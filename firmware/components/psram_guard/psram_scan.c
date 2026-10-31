@@ -13,6 +13,7 @@
 
 #include <inttypes.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #define CHUNK       PSRAM_QUAR_GRAIN
@@ -43,6 +44,7 @@ static size_t        s_n;
 static chunk_t       s_held[MAX_CHUNKS];   // kept for good (quarantine)
 static size_t        s_nheld;
 static psram_quar_t  s_quar;
+static char          s_map[200];
 static region_t      s_regions[MAX_REGIONS];
 static size_t        s_nregions;
 static struct {
@@ -154,6 +156,9 @@ static void log_map(void) {
     extern int _instruction_reserved_start, _instruction_reserved_end, _rodata_reserved_start, _rodata_reserved_end;
     s_stat.lowest  = s_n ? (uintptr_t)s_chunks[0].mem : 0;
     s_stat.highest = s_n ? (uintptr_t)s_chunks[s_n - 1].mem + CHUNK : 0;
+    snprintf(s_map, sizeof(s_map), "%u chunks of 64 KB free at boot, %p..%p; text %p..%p, rodata %p..%p, framebuffer: see log",
+             (unsigned)s_n, (void *)s_stat.lowest, (void *)s_stat.highest, (void *)&_instruction_reserved_start,
+             (void *)&_instruction_reserved_end, (void *)&_rodata_reserved_start, (void *)&_rodata_reserved_end);
     ESP_LOGW(TAG, "map: %u chunks of 64 KB grabbed from %p to %p, %u KB free PSRAM left; text %p..%p, rodata %p..%p",
              (unsigned)s_n, (void *)s_stat.lowest, (void *)s_stat.highest,
              (unsigned)(heap_caps_get_free_size(PSRAM_CAPS) >> 10), (void *)&_instruction_reserved_start,
@@ -240,6 +245,15 @@ void psram_scan_print(void) {
     }
     console_reply("psram quarantine: %u KB in ranges, %u KB held in %u chunks", (unsigned)(psram_quar_bytes(&s_quar) >> 10),
                   (unsigned)(s_nheld * CHUNK >> 10), (unsigned)s_nheld);
+    for (size_t i = 0; i < s_nheld; i++) {
+        size_t t = s_held[i].bad[0] + s_held[i].bad[1] + s_held[i].bad[2] + s_held[i].bad[3];
+        if (t) {
+            console_reply("psram scan chunk %p: bad bytes sparse %u dense %u/%u/%u", (void *)s_held[i].mem,
+                          (unsigned)s_held[i].bad[0], (unsigned)s_held[i].bad[1], (unsigned)s_held[i].bad[2],
+                          (unsigned)s_held[i].bad[3]);
+        }
+    }
+    console_reply("psram map: %s", s_map);
     for (size_t i = 0; i < s_nregions; i++) {
         region_t const *g = &s_regions[i];
         console_reply("psram region %s %p..%p%s", g->name, (void *)g->addr, (void *)(g->addr + g->len),
@@ -247,27 +261,71 @@ void psram_scan_print(void) {
     }
 }
 
+#define WATCH_MAX 128
+
+typedef struct {
+    uintptr_t at[WATCH_MAX]; // first bad byte of each bad 128 B line
+    size_t    n, bytes;
+    uint32_t  up, down;
+} watch_t;
+
+static void watch_read(watch_t *w) {
+    *w = (watch_t){0};
+    for (size_t i = 0; i < s_nheld; i++) {
+        uint8_t *m = s_held[i].mem;
+        sync(m, CHUNK);
+        for (size_t off = 0; off < CHUNK; off += LINE) {
+            psram_check_t r = psram_pattern_check_x(m + off, LINE, (uintptr_t)m + off, 0);
+            if (!r.bad_bytes) {
+                continue;
+            }
+            if (w->n < WATCH_MAX) {
+                w->at[w->n] = (uintptr_t)m + off + r.first_bad;
+            }
+            w->n++;
+            w->bytes += r.bad_bytes;
+            w->up    |= r.up_or;
+            w->down  |= r.down_or;
+        }
+    }
+}
+
+static size_t common(watch_t const *a, watch_t const *b) {
+    size_t same = 0;
+    for (size_t i = 0; i < a->n && i < WATCH_MAX; i++) {
+        for (size_t j = 0; j < b->n && j < WATCH_MAX; j++) {
+            same += a->at[i] == b->at[j];
+        }
+    }
+    return same;
+}
+
+static void watch_line(char const *when, watch_t const *w) {
+    console_reply("psram qwatch %s: %u bad lines, %u bad bytes, 0->1 %08x, 1->0 %08x", when, (unsigned)w->n, (unsigned)w->bytes,
+                  (unsigned)w->up, (unsigned)w->down);
+}
+
 void psram_scan_watch(unsigned ms) {
     if (!s_nheld) {
         console_reply("psram qwatch: nothing held");
         return;
     }
+    static watch_t a, b, c;
     for (size_t i = 0; i < s_nheld; i++) {
         psram_pattern_fill_x(s_held[i].mem, CHUNK, (uintptr_t)s_held[i].mem, 0);
         sync(s_held[i].mem, CHUNK);
     }
+    watch_read(&a); // straight after the write
     vTaskDelay(pdMS_TO_TICKS(ms));
-    size_t total = 0;
-    for (size_t i = 0; i < s_nheld; i++) {
-        sync(s_held[i].mem, CHUNK);
-        psram_check_t r = psram_pattern_check_x(s_held[i].mem, CHUNK, (uintptr_t)s_held[i].mem, 0);
-        if (r.bad_bytes) {
-            total += r.bad_bytes;
-            console_reply("psram qwatch: chunk %p %u bad bytes +%u..+%u, bits %08x (0->1 %08x, 1->0 %08x)", (void *)s_held[i].mem,
-                          (unsigned)r.bad_bytes, (unsigned)r.first_bad, (unsigned)r.last_bad, (unsigned)r.xor_or,
-                          (unsigned)r.up_or, (unsigned)r.down_or);
-        }
+    watch_read(&b); // after the wait
+    watch_read(&c); // and once more: the same lines again = stored wrong, other lines = read errors
+    watch_line("right after the write", &a);
+    watch_line("after the wait", &b);
+    watch_line("read again", &c);
+    for (size_t i = 0; i < b.n && i < 8; i++) {
+        console_reply("psram qwatch bad byte %p (offset in line %u)", (void *)b.at[i], (unsigned)(b.at[i] & (LINE - 1)));
     }
-    console_reply("psram qwatch: %u chunks (%u KB) written once, read back after %u ms: %u bad bytes", (unsigned)s_nheld,
-                  (unsigned)(s_nheld * CHUNK >> 10), ms, (unsigned)total);
+    console_reply("psram qwatch: %u chunks (%u KB), wait %u ms; same first-bad byte in write/wait %u, wait/again %u of %u",
+                  (unsigned)s_nheld, (unsigned)(s_nheld * CHUNK >> 10), ms, (unsigned)common(&a, &b), (unsigned)common(&b, &c),
+                  (unsigned)b.n);
 }
