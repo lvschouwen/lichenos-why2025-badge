@@ -98,6 +98,9 @@ static bool tile_text(char *l1, size_t c1, char *l2, size_t c2) {
 static lv_obj_t       *tabs;
 static lv_obj_t       *messages_list;
 static lv_obj_t       *contacts_list;
+static lv_obj_t       *tab_hint;
+#define HINT_MESSAGES "Enter: write on a channel"
+#define HINT_CONTACTS "Enter: message a contact"
 static lv_obj_t       *tab_hop; // an empty second focusable: Tab moves the focus onto it, which switches the tab
 static lv_timer_t     *timer;
 static uint32_t        shown_generation;
@@ -285,6 +288,7 @@ static void switch_tab(int delta) {
     uint32_t n   = lv_tabview_get_tab_count(tabs);
     uint32_t cur = lv_tabview_get_tab_active(tabs);
     lv_tabview_set_active(tabs, (cur + n + delta) % n, LV_ANIM_OFF);
+    lv_label_set_text(tab_hint, messages_visible() ? HINT_MESSAGES : HINT_CONTACTS);
     if (messages_visible()) {
         mesh_mark_seen();
     }
@@ -299,6 +303,8 @@ static void on_key(lv_event_t *e) {
         case LV_KEY_ENTER:
             if (messages_visible()) {
                 meshcore_chat_pick(); // pick a channel to write on (#46)
+            } else {
+                meshcore_chat_pick_contact(); // or a contact to message (#47)
             }
             break;
         default: break;
@@ -335,6 +341,7 @@ static void on_delete(lv_event_t *e) {
     tab_hop        = NULL;
     messages_list  = NULL;
     contacts_list  = NULL;
+    tab_hint       = NULL;
 }
 
 static lv_obj_t *make_list(lv_obj_t *tab) {
@@ -403,11 +410,12 @@ static void build_tabs(lv_obj_t *screen, lv_group_t *group) {
     lv_obj_set_scrollable(lv_tabview_get_content(tabs), false); // tabs change by key, not by swiping the content
     lv_obj_set_style_pad_bottom(messages_list, 56, 0); // room for the hint below
     lv_obj_t *hint = lv_label_create(screen);
+    tab_hint       = hint;
     lv_obj_set_style_text_color(hint, lv_color_hex(THEME_AMBER), 0);
     lv_obj_set_style_bg_color(hint, lv_color_hex(THEME_BG), 0);
     lv_obj_set_style_bg_opa(hint, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(hint, 6, 0);
-    lv_label_set_text(hint, "Enter: write on a channel");
+    lv_label_set_text(hint, HINT_MESSAGES);
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
 
     if (group) {

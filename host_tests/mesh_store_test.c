@@ -73,12 +73,24 @@ int main(void) {
     CHECK(mesh_store_message(1, &m) && m.outgoing && m.id == 7 && m.state == 0 && strcmp(m.text, "me: yo") == 0);
     CHECK(mesh_store_message(0, &m) && !m.outgoing && m.id == 0);
     view = mesh_store_view_generation();
-    CHECK(mesh_store_update_out(7, 2, 0) && mesh_store_view_generation() != view);
+    CHECK(mesh_store_update_out(7, 2, 0, 0, 0) && mesh_store_view_generation() != view);
     view = mesh_store_view_generation();
-    CHECK(!mesh_store_update_out(7, 2, 0) && mesh_store_view_generation() == view); // unchanged
-    CHECK(!mesh_store_update_out(8, 2, 0) && !mesh_store_update_out(0, 2, 0));
+    CHECK(!mesh_store_update_out(7, 2, 0, 0, 0) && mesh_store_view_generation() == view); // unchanged
+    CHECK(!mesh_store_update_out(8, 2, 0, 0, 0) && !mesh_store_update_out(0, 2, 0, 0, 0));
     CHECK(mesh_store_message(1, &m) && m.state == 2);
 
+    CHECK(mesh_store_init(8));
+    {
+        uint8_t const peer[6] = {9, 8, 7, 6, 5, 4};
+        mesh_store_add_outgoing_dm("@bob", "me: hi", 9, 3, peer);
+        mesh_msg_t m;
+        CHECK(mesh_store_message(mesh_store_message_count() - 1, &m) && m.dm && m.outgoing && m.id == 9 &&
+              memcmp(m.peer, peer, 6) == 0);
+        CHECK(mesh_store_update_out(9, 4, 0, 2, 1500));
+        CHECK(mesh_store_message(mesh_store_message_count() - 1, &m) && m.attempt == 2 && m.trip_ms == 1500);
+        mesh_store_add_dm("@bob", "hello", -50, 4, peer);
+        CHECK(mesh_store_message(mesh_store_message_count() - 1, &m) && m.dm && !m.outgoing && m.peer[0] == 9);
+    }
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -7,12 +7,54 @@
 #include <stdio.h>
 #include <string.h>
 
+void mesh_format_trip(uint32_t ms, char *out, size_t cap) {
+    if (ms < 1000) {
+        snprintf(out, cap, "%u ms", (unsigned)ms);
+    } else {
+        snprintf(out, cap, "%u.%u s", (unsigned)(ms / 1000), (unsigned)(ms % 1000 / 100));
+    }
+}
+
+static mesh_status_kind_t dm_status(mesh_msg_t const *m, char *out, size_t cap) {
+    char try_[16] = "";
+    if (m->attempt > 1) {
+        snprintf(try_, sizeof(try_), ", try %u/%u", (unsigned)m->attempt, OB_MAX_ATTEMPTS);
+    }
+    switch ((mesh_out_state_t)m->state) {
+    case MESH_OUT_QUEUED:
+        snprintf(out, cap, m->attempt ? "retrying%s" : "queued", try_);
+        return MESH_STATUS_PENDING;
+    case MESH_OUT_SENT:
+    case MESH_OUT_ON_AIR:
+    case MESH_OUT_HEARD:
+        snprintf(out, cap, "waiting for ACK%s", try_);
+        return MESH_STATUS_PENDING;
+    case MESH_OUT_DELIVERED: {
+        char trip[16];
+        mesh_format_trip(m->trip_ms, trip, sizeof(trip));
+        snprintf(out, cap, "delivered, %s", trip);
+        return MESH_STATUS_OK;
+    }
+    case MESH_OUT_FAILED:
+    default:
+        snprintf(out, cap, "not delivered");
+        return MESH_STATUS_FAILED;
+    }
+}
+
+bool mesh_msg_in_dm(mesh_msg_t const *m, uint8_t const peer[6]) {
+    return m->dm && memcmp(m->peer, peer, 6) == 0;
+}
+
 mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap) {
     if (cap) {
         out[0] = '\0';
     }
     if (!m->outgoing) {
         return MESH_STATUS_NONE;
+    }
+    if (m->dm) {
+        return dm_status(m, out, cap);
     }
     switch ((mesh_out_state_t)m->state) {
     case MESH_OUT_QUEUED:
@@ -40,7 +82,7 @@ mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap) {
 }
 
 bool mesh_msg_in_channel(mesh_msg_t const *m, char const *channel) {
-    return channel_same_name(m->channel, channel);
+    return !m->dm && channel_same_name(m->channel, channel);
 }
 
 size_t mesh_compose_status(char const *text, size_t max_bytes, char *out, size_t cap) {

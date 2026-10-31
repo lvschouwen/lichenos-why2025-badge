@@ -48,6 +48,30 @@ int main(void) {
     // never inside a UTF-8 character: the é (2 bytes) straddles byte 10
     CHECK(mesh_compose_status("012345678\xc3\xa9z", 10, c, sizeof(c)) == 9 && strstr(c, "last 3"));
 
+    // DMs (#47)
+    mesh_msg_t d;
+    memset(&d, 0, sizeof(d));
+    d.outgoing = 1, d.dm = 1, d.state = MESH_OUT_SENT, d.attempt = 1;
+    CHECK(mesh_msg_status(&d, s, sizeof(s)) == MESH_STATUS_PENDING && strcmp(s, "waiting for ACK") == 0);
+    d.attempt = 2;
+    CHECK(strcmp((mesh_msg_status(&d, s, sizeof(s)), s), "waiting for ACK, try 2/3") == 0);
+    d.state = MESH_OUT_QUEUED;
+    CHECK(mesh_msg_status(&d, s, sizeof(s)) == MESH_STATUS_PENDING && strcmp(s, "retrying, try 2/3") == 0);
+    d.state = MESH_OUT_QUEUED, d.attempt = 0;
+    CHECK(strcmp((mesh_msg_status(&d, s, sizeof(s)), s), "queued") == 0);
+    d.state = MESH_OUT_DELIVERED, d.attempt = 1, d.trip_ms = 1840;
+    CHECK(mesh_msg_status(&d, s, sizeof(s)) == MESH_STATUS_OK && strcmp(s, "delivered, 1.8 s") == 0);
+    d.trip_ms = 420;
+    CHECK(strcmp((mesh_msg_status(&d, s, sizeof(s)), s), "delivered, 420 ms") == 0);
+    d.state = MESH_OUT_FAILED;
+    CHECK(mesh_msg_status(&d, s, sizeof(s)) == MESH_STATUS_FAILED && strcmp(s, "not delivered") == 0);
+    uint8_t const peer[6] = {1, 2, 3, 4, 5, 6}, other[6] = {1, 2, 3, 4, 5, 7};
+    memcpy(d.peer, peer, 6);
+    CHECK(mesh_msg_in_dm(&d, peer) && !mesh_msg_in_dm(&d, other));
+    CHECK(!mesh_msg_in_channel(&d, ""));
+    d.dm = 0;
+    CHECK(!mesh_msg_in_dm(&d, peer));
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

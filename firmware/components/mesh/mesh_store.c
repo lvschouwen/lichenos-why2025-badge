@@ -96,7 +96,9 @@ void mesh_store_add_message(char const *channel, char const *text, int16_t rssi_
     mesh_sanitize(text, strlen(text), m->text, sizeof(m->text));
     m->rssi_x10 = rssi_x10;
     m->heard_s  = heard_s;
-    m->id = m->outgoing = m->state = m->repeats = 0;
+    m->id = m->outgoing = m->state = m->repeats = m->dm = m->attempt = 0;
+    m->trip_ms = 0;
+    memset(m->peer, 0, sizeof(m->peer));
     generation++;
 }
 
@@ -112,15 +114,42 @@ void mesh_store_add_outgoing(char const *channel, char const *text, uint32_t id,
     own_changes++;
 }
 
-bool mesh_store_update_out(uint32_t id, uint8_t state, uint8_t repeats) {
+static mesh_msg_t *newest(void) {
+    return &messages[(msg_head + msg_count - 1) % msg_cap];
+}
+
+void mesh_store_add_dm(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s, uint8_t const peer[6]) {
+    if (!msg_cap) {
+        return;
+    }
+    mesh_store_add_message(channel, text, rssi_x10, heard_s);
+    mesh_msg_t *m = newest();
+    m->dm         = 1;
+    memcpy(m->peer, peer, sizeof(m->peer));
+}
+
+void mesh_store_add_outgoing_dm(char const *channel, char const *text, uint32_t id, uint32_t heard_s,
+                                uint8_t const peer[6]) {
+    if (!msg_cap) {
+        return;
+    }
+    mesh_store_add_outgoing(channel, text, id, heard_s);
+    mesh_msg_t *m = newest();
+    m->dm         = 1;
+    memcpy(m->peer, peer, sizeof(m->peer));
+}
+
+bool mesh_store_update_out(uint32_t id, uint8_t state, uint8_t repeats, uint8_t attempt, uint32_t trip_ms) {
     for (size_t i = msg_count; id && i > 0; i--) {
         mesh_msg_t *m = &messages[(msg_head + i - 1) % msg_cap];
         if (m->outgoing && m->id == id) {
-            if (m->state == state && m->repeats == repeats) {
+            if (m->state == state && m->repeats == repeats && m->attempt == attempt && m->trip_ms == trip_ms) {
                 return false;
             }
             m->state   = state;
             m->repeats = repeats;
+            m->attempt = attempt;
+            m->trip_ms = trip_ms;
             own_changes++;
             return true;
         }

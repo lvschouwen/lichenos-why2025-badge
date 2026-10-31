@@ -7,6 +7,7 @@
 #include "menu.h"
 #include "mesh.h"
 #include "mesh_chat.h"
+#include "mesh_frame.h"
 #include "mesh_format.h"
 #include "shell.h"
 #include "theme.h"
@@ -22,8 +23,19 @@
 #define AGE_REFRESH_S  30
 #define TICK_MS        500
 #define MAX_CHANNELS   40
+#define SCREEN_DM_PICK 143
+#define SCREEN_DM      144
+#define MAX_PEERS      100
+#define ADV_TYPE_CHAT  1 // MeshCore: a person's node (repeaters, rooms and sensors have no DMs)
 
-static char channel[MESH_CHANNEL_MAX + 1]; // the chat that is open
+static char    channel[MESH_NAME_MAX + 2]; // the chat that is open: a channel name, or the contact's name in a DM
+static bool    dm_mode;                       // #47: a chat with one contact
+static uint8_t peer[MF_PREFIX];               // that contact's key prefix
+static size_t  copy_n;
+static lv_obj_t *tab_hop; // an empty second focusable: Tab moves the focus onto it, which retries the failed message
+
+#define HINT_CHANNEL "Enter: send    Esc: back"
+#define HINT_DM      "Enter: send    Tab: retry a failed one    Esc: back"
 
 static lv_obj_t   *list, *ta, *counter, *note;
 static lv_timer_t *timer;
@@ -64,10 +76,11 @@ static void rebuild(size_t n) {
     bool at_end = lv_obj_get_scroll_bottom(list) <= 0;
     int32_t y   = lv_obj_get_scroll_y(list);
     lv_obj_clean(list);
+    copy_n = n;
     size_t shown = 0;
     uint32_t now = mesh_uptime_s();
     for (size_t i = 0; i < n; i++) {
-        if (mesh_msg_in_channel(&copy[i], channel)) {
+        if (dm_mode ? mesh_msg_in_dm(&copy[i], peer) : mesh_msg_in_channel(&copy[i], channel)) {
             add_message(&copy[i], now);
             shown++;
         }
@@ -79,9 +92,13 @@ static void rebuild(size_t n) {
     lv_obj_scroll_to_y(list, at_end ? LV_COORD_MAX : y, LV_ANIM_OFF);
 }
 
+static size_t text_max(void) {
+    return dm_mode ? MF_MAX_TEXT : mesh_channel_text_max();
+}
+
 static void show_counter(void) {
     char text[80];
-    mesh_compose_status(lv_textarea_get_text(ta), mesh_channel_text_max(), text, sizeof(text));
+    mesh_compose_status(lv_textarea_get_text(ta), text_max(), text, sizeof(text));
     lv_label_set_text(counter, text);
 }
 
@@ -112,13 +129,13 @@ static void on_ready(lv_event_t *e) {
         return;
     }
     char const   *why = NULL;
-    mesh_msg_id_t id  = mesh_send_channel(channel, text, &why);
+    mesh_msg_id_t id  = dm_mode ? mesh_send_dm(peer, text, &why) : mesh_send_channel(channel, text, &why);
     if (!id) {
         set_note(why ? why : "not sent", true);
         return;
     }
     lv_textarea_set_text(ta, "");
-    set_note("Enter: send    Esc: back", false);
+    set_note(dm_mode ? HINT_DM : HINT_CHANNEL, false);
     show_counter();
     shown_generation = UINT32_MAX; // the mesh task adds it within a few ms: the next tick shows it
 }
@@ -127,7 +144,31 @@ static void on_changed(lv_event_t *e) {
     (void)e;
     show_counter();
     if (note_error) {
-        set_note("Enter: send    Esc: back", false);
+        set_note(dm_mode ? HINT_DM : HINT_CHANNEL, false);
+    }
+}
+
+// Tab: start over with the newest failed DM of this chat
+static void retry_failed(void) {
+    for (size_t i = copy_n; i > 0; i--) {
+        mesh_msg_t const *m = &copy[i - 1];
+        if (m->outgoing && mesh_msg_in_dm(m, peer) && m->state == MESH_OUT_FAILED) {
+            if (mesh_retry(m->id)) {
+                set_note("Trying again", false);
+                shown_generation = UINT32_MAX;
+            } else {
+                set_note("Cannot retry now", true);
+            }
+            return;
+        }
+    }
+    set_note("Nothing failed to retry", false);
+}
+
+static void on_focus_move(lv_group_t *group) {
+    if (tab_hop && lv_group_get_focused(group) == tab_hop) {
+        retry_failed();
+        lv_group_focus_obj(ta); // calls this again, with the compose line focused: a no-op
     }
 }
 
@@ -147,7 +188,7 @@ static void on_delete(lv_event_t *e) {
     }
     heap_caps_free(copy);
     copy = NULL;
-    list = ta = counter = note = NULL;
+    list = ta = counter = note = tab_hop = NULL;
 }
 
 static void style_ta(void) {
@@ -179,7 +220,7 @@ static lv_obj_t *build_chat(void) {
     lv_label_set_long_mode(heading, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
     lv_obj_set_style_text_color(heading, lv_color_hex(THEME_AMBER), 0);
-    lv_label_set_text(heading, channel);
+    lv_label_set_text(heading, dm_mode ? channel + (channel[0] == '@') : channel);
 
     list = lv_obj_create(screen);
     lv_obj_remove_style_all(list);
@@ -193,7 +234,7 @@ static lv_obj_t *build_chat(void) {
 
     ta = lv_textarea_create(screen);
     lv_textarea_set_one_line(ta, true);
-    lv_textarea_set_max_length(ta, (uint32_t)mesh_channel_text_max());
+    lv_textarea_set_max_length(ta, (uint32_t)text_max());
     lv_textarea_set_placeholder_text(ta, "Write a message");
     style_ta();
     lv_obj_add_event_cb(ta, on_ready, LV_EVENT_READY, NULL);
@@ -204,10 +245,23 @@ static lv_obj_t *build_chat(void) {
     lv_obj_set_width(counter, LV_PCT(100));
     note = lv_label_create(screen);
     lv_obj_set_width(note, LV_PCT(100));
-    set_note("Enter: send    Esc: back", false);
+    set_note(dm_mode ? HINT_DM : HINT_CHANNEL, false);
     lv_obj_set_style_text_color(counter, lv_color_hex(THEME_DIM), 0);
     show_counter();
 
+    lv_group_t *group = lv_group_get_default();
+    tab_hop           = NULL;
+    if (dm_mode && group) {
+        tab_hop = lv_obj_create(screen);
+        lv_obj_remove_style_all(tab_hop);
+        lv_obj_set_size(tab_hop, 0, 0);
+        lv_obj_set_floating(tab_hop, true);
+        lv_obj_set_clickable(tab_hop, false);
+        lv_group_add_obj(group, tab_hop);
+        lv_group_set_focus_cb(group, on_focus_move);
+        lv_group_focus_obj(ta);
+    }
+    copy_n           = 0;
     copy             = heap_caps_malloc(SHOW_MESSAGES * sizeof(*copy), MALLOC_CAP_SPIRAM);
     shown_generation = UINT32_MAX;
     if (copy) {
@@ -223,6 +277,7 @@ static char names[MAX_CHANNELS][MESH_CHANNEL_MAX + 1];
 
 static void open_chat(void *arg) {
     snprintf(channel, sizeof(channel), "%s", (char const *)arg);
+    dm_mode = false;
     shell_open(build_chat, SCREEN_CHAT);
 }
 
@@ -243,4 +298,50 @@ static lv_obj_t *build_pick(void) {
 
 void meshcore_chat_pick(void) {
     shell_open(build_pick, SCREEN_PICK);
+}
+
+// ---- the contact picker, then the DM chat (#47) --------------------------------------------------------------------
+
+static mesh_contact_t *peers;
+
+static void open_dm(void *arg) {
+    mesh_contact_t const *c = arg;
+    snprintf(channel, sizeof(channel), "@%s", c->name[0] ? c->name : "(no name)");
+    memcpy(peer, c->pubkey, MF_PREFIX);
+    dm_mode = true;
+    shell_open(build_chat, SCREEN_DM);
+}
+
+static void free_peers(lv_event_t *e) {
+    (void)e;
+    heap_caps_free(peers);
+    peers = NULL;
+}
+
+static lv_obj_t *build_dm_pick(void) {
+    lv_obj_t *screen = shell_page_create();
+    lv_obj_t *menu   = menu_create(screen, "Message a contact");
+    lv_obj_add_event_cb(screen, free_peers, LV_EVENT_DELETE, NULL);
+    heap_caps_free(peers);
+    peers = heap_caps_malloc(MAX_PEERS * sizeof(*peers), MALLOC_CAP_SPIRAM);
+    size_t total, n = peers ? mesh_contacts_snapshot(peers, MAX_PEERS, &total, SCREEN_WAIT_MS) : 0;
+    if (!peers || n == MESH_BUSY) {
+        menu_note(menu, "MeshCore is busy, press Esc and try again");
+        return screen;
+    }
+    size_t shown = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (peers[i].type == ADV_TYPE_CHAT) {
+            menu_add(menu, peers[i].name[0] ? peers[i].name : "(no name)", "", open_dm, &peers[i]);
+            shown++;
+        }
+    }
+    if (!shown) {
+        menu_note(menu, "No contacts to message yet");
+    }
+    return screen;
+}
+
+void meshcore_chat_pick_contact(void) {
+    shell_open(build_dm_pick, SCREEN_DM_PICK);
 }

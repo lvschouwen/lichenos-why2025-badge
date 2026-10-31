@@ -19,7 +19,7 @@ extern "C" {
 #define MESH_NAME_MAX 32
 
 typedef struct {
-    uint8_t  pubkey[4]; // the start of the public key, for display
+    uint8_t  pubkey[6]; // the start of the public key: shown, and the DM prefix (#47)
     char     name[MESH_NAME_MAX + 1];
     uint8_t  type;     // MeshCore ADV_TYPE_*
     uint8_t  path_len; // hops of the known path, 0xFF when only flood routing works

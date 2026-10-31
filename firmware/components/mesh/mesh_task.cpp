@@ -188,7 +188,8 @@ public:
                        char const *text) override {
         char from_name[sizeof(from.name) + 2]; // mesh_store cuts it to MESH_CHANNEL_MAX
         snprintf(from_name, sizeof(from_name), "@%s", from.name);
-        mesh_store_add_message(from_name, text, (int16_t)(radio_driver.getLastRSSI() * 10.0f), mesh_uptime_s());
+        mesh_store_add_dm(from_name, text, (int16_t)(radio_driver.getLastRSSI() * 10.0f), mesh_uptime_s(),
+                          from.id.pub_key);
         tile_on_message(from_name, text);
     }
     void onChannelMessageRecv(mesh::Packet *pkt, ChannelDetails &channel, char const *text) override {
@@ -268,7 +269,8 @@ static bool keep_contact(ContactInfo const &c) {
 // lock held (the store is under it); the outbox is read in short spinlock sections, the copies are made outside them.
 struct OutSync {
     mesh_msg_id_t id;
-    uint8_t       state, repeats;
+    uint8_t       state, repeats, attempt, kind, prefix[MF_PREFIX];
+    uint32_t      trip_ms;
     bool          fresh;
     char          target[OB_TARGET_MAX];
     char          text[OB_TEXT_MAX];
@@ -280,13 +282,17 @@ static void sync_outgoing(void) {
     mesh_ob_enter();
     for (int i = 0; i < OB_CAP && outbox; i++) {
         ob_entry_t *e = &outbox->e[i];
-        if (!e->used || e->kind != OB_CHANNEL) {
+        if (!e->used) {
             continue;
         }
         OutSync &o = out_sync[n++];
         o.id       = e->id;
         o.state    = e->state;
         o.repeats  = e->repeats;
+        o.attempt  = e->attempt;
+        o.kind     = e->kind;
+        o.trip_ms  = e->trip_ms;
+        memcpy(o.prefix, e->prefix, MF_PREFIX);
         o.fresh    = !e->in_store;
         if (o.fresh) {
             memcpy(o.target, e->target, sizeof(o.target));
@@ -300,9 +306,15 @@ static void sync_outgoing(void) {
         if (o.fresh) {
             char line[MESH_TEXT_MAX + 1];
             snprintf(line, sizeof(line), "me: %s", o.text);
-            mesh_store_add_outgoing(o.target, line, o.id, mesh_uptime_s());
+            if (o.kind == OB_DM) {
+                ContactInfo *c = node ? node->lookupContactByPubKey(o.prefix, MF_PREFIX) : nullptr;
+                snprintf(o.target, sizeof(o.target), "@%s", c ? c->name : "?");
+                mesh_store_add_outgoing_dm(o.target, line, o.id, mesh_uptime_s(), o.prefix);
+            } else {
+                mesh_store_add_outgoing(o.target, line, o.id, mesh_uptime_s());
+            }
         }
-        mesh_store_update_out(o.id, o.state, o.repeats);
+        mesh_store_update_out(o.id, o.state, o.repeats, o.attempt, o.trip_ms);
     }
 }
 
@@ -1006,7 +1018,8 @@ static void cmd_contacts(char const *args) {
         } else {
             snprintf(hops, sizeof(hops), "%u hops", list[i].path_len);
         }
-        console_reply("contact %02x%02x %-32s %-8s %-8s %s", list[i].pubkey[0], list[i].pubkey[1], list[i].name,
+        console_reply("contact %02x%02x%02x%02x%02x%02x %-32s %-8s %-8s %s", list[i].pubkey[0], list[i].pubkey[1], list[i].pubkey[2],
+                      list[i].pubkey[3], list[i].pubkey[4], list[i].pubkey[5], list[i].name,
                       mesh_type_name(list[i].type), hops, age);
     }
     free(list);
