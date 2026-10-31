@@ -9,6 +9,7 @@
 #include "mc_first.h"
 #include "menu.h"
 #include "mesh.h"
+#include "mesh_chat.h"
 #include "mesh_format.h"
 #include "meshcore_chat.h"
 #include "meshcore_settings.h"
@@ -26,7 +27,8 @@
 
 static char const TAG[] = "meshcore";
 
-#define SHOW_MESSAGES  50 // newest kept on screen
+#define SHOW_CONVS     MESH_CONV_MAX // one row per chat
+#define MAX_CHANNELS   40
 #define SHOW_CONTACTS  100
 #define AGE_REFRESH_S  30 // rebuild the lists this often even when nothing new arrived, so "N min ago" stays right
 #define SCROLL_STEP_PX 120
@@ -99,15 +101,20 @@ static lv_obj_t       *tabs;
 static lv_obj_t       *messages_list;
 static lv_obj_t       *contacts_list;
 static lv_obj_t       *tab_hint;
-#define HINT_MESSAGES "Enter: write on a channel"
+#define HINT_MESSAGES "Up/Down: choose    Enter: open"
 #define HINT_CONTACTS "Enter: message a contact"
 static lv_obj_t       *tab_hop; // an empty second focusable: Tab moves the focus onto it, which switches the tab
 static lv_timer_t     *timer;
-static uint32_t        shown_generation;
+static uint32_t        shown_sig;
 static uint32_t        shown_contacts_sig;
 static uint32_t        last_rebuild_s;
 // Copies taken from the mesh (PSRAM): the widgets are built from these, outside the mesh lock
-static mesh_msg_t     *msg_copy;
+static mesh_conv_t    *conv_copy;
+static char          (*chan_names)[MESH_CHANNEL_MAX + 1];
+static size_t          conv_n;       // rows on screen
+static size_t          sel;          // the highlighted row
+static mesh_chat_key_t sel_key;      // and its chat: the highlight follows it when the order changes
+static bool            sel_valid;
 static mesh_contact_t *contact_copy;
 
 static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color) {
@@ -136,9 +143,9 @@ static lv_obj_t *add_item(lv_obj_t *list) {
 // contacts changed order. keys[i] is the identity of the list's child i while the list shows items.
 // In PSRAM with the copies (internal RAM is the display's), allocated while the screen exists; LVGL task only.
 typedef struct {
-    uint32_t      msg[SHOW_MESSAGES];
+    uint32_t      msg[SHOW_CONVS];
     uint32_t      contact[SHOW_CONTACTS];
-    scroll_item_t items[SHOW_CONTACTS > SHOW_MESSAGES ? SHOW_CONTACTS : SHOW_MESSAGES];
+    scroll_item_t items[SHOW_CONTACTS > SHOW_CONVS ? SHOW_CONTACTS : SHOW_CONVS];
 } anchor_mem_t;
 static anchor_mem_t  *anchor_mem;
 static uint32_t      *msg_keys, *contact_keys;
@@ -184,34 +191,107 @@ static void restore_scroll(lv_obj_t *list, scroll_t s, bool newest_at_bottom, ui
     lv_obj_scroll_to_y(list, y, LV_ANIM_OFF);
 }
 
-static uint32_t msg_key(mesh_msg_t const *m) {
-    uint32_t h = scroll_key_hash(&m->heard_s, sizeof(m->heard_s), 0);
-    h          = scroll_key_hash(&m->rssi_x10, sizeof(m->rssi_x10), h);
-    h          = scroll_key_hash(m->channel, strlen(m->channel), h);
-    return scroll_key_hash(m->text, strlen(m->text), h);
+static uint32_t conv_key(mesh_conv_t const *c) {
+    return scroll_key_hash(&c->key, sizeof(c->key), 0);
+}
+
+static void style_row(lv_obj_t *item, bool selected) {
+    lv_obj_set_style_bg_color(item, lv_color_hex(THEME_TILE), 0);
+    lv_obj_set_style_bg_opa(item, selected ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+}
+
+// A label that stays on one line, cut with "..." (the row would grow otherwise)
+static lv_obj_t *add_line(lv_obj_t *parent, char const *text, uint32_t color) {
+    lv_obj_t *label = lv_label_create(parent);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
+    lv_label_set_text(label, text);
+    lv_obj_set_height(label, lv_font_get_line_height(lv_obj_get_style_text_font(label, 0)));
+    return label;
+}
+
+// One chat: title and unread badge on top, the age and latest line under them (mesh_conv_row)
+static void add_conv_row(mesh_conv_t const *c, uint32_t now, bool selected) {
+    char title[MESH_CHANNEL_MAX + 1], badge[8], sub[MESH_TEXT_MAX + 40];
+    mesh_conv_row(c, now, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
+    lv_obj_t *item = add_item(messages_list);
+    style_row(item, selected);
+    lv_obj_set_style_pad_hor(item, 6, 0);
+    lv_obj_t *top = lv_obj_create(item);
+    lv_obj_remove_style_all(top);
+    lv_obj_set_size(top, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(top, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(top, 8, 0);
+    lv_obj_set_scrollable(top, false);
+    lv_obj_set_clickable(top, false);
+    lv_obj_t *t = add_line(top, title, THEME_TEXT);
+    lv_obj_set_flex_grow(t, 1);
+    if (badge[0]) {
+        add_line(top, badge, THEME_AMBER);
+    }
+    lv_obj_t *s = add_line(item, sub, THEME_DIM);
+    lv_obj_set_width(s, LV_PCT(100));
+}
+
+// Where the highlight is after the list changed: on the same chat if it is still there, else the same place
+static void settle_selection(void) {
+    size_t at = conv_n;
+    for (size_t i = 0; sel_valid && i < conv_n; i++) {
+        if (memcmp(&conv_copy[i].key, &sel_key, sizeof(sel_key)) == 0) {
+            at = i;
+            break;
+        }
+    }
+    sel       = at < conv_n ? at : (sel < conv_n ? sel : (conv_n ? conv_n - 1 : 0));
+    sel_valid = conv_n > 0;
+    if (sel_valid) {
+        sel_key = conv_copy[sel].key;
+    }
 }
 
 static void rebuild_messages(size_t count) {
-    scroll_t s = save_scroll(messages_list, true, msg_keys, msg_keys_n);
+    scroll_t s = save_scroll(messages_list, false, msg_keys, msg_keys_n);
     lv_obj_clean(messages_list);
+    conv_n     = count;
     msg_keys_n = count;
+    settle_selection();
     if (!count) {
-        add_label(messages_list, "No messages yet. Listening on Public. Enter: write.", THEME_DIM);
+        add_label(messages_list, "No chats yet. MeshCore is starting.", THEME_DIM);
         return;
     }
     uint32_t now = mesh_uptime_s();
     for (size_t i = 0; i < count; i++) {
-        mesh_msg_t const *m = &msg_copy[i];
-        char              age[24], line[220], meta[64];
-        msg_keys[i]         = msg_key(m);
-        mesh_format_age(now - m->heard_s, age, sizeof(age));
-        snprintf(line, sizeof(line), "[%s] %s", m->channel, m->text);
-        snprintf(meta, sizeof(meta), "%s, %d dBm", age, m->rssi_x10 / 10);
-        lv_obj_t *item = add_item(messages_list);
-        add_label(item, line, THEME_TEXT);
-        add_label(item, meta, THEME_DIM);
+        msg_keys[i] = conv_key(&conv_copy[i]);
+        add_conv_row(&conv_copy[i], now, i == sel);
     }
-    restore_scroll(messages_list, s, true, msg_keys, msg_keys_n);
+    restore_scroll(messages_list, s, false, msg_keys, msg_keys_n);
+}
+
+// Up/Down: the highlight moves and its row scrolls into view
+static void move_selection(int delta) {
+    if (!conv_n || lv_obj_get_child_count(messages_list) != conv_n) {
+        return;
+    }
+    size_t to = delta < 0 ? (sel > 0 ? sel - 1 : 0) : (sel + 1 < conv_n ? sel + 1 : sel);
+    style_row(lv_obj_get_child(messages_list, (int32_t)sel), false);
+    sel     = to;
+    sel_key = conv_copy[sel].key;
+    lv_obj_t *row = lv_obj_get_child(messages_list, (int32_t)sel);
+    style_row(row, true);
+    lv_obj_scroll_to_view(row, LV_ANIM_OFF);
+}
+
+static void open_selected(void) {
+    if (!sel_valid || sel >= conv_n) {
+        return;
+    }
+    mesh_conv_t const *c = &conv_copy[sel];
+    if (c->key.kind == MESH_CHAT_DM) {
+        meshcore_chat_open_dm(c->key.id, c->title);
+    } else {
+        meshcore_chat_open_channel(c->title);
+    }
 }
 
 static void rebuild_contacts(size_t count) {
@@ -246,27 +326,54 @@ static bool messages_visible(void) {
     return lv_tabview_get_tab_active(tabs) == TAB_MESSAGES;
 }
 
+// The chats' signature: changes when a message arrives, a count changes or the channels do
+static uint32_t convs_sig(size_t n) {
+    uint32_t h = scroll_key_hash(&n, sizeof(n), 0);
+    for (size_t i = 0; i < n; i++) {
+        h = scroll_key_hash(&conv_copy[i].key, sizeof(conv_copy[i].key), h);
+        h = scroll_key_hash(&conv_copy[i].last_seq, sizeof(conv_copy[i].last_seq), h);
+        h = scroll_key_hash(&conv_copy[i].unread, sizeof(conv_copy[i].unread), h);
+    }
+    return h;
+}
+
+// The conversation list: the store's chats plus the configured channels, newest first. conv_copy is only written once
+// both snapshots are in, so the rows on screen and the copy Enter opens from always agree.
+static size_t take_convs(void) {
+    size_t names = mesh_channels_snapshot_wait(chan_names, MAX_CHANNELS, SCREEN_WAIT_MS);
+    if (names == MESH_BUSY) {
+        return MESH_BUSY;
+    }
+    size_t n = mesh_convs_snapshot(conv_copy, SHOW_CONVS, SCREEN_WAIT_MS);
+    if (n == MESH_BUSY) {
+        return MESH_BUSY;
+    }
+    n = mesh_conv_merge_channels(conv_copy, n, SHOW_CONVS, (char const(*)[MESH_CHANNEL_MAX + 1])chan_names, names);
+    mesh_conv_sort(conv_copy, n);
+    return n;
+}
+
 // The copies are taken under the mesh lock (inside the snapshot functions), the widgets are built from them afterwards:
 // the mesh task is never kept waiting on LVGL.
 static void refresh(lv_timer_t *t) {
     (void)t;
-    uint32_t generation;
-    size_t   total_contacts;
-    size_t   messages = mesh_messages_snapshot(msg_copy, SHOW_MESSAGES, &generation, SCREEN_WAIT_MS);
-    if (messages == MESH_BUSY) {
-        return; // MeshCore is busy (saving files): the screen stays as it is until the next tick
-    }
+    size_t total_contacts;
     size_t contacts = mesh_contacts_snapshot(contact_copy, SHOW_CONTACTS, &total_contacts, SCREEN_WAIT_MS);
     if (contacts == MESH_BUSY) {
+        return; // MeshCore is busy (saving files): the screen stays as it is until the next tick
+    }
+    size_t convs = take_convs();
+    if (convs == MESH_BUSY) {
         return;
     }
-    // The list changes when the count changes or someone is heard (again): the newest contact's hearing time
+    // The contacts list changes when the count changes or someone is heard (again): the newest contact's hearing time
     uint32_t heard_at     = contacts ? mesh_uptime_s() - contact_copy[0].age_s : 0;
     uint32_t contacts_sig = (uint32_t)total_contacts * 2654435761u ^ heard_at;
+    uint32_t sig          = convs_sig(convs);
     bool     stale        = mesh_uptime_s() - last_rebuild_s >= AGE_REFRESH_S;
-    if (generation != shown_generation || stale) {
-        rebuild_messages(messages);
-        shown_generation = generation;
+    if (sig != shown_sig || stale) {
+        rebuild_messages(convs);
+        shown_sig = sig;
     }
     if (contacts_sig != shown_contacts_sig || stale) {
         rebuild_contacts(contacts);
@@ -292,11 +399,23 @@ static void on_key(lv_event_t *e) {
     switch (lv_event_get_key(e)) {
         case LV_KEY_LEFT: switch_tab(-1); break;
         case LV_KEY_RIGHT: switch_tab(1); break;
-        case LV_KEY_UP: shell_scroll_by(active_list(), SCROLL_STEP_PX); break;
-        case LV_KEY_DOWN: shell_scroll_by(active_list(), -SCROLL_STEP_PX); break;
+        case LV_KEY_UP:
+            if (messages_visible()) {
+                move_selection(-1);
+            } else {
+                shell_scroll_by(active_list(), SCROLL_STEP_PX);
+            }
+            break;
+        case LV_KEY_DOWN:
+            if (messages_visible()) {
+                move_selection(1);
+            } else {
+                shell_scroll_by(active_list(), -SCROLL_STEP_PX);
+            }
+            break;
         case LV_KEY_ENTER:
             if (messages_visible()) {
-                meshcore_chat_pick(); // pick a channel to write on (#46)
+                open_selected(); // the highlighted chat (#48)
             } else {
                 meshcore_chat_pick_contact(); // or a contact to message (#47)
             }
@@ -320,9 +439,12 @@ static void on_delete(lv_event_t *e) {
         lv_timer_delete(timer);
         timer = NULL;
     }
-    heap_caps_free(msg_copy);
+    heap_caps_free(conv_copy);
+    heap_caps_free(chan_names);
     heap_caps_free(contact_copy);
-    msg_copy       = NULL;
+    conv_copy      = NULL;
+    chan_names     = NULL;
+    conv_n         = 0;
     contact_copy   = NULL;
     heap_caps_free(anchor_mem);
     anchor_mem     = NULL;
@@ -377,11 +499,12 @@ static void build_tabs(lv_obj_t *screen, lv_group_t *group) {
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUS_KEY);
-    msg_copy     = heap_caps_malloc(SHOW_MESSAGES * sizeof(*msg_copy), MALLOC_CAP_SPIRAM);
+    conv_copy    = heap_caps_malloc(SHOW_CONVS * sizeof(*conv_copy), MALLOC_CAP_SPIRAM);
+    chan_names   = heap_caps_malloc(MAX_CHANNELS * sizeof(*chan_names), MALLOC_CAP_SPIRAM);
     contact_copy = heap_caps_malloc(SHOW_CONTACTS * sizeof(*contact_copy), MALLOC_CAP_SPIRAM);
     anchor_mem   = heap_caps_malloc(sizeof(*anchor_mem), MALLOC_CAP_SPIRAM);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    if (!msg_copy || !contact_copy || !anchor_mem) {
+    if (!conv_copy || !chan_names || !contact_copy || !anchor_mem) {
         ESP_LOGE(TAG, "no memory for the screen");
         lv_obj_t *label = add_label(screen, "Not enough memory to show MeshCore.", THEME_DIM);
         lv_obj_center(label);
@@ -425,7 +548,9 @@ static void build_tabs(lv_obj_t *screen, lv_group_t *group) {
     }
     lv_obj_add_event_cb(tabs, on_key, LV_EVENT_KEY, NULL);
 
-    shown_generation   = UINT32_MAX;
+    shown_sig          = UINT32_MAX;
+    sel_valid          = false;
+    sel                = 0;
     shown_contacts_sig = UINT32_MAX;
     last_rebuild_s     = mesh_uptime_s();
     timer              = lv_timer_create(refresh, 1000, NULL);

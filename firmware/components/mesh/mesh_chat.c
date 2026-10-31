@@ -1,6 +1,7 @@
 #include "mesh_chat.h"
 
 #include "channel_input.h"
+#include "mesh_format.h"
 #include "mesh_frame.h"
 #include "mesh_outbox.h"
 
@@ -79,6 +80,25 @@ mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap) {
         snprintf(out, cap, "not sent");
         return MESH_STATUS_FAILED;
     }
+}
+
+void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, char *title, size_t title_cap, char *badge, size_t badge_cap,
+                   char *sub, size_t sub_cap) {
+    snprintf(title, title_cap, "%s", c->title);
+    if (c->unread == 0) {
+        badge[0] = '\0';
+    } else if (c->unread > 99) {
+        snprintf(badge, badge_cap, "99+");
+    } else {
+        snprintf(badge, badge_cap, "%u", (unsigned)c->unread);
+    }
+    if (c->count == 0) {
+        snprintf(sub, sub_cap, "no messages yet");
+        return;
+    }
+    char age[24];
+    mesh_format_age(now_s > c->last_heard_s ? now_s - c->last_heard_s : 0, age, sizeof(age));
+    snprintf(sub, sub_cap, "%s: %s", age, c->last);
 }
 
 size_t mesh_compose_status(char const *text, size_t max_bytes, char *out, size_t cap) {

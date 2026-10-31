@@ -9,7 +9,6 @@ typedef struct {
     mesh_conv_t pub;
     mesh_msg_t *ring;
     size_t      head;     // index of the oldest
-    uint32_t    last_seq; // of its newest message: which DM chat has been quiet longest
     bool        used;
 } conv_t;
 
@@ -83,7 +82,7 @@ static conv_t *pick_slot(void) {
         if (!convs[i].used) {
             return &convs[i];
         }
-        if (convs[i].pub.key.kind == MESH_CHAT_DM && (!victim || convs[i].last_seq < victim->last_seq)) {
+        if (convs[i].pub.key.kind == MESH_CHAT_DM && (!victim || convs[i].pub.last_seq < victim->pub.last_seq)) {
             victim = &convs[i];
         }
     }
@@ -210,7 +209,7 @@ static mesh_msg_t *push(mesh_chat_key_t const *key, char const *title, char cons
     memcpy(cv->pub.last, m->text, sizeof(cv->pub.last));
     cv->pub.last_heard_s = heard_s;
     cv->pub.last_outgoing = 0;
-    cv->last_seq         = m->seq;
+    cv->pub.last_seq     = m->seq;
     return m;
 }
 
@@ -390,4 +389,56 @@ uint32_t mesh_store_generation(void) {
 
 uint32_t mesh_store_view_generation(void) {
     return generation + own_changes;
+}
+
+void mesh_conv_sort(mesh_conv_t *convs, size_t n) {
+    for (size_t i = 1; i < n; i++) {
+        mesh_conv_t cur = convs[i];
+        size_t      j   = i;
+        // cur goes before convs[j-1] when it has messages and the other has none or an older newest message
+        while (j > 0 && cur.count > 0 && (convs[j - 1].count == 0 || convs[j - 1].last_seq < cur.last_seq)) {
+            convs[j] = convs[j - 1];
+            j--;
+        }
+        convs[j] = cur;
+    }
+}
+
+static bool channel_configured(mesh_conv_t const *c, char const names[][MESH_CHANNEL_MAX + 1], size_t name_count) {
+    for (size_t i = 0; i < name_count; i++) {
+        mesh_chat_key_t k;
+        mesh_chat_key_channel(&k, names[i]);
+        if (key_same(&k, &c->key)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+size_t mesh_conv_merge_channels(mesh_conv_t *convs, size_t n, size_t max, char const names[][MESH_CHANNEL_MAX + 1],
+                                size_t name_count) {
+    if (name_count == 0) {
+        return n < max ? n : max;
+    }
+    size_t kept = 0;
+    for (size_t i = 0; i < n && kept < max; i++) {
+        if (convs[i].key.kind != MESH_CHAT_CHANNEL || channel_configured(&convs[i], names, name_count)) {
+            convs[kept++] = convs[i];
+        }
+    }
+    for (size_t i = 0; i < name_count && kept < max; i++) {
+        mesh_chat_key_t k;
+        bool            have = false;
+        mesh_chat_key_channel(&k, names[i]);
+        for (size_t j = 0; j < kept && !have; j++) {
+            have = key_same(&k, &convs[j].key);
+        }
+        if (!have) {
+            memset(&convs[kept], 0, sizeof(convs[kept]));
+            convs[kept].key = k;
+            mesh_sanitize(names[i], strlen(names[i]), convs[kept].title, sizeof(convs[kept].title));
+            kept++;
+        }
+    }
+    return kept;
 }

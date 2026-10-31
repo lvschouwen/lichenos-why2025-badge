@@ -49,6 +49,7 @@ typedef struct {
     char            title[MESH_CHANNEL_MAX + 1]; // channel name as last given, or "@<contact>"
     uint16_t        unread;
     uint32_t        last_heard_s;
+    uint32_t        last_seq; // seq of its newest message: the order across chats (0 for a chat without messages)
     char            last[MESH_TEXT_MAX + 1];
     uint8_t         last_outgoing;
     uint16_t        count; // messages kept
@@ -88,6 +89,14 @@ size_t mesh_store_recent(mesh_msg_t *out, size_t max);
 size_t mesh_store_chat(mesh_chat_key_t const *key, mesh_msg_t *out, size_t max, bool mark_read);
 // The chats in table order (the caller sorts), up to max; returns how many
 size_t mesh_store_convs(mesh_conv_t *out, size_t max);
+// The Messages tab's order (#48): chats with messages first, the newest on top; chats without messages after them, in
+// the order given. Stable.
+void mesh_conv_sort(mesh_conv_t *convs, size_t n);
+// Makes the table match the configured channels (names, in slot order): a channel chat that is not configured any more
+// drops out of the list (its messages stay in the store), a configured channel without a chat is added empty. DM chats
+// stay. With no names (MeshCore not up) nothing is filtered. Returns the new count, at most max. Call before the sort.
+size_t mesh_conv_merge_channels(mesh_conv_t *convs, size_t n, size_t max, char const names[][MESH_CHANNEL_MAX + 1],
+                                size_t name_count);
 // Unread incoming messages over all chats
 uint32_t mesh_store_unread_total(void);
 // Changes with every message added, also once the ring is full: readers rebuild when it differs from what they showed

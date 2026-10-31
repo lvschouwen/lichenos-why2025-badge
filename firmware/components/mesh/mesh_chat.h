@@ -26,6 +26,12 @@ mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap);
 // Is this message a DM with the contact whose key starts with peer (6 bytes), either direction
 bool mesh_msg_in_dm(mesh_msg_t const *m, uint8_t const peer[6]);
 
+// One row of the Messages tab (#48): the title ("#badgetest", "@bob"), the unread badge ("" for none, "3", "99+") and
+// the dim line under it: "3 min ago: bob: hello", or "no messages yet" for a chat without any. now_s is the
+// mesh_uptime_s() the chat's last_heard_s is measured against.
+void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, char *title, size_t title_cap, char *badge, size_t badge_cap,
+                   char *sub, size_t sub_cap);
+
 // The compose line's counter: "12 / 138 bytes", or "170 / 138 bytes, the last 32 are cut" when it is too long.
 // Returns the bytes that would be sent (cut on a UTF-8 boundary).
 size_t mesh_compose_status(char const *text, size_t max_bytes, char *out, size_t cap);

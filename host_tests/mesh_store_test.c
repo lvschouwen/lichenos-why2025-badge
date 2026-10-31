@@ -273,6 +273,43 @@ int main(void) {
         mesh_conv_t cv[2];
         CHECK(mesh_store_convs(cv, 2) == 1 && strcmp(cv[0].title, "@alice") == 0 && cv[0].count == 2);
     }
+
+    // The Messages tab (#48): newest chat first, empty configured channels last in slot order, unconfigured channels out
+    CHECK(mesh_store_init(3));
+    {
+        uint8_t const bob[6] = {1, 1, 1, 1, 1, 1};
+        mesh_store_add_message("Public", "a: 1", 0, 1);
+        mesh_store_add_dm("@bob", "hi", 0, 2, bob);
+        mesh_store_add_message("#old", "x: gone", 0, 3);
+        mesh_store_add_message("Public", "a: 2", 0, 4); // Public is now the newest
+        mesh_conv_t cv[MESH_CONV_MAX];
+        size_t      n = mesh_store_convs(cv, MESH_CONV_MAX);
+        char const  names[4][MESH_CHANNEL_MAX + 1] = {"Public", "#BadgeTest", "#other", "#old"};
+        n = mesh_conv_merge_channels(cv, n, MESH_CONV_MAX, names, 3); // #old is not configured any more
+        CHECK(n == 4);
+        mesh_conv_sort(cv, n);
+        CHECK(strcmp(cv[0].title, "Public") == 0 && strcmp(cv[1].title, "@bob") == 0);
+        CHECK(cv[2].count == 0 && strcmp(cv[2].title, "#BadgeTest") == 0 && cv[2].key.kind == MESH_CHAT_CHANNEL);
+        CHECK(cv[3].count == 0 && strcmp(cv[3].title, "#other") == 0);
+        // a message in an empty configured channel: the key matches without case, so no second row
+        mesh_store_add_message("#badgetest", "z: hey", 0, 5);
+        n = mesh_store_convs(cv, MESH_CONV_MAX);
+        n = mesh_conv_merge_channels(cv, n, MESH_CONV_MAX, names, 3);
+        mesh_conv_sort(cv, n);
+        CHECK(n == 4 && strcmp(cv[0].title, "#badgetest") == 0 && strcmp(cv[1].title, "Public") == 0 &&
+              cv[3].count == 0);
+        // no names (MeshCore not up): nothing is filtered or added
+        n = mesh_store_convs(cv, MESH_CONV_MAX);
+        CHECK(mesh_conv_merge_channels(cv, n, MESH_CONV_MAX, names, 0) == n);
+        // the max bounds the result
+        CHECK(mesh_conv_merge_channels(cv, n, 2, names, 3) == 2);
+        // equal chats keep their order (stable)
+        mesh_conv_t e[3];
+        memset(e, 0, sizeof(e));
+        strcpy(e[0].title, "a"), strcpy(e[1].title, "b"), strcpy(e[2].title, "c");
+        mesh_conv_sort(e, 3);
+        CHECK(strcmp(e[0].title, "a") == 0 && strcmp(e[2].title, "c") == 0);
+    }
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

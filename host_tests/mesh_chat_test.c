@@ -66,6 +66,28 @@ int main(void) {
     d.dm = 0;
     CHECK(!mesh_msg_in_dm(&d, peer));
 
+
+    // The Messages tab's rows (#48)
+    {
+        mesh_conv_t cv;
+        char        title[40], badge[8], sub[220];
+        memset(&cv, 0, sizeof(cv));
+        strcpy(cv.title, "#badgetest");
+        mesh_conv_row(&cv, 100, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
+        CHECK(strcmp(title, "#badgetest") == 0 && badge[0] == '\0' && strcmp(sub, "no messages yet") == 0);
+        cv.count = 2, cv.unread = 3, cv.last_heard_s = 40;
+        strcpy(cv.last, "bob: hello");
+        mesh_conv_row(&cv, 220, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
+        CHECK(strcmp(badge, "3") == 0 && strcmp(sub, "3 min ago: bob: hello") == 0);
+        cv.unread = 99;
+        mesh_conv_row(&cv, 220, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
+        CHECK(strcmp(badge, "99") == 0);
+        cv.unread = 100;
+        mesh_conv_row(&cv, 30, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub)); // clock before the message
+        CHECK(strcmp(badge, "99+") == 0 && strcmp(sub, "just now: bob: hello") == 0);
+        mesh_conv_row(&cv, 30, title, 4, badge, 2, sub, 8); // small buffers stay terminated
+        CHECK(strlen(title) == 3 && strlen(badge) == 1 && strlen(sub) == 7);
+    }
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -299,6 +299,12 @@ static void open_chat(void *arg) {
     shell_open(build_chat, SCREEN_CHAT);
 }
 
+void meshcore_chat_open_channel(char const *name) {
+    char copy_name[sizeof(channel)]; // name may be a row of a list that is rebuilt while the chat opens
+    snprintf(copy_name, sizeof(copy_name), "%s", name);
+    open_chat(copy_name);
+}
+
 static bool word_in_name(char const *word, void *name) {
     return list_filter_text_has(name, word);
 }
@@ -340,6 +346,13 @@ static void open_dm(void *arg) {
     mesh_contact_t const *c = arg;
     snprintf(channel, sizeof(channel), "@%s", c->name[0] ? c->name : "(no name)");
     memcpy(peer, c->pubkey, MF_PREFIX);
+    dm_mode = true;
+    shell_open(build_chat, SCREEN_DM);
+}
+
+void meshcore_chat_open_dm(uint8_t const prefix[6], char const *title) {
+    snprintf(channel, sizeof(channel), "%s%s", title[0] == '@' ? "" : "@", title);
+    memcpy(peer, prefix, MF_PREFIX);
     dm_mode = true;
     shell_open(build_chat, SCREEN_DM);
 }
