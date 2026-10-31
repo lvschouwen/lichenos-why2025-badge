@@ -78,8 +78,13 @@ After that, update over Wi-Fi (the update server runs whenever Wi-Fi is up; put 
 tools/badge.sh ota-firmware <ip>                       # firmware/build/badge_fw.bin, then reboot
 tools/badge.sh ota-file <ip> <file> FLASH0:<name>      # one file into /storage
 tools/badge.sh ota-assets <ip>                         # firmware/build/assets.bin (fonts), then reboot
+tools/badge.sh ota-c6 <ip> [dir]                       # C6 bundle (default firmware/storage_staging/c6), then reboot
 tools/badge.sh ota-info <ip>                           # the version the badge runs
 ```
+
+`ota-c6` checks that the six C6 files agree (each `.md5` against its `.bin`), sends every `.bin` right before its
+`.md5` (the badge refuses a pair that disagrees), reboots only after all six arrived and waits for Wi-Fi. Use it when
+`c6/` changed; the next boot reflashes the C6. If it stops half way the badge was not rebooted: run it again.
 
 The tool first asks the badge to prepare (`POST /prepare`: MeshCore and the other apps stop and free their memory),
 then pushes the image. The badge shows **Updating Lichen** with progress and reboots by itself. A new image runs on

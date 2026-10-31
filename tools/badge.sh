@@ -56,6 +56,8 @@ Over Wi-Fi, while the badge is on Wi-Fi:
   ota-file <ip> <file> <badge-path>   push one file, e.g. 'FLASH0:[c6]firmware.bin'
   ota-assets <ip> [--no-reboot]       write firmware/build/assets.bin (or $BADGE_ASSETS_BIN) into the assets
                                       partition (fonts) and reboot
+  ota-c6 <ip> [dir]                   push the C6 bundle (bootloader, partitions, firmware + .md5; default dir
+                                      firmware/storage_staging/c6) in a safe order, reboot, wait for Wi-Fi
   ota-rm <ip> <badge-path>            delete one file on the badge
   ota-reboot <ip>
   log <ip> [--follow]                 print the badge's log (what its console prints, kept in RAM since boot, with
@@ -518,6 +520,57 @@ cmd_fw() {
     ota_curl --max-time 60 -X POST -H 'Content-Type: text/plain' --data-binary "@$work" "http://$ip:$OTA_PORT/console" | printable
 }
 
+# The C6 bundle (#56): the P4 flashes the C6 at boot from /storage/c6 and refuses a .bin whose .md5 differs (the C6
+# then keeps its old image and the boot goes on without it), so every .bin goes up right before its own .md5 and
+# nothing reboots until all six files are there. Small files first, the 1 MB firmware last: a dropped connection
+# then costs the least. The ota_server clears the C6 bundle key on any /storage/c6 write, so the next boot does the
+# full check and reflashes the C6.
+C6_BUNDLE_FILES=(partitions bootloader firmware)
+
+c6_check_local() {
+    local dir=$1 name bin md5 want size
+    [ -d "$dir" ] || { echo "no directory $dir (build first)" >&2; return 1; }
+    for name in "${C6_BUNDLE_FILES[@]}"; do
+        bin=$dir/$name.bin md5=$dir/$name.bin.md5
+        [ -f "$bin" ] && [ -f "$md5" ] || { echo "missing $bin or $md5" >&2; return 1; }
+        size=$(wc -c < "$bin")
+        [ "$size" -ge 1024 ] && [ "$size" -le 4194304 ] ||
+            { echo "$bin has an implausible size ($size bytes)" >&2; return 1; }
+        want=$(md5sum "$bin" | cut -d' ' -f1)
+        [ "$(tr -d '[:space:]' < "$md5")" = "$want" ] ||
+            { echo "$md5 does not match $bin (stale build?): nothing was sent" >&2; return 1; }
+    done
+}
+
+cmd_ota_c6() {
+    local ip=$1 dir=${2:-$REPO/firmware/storage_staging/c6} name f i
+    c6_check_local "$dir" || exit 1
+    # No /prepare here: after it the receiver refuses file pushes (409) until the next boot
+    for name in "${C6_BUNDLE_FILES[@]}"; do
+        for f in "$name.bin" "$name.bin.md5"; do
+            echo "sending $f..."
+            if ! ota_put "$ip" file "$dir/$f" "FLASH0:[c6]$f"; then
+                echo "FAILED at $f. The badge holds a mixed C6 bundle and was NOT rebooted: it keeps running and its" >&2
+                echo "C6 is untouched. Run ota-c6 again (all six files are rewritten); do not reboot it before that works." >&2
+                echo "If a reboot happened anyway and Wi-Fi stays away, use the USB rescue (flash-fw --no-storage)." >&2
+                exit 1
+            fi
+        done
+    done
+    echo "all six files are on the badge; rebooting (the C6 is reflashed at boot, about 1-2 minutes)..."
+    cmd_ota_reboot "$ip" || true
+    sleep 20 # let it go down before polling
+    for i in $(seq 1 36); do
+        if curl -s --connect-timeout 3 "http://$ip:$OTA_PORT/info" > /dev/null 2>&1; then
+            echo "Wi-Fi is back after about $((20 + (i - 1) * 5)) s: check with 'fw $ip c6'"
+            return 0
+        fi
+        sleep 5
+    done
+    echo "no answer from the badge after 200 s: do not push anything else; check its screen and the serial log" >&2
+    exit 1
+}
+
 cmd_ota_rm() { ota_curl -X DELETE -H "X-Path: $2" "http://$1:$OTA_PORT/file"; }
 
 case "${1:-}" in
@@ -532,6 +585,7 @@ case "${1:-}" in
     ota-firmware) [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_ota_firmware "$2" "${3:-}" ;;
     ota-file)     [ $# -eq 4 ] || usage; cmd_ota_file "$2" "$3" "$4" ;;
     ota-assets)   [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_ota_assets "$2" "${3:-}" ;;
+    ota-c6)       [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_ota_c6 "$2" "${3:-}" ;;
     ota-rm)       [ $# -eq 3 ] || usage; cmd_ota_rm "$2" "$3" ;;
     ota-reboot)   [ $# -eq 2 ] || usage; cmd_ota_reboot "$2" ;;
     log)          { [ $# -eq 2 ] || { [ $# -eq 3 ] && [ "$3" = --follow ]; }; } || usage; cmd_log "$2" "${3:-}" ;;
