@@ -1,6 +1,7 @@
 #include "psram_guard.h"
 
 #include "psram_boot.h"
+#include "psram_learned.h"
 #include "psram_pattern.h"
 #include "psram_scan.h"
 
@@ -111,6 +112,7 @@ static void report(int id, block_t *b, psram_check_t const *res) {
              got_hex, ms);
     ESP_LOGW(TAG, "  canary %d: %u single-bit words, %u bad lines (%u whole), xor of first bad word %08x", id,
              (unsigned)res->bit_flips, (unsigned)res->bad_lines, (unsigned)res->full_lines, (unsigned)res->first_xor);
+    psram_learned_feed((uintptr_t)b->mem + res->first_bad, (uintptr_t)b->mem + res->last_bad, "canary");
     b->hits++;
     b->bad_total      += (uint32_t)res->bad_bytes;
     last_hit_block     = (uint32_t)id;
@@ -173,6 +175,9 @@ static void psram_test(char const *kb_text) {
     int64_t       start = esp_timer_get_time();
     fill_block(mem, len);
     psram_check_t res = check_block(mem, len);
+    if (res.bad_bytes) {
+        psram_learned_feed((uintptr_t)mem + res.first_bad, (uintptr_t)mem + res.last_bad, "fw psram test");
+    }
     console_reply("psram test %u KB at %p: %u bad bytes, %u single-bit words, %u bad lines (%u whole), first bad +%u xor %08x, %u us",
                   kb, (void *)mem, (unsigned)res.bad_bytes, (unsigned)res.bit_flips, (unsigned)res.bad_lines,
                   (unsigned)res.full_lines, (unsigned)res.first_bad, (unsigned)res.first_xor,
@@ -184,6 +189,10 @@ static void cmd_psram(char const *args) {
     if (strncmp(args, "qwatch", 6) == 0) {
         unsigned ms = (unsigned)atoi(args + 6);
         psram_scan_watch(ms ? ms : 2000);
+        return;
+    }
+    if (strncmp(args, "forget", 6) == 0) {
+        psram_learned_forget();
         return;
     }
     if (strncmp(args, "test", 4) == 0) {
@@ -236,10 +245,11 @@ void psram_guard_start(void) {
     }
     psram_scan_run(); // before anything else takes memory: map the suspect window, quarantine bad chunks (#86)
     psram_boot_check(); // then, on an untouched heap, before the canaries and the rest of the boot load the bus
+    heap_caps_monitor_local_minimum_free_size_start(); // "mem psram" min: from here, not the scan that held all of it
     add_spread_blocks();
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);
-    console_register("psram", "psram [test <KB> [dense] | qwatch <ms>] (quarantine, canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
+    console_register("psram", "psram [test <KB> [dense] | qwatch <ms> | forget] (learned bad range, quarantine, canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
     if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 4096, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGW(TAG, "canary task failed to start");
     }

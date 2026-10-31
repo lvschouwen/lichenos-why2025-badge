@@ -18,12 +18,12 @@ int main(void) {
     psram_quar_t q = {0};
     CHECK(psram_quar_bytes(&q) == 0 && !psram_quar_overlaps(&q, 0x48000000u, 0x10000000u));
 
-    // One bad byte: margin each side, rounded outwards to 64 KB
+    // One bad byte: margin each side, rounded outwards to the 4 KB grain
     psram_quar_note(&q, 0x4855BA81u, 0x4855BA81u, 1, 0x100);
     CHECK(q.n == 1);
-    CHECK(q.r[0].lo == 0x484D0000u); // 0x4855BA81 - 512K = 0x484DBA81 -> down 0x484D0000
-    CHECK(q.r[0].lo % (64 * K) == 0 && q.r[0].hi % (64 * K) == 0);
-    CHECK(q.r[0].hi >= 0x4855BA82u + PSRAM_QUAR_MARGIN && q.r[0].hi < 0x4855BA82u + PSRAM_QUAR_MARGIN + 64 * K);
+    CHECK(q.r[0].lo == 0x4854B000u); // 0x4855BA81 - 64K = 0x4854BA81 -> down 0x4854B000
+    CHECK(q.r[0].lo % PSRAM_QUAR_GRAIN == 0 && q.r[0].hi % PSRAM_QUAR_GRAIN == 0);
+    CHECK(q.r[0].hi >= 0x4855BA82u + PSRAM_QUAR_MARGIN && q.r[0].hi < 0x4855BA82u + PSRAM_QUAR_MARGIN + PSRAM_QUAR_GRAIN);
     CHECK(q.r[0].first_bad == 0x4855BA81u && q.r[0].bits == 0x100);
 
     // A second find inside the range widens it, bits and counts accumulate
@@ -45,10 +45,10 @@ int main(void) {
     CHECK(q.r[0].hi <= q.r[1].lo && q.r[1].hi <= q.r[2].lo);
     CHECK(psram_quar_bytes(&q) == (q.r[0].hi - q.r[0].lo) + (q.r[1].hi - q.r[1].lo) + (q.r[2].hi - q.r[2].lo));
 
-    // Margins that touch merge (2 margins + 64 KB apart: ranges meet), 4 margins apart do not
+    // Margins that touch merge (2 margins + 1 grain apart: ranges meet), 4 margins apart do not
     psram_quar_t m = {0};
     psram_quar_note(&m, 0x48200000u, 0x48200000u, 1, 1);
-    psram_quar_note(&m, 0x48200000u + 2 * PSRAM_QUAR_MARGIN + 64 * K, 0x48200000u + 2 * PSRAM_QUAR_MARGIN + 64 * K, 1, 2);
+    psram_quar_note(&m, 0x48200000u + 2 * PSRAM_QUAR_MARGIN + PSRAM_QUAR_GRAIN, 0x48200000u + 2 * PSRAM_QUAR_MARGIN + PSRAM_QUAR_GRAIN, 1, 2);
     CHECK(m.n == 1);
     psram_quar_t f = {0};
     psram_quar_note(&f, 0x48200000u, 0x48200000u, 1, 1);
@@ -71,6 +71,12 @@ int main(void) {
     psram_quar_t z = {0};
     psram_quar_note(&z, 0x1000u, 0x1000u, 1, 1);
     CHECK(z.r[0].lo == 0);
+
+    // The learned extent of #86 as one range: 64 KB margins, 4 KB grain, about 1.2 MB for the known span
+    psram_quar_t l = {0};
+    psram_quar_note(&l, 0x48558C01u, 0x48653C01u, 0, 0);
+    CHECK(l.n == 1 && l.r[0].lo == 0x48548000u && l.r[0].hi == 0x48664000u);
+    CHECK(psram_quar_bytes(&l) < 1200 * K && psram_quar_bytes(&l) > 1100 * K);
 
     if (failures) {
         printf("%d failure(s)\n", failures);

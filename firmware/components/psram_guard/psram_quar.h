@@ -7,8 +7,8 @@
 // PSRAM quarantine (#86): the address ranges around cells that fail the boot scan are kept allocated forever, so no
 // buffer ever lands on them. Pure range math, host-tested in host_tests/psram_quar_test.c; psram_boot.c feeds it.
 
-#define PSRAM_QUAR_GRAIN  (64u * 1024u)  // ranges start and end on this
-#define PSRAM_QUAR_MARGIN (512u * 1024u) // each side of the bad bytes before rounding: the failures thin out over ~150 KB, not stop (#86)
+#define PSRAM_QUAR_GRAIN  (4u * 1024u)   // ranges start and end on this (one page): the edges are claimed in 4 KB pieces
+#define PSRAM_QUAR_MARGIN (64u * 1024u)  // each side of the bad bytes before rounding; the learned range (psram_learn.h) carries the fuzzy edge (#86)
 #define PSRAM_QUAR_MAX    4              // separate ranges kept; beyond that the nearest ones are merged
 
 typedef struct {
