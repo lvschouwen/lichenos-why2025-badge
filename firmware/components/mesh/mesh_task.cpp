@@ -1,12 +1,13 @@
 // MeshCore on the badge (#61, #65): MeshCore's own companion (examples/companion_radio MyMesh + DataStore) runs in one
 // task over the LoRa bridge; the screens and the console are its user interface and read copies taken under
 // mesh_lock (no app port: nothing to expose on a network). MyMesh's loop() holds the lock, so its callbacks (the Listener below) already run under it.
-#include "MyMesh.h"
+#include "mesh_link.h"
 
 #include "lora_radio.h"
 #include "identity_move.h"
 #include "mesh.h"
 #include "mesh_format.h"
+#include "mesh_frame.h"
 #include "channel_input.h"
 #include "mesh_prefs.h"
 #include "radio_presets.h"
@@ -114,20 +115,17 @@ extern "C" esp_err_t mesh_nvs_flash_erase(void) {
 static EspRng            rng;
 static SimpleMeshTables *tables;
 static DataStore         store(SPIFFS, rtc_clock);
-static MyMesh           *node;
-// MyMesh always talks to a companion app interface; on the badge no app ever connects
-class NoApp : public BaseSerialInterface {
-public:
-    void   enable() override {}
-    void   disable() override {}
-    bool   isEnabled() const override { return false; }
-    bool   isConnected() const override { return false; }
-    bool   isWriteBusy() const override { return false; }
-    size_t writeFrame(uint8_t const src[], size_t len) override { return 0; }
-    size_t checkRecvFrame(uint8_t dest[]) override { return 0; }
-};
-static NoApp no_app;
+static BadgeMesh        *node;
+static ob_t             *outbox;            // PSRAM; shared with the UI under ob_mux (mesh_link.h)
+static volatile int      offline_queue_len; // MyMesh's offline queue, from the Listener (#55: stays ~0 now)
+static portMUX_TYPE      ob_mux = portMUX_INITIALIZER_UNLOCKED;
 
+extern "C" void mesh_ob_enter(void) {
+    portENTER_CRITICAL(&ob_mux);
+}
+extern "C" void mesh_ob_exit(void) {
+    portEXIT_CRITICAL(&ob_mux);
+}
 static SemaphoreHandle_t mesh_lock_handle(void) {
     static StaticSemaphore_t buf;
     static SemaphoreHandle_t handle = xSemaphoreCreateMutexStatic(&buf);
@@ -197,7 +195,7 @@ public:
         mesh_store_add_message(channel.name, text, (int16_t)(radio_driver.getLastRSSI() * 10.0f), mesh_uptime_s());
         tile_on_message(channel.name, text);
     }
-    void onQueueSizeChanged(int msgcount) override {}
+    void onQueueSizeChanged(int msgcount) override { offline_queue_len = msgcount; }
 };
 static ScreenFeed screen_feed;
 
@@ -252,6 +250,7 @@ extern "C" size_t mesh_contacts_snapshot(mesh_contact_t *out, size_t max, size_t
     return n;
 }
 
+static TaskHandle_t mesh_task_handle;
 static bool stop_requested; // mesh_stop_for_update -> the task
 static bool task_running;   // set once the task exists
 static bool stopped;        // the task -> everyone: it has saved and is gone (or is about to delete itself)
@@ -655,6 +654,186 @@ static void cmd_mesh_radio(char const *args) {
     }
 }
 
+// ---- sending (#45) -------------------------------------------------------------------------------------------------
+
+extern "C" size_t mesh_channel_text_max(void) {
+    mesh_settings_t st;
+    mesh_get_settings(&st);
+    return mf_channel_text_max(strlen(st.name));
+}
+
+static bool send_ready(char const **why) {
+    if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || !outbox || mesh_is_stopped()) {
+        *why = mesh_is_stopped() ? "MeshCore stopped for update" : "MeshCore is not running";
+        return false;
+    }
+    return true;
+}
+
+extern "C" mesh_msg_id_t mesh_send_channel(char const *channel_name, char const *text, char const **why) {
+    char const *local;
+    why = why ? why : &local;
+    *why = NULL;
+    if (!send_ready(why)) {
+        return 0;
+    }
+    size_t len = mf_text_cut(text, mesh_channel_text_max());
+    mesh_ob_enter();
+    mesh_msg_id_t id = ob_add_channel(outbox, channel_name, text, len, (uint32_t)millis(), why);
+    mesh_ob_exit();
+    return id;
+}
+
+extern "C" mesh_msg_id_t mesh_send_dm(uint8_t const prefix[6], char const *text, char const **why) {
+    char const *local;
+    why = why ? why : &local;
+    *why = NULL;
+    if (!send_ready(why)) {
+        return 0;
+    }
+    size_t len = mf_text_cut(text, MF_MAX_TEXT);
+    mesh_ob_enter();
+    mesh_msg_id_t id = ob_add_dm(outbox, prefix, text, len, (uint32_t)millis(), why);
+    mesh_ob_exit();
+    return id;
+}
+
+extern "C" bool mesh_retry(mesh_msg_id_t id) {
+    char const *why;
+    if (!send_ready(&why)) {
+        return false;
+    }
+    mesh_ob_enter();
+    bool ok = ob_retry(outbox, id, (uint32_t)millis());
+    mesh_ob_exit();
+    return ok;
+}
+
+extern "C" bool mesh_out_state(mesh_msg_id_t id, mesh_out_state_t *st, uint8_t *attempt, uint8_t *repeats) {
+    if (!outbox) {
+        return false;
+    }
+    mesh_ob_enter();
+    bool ok = ob_get(outbox, id, st, attempt, repeats, NULL);
+    mesh_ob_exit();
+    return ok;
+}
+
+extern "C" size_t mesh_out_list(mesh_out_info_t *out, size_t max) {
+    size_t n = 0;
+    if (!outbox) {
+        return 0;
+    }
+    mesh_ob_enter();
+    for (size_t round = 0; round < OB_CAP && n < max; round++) {
+        ob_entry_t const *best = NULL; // newest not yet listed
+        for (int i = 0; i < OB_CAP; i++) {
+            ob_entry_t const *e = &outbox->e[i];
+            bool listed = false;
+            for (size_t k = 0; k < n; k++) {
+                listed = listed || out[k].id == e->id;
+            }
+            if (e->used && !listed && (!best || (int32_t)(e->seq - best->seq) > 0)) {
+                best = e;
+            }
+        }
+        if (!best) {
+            break;
+        }
+        out[n].id      = best->id;
+        out[n].is_dm   = best->kind == OB_DM;
+        out[n].state   = (mesh_out_state_t)best->state;
+        out[n].attempt = best->attempt;
+        out[n].repeats = best->repeats;
+        out[n].trip_ms = best->trip_ms;
+        if (best->kind == OB_DM) {
+            snprintf(out[n].target, sizeof(out[n].target), "%02x%02x%02x%02x%02x%02x", best->prefix[0], best->prefix[1],
+                     best->prefix[2], best->prefix[3], best->prefix[4], best->prefix[5]);
+        } else {
+            snprintf(out[n].target, sizeof(out[n].target), "%s", best->target);
+        }
+        n++;
+    }
+    mesh_ob_exit();
+    return n;
+}
+
+static char const *const OUT_STATE_NAME[] = {"queued", "sent", "on air", "heard repeated", "delivered", "FAILED"};
+
+// "fw mesh send <channel> <text>"
+static void cmd_mesh_send(char const *args) {
+    char channel[OB_TARGET_MAX] = "";
+    int  used = 0;
+    if (sscanf(args, "%32s %n", channel, &used) < 1 || !args[used]) {
+        console_reply("mesh send <channel name> <text>");
+        return;
+    }
+    if (time(NULL) < (time_t)BadgeRtc::VALID_FROM) {
+        console_reply("warning: the clock is not set, other nodes will see a wrong time");
+    }
+    char const   *why = NULL;
+    mesh_msg_id_t id  = mesh_send_channel(channel, args + used, &why);
+    if (!id) {
+        console_reply("not queued: %s", why ? why : "?");
+    } else {
+        console_reply("queued #%lu on %s (max %u bytes)", (unsigned long)id, channel, (unsigned)mesh_channel_text_max());
+    }
+}
+
+// "fw mesh dm <12 hex digits of the public key> <text>"
+static void cmd_mesh_dm(char const *args) {
+    uint8_t prefix[6];
+    int     used = 0;
+    unsigned b[6];
+    if (sscanf(args, "%2x%2x%2x%2x%2x%2x %n", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &used) < 6 || !args[used]) {
+        console_reply("mesh dm <12 hex digits of the public key> <text>");
+        return;
+    }
+    for (int i = 0; i < 6; i++) {
+        prefix[i] = (uint8_t)b[i];
+    }
+    char const   *why = NULL;
+    mesh_msg_id_t id  = mesh_send_dm(prefix, args + used, &why);
+    if (id) {
+        console_reply("queued #%lu", (unsigned long)id);
+    } else {
+        console_reply("not queued: %s", why ? why : "?");
+    }
+}
+
+static void cmd_mesh_out(void) {
+    mesh_out_info_t list[OB_CAP];
+    size_t          n = mesh_out_list(list, OB_CAP);
+    for (size_t i = 0; i < n; i++) {
+        console_reply("out #%lu %s %s: %s, attempt %u, repeats %u, trip %lu ms", (unsigned long)list[i].id,
+                      list[i].is_dm ? "dm" : "channel", list[i].target, OUT_STATE_NAME[list[i].state], list[i].attempt,
+                      list[i].repeats, (unsigned long)list[i].trip_ms);
+    }
+    console_reply("%u outgoing message(s)", (unsigned)n);
+}
+
+// "fw mesh link": the companion pipe's counters (#45, #55)
+static void cmd_mesh_link(void) {
+    mesh_lock();
+    LinkStats s    = node->pipe().stats();
+    bool      busy = node->pipe().draining();
+    mesh_unlock();
+    console_reply("link connected, protocol %u | cmds out %lu, replies %lu, pushes %lu | self ok %lu bad %lu", s.app_ver,
+                  (unsigned long)s.cmds_out, (unsigned long)s.replies, (unsigned long)s.pushes,
+                  (unsigned long)s.self_ok, (unsigned long)s.self_bad);
+    console_reply("offline queue %d (drained %lu, msg-waiting pushes %lu, draining %d) | lost replies %lu, fifo drops %lu, "
+                  "bad frames %lu, send confirmed %lu",
+                  (int)offline_queue_len, (unsigned long)s.drained, (unsigned long)s.msg_waiting, busy,
+                  (unsigned long)s.lost_replies, (unsigned long)s.fifo_drops, (unsigned long)s.bad_frames,
+                  (unsigned long)s.confirmed);
+    for (int i = 0; i < LINK_PUSH_KINDS; i++) {
+        if (s.push_count[i]) {
+            console_reply("  push 0x%02x x %lu", 0x80 + i, (unsigned long)s.push_count[i]);
+        }
+    }
+    console_reply("mesh task stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(mesh_task_handle));
+}
+
 static void cmd_mesh(char const *args) {
     if (mesh_is_stopped()) {
         console_reply("MeshCore stopped for update");
@@ -668,8 +847,25 @@ static void cmd_mesh(char const *args) {
         cmd_mesh_radio(args + 5);
         return;
     }
+    if (strncmp(args, "send ", 5) == 0) {
+        cmd_mesh_send(args + 5);
+        return;
+    }
+    if (strncmp(args, "dm ", 3) == 0) {
+        cmd_mesh_dm(args + 3);
+        return;
+    }
+    if (strcmp(args, "out") == 0) {
+        cmd_mesh_out();
+        return;
+    }
+    if (strcmp(args, "link") == 0) {
+        cmd_mesh_link();
+        return;
+    }
     if (*args) {
-        console_reply("mesh | mesh name <name> | mesh radio <preset index | freq bw sf cr> [txdbm]");
+        console_reply("mesh | mesh name <name> | mesh radio <preset index | freq bw sf cr> [txdbm] | mesh link | mesh out | "
+                      "mesh send <channel> <text> | mesh dm <12 hex> <text>");
         return;
     }
     mesh_lock();
@@ -864,15 +1060,19 @@ extern "C" bool mesh_start(void) {
     bool ok = mesh_store_init(STORE_MESSAGES);
     mesh_unlock();
     void *tables_mem = heap_caps_malloc(sizeof(SimpleMeshTables), MALLOC_CAP_SPIRAM);
-    void *mesh_mem   = heap_caps_malloc(sizeof(MyMesh), MALLOC_CAP_SPIRAM);
-    if (!ok || !tables_mem || !mesh_mem || !SPIFFS.begin(true)) {
+    void *mesh_mem   = heap_caps_malloc(sizeof(BadgeMesh), MALLOC_CAP_SPIRAM);
+    void *ob_mem     = heap_caps_calloc(1, sizeof(ob_t), MALLOC_CAP_SPIRAM);
+    if (!ok || !tables_mem || !mesh_mem || !ob_mem || !SPIFFS.begin(true)) {
         ESP_LOGE(TAG, "no memory or no /storage");
         free(tables_mem);
         free(mesh_mem);
+        free(ob_mem);
         return false;
     }
     tables    = new (tables_mem) SimpleMeshTables();
-    MyMesh *n = new (mesh_mem) MyMesh(radio_driver, rng, rtc_clock, *tables, store);
+    outbox = (ob_t *)ob_mem;
+    ob_init(outbox);
+    BadgeMesh *n = new (mesh_mem) BadgeMesh(radio_driver, rng, rtc_clock, *tables, store, outbox);
 
     // Everything is loaded before node is published: the screens and the console read MeshCore only through node, and
     // must not walk the contact table while begin() fills it (#65 review)
@@ -883,7 +1083,7 @@ extern "C" bool mesh_start(void) {
     n->begin();
     apply_boot_radio(n, first_boot);
     n->setListener(&screen_feed);
-    n->startInterface(no_app);
+    n->startPipe(); // connected, so MyMesh's replies and pushes reach us (#45)
     uint8_t const *key = n->self_id.pub_key;
     snprintf(node_id_text, sizeof(node_id_text), "%02x%02x%02x%02x", key[0], key[1], key[2], key[3]);
     mesh_lock();
@@ -897,19 +1097,19 @@ extern "C" bool mesh_start(void) {
     __atomic_store_n(&radio_known, true, __ATOMIC_RELEASE);
     __atomic_store_n(&node_id_known, true, __ATOMIC_RELEASE);
 
-    console_register("mesh", "mesh | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm]", cmd_mesh);
+    console_register("mesh", "mesh | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | mesh link | mesh out | mesh send <channel> <text> | mesh dm <12 hex> <text>", cmd_mesh);
     console_register("contacts", "contacts (nodes heard, newest first)", cmd_contacts);
     console_register("msgs", "msgs [n] (last n messages)", cmd_msgs);
     console_register("channels", "channels (the channels the badge can read)", cmd_channels);
     console_register("channel", "channel add <name> <base64 key> | channel add #name | channel rm <index|name>", cmd_channel);
     console_register("advert", "advert (send a zero-hop advert now)", cmd_advert);
 
-    if (xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_STACK, NULL, 3, NULL, MESH_CORE) != pdPASS) {
+    if (xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_STACK, NULL, 3, &mesh_task_handle, MESH_CORE) != pdPASS) {
         ESP_LOGE(TAG, "mesh task not started");
         return false;
     }
     __atomic_store_n(&task_running, true, __ATOMIC_RELEASE);
-    ESP_LOGW(TAG, "MeshCore companion up: %d contacts, MyMesh %u bytes in PSRAM", n->getNumContacts(),
-             (unsigned)sizeof(MyMesh));
+    ESP_LOGW(TAG, "MeshCore companion up: %d contacts, BadgeMesh %u bytes in PSRAM", n->getNumContacts(),
+             (unsigned)sizeof(BadgeMesh));
     return true;
 }

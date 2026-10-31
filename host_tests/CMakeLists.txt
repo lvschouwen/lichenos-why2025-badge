@@ -380,6 +380,23 @@ target_include_directories(mesh_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(mesh_format_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_format_test COMMAND mesh_format_test)
 
+add_executable(mesh_frame_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/mesh_frame_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_frame.c
+)
+target_include_directories(mesh_frame_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_frame_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_frame_test COMMAND mesh_frame_test)
+
+add_executable(mesh_outbox_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/mesh_outbox_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_outbox.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_frame.c
+)
+target_include_directories(mesh_outbox_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_outbox_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_outbox_test COMMAND mesh_outbox_test)
+
 add_executable(radio_presets_test
     ${CMAKE_CURRENT_SOURCE_DIR}/radio_presets_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/radio_presets.c
@@ -513,12 +530,16 @@ target_compile_definitions(meshcore_companion_host PUBLIC MAX_CONTACTS=1000 MAX_
 set(COMPANION_ESP32_SRCS ${MESHCORE_DIR}/src/helpers/IdentityStore.cpp ${MESHCORE_DIR}/src/helpers/RegionMap.cpp
     ${MESHCORE_DIR}/src/helpers/TransportKeyStore.cpp ${MESHCORE_DIR}/examples/companion_radio/MyMesh.cpp
     ${MESHCORE_DIR}/examples/companion_radio/DataStore.cpp ${CMAKE_CURRENT_SOURCE_DIR}/companion_test.cpp)
-set_source_files_properties(${COMPANION_ESP32_SRCS} PROPERTIES COMPILE_DEFINITIONS ESP32)
+set_source_files_properties(${COMPANION_ESP32_SRCS} ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_link.cpp PROPERTIES COMPILE_DEFINITIONS ESP32)
 target_compile_options(meshcore_companion_host PRIVATE -w)
 
 add_executable(companion_test ${CMAKE_CURRENT_SOURCE_DIR}/companion_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/radio_presets.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_format.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_format.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_frame.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_outbox.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/channel_input.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_link.cpp)
 target_link_libraries(companion_test PRIVATE meshcore_companion_host)
 target_include_directories(companion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
 target_compile_options(companion_test PRIVATE -Wall -Wextra -Wno-unused-parameter)
@@ -681,6 +702,6 @@ add_test(NAME ota_bmp_test COMMAND ota_bmp_test)
 
 add_custom_target(run_tests
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose
-    DEPENDS assets_fmt_test font_cover_test c6_image_test ota_proto_test ota_pieces_test backlight_cmd_test backlight_level_test console_cmd_test lora_proto_test meshcore_hdr_test lora_link_test lora_irq_test console_cmd_fw_test c6_paths_test ota_path_test ota_valid_test kbd_map_test meshcore_decode_test mesh_store_test lora_airtime_test mesh_format_test radio_presets_test radio_confirm_test channel_input_test mesh_tile_test crash_log_test restart_log_test boot_steps_test log_clean_test fs_shim_test cayenne_lpp_test companion_test lora_tx_test nav_test home_layout_test tz_table_test wifi_list_test wifi_cred_test wifi_join_test setup_state_test mc_first_test ui_keys_test boot_text_test update_status_test update_mode_test link_state_test scroll_anchor_test shot_blend_test ota_bmp_test log_ring_test psram_pattern_test
+    DEPENDS assets_fmt_test font_cover_test c6_image_test ota_proto_test ota_pieces_test backlight_cmd_test backlight_level_test console_cmd_test lora_proto_test meshcore_hdr_test lora_link_test lora_irq_test console_cmd_fw_test c6_paths_test ota_path_test ota_valid_test kbd_map_test meshcore_decode_test mesh_store_test lora_airtime_test mesh_format_test mesh_frame_test mesh_outbox_test radio_presets_test radio_confirm_test channel_input_test mesh_tile_test crash_log_test restart_log_test boot_steps_test log_clean_test fs_shim_test cayenne_lpp_test companion_test lora_tx_test nav_test home_layout_test tz_table_test wifi_list_test wifi_cred_test wifi_join_test setup_state_test mc_first_test ui_keys_test boot_text_test update_status_test update_mode_test link_state_test scroll_anchor_test shot_blend_test ota_bmp_test log_ring_test psram_pattern_test
     COMMENT "Running all host tests"
 )

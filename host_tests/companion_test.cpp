@@ -4,6 +4,7 @@
 #include "MyMesh.h"
 #include "identity_move.h"
 #include "mesh_prefs.h"
+#include "mesh_link.h"
 
 #include "SPIFFS.h"
 
@@ -44,6 +45,7 @@ extern "C" void shim_fill_random(void *buf, size_t len) {
 class TestRadio : public BadgeRadio {
 public:
     std::vector<uint8_t> pending;
+    std::vector<std::vector<uint8_t>> sent; // what MyMesh put on air
     int                  recvRaw(uint8_t *bytes, int sz) override {
         int n = (int)pending.size();
         if (!n || n > sz) {
@@ -55,7 +57,10 @@ public:
     }
     uint32_t getEstAirtimeFor(int len) override { return (uint32_t)len; }
     float    packetScore(float snr, int len) override { return 1.0f; }
-    bool     startSendRaw(uint8_t const *bytes, int len) override { return false; }
+    bool     startSendRaw(uint8_t const *bytes, int len) override {
+        sent.emplace_back(bytes, bytes + len);
+        return true;
+    }
     bool     isSendComplete() override { return true; }
     void     onSendFinished() override {}
     bool     isInRecvMode() const override { return true; }
@@ -92,6 +97,10 @@ mesh::LocalIdentity radio_new_identity() {
 }
 void BadgeBoard::reboot() {}
 uint16_t BadgeBoard::getBattMilliVolts() { return 0; }
+
+// The outbox is shared with the UI on the badge (a critical section there); one thread here
+extern "C" void mesh_ob_enter(void) {}
+extern "C" void mesh_ob_exit(void) {}
 
 // The app's end of the companion protocol: frames to deliver, frames received
 class FakeApp : public BaseSerialInterface {
@@ -159,6 +168,10 @@ class Rng : public mesh::RNG {
 public:
     void random(uint8_t *d, size_t n) override { shim_fill_random(d, n); }
 };
+static mesh::RNG &rng_for_pipe() {
+    static Rng r;
+    return r;
+}
 
 // MeshCore's clock: the system's real time when it has one (SNTP on the badge), never MeshCore's 2024 default (#65:
 // other nodes drop adverts that aren't newer than the last one they saw)
@@ -168,6 +181,123 @@ static void clock_uses_real_time(void) {
     CHECK(rtc.getCurrentTime() >= now && rtc.getCurrentTime() <= now + 1);
 }
 
+
+
+// Messages seen by the Listener, as the badge's screens get them
+struct CountingListener : MyMesh::Listener {
+    int channel_msgs = 0, dm_msgs = 0, queue_len = -1;
+    void onMessageRecv(mesh::Packet *, ContactInfo const &, uint8_t, uint32_t, char const *) override { dm_msgs++; }
+    void onChannelMessageRecv(mesh::Packet *, ChannelDetails &, char const *) override { channel_msgs++; }
+    void onQueueSizeChanged(int n) override { queue_len = n; }
+};
+
+static void settle(BadgeMesh &mesh, int loops = 60) {
+    run(mesh, loops);
+}
+
+// The text of a GRP_TXT packet MyMesh put on air, decrypted with the channel's key
+static std::string group_text(std::vector<uint8_t> const &raw, mesh::GroupChannel const &channel) {
+    mesh::Packet pkt;
+    if (!pkt.readFrom(raw.data(), (uint8_t)raw.size()) || pkt.getPayloadType() != PAYLOAD_TYPE_GRP_TXT) {
+        return "";
+    }
+    uint8_t plain[200];
+    int     n = mesh::Utils::MACThenDecrypt(channel.secret, plain, &pkt.payload[1], pkt.payload_len - 1);
+    return n > 5 ? std::string((char *)&plain[5]) : "";
+}
+
+// The companion pipe (#45, #55) on the real MyMesh: start sequence, offline queue drained, sends through the outbox
+static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, SimpleMeshTables &tables) {
+    static DataStore store(SPIFFS, rtc_clock);
+    static ob_t      ob;
+    static BadgeMesh mesh(radio_driver, rng_for_pipe(), rtc_clock, tables, store, &ob);
+    static CountingListener listener;
+    ob_init(&ob);
+    store.begin();
+    mesh.begin();
+    mesh.setListener(&listener);
+    mesh.startPipe();
+    settle(mesh, 10);
+    LinkStats const &st = mesh.pipe().stats();
+    CHECK(st.app_ver != 0);   // DEVICE_INFO answered
+    CHECK(st.self_ok == 1 && st.self_bad == 0); // APP_START: SELF_INFO carries our key
+    CHECK(st.no_more >= 1 && !mesh.pipe().draining());
+
+    // A Public message arrives: the Listener gets it once, the pipe drains the offline queue and drops the frame (#55)
+    test_radio.pending = packets[1];
+    settle(mesh, 20);
+    CHECK(listener.channel_msgs == 1);
+    CHECK(st.msg_waiting >= 1 && st.drained >= 1 && listener.queue_len == 0 && !mesh.pipe().draining());
+    ChannelDetails pub;
+    CHECK(mesh.getChannel(0, pub));
+    for (int i = 0; i < 300; i++) { // more than the queue holds (256): it never fills up
+        uint8_t plain[48] = {};
+        uint32_t ts       = (uint32_t)time(NULL) + 1000 + i;
+        memcpy(plain, &ts, 4);
+        int tlen = snprintf((char *)plain + 5, sizeof(plain) - 5, "Peer: message %d", i);
+        uint8_t raw[128];
+        raw[0]    = (PAYLOAD_TYPE_GRP_TXT << PH_TYPE_SHIFT) | ROUTE_TYPE_FLOOD;
+        raw[1]    = 0;
+        raw[2]    = pub.channel.hash[0];
+        int enc   = mesh::Utils::encryptThenMAC(pub.channel.secret, raw + 3, plain, 5 + tlen + 1);
+        test_radio.pending.assign(raw, raw + 3 + enc);
+        settle(mesh, 2);
+    }
+    CHECK(listener.channel_msgs == 301);
+    CHECK(st.drained >= 301);
+    CHECK(listener.queue_len == 0);
+
+    // A channel send: the frame's text decrypts to "<name>: <text>", then ON_AIR, then HEARD when it is repeated
+    char const *why = NULL;
+    mesh_msg_id_t id = ob_add_channel(&ob, "public", "hello pipe", 10, (uint32_t)millis(), &why);
+    CHECK(id != 0);
+    size_t before = test_radio.sent.size();
+    settle(mesh, 60);
+    mesh_out_state_t state = MESH_OUT_QUEUED;
+    CHECK(ob_get(&ob, id, &state, NULL, NULL, NULL) && state == MESH_OUT_ON_AIR);
+    CHECK(test_radio.sent.size() > before);
+    std::string want = std::string(mesh.getNodeName()) + ": hello pipe";
+    bool        found = false;
+    std::vector<uint8_t> on_air;
+    for (auto const &raw : test_radio.sent) {
+        if (group_text(raw, pub.channel) == want) {
+            found  = true;
+            on_air = raw;
+        }
+    }
+    CHECK(found);
+    test_radio.pending = on_air; // a repeater sends it back
+    settle(mesh, 5);
+    uint8_t reps = 0;
+    CHECK(ob_get(&ob, id, &state, NULL, &reps, NULL) && state == MESH_OUT_HEARD && reps == 1);
+
+    mesh_msg_id_t bad = ob_add_channel(&ob, "#nosuch", "x", 1, (uint32_t)millis(), &why);
+    settle(mesh, 5);
+    CHECK(ob_get(&ob, bad, &state, NULL, NULL, NULL) && state == MESH_OUT_FAILED);
+
+    // A DM to a known contact: RESP_SENT with an ACK, then the ACK packet confirms it
+    ContactsIterator it = mesh.startContactsIterator();
+    ContactInfo      c;
+    CHECK(it.hasNext(&mesh, c));
+    mesh_msg_id_t dm = ob_add_dm(&ob, c.id.pub_key, "dm hi", 5, (uint32_t)millis(), &why);
+    CHECK(dm != 0);
+    settle(mesh, 20);
+    CHECK(ob_get(&ob, dm, &state, NULL, NULL, NULL) && (state == MESH_OUT_SENT || state == MESH_OUT_ON_AIR));
+    uint32_t ack = 0;
+    for (auto const &e : ob.e) {
+        if (e.used && e.id == dm && e.n_acks) {
+            ack = e.acks[0];
+        }
+    }
+    CHECK(ack != 0);
+    uint8_t ack_pkt[6] = {(PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT) | ROUTE_TYPE_FLOOD, 0, 0, 0, 0, 0};
+    memcpy(ack_pkt + 2, &ack, 4);
+    test_radio.pending.assign(ack_pkt, ack_pkt + 6);
+    settle(mesh, 5);
+    uint32_t trip = 0;
+    CHECK(ob_get(&ob, dm, &state, NULL, NULL, &trip) && state == MESH_OUT_DELIVERED);
+    CHECK(st.confirmed == 1);
+}
 
 // Moving the milestone-2 key into DataStore (#65 review): only a saved copy that reads back identical counts, because
 // MeshCore's save reports success once the file opened, even when the write itself failed (disk full, bad FAT)
@@ -214,7 +344,7 @@ int main(int argc, char **argv) {
     CHECK(SPIFFS.begin(true));
 
     static Rng              rng;
-    static SimpleMeshTables tables1, tables2, tables3, tables4, tables5;
+    static SimpleMeshTables tables1, tables2, tables3, tables4, tables5, tables6;
     identity_move_checks_the_saved_copy(rng);
     static FakeApp          app;
     uint8_t                 first_key[PUB_KEY_SIZE];
@@ -252,6 +382,8 @@ int main(int argc, char **argv) {
         CHECK(memcmp(self_key(mesh), first_key, PUB_KEY_SIZE) == 0);
         CHECK(mesh.getNumContacts() == 3);
     }
+
+    pipe_checks(packets, tables6);
 
     {
         // Settings from the badge (#67): name and radio through the setters' own path, saved as the badge saves them

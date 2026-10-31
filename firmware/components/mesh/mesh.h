@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mesh_outbox.h"
 #include "mesh_store.h"
 #include "mesh_tile.h"
 
@@ -94,6 +95,33 @@ uint32_t mesh_uptime_s(void);
 size_t mesh_messages_snapshot(mesh_msg_t *out, size_t max, uint32_t *generation, uint32_t wait_ms);
 // Up to max contacts, most recently heard first; returns how many, *total = all contacts
 size_t mesh_contacts_snapshot(mesh_contact_t *out, size_t max, size_t *total, uint32_t wait_ms);
+
+// ---- sending (#45; the compose screens are #46 and #47) --------------------------------------------------------------
+// All copy-in and non-blocking: they never take the mesh lock (LVGL safe). The mesh task sends from the outbox
+// (mesh_outbox.h) through MyMesh's own command frames and tracks the state of each message.
+
+// Queues a channel message: the channel is named (slots can change), the text is cut at mesh_channel_text_max() on a
+// UTF-8 boundary. 0 with *why set ("busy", "empty", "MeshCore is not running"...). Sent as "<node name>: <text>".
+mesh_msg_id_t mesh_send_channel(char const *channel_name, char const *text, char const **why);
+// A DM to the contact with this 6-byte public key prefix; retried up to 3 times (reset path, then flood), see the outbox
+mesh_msg_id_t mesh_send_dm(uint8_t const prefix[6], char const *text, char const **why);
+// A failed message starts over under the same id
+bool mesh_retry(mesh_msg_id_t id);
+// false when the id is unknown (evicted: the table keeps 16). Any pointer may be NULL.
+bool mesh_out_state(mesh_msg_id_t id, mesh_out_state_t *st, uint8_t *attempt, uint8_t *repeats);
+// Bytes of text that fit in a channel message: 160 minus "<node name>: "
+size_t mesh_channel_text_max(void);
+
+typedef struct {
+    mesh_msg_id_t    id;
+    bool             is_dm;
+    mesh_out_state_t state;
+    uint8_t          attempt, repeats;
+    uint32_t         trip_ms;
+    char             target[OB_TARGET_MAX]; // channel name, or the contact prefix in hex
+} mesh_out_info_t;
+// The newest messages first, up to max (for the console and the chat screens)
+size_t mesh_out_list(mesh_out_info_t *out, size_t max);
 
 #ifdef __cplusplus
 }
