@@ -34,16 +34,33 @@ void psram_pattern_fill_x(void *buf, size_t len, uintptr_t tag, uint32_t mask) {
     }
 }
 
+// Records a differing byte at offset at; word_diff = the difference placed at its byte lane of the 32-bit word, up/down =
+// the bits found set that should be clear / found clear that should be set (same lane)
+static void note_bad(psram_check_t *res, size_t at, uint32_t word_diff, uint32_t first_xor, uint32_t up, uint32_t down) {
+    if (res->bad_bytes++ == 0) {
+        res->first_bad = at;
+        res->first_xor = first_xor;
+    }
+    res->last_bad  = at;
+    res->xor_or   |= word_diff;
+    res->up_or    |= up;
+    res->down_or  |= down;
+}
+
+static void note_bad_byte(psram_check_t *res, uintptr_t tag, size_t i, uint8_t got, uint32_t mask) {
+    uint8_t  want = byte_x(tag + i, mask);
+    unsigned sh   = 8 * ((tag + i) & 3);
+    note_bad(res, i, (uint32_t)(got ^ want) << sh, got ^ want, (uint32_t)(got & ~want & 0xffu) << sh,
+             (uint32_t)(want & ~got & 0xffu) << sh);
+}
+
 psram_check_t psram_pattern_check_x(void const *buf, size_t len, uintptr_t tag, uint32_t mask) {
     uint8_t const *p   = buf;
     psram_check_t  res = {0};
     size_t         i   = 0;
     for (; i < len && ((tag + i) & 3); i++) { // unaligned head and tail: bytes only
         if (p[i] != byte_x(tag + i, mask)) {
-            if (res.bad_bytes++ == 0) {
-                res.first_bad = i;
-                res.first_xor = p[i] ^ byte_x(tag + i, mask);
-            }
+            note_bad_byte(&res, tag, i, p[i], mask);
         }
     }
     uintptr_t line      = (uintptr_t)-1;
@@ -73,10 +90,9 @@ psram_check_t psram_pattern_check_x(void const *buf, size_t len, uintptr_t tag, 
         }
         for (size_t k = 0; k < 4; k++) {
             if ((diff >> (8 * k)) & 0xff) {
-                if (res.bad_bytes++ == 0) {
-                    res.first_bad = i + k;
-                    res.first_xor = diff;
-                }
+                uint32_t want = word_at(tag + i) ^ mask;
+                uint32_t lane = 0xffu << (8 * k);
+                note_bad(&res, i + k, diff & lane, diff, got & ~want & lane, want & ~got & lane);
             }
         }
     }
@@ -85,10 +101,7 @@ psram_check_t psram_pattern_check_x(void const *buf, size_t len, uintptr_t tag, 
     }
     for (; i < len; i++) {
         if (p[i] != byte_x(tag + i, mask)) {
-            if (res.bad_bytes++ == 0) {
-                res.first_bad = i;
-                res.first_xor = p[i] ^ byte_x(tag + i, mask);
-            }
+            note_bad_byte(&res, tag, i, p[i], mask);
         }
     }
     return res;

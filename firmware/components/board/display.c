@@ -70,6 +70,10 @@ bool display_start(lv_display_t **out) {
         return false;
     }
     lcd_panel = panel;
+    void *fb = NULL;
+    if (esp_lcd_dpi_panel_get_frame_buffer(panel, 1, &fb) == ESP_OK) {
+        ESP_LOGW(TAG, "panel framebuffer %p, %u KB", fb, (unsigned)(LCD_H_RES * LCD_V_RES * 2 >> 10)); // #86: who owns what in PSRAM
+    }
 
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_affinity = 1;  // core 1 draws, core 0 talks to the world

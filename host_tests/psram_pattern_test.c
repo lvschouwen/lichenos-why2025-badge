@@ -41,6 +41,20 @@ int main(void) {
     // One flipped bit: one byte, one single-bit word, one line, offset reported
     buf[1000] ^= 0x10;
     r = psram_pattern_check(buf, N, tag);
+    CHECK(r.last_bad == 1000 && r.xor_or == (0x10u << (8 * (1000 % 4))));
+    {
+        uint32_t lane = 0x10u << (8 * (1000 % 4));
+        CHECK((r.up_or == lane) != (r.down_or == lane) && (r.up_or | r.down_or) == lane); // one direction only
+        // the flip direction is what the byte held: force it to a known side
+        buf[1000] = (uint8_t)(psram_pattern_byte(tag + 1000) | 0x10);
+        r = psram_pattern_check(buf, N, tag);
+        CHECK(r.bad_bytes == 0 || r.up_or == lane);
+        buf[1000] = (uint8_t)(psram_pattern_byte(tag + 1000) & ~0x10);
+        r = psram_pattern_check(buf, N, tag);
+        CHECK(r.bad_bytes == 0 || (r.down_or == lane && r.up_or == 0));
+        buf[1000] = psram_pattern_byte(tag + 1000) ^ 0x10;
+        r = psram_pattern_check(buf, N, tag);
+    }
     CHECK(r.bad_bytes == 1 && r.first_bad == 1000 && r.bit_flips == 1 && r.bad_lines == 1 && r.full_lines == 0);
     CHECK(r.first_xor == (0x10u << (8 * (1000 % 4))));
     buf[1000] ^= 0x10;
@@ -49,6 +63,7 @@ int main(void) {
     buf[64] ^= 0xff;
     buf[65] ^= 0x01;
     r = psram_pattern_check(buf, N, tag);
+    CHECK(r.last_bad == 65 && r.xor_or == 0x01ffu);
     CHECK(r.bad_bytes == 2 && r.first_bad == 64 && r.bit_flips == 0 && r.bad_lines == 1);
     psram_pattern_fill(buf, N, tag);
 

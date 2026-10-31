@@ -21,6 +21,10 @@ typedef struct {
     size_t   bit_flips;  // 32-bit words that differ in exactly one bit
     size_t   bad_lines;  // 128-byte lines (by logical address) with at least one differing word
     size_t   full_lines; // lines whose every word differs
+    size_t   last_bad;   // offset of the last byte that differs
+    uint32_t xor_or;     // OR of every differing byte's difference, at its lane of the word: which bits ever flipped
+    uint32_t up_or;      // OR of the bits found 1 that should be 0 (0 -> 1 errors), at their lane of the word
+    uint32_t down_or;    // OR of the bits found 0 that should be 1 (1 -> 0 errors)
     uint32_t first_xor;  // expected ^ found of the first differing word (the whole word, aligned down)
 } psram_check_t;
 

@@ -2,6 +2,7 @@
 
 #include "psram_boot.h"
 #include "psram_pattern.h"
+#include "psram_scan.h"
 
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
@@ -180,11 +181,17 @@ static void psram_test(char const *kb_text) {
 }
 
 static void cmd_psram(char const *args) {
+    if (strncmp(args, "qwatch", 6) == 0) {
+        unsigned ms = (unsigned)atoi(args + 6);
+        psram_scan_watch(ms ? ms : 2000);
+        return;
+    }
     if (strncmp(args, "test", 4) == 0) {
         psram_test(args + 4);
         return;
     }
     psram_boot_print();
+    psram_scan_print();
     xSemaphoreTake(lock, portMAX_DELAY);
     uint32_t hits = 0;
     for (int i = 0; i < MAX_BLOCKS; i++) {
@@ -227,11 +234,12 @@ void psram_guard_start(void) {
     if (!lock) {
         return;
     }
-    psram_boot_check(); // first, on an untouched heap, before the canaries and the rest of the boot load the bus
+    psram_scan_run(); // before anything else takes memory: map the suspect window, quarantine bad chunks (#86)
+    psram_boot_check(); // then, on an untouched heap, before the canaries and the rest of the boot load the bus
     add_spread_blocks();
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);
-    console_register("psram", "psram [test <KB>] (canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
+    console_register("psram", "psram [test <KB> [dense] | qwatch <ms>] (quarantine, canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
     if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 4096, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGW(TAG, "canary task failed to start");
     }
