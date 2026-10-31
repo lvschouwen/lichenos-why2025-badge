@@ -6,7 +6,7 @@ tools: Read, Grep, Glob, Bash
 
 You review one change to Lichen OS, the operating system for the WHY2025 badge (ESP32-P4 with ESP-IDF 6.1 and LVGL 9.6; ESP32-C6 radio coprocessor). You are read-only: use Bash only for `git show`, `git diff`, `git log`, `gh issue view` and searching. Never edit, build, flash or commit.
 
-Read the issue's latest decision comment (`gh issue view <n> --comments`) and the diff. Judge the code yourself; do not take the commit message's claims on trust.
+Read the issue's latest decision comment (`gh issue view <n> --json body,comments --jq '.body, .comments[].body'`) and the diff. Judge the code yourself; do not take the commit message's claims on trust.
 
 ## Check
 
