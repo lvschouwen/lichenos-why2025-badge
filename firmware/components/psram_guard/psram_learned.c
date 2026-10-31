@@ -56,6 +56,7 @@ void psram_learned_load(void) {
         s_rec           = rec;
         s_from_nvs      = true;
         s_loaded_writes = rec.writes;
+        s_dirty         = psram_learn_seed(&s_rec); // old span-only records: their ends are failures; stored with the next find
     }
 }
 
@@ -148,13 +149,14 @@ void psram_learned_print(void) {
     }
     unsigned span, failed;
     psram_learn_page_counts(&r, &span, &failed);
-    console_reply("psram learned pages: %u of %u 4K pages in the span ever failed, %u never", failed, span, span - failed);
+    console_reply("psram learned pages: %u failed 4K pages in total (the quarantine is these +-4 KB); %u of %u in the lo..hi span",
+                  psram_learn_failed_pages(&r), failed, span);
     static char map[800];
     size_t      n = psram_learn_page_map(&r, map, sizeof(map));
     for (size_t i = 0; i < n; i += 64) {
         console_reply("psram learned map +%03u: %.64s", (unsigned)i, map + i);
     }
-    console_reply("psram learned: 0x%08x..0x%08x (%u KB span), speed %u MHz, NVS writes %u (%u at boot, %u this boot), "
+    console_reply("psram learned: 0x%08x..0x%08x (%u KB extent, statistics only), speed %u MHz, NVS writes %u (%u at boot, %u this boot), "
                   "last widened by %s, %u outliers ignored, loaded from NVS %s",
                   (unsigned)r.lo, (unsigned)r.hi, (unsigned)((r.hi - r.lo + 1) >> 10), (unsigned)r.speed_mhz,
                   (unsigned)r.writes, s_loaded_writes, (unsigned)(r.writes - s_loaded_writes),

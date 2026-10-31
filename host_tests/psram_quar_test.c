@@ -21,15 +21,16 @@ int main(void) {
     // One bad byte: margin each side, rounded outwards to the 4 KB grain
     psram_quar_note(&q, 0x4855BA81u, 0x4855BA81u, 1, 0x100);
     CHECK(q.n == 1);
-    CHECK(q.r[0].lo == 0x4854B000u); // 0x4855BA81 - 64K = 0x4854BA81 -> down 0x4854B000
+    CHECK(q.r[0].lo == 0x4855A000u); // one 4 KB page before the failed page 0x4855B000
+    CHECK(q.r[0].hi == 0x4855D000u - 0u && psram_quar_bytes(&q) == 12 * 1024u); // failed page + one page each side
     CHECK(q.r[0].lo % PSRAM_QUAR_GRAIN == 0 && q.r[0].hi % PSRAM_QUAR_GRAIN == 0);
     CHECK(q.r[0].hi >= 0x4855BA82u + PSRAM_QUAR_MARGIN && q.r[0].hi < 0x4855BA82u + PSRAM_QUAR_MARGIN + PSRAM_QUAR_GRAIN);
     CHECK(q.r[0].first_bad == 0x4855BA81u && q.r[0].bits == 0x100);
 
     // A second find inside the range widens it, bits and counts accumulate
-    psram_quar_note(&q, 0x48562000u, 0x48562003u, 4, 0x1);
-    CHECK(q.n == 1 && q.r[0].last_bad == 0x48562003u && q.r[0].bits == 0x101 && q.r[0].bad_bytes == 5);
-    CHECK(q.r[0].hi >= 0x48562004u + PSRAM_QUAR_MARGIN);
+    psram_quar_note(&q, 0x4855E000u, 0x4855E003u, 4, 0x1);
+    CHECK(q.n == 1 && q.r[0].last_bad == 0x4855E003u && q.r[0].bits == 0x101 && q.r[0].bad_bytes == 5);
+    CHECK(q.r[0].hi >= 0x4855E004u + PSRAM_QUAR_MARGIN);
 
     // Overlap test is half-open
     CHECK(psram_quar_overlaps(&q, q.r[0].lo, 1));
@@ -62,9 +63,19 @@ int main(void) {
         psram_quar_note(&s, at[i], at[i], 1, 1);
         CHECK(s.n <= PSRAM_QUAR_MAX);
     }
-    CHECK(s.n == PSRAM_QUAR_MAX); // six separate finds, four slots: the nearest pair were joined
+    CHECK(s.n == 6); // room for many separate ranges
     for (size_t i = 0; i < sizeof(at) / sizeof(at[0]); i++) {
         CHECK(psram_quar_overlaps(&s, at[i], 1));
+    }
+    // More finds than slots: the table stays at MAX, nothing is dropped
+    psram_quar_t t = {0};
+    for (unsigned i = 0; i < PSRAM_QUAR_MAX + 5; i++) {
+        psram_quar_note(&t, 0x48000000u + i * 0x400000u, 0x48000000u + i * 0x400000u, 1, 1);
+        CHECK(t.n <= PSRAM_QUAR_MAX);
+    }
+    CHECK(t.n == PSRAM_QUAR_MAX);
+    for (unsigned i = 0; i < PSRAM_QUAR_MAX + 5; i++) {
+        CHECK(psram_quar_overlaps(&t, 0x48000000u + i * 0x400000u, 1));
     }
 
     // Near the bottom of the address space: no wrap-around
@@ -72,11 +83,36 @@ int main(void) {
     psram_quar_note(&z, 0x1000u, 0x1000u, 1, 1);
     CHECK(z.r[0].lo == 0);
 
-    // The learned extent of #86 as one range: 64 KB margins, 4 KB grain, about 1.2 MB for the known span
+    // The learned extent of #86 as one range: one-page margins: about 1 MB for the known span
     psram_quar_t l = {0};
     psram_quar_note(&l, 0x48558C01u, 0x48653C01u, 0, 0);
-    CHECK(l.n == 1 && l.r[0].lo == 0x48548000u && l.r[0].hi == 0x48664000u);
-    CHECK(psram_quar_bytes(&l) < 1200 * K && psram_quar_bytes(&l) > 1100 * K);
+    CHECK(l.n == 1 && l.r[0].lo == 0x48557000u && l.r[0].hi == 0x48655000u);
+    CHECK(psram_quar_bytes(&l) == 1016 * K);
+
+    // #86 shape: a dense cluster (pages 0x48558000..0x48612000, every 3rd page) plus one outlier at 0x487FBC01, fed
+    // page by page in ascending order: one range for the cluster, one 12 KB range for the outlier
+    psram_quar_t u = {0};
+    for (uintptr_t a = 0x48558000u; a < 0x48612000u; a += 3 * PSRAM_QUAR_GRAIN) {
+        psram_quar_note(&u, a, a + PSRAM_QUAR_GRAIN - 1, 1, 0x100);
+    }
+    psram_quar_note(&u, 0x487FBC01u, 0x487FBC01u, 1, 0x100);
+    CHECK(u.n == 2);
+    CHECK(u.r[0].lo == 0x48557000u && u.r[0].hi == 0x48611000u);
+    CHECK(u.r[1].lo == 0x487FA000u && u.r[1].hi == 0x487FD000u); // an outlier costs 12 KB
+    // The same cluster with a gap of 4 pages between failed pages stays separate ranges
+    psram_quar_t g = {0};
+    psram_quar_note(&g, 0x48558000u, 0x48558FFFu, 1, 1);
+    psram_quar_note(&g, 0x48558000u + 4 * PSRAM_QUAR_GRAIN, 0x48558FFFu + 4 * PSRAM_QUAR_GRAIN, 1, 1);
+    CHECK(g.n == 2 && psram_quar_bytes(&g) == 24 * K);
+    CHECK(!psram_quar_overlaps(&u, 0x48700000u, 0x10000)); // between them: free again
+    CHECK(psram_quar_overlaps(&u, 0x487FBC01u, 1));
+    // Same set in descending order gives the same ranges
+    psram_quar_t d = {0};
+    psram_quar_note(&d, 0x487FBC01u, 0x487FBC01u, 1, 0x100);
+    for (uintptr_t a = 0x4860F000u; a >= 0x48558000u && a < 0x48612000u; a -= 3 * PSRAM_QUAR_GRAIN) {
+        psram_quar_note(&d, a, a + PSRAM_QUAR_GRAIN - 1, 1, 0x100);
+    }
+    CHECK(d.n == 2 && d.r[0].lo == u.r[0].lo && d.r[0].hi == u.r[0].hi && d.r[1].lo == u.r[1].lo && d.r[1].hi == u.r[1].hi);
 
     if (failures) {
         printf("%d failure(s)\n", failures);

@@ -18,7 +18,7 @@
 #include <string.h>
 
 #define CHUNK       (64u * 1024u)  // scan and grab unit
-#define MAX_HELD    256
+#define MAX_HELD    512
 #define MAX_FAR     1536
 #define MAX_CHUNKS  1024
 #define WIN_LO      0x48400000u // the suspect window of #40: bad bytes near 0x4855BA81, 4 MB check ended at 0x485C0A80
@@ -26,7 +26,7 @@
 #define LINE        128
 #define MAX_ROUNDS  8              // extra rounds over the learned range +- NEAR: the errors are intermittent, more writes find more
 #define BUDGET_US   2800000        // the whole scan stays within about this (Lucas: 2-3 s of boot is fine)
-#define NEAR        (448u * 1024u) // chunks this close to the quarantine (learned range + 64 KB margin) get the extra rounds
+#define NEAR        (448u * 1024u) // chunks this close to the quarantine (failed pages + 4 KB margin) get the extra rounds
 #define PSRAM_CAPS  (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 #define SPARSE_XOR  0xAAAAAAAAu // BadgeVMS' boot test: every 8th word of the PSRAM, address ^ this
 #define MAX_REGIONS 6
@@ -144,11 +144,19 @@ static void scan_chunk(chunk_t *c) {
         uintptr_t flo = (uintptr_t)c->mem + first, fhi = (uintptr_t)c->mem + last;
         s_stat.find_lo = !s_stat.find_hi || flo < s_stat.find_lo ? flo : s_stat.find_lo;
         s_stat.find_hi = fhi > s_stat.find_hi ? fhi : s_stat.find_hi;
-        uint32_t bits = s_stat.xor_or;
-        psram_quar_note(&s_quar, (uintptr_t)c->mem + first, (uintptr_t)c->mem + last, (uint32_t)total, bits);
         ESP_LOGW(TAG, "scan: chunk %p bad: sparse %u, dense %u / %u / %u bytes, extent +%u..+%u", (void *)c->mem,
                  (unsigned)c->bad[0], (unsigned)c->bad[1], (unsigned)c->bad[2], (unsigned)c->bad[3], (unsigned)first,
                  (unsigned)last);
+    }
+}
+
+// The quarantine = every page that ever failed (learned set, includes this boot's finds), +- margin, merged
+static void rebuild_quar(void) {
+    psram_learn_t lr = psram_learned_get();
+    s_quar           = (psram_quar_t){0};
+    uintptr_t page;
+    for (uintptr_t from = 0; psram_learn_next_failed(&lr, from, &page); from = page + PSRAM_PAGE) {
+        psram_quar_note(&s_quar, page, page + PSRAM_PAGE - 1, 1, s_stat.xor_or);
     }
 }
 
@@ -231,6 +239,8 @@ static void touched(uintptr_t base, size_t len, uintptr_t *lo, uintptr_t *hi) {
 // takes its start and the wanted piece follows it. The slop is the heap header and the 128 B alignment: the piece
 // starts at or before the range and ends at or after it; if the heap hands something else, the retry widens the slop
 // and a failure is counted ("pages missing") instead of hidden.
+static void grab_rest(void);
+
 static void split_edge(chunk_t const *c) {
     uintptr_t base = (uintptr_t)c->mem, lo, hi;
     touched(base, CHUNK, &lo, &hi);
@@ -244,14 +254,18 @@ static void split_edge(chunk_t const *c) {
         size_t    want = (end - (base + fill) + LINE - 1) & ~(size_t)(LINE - 1);
         uint8_t  *f    = fill ? heap_caps_aligned_alloc(LINE, fill, PSRAM_CAPS) : NULL;
         uint8_t  *m    = heap_caps_aligned_alloc(LINE, want, PSRAM_CAPS);
-        if (f) {
-            heap_caps_free(f);
-        }
         if (m && (uintptr_t)m <= lo_req && (uintptr_t)m + want >= hi_req) {
             hold(m, want, c);
             s_stat.pages_held++;
+            if (f && s_nfar < MAX_FAR) { // keep the rest of this chunk taken too: the next edge chunk must again be the only free block
+                s_far[s_nfar++] = f;
+            } else {
+                heap_caps_free(f);
+            }
+            grab_rest();
             return;
         }
+        heap_caps_free(f);
         heap_caps_free(m); // free(NULL) is fine
     }
     s_stat.short_pages++;
@@ -329,6 +343,7 @@ static void extra_rounds(int64_t start) {
                 scan_chunk(&s_chunks[i]);
             }
         }
+        rebuild_quar();
         last = esp_timer_get_time() - t0;
         s_stat.rounds++;
     }
@@ -338,10 +353,7 @@ void psram_scan_run(void) {
     int64_t start = esp_timer_get_time();
     size_t  free0 = heap_caps_get_free_size(PSRAM_CAPS);
     psram_learned_load();
-    psram_learn_t lr = psram_learned_get();
-    if (!psram_learn_empty(&lr)) { // quarantine what was learned before looking at anything
-        psram_quar_note(&s_quar, lr.lo, lr.hi, 0, 0);
-    }
+    rebuild_quar(); // quarantine what was learned before looking at anything
     grab_all();
     log_map();
     drop_far();
@@ -350,10 +362,15 @@ void psram_scan_run(void) {
             scan_chunk(&s_chunks[i]);
         }
     }
+    if (s_stat.find_hi) {
+        psram_learned_feed(s_stat.find_lo, s_stat.find_hi, "boot scan");
+    }
+    rebuild_quar();
     extra_rounds(start);
     if (s_stat.find_hi) {
         psram_learned_feed(s_stat.find_lo, s_stat.find_hi, "boot scan");
     }
+    rebuild_quar();
     keep_or_free();
     s_stat.us = esp_timer_get_time() - start;
     ESP_LOGW(TAG, "scan: window %p..%p, %u chunk scans + %u extra rounds in %u ms, %u bad chunks, bad bytes sparse %u dense %u/%u/%u; "
@@ -383,7 +400,7 @@ void psram_scan_print(void) {
     }
     for (size_t i = 0; i < s_quar.n; i++) {
         psram_quar_range_t const *r = &s_quar.r[i];
-        console_reply("psram quarantine %u: %p..%p (%u KB), bad bytes %p..%p (%u seen), bits %08x", (unsigned)i,
+        console_reply("psram quarantine %u: %p..%p (%u KB), failed pages %p..%p (%u), bits %08x", (unsigned)i,
                       (void *)r->lo, (void *)r->hi, (unsigned)((r->hi - r->lo) >> 10), (void *)r->first_bad,
                       (void *)r->last_bad, (unsigned)r->bad_bytes, (unsigned)r->bits);
     }
@@ -392,8 +409,8 @@ void psram_scan_print(void) {
         held += s_held[i].len;
     }
     psram_learned_print();
-    console_reply("psram quarantine: %u KB in ranges, %u KB held in %u pieces (%u edge pieces, %u missing)",
-                  (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)(held >> 10), (unsigned)s_nheld,
+    console_reply("psram quarantine: %u ranges, total %u KB, %u KB held in %u pieces (%u edge pieces, %u missing)",
+                  (unsigned)s_quar.n, (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)(held >> 10), (unsigned)s_nheld,
                   (unsigned)s_stat.pages_held, (unsigned)s_stat.short_pages);
     for (size_t i = 0; i < s_nheld; i++) {
         size_t t = s_held[i].bad[0] + s_held[i].bad[1] + s_held[i].bad[2] + s_held[i].bad[3];

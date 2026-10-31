@@ -8,6 +8,8 @@ bool psram_learn_empty(psram_learn_t const *r) {
     return r->lo > r->hi;
 }
 
+static bool page_index(uintptr_t addr, unsigned *idx);
+
 static bool in_psram(uintptr_t a) {
     return a >= PSRAM_ADDR_MIN && a < PSRAM_ADDR_END;
 }
@@ -16,7 +18,7 @@ bool psram_learn_usable(psram_learn_t const *r, size_t size, unsigned speed_mhz)
     if (size != sizeof(*r) || r->version != PSRAM_LEARN_VERSION || r->speed_mhz != speed_mhz) {
         return false;
     }
-    return psram_learn_empty(r) || (in_psram(r->lo) && in_psram(r->hi) && r->hi - r->lo < PSRAM_LEARN_MAX_SPAN);
+    return psram_learn_empty(r) || (in_psram(r->lo) && in_psram(r->hi));
 }
 
 psram_learn_result_t psram_learn_note(psram_learn_t *r, uintptr_t lo, uintptr_t hi) {
@@ -25,11 +27,14 @@ psram_learn_result_t psram_learn_note(psram_learn_t *r, uintptr_t lo, uintptr_t 
     }
     uintptr_t nlo = psram_learn_empty(r) || lo < r->lo ? lo : r->lo;
     uintptr_t nhi = psram_learn_empty(r) || hi > r->hi ? hi : r->hi;
-    if (nhi - nlo >= PSRAM_LEARN_MAX_SPAN) {
-        return PSRAM_LEARN_OUTLIER;
-    }
+    bool paged = psram_learn_mark_page(r, lo);
+    paged |= psram_learn_mark_page(r, hi);
     if (!psram_learn_empty(r) && nlo == r->lo && nhi == r->hi) {
-        return PSRAM_LEARN_SAME;
+        if (!paged) {
+            return PSRAM_LEARN_SAME;
+        }
+        r->writes++;
+        return PSRAM_LEARN_GREW;
     }
     r->lo = (uint32_t)nlo;
     r->hi = (uint32_t)nhi;
@@ -80,6 +85,34 @@ size_t psram_learn_page_map(psram_learn_t const *r, char *out, size_t cap) {
     }
     if (cap) {
         out[n] = 0;
+    }
+    return n;
+}
+
+bool psram_learn_seed(psram_learn_t *r) {
+    if (psram_learn_empty(r)) {
+        return false;
+    }
+    bool changed = psram_learn_mark_page(r, r->lo);
+    changed |= psram_learn_mark_page(r, r->hi);
+    return changed;
+}
+
+bool psram_learn_next_failed(psram_learn_t const *r, uintptr_t from, uintptr_t *page) {
+    uintptr_t a = from < PSRAM_MAP_BASE ? PSRAM_MAP_BASE : from & ~(uintptr_t)(PSRAM_PAGE - 1);
+    for (unsigned i; page_index(a, &i); a += PSRAM_PAGE) {
+        if (r->pages[i / 8] >> (i % 8) & 1) {
+            *page = a;
+            return true;
+        }
+    }
+    return false;
+}
+
+unsigned psram_learn_failed_pages(psram_learn_t const *r) {
+    unsigned n = 0;
+    for (unsigned i = 0; i < PSRAM_MAP_PAGES; i++) {
+        n += r->pages[i / 8] >> (i % 8) & 1;
     }
     return n;
 }
