@@ -18,6 +18,7 @@
 #include "wifi_join.h"
 #include "wifi_list.h"
 #include "nvs.h"
+#include "driver/gpio.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -709,6 +710,20 @@ static void cmd_c6(char const *args) {
     system_restart("C6 reflash requested");
 }
 
+// P4 GPIO13 is the C6 GPIO9 strap: low at a reset means download mode. esp_hosted now resets the C6 through EN (GPIO12), so
+// the strap has to be high first, on every path (the flasher may have bailed out early, #2). The level is set before the
+// pin becomes an output so it never glitches low.
+static void hold_c6_boot_high(void) {
+    gpio_set_level(GPIO_NUM_13, 1);
+    gpio_config_t io = {
+        .pin_bit_mask = 1ULL << GPIO_NUM_13,
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_ENABLE,
+    };
+    gpio_config(&io);
+    gpio_set_level(GPIO_NUM_13, 1);
+}
+
 bool c6link_start(void) {
     console_register("c6log", "c6log [ms] (copy the C6's console into the log)", cmd_c6log);
     console_register("c6", "c6 reflash", cmd_c6);
@@ -729,6 +744,7 @@ bool c6link_start(void) {
         ESP_LOGE(TAG, "C6 image check: %s (going on with what the C6 has)", esp_err_to_name(err));
     }
     // The C6 was reset into its application by the flasher; only now may ESP-Hosted talk to it
+    hold_c6_boot_high();
     if (esp_hosted_init() != 0 || esp_hosted_connect_to_slave() != 0) {
         ESP_LOGE(TAG, "no connection to the C6 over ESP-Hosted");
         boot_progress_end(BOOT_C6, STEP_FAILED, "no ESP-Hosted link");
