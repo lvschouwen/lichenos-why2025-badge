@@ -435,14 +435,18 @@ cmd_ota_assets() {
 }
 
 # GET /screenshot (#30): a 16-bit BMP of the screen, converted to PNG with python3-pil
+work=
 cmd_screenshot() {
-    local ip=$1 out=${2:-} work
+    local ip=$1 out=${2:-}
     umask 077 # the picture can show private messages: nobody else reads it
     work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-shot.XXXXXX")
-    # shellcheck disable=SC2064
-    trap "rm -f '$work/shot.bmp'; rmdir '$work' 2>/dev/null" EXIT # the dir stays when it holds the default PNG
+    trap 'rm -f "$work/shot.bmp"; rmdir "$work" 2>/dev/null' EXIT # the dir stays when it holds the default PNG
     [ -n "$out" ] || out=$work/screenshot.png
-    ota_curl --max-time 30 -o "$work/shot.bmp" "http://$ip:$OTA_PORT/screenshot" || exit 1
+    if ! ota_curl --max-time 30 -o "$work/shot.bmp" "http://$ip:$OTA_PORT/screenshot"; then
+        head -c 300 "$work/shot.bmp" 2>/dev/null | tr -d '\000' >&2 # --fail-with-body: the badge's reason is in the file
+        echo >&2
+        exit 1
+    fi
     python3 -I - "$work/shot.bmp" "$out" <<'PY' || exit 1
 import sys
 from PIL import Image

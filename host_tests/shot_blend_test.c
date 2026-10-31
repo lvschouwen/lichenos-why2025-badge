@@ -9,7 +9,7 @@ static int failures;
 #define CHECK(cond)                                                                                                    \
     do {                                                                                                               \
         if (!(cond)) {                                                                                                 \
-            printf("FAIL %s:%d: %s\\n", __FILE__, __LINE__, #cond);                                                     \
+            printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                                                     \
             failures++;                                                                                                \
         }                                                                                                              \
     } while (0)

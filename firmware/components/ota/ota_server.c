@@ -47,6 +47,7 @@
 #define BODY_GRACE_S    30
 #define SHOT_SLICE      (16 * 1024) // bytes per write of a screenshot, straight from its PSRAM buffer
 #define SHOT_SEND_S     10
+#define SHOT_TOTAL_S    45 // whole send: a client that drips bytes must not hold the one server task and the buffer
 // Flash writes happen on this task, so its stack must be in internal RAM; peaks measured in BadgeVMS: 7 KB
 #define SERVER_STACK    16384
 
@@ -695,7 +696,11 @@ static void handle_screenshot(int fd) {
                           "Connection: close\r\n\r\n",
                           (unsigned)size);
         bool ok = send_all(fd, reply, (size_t)n) && send_all(fd, head, sizeof(head));
+        long stop = now_s() + SHOT_TOTAL_S;
         for (size_t off = 0, total = row * h; ok && off < total; off += SHOT_SLICE) {
+            if (now_s() > stop) {
+                break;
+            }
             ok = send_all(fd, pixels + off, total - off < SHOT_SLICE ? total - off : SHOT_SLICE);
         }
     }

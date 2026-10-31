@@ -18,9 +18,12 @@ static bool blend_child(lv_obj_t *child, uint8_t *dst, uint32_t w, uint32_t h, u
         return true;
     }
     lv_obj_update_layout(child);
+    if (lv_obj_get_width(child) <= 0 || lv_obj_get_height(child) <= 0) {
+        return true; // nothing to draw
+    }
     lv_draw_buf_t *buf = lv_snapshot_create_draw_buf(child, LV_COLOR_FORMAT_ARGB8888);
     if (!buf) {
-        return true; // zero-sized
+        return false; // out of memory: a 200 without this child (the status bar, say) would lie
     }
     lv_draw_buf_clear(buf, NULL); // an opaque child leaves its rounded corners untouched
     bool ok = lv_snapshot_take_to_draw_buf(child, LV_COLOR_FORMAT_ARGB8888, buf) == LV_RESULT_OK;
