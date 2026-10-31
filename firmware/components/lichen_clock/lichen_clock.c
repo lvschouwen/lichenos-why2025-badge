@@ -3,6 +3,7 @@
 #include <time.h>
 
 static clock_sync_info_t info;
+static clock_guard_t     guard;
 
 int64_t clock_build_epoch(void) {
     return LICHEN_BUILD_EPOCH;
@@ -21,9 +22,10 @@ static int64_t mono_ms(void) {
 clock_verdict_t clock_offer_sntp(struct timeval const *tv) {
     struct timeval cur;
     gettimeofday(&cur, NULL);
-    clock_verdict_t v = clock_check((int64_t)tv->tv_sec, (int64_t)cur.tv_sec, LICHEN_BUILD_EPOCH, info.synced);
+    clock_verdict_t v =
+        clock_check_guarded(&guard, (int64_t)tv->tv_sec, (int64_t)cur.tv_sec, LICHEN_BUILD_EPOCH, info.synced);
     info.last_verdict = v;
-    if (v != CLOCK_OK) {
+    if (!clock_accepted(v)) {
         info.refused++;
         return v;
     }
@@ -33,7 +35,7 @@ clock_verdict_t clock_offer_sntp(struct timeval const *tv) {
     info.synced            = true;
     info.last_good_s       = (int64_t)tv->tv_sec;
     info.last_good_mono_ms = info.step_mono_ms;
-    return CLOCK_OK;
+    return v;
 }
 
 clock_sync_info_t clock_sync_info(void) {

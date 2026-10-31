@@ -16,7 +16,7 @@ extern "C" {
 bool    clock_is_set(void);
 int64_t clock_build_epoch(void);
 
-// SNTP offers a time. Sets the system clock and returns CLOCK_OK, or leaves it alone and says why. Records the step.
+// SNTP offers a time. Sets the system clock and returns CLOCK_OK or CLOCK_RECOVERED (see clock_accepted()), or leaves it alone and says why. Records the step.
 clock_verdict_t clock_offer_sntp(struct timeval const *tv);
 
 typedef struct {

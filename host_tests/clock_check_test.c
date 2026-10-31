@@ -47,7 +47,38 @@ int main(void) {
     // 2038: 64-bit arithmetic does not wrap
     CHECK(clock_check(2147483647LL + 5, 2147483647LL, 2147483000LL, true) == CLOCK_OK);
 
-    for (int v = CLOCK_OK; v <= CLOCK_BIG_STEP; v++) {
+    // lock-in recovery: 3 agreeing big steps are believed, a lone rogue answer is not
+    {
+        clock_guard_t g = {0, 0};
+        int64_t       now = B + 1000, bad = 3600; // the clock holds a wrong first answer, the truth is an hour on
+        CHECK(clock_check_guarded(&g, now + bad, now, B, true) == CLOCK_BIG_STEP);
+        CHECK(clock_check_guarded(&g, now + bad + 5, now, B, true) == CLOCK_BIG_STEP);
+        CHECK(clock_check_guarded(&g, now + bad - 20, now, B, true) == CLOCK_RECOVERED);
+        CHECK(g.count == 0);
+        // a rogue answer between normal ones never gets there
+        CHECK(clock_check_guarded(&g, now + bad, now, B, true) == CLOCK_BIG_STEP);
+        CHECK(clock_check_guarded(&g, now + 1, now, B, true) == CLOCK_OK); // small step resets
+        CHECK(clock_check_guarded(&g, now + bad, now, B, true) == CLOCK_BIG_STEP);
+        CHECK(clock_check_guarded(&g, now + bad, now, B, true) == CLOCK_BIG_STEP);
+        CHECK(clock_check_guarded(&g, now + 1, now, B, true) == CLOCK_OK);
+        // disagreeing answers never add up
+        clock_guard_t d = {0, 0};
+        for (int i = 0; i < 10; i++) {
+            CHECK(clock_check_guarded(&d, now + 3600 + i * 200, now, B, true) == CLOCK_BIG_STEP);
+        }
+        // an implausible answer (outside the window) resets and is never recovered
+        clock_guard_t w = {0, 0};
+        CHECK(clock_check_guarded(&w, now + bad, now, B, true) == CLOCK_BIG_STEP);
+        CHECK(clock_check_guarded(&w, 5, now, B, true) == CLOCK_TOO_OLD);
+        CHECK(clock_check_guarded(&w, now + bad, now, B, true) == CLOCK_BIG_STEP);
+        CHECK(clock_check_guarded(&w, now + bad, now, B, true) == CLOCK_BIG_STEP);
+        // before the first sync nothing is a big step
+        clock_guard_t u = {0, 0};
+        CHECK(clock_check_guarded(&u, now + bad, 0, B, false) == CLOCK_OK);
+        CHECK(clock_accepted(CLOCK_OK) && clock_accepted(CLOCK_RECOVERED) && !clock_accepted(CLOCK_BIG_STEP));
+    }
+
+    for (int v = CLOCK_OK; v <= CLOCK_RECOVERED; v++) {
         CHECK(clock_verdict_text((clock_verdict_t)v)[0] != '?');
     }
     if (failures) {

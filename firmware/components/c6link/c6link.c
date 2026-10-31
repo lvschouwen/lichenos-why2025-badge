@@ -201,11 +201,14 @@ static void on_time_sync(struct timeval *tv) {
 // would be too late (#8). This one checks the answer first: an implausible or far-off time is logged and ignored.
 void sntp_sync_time(struct timeval *tv) {
     clock_verdict_t v = clock_offer_sntp(tv);
-    if (v != CLOCK_OK) {
+    if (!clock_accepted(v)) {
         ESP_LOGW(TAG, "SNTP time %lld ignored: %s", (long long)tv->tv_sec, clock_verdict_text(v));
         return;
     }
     clock_sync_info_t info = clock_sync_info();
+    if (v == CLOCK_RECOVERED) {
+        ESP_LOGW(TAG, "SNTP: %s, clock moved", clock_verdict_text(v));
+    }
     ESP_LOGW(TAG, "SNTP step %+lld ms after %lld s uptime", (long long)info.step_ms,
              (long long)(info.step_mono_ms / 1000));
     sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
