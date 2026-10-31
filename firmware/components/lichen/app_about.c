@@ -86,7 +86,10 @@ static void refresh(lv_timer_t *timer) {
     time_t    now = time(NULL);
     struct tm local;
     if (clock_is_set() && localtime_r(&now, &local)) {
-        strftime(text, sizeof(text), "%Y-%m-%d %H:%M", &local);
+        size_t n = strftime(text, sizeof(text), "%Y-%m-%d %H:%M", &local);
+        char   src[48];
+        clock_source_text(src, sizeof(src)); // where the time came from (#83)
+        snprintf(text + n, sizeof(text) - n, ", %s", src);
     } else {
         strlcpy(text, "not set", sizeof(text));
     }

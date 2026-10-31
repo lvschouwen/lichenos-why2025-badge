@@ -39,8 +39,13 @@ int main(void) {
     // the clock gate (#8): adverts refused, messages hinted, while the clock is not set
     CHECK(mesh_advert_refusal(false) && strstr(mesh_advert_refusal(false), "clock not set"));
     CHECK(mesh_advert_refusal(true) == NULL);
-    CHECK(mesh_clock_hint(false) && strstr(mesh_clock_hint(false), "Clock not set"));
-    CHECK(mesh_clock_hint(true) == NULL);
+    CHECK(mesh_clock_hint(false, false) && strstr(mesh_clock_hint(false, false), "Clock not set"));
+    CHECK(mesh_clock_hint(false, true) && strstr(mesh_clock_hint(false, true), "Clock not set"));
+    CHECK(mesh_clock_hint(true, false) == NULL);
+    // #83: a clock set from mesh contacts only is approximate: adverts go out, with a note; the composer says so
+    CHECK(mesh_clock_hint(true, true) && strstr(mesh_clock_hint(true, true), "mesh contacts, unverified"));
+    CHECK(mesh_advert_note(true) && strstr(mesh_advert_note(true), "approximate"));
+    CHECK(mesh_advert_note(false) == NULL);
     CHECK(mesh_compose_status("", 10, c, sizeof(c)) == 0 && strcmp(c, "0 / 10 bytes") == 0);
     CHECK(mesh_compose_status("hello", 10, c, sizeof(c)) == 5 && strcmp(c, "5 / 10 bytes") == 0);
     CHECK(mesh_compose_status("0123456789", 10, c, sizeof(c)) == 10 && strcmp(c, "10 / 10 bytes") == 0);

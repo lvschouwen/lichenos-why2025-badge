@@ -39,7 +39,7 @@ public:
     void        attachDynamicPrefs(KeyValueStore *prefs) {} // as ESP32Board: no board prefs
 };
 
-// MeshCore's clock: the system's real time once it has one (SNTP over Wi-Fi, or the app setting it), else MeshCore's
+// MeshCore's clock: the system's real time once it has one (SNTP over Wi-Fi, or the app proposing it), else MeshCore's
 // default start (May 2024) plus uptime. Other nodes drop adverts that aren't newer than the last they saw, so a
 // clock that starts over at every boot would silence the badge after a reboot (#65).
 class BadgeRtc : public mesh::RTCClock {
@@ -50,12 +50,10 @@ public:
     }
     void setCurrentTime(uint32_t t) override {
         struct timeval tv = {(time_t)t, 0};
-        // same bounds as SNTP (#8), and never backwards: MeshCore's boot bootstrap from the newest contact would
-        // rewind a clock the reset carried over by however long ago that contact was heard (#82)
-        if (clock_accept_app_set((int64_t)t, (int64_t)time(NULL), clock_build_epoch())) {
-            settimeofday(&tv, NULL);
-        } // may be refused (host tests): the fallback below still follows the app
-        base_ = t - (uint32_t)(millis() / 1000);
+        // the OS decides (#83): plausible, forward only (MeshCore's boot bootstrap from the newest contact would rewind
+        // a clock the reset carried over, #82), and never over SNTP or a time set by hand
+        clock_propose(CLOCK_SRC_APP, &tv);
+        base_ = t - (uint32_t)(millis() / 1000); // may be refused (host tests): the fallback below still follows the app
     }
 
 private:

@@ -44,6 +44,13 @@ static void cmd_clock(char const *args) {
     console_reply("carried at boot: %lld s (clock after %lld ms uptime), RTC counter %.1f s", (long long)carried_s,
                   (long long)carried_up_ms, (double)rtc_boot_us / 1e6);
     console_reply("clock: %s, build epoch %lld", clock_is_set() ? "set" : "not set", (long long)clock_build_epoch());
+    char from[48];
+    clock_source_text(from, sizeof(from));
+    if (i.source > CLOCK_SRC_RTC) { // #83
+        console_reply("source: %s (set at %lld s uptime)", from, (long long)(i.source_mono_ms / 1000));
+    } else {
+        console_reply("source: %s", from);
+    }
     if (i.synced) {
         double ppm = i.step_mono_ms ? (double)i.step_ms * 1e6 / (double)i.step_mono_ms : 0;
         console_reply("now %lld; SNTP answer %lld at %lld ms uptime, clock before it %lld", (long long)time(NULL),

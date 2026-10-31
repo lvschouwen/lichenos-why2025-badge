@@ -105,8 +105,15 @@ char const *mesh_advert_refusal(bool clock_set) {
     return clock_set ? NULL : "clock not set";
 }
 
-char const *mesh_clock_hint(bool clock_set) {
-    return clock_set ? NULL : "Clock not set, others see a wrong time    Enter: send    Esc: back";
+char const *mesh_clock_hint(bool clock_set, bool approximate) {
+    if (!clock_set) {
+        return "Clock not set, others see a wrong time    Enter: send    Esc: back";
+    }
+    return approximate ? "Clock from mesh contacts, unverified    Enter: send    Esc: back" : NULL;
+}
+
+char const *mesh_advert_note(bool approximate) {
+    return approximate ? "approximate clock" : NULL;
 }
 
 size_t mesh_compose_status(char const *text, size_t max_bytes, char *out, size_t cap) {

@@ -13,5 +13,8 @@ endif()
 
 idf_component_register(SRCS "clock_check.c" "lichen_clock.c" "clock_cmd.c"
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES fw_console esp_hw_support esp_timer)
+                       PRIV_REQUIRES fw_console esp_hw_support esp_timer log pthread)
+# lichen_clock is the only settimeofday() caller (#83): every other call lands in __wrap_settimeofday (lichen_clock.c),
+# which logs the caller (log-only until the App API boundary work, #84, makes it refuse)
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=settimeofday")
 target_compile_definitions(${COMPONENT_LIB} PRIVATE LICHEN_BUILD_EPOCH=${build_epoch}LL)

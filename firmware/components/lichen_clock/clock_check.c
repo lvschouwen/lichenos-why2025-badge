@@ -1,14 +1,9 @@
 #include "clock_check.h"
 
+#include <stdio.h>
+
 bool clock_in_window(int64_t t, int64_t build_epoch) {
     return t >= build_epoch - CLOCK_BELOW_BUILD_S && t <= build_epoch + CLOCK_ABOVE_BUILD_S;
-}
-
-bool clock_accept_app_set(int64_t cand, int64_t now, int64_t build_epoch) {
-    if (!clock_in_window(cand, build_epoch)) {
-        return false;
-    }
-    return !clock_in_window(now, build_epoch) || cand > now;
 }
 
 clock_verdict_t clock_check(int64_t cand, int64_t now, int64_t build_epoch, bool synced) {
@@ -53,6 +48,24 @@ clock_verdict_t clock_check_guarded(clock_guard_t *g, int64_t cand, int64_t now,
     return CLOCK_BIG_STEP;
 }
 
+clock_verdict_t clock_decide(clock_src_t cur, clock_src_t src, clock_guard_t *g, int64_t cand, int64_t now,
+                             int64_t build_epoch, int64_t mono_s) {
+    if (src < CLOCK_SRC_APP || src > CLOCK_SRC_SNTP) {
+        return CLOCK_NO_SOURCE;
+    }
+    if (src < cur) {
+        return CLOCK_OUTRANKED;
+    }
+    if (src == CLOCK_SRC_SNTP) {
+        return clock_check_guarded(g, cand, now, build_epoch, cur == CLOCK_SRC_SNTP, mono_s);
+    }
+    clock_verdict_t v = clock_check(cand, now, build_epoch, false);
+    if (v != CLOCK_OK || src == CLOCK_SRC_MANUAL) {
+        return v;
+    }
+    return clock_in_window(now, build_epoch) && cand <= now ? CLOCK_NOT_FORWARD : CLOCK_OK;
+}
+
 char const *clock_verdict_text(clock_verdict_t v) {
     switch (v) {
         case CLOCK_OK: return "ok";
@@ -60,6 +73,34 @@ char const *clock_verdict_text(clock_verdict_t v) {
         case CLOCK_TOO_NEW: return "too far in the future";
         case CLOCK_BIG_STEP: return "jump too big after a sync";
         case CLOCK_RECOVERED: return "big step confirmed by repeated answers";
+        case CLOCK_OUTRANKED: return "a better source set the clock";
+        case CLOCK_NOT_FORWARD: return "would move the clock backwards";
+        case CLOCK_NO_SOURCE: return "not a source that sets the clock";
     }
     return "?";
+}
+
+char const *clock_src_text(clock_src_t s) {
+    switch (s) {
+        case CLOCK_SRC_NONE: return "not set";
+        case CLOCK_SRC_RTC: return "carried over the restart";
+        case CLOCK_SRC_APP: return "from mesh contacts, unverified";
+        case CLOCK_SRC_MANUAL: return "set by hand";
+        case CLOCK_SRC_SNTP: return "SNTP";
+    }
+    return "?";
+}
+
+void clock_src_line(clock_src_t s, int64_t age_s, char *out, size_t cap) {
+    if (s != CLOCK_SRC_SNTP) {
+        snprintf(out, cap, "%s", clock_src_text(s));
+    } else if (age_s < 60) {
+        snprintf(out, cap, "SNTP, just now");
+    } else if (age_s < 3600) {
+        snprintf(out, cap, "SNTP, %lld min ago", (long long)(age_s / 60));
+    } else if (age_s < 86400) {
+        snprintf(out, cap, "SNTP, %lld h ago", (long long)(age_s / 3600));
+    } else {
+        snprintf(out, cap, "SNTP, %lld d ago", (long long)(age_s / 86400));
+    }
 }

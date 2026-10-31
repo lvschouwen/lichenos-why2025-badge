@@ -1204,7 +1204,13 @@ static void cmd_advert(char const *args) {
         console_reply("advert not sent: %s (other nodes would drop it)", why);
         return;
     }
-    console_reply(mesh_send_advert() ? "advert queued" : "advert not sent");
+    if (!mesh_send_advert()) {
+        console_reply("advert not sent");
+    } else if (char const *note = mesh_advert_note(clock_is_approximate())) {
+        console_reply("advert queued (%s: %s)", note, clock_src_text(CLOCK_SRC_APP)); // allowed, but said (#83)
+    } else {
+        console_reply("advert queued");
+    }
 }
 
 static bool         radio_known;

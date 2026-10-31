@@ -132,9 +132,10 @@ static void set_note(char const *text, bool error) {
     note_error = error;
 }
 
-// The usual line under the composer; the clock hint takes its place while the clock is not set (#8)
+// The usual line under the composer; the clock hint takes its place while the clock is not set (#8) or only
+// approximate (#83)
 static void set_default_note(void) {
-    char const *clock = mesh_clock_hint(clock_is_set());
+    char const *clock = mesh_clock_hint(clock_is_set(), clock_is_approximate());
     set_note(clock ? clock : (dm_mode ? HINT_DM : HINT_CHANNEL), false);
 }
 

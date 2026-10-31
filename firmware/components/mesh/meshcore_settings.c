@@ -273,7 +273,8 @@ static void page_channels_refresh(void) {
 
 static void advert_done(job_t *job) {
     if (advert_row) {
-        menu_set_value(advert_row, job->ok ? "advert queued" : "not sent");
+        char const *note = mesh_advert_note(clock_is_approximate()); // allowed, but say so (#83)
+        menu_set_value(advert_row, !job->ok ? "not sent" : note ? "queued, approximate clock" : "advert queued");
     }
 }
 
