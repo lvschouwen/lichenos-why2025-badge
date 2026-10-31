@@ -14,6 +14,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs.h"
+#include "nvs_flash.h"
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -345,6 +346,14 @@ void        __wrap_esp_restart(void) {
         record_restart("unknown caller", (uint32_t)(uintptr_t)__builtin_return_address(0));
     }
     __real_esp_restart();
+}
+
+// Log-only for now (#84): the app's DataStore is built with nvs_flash_erase renamed, so any caller seen here is new
+extern esp_err_t __real_nvs_flash_erase(void);
+esp_err_t        __wrap_nvs_flash_erase(void);
+esp_err_t        __wrap_nvs_flash_erase(void) {
+    ESP_LOGW("nvs", "nvs_flash_erase called, caller %p", __builtin_return_address(0));
+    return __real_nvs_flash_erase();
 }
 
 void system_restart(char const *why) {

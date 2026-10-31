@@ -1,7 +1,7 @@
 #include "lora_radio.h"
 
 #include "esp_log.h"
-#include "esp_random.h"
+#include "lichen_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
@@ -84,7 +84,7 @@ void LoraRadio::setParams(float freq_mhz, float bw_khz, uint8_t sf, uint8_t cr) 
 }
 
 uint32_t LoraRadio::getRngSeed() {
-    return esp_random();
+    return lichen_random_u32();
 }
 
 bool LoraRadio::startSendRaw(uint8_t const *bytes, int len) {

@@ -19,12 +19,11 @@
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/TxtDataHelpers.h>
 
-#include "bootloader_random.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_random.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "lichen_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -56,7 +55,7 @@ extern "C" unsigned long millis(void) {
     return (unsigned long)(esp_timer_get_time() / 1000);
 }
 extern "C" void shim_fill_random(void *buf, size_t len) {
-    esp_fill_random(buf, len);
+    lichen_random_fill(buf, len);
 }
 extern "C" void delay(unsigned long ms) {
     vTaskDelay(pdMS_TO_TICKS(ms));
@@ -68,7 +67,7 @@ extern "C" uint32_t mesh_uptime_s(void) {
 
 class EspRng : public mesh::RNG {
 public:
-    void random(uint8_t *dest, size_t sz) override { esp_fill_random(dest, sz); }
+    void random(uint8_t *dest, size_t sz) override { lichen_random_fill(dest, sz); }
 };
 
 // What target.h leaves to the platform
@@ -88,7 +87,7 @@ bool radio_init() {
     return true;
 }
 uint32_t radio_get_rng_seed() {
-    return esp_random();
+    return lichen_random_u32();
 }
 void radio_set_params(float freq, float bw, uint8_t sf, uint8_t cr) {
     radio_driver.setParams(freq, bw, sf, cr);
@@ -96,12 +95,10 @@ void radio_set_params(float freq, float bw, uint8_t sf, uint8_t cr) {
 void radio_set_tx_power(uint8_t dbm) {
     radio_driver.setTxPower((int8_t)dbm);
 }
-// A new key pair, with the entropy source on: the P4 has no radio of its own for esp_random() to draw on
+// A new key pair; the OS keeps the entropy source on (lichen_random.h)
 mesh::LocalIdentity radio_new_identity() {
     EspRng rng;
-    bootloader_random_enable();
     mesh::LocalIdentity id(&rng);
-    bootloader_random_disable();
     return id;
 }
 

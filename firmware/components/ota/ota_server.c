@@ -4,7 +4,6 @@
 // anything touches flash: flash writes while the network is receiving corrupted the stream on this badge (#40).
 #include "ota_server.h"
 
-#include "bootloader_random.h"
 #include "c6_paths.h"
 #include "c6link.h"
 #include "console_cmd.h" // CONSOLE_CMD_MAX
@@ -16,7 +15,7 @@
 #include "assets_fmt.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
-#include "esp_random.h"
+#include "lichen_random.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -1111,12 +1110,9 @@ static bool load_or_create_token(void) {
             return true;
         }
     }
-    // The P4 has no radio of its own, so the RNG only draws on real entropy while the ADC source is on. The token
-    // guards firmware installs: it must not be predictable.
+    // The token guards firmware installs: it must not be predictable (lichen_random keeps the entropy source on)
     uint8_t raw[OTA_TOKEN_LEN / 2];
-    bootloader_random_enable();
-    esp_fill_random(raw, sizeof(raw));
-    bootloader_random_disable();
+    lichen_random_fill(raw, sizeof(raw));
     ota_hex(raw, sizeof(raw), token);
     f = fopen(TOKEN_FILE, "w");
     if (!f) {
