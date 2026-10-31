@@ -61,7 +61,9 @@ IRAM_ATTR uint32_t __wrap_mspi_timing_psram_select_best_tuning_delayline(const v
 typedef struct {
     bool     ran;
     size_t   bytes;
-    size_t   bad_bytes;
+    size_t   bad_bytes;  // both passes
+    size_t   bad_plain;  // pattern pass only
+    size_t   bad_inv;    // inverted pass only
     size_t   bit_flips;
     size_t   first_bad;
     uint32_t first_xor;
@@ -86,6 +88,27 @@ static void line_flush(uint8_t *mem, size_t len) {
 }
 
 // Dense: every byte of the block written and read back as pattern and as its inverse, from the RAM (cache dropped)
+static void dense_run(uint8_t *mem, size_t len, verify_t *v) {
+    static uint32_t const masks[2] = {0, 0xFFFFFFFFu};
+    int64_t               start    = esp_timer_get_time();
+    *v                             = (verify_t){0};
+    for (int m = 0; m < 2; m++) {
+        psram_pattern_fill_x(mem, len, (uintptr_t)mem, masks[m]);
+        line_flush(mem, len);
+        psram_check_t r = psram_pattern_check_x(mem, len, (uintptr_t)mem, masks[m]);
+        if (r.bad_bytes && !v->bad_bytes) {
+            v->first_bad = r.first_bad;
+            v->first_xor = r.first_xor;
+        }
+        v->bad_bytes += r.bad_bytes;
+        v->bit_flips += r.bit_flips;
+        *(m ? &v->bad_inv : &v->bad_plain) = r.bad_bytes;
+    }
+    v->us    = esp_timer_get_time() - start;
+    v->bytes = len;
+    v->ran   = true;
+}
+
 static void dense_check(void) {
     size_t   len = CHECK_BYTES;
     uint8_t *mem = heap_caps_aligned_alloc(LINE, len, PSRAM_CAPS);
@@ -97,23 +120,22 @@ static void dense_check(void) {
         ESP_LOGW(TAG, "boot check: no PSRAM block for the dense check");
         return;
     }
-    int64_t start = esp_timer_get_time();
-    static uint32_t const masks[2] = {0, 0xFFFFFFFFu};
-    for (int m = 0; m < 2; m++) {
-        uint32_t mask = masks[m];
-        psram_pattern_fill_x(mem, len, (uintptr_t)mem, mask);
-        line_flush(mem, len);
-        psram_check_t r = psram_pattern_check_x(mem, len, (uintptr_t)mem, mask);
-        if (r.bad_bytes && !s_verify.bad_bytes) {
-            s_verify.first_bad = r.first_bad;
-            s_verify.first_xor = r.first_xor;
-        }
-        s_verify.bad_bytes += r.bad_bytes;
-        s_verify.bit_flips += r.bit_flips;
+    dense_run(mem, len, &s_verify);
+    heap_caps_free(mem);
+}
+
+// "fw psram test <KB> dense": the boot check on demand, with the bad bytes per pass
+void psram_boot_dense_test(unsigned kb) {
+    uint8_t *mem = heap_caps_aligned_alloc(LINE, (size_t)kb * 1024, PSRAM_CAPS);
+    if (!mem) {
+        console_reply("psram dense test: no PSRAM for %u KB", kb);
+        return;
     }
-    s_verify.us    = esp_timer_get_time() - start;
-    s_verify.bytes = len;
-    s_verify.ran   = true;
+    verify_t v;
+    dense_run(mem, (size_t)kb * 1024, &v);
+    console_reply("psram dense test %u KB at %p: pattern %u bad bytes, inverted %u bad bytes, %u single-bit words, first bad +%u xor %08x, %u ms",
+                  kb, (void *)mem, (unsigned)v.bad_plain, (unsigned)v.bad_inv, (unsigned)v.bit_flips, (unsigned)v.first_bad,
+                  (unsigned)v.first_xor, (unsigned)(v.us / 1000));
     heap_caps_free(mem);
 }
 
@@ -132,8 +154,8 @@ void psram_boot_check(void) {
     ESP_LOGW(TAG, "tuning regs: phase id %u, dqs delay %u, data delay %u", ph, dqs, data);
     dense_check();
     s_bad = psram_boot_verdict(&s_tuning, s_verify.bad_bytes, s_why, sizeof(s_why));
-    ESP_LOGW(TAG, "boot check: %u KB dense (pattern + inverted), %u bad bytes (%u single-bit words), %u ms: %s%s%s",
-             (unsigned)(s_verify.bytes >> 10), (unsigned)s_verify.bad_bytes, (unsigned)s_verify.bit_flips,
+    ESP_LOGW(TAG, "boot check: %u KB dense (pattern + inverted), %u bad bytes (pattern %u, inverted %u; %u single-bit words), %u ms: %s%s%s",
+             (unsigned)(s_verify.bytes >> 10), (unsigned)s_verify.bad_bytes, (unsigned)s_verify.bad_plain, (unsigned)s_verify.bad_inv, (unsigned)s_verify.bit_flips,
              (unsigned)(s_verify.us / 1000), s_bad ? "BAD (" : "ok", s_bad ? s_why : "", s_bad ? ")" : "");
 }
 
@@ -199,8 +221,8 @@ void psram_boot_print(void) {
     bool match = ph == s_tuning.phase_id && dqs == edqs && data == edata;
     console_reply("psram tuning regs: phase id %u, dqs delay %u, data delay %u (%s)", ph, dqs, data,
                   match ? "match the captured choice" : "DIFFER from the captured choice");
-    console_reply("psram boot check: %u KB dense (pattern + inverted), %u bad bytes, %u single-bit words, first bad +%u xor %08x, %u ms: %s%s",
-                  (unsigned)(s_verify.bytes >> 10), (unsigned)s_verify.bad_bytes, (unsigned)s_verify.bit_flips,
+    console_reply("psram boot check: %u KB dense (pattern + inverted), %u bad bytes (pattern %u, inverted %u), %u single-bit words, first bad +%u xor %08x, %u ms: %s%s",
+                  (unsigned)(s_verify.bytes >> 10), (unsigned)s_verify.bad_bytes, (unsigned)s_verify.bad_plain, (unsigned)s_verify.bad_inv, (unsigned)s_verify.bit_flips,
                   (unsigned)s_verify.first_bad, (unsigned)s_verify.first_xor, (unsigned)(s_verify.us / 1000),
                   s_bad ? "BAD " : "ok", s_bad ? s_why : "");
     console_reply("psram boot policy: %s", s_policy_done ? s_policy_line : "not evaluated yet");

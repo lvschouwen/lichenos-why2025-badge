@@ -159,6 +159,10 @@ static void psram_test(char const *kb_text) {
         console_reply("psram test <KB> (1..4096)");
         return;
     }
+    if (strstr(kb_text, "dense")) {
+        psram_boot_dense_test(kb);
+        return;
+    }
     size_t   len = (size_t)kb * 1024;
     uint8_t *mem = heap_caps_aligned_alloc(PSRAM_LINE, len, PSRAM_CAPS);
     if (!mem) {

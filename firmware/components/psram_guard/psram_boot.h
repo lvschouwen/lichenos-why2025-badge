@@ -18,3 +18,6 @@ void psram_boot_policy(void);
 
 // "fw psram": tuning, registers, boot check, LDO lines
 void psram_boot_print(void);
+
+// "fw psram test <KB> dense": the same pattern + inverted check on demand, bad bytes per pass
+void psram_boot_dense_test(unsigned kb);
