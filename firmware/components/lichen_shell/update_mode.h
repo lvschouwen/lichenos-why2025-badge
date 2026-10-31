@@ -44,6 +44,7 @@ bool update_mode_file_allowed(update_state_t const *s);
 // A restart has been decided and the failure message (if any) has been shown
 bool update_mode_restart_due(update_state_t const *s, bool message_done);
 
-// What the OS itself stops after the apps' stop_for_update (the C6 link's update state), set once from main.c. NULL = nothing.
-void update_mode_set_stop_hook(void (*hook)(void));
-void update_mode_run_stop_hook(void);
+// What the OS itself stops after the apps' stop_for_update (the LoRa radio when every app stopped, the C6 link's update
+// state), set once from main.c. NULL = nothing.
+void update_mode_set_stop_hook(void (*hook)(bool apps_stopped));
+void update_mode_run_stop_hook(bool apps_stopped);

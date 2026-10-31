@@ -1,7 +1,8 @@
 # Protocol, config parser/supervisor and packet summaries are pure; lora_proto is shared with the C6
-# (host-tested: lora_proto_test, lora_link_test, meshcore_hdr_test); tomlc17 reads through shared/why_io_libc.c
+# (host-tested: lora_proto_test, lora_link_test); the MeshCore packet summary is the mesh component's (#84 T7); tomlc17
+# reads through shared/why_io_libc.c
 idf_component_register(SRCS "lora.c" "lora_tx.c" "../../../shared/lora/lora_proto.c" "lora_link.c"
-                            "meshcore_hdr.c" "thirdparty/tomlc17.c"
+                            "thirdparty/tomlc17.c"
                             "../../../shared/why_io_libc.c"
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "../../../shared/lora" "../../../shared"

@@ -14,7 +14,9 @@ static int hook_runs;
         }                                                                                                              \
     } while (0)
 
-static void hook(void) {
+static bool hook_apps_stopped;
+static void hook(bool apps_stopped) {
+    hook_apps_stopped = apps_stopped;
     hook_runs++;
 }
 
@@ -89,10 +91,12 @@ int main(void) {
     CHECK(update_mode_on_begin(&f, false) == UM_ACT_NONE);
     CHECK(update_mode_on_prepare(&f, 0) == STOP_CLOSE);
 
-    update_mode_run_stop_hook(); // no hook set: nothing happens
+    update_mode_run_stop_hook(true); // no hook set: nothing happens
     update_mode_set_stop_hook(hook);
-    update_mode_run_stop_hook();
-    CHECK(hook_runs == 1);
+    update_mode_run_stop_hook(false);
+    CHECK(hook_runs == 1 && !hook_apps_stopped); // the hook hears that an app is still running
+    update_mode_run_stop_hook(true);
+    CHECK(hook_runs == 2 && hook_apps_stopped);
 
     if (failures) {
         return 1;

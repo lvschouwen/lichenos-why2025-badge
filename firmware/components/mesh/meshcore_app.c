@@ -769,14 +769,13 @@ static void first_run_set(bool done) {
     ESP_LOGW(TAG, "first-open questions marked %s (%s)", done ? "answered" : "to ask again", ok ? "saved" : "not saved");
 }
 
-// The mesh first (it saves, and sends through LoRa), then the radio it uses
-static void stop_for_update(void) {
-    // lora_send (the mesh task) must not meet a LoRa task that is going away: if MeshCore didn't stop, LoRa stays
-    if (mesh_stop_for_update()) {
-        lora_stop();
-    } else {
-        ESP_LOGE(TAG, "MeshCore still running: LoRa left as it is");
+// The mesh saves and stops; the OS stops the radio afterwards, only when this says true (#84 T7)
+static bool stop_for_update(void) {
+    bool stopped = mesh_stop_for_update();
+    if (!stopped) {
+        ESP_LOGE(TAG, "MeshCore still running");
     }
+    return stopped;
 }
 
 static lichen_app_t const meshcore_app = {

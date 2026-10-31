@@ -60,13 +60,15 @@ static int64_t now_ms(void) {
 // before the transfer starts; the screens go on the LVGL task (close_pending).
 static void stop_everything(void) {
     ESP_LOGW(TAG, "firmware update: stopping the apps");
+    bool all_stopped = true;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
-        if (app && app->stop_for_update) {
-            app->stop_for_update();
+        if (app && app->stop_for_update && !app->stop_for_update()) {
+            ESP_LOGE(TAG, "%s is still running", app->name);
+            all_stopped = false;
         }
     }
-    update_mode_run_stop_hook();
+    update_mode_run_stop_hook(all_stopped);
 }
 
 // POST /prepare (#76): everything stops now, before the first byte of the image is on its way. The update screen comes

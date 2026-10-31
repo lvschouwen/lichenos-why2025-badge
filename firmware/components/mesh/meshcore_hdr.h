@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Summarises a received MeshCore packet for the LoRa log (#51): routing, payload type, path and, for adverts, the
 // sender's name. Follows meshcore/src/Packet.cpp readFrom(). Pure logic, no ESP headers: built into the host tests.
 
@@ -25,3 +29,7 @@ bool mc_hdr_parse(uint8_t const *pkt, size_t len, mc_hdr_t *out);
 
 // One line such as "flood advert v0 path 2x1 'Rep1' (repeater)"; returns the length written (excluding the NUL)
 size_t mc_hdr_format(mc_hdr_t const *h, char *out, size_t cap);
+
+#ifdef __cplusplus
+}
+#endif

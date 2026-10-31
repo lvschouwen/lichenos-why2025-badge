@@ -17,13 +17,19 @@ typedef struct {
 bool lora_start(void);
 // The radio task is running: started and not stopped for an update (says nothing about the C6 link)
 bool lora_up(void);
-// A firmware update is coming (#76): tells the C6 to stop receiving, ends the LoRa task and drops what the C6 still
-// sends. No start again before the restart. Waits up to about 4 s.
+// OS only (main.c's update hook, #76, #84 T7): tells the C6 to stop receiving, ends the LoRa task and drops what the C6
+// still sends. No start again before the restart. Waits up to about 4 s. An app asks for it by returning true from
+// stop_for_update.
 void lora_stop(void);
 
-// Every received packet is also handed to this callback (from the LoRa task: copy and return, don't block)
+// The radio has one owner at a time (#84 T7): the owner's callback gets every received packet (from the LoRa task:
+// copy and return, don't block). A second owner is refused and logged until the first releases.
 typedef void (*lora_packet_cb_t)(uint8_t const *data, size_t len, int16_t rssi_x10, int16_t snr_x10);
-void lora_set_packet_callback(lora_packet_cb_t cb);
+bool lora_claim(char const *owner, lora_packet_cb_t cb);
+void lora_release(char const *owner);
+// The owner describes its packets for the LoRa log and "fw lora": false when the bytes are not one of its packets
+typedef bool (*lora_rx_formatter_t)(uint8_t const *data, size_t len, char *out, size_t cap);
+void lora_set_rx_formatter(lora_rx_formatter_t fmt);
 // The radio settings in use (from lora.toml), for airtime estimates
 void lora_get_radio(uint8_t *sf, uint32_t *bw_hz, uint8_t *cr, uint16_t *preamble);
 // New frequency, bandwidth, spreading factor and coding rate (from MeshCore's prefs); sent to the C6 within a second.

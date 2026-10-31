@@ -7,6 +7,7 @@
 
 extern "C" {
 #include "lora.h"
+#include "meshcore_hdr.h"
 #include "lora_airtime.h"
 }
 
@@ -39,10 +40,24 @@ static void on_packet(uint8_t const *data, size_t len, int16_t rssi_x10, int16_t
     }
 }
 
+// The LoRa log line and "fw lora" show the MeshCore summary of a packet (#51); routing noise says false
+static bool rx_summary(uint8_t const *data, size_t len, char *out, size_t cap) {
+    mc_hdr_t h;
+    if (!mc_hdr_parse(data, len, &h)) {
+        return false;
+    }
+    mc_hdr_format(&h, out, cap);
+    return true;
+}
+
 void LoraRadio::begin() {
     instance = this;
     rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_item_t));
-    lora_set_packet_callback(on_packet);
+    if (!lora_claim("meshcore", on_packet)) {
+        ESP_LOGE("mesh", "LoRa radio not ours: MeshCore receives nothing");
+        return;
+    }
+    lora_set_rx_formatter(rx_summary);
 }
 
 int LoraRadio::recvRaw(uint8_t *bytes, int sz) {

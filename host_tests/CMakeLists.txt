@@ -167,10 +167,10 @@ add_test(NAME lora_proto_test COMMAND lora_proto_test)
 
 add_executable(meshcore_hdr_test
     ${CMAKE_CURRENT_SOURCE_DIR}/meshcore_hdr_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lora/meshcore_hdr.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/meshcore_hdr.c
 )
 
-target_include_directories(meshcore_hdr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lora)
+target_include_directories(meshcore_hdr_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
 
 # Radio noise can pass the CRC: prove the parser never reads past a packet
 target_compile_options(meshcore_hdr_test PRIVATE

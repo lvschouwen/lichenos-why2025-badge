@@ -18,7 +18,6 @@
 #include "lora_link.h"
 #include "lora_proto.h"
 #include "lora_tx.h"
-#include "meshcore_hdr.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,13 +55,33 @@ static void cmd_lora(char const *args);
 // "fw lora raw on": also print each received packet as hex, for test vectors (#61), and every send's answer time
 static bool log_raw;
 
-static lora_packet_cb_t packet_cb;
+static lora_packet_cb_t    packet_cb;
+static char const         *owner;  // who claimed the radio (#84 T7)
+static lora_rx_formatter_t rx_fmt;
 static bool             stop_requested; // lora_stop -> the task
 static bool             stopped;        // the task -> everyone
 static bool             started;        // lora_start succeeded
 
-void lora_set_packet_callback(lora_packet_cb_t cb) {
+bool lora_claim(char const *who, lora_packet_cb_t cb) {
+    if (owner && strcmp(owner, who) != 0) {
+        ESP_LOGE(TAG, "radio claimed by %s: %s refused", owner, who);
+        return false;
+    }
+    owner     = who;
     packet_cb = cb;
+    return true;
+}
+
+void lora_release(char const *who) {
+    if (owner && strcmp(owner, who) == 0) {
+        packet_cb = NULL;
+        rx_fmt    = NULL;
+        owner     = NULL;
+    }
+}
+
+void lora_set_rx_formatter(lora_rx_formatter_t fmt) {
+    rx_fmt = fmt;
 }
 
 static uint32_t now_ms(void);
@@ -253,11 +272,10 @@ static char const *msg_name(uint8_t type) {
 }
 
 static void log_packet(lora_rx_packet_t const *rx) {
-    mc_hdr_t h;
-    char     summary[128];
-    if (mc_hdr_parse(rx->data, rx->len, &h)) {
-        mc_hdr_format(&h, summary, sizeof(summary));
-    } else {
+    char summary[128];
+    if (!rx_fmt) {
+        snprintf(summary, sizeof(summary), "no owner");
+    } else if (!rx_fmt(rx->data, rx->len, summary, sizeof(summary))) {
         snprintf(summary, sizeof(summary), "undecodable");
     }
     ESP_LOGW(TAG, "rx %u B rssi %.1f snr %.1f | %s", rx->len, rx->rssi_x10 / 10.0, rx->snr_x10 / 10.0, summary);

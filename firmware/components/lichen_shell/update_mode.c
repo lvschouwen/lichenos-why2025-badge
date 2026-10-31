@@ -1,6 +1,6 @@
 #include "update_mode.h"
 
-static void (*stop_hook)(void);
+static void (*stop_hook)(bool apps_stopped);
 
 static unsigned enter(update_state_t *s) {
     if (s->mode == UM_UPDATING) {
@@ -64,12 +64,12 @@ bool update_mode_restart_due(update_state_t const *s, bool message_done) {
     return s->reboot && message_done;
 }
 
-void update_mode_set_stop_hook(void (*hook)(void)) {
+void update_mode_set_stop_hook(void (*hook)(bool apps_stopped)) {
     stop_hook = hook;
 }
 
-void update_mode_run_stop_hook(void) {
+void update_mode_run_stop_hook(bool apps_stopped) {
     if (stop_hook) {
-        stop_hook();
+        stop_hook(apps_stopped);
     }
 }

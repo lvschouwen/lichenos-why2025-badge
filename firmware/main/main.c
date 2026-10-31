@@ -68,8 +68,14 @@ static void ota_end(bool ok, bool rebooting) {
     update_screen_end(ok, rebooting);
 }
 
-// What a firmware update stops at OS level (#76), after every app's stop_for_update (MeshCore stops itself and LoRa)
-static void stop_for_update(void) {
+// What a firmware update stops at OS level (#76), after every app's stop_for_update: the LoRa radio, unless an app
+// still runs (its lora_send must not meet a LoRa task that is going away, #84 T7), then the C6 link's update state
+static void stop_for_update(bool apps_stopped) {
+    if (apps_stopped) {
+        lora_stop();
+    } else {
+        ESP_LOGE(TAG, "an app is still running: LoRa left as it is");
+    }
     c6link_set_updating();
 }
 

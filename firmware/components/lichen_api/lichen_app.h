@@ -23,8 +23,9 @@ typedef struct lichen_app {
     bool (*start_background)(void);                                    // from main.c, core 0
     // A firmware update is being received (#76): stop everything of the app's that is not needed for that (tasks, radios,
     // scans) after saving what must survive. Called once from the OTA task, may block for seconds; the badge restarts
-    // afterwards, so there is no start again. Not called for a file push.
-    void (*stop_for_update)(void);
+    // afterwards, so there is no start again. Not called for a file push. True when the app stopped (and saved): the
+    // OS stops the LoRa radio only when every app said so (#84 T7).
+    bool (*stop_for_update)(void);
     void (*about)(lv_obj_t *page); // see settings; LVGL context
     // The app's first-run questions, if it has any: done=false asks them again at the next open, done=true marks
     // them answered ("fw setup reset|done <id>"). The app keeps the flag in its own settings.
