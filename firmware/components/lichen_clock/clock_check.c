@@ -20,7 +20,8 @@ clock_verdict_t clock_check(int64_t cand, int64_t now, int64_t build_epoch, bool
     return CLOCK_OK;
 }
 
-clock_verdict_t clock_check_guarded(clock_guard_t *g, int64_t cand, int64_t now, int64_t build_epoch, bool synced) {
+clock_verdict_t clock_check_guarded(clock_guard_t *g, int64_t cand, int64_t now, int64_t build_epoch, bool synced,
+                                    int64_t mono_s) {
     clock_verdict_t v = clock_check(cand, now, build_epoch, synced);
     if (v != CLOCK_BIG_STEP) {
         g->count = 0;
@@ -29,11 +30,15 @@ clock_verdict_t clock_check_guarded(clock_guard_t *g, int64_t cand, int64_t now,
     int64_t off  = cand - now;
     int64_t diff = off - g->offset;
     if (g->count > 0 && diff <= CLOCK_RECOVER_AGREE_S && diff >= -CLOCK_RECOVER_AGREE_S) {
+        if (mono_s - g->at_s < CLOCK_RECOVER_SPACE_S) {
+            return CLOCK_BIG_STEP; // too soon after the last counted answer: not counted
+        }
         g->count++;
     } else {
         g->count = 1;
     }
     g->offset = off;
+    g->at_s   = mono_s;
     if (g->count >= CLOCK_RECOVER_ANSWERS) {
         g->count = 0;
         return CLOCK_RECOVERED;

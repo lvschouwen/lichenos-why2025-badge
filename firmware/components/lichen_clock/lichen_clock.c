@@ -23,7 +23,8 @@ clock_verdict_t clock_offer_sntp(struct timeval const *tv) {
     struct timeval cur;
     gettimeofday(&cur, NULL);
     clock_verdict_t v =
-        clock_check_guarded(&guard, (int64_t)tv->tv_sec, (int64_t)cur.tv_sec, LICHEN_BUILD_EPOCH, info.synced);
+        clock_check_guarded(&guard, (int64_t)tv->tv_sec, (int64_t)cur.tv_sec, LICHEN_BUILD_EPOCH, info.synced,
+                             mono_ms() / 1000);
     info.last_verdict = v;
     if (!clock_accepted(v)) {
         info.refused++;

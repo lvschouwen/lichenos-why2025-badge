@@ -14,6 +14,7 @@ extern "C" {
 
 #define CLOCK_RECOVER_ANSWERS 3  // this many big steps in a row that agree...
 #define CLOCK_RECOVER_AGREE_S 60 // ...within this many seconds of each other are believed after all
+#define CLOCK_RECOVER_SPACE_S (30 * 60) // and each at least this long after the one counted before (no bursts)
 
 // CLOCK_RECOVERED: accepted too, a big step that several answers in a row agreed on
 typedef enum { CLOCK_OK, CLOCK_TOO_OLD, CLOCK_TOO_NEW, CLOCK_BIG_STEP, CLOCK_RECOVERED } clock_verdict_t;
@@ -21,6 +22,7 @@ typedef enum { CLOCK_OK, CLOCK_TOO_OLD, CLOCK_TOO_NEW, CLOCK_BIG_STEP, CLOCK_REC
 typedef struct {
     int     count;  // consecutive big-step answers that agreed so far
     int64_t offset; // the offset (answer minus clock) of the latest of them
+    int64_t at_s;   // monotonic time (s) when that one was counted
 } clock_guard_t;
 
 // true when t lies in build_epoch - 1 day .. build_epoch + 2 years
@@ -32,9 +34,10 @@ clock_verdict_t clock_check(int64_t cand, int64_t now, int64_t build_epoch, bool
 
 // clock_check() plus the way out of a lock-in: the first answer after a sync may have been wrong (inside the window),
 // and every right answer after it is a "big step". CLOCK_RECOVERED after CLOCK_RECOVER_ANSWERS agreeing big steps in a
-// row; a small step, an implausible answer or an answer that disagrees restarts the count, so one rogue answer never
+// row, each 30 minutes after the last counted one (mono_s: monotonic seconds, so retries and bursts do not count); a small step, an implausible answer or an answer that disagrees restarts the count, so one rogue answer never
 // moves the clock.
-clock_verdict_t clock_check_guarded(clock_guard_t *g, int64_t cand, int64_t now, int64_t build_epoch, bool synced);
+clock_verdict_t clock_check_guarded(clock_guard_t *g, int64_t cand, int64_t now, int64_t build_epoch, bool synced,
+                                    int64_t mono_s);
 
 static inline bool clock_accepted(clock_verdict_t v) { return v == CLOCK_OK || v == CLOCK_RECOVERED; }
 
