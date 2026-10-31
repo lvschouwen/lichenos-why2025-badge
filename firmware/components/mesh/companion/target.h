@@ -7,6 +7,7 @@
 #include <Mesh.h>
 #include <helpers/KeyValueStore.h>
 #include <helpers/SensorManager.h>
+#include <lichen_clock.h>
 
 #include <math.h>
 #include <sys/time.h>
@@ -43,15 +44,15 @@ public:
 // clock that starts over at every boot would silence the badge after a reboot (#65).
 class BadgeRtc : public mesh::RTCClock {
 public:
-    static constexpr uint32_t VALID_FROM = 1767225600; // 2026-01-01: anything earlier means the clock isn't set
-
     uint32_t getCurrentTime() override {
         time_t now = time(NULL);
-        return now >= (time_t)VALID_FROM ? (uint32_t)now : base_ + (uint32_t)(millis() / 1000);
+        return clock_is_set() ? (uint32_t)now : base_ + (uint32_t)(millis() / 1000);
     }
     void setCurrentTime(uint32_t t) override {
         struct timeval tv = {(time_t)t, 0};
-        settimeofday(&tv, NULL); // may be refused (host tests): the fallback below still follows the app
+        if (clock_in_window((int64_t)t, clock_build_epoch())) { // same bounds as SNTP (#8)
+            settimeofday(&tv, NULL);
+        } // may be refused (host tests): the fallback below still follows the app
         base_ = t - (uint32_t)(millis() / 1000);
     }
 

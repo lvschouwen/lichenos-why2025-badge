@@ -5,6 +5,7 @@
 #include "c6_flasher.h"
 #include "c6_paths.h"
 #include "fw_console.h"
+#include "lichen_clock.h"
 #include "esp_event.h"
 #include "esp_hosted.h"
 #include "esp_log.h"
@@ -12,6 +13,7 @@
 #include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_netif_sntp.h"
+#include "esp_sntp.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -193,6 +195,21 @@ static bool load_credentials(wifi_config_t *cfg) {
 static void on_time_sync(struct timeval *tv) {
     ESP_LOGW(TAG, "clock set from SNTP: %lld", (long long)tv->tv_sec);
     boot_progress_end(BOOT_CLOCK, STEP_DONE, NULL);
+}
+
+// lwIP's own sntp_sync_time() is weak and calls settimeofday() before the sync callback, so a filter in the callback
+// would be too late (#8). This one checks the answer first: an implausible or far-off time is logged and ignored.
+void sntp_sync_time(struct timeval *tv) {
+    clock_verdict_t v = clock_offer_sntp(tv);
+    if (v != CLOCK_OK) {
+        ESP_LOGW(TAG, "SNTP time %lld ignored: %s", (long long)tv->tv_sec, clock_verdict_text(v));
+        return;
+    }
+    clock_sync_info_t info = clock_sync_info();
+    ESP_LOGW(TAG, "SNTP step %+lld ms after %lld s uptime", (long long)info.step_ms,
+             (long long)(info.step_mono_ms / 1000));
+    sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
+    on_time_sync(tv);
 }
 
 // Real time for MeshCore's adverts and messages (#65): other nodes drop adverts that aren't newer than the last they

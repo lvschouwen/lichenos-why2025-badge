@@ -5,6 +5,7 @@
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "lichen_clock.h"
 #include "lichen_app.h"
 #include "logo.h"
 #include "shell_parts.h"
@@ -17,7 +18,6 @@
 #include <string.h>
 #include <time.h>
 
-#define CLOCK_VALID_FROM 1767225600 // 2026-01-01: earlier means SNTP hasn't answered yet
 #define SCROLL_STEP      96
 
 enum { ROW_MEMORY, ROW_C6, ROW_WIFI, ROW_LORA, ROW_STORAGE, ROW_UP, ROW_CLOCK, ROWS };
@@ -85,7 +85,7 @@ static void refresh(lv_timer_t *timer) {
 
     time_t    now = time(NULL);
     struct tm local;
-    if (now >= (time_t)CLOCK_VALID_FROM && localtime_r(&now, &local)) {
+    if (clock_is_set() && localtime_r(&now, &local)) {
         strftime(text, sizeof(text), "%Y-%m-%d %H:%M", &local);
     } else {
         strlcpy(text, "not set", sizeof(text));

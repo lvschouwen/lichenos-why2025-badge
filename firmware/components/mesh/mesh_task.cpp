@@ -918,7 +918,7 @@ static void cmd_mesh_send(char const *args) {
         return;
     }
     memcpy(channel, args, name_len);
-    if (time(NULL) < (time_t)BadgeRtc::VALID_FROM) {
+    if (!clock_is_set()) {
         console_reply("warning: the clock is not set, other nodes will see a wrong time");
     }
     char const   *why = NULL;
@@ -1066,7 +1066,7 @@ static void cmd_mesh(char const *args) {
     char      clock[24] = "not set";
     time_t    now       = time(NULL);
     struct tm utc;
-    if (now >= (time_t)BadgeRtc::VALID_FROM && gmtime_r(&now, &utc)) {
+    if (clock_is_set() && gmtime_r(&now, &utc)) {
         strftime(clock, sizeof(clock), "%Y-%m-%d %H:%M:%SZ", &utc);
     }
     console_reply("clock %s", clock);

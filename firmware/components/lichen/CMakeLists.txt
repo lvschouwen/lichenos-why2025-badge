@@ -6,4 +6,4 @@ idf_component_register(SRCS "boot_steps.c" "boot_text.c" "boot_progress.c" "log_
                             "boot_screen.c" "status_bar.c" "link_state.c" "logo.c" "update_status.c" "update_mode.c" "update_screen.c" "scroll_anchor.c" "fonts.c" "shot_blend.c" "screenshot.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl
-                       PRIV_REQUIRES assets freertos nvs_flash fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage app_update esp_system)
+                       PRIV_REQUIRES lichen_clock assets freertos nvs_flash fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage app_update esp_system)

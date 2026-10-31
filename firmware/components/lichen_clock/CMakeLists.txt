@@ -1,0 +1,16 @@
+# Which time to believe (#8): clock_check.c is pure and host-tested (host_tests/clock_check_test.c). lichen_clock.c
+# holds the state (clock_is_set, last SNTP step); the build epoch is the commit time of the checkout, so the build is
+# reproducible (unlike __DATE__).
+execute_process(
+    COMMAND git log -1 --format=%ct
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE build_epoch
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE build_epoch_result)
+if(NOT build_epoch_result EQUAL 0 OR build_epoch STREQUAL "")
+    message(FATAL_ERROR "git log -1 --format=%ct failed: the clock check needs the build epoch")
+endif()
+
+idf_component_register(SRCS "clock_check.c" "lichen_clock.c"
+                       INCLUDE_DIRS ".")
+target_compile_definitions(${COMPONENT_LIB} PRIVATE LICHEN_BUILD_EPOCH=${build_epoch}LL)

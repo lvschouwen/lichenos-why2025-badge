@@ -1,5 +1,6 @@
 // The status bar over every screen after boot (#66, home.html): logo, clock, Wi-Fi, LoRa. Wi-Fi bars and LoRa label, polled once a second from
 // the LVGL task through shell_sources.
+#include "lichen_clock.h"
 #include "link_state.h"
 #include "logo.h"
 #include "shell_parts.h"
@@ -9,7 +10,6 @@
 #include <string.h>
 #include <time.h>
 
-#define CLOCK_VALID_FROM 1767225600 // 2026-01-01: anything earlier means SNTP hasn't answered yet
 
 static lv_obj_t *clock_label;
 static lv_obj_t *lora_label;
@@ -82,7 +82,7 @@ static void refresh(lv_timer_t *timer) {
     char      text[8] = "--:--";
     time_t    now     = time(NULL);
     struct tm local;
-    if (now >= (time_t)CLOCK_VALID_FROM && localtime_r(&now, &local)) {
+    if (clock_is_set() && localtime_r(&now, &local)) {
         strftime(text, sizeof(text), "%H:%M", &local);
     }
     if (strcmp(lv_label_get_text(clock_label), text) != 0) {
