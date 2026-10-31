@@ -80,6 +80,8 @@ char const *mesh_channel_remove_named(char const *name);
 bool mesh_send_advert(void);
 // The channel names in slot order, up to max; MESH_BUSY when the lock wasn't free within MESH_SET_WAIT_MS
 size_t mesh_channels_snapshot(char names[][MESH_CHANNEL_MAX + 1], size_t max);
+// The same, waiting at most wait_ms for the lock (screens call it on the LVGL task)
+size_t mesh_channels_snapshot_wait(char names[][MESH_CHANNEL_MAX + 1], size_t max, uint32_t wait_ms);
 
 // The companion's FIRMWARE_VERSION ("v1.18.0")
 char const *mesh_firmware_version(void);

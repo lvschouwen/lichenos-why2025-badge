@@ -10,6 +10,7 @@
 #include "menu.h"
 #include "mesh.h"
 #include "mesh_format.h"
+#include "meshcore_chat.h"
 #include "meshcore_settings.h"
 #include "scroll_anchor.h"
 #include "settings_store.h"
@@ -192,7 +193,7 @@ static void rebuild_messages(size_t count) {
     lv_obj_clean(messages_list);
     msg_keys_n = count;
     if (!count) {
-        add_label(messages_list, "No messages yet. Listening on Public.", THEME_DIM);
+        add_label(messages_list, "No messages yet. Listening on Public. Enter: write.", THEME_DIM);
         return;
     }
     uint32_t now = mesh_uptime_s();
@@ -295,6 +296,11 @@ static void on_key(lv_event_t *e) {
         case LV_KEY_RIGHT: switch_tab(1); break;
         case LV_KEY_UP: shell_scroll_by(active_list(), SCROLL_STEP_PX); break;
         case LV_KEY_DOWN: shell_scroll_by(active_list(), -SCROLL_STEP_PX); break;
+        case LV_KEY_ENTER:
+            if (messages_visible()) {
+                meshcore_chat_pick(); // pick a channel to write on (#46)
+            }
+            break;
         default: break;
     }
 }
@@ -395,6 +401,14 @@ static void build_tabs(lv_obj_t *screen, lv_group_t *group) {
     contacts_list = make_list(lv_tabview_add_tab(tabs, "Contacts"));
     style_tab_bar(lv_tabview_get_tab_bar(tabs));
     lv_obj_set_scrollable(lv_tabview_get_content(tabs), false); // tabs change by key, not by swiping the content
+    lv_obj_set_style_pad_bottom(messages_list, 56, 0); // room for the hint below
+    lv_obj_t *hint = lv_label_create(screen);
+    lv_obj_set_style_text_color(hint, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_bg_color(hint, lv_color_hex(THEME_BG), 0);
+    lv_obj_set_style_bg_opa(hint, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_all(hint, 6, 0);
+    lv_label_set_text(hint, "Enter: write on a channel");
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
 
     if (group) {
         lv_group_add_obj(group, tabs);

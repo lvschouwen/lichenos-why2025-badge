@@ -208,7 +208,7 @@ extern "C" size_t mesh_messages_snapshot(mesh_msg_t *out, size_t max, uint32_t *
     for (size_t i = first; i < n; i++) {
         mesh_store_message(i, &out[i - first]);
     }
-    *generation = mesh_store_generation();
+    *generation = mesh_store_view_generation();
     mesh_unlock();
     return n - first;
 }
@@ -264,6 +264,48 @@ static bool keep_contact(ContactInfo const &c) {
     return c.type != ADV_TYPE_NONE; // as MyMesh's own filter: not the transient entries
 }
 
+// Our channel messages go into the screens' store as "me: <text>", and their outbox state follows (#46). With the mesh
+// lock held (the store is under it); the outbox is read in short spinlock sections, the copies are made outside them.
+struct OutSync {
+    mesh_msg_id_t id;
+    uint8_t       state, repeats;
+    bool          fresh;
+    char          target[OB_TARGET_MAX];
+    char          text[OB_TEXT_MAX];
+};
+static OutSync out_sync[OB_CAP];
+
+static void sync_outgoing(void) {
+    size_t n = 0;
+    mesh_ob_enter();
+    for (int i = 0; i < OB_CAP && outbox; i++) {
+        ob_entry_t *e = &outbox->e[i];
+        if (!e->used || e->kind != OB_CHANNEL) {
+            continue;
+        }
+        OutSync &o = out_sync[n++];
+        o.id       = e->id;
+        o.state    = e->state;
+        o.repeats  = e->repeats;
+        o.fresh    = !e->in_store;
+        if (o.fresh) {
+            memcpy(o.target, e->target, sizeof(o.target));
+            memcpy(o.text, e->text, sizeof(o.text));
+            e->in_store = true;
+        }
+    }
+    mesh_ob_exit();
+    for (size_t i = 0; i < n; i++) {
+        OutSync &o = out_sync[i];
+        if (o.fresh) {
+            char line[MESH_TEXT_MAX + 1];
+            snprintf(line, sizeof(line), "me: %s", o.text);
+            mesh_store_add_outgoing(o.target, line, o.id, mesh_uptime_s());
+        }
+        mesh_store_update_out(o.id, o.state, o.repeats);
+    }
+}
+
 static void mesh_task(void *arg) {
     (void)arg;
     for (;;) {
@@ -273,6 +315,7 @@ static void mesh_task(void *arg) {
         uint32_t rx      = radio_driver.getPacketsRecv();
         fs_shim_take_busy_us(NULL); // what other tasks spent in files under the lock is not this loop's
         node->loop();
+        sync_outgoing();
         uint32_t file_ops;
         uint32_t file_us = fs_shim_take_busy_us(&file_ops);
         rx               = radio_driver.getPacketsRecv() - rx;
@@ -580,10 +623,14 @@ extern "C" bool mesh_send_advert(void) {
 }
 
 extern "C" size_t mesh_channels_snapshot(char names[][MESH_CHANNEL_MAX + 1], size_t max) {
+    return mesh_channels_snapshot_wait(names, max, MESH_SET_WAIT_MS);
+}
+
+extern "C" size_t mesh_channels_snapshot_wait(char names[][MESH_CHANNEL_MAX + 1], size_t max, uint32_t wait_ms) {
     if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped()) {
         return 0;
     }
-    if (!mesh_lock_within(MESH_SET_WAIT_MS)) {
+    if (!mesh_lock_within(wait_ms)) {
         return MESH_BUSY;
     }
     size_t         n = 0;

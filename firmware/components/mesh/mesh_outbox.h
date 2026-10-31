@@ -36,7 +36,7 @@ typedef enum {
 typedef enum { OB_CHANNEL, OB_DM } ob_kind_t;
 
 typedef struct {
-    bool             used, awaiting, awaiting_reset, pending_reset, flood_seen, have_hash;
+    bool             in_store, used, awaiting, awaiting_reset, pending_reset, flood_seen, have_hash;
     uint8_t          kind, state, attempt, repeats, n_acks;
     mesh_msg_id_t    id;
     uint32_t         seq, ts, not_before_ms, deadline_ms, sent_ms, trip_ms;

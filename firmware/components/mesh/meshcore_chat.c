@@ -1,0 +1,246 @@
+// One channel's chat with a compose line (#46): see meshcore_chat.h. Everything with an lv_obj_t runs in the LVGL task;
+// MeshCore is read through mesh.h copies and written through mesh_send_channel (neither blocks on the mesh task).
+#include "meshcore_chat.h"
+
+#include "esp_heap_caps.h"
+#include "fonts.h"
+#include "menu.h"
+#include "mesh.h"
+#include "mesh_chat.h"
+#include "mesh_format.h"
+#include "shell.h"
+#include "theme.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#define SCREEN_PICK    141
+#define SCREEN_CHAT    142
+#define SHOW_MESSAGES  50
+#define SCREEN_WAIT_MS 20
+#define SCROLL_STEP_PX 120
+#define AGE_REFRESH_S  30
+#define TICK_MS        500
+#define MAX_CHANNELS   40
+
+static char channel[MESH_CHANNEL_MAX + 1]; // the chat that is open
+
+static lv_obj_t   *list, *ta, *counter, *note;
+static lv_timer_t *timer;
+static mesh_msg_t *copy;
+static uint32_t    shown_generation, shown_s;
+static bool        note_error;
+
+static void add_line(lv_obj_t *parent, char const *text, uint32_t color) {
+    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
+    lv_label_set_text(label, text);
+}
+
+static void add_message(mesh_msg_t const *m, uint32_t now) {
+    char age[24], status[32], meta[96];
+    mesh_format_age(now - m->heard_s, age, sizeof(age));
+    mesh_status_kind_t kind = mesh_msg_status(m, status, sizeof(status));
+    uint32_t color = kind == MESH_STATUS_FAILED ? THEME_RED : kind == MESH_STATUS_OK ? THEME_TEAL : THEME_DIM;
+    if (m->outgoing) {
+        snprintf(meta, sizeof(meta), "%s, %s", status, age);
+    } else {
+        snprintf(meta, sizeof(meta), "%s, %d dBm", age, m->rssi_x10 / 10);
+    }
+    lv_obj_t *item = lv_obj_create(list);
+    lv_obj_remove_style_all(item);
+    lv_obj_set_size(item, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(item, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_ver(item, 4, 0);
+    lv_obj_set_scrollable(item, false);
+    lv_obj_set_clickable(item, false);
+    add_line(item, m->text, m->outgoing ? THEME_AMBER : THEME_TEXT);
+    add_line(item, meta, color);
+}
+
+static void rebuild(size_t n) {
+    bool at_end = lv_obj_get_scroll_bottom(list) <= 0;
+    int32_t y   = lv_obj_get_scroll_y(list);
+    lv_obj_clean(list);
+    size_t shown = 0;
+    uint32_t now = mesh_uptime_s();
+    for (size_t i = 0; i < n; i++) {
+        if (mesh_msg_in_channel(&copy[i], channel)) {
+            add_message(&copy[i], now);
+            shown++;
+        }
+    }
+    if (!shown) {
+        add_line(list, "No messages here yet.", THEME_DIM);
+    }
+    lv_obj_update_layout(list);
+    lv_obj_scroll_to_y(list, at_end ? LV_COORD_MAX : y, LV_ANIM_OFF);
+}
+
+static void show_counter(void) {
+    char text[80];
+    mesh_compose_status(lv_textarea_get_text(ta), mesh_channel_text_max(), text, sizeof(text));
+    lv_label_set_text(counter, text);
+}
+
+static void tick(lv_timer_t *t) {
+    (void)t;
+    uint32_t generation;
+    size_t   n = mesh_messages_snapshot(copy, SHOW_MESSAGES, &generation, SCREEN_WAIT_MS);
+    if (n == MESH_BUSY) {
+        return;
+    }
+    if (generation != shown_generation || mesh_uptime_s() - shown_s >= AGE_REFRESH_S) {
+        rebuild(n);
+        shown_generation = generation;
+        shown_s          = mesh_uptime_s();
+    }
+}
+
+static void set_note(char const *text, bool error) {
+    lv_label_set_text(note, text);
+    lv_obj_set_style_text_color(note, lv_color_hex(error ? THEME_RED : THEME_DIM), 0);
+    note_error = error;
+}
+
+static void on_ready(lv_event_t *e) {
+    (void)e;
+    char const *text = lv_textarea_get_text(ta);
+    if (!text[0]) {
+        return;
+    }
+    char const   *why = NULL;
+    mesh_msg_id_t id  = mesh_send_channel(channel, text, &why);
+    if (!id) {
+        set_note(why ? why : "not sent", true);
+        return;
+    }
+    lv_textarea_set_text(ta, "");
+    set_note("Enter: send    Esc: back", false);
+    show_counter();
+    shown_generation = UINT32_MAX; // the mesh task adds it within a few ms: the next tick shows it
+}
+
+static void on_changed(lv_event_t *e) {
+    (void)e;
+    show_counter();
+    if (note_error) {
+        set_note("Enter: send    Esc: back", false);
+    }
+}
+
+static void on_key(lv_event_t *e) {
+    switch (lv_event_get_key(e)) {
+        case LV_KEY_UP: shell_scroll_by(list, SCROLL_STEP_PX); break;
+        case LV_KEY_DOWN: shell_scroll_by(list, -SCROLL_STEP_PX); break;
+        default: break;
+    }
+}
+
+static void on_delete(lv_event_t *e) {
+    (void)e;
+    if (timer) {
+        lv_timer_delete(timer);
+        timer = NULL;
+    }
+    heap_caps_free(copy);
+    copy = NULL;
+    list = ta = counter = note = NULL;
+}
+
+static void style_ta(void) {
+    lv_obj_set_width(ta, LV_PCT(100));
+    lv_obj_set_style_bg_color(ta, lv_color_hex(THEME_TILE), 0);
+    lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(ta, lv_color_hex(THEME_TEXT), 0);
+    lv_obj_set_style_text_font(ta, lichen_font(LICHEN_FONT_SMALL), 0);
+    lv_obj_set_style_radius(ta, 14, 0);
+    lv_obj_set_style_pad_all(ta, 14, 0);
+    lv_obj_set_style_border_width(ta, 3, 0);
+    lv_obj_set_style_border_color(ta, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_outline_width(ta, 0, LV_STATE_ANY);
+    lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, LV_PART_CURSOR);
+    lv_obj_set_style_bg_color(ta, lv_color_hex(THEME_AMBER), LV_PART_CURSOR);
+    lv_obj_set_style_text_color(ta, lv_color_hex(THEME_BG), LV_PART_CURSOR);
+}
+
+static lv_obj_t *build_chat(void) {
+    lv_obj_t *screen = shell_page_create();
+    lv_obj_set_style_pad_bottom(screen, THEME_PAD, 0);
+    lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(screen, 10, 0);
+    lv_obj_set_scrollable(screen, false);
+    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+
+    lv_obj_t *heading = lv_label_create(screen);
+    lv_obj_set_width(heading, LV_PCT(100));
+    lv_label_set_long_mode(heading, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
+    lv_obj_set_style_text_color(heading, lv_color_hex(THEME_AMBER), 0);
+    lv_label_set_text(heading, channel);
+
+    list = lv_obj_create(screen);
+    lv_obj_remove_style_all(list);
+    lv_obj_set_width(list, LV_PCT(100));
+    lv_obj_set_flex_grow(list, 1);
+    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(list, 8, 0);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ACTIVE);
+    shell_scroll_tame(list);
+
+    ta = lv_textarea_create(screen);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_max_length(ta, (uint32_t)mesh_channel_text_max());
+    lv_textarea_set_placeholder_text(ta, "Write a message");
+    style_ta();
+    lv_obj_add_event_cb(ta, on_ready, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(ta, on_changed, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_add_event_cb(ta, on_key, LV_EVENT_KEY, NULL);
+
+    counter = lv_label_create(screen);
+    lv_obj_set_width(counter, LV_PCT(100));
+    note = lv_label_create(screen);
+    lv_obj_set_width(note, LV_PCT(100));
+    set_note("Enter: send    Esc: back", false);
+    lv_obj_set_style_text_color(counter, lv_color_hex(THEME_DIM), 0);
+    show_counter();
+
+    copy             = heap_caps_malloc(SHOW_MESSAGES * sizeof(*copy), MALLOC_CAP_SPIRAM);
+    shown_generation = UINT32_MAX;
+    if (copy) {
+        timer = lv_timer_create(tick, TICK_MS, NULL);
+        tick(timer);
+    }
+    return screen;
+}
+
+// ---- the channel picker ----------------------------------------------------------------------------------------------
+
+static char names[MAX_CHANNELS][MESH_CHANNEL_MAX + 1];
+
+static void open_chat(void *arg) {
+    snprintf(channel, sizeof(channel), "%s", (char const *)arg);
+    shell_open(build_chat, SCREEN_CHAT);
+}
+
+static lv_obj_t *build_pick(void) {
+    lv_obj_t *screen = shell_page_create();
+    lv_obj_t *menu   = menu_create(screen, "Write on a channel");
+    size_t    n      = mesh_channels_snapshot_wait(names, MAX_CHANNELS, SCREEN_WAIT_MS);
+    if (n == MESH_BUSY) {
+        menu_note(menu, "MeshCore is busy, press Esc and try again");
+    } else if (n == 0) {
+        menu_note(menu, "No channels (MeshCore not running?)");
+    }
+    for (size_t i = 0; i < n && n != MESH_BUSY; i++) {
+        menu_add(menu, names[i], "", open_chat, names[i]);
+    }
+    return screen;
+}
+
+void meshcore_chat_pick(void) {
+    shell_open(build_pick, SCREEN_PICK);
+}

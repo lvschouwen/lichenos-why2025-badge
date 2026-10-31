@@ -7,7 +7,7 @@
 // A ring, oldest overwritten
 static mesh_msg_t *messages;
 static size_t      msg_cap, msg_head, msg_count; // msg_head = index of the oldest
-static uint32_t    generation;
+static uint32_t    generation, own_changes;
 
 bool mesh_store_init(size_t max_messages) {
     free(messages);
@@ -96,7 +96,36 @@ void mesh_store_add_message(char const *channel, char const *text, int16_t rssi_
     mesh_sanitize(text, strlen(text), m->text, sizeof(m->text));
     m->rssi_x10 = rssi_x10;
     m->heard_s  = heard_s;
+    m->id = m->outgoing = m->state = m->repeats = 0;
     generation++;
+}
+
+void mesh_store_add_outgoing(char const *channel, char const *text, uint32_t id, uint32_t heard_s) {
+    if (!msg_cap) {
+        return;
+    }
+    mesh_store_add_message(channel, text, 0, heard_s);
+    generation--; // undo: only incoming messages count as unread
+    mesh_msg_t *m = &messages[(msg_head + msg_count - 1) % msg_cap];
+    m->id         = id;
+    m->outgoing   = 1;
+    own_changes++;
+}
+
+bool mesh_store_update_out(uint32_t id, uint8_t state, uint8_t repeats) {
+    for (size_t i = msg_count; id && i > 0; i--) {
+        mesh_msg_t *m = &messages[(msg_head + i - 1) % msg_cap];
+        if (m->outgoing && m->id == id) {
+            if (m->state == state && m->repeats == repeats) {
+                return false;
+            }
+            m->state   = state;
+            m->repeats = repeats;
+            own_changes++;
+            return true;
+        }
+    }
+    return false;
 }
 
 size_t mesh_store_message_count(void) {
@@ -113,4 +142,8 @@ bool mesh_store_message(size_t index, mesh_msg_t *out) {
 
 uint32_t mesh_store_generation(void) {
     return generation;
+}
+
+uint32_t mesh_store_view_generation(void) {
+    return generation + own_changes;
 }

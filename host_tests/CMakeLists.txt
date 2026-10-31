@@ -425,6 +425,18 @@ target_include_directories(channel_input_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_options(channel_input_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME channel_input_test COMMAND channel_input_test)
 
+add_executable(mesh_chat_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/mesh_chat_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_chat.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_frame.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/channel_input.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_format.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_store.c
+)
+target_include_directories(mesh_chat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_chat_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_chat_test COMMAND mesh_chat_test)
+
 add_executable(mesh_tile_test
     ${CMAKE_CURRENT_SOURCE_DIR}/mesh_tile_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_tile.c
@@ -702,6 +714,6 @@ add_test(NAME ota_bmp_test COMMAND ota_bmp_test)
 
 add_custom_target(run_tests
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose
-    DEPENDS assets_fmt_test font_cover_test c6_image_test ota_proto_test ota_pieces_test backlight_cmd_test backlight_level_test console_cmd_test lora_proto_test meshcore_hdr_test lora_link_test lora_irq_test console_cmd_fw_test c6_paths_test ota_path_test ota_valid_test kbd_map_test meshcore_decode_test mesh_store_test lora_airtime_test mesh_format_test mesh_frame_test mesh_outbox_test radio_presets_test radio_confirm_test channel_input_test mesh_tile_test crash_log_test restart_log_test boot_steps_test log_clean_test fs_shim_test cayenne_lpp_test companion_test lora_tx_test nav_test home_layout_test tz_table_test wifi_list_test wifi_cred_test wifi_join_test setup_state_test mc_first_test ui_keys_test boot_text_test update_status_test update_mode_test link_state_test scroll_anchor_test shot_blend_test ota_bmp_test log_ring_test psram_pattern_test
+    DEPENDS assets_fmt_test font_cover_test c6_image_test ota_proto_test ota_pieces_test backlight_cmd_test backlight_level_test console_cmd_test lora_proto_test meshcore_hdr_test lora_link_test lora_irq_test console_cmd_fw_test c6_paths_test ota_path_test ota_valid_test kbd_map_test meshcore_decode_test mesh_store_test lora_airtime_test mesh_format_test mesh_frame_test mesh_outbox_test radio_presets_test radio_confirm_test channel_input_test mesh_chat_test mesh_tile_test crash_log_test restart_log_test boot_steps_test log_clean_test fs_shim_test cayenne_lpp_test companion_test lora_tx_test nav_test home_layout_test tz_table_test wifi_list_test wifi_cred_test wifi_join_test setup_state_test mc_first_test ui_keys_test boot_text_test update_status_test update_mode_test link_state_test scroll_anchor_test shot_blend_test ota_bmp_test log_ring_test psram_pattern_test
     COMMENT "Running all host tests"
 )

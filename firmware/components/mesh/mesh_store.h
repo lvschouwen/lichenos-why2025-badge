@@ -21,6 +21,10 @@ typedef struct {
     char     text[MESH_TEXT_MAX + 1]; // as MeshCore delivers it: "sender: message"
     int16_t  rssi_x10;
     uint32_t heard_s; // uptime when received
+    // Our own channel messages (#46): outgoing, with the outbox id and state (mesh_out_state_t) kept up to date by the
+    // mesh task. text is "me: <text>". Incoming messages have all three zero.
+    uint32_t id;
+    uint8_t  outgoing, state, repeats;
 } mesh_msg_t;
 
 // Allocates the ring (in PSRAM through malloc on the badge); false when out of memory
@@ -28,10 +32,17 @@ bool mesh_store_init(size_t max_messages);
 
 void mesh_store_add_message(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s);
 
+// A message we send: not an unread one (it does not move mesh_store_generation, only the view generation)
+void mesh_store_add_outgoing(char const *channel, char const *text, uint32_t id, uint32_t heard_s);
+// The outgoing message's new state; true when something changed (the view generation moves then)
+bool mesh_store_update_out(uint32_t id, uint8_t state, uint8_t repeats);
+
 size_t mesh_store_message_count(void);
 bool   mesh_store_message(size_t index, mesh_msg_t *out); // 0 = oldest
 // Changes with every message added, also once the ring is full: readers rebuild when it differs from what they showed
 uint32_t mesh_store_generation(void);
+// Moves with every change a screen shows: incoming messages as the generation, plus our own messages and their states
+uint32_t mesh_store_view_generation(void);
 
 // Copies in[0..in_len) to out as printable UTF-8: invalid sequences become '?', control characters ' ', cut on a
 // character boundary to fit cap - 1 bytes. Returns the length written.

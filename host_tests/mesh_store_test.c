@@ -64,6 +64,21 @@ int main(void) {
     mesh_store_add_message("Public", "f: six", -600, 7);
     CHECK(mesh_store_generation() != gen && mesh_store_message_count() == 3u);
 
+    // Our own messages (#46): in the ring with their state, but never unread
+    CHECK(mesh_store_init(4));
+    mesh_store_add_message("Public", "a: hi", -600, 1);
+    uint32_t in_gen = mesh_store_generation(), view = mesh_store_view_generation();
+    mesh_store_add_outgoing("#t", "me: yo", 7, 2);
+    CHECK(mesh_store_generation() == in_gen && mesh_store_view_generation() != view && mesh_store_message_count() == 2);
+    CHECK(mesh_store_message(1, &m) && m.outgoing && m.id == 7 && m.state == 0 && strcmp(m.text, "me: yo") == 0);
+    CHECK(mesh_store_message(0, &m) && !m.outgoing && m.id == 0);
+    view = mesh_store_view_generation();
+    CHECK(mesh_store_update_out(7, 2, 0) && mesh_store_view_generation() != view);
+    view = mesh_store_view_generation();
+    CHECK(!mesh_store_update_out(7, 2, 0) && mesh_store_view_generation() == view); // unchanged
+    CHECK(!mesh_store_update_out(8, 2, 0) && !mesh_store_update_out(0, 2, 0));
+    CHECK(mesh_store_message(1, &m) && m.state == 2);
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;
