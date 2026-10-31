@@ -10,7 +10,9 @@
 #include "freertos/task.h"
 #include "menu.h"
 #include "menu_filter.h"
+#include "lichen_clock.h"
 #include "mesh.h"
+#include "mesh_chat.h"
 #include "mesh_format.h"
 #include "meshcore_settings.h"
 #include "radio_confirm.h"
@@ -277,6 +279,11 @@ static void advert_done(job_t *job) {
 
 static void send_advert(void *arg) {
     (void)arg;
+    char const *refusal = mesh_advert_refusal(clock_is_set());
+    if (refusal) {
+        menu_set_value(advert_row, refusal); // no job: nothing is sent
+        return;
+    }
     job_t *job = job_new(JOB_ADVERT, advert_done);
     if (!job) {
         menu_set_value(advert_row, "busy, try again");

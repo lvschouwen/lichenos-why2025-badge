@@ -4,6 +4,7 @@
 
 #include "esp_heap_caps.h"
 #include "fonts.h"
+#include "lichen_clock.h"
 #include "list_filter.h"
 #include "menu.h"
 #include "menu_filter.h"
@@ -123,10 +124,18 @@ static void tick(lv_timer_t *t) {
     }
 }
 
+static void set_default_note(void);
+
 static void set_note(char const *text, bool error) {
     lv_label_set_text(note, text);
     lv_obj_set_style_text_color(note, lv_color_hex(error ? THEME_RED : THEME_DIM), 0);
     note_error = error;
+}
+
+// The usual line under the composer; the clock hint takes its place while the clock is not set (#8)
+static void set_default_note(void) {
+    char const *clock = mesh_clock_hint(clock_is_set());
+    set_note(clock ? clock : (dm_mode ? HINT_DM : HINT_CHANNEL), false);
 }
 
 static void on_ready(lv_event_t *e) {
@@ -142,7 +151,7 @@ static void on_ready(lv_event_t *e) {
         return;
     }
     lv_textarea_set_text(ta, "");
-    set_note(dm_mode ? HINT_DM : HINT_CHANNEL, false);
+    set_default_note();
     show_counter();
     shown_generation = UINT32_MAX; // the mesh task adds it within a few ms: the next tick shows it
 }
@@ -151,7 +160,7 @@ static void on_changed(lv_event_t *e) {
     (void)e;
     show_counter();
     if (note_error) {
-        set_note(dm_mode ? HINT_DM : HINT_CHANNEL, false);
+        set_default_note();
     }
 }
 
@@ -263,7 +272,7 @@ static lv_obj_t *build_chat(void) {
     lv_obj_set_width(counter, LV_PCT(100));
     note = lv_label_create(screen);
     lv_obj_set_width(note, LV_PCT(100));
-    set_note(dm_mode ? HINT_DM : HINT_CHANNEL, false);
+    set_default_note();
     lv_obj_set_style_text_color(counter, lv_color_hex(THEME_DIM), 0);
     show_counter();
 

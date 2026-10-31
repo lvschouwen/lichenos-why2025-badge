@@ -7,6 +7,7 @@
 #include "identity_move.h"
 #include "mesh.h"
 #include "mesh_format.h"
+#include "mesh_chat.h"
 #include "mesh_frame.h"
 #include "channel_input.h"
 #include "mesh_prefs.h"
@@ -685,6 +686,9 @@ extern "C" char const *mesh_channel_remove_named(char const *name) {
 }
 
 extern "C" bool mesh_send_advert(void) {
+    if (mesh_advert_refusal(clock_is_set())) {
+        return false; // nodes that heard us before drop an advert stamped before their last one (#8)
+    }
     if (settings_lock()) {
         return false;
     }
@@ -1199,6 +1203,10 @@ static void cmd_advert(char const *args) {
         return;
     }
     (void)args;
+    if (char const *why = mesh_advert_refusal(clock_is_set())) {
+        console_reply("advert not sent: %s (other nodes would drop it)", why);
+        return;
+    }
     console_reply(mesh_send_advert() ? "advert queued" : "advert not sent");
 }
 

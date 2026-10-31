@@ -32,6 +32,11 @@ bool mesh_msg_in_dm(mesh_msg_t const *m, uint8_t const peer[6]);
 void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, char *title, size_t title_cap, char *badge, size_t badge_cap,
                    char *sub, size_t sub_cap);
 
+// While the clock is not set (#8) other nodes see a wrong time on what we send: adverts are refused, messages are sent
+// with this hint shown in the composer. NULL when the clock is set / when nothing is refused.
+char const *mesh_advert_refusal(bool clock_set);
+char const *mesh_clock_hint(bool clock_set);
+
 // The compose line's counter: "12 / 138 bytes", or "170 / 138 bytes, the last 32 are cut" when it is too long.
 // Returns the bytes that would be sent (cut on a UTF-8 boundary).
 size_t mesh_compose_status(char const *text, size_t max_bytes, char *out, size_t cap);

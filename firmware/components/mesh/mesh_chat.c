@@ -101,6 +101,14 @@ void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, char *title, size_t tit
     snprintf(sub, sub_cap, "%s: %s", age, c->last);
 }
 
+char const *mesh_advert_refusal(bool clock_set) {
+    return clock_set ? NULL : "clock not set";
+}
+
+char const *mesh_clock_hint(bool clock_set) {
+    return clock_set ? NULL : "Clock not set, others see a wrong time    Enter: send    Esc: back";
+}
+
 size_t mesh_compose_status(char const *text, size_t max_bytes, char *out, size_t cap) {
     size_t len  = strlen(text);
     size_t sent = mf_text_cut(text, max_bytes);
