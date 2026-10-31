@@ -13,6 +13,7 @@
 #include "esp_log.h"
 // #include <algorithm>
 #include "esp_tca8418.h"
+#include "tca8418_mask.h"
 
 #define I2C0_MASTER_FREQ_HZ (100 * 1000) // the carrier board's I2C bus (I2C_NUM_0); was in BadgeVMS's badgevms_config.h
 
@@ -77,19 +78,6 @@ tca8418_dev_t *tca8418_create(gpio_num_t scl_pin, gpio_num_t sda_pin, uint8_t i2
     }
     ESP_LOGI(TAG, "i2c_address: %02x, rows: %u, cols: %u", tca8418_dev->i2c_address, tca8418_dev->rows, tca8418_dev->cols);
 
-    // Bit masks used for rows / columns
-    const uint8_t ROW_COL_BIT_MASK[8] =
-        {
-            0b00000001, // one row / column
-            0b00000011, // two rows / columns
-            0b00000111, // three rows / columns
-            0b00001111, // four rows / columns
-            0b00011111, // five rows / columns
-            0b00111111, // six rows / columns
-            0b01111111, // seven rows / columns
-            0b11111111, // eight rows / columns
-        };
-
     i2c_config_t conf = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = tca8418_dev->sda_pin,
@@ -138,11 +126,12 @@ tca8418_dev_t *tca8418_create(gpio_num_t scl_pin, gpio_num_t sda_pin, uint8_t i2
     writeRegister(tca8418_dev, REG_GPIO_INT_EN3, 0xFF);
 
     // configure rows and columns registers
-    writeRegister(tca8418_dev, REG_KEY_PRESS_GPIO1, ROW_COL_BIT_MASK[MIN(tca8418_dev->rows, sizeof(ROW_COL_BIT_MASK)) - 1]);
-    writeRegister(tca8418_dev, REG_KEY_PRESS_GPIO2, ROW_COL_BIT_MASK[MAX(tca8418_dev->cols, sizeof(ROW_COL_BIT_MASK)) - 1]);
+    const tca8418_masks_t masks = tca8418_key_masks(tca8418_dev->rows, tca8418_dev->cols);
+    writeRegister(tca8418_dev, REG_KEY_PRESS_GPIO1, masks.kp_gpio1);
+    writeRegister(tca8418_dev, REG_KEY_PRESS_GPIO2, masks.kp_gpio2);
     if (tca8418_dev->cols > 8)
     {
-        writeRegister(tca8418_dev, REG_KEY_PRESS_GPIO3, ROW_COL_BIT_MASK[tca8418_dev->cols - 9]);
+        writeRegister(tca8418_dev, REG_KEY_PRESS_GPIO3, masks.kp_gpio3);
     }
 
     writeRegister(tca8418_dev, REG_DEBOUNCE_DIS1, 0x00);

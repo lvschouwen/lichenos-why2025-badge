@@ -7,6 +7,6 @@
 #
 ###############################################################################
 
-idf_component_register(SRCS "esp_tca8418.c"
+idf_component_register(SRCS "esp_tca8418.c" "tca8418_mask.c"
                        INCLUDE_DIRS "include"
                        REQUIRES "esp_driver_gpio" "i2c_bus")
