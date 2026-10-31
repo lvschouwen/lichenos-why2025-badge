@@ -47,49 +47,34 @@ int main(void) {
     CHECK(strcmp(l1, "12 nodes") == 0);
     CHECK(strcmp(l2, "Listening on Public") == 0);
 
-    // gen 5, seen 2
-    t.generation      = 5;
-    t.seen_generation = 2;
+    // Unread is the sum over the chats
+    t.unread_total = 3;
     text(&t);
     CHECK(strcmp(l1, "3 unread " DOT " 12 nodes") == 0);
 
-    // gen 300, seen 0: capped
-    t.generation      = 300;
-    t.seen_generation = 0;
+    // 300 unread: capped
+    t.unread_total = 300;
     text(&t);
     CHECK(strcmp(l1, "99+ unread " DOT " 12 nodes") == 0);
-    t.generation = 99;
+    t.unread_total = 99;
     text(&t);
     CHECK(strcmp(l1, "99 unread " DOT " 12 nodes") == 0);
 
     // One node
     t.contacts = 1;
-    t.generation = t.seen_generation = 7;
+    t.unread_total = 0;
     text(&t);
     CHECK(strcmp(l1, "1 node") == 0);
     t.contacts = 12;
 
-    // Review focus 5 (unread_counts_from_last_seen_generation): opened at gen 40, one more arrives while open -> 1
-    // unread until mesh_mark_seen runs on the next refresh with Messages visible
-    t.generation = 40;
-    mesh_tile_mark_seen(&t);
-    CHECK(t.seen_generation == 40);
+    // A message sets the latest line only; the caller sets the total from the store
+    mesh_tile_on_message(&t, "Public", "hello");
     text(&t);
     CHECK(strcmp(l1, "12 nodes") == 0);
-    mesh_tile_on_message(&t, "Public", "hello", 41);
+    CHECK(strcmp(l2, "[Public] hello") == 0);
+    t.unread_total = 1;
     text(&t);
     CHECK(strcmp(l1, "1 unread " DOT " 12 nodes") == 0);
-    CHECK(strcmp(l2, "[Public] hello") == 0);
-    mesh_tile_mark_seen(&t);
-    text(&t);
-    CHECK(strcmp(l1, "12 nodes") == 0);
-    CHECK(strcmp(l2, "[Public] hello") == 0); // the latest stays
-
-    // Generation wraps: still counts from seen
-    t.seen_generation = 0xFFFFFFFEu;
-    t.generation      = 1;
-    text(&t);
-    CHECK(strcmp(l1, "3 unread " DOT " 12 nodes") == 0);
 
     // The latest 160 bytes: cut to c2 - 1 on a UTF-8 boundary (é = 2 bytes, starting at byte 0, so byte 63 splits one)
     char long_text[MESH_TEXT_MAX + 1];
@@ -107,7 +92,7 @@ int main(void) {
     CHECK(strlen(even) == 62);
 
     // A message longer than the tile's buffer is kept cut, whole characters only
-    mesh_tile_on_message(&t, "Public", long_text, 42);
+    mesh_tile_on_message(&t, "Public", long_text);
     CHECK(strlen(t.latest) <= MESH_TEXT_MAX);
     CHECK(utf8_whole(t.latest));
     CHECK(strncmp(t.latest, "[Public] ", 9) == 0);

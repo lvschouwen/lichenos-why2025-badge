@@ -91,6 +91,91 @@ int main(void) {
         mesh_store_add_dm("@bob", "hello", -50, 4, peer);
         CHECK(mesh_store_message(mesh_store_message_count() - 1, &m) && m.dm && !m.outgoing && m.peer[0] == 9);
     }
+    // #59: a quiet chat keeps its messages however much Public says
+    CHECK(mesh_store_init(5));
+    {
+        uint8_t const bob[6] = {1, 2, 3, 4, 5, 6}, eve[6] = {6, 5, 4, 3, 2, 1};
+        mesh_chat_key_t kb, ke, kc, kp;
+        mesh_chat_key_dm(&kb, bob);
+        mesh_chat_key_dm(&ke, eve);
+        mesh_chat_key_channel(&kc, "#BadgeTest");
+        mesh_chat_key_channel(&kp, "Public");
+        mesh_store_add_dm("@bob", "hi", -50, 1, bob);
+        mesh_store_add_message("#badgetest", "x: t1", -60, 2);
+        for (int i = 0; i < 300; i++) {
+            char t[16];
+            snprintf(t, sizeof(t), "p: %d", i);
+            mesh_store_add_message("Public", t, -70, 3 + (uint32_t)i);
+        }
+        mesh_msg_t buf[8];
+        CHECK(mesh_store_chat(&kb, buf, 8, false) == 1 && strcmp(buf[0].text, "hi") == 0 && buf[0].dm);
+        CHECK(mesh_store_chat(&kc, buf, 8, false) == 1 && strcmp(buf[0].text, "x: t1") == 0); // key ignores case
+        CHECK(mesh_store_chat(&kp, buf, 8, false) == 5 && strcmp(buf[4].text, "p: 299") == 0 &&
+              strcmp(buf[0].text, "p: 295") == 0);
+        CHECK(mesh_store_chat(&kp, buf, 2, false) == 2 && strcmp(buf[0].text, "p: 298") == 0); // newest two
+        CHECK(mesh_store_chat(&ke, buf, 8, false) == 0);
+
+        // Order over all chats (the old flat view): oldest first, by arrival
+        CHECK(mesh_store_message_count() == 7);
+        CHECK(mesh_store_recent(buf, 3) == 3 && strcmp(buf[0].text, "p: 297") == 0 && strcmp(buf[2].text, "p: 299") == 0);
+        mesh_msg_t one;
+        CHECK(mesh_store_message(0, &one) && strcmp(one.text, "hi") == 0);
+        CHECK(mesh_store_message(1, &one) && strcmp(one.text, "x: t1") == 0);
+
+        // Unread per chat, our own messages and mark_read
+        CHECK(mesh_store_unread_total() == 1 + 1 + 300);
+        mesh_store_add_outgoing("#badgetest", "me: yo", 5, 400);
+        CHECK(mesh_store_unread_total() == 302);
+        mesh_conv_t cv[MESH_CONV_MAX];
+        size_t      n = mesh_store_convs(cv, MESH_CONV_MAX);
+        CHECK(n == 3);
+        for (size_t i = 0; i < n; i++) {
+            if (cv[i].key.kind == MESH_CHAT_DM) {
+                CHECK(cv[i].unread == 1 && strcmp(cv[i].title, "@bob") == 0);
+            } else if (strcmp(cv[i].key.chan, "#badgetest") == 0) {
+                CHECK(cv[i].unread == 1 && cv[i].count == 2 && cv[i].last_outgoing && strcmp(cv[i].last, "me: yo") == 0);
+            } else {
+                CHECK(cv[i].unread == 300 && cv[i].count == 5);
+            }
+        }
+        CHECK(mesh_store_chat(&kb, buf, 8, true) == 1);
+        CHECK(mesh_store_unread_total() == 301);
+        CHECK(mesh_store_chat(&kp, buf, 8, true) == 5 && mesh_store_unread_total() == 1);
+        mesh_store_add_dm("@bob", "again", -50, 500, bob);
+        CHECK(mesh_store_unread_total() == 2);
+        CHECK(mesh_store_update_out(5, 3, 1, 0, 0)); // found in its own chat
+        CHECK(mesh_store_chat(&kc, buf, 8, false) == 2 && buf[1].state == 3);
+    }
+
+    // The chat table: a full table drops the DM chat quiet for longest, never a channel
+    CHECK(mesh_store_init(2));
+    {
+        uint8_t peer[6] = {0};
+        char    name[16];
+        for (int i = 0; i < 4; i++) {
+            snprintf(name, sizeof(name), "#c%d", i);
+            mesh_store_add_message(name, "x", 0, 1);
+        }
+        for (int i = 0; i < MESH_CONV_MAX - 4; i++) {
+            peer[0] = (uint8_t)(i + 1);
+            mesh_store_add_dm("@d", "x", 0, 1, peer);
+        }
+        mesh_conv_t cv[MESH_CONV_MAX + 1];
+        CHECK(mesh_store_convs(cv, MESH_CONV_MAX + 1) == MESH_CONV_MAX);
+        peer[0] = 200; // one more: the first DM (peer 1) goes
+        mesh_store_add_dm("@new", "x", 0, 2, peer);
+        mesh_chat_key_t k;
+        mesh_msg_t      b[2];
+        peer[0] = 1;
+        mesh_chat_key_dm(&k, peer);
+        CHECK(mesh_store_chat(&k, b, 2, false) == 0);
+        peer[0] = 200;
+        mesh_chat_key_dm(&k, peer);
+        CHECK(mesh_store_chat(&k, b, 2, false) == 1);
+        mesh_chat_key_channel(&k, "#c0");
+        CHECK(mesh_store_chat(&k, b, 2, false) == 1);
+        CHECK(mesh_store_convs(cv, MESH_CONV_MAX + 1) == MESH_CONV_MAX);
+    }
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

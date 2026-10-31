@@ -275,9 +275,6 @@ static void refresh(lv_timer_t *t) {
     if (stale) {
         last_rebuild_s = mesh_uptime_s();
     }
-    if (messages_visible()) {
-        mesh_mark_seen(); // what is on screen now has been seen
-    }
 }
 
 static lv_obj_t *active_list(void) {
@@ -289,9 +286,6 @@ static void switch_tab(int delta) {
     uint32_t cur = lv_tabview_get_tab_active(tabs);
     lv_tabview_set_active(tabs, (cur + n + delta) % n, LV_ANIM_OFF);
     lv_label_set_text(tab_hint, messages_visible() ? HINT_MESSAGES : HINT_CONTACTS);
-    if (messages_visible()) {
-        mesh_mark_seen();
-    }
 }
 
 static void on_key(lv_event_t *e) {
@@ -436,7 +430,6 @@ static void build_tabs(lv_obj_t *screen, lv_group_t *group) {
     last_rebuild_s     = mesh_uptime_s();
     timer              = lv_timer_create(refresh, 1000, NULL);
     refresh(timer);
-    mesh_mark_seen(); // opening on Messages: seen, even if the first snapshot found MeshCore busy
 }
 
 // ---- the first open: name, then region (#67) ---------------------------------------------------------------------

@@ -82,10 +82,8 @@ static void rebuild(size_t n) {
     size_t shown = 0;
     uint32_t now = mesh_uptime_s();
     for (size_t i = 0; i < n; i++) {
-        if (dm_mode ? mesh_msg_in_dm(&copy[i], peer) : mesh_msg_in_channel(&copy[i], channel)) {
-            add_message(&copy[i], now);
-            shown++;
-        }
+        add_message(&copy[i], now);
+        shown++;
     }
     if (!shown) {
         add_line(list, "No messages here yet.", THEME_DIM);
@@ -106,8 +104,15 @@ static void show_counter(void) {
 
 static void tick(lv_timer_t *t) {
     (void)t;
-    uint32_t generation;
-    size_t   n = mesh_messages_snapshot(copy, SHOW_MESSAGES, &generation, SCREEN_WAIT_MS);
+    uint32_t        generation;
+    mesh_chat_key_t key;
+    if (dm_mode) {
+        mesh_chat_key_dm(&key, peer);
+    } else {
+        mesh_chat_key_channel(&key, channel);
+    }
+    // The chat's own ring (#59), read with mark_read: the chat is on screen, so it counts as read (#48)
+    size_t n = mesh_chat_snapshot(&key, copy, SHOW_MESSAGES, &generation, true, SCREEN_WAIT_MS);
     if (n == MESH_BUSY) {
         return;
     }

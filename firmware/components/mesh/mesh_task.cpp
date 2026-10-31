@@ -42,7 +42,7 @@ extern "C" {
 #include <string.h>
 #include <time.h>
 
-#define STORE_MESSAGES 200 // kept in mesh_store (PSRAM)
+#define STORE_MESSAGES 100 // kept per chat in mesh_store (PSRAM, allocated with the chat's first message)
 #define MESH_STACK     16384 // Ed25519 signature checks are deep, and MyMesh keeps File objects on the stack
 #define MESH_CORE      0     // LVGL runs on core 1
 #define MESH_POLL_MS   2
@@ -148,16 +148,29 @@ static mesh_tile_t  tile;
 static uint32_t     tile_heard_s; // uptime of the newest message, 0 for none
 static portMUX_TYPE tile_mux = portMUX_INITIALIZER_UNLOCKED;
 
+// The unread total over all chats, after the store changed (called under the mesh lock)
+static void tile_publish_unread(void) {
+    uint32_t total = mesh_store_unread_total();
+    portENTER_CRITICAL(&tile_mux);
+    tile.unread_total = total;
+    portEXIT_CRITICAL(&tile_mux);
+}
+
+static uint32_t tile_unread(void) {
+    portENTER_CRITICAL(&tile_mux);
+    uint32_t total = tile.unread_total;
+    portEXIT_CRITICAL(&tile_mux);
+    return total;
+}
+
 static void tile_on_message(char const *channel, char const *text) {
     mesh_tile_t m;
-    portENTER_CRITICAL(&tile_mux);
-    m = tile;
-    portEXIT_CRITICAL(&tile_mux);
-    mesh_tile_on_message(&m, channel, text, mesh_store_generation()); // the formatting outside the spinlock
+    mesh_tile_on_message(&m, channel, text); // the formatting outside the spinlock
+    uint32_t total = mesh_store_unread_total();
     portENTER_CRITICAL(&tile_mux);
     memcpy(tile.latest, m.latest, sizeof(tile.latest));
-    tile.generation = m.generation;
-    tile_heard_s    = mesh_uptime_s();
+    tile.unread_total = total;
+    tile_heard_s      = mesh_uptime_s();
     portEXIT_CRITICAL(&tile_mux);
 }
 
@@ -173,12 +186,6 @@ extern "C" void mesh_tile_snapshot(mesh_tile_t *out) {
     uint32_t heard  = tile_heard_s;
     portEXIT_CRITICAL(&tile_mux);
     out->last_heard_age_s = heard ? mesh_uptime_s() - heard : 0;
-}
-
-extern "C" void mesh_mark_seen(void) {
-    portENTER_CRITICAL(&tile_mux);
-    mesh_tile_mark_seen(&tile);
-    portEXIT_CRITICAL(&tile_mux);
 }
 
 // Messages for the screens, from MyMesh (called inside loop(), under the lock)
@@ -204,14 +211,33 @@ extern "C" size_t mesh_messages_snapshot(mesh_msg_t *out, size_t max, uint32_t *
     if (!mesh_lock_within(wait_ms)) {
         return MESH_BUSY;
     }
-    size_t n     = mesh_store_message_count();
-    size_t first = n > max ? n - max : 0;
-    for (size_t i = first; i < n; i++) {
-        mesh_store_message(i, &out[i - first]);
-    }
+    size_t n    = mesh_store_recent(out, max);
     *generation = mesh_store_view_generation();
     mesh_unlock();
-    return n - first;
+    return n;
+}
+
+extern "C" size_t mesh_chat_snapshot(mesh_chat_key_t const *key, mesh_msg_t *out, size_t max, uint32_t *generation,
+                                     bool mark_read, uint32_t wait_ms) {
+    if (!mesh_lock_within(wait_ms)) {
+        return MESH_BUSY;
+    }
+    size_t n    = mesh_store_chat(key, out, max, mark_read);
+    *generation = mesh_store_view_generation();
+    if (mark_read) {
+        tile_publish_unread();
+    }
+    mesh_unlock();
+    return n;
+}
+
+extern "C" size_t mesh_convs_snapshot(mesh_conv_t *out, size_t max, uint32_t wait_ms) {
+    if (!mesh_lock_within(wait_ms)) {
+        return MESH_BUSY;
+    }
+    size_t n = mesh_store_convs(out, max);
+    mesh_unlock();
+    return n;
 }
 
 extern "C" size_t mesh_contacts_snapshot(mesh_contact_t *out, size_t max, size_t *total, uint32_t wait_ms) {
@@ -932,6 +958,29 @@ static void cmd_mesh_link(void) {
     console_reply("mesh task stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(mesh_task_handle));
 }
 
+// "fw mesh chats": every chat with its unread count and how full its ring is
+static void cmd_mesh_chats(void) {
+    mesh_conv_t *list = (mesh_conv_t *)heap_caps_malloc(MESH_CONV_MAX * sizeof(mesh_conv_t), MALLOC_CAP_SPIRAM);
+    if (!list) {
+        console_reply("no memory");
+        return;
+    }
+    size_t n = mesh_convs_snapshot(list, MESH_CONV_MAX, MESH_WAIT_FOREVER);
+    for (size_t i = 0; i < n; i++) {
+        char what[16];
+        if (list[i].key.kind == MESH_CHAT_DM) {
+            snprintf(what, sizeof(what), "dm %02x%02x%02x%02x%02x%02x", list[i].key.id[0], list[i].key.id[1],
+                     list[i].key.id[2], list[i].key.id[3], list[i].key.id[4], list[i].key.id[5]);
+        } else {
+            snprintf(what, sizeof(what), "channel");
+        }
+        console_reply("chat %-15s %-32s unread %u, %u/%u kept", what, list[i].title, (unsigned)list[i].unread,
+                      (unsigned)list[i].count, (unsigned)STORE_MESSAGES);
+    }
+    free(list);
+    console_reply("%u chat(s), %u unread", (unsigned)n, (unsigned)tile_unread());
+}
+
 static void cmd_mesh(char const *args) {
     if (mesh_is_stopped()) {
         console_reply("MeshCore stopped for update");
@@ -961,8 +1010,12 @@ static void cmd_mesh(char const *args) {
         cmd_mesh_link();
         return;
     }
+    if (strcmp(args, "chats") == 0) {
+        cmd_mesh_chats();
+        return;
+    }
     if (*args) {
-        console_reply("mesh | mesh name <name> | mesh radio <preset index | freq bw sf cr> [txdbm] | mesh link | mesh out | "
+        console_reply("mesh | mesh name <name> | mesh radio <preset index | freq bw sf cr> [txdbm] | mesh link | mesh out | mesh chats | "
                       "mesh send <channel> <text> | mesh dm <12 hex> <text>");
         return;
     }
@@ -1188,8 +1241,8 @@ extern "C" bool mesh_start(void) {
     mesh_lock();
     settings_from_node(n);
     portENTER_CRITICAL(&tile_mux);
-    tile.generation = tile.seen_generation = mesh_store_generation(); // nothing unread at boot
-    tile.contacts                          = (size_t)n->getNumContacts();
+    tile.unread_total = 0; // nothing unread at boot
+    tile.contacts     = (size_t)n->getNumContacts();
     portEXIT_CRITICAL(&tile_mux);
     __atomic_store_n(&node, n, __ATOMIC_RELEASE);
     mesh_unlock();

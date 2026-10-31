@@ -7,7 +7,7 @@
 #define DOT "\xE2\x80\xA2" // U+2022: Montserrat on the badge has it, not U+00B7
 
 void mesh_tile_text(mesh_tile_t const *t, char *line1, size_t c1, char *line2, size_t c2) {
-    uint32_t unread = t->generation - t->seen_generation; // unsigned: survives the wrap
+    uint32_t unread = t->unread_total;
     char     nodes[24];
     snprintf(nodes, sizeof(nodes), "%u %s", (unsigned)t->contacts, t->contacts == 1 ? "node" : "nodes");
     if (c1) {
@@ -28,13 +28,8 @@ void mesh_tile_text(mesh_tile_t const *t, char *line1, size_t c1, char *line2, s
     }
 }
 
-void mesh_tile_mark_seen(mesh_tile_t *t) {
-    t->seen_generation = t->generation;
-}
-
-void mesh_tile_on_message(mesh_tile_t *t, char const *channel, char const *text, uint32_t generation) {
+void mesh_tile_on_message(mesh_tile_t *t, char const *channel, char const *text) {
     char line[MESH_CHANNEL_MAX + MESH_TEXT_MAX + 8];
     snprintf(line, sizeof(line), "[%s] %s", channel, text);
     mesh_sanitize(line, strlen(line), t->latest, sizeof(t->latest));
-    t->generation = generation;
 }

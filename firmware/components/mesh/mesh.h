@@ -42,8 +42,6 @@ bool mesh_node_id(char *hex, size_t cap);
 
 // The home tile (#67): a copy of what the mesh task keeps up to date (a spinlock, never the mesh lock), safe any time
 void mesh_tile_snapshot(mesh_tile_t *out);
-// Messages is on screen: what arrived so far counts as read
-void mesh_mark_seen(void);
 
 // The radio as MeshCore's prefs have it; the prefs are read under the mesh lock (up to wait_ms), else the copy taken at
 // start is given. false before MeshCore is up.
@@ -93,8 +91,14 @@ uint32_t mesh_uptime_s(void);
 // that can take a while): MESH_BUSY when it wasn't free in time, so the screen skips a tick instead of freezing.
 #define MESH_BUSY         SIZE_MAX
 #define MESH_WAIT_FOREVER UINT32_MAX
-// Up to max of the newest messages, oldest first; returns how many, *generation as mesh_store_generation()
+// Up to max of the newest messages over all chats, oldest first; returns how many, *generation as mesh_store_generation()
 size_t mesh_messages_snapshot(mesh_msg_t *out, size_t max, uint32_t *generation, uint32_t wait_ms);
+// One chat's messages (the newest max, oldest first), *generation as mesh_store_view_generation(). With mark_read the
+// chat's unread count is cleared in the same lock and the home tile follows: call it while the chat is on screen.
+size_t mesh_chat_snapshot(mesh_chat_key_t const *key, mesh_msg_t *out, size_t max, uint32_t *generation,
+                          bool mark_read, uint32_t wait_ms);
+// The chats with unread counts and the latest line, in table order (the caller sorts)
+size_t mesh_convs_snapshot(mesh_conv_t *out, size_t max, uint32_t wait_ms);
 // Up to max contacts, most recently heard first; returns how many, *total = all contacts
 size_t mesh_contacts_snapshot(mesh_contact_t *out, size_t max, size_t *total, uint32_t wait_ms);
 

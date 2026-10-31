@@ -4,18 +4,74 @@
 #include <stdlib.h>
 #include <string.h>
 
-// A ring, oldest overwritten
-static mesh_msg_t *messages;
-static size_t      msg_cap, msg_head, msg_count; // msg_head = index of the oldest
-static uint32_t    generation, own_changes;
+// A table of chats, each with a ring of its messages (oldest overwritten)
+typedef struct {
+    mesh_conv_t pub;
+    mesh_msg_t *ring;
+    size_t      head;     // index of the oldest
+    uint32_t    last_seq; // of its newest message: which DM chat has been quiet longest
+    bool        used;
+} conv_t;
 
-bool mesh_store_init(size_t max_messages) {
-    free(messages);
-    messages = calloc(max_messages, sizeof(*messages));
-    msg_cap  = messages ? max_messages : 0;
-    msg_head = msg_count = 0;
+static conv_t   convs[MESH_CONV_MAX];
+static size_t   ring_cap;
+static uint32_t generation, own_changes, next_seq;
+
+bool mesh_store_init(size_t chat_keep) {
+    for (size_t i = 0; i < MESH_CONV_MAX; i++) {
+        free(convs[i].ring);
+    }
+    memset(convs, 0, sizeof(convs));
+    ring_cap = chat_keep;
     generation++;
-    return messages != NULL;
+    return chat_keep > 0;
+}
+
+void mesh_chat_key_channel(mesh_chat_key_t *key, char const *name) {
+    char clean[MESH_CHANNEL_MAX + 1];
+    memset(key, 0, sizeof(*key));
+    key->kind = MESH_CHAT_CHANNEL;
+    mesh_sanitize(name, strlen(name), clean, sizeof(clean));
+    for (size_t i = 0; clean[i]; i++) {
+        key->chan[i] = (clean[i] >= 'A' && clean[i] <= 'Z') ? (char)(clean[i] + 32) : clean[i];
+    }
+}
+
+void mesh_chat_key_dm(mesh_chat_key_t *key, uint8_t const peer[6]) {
+    memset(key, 0, sizeof(*key));
+    key->kind = MESH_CHAT_DM;
+    memcpy(key->id, peer, 6);
+}
+
+static bool key_same(mesh_chat_key_t const *a, mesh_chat_key_t const *b) {
+    return memcmp(a, b, sizeof(*a)) == 0;
+}
+
+static conv_t *find_conv(mesh_chat_key_t const *key) {
+    for (size_t i = 0; i < MESH_CONV_MAX; i++) {
+        if (convs[i].used && key_same(&convs[i].pub.key, key)) {
+            return &convs[i];
+        }
+    }
+    return NULL;
+}
+
+// A free slot, else the DM chat quiet for longest is dropped to make room; NULL when the table holds only channels
+static conv_t *new_conv(void) {
+    conv_t *victim = NULL;
+    for (size_t i = 0; i < MESH_CONV_MAX; i++) {
+        if (!convs[i].used) {
+            return &convs[i];
+        }
+        if (convs[i].pub.key.kind == MESH_CHAT_DM && (!victim || convs[i].last_seq < victim->last_seq)) {
+            victim = &convs[i];
+        }
+    }
+    if (victim) {
+        free(victim->ring);
+        memset(victim, 0, sizeof(*victim));
+    }
+    return victim;
 }
 
 // Length of the UTF-8 sequence starting at in[0], or 0 when it isn't a valid one within len bytes. Strict, as RFC 3629:
@@ -81,68 +137,115 @@ size_t mesh_sanitize(char const *in, size_t in_len, char *out, size_t cap) {
     return n;
 }
 
-void mesh_store_add_message(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s) {
-    if (!msg_cap) {
-        return;
+static mesh_msg_t *conv_at(conv_t const *cv, size_t i) { // 0 = oldest
+    return &cv->ring[(cv->head + i) % ring_cap];
+}
+
+// Appends a message to its chat (created on the first one); NULL when out of memory or the table is full of channels.
+// The caller fills in the rest (id, dm, peer...) and the unread count.
+static mesh_msg_t *push(mesh_chat_key_t const *key, char const *title, char const *channel, char const *text,
+                        int16_t rssi_x10, uint32_t heard_s) {
+    if (!ring_cap) {
+        return NULL;
     }
-    size_t slot = (msg_head + msg_count) % msg_cap;
-    if (msg_count == msg_cap) {
-        msg_head = (msg_head + 1) % msg_cap; // overwrite the oldest
+    conv_t *cv = find_conv(key);
+    if (!cv) {
+        cv = new_conv();
+        if (!cv) {
+            return NULL;
+        }
+        cv->ring = calloc(ring_cap, sizeof(*cv->ring));
+        if (!cv->ring) {
+            return NULL;
+        }
+        cv->used    = true;
+        cv->pub.key = *key;
+    }
+    size_t slot = (cv->head + cv->pub.count) % ring_cap;
+    if (cv->pub.count == ring_cap) {
+        cv->head = (cv->head + 1) % ring_cap; // overwrite the oldest
     } else {
-        msg_count++;
+        cv->pub.count++;
     }
-    mesh_msg_t *m = &messages[slot];
+    mesh_msg_t *m = &cv->ring[slot];
+    memset(m, 0, sizeof(*m));
     mesh_sanitize(channel, strlen(channel), m->channel, sizeof(m->channel));
     mesh_sanitize(text, strlen(text), m->text, sizeof(m->text));
     m->rssi_x10 = rssi_x10;
     m->heard_s  = heard_s;
-    m->id = m->outgoing = m->state = m->repeats = m->dm = m->attempt = 0;
-    m->trip_ms = 0;
-    memset(m->peer, 0, sizeof(m->peer));
-    generation++;
+    m->seq      = ++next_seq;
+    mesh_sanitize(title, strlen(title), cv->pub.title, sizeof(cv->pub.title));
+    memcpy(cv->pub.last, m->text, sizeof(cv->pub.last));
+    cv->pub.last_heard_s = heard_s;
+    cv->pub.last_outgoing = 0;
+    cv->last_seq         = m->seq;
+    return m;
 }
 
-void mesh_store_add_outgoing(char const *channel, char const *text, uint32_t id, uint32_t heard_s) {
-    if (!msg_cap) {
-        return;
+void mesh_store_add_message(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s) {
+    mesh_chat_key_t key;
+    mesh_chat_key_channel(&key, channel);
+    if (push(&key, channel, channel, text, rssi_x10, heard_s)) {
+        conv_t *cv = find_conv(&key);
+        if (cv->pub.unread < UINT16_MAX) {
+            cv->pub.unread++;
+        }
+        generation++;
     }
-    mesh_store_add_message(channel, text, 0, heard_s);
-    generation--; // undo: only incoming messages count as unread
-    mesh_msg_t *m = &messages[(msg_head + msg_count - 1) % msg_cap];
-    m->id         = id;
-    m->outgoing   = 1;
-    own_changes++;
-}
-
-static mesh_msg_t *newest(void) {
-    return &messages[(msg_head + msg_count - 1) % msg_cap];
 }
 
 void mesh_store_add_dm(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s, uint8_t const peer[6]) {
-    if (!msg_cap) {
-        return;
+    mesh_chat_key_t key;
+    mesh_chat_key_dm(&key, peer);
+    mesh_msg_t *m = push(&key, channel, channel, text, rssi_x10, heard_s);
+    if (m) {
+        m->dm = 1;
+        memcpy(m->peer, peer, 6);
+        conv_t *cv = find_conv(&key);
+        if (cv->pub.unread < UINT16_MAX) {
+            cv->pub.unread++;
+        }
+        generation++;
     }
-    mesh_store_add_message(channel, text, rssi_x10, heard_s);
-    mesh_msg_t *m = newest();
-    m->dm         = 1;
-    memcpy(m->peer, peer, sizeof(m->peer));
+}
+
+// Our own message: not unread, so it moves only the view generation
+static void mark_outgoing(mesh_chat_key_t const *key, mesh_msg_t *m, uint32_t id) {
+    m->id       = id;
+    m->outgoing = 1;
+    find_conv(key)->pub.last_outgoing = 1;
+    own_changes++;
+}
+
+void mesh_store_add_outgoing(char const *channel, char const *text, uint32_t id, uint32_t heard_s) {
+    mesh_chat_key_t key;
+    mesh_chat_key_channel(&key, channel);
+    mesh_msg_t *m = push(&key, channel, channel, text, 0, heard_s);
+    if (m) {
+        mark_outgoing(&key, m, id);
+    }
 }
 
 void mesh_store_add_outgoing_dm(char const *channel, char const *text, uint32_t id, uint32_t heard_s,
                                 uint8_t const peer[6]) {
-    if (!msg_cap) {
-        return;
+    mesh_chat_key_t key;
+    mesh_chat_key_dm(&key, peer);
+    mesh_msg_t *m = push(&key, channel, channel, text, 0, heard_s);
+    if (m) {
+        m->dm = 1;
+        memcpy(m->peer, peer, 6);
+        mark_outgoing(&key, m, id);
     }
-    mesh_store_add_outgoing(channel, text, id, heard_s);
-    mesh_msg_t *m = newest();
-    m->dm         = 1;
-    memcpy(m->peer, peer, sizeof(m->peer));
 }
 
 bool mesh_store_update_out(uint32_t id, uint8_t state, uint8_t repeats, uint8_t attempt, uint32_t trip_ms) {
-    for (size_t i = msg_count; id && i > 0; i--) {
-        mesh_msg_t *m = &messages[(msg_head + i - 1) % msg_cap];
-        if (m->outgoing && m->id == id) {
+    for (size_t c = 0; id && c < MESH_CONV_MAX; c++) {
+        conv_t const *cv = &convs[c];
+        for (size_t i = cv->used ? cv->pub.count : 0; i > 0; i--) {
+            mesh_msg_t *m = conv_at(cv, i - 1);
+            if (!m->outgoing || m->id != id) {
+                continue;
+            }
             if (m->state == state && m->repeats == repeats && m->attempt == attempt && m->trip_ms == trip_ms) {
                 return false;
             }
@@ -158,15 +261,87 @@ bool mesh_store_update_out(uint32_t id, uint8_t state, uint8_t repeats, uint8_t 
 }
 
 size_t mesh_store_message_count(void) {
-    return msg_count;
+    size_t n = 0;
+    for (size_t i = 0; i < MESH_CONV_MAX; i++) {
+        n += convs[i].used ? convs[i].pub.count : 0;
+    }
+    return n;
+}
+
+// Walks all chats from their newest message back: the next-newest message overall, NULL at the end
+static mesh_msg_t const *merge_next(size_t left[MESH_CONV_MAX]) {
+    size_t best = MESH_CONV_MAX;
+    for (size_t i = 0; i < MESH_CONV_MAX; i++) {
+        if (left[i] && (best == MESH_CONV_MAX || conv_at(&convs[i], left[i] - 1)->seq > conv_at(&convs[best], left[best] - 1)->seq)) {
+            best = i;
+        }
+    }
+    return best == MESH_CONV_MAX ? NULL : conv_at(&convs[best], --left[best]);
+}
+
+static void merge_start(size_t left[MESH_CONV_MAX]) {
+    for (size_t i = 0; i < MESH_CONV_MAX; i++) {
+        left[i] = convs[i].used ? convs[i].pub.count : 0;
+    }
+}
+
+size_t mesh_store_recent(mesh_msg_t *out, size_t max) {
+    size_t left[MESH_CONV_MAX], total = mesh_store_message_count();
+    size_t n = total < max ? total : max;
+    merge_start(left);
+    for (size_t k = n; k > 0; k--) {
+        out[k - 1] = *merge_next(left);
+    }
+    return n;
 }
 
 bool mesh_store_message(size_t index, mesh_msg_t *out) {
-    if (index >= msg_count) {
+    size_t left[MESH_CONV_MAX], total = mesh_store_message_count();
+    if (index >= total) {
         return false;
     }
-    *out = messages[(msg_head + index) % msg_cap];
-    return true;
+    merge_start(left);
+    for (size_t skip = total - 1 - index;; skip--) {
+        mesh_msg_t const *m = merge_next(left);
+        if (!skip) {
+            *out = *m;
+            return true;
+        }
+    }
+}
+
+size_t mesh_store_chat(mesh_chat_key_t const *key, mesh_msg_t *out, size_t max, bool mark_read) {
+    conv_t *cv = find_conv(key);
+    if (!cv) {
+        return 0;
+    }
+    size_t n     = cv->pub.count < max ? cv->pub.count : max;
+    size_t first = cv->pub.count - n;
+    for (size_t i = 0; i < n; i++) {
+        out[i] = *conv_at(cv, first + i);
+    }
+    if (mark_read) {
+        cv->pub.unread = 0;
+    }
+    return n;
+}
+
+size_t mesh_store_convs(mesh_conv_t *out, size_t max) {
+    size_t n = 0;
+    for (size_t i = 0; i < MESH_CONV_MAX && n < max; i++) {
+        if (convs[i].used) {
+            out[n++] = convs[i].pub;
+        }
+    }
+    return n;
+}
+
+uint32_t mesh_store_unread_total(void) {
+    uint32_t total = 0;
+    for (size_t i = 0; i < MESH_CONV_MAX; i++) {
+        total += convs[i].used ? convs[i].pub.unread : 0;
+    }
+    return total;
 }
 
 uint32_t mesh_store_generation(void) {
