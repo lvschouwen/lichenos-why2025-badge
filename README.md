@@ -124,8 +124,8 @@ fonts; `fw assets` shows their state.
 MeshCore keeps its files in `/storage/meshcore` (identity, made on first boot; contacts; channels), so they survive
 reboots and firmware updates. Limits: 1000 contacts, 40 channels (Public included), 256 queued messages. The screen and
 `fw msgs` show the last 200 messages, which are kept in memory only. The clock comes from SNTP once Wi-Fi is up;
-adverts sent before that carry a wrong timestamp. Text uses LVGL's built-in Montserrat font (ASCII only), so emoji in
-node names show as boxes.
+adverts sent before that carry a wrong timestamp. Text uses Lichen's own fonts from the assets partition (Latin, Cyrillic, Greek, monochrome emoji; regenerate with
+`tools/make_fonts.py`); a character none of them has shows as a box.
 
 The LoRa settings Lichen starts with are in `/storage/lora.toml` (`frequency_mhz`, `bandwidth_khz`,
 `spreading_factor`, `coding_rate`, `sync_word`, `preamble`); the default is the Dutch MeshCore preset, 869.618 MHz,
@@ -182,6 +182,7 @@ Lichen stands on a lot of other people's work. Thank you!
 | [ESP-Hosted MCU](https://github.com/espressif/esp-hosted-mcu) | Wi-Fi and BLE through the C6 | Apache-2.0 |
 | [ESP-IDF](https://github.com/espressif/esp-idf) and Espressif's components (esp_lvgl_port, esp-serial-flasher, esp_wifi_remote, i2c_bus, USB host drivers) | The base of both firmwares | Apache-2.0 |
 | [LVGL](https://github.com/lvgl/lvgl) 9.6 | The user interface (with the Montserrat font, OFL-1.1) | MIT |
+| [DejaVu Sans](https://dejavu-fonts.github.io), [Noto Emoji](https://github.com/googlefonts/noto-emoji) | Glyphs merged into Lichen's fonts (Bitstream Vera license, OFL-1.1) | free font licenses |
 | [RadioLib](https://github.com/jgromes/RadioLib) 7.8 | The SX1262 driver on the C6 | MIT |
 | [rweather/arduinolibs](https://github.com/rweather/arduinolibs) Crypto | Ed25519, AES and SHA for MeshCore | MIT |
 | [base64_arduino](https://github.com/Densaugeo/base64_arduino) | Base64 for MeshCore | MIT |

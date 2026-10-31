@@ -9,6 +9,7 @@
 #include "nav.h"
 #include "settings_store.h"
 #include "shell_parts.h"
+#include "fonts.h"
 #include "theme.h"
 #include "update_screen.h"
 
@@ -61,7 +62,7 @@ void shell_style_screen(lv_obj_t *screen) {
     lv_obj_set_style_bg_color(screen, lv_color_hex(THEME_BG), 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(screen, lv_color_hex(THEME_TEXT), 0);
-    lv_obj_set_style_text_font(screen, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(screen, lichen_font(LICHEN_FONT_SMALL), 0);
 }
 
 static void focus_keys(void) {

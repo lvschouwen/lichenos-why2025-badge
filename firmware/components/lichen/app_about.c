@@ -9,6 +9,7 @@
 #include "logo.h"
 #include "shell_parts.h"
 #include "storage.h"
+#include "fonts.h"
 #include "theme.h"
 
 #include <inttypes.h>
@@ -152,7 +153,7 @@ static void open_about(lv_obj_t *screen) {
     lv_obj_set_flex_flow(names, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(names, 4, 0);
     lv_obj_t *name = lv_label_create(names);
-    lv_obj_set_style_text_font(name, &lv_font_montserrat_40, 0);
+    lv_obj_set_style_text_font(name, lichen_font(LICHEN_FONT_LARGE), 0);
     lv_obj_set_style_text_letter_space(name, 6, 0);
     lv_label_set_text(name, "lichen");
     lv_obj_t *sub = lv_label_create(names);

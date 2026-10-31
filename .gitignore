@@ -10,3 +10,4 @@ managed_components/
 
 __pycache__/
 firmware/storage_staging/
+tools/.font-cache/

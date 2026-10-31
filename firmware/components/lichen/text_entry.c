@@ -2,6 +2,7 @@
 #include "text_entry.h"
 
 #include "shell_parts.h"
+#include "fonts.h"
 #include "theme.h"
 
 #include <stdio.h>
@@ -69,7 +70,7 @@ static lv_obj_t *build(void) {
     lv_obj_t *heading = lv_label_create(screen);
     lv_obj_set_width(heading, LV_PCT(100));
     lv_label_set_long_mode(heading, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_font(heading, &lv_font_montserrat_40, 0);
+    lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
     lv_label_set_text(heading, title);
 
     ta = lv_textarea_create(screen);
@@ -81,7 +82,7 @@ static lv_obj_t *build(void) {
     lv_obj_set_style_bg_color(ta, lv_color_hex(THEME_TILE), 0);
     lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(ta, lv_color_hex(THEME_TEXT), 0);
-    lv_obj_set_style_text_font(ta, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(ta, lichen_font(LICHEN_FONT_SMALL), 0);
     lv_obj_set_style_radius(ta, 14, 0);
     lv_obj_set_style_pad_all(ta, 18, 0);
     lv_obj_set_style_border_width(ta, 3, 0);

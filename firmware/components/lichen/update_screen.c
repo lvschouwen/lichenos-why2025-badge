@@ -11,6 +11,7 @@
 #include "nav.h"
 #include "settings_store.h"
 #include "shell_parts.h"
+#include "fonts.h"
 #include "theme.h"
 #include "esp_system.h"
 #include "lichen_app.h"
@@ -212,7 +213,7 @@ static lv_obj_t *build(void) {
     lv_obj_set_scrollable(screen, false);
 
     logo_create(screen, 100);
-    title_label = add_label(screen, "Updating Lichen", THEME_TEXT, &lv_font_montserrat_40);
+    title_label = add_label(screen, "Updating Lichen", THEME_TEXT, lichen_font(LICHEN_FONT_LARGE));
     lv_obj_set_width(title_label, LV_PCT(100));
     lv_label_set_long_mode(title_label, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
@@ -416,7 +417,7 @@ static void banner_tick(lv_timer_t *t) {
         lv_obj_set_style_pad_hor(banner, 28, 0);
         lv_obj_set_style_pad_ver(banner, 14, 0);
         lv_obj_set_style_text_color(banner, lv_color_hex(THEME_TEXT), 0);
-        lv_obj_set_style_text_font(banner, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_font(banner, lichen_font(LICHEN_FONT_SMALL), 0);
         lv_obj_set_scrollable(banner, false);
         lv_obj_set_clickable(banner, false);
         lv_obj_t *label = lv_label_create(banner);

@@ -3,6 +3,7 @@
 #include "link_state.h"
 #include "logo.h"
 #include "shell_parts.h"
+#include "fonts.h"
 #include "theme.h"
 
 #include <string.h>
@@ -42,7 +43,7 @@ static lv_obj_t *wifi_bars_obj[BAR_COUNT];
 // Four bars of 25/50/75/100 % of the text height: filled in the look's colour up to `bars`, the rest as outlines in
 // the same colour, so a red empty set reads as "down" without words
 static lv_obj_t *wifi_bars_create(lv_obj_t *parent) {
-    int       h    = lv_font_get_line_height(&lv_font_montserrat_24);
+    int       h    = lv_font_get_line_height(lichen_font(LICHEN_FONT_SMALL));
     lv_obj_t *box  = lv_obj_create(parent);
     lv_obj_remove_style_all(box);
     lv_obj_set_size(box, BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP, h);
@@ -106,7 +107,7 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     lv_obj_set_style_border_width(bar, 2, 0);
     lv_obj_set_style_border_color(bar, lv_color_hex(THEME_RULE), 0);
     lv_obj_set_style_pad_hor(bar, 24, 0);
-    lv_obj_set_style_text_font(bar, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_font(bar, lichen_font(LICHEN_FONT_SMALL), 0);
     lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_scrollable(bar, false);

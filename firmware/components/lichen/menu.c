@@ -2,6 +2,7 @@
 #include "menu.h"
 
 #include "shell.h"
+#include "fonts.h"
 #include "theme.h"
 
 #include <stdio.h>
@@ -91,7 +92,7 @@ lv_obj_t *menu_create(lv_obj_t *parent, char const *title) {
     lv_obj_set_scroll_dir(menu, LV_DIR_VER);
     shell_scroll_tame(menu); // it scrolls only when the rows don't fit (focus moves it), never past them
     lv_obj_t *heading = lv_label_create(menu);
-    lv_obj_set_style_text_font(heading, &lv_font_montserrat_40, 0);
+    lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
     lv_obj_set_style_pad_bottom(heading, 8, 0);
     lv_label_set_text(heading, title);
     return menu;

@@ -15,6 +15,7 @@
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "shell.h"
+#include "fonts.h"
 #include "theme.h"
 
 #include <inttypes.h>
@@ -343,7 +344,7 @@ static lv_obj_t *make_list(lv_obj_t *tab) {
 
 static void style_tab_bar(lv_obj_t *bar) {
     lv_obj_set_style_bg_color(bar, lv_color_hex(THEME_BG), 0);
-    lv_obj_set_style_text_font(bar, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(bar, lichen_font(LICHEN_FONT_MEDIUM), 0);
     lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_set_style_border_width(bar, 2, 0);
     lv_obj_set_style_border_color(bar, lv_color_hex(THEME_RULE), 0);

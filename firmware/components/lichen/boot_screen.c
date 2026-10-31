@@ -12,6 +12,7 @@
 #include "log_tap.h"
 #include "logo.h"
 #include "shell_parts.h"
+#include "fonts.h"
 #include "theme.h"
 
 #include <stdio.h>
@@ -246,7 +247,7 @@ lv_obj_t *boot_screen_create(void) {
     lv_obj_set_scrollable(calm, false);
     lv_obj_set_clickable(calm, false);
     logo_create(calm, 100);
-    lv_obj_t *calm_name = add_label(calm, "lichen", THEME_TEXT, &lv_font_montserrat_40);
+    lv_obj_t *calm_name = add_label(calm, "lichen", THEME_TEXT, lichen_font(LICHEN_FONT_LARGE));
     lv_obj_set_style_text_letter_space(calm_name, 6, 0);
     calm_bar = lv_bar_create(calm);
     lv_obj_set_size(calm_bar, LV_PCT(50), 8);
@@ -277,7 +278,7 @@ lv_obj_t *boot_screen_create(void) {
     lv_obj_set_size(names, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(names, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(names, 4, 0);
-    lv_obj_t *name = add_label(names, "lichen", THEME_TEXT, &lv_font_montserrat_40);
+    lv_obj_t *name = add_label(names, "lichen", THEME_TEXT, lichen_font(LICHEN_FONT_LARGE));
     lv_obj_set_style_text_letter_space(name, 6, 0);
     add_label(names, esp_app_get_description()->version, THEME_DIM, NULL);
 
@@ -309,7 +310,7 @@ lv_obj_t *boot_screen_create(void) {
     lv_obj_set_style_margin_top(step, 40, 0);
     lv_obj_set_style_pad_column(step, 16, 0);
     lv_obj_set_flex_align(step, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_text_font(step, &lv_font_montserrat_40, 0);
+    lv_obj_set_style_text_font(step, lichen_font(LICHEN_FONT_LARGE), 0);
     add_label(step, LV_SYMBOL_RIGHT, THEME_AMBER, NULL);
     step_text  = add_label(step, "starting", THEME_TEXT, NULL);
     step_pct   = add_label(step, "", THEME_AMBER, NULL);
@@ -331,7 +332,7 @@ lv_obj_t *boot_screen_create(void) {
     lv_obj_set_style_pad_row(log, 2, 0);
     for (int i = 0; i < SHOW_LOG_LINES; i++) {
         log_labels[i] = add_label(log, "", THEME_DIM, NULL);
-        lv_obj_set_size(log_labels[i], LV_PCT(100), lv_font_get_line_height(&lv_font_montserrat_24));
+        lv_obj_set_size(log_labels[i], LV_PCT(100), lv_font_get_line_height(lichen_font(LICHEN_FONT_SMALL)));
         lv_label_set_long_mode(log_labels[i], LV_LABEL_LONG_MODE_DOTS);
     }
 

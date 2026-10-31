@@ -8,6 +8,7 @@
 #include "settings_store.h"
 #include "setup_state.h"
 #include "shell_parts.h"
+#include "fonts.h"
 #include "theme.h"
 
 #include <string.h>
@@ -53,7 +54,7 @@ static lv_obj_t *build_welcome(void) {
     lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
     logo_create(scr, 100);
     lv_obj_t *title = lv_label_create(scr);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_40, 0);
+    lv_obj_set_style_text_font(title, lichen_font(LICHEN_FONT_LARGE), 0);
     lv_label_set_text(title, "Welcome to Lichen");
     lv_obj_t *what = lv_label_create(scr);
     lv_obj_set_width(what, LV_PCT(90));

@@ -3,7 +3,7 @@
 # log_tap.c keeps the last console lines; shell.c, boot_screen.c, status_bar.c and logo.c are the LVGL screens.
 idf_component_register(SRCS "boot_steps.c" "boot_text.c" "boot_progress.c" "log_tap.c" "log_clean.c" "nav.c" "shell.c" "home.c" "home_layout.c"
                             "settings_store.c" "tz_table.c" "menu.c" "app_settings.c" "app_about.c" "app_icons.c" "wifi_list.c" "wifi_join.c" "wifi_screen.c" "setup_state.c" "setup_screens.c" "text_entry.c" "ui_keys.c" "ui_probe.c"
-                            "boot_screen.c" "status_bar.c" "link_state.c" "logo.c" "update_status.c" "update_mode.c" "update_screen.c" "scroll_anchor.c"
+                            "boot_screen.c" "status_bar.c" "link_state.c" "logo.c" "update_status.c" "update_mode.c" "update_screen.c" "scroll_anchor.c" "fonts.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl
-                       PRIV_REQUIRES freertos nvs_flash fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage app_update esp_system)
+                       PRIV_REQUIRES assets freertos nvs_flash fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage app_update esp_system)
