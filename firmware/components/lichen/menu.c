@@ -117,9 +117,13 @@ static lv_obj_t *add_row(lv_obj_t *menu, char const *label_text, char const *val
     lv_obj_set_style_bg_color(r, lv_color_hex(THEME_TILE), 0);
     lv_obj_set_style_bg_color(r, lv_color_hex(THEME_TRACK), LV_STATE_FOCUSED);
     lv_obj_set_style_bg_color(r, lv_color_hex(THEME_TRACK), LV_STATE_FOCUS_KEY);
+    // The border is always there and only shows when focused: LVGL insets the content by the border width, so a
+    // border that comes and goes would shift the row's text by 3 px as the selection moves (#20)
     lv_obj_set_style_border_color(r, lv_color_hex(THEME_AMBER), 0);
-    lv_obj_set_style_border_width(r, 3, LV_STATE_FOCUSED);
-    lv_obj_set_style_border_width(r, 3, LV_STATE_FOCUS_KEY);
+    lv_obj_set_style_border_width(r, 3, 0);
+    lv_obj_set_style_border_opa(r, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_opa(r, LV_OPA_COVER, LV_STATE_FOCUSED);
+    lv_obj_set_style_border_opa(r, LV_OPA_COVER, LV_STATE_FOCUS_KEY);
     lv_obj_set_style_outline_width(r, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(r, 0, LV_STATE_FOCUS_KEY);
     lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);

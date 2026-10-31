@@ -42,7 +42,9 @@ typedef struct {
 static void style_cell(home_t const *h, int i) {
     bool selected = i == h->sel;
     lv_obj_set_style_bg_color(h->cell[i], lv_color_hex(selected ? THEME_TRACK : THEME_TILE), 0);
-    lv_obj_set_style_border_width(h->cell[i], selected ? 3 : 0, 0);
+    // Fixed width, only the opacity changes: a border that comes and goes shifts the cell's contents (#20)
+    lv_obj_set_style_border_width(h->cell[i], 3, 0);
+    lv_obj_set_style_border_opa(h->cell[i], selected ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 }
 
 static void select(home_t *h, int sel) {

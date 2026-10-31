@@ -352,9 +352,16 @@ static void style_tab_bar(lv_obj_t *bar) {
         lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
         lv_obj_set_style_text_color(button, lv_color_hex(THEME_DIM), 0);
         lv_obj_set_style_text_color(button, lv_color_hex(THEME_AMBER), LV_STATE_CHECKED);
-        lv_obj_set_style_border_side(button, LV_BORDER_SIDE_BOTTOM, LV_STATE_CHECKED);
-        lv_obj_set_style_border_width(button, 4, LV_STATE_CHECKED);
-        lv_obj_set_style_border_color(button, lv_color_hex(THEME_AMBER), LV_STATE_CHECKED);
+        // Every tab has the underline, only the checked one shows it: otherwise its label jumps up (#20)
+        lv_obj_set_style_border_side(button, LV_BORDER_SIDE_BOTTOM, 0);
+        lv_obj_set_style_border_width(button, 4, 0);
+        lv_obj_set_style_border_width(button, 4, LV_STATE_CHECKED); // beats the theme's own CHECKED width
+        // The theme also pads the top of the checked tab only; pad every tab like it, balancing the 4 px underline
+        lv_obj_set_style_pad_top(button, 4, 0);
+        lv_obj_set_style_pad_top(button, 4, LV_STATE_CHECKED);
+        lv_obj_set_style_border_color(button, lv_color_hex(THEME_AMBER), 0);
+        lv_obj_set_style_border_opa(button, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_opa(button, LV_OPA_COVER, LV_STATE_CHECKED);
     }
 }
 
