@@ -39,7 +39,7 @@ You implement exactly one GitHub issue of Lichen OS, the operating system for th
 ## Rules of the house
 
 - Adding or enabling a library (LVGL extras included) only when the feature needs it; then add an entry to `tools/third_party_licenses.py` and regenerate `THIRD_PARTY_LICENSES.txt`.
-- Internal DMA-capable RAM is scarce: large buffers go to PSRAM. Data from the mmap'd assets partition must be copied, never pointed at.
+- Internal DMA-capable RAM is scarce: large buffers go to PSRAM. Never mmap flash at runtime (any mapping makes flash writes stall the display, #31); assets data is a boot-time PSRAM copy, copy what you keep.
 - Spelling: Lichen (OS), MeshCore (app). Match the surrounding C style; functions under about 50 lines; comments explain why.
 
 ## Hand-back

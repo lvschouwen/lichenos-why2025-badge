@@ -10,7 +10,7 @@ Read the issue's latest decision comment (`gh issue view <n> --json body,comment
 
 ## Check
 
-- **Memory and placement.** Internal DMA-capable RAM is scarce (`fw mem`); large allocations belong in PSRAM, and the LVGL heap is PSRAM (`board/lv_mem_psram.c`). Data from the mmap'd assets partition (`firmware/components/assets`) must be copied, never kept as a pointer. Leaks and double frees on every failure path.
+- **Memory and placement.** Internal DMA-capable RAM is scarce (`fw mem`); large allocations belong in PSRAM, and the LVGL heap is PSRAM (`board/lv_mem_psram.c`). Never mmap flash at runtime: with XIP from PSRAM any mapping makes flash writes turn the cache and non-IRAM interrupts off, and the display flashes yellow (#31). Assets data is a boot-time PSRAM copy (`firmware/components/assets`), freed after the fonts load: copy what you keep. Leaks and double frees on every failure path.
 - **Tasks and cores.** Core 1 draws (LVGL), core 0 talks to the world (Wi-Fi, LoRa link, MeshCore). LVGL objects are touched only from the LVGL task or under the LVGL port lock; console commands run on another task. Stack sizes and stack use in the draw path (the LVGL task's headroom is small). ISR and IRAM rules.
 - **LVGL gotchas seen here.** `lv_async_call` runs queued calls newest first (use `shell_back_then`/`shell_back_to`); a border that only appears on focus or checked state moves text (keep the width constant, toggle `border_opa`).
 - **Input from outside.** Files, network data, LoRa packets and console arguments are bounds-checked.

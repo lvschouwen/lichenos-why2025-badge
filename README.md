@@ -95,7 +95,7 @@ Partitions (16 MB flash, `firmware/partitions.csv`):
 |---|---|---|---|
 | `ota_0`, `ota_1` | 0x20000, 0x420000 | 4 MB each | the two firmware slots |
 | `coredump` | 0x820000 | 128 KB | the last crash |
-| `assets` | 0x840000 | 3 MB | read-only files such as fonts, packed from `firmware/assets/` by `tools/pack_assets.py` and memory-mapped at boot |
+| `assets` | 0x840000 | 3 MB | read-only files such as fonts, packed from `firmware/assets/` by `tools/pack_assets.py` and read into PSRAM at boot, never memory-mapped (#31) |
 | `storage` | 0xB40000 | 4.75 MB | FAT, mounted at `/storage`: the C6 image, settings files, MeshCore's data |
 
 Assets are separate from the firmware: `flash-fw` writes them, and over Wi-Fi `ota-assets` replaces them (checked before

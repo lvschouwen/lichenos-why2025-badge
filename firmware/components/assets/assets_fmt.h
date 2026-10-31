@@ -1,4 +1,4 @@
-// The assets image (#22): read-only files (fonts, later images) in the "assets" partition, memory-mapped at boot.
+// The assets image (#22): read-only files (fonts, later images) in the "assets" partition, read at boot.
 // Built by tools/pack_assets.py from firmware/assets/. Pure logic, host-tested (host_tests/assets_fmt_test.c).
 //
 // Layout, all integers little-endian:

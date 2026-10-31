@@ -158,6 +158,9 @@ void app_main(void) {
     meshcore_app_register();
     if (screen) {
         lichen_fonts_load(); // before any screen is built
+    }
+    assets_unmount(); // the fonts made their own PSRAM copies
+    if (screen) {
         shell_sources_t const sources = {.wifi_up = wifi_up, .lora_up = lora_link_up, .c6_up = c6link_up,
                                          .wifi_scan = wifi_scan, .wifi_join = wifi_set_credentials, .wifi_ip = wifi_has_ip,
                                          .wifi_join_state = wifi_join_state,
