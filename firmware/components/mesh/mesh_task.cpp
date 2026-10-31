@@ -80,7 +80,7 @@ uint16_t BadgeBoard::getBattMilliVolts() {
     return 0; // not measured yet
 }
 void BadgeBoard::reboot() {
-    esp_restart();
+    system_restart();
 }
 bool radio_init() {
     return true;
