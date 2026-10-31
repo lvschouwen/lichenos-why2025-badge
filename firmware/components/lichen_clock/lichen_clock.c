@@ -112,10 +112,11 @@ static clock_verdict_t propose(clock_src_t src, struct timeval const *tv, bool f
             info.last_good_mono_ms = now_ms;
         }
     }
-    bool due = record_due_locked();
+    bool        due   = record_due_locked();
+    clock_src_t saved = info.source;
     pthread_mutex_unlock(&lock);
     if (due) {
-        store_save(src); // outside the lock: an NVS write is slow
+        store_save(saved); // outside the lock: an NVS write is slow
     }
     return v;
 }

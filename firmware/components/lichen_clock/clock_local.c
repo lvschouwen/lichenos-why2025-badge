@@ -140,6 +140,9 @@ bool clock_parse_iso(char const *s, int64_t *utc, clock_local_t *how) {
     if (lit(&s, ':') && (!digits(&s, 2, &sec) || sec > 59)) {
         return false;
     }
+    while (*s == ' ') {
+        s++;
+    }
     if (!parse_offset(&s, &zoned, &off_s)) {
         return false;
     }

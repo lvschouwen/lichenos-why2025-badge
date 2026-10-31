@@ -82,13 +82,19 @@ static void refused(clock_verdict_t v) {
     lv_label_set_text(hint_label, text);
 }
 
+static bool done; // an accepted set: the page is on its way out, further keys are ignored
+
 static void set_clock(void) {
+    if (done) {
+        return;
+    }
     tf_commit(&tf);
     int64_t utc = 0;
     pending_utc(&utc);
     struct timeval  tv = {.tv_sec = (time_t)utc};
     clock_verdict_t v  = clock_set_manual(&tv, false);
     if (clock_accepted(v)) {
+        done = true;
         shell_back(); // later, outside the key handling; Time's page refreshes itself
         return;
     }
@@ -97,6 +103,9 @@ static void set_clock(void) {
 }
 
 static void on_key(lv_event_t *e) {
+    if (done) {
+        return;
+    }
     uint32_t key = lv_event_get_key(e);
     switch (key) {
         case LV_KEY_UP: tf_step(&tf, 1); break;
@@ -144,7 +153,11 @@ static void add_fields(lv_obj_t *parent) {
     static char const *const sep[TF_COUNT] = {"-", "-", "    ", ":", ""};
     for (int f = 0; f < TF_COUNT; f++) {
         field_label[f] = add_label(row, "", THEME_TEXT);
-        if (sep[f][0]) {
+        if (sep[f][0] == ' ') { // a label of spaces has no width in a flex row: a fixed gap instead
+            lv_obj_t *gap = lv_obj_create(row);
+            lv_obj_remove_style_all(gap);
+            lv_obj_set_size(gap, 28, 1);
+        } else if (sep[f][0]) {
             add_label(row, sep[f], THEME_DIM);
         }
     }
@@ -158,6 +171,7 @@ static void zone_line(char *out, size_t cap) {
 }
 
 lv_obj_t *time_set_build(void) {
+    done = false;
     lv_obj_t *screen = shell_page_create();
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen, 8, 0);

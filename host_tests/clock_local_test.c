@@ -82,6 +82,7 @@ static void parse(void) {
     CHECK(clock_parse_iso("2026-10-31 12:00:30Z", &t, NULL) && t == utc(2026, 10, 31, 12, 0) + 30);
     CHECK(clock_parse_iso("2026-10-31T12:00+02:00", &t, NULL) && t == utc(2026, 10, 31, 10, 0));
     CHECK(clock_parse_iso("2026-10-31T12:00-05:00", &t, NULL) && t == utc(2026, 10, 31, 17, 0));
+    CHECK(clock_parse_iso("2026-10-31 12:00 -05:00", &t, NULL) && t == utc(2026, 10, 31, 17, 0)); // a space before the offset
     CHECK(clock_parse_iso("2026-10-31T12:00:05+0130", &t, NULL) && t == utc(2026, 10, 31, 10, 30) + 5);
     CHECK(clock_parse_iso("2026-10-31T12:00", &t, &how) && t == utc(2026, 10, 31, 11, 0) && how == CLOCK_LOCAL_OK);
     CHECK(clock_parse_iso("2026-10-31T12:00:59", &t, NULL) && t == utc(2026, 10, 31, 11, 0) + 59);
