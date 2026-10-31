@@ -7,6 +7,12 @@
 
 #include <string.h>
 
+// The asset fonts are RLE-compressed (tools/make_fonts.py). Without this option they load fine but
+// draw nothing, and the built-in fallback never kicks in.
+#if !LV_USE_FONT_COMPRESSED
+#error "Lichen fonts need CONFIG_LV_USE_FONT_COMPRESSED=y"
+#endif
+
 static char const *TAG = "fonts";
 
 typedef struct {

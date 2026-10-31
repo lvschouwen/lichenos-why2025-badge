@@ -35,9 +35,10 @@ static bool font_open(font_t *f, char const *dir, int px) {
         printf("cannot open %s\n", path);
         return false;
     }
-    fseek(fp, 0, SEEK_END);
-    f->size = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
+    if (fseek(fp, 0, SEEK_END) != 0 || (f->size = ftell(fp)) <= 0 || fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        return false;
+    }
     f->buf = malloc((size_t)f->size);
     bool ok = f->buf && fread(f->buf, 1, (size_t)f->size, fp) == (size_t)f->size;
     fclose(fp);
@@ -127,8 +128,10 @@ static uint32_t const SYMBOLS[] = {0xF001, 0xF00B, 0xF013, 0xF1EB, 0xF240, 0xF7C
 static void test_font(char const *dir, int px) {
     font_t f = {0};
     printf("lichen_%d.bin\n", px);
-    CHECK(font_open(&f, dir, px));
-    if (!f.buf) {
+    bool const opened = font_open(&f, dir, px);
+    CHECK(opened);
+    if (!opened) { // cmap_at/count are not validated: don't walk them
+        free(f.buf);
         return;
     }
     for (size_t i = 0; i < sizeof(SAMPLES) / sizeof(SAMPLES[0]); i++) {

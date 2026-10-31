@@ -580,7 +580,7 @@ static void about(lv_obj_t *page) {
     menu_note(page, "About");
     char text[96];
     if (!mesh_node_id(text, sizeof(text))) {
-        strlcpy(text, "-", sizeof(text)); // not running (the font has no em dash)
+        strlcpy(text, "-", sizeof(text)); // not running
     }
     add_row(page, "node id", text);
 
