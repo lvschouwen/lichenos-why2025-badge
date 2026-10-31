@@ -28,6 +28,7 @@ You implement exactly one GitHub issue of Lichen OS, the operating system for th
 - See the screen with `tools/badge.sh screenshot <ip> <out.png>` (save outside the repo) and look at it. Lucas still checks what a screenshot can't show (flicker, colours on the panel).
 - Never press `enter` on Region & radio, TX power, Custom radio or any other setting that changes what the badge transmits, unless the brief says so: a wrong preset puts the badge on a frequency that may not be legal here. Check `fw mesh` shows the Netherlands preset before you hand back.
 - Keep bench walks short; Lucas watches them. Code, build and flash first; reuse "before" screenshots you were given instead of re-walking. Then one pass: one screenshot per page, long lists only downward in batches (`fw keys send down down down`), no back-and-forth.
+- MeshCore on air: never open a DM or compose screen addressed to a real person, and never send to anyone but the agreed test targets (channel `#badgetest`, or a DM target the main session names). An open compose screen is one stray Enter from a message to a stranger from Lucas's identity.
 
 ## Never
 
