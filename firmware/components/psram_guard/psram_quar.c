@@ -88,3 +88,26 @@ size_t psram_quar_bytes(psram_quar_t const *q) {
     }
     return sum;
 }
+
+size_t psram_quar_uncovered(psram_quar_t const *q, psram_span_t const *spans, size_t n, size_t slack) {
+    size_t missing = 0;
+    for (size_t i = 0; i < q->n; i++) {
+        uintptr_t cur = q->r[i].lo, hi = q->r[i].hi;
+        for (size_t k = 0; k < n && cur < hi; k++) {
+            if (spans[k].hi <= cur) {
+                continue;
+            }
+            if (spans[k].lo >= hi) {
+                break;
+            }
+            if (spans[k].lo > cur + slack) {
+                missing += spans[k].lo - cur;
+            }
+            cur = spans[k].hi > cur ? spans[k].hi : cur;
+        }
+        if (cur < hi && hi - cur > slack) {
+            missing += hi - cur;
+        }
+    }
+    return missing;
+}

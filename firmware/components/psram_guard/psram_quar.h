@@ -33,3 +33,13 @@ bool psram_quar_overlaps(psram_quar_t const *q, uintptr_t addr, size_t len);
 
 // Total quarantined bytes
 size_t psram_quar_bytes(psram_quar_t const *q);
+
+// A block we hold: [lo, hi)
+typedef struct {
+    uintptr_t lo, hi;
+} psram_span_t;
+
+// Bytes of the quarantine that no span covers. spans must be sorted by lo. A gap shorter than slack between two spans (or
+// at a range edge) is not counted: that is the allocator's own block header, which nobody can hand out. The claim in
+// psram_scan.c is only guaranteed when this is 0.
+size_t psram_quar_uncovered(psram_quar_t const *q, psram_span_t const *spans, size_t n, size_t slack);

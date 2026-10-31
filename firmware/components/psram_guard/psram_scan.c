@@ -18,8 +18,13 @@
 #include <string.h>
 
 #define CHUNK       (64u * 1024u)  // scan and grab unit
-#define MAX_HELD    512
-#define MAX_FAR     1536
+#define MAX_HELD    256
+#define MAX_PAD     256
+#define MAX_FAR     2048
+#define EDGE_GAP    32u           // a chunk ends this far before a range start: the next block then starts on the range
+#define HDR_SLACK   32u           // gap between two held blocks that is only the allocator header
+#define GRAB_SLACK  384u          // before the pad pass: header plus the alignment pad of a 128 B aligned block
+#define GRAB_TRIES  3
 #define MAX_CHUNKS  1024
 #define WIN_LO      0x48400000u // the suspect window of #40: bad bytes near 0x4855BA81, 4 MB check ended at 0x485C0A80
 #define WIN_HI      0x48A00000u
@@ -48,8 +53,17 @@ typedef struct {
 
 static chunk_t       s_chunks[MAX_CHUNKS]; // every chunk grabbed, sorted by address
 static size_t        s_n;
-static uint8_t      *s_far[MAX_FAR];     // the rest of the free PSRAM while the edges are split
+// The rest of the free PSRAM (fragments) while the pads are collected. The same RAM holds the span list of uncovered(),
+// which only runs while no fragment is taken (internal RAM is scarce).
+#define MAX_SPANS (MAX_CHUNKS + 2 * 64)
+static union {
+    uint8_t     *far[MAX_FAR];
+    psram_span_t spans[MAX_SPANS];
+} s_scratch;
+#define s_far s_scratch.far
 static size_t        s_nfar;
+static uint8_t      *s_pad[MAX_PAD];     // small blocks inside the quarantine: the gaps between held chunks, kept so nobody gets them
+static size_t        s_npad;
 static chunk_t       s_held[MAX_HELD];    // kept for good (quarantine)
 static size_t        s_nheld;
 static psram_quar_t  s_quar;
@@ -61,9 +75,14 @@ static struct {
     uint32_t xor_or, up_or, down_or;
     int64_t  us;
     uintptr_t lowest, highest;
-    size_t   gaps_in_window, rounds, short_pages, pages_held;
+    size_t   gaps_in_window, rounds, shaped, coarse, pads, uncovered, grab_tries, far_full;
     uintptr_t find_lo, find_hi; // lowest / highest bad byte of this scan
 } s_stat;
+
+static int by_span(void const *a, void const *b) {
+    uintptr_t x = ((psram_span_t const *)a)->lo, y = ((psram_span_t const *)b)->lo;
+    return x < y ? -1 : x > y;
+}
 
 static int by_addr(void const *a, void const *b) {
     uintptr_t x = (uintptr_t)((chunk_t const *)a)->mem, y = (uintptr_t)((chunk_t const *)b)->mem;
@@ -75,13 +94,13 @@ static void sync(uint8_t *mem, size_t len) {
 }
 
 // BadgeVMS' pattern on one chunk: every 8th word = its address ^ 0xAAAAAAAA. Returns bad words; records bits/extent.
-static size_t sparse_pass(uint8_t *mem, psram_check_t *acc) {
+static size_t sparse_pass(uint8_t *mem, size_t len, psram_check_t *acc) {
     uint32_t *w = (uint32_t *)mem;
-    size_t    n = CHUNK / 4;
+    size_t    n = len / 4;
     for (size_t i = 0; i < n; i += 8) {
         w[i] = (uint32_t)(uintptr_t)&w[i] ^ SPARSE_XOR;
     }
-    sync(mem, CHUNK);
+    sync(mem, len);
     size_t bad = 0;
     for (size_t i = 0; i < n; i += 8) {
         uint32_t want = (uint32_t)(uintptr_t)&w[i] ^ SPARSE_XOR;
@@ -102,12 +121,12 @@ static size_t sparse_pass(uint8_t *mem, psram_check_t *acc) {
     return bad;
 }
 
-static void dense_pass(uint8_t *mem, uint32_t mask, psram_check_t *out) {
-    psram_pattern_fill_x(mem, CHUNK, (uintptr_t)mem, mask);
-    sync(mem, CHUNK);
-    *out = psram_pattern_check_x(mem, CHUNK, (uintptr_t)mem, mask);
+static void dense_pass(uint8_t *mem, size_t len, uint32_t mask, psram_check_t *out) {
+    psram_pattern_fill_x(mem, len, (uintptr_t)mem, mask);
+    sync(mem, len);
+    *out = psram_pattern_check_x(mem, len, (uintptr_t)mem, mask);
     if (out->bad_bytes) {
-        psram_learned_mark_buf(mem, CHUNK, (uintptr_t)mem, mask, out->first_bad, out->last_bad);
+        psram_learned_mark_buf(mem, len, (uintptr_t)mem, mask, out->first_bad, out->last_bad);
     }
 }
 
@@ -129,11 +148,11 @@ static void scan_chunk(chunk_t *c) {
     psram_check_t r = {0};
     size_t        first = SIZE_MAX, last = 0;
     size_t before = c->bad[0] + c->bad[1] + c->bad[2] + c->bad[3];
-    sparse_pass(c->mem, &r);
+    sparse_pass(c->mem, c->len, &r);
     fold(c, 0, &r, &first, &last);
     static uint32_t const masks[3] = {0, 0xFFFFFFFFu, 0};
     for (int p = 0; p < 3; p++) {
-        dense_pass(c->mem, masks[p], &r);
+        dense_pass(c->mem, c->len, masks[p], &r);
         fold(c, p + 1, &r, &first, &last);
     }
     s_stat.scanned++;
@@ -160,27 +179,101 @@ static void rebuild_quar(void) {
     }
 }
 
+// A fresh chunk must not straddle a quarantine edge. Shrinking a block in place keeps its start (tlsf_realloc), so the
+// chunk is cut right before a range start (the next block then starts on that edge: the free block begins just behind
+// the cut and the 128 B aligned start is the first line boundary after it) or right behind a range end. No free()+malloc()
+// dance, nothing for another task to take in between.
+static void shape(chunk_t *c) {
+    uintptr_t p = (uintptr_t)c->mem, end = p + c->len;
+    size_t    best = c->len;
+    for (size_t i = 0; i < s_quar.n; i++) {
+        uintptr_t lo_cut = s_quar.r[i].lo - EDGE_GAP, hi = s_quar.r[i].hi;
+        if (lo_cut > p + 256 && lo_cut < end && ((lo_cut - p) & ~(uintptr_t)(LINE - 1)) < best) {
+            best = (lo_cut - p) & ~(uintptr_t)(LINE - 1);
+        }
+        if (hi > p && hi < end) {
+            size_t sz = (hi - p + LINE - 1) & ~(uintptr_t)(LINE - 1);
+            sz        = sz < LINE ? LINE : sz;
+            if (sz < best) {
+                best = sz;
+            }
+        }
+    }
+    if (best < c->len) {
+        uint8_t *q = heap_caps_realloc(c->mem, best, PSRAM_CAPS);
+        if (q) {
+            c->mem = q;
+            c->len = best;
+            s_stat.shaped++;
+        }
+    }
+}
+
 static void grab_all(void) {
     while (s_n < MAX_CHUNKS) {
         uint8_t *m = heap_caps_aligned_alloc(LINE, CHUNK, PSRAM_CAPS);
         if (!m) {
             break;
         }
-        s_chunks[s_n++] = (chunk_t){.mem = m, .len = CHUNK};
+        s_chunks[s_n] = (chunk_t){.mem = m, .len = CHUNK};
+        shape(&s_chunks[s_n]);
+        s_n++;
     }
     qsort(s_chunks, s_n, sizeof(chunk_t), by_addr);
 }
 
+// Bytes of the quarantine the held blocks do not cover (spans: chunks, plus the pads when given)
+static size_t uncovered(size_t slack, bool with_held) {
+    psram_span_t *spans = s_scratch.spans;
+    size_t        n     = 0;
+    for (size_t i = 0; i < s_n; i++) {
+        if (s_chunks[i].mem && n < MAX_CHUNKS) {
+            spans[n++] = (psram_span_t){(uintptr_t)s_chunks[i].mem, (uintptr_t)s_chunks[i].mem + s_chunks[i].len};
+        }
+    }
+    for (size_t i = 0; with_held && i < s_nheld && n < MAX_SPANS; i++) {
+        spans[n++] = (psram_span_t){(uintptr_t)s_held[i].mem, (uintptr_t)s_held[i].mem + s_held[i].len};
+    }
+    for (size_t i = 0; with_held && i < s_npad && n < MAX_SPANS; i++) {
+        spans[n++] = (psram_span_t){(uintptr_t)s_pad[i], (uintptr_t)s_pad[i] + heap_caps_get_allocated_size(s_pad[i])};
+    }
+    qsort(spans, n, sizeof(psram_span_t), by_span);
+    return psram_quar_uncovered(&s_quar, spans, n, slack);
+}
+
+// The claim: grab everything free in quarantine-shaped chunks. A range some other owner holds cannot be taken; a range the
+// walk did not reach exactly (the heap handed blocks out in another order) is retried from scratch and, if it stays
+// uncovered, reported at ERROR level and in "fw psram" instead of being hidden.
+static void grab_phase(void) {
+    for (int attempt = 1; attempt <= GRAB_TRIES; attempt++) {
+        grab_all();
+        s_stat.grab_tries = attempt;
+        size_t miss       = uncovered(GRAB_SLACK, false);
+        if (!miss) {
+            return;
+        }
+        ESP_LOGE(TAG, "quarantine claim attempt %d: %u bytes of the quarantine not held%s", attempt, (unsigned)miss,
+                 attempt < GRAB_TRIES ? ", retrying" : "");
+        if (attempt < GRAB_TRIES) {
+            for (size_t i = 0; i < s_n; i++) {
+                heap_caps_free(s_chunks[i].mem);
+            }
+            s_n = 0;
+            s_stat.shaped = 0;
+        }
+    }
+}
+
 static bool in_window(chunk_t const *c) {
     uintptr_t a = (uintptr_t)c->mem;
-    return a + CHUNK > WIN_LO && a < WIN_HI;
+    return a + c->len > WIN_LO && a < WIN_HI;
 }
 
 // Gaps between neighbouring chunks inside the window are memory somebody else already owns (code, rodata, early heap)
 static void log_map(void) {
     extern int _instruction_reserved_start, _instruction_reserved_end, _rodata_reserved_start, _rodata_reserved_end;
     s_stat.lowest  = s_n ? (uintptr_t)s_chunks[0].mem : 0;
-    s_stat.highest = s_n ? (uintptr_t)s_chunks[s_n - 1].mem + CHUNK : 0;
+    s_stat.highest = s_n ? (uintptr_t)s_chunks[s_n - 1].mem + s_chunks[s_n - 1].len : 0;
     snprintf(s_map, sizeof(s_map), "%u chunks of 64 KB free at boot, %p..%p; text %p..%p, rodata %p..%p, framebuffer: see log",
              (unsigned)s_n, (void *)s_stat.lowest, (void *)s_stat.highest, (void *)&_instruction_reserved_start,
              (void *)&_instruction_reserved_end, (void *)&_rodata_reserved_start, (void *)&_rodata_reserved_end);
@@ -189,7 +282,7 @@ static void log_map(void) {
              (unsigned)(heap_caps_get_free_size(PSRAM_CAPS) >> 10), (void *)&_instruction_reserved_start,
              (void *)&_instruction_reserved_end, (void *)&_rodata_reserved_start, (void *)&_rodata_reserved_end);
     for (size_t i = 1; i < s_n; i++) {
-        uintptr_t end = (uintptr_t)s_chunks[i - 1].mem + CHUNK, next = (uintptr_t)s_chunks[i].mem;
+        uintptr_t end = (uintptr_t)s_chunks[i - 1].mem + s_chunks[i - 1].len, next = (uintptr_t)s_chunks[i].mem;
         if (next - end > 4096) {
             if (next > WIN_LO && end < WIN_HI) {
                 s_stat.gaps_in_window++;
@@ -200,15 +293,6 @@ static void log_map(void) {
     }
 }
 
-static bool inside_quar(uintptr_t a, size_t len) {
-    for (size_t i = 0; i < s_quar.n; i++) {
-        if (a >= s_quar.r[i].lo && a + len <= s_quar.r[i].hi) {
-            return true;
-        }
-    }
-    return false;
-}
-
 static void hold(uint8_t *mem, size_t len, chunk_t const *from) {
     if (s_nheld < MAX_HELD) {
         s_held[s_nheld]     = from ? *from : (chunk_t){0};
@@ -216,64 +300,47 @@ static void hold(uint8_t *mem, size_t len, chunk_t const *from) {
         s_held[s_nheld].len = len;
         s_nheld++;
     } else {
+        s_stat.far_full++; // cannot happen with 256 slots for ~60 pieces; counted so it would show
         heap_caps_free(mem);
     }
 }
 
-// The intersection of a chunk with the quarantine ranges it touches (their hull)
+// The hull of the quarantine ranges a chunk touches
 static void touched(uintptr_t base, size_t len, uintptr_t *lo, uintptr_t *hi) {
     *lo = UINTPTR_MAX;
     *hi = 0;
     for (size_t i = 0; i < s_quar.n; i++) {
         if (base < s_quar.r[i].hi && base + len > s_quar.r[i].lo) {
-            uintptr_t l = s_quar.r[i].lo > base ? s_quar.r[i].lo : base;
-            uintptr_t h = s_quar.r[i].hi < base + len ? s_quar.r[i].hi : base + len;
-            *lo         = l < *lo ? l : *lo;
-            *hi         = h > *hi ? h : *hi;
+            *lo = s_quar.r[i].lo < *lo ? s_quar.r[i].lo : *lo;
+            *hi = s_quar.r[i].hi > *hi ? s_quar.r[i].hi : *hi;
         }
     }
 }
 
-// A chunk that only touches the quarantine at its edge: give it back and claim just the part inside the range. With
-// everything else PSRAM held (drop_far is deferred) the freed block is the only free memory, so a filler allocation
-// takes its start and the wanted piece follows it. The slop is the heap header and the 128 B alignment: the piece
-// starts at or before the range and ends at or after it; if the heap hands something else, the retry widens the slop
-// and a failure is counted ("pages missing") instead of hidden.
-static void grab_rest(void);
-
-static void split_edge(chunk_t const *c) {
+// A chunk that touches the quarantine but was not shaped to it: a page that failed for the first time in this very
+// boot (the shapes came from the earlier boots). Its tail is cut at the range end; the head stays held, the next boot
+// has the page in the learned set and shapes the chunks exactly.
+static void keep_coarse(chunk_t *c) {
     uintptr_t base = (uintptr_t)c->mem, lo, hi;
-    touched(base, CHUNK, &lo, &hi);
-    heap_caps_free(c->mem);
-    static size_t const slop[3] = {192, 512, 2048};
-    // The chunk ends are the neighbours' heap headers: do not ask for those bytes, they were never payload
-    uintptr_t lo_req = lo == base ? base + 640 : lo, hi_req = hi == base + CHUNK ? base + CHUNK - 640 : hi;
-    for (int attempt = 0; attempt < 3; attempt++) {
-        size_t    fill = lo_req - base > slop[attempt] ? lo_req - base - slop[attempt] : 0;
-        uintptr_t end  = hi_req + slop[attempt] < base + CHUNK - 384 ? hi_req + slop[attempt] : base + CHUNK - 384;
-        size_t    want = (end - (base + fill) + LINE - 1) & ~(size_t)(LINE - 1);
-        uint8_t  *f    = fill ? heap_caps_aligned_alloc(LINE, fill, PSRAM_CAPS) : NULL;
-        uint8_t  *m    = heap_caps_aligned_alloc(LINE, want, PSRAM_CAPS);
-        if (m && (uintptr_t)m <= lo_req && (uintptr_t)m + want >= hi_req) {
-            hold(m, want, c);
-            s_stat.pages_held++;
-            if (f && s_nfar < MAX_FAR) { // keep the rest of this chunk taken too: the next edge chunk must again be the only free block
-                s_far[s_nfar++] = f;
-            } else {
-                heap_caps_free(f);
-            }
-            grab_rest();
-            return;
-        }
-        heap_caps_free(f);
-        heap_caps_free(m); // free(NULL) is fine
+    touched(base, c->len, &lo, &hi);
+    if (lo > base + 256 || hi + 256 < base + c->len) {
+        s_stat.coarse++;
     }
-    s_stat.short_pages++;
+    if (hi + LINE < base + c->len) {
+        size_t   sz = (hi - base + LINE - 1) & ~(size_t)(LINE - 1);
+        uint8_t *q  = heap_caps_realloc(c->mem, sz, PSRAM_CAPS);
+        if (q == c->mem) {
+            c->len = sz;
+        }
+    }
+    hold(c->mem, c->len, c);
 }
 
-// Everything still free is taken for the moment, so a freed edge chunk is the only free block (split_edge)
-static void grab_rest(void) {
-    for (size_t size = CHUNK; size >= 256; size /= 2) { // then the fragments, down to the smallest the heap hands out
+// Everything still free is taken: the big pieces first, then the fragments down to the smallest block the heap hands
+// out. The gaps between neighbouring held chunks (header, alignment pad) are such fragments; the ones inside the
+// quarantine are kept, so no allocation can ever land between two held chunks.
+static void take_fragments(void) {
+    for (size_t size = CHUNK; size >= 256; size /= 2) {
         while (s_nfar < MAX_FAR) {
             uint8_t *m = heap_caps_aligned_alloc(LINE, size, PSRAM_CAPS);
             if (!m) {
@@ -282,27 +349,44 @@ static void grab_rest(void) {
             s_far[s_nfar++] = m;
         }
     }
+    for (size_t size = 128; size >= 8; size /= 2) {
+        while (s_nfar < MAX_FAR) {
+            uint8_t *m = heap_caps_malloc(size, PSRAM_CAPS);
+            if (!m) {
+                break;
+            }
+            s_far[s_nfar++] = m;
+        }
+    }
+    s_stat.far_full += s_nfar >= MAX_FAR;
 }
 
 static void keep_or_free(void) {
-    grab_rest();
-    for (size_t i = 0; i < s_n; i++) { // first the ones that stay, so a freed neighbour never merges into an edge block
-        uintptr_t a = (uintptr_t)s_chunks[i].mem;
-        if (inside_quar(a, CHUNK)) {
-            hold(s_chunks[i].mem, CHUNK, &s_chunks[i]);
-            s_chunks[i].mem = NULL;
-        } else if (psram_quar_overlaps(&s_quar, a, CHUNK)) {
-            split_edge(&s_chunks[i]);
-            s_chunks[i].mem = NULL;
-        }
-    }
+    take_fragments();
     for (size_t i = 0; i < s_n; i++) {
-        heap_caps_free(s_chunks[i].mem);
+        uintptr_t a = (uintptr_t)s_chunks[i].mem;
+        if (psram_quar_overlaps(&s_quar, a, s_chunks[i].len)) {
+            keep_coarse(&s_chunks[i]);
+        } else {
+            heap_caps_free(s_chunks[i].mem);
+        }
+        s_chunks[i].mem = NULL;
     }
     for (size_t i = 0; i < s_nfar; i++) {
-        heap_caps_free(s_far[i]);
+        size_t len = heap_caps_get_allocated_size(s_far[i]);
+        if (s_npad < MAX_PAD && psram_quar_overlaps(&s_quar, (uintptr_t)s_far[i], len)) {
+            s_pad[s_npad++] = s_far[i];
+        } else {
+            heap_caps_free(s_far[i]);
+        }
     }
-    s_nfar = 0;
+    s_nfar        = 0;
+    s_stat.pads   = s_npad;
+    s_stat.uncovered = uncovered(HDR_SLACK, true);
+    if (s_stat.uncovered) {
+        ESP_LOGE(TAG, "QUARANTINE NOT HELD: %u bytes of the %u KB quarantine are free for allocation (see fw psram)",
+                 (unsigned)s_stat.uncovered, (unsigned)(psram_quar_bytes(&s_quar) >> 10));
+    }
 }
 
 // Chunks well outside the window go back at once, so the rest of the boot is not starved while the window is scanned
@@ -322,7 +406,7 @@ static void drop_far(void) {
 static bool near_quar(chunk_t const *c) {
     uintptr_t a = (uintptr_t)c->mem;
     for (size_t k = 0; k < s_quar.n; k++) {
-        if (a + CHUNK + NEAR > s_quar.r[k].lo && a < s_quar.r[k].hi + NEAR) {
+        if (a + c->len + NEAR > s_quar.r[k].lo && a < s_quar.r[k].hi + NEAR) {
             return true;
         }
     }
@@ -354,7 +438,7 @@ void psram_scan_run(void) {
     size_t  free0 = heap_caps_get_free_size(PSRAM_CAPS);
     psram_learned_load();
     rebuild_quar(); // quarantine what was learned before looking at anything
-    grab_all();
+    grab_phase();
     log_map();
     drop_far();
     for (size_t i = 0; i < s_n; i++) {
@@ -374,12 +458,12 @@ void psram_scan_run(void) {
     keep_or_free();
     s_stat.us = esp_timer_get_time() - start;
     ESP_LOGW(TAG, "scan: window %p..%p, %u chunk scans + %u extra rounds in %u ms, %u bad chunks, bad bytes sparse %u dense %u/%u/%u; "
-                  "flipped bits %08x (0->1 %08x, 1->0 %08x); quarantine %u range(s) %u KB, held %u pieces (%u 4K edge pages, %u missing), free PSRAM %u -> %u KB",
+                  "flipped bits %08x (0->1 %08x, 1->0 %08x); quarantine %u range(s) %u KB, held %u pieces + %u pads (%u shaped chunks, %u coarse, %u B uncovered, %u claim tries), free PSRAM %u -> %u KB",
              (void *)WIN_LO, (void *)WIN_HI, (unsigned)s_stat.scanned, (unsigned)s_stat.rounds, (unsigned)(s_stat.us / 1000),
              (unsigned)s_stat.bad_chunks, (unsigned)s_stat.pass_bad[0], (unsigned)s_stat.pass_bad[1], (unsigned)s_stat.pass_bad[2],
              (unsigned)s_stat.pass_bad[3], (unsigned)s_stat.xor_or, (unsigned)s_stat.up_or, (unsigned)s_stat.down_or,
-             (unsigned)s_quar.n, (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)s_nheld, (unsigned)s_stat.pages_held,
-             (unsigned)s_stat.short_pages, (unsigned)(free0 >> 10), (unsigned)(heap_caps_get_free_size(PSRAM_CAPS) >> 10));
+             (unsigned)s_quar.n, (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)s_nheld, (unsigned)s_npad,
+             (unsigned)s_stat.shaped, (unsigned)s_stat.coarse, (unsigned)s_stat.uncovered, (unsigned)s_stat.grab_tries, (unsigned)(free0 >> 10), (unsigned)(heap_caps_get_free_size(PSRAM_CAPS) >> 10));
 }
 
 void psram_scan_note_region(char const *name, void const *addr, size_t len) {
@@ -409,9 +493,11 @@ void psram_scan_print(void) {
         held += s_held[i].len;
     }
     psram_learned_print();
-    console_reply("psram quarantine: %u ranges, total %u KB, %u KB held in %u pieces (%u edge pieces, %u missing)",
+    console_reply("psram quarantine: %u ranges, total %u KB, %u KB held in %u pieces + %u pads; shaped %u, coarse (first find of a page this boot) %u, "
+                  "claim tries %u; UNCOVERED %u bytes%s",
                   (unsigned)s_quar.n, (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)(held >> 10), (unsigned)s_nheld,
-                  (unsigned)s_stat.pages_held, (unsigned)s_stat.short_pages);
+                  (unsigned)s_npad, (unsigned)s_stat.shaped, (unsigned)s_stat.coarse, (unsigned)s_stat.grab_tries,
+                  (unsigned)s_stat.uncovered, s_stat.uncovered ? "  <== QUARANTINE NOT GUARANTEED, REBOOT" : " (ok)");
     for (size_t i = 0; i < s_nheld; i++) {
         size_t t = s_held[i].bad[0] + s_held[i].bad[1] + s_held[i].bad[2] + s_held[i].bad[3];
         if (t) {

@@ -114,6 +114,23 @@ int main(void) {
     }
     CHECK(d.n == 2 && d.r[0].lo == u.r[0].lo && d.r[0].hi == u.r[0].hi && d.r[1].lo == u.r[1].lo && d.r[1].hi == u.r[1].hi);
 
+    // Coverage check (#86): the claim is only good when every quarantined byte is inside a held span
+    psram_quar_t c = {0};
+    psram_quar_note(&c, 0x48557000u, 0x48557000u, 1, 1); // 0x48556000..0x48559000
+    psram_span_t full[] = {{0x48550000u, 0x48560000u}};
+    CHECK(psram_quar_uncovered(&c, full, 1, 32) == 0);
+    psram_span_t two[] = {{0x48550000u, 0x48557000u}, {0x48557010u, 0x48560000u}}; // 16 B between blocks = header
+    CHECK(psram_quar_uncovered(&c, two, 2, 32) == 0);
+    psram_span_t hole[] = {{0x48550000u, 0x48557000u}, {0x48558000u, 0x48560000u}}; // 4 KB hole inside the range
+    CHECK(psram_quar_uncovered(&c, hole, 2, 32) == 0x1000);
+    psram_span_t low[] = {{0x48557000u, 0x48560000u}}; // first page of the range not held
+    CHECK(psram_quar_uncovered(&c, low, 1, 32) == 0x1000);
+    psram_span_t high[] = {{0x48550000u, 0x48558800u}}; // last half page not held
+    CHECK(psram_quar_uncovered(&c, high, 1, 32) == 0x800);
+    CHECK(psram_quar_uncovered(&c, NULL, 0, 32) == 0x3000);
+    psram_quar_t none = {0};
+    CHECK(psram_quar_uncovered(&none, NULL, 0, 32) == 0);
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -165,6 +165,7 @@ void psram_sweep_cmd(char const *args) {
         return;
     }
     setting_t orig = current();
+    console_reply("psram sweep WARNING: the display blanks / flickers for the whole run (interrupts are off while the PSRAM timing is changed)");
     console_reply("psram sweep: %u known-bad + %u good pages, %u passes x (plain, inverted); original ph%u dqs %u data %u. "
                   "Rows: idx 0..30 = dqs 15..1, 0, data 1..15; numbers = bad bytes",
                   s_pages.nbad, s_pages.ngood, s_pages.passes, orig.phase, orig.dqs, orig.data);
