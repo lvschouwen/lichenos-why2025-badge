@@ -11,6 +11,9 @@
 // the app's own lock, never wait on the mesh or the network).
 typedef struct lichen_app {
     char const *name;                                                  // "MeshCore"
+    // "meshcore": 1..13 of a-z 0-9 _ (app_ns.h). Names the app's NVS namespace (lichen_settings.h) and its console
+    // forms ("fw setup reset <id>"); the OS wipes an app by it (#66). Required.
+    char const *id;
     void (*draw_icon)(lv_obj_t *parent, int size_px);                  // 32 and 64 px
     bool (*tile_text)(char *line1, size_t c1, char *line2, size_t c2); // false = nothing new
     void (*open)(lv_obj_t *screen);                                    // build its screens; runs in LVGL context
@@ -23,6 +26,9 @@ typedef struct lichen_app {
     // afterwards, so there is no start again. Not called for a file push.
     void (*stop_for_update)(void);
     void (*about)(lv_obj_t *page); // see settings; LVGL context
+    // The app's first-run questions, if it has any: done=false asks them again at the next open, done=true marks
+    // them answered ("fw setup reset|done <id>"). The app keeps the flag in its own settings.
+    void (*first_run_set)(bool done);
 } lichen_app_t;
 
 // Size of the app table. Home scrolls to the selection, so this only bounds the arrays; lichen_register_app logs an error
@@ -33,3 +39,4 @@ typedef struct lichen_app {
 void lichen_register_app(lichen_app_t const *app);
 size_t lichen_app_count(void);
 lichen_app_t const *lichen_app_at(size_t index);
+lichen_app_t const *lichen_app_by_id(char const *id); // NULL when no registered app has that id

@@ -209,6 +209,7 @@ static void open_about(lv_obj_t *screen) {
 
 static lichen_app_t const about_app = {
     .name      = "About Lichen",
+    .id        = "about",
     .draw_icon = icon_about,
     .tile_text = about_tile,
     .open      = open_about,

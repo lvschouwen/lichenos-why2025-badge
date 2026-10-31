@@ -3,6 +3,8 @@
 
 #include "esp_log.h"
 
+#include <string.h>
+
 static char const TAG[] = "shell";
 
 static lichen_app_t const *apps[LICHEN_MAX_APPS];
@@ -22,4 +24,13 @@ size_t lichen_app_count(void) {
 
 lichen_app_t const *lichen_app_at(size_t index) {
     return index < app_count ? apps[index] : NULL;
+}
+
+lichen_app_t const *lichen_app_by_id(char const *id) {
+    for (size_t i = 0; id && i < app_count; i++) {
+        if (apps[i]->id && strcmp(apps[i]->id, id) == 0) {
+            return apps[i];
+        }
+    }
+    return NULL;
 }

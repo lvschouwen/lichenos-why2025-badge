@@ -667,6 +667,14 @@ target_include_directories(setup_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(setup_state_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME setup_state_test COMMAND setup_state_test)
 
+add_executable(app_ns_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/app_ns_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c
+)
+target_include_directories(app_ns_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(app_ns_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME app_ns_test COMMAND app_ns_test)
+
 add_executable(boot_text_test
     ${CMAKE_CURRENT_SOURCE_DIR}/boot_text_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/boot_text.c

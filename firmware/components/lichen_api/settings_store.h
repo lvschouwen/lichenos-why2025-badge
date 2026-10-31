@@ -4,7 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Lichen's own settings in NVS namespace badge_fw (#66): home_layout (u8), tz (str), setup_done (u8). A missing key or
+// Lichen's own settings in NVS namespace badge_fw (#66): home_layout (u8), tz (str), setup_done (u8). Not for apps:
+// they have lichen_settings.h (#84). A missing key or
 // an unreadable NVS gives the default. Keys are at most 15 characters (NVS limit).
 uint8_t settings_get_u8(char const *key, uint8_t def);
 bool    settings_set_u8(char const *key, uint8_t value);

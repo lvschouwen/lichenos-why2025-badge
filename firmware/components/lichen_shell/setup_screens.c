@@ -2,6 +2,7 @@
 // network yet. Lives on top of home on the shell's stack, so Esc from Wi-Fi lands on the welcome. setup_done is saved
 // only when the setup ends (joined, skipped, or Enter on the welcome of a badge that already has Wi-Fi).
 #include "esp_log.h"
+#include "lichen_app.h"
 #include "esp_lvgl_port.h"
 #include "fw_console.h"
 #include "logo.h"
@@ -81,16 +82,28 @@ static void cmd_setup(char const *args) {
         bool ok = settings_set_u8("setup_done", 0); // only this key: Wi-Fi and the rest stay
         console_reply(ok ? "setup_done cleared: the welcome shows after the next reboot" : "could not clear setup_done");
         ESP_LOGW(TAG, "setup reset (%s)", ok ? "ok" : "failed");
-    } else if (strcmp(args, "reset mesh") == 0 || strcmp(args, "done mesh") == 0) {
-        // MeshCore's first-open questions (#67): only their flag, the name and the radio stay. "done" is a diagnostic
-        bool done = args[0] == 'd';
-        bool ok   = settings_set_u8("mc_name_set", done ? 1 : 0);
-        console_reply(ok ? (done ? "mc_name_set saved: MeshCore opens straight to Messages"
-                                 : "mc_name_set cleared: MeshCore asks name and region when next opened")
-                         : "could not change mc_name_set");
-        ESP_LOGW(TAG, "setup %s (%s)", args, ok ? "ok" : "failed");
+    } else if (strncmp(args, "reset ", 6) == 0 || strncmp(args, "done ", 5) == 0) {
+        // An app's first-run questions (#84 T5): the app keeps the flag itself; "mesh" stays as the short form. "done"
+        // is a diagnostic
+        bool        done = args[0] == 'd';
+        char const *id   = args + (done ? 5 : 6);
+        if (strcmp(id, "mesh") == 0) {
+            id = "meshcore";
+        }
+        lichen_app_t const *app = lichen_app_by_id(id);
+        if (!app || !app->first_run_set) {
+            console_reply("no app '%s' with first-run questions", id);
+            return;
+        }
+        app->first_run_set(done);
+        if (done) {
+            console_reply("%s: first-run questions marked answered", app->name);
+        } else {
+            console_reply("%s asks its first-run questions when next opened", app->name);
+        }
+        ESP_LOGW(TAG, "setup %s", args);
     } else {
-        console_reply("setup reset [mesh] | setup done mesh (the first-run welcome, or MeshCore's name and region questions)");
+        console_reply("setup reset [<app id>] | setup done <app id> (the first-run welcome, or an app's first-run questions; mesh = meshcore)");
     }
 }
 

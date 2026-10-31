@@ -158,6 +158,7 @@ static bool keytest_tile(char *l1, size_t c1, char *l2, size_t c2) {
 
 static lichen_app_t const keytest_app = {
     .name      = "Keyboard Test",
+    .id        = "keytest",
     .draw_icon = icon_keytest,
     .tile_text = keytest_tile,
     .open      = open_keytest,

@@ -259,6 +259,7 @@ static void open_settings(lv_obj_t *screen) {
 
 static lichen_app_t const settings_app = {
     .name      = "Settings",
+    .id        = "settings",
     .draw_icon = icon_settings,
     .tile_text = settings_tile,
     .open      = open_settings,

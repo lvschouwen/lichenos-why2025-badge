@@ -14,7 +14,7 @@
 #include "meshcore_chat.h"
 #include "meshcore_settings.h"
 #include "scroll_anchor.h"
-#include "settings_store.h"
+#include "lichen_settings.h"
 #include "lichen_ui.h"
 #include "fonts.h"
 #include "theme.h"
@@ -25,6 +25,8 @@
 #include <string.h>
 
 static char const TAG[] = "meshcore";
+
+static lichen_app_t const *self(void); // the app table entry, defined with the rest of the table at the end
 
 #define SHOW_CONVS     MESH_CONV_MAX // one row per chat
 #define MAX_CHANNELS   40
@@ -616,7 +618,7 @@ static void first_step(void *arg) {
             break;
         case MC_FIRST_HOME: first_home(); break;
         case MC_FIRST_FINISH: {
-            bool saved = settings_set_u8("mc_name_set", 1);
+            bool saved = app_settings_set_u8(self(), "mc_name_set", 1);
             ESP_LOGW(TAG, "first-open questions answered (%s)", saved ? "saved" : "not saved");
             lv_obj_t   *screen = first_screen;
             lv_group_t *group  = lv_obj_get_group(screen);
@@ -643,7 +645,7 @@ static void on_first_delete(lv_event_t *e) {
 }
 
 static void open(lv_obj_t *screen) {
-    if (mesh_running() && settings_get_u8("mc_name_set", 0) == 0) {
+    if (mesh_running() && app_settings_get_u8(self(), "mc_name_set", 0) == 0) {
         ESP_LOGW(TAG, "first open: asking name and region");
         first        = (mc_first_t){0};
         first_screen = screen;
@@ -752,7 +754,14 @@ static bool start_background(void) {
         ESP_LOGE(TAG, "no LoRa radio: MeshCore not started");
         return false;
     }
+    app_settings_adopt_u8(self(), "mc_name_set"); // firmware before #84 T5 kept the flag in Lichen's namespace
     return mesh_start();
+}
+
+// "fw setup reset meshcore" / "done meshcore": only the questions' flag; the name and the radio stay
+static void first_run_set(bool done) {
+    bool ok = app_settings_set_u8(self(), "mc_name_set", done ? 1 : 0);
+    ESP_LOGW(TAG, "first-open questions marked %s (%s)", done ? "answered" : "to ask again", ok ? "saved" : "not saved");
 }
 
 // The mesh first (it saves, and sends through LoRa), then the radio it uses
@@ -767,6 +776,7 @@ static void stop_for_update(void) {
 
 static lichen_app_t const meshcore_app = {
     .name             = "MeshCore",
+    .id               = "meshcore",
     .draw_icon        = icon,
     .tile_text        = tile_text,
     .open             = open,
@@ -774,7 +784,12 @@ static lichen_app_t const meshcore_app = {
     .about            = about,
     .start_background = start_background,
     .stop_for_update  = stop_for_update,
+    .first_run_set    = first_run_set,
 };
+
+static lichen_app_t const *self(void) {
+    return &meshcore_app;
+}
 
 void meshcore_app_register(void) {
     lichen_register_app(&meshcore_app);
