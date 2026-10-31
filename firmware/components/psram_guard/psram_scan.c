@@ -516,3 +516,52 @@ void psram_scan_watch(unsigned ms) {
                   (unsigned)s_nheld, (unsigned)(held_bytes() >> 10), ms, (unsigned)common(&a, &b), (unsigned)common(&b, &c),
                   (unsigned)b.n);
 }
+
+// Held (ours) pages for the delay-line sweep: up to max_bad pages that ever failed, spread over the set, and up to max_good
+// held pages farthest from any failed page (known good as far as the scans can tell)
+size_t psram_scan_test_pages(uint8_t **bad, size_t max_bad, uint8_t **good, size_t max_good, size_t *n_good) {
+    psram_learn_t lr = psram_learned_get();
+    uint8_t      *cand[512];
+    size_t        nc = 0;
+    uintptr_t     page;
+    for (uintptr_t from = 0; nc < 512 && psram_learn_next_failed(&lr, from, &page); from = page + PSRAM_PAGE) {
+        for (size_t i = 0; i < s_nheld; i++) {
+            uintptr_t m = (uintptr_t)s_held[i].mem;
+            if (page >= m && page + PSRAM_PAGE <= m + s_held[i].len) {
+                cand[nc++] = (uint8_t *)page;
+                break;
+            }
+        }
+    }
+    size_t nb = nc < max_bad ? nc : max_bad;
+    for (size_t k = 0; k < nb; k++) {
+        bad[k] = cand[k * nc / nb];
+    }
+    *n_good = 0;
+    for (size_t g = 0; g < max_good; g++) { // greedy: the held page with the largest distance to failed pages and chosen ones
+        uintptr_t best = 0, best_d = 0;
+        for (size_t i = 0; i < s_nheld; i++) {
+            uintptr_t m = ((uintptr_t)s_held[i].mem + PSRAM_PAGE - 1) & ~(uintptr_t)(PSRAM_PAGE - 1);
+            for (; m + PSRAM_PAGE <= (uintptr_t)s_held[i].mem + s_held[i].len; m += PSRAM_PAGE) {
+                uintptr_t d = UINTPTR_MAX;
+                for (size_t k = 0; k < nc; k++) {
+                    uintptr_t c = (uintptr_t)cand[k], e = c > m ? c - m : m - c;
+                    d = e < d ? e : d;
+                }
+                for (size_t k = 0; k < *n_good; k++) {
+                    uintptr_t c = (uintptr_t)good[k], e = c > m ? c - m : m - c;
+                    d = e < d ? e : d;
+                }
+                if (d > best_d && d != UINTPTR_MAX) {
+                    best_d = d;
+                    best   = m;
+                }
+            }
+        }
+        if (!best || best_d < PSRAM_PAGE) {
+            break;
+        }
+        good[(*n_good)++] = (uint8_t *)best;
+    }
+    return nb;
+}

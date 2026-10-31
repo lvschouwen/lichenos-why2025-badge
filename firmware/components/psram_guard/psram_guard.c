@@ -4,6 +4,7 @@
 #include "psram_learned.h"
 #include "psram_pattern.h"
 #include "psram_scan.h"
+#include "psram_sweep.h"
 
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
@@ -193,6 +194,10 @@ static void cmd_psram(char const *args) {
         psram_scan_watch(ms ? ms : 2000);
         return;
     }
+    if (strncmp(args, "sweep", 5) == 0) {
+        psram_sweep_cmd(args + 5 + (args[5] == ' '));
+        return;
+    }
     if (strncmp(args, "forget", 6) == 0) {
         psram_learned_forget();
         return;
@@ -251,7 +256,7 @@ void psram_guard_start(void) {
     add_spread_blocks();
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);
-    console_register("psram", "psram [test <KB> [dense] | qwatch <ms> | forget] (learned bad range, quarantine, canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
+    console_register("psram", "psram [test <KB> [dense] | qwatch <ms> | sweep [passes [phase]] | forget] (learned bad range, quarantine, canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
     if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 4096, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGW(TAG, "canary task failed to start");
     }
