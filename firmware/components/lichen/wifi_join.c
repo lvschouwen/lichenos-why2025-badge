@@ -50,3 +50,32 @@ wifi_join_action_t wifi_join_event(wifi_join_t *j, wifi_join_event_t ev, int rea
     }
     return JOIN_ACT_NONE;
 }
+
+void wifi_link_init(wifi_link_t *l) {
+    l->ssid[0] = '\0';
+}
+
+void wifi_link_connected(wifi_link_t *l, char const *ssid, unsigned len) {
+    if (len > sizeof(l->ssid) - 1) {
+        len = sizeof(l->ssid) - 1;
+    }
+    memcpy(l->ssid, ssid, len);
+    l->ssid[len] = '\0';
+}
+
+void wifi_link_down(wifi_link_t *l) {
+    l->ssid[0] = '\0';
+}
+
+char const *wifi_link_ssid(wifi_link_t const *l) {
+    return l->ssid[0] ? l->ssid : NULL;
+}
+
+wifi_join_action_t wifi_join_got_ip(wifi_join_t *j, wifi_link_t const *l, char const *trial_ssid, uint32_t now_ms,
+                                    wifi_join_event_t *ev_out) {
+    wifi_join_event_t ev = wifi_join_ip_event(trial_ssid, wifi_link_ssid(l));
+    if (ev_out) {
+        *ev_out = ev;
+    }
+    return wifi_join_event(j, ev, 0, now_ms);
+}

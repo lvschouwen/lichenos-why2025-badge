@@ -99,7 +99,7 @@ bool wifi_joining(void) {
 }
 
 // Everything that touches the connection runs in one task (c6wifi): events and requests are queued to it
-typedef enum { MSG_CONNECT, MSG_JOIN, MSG_RECONNECT, MSG_FORGET, MSG_DISCONNECTED, MSG_GOT_IP } msg_type_t;
+typedef enum { MSG_CONNECT, MSG_JOIN, MSG_RECONNECT, MSG_FORGET, MSG_DISCONNECTED, MSG_GOT_IP, MSG_CONNECTED } msg_type_t;
 typedef struct {
     msg_type_t type;
     int        reason;
@@ -109,8 +109,15 @@ typedef struct {
 
 static QueueHandle_t queue;
 
+static wifi_link_t link_ap; // c6wifi task only: the SSID the C6 says it is connected to (#15)
+
+// Called from the event loop task, so a short wait is fine; a dropped GOT_IP would roll a good trial back
 static bool post(msg_t const *m) {
-    return queue && xQueueSend(queue, m, 0) == pdTRUE;
+    bool ok = queue && xQueueSend(queue, m, pdMS_TO_TICKS(50)) == pdTRUE;
+    if (!ok && queue) {
+        ESP_LOGW(TAG, "wifi: queue full, message %d dropped", (int)m->type);
+    }
+    return ok;
 }
 
 static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
@@ -121,6 +128,15 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
         post(&m);
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
         xSemaphoreGive(scan_done);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+        wifi_event_sta_connected_t const *up = data;
+        if (up) {
+            unsigned len = up->ssid_len > 32 ? 32 : up->ssid_len; // not terminated
+            memcpy(m.ssid, up->ssid, len);
+            m.ssid[len] = '\0';
+            m.type      = MSG_CONNECTED;
+            post(&m);
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t const *gone = data;
         set_ip("");
@@ -363,6 +379,7 @@ static void rollback(void) {
     bool had = wifi_cred_load(s, p);
     memset(trial_pass, 0, sizeof(trial_pass));
     set_ip("");
+    wifi_link_down(&link_ap);
     esp_wifi_disconnect();
     portENTER_CRITICAL(&state_lock);
     join.state       = WIFI_JOIN_FAILED_KEPT_OLD;
@@ -391,6 +408,7 @@ static void handle_join(msg_t const *m, uint32_t now) {
     portEXIT_CRITICAL(&state_lock);
     retry_pending = false;
     set_ip("");
+    wifi_link_down(&link_ap);
     esp_wifi_disconnect();
     if (apply_config(m->ssid, m->pass)) {
         esp_wifi_connect();
@@ -429,6 +447,7 @@ static void handle_forget(void) {
     memset(trial_pass, 0, sizeof(trial_pass));
     retry_pending = false;
     set_ip("");
+    wifi_link_down(&link_ap);
     esp_wifi_disconnect();
     apply_config("", ""); // the driver's RAM copy goes too
     // Whatever the C6's driver persisted in its own flash earlier (BadgeVMS days, older firmware) goes as well. This
@@ -444,18 +463,12 @@ static void handle_forget(void) {
 
 static void handle_got_ip(void) {
     // Only an IP on the trial's own network proves its password: a late GOT_IP of the old connection must not save
-    // the new pair. The AP is asked here, on the c6wifi task (it is an RPC to the C6)
-    wifi_ap_record_t ap;
-    char             ap_ssid[33];
-    bool             known = esp_wifi_sta_get_ap_info(&ap) == ESP_OK;
-    if (known) {
-        memcpy(ap_ssid, ap.ssid, sizeof(ap_ssid) - 1);
-        ap_ssid[sizeof(ap_ssid) - 1] = '\0';
-    }
+    // the new pair. The SSID comes from the CONNECTED event (no RPC that could fail); never from esp_wifi_get_config,
+    // which already holds the trial pair
     portENTER_CRITICAL(&state_lock);
     first_connect_settled = true;
-    wifi_join_event_t  ev    = wifi_join_ip_event(trial_ssid, known ? ap_ssid : NULL);
-    wifi_join_action_t act   = wifi_join_event(&join, ev, 0, now_ms());
+    wifi_join_event_t  ev;
+    wifi_join_action_t act   = wifi_join_got_ip(&join, &link_ap, trial_ssid, now_ms(), &ev);
     bool               trial = join.state == WIFI_JOIN_TRYING;
     portEXIT_CRITICAL(&state_lock);
     if (act == JOIN_ACT_COMMIT) {
@@ -469,7 +482,12 @@ static void handle_got_ip(void) {
     }
 }
 
+static void handle_connected(msg_t const *m) {
+    wifi_link_connected(&link_ap, m->ssid, strlen(m->ssid));
+}
+
 static void handle_disconnected(int reason, uint32_t now) {
+    wifi_link_down(&link_ap);
     portENTER_CRITICAL(&state_lock);
     first_connect_settled = true;
     wifi_join_action_t act  = wifi_join_event(&join, JOIN_EV_DISCONNECTED, reason, now);
@@ -525,6 +543,7 @@ static void wifi_task(void *arg) {
                 case MSG_FORGET: handle_forget(); break;
                 case MSG_DISCONNECTED: handle_disconnected(m.reason, now); break;
                 case MSG_GOT_IP: handle_got_ip(); break;
+                case MSG_CONNECTED: handle_connected(&m); break;
             }
             memset(&m, 0, sizeof(m));
         }
@@ -697,7 +716,7 @@ bool c6link_start(void) {
     console_register("wifi", "wifi [scan | reconnect | <ssid> <password> | --clear]", cmd_wifi);
     scan_done = xSemaphoreCreateBinary();
     scan_lock = xSemaphoreCreateMutex();
-    queue     = xQueueCreate(8, sizeof(msg_t));
+    queue     = xQueueCreate(16, sizeof(msg_t));
     wifi_join_init(&join);
     if (!scan_done || !scan_lock || !queue ||
         xTaskCreatePinnedToCore(wifi_task, "c6wifi", 4096, NULL, 5, NULL, 0) != pdPASS) {

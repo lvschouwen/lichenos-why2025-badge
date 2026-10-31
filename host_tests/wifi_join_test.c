@@ -2,6 +2,7 @@
 #include "wifi_join.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int failures;
 
@@ -79,6 +80,52 @@ int main(void) {
     wifi_join_start(&j, 0);
     CHECK(wifi_join_event(&j, JOIN_EV_GOT_IP_OTHER, 0, 100) == JOIN_ACT_NONE);
     CHECK(wifi_join_event(&j, JOIN_EV_TICK, 0, WIFI_JOIN_TRIAL_MS) == JOIN_ACT_ROLLBACK); // and it still times out
+
+    // #15: the SSID comes from the CONNECTED event, not from an RPC that can fail at GOT_IP
+    {
+        wifi_link_t l;
+        wifi_join_event_t ev;
+        wifi_link_init(&l);
+        CHECK(wifi_link_ssid(&l) == NULL);
+        // Trial SSID reported by CONNECTED, then GOT_IP: commit (the old code rolled back whenever the RPC failed)
+        wifi_join_start(&j, 0);
+        wifi_link_connected(&l, "New", 3);
+        CHECK(wifi_join_got_ip(&j, &l, "New", 100, &ev) == JOIN_ACT_COMMIT && ev == JOIN_EV_GOT_IP);
+        CHECK(j.state == WIFI_JOIN_JOINED);
+        // Late GOT_IP of the old connection: queue order CONNECTED(old), join clears, GOT_IP(old) sees nothing
+        wifi_link_connected(&l, "Old", 3);
+        wifi_join_start(&j, 0);
+        wifi_link_down(&l); // handle_join
+        CHECK(wifi_join_got_ip(&j, &l, "New", 50, &ev) == JOIN_ACT_NONE && ev == JOIN_EV_GOT_IP_OTHER);
+        CHECK(j.state == WIFI_JOIN_TRYING);
+        // ... or still sees the old SSID when it arrives before the clear
+        wifi_link_connected(&l, "Old", 3);
+        CHECK(wifi_join_got_ip(&j, &l, "New", 60, &ev) == JOIN_ACT_NONE && ev == JOIN_EV_GOT_IP_OTHER);
+        // CONNECTED(old), join, CONNECTED(trial), GOT_IP: commit
+        wifi_link_down(&l);
+        wifi_link_connected(&l, "New", 3);
+        CHECK(wifi_join_got_ip(&j, &l, "New", 70, &ev) == JOIN_ACT_COMMIT);
+        // DISCONNECTED clears: a GOT_IP after it proves nothing
+        wifi_join_start(&j, 0);
+        wifi_link_connected(&l, "New", 3);
+        wifi_link_down(&l);
+        CHECK(wifi_link_ssid(&l) == NULL);
+        CHECK(wifi_join_got_ip(&j, &l, "New", 80, &ev) == JOIN_ACT_NONE && ev == JOIN_EV_GOT_IP_OTHER);
+        CHECK(wifi_join_event(&j, JOIN_EV_TICK, 0, WIFI_JOIN_TRIAL_MS) == JOIN_ACT_ROLLBACK); // no GOT_IP w/o CONNECTED
+        // A 32-byte SSID arrives unterminated
+        char full[33];
+        memset(full, 'a', 32);
+        full[32] = '\0';
+        char raw[40];
+        memset(raw, 'Z', sizeof(raw)); // garbage after the 32 bytes
+        memcpy(raw, full, 32);
+        wifi_join_start(&j, 0);
+        wifi_link_connected(&l, raw, 32);
+        CHECK(strcmp(wifi_link_ssid(&l), full) == 0);
+        CHECK(wifi_join_got_ip(&j, &l, full, 90, &ev) == JOIN_ACT_COMMIT);
+        wifi_link_connected(&l, raw, 99); // too long: capped, never overflows
+        CHECK(strlen(wifi_link_ssid(&l)) == 32);
+    }
 
     if (failures) {
         return 1;
