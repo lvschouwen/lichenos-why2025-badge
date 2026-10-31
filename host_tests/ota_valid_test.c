@@ -31,6 +31,15 @@ int main(void) {
     // Nothing to decide for an image that isn't on trial
     CHECK(!ota_should_mark_valid(false, true, true, settled));
 
+    // Rollback (#36): no C6 link on a trial image restarts it, but only after the grace time
+    uint32_t const give_up = OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S;
+    CHECK(ota_should_roll_back_now(true, false, give_up));
+    CHECK(ota_should_roll_back_now(true, false, give_up + 1000));
+    CHECK(!ota_should_roll_back_now(true, false, give_up - 1));
+    CHECK(!ota_should_roll_back_now(true, false, 0));
+    CHECK(!ota_should_roll_back_now(true, true, give_up + 1000)); // C6 up: Wi-Fi works, fix it over the air
+    CHECK(!ota_should_roll_back_now(false, false, give_up + 1000)); // not on trial
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

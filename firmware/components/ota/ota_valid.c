@@ -3,3 +3,7 @@
 bool ota_should_mark_valid(bool pending_verify, bool ui_up, bool c6_up, uint32_t uptime_s) {
     return pending_verify && ui_up && c6_up && uptime_s >= OTA_VALID_AFTER_S;
 }
+
+bool ota_should_roll_back_now(bool pending_verify, bool c6_up, uint32_t uptime_s) {
+    return pending_verify && !c6_up && uptime_s >= OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S;
+}

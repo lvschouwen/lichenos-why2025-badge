@@ -236,6 +236,10 @@ void app_main(void) {
             ESP_LOGW(TAG, "this image is now valid");
             update_screen_image_valid();
             pending = false;
+        } else if (ota_should_roll_back_now(pending, c6link_up(), uptime_s)) {
+            // No C6 means no Wi-Fi, so nobody can replace this image: let the bootloader roll back
+            ESP_LOGE(TAG, "C6 link never came up on a trial image: restarting to roll back");
+            system_restart("trial image: no C6 link");
         } else if (uptime_s >= OTA_VALID_AFTER_S) {
             ESP_LOGE(TAG, "staying on trial (UI or C6 link down): a reset goes back to the previous image");
             break;
