@@ -19,6 +19,7 @@
 
 #define CHUNK       (64u * 1024u)  // scan and grab unit
 #define MAX_HELD    256
+#define MAX_FAR     1536
 #define MAX_CHUNKS  1024
 #define WIN_LO      0x48400000u // the suspect window of #40: bad bytes near 0x4855BA81, 4 MB check ended at 0x485C0A80
 #define WIN_HI      0x48A00000u
@@ -47,12 +48,13 @@ typedef struct {
 
 static chunk_t       s_chunks[MAX_CHUNKS]; // every chunk grabbed, sorted by address
 static size_t        s_n;
-static uint8_t      *s_far[MAX_CHUNKS];     // the rest of the free PSRAM while the edges are split
+static uint8_t      *s_far[MAX_FAR];     // the rest of the free PSRAM while the edges are split
 static size_t        s_nfar;
 static chunk_t       s_held[MAX_HELD];    // kept for good (quarantine)
 static size_t        s_nheld;
 static psram_quar_t  s_quar;
 static char          s_map[200];
+static char          s_split_dbg[900];
 static region_t      s_regions[MAX_REGIONS];
 static size_t        s_nregions;
 static struct {
@@ -235,19 +237,24 @@ static void split_edge(chunk_t const *c) {
     touched(base, CHUNK, &lo, &hi);
     heap_caps_free(c->mem);
     static size_t const slop[3] = {192, 512, 2048};
+    // The chunk ends are the neighbours' heap headers: do not ask for those bytes, they were never payload
+    uintptr_t lo_req = lo == base ? base + 640 : lo, hi_req = hi == base + CHUNK ? base + CHUNK - 640 : hi;
     for (int attempt = 0; attempt < 3; attempt++) {
-        size_t   fill = lo - base > slop[attempt] ? lo - base - slop[attempt] : 0;
-        uint8_t *f    = fill ? heap_caps_aligned_alloc(LINE, fill, PSRAM_CAPS) : NULL;
-        size_t   want = (hi + slop[attempt] - (base + fill) + LINE - 1) & ~(size_t)(LINE - 1);
-        uint8_t *m    = heap_caps_aligned_alloc(LINE, want, PSRAM_CAPS);
+        size_t    fill = lo_req - base > slop[attempt] ? lo_req - base - slop[attempt] : 0;
+        uintptr_t end  = hi_req + slop[attempt] < base + CHUNK - 384 ? hi_req + slop[attempt] : base + CHUNK - 384;
+        size_t    want = (end - (base + fill) + LINE - 1) & ~(size_t)(LINE - 1);
+        uint8_t  *f    = fill ? heap_caps_aligned_alloc(LINE, fill, PSRAM_CAPS) : NULL;
+        uint8_t  *m    = heap_caps_aligned_alloc(LINE, want, PSRAM_CAPS);
         if (f) {
             heap_caps_free(f);
         }
-        if (m && (uintptr_t)m <= lo && (uintptr_t)m + want >= hi) {
+        if (m && (uintptr_t)m <= lo_req && (uintptr_t)m + want >= hi_req) {
             hold(m, want, c);
             s_stat.pages_held++;
             return;
         }
+        snprintf(s_split_dbg + strlen(s_split_dbg), sizeof(s_split_dbg) - strlen(s_split_dbg), "[%x need %x..%x a%d fill %u got %x len %u] ",
+                 (unsigned)base, (unsigned)lo, (unsigned)hi, attempt, (unsigned)fill, (unsigned)m, (unsigned)want);
         heap_caps_free(m); // free(NULL) is fine
     }
     s_stat.short_pages++;
@@ -255,12 +262,14 @@ static void split_edge(chunk_t const *c) {
 
 // Everything still free is taken for the moment, so a freed edge chunk is the only free block (split_edge)
 static void grab_rest(void) {
-    while (s_nfar < MAX_CHUNKS) {
-        uint8_t *m = heap_caps_aligned_alloc(LINE, CHUNK, PSRAM_CAPS);
-        if (!m) {
-            break;
+    for (size_t size = CHUNK; size >= 256; size /= 2) { // then the fragments, down to the smallest the heap hands out
+        while (s_nfar < MAX_FAR) {
+            uint8_t *m = heap_caps_aligned_alloc(LINE, size, PSRAM_CAPS);
+            if (!m) {
+                break;
+            }
+            s_far[s_nfar++] = m;
         }
-        s_far[s_nfar++] = m;
     }
 }
 
@@ -386,6 +395,9 @@ void psram_scan_print(void) {
         held += s_held[i].len;
     }
     psram_learned_print();
+    if (s_split_dbg[0]) {
+        console_reply("psram split debug: %s", s_split_dbg);
+    }
     console_reply("psram quarantine: %u KB in ranges, %u KB held in %u pieces (%u edge pieces, %u missing)",
                   (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)(held >> 10), (unsigned)s_nheld,
                   (unsigned)s_stat.pages_held, (unsigned)s_stat.short_pages);
