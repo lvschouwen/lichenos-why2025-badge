@@ -19,8 +19,23 @@ typedef enum { C6_PLAN_FULL_CHECK, C6_PLAN_SKIP } c6_plan_t;
 bool c6_bundle_key(char const *boot_md5, char const *part_md5, char const *app_md5, unsigned long boot_size,
                    unsigned long part_size, unsigned long app_size, char *out, size_t cap);
 
-// SKIP only after a software reset, with no forced reflash and no "verify next boot" flag, when the key stored after the
-// last successful verify or flash is non-empty and equals the current one. Everything else is a full check. why gets a
-// short reason for the log (may be NULL).
-c6_plan_t c6_boot_plan(c6_reset_kind_t kind, bool force, bool verify_flag, char const *stored_key, char const *current_key,
-                       char const **why);
+// SKIP only after a software reset, with no forced reflash, no "verify next boot" flag and not on a trial image
+// (PENDING_VERIFY: a restart there would make the bootloader roll the update back), when the key stored after the last
+// successful verify or flash is non-empty and equals the current one. Everything else is a full check. why gets a short
+// reason for the log (may be NULL).
+c6_plan_t c6_boot_plan(c6_reset_kind_t kind, bool force, bool verify_flag, bool trial_image, char const *stored_key,
+                       char const *current_key, char const **why);
+
+// What to persist once the ESP-Hosted attach has been tried. write == false: leave NVS alone. Otherwise store_key says
+// whether to store the current bundle key (else erase it) and verify whether to set the "check fully next boot" flag
+// (else clear it). The key is only ever stored after a successful attach on a verified bundle.
+typedef struct {
+    bool write;
+    bool store_key;
+    bool verify;
+} c6_state_write_t;
+c6_state_write_t c6_state_after_attach(bool full_path, bool attached, bool image_ok, bool key_valid);
+
+// Restart only after a failed attach on the skip path, and only if the verify flag / key erase really persisted;
+// otherwise the next boot would skip again and loop. Everything else carries on (without a link when not attached).
+bool c6_restart_after_attach(bool full_path, bool attached, bool state_persisted);

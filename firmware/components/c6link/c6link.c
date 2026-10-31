@@ -8,6 +8,7 @@
 #include "esp_event.h"
 #include "esp_hosted.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_netif_sntp.h"
@@ -696,12 +697,15 @@ static void cmd_c6log(char const *args) {
     c6_log_console(ms);
 }
 
-static void nvs_write_boot_state(char const *key, bool verify);
+static bool nvs_write_boot_state(char const *key, bool verify);
 static void cmd_c6_status(void);
 
 static void cmd_c6(char const *args) {
     if (strcmp(args, "verify") == 0) {
-        nvs_write_boot_state(NULL, true);
+        if (!nvs_write_boot_state(NULL, true)) {
+            console_reply("c6: can't save the verify flag");
+            return;
+        }
         console_reply("C6 is checked fully during the next boot, rebooting");
         fflush(stdout);
         vTaskDelay(pdMS_TO_TICKS(200));
@@ -791,29 +795,32 @@ static void nvs_read_boot_state(char *stored, size_t cap, bool *verify) {
     *verify = v != 0;
 }
 
-// Writes only what changes (key == NULL erases it): the NVS flash wears per write
-static void nvs_write_boot_state(char const *key, bool verify) {
+// Writes only what changes (key == NULL erases it): the NVS flash wears per write. True only when everything asked for
+// is committed.
+static bool nvs_write_boot_state(char const *key, bool verify) {
     nvs_handle_t nvs;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
-        return;
+        return false;
     }
+    bool   ok                     = true;
     char   cur[C6_BUNDLE_KEY_MAX] = "";
     size_t len                    = sizeof(cur);
     bool   have                   = nvs_get_str(nvs, KEY_OK, cur, &len) == ESP_OK;
     if (key && (!have || strcmp(cur, key) != 0)) {
-        nvs_set_str(nvs, KEY_OK, key);
+        ok = nvs_set_str(nvs, KEY_OK, key) == ESP_OK && ok;
     } else if (!key && have) {
-        nvs_erase_key(nvs, KEY_OK);
+        ok = nvs_erase_key(nvs, KEY_OK) == ESP_OK && ok;
     }
-    uint8_t v = 0;
+    uint8_t v     = 0;
     bool    vhave = nvs_get_u8(nvs, KEY_VERIFY, &v) == ESP_OK;
     if (verify && (!vhave || !v)) {
-        nvs_set_u8(nvs, KEY_VERIFY, 1);
+        ok = nvs_set_u8(nvs, KEY_VERIFY, 1) == ESP_OK && ok;
     } else if (!verify && vhave) {
-        nvs_erase_key(nvs, KEY_VERIFY);
+        ok = nvs_erase_key(nvs, KEY_VERIFY) == ESP_OK && ok;
     }
-    nvs_commit(nvs);
+    ok = nvs_commit(nvs) == ESP_OK && ok;
     nvs_close(nvs);
+    return ok;
 }
 
 void c6link_bundle_changed(void) {
@@ -829,6 +836,13 @@ static void cmd_c6_status(void) {
     console_reply("c6 reflash | verify (full check on the next boot)");
 }
 
+// The first boot of a fresh OTA image: until it is marked valid, one reset makes the bootloader roll it back
+static bool running_image_is_trial(void) {
+    esp_ota_img_states_t state;
+    return esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
+           state == ESP_OTA_IMG_PENDING_VERIFY;
+}
+
 // What to do about the flasher this boot. Returns true to run it.
 static bool plan_full_check(bool force, char *key, size_t key_cap) {
     char stored[C6_BUNDLE_KEY_MAX];
@@ -838,7 +852,7 @@ static bool plan_full_check(bool force, char *key, size_t key_cap) {
         key[0] = '\0';
     }
     c6_reset_kind_t kind = esp_reset_reason() == ESP_RST_SW ? C6_RST_SOFTWARE : C6_RST_OTHER;
-    c6_plan_t       plan = c6_boot_plan(kind, force, verify, stored, key, &boot_info.why);
+    c6_plan_t       plan = c6_boot_plan(kind, force, verify, running_image_is_trial(), stored, key, &boot_info.why);
     boot_info.plan       = plan == C6_PLAN_SKIP ? "skip" : "full";
     return plan == C6_PLAN_FULL_CHECK;
 }
@@ -883,18 +897,20 @@ bool c6link_start(void) {
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "C6 image check: %s (going on with what the C6 has)", esp_err_to_name(err));
         }
-        // Remember a verified bundle; any failure forgets it. The full path never restarts the badge.
-        nvs_write_boot_state(err == ESP_OK && key[0] ? key : NULL, false);
     } else {
         ESP_LOGW(TAG, "C6 bundle unchanged, ROM check skipped (SW reset)");
     }
     // The C6 was reset into its application by the flasher; only now may ESP-Hosted talk to it
     hold_c6_boot_high();
-    if (esp_hosted_init() != 0 || esp_hosted_connect_to_slave() != 0) {
+    bool attached = esp_hosted_init() == 0 && esp_hosted_connect_to_slave() == 0;
+    // The key is stored only after a successful attach; a failed one sets the verify flag (full check next boot)
+    c6_state_write_t w         = c6_state_after_attach(full, attached, err == ESP_OK, key[0] != '\0');
+    bool             persisted = w.write && nvs_write_boot_state(w.store_key ? key : NULL, w.verify);
+    if (!attached) {
         ESP_LOGE(TAG, "no connection to the C6 over ESP-Hosted");
-        if (!full) {
-            // A skip is a bet that the C6 is fine; when it loses, check fully next boot (that boot cannot restart)
-            nvs_write_boot_state(NULL, true);
+        // A skip is a bet that the C6 is fine; when it loses, check fully next boot. Never restart when that could not
+        // be saved (next boot would skip again: a loop without Wi-Fi OTA); the full path never restarts.
+        if (c6_restart_after_attach(full, attached, persisted)) {
             system_restart("C6 attach failed after skip");
         }
         boot_progress_end(BOOT_C6, STEP_FAILED, "no ESP-Hosted link");

@@ -37,8 +37,8 @@ bool c6_bundle_key(char const *boot_md5, char const *part_md5, char const *app_m
     return true;
 }
 
-c6_plan_t c6_boot_plan(c6_reset_kind_t kind, bool force, bool verify_flag, char const *stored_key, char const *current_key,
-                       char const **why) {
+c6_plan_t c6_boot_plan(c6_reset_kind_t kind, bool force, bool verify_flag, bool trial_image, char const *stored_key,
+                       char const *current_key, char const **why) {
     char const *reason;
     c6_plan_t   plan = C6_PLAN_FULL_CHECK;
     if (kind != C6_RST_SOFTWARE) {
@@ -47,6 +47,8 @@ c6_plan_t c6_boot_plan(c6_reset_kind_t kind, bool force, bool verify_flag, char 
         reason = "forced reflash";
     } else if (verify_flag) {
         reason = "verify flag (last attach failed)";
+    } else if (trial_image) {
+        reason = "trial image (a restart would roll it back)";
     } else if (!current_key || !current_key[0]) {
         reason = "no readable bundle";
     } else if (!stored_key || !stored_key[0]) {
@@ -61,4 +63,20 @@ c6_plan_t c6_boot_plan(c6_reset_kind_t kind, bool force, bool verify_flag, char 
         *why = reason;
     }
     return plan;
+}
+
+c6_state_write_t c6_state_after_attach(bool full_path, bool attached, bool image_ok, bool key_valid) {
+    c6_state_write_t w = {0};
+    if (!attached) {
+        w.write  = true; // key erased, verify set: the next boot checks fully
+        w.verify = true;
+    } else if (full_path) {
+        w.write     = true;
+        w.store_key = image_ok && key_valid;
+    }
+    return w;
+}
+
+bool c6_restart_after_attach(bool full_path, bool attached, bool state_persisted) {
+    return !full_path && !attached && state_persisted;
 }

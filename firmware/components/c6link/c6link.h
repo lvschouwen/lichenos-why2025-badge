@@ -12,7 +12,9 @@
 // True once ESP-Hosted talks to the C6, with or without Wi-Fi (no credentials, wrong password, out of range)
 bool c6link_start(void);
 bool c6link_up(void);
-// A file under /storage/c6 was written or deleted: forget the verified bundle so the next boot checks the C6 fully (#36)
+// A file under /storage/c6 was written or deleted: forget the verified bundle so the next boot checks the C6 fully (#36).
+// Invariant: EVERY writer of /storage/c6 must call this before touching the files. The boot-time skip key is built from
+// file sizes and the .md5 text only, so a .bin changed behind its back would still look verified.
 void c6link_bundle_changed(void);
 // A firmware update is being received (#76): wifi_scan refuses from now on (until the restart)
 void c6link_set_updating(void);

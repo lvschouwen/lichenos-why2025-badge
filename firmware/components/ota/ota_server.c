@@ -340,7 +340,8 @@ static bool write_file(char const *path, uint8_t const *data, size_t len) {
 }
 
 // A change under the C6 image directory makes the stored "verified bundle" stale (#36); forget it before touching the file,
-// so even an interrupted write leaves the next boot with a full check
+// so even an interrupted write leaves the next boot with a full check. Every writer of the C6 image directory must go
+// through here (or call c6link_bundle_changed itself): the skip key only covers sizes and .md5 text
 static void forget_c6_bundle_if_c6_file(char const *posix_path) {
     if (strncmp(posix_path, C6_IMAGE_DIR "/", strlen(C6_IMAGE_DIR) + 1) == 0) {
         c6link_bundle_changed();
