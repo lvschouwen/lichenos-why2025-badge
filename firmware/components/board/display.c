@@ -19,6 +19,7 @@ static char const TAG[] = "display";
 #define DSI_LANES                   2
 #define DSI_LANE_MBPS               1000
 #define DRAW_BUFFER_LINES           80
+#define LVGL_TASK_STACK            10240 // measured ~6.1 KiB used on home, Contacts, Settings (#26): 40 % headroom
 
 static st7703_lcd_init_cmd_t const init_cmds[] = CUSTOM_INIT_CMDS();
 
@@ -69,6 +70,9 @@ bool display_start(lv_display_t **out) {
 
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_affinity = 1;  // core 1 draws, core 0 talks to the world
+    // The 7 KiB default left 1032 B at its high-water mark (#26). Internal RAM on purpose: the draw path
+    // runs PPA/DMA2D and flash-backed font reads, which must not depend on a cached PSRAM stack.
+    port_cfg.task_stack = LVGL_TASK_STACK;
     if ((err = lvgl_port_init(&port_cfg)) != ESP_OK) {
         ESP_LOGE(TAG, "LVGL: %s", esp_err_to_name(err));
         return false;
