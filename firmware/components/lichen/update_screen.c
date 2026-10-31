@@ -339,7 +339,7 @@ static void tick(lv_timer_t *t) {
     portEXIT_CRITICAL(&lock);
     if (restart) {
         ESP_LOGW(TAG, "restarting after the update");
-        system_restart();
+        system_restart("after update");
     }
 
     if (!title_label) {

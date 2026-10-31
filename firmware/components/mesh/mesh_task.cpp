@@ -80,7 +80,7 @@ uint16_t BadgeBoard::getBattMilliVolts() {
     return 0; // not measured yet
 }
 void BadgeBoard::reboot() {
-    system_restart();
+    system_restart("MeshCore reboot");
 }
 bool radio_init() {
     return true;

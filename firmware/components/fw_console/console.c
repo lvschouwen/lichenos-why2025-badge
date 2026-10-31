@@ -6,7 +6,10 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_app_desc.h"
 #include "esp_system.h"
+#include "esp_timer.h"
+#include "restart_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -18,6 +21,7 @@
 #include <stdlib.h>
 
 #include <string.h>
+#include <time.h>
 
 #define MAX_COMMANDS   40
 #define MAX_TASKS_SEEN 32
@@ -258,7 +262,7 @@ static void cmd_slot(char const *args) {
     console_reply("booting %s (%s)", other->label, desc.version);
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(200));
-    system_restart();
+    system_restart("slot switch");
 }
 
 static void capture_finish(void) {
@@ -268,7 +272,75 @@ static void capture_finish(void) {
     }
 }
 
-void system_restart(void) {
+#define RESTART_KEY "rst_log"
+
+static char const *s_restart_why; // set by system_restart; NULL when something else called esp_restart (#41)
+static bool        s_restart_recorded;
+
+int system_restart_history(restart_log_t *out) {
+    memset(out, 0, sizeof(*out));
+    nvs_handle_t nvs;
+    size_t       size = sizeof(*out);
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return 0;
+    }
+    esp_err_t err = nvs_get_blob(nvs, RESTART_KEY, out, &size);
+    nvs_close(nvs);
+    if (err != ESP_OK || size != sizeof(*out)) {
+        memset(out, 0, sizeof(*out));
+        return 0;
+    }
+    restart_log_sanitize(out);
+    return (int)out->count;
+}
+
+// NVS, not RTC_NOINIT: that does not survive a software restart on the P4 (#4). One small blob write, no flash mapping
+static void record_restart(char const *why, uint32_t caller) {
+    if (s_restart_recorded) {
+        return;
+    }
+    s_restart_recorded = true;
+    char     when[24];
+    char    *when_p = NULL;
+    time_t   now    = time(NULL);
+    struct tm tm;
+    if (now > 1735689600 && gmtime_r(&now, &tm) && strftime(when, sizeof(when), "%Y-%m-%dT%H:%M:%SZ", &tm)) {
+        when_p = when;
+    }
+    char line[RESTART_LINE_MAX];
+    restart_line_format(line, sizeof(line), when_p, esp_app_get_description()->version, (uint32_t)(esp_timer_get_time() / 1000000),
+                        why, caller);
+    ESP_LOGW(TAG, "restart: %s", line);
+    restart_log_t *log = malloc(sizeof(*log));
+    if (!log) {
+        return;
+    }
+    system_restart_history(log);
+    restart_log_push(log, line);
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_blob(nvs, RESTART_KEY, log, sizeof(*log));
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    free(log);
+}
+
+// Every esp_restart() in the image ends up here (linker --wrap), including ones from IDF components and apps that
+// skip system_restart: those are recorded as "unknown caller" with the address they were called from
+extern void __real_esp_restart(void) __attribute__((noreturn));
+void        __wrap_esp_restart(void) __attribute__((noreturn));
+void        __wrap_esp_restart(void) {
+    if (s_restart_why) {
+        record_restart(s_restart_why, 0);
+    } else {
+        record_restart("unknown caller", (uint32_t)(uintptr_t)__builtin_return_address(0));
+    }
+    __real_esp_restart();
+}
+
+void system_restart(char const *why) {
+    s_restart_why = why ? why : "unspecified";
     if (capture.task && capture.task == xTaskGetCurrentTaskHandle()) {
         capture_finish(); // a command from Wi-Fi answers before the badge goes down (#38)
         vTaskDelay(pdMS_TO_TICKS(300)); // the reply leaves the TCP stack
@@ -281,7 +353,7 @@ static void cmd_reboot(char const *args) {
     console_reply("rebooting");
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(200));
-    system_restart();
+    system_restart("console reboot");
 }
 
 static void run(char *line) {

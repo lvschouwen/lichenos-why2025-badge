@@ -198,6 +198,17 @@ static void show(void) {
     } else {
         console_reply("crash: no core dump on flash");
     }
+    restart_log_t *rl = malloc(sizeof(*rl));
+    if (rl) {
+        int n = system_restart_history(rl);
+        if (n == 0) {
+            console_reply("crash: no restart recorded");
+        }
+        for (int i = 0; i < n; i++) {
+            console_reply("crash: restart: %s", rl->line[i]);
+        }
+        free(rl);
+    }
     char *buf = psram_alloc(LOG_MAX);
     if (!buf) {
         return;
@@ -321,6 +332,13 @@ void crash_check(void) {
     crash_reset_t const      reason = crash_reset_of(why);
     s_reset_reason = (int)why;
     ESP_LOGW(TAG, "reset reason %d (%s)", (int)why, reason_name(reason));
+    restart_log_t *rl = malloc(sizeof(*rl));
+    if (rl) {
+        if (system_restart_history(rl) > 0) {
+            ESP_LOGW(TAG, "restart: newest recorded: %s", rl->line[0]); // matches this boot when the reset reason is 3 (SW)
+        }
+        free(rl);
+    }
 
     uint32_t sum   = 0;
     bool     fresh = dump_sum(&sum) && sum != stored_dump_sum();

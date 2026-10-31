@@ -1,5 +1,7 @@
 #pragma once
 
+#include "restart_log.h"
+
 // Serial console on UART0 (#61): lines starting with "fw " are commands, everything else is ignored.
 // Replies are printed as "fw: ...". Modules add their own commands with console_register().
 
@@ -27,4 +29,9 @@ void console_exec(char const *line, char *buf, size_t cap, console_done_fn done,
 
 // Every deliberate restart goes through here (console, OTA, slot switch, C6 reflash, after an update), not through a
 // bare esp_restart(). The screen is blanked by a shutdown handler (backlight.c), so any esp_restart() gets it.
-void system_restart(void) __attribute__((noreturn));
+// why: a short reason, kept with the fw version, uptime and time in NVS (last 5, "fw crash") so an unexplained restart
+// can be traced (#41). A bare esp_restart() is caught too and recorded as "unknown caller" with its return address.
+void system_restart(char const *why) __attribute__((noreturn));
+
+// The recorded restarts, newest first; returns how many
+int system_restart_history(restart_log_t *out);
