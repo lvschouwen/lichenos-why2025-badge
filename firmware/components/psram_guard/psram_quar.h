@@ -8,7 +8,7 @@
 // buffer ever lands on them. Pure range math, host-tested in host_tests/psram_quar_test.c; psram_boot.c feeds it.
 
 #define PSRAM_QUAR_GRAIN  (64u * 1024u)  // ranges start and end on this
-#define PSRAM_QUAR_MARGIN (128u * 1024u) // added on each side of the bad bytes before rounding
+#define PSRAM_QUAR_MARGIN (512u * 1024u) // each side of the bad bytes before rounding: the failures thin out over ~150 KB, not stop (#86)
 #define PSRAM_QUAR_MAX    4              // separate ranges kept; beyond that the nearest ones are merged
 
 typedef struct {

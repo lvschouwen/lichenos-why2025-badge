@@ -19,8 +19,10 @@
 #define CHUNK       PSRAM_QUAR_GRAIN
 #define MAX_CHUNKS  1024
 #define WIN_LO      0x48400000u // the suspect window of #40: bad bytes near 0x4855BA81, 4 MB check ended at 0x485C0A80
-#define WIN_HI      0x48800000u
+#define WIN_HI      0x48A00000u
 #define LINE        128
+#define EXTRA_ROUNDS 3
+#define NEAR        (1024u * 1024u) // chunks this close to a found range get the extra rounds
 #define PSRAM_CAPS  (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 #define SPARSE_XOR  0xAAAAAAAAu // BadgeVMS' boot test: every 8th word of the PSRAM, address ^ this
 #define MAX_REGIONS 6
@@ -102,7 +104,7 @@ static void fold(chunk_t *c, int pass, psram_check_t const *r, size_t *first, si
     if (!r->bad_bytes) {
         return;
     }
-    c->bad[pass] = r->bad_bytes;
+    c->bad[pass] += r->bad_bytes;
     *first = r->first_bad < *first ? r->first_bad : *first;
     *last  = r->last_bad > *last ? r->last_bad : *last;
     s_stat.pass_bad[pass] += r->bad_bytes;
@@ -114,7 +116,7 @@ static void fold(chunk_t *c, int pass, psram_check_t const *r, size_t *first, si
 static void scan_chunk(chunk_t *c) {
     psram_check_t r = {0};
     size_t        first = SIZE_MAX, last = 0;
-    memset(c->bad, 0, sizeof(c->bad));
+    size_t before = c->bad[0] + c->bad[1] + c->bad[2] + c->bad[3];
     sparse_pass(c->mem, &r);
     fold(c, 0, &r, &first, &last);
     static uint32_t const masks[3] = {0, 0xFFFFFFFFu, 0};
@@ -123,9 +125,9 @@ static void scan_chunk(chunk_t *c) {
         fold(c, p + 1, &r, &first, &last);
     }
     s_stat.scanned++;
-    size_t total = c->bad[0] + c->bad[1] + c->bad[2] + c->bad[3];
+    size_t total = c->bad[0] + c->bad[1] + c->bad[2] + c->bad[3] - before;
     if (total) {
-        s_stat.bad_chunks++;
+        s_stat.bad_chunks += before == 0;
         s_stat.bad_bytes += total;
         uint32_t bits = s_stat.xor_or;
         psram_quar_note(&s_quar, (uintptr_t)c->mem + first, (uintptr_t)c->mem + last, (uint32_t)total, bits);
@@ -208,6 +210,17 @@ void psram_scan_run(void) {
     for (size_t i = 0; i < s_n; i++) {
         if (in_window(&s_chunks[i])) {
             scan_chunk(&s_chunks[i]);
+        }
+    }
+    for (int round = 0; round < EXTRA_ROUNDS && s_quar.n; round++) { // the failures thin out at the edges: look harder there
+        for (size_t i = 0; i < s_n; i++) {
+            uintptr_t a = (uintptr_t)s_chunks[i].mem;
+            for (size_t k = 0; k < s_quar.n; k++) {
+                if (a + CHUNK + NEAR > s_quar.r[k].lo && a < s_quar.r[k].hi + NEAR) {
+                    scan_chunk(&s_chunks[i]);
+                    break;
+                }
+            }
         }
     }
     keep_or_free();
