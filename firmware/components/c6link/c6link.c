@@ -1,7 +1,9 @@
 #include "c6link.h"
 
 #include "boot_progress.h"
+#include "c6_boot_policy.h"
 #include "c6_flasher.h"
+#include "c6_paths.h"
 #include "fw_console.h"
 #include "esp_event.h"
 #include "esp_hosted.h"
@@ -19,6 +21,8 @@
 #include "wifi_list.h"
 #include "nvs.h"
 #include "driver/gpio.h"
+#include "esp_system.h"
+#include <sys/stat.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -692,9 +696,19 @@ static void cmd_c6log(char const *args) {
     c6_log_console(ms);
 }
 
+static void nvs_write_boot_state(char const *key, bool verify);
+static void cmd_c6_status(void);
+
 static void cmd_c6(char const *args) {
+    if (strcmp(args, "verify") == 0) {
+        nvs_write_boot_state(NULL, true);
+        console_reply("C6 is checked fully during the next boot, rebooting");
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        system_restart("C6 verify requested");
+    }
     if (strcmp(args, "reflash") != 0) {
-        console_reply("c6 reflash (write the C6 image again on the next boot, then reboot)");
+        cmd_c6_status();
         return;
     }
     nvs_handle_t nvs;
@@ -708,6 +722,125 @@ static void cmd_c6(char const *args) {
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(200));
     system_restart("C6 reflash requested");
+}
+
+
+// ---- Skipping the flasher check on warm restarts (#36) ----
+// NVS (FW_NVS_NAMESPACE): c6_ok_key = bundle key stored after the last successful verify/flash, c6_verify = the last
+// attach after a skip failed, so the next boot checks fully. Only a software reset can skip; the full path never restarts.
+static char const KEY_OK[]     = "c6_ok_key";
+static char const KEY_VERIFY[] = "c6_verify";
+
+static struct {
+    char const *plan;     // "skip" / "full"
+    char const *why;
+    uint32_t    c6_ms;    // time spent in the C6 step this boot
+    char        key[C6_BUNDLE_KEY_MAX];
+} boot_info = {.plan = "?", .why = "?"};
+
+// md5 text and size of one bundle file, the same files the flasher compares (no hashing of the 1 MB app)
+static bool read_bundle_file(char const *name, char md5[40], unsigned long *size) {
+    char path[64], md5_name[40];
+    snprintf(md5_name, sizeof(md5_name), "%s.md5", name);
+    if (!c6_image_path(name, path, sizeof(path))) {
+        return false;
+    }
+    struct stat st;
+    if (stat(path, &st) != 0 || st.st_size <= 0) {
+        return false;
+    }
+    *size = (unsigned long)st.st_size;
+    if (!c6_image_path(md5_name, path, sizeof(path))) {
+        return false;
+    }
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        return false;
+    }
+    size_t n = fread(md5, 1, 39, f);
+    fclose(f);
+    md5[n] = '\0';
+    return n >= 32;
+}
+
+static bool current_bundle_key(char *out, size_t cap) {
+    char          m[3][40];
+    unsigned long sz[3];
+    static char const *const names[3] = {"bootloader.bin", "partitions.bin", "firmware.bin"};
+    for (int i = 0; i < 3; i++) {
+        if (!read_bundle_file(names[i], m[i], &sz[i])) {
+            return false;
+        }
+    }
+    return c6_bundle_key(m[0], m[1], m[2], sz[0], sz[1], sz[2], out, cap);
+}
+
+static void nvs_read_boot_state(char *stored, size_t cap, bool *verify) {
+    nvs_handle_t nvs;
+    uint8_t      v = 0;
+    stored[0]      = '\0';
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return;
+    }
+    size_t len = cap;
+    if (nvs_get_str(nvs, KEY_OK, stored, &len) != ESP_OK) {
+        stored[0] = '\0';
+    }
+    nvs_get_u8(nvs, KEY_VERIFY, &v);
+    nvs_close(nvs);
+    *verify = v != 0;
+}
+
+// Writes only what changes (key == NULL erases it): the NVS flash wears per write
+static void nvs_write_boot_state(char const *key, bool verify) {
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        return;
+    }
+    char   cur[C6_BUNDLE_KEY_MAX] = "";
+    size_t len                    = sizeof(cur);
+    bool   have                   = nvs_get_str(nvs, KEY_OK, cur, &len) == ESP_OK;
+    if (key && (!have || strcmp(cur, key) != 0)) {
+        nvs_set_str(nvs, KEY_OK, key);
+    } else if (!key && have) {
+        nvs_erase_key(nvs, KEY_OK);
+    }
+    uint8_t v = 0;
+    bool    vhave = nvs_get_u8(nvs, KEY_VERIFY, &v) == ESP_OK;
+    if (verify && (!vhave || !v)) {
+        nvs_set_u8(nvs, KEY_VERIFY, 1);
+    } else if (!verify && vhave) {
+        nvs_erase_key(nvs, KEY_VERIFY);
+    }
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+void c6link_bundle_changed(void) {
+    nvs_write_boot_state(NULL, false);
+}
+
+static void cmd_c6_status(void) {
+    char stored[C6_BUNDLE_KEY_MAX];
+    bool verify = false;
+    nvs_read_boot_state(stored, sizeof(stored), &verify);
+    console_reply("c6: this boot %s (%s), C6 step %u ms", boot_info.plan, boot_info.why, (unsigned)boot_info.c6_ms);
+    console_reply("c6: stored key %s, verify flag %d", stored[0] ? stored : "(none)", verify);
+    console_reply("c6 reflash | verify (full check on the next boot)");
+}
+
+// What to do about the flasher this boot. Returns true to run it.
+static bool plan_full_check(bool force, char *key, size_t key_cap) {
+    char stored[C6_BUNDLE_KEY_MAX];
+    bool verify = false;
+    nvs_read_boot_state(stored, sizeof(stored), &verify);
+    if (!current_bundle_key(key, key_cap)) {
+        key[0] = '\0';
+    }
+    c6_reset_kind_t kind = esp_reset_reason() == ESP_RST_SW ? C6_RST_SOFTWARE : C6_RST_OTHER;
+    c6_plan_t       plan = c6_boot_plan(kind, force, verify, stored, key, &boot_info.why);
+    boot_info.plan       = plan == C6_PLAN_SKIP ? "skip" : "full";
+    return plan == C6_PLAN_FULL_CHECK;
 }
 
 // P4 GPIO13 is the C6 GPIO9 strap: low at a reset means download mode. esp_hosted now resets the C6 through EN (GPIO12), so
@@ -726,7 +859,7 @@ static void hold_c6_boot_high(void) {
 
 bool c6link_start(void) {
     console_register("c6log", "c6log [ms] (copy the C6's console into the log)", cmd_c6log);
-    console_register("c6", "c6 reflash", cmd_c6);
+    console_register("c6", "c6 [reflash | verify]", cmd_c6);
     console_register("net", "net (Wi-Fi state and IP)", cmd_net);
     console_register("wifi", "wifi [scan | reconnect | <ssid> <password> | --clear]", cmd_wifi);
     scan_done = xSemaphoreCreateBinary();
@@ -739,21 +872,43 @@ bool c6link_start(void) {
     }
 
     boot_progress_begin(BOOT_C6);
-    esp_err_t err = flash_c6_if_needed(take_force_flag());
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "C6 image check: %s (going on with what the C6 has)", esp_err_to_name(err));
+    int64_t   t0    = esp_timer_get_time();
+    bool      force = take_force_flag();
+    char      key[C6_BUNDLE_KEY_MAX];
+    bool      full = plan_full_check(force, key, sizeof(key));
+    esp_err_t err  = ESP_OK;
+    if (full) {
+        ESP_LOGW(TAG, "C6 flasher check runs (%s)", boot_info.why);
+        err = flash_c6_if_needed(force);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "C6 image check: %s (going on with what the C6 has)", esp_err_to_name(err));
+        }
+        // Remember a verified bundle; any failure forgets it. The full path never restarts the badge.
+        nvs_write_boot_state(err == ESP_OK && key[0] ? key : NULL, false);
+    } else {
+        ESP_LOGW(TAG, "C6 bundle unchanged, ROM check skipped (SW reset)");
     }
     // The C6 was reset into its application by the flasher; only now may ESP-Hosted talk to it
     hold_c6_boot_high();
     if (esp_hosted_init() != 0 || esp_hosted_connect_to_slave() != 0) {
         ESP_LOGE(TAG, "no connection to the C6 over ESP-Hosted");
+        if (!full) {
+            // A skip is a bet that the C6 is fine; when it loses, check fully next boot (that boot cannot restart)
+            nvs_write_boot_state(NULL, true);
+            system_restart("C6 attach failed after skip");
+        }
         boot_progress_end(BOOT_C6, STEP_FAILED, "no ESP-Hosted link");
         boot_progress_end(BOOT_WIFI, STEP_SKIPPED, "no C6");
         boot_progress_end(BOOT_CLOCK, STEP_SKIPPED, "no C6");
         return false;
     }
-    link_up = true;
-    boot_progress_end(BOOT_C6, STEP_DONE, err == ESP_OK ? NULL : "image check failed");
+    link_up         = true;
+    boot_info.c6_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
+    ESP_LOGW(TAG, "C6 step %s: %u ms", boot_info.plan, (unsigned)boot_info.c6_ms);
+    char note[BOOT_REASON_LEN];
+    snprintf(note, sizeof(note), "%s%s%u ms", full ? "" : "check skipped, ", err == ESP_OK ? "" : "image check failed, ",
+             (unsigned)boot_info.c6_ms);
+    boot_progress_end(BOOT_C6, STEP_DONE, note);
     if (!start_wifi()) {
         ESP_LOGE(TAG, "Wi-Fi not started");
     }

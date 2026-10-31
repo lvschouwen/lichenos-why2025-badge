@@ -12,6 +12,8 @@
 // True once ESP-Hosted talks to the C6, with or without Wi-Fi (no credentials, wrong password, out of range)
 bool c6link_start(void);
 bool c6link_up(void);
+// A file under /storage/c6 was written or deleted: forget the verified bundle so the next boot checks the C6 fully (#36)
+void c6link_bundle_changed(void);
 // A firmware update is being received (#76): wifi_scan refuses from now on (until the restart)
 void c6link_set_updating(void);
 // Copies the station's IPv4 address into ip; false while there is none

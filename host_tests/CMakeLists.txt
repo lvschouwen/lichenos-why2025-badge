@@ -27,6 +27,20 @@ target_compile_options(c6_image_test PRIVATE
 target_include_directories(c6_image_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link)
 add_test(NAME c6_image_test COMMAND c6_image_test)
 
+add_executable(c6_boot_policy_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/c6_boot_policy_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link/c6_boot_policy.c
+)
+
+target_compile_options(c6_boot_policy_test PRIVATE
+    -Wall
+    -Wextra
+    -Werror
+)
+
+target_include_directories(c6_boot_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link)
+add_test(NAME c6_boot_policy_test COMMAND c6_boot_policy_test)
+
 add_executable(ota_proto_test
     ${CMAKE_CURRENT_SOURCE_DIR}/ota_proto_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota/ota_proto.c

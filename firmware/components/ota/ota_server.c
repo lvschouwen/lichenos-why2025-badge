@@ -5,6 +5,7 @@
 #include "ota_server.h"
 
 #include "bootloader_random.h"
+#include "c6_paths.h"
 #include "c6link.h"
 #include "console_cmd.h" // CONSOLE_CMD_MAX
 #include "fw_console.h"
@@ -338,6 +339,14 @@ static bool write_file(char const *path, uint8_t const *data, size_t len) {
     return fclose(f) == 0 && ok;
 }
 
+// A change under the C6 image directory makes the stored "verified bundle" stale (#36); forget it before touching the file,
+// so even an interrupted write leaves the next boot with a full check
+static void forget_c6_bundle_if_c6_file(char const *posix_path) {
+    if (strncmp(posix_path, C6_IMAGE_DIR "/", strlen(C6_IMAGE_DIR) + 1) == 0) {
+        c6link_bundle_changed();
+    }
+}
+
 // Put a checked file in place: write it next to the target, then swap it in. vms is the path as badge.sh names it.
 static bool finish_file(int fd, char const *vms, uint8_t const *data, size_t len, long long sent) {
     char path[OTA_PATH_MAX + 16];
@@ -346,6 +355,7 @@ static bool finish_file(int fd, char const *vms, uint8_t const *data, size_t len
         respond(fd, 400, "bad path");
         return false;
     }
+    forget_c6_bundle_if_c6_file(path);
     mkdir_parents(path);
     if (!write_file(temp, data, len)) {
         unlink(temp);
@@ -830,6 +840,7 @@ static void handle_delete(int fd, ota_request_t const *req) {
         respond(fd, 403, "path not allowed: use FLASH0: with a plain file name");
         return;
     }
+    forget_c6_bundle_if_c6_file(path);
     if (unlink(path) != 0) {
         respond(fd, 404, "couldn't delete %s", req->path);
         return;
