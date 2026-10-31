@@ -358,13 +358,36 @@ static bool held_covers(uintptr_t lo, uintptr_t hi) {
     return false;
 }
 
-// Every quarantined page must be a hole in the heap or inside a chunk held this boot; anything else is counted
-static size_t missing_in(psram_quar_range_t const *r) {
-    size_t missing = 0;
-    for (uintptr_t p = r->lo; p < r->hi; p += PSRAM_PAGE) {
-        if (!is_hole(p, p + PSRAM_PAGE) && !held_covers(p, p + PSRAM_PAGE)) {
-            missing += PSRAM_PAGE;
+#define HEADER_GAP 256 // bytes between two neighbouring held chunks are the heap's block headers, nobody else's
+
+// Bytes of [lo, hi) that are neither a hole nor inside a held chunk, ignoring the heap headers between held chunks.
+// A whole-page gap is somebody's memory (a heap control block, an early allocation): counted.
+static size_t uncovered_in(uintptr_t lo, uintptr_t hi) {
+    size_t    missing = 0;
+    uintptr_t at      = lo;
+    while (at < hi) {
+        uintptr_t next_lo = hi, cover_hi = 0; // the owned block starting at or after at that begins first; its end
+        for (size_t i = 0; i < s_nholes + s_nheld; i++) {
+            uintptr_t blo = i < s_nholes ? s_holes[i].lo : (uintptr_t)s_held[i - s_nholes].mem;
+            uintptr_t bhi = i < s_nholes ? s_holes[i].hi : blo + s_held[i - s_nholes].len;
+            if (bhi <= at || blo >= hi) {
+                continue;
+            }
+            if (blo <= at) { // covers at: extend
+                cover_hi = bhi > cover_hi ? bhi : cover_hi;
+            } else if (blo < next_lo) {
+                next_lo = blo;
+            }
         }
+        if (cover_hi > at) {
+            at = cover_hi;
+            continue;
+        }
+        size_t gap = (next_lo < hi ? next_lo : hi) - at;
+        if (gap >= HEADER_GAP || next_lo >= hi) {
+            missing += gap;
+        }
+        at = next_lo < hi ? next_lo : hi;
     }
     return missing;
 }
@@ -372,7 +395,7 @@ static size_t missing_in(psram_quar_range_t const *r) {
 static void coverage(void) {
     s_stat.missing = 0;
     for (size_t i = 0; i < s_quar.n; i++) {
-        s_stat.missing += missing_in(&s_quar.r[i]);
+        s_stat.missing += uncovered_in(s_quar.r[i].lo, s_quar.r[i].hi);
     }
 }
 
@@ -404,12 +427,12 @@ void psram_scan_run(void) {
     s_stat.us = esp_timer_get_time() - start;
     ESP_LOGW(TAG, "scan: window %p..%p, %u chunk scans + %u extra rounds in %u ms, %u bad chunks, bad bytes sparse %u dense %u/%u/%u; "
                   "flipped bits %08x (0->1 %08x, 1->0 %08x); quarantine %u range(s) %u KB: %u heap holes %u KB, %u chunks of 64 KB "
-                  "held until reboot (new this boot), %u KB NOT covered; free PSRAM %u -> %u KB",
+                  "held until reboot (new this boot), %u bytes NOT covered; free PSRAM %u -> %u KB",
              (void *)WIN_LO, (void *)WIN_HI, (unsigned)s_stat.scanned, (unsigned)s_stat.rounds, (unsigned)(s_stat.us / 1000),
              (unsigned)s_stat.bad_chunks, (unsigned)s_stat.pass_bad[0], (unsigned)s_stat.pass_bad[1], (unsigned)s_stat.pass_bad[2],
              (unsigned)s_stat.pass_bad[3], (unsigned)s_stat.xor_or, (unsigned)s_stat.up_or, (unsigned)s_stat.down_or,
              (unsigned)s_quar.n, (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)s_nholes, (unsigned)(s_hole_bytes >> 10),
-             (unsigned)s_nheld, (unsigned)(s_stat.missing >> 10), (unsigned)(free0 >> 10),
+             (unsigned)s_nheld, (unsigned)s_stat.missing, (unsigned)(free0 >> 10),
              (unsigned)(heap_caps_get_free_size(PSRAM_CAPS) >> 10));
 }
 
@@ -419,14 +442,20 @@ void psram_scan_note_region(char const *name, void const *addr, size_t len) {
     }
 }
 
-static char const *range_status(psram_quar_range_t const *r) {
-    bool hole = true, covered = true;
+static char const *range_status(psram_quar_range_t const *r, char *buf, size_t cap) {
+    bool hole = true;
     for (uintptr_t p = r->lo; p < r->hi; p += PSRAM_PAGE) {
-        bool h = is_hole(p, p + PSRAM_PAGE);
-        hole    = hole && h;
-        covered = covered && (h || held_covers(p, p + PSRAM_PAGE));
+        hole = hole && is_hole(p, p + PSRAM_PAGE);
     }
-    return hole ? "heap hole" : covered ? "held until reboot (new this boot)" : "NOT HELD";
+    size_t missing = uncovered_in(r->lo, r->hi);
+    if (hole) {
+        return "heap hole";
+    }
+    if (!missing) {
+        return "held until reboot (new this boot)";
+    }
+    snprintf(buf, cap, "%u bytes NOT HELD (new this boot, hole from the next boot on)", (unsigned)missing);
+    return buf;
 }
 
 void psram_scan_print(void) {
@@ -436,24 +465,14 @@ void psram_scan_print(void) {
                   (unsigned)s_stat.bad_chunks, (unsigned)s_stat.pass_bad[0], (unsigned)s_stat.pass_bad[1],
                   (unsigned)s_stat.pass_bad[2], (unsigned)s_stat.pass_bad[3], (unsigned)s_stat.xor_or,
                   (unsigned)s_stat.up_or, (unsigned)s_stat.down_or, (unsigned)s_stat.gaps_in_window);
-    if (!s_quar.n) {
-        console_reply("psram quarantine: none (no bad bytes in the window)");
-    }
-    for (size_t i = 0; i < s_quar.n; i++) {
-        psram_quar_range_t const *r = &s_quar.r[i];
-        console_reply("psram quarantine %u: %p..%p (%u KB), failed pages %p..%p (%u), bits %08x: %s", (unsigned)i,
-                      (void *)r->lo, (void *)r->hi, (unsigned)((r->hi - r->lo) >> 10), (void *)r->first_bad,
-                      (void *)r->last_bad, (unsigned)r->bad_bytes, (unsigned)r->bits, range_status(r));
-    }
-    psram_learned_print();
     size_t held = 0;
     for (size_t i = 0; i < s_nheld; i++) {
         held += s_held[i].len;
     }
     console_reply("psram quarantine: %u ranges, %u KB; %u heap holes %u KB (left out of the heap at boot), %u chunks %u KB held until "
-                  "reboot (new finds), %u KB NOT covered; PSRAM heap in %u pieces from %u pools, %u pieces failed",
+                  "reboot (new finds), %u bytes NOT covered; PSRAM heap in %u pieces from %u pools, %u pieces failed",
                   (unsigned)s_quar.n, (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)s_nholes, (unsigned)(s_hole_bytes >> 10),
-                  (unsigned)s_nheld, (unsigned)(held >> 10), (unsigned)(s_stat.missing >> 10), (unsigned)s_pieces,
+                  (unsigned)s_nheld, (unsigned)(held >> 10), (unsigned)s_stat.missing, (unsigned)s_pieces,
                   (unsigned)s_npools, (unsigned)s_pieces_failed);
     for (size_t i = 0; i < s_nholes; i++) {
         console_reply("psram hole %u: %p..%p (%u KB)", (unsigned)i, (void *)s_holes[i].lo, (void *)s_holes[i].hi,
@@ -464,6 +483,17 @@ void psram_scan_print(void) {
                       (unsigned)s_held[i].bad[0], (unsigned)s_held[i].bad[1], (unsigned)s_held[i].bad[2],
                       (unsigned)s_held[i].bad[3]);
     }
+    if (!s_quar.n) {
+        console_reply("psram quarantine: none (no bad bytes in the window)");
+    }
+    for (size_t i = 0; i < s_quar.n; i++) {
+        psram_quar_range_t const *r = &s_quar.r[i];
+        char                      st[80];
+        console_reply("psram quarantine %u: %p..%p (%u KB), failed pages %p..%p (%u), bits %08x: %s", (unsigned)i,
+                      (void *)r->lo, (void *)r->hi, (unsigned)((r->hi - r->lo) >> 10), (void *)r->first_bad,
+                      (void *)r->last_bad, (unsigned)r->bad_bytes, (unsigned)r->bits, range_status(r, st, sizeof(st)));
+    }
+    psram_learned_print();
     console_reply("psram map: %s", s_map);
     for (size_t i = 0; i < s_nregions; i++) {
         region_t const *g = &s_regions[i];
