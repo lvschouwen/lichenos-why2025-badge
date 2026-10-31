@@ -30,7 +30,7 @@ typedef struct {
 // before shell_start(), so it comes first on home; main.c then runs its start_background with the other apps'.
 void meshcore_app_register(void);
 
-bool mesh_start(void); // the app's start_background: false when it did not start
+bool mesh_start(char const *files_dir); // the app's start_background, with its directory (#84 T6): false when it did not start
 // The task runs (started, not stopped for an update)
 bool mesh_running(void);
 // A firmware update is coming (#76): saves prefs, contacts and channels, then the mesh task ends. Waits for that (up to

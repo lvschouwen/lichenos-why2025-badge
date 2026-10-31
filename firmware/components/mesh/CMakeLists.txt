@@ -27,7 +27,7 @@ idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "companion" ${MC}/src ${MC}/examples/companion_radio ${MC}/lib/ed25519 ${CR}
                                          "../../../shared/arduino_shim" "../../../third_party/base64/src"
-                       PRIV_REQUIRES lichen_clock lora fw_console nvs_flash esp_timer lichen_random freertos fatfs
+                       PRIV_REQUIRES lichen_clock lora fw_console nvs_flash esp_timer lichen_random freertos
                                      esp_system heap lichen_api esp_lvgl_port)
 # MeshCore's sizes on the badge: its tables live in PSRAM (mesh_task.cpp), so far beyond MeshCore's defaults
 target_compile_definitions(${COMPONENT_LIB} PRIVATE MAX_CONTACTS=1000 MAX_GROUP_CHANNELS=40 OFFLINE_QUEUE_SIZE=256

@@ -14,6 +14,7 @@
 #include "meshcore_chat.h"
 #include "meshcore_settings.h"
 #include "scroll_anchor.h"
+#include "lichen_fs.h"
 #include "lichen_settings.h"
 #include "lichen_ui.h"
 #include "fonts.h"
@@ -755,7 +756,11 @@ static bool start_background(void) {
         return false;
     }
     app_settings_adopt_u8(self(), "mc_name_set"); // firmware before #84 T5 kept the flag in Lichen's namespace
-    return mesh_start();
+    char const *dir = lichen_fs_app_dir(self()); // /storage/meshcore, as before #84 T6
+    if (!dir) {
+        return false;
+    }
+    return mesh_start(dir);
 }
 
 // "fw setup reset meshcore" / "done meshcore": only the questions' flag; the name and the radio stay

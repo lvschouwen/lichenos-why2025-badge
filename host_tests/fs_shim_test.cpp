@@ -16,11 +16,32 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
+static void fake_drive(size_t *total, size_t *used) {
+    *total = 1000;
+    *used  = 250;
+}
+
 int main(void) {
     char root[] = "/tmp/fs_shim_test.XXXXXX";
     CHECK(mkdtemp(root) != NULL);
+    CHECK(!SPIFFS.begin(true)); // no root yet: the OS hands it over first (#84 T6)
     fs_shim_set_root(root);
     CHECK(SPIFFS.begin(true));
+
+    // The app stays below its root: no "..", ".", or "//" anywhere in a path
+    CHECK(!SPIFFS.exists("/../x") && !SPIFFS.exists("/a/../b") && !SPIFFS.exists("a//b") && !SPIFFS.exists("/./a"));
+    File escape = SPIFFS.open("/../escape", "w", true);
+    CHECK(!escape);
+    char outside[300];
+    snprintf(outside, sizeof(outside), "%s/../escape", root);
+    CHECK(access(outside, F_OK) != 0);
+    CHECK(!SPIFFS.mkdir("/a/../up") && !SPIFFS.remove("/.."));
+
+    // Which roots format() may wipe
+    CHECK(fs_shim_format_allowed("/storage/meshcore") && fs_shim_format_allowed(root));
+    CHECK(!fs_shim_format_allowed("/storage") && !fs_shim_format_allowed("/") && !fs_shim_format_allowed(""));
+    CHECK(!fs_shim_format_allowed(NULL) && !fs_shim_format_allowed("/storage/") && !fs_shim_format_allowed("storage/x"));
+    CHECK(!fs_shim_format_allowed("/storage/c6") && !fs_shim_format_allowed("/storage/meshcore/.."));
 
     // Missing files: not there, and opening one for reading gives a false File
     CHECK(!SPIFFS.exists("/a/b"));
@@ -60,13 +81,23 @@ int main(void) {
     CHECK(!SPIFFS.remove("/a/b"));
     CHECK(SPIFFS.mkdir("/x/y") && SPIFFS.exists("/x/y"));
 
-    // Sizes come from the platform hook; the host's numbers just have to make sense
+    // Sizes come from the platform hook; the host's numbers just have to make sense, and the OS hook is used when set
     CHECK(SPIFFS.totalBytes() > 0 && SPIFFS.usedBytes() <= SPIFFS.totalBytes());
+    fs_shim_set_drive_bytes(fake_drive);
+    CHECK(SPIFFS.totalBytes() == 1000 && SPIFFS.usedBytes() == 250);
+    fs_shim_set_drive_bytes(NULL);
 
     // format() empties the root
     out = SPIFFS.open("/c", "w");
     out.close();
     CHECK(SPIFFS.format() && !SPIFFS.exists("/c") && !SPIFFS.exists("/x/y"));
+    // ... but never a root the rule refuses: the file survives
+    out = SPIFFS.open("/d", "w");
+    out.close();
+    fs_shim_set_root("/");
+    CHECK(!SPIFFS.format());
+    fs_shim_set_root(root);
+    CHECK(SPIFFS.exists("/d") && SPIFFS.remove("/d"));
     rmdir(root);
 
     if (failures) {

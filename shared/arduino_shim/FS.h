@@ -64,8 +64,14 @@ public:
 
 using fs::File;
 
-// The root directory below which MeshCore's paths live (default FS_SHIM_ROOT); host tests point it at a temp dir
+// The root directory below which MeshCore's paths live: the OS hands the app its directory (lichen_fs_app_dir) before
+// begin(); host tests point it at a temp dir. Unset, begin() fails. Paths with a ".." component or "//" are refused.
 void fs_shim_set_root(char const *dir);
+// Sizes of the drive the root lives on (totalBytes/usedBytes); the host default measures the root's file system
+void fs_shim_set_drive_bytes(void (*fn)(size_t *total, size_t *used));
+// format() wipes only a directory of its own below a parent ("/storage/meshcore"): never a top-level directory or the
+// drive itself, never the C6 image's /storage/c6, never through "..". Pure, host-tested.
+bool fs_shim_format_allowed(char const *root);
 // Microseconds spent in file calls (open, read, write, close, exists, remove) since the last call, and how many calls
 // (ops may be NULL); always 0 off the badge
 uint32_t fs_shim_take_busy_us(uint32_t *ops);

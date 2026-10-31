@@ -9,21 +9,16 @@
 
 #ifdef ESP_PLATFORM
 #include "esp_timer.h"
-#include "esp_vfs_fat.h"
-#define FS_SHIM_MOUNT "/storage"
 #else
 #include <sys/statvfs.h>
-#endif
-
-#ifndef FS_SHIM_ROOT
-#define FS_SHIM_ROOT "/storage/meshcore"
 #endif
 
 #define PATH_MAX_LEN 256
 
 fs::SPIFFSFS SPIFFS;
 
-static char root[PATH_MAX_LEN] = FS_SHIM_ROOT;
+static char root[PATH_MAX_LEN]; // empty until the OS sets it (#84 T6)
+static void (*drive_fn)(size_t *total, size_t *used);
 
 // Time spent in the file system (#67: where does a slow MeshCore loop go?). Only the badge measures; the mesh task reads
 // and resets it once per loop, under the mesh lock that every MeshCore file access already runs under.
@@ -51,10 +46,48 @@ struct Timed {
 } // namespace
 
 void fs_shim_set_root(char const *dir) {
-    snprintf(root, sizeof(root), "%s", dir);
+    snprintf(root, sizeof(root), "%s", dir ? dir : "");
+}
+
+void fs_shim_set_drive_bytes(void (*fn)(size_t *total, size_t *used)) {
+    drive_fn = fn;
+}
+
+// No "." or ".." component (the app stays below its root) and no empty component ("//")
+static bool components_ok(char const *path) {
+    for (char const *p = path; *p; ) {
+        while (*p == '/') {
+            p++;
+            if (*p == '/') {
+                return false;
+            }
+        }
+        char const *end = p;
+        while (*end && *end != '/') {
+            end++;
+        }
+        size_t n = (size_t)(end - p);
+        if ((n == 1 && p[0] == '.') || (n == 2 && p[0] == '.' && p[1] == '.')) {
+            return false;
+        }
+        p = end;
+    }
+    return true;
+}
+
+bool fs_shim_format_allowed(char const *r) {
+    if (!r || r[0] != '/' || !components_ok(r)) {
+        return false;
+    }
+    char const *last = strrchr(r, '/');
+    bool        nested = last != r && last[1] != '\0'; // "/parent/name", not "/name", "/" or "/parent/"
+    return nested && strcmp(r, "/storage/c6") != 0;
 }
 
 static bool full_path(char const *path, char *out) {
+    if (!root[0] || !path || !components_ok(path)) {
+        return false;
+    }
     int n = snprintf(out, PATH_MAX_LEN, "%s%s%s", root, path[0] == '/' ? "" : "/", path);
     return n > 0 && n < PATH_MAX_LEN;
 }
@@ -206,7 +239,7 @@ bool FS::mkdir(char const *path) {
 
 bool SPIFFSFS::begin(bool format_on_fail) {
     (void)format_on_fail;
-    return ::mkdir(root, 0755) == 0 || errno == EEXIST;
+    return root[0] && (::mkdir(root, 0755) == 0 || errno == EEXIST);
 }
 
 // Deletes the contents of dir (not dir itself)
@@ -238,16 +271,17 @@ static bool remove_tree(char const *dir) {
 }
 
 bool SPIFFSFS::format() {
-    return remove_tree(root);
+    return fs_shim_format_allowed(root) && remove_tree(root);
 }
 
 // Sizes of the whole drive the root lives on
 static void drive_bytes(size_t *total, size_t *used) {
+    if (drive_fn) {
+        drive_fn(total, used);
+        return;
+    }
 #ifdef ESP_PLATFORM
-    uint64_t t = 0, f = 0;
-    esp_vfs_fat_info(FS_SHIM_MOUNT, &t, &f);
-    *total = (size_t)t;
-    *used  = (size_t)(t - f);
+    *total = *used = 0; // the OS did not say
 #else
     struct statvfs st;
     if (statvfs(root, &st) != 0) {

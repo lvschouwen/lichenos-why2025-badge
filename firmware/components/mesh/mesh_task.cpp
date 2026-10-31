@@ -23,6 +23,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "lichen_fs.h"
 #include "lichen_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -1251,7 +1252,20 @@ extern "C" bool mesh_node_id(char *hex, size_t cap) {
     return true;
 }
 
-extern "C" bool mesh_start(void) {
+// totalBytes/usedBytes of the drive, through the OS (lichen_fs.h)
+static void drive_bytes(size_t *total, size_t *used) {
+    if (!lichen_fs_drive_bytes(total, used)) {
+        *total = *used = 0;
+    }
+}
+
+extern "C" bool mesh_start(char const *files_dir) {
+    if (!files_dir) {
+        ESP_LOGE(TAG, "no directory for MeshCore's files");
+        return false;
+    }
+    fs_shim_set_root(files_dir);
+    fs_shim_set_drive_bytes(drive_bytes);
     mesh_lock();
     mesh_store_set_hooks(store_alloc_ring, store_warn);
     bool ok = mesh_store_init(STORE_MESSAGES);
