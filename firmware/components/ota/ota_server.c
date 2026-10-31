@@ -373,19 +373,8 @@ static bool finish_file(int fd, char const *vms, uint8_t const *data, size_t len
     return true;
 }
 
-// Install a checked firmware image into the other app slot; it runs after a reboot, on trial until it proves itself
-static bool finish_firmware(int fd, uint8_t const *data, size_t len, long long sent) {
-    esp_partition_t const *slot = esp_ota_get_next_update_partition(NULL);
-    esp_ota_handle_t       handle;
-    if (!slot || esp_ota_begin(slot, len, &handle) != ESP_OK) {
-        respond(fd, 503, "couldn't start an OTA session");
-        return false;
-    }
-    if (esp_ota_write(handle, data, len) != ESP_OK) {
-        esp_ota_abort(handle);
-        respond(fd, 500, "flash write failed, nothing installed");
-        return false;
-    }
+// Validate what was written to the slot and make it the boot slot; it runs after a reboot, on trial until it proves itself
+static bool install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t handle, size_t len, long long sent) {
     esp_err_t err = esp_ota_end(handle); // checks the image: chip, segments, hash
     if (err != ESP_OK) {
         respond(fd, 422, "image failed validation (%s), nothing installed", esp_err_to_name(err));
@@ -399,6 +388,22 @@ static bool finish_firmware(int fd, uint8_t const *data, size_t len, long long s
     respond(fd, 200, "installed %zu bytes (%lld sent), runs after a reboot", len, sent);
     firmware_installed = true;
     return true;
+}
+
+// Install a checked firmware image (received whole in memory) into the other app slot
+static bool finish_firmware(int fd, uint8_t const *data, size_t len, long long sent) {
+    esp_partition_t const *slot = esp_ota_get_next_update_partition(NULL);
+    esp_ota_handle_t       handle;
+    if (!slot || esp_ota_begin(slot, len, &handle) != ESP_OK) {
+        respond(fd, 503, "couldn't start an OTA session");
+        return false;
+    }
+    if (esp_ota_write(handle, data, len) != ESP_OK) {
+        esp_ota_abort(handle);
+        respond(fd, 500, "flash write failed, nothing installed");
+        return false;
+    }
+    return install_slot(fd, slot, handle, len, sent);
 }
 
 // Write a checked assets image (#22) over the assets partition. The image is fully checked (header, table, CRC)
@@ -439,6 +444,7 @@ static bool finish_assets(int fd, uint8_t const *data, size_t len, long long sen
     respond(fd, 200, "wrote %zu bytes (%lld sent), %u files, used after a reboot", len, sent, (unsigned)view.count);
     return true;
 }
+
 
 static void handle_firmware(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
     if (req->content_length <= 0 || !req->has_sha256) {
@@ -540,12 +546,21 @@ static struct {
     size_t      got;
     long long   sent;
     ota_pieces_t pieces; // SHA-256 of each verified piece, to find damaged ones if the whole file doesn't match
+    // Firmware pieces are not staged in memory (#37): each goes straight into the inactive slot, which is read back
+    // and hashed at the end. data stays NULL then.
+    esp_partition_t const *slot;
+    esp_ota_handle_t       ota;
+    bool                   ota_open;
+    bool                   dirty; // the last attempt at the current piece wrote (part of) it: erase before the next
 } staged;
 
 // Whole cache lines, so no neighbouring allocation or DMA driver shares a line with the staging buffer (#37)
 #define STAGE_ALIGN CONFIG_CACHE_L2_CACHE_LINE_SIZE
 
 static void staged_reset(void) {
+    if (staged.ota_open) {
+        esp_ota_abort(staged.ota);
+    }
     heap_caps_free(staged.data);
     ota_pieces_clear(&staged.pieces);
     memset(&staged, 0, sizeof(staged));
@@ -567,6 +582,70 @@ static bool fixed_sink(void *ctx, uint8_t const *data, size_t len) {
     return true;
 }
 
+// The streamed firmware piece goes to the slot at base + what came before in this piece
+typedef struct {
+    esp_ota_handle_t handle;
+    size_t           base;
+    size_t           len;
+} flash_ctx_t;
+
+static bool flash_sink(void *ctx, uint8_t const *data, size_t len) {
+    flash_ctx_t *f = ctx;
+    if (esp_ota_write_with_offset(f->handle, data, len, (uint32_t)(f->base + f->len)) != ESP_OK) {
+        return false;
+    }
+    f->len += len;
+    return true;
+}
+
+static int slot_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
+    return esp_partition_read(ctx, off, buf, n) == ESP_OK ? 0 : -1;
+}
+
+// Open the inactive slot for a streamed image. esp_ota_begin erases only what the first piece covers; every later
+// piece (and a resent one) is erased by stream_erase before it arrives, so no single call blocks for long.
+static bool stream_open(size_t first_len) {
+    staged.slot = esp_ota_get_next_update_partition(NULL);
+    if (!staged.slot || esp_ota_begin(staged.slot, first_len, &staged.ota) != ESP_OK) {
+        return false;
+    }
+    staged.ota_open = true;
+    return true;
+}
+
+static bool stream_erase(size_t offset, size_t len) {
+    size_t end = ota_round_up(offset + len, 4096);
+    if (end > staged.slot->size) {
+        end = staged.slot->size;
+    }
+    return esp_partition_erase_range(staged.slot, offset, end - offset) == ESP_OK;
+}
+
+// The streamed image is complete: hash what the slot holds (not what was received), and install it if it is the file
+static bool finish_streamed(int fd, char sha_hex[OTA_SHA256_HEX + 1]) {
+    uint8_t digest[SHA256_DIGEST_LEN];
+    if (ota_hash_range(slot_read, (void *)staged.slot, 0, staged.total, body_buf, sizeof(body_buf), digest) != 0) {
+        respond(fd, 500, "couldn't read the slot back, nothing installed");
+        return false;
+    }
+    ota_hex(digest, sizeof(digest), sha_hex);
+    if (strcmp(sha_hex, staged.file_sha256) != 0) {
+        size_t bad[8];
+        size_t n = ota_pieces_check_read(&staged.pieces, slot_read, (void *)staged.slot, body_buf, sizeof(body_buf),
+                                         bad, 8);
+        ESP_LOGW(TAG, "whole-file mismatch in the slot: %zu of %zu pieces differ from what was received", n,
+                 staged.pieces.n);
+        for (size_t i = 0; i < n && i < 8; i++) {
+            ota_piece_t const *pc = &staged.pieces.v[bad[i]];
+            ESP_LOGW(TAG, "  piece %zu at offset %u (%u bytes) differs", bad[i], (unsigned)pc->offset, (unsigned)pc->len);
+        }
+        respond(fd, 400, "whole-file SHA-256 mismatch (sha256 %s), nothing installed", sha_hex);
+        return false;
+    }
+    staged.ota_open = false; // esp_ota_end ends the handle, good or bad
+    return install_slot(fd, staged.slot, staged.ota, staged.total, staged.sent);
+}
+
 // The whole file didn't match: say which verified pieces no longer match what was stored for them
 static void report_damaged_pieces(void) {
     size_t bad[8];
@@ -577,6 +656,118 @@ static void report_damaged_pieces(void) {
         ota_piece_t const *pc = &staged.pieces.v[bad[i]];
         ESP_LOGW(TAG, "  piece %zu at offset %u (%u bytes) changed", bad[i], (unsigned)pc->offset, (unsigned)pc->len);
     }
+}
+
+// Hash a received piece again where it ended up: in the PSRAM staging buffer, or read back from the OTA slot (#37)
+static void rehash_piece(size_t offset, size_t len, uint8_t digest[SHA256_DIGEST_LEN]) {
+    if (staged.data) {
+        sha256_ctx_t again;
+        sha256_init(&again);
+        sha256_update(&again, staged.data + offset, len);
+        sha256_final(&again, digest);
+    } else if (ota_hash_range(slot_read, (void *)staged.slot, offset, len, body_buf, sizeof(body_buf), digest) != 0) {
+        memset(digest, 0, SHA256_DIGEST_LEN); // unreadable: never equals the sender's hash
+    }
+}
+
+// Offset 0 starts a transfer: get its storage ready and tell the screen. False = answered already.
+static bool piece_start(int fd, ota_request_t const *req, char const *path) {
+    bool stream = req->route == OTA_ROUTE_FIRMWARE;
+    staged_reset();
+    if (!stream) {
+        staged.data = heap_caps_aligned_alloc(STAGE_ALIGN, ota_round_up((size_t)req->total_size, STAGE_ALIGN),
+                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!staged.data) {
+            respond(fd, 503, "not enough memory for %lld bytes", req->total_size);
+            return false;
+        }
+    }
+    staged.active = true;
+    hook_begin(req->route == OTA_ROUTE_FIRMWARE ? OTA_KIND_FIRMWARE
+               : req->route == OTA_ROUTE_ASSETS ? OTA_KIND_ASSETS
+                                                : OTA_KIND_FILE,
+               req->route == OTA_ROUTE_FILE     ? display_name(req->path)
+               : req->route == OTA_ROUTE_ASSETS ? "assets"
+                                                : NULL,
+               req->total_size);
+    staged.route = req->route;
+    staged.total = (size_t)req->total_size;
+    snprintf(staged.path, sizeof(staged.path), "%s", path);
+    strcpy(staged.file_sha256, req->file_sha256);
+    // After hook_begin: it stops the other tasks before the slot is touched
+    if (stream && !stream_open((size_t)req->content_length)) {
+        hook_end(false, false);
+        staged_reset();
+        respond(fd, 503, "couldn't start an OTA session");
+        return false;
+    }
+    return true;
+}
+
+static void piece_done(int fd) {
+    uint8_t digest[SHA256_DIGEST_LEN];
+    char    sha_hex[OTA_SHA256_HEX + 1];
+    bool    finished;
+    if (staged.route == OTA_ROUTE_FIRMWARE) {
+        finished = finish_streamed(fd, sha_hex);
+        hook_end(finished, false);
+        staged_reset();
+        return;
+    }
+    sha256_ctx_t whole;
+    sha256_init(&whole);
+    sha256_update(&whole, staged.data, staged.total);
+    sha256_final(&whole, digest);
+    ota_hex(digest, sizeof(digest), sha_hex);
+    if (strcmp(sha_hex, staged.file_sha256) != 0) {
+        report_damaged_pieces();
+        hook_end(false, false);
+        staged_reset();
+        respond(fd, 400, "whole-file SHA-256 mismatch (sha256 %s), nothing written", sha_hex);
+        return;
+    }
+    finished = staged.route == OTA_ROUTE_ASSETS ? finish_assets(fd, staged.data, staged.total, staged.sent)
+                                                : finish_file(fd, staged.path, staged.data, staged.total, staged.sent);
+    hook_end(finished, false);
+    staged_reset();
+}
+
+// Receive one piece into its place: the staging buffer, or the slot (erased first when it is not fresh)
+static bool piece_receive(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
+    bool        stream = req->route == OTA_ROUTE_FIRMWARE;
+    char        sha_hex[OTA_SHA256_HEX + 1];
+    flash_ctx_t flash = {.handle = staged.ota, .base = staged.got};
+    fixed_ctx_t mem   = {.data = stream ? NULL : staged.data + staged.got, .cap = staged.total - staged.got};
+    if (stream && (req->offset > 0 || staged.dirty) && !stream_erase(staged.got, (size_t)req->content_length)) {
+        staged.dirty = true;
+        respond(fd, 500, "couldn't erase the slot for the piece at %lld, send it again", req->offset);
+        return false;
+    }
+    staged.dirty = stream; // from here on the slot holds (part of) this piece until it is verified
+    if (req->expect_continue) {
+        send_all(fd, "HTTP/1.1 100 Continue\r\n\r\n", 25);
+    }
+    progress_base = (uint32_t)staged.got;
+    bool ok = receive_body(fd, pre, pre_len, req->content_length, false, req->content_length,
+                           stream ? flash_sink : fixed_sink, stream ? (void *)&flash : (void *)&mem, sha_hex);
+    if (!ok || strcmp(sha_hex, req->sha256) != 0) {
+        respond(fd, 400, "piece at %lld %s, send it again", req->offset, ok ? "arrived damaged" : "didn't arrive");
+        return false; // staged.got is unchanged, so the same piece can come again
+    }
+    // The piece was hashed on its way through the internal buffer; hash it again where it landed (#37)
+    uint8_t stored[SHA256_DIGEST_LEN];
+    rehash_piece(staged.got, (size_t)req->content_length, stored);
+    ota_hex(stored, sizeof(stored), sha_hex);
+    if (strcmp(sha_hex, req->sha256) != 0) {
+        ESP_LOGW(TAG, "piece at %lld damaged in %s, asking for it again", req->offset, stream ? "the slot" : "PSRAM");
+        respond(fd, 400, "piece at %lld was damaged in the badge's memory, send it again", req->offset);
+        return false;
+    }
+    staged.dirty = false;
+    ota_pieces_add(&staged.pieces, staged.got, (size_t)req->content_length, stored);
+    staged.got  += (size_t)req->content_length;
+    staged.sent += req->content_length;
+    return true;
 }
 
 static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
@@ -599,27 +790,16 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
         respond(fd, 403, "path not allowed: use FLASH0: with a plain file name");
         return;
     }
+    if (req->route == OTA_ROUTE_FIRMWARE &&
+        !ota_piece_flash_ok((size_t)req->offset, (size_t)req->content_length, (size_t)req->total_size, 4096)) {
+        respond(fd, 400, "firmware pieces start on a 4096-byte boundary and are whole multiples of it, except the last");
+        return;
+    }
     char const *path = req->route == OTA_ROUTE_FILE ? req->path : "";
     if (req->offset == 0) {
-        staged_reset();
-        staged.data = heap_caps_aligned_alloc(STAGE_ALIGN, ota_round_up((size_t)req->total_size, STAGE_ALIGN),
-                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!staged.data) {
-            respond(fd, 503, "not enough memory for %lld bytes", req->total_size);
+        if (!piece_start(fd, req, path)) {
             return;
         }
-        staged.active = true;
-        hook_begin(req->route == OTA_ROUTE_FIRMWARE ? OTA_KIND_FIRMWARE
-                   : req->route == OTA_ROUTE_ASSETS ? OTA_KIND_ASSETS
-                                                    : OTA_KIND_FILE,
-                   req->route == OTA_ROUTE_FILE     ? display_name(req->path)
-                   : req->route == OTA_ROUTE_ASSETS ? "assets"
-                                                    : NULL,
-                   req->total_size);
-        staged.route  = req->route;
-        staged.total  = (size_t)req->total_size;
-        snprintf(staged.path, sizeof(staged.path), "%s", path);
-        strcpy(staged.file_sha256, req->file_sha256);
     } else if (!staged.active || staged.route != req->route || staged.total != (size_t)req->total_size ||
                strcmp(staged.path, path) != 0 || strcmp(staged.file_sha256, req->file_sha256) != 0 ||
                (size_t)req->offset != staged.got) {
@@ -630,58 +810,14 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
         respond(fd, 400, "piece runs past X-Total-Size");
         return;
     }
-    if (req->expect_continue) {
-        send_all(fd, "HTTP/1.1 100 Continue\r\n\r\n", 25);
-    }
-
-    progress_base = (uint32_t)staged.got;
-    fixed_ctx_t piece = {.data = staged.data + staged.got, .cap = staged.total - staged.got};
-    char        sha_hex[OTA_SHA256_HEX + 1];
-    bool        ok = receive_body(fd, pre, pre_len, req->content_length, false, req->content_length, fixed_sink, &piece,
-                                  sha_hex);
-    if (!ok || strcmp(sha_hex, req->sha256) != 0) {
-        respond(fd, 400, "piece at %lld %s, send it again", req->offset, ok ? "arrived damaged" : "didn't arrive");
-        return; // staged.got is unchanged, so the same piece can come again
-    }
-    // The piece was hashed on its way through the internal buffer; hash it again where it landed in PSRAM (#37)
-    uint8_t      stored[SHA256_DIGEST_LEN];
-    sha256_ctx_t again;
-    sha256_init(&again);
-    sha256_update(&again, staged.data + staged.got, (size_t)req->content_length);
-    sha256_final(&again, stored);
-    ota_hex(stored, sizeof(stored), sha_hex);
-    if (strcmp(sha_hex, req->sha256) != 0) {
-        ESP_LOGW(TAG, "piece at %lld damaged in PSRAM (staging buffer %p), asking for it again", req->offset,
-                 (void *)staged.data);
-        respond(fd, 400, "piece at %lld was damaged in the badge's memory, send it again", req->offset);
+    if (!piece_receive(fd, req, pre, pre_len)) {
         return;
     }
-    ota_pieces_add(&staged.pieces, staged.got, (size_t)req->content_length, stored);
-    staged.got  += (size_t)req->content_length;
-    staged.sent += req->content_length;
     if (staged.got < staged.total) {
         respond(fd, 200, "piece ok, %zu of %zu bytes", staged.got, staged.total);
         return;
     }
-
-    sha256_ctx_t whole;
-    uint8_t      digest[SHA256_DIGEST_LEN];
-    sha256_init(&whole);
-    sha256_update(&whole, staged.data, staged.total);
-    sha256_final(&whole, digest);
-    ota_hex(digest, sizeof(digest), sha_hex);
-    if (strcmp(sha_hex, staged.file_sha256) != 0) {
-        report_damaged_pieces();
-        hook_end(false, false);
-        staged_reset();
-        respond(fd, 400, "whole-file SHA-256 mismatch (sha256 %s), nothing written", sha_hex);
-        return;
-    }
-    bool finished = staged.route == OTA_ROUTE_FIRMWARE ? finish_firmware(fd, staged.data, staged.total, staged.sent)
-                    : staged.route == OTA_ROUTE_ASSETS ? finish_assets(fd, staged.data, staged.total, staged.sent)
-                                                       : finish_file(fd, staged.path, staged.data, staged.total, staged.sent);
-    hook_end(finished, false);
-    staged_reset();
+    piece_done(fd);
 }
 
 static void handle_delete(int fd, ota_request_t const *req) {

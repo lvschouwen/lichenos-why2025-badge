@@ -51,3 +51,38 @@ size_t ota_pieces_check(ota_pieces_t const *p, uint8_t const *data, size_t *bad,
     }
     return differ;
 }
+
+int ota_piece_flash_ok(size_t offset, size_t len, size_t total, size_t sector) {
+    return len > 0 && offset % sector == 0 && (len % sector == 0 || offset + len == total);
+}
+
+int ota_hash_range(ota_read_fn read, void *ctx, size_t off, size_t len, uint8_t *scratch, size_t scratch_len,
+                   uint8_t digest[32]) {
+    sha256_ctx_t sha;
+    sha256_init(&sha);
+    for (size_t at = 0; at < len; at += scratch_len) {
+        size_t n = len - at < scratch_len ? len - at : scratch_len;
+        if (read(ctx, off + at, scratch, n) != 0) {
+            return -1;
+        }
+        sha256_update(&sha, scratch, n);
+    }
+    sha256_final(&sha, digest);
+    return 0;
+}
+
+size_t ota_pieces_check_read(ota_pieces_t const *p, ota_read_fn read, void *ctx, uint8_t *scratch, size_t scratch_len,
+                             size_t *bad, size_t max) {
+    size_t differ = 0;
+    for (size_t i = 0; i < p->n; i++) {
+        uint8_t digest[SHA256_DIGEST_LEN];
+        if (ota_hash_range(read, ctx, p->v[i].offset, p->v[i].len, scratch, scratch_len, digest) != 0 ||
+            memcmp(digest, p->v[i].sha, 32) != 0) {
+            if (differ < max) {
+                bad[differ] = i;
+            }
+            differ++;
+        }
+    }
+    return differ;
+}
