@@ -90,6 +90,13 @@ int main(void) {
         CHECK(clock_accepted(CLOCK_OK) && clock_accepted(CLOCK_RECOVERED) && !clock_accepted(CLOCK_BIG_STEP));
     }
 
+    // #82: the bootstrap from contacts must not rewind a clock the reset carried over
+    CHECK(!clock_accept_app_set(B + 1000, B + 4600, B));         // an hour behind a good clock: refused
+    CHECK(clock_accept_app_set(B + 5000, B + 4600, B));          // forward: fine
+    CHECK(!clock_accept_app_set(B + 4600, B + 4600, B));         // not forward
+    CHECK(clock_accept_app_set(B + 1000, 1715770351 + 99, B));   // clock not plausible (cold boot): take it
+    CHECK(!clock_accept_app_set(1715770351, B + 10, B));         // implausible candidate
+
     for (int v = CLOCK_OK; v <= CLOCK_RECOVERED; v++) {
         CHECK(clock_verdict_text((clock_verdict_t)v)[0] != '?');
     }

@@ -28,6 +28,11 @@ typedef struct {
 // true when t lies in build_epoch - 1 day .. build_epoch + 2 years
 bool clock_in_window(int64_t t, int64_t build_epoch);
 
+// MeshCore (or the app) wants to set the clock to cand (#82). MeshCore's boot-time bootstrap sets it to the newest contact
+// timestamp + 1, which is older than a clock the reset carried over: only plausible times that move a plausible clock
+// forward (or fix one that is not plausible) are accepted.
+bool clock_accept_app_set(int64_t cand, int64_t now, int64_t build_epoch);
+
 // An SNTP answer cand against the current time now. synced: SNTP has already set the time since this boot, so a jump
 // of more than 10 minutes is refused (an on-path attacker could otherwise move the clock later; real drift is ms).
 clock_verdict_t clock_check(int64_t cand, int64_t now, int64_t build_epoch, bool synced);

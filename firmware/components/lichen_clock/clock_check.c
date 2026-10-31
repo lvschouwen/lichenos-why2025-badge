@@ -4,6 +4,13 @@ bool clock_in_window(int64_t t, int64_t build_epoch) {
     return t >= build_epoch - CLOCK_BELOW_BUILD_S && t <= build_epoch + CLOCK_ABOVE_BUILD_S;
 }
 
+bool clock_accept_app_set(int64_t cand, int64_t now, int64_t build_epoch) {
+    if (!clock_in_window(cand, build_epoch)) {
+        return false;
+    }
+    return !clock_in_window(now, build_epoch) || cand > now;
+}
+
 clock_verdict_t clock_check(int64_t cand, int64_t now, int64_t build_epoch, bool synced) {
     if (cand < build_epoch - CLOCK_BELOW_BUILD_S) {
         return CLOCK_TOO_OLD;

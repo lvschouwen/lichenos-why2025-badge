@@ -50,7 +50,9 @@ public:
     }
     void setCurrentTime(uint32_t t) override {
         struct timeval tv = {(time_t)t, 0};
-        if (clock_in_window((int64_t)t, clock_build_epoch())) { // same bounds as SNTP (#8)
+        // same bounds as SNTP (#8), and never backwards: MeshCore's boot bootstrap from the newest contact would
+        // rewind a clock the reset carried over by however long ago that contact was heard (#82)
+        if (clock_accept_app_set((int64_t)t, (int64_t)time(NULL), clock_build_epoch())) {
             settimeofday(&tv, NULL);
         } // may be refused (host tests): the fallback below still follows the app
         base_ = t - (uint32_t)(millis() / 1000);
