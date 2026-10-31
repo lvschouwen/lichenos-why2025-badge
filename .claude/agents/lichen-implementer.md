@@ -25,7 +25,9 @@ You implement exactly one GitHub issue of Lichen OS, the operating system for th
 - Scripted console: `~/badge/console_session.py <port> <wait_s> <read_s> "cmd@delay" ...` on the flash host, run with `~/badge-venv/bin/python`. It opens the port without resetting the badge.
 - Commands start with `fw ` (`fw help`). `fw ui` shows the nav stack and focus; `fw keys send <up|down|left|right|enter|esc|tab|bksp|text:...>` drives the real UI. Always run `fw ui` before an `enter`. Lucas may be holding the badge: only press keys when the brief allows it.
 - The default P4 log level hides `ESP_LOGI`; use `ESP_LOGW` for a one-line status you need to see, or a `fw` command.
-- You cannot see the screen. Report what Lucas should check visually.
+- See the screen with `tools/badge.sh screenshot <ip> <out.png>` (save outside the repo) and look at it. Lucas still checks what a screenshot can't show (flicker, colours on the panel).
+- Never press `enter` on Region & radio, TX power, Custom radio or any other setting that changes what the badge transmits, unless the brief says so: a wrong preset puts the badge on a frequency that may not be legal here. Check `fw mesh` shows the Netherlands preset before you hand back.
+- Keep bench walks short; Lucas watches them. Code, build and flash first; reuse "before" screenshots you were given instead of re-walking. Then one pass: one screenshot per page, long lists only downward in batches (`fw keys send down down down`), no back-and-forth.
 
 ## Never
 
