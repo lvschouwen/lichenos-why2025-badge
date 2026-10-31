@@ -4,6 +4,7 @@
 #include "lvgl.h"
 
 #include "esp_heap_caps.h"
+#include "psram_guard.h"
 
 #define LV_HEAP_CAPS (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
@@ -32,8 +33,11 @@ void *lv_realloc_core(void *p, size_t new_size) {
     return q ? q : heap_caps_realloc(p, new_size, MALLOC_CAP_DEFAULT);
 }
 
+// A pointer outside every heap is logged and leaked instead of aborting the badge (#89, psram_guard_free_ok)
 void lv_free_core(void *p) {
-    heap_caps_free(p);
+    if (psram_guard_free_ok(p)) {
+        heap_caps_free(p);
+    }
 }
 
 void lv_mem_monitor_core(lv_mem_monitor_t *mon_p) {

@@ -44,3 +44,12 @@ typedef struct {
 // beyond max, are left out: they stay out of the heap, so the quarantine is exactly the memory between the pieces
 // (psram_scan.c registers the pieces as the PSRAM heap).
 size_t psram_quar_cut(psram_quar_t const *q, uintptr_t start, uintptr_t end, size_t min, psram_quar_piece_t *out, size_t max);
+
+// Is p inside the registered PSRAM heap: in one of the pools the IDF offered and not in a hole (the pieces
+// psram_scan.c registered)? Pure, so "fw psram" and the LVGL allocator agree with the host test.
+bool psram_quar_in_heap(psram_quar_piece_t const *pools, size_t npools, psram_quar_piece_t const *holes, size_t nholes,
+                        uintptr_t p);
+// The lowest bit whose flip puts p inside that heap, or -1: a pointer one bit away from a heap address is what a weak
+// PSRAM cell leaves behind, a pointer with no such neighbour points at a software bug (#89)
+int psram_quar_flip_bit(psram_quar_piece_t const *pools, size_t npools, psram_quar_piece_t const *holes, size_t nholes,
+                        uintptr_t p);

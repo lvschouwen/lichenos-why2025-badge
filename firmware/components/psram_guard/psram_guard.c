@@ -217,6 +217,7 @@ static void cmd_psram(char const *args) {
     }
     psram_boot_print();
     psram_scan_print();
+    psram_scan_print_frees();
     xSemaphoreTake(lock, portMAX_DELAY);
     uint32_t hits = 0;
     for (int i = 0; i < MAX_BLOCKS; i++) {

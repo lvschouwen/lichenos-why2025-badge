@@ -3,6 +3,6 @@ idf_component_register(SRCS "display.c" "backlight.c" "backlight_level.c" "keybo
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl esp_lvgl_port
                        PRIV_REQUIRES esp_lcd esp_lcd_st7703 esp_tca8418 esp_hw_support esp_driver_uart
-                                     esp_driver_gpio esp_driver_i2c nvs_flash fw_console)
+                                     esp_driver_gpio esp_driver_i2c nvs_flash fw_console psram_guard)
 # nothing outside LVGL references the allocator, so pull it in before liblvgl is scanned
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-u lv_malloc_core")

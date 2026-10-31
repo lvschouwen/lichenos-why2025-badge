@@ -110,3 +110,27 @@ size_t psram_quar_cut(psram_quar_t const *q, uintptr_t start, uintptr_t end, siz
     }
     return n;
 }
+
+static bool in_pieces(psram_quar_piece_t const *p, size_t n, uintptr_t a) {
+    for (size_t i = 0; i < n; i++) {
+        if (a >= p[i].lo && a < p[i].hi) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool psram_quar_in_heap(psram_quar_piece_t const *pools, size_t npools, psram_quar_piece_t const *holes, size_t nholes,
+                        uintptr_t p) {
+    return in_pieces(pools, npools, p) && !in_pieces(holes, nholes, p);
+}
+
+int psram_quar_flip_bit(psram_quar_piece_t const *pools, size_t npools, psram_quar_piece_t const *holes, size_t nholes,
+                        uintptr_t p) {
+    for (int b = 0; b < (int)(8 * sizeof(uintptr_t)); b++) {
+        if (psram_quar_in_heap(pools, npools, holes, nholes, p ^ ((uintptr_t)1 << b))) {
+            return b;
+        }
+    }
+    return -1;
+}

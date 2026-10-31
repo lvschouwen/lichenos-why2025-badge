@@ -16,8 +16,9 @@ void psram_scan_release_heap(void);
 // From psram_guard_start(). Logs the map and the verdict at WARN.
 void psram_scan_run(void);
 
-// "fw psram": quarantine lines (ranges, held bytes, bits, direction, map)
+// "fw psram": quarantine lines (ranges, held bytes, bits, direction, map); the frees psram_guard_free_ok() refused
 void psram_scan_print(void);
+void psram_scan_print_frees(void);
 
 // "fw psram qwatch <ms>": fill the quarantine (holes + held chunks), wait, read back: a writer or slow decay shows up here, with
 // everything else (display, Wi-Fi, LVGL) running. Replies with the bad bytes per chunk.

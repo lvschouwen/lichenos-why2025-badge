@@ -114,6 +114,18 @@ int main(void) {
     }
     CHECK(d.n == 2 && d.r[0].lo == u.r[0].lo && d.r[0].hi == u.r[0].hi && d.r[1].lo == u.r[1].lo && d.r[1].hi == u.r[1].hi);
 
+    // Heap membership for the free() guard (#89): one pool, one hole
+    psram_quar_piece_t pools[] = {{0x48400000u, 0x4A000000u}};
+    psram_quar_piece_t holes[] = {{0x48557000u, 0x48622000u}};
+    CHECK(psram_quar_in_heap(pools, 1, holes, 1, 0x48C15AC0u));
+    CHECK(!psram_quar_in_heap(pools, 1, holes, 1, 0x48560000u)); // in the hole
+    CHECK(!psram_quar_in_heap(pools, 1, holes, 1, 0x4FF5A000u)); // internal RAM
+    CHECK(!psram_quar_in_heap(pools, 1, holes, 1, 0x4A000000u)); // one past the pool
+    CHECK(psram_quar_flip_bit(pools, 1, holes, 1, 0x08C15AC0u) == 30); // bit 30 lost: one flip back into the heap
+    CHECK(psram_quar_flip_bit(pools, 1, holes, 1, 0x48560000u) == 17); // bits 0..16 stay inside the hole
+    CHECK(psram_quar_flip_bit(pools, 1, holes, 1, 0x00000056u) == -1); // garbage, no single-bit neighbour
+    CHECK(psram_quar_flip_bit(pools, 1, holes, 1, 0x48C15AC0u) == 0);  // already in: any bit, the lowest is reported
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

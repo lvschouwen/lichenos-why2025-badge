@@ -1,4 +1,5 @@
 #include "psram_scan.h"
+#include "psram_guard.h"
 
 #include "psram_pattern.h"
 #include "psram_learned.h"
@@ -8,6 +9,7 @@
 #include "esp_heap_caps.h"
 #include "esp_heap_caps_init.h"
 #include "esp_log.h"
+#include "esp_memory_utils.h"
 #include "esp_timer.h"
 #include "fw_console.h"
 #include "freertos/FreeRTOS.h"
@@ -64,6 +66,7 @@ static pool_t             s_pools[MAX_POOLS]; // what the IDF wanted to add to t
 static size_t             s_npools;
 static bool               s_released;
 static psram_quar_piece_t s_holes[MAX_HOLES]; // the PSRAM left out of the heap: the quarantine (plus slivers too short for a heap)
+static psram_quar_piece_t s_pool_pieces[MAX_POOLS]; // the pools as [start, end): the heap is these minus the holes (#89)
 static size_t             s_nholes;
 static size_t             s_hole_bytes, s_pieces, s_pieces_failed;
 static chunk_t            s_chunks[MAX_CHUNKS]; // every chunk grabbed, sorted by address
@@ -126,6 +129,7 @@ void psram_scan_release_heap(void) {
     rebuild_quar();
     for (size_t i = 0; i < s_npools; i++) {
         pool_t const      *p = &s_pools[i];
+        s_pool_pieces[i]     = (psram_quar_piece_t){(uintptr_t)p->start, (uintptr_t)p->end};
         psram_quar_piece_t pieces[MAX_PIECES];
         size_t    n  = psram_quar_cut(&s_quar, (uintptr_t)p->start, (uintptr_t)p->end, PSRAM_QUAR_MIN_PIECE, pieces, MAX_PIECES);
         uintptr_t at = (uintptr_t)p->start;
@@ -150,6 +154,51 @@ void psram_scan_release_heap(void) {
                   "pages in %u range(s) = %u KB quarantine, %u KB slivers too short for a heap",
              (unsigned)s_pieces, (unsigned)s_pieces_failed, (unsigned)s_npools, (unsigned)s_nholes, (unsigned)(s_hole_bytes >> 10),
              psram_learn_failed_pages(&lr), (unsigned)s_quar.n, (unsigned)(qb >> 10), (unsigned)((s_hole_bytes > qb ? s_hole_bytes - qb : 0) >> 10));
+}
+
+// ---- the free() guard (#89) ----------------------------------------------------------------------------------------
+// heap_caps_free() aborts on a pointer outside every heap without saying what it was. The LVGL allocator asks here
+// first: a pointer that is neither internal RAM nor in the PSRAM heap is logged with what it looks like and leaked.
+
+static unsigned   s_bad_frees;
+static void const *s_last_bad_free;
+
+static void describe_bad_free(void const *p, char *out, size_t cap) {
+    uintptr_t a = (uintptr_t)p;
+    for (size_t i = 0; i < s_nholes; i++) {
+        if (a >= s_holes[i].lo && a < s_holes[i].hi) {
+            snprintf(out, cap, "in PSRAM quarantine hole %p..%p", (void *)s_holes[i].lo, (void *)s_holes[i].hi);
+            return;
+        }
+    }
+    snprintf(out, cap, esp_ptr_external_ram(p) ? "in PSRAM outside the heap pools" : "not RAM");
+}
+
+bool psram_guard_free_ok(void const *p) {
+    if (!p || !s_released || esp_ptr_internal(p) ||
+        psram_quar_in_heap(s_pool_pieces, s_npools, s_holes, s_nholes, (uintptr_t)p)) {
+        return true;
+    }
+    unsigned n = ++s_bad_frees;
+    s_last_bad_free = p;
+    if (n <= 8 || n % 256 == 0) {
+        char what[64];
+        describe_bad_free(p, what, sizeof(what));
+        int bit = psram_quar_flip_bit(s_pool_pieces, s_npools, s_holes, s_nholes, (uintptr_t)p);
+        if (bit >= 0) {
+            ESP_LOGW(TAG, "free(%p) refused: %s, bit %d flipped would be heap address %p; leaked (%u so far)", p, what, bit,
+                     (void *)((uintptr_t)p ^ ((uintptr_t)1 << bit)), n);
+        } else {
+            ESP_LOGW(TAG, "free(%p) refused: %s, no single-bit neighbour in the heap; leaked (%u so far)", p, what, n);
+        }
+    }
+    return false;
+}
+
+void psram_scan_print_frees(void) {
+    if (s_bad_frees) {
+        console_reply("psram frees refused: %u (outside every heap, leaked), last %p", s_bad_frees, s_last_bad_free);
+    }
 }
 
 // ---- the boot scan ------------------------------------------------------------------------------------------------
