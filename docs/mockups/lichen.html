@@ -1,0 +1,127 @@
+<h2>Lichen: logo, boot screen and About</h2>
+<p class="subtitle">Pick a logo (click one). Below: the boot screen (C) and an About page with it. Badge screens at half size.</p>
+
+<style>
+  .badge { width: 360px; height: 360px; background: #101820; border-radius: 6px; overflow: hidden; position: relative;
+           font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace; color: #f2f2f2; box-shadow: 0 0 0 6px #222, 0 6px 20px rgba(0,0,0,.4); margin: 6px auto 0; box-sizing: border-box; }
+  .amber { color: #f5b700; } .dim { color: #8090a0; } .teal { color: #3fc1b0; }
+  .seg { display: flex; gap: 3px; } .seg span { flex: 1; height: 10px; background: #1f2b36; } .seg span.on { background: #f5b700; }
+  .log { font-size: 10.5px; line-height: 1.45; white-space: pre; }
+  .corner { position: absolute; bottom: 8px; font-size: 9px; }
+  .logo-tile { background: #101820; border-radius: 6px; padding: 18px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .word { font-family: "JetBrains Mono", ui-monospace, monospace; color: #f2f2f2; font-size: 22px; letter-spacing: 5px; }
+  .smalls { display: flex; gap: 14px; align-items: center; }
+  .about p { font-size: 11px; line-height: 1.5; margin: 0 0 8px 0; font-family: system-ui, sans-serif; }
+  .kv { font-size: 10px; line-height: 1.6; white-space: pre; }
+</style>
+
+<!-- Logo definitions, reused below -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- A: mesh rosette -->
+    <g id="rosette">
+      <g stroke="#f5b700" stroke-width="3" stroke-linecap="round" opacity=".85">
+        <line x1="60" y1="60" x2="60" y2="27"/><line x1="60" y1="60" x2="89" y2="42"/><line x1="60" y1="60" x2="92" y2="74"/>
+        <line x1="60" y1="60" x2="66" y2="95"/><line x1="60" y1="60" x2="33" y2="86"/><line x1="60" y1="60" x2="26" y2="52"/>
+        <line x1="60" y1="27" x2="89" y2="42"/><line x1="89" y1="42" x2="92" y2="74"/><line x1="92" y1="74" x2="66" y2="95"/>
+        <line x1="66" y1="95" x2="33" y2="86"/><line x1="33" y1="86" x2="26" y2="52"/><line x1="26" y1="52" x2="60" y2="27"/>
+        <line x1="60" y1="27" x2="70" y2="8"/><line x1="92" y1="74" x2="112" y2="80"/><line x1="33" y1="86" x2="18" y2="104"/><line x1="26" y1="52" x2="7" y2="44"/>
+      </g>
+      <g fill="#f5b700">
+        <circle cx="60" cy="60" r="9" fill="#f2f2f2"/>
+        <circle cx="60" cy="27" r="7"/><circle cx="89" cy="42" r="8"/><circle cx="92" cy="74" r="6.5"/>
+        <circle cx="66" cy="95" r="7.5"/><circle cx="33" cy="86" r="6"/><circle cx="26" cy="52" r="7"/>
+        <circle cx="70" cy="8" r="4"/><circle cx="112" cy="80" r="4.5"/><circle cx="18" cy="104" r="3.5"/><circle cx="7" cy="44" r="4"/>
+      </g>
+    </g>
+    <!-- B: lobed lichen with nodes -->
+    <g id="lobed">
+      <path d="M60 14 C74 10 80 24 90 22 C104 20 110 36 104 46 C114 56 110 72 100 76 C104 90 90 102 78 98 C70 112 52 110 46 100
+               C32 106 18 96 22 82 C8 76 8 58 20 52 C12 38 24 24 38 28 C42 16 52 12 60 14 Z" fill="none" stroke="#f5b700" stroke-width="3.5"/>
+      <path d="M60 34 C70 32 74 40 80 42 C88 46 86 58 82 62 C86 72 76 80 68 78 C62 86 50 84 46 78 C36 80 30 70 36 62 C30 54 36 44 44 44 C46 38 52 34 60 34 Z"
+            fill="#f5b700" opacity=".22"/>
+      <g fill="#f5b700"><circle cx="60" cy="58" r="7" fill="#f2f2f2"/><circle cx="84" cy="48" r="4.5"/><circle cx="40" cy="70" r="4.5"/><circle cx="70" cy="86" r="4"/><circle cx="44" cy="40" r="3.5"/></g>
+    </g>
+    <!-- C: symbiosis, two kinds of node (P4 amber, C6 teal) -->
+    <g id="symbio">
+      <g stroke="#8090a0" stroke-width="2.5" stroke-linecap="round" opacity=".8">
+        <line x1="60" y1="60" x2="60" y2="24"/><line x1="60" y1="60" x2="92" y2="44"/><line x1="60" y1="60" x2="90" y2="80"/>
+        <line x1="60" y1="60" x2="58" y2="98"/><line x1="60" y1="60" x2="28" y2="82"/><line x1="60" y1="60" x2="28" y2="42"/>
+        <line x1="60" y1="24" x2="92" y2="44"/><line x1="92" y1="44" x2="90" y2="80"/><line x1="90" y1="80" x2="58" y2="98"/>
+        <line x1="58" y1="98" x2="28" y2="82"/><line x1="28" y1="82" x2="28" y2="42"/><line x1="28" y1="42" x2="60" y2="24"/>
+      </g>
+      <circle cx="60" cy="60" r="10" fill="#f5b700"/><circle cx="60" cy="60" r="4.5" fill="#3fc1b0"/>
+      <g fill="#f5b700"><circle cx="60" cy="24" r="7"/><circle cx="90" cy="80" r="7"/><circle cx="28" cy="82" r="6"/></g>
+      <g fill="#3fc1b0"><circle cx="92" cy="44" r="6.5"/><circle cx="58" cy="98" r="6.5"/><circle cx="28" cy="42" r="7"/></g>
+    </g>
+  </defs>
+</svg>
+
+<h3>Logo</h3>
+<div class="cards">
+  <div class="card" data-choice="rosette" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="logo-tile">
+      <svg width="140" height="140" viewBox="0 0 120 120"><use href="#rosette"/></svg>
+      <div class="word">lichen</div>
+      <div class="smalls"><svg width="32" height="32" viewBox="0 0 120 120"><use href="#rosette"/></svg><svg width="16" height="16" viewBox="0 0 120 120"><use href="#rosette"/></svg></div>
+    </div></div>
+    <div class="card-body"><h3>A · Mesh rosette</h3><p>Nodes and links growing outward unevenly, like a lichen patch on a stone. Reads as a mesh first.</p></div>
+  </div>
+  <div class="card" data-choice="lobed" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="logo-tile">
+      <svg width="140" height="140" viewBox="0 0 120 120"><use href="#lobed"/></svg>
+      <div class="word">lichen</div>
+      <div class="smalls"><svg width="32" height="32" viewBox="0 0 120 120"><use href="#lobed"/></svg><svg width="16" height="16" viewBox="0 0 120 120"><use href="#lobed"/></svg></div>
+    </div></div>
+    <div class="card-body"><h3>B · Lobed lichen</h3><p>The wavy outline of a real lichen with a few nodes inside. Reads as the organism first.</p></div>
+  </div>
+  <div class="card" data-choice="symbio" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="logo-tile">
+      <svg width="140" height="140" viewBox="0 0 120 120"><use href="#symbio"/></svg>
+      <div class="word">lichen</div>
+      <div class="smalls"><svg width="32" height="32" viewBox="0 0 120 120"><use href="#symbio"/></svg><svg width="16" height="16" viewBox="0 0 120 120"><use href="#symbio"/></svg></div>
+    </div></div>
+    <div class="card-body"><h3>C · Symbiosis</h3><p>Two kinds of node, amber and teal, woven together: the P4 and the C6. Tells the story, needs a second colour.</p></div>
+  </div>
+</div>
+
+<h3 style="margin-top:28px">On the badge (with logo A)</h3>
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Boot screen (C · hybrid)</div>
+    <div class="mockup-body">
+      <div class="badge" style="padding:18px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <svg width="54" height="54" viewBox="0 0 120 120"><use href="#rosette"/></svg>
+          <div><div style="font-size:20px;letter-spacing:4px">lichen</div><div class="dim" style="font-size:10px">0.1.0 · fw-bf7acd9 · MeshCore 1.18.0</div></div>
+        </div>
+        <div class="seg" style="margin-top:22px"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on" style="opacity:.55"></span><span></span><span></span><span></span><span></span></div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;margin-top:4px" class="dim"><span>stor</span><span>disp</span><span>psram</span><span class="amber">c6</span><span>wifi</span><span>clock</span><span>lora</span><span>mesh</span></div>
+        <div style="font-size:13px;margin-top:20px"><span class="amber">▸</span> flashing C6 <span class="amber">52%</span></div>
+        <div class="log dim" style="margin-top:14px">storage   7.9 MB, 6.1 MB free
+display   720x720 @ 60 Hz
+psram     32 MB, 30.4 MB free
+c6        be05dfc3 ≠ c2a1… reflash</div>
+        <div class="corner dim" style="left:18px">node d6abdbd5</div><div class="corner dim" style="right:18px">1.0 s</div>
+      </div>
+    </div>
+  </div>
+  <div class="mockup">
+    <div class="mockup-header">Settings › About</div>
+    <div class="mockup-body">
+      <div class="badge about" style="padding:16px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <svg width="40" height="40" viewBox="0 0 120 120"><use href="#rosette"/></svg>
+          <div><div style="font-size:17px;letter-spacing:3px">lichen</div><div class="dim" style="font-size:9.5px">firmware for the WHY2025 badge</div></div>
+        </div>
+        <p><span class="amber">A lichen</span> isn't one organism but two: a fungus and an alga living as one. The alga makes food from light, the fungus gives it shelter and holds on to the rock. Neither could live there alone.</p>
+        <p>This badge works the same way. The <span class="amber">P4</span> does the thinking and the screen; the <span class="amber">C6</span> talks to the world over Wi-Fi, Bluetooth and LoRa. And like lichen, it spreads slowly from stone to stone: one node, then a mesh.</p>
+        <div class="kv dim" style="margin-top:6px">version   0.1.0 (fw-bf7acd9)   MeshCore 1.18.0
+node      d6abdbd5  "D6ABDBD5"
+radio     869.618 MHz · 62.5 kHz · SF7 · 22 dBm
+storage   6.1 / 7.9 MB free · PSRAM 30.4 MB free
+up        3 h 12 min · clock 2026-10-30 17:02</div>
+      </div>
+    </div>
+  </div>
+</div>

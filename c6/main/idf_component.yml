@@ -1,0 +1,5 @@
+dependencies:
+  idf: '>=6.1'
+  espressif/esp_hosted: '3.0.10'
+  # SX1262 driver for the LoRa receive service (#51); the same library MeshCore uses
+  jgromes/radiolib: '7.8.1'

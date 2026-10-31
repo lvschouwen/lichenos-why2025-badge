@@ -1,0 +1,15 @@
+# LoRa receiver on the C6 (#51). The P4 reads this at boot; a missing file or a bad value means these defaults.
+# The local MeshCore mesh (NL): 869.618 MHz, 62.5 kHz, SF7, CR 4/5.
+
+# Centre frequency in MHz (862-928, the RA-01SH's band)
+frequency_mhz = 869.618
+# Bandwidth in kHz: 7.8, 10.4, 15.6, 20.8, 31.25, 41.7, 62.5, 125, 250 or 500
+bandwidth_khz = 62.5
+# Spreading factor, 5-12
+spreading_factor = 7
+# Coding rate denominator: 5 = 4/5 ... 8 = 4/8
+coding_rate = 5
+# 0x12 is RadioLib's private sync word, the one MeshCore uses
+sync_word = 0x12
+# Preamble length in symbols (MeshCore: 16)
+preamble = 16

@@ -1,0 +1,69 @@
+<h2>Lichen home screen</h2>
+<p class="subtitle">Where the badge lands after boot. MeshCore keeps running in the background (it has to keep listening), so home can show what's new. Click the direction you like.</p>
+
+<style>
+  .badge { width: 360px; height: 360px; background: #101820; border-radius: 6px; overflow: hidden; position: relative;
+           font-family: system-ui, sans-serif; color: #f2f2f2; box-shadow: 0 0 0 6px #222, 0 6px 20px rgba(0,0,0,.4); margin: 6px auto 0; box-sizing: border-box; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .amber { color: #f5b700; } .dim { color: #8090a0; } .teal { color: #3fc1b0; }
+  .sbar { display: flex; justify-content: space-between; align-items: center; font-size: 10px; padding: 8px 12px; color: #8090a0; border-bottom: 1px solid #1c2733; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 22px 20px; }
+  .app { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; padding: 10px 0; border-radius: 10px; position: relative; }
+  .app.sel { background: #1f2b36; box-shadow: 0 0 0 2px #f5b700; }
+  .icon { width: 56px; height: 56px; border-radius: 14px; background: #1a2530; display: flex; align-items: center; justify-content: center; }
+  .icon.ghost { border: 1.5px dashed #2f3d4b; background: none; }
+  .dot { position: absolute; top: 4px; right: 18px; background: #f5b700; color: #101820; font-size: 9px; font-weight: 700; border-radius: 8px; padding: 1px 5px; }
+  .tile { margin: 10px 12px; border-radius: 10px; background: #16212b; padding: 10px 12px; display: flex; gap: 12px; align-items: center; }
+  .tile.sel { box-shadow: 0 0 0 2px #f5b700; background: #1f2b36; }
+  .tile .t { font-size: 13px; } .tile .s { font-size: 10.5px; color: #8090a0; margin-top: 2px; line-height: 1.35; }
+  .hint { position: absolute; bottom: 8px; left: 12px; right: 12px; font-size: 9.5px; color: #8090a0; display: flex; justify-content: space-between; }
+</style>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <g id="symbio">
+    <g stroke="#8090a0" stroke-width="2.5" stroke-linecap="round" opacity=".8">
+      <line x1="60" y1="60" x2="60" y2="24"/><line x1="60" y1="60" x2="92" y2="44"/><line x1="60" y1="60" x2="90" y2="80"/>
+      <line x1="60" y1="60" x2="58" y2="98"/><line x1="60" y1="60" x2="28" y2="82"/><line x1="60" y1="60" x2="28" y2="42"/>
+      <line x1="60" y1="24" x2="92" y2="44"/><line x1="92" y1="44" x2="90" y2="80"/><line x1="90" y1="80" x2="58" y2="98"/>
+      <line x1="58" y1="98" x2="28" y2="82"/><line x1="28" y1="82" x2="28" y2="42"/><line x1="28" y1="42" x2="60" y2="24"/>
+    </g>
+    <circle cx="60" cy="60" r="10" fill="#f5b700"/><circle cx="60" cy="60" r="4.5" fill="#3fc1b0"/>
+    <g fill="#f5b700"><circle cx="60" cy="24" r="7"/><circle cx="90" cy="80" r="7"/><circle cx="28" cy="82" r="6"/></g>
+    <g fill="#3fc1b0"><circle cx="92" cy="44" r="6.5"/><circle cx="58" cy="98" r="6.5"/><circle cx="28" cy="42" r="7"/></g>
+  </g>
+  <g id="mc"><path d="M10 40 Q30 8 50 40" stroke="#f5b700" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M18 40 Q30 20 42 40" stroke="#f5b700" stroke-width="5" fill="none" stroke-linecap="round" opacity=".6"/><circle cx="30" cy="42" r="5" fill="#f5b700"/></g>
+  <g id="gear"><circle cx="30" cy="30" r="9" fill="none" stroke="#8090a0" stroke-width="5"/><g stroke="#8090a0" stroke-width="6" stroke-linecap="round"><line x1="30" y1="8" x2="30" y2="14"/><line x1="30" y1="46" x2="30" y2="52"/><line x1="8" y1="30" x2="14" y2="30"/><line x1="46" y1="30" x2="52" y2="30"/><line x1="14" y1="14" x2="18" y2="18"/><line x1="42" y1="42" x2="46" y2="46"/><line x1="46" y1="14" x2="42" y2="18"/><line x1="18" y1="42" x2="14" y2="46"/></g></g>
+</defs></svg>
+
+<div class="cards">
+  <div class="card" data-choice="grid" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="badge">
+      <div class="sbar mono"><span style="display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 120 120"><use href="#symbio"/></svg>lichen</span><span>17:42 · wifi ▂▄▆ · LoRa ●</span></div>
+      <div class="grid">
+        <div class="app sel"><div class="icon"><svg width="40" height="40" viewBox="0 0 60 60"><use href="#mc"/></svg></div>MeshCore<span class="dot">3</span></div>
+        <div class="app"><div class="icon"><svg width="40" height="40" viewBox="0 0 60 60"><use href="#gear"/></svg></div>Settings</div>
+        <div class="app"><div class="icon"><svg width="38" height="38" viewBox="0 0 120 120"><use href="#symbio"/></svg></div>About</div>
+        <div class="app"><div class="icon ghost"></div><span class="dim">later</span></div>
+        <div class="app"><div class="icon ghost"></div><span class="dim">later</span></div>
+        <div class="app"><div class="icon ghost"></div><span class="dim">later</span></div>
+      </div>
+      <div class="hint"><span>←↑↓→ choose · Enter open</span><span>node d6abdbd5</span></div>
+    </div></div>
+    <div class="card-body"><h3>A · App grid</h3><p>Icons like a phone, an unread count on MeshCore. Room for more apps; empty slots dashed (only shown as placeholders here).</p></div>
+  </div>
+
+  <div class="card" data-choice="tiles" onclick="toggleSelect(this)">
+    <div class="card-image"><div class="badge">
+      <div class="sbar mono"><span style="display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 120 120"><use href="#symbio"/></svg>lichen</span><span>17:42 · wifi ▂▄▆ · LoRa ●</span></div>
+      <div class="tile sel"><svg width="44" height="44" viewBox="0 0 60 60"><use href="#mc"/></svg>
+        <div style="flex:1"><div class="t">MeshCore <span class="amber" style="font-size:11px">· 3 new</span></div>
+          <div class="s">[Public] Alex: anyone at the bar?<br>12 nodes · last heard 2 min ago</div></div></div>
+      <div class="tile"><svg width="44" height="44" viewBox="0 0 60 60"><use href="#gear"/></svg>
+        <div style="flex:1"><div class="t">Settings</div><div class="s">Wi-Fi HomeNet · brightness 80</div></div></div>
+      <div class="tile"><svg width="40" height="40" viewBox="0 0 120 120" style="margin:2px"><use href="#symbio"/></svg>
+        <div style="flex:1"><div class="t">About Lichen</div><div class="s">0.1.0 · up 3 h 12 min · 30.4 MB PSRAM free</div></div></div>
+      <div class="hint"><span>↑↓ choose · Enter open</span><span>node d6abdbd5</span></div>
+    </div></div>
+    <div class="card-body"><h3>B · Live tiles</h3><p>One wide tile per app, each showing a line of what's going on: the latest message, the network, the uptime. Fewer apps fit, more info at a glance.</p></div>
+  </div>
+</div>

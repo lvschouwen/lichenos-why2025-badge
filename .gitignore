@@ -1,0 +1,12 @@
+sdkconfig
+sdkconfig.old
+build/
+managed_components/
+
+*.swp
+.vscode
+.clangd
+.cache
+
+__pycache__/
+firmware/storage_staging/

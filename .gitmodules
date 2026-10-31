@@ -1,0 +1,14 @@
+[submodule "meshcore"]
+	path = meshcore
+	url = https://github.com/lvschouwen/meshcore-why2025-badge.git
+	branch = why2025-badge
+[submodule "esp-hosted-mcu"]
+	path = esp_hosted
+	url = https://github.com/lvschouwen/esp-hosted-mcu-why2025-badge.git
+	branch = why2025-badge
+[submodule "third_party/arduinolibs"]
+	path = third_party/arduinolibs
+	url = https://github.com/rweather/arduinolibs.git
+[submodule "third_party/base64"]
+	path = third_party/base64
+	url = https://github.com/Densaugeo/base64_arduino.git

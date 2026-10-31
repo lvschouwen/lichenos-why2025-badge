@@ -1,0 +1,15 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+// Pure logic, no ESP headers: also built into the host tests.
+
+// How long a new image must run with everything up before it counts as good: a build that crashes or hangs within
+// this time still rolls back on the next reset
+#define OTA_VALID_AFTER_S 45
+
+// A new image runs on trial (pending_verify) until it proves itself: the UI and the C6 link are up and it has run for
+// OTA_VALID_AFTER_S. Wi-Fi is not required, so a badge without (working) Wi-Fi credentials doesn't roll back for ever
+// (#61).
+bool ota_should_mark_valid(bool pending_verify, bool ui_up, bool c6_up, uint32_t uptime_s);

@@ -1,0 +1,16 @@
+Authors of BadgeVMS
+
+  Copyright (C) 2025 - present HP van Braam <hp@tmm.cx>
+
+  Copying and distribution of this file, with or without modification,
+  are permitted in any medium without royalty provided the copyright
+  notice and this notice are preserved.
+
+
+HP van Braam <hp@tmm.cx>                              all files.
+Julian Scheffers <julian@scheffers.net>               contributions to buddy allocator
+Joram Agten <joram.agten@gmail.com>                   drivers/ test_badge.c
+Eirik Furuseth / Heplaphon <heplaphon@heplaphon.com>  main/ota drivers/bmi270
+Joost Peters                                          sdk_libs/sdl2
+Jonas Meeuws                                          CMake magician / micropython
+Peter Hazenberg / Peetz0r <meshcore-ui@peetz0r.nl>    drivers/uart, meshcore_ui, and related changes

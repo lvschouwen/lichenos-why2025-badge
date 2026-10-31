@@ -1,0 +1,188 @@
+# Lichen OS
+
+Lichen OS is a new operating system for the WHY2025 camp badge, replacing the badge's original BadgeVMS. It turns
+the badge into a standalone
+[MeshCore](https://github.com/meshcore-dev/MeshCore) messenger, with Wi-Fi, a home screen and settings around it.
+
+Like a lichen, which is a fungus and an alga living as one, the badge has two chips that work as one:
+
+- **ESP32-P4 (Lichen):** screen, keyboard, storage, the apps and all the UI. One plain ESP-IDF 6.1 application.
+- **ESP32-C6 (radio coprocessor):** Wi-Fi and BLE through [ESP-Hosted](https://github.com/espressif/esp-hosted-mcu),
+  plus our LoRa service for the SX1262. It has no application logic. The P4 flashes it at boot when its image
+  changes.
+
+Apps are built in: **MeshCore** (the first app), Settings and About Lichen. You can't download apps. More on the design
+in [docs/architecture.md](docs/architecture.md) and [docs/shell-design.md](docs/shell-design.md).
+
+On the badge it's simply called Lichen. It started as a fork of
+[BadgeVMS](https://codeberg.org/Peetz0r/why2025-badge-firmware-meshcore), the badge's original OS, and replaced it
+completely. A few files still come from BadgeVMS, see [Acknowledgements](#acknowledgements).
+
+## What you need
+
+- A WHY2025 badge.
+- **Two bodge wires to the LoRa module.** The schematic draws an Ra-01 (SX1276), but an Ai-Thinker RA-01SH (SX1262)
+  is fitted, and its DIO1 and BUSY pads are not routed. Without the wires the radio answers over SPI, but MeshCore's
+  radio init fails.
+
+  | RA-01SH pad | Signal | ESP32-C6-WROOM-1 module pin | C6 GPIO |
+  |---|---|---|---|
+  | 6 | DIO1 | 5 | GPIO5 |
+  | 10 | BUSY | 12 | GPIO11 |
+
+  Count pads from the RA-01SH datasheet, not the KiCad symbol. Module pin 12 is GPIO11; GPIO12 is pin 13 (USB D-).
+  Check the neighbours for bridges: module pins 4 and 6 (LoRa NSS, SCK) and 13. Background and a photo:
+  <https://wiki.why2025.org/Project:Meshtastic_on_the_WHY2025_badge>.
+- **An external 868 MHz antenna before any transmit.** The stock antenna is poorly matched at 868 MHz (SWR about 1.7
+  even after tuning), and MeshCore transmits at up to 22 dBm.
+- To build: Linux, [ESP-IDF 6.1](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32p4/get-started/index.html),
+  CMake, Ninja and a host C/C++ compiler (for the host tests).
+
+## Build
+
+Lichen needs exactly ESP-IDF 6.1. Keep a 6.1 checkout next to your usual one and point `BADGE_IDF_PATH` at it:
+
+```
+git clone --recurse-submodules https://github.com/lvschouwen/lichenos-why2025-badge.git
+git -C ~/esp/esp-idf worktree add --detach ~/esp/esp-idf-v6.1 v6.1
+(cd ~/esp/esp-idf-v6.1 && git submodule update --init --recursive && ./install.sh esp32p4,esp32c6)
+BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build
+```
+
+`firmware/build.sh build` runs the host tests (`host_tests/`), builds the C6 image (`c6/`), puts it on Lichen's
+storage drive together with `firmware/lora.toml`, and builds the P4 image into `firmware/build/`. Any other arguments go
+to `idf.py`. A `sdkconfig` older than its `sdkconfig.defaults` is regenerated (the old one is kept as
+`sdkconfig.old`). The version name comes from `git describe` at configure time, so run
+`./firmware/build.sh reconfigure build` after a commit.
+
+If you cloned without `--recurse-submodules`, run `git submodule update --init --recursive`.
+
+## Install and update
+
+The first install goes over USB. `tools/badge.sh` drives a badge that is plugged into another machine reachable over
+SSH (see [Flashing through a remote USB host](#flashing-through-a-remote-usb-host)):
+
+```
+tools/badge.sh backup <port>                  # full flash dump into ~/badge-backups: do this first
+tools/badge.sh flash-fw <port>                # first install: bootloader, partitions, Lichen and storage
+tools/badge.sh flash-fw <port> --no-storage   # later USB updates: keeps /storage
+```
+
+Leave out `--no-storage` only on the first install: it rewrites `/storage`, and with it MeshCore's identity, contacts
+and channels.
+
+After that, update over Wi-Fi (the update server runs whenever Wi-Fi is up; put the token from `fw token` in
+`~/.config/why2025-badge/ota-token`):
+
+```
+tools/badge.sh ota-firmware <ip>                       # firmware/build/badge_fw.bin, then reboot
+tools/badge.sh ota-file <ip> <file> FLASH0:<name>      # one file into /storage
+tools/badge.sh ota-info <ip>                           # the version the badge runs
+```
+
+The tool first asks the badge to prepare (`POST /prepare`: MeshCore and the other apps stop and free their memory),
+then pushes the image. The badge shows **Updating Lichen** with progress and reboots by itself. A new image runs on
+trial and marks itself valid once the screen and the C6 link are up. If it crashes or never gets there, the next reset
+goes back to the previous image, and home says "Update failed, back on <version>". Uploads are checked against a
+SHA-256 before they replace anything. The token travels as plain HTTP, so only use this on a network you trust.
+
+**Back to stock BadgeVMS:** `tools/badge.sh restore <port> <backup> --yes` writes your backup back (USB).
+
+Partitions (16 MB flash): `ota_0` (4 MB) and `ota_1` (about 3.9 MB) hold the two firmware slots, `coredump` (128 KB)
+holds the last crash, and `storage` (about 8 MB, FAT, mounted at `/storage`) holds the C6 image, settings files and
+MeshCore's data.
+
+## Using the badge
+
+- **Boot:** the Lichen logo, the start-up steps, version and uptime. A step that fails is named.
+- **First run:** a welcome screen, then a Wi-Fi scan to join a network (skippable). It shows once (`fw setup reset`
+  shows it again after a reboot).
+- **Home:** one tile per app with a line or two of live text, e.g. MeshCore's unread count and node count. A switch in
+  Settings turns the tiles into a grid of icons.
+- **Status bar:** local time, Wi-Fi bars (red when the link is down) and the LoRa radio state.
+- **Settings:** Wi-Fi (scan, join; a new network is tried first and the badge goes back to the old one if it doesn't
+  connect), Display (brightness, home layout), Time zone (the default is the Netherlands), About Lichen, and one page
+  per app that has settings.
+- **Settings > MeshCore:** name; Region & radio (presets such as Netherlands, the default, plus Custom: frequency,
+  bandwidth, SF, CR and, under Advanced, TX power); Channels (add a name with a base64 key or `#hashtag`, remove one;
+  Public stays); Send advert; node id, radio, TX power and MeshCore version. The first time the MeshCore app opens it
+  asks for a name and a region.
+- **MeshCore app:** two tabs, Messages and Contacts. Left/Right or Tab switch, Up/Down scroll.
+- **Keyboard:** arrows and Enter move and select, Esc goes back one screen (blocked while a firmware update runs),
+  Tab moves between rows, Backspace edits text.
+
+MeshCore keeps its files in `/storage/meshcore` (identity, made on first boot; contacts; channels), so they survive
+reboots and firmware updates. Limits: 1000 contacts, 40 channels (Public included), 256 queued messages. The screen and
+`fw msgs` show the last 200 messages, which are kept in memory only. The clock comes from SNTP once Wi-Fi is up;
+adverts sent before that carry a wrong timestamp. Text uses LVGL's built-in Montserrat font (ASCII only), so emoji in
+node names show as boxes.
+
+The LoRa settings Lichen starts with are in `/storage/lora.toml` (`frequency_mhz`, `bandwidth_khz`,
+`spreading_factor`, `coding_rate`, `sync_word`, `preamble`); the default is the Dutch MeshCore preset, 869.618 MHz,
+62.5 kHz, SF7, CR 4/5.
+
+## Console and crashes
+
+The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.sh console <port> "fw help"`:
+
+- Wi-Fi and device: `fw wifi [scan | reconnect | <ssid> <password> | --clear]`, `fw net`, `fw token`, `fw mem` (heaps,
+  task stacks, per-task core and CPU %), `fw slot [other]`, `fw reboot`, `fw bl <display> <keyboard>`.
+- LoRa and the C6: `fw lora [raw on|off]`, `fw c6log [ms]` (the C6's own console, up to 60 s), `fw c6 reflash`.
+- MeshCore: `fw mesh` (identity, clock, packet counters), `fw mesh name <name>`, `fw mesh radio <preset | freq bw sf cr>
+  [txdbm]`, `fw contacts`, `fw msgs [n]`, `fw channels`, `fw channel add <name> <base64 key>` or `fw channel add #name`
+  (hashtag channel: key = first 16 bytes of SHA-256 of the lowercased name, `#` included), `fw channel rm <index|name>`,
+  `fw advert` (send a zero-hop advert now).
+- Crashes: every crash keeps a core dump and a log line. `fw crash` shows them, `fw crash dump` prints the dump,
+  `fw crash clear` drops it. `tools/badge.sh crash <port> [elf]` fetches the dump and decodes it against the crashed
+  image's ELF; `flash-fw` and `ota-firmware` keep every ELF in `~/badge-backups/elf` under its SHA-256 and version.
+- Bench: `fw boot [fail <step>]`, `fw home layout tiles|grid`, `fw setup reset [mesh]`, `fw keys on|off|send <keys>` and
+  `fw ui` (press keys and read the screen without looking at it), `fw crash test panic|wdt`.
+
+## Flashing through a remote USB host
+
+`tools/badge.sh` works on a badge plugged into another machine reachable over SSH (set its SSH name in
+`~/.config/why2025-badge/host` or `BADGE_HOST`). That host needs `esptool` 5.x and `pyserial` in `~/badge-venv`. The script only touches Espressif
+USB devices (vendor ID `303a`); a badge behind a generic USB-serial bridge such as a CH340 must be named explicitly with
+`BADGE_EXTRA_PORTS=/dev/ttyUSB1`. Over a CH340, keep the baud rate at the default 460800 (`BADGE_BAUD`): 921600
+corrupts reads. A full 16 MB backup takes about 7 minutes. Run `tools/badge.sh` without arguments for all commands.
+
+## Repository layout
+
+| Path | What |
+|---|---|
+| `firmware/` | Lichen, the P4 firmware (ESP-IDF project; components under `firmware/components/`) |
+| `c6/` | The C6 image: ESP-Hosted 3.0 plus the LoRa service and backlight control |
+| `shared/` | Code both chips and the host tests use: the LoRa protocol, the Arduino shim MeshCore runs on |
+| `host_tests/` | Host tests for the pure logic (run by every build) |
+| `tools/badge.sh` | Backup, flash, console, crash decoding and Wi-Fi updates |
+| `meshcore/` | MeshCore (submodule: our fork, upstream releases plus badge commits) |
+| `esp_hosted/` | ESP-Hosted MCU for the P4 (submodule: our fork, 3.0.10 plus an SDIO receive fix) |
+| `third_party/` | rweather's Crypto and base64 (submodules), used by MeshCore |
+| `docs/` | Architecture and shell design |
+
+## Acknowledgements
+
+Lichen stands on a lot of other people's work. Thank you!
+
+| Project | Used for | License |
+|---|---|---|
+| [BadgeVMS](https://codeberg.org/Peetz0r/why2025-badge-firmware-meshcore) by HP van Braam and contributors (see [AUTHORS](AUTHORS), [THANKS](THANKS)), with Peter Hazenberg's MeshCore work | Where Lichen started: the C6 flasher glue, the keyboard tables, the console command splitter, the Wi-Fi update protocol | GPL-3.0 |
+| [MeshCore](https://github.com/meshcore-dev/MeshCore) | The mesh protocol and the companion radio code the MeshCore app runs | MIT |
+| [ed25519](https://github.com/orlp/ed25519) by Orson Peters (in MeshCore) | MeshCore's identity keys | Zlib |
+| [ESP-Hosted MCU](https://github.com/espressif/esp-hosted-mcu) | Wi-Fi and BLE through the C6 | Apache-2.0 |
+| [ESP-IDF](https://github.com/espressif/esp-idf) and Espressif's components (esp_lvgl_port, esp-serial-flasher, esp_wifi_remote, i2c_bus, USB host drivers) | The base of both firmwares | Apache-2.0 |
+| [LVGL](https://github.com/lvgl/lvgl) 9.6 | The user interface (with the Montserrat font, OFL-1.1) | MIT |
+| [RadioLib](https://github.com/jgromes/RadioLib) 7.8 | The SX1262 driver on the C6 | MIT |
+| [rweather/arduinolibs](https://github.com/rweather/arduinolibs) Crypto | Ed25519, AES and SHA for MeshCore | MIT |
+| [base64_arduino](https://github.com/Densaugeo/base64_arduino) | Base64 for MeshCore | MIT |
+| [tomlc17](https://github.com/cktan/tomlc17) | Reading `lora.toml` | MIT |
+| esp_lcd_st7703 (Espressif) | The display panel driver | Apache-2.0 |
+| [esp_tca8418](https://github.com/atanisoft/esp_tca8418) by Mike Dunston | The keyboard controller driver | BSD-2-Clause |
+
+The WHY2025 badge team made the hardware. The LoRa bodge comes from the WHY2025 wiki page linked above.
+
+We are still checking that this repository meets every license here (#86).
+
+## License
+
+GPL-3.0, see [COPYING](COPYING), because Lichen started from BadgeVMS. The third-party code above keeps its own license.

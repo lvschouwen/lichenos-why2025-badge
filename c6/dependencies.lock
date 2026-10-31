@@ -1,0 +1,45 @@
+dependencies:
+  espressif/esp_hosted:
+    component_hash: c88052665d8df3c7185cb5e34327d77674599006bbbbe4bfdb43c44f9a2a73a3
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.5'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32
+    - esp32c2
+    - esp32s2
+    - esp32s3
+    - esp32c3
+    - esp32c5
+    - esp32c6
+    - esp32c61
+    - esp32h2
+    - esp32h4
+    - esp32h21
+    - esp32p4
+    version: 3.0.10
+  idf:
+    source:
+      type: idf
+    version: 6.1.0
+  jgromes/radiolib:
+    component_hash: 67051f3def406f40329e1fd94ee94f1eb1f2dc2962235c8f2e900cabc366dbfa
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.1'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 7.8.1
+direct_dependencies:
+- espressif/esp_hosted
+- idf
+- jgromes/radiolib
+manifest_hash: d153cfbd458540fa786109581d5556dd001195c2b10111a71ab1e116a27a3f01
+target: esp32c6
+version: 3.0.0

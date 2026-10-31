@@ -1,0 +1,83 @@
+<h2>Boot screen: which direction?</h2>
+<p class="subtitle">Real badge screen is 720×720 (shown at half size). Same moment in all three: the C6 is being reflashed, step 4 of 8.</p>
+
+<style>
+  .badge { width: 360px; height: 360px; background: #101820; border-radius: 6px; overflow: hidden; position: relative;
+           font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace; color: #f2f2f2; box-shadow: 0 0 0 6px #222, 0 6px 20px rgba(0,0,0,.4); margin: 6px auto 0; }
+  .amber { color: #f5b700; } .dim { color: #8090a0; } .ok { color: #5fd38d; } .run { color: #f5b700; }
+  .bar { height: 10px; background: #1f2b36; border-radius: 5px; overflow: hidden; }
+  .bar > div { height: 100%; width: 52%; background: linear-gradient(90deg, #f5b700, #ffd25e); }
+  .seg { display: flex; gap: 3px; } .seg span { flex: 1; height: 10px; background: #1f2b36; } .seg span.on { background: #f5b700; }
+  .log { font-size: 10.5px; line-height: 1.45; white-space: pre; }
+  .corner { position: absolute; bottom: 8px; font-size: 9px; }
+</style>
+
+<div class="cards">
+  <!-- A: terminal -->
+  <div class="card" data-choice="terminal" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="badge" style="padding:14px;box-sizing:border-box">
+        <div class="log amber" style="font-size:9px;line-height:1.1">
+ _               _              __
+| |__  __ _ __| |__ _ ___   / _|_ __ __
+| '_ \/ _` / _` / _` / -_) |  _\ V  V /
+|_.__/\__,_\__,_\__, \___| |_|  \_/\_/
+                |___/   fw-bf7acd9</div>
+        <div class="log" style="margin-top:10px">
+<span class="dim">[ 0.21]</span> storage  /storage 7.9 MB   <span class="ok">[ OK ]</span>
+<span class="dim">[ 0.48]</span> display  720x720 lvgl 9    <span class="ok">[ OK ]</span>
+<span class="dim">[ 0.62]</span> psram    32 MB              <span class="ok">[ OK ]</span>
+<span class="dim">[ 0.95]</span> c6       md5 be05dfc3 ≠ c2a1…
+<span class="dim">[ 1.02]</span> c6       flashing 786/1476 KB <span class="run">[52%]</span>
+<span class="dim">[    ]</span> <span class="dim">wifi     waiting</span>
+<span class="dim">[    ]</span> <span class="dim">clock    waiting (sntp)</span>
+<span class="dim">[    ]</span> <span class="dim">mesh     waiting</span></div>
+        <div style="position:absolute;left:14px;right:14px;bottom:22px"><div class="bar"><div></div></div></div>
+        <div class="corner dim" style="left:14px">step 4/8</div><div class="corner dim" style="right:14px">d6abdbd5</div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · Terminal</h3><p>ASCII logo, a Linux-style boot log with timings and [ OK ]s, thin bar at the bottom. Most geeky.</p></div>
+  </div>
+
+  <!-- B: logo + bar -->
+  <div class="card" data-choice="logo" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="badge" style="display:flex;flex-direction:column;align-items:center;justify-content:center">
+        <svg width="120" height="120" viewBox="0 0 120 120">
+          <g stroke="#f5b700" stroke-width="3" fill="none">
+            <line x1="60" y1="20" x2="25" y2="85"/><line x1="60" y1="20" x2="95" y2="85"/><line x1="25" y1="85" x2="95" y2="85"/>
+            <line x1="60" y1="20" x2="60" y2="62"/><line x1="25" y1="85" x2="60" y2="62"/><line x1="95" y1="85" x2="60" y2="62"/>
+          </g>
+          <g fill="#f5b700"><circle cx="60" cy="20" r="8"/><circle cx="25" cy="85" r="8"/><circle cx="95" cy="85" r="8"/><circle cx="60" cy="62" r="6" fill="#f2f2f2"/></g>
+        </svg>
+        <div style="font-size:22px;letter-spacing:4px;margin-top:8px">badge<span class="amber">fw</span></div>
+        <div style="width:240px;margin-top:26px"><div class="bar"><div></div></div></div>
+        <div style="font-size:11px;margin-top:10px">Flashing the radio chip… 52%</div>
+        <div class="corner dim" style="left:12px">fw-bf7acd9</div><div class="corner dim" style="right:12px">4/8</div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · Logo and bar</h3><p>A mesh logo, one progress bar, one plain line saying what it's doing. Calm, phone-like.</p></div>
+  </div>
+
+  <!-- C: hybrid -->
+  <div class="card" data-choice="hybrid" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="badge" style="padding:18px;box-sizing:border-box">
+        <div style="display:flex;align-items:center;gap:12px">
+          <svg width="54" height="54" viewBox="0 0 120 120"><g stroke="#f5b700" stroke-width="6" fill="none"><line x1="60" y1="20" x2="25" y2="85"/><line x1="60" y1="20" x2="95" y2="85"/><line x1="25" y1="85" x2="95" y2="85"/></g><g fill="#f5b700"><circle cx="60" cy="20" r="12"/><circle cx="25" cy="85" r="12"/><circle cx="95" cy="85" r="12"/></g></svg>
+          <div><div style="font-size:18px;letter-spacing:3px">badge<span class="amber">fw</span></div><div class="dim" style="font-size:10px">fw-bf7acd9 · MeshCore 1.18.0</div></div>
+        </div>
+        <div class="seg" style="margin-top:22px"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on" style="opacity:.55"></span><span></span><span></span><span></span><span></span></div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;margin-top:4px" class="dim"><span>stor</span><span>disp</span><span>psram</span><span class="amber">c6</span><span>wifi</span><span>clock</span><span>lora</span><span>mesh</span></div>
+        <div style="font-size:13px;margin-top:20px"><span class="amber">▸</span> flashing C6 <span class="amber">52%</span></div>
+        <div class="log dim" style="margin-top:14px">
+storage   7.9 MB free 6.1 MB
+display   720x720 @ 60 Hz
+psram     32 MB, 30.4 MB free
+c6        be05dfc3 ≠ c2a1… reflash</div>
+        <div class="corner dim" style="left:18px">node d6abdbd5</div><div class="corner dim" style="right:18px">uptime 1.0 s</div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C · Hybrid</h3><p>Small logo and version, segmented bar with a label per step, the current step big, the last few log lines below.</p></div>
+  </div>
+</div>

@@ -1,0 +1,114 @@
+<h2>Settings and first-run setup</h2>
+<p class="subtitle">Lichen with logo C. Settings becomes a third tab next to Messages and Contacts; setup runs once after a fresh flash. Badge screens at half size; the keyboard does all of it (arrows, Enter, Esc).</p>
+
+<style>
+  .badge { width: 360px; height: 360px; background: #101820; border-radius: 6px; overflow: hidden; position: relative;
+           font-family: system-ui, sans-serif; color: #f2f2f2; box-shadow: 0 0 0 6px #222, 0 6px 20px rgba(0,0,0,.4); margin: 6px auto 0; box-sizing: border-box; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+  .amber { color: #f5b700; } .dim { color: #8090a0; } .teal { color: #3fc1b0; }
+  .tabs { display: flex; font-size: 13px; border-bottom: 1px solid #2a3846; }
+  .tabs div { flex: 1; text-align: center; padding: 8px 0; color: #8090a0; }
+  .tabs div.on { color: #f5b700; border-bottom: 2px solid #f5b700; }
+  .status { font-size: 9px; padding: 6px 10px; color: #f5b700; }
+  .row { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; font-size: 12.5px; border-bottom: 1px solid #1c2733; }
+  .row .v { color: #8090a0; font-size: 11px; }
+  .row.sel { background: #1f2b36; box-shadow: inset 3px 0 0 #f5b700; }
+  .group { font-size: 9px; letter-spacing: 1.5px; color: #8090a0; padding: 10px 14px 4px; text-transform: uppercase; }
+  .wiz { padding: 20px; }
+  .wiz h4 { margin: 10px 0 4px; font-size: 16px; font-weight: 600; }
+  .wiz .steps { display: flex; gap: 4px; } .wiz .steps span { flex: 1; height: 4px; background: #1f2b36; } .wiz .steps span.on { background: #f5b700; }
+  .field { border: 1px solid #f5b700; border-radius: 4px; padding: 8px 10px; font-size: 14px; margin-top: 12px; }
+  .opt { padding: 7px 10px; font-size: 12px; border-radius: 4px; margin-top: 4px; display: flex; justify-content: space-between; }
+  .opt.sel { background: #1f2b36; box-shadow: inset 3px 0 0 #f5b700; }
+  .hint { position: absolute; bottom: 10px; left: 20px; right: 20px; font-size: 9.5px; color: #8090a0; display: flex; justify-content: space-between; }
+</style>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <g id="symbio">
+    <g stroke="#8090a0" stroke-width="2.5" stroke-linecap="round" opacity=".8">
+      <line x1="60" y1="60" x2="60" y2="24"/><line x1="60" y1="60" x2="92" y2="44"/><line x1="60" y1="60" x2="90" y2="80"/>
+      <line x1="60" y1="60" x2="58" y2="98"/><line x1="60" y1="60" x2="28" y2="82"/><line x1="60" y1="60" x2="28" y2="42"/>
+      <line x1="60" y1="24" x2="92" y2="44"/><line x1="92" y1="44" x2="90" y2="80"/><line x1="90" y1="80" x2="58" y2="98"/>
+      <line x1="58" y1="98" x2="28" y2="82"/><line x1="28" y1="82" x2="28" y2="42"/><line x1="28" y1="42" x2="60" y2="24"/>
+    </g>
+    <circle cx="60" cy="60" r="10" fill="#f5b700"/><circle cx="60" cy="60" r="4.5" fill="#3fc1b0"/>
+    <g fill="#f5b700"><circle cx="60" cy="24" r="7"/><circle cx="90" cy="80" r="7"/><circle cx="28" cy="82" r="6"/></g>
+    <g fill="#3fc1b0"><circle cx="92" cy="44" r="6.5"/><circle cx="58" cy="98" r="6.5"/><circle cx="28" cy="42" r="7"/></g>
+  </g>
+</defs></svg>
+
+<h3>Settings tab</h3>
+<div class="split">
+  <div class="mockup"><div class="mockup-header">Settings (top level)</div><div class="mockup-body">
+    <div class="badge">
+      <div class="status mono">192.0.2.42 | C6 ok | LoRa 214 | 12 nodes, 3 msgs</div>
+      <div class="tabs"><div>Messages</div><div>Contacts</div><div class="on">Settings</div></div>
+      <div class="group">Mesh</div>
+      <div class="row sel"><span>Name</span><span class="v">Lucas badge ›</span></div>
+      <div class="row"><span>Region &amp; radio</span><span class="v">Netherlands ›</span></div>
+      <div class="row"><span>Channels</span><span class="v">Public, #nederland ›</span></div>
+      <div class="row"><span>Send advert</span><span class="v">last 12 min ago</span></div>
+      <div class="group">Badge</div>
+      <div class="row"><span>Wi-Fi</span><span class="v">HomeNet ›</span></div>
+      <div class="row"><span>Brightness</span><span class="v">screen 80 · keys 40 ›</span></div>
+      <div class="row"><span>About Lichen</span><span class="v">›</span></div>
+    </div>
+  </div></div>
+  <div class="mockup"><div class="mockup-header">Settings › Region &amp; radio</div><div class="mockup-body">
+    <div class="badge">
+      <div class="status mono">Settings › Region &amp; radio</div>
+      <div class="group">Preset</div>
+      <div class="opt sel" style="margin:4px 10px"><span>Netherlands</span><span class="dim mono">869.618 · 62.5 · SF7 · CR5</span></div>
+      <div class="opt" style="margin:4px 10px"><span>EU/UK narrow</span><span class="dim mono">869.618 · 62.5 · SF8 · CR8</span></div>
+      <div class="opt" style="margin:4px 10px"><span>USA/Canada</span><span class="dim mono">910.525 · 62.5 · SF7 · CR5</span></div>
+      <div class="opt" style="margin:4px 10px"><span>Custom…</span><span class="dim mono"></span></div>
+      <div class="group">Advanced</div>
+      <div class="row"><span>TX power</span><span class="v">22 dBm ›</span></div>
+      <div class="row"><span>Frequency · bandwidth · SF · CR</span><span class="v">›</span></div>
+      <div class="hint"><span>↑↓ choose · Enter apply</span><span>Esc back</span></div>
+    </div>
+  </div></div>
+</div>
+<p class="subtitle" style="margin-top:6px">Preset values are placeholders to check against MeshCore's own list; the badge's radio only covers 862–928 MHz, so 433 MHz presets are left out.</p>
+
+<h3 style="margin-top:24px">First-run setup (after a fresh flash, then never again)</h3>
+<div class="cards">
+  <div class="card"><div class="card-image"><div class="badge wiz">
+    <div class="steps"><span class="on"></span><span></span><span></span><span></span></div>
+    <div style="display:flex;justify-content:center;margin-top:26px"><svg width="96" height="96" viewBox="0 0 120 120"><use href="#symbio"/></svg></div>
+    <div class="mono" style="text-align:center;font-size:22px;letter-spacing:5px;margin-top:10px">lichen</div>
+    <p style="text-align:center;font-size:12px;line-height:1.5;margin-top:14px" class="dim">Hi! Three quick questions and your badge is on the mesh.</p>
+    <div class="hint"><span></span><span>Enter start</span></div>
+  </div></div><div class="card-body"><h3>1 · Welcome</h3></div></div>
+
+  <div class="card"><div class="card-image"><div class="badge wiz">
+    <div class="steps"><span class="on"></span><span class="on"></span><span></span><span></span></div>
+    <h4>Your name on the mesh</h4>
+    <p class="dim" style="font-size:11px;margin:0">Others see this next to your messages.</p>
+    <div class="field">Lucas badge<span class="amber">▏</span></div>
+    <p class="dim" style="font-size:10px;margin-top:6px">up to 31 characters</p>
+    <div class="hint"><span>Esc back</span><span>Enter next</span></div>
+  </div></div><div class="card-body"><h3>2 · Name</h3></div></div>
+
+  <div class="card"><div class="card-image"><div class="badge wiz">
+    <div class="steps"><span class="on"></span><span class="on"></span><span class="on"></span><span></span></div>
+    <h4>Wi-Fi</h4>
+    <p class="dim" style="font-size:11px;margin:0">For the clock and for updates. You can skip this.</p>
+    <div class="opt sel" style="margin-top:10px"><span>HomeNet</span><span class="dim">▂▄▆█</span></div>
+    <div class="opt"><span>HomeNet-guest</span><span class="dim">▂▄▆</span></div>
+    <div class="opt"><span>Neighbour-5G</span><span class="dim">▂▄</span></div>
+    <div class="opt"><span class="dim">Skip for now</span><span></span></div>
+    <div class="hint"><span>Esc back</span><span>Enter choose → password</span></div>
+  </div></div><div class="card-body"><h3>3 · Wi-Fi</h3></div></div>
+
+  <div class="card"><div class="card-image"><div class="badge wiz">
+    <div class="steps"><span class="on"></span><span class="on"></span><span class="on"></span><span class="on"></span></div>
+    <h4>Where are you?</h4>
+    <p class="dim" style="font-size:11px;margin:0">Picks the radio settings your local mesh uses.</p>
+    <div class="opt sel" style="margin-top:10px"><span>Netherlands</span><span class="dim mono">SF7</span></div>
+    <div class="opt"><span>EU/UK narrow</span><span class="dim mono">SF8</span></div>
+    <div class="opt"><span>USA/Canada</span><span class="dim mono">910 MHz</span></div>
+    <p class="dim" style="font-size:10px;margin-top:10px">Changeable later in Settings › Region &amp; radio.</p>
+    <div class="hint"><span>Esc back</span><span>Enter finish → boot</span></div>
+  </div></div><div class="card-body"><h3>4 · Region</h3></div></div>
+</div>
