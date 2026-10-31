@@ -25,6 +25,7 @@
 #include "ota_valid.h"
 #include "settings_store.h"
 #include "shell.h"
+#include "assets.h"
 #include "storage.h"
 #include "update_mode.h"
 #include "update_screen.h"
@@ -45,7 +46,7 @@ static bool lora_link_up(void) {
 
 // The OTA task's hooks, in the shell's terms (#76)
 static void ota_begin(ota_kind_t kind, char const *name, uint32_t total) {
-    update_screen_begin(kind == OTA_KIND_FIRMWARE, name, total);
+    update_screen_begin(kind != OTA_KIND_FILE, kind == OTA_KIND_FIRMWARE, name, total);
 }
 
 static void ota_end(bool ok, bool rebooting) {
@@ -127,6 +128,7 @@ void app_main(void) {
     } else {
         boot_progress_end(BOOT_STORAGE, STEP_DONE, NULL);
     }
+    assets_mount(); // fonts; without them the UI uses the built-in ones (#22)
     crash_check();
     console_start();
     // The screen first, so the boot screen shows the slow C6 check and reflash. The backlight is the C6's (over the

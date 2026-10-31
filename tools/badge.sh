@@ -38,7 +38,7 @@ Usage: $(basename "$0") <command> [args]
   ports                     list Espressif ports on $HOST and the chip behind each
   backup <port>             read the whole flash of the chip on <port> into $BACKUPS
   flash-fw <port> [--no-storage]
-                            write firmware/build (Lichen: bootloader, partitions, app, storage) to the P4;
+                            write firmware/build (Lichen: bootloader, partitions, app, assets, storage) to the P4;
                             storage replaces everything on the badge's flash drive (MeshCore identity,
                             contacts, settings), --no-storage leaves it alone
   crash <port> [elf]        fetch the core dump over the console ("fw crash dump"), check it and decode it with
@@ -54,6 +54,8 @@ Over Wi-Fi, while the badge is on Wi-Fi:
   ota-info <ip>                       show the firmware version the badge runs
   ota-firmware <ip> [--no-reboot]     install firmware/build/badge_fw.bin (or $BADGE_FIRMWARE_BIN) and reboot into it
   ota-file <ip> <file> <badge-path>   push one file, e.g. 'FLASH0:[c6]firmware.bin'
+  ota-assets <ip> [--no-reboot]       write firmware/build/assets.bin (or $BADGE_ASSETS_BIN) into the assets
+                                      partition (fonts) and reboot
   ota-rm <ip> <badge-path>            delete one file on the badge
   ota-reboot <ip>
 
@@ -417,6 +419,19 @@ cmd_ota_firmware() {
 
 cmd_ota_file() { ota_put "$1" file "$2" "$3"; }
 
+# The assets partition (#22): always sent in checked pieces (the receiver takes nothing else there), after /prepare
+# and followed by a reboot, because the running firmware reads the partition in place
+cmd_ota_assets() {
+    local ip=$1 reboot=${2:-}
+    local bin=${BADGE_ASSETS_BIN:-$REPO/firmware/build/assets.bin}
+    [ -f "$bin" ] || { echo "no $bin, build first" >&2; exit 1; }
+    ota_chunks "$ip" || { echo "this receiver can't take assets (no pieces support)" >&2; exit 1; }
+    # The partition is read in place (memory-mapped): stop the apps and screens before it is rewritten
+    ota_prepare "$ip" || exit 1
+    ota_put_pieces "$ip" assets "$bin" || exit 1
+    [ "$reboot" = --no-reboot ] || cmd_ota_reboot "$ip"
+}
+
 cmd_ota_rm() { ota_curl -X DELETE -H "X-Path: $2" "http://$1:$OTA_PORT/file"; }
 
 case "${1:-}" in
@@ -430,6 +445,7 @@ case "${1:-}" in
     ota-info)     [ $# -eq 2 ] || usage; cmd_ota_info "$2" ;;
     ota-firmware) [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_ota_firmware "$2" "${3:-}" ;;
     ota-file)     [ $# -eq 4 ] || usage; cmd_ota_file "$2" "$3" "$4" ;;
+    ota-assets)   [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_ota_assets "$2" "${3:-}" ;;
     ota-rm)       [ $# -eq 3 ] || usage; cmd_ota_rm "$2" "$3" ;;
     ota-reboot)   [ $# -eq 2 ] || usage; cmd_ota_reboot "$2" ;;
     *)        usage ;;

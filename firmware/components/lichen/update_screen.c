@@ -37,7 +37,8 @@ typedef enum { PH_IDLE, PH_RECEIVING, PH_RESTARTING, PH_FILE_DONE, PH_FAILED } p
 typedef struct {
     phase_t  phase;
     uint32_t gen; // counts begins
-    bool     firmware;
+    bool     firmware; // an image (firmware or assets, #22): update mode, ends in a restart
+    bool     new_version; // real firmware: remembered for "Updated" / "Update failed" after the restart
     char     name[48];
     uint32_t total;
     uint32_t done;
@@ -76,8 +77,9 @@ void update_screen_prepare(void) {
     }
     shared.phase    = PH_RECEIVING;
     shared.gen++;
-    shared.firmware = true;
-    shared.name[0]  = '\0';
+    shared.firmware    = true;
+    shared.new_version = false; // the begin that follows says whether this is new firmware or assets
+    shared.name[0]     = '\0';
     shared.total    = 0;
     shared.done     = 0;
     shared.stamp_ms = now_ms();
@@ -103,9 +105,9 @@ bool update_screen_file_ok(void) {
     return ok;
 }
 
-void update_screen_begin(bool firmware, char const *name, uint32_t total) {
+void update_screen_begin(bool image, bool firmware, char const *name, uint32_t total) {
     portENTER_CRITICAL(&lock);
-    unsigned act = update_mode_on_begin(&um, firmware);
+    unsigned act = update_mode_on_begin(&um, image);
     if (act & UM_ACT_REFUSE) {
         portEXIT_CRITICAL(&lock); // the server answers 409 before it gets here; nothing of ours may change
         return;
@@ -115,7 +117,8 @@ void update_screen_begin(bool firmware, char const *name, uint32_t total) {
     }
     shared.phase    = PH_RECEIVING;
     shared.gen++;
-    shared.firmware = firmware;
+    shared.firmware    = image;
+    shared.new_version = firmware;
     snprintf(shared.name, sizeof(shared.name), "%s", name ? name : "");
     shared.total    = total;
     shared.done     = 0;
@@ -147,7 +150,7 @@ void update_screen_end(bool ok, bool rebooting) {
         if (ok) {
             shared.phase = shared.firmware ? PH_RESTARTING : PH_FILE_DONE;
             shared.done  = shared.total;
-            save         = shared.firmware;
+            save         = shared.new_version;
         } else {
             shared.phase = PH_FAILED;
         }

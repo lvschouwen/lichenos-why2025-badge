@@ -12,7 +12,8 @@ void ota_server_start(void);
 // begin: a transfer starts (name is the file's name, NULL for firmware); total is the bytes the sender will send, 0 if
 // unknown. progress: bytes received so far, counted the same way as total (compressed bytes for a compressed body).
 // end: the transfer is over; rebooting is true when the badge is about to restart into the new firmware.
-typedef enum { OTA_KIND_FIRMWARE, OTA_KIND_FILE } ota_kind_t;
+// ASSETS (#22) is handled like FIRMWARE (allowed after /prepare, everything stopped) but is not a new version
+typedef enum { OTA_KIND_FIRMWARE, OTA_KIND_FILE, OTA_KIND_ASSETS } ota_kind_t;
 typedef struct {
     void (*begin)(ota_kind_t kind, char const *name, uint32_t total);
     void (*progress)(uint32_t done);

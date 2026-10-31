@@ -10,7 +10,10 @@
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "assets.h"
+#include "assets_fmt.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_random.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
@@ -36,6 +39,7 @@
 #define TOKEN_FILE      "/storage/ota_token.txt"
 #define FIRMWARE_MAX    (4 * 1024 * 1024) // one app slot (firmware/partitions.csv)
 #define FILE_MAX        (4 * 1024 * 1024) // received into PSRAM before it touches storage (#40)
+#define ASSETS_MAX      (3 * 1024 * 1024) // the assets partition (firmware/partitions.csv, #22)
 #define READ_TIMEOUT_S  10
 #define HEAD_DEADLINE_S 15
 #define BODY_MIN_RATE   (16 * 1024) // bytes/s a body must average, on top of BODY_GRACE_S
@@ -388,6 +392,45 @@ static bool finish_firmware(int fd, uint8_t const *data, size_t len, long long s
     return true;
 }
 
+// Write a checked assets image (#22) over the assets partition. The image is fully checked (header, table, CRC)
+// before anything is erased, and read back afterwards. The partition is memory-mapped, not copied: while it is
+// rewritten, anything reading it sees erased or half-written bytes. So tools/badge.sh asks for /prepare first (the
+// apps and screens stop) and reboots afterwards; consumers copy what they keep (assets.h).
+static bool finish_assets(int fd, uint8_t const *data, size_t len, long long sent) {
+    assets_view_t view;
+    assets_err_t  res = assets_open(data, len, true, &view);
+    if (res != ASSETS_OK) {
+        respond(fd, 422, "not a usable assets image (%s), nothing written", assets_err_str(res));
+        return false;
+    }
+    esp_partition_t const *part =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, ASSETS_PARTITION);
+    if (!part || len > part->size) {
+        respond(fd, 413, "no assets partition, or the image is larger than it");
+        return false;
+    }
+    size_t    erase = (len + part->erase_size - 1) / part->erase_size * part->erase_size;
+    esp_err_t err   = esp_partition_erase_range(part, 0, erase);
+    if (err == ESP_OK) {
+        err = esp_partition_write(part, 0, data, len);
+    }
+    for (size_t at = 0; err == ESP_OK && at < len; at += sizeof(body_buf)) {
+        size_t n = len - at < sizeof(body_buf) ? len - at : sizeof(body_buf);
+        err      = esp_partition_read(part, at, body_buf, n);
+        if (err == ESP_OK && memcmp(body_buf, data + at, n) != 0) {
+            err = ESP_ERR_INVALID_CRC;
+        }
+    }
+    if (err != ESP_OK) {
+        respond(fd, 500, "writing the assets failed (%s); the built-in fonts are used until it succeeds",
+                esp_err_to_name(err));
+        return false;
+    }
+    ESP_LOGW(TAG, "assets written (%zu bytes, %u files)", len, (unsigned)view.count);
+    respond(fd, 200, "wrote %zu bytes (%lld sent), %u files, used after a reboot", len, sent, (unsigned)view.count);
+    return true;
+}
+
 static void handle_firmware(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
     if (req->content_length <= 0 || !req->has_sha256) {
         respond(fd, req->content_length < 0 ? 411 : 400, "needs Content-Length and X-Content-SHA256");
@@ -511,9 +554,9 @@ static bool fixed_sink(void *ctx, uint8_t const *data, size_t len) {
 }
 
 static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
-    long long max = req->route == OTA_ROUTE_FIRMWARE ? FIRMWARE_MAX : FILE_MAX;
+    long long max = req->route == OTA_ROUTE_FIRMWARE ? FIRMWARE_MAX : req->route == OTA_ROUTE_ASSETS ? ASSETS_MAX : FILE_MAX;
     char      posix[OTA_PATH_MAX + 16];
-    if (req->route == OTA_ROUTE_FILE && !file_allowed()) {
+    if (req->route == OTA_ROUTE_FILE && !file_allowed()) { // firmware and assets come after /prepare
         respond(fd, 409, "updating");
         return;
     }
@@ -539,8 +582,13 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
             return;
         }
         staged.active = true;
-        hook_begin(req->route == OTA_ROUTE_FIRMWARE ? OTA_KIND_FIRMWARE : OTA_KIND_FILE,
-                   req->route == OTA_ROUTE_FILE ? display_name(req->path) : NULL, req->total_size);
+        hook_begin(req->route == OTA_ROUTE_FIRMWARE ? OTA_KIND_FIRMWARE
+                   : req->route == OTA_ROUTE_ASSETS ? OTA_KIND_ASSETS
+                                                    : OTA_KIND_FILE,
+                   req->route == OTA_ROUTE_FILE     ? display_name(req->path)
+                   : req->route == OTA_ROUTE_ASSETS ? "assets"
+                                                    : NULL,
+                   req->total_size);
         staged.route  = req->route;
         staged.total  = (size_t)req->total_size;
         snprintf(staged.path, sizeof(staged.path), "%s", path);
@@ -587,9 +635,9 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
         respond(fd, 400, "whole-file SHA-256 mismatch (sha256 %s), nothing written", sha_hex);
         return;
     }
-    bool finished = staged.route == OTA_ROUTE_FIRMWARE
-                        ? finish_firmware(fd, staged.data, staged.total, staged.sent)
-                        : finish_file(fd, staged.path, staged.data, staged.total, staged.sent);
+    bool finished = staged.route == OTA_ROUTE_FIRMWARE ? finish_firmware(fd, staged.data, staged.total, staged.sent)
+                    : staged.route == OTA_ROUTE_ASSETS ? finish_assets(fd, staged.data, staged.total, staged.sent)
+                                                       : finish_file(fd, staged.path, staged.data, staged.total, staged.sent);
     hook_end(finished, false);
     staged_reset();
 }
@@ -666,6 +714,13 @@ static bool handle_connection(int fd) {
                 handle_piece(fd, &req, pre, pre_len);
             } else {
                 handle_file(fd, &req, pre, pre_len);
+            }
+            return false;
+        case OTA_ROUTE_ASSETS:
+            if (req.has_offset) {
+                handle_piece(fd, &req, pre, pre_len);
+            } else {
+                respond(fd, 400, "send assets in pieces (X-Offset, X-Total-Size, X-File-SHA256)");
             }
             return false;
         case OTA_ROUTE_PREPARE:

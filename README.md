@@ -64,7 +64,7 @@ SSH (see [Flashing through a remote USB host](#flashing-through-a-remote-usb-hos
 
 ```
 tools/badge.sh backup <port>                  # full flash dump into ~/badge-backups: do this first
-tools/badge.sh flash-fw <port>                # first install: bootloader, partitions, Lichen and storage
+tools/badge.sh flash-fw <port>                # first install: bootloader, partitions, Lichen, assets and storage
 tools/badge.sh flash-fw <port> --no-storage   # later USB updates: keeps /storage
 ```
 
@@ -77,6 +77,7 @@ After that, update over Wi-Fi (the update server runs whenever Wi-Fi is up; put 
 ```
 tools/badge.sh ota-firmware <ip>                       # firmware/build/badge_fw.bin, then reboot
 tools/badge.sh ota-file <ip> <file> FLASH0:<name>      # one file into /storage
+tools/badge.sh ota-assets <ip>                         # firmware/build/assets.bin (fonts), then reboot
 tools/badge.sh ota-info <ip>                           # the version the badge runs
 ```
 
@@ -88,9 +89,18 @@ SHA-256 before they replace anything. The token travels as plain HTTP, so only u
 
 **Back to stock BadgeVMS:** `tools/badge.sh restore <port> <backup> --yes` writes your backup back (USB).
 
-Partitions (16 MB flash): `ota_0` (4 MB) and `ota_1` (about 3.9 MB) hold the two firmware slots, `coredump` (128 KB)
-holds the last crash, and `storage` (about 8 MB, FAT, mounted at `/storage`) holds the C6 image, settings files and
-MeshCore's data.
+Partitions (16 MB flash, `firmware/partitions.csv`):
+
+| Partition | Offset | Size | Holds |
+|---|---|---|---|
+| `ota_0`, `ota_1` | 0x20000, 0x420000 | 4 MB each | the two firmware slots |
+| `coredump` | 0x820000 | 128 KB | the last crash |
+| `assets` | 0x840000 | 3 MB | read-only files such as fonts, packed from `firmware/assets/` by `tools/pack_assets.py` and memory-mapped at boot |
+| `storage` | 0xB40000 | 4.75 MB | FAT, mounted at `/storage`: the C6 image, settings files, MeshCore's data |
+
+Assets are separate from the firmware: `flash-fw` writes them, and over Wi-Fi `ota-assets` replaces them (checked before
+anything is erased, then read back). If they are missing or damaged, Lichen logs it and falls back to its built-in
+fonts; `fw assets` shows their state.
 
 ## Using the badge
 
@@ -126,7 +136,7 @@ The LoRa settings Lichen starts with are in `/storage/lora.toml` (`frequency_mhz
 The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.sh console <port> "fw help"`:
 
 - Wi-Fi and device: `fw wifi [scan | reconnect | <ssid> <password> | --clear]`, `fw net`, `fw token`, `fw mem` (heaps,
-  task stacks, per-task core and CPU %), `fw slot [other]`, `fw reboot`, `fw bl <display> <keyboard>`.
+  task stacks, per-task core and CPU %), `fw slot [other]`, `fw assets`, `fw reboot`, `fw bl <display> <keyboard>`.
 - LoRa and the C6: `fw lora [raw on|off]`, `fw c6log [ms]` (the C6's own console, up to 60 s), `fw c6 reflash`.
 - MeshCore: `fw mesh` (identity, clock, packet counters), `fw mesh name <name>`, `fw mesh radio <preset | freq bw sf cr>
   [txdbm]`, `fw contacts`, `fw msgs [n]`, `fw channels`, `fw channel add <name> <base64 key>` or `fw channel add #name`

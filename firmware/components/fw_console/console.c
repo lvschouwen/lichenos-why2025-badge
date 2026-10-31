@@ -1,5 +1,6 @@
 #include "fw_console.h"
 
+#include "assets.h"
 #include "console_cmd.h"
 #include "driver/uart.h"
 #include "esp_heap_caps.h"
@@ -145,6 +146,11 @@ static char const *ota_state_name(esp_partition_t const *p) {
     }
 }
 
+static void cmd_assets(char const *args) {
+    (void)args;
+    console_reply("assets %s", assets_status());
+}
+
 static void cmd_slot(char const *args) {
     esp_partition_t const *running = esp_ota_get_running_partition();
     esp_partition_t const *other   = esp_ota_get_next_update_partition(NULL);
@@ -230,6 +236,7 @@ static void console_task(void *arg) {
 void console_start(void) {
     console_register("help", "help", cmd_help);
     console_register("mem", "mem (heaps, task stacks, per-task core and CPU %)", cmd_mem);
+    console_register("assets", "assets (state of the assets partition and its files)", cmd_assets);
     console_register("slot", "slot [other] (show the app slots, or boot the other one)", cmd_slot);
     console_register("reboot", "reboot", cmd_reboot);
 

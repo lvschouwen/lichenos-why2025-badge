@@ -69,6 +69,7 @@ static int parse_request_line(char *line, ota_request_t *req) {
         {"/file", "PUT", OTA_ROUTE_FILE},
         {"/reboot", "POST", OTA_ROUTE_REBOOT},
         {"/prepare", "POST", OTA_ROUTE_PREPARE},
+        {"/assets", "PUT", OTA_ROUTE_ASSETS},
         {"/file", "DELETE", OTA_ROUTE_DELETE},
     };
     bool known_target = false;

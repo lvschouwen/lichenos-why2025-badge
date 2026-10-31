@@ -6,6 +6,7 @@
 //   DELETE /file   X-Path: <VMS path> remove a file (same path rules as PUT)
 //   POST /reboot
 //   POST /prepare                      lean firmware: stop everything else for a firmware update, reply "ready" (#76)
+//   PUT  /assets                       body = assets.bin (tools/pack_assets.py), in pieces only; used after a reboot (#22)
 //
 // Every request but /info carries "Authorization: Bearer <token>"; uploads carry "X-Content-SHA256: <hex>" of the
 // file as it ends up on the badge. "Content-Encoding: deflate" (a zlib stream) sends it compressed.
@@ -30,6 +31,7 @@ typedef enum {
     OTA_ROUTE_REBOOT,
     OTA_ROUTE_DELETE,
     OTA_ROUTE_PREPARE,
+    OTA_ROUTE_ASSETS,
 } ota_route_t;
 
 typedef struct {

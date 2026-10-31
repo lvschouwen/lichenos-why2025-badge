@@ -1,0 +1,3 @@
+# Lichen assets (#22): read-only files packed by tools/pack_assets.py into the "assets" partition.
+# Changing anything here: rebuild, then `tools/badge.sh ota-assets <ip>` (or flash-fw over USB).
+format = 1

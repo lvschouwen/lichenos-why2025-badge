@@ -5,7 +5,8 @@
 
 // "Updating Lichen" (#76). begin/progress/end are called from the OTA task and only store numbers; an LVGL timer opens
 // and refreshes the screen. total 0 = unknown, name NULL for firmware; done counts the same bytes as total.
-void update_screen_begin(bool firmware, char const *name, uint32_t total);
+// image: firmware or assets, which stop everything and end in a restart; firmware: a new version ("Updated" next boot)
+void update_screen_begin(bool image, bool firmware, char const *name, uint32_t total);
 void update_screen_progress(uint32_t done);
 void update_screen_end(bool ok, bool rebooting);
 // After boot: says "Updated to ..." or "Update failed, back on ..." on home for 4 s when the badge has just been through
