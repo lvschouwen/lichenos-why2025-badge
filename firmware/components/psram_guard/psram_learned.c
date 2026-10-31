@@ -1,5 +1,7 @@
 #include "psram_learned.h"
 
+#include "psram_pattern.h"
+
 #include "esp_log.h"
 #include "fw_console.h"
 #include <stdio.h>
@@ -23,6 +25,7 @@ static SemaphoreHandle_t s_lock;
 static unsigned          s_outliers;
 static unsigned          s_loaded_writes;
 static bool              s_from_nvs;
+static bool              s_dirty; // a new page in the map, not stored yet
 static char              s_last_who[24];
 
 static bool store(void) {
@@ -56,12 +59,46 @@ void psram_learned_load(void) {
     }
 }
 
+void psram_learned_mark(uintptr_t addr) {
+    if (!s_lock) {
+        return;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_dirty |= psram_learn_mark_page(&s_rec, addr);
+    xSemaphoreGive(s_lock);
+}
+
+void psram_learned_mark_buf(uint8_t const *mem, size_t len, uintptr_t tag, uint32_t mask, size_t first, size_t last) {
+    size_t    from = first & ~(size_t)(PSRAM_LINE - 1), to = (last + PSRAM_LINE) & ~(size_t)(PSRAM_LINE - 1);
+    to             = to < len ? to : len;
+    tag += from;
+    mem += from;
+    len = to - from;
+    uintptr_t a = (uintptr_t)mem, end = a + len;
+    while (a < end) {
+        uintptr_t pe = (a | (PSRAM_PAGE - 1)) + 1;
+        pe           = pe < end ? pe : end;
+        psram_check_t r = psram_pattern_check_x((void const *)a, pe - a, tag + (a - (uintptr_t)mem), mask);
+        if (r.bad_bytes) {
+            psram_learned_mark(a);
+        }
+        a = pe;
+    }
+}
+
 void psram_learned_feed(uintptr_t lo, uintptr_t hi, char const *who) {
     if (!s_lock) {
         return;
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
     psram_learn_result_t r = psram_learn_note(&s_rec, lo, hi);
+    if (r == PSRAM_LEARN_SAME && s_dirty) { // only the page map changed: still one write per new page
+        s_rec.writes++;
+        r = PSRAM_LEARN_GREW;
+    }
+    if (r == PSRAM_LEARN_GREW) {
+        s_dirty = false;
+    }
     if (r == PSRAM_LEARN_OUTLIER) {
         s_outliers++;
         ESP_LOGW(TAG, "learned: %s found bad bytes %p..%p, too far from the learned range: not learned", who, (void *)lo,
@@ -69,7 +106,7 @@ void psram_learned_feed(uintptr_t lo, uintptr_t hi, char const *who) {
     } else if (r == PSRAM_LEARN_GREW) {
         bool ok = store();
         snprintf(s_last_who, sizeof(s_last_who), "%s", who);
-        ESP_LOGW(TAG, "learned: %s widened the bad range to 0x%08x..0x%08x (%u KB), NVS write #%u %s", who, (unsigned)s_rec.lo,
+        ESP_LOGW(TAG, "learned: %s updated the bad range 0x%08x..0x%08x (%u KB) or its page map, NVS write #%u %s", who, (unsigned)s_rec.lo,
                  (unsigned)s_rec.hi, (unsigned)((s_rec.hi - s_rec.lo + 1) >> 10), (unsigned)s_rec.writes,
                  ok ? "stored" : "FAILED");
     }
@@ -108,6 +145,14 @@ void psram_learned_print(void) {
     if (psram_learn_empty(&r)) {
         console_reply("psram learned: nothing yet (speed %u MHz)", (unsigned)r.speed_mhz);
         return;
+    }
+    unsigned span, failed;
+    psram_learn_page_counts(&r, &span, &failed);
+    console_reply("psram learned pages: %u of %u 4K pages in the span ever failed, %u never", failed, span, span - failed);
+    static char map[800];
+    size_t      n = psram_learn_page_map(&r, map, sizeof(map));
+    for (size_t i = 0; i < n; i += 64) {
+        console_reply("psram learned map +%03u: %.64s", (unsigned)i, map + i);
     }
     console_reply("psram learned: 0x%08x..0x%08x (%u KB span), speed %u MHz, NVS writes %u (%u at boot, %u this boot), "
                   "last widened by %s, %u outliers ignored, loaded from NVS %s",

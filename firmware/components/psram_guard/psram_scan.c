@@ -18,7 +18,6 @@
 #include <string.h>
 
 #define CHUNK       (64u * 1024u)  // scan and grab unit
-#define PAGE        PSRAM_QUAR_GRAIN // edge pieces of the quarantine
 #define MAX_HELD    256
 #define MAX_CHUNKS  1024
 #define WIN_LO      0x48400000u // the suspect window of #40: bad bytes near 0x4855BA81, 4 MB check ended at 0x485C0A80
@@ -48,6 +47,8 @@ typedef struct {
 
 static chunk_t       s_chunks[MAX_CHUNKS]; // every chunk grabbed, sorted by address
 static size_t        s_n;
+static uint8_t      *s_far[MAX_CHUNKS];     // the rest of the free PSRAM while the edges are split
+static size_t        s_nfar;
 static chunk_t       s_held[MAX_HELD];    // kept for good (quarantine)
 static size_t        s_nheld;
 static psram_quar_t  s_quar;
@@ -87,6 +88,7 @@ static size_t sparse_pass(uint8_t *mem, psram_check_t *acc) {
         if (!diff) {
             continue;
         }
+        psram_learned_mark((uintptr_t)&w[i]);
         if (bad++ == 0 && !acc->bad_bytes) {
             acc->first_bad = i * 4;
         }
@@ -103,6 +105,9 @@ static void dense_pass(uint8_t *mem, uint32_t mask, psram_check_t *out) {
     psram_pattern_fill_x(mem, CHUNK, (uintptr_t)mem, mask);
     sync(mem, CHUNK);
     *out = psram_pattern_check_x(mem, CHUNK, (uintptr_t)mem, mask);
+    if (out->bad_bytes) {
+        psram_learned_mark_buf(mem, CHUNK, (uintptr_t)mem, mask, out->first_bad, out->last_bad);
+    }
 }
 
 // Folds one pass result into the chunk's extent and the global bit statistics
@@ -206,49 +211,78 @@ static void hold(uint8_t *mem, size_t len, chunk_t const *from) {
     }
 }
 
-// A chunk that only touches the quarantine at its edge: give it back and re-claim it in 4 KB pages, keeping only the
-// pages inside the range. Pages that come from elsewhere are handed back at the end; a shortfall is counted and shown.
+// The intersection of a chunk with the quarantine ranges it touches (their hull)
+static void touched(uintptr_t base, size_t len, uintptr_t *lo, uintptr_t *hi) {
+    *lo = UINTPTR_MAX;
+    *hi = 0;
+    for (size_t i = 0; i < s_quar.n; i++) {
+        if (base < s_quar.r[i].hi && base + len > s_quar.r[i].lo) {
+            uintptr_t l = s_quar.r[i].lo > base ? s_quar.r[i].lo : base;
+            uintptr_t h = s_quar.r[i].hi < base + len ? s_quar.r[i].hi : base + len;
+            *lo         = l < *lo ? l : *lo;
+            *hi         = h > *hi ? h : *hi;
+        }
+    }
+}
+
+// A chunk that only touches the quarantine at its edge: give it back and claim just the part inside the range. With
+// everything else PSRAM held (drop_far is deferred) the freed block is the only free memory, so a filler allocation
+// takes its start and the wanted piece follows it. The slop is the heap header and the 128 B alignment: the piece
+// starts at or before the range and ends at or after it; if the heap hands something else, the retry widens the slop
+// and a failure is counted ("pages missing") instead of hidden.
 static void split_edge(chunk_t const *c) {
-    uintptr_t base = (uintptr_t)c->mem;
-    uint8_t  *got[2 * CHUNK / PAGE];
-    size_t    n = 0, inside = 0;
+    uintptr_t base = (uintptr_t)c->mem, lo, hi;
+    touched(base, CHUNK, &lo, &hi);
     heap_caps_free(c->mem);
-    while (inside < CHUNK / PAGE && n < 2 * CHUNK / PAGE) {
-        uint8_t *m = heap_caps_aligned_alloc(LINE, PAGE, PSRAM_CAPS);
+    static size_t const slop[3] = {192, 512, 2048};
+    for (int attempt = 0; attempt < 3; attempt++) {
+        size_t   fill = lo - base > slop[attempt] ? lo - base - slop[attempt] : 0;
+        uint8_t *f    = fill ? heap_caps_aligned_alloc(LINE, fill, PSRAM_CAPS) : NULL;
+        size_t   want = (hi + slop[attempt] - (base + fill) + LINE - 1) & ~(size_t)(LINE - 1);
+        uint8_t *m    = heap_caps_aligned_alloc(LINE, want, PSRAM_CAPS);
+        if (f) {
+            heap_caps_free(f);
+        }
+        if (m && (uintptr_t)m <= lo && (uintptr_t)m + want >= hi) {
+            hold(m, want, c);
+            s_stat.pages_held++;
+            return;
+        }
+        heap_caps_free(m); // free(NULL) is fine
+    }
+    s_stat.short_pages++;
+}
+
+// Everything still free is taken for the moment, so a freed edge chunk is the only free block (split_edge)
+static void grab_rest(void) {
+    while (s_nfar < MAX_CHUNKS) {
+        uint8_t *m = heap_caps_aligned_alloc(LINE, CHUNK, PSRAM_CAPS);
         if (!m) {
             break;
         }
-        got[n++] = m;
-        inside  += (uintptr_t)m >= base && (uintptr_t)m < base + CHUNK;
+        s_far[s_nfar++] = m;
     }
-    size_t need = 0, kept = 0;
-    for (uintptr_t a = base; a < base + CHUNK; a += PAGE) {
-        need += psram_quar_overlaps(&s_quar, a, PAGE);
-    }
-    for (size_t i = 0; i < n; i++) {
-        uintptr_t a = (uintptr_t)got[i];
-        if (a >= base && a < base + CHUNK && psram_quar_overlaps(&s_quar, a, PAGE)) {
-            hold(got[i], PAGE, c);
-            kept++;
-        } else {
-            heap_caps_free(got[i]);
-        }
-    }
-    s_stat.pages_held  += kept;
-    s_stat.short_pages += need > kept ? need - kept : 0;
 }
 
 static void keep_or_free(void) {
-    for (size_t i = 0; i < s_n; i++) {
+    grab_rest();
+    for (size_t i = 0; i < s_n; i++) { // first the ones that stay, so a freed neighbour never merges into an edge block
         uintptr_t a = (uintptr_t)s_chunks[i].mem;
         if (inside_quar(a, CHUNK)) {
             hold(s_chunks[i].mem, CHUNK, &s_chunks[i]);
+            s_chunks[i].mem = NULL;
         } else if (psram_quar_overlaps(&s_quar, a, CHUNK)) {
             split_edge(&s_chunks[i]);
-        } else {
-            heap_caps_free(s_chunks[i].mem);
+            s_chunks[i].mem = NULL;
         }
     }
+    for (size_t i = 0; i < s_n; i++) {
+        heap_caps_free(s_chunks[i].mem);
+    }
+    for (size_t i = 0; i < s_nfar; i++) {
+        heap_caps_free(s_far[i]);
+    }
+    s_nfar = 0;
 }
 
 // Chunks well outside the window go back at once, so the rest of the boot is not starved while the window is scanned
@@ -352,7 +386,7 @@ void psram_scan_print(void) {
         held += s_held[i].len;
     }
     psram_learned_print();
-    console_reply("psram quarantine: %u KB in ranges, %u KB held in %u pieces (%u 4K edge pages, %u pages missing)",
+    console_reply("psram quarantine: %u KB in ranges, %u KB held in %u pieces (%u edge pieces, %u missing)",
                   (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)(held >> 10), (unsigned)s_nheld,
                   (unsigned)s_stat.pages_held, (unsigned)s_stat.short_pages);
     for (size_t i = 0; i < s_nheld; i++) {
@@ -396,6 +430,8 @@ static void watch_read(watch_t *w) {
             uintptr_t blo = (uintptr_t)m + off + r.first_bad, bhi = (uintptr_t)m + off + r.last_bad;
             w->lo = !w->hi || blo < w->lo ? blo : w->lo;
             w->hi = bhi > w->hi ? bhi : w->hi;
+            psram_learned_mark(blo);
+            psram_learned_mark(bhi);
             w->n++;
             w->bytes += r.bad_bytes;
             w->up    |= r.up_or;

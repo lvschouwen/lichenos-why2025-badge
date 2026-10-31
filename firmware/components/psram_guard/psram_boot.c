@@ -105,6 +105,7 @@ static void dense_run(uint8_t *mem, size_t len, verify_t *v, char const *who) {
             v->first_xor = r.first_xor;
         }
         if (r.bad_bytes) {
+            psram_learned_mark_buf(mem, len, (uintptr_t)mem, masks[m], r.first_bad, r.last_bad);
             uintptr_t blo = (uintptr_t)mem + r.first_bad, bhi = (uintptr_t)mem + r.last_bad;
             v->lo = !v->hi || blo < v->lo ? blo : v->lo;
             v->hi = bhi > v->hi ? bhi : v->hi;

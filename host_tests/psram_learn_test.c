@@ -60,6 +60,27 @@ int main(void) {
     psram_learn_reset(&empty, 200);
     CHECK(psram_learn_usable(&empty, sizeof(empty), 200));
 
+    // Page failure map: first mark of a page reports "new", later ones do not; counted inside the span only
+    psram_learn_t m;
+    psram_learn_reset(&m, 200);
+    psram_learn_note(&m, 0x48558C01u, 0x4855CFFFu); // pages 0x48558000 .. 0x4855C000 = 5 pages
+    CHECK(psram_learn_mark_page(&m, 0x48558C01u));
+    CHECK(!psram_learn_mark_page(&m, 0x48558FFFu)); // same page
+    CHECK(psram_learn_mark_page(&m, 0x4855AFFFu));
+    CHECK(!psram_learn_mark_page(&m, 0x40000000u)); // outside the map window: not marked
+    CHECK(psram_learn_mark_page(&m, 0x48600000u));  // inside the map but outside the span: kept, not counted
+    unsigned span, failed;
+    psram_learn_page_counts(&m, &span, &failed);
+    CHECK(span == 5 && failed == 2);
+    char map[16];
+    CHECK(psram_learn_page_map(&m, map, sizeof(map)) == 5);
+    CHECK(map[0] == '#' && map[1] == '.' && map[2] == '#' && map[3] == '.' && map[4] == '.' && map[5] == 0);
+    psram_learn_t none;
+    psram_learn_reset(&none, 200);
+    psram_learn_page_counts(&none, &span, &failed);
+    CHECK(span == 0 && failed == 0 && psram_learn_page_map(&none, map, sizeof(map)) == 0);
+    CHECK(psram_learn_usable(&m, sizeof(m), 200));
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

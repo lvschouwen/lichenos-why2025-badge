@@ -112,6 +112,7 @@ static void report(int id, block_t *b, psram_check_t const *res) {
              got_hex, ms);
     ESP_LOGW(TAG, "  canary %d: %u single-bit words, %u bad lines (%u whole), xor of first bad word %08x", id,
              (unsigned)res->bit_flips, (unsigned)res->bad_lines, (unsigned)res->full_lines, (unsigned)res->first_xor);
+    psram_learned_mark_buf(b->mem, b->len, (uintptr_t)b->mem, 0, res->first_bad, res->last_bad);
     psram_learned_feed((uintptr_t)b->mem + res->first_bad, (uintptr_t)b->mem + res->last_bad, "canary");
     b->hits++;
     b->bad_total      += (uint32_t)res->bad_bytes;
@@ -176,6 +177,7 @@ static void psram_test(char const *kb_text) {
     fill_block(mem, len);
     psram_check_t res = check_block(mem, len);
     if (res.bad_bytes) {
+        psram_learned_mark_buf(mem, len, (uintptr_t)mem, 0, res.first_bad, res.last_bad);
         psram_learned_feed((uintptr_t)mem + res.first_bad, (uintptr_t)mem + res.last_bad, "fw psram test");
     }
     console_reply("psram test %u KB at %p: %u bad bytes, %u single-bit words, %u bad lines (%u whole), first bad +%u xor %08x, %u us",

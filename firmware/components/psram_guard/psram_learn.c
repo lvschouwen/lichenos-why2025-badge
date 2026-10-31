@@ -36,3 +36,50 @@ psram_learn_result_t psram_learn_note(psram_learn_t *r, uintptr_t lo, uintptr_t 
     r->writes++;
     return PSRAM_LEARN_GREW;
 }
+
+static bool page_index(uintptr_t addr, unsigned *idx) {
+    if (addr < PSRAM_MAP_BASE || addr >= PSRAM_MAP_BASE + PSRAM_MAP_PAGES * PSRAM_PAGE) {
+        return false;
+    }
+    *idx = (unsigned)((addr - PSRAM_MAP_BASE) / PSRAM_PAGE);
+    return true;
+}
+
+bool psram_learn_mark_page(psram_learn_t *r, uintptr_t addr) {
+    unsigned i;
+    if (!page_index(addr, &i) || (r->pages[i / 8] >> (i % 8) & 1)) {
+        return false;
+    }
+    r->pages[i / 8] |= (uint8_t)(1u << (i % 8));
+    return true;
+}
+
+void psram_learn_page_counts(psram_learn_t const *r, unsigned *span_pages, unsigned *failed) {
+    *span_pages = 0;
+    *failed     = 0;
+    if (psram_learn_empty(r)) {
+        return;
+    }
+    uintptr_t first = r->lo & ~(uintptr_t)(PSRAM_PAGE - 1);
+    for (uintptr_t a = first; a <= r->hi; a += PSRAM_PAGE) {
+        unsigned i;
+        (*span_pages)++;
+        if (page_index(a, &i) && (r->pages[i / 8] >> (i % 8) & 1)) {
+            (*failed)++;
+        }
+    }
+}
+
+size_t psram_learn_page_map(psram_learn_t const *r, char *out, size_t cap) {
+    size_t n = 0;
+    if (!psram_learn_empty(r)) {
+        for (uintptr_t a = r->lo & ~(uintptr_t)(PSRAM_PAGE - 1); a <= r->hi && n + 1 < cap; a += PSRAM_PAGE) {
+            unsigned i;
+            out[n++] = page_index(a, &i) && (r->pages[i / 8] >> (i % 8) & 1) ? '#' : '.';
+        }
+    }
+    if (cap) {
+        out[n] = 0;
+    }
+    return n;
+}
