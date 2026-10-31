@@ -47,6 +47,45 @@ static const char *TAG = "tca8418";
 
 static uint8_t readRegister(tca8418_dev_t *tca8418_dev, uint8_t reg);
 static void writeRegister(tca8418_dev_t *tca8418_dev, uint8_t reg, uint8_t value);
+static bool read_reg(tca8418_dev_t *tca8418_dev, uint8_t reg, uint8_t *out);
+
+// The register setup alone, on the existing bus and device handle (#14): C6 EN also resets the TCA8418, and the keyboard
+// task calls this again when its readback finds the chip back at its power-on defaults
+void tca8418_configure(tca8418_dev_t *dev)
+{
+    // set default all GPIO pins to INPUT.
+    writeRegister(dev, REG_GPIO_DIRECTION_1, 0x00);
+    writeRegister(dev, REG_GPIO_DIRECTION_2, 0x00);
+    writeRegister(dev, REG_GPIO_DIRECTION_3, 0x00);
+
+    // add all pins to key events.
+    writeRegister(dev, REG_GPI_EM1, 0xFF);
+    writeRegister(dev, REG_GPI_EM2, 0xFF);
+    writeRegister(dev, REG_GPI_EM3, 0xFF);
+
+    // set all pins to FALLING interrupts.
+    writeRegister(dev, REG_GPIO_INTERRUPT_LVL1, 0x00);
+    writeRegister(dev, REG_GPIO_INTERRUPT_LVL2, 0x00);
+    writeRegister(dev, REG_GPIO_INTERRUPT_LVL3, 0x00);
+
+    // add all pins to interrupts.
+    writeRegister(dev, REG_GPIO_INT_EN1, 0xFF);
+    writeRegister(dev, REG_GPIO_INT_EN2, 0xFF);
+    writeRegister(dev, REG_GPIO_INT_EN3, 0xFF);
+
+    // configure rows and columns registers
+    const tca8418_masks_t masks = tca8418_key_masks(dev->rows, dev->cols);
+    writeRegister(dev, REG_KEY_PRESS_GPIO1, masks.kp_gpio1);
+    writeRegister(dev, REG_KEY_PRESS_GPIO2, masks.kp_gpio2);
+    if (dev->cols > 8)
+    {
+        writeRegister(dev, REG_KEY_PRESS_GPIO3, masks.kp_gpio3);
+    }
+
+    writeRegister(dev, REG_DEBOUNCE_DIS1, 0x00);
+    writeRegister(dev, REG_DEBOUNCE_DIS2, 0x00);
+    writeRegister(dev, REG_DEBOUNCE_DIS3, 0x00);
+}
 
 tca8418_dev_t *tca8418_create(gpio_num_t scl_pin, gpio_num_t sda_pin, uint8_t i2c_address, gpio_num_t notify_pin, uint8_t rows, uint8_t cols)
 {
@@ -105,38 +144,7 @@ tca8418_dev_t *tca8418_create(gpio_num_t scl_pin, gpio_num_t sda_pin, uint8_t i2
     }
     ESP_LOGI(TAG, "Device %02x found! Configuring for %zu (cols), %zu (rows)", tca8418_dev->i2c_address, tca8418_dev->cols, tca8418_dev->rows);
 
-    // set default all GPIO pins to INPUT.
-    writeRegister(tca8418_dev, REG_GPIO_DIRECTION_1, 0x00);
-    writeRegister(tca8418_dev, REG_GPIO_DIRECTION_2, 0x00);
-    writeRegister(tca8418_dev, REG_GPIO_DIRECTION_3, 0x00);
-
-    // add all pins to key events.
-    writeRegister(tca8418_dev, REG_GPI_EM1, 0xFF);
-    writeRegister(tca8418_dev, REG_GPI_EM2, 0xFF);
-    writeRegister(tca8418_dev, REG_GPI_EM3, 0xFF);
-
-    // set all pins to FALLING interrupts.
-    writeRegister(tca8418_dev, REG_GPIO_INTERRUPT_LVL1, 0x00);
-    writeRegister(tca8418_dev, REG_GPIO_INTERRUPT_LVL2, 0x00);
-    writeRegister(tca8418_dev, REG_GPIO_INTERRUPT_LVL3, 0x00);
-
-    // add all pins to interrupts.
-    writeRegister(tca8418_dev, REG_GPIO_INT_EN1, 0xFF);
-    writeRegister(tca8418_dev, REG_GPIO_INT_EN2, 0xFF);
-    writeRegister(tca8418_dev, REG_GPIO_INT_EN3, 0xFF);
-
-    // configure rows and columns registers
-    const tca8418_masks_t masks = tca8418_key_masks(tca8418_dev->rows, tca8418_dev->cols);
-    writeRegister(tca8418_dev, REG_KEY_PRESS_GPIO1, masks.kp_gpio1);
-    writeRegister(tca8418_dev, REG_KEY_PRESS_GPIO2, masks.kp_gpio2);
-    if (tca8418_dev->cols > 8)
-    {
-        writeRegister(tca8418_dev, REG_KEY_PRESS_GPIO3, masks.kp_gpio3);
-    }
-
-    writeRegister(tca8418_dev, REG_DEBOUNCE_DIS1, 0x00);
-    writeRegister(tca8418_dev, REG_DEBOUNCE_DIS2, 0x00);
-    writeRegister(tca8418_dev, REG_DEBOUNCE_DIS3, 0x00);
+    tca8418_configure(tca8418_dev);
 
     if (tca8418_dev->notify_pin != GPIO_NUM_NC)
     {
@@ -206,6 +214,43 @@ void tca8418_flush(tca8418_dev_t *tca8418_dev)
     writeRegister(tca8418_dev, REG_INTERRUPT_STATUS, 0x03);
 }
 
+tca8418_check_t tca8418_check(tca8418_dev_t *tca8418_dev)
+{
+    uint8_t value = 0;
+    bool ok = read_reg(tca8418_dev, REG_KEY_PRESS_GPIO1, &value);
+    return tca8418_check_kp_gpio1(ok, value, tca8418_dev->rows, tca8418_dev->cols);
+}
+
+// One line per run of failures instead of one per 20 ms poll while the chip is held in reset (#14)
+static void note_result(tca8418_dev_t *tca8418_dev, bool write, uint8_t reg, esp_err_t err)
+{
+    uint32_t fails = 0;
+    if (err == ESP_OK) {
+        if (tca8418_warn_ok(&tca8418_dev->warn, &fails) == TCA8418_WARN_BACK) {
+            ESP_LOGW(TAG, "I2C back after %u failed transfers", (unsigned)fails);
+        }
+        return;
+    }
+    switch (tca8418_warn_fail(&tca8418_dev->warn)) {
+    case TCA8418_WARN_FIRST:
+        ESP_LOGW(TAG, "%s register %02x failed: %s (further failures are counted)", write ? "Writing" : "Reading", reg,
+                 esp_err_to_name(err));
+        break;
+    case TCA8418_WARN_STILL:
+        ESP_LOGW(TAG, "I2C still failing: %u transfers", (unsigned)tca8418_dev->warn.fails);
+        break;
+    default:
+        break;
+    }
+}
+
+static bool read_reg(tca8418_dev_t *tca8418_dev, uint8_t reg, uint8_t *out)
+{
+    esp_err_t err = i2c_bus_read_byte(tca8418_dev->dev_handle, reg, out);
+    note_result(tca8418_dev, false, reg, err);
+    return err == ESP_OK;
+}
+
 /// Reads a single register from the TCA8418 IC.
 ///
 /// @param reg Register to read the value of.
@@ -213,15 +258,10 @@ void tca8418_flush(tca8418_dev_t *tca8418_dev)
 /// @return register value.
 static uint8_t readRegister(tca8418_dev_t *tca8418_dev, uint8_t reg)
 {
-    uint8_t receive_buf[1] = {0};
+    uint8_t value = 0;
     ESP_LOGV(TAG, "Reading register %02x from dev %02x", reg, tca8418_dev->i2c_address);
-    esp_err_t err = i2c_bus_read_byte(tca8418_dev->dev_handle, reg, receive_buf);
-    if (err != ESP_OK) {
-        // The keyboard is polled every frame; a bus glitch must not abort the badge. 0 reads as "no key"/"no events".
-        ESP_LOGW(TAG, "Reading register %02x failed: %s", reg, esp_err_to_name(err));
-        return 0;
-    }
-    return receive_buf[0];
+    // The keyboard is polled every frame; a bus glitch must not abort the badge. 0 reads as "no key"/"no events".
+    return read_reg(tca8418_dev, reg, &value) ? value : 0;
 }
 
 /// Writes a register value to the TCA8418 IC.
@@ -231,8 +271,5 @@ static uint8_t readRegister(tca8418_dev_t *tca8418_dev, uint8_t reg)
 static void writeRegister(tca8418_dev_t *tca8418_dev, uint8_t reg, uint8_t value)
 {
     ESP_LOGV(TAG, "Writing %02x to register %02x on dev %02x", value, reg, tca8418_dev->i2c_address);
-    esp_err_t err = i2c_bus_write_byte(tca8418_dev->dev_handle, reg, value);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Writing register %02x failed: %s", reg, esp_err_to_name(err));
-    }
+    note_result(tca8418_dev, true, reg, i2c_bus_write_byte(tca8418_dev->dev_handle, reg, value));
 }

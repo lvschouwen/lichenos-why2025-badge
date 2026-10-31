@@ -125,6 +125,26 @@ static void supervisor_reconfigures_after_c6_restart(void) {
     CHECK(lora_sup_on_status(&s, &st, 60015) == 0);
 }
 
+static void supervisor_restarts_after_reattach(void) {
+    // #14: after an ESP-Hosted re-attach the LoRa task runs lora_sup_init again on its used supervisor, late in the
+    // boot and near the uint32 wrap. The first tick must re-send config + RX start, and the silence count starts over.
+    uint32_t const starts[] = {5000000u, 0xFFFFF000u};
+    for (size_t i = 0; i < sizeof(starts) / sizeof(starts[0]); i++) {
+        lora_sup_t s;
+        lora_sup_init(&s, 0);
+        lora_sup_tick(&s, 0);
+        lora_sup_tick(&s, 30000);
+        lora_sup_tick(&s, 60000); // two unanswered polls: one more would reconfigure
+        uint32_t t = starts[i];
+        lora_sup_init(&s, t);
+        CHECK(lora_sup_tick(&s, t) == (LORA_ACT_SEND_CONFIG | LORA_ACT_RX_START));
+        CHECK(lora_sup_tick(&s, t + 1000) == 0);
+        CHECK(lora_sup_tick(&s, t + 30000) == LORA_ACT_STATUS_REQ);
+        CHECK(lora_sup_tick(&s, t + 60000) == LORA_ACT_STATUS_REQ);
+        CHECK(lora_sup_tick(&s, t + 90000) == (LORA_ACT_STATUS_REQ | LORA_ACT_SEND_CONFIG | LORA_ACT_RX_START));
+    }
+}
+
 static void supervisor_retries_failed_radio_slowly(void) {
     lora_sup_t s;
     lora_sup_init(&s, 0);
@@ -218,6 +238,7 @@ int main(void) {
     supervisor_reconfigures_after_c6_restart();
     supervisor_reconfigures_after_silence();
     supervisor_retries_failed_radio_slowly();
+    supervisor_restarts_after_reattach();
     status_line_format();
 
     if (failures) {

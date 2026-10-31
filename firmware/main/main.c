@@ -199,6 +199,7 @@ void app_main(void) {
         lv_indev_t *keys = NULL; // the keypad is an LVGL input device: LVGL first
         if (keyboard_start(&keys)) {
             shell_attach_keys(keys);
+            keyboard_set_reset_hook(c6link_note_keyboard_reset); // the chip resets only with the C6 (#14)
         } else {
             ESP_LOGE(TAG, "no keyboard");
         }

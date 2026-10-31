@@ -10,12 +10,14 @@
 #include "kbd_map.h"
 
 #include <assert.h>
+#include <stdatomic.h>
 #include <string.h>
 
 static char const TAG[] = "keyboard";
 
 #define POLL_MS     20
 #define QUEUE_DEPTH 32
+#define CHECK_MS    1000 // the self-heal readback (#14): one I2C read a second
 
 static_assert(KBD_KEY_UP == LV_KEY_UP && KBD_KEY_DOWN == LV_KEY_DOWN && KBD_KEY_LEFT == LV_KEY_LEFT &&
                   KBD_KEY_RIGHT == LV_KEY_RIGHT && KBD_KEY_ENTER == LV_KEY_ENTER &&
@@ -31,6 +33,8 @@ static tca8418_dev_t *chip;
 static QueueHandle_t  events;
 static uint32_t       held[0x51]; // what each pressed key was mapped to, so its release reports the same key
 static bool           shift;
+static atomic_bool    reinit_asked;            // keyboard_reinit(): honoured by the poll task, which owns the chip
+static void (*_Atomic reset_hook)(void);       // told when the readback finds the chip reset (#14)
 
 static struct {
     key_raw_fn fn;
@@ -77,9 +81,59 @@ static bool run_hooks(key_raw_event_t const *ev) {
     return swallowed;
 }
 
+void keyboard_reinit(void) {
+    atomic_store(&reinit_asked, true);
+}
+
+void keyboard_set_reset_hook(void (*fn)(void)) {
+    atomic_store(&reset_hook, fn);
+}
+
+// The chip forgot its pressed keys with its configuration: release them all, so LVGL never sees a key held forever
+static void release_held(void) {
+    for (size_t k = 0; k < sizeof(held) / sizeof(held[0]); k++) {
+        if (held[k]) {
+            key_event_t ev = {.key = held[k], .pressed = false};
+            xQueueSend(events, &ev, 0);
+            held[k] = 0;
+        }
+    }
+    shift = false;
+}
+
+static void reconfigure(char const *why) {
+    tca8418_configure(chip);
+    tca8418_flush(chip);
+    release_held();
+    ESP_LOGW(TAG, "TCA8418 reconfigured (%s)", why);
+}
+
+// C6 EN also resets the TCA8418 (#14). Once a second the KP_GPIO1 readback tells whether it still has its setup; a
+// failed read (chip held in reset) is no verdict, the next second asks again.
+static void self_heal(TickType_t *last_check) {
+    if (atomic_exchange(&reinit_asked, false)) {
+        reconfigure("asked");
+        *last_check = xTaskGetTickCount();
+        return;
+    }
+    if (xTaskGetTickCount() - *last_check < pdMS_TO_TICKS(CHECK_MS)) {
+        return;
+    }
+    *last_check = xTaskGetTickCount();
+    if (tca8418_check(chip) == TCA8418_CHECK_RESET) {
+        reconfigure("chip was reset");
+        void (*hook)(void) = atomic_load(&reset_hook);
+        if (hook) {
+            hook();
+        }
+    }
+}
+
 static void poll_task(void *arg) {
     (void)arg;
+    TickType_t last_check = xTaskGetTickCount();
     for (;;) {
+        self_heal(&last_check);
         while (tca8418_get_event_count(chip) > 0) {
             uint8_t raw     = tca8418_get_key(chip);
             uint8_t key     = raw & 0x7F;

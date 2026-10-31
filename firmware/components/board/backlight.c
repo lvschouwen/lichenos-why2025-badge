@@ -51,8 +51,34 @@ static bool send_raw(unsigned display, unsigned keyboard) {
     return len && open_uart() && uart_write_bytes(BL_UART, cmd, len) == (int)len;
 }
 
+// The last levels asked for (a slider included, not only the saved ones): a C6 reset brings back its 30/10 defaults and
+// backlight_reapply() sends these again (#14). The restart blank (send_raw 0 0) is not one of them.
+static portMUX_TYPE applied_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool         applied_known;
+static uint8_t      applied_display, applied_keyboard;
+
 static bool send(uint8_t display, uint8_t keyboard) {
+    portENTER_CRITICAL(&applied_lock);
+    applied_known    = true;
+    applied_display  = display;
+    applied_keyboard = keyboard;
+    portEXIT_CRITICAL(&applied_lock);
     return send_raw(display, keyboard);
+}
+
+void backlight_reapply(void) {
+    uint8_t display, keyboard;
+    portENTER_CRITICAL(&applied_lock);
+    bool known = applied_known;
+    display    = applied_display;
+    keyboard   = applied_keyboard;
+    portEXIT_CRITICAL(&applied_lock);
+    if (!known) {
+        backlight_get(&display, &keyboard);
+    }
+    if (!send_raw(display, keyboard)) {
+        ESP_LOGW(TAG, "backlight not re-sent to the C6");
+    }
 }
 
 static void save(uint8_t display, uint8_t keyboard) {

@@ -14,6 +14,7 @@
 #include "i2c_bus.h"
 #include "hal/gpio_types.h"
 #include "keymap.h"
+#include "tca8418_mask.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -34,6 +35,7 @@ extern "C"
         uint8_t cols;                       // Number of rows to configure the TCA8418 to use, default to maximum (10).
         i2c_bus_handle_t bus_handle;        // I2C bus handle
         i2c_bus_device_handle_t dev_handle; // I2C device handle to use for I2C communication.
+        tca8418_warn_t warn;                // rate limit of the I2C warnings (#14)
     } tca8418_dev_t;
 
     typedef struct
@@ -53,6 +55,13 @@ extern "C"
     /// @param cols             Number of rows to configure the TCA8418 to use, default to maximum (10).
     /// @return                 pointer to initialized tca8418_dev_t struct after successfully creating i2c_bus i2c_device and configuring it
     tca8418_dev_t *tca8418_create(gpio_num_t scl_pin, gpio_num_t sda_pin, uint8_t i2c_address, gpio_num_t notify_pin, uint8_t rows, uint8_t cols);
+
+    /// Writes the keypad register setup again on the existing handles (tca8418_create does it once). For a chip that
+    /// was reset with the C6 (#14); call it from the task that polls the chip.
+    void tca8418_configure(tca8418_dev_t *tca8418_dev);
+
+    /// Reads KP_GPIO1 back: RESET when the chip lost its configuration, NO_ANSWER when the read failed (#14)
+    tca8418_check_t tca8418_check(tca8418_dev_t *tca8418_dev);
 
     /// @brief Destructor
     /// @param tca8418_dev      pointer to initialized tca8418_dev_t struct

@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "c6_watch.h"
 #include "wifi_join.h"
 #include "wifi_list.h"
 
@@ -11,7 +12,21 @@
 
 // True once ESP-Hosted talks to the C6, with or without Wi-Fi (no credentials, wrong password, out of range)
 bool c6link_start(void);
+// False again once ESP-Hosted reports a transport failure (#14)
 bool c6link_up(void);
+
+// A C6 reset at runtime (#14): what the watch knows, for `fw c6`, the status bar and About. Safe from any task.
+typedef struct {
+    c6w_state_t  state;
+    c6w_source_t source;           // what started the current (or the last) outage
+    uint32_t     restarts;         // outages the C6 came back from
+    uint32_t     last_recovery_ms; // how long the last one took
+    uint8_t      attempt;          // re-attach attempts in the current outage
+    char         reason[C6W_REASON_MAX]; // the last recovery in words ("" before the first)
+} c6_status_t;
+void c6link_status(c6_status_t *out);
+// The keyboard found the TCA8418 reset, which only C6 EN does: hand it to keyboard_set_reset_hook() (#14)
+void c6link_note_keyboard_reset(void);
 // A file under /storage/c6 was written or deleted: forget the verified bundle so the next boot checks the C6 fully (#36).
 // Invariant: EVERY writer of /storage/c6 must call this before touching the files. The boot-time skip key is built from
 // file sizes and the .md5 text only, so a .bin changed behind its back would still look verified.
