@@ -32,12 +32,78 @@ typedef struct {
 static command_t commands[MAX_COMMANDS];
 static int       n_commands;
 
-void console_reply(char const *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
+#define REPLY_MAX 384 // longer replies reach the UART whole but are cut in the log and the Wi-Fi console
+
+static void (*tap)(char const *text, size_t len);
+
+void console_set_tap(void (*fn)(char const *text, size_t len)) {
+    tap = fn;
+}
+
+// The output of console_exec (#38): only the task that runs it is collected, so the UART console keeps working
+static struct {
+    TaskHandle_t    task;
+    char           *buf;
+    size_t          cap;
+    size_t          len;
+    bool            cut;
+    bool            done_called;
+    console_done_fn done;
+    void           *ctx;
+} capture;
+
+#define CUT_NOTE "[output cut]\n"
+
+static void capture_add(char const *text, size_t n) {
+    if (capture.cut || capture.cap < sizeof(CUT_NOTE) + 2) {
+        return;
+    }
+    size_t room = capture.cap - capture.len - sizeof(CUT_NOTE); // always keeps room for the note
+    if (n + 1 > room) {
+        memcpy(capture.buf + capture.len, CUT_NOTE, sizeof(CUT_NOTE) - 1);
+        capture.len += sizeof(CUT_NOTE) - 1;
+        capture.cut  = true;
+        return;
+    }
+    memcpy(capture.buf + capture.len, text, n);
+    capture.buf[capture.len + n] = '\n';
+    capture.len                 += n + 1;
+}
+
+static void reply_v(bool private, char const *fmt, va_list ap) {
+    va_list copy;
+    va_copy(copy, ap);
     printf("fw: ");
     vprintf(fmt, ap);
     printf("\n");
+    if (!private) {
+        char text[REPLY_MAX];
+        int  n = vsnprintf(text, sizeof(text), fmt, copy);
+        if (n > 0) {
+            size_t len = (size_t)n < sizeof(text) ? (size_t)n : sizeof(text) - 1;
+            if (tap) {
+                text[len] = '\n';
+                tap(text, len + 1);
+            }
+            if (capture.task && capture.task == xTaskGetCurrentTaskHandle()) {
+                capture_add(text, len);
+            }
+        }
+    }
+    va_end(copy);
+}
+
+void console_reply(char const *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    reply_v(false, fmt, ap);
+    va_end(ap);
+}
+
+void console_reply_private(char const *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    reply_v(true, fmt, ap);
     va_end(ap);
 }
 
@@ -186,7 +252,18 @@ static void cmd_slot(char const *args) {
     system_restart();
 }
 
+static void capture_finish(void) {
+    if (capture.task && !capture.done_called) {
+        capture.done_called = true;
+        capture.done(capture.ctx, capture.buf, capture.len);
+    }
+}
+
 void system_restart(void) {
+    if (capture.task && capture.task == xTaskGetCurrentTaskHandle()) {
+        capture_finish(); // a command from Wi-Fi answers before the badge goes down (#38)
+        vTaskDelay(pdMS_TO_TICKS(300)); // the reply leaves the TCP stack
+    }
     esp_restart();
 }
 
@@ -215,6 +292,23 @@ static void run(char *line) {
         }
     }
     console_reply("unknown command '%s', try 'fw help'", line);
+}
+
+void console_exec(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx) {
+    char cmd[CONSOLE_CMD_MAX];
+    while (*line == ' ') {
+        line++;
+    }
+    if (strncmp(line, "fw ", 3) == 0) {
+        line += 3;
+    }
+    snprintf(cmd, sizeof(cmd), "%s", line); // run() splits it in place
+    capture = (typeof(capture)){.task = xTaskGetCurrentTaskHandle(), .buf = buf, .cap = cap, .done = done, .ctx = ctx};
+    if (cmd[0]) {
+        run(cmd);
+    }
+    capture_finish();
+    capture.task = NULL;
 }
 
 static void console_task(void *arg) {

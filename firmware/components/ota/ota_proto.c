@@ -72,7 +72,17 @@ static int parse_request_line(char *line, ota_request_t *req) {
         {"/assets", "PUT", OTA_ROUTE_ASSETS},
         {"/file", "DELETE", OTA_ROUTE_DELETE},
         {"/screenshot", "GET", OTA_ROUTE_SCREENSHOT},
+        {"/log", "GET", OTA_ROUTE_LOG},
+        {"/console", "POST", OTA_ROUTE_CONSOLE},
     };
+    // Only /log takes a query: "?since=<seq>" (digits). Every other target with a '?' stays unknown.
+    char *query = strchr(target, '?');
+    if (query && strncmp(target, "/log?", 5) == 0) {
+        *query = '\0';
+        if (strncmp(query + 1, "since=", 6) != 0 || !parse_size(query + 7, strlen(query + 7), &req->since)) {
+            return 400;
+        }
+    }
     bool known_target = false;
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         if (strcmp(target, routes[i].target) == 0) {

@@ -58,6 +58,12 @@ Over Wi-Fi, while the badge is on Wi-Fi:
                                       partition (fonts) and reboot
   ota-rm <ip> <badge-path>            delete one file on the badge
   ota-reboot <ip>
+  log <ip> [--follow]                 print the badge's log (what its console prints, kept in RAM since boot, with
+                                      sequence numbers and uptimes); --follow keeps polling every second. Lines printed
+                                      by ROM code (panics, the DPI underrun note) are not in it. It can show node names
+                                      and messages: treat it like a screenshot
+  fw <ip> <command...>                run one console command over Wi-Fi and print its output, e.g.
+                                      "fw 192.0.2.7 mem" ("fw " in front of the command is optional)
   screenshot <ip> [out.png]           save what the screen shows as a PNG (default: a private dir under \$XDG_RUNTIME_DIR or \$TMPDIR; it
                                       can show private messages, so keep it out of the repo)
 
@@ -455,6 +461,45 @@ PY
     echo "$out"
 }
 
+# GET /log (#38): lines after a sequence number; the badge answers the number to ask for next in X-Next-Seq. A smaller
+# number than asked (the badge restarted) just starts over.
+cmd_log() {
+    local ip=$1 follow=${2:-} since=0 hdr body next missed
+    umask 077
+    work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-log.XXXXXX")
+    trap 'rm -f "$work/hdr" "$work/body"; rmdir "$work" 2>/dev/null' EXIT
+    hdr=$work/hdr body=$work/body
+    while :; do
+        if ! ota_curl --max-time 60 -D "$hdr" -o "$body" "http://$ip:$OTA_PORT/log?since=$since"; then
+            head -c 300 "$body" 2>/dev/null | tr -d '\000' >&2
+            [ -n "$follow" ] || exit 1
+            sleep 2 # Wi-Fi hiccup or a reboot: keep trying
+            continue
+        fi
+        cat "$body"
+        next=$(tr -d '\r' < "$hdr" | sed -n 's/^[Xx]-[Nn]ext-[Ss]eq: *\([0-9][0-9]*\)$/\1/p' | tail -n 1)
+        missed=$(tr -d '\r' < "$hdr" | sed -n 's/^[Xx]-[Ll]og-[Mm]issed: *\([0-9][0-9]*\)$/\1/p' | tail -n 1)
+        [ "${missed:-0}" = 0 ] || echo "-- $missed older line(s) were already dropped from the badge's log --" >&2
+        [ -z "$next" ] || since=$next
+        [ -n "$follow" ] || break
+        # A full answer (24 KB cap) means more is waiting: ask again at once
+        [ "$(wc -c < "$body")" -lt 20000 ] && sleep 1
+    done
+}
+
+# POST /console (#38): one fw command; the badge runs it like the UART console and answers with its output
+cmd_fw() {
+    local ip=$1
+    shift
+    local line="$*"
+    # In a private file, not on the command line: the line can hold a Wi-Fi password (the token goes in on stdin)
+    umask 077
+    work=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-fw.XXXXXX")
+    trap 'rm -f "$work"' EXIT
+    printf '%s' "$line" > "$work"
+    ota_curl --max-time 60 -X POST -H 'Content-Type: text/plain' --data-binary "@$work" "http://$ip:$OTA_PORT/console"
+}
+
 cmd_ota_rm() { ota_curl -X DELETE -H "X-Path: $2" "http://$1:$OTA_PORT/file"; }
 
 case "${1:-}" in
@@ -471,6 +516,8 @@ case "${1:-}" in
     ota-assets)   [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_ota_assets "$2" "${3:-}" ;;
     ota-rm)       [ $# -eq 3 ] || usage; cmd_ota_rm "$2" "$3" ;;
     ota-reboot)   [ $# -eq 2 ] || usage; cmd_ota_reboot "$2" ;;
+    log)          { [ $# -eq 2 ] || { [ $# -eq 3 ] && [ "$3" = --follow ]; }; } || usage; cmd_log "$2" "${3:-}" ;;
+    fw)           [ $# -ge 3 ] || usage; ip=$2; shift 2; cmd_fw "$ip" "$@" ;;
     screenshot)   [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_screenshot "$2" "${3:-}" ;;
     *)        usage ;;
 esac

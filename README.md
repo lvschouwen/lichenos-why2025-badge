@@ -142,6 +142,23 @@ While the badge is on Wi-Fi it renders the active screen, the status bar and the
 every other Wi-Fi command and is never logged. The screen can show private messages and contacts: keep the files out
 of the repo and out of issues. A busy UI answers 503 (try again); during a firmware update it answers 409.
 
+## Log and console over Wi-Fi
+
+```
+tools/badge.sh log <ip> [--follow]     # the badge's log since boot; --follow polls every second
+tools/badge.sh fw <ip> <command...>    # e.g. fw 192.0.2.7 mem, fw 192.0.2.7 ui, fw 192.0.2.7 keys send down enter
+```
+
+The badge keeps every log line and every console reply in a 96 KB ring in PSRAM (`GET /log?since=<seq>`: lines with a
+sequence number and uptime; the answer's `X-Next-Seq` header is the number to ask for next, `X-Log-Missed` counts lines
+that were dropped from the ring before you asked). `POST /console` runs one `fw` command line (at most 95
+characters) like the USB console would and returns its output; commands that restart the badge (`fw reboot`, `fw slot
+other`, a C6 reflash) answer first. Both need the update token like every other Wi-Fi command, and the log and console
+output can show node names and messages, so treat them like screenshots. Not in the log: lines printed by ROM code
+(panics, the display underrun note, the bootloader), plain `printf` output (`fw crash dump`, the C6 flasher's progress)
+and anything before `app_main`; `fw token` never enters it. The console answers 409 during a firmware update. To
+switch the Wi-Fi console off, disable `OTA_WIFI_CONSOLE` (menuconfig, "Lichen Wi-Fi update server"; the log stays).
+
 ## Console and crashes
 
 The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.sh console <port> "fw help"`:

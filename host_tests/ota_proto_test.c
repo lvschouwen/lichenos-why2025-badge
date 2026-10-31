@@ -127,6 +127,20 @@ static void test_parse(void) {
     CHECK(parse("PUT /screenshot HTTP/1.1\r\n\r\n", &req) == 405);
     CHECK(parse("POST /screenshot HTTP/1.1\r\n\r\n", &req) == 405);
 
+    CHECK(parse("GET /log HTTP/1.1\r\nAuthorization: Bearer " TOKEN "\r\n\r\n", &req) == 0);
+    CHECK(req.route == OTA_ROUTE_LOG && req.has_token && req.since == 0);
+    CHECK(parse("GET /log?since=1234 HTTP/1.1\r\n\r\n", &req) == 0 && req.route == OTA_ROUTE_LOG && req.since == 1234);
+    CHECK(parse("GET /log?since=0 HTTP/1.1\r\n\r\n", &req) == 0 && req.since == 0);
+    CHECK(parse("GET /log?since= HTTP/1.1\r\n\r\n", &req) == 400);
+    CHECK(parse("GET /log?since=-1 HTTP/1.1\r\n\r\n", &req) == 400);
+    CHECK(parse("GET /log?since=1x HTTP/1.1\r\n\r\n", &req) == 400);
+    CHECK(parse("GET /log?x=1 HTTP/1.1\r\n\r\n", &req) == 400);
+    CHECK(parse("POST /log HTTP/1.1\r\n\r\n", &req) == 405);
+    CHECK(parse("POST /console HTTP/1.1\r\nContent-Length: 6\r\nAuthorization: Bearer " TOKEN "\r\n\r\n", &req) == 0);
+    CHECK(req.route == OTA_ROUTE_CONSOLE && req.content_length == 6 && req.has_token);
+    CHECK(parse("GET /console HTTP/1.1\r\n\r\n", &req) == 405);
+    CHECK(parse("POST /console?x=1 HTTP/1.1\r\n\r\n", &req) == 404);
+
     // Wrong method, unknown path, junk
     CHECK(parse("GET /firmware HTTP/1.1\r\n\r\n", &req) == 405);
     CHECK(parse("PUT /info HTTP/1.1\r\n\r\n", &req) == 405);

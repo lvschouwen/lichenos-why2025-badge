@@ -6,6 +6,7 @@
 
 #include "bootloader_random.h"
 #include "c6link.h"
+#include "console_cmd.h" // CONSOLE_CMD_MAX
 #include "fw_console.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -47,6 +48,9 @@
 #define BODY_GRACE_S    30
 #define SHOT_SLICE      (16 * 1024) // bytes per write of a screenshot, straight from its PSRAM buffer
 #define SHOT_SEND_S     10
+#define LOG_SLICE       2048  // bytes copied out of the log store per call (interrupts are off meanwhile)
+#define LOG_REPLY_MAX   (24 * 1024) // one GET /log answer; the client asks again from X-Next-Seq
+#define CONSOLE_REPLY   4096
 #define SHOT_TOTAL_S    45 // whole send: a client that drips bytes must not hold the one server task and the buffer
 // Flash writes happen on this task, so its stack must be in internal RAM; peaks measured in BadgeVMS: 7 KB
 #define SERVER_STACK    16384
@@ -709,6 +713,119 @@ static void handle_screenshot(int fd) {
     }
 }
 
+// A reply with a body that is not a short text: head then body in slices, within one total deadline
+static void send_body(int fd, char const *head, size_t head_len, char const *body, size_t len) {
+    struct timeval tv = {.tv_sec = SHOT_SEND_S};
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    bool ok   = send_all(fd, head, head_len);
+    long stop = now_s() + SHOT_TOTAL_S;
+    for (size_t off = 0; ok && off < len; off += SHOT_SLICE) {
+        ok = now_s() <= stop && send_all(fd, body + off, len - off < SHOT_SLICE ? len - off : SHOT_SLICE);
+    }
+}
+
+// GET /log (#38): lines of the log store from ?since= on. At most LOG_REPLY_MAX bytes are collected first (copied out of
+// the store in small locked slices), so the headers can carry the exact length and the next sequence number. Lines
+// are private (node names, messages): never logged by this server, token required like the rest.
+static void handle_log(int fd, ota_request_t const *req) {
+    if (!hooks.log_read) {
+        respond(fd, 404, "no log here");
+        return;
+    }
+    char *reply = heap_caps_malloc(LOG_REPLY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!reply) {
+        respond(fd, 503, "out of memory, try again");
+        return;
+    }
+    uint32_t since  = req->since > UINT32_MAX ? UINT32_MAX : (uint32_t)req->since;
+    uint32_t next   = since;
+    uint32_t missed = 0;
+    size_t   total  = 0;
+    while (total + LOG_SLICE <= LOG_REPLY_MAX) {
+        uint32_t step_missed;
+        size_t   n = hooks.log_read(since, (char *)body_buf, LOG_SLICE, &next, &step_missed);
+        missed    += step_missed;
+        if (n == 0) {
+            break;
+        }
+        memcpy(reply + total, body_buf, n);
+        total += n;
+        since  = next;
+    }
+    char head[224];
+    int  n = snprintf(head, sizeof(head),
+                      "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %u\r\nX-Next-Seq: %u\r\n"
+                      "X-Log-Missed: %u\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+                      (unsigned)total, (unsigned)next, (unsigned)missed);
+    send_body(fd, head, (size_t)n, reply, total);
+    free(reply);
+}
+
+typedef struct {
+    int fd;
+} console_reply_ctx_t;
+
+static void console_done(void *ctx, char const *out, size_t len) {
+    char head[160];
+    int  n = snprintf(head, sizeof(head),
+                      "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %u\r\n"
+                      "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
+                      (unsigned)len);
+    send_body(((console_reply_ctx_t *)ctx)->fd, head, (size_t)n, out, len);
+}
+
+// The command line comes in the body (never logged, it can hold a Wi-Fi password): printable ASCII only
+static bool read_console_line(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len, char *line) {
+    size_t want = (size_t)req->content_length;
+    size_t have = pre_len < want ? pre_len : want;
+    memcpy(line, pre, have);
+    long deadline = now_s() + HEAD_DEADLINE_S;
+    set_read_timeout(fd, READ_TIMEOUT_S, 0);
+    while (have < want) {
+        ssize_t n = read(fd, line + have, want - have);
+        if (n <= 0 || now_s() > deadline) {
+            return false;
+        }
+        have += (size_t)n;
+    }
+    line[have] = '\0';
+    for (size_t i = 0; i < have; i++) {
+        if ((unsigned char)line[i] < 0x20 || (unsigned char)line[i] > 0x7e) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// POST /console (#38): one fw command, run through the same dispatcher as the UART console
+static void handle_console(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
+    if (!hooks.console_run) {
+        respond(fd, 404, "the Wi-Fi console is off");
+        return;
+    }
+    if (!file_allowed()) {
+        respond(fd, 409, "a firmware update is running");
+        return;
+    }
+    if (req->content_length < 1 || req->content_length >= CONSOLE_CMD_MAX) {
+        respond(fd, req->content_length < 0 ? 411 : 400, "body: one command line of 1 to %d characters", CONSOLE_CMD_MAX - 1);
+        return;
+    }
+    char line[CONSOLE_CMD_MAX];
+    if (!read_console_line(fd, req, pre, pre_len, line)) {
+        respond(fd, 400, "couldn't read a printable command line");
+        return;
+    }
+    char *out = heap_caps_malloc(CONSOLE_REPLY, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!out) {
+        respond(fd, 503, "out of memory, try again");
+        return;
+    }
+    console_reply_ctx_t ctx = {.fd = fd};
+    hooks.console_run(line, out, CONSOLE_REPLY, console_done, &ctx); // may restart the badge, after the reply
+    free(out);
+}
+
 // Handle one connection. Returns true when the badge should reboot.
 static bool handle_connection(int fd) {
     size_t len      = 0;
@@ -785,6 +902,8 @@ static bool handle_connection(int fd) {
             return false;
         case OTA_ROUTE_DELETE: handle_delete(fd, &req); return false;
         case OTA_ROUTE_SCREENSHOT: handle_screenshot(fd); return false;
+        case OTA_ROUTE_LOG: handle_log(fd, &req); return false;
+        case OTA_ROUTE_CONSOLE: handle_console(fd, &req, pre, pre_len); return false;
         case OTA_ROUTE_REBOOT:
             respond(fd, 200, "rebooting");
             hook_end(true, firmware_installed); // a plain reboot with no new firmware is not an update
@@ -872,7 +991,7 @@ static void server_task(void *arg) {
 
 static void cmd_token(char const *args) {
     (void)args;
-    console_reply("token %s", token[0] ? token : "(none: storage unavailable?)");
+    console_reply_private("token %s", token[0] ? token : "(none: storage unavailable?)");
 }
 
 void ota_server_start(void) {

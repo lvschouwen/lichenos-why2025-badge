@@ -1,0 +1,8 @@
+menu "Lichen Wi-Fi update server"
+    config OTA_WIFI_CONSOLE
+        bool "Run fw console commands over Wi-Fi (POST /console)"
+        default y
+        help
+            With the update token, tools/badge.sh fw <ip> <command> runs any console command, which is as much as
+            the USB console can do (#38). Turn off to answer 404.
+endmenu

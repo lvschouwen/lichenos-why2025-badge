@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // Wi-Fi update server (#61): tools/badge.sh ota-* on port 8080, guarded by the token in /storage/ota_token.txt
@@ -27,5 +28,12 @@ typedef struct {
     // status to answer with. The pixels stay valid until screenshot_free. NULL = the receiver has no screen (404).
     int (*screenshot)(uint8_t const **pixels, uint32_t *width, uint32_t *height, uint32_t *stride);
     void (*screenshot_free)(void);
+    // GET /log (#38): up to cap bytes of log lines from sequence number since on (zero bytes: nothing new); *next is the
+    // number to ask for next, *missed the lines that were gone already. NULL = no log here (404).
+    size_t (*log_read)(uint32_t since, char *out, size_t cap, uint32_t *next, uint32_t *missed);
+    // POST /console (#38): runs one command line on this task, output collected in buf; done(ctx, out, len) is called
+    // exactly once, before the command restarts the badge if it does. NULL = the Wi-Fi console is off (404).
+    void (*console_run)(char const *line, char *buf, size_t cap, void (*done)(void *ctx, char const *out, size_t len),
+                        void *ctx);
 } ota_hooks_t;
 void ota_server_set_hooks(ota_hooks_t const *hooks); // copied; before ota_server_start

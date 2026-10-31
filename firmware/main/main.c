@@ -14,6 +14,7 @@
 #include "esp_lvgl_port.h"
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
+#include "log_store.h"
 #include "log_tap.h"
 #include "lora.h"
 #include "mesh.h"
@@ -96,6 +97,8 @@ static void log_heap(char const *name, uint32_t caps) {
 
 void app_main(void) {
     log_tap_start();
+    log_store_start(); // after log_tap: its hook chains to the boot screen's
+    console_set_tap(log_store_add);
     boot_progress_start();
     ESP_LOGI(TAG, "badge_fw %s starting", esp_app_get_description()->version);
     log_heap("default", MALLOC_CAP_DEFAULT);
@@ -188,14 +191,23 @@ void app_main(void) {
         boot_progress_end(BOOT_LORA, STEP_FAILED, "no C6 link");
     }
     start_apps();
+    // Wi-Fi console and log (#38) work without a screen; the update screen hooks need one
+    ota_hooks_t hooks = {.log_read = log_store_read};
+#if CONFIG_OTA_WIFI_CONSOLE
+    hooks.console_run = console_exec;
+#endif
     if (screen) {
-        ota_hooks_t const hooks = {.begin = ota_begin, .progress = update_screen_progress, .end = ota_end,
-                                   .prepare = update_screen_prepare, .file_ok = update_screen_file_ok,
-                                   .screenshot = screenshot_take, .screenshot_free = screenshot_free};
-        ota_server_set_hooks(&hooks);
+        hooks.begin = ota_begin;
+        hooks.progress = update_screen_progress;
+        hooks.end = ota_end;
+        hooks.prepare = update_screen_prepare;
+        hooks.file_ok = update_screen_file_ok;
+        hooks.screenshot = screenshot_take;
+        hooks.screenshot_free = screenshot_free;
         update_mode_set_stop_hook(stop_for_update);
         update_screen_boot_check();
     }
+    ota_server_set_hooks(&hooks);
     ota_server_start();
 
     // A freshly installed image runs on trial until it has been up for a while; a reset before that boots the

@@ -5,6 +5,9 @@
 //   PUT  /file      X-Path: <VMS path> body = the file, written under FLASH0: or SD0:
 //   DELETE /file   X-Path: <VMS path> remove a file (same path rules as PUT)
 //   GET  /screenshot                   the screen as a 16-bit BMP (ota_bmp.h, #30); the token is required
+//   GET  /log[?since=<seq>]            the badge's log lines from sequence number <seq> on (log_ring.h, #38); the token
+//                                      is required. Reply headers: X-Next-Seq (ask for this next), X-Log-Missed
+//   POST /console                      body = one fw command line; the reply is its output (#38); the token is required
 //   POST /reboot
 //   POST /prepare                      lean firmware: stop everything else for a firmware update, reply "ready" (#76)
 //   PUT  /assets                       body = assets.bin (tools/pack_assets.py), in pieces only; used after a reboot (#22)
@@ -34,6 +37,8 @@ typedef enum {
     OTA_ROUTE_PREPARE,
     OTA_ROUTE_ASSETS,
     OTA_ROUTE_SCREENSHOT,
+    OTA_ROUTE_LOG,
+    OTA_ROUTE_CONSOLE,
 } ota_route_t;
 
 typedef struct {
@@ -50,6 +55,7 @@ typedef struct {
     bool        has_offset;
     long long   offset;
     long long   total_size; // -1 when absent
+    long long   since; // GET /log: ?since=; 0 when absent
     bool        has_file_sha256;
     char        file_sha256[OTA_SHA256_HEX + 1]; // lowercase
 } ota_request_t;
