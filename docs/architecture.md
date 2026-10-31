@@ -34,6 +34,7 @@ Links between the chips:
   carries the backlight commands.
 - **GPIO:** P4 GPIO12 → C6 EN, which also resets the TCA8418. GPIO13 → C6 boot strap; esp_hosted's `RESET_GPIO=13` is
   wrong, #15. GPIO14 ← C6 interrupt.
+- **GPIO0/GPIO1:** XTAL_32K, the Y1 crystal for the RTC slow clock (#63). Reserved: nothing else may claim them.
 
 ## Kernel and tick
 

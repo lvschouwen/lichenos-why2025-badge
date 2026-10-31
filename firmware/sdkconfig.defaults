@@ -93,3 +93,8 @@ CONFIG_LVGL_PORT_ENABLE_PPA=y
 # ones left in ESP-IDF 6.1 (no CRC32 choice). The dump holds every task's stack, so it must fit in 128 KB.
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=48
+
+# RTC slow clock from Y1 (32.768 kHz crystal on GPIO0/1, #63): the internal RC is ~9% off and drifts, which spoils the
+# time carried across a warm reset. If the crystal does not start, IDF falls back to the RC at boot.
+CONFIG_RTC_CLK_SRC_EXT_CRYS=y
+CONFIG_RTC_CLK_CAL_CYCLES=1024
