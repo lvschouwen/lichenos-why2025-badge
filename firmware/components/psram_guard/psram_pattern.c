@@ -11,34 +11,38 @@ static uint32_t word_at(uintptr_t addr) {
     return x;
 }
 
-uint8_t psram_pattern_byte(uintptr_t addr) {
-    return (uint8_t)(word_at(addr & ~(uintptr_t)3) >> (8 * (addr & 3)));
+static uint8_t byte_x(uintptr_t addr, uint32_t mask) {
+    return (uint8_t)((word_at(addr & ~(uintptr_t)3) ^ mask) >> (8 * (addr & 3)));
 }
 
-void psram_pattern_fill(void *buf, size_t len, uintptr_t tag) {
+uint8_t psram_pattern_byte(uintptr_t addr) {
+    return byte_x(addr, 0);
+}
+
+void psram_pattern_fill_x(void *buf, size_t len, uintptr_t tag, uint32_t mask) {
     uint8_t *p = buf;
     size_t   i = 0;
     for (; i < len && ((tag + i) & 3); i++) {
-        p[i] = psram_pattern_byte(tag + i);
+        p[i] = byte_x(tag + i, mask);
     }
     for (; i + 4 <= len; i += 4) {
-        uint32_t w = word_at(tag + i);
+        uint32_t w = (word_at(tag + i) ^ mask);
         memcpy(p + i, &w, 4); // little-endian, like psram_pattern_byte
     }
     for (; i < len; i++) {
-        p[i] = psram_pattern_byte(tag + i);
+        p[i] = byte_x(tag + i, mask);
     }
 }
 
-psram_check_t psram_pattern_check(void const *buf, size_t len, uintptr_t tag) {
+psram_check_t psram_pattern_check_x(void const *buf, size_t len, uintptr_t tag, uint32_t mask) {
     uint8_t const *p   = buf;
     psram_check_t  res = {0};
     size_t         i   = 0;
     for (; i < len && ((tag + i) & 3); i++) { // unaligned head and tail: bytes only
-        if (p[i] != psram_pattern_byte(tag + i)) {
+        if (p[i] != byte_x(tag + i, mask)) {
             if (res.bad_bytes++ == 0) {
                 res.first_bad = i;
-                res.first_xor = p[i] ^ psram_pattern_byte(tag + i);
+                res.first_xor = p[i] ^ byte_x(tag + i, mask);
             }
         }
     }
@@ -57,7 +61,7 @@ psram_check_t psram_pattern_check(void const *buf, size_t len, uintptr_t tag) {
         }
         uint32_t got;
         memcpy(&got, p + i, 4);
-        uint32_t diff = got ^ word_at(tag + i);
+        uint32_t diff = got ^ (word_at(tag + i) ^ mask);
         if (!diff) {
             continue;
         }
@@ -80,12 +84,20 @@ psram_check_t psram_pattern_check(void const *buf, size_t len, uintptr_t tag) {
         res.full_lines++;
     }
     for (; i < len; i++) {
-        if (p[i] != psram_pattern_byte(tag + i)) {
+        if (p[i] != byte_x(tag + i, mask)) {
             if (res.bad_bytes++ == 0) {
                 res.first_bad = i;
-                res.first_xor = p[i] ^ psram_pattern_byte(tag + i);
+                res.first_xor = p[i] ^ byte_x(tag + i, mask);
             }
         }
     }
     return res;
+}
+
+void psram_pattern_fill(void *buf, size_t len, uintptr_t tag) {
+    psram_pattern_fill_x(buf, len, tag, 0);
+}
+
+psram_check_t psram_pattern_check(void const *buf, size_t len, uintptr_t tag) {
+    return psram_pattern_check_x(buf, len, tag, 0);
 }

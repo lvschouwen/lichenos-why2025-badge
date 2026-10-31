@@ -295,11 +295,7 @@ int system_restart_history(restart_log_t *out) {
 }
 
 // NVS, not RTC_NOINIT: that does not survive a software restart on the P4 (#4). One small blob write, no flash mapping
-static void record_restart(char const *why, uint32_t caller) {
-    if (s_restart_recorded) {
-        return;
-    }
-    s_restart_recorded = true;
+static void push_restart_line(char const *why, uint32_t caller) {
     char     when[24];
     char    *when_p = NULL;
     time_t   now    = time(NULL);
@@ -324,6 +320,18 @@ static void record_restart(char const *why, uint32_t caller) {
         nvs_close(nvs);
     }
     free(log);
+}
+
+static void record_restart(char const *why, uint32_t caller) {
+    if (s_restart_recorded) {
+        return;
+    }
+    s_restart_recorded = true;
+    push_restart_line(why, caller);
+}
+
+void system_restart_note(char const *why) {
+    push_restart_line(why, 0); // not the restart guard: the real restart of this boot is still recorded
 }
 
 // Every esp_restart() in the image ends up here (linker --wrap), including ones from IDF components and apps that

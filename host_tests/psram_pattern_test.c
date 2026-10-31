@@ -71,6 +71,14 @@ int main(void) {
     CHECK(r.bad_bytes == 2 && r.first_bad == 0);
 
     CHECK(psram_pattern_check(buf, 0, tag).bad_bytes == 0);
+
+    // Inverted pass: every word XORed; it fails the plain check and passes its own, a single flip is still seen
+    psram_pattern_fill_x(buf, N, tag, 0xFFFFFFFFu);
+    CHECK(psram_pattern_check(buf, N, tag).bad_bytes == N);
+    CHECK(psram_pattern_check_x(buf, N, tag, 0xFFFFFFFFu).bad_bytes == 0);
+    buf[8] ^= 0x01;
+    r = psram_pattern_check_x(buf, N, tag, 0xFFFFFFFFu);
+    CHECK(r.bad_bytes == 1 && r.bit_flips == 1 && r.first_bad == 8);
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

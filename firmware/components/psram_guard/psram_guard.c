@@ -1,5 +1,6 @@
 #include "psram_guard.h"
 
+#include "psram_boot.h"
 #include "psram_pattern.h"
 
 #include "esp_cache.h"
@@ -143,6 +144,8 @@ static void verify_all(void) {
 
 static void guard_task(void *arg) {
     (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(3000)); // NVS is up by now: restart-log note and retry policy of a bad boot
+    psram_boot_policy();
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(PERIOD_MS));
         verify_all();
@@ -177,6 +180,7 @@ static void cmd_psram(char const *args) {
         psram_test(args + 4);
         return;
     }
+    psram_boot_print();
     xSemaphoreTake(lock, portMAX_DELAY);
     uint32_t hits = 0;
     for (int i = 0; i < MAX_BLOCKS; i++) {
@@ -219,6 +223,7 @@ void psram_guard_start(void) {
     if (!lock) {
         return;
     }
+    psram_boot_check(); // first, on an untouched heap, before the canaries and the rest of the boot load the bus
     add_spread_blocks();
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);

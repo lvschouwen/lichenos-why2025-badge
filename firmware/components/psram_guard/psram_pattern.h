@@ -26,3 +26,8 @@ typedef struct {
 
 // Compare buf with the pattern for tag
 psram_check_t psram_pattern_check(void const *buf, size_t len, uintptr_t tag);
+
+// The same with every word XORed with mask (0xFFFFFFFF = the inverted pattern): the boot check runs both, so every bit
+// is written and read back as 0 and as 1 (#40)
+void          psram_pattern_fill_x(void *buf, size_t len, uintptr_t tag, uint32_t mask);
+psram_check_t psram_pattern_check_x(void const *buf, size_t len, uintptr_t tag, uint32_t mask);

@@ -33,5 +33,8 @@ void console_exec(char const *line, char *buf, size_t cap, console_done_fn done,
 // can be traced (#41). A bare esp_restart() is caught too and recorded as "unknown caller" with its return address.
 void system_restart(char const *why) __attribute__((noreturn));
 
+// Adds a line to the same history without restarting: something worth knowing about this boot (#40: a bad PSRAM tuning)
+void system_restart_note(char const *why);
+
 // The recorded restarts, newest first; returns how many
 int system_restart_history(restart_log_t *out);
