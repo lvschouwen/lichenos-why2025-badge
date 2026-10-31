@@ -7,6 +7,7 @@
 #include "esp_lvgl_port.h"
 #include "lichen_app.h"
 #include "nav.h"
+#include "scroll_anchor.h"
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "fonts.h"
@@ -259,8 +260,13 @@ void shell_scroll_tame(lv_obj_t *obj) {
 }
 
 void shell_scroll_by(lv_obj_t *obj, int32_t dy) {
-    // _bounded clamps to the content: content that fits has nothing to scroll
-    lv_obj_scroll_by_bounded(obj, 0, dy, LV_ANIM_ON);
+    // From where a running animation is heading, not from where it is drawn (a burst of keys would lose steps, #34);
+    // clamped to the content: content that fits has nothing to scroll
+    lv_point_t end;
+    lv_obj_update_layout(obj);
+    lv_obj_get_scroll_end(obj, &end);
+    int32_t max_y = lv_obj_get_scroll_y(obj) + lv_obj_get_scroll_bottom(obj);
+    lv_obj_scroll_to_y(obj, scroll_step_target(end.y, dy, max_y), LV_ANIM_ON);
 }
 
 static lichen_app_t const *opening; // for build_app, which shell_open() calls without arguments

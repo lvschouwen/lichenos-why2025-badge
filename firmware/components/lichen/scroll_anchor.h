@@ -30,3 +30,8 @@ bool scroll_anchor_find(scroll_anchor_t const *a, scroll_item_t const *items, si
 
 // FNV-1a over len bytes, continuing from seed (0 to start): an identity for items that have no id of their own
 uint32_t scroll_key_hash(void const *data, size_t len, uint32_t seed);
+
+// Where a list scrolls to when a key asks to move it by dy (positive = content moves down, as lv_obj_scroll_by) from
+// `from_y`, the scroll position it is heading for (the end of a running animation, not where it is drawn: else a key
+// pressed mid-animation drops what is left of the previous one, #34). Clamped to 0..max_y.
+int32_t scroll_step_target(int32_t from_y, int32_t dy, int32_t max_y);

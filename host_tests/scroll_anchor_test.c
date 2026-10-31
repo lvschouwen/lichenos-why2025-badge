@@ -85,6 +85,13 @@ int main(void) {
     CHECK(scroll_key_hash("abc", 3, 7) != scroll_key_hash("abd", 3, 7));
     CHECK(scroll_key_hash("abc", 3, 7) != scroll_key_hash("abc", 3, 8));
 
+    // Steps chain from the target: two Down keys mid-animation are two steps
+    CHECK(scroll_step_target(0, -120, 1000) == 120);
+    CHECK(scroll_step_target(120, -120, 1000) == 240);
+    CHECK(scroll_step_target(900, -120, 1000) == 1000);
+    CHECK(scroll_step_target(50, 120, 1000) == 0);
+    CHECK(scroll_step_target(0, -120, 0) == 0);
+
     if (failures) {
         printf("%d failures\n", failures);
         return 1;

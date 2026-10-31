@@ -33,3 +33,11 @@ uint32_t scroll_key_hash(void const *data, size_t len, uint32_t seed) {
     }
     return h;
 }
+
+int32_t scroll_step_target(int32_t from_y, int32_t dy, int32_t max_y) {
+    int32_t y = from_y - dy;
+    if (y > max_y) {
+        y = max_y;
+    }
+    return y < 0 ? 0 : y;
+}
