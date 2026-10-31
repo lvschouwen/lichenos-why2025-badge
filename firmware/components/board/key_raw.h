@@ -8,6 +8,7 @@
 typedef struct {
     uint8_t code;    // 1-0x50, without the press bit
     bool    pressed;
+    bool    test_open; // stamped at capture: the Keyboard Test was the foreground screen (gates "fw keys log")
     bool    shift;   // a Shift key is down (for a Shift key's own event: after the event)
 } key_raw_event_t;
 

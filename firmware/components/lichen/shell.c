@@ -393,17 +393,18 @@ void shell_attach_keys(lv_indev_t *indev) {
     lvgl_port_unlock();
 }
 
-// "fw keys log on": every raw key event (before the keyboard maps it, so shape keys and Fn show too). Not while a secret
-// text area has the focus: the codes would spell the password.
+// "fw keys log on": raw key events (before the keyboard maps it, so shape keys and Fn show too), only those captured while
+// the Keyboard Test was open: anywhere else the codes could spell a password. Not persisted.
 static bool log_raw;
 
 static void on_raw_key(key_raw_event_t const *ev, void *arg) {
     (void)arg;
+    if (!ev->test_open) {
+        return;
+    }
     char text[64];
     key_matrix_format(text, sizeof(text), ev);
-    if (!password_focused()) {
-        ESP_LOGW(TAG, "raw key %s", text);
-    }
+    ESP_LOGW(TAG, "raw key %s", text);
 }
 
 static void set_raw_log(bool on) {

@@ -24,12 +24,19 @@ static lv_timer_t   *timer;
 static bool          hooked;
 static atomic_int    active;  // listeners registered: the hook queues nothing while 0
 static atomic_int    swallowing;
+static atomic_bool   test_open;
+
+void raw_keys_set_test_open(bool open) {
+    atomic_store(&test_open, open);
+}
 
 // Keyboard task
 static bool hook(key_raw_event_t const *ev, void *arg) {
     (void)arg;
     if (atomic_load(&active) > 0) {
-        xQueueSend(queue, ev, 0); // a full queue drops events rather than blocking the keyboard
+        key_raw_event_t stamped = *ev;
+        stamped.test_open       = atomic_load(&test_open);
+        xQueueSend(queue, &stamped, 0); // a full queue drops events rather than blocking the keyboard
     }
     return atomic_load(&swallowing) > 0;
 }

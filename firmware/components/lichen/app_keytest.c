@@ -75,6 +75,7 @@ static void tick(lv_timer_t *timer) {
 
 static void on_delete(lv_event_t *e) {
     keytest_t *t = lv_event_get_user_data(e);
+    raw_keys_set_test_open(false);
     if (t->listening) {
         raw_keys_unlisten(on_raw, t);
     }
@@ -140,6 +141,7 @@ static void open_keytest(lv_obj_t *screen) {
     lv_obj_set_style_bg_color(t->hold_bar, lv_color_hex(THEME_TRACK), 0);
     lv_obj_set_style_bg_color(t->hold_bar, lv_color_hex(THEME_AMBER), LV_PART_INDICATOR);
 
+    raw_keys_set_test_open(true);
     t->timer     = lv_timer_create(tick, 50, t);
     t->listening = raw_keys_listen(on_raw, t, true);
     if (!t->listening) {
