@@ -32,7 +32,6 @@ static char const TAG[] = "meshcore";
 #define SCREEN_WAIT_MS 20 // for the mesh lock; LVGL (and with it the keys) must not wait on MeshCore's file saves
 #define TAB_BAR_H      64
 #define TAB_MESSAGES   0
-#define KEY_W          150
 
 // ---- the icon (home.html <g id="mc">: two arcs over a dot, in a 60x60 view) ---------------------------------------
 
@@ -521,7 +520,21 @@ static void open(lv_obj_t *screen) {
 static lv_obj_t *about_radio; // the about rows' values that a radio change makes stale, NULL once the page is gone
 static lv_obj_t *about_power;
 
+// Width of the key column: the widest key in the current font plus a gap, so a taller font cannot make a key touch
+// its value (#28)
+static int32_t key_col_w(lv_obj_t *obj, char const *const *keys, size_t n) {
+    lv_font_t const *font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
+    int32_t          w    = 0;
+    for (size_t i = 0; i < n; i++) {
+        lv_point_t size;
+        lv_text_get_size(&size, keys[i], font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        w = size.x > w ? size.x : w;
+    }
+    return w + 24;
+}
+
 static lv_obj_t *add_row(lv_obj_t *page, char const *key, char const *value) {
+    static char const *const KEYS[] = {"node id", "radio", "TX power", "version"};
     lv_obj_t *row = lv_obj_create(page);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -529,7 +542,7 @@ static lv_obj_t *add_row(lv_obj_t *page, char const *key, char const *value) {
     lv_obj_set_scrollable(row, false);
     lv_obj_set_clickable(row, false);
     lv_obj_t *k = lv_label_create(row);
-    lv_obj_set_width(k, KEY_W);
+    lv_obj_set_width(k, key_col_w(page, KEYS, sizeof(KEYS) / sizeof(KEYS[0])));
     lv_obj_set_style_text_color(k, lv_color_hex(THEME_DIM), 0);
     lv_label_set_text(k, key);
     lv_obj_t *v = lv_label_create(row);

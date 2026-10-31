@@ -128,17 +128,26 @@ static lv_obj_t *add_row(lv_obj_t *menu, char const *label_text, char const *val
     lv_obj_set_style_outline_width(r, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(r, 0, LV_STATE_FOCUS_KEY);
     lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(r, 16, 0);
     lv_obj_set_scrollable(r, false);
     lv_obj_set_scroll_on_focus(r, true);
 
+    // The label keeps the width it needs (what the user picks by stays readable); the value takes what is left, on
+    // one line, right-aligned, and ends in "..." when it does not fit. Never overlapping, whatever the font (#28)
+    int32_t line_h = lv_font_get_line_height(lv_obj_get_style_text_font(r, LV_PART_MAIN));
     lv_obj_t *label = lv_label_create(r);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_max_width(label, LV_PCT(100), 0);
+    lv_obj_set_height(label, line_h);
     lv_label_set_text(label, label_text);
     row->value = lv_label_create(r);
     lv_obj_set_style_text_color(row->value, lv_color_hex(THEME_DIM), 0);
     lv_label_set_long_mode(row->value, LV_LABEL_LONG_DOT);
-    lv_obj_set_flex_grow(row->value, 0);
+    lv_obj_set_style_text_align(row->value, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_width(row->value, 0);
+    lv_obj_set_flex_grow(row->value, 1);
+    lv_obj_set_height(row->value, line_h);
     lv_label_set_text(row->value, value_text ? value_text : "");
     lv_obj_add_event_cb(r, on_key, LV_EVENT_KEY, row);
     lv_obj_add_event_cb(r, on_delete, LV_EVENT_DELETE, row);

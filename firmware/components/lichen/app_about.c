@@ -18,7 +18,6 @@
 #include <time.h>
 
 #define CLOCK_VALID_FROM 1767225600 // 2026-01-01: earlier means SNTP hasn't answered yet
-#define KEY_W            150
 #define SCROLL_STEP      96
 
 enum { ROW_MEMORY, ROW_C6, ROW_WIFI, ROW_LORA, ROW_STORAGE, ROW_UP, ROW_CLOCK, ROWS };
@@ -114,7 +113,21 @@ static lv_obj_t *add_text(lv_obj_t *parent, char const *text, uint32_t color) {
     return label;
 }
 
+// Width of the key column: the widest key in the current font plus a gap, so a taller font cannot make a key touch
+// its value (#28)
+static int32_t key_col_w(lv_obj_t *obj, char const *const *keys, size_t n) {
+    lv_font_t const *font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
+    int32_t          w    = 0;
+    for (size_t i = 0; i < n; i++) {
+        lv_point_t size;
+        lv_text_get_size(&size, keys[i], font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        w = size.x > w ? size.x : w;
+    }
+    return w + 24;
+}
+
 static lv_obj_t *add_row(lv_obj_t *parent, char const *key, char const *fixed) {
+    static char const *const KEYS[] = {"version", "memory", "C6 link", "Wi-Fi", "LoRa", "storage", "up", "clock"};
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -122,7 +135,7 @@ static lv_obj_t *add_row(lv_obj_t *parent, char const *key, char const *fixed) {
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_scrollable(row, false);
     lv_obj_t *k = lv_label_create(row);
-    lv_obj_set_width(k, KEY_W);
+    lv_obj_set_width(k, key_col_w(parent, KEYS, sizeof(KEYS) / sizeof(KEYS[0])));
     lv_obj_set_style_text_color(k, lv_color_hex(THEME_DIM), 0);
     lv_label_set_text(k, key);
     lv_obj_t *v = lv_label_create(row);

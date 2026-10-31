@@ -131,8 +131,8 @@ static int current_preset(mesh_settings_t const *s) {
 }
 
 static void radio_values(char *out, size_t cap, float freq, float bw, uint8_t sf, uint8_t cr, bool marked) {
-    snprintf(out, cap, "%s%.3f  " LV_SYMBOL_BULLET "  %g  " LV_SYMBOL_BULLET "  SF%u  " LV_SYMBOL_BULLET "  CR%u",
-             marked ? LV_SYMBOL_OK "  " : "", freq, bw, sf, cr);
+    snprintf(out, cap, "%s%.3f " LV_SYMBOL_BULLET " %g " LV_SYMBOL_BULLET " SF%u/CR%u",
+             marked ? LV_SYMBOL_OK " " : "", freq, bw, sf, cr);
 }
 
 static void set_note(lv_obj_t *note, char const *text, bool problem) {
@@ -244,11 +244,8 @@ static void channels_line(job_t *job, lv_obj_t *row) {
         menu_set_value(row, "busy");
         return;
     }
-    char line[128] = "";
-    for (size_t i = 0; i < job->n; i++) {
-        size_t used = strlen(line);
-        snprintf(line + used, sizeof(line) - used, "%s%s", i ? ", " : "", job->names[i]);
-    }
+    char line[24];
+    snprintf(line, sizeof(line), "%u channel%s", (unsigned)job->n, job->n == 1 ? "" : "s");
     menu_set_value(row, job->n ? line : "none");
 }
 

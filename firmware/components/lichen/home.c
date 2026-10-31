@@ -25,7 +25,8 @@ static char const TAG[] = "home";
 #define TILE_GAP      16
 #define TILE_RADIUS   20
 #define GRID_GAP      24
-#define GRID_CELL_H   176
+#define GRID_CELL_PAD 32 // above the icon and below the name
+#define GRID_ICON_GAP 14
 #define LINE_CAP      64
 #define REFRESH_MS    1000
 
@@ -169,10 +170,12 @@ static void add_grid_cell(home_t *h, lv_obj_t *home, int i) {
     lichen_app_t const *app  = lichen_app_at(i);
     lv_obj_t           *cell = base_cell(home);
     int                 w    = (LV_HOR_RES - 2 * THEME_PAD - (HOME_GRID_COLS - 1) * GRID_GAP) / HOME_GRID_COLS;
-    lv_obj_set_size(cell, w, GRID_CELL_H);
+    // Height from the font, so a taller font never pushes the name out of the cell (#28)
+    int32_t line_h = lv_font_get_line_height(lv_obj_get_style_text_font(cell, LV_PART_MAIN));
+    lv_obj_set_size(cell, w, GRID_ICON_PX + GRID_ICON_GAP + line_h + 2 * GRID_CELL_PAD);
     lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(cell, 14, 0);
+    lv_obj_set_style_pad_row(cell, GRID_ICON_GAP, 0);
     add_icon(cell, app, GRID_ICON_PX);
     lv_obj_t *name = add_label(cell, app->name, THEME_TEXT);
     lv_obj_set_width(name, w - 16);
