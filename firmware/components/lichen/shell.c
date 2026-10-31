@@ -159,11 +159,19 @@ lv_group_t *shell_top_group(void) {
 
 static bool log_keys; // "fw keys on": a diagnostic, not saved
 
+// Typed passwords must not reach the log (readable over Wi-Fi with the token): keys are not logged while a password
+// text area has the focus
+static bool password_focused(void) {
+    lv_group_t *g  = lv_indev_get_group(keys);
+    lv_obj_t   *ta = g ? lv_group_get_focused(g) : NULL;
+    return ta && lv_obj_check_type(ta, &lv_textarea_class) && lv_textarea_get_password_mode(ta);
+}
+
 static void on_key(lv_event_t *e) {
     (void)e;
     uint32_t key     = lv_indev_get_key(keys);
     bool     pressed = lv_indev_get_state(keys) == LV_INDEV_STATE_PRESSED;
-    if (log_keys) {
+    if (log_keys && !password_focused()) {
         ESP_LOGW(TAG, "key %lu (0x%02lx) %s", (unsigned long)key, (unsigned long)key, pressed ? "pressed" : "released");
     }
     if (key == LV_KEY_ESC && pressed) {

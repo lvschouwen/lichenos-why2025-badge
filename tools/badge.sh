@@ -445,12 +445,11 @@ cmd_ota_assets() {
 }
 
 # GET /screenshot (#30): a 16-bit BMP of the screen, converted to PNG with python3-pil
-work=
 cmd_screenshot() {
-    local ip=$1 out=${2:-}
+    local ip=$1 out=${2:-} work
     umask 077 # the picture can show private messages: nobody else reads it
     work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-shot.XXXXXX")
-    trap 'rm -f "$work/shot.bmp"; rmdir "$work" 2>/dev/null' EXIT # the dir stays when it holds the default PNG
+    trap "rm -f '$work/shot.bmp'; rmdir '$work' 2>/dev/null" EXIT # the dir stays when it holds the default PNG
     [ -n "$out" ] || out=$work/screenshot.png
     if ! ota_curl --max-time 30 -o "$work/shot.bmp" "http://$ip:$OTA_PORT/screenshot"; then
         head -c 300 "$work/shot.bmp" 2>/dev/null | tr -d '\000' >&2 # --fail-with-body: the badge's reason is in the file
@@ -465,43 +464,58 @@ PY
     echo "$out"
 }
 
+# Console text from the radio (node names, messages) must not drive this terminal: drop C0 controls except \n and \t
+printable() {
+    LC_ALL=C tr -d '\000-\010\013-\037\177'
+}
+
 # GET /log (#38): lines after a sequence number; the badge answers the number to ask for next in X-Next-Seq. A smaller
 # number than asked (the badge restarted) just starts over.
 cmd_log() {
-    local ip=$1 follow=${2:-} since=0 hdr body next missed
+    local ip=$1 follow=${2:-} since=0 hdr body next missed code work
     umask 077
     work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-log.XXXXXX")
-    trap 'rm -f "$work/hdr" "$work/body"; rmdir "$work" 2>/dev/null' EXIT
+    trap "rm -f '$work/hdr' '$work/body'; rmdir '$work' 2>/dev/null" EXIT
     hdr=$work/hdr body=$work/body
     while :; do
-        if ! ota_curl --max-time 60 -D "$hdr" -o "$body" "http://$ip:$OTA_PORT/log?since=$since"; then
-            head -c 300 "$body" 2>/dev/null | tr -d '\000' >&2
+        if ! code=$(ota_curl --max-time 60 -D "$hdr" -o "$body" -w '%{http_code}' "http://$ip:$OTA_PORT/log?since=$since"); then
+            head -c 300 "$body" 2>/dev/null | printable >&2
+            # A wrong or missing token will not get better: stop instead of polling for ever
+            if [ "$code" = 401 ] || [ "$code" = 403 ]; then
+                exit 1
+            fi
             [ -n "$follow" ] || exit 1
             sleep 2 # Wi-Fi hiccup or a reboot: keep trying
             continue
         fi
-        cat "$body"
+        printable < "$body"
         next=$(tr -d '\r' < "$hdr" | sed -n 's/^[Xx]-[Nn]ext-[Ss]eq: *\([0-9][0-9]*\)$/\1/p' | tail -n 1)
         missed=$(tr -d '\r' < "$hdr" | sed -n 's/^[Xx]-[Ll]og-[Mm]issed: *\([0-9][0-9]*\)$/\1/p' | tail -n 1)
-        [ "${missed:-0}" = 0 ] || echo "-- $missed older line(s) were already dropped from the badge's log --" >&2
-        [ -z "$next" ] || since=$next
+        if [ "${missed:-0}" != 0 ]; then
+            echo "-- $missed older line(s) were already dropped from the badge's log --" >&2
+        fi
+        if [ -n "$next" ]; then
+            since=$next
+        fi
         [ -n "$follow" ] || break
         # A full answer (24 KB cap) means more is waiting: ask again at once
-        [ "$(wc -c < "$body")" -lt 20000 ] && sleep 1
+        if [ "$(wc -c < "$body")" -lt 20000 ]; then
+            sleep 1
+        fi
     done
 }
 
 # POST /console (#38): one fw command; the badge runs it like the UART console and answers with its output
 cmd_fw() {
-    local ip=$1
+    local ip=$1 work
     shift
     local line="$*"
     # In a private file, not on the command line: the line can hold a Wi-Fi password (the token goes in on stdin)
     umask 077
     work=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-fw.XXXXXX")
-    trap 'rm -f "$work"' EXIT
+    trap "rm -f '$work'" EXIT
     printf '%s' "$line" > "$work"
-    ota_curl --max-time 60 -X POST -H 'Content-Type: text/plain' --data-binary "@$work" "http://$ip:$OTA_PORT/console"
+    ota_curl --max-time 60 -X POST -H 'Content-Type: text/plain' --data-binary "@$work" "http://$ip:$OTA_PORT/console" | printable
 }
 
 cmd_ota_rm() { ota_curl -X DELETE -H "X-Path: $2" "http://$1:$OTA_PORT/file"; }

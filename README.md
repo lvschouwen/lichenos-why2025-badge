@@ -156,7 +156,7 @@ characters) like the USB console would and returns its output; commands that res
 other`, a C6 reflash) answer first. Both need the update token like every other Wi-Fi command, and the log and console
 output can show node names and messages, so treat them like screenshots. Not in the log: lines printed by ROM code
 (panics, the display underrun note, the bootloader), plain `printf` output (`fw crash dump`, the C6 flasher's progress)
-and anything before `app_main`; `fw token` never enters it. The console answers 409 during a firmware update. To
+and anything before `app_main`; `fw token` never enters it. Control characters and invalid UTF-8 in the log are shown as `?`, and `badge.sh` strips terminal control codes from what it prints. `fw keys on` writes every key the screen receives into the log (typed text included; it skips password fields, but treat the log as sensitive while it is on). When the ring is busy a line can be dropped; the next stored line then reads `(N log lines lost)`. The console answers 409 during a firmware update. To
 switch the Wi-Fi console off, disable `OTA_WIFI_CONSOLE` (menuconfig, "Lichen Wi-Fi update server"; the log stays).
 
 ## Console and crashes

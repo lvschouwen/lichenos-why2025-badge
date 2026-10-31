@@ -8,6 +8,7 @@
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs.h"
 
@@ -70,17 +71,24 @@ static void capture_add(char const *text, size_t n) {
     capture.len                 += n + 1;
 }
 
+// One command runs at a time, from the UART or from Wi-Fi: commands share state (the capture, the commands' statics)
+static SemaphoreHandle_t run_mutex;
+#define RUN_WAIT_MS 2000
+// reply_v's formatting buffer is static (384 B off the 4 KB console and c6link task stacks), guarded by its own mutex
+static SemaphoreHandle_t reply_mutex;
+static char              reply_text[REPLY_MAX];
+
 static void reply_v(bool private, char const *fmt, va_list ap) {
     va_list copy;
     va_copy(copy, ap);
     printf("fw: ");
     vprintf(fmt, ap);
     printf("\n");
-    if (!private) {
-        char text[REPLY_MAX];
-        int  n = vsnprintf(text, sizeof(text), fmt, copy);
+    if (!private && reply_mutex && xSemaphoreTake(reply_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) == pdTRUE) {
+        char *text = reply_text;
+        int   n    = vsnprintf(text, REPLY_MAX, fmt, copy);
         if (n > 0) {
-            size_t len = (size_t)n < sizeof(text) ? (size_t)n : sizeof(text) - 1;
+            size_t len = (size_t)n < REPLY_MAX ? (size_t)n : REPLY_MAX - 1;
             if (tap) {
                 text[len] = '\n';
                 tap(text, len + 1);
@@ -89,6 +97,7 @@ static void reply_v(bool private, char const *fmt, va_list ap) {
                 capture_add(text, len);
             }
         }
+        xSemaphoreGive(reply_mutex);
     }
     va_end(copy);
 }
@@ -303,12 +312,20 @@ void console_exec(char const *line, char *buf, size_t cap, console_done_fn done,
         line += 3;
     }
     snprintf(cmd, sizeof(cmd), "%s", line); // run() splits it in place
+    if (run_mutex && xSemaphoreTake(run_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) != pdTRUE) {
+        static char const busy[] = "busy, try again\n";
+        done(ctx, busy, sizeof(busy) - 1);
+        return;
+    }
     capture = (typeof(capture)){.task = xTaskGetCurrentTaskHandle(), .buf = buf, .cap = cap, .done = done, .ctx = ctx};
     if (cmd[0]) {
         run(cmd);
     }
     capture_finish();
     capture.task = NULL;
+    if (run_mutex) {
+        xSemaphoreGive(run_mutex);
+    }
 }
 
 static void console_task(void *arg) {
@@ -324,7 +341,16 @@ static void console_task(void *arg) {
             continue;
         }
         switch (console_cmd_feed(&state, (char)c, &pass, &pass_len)) {
-            case CONSOLE_CMD_READY: run(state.buf); break;
+            case CONSOLE_CMD_READY:
+                if (!run_mutex || xSemaphoreTake(run_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) == pdTRUE) {
+                    run(state.buf);
+                    if (run_mutex) {
+                        xSemaphoreGive(run_mutex);
+                    }
+                } else {
+                    console_reply("busy, try again");
+                }
+                break;
             case CONSOLE_CMD_TOO_LONG: console_reply("command too long"); break;
             default: break;
         }
@@ -332,6 +358,8 @@ static void console_task(void *arg) {
 }
 
 void console_start(void) {
+    run_mutex   = xSemaphoreCreateMutex();
+    reply_mutex = xSemaphoreCreateMutex();
     console_register("help", "help", cmd_help);
     console_register("mem", "mem (heaps, task stacks, per-task core and CPU %)", cmd_mem);
     console_register("assets", "assets (state of the assets partition and its files)", cmd_assets);
