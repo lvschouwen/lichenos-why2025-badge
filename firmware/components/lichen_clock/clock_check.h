@@ -73,9 +73,23 @@ static inline bool clock_accepted(clock_verdict_t v) { return v == CLOCK_OK || v
 char const *clock_verdict_text(clock_verdict_t v);
 // "SNTP", "set by hand", "from mesh contacts, unverified", "carried over the restart", "not set"
 char const *clock_src_text(clock_src_t s);
-// One line for "fw clock" and About: clock_src_text(), and for SNTP how long ago it last set the clock (age_s):
-// "SNTP, just now", "SNTP, 3 min ago", "SNTP, 2 h ago", "SNTP, 4 d ago"
-void clock_src_line(clock_src_t s, int64_t age_s, char *out, size_t cap);
+// One line for "fw clock", About and Settings: clock_src_text(), for SNTP and by hand how long ago it set the clock
+// (age_s): "SNTP, just now", "SNTP, 3 min ago", "set by hand, 2 h ago", "SNTP, 4 d ago"; for a carried clock the
+// source before the reset (was, see clock_src_was()): "carried over the restart, was SNTP" (#64)
+void clock_src_line(clock_src_t s, clock_src_t was, int64_t age_s, char *out, size_t cap);
+// A word for the Settings row: "SNTP", "by hand", "mesh", "carried", "not set" (#64)
+char const *clock_src_short(clock_src_t s);
+
+// The source remembered from before a warm reset (#64): only for a carried clock (cur RTC), and only a real source
+// (APP, MANUAL, SNTP); anything else, a garbled record included, gives NONE. A power-off clears the clock (no VBAT), so
+// cur is NONE then and the record means nothing.
+clock_src_t clock_src_was(clock_src_t cur, clock_src_t stored);
+// Mesh time, unverified: the status bar's amber ~ (#64). Set by an app this boot, or carried over a reset from a clock
+// an app had set. A carried clock without a record is shown plain: amber is only for mesh time.
+bool clock_src_unverified(clock_src_t cur, clock_src_t was);
+// "fw clock set --force" (#64, bench only): the rank a manual set is judged against, SNTP dropped to MANUAL so the
+// manual path can be tried on a badge with Wi-Fi
+clock_src_t clock_force_rank(clock_src_t cur);
 
 #ifdef __cplusplus
 }

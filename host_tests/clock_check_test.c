@@ -140,22 +140,68 @@ int main(void) {
     CHECK(strcmp(clock_src_text(CLOCK_SRC_APP), "from mesh contacts, unverified") == 0);
     {
         char l[48];
-        clock_src_line(CLOCK_SRC_SNTP, 5, l, sizeof(l));
+        clock_src_line(CLOCK_SRC_SNTP, CLOCK_SRC_NONE, 5, l, sizeof(l));
         CHECK(strcmp(l, "SNTP, just now") == 0);
-        clock_src_line(CLOCK_SRC_SNTP, 3 * 60 + 59, l, sizeof(l));
+        clock_src_line(CLOCK_SRC_SNTP, CLOCK_SRC_NONE, 3 * 60 + 59, l, sizeof(l));
         CHECK(strcmp(l, "SNTP, 3 min ago") == 0);
-        clock_src_line(CLOCK_SRC_SNTP, 2 * 3600 + 5, l, sizeof(l));
+        clock_src_line(CLOCK_SRC_SNTP, CLOCK_SRC_NONE, 2 * 3600 + 5, l, sizeof(l));
         CHECK(strcmp(l, "SNTP, 2 h ago") == 0);
-        clock_src_line(CLOCK_SRC_SNTP, 4 * 86400 + 5, l, sizeof(l));
+        clock_src_line(CLOCK_SRC_SNTP, CLOCK_SRC_NONE, 4 * 86400 + 5, l, sizeof(l));
         CHECK(strcmp(l, "SNTP, 4 d ago") == 0);
-        clock_src_line(CLOCK_SRC_MANUAL, 999, l, sizeof(l));
-        CHECK(strcmp(l, "set by hand") == 0);
-        clock_src_line(CLOCK_SRC_RTC, 0, l, sizeof(l));
+        clock_src_line(CLOCK_SRC_MANUAL, CLOCK_SRC_NONE, 999, l, sizeof(l)); // #64: by hand has an age too
+        CHECK(strcmp(l, "set by hand, 16 min ago") == 0);
+        clock_src_line(CLOCK_SRC_RTC, CLOCK_SRC_NONE, 0, l, sizeof(l));
         CHECK(strcmp(l, "carried over the restart") == 0);
-        clock_src_line(CLOCK_SRC_NONE, 0, l, sizeof(l));
+        clock_src_line(CLOCK_SRC_NONE, CLOCK_SRC_SNTP, 0, l, sizeof(l)); // a record without a clock is ignored
         CHECK(strcmp(l, "not set") == 0);
-        clock_src_line(CLOCK_SRC_APP, 0, l, 8); // cut, still terminated
+        clock_src_line(CLOCK_SRC_APP, CLOCK_SRC_NONE, 0, l, 8); // cut, still terminated
         CHECK(strcmp(l, "from me") == 0);
+        // the source before a warm reset (#64)
+        clock_src_line(CLOCK_SRC_RTC, CLOCK_SRC_SNTP, 0, l, sizeof(l));
+        CHECK(strcmp(l, "carried over the restart, was SNTP") == 0);
+        clock_src_line(CLOCK_SRC_RTC, CLOCK_SRC_MANUAL, 0, l, sizeof(l));
+        CHECK(strcmp(l, "carried over the restart, was set by hand") == 0);
+        clock_src_line(CLOCK_SRC_RTC, CLOCK_SRC_APP, 0, l, sizeof(l));
+        CHECK(strcmp(l, "carried over the restart, was from mesh") == 0);
+        clock_src_line(CLOCK_SRC_RTC, CLOCK_SRC_RTC, 0, l, sizeof(l)); // not a real "was"
+        CHECK(strcmp(l, "carried over the restart") == 0);
+        clock_src_line(CLOCK_SRC_SNTP, CLOCK_SRC_APP, 61, l, sizeof(l)); // only a carried clock says "was"
+        CHECK(strcmp(l, "SNTP, 1 min ago") == 0);
+        CHECK(strlen("carried over the restart, was set by hand") < 48); // About's and fw clock's buffers
+    }
+    // the Settings row's short name, and which clocks the status bar marks with an amber ~ (#64)
+    CHECK(strcmp(clock_src_short(CLOCK_SRC_SNTP), "SNTP") == 0);
+    CHECK(strcmp(clock_src_short(CLOCK_SRC_MANUAL), "by hand") == 0);
+    CHECK(strcmp(clock_src_short(CLOCK_SRC_APP), "mesh") == 0);
+    CHECK(strcmp(clock_src_short(CLOCK_SRC_RTC), "carried") == 0);
+    CHECK(strcmp(clock_src_short(CLOCK_SRC_NONE), "not set") == 0);
+    CHECK(clock_src_unverified(CLOCK_SRC_APP, CLOCK_SRC_NONE));
+    CHECK(clock_src_unverified(CLOCK_SRC_RTC, CLOCK_SRC_APP)); // mesh time carried over: still mesh time
+    CHECK(!clock_src_unverified(CLOCK_SRC_RTC, CLOCK_SRC_SNTP));
+    CHECK(!clock_src_unverified(CLOCK_SRC_RTC, CLOCK_SRC_MANUAL));
+    CHECK(!clock_src_unverified(CLOCK_SRC_RTC, CLOCK_SRC_NONE)); // no record: plain (amber only for mesh time)
+    CHECK(!clock_src_unverified(CLOCK_SRC_SNTP, CLOCK_SRC_APP));
+    CHECK(!clock_src_unverified(CLOCK_SRC_MANUAL, CLOCK_SRC_APP));
+    CHECK(!clock_src_unverified(CLOCK_SRC_NONE, CLOCK_SRC_APP));
+    CHECK(clock_src_was(CLOCK_SRC_RTC, CLOCK_SRC_SNTP) == CLOCK_SRC_SNTP);
+    CHECK(clock_src_was(CLOCK_SRC_RTC, CLOCK_SRC_RTC) == CLOCK_SRC_NONE);
+    CHECK(clock_src_was(CLOCK_SRC_RTC, (clock_src_t)77) == CLOCK_SRC_NONE); // garbage from NVS
+    CHECK(clock_src_was(CLOCK_SRC_NONE, CLOCK_SRC_SNTP) == CLOCK_SRC_NONE); // power-off: the clock is gone
+    CHECK(clock_src_was(CLOCK_SRC_APP, CLOCK_SRC_SNTP) == CLOCK_SRC_NONE);
+    {
+        // The manual path (#64): backwards is fine, after SNTP outranked; "fw clock set --force" drops this boot's
+        // SNTP rank to MANUAL, and the next SNTP answer is then taken in full, big step or not
+        clock_guard_t g = {0};
+        CHECK(clock_decide(CLOCK_SRC_MANUAL, CLOCK_SRC_MANUAL, &g, B + 100, B + 86400, B, 0) == CLOCK_OK);
+        CHECK(clock_decide(CLOCK_SRC_MANUAL, CLOCK_SRC_APP, &g, B + 99999, B + 100, B, 0) == CLOCK_OUTRANKED);
+        CHECK(clock_decide(CLOCK_SRC_SNTP, CLOCK_SRC_MANUAL, &g, B + 100, B + 86400, B, 0) == CLOCK_OUTRANKED);
+        CHECK(clock_force_rank(CLOCK_SRC_SNTP) == CLOCK_SRC_MANUAL);
+        CHECK(clock_force_rank(CLOCK_SRC_APP) == CLOCK_SRC_APP);
+        CHECK(clock_force_rank(CLOCK_SRC_NONE) == CLOCK_SRC_NONE);
+        CHECK(clock_decide(clock_force_rank(CLOCK_SRC_SNTP), CLOCK_SRC_MANUAL, &g, B + 100, B + 86400, B, 0) ==
+              CLOCK_OK);
+        CHECK(clock_decide(CLOCK_SRC_MANUAL, CLOCK_SRC_SNTP, &g, B + 86400, B + 100, B, 0) == CLOCK_OK);
+        CHECK(g.count == 0);
     }
 
     for (int v = CLOCK_OK; v <= CLOCK_NO_SOURCE; v++) {

@@ -31,6 +31,9 @@ void settings_app_register(void);
 void about_app_register(void);
 void keytest_app_register(void);
 
+// time_set_screen.c: Settings > Time > Set date & time (#64), a builder for shell_open()
+lv_obj_t *time_set_build(void);
+
 // wifi_screen.c: Settings > Wi-Fi
 void wifi_screen_open(void);
 // The same screen as the first-run Wi-Fi step: a Skip row on top; done() runs (LVGL task) after a join or a skip

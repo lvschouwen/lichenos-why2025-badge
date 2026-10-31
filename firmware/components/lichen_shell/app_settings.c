@@ -1,9 +1,10 @@
-// Settings (#66, settings.html top row): Wi-Fi, Display (brightness, home layout), Time zone, About Lichen, then one
-// entry per app that has a settings page. Every screen is a menu.h list; Esc is the shell's.
+// Settings (#66, settings.html top row): Wi-Fi, Display (brightness, home layout), Time (#64: set date & time, time
+// zone), About Lichen, then one entry per app that has a settings page. Every screen is a menu.h list; Esc is the shell's.
 #include "app_icons.h"
 #include "backlight.h"
 #include "backlight_level.h"
 #include "home_layout.h"
+#include "lichen_clock.h"
 #include "lichen_app.h"
 #include "menu.h"
 #include "settings_store.h"
@@ -21,6 +22,8 @@
 #define SCREEN_DISPLAY 101
 #define SCREEN_TZ      102
 #define SCREEN_ABOUT   103
+#define SCREEN_TIME    104
+#define SCREEN_TIME_SET 105
 #define SCREEN_APP     110 // + app index
 #define SAVE_AFTER_MS  1000 // brightness is saved this long after the last step, to spare the flash
 
@@ -149,6 +152,8 @@ static void open_display(void *arg) {
 }
 
 // Time zone
+static void time_tz_changed(void); // Time's page under this one shows the zone
+
 static lv_obj_t *tz_row[16];
 static int       tz_selected = -1;
 
@@ -160,6 +165,7 @@ static void pick_tz(void *arg) {
     }
     menu_set_value(tz_row[i], LV_SYMBOL_OK);
     tz_selected = i;
+    time_tz_changed();
 }
 
 static void on_tz_delete(lv_event_t *e) {
@@ -187,6 +193,126 @@ static lv_obj_t *build_tz(void) {
 static void open_tz(void *arg) {
     (void)arg;
     shell_open(build_tz, SCREEN_TZ);
+}
+
+// ---- Time (#64): Set date & time, Time zone, where the time came from ------------------------------------------
+
+// Settings' row: "14:05 · SNTP", "~14:05 · mesh", "not set"
+static void time_value(char *out, size_t cap) {
+    time_t    now = time(NULL);
+    struct tm l;
+    char      hm[8];
+    if (!clock_is_set() || !localtime_r(&now, &l) || !strftime(hm, sizeof(hm), "%H:%M", &l)) {
+        snprintf(out, cap, "not set");
+        return;
+    }
+    snprintf(out, cap, "%s%s · %s", clock_is_approximate() ? "~" : "", hm,
+             clock_src_short(clock_sync_info().source));
+}
+
+// Set date & time's row: the local date and time
+static void now_value(char *out, size_t cap) {
+    time_t    now = time(NULL);
+    struct tm l;
+    if (!clock_is_set() || !localtime_r(&now, &l) || !strftime(out, cap, "%Y-%m-%d %H:%M", &l)) {
+        snprintf(out, cap, "not set");
+    }
+}
+
+static void tz_value(char *out, size_t cap) {
+    char posix[64];
+    settings_get_str("tz", posix, sizeof(posix), TZ_DEFAULT_POSIX);
+    int i = tz_find_posix(posix);
+    snprintf(out, cap, "%s", i >= 0 ? tz_at((size_t)i)->name : "");
+}
+
+// The rows that show the time are refreshed once a second, and only redrawn when their text changed
+typedef struct {
+    lv_obj_t *obj;
+    bool      note; // a menu_note label, not a menu_add row
+    void (*fill)(char *out, size_t cap);
+    char shown[48];
+} live_row_t;
+
+static void live_update(live_row_t *r) {
+    if (!r->obj) {
+        return; // its page is gone
+    }
+    char v[sizeof(r->shown)];
+    r->fill(v, sizeof(v));
+    if (strcmp(v, r->shown) != 0) {
+        strlcpy(r->shown, v, sizeof(r->shown));
+        if (r->note) {
+            lv_label_set_text(r->obj, v);
+        } else {
+            menu_set_value(r->obj, v);
+        }
+    }
+}
+
+static live_row_t time_rows[3]; // Time's page: Set date & time, Time zone, the source note
+static live_row_t settings_time_row; // Settings' own page: Time
+
+// The zone row reads NVS: only refreshed when a zone is picked, not every second
+static void refresh_time_page(lv_timer_t *t) {
+    (void)t;
+    live_update(&time_rows[0]);
+    live_update(&time_rows[2]);
+}
+
+static void time_tz_changed(void) {
+    live_update(&time_rows[1]);
+}
+
+static void refresh_settings_time(lv_timer_t *t) {
+    (void)t;
+    live_update(&settings_time_row);
+}
+
+// Each page's timer dies with it, and the rows it filled are forgotten
+static void forget_time_page(lv_event_t *e) {
+    lv_timer_delete(lv_event_get_user_data(e));
+    memset(time_rows, 0, sizeof(time_rows));
+}
+
+static void forget_settings_time(lv_event_t *e) {
+    lv_timer_delete(lv_event_get_user_data(e));
+    memset(&settings_time_row, 0, sizeof(settings_time_row));
+}
+
+static void source_note(char *out, size_t cap) {
+    clock_source_text(out, cap);
+}
+
+static void open_time_set(void *arg) {
+    (void)arg;
+    shell_open(time_set_build, SCREEN_TIME_SET);
+}
+
+static live_row_t live_row(lv_obj_t *obj, bool note, void (*fill)(char *, size_t)) {
+    live_row_t r = {.obj = obj, .note = note, .fill = fill};
+    fill(r.shown, sizeof(r.shown));
+    if (note) {
+        lv_label_set_text(obj, r.shown);
+    } else {
+        menu_set_value(obj, r.shown);
+    }
+    return r;
+}
+
+static lv_obj_t *build_time(void) {
+    lv_obj_t *screen = shell_page_create();
+    lv_obj_t *menu   = menu_create(screen, "Time");
+    time_rows[0]     = live_row(menu_add(menu, "Set date & time", "", open_time_set, NULL), false, now_value);
+    time_rows[1]     = live_row(menu_add(menu, "Time zone", "", open_tz, NULL), false, tz_value);
+    time_rows[2]     = live_row(menu_note(menu, ""), true, source_note);
+    lv_obj_add_event_cb(screen, forget_time_page, LV_EVENT_DELETE, lv_timer_create(refresh_time_page, 1000, NULL));
+    return screen;
+}
+
+static void open_time(void *arg) {
+    (void)arg;
+    shell_open(build_time, SCREEN_TIME);
 }
 
 static void open_about(void *arg) {
@@ -241,7 +367,9 @@ static void open_settings(lv_obj_t *screen) {
     menu_note(menu, "Lichen");
     menu_add(menu, "Wi-Fi", wifi, open_wifi, NULL);
     menu_add(menu, "Display", "", open_display, NULL);
-    menu_add(menu, "Time zone", "", open_tz, NULL);
+    settings_time_row = live_row(menu_add(menu, "Time", "", open_time, NULL), false, time_value);
+    lv_obj_add_event_cb(screen, forget_settings_time, LV_EVENT_DELETE,
+                        lv_timer_create(refresh_settings_time, 1000, NULL));
     menu_add(menu, "About Lichen", "", open_about, NULL);
     bool heading = false;
     for (size_t i = 0; i < lichen_app_count(); i++) {

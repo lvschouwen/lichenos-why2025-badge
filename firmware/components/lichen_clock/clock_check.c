@@ -91,16 +91,63 @@ char const *clock_src_text(clock_src_t s) {
     return "?";
 }
 
-void clock_src_line(clock_src_t s, int64_t age_s, char *out, size_t cap) {
-    if (s != CLOCK_SRC_SNTP) {
-        snprintf(out, cap, "%s", clock_src_text(s));
-    } else if (age_s < 60) {
-        snprintf(out, cap, "SNTP, just now");
+// "just now", "3 min ago", "2 h ago", "4 d ago"
+static void age_text(int64_t age_s, char *out, size_t cap) {
+    if (age_s < 60) {
+        snprintf(out, cap, "just now");
     } else if (age_s < 3600) {
-        snprintf(out, cap, "SNTP, %lld min ago", (long long)(age_s / 60));
+        snprintf(out, cap, "%lld min ago", (long long)(age_s / 60));
     } else if (age_s < 86400) {
-        snprintf(out, cap, "SNTP, %lld h ago", (long long)(age_s / 3600));
+        snprintf(out, cap, "%lld h ago", (long long)(age_s / 3600));
     } else {
-        snprintf(out, cap, "SNTP, %lld d ago", (long long)(age_s / 86400));
+        snprintf(out, cap, "%lld d ago", (long long)(age_s / 86400));
     }
+}
+
+// Short enough for "carried over the restart, was ..." to fit About's and fw clock's 48-byte buffers
+static char const *was_text(clock_src_t s) {
+    switch (s) {
+        case CLOCK_SRC_SNTP: return "SNTP";
+        case CLOCK_SRC_MANUAL: return "set by hand";
+        case CLOCK_SRC_APP: return "from mesh";
+        default: return NULL;
+    }
+}
+
+void clock_src_line(clock_src_t s, clock_src_t was, int64_t age_s, char *out, size_t cap) {
+    char age[24];
+    if (s == CLOCK_SRC_SNTP || s == CLOCK_SRC_MANUAL) {
+        age_text(age_s, age, sizeof(age));
+        snprintf(out, cap, "%s, %s", clock_src_text(s), age);
+    } else if (s == CLOCK_SRC_RTC && was_text(was)) {
+        snprintf(out, cap, "%s, was %s", clock_src_text(s), was_text(was));
+    } else {
+        snprintf(out, cap, "%s", clock_src_text(s));
+    }
+}
+
+char const *clock_src_short(clock_src_t s) {
+    switch (s) {
+        case CLOCK_SRC_NONE: return "not set";
+        case CLOCK_SRC_RTC: return "carried";
+        case CLOCK_SRC_APP: return "mesh";
+        case CLOCK_SRC_MANUAL: return "by hand";
+        case CLOCK_SRC_SNTP: return "SNTP";
+    }
+    return "?";
+}
+
+clock_src_t clock_src_was(clock_src_t cur, clock_src_t stored) {
+    if (cur != CLOCK_SRC_RTC || stored < CLOCK_SRC_APP || stored > CLOCK_SRC_SNTP) {
+        return CLOCK_SRC_NONE;
+    }
+    return stored;
+}
+
+bool clock_src_unverified(clock_src_t cur, clock_src_t was) {
+    return cur == CLOCK_SRC_APP || (cur == CLOCK_SRC_RTC && was == CLOCK_SRC_APP);
+}
+
+clock_src_t clock_force_rank(clock_src_t cur) {
+    return cur > CLOCK_SRC_MANUAL ? CLOCK_SRC_MANUAL : cur;
 }

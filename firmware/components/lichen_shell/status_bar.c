@@ -1,4 +1,4 @@
-// The status bar over every screen after boot (#66, home.html): logo, clock, Wi-Fi, LoRa. Wi-Fi bars and LoRa label, polled once a second from
+// The status bar over every screen after boot (#66, home.html): logo, clock (marked when unverified, #64), Wi-Fi, LoRa. Wi-Fi bars and LoRa label, polled once a second from
 // the LVGL task through shell_sources.
 #include "lichen_clock.h"
 #include "link_state.h"
@@ -77,17 +77,41 @@ static void show_lora(link_look_t look) {
     lv_obj_set_style_text_color(lora_label, lv_color_hex(look.color), 0);
 }
 
-static void refresh(lv_timer_t *timer) {
-    (void)timer;
-    char      text[8] = "--:--";
-    time_t    now     = time(NULL);
-    struct tm local;
+// HH:MM for SNTP, by hand or a carried clock; ~HH:MM in amber for mesh time, unverified; --:-- dimmed when not set
+// (#64). Only touched when the text or the colour changes.
+static void show_clock(void) {
+    static uint32_t shown_color;
+    char            text[8] = "--:--";
+    uint32_t        color   = THEME_DIM;
+    time_t          now     = time(NULL);
+    struct tm       local;
     if (clock_is_set() && localtime_r(&now, &local)) {
-        strftime(text, sizeof(text), "%H:%M", &local);
+        bool approx = clock_is_approximate();
+        strftime(text, sizeof(text), approx ? "~%H:%M" : "%H:%M", &local);
+        color = approx ? THEME_AMBER : THEME_TEXT;
     }
     if (strcmp(lv_label_get_text(clock_label), text) != 0) {
         lv_label_set_text(clock_label, text);
     }
+    if (color != shown_color) {
+        lv_obj_set_style_text_color(clock_label, lv_color_hex(color), 0);
+        shown_color = color;
+    }
+}
+
+// As wide as the widest text it shows, right-aligned: the Wi-Fi bars and the LoRa label never move when a ~ comes
+// or goes (#64)
+static void fix_clock_width(void) {
+    lv_point_t size;
+    lv_text_get_size(&size, "~00:00", lichen_font(LICHEN_FONT_SMALL), 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_obj_set_width(clock_label, size.x);
+    lv_label_set_long_mode(clock_label, LV_LABEL_LONG_MODE_CLIP);
+    lv_obj_set_style_text_align(clock_label, LV_TEXT_ALIGN_RIGHT, 0);
+}
+
+static void refresh(lv_timer_t *timer) {
+    (void)timer;
+    show_clock();
     int8_t rssi  = 0;
     bool   known = shell_sources.wifi_rssi && shell_sources.wifi_rssi(&rssi);
     show_wifi(wifi_look(shell_sources.wifi_has_credentials && shell_sources.wifi_has_credentials(),
@@ -118,7 +142,8 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     add_text(left, "lichen", THEME_DIM);
 
     lv_obj_t *right = add_row(bar, 28);
-    clock_label     = add_text(right, "--:--", THEME_TEXT);
+    clock_label     = add_text(right, "--:--", THEME_DIM);
+    fix_clock_width();
     lv_obj_t *wifi = add_row(right, 6);
     wifi_label     = add_text(wifi, "Wi-Fi", THEME_DIM);
     wifi_bars_create(wifi);
