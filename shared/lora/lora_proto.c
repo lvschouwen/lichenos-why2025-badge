@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 Lucas van Schouwen
+// SPDX-License-Identifier: Apache-2.0
 #include "lora_proto.h"
 
 #include <string.h>

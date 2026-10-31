@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 Lucas van Schouwen
+// SPDX-License-Identifier: Apache-2.0
 /*
  * LoRa radio service for the P4 (#51, #65).
  *

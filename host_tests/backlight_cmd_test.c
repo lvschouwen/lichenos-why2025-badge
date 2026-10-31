@@ -1,4 +1,4 @@
-// Host tests for the C6 backlight command parser
+// Host tests for the C6 backlight command parser and PWM duty
 #include "backlight_cmd.h"
 
 #include <stdio.h>
@@ -30,6 +30,16 @@ int main(void) {
     CHECK(!backlight_cmd_parse("", &d, &k));
     CHECK(!backlight_cmd_parse("I (123) boot: BL 30 10", &d, &k));
     CHECK(d == -1 && k == -1); // untouched on failure
+
+    // 8-bit PWM: off stays off, 1-9% is raised to 10%, anything above 80% is held at 80%
+    CHECK(backlight_duty(0, 8) == 0);
+    CHECK(backlight_duty(1, 8) == 25);
+    CHECK(backlight_duty(10, 8) == 25);
+    CHECK(backlight_duty(30, 8) == 76);
+    CHECK(backlight_duty(80, 8) == 204);
+    CHECK(backlight_duty(100, 8) == 204);
+    CHECK(backlight_duty(-5, 8) == 0);
+    CHECK(backlight_duty(50, 10) == 512);
 
     if (failures) {
         printf("%d failure(s)\n", failures);

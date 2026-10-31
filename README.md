@@ -190,6 +190,10 @@ Picolibc, wpa_supplicant and more), and LVGL brings in Marco Paland's printf and
 GPL-3.0, see [COPYING](COPYING), because Lichen started from BadgeVMS. The third-party code keeps its own license; all
 of it is GPL-3.0-compatible.
 
+The C6 image is the exception: it is a separate program on its own chip and links Espressif's binary-only Wi-Fi,
+Bluetooth and PHY libraries, so our code in it (`c6/main`, `shared/lora`) is Apache-2.0, as each file's SPDX header
+says.
+
 Every released image ships with [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt), because the MIT, BSD, Zlib, ISC and
 OFL licenses ask for their notice in binary copies too. `tools/third_party_licenses.py` builds that file from the real
 license files, and `firmware/build.sh` stops with an error when it no longer matches the dependencies. When you add

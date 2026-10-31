@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 Lucas van Schouwen
+// SPDX-License-Identifier: Apache-2.0
 /*
  * ESP-Hosted 3.x co-processor entry point for the WHY2025 badge C6.
  *
@@ -15,53 +17,50 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 
-#define PWM_TIMER_BASE_CLK   LEDC_USE_XTAL_CLK
-#define PWM_TIMER_RESOLUTION LEDC_TIMER_8_BIT
-#define PWM_TIMER_FREQ_HZ    25000 // Set well above hearing frequency
+// Both backlights share one LEDC timer; 25 kHz keeps the PWM out of hearing range
+#define BL_TIMER      LEDC_TIMER_0
+#define BL_RESOLUTION 8
+#define BL_FREQ_HZ    25000
 
 // The screen's AP3032 boost driver flickers on battery at 10%: its on-time per PWM period gets too short to ride out
 // ripple on the IP5306's 5 V (#39). The keyboard LEDs are driven directly and are fine at 10%.
-#define DISPLAY_BACKLIGHT_PERCENT  30
-#define KEYBOARD_BACKLIGHT_PERCENT 10
+enum { BL_DISPLAY, BL_KEYBOARD, BL_COUNT };
+static struct {
+	int gpio;
+	ledc_channel_t channel;
+	int boot_percent;
+} const backlights[BL_COUNT] = {
+	[BL_DISPLAY]  = { .gpio = 15, .channel = LEDC_CHANNEL_0, .boot_percent = 30 },
+	[BL_KEYBOARD] = { .gpio = 10, .channel = LEDC_CHANNEL_1, .boot_percent = 10 },
+};
 
-static void configure_pwm_timer(ledc_timer_t timer_num)
+static void backlight_set(int which, int percent)
 {
-	ledc_timer_config_t timer_conf = {
-		.speed_mode = LEDC_LOW_SPEED_MODE,
-		.duty_resolution = PWM_TIMER_RESOLUTION,
-		.timer_num = timer_num,
-		.freq_hz = PWM_TIMER_FREQ_HZ,
-		.clk_cfg = PWM_TIMER_BASE_CLK,
-	};
-	ESP_ERROR_CHECK(ledc_timer_config(&timer_conf));
-}
-
-static void configure_pwm(int gpio_num, ledc_channel_t channel, ledc_timer_t timer_num)
-{
-	ledc_channel_config_t channel_conf = {
-		.gpio_num = gpio_num,
-		.speed_mode = LEDC_LOW_SPEED_MODE,
-		.channel = channel,
-		.intr_type = LEDC_INTR_DISABLE,
-		.timer_sel = timer_num,
-		.duty = 0,
-		.hpoint = 0,
-	};
-	ESP_ERROR_CHECK(ledc_channel_config(&channel_conf));
-}
-
-/// @brief set the pwm value, limiting the duty to 0 or 10-80%
-static void set_pwm_duty_cycle(ledc_channel_t channel, int duty_percentage)
-{
-	if (duty_percentage < 10 && duty_percentage != 0) {
-		duty_percentage = 10;
-	}
-	if (duty_percentage > 80) {
-		duty_percentage = 80;
-	}
-	uint32_t duty = (uint32_t)((1 << (PWM_TIMER_RESOLUTION)) * duty_percentage / 100);
-	ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, channel, duty));
+	ledc_channel_t channel = backlights[which].channel;
+	ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, channel, backlight_duty(percent, BL_RESOLUTION)));
 	ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, channel));
+}
+
+static void backlights_start(void)
+{
+	ledc_timer_config_t const timer = {
+		.speed_mode = LEDC_LOW_SPEED_MODE,
+		.timer_num = BL_TIMER,
+		.duty_resolution = (ledc_timer_bit_t)BL_RESOLUTION,
+		.freq_hz = BL_FREQ_HZ,
+		.clk_cfg = LEDC_USE_XTAL_CLK,
+	};
+	ESP_ERROR_CHECK(ledc_timer_config(&timer));
+	for (int i = 0; i < BL_COUNT; i++) {
+		ledc_channel_config_t const ch = {
+			.gpio_num = backlights[i].gpio,
+			.speed_mode = LEDC_LOW_SPEED_MODE,
+			.channel = backlights[i].channel,
+			.timer_sel = BL_TIMER,
+			.duty = backlight_duty(backlights[i].boot_percent, BL_RESOLUTION),
+		};
+		ESP_ERROR_CHECK(ledc_channel_config(&ch));
+	}
 }
 
 // The P4 sets the brightness with "BL <display%> <keyboard%>" lines on our console UART (its UART1, the line it
@@ -79,8 +78,8 @@ static void backlight_command_task(void *arg)
 			line[len] = '\0';
 			int display, keyboard;
 			if (len && backlight_cmd_parse(line, &display, &keyboard)) {
-				set_pwm_duty_cycle(LEDC_CHANNEL_0, display);
-				set_pwm_duty_cycle(LEDC_CHANNEL_1, keyboard);
+				backlight_set(BL_DISPLAY, display);
+				backlight_set(BL_KEYBOARD, keyboard);
 				ESP_LOGI("backlight", "display %d%%, keyboard %d%%", display, keyboard);
 			}
 			len = 0;
@@ -94,12 +93,7 @@ static void backlight_command_task(void *arg)
 
 void app_main(void)
 {
-	// display (GPIO15) and keyboard (GPIO10) backlight share one PWM timer
-	configure_pwm_timer(LEDC_TIMER_0);
-	configure_pwm(15, LEDC_CHANNEL_0, LEDC_TIMER_0);
-	set_pwm_duty_cycle(LEDC_CHANNEL_0, DISPLAY_BACKLIGHT_PERCENT);
-	configure_pwm(10, LEDC_CHANNEL_1, LEDC_TIMER_0);
-	set_pwm_duty_cycle(LEDC_CHANNEL_1, KEYBOARD_BACKLIGHT_PERCENT);
+	backlights_start();
 
 	esp_err_t ret = nvs_flash_init();
 	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
