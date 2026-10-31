@@ -18,8 +18,7 @@
 #include "radio_confirm.h"
 #include "radio_filter.h"
 #include "radio_presets.h"
-#include "shell.h"
-#include "shell_parts.h"
+#include "lichen_ui.h"
 #include "text_entry.h"
 #include "theme.h"
 

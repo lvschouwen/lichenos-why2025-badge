@@ -2,6 +2,6 @@
 # c6_image.c is pure (host-tested in host_tests/c6_image_test.c)
 idf_component_register(SRCS "c6link.c" "c6_paths.c" "c6_flasher.c" "c6_firmware.c" "c6_image.c" "c6_boot_policy.c"
                        INCLUDE_DIRS "."
-                       REQUIRES esp_hosted esp_wifi esp_netif esp_event lichen
-                       PRIV_REQUIRES lichen_clock fw_console nvs_flash app_update esp_driver_uart esp_driver_gpio esp_timer
+                       REQUIRES esp_hosted esp_wifi esp_netif esp_event lichen_net
+                       PRIV_REQUIRES lichen_boot lichen_clock fw_console nvs_flash app_update esp_driver_uart esp_driver_gpio esp_timer
                                      espressif__esp-serial-flasher)

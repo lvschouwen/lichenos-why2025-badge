@@ -15,8 +15,7 @@
 #include "meshcore_settings.h"
 #include "scroll_anchor.h"
 #include "settings_store.h"
-#include "shell_parts.h"
-#include "shell.h"
+#include "lichen_ui.h"
 #include "fonts.h"
 #include "theme.h"
 

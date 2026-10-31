@@ -1,7 +1,7 @@
 // Full-screen text entry (#66): see text_entry.h
 #include "text_entry.h"
 
-#include "shell_parts.h"
+#include "lichen_ui.h"
 #include "fonts.h"
 #include "theme.h"
 

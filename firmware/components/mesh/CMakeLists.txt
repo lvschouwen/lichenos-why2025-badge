@@ -2,8 +2,8 @@
 # and our Arduino shim, as host_tests/CMakeLists.txt builds it (meshcore_companion_host, #65); the badge target is
 # companion/target.h. Pure parts (mesh_store, mesh_format, mesh_tile, lora_airtime, radio_presets,
 # channel_input) are host-tested.
-# meshcore_app.c makes it a Lichen app (#67), meshcore_settings.c its Settings page: mesh depends on lichen, never the
-# other way round.
+# meshcore_app.c makes it a Lichen app (#67), meshcore_settings.c its Settings page: mesh depends on lichen_api, never
+# the other way round, and never on lichen_shell (#84).
 set(MC ../../../meshcore)
 set(CR ../../../third_party/arduinolibs/libraries/Crypto)
 file(GLOB ED25519_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/${MC}/lib/ed25519/*.c)
@@ -28,7 +28,7 @@ idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh
                        PRIV_INCLUDE_DIRS "companion" ${MC}/src ${MC}/examples/companion_radio ${MC}/lib/ed25519 ${CR}
                                          "../../../shared/arduino_shim" "../../../third_party/base64/src"
                        PRIV_REQUIRES lichen_clock lora fw_console nvs_flash esp_timer lichen_random freertos fatfs
-                                     esp_system heap lichen esp_lvgl_port)
+                                     esp_system heap lichen_api esp_lvgl_port)
 # MeshCore's sizes on the badge: its tables live in PSRAM (mesh_task.cpp), so far beyond MeshCore's defaults
 target_compile_definitions(${COMPONENT_LIB} PRIVATE MAX_CONTACTS=1000 MAX_GROUP_CHANNELS=40 OFFLINE_QUEUE_SIZE=256
                            LORA_FREQ=869.618 LORA_BW=62.5 LORA_SF=7 LORA_CR=5 LORA_TX_POWER=22 MAX_LORA_TX_POWER=22)

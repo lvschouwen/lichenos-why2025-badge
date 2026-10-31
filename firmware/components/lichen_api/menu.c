@@ -1,7 +1,7 @@
 // The list menu helper (#66): see menu.h
 #include "menu.h"
 
-#include "shell.h"
+#include "lichen_ui.h"
 #include "fonts.h"
 #include "theme.h"
 

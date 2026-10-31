@@ -3,7 +3,7 @@
 
 #include "list_filter.h"
 #include "menu.h"
-#include "shell.h"
+#include "lichen_ui.h"
 #include "theme.h"
 
 #include <stdio.h>

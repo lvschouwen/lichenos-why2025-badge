@@ -9,7 +9,6 @@ extern shell_sources_t shell_sources;
 lv_obj_t *boot_screen_create(void);       // the boot screen; calls shell_home() itself when boot is done
 lv_group_t *boot_screen_group(void);     // the keypad group of the boot screen, NULL once it is gone
 lv_obj_t *status_bar_create(lv_obj_t *parent); // on the top layer, over every screen after boot
-void      shell_style_screen(lv_obj_t *screen);
 
 // home.c
 lv_obj_t *home_create(void);   // a fresh home screen for the registered apps and the saved layout; focus object = itself
@@ -19,10 +18,6 @@ void      home_init(void);     // registers the "fw home" console command
 // shell.c
 void shell_esc(void);                // Esc pressed: the top screen's shell_on_esc() hook first, else shell_back()
 void shell_back(void);               // like Esc: pops the top screen (later, outside key handling)
-// Pop one screen / down to `screen` (nothing is popped when it is not on the stack), then call then(arg), all in one
-// async step: the target is showing when then runs, whatever else is queued (LVGL runs async calls newest first)
-void shell_back_then(void (*then)(void *), void *arg);
-void shell_back_to(lv_obj_t *screen, void (*then)(void *), void *arg);
 lv_group_t *shell_top_group(void);   // the keypad group of the screen on top (ui_probe, LVGL context)
 void shell_open_app(size_t index);     // opens lichen_app_at(index); from home's Enter
 void shell_rebuild_home(void);         // after the app list or the layout changed

@@ -450,9 +450,9 @@ add_test(NAME radio_presets_test COMMAND radio_presets_test)
 
 add_executable(list_filter_test
     ${CMAKE_CURRENT_SOURCE_DIR}/list_filter_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/list_filter.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/list_filter.c
 )
-target_include_directories(list_filter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(list_filter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(list_filter_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME list_filter_test COMMAND list_filter_test)
 
@@ -460,10 +460,10 @@ add_executable(radio_filter_test
     ${CMAKE_CURRENT_SOURCE_DIR}/radio_filter_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/radio_filter.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/radio_presets.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/list_filter.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/list_filter.c
 )
 target_include_directories(radio_filter_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh
-                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(radio_filter_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(radio_filter_test PRIVATE m)
 add_test(NAME radio_filter_test COMMAND radio_filter_test)
@@ -526,17 +526,17 @@ add_test(NAME restart_log_test COMMAND restart_log_test)
 
 add_executable(boot_steps_test
     ${CMAKE_CURRENT_SOURCE_DIR}/boot_steps_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/boot_steps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/boot_steps.c
 )
-target_include_directories(boot_steps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(boot_steps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot)
 target_compile_options(boot_steps_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME boot_steps_test COMMAND boot_steps_test)
 
 add_executable(log_clean_test
     ${CMAKE_CURRENT_SOURCE_DIR}/log_clean_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/log_clean.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/log_clean.c
 )
-target_include_directories(log_clean_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(log_clean_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot)
 target_compile_options(log_clean_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME log_clean_test COMMAND log_clean_test)
 
@@ -637,9 +637,9 @@ add_test(NAME lora_tx_test COMMAND lora_tx_test)
 
 add_executable(nav_test
     ${CMAKE_CURRENT_SOURCE_DIR}/nav_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/nav.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/nav.c
 )
-target_include_directories(nav_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(nav_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(nav_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME nav_test COMMAND nav_test)
 
@@ -653,66 +653,66 @@ add_test(NAME mc_first_test COMMAND mc_first_test)
 
 add_executable(ui_keys_test
     ${CMAKE_CURRENT_SOURCE_DIR}/ui_keys_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/ui_keys.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/ui_keys.c
 )
-target_include_directories(ui_keys_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(ui_keys_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(ui_keys_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME ui_keys_test COMMAND ui_keys_test)
 
 add_executable(setup_state_test
     ${CMAKE_CURRENT_SOURCE_DIR}/setup_state_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/setup_state.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/setup_state.c
 )
-target_include_directories(setup_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(setup_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(setup_state_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME setup_state_test COMMAND setup_state_test)
 
 add_executable(boot_text_test
     ${CMAKE_CURRENT_SOURCE_DIR}/boot_text_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/boot_text.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/boot_text.c
 )
-target_include_directories(boot_text_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(boot_text_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot)
 target_compile_options(boot_text_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME boot_text_test COMMAND boot_text_test)
 
 add_executable(update_status_test
     ${CMAKE_CURRENT_SOURCE_DIR}/update_status_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/update_status.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/update_status.c
 )
-target_include_directories(update_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(update_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(update_status_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME update_status_test COMMAND update_status_test)
 
 add_executable(update_mode_test
     ${CMAKE_CURRENT_SOURCE_DIR}/update_mode_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/update_mode.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/update_mode.c
 )
-target_include_directories(update_mode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(update_mode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(update_mode_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME update_mode_test COMMAND update_mode_test)
 
 add_executable(home_layout_test
     ${CMAKE_CURRENT_SOURCE_DIR}/home_layout_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/home_layout.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/home_layout.c
 )
-target_include_directories(home_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(home_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(home_layout_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME home_layout_test COMMAND home_layout_test)
 
 add_executable(hold_exit_test
     ${CMAKE_CURRENT_SOURCE_DIR}/hold_exit_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/hold_exit.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/hold_exit.c
 )
-target_include_directories(hold_exit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(hold_exit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(hold_exit_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME hold_exit_test COMMAND hold_exit_test)
 
 add_executable(key_matrix_test
     ${CMAKE_CURRENT_SOURCE_DIR}/key_matrix_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/key_matrix.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/key_matrix.c
 )
 target_include_directories(key_matrix_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board
 )
 target_compile_options(key_matrix_test PRIVATE -Wall -Wextra -Werror)
@@ -720,9 +720,9 @@ add_test(NAME key_matrix_test COMMAND key_matrix_test)
 
 add_executable(tz_table_test
     ${CMAKE_CURRENT_SOURCE_DIR}/tz_table_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/tz_table.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/tz_table.c
 )
-target_include_directories(tz_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(tz_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(tz_table_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME tz_table_test COMMAND tz_table_test)
 
@@ -736,67 +736,69 @@ add_test(NAME clock_check_test COMMAND clock_check_test)
 
 add_executable(wifi_list_test
     ${CMAKE_CURRENT_SOURCE_DIR}/wifi_list_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/wifi_list.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_list.c
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs/nvs_stub.c
 )
 target_include_directories(wifi_list_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs)
-target_include_directories(wifi_list_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen
+target_include_directories(wifi_list_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net
                            ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
 target_compile_options(wifi_list_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME wifi_list_test COMMAND wifi_list_test)
 
 add_executable(link_state_test
     ${CMAKE_CURRENT_SOURCE_DIR}/link_state_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/link_state.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/wifi_list.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/link_state.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_list.c
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs/nvs_stub.c
 )
 target_include_directories(link_state_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs)
-target_include_directories(link_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen
+target_include_directories(link_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api # theme.h
                            ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
 target_compile_options(link_state_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME link_state_test COMMAND link_state_test)
 
 add_executable(wifi_cred_test
     ${CMAKE_CURRENT_SOURCE_DIR}/wifi_cred_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/wifi_list.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_list.c
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs/nvs_stub.c
 )
 target_include_directories(wifi_cred_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs)
-target_include_directories(wifi_cred_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen
+target_include_directories(wifi_cred_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net
                            ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
 target_compile_options(wifi_cred_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME wifi_cred_test COMMAND wifi_cred_test)
 
 add_executable(wifi_join_test
     ${CMAKE_CURRENT_SOURCE_DIR}/wifi_join_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/wifi_join.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_join.c
 )
-target_include_directories(wifi_join_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(wifi_join_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net)
 target_compile_options(wifi_join_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME wifi_join_test COMMAND wifi_join_test)
 
 add_executable(scroll_anchor_test
     ${CMAKE_CURRENT_SOURCE_DIR}/scroll_anchor_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/scroll_anchor.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/scroll_anchor.c
 )
-target_include_directories(scroll_anchor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(scroll_anchor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(scroll_anchor_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME scroll_anchor_test COMMAND scroll_anchor_test)
 
 add_executable(shot_blend_test
     ${CMAKE_CURRENT_SOURCE_DIR}/shot_blend_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/shot_blend.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/shot_blend.c
 )
-target_include_directories(shot_blend_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(shot_blend_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(shot_blend_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME shot_blend_test COMMAND shot_blend_test)
 
 add_executable(log_ring_test
     ${CMAKE_CURRENT_SOURCE_DIR}/log_ring_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen/log_ring.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/log_ring.c
 )
-target_include_directories(log_ring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen)
+target_include_directories(log_ring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(log_ring_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME log_ring_test COMMAND log_ring_test)
 

@@ -134,7 +134,7 @@ I checked the design against the code before planning. The findings:
    gets "Netherlands (local)" as default plus MeshCore's own presets, with values copied from the MeshCore app source
    in the plan task. Out-of-band presets (433 MHz, US 915 on parts the RA-01SH can't do) are left out, see
    Constraints.
-7. **Fonts (superseded by #16, see `components/lichen/fonts.h`):** Montserrat 14, 24 and 28 were enabled. The boot screen's large step text and the logo name need one
+7. **Fonts (superseded by #16, see `components/lichen_api/fonts.h`):** Montserrat 14, 24 and 28 were enabled. The boot screen's large step text and the logo name need one
    bigger size (36 or 48), about 30-60 KB of flash each. Cheap enough.
 8. **The ordering issues fit as first tasks:** #69 (tick 1000 Hz), then #70 (pinning: moving LVGL to core 1 and the
    mesh task to core 0 also fixes the wrong comment in `mesh_task.cpp`), then #71 step 1 (PPA rotation experiment

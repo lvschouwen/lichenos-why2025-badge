@@ -11,7 +11,7 @@ Each size merges four sources with lv_font_conv (the first font that has a code 
 
 The sources are downloaded once into --cache (default tools/.font-cache, git-ignored) and checked against the sha256
 pinned below. The generated .bin files are committed, so a normal build needs neither network nor node.
-The firmware loads them at boot (components/lichen/fonts.c); host_tests/font_cover_test.c checks their coverage.
+The firmware loads them at boot (components/lichen_api/fonts.c); host_tests/font_cover_test.c checks their coverage.
 """
 
 import argparse

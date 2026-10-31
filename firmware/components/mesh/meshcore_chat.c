@@ -12,7 +12,7 @@
 #include "mesh_chat.h"
 #include "mesh_frame.h"
 #include "mesh_format.h"
-#include "shell.h"
+#include "lichen_ui.h"
 #include "theme.h"
 
 #include <stdio.h>
