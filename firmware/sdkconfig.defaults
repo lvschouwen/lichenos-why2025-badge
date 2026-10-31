@@ -17,7 +17,10 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
 # PSRAM is ordinary malloc memory: big buffers, lwIP and the UI live there, internal RAM stays for DMA
 CONFIG_SPIRAM=y
-CONFIG_SPIRAM_SPEED_200M=y
+# 80 MHz, not 200: at 200 MHz this board (P4 rev v1.0) gets single-bit PSRAM read errors (always bit 8) that damaged
+# OTA staging data and made the screen flicker (#31, #37, #40). ECC is no way out: it crashes with the PPA and is an
+# open Espressif bug (esp-idf #17855). There is no speed between 80 and 200 on this chip.
+CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_CACHE_L2_CACHE_256KB=y
