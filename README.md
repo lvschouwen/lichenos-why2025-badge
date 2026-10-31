@@ -181,8 +181,16 @@ Lichen stands on a lot of other people's work. Thank you!
 
 The WHY2025 badge team made the hardware. The LoRa bodge comes from the WHY2025 wiki page linked above.
 
-We are still checking that this repository meets every license here (#86).
+The table names the main projects. ESP-IDF also brings in code from others (FreeRTOS, lwIP, TLSF, FatFs, protobuf-c,
+Picolibc, wpa_supplicant and more), and LVGL brings in Marco Paland's printf and the Font Awesome symbols.
+[THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) lists everything linked into each image, with its license text.
 
 ## License
 
-GPL-3.0, see [COPYING](COPYING), because Lichen started from BadgeVMS. The third-party code above keeps its own license.
+GPL-3.0, see [COPYING](COPYING), because Lichen started from BadgeVMS. The third-party code keeps its own license; all
+of it is GPL-3.0-compatible.
+
+Every released image ships with [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt), because the MIT, BSD, Zlib, ISC and
+OFL licenses ask for their notice in binary copies too. `tools/third_party_licenses.py` builds that file from the real
+license files, and `firmware/build.sh` stops with an error when it no longer matches the dependencies. When you add
+or enable a library (an LVGL decoder, say), add it to the list in the script and run it again.

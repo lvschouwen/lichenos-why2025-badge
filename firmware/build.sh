@@ -47,4 +47,10 @@ if [ "$building" = 1 ]; then
     "$here/tools/stage_storage.sh"
 fi
 
-exec idf.py -C "$here" "$@"
+if [ "$building" = 1 ]; then
+    idf.py -C "$here" "$@"
+    # Released images ship this file; it must match the dependencies just built (#18)
+    BADGE_IDF_PATH="$IDF_DIR" python3 "$repo/tools/third_party_licenses.py" --check
+else
+    exec idf.py -C "$here" "$@"
+fi

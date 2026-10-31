@@ -165,6 +165,9 @@ static void open_about(lv_obj_t *screen) {
     add_text(screen, "This badge works the same way. The P4 does the thinking and the screen; the C6 talks to the "
                      "world over Wi-Fi, Bluetooth and LoRa. And like lichen, it spreads slowly from stone to stone: "
                      "one node, then a mesh.", THEME_TEXT);
+    // GPL-3.0 section 0 "Appropriate Legal Notices"; the MIT/BSD notices are in THIRD_PARTY_LICENSES.txt (#18)
+    add_text(screen, "Free software under the GPL-3.0; third-party code keeps its own license. Source and license "
+                     "texts: github.com/lvschouwen/lichenos-why2025-badge", THEME_DIM);
 
     lv_obj_t *rule = lv_obj_create(screen);
     lv_obj_remove_style_all(rule);
