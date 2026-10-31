@@ -12,6 +12,7 @@
 #include "mesh.h"
 #include "mesh_format.h"
 #include "meshcore_settings.h"
+#include "radio_confirm.h"
 #include "radio_presets.h"
 #include "shell.h"
 #include "shell_parts.h"
@@ -30,6 +31,7 @@ static char const TAG[] = "meshcore";
 #define SCREEN_CUSTOM   131
 #define SCREEN_CHANNELS 132
 #define SCREEN_REMOVE   133
+#define SCREEN_SWITCH   134
 #define JOB_STACK       6144 // savePrefs / saveChannels keep File objects on the stack (the console's 4 KB suffices)
 #define MAX_CHANNELS    40   // MAX_GROUP_CHANNELS in the mesh component's build
 #define MAX_PRESETS     32
@@ -352,7 +354,58 @@ static void preset_done(job_t *job) {
     region_chosen();
 }
 
-static void pick_preset(void *arg) {
+// Switching the radio asks first (#33): a stray Enter put the badge on a frequency that may not be legal here. The
+// confirm page shows the new radio; Enter runs `go` on the screen below it, Esc keeps the current radio.
+static struct {
+    char            title[40];
+    float           freq, bw;
+    uint8_t         sf, cr;
+    radio_confirm_t level;
+    void (*go)(void *);
+    void *arg;
+} want;
+
+static void switch_yes(void *arg) {
+    (void)arg;
+    shell_back_then(want.go, want.arg);
+}
+
+static lv_obj_t *build_switch(void) {
+    lv_obj_t *screen = shell_page_create();
+    lv_obj_t *menu   = menu_create(screen, "Switch radio");
+    char      text[96];
+    menu_note(menu, want.title);
+    radio_values(text, sizeof(text), want.freq, want.bw, want.sf, want.cr, false);
+    menu_note(menu, text);
+    snprintf(text, sizeof(text), "Switch radio to %s?", want.title);
+    menu_note(menu, text);
+    if (want.level == RADIO_CONFIRM_BAND) {
+        set_note(menu_note(menu, ""), "Another band than the current radio. It may not be legal where you are.", true);
+    }
+    menu_add(menu, "Switch radio", "Enter", switch_yes, NULL);
+    menu_note(menu, "Esc keeps the current radio.");
+    return screen;
+}
+
+// Asks, or applies at once when the first-run question is being answered (that list is the question itself)
+static void confirm_switch(char const *title, float freq, float bw, uint8_t sf, uint8_t cr, radio_confirm_t level,
+                           void (*go)(void *), void *arg) {
+    if (first_region_chosen) {
+        go(arg);
+        return;
+    }
+    snprintf(want.title, sizeof(want.title), "%s", title);
+    want.freq  = freq;
+    want.bw    = bw;
+    want.sf    = sf;
+    want.cr    = cr;
+    want.level = level;
+    want.go    = go;
+    want.arg   = arg;
+    shell_open(build_switch, SCREEN_SWITCH);
+}
+
+static void preset_go(void *arg) {
     size_t                i = (size_t)(uintptr_t)arg;
     radio_preset_t const *p = radio_preset_at(i);
     mesh_settings_t       s;
@@ -373,6 +426,22 @@ static void pick_preset(void *arg) {
     job->n              = i; // the row for the result
     menu_set_value(preset_rows[i], "applying...");
     job_start(job);
+}
+
+static void pick_preset(void *arg) {
+    size_t                i = (size_t)(uintptr_t)arg;
+    radio_preset_t const *p = radio_preset_at(i);
+    mesh_settings_t       s;
+    if (!p || !mesh_get_settings(&s)) {
+        return;
+    }
+    radio_confirm_t level = radio_confirm_needed(s.freq, s.bw, s.sf, s.cr, s.path_hash_size, p->freq_mhz, p->bw_khz,
+                                                 p->sf, p->cr, p->path_hash_size);
+    if (level == RADIO_CONFIRM_NONE) {
+        region_chosen(); // already in use: nothing to switch (the first-run question counts it as the answer)
+        return;
+    }
+    confirm_switch(p->title, p->freq_mhz, p->bw_khz, p->sf, p->cr, level, preset_go, arg);
 }
 
 // A TX power change is never lost quietly (review R1): it waits for a change still running, is tried TX_TRIES times
@@ -571,16 +640,11 @@ static void custom_done(job_t *job) {
     region_chosen();
 }
 
-static void apply_custom(void *arg) {
+// Runs on the Custom radio screen, after the confirm page is popped
+static void custom_go(void *arg) {
     (void)arg;
     mesh_settings_t s;
     if (!mesh_get_settings(&s)) {
-        return;
-    }
-    // Refused here too, before any task: the reason shows at once
-    char const *why = radio_check(draft_freq, radio_bandwidth_at(draft_bw), draft_sf, draft_cr, s.tx_dbm);
-    if (why) {
-        set_note(custom_note, why, true);
         return;
     }
     job_t *job = job_new(JOB_RADIO, custom_done);
@@ -596,6 +660,28 @@ static void apply_custom(void *arg) {
     job->tx_dbm         = s.tx_dbm;
     set_note(custom_note, "Applying...", false);
     job_start(job);
+}
+
+static void apply_custom(void *arg) {
+    (void)arg;
+    mesh_settings_t s;
+    if (!mesh_get_settings(&s)) {
+        return;
+    }
+    // Refused here too, before any task: the reason shows at once
+    char const *why = radio_check(draft_freq, radio_bandwidth_at(draft_bw), draft_sf, draft_cr, s.tx_dbm);
+    if (why) {
+        set_note(custom_note, why, true);
+        return;
+    }
+    radio_confirm_t level = radio_confirm_needed(s.freq, s.bw, s.sf, s.cr, s.path_hash_size, draft_freq,
+                                                 radio_bandwidth_at(draft_bw), draft_sf, draft_cr, s.path_hash_size);
+    if (level == RADIO_CONFIRM_NONE) {
+        set_note(custom_note, "Already using these values", false);
+        region_chosen();
+        return;
+    }
+    confirm_switch("Custom radio", draft_freq, radio_bandwidth_at(draft_bw), draft_sf, draft_cr, level, custom_go, NULL);
 }
 
 static void on_custom_delete(lv_event_t *e) {
