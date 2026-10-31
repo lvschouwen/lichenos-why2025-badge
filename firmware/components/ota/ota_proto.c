@@ -71,6 +71,7 @@ static int parse_request_line(char *line, ota_request_t *req) {
         {"/prepare", "POST", OTA_ROUTE_PREPARE},
         {"/assets", "PUT", OTA_ROUTE_ASSETS},
         {"/file", "DELETE", OTA_ROUTE_DELETE},
+        {"/screenshot", "GET", OTA_ROUTE_SCREENSHOT},
     };
     bool known_target = false;
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {

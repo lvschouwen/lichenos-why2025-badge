@@ -23,5 +23,9 @@ typedef struct {
     void (*prepare)(void);
     // false while a firmware update has everything stopped: a file push is then answered 409. NULL = always true.
     bool (*file_ok)(void);
+    // GET /screenshot (#30): render the screen (RGB565, stride in bytes) on the OTA task and return 0, or the HTTP
+    // status to answer with. The pixels stay valid until screenshot_free. NULL = the receiver has no screen (404).
+    int (*screenshot)(uint8_t const **pixels, uint32_t *width, uint32_t *height, uint32_t *stride);
+    void (*screenshot_free)(void);
 } ota_hooks_t;
 void ota_server_set_hooks(ota_hooks_t const *hooks); // copied; before ota_server_start

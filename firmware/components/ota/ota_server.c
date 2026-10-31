@@ -18,6 +18,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "ota_bmp.h"
 #include "ota_path.h"
 #include "ota_proto.h"
 #include "miniz.h" // the ROM inflater
@@ -44,6 +45,8 @@
 #define HEAD_DEADLINE_S 15
 #define BODY_MIN_RATE   (16 * 1024) // bytes/s a body must average, on top of BODY_GRACE_S
 #define BODY_GRACE_S    30
+#define SHOT_SLICE      (16 * 1024) // bytes per write of a screenshot, straight from its PSRAM buffer
+#define SHOT_SEND_S     10
 // Flash writes happen on this task, so its stack must be in internal RAM; peaks measured in BadgeVMS: 7 KB
 #define SERVER_STACK    16384
 
@@ -659,6 +662,48 @@ static void handle_delete(int fd, ota_request_t const *req) {
     respond(fd, 200, "deleted %s", req->path);
 }
 
+// GET /screenshot (#30): the screen as a BMP. The picture is rendered by the hook (LVGL stays out of this component),
+// sent from its PSRAM buffer in slices and freed. It is never logged: it can show private messages.
+static void handle_screenshot(int fd) {
+    if (!hooks.screenshot) {
+        respond(fd, 404, "no screen here");
+        return;
+    }
+    if (!file_allowed()) {
+        respond(fd, 409, "a firmware update is running");
+        return;
+    }
+    uint8_t const *pixels;
+    uint32_t       w, h, stride;
+    int            status = hooks.screenshot(&pixels, &w, &h, &stride);
+    if (status) {
+        respond(fd, status, status == 503 ? "the screen is busy, try again" : "no screenshot");
+        return;
+    }
+    uint8_t head[OTA_BMP_HEADER_LEN];
+    size_t  row  = (size_t)w * 2;
+    size_t  size = ota_bmp565_file_size(w, h);
+    // Rows go out as they sit in memory: only a tightly packed picture with 4-byte rows is supported
+    if (!size || stride != row || ota_bmp565_row_bytes(w) != row || !ota_bmp565_header(w, h, head)) {
+        respond(fd, 500, "unsupported screen shape");
+    } else {
+        struct timeval tv = {.tv_sec = SHOT_SEND_S};
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        char reply[160];
+        int  n = snprintf(reply, sizeof(reply),
+                          "HTTP/1.1 200 OK\r\nContent-Type: image/bmp\r\nContent-Length: %u\r\nCache-Control: no-store\r\n"
+                          "Connection: close\r\n\r\n",
+                          (unsigned)size);
+        bool ok = send_all(fd, reply, (size_t)n) && send_all(fd, head, sizeof(head));
+        for (size_t off = 0, total = row * h; ok && off < total; off += SHOT_SLICE) {
+            ok = send_all(fd, pixels + off, total - off < SHOT_SLICE ? total - off : SHOT_SLICE);
+        }
+    }
+    if (hooks.screenshot_free) {
+        hooks.screenshot_free();
+    }
+}
+
 // Handle one connection. Returns true when the badge should reboot.
 static bool handle_connection(int fd) {
     size_t len      = 0;
@@ -734,6 +779,7 @@ static bool handle_connection(int fd) {
                     (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA));
             return false;
         case OTA_ROUTE_DELETE: handle_delete(fd, &req); return false;
+        case OTA_ROUTE_SCREENSHOT: handle_screenshot(fd); return false;
         case OTA_ROUTE_REBOOT:
             respond(fd, 200, "rebooting");
             hook_end(true, firmware_installed); // a plain reboot with no new firmware is not an update

@@ -58,6 +58,8 @@ Over Wi-Fi, while the badge is on Wi-Fi:
                                       partition (fonts) and reboot
   ota-rm <ip> <badge-path>            delete one file on the badge
   ota-reboot <ip>
+  screenshot <ip> [out.png]           save what the screen shows as a PNG (default: a private dir under \$XDG_RUNTIME_DIR or \$TMPDIR; it
+                                      can show private messages, so keep it out of the repo)
 
 <port> is a /dev/serial/by-id/... path or /dev/ttyACMn as shown by 'ports'.
 EOF
@@ -432,6 +434,23 @@ cmd_ota_assets() {
     [ "$reboot" = --no-reboot ] || cmd_ota_reboot "$ip"
 }
 
+# GET /screenshot (#30): a 16-bit BMP of the screen, converted to PNG with python3-pil
+cmd_screenshot() {
+    local ip=$1 out=${2:-} work
+    umask 077 # the picture can show private messages: nobody else reads it
+    work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-shot.XXXXXX")
+    # shellcheck disable=SC2064
+    trap "rm -f '$work/shot.bmp'; rmdir '$work' 2>/dev/null" EXIT # the dir stays when it holds the default PNG
+    [ -n "$out" ] || out=$work/screenshot.png
+    ota_curl --max-time 30 -o "$work/shot.bmp" "http://$ip:$OTA_PORT/screenshot" || exit 1
+    python3 -I - "$work/shot.bmp" "$out" <<'PY' || exit 1
+import sys
+from PIL import Image
+Image.open(sys.argv[1]).convert("RGB").save(sys.argv[2])
+PY
+    echo "$out"
+}
+
 cmd_ota_rm() { ota_curl -X DELETE -H "X-Path: $2" "http://$1:$OTA_PORT/file"; }
 
 case "${1:-}" in
@@ -448,5 +467,6 @@ case "${1:-}" in
     ota-assets)   [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_ota_assets "$2" "${3:-}" ;;
     ota-rm)       [ $# -eq 3 ] || usage; cmd_ota_rm "$2" "$3" ;;
     ota-reboot)   [ $# -eq 2 ] || usage; cmd_ota_reboot "$2" ;;
+    screenshot)   [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_screenshot "$2" "${3:-}" ;;
     *)        usage ;;
 esac

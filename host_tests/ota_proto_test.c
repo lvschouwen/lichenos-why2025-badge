@@ -122,6 +122,10 @@ static void test_parse(void) {
     CHECK(parse("PUT /assets HTTP/1.1\r\nX-Offset: 0\r\nX-Total-Size: 300\r\n\r\n", &req) == 0);
     CHECK(req.route == OTA_ROUTE_ASSETS && req.has_offset && req.total_size == 300);
     CHECK(parse("GET /assets HTTP/1.1\r\n\r\n", &req) == 405);
+    CHECK(parse("GET /screenshot HTTP/1.1\r\nAuthorization: Bearer " TOKEN "\r\n\r\n", &req) == 0);
+    CHECK(req.route == OTA_ROUTE_SCREENSHOT && req.has_token);
+    CHECK(parse("PUT /screenshot HTTP/1.1\r\n\r\n", &req) == 405);
+    CHECK(parse("POST /screenshot HTTP/1.1\r\n\r\n", &req) == 405);
 
     // Wrong method, unknown path, junk
     CHECK(parse("GET /firmware HTTP/1.1\r\n\r\n", &req) == 405);

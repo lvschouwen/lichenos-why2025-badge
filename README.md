@@ -131,6 +131,17 @@ The LoRa settings Lichen starts with are in `/storage/lora.toml` (`frequency_mhz
 `spreading_factor`, `coding_rate`, `sync_word`, `preamble`); the default is the Dutch MeshCore preset, 869.618 MHz,
 62.5 kHz, SF7, CR 4/5.
 
+## Screenshots
+
+```
+tools/badge.sh screenshot <ip> [out.png]    # default: a private (mode 700) temp dir; prints the path
+```
+
+While the badge is on Wi-Fi it renders the active screen, the status bar and the update banner (LVGL's snapshot, upright,
+720x720) and sends it as a BMP, which the tool turns into a PNG (needs python3-pil). It needs the update token like
+every other Wi-Fi command and is never logged. The screen can show private messages and contacts: keep the files out
+of the repo and out of issues. A busy UI answers 503 (try again); during a firmware update it answers 409.
+
 ## Console and crashes
 
 The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.sh console <port> "fw help"`:

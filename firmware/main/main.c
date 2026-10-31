@@ -27,6 +27,7 @@
 #include "shell.h"
 #include "assets.h"
 #include "fonts.h"
+#include "screenshot.h"
 #include "storage.h"
 #include "update_mode.h"
 #include "update_screen.h"
@@ -179,7 +180,8 @@ void app_main(void) {
     start_apps();
     if (screen) {
         ota_hooks_t const hooks = {.begin = ota_begin, .progress = update_screen_progress, .end = ota_end,
-                                   .prepare = update_screen_prepare, .file_ok = update_screen_file_ok};
+                                   .prepare = update_screen_prepare, .file_ok = update_screen_file_ok,
+                                   .screenshot = screenshot_take, .screenshot_free = screenshot_free};
         ota_server_set_hooks(&hooks);
         update_mode_set_stop_hook(stop_for_update);
         update_screen_boot_check();

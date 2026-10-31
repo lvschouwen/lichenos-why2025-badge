@@ -77,6 +77,9 @@ CONFIG_LV_FONT_MONTSERRAT_28=y
 # Lichen's name and the boot screen's current step (#66)
 CONFIG_LV_FONT_MONTSERRAT_40=y
 
+# Screenshots (#30): lv_snapshot renders the screen into a PSRAM buffer
+CONFIG_LV_USE_SNAPSHOT=y
+
 # Run code and read-only data from PSRAM: flash writes (settings, file pushes, updates) then no longer suspend the
 # caches, which disturbed the panel's scan-out from its PSRAM framebuffer as yellow flashes (#61)
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y

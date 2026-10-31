@@ -4,6 +4,7 @@
 //   PUT  /firmware                     body = badgevms.bin, installed into the next OTA slot
 //   PUT  /file      X-Path: <VMS path> body = the file, written under FLASH0: or SD0:
 //   DELETE /file   X-Path: <VMS path> remove a file (same path rules as PUT)
+//   GET  /screenshot                   the screen as a 16-bit BMP (ota_bmp.h, #30); the token is required
 //   POST /reboot
 //   POST /prepare                      lean firmware: stop everything else for a firmware update, reply "ready" (#76)
 //   PUT  /assets                       body = assets.bin (tools/pack_assets.py), in pieces only; used after a reboot (#22)
@@ -32,6 +33,7 @@ typedef enum {
     OTA_ROUTE_DELETE,
     OTA_ROUTE_PREPARE,
     OTA_ROUTE_ASSETS,
+    OTA_ROUTE_SCREENSHOT,
 } ota_route_t;
 
 typedef struct {
