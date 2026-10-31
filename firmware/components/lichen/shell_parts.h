@@ -34,6 +34,7 @@ void ui_probe_send(char const *seq); // "fw keys send <seq>"
 // app_settings.c, app_about.c: the built-in apps (shell_start registers them)
 void settings_app_register(void);
 void about_app_register(void);
+void keytest_app_register(void);
 
 // wifi_screen.c: Settings > Wi-Fi
 void wifi_screen_open(void);

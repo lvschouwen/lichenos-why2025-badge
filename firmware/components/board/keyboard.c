@@ -9,6 +9,7 @@
 #include "kbd_map.h"
 
 #include <assert.h>
+#include <string.h>
 
 static char const TAG[] = "keyboard";
 
@@ -32,6 +33,51 @@ static QueueHandle_t  events;
 static uint32_t       held[0x51]; // what each pressed key was mapped to, so its release reports the same key
 static bool           shift;
 
+static struct {
+    key_raw_fn fn;
+    void      *arg;
+} hooks[KEYBOARD_RAW_MAX];
+static portMUX_TYPE hooks_lock = portMUX_INITIALIZER_UNLOCKED;
+
+bool keyboard_raw_add(key_raw_fn fn, void *arg) {
+    bool ok = false;
+    portENTER_CRITICAL(&hooks_lock);
+    for (int i = 0; i < KEYBOARD_RAW_MAX && !ok; i++) {
+        if (!hooks[i].fn) {
+            hooks[i].fn  = fn;
+            hooks[i].arg = arg;
+            ok           = true;
+        }
+    }
+    portEXIT_CRITICAL(&hooks_lock);
+    return ok;
+}
+
+void keyboard_raw_remove(key_raw_fn fn, void *arg) {
+    portENTER_CRITICAL(&hooks_lock);
+    for (int i = 0; i < KEYBOARD_RAW_MAX; i++) {
+        if (hooks[i].fn == fn && hooks[i].arg == arg) {
+            hooks[i].fn = NULL;
+        }
+    }
+    portEXIT_CRITICAL(&hooks_lock);
+}
+
+// Offers the event to every hook (a copy of the table, so a hook may remove itself); true = swallowed
+static bool run_hooks(key_raw_event_t const *ev) {
+    typeof(hooks) copy;
+    portENTER_CRITICAL(&hooks_lock);
+    memcpy(copy, hooks, sizeof(copy));
+    portEXIT_CRITICAL(&hooks_lock);
+    bool swallowed = false;
+    for (int i = 0; i < KEYBOARD_RAW_MAX; i++) {
+        if (copy[i].fn && copy[i].fn(ev, copy[i].arg)) {
+            swallowed = true;
+        }
+    }
+    return swallowed;
+}
+
 static void poll_task(void *arg) {
     (void)arg;
     for (;;) {
@@ -44,6 +90,14 @@ static void poll_task(void *arg) {
             }
             if (kbd_map_is_shift(key)) {
                 shift = pressed;
+            }
+            key_raw_event_t raw_ev = {.code = key, .pressed = pressed, .shift = shift};
+            bool swallowed = run_hooks(&raw_ev);
+            // A key pressed before the hook grabbed the keys still gets its release, or LVGL would see it held forever
+            if (swallowed && (pressed || !held[key])) {
+                continue;
+            }
+            if (kbd_map_is_shift(key)) {
                 continue;
             }
             uint32_t mapped = pressed ? kbd_map_key(key, shift) : held[key];

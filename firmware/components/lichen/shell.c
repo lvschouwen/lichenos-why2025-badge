@@ -5,8 +5,10 @@
 #include "esp_log.h"
 #include "fw_console.h"
 #include "esp_lvgl_port.h"
+#include "key_matrix.h"
 #include "lichen_app.h"
 #include "nav.h"
+#include "raw_keys.h"
 #include "scroll_anchor.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -40,7 +42,7 @@ static size_t               app_count;
 
 void lichen_register_app(lichen_app_t const *app) {
     if (app_count >= LICHEN_MAX_APPS) {
-        ESP_LOGW(TAG, "no room for app %s", app->name);
+        ESP_LOGE(TAG, "no room for app %s: LICHEN_MAX_APPS (%d) apps are registered already", app->name, LICHEN_MAX_APPS);
         return;
     }
     apps[app_count++] = app;
@@ -391,7 +393,36 @@ void shell_attach_keys(lv_indev_t *indev) {
     lvgl_port_unlock();
 }
 
+// "fw keys log on": every raw key event (before the keyboard maps it, so shape keys and Fn show too). Not while a secret
+// text area has the focus: the codes would spell the password.
+static bool log_raw;
+
+static void on_raw_key(key_raw_event_t const *ev, void *arg) {
+    (void)arg;
+    char text[64];
+    key_matrix_format(text, sizeof(text), ev);
+    if (!password_focused()) {
+        ESP_LOGW(TAG, "raw key %s", text);
+    }
+}
+
+static void set_raw_log(bool on) {
+    lvgl_port_lock(0);
+    if (on && !log_raw) {
+        log_raw = raw_keys_listen(on_raw_key, NULL, false);
+    } else if (!on && log_raw) {
+        raw_keys_unlisten(on_raw_key, NULL);
+        log_raw = false;
+    }
+    lvgl_port_unlock();
+}
+
 static void cmd_keys(char const *args) {
+    if (strncmp(args, "log ", 4) == 0 && (strcmp(args + 4, "on") == 0 || strcmp(args + 4, "off") == 0)) {
+        set_raw_log(args[5] == 'n');
+        console_reply("raw keys %s", log_raw ? "logged" : "not logged");
+        return;
+    }
     if (strncmp(args, "send ", 5) == 0) {
         ui_probe_send(args + 5);
         return;
@@ -408,13 +439,14 @@ static void cmd_keys(char const *args) {
 void shell_start(lv_display_t *display) {
     home_init();
     setup_init();
-    console_register("keys", "keys on|off (log every key) | keys send <up down left right enter esc tab bksp wait text:..|>", cmd_keys);
+    console_register("keys", "keys on|off (log every key) | keys log on|off (log raw key events) | keys send <up down left right enter esc tab bksp wait text:..|>", cmd_keys);
     ui_probe_init();
     if (!getenv("TZ")) {
         settings_apply_tz(); // main.c normally did this already
     }
     settings_app_register();
     about_app_register();
+    keytest_app_register();
     lvgl_port_lock(0);
     lv_display_set_default(display);
     lv_obj_t *boot = boot_screen_create();

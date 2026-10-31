@@ -25,7 +25,9 @@ typedef struct lichen_app {
     void (*about)(lv_obj_t *page); // see settings; LVGL context
 } lichen_app_t;
 
-#define LICHEN_MAX_APPS 8
+// Size of the app table. Home scrolls to the selection, so this only bounds the arrays; lichen_register_app logs an error
+// when it is full.
+#define LICHEN_MAX_APPS 16
 
 // Before shell_home(). The app struct must stay valid for as long as the badge runs (a static const).
 void lichen_register_app(lichen_app_t const *app);
