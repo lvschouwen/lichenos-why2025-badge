@@ -891,6 +891,7 @@ static void hold_c6_boot_high(void) {
 bool c6link_start(void) {
     console_register("c6log", "c6log [ms] (copy the C6's console into the log)", cmd_c6log);
     console_register("c6", "c6 [reflash | verify]", cmd_c6);
+    clock_console_register();
     console_register("net", "net (Wi-Fi state and IP)", cmd_net);
     console_register("wifi", "wifi [scan | reconnect | <ssid> <password> | --clear]", cmd_wifi);
     scan_done = xSemaphoreCreateBinary();

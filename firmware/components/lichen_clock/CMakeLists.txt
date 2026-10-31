@@ -11,6 +11,7 @@ if(NOT build_epoch_result EQUAL 0 OR build_epoch STREQUAL "")
     message(FATAL_ERROR "git log -1 --format=%ct failed: the clock check needs the build epoch")
 endif()
 
-idf_component_register(SRCS "clock_check.c" "lichen_clock.c"
-                       INCLUDE_DIRS ".")
+idf_component_register(SRCS "clock_check.c" "lichen_clock.c" "clock_cmd.c"
+                       INCLUDE_DIRS "."
+                       PRIV_REQUIRES fw_console esp_hw_support esp_timer)
 target_compile_definitions(${COMPONENT_LIB} PRIVATE LICHEN_BUILD_EPOCH=${build_epoch}LL)

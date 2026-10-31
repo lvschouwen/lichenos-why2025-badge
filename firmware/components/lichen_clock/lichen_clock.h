@@ -31,6 +31,9 @@ typedef struct {
 
 clock_sync_info_t clock_sync_info(void);
 
+// Registers "fw clock" (clock_cmd.c) and notes the RTC and esp_timer readings it measures drift against. Call early.
+void clock_console_register(void);
+
 #ifdef __cplusplus
 }
 #endif
