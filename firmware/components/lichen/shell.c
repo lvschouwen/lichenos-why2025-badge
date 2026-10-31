@@ -25,6 +25,8 @@ static char const TAG[] = "shell";
 typedef struct {
     lv_obj_t   *screen;
     lv_group_t *group;
+    bool      (*on_esc)(void *); // shell_on_esc(): true when it used the Esc
+    void       *on_esc_arg;
 } frame_t;
 
 shell_sources_t shell_sources;
@@ -104,6 +106,24 @@ static void go_back(void *arg) {
     pop_one();
 }
 
+static bool   (*building_esc)(void *); // set by shell_on_esc() while shell_open() runs a builder
+static void    *building_esc_arg;
+
+void shell_on_esc(bool (*fn)(void *arg), void *arg) {
+    building_esc     = fn;
+    building_esc_arg = arg;
+}
+
+// The top screen may use the Esc first (clear a search or a draft); if not, it goes back
+void shell_esc(void) {
+    int depth = nav_depth();
+    frame_t *top = depth > 0 ? &frames[depth - 1] : NULL;
+    if (top && top->on_esc && top->on_esc(top->on_esc_arg)) {
+        return;
+    }
+    lv_async_call(go_back, NULL);
+}
+
 void shell_back(void) {
     lv_async_call(go_back, NULL);
 }
@@ -177,7 +197,7 @@ static void on_key(lv_event_t *e) {
         ESP_LOGW(TAG, "key %lu (0x%02lx) %s", (unsigned long)key, (unsigned long)key, pressed ? "pressed" : "released");
     }
     if (key == LV_KEY_ESC && pressed) {
-        lv_async_call(go_back, NULL);
+        shell_esc();
     }
 }
 
@@ -313,7 +333,11 @@ void shell_open(lv_obj_t *(*build)(void), int screen_id) {
     lv_group_t *group    = lv_group_create();
     lv_group_t *previous = lv_group_get_default();
     lv_group_set_default(group);
+    shell_on_esc(NULL, NULL);
     lv_obj_t *screen = build();
+    bool (*on_esc)(void *) = building_esc;
+    void *on_esc_arg       = building_esc_arg;
+    shell_on_esc(NULL, NULL);
     lv_group_set_default(previous);
     if (!screen) {
         nav_back();
@@ -324,7 +348,7 @@ void shell_open(lv_obj_t *(*build)(void), int screen_id) {
     if (lv_group_get_obj_count(group) == 0) {
         lv_group_add_obj(group, screen); // keys still reach a screen without focusable widgets
     }
-    frames[nav_depth() - 1] = (frame_t){screen, group};
+    frames[nav_depth() - 1] = (frame_t){screen, group, on_esc, on_esc_arg};
     show_top();
     lvgl_port_unlock();
 }

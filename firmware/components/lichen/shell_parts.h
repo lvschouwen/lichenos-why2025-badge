@@ -17,6 +17,7 @@ char const *home_selected_name(lv_obj_t *home); // the selected tile's app name;
 void      home_init(void);     // registers the "fw home" console command
 
 // shell.c
+void shell_esc(void);                // Esc pressed: the top screen's shell_on_esc() hook first, else shell_back()
 void shell_back(void);               // like Esc: pops the top screen (later, outside key handling)
 // Pop one screen / down to `screen` (nothing is popped when it is not on the stack), then call then(arg), all in one
 // async step: the target is showing when then runs, whatever else is queued (LVGL runs async calls newest first)

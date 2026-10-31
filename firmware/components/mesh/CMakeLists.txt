@@ -21,7 +21,7 @@ set(COMPANION_SRCS
     ${MC}/src/helpers/IdentityStore.cpp ${MC}/src/helpers/RegionMap.cpp ${MC}/src/helpers/TransportKeyStore.cpp
     ${MC}/examples/companion_radio/MyMesh.cpp ${MC}/examples/companion_radio/DataStore.cpp)
 idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "lora_radio.cpp" "mesh_store.c" "lora_airtime.c" "mesh_format.c" "mesh_tile.c"
-                            "meshcore_app.c" "meshcore_chat.c" "mesh_chat.c" "meshcore_settings.c" "radio_presets.c" "radio_confirm.c" "channel_input.c" "mc_first.c"
+                            "meshcore_app.c" "meshcore_chat.c" "mesh_chat.c" "meshcore_settings.c" "radio_presets.c" "radio_filter.c" "radio_confirm.c" "channel_input.c" "mc_first.c"
                             "../../../shared/arduino_shim/arduino_shim.cpp"
                             "../../../shared/arduino_shim/fs_shim.cpp" ${THIRD_PARTY_SRCS} ${COMPANION_SRCS}
                        INCLUDE_DIRS "."

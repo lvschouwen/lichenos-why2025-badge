@@ -9,10 +9,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "menu.h"
+#include "menu_filter.h"
 #include "mesh.h"
 #include "mesh_format.h"
 #include "meshcore_settings.h"
 #include "radio_confirm.h"
+#include "radio_filter.h"
 #include "radio_presets.h"
 #include "shell.h"
 #include "shell_parts.h"
@@ -529,6 +531,11 @@ static void on_radio_delete(lv_event_t *e) {
     }
 }
 
+static bool radio_row_matches(size_t preset, char const *query, void *ctx) {
+    (void)ctx;
+    return radio_filter_match(preset, query);
+}
+
 static lv_obj_t *build_radio(void) {
     mesh_settings_t s;
     if (!mesh_get_settings(&s)) {
@@ -536,11 +543,14 @@ static lv_obj_t *build_radio(void) {
     }
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Region & radio");
+    menu_filter_t *filter = menu_filter_create(screen, menu, radio_row_matches, NULL); // #32
     menu_note(menu, "Preset  (MHz " LV_SYMBOL_BULLET " kHz " LV_SYMBOL_BULLET " SF " LV_SYMBOL_BULLET " CR)");
     for (size_t i = 0; i < radio_preset_count() && i < MAX_PRESETS; i++) {
         preset_rows[i] = menu_add(menu, radio_preset_at(i)->title, "", pick_preset, (void *)(uintptr_t)i);
+        menu_filter_add(filter, preset_rows[i], i);
     }
     custom_row = menu_add(menu, "Custom...", "", open_custom, NULL);
+    menu_filter_fallback(filter, custom_row);
     menu_note(menu, "Advanced");
     tx_wanted = s.tx_dbm;
     menu_add_slider(menu, "TX power (dBm)", -9, 22, s.tx_dbm, on_tx, NULL);

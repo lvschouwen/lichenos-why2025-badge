@@ -4,7 +4,9 @@
 
 #include "esp_heap_caps.h"
 #include "fonts.h"
+#include "list_filter.h"
 #include "menu.h"
+#include "menu_filter.h"
 #include "mesh.h"
 #include "mesh_chat.h"
 #include "mesh_frame.h"
@@ -180,6 +182,16 @@ static void on_key(lv_event_t *e) {
     }
 }
 
+// Esc clears a draft first, then leaves (#57)
+static bool clear_draft(void *arg) {
+    (void)arg;
+    if (!ta || !lv_textarea_get_text(ta)[0]) {
+        return false;
+    }
+    lv_textarea_set_text(ta, "");
+    return true;
+}
+
 static void on_delete(lv_event_t *e) {
     (void)e;
     if (timer) {
@@ -214,6 +226,7 @@ static lv_obj_t *build_chat(void) {
     lv_obj_set_style_pad_row(screen, 10, 0);
     lv_obj_set_scrollable(screen, false);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    shell_on_esc(clear_draft, NULL);
 
     lv_obj_t *heading = lv_label_create(screen);
     lv_obj_set_width(heading, LV_PCT(100));
@@ -281,9 +294,23 @@ static void open_chat(void *arg) {
     shell_open(build_chat, SCREEN_CHAT);
 }
 
+static bool word_in_name(char const *word, void *name) {
+    return list_filter_text_has(name, word);
+}
+
+static bool name_matches(char const *name, char const *query) {
+    return list_filter_match(query, word_in_name, (void *)name);
+}
+
+static bool channel_matches(size_t i, char const *query, void *ctx) {
+    (void)ctx;
+    return name_matches(names[i], query);
+}
+
 static lv_obj_t *build_pick(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Write on a channel");
+    menu_filter_t *filter = menu_filter_create(screen, menu, channel_matches, NULL); // #57
     size_t    n      = mesh_channels_snapshot_wait(names, MAX_CHANNELS, SCREEN_WAIT_MS);
     if (n == MESH_BUSY) {
         menu_note(menu, "MeshCore is busy, press Esc and try again");
@@ -291,7 +318,7 @@ static lv_obj_t *build_pick(void) {
         menu_note(menu, "No channels (MeshCore not running?)");
     }
     for (size_t i = 0; i < n && n != MESH_BUSY; i++) {
-        menu_add(menu, names[i], "", open_chat, names[i]);
+        menu_filter_add(filter, menu_add(menu, names[i], "", open_chat, names[i]), i);
     }
     return screen;
 }
@@ -318,9 +345,22 @@ static void free_peers(lv_event_t *e) {
     peers = NULL;
 }
 
+// A word matches the name, or (hex digits) the start of the key
+static bool word_in_contact(char const *word, void *arg) {
+    mesh_contact_t const *c = arg;
+    return list_filter_text_has(c->name[0] ? c->name : "(no name)", word) ||
+           list_filter_key_starts(c->pubkey, sizeof(c->pubkey), word);
+}
+
+static bool contact_matches(size_t i, char const *query, void *ctx) {
+    (void)ctx;
+    return list_filter_match(query, word_in_contact, &peers[i]);
+}
+
 static lv_obj_t *build_dm_pick(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Message a contact");
+    menu_filter_t *filter = menu_filter_create(screen, menu, contact_matches, NULL); // #57
     lv_obj_add_event_cb(screen, free_peers, LV_EVENT_DELETE, NULL);
     heap_caps_free(peers);
     peers = heap_caps_malloc(MAX_PEERS * sizeof(*peers), MALLOC_CAP_SPIRAM);
@@ -332,7 +372,7 @@ static lv_obj_t *build_dm_pick(void) {
     size_t shown = 0;
     for (size_t i = 0; i < n; i++) {
         if (peers[i].type == ADV_TYPE_CHAT) {
-            menu_add(menu, peers[i].name[0] ? peers[i].name : "(no name)", "", open_dm, &peers[i]);
+            menu_filter_add(filter, menu_add(menu, peers[i].name[0] ? peers[i].name : "(no name)", "", open_dm, &peers[i]), i);
             shown++;
         }
     }

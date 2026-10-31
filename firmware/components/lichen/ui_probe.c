@@ -33,7 +33,7 @@ typedef struct {
 static void deliver_key(uint32_t key) {
     lv_group_t *group = shell_top_group();
     if (key == LV_KEY_ESC) {
-        shell_back(); // the shell's own Esc handling (it sees the indev's key, which this does not go through)
+        shell_esc(); // the shell's own Esc handling (it sees the indev's key, which this does not go through)
     } else if (key == LV_KEY_NEXT) {
         if (group) {
             lv_group_focus_next(group);

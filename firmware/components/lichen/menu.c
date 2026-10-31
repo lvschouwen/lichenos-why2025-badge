@@ -29,14 +29,28 @@ static void fire_enter(void *data) {
     row->on_enter(row->arg);
 }
 
-// No selectable row comes after this one in its menu
+// The menu's own user data: who gets the keys no row uses (#32)
+typedef struct {
+    bool (*fn)(uint32_t key, void *arg);
+    void *arg;
+} text_hook_t;
+
+// No selectable row comes after this one in its menu (hidden rows, which a filter hides, are not selectable)
 static bool is_last_row(lv_obj_t *menu, lv_obj_t *row) {
     for (uint32_t i = lv_obj_get_index(row) + 1; i < lv_obj_get_child_count(menu); i++) {
-        if (lv_obj_get_user_data(lv_obj_get_child(menu, (int32_t)i))) {
+        lv_obj_t *child = lv_obj_get_child(menu, (int32_t)i);
+        if (lv_obj_get_user_data(child) && !lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
             return false;
         }
     }
     return true;
+}
+
+static void pass_to_hook(lv_obj_t *obj, uint32_t key) {
+    text_hook_t *hook = lv_obj_get_user_data(lv_obj_get_parent(obj));
+    if (hook) {
+        hook->fn(key, hook->arg);
+    }
 }
 
 static void on_key(lv_event_t *e) {
@@ -56,9 +70,12 @@ static void on_key(lv_event_t *e) {
         } else {
             lv_group_focus_next(g);
         }
-    } else if (key == LV_KEY_ENTER && row->on_enter) {
-        // Opening a screen swaps the indev's group: not from inside its key handling
-        lv_async_call(fire_enter, row);
+    } else if (key == LV_KEY_ENTER) {
+        // Opening a screen swaps the indev's group: not from inside its key handling. A row a filter hid (it can
+        // still hold the focus when nothing matches) does nothing.
+        if (row->on_enter && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+            lv_async_call(fire_enter, row);
+        }
     } else if ((key == LV_KEY_LEFT || key == LV_KEY_RIGHT) && row->slider) {
         int step = (row->max - row->min) / SLIDER_STEPS;
         int v    = lv_slider_get_value(row->slider) + (key == LV_KEY_RIGHT ? step : -step);
@@ -72,6 +89,9 @@ static void on_key(lv_event_t *e) {
                 row->on_change(v, row->arg);
             }
         }
+    } else if (key != LV_KEY_ESC && key != LV_KEY_NEXT && key != LV_KEY_PREV && key != LV_KEY_LEFT &&
+               key != LV_KEY_RIGHT) {
+        pass_to_hook(obj, key);
     }
 }
 
@@ -96,6 +116,24 @@ lv_obj_t *menu_create(lv_obj_t *parent, char const *title) {
     lv_obj_set_style_pad_bottom(heading, 8, 0);
     lv_label_set_text(heading, title);
     return menu;
+}
+
+static void on_menu_delete(lv_event_t *e) {
+    free(lv_event_get_user_data(e));
+}
+
+void menu_on_text(lv_obj_t *menu, bool (*fn)(uint32_t key, void *arg), void *arg) {
+    text_hook_t *hook = lv_obj_get_user_data(menu);
+    if (!hook) {
+        hook = calloc(1, sizeof(*hook));
+        if (!hook) {
+            return;
+        }
+        lv_obj_set_user_data(menu, hook);
+        lv_obj_add_event_cb(menu, on_menu_delete, LV_EVENT_DELETE, hook);
+    }
+    hook->fn  = fn;
+    hook->arg = arg;
 }
 
 lv_obj_t *menu_note(lv_obj_t *menu, char const *text) {

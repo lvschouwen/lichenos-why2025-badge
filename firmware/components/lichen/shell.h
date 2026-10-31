@@ -37,6 +37,9 @@ void shell_home(void);
 // Builds a screen (lv_obj_create(NULL), runs in LVGL context) and shows it on top of the stack; Esc goes back. The
 // builder's focusable widgets are put in a group of their own (the default group while it runs).
 void shell_open(lv_obj_t *(*build)(void), int screen_id);
+// Called from inside a builder: the screen gets first use of Esc. fn(arg) runs on Esc (LVGL context); when it returns
+// true the Esc is used up (a search or a draft was cleared), otherwise the screen goes back as usual (#32).
+void shell_on_esc(bool (*fn)(void *arg), void *arg);
 // Update mode (#76): deletes every screen below the top one, home included, so their LVGL objects are freed. The top
 // one becomes the only frame; Esc and shell_open do nothing afterwards (there is no home to go back to).
 void shell_close_all_but_top(void);

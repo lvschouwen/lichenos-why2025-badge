@@ -17,3 +17,6 @@ lv_obj_t *menu_note(lv_obj_t *menu, char const *text);
 void      menu_set_value(lv_obj_t *row, char const *value);
 // Moves the selection to the index-th selectable row (counting menu_add and menu_add_slider rows only)
 void      menu_focus_row(lv_obj_t *menu, int index);
+// Keys no row uses (printable characters and Backspace) go to fn(key, arg),
+// from the key handling of whichever row has the focus. For type-to-search (menu_filter.h).
+void      menu_on_text(lv_obj_t *menu, bool (*fn)(uint32_t key, void *arg), void *arg);
