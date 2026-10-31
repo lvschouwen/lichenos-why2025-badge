@@ -1,6 +1,7 @@
 #include "psram_guard.h"
 
 #include "psram_boot.h"
+#include "psram_ldo.h"
 #include "psram_learned.h"
 #include "psram_pattern.h"
 #include "psram_scan.h"
@@ -198,6 +199,14 @@ static void cmd_psram(char const *args) {
         psram_sweep_cmd(args + 5 + (args[5] == ' '));
         return;
     }
+    if (strncmp(args, "stress", 6) == 0) {
+        psram_scan_stress((unsigned)atoi(args + 6));
+        return;
+    }
+    if (strncmp(args, "ldo", 3) == 0) {
+        psram_ldo_cmd(args + 3);
+        return;
+    }
     if (strncmp(args, "forget", 6) == 0) {
         psram_learned_forget();
         return;
@@ -245,18 +254,22 @@ static void add_spread_blocks(void) {
     }
 }
 
+void psram_guard_heap_start(void) {
+    psram_scan_release_heap();
+}
+
 void psram_guard_start(void) {
     lock = xSemaphoreCreateMutex();
     if (!lock) {
         return;
     }
-    psram_scan_run(); // before anything else takes memory: map the suspect window, quarantine bad chunks (#86)
+    psram_scan_run(); // before anything else takes memory: map the suspect window, learn new bad pages (#86)
     psram_boot_check(); // then, on an untouched heap, before the canaries and the rest of the boot load the bus
     heap_caps_monitor_local_minimum_free_size_start(); // "mem psram" min: from here, not the scan that held all of it
     add_spread_blocks();
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);
-    console_register("psram", "psram [test <KB> [dense] | qwatch <ms> | sweep [passes [phase]] | forget] (learned bad range, quarantine, canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
+    console_register("psram", "psram [test <KB> [dense] | qwatch <ms> | stress [rounds] | sweep [passes [phase]] | ldo [mV] | forget] (learned bad range, quarantine, canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
     if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 4096, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGW(TAG, "canary task failed to start");
     }

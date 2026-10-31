@@ -6,11 +6,13 @@
 
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
+#include "esp_heap_caps_init.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "fw_console.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "heap_memory_layout.h"
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -18,9 +20,11 @@
 #include <string.h>
 
 #define CHUNK       (64u * 1024u)  // scan and grab unit
-#define MAX_HELD    512
-#define MAX_FAR     1536
+#define MAX_HELD    64             // chunks held until reboot: the ones where this boot found new bad bytes
 #define MAX_CHUNKS  1024
+#define MAX_POOLS   8              // heap regions the IDF registers for the PSRAM (the pool + the irom/drom alignment gaps)
+#define MAX_PIECES  (PSRAM_QUAR_MAX + MAX_POOLS)
+#define MAX_HOLES   MAX_PIECES
 #define WIN_LO      0x48400000u // the suspect window of #40: bad bytes near 0x4855BA81, 4 MB check ended at 0x485C0A80
 #define WIN_HI      0x48A00000u
 #define LINE        128
@@ -46,24 +50,109 @@ typedef struct {
     size_t      len;
 } region_t;
 
-static chunk_t       s_chunks[MAX_CHUNKS]; // every chunk grabbed, sorted by address
-static size_t        s_n;
-static uint8_t      *s_far[MAX_FAR];     // the rest of the free PSRAM while the edges are split
-static size_t        s_nfar;
-static chunk_t       s_held[MAX_HELD];    // kept for good (quarantine)
-static size_t        s_nheld;
-static psram_quar_t  s_quar;
-static char          s_map[200];
-static region_t      s_regions[MAX_REGIONS];
-static size_t        s_nregions;
+typedef struct {
+    uint32_t caps[SOC_MEMORY_TYPE_NO_PRIOS];
+    intptr_t start, end;
+} pool_t;
+
+typedef struct {
+    uint8_t *mem;
+    size_t   len;
+} own_t; // memory only this module touches: a hole in the heap or a held chunk
+
+static pool_t             s_pools[MAX_POOLS]; // what the IDF wanted to add to the heap, held back until the quarantine is known
+static size_t             s_npools;
+static bool               s_released;
+static psram_quar_piece_t s_holes[MAX_HOLES]; // the PSRAM left out of the heap: the quarantine (plus slivers too short for a heap)
+static size_t             s_nholes;
+static size_t             s_hole_bytes, s_pieces, s_pieces_failed;
+static chunk_t            s_chunks[MAX_CHUNKS]; // every chunk grabbed, sorted by address
+static size_t             s_n;
+static chunk_t            s_held[MAX_HELD]; // kept until reboot: chunks with bad bytes found this boot (holes next boot)
+static size_t             s_nheld;
+static psram_quar_t       s_quar;
+static char               s_map[200];
+static region_t           s_regions[MAX_REGIONS];
+static size_t             s_nregions;
+static uint8_t           *s_good[2]; // control pages for the sweep, taken from the heap on first use
 static struct {
     size_t   scanned, bad_chunks, pass_bad[PASSES], bad_bytes;
     uint32_t xor_or, up_or, down_or;
     int64_t  us;
     uintptr_t lowest, highest;
-    size_t   gaps_in_window, rounds, short_pages, pages_held;
+    size_t   gaps_in_window, rounds;
+    size_t   missing; // quarantined bytes neither a hole nor held: must be 0
     uintptr_t find_lo, find_hi; // lowest / highest bad byte of this scan
 } s_stat;
+
+// ---- the heap: PSRAM minus the quarantine -------------------------------------------------------------------------
+
+esp_err_t __real_heap_caps_add_region_with_caps(uint32_t const caps[], intptr_t start, intptr_t end);
+
+// The IDF registers the PSRAM with the heap at system start, before app_main. Those calls are recorded and answered with
+// ESP_OK here; psram_scan_release_heap() registers the memory itself, cut around the quarantine. Until then PSRAM
+// allocations fail and default mallocs fall back to internal RAM, as on a board without PSRAM; nothing in the start-up
+// needs PSRAM. Regions added later (nobody does today) pass straight through.
+esp_err_t __wrap_heap_caps_add_region_with_caps(uint32_t const caps[], intptr_t start, intptr_t end) {
+    if (s_released || s_npools == MAX_POOLS || !caps) {
+        return __real_heap_caps_add_region_with_caps(caps, start, end);
+    }
+    pool_t *p = &s_pools[s_npools++];
+    memcpy(p->caps, caps, sizeof(p->caps));
+    p->start = start;
+    p->end   = end;
+    return ESP_OK;
+}
+
+// The quarantine = every page that ever failed (learned set, includes this boot's finds), +- margin, merged
+static void rebuild_quar(void) {
+    psram_learn_t lr = psram_learned_get();
+    s_quar           = (psram_quar_t){0};
+    uintptr_t page;
+    for (uintptr_t from = 0; psram_learn_next_failed(&lr, from, &page); from = page + PSRAM_PAGE) {
+        psram_quar_note(&s_quar, page, page + PSRAM_PAGE - 1, 1, s_stat.xor_or);
+    }
+}
+
+static void note_hole(uintptr_t lo, uintptr_t hi) {
+    if (hi > lo && s_nholes < MAX_HOLES) {
+        s_holes[s_nholes++] = (psram_quar_piece_t){lo, hi};
+        s_hole_bytes += hi - lo;
+    }
+}
+
+void psram_scan_release_heap(void) {
+    psram_learned_load();
+    rebuild_quar();
+    for (size_t i = 0; i < s_npools; i++) {
+        pool_t const      *p = &s_pools[i];
+        psram_quar_piece_t pieces[MAX_PIECES];
+        size_t    n  = psram_quar_cut(&s_quar, (uintptr_t)p->start, (uintptr_t)p->end, PSRAM_QUAR_MIN_PIECE, pieces, MAX_PIECES);
+        uintptr_t at = (uintptr_t)p->start;
+        for (size_t k = 0; k < n; k++) {
+            note_hole(at, pieces[k].lo);
+            esp_err_t err = __real_heap_caps_add_region_with_caps(p->caps, (intptr_t)pieces[k].lo, (intptr_t)pieces[k].hi);
+            if (err == ESP_OK) {
+                s_pieces++;
+            } else {
+                s_pieces_failed++;
+                ESP_LOGE(TAG, "heap: PSRAM piece %p..%p not registered: %s", (void *)pieces[k].lo, (void *)pieces[k].hi,
+                         esp_err_to_name(err));
+            }
+            at = pieces[k].hi;
+        }
+        note_hole(at, (uintptr_t)p->end);
+    }
+    s_released = true;
+    psram_learn_t lr = psram_learned_get();
+    size_t        qb = psram_quar_bytes(&s_quar);
+    ESP_LOGW(TAG, "heap: PSRAM registered in %u piece(s) (%u failed) from %u pool(s); %u hole(s) left out = %u KB: %u learned bad "
+                  "pages in %u range(s) = %u KB quarantine, %u KB slivers too short for a heap",
+             (unsigned)s_pieces, (unsigned)s_pieces_failed, (unsigned)s_npools, (unsigned)s_nholes, (unsigned)(s_hole_bytes >> 10),
+             psram_learn_failed_pages(&lr), (unsigned)s_quar.n, (unsigned)(qb >> 10), (unsigned)((s_hole_bytes > qb ? s_hole_bytes - qb : 0) >> 10));
+}
+
+// ---- the boot scan ------------------------------------------------------------------------------------------------
 
 static int by_addr(void const *a, void const *b) {
     uintptr_t x = (uintptr_t)((chunk_t const *)a)->mem, y = (uintptr_t)((chunk_t const *)b)->mem;
@@ -150,16 +239,6 @@ static void scan_chunk(chunk_t *c) {
     }
 }
 
-// The quarantine = every page that ever failed (learned set, includes this boot's finds), +- margin, merged
-static void rebuild_quar(void) {
-    psram_learn_t lr = psram_learned_get();
-    s_quar           = (psram_quar_t){0};
-    uintptr_t page;
-    for (uintptr_t from = 0; psram_learn_next_failed(&lr, from, &page); from = page + PSRAM_PAGE) {
-        psram_quar_note(&s_quar, page, page + PSRAM_PAGE - 1, 1, s_stat.xor_or);
-    }
-}
-
 static void grab_all(void) {
     while (s_n < MAX_CHUNKS) {
         uint8_t *m = heap_caps_aligned_alloc(LINE, CHUNK, PSRAM_CAPS);
@@ -176,7 +255,17 @@ static bool in_window(chunk_t const *c) {
     return a + CHUNK > WIN_LO && a < WIN_HI;
 }
 
-// Gaps between neighbouring chunks inside the window are memory somebody else already owns (code, rodata, early heap)
+static bool is_hole(uintptr_t lo, uintptr_t hi) {
+    for (size_t i = 0; i < s_nholes; i++) {
+        if (lo >= s_holes[i].lo && hi <= s_holes[i].hi) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Gaps between neighbouring chunks inside the window are the quarantine holes or memory somebody else already owns
+// (code, rodata, early heap)
 static void log_map(void) {
     extern int _instruction_reserved_start, _instruction_reserved_end, _rodata_reserved_start, _rodata_reserved_end;
     s_stat.lowest  = s_n ? (uintptr_t)s_chunks[0].mem : 0;
@@ -191,118 +280,28 @@ static void log_map(void) {
     for (size_t i = 1; i < s_n; i++) {
         uintptr_t end = (uintptr_t)s_chunks[i - 1].mem + CHUNK, next = (uintptr_t)s_chunks[i].mem;
         if (next - end > 4096) {
-            if (next > WIN_LO && end < WIN_HI) {
+            bool hole = is_hole(end, next);
+            if (next > WIN_LO && end < WIN_HI && !hole) {
                 s_stat.gaps_in_window++;
             }
-            ESP_LOGW(TAG, "map: in use %p..%p (%u KB)%s", (void *)end, (void *)next, (unsigned)((next - end) >> 10),
-                     next > WIN_LO && end < WIN_HI ? " in the scan window" : "");
+            ESP_LOGW(TAG, "map: %s %p..%p (%u KB)%s", hole ? "quarantine hole" : "in use", (void *)end, (void *)next,
+                     (unsigned)((next - end) >> 10), next > WIN_LO && end < WIN_HI ? " in the scan window" : "");
         }
     }
 }
 
-static bool inside_quar(uintptr_t a, size_t len) {
-    for (size_t i = 0; i < s_quar.n; i++) {
-        if (a >= s_quar.r[i].lo && a + len <= s_quar.r[i].hi) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static void hold(uint8_t *mem, size_t len, chunk_t const *from) {
-    if (s_nheld < MAX_HELD) {
-        s_held[s_nheld]     = from ? *from : (chunk_t){0};
-        s_held[s_nheld].mem = mem;
-        s_held[s_nheld].len = len;
-        s_nheld++;
-    } else {
-        heap_caps_free(mem);
-    }
-}
-
-// The intersection of a chunk with the quarantine ranges it touches (their hull)
-static void touched(uintptr_t base, size_t len, uintptr_t *lo, uintptr_t *hi) {
-    *lo = UINTPTR_MAX;
-    *hi = 0;
-    for (size_t i = 0; i < s_quar.n; i++) {
-        if (base < s_quar.r[i].hi && base + len > s_quar.r[i].lo) {
-            uintptr_t l = s_quar.r[i].lo > base ? s_quar.r[i].lo : base;
-            uintptr_t h = s_quar.r[i].hi < base + len ? s_quar.r[i].hi : base + len;
-            *lo         = l < *lo ? l : *lo;
-            *hi         = h > *hi ? h : *hi;
-        }
-    }
-}
-
-// A chunk that only touches the quarantine at its edge: give it back and claim just the part inside the range. With
-// everything else PSRAM held (drop_far is deferred) the freed block is the only free memory, so a filler allocation
-// takes its start and the wanted piece follows it. The slop is the heap header and the 128 B alignment: the piece
-// starts at or before the range and ends at or after it; if the heap hands something else, the retry widens the slop
-// and a failure is counted ("pages missing") instead of hidden.
-static void grab_rest(void);
-
-static void split_edge(chunk_t const *c) {
-    uintptr_t base = (uintptr_t)c->mem, lo, hi;
-    touched(base, CHUNK, &lo, &hi);
-    heap_caps_free(c->mem);
-    static size_t const slop[3] = {192, 512, 2048};
-    // The chunk ends are the neighbours' heap headers: do not ask for those bytes, they were never payload
-    uintptr_t lo_req = lo == base ? base + 640 : lo, hi_req = hi == base + CHUNK ? base + CHUNK - 640 : hi;
-    for (int attempt = 0; attempt < 3; attempt++) {
-        size_t    fill = lo_req - base > slop[attempt] ? lo_req - base - slop[attempt] : 0;
-        uintptr_t end  = hi_req + slop[attempt] < base + CHUNK - 384 ? hi_req + slop[attempt] : base + CHUNK - 384;
-        size_t    want = (end - (base + fill) + LINE - 1) & ~(size_t)(LINE - 1);
-        uint8_t  *f    = fill ? heap_caps_aligned_alloc(LINE, fill, PSRAM_CAPS) : NULL;
-        uint8_t  *m    = heap_caps_aligned_alloc(LINE, want, PSRAM_CAPS);
-        if (m && (uintptr_t)m <= lo_req && (uintptr_t)m + want >= hi_req) {
-            hold(m, want, c);
-            s_stat.pages_held++;
-            if (f && s_nfar < MAX_FAR) { // keep the rest of this chunk taken too: the next edge chunk must again be the only free block
-                s_far[s_nfar++] = f;
-            } else {
-                heap_caps_free(f);
-            }
-            grab_rest();
-            return;
-        }
-        heap_caps_free(f);
-        heap_caps_free(m); // free(NULL) is fine
-    }
-    s_stat.short_pages++;
-}
-
-// Everything still free is taken for the moment, so a freed edge chunk is the only free block (split_edge)
-static void grab_rest(void) {
-    for (size_t size = CHUNK; size >= 256; size /= 2) { // then the fragments, down to the smallest the heap hands out
-        while (s_nfar < MAX_FAR) {
-            uint8_t *m = heap_caps_aligned_alloc(LINE, size, PSRAM_CAPS);
-            if (!m) {
-                break;
-            }
-            s_far[s_nfar++] = m;
-        }
-    }
-}
-
+// Chunks with new bad bytes (the quarantine grew into them) stay allocated until reboot; next boot they are holes
 static void keep_or_free(void) {
-    grab_rest();
-    for (size_t i = 0; i < s_n; i++) { // first the ones that stay, so a freed neighbour never merges into an edge block
+    for (size_t i = 0; i < s_n; i++) {
         uintptr_t a = (uintptr_t)s_chunks[i].mem;
-        if (inside_quar(a, CHUNK)) {
-            hold(s_chunks[i].mem, CHUNK, &s_chunks[i]);
-            s_chunks[i].mem = NULL;
-        } else if (psram_quar_overlaps(&s_quar, a, CHUNK)) {
-            split_edge(&s_chunks[i]);
-            s_chunks[i].mem = NULL;
+        if (psram_quar_overlaps(&s_quar, a, CHUNK) && s_nheld < MAX_HELD) {
+            s_held[s_nheld++] = s_chunks[i];
+            s_chunks[i].mem   = NULL;
         }
     }
     for (size_t i = 0; i < s_n; i++) {
-        heap_caps_free(s_chunks[i].mem);
+        heap_caps_free(s_chunks[i].mem); // free(NULL) is fine
     }
-    for (size_t i = 0; i < s_nfar; i++) {
-        heap_caps_free(s_far[i]);
-    }
-    s_nfar = 0;
 }
 
 // Chunks well outside the window go back at once, so the rest of the boot is not starved while the window is scanned
@@ -349,11 +348,40 @@ static void extra_rounds(int64_t start) {
     }
 }
 
+static bool held_covers(uintptr_t lo, uintptr_t hi) {
+    for (size_t i = 0; i < s_nheld; i++) {
+        uintptr_t m = (uintptr_t)s_held[i].mem;
+        if (lo >= m && hi <= m + s_held[i].len) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Every quarantined page must be a hole in the heap or inside a chunk held this boot; anything else is counted
+static size_t missing_in(psram_quar_range_t const *r) {
+    size_t missing = 0;
+    for (uintptr_t p = r->lo; p < r->hi; p += PSRAM_PAGE) {
+        if (!is_hole(p, p + PSRAM_PAGE) && !held_covers(p, p + PSRAM_PAGE)) {
+            missing += PSRAM_PAGE;
+        }
+    }
+    return missing;
+}
+
+static void coverage(void) {
+    s_stat.missing = 0;
+    for (size_t i = 0; i < s_quar.n; i++) {
+        s_stat.missing += missing_in(&s_quar.r[i]);
+    }
+}
+
 void psram_scan_run(void) {
     int64_t start = esp_timer_get_time();
     size_t  free0 = heap_caps_get_free_size(PSRAM_CAPS);
-    psram_learned_load();
-    rebuild_quar(); // quarantine what was learned before looking at anything
+    if (!s_released) {
+        psram_scan_release_heap(); // app_main does this first; here only as a safety net
+    }
     grab_all();
     log_map();
     drop_far();
@@ -372,20 +400,33 @@ void psram_scan_run(void) {
     }
     rebuild_quar();
     keep_or_free();
+    coverage();
     s_stat.us = esp_timer_get_time() - start;
     ESP_LOGW(TAG, "scan: window %p..%p, %u chunk scans + %u extra rounds in %u ms, %u bad chunks, bad bytes sparse %u dense %u/%u/%u; "
-                  "flipped bits %08x (0->1 %08x, 1->0 %08x); quarantine %u range(s) %u KB, held %u pieces (%u 4K edge pages, %u missing), free PSRAM %u -> %u KB",
+                  "flipped bits %08x (0->1 %08x, 1->0 %08x); quarantine %u range(s) %u KB: %u heap holes %u KB, %u chunks of 64 KB "
+                  "held until reboot (new this boot), %u KB NOT covered; free PSRAM %u -> %u KB",
              (void *)WIN_LO, (void *)WIN_HI, (unsigned)s_stat.scanned, (unsigned)s_stat.rounds, (unsigned)(s_stat.us / 1000),
              (unsigned)s_stat.bad_chunks, (unsigned)s_stat.pass_bad[0], (unsigned)s_stat.pass_bad[1], (unsigned)s_stat.pass_bad[2],
              (unsigned)s_stat.pass_bad[3], (unsigned)s_stat.xor_or, (unsigned)s_stat.up_or, (unsigned)s_stat.down_or,
-             (unsigned)s_quar.n, (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)s_nheld, (unsigned)s_stat.pages_held,
-             (unsigned)s_stat.short_pages, (unsigned)(free0 >> 10), (unsigned)(heap_caps_get_free_size(PSRAM_CAPS) >> 10));
+             (unsigned)s_quar.n, (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)s_nholes, (unsigned)(s_hole_bytes >> 10),
+             (unsigned)s_nheld, (unsigned)(s_stat.missing >> 10), (unsigned)(free0 >> 10),
+             (unsigned)(heap_caps_get_free_size(PSRAM_CAPS) >> 10));
 }
 
 void psram_scan_note_region(char const *name, void const *addr, size_t len) {
     if (s_nregions < MAX_REGIONS) {
         s_regions[s_nregions++] = (region_t){name, (uintptr_t)addr, len};
     }
+}
+
+static char const *range_status(psram_quar_range_t const *r) {
+    bool hole = true, covered = true;
+    for (uintptr_t p = r->lo; p < r->hi; p += PSRAM_PAGE) {
+        bool h = is_hole(p, p + PSRAM_PAGE);
+        hole    = hole && h;
+        covered = covered && (h || held_covers(p, p + PSRAM_PAGE));
+    }
+    return hole ? "heap hole" : covered ? "held until reboot (new this boot)" : "NOT HELD";
 }
 
 void psram_scan_print(void) {
@@ -400,25 +441,28 @@ void psram_scan_print(void) {
     }
     for (size_t i = 0; i < s_quar.n; i++) {
         psram_quar_range_t const *r = &s_quar.r[i];
-        console_reply("psram quarantine %u: %p..%p (%u KB), failed pages %p..%p (%u), bits %08x", (unsigned)i,
+        console_reply("psram quarantine %u: %p..%p (%u KB), failed pages %p..%p (%u), bits %08x: %s", (unsigned)i,
                       (void *)r->lo, (void *)r->hi, (unsigned)((r->hi - r->lo) >> 10), (void *)r->first_bad,
-                      (void *)r->last_bad, (unsigned)r->bad_bytes, (unsigned)r->bits);
+                      (void *)r->last_bad, (unsigned)r->bad_bytes, (unsigned)r->bits, range_status(r));
     }
+    psram_learned_print();
     size_t held = 0;
     for (size_t i = 0; i < s_nheld; i++) {
         held += s_held[i].len;
     }
-    psram_learned_print();
-    console_reply("psram quarantine: %u ranges, total %u KB, %u KB held in %u pieces (%u edge pieces, %u missing)",
-                  (unsigned)s_quar.n, (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)(held >> 10), (unsigned)s_nheld,
-                  (unsigned)s_stat.pages_held, (unsigned)s_stat.short_pages);
+    console_reply("psram quarantine: %u ranges, %u KB; %u heap holes %u KB (left out of the heap at boot), %u chunks %u KB held until "
+                  "reboot (new finds), %u KB NOT covered; PSRAM heap in %u pieces from %u pools, %u pieces failed",
+                  (unsigned)s_quar.n, (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)s_nholes, (unsigned)(s_hole_bytes >> 10),
+                  (unsigned)s_nheld, (unsigned)(held >> 10), (unsigned)(s_stat.missing >> 10), (unsigned)s_pieces,
+                  (unsigned)s_npools, (unsigned)s_pieces_failed);
+    for (size_t i = 0; i < s_nholes; i++) {
+        console_reply("psram hole %u: %p..%p (%u KB)", (unsigned)i, (void *)s_holes[i].lo, (void *)s_holes[i].hi,
+                      (unsigned)((s_holes[i].hi - s_holes[i].lo) >> 10));
+    }
     for (size_t i = 0; i < s_nheld; i++) {
-        size_t t = s_held[i].bad[0] + s_held[i].bad[1] + s_held[i].bad[2] + s_held[i].bad[3];
-        if (t) {
-            console_reply("psram scan chunk %p: bad bytes sparse %u dense %u/%u/%u", (void *)s_held[i].mem,
-                          (unsigned)s_held[i].bad[0], (unsigned)s_held[i].bad[1], (unsigned)s_held[i].bad[2],
-                          (unsigned)s_held[i].bad[3]);
-        }
+        console_reply("psram scan chunk %p held: bad bytes sparse %u dense %u/%u/%u", (void *)s_held[i].mem,
+                      (unsigned)s_held[i].bad[0], (unsigned)s_held[i].bad[1], (unsigned)s_held[i].bad[2],
+                      (unsigned)s_held[i].bad[3]);
     }
     console_reply("psram map: %s", s_map);
     for (size_t i = 0; i < s_nregions; i++) {
@@ -426,6 +470,27 @@ void psram_scan_print(void) {
         console_reply("psram region %s %p..%p%s", g->name, (void *)g->addr, (void *)(g->addr + g->len),
                       psram_quar_overlaps(&s_quar, g->addr, g->len) ? " OVERLAPS the quarantine" : "");
     }
+}
+
+// ---- tests over the quarantine (holes + held chunks: ours alone) --------------------------------------------------
+
+static size_t own_n(void) {
+    return s_nholes + s_nheld;
+}
+
+static own_t own_at(size_t i) {
+    if (i < s_nholes) {
+        return (own_t){(uint8_t *)s_holes[i].lo, s_holes[i].hi - s_holes[i].lo};
+    }
+    return (own_t){s_held[i - s_nholes].mem, s_held[i - s_nholes].len};
+}
+
+static size_t own_bytes(void) {
+    size_t sum = 0;
+    for (size_t i = 0; i < own_n(); i++) {
+        sum += own_at(i).len;
+    }
+    return sum;
 }
 
 #define WATCH_MAX 128
@@ -439,18 +504,18 @@ typedef struct {
 
 static void watch_read(watch_t *w) {
     *w = (watch_t){0};
-    for (size_t i = 0; i < s_nheld; i++) {
-        uint8_t *m = s_held[i].mem;
-        sync(m, s_held[i].len);
-        for (size_t off = 0; off < s_held[i].len; off += LINE) {
-            psram_check_t r = psram_pattern_check_x(m + off, LINE, (uintptr_t)m + off, 0);
+    for (size_t i = 0; i < own_n(); i++) {
+        own_t o = own_at(i);
+        sync(o.mem, o.len);
+        for (size_t off = 0; off < o.len; off += LINE) {
+            psram_check_t r = psram_pattern_check_x(o.mem + off, LINE, (uintptr_t)o.mem + off, 0);
             if (!r.bad_bytes) {
                 continue;
             }
             if (w->n < WATCH_MAX) {
-                w->at[w->n] = (uintptr_t)m + off + r.first_bad;
+                w->at[w->n] = (uintptr_t)o.mem + off + r.first_bad;
             }
-            uintptr_t blo = (uintptr_t)m + off + r.first_bad, bhi = (uintptr_t)m + off + r.last_bad;
+            uintptr_t blo = (uintptr_t)o.mem + off + r.first_bad, bhi = (uintptr_t)o.mem + off + r.last_bad;
             w->lo = !w->hi || blo < w->lo ? blo : w->lo;
             w->hi = bhi > w->hi ? bhi : w->hi;
             psram_learned_mark(blo);
@@ -473,28 +538,21 @@ static size_t common(watch_t const *a, watch_t const *b) {
     return same;
 }
 
-static size_t held_bytes(void) {
-    size_t sum = 0;
-    for (size_t i = 0; i < s_nheld; i++) {
-        sum += s_held[i].len;
-    }
-    return sum;
-}
-
 static void watch_line(char const *when, watch_t const *w) {
     console_reply("psram qwatch %s: %u bad lines, %u bad bytes, 0->1 %08x, 1->0 %08x", when, (unsigned)w->n, (unsigned)w->bytes,
                   (unsigned)w->up, (unsigned)w->down);
 }
 
 void psram_scan_watch(unsigned ms) {
-    if (!s_nheld) {
-        console_reply("psram qwatch: nothing held");
+    if (!own_n()) {
+        console_reply("psram qwatch: no quarantine");
         return;
     }
     static watch_t a, b, c;
-    for (size_t i = 0; i < s_nheld; i++) {
-        psram_pattern_fill_x(s_held[i].mem, s_held[i].len, (uintptr_t)s_held[i].mem, 0);
-        sync(s_held[i].mem, s_held[i].len);
+    for (size_t i = 0; i < own_n(); i++) {
+        own_t o = own_at(i);
+        psram_pattern_fill_x(o.mem, o.len, (uintptr_t)o.mem, 0);
+        sync(o.mem, o.len);
     }
     watch_read(&a); // straight after the write
     vTaskDelay(pdMS_TO_TICKS(ms));
@@ -512,25 +570,70 @@ void psram_scan_watch(unsigned ms) {
     for (size_t i = 0; i < b.n && i < 8; i++) {
         console_reply("psram qwatch bad byte %p (offset in line %u)", (void *)b.at[i], (unsigned)(b.at[i] & (LINE - 1)));
     }
-    console_reply("psram qwatch: %u chunks (%u KB), wait %u ms; same first-bad byte in write/wait %u, wait/again %u of %u",
-                  (unsigned)s_nheld, (unsigned)(held_bytes() >> 10), ms, (unsigned)common(&a, &b), (unsigned)common(&b, &c),
+    console_reply("psram qwatch: %u blocks (%u KB), wait %u ms; same first-bad byte in write/wait %u, wait/again %u of %u",
+                  (unsigned)own_n(), (unsigned)(own_bytes() >> 10), ms, (unsigned)common(&a, &b), (unsigned)common(&b, &c),
                   (unsigned)b.n);
 }
 
-// Held (ours) pages for the delay-line sweep: up to max_bad pages that ever failed, spread over the set, and up to max_good
-// held pages farthest from any failed page (known good as far as the scans can tell)
+// "fw psram stress <rounds>": the boot scan's dense passes over the quarantine, on demand: pattern and inverted
+// pattern alternately, each written back and read from the RAM. Bad bytes per round and in total; feeds the learned set.
+void psram_scan_stress(unsigned rounds) {
+    if (!own_n()) {
+        console_reply("psram stress: no quarantine");
+        return;
+    }
+    rounds = rounds ? (rounds > 64 ? 64 : rounds) : 8;
+    size_t    total = 0, per[64] = {0};
+    uint32_t  up = 0, down = 0;
+    uintptr_t lo = 0, hi = 0;
+    int64_t   t0 = esp_timer_get_time();
+    for (unsigned r = 0; r < rounds; r++) {
+        uint32_t mask = r & 1 ? 0xFFFFFFFFu : 0;
+        for (size_t i = 0; i < own_n(); i++) {
+            own_t o = own_at(i);
+            psram_pattern_fill_x(o.mem, o.len, (uintptr_t)o.mem, mask);
+            sync(o.mem, o.len);
+        }
+        for (size_t i = 0; i < own_n(); i++) {
+            own_t         o = own_at(i);
+            psram_check_t c = psram_pattern_check_x(o.mem, o.len, (uintptr_t)o.mem, mask);
+            if (!c.bad_bytes) {
+                continue;
+            }
+            per[r] += c.bad_bytes;
+            up |= c.up_or;
+            down |= c.down_or;
+            uintptr_t blo = (uintptr_t)o.mem + c.first_bad, bhi = (uintptr_t)o.mem + c.last_bad;
+            lo = !hi || blo < lo ? blo : lo;
+            hi = bhi > hi ? bhi : hi;
+            psram_learned_mark_buf(o.mem, o.len, (uintptr_t)o.mem, mask, c.first_bad, c.last_bad);
+        }
+        total += per[r];
+        vTaskDelay(1);
+    }
+    if (hi) {
+        psram_learned_feed(lo, hi, "stress");
+    }
+    char line[220];
+    int  n = 0;
+    for (unsigned r = 0; r < rounds && r < 32 && n < (int)sizeof(line) - 8; r++) {
+        n += snprintf(line + n, sizeof(line) - (size_t)n, " %u", (unsigned)per[r]);
+    }
+    console_reply("psram stress: %u rounds (pattern, inverted, ...) over %u KB quarantine: %u bad bytes, 0->1 %08x, 1->0 %08x, %u ms; per round:%s",
+                  rounds, (unsigned)(own_bytes() >> 10), (unsigned)total, (unsigned)up, (unsigned)down,
+                  (unsigned)((esp_timer_get_time() - t0) / 1000), line);
+}
+
+// Pages for the delay-line sweep: up to max_bad quarantined 4 KB pages that failed before, spread over the set, and up
+// to max_good pages from the heap outside the quarantine (never seen failing), kept for the next sweep
 size_t psram_scan_test_pages(uint8_t **bad, size_t max_bad, uint8_t **good, size_t max_good, size_t *n_good) {
     psram_learn_t lr = psram_learned_get();
     uint8_t      *cand[512];
     size_t        nc = 0;
     uintptr_t     page;
     for (uintptr_t from = 0; nc < 512 && psram_learn_next_failed(&lr, from, &page); from = page + PSRAM_PAGE) {
-        for (size_t i = 0; i < s_nheld; i++) {
-            uintptr_t m = (uintptr_t)s_held[i].mem;
-            if (page >= m && page + PSRAM_PAGE <= m + s_held[i].len) {
-                cand[nc++] = (uint8_t *)page;
-                break;
-            }
+        if (is_hole(page, page + PSRAM_PAGE) || held_covers(page, page + PSRAM_PAGE)) {
+            cand[nc++] = (uint8_t *)page;
         }
     }
     size_t nb = nc < max_bad ? nc : max_bad;
@@ -538,30 +641,13 @@ size_t psram_scan_test_pages(uint8_t **bad, size_t max_bad, uint8_t **good, size
         bad[k] = cand[k * nc / nb];
     }
     *n_good = 0;
-    for (size_t g = 0; g < max_good; g++) { // greedy: the held page with the largest distance to failed pages and chosen ones
-        uintptr_t best = 0, best_d = 0;
-        for (size_t i = 0; i < s_nheld; i++) {
-            uintptr_t m = ((uintptr_t)s_held[i].mem + PSRAM_PAGE - 1) & ~(uintptr_t)(PSRAM_PAGE - 1);
-            for (; m + PSRAM_PAGE <= (uintptr_t)s_held[i].mem + s_held[i].len; m += PSRAM_PAGE) {
-                uintptr_t d = UINTPTR_MAX;
-                for (size_t k = 0; k < nc; k++) {
-                    uintptr_t c = (uintptr_t)cand[k], e = c > m ? c - m : m - c;
-                    d = e < d ? e : d;
-                }
-                for (size_t k = 0; k < *n_good; k++) {
-                    uintptr_t c = (uintptr_t)good[k], e = c > m ? c - m : m - c;
-                    d = e < d ? e : d;
-                }
-                if (d > best_d && d != UINTPTR_MAX) {
-                    best_d = d;
-                    best   = m;
-                }
-            }
+    for (size_t g = 0; g < max_good && g < 2; g++) {
+        if (!s_good[g]) {
+            s_good[g] = heap_caps_aligned_alloc(PSRAM_PAGE, PSRAM_PAGE, PSRAM_CAPS);
         }
-        if (!best || best_d < PSRAM_PAGE) {
-            break;
+        if (s_good[g]) {
+            good[(*n_good)++] = s_good[g];
         }
-        good[(*n_good)++] = (uint8_t *)best;
     }
     return nb;
 }

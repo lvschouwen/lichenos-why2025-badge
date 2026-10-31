@@ -17,9 +17,10 @@ CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 
 # PSRAM is ordinary malloc memory: big buffers, lwIP and the UI live there, internal RAM stays for DMA
 CONFIG_SPIRAM=y
-# 200 MHz. At 80 MHz PSRAM is ~40 % slower. The bit-8 read errors seen at 200 MHz (#40) came with the flash-write
-# cache stalls of #31; since e24d170 a 108 MB test under load has 0 flips (#42); psram_guard keeps watching. No ECC:
-# it crashes with the PPA (esp-idf #17855) and a mode change must never go out over Wi-Fi (crash loop until power off).
+# 200 MHz. At 80 MHz PSRAM is ~40 % slower. This badge has a ~1 MB region of weak cells (bit 8, first beat of a burst;
+# #86: independent of delay line, DQS phase, LDO voltage 1.7-2.0 V and XIP) that psram_guard keeps out of the heap.
+# No ECC: on P4 v1.0 it breaks (esp-idf #17855, OTA; here it crash-looped until power off). A mode change must never
+# go out over Wi-Fi.
 CONFIG_SPIRAM_SPEED_200M=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y

@@ -8,7 +8,11 @@
 // Cost: 4 x 64 KB + two small blocks of PSRAM, plus one more 64 KB block during update mode. Each pass reads ~270 KB
 // of PSRAM (about 2.7 MB/s at a 100 ms period); not measured on hardware, "fw psram" shows the last and longest pass.
 
-// After the heaps are up (app_main, early): allocates the canaries, starts the task, registers "fw psram"
+// First line of app_main: registers the PSRAM with the heap minus the learned bad pages (#86). Until this runs there
+// is no PSRAM heap (the IDF's registration is held back), so nothing may allocate in PSRAM before it.
+void psram_guard_heap_start(void);
+
+// After the heaps are up (app_main, early): boot scan, boot check, canaries, the task, "fw psram"
 void psram_guard_start(void);
 
 // One more canary while update mode runs (#37 hits then); idempotent. From any task.

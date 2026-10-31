@@ -88,3 +88,24 @@ size_t psram_quar_bytes(psram_quar_t const *q) {
     }
     return sum;
 }
+
+size_t psram_quar_cut(psram_quar_t const *q, uintptr_t start, uintptr_t end, size_t min, psram_quar_piece_t *out, size_t max) {
+    size_t    n  = 0;
+    uintptr_t at = start;
+    for (size_t i = 0; i < q->n && at < end; i++) {
+        if (q->r[i].hi <= at) {
+            continue;
+        }
+        if (q->r[i].lo >= end) {
+            break;
+        }
+        if (q->r[i].lo > at && q->r[i].lo - at >= min && n < max) {
+            out[n++] = (psram_quar_piece_t){at, q->r[i].lo};
+        }
+        at = q->r[i].hi > at ? q->r[i].hi : at;
+    }
+    if (at < end && end - at >= min && n < max) {
+        out[n++] = (psram_quar_piece_t){at, end};
+    }
+    return n;
+}

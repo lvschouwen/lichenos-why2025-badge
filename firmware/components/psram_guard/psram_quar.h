@@ -10,6 +10,7 @@
 #define PSRAM_QUAR_GRAIN  (4u * 1024u)   // ranges start and end on this (one page): the edges are claimed in 4 KB pieces
 #define PSRAM_QUAR_MARGIN (4u * 1024u)   // one page each side of every failed page (Lucas); ranges that touch merge
 #define PSRAM_QUAR_MAX    256            // separate ranges kept; beyond that the nearest ones are merged
+#define PSRAM_QUAR_MIN_PIECE (32u * 1024u) // heap left between two ranges shorter than this is not worth its own heap: it joins the quarantine
 
 typedef struct {
     uintptr_t lo, hi;         // quarantined [lo, hi), grain-aligned, margin included
@@ -33,3 +34,12 @@ bool psram_quar_overlaps(psram_quar_t const *q, uintptr_t addr, size_t len);
 
 // Total quarantined bytes
 size_t psram_quar_bytes(psram_quar_t const *q);
+
+typedef struct {
+    uintptr_t lo, hi; // [lo, hi)
+} psram_quar_piece_t;
+
+// The parts of the heap pool [start, end) outside the quarantine that are at least min bytes long, in address order;
+// returns how many (at most max). Shorter parts, and pieces beyond max, are left out: they stay out of the heap, so
+// the quarantine is exactly the memory between the pieces (psram_scan.c registers the pieces as the PSRAM heap).
+size_t psram_quar_cut(psram_quar_t const *q, uintptr_t start, uintptr_t end, size_t min, psram_quar_piece_t *out, size_t max);

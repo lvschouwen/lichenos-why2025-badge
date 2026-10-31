@@ -106,6 +106,7 @@ static void log_heap(char const *name, uint32_t caps) {
 }
 
 void app_main(void) {
+    psram_guard_heap_start(); // the PSRAM heap minus the quarantined pages; nothing may allocate in PSRAM before this (#86)
     log_tap_start();
     psram_guard_start(); // canaries early, so they sit low in the PSRAM heap (#40)
     log_store_start(); // after log_tap: its hook chains to the boot screen's
