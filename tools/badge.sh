@@ -340,7 +340,11 @@ OTA_PIECE_TRIES=${BADGE_OTA_PIECE_TRIES:-6}
 
 # ota_put_pieces <ip> <route> <local file> [badge path]: upload in checked pieces, the whole file checked at the end
 ota_put_pieces() {
-    local ip=$1 route=$2 file=$3 path=${4:-} total file_sha piece piece_sha offset=0 index=0 try reply
+    local ip=$1 route=$2 file=$3 path=${4:-} total file_sha piece piece_sha offset=0 index=0 try reply snapshot
+    # Work on a private copy: a rebuild during the push must not mix two images (#37)
+    snapshot=$(mktemp)
+    cp -- "$file" "$snapshot" || { rm -f -- "$snapshot"; return 1; }
+    file=$snapshot
     total=$(stat -c %s "$file")
     file_sha=$(sha256sum "$file" | cut -d' ' -f1)
     piece=$(mktemp)
@@ -359,7 +363,7 @@ ota_put_pieces() {
                 break
             fi
             if [ "$try" -ge "$OTA_PIECE_TRIES" ]; then
-                rm -f -- "$piece"
+                rm -f -- "$piece" "$snapshot"
                 echo "giving up on the piece at $offset: $reply" >&2
                 return 1
             fi
@@ -368,7 +372,7 @@ ota_put_pieces() {
         offset=$((offset + $(stat -c %s "$piece")))
         index=$((index + 1))
     done
-    rm -f -- "$piece"
+    rm -f -- "$piece" "$snapshot"
     echo "$reply"
 }
 

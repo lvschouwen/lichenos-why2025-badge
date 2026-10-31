@@ -21,6 +21,7 @@
 #include "freertos/task.h"
 #include "ota_bmp.h"
 #include "ota_path.h"
+#include "ota_pieces.h"
 #include "ota_proto.h"
 #include "miniz.h" // the ROM inflater
 #include "sha256.h"
@@ -538,10 +539,15 @@ static struct {
     size_t      total;
     size_t      got;
     long long   sent;
+    ota_pieces_t pieces; // SHA-256 of each verified piece, to find damaged ones if the whole file doesn't match
 } staged;
 
+// Whole cache lines, so no neighbouring allocation or DMA driver shares a line with the staging buffer (#37)
+#define STAGE_ALIGN CONFIG_CACHE_L2_CACHE_LINE_SIZE
+
 static void staged_reset(void) {
-    free(staged.data);
+    heap_caps_free(staged.data);
+    ota_pieces_clear(&staged.pieces);
     memset(&staged, 0, sizeof(staged));
 }
 
@@ -559,6 +565,18 @@ static bool fixed_sink(void *ctx, uint8_t const *data, size_t len) {
     memcpy(buf->data + buf->len, data, len);
     buf->len += len;
     return true;
+}
+
+// The whole file didn't match: say which verified pieces no longer match what was stored for them
+static void report_damaged_pieces(void) {
+    size_t bad[8];
+    size_t n = ota_pieces_check(&staged.pieces, staged.data, bad, 8);
+    ESP_LOGW(TAG, "whole-file mismatch: staging buffer %p, %zu of %zu pieces changed in PSRAM since they were checked",
+             (void *)staged.data, n, staged.pieces.n);
+    for (size_t i = 0; i < n && i < 8; i++) {
+        ota_piece_t const *pc = &staged.pieces.v[bad[i]];
+        ESP_LOGW(TAG, "  piece %zu at offset %u (%u bytes) changed", bad[i], (unsigned)pc->offset, (unsigned)pc->len);
+    }
 }
 
 static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
@@ -584,7 +602,8 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
     char const *path = req->route == OTA_ROUTE_FILE ? req->path : "";
     if (req->offset == 0) {
         staged_reset();
-        staged.data = malloc((size_t)req->total_size);
+        staged.data = heap_caps_aligned_alloc(STAGE_ALIGN, ota_round_up((size_t)req->total_size, STAGE_ALIGN),
+                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (!staged.data) {
             respond(fd, 503, "not enough memory for %lld bytes", req->total_size);
             return;
@@ -624,6 +643,20 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
         respond(fd, 400, "piece at %lld %s, send it again", req->offset, ok ? "arrived damaged" : "didn't arrive");
         return; // staged.got is unchanged, so the same piece can come again
     }
+    // The piece was hashed on its way through the internal buffer; hash it again where it landed in PSRAM (#37)
+    uint8_t      stored[SHA256_DIGEST_LEN];
+    sha256_ctx_t again;
+    sha256_init(&again);
+    sha256_update(&again, staged.data + staged.got, (size_t)req->content_length);
+    sha256_final(&again, stored);
+    ota_hex(stored, sizeof(stored), sha_hex);
+    if (strcmp(sha_hex, req->sha256) != 0) {
+        ESP_LOGW(TAG, "piece at %lld damaged in PSRAM (staging buffer %p), asking for it again", req->offset,
+                 (void *)staged.data);
+        respond(fd, 400, "piece at %lld was damaged in the badge's memory, send it again", req->offset);
+        return;
+    }
+    ota_pieces_add(&staged.pieces, staged.got, (size_t)req->content_length, stored);
     staged.got  += (size_t)req->content_length;
     staged.sent += req->content_length;
     if (staged.got < staged.total) {
@@ -638,6 +671,7 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
     sha256_final(&whole, digest);
     ota_hex(digest, sizeof(digest), sha_hex);
     if (strcmp(sha_hex, staged.file_sha256) != 0) {
+        report_damaged_pieces();
         hook_end(false, false);
         staged_reset();
         respond(fd, 400, "whole-file SHA-256 mismatch (sha256 %s), nothing written", sha_hex);
