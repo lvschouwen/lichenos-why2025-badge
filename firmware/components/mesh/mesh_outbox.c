@@ -90,16 +90,17 @@ mesh_msg_id_t ob_add_channel(ob_t *ob, char const *channel, char const *text, si
 }
 
 static bool dm_allowed(ob_t *ob, uint8_t const prefix[MF_PREFIX]) {
-    int active = 0;
+    int active = 0, acks = 0;
     for (int i = 0; i < OB_CAP; i++) {
         if (dm_active(&ob->e[i])) {
             active++;
+            acks += OB_MAX_ATTEMPTS; // worst case: one ACK per attempt
             if (memcmp(ob->e[i].prefix, prefix, MF_PREFIX) == 0) {
                 return false; // one at a time per contact
             }
         }
     }
-    return active < OB_MAX_DM_INFLIGHT;
+    return active < OB_MAX_DM_INFLIGHT && acks + OB_MAX_ATTEMPTS < OB_ACK_SLOTS;
 }
 
 mesh_msg_id_t ob_add_dm(ob_t *ob, uint8_t const prefix[MF_PREFIX], char const *text, size_t text_len, uint32_t now_ms,
@@ -258,7 +259,7 @@ void ob_on_tx_fail(ob_t *ob, bool payload_is_dm, uint32_t now_ms) {
     if (e->kind == OB_CHANNEL) {
         e->state = MESH_OUT_FAILED;
     } else {
-        e->deadline_ms = now_ms; // the attempt is lost: do not wait for its ACK
+        e->deadline_ms = now_ms + OB_RETRY_BACKOFF_MS; // the attempt is lost: retry after a pause, not at once
     }
 }
 
@@ -337,4 +338,12 @@ bool ob_get(ob_t const *ob, mesh_msg_id_t id, mesh_out_state_t *st, uint8_t *att
         }
     }
     return false;
+}
+
+bool ob_arb_outbox_first(ob_arb_t const *arb, bool fifo_has) {
+    return !fifo_has || arb->last_internal;
+}
+
+void ob_arb_took(ob_arb_t *arb, bool internal) {
+    arb->last_internal = internal;
 }

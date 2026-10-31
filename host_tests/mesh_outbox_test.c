@@ -175,7 +175,9 @@ static void dm_retry_and_errors(void) {
     mf_msg_t s = sent(0x10, 30000, 0);
     ob_on_reply(&ob, id2, &s, 6000);
     ob_on_tx_fail(&ob, true, 6100);
-    take(&ob, 6100, OB_ACT_SEND_DM);
+    ob_action_t early;
+    CHECK(!ob_next_action(&ob, 6100, 1000, &early)); // a pause first: three refusals must not burn all attempts at once
+    take(&ob, 6100 + OB_RETRY_BACKOFF_MS, OB_ACT_SEND_DM);
     CHECK(id2 != 0);
 }
 
@@ -191,7 +193,9 @@ static void limits(void) {
         CHECK(ob_add_dm(&ob, p, "c", 1, 0, &why) != 0);
     }
     p[0] = 99;
-    CHECK(ob_add_dm(&ob, p, "d", 1, 0, &why) == 0); // four in flight
+    CHECK(ob_add_dm(&ob, p, "d", 1, 0, &why) == 0); // limit in flight
+    CHECK((OB_MAX_DM_INFLIGHT + 1) * OB_MAX_ATTEMPTS < OB_ACK_SLOTS + OB_MAX_ATTEMPTS); // the ACK table fits them
+    CHECK(OB_MAX_DM_INFLIGHT * OB_MAX_ATTEMPTS < OB_ACK_SLOTS);
     // the table fills with channel messages, then refuses; sent ones make room
     ob_t full;
     ob_init(&full);
@@ -203,6 +207,36 @@ static void limits(void) {
     mf_msg_t    ok = reply(MF_OK);
     ob_on_reply(&full, a.id, &ok, 1);
     CHECK(ob_add_channel(&full, "#t", "x", 1, 0, &why) != 0);
+}
+
+// Every in-flight DM can register one ACK per attempt: their total must fit MyMesh's table (8)
+static void ack_slots(void) {
+    ob_t ob;
+    ob_init(&ob);
+    char const *why = NULL;
+    int         added = 0;
+    for (uint8_t i = 1; i <= 6; i++) {
+        uint8_t p[6] = {i};
+        added += ob_add_dm(&ob, p, "x", 1, 0, &why) != 0;
+    }
+    CHECK(added * OB_MAX_ATTEMPTS < OB_ACK_SLOTS);
+    CHECK(added == 2);
+}
+
+// A drain keeps refilling the internal FIFO: the outbox still gets every second frame
+static void arbitration(void) {
+    ob_arb_t arb = {0};
+    int      internal = 0, outbox = 0;
+    for (int i = 0; i < 10; i++) {
+        if (ob_arb_outbox_first(&arb, true)) {
+            ob_arb_took(&arb, false), outbox++;
+        } else {
+            ob_arb_took(&arb, true), internal++;
+        }
+    }
+    CHECK(internal == 5 && outbox == 5);
+    ob_arb_t idle = {1};
+    CHECK(ob_arb_outbox_first(&idle, false)); // nothing queued internally: outbox as usual
 }
 
 static void wrap(void) {
@@ -231,6 +265,8 @@ int main(void) {
     dm_retries();
     dm_retry_and_errors();
     limits();
+    ack_slots();
+    arbitration();
     wrap();
     if (failures) {
         printf("%d failure(s)\n", failures);

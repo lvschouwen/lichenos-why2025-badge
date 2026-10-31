@@ -50,15 +50,16 @@ void BadgeMesh::logTxFail(mesh::Packet *packet, int len) {
 
 // ---- the pipe ------------------------------------------------------------------------------------------------------
 
-void CompanionPipe::fifo_push(uint8_t const *data, size_t len) {
+bool CompanionPipe::fifo_push(uint8_t const *data, size_t len) {
     if (fifo_n_ >= LINK_FIFO || len > MF_MAX_FRAME) {
         stats_.fifo_drops++;
-        return;
+        return false;
     }
     Frame &f = fifo_[(fifo_head_ + fifo_n_) % LINK_FIFO];
     f.len    = (uint8_t)len;
     memcpy(f.data, data, len);
     fifo_n_++;
+    return true;
 }
 
 void CompanionPipe::request_drain() {
@@ -70,8 +71,7 @@ void CompanionPipe::request_drain() {
         return;
     }
     uint8_t f[1];
-    fifo_push(f, mf_encode_sync_next(f));
-    draining_ = true;
+    draining_ = fifo_push(f, mf_encode_sync_next(f));
 }
 
 void CompanionPipe::start() {
@@ -124,17 +124,29 @@ size_t CompanionPipe::checkRecvFrame(uint8_t dest[]) {
         }
         cur_ = CUR_NONE;
     }
-    if (fifo_n_ > 0) {
-        Frame &f = fifo_[fifo_head_];
-        size_t n = f.len;
-        memcpy(dest, f.data, n);
-        fifo_head_ = (fifo_head_ + 1) % LINK_FIFO;
-        fifo_n_--;
-        cur_     = CUR_INTERNAL;
-        cur_cmd_ = dest[0];
-        stats_.cmds_out++;
-        return n;
+    bool fifo_has = fifo_n_ > 0;
+    bool ob_first = ob_arb_outbox_first(&arb_, fifo_has);
+    size_t n      = ob_first ? take_outbox(dest) : 0;
+    if (n == 0 && fifo_has && fifo_n_ > 0) {
+        n = take_fifo(dest);
     }
+    return n;
+}
+
+size_t CompanionPipe::take_fifo(uint8_t dest[]) {
+    Frame &f = fifo_[fifo_head_];
+    size_t n = f.len;
+    memcpy(dest, f.data, n);
+    fifo_head_ = (fifo_head_ + 1) % LINK_FIFO;
+    fifo_n_--;
+    cur_     = CUR_INTERNAL;
+    cur_cmd_ = dest[0];
+    stats_.cmds_out++;
+    ob_arb_took(&arb_, true);
+    return n;
+}
+
+size_t CompanionPipe::take_outbox(uint8_t dest[]) {
     mesh_ob_enter();
     bool have = ob_next_action(ob_, (uint32_t)millis(), 0, &act_);
     mesh_ob_exit();
@@ -158,6 +170,7 @@ size_t CompanionPipe::checkRecvFrame(uint8_t dest[]) {
     cur_cmd_ = dest[0];
     cur_id_  = act_.id;
     stats_.cmds_out++;
+    ob_arb_took(&arb_, false);
     return n;
 }
 
@@ -178,7 +191,9 @@ void CompanionPipe::on_reply(mf_msg_t const &m) {
         stats_.drained++;
         {
             uint8_t f[1];
-            fifo_push(f, mf_encode_sync_next(f));
+            if (!fifo_push(f, mf_encode_sync_next(f))) {
+                draining_ = false; // the loop would hang otherwise: the next MSG_WAITING restarts it
+            }
         }
         break;
     case MF_NO_MORE:
@@ -196,7 +211,7 @@ void CompanionPipe::on_reply(mf_msg_t const &m) {
     default:
         break;
     }
-    if (cur_cmd_ == MF_CMD_SYNC_NEXT && m.kind != MF_MSG_RECV && m.kind != MF_NO_MORE) {
+    if (cur == CUR_INTERNAL && cur_cmd_ == MF_CMD_SYNC_NEXT && m.kind != MF_MSG_RECV && m.kind != MF_NO_MORE) {
         draining_ = false; // an answer we do not know: stop draining, the next MSG_WAITING starts again
     }
 }

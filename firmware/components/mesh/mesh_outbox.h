@@ -25,7 +25,8 @@ typedef enum {
 
 #define OB_CAP              16
 #define OB_MAX_ATTEMPTS     3
-#define OB_MAX_DM_INFLIGHT  4 // MyMesh's ACK table has 8 slots
+#define OB_ACK_SLOTS        8 // MyMesh's expected-ACK table; the oldest slot is overwritten when it is full
+#define OB_MAX_DM_INFLIGHT  2 // each DM may register OB_MAX_ATTEMPTS ACKs: (inflight + 1) x 3 must stay below OB_ACK_SLOTS
 #define OB_TARGET_MAX       33 // channel name + NUL
 #define OB_TEXT_MAX         (MF_MAX_TEXT + 1)
 #define OB_HASH_LEN         8
@@ -85,6 +86,16 @@ void ob_on_rx(ob_t *ob, uint8_t const hash[OB_HASH_LEN]);
 void ob_on_confirm(ob_t *ob, uint32_t ack, uint32_t trip_ms);
 // A failed message starts a new cycle under the same id (a new timestamp). false when it is not failed or busy.
 bool ob_retry(ob_t *ob, mesh_msg_id_t id, uint32_t now_ms);
+// Where the pipe takes its next frame from while its internal FIFO (a drain refills it after every reply) and the
+// outbox both have work: they alternate, so a send never waits for a whole drain.
+typedef struct {
+    bool last_internal;
+} ob_arb_t;
+// true: try the outbox before the FIFO
+bool ob_arb_outbox_first(ob_arb_t const *arb, bool fifo_has);
+void ob_arb_took(ob_arb_t *arb, bool internal);
+
+// ob_get false for an id means finished and evicted (the table keeps the newest OB_CAP) or never queued
 bool ob_get(ob_t const *ob, mesh_msg_id_t id, mesh_out_state_t *st, uint8_t *attempt, uint8_t *repeats,
             uint32_t *trip_ms);
 

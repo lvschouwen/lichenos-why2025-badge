@@ -53,7 +53,9 @@ private:
         uint8_t len;
         uint8_t data[MF_MAX_FRAME];
     };
-    void   fifo_push(uint8_t const *data, size_t len);
+    bool   fifo_push(uint8_t const *data, size_t len);
+    size_t take_fifo(uint8_t dest[]);
+    size_t take_outbox(uint8_t dest[]);
     void   request_drain();
     size_t build_outbox_frame(ob_action_t const &act, uint8_t *dest);
     void   on_reply(mf_msg_t const &m);
@@ -67,6 +69,7 @@ private:
     uint8_t    cur_cmd_  = 0;
     mesh_msg_id_t cur_id_ = 0;
     bool       draining_ = false;
+    ob_arb_t   arb_      = {};
     LinkStats  stats_;
     mf_msg_t   scratch_; // off the mesh task's stack: writeFrame runs deep inside loop()
     ob_action_t act_;

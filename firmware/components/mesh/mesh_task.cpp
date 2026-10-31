@@ -678,6 +678,10 @@ extern "C" mesh_msg_id_t mesh_send_channel(char const *channel_name, char const 
         return 0;
     }
     size_t len = mf_text_cut(text, mesh_channel_text_max());
+    if (len == 0 && text[0]) {
+        *why = "no room for text";
+        return 0;
+    }
     mesh_ob_enter();
     mesh_msg_id_t id = ob_add_channel(outbox, channel_name, text, len, (uint32_t)millis(), why);
     mesh_ob_exit();
@@ -719,42 +723,58 @@ extern "C" bool mesh_out_state(mesh_msg_id_t id, mesh_out_state_t *st, uint8_t *
     return ok;
 }
 
+// Copies what the list needs under the lock; the formatting happens after it (snprintf inside a portMUX stalls both cores)
+struct OutSnap {
+    mesh_out_info_t info;
+    uint8_t         prefix[MF_PREFIX];
+    char            target[OB_TARGET_MAX];
+    uint32_t        seq;
+};
+
 extern "C" size_t mesh_out_list(mesh_out_info_t *out, size_t max) {
-    size_t n = 0;
+    OutSnap snap[OB_CAP];
+    size_t  n = 0;
     if (!outbox) {
         return 0;
     }
     mesh_ob_enter();
-    for (size_t round = 0; round < OB_CAP && n < max; round++) {
-        ob_entry_t const *best = NULL; // newest not yet listed
-        for (int i = 0; i < OB_CAP; i++) {
-            ob_entry_t const *e = &outbox->e[i];
-            bool listed = false;
-            for (size_t k = 0; k < n; k++) {
-                listed = listed || out[k].id == e->id;
-            }
-            if (e->used && !listed && (!best || (int32_t)(e->seq - best->seq) > 0)) {
-                best = e;
-            }
+    for (int i = 0; i < OB_CAP; i++) {
+        ob_entry_t const *e = &outbox->e[i];
+        if (!e->used) {
+            continue;
         }
-        if (!best) {
-            break;
-        }
-        out[n].id      = best->id;
-        out[n].is_dm   = best->kind == OB_DM;
-        out[n].state   = (mesh_out_state_t)best->state;
-        out[n].attempt = best->attempt;
-        out[n].repeats = best->repeats;
-        out[n].trip_ms = best->trip_ms;
-        if (best->kind == OB_DM) {
-            snprintf(out[n].target, sizeof(out[n].target), "%02x%02x%02x%02x%02x%02x", best->prefix[0], best->prefix[1],
-                     best->prefix[2], best->prefix[3], best->prefix[4], best->prefix[5]);
-        } else {
-            snprintf(out[n].target, sizeof(out[n].target), "%s", best->target);
-        }
-        n++;
+        OutSnap &s       = snap[n++];
+        s.info.id        = e->id;
+        s.info.is_dm     = e->kind == OB_DM;
+        s.info.state     = (mesh_out_state_t)e->state;
+        s.info.attempt   = e->attempt;
+        s.info.repeats   = e->repeats;
+        s.info.trip_ms   = e->trip_ms;
+        s.seq            = e->seq;
+        memcpy(s.prefix, e->prefix, MF_PREFIX);
+        memcpy(s.target, e->target, sizeof(s.target));
     }
     mesh_ob_exit();
+    for (size_t i = 1; i < n; i++) { // newest first
+        OutSnap t = snap[i];
+        size_t  k = i;
+        for (; k > 0 && (int32_t)(t.seq - snap[k - 1].seq) > 0; k--) {
+            snap[k] = snap[k - 1];
+        }
+        snap[k] = t;
+    }
+    if (n > max) {
+        n = max;
+    }
+    for (size_t i = 0; i < n; i++) {
+        out[i] = snap[i].info;
+        if (snap[i].info.is_dm) {
+            snprintf(out[i].target, sizeof(out[i].target), "%02x%02x%02x%02x%02x%02x", snap[i].prefix[0],
+                     snap[i].prefix[1], snap[i].prefix[2], snap[i].prefix[3], snap[i].prefix[4], snap[i].prefix[5]);
+        } else {
+            snprintf(out[i].target, sizeof(out[i].target), "%s", snap[i].target);
+        }
+    }
     return n;
 }
 
@@ -763,11 +783,23 @@ static char const *const OUT_STATE_NAME[] = {"queued", "sent", "on air", "heard 
 // "fw mesh send <channel> <text>"
 static void cmd_mesh_send(char const *args) {
     char channel[OB_TARGET_MAX] = "";
-    int  used = 0;
-    if (sscanf(args, "%32s %n", channel, &used) < 1 || !args[used]) {
+    while (*args == ' ') {
+        args++;
+    }
+    size_t name_len = strcspn(args, " ");
+    int    used     = (int)name_len;
+    while (args[used] == ' ') {
+        used++;
+    }
+    if (name_len == 0 || !args[used]) {
         console_reply("mesh send <channel name> <text>");
         return;
     }
+    if (name_len >= OB_TARGET_MAX) {
+        console_reply("channel name longer than %d bytes", OB_TARGET_MAX - 1);
+        return;
+    }
+    memcpy(channel, args, name_len);
     if (time(NULL) < (time_t)BadgeRtc::VALID_FROM) {
         console_reply("warning: the clock is not set, other nodes will see a wrong time");
     }
@@ -776,16 +808,23 @@ static void cmd_mesh_send(char const *args) {
     if (!id) {
         console_reply("not queued: %s", why ? why : "?");
     } else {
-        console_reply("queued #%lu on %s (max %u bytes)", (unsigned long)id, channel, (unsigned)mesh_channel_text_max());
+        size_t max = mesh_channel_text_max();
+        console_reply("queued #%lu on %s (max %u bytes%s)", (unsigned long)id, channel, (unsigned)max,
+                      strlen(args + used) > max ? ", text cut" : "");
     }
 }
 
 // "fw mesh dm <12 hex digits of the public key> <text>"
 static void cmd_mesh_dm(char const *args) {
     uint8_t prefix[6];
-    int     used = 0;
+    int     used = 12;
     unsigned b[6];
-    if (sscanf(args, "%2x%2x%2x%2x%2x%2x %n", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &used) < 6 || !args[used]) {
+    bool ok = strspn(args, "0123456789abcdefABCDEF") == 12 && args[12] == ' ';
+    while (ok && args[used] == ' ') {
+        used++;
+    }
+    if (!ok || !args[used] ||
+        sscanf(args, "%2x%2x%2x%2x%2x%2x", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) < 6) {
         console_reply("mesh dm <12 hex digits of the public key> <text>");
         return;
     }
