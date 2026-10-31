@@ -23,6 +23,8 @@ static char const TAG[] = "display";
 
 static st7703_lcd_init_cmd_t const init_cmds[] = CUSTOM_INIT_CMDS();
 
+static esp_lcd_panel_handle_t lcd_panel;
+
 bool display_start(lv_display_t **out) {
     esp_ldo_channel_handle_t       ldo;
     esp_ldo_channel_config_t const ldo_cfg = {.chan_id = DSI_PHY_LDO_CHAN, .voltage_mv = DSI_PHY_LDO_MV};
@@ -67,6 +69,7 @@ bool display_start(lv_display_t **out) {
         ESP_LOGE(TAG, "panel: %s", esp_err_to_name(err));
         return false;
     }
+    lcd_panel = panel;
 
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_affinity = 1;  // core 1 draws, core 0 talks to the world
@@ -99,4 +102,10 @@ bool display_start(lv_display_t **out) {
     lv_display_set_rotation(*out, LV_DISPLAY_ROTATION_90);
     lvgl_port_unlock();
     return true;
+}
+
+void display_blank(void) {
+    if (lcd_panel) {
+        esp_lcd_panel_disp_on_off(lcd_panel, false);
+    }
 }

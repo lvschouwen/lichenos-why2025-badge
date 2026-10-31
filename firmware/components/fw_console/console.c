@@ -183,6 +183,10 @@ static void cmd_slot(char const *args) {
     console_reply("booting %s (%s)", other->label, desc.version);
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(200));
+    system_restart();
+}
+
+void system_restart(void) {
     esp_restart();
 }
 
@@ -191,7 +195,7 @@ static void cmd_reboot(char const *args) {
     console_reply("rebooting");
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(200));
-    esp_restart();
+    system_restart();
 }
 
 static void run(char *line) {

@@ -687,7 +687,7 @@ static void cmd_c6(char const *args) {
     console_reply("C6 is flashed again during the next boot, rebooting");
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(200));
-    esp_restart();
+    system_restart();
 }
 
 bool c6link_start(void) {

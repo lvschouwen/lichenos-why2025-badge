@@ -11,6 +11,7 @@
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_lvgl_port.h"
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "log_tap.h"
@@ -155,6 +156,15 @@ void app_main(void) {
         ESP_LOGE(TAG, "no display");
         boot_progress_end(BOOT_DISPLAY, STEP_FAILED, "no display");
     }
+    if (screen) {
+        // A restart leaves the backlight off (#23): once the boot screen has been drawn, turn it on again, before the
+        // slow C6 check
+        lvgl_port_lock(0);
+        lv_refr_now(display);
+        lvgl_port_unlock();
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+    backlight_restore();
     if (!c6link_start()) {
         ESP_LOGE(TAG, "no C6 link: no Wi-Fi, no LoRa");
     }

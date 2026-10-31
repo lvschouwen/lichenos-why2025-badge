@@ -14,6 +14,7 @@
 #include "fonts.h"
 #include "theme.h"
 #include "esp_system.h"
+#include "fw_console.h"
 #include "lichen_app.h"
 #include "shell.h"
 #include "update_mode.h"
@@ -338,7 +339,7 @@ static void tick(lv_timer_t *t) {
     portEXIT_CRITICAL(&lock);
     if (restart) {
         ESP_LOGW(TAG, "restarting after the update");
-        esp_restart();
+        system_restart();
     }
 
     if (!title_label) {

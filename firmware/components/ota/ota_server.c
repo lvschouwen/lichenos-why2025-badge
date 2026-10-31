@@ -865,7 +865,7 @@ static void server_task(void *arg) {
         if (reboot) {
             ESP_LOGW(TAG, "reboot requested over Wi-Fi");
             vTaskDelay(pdMS_TO_TICKS(300));
-            esp_restart();
+            system_restart();
         }
     }
 }

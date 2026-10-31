@@ -1,8 +1,12 @@
 #include "backlight.h"
 #include "backlight_level.h"
 
+#include "display.h"
 #include "driver/uart.h"
 #include "esp_log.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "fw_console.h"
 #include "nvs.h"
 
@@ -12,32 +16,43 @@
 #define BL_UART    UART_NUM_1 // the C6's console UART; the C6 flasher and "fw c6log" use it too
 #define BL_TX_PIN  16
 #define BL_RX_PIN  15
+#define BL_FRAME_MS 20 // one 60 Hz frame is 17 ms
 #define BL_DEFAULT_DISPLAY  30 // what the C6 firmware starts with
 #define BL_DEFAULT_KEYBOARD 10
 
 static char const TAG[] = "backlight";
 
-static bool send(uint8_t display, uint8_t keyboard) {
-    if (!uart_is_driver_installed(BL_UART)) {
-        uart_config_t const cfg = {
-            .baud_rate  = 115200,
-            .data_bits  = UART_DATA_8_BITS,
-            .parity     = UART_PARITY_DISABLE,
-            .stop_bits  = UART_STOP_BITS_1,
-            .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
-            .source_clk = UART_SCLK_DEFAULT,
-        };
-        // 2 KiB receive buffer: "fw c6log" reads the C6's console through this driver
-        if (uart_driver_install(BL_UART, 2048, 0, 0, NULL, 0) != ESP_OK) {
-            ESP_LOGE(TAG, "UART to the C6 not available");
-            return false;
-        }
-        uart_param_config(BL_UART, &cfg);
-        uart_set_pin(BL_UART, BL_TX_PIN, BL_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+static bool open_uart(void) {
+    if (uart_is_driver_installed(BL_UART)) {
+        return true;
     }
-    char cmd[24];
-    int  len = snprintf(cmd, sizeof(cmd), "\nBL %u %u\n", display, keyboard); // leading \n ends a partial line
-    return uart_write_bytes(BL_UART, cmd, (size_t)len) == len;
+    uart_config_t const cfg = {
+        .baud_rate  = 115200,
+        .data_bits  = UART_DATA_8_BITS,
+        .parity     = UART_PARITY_DISABLE,
+        .stop_bits  = UART_STOP_BITS_1,
+        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+    // 2 KiB receive buffer: "fw c6log" reads the C6's console through this driver
+    if (uart_driver_install(BL_UART, 2048, 0, 0, NULL, 0) != ESP_OK) {
+        ESP_LOGE(TAG, "UART to the C6 not available");
+        return false;
+    }
+    uart_param_config(BL_UART, &cfg);
+    uart_set_pin(BL_UART, BL_TX_PIN, BL_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    return true;
+}
+
+// The levels as given, no clamp
+static bool send_raw(unsigned display, unsigned keyboard) {
+    char   cmd[24];
+    size_t len = backlight_cmd_format(cmd, sizeof(cmd), display, keyboard);
+    return len && open_uart() && uart_write_bytes(BL_UART, cmd, len) == (int)len;
+}
+
+static bool send(uint8_t display, uint8_t keyboard) {
+    return send_raw(display, keyboard);
 }
 
 static void save(uint8_t display, uint8_t keyboard) {
@@ -92,9 +107,39 @@ static void cmd_bl(char const *args) {
     console_reply("backlight %u %u", display, keyboard);
 }
 
+// Runs inside esp_restart() (before the scheduler stops, newest handler first, so before esp_wifi_stop). The panel
+// has no power switch and the backlight is the C6's: without this, the stopped DSI feed leaves the lit panel showing
+// garbage (yellow, then gray) until the next boot resets it (#23). Backlight off first, so nothing shows while the
+// panel switches off. Not run on panic, abort, watchdog or brownout resets: nothing can be done there.
+static void blank_for_restart(void) {
+    if (send_raw(0, 0)) {
+        uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
+    }
+    display_blank();
+    vTaskDelay(pdMS_TO_TICKS(BL_FRAME_MS));
+}
+
+void backlight_restore(void) {
+    uint8_t display, keyboard;
+    backlight_get(&display, &keyboard);
+    if (send(display, keyboard)) {
+        uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
+    }
+    // The C6 flasher installs the UART driver itself and fails if it is already there; backlight_start() opens it
+    // again after the C6 check
+    if (uart_is_driver_installed(BL_UART)) {
+        uart_driver_delete(BL_UART);
+    }
+}
+
 void backlight_start(void) {
     console_register("bl", "bl <display> <keyboard> (backlight 0-100, screen at least 5)", cmd_bl);
     uint8_t display, keyboard;
     backlight_get(&display, &keyboard);
     send(display, keyboard);
+    // After c6link_start(): handlers run newest first, so this runs before esp_wifi_stop (which the C6 Wi-Fi setup
+    // registers; there are only 5 slots in all)
+    if (esp_register_shutdown_handler(blank_for_restart) != ESP_OK) {
+        ESP_LOGE(TAG, "no shutdown handler slot: the screen will flash on restart");
+    }
 }

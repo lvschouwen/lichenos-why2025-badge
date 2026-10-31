@@ -3,6 +3,7 @@
 #include "backlight_level.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int failures = 0;
 
@@ -28,6 +29,16 @@ int main(void) {
     CHECK(backlight_keyboard_level(10) == 10);
     CHECK(backlight_keyboard_level(100) == 100);
     CHECK(backlight_keyboard_level(200) == 100);
+
+    char   cmd[24];
+    size_t len = backlight_cmd_format(cmd, sizeof(cmd), 0, 0); // not clamped to the screen minimum
+    CHECK(len == 8 && strcmp(cmd, "\nBL 0 0\n") == 0);
+    len = backlight_cmd_format(cmd, sizeof(cmd), 30, 10);
+    CHECK(len == 10 && strcmp(cmd, "\nBL 30 10\n") == 0);
+    len = backlight_cmd_format(cmd, sizeof(cmd), 100, 100);
+    CHECK(len == 12 && strcmp(cmd, "\nBL 100 100\n") == 0);
+    CHECK(backlight_cmd_format(cmd, 8, 0, 0) == 0); // needs 8 bytes plus the NUL
+    CHECK(backlight_cmd_format(cmd, 9, 0, 0) == 8);
 
     if (failures) {
         printf("%d failure(s)\n", failures);
