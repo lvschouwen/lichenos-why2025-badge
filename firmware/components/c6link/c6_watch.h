@@ -42,6 +42,11 @@ enum {
 #define C6W_DETECT_SLACK_MS  35000u
 #define C6W_UPTIME_UNKNOWN   UINT32_MAX
 #define C6W_REASON_MAX       160
+// Our own re-attach pulses C6 EN, which resets the TCA8418 too: a keyboard signal this soon after an outage ended is
+// that pulse, not a new reset (#14 T-B)
+#define C6W_KEYBOARD_GRACE_MS 3000u
+// The NVS flag "the badge restarted for a lost C6" (c6_rt_restart) is cleared after this long with the C6 up
+#define C6W_RT_FLAG_CLEAR_MS (10u * 60u * 1000u)
 
 typedef struct {
     c6w_state_t  state;
@@ -59,6 +64,7 @@ typedef struct {
     uint32_t     next_ms;     // DOWN / GAVE_UP: when the next attempt is due
     uint32_t     restarts;    // outages that ended with the C6 back
     uint32_t     last_recovery_ms;
+    uint32_t     up_ms;       // when the last outage ended (valid once restarts > 0)
     char         reason[C6W_REASON_MAX]; // the last recovery, as the note and fw c6 show it ("" before the first)
 } c6_watch_t;
 
@@ -82,3 +88,18 @@ unsigned c6_watch_tick(c6_watch_t *w, uint32_t now_ms);
 // The `fw c6` line: "c6: up | restarts 1 | last: <reason>", "c6: recovering 2/3 | ...", "c6: down (no answer) | ...".
 // Returns the length written (excluding the NUL).
 size_t   c6_watch_line(c6_watch_t const *w, uint32_t now_ms, char *out, size_t cap);
+// The state alone, as the status bar and About show it: "up", "recovering 2/3", "down (no answer)"
+void     c6_watch_state_text(c6w_state_t state, uint8_t attempt, char *out, size_t cap);
+
+// The supervisor queues every signal with the time it was raised and runs it later (#14 T-B). True when the signal
+// belongs to an outage that is already over: raised before the C6 came back, or a keyboard reset that is only our
+// own re-attach's EN pulse (within C6W_KEYBOARD_GRACE_MS of coming back). Such a signal is dropped.
+bool     c6_watch_stale(c6_watch_t const *w, c6w_source_t src, uint32_t raised_ms);
+
+// FALLBACK_RESTART, carried out (#14, Lucas 2026-10-31): normally a warning dialog with a countdown that ends in the
+// restart; during a firmware update (nobody to ask, the update is lost with the C6 anyway) or without a screen to
+// ask on, the restart at once
+typedef enum { C6W_FALLBACK_ASK, C6W_FALLBACK_RESTART_NOW } c6w_fallback_t;
+c6w_fallback_t c6_watch_fallback_plan(bool updating, bool can_ask);
+// Whether the c6_rt_restart flag may be cleared now: it is set and the C6 has been up for C6W_RT_FLAG_CLEAR_MS
+bool     c6_watch_rt_flag_clear_due(bool flag_set, c6w_state_t state, uint32_t uptime_ms);

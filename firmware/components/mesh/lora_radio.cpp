@@ -50,6 +50,12 @@ static bool rx_summary(uint8_t const *data, size_t len, char *out, size_t cap) {
     return true;
 }
 
+// The radio went away with a C6 reset and came back (#14): nothing to redo, the OS keeps the radio settings and TX
+// power and sends them again; MeshCore's sends just fail while it is gone
+static void on_link(bool up) {
+    ESP_LOGW("mesh", "LoRa radio %s", up ? "back after a C6 reset" : "gone with the C6, sends fail until it is back");
+}
+
 void LoraRadio::begin() {
     instance = this;
     rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_item_t));
@@ -58,6 +64,7 @@ void LoraRadio::begin() {
         return;
     }
     lora_set_rx_formatter(rx_summary);
+    lora_set_link_callback("meshcore", on_link);
 }
 
 int LoraRadio::recvRaw(uint8_t *bytes, int sz) {

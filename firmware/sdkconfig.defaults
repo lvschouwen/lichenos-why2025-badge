@@ -66,6 +66,9 @@ CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE=y
 # The C6 flasher must release the C6 before esp_hosted starts (auto-init races it into a boot loop)
 CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
 CONFIG_ESP_HOSTED_HOST_FEAT_PEER_DATA=y
+# A failed SDIO transfer posts TRANSPORT_FAILURE; Lichen's C6 supervisor recovers from it (#14) instead of
+# esp_hosted aborting the P4
+CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=n
 CONFIG_WIFI_RMT_STATIC_TX_BUFFER=y
 # CONFIG_WIFI_RMT_SOFTAP_SUPPORT is not set
 # The Wi-Fi side runs on the C6, which has no PSRAM: don't ask it for TX cache buffers

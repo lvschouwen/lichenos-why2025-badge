@@ -132,7 +132,10 @@ static void set_reason(c6_watch_t *w, uint32_t c6_uptime_ms) {
     cause_text(w, cause, sizeof(cause));
     tenths(back, sizeof(back), w->last_recovery_ms);
     if (c6_uptime_ms == C6W_UPTIME_UNKNOWN) {
-        snprintf(c6, sizeof(c6), "C6 uptime unknown");
+        // Every re-attach pulses EN (CP_RESET_STRATEGY_ALWAYS), so the uptime can only come from before it. Without
+        // one, only a keyboard reset or our own pulse proves that EN went low.
+        bool en_low = w->source == C6W_SRC_KEYBOARD || w->manual_cause;
+        snprintf(c6, sizeof(c6), en_low ? "C6 was reset (EN low)" : "C6 silent before the re-attach");
     } else if (c6_uptime_ms <= w->last_recovery_ms + C6W_DETECT_SLACK_MS) {
         snprintf(c6, sizeof(c6), "C6 rebooted (uptime %u s)", (unsigned)(c6_uptime_ms / 1000));
     } else {
@@ -172,22 +175,48 @@ unsigned c6_watch_attached(c6_watch_t *w, bool ok, uint32_t c6_uptime_ms, uint32
     w->state            = C6W_UP;
     w->restarts++;
     w->last_recovery_ms = now_ms - w->down_ms;
+    w->up_ms            = now_ms;
     set_reason(w, c6_uptime_ms);
     w->manual_cause = false;
     return C6W_ACT_UP_HOOKS | C6W_ACT_NOTE;
 }
 
-static void state_text(c6_watch_t const *w, char *out, size_t cap) {
-    bool slow = w->state == C6W_GAVE_UP || w->attempt > C6W_ATTEMPTS;
-    if (w->state == C6W_UP) {
+void c6_watch_state_text(c6w_state_t state, uint8_t attempt, char *out, size_t cap) {
+    if (!out || cap == 0) {
+        return;
+    }
+    bool slow = state == C6W_GAVE_UP || attempt > C6W_ATTEMPTS;
+    if (state == C6W_UP) {
         snprintf(out, cap, "up");
     } else if (slow) {
-        snprintf(out, cap, "down (no answer)%s", w->state == C6W_ATTACHING ? ", retrying" : "");
+        snprintf(out, cap, "down (no answer)%s", state == C6W_ATTACHING ? ", retrying" : "");
     } else {
         // While waiting, the attempt shown is the one that comes next
-        unsigned n = w->attempt + (w->state == C6W_DOWN ? 1u : 0u);
+        unsigned n = attempt + (state == C6W_DOWN ? 1u : 0u);
         snprintf(out, cap, "recovering %u/%u", n, (unsigned)C6W_ATTEMPTS);
     }
+}
+
+static void state_text(c6_watch_t const *w, char *out, size_t cap) {
+    c6_watch_state_text(w->state, w->attempt, out, cap);
+}
+
+bool c6_watch_stale(c6_watch_t const *w, c6w_source_t src, uint32_t raised_ms) {
+    if (w->restarts == 0) {
+        return false; // no outage has ended yet
+    }
+    if (!due(raised_ms, w->up_ms)) {
+        return true; // raised before the C6 came back
+    }
+    return src == C6W_SRC_KEYBOARD && raised_ms - w->up_ms < C6W_KEYBOARD_GRACE_MS;
+}
+
+c6w_fallback_t c6_watch_fallback_plan(bool updating, bool can_ask) {
+    return updating || !can_ask ? C6W_FALLBACK_RESTART_NOW : C6W_FALLBACK_ASK;
+}
+
+bool c6_watch_rt_flag_clear_due(bool flag_set, c6w_state_t state, uint32_t uptime_ms) {
+    return flag_set && state == C6W_UP && uptime_ms >= C6W_RT_FLAG_CLEAR_MS;
 }
 
 size_t c6_watch_line(c6_watch_t const *w, uint32_t now_ms, char *out, size_t cap) {

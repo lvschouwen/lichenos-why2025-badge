@@ -193,7 +193,16 @@ static void reason_from_uptime(void) {
     // no uptime
     c6_watch_reattach(&w, 2000000);
     c6_watch_attached(&w, true, C6W_UPTIME_UNKNOWN, 2000500);
-    CHECK(strcmp(w.reason, "fw c6 reattach, back in 0.5 s, C6 uptime unknown") == 0);
+    CHECK(strcmp(w.reason, "fw c6 reattach, back in 0.5 s, C6 silent before the re-attach") == 0);
+    // no uptime, but the keyboard chip reset with the C6: EN went low, so it was reset
+    c6_watch_hard(&w, C6W_SRC_KEYBOARD, 2500000);
+    c6_watch_attached(&w, true, C6W_UPTIME_UNKNOWN, 2501000);
+    CHECK(strcmp(w.reason, "keyboard chip reset, back in 1.0 s, C6 was reset (EN low)") == 0);
+    // and our own pulse proves it as well
+    c6_watch_manual_reset(&w, 2600000);
+    c6_watch_hard(&w, C6W_SRC_TRANSPORT, 2600300);
+    c6_watch_attached(&w, true, C6W_UPTIME_UNKNOWN, 2601300);
+    CHECK(strcmp(w.reason, "transport failure 0.3 s after fw c6 reset, back in 1.0 s, C6 was reset (EN low)") == 0);
     // a probe without an answer
     c6_watch_soft_fail(&w, 3000000);
     c6_watch_soft_fail(&w, 3000001);
@@ -219,6 +228,82 @@ static void line_fits_and_while_down(void) {
     CHECK(c6_watch_line(&w, 0, NULL, 0) == 0);
 }
 
+// #14 T-A review: LoRa's soft signal and a probe result change nothing while an outage runs
+static void soft_and_probe_ignored_while_not_up(void) {
+    c6_watch_t w = fresh();
+    c6_watch_soft_fail(&w, 0);
+    c6_watch_soft_fail(&w, 1);
+    CHECK(c6_watch_soft_fail(&w, 2) == C6W_ACT_PROBE);
+    c6_watch_hard(&w, C6W_SRC_TRANSPORT, 10); // the outage starts while the probe is out
+    CHECK(w.state == C6W_ATTACHING);
+    CHECK(c6_watch_soft_fail(&w, 20) == 0);
+    CHECK(c6_watch_probe(&w, false, 30) == 0 && w.state == C6W_ATTACHING && w.source == C6W_SRC_TRANSPORT);
+    c6_watch_attached(&w, false, C6W_UPTIME_UNKNOWN, 40);
+    CHECK(w.state == C6W_DOWN);
+    CHECK(c6_watch_soft_fail(&w, 50) == 0 && c6_watch_soft_fail(&w, 51) == 0 && c6_watch_soft_fail(&w, 52) == 0);
+    CHECK(c6_watch_probe(&w, false, 60) == 0 && w.state == C6W_DOWN && w.attempt == 1);
+    for (uint32_t t = 100000; w.state != C6W_GAVE_UP; t += 20000) {
+        c6_watch_tick(&w, t);
+        c6_watch_attached(&w, false, C6W_UPTIME_UNKNOWN, t + 1);
+    }
+    CHECK(c6_watch_soft_fail(&w, 500000) == 0 && c6_watch_soft_fail(&w, 500001) == 0);
+    CHECK(c6_watch_soft_fail(&w, 500002) == 0);
+    CHECK(c6_watch_probe(&w, false, 500003) == 0 && w.state == C6W_GAVE_UP);
+}
+
+static void state_text_for_the_screen(void) {
+    char t[40];
+    c6_watch_state_text(C6W_UP, 0, t, sizeof(t));
+    CHECK(strcmp(t, "up") == 0);
+    c6_watch_state_text(C6W_ATTACHING, 1, t, sizeof(t));
+    CHECK(strcmp(t, "recovering 1/3") == 0);
+    c6_watch_state_text(C6W_DOWN, 1, t, sizeof(t)); // waiting for attempt 2
+    CHECK(strcmp(t, "recovering 2/3") == 0);
+    c6_watch_state_text(C6W_GAVE_UP, 3, t, sizeof(t));
+    CHECK(strcmp(t, "down (no answer)") == 0);
+    c6_watch_state_text(C6W_ATTACHING, 4, t, sizeof(t)); // a slow retry
+    CHECK(strcmp(t, "down (no answer), retrying") == 0);
+    char small[5];
+    c6_watch_state_text(C6W_GAVE_UP, 3, small, sizeof(small));
+    CHECK(strlen(small) == 4);
+    c6_watch_state_text(C6W_UP, 0, NULL, 0); // no crash
+}
+
+static void stale_signals_are_dropped(void) {
+    c6_watch_t w = fresh();
+    // nothing has ended yet: nothing is stale
+    CHECK(!c6_watch_stale(&w, C6W_SRC_KEYBOARD, 0));
+    CHECK(!c6_watch_stale(&w, C6W_SRC_TRANSPORT, 5000));
+    c6_watch_hard(&w, C6W_SRC_TRANSPORT, 10000);
+    c6_watch_attached(&w, true, 1000, 12000); // up again at 12 s
+    // raised during the outage, run after it: stale
+    CHECK(c6_watch_stale(&w, C6W_SRC_TRANSPORT, 11000));
+    CHECK(c6_watch_stale(&w, C6W_SRC_LORA, 11999));
+    CHECK(c6_watch_stale(&w, C6W_SRC_KEYBOARD, 11500));
+    // our own EN pulse shows up on the keyboard a little later: stale for the grace period
+    CHECK(c6_watch_stale(&w, C6W_SRC_KEYBOARD, 12000 + C6W_KEYBOARD_GRACE_MS - 1));
+    CHECK(!c6_watch_stale(&w, C6W_SRC_KEYBOARD, 12000 + C6W_KEYBOARD_GRACE_MS));
+    // a transport failure after coming back is new
+    CHECK(!c6_watch_stale(&w, C6W_SRC_TRANSPORT, 12000));
+    CHECK(!c6_watch_stale(&w, C6W_SRC_LORA, 12500));
+    // wrap-safe
+    c6_watch_t v = fresh();
+    c6_watch_hard(&v, C6W_SRC_TRANSPORT, 0xFFFFF000u);
+    c6_watch_attached(&v, true, 1000, 0x00000100u);
+    CHECK(c6_watch_stale(&v, C6W_SRC_TRANSPORT, 0xFFFFF800u));
+    CHECK(!c6_watch_stale(&v, C6W_SRC_TRANSPORT, 0x00000200u));
+}
+
+static void fallback_plan_and_rt_flag(void) {
+    CHECK(c6_watch_fallback_plan(false, true) == C6W_FALLBACK_ASK);
+    CHECK(c6_watch_fallback_plan(true, true) == C6W_FALLBACK_RESTART_NOW);   // during an update
+    CHECK(c6_watch_fallback_plan(false, false) == C6W_FALLBACK_RESTART_NOW); // no screen to ask on
+    CHECK(!c6_watch_rt_flag_clear_due(false, C6W_UP, C6W_RT_FLAG_CLEAR_MS));
+    CHECK(!c6_watch_rt_flag_clear_due(true, C6W_UP, C6W_RT_FLAG_CLEAR_MS - 1));
+    CHECK(c6_watch_rt_flag_clear_due(true, C6W_UP, C6W_RT_FLAG_CLEAR_MS));
+    CHECK(!c6_watch_rt_flag_clear_due(true, C6W_GAVE_UP, 2 * C6W_RT_FLAG_CLEAR_MS));
+}
+
 int main(void) {
     starts_up_and_quiet();
     hard_signal_reattaches_at_once();
@@ -230,6 +315,10 @@ int main(void) {
     reattach_command();
     reason_from_uptime();
     line_fits_and_while_down();
+    soft_and_probe_ignored_while_not_up();
+    state_text_for_the_screen();
+    stale_signals_are_dropped();
+    fallback_plan_and_rt_flag();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

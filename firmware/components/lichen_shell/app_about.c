@@ -60,7 +60,11 @@ static void refresh(lv_timer_t *timer) {
              (double)heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1048576.0);
     set_text(value_label[ROW_MEMORY], text);
 
-    set_text(value_label[ROW_C6], shell_sources.c6_up && shell_sources.c6_up() ? "up" : "down");
+    // While the C6 is being recovered, how far it has got (#14 T-B)
+    if (!(shell_sources.c6_trouble && shell_sources.c6_trouble(text, sizeof(text)))) {
+        strlcpy(text, shell_sources.c6_up && shell_sources.c6_up() ? "up" : "down", sizeof(text));
+    }
+    set_text(value_label[ROW_C6], text);
 
     char ip[16];
     if (shell_sources.wifi_ip && shell_sources.wifi_ip(ip, sizeof(ip))) {

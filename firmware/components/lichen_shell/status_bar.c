@@ -7,6 +7,7 @@
 #include "fonts.h"
 #include "theme.h"
 
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -14,6 +15,7 @@
 static lv_obj_t *clock_label;
 static lv_obj_t *lora_label;
 static lv_obj_t *wifi_label;
+static lv_obj_t *c6_label; // only while the C6 is being recovered or gone (#14)
 
 static lv_obj_t *add_row(lv_obj_t *parent, int gap) {
     lv_obj_t *row = lv_obj_create(parent);
@@ -109,9 +111,27 @@ static void fix_clock_width(void) {
     lv_obj_set_style_text_align(clock_label, LV_TEXT_ALIGN_RIGHT, 0);
 }
 
+// "C6: recovering 2/3" in amber, "C6: down (no answer)" in red, hidden while the C6 is up (#14 T-B)
+static void show_c6(void) {
+    char state[40], text[48];
+    bool trouble = shell_sources.c6_trouble && shell_sources.c6_trouble(state, sizeof(state));
+    if (!trouble) {
+        lv_obj_set_hidden(c6_label, true);
+        return;
+    }
+    snprintf(text, sizeof(text), "C6: %s", state);
+    if (strcmp(lv_label_get_text(c6_label), text) != 0) {
+        lv_label_set_text(c6_label, text);
+        bool down = strncmp(state, "down", 4) == 0;
+        lv_obj_set_style_text_color(c6_label, lv_color_hex(down ? THEME_LINK_RED : THEME_AMBER), 0);
+    }
+    lv_obj_set_hidden(c6_label, false);
+}
+
 static void refresh(lv_timer_t *timer) {
     (void)timer;
     show_clock();
+    show_c6();
     int8_t rssi  = 0;
     bool   known = shell_sources.wifi_rssi && shell_sources.wifi_rssi(&rssi);
     show_wifi(wifi_look(shell_sources.wifi_has_credentials && shell_sources.wifi_has_credentials(),
@@ -142,6 +162,8 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     add_text(left, "lichen", THEME_DIM);
 
     lv_obj_t *right = add_row(bar, 28);
+    c6_label        = add_text(right, "", THEME_AMBER);
+    lv_obj_set_hidden(c6_label, true);
     clock_label     = add_text(right, "--:--", THEME_DIM);
     fix_clock_width();
     lv_obj_t *wifi = add_row(right, 6);

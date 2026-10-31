@@ -79,6 +79,53 @@ static void stop_for_update(bool apps_stopped) {
     c6link_set_updating();
 }
 
+// ---- A C6 reset at runtime (#14 T-B): what the supervisor (c6sup) stops and restarts, in this order ----
+
+static bool have_keyboard;
+
+static void c6_down(void) {
+    lora_c6_lost(); // sends fail at once, no polls until the C6 is back
+}
+
+// The re-attach pulsed C6 EN again, which also reset the TCA8418: the keyboard first, then the backlight (the C6 starts
+// at its own defaults), then LoRa (config + RX start with MeshCore's settings)
+static void c6_up(void) {
+    if (have_keyboard) {
+        keyboard_reinit();
+    }
+    backlight_reapply();
+    lora_c6_back();
+}
+
+static void c6_restart_answer(bool confirmed) {
+    c6link_fallback_answer(confirmed);
+}
+
+// Lucas 2026-10-31: a warning with a countdown, not a silent restart; the countdown ends in the restart because the
+// keyboard may be dead in exactly this state
+static bool c6_ask_restart(void) {
+    shell_dialog_t const d = {
+        .title        = "C6 (radio/Wi-Fi) not responding —",
+        .count_prefix = "restarting in ",
+        .count_suffix = " s.",
+        .hint         = "Enter: restart now · Esc: stay without radio",
+        .seconds      = 30,
+    };
+    return shell_dialog_countdown(&d, c6_restart_answer);
+}
+
+static void c6_wire_hooks(bool screen) {
+    c6link_hooks_t const hooks = {
+        .down        = c6_down,
+        .up          = c6_up,
+        .probe       = lora_c6_probe,
+        .ask_restart = screen ? c6_ask_restart : NULL, // no screen: nobody to ask, the restart comes at once
+        .ask_cancel  = screen ? shell_dialog_close : NULL,
+    };
+    c6link_set_hooks(&hooks);
+    lora_set_send_hook(c6link_note_lora_send); // LoRa sends failing in a row: the soft signal
+}
+
 // The "apps" boot step (#66): every registered app's background part, on this task (core 0). FAILED names the apps
 // that did not start; the others keep running.
 static void start_apps(void) {
@@ -174,7 +221,8 @@ void app_main(void) {
                                          .wifi_scan = wifi_scan, .wifi_join = wifi_set_credentials, .wifi_ip = wifi_has_ip,
                                          .wifi_join_state = wifi_join_state,
                                          .wifi_has_credentials = wifi_has_credentials,
-                                         .wifi_rssi = wifi_rssi, .wifi_joining = wifi_joining};
+                                         .wifi_rssi = wifi_rssi, .wifi_joining = wifi_joining,
+                                         .c6_trouble = c6link_trouble};
         shell_set_sources(&sources);
         shell_start(display);
         boot_progress_end(BOOT_DISPLAY, STEP_DONE, NULL);
@@ -200,6 +248,7 @@ void app_main(void) {
         if (keyboard_start(&keys)) {
             shell_attach_keys(keys);
             keyboard_set_reset_hook(c6link_note_keyboard_reset); // the chip resets only with the C6 (#14)
+            have_keyboard = true;
         } else {
             ESP_LOGE(TAG, "no keyboard");
         }
@@ -214,6 +263,7 @@ void app_main(void) {
     } else {
         boot_progress_end(BOOT_LORA, STEP_FAILED, "no C6 link");
     }
+    c6_wire_hooks(screen); // after keyboard and LoRa: from now on a C6 reset is recovered from
     start_apps();
     // Wi-Fi console and log (#38) work without a screen; the update screen hooks need one
     ota_hooks_t hooks = {.log_read = log_store_read};

@@ -145,6 +145,45 @@ static void supervisor_restarts_after_reattach(void) {
     }
 }
 
+static void c6_link_across_a_reset(void) {
+    // #14 T-B: lost, then back: the task tells the owner "down", re-inits, and tells "up" once the C6 speaks
+    lora_c6_link_t l;
+    lora_c6_link_init(&l);
+    CHECK(!l.lost);
+    CHECK(lora_c6_link_take(&l) == 0);
+    CHECK(lora_c6_link_heard(&l) == 0); // normal traffic tells nobody anything
+    lora_c6_link_back(&l);              // back without lost: nothing to do
+    CHECK(lora_c6_link_take(&l) == 0);
+
+    lora_c6_link_lost(&l);
+    CHECK(l.lost);
+    CHECK(lora_c6_link_take(&l) == LORA_C6_TELL_DOWN);
+    CHECK(lora_c6_link_take(&l) == 0);
+    CHECK(l.lost);                      // no polls while lost
+    CHECK(lora_c6_link_heard(&l) == 0); // a late message from before the loss
+    lora_c6_link_back(&l);
+    CHECK(lora_c6_link_take(&l) == LORA_C6_REINIT);
+    CHECK(!l.lost);
+    CHECK(lora_c6_link_take(&l) == 0); // REINIT once
+    CHECK(lora_c6_link_heard(&l) == LORA_C6_TELL_UP);
+    CHECK(lora_c6_link_heard(&l) == 0);
+
+    // lost and back before the task looked: both, down first
+    lora_c6_link_lost(&l);
+    lora_c6_link_back(&l);
+    CHECK(lora_c6_link_take(&l) == (LORA_C6_TELL_DOWN | LORA_C6_REINIT));
+    // lost again before the C6 spoke: no "up" for the old attach
+    lora_c6_link_lost(&l);
+    CHECK(lora_c6_link_heard(&l) == 0);
+    CHECK(lora_c6_link_take(&l) == LORA_C6_TELL_DOWN);
+    // a second lost while lost: one more "down" is harmless, still one REINIT after back
+    lora_c6_link_lost(&l);
+    lora_c6_link_back(&l);
+    lora_c6_link_back(&l);
+    CHECK(lora_c6_link_take(&l) == (LORA_C6_TELL_DOWN | LORA_C6_REINIT));
+    CHECK(lora_c6_link_take(&l) == 0);
+}
+
 static void supervisor_retries_failed_radio_slowly(void) {
     lora_sup_t s;
     lora_sup_init(&s, 0);
@@ -239,6 +278,7 @@ int main(void) {
     supervisor_reconfigures_after_silence();
     supervisor_retries_failed_radio_slowly();
     supervisor_restarts_after_reattach();
+    c6_link_across_a_reset();
     status_line_format();
 
     if (failures) {

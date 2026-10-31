@@ -37,6 +37,27 @@ unsigned lora_sup_tick(lora_sup_t *s, uint32_t now_ms);
 // started again on every LORA_ERROR_RETRY_REPORTS-th report
 unsigned lora_sup_on_status(lora_sup_t *s, lora_status_t const *st, uint32_t now_ms);
 
+// The C6 link as the LoRa task sees it across a C6 reset (#14 T-B). lora_c6_lost()/lora_c6_back() (the supervisor's
+// down and up hooks, any task) only mark it, under the caller's lock; the LoRa task takes the work at the top of its
+// loop. While lost the task neither polls nor sends. After back it registers again and re-sends config + RX start
+// (REINIT); the owner hears "down" when the task notices the loss and "up" once the C6 has spoken again.
+#define LORA_C6_REINIT    1u
+#define LORA_C6_TELL_DOWN 2u
+#define LORA_C6_TELL_UP   4u
+
+typedef struct {
+    bool lost;
+    bool back_pending;
+    bool down_pending;
+    bool up_pending; // REINIT done, waiting for the C6 to speak
+} lora_c6_link_t;
+
+void     lora_c6_link_init(lora_c6_link_t *l);
+void     lora_c6_link_lost(lora_c6_link_t *l);
+void     lora_c6_link_back(lora_c6_link_t *l); // nothing unless lost
+unsigned lora_c6_link_take(lora_c6_link_t *l); // LORA_C6_REINIT | LORA_C6_TELL_DOWN
+unsigned lora_c6_link_heard(lora_c6_link_t *l); // a message from the C6: LORA_C6_TELL_UP once after a REINIT
+
 // The `badgevms lora` line; returns the length written (excluding the NUL)
 size_t lora_status_format(
     lora_config_t const *cfg,

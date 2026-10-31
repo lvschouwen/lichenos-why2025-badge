@@ -27,6 +27,9 @@ typedef struct {
     bool (*wifi_rssi)(int8_t *out);     // signal of the connected AP, false while unknown (status bar bars)
     bool (*wifi_joining)(void);         // a join is under way (status bar amber)
     bool (*wifi_has_credentials)(void); // first-run setup skips the Wi-Fi step when the badge has a network saved
+    // The C6 is being recovered or is gone (#14): the state in words ("recovering 2/3", "down (no answer)"), false
+    // while it is up
+    bool (*c6_trouble)(char *out, size_t cap);
 } shell_sources_t;
 
 void shell_set_sources(shell_sources_t const *sources); // before shell_start; copied
@@ -39,3 +42,20 @@ void shell_attach_keys(lv_indev_t *keys);
 void shell_close_all_but_top(void);
 // The boot screen is up (the OTA valid gate: a new image must show it before it counts as working)
 bool shell_up(void);
+
+// An OS warning dialog over every screen (#14 T-B), e.g. "C6 (radio/Wi-Fi) not responding — restarting in 30 s".
+// The message reads "<title> <count_prefix><seconds left><count_suffix>", the hint below it. Enter confirms, Esc
+// cancels, and when the countdown runs out it confirms by itself (the keyboard may be dead). done runs once on the LVGL
+// task with the answer: keep it short (queue the work). One dialog at a time: a second call replaces the first. Safe
+// from any task, never blocks on more than the LVGL lock (2 s); false when it could not be shown.
+typedef struct {
+    char const *title;
+    char const *count_prefix;
+    char const *count_suffix;
+    char const *hint;
+    uint32_t    seconds;
+} shell_dialog_t;
+typedef void (*shell_dialog_fn)(bool confirmed);
+bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done);
+// Closes it without an answer (the reason for it went away); safe from any task
+void shell_dialog_close(void);

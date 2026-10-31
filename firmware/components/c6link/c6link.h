@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "c6_watch.h"
+#include "esp_event.h"
 #include "wifi_join.h"
 #include "wifi_list.h"
 
@@ -12,8 +13,35 @@
 
 // True once ESP-Hosted talks to the C6, with or without Wi-Fi (no credentials, wrong password, out of range)
 bool c6link_start(void);
-// False again once ESP-Hosted reports a transport failure (#14)
+// False while the C6 supervisor (c6sup, #14) recovers the link, true again once it is back
 bool c6link_up(void);
+
+// Posted on the default event loop when the link goes down and when it is back (#14), for observers. The users of the
+// link are stopped and restarted through c6link_set_hooks(), in a fixed order, before these are posted.
+ESP_EVENT_DECLARE_BASE(C6LINK_EVENT);
+enum { C6LINK_EVENT_DOWN, C6LINK_EVENT_UP };
+
+// What the supervisor needs from the rest of the badge (#14 T-B), from main.c: c6link depends on neither the board
+// nor LoRa. All run on the c6sup task; any member may be NULL.
+typedef struct {
+    void (*down)(void); // the link is going away: stop its users (LoRa)
+    void (*up)(void);   // it is back: keyboard_reinit, then backlight_reapply, then LoRa, in that order
+    // Ask the C6 something cheap and wait at most timeout_ms; true with its uptime when it answered
+    bool (*probe)(uint32_t timeout_ms, uint32_t *c6_uptime_s);
+    // The C6 is not coming back: ask whether to restart (Lucas: a warning dialog with a countdown). Answer later with
+    // c6link_fallback_answer(); false when it could not ask (the badge then restarts at once)
+    bool (*ask_restart)(void);
+    void (*ask_cancel)(void); // the C6 came back while the question was open: take it away
+} c6link_hooks_t;
+void c6link_set_hooks(c6link_hooks_t const *hooks);
+// The answer to ask_restart: true restarts the badge (Enter, or the countdown ran out), false stays without the C6
+// (Esc; the slow retry goes on). Safe from any task.
+void c6link_fallback_answer(bool restart);
+// The C6 is being recovered or is gone: the state in words ("recovering 2/3", "down (no answer)") for the status bar
+// and About; false while it is up. Quick, safe from the LVGL task.
+bool c6link_trouble(char *out, size_t cap);
+// Every peer-data send to the C6 (lora_set_send_hook): failures in a row are the soft signal that it may be gone (#14)
+void c6link_note_lora_send(bool ok);
 
 // A C6 reset at runtime (#14): what the watch knows, for `fw c6`, the status bar and About. Safe from any task.
 typedef struct {

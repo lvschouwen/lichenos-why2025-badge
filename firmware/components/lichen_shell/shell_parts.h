@@ -43,6 +43,11 @@ void wifi_screen_open_setup(void (*done)(void));
 void setup_init(void);  // registers "fw setup reset"
 void setup_start(void); // opens the welcome on top of home unless setup_done is saved
 
+// dialog.c: the open dialog's keypad group, NULL when none is open (#14 T-B); shell.c: give the keys to the dialog, or
+// back to the top screen once it is gone
+lv_group_t *shell_dialog_group(void);
+void        shell_refocus(void);
+
 // shell.c: home is on screen and its fade-in is over (screens may open)
 bool shell_home_shown(void);
 

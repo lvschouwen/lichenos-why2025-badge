@@ -227,3 +227,43 @@ size_t lora_status_format(
     used += n < 0 ? 0 : (size_t)n;
     return used < cap ? used : cap - 1;
 }
+
+void lora_c6_link_init(lora_c6_link_t *l) {
+    memset(l, 0, sizeof(*l));
+}
+
+void lora_c6_link_lost(lora_c6_link_t *l) {
+    l->lost         = true;
+    l->back_pending = false;
+    l->up_pending   = false;
+    l->down_pending = true;
+}
+
+void lora_c6_link_back(lora_c6_link_t *l) {
+    if (l->lost) {
+        l->back_pending = true;
+    }
+}
+
+unsigned lora_c6_link_take(lora_c6_link_t *l) {
+    unsigned act = 0;
+    if (l->down_pending) {
+        l->down_pending = false;
+        act |= LORA_C6_TELL_DOWN;
+    }
+    if (l->back_pending) {
+        l->back_pending = false;
+        l->lost         = false;
+        l->up_pending   = true;
+        act |= LORA_C6_REINIT;
+    }
+    return act;
+}
+
+unsigned lora_c6_link_heard(lora_c6_link_t *l) {
+    if (l->up_pending && !l->lost) {
+        l->up_pending = false;
+        return LORA_C6_TELL_UP;
+    }
+    return 0;
+}

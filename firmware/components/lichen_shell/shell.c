@@ -53,10 +53,27 @@ void shell_style_screen(lv_obj_t *screen) {
     lv_obj_set_style_text_font(screen, lichen_font(LICHEN_FONT_SMALL), 0);
 }
 
+// An open dialog keeps the keys whatever opens or closes below it (#14 T-B)
 static void focus_keys(void) {
-    if (keys) {
-        lv_indev_set_group(keys, frames[nav_depth() - 1].group);
+    if (!keys) {
+        return;
     }
+    if (shell_dialog_group()) {
+        lv_indev_set_group(keys, shell_dialog_group());
+    } else if (nav_depth() > 0 && frames[nav_depth() - 1].group) {
+        lv_indev_set_group(keys, frames[nav_depth() - 1].group);
+    } else if (boot_screen_group()) {
+        lv_indev_set_group(keys, boot_screen_group());
+    }
+}
+
+// The dialog opened or closed (#14 T-B): a key still held (the Enter that answered it) must not be released into the
+// other group, where its release would click a widget that never saw the press
+void shell_refocus(void) {
+    if (keys) {
+        lv_indev_wait_release(keys);
+    }
+    focus_keys();
 }
 
 static void show_top(void) {
@@ -100,6 +117,9 @@ void shell_on_esc(bool (*fn)(void *arg), void *arg) {
 
 // The top screen may use the Esc first (clear a search or a draft); if not, it goes back
 void shell_esc(void) {
+    if (shell_dialog_group()) {
+        return; // the dialog's own Esc (#14 T-B)
+    }
     int depth = nav_depth();
     frame_t *top = depth > 0 ? &frames[depth - 1] : NULL;
     if (top && top->on_esc && top->on_esc(top->on_esc_arg)) {

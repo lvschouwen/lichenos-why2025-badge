@@ -2,15 +2,13 @@
 
 #include "boot_progress.h"
 #include "c6_boot_policy.h"
-#include "c6_watch.h"
+#include "c6link_priv.h"
 #include "c6_flasher.h"
 #include "c6_paths.h"
 #include "fw_console.h"
 #include "lichen_clock.h"
 #include "esp_event.h"
 #include "esp_hosted.h"
-#include "eh_host_event.h"
-#include "esp_rom_sys.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_netif.h"
@@ -38,7 +36,7 @@
 
 static char const TAG[] = "c6link";
 
-// Written by the attach, the ESP-Hosted event handler and (#14 T-B) the supervisor; read from any task
+// Written by the boot attach and the supervisor (c6_sup.c, #14); read from any task
 static atomic_bool  link_up;
 // Shared between the event handler, the c6wifi task, the console and the screen: guarded by state_lock. The task is the
 // only one that calls esp_wifi_connect/disconnect/set_config after boot.
@@ -57,6 +55,10 @@ static char         ip_text[16];
 
 bool c6link_up(void) {
     return atomic_load(&link_up);
+}
+
+void c6link_set_link(bool up) {
+    atomic_store(&link_up, up);
 }
 
 bool wifi_has_ip(char *ip, size_t cap) {
@@ -112,7 +114,17 @@ bool wifi_joining(void) {
 }
 
 // Everything that touches the connection runs in one task (c6wifi): events and requests are queued to it
-typedef enum { MSG_CONNECT, MSG_JOIN, MSG_RECONNECT, MSG_FORGET, MSG_DISCONNECTED, MSG_GOT_IP, MSG_CONNECTED } msg_type_t;
+typedef enum {
+    MSG_CONNECT,
+    MSG_JOIN,
+    MSG_RECONNECT,
+    MSG_FORGET,
+    MSG_DISCONNECTED,
+    MSG_GOT_IP,
+    MSG_CONNECTED,
+    MSG_C6_DOWN, // the supervisor re-attaches (#14): stop and deinit the driver
+    MSG_C6_UP,   // and it is back: init and start it again
+} msg_type_t;
 typedef struct {
     msg_type_t type;
     int        reason;
@@ -258,7 +270,8 @@ static void wipe_driver_store_once(void) {
     nvs_close(nvs);
 }
 
-static bool wifi_driver_up(void);
+typedef enum { DRV_STARTED, DRV_NO_CREDENTIALS, DRV_FAILED } drv_result_t;
+static drv_result_t wifi_driver_up(char const **why);
 
 static bool start_wifi(void) {
     boot_progress_begin(BOOT_WIFI);
@@ -275,22 +288,38 @@ static bool start_wifi(void) {
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL, NULL);
     sta_netif = esp_netif_create_default_wifi_sta();
     start_sntp();
-    return wifi_driver_up();
+    // The boot steps are ended here, not in wifi_driver_up: a re-attach runs it again without them (#14)
+    char const  *why = NULL;
+    drv_result_t r   = wifi_driver_up(&why);
+    if (r == DRV_FAILED) {
+        return wifi_failed(why);
+    }
+    if (r == DRV_NO_CREDENTIALS) {
+        boot_progress_end(BOOT_WIFI, STEP_SKIPPED, "no credentials");
+        boot_progress_end(BOOT_CLOCK, STEP_SKIPPED, "no Wi-Fi");
+        return true;
+    }
+    // Associating, the IP and the clock come later and are not waited for; the clock step ends in on_time_sync()
+    boot_progress_end(BOOT_WIFI, STEP_DONE, NULL);
+    return true;
 }
 
-// The part of the Wi-Fi bring-up that belongs to one ESP-Hosted attach (#14): a re-attach after a C6 reset (T-B) runs
-// it again, while the event loop, netif, handlers and SNTP above stay from the first boot
-static bool wifi_driver_up(void) {
+static atomic_bool driver_up; // esp_wifi is initialised and started on the C6 that is attached now (#14)
+
+// The part of the Wi-Fi bring-up that belongs to one ESP-Hosted attach (#14): a re-attach after a C6 reset runs it
+// again (MSG_C6_UP), while the event loop, netif, handlers and SNTP above stay from the first boot
+static drv_result_t wifi_driver_up(char const **why) {
     esp_err_t          err;
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
+    *why                    = "Wi-Fi init";
     if ((err = esp_wifi_init(&init)) != ESP_OK) {
         ESP_LOGE(TAG, "Wi-Fi init: %s", esp_err_to_name(err));
-        return wifi_failed("Wi-Fi init");
+        return DRV_FAILED;
     }
     wipe_driver_store_once();
     if ((err = esp_wifi_set_mode(WIFI_MODE_STA)) != ESP_OK) {
         ESP_LOGE(TAG, "Wi-Fi init: %s", esp_err_to_name(err));
-        return wifi_failed("Wi-Fi init");
+        return DRV_FAILED;
     }
     // The credentials are ours (NVS badge_fw): the driver must never keep a copy in its own flash storage, so that
     // "fw wifi --clear" really forgets them
@@ -308,20 +337,19 @@ static bool wifi_driver_up(void) {
         if ((err = esp_wifi_start()) != ESP_OK) {
             ESP_LOGE(TAG, "Wi-Fi start: %s", esp_err_to_name(err));
         }
-        boot_progress_end(BOOT_WIFI, STEP_SKIPPED, "no credentials");
-        boot_progress_end(BOOT_CLOCK, STEP_SKIPPED, "no Wi-Fi");
-        return true;
+        atomic_store(&driver_up, true);
+        return DRV_NO_CREDENTIALS;
     }
     portENTER_CRITICAL(&state_lock);
     snprintf(ssid, sizeof(ssid), "%.32s", (char const *)cfg.sta.ssid);
     portEXIT_CRITICAL(&state_lock);
     if ((err = esp_wifi_set_config(WIFI_IF_STA, &cfg)) != ESP_OK || (err = esp_wifi_start()) != ESP_OK) {
         ESP_LOGE(TAG, "Wi-Fi start: %s", esp_err_to_name(err));
-        return wifi_failed("Wi-Fi start");
+        *why = "Wi-Fi start";
+        return DRV_FAILED;
     }
-    // Associating, the IP and the clock come later and are not waited for; the clock step ends in on_time_sync()
-    boot_progress_end(BOOT_WIFI, STEP_DONE, NULL);
-    return true;
+    atomic_store(&driver_up, true);
+    return DRV_STARTED;
 }
 
 // ---- scan, join, reconnect (#66) ---------------------------------------------------------------------------------
@@ -329,15 +357,19 @@ static bool wifi_driver_up(void) {
 #define SCAN_RECORDS  32
 #define SCAN_WAIT_MS  6000
 
-static bool updating; // a firmware update is being received: no scans (#76)
+static atomic_bool updating; // a firmware update is being received: no scans (#76); read by c6sup too (#14)
 
 void c6link_set_updating(void) {
-    updating = true;
+    atomic_store(&updating, true);
+}
+
+bool c6link_updating(void) {
+    return atomic_load(&updating);
 }
 
 bool wifi_scan(wifi_ap_t *out, size_t max, size_t *n) {
     *n = 0;
-    if (updating || !atomic_load(&link_up) || !out || max == 0 || !scan_lock || xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) != pdTRUE) {
+    if (atomic_load(&updating) || !atomic_load(&link_up) || !out || max == 0 || !scan_lock || xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) != pdTRUE) {
         return false;
     }
     bool                 ok = false;
@@ -551,13 +583,95 @@ static void poll_rssi(uint32_t now) {
     }
     next_at = now + RSSI_POLL_MS;
     wifi_ap_record_t ap;
-    if (updating || !wifi_has_ip(NULL, 0) || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+    if (atomic_load(&updating) || !wifi_has_ip(NULL, 0) || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
         return;
     }
     portENTER_CRITICAL(&state_lock);
     rssi_cached = ap.rssi;
     rssi_known  = true;
     portEXIT_CRITICAL(&state_lock);
+}
+
+// A trial that was running when the C6 went away has failed: the pair NVS holds stays, nothing is saved, and no driver
+// call is made (the C6 is gone, each one would wait for its RPC timeout)
+static void abort_trial(void) {
+    portENTER_CRITICAL(&state_lock);
+    bool trying = join.state == WIFI_JOIN_TRYING || join.state == WIFI_JOIN_PENDING;
+    if (trying) {
+        join.state = WIFI_JOIN_FAILED_KEPT_OLD;
+    }
+    portEXIT_CRITICAL(&state_lock);
+    if (!trying) {
+        return;
+    }
+    char s[33], p[64];
+    bool had = wifi_cred_load(s, p);
+    memset(p, 0, sizeof(p));
+    memset(trial_pass, 0, sizeof(trial_pass));
+    portENTER_CRITICAL(&state_lock);
+    have_credentials = had;
+    snprintf(kept_ssid, sizeof(kept_ssid), "%s", had ? s : "");
+    snprintf(ssid, sizeof(ssid), "%s", had ? s : "");
+    portEXIT_CRITICAL(&state_lock);
+    ESP_LOGW(TAG, "wifi: the C6 went away during a trial join: not saved");
+}
+
+// The supervisor re-attaches (#14 T-B): forget the connection and take the driver down. Errors are expected (the C6
+// may be gone) and ignored; each RPC gives up after its own timeout.
+static void handle_c6_down(void) {
+    // A scan from the screen or the console may be inside the driver: let it end first (it gives up after 6 s)
+    bool scan_held = scan_lock && xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE;
+    atomic_store(&driver_up, false);
+    retry_pending = false;
+    set_ip("");
+    wifi_link_down(&link_ap);
+    abort_trial();
+    esp_err_t stop = esp_wifi_stop();
+    esp_err_t gone = esp_wifi_deinit();
+    ESP_LOGW(TAG, "wifi: down for the C6 re-attach (stop %s, deinit %s)", esp_err_to_name(stop), esp_err_to_name(gone));
+    if (scan_held) {
+        xSemaphoreGive(scan_lock); // wifi_scan refuses on its own while link_up is false
+    }
+}
+
+// The C6 is attached again: the driver comes up as at boot; STA_START then connects with the saved pair
+static void handle_c6_up(void) {
+    portENTER_CRITICAL(&state_lock);
+    first_connect_settled = false; // the status bar shows it as joining again
+    portEXIT_CRITICAL(&state_lock);
+    char const  *why = NULL;
+    drv_result_t r   = DRV_FAILED;
+    // A C6 that has only just booted may refuse the first RPCs: two more tries before giving up until the next outage
+    for (int i = 0; i < 3 && (r = wifi_driver_up(&why)) == DRV_FAILED; i++) {
+        esp_wifi_deinit();
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+    ESP_LOGW(TAG, "wifi: %s after the C6 re-attach", r == DRV_FAILED ? why : r == DRV_NO_CREDENTIALS ? "started, no network saved" : "started");
+}
+
+static SemaphoreHandle_t c6_msg_done; // given by the task after MSG_C6_DOWN / MSG_C6_UP
+static atomic_int        c6_msg_seq;  // the request the last give was for: a late one must not end the next wait
+
+bool c6link_wifi_request(bool up, uint32_t wait_ms) {
+    static int seq;
+    msg_t      m = {.type = up ? MSG_C6_UP : MSG_C6_DOWN, .reason = ++seq};
+    if (!c6_msg_done || !post(&m)) {
+        return false;
+    }
+    TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(wait_ms);
+    while (atomic_load(&c6_msg_seq) != m.reason) {
+        TickType_t now = xTaskGetTickCount();
+        if ((int32_t)(until - now) <= 0 || xSemaphoreTake(c6_msg_done, until - now) != pdTRUE) {
+            return atomic_load(&c6_msg_seq) == m.reason;
+        }
+    }
+    return true;
+}
+
+static TaskHandle_t wifi_task_handle;
+
+unsigned c6link_wifi_stack_free(void) {
+    return wifi_task_handle ? (unsigned)uxTaskGetStackHighWaterMark(wifi_task_handle) : 0;
 }
 
 static void wifi_task(void *arg) {
@@ -572,7 +686,7 @@ static void wifi_task(void *arg) {
                     portENTER_CRITICAL(&state_lock);
                     bool have = have_credentials;
                     portEXIT_CRITICAL(&state_lock);
-                    if (have) {
+                    if (have && atomic_load(&driver_up)) {
                         esp_wifi_connect();
                     }
                     break;
@@ -583,12 +697,20 @@ static void wifi_task(void *arg) {
                 case MSG_DISCONNECTED: handle_disconnected(m.reason, now); break;
                 case MSG_GOT_IP: handle_got_ip(); break;
                 case MSG_CONNECTED: handle_connected(&m); break;
+                case MSG_C6_DOWN:
+                case MSG_C6_UP:
+                    m.type == MSG_C6_UP ? handle_c6_up() : handle_c6_down();
+                    atomic_store(&c6_msg_seq, m.reason);
+                    xSemaphoreGive(c6_msg_done);
+                    break;
             }
             memset(&m, 0, sizeof(m));
         }
         if (retry_pending && (int32_t)(now - retry_at) >= 0) {
             retry_pending = false;
-            esp_wifi_connect();
+            if (atomic_load(&driver_up)) {
+                esp_wifi_connect();
+            }
         }
         poll_rssi(now);
         portENTER_CRITICAL(&state_lock);
@@ -732,12 +854,9 @@ static void cmd_c6log(char const *args) {
 
 static bool nvs_write_boot_state(char const *key, bool verify);
 static void cmd_c6_status(void);
-static void cmd_c6_reset(void);
-static void watch_line(char *out, size_t cap);
 
 static void cmd_c6(char const *args) {
-    if (strcmp(args, "reset") == 0) {
-        cmd_c6_reset();
+    if (c6_sup_command(args)) { // reset, reset rom, reattach (#14)
         return;
     }
     if (strcmp(args, "verify") == 0) {
@@ -866,6 +985,14 @@ void c6link_bundle_changed(void) {
     nvs_write_boot_state(NULL, false);
 }
 
+// The C6 was lost at runtime and the badge restarts for it (#14): check it fully during the next boot, keeping the key
+bool c6link_set_verify_flag(void) {
+    char stored[C6_BUNDLE_KEY_MAX];
+    bool verify = false;
+    nvs_read_boot_state(stored, sizeof(stored), &verify);
+    return nvs_write_boot_state(stored[0] ? stored : NULL, true);
+}
+
 static void cmd_c6_status(void) {
     char stored[C6_BUNDLE_KEY_MAX];
     bool verify = false;
@@ -873,13 +1000,13 @@ static void cmd_c6_status(void) {
     console_reply("c6: this boot %s (%s), C6 step %u ms", boot_info.plan, boot_info.why, (unsigned)boot_info.c6_ms);
     console_reply("c6: stored key %s, verify flag %d", stored[0] ? stored : "(none)", verify);
     char line[C6W_REASON_MAX + 64];
-    watch_line(line, sizeof(line));
+    c6_sup_watch_line(line, sizeof(line));
     console_reply("%s", line);
-    console_reply("c6 reflash | verify (full check on the next boot) | reset (pulse C6 EN now, #14)");
+    console_reply("c6 reflash | verify (full check on the next boot) | reset [rom] (pulse C6 EN now) | reattach (#14)");
 }
 
 // The first boot of a fresh OTA image: until it is marked valid, one reset makes the bootloader roll it back
-static bool running_image_is_trial(void) {
+bool c6link_image_is_trial(void) {
     esp_ota_img_states_t state;
     return esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
            state == ESP_OTA_IMG_PENDING_VERIFY;
@@ -894,138 +1021,40 @@ static bool plan_full_check(bool force, char *key, size_t key_cap) {
         key[0] = '\0';
     }
     c6_reset_kind_t kind = esp_reset_reason() == ESP_RST_SW ? C6_RST_SOFTWARE : C6_RST_OTHER;
-    c6_plan_t       plan = c6_boot_plan(kind, force, verify, running_image_is_trial(), stored, key, &boot_info.why);
+    c6_plan_t       plan = c6_boot_plan(kind, force, verify, c6link_image_is_trial(), stored, key, &boot_info.why);
     boot_info.plan       = plan == C6_PLAN_SKIP ? "skip" : "full";
     return plan == C6_PLAN_FULL_CHECK;
 }
 
 // P4 GPIO13 is the C6 GPIO9 strap: low at a reset means download mode. esp_hosted now resets the C6 through EN (GPIO12), so
 // the strap has to be high first, on every path (the flasher may have bailed out early, #2). The level is set before the
-// pin becomes an output so it never glitches low.
-static void hold_c6_boot_high(void) {
-    gpio_set_level(GPIO_NUM_13, 1);
+// pin becomes an output so it never glitches. Low only for "fw c6 reset rom" (#14).
+void hold_c6_boot(int level) {
+    gpio_set_level(GPIO_NUM_13, level);
     gpio_config_t io = {
         .pin_bit_mask = 1ULL << GPIO_NUM_13,
         .mode         = GPIO_MODE_OUTPUT,
         .pull_up_en   = GPIO_PULLUP_ENABLE,
     };
     gpio_config(&io);
-    gpio_set_level(GPIO_NUM_13, 1);
-}
-
-// ---- Noticing a C6 reset at runtime (#14) ----------------------------------------------------------------------
-// T-A: the inputs feed c6_watch and `fw c6` reports it; nothing carries the actions out yet (that is the c6sup task of
-// T-B). ESP-Hosted's RESTART_ON_FAILURE still aborts the P4 right after posting TRANSPORT_FAILURE.
-
-#define RESET_DELAY_MS 1000 // fw c6 reset: lets the console reply leave over Wi-Fi first
-#define RESET_PULSE_US 10000
-
-static c6_watch_t         watch;
-static portMUX_TYPE       watch_lock = portMUX_INITIALIZER_UNLOCKED;
-static esp_timer_handle_t reset_timer;
-
-static void watch_hard(c6w_source_t src, char const *what) {
-    portENTER_CRITICAL(&watch_lock);
-    unsigned act = c6_watch_hard(&watch, src, now_ms());
-    portEXIT_CRITICAL(&watch_lock);
-    if (act) {
-        ESP_LOGW(TAG, "C6 watch: %s, actions 0x%02x (no recovery before #14 T-B)", what, act);
-    }
-}
-
-void c6link_note_keyboard_reset(void) {
-    // link_up stays as it is: only the transport (or, in T-B, the supervisor's down hooks) may say the link is gone
-    watch_hard(C6W_SRC_KEYBOARD, "keyboard chip was reset");
-}
-
-// Runs on the event loop task. Only notes it: the recovery may not run here (T-B queues it to c6sup).
-static void on_hosted_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
-    (void)arg, (void)base, (void)data;
-    if (id == EH_HOST_EVENT_TRANSPORT_FAILURE) {
-        atomic_store(&link_up, false);
-        watch_hard(C6W_SRC_TRANSPORT, "ESP-Hosted transport failure");
-    }
-}
-
-static void watch_register_events(void) {
-    // esp_hosted_init created the default event loop
-    esp_err_t err = esp_event_handler_instance_register(EH_HOST_EVENT, EH_HOST_EVENT_TRANSPORT_FAILURE, on_hosted_event,
-                                                        NULL, NULL);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "no ESP-Hosted event handler: %s", esp_err_to_name(err));
-    }
-}
-
-static void watch_line(char *out, size_t cap) {
-    portENTER_CRITICAL(&watch_lock);
-    c6_watch_t copy = watch;
-    portEXIT_CRITICAL(&watch_lock);
-    c6_watch_line(&copy, now_ms(), out, cap);
-}
-
-void c6link_status(c6_status_t *out) {
-    portENTER_CRITICAL(&watch_lock);
-    out->state            = watch.state;
-    out->source           = watch.source;
-    out->restarts         = watch.restarts;
-    out->last_recovery_ms = watch.last_recovery_ms;
-    out->attempt          = watch.attempt;
-    memcpy(out->reason, watch.reason, sizeof(out->reason));
-    portEXIT_CRITICAL(&watch_lock);
-}
-
-// A raw EN pulse behind ESP-Hosted's back, as a C6 crash would look (#14): detection has to find it on its own. GPIO12
-// is already an output (ESP-Hosted's reset pin, set up by the attach); GPIO13 (the C6 GPIO9 strap) is held high so the
-// C6 boots its application.
-static void reset_pulse(void *arg) {
-    (void)arg;
-    if (updating || !atomic_load(&link_up)) { // checked again: an update may have started in the second since the command
-        ESP_LOGW(TAG, "fw c6 reset: not now (%s)", updating ? "update running" : "no C6 link");
-        return;
-    }
-    portENTER_CRITICAL(&watch_lock);
-    c6_watch_manual_reset(&watch, now_ms());
-    portEXIT_CRITICAL(&watch_lock);
-    hold_c6_boot_high();
-    ESP_LOGW(TAG, "fw c6 reset: C6 EN low for %d ms", RESET_PULSE_US / 1000);
-    gpio_set_level(GPIO_NUM_12, 0);
-    esp_rom_delay_us(RESET_PULSE_US);
-    gpio_set_level(GPIO_NUM_12, 1);
-}
-
-static void cmd_c6_reset(void) {
-    if (updating || !reset_timer || !atomic_load(&link_up)) {
-        console_reply("c6 reset: not now (%s)", updating ? "update running" : "no C6 link");
-        return;
-    }
-    console_reply("C6 reset in %d s, Wi-Fi drops. Until #14 T-B the badge most likely aborts and reboots: read the "
-                  "result with fw c6, fw crash and the log", RESET_DELAY_MS / 1000);
-    esp_timer_stop(reset_timer); // a second fw c6 reset within the second: still one pulse
-    esp_timer_start_once(reset_timer, (uint64_t)RESET_DELAY_MS * 1000);
-}
-
-static void watch_start(void) {
-    // T-B adds the NVS "restarted for a lost C6" flag; until then nothing acts on FALLBACK_RESTART anyway
-    c6_watch_init(&watch, running_image_is_trial(), false);
-    esp_timer_create_args_t const args = {.callback = reset_pulse, .name = "c6reset"};
-    if (esp_timer_create(&args, &reset_timer) != ESP_OK) {
-        reset_timer = NULL;
-    }
+    gpio_set_level(GPIO_NUM_13, level);
 }
 
 bool c6link_start(void) {
     console_register("c6log", "c6log [ms] (copy the C6's console into the log)", cmd_c6log);
-    console_register("c6", "c6 [reflash | verify | reset]", cmd_c6);
+    console_register("c6", "c6 [reflash | verify | reset [rom] | reattach]", cmd_c6);
     clock_console_register();
     console_register("net", "net (Wi-Fi state and IP)", cmd_net);
     console_register("wifi", "wifi [scan | reconnect | <ssid> <password> | --clear]", cmd_wifi);
-    watch_start();
-    scan_done = xSemaphoreCreateBinary();
-    scan_lock = xSemaphoreCreateMutex();
-    queue     = xQueueCreate(16, sizeof(msg_t));
+    c6_sup_start();
+    scan_done   = xSemaphoreCreateBinary();
+    scan_lock   = xSemaphoreCreateMutex();
+    c6_msg_done = xSemaphoreCreateBinary();
+    queue       = xQueueCreate(16, sizeof(msg_t));
     wifi_join_init(&join);
-    if (!scan_done || !scan_lock || !queue ||
-        xTaskCreatePinnedToCore(wifi_task, "c6wifi", 4096, NULL, 5, NULL, 0) != pdPASS) {
+    if (!scan_done || !scan_lock || !c6_msg_done || !queue ||
+        // 5 KB: since #14 it also runs wifi_driver_up (esp_wifi_init, a wifi_config_t, RPCs) after a re-attach
+        xTaskCreatePinnedToCore(wifi_task, "c6wifi", 5120, NULL, 5, &wifi_task_handle, 0) != pdPASS) {
         ESP_LOGE(TAG, "Wi-Fi task did not start");
     }
 
@@ -1045,7 +1074,7 @@ bool c6link_start(void) {
         ESP_LOGW(TAG, "C6 bundle unchanged, ROM check skipped (SW reset)");
     }
     // The C6 was reset into its application by the flasher; only now may ESP-Hosted talk to it
-    hold_c6_boot_high();
+    hold_c6_boot(1);
     bool attached = esp_hosted_init() == 0 && esp_hosted_connect_to_slave() == 0;
     // The key is stored only after a successful attach; a failed one sets the verify flag (full check next boot)
     c6_state_write_t w         = c6_state_after_attach(full, attached, err == ESP_OK, key[0] != '\0');
@@ -1063,7 +1092,7 @@ bool c6link_start(void) {
         return false;
     }
     atomic_store(&link_up, true);
-    watch_register_events();
+    c6_sup_attached(); // from now on c6sup notices a C6 reset and recovers from it (#14)
     boot_info.c6_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
     ESP_LOGW(TAG, "C6 step %s: %u ms", boot_info.plan, (unsigned)boot_info.c6_ms);
     char note[BOOT_REASON_LEN];

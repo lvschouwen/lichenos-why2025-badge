@@ -14,6 +14,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lora_link.h"
 #include "lora_proto.h"
@@ -61,6 +62,14 @@ static lora_rx_formatter_t rx_fmt;
 static bool             stop_requested; // lora_stop -> the task
 static bool             stopped;        // the task -> everyone
 static bool             started;        // lora_start succeeded
+static void           (*link_cb)(bool up); // the owner's, #14
+static void           (*send_hook)(bool ok); // the C6 supervisor's soft signal, #14
+static lora_c6_link_t   c6_link;           // under state_lock (#14 T-B)
+static bool             probe_requested;   // lora_c6_probe -> the task, under state_lock
+// Held around every peer-data send (the LoRa task's and the mesh task's): lora_c6_lost takes it once, so when it returns
+// no send is inside ESP-Hosted any more and the supervisor may deinit it (#14 T-B)
+static SemaphoreHandle_t send_mutex;
+#define SEND_DRAIN_MS 7000 // one send blocks at most about 5 s on a C6 that is gone
 
 bool lora_claim(char const *who, lora_packet_cb_t cb) {
     if (owner && strcmp(owner, who) != 0) {
@@ -76,8 +85,22 @@ void lora_release(char const *who) {
     if (owner && strcmp(owner, who) == 0) {
         packet_cb = NULL;
         rx_fmt    = NULL;
+        link_cb   = NULL;
         owner     = NULL;
     }
+}
+
+bool lora_set_link_callback(char const *who, void (*fn)(bool up)) {
+    if (!who || !owner || strcmp(owner, who) != 0) {
+        ESP_LOGE(TAG, "link callback refused: %s does not hold the radio", who ? who : "?");
+        return false;
+    }
+    link_cb = fn;
+    return true;
+}
+
+void lora_set_send_hook(void (*fn)(bool ok)) {
+    send_hook = fn;
 }
 
 void lora_set_rx_formatter(lora_rx_formatter_t fmt) {
@@ -121,9 +144,10 @@ bool lora_send(uint8_t const *bytes, size_t len, uint32_t airtime_ms) {
         tx_sent_ms    = now_ms();
         tx_airtime_ms   = airtime_ms;
     }
+    bool lost = c6_link.lost; // the supervisor is re-attaching (#14): the send has failed already, don't touch ESP-Hosted
     portEXIT_CRITICAL(&state_lock);
-    if (!ok) {
-        return false;
+    if (!ok || lost) {
+        return ok;
     }
     lora_msg_t msg = {.type = LORA_MSG_SEND};
     msg.u.tx.len   = (uint8_t)len;
@@ -228,11 +252,25 @@ static bool send_to_c6(lora_msg_t const *msg) {
     static bool failing;
     uint8_t     buf[LORA_MSG_MAX];
     size_t      len = lora_encode(msg, buf, sizeof(buf));
-    esp_err_t   err = len ? eh_host_peer_data_send(LORA_MSG_ID_TO_C6, buf, len) : ESP_ERR_INVALID_SIZE;
+    if (!send_mutex || xSemaphoreTake(send_mutex, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+    portENTER_CRITICAL(&state_lock);
+    bool lost = c6_link.lost;
+    portEXIT_CRITICAL(&state_lock);
+    if (lost) { // ESP-Hosted is being re-attached (#14): not a failure of the C6, so no soft signal either
+        xSemaphoreGive(send_mutex);
+        return false;
+    }
+    esp_err_t err = len ? eh_host_peer_data_send(LORA_MSG_ID_TO_C6, buf, len) : ESP_ERR_INVALID_SIZE;
+    xSemaphoreGive(send_mutex);
     if (err != ESP_OK && !failing) {
         ESP_LOGE(TAG, "cannot reach the C6: %s", esp_err_to_name(err));
     }
     failing = err != ESP_OK;
+    if (send_hook) {
+        send_hook(!failing);
+    }
     if (failing) {
         // Until the C6 answers again, MeshCore's sends fail at once instead of blocking its loop on the RPC
         portENTER_CRITICAL(&state_lock);
@@ -297,6 +335,43 @@ static void log_packet(lora_rx_packet_t const *rx) {
     portEXIT_CRITICAL(&state_lock);
 }
 
+static void tell_owner(bool up) {
+    void (*fn)(bool) = link_cb;
+    if (fn) {
+        fn(up);
+    }
+}
+
+// The supervisor's down/up hooks, carried out on this task (#14 T-B). Returns true while the C6 is lost: no polls, no
+// sends, the received queue is dropped.
+static bool c6_link_work(lora_sup_t *sup) {
+    portENTER_CRITICAL(&state_lock);
+    unsigned act  = lora_c6_link_take(&c6_link);
+    bool     lost = c6_link.lost;
+    bool     probe = probe_requested && !lost;
+    probe_requested = false;
+    portEXIT_CRITICAL(&state_lock);
+    if (act & LORA_C6_TELL_DOWN) {
+        ESP_LOGW(TAG, "C6 lost: LoRa waits for it");
+        tell_owner(false);
+    }
+    if (act & LORA_C6_REINIT) {
+        // The registry outlives esp_hosted_deinit, so this is a "register update"; it is redone in case it did not
+        if (eh_host_peer_data_register(LORA_MSG_ID_TO_P4, on_peer_data, NULL) != ESP_OK) {
+            ESP_LOGE(TAG, "peer data callback not registered again");
+        }
+        lora_sup_init(sup, now_ms()); // its first tick re-sends config + RX start with the owner's settings
+        ESP_LOGW(TAG, "C6 back: sending the radio config again");
+    }
+    if (lost) {
+        xQueueReset(rx_queue);
+        vTaskDelay(pdMS_TO_TICKS(250));
+    } else if (probe) {
+        run_actions(LORA_ACT_STATUS_REQ);
+    }
+    return lost;
+}
+
 static void lora_task(void *arg) {
     lora_sup_t sup;
     lora_sup_init(&sup, now_ms());
@@ -311,6 +386,9 @@ static void lora_task(void *arg) {
             __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
             ESP_LOGW(TAG, "LoRa stopped for the update");
             vTaskDelete(NULL);
+        }
+        if (c6_link_work(&sup)) {
+            continue;
         }
         run_actions(lora_sup_tick(&sup, now_ms()));
         portENTER_CRITICAL(&state_lock);
@@ -335,8 +413,19 @@ static void lora_task(void *arg) {
         }
 
         portENTER_CRITICAL(&state_lock);
-        lora_tx_link(&tx, true); // the C6 spoke: sends may go to it again
+        bool     lost_now = c6_link.lost;
+        unsigned heard    = lost_now ? 0 : lora_c6_link_heard(&c6_link);
+        if (!lost_now) {
+            lora_tx_link(&tx, true); // the C6 spoke: sends may go to it again
+        }
         portEXIT_CRITICAL(&state_lock);
+        if (lost_now) {
+            continue; // from before the loss
+        }
+        if (heard & LORA_C6_TELL_UP) {
+            ESP_LOGW(TAG, "C6 answers again: LoRa back");
+            tell_owner(true);
+        }
         switch (msg.type) {
             case LORA_MSG_RX_PACKET: log_packet(&msg.u.rx); break;
             case LORA_MSG_STATUS:
@@ -383,10 +472,12 @@ static void lora_task(void *arg) {
 }
 
 bool lora_start(void) {
+    lora_c6_link_init(&c6_link);
+    send_mutex = xSemaphoreCreateMutex();
     load_config();
     boot_config = config;
     rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(lora_rx_msg_t));
-    if (!rx_queue) {
+    if (!rx_queue || !send_mutex) {
         ESP_LOGE(TAG, "no memory for the receive queue");
         return false;
     }
@@ -417,6 +508,62 @@ void lora_stop(void) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     vTaskDelay(pdMS_TO_TICKS(50));
+}
+
+void lora_c6_lost(void) {
+    if (__atomic_load_n(&stopped, __ATOMIC_ACQUIRE) || __atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
+        return; // stopped for an update: nothing to bring back
+    }
+    portENTER_CRITICAL(&state_lock);
+    lora_c6_link_lost(&c6_link);
+    // A pending send fails at once instead of waiting for its deadline (its RESULT will never come), new ones too
+    lora_tx_result(&tx, LORA_RESULT_RADIO_ERROR);
+    lora_tx_link(&tx, false);
+    probe_requested = false;
+    portEXIT_CRITICAL(&state_lock);
+    // Wait for a send that was already inside ESP-Hosted; new ones see the flag and stay out
+    if (send_mutex && xSemaphoreTake(send_mutex, pdMS_TO_TICKS(SEND_DRAIN_MS)) == pdTRUE) {
+        xSemaphoreGive(send_mutex);
+    } else {
+        ESP_LOGE(TAG, "a send to the C6 is still running after %d ms", SEND_DRAIN_MS);
+    }
+}
+
+void lora_c6_back(void) {
+    if (__atomic_load_n(&stopped, __ATOMIC_ACQUIRE) || __atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
+        return;
+    }
+    portENTER_CRITICAL(&state_lock);
+    lora_c6_link_back(&c6_link);
+    portEXIT_CRITICAL(&state_lock);
+}
+
+bool lora_c6_probe(uint32_t timeout_ms, uint32_t *uptime_s) {
+    if (!lora_up() || __atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
+        return false;
+    }
+    portENTER_CRITICAL(&state_lock);
+    bool     lost   = c6_link.lost;
+    uint32_t before = status_at_ms;
+    bool     had    = have_status;
+    probe_requested = !lost;
+    portEXIT_CRITICAL(&state_lock);
+    if (lost) {
+        return false;
+    }
+    // The task sends the request within a second (its queue wait); the answer comes back through it as well
+    for (uint32_t waited = 0; waited < timeout_ms; waited += 50) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        portENTER_CRITICAL(&state_lock);
+        bool     answered = have_status && (!had || status_at_ms != before);
+        uint32_t up       = c6_status.uptime_s;
+        portEXIT_CRITICAL(&state_lock);
+        if (answered) {
+            *uptime_s = up;
+            return true;
+        }
+    }
+    return false;
 }
 
 void lora_get_stats(lora_ui_stats_t *out) {
