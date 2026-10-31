@@ -71,6 +71,8 @@ typedef struct {
 } verify_t;
 
 static psram_tuning_t s_tuning;
+static verify_t       s_repeat;
+static void          *s_check_addr;
 static verify_t       s_verify;
 static bool           s_bad;
 static char           s_why[64];
@@ -121,6 +123,10 @@ static void dense_check(void) {
         return;
     }
     dense_run(mem, len, &s_verify);
+    s_check_addr = mem;
+    if (s_verify.bad_bytes) { // the same block again: the same bad bytes point at the place, new ones at the moment
+        dense_run(mem, len, &s_repeat);
+    }
     heap_caps_free(mem);
 }
 
@@ -154,9 +160,9 @@ void psram_boot_check(void) {
     ESP_LOGW(TAG, "tuning regs: phase id %u, dqs delay %u, data delay %u", ph, dqs, data);
     dense_check();
     s_bad = psram_boot_verdict(&s_tuning, s_verify.bad_bytes, s_why, sizeof(s_why));
-    ESP_LOGW(TAG, "boot check: %u KB dense (pattern + inverted), %u bad bytes (pattern %u, inverted %u; %u single-bit words), %u ms: %s%s%s",
-             (unsigned)(s_verify.bytes >> 10), (unsigned)s_verify.bad_bytes, (unsigned)s_verify.bad_plain, (unsigned)s_verify.bad_inv, (unsigned)s_verify.bit_flips,
-             (unsigned)(s_verify.us / 1000), s_bad ? "BAD (" : "ok", s_bad ? s_why : "", s_bad ? ")" : "");
+    ESP_LOGW(TAG, "boot check: %u KB dense at %p (pattern + inverted), %u bad bytes (pattern %u, inverted %u; %u single-bit words, first +%u), %u ms; same block again: %u bad: %s%s%s",
+             (unsigned)(s_verify.bytes >> 10), s_check_addr, (unsigned)s_verify.bad_bytes, (unsigned)s_verify.bad_plain, (unsigned)s_verify.bad_inv, (unsigned)s_verify.bit_flips,
+             (unsigned)s_verify.first_bad, (unsigned)(s_verify.us / 1000), (unsigned)s_repeat.bad_bytes, s_bad ? "BAD (" : "ok", s_bad ? s_why : "", s_bad ? ")" : "");
 }
 
 static uint32_t wall_s(void) {
@@ -221,10 +227,10 @@ void psram_boot_print(void) {
     bool match = ph == s_tuning.phase_id && dqs == edqs && data == edata;
     console_reply("psram tuning regs: phase id %u, dqs delay %u, data delay %u (%s)", ph, dqs, data,
                   match ? "match the captured choice" : "DIFFER from the captured choice");
-    console_reply("psram boot check: %u KB dense (pattern + inverted), %u bad bytes (pattern %u, inverted %u), %u single-bit words, first bad +%u xor %08x, %u ms: %s%s",
-                  (unsigned)(s_verify.bytes >> 10), (unsigned)s_verify.bad_bytes, (unsigned)s_verify.bad_plain, (unsigned)s_verify.bad_inv, (unsigned)s_verify.bit_flips,
-                  (unsigned)s_verify.first_bad, (unsigned)s_verify.first_xor, (unsigned)(s_verify.us / 1000),
-                  s_bad ? "BAD " : "ok", s_bad ? s_why : "");
+    console_reply("psram boot check: %u KB dense at %p (pattern + inverted), %u bad bytes (pattern %u, inverted %u), %u single-bit words, first bad +%u xor %08x, %u ms, same block again: %u bad: %s%s",
+                  (unsigned)(s_verify.bytes >> 10), s_check_addr, (unsigned)s_verify.bad_bytes, (unsigned)s_verify.bad_plain,
+                  (unsigned)s_verify.bad_inv, (unsigned)s_verify.bit_flips, (unsigned)s_verify.first_bad, (unsigned)s_verify.first_xor, (unsigned)(s_verify.us / 1000),
+                  (unsigned)s_repeat.bad_bytes, s_bad ? "BAD " : "ok", s_bad ? s_why : "");
     console_reply("psram boot policy: %s", s_policy_done ? s_policy_line : "not evaluated yet");
     print_ldo();
 }
