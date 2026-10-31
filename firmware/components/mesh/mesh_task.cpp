@@ -188,6 +188,16 @@ extern "C" void mesh_tile_snapshot(mesh_tile_t *out) {
     out->last_heard_age_s = heard ? mesh_uptime_s() - heard : 0;
 }
 
+// The chat rings go to PSRAM explicitly: through plain malloc a ring under SPIRAM_MALLOC_ALWAYSINTERNAL would take
+// internal RAM, which the display needs (L6 of #59)
+static void *store_alloc_ring(size_t count, size_t size) {
+    return heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM);
+}
+
+static void store_warn(char const *what) {
+    ESP_LOGW(TAG, "message dropped: %s", what);
+}
+
 // Messages for the screens, from MyMesh (called inside loop(), under the lock)
 class ScreenFeed : public MyMesh::Listener {
 public:
@@ -195,13 +205,16 @@ public:
                        char const *text) override {
         char from_name[sizeof(from.name) + 2]; // mesh_store cuts it to MESH_CHANNEL_MAX
         snprintf(from_name, sizeof(from_name), "@%s", from.name);
-        mesh_store_add_dm(from_name, text, (int16_t)(radio_driver.getLastRSSI() * 10.0f), mesh_uptime_s(),
-                          from.id.pub_key);
-        tile_on_message(from_name, text);
+        // The tile follows the store: a message the store dropped (and logged) is not shown as the latest either
+        if (mesh_store_add_dm(from_name, text, (int16_t)(radio_driver.getLastRSSI() * 10.0f), mesh_uptime_s(),
+                              from.id.pub_key)) {
+            tile_on_message(from_name, text);
+        }
     }
     void onChannelMessageRecv(mesh::Packet *pkt, ChannelDetails &channel, char const *text) override {
-        mesh_store_add_message(channel.name, text, (int16_t)(radio_driver.getLastRSSI() * 10.0f), mesh_uptime_s());
-        tile_on_message(channel.name, text);
+        if (mesh_store_add_message(channel.name, text, (int16_t)(radio_driver.getLastRSSI() * 10.0f), mesh_uptime_s())) {
+            tile_on_message(channel.name, text);
+        }
     }
     void onQueueSizeChanged(int msgcount) override { offline_queue_len = msgcount; }
 };
@@ -303,7 +316,8 @@ struct OutSync {
 };
 static OutSync out_sync[OB_CAP];
 
-static void sync_outgoing(void) {
+// true when a message was added to the store (which may have evicted a chat, so the unread total can have changed)
+static bool sync_outgoing(void) {
     size_t n = 0;
     mesh_ob_enter();
     for (int i = 0; i < OB_CAP && outbox; i++) {
@@ -323,25 +337,42 @@ static void sync_outgoing(void) {
         if (o.fresh) {
             memcpy(o.target, e->target, sizeof(o.target));
             memcpy(o.text, e->text, sizeof(o.text));
-            e->in_store = true;
         }
     }
     mesh_ob_exit();
+    bool added = false;
     for (size_t i = 0; i < n; i++) {
         OutSync &o = out_sync[i];
         if (o.fresh) {
             char line[MESH_TEXT_MAX + 1];
             snprintf(line, sizeof(line), "me: %s", o.text);
+            bool ok;
             if (o.kind == OB_DM) {
                 ContactInfo *c = node ? node->lookupContactByPubKey(o.prefix, MF_PREFIX) : nullptr;
                 snprintf(o.target, sizeof(o.target), "@%s", c ? c->name : "?");
-                mesh_store_add_outgoing_dm(o.target, line, o.id, mesh_uptime_s(), o.prefix);
+                ok = mesh_store_add_outgoing_dm(o.target, line, o.id, mesh_uptime_s(), o.prefix);
             } else {
-                mesh_store_add_outgoing(o.target, line, o.id, mesh_uptime_s());
+                ok = mesh_store_add_outgoing(o.target, line, o.id, mesh_uptime_s());
+            }
+            // in_store only after the store took it: a dropped one is tried again on the next pass (logged once)
+            static mesh_msg_id_t failed_logged;
+            if (ok) {
+                added = true;
+                mesh_ob_enter();
+                for (int k = 0; k < OB_CAP && outbox; k++) {
+                    if (outbox->e[k].used && outbox->e[k].id == o.id) {
+                        outbox->e[k].in_store = true;
+                    }
+                }
+                mesh_ob_exit();
+            } else if (failed_logged != o.id) {
+                failed_logged = o.id;
+                ESP_LOGW(TAG, "outgoing message %lu not in the store, will retry", (unsigned long)o.id);
             }
         }
         mesh_store_update_out(o.id, o.state, o.repeats, o.attempt, o.trip_ms);
     }
+    return added;
 }
 
 static void mesh_task(void *arg) {
@@ -353,7 +384,9 @@ static void mesh_task(void *arg) {
         uint32_t rx      = radio_driver.getPacketsRecv();
         fs_shim_take_busy_us(NULL); // what other tasks spent in files under the lock is not this loop's
         node->loop();
-        sync_outgoing();
+        if (sync_outgoing()) {
+            tile_publish_unread(); // an added message can evict a DM chat that had unread
+        }
         uint32_t file_ops;
         uint32_t file_us = fs_shim_take_busy_us(&file_ops);
         rx               = radio_driver.getPacketsRecv() - rx;
@@ -1209,6 +1242,7 @@ extern "C" bool mesh_node_id(char *hex, size_t cap) {
 
 extern "C" bool mesh_start(void) {
     mesh_lock();
+    mesh_store_set_hooks(store_alloc_ring, store_warn);
     bool ok = mesh_store_init(STORE_MESSAGES);
     mesh_unlock();
     void *tables_mem = heap_caps_malloc(sizeof(SimpleMeshTables), MALLOC_CAP_SPIRAM);

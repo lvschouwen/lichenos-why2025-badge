@@ -15,7 +15,25 @@ typedef struct {
 
 static conv_t   convs[MESH_CONV_MAX];
 static size_t   ring_cap;
-static uint32_t generation, own_changes, next_seq;
+static uint32_t generation, own_changes, next_seq, dropped;
+static void *(*ring_alloc)(size_t, size_t);
+static void (*warn_hook)(char const *);
+
+void mesh_store_set_hooks(void *(*alloc_ring)(size_t, size_t), void (*warn)(char const *)) {
+    ring_alloc = alloc_ring;
+    warn_hook  = warn;
+}
+
+uint32_t mesh_store_dropped(void) {
+    return dropped;
+}
+
+static void drop(char const *why) {
+    dropped++;
+    if (warn_hook) {
+        warn_hook(why);
+    }
+}
 
 bool mesh_store_init(size_t chat_keep) {
     for (size_t i = 0; i < MESH_CONV_MAX; i++) {
@@ -23,6 +41,7 @@ bool mesh_store_init(size_t chat_keep) {
     }
     memset(convs, 0, sizeof(convs));
     ring_cap = chat_keep;
+    dropped  = 0;
     generation++;
     return chat_keep > 0;
 }
@@ -56,8 +75,9 @@ static conv_t *find_conv(mesh_chat_key_t const *key) {
     return NULL;
 }
 
-// A free slot, else the DM chat quiet for longest is dropped to make room; NULL when the table holds only channels
-static conv_t *new_conv(void) {
+// A free slot, else the DM chat quiet for longest (its slot is taken over once the new ring exists); NULL when the table
+// holds only channels
+static conv_t *pick_slot(void) {
     conv_t *victim = NULL;
     for (size_t i = 0; i < MESH_CONV_MAX; i++) {
         if (!convs[i].used) {
@@ -67,11 +87,27 @@ static conv_t *new_conv(void) {
             victim = &convs[i];
         }
     }
-    if (victim) {
-        free(victim->ring);
-        memset(victim, 0, sizeof(*victim));
-    }
     return victim;
+}
+
+// A new chat: its ring is allocated before any chat is evicted, so a failure costs the new message only
+static conv_t *new_conv(mesh_chat_key_t const *key) {
+    conv_t *slot = pick_slot();
+    if (!slot) {
+        drop("chat table full of channels");
+        return NULL;
+    }
+    mesh_msg_t *ring = ring_alloc ? ring_alloc(ring_cap, sizeof(*ring)) : calloc(ring_cap, sizeof(*ring));
+    if (!ring) {
+        drop("no memory for a chat ring");
+        return NULL;
+    }
+    free(slot->ring);
+    memset(slot, 0, sizeof(*slot));
+    slot->ring    = ring;
+    slot->used    = true;
+    slot->pub.key = *key;
+    return slot;
 }
 
 // Length of the UTF-8 sequence starting at in[0], or 0 when it isn't a valid one within len bytes. Strict, as RFC 3629:
@@ -150,16 +186,10 @@ static mesh_msg_t *push(mesh_chat_key_t const *key, char const *title, char cons
     }
     conv_t *cv = find_conv(key);
     if (!cv) {
-        cv = new_conv();
+        cv = new_conv(key);
         if (!cv) {
             return NULL;
         }
-        cv->ring = calloc(ring_cap, sizeof(*cv->ring));
-        if (!cv->ring) {
-            return NULL;
-        }
-        cv->used    = true;
-        cv->pub.key = *key;
     }
     size_t slot = (cv->head + cv->pub.count) % ring_cap;
     if (cv->pub.count == ring_cap) {
@@ -174,7 +204,9 @@ static mesh_msg_t *push(mesh_chat_key_t const *key, char const *title, char cons
     m->rssi_x10 = rssi_x10;
     m->heard_s  = heard_s;
     m->seq      = ++next_seq;
-    mesh_sanitize(title, strlen(title), cv->pub.title, sizeof(cv->pub.title));
+    if (!cv->pub.title[0] || strcmp(title, "@?") != 0) { // an unknown contact name does not replace a good one
+        mesh_sanitize(title, strlen(title), cv->pub.title, sizeof(cv->pub.title));
+    }
     memcpy(cv->pub.last, m->text, sizeof(cv->pub.last));
     cv->pub.last_heard_s = heard_s;
     cv->pub.last_outgoing = 0;
@@ -182,31 +214,35 @@ static mesh_msg_t *push(mesh_chat_key_t const *key, char const *title, char cons
     return m;
 }
 
-void mesh_store_add_message(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s) {
+bool mesh_store_add_message(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s) {
     mesh_chat_key_t key;
     mesh_chat_key_channel(&key, channel);
-    if (push(&key, channel, channel, text, rssi_x10, heard_s)) {
-        conv_t *cv = find_conv(&key);
-        if (cv->pub.unread < UINT16_MAX) {
-            cv->pub.unread++;
-        }
-        generation++;
+    if (!push(&key, channel, channel, text, rssi_x10, heard_s)) {
+        return false;
     }
+    conv_t *cv = find_conv(&key);
+    if (cv->pub.unread < UINT16_MAX) {
+        cv->pub.unread++;
+    }
+    generation++;
+    return true;
 }
 
-void mesh_store_add_dm(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s, uint8_t const peer[6]) {
+bool mesh_store_add_dm(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s, uint8_t const peer[6]) {
     mesh_chat_key_t key;
     mesh_chat_key_dm(&key, peer);
     mesh_msg_t *m = push(&key, channel, channel, text, rssi_x10, heard_s);
-    if (m) {
-        m->dm = 1;
-        memcpy(m->peer, peer, 6);
-        conv_t *cv = find_conv(&key);
-        if (cv->pub.unread < UINT16_MAX) {
-            cv->pub.unread++;
-        }
-        generation++;
+    if (!m) {
+        return false;
     }
+    m->dm = 1;
+    memcpy(m->peer, peer, 6);
+    conv_t *cv = find_conv(&key);
+    if (cv->pub.unread < UINT16_MAX) {
+        cv->pub.unread++;
+    }
+    generation++;
+    return true;
 }
 
 // Our own message: not unread, so it moves only the view generation
@@ -217,25 +253,29 @@ static void mark_outgoing(mesh_chat_key_t const *key, mesh_msg_t *m, uint32_t id
     own_changes++;
 }
 
-void mesh_store_add_outgoing(char const *channel, char const *text, uint32_t id, uint32_t heard_s) {
+bool mesh_store_add_outgoing(char const *channel, char const *text, uint32_t id, uint32_t heard_s) {
     mesh_chat_key_t key;
     mesh_chat_key_channel(&key, channel);
     mesh_msg_t *m = push(&key, channel, channel, text, 0, heard_s);
-    if (m) {
-        mark_outgoing(&key, m, id);
+    if (!m) {
+        return false;
     }
+    mark_outgoing(&key, m, id);
+    return true;
 }
 
-void mesh_store_add_outgoing_dm(char const *channel, char const *text, uint32_t id, uint32_t heard_s,
+bool mesh_store_add_outgoing_dm(char const *channel, char const *text, uint32_t id, uint32_t heard_s,
                                 uint8_t const peer[6]) {
     mesh_chat_key_t key;
     mesh_chat_key_dm(&key, peer);
     mesh_msg_t *m = push(&key, channel, channel, text, 0, heard_s);
-    if (m) {
-        m->dm = 1;
-        memcpy(m->peer, peer, 6);
-        mark_outgoing(&key, m, id);
+    if (!m) {
+        return false;
     }
+    m->dm = 1;
+    memcpy(m->peer, peer, 6);
+    mark_outgoing(&key, m, id);
+    return true;
 }
 
 bool mesh_store_update_out(uint32_t id, uint8_t state, uint8_t repeats, uint8_t attempt, uint32_t trip_ms) {

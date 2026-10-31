@@ -81,10 +81,6 @@ mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap) {
     }
 }
 
-bool mesh_msg_in_channel(mesh_msg_t const *m, char const *channel) {
-    return !m->dm && channel_same_name(m->channel, channel);
-}
-
 size_t mesh_compose_status(char const *text, size_t max_bytes, char *out, size_t cap) {
     size_t len  = strlen(text);
     size_t sent = mf_text_cut(text, max_bytes);

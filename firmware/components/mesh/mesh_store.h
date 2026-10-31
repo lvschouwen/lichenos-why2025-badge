@@ -58,14 +58,23 @@ typedef struct {
 // on the badge); false when chat_keep is 0.
 bool mesh_store_init(size_t chat_keep);
 
-void mesh_store_add_message(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s);
+// Hooks (NULL = default): alloc_ring gets (count, size) for a chat's ring and returns zeroed memory (the badge gives
+// PSRAM explicitly, host tests can fail it); warn is told when a message is dropped (out of memory, or a table full of
+// channels). Set before mesh_store_init.
+void mesh_store_set_hooks(void *(*alloc_ring)(size_t count, size_t size), void (*warn)(char const *what));
+// Messages dropped since mesh_store_init
+uint32_t mesh_store_dropped(void);
+
+// The add functions return false when the message was dropped: the chat table is full of channels, or a new chat's
+// ring could not be allocated (the chat that would have made room is then kept, with its messages).
+bool mesh_store_add_message(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s);
 
 // A direct message (#47): channel is "@<name>", peer the sender's 6-byte key prefix
-void mesh_store_add_dm(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s, uint8_t const peer[6]);
-void mesh_store_add_outgoing_dm(char const *channel, char const *text, uint32_t id, uint32_t heard_s,
+bool mesh_store_add_dm(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s, uint8_t const peer[6]);
+bool mesh_store_add_outgoing_dm(char const *channel, char const *text, uint32_t id, uint32_t heard_s,
                                 uint8_t const peer[6]);
 // A message we send: not an unread one (it does not move mesh_store_generation, only the view generation)
-void mesh_store_add_outgoing(char const *channel, char const *text, uint32_t id, uint32_t heard_s);
+bool mesh_store_add_outgoing(char const *channel, char const *text, uint32_t id, uint32_t heard_s);
 // The outgoing message's new state; true when something changed (the view generation moves then)
 bool mesh_store_update_out(uint32_t id, uint8_t state, uint8_t repeats, uint8_t attempt, uint32_t trip_ms);
 

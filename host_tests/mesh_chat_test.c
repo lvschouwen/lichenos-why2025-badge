@@ -34,11 +34,6 @@ int main(void) {
     CHECK(status(1, MESH_OUT_DELIVERED, 0, s) == MESH_STATUS_OK && strcmp(s, "delivered") == 0);
     CHECK(status(1, MESH_OUT_FAILED, 0, s) == MESH_STATUS_FAILED && strcmp(s, "not sent") == 0);
 
-    mesh_msg_t m;
-    memset(&m, 0, sizeof(m));
-    strcpy(m.channel, "#BadgeTest");
-    CHECK(mesh_msg_in_channel(&m, "#badgetest") && !mesh_msg_in_channel(&m, "Public"));
-
     // The counter and the cut: 10 bytes of room
     char c[64];
     CHECK(mesh_compose_status("", 10, c, sizeof(c)) == 0 && strcmp(c, "0 / 10 bytes") == 0);
@@ -68,7 +63,6 @@ int main(void) {
     uint8_t const peer[6] = {1, 2, 3, 4, 5, 6}, other[6] = {1, 2, 3, 4, 5, 7};
     memcpy(d.peer, peer, 6);
     CHECK(mesh_msg_in_dm(&d, peer) && !mesh_msg_in_dm(&d, other));
-    CHECK(!mesh_msg_in_channel(&d, ""));
     d.dm = 0;
     CHECK(!mesh_msg_in_dm(&d, peer));
 

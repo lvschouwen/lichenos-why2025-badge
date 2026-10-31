@@ -23,9 +23,6 @@ mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap);
 
 // A DM's words (#47): "queued", "waiting for ACK" ("..., try 2/3" from the second attempt), "delivered, 1.8 s",
 // "not delivered". Same kinds as above. Called by mesh_msg_status for DMs.
-// Is this message part of the chat on that channel (names compare without case)
-bool mesh_msg_in_channel(mesh_msg_t const *m, char const *channel);
-
 // Is this message a DM with the contact whose key starts with peer (6 bytes), either direction
 bool mesh_msg_in_dm(mesh_msg_t const *m, uint8_t const peer[6]);
 

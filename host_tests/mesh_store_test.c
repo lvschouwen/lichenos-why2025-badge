@@ -2,6 +2,7 @@
 #include "mesh_store.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int failures;
@@ -13,6 +14,15 @@ static int failures;
             failures++;                                                                                                \
         }                                                                                                              \
     } while (0)
+
+static int fail_alloc, warned;
+static void *test_alloc(size_t count, size_t size) {
+    return fail_alloc ? NULL : calloc(count, size);
+}
+static void test_warn(char const *what) {
+    (void)what;
+    warned++;
+}
 
 int main(void) {
     CHECK(mesh_store_init(3));
@@ -175,6 +185,93 @@ int main(void) {
         mesh_chat_key_channel(&k, "#c0");
         CHECK(mesh_store_chat(&k, b, 2, false) == 1);
         CHECK(mesh_store_convs(cv, MESH_CONV_MAX + 1) == MESH_CONV_MAX);
+    }
+
+    // Eviction goes by the newest message of a chat: DM #1 gets a late message, so DM #2 is the one that goes
+    CHECK(mesh_store_init(2));
+    {
+        uint8_t peer[6] = {0};
+        char    name[16];
+        mesh_chat_key_t k;
+        mesh_msg_t      b[2];
+        for (int i = 0; i < 3; i++) {
+            snprintf(name, sizeof(name), "#c%d", i);
+            mesh_store_add_message(name, "x", 0, 1);
+        }
+        for (int i = 0; i < MESH_CONV_MAX - 3; i++) {
+            peer[0] = (uint8_t)(i + 1);
+            mesh_store_add_dm("@d", "x", 0, 1, peer);
+        }
+        peer[0] = 1;
+        CHECK(mesh_store_add_dm("@d", "late", 0, 9, peer)); // DM #1 is now the newest
+        peer[0] = 200;
+        CHECK(mesh_store_add_dm("@new", "x", 0, 10, peer));
+        peer[0] = 2;
+        mesh_chat_key_dm(&k, peer);
+        CHECK(mesh_store_chat(&k, b, 2, false) == 0); // DM #2 was the one quiet for longest
+        peer[0] = 1;
+        mesh_chat_key_dm(&k, peer);
+        CHECK(mesh_store_chat(&k, b, 2, false) == 2);
+    }
+
+    // A table of 64 channels: a DM has no room and is dropped, nothing breaks
+    CHECK(mesh_store_init(2));
+    mesh_store_set_hooks(NULL, test_warn);
+    warned = 0;
+    {
+        char    name[16];
+        uint8_t peer[6] = {7, 7, 7, 7, 7, 7};
+        for (int i = 0; i < MESH_CONV_MAX; i++) {
+            snprintf(name, sizeof(name), "#c%d", i);
+            CHECK(mesh_store_add_message(name, "x", 0, 1));
+        }
+        CHECK(!mesh_store_add_dm("@who", "hi", 0, 2, peer) && !mesh_store_add_outgoing_dm("@who", "me: hi", 3, 2, peer));
+        CHECK(!mesh_store_add_message("#one-more", "x", 0, 3));
+        CHECK(mesh_store_dropped() == 3 && warned == 3);
+        mesh_conv_t cv[MESH_CONV_MAX + 1];
+        CHECK(mesh_store_convs(cv, MESH_CONV_MAX + 1) == MESH_CONV_MAX);
+        CHECK(mesh_store_unread_total() == MESH_CONV_MAX);
+    }
+
+    // No memory for a new ring: the new message is dropped and the DM that would have made room stays, with its messages
+    CHECK(mesh_store_init(2));
+    mesh_store_set_hooks(test_alloc, test_warn);
+    warned = 0;
+    {
+        uint8_t peer[6] = {0};
+        char    name[16];
+        for (int i = 0; i < 2; i++) {
+            snprintf(name, sizeof(name), "#c%d", i);
+            mesh_store_add_message(name, "x", 0, 1);
+        }
+        for (int i = 0; i < MESH_CONV_MAX - 2; i++) {
+            peer[0] = (uint8_t)(i + 1);
+            mesh_store_add_dm("@d", "keep me", 0, 1, peer);
+        }
+        fail_alloc = 1;
+        peer[0]    = 200;
+        CHECK(!mesh_store_add_dm("@new", "x", 0, 5, peer) && warned == 1 && mesh_store_dropped() == 1);
+        fail_alloc = 0;
+        mesh_chat_key_t k;
+        mesh_msg_t      b[2];
+        peer[0] = 1;
+        mesh_chat_key_dm(&k, peer);
+        CHECK(mesh_store_chat(&k, b, 2, false) == 1 && strcmp(b[0].text, "keep me") == 0); // the victim is still there
+        peer[0] = 200;
+        mesh_chat_key_dm(&k, peer);
+        CHECK(mesh_store_chat(&k, b, 2, false) == 0);
+        CHECK(mesh_store_add_dm("@new", "x", 0, 6, peer)); // and it works once memory is back
+    }
+    mesh_store_set_hooks(NULL, NULL);
+
+    // A DM from a contact whose name could not be looked up ("@?") does not replace the name we know
+    CHECK(mesh_store_init(2));
+    {
+        uint8_t const peer[6] = {4, 4, 4, 4, 4, 4};
+        mesh_store_add_dm("@alice", "a", 0, 1, peer);
+        mesh_store_add_outgoing_dm("@?", "me: b", 2, 2, peer);
+        mesh_conv_t cv[2];
+        CHECK(mesh_store_convs(cv, 2) == 1 && strcmp(cv[0].title, "@alice") == 0 && cv[0].count == 2);
     }
     if (failures) {
         printf("%d failure(s)\n", failures);
