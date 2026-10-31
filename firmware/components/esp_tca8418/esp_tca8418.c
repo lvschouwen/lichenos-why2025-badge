@@ -73,18 +73,19 @@ void tca8418_configure(tca8418_dev_t *dev)
     writeRegister(dev, REG_GPIO_INT_EN2, 0xFF);
     writeRegister(dev, REG_GPIO_INT_EN3, 0xFF);
 
-    // configure rows and columns registers
+    writeRegister(dev, REG_DEBOUNCE_DIS1, 0x00);
+    writeRegister(dev, REG_DEBOUNCE_DIS2, 0x00);
+    writeRegister(dev, REG_DEBOUNCE_DIS3, 0x00);
+
+    // configure rows and columns registers. KP_GPIO1 goes last: tca8418_check() reads it back as "still configured", so
+    // a reset that lands halfway through these writes must not leave a chip that passes the check (#14)
     const tca8418_masks_t masks = tca8418_key_masks(dev->rows, dev->cols);
-    writeRegister(dev, REG_KEY_PRESS_GPIO1, masks.kp_gpio1);
     writeRegister(dev, REG_KEY_PRESS_GPIO2, masks.kp_gpio2);
     if (dev->cols > 8)
     {
         writeRegister(dev, REG_KEY_PRESS_GPIO3, masks.kp_gpio3);
     }
-
-    writeRegister(dev, REG_DEBOUNCE_DIS1, 0x00);
-    writeRegister(dev, REG_DEBOUNCE_DIS2, 0x00);
-    writeRegister(dev, REG_DEBOUNCE_DIS3, 0x00);
+    writeRegister(dev, REG_KEY_PRESS_GPIO1, masks.kp_gpio1);
 }
 
 tca8418_dev_t *tca8418_create(gpio_num_t scl_pin, gpio_num_t sda_pin, uint8_t i2c_address, gpio_num_t notify_pin, uint8_t rows, uint8_t cols)

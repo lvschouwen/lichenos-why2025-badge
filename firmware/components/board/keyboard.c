@@ -33,6 +33,7 @@ static tca8418_dev_t *chip;
 static QueueHandle_t  events;
 static uint32_t       held[0x51]; // what each pressed key was mapped to, so its release reports the same key
 static bool           shift;
+static bool           raw_down[0x51]; // keys the raw hooks saw pressed, so a chip reset releases them there too (#14)
 static atomic_bool    reinit_asked;            // keyboard_reinit(): honoured by the poll task, which owns the chip
 static void (*_Atomic reset_hook)(void);       // told when the readback finds the chip reset (#14)
 
@@ -91,14 +92,20 @@ void keyboard_set_reset_hook(void (*fn)(void)) {
 
 // The chip forgot its pressed keys with its configuration: release them all, so LVGL never sees a key held forever
 static void release_held(void) {
+    shift = false;
+    xQueueReset(events); // queued presses are moot now, and the releases must not be dropped by a full queue
     for (size_t k = 0; k < sizeof(held) / sizeof(held[0]); k++) {
+        if (raw_down[k]) {
+            key_raw_event_t raw_ev = {.code = (uint8_t)k, .pressed = false, .shift = false};
+            run_hooks(&raw_ev); // hold-to-exit and other raw listeners would otherwise see the key down forever
+            raw_down[k] = false;
+        }
         if (held[k]) {
             key_event_t ev = {.key = held[k], .pressed = false};
             xQueueSend(events, &ev, 0);
             held[k] = 0;
         }
     }
-    shift = false;
 }
 
 static void reconfigure(char const *why) {
@@ -144,6 +151,7 @@ static void poll_task(void *arg) {
             if (kbd_map_is_shift(key)) {
                 shift = pressed;
             }
+            raw_down[key]          = pressed;
             key_raw_event_t raw_ev = {.code = key, .pressed = pressed, .shift = shift};
             bool swallowed = run_hooks(&raw_ev);
             // A key pressed before the hook grabbed the keys still gets its release, or LVGL would see it held forever
@@ -190,7 +198,7 @@ bool keyboard_start(lv_indev_t **out) {
     }
     tca8418_flush(chip);
     events = xQueueCreate(QUEUE_DEPTH, sizeof(key_event_t));
-    if (!events || xTaskCreatePinnedToCore(poll_task, "keyboard", 3072, NULL, 4, NULL, 0) != pdPASS) {
+    if (!events || xTaskCreatePinnedToCore(poll_task, "keyboard", 4096, NULL, 4, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "keyboard task not started");
         return false;
     }

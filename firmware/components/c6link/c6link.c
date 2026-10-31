@@ -979,6 +979,10 @@ void c6link_status(c6_status_t *out) {
 // C6 boots its application.
 static void reset_pulse(void *arg) {
     (void)arg;
+    if (updating || !atomic_load(&link_up)) { // checked again: an update may have started in the second since the command
+        ESP_LOGW(TAG, "fw c6 reset: not now (%s)", updating ? "update running" : "no C6 link");
+        return;
+    }
     portENTER_CRITICAL(&watch_lock);
     c6_watch_manual_reset(&watch, now_ms());
     portEXIT_CRITICAL(&watch_lock);
