@@ -47,6 +47,9 @@ Usage: $(basename "$0") <command> [args]
                             write a backup image back at offset 0 (checks the .sha256 and that the chip
                             matches the backup's name; --yes confirms overwriting the whole flash)
   monitor <port>            open a serial console (exit with Ctrl-])
+  logger <install|start|stop|status>
+                            the serial logger on $HOST (tools/serial_log.py, writes /tmp/badge-serial.log); the port
+                            commands above pause it while they use the port
   console <port> <line>     send one line to the badge's console without resetting it and show the reply;
                             commands start with "fw " (try "fw help")
 
@@ -81,7 +84,12 @@ remote() {
     [ -n "$HOST" ] || { echo "no badge host: put its SSH name in ${XDG_CONFIG_HOME:-~/.config}/why2025-badge/host (or BADGE_HOST)" >&2; exit 1; }
     ssh "$HOST" "$@"
 }
-esptool() { remote "$VENV/bin/esptool $*"; }
+# Run a command on the badge host with the serial logger (tools/serial_log.py, #61) paused: it closes the port while
+# /tmp/badge-serial.log.pause exists and confirms with .paused. The pause is removed when the remote shell exits
+# (also on errors); if ssh dies, the logger ignores a pause older than 10 minutes.
+PORT_PAUSE='P=/tmp/badge-serial.log; if pgrep -f "[s]erial_log.py" >/dev/null; then : > "$P.pause"; trap '"'"'rm -f "$P.pause"'"'"' EXIT; i=0; while [ ! -e "$P.paused" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; [ -e "$P.paused" ] || echo "warning: the serial logger did not release the port" >&2; fi;'
+port_remote() { remote "$PORT_PAUSE $*"; }
+esptool() { port_remote "$VENV/bin/esptool $*"; }
 
 # The chip behind <port> as one lowercase word, e.g. esp32p4 (empty if it doesn't answer)
 chip_of() {
@@ -164,7 +172,7 @@ cmd_flash_fw() {
         scp "$args.nostorage" "$HOST:$REMOTE_DIR/images/p4/flash_args.nostorage"
         rm -f "$args.nostorage"
     fi
-    remote "cd $REMOTE_DIR/images/p4 && $VENV/bin/esptool --chip esp32p4 --port '$port' --baud $BAUD write-flash $flash_args"
+    port_remote "cd $REMOTE_DIR/images/p4 && $VENV/bin/esptool --chip esp32p4 --port '$port' --baud $BAUD write-flash $flash_args"
     [ ! -f "$build/badge_fw.elf" ] || archive_elf "$build"
 }
 
@@ -179,7 +187,7 @@ cmd_crash() {
     trap "rm -rf '$tmp'" RETURN
     local try
     for try in 1 2 3; do
-        remote "$VENV/bin/python $REMOTE_DIR/console_session.py '$port' 1 60 'fw crash dump@2'" | sed 's/^ *[0-9.]* //' | tr -d '\r' > "$tmp/session.txt"
+        port_remote "$VENV/bin/python $REMOTE_DIR/console_session.py '$port' 1 60 'fw crash dump@2'" | sed 's/^ *[0-9.]* //' | tr -d '\r' > "$tmp/session.txt"
         python3 -I - "$tmp/session.txt" "$tmp/core.bin" "$tmp/version" "$tmp/elfsha" <<'PY' && break
 import base64, re, sys, zlib
 lines = open(sys.argv[1]).read().split("\n")
@@ -257,10 +265,29 @@ cmd_restore() {
     esptool --port "$port" --baud "$BAUD" write-flash 0 "$REMOTE_DIR/images/restore.bin"
 }
 
+# The serial logger on the badge host (tools/serial_log.py -> ~/badge/serial_log.py, log in /tmp/badge-serial.log).
+# Every port user in this script pauses it (PORT_PAUSE), so it can run all the time.
+cmd_logger() {
+    case $1 in
+        install) scp "$REPO/tools/serial_log.py" "$HOST:$REMOTE_DIR/serial_log.py" && echo "installed; restart it to use the new version" ;;
+        start)
+            # the script name is built from two parts so pgrep doesn't match this ssh shell's own command line
+            remote "pgrep -f '[s]erial_log.py' >/dev/null && { echo 'already running'; exit 0; }; n=serial_log;
+                    nohup $VENV/bin/python $REMOTE_DIR/\$n.py >/dev/null 2>&1 < /dev/null & sleep 1;
+                    pgrep -af '[s]erial_log.py' || { echo 'did not start' >&2; exit 1; }" ;;
+        stop) remote "pkill -f '[s]erial_log.py' && echo stopped || echo 'not running'" ;;
+        status)
+            remote "pgrep -af '[s]erial_log.py' || echo 'not running';
+                    [ -e /tmp/badge-serial.log.pause ] && echo 'pause requested'; [ -e /tmp/badge-serial.log.paused ] && echo 'paused';
+                    tail -n 3 /tmp/badge-serial.log 2>/dev/null" ;;
+        *) usage ;;
+    esac
+}
+
 cmd_monitor() {
     local port=$1
     require_espressif_port "$port"
-    ssh -t "$HOST" "$VENV/bin/python -m serial.tools.miniterm --raw '$port' 115200"
+    ssh -t "$HOST" "$PORT_PAUSE $VENV/bin/python -m serial.tools.miniterm --raw '$port' 115200"
 }
 
 # Writes one line to the console UART without resetting the badge and prints what comes back within two seconds.
@@ -271,7 +298,7 @@ cmd_console() {
     local port=$1 line=$2
     require_espressif_port "$port"
     case $line in *"'"*|*$'\n'*|*$'\r'*) echo "refusing: no quotes or line breaks in a console line" >&2; exit 1;; esac
-    remote "$VENV/bin/python - '$port' '$line'" <<'PY'
+    port_remote "$VENV/bin/python - '$port' '$line'" <<'PY'
 import sys, time, serial
 port, line = sys.argv[1], sys.argv[2]
 s = serial.Serial()
@@ -581,6 +608,7 @@ case "${1:-}" in
     restore)  [ $# -eq 4 ] || usage; cmd_restore "$2" "$3" "$4" ;;
     monitor)  [ $# -eq 2 ] || usage; cmd_monitor "$2" ;;
     console)      [ $# -eq 3 ] || usage; cmd_console "$2" "$3" ;;
+    logger)       [ $# -eq 2 ] || usage; cmd_logger "$2" ;;
     ota-info)     [ $# -eq 2 ] || usage; cmd_ota_info "$2" ;;
     ota-firmware) [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_ota_firmware "$2" "${3:-}" ;;
     ota-file)     [ $# -eq 4 ] || usage; cmd_ota_file "$2" "$3" "$4" ;;
