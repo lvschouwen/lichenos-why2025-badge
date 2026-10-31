@@ -54,7 +54,6 @@ static chunk_t       s_held[MAX_HELD];    // kept for good (quarantine)
 static size_t        s_nheld;
 static psram_quar_t  s_quar;
 static char          s_map[200];
-static char          s_split_dbg[900];
 static region_t      s_regions[MAX_REGIONS];
 static size_t        s_nregions;
 static struct {
@@ -253,8 +252,6 @@ static void split_edge(chunk_t const *c) {
             s_stat.pages_held++;
             return;
         }
-        snprintf(s_split_dbg + strlen(s_split_dbg), sizeof(s_split_dbg) - strlen(s_split_dbg), "[%x need %x..%x a%d fill %u got %x len %u] ",
-                 (unsigned)base, (unsigned)lo, (unsigned)hi, attempt, (unsigned)fill, (unsigned)m, (unsigned)want);
         heap_caps_free(m); // free(NULL) is fine
     }
     s_stat.short_pages++;
@@ -395,9 +392,6 @@ void psram_scan_print(void) {
         held += s_held[i].len;
     }
     psram_learned_print();
-    if (s_split_dbg[0]) {
-        console_reply("psram split debug: %s", s_split_dbg);
-    }
     console_reply("psram quarantine: %u KB in ranges, %u KB held in %u pieces (%u edge pieces, %u missing)",
                   (unsigned)(psram_quar_bytes(&s_quar) >> 10), (unsigned)(held >> 10), (unsigned)s_nheld,
                   (unsigned)s_stat.pages_held, (unsigned)s_stat.short_pages);
