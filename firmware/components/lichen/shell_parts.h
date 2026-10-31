@@ -13,6 +13,7 @@ void      shell_style_screen(lv_obj_t *screen);
 
 // home.c
 lv_obj_t *home_create(void);   // a fresh home screen for the registered apps and the saved layout; focus object = itself
+char const *home_selected_name(lv_obj_t *home); // the selected tile's app name; NULL if none or not a home screen
 void      home_init(void);     // registers the "fw home" console command
 
 // shell.c

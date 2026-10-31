@@ -156,8 +156,44 @@ static void first_label(lv_obj_t *obj, char *out, size_t cap) {
     }
 }
 
+// What the focus object stands for when its own first label is not it: the home screen holds the focus for all its
+// tiles, a tabview for all its tabs (#27)
+static void describe_focus(lv_obj_t *foc, char *out, size_t cap) {
+    char const *home = (nav_depth() == 1 && foc == lv_screen_active() && shell_home_shown()) ? home_selected_name(foc)
+                                                                                             : NULL;
+    if (home) {
+        snprintf(out, cap, "%s", home);
+    } else if (lv_obj_check_type(foc, &lv_tabview_class)) {
+        lv_obj_t *button = lv_obj_get_child(lv_tabview_get_tab_bar(foc), (int32_t)lv_tabview_get_tab_active(foc));
+        if (button) {
+            first_label(button, out, cap);
+        }
+    } else {
+        first_label(foc, out, cap);
+    }
+}
+
+static void settle_done(void *arg) {
+    xTaskNotifyGive((TaskHandle_t)arg);
+}
+
+// Waits until the LVGL task has run what is queued for it (lv_async_call: Enter's screen change, and what that chains
+// into), so the report below is of the keys already sent, not one behind
+static void settle(void) {
+    for (int round = 0; round < 3; round++) {
+        ulTaskNotifyTake(pdTRUE, 0);
+        lvgl_port_lock(0);
+        lv_async_call(settle_done, xTaskGetCurrentTaskHandle());
+        lvgl_port_unlock();
+        if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(300)) == 0) {
+            return;
+        }
+    }
+}
+
 static void cmd_ui(char const *args) {
     (void)args;
+    settle();
     line_t *lines = malloc(sizeof(line_t) * MAX_LINES);
     if (!lines) {
         console_reply("ui: no memory");
@@ -173,7 +209,7 @@ static void cmd_ui(char const *args) {
     lv_group_t *group = shell_top_group();
     lv_obj_t   *foc   = group ? lv_group_get_focused(group) : NULL;
     if (foc) {
-        first_label(foc, focus, sizeof(focus));
+        describe_focus(foc, focus, sizeof(focus));
     }
     collect(lv_screen_active(), lines, &n);
     lvgl_port_unlock();

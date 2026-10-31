@@ -183,6 +183,15 @@ static void add_grid_cell(home_t *h, lv_obj_t *home, int i) {
     h->cell[i] = cell;
 }
 
+// "fw ui": the home screen itself holds the focus, so the selection has to be asked for
+char const *home_selected_name(lv_obj_t *home) {
+    home_t const *h = lv_obj_get_user_data(home);
+    if (!h || h->count == 0 || h->sel >= h->count) {
+        return NULL;
+    }
+    return lichen_app_at(h->sel)->name;
+}
+
 lv_obj_t *home_create(void) {
     lv_obj_t *home = lv_obj_create(NULL);
     shell_style_screen(home);
@@ -211,6 +220,7 @@ lv_obj_t *home_create(void) {
         lv_obj_set_flex_flow(home, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_style_pad_row(home, TILE_GAP, 0);
     }
+    lv_obj_set_user_data(home, h);
     for (int i = 0; i < h->count; i++) {
         if (h->layout == HOME_GRID) {
             add_grid_cell(h, home, i);
