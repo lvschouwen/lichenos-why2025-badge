@@ -15,6 +15,7 @@
 #include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "log_store.h"
+#include "psram_guard.h"
 #include "log_tap.h"
 #include "lora.h"
 #include "mesh.h"
@@ -50,10 +51,19 @@ static bool lora_link_up(void) {
 
 // The OTA task's hooks, in the shell's terms (#76)
 static void ota_begin(ota_kind_t kind, char const *name, uint32_t total) {
+    if (kind != OTA_KIND_FILE) {
+        psram_guard_update_begin(); // no-op when /prepare already added it (#40)
+    }
     update_screen_begin(kind != OTA_KIND_FILE, kind == OTA_KIND_FIRMWARE, name, total);
 }
 
+static void ota_prepare(void) {
+    update_screen_prepare();
+    psram_guard_update_begin(); // an extra canary while update mode runs: #37 hit then (#40)
+}
+
 static void ota_end(bool ok, bool rebooting) {
+    psram_guard_update_end();
     update_screen_end(ok, rebooting);
 }
 
@@ -97,6 +107,7 @@ static void log_heap(char const *name, uint32_t caps) {
 
 void app_main(void) {
     log_tap_start();
+    psram_guard_start(); // canaries early, so they sit low in the PSRAM heap (#40)
     log_store_start(); // after log_tap: its hook chains to the boot screen's
     console_set_tap(log_store_add);
     boot_progress_start();
@@ -200,7 +211,7 @@ void app_main(void) {
         hooks.begin = ota_begin;
         hooks.progress = update_screen_progress;
         hooks.end = ota_end;
-        hooks.prepare = update_screen_prepare;
+        hooks.prepare = ota_prepare;
         hooks.file_ok = update_screen_file_ok;
         hooks.screenshot = screenshot_take;
         hooks.screenshot_free = screenshot_free;
