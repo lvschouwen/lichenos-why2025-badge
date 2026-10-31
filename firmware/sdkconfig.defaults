@@ -58,7 +58,9 @@ CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D1=31
 CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D2=30
 CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D3=29
 CONFIG_ESP_HOSTED_HOST_RESET_GPIO=12
-CONFIG_ESP_HOSTED_HOST_CP_RESET_SETTLE_MS=300
+# The C6 answers on SDIO ~700 ms after its reset: with 300 or 500 ms the first card init failed (one E line per boot)
+# and only the retry succeeded, at the same ~700 ms (#87)
+CONFIG_ESP_HOSTED_HOST_CP_RESET_SETTLE_MS=700
 CONFIG_ESP_HOSTED_HOST_SDIO_CLK_KHZ=40000
 CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE=y
 # The C6 flasher must release the C6 before esp_hosted starts (auto-init races it into a boot loop)

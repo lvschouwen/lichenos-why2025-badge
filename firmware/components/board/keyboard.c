@@ -1,5 +1,6 @@
 #include "keyboard.h"
 
+#include "board_i2c.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_tca8418.h"
@@ -13,8 +14,6 @@
 
 static char const TAG[] = "keyboard";
 
-#define SDA_PIN     18
-#define SCL_PIN     20
 #define POLL_MS     20
 #define QUEUE_DEPTH 32
 
@@ -127,7 +126,10 @@ static void read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 }
 
 bool keyboard_start(lv_indev_t **out) {
-    chip = tca8418_create(SCL_PIN, SDA_PIN, 0, GPIO_NUM_NC, 0, 0);
+    if (!board_i2c_bus()) { // the OS owns the bus; the driver adopts it (#87)
+        return false;
+    }
+    chip = tca8418_create(BOARD_I2C_SCL, BOARD_I2C_SDA, 0, GPIO_NUM_NC, 0, 0);
     if (!chip) {
         ESP_LOGE(TAG, "TCA8418 not found");
         return false;
