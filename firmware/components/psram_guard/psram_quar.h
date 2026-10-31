@@ -39,7 +39,8 @@ typedef struct {
     uintptr_t lo, hi; // [lo, hi)
 } psram_quar_piece_t;
 
-// The parts of the heap pool [start, end) outside the quarantine that are at least min bytes long, in address order;
-// returns how many (at most max). Shorter parts, and pieces beyond max, are left out: they stay out of the heap, so
-// the quarantine is exactly the memory between the pieces (psram_scan.c registers the pieces as the PSRAM heap).
+// The parts of the heap pool [start, end) outside the quarantine, in address order; returns how many (at most max). A
+// pool the quarantine does not touch is one piece whatever its size; cut remainders shorter than min, and pieces
+// beyond max, are left out: they stay out of the heap, so the quarantine is exactly the memory between the pieces
+// (psram_scan.c registers the pieces as the PSRAM heap).
 size_t psram_quar_cut(psram_quar_t const *q, uintptr_t start, uintptr_t end, size_t min, psram_quar_piece_t *out, size_t max);

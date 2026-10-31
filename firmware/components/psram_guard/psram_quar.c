@@ -104,7 +104,8 @@ size_t psram_quar_cut(psram_quar_t const *q, uintptr_t start, uintptr_t end, siz
         }
         at = q->r[i].hi > at ? q->r[i].hi : at;
     }
-    if (at < end && end - at >= min && n < max) {
+    // The last piece: an uncut pool (nothing quarantined in it) is kept whatever its size, a cut remainder only if long enough
+    if (at < end && (at == start || end - at >= min) && n < max) {
         out[n++] = (psram_quar_piece_t){at, end};
     }
     return n;

@@ -44,6 +44,8 @@ int main(void) {
     CHECK(psram_quar_cut(&one, 0x49000000u, POOL_HI, MIN, p, 16) == 1 && p[0].lo == 0x49000000u && p[0].hi == POOL_HI);
     CHECK(psram_quar_cut(&one, 0x48560000u, POOL_HI, MIN, p, 16) == 1 && p[0].lo == one.r[0].hi && p[0].hi == POOL_HI);
     CHECK(psram_quar_cut(&one, POOL_LO, 0x48600000u, MIN, p, 16) == 1 && p[0].lo == POOL_LO && p[0].hi == one.r[0].lo);
+    // A small pool the quarantine does not touch (the IDF's irom/drom alignment gaps) stays a heap whatever its size
+    CHECK(psram_quar_cut(&one, 0x481b9b00u, 0x481c0000u, MIN, p, 16) == 1 && p[0].lo == 0x481b9b00u && p[0].hi == 0x481c0000u);
     // A pool inside the range: nothing left
     CHECK(psram_quar_cut(&one, 0x48560000u, 0x48600000u, MIN, p, 16) == 0);
 
