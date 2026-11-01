@@ -16,6 +16,7 @@
 #include "meshcore_run.h"
 #include "channel_input.h"
 #include "mesh_prefs.h"
+#include "mesh_share.h"
 #include "radio_presets.h"
 
 #include "SPIFFS.h"
@@ -955,6 +956,162 @@ extern "C" char const *mesh_channel_remove_named(char const *name) {
     return why;
 }
 
+// ---- channel details, rename (#54) ----------------------------------------------------------------------------------
+
+extern "C" size_t mesh_channel_info(int index, char const *name, mesh_channel_info_t *out, uint32_t wait_ms) {
+    if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped()) {
+        return MESH_BUSY;
+    }
+    if (!mesh_lock_within(wait_ms)) {
+        return MESH_BUSY;
+    }
+    ChannelDetails slot;
+    int            at = index >= 0 ? index : name ? channel_find_locked(name) : -1;
+    bool           ok = at >= 0 && at < MAX_GROUP_CHANNELS && node->getChannel(at, slot) && slot.name[0];
+    if (ok) {
+        out->index = at;
+        mesh_sanitize(slot.name, strnlen(slot.name, sizeof(slot.name)), out->name, sizeof(out->name));
+        memcpy(out->secret, slot.channel.secret, sizeof(out->secret));
+        out->key_len = (uint8_t)mesh_channel_key_len(out->secret);
+        out->hash    = slot.channel.hash[0];
+    }
+    mesh_unlock();
+    memset(&slot, 0, sizeof(slot)); // a channel key: not left on the stack
+    return ok ? 1 : 0;
+}
+
+extern "C" char const *mesh_channel_rename(char const *name, char const *new_in) {
+    char        clean[MESH_CHANNEL_MAX + 1];
+    bool        hashtag;
+    char const *why = channel_rename_parse(new_in, clean, sizeof(clean), &hashtag);
+    if (why) {
+        return why;
+    }
+    why = settings_lock();
+    if (why) {
+        return why;
+    }
+    ChannelDetails slot, other;
+    int            at = -1;
+    for (int i = 0; i < MAX_GROUP_CHANNELS && node->getChannel(i, other); i++) {
+        if (other.name[0] && channel_same_name(other.name, name)) {
+            at = i;
+            break;
+        }
+    }
+    if (at < 0 || !node->getChannel(at, slot)) {
+        why = "No such channel";
+    }
+    for (int i = 0; !why && i < MAX_GROUP_CHANNELS && node->getChannel(i, other); i++) {
+        if (i != at && other.name[0] && channel_same_name(other.name, clean)) {
+            why = "Another channel has that name";
+        }
+    }
+    if (!why && hashtag) {
+        uint8_t tag[CHANNEL_SECRET_MAX] = {};
+        hashtag_secret(clean, tag);
+        if (memcmp(tag, slot.channel.secret, sizeof(slot.channel.secret)) != 0) {
+            why = "A #name needs that hashtag's key: add it as a new channel instead";
+        }
+        memset(tag, 0, sizeof(tag));
+    }
+    if (!why) {
+        StrHelper::strncpy(slot.name, clean, sizeof(slot.name)); // the name only: secret and hash stay as they are
+        why = node->setChannel(at, slot) ? NULL : "No such channel";
+    }
+    if (!why) {
+        store.saveChannels(node);
+        ESP_LOGW(TAG, "channel %d renamed", at);
+    }
+    mesh_unlock();
+    memset(&slot, 0, sizeof(slot));
+    memset(&other, 0, sizeof(other));
+    return why;
+}
+
+// ---- contact export / import (#54) ---------------------------------------------------------------------------------
+
+#define IMPORT_WAIT_MS 3000 // MyMesh takes a loop-back packet in its next loop
+
+extern "C" char const *mesh_contact_export(uint8_t const *prefix, char *uri, size_t cap) {
+    if (!prefix && mesh_advert_refusal(clock_is_set())) {
+        return "the clock is not set: our advert would carry a wrong time"; // as adverts (#8)
+    }
+    uint8_t *pkt = (uint8_t *)heap_caps_malloc(MAX_TRANS_UNIT, MALLOC_CAP_SPIRAM);
+    if (!pkt) {
+        return "no memory";
+    }
+    char const *why = settings_lock();
+    if (why) {
+        heap_caps_free(pkt);
+        return why;
+    }
+    int len = 0;
+    if (prefix) {
+        ContactInfo *c = node->lookupContactByPubKey(prefix, MF_PREFIX);
+        len = c ? node->exportContact(*c, pkt) : 0; // the stored advert, a file read
+        why = !c ? "No such contact" : len <= 0 ? "MeshCore kept no advert of this contact" : NULL;
+    } else {
+        mesh::Packet *p = node->createSelfAdvert(node->getNodeName()); // signed, not queued: never sent
+        if (p) {
+            p->header |= ROUTE_TYPE_FLOOD;
+            len = p->writeTo(pkt);
+            node->releasePacket(p);
+        }
+        why = p ? NULL : "MeshCore is busy, try again";
+    }
+    mesh_unlock();
+    if (!why && !mesh_advert_uri(pkt, (size_t)len, uri, cap)) {
+        why = "not an advert MeshCore can read";
+    }
+    heap_caps_free(pkt);
+    return why;
+}
+
+extern "C" char const *mesh_contact_import(uint8_t const *pkt, size_t len, char *name_out, size_t name_cap) {
+    if (len < MESH_ADVERT_PUB_AT + MESH_ADVERT_PUB_LEN || len > MAX_TRANS_UNIT) {
+        return "not an advert";
+    }
+    uint8_t const *pub = pkt + MESH_ADVERT_PUB_AT;
+    char const    *why = settings_lock();
+    if (why) {
+        return why;
+    }
+    if (memcmp(pub, node->self_id.pub_key, PUB_KEY_SIZE) == 0) {
+        why = "that is this badge's own contact";
+    } else if (node->lookupContactByPubKey(pub, PUB_KEY_SIZE)) {
+        why = "already a contact (left as it is)";
+    } else if (node->getNumContacts() >= MAX_CONTACTS) {
+        why = "the contact list is full (MeshCore would replace the oldest contact)";
+    } else if (!node->importContact(pkt, (uint8_t)len)) {
+        why = "MeshCore did not take it (busy, or not an advert)";
+    }
+    mesh_unlock();
+    if (why) {
+        return why;
+    }
+    // MyMesh checks the signature and adds it in its next loop (its auto-add rules, as for an advert heard on air)
+    for (uint32_t waited = 0; waited < IMPORT_WAIT_MS; waited += 100) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        if (!mesh_lock_within(100)) {
+            continue;
+        }
+        ContactInfo const *c = node->lookupContactByPubKey(pub, PUB_KEY_SIZE);
+        if (c) {
+            mesh_sanitize(c->name, strnlen(c->name, sizeof(c->name)), name_out, name_cap);
+        }
+        bool gone = mesh_is_stopped();
+        mesh_unlock();
+        if (c) {
+            return NULL;
+        }
+        if (gone) {
+            return stopped_why();
+        }
+    }
+    return "not added: a bad signature, or MeshCore's manual add / hop limit setting kept it out";
+}
+
 extern "C" bool mesh_send_advert(void) {
     if (!ident_tx_allowed()) {
         return false; // a damaged identity transmits nothing (#80)
@@ -1442,11 +1599,105 @@ static void cmd_mesh(char const *args) {
     }
 }
 
+// ---- "fw contacts export|import" (#54) ------------------------------------------------------------------------------
+
+static mesh_import_t *import_text; // PSRAM: the parts of a link pasted so far (the console takes 95 bytes a line)
+
+// "fw contacts export [<12 hex>]": the contact's (or our own) export link
+static void contacts_export(char const *arg) {
+    uint8_t  prefix[MF_PREFIX];
+    unsigned b[MF_PREFIX];
+    bool     self = !*arg;
+    if (!self && (strspn(arg, "0123456789abcdefABCDEF") != 12 || arg[12] ||
+                  sscanf(arg, "%2x%2x%2x%2x%2x%2x", &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) < 6)) {
+        console_reply("contacts export [<12 hex digits of the public key>] (none: this badge)");
+        return;
+    }
+    for (int i = 0; i < MF_PREFIX; i++) {
+        prefix[i] = (uint8_t)b[i];
+    }
+    char *uri = (char *)heap_caps_malloc(MESH_ADVERT_URI_MAX, MALLOC_CAP_SPIRAM);
+    if (!uri) {
+        console_reply("no memory");
+        return;
+    }
+    char const *why = mesh_contact_export(self ? NULL : prefix, uri, MESH_ADVERT_URI_MAX);
+    if (why) {
+        console_reply("not exported: %s", why);
+    } else {
+        console_reply("%s", uri);
+        console_reply("(%u characters; to import on a badge paste it in parts with \"fw contacts import <part>\", "
+                      "then \"fw contacts import end\")", (unsigned)strlen(uri));
+    }
+    free(uri);
+}
+
+// "fw contacts import <part>" ... "fw contacts import end" (or "cancel")
+static void contacts_import(char const *arg) {
+    if (!import_text) {
+        import_text = (mesh_import_t *)heap_caps_calloc(1, sizeof(*import_text), MALLOC_CAP_SPIRAM);
+        if (!import_text) {
+            console_reply("no memory");
+            return;
+        }
+    }
+    if (strcmp(arg, "cancel") == 0) {
+        import_text->len = 0;
+        console_reply("import cancelled");
+        return;
+    }
+    if (strcmp(arg, "end") != 0) {
+        char const *why = *arg ? mesh_import_add(import_text, arg) : "contacts import <part> | end | cancel";
+        if (why) {
+            console_reply("%s", why);
+        } else {
+            console_reply("%u characters so far (\"fw contacts import end\" when all parts are in)",
+                          (unsigned)import_text->len);
+        }
+        return;
+    }
+    uint8_t    *pkt = (uint8_t *)heap_caps_malloc(MESH_ADVERT_MAX, MALLOC_CAP_SPIRAM);
+    char const *why = NULL;
+    size_t      len = 0;
+    if (!pkt) {
+        console_reply("no memory");
+        return;
+    }
+    if (import_text->len == 0) {
+        why = "nothing pasted (\"fw contacts import meshcore://...\" first)";
+    } else {
+        len = mesh_advert_uri_parse(import_text->text, pkt, MESH_ADVERT_MAX, &why);
+    }
+    import_text->len = 0;
+    char name[MESH_NAME_MAX + 1] = "";
+    if (len) {
+        why = mesh_contact_import(pkt, len, name, sizeof(name));
+    }
+    if (why) {
+        console_reply("not imported: %s", why);
+    } else {
+        console_reply("contact %02x%02x%02x%02x%02x%02x \"%s\" added", pkt[2], pkt[3], pkt[4], pkt[5], pkt[6], pkt[7],
+                      name);
+    }
+    free(pkt);
+}
+
 static void cmd_contacts(char const *args) {
     if (console_not_running()) {
         return;
     }
-    (void)args;
+    if (strncmp(args, "export", 6) == 0 && (args[6] == ' ' || !args[6])) {
+        contacts_export(args[6] ? args + 7 : "");
+        return;
+    }
+    if (strncmp(args, "import", 6) == 0 && (args[6] == ' ' || !args[6])) {
+        contacts_import(args[6] ? args + 7 : "");
+        return;
+    }
+    if (*args) {
+        console_reply("contacts | contacts export [<12 hex>] | contacts import <part> | end | cancel");
+        return;
+    }
     size_t          total;
     mesh_contact_t *list = (mesh_contact_t *)heap_caps_malloc(MAX_CONTACTS * sizeof(mesh_contact_t), MALLOC_CAP_SPIRAM);
     if (!list) {
@@ -1522,6 +1773,74 @@ static void channel_rm(char const *arg) {
     }
 }
 
+// The channel a console argument names: a slot number or a name (channel_find_locked); false (said why) when none
+static bool console_channel_info(char const *arg, mesh_channel_info_t *info) {
+    char *end;
+    long  index = strtol(arg, &end, 10);
+    bool  by_index = end != arg && *end == 0 && index >= 0;
+    size_t found = mesh_channel_info(by_index ? (int)index : -1, by_index ? NULL : arg, info, MESH_SET_WAIT_MS);
+    if (found == MESH_BUSY) {
+        console_reply("MeshCore is busy, try again");
+    } else if (!found) {
+        console_reply("no channel %s (\"fw channels\" lists them)", arg);
+    }
+    return found == 1;
+}
+
+// "fw channel show <index|name>" (#54): the key and the link MeshCore's apps add a channel from. UART only, as the
+// update token: a private channel's key does not belong in the log or the Wi-Fi console.
+static void channel_show(char const *arg) {
+    struct ShowMem {
+        mesh_channel_info_t info;
+        char                hex[MESH_KEY_HEX_MAX], b64[MESH_KEY_B64_MAX], uri[MESH_CHANNEL_URI_MAX];
+    };
+    ShowMem *m = (ShowMem *)heap_caps_calloc(1, sizeof(ShowMem), MALLOC_CAP_SPIRAM); // off the console's 4 KB stack
+    if (!m) {
+        console_reply("no memory");
+        return;
+    }
+    if (console_channel_info(arg, &m->info)) {
+        mesh_channel_info_t const &info = m->info;
+        mesh_hex_text(info.secret, info.key_len, m->hex, sizeof(m->hex));
+        mesh_base64_text(info.secret, info.key_len, m->b64, sizeof(m->b64));
+        console_reply("channel %d: %s (hash %02x, %u-byte key; key and link on the serial console only)", info.index,
+                      info.name, info.hash, info.key_len);
+        console_reply_private("key (hex) %s", m->hex);
+        console_reply_private("key (base64) %s", m->b64);
+        if (mesh_channel_uri(info.name, info.secret, info.key_len, m->uri, sizeof(m->uri))) {
+            console_reply_private("link %s", m->uri);
+        } else {
+            console_reply_private("no link: MeshCore's apps only take 16-byte keys");
+        }
+    }
+    memset(m, 0, sizeof(*m)); // a channel key: not left in the heap
+    free(m);
+}
+
+// "fw channel rename <index|name> <new name>" (#54): the name only, the key stays
+static void channel_rename(char const *args) {
+    char   which[MESH_CHANNEL_MAX + 2];
+    size_t n = strcspn(args, " ");
+    char const *new_name = args + n + strspn(args + n, " ");
+    if (n == 0 || n >= sizeof(which) || !*new_name) {
+        console_reply("channel rename <index|name> <new name>");
+        return;
+    }
+    memcpy(which, args, n);
+    which[n] = '\0';
+    mesh_channel_info_t info;
+    if (!console_channel_info(which, &info)) {
+        return;
+    }
+    memset(info.secret, 0, sizeof(info.secret));
+    char const *why = mesh_channel_rename(info.name, new_name);
+    if (why) {
+        console_reply("channel %s not renamed: %s", info.name, why);
+    } else {
+        console_reply("channel %d renamed from %s", info.index, info.name);
+    }
+}
+
 // "fw channel add <name> <base64 key>" or "fw channel add #name": the same as the screen's
 static void cmd_channel(char const *args) {
     if (console_not_running()) {
@@ -1534,9 +1853,18 @@ static void cmd_channel(char const *args) {
         channel_rm(args + 3);
         return;
     }
+    if (strncmp(args, "show ", 5) == 0 && args[5]) {
+        channel_show(args + 5);
+        return;
+    }
+    if (strncmp(args, "rename ", 7) == 0) {
+        channel_rename(args + 7);
+        return;
+    }
     char name[48] = "", key[64] = "";
     if (sscanf(args, "add %47s %63s", name, key) < 1) {
-        console_reply("channel add <name> <base64 key> | channel add #name | channel rm <index|name>");
+        console_reply("channel add <name> <base64 key> | channel add #name | channel rm <index|name> | "
+                      "channel show <index|name> | channel rename <index|name> <new name>");
         return;
     }
     char const *why = mesh_channel_add(name, key[0] ? key : NULL);
@@ -1633,10 +1961,12 @@ extern "C" void mesh_console_init(void) {
                      "mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
                      "mesh dm <12 hex> <text>",
                      cmd_mesh);
-    console_register("contacts", "contacts (nodes heard, newest first)", cmd_contacts);
+    console_register("contacts", "contacts (nodes heard, newest first) | contacts export [<12 hex>] | contacts import "
+                     "<part> | end | cancel", cmd_contacts);
     console_register("msgs", "msgs [n] (last n messages)", cmd_msgs);
     console_register("channels", "channels (the channels the badge can read)", cmd_channels);
-    console_register("channel", "channel add <name> <base64 key> | channel add #name | channel rm <index|name>", cmd_channel);
+    console_register("channel", "channel add <name> <base64 key> | channel add #name | channel rm <index|name> | "
+                     "channel show <index|name> | channel rename <index|name> <new name>", cmd_channel);
     console_register("advert", "advert (send a zero-hop advert now)", cmd_advert);
 }
 

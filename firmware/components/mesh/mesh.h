@@ -90,6 +90,31 @@ char const *mesh_channel_add(char const *name, char const *b64_key_or_null);
 // slot 0 (Public) and empty slots are refused. _named picks it by name, without case. Same lock rules as the setters.
 char const *mesh_channel_remove(int index);
 char const *mesh_channel_remove_named(char const *name);
+// One channel's details (#54): slot, name as stored, its key (secret, 16 or 32 bytes: mesh_share.h) and hash byte.
+// index >= 0 picks that slot, else name does (channel_name_match: "badgetest" finds "#badgetest", an exact name wins).
+// 1 when found, 0 when not, MESH_BUSY when the lock was not free within wait_ms or MeshCore is not running.
+typedef struct {
+    int     index;
+    char    name[MESH_CHANNEL_MAX + 1];
+    uint8_t secret[32];
+    uint8_t key_len;
+    uint8_t hash;
+} mesh_channel_info_t;
+size_t mesh_channel_info(int index, char const *name, mesh_channel_info_t *out, uint32_t wait_ms);
+// A new name for the channel stored as `name` (exactly, without case), saved; the key and the slot stay. NULL when
+// renamed, else why not: the name rules of channel_rename_parse, a name another channel has, or a #hashtag whose key is
+// not this channel's. Same lock rules as the setters. The chat history stays under the old name (it shows again if the
+// channel gets that name back).
+char const *mesh_channel_rename(char const *name, char const *new_name);
+// Contact export (#54): the contact with this 6-byte key prefix as MeshCore's export link (meshcore://<hex> of its
+// last advert, which MeshCore keeps on flash), or with prefix NULL our own advert, made and signed now without a
+// location and not sent. NULL when uri holds it (cap MESH_ADVERT_URI_MAX), else why not. Nothing goes on air.
+char const *mesh_contact_export(uint8_t const *prefix_or_null, char *uri, size_t cap);
+// Contact import (#54): a normalised advert (mesh_advert_uri_parse) handed to MyMesh as if heard (BaseChatMesh::
+// importContact: it checks the signature and adds the contact as its auto-add does; nothing is sent). Refused for our
+// own key, a contact already there (never overwritten), and a full table (MeshCore would replace the oldest). Waits up
+// to a few seconds for MyMesh to take it. NULL when the contact is now there (its name in name_out), else why not.
+char const *mesh_contact_import(uint8_t const *pkt, size_t len, char *name_out, size_t name_cap);
 // A zero-hop advert now: true when queued (the home tile snapshot then has advert_sent and its age)
 bool mesh_send_advert(void);
 // The channel names in slot order, up to max; MESH_BUSY when the lock wasn't free within MESH_SET_WAIT_MS

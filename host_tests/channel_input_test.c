@@ -71,6 +71,17 @@ int main(void) {
     CHECK(channel_same_name("Public", "public"));
     CHECK(!channel_same_name("#foo", "#foo2"));
     CHECK(!channel_same_name("#foo", "foo"));
+    // Rename (#54): the add rules for the name, a #hashtag flagged for the key check
+    {
+        char out[32];
+        bool tag = true;
+        CHECK(channel_rename_parse("  Team chat ", out, sizeof(out), &tag) == NULL && strcmp(out, "Team chat") == 0 && !tag);
+        CHECK(channel_rename_parse("#BadgeTest", out, sizeof(out), &tag) == NULL && strcmp(out, "#badgetest") == 0 && tag);
+        CHECK(channel_rename_parse("#bad test", out, sizeof(out), &tag) != NULL);
+        CHECK(channel_rename_parse("#", out, sizeof(out), &tag) != NULL);
+        CHECK(channel_rename_parse("   ", out, sizeof(out), &tag) != NULL);
+        CHECK(channel_rename_parse("0123456789012345678901234567890123", out, sizeof(out), &tag) != NULL);
+    }
     // The console names a hashtag channel with or without its '#' (#101: "mesh send badgetest" failed at once)
     CHECK(channel_name_match("#badgetest", "#badgetest") == CHANNEL_MATCH_EXACT);
     CHECK(channel_name_match("#badgetest", "#BadgeTest") == CHANNEL_MATCH_EXACT);

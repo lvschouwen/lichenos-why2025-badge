@@ -99,6 +99,31 @@ char const *channel_parse(char const *name, char const *b64_or_null, char *out_n
     return NULL;
 }
 
+char const *channel_rename_parse(char const *new_name, char *out, size_t cap, bool *hashtag) {
+    uint8_t     unused[CHANNEL_SECRET_MAX];
+    size_t      len;
+    char const *why;
+    *hashtag = false;
+    // channel_parse's name rules; a dummy key keeps it from asking for a #hashtag
+    why = channel_parse(new_name, "AAAAAAAAAAAAAAAAAAAAAA", out, cap, unused, &len);
+    if (why) {
+        return why;
+    }
+    if (out[0] == '#') {
+        if (!out[1]) {
+            return "A #hashtag needs a name after the #";
+        }
+        if (strchr(out, ' ')) {
+            return "A #hashtag has no spaces";
+        }
+        for (char *p = out; *p; p++) {
+            *p = (char)tolower((unsigned char)*p);
+        }
+        *hashtag = true;
+    }
+    return NULL;
+}
+
 bool channel_same_name(char const *a, char const *b) {
     return strcasecmp(a, b) == 0;
 }

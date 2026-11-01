@@ -196,8 +196,12 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
 - MeshCore: `fw mesh` (identity, clock, packet counters; or why it is not running), `fw mesh start`, `fw mesh stop`,
   `fw mesh name <name>`, `fw mesh radio <preset | freq bw sf cr>
   [txdbm]`, `fw contacts`, `fw msgs [n]`, `fw channels`, `fw channel add <name> <base64 key>` or `fw channel add #name`
-  (hashtag channel: key = first 16 bytes of SHA-256 of the lowercased name, `#` included), `fw channel rm <index|name>`,
-  `fw advert` (send a zero-hop advert now).
+  (hashtag channel: key = first 16 bytes of SHA-256 of the lowercased name, `#` included), `fw channel rm <index|name>`
+  (a hashtag channel with or without its `#`), `fw channel show <index|name>` (key as hex and base64 and the
+  `meshcore://channel/add` link, on the serial console only), `fw channel rename <index|name> <new name>` (the key
+  stays), `fw contacts export [<12 hex>]` (MeshCore's `meshcore://<hex>` export of a contact, or of this badge),
+  `fw contacts import <part>` ... `fw contacts import end` (paste a link in parts of up to 79 characters; `cancel`
+  drops it; existing contacts are never changed), `fw advert` (send a zero-hop advert now).
 - Crashes: every crash keeps a core dump and a log line. `fw crash` shows them, `fw crash dump` prints the dump,
   `fw crash clear` drops it. `tools/badge.sh crash <port> [elf]` fetches the dump and decodes it against the crashed
   image's ELF; `flash-fw` and `ota-firmware` keep every ELF in `~/badge-backups/elf` under its SHA-256 and version.

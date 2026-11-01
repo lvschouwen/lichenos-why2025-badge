@@ -84,7 +84,7 @@ void mesh_format_route(uint8_t path_len, uint8_t const *path, char *out, size_t 
 }
 
 // RFC 3986 unreserved bytes stay, a space is '+', everything else (UTF-8 included) is %XX
-static size_t url_encode(char const *in, char *out, size_t cap) {
+size_t mesh_url_encode(char const *in, char *out, size_t cap) {
     static char const digits[] = "0123456789ABCDEF";
     size_t            at       = 0;
     for (; *in; in++) {
@@ -114,7 +114,7 @@ bool mesh_contact_uri(char const *name, uint8_t const pub[MESH_CONTACT_PUB_LEN],
         return false;
     }
     out[0] = '\0';
-    if (url_encode(name, enc, sizeof(enc)) == SIZE_MAX) {
+    if (mesh_url_encode(name, enc, sizeof(enc)) == SIZE_MAX) {
         return false;
     }
     mesh_hex(pub, MESH_CONTACT_PUB_LEN, 0, key, sizeof(key));

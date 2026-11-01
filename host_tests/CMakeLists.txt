@@ -549,6 +549,16 @@ target_include_directories(channel_input_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_options(channel_input_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME channel_input_test COMMAND channel_input_test)
 
+add_executable(mesh_share_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/mesh_share_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_share.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_contact_fmt.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_format.c
+)
+target_include_directories(mesh_share_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_share_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_share_test COMMAND mesh_share_test)
+
 add_executable(mesh_chat_test
     ${CMAKE_CURRENT_SOURCE_DIR}/mesh_chat_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_chat.c
@@ -1035,6 +1045,7 @@ add_custom_target(run_tests
     sd_settings_model_test
     mesh_contact_fmt_test
     advert_limit_test
+    mesh_share_test
     mesh_grid_test
     mesh_run_test
     sensors_format_test

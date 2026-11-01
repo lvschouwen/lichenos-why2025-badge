@@ -20,6 +20,10 @@ extern "C" {
 // 32 bytes (padded or not), decoded into out_secret.
 char const *channel_parse(char const *name, char const *b64_or_null, char *out_name, size_t name_cap,
                           uint8_t out_secret[CHANNEL_SECRET_MAX], size_t *secret_len);
+// A channel's new name (#54): NULL when it can be one, else why not. Trimmed, at most 31 bytes, into out (cap >= 32); a
+// #hashtag has no spaces and is lowercased, as channel_parse. *hashtag tells the caller to check that the channel's key
+// is that hashtag's key: renaming never changes a key, and a #name with another key would never meet that hashtag.
+char const *channel_rename_parse(char const *new_name, char *out, size_t cap, bool *hashtag);
 // Two channel names are the same channel to the user: compared without case
 bool channel_same_name(char const *a, char const *b);
 // How well a name typed on the console names a stored channel (#101): CHANNEL_MATCH_EXACT for the same name without

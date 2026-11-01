@@ -49,6 +49,9 @@ char const *mesh_contact_type_name(uint8_t type);
 void        mesh_hex(uint8_t const *bytes, size_t n, size_t group, char *out, size_t cap);
 // "flood", "direct", or "2 hops via a1b2,c3d4 (2-byte hashes)": the hops with the hash of each repeater
 void        mesh_format_route(uint8_t path_len, uint8_t const *path, char *out, size_t cap);
+// RFC 3986 unreserved bytes stay, a space is '+', everything else (UTF-8 included) is %XX; the length, SIZE_MAX when
+// it does not fit in cap (with the terminator)
+size_t mesh_url_encode(char const *in, char *out, size_t cap);
 // The share link MeshCore's apps read (docs/qr_codes.md):
 // meshcore://contact/add?name=<url-encoded>&public_key=<64 hex>&type=<n>. false (out empty) when it does not fit.
 #define MESH_URI_MAX 224 // a 32-byte name with every byte escaped: 207

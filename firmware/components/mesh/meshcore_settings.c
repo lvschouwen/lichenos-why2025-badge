@@ -14,6 +14,7 @@
 #include "mesh.h"
 #include "mesh_chat.h"
 #include "mesh_format.h"
+#include "mesh_share.h"
 #include "meshcore_run.h"
 #include "meshcore_settings.h"
 #include "radio_confirm.h"
@@ -35,6 +36,7 @@ static char const TAG[] = "meshcore";
 #define SCREEN_CUSTOM   131
 #define SCREEN_CHANNELS 132
 #define SCREEN_SWITCH   134
+#define SCREEN_CHANNEL  135
 #define REMOVE_ASK_S    20 // the careful remove dialog cancels by itself after this
 #define JOB_STACK       6144 // savePrefs / saveChannels keep File objects on the stack (the console's 4 KB suffices)
 #define MAX_CHANNELS    40   // MAX_GROUP_CHANNELS in the mesh component's build
@@ -45,7 +47,16 @@ static char const TAG[] = "meshcore";
 
 // ---- the change, off the LVGL task -------------------------------------------------------------------------------
 
-typedef enum { JOB_NAME, JOB_RADIO, JOB_CHANNEL_ADD, JOB_CHANNEL_RM, JOB_ADVERT, JOB_CHANNELS } job_kind_t;
+typedef enum {
+    JOB_NAME,
+    JOB_RADIO,
+    JOB_CHANNEL_ADD,
+    JOB_CHANNEL_RM,
+    JOB_ADVERT,
+    JOB_CHANNELS,
+    JOB_CHANNEL_INFO,
+    JOB_CHANNEL_RENAME,
+} job_kind_t;
 
 typedef struct job {
     job_kind_t  kind;
@@ -59,6 +70,7 @@ typedef struct job {
     bool        ok;
     size_t      n;
     char        names[MAX_CHANNELS][MESH_CHANNEL_MAX + 1];
+    mesh_channel_info_t info; // JOB_CHANNEL_INFO (#54): holds a key, wiped with the job
     void (*done)(struct job *);
 } job_t;
 
@@ -69,6 +81,7 @@ static void job_finish(void *data) {
     job_running = false;
     job->done(job);
     memset(job->key, 0, sizeof(job->key)); // a channel key: not left in the heap
+    memset(&job->info, 0, sizeof(job->info));
     heap_caps_free(job);
 }
 
@@ -83,6 +96,8 @@ static void job_task(void *arg) {
         case JOB_CHANNEL_RM: job->reason = mesh_channel_remove_named(job->text); break;
         case JOB_ADVERT: job->ok = mesh_send_advert(); break;
         case JOB_CHANNELS: job->n = mesh_channels_snapshot(job->names, MAX_CHANNELS); break;
+        case JOB_CHANNEL_INFO: job->n = mesh_channel_info(-1, job->text, &job->info, MESH_SET_WAIT_MS); break;
+        case JOB_CHANNEL_RENAME: job->reason = mesh_channel_rename(job->text, job->title); break;
     }
     // lv_async_call is not thread safe: take the LVGL lock like the shell does
     lvgl_port_lock(0);
@@ -829,8 +844,11 @@ static lv_obj_t *channel_rows[MAX_CHANNELS + 1]; // the channels, or one placeho
 static size_t    channel_row_count;
 static lv_obj_t *add_tag_row, *channel_note;
 static char      pending_name[MESH_CHANNEL_MAX + 1];
-static char      row_names[MAX_CHANNELS][MESH_CHANNEL_MAX + 1]; // what Enter on a channel row removes
+static char      row_names[MAX_CHANNELS][MESH_CHANNEL_MAX + 1]; // what Enter on a channel row opens
+static lv_obj_t *channels_screen;                               // the list, while it exists
+static lv_obj_t *channel_screen;                                // a channel's details (#54), while they exist
 static void      remove_ask(void *arg);
+static void      open_channel(void *arg);
 
 static void list_done(job_t *job) {
     channels_line(job, channels_row);
@@ -855,8 +873,8 @@ static void list_done(job_t *job) {
     size_t n          = job->n == MESH_BUSY ? 0 : job->n;
     for (size_t i = 0; i < n; i++) {
         snprintf(row_names[i], sizeof(row_names[i]), "%s", job->names[i]);
-        // The first channel is Public: nothing to remove there
-        channel_rows[channel_row_count++] = menu_add(menu, job->names[i], "", i ? remove_ask : NULL, row_names[i]);
+        // Enter opens the channel's details: key, link, Rename, Remove (#54)
+        channel_rows[channel_row_count++] = menu_add(menu, job->names[i], "", open_channel, row_names[i]);
     }
     if (!n) {
         channel_rows[channel_row_count++] = menu_add(menu, job->n == MESH_BUSY ? "MeshCore busy" : "No channels", "",
@@ -930,6 +948,9 @@ static void remove_done(job_t *job) {
     }
     set_note(channel_note, text, job->reason != NULL);
     if (!job->reason) {
+        if (channel_screen && channels_screen) {
+            shell_back_to(channels_screen, NULL, NULL); // the details of a channel that is gone
+        }
         if (add_tag_row) {
             list_refresh();
         } else {
@@ -938,7 +959,7 @@ static void remove_done(job_t *job) {
     }
 }
 
-// Runs on the channel list, after the confirm dialog
+// Runs on the channel list (or its details), after the confirm dialog
 static void remove_go(void) {
     job_t *job = job_new(JOB_CHANNEL_RM, remove_done);
     if (!job) {
@@ -1011,10 +1032,149 @@ static void on_channels_delete(lv_event_t *e) {
     channel_row_count = 0;
     add_tag_row       = NULL;
     channel_note      = NULL;
+    channels_screen   = NULL;
+}
+
+// ---- one channel's details (#54): its key as hex and base64, the app link, Rename, Remove ---------------------------
+
+typedef struct {
+    char name[MESH_CHANNEL_MAX + 1];
+    char hex[MESH_KEY_HEX_MAX], b64[MESH_KEY_B64_MAX], uri[MESH_CHANNEL_URI_MAX];
+} channel_mem_t;
+
+static channel_mem_t *chan_mem; // PSRAM, while the details exist; holds a key, wiped when they go
+static lv_obj_t      *chan_menu, *chan_loading, *chan_note;
+static lv_group_t    *chan_group; // the details screen's keys
+
+static lv_obj_t *add_value(lv_obj_t *menu, char const *text) {
+    lv_obj_t *label = menu_note(menu, text);
+    lv_obj_set_style_text_color(label, lv_color_hex(THEME_TEXT), 0);
+    return label;
+}
+
+static void rename_done(job_t *job) {
+    char text[160];
+    if (job->reason) {
+        snprintf(text, sizeof(text), "%s not renamed: %s", job->text, job->reason);
+        set_note(chan_note, text, true);
+        return;
+    }
+    snprintf(text, sizeof(text), "%s is now %s", job->text, job->title);
+    set_note(channel_note, text, false);
+    if (channel_screen && channels_screen) {
+        shell_back_to(channels_screen, NULL, NULL);
+    }
+    if (add_tag_row) {
+        list_refresh();
+    }
+}
+
+static void on_rename(char const *text, void *arg) {
+    (void)arg;
+    job_t *job = chan_mem ? job_new(JOB_CHANNEL_RENAME, rename_done) : NULL;
+    if (!job) {
+        set_note(chan_note, "Busy, try again", true);
+        return;
+    }
+    snprintf(job->text, sizeof(job->text), "%s", chan_mem->name);
+    snprintf(job->title, sizeof(job->title), "%s", text);
+    set_note(chan_note, "Renaming...", false);
+    job_start(job);
+}
+
+static void ask_rename(void *arg) {
+    (void)arg;
+    if (chan_mem) {
+        text_entry_open("New channel name", chan_mem->name, false, MESH_CHANNEL_MAX, on_rename, NULL);
+    }
+}
+
+static void info_done(job_t *job) {
+    if (!chan_menu || !chan_mem) {
+        return; // the details are gone
+    }
+    lv_obj_delete(chan_loading);
+    chan_loading = NULL;
+    if (job->n != 1) {
+        menu_note(chan_menu, job->n == 0 ? "This channel is gone." : "MeshCore is busy: Esc and try again.");
+        return;
+    }
+    mesh_channel_info_t const *info = &job->info;
+    mesh_hex_text(info->secret, info->key_len, chan_mem->hex, sizeof(chan_mem->hex));
+    mesh_base64_text(info->secret, info->key_len, chan_mem->b64, sizeof(chan_mem->b64));
+    bool link = mesh_channel_uri(info->name, info->secret, info->key_len, chan_mem->uri, sizeof(chan_mem->uri));
+    lv_group_t *previous = lv_group_get_default();
+    lv_group_set_default(chan_group); // the new rows join the screen's group
+    menu_add(chan_menu, "Rename", "", ask_rename, NULL);
+    if (info->index != 0) {
+        menu_add(chan_menu, "Remove", "", remove_ask, chan_mem->name); // Public (slot 0) stays
+    }
+    lv_group_set_default(previous);
+    menu_focus_row(chan_menu, 0);
+    menu_note(chan_menu, info->key_len == 16 ? "Key (16 bytes, hex):" : "Key (32 bytes, hex):");
+    add_value(chan_menu, chan_mem->hex);
+    menu_note(chan_menu, "Key (base64, as Add channel with key takes it):");
+    add_value(chan_menu, chan_mem->b64);
+    menu_note(chan_menu, link ? "Link for MeshCore apps (Add channel, paste):"
+                              : "No app link: MeshCore's apps only take 16-byte keys.");
+    if (link) {
+        add_value(chan_menu, chan_mem->uri);
+    }
+}
+
+static void on_channel_delete(lv_event_t *e) {
+    (void)e;
+    if (chan_mem) {
+        memset(chan_mem, 0, sizeof(*chan_mem));
+        heap_caps_free(chan_mem);
+    }
+    chan_mem       = NULL;
+    chan_menu      = chan_loading = chan_note = NULL;
+    chan_group     = NULL;
+    channel_screen = NULL;
+}
+
+static char pending_channel[MESH_CHANNEL_MAX + 1]; // what open_channel opens
+
+static void info_start(void) {
+    if (!chan_mem) {
+        return;
+    }
+    job_t *job = job_new(JOB_CHANNEL_INFO, info_done);
+    if (job) {
+        snprintf(job->text, sizeof(job->text), "%s", chan_mem->name);
+        job_start(job);
+    } else if (job_running) {
+        retry_later(info_start);
+    }
+}
+
+static lv_obj_t *build_channel(void) {
+    lv_obj_t *screen = shell_page_create();
+    channel_screen   = screen;
+    chan_group       = lv_group_get_default();
+    lv_obj_add_event_cb(screen, on_channel_delete, LV_EVENT_DELETE, NULL);
+    chan_mem  = heap_caps_calloc(1, sizeof(*chan_mem), MALLOC_CAP_SPIRAM);
+    chan_menu = menu_create(screen, pending_channel);
+    if (!chan_mem) {
+        menu_note(chan_menu, "Not enough memory to show the channel.");
+        return screen;
+    }
+    snprintf(chan_mem->name, sizeof(chan_mem->name), "%s", pending_channel);
+    chan_note    = menu_note(chan_menu, "");
+    chan_loading = menu_note(chan_menu, "Loading...");
+    info_start();
+    return screen;
+}
+
+static void open_channel(void *arg) {
+    snprintf(pending_channel, sizeof(pending_channel), "%s", (char const *)arg);
+    shell_open(build_channel, SCREEN_CHANNEL);
 }
 
 static lv_obj_t *build_channels(void) {
     lv_obj_t *screen     = shell_page_create();
+    channels_screen      = screen;
     lv_obj_t *menu       = menu_create(screen, "Channels");
     channel_rows[0]      = menu_add(menu, "Loading...", "", NULL, NULL);
     channel_row_count    = 1;
