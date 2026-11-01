@@ -12,11 +12,21 @@ typedef struct {
     uint32_t color; // teal up, amber joining, red down
 } link_look_t;
 
+// Off by choice is dim, red is only for faults, amber for a change under way (#105).
 // Up: bars from the RSSI (1 while it is unknown), teal. Joining: amber, 0 bars. Credentials but no IP: red, 0 bars
-// (DOWN). No credentials: red, 0 bars (OFF).
+// (DOWN). No credentials: dim, 0 bars (OFF, a faint fan).
 link_look_t wifi_look(bool have_credentials, bool joining, bool has_ip, bool rssi_known, int8_t rssi);
-// The "LoRa" label: teal up, red down; dim (OFF) whatever the radio does while its user is stopped by choice (#103)
-link_look_t lora_look(bool up, bool wanted);
+
+// What the radio's user (MeshCore) is doing, as the status bar needs it
+typedef enum {
+    LORA_USE_RUNNING,  // running
+    LORA_USE_OFF,      // stopped by choice (#103: start at boot off, or stopped on request)
+    LORA_USE_CHANGING, // starting or stopping
+    LORA_USE_FAILED,   // wanted but not running (a start failed, stopped by itself)
+} lora_use_t;
+// The "LoRa" label: dim (OFF) while its user is off by choice, whatever the radio does; red when the radio (or the C6)
+// is down or its user failed; amber while it starts or stops; teal up
+link_look_t lora_look(bool up, lora_use_t use);
 
 // The Wi-Fi fan icon (#58): part 0 is the dot, 1-3 the arcs from the inside out. Lit in the look's colour up to `bars`
 // (1 = the dot alone, 4 = the dot and all three arcs), the rest faint; 0 bars leaves the whole fan faint.

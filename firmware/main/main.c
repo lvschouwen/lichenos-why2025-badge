@@ -20,6 +20,7 @@
 #include "log_tap.h"
 #include "lora.h"
 #include "mesh.h"
+#include "meshcore_run.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "keyboard.h"
@@ -52,6 +53,18 @@ static bool wifi_up(void) {
 
 static bool lora_link_up(void) {
     return lora_up() && c6link_up();
+}
+
+// MeshCore's run state in the status bar's terms (#103, #105)
+static lora_use_t lora_use(void) {
+    mesh_run_t r = meshcore_run_get();
+    if (!mesh_run_wants_radio(r)) {
+        return LORA_USE_OFF;
+    }
+    if (mesh_run_busy(r)) {
+        return LORA_USE_CHANGING;
+    }
+    return r.state == MESH_RUN_RUNNING ? LORA_USE_RUNNING : LORA_USE_FAILED;
 }
 
 // The OTA task's hooks, in the shell's terms (#76)
@@ -221,7 +234,7 @@ void app_main(void) {
     assets_unmount(); // the fonts made their own PSRAM copies
     if (screen) {
         shell_sources_t const sources = {.wifi_up = wifi_up, .lora_up = lora_link_up, .c6_up = c6link_up,
-                                         .lora_wanted = mesh_wants_radio,
+                                         .lora_use = lora_use,
                                          .wifi_scan = wifi_scan, .wifi_join = wifi_set_credentials, .wifi_ip = wifi_has_ip,
                                          .wifi_join_state = wifi_join_state,
                                          .wifi_has_credentials = wifi_has_credentials,

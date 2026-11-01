@@ -217,7 +217,7 @@ static void refresh(lv_timer_t *timer) {
                         shell_sources.wifi_joining && shell_sources.wifi_joining(),
                         shell_sources.wifi_up && shell_sources.wifi_up(), known, rssi));
     show_lora(lora_look(shell_sources.lora_up && shell_sources.lora_up(),
-                        !shell_sources.lora_wanted || shell_sources.lora_wanted()));
+                        shell_sources.lora_use ? shell_sources.lora_use() : LORA_USE_RUNNING));
 }
 
 #define BAR_PAD    24

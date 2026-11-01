@@ -78,10 +78,6 @@ mesh_run_t meshcore_run_get(void) {
     return r;
 }
 
-bool mesh_wants_radio(void) {
-    return mesh_run_wants_radio(meshcore_run_get());
-}
-
 static void job_task(void *arg) {
     bool start = arg != NULL;
     bool ok    = start ? start_now() : mesh_stop(MESH_STOP_USER);

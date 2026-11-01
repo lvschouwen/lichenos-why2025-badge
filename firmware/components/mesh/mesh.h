@@ -50,8 +50,6 @@ typedef enum {
 bool mesh_stop(mesh_stop_reason_t why);
 // "fw mesh", "fw contacts" and friends: registered once, whether MeshCore starts or not (#103)
 void mesh_console_init(void);
-// The status bar's LoRa look (#103, main.c's shell source): false only while MeshCore is stopped by choice
-bool mesh_wants_radio(void);
 // The node id (the start of the public key) as 8 hex digits, taken once at mesh_start: no lock, so the screens may
 // call it any time. false before MeshCore is up.
 bool mesh_node_id(char *hex, size_t cap);

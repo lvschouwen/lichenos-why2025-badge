@@ -119,8 +119,9 @@ fonts; `fw assets` shows their state.
 - **Home:** one tile per app with a line or two of live text, e.g. MeshCore's unread count and node count. A switch in
   Settings turns the tiles into a grid of icons.
 - **Status bar:** local time (`~14:05` in amber while it only comes from mesh contacts, `--:--` when the badge has no
-  time: it has no backup battery, so a power-off loses it), Wi-Fi bars (red when the link is down) and the LoRa radio
-  state.
+  time: it has no backup battery, so a power-off loses it), Wi-Fi bars and the LoRa radio state: red only for a fault
+  (a saved network not joined, the radio down, MeshCore wanted but not running), amber while joining or starting, dim
+  when switched off (no network saved, MeshCore stopped by choice).
 - **Settings:** Wi-Fi (scan, join; a new network is tried first and the badge goes back to the old one if it doesn't
   connect), Display (brightness, screen timeout: dim after 1 min, off after 5 min; home layout), Time (set date & time by hand, time zone with the Netherlands as the
   default, where the time came from), About Lichen, and one page per app that has settings. SNTP still wins over a
