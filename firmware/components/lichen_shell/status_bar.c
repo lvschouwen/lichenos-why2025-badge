@@ -1,5 +1,7 @@
-// The status bar over every screen after boot (#66, home.html): logo, clock (marked when unverified, #64), Wi-Fi, LoRa. Wi-Fi fan (#58) and LoRa label, polled once a second from
-// the LVGL task through shell_sources; the LoRa TX/RX chevrons from the packet counters every 100 ms (#29).
+// The status bar over every screen after boot (#66, home.html), three columns (#104): logo and wordmark (and the C6
+// trouble label) left, the clock centred (marked when unverified, #64), Wi-Fi and LoRa right. Wi-Fi fan (#58) and LoRa
+// label are polled once a second from the LVGL task through shell_sources; the LoRa TX/RX chevrons from the packet
+// counters every 100 ms (#29).
 #include "lichen_clock.h"
 #include "link_state.h"
 #include "lora_activity.h"
@@ -17,7 +19,7 @@ static lv_obj_t *clock_label;
 static lv_obj_t *lora_label;
 static lv_obj_t *wifi_label;
 static lv_obj_t *c6_label; // only while the C6 is being recovered or gone (#14)
-static lv_obj_t *lora_arrows; // the TX/RX chevrons after "LoRa" (#29)
+static int32_t   c6_max_w; // the room left of the clock (#104): longer C6 text ends in "..."
 
 static lv_obj_t *add_row(lv_obj_t *parent, int gap) {
     lv_obj_t *row = lv_obj_create(parent);
@@ -171,14 +173,20 @@ static void show_clock(void) {
     }
 }
 
-// As wide as the widest text it shows, right-aligned: the Wi-Fi fan and the LoRa label never move when a ~ comes
-// or goes (#64)
-static void fix_clock_width(void) {
+// As wide as the widest text it shows, right-aligned: the digits never move when a ~ comes or goes (#64), and the
+// centred box keeps its place (#104)
+static int32_t text_width(char const *text) {
     lv_point_t size;
-    lv_text_get_size(&size, "~00:00", lichen_font(LICHEN_FONT_SMALL), 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    lv_obj_set_width(clock_label, size.x);
+    lv_text_get_size(&size, text, lichen_font(LICHEN_FONT_SMALL), 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return size.x;
+}
+
+static int32_t fix_clock_width(void) {
+    int32_t w = text_width("~00:00");
+    lv_obj_set_width(clock_label, w);
     lv_label_set_long_mode(clock_label, LV_LABEL_LONG_MODE_CLIP);
     lv_obj_set_style_text_align(clock_label, LV_TEXT_ALIGN_RIGHT, 0);
+    return w;
 }
 
 // "C6: recovering 2/3" in amber, "C6: down (no answer)" in red, hidden while the C6 is up (#14 T-B)
@@ -187,22 +195,16 @@ static void show_c6(void) {
     bool trouble = shell_sources.c6_trouble && shell_sources.c6_trouble(state, sizeof(state));
     if (!trouble) {
         lv_obj_set_hidden(c6_label, true);
-        if (lora_arrows) {
-            lv_obj_set_hidden(lora_arrows, false);
-        }
         return;
     }
     snprintf(text, sizeof(text), "C6: %s", state);
     if (strcmp(lv_label_get_text(c6_label), text) != 0) {
+        lv_obj_set_width(c6_label, LV_MIN(text_width(text), c6_max_w));
         lv_label_set_text(c6_label, text);
         bool down = strncmp(state, "down", 4) == 0;
         lv_obj_set_style_text_color(c6_label, lv_color_hex(down ? THEME_LINK_RED : THEME_AMBER), 0);
     }
     lv_obj_set_hidden(c6_label, false);
-    // No traffic while the C6 is away, and the long C6 text needs the room at 720 px
-    if (lora_arrows) {
-        lv_obj_set_hidden(lora_arrows, true);
-    }
 }
 
 static void refresh(lv_timer_t *timer) {
@@ -217,6 +219,19 @@ static void refresh(lv_timer_t *timer) {
     show_lora(lora_look(shell_sources.lora_up && shell_sources.lora_up()));
 }
 
+#define BAR_PAD    24
+#define LEFT_GAP   12
+#define LOGO_PX    16
+#define CLOCK_GAP  16 // the least room between the C6 text and the clock
+
+// From the end of the wordmark to CLOCK_GAP before the centred clock: the C6 label's widest. Measured, so the clock
+// and the right group never move however long the C6 state text gets (#104).
+static int32_t c6_room(lv_obj_t *word, int32_t clock_w) {
+    int32_t half  = lv_display_get_horizontal_resolution(lv_obj_get_display(word)) / 2;
+    int32_t taken = BAR_PAD + LOGO_PX + LEFT_GAP + text_width(lv_label_get_text(word)) + LEFT_GAP;
+    return LV_MAX(half - clock_w / 2 - CLOCK_GAP - taken, 0);
+}
+
 lv_obj_t *status_bar_create(lv_obj_t *parent) {
     lv_obj_t *bar = lv_obj_create(parent);
     lv_obj_remove_style_all(bar);
@@ -227,31 +242,37 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_set_style_border_width(bar, 2, 0);
     lv_obj_set_style_border_color(bar, lv_color_hex(THEME_RULE), 0);
-    lv_obj_set_style_pad_hor(bar, 24, 0);
+    lv_obj_set_style_pad_hor(bar, BAR_PAD, 0);
     lv_obj_set_style_text_font(bar, lichen_font(LICHEN_FONT_SMALL), 0);
     lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_scrollable(bar, false);
     lv_obj_set_clickable(bar, false);
 
-    lv_obj_t *left = add_row(bar, 12);
-    logo_create(left, 16);
-    add_text(left, "lichen", THEME_DIM);
-
-    lv_obj_t *right = add_row(bar, 28);
-    c6_label        = add_text(right, "", THEME_AMBER);
+    lv_obj_t *left = add_row(bar, LEFT_GAP);
+    logo_create(left, LOGO_PX);
+    lv_obj_t *word = add_text(left, "lichen", THEME_DIM);
+    c6_label       = add_text(left, "", THEME_AMBER);
+    lv_label_set_long_mode(c6_label, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_hidden(c6_label, true);
-    clock_label     = add_text(right, "--:--", THEME_DIM);
-    fix_clock_width();
-    lv_obj_t *wifi = add_row(right, 6);
-    wifi_label     = add_text(wifi, "Wi-Fi", THEME_DIM);
+
+    clock_label     = add_text(bar, "--:--", THEME_DIM);
+    int32_t clock_w = fix_clock_width();
+    lv_obj_add_flag(clock_label, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_align(clock_label, LV_ALIGN_CENTER, 0, 0);
+    c6_max_w = c6_room(word, clock_w);
+
+    // Right-aligned by the bar's SPACE_BETWEEN; about 50 px stay free to the clock for a notification dot (#62)
+    lv_obj_t *right = add_row(bar, 28);
+    lv_obj_t *wifi  = add_row(right, 6);
+    wifi_label      = add_text(wifi, "Wi-Fi", THEME_DIM);
     wifi_fan_create(wifi);
     lv_obj_t *lora = add_row(right, 6);
     lora_label     = add_text(lora, "LoRa", THEME_DIM);
     if (shell_sources.lora_counts) {
-        lora_arrows = add_row(lora, 2);
-        add_chevron(lora_arrows, &tx_chevron, LV_SYMBOL_UP);
-        add_chevron(lora_arrows, &rx_chevron, LV_SYMBOL_DOWN);
+        lv_obj_t *arrows = add_row(lora, 2); // the TX/RX chevrons (#29)
+        add_chevron(arrows, &tx_chevron, LV_SYMBOL_UP);
+        add_chevron(arrows, &rx_chevron, LV_SYMBOL_DOWN);
         poll_lora_activity(NULL); // primes both: the packets heard before the bar existed do not flash
         lv_timer_create(poll_lora_activity, 100, NULL);
     }
