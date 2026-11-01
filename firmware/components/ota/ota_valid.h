@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // Pure logic, no ESP headers: also built into the host tests.
@@ -20,3 +21,8 @@ bool ota_should_mark_valid(bool pending_verify, bool ui_up, bool c6_up, uint32_t
 // A trial image whose C6 link never came up has no Wi-Fi, so nobody can fix it over the air: restart so the bootloader
 // boots the previous image (#36). With the C6 up (UI down only) Wi-Fi works and the image stays on trial.
 bool ota_should_roll_back_now(bool pending_verify, bool c6_up, uint32_t uptime_s);
+
+// The first bytes of an app image (esp_image_header_t, 24 bytes): checked before a slot is erased, so a wrong file or
+// another chip's image never costs the fallback slot (#5)
+#define OTA_IMAGE_HEADER_LEN 24
+bool ota_image_header_ok(uint8_t const *head, size_t len, uint16_t chip_id);

@@ -25,6 +25,7 @@
 #include "ota_path.h"
 #include "ota_pieces.h"
 #include "ota_proto.h"
+#include "ota_valid.h"
 #include "miniz.h" // the ROM inflater
 #include "settings_store.h"
 #include "sha256.h"
@@ -419,12 +420,29 @@ static bool install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t h
     return true;
 }
 
+// esp_ota_begin refused: say why when the reason is the running image still being on trial (#5)
+static void respond_begin_failed(int fd, esp_err_t err) {
+    esp_ota_img_states_t state;
+    if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
+        state == ESP_OTA_IMG_PENDING_VERIFY) {
+        respond(fd, 503, "the running image is still on trial: try again once it is marked valid (%d s after boot)",
+                OTA_VALID_AFTER_S);
+    } else {
+        respond(fd, 503, "couldn't start an OTA session (%s)", esp_err_to_name(err));
+    }
+}
+
 // Install a checked firmware image (received whole in memory) into the other app slot
 static bool finish_firmware(int fd, uint8_t const *data, size_t len, long long sent) {
+    if (!ota_image_header_ok(data, len, CONFIG_IDF_FIRMWARE_CHIP_ID)) {
+        respond(fd, 422, "not an app image for this chip, nothing erased or installed");
+        return false;
+    }
     esp_partition_t const *slot = esp_ota_get_next_update_partition(NULL);
     esp_ota_handle_t       handle;
-    if (!slot || esp_ota_begin(slot, len, &handle) != ESP_OK) {
-        respond(fd, 503, "couldn't start an OTA session");
+    esp_err_t              err  = slot ? esp_ota_begin(slot, len, &handle) : ESP_ERR_NOT_FOUND;
+    if (err != ESP_OK) {
+        respond_begin_failed(fd, err);
         return false;
     }
     if (esp_ota_write(handle, data, len) != ESP_OK) {
@@ -515,6 +533,12 @@ static void handle_firmware(int fd, ota_request_t const *req, uint8_t const *pre
     free(mem.data);
 }
 
+// A push onto a directory name (e.g. FLASH0:c6) must not replace the directory (#5)
+static bool is_directory(char const *posix_path) {
+    struct stat st;
+    return stat(posix_path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
 static void handle_file(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
     char path[OTA_PATH_MAX + 16];
     if (!file_allowed()) {
@@ -531,6 +555,10 @@ static void handle_file(int fd, ota_request_t const *req, uint8_t const *pre, si
     }
     if (req->content_length > FILE_MAX) {
         respond(fd, 413, "file is larger than %d bytes", FILE_MAX);
+        return;
+    }
+    if (is_directory(path)) {
+        respond(fd, 409, "%s is a directory, nothing written", req->path);
         return;
     }
     // A plain body has its exact size; a compressed one starts from a guess and grows (up to FILE_MAX)
@@ -581,6 +609,7 @@ static struct {
     esp_ota_handle_t       ota;
     bool                   ota_open;
     bool                   dirty; // the last attempt at the current piece wrote (part of) it: erase before the next
+    long                   last_s; // when the last piece came: an upload left half-way is dropped (piece_expire)
 } staged;
 
 // Whole cache lines, so no neighbouring allocation or DMA driver shares a line with the staging buffer (#37)
@@ -593,6 +622,18 @@ static void staged_reset(void) {
     heap_caps_free(staged.data);
     ota_pieces_clear(&staged.pieces);
     memset(&staged, 0, sizeof(staged));
+}
+
+// An upload in pieces that stopped coming holds its staging buffer (up to FILE_MAX of PSRAM), an open slot and the
+// stopped screens: give it all back after PIECE_IDLE_S without a piece (#5)
+#define PIECE_IDLE_S 300
+
+static void piece_expire(bool now) {
+    if (staged.active && (now || now_s() - staged.last_s > PIECE_IDLE_S)) {
+        ESP_LOGW(TAG, "upload in pieces abandoned at %zu of %zu bytes: dropped", staged.got, staged.total);
+        hook_end(false, false);
+        staged_reset();
+    }
 }
 
 typedef struct {
@@ -633,12 +674,32 @@ static int slot_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
 
 // Open the inactive slot for a streamed image. esp_ota_begin erases only what the first piece covers; every later
 // piece (and a resent one) is erased by stream_erase before it arrives, so no single call blocks for long.
-static bool stream_open(size_t first_len) {
-    staged.slot = esp_ota_get_next_update_partition(NULL);
-    if (!staged.slot || esp_ota_begin(staged.slot, first_len, &staged.ota) != ESP_OK) {
-        return false;
+static esp_err_t stream_open(size_t first_len) {
+    staged.slot   = esp_ota_get_next_update_partition(NULL);
+    esp_err_t err = staged.slot ? esp_ota_begin(staged.slot, first_len, &staged.ota) : ESP_ERR_NOT_FOUND;
+    staged.ota_open = err == ESP_OK;
+    return err;
+}
+
+// Make sure at least want bytes of the body are in *pre (reading them from the socket if needed), so the image header
+// can be checked before esp_ota_begin erases anything
+static uint8_t peek_buf[OTA_IMAGE_HEADER_LEN];
+
+static bool peek_body(int fd, uint8_t const **pre, size_t *pre_len, size_t want) {
+    if (*pre_len >= want) {
+        return true;
     }
-    staged.ota_open = true;
+    size_t have = *pre_len;
+    memcpy(peek_buf, *pre, have);
+    while (have < want) {
+        ssize_t n = read(fd, peek_buf + have, want - have);
+        if (n <= 0) {
+            return false;
+        }
+        have += (size_t)n;
+    }
+    *pre     = peek_buf;
+    *pre_len = have;
     return true;
 }
 
@@ -699,8 +760,10 @@ static void rehash_piece(size_t offset, size_t len, uint8_t digest[SHA256_DIGEST
     }
 }
 
-// Offset 0 starts a transfer: get its storage ready and tell the screen. False = answered already.
-static bool piece_start(int fd, ota_request_t const *req, char const *path) {
+// Offset 0 starts a transfer: get its storage ready and tell the screen. A firmware image's header is read (and
+// 100 Continue sent, *continued) before the slot is opened. False = answered already.
+static bool piece_start(int fd, ota_request_t const *req, char const *path, uint8_t const **pre, size_t *pre_len,
+                        bool *continued) {
     bool stream = req->route == OTA_ROUTE_FIRMWARE;
     staged_reset();
     if (!stream) {
@@ -724,11 +787,25 @@ static bool piece_start(int fd, ota_request_t const *req, char const *path) {
     snprintf(staged.path, sizeof(staged.path), "%s", path);
     strcpy(staged.file_sha256, req->file_sha256);
     // After hook_begin: it stops the other tasks before the slot is touched
-    if (stream && !stream_open((size_t)req->content_length)) {
-        hook_end(false, false);
-        staged_reset();
-        respond(fd, 503, "couldn't start an OTA session");
-        return false;
+    if (stream) {
+        if (req->expect_continue) {
+            send_all(fd, "HTTP/1.1 100 Continue\r\n\r\n", 25);
+            *continued = true;
+        }
+        size_t want = req->content_length < OTA_IMAGE_HEADER_LEN ? (size_t)req->content_length : OTA_IMAGE_HEADER_LEN;
+        if (!peek_body(fd, pre, pre_len, want) || !ota_image_header_ok(*pre, *pre_len, CONFIG_IDF_FIRMWARE_CHIP_ID)) {
+            hook_end(false, false);
+            staged_reset();
+            respond(fd, 422, "not an app image for this chip, nothing erased");
+            return false;
+        }
+        esp_err_t err = stream_open((size_t)req->content_length);
+        if (err != ESP_OK) {
+            hook_end(false, false);
+            staged_reset();
+            respond_begin_failed(fd, err);
+            return false;
+        }
     }
     return true;
 }
@@ -762,7 +839,7 @@ static void piece_done(int fd) {
 }
 
 // Receive one piece into its place: the staging buffer, or the slot (erased first when it is not fresh)
-static bool piece_receive(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
+static bool piece_receive(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len, bool continued) {
     bool        stream = req->route == OTA_ROUTE_FIRMWARE;
     char        sha_hex[OTA_SHA256_HEX + 1];
     flash_ctx_t flash = {.handle = staged.ota, .base = staged.got};
@@ -773,7 +850,7 @@ static bool piece_receive(int fd, ota_request_t const *req, uint8_t const *pre, 
         return false;
     }
     staged.dirty = stream; // from here on the slot holds (part of) this piece until it is verified
-    if (req->expect_continue) {
+    if (req->expect_continue && !continued) {
         send_all(fd, "HTTP/1.1 100 Continue\r\n\r\n", 25);
     }
     progress_base = (uint32_t)staged.got;
@@ -824,9 +901,14 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
         respond(fd, 400, "firmware pieces start on a 4096-byte boundary and are whole multiples of it, except the last");
         return;
     }
-    char const *path = req->route == OTA_ROUTE_FILE ? req->path : "";
+    if (req->route == OTA_ROUTE_FILE && is_directory(posix)) {
+        respond(fd, 409, "%s is a directory, nothing written", req->path);
+        return;
+    }
+    char const *path      = req->route == OTA_ROUTE_FILE ? req->path : "";
+    bool        continued = false;
     if (req->offset == 0) {
-        if (!piece_start(fd, req, path)) {
+        if (!piece_start(fd, req, path, &pre, &pre_len, &continued)) {
             return;
         }
     } else if (!staged.active || staged.route != req->route || staged.total != (size_t)req->total_size ||
@@ -839,7 +921,8 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
         respond(fd, 400, "piece runs past X-Total-Size");
         return;
     }
-    if (!piece_receive(fd, req, pre, pre_len)) {
+    staged.last_s = now_s();
+    if (!piece_receive(fd, req, pre, pre_len, continued)) {
         return;
     }
     if (staged.got < staged.total) {
@@ -1169,6 +1252,7 @@ static void serve(int ls) {
             if (errno != EAGAIN && errno != EWOULDBLOCK) {
                 vTaskDelay(pdMS_TO_TICKS(100));
             }
+            piece_expire(false);
             continue;
         }
         set_read_timeout(fd, READ_TIMEOUT_S, 0);
@@ -1202,6 +1286,7 @@ static void server_task(void *arg) {
         ESP_LOGW(TAG, "update server on port %d", OTA_PORT);
         serve(ls);
         close(ls);
+        piece_expire(true); // switched off half-way through an upload
         ESP_LOGW(TAG, "update server closed");
     }
 }

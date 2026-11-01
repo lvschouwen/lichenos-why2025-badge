@@ -14,7 +14,22 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
+static void test_image_header(void) {
+    uint8_t head[OTA_IMAGE_HEADER_LEN] = {0xE9, 5};
+    head[12] = 0x12; // ESP32-P4
+    CHECK(ota_image_header_ok(head, sizeof(head), 0x0012));
+    CHECK(!ota_image_header_ok(head, sizeof(head), 0x000D)); // a C6 badge wants a C6 image
+    CHECK(!ota_image_header_ok(head, sizeof(head) - 1, 0x0012));
+    CHECK(!ota_image_header_ok(NULL, 0, 0x0012));
+    head[0] = 0x50; // "PK": a zip, not an image
+    CHECK(!ota_image_header_ok(head, sizeof(head), 0x0012));
+    head[0]  = 0xE9;
+    head[12] = 0x0D; // a C6 image pushed to the P4
+    CHECK(!ota_image_header_ok(head, sizeof(head), 0x0012));
+}
+
 int main(void) {
+    test_image_header();
     uint32_t const settled = OTA_VALID_AFTER_S;
     CHECK(ota_should_mark_valid(true, true, true, settled));
     CHECK(ota_should_mark_valid(true, true, true, settled + 100));
