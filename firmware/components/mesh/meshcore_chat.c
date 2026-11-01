@@ -57,6 +57,12 @@ static uint32_t  hit_seq;
 static int32_t   search_from_y; // where the list was when the search began: Esc goes back there
 static bool      search_from_end; // ... or it was at the end: Esc goes to the end, messages may have come in since
 
+// Select mode (#111): Up on an empty compose line frames messages, Enter mentions the sender
+#define HINT_SELECT "Up/Down: message    Enter: reply    Esc: cancel"
+static bool     selecting;
+static size_t   sel_pos = MESH_CHAT_NO_HIT;
+static uint32_t sel_seq;
+
 static void add_line(lv_obj_t *parent, char const *text, uint32_t color) {
     lv_obj_t *label = lv_label_create(parent);
     lv_obj_set_width(label, LV_PCT(100));
@@ -95,6 +101,8 @@ static void add_message(mesh_msg_t const *m, uint32_t now, uint32_t now_epoch) {
 }
 
 static void search_apply(bool scroll);
+static void select_apply(bool scroll);
+static void select_leave(void);
 
 static void rebuild(size_t n) {
     bool at_end = lv_obj_get_scroll_bottom(list) <= 0;
@@ -114,6 +122,9 @@ static void rebuild(size_t n) {
     lv_obj_scroll_to_y(list, at_end ? LV_COORD_MAX : y, LV_ANIM_OFF);
     if (searching) {
         search_apply(false); // new rows: highlight them again, the view stays where it is
+    }
+    if (selecting) {
+        select_apply(false);
     }
 }
 
@@ -281,12 +292,110 @@ static void search_leave(bool restore) {
     }
 }
 
+// ---- select mode (#111) ---------------------------------------------------------------------------------------------
+
+// Frames message sel_pos like search's current hit. The list was rebuilt maybe: the message is found again by its seq,
+// and select mode ends when it scrolled out of the window.
+static void select_apply(bool scroll) {
+    if (selecting) {
+        sel_pos = mesh_chat_select_of_seq(copy, copy_n, sel_seq);
+        if (sel_pos == MESH_CHAT_NO_HIT) {
+            select_leave();
+            return;
+        }
+    }
+    for (size_t i = 0; i < copy_n; i++) {
+        lv_obj_t *item = lv_obj_get_child(list, (int32_t)i);
+        if (!item) {
+            break;
+        }
+        bool on = selecting && i == sel_pos;
+        lv_obj_set_style_bg_opa(item, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_opa(item, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    }
+    if (scroll && selecting) {
+        lv_obj_t *item = lv_obj_get_child(list, (int32_t)sel_pos);
+        if (item) {
+            lv_obj_update_layout(list);
+            lv_obj_scroll_to_view(item, LV_ANIM_OFF);
+        }
+    }
+}
+
+static void select_enter(void) {
+    size_t pos = mesh_chat_select_step(MESH_CHAT_NO_HIT, copy_n, -1);
+    if (selecting || searching || pos == MESH_CHAT_NO_HIT) {
+        return;
+    }
+    selecting = true;
+    sel_pos   = pos;
+    sel_seq   = copy[pos].seq;
+    set_note(HINT_SELECT, false);
+    select_apply(true);
+}
+
+// Back to typing; the compose line kept the focus all along
+static void select_leave(void) {
+    if (!selecting) {
+        return;
+    }
+    selecting = false;
+    sel_pos   = MESH_CHAT_NO_HIT;
+    select_apply(false);
+    set_default_note();
+}
+
+// Enter on someone else's channel message starts the compose line with their mention; anything else just goes back
+static void select_pick(void) {
+    char mention[MESH_NAME_MAX * 2 + 8];
+    bool can = !dm_mode && sel_pos < copy_n && mesh_chat_mention(&copy[sel_pos], mention, sizeof(mention));
+    bool own = sel_pos < copy_n && copy[sel_pos].outgoing;
+    select_leave();
+    if (!can) {
+        if (!dm_mode && !own) {
+            set_note("Cannot mention that name", true);
+        }
+        return;
+    }
+    char const *draft = lv_textarea_get_text(ta);
+    if (!mesh_chat_mention_fits(draft, mention, text_max())) {
+        set_note("Too long to mention", true);
+        return;
+    }
+    lv_textarea_set_cursor_pos(ta, 0);
+    lv_textarea_add_text(ta, mention);
+    lv_textarea_set_cursor_pos(ta, LV_TEXTAREA_CURSOR_LAST);
+}
+
+// Keys while selecting: Up/Down step, Enter picks, everything else is swallowed (Esc is the shell's: on_esc)
+static void select_key(uint32_t key) {
+    if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
+        size_t pos = mesh_chat_select_step(sel_pos, copy_n, key == LV_KEY_UP ? -1 : 1);
+        if (pos == MESH_CHAT_NO_HIT) {
+            select_leave();
+            return;
+        }
+        sel_pos = pos;
+        sel_seq = copy[pos].seq;
+        select_apply(true);
+    } else if (key == LV_KEY_ENTER) {
+        select_pick();
+    }
+}
+
 // The compose line sees a key before the textarea does: "/" on an empty line starts a search and never reaches the
 // draft
 static void on_compose_key(lv_event_t *e) {
-    if (lv_event_get_key(e) == '/' && !lv_textarea_get_text(ta)[0]) {
+    uint32_t key = lv_event_get_key(e);
+    if (selecting) {
+        lv_event_stop_processing(e);
+        select_key(key);
+    } else if (key == '/' && !lv_textarea_get_text(ta)[0]) {
         lv_event_stop_processing(e);
         search_enter();
+    } else if (key == LV_KEY_UP && !lv_textarea_get_text(ta)[0] && copy_n) {
+        lv_event_stop_processing(e); // with a draft Up keeps scrolling the list (on_key)
+        select_enter();
     }
 }
 
@@ -319,6 +428,10 @@ static void on_focus_move(lv_group_t *group) {
         return;
     }
     if (tab_hop && lv_group_get_focused(group) == tab_hop) {
+        if (selecting) {
+            lv_group_focus_obj(ta); // no retry while a message is framed
+            return;
+        }
         retry_failed();
         lv_group_focus_obj(ta); // calls this again, with the compose line focused: a no-op
     }
@@ -332,9 +445,13 @@ static void on_key(lv_event_t *e) {
     }
 }
 
-// Esc leaves a search first (#48), then clears a draft (#57), then leaves
+// Esc leaves select mode or a search first (#48), then clears a draft (#57), then leaves
 static bool on_esc(void *arg) {
     (void)arg;
+    if (selecting) {
+        select_leave();
+        return true;
+    }
     if (searching) {
         search_leave(true);
         return true;
@@ -361,6 +478,8 @@ static void on_delete(lv_event_t *e) {
     copy = NULL;
     list = ta = counter = note = tab_hop = search_line = NULL;
     searching = false;
+    selecting = false;
+    sel_pos   = MESH_CHAT_NO_HIT;
 }
 
 static void style_ta(void) {
@@ -382,7 +501,9 @@ static void style_ta(void) {
 // The search key (●, #79), as "/" on an empty compose line
 static void on_search(void *arg) {
     (void)arg;
-    search_enter(); // does nothing while a search is open
+    if (!selecting) {
+        search_enter(); // does nothing while a search is open
+    }
 }
 
 static lv_obj_t *build_chat(void) {
@@ -461,6 +582,8 @@ static lv_obj_t *build_chat(void) {
         lv_group_set_focus_cb(group, on_focus_move); // the screen's own group; keeps the focus on a search (#48)
     }
     searching = false;
+    selecting = false;
+    sel_pos   = MESH_CHAT_NO_HIT;
     copy_n           = 0;
     copy             = heap_caps_malloc(SHOW_MESSAGES * sizeof(*copy), MALLOC_CAP_SPIRAM);
     shown_generation = UINT32_MAX;

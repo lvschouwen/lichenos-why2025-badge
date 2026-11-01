@@ -192,3 +192,51 @@ void mesh_chat_search_line(char const *query, size_t pos, size_t n_hits, char *o
         snprintf(out, cap, "Search: %s_  (%u of %u)", query, (unsigned)(n_hits - pos), (unsigned)n_hits);
     }
 }
+
+size_t mesh_chat_select_step(size_t pos, size_t n, int dir) {
+    if (n == 0 || (dir > 0 && pos >= n)) {
+        return MESH_CHAT_NO_HIT;
+    }
+    if (pos >= n) { // not selecting: Up (or anything but Down) frames the newest
+        return n - 1;
+    }
+    if (dir < 0) {
+        return pos == 0 ? 0 : pos - 1;
+    }
+    return pos + 1 == n ? MESH_CHAT_NO_HIT : pos + 1;
+}
+
+size_t mesh_chat_select_of_seq(mesh_msg_t const *msgs, size_t n, uint32_t seq) {
+    for (size_t i = 0; i < n; i++) {
+        if (msgs[i].seq == seq) {
+            return i;
+        }
+    }
+    return MESH_CHAT_NO_HIT;
+}
+
+bool mesh_chat_mention(mesh_msg_t const *m, char *out, size_t cap) {
+    if (cap) {
+        out[0] = '\0';
+    }
+    char const *sep = m && !m->outgoing ? strstr(m->text, ": ") : NULL;
+    if (!sep || sep == m->text) {
+        return false;
+    }
+    size_t len = (size_t)(sep - m->text);
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)m->text[i];
+        if (c == '[' || c == ']' || c < 0x20 || c == 0x7f) {
+            return false;
+        }
+    }
+    if (len + 4 + 1 > cap) { // "@[" + name + "] "
+        return false;
+    }
+    snprintf(out, cap, "@[%.*s] ", (int)len, m->text);
+    return true;
+}
+
+bool mesh_chat_mention_fits(char const *draft, char const *mention, size_t max_bytes) {
+    return strlen(draft ? draft : "") + strlen(mention ? mention : "") <= max_bytes;
+}

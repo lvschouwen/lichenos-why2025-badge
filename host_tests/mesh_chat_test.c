@@ -99,6 +99,48 @@ static void search_checks(void) {
     CHECK(strlen(line) == 7);
 }
 
+// Select mode (#111)
+static void select_checks(void) {
+    size_t N = MESH_CHAT_NO_HIT;
+    CHECK(mesh_chat_select_step(N, 0, -1) == N);  // nothing to select
+    CHECK(mesh_chat_select_step(N, 4, -1) == 3);  // Up frames the newest
+    CHECK(mesh_chat_select_step(3, 4, -1) == 2);
+    CHECK(mesh_chat_select_step(0, 4, -1) == 0);  // clamps at the oldest
+    CHECK(mesh_chat_select_step(1, 4, 1) == 2);
+    CHECK(mesh_chat_select_step(3, 4, 1) == N);   // Down past the newest: back to typing
+    CHECK(mesh_chat_select_step(N, 4, 1) == N);
+    CHECK(mesh_chat_select_step(7, 4, -1) == 3);  // a stale position frames the newest
+
+    static mesh_msg_t m[3];
+    memset(m, 0, sizeof(m));
+    m[0].seq = 10, m[1].seq = 11, m[2].seq = 15;
+    CHECK(mesh_chat_select_of_seq(m, 3, 11) == 1);
+    CHECK(mesh_chat_select_of_seq(m, 3, 12) == N);
+
+    char out[48];
+    mesh_msg_t one;
+    memset(&one, 0, sizeof(one));
+    strcpy(one.text, "Alice Smith: hi: there");
+    CHECK(mesh_chat_mention(&one, out, sizeof(out)) && strcmp(out, "@[Alice Smith] ") == 0); // spaces; first ": " ends the name
+    strcpy(one.text, "\xf0\x9f\x8c\xb2 Pine: hi");
+    CHECK(mesh_chat_mention(&one, out, sizeof(out)) && strcmp(out, "@[\xf0\x9f\x8c\xb2 Pine] ") == 0); // emoji
+    strcpy(one.text, "bob[2]: hi");
+    CHECK(!mesh_chat_mention(&one, out, sizeof(out)) && out[0] == 0); // brackets would break the mention
+    strcpy(one.text, ": hi");
+    CHECK(!mesh_chat_mention(&one, out, sizeof(out)));
+    strcpy(one.text, "no separator");
+    CHECK(!mesh_chat_mention(&one, out, sizeof(out)));
+    strcpy(one.text, "bob: hi");
+    CHECK(!mesh_chat_mention(&one, out, 7));  // "@[bob] " is 7 chars + NUL
+    CHECK(mesh_chat_mention(&one, out, 8));
+    one.outgoing = 1;
+    strcpy(one.text, "me: hi");
+    CHECK(!mesh_chat_mention(&one, out, sizeof(out))); // never our own
+    CHECK(mesh_chat_mention_fits("", "@[bob] ", 7));
+    CHECK(!mesh_chat_mention_fits("x", "@[bob] ", 7));
+    CHECK(mesh_chat_mention_fits(NULL, "@[bob] ", 100));
+}
+
 int main(void) {
     char s[32];
     CHECK(status(0, MESH_OUT_FAILED, 0, s) == MESH_STATUS_NONE && s[0] == '\0'); // incoming: no state
@@ -192,6 +234,7 @@ int main(void) {
         CHECK(strcmp(sub, "no messages yet") == 0);
     }
     search_checks();
+    select_checks();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

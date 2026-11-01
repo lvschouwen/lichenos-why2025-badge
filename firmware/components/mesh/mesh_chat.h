@@ -67,6 +67,23 @@ size_t mesh_chat_rehit(mesh_msg_t const *msgs, size_t n, char const *query, uint
 // "Search: foo_  no match", or "Search: _  type to search" for an empty query
 void mesh_chat_search_line(char const *query, size_t pos, size_t n_hits, char *out, size_t cap);
 
+// Select mode (#111): Up on an empty compose line frames messages one by one, Enter mentions the sender. pos indexes the
+// n shown messages (oldest first), MESH_CHAT_NO_HIT is "not selecting". dir -1 is Up (older), +1 is Down (newer).
+// Up from NO_HIT frames the newest, Up at the oldest stays there (no wrap, unlike search), Down past the newest gives
+// MESH_CHAT_NO_HIT: back to typing. NO_HIT stays NO_HIT when n is 0 or on Down.
+size_t mesh_chat_select_step(size_t pos, size_t n, int dir);
+
+// Where the message with this seq is among msgs, MESH_CHAT_NO_HIT when it is gone (the window moved on)
+size_t mesh_chat_select_of_seq(mesh_msg_t const *msgs, size_t n, uint32_t seq);
+
+// MeshCore's mention of a channel message's sender, "@[name] ", from the "name: text" the message is stored as. False
+// (out empty) for an outgoing message, a missing/empty name, a name with '[' or ']' or a control character (the mention
+// could not be told apart from its brackets), or when it does not fit cap.
+bool mesh_chat_mention(mesh_msg_t const *m, char *out, size_t cap);
+
+// Does mention + the draft stay within max_bytes (the compose line's limit)?
+bool mesh_chat_mention_fits(char const *draft, char const *mention, size_t max_bytes);
+
 #ifdef __cplusplus
 }
 #endif
