@@ -202,8 +202,8 @@ static char const *compact_journal(work_t *w, int *err) {
     if (scan.crypto_error) {
         return "journal crypto failed";
     }
-    if (scan.unreadable) {
-        return "journal unreadable"; // it was readable at boot: the file was replaced meanwhile
+    if (!mesh_hist_compact_safe(&scan)) {
+        return "journal does not match the open keys"; // replaced or damaged since boot: left as it is
     }
     char const *bad = NULL;
     if (scan.bad_seen && (uint64_t)st.st_size - scan.first_bad > BAD_KEEP_FROM) {

@@ -448,6 +448,7 @@ static bool scan_head(mesh_hist_scan_t *out, mesh_hist_crypt_t *c, mesh_hist_rec
         }
         if (memcmp(rec->salt, c->salt, MESH_HIST_SALT) != 0 || !same16(want, rec->check)) {
             out->auth_failures++;
+            out->foreign_head = true;
             return true;
         }
     } else if (!c || !mesh_hist_crypt_open(c, rec->salt, rec->check)) {
@@ -460,6 +461,7 @@ static bool scan_head(mesh_hist_scan_t *out, mesh_hist_crypt_t *c, mesh_hist_rec
     }
     out->head = true;
     out->heads++;
+    out->heads_matching++; // opened the keys, or repeats the HEAD that did
     return true;
 }
 
@@ -1039,8 +1041,8 @@ void mesh_hist_compact(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hi
     }
     mesh_hist_scan(read, rctx, buf, crypt, compact_rec, &c, &scan);
     st->auth_failures = scan.auth_failures;
-    if (scan.crypto_error || scan.unreadable || crypt->error) {
-        st->ok = false; // never rewrite a journal after a primitive failed: records would go missing
+    if (!mesh_hist_compact_safe(&scan) || crypt->error) {
+        st->ok = false; // never rewrite a journal that is not this one, or after a primitive failed
     }
     if (st->ok && c.out_len && !write(wctx, out, c.out_len)) {
         st->ok = false;
@@ -1086,4 +1088,11 @@ int mesh_hist_aside_slot(bool have_0, bool have_1) {
 
 int mesh_hist_newest_slot(bool have_0, bool have_1) {
     return have_1 ? 1 : have_0 ? 0 : -1;
+}
+
+bool mesh_hist_compact_safe(mesh_hist_scan_t const *s) {
+    if (s->crypto_error || s->unreadable || s->foreign_head || s->heads_matching == 0) {
+        return false;
+    }
+    return (uint64_t)s->auth_failures * 10 <= s->records; // more failing records than that: not our journal any more
 }

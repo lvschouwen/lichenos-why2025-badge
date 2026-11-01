@@ -904,6 +904,34 @@ static void fault_checks(void) {
     CHECK(s.head && got_n == 2);
 }
 
+// A compaction over a file that is not the open keys' journal refuses and writes nothing
+static void compact_refuse_checks(void) {
+    mesh_chat_key_t ck = chan_key("#a");
+    static uint8_t  buf[MESH_HIST_SCAN_BUF];
+    uint8_t         stage[MESH_HIST_REC_MAX * 2];
+    mesh_hist_table_t   t;
+    mesh_hist_compact_t st;
+    // Another journal's HEAD (swapped card): with the keys open, its records fail and its HEAD is foreign
+    mesh_hist_crypt_t other = kc;
+    CHECK(mesh_hist_crypt_new(&other));
+    file_len          = mesh_hist_encode_head(&other, file, sizeof(file));
+    mesh_hist_rec_t r = msg_rec(&ck, 1, "x");
+    file_len += mesh_hist_encode(&r, &other, file + file_len, sizeof(file) - file_len);
+    mesh_hist_table_init(&t, slots, 16);
+    mem_rd_t rd = {.p = file, .len = file_len};
+    out_len     = 0;
+    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    CHECK(!st.ok);
+    // Our records but no HEAD left at all
+    file_len = 0;
+    append(&r);
+    append(&r);
+    rd      = (mem_rd_t){.p = file, .len = file_len};
+    out_len = 0;
+    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    CHECK(!st.ok);
+}
+
 // The boot's decisions on its files
 static void plan_checks(void) {
     struct {
@@ -935,6 +963,24 @@ static void plan_checks(void) {
     CHECK(mesh_hist_load_plan(true, 70000, &broken, true) == MESH_HIST_LOAD_ASIDE);  // never truncated
     CHECK(mesh_hist_load_plan(true, 900, &foreign, false) == MESH_HIST_LOAD_OFF);    // both log.old names taken
     CHECK(mesh_hist_load_plan(true, 900, &crypto, true) == MESH_HIST_LOAD_OFF);
+    // Compaction only over the journal the open keys belong to
+    struct {
+        uint32_t heads_matching, auth, records;
+        bool     foreign, crypto, unreadable, safe;
+    } const comp[] = {
+        {1, 0, 100, false, false, false, true},  {3, 10, 100, false, false, false, true}, // 10 %: still ours
+        {1, 11, 100, false, false, false, false},                                         // more: not ours any more
+        {0, 0, 100, false, false, false, false},                                          // no matching HEAD
+        {1, 1, 100, true, false, false, false},                                           // a foreign HEAD
+        {1, 0, 100, false, true, false, false},  {1, 0, 100, false, false, true, false},
+    };
+    for (size_t i = 0; i < sizeof(comp) / sizeof(comp[0]); i++) {
+        mesh_hist_scan_t c;
+        memset(&c, 0, sizeof(c));
+        c.heads_matching = comp[i].heads_matching, c.auth_failures = comp[i].auth, c.records = comp[i].records;
+        c.foreign_head = comp[i].foreign, c.crypto_error = comp[i].crypto, c.unreadable = comp[i].unreadable;
+        CHECK(mesh_hist_compact_safe(&c) == comp[i].safe);
+    }
     CHECK(mesh_hist_aside_slot(false, false) == 0 && mesh_hist_aside_slot(true, false) == 1 &&
           mesh_hist_aside_slot(true, true) == -1 && mesh_hist_aside_slot(false, true) == 0);
     CHECK(mesh_hist_newest_slot(true, true) == 1 && mesh_hist_newest_slot(true, false) == 0 &&
@@ -952,6 +998,7 @@ int main(void) {
     nonce_checks();
     fault_checks();
     plan_checks();
+    compact_refuse_checks();
     codec_checks();
     unknown_type_checks();
     scan_checks();

@@ -136,6 +136,8 @@ typedef struct {
     uint32_t auth_failures; // records whose tag did not match: dropped
     bool     crypto_error;  // a primitive failed (HEAD check or a record): stopped, no verdict on the journal
     uint32_t heads;         // HEADs taken (the first and its repeats)
+    uint32_t heads_matching; // HEADs of the open keys' journal (the one that opened them, or its repeats)
+    bool     foreign_head;   // a HEAD of another journal while the keys were open
     uint32_t before_head;   // records before the first good HEAD, not read in this pass (no keys yet)
 } mesh_hist_scan_t;
 
@@ -277,6 +279,10 @@ typedef enum {
 } mesh_hist_load_t;
 // log.bin after the HEAD search (s): exists and size from stat; aside_free: a log.old name is free
 mesh_hist_load_t mesh_hist_load_plan(bool exists, uint64_t size, mesh_hist_scan_t const *s, bool aside_free);
+// A journal may be rewritten (compacted) only when the scan shows it is the one the open keys belong to: a matching
+// HEAD, no foreign HEAD, no crypto failure, and at most 10 % of its records failing their tag. Else it was swapped or
+// damaged since boot, and a compaction would keep nothing of it.
+bool mesh_hist_compact_safe(mesh_hist_scan_t const *s);
 // Copies kept aside (log.old, log.bad): 0 for the plain name, 1 for ".1", -1 when both exist (never overwritten)
 int mesh_hist_aside_slot(bool have_0, bool have_1);
 // The newer of the two copies (".1" is made only when the plain name exists): 1, 0, or -1 for none
