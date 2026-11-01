@@ -1,0 +1,78 @@
+Lichen patch for ESP-IDF v6.1 (lichenos-why2025-badge #94): a 120 MHz PSRAM clock for the ESP32-P4.
+
+The IDF offers 20/80/200/250 MHz. On this badge 200 MHz flips bit 8/9 of PSRAM words and 80 MHz is clean but slow
+(#89, #93); 120 MHz = MPLL 480 MHz / 4 sits in between. The divider must be even: psram_ctrlr_ll_set_bus_clock gives
+an odd divider a 33 % duty clock, which the DDR PSRAM cannot follow (133 MHz = 400 / 3 ends in "PSRAM chip is not
+connected" at boot). The latency codes the IDF programs for 80 MHz (LC5 / WLC5) are the datasheet's codes up to
+133 MHz (APS256XXN Tables 5 and 15), so only the PLL constants change; the boot-time DQS/delay-line tuning stays on.
+
+The three files are Espressif's, Apache-2.0 (see their SPDX headers); each hunk carries a "Modified by Lichen" note
+as the license asks. Apply to the IDF checkout that BADGE_IDF_PATH points at:
+
+    git -C ~/esp/esp-idf-v6.1 apply "$PWD/tools/idf-patches/0001-esp32p4-psram-120mhz.patch"
+
+firmware/build.sh refuses to build a CONFIG_SPIRAM_SPEED_120M=y configuration against an unpatched IDF (Kconfig would
+drop the unknown symbol and silently fall back to 200 MHz). To go back to a stock IDF: git -C <idf> checkout -- <files>.
+
+diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_tuning_configs.h b/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_tuning_configs.h
+index 4d599c6274..870ea23014 100644
+--- a/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_tuning_configs.h
++++ b/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_tuning_configs.h
+@@ -26,6 +26,10 @@ extern "C" {
+ #elif CONFIG_SPIRAM_SPEED_200M
+ #define MSPI_TIMING_PSRAM_NEEDS_TUNING      1
+ #define MSPI_TIMING_MPLL_FREQ_MHZ           400
++#elif CONFIG_SPIRAM_SPEED_120M
++// Modified by Lichen (lichenos-why2025-badge #94): 120 MHz = MPLL 480 / 4, tuned at boot like the other speeds
++#define MSPI_TIMING_PSRAM_NEEDS_TUNING      1
++#define MSPI_TIMING_MPLL_FREQ_MHZ           480
+ #elif CONFIG_SPIRAM_SPEED_80M
+ #define MSPI_TIMING_PSRAM_NEEDS_TUNING      1
+ #define MSPI_TIMING_MPLL_FREQ_MHZ           320
+diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/esp_psram/device/esp_psram_impl_ap_hex.c
+index 8219f1c528..dbd0eda5c9 100644
+--- a/components/esp_psram/device/esp_psram_impl_ap_hex.c
++++ b/components/esp_psram/device/esp_psram_impl_ap_hex.c
+@@ -40,6 +40,8 @@
+ #define AP_HEX_PSRAM_RD_LATENCY            4
+ #define AP_HEX_PSRAM_WR_LATENCY            1
+ #else
++// 120 MHz (Modified by Lichen, lichenos-why2025-badge #94) uses these too: LC5 / WLC5 are the datasheet's codes up to
++// 133 MHz (APS256XXN Tables 5 and 15)
+ #define AP_HEX_PSRAM_RD_DUMMY_BITLEN       (2*(10-1))
+ #define AP_HEX_PSRAM_RD_REG_DUMMY_BITLEN   (2*(5-1))
+ #define AP_HEX_PSRAM_WR_DUMMY_BITLEN       (2*(5-1))
+@@ -56,6 +58,9 @@
+ 
+ #if CONFIG_SPIRAM_SPEED_80M
+ #define AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ 320
++#elif CONFIG_SPIRAM_SPEED_120M
++// Modified by Lichen (lichenos-why2025-badge #94): 480 / 4 = 120 MHz, an even divider as for every stock speed
++#define AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ 480
+ #elif CONFIG_SPIRAM_SPEED_250M
+ #define AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ 500
+ #else
+diff --git a/components/esp_psram/esp32p4/Kconfig.spiram b/components/esp_psram/esp32p4/Kconfig.spiram
+index 3dd2074bf3..f3150bf586 100644
+--- a/components/esp_psram/esp32p4/Kconfig.spiram
++++ b/components/esp_psram/esp32p4/Kconfig.spiram
+@@ -37,6 +37,11 @@ menu "PSRAM config"
+         config SPIRAM_SPEED_200M
+             bool "200MHz clock speed"
+ 
++        # Modified by Lichen (lichenos-why2025-badge #94): 120 MHz = MPLL 480 / 4 (the divider must be even: an odd one
++        # gives the DDR bus a 33 % duty clock and the chip is not found); the 80 MHz latency codes are good to 133 MHz
++        config SPIRAM_SPEED_120M
++            bool "120MHz clock speed (Lichen patch)"
++
+         config SPIRAM_SPEED_80M
+             bool "80MHz clock speed"
+ 
+@@ -49,6 +54,7 @@ menu "PSRAM config"
+         default 20 if SPIRAM_SPEED_20M
+         default 80 if SPIRAM_SPEED_80M
+         default 100 if SPIRAM_SPEED_100M
++        default 120 if SPIRAM_SPEED_120M
+         default 200 if SPIRAM_SPEED_200M
+         default 250 if SPIRAM_SPEED_250M
+ 

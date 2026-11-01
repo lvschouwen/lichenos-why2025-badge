@@ -22,11 +22,14 @@ CONFIG_SPIRAM=y
 # a heap canary flipped 1 s after it was written). At 80 MHz the same memory is clean with no quarantine. Cost: PSRAM
 # reads ~2x slower (the UI feels fine; numbers in #93), no internal RAM (the 12 KB once blamed on it were the c6link
 # supervisor's task stacks, #14). psram_guard stays as the watchdog (canaries + boot check, #93); the quarantine
-# machinery of #86 was removed in #93 (last commit with it: 7392597). Speeds between 80 and 200 are not a Kconfig
-# choice: PSRAM clock = MPLL / integer divider, see #93.
+# machinery of #86 was removed in #93 (last commit with it: 7392597).
+# 120 MHz trial since 2026-11-01 (#94): not an IDF option; tools/idf-patches/0001-esp32p4-psram-120mhz.patch adds it
+# (MPLL 480 / 4; the 80 MHz latency codes are good to 133 MHz); build.sh refuses to build without the patch. 133 MHz
+# (400 / 3) does not work: an odd divider gives the DDR bus a 33 % duty clock and the chip is not found at boot. If the
+# bit flips come back (`fw psram` canaries, `ui_check: FOUND`, CORRUPT HEAP), go back to CONFIG_SPIRAM_SPEED_80M=y.
 # No ECC: on P4 v1.0 it breaks (esp-idf #17855, OTA; here it crash-looped until power off). A mode change must never
 # go out over Wi-Fi without someone at the badge to power-cycle it.
-CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_SPEED_120M=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_CACHE_L2_CACHE_256KB=y

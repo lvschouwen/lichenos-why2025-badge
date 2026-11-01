@@ -5,8 +5,9 @@ the WHY2025 badge (lean firmware, #61); MeshCore is its first app (#67).
 
 ## Two chips
 
-**P4 (Lichen):** dual-core RISC-V at 360 MHz (rev v1.0 silicon), 32 MB PSRAM at 80 MHz (at 200 MHz this board flips
-bits in PSRAM words, #89/#93; `fw psram` watches it with canaries), 16 MB flash.
+**P4 (Lichen):** dual-core RISC-V at 360 MHz (rev v1.0 silicon), 32 MB PSRAM at 120 MHz (a patched IDF option, #94;
+at 200 MHz this board flips bits in PSRAM words, #89/#93, 80 MHz is the known-clean fallback; `fw psram` watches it
+with canaries), 16 MB flash.
 - Runs Lichen, the apps (MeshCore included, #33 option 1) and all UI.
 - Owns the display (ST7703, MIPI DSI, 720×720, shown rotated 90°), the keyboard (TCA8418, I2C), the sensors (BMI270,
   BME690, same I2C bus), the SD card and the flash (two 4 MiB app slots with rollback, FAT `/storage`).

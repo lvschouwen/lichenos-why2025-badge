@@ -26,6 +26,15 @@ for arg in "$@"; do
     esac
 done
 
+# PSRAM at 120 MHz (#94) is not an IDF option: it needs tools/idf-patches/ applied to the IDF checkout. Without it
+# Kconfig would drop the unknown symbol and fall back to the 200 MHz default, which flips bits on this badge.
+if grep -q '^CONFIG_SPIRAM_SPEED_120M=y' "$here/sdkconfig.defaults" &&
+   ! grep -q 'SPIRAM_SPEED_120M' "$IDF_DIR/components/esp_psram/esp32p4/Kconfig.spiram"; then
+    echo "sdkconfig.defaults asks for PSRAM at 120 MHz but $IDF_DIR is not patched for it:" >&2
+    echo "  git -C $IDF_DIR apply $repo/tools/idf-patches/0001-esp32p4-psram-120mhz.patch" >&2
+    exit 1
+fi
+
 # shellcheck disable=SC1091
 . "$IDF_DIR/export.sh" >/dev/null
 

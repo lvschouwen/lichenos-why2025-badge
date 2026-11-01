@@ -46,8 +46,12 @@ Lichen needs exactly ESP-IDF 6.1. Keep a 6.1 checkout next to your usual one and
 git clone --recurse-submodules https://github.com/lvschouwen/lichenos-why2025-badge.git
 git -C ~/esp/esp-idf worktree add --detach ~/esp/esp-idf-v6.1 v6.1
 (cd ~/esp/esp-idf-v6.1 && git submodule update --init --recursive && ./install.sh esp32p4,esp32c6)
+git -C ~/esp/esp-idf-v6.1 apply "$PWD/tools/idf-patches/0001-esp32p4-psram-120mhz.patch"
 BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build
 ```
+
+The patch adds a 120 MHz PSRAM clock to the IDF (its own choices are 80 and 200; see `tools/idf-patches/` for why and
+the license note). `build.sh` refuses to build without it while `sdkconfig.defaults` asks for 120 MHz.
 
 `firmware/build.sh build` runs the host tests (`host_tests/`), builds the C6 image (`c6/`), puts it on Lichen's
 storage drive together with `firmware/lora.toml`, and builds the P4 image into `firmware/build/`. Any other arguments go
