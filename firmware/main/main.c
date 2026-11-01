@@ -32,6 +32,7 @@
 #include "assets.h"
 #include "fonts.h"
 #include "screenshot.h"
+#include "sdcard.h"
 #include "storage.h"
 #include "update_mode.h"
 #include "update_screen.h"
@@ -238,6 +239,9 @@ void app_main(void) {
         vTaskDelay(pdMS_TO_TICKS(40));
     }
     backlight_restore();
+    // The SD card (#60): before the C6 link, as BadgeVMS, so the SDMMC controller is set up before esp_hosted shares
+    // it, and before the apps start. No card is one warning; nothing else waits for it.
+    sd_start();
     if (!c6link_start()) {
         ESP_LOGE(TAG, "no C6 link: no Wi-Fi, no LoRa");
     }

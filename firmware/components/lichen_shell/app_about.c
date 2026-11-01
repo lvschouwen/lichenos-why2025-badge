@@ -1,6 +1,6 @@
 // About Lichen (#66, lichen.html bottom): logo, what a lichen is, then the OS and the hardware only (the OS speaks only for
 // itself; an app's own details are on its Settings page): version, free memory, the C6 link, Wi-Fi, the LoRa radio,
-// storage, uptime and the local clock. Up/Down scroll when it doesn't fit; the detail lines refresh once a second.
+// storage, the SD card, uptime and the local clock. Up/Down scroll when it doesn't fit; the detail lines refresh once a second.
 #include "app_icons.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -8,6 +8,7 @@
 #include "lichen_clock.h"
 #include "lichen_app.h"
 #include "logo.h"
+#include "sdcard.h"
 #include "shell_parts.h"
 #include "storage.h"
 #include "fonts.h"
@@ -20,7 +21,7 @@
 
 #define SCROLL_STEP      96
 
-enum { ROW_MEMORY, ROW_C6, ROW_WIFI, ROW_LORA, ROW_STORAGE, ROW_UP, ROW_CLOCK, ROWS };
+enum { ROW_MEMORY, ROW_C6, ROW_WIFI, ROW_LORA, ROW_STORAGE, ROW_SD, ROW_UP, ROW_CLOCK, ROWS };
 
 static lv_obj_t *value_label[ROWS];
 
@@ -84,6 +85,11 @@ static void refresh(lv_timer_t *timer) {
     }
     set_text(value_label[ROW_STORAGE], text);
 
+    sd_info_t sd; // cached: the LVGL task never reads the card (#60)
+    sd_info(&sd);
+    sd_short_text(&sd, text, sizeof(text));
+    set_text(value_label[ROW_SD], text);
+
     fmt_uptime(text, sizeof(text));
     set_text(value_label[ROW_UP], text);
 
@@ -134,7 +140,7 @@ static int32_t key_col_w(lv_obj_t *obj, char const *const *keys, size_t n) {
 }
 
 static lv_obj_t *add_row(lv_obj_t *parent, char const *key, char const *fixed) {
-    static char const *const KEYS[] = {"version", "memory", "C6 link", "Wi-Fi", "LoRa", "storage", "up", "clock"};
+    static char const *const KEYS[] = {"version", "memory", "C6 link", "Wi-Fi", "LoRa", "storage", "SD card", "up", "clock"};
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -202,6 +208,7 @@ static void open_about(lv_obj_t *screen) {
     value_label[ROW_WIFI]    = add_row(screen, "Wi-Fi", NULL);
     value_label[ROW_LORA]    = add_row(screen, "LoRa", NULL);
     value_label[ROW_STORAGE] = add_row(screen, "storage", NULL);
+    value_label[ROW_SD]      = add_row(screen, "SD card", NULL);
     value_label[ROW_UP]      = add_row(screen, "up", NULL);
     value_label[ROW_CLOCK]   = add_row(screen, "clock", NULL);
 

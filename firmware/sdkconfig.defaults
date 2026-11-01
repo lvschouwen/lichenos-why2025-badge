@@ -44,6 +44,8 @@ CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
 # FAT drive
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_USE_DYN_BUFFERS=y
+# "fw sd format" names the card LICHEN (f_setlabel, #60)
+CONFIG_FATFS_USE_LABEL=y
 
 # lwIP (as BadgeVMS, minus its BadgeVMS-specific settings)
 CONFIG_LWIP_LOCAL_HOSTNAME="badge"
