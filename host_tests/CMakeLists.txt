@@ -863,8 +863,11 @@ add_test(NAME ota_bmp_test COMMAND ota_bmp_test)
 add_executable(hosted_link_test
     ${CMAKE_CURRENT_SOURCE_DIR}/hosted_link_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/host/mcu/eh_host_mcu_transport/src/eh_host_mcu_transport_state.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/host/features/eh_host_feat_rpc/src/eh_host_feat_rpc_slice.c
 )
-target_include_directories(hosted_link_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/host/mcu/eh_host_mcu_transport/include)
+target_include_directories(hosted_link_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/host/mcu/eh_host_mcu_transport/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/host/features/eh_host_feat_rpc/src)
 target_compile_options(hosted_link_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME hosted_link_test COMMAND hosted_link_test)
 
