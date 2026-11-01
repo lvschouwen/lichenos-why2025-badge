@@ -104,3 +104,6 @@ CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=48
 # time carried across a warm reset. If the crystal does not start, IDF falls back to the RC at boot.
 CONFIG_RTC_CLK_SRC_EXT_CRYS=y
 CONFIG_RTC_CLK_CAL_CYCLES=1024
+
+# #89: light poisoning so a double free or a free of a bad pointer aborts at the culprit (8 B per block)
+CONFIG_HEAP_POISONING_LIGHT=y

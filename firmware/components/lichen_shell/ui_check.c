@@ -67,11 +67,33 @@ static void dump_line(void const *slot) {
     ESP_LOGE(TAG, "                                      %s", hex + 128);
 }
 
+static bool group_exists(lv_group_t const *g) {
+    lv_ll_t *ll = &LV_GLOBAL_DEFAULT()->group_ll; // no public iterator in LVGL 9; lv_group.c walks this list too
+    for (lv_group_t *it = lv_ll_get_head(ll); it; it = lv_ll_get_next(ll, it)) {
+        if (it == g) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void dump_spec_attr(lv_obj_spec_attr_t const *sa) {
+    uint8_t const *b = (uint8_t const *)sa;
+    char           hex[sizeof(*sa) * 2 + 1];
+    for (size_t i = 0; i < sizeof(*sa); i++) {
+        snprintf(hex + 2 * i, 3, "%02x", b[i]);
+    }
+    ESP_LOGE(TAG, "  spec_attr %p (%u B): %s", (void const *)sa, (unsigned)sizeof(*sa), hex);
+}
+
 static void report(lv_obj_t *obj, unsigned depth, char const *what, void const *slot, void const *value) {
     if (reports >= MAX_REPORTS) {
         return;
     }
     reports++;
+    if (in_ram(obj->spec_attr)) {
+        dump_spec_attr(obj->spec_attr);
+    }
     lv_obj_t *parent = obj->parent;
     ESP_LOGE(TAG, "FOUND: obj %p (class %p, parent %p, depth %u, %u children): %s: slot %p holds %p, walk %" PRIu32 ", uptime %" PRId64 " ms",
              (void *)obj, (void const *)obj->class_p, (void *)parent, depth, obj->spec_attr ? obj->spec_attr->child_cnt : 0, what,
@@ -110,8 +132,16 @@ static void check_tree(lv_obj_t *obj, unsigned depth) {
             report(obj, depth, "children pointer not in RAM", &sa->children, sa->children);
             return;
         }
+        if (sa->group_p && !group_exists(sa->group_p)) { // crash 4: group_p held 0x200
+            report(obj, depth, "group pointer is not a live group", &sa->group_p, sa->group_p);
+            return;
+        }
         lv_array_t *ev = &sa->event_list.array;
         uint32_t    n  = lv_array_size(ev);
+        if (n > ev->capacity || ev->capacity > 64 || (n && ev->element_size != sizeof(void *))) {
+            report(obj, depth, "event list size/capacity/element size are not sane", &ev->size, (void *)(uintptr_t)ev->size);
+            return;
+        }
         if (n) {
             if (!in_ram(ev->data)) {
                 report(obj, depth, "event list array not in RAM", &ev->data, ev->data);
@@ -160,9 +190,27 @@ static void walk_all(void) {
     last_walk_us = esp_timer_get_time() - t0;
 }
 
+// With CONFIG_HEAP_POISONING_LIGHT every block carries head and tail canaries: an overrun from a neighbour is seen
+// here, at the victim, before anything reads the damaged words (a double free aborts in heap_caps_free itself)
+static void heap_tick(void) {
+    static uint32_t n;
+    if (++n % 10) {
+        return;
+    }
+    if (!heap_caps_check_integrity(MALLOC_CAP_SPIRAM, true)) {
+        ESP_LOGE(TAG, "FOUND: PSRAM heap integrity check failed (details above), walk %" PRIu32, walks);
+        if (reports < MAX_REPORTS) {
+            reports++;
+            snprintf(last_finding, sizeof(last_finding), "ui check: PSRAM heap integrity failed (walk %" PRIu32 ")", walks);
+            system_restart_note(last_finding);
+        }
+    }
+}
+
 static void tick(lv_timer_t *t) {
     (void)t;
     walk_all();
+    heap_tick();
 }
 
 static void cmd_uicheck(char const *args) {

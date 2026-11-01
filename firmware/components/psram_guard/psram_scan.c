@@ -115,6 +115,12 @@ static void rebuild_quar(void) {
     for (uintptr_t from = 0; psram_learn_next_failed(&lr, from, &page); from = page + PSRAM_PAGE) {
         psram_quar_note(&s_quar, page, page + PSRAM_PAGE - 1, 1, s_stat.xor_or);
     }
+    // ... plus the whole learned extent in one piece (#89, 2026-11-01): a heap canary flipped bit 8 at 0x48668400,
+    // between two learned pages, 1 s after it was written. The cluster has cells that fail too rarely for the map,
+    // so the gaps between its pages are not trusted either (costs ~450 KB more of the 32 MB).
+    if (lr.lo <= lr.hi) {
+        psram_quar_note(&s_quar, lr.lo, lr.hi, 1, s_stat.xor_or);
+    }
 }
 
 static void note_hole(uintptr_t lo, uintptr_t hi) {
