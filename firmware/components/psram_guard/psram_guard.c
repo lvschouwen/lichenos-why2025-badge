@@ -1,15 +1,13 @@
 #include "psram_guard.h"
 
 #include "psram_boot.h"
-#include "psram_ldo.h"
-#include "psram_learned.h"
+#include "psram_heap.h"
 #include "psram_pattern.h"
-#include "psram_scan.h"
-#include "psram_sweep.h"
 
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_memory_utils.h"
 #include "esp_timer.h"
 #include "fw_console.h"
 #include "freertos/FreeRTOS.h"
@@ -28,6 +26,7 @@
 #define MAX_BLOCKS    (BIG_BLOCKS + 3) // + heap_caps small, + LVGL small, + update mode
 #define PERIOD_MS     100
 #define SHOW_BYTES    16
+#define MAX_POOLS     8 // heap regions the IDF registers for the PSRAM (the pool + the irom/drom alignment gaps)
 #define PSRAM_CAPS    (MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 typedef struct {
@@ -53,6 +52,46 @@ static uintptr_t         last_hit_addr;
 static size_t            last_hit_off;
 static uint32_t          last_hit_bad;
 static int64_t           last_hit_ms;
+
+// ---- where the PSRAM heap is (#89) --------------------------------------------------------------------------------
+// The IDF registers the PSRAM with the heap at system start, before app_main; the call passes straight through and the
+// PSRAM regions are noted, so psram_guard_free_ok() can tell a heap pointer from a flipped one. .bss is zeroed by then.
+
+static psram_range_t s_pools[MAX_POOLS];
+static size_t        s_npools;
+static unsigned      s_bad_frees;
+static void const   *s_last_bad_free;
+
+esp_err_t __real_heap_caps_add_region_with_caps(uint32_t const caps[], intptr_t start, intptr_t end);
+
+esp_err_t __wrap_heap_caps_add_region_with_caps(uint32_t const caps[], intptr_t start, intptr_t end) {
+    esp_err_t err = __real_heap_caps_add_region_with_caps(caps, start, end);
+    if (err == ESP_OK && s_npools < MAX_POOLS && esp_ptr_external_ram((void const *)start)) {
+        s_pools[s_npools++] = (psram_range_t){(uintptr_t)start, (uintptr_t)end};
+    }
+    return err;
+}
+
+bool psram_guard_free_ok(void const *p) {
+    if (!p || !s_npools || esp_ptr_internal(p) || psram_heap_has(s_pools, s_npools, (uintptr_t)p)) {
+        return true; // no pools known = nothing to judge by: let heap_caps_free decide
+    }
+    unsigned n      = ++s_bad_frees;
+    s_last_bad_free = p;
+    if (n <= 8 || n % 256 == 0) {
+        char const *what = esp_ptr_external_ram(p) ? "in PSRAM outside the heap pools" : "not RAM";
+        int         bit  = psram_heap_flip_bit(s_pools, s_npools, (uintptr_t)p);
+        if (bit >= 0) {
+            ESP_LOGW(TAG, "free(%p) refused: %s, bit %d flipped would be heap address %p; leaked (%u so far)", p, what, bit,
+                     (void *)((uintptr_t)p ^ ((uintptr_t)1 << bit)), n);
+        } else {
+            ESP_LOGW(TAG, "free(%p) refused: %s, no single-bit neighbour in the heap; leaked (%u so far)", p, what, n);
+        }
+    }
+    return false;
+}
+
+// ---- the canaries (#40) --------------------------------------------------------------------------------------------
 
 // Whole cache lines, so the write-back/invalidate of one canary never touches a neighbour (and the other way round)
 static void *aligned_in(void *raw) {
@@ -114,8 +153,6 @@ static void report(int id, block_t *b, psram_check_t const *res) {
              got_hex, ms);
     ESP_LOGW(TAG, "  canary %d: %u single-bit words, %u bad lines (%u whole), xor of first bad word %08x", id,
              (unsigned)res->bit_flips, (unsigned)res->bad_lines, (unsigned)res->full_lines, (unsigned)res->first_xor);
-    psram_learned_mark_buf(b->mem, b->len, (uintptr_t)b->mem, 0, res->first_bad, res->last_bad);
-    psram_learned_feed((uintptr_t)b->mem + res->first_bad, (uintptr_t)b->mem + res->last_bad, "canary");
     b->hits++;
     b->bad_total      += (uint32_t)res->bad_bytes;
     last_hit_block     = (uint32_t)id;
@@ -158,11 +195,11 @@ static void guard_task(void *arg) {
     }
 }
 
-// "psram test <KB>": one fill / write-back / invalidate / read-back round trip over a fresh block, on demand
+// "psram test <KB> [dense]": one fill / write-back / invalidate / read-back round trip over a fresh block, on demand
 static void psram_test(char const *kb_text) {
     unsigned kb = (unsigned)atoi(kb_text);
     if (kb == 0 || kb > 4096) {
-        console_reply("psram test <KB> (1..4096)");
+        console_reply("psram test <KB> [dense] (1..4096)");
         return;
     }
     if (strstr(kb_text, "dense")) {
@@ -178,10 +215,6 @@ static void psram_test(char const *kb_text) {
     int64_t       start = esp_timer_get_time();
     fill_block(mem, len);
     psram_check_t res = check_block(mem, len);
-    if (res.bad_bytes) {
-        psram_learned_mark_buf(mem, len, (uintptr_t)mem, 0, res.first_bad, res.last_bad);
-        psram_learned_feed((uintptr_t)mem + res.first_bad, (uintptr_t)mem + res.last_bad, "fw psram test");
-    }
     console_reply("psram test %u KB at %p: %u bad bytes, %u single-bit words, %u bad lines (%u whole), first bad +%u xor %08x, %u us",
                   kb, (void *)mem, (unsigned)res.bad_bytes, (unsigned)res.bit_flips, (unsigned)res.bad_lines,
                   (unsigned)res.full_lines, (unsigned)res.first_bad, (unsigned)res.first_xor,
@@ -190,34 +223,18 @@ static void psram_test(char const *kb_text) {
 }
 
 static void cmd_psram(char const *args) {
-    if (strncmp(args, "qwatch", 6) == 0) {
-        unsigned ms = (unsigned)atoi(args + 6);
-        psram_scan_watch(ms ? ms : 2000);
-        return;
-    }
-    if (strncmp(args, "sweep", 5) == 0) {
-        psram_sweep_cmd(args + 5 + (args[5] == ' '));
-        return;
-    }
-    if (strncmp(args, "stress", 6) == 0) {
-        psram_scan_stress((unsigned)atoi(args + 6));
-        return;
-    }
-    if (strncmp(args, "ldo", 3) == 0) {
-        psram_ldo_cmd(args + 3);
-        return;
-    }
-    if (strncmp(args, "forget", 6) == 0) {
-        psram_learned_forget();
-        return;
-    }
     if (strncmp(args, "test", 4) == 0) {
         psram_test(args + 4);
         return;
     }
     psram_boot_print();
-    psram_scan_print();
-    psram_scan_print_frees();
+    for (size_t i = 0; i < s_npools; i++) {
+        console_reply("psram heap pool %u: %p..%p (%u KB)", (unsigned)i, (void *)s_pools[i].lo, (void *)s_pools[i].hi,
+                      (unsigned)((s_pools[i].hi - s_pools[i].lo) >> 10));
+    }
+    if (s_bad_frees) {
+        console_reply("psram frees refused: %u (outside every heap, leaked), last %p", s_bad_frees, s_last_bad_free);
+    }
     xSemaphoreTake(lock, portMAX_DELAY);
     uint32_t hits = 0;
     for (int i = 0; i < MAX_BLOCKS; i++) {
@@ -255,22 +272,17 @@ static void add_spread_blocks(void) {
     }
 }
 
-void psram_guard_heap_start(void) {
-    psram_scan_release_heap();
-}
-
 void psram_guard_start(void) {
     lock = xSemaphoreCreateMutex();
     if (!lock) {
         return;
     }
-    psram_scan_run(); // before anything else takes memory: map the suspect window, learn new bad pages (#86)
-    psram_boot_check(); // then, on an untouched heap, before the canaries and the rest of the boot load the bus
-    heap_caps_monitor_local_minimum_free_size_start(); // "mem psram" min: from here, not the scan that held all of it
+    psram_boot_check(); // on an untouched heap, before the canaries and the rest of the boot load the bus
+    heap_caps_monitor_local_minimum_free_size_start(); // "mem psram" min: from here, not the 4 MB the check held
     add_spread_blocks();
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);
-    console_register("psram", "psram [test <KB> [dense] | qwatch <ms> | stress [rounds] | sweep [passes [phase]] | ldo [mV] | forget] (learned bad range, quarantine, canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
+    console_register("psram", "psram [test <KB> [dense]] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
     if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 4096, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGW(TAG, "canary task failed to start");
     }

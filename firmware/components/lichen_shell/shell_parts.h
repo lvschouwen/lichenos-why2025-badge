@@ -26,6 +26,9 @@ void shell_rebuild_home(void);         // after the app list or the layout chang
 void ui_probe_init(void);           // registers "fw ui"
 void ui_probe_send(char const *seq); // "fw keys send <seq>"
 void ui_check_start(void);           // #89: 1 s LVGL object-tree check, registers "fw uicheck"
+// ui_perf.c: frame timing from the display events (#93); "fw ui perf ..." (ui_probe.c dispatches it)
+void ui_perf_start(void);
+void ui_perf_cmd(char const *args);
 
 // app_settings.c, app_about.c: the built-in apps (shell_start registers them)
 void settings_app_register(void);

@@ -192,7 +192,10 @@ static void settle(void) {
 }
 
 static void cmd_ui(char const *args) {
-    (void)args;
+    if (strncmp(args, "perf", 4) == 0) {
+        ui_perf_cmd(args + 4);
+        return;
+    }
     settle();
     line_t *lines = malloc(sizeof(line_t) * MAX_LINES);
     if (!lines) {
@@ -222,5 +225,5 @@ static void cmd_ui(char const *args) {
 }
 
 void ui_probe_init(void) {
-    console_register("ui", "ui (screen ids on the stack, the focused row, every visible label)", cmd_ui);
+    console_register("ui", "ui [perf [reset | bench [n]]] (screen ids on the stack, the focused row, every visible label; perf: frame timing, #93)", cmd_ui);
 }

@@ -160,7 +160,6 @@ static void log_heap(char const *name, uint32_t caps) {
 }
 
 void app_main(void) {
-    psram_guard_heap_start(); // the PSRAM heap minus the quarantined pages; nothing may allocate in PSRAM before this (#86)
     lichen_random_start(); // the OS owns the entropy source and leaves it on (#84)
     log_tap_start();
     psram_guard_start(); // canaries early, so they sit low in the PSRAM heap (#40)

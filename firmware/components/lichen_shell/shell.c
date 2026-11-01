@@ -445,6 +445,7 @@ void shell_start(lv_display_t *display) {
     console_register("keys", "keys on|off (log every key) | keys log on|off (log raw key events) | keys send <up down left right enter esc tab bksp wait text:..|>", cmd_keys);
     ui_probe_init();
     ui_check_start();
+    ui_perf_start();
     if (!getenv("TZ")) {
         settings_apply_tz(); // main.c normally did this already
     }

@@ -1,6 +1,5 @@
 #include "psram_boot.h"
 
-#include "psram_learned.h"
 #include "psram_pattern.h"
 #include "psram_tuning.h"
 
@@ -92,7 +91,7 @@ static void line_flush(uint8_t *mem, size_t len) {
 }
 
 // Dense: every byte of the block written and read back as pattern and as its inverse, from the RAM (cache dropped)
-static void dense_run(uint8_t *mem, size_t len, verify_t *v, char const *who) {
+static void dense_run(uint8_t *mem, size_t len, verify_t *v) {
     static uint32_t const masks[2] = {0, 0xFFFFFFFFu};
     int64_t               start    = esp_timer_get_time();
     *v                             = (verify_t){0};
@@ -105,7 +104,6 @@ static void dense_run(uint8_t *mem, size_t len, verify_t *v, char const *who) {
             v->first_xor = r.first_xor;
         }
         if (r.bad_bytes) {
-            psram_learned_mark_buf(mem, len, (uintptr_t)mem, masks[m], r.first_bad, r.last_bad);
             uintptr_t blo = (uintptr_t)mem + r.first_bad, bhi = (uintptr_t)mem + r.last_bad;
             v->lo = !v->hi || blo < v->lo ? blo : v->lo;
             v->hi = bhi > v->hi ? bhi : v->hi;
@@ -117,9 +115,6 @@ static void dense_run(uint8_t *mem, size_t len, verify_t *v, char const *who) {
     v->us    = esp_timer_get_time() - start;
     v->bytes = len;
     v->ran   = true;
-    if (v->hi) {
-        psram_learned_feed(v->lo, v->hi, who);
-    }
 }
 
 static void dense_check(void) {
@@ -133,10 +128,10 @@ static void dense_check(void) {
         ESP_LOGW(TAG, "boot check: no PSRAM block for the dense check");
         return;
     }
-    dense_run(mem, len, &s_verify, "boot check");
+    dense_run(mem, len, &s_verify);
     s_check_addr = mem;
     if (s_verify.bad_bytes) { // the same block again: the same bad bytes point at the place, new ones at the moment
-        dense_run(mem, len, &s_repeat, "boot check");
+        dense_run(mem, len, &s_repeat);
     }
     heap_caps_free(mem);
 }
@@ -149,7 +144,7 @@ void psram_boot_dense_test(unsigned kb) {
         return;
     }
     verify_t v;
-    dense_run(mem, (size_t)kb * 1024, &v, "fw psram test");
+    dense_run(mem, (size_t)kb * 1024, &v);
     console_reply("psram dense test %u KB at %p: pattern %u bad bytes, inverted %u bad bytes, %u single-bit words, first bad +%u xor %08x, %u ms",
                   kb, (void *)mem, (unsigned)v.bad_plain, (unsigned)v.bad_inv, (unsigned)v.bit_flips, (unsigned)v.first_bad,
                   (unsigned)v.first_xor, (unsigned)(v.us / 1000));

@@ -148,8 +148,66 @@ static void print_heap(char const *name, uint32_t caps) {
     );
 }
 
+// "mem blocks [internal|dma|psram] [min bytes]": the allocated blocks of a heap, the ones of at least min bytes listed
+// (#93: who holds the internal RAM). Collected first, printed after: the walk holds the heap's lock.
+#define MAX_LISTED 48
+
+typedef struct {
+    size_t min;
+    unsigned used_n, used_bytes, big_n, big_bytes, listed;
+    struct {
+        void  *ptr;
+        size_t size;
+    } big[MAX_LISTED];
+} blocks_ctx_t;
+
+static bool block_cb(walker_heap_into_t heap, walker_block_info_t b, void *user) {
+    (void)heap;
+    blocks_ctx_t *c = user;
+    if (!b.used) {
+        return true;
+    }
+    c->used_n++;
+    c->used_bytes += (unsigned)b.size;
+    if (b.size >= c->min) {
+        c->big_n++;
+        c->big_bytes += (unsigned)b.size;
+        if (c->listed < MAX_LISTED) {
+            c->big[c->listed].ptr  = b.ptr;
+            c->big[c->listed].size = b.size;
+            c->listed++;
+        }
+    }
+    return true;
+}
+
+static void mem_blocks(char const *args) {
+    uint32_t    caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    char const *name = "internal";
+    if (strncmp(args, "psram", 5) == 0) {
+        caps = MALLOC_CAP_SPIRAM;
+        name = "psram";
+    } else if (strncmp(args, "dma", 3) == 0) {
+        caps = MALLOC_CAP_DMA;
+        name = "dma";
+    }
+    char const *num = strpbrk(args, "0123456789");
+    static blocks_ctx_t ctx; // 400 B: not on the console task's stack
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.min = num ? (size_t)atoi(num) : 1024;
+    heap_caps_walk(caps, block_cb, &ctx);
+    for (unsigned i = 0; i < ctx.listed; i++) {
+        console_reply("mem block %p %u B", ctx.big[i].ptr, (unsigned)ctx.big[i].size);
+    }
+    console_reply("mem %s blocks: %u allocated = %u B; %u of them >= %u B = %u B%s", name, ctx.used_n, ctx.used_bytes, ctx.big_n,
+                  (unsigned)ctx.min, ctx.big_bytes, ctx.big_n > ctx.listed ? " (first ones listed)" : "");
+}
+
 static void cmd_mem(char const *args) {
-    (void)args;
+    if (strncmp(args, "blocks", 6) == 0) {
+        mem_blocks(args + 6 + (args[6] == ' '));
+        return;
+    }
     print_heap("internal", MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     print_heap("dma", MALLOC_CAP_DMA);
     print_heap("psram", MALLOC_CAP_SPIRAM);
@@ -450,7 +508,7 @@ void console_start(void) {
     run_mutex   = xSemaphoreCreateMutex();
     reply_mutex = xSemaphoreCreateMutex();
     console_register("help", "help", cmd_help);
-    console_register("mem", "mem (heaps, task stacks, per-task core and CPU %)", cmd_mem);
+    console_register("mem", "mem [blocks [internal|dma|psram] [min bytes]] (heaps, task stacks, per-task core and CPU %; blocks: who holds a heap)", cmd_mem);
     console_register("assets", "assets (state of the assets partition and its files)", cmd_assets);
     console_register("slot", "slot [other] (show the app slots, or boot the other one)", cmd_slot);
     console_register("reboot", "reboot", cmd_reboot);
