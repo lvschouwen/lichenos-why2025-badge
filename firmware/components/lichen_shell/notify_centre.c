@@ -81,7 +81,7 @@ static void age_text(nr_entry_t const *e, uint16_t boot, char *out, size_t cap) 
 static char const *console_hint(char const *target) {
     static char const *const map[][2] = {
         {"crash", "fw crash"}, {"clock", "fw clock"}, {"psram", "fw psram"}, {"c6", "fw c6"},
-        {"sd", "fw sd"},       {"sensors", "fw sensors"}, {"update", "fw version"}, {"storage", "fw storage"},
+        {"sd", "fw sd"}, {"battery", "fw thermal"},       {"sensors", "fw sensors"}, {"update", "fw version"}, {"storage", "fw storage"},
     };
     for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
         if (strcmp(map[i][0], target) == 0) {
@@ -160,6 +160,9 @@ static bool open_system(char const *target) {
         }
     } else if (strcmp(target, "sd") == 0) {
         sd_screen_open();
+        return true;
+    } else if (strcmp(target, "battery") == 0) {
+        battery_open(NULL);
         return true;
     }
     return false;

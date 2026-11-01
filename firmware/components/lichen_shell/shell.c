@@ -495,4 +495,5 @@ void shell_start(lv_display_t *display) {
     up = true;
     lvgl_port_unlock();
     sys_notices_start();
+    thermal_start();
 }

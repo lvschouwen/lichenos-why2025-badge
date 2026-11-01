@@ -23,6 +23,7 @@ static lv_obj_t *lora_label;
 static lv_obj_t *wifi_label;
 static lv_obj_t *c6_label; // only while the C6 is being recovered or gone (#14)
 static int32_t   c6_max_w; // the room left of the clock (#104): longer C6 text ends in "..."
+static lv_obj_t *hot_label; // "HOT" while the thermal watchdog warns (#10)
 static lv_obj_t *notify_box; // the unread dot and count (#62), hidden at 0
 static lv_obj_t *notify_dot;
 static lv_obj_t *notify_count;
@@ -233,8 +234,20 @@ static void show_notify(void) {
     }
 }
 
+// Amber "HOT" while the watchdog warns, red once it is switching the badge off (#10)
+static void show_hot(void) {
+    thermal_info_t t;
+    thermal_info(&t);
+    bool hot = t.level != TH_OK;
+    lv_obj_set_hidden(hot_label, !hot);
+    if (hot) {
+        lv_obj_set_style_text_color(hot_label, lv_color_hex(t.level == TH_SHUTDOWN ? THEME_LINK_RED : THEME_AMBER), 0);
+    }
+}
+
 static void refresh(lv_timer_t *timer) {
     (void)timer;
+    show_hot();
     show_notify();
     show_clock();
     show_c6();
@@ -292,6 +305,8 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
 
     // Right-aligned by the bar's SPACE_BETWEEN; about 50 px stay free to the clock for a notification dot (#62)
     lv_obj_t *right = add_row(bar, 28);
+    hot_label       = add_text(right, "HOT", THEME_AMBER);
+    lv_obj_set_hidden(hot_label, true);
     lv_obj_t *wifi  = add_row(right, 6);
     // The unread dot and count (#62) just left of "Wi-Fi", in the room the right group leaves to the clock; hidden
     // (out of the layout) at 0

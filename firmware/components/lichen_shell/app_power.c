@@ -109,6 +109,10 @@ static void start(bool off) {
     }
 }
 
+void power_request_off(void) {
+    start(true);
+}
+
 static void answer_restart(bool yes) {
     if (yes) {
         start(false);

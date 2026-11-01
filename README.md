@@ -192,6 +192,8 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
   `fw sensors raw` (chip ids, status registers, counters), `fw sensors start|stop`, `fw i2c scan`. The BME690's gas
   heater (300 C for 100 ms each second) and the badge's own warmth make its temperature read somewhat above the room
   and humidity somewhat below; menuconfig "Lichen sensors" can shorten the heater or switch it off (no gas reading).
+- Battery safety (#10): `fw thermal` (readings per source, state, thresholds, last events), `fw thermal test warn|clear`,
+  `fw thermal test shutdown YES` (really powers the badge off), `fw thermal seen reset`. See "Battery safety" below.
 - LoRa and the C6: `fw lora [raw on|off]`, `fw c6log [ms]` (the C6's own console, up to 60 s), `fw c6 reflash`, `fw c6` (link state, recoveries), `fw c6 reattach` (re-attach the C6 now), `fw c6 reset [rom]` (pulse C6 EN to test the recovery; `rom` only with someone at the badge).
 - MeshCore: `fw mesh` (identity, clock, packet counters; or why it is not running), `fw mesh start`, `fw mesh stop`,
   `fw mesh name <name>`, `fw mesh radio <preset | freq bw sf cr>
@@ -270,3 +272,26 @@ Every released image ships with [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.
 OFL licenses ask for their notice in binary copies too. `tools/third_party_licenses.py` builds that file from the real
 license files, and `firmware/build.sh` stops with an error when it no longer matches the dependencies. When you add
 or enable a library (an LVGL decoder, say), add it to the list in the script and run it again.
+
+## Battery safety (#10)
+
+The badge runs on two **unprotected** 18650 cells in parallel behind an IP5306 charger/boost chip. The IP5306 here has
+no I2C and no signal reaches the P4 or the C6, so Lichen cannot see cell voltage, current or charge state, and cannot
+stop a short circuit or an overcharge (that is hardware only). What it can do is watch the temperature
+(`firmware/components/lichen_shell/thermal.c`, rules in `thermal_rules.c`, host-tested):
+
+- Every 5 s the BME690 (next to the cells; its gas-heater bias of about 17 K is taken off, 15 K) and the P4 die sensor are
+  read. Board: warn at 50 C (clears under 45), switch off at 60 C or after a rise of 10 K within 60 s (from 40 C up).
+  Die: warn 75, off 90, rise 20 K. Every decision needs two polls in a row. The C6's temperature is not on the C6 link.
+- Warn: "HOT" in the status bar, a notice, a full-screen warning once, backlight to the minimum.
+- Shutdown: a notice, then Power off (#65): the IP5306 cuts the cells about 32 s later.
+- A missing or implausible sensor is ignored while another answers; with none for 60 s the badge reports that heat is
+  not watched, but never switches itself off for that.
+- Settings > Battery says all this on the badge; a one-time notice shows at first boot after this firmware.
+
+Advice: power from USB or a power bank, never charge unattended, use protected cells or an inline protection board where
+the holders allow, keep metal off the battery contacts.
+
+Optional hardware path (not required, not built): a divider from +BATT (for example 100k/100k, so 4.2 V reads 2.1 V) to a
+free P4 ADC pin, with a 100 nF capacitor, would give real voltage readings and a low-voltage cut-off later. Check
+which P4 ADC pins the carrier leaves free before choosing one.
