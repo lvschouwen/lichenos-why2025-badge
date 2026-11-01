@@ -264,9 +264,14 @@ static void set_boot_strap(void) {
 static unsigned do_reattach(void) {
     uint32_t t0 = now_ms();
     atomic_store(&hosted_quiet, true);
+    // One line per step: a step that blocks for good (bench 2026-11-01, second attempt against a C6 in its ROM) is
+    // then named by the last line in the console
+    ESP_LOGW(TAG, "re-attach: esp_hosted deinit");
     int d = esp_hosted_deinit();
     set_boot_strap();
-    int  i  = esp_hosted_init();
+    ESP_LOGW(TAG, "re-attach: esp_hosted init (deinit %d, %u ms)", d, (unsigned)(now_ms() - t0));
+    int i = esp_hosted_init();
+    ESP_LOGW(TAG, "re-attach: connect to slave (init %d, %u ms)", i, (unsigned)(now_ms() - t0));
     int  c  = i == 0 ? esp_hosted_connect_to_slave() : -1;
     bool ok = i == 0 && c == 0;
     portENTER_CRITICAL(&watch_lock);
