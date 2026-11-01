@@ -23,6 +23,8 @@ void backlight_get(uint8_t *display, uint8_t *keyboard);
 // needs the UART driver to itself). A restart leaves the backlight off (see backlight_start()); call this after the
 // first frame is drawn.
 void backlight_restore(void);
+// Power off (#65): both backlights off, then the panel, as before a restart. The C6 must still run (it drives them).
+void backlight_power_off(void);
 // Sends the last applied levels again (the saved ones if none were applied yet): the C6 starts at its defaults after a
 // reset (#14). Call after backlight_start(), once the C6 runs its application again.
 void backlight_reapply(void);

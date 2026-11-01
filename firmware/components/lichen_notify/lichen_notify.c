@@ -233,6 +233,32 @@ static void load(void) {
     ESP_LOGI(TAG, "%u notifications kept, boot %u", (unsigned)nr_count(s_ring), (unsigned)s_ring->boot);
 }
 
+// Restart / power off (#65): a save that is waiting runs now, and this waits for it (and for one already running)
+bool lichen_notify_save_now(uint32_t wait_ms) {
+    if (!s_storage || !s_save_timer) {
+        return true;
+    }
+    for (uint32_t waited = 0;; waited += 20) {
+        lock();
+        bool due = s_save_due_us != 0;
+        unlock();
+        portENTER_CRITICAL(&s_save_mux);
+        bool saving = s_saving;
+        portEXIT_CRITICAL(&s_save_mux);
+        if (!due && !saving) {
+            return true;
+        }
+        if (due && !saving) {
+            esp_timer_stop(s_save_timer); // a timer that fires anyway only marks the save to run again: harmless
+            save_due(NULL);
+        }
+        if (waited >= wait_ms) {
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
 void lichen_notify_start(bool storage_ok) {
     if (atomic_load(&s_started)) {
         return;

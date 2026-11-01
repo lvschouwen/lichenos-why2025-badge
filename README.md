@@ -126,6 +126,11 @@ fonts; `fw assets` shows their state.
   connect), Display (brightness, screen timeout: dim after 1 min, off after 5 min; home layout), Time (set date & time by hand, time zone with the Netherlands as the
   default, where the time came from), About Lichen, and one page per app that has settings. SNTP still wins over a
   time set by hand; `fw clock set <ISO8601>` and `fw clock sync` do the same from the console.
+- **Power:** a home tile (also Settings > Power) with Restart and Power off, each confirmed with Enter. Both save
+  first (MeshCore contacts and history, notifications, SD card unmounted). Power off switches the screen, the C6 and the
+  P4 off; on battery the charger then cuts the power after about 32 s (the IP5306 decides that, not Lichen), and the
+  power button starts the badge again. On USB power the charger never cuts: unplug, then press the power button.
+  `fw poweroff` does the same from the console.
 - **Settings > MeshCore:** Start at boot (on by default; off leaves the LoRa radio unclaimed, the status bar's LoRa dim,
   and the MeshCore tile says "Not running / Enter to start": Enter starts it); Start/Stop MeshCore; name; Region &
   radio (presets such as Netherlands, the default, plus Custom: frequency,

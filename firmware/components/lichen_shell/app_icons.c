@@ -88,3 +88,28 @@ void icon_notify(lv_obj_t *parent, int size_px) {
     lv_label_set_text(bell, LV_SYMBOL_BELL);
     lv_obj_center(bell);
 }
+
+// Power (#65): the power symbol, a ring open at the top with a bar through the gap
+void icon_power(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    int       w   = size_px >= 64 ? 5 : 3;
+    lv_obj_t *arc = lv_arc_create(parent);
+    lv_obj_remove_style_all(arc);
+    lv_obj_set_size(arc, size_px * 5 / 8, size_px * 5 / 8);
+    lv_arc_set_bg_angles(arc, 0, 360);
+    lv_arc_set_angles(arc, 300, 240); // 0 = 3 o'clock, clockwise: open between 240 and 300 (the top)
+    lv_obj_set_style_arc_width(arc, w, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(arc, lv_color_hex(THEME_TEAL), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
+    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(arc);
+    lv_obj_t *bar = lv_obj_create(parent);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_size(bar, w, size_px * 3 / 8);
+    lv_obj_set_style_radius(bar, w / 2, 0);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(THEME_TEAL), 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    lv_obj_align(bar, LV_ALIGN_CENTER, 0, -size_px / 8);
+}

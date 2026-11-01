@@ -177,6 +177,10 @@ static void blank_for_restart(void) {
     vTaskDelay(pdMS_TO_TICKS(BL_FRAME_MS));
 }
 
+void backlight_power_off(void) {
+    blank_for_restart();
+}
+
 void backlight_restore(void) {
     uint8_t display, keyboard;
     backlight_get(&display, &keyboard);

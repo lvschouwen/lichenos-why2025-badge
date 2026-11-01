@@ -47,6 +47,9 @@ void shell_attach_keys(lv_indev_t *keys);
 // Update mode (#76): deletes every screen below the top one, home included, so their LVGL objects are freed. The top
 // one becomes the only frame; Esc and shell_open do nothing afterwards (there is no home to go back to).
 void shell_close_all_but_top(void);
+// The Power app (#65): what the OS does once the apps stopped and the saves are done, on the power task. power_off
+// true: backlight, panel, C6 and P4 down; false: restart. Must not return. Without a hook the badge only restarts.
+void shell_set_power_hook(void (*finish)(bool power_off));
 // The boot screen is up (the OTA valid gate: a new image must show it before it counts as working)
 bool shell_up(void);
 

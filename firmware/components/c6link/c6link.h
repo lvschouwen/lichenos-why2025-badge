@@ -61,6 +61,8 @@ void c6link_note_keyboard_reset(void);
 void c6link_bundle_changed(void);
 // A firmware update is being received (#76): wifi_scan refuses from now on (until the restart)
 void c6link_set_updating(void);
+// Power off (#65): holds the C6 (and the TCA8418) in reset through the P4's deep sleep. Nothing on the link works after.
+void c6link_hold_in_reset(void);
 // Copies the station's IPv4 address into ip; false while there is none
 bool wifi_has_ip(char *ip, size_t cap);
 // The cached signal strength of the connected AP (read every 5 s by the c6wifi task); false while not connected or

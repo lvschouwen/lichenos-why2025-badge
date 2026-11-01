@@ -36,6 +36,11 @@ void about_app_register(void);
 void keytest_app_register(void);
 void bench_app_register(void); // app_bench.c (#96); also registers "fw bench"
 bool bench_running(void);      // app_bench.c: a run is measuring (LVGL task)
+void power_app_register(void);                   // app_power.c (#65): Restart / Power off, also "fw poweroff"
+void power_open_from_settings(void *arg);        // Settings > Power: opens the Power app
+// update_screen.c: every app's stop_for_update (a firmware update, a restart or power off from the Power app, #65);
+// true when all of them stopped. Blocks for seconds: never on the LVGL task.
+bool shell_stop_apps(void);
 void crashlog_app_register(void); // app_crashlog.c (#72); after a crash also asks on home to open it
 
 // time_set_screen.c: Settings > Time > Set date & time (#64), a builder for shell_open()

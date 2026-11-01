@@ -59,8 +59,7 @@ static int64_t now_ms(void) {
 
 // Everything not needed to receive the image stops. Runs on the OTA task (it may block on the mesh saving its files),
 // before the transfer starts; the screens go on the LVGL task (close_pending).
-static void stop_everything(void) {
-    ESP_LOGW(TAG, "firmware update: stopping the apps");
+bool shell_stop_apps(void) {
     bool all_stopped = true;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
@@ -69,7 +68,12 @@ static void stop_everything(void) {
             all_stopped = false;
         }
     }
-    update_mode_run_stop_hook(all_stopped);
+    return all_stopped;
+}
+
+static void stop_everything(void) {
+    ESP_LOGW(TAG, "firmware update: stopping the apps");
+    update_mode_run_stop_hook(shell_stop_apps());
 }
 
 // POST /prepare (#76): everything stops now, before the first byte of the image is on its way. The update screen comes

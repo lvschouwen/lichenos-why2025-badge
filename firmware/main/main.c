@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_ota_ops.h"
+#include "esp_sleep.h"
 #include "esp_timer.h"
 #include "log_store.h"
 #include "psram_guard.h"
@@ -95,6 +96,22 @@ static void stop_for_update(bool apps_stopped) {
         ESP_LOGE(TAG, "an app is still running: LoRa left as it is");
     }
     c6link_set_updating();
+}
+
+// Power off / Restart from the Power app (#65), after the apps stopped and the saves are done. Off: the backlights and
+// the panel (the C6 drives the backlights, so first), then the C6 held in reset, then the P4 in deep sleep with nothing
+// to wake it. That leaves the IP5306 under its ~50 mA load, so on battery it cuts the 5 V after ~32 s; the power
+// button starts the badge from cold. Restart is the usual one (its shutdown hook blanks the screen).
+static void power_finish(bool power_off) {
+    if (!power_off) {
+        system_restart("power menu restart");
+    }
+    system_restart_note("power off");
+    backlight_power_off();
+    c6link_hold_in_reset();
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    ESP_LOGW(TAG, "power off: deep sleep, no wake source");
+    esp_deep_sleep_start();
 }
 
 // ---- A C6 reset at runtime (#14 T-B): what the supervisor (c6sup) stops and restarts, in this order ----
@@ -316,6 +333,7 @@ void app_main(void) {
         hooks.screenshot = screenshot_take;
         hooks.screenshot_free = screenshot_free;
         update_mode_set_stop_hook(stop_for_update);
+        shell_set_power_hook(power_finish);
         update_screen_boot_check();
     }
     ota_server_set_hooks(&hooks);

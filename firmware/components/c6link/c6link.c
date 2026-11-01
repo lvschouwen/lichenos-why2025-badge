@@ -368,6 +368,17 @@ void c6link_set_updating(void) {
     atomic_store(&updating, true);
 }
 
+// Power off (#65): C6 EN low and held there through the P4's deep sleep (GPIO12 is an LP IO), so the C6, its radios
+// and the TCA8418 on the same reset draw nothing. Last thing before esp_deep_sleep_start: the link is gone after it.
+void c6link_hold_in_reset(void) {
+    atomic_store(&updating, true); // the supervisor must not take this for an outage
+    gpio_set_level(GPIO_NUM_12, 0);
+    gpio_set_direction(GPIO_NUM_12, GPIO_MODE_OUTPUT); // it is already (the reset line); low before it drives
+    if (gpio_hold_en(GPIO_NUM_12) != ESP_OK) {
+        ESP_LOGW(TAG, "C6 EN: no pad hold, the C6 may start again in deep sleep");
+    }
+}
+
 bool c6link_updating(void) {
     return atomic_load(&updating);
 }

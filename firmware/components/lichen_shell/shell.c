@@ -456,6 +456,7 @@ void shell_start(lv_display_t *display) {
     keytest_app_register();
     bench_app_register();
     crashlog_app_register();
+    power_app_register();
     notify_app_register();
     lvgl_port_lock(0);
     lv_display_set_default(display);

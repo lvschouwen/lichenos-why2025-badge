@@ -13,6 +13,10 @@ extern "C" {
 // the drive is up), the do-not-disturb setting, "fw notify". lichen_notify() returns 0 before this.
 void lichen_notify_start(bool storage_ok);
 
+// Restart / power off (#65): runs a waiting save at once and waits up to wait_ms for it; true when nothing is left
+// to write. Blocks: never on the LVGL task.
+bool lichen_notify_save_now(uint32_t wait_ms);
+
 // The clock can be believed (lichen_clock's clock_is_set): entries get a wall-clock time only then. Set once by the shell.
 void lichen_notify_set_clock(bool (*is_set)(void));
 

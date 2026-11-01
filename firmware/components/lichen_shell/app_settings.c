@@ -428,6 +428,7 @@ static void open_settings(lv_obj_t *screen) {
                         lv_timer_create(refresh_settings_time, 1000, NULL));
     settings_sd_row = live_row(menu_add(menu, "SD card", "", open_sd, NULL), false, sd_value);
     settings_notify_row = live_row(menu_add(menu, "Notifications", "", open_notify, NULL), false, notify_value);
+    menu_add(menu, "Power", "Restart, power off", power_open_from_settings, NULL);
     menu_add(menu, "About Lichen", "", open_about, NULL);
     bool heading = false;
     for (size_t i = 0; i < lichen_app_count(); i++) {
