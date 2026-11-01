@@ -16,6 +16,7 @@
 #include "mesh_format.h"
 #include "mesh_share.h"
 #include "meshcore_run.h"
+#include "meshcore_screens.h"
 #include "meshcore_settings.h"
 #include "radio_confirm.h"
 #include "radio_filter.h"
@@ -399,18 +400,25 @@ static void on_page_delete(lv_event_t *e) {
     meshcore_advert_forget(advert_row_status);
 }
 
+static void open_notify_page(void *arg) {
+    (void)arg;
+    meshcore_notify_settings_open(); // #50: the same page as Settings > Notifications > MeshCore
+}
+
 void meshcore_settings(lv_obj_t *page) {
     run_rows(page);
     lv_obj_add_event_cb(page, on_page_delete, LV_EVENT_DELETE, NULL);
     mesh_settings_t s;
     if (!mesh_running() || !mesh_get_settings(&s)) {
         menu_note(page, "MeshCore is not running: its settings come back when it does.");
+        menu_add(page, "Notifications", "", open_notify_page, NULL);
         return;
     }
     name_row     = menu_add(page, "Name", s.name, edit_name, NULL);
     radio_row    = menu_add(page, "Region & radio", "", open_radio, NULL);
     channels_row = menu_add(page, "Channels", "...", open_channels, NULL);
     advert_row   = menu_add(page, "Send advert", "", send_advert, NULL);
+    menu_add(page, "Notifications", "", open_notify_page, NULL);
     radio_row_refresh();
     page_channels_refresh();
 }

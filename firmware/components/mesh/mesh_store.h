@@ -116,6 +116,8 @@ size_t mesh_conv_merge_channels(mesh_conv_t *convs, size_t n, size_t max, char c
                                 size_t name_count);
 // Unread incoming messages over all chats
 uint32_t mesh_store_unread_total(void);
+// The same over the chats counts() accepts (#50: the badge leaves out channels set to Mentions or Off)
+uint32_t mesh_store_unread_where(bool (*counts)(mesh_chat_key_t const *key, void *ctx), void *ctx);
 // Changes with every message added, also once the ring is full: readers rebuild when it differs from what they showed
 uint32_t mesh_store_generation(void);
 // Moves with every change a screen shows: incoming messages as the generation, plus our own messages and their states

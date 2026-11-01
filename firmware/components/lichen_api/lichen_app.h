@@ -39,6 +39,9 @@ typedef struct lichen_app {
     // list on top of it, unless open() showed something else first (first-run questions). LVGL context. The first
     // registered app that sets it gets the key; NULL: not a messaging app.
     void (*open_messages)(void);
+    // What the app sends to the notification service is configurable (#50): the page for it (shell_open, LVGL context).
+    // Settings > Notifications lists a row for each app that has one, below the per-app On/Off switches.
+    void (*notify_settings_open)(void);
 } lichen_app_t;
 
 // Size of the app table. Home scrolls to the selection, so this only bounds the arrays; lichen_register_app logs an error

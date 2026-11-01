@@ -466,6 +466,16 @@ uint32_t mesh_store_unread_total(void) {
     return total;
 }
 
+uint32_t mesh_store_unread_where(bool (*counts)(mesh_chat_key_t const *key, void *ctx), void *ctx) {
+    uint32_t total = 0;
+    for (size_t i = 0; i < MESH_CONV_MAX; i++) {
+        if (convs[i].used && convs[i].pub.unread && counts(&convs[i].pub.key, ctx)) {
+            total += convs[i].pub.unread;
+        }
+    }
+    return total;
+}
+
 uint32_t mesh_store_generation(void) {
     return generation;
 }

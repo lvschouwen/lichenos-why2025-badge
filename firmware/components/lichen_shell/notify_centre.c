@@ -440,6 +440,11 @@ static void toggle_source(void *arg) {
     menu_set_value(s_s.source_row[i], on_off(lichen_notify_source_enabled(s_s.source[i])));
 }
 
+static void open_app_notify_settings(void *arg) {
+    lichen_app_t const *app = arg;
+    app->notify_settings_open();
+}
+
 static void toggle_dnd(void *arg) {
     (void)arg;
     lichen_notify_set_dnd(!lichen_notify_dnd());
@@ -498,6 +503,14 @@ static lv_obj_t *build_settings(void) {
     s_s.source[n]     = "lichen";
     s_s.source_row[n] = menu_add(menu, "Lichen (system)", on_off(lichen_notify_source_enabled("lichen")), toggle_source,
                                  (void *)(uintptr_t)n);
+    for (size_t i = 0; i < lichen_app_count(); i++) { // what an app sends, if it can be set (#50)
+        lichen_app_t const *app = lichen_app_at(i);
+        if (app->notify_settings_open) {
+            char label[40];
+            snprintf(label, sizeof(label), "%s notifications", app->name);
+            menu_add(menu, label, "", open_app_notify_settings, (void *)app);
+        }
+    }
     s_s.dnd_row = menu_add(menu, "Do not disturb", on_off(lichen_notify_dnd()), toggle_dnd, NULL);
     s_s.led_row = menu_add(menu, "Status LED", on_off(led_enabled()), toggle_led, NULL);
     char       count[12];

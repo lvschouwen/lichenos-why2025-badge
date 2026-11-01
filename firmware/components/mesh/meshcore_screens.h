@@ -17,3 +17,7 @@ void meshcore_chats_open(void);
 void meshcore_contacts_open(mesh_contact_view_t view);
 // Settings: the app's settings page with its about rows, as Settings > MeshCore shows it (meshcore_app.c, #17)
 void meshcore_app_settings_open(void);
+// Notifications (#50): the page that sets what MeshCore sends (Settings > Notifications > MeshCore, and under Settings >
+// MeshCore), and the opener for a notice's target (meshcore_notify.c)
+void meshcore_notify_settings_open(void);
+void meshcore_open_notification(char const *target, uint32_t id);

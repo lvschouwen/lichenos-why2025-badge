@@ -97,6 +97,11 @@ static void loaded_checks(void) {
     CHECK(mesh_store_convs(cv, 2) == 2 && (strcmp(cv[0].title, "@Bob") == 0 || strcmp(cv[1].title, "@Bob") == 0));
 }
 
+static bool only_dms(mesh_chat_key_t const *key, void *ctx) {
+    (void)ctx;
+    return key->kind == MESH_CHAT_DM;
+}
+
 int main(void) {
     loaded_checks();
     CHECK(mesh_store_init(3));
@@ -227,6 +232,7 @@ int main(void) {
         CHECK(mesh_store_chat(&kp, buf, 8, true) == 5 && mesh_store_unread_total() == 1);
         mesh_store_add_dm("@bob", "again", -50, 500, bob);
         CHECK(mesh_store_unread_total() == 2);
+        CHECK(mesh_store_unread_where(only_dms, NULL) == 1); // bob's; #badgetest has the other one
         CHECK(mesh_store_update_out(5, 3, 1, 0, 0)); // found in its own chat
         CHECK(mesh_store_chat(&kc, buf, 8, false) == 2 && buf[1].state == 3);
     }

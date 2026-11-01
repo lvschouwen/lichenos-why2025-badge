@@ -387,6 +387,8 @@ static lichen_app_t const meshcore_app = {
     .stop_for_update  = stop_for_update,
     .first_run_set    = first_run_set,
     .open_messages    = open_messages,
+    .open_notification    = meshcore_open_notification,
+    .notify_settings_open = meshcore_notify_settings_open,
 };
 
 static lichen_app_t const *self(void) {

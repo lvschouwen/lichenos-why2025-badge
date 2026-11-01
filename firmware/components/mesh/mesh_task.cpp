@@ -33,6 +33,7 @@
 #include "lichen_fs.h"
 #include "lichen_notify.h"
 #include "lichen_radio.h"
+#include "mesh_notify_run.h"
 #include "lichen_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -200,7 +201,7 @@ static portMUX_TYPE tile_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // The unread total over all chats, after the store changed (called under the mesh lock)
 static void tile_publish_unread(void) {
-    uint32_t total = mesh_store_unread_total();
+    uint32_t total = mesh_store_unread_where(mesh_notify_counts_unread, NULL); // the number the badge and tile share (#50)
     portENTER_CRITICAL(&tile_mux);
     tile.unread_total = total;
     portEXIT_CRITICAL(&tile_mux);
@@ -218,7 +219,7 @@ static uint32_t tile_unread(void) {
 static void tile_on_message(char const *channel, char const *text) {
     mesh_tile_t m;
     mesh_tile_on_message(&m, channel, text); // the formatting outside the spinlock
-    uint32_t total = mesh_store_unread_total();
+    uint32_t total = mesh_store_unread_where(mesh_notify_counts_unread, NULL);
     portENTER_CRITICAL(&tile_mux);
     memcpy(tile.latest, m.latest, sizeof(tile.latest));
     tile.unread_total = total;
@@ -282,6 +283,7 @@ public:
             mesh_chat_key_t key;
             mesh_chat_key_dm(&key, from.id.pub_key);
             mesh_journal_incoming_locked(&key);
+            mesh_notify_dm(&key, from_name, text); // queued; posted by the task after the unlock (#50)
         }
     }
     void onChannelMessageRecv(mesh::Packet *pkt, ChannelDetails &channel, char const *text) override {
@@ -290,6 +292,7 @@ public:
             mesh_chat_key_t key;
             mesh_chat_key_channel(&key, channel.name);
             mesh_journal_incoming_locked(&key);
+            mesh_notify_channel(&key, channel.name, text);
         }
     }
     void onQueueSizeChanged(int msgcount) override { offline_queue_len = msgcount; }
@@ -469,6 +472,37 @@ struct OutSync {
 };
 static OutSync out_sync[OB_CAP];
 
+// An own message has just ended FAILED (#50): its target and text are read again from the outbox, as only fresh
+// entries are copied above
+static void notify_failed(OutSync const &o) {
+    char       target[OB_TARGET_MAX] = "";
+    char       text[OB_TEXT_MAX]     = "";
+    uint8_t    kind                  = OB_CHANNEL;
+    uint8_t    prefix[MF_PREFIX]     = {0};
+    mesh_ob_enter();
+    for (int i = 0; i < OB_CAP && outbox; i++) {
+        ob_entry_t const *e = &outbox->e[i];
+        if (e->used && e->id == o.id) {
+            memcpy(target, e->target, sizeof(target));
+            memcpy(text, e->text, sizeof(text));
+            memcpy(prefix, e->prefix, sizeof(prefix));
+            kind = e->kind;
+        }
+    }
+    mesh_ob_exit();
+    mesh_chat_key_t key;
+    char            title[MESH_CHANNEL_MAX + 2];
+    if (kind == OB_DM) {
+        ContactInfo *c = node ? node->lookupContactByPubKey(prefix, MF_PREFIX) : nullptr;
+        snprintf(title, sizeof(title), "@%s", c ? c->name : "?");
+        mesh_chat_key_dm(&key, prefix);
+    } else {
+        snprintf(title, sizeof(title), "%s", target);
+        mesh_chat_key_channel(&key, target);
+    }
+    mesh_notify_failed(&key, title, text);
+}
+
 // true when a message was added to the store (which may have evicted a chat, so the unread total can have changed)
 static bool sync_outgoing(void) {
     size_t n = 0;
@@ -530,6 +564,9 @@ static bool sync_outgoing(void) {
             }
         }
         mesh_store_update_out(o.id, o.state, o.repeats, o.attempt, o.trip_ms);
+        if (mesh_notify_out_state(o.id, o.state == MESH_OUT_FAILED)) {
+            notify_failed(o);
+        }
         mesh_journal_out_state_locked(o.id, o.state, o.repeats, o.attempt, o.trip_ms);
     }
     uint32_t ids[OB_CAP];
@@ -568,7 +605,9 @@ static void mesh_task(void *arg) {
                 size_t failed = ob_fail_pending(outbox);
                 mesh_ob_exit();
                 int dropped = node->dropOutbound();
+                mesh_notify_mute_failures(true); // the user asked for this stop: no "not delivered" notices
                 sync_outgoing();
+                mesh_notify_mute_failures(false);
                 ESP_LOGW(TAG, "stop: %u outgoing message(s) failed, %d queued packet(s) dropped", (unsigned)failed,
                          dropped);
             }
@@ -595,6 +634,11 @@ static void mesh_task(void *arg) {
         int64_t took_ms = (esp_timer_get_time() - started) / 1000;
         mesh_unlock();
         mesh_journal_flush(); // the card's I/O never under the mesh lock: the screens keep their snapshots meanwhile
+        if (mesh_notify_drain()) { // #50: notices posted after the unlock; a mode read or changed moves the badge
+            mesh_lock();
+            tile_publish_unread();
+            mesh_unlock();
+        }
         if (took_ms >= MESH_SLOW_LOOP_MS) {
             // Where it went (#67): file time is DataStore's (the lazy /contacts3 rewrite), the rest is MeshCore's own
             // work on the packets received (Ed25519 checks of adverts, decryption); the screens skip ticks meanwhile
@@ -1534,6 +1578,10 @@ static void cmd_mesh(char const *args) {
         mesh_journal_console(args[4] ? args + 5 : ""); // the journal's own status: there whether MeshCore runs or not
         return;
     }
+    if (strncmp(args, "notify", 6) == 0 && (args[6] == ' ' || !args[6])) {
+        mesh_notify_console(args[6] ? args + 7 : ""); // #50: the settings and counters are there whether MeshCore runs or not
+        return;
+    }
     if (console_not_running()) {
         return;
     }
@@ -1971,7 +2019,7 @@ extern "C" void mesh_console_init(void) {
     console_register("mesh",
                      "mesh | mesh start | mesh stop | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | "
                      "mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
-                     "mesh dm <12 hex> <text>",
+                     "mesh dm <12 hex> <text> | mesh notify [test dm|chan <name>|fail|mention]",
                      cmd_mesh);
     console_register("contacts", "contacts (nodes heard, newest first) | contacts export [<12 hex>] | contacts import "
                      "<part> | end | cancel", cmd_contacts);

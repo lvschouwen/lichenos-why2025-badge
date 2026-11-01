@@ -12,6 +12,7 @@
 #include "mesh_chat.h"
 #include "mesh_frame.h"
 #include "mesh_format.h"
+#include "mesh_notify_run.h"
 #include "lichen_ui.h"
 #include "theme.h"
 
@@ -463,8 +464,32 @@ static bool on_esc(void *arg) {
     return true;
 }
 
-static void on_delete(lv_event_t *e) {
+// The chat is on screen (#50): no notice is posted for it and its notices are marked read. The key is the one this
+// screen was loaded with (the statics above belong to whichever chat opened last).
+static mesh_chat_key_t loaded_key;
+static bool            loaded_set;
+
+static void on_loaded(lv_event_t *e) {
     (void)e;
+    if (dm_mode) {
+        mesh_chat_key_dm(&loaded_key, peer);
+    } else {
+        mesh_chat_key_channel(&loaded_key, channel);
+    }
+    loaded_set = true;
+    mesh_notify_set_open_chat(&loaded_key);
+}
+
+static void on_unload(lv_event_t *e) {
+    (void)e;
+    if (loaded_set) {
+        mesh_notify_clear_open_chat(&loaded_key); // only if it is still the open one
+        loaded_set = false;
+    }
+}
+
+static void on_delete(lv_event_t *e) {
+    on_unload(e);
     if (timer) {
         lv_timer_delete(timer);
         timer = NULL;
@@ -513,6 +538,8 @@ static lv_obj_t *build_chat(void) {
     lv_obj_set_style_pad_row(screen, 10, 0);
     lv_obj_set_scrollable(screen, false);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    lv_obj_add_event_cb(screen, on_loaded, LV_EVENT_SCREEN_LOADED, NULL);
+    lv_obj_add_event_cb(screen, on_unload, LV_EVENT_SCREEN_UNLOAD_START, NULL);
     shell_on_esc(on_esc, NULL);
     shell_on_search(on_search, NULL);
 
