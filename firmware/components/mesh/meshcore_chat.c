@@ -54,7 +54,10 @@ static bool      searching;
 static char      query[LIST_FILTER_MAX + 1];
 static uint16_t  hits[SHOW_MESSAGES];
 static size_t    hit_n, hit_pos;
+static bool      have_hit;      // hit_seq names the current hit: it survives a rebuild by seq, not by index
+static uint32_t  hit_seq;
 static int32_t   search_from_y; // where the list was when the search began: Esc goes back there
+static bool      search_from_end; // ... or it was at the end: Esc goes to the end, messages may have come in since
 
 static void add_line(lv_obj_t *parent, char const *text, uint32_t color) {
     lv_obj_t *label = lv_label_create(parent);
@@ -210,13 +213,10 @@ static void retry_failed(void) {
 // Highlights the hits (THEME_TILE) and frames the current one (amber left border); scroll brings the current one into
 // view. Works on copy[], the snapshot the screen already holds: no second mesh lock.
 static void search_apply(bool scroll) {
-    uint32_t cur_seq = hit_pos < hit_n ? copy[hits[hit_pos]].seq : 0;
-    bool     had_cur = hit_pos < hit_n;
-    hit_n            = mesh_chat_hits(copy, copy_n, query, hits, SHOW_MESSAGES);
-    hit_pos          = had_cur ? mesh_chat_hit_of_seq(copy, hits, hit_n, cur_seq) : MESH_CHAT_NO_HIT;
-    if (hit_pos == MESH_CHAT_NO_HIT) {
-        hit_pos = mesh_chat_hit_step(MESH_CHAT_NO_HIT, hit_n, 0); // the newest hit first
-    }
+    // copy[] may be a new snapshot already (rebuild): resolve the current hit by its seq, never by an old index
+    hit_n    = mesh_chat_rehit(copy, copy_n, query, hits, SHOW_MESSAGES, have_hit, hit_seq, &hit_pos);
+    have_hit = hit_pos < hit_n;
+    hit_seq  = have_hit ? copy[hits[hit_pos]].seq : 0;
     size_t h = 0;
     for (size_t i = 0; i < copy_n; i++) {
         lv_obj_t *item = lv_obj_get_child(list, (int32_t)i);
@@ -248,8 +248,10 @@ static void search_enter(void) {
     searching     = true;
     query[0]      = '\0';
     hit_n         = 0;
-    hit_pos       = MESH_CHAT_NO_HIT;
-    search_from_y = lv_obj_get_scroll_y(list);
+    hit_pos         = MESH_CHAT_NO_HIT;
+    have_hit        = false;
+    search_from_y   = lv_obj_get_scroll_y(list);
+    search_from_end = lv_obj_get_scroll_bottom(list) <= 0;
     // The search line takes the focus (and the keys) before the compose line hides: hiding a focused object moves the
     // focus on, which in a DM is the Tab-retry hop
     lv_group_add_obj(group, search_line);
@@ -277,7 +279,7 @@ static void search_leave(bool restore) {
     set_default_note();
     if (restore) {
         lv_obj_update_layout(list);
-        lv_obj_scroll_to_y(list, search_from_y, LV_ANIM_OFF);
+        lv_obj_scroll_to_y(list, search_from_end ? LV_COORD_MAX : search_from_y, LV_ANIM_OFF);
     }
 }
 
@@ -298,12 +300,17 @@ static void on_search_key(lv_event_t *e) {
         return;
     }
     if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
-        hit_pos = mesh_chat_hit_step(hit_pos, hit_n, key == LV_KEY_UP ? -1 : 1);
+        if (hit_n == 0) {
+            return;
+        }
+        hit_pos  = mesh_chat_hit_step(hit_pos, hit_n, key == LV_KEY_UP ? -1 : 1);
+        hit_seq  = copy[hits[hit_pos]].seq; // hits[] matches copy[]: both were set by the last search_apply
+        have_hit = true;
         search_apply(true);
     } else if (key == LV_KEY_ENTER) {
         search_leave(false);
     } else if (list_filter_edit(query, sizeof(query), key)) {
-        hit_pos = MESH_CHAT_NO_HIT; // a new query starts at its newest hit
+        have_hit = false; // a new query starts at its newest hit
         search_apply(true);
     }
 }
@@ -346,6 +353,11 @@ static void on_delete(lv_event_t *e) {
     if (timer) {
         lv_timer_delete(timer);
         timer = NULL;
+    }
+    // The focus callback was set on this screen's group; the shell usually deletes the group first (then ta has none)
+    lv_group_t *group = ta ? lv_obj_get_group(ta) : NULL;
+    if (group) {
+        lv_group_set_focus_cb(group, NULL);
     }
     heap_caps_free(copy);
     copy = NULL;

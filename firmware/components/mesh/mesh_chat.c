@@ -168,7 +168,20 @@ size_t mesh_chat_hit_of_seq(mesh_msg_t const *msgs, uint16_t const *hits, size_t
     return MESH_CHAT_NO_HIT;
 }
 
+size_t mesh_chat_rehit(mesh_msg_t const *msgs, size_t n, char const *query, uint16_t *hits, size_t max, bool have_prev,
+                       uint32_t prev_seq, size_t *pos) {
+    size_t n_hits = mesh_chat_hits(msgs, n, query, hits, max);
+    *pos          = have_prev ? mesh_chat_hit_of_seq(msgs, hits, n_hits, prev_seq) : MESH_CHAT_NO_HIT;
+    if (*pos == MESH_CHAT_NO_HIT) {
+        *pos = mesh_chat_hit_step(MESH_CHAT_NO_HIT, n_hits, 0); // the newest hit
+    }
+    return n_hits;
+}
+
 void mesh_chat_search_line(char const *query, size_t pos, size_t n_hits, char *out, size_t cap) {
+    if (!query) {
+        query = "";
+    }
     if (!query[0]) {
         snprintf(out, cap, "Search: _  type to search");
     } else if (n_hits == 0 || pos >= n_hits) {

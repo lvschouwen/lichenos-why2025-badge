@@ -61,7 +61,32 @@ static void search_checks(void) {
     CHECK(mesh_chat_hit_of_seq(m, hits, n, 101) == MESH_CHAT_NO_HIT); // not a hit
     CHECK(mesh_chat_hit_of_seq(m, hits, 0, 100) == MESH_CHAT_NO_HIT);
 
+    // after a rebuild: the current hit is found again by seq, whatever its new index
+    size_t pos;
+    n = mesh_chat_rehit(m, 5, "foo", hits, 8, true, 102, &pos); // carol, hit 1 of the oldest-first list
+    CHECK(n == 4 && pos == 1);
+    // the count changes: a new matching message arrives, the window shifts by one (the oldest drops out)
+    static mesh_msg_t w[5];
+    memcpy(w, m + 1, 4 * sizeof(*w));
+    strcpy(w[4].text, "frank: foo again");
+    w[4].seq = 105;
+    n = mesh_chat_rehit(w, 5, "foo", hits, 8, true, 102, &pos);
+    CHECK(n == 4 && pos == 0 && w[hits[pos]].seq == 102); // still carol, now at a new index
+    // the previous hit left the window: back to the newest hit
+    n = mesh_chat_rehit(w, 5, "foo", hits, 8, true, 100, &pos);
+    CHECK(n == 4 && pos == 3 && w[hits[pos]].seq == 105);
+    // no previous hit: the newest
+    n = mesh_chat_rehit(m, 5, "foo", hits, 8, false, 102, &pos);
+    CHECK(n == 4 && pos == 3);
+    // no hits any more
+    n = mesh_chat_rehit(m, 5, "zzz", hits, 8, true, 102, &pos);
+    CHECK(n == 0 && pos == MESH_CHAT_NO_HIT);
+    n = mesh_chat_rehit(m, 0, "foo", hits, 8, true, 102, &pos);
+    CHECK(n == 0 && pos == MESH_CHAT_NO_HIT);
+
     char line[64];
+    mesh_chat_search_line(NULL, MESH_CHAT_NO_HIT, 0, line, sizeof(line)); // NULL reads as empty
+    CHECK(strcmp(line, "Search: _  type to search") == 0);
     mesh_chat_search_line("", MESH_CHAT_NO_HIT, 0, line, sizeof(line));
     CHECK(strcmp(line, "Search: _  type to search") == 0);
     mesh_chat_search_line("zzz", MESH_CHAT_NO_HIT, 0, line, sizeof(line));

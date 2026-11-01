@@ -57,6 +57,12 @@ size_t mesh_chat_hit_step(size_t pos, size_t n_hits, int dir);
 // Where the message with this seq is among the hits, MESH_CHAT_NO_HIT when it is not one (the list was rebuilt)
 size_t mesh_chat_hit_of_seq(mesh_msg_t const *msgs, uint16_t const *hits, size_t n_hits, uint32_t seq);
 
+// The hits again after the chat was redrawn (new messages, the window moved on): fills hits like mesh_chat_hits and
+// returns their count; *pos becomes the hit with prev_seq (when have_prev), else the newest hit (MESH_CHAT_NO_HIT when
+// there are none). Never looks at the old hits: their indices belong to the old snapshot.
+size_t mesh_chat_rehit(mesh_msg_t const *msgs, size_t n, char const *query, uint16_t *hits, size_t max, bool have_prev,
+                       uint32_t prev_seq, size_t *pos);
+
 // The line in place of the compose line while searching: "Search: foo_  (2 of 7)", counted from the newest hit,
 // "Search: foo_  no match", or "Search: _  type to search" for an empty query
 void mesh_chat_search_line(char const *query, size_t pos, size_t n_hits, char *out, size_t cap);
