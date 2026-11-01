@@ -80,7 +80,7 @@ static void test_text(void) {
     CHECK(strstr(out, "Task: console\nPC: 0x4ff0abcd\nFirmware: fw-1\n") != NULL);
     CHECK(strstr(out, "Crashed image ELF: abc\n") != NULL);
     CHECK(strstr(out, "Backtrace:\n  0x00000001\n  0x00000002\n") != NULL);
-    CHECK(strstr(out, "Core dump:") != NULL);
+    CHECK(strstr(out, "Core dump: the last one on flash") != NULL && strstr(out, "may belong to a newer crash") != NULL);
     CHECK(strstr(out, l) != NULL);
     crashlog_full(&e, false, out, sizeof(out));
     CHECK(strstr(out, "Core dump:") == NULL);

@@ -20,5 +20,8 @@ bool crash_log_store(char const *text, size_t len);
 bool crash_clear_all(void);
 // The NVS crash counter: crashes recorded since the last clear
 uint32_t crash_count_since_clear(void);
+// Held around a read-modify-write of the log (load, change, store); store and clear take it too (recursive)
+void crash_log_lock(void);
+void crash_log_unlock(void);
 // Changes whenever the log is stored or cleared, so a cached view knows to read it again
 uint32_t crash_log_generation(void);

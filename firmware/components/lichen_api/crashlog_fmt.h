@@ -46,7 +46,8 @@ char const *crashlog_reason_text(char const *reason);
 void crashlog_when_text(char const *when, char *out, size_t cap);
 // A list row: title "Panic • 2026-10-30 12:00 UTC", value the task ("console"); an unparsed line is its own title
 void crashlog_row(crashlog_entry_t const *e, char *title, size_t tc, char *value, size_t vc);
-// The full view, one fact per line; newest adds where the core dump is. Returns the length (NUL terminated).
+// The full view, one fact per line; newest adds a note on the core dump (only the last one is kept, and deleting entries
+// leaves it, so it may be a newer crash than this one). Returns the length (NUL terminated).
 size_t crashlog_full(crashlog_entry_t const *e, bool newest, char *out, size_t cap);
 
 // Removes the index-th non-empty line counted newest first (as crashlog_split numbers them) from text in place, with

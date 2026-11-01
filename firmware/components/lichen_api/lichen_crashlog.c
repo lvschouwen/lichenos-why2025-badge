@@ -15,8 +15,7 @@ static char const TAG[] = "crashlog";
 #define LOG_CAP (CRASHLOG_MAX * CRASHLOG_LINE_MAX + 1024)
 
 // The app's seen marker: crash.c's counter and the newest line's hash when the viewer was last opened
-#define KEY_SEEN_COUNT "seen_n"
-#define KEY_SEEN_HASH  "seen_h"
+#define KEY_SEEN "seen"
 
 // The log text in PSRAM (internal RAM is for the display); NULL when there is no memory. Free it.
 static char *load(size_t *len) {
@@ -61,33 +60,51 @@ static uint32_t newest_hash(char const *buf, size_t len, size_t *entries) {
     return *entries ? crashlog_hash(buf + spans[0].start, spans[0].len) : 0;
 }
 
-static void store_seen(lichen_app_t const *app, uint32_t count, uint32_t hash) {
-    app_settings_set_u32(app, KEY_SEEN_COUNT, count);
-    app_settings_set_u32(app, KEY_SEEN_HASH, hash);
+// One NVS key, one commit: the counter in the high half, the hash in the low one
+static uint64_t marker(uint32_t count, uint32_t hash) {
+    return ((uint64_t)count << 32) | hash;
 }
 
-void lichen_crashlog_mark_seen(lichen_app_t const *app) {
-    size_t len, entries;
-    char  *buf = load(&len);
+static void store_seen(lichen_app_t const *app, uint32_t count, uint32_t hash) {
+    uint64_t const want = marker(count, hash);
+    if (app_settings_get_u64(app, KEY_SEEN, UINT64_MAX) != want) { // opening the app writes nothing when nothing changed
+        app_settings_set_u64(app, KEY_SEEN, want);
+    }
+}
+
+bool lichen_crashlog_mark_seen(lichen_app_t const *app) {
+    static bool logged;
+    size_t      len, entries;
+    char       *buf = load(&len);
     if (buf) {
         store_seen(app, crash_count_since_clear(), newest_hash(buf, len, &entries));
+    } else if (!logged) {
+        ESP_LOGW(TAG, "mark seen: log not read, the tile may count old entries as new");
+        logged = true;
     }
     free(buf);
+    return buf != NULL;
+}
+
+// The index-th line is still the one the viewer showed
+static bool still_there(char const *buf, crashlog_span_t const *spans, size_t n, size_t index, crashlog_entry_t const *expect) {
+    return expect && index < n && spans[index].len == strlen(expect->line) &&
+           memcmp(buf + spans[index].start, expect->line, spans[index].len) == 0;
 }
 
 bool lichen_crashlog_delete(lichen_app_t const *app, size_t index, crashlog_entry_t const *expect) {
+    crash_log_lock(); // "fw crash clear" waits until the rewrite is done
     size_t          len;
     char           *buf = load(&len);
     crashlog_span_t spans[CRASHLOG_MAX];
     size_t          n  = buf ? crashlog_split(buf, len, spans, CRASHLOG_MAX) : 0;
-    // The log may have changed under the viewer (fw crash clear): delete only the line that was shown
-    bool ok = index < n && spans[index].len == strlen(expect->line) &&
-              memcmp(buf + spans[index].start, expect->line, spans[index].len) == 0;
-    ok = ok && crashlog_remove(buf, &len, index) && crash_log_store(buf, len);
+    bool            ok = still_there(buf, spans, n, index, expect) && crashlog_remove(buf, &len, index) &&
+              crash_log_store(buf, len);
     if (ok) {
         size_t entries;
         store_seen(app, crash_count_since_clear(), newest_hash(buf, len, &entries));
     }
+    crash_log_unlock();
     ESP_LOGW(TAG, "delete entry %u: %s", (unsigned)index, ok ? "done" : "not deleted");
     free(buf);
     return ok;
@@ -100,7 +117,7 @@ bool lichen_crashlog_clear(lichen_app_t const *app) {
     return ok;
 }
 
-void lichen_crashlog_status(lichen_app_t const *app, lichen_crashlog_status_t *out) {
+bool lichen_crashlog_status(lichen_app_t const *app, lichen_crashlog_status_t *out) {
     memset(out, 0, sizeof(*out));
     size_t          len;
     char           *buf = load(&len);
@@ -109,11 +126,13 @@ void lichen_crashlog_status(lichen_app_t const *app, lichen_crashlog_status_t *o
     if (n) {
         crashlog_parse(buf + spans[0].start, spans[0].len, &out->newest);
         uint32_t hash = crashlog_hash(buf + spans[0].start, spans[0].len);
-        out->unseen   = crashlog_unseen(crash_count_since_clear(), app_settings_get_u32(app, KEY_SEEN_COUNT, 0), hash,
-                                        app_settings_get_u32(app, KEY_SEEN_HASH, 0), n);
+        uint64_t seen = app_settings_get_u64(app, KEY_SEEN, 0);
+        out->unseen   = crashlog_unseen(crash_count_since_clear(), (uint32_t)(seen >> 32), hash, (uint32_t)seen, n);
     }
     out->entries = n;
+    out->ok      = buf != NULL;
     free(buf);
+    return out->ok;
 }
 
 uint32_t lichen_crashlog_generation(void) {

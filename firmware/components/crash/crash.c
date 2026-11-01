@@ -11,6 +11,7 @@
 #include "esp_rom_crc.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "fw_console.h"
 #include "nvs.h"
@@ -38,6 +39,22 @@ static char const TAG[] = "crash";
 static bool s_recovered;
 static int  s_reset_reason = -1; // esp_reset_reason() of this boot, for fw crash
 static atomic_uint s_generation;  // crash_log_generation()
+
+// One writer at a time: the Crash log app's delete (load, remove, store) against "fw crash clear" on the console.
+// Recursive, so a holder may call crash_log_store and crash_clear_all. Created in crash_check, before any user.
+static StaticSemaphore_t s_lock_buf;
+static SemaphoreHandle_t s_lock;
+
+void crash_log_lock(void) {
+    if (!s_lock) {
+        s_lock = xSemaphoreCreateRecursiveMutexStatic(&s_lock_buf);
+    }
+    xSemaphoreTakeRecursive(s_lock, portMAX_DELAY);
+}
+
+void crash_log_unlock(void) {
+    xSemaphoreGiveRecursive(s_lock);
+}
 
 static crash_reset_t crash_reset_of(esp_reset_reason_t r) {
     switch (r) {
@@ -131,10 +148,13 @@ static size_t read_file(char const *path, char *buf, size_t cap) {
     return n;
 }
 
-// A swap cut short by a reset leaves the previous log as log.old only: it still counts
+// A swap cut short by a reset leaves the log as log.old (moved aside) or log.tmp (not renamed yet) only: it still counts
 static size_t read_log(char *buf, size_t cap) {
     size_t n = read_file(CRASH_LOG, buf, cap);
-    return n ? n : read_file(CRASH_OLD, buf, cap);
+    if (n == 0) {
+        n = read_file(CRASH_OLD, buf, cap);
+    }
+    return n ? n : read_file(CRASH_TMP, buf, cap);
 }
 
 size_t crash_log_load(char *buf, size_t cap) {
@@ -150,15 +170,21 @@ static bool write_file(char const *path, char const *text, size_t len) {
     return (fclose(f) == 0) && ok;
 }
 
-// rename does not replace on FAT: the old log steps aside until the new one is in place, as ota_server.c does
+// rename does not replace on FAT: the old log steps aside until the new one is in place, as ota_server.c does. A
+// log.old is only dropped while log.txt exists: after an earlier cut it may be the only copy left.
 static bool swap_in(void) {
-    unlink(CRASH_OLD);
-    bool had_old = rename(CRASH_LOG, CRASH_OLD) == 0;
+    struct stat st;
+    bool        had_log = stat(CRASH_LOG, &st) == 0;
+    if (had_log) {
+        unlink(CRASH_OLD);
+        if (rename(CRASH_LOG, CRASH_OLD) != 0) {
+            return false;
+        }
+    }
     if (rename(CRASH_TMP, CRASH_LOG) != 0) {
-        if (had_old) {
+        if (had_log) {
             rename(CRASH_OLD, CRASH_LOG);
         }
-        unlink(CRASH_TMP);
         return false;
     }
     unlink(CRASH_OLD);
@@ -167,9 +193,11 @@ static bool swap_in(void) {
 
 bool crash_log_store(char const *text, size_t len) {
     bool ok;
+    crash_log_lock();
     if (len == 0) {
         ok = unlink(CRASH_LOG) == 0 || errno == ENOENT;
         unlink(CRASH_OLD);
+        unlink(CRASH_TMP);
     } else {
         mkdir(CRASH_DIR, 0777); // exists after the first crash
         ok = write_file(CRASH_TMP, text, len) && swap_in();
@@ -181,6 +209,7 @@ bool crash_log_store(char const *text, size_t len) {
         ESP_LOGE(TAG, "cannot write %s: errno %d", CRASH_LOG, errno);
     }
     atomic_fetch_add(&s_generation, 1);
+    crash_log_unlock();
     return ok;
 }
 
@@ -193,6 +222,7 @@ static void append_record(char const *record) {
     if (!buf) {
         return;
     }
+    crash_log_lock();
     size_t len = read_log(buf, LOG_MAX - 256);
     if (len && buf[len - 1] != '\n') {
         buf[len++] = '\n';
@@ -200,6 +230,7 @@ static void append_record(char const *record) {
     len += (size_t)snprintf(buf + len, LOG_MAX - len, "%s\n", record);
     len = crash_log_trim(buf, len, KEEP_RECORDS);
     crash_log_store(buf, len);
+    crash_log_unlock();
     free(buf);
 }
 
@@ -355,8 +386,8 @@ static void crash_test_wdt(void) {
 }
 
 bool crash_clear_all(void) {
+    crash_log_lock();
     esp_err_t err = esp_core_dump_image_erase();
-    unlink(CRASH_TMP);
     crash_log_store("", 0);
     nvs_handle_t nvs;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
@@ -366,6 +397,7 @@ bool crash_clear_all(void) {
         nvs_close(nvs);
     }
     atomic_fetch_add(&s_generation, 1); // the counter changed too
+    crash_log_unlock();
     return err == ESP_OK;
 }
 
@@ -386,6 +418,8 @@ static void crash_command(char const *args) {
 }
 
 void crash_check(void) {
+    crash_log_lock(); // creates the lock before any other task can want it
+    crash_log_unlock();
     check_image_fits();
     console_register("crash", "crash [dump | clear | test panic|wdt] (crash log and core dump)", crash_command);
     esp_reset_reason_t const why    = esp_reset_reason();

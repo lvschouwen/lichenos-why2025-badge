@@ -196,7 +196,7 @@ size_t crashlog_full(crashlog_entry_t const *e, bool newest, char *out, size_t c
         pos = append(out, cap, pos, "%s0x%08x\n", i == 0 ? "Backtrace:\n  " : "  ", (unsigned)e->bt[i]);
     }
     if (newest) {
-        pos = append(out, cap, pos, "Core dump: tools/badge.sh crash decodes the newest crash\n");
+        pos = append(out, cap, pos, "Core dump: the last one on flash (tools/badge.sh crash); it may belong to a newer crash than this entry\n");
     }
     return append(out, cap, pos, "\nAs stored:\n%s", e->line);
 }

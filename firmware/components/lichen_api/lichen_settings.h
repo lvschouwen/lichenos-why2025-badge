@@ -15,8 +15,8 @@ extern "C" {
 
 uint8_t app_settings_get_u8(lichen_app_t const *app, char const *key, uint8_t def);
 bool    app_settings_set_u8(lichen_app_t const *app, char const *key, uint8_t value);
-uint32_t app_settings_get_u32(lichen_app_t const *app, char const *key, uint32_t def);
-bool     app_settings_set_u32(lichen_app_t const *app, char const *key, uint32_t value);
+uint64_t app_settings_get_u64(lichen_app_t const *app, char const *key, uint64_t def);
+bool     app_settings_set_u64(lichen_app_t const *app, char const *key, uint64_t value);
 // Copies the value (or def) into out, always NUL-terminated
 void app_settings_get_str(lichen_app_t const *app, char const *key, char *out, size_t cap, char const *def);
 bool app_settings_set_str(lichen_app_t const *app, char const *key, char const *value);
