@@ -22,7 +22,7 @@ typedef struct {
     uint8_t  pubkey[6]; // the start of the public key: shown, and the DM prefix (#47)
     char     name[MESH_NAME_MAX + 1];
     uint8_t  type;     // MeshCore ADV_TYPE_*
-    uint8_t  path_len; // hops of the known path, 0xFF when only flood routing works
+    uint8_t  path_len; // MeshCore's out_path_len: hops and hash size packed (mesh_path_decode), 0xFF = flood
     uint32_t age_s;    // since its last advert was heard
 } mesh_contact_t;
 

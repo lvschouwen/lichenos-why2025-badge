@@ -10,6 +10,7 @@
 #include "menu.h"
 #include "mesh.h"
 #include "mesh_chat.h"
+#include "mesh_contact_fmt.h"
 #include "mesh_format.h"
 #include "meshcore_chat.h"
 #include "meshcore_settings.h"
@@ -309,13 +310,7 @@ static void rebuild_contacts(size_t count) {
         char                  age[24], hops[16], meta[80];
         contact_keys[i]         = scroll_key_hash(c->pubkey, sizeof(c->pubkey), 0);
         mesh_format_age(c->age_s, age, sizeof(age));
-        if (c->path_len == 0xFF) {
-            snprintf(hops, sizeof(hops), "flood");
-        } else if (c->path_len == 0) {
-            snprintf(hops, sizeof(hops), "direct");
-        } else {
-            snprintf(hops, sizeof(hops), "%u hops", c->path_len);
-        }
+        mesh_format_hops(c->path_len, hops, sizeof(hops)); // the hash size bits are not hops (#85)
         snprintf(meta, sizeof(meta), "%s, %s, %s", mesh_type_name(c->type), hops, age);
         lv_obj_t *item = add_item(contacts_list);
         add_label(item, c->name[0] ? c->name : "(no name)", THEME_TEXT);

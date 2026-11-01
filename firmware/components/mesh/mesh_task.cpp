@@ -7,6 +7,7 @@
 #include "identity_move.h"
 #include "mesh.h"
 #include "mesh_format.h"
+#include "mesh_contact_fmt.h"
 #include "mesh_chat.h"
 #include "mesh_frame.h"
 #include "channel_input.h"
@@ -1101,11 +1102,7 @@ static void cmd_contacts(char const *args) {
     for (size_t i = 0; i < n; i++) {
         char age[24], hops[12];
         mesh_format_age(list[i].age_s, age, sizeof(age));
-        if (list[i].path_len == 0xFF) {
-            snprintf(hops, sizeof(hops), "flood");
-        } else {
-            snprintf(hops, sizeof(hops), "%u hops", list[i].path_len);
-        }
+        mesh_format_hops(list[i].path_len, hops, sizeof(hops)); // the hash size bits are not hops (#85)
         console_reply("contact %02x%02x%02x%02x%02x%02x %-32s %-8s %-8s %s", list[i].pubkey[0], list[i].pubkey[1], list[i].pubkey[2],
                       list[i].pubkey[3], list[i].pubkey[4], list[i].pubkey[5], list[i].name,
                       mesh_type_name(list[i].type), hops, age);
