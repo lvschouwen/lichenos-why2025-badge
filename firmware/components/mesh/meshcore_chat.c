@@ -37,14 +37,24 @@ static uint8_t peer[MF_PREFIX];               // that contact's key prefix
 static size_t  copy_n;
 static lv_obj_t *tab_hop; // an empty second focusable: Tab moves the focus onto it, which retries the failed message
 
-#define HINT_CHANNEL "Enter: send    Esc: back"
-#define HINT_DM      "Enter: send    Tab: retry a failed one    Esc: back"
+#define HINT_CHANNEL "Enter: send    /: search    Esc: back"
+#define HINT_DM      "Enter: send    Tab: retry a failed one    /: search    Esc: back"
+#define HINT_SEARCH  "Up/Down: older/newer match    Enter: done    Esc: cancel"
+#define HIT_BORDER_W 4 // on every row, shown only on the current hit: a border that came and went would move the text
 
 static lv_obj_t   *list, *ta, *counter, *note;
 static lv_timer_t *timer;
 static mesh_msg_t *copy;
 static uint32_t    shown_generation, shown_s;
 static bool        note_error;
+
+// Search inside the chat (#48): the line that takes the compose line's place, and the hits among copy[]
+static lv_obj_t *search_line;
+static bool      searching;
+static char      query[LIST_FILTER_MAX + 1];
+static uint16_t  hits[SHOW_MESSAGES];
+static size_t    hit_n, hit_pos;
+static int32_t   search_from_y; // where the list was when the search began: Esc goes back there
 
 static void add_line(lv_obj_t *parent, char const *text, uint32_t color) {
     lv_obj_t *label = lv_label_create(parent);
@@ -69,11 +79,21 @@ static void add_message(mesh_msg_t const *m, uint32_t now) {
     lv_obj_set_size(item, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(item, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_ver(item, 4, 0);
+    lv_obj_set_style_pad_hor(item, 8, 0);
+    lv_obj_set_style_radius(item, 8, 0);
+    lv_obj_set_style_bg_color(item, lv_color_hex(THEME_TILE), 0);
+    lv_obj_set_style_bg_opa(item, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_side(item, LV_BORDER_SIDE_LEFT, 0);
+    lv_obj_set_style_border_width(item, HIT_BORDER_W, 0);
+    lv_obj_set_style_border_color(item, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_border_opa(item, LV_OPA_TRANSP, 0);
     lv_obj_set_scrollable(item, false);
     lv_obj_set_clickable(item, false);
     add_line(item, m->text, m->outgoing ? THEME_AMBER : THEME_TEXT);
     add_line(item, meta, color);
 }
+
+static void search_apply(bool scroll);
 
 static void rebuild(size_t n) {
     bool at_end = lv_obj_get_scroll_bottom(list) <= 0;
@@ -91,6 +111,9 @@ static void rebuild(size_t n) {
     }
     lv_obj_update_layout(list);
     lv_obj_scroll_to_y(list, at_end ? LV_COORD_MAX : y, LV_ANIM_OFF);
+    if (searching) {
+        search_apply(false); // new rows: highlight them again, the view stays where it is
+    }
 }
 
 static size_t text_max(void) {
@@ -182,7 +205,114 @@ static void retry_failed(void) {
     set_note("Nothing failed to retry", false);
 }
 
+// ---- search inside the chat (#48) -----------------------------------------------------------------------------------
+
+// Highlights the hits (THEME_TILE) and frames the current one (amber left border); scroll brings the current one into
+// view. Works on copy[], the snapshot the screen already holds: no second mesh lock.
+static void search_apply(bool scroll) {
+    uint32_t cur_seq = hit_pos < hit_n ? copy[hits[hit_pos]].seq : 0;
+    bool     had_cur = hit_pos < hit_n;
+    hit_n            = mesh_chat_hits(copy, copy_n, query, hits, SHOW_MESSAGES);
+    hit_pos          = had_cur ? mesh_chat_hit_of_seq(copy, hits, hit_n, cur_seq) : MESH_CHAT_NO_HIT;
+    if (hit_pos == MESH_CHAT_NO_HIT) {
+        hit_pos = mesh_chat_hit_step(MESH_CHAT_NO_HIT, hit_n, 0); // the newest hit first
+    }
+    size_t h = 0;
+    for (size_t i = 0; i < copy_n; i++) {
+        lv_obj_t *item = lv_obj_get_child(list, (int32_t)i);
+        bool      hit  = h < hit_n && hits[h] == i;
+        if (!item) {
+            break;
+        }
+        lv_obj_set_style_bg_opa(item, hit ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_opa(item, hit && h == hit_pos ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        h += hit;
+    }
+    char text[96];
+    mesh_chat_search_line(query, hit_pos, hit_n, text, sizeof(text));
+    lv_label_set_text(search_line, text);
+    if (scroll && hit_pos < hit_n) {
+        lv_obj_t *item = lv_obj_get_child(list, hits[hit_pos]);
+        if (item) {
+            lv_obj_update_layout(list);
+            lv_obj_scroll_to_view(item, LV_ANIM_OFF);
+        }
+    }
+}
+
+static void search_enter(void) {
+    lv_group_t *group = lv_obj_get_group(ta);
+    if (!group || !search_line || searching) {
+        return;
+    }
+    searching     = true;
+    query[0]      = '\0';
+    hit_n         = 0;
+    hit_pos       = MESH_CHAT_NO_HIT;
+    search_from_y = lv_obj_get_scroll_y(list);
+    // The search line takes the focus (and the keys) before the compose line hides: hiding a focused object moves the
+    // focus on, which in a DM is the Tab-retry hop
+    lv_group_add_obj(group, search_line);
+    lv_obj_remove_flag(search_line, LV_OBJ_FLAG_HIDDEN);
+    lv_group_focus_obj(search_line);
+    lv_obj_add_flag(ta, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(counter, LV_OBJ_FLAG_HIDDEN);
+    set_note(HINT_SEARCH, false);
+    search_apply(false);
+}
+
+// Enter keeps the view where the search took it; Esc (restore) goes back to where the search began
+static void search_leave(bool restore) {
+    if (!searching) {
+        return;
+    }
+    searching = false;
+    query[0]  = '\0';
+    search_apply(false); // no query, no hits: every row plain again
+    lv_obj_remove_flag(ta, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(counter, LV_OBJ_FLAG_HIDDEN);
+    lv_group_focus_obj(ta);
+    lv_group_remove_obj(search_line);
+    lv_obj_add_flag(search_line, LV_OBJ_FLAG_HIDDEN);
+    set_default_note();
+    if (restore) {
+        lv_obj_update_layout(list);
+        lv_obj_scroll_to_y(list, search_from_y, LV_ANIM_OFF);
+    }
+}
+
+// The compose line sees a key before the textarea does: "/" on an empty line starts a search and never reaches the
+// draft
+static void on_compose_key(lv_event_t *e) {
+    if (lv_event_get_key(e) == '/' && !lv_textarea_get_text(ta)[0]) {
+        lv_event_stop_processing(e);
+        search_enter();
+    }
+}
+
+// Keys while searching (the search line has the focus): typing and Backspace edit the query, Up/Down jump between
+// hits, Enter is done
+static void on_search_key(lv_event_t *e) {
+    uint32_t key = lv_event_get_key(e);
+    if (!searching) {
+        return;
+    }
+    if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
+        hit_pos = mesh_chat_hit_step(hit_pos, hit_n, key == LV_KEY_UP ? -1 : 1);
+        search_apply(true);
+    } else if (key == LV_KEY_ENTER) {
+        search_leave(false);
+    } else if (list_filter_edit(query, sizeof(query), key)) {
+        hit_pos = MESH_CHAT_NO_HIT; // a new query starts at its newest hit
+        search_apply(true);
+    }
+}
+
 static void on_focus_move(lv_group_t *group) {
+    if (searching && lv_group_get_focused(group) != search_line) {
+        lv_group_focus_obj(search_line); // Tab does nothing while searching (no retry from a hidden compose line)
+        return;
+    }
     if (tab_hop && lv_group_get_focused(group) == tab_hop) {
         retry_failed();
         lv_group_focus_obj(ta); // calls this again, with the compose line focused: a no-op
@@ -197,9 +327,13 @@ static void on_key(lv_event_t *e) {
     }
 }
 
-// Esc clears a draft first, then leaves (#57)
-static bool clear_draft(void *arg) {
+// Esc leaves a search first (#48), then clears a draft (#57), then leaves
+static bool on_esc(void *arg) {
     (void)arg;
+    if (searching) {
+        search_leave(true);
+        return true;
+    }
     if (!ta || !lv_textarea_get_text(ta)[0]) {
         return false;
     }
@@ -215,7 +349,8 @@ static void on_delete(lv_event_t *e) {
     }
     heap_caps_free(copy);
     copy = NULL;
-    list = ta = counter = note = tab_hop = NULL;
+    list = ta = counter = note = tab_hop = search_line = NULL;
+    searching = false;
 }
 
 static void style_ta(void) {
@@ -241,7 +376,7 @@ static lv_obj_t *build_chat(void) {
     lv_obj_set_style_pad_row(screen, 10, 0);
     lv_obj_set_scrollable(screen, false);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    shell_on_esc(clear_draft, NULL);
+    shell_on_esc(on_esc, NULL);
 
     lv_obj_t *heading = lv_label_create(screen);
     lv_obj_set_width(heading, LV_PCT(100));
@@ -268,6 +403,23 @@ static lv_obj_t *build_chat(void) {
     lv_obj_add_event_cb(ta, on_ready, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(ta, on_changed, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(ta, on_key, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(ta, on_compose_key, LV_EVENT_KEY | LV_EVENT_PREPROCESS, NULL);
+
+    // Takes the compose line's place while searching (#48), styled like it so nothing else moves
+    search_line = lv_label_create(screen);
+    lv_obj_set_width(search_line, LV_PCT(100));
+    lv_label_set_long_mode(search_line, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_bg_color(search_line, lv_color_hex(THEME_TILE), 0);
+    lv_obj_set_style_bg_opa(search_line, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(search_line, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_text_font(search_line, lichen_font(LICHEN_FONT_SMALL), 0);
+    lv_obj_set_style_radius(search_line, 14, 0);
+    lv_obj_set_style_pad_all(search_line, 14, 0);
+    lv_obj_set_style_border_width(search_line, 3, 0);
+    lv_obj_set_style_border_color(search_line, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_outline_width(search_line, 0, LV_STATE_ANY);
+    lv_obj_add_flag(search_line, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(search_line, on_search_key, LV_EVENT_KEY, NULL);
 
     counter = lv_label_create(screen);
     lv_obj_set_width(counter, LV_PCT(100));
@@ -286,9 +438,12 @@ static lv_obj_t *build_chat(void) {
         lv_obj_set_floating(tab_hop, true);
         lv_obj_set_clickable(tab_hop, false);
         lv_group_add_obj(group, tab_hop);
-        lv_group_set_focus_cb(group, on_focus_move);
         lv_group_focus_obj(ta);
     }
+    if (group) {
+        lv_group_set_focus_cb(group, on_focus_move); // the screen's own group; keeps the focus on a search (#48)
+    }
+    searching = false;
     copy_n           = 0;
     copy             = heap_caps_malloc(SHOW_MESSAGES * sizeof(*copy), MALLOC_CAP_SPIRAM);
     shown_generation = UINT32_MAX;

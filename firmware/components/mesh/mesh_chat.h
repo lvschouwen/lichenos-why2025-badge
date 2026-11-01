@@ -44,6 +44,23 @@ char const *mesh_advert_note(bool approximate);
 // Returns the bytes that would be sent (cut on a UTF-8 boundary).
 size_t mesh_compose_status(char const *text, size_t max_bytes, char *out, size_t cap);
 
+// Search inside a chat (#48): the messages whose text has every word of query (case-insensitive, list_filter rules).
+// Writes their indices into hits (oldest first, as msgs is) and returns how many, at most max. An empty or blank query
+// has no hits.
+#define MESH_CHAT_NO_HIT ((size_t)-1)
+size_t mesh_chat_hits(mesh_msg_t const *msgs, size_t n, char const *query, uint16_t *hits, size_t max);
+
+// The hit after pos (an index into hits) going dir: -1 is Up (older), +1 is Down (newer), wrapping at both ends. A pos
+// that is not a hit (MESH_CHAT_NO_HIT) gives the newest hit, and so does dir 0. MESH_CHAT_NO_HIT when there are none.
+size_t mesh_chat_hit_step(size_t pos, size_t n_hits, int dir);
+
+// Where the message with this seq is among the hits, MESH_CHAT_NO_HIT when it is not one (the list was rebuilt)
+size_t mesh_chat_hit_of_seq(mesh_msg_t const *msgs, uint16_t const *hits, size_t n_hits, uint32_t seq);
+
+// The line in place of the compose line while searching: "Search: foo_  (2 of 7)", counted from the newest hit,
+// "Search: foo_  no match", or "Search: _  type to search" for an empty query
+void mesh_chat_search_line(char const *query, size_t pos, size_t n_hits, char *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

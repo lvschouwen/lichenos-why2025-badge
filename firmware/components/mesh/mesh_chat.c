@@ -1,6 +1,7 @@
 #include "mesh_chat.h"
 
 #include "channel_input.h"
+#include "list_filter.h"
 #include "mesh_format.h"
 #include "mesh_frame.h"
 #include "mesh_outbox.h"
@@ -107,9 +108,9 @@ char const *mesh_advert_refusal(bool clock_set) {
 
 char const *mesh_clock_hint(bool clock_set, bool approximate) {
     if (!clock_set) {
-        return "Clock not set, others see a wrong time    Enter: send    Esc: back";
+        return "Clock not set, others see a wrong time    Enter: send    /: search    Esc: back";
     }
-    return approximate ? "Clock from mesh contacts, unverified    Enter: send    Esc: back" : NULL;
+    return approximate ? "Clock from mesh contacts, unverified    Enter: send    /: search    Esc: back" : NULL;
 }
 
 char const *mesh_advert_note(bool approximate) {
@@ -126,4 +127,53 @@ size_t mesh_compose_status(char const *text, size_t max_bytes, char *out, size_t
         snprintf(out, cap, "%u / %u bytes", (unsigned)len, (unsigned)max_bytes);
     }
     return sent;
+}
+
+static bool word_in_text(char const *word, void *text) {
+    return list_filter_text_has(text, word);
+}
+
+size_t mesh_chat_hits(mesh_msg_t const *msgs, size_t n, char const *query, uint16_t *hits, size_t max) {
+    if (!query || !query[strspn(query, " ")]) {
+        return 0;
+    }
+    size_t found = 0;
+    for (size_t i = 0; i < n && found < max; i++) {
+        if (list_filter_match(query, word_in_text, (void *)msgs[i].text)) {
+            hits[found++] = (uint16_t)i;
+        }
+    }
+    return found;
+}
+
+size_t mesh_chat_hit_step(size_t pos, size_t n_hits, int dir) {
+    if (n_hits == 0) {
+        return MESH_CHAT_NO_HIT;
+    }
+    if (pos >= n_hits || dir == 0) {
+        return n_hits - 1;
+    }
+    if (dir < 0) {
+        return pos == 0 ? n_hits - 1 : pos - 1;
+    }
+    return pos + 1 == n_hits ? 0 : pos + 1;
+}
+
+size_t mesh_chat_hit_of_seq(mesh_msg_t const *msgs, uint16_t const *hits, size_t n_hits, uint32_t seq) {
+    for (size_t i = 0; i < n_hits; i++) {
+        if (msgs[hits[i]].seq == seq) {
+            return i;
+        }
+    }
+    return MESH_CHAT_NO_HIT;
+}
+
+void mesh_chat_search_line(char const *query, size_t pos, size_t n_hits, char *out, size_t cap) {
+    if (!query[0]) {
+        snprintf(out, cap, "Search: _  type to search");
+    } else if (n_hits == 0 || pos >= n_hits) {
+        snprintf(out, cap, "Search: %s_  no match", query);
+    } else {
+        snprintf(out, cap, "Search: %s_  (%u of %u)", query, (unsigned)(n_hits - pos), (unsigned)n_hits);
+    }
 }
