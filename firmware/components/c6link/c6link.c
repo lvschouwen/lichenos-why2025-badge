@@ -1,4 +1,5 @@
 #include "c6link.h"
+#include "board_sdmmc.h"
 
 #include "boot_progress.h"
 #include "c6_boot_policy.h"
@@ -1086,7 +1087,11 @@ bool c6link_start(void) {
     }
     // The C6 was reset into its application by the flasher; only now may ESP-Hosted talk to it
     hold_c6_boot(1);
-    bool attached = esp_hosted_init() == 0 && esp_hosted_connect_to_slave() == 0;
+    // esp_hosted_init adds SDMMC slot 1 to the controller the SD card shares (#60): under its lock, not the connect
+    board_sdmmc_lock(UINT32_MAX);
+    bool inited = esp_hosted_init() == 0;
+    board_sdmmc_unlock();
+    bool attached = inited && esp_hosted_connect_to_slave() == 0;
     // The key is stored only after a successful attach; a failed one sets the verify flag (full check next boot)
     c6_state_write_t w         = c6_state_after_attach(full, attached, err == ESP_OK, key[0] != '\0');
     bool             persisted = w.write && nvs_write_boot_state(w.store_key ? key : NULL, w.verify);

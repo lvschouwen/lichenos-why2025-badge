@@ -1,6 +1,7 @@
 // Host test: the SD card's rules (#60): mount outcomes and power, the I/O error run, sizes, status texts, format word
 #include "sd_policy.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -28,14 +29,39 @@ static void test_mount_plan(void) {
 
 static void test_io_run(void) {
     sd_io_count_t c = {0};
-    CHECK(!sd_policy_io(&c, false));
-    CHECK(!sd_policy_io(&c, false));
-    CHECK(!sd_policy_io(&c, true)); // a good batch resets the run, not the total
+    CHECK(!sd_policy_io(&c, SD_IO_FAILED));
+    CHECK(!sd_policy_io(&c, SD_IO_FAILED));
+    CHECK(!sd_policy_io(&c, SD_IO_OK)); // a good batch resets the run, not the total
     CHECK(c.in_row == 0 && c.total == 2);
-    CHECK(!sd_policy_io(&c, false));
-    CHECK(!sd_policy_io(&c, false));
-    CHECK(sd_policy_io(&c, false)); // the third in a row: unmount now
+    CHECK(!sd_policy_io(&c, SD_IO_FAILED));
+    CHECK(!sd_policy_io(&c, SD_IO_FAILED));
+    CHECK(sd_policy_io(&c, SD_IO_FAILED)); // the third in a row: unmount now
     CHECK(c.total == 5);
+
+    // Neutral batches neither count nor reset: a full card never unmounts a healthy one, and does not hide a dying one
+    sd_io_count_t n = {0};
+    for (int i = 0; i < 10; i++) {
+        CHECK(!sd_policy_io(&n, SD_IO_NEUTRAL));
+    }
+    CHECK(n.in_row == 0 && n.total == 0);
+    CHECK(!sd_policy_io(&n, SD_IO_FAILED));
+    CHECK(!sd_policy_io(&n, SD_IO_FAILED));
+    CHECK(!sd_policy_io(&n, SD_IO_NEUTRAL));
+    CHECK(n.in_row == 2);
+    CHECK(sd_policy_io(&n, SD_IO_FAILED));
+}
+
+static void test_errno(void) {
+    CHECK(sd_io_from_errno(0) == SD_IO_OK);
+    CHECK(sd_io_from_errno(EIO) == SD_IO_FAILED);       // FR_DISK_ERR, FR_INT_ERR
+    CHECK(sd_io_from_errno(ENODEV) == SD_IO_FAILED);    // FR_NOT_READY: the status check found no card
+    CHECK(sd_io_from_errno(ETIMEDOUT) == SD_IO_FAILED);
+    CHECK(sd_io_from_errno(ENOSPC) == SD_IO_NEUTRAL);   // full
+    CHECK(sd_io_from_errno(ENAMETOOLONG) == SD_IO_NEUTRAL);
+    CHECK(sd_io_from_errno(EROFS) == SD_IO_NEUTRAL);
+    CHECK(sd_io_from_errno(ENOENT) == SD_IO_NEUTRAL);
+    CHECK(sd_io_from_errno(ENOMEM) == SD_IO_NEUTRAL);
+    CHECK(sd_io_from_errno(EEXIST) == SD_IO_NEUTRAL);
 }
 
 static void test_sizes(void) {
@@ -128,6 +154,7 @@ static void test_confirm(void) {
 int main(void) {
     test_mount_plan();
     test_io_run();
+    test_errno();
     test_sizes();
     test_kind();
     test_texts();

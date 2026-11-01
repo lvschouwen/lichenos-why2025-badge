@@ -2,6 +2,8 @@
 
 #include "app_ns.h" // the id rules
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "fs_path.h"
 #include "sdcard.h"
 #include "storage.h"
@@ -27,6 +29,21 @@ typedef struct {
 } sd_dir_t;
 
 static sd_dir_t sd_dirs[LICHEN_MAX_APPS];
+
+// Apps call lichen_fs_sd_dir from their own tasks: the table (claiming a slot, rewriting it after a remount) is only
+// touched with this held. Made on first use.
+static SemaphoreHandle_t sd_dirs_lock;
+static StaticSemaphore_t sd_dirs_lock_buf;
+static portMUX_TYPE      sd_dirs_make = portMUX_INITIALIZER_UNLOCKED;
+
+static bool take_sd_dirs(void) {
+    portENTER_CRITICAL(&sd_dirs_make);
+    if (!sd_dirs_lock) {
+        sd_dirs_lock = xSemaphoreCreateMutexStatic(&sd_dirs_lock_buf);
+    }
+    portEXIT_CRITICAL(&sd_dirs_make);
+    return xSemaphoreTake(sd_dirs_lock, pdMS_TO_TICKS(2000)) == pdTRUE;
+}
 
 static bool usable(lichen_app_t const *app) {
     char ns[16];
@@ -78,15 +95,8 @@ bool lichen_fs_drive_bytes(size_t *total, size_t *used) {
     return true;
 }
 
-char const *lichen_fs_sd_dir(lichen_app_t const *app) {
-    if (!usable(app)) {
-        return NULL;
-    }
-    sd_info_t info;
-    sd_info(&info);
-    if (info.state != SD_STATE_MOUNTED) {
-        return NULL; // no card is normal: the app asks again later
-    }
+// With sd_dirs_lock held
+static char const *sd_dir_locked(lichen_app_t const *app, uint32_t generation) {
     sd_dir_t *slot = NULL;
     for (size_t i = 0; i < LICHEN_MAX_APPS; i++) {
         if (sd_dirs[i].app == app) {
@@ -101,7 +111,7 @@ char const *lichen_fs_sd_dir(lichen_app_t const *app) {
         ESP_LOGE(TAG, "no room for %s's SD directory", app->id);
         return NULL;
     }
-    if (slot->app == app && slot->generation == info.generation) {
+    if (slot->app == app && slot->generation == generation) {
         return slot->path;
     }
     fs_app_dir_path(SD_APPS_DIR, app->id, slot->path, sizeof(slot->path));
@@ -109,15 +119,33 @@ char const *lichen_fs_sd_dir(lichen_app_t const *app) {
     if (!sd_begin(1000)) {
         return NULL;
     }
-    bool ok = made(SD_APPS_DIR) && made(slot->path);
-    int  err = errno;
-    sd_end(ok);
+    bool ok  = made(SD_APPS_DIR) && made(slot->path);
+    int  err = ok ? 0 : errno;
+    sd_end(sd_io_from_errno(err)); // only a failing card counts toward the unmount, not ENOSPC or a name FAT refuses
     if (!ok) {
         ESP_LOGE(TAG, "%s: mkdir failed (errno %d)", slot->path, err);
         return NULL;
     }
-    slot->generation = info.generation;
+    slot->generation = generation;
     return slot->path;
+}
+
+char const *lichen_fs_sd_dir(lichen_app_t const *app) {
+    if (!usable(app)) {
+        return NULL;
+    }
+    sd_info_t info;
+    sd_info(&info);
+    if (info.state != SD_STATE_MOUNTED) {
+        return NULL; // no card is normal: the app asks again later
+    }
+    if (!take_sd_dirs()) {
+        ESP_LOGE(TAG, "%s: SD directory table busy", app->id);
+        return NULL;
+    }
+    char const *path = sd_dir_locked(app, info.generation);
+    xSemaphoreGive(sd_dirs_lock);
+    return path;
 }
 
 bool lichen_fs_sd_bytes(uint64_t *total, uint64_t *used) {

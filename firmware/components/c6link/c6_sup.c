@@ -6,6 +6,7 @@
 // driver again, up hooks (keyboard, backlight, LoRa), a note in the restart history. When the C6 does not come back,
 // it asks (main.c's dialog) whether to restart the badge once. No LVGL here: the screen polls c6link_status().
 #include "c6link.h"
+#include "board_sdmmc.h"
 #include "c6link_priv.h"
 
 #include "c6_watch.h"
@@ -278,10 +279,16 @@ static unsigned do_reattach(void) {
     // One line per step: a step that blocks for good (bench 2026-11-01, second attempt against a C6 in its ROM) is
     // then named by the last line in the console
     ESP_LOGW(TAG, "re-attach: esp_hosted deinit");
+    // deinit and init remove and re-add SDMMC slot 1 on the controller the SD card shares (#60): under its lock, which
+    // is never held across the connect below
+    board_sdmmc_lock(UINT32_MAX);
     int d = esp_hosted_deinit();
+    board_sdmmc_unlock();
     set_boot_strap();
     ESP_LOGW(TAG, "re-attach: esp_hosted init (deinit %d, %u ms)", d, (unsigned)(now_ms() - t0));
+    board_sdmmc_lock(UINT32_MAX);
     int i = esp_hosted_init();
+    board_sdmmc_unlock();
     ESP_LOGW(TAG, "re-attach: connect to slave (init %d, %u ms)", i, (unsigned)(now_ms() - t0));
     int  c  = i == 0 ? esp_hosted_connect_to_slave() : -1;
     bool ok = i == 0 && c == 0;

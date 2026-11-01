@@ -30,14 +30,23 @@ typedef struct {
 
 sd_mount_plan_t sd_policy_after_mount(sd_mount_outcome_t outcome);
 
-// sd_end(ok) bookkeeping: a failed batch counts, a good one resets the run. True when the card must be unmounted now.
+// How a batch of file work went (sd_end). NEUTRAL: it failed, but not because of the card (full, a bad name, no
+// memory), so it says nothing about whether the card is still there.
+typedef enum { SD_IO_OK, SD_IO_FAILED, SD_IO_NEUTRAL } sd_io_t;
+
+// 0 is OK; EIO (FR_DISK_ERR, FR_INT_ERR), ENODEV (FR_NOT_READY: the CMD13 status check failed) and ETIMEDOUT are the
+// card failing; any other errno is NEUTRAL
+sd_io_t sd_io_from_errno(int err);
+
+// sd_end bookkeeping: a failed batch counts, a good one resets the run, a neutral one changes nothing. True when the
+// card must be unmounted now.
 #define SD_IO_ERRORS_TO_UNMOUNT 3
 typedef struct {
     uint32_t in_row;
     uint32_t total;
 } sd_io_count_t;
 
-bool sd_policy_io(sd_io_count_t *count, bool ok);
+bool sd_policy_io(sd_io_count_t *count, sd_io_t result);
 
 // What sd_info() hands out: a copy of cached values, never read from the card
 typedef struct {

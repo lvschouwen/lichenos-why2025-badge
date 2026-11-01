@@ -1,5 +1,6 @@
-# lv_mem_psram.c is LVGL's heap (LV_STDLIB_CUSTOM). kbd_map.c and backlight_level.c are pure (host_tests/kbd_map_test.c, backlight_level_test.c); the TCA8418 table and US layout (tca8418_keymap.h, key_codes.h) come from BadgeVMS
-idf_component_register(SRCS "display.c" "backlight.c" "backlight_level.c" "keyboard.c" "board_i2c.c" "kbd_map.c" "lv_mem_psram.c"
+# lv_mem_psram.c is LVGL's heap (LV_STDLIB_CUSTOM). kbd_map.c and backlight_level.c are pure (host_tests/kbd_map_test.c, backlight_level_test.c); the TCA8418 table and US layout (tca8418_keymap.h, key_codes.h) come from BadgeVMS.
+# board_sdmmc.c is the lock around the SDMMC controller the C6 link and the SD card share (#60).
+idf_component_register(SRCS "display.c" "backlight.c" "backlight_level.c" "keyboard.c" "board_i2c.c" "board_sdmmc.c" "kbd_map.c" "lv_mem_psram.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl esp_lvgl_port
                        PRIV_REQUIRES esp_lcd esp_lcd_st7703 esp_tca8418 esp_hw_support esp_driver_uart

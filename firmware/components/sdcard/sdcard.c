@@ -3,6 +3,7 @@
 // hardware notes on issue #60 (BadgeVMS drivers/fatfs.c, the M.2 card's schematic: VO4 = V/SDMMC).
 #include "sdcard.h"
 
+#include "board_sdmmc.h"
 #include "diskio_impl.h"
 #include "diskio_sdmmc.h"
 #include "driver/sdmmc_host.h"
@@ -33,6 +34,7 @@ static char const TAG[] = "sd";
 #define SD_MAX_FILES    4
 #define SD_MKFS_WORK    (32 * 1024)
 #define SD_LOCK_WAIT_MS 10000 // mount, unmount and format wait this long for a running batch
+#define SD_HOST_WAIT_MS 10000 // and this long for the C6 link to finish adding or removing its slot
 
 static SemaphoreHandle_t lock;
 static StaticSemaphore_t lock_buf;
@@ -49,7 +51,7 @@ static sdmmc_card_t        *card;
 static BYTE                 pdrv = 0xFF;
 static char                 drv[3];
 static FATFS               *fs;
-static bool                 vfs_up, fs_mounted;
+static bool                 vfs_up;
 
 static void set_reason(char *reason, size_t cap, char const *what, esp_err_t err) {
     snprintf(reason, cap, "%s: %s", what, esp_err_to_name(err));
@@ -81,11 +83,10 @@ static void refresh_space(void) {
 
 static void bring_down(void) {
     atomic_store(&mounted, false);
-    if (fs_mounted) {
-        f_mount(NULL, drv, 0);
-        fs_mounted = false;
-    }
     if (vfs_up) {
+        // Always, mounted or not: f_mount(fs, drv, 1) registers fs in FatFs's volume table before it even tries, so a
+        // failed mount (no FAT) leaves FatFs pointing at fs, which esp_vfs_fat_unregister_path is about to free
+        f_mount(NULL, drv, 0);
         esp_vfs_fat_unregister_path(SD_BASE); // frees fs
         vfs_up = false;
         fs     = NULL;
@@ -95,17 +96,35 @@ static void bring_down(void) {
         pdrv = 0xFF;
     }
     if (slot_up) {
-        sdmmc_host_deinit_slot(SDMMC_HOST_SLOT_0); // slot 0 only: the controller stays while the C6 link holds slot 1
+        // Slot 0 only: the controller stays while the C6 link holds slot 1. If the lock does not come, deinit anyway:
+        // leaving the slot behind is worse than the (unlikely) race
+        bool locked = board_sdmmc_lock(SD_HOST_WAIT_MS);
+        sdmmc_host_deinit_slot(SDMMC_HOST_SLOT_0);
+        if (locked) {
+            board_sdmmc_unlock();
+        }
         slot_up = false;
     }
     free(card);
     card = NULL;
     if (pwr) {
-        sd_pwr_ctrl_del_on_chip_ldo(pwr);
+        esp_err_t err = sd_pwr_ctrl_del_on_chip_ldo(pwr);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "LDO %d not released: %s", SD_LDO_CHAN, esp_err_to_name(err)); // the handle leaks
+        }
         pwr = NULL;
     }
     heap_caps_free(bounce);
     bounce = NULL;
+}
+
+// After a failed slot init: a controller we just made has no slot at all, so nothing frees it (deinit_slot needs a
+// slot). Delete it only when no slot is registered, so the C6 link's slot 1 is never touched. With the lock held.
+static void drop_empty_controller(void) {
+    sdmmc_host_state_t state = {0};
+    if (sdmmc_host_get_state(&state) == ESP_OK && state.host_initialized && state.num_of_init_slots == 0) {
+        sdmmc_host_deinit();
+    }
 }
 
 static sd_mount_outcome_t power_and_probe(char *reason, size_t cap) {
@@ -149,10 +168,19 @@ static sd_mount_outcome_t power_and_probe(char *reason, size_t cap) {
         .width = 4,
         .flags = SDMMC_SLOT_FLAG_INTERNAL_PULLUP, // on top of the board's 51K pull-ups; harmless
     };
+    // Under the controller lock, so esp_hosted cannot delete the controller between our init and our slot (#60)
+    if (!board_sdmmc_lock(SD_HOST_WAIT_MS)) {
+        snprintf(reason, cap, "SDMMC busy (C6 link)");
+        return SD_MOUNT_ERROR;
+    }
     err = sdmmc_host_init(); // ESP_OK when esp_hosted already made the controller
     if (err == ESP_OK) {
         err = sdmmc_host_init_slot(SDMMC_HOST_SLOT_0, &slot);
+        if (err != ESP_OK) {
+            drop_empty_controller();
+        }
     }
+    board_sdmmc_unlock();
     if (err != ESP_OK) {
         set_reason(reason, cap, "host", err);
         return SD_MOUNT_ERROR;
@@ -178,7 +206,9 @@ static FRESULT make_fat(void) {
     if (!work) {
         return FR_NOT_ENOUGH_CORE;
     }
+    // FM_ANY never means exFAT here: FF_FS_EXFAT is 0 in IDF's ffconf.h, so a big card gets FAT32
     MKFS_PARM const opt = {.fmt = FM_ANY, .n_fat = 2, .align = 0, .n_root = 0, .au_size = 0};
+    f_mount(NULL, drv, 0); // f_mkfs invalidates whatever FatFs has registered for this volume: make sure it is nothing
     ESP_LOGW(TAG, "formatting the card");
     FRESULT res = f_mkfs(drv, &opt, work, SD_MKFS_WORK);
     heap_caps_free(work);
@@ -220,12 +250,14 @@ static sd_mount_outcome_t bring_up(bool format, char *reason, size_t cap) {
         snprintf(reason, cap, "mount failed (FR %d)", (int)res);
         return SD_MOUNT_ERROR;
     }
-    fs_mounted = true;
 #if CONFIG_FATFS_USE_LABEL
     if (format) {
         char label[12];
         snprintf(label, sizeof(label), "%sLICHEN", drv);
-        f_setlabel(label);
+        res = f_setlabel(label);
+        if (res != FR_OK) {
+            ESP_LOGW(TAG, "volume label not set (FR %d)", (int)res);
+        }
     }
 #endif
     if (mkdir(SD_LICHEN_DIR, 0755) != 0 && errno != EEXIST) {
@@ -289,11 +321,12 @@ void sd_unmount(void) {
         ESP_LOGE(TAG, "unmount: the card stays busy");
         return;
     }
-    bring_down();
-    portENTER_CRITICAL(&info_lock);
+    portENTER_CRITICAL(&info_lock); // readers never see MOUNTED once mounted is false
     info.state      = SD_STATE_OFF;
     info.free_known = false;
+    atomic_store(&mounted, false);
     portEXIT_CRITICAL(&info_lock);
+    bring_down();
     xSemaphoreGive(lock);
 }
 
@@ -322,20 +355,21 @@ bool sd_begin(uint32_t wait_ms) {
     return true;
 }
 
-void sd_end(bool ok) {
-    if (sd_policy_io(&io, ok)) {
+void sd_end(sd_io_t result) {
+    if (sd_policy_io(&io, result)) {
         ESP_LOGW(TAG, "%d failed batches in a row: unmounting the card", SD_IO_ERRORS_TO_UNMOUNT);
-        bring_down();
         portENTER_CRITICAL(&info_lock);
         info.state      = SD_STATE_REMOVED;
         info.io_errors  = io.total;
         info.free_known = false;
+        atomic_store(&mounted, false);
         portEXIT_CRITICAL(&info_lock);
+        bring_down();
     } else {
         portENTER_CRITICAL(&info_lock);
         info.io_errors = io.total;
         portEXIT_CRITICAL(&info_lock);
-        if (ok) {
+        if (result != SD_IO_FAILED) {
             refresh_space();
         }
     }
@@ -351,6 +385,9 @@ void sd_info(sd_info_t *out) {
 void sd_console_register(void); // sd_console.c
 
 void sd_start(void) {
+    if (lock) {
+        return; // once per boot
+    }
     lock = xSemaphoreCreateMutexStatic(&lock_buf);
     sd_console_register();
     sd_mount();

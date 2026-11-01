@@ -1,5 +1,6 @@
 #include "sd_policy.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -17,8 +18,18 @@ sd_mount_plan_t sd_policy_after_mount(sd_mount_outcome_t outcome) {
     }
 }
 
-bool sd_policy_io(sd_io_count_t *count, bool ok) {
-    if (ok) {
+sd_io_t sd_io_from_errno(int err) {
+    if (err == 0) {
+        return SD_IO_OK;
+    }
+    return err == EIO || err == ENODEV || err == ETIMEDOUT ? SD_IO_FAILED : SD_IO_NEUTRAL;
+}
+
+bool sd_policy_io(sd_io_count_t *count, sd_io_t result) {
+    if (result == SD_IO_NEUTRAL) {
+        return false;
+    }
+    if (result == SD_IO_OK) {
         count->in_row = 0;
         return false;
     }

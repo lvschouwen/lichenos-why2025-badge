@@ -34,10 +34,12 @@ bool sd_mounted(void);
 
 // One batch of file work (open, write, close) under the card's mutex, so the card is never unmounted under an open
 // FILE*. False when the card is not mounted or the mutex is not free within wait_ms: then do no file work and do
-// not call sd_end. sd_end(false) counts a failed batch; SD_IO_ERRORS_TO_UNMOUNT in a row unmount the card
-// (SD_STATE_REMOVED) until "fw sd mount" or a reboot. Never from the LVGL task: SD I/O can take a while.
+// not call sd_end. sd_end says how the batch went: SD_IO_FAILED only when the card itself failed (errno EIO, ENODEV,
+// ETIMEDOUT: use sd_io_from_errno); a full card, a bad name or out of memory is SD_IO_NEUTRAL. SD_IO_ERRORS_TO_UNMOUNT
+// failed batches in a row unmount the card (SD_STATE_REMOVED) until "fw sd mount" or a reboot. Never from the LVGL
+// task: SD I/O can take a while.
 bool sd_begin(uint32_t wait_ms);
-void sd_end(bool ok);
+void sd_end(sd_io_t result);
 
 // Cached state, sizes and card details; never touches the card, safe from LVGL. Free space is refreshed at mount,
 // after every sd_end and by "fw sd".
