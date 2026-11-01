@@ -1,7 +1,7 @@
 // The thermal watchdog (#10). The IP5306 charger has no data link to the MCUs, so the badge cannot see its two
 // unprotected cells; heat is the one thing it can notice. Every 5 s a task on core 0 reads the sensors service's
 // snapshot (the BME690 beside the cells, the P4 die sensor), asks thermal_rules.c what it means and acts:
-//   warn      status bar HOT, a notice, a full-screen warning once, load shed (backlight to the minimum)
+//   warn      status bar HOT, a notice, a full-screen warning once, load shed (backlight to the minimum, Wi-Fi and LoRa off)
 //   shutdown  a notice (saved by the power task), then Power off (#65): C6 held in reset, P4 in deep sleep, the IP5306
 //             cuts the cells after ~32 s
 // The BME690's temperature reads about 17 K high with the gas heater on (LICHEN_SENSORS_GAS_HEATER), so the board
@@ -17,6 +17,7 @@
 #include "backlight_level.h"
 #include "fw_console.h"
 #include "lichen_notify.h"
+#include "lichen_radio.h"
 #include "lichen_sensors.h"
 #include "sdkconfig.h"
 #include "settings_store.h"
@@ -79,12 +80,15 @@ void thermal_info(thermal_info_t *out) {
 
 // ---- load shedding ---------------------------------------------------------------------------------------------------
 
-// Everything that sheds load while the badge is warm, in one place. Backlight to the minimum now (not saved, so the
-// person's levels come back). TODO(#108): radio_set(...) here, Wi-Fi off and LoRa TX off, and the matching restore in the
-// `false` branch, once the OS radio switch service has merged.
+// Everything that sheds load while the badge is warm, in one place. Backlight to the minimum (not saved, so the
+// person's levels come back) and Wi-Fi and LoRa off through the OS radio switches (#108). lichen_radio_set saves the
+// switch state, so a reboot while warm leaves the radios off (safe side); on a clear only the radios this function
+// switched off are switched back on, and only if still off (a person who switched one on meanwhile is not overridden).
 static void shed_load(bool on) {
     static uint8_t saved[2];
     static bool    shed;
+    static bool    was_on[2]; // Wi-Fi, LoRa: on before the shed
+    static radio_id_t const ids[2] = {RADIO_WIFI, RADIO_LORA};
     if (on == shed) {
         return;
     }
@@ -94,6 +98,16 @@ static void shed_load(bool on) {
         backlight_set(BACKLIGHT_DISPLAY_MIN, 0);
     } else {
         backlight_set(saved[0], saved[1]);
+    }
+    for (int k = 0; k < 2; k++) {
+        if (on) {
+            was_on[k] = lichen_radio_get(ids[k]);
+            if (was_on[k]) {
+                lichen_radio_set(ids[k], false);
+            }
+        } else if (was_on[k] && !lichen_radio_get(ids[k]) && !lichen_airplane_get()) {
+            lichen_radio_set(ids[k], true);
+        }
     }
 }
 
@@ -117,7 +131,7 @@ static void on_events(unsigned ev) {
     if (ev & TH_EV_WARN) {
         cause_text(&now, body, sizeof(body));
         size_t n = strlen(body);
-        snprintf(body + n, sizeof(body) - n, " Screen dimmed. Unplug the charger and let it cool.");
+        snprintf(body + n, sizeof(body) - n, " Screen dimmed, radios off. Unplug the charger and let it cool.");
         say(LN_WARN, "Badge is getting hot", body, LN_COALESCE);
         shed_load(true);
         battery_open_alert();

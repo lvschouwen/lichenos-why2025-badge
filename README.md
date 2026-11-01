@@ -283,7 +283,7 @@ stop a short circuit or an overcharge (that is hardware only). What it can do is
 - Every 5 s the BME690 (next to the cells; its gas-heater bias of about 17 K is taken off, 15 K) and the P4 die sensor are
   read. Board: warn at 50 C (clears under 45), switch off at 60 C or after a rise of 10 K within 60 s (from 40 C up).
   Die: warn 75, off 90, rise 20 K. Every decision needs two polls in a row. The C6's temperature is not on the C6 link.
-- Warn: "HOT" in the status bar, a notice, a full-screen warning once, backlight to the minimum.
+- Warn: "HOT" in the status bar, a notice, a full-screen warning once, backlight to the minimum, Wi-Fi and LoRa off (switched back on when the warning clears).
 - Shutdown: a notice, then Power off (#65): the IP5306 cuts the cells about 32 s later.
 - A missing or implausible sensor is ignored while another answers; with none for 60 s the badge reports that heat is
   not watched, but never switches itself off for that.

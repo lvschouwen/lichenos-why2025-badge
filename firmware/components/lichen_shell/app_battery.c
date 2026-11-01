@@ -33,7 +33,7 @@ static void status_text(char *out, size_t cap) {
         snprintf(die, sizeof(die), "%.0f C", (double)i.c[TH_SRC_DIE]);
     }
     char const *state = i.level == TH_SHUTDOWN ? "SWITCHING OFF, too hot"
-                        : i.level == TH_WARN   ? "WARM: screen dimmed, unplug the charger"
+                        : i.level == TH_WARN   ? "WARM: screen dimmed, radios off the charger"
                         : i.blind              ? "no sensor answers, heat is not watched"
                                                : "normal";
     snprintf(out, cap, "Temperature watch: %s\nBoard %s  \xE2\x80\xA2  chip %s\nWarns at 50 C, switches off at 60 C or on a "
