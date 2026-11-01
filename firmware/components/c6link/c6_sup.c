@@ -330,10 +330,12 @@ static void notify_c6_event(char const *text) {
 }
 
 static void note(void) {
-    char why[C6W_REASON_MAX + 16];
+    char reason[sizeof(watch.reason)], why[C6W_REASON_MAX + 16];
     portENTER_CRITICAL(&watch_lock);
-    snprintf(why, sizeof(why), "C6 restarted: %s", watch.reason);
+    memcpy(reason, watch.reason, sizeof(reason)); // copied with interrupts off, formatted after (#5)
     portEXIT_CRITICAL(&watch_lock);
+    reason[sizeof(reason) - 1] = '\0';
+    snprintf(why, sizeof(why), "C6 restarted: %s", reason);
     system_restart_note(why); // NVS history: fw crash shows it after a later reboot too (cut to its line length)
     notify_c6_event(why);
     ESP_LOGW(TAG, "stack free: c6sup %u, c6wifi %u", (unsigned)uxTaskGetStackHighWaterMark(sup_handle),

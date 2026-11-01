@@ -1307,12 +1307,13 @@ static void cmd_token(char const *args) {
 }
 
 void ota_server_start(void) {
-    console_register("token", "token (the update token for tools/badge.sh)", cmd_token);
     console_register("ota", "ota [on|off] (the update server over Wi-Fi, also Settings)", cmd_ota);
     server_on = settings_get_u8(OTA_WIFI_KEY, OTA_WIFI_DEFAULT) != 0;
     if (!load_or_create_token()) {
         ESP_LOGE(TAG, "couldn't save the token in %s; it changes on every boot", TOKEN_FILE);
     }
+    // After the token is final (#5): "fw token" never shows a half-written one or "(none)" while it is being made
+    console_register("token", "token (the update token for tools/badge.sh)", cmd_token);
     if (xTaskCreatePinnedToCore(server_task, "ota", SERVER_STACK, NULL, 5, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "update server task failed to start");
     }

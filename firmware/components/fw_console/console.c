@@ -121,17 +121,33 @@ void console_reply_private(char const *fmt, ...) {
     va_end(ap);
 }
 
+// Components register from their own tasks at boot while the console task may already run a command (#5): writers
+// take commands_lock, and an entry is complete before the count that makes it visible is published. Entries are never
+// changed or removed, so readers need only the count (commands_count) and no lock.
+static portMUX_TYPE commands_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static int commands_count(void) {
+    return __atomic_load_n(&n_commands, __ATOMIC_ACQUIRE);
+}
+
 void console_register(char const *name, char const *usage, console_fn_t fn) {
-    if (n_commands == MAX_COMMANDS) {
-        ESP_LOGE(TAG, "no room for command %s", name);
-        return;
+    portENTER_CRITICAL(&commands_lock);
+    int  n    = n_commands;
+    bool room = n < MAX_COMMANDS;
+    if (room) {
+        commands[n] = (command_t){name, usage, fn};
+        __atomic_store_n(&n_commands, n + 1, __ATOMIC_RELEASE);
     }
-    commands[n_commands++] = (command_t){name, usage, fn};
+    portEXIT_CRITICAL(&commands_lock);
+    if (!room) {
+        ESP_LOGE(TAG, "no room for command %s", name);
+    }
 }
 
 static void cmd_help(char const *args) {
     (void)args;
-    for (int i = 0; i < n_commands; i++) {
+    int n = commands_count();
+    for (int i = 0; i < n; i++) {
         console_reply("%s", commands[i].usage);
     }
 }
@@ -441,7 +457,8 @@ static void run(char *line) {
     } else {
         args = line + strlen(line);
     }
-    for (int i = 0; i < n_commands; i++) {
+    int n = commands_count();
+    for (int i = 0; i < n; i++) {
         if (strcmp(commands[i].name, line) == 0) {
             commands[i].fn(args);
             return;
@@ -483,8 +500,9 @@ static void console_task(void *arg) {
         uint8_t     c;
         char const *pass;
         size_t      pass_len;
-        if (uart_read_bytes(UART_NUM_0, &c, 1, pdMS_TO_TICKS(100)) != 1) {
-            console_cmd_flush(&state, &pass, &pass_len); // there is no app stdin: held bytes are dropped
+        // No idle flush (#5): there is no app stdin to hand held bytes to, and dropping a held "f" after 100 ms made
+        // "fw ..." typed by hand in a terminal never match. Held bytes wait for the next key, however long it takes.
+        if (uart_read_bytes(UART_NUM_0, &c, 1, portMAX_DELAY) != 1) {
             continue;
         }
         switch (console_cmd_feed(&state, (char)c, &pass, &pass_len)) {

@@ -202,12 +202,19 @@ static bool queue_apply(void) {
     return ok;
 }
 
+// A bounded copy into one TEXT_MAX field, NULL as "": no snprintf with interrupts off (#5)
+static void copy_text(char dst[TEXT_MAX], char const *src) {
+    size_t n = src ? strnlen(src, TEXT_MAX - 1) : 0;
+    memcpy(dst, src ? src : "", n);
+    dst[n] = '\0';
+}
+
 bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done) {
     portENTER_CRITICAL(&want_lock);
-    snprintf(want.title, sizeof(want.title), "%s", d->title ? d->title : "");
-    snprintf(want.prefix, sizeof(want.prefix), "%s", d->count_prefix ? d->count_prefix : "");
-    snprintf(want.suffix, sizeof(want.suffix), "%s", d->count_suffix ? d->count_suffix : "");
-    snprintf(want.hint, sizeof(want.hint), "%s", d->hint ? d->hint : "");
+    copy_text(want.title, d->title);
+    copy_text(want.prefix, d->count_prefix);
+    copy_text(want.suffix, d->count_suffix);
+    copy_text(want.hint, d->hint);
     want.seconds = d->seconds;
     want.careful = d->careful;
     want.done    = done;

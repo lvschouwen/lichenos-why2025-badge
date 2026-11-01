@@ -54,6 +54,14 @@ static SemaphoreHandle_t scan_lock; // one scan at a time (the screen and the co
 static portMUX_TYPE ip_lock = portMUX_INITIALIZER_UNLOCKED;
 static char         ip_text[16];
 
+// A bounded copy for the state_lock / ip_lock sections: no snprintf with interrupts off (#5). Stops at cap - 1 bytes
+// or a NUL, so it also takes the driver's unterminated 32-byte SSID field.
+static void copy_text(char *dst, size_t cap, char const *src) {
+    size_t n = strnlen(src, cap - 1);
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
 bool c6link_up(void) {
     return atomic_load(&link_up);
 }
@@ -66,7 +74,7 @@ bool wifi_has_ip(char *ip, size_t cap) {
     portENTER_CRITICAL(&ip_lock);
     bool have = ip_text[0] != '\0';
     if (have && cap) {
-        snprintf(ip, cap, "%s", ip_text);
+        copy_text(ip, cap, ip_text);
     }
     portEXIT_CRITICAL(&ip_lock);
     return have;
@@ -87,7 +95,7 @@ static bool first_connect_settled;
 
 static void set_ip(char const *text) {
     portENTER_CRITICAL(&ip_lock);
-    snprintf(ip_text, sizeof(ip_text), "%s", text);
+    copy_text(ip_text, sizeof(ip_text), text);
     portEXIT_CRITICAL(&ip_lock);
     if (!text[0]) {
         portENTER_CRITICAL(&state_lock);
@@ -345,7 +353,7 @@ static drv_result_t wifi_driver_up(char const **why) {
         return DRV_NO_CREDENTIALS;
     }
     portENTER_CRITICAL(&state_lock);
-    snprintf(ssid, sizeof(ssid), "%.32s", (char const *)cfg.sta.ssid);
+    copy_text(ssid, sizeof(ssid), (char const *)cfg.sta.ssid);
     portEXIT_CRITICAL(&state_lock);
     atomic_store(&driver_up, true); // before esp_wifi_start, see above
     if ((err = esp_wifi_set_config(WIFI_IF_STA, &cfg)) != ESP_OK || (err = esp_wifi_start()) != ESP_OK) {
@@ -471,8 +479,8 @@ static void rollback(void) {
     portENTER_CRITICAL(&state_lock);
     join.state       = WIFI_JOIN_FAILED_KEPT_OLD;
     have_credentials = had;
-    snprintf(kept_ssid, sizeof(kept_ssid), "%s", had ? s : "");
-    snprintf(ssid, sizeof(ssid), "%s", had ? s : "");
+    copy_text(kept_ssid, sizeof(kept_ssid), had ? s : "");
+    copy_text(ssid, sizeof(ssid), had ? s : "");
     portEXIT_CRITICAL(&state_lock);
     if (had && apply_config(s, p)) {
         esp_wifi_connect();
@@ -489,9 +497,9 @@ static void handle_join(msg_t const *m, uint32_t now) {
     memcpy(trial_pass, m->pass, sizeof(trial_pass));
     portENTER_CRITICAL(&state_lock);
     wifi_join_start(&join, now);
-    snprintf(trial_ssid, sizeof(trial_ssid), "%s", m->ssid);
+    copy_text(trial_ssid, sizeof(trial_ssid), m->ssid);
     have_credentials = true;
-    snprintf(ssid, sizeof(ssid), "%s", m->ssid);
+    copy_text(ssid, sizeof(ssid), m->ssid);
     portEXIT_CRITICAL(&state_lock);
     retry_pending = false;
     set_ip("");
@@ -514,7 +522,7 @@ static void handle_reconnect(void) {
     }
     portENTER_CRITICAL(&state_lock);
     have_credentials = true;
-    snprintf(ssid, sizeof(ssid), "%s", s);
+    copy_text(ssid, sizeof(ssid), s);
     portEXIT_CRITICAL(&state_lock);
     set_ip("");
     esp_wifi_disconnect();
@@ -626,8 +634,8 @@ static void abort_trial(void) {
     memset(trial_pass, 0, sizeof(trial_pass));
     portENTER_CRITICAL(&state_lock);
     have_credentials = had;
-    snprintf(kept_ssid, sizeof(kept_ssid), "%s", had ? s : "");
-    snprintf(ssid, sizeof(ssid), "%s", had ? s : "");
+    copy_text(kept_ssid, sizeof(kept_ssid), had ? s : "");
+    copy_text(ssid, sizeof(ssid), had ? s : "");
     portEXIT_CRITICAL(&state_lock);
     ESP_LOGW(TAG, "wifi: the C6 went away during a trial join: not saved");
 }
@@ -757,7 +765,7 @@ bool wifi_set_credentials(char const *new_ssid, char const *pass) {
     portENTER_CRITICAL(&state_lock);
     wifi_join_t before = join;
     wifi_join_request(&join);
-    snprintf(pending_ssid, sizeof(pending_ssid), "%s", new_ssid);
+    copy_text(pending_ssid, sizeof(pending_ssid), new_ssid);
     portEXIT_CRITICAL(&state_lock);
     bool ok = post(&m);
     memset(&m, 0, sizeof(m));
@@ -773,10 +781,10 @@ wifi_join_state_t wifi_join_state(char *tried, size_t tried_cap, char *kept, siz
     portENTER_CRITICAL(&state_lock);
     wifi_join_state_t state = join.state;
     if (tried && tried_cap) {
-        snprintf(tried, tried_cap, "%s", state == WIFI_JOIN_PENDING ? pending_ssid : trial_ssid);
+        copy_text(tried, tried_cap, state == WIFI_JOIN_PENDING ? pending_ssid : trial_ssid);
     }
     if (kept && kept_cap) {
-        snprintf(kept, kept_cap, "%s", kept_ssid);
+        copy_text(kept, kept_cap, kept_ssid);
     }
     portEXIT_CRITICAL(&state_lock);
     return state;
@@ -788,7 +796,7 @@ static void cmd_wifi(char const *args) {
         char ip[16], cur[33];
         portENTER_CRITICAL(&state_lock);
         bool have = have_credentials;
-        snprintf(cur, sizeof(cur), "%s", ssid);
+        copy_text(cur, sizeof(cur), ssid);
         portEXIT_CRITICAL(&state_lock);
         clean(cur, a, sizeof(a));
         if (!have) {

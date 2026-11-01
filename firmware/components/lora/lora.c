@@ -360,10 +360,12 @@ static void log_packet(lora_rx_packet_t const *rx) {
         hex[2 * rx->len] = '\0';
         printf("lora raw %s\n", hex);
     }
+    char kept[sizeof(last_summary)]; // cut to size here: only a copy happens with interrupts off (#5)
+    snprintf(kept, sizeof(kept), "%s", summary);
     portENTER_CRITICAL(&state_lock);
     packets++;
     last_rssi_x10 = rx->rssi_x10;
-    snprintf(last_summary, sizeof(last_summary), "%s", summary);
+    memcpy(last_summary, kept, sizeof(last_summary));
     portEXIT_CRITICAL(&state_lock);
 }
 
@@ -607,7 +609,8 @@ void lora_get_stats(lora_ui_stats_t *out) {
     portENTER_CRITICAL(&state_lock);
     out->packets         = packets;
     out->last_rssi_dbx10 = last_rssi_x10;
-    snprintf(out->last_summary, sizeof(out->last_summary), "%s", last_summary);
+    _Static_assert(sizeof(out->last_summary) == sizeof(last_summary), "summary sizes differ");
+    memcpy(out->last_summary, last_summary, sizeof(last_summary)); // always terminated: written whole, from kept
     portEXIT_CRITICAL(&state_lock);
 }
 
