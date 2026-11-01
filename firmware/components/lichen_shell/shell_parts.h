@@ -36,6 +36,7 @@ void about_app_register(void);
 void keytest_app_register(void);
 void bench_app_register(void); // app_bench.c (#96); also registers "fw bench"
 bool bench_running(void);      // app_bench.c: a run is measuring (LVGL task)
+void crashlog_app_register(void); // app_crashlog.c (#72); after a crash also asks on home to open it
 
 // time_set_screen.c: Settings > Time > Set date & time (#64), a builder for shell_open()
 lv_obj_t *time_set_build(void);

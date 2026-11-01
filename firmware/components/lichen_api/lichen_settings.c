@@ -56,6 +56,27 @@ bool app_settings_set_u8(lichen_app_t const *app, char const *key, uint8_t value
     return commit_close(app, key, nvs, nvs_set_u8(nvs, key, value));
 }
 
+uint32_t app_settings_get_u32(lichen_app_t const *app, char const *key, uint32_t def) {
+    nvs_handle_t nvs;
+    if (!open_app(app, NVS_READONLY, &nvs)) {
+        return def;
+    }
+    uint32_t value = def;
+    if (nvs_get_u32(nvs, key, &value) != ESP_OK) {
+        value = def;
+    }
+    nvs_close(nvs);
+    return value;
+}
+
+bool app_settings_set_u32(lichen_app_t const *app, char const *key, uint32_t value) {
+    nvs_handle_t nvs;
+    if (!open_app(app, NVS_READWRITE, &nvs)) {
+        return false;
+    }
+    return commit_close(app, key, nvs, nvs_set_u32(nvs, key, value));
+}
+
 void app_settings_get_str(lichen_app_t const *app, char const *key, char *out, size_t cap, char const *def) {
     if (cap == 0) {
         return;

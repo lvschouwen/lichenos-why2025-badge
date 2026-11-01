@@ -322,7 +322,7 @@ lv_obj_t *boot_screen_create(void) {
     lv_obj_set_hidden(failures, true);
 
     if (crash_recovered()) {
-        lv_obj_t *crash = add_label(details, "Recovered from a crash - see fw crash", THEME_AMBER, NULL);
+        lv_obj_t *crash = add_label(details, "Recovered from a crash - see the Crash log app", THEME_AMBER, NULL);
         lv_obj_set_style_margin_top(crash, 16, 0);
     }
 

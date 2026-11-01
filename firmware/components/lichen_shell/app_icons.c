@@ -57,3 +57,22 @@ void icon_bench(lv_obj_t *parent, int size_px) {
     lv_obj_set_style_arc_color(arc, lv_color_hex(THEME_AMBER), LV_PART_INDICATOR);
     lv_obj_center(arc);
 }
+
+// Crash log (#72): a red-ringed tile with an amber "!"
+void icon_crashlog(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    lv_obj_t *ring = lv_obj_create(parent);
+    lv_obj_remove_style_all(ring);
+    lv_obj_set_size(ring, size_px * 5 / 8, size_px * 5 / 8);
+    lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(ring, size_px >= 64 ? 5 : 3, 0);
+    lv_obj_set_style_border_color(ring, lv_color_hex(THEME_RED), 0);
+    lv_obj_center(ring);
+    lv_obj_t *mark = lv_label_create(ring);
+    lv_obj_set_style_text_color(mark, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_text_font(mark, size_px >= 64 ? lichen_font(LICHEN_FONT_LARGE) : lichen_font(LICHEN_FONT_SMALL), 0);
+    lv_label_set_text(mark, "!");
+    lv_obj_center(mark);
+}

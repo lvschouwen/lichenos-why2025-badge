@@ -17,6 +17,7 @@
 #include "storage.h"
 
 #include <errno.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +27,8 @@
 
 #define CRASH_DIR    STORAGE_BASE "/crash"
 #define CRASH_LOG    CRASH_DIR "/log.txt"
+#define CRASH_TMP    CRASH_DIR "/log.tmp"
+#define CRASH_OLD    CRASH_DIR "/log.old" // the previous log while a new one is swapped in
 #define KEEP_RECORDS 20
 #define LOG_MAX      (KEEP_RECORDS * 256 + 256)
 #define B64_LINE     76
@@ -34,6 +37,7 @@ static char const TAG[] = "crash";
 
 static bool s_recovered;
 static int  s_reset_reason = -1; // esp_reset_reason() of this boot, for fw crash
+static atomic_uint s_generation;  // crash_log_generation()
 
 static crash_reset_t crash_reset_of(esp_reset_reason_t r) {
     switch (r) {
@@ -115,9 +119,9 @@ static void store_dump_sum(uint32_t v) {
 }
 
 // Reads the whole log (it is small); returns its length
-static size_t read_log(char *buf, size_t cap) {
+static size_t read_file(char const *path, char *buf, size_t cap) {
     buf[0]  = '\0';
-    FILE *f = fopen(CRASH_LOG, "r");
+    FILE *f = fopen(path, "r");
     if (!f) {
         return 0;
     }
@@ -127,8 +131,64 @@ static size_t read_log(char *buf, size_t cap) {
     return n;
 }
 
+// A swap cut short by a reset leaves the previous log as log.old only: it still counts
+static size_t read_log(char *buf, size_t cap) {
+    size_t n = read_file(CRASH_LOG, buf, cap);
+    return n ? n : read_file(CRASH_OLD, buf, cap);
+}
+
+size_t crash_log_load(char *buf, size_t cap) {
+    return cap ? read_log(buf, cap) : 0;
+}
+
+static bool write_file(char const *path, char const *text, size_t len) {
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        return false;
+    }
+    bool ok = fwrite(text, 1, len, f) == len;
+    return (fclose(f) == 0) && ok;
+}
+
+// rename does not replace on FAT: the old log steps aside until the new one is in place, as ota_server.c does
+static bool swap_in(void) {
+    unlink(CRASH_OLD);
+    bool had_old = rename(CRASH_LOG, CRASH_OLD) == 0;
+    if (rename(CRASH_TMP, CRASH_LOG) != 0) {
+        if (had_old) {
+            rename(CRASH_OLD, CRASH_LOG);
+        }
+        unlink(CRASH_TMP);
+        return false;
+    }
+    unlink(CRASH_OLD);
+    return true;
+}
+
+bool crash_log_store(char const *text, size_t len) {
+    bool ok;
+    if (len == 0) {
+        ok = unlink(CRASH_LOG) == 0 || errno == ENOENT;
+        unlink(CRASH_OLD);
+    } else {
+        mkdir(CRASH_DIR, 0777); // exists after the first crash
+        ok = write_file(CRASH_TMP, text, len) && swap_in();
+        if (!ok) {
+            unlink(CRASH_TMP);
+        }
+    }
+    if (!ok) {
+        ESP_LOGE(TAG, "cannot write %s: errno %d", CRASH_LOG, errno);
+    }
+    atomic_fetch_add(&s_generation, 1);
+    return ok;
+}
+
+uint32_t crash_log_generation(void) {
+    return atomic_load(&s_generation);
+}
+
 static void append_record(char const *record) {
-    mkdir(CRASH_DIR, 0777); // exists after the first crash
     char *buf = psram_alloc(LOG_MAX);
     if (!buf) {
         return;
@@ -139,13 +199,7 @@ static void append_record(char const *record) {
     }
     len += (size_t)snprintf(buf + len, LOG_MAX - len, "%s\n", record);
     len = crash_log_trim(buf, len, KEEP_RECORDS);
-    FILE *f = fopen(CRASH_LOG, "w");
-    if (f) {
-        fwrite(buf, 1, len, f);
-        fclose(f);
-    } else {
-        ESP_LOGE(TAG, "cannot write %s: errno %d", CRASH_LOG, errno);
-    }
+    crash_log_store(buf, len);
     free(buf);
 }
 
@@ -163,7 +217,7 @@ static uint32_t bump_count(void) {
     return count;
 }
 
-static uint32_t get_count(void) {
+uint32_t crash_count_since_clear(void) {
     nvs_handle_t nvs;
     uint32_t     count = 0;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
@@ -191,7 +245,7 @@ static void check_image_fits(void) {
 static void show(void) {
     esp_partition_t const *part;
     size_t                 off, size;
-    console_reply("crash: %u since the last clear, this boot %s (reset reason %d)", (unsigned)get_count(),
+    console_reply("crash: %u since the last clear, this boot %s (reset reason %d)", (unsigned)crash_count_since_clear(),
                   s_recovered ? "follows a crash" : "is clean", s_reset_reason);
     if (dump_location(&part, &off, &size)) {
         console_reply("crash: core dump on flash, %u bytes of %u (fw crash dump)", (unsigned)size, (unsigned)part->size);
@@ -300,22 +354,28 @@ static void crash_test_wdt(void) {
     }
 }
 
+bool crash_clear_all(void) {
+    esp_err_t err = esp_core_dump_image_erase();
+    unlink(CRASH_TMP);
+    crash_log_store("", 0);
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_erase_key(nvs, "crash_count");
+        nvs_erase_key(nvs, "dump_sum");
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    atomic_fetch_add(&s_generation, 1); // the counter changed too
+    return err == ESP_OK;
+}
+
 static void crash_command(char const *args) {
     if (*args == '\0') {
         show();
     } else if (strcmp(args, "dump") == 0) {
         dump();
     } else if (strcmp(args, "clear") == 0) {
-        esp_err_t err = esp_core_dump_image_erase();
-        unlink(CRASH_LOG);
-        nvs_handle_t nvs;
-        if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-            nvs_erase_key(nvs, "crash_count");
-            nvs_erase_key(nvs, "dump_sum");
-            nvs_commit(nvs);
-            nvs_close(nvs);
-        }
-        console_reply(err == ESP_OK ? "crash: cleared" : "crash: erasing the core dump failed");
+        console_reply(crash_clear_all() ? "crash: cleared" : "crash: erasing the core dump failed");
     } else if (strcmp(args, "test panic") == 0) {
         crash_test_panic();
     } else if (strcmp(args, "test wdt") == 0) {
