@@ -36,6 +36,8 @@ static bool           shift;
 static bool           raw_down[0x51]; // keys the raw hooks saw pressed, so a chip reset releases them there too (#14)
 static atomic_bool    reinit_asked;            // keyboard_reinit(): honoured by the poll task, which owns the chip
 static void (*_Atomic reset_hook)(void);       // told when the readback finds the chip reset (#14)
+static bool (*_Atomic wake_hook)(void);        // the screen timeout (#43)
+static bool           woke[0x51];              // presses the wake hook swallowed: their releases go nowhere either
 
 static struct {
     key_raw_fn fn;
@@ -90,9 +92,26 @@ void keyboard_set_reset_hook(void (*fn)(void)) {
     atomic_store(&reset_hook, fn);
 }
 
+void keyboard_set_wake_hook(bool (*fn)(void)) {
+    atomic_store(&wake_hook, fn);
+}
+
+// A press that only woke the screen, or the release of one: nobody else hears of it
+static bool wake_swallows(uint8_t key, bool pressed) {
+    if (!pressed) {
+        bool was  = woke[key];
+        woke[key] = false;
+        return was;
+    }
+    bool (*hook)(void) = atomic_load(&wake_hook);
+    woke[key]          = hook && hook();
+    return woke[key];
+}
+
 // The chip forgot its pressed keys with its configuration: release them all, so LVGL never sees a key held forever
 static void release_held(void) {
     shift = false;
+    memset(woke, 0, sizeof(woke));
     xQueueReset(events); // queued presses are moot now, and the releases must not be dropped by a full queue
     for (size_t k = 0; k < sizeof(held) / sizeof(held[0]); k++) {
         if (raw_down[k]) {
@@ -150,6 +169,9 @@ static void poll_task(void *arg) {
             }
             if (kbd_map_is_shift(key)) {
                 shift = pressed;
+            }
+            if (wake_swallows(key, pressed)) {
+                continue;
             }
             raw_down[key]          = pressed;
             key_raw_event_t raw_ev = {.code = key, .pressed = pressed, .shift = shift};

@@ -15,6 +15,10 @@ void keyboard_reinit(void);
 // means C6 EN went low (#14). Keep it short; NULL removes it.
 void keyboard_set_reset_hook(void (*fn)(void));
 
+// Screen timeout (#43): called first for every key press, before the raw hooks. True = the press only woke the screen:
+// no raw hook and not LVGL sees it, nor its release. Keyboard task, keep it short; NULL removes it.
+void keyboard_set_wake_hook(bool (*fn)(void));
+
 // Raw key hooks (#81, #79): up to KEYBOARD_RAW_MAX; false when full. Called from any task. A hook that swallows an
 // event stops the mapped key reaching LVGL (its release too); other hooks still see it.
 #define KEYBOARD_RAW_MAX 4

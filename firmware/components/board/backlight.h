@@ -8,9 +8,13 @@
 void backlight_start(void);
 // Applies the levels now, saves nothing (a slider being dragged)
 void backlight_set(uint8_t display, uint8_t keyboard);
-// Screen timeout (#43): both backlights off, below BACKLIGHT_DISPLAY_MIN, nothing saved. backlight_reapply() keeps them
-// off until backlight_set() lights them again.
-void backlight_off(void);
+// Screen timeout (#43): its own levels (dim, or 0 0 = off), not clamped to BACKLIGHT_DISPLAY_MIN, never saved and not
+// taken as the person's levels. backlight_reapply() keeps them until backlight_resume() or a backlight_set*().
+void backlight_idle(uint8_t display, uint8_t keyboard);
+// Back to the person's levels: the last ones backlight_set*() asked for (a slider not yet saved included), from RAM
+void backlight_resume(void);
+// Counts backlight_set() / backlight_set_saved() calls: the screen timeout takes a change as activity (fw bl, a slider)
+uint32_t backlight_user_generation(void);
 // Applies and saves (NVS bl_disp / bl_kbd, what "fw bl" writes)
 void backlight_set_saved(uint8_t display, uint8_t keyboard);
 // The saved levels, or the C6 firmware's defaults before any were saved

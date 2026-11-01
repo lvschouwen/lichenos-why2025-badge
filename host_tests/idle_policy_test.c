@@ -54,6 +54,17 @@ int main(void) {
         }
     }
 
+    // Holds: busy restarts the clock whatever it says; setup holds for 10 min since the last key, then lets go
+    CHECK(idle_hold(false, false, 0) == IDLE_HOLD_NONE);
+    CHECK(idle_hold(true, false, 0) == IDLE_HOLD_RESTART);
+    CHECK(idle_hold(true, true, 100000) == IDLE_HOLD_RESTART);
+    CHECK(idle_hold(false, true, 0) == IDLE_HOLD_BRIGHT);
+    CHECK(idle_hold(false, true, IDLE_SETUP_HOLD_S - 1) == IDLE_HOLD_BRIGHT);
+    CHECK(idle_hold(false, true, IDLE_SETUP_HOLD_S) == IDLE_HOLD_NONE);
+    // an abandoned setup goes straight to off with the default times
+    CHECK(idle_level(IDLE_SETUP_HOLD_S, (idle_times_t){60, 300},
+                     idle_hold(false, true, IDLE_SETUP_HOLD_S) != IDLE_HOLD_NONE) == IDLE_OFF);
+
     // Only a key that finds the screen off is swallowed; a dimmed screen's key acts
     CHECK(!idle_key_swallowed(IDLE_BRIGHT));
     CHECK(!idle_key_swallowed(IDLE_DIM));

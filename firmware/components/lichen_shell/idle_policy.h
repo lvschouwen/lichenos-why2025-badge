@@ -19,8 +19,14 @@ typedef struct {
 #define IDLE_DIM_DEFAULT_10S 6  // 1 min
 #define IDLE_OFF_DEFAULT_10S 30 // 5 min
 
-// What the backlight should be after idle_s seconds without a key. inhibit (an update running, the first-run setup,
-// the Bench app measuring) keeps it bright. Off wins over dim when both are due (also when off_s <= dim_s).
+// What keeps the screen lit regardless of the idle clock. busy (an update running, the Bench app measuring): bright, and
+// the clock starts again, so the timeout counts in full from when it ends. setup (the first-run screens): bright for at
+// most IDLE_SETUP_HOLD_S since the last key, so an abandoned welcome does not drain the battery.
+#define IDLE_SETUP_HOLD_S 600
+typedef enum { IDLE_HOLD_NONE, IDLE_HOLD_BRIGHT, IDLE_HOLD_RESTART } idle_hold_t;
+idle_hold_t idle_hold(bool busy, bool setup, uint32_t idle_s);
+
+// What the backlight should be after idle_s seconds without a key. inhibit (any hold) keeps it bright. Off wins over dim when both are due (also when off_s <= dim_s).
 idle_level_t idle_level(uint32_t idle_s, idle_times_t t, bool inhibit);
 
 // A key was pressed while the backlight showed `shown`: true when that key only wakes the screen and must not reach

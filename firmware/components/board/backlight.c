@@ -10,6 +10,7 @@
 #include "fw_console.h"
 #include "nvs.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -91,18 +92,45 @@ static void save(uint8_t display, uint8_t keyboard) {
     }
 }
 
-void backlight_set(uint8_t display, uint8_t keyboard) {
-    send(backlight_display_level(display), backlight_keyboard_level(keyboard));
+// The person's levels (backlight_set*, the saved ones at start): what backlight_resume() goes back to after a dim (#43)
+static uint8_t     user_display = BL_DEFAULT_DISPLAY, user_keyboard = BL_DEFAULT_KEYBOARD;
+static atomic_uint user_gen;
+
+static bool send_user(uint8_t display, uint8_t keyboard, bool count) {
+    portENTER_CRITICAL(&applied_lock);
+    user_display  = display;
+    user_keyboard = keyboard;
+    portEXIT_CRITICAL(&applied_lock);
+    if (count) {
+        atomic_fetch_add(&user_gen, 1);
+    }
+    return send(display, keyboard);
 }
 
-void backlight_off(void) {
-    send(0, 0);
+uint32_t backlight_user_generation(void) {
+    return atomic_load(&user_gen);
+}
+
+void backlight_idle(uint8_t display, uint8_t keyboard) {
+    send(display > 100 ? 100 : display, backlight_keyboard_level(keyboard));
+}
+
+void backlight_resume(void) {
+    portENTER_CRITICAL(&applied_lock);
+    uint8_t display  = user_display;
+    uint8_t keyboard = user_keyboard;
+    portEXIT_CRITICAL(&applied_lock);
+    send(display, keyboard);
+}
+
+void backlight_set(uint8_t display, uint8_t keyboard) {
+    send_user(backlight_display_level(display), backlight_keyboard_level(keyboard), true);
 }
 
 void backlight_set_saved(uint8_t display, uint8_t keyboard) {
     display  = backlight_display_level(display);
     keyboard = backlight_keyboard_level(keyboard);
-    send(display, keyboard);
+    send_user(display, keyboard, true);
     save(display, keyboard);
 }
 
@@ -152,7 +180,7 @@ static void blank_for_restart(void) {
 void backlight_restore(void) {
     uint8_t display, keyboard;
     backlight_get(&display, &keyboard);
-    if (send(display, keyboard)) {
+    if (send_user(display, keyboard, false)) {
         uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
     }
     // The C6 flasher installs the UART driver itself and fails if it is already there; backlight_start() opens it
@@ -166,7 +194,7 @@ void backlight_start(void) {
     console_register("bl", "bl <display> <keyboard> (backlight 0-100, screen at least 5)", cmd_bl);
     uint8_t display, keyboard;
     backlight_get(&display, &keyboard);
-    send(display, keyboard);
+    send_user(display, keyboard, false);
     // After c6link_start(): handlers run newest first, so this runs before esp_wifi_stop (which the C6 Wi-Fi setup
     // registers; there are only 5 slots in all)
     if (esp_register_shutdown_handler(blank_for_restart) != ESP_OK) {

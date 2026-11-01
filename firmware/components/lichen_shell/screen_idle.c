@@ -1,6 +1,7 @@
 // Screen timeout (#43): after a while without a key the backlight dims (screen to its minimum, keyboard off), later
 // both go off. Any key lights them again; a key that finds the screen off only wakes it. The keyboard is the activity
-// source (a raw key hook on its task), plus "fw keys send" so the bench can wake the badge. idle_policy.c decides; an
+// source (its wake hook, ahead of the raw key hooks), plus "fw keys send" so the bench can wake the badge, plus a
+// backlight change (fw bl, a slider). idle_policy.c decides; an
 // LVGL timer applies the level, so the inhibits (update, first-run setup, Bench) are read on the task that owns them.
 #include "backlight.h"
 #include "backlight_level.h"
@@ -32,6 +33,7 @@ static bool         inhibited;
 static bool         started;
 
 static idle_level_t applied = IDLE_BRIGHT; // LVGL task: what the backlight was last set to
+static uint32_t     seen_gen;              // LVGL task: backlight_user_generation() at the last tick
 
 static int64_t now_us(void) {
     return esp_timer_get_time();
@@ -46,11 +48,6 @@ bool screen_idle_key(void) {
     return swallow;
 }
 
-// Keyboard task: presses only (a release follows its press, which already counted)
-static bool on_raw_key(key_raw_event_t const *ev, void *arg) {
-    (void)arg;
-    return ev->pressed && screen_idle_key();
-}
 
 void screen_idle_reload(void) {
     idle_times_t t = idle_times_from_10s(settings_get_u8("idle_dim", IDLE_DIM_DEFAULT_10S),
@@ -63,13 +60,11 @@ void screen_idle_reload(void) {
 
 static void apply(idle_level_t level) {
     if (level == IDLE_OFF) {
-        backlight_off();
+        backlight_idle(0, 0);
     } else if (level == IDLE_DIM) {
-        backlight_set(BACKLIGHT_DISPLAY_MIN, 0);
+        backlight_idle(BACKLIGHT_DISPLAY_MIN, 0);
     } else {
-        uint8_t display, keyboard;
-        backlight_get(&display, &keyboard); // the saved levels: a dim never touches them
-        backlight_set(display, keyboard);
+        backlight_resume(); // the live levels, a slider not yet saved included
     }
     ESP_LOGI(TAG, "backlight %s", idle_level_name(level));
     applied = level;
@@ -77,13 +72,29 @@ static void apply(idle_level_t level) {
 
 static void tick(lv_timer_t *timer) {
     (void)timer;
-    bool inhibit = update_screen_busy() || setup_running() || bench_running();
+    bool     busy  = update_screen_busy() || bench_running();
+    bool     setup = setup_running();
+    uint32_t gen   = backlight_user_generation();
+    bool     touch = gen != seen_gen; // fw bl or a slider lit the screen: that is activity too
+    seen_gen       = gen;
     portENTER_CRITICAL(&lock);
-    uint32_t     idle_s = (uint32_t)((now_us() - last_key_us) / 1000000);
-    idle_level_t level  = idle_level(idle_s, times, inhibit);
-    shown               = level;
-    inhibited           = inhibit;
+    int64_t now = now_us();
+    if (touch) {
+        last_key_us = now;
+    }
+    uint32_t    idle_s = (uint32_t)((now - last_key_us) / 1000000);
+    idle_hold_t hold   = idle_hold(busy, setup, idle_s);
+    if (hold == IDLE_HOLD_RESTART) {
+        last_key_us = now; // the full timeout once the update or the Bench run is over
+        idle_s      = 0;
+    }
+    idle_level_t level = idle_level(idle_s, times, hold != IDLE_HOLD_NONE);
+    shown              = level;
+    inhibited          = hold != IDLE_HOLD_NONE;
     portEXIT_CRITICAL(&lock);
+    if (touch && level == IDLE_BRIGHT) {
+        applied = IDLE_BRIGHT; // the change already lit it with the levels asked for
+    }
     if (level != applied) {
         apply(level);
     }
@@ -141,16 +152,13 @@ void screen_idle_start(void) {
         return;
     }
     screen_idle_reload();
-    if (!keyboard_raw_add(on_raw_key, NULL)) {
-        ESP_LOGE(TAG, "no raw key hook slot: no screen timeout");
-        return;
-    }
+    seen_gen = backlight_user_generation();
     if (!lv_timer_create(tick, TICK_MS, NULL)) {
-        keyboard_raw_remove(on_raw_key, NULL);
         ESP_LOGE(TAG, "no timer: no screen timeout");
         return;
     }
     portENTER_CRITICAL(&lock);
     started = true;
     portEXIT_CRITICAL(&lock);
+    keyboard_set_wake_hook(screen_idle_key); // presses only: the keyboard drops the release of a swallowed one
 }
