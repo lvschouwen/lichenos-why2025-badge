@@ -1,0 +1,21 @@
+menu "Lichen display"
+    config LICHEN_DISPLAY_DIRECT_FLUSH
+        bool "Rotate LVGL strips straight into the panel frame buffer"
+        default y
+        help
+            Lichen's own flush callback turns each rendered 720x80 strip by 90 degrees directly into the DSI
+            panel's frame buffer, instead of esp_lvgl_port rotating it into a second PSRAM buffer and the DPI
+            driver copying that into the frame buffer with DMA2D (#95). Saves two PSRAM passes per strip and
+            the port's 112 KB rotation buffer. Off = the port's path, untouched.
+
+    choice LICHEN_DISPLAY_DIRECT_FLUSH_ENGINE
+        prompt "What rotates the strip"
+        depends on LICHEN_DISPLAY_DIRECT_FLUSH
+        default LICHEN_DISPLAY_DIRECT_FLUSH_PPA
+
+        config LICHEN_DISPLAY_DIRECT_FLUSH_PPA
+            bool "PPA (blocking scale-rotate-mirror)"
+        config LICHEN_DISPLAY_DIRECT_FLUSH_CPU
+            bool "CPU (lv_draw_sw_rotate, then a cache write-back of the touched rows)"
+    endchoice
+endmenu
