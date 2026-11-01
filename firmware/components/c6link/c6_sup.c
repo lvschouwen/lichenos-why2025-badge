@@ -11,6 +11,7 @@
 #include "c6_watch.h"
 #include "driver/gpio.h"
 #include "eh_host_event.h"
+#include "eh_host_mcu_transport_state.h"
 #include "esp_event.h"
 #include "esp_hosted.h"
 #include "esp_log.h"
@@ -240,6 +241,16 @@ static void go_down(void) {
     esp_event_post(C6LINK_EVENT, C6LINK_EVENT_DOWN, NULL, 0, 0);
     if (hooks.down) {
         hooks.down();
+    }
+    // A hard signal proves the C6 was reset, so no RPC of the old session can be answered: tell ESP-Hosted, whose
+    // esp_wifi_stop/deinit then fail at once instead of after 5 s each (#90). Its own TRANSPORT_FAILURE does the same,
+    // but only when the bus noticed; a keyboard-first outage may not have touched the bus yet. A live C6 (fw c6
+    // reattach) and the LoRa probe path keep the normal RPC wait. The re-attach's deinit/init clears the flag.
+    portENTER_CRITICAL(&watch_lock);
+    bool reset_proven = watch.source == C6W_SRC_TRANSPORT || watch.source == C6W_SRC_KEYBOARD;
+    portEXIT_CRITICAL(&watch_lock);
+    if (reset_proven) {
+        eh_host_mcu_transport_state_set_failed();
     }
     // ESP-Hosted must not be deinitialised under an esp_wifi call in flight: wait once more before going on anyway
     if (!c6link_wifi_request(false, WIFI_WAIT_MS) && !c6link_wifi_request(false, WIFI_WAIT_MS)) {

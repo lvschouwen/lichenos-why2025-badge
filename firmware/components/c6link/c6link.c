@@ -621,7 +621,8 @@ static void abort_trial(void) {
 }
 
 // The supervisor re-attaches (#14 T-B): forget the connection and take the driver down. Errors are expected (the C6
-// may be gone) and ignored; each RPC gives up after its own timeout.
+// may be gone) and ignored; each RPC gives up after its own timeout, or at once when ESP-Hosted knows the transport
+// is down (#90).
 static void handle_c6_down(void) {
     // A scan from the screen or the console may be inside the driver: let it end first (it gives up after 6 s)
     bool scan_held = scan_lock && xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE;
