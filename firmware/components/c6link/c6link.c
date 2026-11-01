@@ -45,6 +45,7 @@ static atomic_bool  link_up;
 // c6link_start(). wifi_started: esp_wifi_start was called and not stopped since (set by the boot task, then the c6wifi task).
 static atomic_bool wifi_enabled = true;
 static atomic_bool wifi_started;
+static atomic_bool driver_ready; // esp_wifi_init done on the C6 that is attached now; false until MSG_C6_UP has run
 // Shared between the event handler, the c6wifi task, the console and the screen: guarded by state_lock. The task is the
 // only one that calls esp_wifi_connect/disconnect/set_config after boot.
 static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -342,6 +343,7 @@ static drv_result_t wifi_driver_up(char const **why) {
         ESP_LOGE(TAG, "Wi-Fi init: %s", esp_err_to_name(err));
         return DRV_FAILED;
     }
+    atomic_store(&driver_ready, true);
     // The credentials are ours (NVS badge_fw): the driver must never keep a copy in its own flash storage, so that
     // "fw wifi --clear" really forgets them
     if ((err = esp_wifi_set_storage(WIFI_STORAGE_RAM)) != ESP_OK) {
@@ -671,6 +673,7 @@ static void handle_c6_down(void) {
     bool scan_held = scan_lock && xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE;
     atomic_store(&driver_up, false);
     atomic_store(&wifi_started, false);
+    atomic_store(&driver_ready, false);
     retry_pending = false;
     set_ip("");
     wifi_link_down(&link_ap);
@@ -698,6 +701,7 @@ static void handle_c6_up(void) {
     drv_result_t r   = DRV_FAILED;
     // A C6 that has only just booted may refuse the first RPCs: two more tries before giving up until the next outage
     for (int i = 0; i < 3 && (r = wifi_driver_up(&why)) == DRV_FAILED; i++) {
+        atomic_store(&driver_ready, false);
         esp_wifi_deinit();
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
@@ -709,7 +713,7 @@ static void handle_c6_up(void) {
 // STA_STOP. On starts it; STA_START then connects with the saved pair. While the link is down the next attach decides.
 static void handle_wifi_sync(void) {
     bool want = atomic_load(&wifi_enabled);
-    if (!atomic_load(&link_up) || want == atomic_load(&wifi_started)) {
+    if (!atomic_load(&link_up) || !atomic_load(&driver_ready) || want == atomic_load(&wifi_started)) {
         return;
     }
     if (want) {
@@ -810,6 +814,11 @@ static void wifi_task(void *arg) {
             if (atomic_load(&driver_up)) {
                 esp_wifi_connect();
             }
+        }
+        static uint32_t next_sync;
+        if (!got && (int32_t)(now - next_sync) >= 0) {
+            next_sync = now + 5000;
+            handle_wifi_sync(); // idempotent: catches a MSG_WIFI_SYNC that was dropped on a full queue
         }
         poll_rssi(now);
         portENTER_CRITICAL(&state_lock);

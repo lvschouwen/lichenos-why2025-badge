@@ -58,6 +58,10 @@ static void wifi_line(char *out, size_t cap, bool with_prefix) {
     }
 }
 
+static void wifi_value(char *out, size_t cap) {
+    wifi_line(out, cap, false);
+}
+
 static bool settings_tile(char *l1, size_t c1, char *l2, size_t c2) {
     wifi_line(l1, c1, true);
     l2[0] = '\0';
@@ -286,6 +290,7 @@ static void live_update(live_row_t *r) {
 static live_row_t time_rows[3]; // Time's page: Set date & time, Time zone, the source note
 static live_row_t settings_time_row; // Settings' own page: Time
 static live_row_t settings_sd_row;   // and SD card (a mount or unmount on its page or the console shows on return)
+static live_row_t settings_wifi_row;   // Wi-Fi (the radio switch is on its page)
 static live_row_t settings_notify_row; // and Notifications (do-not-disturb, #62)
 
 // The zone row reads NVS: only refreshed when a zone is picked, not every second
@@ -304,6 +309,7 @@ static void refresh_settings_time(lv_timer_t *t) {
     live_update(&settings_time_row);
     live_update(&settings_sd_row);
     live_update(&settings_notify_row);
+    live_update(&settings_wifi_row);
 }
 
 // Each page's timer dies with it, and the rows it filled are forgotten
@@ -317,6 +323,7 @@ static void forget_settings_time(lv_event_t *e) {
     memset(&settings_time_row, 0, sizeof(settings_time_row));
     memset(&settings_sd_row, 0, sizeof(settings_sd_row));
     memset(&settings_notify_row, 0, sizeof(settings_notify_row));
+    memset(&settings_wifi_row, 0, sizeof(settings_wifi_row));
 }
 
 static void source_note(char *out, size_t cap) {
@@ -457,14 +464,10 @@ static void toggle_ota(void *arg) {
 
 // Radio switches (#108): LoRa and airplane mode here, Wi-Fi on its own page. Airplane changes the others too, so every
 // row is refreshed after a toggle.
-static lv_obj_t *wifi_row, *lora_row, *air_row;
+static lv_obj_t *lora_row, *air_row;
 
 static void radio_rows_refresh(void) {
-    char wifi[48];
-    if (wifi_row) {
-        wifi_line(wifi, sizeof(wifi), false);
-        menu_set_value(wifi_row, wifi);
-    }
+    live_update(&settings_wifi_row);
     if (lora_row) {
         menu_set_value(lora_row, lichen_radio_get(RADIO_LORA) ? "On" : "Off");
     }
@@ -487,7 +490,7 @@ static void toggle_airplane(void *arg) {
 
 static void forget_ota_row(lv_event_t *e) {
     (void)e;
-    ota_row = wifi_row = lora_row = air_row = NULL;
+    ota_row = lora_row = air_row = NULL;
 }
 
 static void open_settings(lv_obj_t *screen) {
@@ -495,7 +498,8 @@ static void open_settings(lv_obj_t *screen) {
     char      wifi[48];
     wifi_line(wifi, sizeof(wifi), false);
     menu_note(menu, "Lichen");
-    wifi_row = menu_add(menu, "Wi-Fi", wifi, open_wifi, NULL);
+    settings_wifi_row = live_row(menu_add(menu, "Wi-Fi", wifi, open_wifi, NULL), false, wifi_value);
+    strlcpy(settings_wifi_row.shown, wifi, sizeof(settings_wifi_row.shown));
     ota_row = menu_add(menu, "Updates over Wi-Fi", ota_server_enabled() ? "On" : "Off", toggle_ota, NULL);
     lora_row = menu_add(menu, "LoRa radio", lichen_radio_get(RADIO_LORA) ? "On" : "Off", toggle_lora, NULL);
     air_row  = menu_add(menu, "Airplane mode", lichen_airplane_get() ? "On" : "Off", toggle_airplane, NULL);
