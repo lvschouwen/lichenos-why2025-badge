@@ -8,6 +8,9 @@
 void backlight_start(void);
 // Applies the levels now, saves nothing (a slider being dragged)
 void backlight_set(uint8_t display, uint8_t keyboard);
+// Screen timeout (#43): both backlights off, below BACKLIGHT_DISPLAY_MIN, nothing saved. backlight_reapply() keeps them
+// off until backlight_set() lights them again.
+void backlight_off(void);
 // Applies and saves (NVS bl_disp / bl_kbd, what "fw bl" writes)
 void backlight_set_saved(uint8_t display, uint8_t keyboard);
 // The saved levels, or the C6 firmware's defaults before any were saved

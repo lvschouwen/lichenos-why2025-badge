@@ -17,6 +17,8 @@ void update_screen_boot_check(void);
 void update_screen_image_valid(void);
 // Esc must not close the screen while a firmware update runs (the "Don't turn off the badge" notice stays)
 bool update_screen_blocks_back(void);
+// A transfer is under way, or update mode has everything stopped (the screen timeout keeps the screen lit, #43)
+bool update_screen_busy(void);
 // POST /prepare (#76): enters update mode now (apps stopped, screens closed, update screen up) and returns when done;
 // may block for seconds, OTA task only. A firmware begin must follow within UPDATE_PREPARE_TIMEOUT_MS or the badge restarts.
 void update_screen_prepare(void);

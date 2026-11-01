@@ -387,6 +387,7 @@ void shell_attach_keys(lv_indev_t *indev) {
     lvgl_port_lock(0);
     keys = indev;
     lv_indev_add_event_cb(keys, on_key, LV_EVENT_KEY, NULL);
+    screen_idle_start(); // no keyboard, no timeout: nothing could wake the screen
     if (frames[0].screen) {
         focus_keys();
     } else if (boot_screen_group()) {
@@ -442,6 +443,7 @@ static void cmd_keys(char const *args) {
 void shell_start(lv_display_t *display) {
     home_init();
     setup_init();
+    screen_idle_init();
     console_register("keys", "keys on|off (log every key) | keys log on|off (log raw key events) | keys send <up down left right enter esc tab bksp wait text:..|>", cmd_keys);
     ui_probe_init();
     ui_check_start();

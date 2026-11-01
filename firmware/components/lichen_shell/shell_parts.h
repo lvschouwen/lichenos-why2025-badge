@@ -35,6 +35,7 @@ void settings_app_register(void);
 void about_app_register(void);
 void keytest_app_register(void);
 void bench_app_register(void); // app_bench.c (#96); also registers "fw bench"
+bool bench_running(void);      // app_bench.c: a run is measuring (LVGL task)
 
 // time_set_screen.c: Settings > Time > Set date & time (#64), a builder for shell_open()
 lv_obj_t *time_set_build(void);
@@ -50,6 +51,16 @@ void sd_screen_open(void);
 // setup_screens.c: first-run setup
 void setup_init(void);  // registers "fw setup reset"
 void setup_start(void); // opens the welcome on top of home unless setup_done is saved
+bool setup_running(void); // the first-run setup is on screen (LVGL task)
+
+// screen_idle.c: the screen timeout (#43)
+void screen_idle_init(void);  // registers "fw idle"; from shell_start
+void screen_idle_start(void); // once the keyboard is attached: the key hook and the timer (LVGL lock held)
+// A key press reached the badge (the keyboard task, or "fw keys send" on the LVGL task): restarts the idle clock and
+// lights the screen. True when the key only woke a dark screen and must not act.
+bool screen_idle_key(void);
+// Settings > Display changed the times
+void screen_idle_reload(void);
 
 // dialog.c: the open dialog's keypad group, NULL when none is open (#14 T-B); shell.c: give the keys to the dialog, or
 // back to the top screen once it is gone

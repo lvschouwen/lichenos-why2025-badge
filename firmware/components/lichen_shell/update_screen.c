@@ -453,6 +453,13 @@ bool update_screen_blocks_back(void) {
     return busy && nav_current() == SCREEN_UPDATE;
 }
 
+bool update_screen_busy(void) {
+    portENTER_CRITICAL(&lock);
+    bool busy = um.mode == UM_UPDATING || shared.phase == PH_RECEIVING || shared.phase == PH_RESTARTING;
+    portEXIT_CRITICAL(&lock);
+    return busy;
+}
+
 void update_screen_boot_check(void) {
     char prev[64];
     settings_get_str(UPD_FROM_KEY, prev, sizeof(prev), "");

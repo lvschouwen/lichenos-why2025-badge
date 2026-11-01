@@ -272,6 +272,10 @@ static void tick(lv_timer_t *timer) {
     }
 }
 
+bool bench_running(void) {
+    return s_b.stage != ST_IDLE;
+}
+
 static void start_run(void) {
     if (s_b.stage != ST_IDLE) {
         return;

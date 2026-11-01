@@ -1,7 +1,8 @@
 # Lichen, the badge's OS shell (#66): home, boot screen, setup, update, status bar, the system apps. Apps never require
 # it; they PRIV_REQUIRE lichen_api (#84). Pure and host-tested: log_ring.c (log_ring_test.c; log_store.c keeps the log
 # in PSRAM for GET /log, #38), nav.c (nav_test.c), home_layout.c (home_layout_test.c), shot_blend.c (shot_blend_test.c), time_fields.c (time_fields_test.c, #64),
-# dialog_countdown.c (dialog_countdown_test.c, #14), ui_perf_stats.c (ui_perf_stats_test.c, #93), bench_calc.c (bench_calc_test.c, #96), sd_settings_model.c (sd_settings_model_test.c, #99).
+# dialog_countdown.c (dialog_countdown_test.c, #14), ui_perf_stats.c (ui_perf_stats_test.c, #93), bench_calc.c (bench_calc_test.c, #96), sd_settings_model.c (sd_settings_model_test.c, #99),
+# idle_policy.c (idle_policy_test.c, #43; screen_idle.c applies it).
 # app_bench.c is the Bench app (#96).
 # shell.c, boot_screen.c, status_bar.c and logo.c are the LVGL screens; shell.c and app_settings.c implement lichen_ui.h.
 idf_component_register(SRCS "log_store.c" "log_ring.c" "nav.c" "shell.c" "home.c" "home_layout.c"
@@ -9,6 +10,7 @@ idf_component_register(SRCS "log_store.c" "log_ring.c" "nav.c" "shell.c" "home.c
                             "boot_screen.c" "status_bar.c" "link_state.c" "logo.c" "update_status.c" "update_mode.c" "update_screen.c" "shot_blend.c" "screenshot.c" "time_fields.c" "time_set_screen.c"
                             "dialog.c" "dialog_countdown.c" "ui_check.c" "ui_perf.c" "ui_perf_stats.c" "app_bench.c" "bench_calc.c"
                             "sd_screen.c" "sd_settings_model.c"
+                            "idle_policy.c" "screen_idle.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api lichen_net
                        PRIV_REQUIRES lichen_boot lichen_clock freertos fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage sdcard app_update esp_system psram_guard esp_mm)

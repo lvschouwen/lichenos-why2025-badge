@@ -95,6 +95,10 @@ void backlight_set(uint8_t display, uint8_t keyboard) {
     send(backlight_display_level(display), backlight_keyboard_level(keyboard));
 }
 
+void backlight_off(void) {
+    send(0, 0);
+}
+
 void backlight_set_saved(uint8_t display, uint8_t keyboard) {
     display  = backlight_display_level(display);
     keyboard = backlight_keyboard_level(keyboard);

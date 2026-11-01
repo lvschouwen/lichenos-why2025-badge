@@ -31,6 +31,9 @@ typedef struct {
 
 // LVGL context only
 static void deliver_key(uint32_t key) {
+    if (screen_idle_key()) {
+        return; // it woke the dark screen (#43), as a real key would
+    }
     lv_group_t *group = shell_top_group();
     if (key == LV_KEY_ESC) {
         shell_esc(); // the shell's own Esc handling (it sees the indev's key, which this does not go through)

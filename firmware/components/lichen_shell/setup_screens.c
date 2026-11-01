@@ -18,6 +18,17 @@
 
 static char const TAG[] = "setup";
 
+static bool welcome_up; // LVGL task: the welcome stays under the setup's Wi-Fi step until the setup ends
+
+bool setup_running(void) {
+    return welcome_up;
+}
+
+static void on_welcome_delete(lv_event_t *e) {
+    (void)e;
+    welcome_up = false;
+}
+
 static void finish(void) {
     settings_set_u8("setup_done", 1);
     shell_home();
@@ -67,6 +78,8 @@ static lv_obj_t *build_welcome(void) {
     lv_obj_set_style_pad_top(hint, 24, 0);
     lv_label_set_text(hint, "Press Enter to start");
     lv_obj_add_event_cb(scr, on_key, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(scr, on_welcome_delete, LV_EVENT_DELETE, NULL);
+    welcome_up = true;
     return scr;
 }
 

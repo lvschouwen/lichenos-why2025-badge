@@ -1,9 +1,11 @@
-// Settings (#66, settings.html top row): Wi-Fi, Display (brightness, home layout), Time (#64: set date & time, time
-// zone), SD card (#99, sd_screen.c), About Lichen, then one entry per app that has a settings page. Every screen is a menu.h list; Esc is the shell's.
+// Settings (#66, settings.html top row): Wi-Fi, Display (brightness, screen timeout #43, home layout), Time (#64: set
+// date & time, time zone), SD card (#99, sd_screen.c), About Lichen, then one entry per app that has a settings page.
+// Every screen is a menu.h list; Esc is the shell's.
 #include "app_icons.h"
 #include "backlight.h"
 #include "backlight_level.h"
 #include "home_layout.h"
+#include "idle_policy.h"
 #include "lichen_clock.h"
 #include "lichen_app.h"
 #include "menu.h"
@@ -114,6 +116,26 @@ static void toggle_layout(void *arg) {
     layout_changed = true; // home is rebuilt when this screen is left: a rebuild now would close it
 }
 
+// Screen timeout (#43): Enter steps through the choices; saved at once, the idle clock starts again from it
+static lv_obj_t *dim_row, *off_row;
+
+static void idle_rows_refresh(void) {
+    char text[16];
+    idle_choice_text(settings_get_u8("idle_dim", IDLE_DIM_DEFAULT_10S), text, sizeof(text));
+    menu_set_value(dim_row, text);
+    idle_choice_text(settings_get_u8("idle_off", IDLE_OFF_DEFAULT_10S), text, sizeof(text));
+    menu_set_value(off_row, text);
+}
+
+static void step_idle(void *arg) {
+    bool        off = arg != NULL;
+    char const *key = off ? "idle_off" : "idle_dim";
+    uint8_t     now = settings_get_u8(key, off ? IDLE_OFF_DEFAULT_10S : IDLE_DIM_DEFAULT_10S);
+    settings_set_u8(key, off ? idle_off_next(now) : idle_dim_next(now));
+    screen_idle_reload();
+    idle_rows_refresh();
+}
+
 static void rebuild_later(void *arg) {
     (void)arg;
     shell_rebuild_home();
@@ -127,6 +149,8 @@ static void on_display_delete(lv_event_t *e) {
         save_levels();
     }
     layout_row = NULL;
+    dim_row    = NULL;
+    off_row    = NULL;
     if (layout_changed) {
         layout_changed = false;
         lv_async_call(rebuild_later, NULL); // after the screen being deleted is gone
@@ -142,6 +166,9 @@ static lv_obj_t *build_display(void) {
     if (shell_sources.c6_up && !shell_sources.c6_up()) {
         menu_note(menu, "brightness needs the C6");
     }
+    dim_row    = menu_add(menu, "Dim after", "", step_idle, NULL);
+    off_row    = menu_add(menu, "Screen off after", "", step_idle, (void *)1);
+    idle_rows_refresh();
     layout_row = menu_add(menu, "Home layout", layout_name(), toggle_layout, NULL);
     lv_obj_add_event_cb(screen, on_display_delete, LV_EVENT_DELETE, NULL);
     return screen;
