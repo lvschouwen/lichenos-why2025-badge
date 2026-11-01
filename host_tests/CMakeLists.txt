@@ -984,6 +984,11 @@ target_include_directories(notify_mute_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(notify_mute_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME notify_mute_test COMMAND notify_mute_test)
 
+add_executable(led_pattern_test ${CMAKE_CURRENT_SOURCE_DIR}/led_pattern_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_led/led_pattern.c)
+target_include_directories(led_pattern_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_led)
+target_compile_options(led_pattern_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME led_pattern_test COMMAND led_pattern_test)
+
 add_executable(notify_view_test ${CMAKE_CURRENT_SOURCE_DIR}/notify_view_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/notify_view.c)
 target_include_directories(notify_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(notify_view_test PRIVATE -Wall -Wextra -Werror)
@@ -1007,6 +1012,7 @@ add_custom_target(run_tests
     notify_ring_test
     notify_rate_test
     notify_mute_test
+    led_pattern_test
     notify_view_test
     sys_notice_rules_test
     COMMENT "Running all host tests"

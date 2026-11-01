@@ -26,6 +26,7 @@
 #include "freertos/task.h"
 #include "keyboard.h"
 #include "lichen_sensors.h"
+#include "led.h"
 #include "lichen_app.h"
 #include "lichen_random.h"
 #include "notify_os.h"
@@ -75,6 +76,7 @@ static void ota_begin(ota_kind_t kind, char const *name, uint32_t total) {
         psram_guard_update_begin(); // no-op when /prepare already added it (#40)
     }
     update_screen_begin(kind != OTA_KIND_FILE, kind == OTA_KIND_FIRMWARE, name, total);
+    led_set_updating(true); // fast blink on the status LED (#74)
 }
 
 static void ota_prepare(void) {
@@ -84,6 +86,7 @@ static void ota_prepare(void) {
 
 static void ota_end(bool ok, bool rebooting) {
     psram_guard_update_end();
+    led_set_updating(false);
     update_screen_end(ok, rebooting);
 }
 
@@ -244,6 +247,7 @@ void app_main(void) {
         boot_progress_end(BOOT_STORAGE, STEP_DONE, NULL);
     }
     lichen_notify_start(storage_ok); // the history from /storage/lichen/notify.bin (#62); lichen_notify() works from now
+    led_start();                     // the status LED follows the notices (#74)
 
     assets_mount(); // fonts; without them the UI uses the built-in ones (#22)
     crash_check();
