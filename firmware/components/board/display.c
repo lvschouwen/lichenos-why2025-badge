@@ -178,7 +178,7 @@ bool display_start(lv_display_t **out) {
     };
     esp_lcd_panel_dev_config_t const dev_cfg = {
         .bits_per_pixel          = 16,
-        .rgb_ele_order           = LCD_RGB_ELEMENT_ORDER_BGR, // the badge's panel is wired backwards
+        .rgb_ele_order           = LCD_RGB_ELEMENT_ORDER_RGB, // BGR swapped red and blue on the panel for weeks (#106): screenshots never showed it, they render from the LVGL buffer
         .reset_gpio_num          = LCD_IO_RST,
         .vendor_config           = &vendor_config,
         .flags.reset_active_high = 1,
