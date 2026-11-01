@@ -333,22 +333,26 @@ static drv_result_t wifi_driver_up(char const **why) {
     portEXIT_CRITICAL(&state_lock);
     if (!have) {
         ESP_LOGW(TAG, "no Wi-Fi credentials, set them in Settings or with: fw wifi <ssid> <password>");
-        // The radio still starts (without connecting) so that the badge can scan and join from Settings
+        // The radio still starts (without connecting) so that the badge can scan and join from Settings.
+        // driver_up goes true BEFORE esp_wifi_start: STA_START is handled by the c6wifi task (prio 5) before the
+        // boot task gets back from esp_wifi_start, and MSG_CONNECT is dropped while driver_up is false
+        atomic_store(&driver_up, true);
         if ((err = esp_wifi_start()) != ESP_OK) {
             ESP_LOGE(TAG, "Wi-Fi start: %s", esp_err_to_name(err));
+            atomic_store(&driver_up, false);
         }
-        atomic_store(&driver_up, true);
         return DRV_NO_CREDENTIALS;
     }
     portENTER_CRITICAL(&state_lock);
     snprintf(ssid, sizeof(ssid), "%.32s", (char const *)cfg.sta.ssid);
     portEXIT_CRITICAL(&state_lock);
+    atomic_store(&driver_up, true); // before esp_wifi_start, see above
     if ((err = esp_wifi_set_config(WIFI_IF_STA, &cfg)) != ESP_OK || (err = esp_wifi_start()) != ESP_OK) {
         ESP_LOGE(TAG, "Wi-Fi start: %s", esp_err_to_name(err));
+        atomic_store(&driver_up, false);
         *why = "Wi-Fi start";
         return DRV_FAILED;
     }
-    atomic_store(&driver_up, true);
     return DRV_STARTED;
 }
 
@@ -627,6 +631,12 @@ static void handle_c6_down(void) {
     wifi_link_down(&link_ap);
     abort_trial();
     esp_err_t stop = esp_wifi_stop();
+    // A dead C6 never answers the stop, so WIFI_EVENT_STA_DISCONNECTED/STA_STOP never come and the default handlers
+    // never take the station netif down and out of lwIP; the STA_START of the re-attach then adds it a second time
+    // ("netif_add: netif already added", bench 2026-11-01). Run the two default actions ourselves; if the events do
+    // come later (live C6, fw c6 reattach) the handlers find the netif gone and do nothing
+    esp_netif_action_disconnected(sta_netif, NULL, 0, NULL);
+    esp_netif_action_stop(sta_netif, NULL, 0, NULL);
     esp_err_t gone = esp_wifi_deinit();
     ESP_LOGW(TAG, "wifi: down for the C6 re-attach (stop %s, deinit %s)", esp_err_to_name(stop), esp_err_to_name(gone));
     if (scan_held) {
