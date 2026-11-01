@@ -112,6 +112,10 @@ static void test_views(void) {
     CHECK(mesh_contact_view_keeps(MESH_VIEW_REPEATERS, 2) && mesh_contact_view_keeps(MESH_VIEW_REPEATERS, 3));
     CHECK(!mesh_contact_view_keeps(MESH_VIEW_REPEATERS, 1) && !mesh_contact_view_keeps(MESH_VIEW_REPEATERS, 4));
     CHECK(!mesh_contact_view_keeps(MESH_VIEW_REPEATERS, 0));
+    // Contacts are the people (#101): repeaters and rooms only on Repeaters; sensors stay (no other list has them)
+    CHECK(mesh_contact_view_keeps(MESH_VIEW_CONTACTS, 1) && mesh_contact_view_keeps(MESH_VIEW_CONTACTS, 4));
+    CHECK(!mesh_contact_view_keeps(MESH_VIEW_CONTACTS, 2) && !mesh_contact_view_keeps(MESH_VIEW_CONTACTS, 3));
+    CHECK(mesh_contact_view_before(MESH_VIEW_CONTACTS, MESH_CONTACT_FAV, 900, 0, 5)); // favourites first
     CHECK(mesh_contact_view_before(MESH_VIEW_ALL, MESH_CONTACT_FAV, 900, 0, 5));
     CHECK(mesh_contact_view_before(MESH_VIEW_REPEATERS, MESH_CONTACT_FAV, 900, 0, 5));
     CHECK(!mesh_contact_view_before(MESH_VIEW_HEARD, MESH_CONTACT_FAV, 900, 0, 5)); // newest first, favourite or not

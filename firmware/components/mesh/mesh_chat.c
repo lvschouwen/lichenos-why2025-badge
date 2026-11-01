@@ -93,13 +93,15 @@ void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, uint32_t now_epoch, cha
     } else {
         snprintf(badge, badge_cap, "%u", (unsigned)c->unread);
     }
+    char const *gone = c->key.kind == MESH_CHAT_DM && c->contact_gone ? "contact removed" : NULL;
     if (c->count == 0) {
-        snprintf(sub, sub_cap, "no messages yet");
+        snprintf(sub, sub_cap, "%s", gone ? gone : "no messages yet");
         return;
     }
     char age[24];
     mesh_format_msg_age(c->last_loaded, c->last_heard_s, c->last_epoch, now_s, now_epoch, age, sizeof(age));
-    snprintf(sub, sub_cap, "%s: %s", age, c->last);
+    // The latest line first, its age after it (#101): "bob: hello · 3 min ago"
+    snprintf(sub, sub_cap, "%s%s%s · %s", gone ? gone : "", gone ? " · " : "", c->last, age);
 }
 
 char const *mesh_advert_refusal(bool clock_set) {

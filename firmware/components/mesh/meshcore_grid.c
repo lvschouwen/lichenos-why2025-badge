@@ -58,7 +58,7 @@ static void set_text(lv_obj_t *label, char const *text) {
 static void take_contact_counts(mesh_grid_counts_t *c) {
     mesh_contact_stats_t st;
     if (mesh_contacts_stats(&st, SCREEN_WAIT_MS)) {
-        c->contacts    = st.total;
+        c->contacts    = st.total - st.repeaters; // the Contacts list: the people only (#101)
         c->repeaters   = st.repeaters;
         c->heard_any   = st.heard_any;
         c->heard_age_s = st.newest_age_s;
@@ -183,7 +183,7 @@ static void open_tile(void *arg) {
     }
     switch ((mesh_grid_tile_t)(intptr_t)arg) {
         case MESH_GRID_CHAT: meshcore_chats_open(); break;
-        case MESH_GRID_CONTACTS: meshcore_contacts_open(MESH_VIEW_ALL); break;
+        case MESH_GRID_CONTACTS: meshcore_contacts_open(MESH_VIEW_CONTACTS); break;
         case MESH_GRID_REPEATERS: meshcore_contacts_open(MESH_VIEW_REPEATERS); break;
         case MESH_GRID_HEARD: meshcore_contacts_open(MESH_VIEW_HEARD); break;
         case MESH_GRID_ADVERTISE: ask_advert(); break;

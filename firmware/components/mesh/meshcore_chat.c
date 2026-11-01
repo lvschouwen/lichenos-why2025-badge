@@ -400,7 +400,7 @@ static lv_obj_t *build_chat(void) {
     lv_label_set_long_mode(heading, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
     lv_obj_set_style_text_color(heading, lv_color_hex(THEME_AMBER), 0);
-    lv_label_set_text(heading, dm_mode ? channel + (channel[0] == '@') : channel);
+    lv_label_set_text(heading, channel); // "@bob" for a DM, as the Chat list's rows (#101)
 
     list = lv_obj_create(screen);
     lv_obj_remove_style_all(list);

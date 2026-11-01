@@ -27,6 +27,7 @@ typedef struct {
 
 static view_text_t const VIEWS[] = {
     [MESH_VIEW_ALL]       = {"Contacts", NULL, "No nodes heard yet."},
+    [MESH_VIEW_CONTACTS]  = {"Contacts", "People: repeaters and rooms are under Repeaters.", "No companions heard yet."},
     [MESH_VIEW_REPEATERS] = {"Repeaters", "Repeaters and rooms among the contacts.", "No repeaters or rooms heard yet."},
     [MESH_VIEW_HEARD]     = {"Heard", "Newest first. Only nodes kept as contacts are listed: others are not stored.",
                              "No nodes heard yet."},
@@ -190,6 +191,6 @@ static lv_obj_t *build(void) {
 }
 
 void meshcore_contacts_open(mesh_contact_view_t v) {
-    view = v <= MESH_VIEW_HEARD ? v : MESH_VIEW_ALL;
+    view = v <= MESH_VIEW_CONTACTS ? v : MESH_VIEW_CONTACTS;
     shell_open(build, SCREEN_CONTACTS);
 }

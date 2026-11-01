@@ -323,6 +323,9 @@ extern "C" size_t mesh_convs_snapshot(mesh_conv_t *out, size_t max, uint32_t wai
         return MESH_BUSY;
     }
     size_t n = mesh_store_convs(out, max);
+    for (size_t i = 0; i < n; i++) { // a removed contact's DM history stays, marked (#101)
+        out[i].contact_gone = out[i].key.kind == MESH_CHAT_DM && node && !node->lookupContactByPubKey(out[i].key.id, 6);
+    }
     mesh_unlock();
     return n;
 }
@@ -883,10 +886,25 @@ extern "C" char const *mesh_channel_add(char const *name_in, char const *b64_key
     return ok ? NULL : "No free channel slot";
 }
 
+// The slot of the channel a typed name means (channel_name_match: "badgetest" finds "#badgetest", an exact name wins),
+// -1 for none. With the lock held.
+static int channel_find_locked(char const *typed) {
+    ChannelDetails slot;
+    int            best = -1, best_match = CHANNEL_MATCH_NONE;
+    for (int i = 0; i < MAX_GROUP_CHANNELS && node->getChannel(i, slot); i++) {
+        int match = slot.name[0] ? channel_name_match(slot.name, typed) : CHANNEL_MATCH_NONE;
+        if (match > best_match) {
+            best = i, best_match = match;
+        }
+    }
+    return best;
+}
+
 // Clears slot `index` as MeshCore's apps do (setChannel with an empty ChannelDetails) and saves. DataStore writes every
 // slot in order, empty ones as zeroes, and loads them back by position: so the later channels keep their indices and
 // an emptied slot reads back empty (the lists skip it, the next add reuses it). Called with the lock held; by_name
-// (or NULL) picks the slot by name, without case, instead.
+// (or NULL) picks the slot by name, without case, instead: the stored name exactly (the screens pass it; a typed one
+// goes through channel_find_locked first, so a vanished "x" never takes "#x" with it).
 static char const *channel_remove_locked(int index, char const *by_name) {
     ChannelDetails slot;
     if (by_name) {
@@ -1177,6 +1195,25 @@ extern "C" size_t mesh_out_list(mesh_out_info_t *out, size_t max) {
 
 static char const *const OUT_STATE_NAME[] = {"queued", "sent", "on air", "heard repeated", "delivered", "FAILED"};
 
+// A channel name typed on the console as stored (channel_find_locked), into out (may be typed); false (said why,
+// after `what`) when there is none or MeshCore is not there
+static bool console_channel_name(char const *typed, char *out, size_t cap, char const *what) {
+    if (char const *why = settings_lock()) {
+        console_reply("%s: %s", what, why);
+        return false;
+    }
+    ChannelDetails found;
+    int            slot = channel_find_locked(typed);
+    bool           have = slot >= 0 && node->getChannel(slot, found);
+    mesh_unlock();
+    if (!have) {
+        console_reply("%s: no channel %s (\"fw channels\" lists them)", what, typed);
+        return false;
+    }
+    snprintf(out, cap, "%.*s", (int)sizeof(found.name), found.name);
+    return true;
+}
+
 // "fw mesh send <channel> <text>"
 static void cmd_mesh_send(char const *args) {
     char channel[OB_TARGET_MAX] = "";
@@ -1197,6 +1234,9 @@ static void cmd_mesh_send(char const *args) {
         return;
     }
     memcpy(channel, args, name_len);
+    if (!console_channel_name(channel, channel, sizeof(channel), "not queued")) {
+        return; // the outbox names the channel as stored: "badgetest" means "#badgetest" (#101)
+    }
     if (!clock_is_set()) {
         console_reply("warning: the clock is not set, other nodes will see a wrong time");
     }
@@ -1470,7 +1510,11 @@ static void channel_rm(char const *arg) {
     char *end;
     long  index = strtol(arg, &end, 10);
     bool  by_index = end != arg && *end == 0;
-    char const *why = by_index ? mesh_channel_remove((int)index) : mesh_channel_remove_named(arg);
+    char name[MESH_CHANNEL_MAX + 1];
+    if (!by_index && !console_channel_name(arg, name, sizeof(name), "not removed")) {
+        return; // "badgetest" means "#badgetest" (#101)
+    }
+    char const *why = by_index ? mesh_channel_remove((int)index) : mesh_channel_remove_named(name);
     if (why) {
         console_reply("channel %s not removed: %s", arg, why);
     } else {

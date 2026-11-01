@@ -22,6 +22,11 @@ char const *channel_parse(char const *name, char const *b64_or_null, char *out_n
                           uint8_t out_secret[CHANNEL_SECRET_MAX], size_t *secret_len);
 // Two channel names are the same channel to the user: compared without case
 bool channel_same_name(char const *a, char const *b);
+// How well a name typed on the console names a stored channel (#101): CHANNEL_MATCH_EXACT for the same name without
+// case, CHANNEL_MATCH_HASHTAG when only the stored name's leading '#' is left out ("badgetest" for "#badgetest"), else
+// CHANNEL_MATCH_NONE. Callers take an exact match over a hashtag one, so a keyed "badgetest" is never shadowed.
+enum { CHANNEL_MATCH_NONE, CHANNEL_MATCH_HASHTAG, CHANNEL_MATCH_EXACT };
+int channel_name_match(char const *stored, char const *typed);
 
 // NULL when the channel in slot `index` (name as stored, NULL or "" for an empty slot) may be removed, else why not:
 // slot 0 is Public (MeshCore's default channel), and an empty or missing slot has nothing to remove

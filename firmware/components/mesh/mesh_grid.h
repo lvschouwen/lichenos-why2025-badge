@@ -35,7 +35,7 @@ char const *mesh_grid_name(mesh_grid_tile_t tile);
 // What the badges are made from: copies the grid takes once a second
 typedef struct {
     uint32_t unread;      // over all chats (the home tile's number)
-    size_t   contacts;    // all contacts
+    size_t   contacts;    // contacts that are not repeaters or rooms (the Contacts list, #101)
     size_t   repeaters;   // contacts that are repeaters or rooms
     bool     heard_any;   // a contact has been heard at all
     uint32_t heard_age_s; // since the most recently heard contact

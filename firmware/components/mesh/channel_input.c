@@ -103,6 +103,17 @@ bool channel_same_name(char const *a, char const *b) {
     return strcasecmp(a, b) == 0;
 }
 
+int channel_name_match(char const *stored, char const *typed) {
+    if (!stored || !typed || !stored[0] || !typed[0]) {
+        return CHANNEL_MATCH_NONE;
+    }
+    if (strcasecmp(stored, typed) == 0) {
+        return CHANNEL_MATCH_EXACT;
+    }
+    return stored[0] == '#' && typed[0] != '#' && strcasecmp(stored + 1, typed) == 0 ? CHANNEL_MATCH_HASHTAG
+                                                                                     : CHANNEL_MATCH_NONE;
+}
+
 char const *channel_removable(int index, char const *name) {
     if (index == 0) {
         return "Public can't be removed";

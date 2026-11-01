@@ -113,6 +113,7 @@ static uint32_t convs_sig(size_t n) {
         h = scroll_key_hash(&mem->convs[i].key, sizeof(mem->convs[i].key), h);
         h = scroll_key_hash(&mem->convs[i].last_seq, sizeof(mem->convs[i].last_seq), h);
         h = scroll_key_hash(&mem->convs[i].unread, sizeof(mem->convs[i].unread), h);
+        h = scroll_key_hash(&mem->convs[i].contact_gone, sizeof(mem->convs[i].contact_gone), h);
     }
     return h;
 }

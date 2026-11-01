@@ -135,7 +135,12 @@ bool mesh_contact_before(uint8_t flags_a, uint32_t age_a, uint8_t flags_b, uint3
 }
 
 bool mesh_contact_view_keeps(mesh_contact_view_t view, uint8_t type) {
-    return view != MESH_VIEW_REPEATERS || type == MESH_ADV_TYPE_REPEATER || type == MESH_ADV_TYPE_ROOM;
+    bool infrastructure = type == MESH_ADV_TYPE_REPEATER || type == MESH_ADV_TYPE_ROOM;
+    switch (view) {
+        case MESH_VIEW_REPEATERS: return infrastructure;
+        case MESH_VIEW_CONTACTS: return !infrastructure;
+        default: return true;
+    }
 }
 
 bool mesh_contact_view_before(mesh_contact_view_t view, uint8_t flags_a, uint32_t age_a, uint8_t flags_b,

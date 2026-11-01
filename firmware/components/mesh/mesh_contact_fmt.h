@@ -56,9 +56,10 @@ bool mesh_contact_uri(char const *name, uint8_t const pub[MESH_CONTACT_PUB_LEN],
 // The Contacts order: favourites first, then the most recently heard
 bool mesh_contact_before(uint8_t flags_a, uint32_t age_a, uint8_t flags_b, uint32_t age_b);
 
-// The contact lists of the app's grid (#88): Contacts shows all, Repeaters only repeaters and rooms (favourites first
-// in both, as mesh_contact_before), Heard all of them by when they were last heard only, newest first
-typedef enum { MESH_VIEW_ALL, MESH_VIEW_REPEATERS, MESH_VIEW_HEARD } mesh_contact_view_t;
+// The contact lists of the app's grid (#88): Contacts (MESH_VIEW_CONTACTS, #101) the people, so everything but
+// repeaters and rooms; Repeaters only repeaters and rooms (favourites first in both, as mesh_contact_before); Heard all
+// of them by when they were last heard only, newest first. MESH_VIEW_ALL is every contact (the console's list).
+typedef enum { MESH_VIEW_ALL, MESH_VIEW_REPEATERS, MESH_VIEW_HEARD, MESH_VIEW_CONTACTS } mesh_contact_view_t;
 #define MESH_ADV_TYPE_REPEATER 2 // MeshCore ADV_TYPE_REPEATER
 #define MESH_ADV_TYPE_ROOM     3 // ADV_TYPE_ROOM
 // Whether a contact of this MeshCore advert type is in the view

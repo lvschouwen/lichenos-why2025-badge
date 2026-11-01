@@ -26,9 +26,16 @@ lv_obj_t *mc_list_line(lv_obj_t *parent, char const *text, uint32_t color) {
     return label;
 }
 
+#define SEL_BORDER_W 4 // on every row, shown only on the selected one: a border that came and went would move the text
+
+// The selected row (#101): THEME_TRACK with an amber left border, as the chat's search hit (THEME_TILE was too faint)
 void mc_list_style_row(lv_obj_t *row, bool selected) {
-    lv_obj_set_style_bg_color(row, lv_color_hex(THEME_TILE), 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(THEME_TRACK), 0);
     lv_obj_set_style_bg_opa(row, selected ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_LEFT, 0);
+    lv_obj_set_style_border_width(row, SEL_BORDER_W, 0);
+    lv_obj_set_style_border_color(row, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_border_opa(row, selected ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 }
 
 lv_obj_t *mc_list_row(mc_list_t *l, bool selected) {

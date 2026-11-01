@@ -71,6 +71,17 @@ int main(void) {
     CHECK(channel_same_name("Public", "public"));
     CHECK(!channel_same_name("#foo", "#foo2"));
     CHECK(!channel_same_name("#foo", "foo"));
+    // The console names a hashtag channel with or without its '#' (#101: "mesh send badgetest" failed at once)
+    CHECK(channel_name_match("#badgetest", "#badgetest") == CHANNEL_MATCH_EXACT);
+    CHECK(channel_name_match("#badgetest", "#BadgeTest") == CHANNEL_MATCH_EXACT);
+    CHECK(channel_name_match("#badgetest", "badgetest") == CHANNEL_MATCH_HASHTAG);
+    CHECK(channel_name_match("#badgetest", "BADGETEST") == CHANNEL_MATCH_HASHTAG);
+    CHECK(channel_name_match("badgetest", "badgetest") == CHANNEL_MATCH_EXACT); // a keyed channel of that name
+    CHECK(channel_name_match("badgetest", "#badgetest") == CHANNEL_MATCH_NONE); // a '#' is never dropped from what is typed
+    CHECK(channel_name_match("#badgetest", "badge") == CHANNEL_MATCH_NONE);
+    CHECK(channel_name_match("#badgetest", "##badgetest") == CHANNEL_MATCH_NONE);
+    CHECK(channel_name_match("#", "") == CHANNEL_MATCH_NONE && channel_name_match("", "") == CHANNEL_MATCH_NONE);
+    CHECK(channel_name_match(NULL, "x") == CHANNEL_MATCH_NONE && channel_name_match("x", NULL) == CHANNEL_MATCH_NONE);
 
     // Which slots can be removed: not Public (slot 0), not an empty or missing slot
     CHECK(channel_removable(0, "Public") != NULL);

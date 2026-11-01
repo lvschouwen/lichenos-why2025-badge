@@ -57,6 +57,7 @@ typedef struct {
     uint8_t         last_loaded; // the newest message came from the journal: last_epoch is its age, not last_heard_s
     uint32_t        last_epoch;
     uint16_t        count; // messages kept
+    uint8_t         contact_gone; // a DM whose contact MeshCore no longer has (set by mesh_convs_snapshot, #101)
 } mesh_conv_t;
 
 // Resets the store. Every chat gets a ring of chat_keep messages, allocated on its first message (PSRAM through malloc
