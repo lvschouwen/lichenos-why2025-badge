@@ -83,7 +83,7 @@ mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap) {
     }
 }
 
-void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, char *title, size_t title_cap, char *badge, size_t badge_cap,
+void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, uint32_t now_epoch, char *title, size_t title_cap, char *badge, size_t badge_cap,
                    char *sub, size_t sub_cap) {
     snprintf(title, title_cap, "%s", c->title);
     if (c->unread == 0) {
@@ -98,7 +98,7 @@ void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, char *title, size_t tit
         return;
     }
     char age[24];
-    mesh_format_age(now_s > c->last_heard_s ? now_s - c->last_heard_s : 0, age, sizeof(age));
+    mesh_format_msg_age(c->last_loaded, c->last_heard_s, c->last_epoch, now_s, now_epoch, age, sizeof(age));
     snprintf(sub, sub_cap, "%s: %s", age, c->last);
 }
 

@@ -159,20 +159,26 @@ int main(void) {
         char        title[40], badge[8], sub[220];
         memset(&cv, 0, sizeof(cv));
         strcpy(cv.title, "#badgetest");
-        mesh_conv_row(&cv, 100, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
+        mesh_conv_row(&cv, 100, 0, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
         CHECK(strcmp(title, "#badgetest") == 0 && badge[0] == '\0' && strcmp(sub, "no messages yet") == 0);
         cv.count = 2, cv.unread = 3, cv.last_heard_s = 40;
         strcpy(cv.last, "bob: hello");
-        mesh_conv_row(&cv, 220, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
+        mesh_conv_row(&cv, 220, 0, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
         CHECK(strcmp(badge, "3") == 0 && strcmp(sub, "3 min ago: bob: hello") == 0);
         cv.unread = 99;
-        mesh_conv_row(&cv, 220, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
+        mesh_conv_row(&cv, 220, 0, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
         CHECK(strcmp(badge, "99") == 0);
         cv.unread = 100;
-        mesh_conv_row(&cv, 30, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub)); // clock before the message
+        mesh_conv_row(&cv, 30, 0, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub)); // clock before the message
         CHECK(strcmp(badge, "99+") == 0 && strcmp(sub, "just now: bob: hello") == 0);
-        mesh_conv_row(&cv, 30, title, 4, badge, 2, sub, 8); // small buffers stay terminated
+        mesh_conv_row(&cv, 30, 0, title, 4, badge, 2, sub, 8); // small buffers stay terminated
         CHECK(strlen(title) == 3 && strlen(badge) == 1 && strlen(sub) == 7);
+        // A chat whose newest message came from the journal (#48): its age by the wall clock, if there is one
+        cv.last_loaded = 1, cv.last_heard_s = 0, cv.last_epoch = 1000000;
+        mesh_conv_row(&cv, 30, 1000000 + 7200, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
+        CHECK(strcmp(sub, "2 h ago: bob: hello") == 0);
+        mesh_conv_row(&cv, 30, 0, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
+        CHECK(strcmp(sub, "before restart: bob: hello") == 0);
     }
     search_checks();
     if (failures) {

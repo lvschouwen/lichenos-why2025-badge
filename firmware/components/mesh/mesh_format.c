@@ -16,6 +16,17 @@ void mesh_format_age(uint32_t age_s, char *out, size_t cap) {
     }
 }
 
+void mesh_format_msg_age(bool loaded, uint32_t heard_s, uint32_t epoch, uint32_t now_s, uint32_t now_epoch, char *out,
+                         size_t cap) {
+    if (!loaded) {
+        mesh_format_age(now_s > heard_s ? now_s - heard_s : 0, out, cap);
+    } else if (epoch && now_epoch) {
+        mesh_format_age(now_epoch > epoch ? now_epoch - epoch : 0, out, cap);
+    } else {
+        snprintf(out, cap, "before restart");
+    }
+}
+
 char const *mesh_type_name(uint8_t type) {
     switch (type) {
         case 1: return "chat";

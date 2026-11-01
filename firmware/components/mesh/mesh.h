@@ -88,6 +88,8 @@ char const *mesh_firmware_version(void);
 
 // The one clock for "N min ago": seconds since boot (64-bit source, doesn't wrap)
 uint32_t mesh_uptime_s(void);
+// The wall clock for message ages (#48): Unix seconds, 0 while the clock is not set
+uint32_t mesh_epoch_now(void);
 
 // The snapshots wait at most wait_ms for the mesh lock (MeshCore holds it through its loop, including file saves
 // that can take a while): MESH_BUSY when it wasn't free in time, so the screen skips a tick instead of freezing.

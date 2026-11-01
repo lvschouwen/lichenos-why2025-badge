@@ -216,9 +216,9 @@ static lv_obj_t *add_line(lv_obj_t *parent, char const *text, uint32_t color) {
 }
 
 // One chat: title and unread badge on top, the age and latest line under them (mesh_conv_row)
-static void add_conv_row(mesh_conv_t const *c, uint32_t now, bool selected) {
+static void add_conv_row(mesh_conv_t const *c, uint32_t now, uint32_t now_epoch, bool selected) {
     char title[MESH_CHANNEL_MAX + 1], badge[8], sub[MESH_TEXT_MAX + 40];
-    mesh_conv_row(c, now, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
+    mesh_conv_row(c, now, now_epoch, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
     lv_obj_t *item = add_item(messages_list);
     style_row(item, selected);
     lv_obj_set_style_pad_hor(item, 6, 0);
@@ -265,10 +265,10 @@ static void rebuild_messages(size_t count) {
         add_label(messages_list, "No chats yet. MeshCore is starting.", THEME_DIM);
         return;
     }
-    uint32_t now = mesh_uptime_s();
+    uint32_t now = mesh_uptime_s(), now_epoch = mesh_epoch_now();
     for (size_t i = 0; i < count; i++) {
         msg_keys[i] = conv_key(&conv_copy[i]);
-        add_conv_row(&conv_copy[i], now, i == sel);
+        add_conv_row(&conv_copy[i], now, now_epoch, i == sel);
     }
     restore_scroll(messages_list, s, false, msg_keys, msg_keys_n);
 }

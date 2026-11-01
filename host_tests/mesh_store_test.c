@@ -24,7 +24,77 @@ static void test_warn(char const *what) {
     warned++;
 }
 
+static uint32_t fake_epoch;
+static uint32_t test_clock(void) {
+    return fake_epoch;
+}
+
+static mesh_msg_t loaded_msg(uint32_t seq, char const *text) {
+    mesh_msg_t m;
+    memset(&m, 0, sizeof(m));
+    m.seq   = seq;
+    m.epoch = 1000 + seq;
+    m.id    = 77; // an old outbox id: never kept
+    m.heard_s = 99;
+    strcpy(m.text, text);
+    strcpy(m.channel, "#test");
+    return m;
+}
+
+// The history journal's entry point (#48): seq order, same seq replaces, counted as read, the counter continues
+static void loaded_checks(void) {
+    mesh_store_set_hooks(NULL, NULL);
+    CHECK(mesh_store_init(3));
+    mesh_chat_key_t key;
+    mesh_chat_key_channel(&key, "#test");
+    mesh_msg_t m = loaded_msg(10, "a: ten");
+    CHECK(mesh_store_add_loaded(&key, "#test", &m));
+    m = loaded_msg(30, "me: thirty");
+    m.outgoing = 1, m.state = 2;
+    CHECK(mesh_store_add_loaded(&key, "#test", &m));
+    m = loaded_msg(20, "b: twenty"); // written after 30 (an outgoing message held back), sorted in before it
+    CHECK(mesh_store_add_loaded(&key, "#test", &m));
+    mesh_msg_t out[4];
+    CHECK(mesh_store_chat(&key, out, 4, false) == 3);
+    CHECK(out[0].seq == 10 && out[1].seq == 20 && out[2].seq == 30);
+    CHECK(out[0].loaded == 1 && out[0].heard_s == 0 && out[0].id == 0 && out[0].epoch == 1010);
+    CHECK(mesh_store_unread_total() == 0);
+    // A newer state of seq 30 replaces it
+    m = loaded_msg(30, "me: thirty");
+    m.outgoing = 1, m.state = 3, m.repeats = 2;
+    CHECK(mesh_store_add_loaded(&key, "#test", &m));
+    CHECK(mesh_store_chat(&key, out, 4, false) == 3 && out[2].state == 3 && out[2].repeats == 2);
+    // The ring is full: an older message than all is dropped, a newer one pushes the oldest out
+    m = loaded_msg(5, "too old");
+    CHECK(!mesh_store_add_loaded(&key, "#test", &m));
+    m = loaded_msg(25, "c: twenty-five");
+    CHECK(mesh_store_add_loaded(&key, "#test", &m));
+    CHECK(mesh_store_chat(&key, out, 4, false) == 3 && out[0].seq == 20 && out[1].seq == 25 && out[2].seq == 30);
+    // The list row follows the newest loaded message
+    mesh_conv_t cv[2];
+    CHECK(mesh_store_convs(cv, 2) == 1 && cv[0].last_loaded == 1 && cv[0].last_epoch == 1030 && cv[0].last_seq == 30 &&
+          strcmp(cv[0].last, "me: thirty") == 0 && cv[0].last_outgoing == 1);
+    CHECK(mesh_store_last_seq() == 30);
+    // A live message comes after the loaded ones, with the clock's epoch
+    fake_epoch = 5555;
+    mesh_store_set_clock(test_clock);
+    mesh_store_add_message("#test", "d: live", -500, 7);
+    CHECK(mesh_store_chat(&key, out, 4, false) == 3 && out[2].seq == 31 && out[2].loaded == 0 && out[2].epoch == 5555);
+    CHECK(mesh_store_convs(cv, 2) == 1 && cv[0].last_loaded == 0 && cv[0].last_epoch == 5555);
+    mesh_store_set_clock(NULL);
+    // A DM title "@?" does not replace a name
+    uint8_t         peer[6] = {9, 8, 7, 6, 5, 4};
+    mesh_chat_key_t dk;
+    mesh_chat_key_dm(&dk, peer);
+    m = loaded_msg(40, "x");
+    CHECK(mesh_store_add_loaded(&dk, "@Bob", &m));
+    m = loaded_msg(41, "y");
+    CHECK(mesh_store_add_loaded(&dk, "@?", &m));
+    CHECK(mesh_store_convs(cv, 2) == 2 && (strcmp(cv[0].title, "@Bob") == 0 || strcmp(cv[1].title, "@Bob") == 0));
+}
+
 int main(void) {
+    loaded_checks();
     CHECK(mesh_store_init(3));
     mesh_msg_t m;
 

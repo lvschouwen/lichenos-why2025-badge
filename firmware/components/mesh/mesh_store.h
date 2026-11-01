@@ -29,7 +29,9 @@ typedef struct {
     // holds "@<name>". attempt is the DM try in progress (1-3), trip_ms the time to the ACK once delivered.
     uint8_t  dm, attempt, peer[6];
     uint32_t trip_ms;
-    uint32_t seq; // store-wide counter, grows with every message: the order across chats
+    uint32_t seq;   // store-wide counter, grows with every message: the order across chats (also the journal's, #48)
+    uint32_t epoch; // wall clock (Unix seconds) when it was added, 0 when the clock was not set
+    uint8_t  loaded; // replayed from the history journal at boot (#48): heard_s means nothing then, epoch is the age
 } mesh_msg_t;
 
 // A chat: a channel (by lower-cased name, slots get reused) or a DM (by the contact's 6-byte key prefix)
@@ -52,6 +54,8 @@ typedef struct {
     uint32_t        last_seq; // seq of its newest message: the order across chats (0 for a chat without messages)
     char            last[MESH_TEXT_MAX + 1];
     uint8_t         last_outgoing;
+    uint8_t         last_loaded; // the newest message came from the journal: last_epoch is its age, not last_heard_s
+    uint32_t        last_epoch;
     uint16_t        count; // messages kept
 } mesh_conv_t;
 
@@ -63,6 +67,8 @@ bool mesh_store_init(size_t chat_keep);
 // PSRAM explicitly, host tests can fail it); warn is told when a message is dropped (out of memory, or a table full of
 // channels). Set before mesh_store_init.
 void mesh_store_set_hooks(void *(*alloc_ring)(size_t count, size_t size), void (*warn)(char const *what));
+// The wall clock for mesh_msg_t.epoch (NULL or returning 0: not set). Kept across mesh_store_init.
+void mesh_store_set_clock(uint32_t (*epoch_now)(void));
 // Messages dropped since mesh_store_init
 uint32_t mesh_store_dropped(void);
 
@@ -78,6 +84,15 @@ bool mesh_store_add_outgoing_dm(char const *channel, char const *text, uint32_t 
 bool mesh_store_add_outgoing(char const *channel, char const *text, uint32_t id, uint32_t heard_s);
 // The outgoing message's new state; true when something changed (the view generation moves then)
 bool mesh_store_update_out(uint32_t id, uint8_t state, uint8_t repeats, uint8_t attempt, uint32_t trip_ms);
+
+// A message replayed from the history journal (#48): it goes into its chat in seq order (the journal can hold an
+// outgoing message after later incoming ones, it is written once its state is final), and a message with a seq the
+// chat already holds replaces it (a newer state of the same message). It counts as read, gets loaded = 1, heard_s = 0
+// and id = 0 (outbox ids do not survive a restart), and the store's seq counter continues after it. false when it was
+// dropped: table full of channels, no memory, or older than everything in a full ring.
+bool mesh_store_add_loaded(mesh_chat_key_t const *key, char const *title, mesh_msg_t const *m);
+// The newest seq handed out (or loaded): 0 for an empty store
+uint32_t mesh_store_last_seq(void);
 
 // All chats together, ordered by seq (the Messages tab until it lists chats, and the console)
 size_t mesh_store_message_count(void);

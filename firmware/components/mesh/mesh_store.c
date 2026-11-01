@@ -17,6 +17,15 @@ static size_t   ring_cap;
 static uint32_t generation, own_changes, next_seq, dropped;
 static void *(*ring_alloc)(size_t, size_t);
 static void (*warn_hook)(char const *);
+static uint32_t (*clock_hook)(void);
+
+void mesh_store_set_clock(uint32_t (*epoch_now)(void)) {
+    clock_hook = epoch_now;
+}
+
+uint32_t mesh_store_last_seq(void) {
+    return next_seq;
+}
 
 void mesh_store_set_hooks(void *(*alloc_ring)(size_t, size_t), void (*warn)(char const *)) {
     ring_alloc = alloc_ring;
@@ -203,14 +212,81 @@ static mesh_msg_t *push(mesh_chat_key_t const *key, char const *title, char cons
     m->rssi_x10 = rssi_x10;
     m->heard_s  = heard_s;
     m->seq      = ++next_seq;
+    m->epoch    = clock_hook ? clock_hook() : 0;
     if (!cv->pub.title[0] || strcmp(title, "@?") != 0) { // an unknown contact name does not replace a good one
         mesh_sanitize(title, strlen(title), cv->pub.title, sizeof(cv->pub.title));
     }
     memcpy(cv->pub.last, m->text, sizeof(cv->pub.last));
     cv->pub.last_heard_s = heard_s;
     cv->pub.last_outgoing = 0;
-    cv->pub.last_seq     = m->seq;
+    cv->pub.last_loaded   = 0;
+    cv->pub.last_epoch    = m->epoch;
+    cv->pub.last_seq      = m->seq;
     return m;
+}
+
+// The chat's newest message changed (a loaded one): the list row follows it
+static void conv_take_last(conv_t *cv) {
+    mesh_msg_t const *m   = conv_at(cv, cv->pub.count - 1);
+    memcpy(cv->pub.last, m->text, sizeof(cv->pub.last));
+    cv->pub.last_heard_s  = m->heard_s;
+    cv->pub.last_outgoing = m->outgoing;
+    cv->pub.last_loaded   = m->loaded;
+    cv->pub.last_epoch    = m->epoch;
+    cv->pub.last_seq      = m->seq;
+}
+
+// Where a loaded message goes in its chat's ring (kept in seq order): the index after the last older message; *same
+// when the message before that index has this very seq
+static size_t loaded_pos(conv_t const *cv, uint32_t seq, bool *same) {
+    size_t pos = cv->pub.count;
+    while (pos > 0 && conv_at(cv, pos - 1)->seq > seq) {
+        pos--;
+    }
+    *same = pos > 0 && conv_at(cv, pos - 1)->seq == seq;
+    return pos;
+}
+
+bool mesh_store_add_loaded(mesh_chat_key_t const *key, char const *title, mesh_msg_t const *in) {
+    if (!ring_cap) {
+        return false;
+    }
+    conv_t *cv = find_conv(key);
+    if (!cv && !(cv = new_conv(key))) {
+        return false;
+    }
+    if (!cv->pub.title[0] || strcmp(title, "@?") != 0) {
+        mesh_sanitize(title, strlen(title), cv->pub.title, sizeof(cv->pub.title));
+    }
+    mesh_msg_t m = *in;
+    mesh_sanitize(in->channel, sizeof(in->channel), m.channel, sizeof(m.channel));
+    mesh_sanitize(in->text, sizeof(in->text), m.text, sizeof(m.text));
+    m.loaded  = 1;
+    m.heard_s = 0;
+    m.id      = 0;
+    bool   same;
+    size_t pos = loaded_pos(cv, m.seq, &same);
+    if (same) {
+        *conv_at(cv, pos - 1) = m;
+    } else {
+        if (cv->pub.count == ring_cap) {
+            if (pos == 0) {
+                return false; // older than everything the full ring keeps
+            }
+            cv->head = (cv->head + 1) % ring_cap; // the oldest goes
+            cv->pub.count--;
+            pos--;
+        }
+        for (size_t i = cv->pub.count; i > pos; i--) {
+            *conv_at(cv, i) = *conv_at(cv, i - 1);
+        }
+        cv->pub.count++;
+        *conv_at(cv, pos) = m;
+    }
+    next_seq = m.seq > next_seq ? m.seq : next_seq;
+    conv_take_last(cv);
+    generation++;
+    return true;
 }
 
 bool mesh_store_add_message(char const *channel, char const *text, int16_t rssi_x10, uint32_t heard_s) {

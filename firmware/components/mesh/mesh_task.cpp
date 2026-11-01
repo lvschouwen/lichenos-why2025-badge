@@ -10,6 +10,7 @@
 #include "mesh_chat.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
+#include "mesh_journal.h"
 #include "channel_input.h"
 #include "mesh_prefs.h"
 #include "radio_presets.h"
@@ -65,6 +66,10 @@ extern "C" void delay(unsigned long ms) {
 
 extern "C" uint32_t mesh_uptime_s(void) {
     return (uint32_t)(esp_timer_get_time() / 1000000);
+}
+
+extern "C" uint32_t mesh_epoch_now(void) {
+    return clock_is_set() ? (uint32_t)time(NULL) : 0;
 }
 
 class EspRng : public mesh::RNG {
@@ -209,11 +214,17 @@ public:
         if (mesh_store_add_dm(from_name, text, (int16_t)(radio_driver.getLastRSSI() * 10.0f), mesh_uptime_s(),
                               from.id.pub_key)) {
             tile_on_message(from_name, text);
+            mesh_chat_key_t key;
+            mesh_chat_key_dm(&key, from.id.pub_key);
+            mesh_journal_incoming_locked(&key);
         }
     }
     void onChannelMessageRecv(mesh::Packet *pkt, ChannelDetails &channel, char const *text) override {
         if (mesh_store_add_message(channel.name, text, (int16_t)(radio_driver.getLastRSSI() * 10.0f), mesh_uptime_s())) {
             tile_on_message(channel.name, text);
+            mesh_chat_key_t key;
+            mesh_chat_key_channel(&key, channel.name);
+            mesh_journal_incoming_locked(&key);
         }
     }
     void onQueueSizeChanged(int msgcount) override { offline_queue_len = msgcount; }
@@ -385,13 +396,19 @@ static bool sync_outgoing(void) {
         if (o.fresh) {
             char line[MESH_TEXT_MAX + 1];
             snprintf(line, sizeof(line), "me: %s", o.text);
-            bool ok;
+            bool            ok;
+            mesh_chat_key_t key;
             if (o.kind == OB_DM) {
                 ContactInfo *c = node ? node->lookupContactByPubKey(o.prefix, MF_PREFIX) : nullptr;
                 snprintf(o.target, sizeof(o.target), "@%s", c ? c->name : "?");
                 ok = mesh_store_add_outgoing_dm(o.target, line, o.id, mesh_uptime_s(), o.prefix);
+                mesh_chat_key_dm(&key, o.prefix);
             } else {
                 ok = mesh_store_add_outgoing(o.target, line, o.id, mesh_uptime_s());
+                mesh_chat_key_channel(&key, o.target);
+            }
+            if (ok) {
+                mesh_journal_outgoing_locked(&key); // held until its state is final
             }
             // in_store only after the store took it: a dropped one is tried again on the next pass (logged once)
             static mesh_msg_id_t failed_logged;
@@ -410,7 +427,13 @@ static bool sync_outgoing(void) {
             }
         }
         mesh_store_update_out(o.id, o.state, o.repeats, o.attempt, o.trip_ms);
+        mesh_journal_out_state_locked(o.id, o.state, o.repeats, o.attempt, o.trip_ms);
     }
+    uint32_t ids[OB_CAP];
+    for (size_t i = 0; i < n; i++) {
+        ids[i] = out_sync[i].id;
+    }
+    mesh_journal_out_sweep_locked(ids, n);
     return added;
 }
 
@@ -430,6 +453,7 @@ static void mesh_task(void *arg) {
         uint32_t file_us = fs_shim_take_busy_us(&file_ops);
         rx               = radio_driver.getPacketsRecv() - rx;
         tile_set_contacts((size_t)node->getNumContacts());
+        mesh_journal_tick_locked(); // a due flush swaps the pending records out; they are written after the unlock
         if (__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
             // The task stops itself, between two loops and with the lock held: nothing is half done, and the stack
             // (16 KB, the saves keep File objects on it) is the one that is big enough
@@ -440,6 +464,7 @@ static void mesh_task(void *arg) {
             int64_t contacts_us = esp_timer_get_time() - contacts_started;
             store.saveChannels(node);
             int64_t save_us = esp_timer_get_time() - save_started;
+            mesh_journal_stop_locked();
             __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
             mesh_unlock();
             // The contact rewrite is the same one MyMesh does lazily in its loop: its time here says what it costs there
@@ -449,6 +474,7 @@ static void mesh_task(void *arg) {
         }
         int64_t took_ms = (esp_timer_get_time() - started) / 1000;
         mesh_unlock();
+        mesh_journal_flush(); // the card's I/O never under the mesh lock: the screens keep their snapshots meanwhile
         if (took_ms >= MESH_SLOW_LOOP_MS) {
             // Where it went (#67): file time is DataStore's (the lazy /contacts3 rewrite), the rest is MeshCore's own
             // work on the packets received (Ed25519 checks of adverts, decryption); the screens skip ticks meanwhile
@@ -1089,8 +1115,12 @@ static void cmd_mesh(char const *args) {
         cmd_mesh_chats();
         return;
     }
+    if (strncmp(args, "hist", 4) == 0 && (args[4] == ' ' || !args[4])) {
+        mesh_journal_console(args[4] ? args + 5 : "");
+        return;
+    }
     if (*args) {
-        console_reply("mesh | mesh name <name> | mesh radio <preset index | freq bw sf cr> [txdbm] | mesh link | mesh out | mesh chats | "
+        console_reply("mesh | mesh name <name> | mesh radio <preset index | freq bw sf cr> [txdbm] | mesh link | mesh out | mesh chats | mesh hist [compact] | "
                       "mesh send <channel> <text> | mesh dm <12 hex> <text>");
         return;
     }
@@ -1164,10 +1194,10 @@ static void cmd_msgs(char const *args) {
         return;
     }
     size_t n   = mesh_messages_snapshot(list, (size_t)want, &generation, MESH_WAIT_FOREVER);
-    uint32_t now = mesh_uptime_s();
+    uint32_t now = mesh_uptime_s(), epoch = mesh_epoch_now();
     for (size_t i = 0; i < n; i++) {
         char age[24];
-        mesh_format_age(now - list[i].heard_s, age, sizeof(age));
+        mesh_format_msg_age(list[i].loaded, list[i].heard_s, list[i].epoch, now, epoch, age, sizeof(age));
         console_reply("[%s] %s (%s, rssi %d)", list[i].channel, list[i].text, age, list[i].rssi_x10 / 10);
     }
     free(list);
@@ -1304,8 +1334,13 @@ extern "C" bool mesh_start(char const *files_dir) {
     fs_shim_set_drive_bytes(drive_bytes);
     mesh_lock();
     mesh_store_set_hooks(store_alloc_ring, store_warn);
+    mesh_store_set_clock(mesh_epoch_now);
     bool ok = mesh_store_init(STORE_MESSAGES);
     mesh_unlock();
+    // The history from the SD card (#48) before MeshCore runs: the replayed messages are older than anything it adds
+    if (ok) {
+        mesh_journal_boot(STORE_MESSAGES, mesh_lock, mesh_unlock);
+    }
     void *tables_mem = heap_caps_malloc(sizeof(SimpleMeshTables), MALLOC_CAP_SPIRAM);
     void *mesh_mem   = heap_caps_malloc(sizeof(BadgeMesh), MALLOC_CAP_SPIRAM);
     void *ob_mem     = heap_caps_calloc(1, sizeof(ob_t), MALLOC_CAP_SPIRAM);
@@ -1344,7 +1379,7 @@ extern "C" bool mesh_start(char const *files_dir) {
     __atomic_store_n(&radio_known, true, __ATOMIC_RELEASE);
     __atomic_store_n(&node_id_known, true, __ATOMIC_RELEASE);
 
-    console_register("mesh", "mesh | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | mesh link | mesh out | mesh send <channel> <text> | mesh dm <12 hex> <text>", cmd_mesh);
+    console_register("mesh", "mesh | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | mesh link | mesh out | mesh chats | mesh hist [compact] | mesh send <channel> <text> | mesh dm <12 hex> <text>", cmd_mesh);
     console_register("contacts", "contacts (nodes heard, newest first)", cmd_contacts);
     console_register("msgs", "msgs [n] (last n messages)", cmd_msgs);
     console_register("channels", "channels (the channels the badge can read)", cmd_channels);
