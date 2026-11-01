@@ -16,7 +16,11 @@
 //  - shutdown latches (the badge powers off; a test that says otherwise calls th_reset);
 //  - broken sensors: a source without readings is ignored while another one answers (protection continues on the
 //    rest); with no source at all for TH_BLIND_S the badge is "blind": that is reported once (TH_EV_BLIND, and again
-//    as TH_EV_SIGHT when readings return) but never shuts the badge down by itself.
+//    as TH_EV_SIGHT when readings return) but never shuts the badge down by itself;
+//  - the board sensor alone is the one near the cells, so its loss is reported on its own (TH_EV_BOARD_LOST after
+//    TH_BLIND_S, TH_EV_BOARD_BACK) even while the die sensor still answers, which then guards the chip only;
+//  - by design a sustained die rise of 20 K within 60 s from 60 C up powers the badge off (a heavy load that heats the
+//    chip that fast is also a reason to stop).
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -67,6 +71,8 @@ typedef struct {
     th_level_t level;
     bool       blind;
     bool       started;
+    bool       board_lost, started_board;
+    uint32_t   board_ok_s; // the last poll with a usable board reading
     uint8_t    hot_polls, crit_polls, cool_polls;
     uint32_t   last_reading_s; // the last poll with any valid source (start time before the first)
     uint32_t   implausible[TH_SRC_COUNT]; // readings refused
@@ -82,6 +88,8 @@ enum {
     TH_EV_SHUTDOWN = 1 << 2,
     TH_EV_BLIND   = 1 << 3,
     TH_EV_SIGHT   = 1 << 4,
+    TH_EV_BOARD_LOST = 1 << 5, // the board sensor (BME690, the one beside the cells) gave nothing for TH_BLIND_S
+    TH_EV_BOARD_BACK = 1 << 6,
 };
 
 void th_reset(th_state_t *st);

@@ -136,7 +136,7 @@ static void blind_is_reported_once_and_never_shuts_down(void) {
     CHECK(blinds == 1 && st.blind);
     CHECK(!(total & TH_EV_SHUTDOWN) && st.level == TH_OK);
     th_input_t ok = board(30);
-    CHECK(th_step(&st, &ok, 305) == TH_EV_SIGHT && !st.blind);
+    CHECK(th_step(&st, &ok, 305) == (TH_EV_SIGHT | TH_EV_BOARD_BACK) && !st.blind);
 }
 
 static void blind_warning_keeps_its_level(void) {
@@ -153,7 +153,34 @@ static void heater_offset(void) {
     CHECK(th_board_from_bme(40, false) == 40);
 }
 
+static void board_loss_is_reported_while_die_answers(void) {
+    th_state_t st; th_reset(&st);
+    th_input_t die_only = {0};
+    die_only.src[TH_SRC_DIE] = (th_reading_t){true, 50};
+    int lost = 0;
+    unsigned all = 0;
+    for (uint32_t t = 0; t <= 200; t += 5) {
+        unsigned ev = th_step(&st, &die_only, t);
+        all |= ev;
+        lost += (ev & TH_EV_BOARD_LOST) != 0;
+    }
+    CHECK(lost == 1 && st.board_lost);
+    CHECK(!(all & (TH_EV_BLIND | TH_EV_SHUTDOWN)) && !st.blind);
+    th_input_t ok = both(30, 50);
+    CHECK(th_step(&st, &ok, 205) == TH_EV_BOARD_BACK && !st.board_lost);
+}
+
+static void die_rise_powers_off_by_design(void) {
+    th_state_t st; th_reset(&st);
+    th_input_t a = both(30, 62), b = both(30, 83);
+    th_step(&st, &a, 0);
+    th_step(&st, &b, 5);
+    CHECK(th_step(&st, &b, 10) == TH_EV_SHUTDOWN && st.cause == TH_SRC_DIE && st.cause_rise);
+}
+
 int main(void) {
+    board_loss_is_reported_while_die_answers();
+    die_rise_powers_off_by_design();
     warn_needs_two_polls_and_clears_with_hysteresis();
     single_glitch_does_nothing();
     shutdown_at_limit_latches();

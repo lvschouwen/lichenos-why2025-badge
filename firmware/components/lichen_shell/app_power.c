@@ -27,6 +27,7 @@
 #define NOTIFY_SAVE_MS   2000
 #define BYE_MIN_MS       3000 // the goodbye screen stays readable this long before the backlight goes
 #define POWER_STACK      6144
+#define BYE_UI_STACK     6144 // builds the goodbye screen
 
 static void (*finish_hook)(bool power_off);
 static atomic_bool running;
@@ -97,15 +98,25 @@ static lv_obj_t *build_bye(void) {
     return screen;
 }
 
+static void bye_task(void *arg) {
+    (void)arg;
+    shell_open(build_bye, SCREEN_POWER_BYE);
+    vTaskDelete(NULL);
+}
+
 static void start(bool off) {
     if (atomic_exchange(&running, true)) {
         return;
     }
     want_off = off;
-    shell_open(build_bye, SCREEN_POWER_BYE);
+    // The task first: a busy or stuck LVGL lock must not hold up a (thermal) shutdown. The goodbye screen is opened by
+    // a short task of its own, which may wait for the lock as long as it needs.
     if (xTaskCreatePinnedToCore(power_task, "power", POWER_STACK, NULL, 5, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "no memory for the power task: restarting as is");
         system_restart("power menu (no task)");
+    }
+    if (xTaskCreatePinnedToCore(bye_task, "pwrui", BYE_UI_STACK, NULL, 5, NULL, 0) != pdPASS) {
+        ESP_LOGW(TAG, "no memory for the goodbye screen");
     }
 }
 

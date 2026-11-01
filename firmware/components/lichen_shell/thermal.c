@@ -39,6 +39,7 @@ static char const TAG[] = "thermal";
 #define NO_SIM         INT32_MIN
 #define EVENT_LOG      6
 #define SEEN_KEY       "batt_seen"
+#define SHED_KEY       "thermal_shed" // set while the radios are shed: a reboot in between is told at boot
 
 #if CONFIG_LICHEN_SENSORS_GAS_HEATER
 #define HEATER_ON true
@@ -94,9 +95,11 @@ static void shed_load(bool on) {
     }
     shed = on;
     if (on) {
+        settings_set_u8(SHED_KEY, 1);
         backlight_get(&saved[0], &saved[1]);
         backlight_set(BACKLIGHT_DISPLAY_MIN, 0);
     } else {
+        settings_erase(SHED_KEY);
         backlight_set(saved[0], saved[1]);
     }
     for (int k = 0; k < 2; k++) {
@@ -154,6 +157,14 @@ static void on_events(unsigned ev) {
         say(LN_WARN, "Temperature not watched",
             "No temperature sensor answers, so the badge cannot warn you about heat. Keep an eye on it.", LN_COALESCE);
     }
+    if (ev & TH_EV_BOARD_LOST) {
+        say(LN_WARN, "Battery-side sensor lost",
+            "The air sensor beside the batteries stopped answering. Only the chip temperature is watched now, "
+            "which says little about the cells.", LN_COALESCE);
+    }
+    if (ev & TH_EV_BOARD_BACK) {
+        say(LN_INFO, "Battery-side sensor is back", "The air sensor answers again.", LN_COALESCE);
+    }
     if (ev & TH_EV_SIGHT) {
         say(LN_INFO, "Temperature watch is back", "A sensor answers again.", LN_COALESCE);
     }
@@ -198,7 +209,20 @@ static void publish(th_state_t const *st, th_input_t const *in, float bme_raw) {
 
 // ---- the first-run notice --------------------------------------------------------------------------------------------
 
+// The badge went down (or restarted) while the radios were shed: they stay off (the safe side) and the person is told
+static void shed_boot_notice(void) {
+    if (!settings_get_u8(SHED_KEY, 0)) {
+        return;
+    }
+    if (lichen_notify_to("lichen", LN_WARN, "battery", "Radios were switched off",
+                         "Wi-Fi and LoRa were switched off because the badge was too hot. Switch them on again in "
+                         "Settings when it has cooled.", 0)) {
+        settings_erase(SHED_KEY);
+    }
+}
+
 static void first_run_notice(void) {
+    shed_boot_notice();
     if (settings_get_u8(SEEN_KEY, 0)) {
         return;
     }

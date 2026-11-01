@@ -107,6 +107,25 @@ static unsigned blind_step(th_state_t *st, bool any, uint32_t now_s) {
     return 0;
 }
 
+// The board sensor on its own: lost after TH_BLIND_S without a usable reading, back with the first one
+static unsigned board_step(th_state_t *st, th_input_t const *in, uint32_t now_s) {
+    th_reading_t r  = in->src[TH_SRC_BOARD];
+    bool         ok = r.valid && th_plausible(r.c);
+    if (!st->started_board || ok) {
+        st->started_board = true; // the first poll starts the clock
+        st->board_ok_s    = now_s;
+    }
+    if (ok && st->board_lost) {
+        st->board_lost = false;
+        return TH_EV_BOARD_BACK;
+    }
+    if (!ok && !st->board_lost && now_s - st->board_ok_s >= TH_BLIND_S) {
+        st->board_lost = true;
+        return TH_EV_BOARD_LOST;
+    }
+    return 0;
+}
+
 unsigned th_step(th_state_t *st, th_input_t const *in, uint32_t now_s) {
     if (!st->started) {
         st->started        = true;
@@ -114,7 +133,7 @@ unsigned th_step(th_state_t *st, th_input_t const *in, uint32_t now_s) {
     }
     verdict_t v = {0};
     judge(st, in, now_s, &v);
-    unsigned ev = blind_step(st, v.any, now_s);
+    unsigned ev = blind_step(st, v.any, now_s) | board_step(st, in, now_s);
     if (st->level == TH_SHUTDOWN) {
         return ev;
     }

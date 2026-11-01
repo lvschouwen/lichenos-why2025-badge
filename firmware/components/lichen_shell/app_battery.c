@@ -2,6 +2,9 @@
 // no data link to the processors, so the badge cannot see their voltage, charge or current; all it can do is watch
 // the temperature (thermal.c). The same page, headed by a red warning, is the full-screen warning when the watchdog
 // raises its alarm. Up/Down scroll; the live lines refresh once a second.
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "menu.h"
 #include "shell_parts.h"
 #include "theme.h"
@@ -12,6 +15,7 @@
 #define SCREEN_BATTERY 160
 #define SCROLL_STEP    96
 #define REFRESH_MS     1000
+#define ALERT_STACK    6144
 
 static bool      alert_mode; // set before the builder runs
 
@@ -94,7 +98,17 @@ void battery_open(void *arg) {
     shell_open(build_battery, SCREEN_BATTERY);
 }
 
-void battery_open_alert(void) {
+// Building the page takes the LVGL lock and some stack: a short task of its own, so the watchdog's task (4 KB) never
+// waits for the UI or builds it
+static void alert_task(void *arg) {
+    (void)arg;
     alert_mode = true;
     shell_open(build_battery, SCREEN_BATTERY);
+    vTaskDelete(NULL);
+}
+
+void battery_open_alert(void) {
+    if (xTaskCreatePinnedToCore(alert_task, "battalert", ALERT_STACK, NULL, 3, NULL, 0) != pdPASS) {
+        ESP_LOGW("battery", "no memory for the warning screen");
+    }
 }
