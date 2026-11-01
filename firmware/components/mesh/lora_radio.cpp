@@ -7,6 +7,7 @@
 
 extern "C" {
 #include "lora.h"
+#include "lichen_radio.h"
 #include "meshcore_hdr.h"
 #include "lora_airtime.h"
 }
@@ -127,8 +128,8 @@ uint32_t LoraRadio::getRngSeed() {
 }
 
 bool LoraRadio::startSendRaw(uint8_t const *bytes, int len) {
-    if (len <= 0 || __atomic_load_n(&tx_blocked, __ATOMIC_ACQUIRE)) {
-        return false;
+    if (len <= 0 || __atomic_load_n(&tx_blocked, __ATOMIC_ACQUIRE) || !lichen_radio_get(RADIO_LORA)) {
+        return false; // a damaged identity, or LoRa switched off (#108)
     }
     if (!lora_send(bytes, (size_t)len, getEstAirtimeFor(len))) {
         send_refused++;

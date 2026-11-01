@@ -32,6 +32,7 @@
 #include "lichen_badge.h"
 #include "lichen_fs.h"
 #include "lichen_notify.h"
+#include "lichen_radio.h"
 #include "lichen_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -1116,6 +1117,9 @@ extern "C" bool mesh_send_advert(void) {
     if (!ident_tx_allowed()) {
         return false; // a damaged identity transmits nothing (#80)
     }
+    if (!lichen_radio_get(RADIO_LORA)) {
+        return false; // LoRa is switched off (#108): periodic adverts skip, nothing is queued
+    }
     if (mesh_advert_refusal(clock_is_set())) {
         return false; // nodes that heard us before drop an advert stamped before their last one (#8)
     }
@@ -1237,6 +1241,10 @@ static bool send_ready(char const **why) {
     }
     if (!ident_tx_allowed()) {
         *why = "identity damaged: TX blocked"; // refused here, not queued to fail at the radio
+        return false;
+    }
+    if (!lichen_radio_get(RADIO_LORA)) { // the one gate for "radio off" (#108); startSendRaw refuses too, as a net
+        *why = lichen_airplane_get() ? "LoRa is off (airplane mode)" : "LoRa is off";
         return false;
     }
     return true;
@@ -1883,6 +1891,10 @@ static void cmd_advert(char const *args) {
     (void)args;
     if (!ident_tx_allowed()) {
         console_reply("advert not sent: identity %s", mesh_ident_text(MESH_IDENT_MISMATCH));
+        return;
+    }
+    if (!lichen_radio_get(RADIO_LORA)) {
+        console_reply("advert not sent: LoRa is off (fw lora on)");
         return;
     }
     if (char const *why = mesh_advert_refusal(clock_is_set())) {

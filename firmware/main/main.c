@@ -20,6 +20,7 @@
 #include "psram_guard.h"
 #include "log_tap.h"
 #include "lora.h"
+#include "lichen_radio.h"
 #include "mesh.h"
 #include "meshcore_run.h"
 #include "freertos/FreeRTOS.h"
@@ -60,6 +61,9 @@ static bool lora_link_up(void) {
 
 // MeshCore's run state in the status bar's terms (#103, #105)
 static lora_use_t lora_use(void) {
+    if (!lichen_radio_get(RADIO_LORA)) {
+        return LORA_USE_OFF; // the OS radio switch or airplane mode (#108): off by choice, like a stopped MeshCore
+    }
     mesh_run_t r = meshcore_run_get();
     if (!mesh_run_wants_radio(r)) {
         return LORA_USE_OFF;
@@ -68,6 +72,15 @@ static lora_use_t lora_use(void) {
         return LORA_USE_CHANGING;
     }
     return r.state == MESH_RUN_RUNNING ? LORA_USE_RUNNING : LORA_USE_FAILED;
+}
+
+// The OS radio switches (#108) reach the hardware here: the services own the radios, everyone else reads the state
+static void radio_changed(radio_id_t id, bool on) {
+    if (id == RADIO_WIFI) {
+        c6link_wifi_enable(on);
+    } else if (id == RADIO_LORA) {
+        lora_set_enabled(on);
+    } // RADIO_BT: no Bluetooth service before #73
 }
 
 // The OTA task's hooks, in the shell's terms (#76)
@@ -292,6 +305,9 @@ void app_main(void) {
     // The SD card (#60): before the C6 link, as BadgeVMS, so the SDMMC controller is set up before esp_hosted shares
     // it, and before the apps start. No card is one warning; nothing else waits for it.
     sd_start();
+    lichen_radio_listen(radio_changed);
+    lichen_radio_apply_all(); // the saved switches, before Wi-Fi and LoRa start
+    lichen_radio_console_register();
     if (!c6link_start()) {
         ESP_LOGE(TAG, "no C6 link: no Wi-Fi, no LoRa");
     }

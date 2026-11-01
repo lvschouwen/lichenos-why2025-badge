@@ -37,9 +37,17 @@ int main(void) {
         {false, false, false, false, 0, LINK_OFF, 0, DIM}, // off by choice: a faint fan
     };
     for (size_t i = 0; i < sizeof(wifi) / sizeof(wifi[0]); i++) {
-        link_look_t l = wifi_look(wifi[i].creds, wifi[i].joining, wifi[i].ip, wifi[i].known, wifi[i].rssi);
+        link_look_t l = wifi_look(true, wifi[i].creds, wifi[i].joining, wifi[i].ip, wifi[i].known, wifi[i].rssi);
         if (l.state != wifi[i].state || l.bars != wifi[i].bars || l.color != wifi[i].color) {
             printf("FAIL wifi row %u\n", (unsigned)i);
+            failures++;
+        }
+    }
+    // Switched off (#108): dim whatever else is true, even connected or with a fault
+    {
+        link_look_t l = wifi_look(false, true, false, true, true, -50);
+        if (l.state != LINK_OFF || l.bars != 0 || l.color != DIM) {
+            printf("FAIL wifi switched off\n");
             failures++;
         }
     }

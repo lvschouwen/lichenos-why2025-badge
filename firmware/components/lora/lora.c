@@ -7,6 +7,7 @@
  */
 
 #include "lora.h"
+#include "lichen_radio.h"
 
 #include "fw_console.h"
 #include "eh_host_feat_peer_data.h"
@@ -62,6 +63,8 @@ static char const         *owner;  // who claimed the radio (#84 T7)
 static lora_rx_formatter_t rx_fmt;
 static bool             stop_requested; // lora_stop -> the task
 static bool             stopped;        // the task -> everyone
+static bool             want_on = true;    // the OS radio switch (#108), set by lora_set_enabled
+static bool             applied_on = true; // what the task has told the C6; only the task writes it
 static bool             started;        // lora_start succeeded
 static void           (*link_cb)(bool up); // the owner's, #14
 static void           (*send_hook)(bool ok); // the C6 supervisor's soft signal, #14
@@ -163,8 +166,8 @@ bool lora_send(uint8_t const *bytes, size_t len, uint32_t airtime_ms) {
     if (len == 0 || len > sizeof(((lora_tx_packet_t *)0)->data)) {
         return false;
     }
-    if (__atomic_load_n(&stopped, __ATOMIC_ACQUIRE)) {
-        return false;
+    if (__atomic_load_n(&stopped, __ATOMIC_ACQUIRE) || !__atomic_load_n(&want_on, __ATOMIC_ACQUIRE)) {
+        return false; // stopped for an update, or switched off (#108)
     }
     portENTER_CRITICAL(&state_lock);
     bool ok = lora_tx_begin(&tx, now_ms(), airtime_ms);
@@ -309,6 +312,9 @@ static bool send_to_c6(lora_msg_t const *msg) {
 }
 
 static void run_actions(unsigned act) {
+    if (!__atomic_load_n(&applied_on, __ATOMIC_ACQUIRE)) {
+        act &= LORA_ACT_STATUS_REQ; // switched off (#108): the C6 stays quiet, only its health is asked
+    }
     if (act & LORA_ACT_SEND_CONFIG) {
         lora_msg_t msg = {.type = LORA_MSG_CONFIG};
         portENTER_CRITICAL(&state_lock);
@@ -408,6 +414,26 @@ static bool c6_link_work(lora_sup_t *sup) {
     return lost;
 }
 
+// The OS radio switch (#108), carried out by the task so it is not interleaved with its own sends. Off: the C6 stops
+// receiving (SX1262 in standby, no TX since the C6 only sends in RX) and the supervisor's config + RX start are held back
+// by run_actions. On: the supervisor starts over, whose first tick sends config + RX start again.
+static void apply_enabled(lora_sup_t *sup) {
+    bool want = __atomic_load_n(&want_on, __ATOMIC_ACQUIRE);
+    if (want == applied_on) {
+        return;
+    }
+    if (!want) {
+        lora_msg_t stop = {.type = LORA_MSG_RX_STOP};
+        send_to_c6(&stop);
+        __atomic_store_n(&applied_on, false, __ATOMIC_RELEASE);
+        ESP_LOGW(TAG, "LoRa radio switched off");
+    } else {
+        __atomic_store_n(&applied_on, true, __ATOMIC_RELEASE);
+        lora_sup_init(sup, now_ms());
+        ESP_LOGW(TAG, "LoRa radio switched on: sending the radio config");
+    }
+}
+
 static void lora_task(void *arg) {
     lora_sup_t sup;
     lora_sup_init(&sup, now_ms());
@@ -426,6 +452,7 @@ static void lora_task(void *arg) {
         if (c6_link_work(&sup)) {
             continue;
         }
+        apply_enabled(&sup);
         run_actions(lora_sup_tick(&sup, now_ms()));
         portENTER_CRITICAL(&state_lock);
         bool changed   = config_changed;
@@ -472,6 +499,11 @@ static void lora_task(void *arg) {
                 portEXIT_CRITICAL(&state_lock);
                 if (msg.u.status.state == LORA_STATE_ERROR) {
                     ESP_LOGE(TAG, "C6 radio error %d", msg.u.status.last_radio_err);
+                }
+                if (!applied_on && msg.u.status.state == LORA_STATE_RX) {
+                    // Switched off while the C6 was sending: it went back to receiving afterwards
+                    lora_msg_t stop = {.type = LORA_MSG_RX_STOP};
+                    send_to_c6(&stop);
                 }
                 run_actions(lora_sup_on_status(&sup, &msg.u.status, now_ms()));
                 break;
@@ -524,13 +556,21 @@ bool lora_start(void) {
         ESP_LOGE(TAG, "peer data callback not registered");
         return false;
     }
-    console_register("lora", "lora [raw on|off] (radio status; raw: print packets as hex and tx answer times)", cmd_lora);
+    console_register("lora", "lora [on|off | raw on|off] (radio status and switch; raw: print packets as hex and tx answer times)", cmd_lora);
     if (xTaskCreatePinnedToCore(lora_task, "LoRa", 5120 /* peak 2.7 KB, #107 */, NULL, 3, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "task not started");
         return false;
     }
     __atomic_store_n(&started, true, __ATOMIC_RELEASE);
     return true;
+}
+
+void lora_set_enabled(bool on) {
+    __atomic_store_n(&want_on, on, __ATOMIC_RELEASE);
+}
+
+bool lora_enabled(void) {
+    return __atomic_load_n(&want_on, __ATOMIC_ACQUIRE);
 }
 
 bool lora_up(void) {
@@ -627,8 +667,13 @@ static void cmd_lora(char const *args) {
         console_reply("lora raw %s", log_raw ? "on" : "off");
         return;
     }
+    if (strcmp(args, "on") == 0 || strcmp(args, "off") == 0) {
+        lichen_radio_set(RADIO_LORA, args[1] == 'n'); // saved, and lora_set_enabled follows through the listener
+        console_reply("lora radio %s", lichen_radio_get(RADIO_LORA) ? "on" : "off");
+        return;
+    }
     if (*args) {
-        console_reply("lora [raw on|off]");
+        console_reply("lora [on|off | raw on|off]");
         return;
     }
     lora_status_t st;
@@ -645,7 +690,8 @@ static void cmd_lora(char const *args) {
 
     char line[STATUS_LINE_MAX];
     lora_status_format(&config, &st, have, age_s, dropped, bad, line, sizeof(line));
-    console_reply("lora %s | tx %lu", line, (unsigned long)sent);
+    console_reply("lora %s | tx %lu%s", line, (unsigned long)sent,
+                  lora_enabled() ? "" : " | radio switched off (fw lora on)");
     char const *who = owner_now();
     console_reply("lora owner %s", who ? who : "none (unclaimed)"); // #103: MeshCore stopped gives the radio back
 }

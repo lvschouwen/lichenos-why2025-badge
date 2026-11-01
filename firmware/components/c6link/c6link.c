@@ -22,6 +22,7 @@
 #include "freertos/task.h"
 #include "esp_timer.h"
 #include "freertos/queue.h"
+#include "lichen_radio.h"
 #include "wifi_join.h"
 #include "wifi_list.h"
 #include "nvs.h"
@@ -39,6 +40,11 @@ static char const TAG[] = "c6link";
 
 // Written by the boot attach and the supervisor (c6_sup.c, #14); read from any task
 static atomic_bool  link_up;
+// The OS Wi-Fi switch (#108, lichen_radio): off = the driver stays initialised on the C6 but is not started, so the
+// link, LoRa and the C6 watch are untouched and nothing here looks like a lost C6. c6link_wifi_enable() may come before
+// c6link_start(). wifi_started: esp_wifi_start was called and not stopped since (set by the boot task, then the c6wifi task).
+static atomic_bool wifi_enabled = true;
+static atomic_bool wifi_started;
 // Shared between the event handler, the c6wifi task, the console and the screen: guarded by state_lock. The task is the
 // only one that calls esp_wifi_connect/disconnect/set_config after boot.
 static portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -116,8 +122,8 @@ bool wifi_rssi(int8_t *out) {
 
 bool wifi_joining(void) {
     portENTER_CRITICAL(&state_lock);
-    bool joining = join.state == WIFI_JOIN_PENDING || join.state == WIFI_JOIN_TRYING ||
-                   (atomic_load(&link_up) && have_credentials && !first_connect_settled);
+    bool joining = atomic_load(&wifi_enabled) && (join.state == WIFI_JOIN_PENDING || join.state == WIFI_JOIN_TRYING ||
+                   (atomic_load(&link_up) && have_credentials && !first_connect_settled));
     portEXIT_CRITICAL(&state_lock);
     return joining;
 }
@@ -133,6 +139,7 @@ typedef enum {
     MSG_CONNECTED,
     MSG_C6_DOWN, // the supervisor re-attaches (#14): stop and deinit the driver
     MSG_C6_UP,   // and it is back: init and start it again
+    MSG_WIFI_SYNC, // the OS Wi-Fi switch changed (#108): start or stop the driver to match
 } msg_type_t;
 typedef struct {
     msg_type_t type;
@@ -279,7 +286,7 @@ static void wipe_driver_store_once(void) {
     nvs_close(nvs);
 }
 
-typedef enum { DRV_STARTED, DRV_NO_CREDENTIALS, DRV_FAILED } drv_result_t;
+typedef enum { DRV_STARTED, DRV_NO_CREDENTIALS, DRV_FAILED, DRV_OFF } drv_result_t;
 static drv_result_t wifi_driver_up(char const **why);
 
 static bool start_wifi(void) {
@@ -302,6 +309,11 @@ static bool start_wifi(void) {
     drv_result_t r   = wifi_driver_up(&why);
     if (r == DRV_FAILED) {
         return wifi_failed(why);
+    }
+    if (r == DRV_OFF) {
+        boot_progress_end(BOOT_WIFI, STEP_SKIPPED, "switched off");
+        boot_progress_end(BOOT_CLOCK, STEP_SKIPPED, "no Wi-Fi");
+        return true;
     }
     if (r == DRV_NO_CREDENTIALS) {
         boot_progress_end(BOOT_WIFI, STEP_SKIPPED, "no credentials");
@@ -340,6 +352,14 @@ static drv_result_t wifi_driver_up(char const **why) {
     portENTER_CRITICAL(&state_lock);
     have_credentials = have;
     portEXIT_CRITICAL(&state_lock);
+    if (!atomic_load(&wifi_enabled)) {
+        // Not started: Settings or "fw wifi on" does it (c6link_wifi_enable). The saved pair goes to the driver then
+        if (have) {
+            esp_wifi_set_config(WIFI_IF_STA, &cfg);
+        }
+        ESP_LOGW(TAG, "Wi-Fi is switched off");
+        return DRV_OFF;
+    }
     if (!have) {
         ESP_LOGW(TAG, "no Wi-Fi credentials, set them in Settings or with: fw wifi <ssid> <password>");
         // The radio still starts (without connecting) so that the badge can scan and join from Settings.
@@ -349,6 +369,8 @@ static drv_result_t wifi_driver_up(char const **why) {
         if ((err = esp_wifi_start()) != ESP_OK) {
             ESP_LOGE(TAG, "Wi-Fi start: %s", esp_err_to_name(err));
             atomic_store(&driver_up, false);
+        } else {
+            atomic_store(&wifi_started, true);
         }
         return DRV_NO_CREDENTIALS;
     }
@@ -362,6 +384,7 @@ static drv_result_t wifi_driver_up(char const **why) {
         *why = "Wi-Fi start";
         return DRV_FAILED;
     }
+    atomic_store(&wifi_started, true);
     return DRV_STARTED;
 }
 
@@ -393,7 +416,7 @@ bool c6link_updating(void) {
 
 bool wifi_scan(wifi_ap_t *out, size_t max, size_t *n) {
     *n = 0;
-    if (atomic_load(&updating) || !atomic_load(&link_up) || !out || max == 0 || !scan_lock || xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) != pdTRUE) {
+    if (atomic_load(&updating) || !atomic_load(&link_up) || !atomic_load(&wifi_enabled) || !out || max == 0 || !scan_lock || xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) != pdTRUE) {
         return false;
     }
     bool                 ok = false;
@@ -517,7 +540,7 @@ static void handle_reconnect(void) {
     portENTER_CRITICAL(&state_lock);
     bool trying = join.state == WIFI_JOIN_TRYING || join.state == WIFI_JOIN_PENDING;
     portEXIT_CRITICAL(&state_lock);
-    if (trying || !wifi_cred_load(s, p)) {
+    if (trying || !atomic_load(&wifi_enabled) || !wifi_cred_load(s, p)) {
         return;
     }
     portENTER_CRITICAL(&state_lock);
@@ -590,7 +613,7 @@ static void handle_disconnected(int reason, uint32_t now) {
     portEXIT_CRITICAL(&state_lock);
     if (act == JOIN_ACT_ROLLBACK) {
         rollback();
-    } else if (have) {
+    } else if (have && atomic_load(&wifi_enabled)) {
         // Keep trying for as long as the badge runs: the network may come back (out of range, router restart)
         retry_pending = true;
         retry_at      = now + RETRY_MS;
@@ -647,6 +670,7 @@ static void handle_c6_down(void) {
     // A scan from the screen or the console may be inside the driver: let it end first (it gives up after 6 s)
     bool scan_held = scan_lock && xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE;
     atomic_store(&driver_up, false);
+    atomic_store(&wifi_started, false);
     retry_pending = false;
     set_ip("");
     wifi_link_down(&link_ap);
@@ -677,7 +701,50 @@ static void handle_c6_up(void) {
         esp_wifi_deinit();
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
-    ESP_LOGW(TAG, "wifi: %s after the C6 re-attach", r == DRV_FAILED ? why : r == DRV_NO_CREDENTIALS ? "started, no network saved" : "started");
+    ESP_LOGW(TAG, "wifi: %s after the C6 re-attach", r == DRV_FAILED ? why : r == DRV_OFF ? "ready, switched off" : r == DRV_NO_CREDENTIALS ? "started, no network saved" : "started");
+}
+
+// Wi-Fi switched off or on (#108). Off stops the radio on a live C6 (stop, not deinit: the next start is quick and the
+// credentials stay in the driver), forgets the IP and an unfinished trial; the default handlers take the netif down on
+// STA_STOP. On starts it; STA_START then connects with the saved pair. While the link is down the next attach decides.
+static void handle_wifi_sync(void) {
+    bool want = atomic_load(&wifi_enabled);
+    if (!atomic_load(&link_up) || want == atomic_load(&wifi_started)) {
+        return;
+    }
+    if (want) {
+        portENTER_CRITICAL(&state_lock);
+        first_connect_settled = false;
+        portEXIT_CRITICAL(&state_lock);
+        atomic_store(&driver_up, true); // before the start, as in wifi_driver_up
+        esp_err_t err = esp_wifi_start();
+        atomic_store(&wifi_started, err == ESP_OK);
+        atomic_store(&driver_up, err == ESP_OK);
+        ESP_LOGW(TAG, "wifi: switched on (%s)", esp_err_to_name(err));
+        return;
+    }
+    bool scan_held = scan_lock && xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE;
+    atomic_store(&driver_up, false);
+    retry_pending = false;
+    set_ip("");
+    wifi_link_down(&link_ap);
+    abort_trial();
+    esp_err_t stop = esp_wifi_stop();
+    atomic_store(&wifi_started, false);
+    ESP_LOGW(TAG, "wifi: switched off (%s)", esp_err_to_name(stop));
+    if (scan_held) {
+        xSemaphoreGive(scan_lock);
+    }
+}
+
+void c6link_wifi_enable(bool on) {
+    atomic_store(&wifi_enabled, on);
+    msg_t m = {.type = MSG_WIFI_SYNC};
+    post(&m); // before the task exists the flag alone is enough: the boot start reads it
+}
+
+bool c6link_wifi_enabled(void) {
+    return atomic_load(&wifi_enabled);
 }
 
 static SemaphoreHandle_t c6_msg_done; // given by the task after MSG_C6_DOWN / MSG_C6_UP
@@ -727,6 +794,7 @@ static void wifi_task(void *arg) {
                 case MSG_FORGET: handle_forget(); break;
                 case MSG_DISCONNECTED: handle_disconnected(m.reason, now); break;
                 case MSG_GOT_IP: handle_got_ip(); break;
+                case MSG_WIFI_SYNC: handle_wifi_sync(); break;
                 case MSG_CONNECTED: handle_connected(&m); break;
                 case MSG_C6_DOWN:
                 case MSG_C6_UP:
@@ -754,7 +822,7 @@ static void wifi_task(void *arg) {
 }
 
 bool wifi_set_credentials(char const *new_ssid, char const *pass) {
-    if (!atomic_load(&link_up) || !wifi_cred_valid(new_ssid, pass)) {
+    if (!atomic_load(&link_up) || !atomic_load(&wifi_enabled) || !wifi_cred_valid(new_ssid, pass)) {
         return false;
     }
     msg_t m = {.type = MSG_JOIN};
@@ -799,7 +867,9 @@ static void cmd_wifi(char const *args) {
         copy_text(cur, sizeof(cur), ssid);
         portEXIT_CRITICAL(&state_lock);
         clean(cur, a, sizeof(a));
-        if (!have) {
+        if (!c6link_wifi_enabled()) {
+            console_reply("wifi: radio switched off%s (fw wifi on)", lichen_airplane_get() ? ", airplane mode" : "");
+        } else if (!have) {
             console_reply("wifi: no credentials (fw wifi scan | <ssid> <password> | reconnect | --clear)");
         } else if (wifi_has_ip(ip, sizeof(ip))) {
             int8_t rssi;
@@ -822,6 +892,9 @@ static void cmd_wifi(char const *args) {
             console_reply(kept[0] ? "wifi: couldn't join \"%s\": kept \"%s\"" : "wifi: couldn't join \"%s\": no network saved", a,
                           b);
         }
+    } else if (strcmp(args, "on") == 0 || strcmp(args, "off") == 0) {
+        lichen_radio_set(RADIO_WIFI, args[1] == 'n'); // saved; c6link_wifi_enable follows through the listener
+        console_reply("wifi: radio %s", lichen_radio_get(RADIO_WIFI) ? "on" : "off");
     } else if (strcmp(args, "--clear") == 0) {
         msg_t m = {.type = MSG_FORGET};
         console_reply(post(&m) ? "wifi: credentials removed" : "wifi: busy, try again");
@@ -1076,7 +1149,7 @@ bool c6link_start(void) {
     console_register("c6", "c6 [reflash | verify | reset [rom] | reattach]", cmd_c6);
     clock_console_register();
     console_register("net", "net (Wi-Fi state and IP)", cmd_net);
-    console_register("wifi", "wifi [scan | reconnect | <ssid> <password> | --clear]", cmd_wifi);
+    console_register("wifi", "wifi [on | off | scan | reconnect | <ssid> <password> | --clear]", cmd_wifi);
     c6_sup_start();
     scan_done   = xSemaphoreCreateBinary();
     scan_lock   = xSemaphoreCreateMutex();

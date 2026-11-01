@@ -3,6 +3,7 @@
 // LoRa right. The unread count, Wi-Fi fan (#58) and LoRa label are polled once a second from the LVGL task (the
 // latter two through shell_sources); the LoRa TX/RX chevrons from the packet counters every 100 ms (#29).
 #include "lichen_clock.h"
+#include "lichen_radio.h"
 #include "link_state.h"
 #include "lora_activity.h"
 #include "logo.h"
@@ -239,7 +240,7 @@ static void refresh(lv_timer_t *timer) {
     show_c6();
     int8_t rssi  = 0;
     bool   known = shell_sources.wifi_rssi && shell_sources.wifi_rssi(&rssi);
-    show_wifi(wifi_look(shell_sources.wifi_has_credentials && shell_sources.wifi_has_credentials(),
+    show_wifi(wifi_look(lichen_radio_get(RADIO_WIFI), shell_sources.wifi_has_credentials && shell_sources.wifi_has_credentials(),
                         shell_sources.wifi_joining && shell_sources.wifi_joining(),
                         shell_sources.wifi_up && shell_sources.wifi_up(), known, rssi));
     show_lora(lora_look(shell_sources.lora_up && shell_sources.lora_up(),

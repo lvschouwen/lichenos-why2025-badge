@@ -5,6 +5,7 @@
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lichen_radio.h"
 #include "menu.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -57,6 +58,45 @@ __attribute__((format(printf, 1, 2))) static void set_status(char const *fmt, ..
 }
 
 static void start_scan(void);
+static void clear_rows(void);
+
+// The Wi-Fi radio switch (#108) is the first row: off clears the list, on scans once the driver has had a moment to start
+static lv_obj_t   *radio_row;
+static lv_timer_t *start_timer;
+#define RADIO_START_MS 2000
+
+static void radio_row_refresh(void) {
+    if (radio_row) {
+        menu_set_value(radio_row, lichen_radio_get(RADIO_WIFI) ? "On" : "Off");
+    }
+}
+
+static void scan_after_start(lv_timer_t *timer) {
+    lv_timer_delete(timer);
+    start_timer = NULL;
+    if (screen && lichen_radio_get(RADIO_WIFI)) {
+        start_scan();
+    }
+}
+
+static void toggle_radio(void *arg) {
+    (void)arg;
+    bool on = !lichen_radio_get(RADIO_WIFI);
+    lichen_radio_set(RADIO_WIFI, on);
+    radio_row_refresh();
+    gen++; // a scan under way is dropped when it reports
+    if (start_timer) {
+        lv_timer_delete(start_timer);
+        start_timer = NULL;
+    }
+    clear_rows();
+    if (on) {
+        set_status("Starting Wi-Fi...");
+        start_timer = lv_timer_create(scan_after_start, RADIO_START_MS, NULL);
+    } else {
+        set_status("Wi-Fi is off");
+    }
+}
 
 // ---- joining -----------------------------------------------------------------------------------------------------
 
@@ -267,6 +307,11 @@ static void start_scan(void) {
 static void on_delete(lv_event_t *e) {
     (void)e;
     stop_poll();
+    if (start_timer) {
+        lv_timer_delete(start_timer);
+        start_timer = NULL;
+    }
+    radio_row = NULL;
     gen++; // a scan still running is dropped when it reports
     setup_done = NULL;
     screen = menu = status = NULL;
@@ -288,9 +333,14 @@ static lv_obj_t *build(void) {
     if (setup_done) {
         menu_add(menu, "Skip for now", "", on_skip, NULL);
     }
+    radio_row = menu_add(menu, "Wi-Fi", lichen_radio_get(RADIO_WIFI) ? "On" : "Off", toggle_radio, NULL);
     status    = menu_note(menu, "");
     lv_obj_add_event_cb(scr, on_delete, LV_EVENT_DELETE, NULL);
-    start_scan();
+    if (lichen_radio_get(RADIO_WIFI)) {
+        start_scan();
+    } else {
+        set_status(lichen_airplane_get() ? "Wi-Fi is off (airplane mode)" : "Wi-Fi is off");
+    }
     wifi_join_state_t now = shell_sources.wifi_join_state ? shell_sources.wifi_join_state(target, sizeof(target), NULL, 0)
                                                           : WIFI_JOIN_NONE;
     if (now == WIFI_JOIN_TRYING || now == WIFI_JOIN_PENDING) {

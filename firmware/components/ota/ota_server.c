@@ -8,6 +8,7 @@
 
 #include "c6_paths.h"
 #include "c6link.h"
+#include "lichen_radio.h"
 #include "console_cmd.h" // CONSOLE_CMD_MAX
 #include "fw_console.h"
 #include "esp_app_desc.h"
@@ -1244,7 +1245,8 @@ static int open_listener(void) {
 }
 
 static void serve(int ls) {
-    while (server_on) {
+    // Closes with Wi-Fi (the OS switch or airplane mode, #108): the C6 stops answering and the IP is gone
+    while (server_on && lichen_radio_get(RADIO_WIFI)) {
         struct sockaddr_in peer;
         socklen_t          peer_len = sizeof(peer);
         int                fd       = accept(ls, (struct sockaddr *)&peer, &peer_len);
@@ -1276,7 +1278,7 @@ static void server_task(void *arg) {
     (void)arg;
     for (;;) {
         // Wi-Fi may come up late or not at all (no credentials), and the server may be switched off (#44)
-        while (!server_on || !wifi_has_ip(NULL, 0)) {
+        while (!server_on || !lichen_radio_get(RADIO_WIFI) || !wifi_has_ip(NULL, 0)) {
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
         int ls = open_listener();

@@ -9,6 +9,7 @@
 #include "lichen_clock.h"
 #include "lichen_app.h"
 #include "lichen_notify.h"
+#include "lichen_radio.h"
 #include "menu.h"
 #include "ota_server.h"
 #include "sdcard.h"
@@ -38,7 +39,7 @@ static void wifi_line(char *out, size_t cap, bool with_prefix) {
     static char ssid[33];
     static bool     have, was_up;
     static uint32_t generation;
-    bool            up = shell_sources.wifi_up && shell_sources.wifi_up();
+    bool            up = shell_sources.wifi_up && shell_sources.wifi_up() && lichen_radio_get(RADIO_WIFI);
     // The NVS read only when something changed: the link flipped or the credentials were saved (screen or console)
     if (!have || up != was_up || generation != wifi_cred_generation()) {
         settings_get_str("wifi_ssid", ssid, sizeof(ssid), "");
@@ -46,7 +47,9 @@ static void wifi_line(char *out, size_t cap, bool with_prefix) {
         was_up     = up;
         generation = wifi_cred_generation();
     }
-    if (up && ssid[0]) {
+    if (!lichen_radio_get(RADIO_WIFI)) { // the OS switch or airplane mode (#108)
+        snprintf(out, cap, with_prefix ? "Wi-Fi: off" : "off");
+    } else if (up && ssid[0]) {
         char name[140]; // the name came over the air: no control bytes on a label
         wifi_ssid_sanitize(ssid, name, sizeof(name));
         snprintf(out, cap, with_prefix ? "Wi-Fi: %s" : "%s", name);
@@ -452,9 +455,39 @@ static void toggle_ota(void *arg) {
     shell_dialog_countdown(&d, ota_off_answer);
 }
 
+// Radio switches (#108): LoRa and airplane mode here, Wi-Fi on its own page. Airplane changes the others too, so every
+// row is refreshed after a toggle.
+static lv_obj_t *wifi_row, *lora_row, *air_row;
+
+static void radio_rows_refresh(void) {
+    char wifi[48];
+    if (wifi_row) {
+        wifi_line(wifi, sizeof(wifi), false);
+        menu_set_value(wifi_row, wifi);
+    }
+    if (lora_row) {
+        menu_set_value(lora_row, lichen_radio_get(RADIO_LORA) ? "On" : "Off");
+    }
+    if (air_row) {
+        menu_set_value(air_row, lichen_airplane_get() ? "On" : "Off");
+    }
+}
+
+static void toggle_lora(void *arg) {
+    (void)arg;
+    lichen_radio_set(RADIO_LORA, !lichen_radio_get(RADIO_LORA));
+    radio_rows_refresh();
+}
+
+static void toggle_airplane(void *arg) {
+    (void)arg;
+    lichen_airplane_set(!lichen_airplane_get());
+    radio_rows_refresh();
+}
+
 static void forget_ota_row(lv_event_t *e) {
     (void)e;
-    ota_row = NULL;
+    ota_row = wifi_row = lora_row = air_row = NULL;
 }
 
 static void open_settings(lv_obj_t *screen) {
@@ -462,8 +495,10 @@ static void open_settings(lv_obj_t *screen) {
     char      wifi[48];
     wifi_line(wifi, sizeof(wifi), false);
     menu_note(menu, "Lichen");
-    menu_add(menu, "Wi-Fi", wifi, open_wifi, NULL);
+    wifi_row = menu_add(menu, "Wi-Fi", wifi, open_wifi, NULL);
     ota_row = menu_add(menu, "Updates over Wi-Fi", ota_server_enabled() ? "On" : "Off", toggle_ota, NULL);
+    lora_row = menu_add(menu, "LoRa radio", lichen_radio_get(RADIO_LORA) ? "On" : "Off", toggle_lora, NULL);
+    air_row  = menu_add(menu, "Airplane mode", lichen_airplane_get() ? "On" : "Off", toggle_airplane, NULL);
     lv_obj_add_event_cb(screen, forget_ota_row, LV_EVENT_DELETE, NULL);
     menu_add(menu, "Display", "", open_display, NULL);
     settings_time_row = live_row(menu_add(menu, "Time", "", open_time, NULL), false, time_value);

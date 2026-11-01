@@ -6,7 +6,7 @@ idf_component_register(SRCS "lora.c" "lora_tx.c" "../../../shared/lora/lora_prot
                             "../../../shared/why_io_libc.c"
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "../../../shared/lora" "../../../shared"
-                       PRIV_REQUIRES esp_hosted esp_timer fw_console)
+                       PRIV_REQUIRES esp_hosted esp_timer fw_console lichen_api)
 # why_io.h uses clang's nullability qualifiers
 target_compile_definitions(${COMPONENT_LIB} PRIVATE _Nullable=)
 # why_io.h names struct stat without including its header

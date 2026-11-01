@@ -63,6 +63,12 @@ void c6link_bundle_changed(void);
 void c6link_set_updating(void);
 // Power off (#65): holds the C6 (and the TCA8418) in reset through the P4's deep sleep. Nothing on the link works after.
 void c6link_hold_in_reset(void);
+// The OS Wi-Fi switch (#108; main.c wires lichen_radio to it): off stops the Wi-Fi driver on the C6 and closes everything
+// that rides on it (IP, update server, scans and joins are refused), on starts it and reconnects with the saved pair.
+// The C6 link itself and LoRa are not touched, and the C6 watch (c6_watch) never sees it as an outage. Returns at once;
+// the c6wifi task does the work. May be called before c6link_start.
+void c6link_wifi_enable(bool on);
+bool c6link_wifi_enabled(void);
 // Copies the station's IPv4 address into ip; false while there is none
 bool wifi_has_ip(char *ip, size_t cap);
 // The cached signal strength of the connected AP (read every 5 s by the c6wifi task); false while not connected or

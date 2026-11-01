@@ -3,7 +3,10 @@
 #include "theme.h"
 #include "wifi_list.h"
 
-link_look_t wifi_look(bool have_credentials, bool joining, bool has_ip, bool rssi_known, int8_t rssi) {
+link_look_t wifi_look(bool enabled, bool have_credentials, bool joining, bool has_ip, bool rssi_known, int8_t rssi) {
+    if (!enabled) {
+        return (link_look_t){LINK_OFF, 0, THEME_DIM}; // switched off (#108)
+    }
     if (has_ip) {
         // Connected but no reading yet (the first one comes within 5 s): one bar rather than none, which would read as down
         return (link_look_t){LINK_UP, rssi_known ? wifi_bars(rssi) : 1, THEME_TEAL};

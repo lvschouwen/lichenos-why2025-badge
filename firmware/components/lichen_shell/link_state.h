@@ -13,9 +13,10 @@ typedef struct {
 } link_look_t;
 
 // Off by choice is dim, red is only for faults, amber for a change under way (#105).
+// The OS Wi-Fi switch or airplane mode off (#108): OFF, dim, whatever else is true.
 // Up: bars from the RSSI (1 while it is unknown), teal. Joining: amber, 0 bars. Credentials but no IP: red, 0 bars
 // (DOWN). No credentials: dim, 0 bars (OFF, a faint fan).
-link_look_t wifi_look(bool have_credentials, bool joining, bool has_ip, bool rssi_known, int8_t rssi);
+link_look_t wifi_look(bool enabled, bool have_credentials, bool joining, bool has_ip, bool rssi_known, int8_t rssi);
 
 // What the radio's user (MeshCore) is doing, as the status bar needs it
 typedef enum {

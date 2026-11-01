@@ -33,6 +33,12 @@ bool lora_c6_probe(uint32_t timeout_ms, uint32_t *uptime_s);
 // failures are the supervisor's soft signal that the C6 may be gone.
 void lora_set_send_hook(void (*fn)(bool ok));
 
+// The OS radio switch (#108; lichen_radio.h is the user-facing one, main.c wires it here): off sends the C6 RX_STOP (the
+// SX1262 idles, nothing is received or sent) and holds back the supervisor's config + RX start; lora_send is refused.
+// On starts them again. Takes effect on the LoRa task within a second; callable before lora_start.
+void lora_set_enabled(bool on);
+bool lora_enabled(void);
+
 // The radio has one owner at a time (#84 T7): the owner's callback gets every received packet (from the LoRa task:
 // copy and return, don't block). A second owner is refused and logged until the first releases.
 typedef void (*lora_packet_cb_t)(uint8_t const *data, size_t len, int16_t rssi_x10, int16_t snr_x10);
