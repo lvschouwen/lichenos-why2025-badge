@@ -79,6 +79,11 @@ The rule: **core 1 draws, core 0 talks to the world.**
   heaps and stacks, wrapped functions, an export table). A sandboxed script runtime (MicroPython, Lua or WebAssembly)
   is the safe way to open up later and could be one app running scripts through the same interface.
 - Others can already write an app as a component and build their own Lichen.
+- Notifications (#62) are an OS service in the app API: `lichen_notify(source, level, title, body, flags)` from any
+  task. Lichen shows a toast that never takes the focus, the unread count on the app's tile and in the status bar, and
+  keeps a history of 48 in `/storage/lichen/notify.bin` (the Notifications tile, the cloud key). The user switches
+  sources on or off and sets do-not-disturb in Settings › Notifications. Lichen raises its own notices too (a crash,
+  the PSRAM check, the clock, an update, the C6 coming back, the SD card, a sensor, low storage).
 
 ## Lessons from BadgeVMS
 

@@ -21,6 +21,7 @@
 #include "update_screen.h"
 #include "update_status.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -401,6 +402,7 @@ void update_screen_init(void) {
 // --- after the reboot ---
 
 static char     banner_line[64];
+static atomic_int boot_result = UPD_NONE; // set once banner_line holds the text (#62 reads it from the LVGL task)
 static lv_obj_t *banner;
 static int64_t  banner_shown_ms;
 
@@ -484,7 +486,16 @@ void update_screen_boot_check(void) {
         return;
     }
     update_line(after.result, prev, run, banner_line, sizeof(banner_line));
+    atomic_store(&boot_result, (int)after.result);
     lvgl_port_lock(0);
     lv_timer_create(banner_tick, TICK_MS, NULL);
     lvgl_port_unlock();
+}
+
+upd_result_t update_screen_boot_result(char *line, size_t cap) {
+    upd_result_t r = (upd_result_t)atomic_load(&boot_result);
+    if (cap) {
+        snprintf(line, cap, "%s", r == UPD_NONE ? "" : banner_line);
+    }
+    return r;
 }

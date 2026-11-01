@@ -33,7 +33,7 @@ static lv_obj_t     *s_body;
 static nview_queue_t s_waiting;
 static nview_toast_t s_showing;   // id 0: none
 static uint32_t      s_shown_at;  // lv_tick of the last (re)show
-static uint32_t      s_gen;       // lichen_notify_generation() the badges and the toast were last checked at
+static uint32_t      s_gen = UINT32_MAX; // lichen_notify_generation() at the last check; none yet: the first drain sets the badges
 static bool          s_badged[LICHEN_MAX_APPS]; // a badge this file set (so it also clears it, and no other)
 
 uint32_t notify_level_color(uint8_t level) {

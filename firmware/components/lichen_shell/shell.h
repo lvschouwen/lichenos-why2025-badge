@@ -35,6 +35,8 @@ typedef struct {
     // LoRa packets received and sent so far, both only going up: the status bar's TX/RX chevrons, polled every 100 ms
     // (#29)
     void (*lora_counts)(uint32_t *rx, uint32_t *tx);
+    // C6 outages the badge came back from (#14) and the last recovery in words, for the notification (#62)
+    uint32_t (*c6_restarts)(char *reason, size_t cap);
 } shell_sources_t;
 
 void shell_set_sources(shell_sources_t const *sources); // before shell_start; copied

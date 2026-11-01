@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 // Per-boot PSRAM tuning report and dense check (#40). The IDF picks the MSPI phase and delayline on every boot and only
@@ -17,6 +18,10 @@ void psram_boot_check(void);
 
 // Once NVS is up (the guard task calls it ~3 s after boot): restart-log note and retry policy for a bad boot
 void psram_boot_policy(void);
+
+// The boot check (or the tuning) found this boot bad; why gets the reason ("" when good). Set before the shell starts,
+// read-only afterwards: any task (#62's notice)
+bool psram_boot_bad(char *why, size_t cap);
 
 // "fw psram": tuning, registers, boot check, LDO lines
 void psram_boot_print(void);

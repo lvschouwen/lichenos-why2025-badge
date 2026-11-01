@@ -83,3 +83,5 @@ void notify_app_register(void);
 void notify_open_entry(uint32_t id);
 void notify_open_centre(void);
 void notify_settings_open(void);
+// sys_notices.c: Lichen's own notifications (crash, PSRAM, clock, update, C6, SD, sensors, storage); from shell_start
+void sys_notices_start(void);

@@ -465,4 +465,5 @@ void shell_start(lv_display_t *display) {
     notify_ui_start();
     up = true;
     lvgl_port_unlock();
+    sys_notices_start();
 }

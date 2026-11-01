@@ -115,6 +115,13 @@ static void c6_up(void) {
     lora_c6_back();
 }
 
+static uint32_t c6_restarts(char *reason, size_t cap) {
+    static c6_status_t st; // the reason is long; only the sys_notices task calls this
+    c6link_status(&st);
+    snprintf(reason, cap, "%s", st.reason);
+    return st.restarts;
+}
+
 static void c6_restart_answer(bool confirmed) {
     c6link_fallback_answer(confirmed);
 }
@@ -243,7 +250,8 @@ void app_main(void) {
                                          .wifi_join_state = wifi_join_state,
                                          .wifi_has_credentials = wifi_has_credentials,
                                          .wifi_rssi = wifi_rssi, .wifi_joining = wifi_joining,
-                                         .c6_trouble = c6link_trouble, .lora_counts = lora_get_counts};
+                                         .c6_trouble = c6link_trouble, .lora_counts = lora_get_counts,
+                                         .c6_restarts = c6_restarts};
         shell_set_sources(&sources);
         shell_start(display);
         boot_progress_end(BOOT_DISPLAY, STEP_DONE, NULL);

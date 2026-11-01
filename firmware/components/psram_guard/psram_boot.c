@@ -244,3 +244,10 @@ void psram_boot_print(void) {
     console_reply("psram boot policy: %s", s_policy_done ? s_policy_line : "not evaluated yet");
     print_ldo();
 }
+
+bool psram_boot_bad(char *why, size_t cap) {
+    if (cap) {
+        snprintf(why, cap, "%s", s_bad ? s_why : "");
+    }
+    return s_bad;
+}
