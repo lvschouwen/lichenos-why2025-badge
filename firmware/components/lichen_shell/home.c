@@ -43,6 +43,7 @@ typedef struct {
     lv_obj_t     *line1[LICHEN_MAX_APPS]; // tiles only
     lv_obj_t     *line2[LICHEN_MAX_APPS];
     lv_obj_t     *badge[LICHEN_MAX_APPS]; // the count circle on each icon (#102), hidden at 0
+    lv_obj_t     *icon[LICHEN_MAX_APPS];  // the box it sits on
     uint32_t      badge_gen;              // lichen_badge_generation() when they were last drawn
     bool          badges_drawn;
     lv_timer_t   *timer;
@@ -88,11 +89,20 @@ static void on_delete(lv_event_t *e) {
     free(h);
 }
 
-static void refresh_badge(lv_obj_t *badge, unsigned count) {
+// Centred on the icon's top-right corner, so it overlaps the icon by half, phone style. Its width follows the text, so
+// again after every new text, and after home has laid out (align_to takes the positions of that moment).
+static void place_badge(lv_obj_t *badge, lv_obj_t *icon) {
+    int32_t h = lv_font_get_line_height(lv_obj_get_style_text_font(badge, LV_PART_MAIN));
+    lv_obj_update_layout(badge);
+    lv_obj_align_to(badge, icon, LV_ALIGN_TOP_RIGHT, h / 2, -h / 2);
+}
+
+static void refresh_badge(lv_obj_t *badge, lv_obj_t *icon, unsigned count) {
     char text[8];
     bool shown = home_badge_text(count, text, sizeof(text));
     if (shown && strcmp(lv_label_get_text(badge), text) != 0) {
         lv_label_set_text(badge, text);
+        place_badge(badge, icon);
     }
     if (shown == lv_obj_is_hidden(badge)) {
         lv_obj_set_hidden(badge, !shown);
@@ -107,7 +117,7 @@ static void refresh_badges(home_t *h) {
     }
     for (int i = 0; i < h->count; i++) {
         if (h->badge[i]) {
-            refresh_badge(h->badge[i], lichen_badge_get(lichen_app_at(i)->id));
+            refresh_badge(h->badge[i], h->icon[i], lichen_badge_get(lichen_app_at(i)->id));
         }
     }
     h->badge_gen    = generation;
@@ -136,13 +146,14 @@ static void refresh(lv_timer_t *timer) {
     }
 }
 
-// A pill centred on the icon's top-right corner, growing to the left for "99+"; hidden until refresh() has a count.
-// Last child of the icon box, so it is drawn over the icon; the box lets it overflow.
-static lv_obj_t *add_badge(lv_obj_t *icon) {
-    lv_font_t const *font = lichen_font(LICHEN_FONT_SMALL);
-    int32_t          h    = lv_font_get_line_height(font);
-    lv_obj_set_overflow_visible(icon, true);
-    lv_obj_t *badge = lv_label_create(icon);
+// A child of the cell, not of the icon box: the box clips what sticks out of it (an overflow-visible box still showed
+// only a quarter of the circle on the badge). Floating, so the cell's flex layout leaves it where place_badge puts it;
+// last child, so it is drawn over the icon. Hidden until refresh() has a count.
+static lv_obj_t *add_badge(lv_obj_t *cell) {
+    lv_font_t const *font  = lichen_font(LICHEN_FONT_SMALL); // the smallest Lichen font, also on the 32 px tile icon
+    int32_t          h     = lv_font_get_line_height(font);
+    lv_obj_t        *badge = lv_label_create(cell);
+    lv_obj_set_floating(badge, true);
     lv_obj_set_style_text_font(badge, font, 0);
     lv_obj_set_style_text_color(badge, lv_color_hex(THEME_TEXT), 0);
     lv_obj_set_style_text_align(badge, LV_TEXT_ALIGN_CENTER, 0);
@@ -154,7 +165,6 @@ static lv_obj_t *add_badge(lv_obj_t *icon) {
     lv_obj_set_height(badge, h);
     lv_obj_set_clickable(badge, false);
     lv_label_set_text(badge, "");
-    lv_obj_align(badge, LV_ALIGN_TOP_RIGHT, h / 2, -h / 2);
     lv_obj_set_hidden(badge, true);
     return badge;
 }
@@ -206,8 +216,7 @@ static void add_tile(home_t *h, lv_obj_t *home, int i) {
     lv_obj_set_style_pad_column(tile, 24, 0);
     lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *icon = add_icon(tile, app, TILE_ICON_PX);
-    h->badge[i]    = add_badge(icon);
+    h->icon[i] = add_icon(tile, app, TILE_ICON_PX);
 
     lv_obj_t *text = lv_obj_create(tile);
     lv_obj_remove_style_all(text);
@@ -222,7 +231,8 @@ static void add_tile(home_t *h, lv_obj_t *home, int i) {
     h->line2[i] = add_label(text, "", THEME_DIM);
     lv_obj_set_width(h->line1[i], LV_PCT(100));
     lv_obj_set_width(h->line2[i], LV_PCT(100));
-    h->cell[i] = tile;
+    h->badge[i] = add_badge(tile); // after the text, so it is drawn over everything in the tile
+    h->cell[i]  = tile;
 }
 
 static void add_grid_cell(home_t *h, lv_obj_t *home, int i) {
@@ -235,12 +245,12 @@ static void add_grid_cell(home_t *h, lv_obj_t *home, int i) {
     lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(cell, GRID_ICON_GAP, 0);
-    lv_obj_t *icon = add_icon(cell, app, GRID_ICON_PX);
-    h->badge[i]    = add_badge(icon);
+    h->icon[i] = add_icon(cell, app, GRID_ICON_PX);
     lv_obj_t *name = add_label(cell, app->name, THEME_TEXT);
     lv_obj_set_width(name, w - 16);
     lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
-    h->cell[i] = cell;
+    h->badge[i] = add_badge(cell);
+    h->cell[i]  = cell;
 }
 
 // "fw ui": the home screen itself holds the focus, so the selection has to be asked for
@@ -288,6 +298,10 @@ lv_obj_t *home_create(void) {
             add_tile(h, home, i);
         }
         style_cell(h, i);
+    }
+    lv_obj_update_layout(home); // the icons' final places, for the badges
+    for (int i = 0; i < h->count; i++) {
+        place_badge(h->badge[i], h->icon[i]);
     }
     h->timer = lv_timer_create(refresh, REFRESH_MS, h);
     refresh(h->timer); // no blank lines or missing bubbles for the first second
