@@ -37,7 +37,8 @@
 static char const TAG[] = "bench";
 
 enum { ROW_PSRAM, ROW_WRITE, ROW_READ, ROW_COPY, ROW_INT, ROW_REDRAW, ROW_SCROLL, ROW_MEM, ROWS };
-static char const *const KEYS[ROWS] = {"PSRAM", "write", "read", "copy", "int" LV_SYMBOL_RIGHT "PSRAM", "redraw", "scroll", "memory"};
+static char const *const KEYS[ROWS]     = {"PSRAM", "write", "read", "copy", "int" LV_SYMBOL_RIGHT "PSRAM", "redraw", "scroll", "memory"};
+static char const *const LOG_KEYS[ROWS] = {"psram", "write", "read", "copy", "int->psram", "redraw", "scroll", "memory"}; // ASCII: the symbol is a private-use glyph
 
 typedef enum { ST_IDLE, ST_BANDWIDTH, ST_REDRAW, ST_SCROLL_START, ST_SCROLL, ST_MEM } stage_t;
 
@@ -140,7 +141,7 @@ static void set_result(int row, char const *text) {
     if (s_b.value[row]) {
         lv_label_set_text(s_b.value[row], text);
     }
-    ESP_LOGW(TAG, "%s: %s", KEYS[row], text);
+    ESP_LOGW(TAG, "%s: %s", LOG_KEYS[row], text);
 }
 
 static void set_hint(char const *text) {
