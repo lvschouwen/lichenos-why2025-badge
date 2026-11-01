@@ -58,3 +58,6 @@ int  lora_send_state(void);
 // What lora.toml (or the built-in default) gave at boot: MeshCore's first-boot radio settings
 void lora_get_boot_radio(uint32_t *freq_hz, uint32_t *bw_hz, uint8_t *sf, uint8_t *cr);
 void lora_get_stats(lora_ui_stats_t *out);
+// Packets received (every one the C6 handed over) and sent on air (the C6 answered OK); both only go up. Two loads under
+// the state lock, cheap enough for the status bar's 100 ms poll (#29).
+void lora_get_counts(uint32_t *rx, uint32_t *tx);

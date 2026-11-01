@@ -225,7 +225,7 @@ void app_main(void) {
                                          .wifi_join_state = wifi_join_state,
                                          .wifi_has_credentials = wifi_has_credentials,
                                          .wifi_rssi = wifi_rssi, .wifi_joining = wifi_joining,
-                                         .c6_trouble = c6link_trouble};
+                                         .c6_trouble = c6link_trouble, .lora_counts = lora_get_counts};
         shell_set_sources(&sources);
         shell_start(display);
         boot_progress_end(BOOT_DISPLAY, STEP_DONE, NULL);

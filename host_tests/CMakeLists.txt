@@ -861,6 +861,11 @@ target_include_directories(link_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
 target_compile_options(link_state_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME link_state_test COMMAND link_state_test)
 
+add_executable(lora_activity_test ${CMAKE_CURRENT_SOURCE_DIR}/lora_activity_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/lora_activity.c)
+target_include_directories(lora_activity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(lora_activity_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME lora_activity_test COMMAND lora_activity_test)
+
 add_executable(wifi_cred_test
     ${CMAKE_CURRENT_SOURCE_DIR}/wifi_cred_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_list.c
@@ -968,5 +973,6 @@ add_custom_target(run_tests
     mesh_grid_test
     sensors_format_test
     crashlog_fmt_test
+    lora_activity_test
     COMMENT "Running all host tests"
 )

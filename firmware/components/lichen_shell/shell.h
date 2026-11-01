@@ -30,6 +30,9 @@ typedef struct {
     // The C6 is being recovered or is gone (#14): the state in words ("recovering 2/3", "down (no answer)"), false
     // while it is up
     bool (*c6_trouble)(char *out, size_t cap);
+    // LoRa packets received and sent so far, both only going up: the status bar's TX/RX chevrons, polled every 100 ms
+    // (#29)
+    void (*lora_counts)(uint32_t *rx, uint32_t *tx);
 } shell_sources_t;
 
 void shell_set_sources(shell_sources_t const *sources); // before shell_start; copied

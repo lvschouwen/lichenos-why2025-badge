@@ -1,7 +1,8 @@
 // The status bar over every screen after boot (#66, home.html): logo, clock (marked when unverified, #64), Wi-Fi, LoRa. Wi-Fi bars and LoRa label, polled once a second from
-// the LVGL task through shell_sources.
+// the LVGL task through shell_sources; the LoRa TX/RX chevrons from the packet counters every 100 ms (#29).
 #include "lichen_clock.h"
 #include "link_state.h"
+#include "lora_activity.h"
 #include "logo.h"
 #include "shell_parts.h"
 #include "fonts.h"
@@ -16,6 +17,7 @@ static lv_obj_t *clock_label;
 static lv_obj_t *lora_label;
 static lv_obj_t *wifi_label;
 static lv_obj_t *c6_label; // only while the C6 is being recovered or gone (#14)
+static lv_obj_t *lora_arrows; // the TX/RX chevrons after "LoRa" (#29)
 
 static lv_obj_t *add_row(lv_obj_t *parent, int gap) {
     lv_obj_t *row = lv_obj_create(parent);
@@ -79,6 +81,43 @@ static void show_lora(link_look_t look) {
     lv_obj_set_style_text_color(lora_label, lv_color_hex(look.color), 0);
 }
 
+typedef struct {
+    lv_obj_t  *arrow;
+    uint32_t   on_color; // TX amber (energy on air), RX teal (the radio half of the logo)
+    lora_act_t act;
+    uint8_t    shown; // the level its colour was last set for
+} lora_chevron_t;
+
+static lora_chevron_t tx_chevron = {.on_color = THEME_AMBER};
+static lora_chevron_t rx_chevron = {.on_color = THEME_TEAL};
+
+// Restyled only when the level moves: idle costs no redraw
+static void step_chevron(lora_chevron_t *c, uint32_t count, uint32_t now_ms) {
+    uint8_t level = lora_act_step(&c->act, count, now_ms);
+    if (level == c->shown) {
+        return;
+    }
+    c->shown = level;
+    lv_color_t color = lv_color_mix(lv_color_hex(c->on_color), lv_color_hex(THEME_FAINT), level);
+    lv_obj_set_style_text_color(c->arrow, color, 0);
+}
+
+// Every 100 ms: two loads under lora.c's state lock, nothing else unless a chevron's level changes. Comparing counts
+// (they only go up) catches a packet whatever the poll rate, so nothing on the radio path has to flag it.
+static void poll_lora_activity(lv_timer_t *timer) {
+    (void)timer;
+    uint32_t rx = 0, tx = 0;
+    shell_sources.lora_counts(&rx, &tx);
+    uint32_t now = lv_tick_get();
+    step_chevron(&tx_chevron, tx, now);
+    step_chevron(&rx_chevron, rx, now);
+}
+
+static void add_chevron(lv_obj_t *parent, lora_chevron_t *c, char const *symbol) {
+    c->arrow = add_text(parent, symbol, THEME_FAINT);
+    c->shown = 0; // faint, as created
+}
+
 // HH:MM for SNTP, by hand or a carried clock; ~HH:MM in amber for mesh time, unverified; --:-- dimmed when not set
 // (#64). Only touched when the text or the colour changes.
 static void show_clock(void) {
@@ -117,6 +156,9 @@ static void show_c6(void) {
     bool trouble = shell_sources.c6_trouble && shell_sources.c6_trouble(state, sizeof(state));
     if (!trouble) {
         lv_obj_set_hidden(c6_label, true);
+        if (lora_arrows) {
+            lv_obj_set_hidden(lora_arrows, false);
+        }
         return;
     }
     snprintf(text, sizeof(text), "C6: %s", state);
@@ -126,6 +168,10 @@ static void show_c6(void) {
         lv_obj_set_style_text_color(c6_label, lv_color_hex(down ? THEME_LINK_RED : THEME_AMBER), 0);
     }
     lv_obj_set_hidden(c6_label, false);
+    // No traffic while the C6 is away, and the long C6 text needs the room at 720 px
+    if (lora_arrows) {
+        lv_obj_set_hidden(lora_arrows, true);
+    }
 }
 
 static void refresh(lv_timer_t *timer) {
@@ -169,7 +215,15 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     lv_obj_t *wifi = add_row(right, 6);
     wifi_label     = add_text(wifi, "Wi-Fi", THEME_DIM);
     wifi_bars_create(wifi);
-    lora_label = add_text(right, "LoRa", THEME_DIM);
+    lv_obj_t *lora = add_row(right, 6);
+    lora_label     = add_text(lora, "LoRa", THEME_DIM);
+    if (shell_sources.lora_counts) {
+        lora_arrows = add_row(lora, 2);
+        add_chevron(lora_arrows, &tx_chevron, LV_SYMBOL_UP);
+        add_chevron(lora_arrows, &rx_chevron, LV_SYMBOL_DOWN);
+        poll_lora_activity(NULL); // primes both: the packets heard before the bar existed do not flash
+        lv_timer_create(poll_lora_activity, 100, NULL);
+    }
 
     refresh(NULL);
     lv_timer_create(refresh, 1000, NULL);

@@ -48,6 +48,7 @@ static uint32_t      status_at_ms;
 static uint32_t      p4_dropped;
 static uint32_t      p4_bad;
 static uint32_t      packets;
+static uint32_t      tx_packets; // sends the C6 answered OK: they went on air (#29, the status bar's TX chevron)
 static int16_t       last_rssi_x10;
 static char          last_summary[LORA_SUMMARY_MAX];
 
@@ -443,6 +444,9 @@ static void lora_task(void *arg) {
                 if (msg.u.result.for_type == LORA_MSG_SEND) {
                     portENTER_CRITICAL(&state_lock);
                     lora_tx_result(&tx, msg.u.result.code);
+                    if (msg.u.result.code == LORA_RESULT_OK) {
+                        tx_packets++;
+                    }
                     uint32_t took = now_ms() - tx_sent_ms, est = tx_airtime_ms;
                     portEXIT_CRITICAL(&state_lock);
                     // The bridge's round trip against MeshCore's airtime estimate (it gives up at 1.5 x estimate):
@@ -574,6 +578,13 @@ void lora_get_stats(lora_ui_stats_t *out) {
     portEXIT_CRITICAL(&state_lock);
 }
 
+void lora_get_counts(uint32_t *rx, uint32_t *tx_count) {
+    portENTER_CRITICAL(&state_lock);
+    *rx       = packets;
+    *tx_count = tx_packets;
+    portEXIT_CRITICAL(&state_lock);
+}
+
 static void cmd_lora(char const *args) {
     if (strcmp(args, "raw on") == 0 || strcmp(args, "raw off") == 0) {
         log_raw = args[5] == 'n';
@@ -586,16 +597,17 @@ static void cmd_lora(char const *args) {
     }
     lora_status_t st;
     bool          have;
-    uint32_t      age_s, dropped, bad;
+    uint32_t      age_s, dropped, bad, sent;
     portENTER_CRITICAL(&state_lock);
     st      = c6_status;
     have    = have_status;
     age_s   = (now_ms() - status_at_ms) / 1000;
     dropped = p4_dropped;
     bad     = p4_bad;
+    sent    = tx_packets;
     portEXIT_CRITICAL(&state_lock);
 
     char line[STATUS_LINE_MAX];
     lora_status_format(&config, &st, have, age_s, dropped, bad, line, sizeof(line));
-    console_reply("lora %s", line);
+    console_reply("lora %s | tx %lu", line, (unsigned long)sent);
 }
