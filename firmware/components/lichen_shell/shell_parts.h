@@ -44,6 +44,9 @@ void wifi_screen_open(void);
 // The same screen as the first-run Wi-Fi step: a Skip row on top; done() runs (LVGL task) after a join or a skip
 void wifi_screen_open_setup(void (*done)(void));
 
+// sd_screen.c: Settings > SD card (#99)
+void sd_screen_open(void);
+
 // setup_screens.c: first-run setup
 void setup_init(void);  // registers "fw setup reset"
 void setup_start(void); // opens the welcome on top of home unless setup_done is saved

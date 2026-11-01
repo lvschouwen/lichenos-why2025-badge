@@ -4,6 +4,12 @@ void dlg_countdown_start(dlg_countdown_t *d, uint32_t now_ms, uint32_t seconds) 
     d->start_ms = now_ms;
     d->total_ms = seconds * 1000u;
     d->decided  = false;
+    d->careful  = false;
+}
+
+void dlg_countdown_start_careful(dlg_countdown_t *d, uint32_t now_ms, uint32_t seconds) {
+    dlg_countdown_start(d, now_ms, seconds);
+    d->careful = true;
 }
 
 static dlg_result_t decide(dlg_countdown_t *d, dlg_result_t r) {
@@ -14,9 +20,12 @@ static dlg_result_t decide(dlg_countdown_t *d, dlg_result_t r) {
     return r;
 }
 
-dlg_result_t dlg_countdown_key(dlg_countdown_t *d, dlg_key_t key) {
+dlg_result_t dlg_countdown_key(dlg_countdown_t *d, dlg_key_t key, uint32_t now_ms) {
     switch (key) {
     case DLG_KEY_ENTER:
+        if (d->careful && now_ms - d->start_ms < DLG_CAREFUL_ARM_MS) {
+            return DLG_WAIT;
+        }
         return decide(d, DLG_CONFIRM);
     case DLG_KEY_ESC:
         return decide(d, DLG_CANCEL);
@@ -26,7 +35,7 @@ dlg_result_t dlg_countdown_key(dlg_countdown_t *d, dlg_key_t key) {
 }
 
 dlg_result_t dlg_countdown_tick(dlg_countdown_t *d, uint32_t now_ms) {
-    return now_ms - d->start_ms >= d->total_ms ? decide(d, DLG_CONFIRM) : DLG_WAIT;
+    return now_ms - d->start_ms >= d->total_ms ? decide(d, d->careful ? DLG_CANCEL : DLG_CONFIRM) : DLG_WAIT;
 }
 
 uint32_t dlg_countdown_left_s(dlg_countdown_t const *d, uint32_t now_ms) {

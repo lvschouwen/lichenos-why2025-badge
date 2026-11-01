@@ -26,22 +26,22 @@ static void runs_out_into_confirm(void) {
     CHECK(dlg_countdown_left_s(&d, 31000) == 0);
     // once
     CHECK(dlg_countdown_tick(&d, 32000) == DLG_WAIT);
-    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER) == DLG_WAIT);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 0) == DLG_WAIT);
 }
 
 static void keys_decide_once(void) {
     dlg_countdown_t d;
     dlg_countdown_start(&d, 0, 30);
-    CHECK(dlg_countdown_key(&d, DLG_KEY_OTHER) == DLG_WAIT);
-    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER) == DLG_CONFIRM);
-    CHECK(dlg_countdown_key(&d, DLG_KEY_ESC) == DLG_WAIT);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_OTHER, 0) == DLG_WAIT);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 0) == DLG_CONFIRM);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ESC, 0) == DLG_WAIT);
     CHECK(dlg_countdown_tick(&d, 60000) == DLG_WAIT);
 
     dlg_countdown_start(&d, 0, 30);
-    CHECK(dlg_countdown_key(&d, DLG_KEY_ESC) == DLG_CANCEL);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ESC, 0) == DLG_CANCEL);
     // cancelled: running out later restarts nothing
     CHECK(dlg_countdown_tick(&d, 60000) == DLG_WAIT);
-    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER) == DLG_WAIT);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 0) == DLG_WAIT);
 }
 
 static void time_wraps(void) {
@@ -52,10 +52,32 @@ static void time_wraps(void) {
     CHECK(dlg_countdown_tick(&d, 0xFFFFF000u + 10000u) == DLG_CONFIRM);
 }
 
+// Format (#99): nobody answering is a no, and an Enter in the first second (held over from the row) is ignored
+static void careful_runs_out_into_cancel(void) {
+    dlg_countdown_t d;
+    dlg_countdown_start_careful(&d, 1000, 15);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 1000) == DLG_WAIT);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 1000 + DLG_CAREFUL_ARM_MS - 1) == DLG_WAIT);
+    CHECK(dlg_countdown_tick(&d, 15999) == DLG_WAIT);
+    CHECK(dlg_countdown_tick(&d, 16000) == DLG_CANCEL);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 16000) == DLG_WAIT);
+
+    dlg_countdown_start_careful(&d, 1000, 15);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ESC, 1000) == DLG_CANCEL); // Esc always counts
+    dlg_countdown_start_careful(&d, 1000, 15);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 1000 + DLG_CAREFUL_ARM_MS) == DLG_CONFIRM);
+    CHECK(dlg_countdown_tick(&d, 16000) == DLG_WAIT);
+
+    // a plain countdown is not armed late: the C6 dialog takes Enter at once
+    dlg_countdown_start(&d, 1000, 15);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 1000) == DLG_CONFIRM);
+}
+
 int main(void) {
     runs_out_into_confirm();
     keys_decide_once();
     time_wraps();
+    careful_runs_out_into_cancel();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -45,15 +45,17 @@ bool shell_up(void);
 
 // An OS warning dialog over every screen (#14 T-B), e.g. "C6 (radio/Wi-Fi) not responding — restarting in 30 s".
 // The message reads "<title> <count_prefix><seconds left><count_suffix>", the hint below it. Enter confirms, Esc
-// cancels, and when the countdown runs out it confirms by itself (the keyboard may be dead). done runs once on the LVGL
-// task with the answer: keep it short (queue the work). One dialog at a time: a second call replaces the first. Safe
-// from any task, never blocks on more than the LVGL lock (2 s); false when it could not be shown.
+// cancels, and when the countdown runs out it confirms by itself (the keyboard may be dead), or cancels when careful.
+// done runs once on the LVGL task with the answer: keep it short (queue the work). One dialog at a time: a second
+// call replaces the first. Safe from any task, never blocks on more than the LVGL lock (2 s); false when it could not
+// be shown.
 typedef struct {
     char const *title;
     char const *count_prefix;
     char const *count_suffix;
     char const *hint;
     uint32_t    seconds;
+    bool        careful; // the countdown ends in a cancel and Enter counts only after a second (an erase, #99)
 } shell_dialog_t;
 typedef void (*shell_dialog_fn)(bool confirmed);
 bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done);

@@ -27,6 +27,7 @@ typedef struct {
     char     suffix[TEXT_MAX];
     char     hint[TEXT_MAX];
     uint32_t seconds;
+    bool     careful;
     shell_dialog_fn done;
 } request_t;
 
@@ -92,8 +93,9 @@ static void decided(bool confirmed) {
 
 static void on_tick(lv_timer_t *t) {
     (void)t;
-    if (dlg_countdown_tick(&countdown, now_ms()) == DLG_CONFIRM) {
-        decided(true);
+    dlg_result_t r = dlg_countdown_tick(&countdown, now_ms());
+    if (r != DLG_WAIT) {
+        decided(r == DLG_CONFIRM);
         return;
     }
     set_message();
@@ -102,7 +104,7 @@ static void on_tick(lv_timer_t *t) {
 static void on_key(lv_event_t *e) {
     uint32_t     key = lv_event_get_key(e);
     dlg_key_t    k   = key == LV_KEY_ENTER ? DLG_KEY_ENTER : key == LV_KEY_ESC ? DLG_KEY_ESC : DLG_KEY_OTHER;
-    dlg_result_t r   = dlg_countdown_key(&countdown, k);
+    dlg_result_t r   = dlg_countdown_key(&countdown, k, now_ms());
     if (r != DLG_WAIT) {
         decided(r == DLG_CONFIRM);
     }
@@ -154,7 +156,11 @@ static void build(void) {
     lv_group_add_obj(group, backdrop);
     lv_obj_add_event_cb(backdrop, on_key, LV_EVENT_KEY, NULL);
     timer = lv_timer_create(on_tick, TICK_MS, NULL);
-    dlg_countdown_start(&countdown, now_ms(), shown.seconds);
+    if (shown.careful) {
+        dlg_countdown_start_careful(&countdown, now_ms(), shown.seconds);
+    } else {
+        dlg_countdown_start(&countdown, now_ms(), shown.seconds);
+    }
     set_message();
     shell_refocus();
 }
@@ -193,6 +199,7 @@ bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done) {
     snprintf(want.suffix, sizeof(want.suffix), "%s", d->count_suffix ? d->count_suffix : "");
     snprintf(want.hint, sizeof(want.hint), "%s", d->hint ? d->hint : "");
     want.seconds = d->seconds;
+    want.careful = d->careful;
     want.done    = done;
     want_open    = true;
     want_gen++;
