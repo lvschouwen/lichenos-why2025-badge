@@ -1,6 +1,7 @@
 #pragma once
 // The message history journal on the SD card (#48): the file side of mesh_hist.c, for mesh_task.cpp only.
-// /sd/lichen/messages/log.bin is appended to; log.tmp exists only while a compaction writes it.
+// /sd/lichen/messages/log.bin is appended to; log.tmp exists only while a compaction writes it. The records are
+// encrypted with a key derived from the node's identity (#98, see mesh_hist.h).
 //
 // Threading: the _locked functions run on the mesh task with the mesh lock held and only touch memory. The file work
 // (mesh_journal_flush) runs on the mesh task after mesh_unlock(), inside one sd_begin/sd_end batch, so the screens
@@ -16,10 +17,11 @@
 extern "C" {
 #endif
 
-// Boot, before MeshCore starts: replays the journal into the store (taking lock/unlock around each store change, the
+// Boot, after MeshCore's begin() loaded the identity (prv: its private key, for the journal key, #98; not kept) and
+// before the mesh task runs: replays the journal into the store (taking lock/unlock around each store change, the
 // screens may already be reading it), compacts it when needed, and checks the card. Persistence is off (one
 // ESP_LOGW, RAM history keeps working) without a card, on a full card, or when memory or the journal fail.
-void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void));
+void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), uint8_t const *prv, size_t prv_len);
 
 // A message just added to the store (the chat's newest): incoming ones are journaled at once, outgoing ones are held
 // until their state is final

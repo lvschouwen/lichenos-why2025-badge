@@ -10,6 +10,7 @@
 #include "mesh_chat.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
+#include "mesh_hist_crypto.h"
 #include "mesh_journal.h"
 #include "channel_input.h"
 #include "mesh_prefs.h"
@@ -1351,10 +1352,6 @@ extern "C" bool mesh_start(char const *files_dir) {
     mesh_store_set_clock(mesh_epoch_now);
     bool ok = mesh_store_init(STORE_MESSAGES);
     mesh_unlock();
-    // The history from the SD card (#48) before MeshCore runs: the replayed messages are older than anything it adds
-    if (ok) {
-        mesh_journal_boot(STORE_MESSAGES, mesh_lock, mesh_unlock);
-    }
     void *tables_mem = heap_caps_malloc(sizeof(SimpleMeshTables), MALLOC_CAP_SPIRAM);
     void *mesh_mem   = heap_caps_malloc(sizeof(BadgeMesh), MALLOC_CAP_SPIRAM);
     void *ob_mem     = heap_caps_calloc(1, sizeof(ob_t), MALLOC_CAP_SPIRAM);
@@ -1378,6 +1375,12 @@ extern "C" bool mesh_start(char const *files_dir) {
     radio_driver.begin();
     n->begin();
     apply_boot_radio(n, first_boot);
+    // The history from the SD card (#48), encrypted with a key from the identity begin() just loaded (#98), before the
+    // mesh task runs: the replayed messages are older than anything MeshCore adds, which it does only in its loop
+    uint8_t prv[PRV_KEY_SIZE];
+    n->self_id.writeTo(prv, sizeof(prv)); // with room for the private key only, that is what it writes
+    mesh_journal_boot(STORE_MESSAGES, mesh_lock, mesh_unlock, prv, sizeof(prv));
+    mh_wipe(prv, sizeof(prv));
     n->setListener(&screen_feed);
     n->startPipe(); // connected, so MyMesh's replies and pushes reach us (#45)
     uint8_t const *key = n->self_id.pub_key;

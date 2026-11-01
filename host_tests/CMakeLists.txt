@@ -438,9 +438,12 @@ add_test(NAME mesh_store_test COMMAND mesh_store_test)
 add_executable(mesh_hist_test
     ${CMAKE_CURRENT_SOURCE_DIR}/mesh_hist_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_hist.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_hist_crypto.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_store.c
 )
 target_include_directories(mesh_hist_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+# The journal's encryption (#98) uses rweather's Crypto (SHA-256, AES-128) as MeshCore builds it
+target_link_libraries(mesh_hist_test PRIVATE meshcore_host)
 target_compile_options(mesh_hist_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_hist_test COMMAND mesh_hist_test)
 

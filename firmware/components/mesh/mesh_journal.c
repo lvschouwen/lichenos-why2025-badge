@@ -3,11 +3,13 @@
 #include "fw_console.h"
 #include "mesh.h"
 #include "mesh_hist.h"
+#include "mesh_hist_crypto.h"
 #include "sdcard.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "lichen_random.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -19,6 +21,7 @@
 #define LOG_PATH      SD_MESSAGES_DIR "/log.bin"
 #define TMP_PATH      SD_MESSAGES_DIR "/log.tmp"
 #define BAD_PATH      SD_MESSAGES_DIR "/log.bad" // a damaged journal as it was, kept when much followed the damage
+#define OLD_PATH      SD_MESSAGES_DIR "/log.old" // a journal this node cannot read (another key, an older format)
 #define BAD_KEEP_FROM 4096 // bytes after the first bad spot that make log.bad worth keeping
 #define TABLE_CHATS   1024 // chats a compaction tells apart (PSRAM, about 170 KB while it runs); more keep everything
 #define STAGE_BYTES   4096
@@ -30,6 +33,7 @@
 static char const TAG[] = "mesh_hist";
 
 static mesh_hist_t *hist;      // PSRAM; under the mesh lock
+static mesh_hist_crypt_t wcrypt; // the journal's keys (#98): set at boot, then only read (the salt survives compaction)
 static uint8_t     *spare;     // the buffer hist is not filling: holds out_len bytes to write while out_len > 0
 static size_t       out_len;   // mesh task only
 static uint32_t     out_records;
@@ -44,7 +48,7 @@ static void (*unlock_fn)(void);
 static volatile bool        on;
 static char const *volatile why_off = "not started";
 static volatile uint32_t    log_bytes, log_records, flushes, last_flush_s, last_flush_ms, write_errors, compactions;
-static volatile uint32_t    resyncs;
+static volatile uint32_t    resyncs, auth_failures;
 static volatile bool        compact_asked; // the mesh task compacts before its next write (boot asks when needed)
 
 static void turn_off(char const *why) {
@@ -89,15 +93,20 @@ static void work_free(work_t *w) {
     free(w->buf);
 }
 
-// Scans a whole file through on_rec; false (with *err) when it could not be read to its end
-static bool scan_file(char const *path, work_t *w, mesh_hist_rec_fn on_rec, void *ctx, mesh_hist_scan_t *scan,
-                      int *err) {
+static void random_fill(void *buf, size_t len) {
+    lichen_random_fill(buf, len);
+}
+
+// Scans a whole file through on_rec with keys c (opened by its HEAD); false (with *err) when it could not be read to
+// its end
+static bool scan_file(char const *path, work_t *w, mesh_hist_crypt_t *c, mesh_hist_rec_fn on_rec, void *ctx,
+                      mesh_hist_scan_t *scan, int *err) {
     FILE *f = fopen(path, "rb");
     if (!f) {
         *err = errno;
         return false;
     }
-    mesh_hist_scan(file_read, f, w->buf, on_rec, ctx, scan);
+    mesh_hist_scan(file_read, f, w->buf, c, on_rec, ctx, scan);
     bool failed = ferror(f);
     *err        = failed ? errno : 0;
     fclose(f);
@@ -126,7 +135,10 @@ static char const *compact_file(char const *src, mesh_hist_table_t *t, uint8_t *
         return "compaction could not start";
     }
     mesh_hist_compact_t st;
-    mesh_hist_compact(file_read, in, buf, t, keep_n, file_write, out, stage, STAGE_BYTES, &st);
+    mesh_hist_crypt_t   c = wcrypt; // the root; the HEAD opens the copy
+    mesh_hist_compact(file_read, in, buf, &c, t, keep_n, file_write, out, stage, STAGE_BYTES, &st);
+    mh_wipe(&c, sizeof(c));
+    auth_failures += st.auth_failures;
     bool ok = st.ok && !ferror(in);
     fclose(in);
     free(stage);
@@ -151,7 +163,8 @@ static char const *compact_file(char const *src, mesh_hist_table_t *t, uint8_t *
     return NULL;
 }
 
-static bool count_rec(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
+static bool count_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes, void *ctx) {
+    (void)raw;
     mesh_hist_count((mesh_hist_table_t *)ctx, r, bytes);
     return true;
 }
@@ -165,8 +178,14 @@ static char const *compact_journal(work_t *w, int *err) {
         log_bytes = log_records = 0;
         return NULL; // nothing to compact
     }
-    if (!scan_file(LOG_PATH, w, count_rec, &w->table, &scan, err)) {
+    mesh_hist_crypt_t c  = wcrypt;
+    bool              ok = scan_file(LOG_PATH, w, &c, count_rec, &w->table, &scan, err);
+    mh_wipe(&c, sizeof(c));
+    if (!ok) {
         return "journal read failed"; // compacting now would drop everything after the failed read
+    }
+    if (scan.unreadable) {
+        return "journal unreadable"; // it was readable at boot: the file was replaced meanwhile
     }
     bool kept_bad = false;
     if (scan.bad_seen && (uint64_t)st.st_size - scan.first_bad > BAD_KEEP_FROM) {
@@ -195,7 +214,8 @@ typedef struct {
 
 // Every record into the store (under the mesh lock, a record at a time: the screens may read it) and counted, so the
 // compaction decision needs no second pass
-static bool boot_rec(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
+static bool boot_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes, void *ctx) {
+    (void)raw;
     boot_ctx_t *b = (boot_ctx_t *)ctx;
     lock_fn();
     mesh_hist_replay(hist, r);
@@ -221,8 +241,11 @@ static char const *journal_files(work_t *w, int *err) {
     }
     bool have_log = stat(LOG_PATH, &st) == 0;
     if (have_log) {
-        mesh_hist_scan_t scan;
-        bool clean = scan_file(TMP_PATH, w, NULL, NULL, &scan, err) && !scan.torn && !scan.resyncs;
+        mesh_hist_scan_t  scan;
+        mesh_hist_crypt_t c     = wcrypt;
+        bool              clean = scan_file(TMP_PATH, w, &c, NULL, NULL, &scan, err) && !scan.torn && !scan.resyncs &&
+                     scan.head && !scan.auth_failures;
+        mh_wipe(&c, sizeof(c));
         if (!clean) {
             unlink(TMP_PATH);
             return NULL;
@@ -240,17 +263,58 @@ static char const *journal_files(work_t *w, int *err) {
     return NULL;
 }
 
+// A new, empty journal: its HEAD with a new salt (the keys the writer uses from now on)
+static char const *journal_fresh(int *err) {
+    uint8_t head[MESH_HIST_REC_MAX];
+    mesh_hist_crypt_new(&wcrypt);
+    size_t n  = mesh_hist_encode_head(&wcrypt, head, sizeof(head));
+    FILE  *f  = fopen(LOG_PATH, "wb");
+    bool   ok = f && n && fwrite(head, 1, n, f) == n;
+    *err      = ok ? 0 : errno;
+    if (f && fclose(f) != 0 && ok) {
+        ok   = false;
+        *err = errno;
+    }
+    if (!ok) {
+        return "new journal not written";
+    }
+    log_bytes   = (uint32_t)n;
+    log_records = 1;
+    return NULL;
+}
+
+// A journal this node cannot read is moved aside once, never deleted (another badge's card, or a new identity)
+static char const *journal_aside(int *err) {
+    unlink(OLD_PATH);
+    if (rename(LOG_PATH, OLD_PATH) != 0) {
+        *err = errno;
+        return "unreadable journal not moved aside";
+    }
+    ESP_LOGW(TAG, "journal unreadable with this node's key (another badge, a new identity or an older format): "
+                  "moved to log.old, starting a new one");
+    return journal_fresh(err);
+}
+
 // Replays log.bin into the store; asks for a compaction when the rules say so (the mesh task does it, after start)
 static char const *journal_load(work_t *w, int *err) {
     struct stat st;
     if (stat(LOG_PATH, &st) != 0) {
-        log_bytes = log_records = 0;
-        return NULL; // no journal yet
+        return journal_fresh(err); // no journal yet
     }
     boot_ctx_t       b = {.table = &w->table};
     mesh_hist_scan_t scan;
-    if (!scan_file(LOG_PATH, w, boot_rec, &b, &scan, err)) {
+    if (!scan_file(LOG_PATH, w, &wcrypt, boot_rec, &b, &scan, err)) {
         return "journal read failed";
+    }
+    if (scan.unreadable) {
+        return journal_aside(err);
+    }
+    if (!scan.head) {
+        return journal_fresh(err); // empty, or cut before its HEAD was whole: nothing in it
+    }
+    auth_failures = scan.auth_failures;
+    if (scan.auth_failures) {
+        ESP_LOGW(TAG, "journal: %lu record(s) failed authentication, dropped", (unsigned long)scan.auth_failures);
     }
     log_bytes   = clamp32((uint64_t)st.st_size);
     log_records = scan.records;
@@ -279,14 +343,18 @@ static bool boot_buffers(void) {
         hist = NULL;
         return false;
     }
-    mesh_hist_init(hist, a, MESH_HIST_PENDING);
+    mesh_hist_init(hist, a, MESH_HIST_PENDING, &wcrypt);
     return true;
 }
 
-void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void)) {
+void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), uint8_t const *prv, size_t prv_len) {
     keep_n    = keep;
     lock_fn   = lock;
     unlock_fn = unlock;
+    uint8_t root[32];
+    mesh_hist_key(root, prv, prv_len);
+    mesh_hist_crypt_init(&wcrypt, root, random_fill);
+    mh_wipe(root, sizeof(root));
     if (!boot_buffers()) {
         turn_off("no memory");
         return;
@@ -530,7 +598,7 @@ void mesh_journal_console(char const *args) {
                   "dropped %lu",
                   (unsigned)pending, (unsigned long)pending_records, (unsigned long)(pending ? now - oldest_s : 0),
                   (unsigned)out_len, (unsigned)held, (unsigned long)dropped);
-    console_reply("flushes %lu, last %s (%lu ms) | write errors %lu | compactions %lu%s", (unsigned long)flushes, last,
-                  (unsigned long)last_flush_ms, (unsigned long)write_errors, (unsigned long)compactions,
-                  compact_asked ? " (one due)" : "");
+    console_reply("flushes %lu, last %s (%lu ms) | write errors %lu | compactions %lu%s | auth failures %lu",
+                  (unsigned long)flushes, last, (unsigned long)last_flush_ms, (unsigned long)write_errors,
+                  (unsigned long)compactions, compact_asked ? " (one due)" : "", (unsigned long)auth_failures);
 }

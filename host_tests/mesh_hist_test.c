@@ -1,5 +1,7 @@
-// Host test: the message history journal on the SD card (#48): codec, scan, replay, writer, policies, compaction
+// Host test: the message history journal on the SD card (#48): codec, scan, replay, writer, policies, compaction, and
+// its encryption (#98)
 #include "mesh_hist.h"
+#include "mesh_hist_crypto.h"
 #include "mesh_outbox.h"
 
 #include <stdio.h>
@@ -17,6 +19,44 @@ static int failures;
     } while (0)
 
 // ---- helpers -------------------------------------------------------------------------------------------------------
+
+static mesh_hist_crypt_t kc; // the test journal's keys (open)
+static uint32_t          rand_ctr;
+
+static void test_rand(void *buf, size_t len) { // deterministic, never the same bytes twice in a row
+    uint8_t *p = (uint8_t *)buf;
+    for (size_t i = 0; i < len; i++) {
+        uint32_t x = ++rand_ctr * 2654435761u;
+        p[i]       = (uint8_t)(x >> 24);
+    }
+}
+
+static void test_root(uint8_t root[32], uint8_t first) {
+    uint8_t prv[64];
+    for (size_t i = 0; i < sizeof(prv); i++) {
+        prv[i] = (uint8_t)(first + i);
+    }
+    mesh_hist_key(root, prv, sizeof(prv));
+}
+
+#define ENC(r, out, cap)        mesh_hist_encode(r, &kc, out, cap)
+#define DEC(in, len, r, used)   mesh_hist_decode(in, len, &kc, r, used)
+
+// The CRC of a record changed on purpose (CRC-16/CCITT-FALSE bitwise, against the codec's table)
+static void fix_crc(uint8_t *rec) {
+    uint16_t crc  = 0xFFFF;
+    size_t   plen = rec[2] | rec[3] << 8;
+    for (size_t i = 1; i < MESH_HIST_HDR + plen; i++) {
+        if (i == 8) {
+            i = MESH_HIST_HDR; // skip the CRC field
+        }
+        crc ^= (uint16_t)(rec[i] << 8);
+        for (int b = 0; b < 8; b++) {
+            crc = (uint16_t)(crc & 0x8000 ? (crc << 1) ^ 0x1021 : crc << 1);
+        }
+    }
+    rec[8] = (uint8_t)crc, rec[9] = (uint8_t)(crc >> 8);
+}
 
 static uint8_t file[65536]; // a journal in memory
 static size_t  file_len;
@@ -51,8 +91,22 @@ static bool mem_write(void *ctx, uint8_t const *buf, size_t len) {
     return true;
 }
 
+// The root of kc, not open: a scan or compaction opens it from the journal's HEAD
+static mesh_hist_crypt_t *kcopy(void) {
+    static mesh_hist_crypt_t c;
+    c      = kc;
+    c.open = false;
+    return &c;
+}
+
+// A new journal: its HEAD first
+static void start_file(void) {
+    file_len = mesh_hist_encode_head(&kc, file, sizeof(file));
+    CHECK(file_len == MESH_HIST_HDR + 1 + MESH_HIST_SALT + MESH_HIST_CHECK);
+}
+
 static void append(mesh_hist_rec_t const *r) {
-    size_t n = mesh_hist_encode(r, file + file_len, sizeof(file) - file_len);
+    size_t n = ENC(r, file + file_len, sizeof(file) - file_len);
     CHECK(n > 0);
     file_len += n;
 }
@@ -82,9 +136,10 @@ static mesh_hist_rec_t msg_rec(mesh_chat_key_t const *k, uint32_t seq, char cons
 static mesh_hist_rec_t got[MAX_RECS];
 static size_t          got_n;
 
-static bool collect(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
-    (void)bytes, (void)ctx;
-    if (got_n < MAX_RECS) {
+// Every record but the HEAD
+static bool collect(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes, void *ctx) {
+    (void)raw, (void)bytes, (void)ctx;
+    if (r->type != MESH_HIST_HEAD && got_n < MAX_RECS) {
         got[got_n++] = *r;
     }
     return true;
@@ -92,10 +147,11 @@ static bool collect(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
 
 static mesh_hist_scan_t scan_bytes(uint8_t const *p, size_t len, size_t chunk) {
     static uint8_t   buf[MESH_HIST_SCAN_BUF];
-    mem_rd_t         rd = {.p = p, .len = len, .chunk = chunk};
-    mesh_hist_scan_t s;
-    got_n = 0;
-    mesh_hist_scan(mem_read, &rd, buf, collect, NULL, &s);
+    mem_rd_t          rd = {.p = p, .len = len, .chunk = chunk};
+    mesh_hist_scan_t  s;
+    mesh_hist_crypt_t c = kc; // the root; the journal's HEAD opens it
+    got_n               = 0;
+    mesh_hist_scan(mem_read, &rd, buf, &c, collect, NULL, &s);
     return s;
 }
 
@@ -121,9 +177,10 @@ static void codec_checks(void) {
     size_t          used = 0;
 
     in = chat_rec(&ck, "#BadgeTest");
-    size_t n = mesh_hist_encode(&in, buf, sizeof(buf));
-    CHECK(n == MESH_HIST_HDR + 2 + 10 + 1 + 10 && buf[0] == MESH_HIST_MAGIC && buf[1] == MESH_HIST_CHAT);
-    CHECK(mesh_hist_decode(buf, n, &out, &used) == MESH_HIST_OK && used == n);
+    size_t n = ENC(&in, buf, sizeof(buf));
+    CHECK(n == MESH_HIST_HDR + MESH_HIST_NONCE + 2 + 10 + 1 + 10 + MESH_HIST_TAG && buf[0] == MESH_HIST_MAGIC &&
+          buf[1] == MESH_HIST_CHAT);
+    CHECK(DEC(buf, n, &out, &used) == MESH_HIST_OK && used == n);
     CHECK(out.type == MESH_HIST_CHAT && memcmp(&out.key, &ck, sizeof(ck)) == 0 && strcmp(out.title, "#BadgeTest") == 0);
 
     // A DM message with the longest text and every field set
@@ -131,76 +188,63 @@ static void codec_checks(void) {
     memset(in.text, 'x', MESH_TEXT_MAX);
     in.text[MESH_TEXT_MAX] = '\0';
     in.outgoing = 1, in.state = MESH_OUT_DELIVERED, in.repeats = 3, in.trip_ms = 123456;
-    n = mesh_hist_encode(&in, buf, sizeof(buf));
+    n = ENC(&in, buf, sizeof(buf));
     CHECK(n > 0 && n <= MESH_HIST_REC_MAX);
-    CHECK(mesh_hist_decode(buf, n, &out, &used) == MESH_HIST_OK && used == n);
+    CHECK(DEC(buf, n, &out, &used) == MESH_HIST_OK && used == n);
     CHECK(out.seq == 0xDEADBEEF && out.key.kind == MESH_CHAT_DM && out.key.id[0] == 0xAB && out.epoch == in.epoch &&
           out.rssi_x10 == -873 && out.outgoing == 1 && out.state == MESH_OUT_DELIVERED && out.repeats == 3 &&
           out.trip_ms == 123456 && strcmp(out.text, in.text) == 0);
 
     in.type     = MESH_HIST_READ;
     in.read_seq = 42;
-    n           = mesh_hist_encode(&in, buf, sizeof(buf));
-    CHECK(mesh_hist_decode(buf, n, &out, &used) == MESH_HIST_OK && out.type == MESH_HIST_READ && out.read_seq == 42);
+    n           = ENC(&in, buf, sizeof(buf));
+    CHECK(DEC(buf, n, &out, &used) == MESH_HIST_OK && out.type == MESH_HIST_READ && out.read_seq == 42);
 
     // Too small a buffer, a bad key or type: nothing encoded
     in = msg_rec(&ck, 1, "hello");
-    CHECK(mesh_hist_encode(&in, buf, 12) == 0);
+    CHECK(ENC(&in, buf, 12) == 0);
     in.key.kind = 9;
-    CHECK(mesh_hist_encode(&in, buf, sizeof(buf)) == 0);
+    CHECK(ENC(&in, buf, sizeof(buf)) == 0);
     in      = msg_rec(&ck, 1, "hello");
     in.type = 77;
-    CHECK(mesh_hist_encode(&in, buf, sizeof(buf)) == 0);
+    CHECK(ENC(&in, buf, sizeof(buf)) == 0);
 
     // Partial records want more; any changed byte is caught by the CRC; a wrong magic is bad at once
     in = msg_rec(&ck, 7, "hello");
-    n  = mesh_hist_encode(&in, buf, sizeof(buf));
-    CHECK(mesh_hist_decode(buf, 0, &out, &used) == MESH_HIST_MORE);
-    CHECK(mesh_hist_decode(buf, 5, &out, &used) == MESH_HIST_MORE);
-    CHECK(mesh_hist_decode(buf, n - 1, &out, &used) == MESH_HIST_MORE);
+    n  = ENC(&in, buf, sizeof(buf));
+    CHECK(DEC(buf, 0, &out, &used) == MESH_HIST_MORE);
+    CHECK(DEC(buf, 5, &out, &used) == MESH_HIST_MORE);
+    CHECK(DEC(buf, n - 1, &out, &used) == MESH_HIST_MORE);
     for (size_t i = 1; i < n; i++) {
         buf[i] ^= 0x10;
-        mesh_hist_dec_t d = mesh_hist_decode(buf, n, &out, &used);
+        mesh_hist_dec_t d = DEC(buf, n, &out, &used);
         CHECK(d == MESH_HIST_BAD || (i == 2 || i == 3)); // a changed length can also read as "more"
         buf[i] ^= 0x10;
     }
     buf[0] = 0;
-    CHECK(mesh_hist_decode(buf, n, &out, &used) == MESH_HIST_BAD);
+    CHECK(DEC(buf, n, &out, &used) == MESH_HIST_BAD);
 }
 
 // A record type from a newer firmware (good CRC) is skipped, not an error
 static void unknown_type_checks(void) {
     mesh_chat_key_t ck = chan_key("public");
     mesh_hist_rec_t r  = msg_rec(&ck, 3, "hi");
-    file_len           = 0;
+    start_file();
     append(&r);
     size_t at = file_len;
     append(&r);
-    file[at + 1] = 9; // retype the second record and fix its CRC by re-encoding the header the same way
-    {
-        // CRC-16/CCITT-FALSE over type..seq and the payload, as mesh_hist.c
-        uint16_t crc  = 0xFFFF;
-        size_t   plen = file[at + 2] | file[at + 3] << 8;
-        for (size_t i = at + 1; i < at + MESH_HIST_HDR + plen; i++) {
-            if (i == at + 8) {
-                i = at + MESH_HIST_HDR; // skip the CRC field
-            }
-            crc ^= (uint16_t)(file[i] << 8);
-            for (int b = 0; b < 8; b++) {
-                crc = (uint16_t)(crc & 0x8000 ? (crc << 1) ^ 0x1021 : crc << 1);
-            }
-        }
-        file[at + 8] = (uint8_t)crc, file[at + 9] = (uint8_t)(crc >> 8);
-    }
+    file[at + 1] = 9; // retype the second record; its CRC made to match (bitwise here, by table in mesh_hist.c)
+    fix_crc(file + at);
     append(&r);
     mesh_hist_scan_t s = scan_bytes(file, file_len, 0);
-    CHECK(!s.torn && s.records == 3 && got_n == 3 && got[1].type == 9 && got[2].type == MESH_HIST_MSG);
+    CHECK(!s.torn && s.records == 4 && got_n == 3 && got[1].type == 9 && got[2].type == MESH_HIST_MSG);
 }
 
 static void scan_checks(void) {
     mesh_chat_key_t ck = chan_key("#badgetest");
-    file_len           = 0;
-    mesh_hist_rec_t r  = chat_rec(&ck, "#badgetest");
+    start_file();
+    size_t          head_len = file_len;
+    mesh_hist_rec_t r        = chat_rec(&ck, "#badgetest");
     append(&r);
     char text[40];
     for (uint32_t i = 1; i <= 100; i++) {
@@ -212,17 +256,17 @@ static void scan_checks(void) {
     size_t chunks[] = {0, 1, 7, 33, 4096};
     for (size_t c = 0; c < sizeof(chunks) / sizeof(chunks[0]); c++) {
         mesh_hist_scan_t s = scan_bytes(file, file_len, chunks[c]);
-        CHECK(!s.torn && s.records == 101 && s.good_bytes == file_len && got_n == 101);
+        CHECK(!s.torn && s.records == 102 && s.good_bytes == file_len && got_n == 101 && s.head);
         CHECK(got[100].seq == 100 && strcmp(got[100].text, "bob: message 100") == 0);
     }
     // A torn tail: the last record cut short (power lost mid-write) fails, replay stops there
     mesh_hist_scan_t s = scan_bytes(file, file_len - 3, 7);
-    CHECK(s.torn && s.records == 100 && got_n == 100 && got[99].seq == 99);
+    CHECK(s.torn && s.records == 101 && got_n == 100 && got[99].seq == 99);
     // A bad record in the middle: skipped, the scan picks up at the next record that decodes
-    size_t mid = 0, used = 0, len51 = 0;
+    size_t mid = head_len, used = 0, len51 = 0;
     for (int i = 0; i < 52; i++) {
         mesh_hist_rec_t tmp;
-        mesh_hist_decode(file + mid, file_len - mid, &tmp, &used);
+        DEC(file + mid, file_len - mid, &tmp, &used);
         if (i == 51) {
             len51 = used;
             break;
@@ -232,7 +276,7 @@ static void scan_checks(void) {
     file[mid + MESH_HIST_HDR + 3] ^= 0xFF;
     for (size_t c = 0; c < 3; c++) {
         s = scan_bytes(file, file_len, chunks[c + 1]);
-        CHECK(!s.torn && s.records == 100 && s.resyncs == 1 && s.bad_seen && s.first_bad == mid);
+        CHECK(!s.torn && s.records == 101 && s.resyncs == 1 && s.bad_seen && s.first_bad == mid);
         CHECK(s.skipped_bytes == len51 && got[50].seq == 50 && got[51].seq == 52);
     }
     file[mid + MESH_HIST_HDR + 3] ^= 0xFF;
@@ -241,17 +285,17 @@ static void scan_checks(void) {
     memcpy(saved, file + mid, sizeof(saved));
     memset(file + mid, 0, 512);
     s = scan_bytes(file, file_len, 33);
-    CHECK(!s.torn && s.resyncs == 1 && s.records < 100 && s.records > 80 && got[got_n - 1].seq == 100);
+    CHECK(!s.torn && s.resyncs == 1 && s.records < 101 && s.records > 81 && got[got_n - 1].seq == 100);
     memcpy(file + mid, saved, sizeof(saved));
     // Garbage (zeros, as a FAT cluster that was allocated but never written) at the end is torn
     memset(file + file_len, 0, 32);
     s = scan_bytes(file, file_len + 32, 0);
-    CHECK(s.torn && s.records == 101 && s.resyncs == 1 && s.skipped_bytes == 32);
+    CHECK(s.torn && s.records == 102 && s.resyncs == 1 && s.skipped_bytes == 32);
     // A bad spot longer than MESH_HIST_RESYNC_MAX ends the scan
     {
         static uint8_t big[MESH_HIST_RESYNC_MAX + 2000];
         size_t         first = 0;
-        mesh_hist_decode(file, file_len, &got[0], &first);
+        DEC(file, file_len, &got[0], &first);
         memcpy(big, file, first);
         memset(big + first, 0x55, MESH_HIST_RESYNC_MAX + 100);
         memcpy(big + first + MESH_HIST_RESYNC_MAX + 100, file + first, 200);
@@ -268,9 +312,9 @@ static void replay_checks(void) {
     static uint8_t     pend[MESH_HIST_PENDING];
     mesh_store_set_hooks(NULL, NULL);
     CHECK(mesh_store_init(3));
-    mesh_hist_init(&h, pend, sizeof(pend));
+    mesh_hist_init(&h, pend, sizeof(pend), &kc);
     mesh_chat_key_t ck = chan_key("#BadgeTest"), dk = dm_key(7);
-    file_len           = 0;
+    start_file();
     mesh_hist_rec_t r  = chat_rec(&ck, "#BadgeTest");
     append(&r);
     r = chat_rec(&dk, "@Bob");
@@ -318,15 +362,19 @@ static void replay_checks(void) {
     CHECK(mesh_store_chat(&other, m, 1, false) == 1 && strcmp(m[0].channel, "#lost") == 0);
 }
 
+// The pending records behind a HEAD, as they will be in the file
 static void decode_pending(mesh_hist_t const *h) {
-    scan_bytes(h->buf, h->len, 0);
+    static uint8_t j[MESH_HIST_PENDING + 64];
+    size_t         n = mesh_hist_encode_head(&kc, j, sizeof(j));
+    memcpy(j + n, h->buf, h->len);
+    scan_bytes(j, n + h->len, 0);
 }
 
 static void writer_checks(void) {
     static mesh_hist_t h;
     static uint8_t     pend[MESH_HIST_PENDING], fresh[MESH_HIST_PENDING];
     mesh_store_init(5);
-    mesh_hist_init(&h, pend, sizeof(pend));
+    mesh_hist_init(&h, pend, sizeof(pend), &kc);
     mesh_chat_key_t ck = chan_key("#badgetest"), dk = dm_key(1);
 
     // Incoming: CHAT once, then MSG; the first record starts the 60 s clock
@@ -421,7 +469,7 @@ static void writer_checks(void) {
     CHECK(got[got_n - 1].seq == 100 && got[got_n - 1].state == MESH_OUT_FAILED);
 
     // A full buffer drops records and counts them
-    mesh_hist_init(&h, pend, 100);
+    mesh_hist_init(&h, pend, 140, &kc);
     m.seq = 1;
     strcpy(m.channel, "#badgetest");
     CHECK(mesh_hist_add(&h, &ck, &m, 1)); // CHAT + MSG, about 90 bytes
@@ -464,7 +512,7 @@ static mesh_hist_chat_t slots[16];
 
 static void compact_checks(void) {
     mesh_chat_key_t a = chan_key("#a"), b = dm_key(2);
-    file_len          = 0;
+    start_file();
     mesh_hist_rec_t r = chat_rec(&a, "#a");
     append(&r);
     r = chat_rec(&b, "@?");
@@ -497,7 +545,7 @@ static void compact_checks(void) {
     {
         size_t          at = 0, used;
         mesh_hist_rec_t tmp;
-        while (at < file_len && mesh_hist_decode(file + at, file_len - at, &tmp, &used) == MESH_HIST_OK) {
+        while (at < file_len && DEC(file + at, file_len - at, &tmp, &used) == MESH_HIST_OK) {
             mesh_hist_count(&t, &tmp, used);
             at += used;
         }
@@ -512,8 +560,9 @@ static void compact_checks(void) {
     out_len            = 0;
     fail_write_after   = -1;
     rd.pos             = 0;
-    mesh_hist_compact(mem_read, &rd, buf, &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
-    CHECK(st.ok && st.bytes_out == out_len && st.records_out == 2 + 3 + 2);
+    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    CHECK(st.ok && st.bytes_out == out_len && st.records_out == 1 + 2 + 3 + 2); // HEAD, CHATs, messages
+    CHECK(memcmp(out_file, file, MESH_HIST_HDR + 1 + MESH_HIST_SALT + MESH_HIST_CHECK) == 0); // the same HEAD
     s = scan_bytes(out_file, out_len, 0);
     CHECK(!s.torn && got_n == 7);
     // Journal order; each chat's CHAT (with its last title) just before its first kept message; a0..a2 dropped
@@ -521,7 +570,7 @@ static void compact_checks(void) {
     CHECK(strcmp(got[1].text, "b0") == 0 && strcmp(got[2].text, "b1") == 0);
     CHECK(got[3].type == MESH_HIST_CHAT && strcmp(got[3].title, "#A") == 0);
     CHECK(strcmp(got[4].text, "a3") == 0 && got[4].seq == 6 && strcmp(got[6].text, "a5") == 0);
-    // The result replays to the same newest messages, and compacting it again changes nothing
+    // Compacting the result again keeps it as it is (the CHAT records get new nonces, the size stays)
     uint64_t first = out_len;
     for (size_t i = 0; i < 16; i++) {
         slots[i].used = false;
@@ -534,14 +583,14 @@ static void compact_checks(void) {
     file_len = out_len;
     rd       = (mem_rd_t){.p = file, .len = file_len};
     out_len  = 0;
-    mesh_hist_compact(mem_read, &rd, buf, &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
-    CHECK(st.ok && out_len == first && memcmp(out_file, file, out_len) == 0);
+    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    CHECK(st.ok && out_len == first);
 
     // A write that fails is reported
     rd.pos           = 0;
     out_len          = 0;
     fail_write_after = 0;
-    mesh_hist_compact(mem_read, &rd, buf, &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
     CHECK(!st.ok);
     fail_write_after = -1;
 
@@ -554,7 +603,7 @@ static void compact_checks(void) {
     CHECK(t.n == 1 && t.overflow);
     rd.pos  = 0;
     out_len = 0;
-    mesh_hist_compact(mem_read, &rd, buf, &t, 1, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 1, mem_write, NULL, stage, sizeof(stage), &st);
     CHECK(st.ok);
     s = scan_bytes(out_file, out_len, 0);
     CHECK(!s.torn && got_n == 2 + 4); // the tracked chat (b): CHAT + 1 message; the other: CHAT + all 3 of its messages
@@ -564,6 +613,7 @@ static void compact_checks(void) {
 static void compact_dup_checks(void) {
     mesh_chat_key_t a = chan_key("#a");
     file_len          = 0;
+    start_file();
     mesh_hist_rec_t r = chat_rec(&a, "#a");
     append(&r);
     for (uint32_t seq = 1; seq <= 4; seq++) {
@@ -582,7 +632,7 @@ static void compact_dup_checks(void) {
     mesh_hist_table_init(&t, slots, 16);
     size_t          at = 0, used;
     mesh_hist_rec_t tmp;
-    while (at < file_len && mesh_hist_decode(file + at, file_len - at, &tmp, &used) == MESH_HIST_OK) {
+    while (at < file_len && DEC(file + at, file_len - at, &tmp, &used) == MESH_HIST_OK) {
         mesh_hist_count(&t, &tmp, used);
         at += used;
     }
@@ -596,7 +646,7 @@ static void compact_dup_checks(void) {
     mesh_hist_compact_t st;
     mem_rd_t            rd = {.p = file, .len = file_len};
     out_len                = 0;
-    mesh_hist_compact(mem_read, &rd, buf, &t, 2, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 2, mem_write, NULL, stage, sizeof(stage), &st);
     mesh_hist_scan_t s = scan_bytes(out_file, out_len, 0);
     // keep 2: messages 5 and 6, with both copies of 5 (the replay keeps the newest)
     CHECK(st.ok && !s.torn && got_n == 4 && got[1].seq == 5 && got[2].seq == 6 && got[3].seq == 5 &&
@@ -606,7 +656,7 @@ static void compact_dup_checks(void) {
 static void forget_checks(void) {
     static mesh_hist_t h;
     static uint8_t     pend[1024];
-    mesh_hist_init(&h, pend, sizeof(pend));
+    mesh_hist_init(&h, pend, sizeof(pend), &kc);
     mesh_chat_key_t ck = chan_key("#a");
     mesh_msg_t      m;
     memset(&m, 0, sizeof(m));
@@ -619,7 +669,110 @@ static void forget_checks(void) {
     CHECK(h.pending_records == 5);
 }
 
+static bool has_bytes(uint8_t const *hay, size_t n, char const *needle) {
+    size_t m = strlen(needle);
+    for (size_t i = 0; i + m <= n; i++) {
+        if (memcmp(hay + i, needle, m) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The encryption (#98)
+static void crypto_checks(void) {
+    // Key derivation: SHA-256("lichen-journal-v1" | prv), prv = 00 01 .. 3f (python hashlib)
+    static uint8_t const KEY_VECTOR[32] = {0x0f, 0x23, 0x66, 0x80, 0x7d, 0x39, 0x6f, 0x7f, 0x94, 0x22, 0x30,
+                                           0x1e, 0x93, 0x58, 0x8e, 0xff, 0x7b, 0xa3, 0x5e, 0xdb, 0x7b, 0x42,
+                                           0x4b, 0x0e, 0x22, 0xed, 0x8b, 0x85, 0x03, 0x28, 0xd2, 0x08};
+    uint8_t              root[32];
+    test_root(root, 0);
+    CHECK(memcmp(root, KEY_VECTOR, 32) == 0);
+
+    // The text is nowhere in the record; the same message written twice gets two nonces (rewritten outgoing copies
+    // share a seq), and both read back
+    mesh_chat_key_t ck = chan_key("#secret-channel");
+    mesh_hist_rec_t r  = msg_rec(&ck, 42, "alice: meet at the north gate");
+    uint8_t         a[MESH_HIST_REC_MAX], b[MESH_HIST_REC_MAX];
+    size_t          na = ENC(&r, a, sizeof(a)), nb = ENC(&r, b, sizeof(b)), used;
+    CHECK(na == nb && na > 0 && memcmp(a, b, na) != 0);
+    CHECK(memcmp(a + MESH_HIST_HDR, b + MESH_HIST_HDR, MESH_HIST_NONCE) != 0);
+    CHECK(!has_bytes(a, na, "north gate") && !has_bytes(a, na, "secret") && !has_bytes(a, na, "alice"));
+    mesh_hist_rec_t out;
+    CHECK(DEC(a, na, &out, &used) == MESH_HIST_OK && strcmp(out.text, r.text) == 0 && out.seq == 42);
+    CHECK(DEC(b, nb, &out, &used) == MESH_HIST_OK && strcmp(out.key.chan, "#secret-channel") == 0);
+    mesh_hist_rec_t chat = chat_rec(&ck, "#Secret-Channel");
+    na                   = ENC(&chat, a, sizeof(a));
+    CHECK(!has_bytes(a, na, "ecret"));
+
+    // A changed ciphertext, nonce, tag or seq (the CRC made to match) fails the tag: AUTH, not BAD
+    na = ENC(&r, a, sizeof(a));
+    size_t const spots[] = {4, MESH_HIST_HDR, MESH_HIST_HDR + MESH_HIST_NONCE + 3, na - 1};
+    for (size_t i = 0; i < sizeof(spots) / sizeof(spots[0]); i++) {
+        memcpy(b, a, na);
+        b[spots[i]] ^= 0x01;
+        fix_crc(b);
+        CHECK(DEC(b, na, &out, &used) == MESH_HIST_AUTH && used == na);
+    }
+    // Without open keys a record is AUTH too
+    CHECK(mesh_hist_decode(a, na, NULL, &out, &used) == MESH_HIST_AUTH);
+
+    // A scan drops and counts a record that fails its tag, and goes on
+    start_file();
+    append(&r);
+    size_t at = file_len;
+    append(&r);
+    file[file_len - 1] ^= 0x80;
+    fix_crc(file + at);
+    append(&r);
+    mesh_hist_scan_t s = scan_bytes(file, file_len, 0);
+    CHECK(!s.torn && s.head && !s.unreadable && s.auth_failures == 1 && got_n == 2 && s.resyncs == 0);
+
+    // Another node's key: the HEAD's check does not match, the journal is unreadable (nothing decoded)
+    mesh_hist_crypt_t other;
+    uint8_t           root2[32];
+    test_root(root2, 1);
+    mesh_hist_crypt_init(&other, root2, test_rand);
+    mesh_hist_crypt_t saved = kc;
+    kc                      = other; // scan_bytes scans with kc's root
+    s                       = scan_bytes(file, file_len, 0);
+    CHECK(s.unreadable && !s.head && got_n == 0);
+    kc = saved;
+    // A journal of the plaintext format (no HEAD; its records do not authenticate either) is unreadable
+    s = scan_bytes(file + MESH_HIST_HDR + 1 + MESH_HIST_SALT + MESH_HIST_CHECK,
+                   file_len - (MESH_HIST_HDR + 1 + MESH_HIST_SALT + MESH_HIST_CHECK), 0);
+    CHECK(s.unreadable && got_n == 0);
+    // A HEAD of a newer version is not read either
+    uint8_t head[64];
+    size_t  hn = mesh_hist_encode_head(&kc, head, sizeof(head));
+    head[MESH_HIST_HDR] = MESH_HIST_VERSION + 1;
+    fix_crc(head);
+    s = scan_bytes(head, hn, 0);
+    CHECK(s.unreadable);
+    // Keys from a salt open only with its check value; a new journal gets a new salt
+    mesh_hist_crypt_t c;
+    mesh_hist_crypt_init(&c, root, test_rand);
+    CHECK(!c.open && mesh_hist_encode_head(&c, head, sizeof(head)) == 0 && ENC(&r, a, 0) == 0);
+    mesh_hist_crypt_new(&c);
+    uint8_t salt1[MESH_HIST_SALT];
+    memcpy(salt1, c.salt, sizeof(salt1));
+    mesh_hist_crypt_new(&c);
+    CHECK(c.open && memcmp(salt1, c.salt, sizeof(salt1)) != 0);
+    // The longest message still fits a record
+    mesh_chat_key_t long_key = chan_key("#0123456789012345678901234567890");
+    r                        = msg_rec(&long_key, 1, "");
+    memset(r.text, 0xC3, MESH_TEXT_MAX);
+    r.text[MESH_TEXT_MAX] = '\0';
+    na                    = ENC(&r, a, sizeof(a));
+    CHECK(na > 0 && na <= MESH_HIST_REC_MAX);
+}
+
 int main(void) {
+    uint8_t root[32];
+    test_root(root, 0);
+    mesh_hist_crypt_init(&kc, root, test_rand);
+    mesh_hist_crypt_new(&kc);
+    crypto_checks();
     codec_checks();
     unknown_type_checks();
     scan_checks();

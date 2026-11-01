@@ -1,5 +1,6 @@
 #include "mesh_hist.h"
 
+#include "mesh_hist_crypto.h"
 #include "mesh_outbox.h"
 
 #include <string.h>
@@ -168,13 +169,94 @@ static void r_key(rd_t *r, mesh_chat_key_t *k) {
     }
 }
 
-size_t mesh_hist_encode(mesh_hist_rec_t const *rec, uint8_t *out, size_t cap) {
-    if (cap < MESH_HIST_HDR) {
+// ---- keys (#98) ----------------------------------------------------------------------------------------------------
+
+static char const KEY_LABEL[] = "lichen-journal-v1";
+
+void mesh_hist_key(uint8_t root[32], uint8_t const *prv, size_t prv_len) {
+    mh_sha256(root, KEY_LABEL, sizeof(KEY_LABEL) - 1, prv, prv_len);
+}
+
+void mesh_hist_crypt_init(mesh_hist_crypt_t *c, uint8_t const root[32], void (*rand)(void *buf, size_t len)) {
+    memset(c, 0, sizeof(*c));
+    memcpy(c->root, root, sizeof(c->root));
+    c->have_root = true;
+    c->rand      = rand;
+}
+
+static void check_value(mesh_hist_crypt_t const *c, uint8_t const salt[MESH_HIST_SALT], uint8_t out[MESH_HIST_CHECK]) {
+    uint8_t mac[32];
+    mh_hmac(mac, c->root, sizeof(c->root), "check", 5, salt, MESH_HIST_SALT, NULL, 0);
+    memcpy(out, mac, MESH_HIST_CHECK);
+    mh_wipe(mac, sizeof(mac));
+}
+
+static void file_keys(mesh_hist_crypt_t *c, uint8_t const salt[MESH_HIST_SALT]) {
+    uint8_t k[32];
+    memcpy(c->salt, salt, MESH_HIST_SALT);
+    mh_hmac(k, c->root, sizeof(c->root), "enc", 3, salt, MESH_HIST_SALT, NULL, 0);
+    memcpy(c->enc, k, sizeof(c->enc));
+    mh_hmac(c->mac, c->root, sizeof(c->root), "mac", 3, salt, MESH_HIST_SALT, NULL, 0);
+    mh_wipe(k, sizeof(k));
+    c->open = true;
+}
+
+void mesh_hist_crypt_new(mesh_hist_crypt_t *c) {
+    uint8_t salt[MESH_HIST_SALT];
+    c->rand(salt, sizeof(salt));
+    file_keys(c, salt);
+}
+
+static bool same16(uint8_t const *a, uint8_t const *b) { // constant time
+    uint8_t diff = 0;
+    for (size_t i = 0; i < 16; i++) {
+        diff |= a[i] ^ b[i];
+    }
+    return diff == 0;
+}
+
+bool mesh_hist_crypt_open(mesh_hist_crypt_t *c, uint8_t const salt[MESH_HIST_SALT],
+                          uint8_t const check[MESH_HIST_CHECK]) {
+    uint8_t want[MESH_HIST_CHECK];
+    c->open = false;
+    if (!c->have_root) {
+        return false;
+    }
+    check_value(c, salt, want);
+    if (!same16(want, check)) {
+        return false;
+    }
+    file_keys(c, salt);
+    return true;
+}
+
+// ---- codec ---------------------------------------------------------------------------------------------------------
+
+// The plaintext header around a payload of plen bytes already at out + MESH_HIST_HDR
+static size_t frame(uint8_t *out, uint8_t type, size_t plen, uint32_t seq) {
+    out[0] = MESH_HIST_MAGIC;
+    out[1] = type;
+    put16(out + 2, (uint16_t)plen);
+    put32(out + 4, seq);
+    uint16_t crc = crc16(0xFFFF, out + 1, 7);
+    put16(out + 8, crc16(crc, out + MESH_HIST_HDR, plen));
+    return MESH_HIST_HDR + plen;
+}
+
+size_t mesh_hist_encode_head(mesh_hist_crypt_t const *c, uint8_t *out, size_t cap) {
+    size_t plen = 1 + MESH_HIST_SALT + MESH_HIST_CHECK;
+    if (!c || !c->open || cap < MESH_HIST_HDR + plen) {
         return 0;
     }
-    size_t room = cap - MESH_HIST_HDR < MESH_HIST_REC_MAX - MESH_HIST_HDR ? cap - MESH_HIST_HDR
-                                                                         : MESH_HIST_REC_MAX - MESH_HIST_HDR;
-    wr_t w = {.p = out + MESH_HIST_HDR, .cap = room};
+    out[MESH_HIST_HDR] = MESH_HIST_VERSION;
+    memcpy(out + MESH_HIST_HDR + 1, c->salt, MESH_HIST_SALT);
+    check_value(c, c->salt, out + MESH_HIST_HDR + 1 + MESH_HIST_SALT);
+    return frame(out, MESH_HIST_HEAD, plen, 0);
+}
+
+// The record's plain payload; 0 when it does not fit in cap or the key is not valid
+static size_t plain_payload(mesh_hist_rec_t const *rec, uint8_t *p, size_t cap) {
+    wr_t w = {.p = p, .cap = cap};
     w_key(&w, &rec->key);
     switch (rec->type) {
     case MESH_HIST_CHAT:
@@ -195,19 +277,89 @@ size_t mesh_hist_encode(mesh_hist_rec_t const *rec, uint8_t *out, size_t cap) {
     default:
         return 0;
     }
-    if (w.bad) {
-        return 0;
-    }
-    out[0] = MESH_HIST_MAGIC;
-    out[1] = rec->type;
-    put16(out + 2, (uint16_t)w.n);
-    put32(out + 4, rec->seq);
-    uint16_t crc = crc16(0xFFFF, out + 1, 7);
-    put16(out + 8, crc16(crc, out + MESH_HIST_HDR, w.n));
-    return MESH_HIST_HDR + w.n;
+    return w.bad ? 0 : w.n;
 }
 
-mesh_hist_dec_t mesh_hist_decode(uint8_t const *in, size_t len, mesh_hist_rec_t *rec, size_t *used) {
+// The tag over type | seq | nonce | ciphertext (the payload up to the tag)
+static void record_tag(mesh_hist_crypt_t const *c, uint8_t type, uint32_t seq, uint8_t const *p, size_t n,
+                       uint8_t tag[MESH_HIST_TAG]) {
+    uint8_t ad[5], mac[32];
+    ad[0] = type;
+    put32(ad + 1, seq);
+    mh_hmac(mac, c->mac, sizeof(c->mac), ad, sizeof(ad), p, n, NULL, 0);
+    memcpy(tag, mac, MESH_HIST_TAG);
+}
+
+static void record_iv(uint32_t seq, uint8_t const nonce[MESH_HIST_NONCE], uint8_t iv[12]) {
+    put32(iv, seq);
+    memcpy(iv + 4, nonce, MESH_HIST_NONCE);
+}
+
+size_t mesh_hist_encode(mesh_hist_rec_t const *rec, mesh_hist_crypt_t const *c, uint8_t *out, size_t cap) {
+    size_t const over = MESH_HIST_HDR + MESH_HIST_NONCE + MESH_HIST_TAG;
+    if (!c || !c->open || cap <= over) {
+        return 0;
+    }
+    size_t   room = (cap < MESH_HIST_REC_MAX ? cap : MESH_HIST_REC_MAX) - over;
+    uint8_t *p    = out + MESH_HIST_HDR;
+    size_t   n    = plain_payload(rec, p + MESH_HIST_NONCE, room);
+    if (n == 0) {
+        return 0;
+    }
+    uint8_t iv[12];
+    c->rand(p, MESH_HIST_NONCE);
+    record_iv(rec->seq, p, iv);
+    mh_aes128_ctr(c->enc, iv, p + MESH_HIST_NONCE, n);
+    record_tag(c, rec->type, rec->seq, p, MESH_HIST_NONCE + n, p + MESH_HIST_NONCE + n);
+    return frame(out, rec->type, MESH_HIST_NONCE + n + MESH_HIST_TAG, rec->seq);
+}
+
+static mesh_hist_dec_t parse_plain(uint8_t const *p, size_t plen, mesh_hist_rec_t *rec) {
+    rd_t r = {.p = p, .len = plen};
+    switch (rec->type) {
+    case MESH_HIST_CHAT:
+        r_key(&r, &rec->key);
+        r_str(&r, rec->title, MESH_CHANNEL_MAX);
+        break;
+    case MESH_HIST_MSG:
+        r_key(&r, &rec->key);
+        rec->epoch    = r32(&r);
+        rec->rssi_x10 = (int16_t)r16(&r);
+        rec->outgoing = r8(&r) & 1;
+        rec->state    = r8(&r);
+        rec->repeats  = r8(&r);
+        rec->trip_ms  = r32(&r);
+        r_str(&r, rec->text, MESH_TEXT_MAX);
+        break;
+    default: // READ
+        r_key(&r, &rec->key);
+        rec->read_seq = r32(&r);
+        break;
+    }
+    return r.bad ? MESH_HIST_AUTH : MESH_HIST_OK; // a good tag over a payload that does not parse: not ours either
+}
+
+// Checks the tag, then decrypts into a scratch copy and parses it
+static mesh_hist_dec_t decrypt(uint8_t const *p, size_t plen, mesh_hist_crypt_t const *c, mesh_hist_rec_t *rec) {
+    if (!c || !c->open || plen < MESH_HIST_NONCE + MESH_HIST_TAG) {
+        return MESH_HIST_AUTH;
+    }
+    size_t  n = plen - MESH_HIST_NONCE - MESH_HIST_TAG;
+    uint8_t tag[MESH_HIST_TAG], iv[12], plain[MESH_HIST_REC_MAX];
+    record_tag(c, rec->type, rec->seq, p, MESH_HIST_NONCE + n, tag);
+    if (!same16(tag, p + MESH_HIST_NONCE + n)) {
+        return MESH_HIST_AUTH;
+    }
+    memcpy(plain, p + MESH_HIST_NONCE, n);
+    record_iv(rec->seq, p, iv);
+    mh_aes128_ctr(c->enc, iv, plain, n);
+    mesh_hist_dec_t d = parse_plain(plain, n, rec);
+    mh_wipe(plain, n);
+    return d;
+}
+
+mesh_hist_dec_t mesh_hist_decode(uint8_t const *in, size_t len, mesh_hist_crypt_t const *c, mesh_hist_rec_t *rec,
+                                 size_t *used) {
     if (len == 0) {
         return MESH_HIST_MORE;
     }
@@ -229,33 +381,30 @@ mesh_hist_dec_t mesh_hist_decode(uint8_t const *in, size_t len, mesh_hist_rec_t 
         return MESH_HIST_BAD;
     }
     memset(rec, 0, sizeof(*rec));
-    rec->type = in[1];
-    rec->seq  = get32(in + 4);
-    *used     = MESH_HIST_HDR + plen;
-    rd_t r    = {.p = in + MESH_HIST_HDR, .len = plen};
+    rec->type          = in[1];
+    rec->seq           = get32(in + 4);
+    *used              = MESH_HIST_HDR + plen;
+    uint8_t const *p   = in + MESH_HIST_HDR;
     switch (rec->type) {
+    case MESH_HIST_HEAD: {
+        rd_t           r    = {.p = p, .len = plen};
+        uint8_t        ver  = r8(&r);
+        uint8_t const *salt = r_bytes(&r, MESH_HIST_SALT);
+        uint8_t const *chk  = r_bytes(&r, MESH_HIST_CHECK);
+        if (r.bad || ver != MESH_HIST_VERSION) {
+            return r.bad ? MESH_HIST_BAD : MESH_HIST_AUTH; // a newer journal version: unreadable here
+        }
+        memcpy(rec->salt, salt, MESH_HIST_SALT);
+        memcpy(rec->check, chk, MESH_HIST_CHECK);
+        return MESH_HIST_OK;
+    }
     case MESH_HIST_CHAT:
-        r_key(&r, &rec->key);
-        r_str(&r, rec->title, MESH_CHANNEL_MAX);
-        break;
     case MESH_HIST_MSG:
-        r_key(&r, &rec->key);
-        rec->epoch    = r32(&r);
-        rec->rssi_x10 = (int16_t)r16(&r);
-        rec->outgoing = r8(&r) & 1;
-        rec->state    = r8(&r);
-        rec->repeats  = r8(&r);
-        rec->trip_ms  = r32(&r);
-        r_str(&r, rec->text, MESH_TEXT_MAX);
-        break;
     case MESH_HIST_READ:
-        r_key(&r, &rec->key);
-        rec->read_seq = r32(&r);
-        break;
+        return decrypt(p, plen, c, rec);
     default:
         return MESH_HIST_OK; // a newer firmware's record: skipped
     }
-    return r.bad ? MESH_HIST_BAD : MESH_HIST_OK;
 }
 
 // A bad spot: skip to the next magic byte; a record that decodes there (CRC and all) ends the skip
@@ -275,8 +424,32 @@ static void scan_bad(mesh_hist_scan_t *out, uint8_t const *buf, size_t have, siz
     } while (*off < have && buf[*off] != MESH_HIST_MAGIC);
 }
 
-void mesh_hist_scan(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_rec_fn on_rec, void *ctx,
-                    mesh_hist_scan_t *out) {
+// A whole record (decoded, or failing its tag): false when the scan must stop
+static bool scan_good(mesh_hist_scan_t *out, mesh_hist_dec_t d, mesh_hist_rec_t const *rec, mesh_hist_crypt_t *c,
+                      uint8_t const *raw, size_t used, mesh_hist_rec_fn on_rec, void *ctx) {
+    if (rec->type == MESH_HIST_HEAD && d == MESH_HIST_OK) {
+        if (!c || !mesh_hist_crypt_open(c, rec->salt, rec->check)) {
+            out->unreadable = true; // another node's journal, or one from before a new identity
+            return false;
+        }
+        out->head = true;
+    } else if (!out->head) {
+        out->unreadable = true; // no HEAD first: a plaintext journal of an older build, or not ours
+        return false;
+    }
+    if (d == MESH_HIST_AUTH) {
+        out->auth_failures++;
+        return true;
+    }
+    if (on_rec && !on_rec(rec, raw, used, ctx)) {
+        out->stopped = true;
+        return false;
+    }
+    return true;
+}
+
+void mesh_hist_scan(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_crypt_t *c, mesh_hist_rec_fn on_rec,
+                    void *ctx, mesh_hist_scan_t *out) {
     mesh_hist_rec_t rec;
     size_t          have = 0, off = 0;
     uint64_t        base = 0, skip_from = 0; // base: the file offset of buf[0]
@@ -284,17 +457,17 @@ void mesh_hist_scan(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_
     memset(out, 0, sizeof(*out));
     for (;;) {
         size_t          used = 0;
-        mesh_hist_dec_t d    = mesh_hist_decode(buf + off, have - off, &rec, &used);
-        if (d == MESH_HIST_OK) {
+        mesh_hist_dec_t d    = mesh_hist_decode(buf + off, have - off, c, &rec, &used);
+        if (d == MESH_HIST_OK || d == MESH_HIST_AUTH) {
             if (skipping) {
                 skipping = false;
                 out->skipped_bytes += base + off - skip_from;
             }
+            uint8_t const *raw = buf + off;
             off += used;
             out->good_bytes = base + off;
             out->records++;
-            if (on_rec && !on_rec(&rec, used, ctx)) {
-                out->stopped = true;
+            if (!scan_good(out, d, &rec, c, raw, used, on_rec, ctx)) {
                 return;
             }
             continue;
@@ -326,15 +499,16 @@ void mesh_hist_scan(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_
 
 // ---- the writer ----------------------------------------------------------------------------------------------------
 
-void mesh_hist_init(mesh_hist_t *h, uint8_t *buf, size_t cap) {
+void mesh_hist_init(mesh_hist_t *h, uint8_t *buf, size_t cap, mesh_hist_crypt_t const *crypt) {
     memset(h, 0, sizeof(*h));
-    h->buf = buf;
-    h->cap = cap;
+    h->buf   = buf;
+    h->cap   = cap;
+    h->crypt = crypt;
 }
 
 static bool emit(mesh_hist_t *h, mesh_hist_rec_t const *rec, uint32_t now_s) {
     uint8_t tmp[MESH_HIST_REC_MAX];
-    size_t  n = mesh_hist_encode(rec, tmp, sizeof(tmp));
+    size_t  n = mesh_hist_encode(rec, h->crypt, tmp, sizeof(tmp));
     if (n == 0 || h->len + n > h->cap) {
         h->dropped++;
         return false;
@@ -659,7 +833,7 @@ void mesh_hist_count(mesh_hist_table_t *t, mesh_hist_rec_t const *r, size_t byte
 
 static size_t chat_rec_bytes(mesh_hist_chat_t const *c) {
     size_t key = c->key.kind == MESH_CHAT_DM ? 1 + 6 : 2 + strlen(c->key.chan);
-    return MESH_HIST_HDR + key + 1 + strlen(c->title);
+    return MESH_HIST_HDR + MESH_HIST_NONCE + MESH_HIST_TAG + key + 1 + strlen(c->title);
 }
 
 uint64_t mesh_hist_live_bytes(mesh_hist_table_t const *t, size_t keep) {
@@ -683,8 +857,10 @@ bool mesh_hist_space_ok(uint64_t free_bytes, uint64_t log_bytes) {
 }
 
 typedef struct {
+    mesh_hist_crypt_t   *crypt;
     mesh_hist_table_t   *t;
     size_t               keep;
+    bool                 head_written;
     mesh_hist_write_fn   write;
     void                *wctx;
     uint8_t             *out;
@@ -692,7 +868,8 @@ typedef struct {
     mesh_hist_compact_t *st;
 } compact_ctx_t;
 
-static bool stage(compact_ctx_t *c, mesh_hist_rec_t const *rec) {
+// Room for one more record in the staging buffer
+static bool stage_room(compact_ctx_t *c) {
     if (c->out_cap - c->out_len < MESH_HIST_REC_MAX) {
         if (!c->write(c->wctx, c->out, c->out_len)) {
             c->st->ok = false;
@@ -700,22 +877,47 @@ static bool stage(compact_ctx_t *c, mesh_hist_rec_t const *rec) {
         }
         c->out_len = 0;
     }
-    size_t n = mesh_hist_encode(rec, c->out + c->out_len, c->out_cap - c->out_len);
-    c->out_len += n;
-    c->st->bytes_out += n;
-    c->st->records_out += n ? 1 : 0;
     return true;
 }
 
-static bool compact_rec(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
+static void staged(compact_ctx_t *c, size_t n) {
+    c->out_len += n;
+    c->st->bytes_out += n;
+    c->st->records_out += n ? 1 : 0;
+}
+
+// A record as it is in the journal (same nonce, same ciphertext)
+static bool stage_raw(compact_ctx_t *c, uint8_t const *raw, size_t n) {
+    if (!stage_room(c)) {
+        return false;
+    }
+    memcpy(c->out + c->out_len, raw, n);
+    staged(c, n);
+    return true;
+}
+
+// A new record (a chat's CHAT with its last title), encrypted with the journal's keys and a fresh nonce
+static bool stage(compact_ctx_t *c, mesh_hist_rec_t const *rec) {
+    if (!stage_room(c)) {
+        return false;
+    }
+    staged(c, mesh_hist_encode(rec, c->crypt, c->out + c->out_len, c->out_cap - c->out_len));
+    return true;
+}
+
+static bool compact_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes, void *ctx) {
     compact_ctx_t *c = (compact_ctx_t *)ctx;
-    (void)bytes;
+    if (r->type == MESH_HIST_HEAD) {
+        bool first      = !c->head_written;
+        c->head_written = true;
+        return !first || stage_raw(c, raw, bytes); // the same salt: the writer's keys stay valid
+    }
     if (r->type != MESH_HIST_CHAT && r->type != MESH_HIST_MSG) {
         return true; // READ records go
     }
     mesh_hist_chat_t *slot = table_slot(c->t, &r->key, false);
     if (!slot) {
-        return stage(c, r); // a chat the table had no room for: all of its records stay
+        return stage_raw(c, raw, bytes); // a chat the table had no room for: all of its records stay
     }
     if (r->type == MESH_HIST_CHAT) {
         return true; // written once, before its first kept message, with its last title
@@ -729,6 +931,7 @@ static bool compact_rec(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
         mesh_hist_rec_t chat;
         memset(&chat, 0, sizeof(chat));
         chat.type = MESH_HIST_CHAT;
+        chat.seq  = r->seq; // a seq of its own for the nonce's counter block, next to the random nonce
         chat.key  = slot->key;
         memcpy(chat.title, slot->title[0] ? slot->title : slot->key.chan, sizeof(chat.title));
         if (!chat.title[0]) {
@@ -739,11 +942,12 @@ static bool compact_rec(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
         }
         slot->written = true;
     }
-    return stage(c, r);
+    return stage_raw(c, raw, bytes);
 }
 
-void mesh_hist_compact(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_table_t *t, size_t keep,
-                       mesh_hist_write_fn write, void *wctx, uint8_t *out, size_t out_cap, mesh_hist_compact_t *st) {
+void mesh_hist_compact(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_crypt_t *crypt, mesh_hist_table_t *t,
+                       size_t keep, mesh_hist_write_fn write, void *wctx, uint8_t *out, size_t out_cap,
+                       mesh_hist_compact_t *st) {
     memset(st, 0, sizeof(*st));
     st->ok = out_cap >= MESH_HIST_REC_MAX;
     if (!st->ok) {
@@ -754,9 +958,20 @@ void mesh_hist_compact(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hi
         t->slots[i].written = false;
         forget_outgoing(&t->slots[i]);
     }
-    compact_ctx_t    c = {.t = t, .keep = keep, .write = write, .wctx = wctx, .out = out, .out_cap = out_cap, .st = st};
+    compact_ctx_t c = {.crypt   = crypt,
+                       .t       = t,
+                       .keep    = keep,
+                       .write   = write,
+                       .wctx    = wctx,
+                       .out     = out,
+                       .out_cap = out_cap,
+                       .st      = st};
     mesh_hist_scan_t scan;
-    mesh_hist_scan(read, rctx, buf, compact_rec, &c, &scan);
+    mesh_hist_scan(read, rctx, buf, crypt, compact_rec, &c, &scan);
+    st->auth_failures = scan.auth_failures;
+    if (!scan.head) {
+        st->ok = false; // never write a journal without its HEAD
+    }
     if (st->ok && c.out_len && !write(wctx, out, c.out_len)) {
         st->ok = false;
     }
