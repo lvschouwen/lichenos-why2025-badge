@@ -1,7 +1,8 @@
 // "fw ui perf" (#93): frame timing of the display, from LVGL's display events, so the cost of a screen (and of the
 // PSRAM clock) is a number instead of a feeling. "fw ui perf bench [n]" redraws the whole current screen n times under
-// the LVGL lock and reports the time per frame: the same screen, the same number, whatever else is going on.
-#include "ui_perf_stats.h"
+// the LVGL lock and reports the time per frame: the same screen, the same number, whatever else is going on. The Bench
+// app (#96) uses the same two calls (ui_perf.h).
+#include "ui_perf.h"
 
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
@@ -34,18 +35,26 @@ static void on_display(lv_event_t *e) {
     }
 }
 
-static void bench(unsigned n) {
-    n = n == 0 ? 10 : n > BENCH_MAX ? BENCH_MAX : n;
-    lvgl_port_lock(0);
-    lv_display_t *disp    = lv_display_get_default();
-    uint32_t      renders = s_perf.render.n;
-    int64_t       t0      = esp_timer_get_time();
+void ui_perf_snapshot(ui_perf_t *out) {
+    *out = s_perf;
+}
+
+uint64_t ui_perf_redraw_us(unsigned n) {
+    lv_display_t *disp = lv_display_get_default();
+    int64_t       t0   = esp_timer_get_time();
     for (unsigned i = 0; i < n; i++) {
         lv_obj_invalidate(lv_screen_active());
         lv_refr_now(disp);
     }
-    int64_t us = esp_timer_get_time() - t0;
-    renders    = s_perf.render.n - renders;
+    return (uint64_t)(esp_timer_get_time() - t0);
+}
+
+static void bench(unsigned n) {
+    n = n == 0 ? 10 : n > BENCH_MAX ? BENCH_MAX : n;
+    lvgl_port_lock(0);
+    uint32_t renders = s_perf.render.n;
+    uint64_t us      = ui_perf_redraw_us(n);
+    renders          = s_perf.render.n - renders;
     lvgl_port_unlock();
     unsigned per10 = (unsigned)((us / n + 50) / 100);
     console_reply("ui perf bench: %u full-screen redraws in %u ms, %u.%u ms per frame (%u renders counted)", n,

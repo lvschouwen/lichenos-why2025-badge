@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+
 // Per-boot PSRAM tuning report and dense check (#40). The IDF picks the MSPI phase and delayline on every boot and only
 // logs a failure to the ROM console; here the choice is captured (linker wrap of the two select functions), read back
 // from the MSPI registers, logged at WARN, and a dense 4 MB pattern check runs once. A bad boot is noted in the restart
@@ -21,3 +23,6 @@ void psram_boot_print(void);
 
 // "fw psram test <KB> dense": the same pattern + inverted check on demand, bad bytes per pass
 void psram_boot_dense_test(unsigned kb);
+
+// The tuning line ("phase 67.50 (run 4/4), delayline idx 15 ..."), for the Bench app (#96); returns the length
+size_t psram_boot_tuning_text(char *out, size_t cap);

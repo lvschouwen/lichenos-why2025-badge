@@ -223,6 +223,10 @@ static void print_ldo(void) {
                   (unsigned)PMU.ext_ldo[LDO_PSRAM_IDX].pmu_ext_ldo.tieh, vref * (4u + mul) / 4u);
 }
 
+size_t psram_boot_tuning_text(char *out, size_t cap) {
+    return psram_tuning_format(out, cap, &s_tuning);
+}
+
 void psram_boot_print(void) {
     char text[128];
     psram_tuning_format(text, sizeof(text), &s_tuning);

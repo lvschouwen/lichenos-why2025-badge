@@ -452,6 +452,7 @@ void shell_start(lv_display_t *display) {
     settings_app_register();
     about_app_register();
     keytest_app_register();
+    bench_app_register();
     lvgl_port_lock(0);
     lv_display_set_default(display);
     lv_obj_t *boot = boot_screen_create();

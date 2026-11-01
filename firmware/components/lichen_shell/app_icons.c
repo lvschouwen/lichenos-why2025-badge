@@ -38,3 +38,22 @@ void icon_keytest(lv_obj_t *parent, int size_px) {
     lv_label_set_text(k, "K");
     lv_obj_center(k);
 }
+
+// Bench (#96): a gauge, three quarters of a ring with the amber needle part filled
+void icon_bench(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    lv_obj_t *arc = lv_arc_create(parent);
+    lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
+    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(arc, size_px * 5 / 8, size_px * 5 / 8);
+    lv_arc_set_rotation(arc, 135);
+    lv_arc_set_bg_angles(arc, 0, 270);
+    lv_arc_set_value(arc, 70);
+    lv_obj_set_style_arc_width(arc, size_px >= 64 ? 6 : 3, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, size_px >= 64 ? 6 : 3, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(arc, lv_color_hex(THEME_FAINT), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(arc, lv_color_hex(THEME_AMBER), LV_PART_INDICATOR);
+    lv_obj_center(arc);
+}
