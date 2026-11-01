@@ -41,6 +41,9 @@ typedef enum {
     OTA_ROUTE_CONSOLE,
 } ota_route_t;
 
+// Every route needs the token since #44, /info included (it names the firmware version)
+bool ota_route_needs_token(ota_route_t route);
+
 typedef struct {
     ota_route_t route;
     long long   content_length; // -1 when absent

@@ -285,3 +285,8 @@ void ota_hex(uint8_t const *bytes, size_t len, char *out) {
     }
     out[len * 2] = '\0';
 }
+
+bool ota_route_needs_token(ota_route_t route) {
+    (void)route;
+    return true;
+}

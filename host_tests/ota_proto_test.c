@@ -205,7 +205,18 @@ static void test_token(void) {
     CHECK(!ota_token_equal("", ""));
 }
 
+// #44: no route answers without the token any more, /info included
+static void test_routes_need_token(void) {
+    ota_route_t const routes[] = {OTA_ROUTE_INFO,  OTA_ROUTE_FIRMWARE,   OTA_ROUTE_FILE, OTA_ROUTE_REBOOT,
+                                  OTA_ROUTE_DELETE, OTA_ROUTE_PREPARE,   OTA_ROUTE_ASSETS, OTA_ROUTE_SCREENSHOT,
+                                  OTA_ROUTE_LOG,   OTA_ROUTE_CONSOLE};
+    for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
+        CHECK(ota_route_needs_token(routes[i]));
+    }
+}
+
 int main(void) {
+    test_routes_need_token();
     test_sha256();
     test_head_length();
     test_parse();

@@ -338,6 +338,9 @@ ota_curl() {
     token=$(ota_token)
     printf 'header = "Authorization: Bearer %s"\n' "$token" |
         curl --config - -sS --fail-with-body --connect-timeout 5 "$@"
+    local rc=$?
+    [ $rc -eq 7 ] && echo "the badge's update server doesn't answer: is Wi-Fi up and Settings › Updates over Wi-Fi on? ('fw ota on' on the USB console)" >&2
+    return $rc
 }
 
 # Whether the receiver at <ip> takes compressed bodies (it says "deflate" in /info); asked once per run
@@ -345,7 +348,7 @@ OTA_DEFLATE=
 ota_deflate() {
     if [ -z "$OTA_DEFLATE" ]; then
         OTA_DEFLATE=no
-        if [ "${BADGE_OTA_COMPRESS:-1}" != 0 ] && curl -s --connect-timeout 5 "http://$1:$OTA_PORT/info" | grep -q deflate; then
+        if [ "${BADGE_OTA_COMPRESS:-1}" != 0 ] && ota_curl "http://$1:$OTA_PORT/info" 2>/dev/null | grep -q deflate; then
             OTA_DEFLATE=yes
         fi
     fi
@@ -357,7 +360,7 @@ OTA_CHUNKS=
 ota_chunks() {
     if [ -z "$OTA_CHUNKS" ]; then
         OTA_CHUNKS=no
-        if curl -s --connect-timeout 5 "http://$1:$OTA_PORT/info" | grep -q chunks; then
+        if ota_curl "http://$1:$OTA_PORT/info" 2>/dev/null | grep -q chunks; then
             OTA_CHUNKS=yes
         fi
     fi
@@ -439,7 +442,7 @@ cmd_ota_reboot() { ota_curl -X POST "http://$1:$OTA_PORT/reboot"; }
 # to say "ready" (it prints the DMA RAM it has free then). Without /prepare in /info the push goes ahead as is.
 ota_prepare() {
     local ip=$1 reply
-    curl -s --connect-timeout 5 "http://$ip:$OTA_PORT/info" | grep -q prepare || return 0
+    ota_curl "http://$ip:$OTA_PORT/info" 2>/dev/null | grep -q prepare || return 0
     echo "preparing the badge: stopping MeshCore, LoRa and the screens..."
     reply=$(ota_curl --max-time 40 -X POST "http://$ip:$OTA_PORT/prepare" 2>&1) ||
         { echo "the badge did not get ready: $reply" >&2; return 1; }
@@ -588,7 +591,7 @@ cmd_ota_c6() {
     cmd_ota_reboot "$ip" || true
     sleep 20 # let it go down before polling
     for i in $(seq 1 36); do
-        if curl -s --connect-timeout 3 "http://$ip:$OTA_PORT/info" > /dev/null 2>&1; then
+        if ota_curl --connect-timeout 3 "http://$ip:$OTA_PORT/info" > /dev/null 2>&1; then
             echo "Wi-Fi is back after about $((20 + (i - 1) * 5)) s: check with 'fw $ip c6'"
             return 0
         fi

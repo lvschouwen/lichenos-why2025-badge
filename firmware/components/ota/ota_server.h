@@ -8,6 +8,10 @@
 // ("fw token" prints it). Starts listening once Wi-Fi has an address.
 void ota_server_start(void);
 
+// Settings › Updates over Wi-Fi (#44): off closes port OTA_PORT (and with it the Wi-Fi console); saved in NVS
+bool ota_server_enabled(void);
+void ota_server_set_enabled(bool on);
+
 // Hooks for a screen that shows what an update is doing (#76). They run on the OTA task (core 0): store numbers, never
 // block, never call LVGL without its lock. Any member may be NULL.
 // begin: a transfer starts (name is the file's name, NULL for firmware); total is the bytes the sender will send, 0 if

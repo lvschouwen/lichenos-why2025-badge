@@ -1,7 +1,7 @@
 // Wi-Fi update server of the lean firmware (#61), adapted from BadgeVMS's OTA receiver app
 // (sdk_apps/ota_receiver/main.c): same protocol (ota_proto.h) so tools/badge.sh ota-* works unchanged. It runs
-// whenever Wi-Fi is up; the token guards everything but /info. Bodies are received into memory and checked before
-// anything touches flash: flash writes while the network is receiving corrupted the stream on this badge (#40).
+// whenever Wi-Fi is up and Settings › Updates over Wi-Fi is on (#44); the token guards every route. Bodies are
+// received into memory and checked before anything touches flash: flash writes while the network is receiving corrupted the stream on this badge (#40).
 #include "ota_server.h"
 
 #include "esp_attr.h"
@@ -26,6 +26,7 @@
 #include "ota_pieces.h"
 #include "ota_proto.h"
 #include "miniz.h" // the ROM inflater
+#include "settings_store.h"
 #include "sha256.h"
 
 #include <errno.h>
@@ -61,6 +62,22 @@
 static char const TAG[] = "ota";
 
 static char token[OTA_TOKEN_LEN + 1];
+
+// Settings › Updates over Wi-Fi (#44). On by default while Lichen is in development: tools/badge.sh, the Wi-Fi console,
+// the log and screenshots all go through this server. Off closes the port; the USB console (`fw ota on`) reopens it.
+#define OTA_WIFI_KEY     "ota_wifi"
+#define OTA_WIFI_DEFAULT 1
+static volatile bool server_on;
+
+bool ota_server_enabled(void) {
+    return server_on;
+}
+
+void ota_server_set_enabled(bool on) {
+    server_on = on;
+    settings_set_u8(OTA_WIFI_KEY, on ? 1 : 0);
+    ESP_LOGW(TAG, "update server over Wi-Fi switched %s", on ? "on" : "off");
+}
 
 // One request at a time
 EXT_RAM_BSS_ATTR static char    head_buf[2048]; // PSRAM (#107): sockets and flash reads copy, no DMA
@@ -1037,15 +1054,15 @@ static bool handle_connection(int fd) {
         return false;
     }
 
+    if (ota_route_needs_token(req.route) && (!req.has_token || !ota_token_equal(req.token, token))) {
+        respond(fd, 401, "wrong or missing token");
+        return false;
+    }
+
     if (req.route == OTA_ROUTE_INFO) {
         // "deflate chunks" tells tools/badge.sh this receiver takes compressed bodies and pieces
         respond(fd, 200, "badge_fw %s; receiver: deflate chunks%s", esp_app_get_description()->version,
                 hooks.prepare ? " prepare" : "");
-        return false;
-    }
-
-    if (!req.has_token || !ota_token_equal(req.token, token)) {
-        respond(fd, 401, "wrong or missing token");
         return false;
     }
 
@@ -1124,16 +1141,12 @@ static bool load_or_create_token(void) {
     return fclose(f) == 0 && written;
 }
 
-static void server_task(void *arg) {
-    (void)arg;
-    // Wi-Fi may come up late or not at all (no credentials): wait for an address before listening
-    while (!wifi_has_ip(NULL, 0)) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+// A listening socket on OTA_PORT whose accept() gives up after a second, so a switch-off is noticed; -1 on failure
+static int open_listener(void) {
     int ls = socket(AF_INET, SOCK_STREAM, 0);
     if (ls < 0) {
         ESP_LOGE(TAG, "can't create a socket");
-        vTaskDelete(NULL);
+        return -1;
     }
     int one = 1;
     setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
@@ -1141,16 +1154,21 @@ static void server_task(void *arg) {
     if (bind(ls, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(ls, 2) != 0) {
         ESP_LOGE(TAG, "can't listen on port %d", OTA_PORT);
         close(ls);
-        vTaskDelete(NULL);
+        return -1;
     }
-    ESP_LOGW(TAG, "update server on port %d", OTA_PORT);
+    set_read_timeout(ls, 1, 0);
+    return ls;
+}
 
-    for (;;) {
+static void serve(int ls) {
+    while (server_on) {
         struct sockaddr_in peer;
         socklen_t          peer_len = sizeof(peer);
         int                fd       = accept(ls, (struct sockaddr *)&peer, &peer_len);
         if (fd < 0) {
-            vTaskDelay(pdMS_TO_TICKS(100));
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
             continue;
         }
         set_read_timeout(fd, READ_TIMEOUT_S, 0);
@@ -1169,6 +1187,35 @@ static void server_task(void *arg) {
     }
 }
 
+static void server_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        // Wi-Fi may come up late or not at all (no credentials), and the server may be switched off (#44)
+        while (!server_on || !wifi_has_ip(NULL, 0)) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+        int ls = open_listener();
+        if (ls < 0) {
+            vTaskDelay(pdMS_TO_TICKS(5000));
+            continue;
+        }
+        ESP_LOGW(TAG, "update server on port %d", OTA_PORT);
+        serve(ls);
+        close(ls);
+        ESP_LOGW(TAG, "update server closed");
+    }
+}
+
+static void cmd_ota(char const *args) {
+    if (strcmp(args, "on") == 0 || strcmp(args, "off") == 0) {
+        ota_server_set_enabled(args[1] == 'n');
+    } else if (*args) {
+        console_reply("usage: ota [on|off]");
+        return;
+    }
+    console_reply("update server over Wi-Fi: %s", server_on ? "on" : "off");
+}
+
 static void cmd_token(char const *args) {
     (void)args;
     console_reply_private("token %s", token[0] ? token : "(none: storage unavailable?)");
@@ -1176,6 +1223,8 @@ static void cmd_token(char const *args) {
 
 void ota_server_start(void) {
     console_register("token", "token (the update token for tools/badge.sh)", cmd_token);
+    console_register("ota", "ota [on|off] (the update server over Wi-Fi, also Settings)", cmd_ota);
+    server_on = settings_get_u8(OTA_WIFI_KEY, OTA_WIFI_DEFAULT) != 0;
     if (!load_or_create_token()) {
         ESP_LOGE(TAG, "couldn't save the token in %s; it changes on every boot", TOKEN_FILE);
     }

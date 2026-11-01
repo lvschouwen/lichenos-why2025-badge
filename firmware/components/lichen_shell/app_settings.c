@@ -10,6 +10,7 @@
 #include "lichen_app.h"
 #include "lichen_notify.h"
 #include "menu.h"
+#include "ota_server.h"
 #include "sdcard.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -416,12 +417,30 @@ static void open_app_page(void *arg) {
     }
 }
 
+// Updates over Wi-Fi (#44): Enter switches the update server (and with it the Wi-Fi console) on or off
+static lv_obj_t *ota_row;
+
+static void toggle_ota(void *arg) {
+    (void)arg;
+    ota_server_set_enabled(!ota_server_enabled());
+    if (ota_row) {
+        menu_set_value(ota_row, ota_server_enabled() ? "On" : "Off");
+    }
+}
+
+static void forget_ota_row(lv_event_t *e) {
+    (void)e;
+    ota_row = NULL;
+}
+
 static void open_settings(lv_obj_t *screen) {
     lv_obj_t *menu = menu_create(screen, "Settings");
     char      wifi[48];
     wifi_line(wifi, sizeof(wifi), false);
     menu_note(menu, "Lichen");
     menu_add(menu, "Wi-Fi", wifi, open_wifi, NULL);
+    ota_row = menu_add(menu, "Updates over Wi-Fi", ota_server_enabled() ? "On" : "Off", toggle_ota, NULL);
+    lv_obj_add_event_cb(screen, forget_ota_row, LV_EVENT_DELETE, NULL);
     menu_add(menu, "Display", "", open_display, NULL);
     settings_time_row = live_row(menu_add(menu, "Time", "", open_time, NULL), false, time_value);
     lv_obj_add_event_cb(screen, forget_settings_time, LV_EVENT_DELETE,
