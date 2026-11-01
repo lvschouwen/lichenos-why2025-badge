@@ -19,14 +19,18 @@ typedef enum {
     MESH_IDENT_UNCHECKED, // not loaded yet
     MESH_IDENT_OK,
     MESH_IDENT_MISMATCH,
+    MESH_IDENT_UNREADABLE, // the file exists but could not be loaded (#109): kept as it is, no new identity
 } mesh_ident_t;
 
 // Derives the public key from prv and compares it with pub. Only the scalar half of prv goes into the public key, so
 // a flip in the signing prefix (prv[32..63]) is not seen here: it gives wrong signatures under a right key.
 mesh_ident_t mesh_ident_check(uint8_t const prv[MESH_IDENT_PRV_SIZE], uint8_t const pub[MESH_IDENT_PUB_SIZE]);
+// The result at load: MyMesh::begin() kept an unreadable file (#109), else the check above
+mesh_ident_t mesh_ident_after_load(bool file_unreadable, uint8_t const prv[MESH_IDENT_PRV_SIZE],
+                                   uint8_t const pub[MESH_IDENT_PUB_SIZE]);
 // Transmitting is allowed only after a check that passed
 bool         mesh_ident_tx_allowed(mesh_ident_t state);
-// For "fw mesh": "ok", "MISMATCH, TX blocked", "not checked"
+// For "fw mesh": "ok", "MISMATCH, TX blocked", "file unreadable, TX blocked", "not checked"
 char const  *mesh_ident_text(mesh_ident_t state);
 
 #ifdef __cplusplus

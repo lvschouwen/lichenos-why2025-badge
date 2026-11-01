@@ -4,6 +4,7 @@
 #include "MyMesh.h"
 #include "identity_move.h"
 #include "mesh_prefs.h"
+#include "mesh_ident.h"
 #include "mesh_link.h"
 
 #include "SPIFFS.h"
@@ -390,6 +391,48 @@ static void identity_move_checks_the_saved_copy(mesh::RNG &rng) {
     CHECK(!identity_move(short_write, id));
 }
 
+static std::vector<uint8_t> file_bytes(std::string const &path) {
+    std::vector<uint8_t> out;
+    FILE                *f = fopen(path.c_str(), "rb");
+    if (f) {
+        int c;
+        while ((c = fgetc(f)) != EOF) {
+            out.push_back((uint8_t)c);
+        }
+        fclose(f);
+    }
+    return out;
+}
+
+// #109: only a missing identity file makes a new identity. One that exists but can't be read (cut short by a power
+// loss) is kept byte for byte, nothing is saved over it, and the badge must not transmit.
+static void identity_file_checks(char const *root, uint8_t const *first_key, SimpleMeshTables &tables) {
+    std::string          path = std::string(root) + "/identity/_main.id";
+    std::vector<uint8_t> good = file_bytes(path);
+    CHECK(good.size() == PUB_KEY_SIZE + PRV_KEY_SIZE); // the first boot saved it: public key, then private key
+    CHECK(good.size() >= PUB_KEY_SIZE && memcmp(good.data(), first_key, PUB_KEY_SIZE) == 0);
+
+    CHECK(truncate(path.c_str(), 50) == 0);
+    static DataStore store(SPIFFS, rtc_clock);
+    static MyMesh    mesh(radio_driver, rng_for_pipe(), rtc_clock, tables, store);
+    store.begin();
+    mesh.begin();
+    std::vector<uint8_t> after = file_bytes(path);
+    CHECK(after.size() == 50 && memcmp(after.data(), good.data(), 50) == 0); // untouched
+    CHECK(mesh.identityUnreadable());
+    uint8_t prv[PRV_KEY_SIZE];
+    CHECK(mesh.self_id.writeTo(prv, sizeof(prv)) == PRV_KEY_SIZE);
+    mesh_ident_t state = mesh_ident_after_load(mesh.identityUnreadable(), prv, self_key(mesh));
+    CHECK(state == MESH_IDENT_UNREADABLE && !mesh_ident_tx_allowed(state));
+
+    // put back as it was, for anything after this
+    FILE *f = fopen(path.c_str(), "wb");
+    CHECK(f && fwrite(good.data(), 1, good.size(), f) == good.size());
+    if (f) {
+        fclose(f);
+    }
+}
+
 int main(int argc, char **argv) {
     clock_uses_real_time();
     auto packets = load(argc > 1 ? argv[1] : "vectors/meshcore_rx.txt");
@@ -401,7 +444,7 @@ int main(int argc, char **argv) {
     CHECK(SPIFFS.begin(true));
 
     static Rng              rng;
-    static SimpleMeshTables tables1, tables2, tables3, tables4, tables5, tables6;
+    static SimpleMeshTables tables1, tables2, tables3, tables4, tables5, tables6, tables7;
     identity_move_checks_the_saved_copy(rng);
     static FakeApp          app;
     uint8_t                 first_key[PUB_KEY_SIZE];
@@ -413,6 +456,7 @@ int main(int argc, char **argv) {
         store.begin();
         mesh.begin();
         mesh.startInterface(app);
+        CHECK(!mesh.identityUnreadable()); // no file: a new identity, saved (identity_file_checks reads it back)
         memcpy(first_key, self_key(mesh), PUB_KEY_SIZE);
         for (auto const &p : packets) {
             test_radio.pending = p;
@@ -437,6 +481,7 @@ int main(int argc, char **argv) {
         store.begin();
         mesh.begin();
         CHECK(memcmp(self_key(mesh), first_key, PUB_KEY_SIZE) == 0);
+        CHECK(!mesh.identityUnreadable());
         CHECK(mesh.getNumContacts() == 3);
     }
 
@@ -494,6 +539,8 @@ int main(int argc, char **argv) {
         CHECK(mesh.getNumContacts() <= 3);
         CHECK(memcmp(self_key(mesh), first_key, PUB_KEY_SIZE) == 0);
     }
+
+    identity_file_checks(root, first_key, tables7);
 
     SPIFFS.format();
     rmdir(root);

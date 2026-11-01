@@ -660,20 +660,29 @@ extern "C" bool mesh_stop(mesh_stop_reason_t why) {
     return ok;
 }
 
-// The stored identity's check (#80): once, at the first load. A mismatch blocks every transmit until a restart, at the
-// senders (nothing is queued to fail later) and at the radio (MeshCore's own ACKs, paths and adverts). The file is
-// never rewritten or regenerated here: it may be the only copy of the identity.
+// The stored identity's check (#80): once, at the first load. A mismatch, or a file MyMesh could not read (#109),
+// blocks every transmit until a restart, at the senders (nothing is queued to fail later) and at the radio (MeshCore's
+// own ACKs, paths and adverts). The file is never rewritten or regenerated here: it may be the only copy of the identity.
 static void ident_apply(mesh_ident_t state, bool simulated) {
     __atomic_store_n(&ident_state, state, __ATOMIC_RELEASE);
     __atomic_store_n(&lora_radio.tx_blocked, !mesh_ident_tx_allowed(state), __ATOMIC_RELEASE);
-    if (state != MESH_IDENT_MISMATCH) {
+    if (mesh_ident_tx_allowed(state)) {
         return;
     }
-    ESP_LOGE(TAG, "MeshCore identity MISMATCH%s: the stored public key is not the private key's; TX blocked, file "
-                  "kept as it is", simulated ? " (simulated)" : "");
+    bool unreadable = state == MESH_IDENT_UNREADABLE;
+    ESP_LOGE(TAG, "MeshCore %s%s; TX blocked, file kept as it is",
+             unreadable ? "identity file unreadable (#109): no new identity made"
+                        : "identity MISMATCH: the stored public key is not the private key's",
+             simulated ? " (simulated)" : "");
     // an error notice: toasted, kept in the history across restarts until read
-    lichen_notify("meshcore", LN_ERROR, simulated ? "MeshCore identity (test)" : "MeshCore identity damaged",
-                  "The stored keys do not match: MeshCore will not transmit. The file is kept; fw mesh shows it.",
+    lichen_notify("meshcore", LN_ERROR,
+                  simulated    ? "MeshCore identity (test)"
+                  : unreadable ? "MeshCore identity unreadable"
+                               : "MeshCore identity damaged",
+                  unreadable ? "The identity file could not be read: MeshCore will not transmit. The file is kept; "
+                               "fw mesh shows it."
+                             : "The stored keys do not match: MeshCore will not transmit. The file is kept; fw mesh "
+                               "shows it.",
                   LN_ONCE_BOOT);
 }
 
@@ -681,7 +690,7 @@ static void ident_verify(BadgeMesh *n) {
     uint8_t      prv[PRV_KEY_SIZE];
     mesh_ident_t state = MESH_IDENT_MISMATCH; // a key that can't be read is not a sound one either
     if (n->self_id.writeTo(prv, sizeof(prv)) == PRV_KEY_SIZE) {
-        state = mesh_ident_check(prv, n->self_id.pub_key);
+        state = mesh_ident_after_load(n->identityUnreadable(), prv, n->self_id.pub_key);
     }
     mh_wipe(prv, sizeof(prv));
     ident_apply(state, false);
@@ -690,11 +699,11 @@ static void ident_verify(BadgeMesh *n) {
 // Milestone 2 kept the key pair in NVS; MeshCore's DataStore keeps it in /storage/meshcore. Moved once, so the
 // contacts that already know the badge keep knowing it.
 static void migrate_identity(void) {
-    mesh::LocalIdentity existing;
-    nvs_handle_t        nvs;
-    uint8_t             blob[128];
-    size_t              len = sizeof(blob);
-    if (store.loadMainIdentity(existing) || nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+    nvs_handle_t nvs;
+    uint8_t      blob[128];
+    size_t       len = sizeof(blob);
+    // A file that is there but unreadable (#109) is kept too: never written over, not even with the NVS copy
+    if (store.hasMainIdentity() || nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
         return;
     }
     if (nvs_get_blob(nvs, "identity", blob, &len) == ESP_OK && len >= PRV_KEY_SIZE + PUB_KEY_SIZE) {

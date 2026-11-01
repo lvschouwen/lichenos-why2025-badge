@@ -15,6 +15,11 @@ mesh_ident_t mesh_ident_check(uint8_t const prv[MESH_IDENT_PRV_SIZE], uint8_t co
     return diff == 0 ? MESH_IDENT_OK : MESH_IDENT_MISMATCH;
 }
 
+mesh_ident_t mesh_ident_after_load(bool file_unreadable, uint8_t const prv[MESH_IDENT_PRV_SIZE],
+                                   uint8_t const pub[MESH_IDENT_PUB_SIZE]) {
+    return file_unreadable ? MESH_IDENT_UNREADABLE : mesh_ident_check(prv, pub);
+}
+
 bool mesh_ident_tx_allowed(mesh_ident_t state) {
     return state == MESH_IDENT_OK;
 }
@@ -25,6 +30,8 @@ char const *mesh_ident_text(mesh_ident_t state) {
         return "ok";
     case MESH_IDENT_MISMATCH:
         return "MISMATCH, TX blocked";
+    case MESH_IDENT_UNREADABLE:
+        return "file unreadable, TX blocked";
     default:
         return "not checked";
     }

@@ -60,6 +60,12 @@ int main(void) {
     uint8_t zero_prv[MESH_IDENT_PRV_SIZE] = {0}, zero_pub[MESH_IDENT_PUB_SIZE] = {0};
     CHECK(mesh_ident_check(zero_prv, zero_pub) == MESH_IDENT_MISMATCH);
 
+    // an identity file that could not be read (#109): blocked whatever the (zeroed) keys say
+    CHECK(mesh_ident_after_load(true, prv, rfc_pub) == MESH_IDENT_UNREADABLE);
+    CHECK(mesh_ident_after_load(false, prv, rfc_pub) == MESH_IDENT_OK);
+    CHECK(!mesh_ident_tx_allowed(MESH_IDENT_UNREADABLE));
+    CHECK(strcmp(mesh_ident_text(MESH_IDENT_UNREADABLE), "file unreadable, TX blocked") == 0);
+
     // only a passed check transmits
     CHECK(!mesh_ident_tx_allowed(MESH_IDENT_MISMATCH));
     CHECK(!mesh_ident_tx_allowed(MESH_IDENT_UNCHECKED));
