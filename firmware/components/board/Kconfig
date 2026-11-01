@@ -11,7 +11,7 @@ menu "Lichen display"
     choice LICHEN_DISPLAY_DIRECT_FLUSH_ENGINE
         prompt "What rotates the strip"
         depends on LICHEN_DISPLAY_DIRECT_FLUSH
-        default LICHEN_DISPLAY_DIRECT_FLUSH_PPA
+        default LICHEN_DISPLAY_DIRECT_FLUSH_CPU
 
         config LICHEN_DISPLAY_DIRECT_FLUSH_PPA
             bool "PPA (blocking scale-rotate-mirror)"
