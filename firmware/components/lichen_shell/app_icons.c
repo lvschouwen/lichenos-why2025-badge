@@ -76,3 +76,15 @@ void icon_crashlog(lv_obj_t *parent, int size_px) {
     lv_label_set_text(mark, "!");
     lv_obj_center(mark);
 }
+
+// Notifications (#62): an amber bell
+void icon_notify(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    lv_obj_t *bell = lv_label_create(parent);
+    lv_obj_set_style_text_color(bell, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_text_font(bell, size_px >= 64 ? lichen_font(LICHEN_FONT_LARGE) : lichen_font(LICHEN_FONT_SMALL), 0);
+    lv_label_set_text(bell, LV_SYMBOL_BELL);
+    lv_obj_center(bell);
+}

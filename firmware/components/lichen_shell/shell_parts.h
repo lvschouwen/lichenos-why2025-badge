@@ -72,3 +72,14 @@ void        shell_refocus(void);
 bool shell_home_shown(void);
 
 void update_screen_init(void); // update_screen.c; from shell_start, with the LVGL lock held
+
+// Notifications (#62). notify_ui.c: the toast, the tile badges, the cloud key; from shell_start, LVGL lock held.
+#define NOTIFY_APP_ID "notify"
+void     notify_ui_start(void);
+uint32_t notify_level_color(uint8_t level); // dim / amber / red, the toast's stripe and the status bar's dot
+// notify_centre.c: the Notifications app (registered by shell_start), opening one notice where it belongs, the centre,
+// Settings › Notifications. LVGL context.
+void notify_app_register(void);
+void notify_open_entry(uint32_t id);
+void notify_open_centre(void);
+void notify_settings_open(void);

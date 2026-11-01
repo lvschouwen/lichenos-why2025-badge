@@ -4,6 +4,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // A Lichen app (#66): MeshCore, Settings, About. Everything with an lv_obj_t runs in LVGL's context (core 1);
 // start_background runs from main.c on core 0. Any member except name may be NULL.
@@ -30,6 +31,10 @@ typedef struct lichen_app {
     // The app's first-run questions, if it has any: done=false asks them again at the next open, done=true marks
     // them answered ("fw setup reset|done <id>"). The app keeps the flag in its own settings.
     void (*first_run_set)(bool done);
+    // The user opened one of the app's notifications (lichen_notify.h, #62) in the centre or with the cloud key: show
+    // that place (target as the app passed it, "" for none). LVGL context; the entry is already marked read. NULL:
+    // the shell opens the app as from home.
+    void (*open_notification)(char const *target, uint32_t id);
 } lichen_app_t;
 
 // Size of the app table. Home scrolls to the selection, so this only bounds the arrays; lichen_register_app logs an error

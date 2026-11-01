@@ -8,3 +8,4 @@ void icon_about(lv_obj_t *parent, int size_px);
 void icon_keytest(lv_obj_t *parent, int size_px);
 void icon_bench(lv_obj_t *parent, int size_px);
 void icon_crashlog(lv_obj_t *parent, int size_px);
+void icon_notify(lv_obj_t *parent, int size_px);

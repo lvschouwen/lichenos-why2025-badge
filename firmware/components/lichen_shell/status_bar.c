@@ -1,11 +1,13 @@
 // The status bar over every screen after boot (#66, home.html), three columns (#104): logo and wordmark (and the C6
-// trouble label) left, the clock centred (marked when unverified, #64), Wi-Fi and LoRa right. Wi-Fi fan (#58) and LoRa
-// label are polled once a second from the LVGL task through shell_sources; the LoRa TX/RX chevrons from the packet
-// counters every 100 ms (#29).
+// trouble label) left, the clock centred (marked when unverified, #64), the unread notifications (#62), Wi-Fi and
+// LoRa right. The unread count, Wi-Fi fan (#58) and LoRa label are polled once a second from the LVGL task (the
+// latter two through shell_sources); the LoRa TX/RX chevrons from the packet counters every 100 ms (#29).
 #include "lichen_clock.h"
 #include "link_state.h"
 #include "lora_activity.h"
 #include "logo.h"
+#include "notify_os.h"
+#include "notify_view.h"
 #include "shell_parts.h"
 #include "fonts.h"
 #include "theme.h"
@@ -20,6 +22,11 @@ static lv_obj_t *lora_label;
 static lv_obj_t *wifi_label;
 static lv_obj_t *c6_label; // only while the C6 is being recovered or gone (#14)
 static int32_t   c6_max_w; // the room left of the clock (#104): longer C6 text ends in "..."
+static lv_obj_t *notify_box; // the unread dot and count (#62), hidden at 0
+static lv_obj_t *notify_dot;
+static lv_obj_t *notify_count;
+
+#define NOTIFY_DOT 10
 
 static lv_obj_t *add_row(lv_obj_t *parent, int gap) {
     lv_obj_t *row = lv_obj_create(parent);
@@ -207,8 +214,27 @@ static void show_c6(void) {
     lv_obj_set_hidden(c6_label, false);
 }
 
+// A dot and the unread count left of Wi-Fi, coloured by the highest unread level (#62); hidden at 0
+static void show_notify(void) {
+    char   text[8];
+    size_t unread = lichen_notify_unread(NULL);
+    nview_count(text, sizeof(text), unread);
+    lv_obj_set_hidden(notify_box, unread == 0);
+    if (!unread) {
+        return;
+    }
+    ln_level_t top   = lichen_notify_unread_top();
+    lv_color_t color = lv_color_hex(top == LN_INFO ? THEME_TEAL : notify_level_color(top));
+    lv_obj_set_style_bg_color(notify_dot, color, 0);
+    lv_obj_set_style_text_color(notify_count, color, 0);
+    if (strcmp(lv_label_get_text(notify_count), text) != 0) {
+        lv_label_set_text(notify_count, text);
+    }
+}
+
 static void refresh(lv_timer_t *timer) {
     (void)timer;
+    show_notify();
     show_clock();
     show_c6();
     int8_t rssi  = 0;
@@ -266,6 +292,18 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     // Right-aligned by the bar's SPACE_BETWEEN; about 50 px stay free to the clock for a notification dot (#62)
     lv_obj_t *right = add_row(bar, 28);
     lv_obj_t *wifi  = add_row(right, 6);
+    // The unread dot and count (#62) just left of "Wi-Fi", in the room the right group leaves to the clock; hidden
+    // (out of the layout) at 0
+    notify_box = add_row(wifi, 4);
+    lv_obj_set_style_pad_right(notify_box, 8, 0);
+    notify_dot = lv_obj_create(notify_box);
+    lv_obj_remove_style_all(notify_dot);
+    lv_obj_set_size(notify_dot, NOTIFY_DOT, NOTIFY_DOT);
+    lv_obj_set_style_radius(notify_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(notify_dot, LV_OPA_COVER, 0);
+    lv_obj_set_clickable(notify_dot, false);
+    notify_count = add_text(notify_box, "", THEME_TEAL);
+    lv_obj_set_hidden(notify_box, true);
     wifi_label      = add_text(wifi, "Wi-Fi", THEME_DIM);
     wifi_fan_create(wifi);
     lv_obj_t *lora = add_row(right, 6);

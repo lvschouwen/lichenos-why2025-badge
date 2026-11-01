@@ -1,5 +1,5 @@
 // Settings (#66, settings.html top row): Wi-Fi, Display (brightness, screen timeout #43, home layout), Time (#64: set
-// date & time, time zone), SD card (#99, sd_screen.c), About Lichen, then one entry per app that has a settings page.
+// date & time, time zone), SD card (#99, sd_screen.c), Notifications (#62, notify_centre.c), About Lichen, then one entry per app that has a settings page.
 // Every screen is a menu.h list; Esc is the shell's.
 #include "app_icons.h"
 #include "backlight.h"
@@ -8,6 +8,7 @@
 #include "idle_policy.h"
 #include "lichen_clock.h"
 #include "lichen_app.h"
+#include "lichen_notify.h"
 #include "menu.h"
 #include "sdcard.h"
 #include "settings_store.h"
@@ -281,6 +282,7 @@ static void live_update(live_row_t *r) {
 static live_row_t time_rows[3]; // Time's page: Set date & time, Time zone, the source note
 static live_row_t settings_time_row; // Settings' own page: Time
 static live_row_t settings_sd_row;   // and SD card (a mount or unmount on its page or the console shows on return)
+static live_row_t settings_notify_row; // and Notifications (do-not-disturb, #62)
 
 // The zone row reads NVS: only refreshed when a zone is picked, not every second
 static void refresh_time_page(lv_timer_t *t) {
@@ -297,6 +299,7 @@ static void refresh_settings_time(lv_timer_t *t) {
     (void)t;
     live_update(&settings_time_row);
     live_update(&settings_sd_row);
+    live_update(&settings_notify_row);
 }
 
 // Each page's timer dies with it, and the rows it filled are forgotten
@@ -309,6 +312,7 @@ static void forget_settings_time(lv_event_t *e) {
     lv_timer_delete(lv_event_get_user_data(e));
     memset(&settings_time_row, 0, sizeof(settings_time_row));
     memset(&settings_sd_row, 0, sizeof(settings_sd_row));
+    memset(&settings_notify_row, 0, sizeof(settings_notify_row));
 }
 
 static void source_note(char *out, size_t cap) {
@@ -351,6 +355,15 @@ static void sd_value(char *out, size_t cap) {
     sd_info_t info;
     sd_info(&info);
     sd_short_text(&info, out, cap);
+}
+
+static void notify_value(char *out, size_t cap) {
+    snprintf(out, cap, "%s", lichen_notify_dnd() ? "Do not disturb" : "");
+}
+
+static void open_notify(void *arg) {
+    (void)arg;
+    notify_settings_open();
 }
 
 static void open_sd(void *arg) {
@@ -414,6 +427,7 @@ static void open_settings(lv_obj_t *screen) {
     lv_obj_add_event_cb(screen, forget_settings_time, LV_EVENT_DELETE,
                         lv_timer_create(refresh_settings_time, 1000, NULL));
     settings_sd_row = live_row(menu_add(menu, "SD card", "", open_sd, NULL), false, sd_value);
+    settings_notify_row = live_row(menu_add(menu, "Notifications", "", open_notify, NULL), false, notify_value);
     menu_add(menu, "About Lichen", "", open_about, NULL);
     bool heading = false;
     for (size_t i = 0; i < lichen_app_count(); i++) {
