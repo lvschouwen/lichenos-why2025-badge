@@ -1,10 +1,13 @@
 // Home (#66, home.html): one wide live tile per app (default) or an icon grid. The home screen itself is the one
 // focusable object; it takes the arrow keys, moves a selection with home_move() and opens the app on Enter. Tiles
-// refresh their text once a second from the LVGL task.
+// refresh their text once a second from the LVGL task, and every icon carries the red count circle of lichen_badge.h
+// (#102), redrawn when a count changed.
 #include "fw_console.h"
 #include "esp_log.h"
+#include "fonts.h"
 #include "home_layout.h"
 #include "lichen_app.h"
+#include "lichen_badge.h"
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "theme.h"
@@ -29,6 +32,8 @@ static char const TAG[] = "home";
 #define GRID_ICON_GAP 14
 #define LINE_CAP      64
 #define REFRESH_MS    1000
+#define BADGE_RED     THEME_LINK_RED // the count circle (#102): white on red, like a phone's app badge
+#define BADGE_PAD_HOR 6
 
 typedef struct {
     home_layout_t layout;
@@ -37,6 +42,9 @@ typedef struct {
     lv_obj_t     *cell[LICHEN_MAX_APPS];
     lv_obj_t     *line1[LICHEN_MAX_APPS]; // tiles only
     lv_obj_t     *line2[LICHEN_MAX_APPS];
+    lv_obj_t     *badge[LICHEN_MAX_APPS]; // the count circle on each icon (#102), hidden at 0
+    uint32_t      badge_gen;              // lichen_badge_generation() when they were last drawn
+    bool          badges_drawn;
     lv_timer_t   *timer;
 } home_t;
 
@@ -80,8 +88,35 @@ static void on_delete(lv_event_t *e) {
     free(h);
 }
 
+static void refresh_badge(lv_obj_t *badge, unsigned count) {
+    char text[8];
+    bool shown = home_badge_text(count, text, sizeof(text));
+    if (shown && strcmp(lv_label_get_text(badge), text) != 0) {
+        lv_label_set_text(badge, text);
+    }
+    if (shown == lv_obj_is_hidden(badge)) {
+        lv_obj_set_hidden(badge, !shown);
+    }
+}
+
+// Only when a count changed somewhere: a lookup per app, no app code
+static void refresh_badges(home_t *h) {
+    uint32_t generation = lichen_badge_generation();
+    if (h->badges_drawn && generation == h->badge_gen) {
+        return;
+    }
+    for (int i = 0; i < h->count; i++) {
+        if (h->badge[i]) {
+            refresh_badge(h->badge[i], lichen_badge_get(lichen_app_at(i)->id));
+        }
+    }
+    h->badge_gen    = generation;
+    h->badges_drawn = true;
+}
+
 static void refresh(lv_timer_t *timer) {
     home_t *h = lv_timer_get_user_data(timer);
+    refresh_badges(h);
     for (int i = 0; i < h->count; i++) {
         lichen_app_t const *app = lichen_app_at(i);
         char                t1[LINE_CAP], t2[LINE_CAP];
@@ -99,6 +134,29 @@ static void refresh(lv_timer_t *timer) {
             lv_label_set_text(h->line2[i], t2);
         }
     }
+}
+
+// A pill centred on the icon's top-right corner, growing to the left for "99+"; hidden until refresh() has a count.
+// Last child of the icon box, so it is drawn over the icon; the box lets it overflow.
+static lv_obj_t *add_badge(lv_obj_t *icon) {
+    lv_font_t const *font = lichen_font(LICHEN_FONT_SMALL);
+    int32_t          h    = lv_font_get_line_height(font);
+    lv_obj_set_overflow_visible(icon, true);
+    lv_obj_t *badge = lv_label_create(icon);
+    lv_obj_set_style_text_font(badge, font, 0);
+    lv_obj_set_style_text_color(badge, lv_color_hex(THEME_TEXT), 0);
+    lv_obj_set_style_text_align(badge, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_bg_color(badge, lv_color_hex(BADGE_RED), 0);
+    lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(badge, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_hor(badge, BADGE_PAD_HOR, 0);
+    lv_obj_set_style_min_width(badge, h, 0);
+    lv_obj_set_height(badge, h);
+    lv_obj_set_clickable(badge, false);
+    lv_label_set_text(badge, "");
+    lv_obj_align(badge, LV_ALIGN_TOP_RIGHT, h / 2, -h / 2);
+    lv_obj_set_hidden(badge, true);
+    return badge;
 }
 
 static lv_obj_t *add_icon(lv_obj_t *parent, lichen_app_t const *app, int px) {
@@ -148,7 +206,8 @@ static void add_tile(home_t *h, lv_obj_t *home, int i) {
     lv_obj_set_style_pad_column(tile, 24, 0);
     lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    add_icon(tile, app, TILE_ICON_PX);
+    lv_obj_t *icon = add_icon(tile, app, TILE_ICON_PX);
+    h->badge[i]    = add_badge(icon);
 
     lv_obj_t *text = lv_obj_create(tile);
     lv_obj_remove_style_all(text);
@@ -176,7 +235,8 @@ static void add_grid_cell(home_t *h, lv_obj_t *home, int i) {
     lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(cell, GRID_ICON_GAP, 0);
-    add_icon(cell, app, GRID_ICON_PX);
+    lv_obj_t *icon = add_icon(cell, app, GRID_ICON_PX);
+    h->badge[i]    = add_badge(icon);
     lv_obj_t *name = add_label(cell, app->name, THEME_TEXT);
     lv_obj_set_width(name, w - 16);
     lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
@@ -230,9 +290,7 @@ lv_obj_t *home_create(void) {
         style_cell(h, i);
     }
     h->timer = lv_timer_create(refresh, REFRESH_MS, h);
-    if (h->layout == HOME_TILES) {
-        refresh(h->timer); // no blank lines for the first second
-    }
+    refresh(h->timer); // no blank lines or missing bubbles for the first second
     lv_obj_add_event_cb(home, on_key, LV_EVENT_KEY, h);
     lv_obj_add_event_cb(home, on_delete, LV_EVENT_DELETE, h);
     return home;

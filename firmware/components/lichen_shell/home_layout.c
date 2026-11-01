@@ -1,5 +1,7 @@
 #include "home_layout.h"
 
+#include <stdio.h>
+
 home_layout_t home_layout_from_u8(uint8_t value) {
     return value == HOME_GRID ? HOME_GRID : HOME_TILES;
 }
@@ -30,4 +32,20 @@ int home_move(home_layout_t layout, int count, int index, uint32_t key) {
         return 0;
     }
     return layout == HOME_GRID ? move_grid(count, index, key) : move_tiles(count, index, key);
+}
+
+bool home_badge_text(unsigned count, char *out, size_t cap) {
+    if (cap == 0) {
+        return false;
+    }
+    out[0] = '\0';
+    if (count == 0) {
+        return false;
+    }
+    if (count > HOME_BADGE_CAP) {
+        snprintf(out, cap, "%u+", (unsigned)HOME_BADGE_CAP);
+    } else {
+        snprintf(out, cap, "%u", count);
+    }
+    return true;
 }

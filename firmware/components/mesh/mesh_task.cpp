@@ -26,6 +26,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "lichen_badge.h"
 #include "lichen_fs.h"
 #include "lichen_random.h"
 #include "freertos/FreeRTOS.h"
@@ -160,6 +161,7 @@ static void tile_publish_unread(void) {
     portENTER_CRITICAL(&tile_mux);
     tile.unread_total = total;
     portEXIT_CRITICAL(&tile_mux);
+    lichen_badge_set("meshcore", total); // home's count on the icon (#102); its own lock, not inside ours
 }
 
 static uint32_t tile_unread(void) {
@@ -178,6 +180,7 @@ static void tile_on_message(char const *channel, char const *text) {
     tile.unread_total = total;
     tile_heard_s      = mesh_uptime_s();
     portEXIT_CRITICAL(&tile_mux);
+    lichen_badge_set("meshcore", total);
 }
 
 // Boot (under the mesh lock): the newest message from the history journal as the tile's latest line
@@ -1395,6 +1398,7 @@ extern "C" bool mesh_start(char const *files_dir) {
     tile.unread_total = 0; // nothing unread at boot
     tile.contacts     = (size_t)n->getNumContacts();
     portEXIT_CRITICAL(&tile_mux);
+    lichen_badge_set("meshcore", 0);
     tile_seed_latest(); // the history's newest line; tile_heard_s stays 0, so no "just now" for an old message
     __atomic_store_n(&node, n, __ATOMIC_RELEASE);
     mesh_unlock();

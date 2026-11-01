@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "fonts.h"
 #include "lichen_app.h"
+#include "lichen_badge.h"
 #include "lichen_crashlog.h"
 #include "lichen_ui.h"
 #include "menu.h"
@@ -37,6 +38,7 @@ static char const TAG[] = "crashlog";
 #define RESULT_CAP         96
 #define JOB_STACK          6144
 #define POLL_MS            1000
+#define BADGE_TICK_MS      1000
 #define JOB_PENDING        (-1)
 
 static lichen_app_t const crashlog_app;
@@ -321,6 +323,7 @@ static void open_crashlog(lv_obj_t *screen) {
     s_v.group   = lv_group_get_default(); // shell_open's group for this screen while it is built
     s_v.entries = heap_caps_calloc(CRASHLOG_MAX, sizeof(crashlog_entry_t), MALLOC_CAP_SPIRAM);
     lichen_crashlog_mark_seen(&crashlog_app); // logs once when it cannot
+    lichen_badge_set(crashlog_app.id, 0);     // seen now; badge_tick reads the log again within a second
     s_tile.valid = false;
     if (s_job == JOB_NONE) {
         s_result[0] = '\0'; // an old outcome is news no more
@@ -331,20 +334,36 @@ static void open_crashlog(lv_obj_t *screen) {
     lv_obj_add_event_cb(screen, on_screen_delete, LV_EVENT_DELETE, NULL);
 }
 
-static bool tile_text(char *l1, size_t c1, char *l2, size_t c2) {
+// Reads the log only when it changed or the viewer marked it seen, and sets the badge (#102) from what it read; false
+// while it cannot be read (no memory). LVGL task.
+static bool tile_fresh(void) {
     uint32_t generation = lichen_crashlog_generation();
     if (!s_tile.valid || generation != s_tile.generation) {
         if (!lichen_crashlog_status(&crashlog_app, &s_status)) {
-            return false; // not read (no memory): keep what is shown, try again in a second
+            return false;
         }
         crashlog_tile(s_status.entries, s_status.unseen, &s_status.newest, s_tile.l1, sizeof(s_tile.l1), s_tile.l2,
                       sizeof(s_tile.l2));
         s_tile.generation = generation;
         s_tile.valid      = true;
+        lichen_badge_set(crashlog_app.id, (unsigned)s_status.unseen);
+    }
+    return true;
+}
+
+static bool tile_text(char *l1, size_t c1, char *l2, size_t c2) {
+    if (!tile_fresh()) {
+        return false; // keep what is shown, try again in a second
     }
     snprintf(l1, c1, "%s", s_tile.l1);
     snprintf(l2, c2, "%s", s_tile.l2);
     return true;
+}
+
+// Keeps the badge current in either home layout: the grid never asks for the tile's text
+static void badge_tick(lv_timer_t *timer) {
+    (void)timer;
+    tile_fresh();
 }
 
 static lichen_app_t const crashlog_app = {
@@ -394,9 +413,10 @@ static void notice_tick(lv_timer_t *timer) {
 
 void crashlog_app_register(void) {
     lichen_register_app(&crashlog_app);
+    lvgl_port_lock(0);
+    lv_timer_create(badge_tick, BADGE_TICK_MS, NULL);
     if (lichen_crashlog_after_crash()) {
-        lvgl_port_lock(0);
         lv_timer_create(notice_tick, NOTICE_TICK_MS, NULL);
-        lvgl_port_unlock();
     }
+    lvgl_port_unlock();
 }

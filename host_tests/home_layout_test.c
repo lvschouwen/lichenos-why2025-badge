@@ -2,6 +2,7 @@
 #include "home_layout.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int failures;
 
@@ -63,6 +64,15 @@ int main(void) {
     // Nothing to move on
     CHECK(home_move(HOME_TILES, 0, 0, HOME_KEY_DOWN) == 0);
     CHECK(home_move(HOME_GRID, 0, 0, HOME_KEY_RIGHT) == 0);
+
+    // Count bubble (#102): none at 0, the number up to 99, "99+" above
+    char b[8];
+    CHECK(!home_badge_text(0, b, sizeof(b)) && b[0] == '\0');
+    CHECK(home_badge_text(1, b, sizeof(b)) && strcmp(b, "1") == 0);
+    CHECK(home_badge_text(99, b, sizeof(b)) && strcmp(b, "99") == 0);
+    CHECK(home_badge_text(100, b, sizeof(b)) && strcmp(b, "99+") == 0);
+    CHECK(home_badge_text(4000000000u, b, sizeof(b)) && strcmp(b, "99+") == 0);
+    CHECK(!home_badge_text(5, b, 0));
 
     CHECK(home_layout_from_u8(0) == HOME_TILES);
     CHECK(home_layout_from_u8(1) == HOME_GRID);

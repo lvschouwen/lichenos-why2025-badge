@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // Home's two layouts and how the arrow keys move the selection in them (#66). Pure, host-tested in
@@ -21,3 +23,7 @@ home_layout_t home_layout_from_u8(uint8_t value);
 // The new selection after `key` (other keys and moves with nothing there keep `index`). Tiles: Up/Down, clamped. Grid:
 // three columns, arrows move in 2-D and stop at the edges and where there is no app.
 int home_move(home_layout_t layout, int count, int index, uint32_t key);
+
+// The count bubble on an app's icon (#102): false and "" for 0 (no bubble), "1".."99", "99+" above that
+#define HOME_BADGE_CAP 99
+bool home_badge_text(unsigned count, char *out, size_t cap);
