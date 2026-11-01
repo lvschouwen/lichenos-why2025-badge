@@ -126,7 +126,7 @@ uint32_t LoraRadio::getRngSeed() {
 }
 
 bool LoraRadio::startSendRaw(uint8_t const *bytes, int len) {
-    if (len <= 0) {
+    if (len <= 0 || __atomic_load_n(&tx_blocked, __ATOMIC_ACQUIRE)) {
         return false;
     }
     if (!lora_send(bytes, (size_t)len, getEstAirtimeFor(len))) {

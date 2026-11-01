@@ -382,6 +382,16 @@ add_test(NAME tca8418_mask_test COMMAND tca8418_mask_test)
 set(MESHCORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../meshcore)
 set(CRYPTO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/arduinolibs/libraries/Crypto)
 file(GLOB ED25519_SOURCES ${MESHCORE_DIR}/lib/ed25519/*.c)
+# The stored identity's check at load (#80): MeshCore's Ed25519 code alone, built as is (third party: no -Werror)
+add_library(ed25519_host STATIC ${ED25519_SOURCES})
+target_include_directories(ed25519_host SYSTEM PUBLIC ${MESHCORE_DIR}/lib/ed25519)
+target_compile_options(ed25519_host PRIVATE -w)
+add_executable(mesh_ident_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_ident_test.c
+                               ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_ident.c)
+target_include_directories(mesh_ident_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_ident_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(mesh_ident_test ed25519_host)
+add_test(NAME mesh_ident_test COMMAND mesh_ident_test)
 add_library(meshcore_host STATIC
     ${MESHCORE_DIR}/src/Dispatcher.cpp
     ${MESHCORE_DIR}/src/Mesh.cpp
@@ -1015,5 +1025,6 @@ add_custom_target(run_tests
     led_pattern_test
     notify_view_test
     sys_notice_rules_test
+    mesh_ident_test
     COMMENT "Running all host tests"
 )

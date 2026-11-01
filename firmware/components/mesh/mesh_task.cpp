@@ -11,6 +11,7 @@
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
 #include "mesh_hist_crypto.h"
+#include "mesh_ident.h"
 #include "mesh_journal.h"
 #include "meshcore_run.h"
 #include "channel_input.h"
@@ -29,6 +30,7 @@
 #include "esp_timer.h"
 #include "lichen_badge.h"
 #include "lichen_fs.h"
+#include "lichen_notify.h"
 #include "lichen_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -167,6 +169,13 @@ static bool mesh_is_stopped(void) {
 // Why a stopped MeshCore refuses, for the setters and senders
 static char const *stopped_why(void) {
     return __atomic_load_n(&final_stop, __ATOMIC_ACQUIRE) ? "MeshCore stopped for update" : "MeshCore is not running";
+}
+
+// The stored identity's check at load (#80, ident_verify): only a passed check transmits
+static mesh_ident_t ident_state;
+
+static bool ident_tx_allowed(void) {
+    return mesh_ident_tx_allowed(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE));
 }
 
 // mesh_start and mesh_stop one at a time: the update path, a job task and the boot never overlap
@@ -647,6 +656,33 @@ extern "C" bool mesh_stop(mesh_stop_reason_t why) {
     return ok;
 }
 
+// The stored identity's check (#80): once, at the first load. A mismatch blocks every transmit until a restart, at the
+// senders (nothing is queued to fail later) and at the radio (MeshCore's own ACKs, paths and adverts). The file is
+// never rewritten or regenerated here: it may be the only copy of the identity.
+static void ident_apply(mesh_ident_t state, bool simulated) {
+    __atomic_store_n(&ident_state, state, __ATOMIC_RELEASE);
+    __atomic_store_n(&lora_radio.tx_blocked, !mesh_ident_tx_allowed(state), __ATOMIC_RELEASE);
+    if (state != MESH_IDENT_MISMATCH) {
+        return;
+    }
+    ESP_LOGE(TAG, "MeshCore identity MISMATCH%s: the stored public key is not the private key's; TX blocked, file "
+                  "kept as it is", simulated ? " (simulated)" : "");
+    // an error notice: toasted, kept in the history across restarts until read
+    lichen_notify("meshcore", LN_ERROR, simulated ? "MeshCore identity (test)" : "MeshCore identity damaged",
+                  "The stored keys do not match: MeshCore will not transmit. The file is kept; fw mesh shows it.",
+                  LN_ONCE_BOOT);
+}
+
+static void ident_verify(BadgeMesh *n) {
+    uint8_t      prv[PRV_KEY_SIZE];
+    mesh_ident_t state = MESH_IDENT_MISMATCH; // a key that can't be read is not a sound one either
+    if (n->self_id.writeTo(prv, sizeof(prv)) == PRV_KEY_SIZE) {
+        state = mesh_ident_check(prv, n->self_id.pub_key);
+    }
+    mh_wipe(prv, sizeof(prv));
+    ident_apply(state, false);
+}
+
 // Milestone 2 kept the key pair in NVS; MeshCore's DataStore keeps it in /storage/meshcore. Moved once, so the
 // contacts that already know the badge keep knowing it.
 static void migrate_identity(void) {
@@ -889,6 +925,9 @@ extern "C" char const *mesh_channel_remove_named(char const *name) {
 }
 
 extern "C" bool mesh_send_advert(void) {
+    if (!ident_tx_allowed()) {
+        return false; // a damaged identity transmits nothing (#80)
+    }
     if (mesh_advert_refusal(clock_is_set())) {
         return false; // nodes that heard us before drop an advert stamped before their last one (#8)
     }
@@ -1006,6 +1045,10 @@ extern "C" size_t mesh_channel_text_max(void) {
 static bool send_ready(char const **why) {
     if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || !outbox || mesh_is_stopped()) {
         *why = stopped_why();
+        return false;
+    }
+    if (!ident_tx_allowed()) {
+        *why = "identity damaged: TX blocked"; // refused here, not queued to fail at the radio
         return false;
     }
     return true;
@@ -1237,6 +1280,23 @@ static void cmd_mesh_chats(void) {
     console_reply("%u chat(s), %u unread", (unsigned)n, (unsigned)tile_unread());
 }
 
+// "fw mesh ident simulate" (#80): the mismatch path on the bench without touching the identity file. A copy of the
+// live public key with one bit flipped must fail the check; then TX is blocked and the notice raised, as for a real
+// mismatch, until the next restart (which checks the real file again).
+static void cmd_mesh_ident_simulate(void) {
+    uint8_t prv[PRV_KEY_SIZE], pub[PUB_KEY_SIZE];
+    mesh_lock();
+    size_t got = node->self_id.writeTo(prv, sizeof(prv));
+    memcpy(pub, node->self_id.pub_key, sizeof(pub));
+    mesh_unlock();
+    pub[PUB_KEY_SIZE / 2] ^= 0x10;
+    mesh_ident_t flipped = got == PRV_KEY_SIZE ? mesh_ident_check(prv, pub) : MESH_IDENT_UNCHECKED;
+    mh_wipe(prv, sizeof(prv));
+    console_reply("check of a copy with one bit flipped: %s", mesh_ident_text(flipped));
+    ident_apply(MESH_IDENT_MISMATCH, true);
+    console_reply("identity: %s (simulated until restart; the file is untouched)", mesh_ident_text(MESH_IDENT_MISMATCH));
+}
+
 // "fw mesh start|stop" (#103): the same job as the tile and the Settings row; "fw mesh" shows the result
 static void cmd_mesh_run(bool start) {
     char const *why = meshcore_run_request(start);
@@ -1287,9 +1347,13 @@ static void cmd_mesh(char const *args) {
         cmd_mesh_chats();
         return;
     }
+    if (strcmp(args, "ident simulate") == 0) {
+        cmd_mesh_ident_simulate();
+        return;
+    }
     if (*args) {
         console_reply("mesh | mesh start | mesh stop | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
-                      "[txdbm] | mesh link | mesh out | mesh chats | mesh hist [compact] | mesh send <channel> <text> | "
+                      "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
                       "mesh dm <12 hex> <text>");
         return;
     }
@@ -1316,6 +1380,7 @@ static void cmd_mesh(char const *args) {
                   key[0], key[1], key[2], key[3], name, (unsigned long)rx, (unsigned long)dropped,
                   (unsigned long)sent, (unsigned long)send_failed, (unsigned long)timeouts, (unsigned long)refused,
                   contacts, (unsigned)msgs);
+    console_reply("identity: %s", mesh_ident_text(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE)));
     mesh_settings_t st;
     if (mesh_get_settings(&st)) {
         int preset = radio_preset_match_exact(st.freq, st.bw, st.sf, st.cr, st.path_hash_size);
@@ -1431,6 +1496,10 @@ static void cmd_advert(char const *args) {
         return;
     }
     (void)args;
+    if (!ident_tx_allowed()) {
+        console_reply("advert not sent: identity %s", mesh_ident_text(MESH_IDENT_MISMATCH));
+        return;
+    }
     if (char const *why = mesh_advert_refusal(clock_is_set())) {
         console_reply("advert not sent: %s (other nodes would drop it)", why);
         return;
@@ -1504,7 +1573,7 @@ extern "C" void mesh_console_init(void) {
     registered = true;
     console_register("mesh",
                      "mesh | mesh start | mesh stop | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | "
-                     "mesh link | mesh out | mesh chats | mesh hist [compact] | mesh send <channel> <text> | "
+                     "mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
                      "mesh dm <12 hex> <text>",
                      cmd_mesh);
     console_register("contacts", "contacts (nodes heard, newest first)", cmd_contacts);
@@ -1622,14 +1691,17 @@ static bool start_locked(char const *files_dir) {
     bool first_boot = !SPIFFS.exists("/prefs.json") && !SPIFFS.exists("/node_prefs");
     radio_driver.begin();
     n->begin();
+    ident_verify(n); // before anything can transmit: the task does not exist yet
     apply_boot_radio(n, first_boot);
     // The history from the SD card (#48), encrypted with a key from the identity begin() just loaded (#98), before the
     // mesh task runs: the replayed messages are older than anything MeshCore adds, which it does only in its loop
     uint8_t prv[PRV_KEY_SIZE];
     // With room for the private key only, that is what it writes; anything else: no key (never stack garbage)
-    bool have_prv = n->self_id.writeTo(prv, sizeof(prv)) == PRV_KEY_SIZE;
+    // A damaged identity (#80) may be a damaged private key: no history key from it, so nothing is written under a
+    // wrong key and the stored history stays readable once the identity is sound again
+    bool have_prv = ident_tx_allowed() && n->self_id.writeTo(prv, sizeof(prv)) == PRV_KEY_SIZE;
     if (!have_prv) {
-        ESP_LOGW(TAG, "identity key not readable: message history off");
+        ESP_LOGW(TAG, "identity key not readable or damaged: message history off");
     }
     mesh_journal_boot(STORE_MESSAGES, mesh_lock, mesh_unlock, have_prv ? prv : NULL, sizeof(prv));
     mh_wipe(prv, sizeof(prv));
@@ -1653,7 +1725,7 @@ static bool start_locked(char const *files_dir) {
     if (!task_create()) {
         return false;
     }
-    ESP_LOGW(TAG, "MeshCore companion up: %d contacts, BadgeMesh %u bytes in PSRAM", n->getNumContacts(),
-             (unsigned)sizeof(BadgeMesh));
+    ESP_LOGW(TAG, "MeshCore companion up: %d contacts, BadgeMesh %u bytes in PSRAM, identity %s", n->getNumContacts(),
+             (unsigned)sizeof(BadgeMesh), mesh_ident_text(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE)));
     return true;
 }

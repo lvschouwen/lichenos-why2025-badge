@@ -28,6 +28,8 @@ public:
     // MeshCore gives up on a send after 1.5 x its airtime; the C6's answer can come later than that (#65 review)
     uint32_t send_timeouts = 0; // given up by MeshCore before the C6 answered
     uint32_t send_refused  = 0; // not started: the previous packet was still waiting for the C6's answer
+    // The stored identity failed its check at load (#80, mesh_ident.h): nothing leaves the radio until a restart
+    bool     tx_blocked    = false;
 
 private:
     float last_rssi = 0, last_snr = 0;
