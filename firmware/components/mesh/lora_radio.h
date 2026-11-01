@@ -23,7 +23,10 @@ public:
     void     setTxPower(int8_t dbm) override;
     uint32_t getRngSeed() override;
 
-    uint32_t dropped     = 0; // packets that arrived while the queue was full
+    // Packets that arrived while the queue was full: counted by the LoRa task, read by the console (#6)
+    uint32_t rx_dropped() const { return __atomic_load_n(&dropped, __ATOMIC_RELAXED); }
+    void     count_dropped() { __atomic_fetch_add(&dropped, 1, __ATOMIC_RELAXED); }
+    // The rest are counted on the mesh task inside MeshCore's loop and read under the mesh lock
     uint32_t send_failed = 0; // packets the C6 didn't get out
     // MeshCore gives up on a send after 1.5 x its airtime; the C6's answer can come later than that (#65 review)
     uint32_t send_timeouts = 0; // given up by MeshCore before the C6 answered
@@ -32,7 +35,8 @@ public:
     bool     tx_blocked    = false;
 
 private:
-    float last_rssi = 0, last_snr = 0;
+    uint32_t dropped   = 0;
+    float    last_rssi = 0, last_snr = 0;
     bool  sending   = false;
     bool  completed = false; // isSendComplete() saw the C6's answer for the current packet
 };

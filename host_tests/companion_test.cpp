@@ -101,6 +101,9 @@ uint16_t BadgeBoard::getBattMilliVolts() { return 0; }
 // The outbox is shared with the UI on the badge (a critical section there); one thread here
 extern "C" void mesh_ob_enter(void) {}
 extern "C" void mesh_ob_exit(void) {}
+extern "C" void mesh_advert_limited(uint32_t refused) {
+    (void)refused;
+}
 
 // The app's end of the companion protocol: frames to deliver, frames received
 class FakeApp : public BaseSerialInterface {

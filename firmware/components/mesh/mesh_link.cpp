@@ -48,6 +48,20 @@ void BadgeMesh::logTxFail(mesh::Packet *packet, int len) {
     mesh_ob_exit();
 }
 
+void BadgeMesh::onAdvertRecv(mesh::Packet *packet, mesh::Identity const &id, uint32_t timestamp,
+                             uint8_t const *app_data, size_t app_data_len) {
+    if (!lookupContactByPubKey(id.pub_key, PUB_KEY_SIZE)) {
+        advert_limit_result_t r = advert_limit_take(&advert_limit_, (uint32_t)millis());
+        if (r != ADVERT_LIMIT_OK) {
+            if (r == ADVERT_LIMIT_REFUSED_FIRST) {
+                mesh_advert_limited(advert_limit_.refused);
+            }
+            return;
+        }
+    }
+    MyMesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len);
+}
+
 static void contact_to_frame(ContactInfo const &c, mf_contact_t *out) {
     memcpy(out->pub, c.id.pub_key, MF_PUB_LEN);
     out->type         = c.type;

@@ -1,7 +1,7 @@
 # MeshCore's companion (meshcore/ submodule: src/ and examples/companion_radio, built unchanged) with rweather's Crypto
 # and our Arduino shim, as host_tests/CMakeLists.txt builds it (meshcore_companion_host, #65); the badge target is
 # companion/target.h. Pure parts (mesh_store, mesh_format, mesh_tile, lora_airtime, radio_presets,
-# channel_input, mesh_grid) are host-tested.
+# channel_input, mesh_grid, advert_limit) are host-tested.
 # meshcore_app.c makes it a Lichen app (#67), meshcore_settings.c its Settings page; the app opens on its own grid of
 # tiles (#88: meshcore_grid.c on the pure mesh_grid.c, the lists in meshcore_chats.c and meshcore_contacts.c): mesh depends on lichen_api, never
 # the other way round, and never on lichen_shell (#84).
@@ -21,7 +21,7 @@ set(THIRD_PARTY_SRCS
 set(COMPANION_SRCS
     ${MC}/src/helpers/IdentityStore.cpp ${MC}/src/helpers/RegionMap.cpp ${MC}/src/helpers/TransportKeyStore.cpp
     ${MC}/examples/companion_radio/MyMesh.cpp ${MC}/examples/companion_radio/DataStore.cpp)
-idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "lora_radio.cpp" "mesh_store.c" "lora_airtime.c"
+idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "lora_radio.cpp" "mesh_store.c" "lora_airtime.c" "advert_limit.c"
                             "mesh_hist.c" "mesh_hist_crypto.cpp" "mesh_hist_selftest.c" "mesh_ident.c" "mesh_journal.c" "mesh_format.c" "mesh_contact_fmt.c" "mesh_tile.c"
                             "meshcore_hdr.c" "meshcore_app.c" "meshcore_run.c" "mesh_run.c" "meshcore_grid.c" "meshcore_grid_icons.c" "mesh_grid.c" "meshcore_list.c" "meshcore_chats.c" "meshcore_contacts.c" "meshcore_chat.c" "meshcore_contact.c" "mesh_chat.c" "meshcore_settings.c" "radio_presets.c" "radio_filter.c" "radio_confirm.c" "channel_input.c" "mc_first.c"
                             "../../../shared/arduino_shim/arduino_shim.cpp"

@@ -35,8 +35,9 @@ static void on_packet(uint8_t const *data, size_t len, int16_t rssi_x10, int16_t
     item.rssi_x10 = rssi_x10;
     item.snr_x10  = snr_x10;
     memcpy(item.data, data, len);
-    if (xQueueSend(rx_queue, &item, 0) != pdTRUE && instance) {
-        instance->dropped++;
+    LoraRadio *self = __atomic_load_n(&instance, __ATOMIC_ACQUIRE); // set by claim() on the mesh task
+    if (xQueueSend(rx_queue, &item, 0) != pdTRUE && self) {
+        self->count_dropped();
     }
 }
 
@@ -63,7 +64,7 @@ void LoraRadio::begin() {
 }
 
 bool LoraRadio::claim() {
-    instance = this;
+    __atomic_store_n(&instance, this, __ATOMIC_RELEASE);
     if (!rx_queue) {
         rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_item_t));
     } else {

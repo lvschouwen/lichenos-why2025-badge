@@ -7,6 +7,7 @@
 // platform: mesh_task.cpp on the badge, a no-op in the host test).
 #include "MyMesh.h"
 
+#include "advert_limit.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
 #include "mesh_outbox.h"
@@ -14,6 +15,8 @@
 extern "C" {
 void mesh_ob_enter(void);
 void mesh_ob_exit(void);
+// Adverts from new nodes are being dropped (#6): told once per spell, with the total since boot (mesh_task.cpp logs it)
+void mesh_advert_limited(uint32_t refused);
 }
 
 #define LINK_PUSH_KINDS 0x11 // push codes 0x80..0x90
@@ -86,6 +89,7 @@ public:
               ob_t *ob)
         : MyMesh(radio, rng, rtc, tables, store), ob_(ob) {
         pipe_.attach(this, ob);
+        advert_limit_init(&advert_limit_);
     }
     CompanionPipe &pipe() { return pipe_; }
     // A contact change from the details screen (#49), under the mesh lock. It goes to MyMesh as its own command
@@ -107,8 +111,12 @@ protected:
     void logRx(mesh::Packet *packet, int len, float score) override;
     void logTx(mesh::Packet *packet, int len) override;
     void logTxFail(mesh::Packet *packet, int len) override;
+    // Verified adverts: a node not in the contact table goes through the new-node rate limit first (#6)
+    void onAdvertRecv(mesh::Packet *packet, mesh::Identity const &id, uint32_t timestamp, uint8_t const *app_data,
+                      size_t app_data_len) override;
 
 private:
-    ob_t         *ob_;
-    CompanionPipe pipe_;
+    ob_t          *ob_;
+    CompanionPipe  pipe_;
+    advert_limit_t advert_limit_;
 };

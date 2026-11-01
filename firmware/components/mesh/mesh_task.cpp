@@ -136,6 +136,10 @@ extern "C" void mesh_ob_enter(void) {
 extern "C" void mesh_ob_exit(void) {
     portEXIT_CRITICAL(&ob_mux);
 }
+extern "C" void mesh_advert_limited(uint32_t refused) {
+    ESP_LOGW(TAG, "adverts from new nodes rate-limited (%lu dropped since boot): an advert flood?",
+             (unsigned long)refused);
+}
 static SemaphoreHandle_t mesh_lock_handle(void) {
     static StaticSemaphore_t buf;
     static SemaphoreHandle_t handle = xSemaphoreCreateMutexStatic(&buf);
@@ -1361,7 +1365,7 @@ static void cmd_mesh(char const *args) {
     uint8_t  key[4];
     char     name[sizeof(node->getNodePrefs()->node_name)];
     int      contacts = node->getNumContacts();
-    uint32_t rx = radio_driver.getPacketsRecv(), dropped = lora_radio.dropped;
+    uint32_t rx = radio_driver.getPacketsRecv(), dropped = lora_radio.rx_dropped();
     uint32_t sent = radio_driver.getPacketsSent(), send_failed = lora_radio.send_failed;
     uint32_t timeouts = lora_radio.send_timeouts, refused = lora_radio.send_refused;
     size_t   msgs = mesh_store_message_count();
