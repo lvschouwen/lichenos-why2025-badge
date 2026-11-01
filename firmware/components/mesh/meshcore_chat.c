@@ -379,6 +379,12 @@ static void style_ta(void) {
     lv_obj_set_style_text_color(ta, lv_color_hex(THEME_BG), LV_PART_CURSOR);
 }
 
+// The search key (●, #79), as "/" on an empty compose line
+static void on_search(void *arg) {
+    (void)arg;
+    search_enter(); // does nothing while a search is open
+}
+
 static lv_obj_t *build_chat(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_set_style_pad_bottom(screen, THEME_PAD, 0);
@@ -387,6 +393,7 @@ static lv_obj_t *build_chat(void) {
     lv_obj_set_scrollable(screen, false);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     shell_on_esc(on_esc, NULL);
+    shell_on_search(on_search, NULL);
 
     lv_obj_t *heading = lv_label_create(screen);
     lv_obj_set_width(heading, LV_PCT(100));

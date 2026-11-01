@@ -13,6 +13,7 @@ typedef void (*raw_keys_cb)(key_raw_event_t const *ev, void *arg);
 // False when the listener table is full.
 // The Keyboard Test sets this while it is open; the keyboard task stamps it into each event at capture time
 void raw_keys_set_test_open(bool open);
+bool raw_keys_test_open(void); // what the keyboard task stamps now ("fw keys send" shape keys, #79)
 
 bool raw_keys_listen(raw_keys_cb cb, void *arg, bool swallow);
 void raw_keys_unlisten(raw_keys_cb cb, void *arg);

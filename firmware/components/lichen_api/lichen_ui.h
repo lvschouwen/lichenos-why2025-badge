@@ -16,6 +16,9 @@ void shell_open(lv_obj_t *(*build)(void), int screen_id);
 // Called from inside a builder: the screen gets first use of Esc. fn(arg) runs on Esc (LVGL context); when it returns
 // true the Esc is used up (a search or a draft was cleared), otherwise the screen goes back as usual (#32).
 void shell_on_esc(bool (*fn)(void *arg), void *arg);
+// Called from inside a builder, like shell_on_esc: the screen can search (a list filter, a chat). fn(arg) runs on the
+// search key (●, #79; LVGL context) and starts or restarts the screen's search. Screens without one ignore the key.
+void shell_on_search(void (*fn)(void *arg), void *arg);
 // Up/Down on a scrollable object: moves by dy within its content only, so nothing scrolls when it all fits and nothing
 // overscrolls. shell_scroll_tame turns off LVGL's elastic and momentum scrolling on obj (screens, menus, lists).
 void shell_scroll_by(lv_obj_t *obj, int32_t dy);

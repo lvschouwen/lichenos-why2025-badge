@@ -368,6 +368,13 @@ static bool stop_for_update(void) {
     return stopped;
 }
 
+// The Messages key (▲, #79): the Chat tile's conversation list, unless open() is asking the first-run questions
+static void open_messages(void) {
+    if (!first_screen) {
+        meshcore_chats_open();
+    }
+}
+
 static lichen_app_t const meshcore_app = {
     .name             = "MeshCore",
     .id               = "meshcore",
@@ -379,6 +386,7 @@ static lichen_app_t const meshcore_app = {
     .start_background = start_background,
     .stop_for_update  = stop_for_update,
     .first_run_set    = first_run_set,
+    .open_messages    = open_messages,
 };
 
 static lichen_app_t const *self(void) {

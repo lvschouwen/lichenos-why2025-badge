@@ -106,6 +106,13 @@ static bool on_esc(void *arg) {
     return true;
 }
 
+// The search key (●, #79): a fresh search, as after Esc
+static void on_search(void *arg) {
+    menu_filter_t *f = arg;
+    f->query[0]      = '\0';
+    apply(f);
+}
+
 static void on_screen_delete(lv_event_t *e) {
     free(lv_event_get_user_data(e));
 }
@@ -124,6 +131,7 @@ menu_filter_t *menu_filter_create(lv_obj_t *screen, lv_obj_t *menu, menu_filter_
     show_line(f, 0);
     menu_on_text(menu, on_text, f);
     shell_on_esc(on_esc, f);
+    shell_on_search(on_search, f);
     lv_obj_add_event_cb(screen, on_screen_delete, LV_EVENT_DELETE, f);
     return f;
 }

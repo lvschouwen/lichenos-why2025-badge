@@ -3,12 +3,14 @@
 #include <stdbool.h>
 #include <string.h>
 
-// LVGL's key codes (ui_probe.c static_asserts them)
+// LVGL's key codes (ui_probe.c static_asserts them); the shape keys as their TCA8418 codes (tca8418_keymap.h)
 static struct {
     char const *name;
     uint32_t    key;
 } const NAMES[] = {{"up", 17},   {"down", 18}, {"left", 20}, {"right", 19}, {"enter", 10},
-                   {"esc", 27},  {"tab", 9},   {"bksp", 8},  {"wait", UI_KEY_WAIT}};
+                   {"esc", 27},  {"tab", 9},   {"bksp", 8},  {"wait", UI_KEY_WAIT},
+                   {"square", UI_KEY_SHAPE(2)}, {"triangle", UI_KEY_SHAPE(3)}, {"cross", UI_KEY_SHAPE(4)},
+                   {"circle", UI_KEY_SHAPE(5)}, {"cloud", UI_KEY_SHAPE(6)},    {"diamond", UI_KEY_SHAPE(7)}};
 
 size_t ui_keys_parse(char const *seq, uint32_t *out, size_t max, size_t *err_pos) {
     size_t n = 0;

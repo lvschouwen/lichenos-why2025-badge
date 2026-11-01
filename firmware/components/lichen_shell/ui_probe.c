@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nav.h"
+#include "raw_keys.h"
 #include "shell_parts.h"
 #include "ui_keys.h"
 
@@ -35,7 +36,9 @@ static void deliver_key(uint32_t key) {
         return; // it woke the dark screen (#43), as a real key would
     }
     lv_group_t *group = shell_top_group();
-    if (key == LV_KEY_ESC) {
+    if (UI_KEY_IS_SHAPE(key)) {
+        shortcuts_key(UI_KEY_SHAPE_CODE(key), true, raw_keys_test_open()); // as the real key: the OS's, never LVGL's
+    } else if (key == LV_KEY_ESC) {
         shell_esc(); // the shell's own Esc handling (it sees the indev's key, which this does not go through)
     } else if (key == LV_KEY_NEXT) {
         if (group) {

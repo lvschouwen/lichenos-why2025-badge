@@ -84,6 +84,11 @@ The rule: **core 1 draws, core 0 talks to the world.**
   keeps a history of 48 in `/storage/lichen/notify.bin` (the Notifications tile, the cloud key). The user switches
   sources on or off and sets do-not-disturb in Settings › Notifications. Lichen raises its own notices too (a crash,
   the PSRAM check, the clock, an update, the C6 coming back, the SD card, a sensor, low storage).
+- The six shape keys between Esc and Backspace are OS shortcuts (#79), the same on every screen: ■ home, ▲ messages
+  (the app with `open_messages`, MeshCore's Chat), ✕ back to the previous app, ● search (the screen's
+  `shell_on_search` hook: list filters, a chat), ☁ notifications, ◆ the Power app. The shell hears them as raw key
+  events before any focus; apps never get them as keys or text. Not while a dialog, the Keyboard Test, first-run
+  setup, an update or a power-down is on screen. Bench: `fw keys send square|triangle|cross|circle|cloud|diamond`.
 
 ## Lessons from BadgeVMS
 

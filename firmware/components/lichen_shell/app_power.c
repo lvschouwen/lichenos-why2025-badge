@@ -32,6 +32,10 @@ static void (*finish_hook)(bool power_off);
 static atomic_bool running;
 static bool        want_off; // set before the task starts
 
+bool power_going_down(void) {
+    return atomic_load(&running);
+}
+
 void shell_set_power_hook(void (*finish)(bool power_off)) {
     finish_hook = finish;
 }

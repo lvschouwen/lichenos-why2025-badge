@@ -78,6 +78,16 @@ bool shell_home_shown(void);
 
 void update_screen_init(void); // update_screen.c; from shell_start, with the LVGL lock held
 
+// The shape keys as OS shortcuts (#79). shortcuts.c: the raw key listener (shell_start, LVGL lock held), the key itself
+// (also "fw keys send square ..."), and the app history ✕ switches in (shell_open_app tells it). LVGL context.
+void shortcuts_start(void);
+void shortcuts_key(uint8_t code, bool pressed, bool test_open);
+void shortcuts_app_opened(size_t index);
+// shell.c: ● runs the top screen's shell_on_search() hook; false when it has none
+bool shell_search(void);
+// app_power.c: Restart or Power off is under way (the goodbye screen is up); any task
+bool power_going_down(void);
+
 // Notifications (#62). notify_ui.c: the toast, the tile badges, the cloud key; from shell_start, LVGL lock held.
 #define NOTIFY_APP_ID "notify"
 void     notify_ui_start(void);
@@ -88,5 +98,6 @@ void notify_app_register(void);
 void notify_open_entry(uint32_t id);
 void notify_open_centre(void);
 void notify_settings_open(void);
+void     notify_ui_cloud_key(void); // ☁ (#79, shortcuts.c): open the showing toast, else the centre
 // sys_notices.c: Lichen's own notifications (crash, PSRAM, clock, update, C6, SD, sensors, storage); from shell_start
 void sys_notices_start(void);

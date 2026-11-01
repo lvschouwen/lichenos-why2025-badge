@@ -10,9 +10,7 @@
 #include "lichen_clock.h"
 #include "notify_os.h"
 #include "notify_view.h"
-#include "raw_keys.h"
 #include "shell_parts.h"
-#include "tca8418_keymap.h"
 #include "theme.h"
 #include "update_screen.h"
 
@@ -126,16 +124,8 @@ static void drain(lv_timer_t *timer) {
     }
 }
 
-// The cloud key (raw key events, LVGL context): until #79 makes shape keys OS shortcuts, #62 listens itself
-static void on_raw_key(key_raw_event_t const *ev, void *arg) {
-    (void)arg;
-    if (!ev->pressed || ev->test_open || ev->code < 1 || ev->code > 80 ||
-        tca8418_keymap[ev->code - 1] != KEY_SCANCODE_CLOUD) {
-        return;
-    }
-    if (shell_dialog_group() || !shell_home_shown() || update_screen_busy() || setup_running()) {
-        return;
-    }
+// The cloud key (#79's shortcuts.c decided it may act now)
+void notify_ui_cloud_key(void) {
     if (s_showing.id) {
         uint32_t id = s_showing.id;
         hide();
@@ -185,7 +175,4 @@ void notify_ui_start(void) {
     s_body  = add_label(s_toast, THEME_DIM);
     lv_obj_set_hidden(s_toast, true);
     lv_timer_create(drain, DRAIN_MS, NULL);
-    if (!raw_keys_listen(on_raw_key, NULL, false)) {
-        ESP_LOGW(TAG, "cloud key not wired: no raw key listener free");
-    }
 }

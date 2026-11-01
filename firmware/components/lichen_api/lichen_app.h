@@ -35,6 +35,10 @@ typedef struct lichen_app {
     // that place (target as the app passed it, "" for none). LVGL context; the entry is already marked read. NULL:
     // the shell opens the app as from home.
     void (*open_notification)(char const *target, uint32_t id);
+    // The Messages key (▲, #79): the shell has just opened the app from home (its open() ran); open the app's message
+    // list on top of it, unless open() showed something else first (first-run questions). LVGL context. The first
+    // registered app that sets it gets the key; NULL: not a messaging app.
+    void (*open_messages)(void);
 } lichen_app_t;
 
 // Size of the app table. Home scrolls to the selection, so this only bounds the arrays; lichen_register_app logs an error

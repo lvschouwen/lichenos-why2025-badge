@@ -29,6 +29,8 @@ typedef struct {
     lv_group_t *group;
     bool      (*on_esc)(void *); // shell_on_esc(): true when it used the Esc
     void       *on_esc_arg;
+    void      (*on_search)(void *); // shell_on_search() (#79)
+    void       *on_search_arg;
 } frame_t;
 
 shell_sources_t shell_sources;
@@ -113,6 +115,24 @@ static void    *building_esc_arg;
 void shell_on_esc(bool (*fn)(void *arg), void *arg) {
     building_esc     = fn;
     building_esc_arg = arg;
+}
+
+static void  (*building_search)(void *); // shell_on_search(), the same way
+static void   *building_search_arg;
+
+void shell_on_search(void (*fn)(void *arg), void *arg) {
+    building_search     = fn;
+    building_search_arg = arg;
+}
+
+bool shell_search(void) {
+    int      depth = nav_depth();
+    frame_t *top   = depth > 0 ? &frames[depth - 1] : NULL;
+    if (!top || !top->on_search) {
+        return false;
+    }
+    top->on_search(top->on_search_arg);
+    return true;
 }
 
 // The top screen may use the Esc first (clear a search or a draft); if not, it goes back
@@ -323,6 +343,9 @@ void shell_open_app(size_t index) {
     lvgl_port_lock(0);
     opening = app;
     shell_open(build_app, 1 + (int)index);
+    if (nav_current() == 1 + (int)index) {
+        shortcuts_app_opened(index); // ✕ goes back here later (#79)
+    }
     lvgl_port_unlock();
 }
 
@@ -338,10 +361,14 @@ void shell_open(lv_obj_t *(*build)(void), int screen_id) {
     lv_group_t *previous = lv_group_get_default();
     lv_group_set_default(group);
     shell_on_esc(NULL, NULL);
+    shell_on_search(NULL, NULL);
     lv_obj_t *screen = build();
     bool (*on_esc)(void *) = building_esc;
     void *on_esc_arg       = building_esc_arg;
+    void (*on_search)(void *) = building_search;
+    void *on_search_arg       = building_search_arg;
     shell_on_esc(NULL, NULL);
+    shell_on_search(NULL, NULL);
     lv_group_set_default(previous);
     if (!screen) {
         nav_back();
@@ -352,7 +379,7 @@ void shell_open(lv_obj_t *(*build)(void), int screen_id) {
     if (lv_group_get_obj_count(group) == 0) {
         lv_group_add_obj(group, screen); // keys still reach a screen without focusable widgets
     }
-    frames[nav_depth() - 1] = (frame_t){screen, group, on_esc, on_esc_arg};
+    frames[nav_depth() - 1] = (frame_t){screen, group, on_esc, on_esc_arg, on_search, on_search_arg};
     show_top();
     lvgl_port_unlock();
 }
@@ -444,7 +471,7 @@ void shell_start(lv_display_t *display) {
     home_init();
     setup_init();
     screen_idle_init();
-    console_register("keys", "keys on|off (log every key) | keys log on|off (log raw key events) | keys send <up down left right enter esc tab bksp wait text:..|>", cmd_keys);
+    console_register("keys", "keys on|off (log every key) | keys log on|off (log raw key events) | keys send <up down left right enter esc tab bksp wait square triangle cross circle cloud diamond text:..|>", cmd_keys);
     ui_probe_init();
     ui_check_start();
     ui_perf_start();
@@ -464,6 +491,7 @@ void shell_start(lv_display_t *display) {
     lv_screen_load_anim(boot, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, true); // drops LVGL's empty start screen
     update_screen_init();
     notify_ui_start();
+    shortcuts_start();
     up = true;
     lvgl_port_unlock();
     sys_notices_start();

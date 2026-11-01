@@ -30,6 +30,10 @@ void raw_keys_set_test_open(bool open) {
     atomic_store(&test_open, open);
 }
 
+bool raw_keys_test_open(void) {
+    return atomic_load(&test_open);
+}
+
 // Keyboard task
 static bool hook(key_raw_event_t const *ev, void *arg) {
     (void)arg;

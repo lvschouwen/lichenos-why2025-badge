@@ -4,7 +4,8 @@
 # dialog_countdown.c (dialog_countdown_test.c, #14), ui_perf_stats.c (ui_perf_stats_test.c, #93), bench_calc.c (bench_calc_test.c, #96), sd_settings_model.c (sd_settings_model_test.c, #99),
 # idle_policy.c (idle_policy_test.c, #43; screen_idle.c applies it), lora_activity.c (lora_activity_test.c, #29; the
 # status bar's TX/RX chevrons), notify_view.c (notify_view_test.c, #62),
-# sys_notice_rules.c (sys_notice_rules_test.c, #62; sys_notices.c raises what it decides).
+# sys_notice_rules.c (sys_notice_rules_test.c, #62; sys_notices.c raises what it decides),
+# shortcut.c (shortcut_test.c, #79; shortcuts.c runs the shape-key shortcuts it decides).
 # notify_ui.c and notify_centre.c are the notifications' toast, tile badges, cloud key, centre and settings page (#62).
 # app_bench.c is the Bench app (#96), app_crashlog.c the Crash log app (#72, on lichen_crashlog.h), app_power.c the Power app (#65).
 # shell.c, boot_screen.c, status_bar.c and logo.c are the LVGL screens; shell.c and app_settings.c implement lichen_ui.h.
@@ -15,6 +16,7 @@ idf_component_register(SRCS "log_store.c" "log_ring.c" "nav.c" "shell.c" "home.c
                             "sd_screen.c" "sd_settings_model.c"
                             "idle_policy.c" "screen_idle.c"
                             "notify_view.c" "notify_ui.c" "notify_centre.c" "sys_notices.c" "sys_notice_rules.c"
+                            "shortcut.c" "shortcuts.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api lichen_net
                        PRIV_REQUIRES lichen_boot lichen_clock freertos fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage sdcard app_update esp_system psram_guard esp_mm lichen_led ota)
