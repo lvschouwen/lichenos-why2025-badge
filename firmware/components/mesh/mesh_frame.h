@@ -20,8 +20,10 @@ enum {
     MF_CMD_APP_START        = 1,
     MF_CMD_SEND_TXT_MSG     = 2,
     MF_CMD_SEND_CHANNEL_TXT = 3,
+    MF_CMD_ADD_UPDATE_CONTACT = 9,
     MF_CMD_SYNC_NEXT        = 10,
     MF_CMD_RESET_PATH       = 13,
+    MF_CMD_REMOVE_CONTACT   = 15,
     MF_CMD_DEVICE_QUERY     = 22,
 };
 enum {
@@ -84,6 +86,20 @@ size_t mf_encode_send_channel(uint8_t *out, uint8_t channel_idx, uint32_t timest
 size_t mf_encode_send_dm(uint8_t *out, uint8_t attempt, uint32_t timestamp, uint8_t const prefix[MF_PREFIX],
                          char const *text, size_t text_len);
 size_t mf_encode_reset_path(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);
+size_t mf_encode_remove_contact(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);
+
+// A whole contact for CMD_ADD_UPDATE_CONTACT (#49), as MyMesh::updateContactFromFrame reads it. lastmod goes along so
+// a changed flag does not move the contact in "most recently heard" order.
+#define MF_PATH_MAX 64 // MAX_PATH_SIZE
+typedef struct {
+    uint8_t  pub[MF_PUB_LEN];
+    uint8_t  type, flags, out_path_len;
+    uint8_t  out_path[MF_PATH_MAX];
+    char     name[MF_NAME_MAX]; // not necessarily terminated, as ContactInfo.name
+    uint32_t last_advert_timestamp, lastmod;
+    int32_t  gps_lat, gps_lon;
+} mf_contact_t;
+size_t mf_encode_update_contact(uint8_t *out, mf_contact_t const *c); // 148 bytes
 
 void mf_decode(uint8_t const *frame, size_t len, mf_msg_t *out);
 

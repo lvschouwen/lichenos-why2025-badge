@@ -271,11 +271,12 @@ extern "C" size_t mesh_contacts_snapshot(mesh_contact_t *out, size_t max, size_t
         memcpy(entry.pubkey, c.id.pub_key, sizeof(entry.pubkey));
         mesh_sanitize(c.name, strnlen(c.name, sizeof(c.name)), entry.name, sizeof(entry.name));
         entry.type     = c.type;
+        entry.flags    = c.flags;
         entry.path_len = c.out_path_len;
         entry.age_s    = now > c.lastmod ? now - c.lastmod : 0;
-        // Keep out[] sorted by age, newest first, dropping the oldest once full
+        // Keep out[] sorted, favourites first and then newest first (#49), dropping the last once full
         size_t pos = n;
-        while (pos > 0 && out[pos - 1].age_s > entry.age_s) {
+        while (pos > 0 && mesh_contact_before(entry.flags, entry.age_s, out[pos - 1].flags, out[pos - 1].age_s)) {
             pos--;
         }
         if (pos >= max) {
@@ -297,6 +298,44 @@ static bool stopped;        // the task -> everyone: it has saved and is gone (o
 
 static bool mesh_is_stopped(void) {
     return __atomic_load_n(&stopped, __ATOMIC_ACQUIRE);
+}
+
+// ---- one contact: the details screen (#49) ---------------------------------------------------------------------------
+
+extern "C" size_t mesh_contact_detail(uint8_t const prefix[6], mesh_contact_detail_t *out, uint32_t wait_ms) {
+    if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped()) {
+        return 0;
+    }
+    if (!mesh_lock_within(wait_ms)) {
+        return MESH_BUSY;
+    }
+    ContactInfo const *c = node->lookupContactByPubKey(prefix, MF_PREFIX);
+    if (c) {
+        uint32_t now = rtc_clock.getCurrentTime();
+        memcpy(out->pub, c->id.pub_key, sizeof(out->pub));
+        mesh_sanitize(c->name, strnlen(c->name, sizeof(c->name)), out->name, sizeof(out->name));
+        out->type     = c->type;
+        out->flags    = c->flags;
+        out->path_len = c->out_path_len;
+        memcpy(out->path, c->out_path, sizeof(out->path));
+        out->age_s  = now > c->lastmod ? now - c->lastmod : 0;
+        out->lat_e6 = c->gps_lat;
+        out->lon_e6 = c->gps_lon;
+    }
+    mesh_unlock();
+    return c ? 1 : 0;
+}
+
+extern "C" size_t mesh_contact_do(uint8_t const prefix[6], mesh_contact_op_t op, uint32_t wait_ms) {
+    if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped()) {
+        return 0;
+    }
+    if (!mesh_lock_within(wait_ms)) {
+        return MESH_BUSY;
+    }
+    BadgeMesh::ContactResult r = node->contactAction(prefix, op);
+    mesh_unlock();
+    return r == BadgeMesh::CONTACT_QUEUED ? 1 : r == BadgeMesh::CONTACT_GONE ? 0 : MESH_BUSY;
 }
 
 // MeshCore writes contacts lazily; a firmware update must not lose the last few minutes of them

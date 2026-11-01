@@ -13,6 +13,7 @@
 #include "mesh_contact_fmt.h"
 #include "mesh_format.h"
 #include "meshcore_chat.h"
+#include "meshcore_contact.h"
 #include "meshcore_settings.h"
 #include "scroll_anchor.h"
 #include "lichen_fs.h"
@@ -34,7 +35,6 @@ static lichen_app_t const *self(void); // the app table entry, defined with the 
 #define MAX_CHANNELS   40
 #define SHOW_CONTACTS  100
 #define AGE_REFRESH_S  30 // rebuild the lists this often even when nothing new arrived, so "N min ago" stays right
-#define SCROLL_STEP_PX 120
 #define SCREEN_WAIT_MS 20 // for the mesh lock; LVGL (and with it the keys) must not wait on MeshCore's file saves
 #define TAB_BAR_H      64
 #define TAB_MESSAGES   0
@@ -105,7 +105,7 @@ static lv_obj_t       *messages_list;
 static lv_obj_t       *contacts_list;
 static lv_obj_t       *tab_hint;
 #define HINT_MESSAGES "Up/Down: choose    Enter: open"
-#define HINT_CONTACTS "Enter: message a contact"
+#define HINT_CONTACTS "Up/Down: choose    Enter: details"
 static lv_obj_t       *tab_hop; // an empty second focusable: Tab moves the focus onto it, which switches the tab
 static lv_timer_t     *timer;
 static uint32_t        shown_sig;
@@ -119,6 +119,8 @@ static size_t          sel;          // the highlighted row
 static mesh_chat_key_t sel_key;      // and its chat: the highlight follows it when the order changes
 static bool            sel_valid;
 static mesh_contact_t *contact_copy;
+static size_t          contact_n, contact_sel; // the Contacts tab's rows and highlight (#49), kept on the same
+static uint8_t         contact_sel_key[6];     // contact (its key prefix) when the order changes
 
 static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color) {
     lv_obj_t *label = lv_label_create(parent);
@@ -297,10 +299,41 @@ static void open_selected(void) {
     }
 }
 
+// The Contacts tab's highlight after the list changed: on the same contact if it is still there, else the same place
+static size_t contact_settle(size_t count) {
+    size_t at = contact_sel < count ? contact_sel : (count ? count - 1 : 0);
+    for (size_t i = 0; contact_n && i < count; i++) {
+        if (memcmp(contact_copy[i].pubkey, contact_sel_key, sizeof(contact_sel_key)) == 0) {
+            at = i;
+            break;
+        }
+    }
+    contact_n = count;
+    if (count) {
+        memcpy(contact_sel_key, contact_copy[at].pubkey, sizeof(contact_sel_key));
+    }
+    return at;
+}
+
+static void move_contact(int delta) {
+    if (!contact_n || lv_obj_get_child_count(contacts_list) != contact_n) {
+        return;
+    }
+    size_t to = delta < 0 ? (contact_sel > 0 ? contact_sel - 1 : 0)
+                          : (contact_sel + 1 < contact_n ? contact_sel + 1 : contact_sel);
+    style_row(lv_obj_get_child(contacts_list, (int32_t)contact_sel), false);
+    contact_sel = to;
+    memcpy(contact_sel_key, contact_copy[to].pubkey, sizeof(contact_sel_key));
+    lv_obj_t *row = lv_obj_get_child(contacts_list, (int32_t)to);
+    style_row(row, true);
+    lv_obj_scroll_to_view(row, LV_ANIM_OFF);
+}
+
 static void rebuild_contacts(size_t count) {
     scroll_t s = save_scroll(contacts_list, false, contact_keys, contact_keys_n);
     lv_obj_clean(contacts_list);
     contact_keys_n = count;
+    contact_sel    = contact_settle(count);
     if (!count) {
         add_label(contacts_list, "No nodes heard yet.", THEME_DIM);
         return;
@@ -312,8 +345,13 @@ static void rebuild_contacts(size_t count) {
         mesh_format_age(c->age_s, age, sizeof(age));
         mesh_format_hops(c->path_len, hops, sizeof(hops)); // the hash size bits are not hops (#85)
         snprintf(meta, sizeof(meta), "%s, %s, %s", mesh_type_name(c->type), hops, age);
+        char name[MESH_NAME_MAX + 8];
+        snprintf(name, sizeof(name), "%s%s", c->flags & MESH_CONTACT_FAV ? "\u2B50 " : "", // a favourite (#49)
+                 c->name[0] ? c->name : "(no name)");
         lv_obj_t *item = add_item(contacts_list);
-        add_label(item, c->name[0] ? c->name : "(no name)", THEME_TEXT);
+        style_row(item, i == contact_sel);
+        lv_obj_set_style_pad_hor(item, 6, 0);
+        add_label(item, name, THEME_TEXT);
         add_label(item, meta, THEME_DIM);
     }
     restore_scroll(contacts_list, s, false, contact_keys, contact_keys_n);
@@ -350,6 +388,21 @@ static size_t take_convs(void) {
     return n;
 }
 
+// The contacts list changes when the count changes, someone is heard (again): the newest hearing time, or a
+// contact's favourite flag or path changes (#49: favourites come first)
+static uint32_t contacts_signature(size_t n, size_t total) {
+    uint32_t newest = UINT32_MAX;
+    uint32_t h      = scroll_key_hash(&total, sizeof(total), 0);
+    for (size_t i = 0; i < n; i++) {
+        newest = contact_copy[i].age_s < newest ? contact_copy[i].age_s : newest;
+        h      = scroll_key_hash(contact_copy[i].pubkey, sizeof(contact_copy[i].pubkey), h);
+        h      = scroll_key_hash(&contact_copy[i].flags, 1, h);
+        h      = scroll_key_hash(&contact_copy[i].path_len, 1, h);
+    }
+    uint32_t heard_at = n ? mesh_uptime_s() - newest : 0;
+    return h ^ heard_at;
+}
+
 // The copies are taken under the mesh lock (inside the snapshot functions), the widgets are built from them afterwards:
 // the mesh task is never kept waiting on LVGL.
 static void refresh(lv_timer_t *t) {
@@ -363,9 +416,7 @@ static void refresh(lv_timer_t *t) {
     if (convs == MESH_BUSY) {
         return;
     }
-    // The contacts list changes when the count changes or someone is heard (again): the newest contact's hearing time
-    uint32_t heard_at     = contacts ? mesh_uptime_s() - contact_copy[0].age_s : 0;
-    uint32_t contacts_sig = (uint32_t)total_contacts * 2654435761u ^ heard_at;
+    uint32_t contacts_sig = contacts_signature(contacts, total_contacts);
     uint32_t sig          = convs_sig(convs);
     bool     stale        = mesh_uptime_s() - last_rebuild_s >= AGE_REFRESH_S;
     if (sig != shown_sig || stale) {
@@ -381,15 +432,21 @@ static void refresh(lv_timer_t *t) {
     }
 }
 
-static lv_obj_t *active_list(void) {
-    return messages_visible() ? messages_list : contacts_list;
-}
-
 static void switch_tab(int delta) {
     uint32_t n   = lv_tabview_get_tab_count(tabs);
     uint32_t cur = lv_tabview_get_tab_active(tabs);
     lv_tabview_set_active(tabs, (cur + n + delta) % n, LV_ANIM_OFF);
     lv_label_set_text(tab_hint, messages_visible() ? HINT_MESSAGES : HINT_CONTACTS);
+}
+
+// By its key, not the row: refresh() takes a new copy every tick, a rebuild may not have followed yet
+static void open_contact(void) {
+    for (size_t i = 0; i < contact_n; i++) {
+        if (memcmp(contact_copy[i].pubkey, contact_sel_key, sizeof(contact_sel_key)) == 0) {
+            meshcore_contact_open(&contact_copy[i]);
+            return;
+        }
+    }
 }
 
 static void on_key(lv_event_t *e) {
@@ -400,21 +457,21 @@ static void on_key(lv_event_t *e) {
             if (messages_visible()) {
                 move_selection(-1);
             } else {
-                shell_scroll_by(active_list(), SCROLL_STEP_PX);
+                move_contact(-1);
             }
             break;
         case LV_KEY_DOWN:
             if (messages_visible()) {
                 move_selection(1);
             } else {
-                shell_scroll_by(active_list(), -SCROLL_STEP_PX);
+                move_contact(1);
             }
             break;
         case LV_KEY_ENTER:
             if (messages_visible()) {
                 open_selected(); // the highlighted chat (#48)
             } else {
-                meshcore_chat_pick_contact(); // or a contact to message (#47)
+                open_contact(); // the highlighted contact's details (#49): Message is their first row
             }
             break;
         default: break;
@@ -443,6 +500,8 @@ static void on_delete(lv_event_t *e) {
     chan_names     = NULL;
     conv_n         = 0;
     contact_copy   = NULL;
+    contact_n      = 0;
+    contact_sel    = 0;
     heap_caps_free(anchor_mem);
     anchor_mem     = NULL;
     msg_keys       = NULL;

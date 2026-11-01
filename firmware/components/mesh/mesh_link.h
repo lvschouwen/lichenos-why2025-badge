@@ -7,6 +7,7 @@
 // platform: mesh_task.cpp on the badge, a no-op in the host test).
 #include "MyMesh.h"
 
+#include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
 #include "mesh_outbox.h"
 
@@ -46,6 +47,9 @@ public:
     bool   isWriteBusy() const override { return false; }
     size_t writeFrame(uint8_t const src[], size_t len) override;
     size_t checkRecvFrame(uint8_t dest[]) override;
+    // A command of the badge's own (#49) for MyMesh's next loop, like the start sequence; false when the queue is full
+    bool queue_cmd(uint8_t const *frame, size_t len) { return fifo_push(frame, len); }
+    bool can_queue() const { return fifo_n_ < LINK_FIFO; }
 
 private:
     enum CurKind : uint8_t { CUR_NONE, CUR_INTERNAL, CUR_OUTBOX };
@@ -84,6 +88,12 @@ public:
         pipe_.attach(this, ob);
     }
     CompanionPipe &pipe() { return pipe_; }
+    // A contact change from the details screen (#49), under the mesh lock. It goes to MyMesh as its own command
+    // (RESET_PATH, ADD_UPDATE_CONTACT, REMOVE_CONTACT), so MyMesh saves the contacts itself (its lazy 5 s write) and
+    // Remove also drops the stored advert. Reset path and the favourite flag are set at once too, so a copy taken right
+    // after shows them.
+    enum ContactResult { CONTACT_QUEUED, CONTACT_GONE, CONTACT_QUEUE_FULL };
+    ContactResult contactAction(uint8_t const prefix[MF_PREFIX], mesh_contact_op_t op);
     void           startPipe() {
         startInterface(pipe_);
         pipe_.start();

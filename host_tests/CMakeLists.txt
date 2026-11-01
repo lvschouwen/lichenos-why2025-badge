@@ -447,6 +447,7 @@ add_test(NAME mesh_format_test COMMAND mesh_format_test)
 add_executable(mesh_contact_fmt_test
     ${CMAKE_CURRENT_SOURCE_DIR}/mesh_contact_fmt_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_contact_fmt.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_format.c
 )
 target_include_directories(mesh_contact_fmt_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
 target_compile_options(mesh_contact_fmt_test PRIVATE -Wall -Wextra -Werror)

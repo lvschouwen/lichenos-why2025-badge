@@ -67,6 +67,31 @@ size_t mf_encode_reset_path(uint8_t *out, uint8_t const pub[MF_PUB_LEN]) {
     return 1 + MF_PUB_LEN;
 }
 
+size_t mf_encode_remove_contact(uint8_t *out, uint8_t const pub[MF_PUB_LEN]) {
+    out[0] = MF_CMD_REMOVE_CONTACT;
+    memcpy(out + 1, pub, MF_PUB_LEN);
+    return 1 + MF_PUB_LEN;
+}
+
+size_t mf_encode_update_contact(uint8_t *out, mf_contact_t const *c) {
+    size_t i = 0;
+    out[i++] = MF_CMD_ADD_UPDATE_CONTACT;
+    memcpy(out + i, c->pub, MF_PUB_LEN);
+    i += MF_PUB_LEN;
+    out[i++] = c->type;
+    out[i++] = c->flags;
+    out[i++] = c->out_path_len;
+    memcpy(out + i, c->out_path, MF_PATH_MAX);
+    i += MF_PATH_MAX;
+    memcpy(out + i, c->name, MF_NAME_MAX);
+    i += MF_NAME_MAX;
+    put32(out + i, c->last_advert_timestamp);
+    put32(out + i + 4, (uint32_t)c->gps_lat);
+    put32(out + i + 8, (uint32_t)c->gps_lon);
+    put32(out + i + 12, c->lastmod);
+    return i + 16;
+}
+
 // Shortest frame of each kind we read
 static bool too_short(size_t len, size_t need) {
     return len < need;

@@ -206,6 +206,59 @@ static std::string group_text(std::vector<uint8_t> const &raw, mesh::GroupChanne
     return n > 5 ? std::string((char *)&plain[5]) : "";
 }
 
+// The details screen's actions (#49) on the real MyMesh: each one goes through MyMesh's own command, so it is saved
+// with MyMesh's lazy contacts write, and a fresh MyMesh on the same files sees it
+static void contact_action_checks(BadgeMesh &mesh) {
+    ContactsIterator it = mesh.startContactsIterator();
+    ContactInfo      a, b;
+    CHECK(it.hasNext(&mesh, a) && it.hasNext(&mesh, b));
+    int before = mesh.getNumContacts();
+
+    // Reset path: a known path (one hop, 2-byte hashes) is gone at once, and MyMesh answers OK
+    ContactInfo *pa   = mesh.lookupContactByPubKey(a.id.pub_key, PUB_KEY_SIZE);
+    pa->out_path_len  = 0x41;
+    pa->out_path[0]   = 0x12;
+    uint32_t lastmod  = pa->lastmod;
+    LinkStats const &st = mesh.pipe().stats();
+    uint32_t oks      = st.reply_count[0];
+    CHECK(mesh.contactAction(a.id.pub_key, MESH_CO_RESET_PATH) == BadgeMesh::CONTACT_QUEUED);
+    CHECK(pa->out_path_len == OUT_PATH_UNKNOWN);
+    settle(mesh, 3);
+    CHECK(st.reply_count[0] == oks + 1);
+
+    // Favourite on: the flag at once, lastmod kept (the order by "last heard" does not jump), the path not brought back
+    CHECK(mesh.contactAction(a.id.pub_key, MESH_CO_FAV_ON) == BadgeMesh::CONTACT_QUEUED);
+    CHECK(pa->flags & MESH_CONTACT_FAV);
+    settle(mesh, 3);
+    pa = mesh.lookupContactByPubKey(a.id.pub_key, PUB_KEY_SIZE);
+    CHECK(pa && (pa->flags & MESH_CONTACT_FAV) && pa->lastmod == lastmod && pa->out_path_len == OUT_PATH_UNKNOWN);
+    CHECK(st.reply_count[0] == oks + 2);
+
+    // Remove: gone after MyMesh's loop; a second try finds nothing
+    CHECK(mesh.contactAction(b.id.pub_key, MESH_CO_REMOVE) == BadgeMesh::CONTACT_QUEUED);
+    settle(mesh, 3);
+    CHECK(mesh.getNumContacts() == before - 1 && !mesh.lookupContactByPubKey(b.id.pub_key, PUB_KEY_SIZE));
+    CHECK(mesh.contactAction(b.id.pub_key, MESH_CO_REMOVE) == BadgeMesh::CONTACT_GONE);
+
+    // MyMesh's own lazy write (5 s after the last change), then a fresh node on the same files
+    settle(mesh, 80);
+    static DataStore        store(SPIFFS, rtc_clock);
+    static SimpleMeshTables tables;
+    static MyMesh           fresh(radio_driver, rng_for_pipe(), rtc_clock, tables, store);
+    store.begin();
+    fresh.begin();
+    ContactInfo *fa = fresh.lookupContactByPubKey(a.id.pub_key, PUB_KEY_SIZE);
+    CHECK(fresh.getNumContacts() == before - 1 && !fresh.lookupContactByPubKey(b.id.pub_key, PUB_KEY_SIZE));
+    CHECK(fa && (fa->flags & MESH_CONTACT_FAV) && fa->out_path_len == OUT_PATH_UNKNOWN);
+
+    // Favourite off: the other bits of flags stay
+    pa        = mesh.lookupContactByPubKey(a.id.pub_key, PUB_KEY_SIZE);
+    pa->flags = MESH_CONTACT_FAV | 0x02;
+    CHECK(mesh.contactAction(a.id.pub_key, MESH_CO_FAV_OFF) == BadgeMesh::CONTACT_QUEUED);
+    settle(mesh, 3);
+    CHECK(pa->flags == 0x02);
+}
+
 // The companion pipe (#45, #55) on the real MyMesh: start sequence, offline queue drained, sends through the outbox
 static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, SimpleMeshTables &tables) {
     static DataStore store(SPIFFS, rtc_clock);
@@ -297,6 +350,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     uint32_t trip = 0;
     CHECK(ob_get(&ob, dm, &state, NULL, NULL, &trip) && state == MESH_OUT_DELIVERED);
     CHECK(st.confirmed == 1);
+    contact_action_checks(mesh);
 }
 
 // Moving the milestone-2 key into DataStore (#65 review): only a saved copy that reads back identical counts, because

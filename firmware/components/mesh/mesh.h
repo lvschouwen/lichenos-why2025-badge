@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mesh_contact_fmt.h"
 #include "mesh_outbox.h"
 #include "mesh_store.h"
 #include "mesh_tile.h"
@@ -22,6 +23,7 @@ typedef struct {
     uint8_t  pubkey[6]; // the start of the public key: shown, and the DM prefix (#47)
     char     name[MESH_NAME_MAX + 1];
     uint8_t  type;     // MeshCore ADV_TYPE_*
+    uint8_t  flags;    // MESH_CONTACT_FAV: a favourite (#49)
     uint8_t  path_len; // MeshCore's out_path_len: hops and hash size packed (mesh_path_decode), 0xFF = flood
     uint32_t age_s;    // since its last advert was heard
 } mesh_contact_t;
@@ -100,8 +102,15 @@ size_t mesh_chat_snapshot(mesh_chat_key_t const *key, mesh_msg_t *out, size_t ma
 // The chats with unread counts and the latest line, in table order (the caller sorts: mesh_conv_sort). out holds up to
 // max chats (MESH_CONV_MAX is about 15 KB): a PSRAM buffer, never the stack.
 size_t mesh_convs_snapshot(mesh_conv_t *out, size_t max, uint32_t wait_ms);
-// Up to max contacts, most recently heard first; returns how many, *total = all contacts
+// Up to max contacts, favourites first, then the most recently heard; returns how many, *total = all contacts
 size_t mesh_contacts_snapshot(mesh_contact_t *out, size_t max, size_t *total, uint32_t wait_ms);
+// One contact by its 6-byte key prefix (#49): 1, 0 when it is not (or no longer) there, MESH_BUSY
+size_t mesh_contact_detail(uint8_t const prefix[6], mesh_contact_detail_t *out, uint32_t wait_ms);
+// Reset path / favourite on or off / remove (#49): handed to MyMesh as its own command, which it runs in its next loop
+// and saves with its contacts a few seconds later (Remove also drops the contact's stored advert). Reset path and the
+// favourite flag show in a copy taken right after. 1 when queued, 0 when the contact is gone, MESH_BUSY when the lock
+// was not free within wait_ms or MyMesh's command queue is full.
+size_t mesh_contact_do(uint8_t const prefix[6], mesh_contact_op_t op, uint32_t wait_ms);
 
 // ---- sending (#45; the compose screens are #46 and #47) --------------------------------------------------------------
 // All copy-in and non-blocking: they never take the mesh lock (LVGL safe). The mesh task sends from the outbox

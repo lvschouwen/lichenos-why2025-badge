@@ -31,6 +31,23 @@ static void encoders(void) {
     uint8_t pub[32];
     memset(pub, 9, sizeof(pub));
     CHECK(mf_encode_reset_path(f, pub) == 33 && f[0] == 13 && f[32] == 9);
+    CHECK(mf_encode_remove_contact(f, pub) == 33 && f[0] == 15 && f[1] == pub[0] && f[32] == pub[31]);
+
+    // CMD_ADD_UPDATE_CONTACT (#49): MyMesh::updateContactFromFrame's offsets, lastmod at the end
+    mf_contact_t c = {.type = 1, .flags = 1, .out_path_len = 0x41, .last_advert_timestamp = 0x01020304,
+                      .lastmod = 0x0A0B0C0D, .gps_lat = -2, .gps_lon = 0x11223344};
+    memcpy(c.pub, pub, sizeof(c.pub));
+    c.out_path[0] = 0xAB;
+    c.out_path[63] = 0xCD;
+    memcpy(c.name, "Heltec", 6);
+    memset(f, 0x55, MF_MAX_FRAME);
+    CHECK(mf_encode_update_contact(f, &c) == 148);
+    CHECK(f[0] == 9 && f[1] == pub[0] && f[33] == 1 && f[34] == 1 && f[35] == 0x41);
+    CHECK(f[36] == 0xAB && f[99] == 0xCD && memcmp(f + 100, "Heltec", 6) == 0 && f[106] == 0);
+    CHECK(f[132] == 0x04 && f[135] == 0x01);                     // last_advert_timestamp, little-endian
+    CHECK(f[136] == 0xFE && f[139] == 0xFF);                     // gps_lat -2
+    CHECK(f[140] == 0x44 && f[143] == 0x11);                     // gps_lon
+    CHECK(f[144] == 0x0D && f[147] == 0x0A && f[148] == 0x55);   // lastmod, nothing written after it
 }
 
 static void limits(void) {

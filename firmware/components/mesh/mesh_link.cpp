@@ -48,6 +48,46 @@ void BadgeMesh::logTxFail(mesh::Packet *packet, int len) {
     mesh_ob_exit();
 }
 
+static void contact_to_frame(ContactInfo const &c, mf_contact_t *out) {
+    memcpy(out->pub, c.id.pub_key, MF_PUB_LEN);
+    out->type         = c.type;
+    out->flags        = c.flags;
+    out->out_path_len = c.out_path_len;
+    memcpy(out->out_path, c.out_path, MF_PATH_MAX);
+    memcpy(out->name, c.name, MF_NAME_MAX);
+    out->last_advert_timestamp = c.last_advert_timestamp;
+    out->lastmod               = c.lastmod;
+    out->gps_lat               = c.gps_lat;
+    out->gps_lon               = c.gps_lon;
+}
+
+BadgeMesh::ContactResult BadgeMesh::contactAction(uint8_t const prefix[MF_PREFIX], mesh_contact_op_t op) {
+    ContactInfo *c = lookupContactByPubKey(prefix, MF_PREFIX);
+    if (!c) {
+        return CONTACT_GONE;
+    }
+    if (!pipe_.can_queue()) {
+        return CONTACT_QUEUE_FULL; // checked first: nothing changes that MyMesh would then not save
+    }
+    uint8_t      f[MF_MAX_FRAME];
+    size_t       n = 0;
+    mf_contact_t mc;
+    switch (op) {
+    case MESH_CO_RESET_PATH:
+        resetPathTo(*c);
+        n = mf_encode_reset_path(f, c->id.pub_key);
+        break;
+    case MESH_CO_FAV_ON:
+    case MESH_CO_FAV_OFF:
+        c->flags = (uint8_t)(op == MESH_CO_FAV_ON ? (c->flags | MESH_CONTACT_FAV) : (c->flags & ~MESH_CONTACT_FAV));
+        contact_to_frame(*c, &mc);
+        n = mf_encode_update_contact(f, &mc);
+        break;
+    case MESH_CO_REMOVE: n = mf_encode_remove_contact(f, c->id.pub_key); break;
+    }
+    return n && pipe_.queue_cmd(f, n) ? CONTACT_QUEUED : CONTACT_QUEUE_FULL;
+}
+
 // ---- the pipe ------------------------------------------------------------------------------------------------------
 
 bool CompanionPipe::fifo_push(uint8_t const *data, size_t len) {
