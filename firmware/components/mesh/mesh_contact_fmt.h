@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-// A contact's texts for the Contacts tab, its details screen and the console (#85, #49). Pure logic, no ESP headers.
+// A contact's texts for the contact lists, its details screen and the console (#85, #49). Pure logic, no ESP headers.
 
 // ContactInfo.out_path_len as MeshCore (v1.9 and later) packs it: the hop count in bits 0-5, the path hash size minus
 // one in bits 6-7 (Packet::getPathHashCount / getPathHashSize). 0xFF (OUT_PATH_UNKNOWN) means no path: flood.
@@ -55,6 +55,17 @@ void        mesh_format_route(uint8_t path_len, uint8_t const *path, char *out, 
 bool mesh_contact_uri(char const *name, uint8_t const pub[MESH_CONTACT_PUB_LEN], uint8_t type, char *out, size_t cap);
 // The Contacts order: favourites first, then the most recently heard
 bool mesh_contact_before(uint8_t flags_a, uint32_t age_a, uint8_t flags_b, uint32_t age_b);
+
+// The contact lists of the app's grid (#88): Contacts shows all, Repeaters only repeaters and rooms (favourites first
+// in both, as mesh_contact_before), Heard all of them by when they were last heard only, newest first
+typedef enum { MESH_VIEW_ALL, MESH_VIEW_REPEATERS, MESH_VIEW_HEARD } mesh_contact_view_t;
+#define MESH_ADV_TYPE_REPEATER 2 // MeshCore ADV_TYPE_REPEATER
+#define MESH_ADV_TYPE_ROOM     3 // ADV_TYPE_ROOM
+// Whether a contact of this MeshCore advert type is in the view
+bool mesh_contact_view_keeps(mesh_contact_view_t view, uint8_t type);
+// The view's order: true when a comes before b
+bool mesh_contact_view_before(mesh_contact_view_t view, uint8_t flags_a, uint32_t age_a, uint8_t flags_b,
+                              uint32_t age_b);
 
 // The details screen's lines, always in this order: "Type: ...", "ID: <12 hex>" (what `fw mesh dm` takes), "Key: <64
 // hex in groups of 8 digits>", "Last heard: ...", "Route: ...", "Location: ..."

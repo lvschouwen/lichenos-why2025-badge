@@ -26,7 +26,7 @@ mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap);
 // Is this message a DM with the contact whose key starts with peer (6 bytes), either direction
 bool mesh_msg_in_dm(mesh_msg_t const *m, uint8_t const peer[6]);
 
-// One row of the Messages tab (#48): the title ("#badgetest", "@bob"), the unread badge ("" for none, "3", "99+") and
+// One row of the Chat list (#48, #88): the title ("#badgetest", "@bob"), the unread badge ("" for none, "3", "99+") and
 // the dim line under it: "3 min ago: bob: hello", or "no messages yet" for a chat without any. now_s is the
 // mesh_uptime_s() the chat's last_heard_s is measured against.
 void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, uint32_t now_epoch, char *title, size_t title_cap,

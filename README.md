@@ -129,7 +129,9 @@ fonts; `fw assets` shows their state.
   bandwidth, SF, CR and, under Advanced, TX power); Channels (add a name with a base64 key or `#hashtag`, remove one;
   Public stays); Send advert; node id, radio, TX power and MeshCore version. The first time the MeshCore app opens it
   asks for a name and a region.
-- **MeshCore app:** two tabs, Messages and Contacts. Left/Right or Tab switch, Up/Down scroll.
+- **MeshCore app:** opens on its own grid of tiles (Chat, Contacts, Repeaters, Heard, Advertise, Settings) with badges
+  (unread, contacts, repeaters, last heard, last advert). Arrows move, Enter opens, Esc goes back to the grid and from
+  there to Lichen home.
 - **Keyboard:** arrows and Enter move and select, Esc goes back one screen (blocked while a firmware update runs),
   Tab moves between rows, Backspace edits text.
 

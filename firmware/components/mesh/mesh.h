@@ -76,7 +76,7 @@ char const *mesh_channel_add(char const *name, char const *b64_key_or_null);
 // slot 0 (Public) and empty slots are refused. _named picks it by name, without case. Same lock rules as the setters.
 char const *mesh_channel_remove(int index);
 char const *mesh_channel_remove_named(char const *name);
-// A zero-hop advert now: true when queued
+// A zero-hop advert now: true when queued (the home tile snapshot then has advert_sent and its age)
 bool mesh_send_advert(void);
 // The channel names in slot order, up to max; MESH_BUSY when the lock wasn't free within MESH_SET_WAIT_MS
 size_t mesh_channels_snapshot(char names[][MESH_CHANNEL_MAX + 1], size_t max);
@@ -106,6 +106,9 @@ size_t mesh_chat_snapshot(mesh_chat_key_t const *key, mesh_msg_t *out, size_t ma
 size_t mesh_convs_snapshot(mesh_conv_t *out, size_t max, uint32_t wait_ms);
 // Up to max contacts, favourites first, then the most recently heard; returns how many, *total = all contacts
 size_t mesh_contacts_snapshot(mesh_contact_t *out, size_t max, size_t *total, uint32_t wait_ms);
+// The same for one of the grid's lists (#88, mesh_contact_view_t): only the view's contacts, in its order; *total =
+// all contacts in the view (max 0 just counts them)
+size_t mesh_contacts_view(mesh_contact_view_t view, mesh_contact_t *out, size_t max, size_t *total, uint32_t wait_ms);
 // One contact by its 6-byte key prefix (#49): 1, 0 when it is not (or no longer) there, MESH_BUSY when the lock was
 // not free in time or MeshCore is not running (not up yet, stopped for an update)
 size_t mesh_contact_detail(uint8_t const prefix[6], mesh_contact_detail_t *out, uint32_t wait_ms);

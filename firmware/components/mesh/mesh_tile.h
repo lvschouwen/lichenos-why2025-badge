@@ -17,6 +17,8 @@ typedef struct {
     size_t   contacts;
     uint32_t last_heard_age_s;
     char     latest[MESH_TEXT_MAX + 1]; // "[channel] text" of the newest message, "" when none
+    bool     advert_sent;  // an advert of ours went out since boot (#88: the grid's Advertise badge)
+    uint32_t advert_age_s; // since then
 } mesh_tile_t;
 
 #define MESH_TILE_UNREAD_CAP 99 // shown as "99+" above this

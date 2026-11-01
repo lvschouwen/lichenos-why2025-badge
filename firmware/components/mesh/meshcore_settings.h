@@ -6,6 +6,11 @@
 
 // The app's settings callback: Name, Region & radio, Channels, Send advert on the page (a menu.h menu)
 void meshcore_settings(lv_obj_t *page);
+// A zero-hop advert, off the LVGL task (#88: the Settings row and the grid's Advertise tile). status(text) runs on
+// the LVGL task: at once with "sending..." or why nothing is sent (clock not set, busy), later with the result.
+// forget(status) drops a pending result when its screen goes away.
+void meshcore_advert_send(void (*status)(char const *text));
+void meshcore_advert_forget(void (*status)(char const *text));
 // The about rows (meshcore_app.c) show the radio again after a change; nothing when the page is gone
 void meshcore_about_refresh(void);
 

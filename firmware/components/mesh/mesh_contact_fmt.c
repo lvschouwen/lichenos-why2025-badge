@@ -134,6 +134,16 @@ bool mesh_contact_before(uint8_t flags_a, uint32_t age_a, uint8_t flags_b, uint3
     return age_a < age_b;
 }
 
+bool mesh_contact_view_keeps(mesh_contact_view_t view, uint8_t type) {
+    return view != MESH_VIEW_REPEATERS || type == MESH_ADV_TYPE_REPEATER || type == MESH_ADV_TYPE_ROOM;
+}
+
+bool mesh_contact_view_before(mesh_contact_view_t view, uint8_t flags_a, uint32_t age_a, uint8_t flags_b,
+                              uint32_t age_b) {
+    // Heard is about the air, not about who matters to us: a favourite heard last week sorts as last week
+    return view == MESH_VIEW_HEARD ? age_a < age_b : mesh_contact_before(flags_a, age_a, flags_b, age_b);
+}
+
 // "52.123456, -4.500000" without floats (newlib-nano's printf has none)
 static void format_degrees(int32_t e6, char *out, size_t cap) {
     uint32_t mag = e6 < 0 ? (uint32_t)(-(int64_t)e6) : (uint32_t)e6;

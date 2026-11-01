@@ -106,6 +106,19 @@ static void test_order(void) {
     CHECK(!mesh_contact_before(0, 5, 0, 5));
 }
 
+// The grid's contact lists (#88)
+static void test_views(void) {
+    CHECK(mesh_contact_view_keeps(MESH_VIEW_ALL, 1) && mesh_contact_view_keeps(MESH_VIEW_HEARD, 4));
+    CHECK(mesh_contact_view_keeps(MESH_VIEW_REPEATERS, 2) && mesh_contact_view_keeps(MESH_VIEW_REPEATERS, 3));
+    CHECK(!mesh_contact_view_keeps(MESH_VIEW_REPEATERS, 1) && !mesh_contact_view_keeps(MESH_VIEW_REPEATERS, 4));
+    CHECK(!mesh_contact_view_keeps(MESH_VIEW_REPEATERS, 0));
+    CHECK(mesh_contact_view_before(MESH_VIEW_ALL, MESH_CONTACT_FAV, 900, 0, 5));
+    CHECK(mesh_contact_view_before(MESH_VIEW_REPEATERS, MESH_CONTACT_FAV, 900, 0, 5));
+    CHECK(!mesh_contact_view_before(MESH_VIEW_HEARD, MESH_CONTACT_FAV, 900, 0, 5)); // newest first, favourite or not
+    CHECK(mesh_contact_view_before(MESH_VIEW_HEARD, 0, 5, MESH_CONTACT_FAV, 900));
+    CHECK(!mesh_contact_view_before(MESH_VIEW_HEARD, 0, 5, 0, 5));
+}
+
 static void test_lines(void) {
     mesh_contact_detail_t d = {.type = 1, .path_len = 0x41, .age_s = 180, .lat_e6 = 52012345, .lon_e6 = -4500000};
     for (int i = 0; i < 32; i++) {
@@ -137,6 +150,7 @@ int main(void) {
     test_hex_and_route();
     test_uri();
     test_order();
+    test_views();
     test_lines();
     if (failures) {
         printf("%d failure(s)\n", failures);

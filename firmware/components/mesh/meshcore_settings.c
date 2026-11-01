@@ -270,27 +270,47 @@ static void page_channels_refresh(void) {
     }
 }
 
+// One advert at a time, from the Settings row or the grid's Advertise tile (#88): the result goes to whoever asked
+static void (*advert_status)(char const *status);
+
 static void advert_done(job_t *job) {
+    char const *note = mesh_advert_note(clock_is_approximate()); // allowed, but say so (#83)
+    if (advert_status) {
+        advert_status(!job->ok ? "not sent" : note ? "queued, approximate clock" : "advert queued");
+    }
+}
+
+void meshcore_advert_send(void (*status)(char const *text)) {
+    char const *refusal = mesh_advert_refusal(clock_is_set());
+    if (refusal) {
+        status(refusal); // no job: nothing is sent
+        return;
+    }
+    job_t *job = job_new(JOB_ADVERT, advert_done);
+    if (!job) {
+        status("busy, try again");
+        return;
+    }
+    advert_status = status;
+    status("sending...");
+    job_start(job);
+}
+
+void meshcore_advert_forget(void (*status)(char const *text)) {
+    if (advert_status == status) {
+        advert_status = NULL;
+    }
+}
+
+static void advert_row_status(char const *text) {
     if (advert_row) {
-        char const *note = mesh_advert_note(clock_is_approximate()); // allowed, but say so (#83)
-        menu_set_value(advert_row, !job->ok ? "not sent" : note ? "queued, approximate clock" : "advert queued");
+        menu_set_value(advert_row, text);
     }
 }
 
 static void send_advert(void *arg) {
     (void)arg;
-    char const *refusal = mesh_advert_refusal(clock_is_set());
-    if (refusal) {
-        menu_set_value(advert_row, refusal); // no job: nothing is sent
-        return;
-    }
-    job_t *job = job_new(JOB_ADVERT, advert_done);
-    if (!job) {
-        menu_set_value(advert_row, "busy, try again");
-        return;
-    }
-    menu_set_value(advert_row, "sending...");
-    job_start(job);
+    meshcore_advert_send(advert_row_status);
 }
 
 static void open_radio(void *arg);
@@ -299,6 +319,7 @@ static void open_channels(void *arg);
 static void on_page_delete(lv_event_t *e) {
     (void)e;
     name_row = radio_row = channels_row = advert_row = NULL;
+    meshcore_advert_forget(advert_row_status);
 }
 
 void meshcore_settings(lv_obj_t *page) {

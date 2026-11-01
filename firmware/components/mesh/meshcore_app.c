@@ -1,25 +1,18 @@
-// MeshCore as a Lichen app (#67): its home tile (unread, nodes, the latest message), its screen with two tabs, Messages
-// and Contacts (from the old ui/ui.c), its about section under Settings and its background part (the mesh task, started
-// from main.c whatever screen is open). Keys on the screen: Left/Right or Tab switch tabs, Up/Down scroll, Esc is the
-// shell's. Everything with an lv_obj_t runs in the LVGL task; it reads MeshCore only through mesh.h copies.
-#include "esp_heap_caps.h"
+// MeshCore as a Lichen app (#67): its home tile (unread, nodes, the latest message), its screen (the app's own grid of
+// tiles, #88: meshcore_grid.c, with the lists in meshcore_chats.c and meshcore_contacts.c), its about section under
+// Settings and its background part (the mesh task, started from main.c whatever screen is open). Esc on the grid is
+// the shell's. Everything with an lv_obj_t runs in the LVGL task; it reads MeshCore only through mesh.h copies.
 #include "esp_log.h"
 #include "lichen_app.h"
 #include "lora.h"
 #include "mc_first.h"
 #include "menu.h"
 #include "mesh.h"
-#include "mesh_chat.h"
-#include "mesh_contact_fmt.h"
-#include "mesh_format.h"
-#include "meshcore_chat.h"
-#include "meshcore_contact.h"
+#include "meshcore_screens.h"
 #include "meshcore_settings.h"
-#include "scroll_anchor.h"
 #include "lichen_fs.h"
 #include "lichen_settings.h"
 #include "lichen_ui.h"
-#include "fonts.h"
 #include "theme.h"
 
 #include <inttypes.h>
@@ -31,13 +24,8 @@ static char const TAG[] = "meshcore";
 
 static lichen_app_t const *self(void); // the app table entry, defined with the rest of the table at the end
 
-#define SHOW_CONVS     MESH_CONV_MAX // one row per chat
-#define MAX_CHANNELS   40
-#define SHOW_CONTACTS  100
-#define AGE_REFRESH_S  30 // rebuild the lists this often even when nothing new arrived, so "N min ago" stays right
-#define SCREEN_WAIT_MS 20 // for the mesh lock; LVGL (and with it the keys) must not wait on MeshCore's file saves
-#define TAB_BAR_H      64
-#define TAB_MESSAGES   0
+#define SCREEN_WAIT_MS  20  // for the mesh lock; LVGL (and with it the keys) must not wait on MeshCore's file saves
+#define SCREEN_SETTINGS 172 // the grid's Settings tile
 
 // ---- the icon (home.html <g id="mc">: two arcs over a dot, in a 60x60 view) ---------------------------------------
 
@@ -96,521 +84,6 @@ static bool tile_text(char *l1, size_t c1, char *l2, size_t c2) {
     mesh_tile_snapshot(&t);
     mesh_tile_text(&t, l1, c1, l2, c2);
     return true;
-}
-
-// ---- the screen: Messages and Contacts ---------------------------------------------------------------------------
-
-static lv_obj_t       *tabs;
-static lv_obj_t       *messages_list;
-static lv_obj_t       *contacts_list;
-static lv_obj_t       *tab_hint;
-#define HINT_MESSAGES "Up/Down: choose    Enter: open"
-#define HINT_CONTACTS "Up/Down: choose    Enter: details"
-static lv_obj_t       *tab_hop; // an empty second focusable: Tab moves the focus onto it, which switches the tab
-static lv_timer_t     *timer;
-static uint32_t        shown_sig;
-static uint32_t        shown_contacts_sig;
-static uint32_t        last_rebuild_s;
-// Copies taken from the mesh (PSRAM): the widgets are built from these, outside the mesh lock
-static mesh_conv_t    *conv_copy;
-static char          (*chan_names)[MESH_CHANNEL_MAX + 1];
-static size_t          conv_n;       // rows on screen
-static size_t          sel;          // the highlighted row
-static mesh_chat_key_t sel_key;      // and its chat: the highlight follows it when the order changes
-static bool            sel_valid;
-static mesh_contact_t *contact_copy;
-static size_t          contact_n, contact_sel; // the Contacts tab's rows and highlight (#49), kept on the same
-static uint8_t         contact_sel_key[6];     // contact (its key prefix) when the order changes
-
-static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color) {
-    lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_width(label, LV_PCT(100));
-    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
-    lv_label_set_text(label, text);
-    return label;
-}
-
-static lv_obj_t *add_item(lv_obj_t *list) {
-    lv_obj_t *item = lv_obj_create(list);
-    lv_obj_remove_style_all(item);
-    lv_obj_set_size(item, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(item, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_ver(item, 4, 0);
-    lv_obj_set_style_pad_row(item, 2, 0);
-    lv_obj_set_scrollable(item, false);
-    lv_obj_set_clickable(item, false);
-    return item;
-}
-
-// Rebuilding a list keeps where the reader was: at the newest end if they were there, else on the same item (by
-// identity, scroll_anchor.c): a pixel offset jumped one item when the full message window dropped its oldest or the
-// contacts changed order. keys[i] is the identity of the list's child i while the list shows items.
-// In PSRAM with the copies (internal RAM is the display's), allocated while the screen exists; LVGL task only.
-typedef struct {
-    uint32_t      msg[SHOW_CONVS];
-    uint32_t      contact[SHOW_CONTACTS];
-    scroll_item_t items[SHOW_CONTACTS > SHOW_CONVS ? SHOW_CONTACTS : SHOW_CONVS];
-} anchor_mem_t;
-static anchor_mem_t  *anchor_mem;
-static uint32_t      *msg_keys, *contact_keys;
-static scroll_item_t *scroll_items;
-static size_t         msg_keys_n, contact_keys_n;
-
-typedef struct {
-    int32_t         y;
-    bool            at_end;
-    scroll_anchor_t anchor;
-} scroll_t;
-
-// The list's items with their keys; 0 when the children are not the keyed items (the "nothing yet" line)
-static size_t list_items(lv_obj_t *list, uint32_t const *keys, size_t n) {
-    if (n == 0 || lv_obj_get_child_count(list) != n) {
-        return 0;
-    }
-    for (size_t i = 0; i < n; i++) {
-        lv_obj_t *item         = lv_obj_get_child(list, (int32_t)i);
-        scroll_items[i].top    = lv_obj_get_y(item); // in the content: does not move with scrolling
-        scroll_items[i].bottom = scroll_items[i].top + lv_obj_get_height(item);
-        scroll_items[i].key    = keys[i];
-    }
-    return n;
-}
-
-static scroll_t save_scroll(lv_obj_t *list, bool newest_at_bottom, uint32_t const *keys, size_t n) {
-    scroll_t s = {.y = lv_obj_get_scroll_y(list)};
-    s.at_end   = newest_at_bottom ? lv_obj_get_scroll_bottom(list) <= 0 : s.y <= 0;
-    s.anchor   = scroll_anchor_take(scroll_items, list_items(list, keys, n), s.y);
-    return s;
-}
-
-static void restore_scroll(lv_obj_t *list, scroll_t s, bool newest_at_bottom, uint32_t const *keys, size_t n) {
-    lv_obj_update_layout(list);
-    int32_t y = s.y;
-    if (s.at_end) {
-        y = newest_at_bottom ? LV_COORD_MAX : 0;
-    } else {
-        scroll_anchor_find(&s.anchor, scroll_items, list_items(list, keys, n), &y);
-    }
-    // scroll_to_y is bounded: a list that fits doesn't move, a shorter one doesn't end up overscrolled
-    lv_obj_scroll_to_y(list, y, LV_ANIM_OFF);
-}
-
-static uint32_t conv_key(mesh_conv_t const *c) {
-    return scroll_key_hash(&c->key, sizeof(c->key), 0);
-}
-
-static void style_row(lv_obj_t *item, bool selected) {
-    lv_obj_set_style_bg_color(item, lv_color_hex(THEME_TILE), 0);
-    lv_obj_set_style_bg_opa(item, selected ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-}
-
-// A label that stays on one line, cut with "..." (the row would grow otherwise)
-static lv_obj_t *add_line(lv_obj_t *parent, char const *text, uint32_t color) {
-    lv_obj_t *label = lv_label_create(parent);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
-    lv_label_set_text(label, text);
-    lv_obj_set_height(label, lv_font_get_line_height(lv_obj_get_style_text_font(label, 0)));
-    return label;
-}
-
-// One chat: title and unread badge on top, the age and latest line under them (mesh_conv_row)
-static void add_conv_row(mesh_conv_t const *c, uint32_t now, uint32_t now_epoch, bool selected) {
-    char title[MESH_CHANNEL_MAX + 1], badge[8], sub[MESH_TEXT_MAX + 40];
-    mesh_conv_row(c, now, now_epoch, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
-    lv_obj_t *item = add_item(messages_list);
-    style_row(item, selected);
-    lv_obj_set_style_pad_hor(item, 6, 0);
-    lv_obj_t *top = lv_obj_create(item);
-    lv_obj_remove_style_all(top);
-    lv_obj_set_size(top, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(top, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(top, 8, 0);
-    lv_obj_set_scrollable(top, false);
-    lv_obj_set_clickable(top, false);
-    lv_obj_t *t = add_line(top, title, THEME_TEXT);
-    lv_obj_set_flex_grow(t, 1);
-    if (badge[0]) {
-        add_line(top, badge, THEME_AMBER);
-    }
-    lv_obj_t *s = add_line(item, sub, THEME_DIM);
-    lv_obj_set_width(s, LV_PCT(100));
-}
-
-// Where the highlight is after the list changed: on the same chat if it is still there, else the same place
-static void settle_selection(void) {
-    size_t at = conv_n;
-    for (size_t i = 0; sel_valid && i < conv_n; i++) {
-        if (memcmp(&conv_copy[i].key, &sel_key, sizeof(sel_key)) == 0) {
-            at = i;
-            break;
-        }
-    }
-    sel       = at < conv_n ? at : (sel < conv_n ? sel : (conv_n ? conv_n - 1 : 0));
-    sel_valid = conv_n > 0;
-    if (sel_valid) {
-        sel_key = conv_copy[sel].key;
-    }
-}
-
-static void rebuild_messages(size_t count) {
-    scroll_t s = save_scroll(messages_list, false, msg_keys, msg_keys_n);
-    lv_obj_clean(messages_list);
-    conv_n     = count;
-    msg_keys_n = count;
-    settle_selection();
-    if (!count) {
-        add_label(messages_list, "No chats yet. MeshCore is starting.", THEME_DIM);
-        return;
-    }
-    uint32_t now = mesh_uptime_s(), now_epoch = mesh_epoch_now();
-    for (size_t i = 0; i < count; i++) {
-        msg_keys[i] = conv_key(&conv_copy[i]);
-        add_conv_row(&conv_copy[i], now, now_epoch, i == sel);
-    }
-    restore_scroll(messages_list, s, false, msg_keys, msg_keys_n);
-}
-
-// Up/Down: the highlight moves and its row scrolls into view
-static void move_selection(int delta) {
-    if (!conv_n || lv_obj_get_child_count(messages_list) != conv_n) {
-        return;
-    }
-    size_t to = delta < 0 ? (sel > 0 ? sel - 1 : 0) : (sel + 1 < conv_n ? sel + 1 : sel);
-    style_row(lv_obj_get_child(messages_list, (int32_t)sel), false);
-    sel     = to;
-    sel_key = conv_copy[sel].key;
-    lv_obj_t *row = lv_obj_get_child(messages_list, (int32_t)sel);
-    style_row(row, true);
-    lv_obj_scroll_to_view(row, LV_ANIM_OFF);
-}
-
-static void open_selected(void) {
-    if (!sel_valid || sel >= conv_n) {
-        return;
-    }
-    mesh_conv_t const *c = &conv_copy[sel];
-    if (c->key.kind == MESH_CHAT_DM) {
-        meshcore_chat_open_dm(c->key.id, c->title);
-    } else {
-        meshcore_chat_open_channel(c->title);
-    }
-}
-
-// The Contacts tab's highlight after the list changed: on the same contact if it is still there, else the same place
-static size_t contact_settle(size_t count) {
-    size_t at = contact_sel < count ? contact_sel : (count ? count - 1 : 0);
-    for (size_t i = 0; contact_n && i < count; i++) {
-        if (memcmp(contact_copy[i].pubkey, contact_sel_key, sizeof(contact_sel_key)) == 0) {
-            at = i;
-            break;
-        }
-    }
-    contact_n = count;
-    if (count) {
-        memcpy(contact_sel_key, contact_copy[at].pubkey, sizeof(contact_sel_key));
-    }
-    return at;
-}
-
-static void move_contact(int delta) {
-    if (!contact_n || lv_obj_get_child_count(contacts_list) != contact_n) {
-        return;
-    }
-    size_t to = delta < 0 ? (contact_sel > 0 ? contact_sel - 1 : 0)
-                          : (contact_sel + 1 < contact_n ? contact_sel + 1 : contact_sel);
-    style_row(lv_obj_get_child(contacts_list, (int32_t)contact_sel), false);
-    contact_sel = to;
-    memcpy(contact_sel_key, contact_copy[to].pubkey, sizeof(contact_sel_key));
-    lv_obj_t *row = lv_obj_get_child(contacts_list, (int32_t)to);
-    style_row(row, true);
-    lv_obj_scroll_to_view(row, LV_ANIM_OFF);
-}
-
-static void rebuild_contacts(size_t count) {
-    scroll_t s = save_scroll(contacts_list, false, contact_keys, contact_keys_n);
-    lv_obj_clean(contacts_list);
-    contact_keys_n = count;
-    contact_sel    = contact_settle(count);
-    if (!count) {
-        add_label(contacts_list, "No nodes heard yet.", THEME_DIM);
-        return;
-    }
-    for (size_t i = 0; i < count; i++) {
-        mesh_contact_t const *c = &contact_copy[i];
-        char                  age[24], hops[16], meta[80];
-        contact_keys[i]         = scroll_key_hash(c->pubkey, sizeof(c->pubkey), 0);
-        mesh_format_age(c->age_s, age, sizeof(age));
-        mesh_format_hops(c->path_len, hops, sizeof(hops)); // the hash size bits are not hops (#85)
-        snprintf(meta, sizeof(meta), "%s, %s, %s", mesh_type_name(c->type), hops, age);
-        char name[MESH_NAME_MAX + 8];
-        snprintf(name, sizeof(name), "%s%s", c->flags & MESH_CONTACT_FAV ? "\u2B50 " : "", // a favourite (#49)
-                 c->name[0] ? c->name : "(no name)");
-        lv_obj_t *item = add_item(contacts_list);
-        style_row(item, i == contact_sel);
-        lv_obj_set_style_pad_hor(item, 6, 0);
-        add_label(item, name, THEME_TEXT);
-        add_label(item, meta, THEME_DIM);
-    }
-    restore_scroll(contacts_list, s, false, contact_keys, contact_keys_n);
-}
-
-static bool messages_visible(void) {
-    return lv_tabview_get_tab_active(tabs) == TAB_MESSAGES;
-}
-
-// The chats' signature: changes when a message arrives, a count changes or the channels do
-static uint32_t convs_sig(size_t n) {
-    uint32_t h = scroll_key_hash(&n, sizeof(n), 0);
-    for (size_t i = 0; i < n; i++) {
-        h = scroll_key_hash(&conv_copy[i].key, sizeof(conv_copy[i].key), h);
-        h = scroll_key_hash(&conv_copy[i].last_seq, sizeof(conv_copy[i].last_seq), h);
-        h = scroll_key_hash(&conv_copy[i].unread, sizeof(conv_copy[i].unread), h);
-    }
-    return h;
-}
-
-// The conversation list: the store's chats plus the configured channels, newest first. conv_copy is only written once
-// both snapshots are in, so the rows on screen and the copy Enter opens from always agree.
-static size_t take_convs(void) {
-    size_t names = mesh_channels_snapshot_wait(chan_names, MAX_CHANNELS, SCREEN_WAIT_MS);
-    if (names == MESH_BUSY) {
-        return MESH_BUSY;
-    }
-    size_t n = mesh_convs_snapshot(conv_copy, SHOW_CONVS, SCREEN_WAIT_MS);
-    if (n == MESH_BUSY) {
-        return MESH_BUSY;
-    }
-    n = mesh_conv_merge_channels(conv_copy, n, SHOW_CONVS, (char const(*)[MESH_CHANNEL_MAX + 1])chan_names, names);
-    mesh_conv_sort(conv_copy, n);
-    return n;
-}
-
-// The contacts list changes when the count changes, someone is heard (again): the newest hearing time, or a
-// contact's favourite flag or path changes (#49: favourites come first)
-static uint32_t contacts_signature(size_t n, size_t total) {
-    uint32_t newest = UINT32_MAX;
-    uint32_t h      = scroll_key_hash(&total, sizeof(total), 0);
-    for (size_t i = 0; i < n; i++) {
-        newest = contact_copy[i].age_s < newest ? contact_copy[i].age_s : newest;
-        h      = scroll_key_hash(contact_copy[i].pubkey, sizeof(contact_copy[i].pubkey), h);
-        h      = scroll_key_hash(&contact_copy[i].flags, 1, h);
-        h      = scroll_key_hash(&contact_copy[i].path_len, 1, h);
-    }
-    uint32_t heard_at = n ? mesh_uptime_s() - newest : 0;
-    return h ^ heard_at;
-}
-
-// The copies are taken under the mesh lock (inside the snapshot functions), the widgets are built from them afterwards:
-// the mesh task is never kept waiting on LVGL.
-static void refresh(lv_timer_t *t) {
-    (void)t;
-    size_t total_contacts;
-    size_t contacts = mesh_contacts_snapshot(contact_copy, SHOW_CONTACTS, &total_contacts, SCREEN_WAIT_MS);
-    if (contacts == MESH_BUSY) {
-        return; // MeshCore is busy (saving files): the screen stays as it is until the next tick
-    }
-    size_t convs = take_convs();
-    if (convs == MESH_BUSY) {
-        return;
-    }
-    uint32_t contacts_sig = contacts_signature(contacts, total_contacts);
-    uint32_t sig          = convs_sig(convs);
-    bool     stale        = mesh_uptime_s() - last_rebuild_s >= AGE_REFRESH_S;
-    if (sig != shown_sig || stale) {
-        rebuild_messages(convs);
-        shown_sig = sig;
-    }
-    if (contacts_sig != shown_contacts_sig || stale) {
-        rebuild_contacts(contacts);
-        shown_contacts_sig = contacts_sig;
-    }
-    if (stale) {
-        last_rebuild_s = mesh_uptime_s();
-    }
-}
-
-static void switch_tab(int delta) {
-    uint32_t n   = lv_tabview_get_tab_count(tabs);
-    uint32_t cur = lv_tabview_get_tab_active(tabs);
-    lv_tabview_set_active(tabs, (cur + n + delta) % n, LV_ANIM_OFF);
-    lv_label_set_text(tab_hint, messages_visible() ? HINT_MESSAGES : HINT_CONTACTS);
-}
-
-// By its key, not the row: refresh() takes a new copy every tick, a rebuild may not have followed yet
-static void open_contact(void) {
-    for (size_t i = 0; i < contact_n; i++) {
-        if (memcmp(contact_copy[i].pubkey, contact_sel_key, sizeof(contact_sel_key)) == 0) {
-            meshcore_contact_open(&contact_copy[i]);
-            return;
-        }
-    }
-}
-
-static void on_key(lv_event_t *e) {
-    switch (lv_event_get_key(e)) {
-        case LV_KEY_LEFT: switch_tab(-1); break;
-        case LV_KEY_RIGHT: switch_tab(1); break;
-        case LV_KEY_UP:
-            if (messages_visible()) {
-                move_selection(-1);
-            } else {
-                move_contact(-1);
-            }
-            break;
-        case LV_KEY_DOWN:
-            if (messages_visible()) {
-                move_selection(1);
-            } else {
-                move_contact(1);
-            }
-            break;
-        case LV_KEY_ENTER:
-            if (messages_visible()) {
-                open_selected(); // the highlighted chat (#48)
-            } else {
-                open_contact(); // the highlighted contact's details (#49): Message is their first row
-            }
-            break;
-        default: break;
-    }
-}
-
-// Tab (LV_KEY_NEXT) is taken by the group to move focus, and a group with one object doesn't move (nor tell anyone).
-// With tab_hop as the second object the focus lands there: switch the tab and give the focus back to the tabs.
-static void on_focus_move(lv_group_t *group) {
-    if (tabs && tab_hop && lv_group_get_focused(group) == tab_hop) {
-        switch_tab(1);
-        lv_group_focus_obj(tabs); // calls this again, with the tabs focused: a no-op
-    }
-}
-
-static void on_delete(lv_event_t *e) {
-    (void)e;
-    if (timer) {
-        lv_timer_delete(timer);
-        timer = NULL;
-    }
-    heap_caps_free(conv_copy);
-    heap_caps_free(chan_names);
-    heap_caps_free(contact_copy);
-    conv_copy      = NULL;
-    chan_names     = NULL;
-    conv_n         = 0;
-    contact_copy   = NULL;
-    contact_n      = 0;
-    contact_sel    = 0;
-    heap_caps_free(anchor_mem);
-    anchor_mem     = NULL;
-    msg_keys       = NULL;
-    contact_keys   = NULL;
-    scroll_items   = NULL;
-    msg_keys_n     = 0;
-    contact_keys_n = 0;
-    tabs           = NULL;
-    tab_hop        = NULL;
-    messages_list  = NULL;
-    contacts_list  = NULL;
-    tab_hint       = NULL;
-}
-
-static lv_obj_t *make_list(lv_obj_t *tab) {
-    lv_obj_set_style_pad_all(tab, 8, 0);
-    lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(tab, 10, 0);
-    lv_obj_set_scroll_dir(tab, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(tab, LV_SCROLLBAR_MODE_ACTIVE);
-    shell_scroll_tame(tab);
-    return tab;
-}
-
-static void style_tab_bar(lv_obj_t *bar) {
-    lv_obj_set_style_bg_color(bar, lv_color_hex(THEME_BG), 0);
-    lv_obj_set_style_text_font(bar, lichen_font(LICHEN_FONT_MEDIUM), 0);
-    lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_BOTTOM, 0);
-    lv_obj_set_style_border_width(bar, 2, 0);
-    lv_obj_set_style_border_color(bar, lv_color_hex(THEME_RULE), 0);
-    for (uint32_t i = 0; i < lv_obj_get_child_count(bar); i++) {
-        lv_obj_t *button = lv_obj_get_child(bar, (int32_t)i);
-        lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_text_color(button, lv_color_hex(THEME_DIM), 0);
-        lv_obj_set_style_text_color(button, lv_color_hex(THEME_AMBER), LV_STATE_CHECKED);
-        // Every tab has the underline, only the checked one shows it: otherwise its label jumps up (#20)
-        lv_obj_set_style_border_side(button, LV_BORDER_SIDE_BOTTOM, 0);
-        lv_obj_set_style_border_width(button, 4, 0);
-        lv_obj_set_style_border_width(button, 4, LV_STATE_CHECKED); // beats the theme's own CHECKED width
-        // The theme also pads the top of the checked tab only; pad every tab like it, balancing the 4 px underline
-        lv_obj_set_style_pad_top(button, 4, 0);
-        lv_obj_set_style_pad_top(button, 4, LV_STATE_CHECKED);
-        lv_obj_set_style_border_color(button, lv_color_hex(THEME_AMBER), 0);
-        lv_obj_set_style_border_opa(button, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_opa(button, LV_OPA_COVER, LV_STATE_CHECKED);
-    }
-}
-
-static void build_tabs(lv_obj_t *screen, lv_group_t *group) {
-    lv_obj_set_style_pad_bottom(screen, 0, 0);
-    lv_obj_set_scrollable(screen, false);
-    lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUS_KEY);
-    conv_copy    = heap_caps_malloc(SHOW_CONVS * sizeof(*conv_copy), MALLOC_CAP_SPIRAM);
-    chan_names   = heap_caps_malloc(MAX_CHANNELS * sizeof(*chan_names), MALLOC_CAP_SPIRAM);
-    contact_copy = heap_caps_malloc(SHOW_CONTACTS * sizeof(*contact_copy), MALLOC_CAP_SPIRAM);
-    anchor_mem   = heap_caps_malloc(sizeof(*anchor_mem), MALLOC_CAP_SPIRAM);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    if (!conv_copy || !chan_names || !contact_copy || !anchor_mem) {
-        ESP_LOGE(TAG, "no memory for the screen");
-        lv_obj_t *label = add_label(screen, "Not enough memory to show MeshCore.", THEME_DIM);
-        lv_obj_center(label);
-        return;
-    }
-
-    msg_keys     = anchor_mem->msg;
-    contact_keys = anchor_mem->contact;
-    scroll_items = anchor_mem->items;
-
-    tabs = lv_tabview_create(screen);
-    lv_obj_set_size(tabs, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_opa(tabs, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_outline_width(tabs, 0, LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_width(tabs, 0, LV_STATE_FOCUS_KEY);
-    lv_tabview_set_tab_bar_size(tabs, TAB_BAR_H);
-    messages_list = make_list(lv_tabview_add_tab(tabs, "Messages"));
-    contacts_list = make_list(lv_tabview_add_tab(tabs, "Contacts"));
-    style_tab_bar(lv_tabview_get_tab_bar(tabs));
-    lv_obj_set_scrollable(lv_tabview_get_content(tabs), false); // tabs change by key, not by swiping the content
-    lv_obj_set_style_pad_bottom(messages_list, 56, 0); // room for the hint below
-    lv_obj_t *hint = lv_label_create(screen);
-    tab_hint       = hint;
-    lv_obj_set_style_text_color(hint, lv_color_hex(THEME_AMBER), 0);
-    lv_obj_set_style_bg_color(hint, lv_color_hex(THEME_BG), 0);
-    lv_obj_set_style_bg_opa(hint, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_all(hint, 6, 0);
-    lv_label_set_text(hint, HINT_MESSAGES);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
-
-    if (group) {
-        lv_group_add_obj(group, tabs);
-        tab_hop = lv_obj_create(screen);
-        lv_obj_remove_style_all(tab_hop);
-        lv_obj_set_size(tab_hop, 0, 0);
-        lv_obj_set_floating(tab_hop, true);
-        lv_obj_set_clickable(tab_hop, false);
-        lv_group_add_obj(group, tab_hop);
-        lv_group_set_focus_cb(group, on_focus_move);
-        lv_group_focus_obj(tabs);
-    }
-    lv_obj_add_event_cb(tabs, on_key, LV_EVENT_KEY, NULL);
-
-    shown_sig          = UINT32_MAX;
-    sel_valid          = false;
-    sel                = 0;
-    shown_contacts_sig = UINT32_MAX;
-    last_rebuild_s     = mesh_uptime_s();
-    timer              = lv_timer_create(refresh, 1000, NULL);
-    refresh(timer);
 }
 
 // ---- the first open: name, then region (#67) ---------------------------------------------------------------------
@@ -679,9 +152,9 @@ static void first_step(void *arg) {
             lv_group_t *group  = lv_obj_get_group(screen);
             first_screen       = NULL;
             if (group) {
-                lv_group_remove_obj(screen); // keys go to the tabs, Tab must not land on the bare screen
+                lv_group_remove_obj(screen); // keys go to the tiles, Tab must not land on the bare screen
             }
-            build_tabs(screen, group);
+            meshcore_grid_build(screen, group);
             break;
         }
     }
@@ -708,7 +181,7 @@ static void open(lv_obj_t *screen) {
         lv_obj_add_event_cb(screen, on_first_delete, LV_EVENT_DELETE, NULL);
         return;
     }
-    build_tabs(screen, lv_group_get_default()); // the screen's own (shell_open)
+    meshcore_grid_build(screen, lv_group_get_default()); // the screen's own (shell_open)
 }
 
 // ---- Settings > MeshCore: about ----------------------------------------------------------------------------------
@@ -800,6 +273,20 @@ static void about(lv_obj_t *page) {
     lv_obj_add_event_cb(about_radio, on_about_delete, LV_EVENT_DELETE, NULL);
     snprintf(text, sizeof(text), "MeshCore %s", mesh_firmware_version());
     add_row(page, "version", text);
+}
+
+// ---- the grid's Settings tile: the same page as Settings > MeshCore (app_settings.c builds it alike) -------------
+
+static lv_obj_t *build_settings(void) {
+    lv_obj_t *screen = shell_page_create();
+    lv_obj_t *menu   = menu_create(screen, self()->name);
+    meshcore_settings(menu);
+    about(menu);
+    return screen;
+}
+
+void meshcore_app_settings_open(void) {
+    shell_open(build_settings, SCREEN_SETTINGS);
 }
 
 // ---- the background part -----------------------------------------------------------------------------------------
