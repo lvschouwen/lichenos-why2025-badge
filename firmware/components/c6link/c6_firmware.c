@@ -14,6 +14,7 @@
  */
 
 #include "boot_progress.h"
+#include "esp_attr.h"
 #include "c6_firmware.h"
 #include "c6_image.h"
 #include "c6_paths.h"
@@ -116,7 +117,7 @@ error:
 
 // MD5 of the whole file against the hex text of its .md5; leaves the file rewound
 static bool file_matches_md5(FILE *fp, char const *md5_hex) {
-    static uint8_t buf[4096];
+    EXT_RAM_BSS_ATTR static uint8_t buf[4096]; // PSRAM (#107): fread copies
     md5_context_t  ctx;
     uint8_t        digest[ESP_ROM_MD5_DIGEST_LEN];
     size_t         n;
@@ -177,7 +178,7 @@ static size_t read_partition_table(c6_binaries_t *bins, uint8_t *table) {
 
 // Make sure the application fits the app partition at APPLICATION_ADDRESS in the image's own partition table
 static bool app_fits_partition(c6_binaries_t *bins) {
-    static uint8_t table[PARTITION_TABLE_MAX_LEN];
+    EXT_RAM_BSS_ATTR static uint8_t table[PARTITION_TABLE_MAX_LEN];
     size_t         len = read_partition_table(bins, table);
     uint32_t       size;
 
@@ -194,7 +195,7 @@ static bool app_fits_partition(c6_binaries_t *bins) {
 }
 
 bool c6_binaries_otadata(c6_binaries_t *bins, uint32_t *offset, uint32_t *size) {
-    static uint8_t table[PARTITION_TABLE_MAX_LEN];
+    EXT_RAM_BSS_ATTR static uint8_t table[PARTITION_TABLE_MAX_LEN];
     size_t         len = read_partition_table(bins, table);
     return c6_otadata_region(table, len, offset, size);
 }
@@ -293,7 +294,7 @@ esp_loader_error_t connect_to_target_with_stub(
 }
 
 esp_loader_error_t flash_binary(esp_loader_t *loader, FILE *bin, size_t size, size_t address) {
-    static uint8_t         payload[1024];
+    EXT_RAM_BSS_ATTR static uint8_t payload[1024];
 
     if (!bin) {
         return ESP_LOADER_ERROR_INVALID_PARAM;

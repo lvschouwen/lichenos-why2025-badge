@@ -25,7 +25,7 @@ static char const TAG[] = "sys_notices";
 #define POLL_MS        1000
 #define SETTLE_POLLS   3  // after home shows: the boot steps have all reported by then
 #define STORAGE_POLLS  60 // free space once a minute
-#define TASK_STACK     6144
+#define TASK_STACK     4096 // peak 1.2 KB measured (#107)
 #define STACK_LOG_POLL 120 // the stack high-water mark is logged once, two minutes in
 #define BODY_CAP       120
 

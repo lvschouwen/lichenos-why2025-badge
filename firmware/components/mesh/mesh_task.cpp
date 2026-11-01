@@ -49,7 +49,7 @@ extern "C" {
 #include <time.h>
 
 #define STORE_MESSAGES 100 // kept per chat in mesh_store (PSRAM, allocated with the chat's first message)
-#define MESH_STACK     16384 // Ed25519 signature checks are deep, and MyMesh keeps File objects on the stack
+#define MESH_STACK     12288 // Ed25519 checks are deep and MyMesh keeps File objects on the stack; peak 3.1 KB (#107)
 #define MESH_CORE      1     // with LVGL: its 400-650 ms file bursts stay off core 0, where SDIO, tcpip and LoRa live (#91)
 #define MESH_POLL_MS   2
 #define MESH_SLOW_LOOP_MS 200

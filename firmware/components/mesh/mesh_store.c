@@ -4,6 +4,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef ESP_PLATFORM
+#include "esp_attr.h"
+#else
+#define EXT_RAM_BSS_ATTR // host tests
+#endif
+
 // A table of chats, each with a ring of its messages (oldest overwritten)
 typedef struct {
     mesh_conv_t pub;
@@ -12,7 +18,7 @@ typedef struct {
     bool        used;
 } conv_t;
 
-static conv_t   convs[MESH_CONV_MAX];
+EXT_RAM_BSS_ATTR static conv_t convs[MESH_CONV_MAX]; // 17 KB: PSRAM on the badge (#107)
 static size_t   ring_cap;
 static uint32_t generation, own_changes, next_seq, dropped;
 static void *(*ring_alloc)(size_t, size_t);

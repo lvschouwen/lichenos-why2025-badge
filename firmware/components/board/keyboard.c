@@ -220,7 +220,7 @@ bool keyboard_start(lv_indev_t **out) {
     }
     tca8418_flush(chip);
     events = xQueueCreate(QUEUE_DEPTH, sizeof(key_event_t));
-    if (!events || xTaskCreatePinnedToCore(poll_task, "keyboard", 4096, NULL, 4, NULL, 0) != pdPASS) {
+    if (!events || xTaskCreatePinnedToCore(poll_task, "keyboard", 3072 /* peak 1 KB, #107 */, NULL, 4, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "keyboard task not started");
         return false;
     }

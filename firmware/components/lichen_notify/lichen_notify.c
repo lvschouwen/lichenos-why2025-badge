@@ -36,7 +36,7 @@ static char const TAG[] = "notify";
 #define SAVE_SLOW_US (30LL * 1000 * 1000)
 #define SAVE_SOON_US (3LL * 1000 * 1000)
 #define SAVE_GAP_US  (30LL * 1000 * 1000) // the least time between two saves (except a removal or a clear)
-#define SAVE_STACK   6144
+#define SAVE_STACK   4096 // peak 1.4 KB measured (#107)
 #define TOAST_DEPTH  8
 #define ONCE_SLOTS   64
 #define DND_KEY      "notify_dnd"

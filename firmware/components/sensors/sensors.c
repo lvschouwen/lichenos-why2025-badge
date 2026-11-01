@@ -18,7 +18,7 @@
 
 static char const TAG[] = "sensors";
 
-#define STACK_BYTES   6144 // the Bosch calls' depth is not measured yet: the margin is logged once (see log_stack)
+#define STACK_BYTES   4096 // peak 1.6 KB measured (#107); the margin is still logged once (see log_stack)
 #define PRIORITY      2    // below the keyboard (4): a key press never waits for a sample
 #define RETRY_US      (30 * 1000000LL)
 #define IMU_FAILS     5 // in a row, then the chip counts as gone and is re-initialised

@@ -523,7 +523,7 @@ bool lora_start(void) {
         return false;
     }
     console_register("lora", "lora [raw on|off] (radio status; raw: print packets as hex and tx answer times)", cmd_lora);
-    if (xTaskCreatePinnedToCore(lora_task, "LoRa", 6144, NULL, 3, NULL, 0) != pdPASS) {
+    if (xTaskCreatePinnedToCore(lora_task, "LoRa", 5120 /* peak 2.7 KB, #107 */, NULL, 3, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "task not started");
         return false;
     }

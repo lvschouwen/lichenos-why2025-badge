@@ -4,6 +4,8 @@
 // anything touches flash: flash writes while the network is receiving corrupted the stream on this badge (#40).
 #include "ota_server.h"
 
+#include "esp_attr.h"
+
 #include "c6_paths.h"
 #include "c6link.h"
 #include "console_cmd.h" // CONSOLE_CMD_MAX
@@ -61,8 +63,8 @@ static char const TAG[] = "ota";
 static char token[OTA_TOKEN_LEN + 1];
 
 // One request at a time
-static char    head_buf[2048];
-static uint8_t body_buf[4096];
+EXT_RAM_BSS_ATTR static char    head_buf[2048]; // PSRAM (#107): sockets and flash reads copy, no DMA
+EXT_RAM_BSS_ATTR static uint8_t body_buf[4096];
 
 static ota_hooks_t hooks;
 static uint32_t    progress_base; // bytes of earlier pieces, so a piece's progress counts from the start of the file
@@ -191,8 +193,8 @@ static bool output_bytes(output_t *out, uint8_t const *data, size_t len) {
 }
 
 // Streaming inflate of a zlib body with the ROM's tinfl; its 32 KiB dictionary doubles as the output window
-static tinfl_decompressor inflater;
-static uint8_t            inflate_window[TINFL_LZ_DICT_SIZE];
+EXT_RAM_BSS_ATTR static tinfl_decompressor inflater; // 43 KB with the window: PSRAM (#107)
+EXT_RAM_BSS_ATTR static uint8_t            inflate_window[TINFL_LZ_DICT_SIZE];
 static size_t             inflate_ofs;
 static bool               inflate_done;
 

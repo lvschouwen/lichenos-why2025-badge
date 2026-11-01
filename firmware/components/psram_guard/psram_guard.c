@@ -283,7 +283,7 @@ void psram_guard_start(void) {
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);
     console_register("psram", "psram [test <KB> [dense]] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
-    if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 4096, NULL, 1, NULL, 0) != pdPASS) {
+    if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 3072 /* peak 1.4 KB, #107 */, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGW(TAG, "canary task failed to start");
     }
 }
