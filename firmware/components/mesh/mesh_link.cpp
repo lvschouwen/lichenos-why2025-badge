@@ -80,6 +80,9 @@ BadgeMesh::ContactResult BadgeMesh::contactAction(uint8_t const prefix[MF_PREFIX
     case MESH_CO_FAV_ON:
     case MESH_CO_FAV_OFF:
         c->flags = (uint8_t)(op == MESH_CO_FAV_ON ? (c->flags | MESH_CONTACT_FAV) : (c->flags & ~MESH_CONTACT_FAV));
+        // The frame is a snapshot of the whole contact that MyMesh applies in its next loop (ms later): a path learned
+        // in between would be overwritten by the old one. Accepted: the window is one loop, and the next DM or
+        // advert learns the path again.
         contact_to_frame(*c, &mc);
         n = mf_encode_update_contact(f, &mc);
         break;

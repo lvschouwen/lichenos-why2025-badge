@@ -33,8 +33,8 @@ static char const TAG[] = "meshcore";
 #define SCREEN_RADIO    130
 #define SCREEN_CUSTOM   131
 #define SCREEN_CHANNELS 132
-#define SCREEN_REMOVE   133
 #define SCREEN_SWITCH   134
+#define REMOVE_ASK_S    20 // the careful remove dialog cancels by itself after this
 #define JOB_STACK       6144 // savePrefs / saveChannels keep File objects on the stack (the console's 4 KB suffices)
 #define MAX_CHANNELS    40   // MAX_GROUP_CHANNELS in the mesh component's build
 #define MAX_PRESETS     32
@@ -854,9 +854,8 @@ static void remove_done(job_t *job) {
     }
 }
 
-// Runs on the channel list, after the confirm screen is popped
-static void remove_go(void *arg) {
-    (void)arg;
+// Runs on the channel list, after the confirm dialog
+static void remove_go(void) {
     job_t *job = job_new(JOB_CHANNEL_RM, remove_done);
     if (!job) {
         set_note(channel_note, "Busy, try again", true);
@@ -867,25 +866,28 @@ static void remove_go(void *arg) {
     job_start(job);
 }
 
-static void remove_yes(void *arg) {
-    (void)arg;
-    shell_back_then(remove_go, NULL);
+static void remove_answer(bool yes) {
+    if (yes) {
+        remove_go();
+    }
 }
 
-static lv_obj_t *build_remove(void) {
-    lv_obj_t *screen = shell_page_create();
-    lv_obj_t *menu   = menu_create(screen, "Remove channel");
-    char      text[64];
-    snprintf(text, sizeof(text), "Remove %s?", remove_name);
-    menu_note(menu, text);
-    menu_add(menu, "Remove", "Enter", remove_yes, NULL);
-    menu_note(menu, "Esc keeps it. Messages already received stay.");
-    return screen;
-}
-
+// A careful dialog: a held Enter (LVGL repeats it) never confirms, only a fresh press after a second does (#49 review)
 static void remove_ask(void *arg) {
     snprintf(remove_name, sizeof(remove_name), "%s", (char const *)arg);
-    shell_open(build_remove, SCREEN_REMOVE);
+    char                 title[MESH_CHANNEL_MAX + 64];
+    shell_dialog_t const d = {
+        .title        = title,
+        .count_prefix = "(cancels in ",
+        .count_suffix = " s)",
+        .hint         = "Enter: remove · Esc: keep it",
+        .seconds      = REMOVE_ASK_S,
+        .careful      = true,
+    };
+    snprintf(title, sizeof(title), "Remove %s? Messages already received stay.", remove_name);
+    if (!shell_dialog_countdown(&d, remove_answer)) {
+        set_note(channel_note, "Busy, try again", true);
+    }
 }
 
 static void on_tag(char const *text, void *arg) {

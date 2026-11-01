@@ -7,8 +7,8 @@
 #include "identity_move.h"
 #include "mesh.h"
 #include "mesh_format.h"
-#include "mesh_contact_fmt.h"
 #include "mesh_chat.h"
+#include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
 #include "channel_input.h"
 #include "mesh_prefs.h"
@@ -304,7 +304,7 @@ static bool mesh_is_stopped(void) {
 
 extern "C" size_t mesh_contact_detail(uint8_t const prefix[6], mesh_contact_detail_t *out, uint32_t wait_ms) {
     if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped()) {
-        return 0;
+        return MESH_BUSY; // not up (yet), or stopped for an update: not a sign the contact is gone
     }
     if (!mesh_lock_within(wait_ms)) {
         return MESH_BUSY;
@@ -328,7 +328,7 @@ extern "C" size_t mesh_contact_detail(uint8_t const prefix[6], mesh_contact_deta
 
 extern "C" size_t mesh_contact_do(uint8_t const prefix[6], mesh_contact_op_t op, uint32_t wait_ms) {
     if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped()) {
-        return 0;
+        return MESH_BUSY; // as mesh_contact_detail
     }
     if (!mesh_lock_within(wait_ms)) {
         return MESH_BUSY;

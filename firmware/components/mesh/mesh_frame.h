@@ -17,14 +17,14 @@ extern "C" {
 #define MF_PREFIX    6
 
 enum {
-    MF_CMD_APP_START        = 1,
-    MF_CMD_SEND_TXT_MSG     = 2,
-    MF_CMD_SEND_CHANNEL_TXT = 3,
+    MF_CMD_APP_START          = 1,
+    MF_CMD_SEND_TXT_MSG       = 2,
+    MF_CMD_SEND_CHANNEL_TXT   = 3,
     MF_CMD_ADD_UPDATE_CONTACT = 9,
-    MF_CMD_SYNC_NEXT        = 10,
-    MF_CMD_RESET_PATH       = 13,
-    MF_CMD_REMOVE_CONTACT   = 15,
-    MF_CMD_DEVICE_QUERY     = 22,
+    MF_CMD_SYNC_NEXT          = 10,
+    MF_CMD_RESET_PATH         = 13,
+    MF_CMD_REMOVE_CONTACT     = 15,
+    MF_CMD_DEVICE_QUERY       = 22,
 };
 enum {
     MF_RESP_OK                  = 0,

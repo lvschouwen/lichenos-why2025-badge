@@ -44,7 +44,8 @@ typedef struct {
 
 // MeshCore's advert types as the details screen names them: "companion", "repeater", "room", "sensor", "unknown"
 char const *mesh_contact_type_name(uint8_t type);
-// n bytes as lowercase hex, a space after every group bytes (0: none); cut to what fits in cap
+// n bytes as lowercase hex, a space after every group bytes (0: none; the Key line uses 4 bytes = 8 hex digits); cut
+// on a whole byte to what fits in cap
 void        mesh_hex(uint8_t const *bytes, size_t n, size_t group, char *out, size_t cap);
 // "flood", "direct", or "2 hops via a1b2,c3d4 (2-byte hashes)": the hops with the hash of each repeater
 void        mesh_format_route(uint8_t path_len, uint8_t const *path, char *out, size_t cap);
@@ -56,7 +57,7 @@ bool mesh_contact_uri(char const *name, uint8_t const pub[MESH_CONTACT_PUB_LEN],
 bool mesh_contact_before(uint8_t flags_a, uint32_t age_a, uint8_t flags_b, uint32_t age_b);
 
 // The details screen's lines, always in this order: "Type: ...", "ID: <12 hex>" (what `fw mesh dm` takes), "Key: <64
-// hex in groups of 8>", "Last heard: ...", "Route: ...", "Location: ..."
+// hex in groups of 8 digits>", "Last heard: ...", "Route: ...", "Location: ..."
 enum {
     MESH_LINE_TYPE,
     MESH_LINE_ID,

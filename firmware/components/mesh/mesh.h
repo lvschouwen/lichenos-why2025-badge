@@ -104,12 +104,13 @@ size_t mesh_chat_snapshot(mesh_chat_key_t const *key, mesh_msg_t *out, size_t ma
 size_t mesh_convs_snapshot(mesh_conv_t *out, size_t max, uint32_t wait_ms);
 // Up to max contacts, favourites first, then the most recently heard; returns how many, *total = all contacts
 size_t mesh_contacts_snapshot(mesh_contact_t *out, size_t max, size_t *total, uint32_t wait_ms);
-// One contact by its 6-byte key prefix (#49): 1, 0 when it is not (or no longer) there, MESH_BUSY
+// One contact by its 6-byte key prefix (#49): 1, 0 when it is not (or no longer) there, MESH_BUSY when the lock was
+// not free in time or MeshCore is not running (not up yet, stopped for an update)
 size_t mesh_contact_detail(uint8_t const prefix[6], mesh_contact_detail_t *out, uint32_t wait_ms);
 // Reset path / favourite on or off / remove (#49): handed to MyMesh as its own command, which it runs in its next loop
 // and saves with its contacts a few seconds later (Remove also drops the contact's stored advert). Reset path and the
 // favourite flag show in a copy taken right after. 1 when queued, 0 when the contact is gone, MESH_BUSY when the lock
-// was not free within wait_ms or MyMesh's command queue is full.
+// was not free within wait_ms, MyMesh's command queue is full or MeshCore is not running.
 size_t mesh_contact_do(uint8_t const prefix[6], mesh_contact_op_t op, uint32_t wait_ms);
 
 // ---- sending (#45; the compose screens are #46 and #47) --------------------------------------------------------------

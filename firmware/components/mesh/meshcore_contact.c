@@ -19,10 +19,10 @@ static char const TAG[] = "meshcore";
 
 #define SCREEN_CONTACT 160
 #define SCREEN_SHARE   161
-#define SCREEN_REMOVE  162
 #define TICK_MS        1000
 #define TICK_WAIT_MS   20  // the refresh: a busy MeshCore (saving files) skips a tick, the keys never wait on it
-#define KEY_WAIT_MS    250 // a key press: worth a short wait rather than "busy" on most presses
+#define KEY_WAIT_MS    100 // a key press, in all (action and the copy after it): a short wait beats "busy"
+#define REMOVE_ASK_S   20  // the careful Remove dialog cancels by itself after this
 #define ADV_TYPE_CHAT  1   // MeshCore: a person's node (repeaters, rooms and sensors have no DMs)
 
 typedef struct {
@@ -38,7 +38,7 @@ static lv_obj_t      *list_screen; // the screen the details were opened from: R
 static contact_mem_t *mem;         // PSRAM, while the details screen exists
 static bool           have_detail, gone;
 static int            shown_path_len, shown_flags; // what the rows show; -1: nothing yet
-static lv_obj_t      *info[MESH_CONTACT_LINES], *note, *fav_row, *reset_row, *remove_note;
+static lv_obj_t      *info[MESH_CONTACT_LINES], *note, *fav_row, *reset_row;
 static lv_timer_t    *timer;
 
 static void set_text(lv_obj_t *label, char const *text) {
@@ -97,7 +97,8 @@ static bool act(mesh_contact_op_t op, lv_obj_t *status) {
     if (gone) {
         return false;
     }
-    size_t r = have_detail ? mesh_contact_do(prefix, op, KEY_WAIT_MS) : MESH_BUSY;
+    uint32_t start = lv_tick_get();
+    size_t   r     = have_detail ? mesh_contact_do(prefix, op, KEY_WAIT_MS) : MESH_BUSY;
     if (r == MESH_BUSY) {
         set_note(status, "MeshCore is busy, try again", true);
         return false;
@@ -106,7 +107,10 @@ static bool act(mesh_contact_op_t op, lv_obj_t *status) {
         mark_gone();
         return false;
     }
-    fill(KEY_WAIT_MS);
+    uint32_t spent = lv_tick_elaps(start);
+    if (spent < KEY_WAIT_MS) {
+        fill(KEY_WAIT_MS - spent); // else the next tick shows it: the keys never wait more than KEY_WAIT_MS in all
+    }
     return true;
 }
 
@@ -159,32 +163,32 @@ static void on_share(void *arg) {
     shell_open(build_share, SCREEN_SHARE);
 }
 
-// ---- Remove: confirmed on a screen of its own, as a channel is --------------------------------------------------
+// ---- Remove: a careful dialog, so a held Enter (LVGL repeats it) never confirms it --------------------------------
 
-static void remove_yes(void *arg) {
-    (void)arg;
-    if (act(MESH_CO_REMOVE, remove_note)) {
-        shell_back_to(list_screen, NULL, NULL); // past the details: the contact is gone
-    } else if (gone) {
-        set_note(remove_note, "Already gone", true);
+static void remove_answer(bool yes) {
+    if (!yes || !mem) { // no, timed out, or the details screen went away meanwhile
+        return;
     }
-}
-
-static lv_obj_t *build_remove(void) {
-    lv_obj_t *screen = shell_page_create();
-    lv_obj_t *menu   = menu_create(screen, "Remove contact");
-    char      text[MESH_NAME_MAX + 16];
-    snprintf(text, sizeof(text), "Remove %s?", title[0] ? title : "(no name)");
-    menu_note(menu, text);
-    menu_add(menu, "Remove", "Enter", remove_yes, NULL);
-    menu_note(menu, "Esc keeps it. Your chat with them stays.");
-    remove_note = menu_note(menu, "");
-    return screen;
+    if (act(MESH_CO_REMOVE, note)) {
+        shell_back_to(list_screen, NULL, NULL); // past the details: the contact is gone
+    }
 }
 
 static void on_remove(void *arg) {
     (void)arg;
-    shell_open(build_remove, SCREEN_REMOVE);
+    char                 text[MESH_NAME_MAX + 64];
+    shell_dialog_t const d = {
+        .title        = text,
+        .count_prefix = "(cancels in ",
+        .count_suffix = " s)",
+        .hint         = "Enter: remove · Esc: keep it",
+        .seconds      = REMOVE_ASK_S,
+        .careful      = true,
+    };
+    snprintf(text, sizeof(text), "Remove %s from MeshCore? The chat stays.", title[0] ? title : "(no name)");
+    if (!shell_dialog_countdown(&d, remove_answer)) {
+        set_note(note, "Could not ask, try again", true);
+    }
 }
 
 // ---- the details screen ---------------------------------------------------------------------------------------------
@@ -198,7 +202,7 @@ static void on_delete(lv_event_t *e) {
     heap_caps_free(mem);
     mem = NULL;
     memset(info, 0, sizeof(info));
-    note = fav_row = reset_row = remove_note = NULL;
+    note = fav_row = reset_row = NULL;
 }
 
 static lv_obj_t *build_detail(void) {
