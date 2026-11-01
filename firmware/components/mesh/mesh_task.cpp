@@ -336,6 +336,30 @@ extern "C" size_t mesh_contacts_view(mesh_contact_view_t view, mesh_contact_t *o
     return n;
 }
 
+extern "C" bool mesh_contacts_stats(mesh_contact_stats_t *out, uint32_t wait_ms) {
+    mesh_contact_stats_t st = {};
+    if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE)) {
+        *out = st;
+        return true;
+    }
+    if (!mesh_lock_within(wait_ms)) {
+        return false;
+    }
+    uint32_t         now = rtc_clock.getCurrentTime();
+    ContactsIterator it  = node->startContactsIterator();
+    ContactInfo      c;
+    while (it.hasNext(node, c)) {
+        uint32_t age = now > c.lastmod ? now - c.lastmod : 0;
+        st.total++;
+        st.repeaters += mesh_contact_view_keeps(MESH_VIEW_REPEATERS, c.type) ? 1 : 0;
+        st.newest_age_s = !st.heard_any || age < st.newest_age_s ? age : st.newest_age_s;
+        st.heard_any    = true;
+    }
+    mesh_unlock();
+    *out = st;
+    return true;
+}
+
 extern "C" size_t mesh_contacts_snapshot(mesh_contact_t *out, size_t max, size_t *total, uint32_t wait_ms) {
     if (max == 0) {
         *total = 0;

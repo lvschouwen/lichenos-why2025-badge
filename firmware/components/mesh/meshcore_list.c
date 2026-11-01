@@ -87,9 +87,9 @@ lv_obj_t *mc_list_screen(lv_obj_t *screen, char const *title, char const *note, 
     return list;
 }
 
-// The rows with their keys; 0 when the children are not the keyed rows (the "nothing yet" line)
+// The rows with their keys: the first n children (a note may follow them); 0 while there are none
 static size_t keyed_rows(mc_list_t *l) {
-    if (l->n == 0 || lv_obj_get_child_count(l->list) != l->n) {
+    if (l->n == 0 || lv_obj_get_child_count(l->list) < l->n) {
         return 0;
     }
     for (size_t i = 0; i < l->n; i++) {
@@ -121,7 +121,7 @@ void mc_list_restore(mc_list_t *l, mc_scroll_t s) {
 }
 
 bool mc_list_move(mc_list_t *l, int delta) {
-    if (!l->n || lv_obj_get_child_count(l->list) != l->n) {
+    if (!l->n || lv_obj_get_child_count(l->list) < l->n) {
         return false;
     }
     size_t to = delta < 0 ? (l->sel > 0 ? l->sel - 1 : 0) : (l->sel + 1 < l->n ? l->sel + 1 : l->sel);

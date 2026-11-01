@@ -17,7 +17,7 @@ typedef struct {
     uint32_t      *keys;
     scroll_item_t *items;
     size_t         cap;
-    size_t         n;   // rows on screen (0 while it shows the "nothing yet" line)
+    size_t         n;   // rows on screen: the list's first n children (a dim note may follow them)
     size_t         sel; // the highlighted row
 } mc_list_t;
 

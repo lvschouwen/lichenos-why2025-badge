@@ -109,6 +109,14 @@ size_t mesh_contacts_snapshot(mesh_contact_t *out, size_t max, size_t *total, ui
 // The same for one of the grid's lists (#88, mesh_contact_view_t): only the view's contacts, in its order; *total =
 // all contacts in the view (max 0 just counts them)
 size_t mesh_contacts_view(mesh_contact_view_t view, mesh_contact_t *out, size_t max, size_t *total, uint32_t wait_ms);
+// The grid's badges (#88) in one pass under the lock, without copying contacts: false (out unchanged) when the lock was
+// not free within wait_ms; zeros when MeshCore is not running
+typedef struct {
+    size_t   total, repeaters; // all contacts; those in MESH_VIEW_REPEATERS
+    bool     heard_any;
+    uint32_t newest_age_s;     // since the most recently heard contact
+} mesh_contact_stats_t;
+bool mesh_contacts_stats(mesh_contact_stats_t *out, uint32_t wait_ms);
 // One contact by its 6-byte key prefix (#49): 1, 0 when it is not (or no longer) there, MESH_BUSY when the lock was
 // not free in time or MeshCore is not running (not up yet, stopped for an update)
 size_t mesh_contact_detail(uint8_t const prefix[6], mesh_contact_detail_t *out, uint32_t wait_ms);

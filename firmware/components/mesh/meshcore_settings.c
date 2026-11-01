@@ -276,7 +276,7 @@ static void (*advert_status)(char const *status);
 static void advert_done(job_t *job) {
     char const *note = mesh_advert_note(clock_is_approximate()); // allowed, but say so (#83)
     if (advert_status) {
-        advert_status(!job->ok ? "not sent" : note ? "queued, approximate clock" : "advert queued");
+        advert_status(!job->ok ? "not sent" : note ? "queued, approximate clock" : "queued");
     }
 }
 
@@ -293,7 +293,10 @@ void meshcore_advert_send(void (*status)(char const *text)) {
     }
     advert_status = status;
     status("sending...");
-    job_start(job);
+    if (!job_start(job)) { // the job is freed: no result will come
+        advert_status = NULL;
+        status("busy, try again");
+    }
 }
 
 void meshcore_advert_forget(void (*status)(char const *text)) {

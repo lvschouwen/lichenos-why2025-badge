@@ -18,14 +18,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SCREEN_PICK    141
 #define SCREEN_CHAT    142
 #define SHOW_MESSAGES  50
 #define SCREEN_WAIT_MS 20
 #define SCROLL_STEP_PX 120
 #define AGE_REFRESH_S  30
 #define TICK_MS        500
-#define MAX_CHANNELS   40
 #define SCREEN_DM_PICK 143
 #define SCREEN_DM      144
 #define MAX_PEERS      100
@@ -466,9 +464,7 @@ static lv_obj_t *build_chat(void) {
     return screen;
 }
 
-// ---- the channel picker ----------------------------------------------------------------------------------------------
-
-static char names[MAX_CHANNELS][MESH_CHANNEL_MAX + 1];
+// ---- a channel chat, from the Chat list (#48) ------------------------------------------------------------------------
 
 static void open_chat(void *arg) {
     snprintf(channel, sizeof(channel), "%s", (char const *)arg);
@@ -480,39 +476,6 @@ void meshcore_chat_open_channel(char const *name) {
     char copy_name[sizeof(channel)]; // name may be a row of a list that is rebuilt while the chat opens
     snprintf(copy_name, sizeof(copy_name), "%s", name);
     open_chat(copy_name);
-}
-
-static bool word_in_name(char const *word, void *name) {
-    return list_filter_text_has(name, word);
-}
-
-static bool name_matches(char const *name, char const *query) {
-    return list_filter_match(query, word_in_name, (void *)name);
-}
-
-static bool channel_matches(size_t i, char const *query, void *ctx) {
-    (void)ctx;
-    return name_matches(names[i], query);
-}
-
-static lv_obj_t *build_pick(void) {
-    lv_obj_t *screen = shell_page_create();
-    lv_obj_t *menu   = menu_create(screen, "Write on a channel");
-    menu_filter_t *filter = menu_filter_create(screen, menu, channel_matches, NULL); // #57
-    size_t    n      = mesh_channels_snapshot_wait(names, MAX_CHANNELS, SCREEN_WAIT_MS);
-    if (n == MESH_BUSY) {
-        menu_note(menu, "MeshCore is busy, press Esc and try again");
-    } else if (n == 0) {
-        menu_note(menu, "No channels (MeshCore not running?)");
-    }
-    for (size_t i = 0; i < n && n != MESH_BUSY; i++) {
-        menu_filter_add(filter, menu_add(menu, names[i], "", open_chat, names[i]), i);
-    }
-    return screen;
-}
-
-void meshcore_chat_pick(void) {
-    shell_open(build_pick, SCREEN_PICK);
 }
 
 // ---- the contact picker, then the DM chat (#47) --------------------------------------------------------------------

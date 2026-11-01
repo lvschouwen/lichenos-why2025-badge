@@ -32,6 +32,7 @@ static char const TAG[] = "meshcore";
 #define REFRESH_MS     1000
 #define SCREEN_WAIT_MS 20
 #define ADVERT_ASK_S   15 // the confirm cancels by itself after this: nothing goes on air unasked
+#define STATUS_KEEP_MS 10000 // the Advertise result stays this long under the grid
 
 static struct {
     lv_obj_t          *screen;
@@ -39,6 +40,8 @@ static struct {
     lv_obj_t          *badge[MESH_GRID_TILES];
     lv_obj_t          *status; // the Advertise result; NULL once the grid is gone
     lv_timer_t        *timer;
+    lv_timer_t        *status_timer; // clears the status line
+
     mesh_grid_counts_t counts;
 } g;
 
@@ -48,19 +51,14 @@ static void set_text(lv_obj_t *label, char const *text) {
     }
 }
 
-// The counts that need the mesh lock; a busy MeshCore keeps the last ones
+// The counts that need the mesh lock, in one pass; a busy MeshCore keeps the last ones
 static void take_contact_counts(mesh_grid_counts_t *c) {
-    mesh_contact_t newest;
-    size_t         total;
-    size_t         n = mesh_contacts_view(MESH_VIEW_HEARD, &newest, 1, &total, SCREEN_WAIT_MS);
-    if (n != MESH_BUSY) {
-        c->contacts    = total;
-        c->heard_any   = n == 1;
-        c->heard_age_s = n == 1 ? newest.age_s : 0;
-    }
-    n = mesh_contacts_view(MESH_VIEW_REPEATERS, NULL, 0, &total, SCREEN_WAIT_MS);
-    if (n != MESH_BUSY) {
-        c->repeaters = total;
+    mesh_contact_stats_t st;
+    if (mesh_contacts_stats(&st, SCREEN_WAIT_MS)) {
+        c->contacts    = st.total;
+        c->repeaters   = st.repeaters;
+        c->heard_any   = st.heard_any;
+        c->heard_age_s = st.newest_age_s;
     }
 }
 
@@ -88,11 +86,31 @@ static void refresh(lv_timer_t *t) {
 
 // ---- Advertise: confirmed first, the result under the grid ----------------------------------------------------------
 
+static void clear_status(lv_timer_t *t) {
+    (void)t;
+    set_text(g.status, "");
+    if (g.status_timer) {
+        lv_timer_pause(g.status_timer); // until the next result
+    }
+}
+
+// "Advert: <text>", cleared STATUS_KEEP_MS after the last one (or when a tile opens)
+static void show_status(char const *text) {
+    if (!g.status) {
+        return;
+    }
+    char line[64];
+    snprintf(line, sizeof(line), "Advert: %s", text);
+    set_text(g.status, line);
+    if (g.status_timer) {
+        lv_timer_reset(g.status_timer);
+        lv_timer_resume(g.status_timer);
+    }
+}
+
 static void advert_status(char const *text) {
+    show_status(text);
     if (g.status) {
-        char line[64];
-        snprintf(line, sizeof(line), "Advert: %s", text);
-        set_text(g.status, line);
         refresh(NULL); // the badge's age starts now
     }
 }
@@ -102,7 +120,7 @@ static void advert_answer(bool confirmed) {
         return; // the grid went away meanwhile
     }
     if (!confirmed) {
-        set_text(g.status, "Advert: not sent");
+        show_status("not sent");
         return;
     }
     ESP_LOGW(TAG, "advert confirmed on the grid");
@@ -111,7 +129,7 @@ static void advert_answer(bool confirmed) {
 
 static void ask_advert(void) {
     if (!mesh_running()) {
-        set_text(g.status, "Advert: MeshCore is not running");
+        show_status("MeshCore is not running");
         return;
     }
     char const *refusal = mesh_advert_refusal(clock_is_set());
@@ -128,13 +146,14 @@ static void ask_advert(void) {
         .careful      = true, // a held Enter never sends it, the countdown ends in a cancel
     };
     if (!shell_dialog_countdown(&d, advert_answer)) {
-        set_text(g.status, "Advert: busy, try again");
+        show_status("busy, try again");
     }
 }
 
 // ---- keys --------------------------------------------------------------------------------------------------------
 
 static void open_tile(void *arg) {
+    clear_status(NULL); // an old result does not belong to what comes next
     switch ((mesh_grid_tile_t)(intptr_t)arg) {
         case MESH_GRID_CHAT: meshcore_chats_open(); break;
         case MESH_GRID_CONTACTS: meshcore_contacts_open(MESH_VIEW_ALL); break;
@@ -216,6 +235,9 @@ static void on_delete(lv_event_t *e) {
     if (g.timer) {
         lv_timer_delete(g.timer);
     }
+    if (g.status_timer) {
+        lv_timer_delete(g.status_timer);
+    }
     meshcore_advert_forget(advert_status);
     memset(&g, 0, sizeof(g));
 }
@@ -240,6 +262,10 @@ void meshcore_grid_build(lv_obj_t *screen, lv_group_t *group) {
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     if (group) {
         lv_group_focus_obj(g.cell[MESH_GRID_CHAT]);
+    }
+    g.status_timer = lv_timer_create(clear_status, STATUS_KEEP_MS, NULL);
+    if (g.status_timer) {
+        lv_timer_pause(g.status_timer); // runs from the first result on
     }
     g.timer = lv_timer_create(refresh, REFRESH_MS, NULL);
     refresh(NULL); // the screen is not loaded yet: the badges right away all the same

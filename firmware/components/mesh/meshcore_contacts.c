@@ -42,6 +42,7 @@ static contacts_mem_t     *mem; // PSRAM, while the screen exists
 static mc_list_t           list;
 static mesh_contact_view_t view;
 static lv_timer_t         *timer;
+static lv_obj_t           *screen_obj;
 static uint32_t            shown_sig, last_rebuild_s;
 static uint8_t             sel_key[6]; // the highlighted contact (its key prefix), kept when the order changes
 static bool                sel_valid;
@@ -74,7 +75,16 @@ static void add_contact_row(mesh_contact_t const *c, bool selected) {
     mc_list_label(row, meta, THEME_DIM);
 }
 
-static void rebuild(size_t count) {
+// Only the first SHOW_CONTACTS fit: say so under them rather than let a long list look complete
+static void add_more_note(size_t count, size_t total) {
+    if (total > count) {
+        char text[64];
+        snprintf(text, sizeof(text), "showing %u of %u", (unsigned)count, (unsigned)total);
+        mc_list_label(list.list, text, THEME_DIM);
+    }
+}
+
+static void rebuild(size_t count, size_t total) {
     mc_scroll_t s = mc_list_save(&list);
     lv_obj_clean(list.list);
     list.n = count;
@@ -87,6 +97,7 @@ static void rebuild(size_t count) {
         list.keys[i] = scroll_key_hash(mem->contacts[i].pubkey, sizeof(mem->contacts[i].pubkey), 0);
         add_contact_row(&mem->contacts[i], i == list.sel);
     }
+    add_more_note(count, total);
     mc_list_restore(&list, s);
 }
 
@@ -107,7 +118,9 @@ static uint32_t signature(size_t n, size_t total) {
 }
 
 static void refresh(lv_timer_t *t) {
-    (void)t;
+    if (t && lv_screen_active() != screen_obj) {
+        return; // the details are open on top: no mesh lock for rows nobody sees
+    }
     size_t total;
     size_t count = mesh_contacts_view(view, mem->contacts, SHOW_CONTACTS, &total, SCREEN_WAIT_MS);
     if (count == MESH_BUSY) {
@@ -116,7 +129,7 @@ static void refresh(lv_timer_t *t) {
     uint32_t sig   = signature(count, total);
     bool     stale = mesh_uptime_s() - last_rebuild_s >= AGE_REFRESH_S;
     if (sig != shown_sig || stale) {
-        rebuild(count);
+        rebuild(count, total);
         shown_sig      = sig;
         last_rebuild_s = mesh_uptime_s();
     }
@@ -150,12 +163,14 @@ static void on_delete(lv_event_t *e) {
         timer = NULL;
     }
     heap_caps_free(mem);
-    mem  = NULL;
-    list = (mc_list_t){0};
+    mem        = NULL;
+    screen_obj = NULL;
+    list       = (mc_list_t){0};
 }
 
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
+    screen_obj       = screen;
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     mem = heap_caps_calloc(1, sizeof(*mem), MALLOC_CAP_SPIRAM);
     if (!mem) {
@@ -170,7 +185,7 @@ static lv_obj_t *build(void) {
     sel_valid      = false;
     last_rebuild_s = mesh_uptime_s();
     timer          = lv_timer_create(refresh, 1000, NULL);
-    refresh(timer);
+    refresh(NULL); // not loaded yet: the rows right away all the same
     return screen;
 }
 
