@@ -53,6 +53,7 @@ private:
     int      fd_ = -1;      // a "w" file
     uint8_t *buf_ = nullptr; // a "w" file's whole contents
     size_t   len_ = 0, cap_ = 0, pos_ = 0;
+    uint32_t caps_ = 0;       // which heap buf_ came from (badge): later reallocs stay there
     bool     failed_ = false; // a write did not fit: the file is left as it was
     char     path_[256] = "";
 };
@@ -93,3 +94,8 @@ uint32_t fs_shim_take_busy_us(uint32_t *ops);
 uint32_t fs_shim_take_raw_writes(void);
 // The chunk a "w" file is compared and rewritten in: the FatFs sector on the badge, one flash erase each
 #define FS_SHIM_CHUNK 4096
+// The largest "w" file the shim buffers (1 MB): MeshCore's biggest is contacts3, 152 KB at 1000 contacts. A write past
+// it fails, and close() leaves the old file as it was.
+#define FS_SHIM_MAX_FILE ((size_t)1 << 20)
+// Host tests only: make buffer allocations fail, or make the reads that compare chunks fail
+void fs_shim_test_faults(bool fail_alloc, bool fail_reads);

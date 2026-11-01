@@ -28,6 +28,18 @@ static void (*drive_fn)(size_t *total, size_t *used);
 // and resets it once per loop, under the mesh lock that every MeshCore file access already runs under.
 static uint32_t busy_us, busy_ops;
 static uint32_t raw_writes; // writes and truncates of buffered "w" files (host tests count them)
+static bool     fail_alloc, fail_reads;
+
+void fs_shim_test_faults(bool alloc, bool reads) {
+    fail_alloc = alloc;
+    fail_reads = reads;
+}
+
+#ifdef ESP_PLATFORM
+#define SHIM_WARN(...) ESP_LOGW("fs_shim", __VA_ARGS__)
+#else
+#define SHIM_WARN(...) ((void)0)
+#endif
 
 uint32_t fs_shim_take_raw_writes(void) {
     uint32_t n = raw_writes;
@@ -35,16 +47,33 @@ uint32_t fs_shim_take_raw_writes(void) {
     return n;
 }
 
-// A "w" file's buffer lives in PSRAM: contacts3 alone is 152 bytes a contact, up to 1000 contacts
-static void *buf_realloc(void *p, size_t n) {
+// A "w" file's buffer lives in PSRAM (contacts3 alone is 152 bytes a contact, up to 1000 contacts); when PSRAM is
+// full, internal RAM, so a small prefs or identity save still lands. A buffer grows in the heap it started in (*caps).
+static void *buf_realloc(void *p, size_t n, uint32_t *caps) {
+    if (fail_alloc) {
+        return NULL;
+    }
 #ifdef ESP_PLATFORM
-    return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM);
+    if (p) {
+        return heap_caps_realloc(p, n, *caps);
+    }
+    *caps   = MALLOC_CAP_SPIRAM;
+    void *q = heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
+    if (!q) {
+        *caps = MALLOC_CAP_8BIT;
+        q     = heap_caps_malloc(n, MALLOC_CAP_8BIT);
+    }
+    return q;
 #else
+    (void)caps;
     return realloc(p, n);
 #endif
 }
 
 static bool read_full(int fd, uint8_t *dst, size_t n) {
+    if (fail_reads) {
+        return false;
+    }
     while (n > 0) {
         ssize_t r = ::read(fd, dst, n);
         if (r <= 0) {
@@ -175,6 +204,7 @@ File &File::operator=(File &&other) noexcept {
         buf_    = other.buf_;
         len_    = other.len_;
         cap_    = other.cap_;
+        caps_   = other.caps_;
         pos_    = other.pos_;
         failed_ = other.failed_;
         memcpy(path_, other.path_, sizeof(path_));
@@ -183,6 +213,7 @@ File &File::operator=(File &&other) noexcept {
         other.fd_  = -1;
         other.buf_ = nullptr;
         other.len_ = other.cap_ = other.pos_ = 0;
+        other.caps_ = 0;
         other.failed_ = false;
     }
     return *this;
@@ -225,8 +256,10 @@ size_t File::read(uint8_t *buf, size_t len) {
     if (fd_ >= 0) { // what this File wrote: the buffer is the whole file
         size_t n = pos_ < len_ ? len_ - pos_ : 0;
         n        = n < len ? n : len;
-        memcpy(buf, buf_ + pos_, n);
-        pos_ += n;
+        if (n > 0) {
+            memcpy(buf, buf_ + pos_, n);
+            pos_ += n;
+        }
         return n;
     }
     [[maybe_unused]] Timed timed;
@@ -240,8 +273,12 @@ int File::read() {
 
 size_t File::write(uint8_t const *buf, size_t len) {
     if (fd_ >= 0) { // into the buffer, no file system call: committed by flush() or close()
+        if (failed_ || len == 0) {
+            return 0;
+        }
         size_t end = pos_ + len;
-        if (failed_ || end < pos_) {
+        if (end < pos_ || end > FS_SHIM_MAX_FILE) { // also keeps the doubling below from overflowing
+            failed_ = true;
             return 0;
         }
         if (end > cap_) {
@@ -249,7 +286,7 @@ size_t File::write(uint8_t const *buf, size_t len) {
             while (cap < end) {
                 cap *= 2;
             }
-            uint8_t *grown = (uint8_t *)buf_realloc(buf_, cap);
+            uint8_t *grown = (uint8_t *)buf_realloc(buf_, cap, &caps_);
             if (!grown) {
                 failed_ = true; // a half-written file must not replace the old one
                 return 0;
@@ -297,7 +334,8 @@ bool File::commit() {
         return false;
     }
     size_t   old     = (size_t)st.st_size;
-    uint8_t *scratch = old ? (uint8_t *)buf_realloc(NULL, FS_SHIM_CHUNK) : NULL; // none: every chunk is rewritten
+    uint32_t caps    = 0;
+    uint8_t *scratch = old ? (uint8_t *)buf_realloc(NULL, FS_SHIM_CHUNK, &caps) : NULL; // none: all are rewritten
     bool     ok      = true;
     for (size_t off = 0; ok && off < len_; off += FS_SHIM_CHUNK) {
         size_t n    = len_ - off < FS_SHIM_CHUNK ? len_ - off : FS_SHIM_CHUNK;
@@ -312,35 +350,45 @@ bool File::commit() {
         ok = ftruncate(fd_, (off_t)len_) == 0;
         raw_writes++;
     }
-    free(scratch);
-#ifdef ESP_PLATFORM
     if (!ok) {
-        ESP_LOGW("fs_shim", "writing %s failed: errno %d", path_, errno);
+        SHIM_WARN("writing %s failed: errno %d", path_, errno);
     }
-#endif
+    free(scratch);
     return ok;
 }
 
 void File::flush() {
-    if (fd_ >= 0 && !failed_) {
-        [[maybe_unused]] Timed timed;
-        if (commit()) {
-            fsync(fd_);
-        }
+    if (fd_ < 0) {
+        return;
+    }
+    if (failed_) {
+        SHIM_WARN("%s not saved: a write did not fit in memory (%u bytes)", path_, (unsigned)len_);
+        return;
+    }
+    [[maybe_unused]] Timed timed;
+    if (commit() && fsync(fd_) != 0) {
+        SHIM_WARN("syncing %s failed: errno %d", path_, errno);
     }
 }
 
 void File::close() {
     [[maybe_unused]] Timed timed;
     if (fd_ >= 0) {
-        if (!failed_) {
+        if (failed_) {
+            SHIM_WARN("%s not saved, the old file is kept: a write did not fit in memory (%u bytes)", path_,
+                      (unsigned)len_);
+        } else {
             commit();
         }
-        ::close(fd_); // FatFs syncs the file (data, FAT, directory entry) here: on flash when close() returns
+        // FatFs syncs the file (data, FAT, directory entry) here: on flash when close() returns
+        if (::close(fd_) != 0) {
+            SHIM_WARN("closing %s failed: errno %d", path_, errno);
+        }
         fd_ = -1;
         free(buf_);
         buf_    = nullptr;
         len_    = cap_ = pos_ = 0;
+        caps_   = 0;
         failed_ = false;
     }
     if (f_) {

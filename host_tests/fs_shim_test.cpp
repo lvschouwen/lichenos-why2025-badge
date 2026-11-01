@@ -82,8 +82,45 @@ static void buffered_writes(void) {
     save_contacts(expect, 150, 100, 12345);
     CHECK(fs_shim_take_raw_writes() == 1);
     CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 150 * REC_SIZE && memcmp(disk, expect, 150 * REC_SIZE) == 0);
-    save_contacts(expect, 0, 999, 0); // none left: an empty file
+    // Fewer contacts and a changed one in the new last chunk: the write and the truncate (in that order) both land
+    save_contacts(expect, 150, 999, 0); // record 100 back to its old timestamp: chunk 3
+    CHECK(fs_shim_take_raw_writes() == 1);
+    save_contacts(expect, 140, 135, 777); // 21280 bytes; record 135 sits in bytes 20520..20671: chunk 5, the last one
+    CHECK(fs_shim_take_raw_writes() == 2);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 140 * REC_SIZE && memcmp(disk, expect, 140 * REC_SIZE) == 0);
+    save_contacts(expect, 0, 999, 0); // none left: an empty file, one truncate
+    CHECK(fs_shim_take_raw_writes() == 1);
     CHECK(SPIFFS.exists("/contacts3") && disk_read("/contacts3", disk, sizeof(disk)) == 0);
+
+    // A chunk that cannot be read back for comparing is rewritten, not skipped
+    save_contacts(expect, 30, 999, 0);
+    fs_shim_take_raw_writes();
+    fs_shim_test_faults(false, true);
+    save_contacts(expect, 30, 999, 0);
+    fs_shim_test_faults(false, false);
+    CHECK(fs_shim_take_raw_writes() == 2);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 30 * REC_SIZE && memcmp(disk, expect, 30 * REC_SIZE) == 0);
+
+    // No memory for the buffer: the write fails and close() leaves the old file as it was
+    fs_shim_test_faults(true, false);
+    File nomem = SPIFFS.open("/contacts3", "w", true);
+    CHECK(nomem && nomem.write(expect, 10) == 0);
+    nomem.close();
+    fs_shim_test_faults(false, false);
+    CHECK(fs_shim_take_raw_writes() == 0);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 30 * REC_SIZE && memcmp(disk, expect, 30 * REC_SIZE) == 0);
+
+    // A write past FS_SHIM_MAX_FILE (or one that would wrap) fails instead of growing the buffer: old file kept
+    File huge = SPIFFS.open("/contacts3", "w", true);
+    CHECK(huge.write(expect, 0) == 0); // nothing to write, nothing allocated
+    CHECK(huge.seek(0xFFFFFFFFu) && huge.write(expect, 2) == 0);
+    CHECK(huge.seek(0) && huge.write(expect, 2) == 0); // failed stays failed
+    huge.close();
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 30 * REC_SIZE && memcmp(disk, expect, 30 * REC_SIZE) == 0);
+    huge = SPIFFS.open("/contacts3", "w", true);
+    CHECK(huge.seek((uint32_t)FS_SHIM_MAX_FILE) && huge.write(expect, 1) == 0);
+    huge.close();
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 30 * REC_SIZE);
     fs_shim_take_raw_writes();
 
     // Nothing reaches the file before flush(); flush() commits, close() commits the rest
@@ -135,6 +172,41 @@ static void buffered_writes(void) {
     File in = SPIFFS.open("/d", "r");
     CHECK(in && in.size() == 21);
     in.close();
+
+    // DataStore's NRF52/STM32 putBlobByKey pattern (not built for ESP32, but the File serves it): read the records,
+    // seek back, overwrite one in place
+    struct Blob {
+        uint8_t key[7];
+        uint8_t len;
+        uint8_t data[24];
+    } blobs[3], tmp;
+    for (int i = 0; i < 3; i++) {
+        memset(&blobs[i], 0x10 * (i + 1), sizeof(blobs[i]));
+    }
+    f = SPIFFS.open("/blobs", "w");
+    CHECK(f.write((uint8_t *)blobs, sizeof(blobs)) == sizeof(blobs));
+    f.close();
+    f = SPIFFS.open("/blobs", "w");
+    CHECK(f.seek(0));
+    uint32_t pos = 0, found = 0;
+    while (f.read((uint8_t *)&tmp, sizeof(tmp)) == sizeof(tmp)) { // a fresh "w" File has nothing to read yet
+        pos += sizeof(tmp);
+    }
+    CHECK(pos == 0);
+    CHECK(f.write((uint8_t *)blobs, sizeof(blobs)) == sizeof(blobs) && f.seek(0));
+    while (f.read((uint8_t *)&tmp, sizeof(tmp)) == sizeof(tmp)) {
+        if (tmp.key[0] == 0x20) {
+            found = pos;
+        }
+        pos += sizeof(tmp);
+    }
+    CHECK(pos == sizeof(blobs) && found == sizeof(Blob));
+    memset(&tmp, 0x77, sizeof(tmp));
+    CHECK(f.seek(found) && f.write((uint8_t *)&tmp, sizeof(tmp)) == sizeof(tmp));
+    f.close();
+    blobs[1] = tmp;
+    CHECK(disk_read("/blobs", disk, sizeof(disk)) == sizeof(blobs) && memcmp(disk, blobs, sizeof(blobs)) == 0);
+    CHECK(SPIFFS.remove("/blobs"));
 
     // "a" still appends
     f = SPIFFS.open("/d", "a");
