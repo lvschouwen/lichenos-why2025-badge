@@ -12,6 +12,7 @@
 #include "mesh_frame.h"
 #include "mesh_hist_crypto.h"
 #include "mesh_journal.h"
+#include "meshcore_run.h"
 #include "channel_input.h"
 #include "mesh_prefs.h"
 #include "radio_presets.h"
@@ -149,6 +150,32 @@ static void mesh_unlock(void) {
     xSemaphoreGive(mesh_lock_handle());
 }
 
+// Running or not (#103). A stop keeps node, its tables, the outbox and the store in PSRAM: a start after a stop on
+// request only claims the radio again and makes a new task, so nothing is loaded or replayed twice.
+static TaskHandle_t mesh_task_handle; // valid only while mesh_running()
+static bool stop_requested; // mesh_stop -> the task
+static bool stop_final;     // with it: the update stop (the journal settles and wipes its key)
+static bool task_running;   // set once the first task exists
+static bool stopped;        // the task -> everyone: it has saved and is gone (or is about to delete itself)
+static bool final_stop;     // stopped for an update: no start again before the restart
+static bool task_exited = true; // the task -> mesh_stop / mesh_start: radio released, about to delete itself
+
+static bool mesh_is_stopped(void) {
+    return __atomic_load_n(&stopped, __ATOMIC_ACQUIRE);
+}
+
+// Why a stopped MeshCore refuses, for the setters and senders
+static char const *stopped_why(void) {
+    return __atomic_load_n(&final_stop, __ATOMIC_ACQUIRE) ? "MeshCore stopped for update" : "MeshCore is not running";
+}
+
+// mesh_start and mesh_stop one at a time: the update path, a job task and the boot never overlap
+static SemaphoreHandle_t run_lock_handle(void) {
+    static StaticSemaphore_t buf;
+    static SemaphoreHandle_t handle = xSemaphoreCreateMutexStatic(&buf);
+    return handle;
+}
+
 // The home tile's numbers (#67): written by the mesh task, read by the LVGL task, under a spinlock of their own so the
 // tile never waits on MeshCore
 static mesh_tile_t  tile;
@@ -162,7 +189,8 @@ static void tile_publish_unread(void) {
     portENTER_CRITICAL(&tile_mux);
     tile.unread_total = total;
     portEXIT_CRITICAL(&tile_mux);
-    lichen_badge_set("meshcore", total); // home's count on the icon (#102); its own lock, not inside ours
+    // home's count on the icon (#102); its own lock, not inside ours. 0 while stopped (#103): nothing arrives then
+    lichen_badge_set("meshcore", mesh_is_stopped() ? 0 : total);
 }
 
 static uint32_t tile_unread(void) {
@@ -368,15 +396,6 @@ extern "C" size_t mesh_contacts_snapshot(mesh_contact_t *out, size_t max, size_t
     return mesh_contacts_view(MESH_VIEW_ALL, out, max, total, wait_ms);
 }
 
-static TaskHandle_t mesh_task_handle;
-static bool stop_requested; // mesh_stop_for_update -> the task
-static bool task_running;   // set once the task exists
-static bool stopped;        // the task -> everyone: it has saved and is gone (or is about to delete itself)
-
-static bool mesh_is_stopped(void) {
-    return __atomic_load_n(&stopped, __ATOMIC_ACQUIRE);
-}
-
 // ---- one contact: the details screen (#49) ---------------------------------------------------------------------------
 
 extern "C" size_t mesh_contact_detail(uint8_t const prefix[6], mesh_contact_detail_t *out, uint32_t wait_ms) {
@@ -530,12 +549,18 @@ static void mesh_task(void *arg) {
             int64_t contacts_us = esp_timer_get_time() - contacts_started;
             store.saveChannels(node);
             int64_t save_us = esp_timer_get_time() - save_started;
-            mesh_journal_stop_locked();
+            bool final = __atomic_load_n(&stop_final, __ATOMIC_ACQUIRE);
+            mesh_journal_stop_locked(final);
             __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
             mesh_unlock();
+            // Here, not in mesh_stop: a stop that outlasts mesh_stop's wait still gives the radio back (#103)
+            lora_radio.end();
+            lichen_badge_set("meshcore", 0);
             // The contact rewrite is the same one MyMesh does lazily in its loop: its time here says what it costs there
-            ESP_LOGW(TAG, "MeshCore stopped for the update: prefs, %d contacts, channels saved in %lld ms (contacts %lld ms)",
-                     node->getNumContacts(), (long long)(save_us / 1000), (long long)(contacts_us / 1000));
+            ESP_LOGW(TAG, "MeshCore stopped%s: prefs, %d contacts, channels saved in %lld ms (contacts %lld ms)",
+                     final ? " for the update" : "", node->getNumContacts(), (long long)(save_us / 1000),
+                     (long long)(contacts_us / 1000));
+            __atomic_store_n(&task_exited, true, __ATOMIC_RELEASE);
             vTaskDelete(NULL);
         }
         int64_t took_ms = (esp_timer_get_time() - started) / 1000;
@@ -557,21 +582,47 @@ extern "C" bool mesh_running(void) {
     return __atomic_load_n(&task_running, __ATOMIC_ACQUIRE) && !mesh_is_stopped();
 }
 
-extern "C" bool mesh_stop_for_update(void) {
-    if (mesh_is_stopped() || !__atomic_load_n(&task_running, __ATOMIC_ACQUIRE)) {
-        return true; // nothing running (never started, or already stopped)
+// Under the run lock
+static bool stop_locked(mesh_stop_reason_t why) {
+    bool final = why == MESH_STOP_UPDATE;
+    if (!mesh_running()) {
+        // Never started, or stopped on request before: an update still settles the journal (held messages, the key)
+        if (final && !__atomic_load_n(&final_stop, __ATOMIC_ACQUIRE) && __atomic_load_n(&node, __ATOMIC_ACQUIRE)) {
+            mesh_lock();
+            mesh_journal_stop_locked(true);
+            mesh_unlock();
+        }
+        if (final) {
+            __atomic_store_n(&final_stop, true, __ATOMIC_RELEASE);
+        }
+        return true;
     }
+    if (final) {
+        __atomic_store_n(&final_stop, true, __ATOMIC_RELEASE); // no start slips in after this
+    }
+    __atomic_store_n(&stop_final, final, __ATOMIC_RELEASE);
     __atomic_store_n(&stop_requested, true, __ATOMIC_RELEASE);
     // A loop can sit in a file save for a second or two; the saves here the same again
-    for (int i = 0; i < 1000 && !mesh_is_stopped(); i++) {
+    for (int i = 0; i < 1000 && !__atomic_load_n(&task_exited, __ATOMIC_ACQUIRE); i++) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    if (!mesh_is_stopped()) {
+    if (!__atomic_load_n(&task_exited, __ATOMIC_ACQUIRE)) {
         ESP_LOGE(TAG, "MeshCore did not stop in 10 s");
         return false;
     }
-    vTaskDelay(pdMS_TO_TICKS(50)); // the task deletes itself right after giving the lock back
+    vTaskDelay(pdMS_TO_TICKS(50)); // the task releases the radio and deletes itself right after giving the lock back
     return true;
+}
+
+extern "C" bool mesh_stop(mesh_stop_reason_t why) {
+    // The update must not wait forever behind a start: it gives up after 15 s, as a stop that did not end in time
+    if (xSemaphoreTake(run_lock_handle(), pdMS_TO_TICKS(15000)) != pdTRUE) {
+        ESP_LOGE(TAG, "MeshCore busy starting or stopping: not stopped");
+        return false;
+    }
+    bool ok = stop_locked(why);
+    xSemaphoreGive(run_lock_handle());
+    return ok;
 }
 
 // Milestone 2 kept the key pair in NVS; MeshCore's DataStore keeps it in /storage/meshcore. Moved once, so the
@@ -660,9 +711,9 @@ static char const *settings_lock(void) {
     if (!mesh_lock_within(MESH_SET_WAIT_MS)) {
         return "MeshCore is busy, try again";
     }
-    if (mesh_is_stopped()) { // stopped (and saved) for an update while we waited
+    if (mesh_is_stopped()) { // stopped (and saved) while we waited
         mesh_unlock();
-        return "MeshCore stopped for update";
+        return stopped_why();
     }
     return NULL;
 }
@@ -856,6 +907,16 @@ extern "C" size_t mesh_channels_snapshot_wait(char names[][MESH_CHANNEL_MAX + 1]
     return n;
 }
 
+// The console commands while MeshCore does not run (#103): "MeshCore stopped (autostart off)" and the like
+static bool console_not_running(void) {
+    if (mesh_running()) {
+        return false;
+    }
+    char const *text = mesh_run_console_text(meshcore_run_get());
+    console_reply("MeshCore %s", text ? text : "not running");
+    return true;
+}
+
 // "fw mesh name <name>": the same setter as the screen
 static void cmd_mesh_name(char const *name) {
     if (mesh_set_name(name)) {
@@ -922,7 +983,7 @@ extern "C" size_t mesh_channel_text_max(void) {
 
 static bool send_ready(char const **why) {
     if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || !outbox || mesh_is_stopped()) {
-        *why = mesh_is_stopped() ? "MeshCore stopped for update" : "MeshCore is not running";
+        *why = stopped_why();
         return false;
     }
     return true;
@@ -1154,9 +1215,26 @@ static void cmd_mesh_chats(void) {
     console_reply("%u chat(s), %u unread", (unsigned)n, (unsigned)tile_unread());
 }
 
+// "fw mesh start|stop" (#103): the same job as the tile and the Settings row; "fw mesh" shows the result
+static void cmd_mesh_run(bool start) {
+    char const *why = meshcore_run_request(start);
+    if (why) {
+        console_reply("MeshCore not %s: %s", start ? "started" : "stopped", why);
+    } else {
+        console_reply("MeshCore %s (\"fw mesh\" shows when it is done)", start ? "starting..." : "stopping...");
+    }
+}
+
 static void cmd_mesh(char const *args) {
-    if (mesh_is_stopped()) {
-        console_reply("MeshCore stopped for update");
+    if (strcmp(args, "start") == 0 || strcmp(args, "stop") == 0) {
+        cmd_mesh_run(args[2] == 'a');
+        return;
+    }
+    if (strncmp(args, "hist", 4) == 0 && (args[4] == ' ' || !args[4])) {
+        mesh_journal_console(args[4] ? args + 5 : ""); // the journal's own status: there whether MeshCore runs or not
+        return;
+    }
+    if (console_not_running()) {
         return;
     }
     if (strncmp(args, "name ", 5) == 0) {
@@ -1187,13 +1265,9 @@ static void cmd_mesh(char const *args) {
         cmd_mesh_chats();
         return;
     }
-    if (strncmp(args, "hist", 4) == 0 && (args[4] == ' ' || !args[4])) {
-        mesh_journal_console(args[4] ? args + 5 : "");
-        return;
-    }
     if (*args) {
-        console_reply("mesh | mesh name <name> | mesh radio <preset index | freq bw sf cr> [txdbm] | mesh link | "
-                      "mesh out | mesh chats | mesh hist [compact] | mesh send <channel> <text> | "
+        console_reply("mesh | mesh start | mesh stop | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
+                      "[txdbm] | mesh link | mesh out | mesh chats | mesh hist [compact] | mesh send <channel> <text> | "
                       "mesh dm <12 hex> <text>");
         return;
     }
@@ -1229,8 +1303,7 @@ static void cmd_mesh(char const *args) {
 }
 
 static void cmd_contacts(char const *args) {
-    if (mesh_is_stopped()) {
-        console_reply("MeshCore stopped for update");
+    if (console_not_running()) {
         return;
     }
     (void)args;
@@ -1254,8 +1327,7 @@ static void cmd_contacts(char const *args) {
 }
 
 static void cmd_msgs(char const *args) {
-    if (mesh_is_stopped()) {
-        console_reply("MeshCore stopped for update");
+    if (console_not_running()) {
         return;
     }
     long want = *args ? strtol(args, NULL, 10) : 10;
@@ -1278,8 +1350,7 @@ static void cmd_msgs(char const *args) {
 }
 
 static void cmd_channels(char const *args) {
-    if (mesh_is_stopped()) {
-        console_reply("MeshCore stopped for update");
+    if (console_not_running()) {
         return;
     }
     (void)args;
@@ -1309,8 +1380,7 @@ static void channel_rm(char const *arg) {
 
 // "fw channel add <name> <base64 key>" or "fw channel add #name": the same as the screen's
 static void cmd_channel(char const *args) {
-    if (mesh_is_stopped()) {
-        console_reply("MeshCore stopped for update");
+    if (console_not_running()) {
         return;
     }
     while (*args == ' ') {
@@ -1335,8 +1405,7 @@ static void cmd_channel(char const *args) {
 
 // "fw advert": a zero-hop advert now (MyMesh::advert(): nodes in direct range hear it), for testing transmit
 static void cmd_advert(char const *args) {
-    if (mesh_is_stopped()) {
-        console_reply("MeshCore stopped for update");
+    if (console_not_running()) {
         return;
     }
     (void)args;
@@ -1398,11 +1467,101 @@ static void drive_bytes(size_t *total, size_t *used) {
     }
 }
 
+static void cmd_mesh(char const *args);
+static void cmd_contacts(char const *args);
+static void cmd_msgs(char const *args);
+static void cmd_channels(char const *args);
+static void cmd_channel(char const *args);
+static void cmd_advert(char const *args);
+
+extern "C" void mesh_console_init(void) {
+    static bool registered; // boot, from start_background: one task
+    if (registered) {
+        return;
+    }
+    registered = true;
+    console_register("mesh",
+                     "mesh | mesh start | mesh stop | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | "
+                     "mesh link | mesh out | mesh chats | mesh hist [compact] | mesh send <channel> <text> | "
+                     "mesh dm <12 hex> <text>",
+                     cmd_mesh);
+    console_register("contacts", "contacts (nodes heard, newest first)", cmd_contacts);
+    console_register("msgs", "msgs [n] (last n messages)", cmd_msgs);
+    console_register("channels", "channels (the channels the badge can read)", cmd_channels);
+    console_register("channel", "channel add <name> <base64 key> | channel add #name | channel rm <index|name>", cmd_channel);
+    console_register("advert", "advert (send a zero-hop advert now)", cmd_advert);
+}
+
+// The mesh task, new each start; false when it could not be made
+static bool task_create(void) {
+    __atomic_store_n(&stop_requested, false, __ATOMIC_RELEASE);
+    __atomic_store_n(&task_exited, false, __ATOMIC_RELEASE);
+    if (xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_STACK, NULL, 3, &mesh_task_handle, MESH_CORE) != pdPASS) {
+        __atomic_store_n(&task_exited, true, __ATOMIC_RELEASE);
+        ESP_LOGE(TAG, "mesh task not started");
+        return false;
+    }
+    __atomic_store_n(&stopped, false, __ATOMIC_RELEASE);
+    __atomic_store_n(&task_running, true, __ATOMIC_RELEASE);
+    return true;
+}
+
+// After a stop on request (#103): everything is still loaded (node, contacts, channels, the store, the journal and
+// its key, the console). The radio is claimed again with the prefs' settings, the unread badge comes back and a new
+// task runs. Under the run lock.
+static bool resume_locked(void) {
+    if (!__atomic_load_n(&task_exited, __ATOMIC_ACQUIRE)) {
+        ESP_LOGE(TAG, "MeshCore is still stopping: not started");
+        return false;
+    }
+    lora_radio.begin();
+    mesh_lock();
+    NodePrefs const *prefs = node->getNodePrefs();
+    radio_driver.setParams(prefs->freq, prefs->bw, prefs->sf, prefs->cr);
+    radio_driver.setTxPower(prefs->tx_power_dbm);
+    tile_set_contacts((size_t)node->getNumContacts());
+    mesh_unlock();
+    if (!task_create()) {
+        lora_radio.end();
+        return false;
+    }
+    mesh_lock();
+    tile_publish_unread(); // after stopped is cleared: the badge shows the count again
+    mesh_unlock();
+    ESP_LOGW(TAG, "MeshCore started again: %d contacts", node->getNumContacts());
+    return true;
+}
+
+static bool start_locked(char const *files_dir);
+
 extern "C" bool mesh_start(char const *files_dir) {
+    if (xSemaphoreTake(run_lock_handle(), pdMS_TO_TICKS(15000)) != pdTRUE) {
+        ESP_LOGE(TAG, "MeshCore busy stopping: not started");
+        return false;
+    }
+    bool ok;
+    if (__atomic_load_n(&final_stop, __ATOMIC_ACQUIRE)) {
+        ESP_LOGE(TAG, "MeshCore stopped for update: no start before the restart");
+        ok = false;
+    } else if (mesh_running()) {
+        ok = true; // a second start is not a second MeshCore
+    } else if (__atomic_load_n(&node, __ATOMIC_ACQUIRE)) {
+        ok = resume_locked();
+    } else {
+        ok = start_locked(files_dir);
+    }
+    xSemaphoreGive(run_lock_handle());
+    return ok;
+}
+
+// The first start: loads everything (#61, #65, #48). Under the run lock; node is published only at the end, so a start
+// that fails before that can be tried again from the top.
+static bool start_locked(char const *files_dir) {
     if (!files_dir) {
         ESP_LOGE(TAG, "no directory for MeshCore's files");
         return false;
     }
+    mesh_console_init();
     fs_shim_set_root(files_dir);
     fs_shim_set_drive_bytes(drive_bytes);
     mesh_lock();
@@ -1460,21 +1619,9 @@ extern "C" bool mesh_start(char const *files_dir) {
     __atomic_store_n(&radio_known, true, __ATOMIC_RELEASE);
     __atomic_store_n(&node_id_known, true, __ATOMIC_RELEASE);
 
-    console_register("mesh",
-                     "mesh | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | mesh link | mesh out | "
-                     "mesh chats | mesh hist [compact] | mesh send <channel> <text> | mesh dm <12 hex> <text>",
-                     cmd_mesh);
-    console_register("contacts", "contacts (nodes heard, newest first)", cmd_contacts);
-    console_register("msgs", "msgs [n] (last n messages)", cmd_msgs);
-    console_register("channels", "channels (the channels the badge can read)", cmd_channels);
-    console_register("channel", "channel add <name> <base64 key> | channel add #name | channel rm <index|name>", cmd_channel);
-    console_register("advert", "advert (send a zero-hop advert now)", cmd_advert);
-
-    if (xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_STACK, NULL, 3, &mesh_task_handle, MESH_CORE) != pdPASS) {
-        ESP_LOGE(TAG, "mesh task not started");
+    if (!task_create()) {
         return false;
     }
-    __atomic_store_n(&task_running, true, __ATOMIC_RELEASE);
     ESP_LOGW(TAG, "MeshCore companion up: %d contacts, BadgeMesh %u bytes in PSRAM", n->getNumContacts(),
              (unsigned)sizeof(BadgeMesh));
     return true;

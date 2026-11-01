@@ -566,6 +566,10 @@ add_executable(mesh_grid_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_grid_test.c ${CMA
 target_include_directories(mesh_grid_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(mesh_grid_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_grid_test COMMAND mesh_grid_test)
+add_executable(mesh_run_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_run_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_run.c)
+target_include_directories(mesh_run_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_run_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_run_test COMMAND mesh_run_test)
 
 add_executable(crash_log_test
     ${CMAKE_CURRENT_SOURCE_DIR}/crash_log_test.c
@@ -971,6 +975,7 @@ add_custom_target(run_tests
     sd_settings_model_test
     mesh_contact_fmt_test
     mesh_grid_test
+    mesh_run_test
     sensors_format_test
     crashlog_fmt_test
     lora_activity_test

@@ -18,6 +18,9 @@ bool wifi_fan_part_lit(int bars, int part) {
     return part >= 0 && part < WIFI_FAN_PARTS && part < bars;
 }
 
-link_look_t lora_look(bool up) {
+link_look_t lora_look(bool up, bool wanted) {
+    if (!wanted) {
+        return (link_look_t){LINK_OFF, 0, THEME_DIM}; // nobody uses the radio by choice (#103): not an alarm
+    }
     return (link_look_t){up ? LINK_UP : LINK_DOWN, 0, up ? THEME_TEAL : THEME_LINK_RED};
 }

@@ -125,7 +125,9 @@ fonts; `fw assets` shows their state.
   connect), Display (brightness, screen timeout: dim after 1 min, off after 5 min; home layout), Time (set date & time by hand, time zone with the Netherlands as the
   default, where the time came from), About Lichen, and one page per app that has settings. SNTP still wins over a
   time set by hand; `fw clock set <ISO8601>` and `fw clock sync` do the same from the console.
-- **Settings > MeshCore:** name; Region & radio (presets such as Netherlands, the default, plus Custom: frequency,
+- **Settings > MeshCore:** Start at boot (on by default; off leaves the LoRa radio unclaimed, the status bar's LoRa dim,
+  and the MeshCore tile says "Not running / Enter to start": Enter starts it); Start/Stop MeshCore; name; Region &
+  radio (presets such as Netherlands, the default, plus Custom: frequency,
   bandwidth, SF, CR and, under Advanced, TX power); Channels (add a name with a base64 key or `#hashtag`, remove one;
   Public stays); Send advert; node id, radio, TX power and MeshCore version. The first time the MeshCore app opens it
   asks for a name and a region.
@@ -185,7 +187,8 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
   heater (300 C for 100 ms each second) and the badge's own warmth make its temperature read somewhat above the room
   and humidity somewhat below; menuconfig "Lichen sensors" can shorten the heater or switch it off (no gas reading).
 - LoRa and the C6: `fw lora [raw on|off]`, `fw c6log [ms]` (the C6's own console, up to 60 s), `fw c6 reflash`, `fw c6` (link state, recoveries), `fw c6 reattach` (re-attach the C6 now), `fw c6 reset [rom]` (pulse C6 EN to test the recovery; `rom` only with someone at the badge).
-- MeshCore: `fw mesh` (identity, clock, packet counters), `fw mesh name <name>`, `fw mesh radio <preset | freq bw sf cr>
+- MeshCore: `fw mesh` (identity, clock, packet counters; or why it is not running), `fw mesh start`, `fw mesh stop`,
+  `fw mesh name <name>`, `fw mesh radio <preset | freq bw sf cr>
   [txdbm]`, `fw contacts`, `fw msgs [n]`, `fw channels`, `fw channel add <name> <base64 key>` or `fw channel add #name`
   (hashtag channel: key = first 16 bytes of SHA-256 of the lowercased name, `#` included), `fw channel rm <index|name>`,
   `fw advert` (send a zero-hop advert now).

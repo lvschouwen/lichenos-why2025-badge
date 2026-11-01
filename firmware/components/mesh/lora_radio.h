@@ -7,6 +7,7 @@
 class LoraRadio : public BadgeRadio {
 public:
     void     begin() override;
+    void     end(); // releases the LoRa claim (#103); begin() claims it again
     int      recvRaw(uint8_t *bytes, int sz) override;
     uint32_t getEstAirtimeFor(int len_bytes) override;
     float    packetScore(float snr, int packet_len) override;

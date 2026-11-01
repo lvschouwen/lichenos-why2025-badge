@@ -18,6 +18,7 @@
 typedef struct {
     bool (*wifi_up)(void);
     bool (*lora_up)(void);                  // the LoRa radio runs (and the C6 link is up)
+    bool (*lora_wanted)(void);              // false while its user stopped by choice (#103): dim, not red; NULL = yes
     bool (*c6_up)(void);                    // the C6 link: brightness and the radio need it
     // Settings > Wi-Fi: wifi_scan blocks for seconds and only runs off the LVGL task; wifi_join saves and applies
     bool (*wifi_scan)(wifi_ap_t *out, size_t max, size_t *n);

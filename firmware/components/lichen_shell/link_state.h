@@ -15,8 +15,8 @@ typedef struct {
 // Up: bars from the RSSI (1 while it is unknown), teal. Joining: amber, 0 bars. Credentials but no IP: red, 0 bars
 // (DOWN). No credentials: red, 0 bars (OFF).
 link_look_t wifi_look(bool have_credentials, bool joining, bool has_ip, bool rssi_known, int8_t rssi);
-// The "LoRa" label: teal up, red down
-link_look_t lora_look(bool up);
+// The "LoRa" label: teal up, red down; dim (OFF) whatever the radio does while its user is stopped by choice (#103)
+link_look_t lora_look(bool up, bool wanted);
 
 // The Wi-Fi fan icon (#58): part 0 is the dot, 1-3 the arcs from the inside out. Lit in the look's colour up to `bars`
 // (1 = the dot alone, 4 = the dot and all three arcs), the rest faint; 0 bars leaves the whole fan faint.

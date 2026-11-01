@@ -32,12 +32,26 @@ typedef struct {
 // before shell_start(), so it comes first on home; main.c then runs its start_background with the other apps'.
 void meshcore_app_register(void);
 
-bool mesh_start(char const *files_dir); // the app's start_background, with its directory (#84 T6): false when it did not start
-// The task runs (started, not stopped for an update)
+// Starts MeshCore with its directory (#84 T6): false when it did not start. The first start loads everything (identity,
+// contacts, the history journal); after a mesh_stop(MESH_STOP_USER) it only claims the radio again and restarts the
+// task (#103). True at once when it runs; false after a stop for an update. Blocks for up to a few seconds: boot or a
+// job task, never the LVGL task. Starts and stops are serialised.
+bool mesh_start(char const *files_dir);
+// The task runs (started, not stopped)
 bool mesh_running(void);
-// A firmware update is coming (#76): saves prefs, contacts and channels, then the mesh task ends. Waits for that (up to
-// 10 s); true when it is stopped (or was not running), false when it did not stop in time. MeshCore does not start again before the restart. The console commands then say "MeshCore stopped for update".
-bool mesh_stop_for_update(void);
+typedef enum {
+    MESH_STOP_USER,   // on request (#103): mesh_start brings it back
+    MESH_STOP_UPDATE, // a firmware update is coming (#76): final, no start before the restart
+} mesh_stop_reason_t;
+// Saves prefs, contacts and channels, flushes the history journal, then the mesh task ends and the LoRa claim is
+// released. Waits for that (up to 10 s): true when it is stopped (or was not running), false when it did not stop in
+// time (it still stops, and releases the radio, when the task gets there). The update stop also settles the journal's
+// held messages and wipes its key; it works on a MeshCore already stopped on request too.
+bool mesh_stop(mesh_stop_reason_t why);
+// "fw mesh", "fw contacts" and friends: registered once, whether MeshCore starts or not (#103)
+void mesh_console_init(void);
+// The status bar's LoRa look (#103, main.c's shell source): false only while MeshCore is stopped by choice
+bool mesh_wants_radio(void);
 // The node id (the start of the public key) as 8 hex digits, taken once at mesh_start: no lock, so the screens may
 // call it any time. false before MeshCore is up.
 bool mesh_node_id(char *hex, size_t cap);

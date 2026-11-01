@@ -14,6 +14,7 @@
 #include "mesh.h"
 #include "mesh_chat.h"
 #include "mesh_format.h"
+#include "meshcore_run.h"
 #include "meshcore_settings.h"
 #include "radio_confirm.h"
 #include "radio_filter.h"
@@ -319,15 +320,75 @@ static void send_advert(void *arg) {
 static void open_radio(void *arg);
 static void open_channels(void *arg);
 
+// ---- running or not (#103): Start at boot, Start / Stop MeshCore -------------------------------------------------
+
+#define RUN_POLL_MS 500
+
+static lv_obj_t   *autostart_row, *run_row; // NULL once the page is gone
+static lv_timer_t *run_timer;
+static char const *run_refusal; // why the last Enter did nothing, shown until the state changes
+static mesh_run_t  run_shown;
+
+static void run_row_refresh(lv_timer_t *timer) {
+    (void)timer;
+    if (!run_row) {
+        return;
+    }
+    mesh_run_t r = meshcore_run_get();
+    if (r.state != run_shown.state || r.why != run_shown.why) {
+        run_refusal = NULL;
+    }
+    run_shown = r;
+    menu_set_label(run_row, mesh_run_action_label(r));
+    menu_set_value(run_row, run_refusal ? run_refusal : mesh_run_action_value(r));
+}
+
+static void toggle_autostart(void *arg) {
+    (void)arg;
+    bool on = !meshcore_autostart();
+    menu_set_value(autostart_row, meshcore_autostart_set(on) ? mesh_run_autostart_text(on) : "not saved");
+}
+
+static void start_stop(void *arg) {
+    (void)arg;
+    mesh_run_t r = meshcore_run_get();
+    if (mesh_run_busy(r) || (r.state == MESH_RUN_STOPPED && r.why == MESH_WHY_UPDATE)) {
+        return; // the row already says so
+    }
+    char const *why = meshcore_run_request(r.state == MESH_RUN_STOPPED);
+    run_row_refresh(NULL);
+    if (why) {
+        run_refusal = why;
+        menu_set_value(run_row, why);
+    }
+}
+
+static void run_rows(lv_obj_t *page) {
+    char const *on = mesh_run_autostart_text(meshcore_autostart());
+    autostart_row  = menu_add(page, "Start at boot", on, toggle_autostart, NULL);
+    run_row       = menu_add(page, "", "", start_stop, NULL);
+    run_refusal   = NULL;
+    run_shown     = meshcore_run_get();
+    run_row_refresh(NULL);
+    run_timer = lv_timer_create(run_row_refresh, RUN_POLL_MS, NULL); // a start or stop ends on the job task
+}
+
 static void on_page_delete(lv_event_t *e) {
     (void)e;
     name_row = radio_row = channels_row = advert_row = NULL;
+    autostart_row = run_row = NULL;
+    if (run_timer) {
+        lv_timer_delete(run_timer);
+        run_timer = NULL;
+    }
     meshcore_advert_forget(advert_row_status);
 }
 
 void meshcore_settings(lv_obj_t *page) {
+    run_rows(page);
+    lv_obj_add_event_cb(page, on_page_delete, LV_EVENT_DELETE, NULL);
     mesh_settings_t s;
-    if (!mesh_get_settings(&s)) {
+    if (!mesh_running() || !mesh_get_settings(&s)) {
         menu_note(page, "MeshCore is not running: its settings come back when it does.");
         return;
     }
@@ -335,7 +396,6 @@ void meshcore_settings(lv_obj_t *page) {
     radio_row    = menu_add(page, "Region & radio", "", open_radio, NULL);
     channels_row = menu_add(page, "Channels", "...", open_channels, NULL);
     advert_row   = menu_add(page, "Send advert", "", send_advert, NULL);
-    lv_obj_add_event_cb(page, on_page_delete, LV_EVENT_DELETE, NULL);
     radio_row_refresh();
     page_channels_refresh();
 }

@@ -8,9 +8,9 @@
 #include "mc_first.h"
 #include "menu.h"
 #include "mesh.h"
+#include "meshcore_run.h"
 #include "meshcore_screens.h"
 #include "meshcore_settings.h"
-#include "lichen_fs.h"
 #include "lichen_settings.h"
 #include "lichen_ui.h"
 #include "theme.h"
@@ -75,9 +75,8 @@ static void icon(lv_obj_t *parent, int size_px) {
 // ---- the tile ----------------------------------------------------------------------------------------------------
 
 static bool tile_text(char *l1, size_t c1, char *l2, size_t c2) {
-    if (!mesh_running()) {
-        snprintf(l1, c1, "Not running");
-        snprintf(l2, c2, "%s", lora_up() ? "" : "Needs the LoRa radio");
+    // Not running, starting, stopping (#103): "Not running" / "Enter to start"
+    if (mesh_run_tile_text(meshcore_run_get(), lora_up(), l1, c1, l2, c2) || !mesh_running()) {
         return true;
     }
     mesh_tile_t t;
@@ -173,6 +172,12 @@ static void on_first_delete(lv_event_t *e) {
 }
 
 static void open(lv_obj_t *screen) {
+    // "Enter to start" (#103): a stopped MeshCore starts on the job task; the grid says so until it runs
+    mesh_run_t run = meshcore_run_get();
+    if (run.state == MESH_RUN_STOPPED && run.why != MESH_WHY_UPDATE && lora_up()) {
+        char const *why = meshcore_run_request(true);
+        ESP_LOGW(TAG, "opened while stopped: start %s", why ? why : "asked");
+    }
     if (mesh_running() && app_settings_get_u8(self(), "mc_name_set", 0) == 0) {
         ESP_LOGW(TAG, "first open: asking name and region");
         first        = (mc_first_t){0};
@@ -292,16 +297,8 @@ void meshcore_app_settings_open(void) {
 // ---- the background part -----------------------------------------------------------------------------------------
 
 static bool start_background(void) {
-    if (!lora_up()) {
-        ESP_LOGE(TAG, "no LoRa radio: MeshCore not started");
-        return false;
-    }
     app_settings_adopt_u8(self(), "mc_name_set"); // firmware before #84 T5 kept the flag in Lichen's namespace
-    char const *dir = lichen_fs_app_dir(self()); // /storage/meshcore, as before #84 T6
-    if (!dir) {
-        return false;
-    }
-    return mesh_start(dir);
+    return meshcore_run_boot(); // start at boot on: started here, as before; off: only the console commands (#103)
 }
 
 // "fw setup reset meshcore" / "done meshcore": only the questions' flag; the name and the radio stay
@@ -312,7 +309,7 @@ static void first_run_set(bool done) {
 
 // The mesh saves and stops; the OS stops the radio afterwards, only when this says true (#84 T7)
 static bool stop_for_update(void) {
-    bool stopped = mesh_stop_for_update();
+    bool stopped = meshcore_run_stop_for_update();
     if (!stopped) {
         ESP_LOGE(TAG, "MeshCore still running");
     }
@@ -337,5 +334,6 @@ static lichen_app_t const *self(void) {
 }
 
 void meshcore_app_register(void) {
+    meshcore_run_init(&meshcore_app);
     lichen_register_app(&meshcore_app);
 }

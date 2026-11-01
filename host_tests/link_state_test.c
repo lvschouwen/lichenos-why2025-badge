@@ -16,6 +16,7 @@ static int failures;
 #define TEAL  0x3FC1B0
 #define AMBER 0xF5B700
 #define RED   0xE5484D
+#define DIM   0x8090A0
 
 int main(void) {
     link_look_t l = wifi_look(true, false, true, true, -50);
@@ -32,10 +33,14 @@ int main(void) {
     CHECK(l.state == LINK_DOWN && l.bars == 0 && l.color == RED);
     l = wifi_look(false, false, false, false, 0);
     CHECK(l.state == LINK_OFF && l.bars == 0 && l.color == RED);
-    l = lora_look(true);
+    l = lora_look(true, true);
     CHECK(l.state == LINK_UP && l.color == TEAL);
-    l = lora_look(false);
+    l = lora_look(false, true);
     CHECK(l.state == LINK_DOWN && l.color == RED);
+    l = lora_look(true, false); // MeshCore stopped by choice (#103): dim, never red
+    CHECK(l.state == LINK_OFF && l.color == DIM);
+    l = lora_look(false, false);
+    CHECK(l.state == LINK_OFF && l.color == DIM);
 
     // The fan (#58): which of dot, inner, middle, outer arc are lit, for 0..4 bars
     static bool const fan[5][WIFI_FAN_PARTS] = {

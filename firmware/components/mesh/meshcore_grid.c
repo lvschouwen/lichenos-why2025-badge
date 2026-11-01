@@ -6,9 +6,11 @@
 #include "esp_log.h"
 #include "lichen_clock.h"
 #include "lichen_ui.h"
+#include "lora.h"
 #include "mesh.h"
 #include "mesh_chat.h"
 #include "mesh_grid.h"
+#include "meshcore_run.h"
 #include "meshcore_screens.h"
 #include "meshcore_settings.h"
 #include "theme.h"
@@ -39,6 +41,7 @@ static struct {
     lv_obj_t          *cell[MESH_GRID_TILES];
     lv_obj_t          *badge[MESH_GRID_TILES];
     lv_obj_t          *status; // the Advertise result; NULL once the grid is gone
+    lv_obj_t          *run;    // "MeshCore is not running. Enter starts it." over the tiles, hidden while it runs
     lv_timer_t        *timer;
     lv_timer_t        *status_timer; // clears the status line
 
@@ -66,7 +69,12 @@ static void refresh(lv_timer_t *t) {
     if (t && lv_screen_active() != g.screen) {
         return; // a tile's screen is on top: no mesh lock for badges nobody sees
     }
-    mesh_grid_counts_t *c = &g.counts;
+    mesh_grid_counts_t *c   = &g.counts;
+    char const         *run = mesh_run_grid_text(meshcore_run_get(), lora_up());
+    set_text(g.run, run);
+    if (g.run && lv_obj_is_hidden(g.run) != (run[0] == '\0')) {
+        lv_obj_set_hidden(g.run, run[0] == '\0'); // only on a change, as set_text
+    }
     if (mesh_running()) {
         mesh_tile_t tile;
         mesh_tile_snapshot(&tile); // never waits: the home tile's own copy
@@ -152,8 +160,27 @@ static void ask_advert(void) {
 
 // ---- keys --------------------------------------------------------------------------------------------------------
 
+// A stopped MeshCore (#103): Enter on any tile but Settings starts it, as the line above the tiles says; true when
+// that is what Enter did
+static bool start_instead(mesh_grid_tile_t tile) {
+    mesh_run_t r = meshcore_run_get();
+    bool final = r.state == MESH_RUN_STOPPED && r.why == MESH_WHY_UPDATE;
+    if (tile == MESH_GRID_SETTINGS || r.state == MESH_RUN_RUNNING || final) {
+        return false;
+    }
+    if (r.state == MESH_RUN_STOPPED) {
+        char const *why = meshcore_run_request(true);
+        ESP_LOGW(TAG, "start from the grid: %s", why ? why : "asked");
+    }
+    refresh(NULL); // "Starting MeshCore..." at once
+    return true;   // starting or stopping: the tiles wait for it
+}
+
 static void open_tile(void *arg) {
     clear_status(NULL); // an old result does not belong to what comes next
+    if (!g.screen || start_instead((mesh_grid_tile_t)(intptr_t)arg)) {
+        return;
+    }
     switch ((mesh_grid_tile_t)(intptr_t)arg) {
         case MESH_GRID_CHAT: meshcore_chats_open(); break;
         case MESH_GRID_CONTACTS: meshcore_contacts_open(MESH_VIEW_ALL); break;
@@ -251,6 +278,9 @@ void meshcore_grid_build(lv_obj_t *screen, lv_group_t *group) {
     lv_obj_set_style_pad_column(screen, GRID_GAP, 0);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUS_KEY);
+    g.run = add_label(screen, "", THEME_AMBER);
+    lv_obj_set_width(g.run, LV_PCT(100));
+    lv_obj_set_hidden(g.run, true); // refresh shows it when MeshCore does not run
     for (int i = 0; i < MESH_GRID_TILES; i++) {
         add_cell(screen, group, i);
     }

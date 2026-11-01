@@ -36,9 +36,11 @@ void mesh_journal_out_sweep_locked(uint32_t const *ids, size_t n);
 void mesh_journal_tick_locked(void);
 // Once per mesh loop, after mesh_unlock(): writes a swapped-out buffer (and compacts when asked or over the cap)
 void mesh_journal_flush(void);
-// The update stop, with the lock held (MeshCore saves its own files under it too): held outgoing messages are written
-// as they stand ("not sent" when still pending) and everything pending goes to the card before MeshCore is gone
-void mesh_journal_stop_locked(void);
+// MeshCore stops, with the lock held (MeshCore saves its own files under it too): everything pending goes to the card.
+// final (the update stop): held outgoing messages are written as they stand first ("not sent" when still pending) and
+// the key is wiped. Not final (a stop on request, #103): held messages stay held (the outbox keeps them for the next
+// start) and the journal carries on after it.
+void mesh_journal_stop_locked(bool final);
 
 // "fw mesh hist [compact]"
 void mesh_journal_console(char const *args);

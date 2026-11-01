@@ -610,4 +610,6 @@ static void cmd_lora(char const *args) {
     char line[STATUS_LINE_MAX];
     lora_status_format(&config, &st, have, age_s, dropped, bad, line, sizeof(line));
     console_reply("lora %s | tx %lu", line, (unsigned long)sent);
+    char const *who = __atomic_load_n(&owner, __ATOMIC_ACQUIRE);
+    console_reply("lora owner %s", who ? who : "none (unclaimed)"); // #103: MeshCore stopped gives the radio back
 }

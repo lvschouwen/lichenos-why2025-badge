@@ -607,11 +607,13 @@ void mesh_journal_flush(void) {
     }
 }
 
-void mesh_journal_stop_locked(void) {
+void mesh_journal_stop_locked(bool final) {
     if (!hist || !on) {
         return;
     }
-    mesh_hist_stop(hist, mesh_uptime_s());
+    if (final) {
+        mesh_hist_stop(hist, mesh_uptime_s());
+    }
     // One deadline for both writes: the update waits for this
     int64_t deadline = esp_timer_get_time() + (int64_t)STOP_WAIT_MS * 1000;
     if (out_len) {
@@ -623,10 +625,12 @@ void mesh_journal_stop_locked(void) {
         write_out((uint32_t)left_ms);
     }
     if (out_len || hist->len || hist->dropped) {
-        ESP_LOGW(TAG, "message history for the update: %u bytes not written, %lu records dropped earlier",
+        ESP_LOGW(TAG, "message history at the stop: %u bytes not written, %lu records dropped earlier",
                  (unsigned)(out_len + hist->len), (unsigned long)hist->dropped);
     }
-    mh_wipe(&wcrypt, sizeof(wcrypt)); // the last write is done: MeshCore does not start again before the restart
+    if (final) {
+        mh_wipe(&wcrypt, sizeof(wcrypt)); // the last write is done: MeshCore does not start again before the restart
+    }
 }
 
 // ---- console -------------------------------------------------------------------------------------------------------

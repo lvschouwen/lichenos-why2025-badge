@@ -56,15 +56,26 @@ static void on_link(bool up) {
     ESP_LOGW("mesh", "LoRa radio %s", up ? "back after a C6 reset" : "gone with the C6, sends fail until it is back");
 }
 
+// Every start of MeshCore (#103: again after a stop): one queue for the whole run of the badge, emptied on a restart so
+// packets from before the stop are not handled as new
 void LoraRadio::begin() {
     instance = this;
-    rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_item_t));
+    if (!rx_queue) {
+        rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_item_t));
+    } else {
+        xQueueReset(rx_queue);
+    }
     if (!lora_claim("meshcore", on_packet)) {
         ESP_LOGE("mesh", "LoRa radio not ours: MeshCore receives nothing");
         return;
     }
     lora_set_rx_formatter(rx_summary);
     lora_set_link_callback("meshcore", on_link);
+}
+
+// MeshCore stopped (#103): the radio is free again (the OS keeps it receiving; nobody gets the packets)
+void LoraRadio::end() {
+    lora_release("meshcore");
 }
 
 int LoraRadio::recvRaw(uint8_t *bytes, int sz) {
