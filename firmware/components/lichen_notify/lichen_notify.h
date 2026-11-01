@@ -1,7 +1,7 @@
 #pragma once
 // Notifications (#62): any app, and Lichen itself, raises a notice; the OS keeps a history of 48 (kept across
-// reboots in /storage/lichen/notify.bin), shows a toast over the current screen that never takes the focus, puts the
-// unread count on the source app's home tile (lichen_badge.h) and an unread dot in the status bar, and lists them all
+// reboots in /storage/lichen/notify.bin), shows a toast over the current screen that never takes the focus, puts an
+// unread dot in the status bar, and lists them all
 // in the notification centre (the Notifications tile, the cloud key). Part of the app API: lichen_api REQUIRES it.
 //
 // Every call here is safe from any task (never from an ISR); the strings are copied. A source is the app's id
@@ -13,8 +13,7 @@
 // Notifications) hides toasts and feedback; errors still toast, silently. Errors stay until read: the history drops
 // read entries first, then the oldest info, then warnings.
 //
-// The tile badge (lichen_badge.h) of an app that raises notices belongs to this service: it sets it to the app's
-// unread count, so that app must not also call lichen_badge_set for itself (MeshCore moves over in #50).
+// This service does not set tile badges: an app sets its own with lichen_badge_set (lichen_badge.h).
 //
 // Follow-up: source is taken on trust; binding it to the calling app (so one app can't post as another) needs the app
 // identity the OS does not track per task yet.
@@ -29,7 +28,7 @@ extern "C" {
 
 typedef enum { LN_INFO, LN_WARN, LN_ERROR } ln_level_t;
 
-#define LN_SILENT    0x01 // history and tile badge only: no toast, no sound/vibration/LED
+#define LN_SILENT    0x01 // history and status-bar dot only: no toast, no sound/vibration/LED
 #define LN_COALESCE  0x02 // merge into an unread entry with the same (source, target) of the last 10 min (count goes up)
 #define LN_ONCE_BOOT 0x04 // at most once per boot per (source, target); a repeat returns 0 and is not counted dropped
 

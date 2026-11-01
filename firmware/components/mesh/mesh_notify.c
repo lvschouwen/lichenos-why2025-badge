@@ -3,9 +3,10 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <strings.h>
 #include <string.h>
 
-#define CHAN_TARGET_NAME 28 // MN_TARGET_MAX - 1 - strlen("ch:")
+#define CHAN_TARGET_NAME MN_TARGET_NAME_MAX // MN_TARGET_MAX - 1 - strlen("ch:")
 
 mn_mode_t mn_default_mode(mesh_chat_key_t const *key) {
     if (key->kind == MESH_CHAT_CHANNEL && strcmp(key->chan, "public") == 0) {
@@ -143,6 +144,28 @@ bool mn_target_parse(char const *target, mesh_chat_key_t *key, bool *failed) {
     }
     *failed = fail;
     return true;
+}
+
+int mn_channel_match(char const names[][MESH_CHANNEL_MAX + 1], size_t n, char const *chan) {
+    size_t len = strlen(chan);
+    for (size_t i = 0; i < n; i++) {
+        if (strlen(names[i]) == len && strncasecmp(names[i], chan, len) == 0) {
+            return (int)i;
+        }
+    }
+    if (len < MN_TARGET_NAME_MAX) {
+        return -1; // not cut, so no longer name can be meant
+    }
+    int found = -1;
+    for (size_t i = 0; i < n; i++) {
+        if (strlen(names[i]) > len && strncasecmp(names[i], chan, len) == 0) {
+            if (found >= 0) {
+                return -1; // ambiguous
+            }
+            found = (int)i;
+        }
+    }
+    return found;
 }
 
 // ---- stored modes --------------------------------------------------------------------------------------------------

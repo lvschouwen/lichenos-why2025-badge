@@ -93,12 +93,10 @@ void meshcore_open_notification(char const *target, uint32_t id) {
         if (key.kind == MESH_CHAT_CHANNEL) {
             static char names[MAX_CHANNELS][MESH_CHANNEL_MAX + 1];
             size_t      n = mesh_channels_snapshot_wait(names, MAX_CHANNELS, SCREEN_WAIT_MS);
-            for (size_t i = 0; n != MESH_BUSY && i < n; i++) {
-                // the target holds the name lower-cased and cut to what fits, so compare that much, without case
-                if (strncasecmp(names[i], key.chan, strlen(key.chan)) == 0) {
-                    meshcore_chat_open_channel(names[i]);
-                    return;
-                }
+            int at = n == MESH_BUSY ? -1 : mn_channel_match(names, n, key.chan);
+            if (at >= 0) {
+                meshcore_chat_open_channel(names[at]);
+                return;
             }
         } else {
             mesh_contact_detail_t d;

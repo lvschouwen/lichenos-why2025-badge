@@ -205,7 +205,27 @@ static void failtrack(void) {
     }
 }
 
+static void channel_match(void) {
+    char const names[6][MESH_CHANNEL_MAX + 1] = {"Public", "Public Safety", "team-b", "team", "#a-long-channel-name-of-28-xyz",
+                                                 "#a-long-channel-name-of-28-abc"};
+    CHECK(mn_channel_match(names, 6, "public") == 0); // exact, not the longer one
+    CHECK(mn_channel_match(names, 6, "team") == 3);   // team-b is listed first but is not team
+    CHECK(mn_channel_match(names, 6, "team-b") == 2);
+    CHECK(mn_channel_match(names, 6, "tea") == -1);   // not cut: no prefix match
+    CHECK(mn_channel_match(names, 6, "gone") == -1);
+    CHECK(mn_channel_match(names, 6, "#A-LONG-CHANNEL-NAME-OF-28-XYZ") == 4); // exact, without case
+    // cut names: 28 bytes
+    char const cut[3][MESH_CHANNEL_MAX + 1] = {"#a-long-channel-name-of-28-xy1", "#other", "#a-long-channel-name-of-28-xy2"};
+    CHECK(mn_channel_match(cut, 2, "#a-long-channel-name-of") == -1);
+    char key[40];
+    snprintf(key, sizeof(key), "%.*s", MN_TARGET_NAME_MAX, "#a-long-channel-name-of-28-xy1");
+    CHECK(strlen(key) == MN_TARGET_NAME_MAX);
+    CHECK(mn_channel_match(cut, 2, key) == 0);  // unique prefix of a cut name
+    CHECK(mn_channel_match(cut, 3, key) == -1); // two share the cut: ambiguous, the list opens
+}
+
 int main(void) {
+    channel_match();
     decide_matrix();
     defaults();
     mentions();

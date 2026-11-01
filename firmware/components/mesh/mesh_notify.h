@@ -58,6 +58,10 @@ bool mn_is_mention(char const *text, char const *my_name);
 // delivery (its own target, so it never merges into "new messages"). A channel name is cut to 28 bytes.
 #define MN_TARGET_MAX 32
 size_t mn_target(mn_kind_t kind, mesh_chat_key_t const *key, char *out, size_t cap);
+#define MN_TARGET_NAME_MAX 28 // a channel name is cut to this in a target
+// Which of the configured channels (names[0..n), stored case) a parsed target's chan means: -1 for none. An exact
+// match without case wins; only a chan of MN_TARGET_NAME_MAX bytes (cut) may match by prefix, and only one channel.
+int mn_channel_match(char const names[][MESH_CHANNEL_MAX + 1], size_t n, char const *chan);
 // false when target is not one of ours. key->chan is the (possibly cut) lower-case name; *failed for fc:/fd:
 bool mn_target_parse(char const *target, mesh_chat_key_t *key, bool *failed);
 
