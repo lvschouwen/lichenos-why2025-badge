@@ -1255,6 +1255,7 @@ static void serve(int ls) {
             piece_expire(false);
             continue;
         }
+        piece_expire(false); // also between connections: a /log poll every second must not keep it alive
         set_read_timeout(fd, READ_TIMEOUT_S, 0);
         bool reboot = handle_connection(fd);
 

@@ -500,9 +500,10 @@ static void console_task(void *arg) {
         uint8_t     c;
         char const *pass;
         size_t      pass_len;
-        // No idle flush (#5): there is no app stdin to hand held bytes to, and dropping a held "f" after 100 ms made
-        // "fw ..." typed by hand in a terminal never match. Held bytes wait for the next key, however long it takes.
-        if (uart_read_bytes(UART_NUM_0, &c, 1, portMAX_DELAY) != 1) {
+        // Held prefix bytes are dropped after 2 s without a key (#5): 100 ms was too short for "fw ..." typed by hand,
+        // and never dropping them let a stray "f" eat the next scripted command (there is no app stdin to hand them to)
+        if (uart_read_bytes(UART_NUM_0, &c, 1, pdMS_TO_TICKS(2000)) != 1) {
+            console_cmd_flush(&state, &pass, &pass_len);
             continue;
         }
         switch (console_cmd_feed(&state, (char)c, &pass, &pass_len)) {

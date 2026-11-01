@@ -336,11 +336,17 @@ ota_token() {
 ota_curl() {
     local token
     token=$(ota_token)
+    local rc=0
     printf 'header = "Authorization: Bearer %s"\n' "$token" |
-        curl --config - -sS --fail-with-body --connect-timeout 5 "$@"
-    local rc=$?
+        curl --config - -sS --fail-with-body --connect-timeout 5 "$@" || rc=$?
     [ $rc -eq 7 ] && echo "the badge's update server doesn't answer: is Wi-Fi up and Settings › Updates over Wi-Fi on? ('fw ota on' on the USB console)" >&2
     return $rc
+}
+
+# The receiver's /info line (with the token), empty when it doesn't answer; no pipe into grep, so pipefail can't turn
+# an early-closing grep into "feature missing"
+ota_info_line() {
+    ota_curl "http://$1:$OTA_PORT/info" || true
 }
 
 # Whether the receiver at <ip> takes compressed bodies (it says "deflate" in /info); asked once per run
@@ -348,7 +354,7 @@ OTA_DEFLATE=
 ota_deflate() {
     if [ -z "$OTA_DEFLATE" ]; then
         OTA_DEFLATE=no
-        if [ "${BADGE_OTA_COMPRESS:-1}" != 0 ] && ota_curl "http://$1:$OTA_PORT/info" 2>/dev/null | grep -q deflate; then
+        if [ "${BADGE_OTA_COMPRESS:-1}" != 0 ] && [[ $(ota_info_line "$1") == *deflate* ]]; then
             OTA_DEFLATE=yes
         fi
     fi
@@ -360,7 +366,7 @@ OTA_CHUNKS=
 ota_chunks() {
     if [ -z "$OTA_CHUNKS" ]; then
         OTA_CHUNKS=no
-        if ota_curl "http://$1:$OTA_PORT/info" 2>/dev/null | grep -q chunks; then
+        if [[ $(ota_info_line "$1") == *chunks* ]]; then
             OTA_CHUNKS=yes
         fi
     fi
@@ -442,7 +448,7 @@ cmd_ota_reboot() { ota_curl -X POST "http://$1:$OTA_PORT/reboot"; }
 # to say "ready" (it prints the DMA RAM it has free then). Without /prepare in /info the push goes ahead as is.
 ota_prepare() {
     local ip=$1 reply
-    ota_curl "http://$ip:$OTA_PORT/info" 2>/dev/null | grep -q prepare || return 0
+    [[ $(ota_info_line "$ip") == *prepare* ]] || return 0
     echo "preparing the badge: stopping MeshCore, LoRa and the screens..."
     reply=$(ota_curl --max-time 40 -X POST "http://$ip:$OTA_PORT/prepare" 2>&1) ||
         { echo "the badge did not get ready: $reply" >&2; return 1; }

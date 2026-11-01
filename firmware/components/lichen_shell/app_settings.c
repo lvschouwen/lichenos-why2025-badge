@@ -420,12 +420,36 @@ static void open_app_page(void *arg) {
 // Updates over Wi-Fi (#44): Enter switches the update server (and with it the Wi-Fi console) on or off
 static lv_obj_t *ota_row;
 
-static void toggle_ota(void *arg) {
-    (void)arg;
-    ota_server_set_enabled(!ota_server_enabled());
+static void ota_row_refresh(void) {
     if (ota_row) {
         menu_set_value(ota_row, ota_server_enabled() ? "On" : "Off");
     }
+}
+
+static void ota_off_answer(bool confirmed) {
+    if (confirmed) {
+        ota_server_set_enabled(false);
+    }
+    ota_row_refresh();
+}
+
+// Off cuts tools/badge.sh and the Wi-Fi console too, and only Settings or the USB console bring it back: confirm first
+static void toggle_ota(void *arg) {
+    (void)arg;
+    if (!ota_server_enabled()) {
+        ota_server_set_enabled(true);
+        ota_row_refresh();
+        return;
+    }
+    shell_dialog_t const d = {
+        .title        = "Switch off updates over Wi-Fi? Wi-Fi console too.",
+        .count_prefix = "Cancels in ",
+        .count_suffix = " s",
+        .hint         = "Enter: switch off   Esc: keep on",
+        .seconds      = 10,
+        .careful      = true,
+    };
+    shell_dialog_countdown(&d, ota_off_answer);
 }
 
 static void forget_ota_row(lv_event_t *e) {

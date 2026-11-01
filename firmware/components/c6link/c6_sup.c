@@ -39,7 +39,7 @@ ESP_EVENT_DEFINE_BASE(C6LINK_EVENT);
 #define QUEUE_DEPTH    8
 // esp_hosted_init/connect (SDMMC card init, its tasks), the restart note (NVS blob) and the reason texts. The high-water
 // marks of c6sup and c6wifi are logged after every recovery, and fw mem shows them (#14 T-B).
-#define SUP_STACK      4096 // peak 0.7 KB measured (#107)
+#define SUP_STACK      6144 // the re-attach (esp_hosted deinit/init, logging) wasn't measured: kept (#107 review)
 #define ASK_TRIES      5 // the dialog could not be shown (LVGL busy): ask again once a second, then restart
 #define KEY_RT_RESTART "c6_rt_restart" // the badge restarted for a lost C6 (cleared after 10 min up)
 
