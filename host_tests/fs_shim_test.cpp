@@ -21,12 +21,137 @@ static void fake_drive(size_t *total, size_t *used) {
     *used  = 250;
 }
 
+static char root_dir[64];
+
+// The file's bytes as the file system has them, read past the shim
+static size_t disk_read(char const *name, uint8_t *out, size_t cap) {
+    char path[300];
+    snprintf(path, sizeof(path), "%s%s", root_dir, name);
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return 0;
+    }
+    size_t n = fread(out, 1, cap, f);
+    fclose(f);
+    return n;
+}
+
+// One contact record as DataStore::saveContacts writes it: 12 writes, 152 bytes
+#define REC_SIZE 152
+static void fill_record(uint8_t *rec, uint32_t i, uint32_t stamp) {
+    for (size_t j = 0; j < REC_SIZE; j++) {
+        rec[j] = (uint8_t)(i * 7 + j);
+    }
+    memcpy(rec + 72, &stamp, 4); // last_advert_timestamp sits at 72
+}
+
+static void save_contacts(uint8_t *expect, uint32_t count, uint32_t changed, uint32_t stamp) {
+    static size_t const fields[12] = {32, 32, 1, 1, 1, 4, 1, 4, 64, 4, 4, 4};
+    File f = SPIFFS.open("/contacts3", "w", true);
+    CHECK(f);
+    for (uint32_t i = 0; i < count; i++) {
+        uint8_t *rec = expect + i * REC_SIZE;
+        fill_record(rec, i, i == changed ? stamp : 0);
+        size_t off = 0;
+        for (size_t k = 0; k < 12; k++) {
+            CHECK(f.write(rec + off, fields[k]) == fields[k]);
+            off += fields[k];
+        }
+    }
+    f.close();
+}
+
+// #97: "w" files are buffered and committed by flush()/close(), rewriting only the 4 KB chunks that changed
+static void buffered_writes(void) {
+    static uint8_t expect[400 * REC_SIZE], disk[400 * REC_SIZE];
+    fs_shim_take_raw_writes();
+
+    // A contacts save of 184 contacts: 2208 File writes, 7 chunk writes into a new file
+    save_contacts(expect, 184, 999, 0);
+    CHECK(fs_shim_take_raw_writes() == (184 * REC_SIZE + FS_SHIM_CHUNK - 1) / FS_SHIM_CHUNK);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 184 * REC_SIZE && memcmp(disk, expect, 184 * REC_SIZE) == 0);
+    // The same save again writes nothing; one contact's new timestamp rewrites one chunk
+    save_contacts(expect, 184, 999, 0);
+    CHECK(fs_shim_take_raw_writes() == 0);
+    save_contacts(expect, 184, 100, 12345); // record 100 sits in bytes 15200..15351: chunk 3 only
+    CHECK(fs_shim_take_raw_writes() == 1);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 184 * REC_SIZE && memcmp(disk, expect, 184 * REC_SIZE) == 0);
+    // A new contact at the end: only the last chunk; fewer contacts: a truncate, nothing rewritten
+    save_contacts(expect, 185, 100, 12345);
+    CHECK(fs_shim_take_raw_writes() == 1);
+    save_contacts(expect, 150, 100, 12345);
+    CHECK(fs_shim_take_raw_writes() == 1);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 150 * REC_SIZE && memcmp(disk, expect, 150 * REC_SIZE) == 0);
+    save_contacts(expect, 0, 999, 0); // none left: an empty file
+    CHECK(SPIFFS.exists("/contacts3") && disk_read("/contacts3", disk, sizeof(disk)) == 0);
+    fs_shim_take_raw_writes();
+
+    // Nothing reaches the file before flush(); flush() commits, close() commits the rest
+    uint8_t data[3 * FS_SHIM_CHUNK + 5];
+    for (size_t i = 0; i < sizeof(data); i++) {
+        data[i] = (uint8_t)(i * 13 + 1);
+    }
+    File f = SPIFFS.open("/b", "w");
+    CHECK(f && f.write(data, 100) == 100 && f.size() == 100);
+    CHECK(disk_read("/b", disk, sizeof(disk)) == 0 && fs_shim_take_raw_writes() == 0);
+    f.flush();
+    CHECK(disk_read("/b", disk, sizeof(disk)) == 100 && memcmp(disk, data, 100) == 0);
+    CHECK(f.write(data + 100, 50) == 50);
+    f.close();
+    CHECK(disk_read("/b", disk, sizeof(disk)) == 150 && memcmp(disk, data, 150) == 0);
+
+    // Exactly one chunk, one write; more than a chunk in one call; many one-byte writes
+    f = SPIFFS.open("/b", "w");
+    CHECK(f.write(data, FS_SHIM_CHUNK) == FS_SHIM_CHUNK);
+    f.close();
+    CHECK(disk_read("/b", disk, sizeof(disk)) == FS_SHIM_CHUNK && memcmp(disk, data, FS_SHIM_CHUNK) == 0);
+    fs_shim_take_raw_writes();
+    f = SPIFFS.open("/c", "w");
+    CHECK(f.write(data, sizeof(data)) == sizeof(data));
+    f.close();
+    CHECK(fs_shim_take_raw_writes() == 4);
+    CHECK(disk_read("/c", disk, sizeof(disk)) == sizeof(data) && memcmp(disk, data, sizeof(data)) == 0);
+    f = SPIFFS.open("/c", "w");
+    for (size_t i = 0; i < sizeof(data); i++) {
+        CHECK(f.write(data[i]) == 1);
+    }
+    f.close();
+    CHECK(fs_shim_take_raw_writes() == 0); // the same bytes: nothing rewritten
+    CHECK(disk_read("/c", disk, sizeof(disk)) == sizeof(data) && memcmp(disk, data, sizeof(data)) == 0);
+
+    // Seek and read back in the same File; a seek past the end leaves zeroes; a moved File keeps its buffer
+    f = SPIFFS.open("/d", "w");
+    CHECK(f.write(data, 10) == 10 && f.seek(2) && f.write(data + 50, 2) == 2 && f.size() == 10);
+    CHECK(f.seek(20) && f.write(data, 1) == 1 && f.size() == 21);
+    uint8_t back[21];
+    CHECK(f.seek(0) && f.available() == 21 && f.read(back, sizeof(back)) == 21 && f.read() == -1);
+    CHECK(back[0] == data[0] && back[2] == data[50] && back[3] == data[51] && back[4] == data[4]);
+    CHECK(back[10] == 0 && back[19] == 0 && back[20] == data[0]);
+    File moved;
+    moved = static_cast<File &&>(f);
+    CHECK(!f && moved);
+    moved.close();
+    CHECK(disk_read("/d", disk, sizeof(disk)) == 21 && memcmp(disk, back, 21) == 0);
+    File in = SPIFFS.open("/d", "r");
+    CHECK(in && in.size() == 21);
+    in.close();
+
+    // "a" still appends
+    f = SPIFFS.open("/d", "a");
+    CHECK(f && f.write(data, 3) == 3);
+    f.close();
+    CHECK(disk_read("/d", disk, sizeof(disk)) == 24 && memcmp(disk + 21, data, 3) == 0);
+
+    CHECK(SPIFFS.remove("/b") && SPIFFS.remove("/c") && SPIFFS.remove("/d") && SPIFFS.remove("/contacts3"));
+}
+
 int main(void) {
     char root[] = "/tmp/fs_shim_test.XXXXXX";
     CHECK(mkdtemp(root) != NULL);
     CHECK(!SPIFFS.begin(true)); // no root yet: the OS hands it over first (#84 T6)
     fs_shim_set_root(root);
     CHECK(SPIFFS.begin(true));
+    snprintf(root_dir, sizeof(root_dir), "%s", root);
 
     // The app stays below its root: no "..", ".", or "//" anywhere in a path
     CHECK(!SPIFFS.exists("/../x") && !SPIFFS.exists("/a/../b") && !SPIFFS.exists("a//b") && !SPIFFS.exists("/./a"));
@@ -75,6 +200,8 @@ int main(void) {
     in = SPIFFS.open("/a/b");
     CHECK(in.size() == 5 && in.read(back, sizeof(back)) == 5); // a short file reads short, no error
     in.close();
+
+    buffered_writes();
 
     // Remove; mkdir of a nested directory
     CHECK(SPIFFS.remove("/a/b") && !SPIFFS.exists("/a/b"));
