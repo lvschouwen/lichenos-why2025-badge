@@ -2,8 +2,9 @@
 // Tile badges (#102): a count per app that home draws as a red circle with the number in white on the top-right corner
 // of the app's icon, in both home layouts ("99+" above 99, nothing at 0). The OS keeps the counts; an app (or the OS
 // for it) sets its own whenever it changes: the crash log its unseen crashes, MeshCore its unread messages. The
-// notifications service (#62) will set badges for any app the same way. Any task (a spinlock, held only to copy a
-// number): never from an ISR.
+// notifications service (#62) sets the badge of every app that raises notices to its unread count: such an app must
+// not also set its own badge here (the two would overwrite each other; MeshCore moves over in #50). Any task (a
+// spinlock, held only to copy a number): never from an ISR.
 
 #include <stdint.h>
 

@@ -9,6 +9,7 @@
 #include "lichen_app.h"
 #include "lichen_ui.h"
 #include "menu.h"
+#include "nav.h"
 #include "notify_os.h"
 #include "notify_view.h"
 #include "shell_parts.h"
@@ -60,11 +61,16 @@ static uint32_t uptime_s(void) {
     return lv_tick_get() / 1000; // the same clock as esp_timer within a second; only used for ages
 }
 
-static void age_text(nr_entry_t const *e, char *out, size_t cap) {
+// The store's boot counter, read once per page or list build
+static uint16_t store_boot(void) {
     ln_stats_t st;
     lichen_notify_stats(&st);
+    return st.boot;
+}
+
+static void age_text(nr_entry_t const *e, uint16_t boot, char *out, size_t cap) {
     time_t now = time(NULL);
-    nview_age(out, cap, e->boot, e->mono_s, e->epoch, st.boot, (uint32_t)(esp_log_timestamp() / 1000),
+    nview_age(out, cap, e->boot, e->mono_s, e->epoch, boot, (uint32_t)(esp_log_timestamp() / 1000),
               e->epoch ? (int64_t)now : 0);
 }
 
@@ -117,7 +123,7 @@ static lv_obj_t *build_detail(void) {
     lv_obj_set_style_text_font(t, lichen_font(LICHEN_FONT_LARGE), 0);
     add_text(screen, s_entry.body, THEME_TEXT);
     char line[96], age[24], when[24] = "";
-    age_text(&s_entry, age, sizeof(age));
+    age_text(&s_entry, store_boot(), age, sizeof(age));
     struct tm local;
     time_t    at = (time_t)s_entry.epoch;
     if (s_entry.epoch && localtime_r(&at, &local)) {
@@ -158,29 +164,36 @@ static bool open_system(char const *target) {
     return false;
 }
 
-void notify_open_entry(uint32_t id) {
-    if (!lichen_notify_get(id, &s_entry)) {
-        return;
-    }
-    lichen_notify_mark_read_id(id);
+// Opens where the notice in s_entry belongs
+static void open_where(uint32_t id) {
     if (strcmp(s_entry.source, "lichen") == 0) {
         if (!open_system(s_entry.target)) {
             open_detail(id);
         }
         return;
     }
-    int i = app_index(s_entry.source);
-    if (i < 0 || strcmp(s_entry.source, NOTIFY_APP_ID) == 0) {
-        open_detail(id); // no such app ("fw notify test"): its page here
-        return;
-    }
-    lichen_app_t const *app = lichen_app_at((size_t)i);
-    if (app->open_notification) {
+    int                 i   = app_index(s_entry.source);
+    lichen_app_t const *app = i >= 0 ? lichen_app_at((size_t)i) : NULL;
+    if (!app || strcmp(s_entry.source, NOTIFY_APP_ID) == 0 || (!app->open && !app->open_notification)) {
+        open_detail(id); // no such app ("fw notify test"), or one without a screen: its page here
+    } else if (app->open_notification) {
         char target[NR_TARGET_CAP];
         snprintf(target, sizeof(target), "%s", s_entry.target);
         app->open_notification(target, id);
     } else {
         shell_open_app((size_t)i);
+    }
+}
+
+// Marked read only once a screen for it really opened (shell_open refuses while booting or with the stack full)
+void notify_open_entry(uint32_t id) {
+    if (!lichen_notify_get(id, &s_entry)) {
+        return;
+    }
+    int depth = nav_depth();
+    open_where(id);
+    if (nav_depth() > depth) {
+        lichen_notify_mark_read_id(id);
     }
 }
 
@@ -195,9 +208,12 @@ void notify_open_centre(void) {
 
 static void fill_list(void);
 
+// Only while the centre is on top and no dialog is open (on_poll's rule); otherwise on_poll rebuilds it once it is
 static void refill(void *arg) {
     (void)arg;
-    fill_list();
+    if (s_c.screen && lv_screen_active() == s_c.screen && !shell_dialog_group()) {
+        fill_list();
+    }
 }
 
 static void on_row(void *arg) {
@@ -275,8 +291,9 @@ static bool on_text(uint32_t key, void *arg) {
 }
 
 static void add_rows(void) {
-    s_c.count = lichen_notify_ids(s_c.ids, NR_SLOTS);
-    size_t shown = 0;
+    s_c.count      = lichen_notify_ids(s_c.ids, NR_SLOTS);
+    size_t   shown = 0;
+    uint16_t boot  = store_boot();
     for (size_t i = 0; i < s_c.count; i++) {
         if (!lichen_notify_get(s_c.ids[i], &s_entry)) {
             continue;
@@ -284,7 +301,7 @@ static void add_rows(void) {
         char title[NR_TITLE_CAP + 24], age[24];
         nview_title(title + strlen(BULLET), sizeof(title) - strlen(BULLET), s_entry.title, s_entry.count);
         memcpy(title, BULLET, strlen(BULLET));
-        age_text(&s_entry, age, sizeof(age));
+        age_text(&s_entry, boot, age, sizeof(age));
         lv_obj_t *row = menu_add(s_c.menu, s_entry.read ? title + strlen(BULLET) : title, age, on_row,
                                  (void *)(uintptr_t)shown);
         uint32_t color = s_entry.read ? THEME_DIM : s_entry.level == LN_INFO ? THEME_TEXT : notify_level_color(s_entry.level);

@@ -1,8 +1,9 @@
 // The notification service (#62): lichen_notify.h for apps, notify_os.h for the shell. The history (notify_ring.c,
 // pure) lives in PSRAM under one mutex; lichen_notify() writes it from the caller's task and queues a toast for the
 // shell's LVGL timer, which only ever reads copies. The file is rewritten whole (tmp, then swapped in, as crash.c does)
-// on a short-lived task: 30 s after the last change, 3 s after an error or a clear, so normally a few writes a day.
-// Plain FAT writes; nothing maps flash.
+// on a short-lived task: 30 s after the first change of a batch, and never sooner than 30 s after the last save
+// began, so a source raising errors in a loop costs one write per 30 s; a new error saves after 3 s within that gap,
+// a removal or a clear after 3 s regardless. Normally a few writes a day. Plain FAT writes; nothing maps flash.
 #include "notify_os.h"
 
 #include "esp_heap_caps.h"
@@ -34,9 +35,10 @@ static char const TAG[] = "notify";
 #define NOTIFY_TMP   NOTIFY_DIR "/notify.tmp"
 #define SAVE_SLOW_US (30LL * 1000 * 1000)
 #define SAVE_SOON_US (3LL * 1000 * 1000)
-#define SAVE_STACK   4096
+#define SAVE_GAP_US  (30LL * 1000 * 1000) // the least time between two saves (except a removal or a clear)
+#define SAVE_STACK   6144
 #define TOAST_DEPTH  8
-#define ONCE_SLOTS   32
+#define ONCE_SLOTS   64
 #define DND_KEY      "notify_dnd"
 
 void notify_cmd_register(void); // notify_cmd.c
@@ -47,7 +49,8 @@ static uint8_t          *s_buf;  // PSRAM, the file image; only the save task (o
 static nrate_t           s_rate; // under s_lock
 static nmute_t           s_mute; // under s_lock: the per-source switches read so far
 static uint32_t          s_once[ONCE_SLOTS];
-static size_t            s_once_n;
+static size_t            s_once_n;    // filled so far; then the oldest is overwritten (s_once_next)
+static size_t            s_once_next;
 static QueueHandle_t     s_toasts;
 static esp_timer_handle_t s_save_timer;
 static int64_t           s_save_due_us; // when the armed timer fires, 0 when it is not armed; under s_lock
@@ -61,6 +64,8 @@ static portMUX_TYPE      s_save_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool              s_saving, s_save_again;
 static uint32_t          s_saves, s_save_errors;
 static int64_t           s_last_save_ms;
+static int64_t           s_save_began_us; // under s_lock: when the last save task started, for SAVE_GAP_US
+static bool              s_retried;       // under s_lock: a failed save is tried again once
 
 static void lock(void) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -101,12 +106,15 @@ static bool swap_in(void) {
     return true;
 }
 
-static void schedule_save_locked(int64_t delay_us);
+typedef enum { SAVE_SLOW, SAVE_SOON, SAVE_FORCE } save_when_t;
+static void schedule_save_locked(save_when_t when);
 
 static void save_task(void *arg) {
     (void)arg;
+    static bool told_stack;
     lock();
-    size_t len = nr_encode(s_ring, s_buf, NR_FILE_MAX);
+    s_save_began_us = esp_timer_get_time();
+    size_t len      = nr_encode(s_ring, s_buf, NR_FILE_MAX);
     unlock();
     mkdir(NOTIFY_DIR, 0777); // exists after the first save
     bool ok = len && write_file(NOTIFY_TMP, s_buf, len) && swap_in();
@@ -114,19 +122,25 @@ static void save_task(void *arg) {
         ESP_LOGW(TAG, "cannot write %s (errno %d)", NOTIFY_FILE, errno);
         unlink(NOTIFY_TMP);
     }
+    if (!told_stack) {
+        told_stack = true;
+        ESP_LOGW(TAG, "save task stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    }
     lock();
     s_saves += ok;
     s_save_errors += !ok;
     s_last_save_ms = esp_timer_get_time() / 1000;
+    bool retry     = !ok && !s_retried; // once: a drive that keeps failing is not hammered
+    s_retried      = !ok;
     unlock();
     portENTER_CRITICAL(&s_save_mux);
-    s_saving    = false;
-    bool again  = s_save_again;
+    s_saving     = false;
+    bool again   = s_save_again;
     s_save_again = false;
     portEXIT_CRITICAL(&s_save_mux);
-    if (again) {
+    if (again || retry) {
         lock();
-        schedule_save_locked(SAVE_SOON_US);
+        schedule_save_locked(retry ? SAVE_SLOW : SAVE_SOON);
         unlock();
     }
     vTaskDelete(NULL);
@@ -154,35 +168,40 @@ static void save_due(void *arg) {
         s_saving = false;
         portEXIT_CRITICAL(&s_save_mux);
         lock();
-        schedule_save_locked(SAVE_SLOW_US);
+        schedule_save_locked(SAVE_SLOW);
         unlock();
     }
 }
 
-// Armed for delay_us from now, unless it is already due sooner
-static void schedule_save_locked(int64_t delay_us) {
+// Armed for 30 s (SLOW) or 3 s from now, but SLOW and SOON never sooner than SAVE_GAP_US after the last save began;
+// an earlier due time already armed stays (so a batch saves 30 s after its first change)
+static void schedule_save_locked(save_when_t when) {
     if (!s_storage || !s_save_timer) {
         return;
     }
-    int64_t due = esp_timer_get_time() + delay_us;
+    int64_t now = esp_timer_get_time();
+    int64_t due = now + (when == SAVE_SLOW ? SAVE_SLOW_US : SAVE_SOON_US);
+    if (when != SAVE_FORCE && s_save_began_us && due < s_save_began_us + SAVE_GAP_US) {
+        due = s_save_began_us + SAVE_GAP_US;
+    }
     if (s_save_due_us && s_save_due_us <= due) {
         return;
     }
     esp_timer_stop(s_save_timer); // ESP_ERR_INVALID_STATE when it is not running: fine
-    if (esp_timer_start_once(s_save_timer, (uint64_t)delay_us) == ESP_OK) {
+    if (esp_timer_start_once(s_save_timer, (uint64_t)(due - now)) == ESP_OK) {
         s_save_due_us = due;
     }
 }
 
 // The history changed: views read it again, the file follows
-static void changed_locked(bool soon) {
+static void changed_locked(save_when_t when) {
     atomic_store(&s_generation, s_ring->generation);
-    schedule_save_locked(soon ? SAVE_SOON_US : SAVE_SLOW_US);
+    schedule_save_locked(when);
 }
 
 // ---- loading --------------------------------------------------------------------------------------------------------
 
-// The file, its swap leftovers in the order a cut-short swap leaves them; the first whole one wins
+// The file or one of its swap leftovers; the first whole one wins
 static bool load_file(char const *path) {
     FILE *f = fopen(path, "rb");
     if (!f) {
@@ -199,7 +218,8 @@ static bool load_file(char const *path) {
 }
 
 static void load(void) {
-    char const *paths[] = {NOTIFY_FILE, NOTIFY_OLD, NOTIFY_TMP};
+    // A swap cut short leaves .old (the previous file) and .tmp (complete, newer): .tmp before .old
+    char const *paths[] = {NOTIFY_FILE, NOTIFY_TMP, NOTIFY_OLD};
     bool        loaded  = false;
     for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]) && !loaded; i++) {
         loaded = load_file(paths[i]);
@@ -249,31 +269,36 @@ void lichen_notify_start(bool storage_ok) {
 
 // ---- per-source switches --------------------------------------------------------------------------------------------
 
-// The switch of source, from the cache or NVS (default on)
-static bool source_on_locked(char const *source) {
+// The switch of source, from the cache, else from NVS (default on). The NVS read runs outside s_lock: a first notice
+// from a source must not hold every other task's notices behind a flash read.
+static bool source_on(char const *source) {
+    lock();
     nmute_state_t state = nmute_get(&s_mute, source);
-    if (state == NMUTE_UNKNOWN) {
-        char         key[NMUTE_KEY_CAP];
-        uint8_t      on = 1;
-        nvs_handle_t nvs;
-        if (nmute_key(source, key, sizeof(key)) && nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-            nvs_get_u8(nvs, key, &on);
-            nvs_close(nvs);
-        }
-        nmute_put(&s_mute, source, on != 0);
-        state = on ? NMUTE_ON : NMUTE_OFF;
+    unlock();
+    if (state != NMUTE_UNKNOWN) {
+        return state == NMUTE_ON;
     }
-    return state == NMUTE_ON;
+    char         key[NMUTE_KEY_CAP];
+    uint8_t      on = 1;
+    nvs_handle_t nvs;
+    if (nmute_key(source, key, sizeof(key)) && nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u8(nvs, key, &on);
+        nvs_close(nvs);
+    }
+    lock();
+    if (nmute_get(&s_mute, source) == NMUTE_UNKNOWN) { // a setter may have been quicker: its value wins
+        nmute_put(&s_mute, source, on != 0);
+    }
+    state = nmute_get(&s_mute, source);
+    unlock();
+    return state != NMUTE_OFF;
 }
 
 bool lichen_notify_source_enabled(char const *source) {
     if (!atomic_load(&s_started) || !source || !source[0]) {
         return true;
     }
-    lock();
-    bool on = source_on_locked(source);
-    unlock();
-    return on;
+    return source_on(source);
 }
 
 void lichen_notify_set_source_enabled(char const *source, bool on) {
@@ -282,7 +307,8 @@ void lichen_notify_set_source_enabled(char const *source, bool on) {
         return;
     }
     lock();
-    nmute_put(&s_mute, source, on);
+    nmute_put(&s_mute, source, on); // takes effect at once; NVS follows outside the lock
+    unlock();
     nvs_handle_t nvs;
     esp_err_t    err = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
@@ -295,7 +321,6 @@ void lichen_notify_set_source_enabled(char const *source, bool on) {
         }
         nvs_close(nvs);
     }
-    unlock();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "switch for %s not saved: %s", source, esp_err_to_name(err));
     }
@@ -315,18 +340,23 @@ static uint32_t key_hash(char const *source, char const *target) {
     return h;
 }
 
-// LN_ONCE_BOOT: true when (source, target) was raised before this boot; remembers it otherwise
-static bool seen_this_boot_locked(char const *source, char const *target) {
-    uint32_t h = key_hash(source, target);
+// LN_ONCE_BOOT: (source, target) was already raised this boot
+static bool seen_this_boot_locked(uint32_t h) {
     for (size_t i = 0; i < s_once_n; i++) {
         if (s_once[i] == h) {
             return true;
         }
     }
-    if (s_once_n < ONCE_SLOTS) {
-        s_once[s_once_n++] = h;
-    }
     return false;
+}
+
+// Remembered only once it made it into the history; a full table forgets its oldest
+static void remember_this_boot_locked(uint32_t h) {
+    s_once[s_once_next] = h;
+    s_once_next         = (s_once_next + 1) % ONCE_SLOTS;
+    if (s_once_n < ONCE_SLOTS) {
+        s_once_n++;
+    }
 }
 
 uint32_t lichen_notify_to(char const *source, ln_level_t level, char const *target, char const *title,
@@ -338,15 +368,23 @@ uint32_t lichen_notify_to(char const *source, ln_level_t level, char const *targ
     if (level > LN_ERROR) {
         level = LN_ERROR;
     }
+    if (strlen(source) > NR_SOURCE_CAP - 1) { // cut, it would never match itself again (coalescing, badges)
+        lock();
+        s_ring->dropped++;
+        unlock();
+        ESP_LOGW(TAG, "dropped \"%s\": source \"%s\" is longer than an app id", title ? title : "", source);
+        return 0;
+    }
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
     bool     clock  = s_clock_set && s_clock_set();
+    uint32_t once   = key_hash(source, target);
+    source_on(source); // fills the switch cache (an NVS read the first time) before the lock is taken
     lock();
-    source_on_locked(source);
     if (nmute_drop(&s_mute, source)) { // switched off in Settings › Notifications: no history, no badge
         unlock();
         return 0;
     }
-    if ((flags & LN_ONCE_BOOT) && seen_this_boot_locked(source, target)) {
+    if ((flags & LN_ONCE_BOOT) && seen_this_boot_locked(once)) {
         unlock();
         return 0;
     }
@@ -366,7 +404,11 @@ uint32_t lichen_notify_to(char const *source, ln_level_t level, char const *targ
     uint32_t     id      = 0;
     nr_outcome_t outcome = nr_add(s_ring, &n, &id);
     if (outcome != NR_DROPPED) {
-        changed_locked(level == LN_ERROR);
+        // Only a new error is worth an early save; one merged into an existing entry waits like the rest
+        changed_locked(outcome == NR_ADDED && level == LN_ERROR ? SAVE_SOON : SAVE_SLOW);
+        if (flags & LN_ONCE_BOOT) {
+            remember_this_boot_locked(once);
+        }
     }
     nrate_show_t show = nrate_show((uint8_t)level, flags & LN_SILENT, atomic_load(&s_dnd), within);
     unlock();
@@ -419,7 +461,7 @@ static void mark(char const *source, char const *target, uint32_t id, int upto) 
                : upto >= 0 ? nr_mark_read_upto(s_ring, (uint8_t)upto)
                            : nr_mark_read(s_ring, source, target);
     if (n) {
-        changed_locked(false);
+        changed_locked(SAVE_SLOW);
     }
     unlock();
 }
@@ -451,7 +493,7 @@ bool lichen_notify_remove(uint32_t id) {
     lock();
     bool removed = nr_remove(s_ring, id);
     if (removed) {
-        changed_locked(true);
+        changed_locked(SAVE_FORCE);
     }
     unlock();
     return removed;
@@ -463,7 +505,7 @@ void lichen_notify_clear_all(void) {
     }
     lock();
     nr_clear(s_ring);
-    changed_locked(true);
+    changed_locked(SAVE_FORCE);
     unlock();
 }
 

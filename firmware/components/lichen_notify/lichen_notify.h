@@ -12,6 +12,12 @@
 // (merged into an unread one of the same target when it can) but gets no toast. Do-not-disturb (Settings ›
 // Notifications) hides toasts and feedback; errors still toast, silently. Errors stay until read: the history drops
 // read entries first, then the oldest info, then warnings.
+//
+// The tile badge (lichen_badge.h) of an app that raises notices belongs to this service: it sets it to the app's
+// unread count, so that app must not also call lichen_badge_set for itself (MeshCore moves over in #50).
+//
+// Follow-up: source is taken on trust; binding it to the calling app (so one app can't post as another) needs the app
+// identity the OS does not track per task yet.
 
 #include <stdbool.h>
 #include <stddef.h>

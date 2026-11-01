@@ -25,7 +25,8 @@ static char const TAG[] = "sys_notices";
 #define POLL_MS        1000
 #define SETTLE_POLLS   3  // after home shows: the boot steps have all reported by then
 #define STORAGE_POLLS  60 // free space once a minute
-#define TASK_STACK     4096
+#define TASK_STACK     6144
+#define STACK_LOG_POLL 120 // the stack high-water mark is logged once, two minutes in
 #define BODY_CAP       120
 
 static void body_for(sysn_event_t e, sysn_snapshot_t const *s, sd_info_t const *sd, char *out, size_t cap) {
@@ -106,6 +107,9 @@ static void notices_task(void *arg) {
             body_for(events[i], &snap, &sd, body, sizeof(body));
             ESP_LOGW(TAG, "%s: %s", info.title, body);
             lichen_notify_to("lichen", (ln_level_t)info.level, info.target, info.title, body, info.flags);
+        }
+        if (poll == STACK_LOG_POLL) {
+            ESP_LOGW(TAG, "stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));
     }
