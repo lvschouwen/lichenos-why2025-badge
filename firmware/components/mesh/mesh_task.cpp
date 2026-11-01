@@ -212,6 +212,7 @@ static struct {
 } adv;
 
 static void advert_tick_locked(void);
+static void contacts_full_post(void);
 
 // The unread total over all chats, after the store changed (called under the mesh lock)
 static void tile_publish_unread(void) {
@@ -655,6 +656,7 @@ static void mesh_task(void *arg) {
         int64_t took_ms = (esp_timer_get_time() - started) / 1000;
         mesh_unlock();
         mesh_journal_flush(); // the card's I/O never under the mesh lock: the screens keep their snapshots meanwhile
+        contacts_full_post();
         if (mesh_notify_drain()) { // #50: notices posted after the unlock; a mode read or changed moves the badge
             mesh_lock();
             tile_publish_unread();
@@ -1284,12 +1286,19 @@ static void advert_tick_locked(void) {
     char const *why = clock_is_approximate() ? "the clock is only approximate"
                       : !meshcore_setup_done() ? "MeshCore is not set up yet"
                                                : advert_tx_locked(true);
-    portENTER_CRITICAL(&tile_mux);
+    static char const *logged_why;
     if (why) {
-        adv.next_epoch = epoch + interval * 60; // refused: skip to the next time, no retry spam
+        // Soft refusals (clock, setup, LoRa off, the gap) are tried again in a minute, a damaged identity waits a
+        // whole interval
+        uint32_t retry = advcfg_retry_at(epoch, interval, !ident_tx_allowed());
+        portENTER_CRITICAL(&tile_mux);
+        adv.next_epoch = retry;
+        portEXIT_CRITICAL(&tile_mux);
     }
-    portEXIT_CRITICAL(&tile_mux);
-    ESP_LOGW(TAG, "periodic advert (flood): %s", why ? why : "queued");
+    if (why != logged_why) { // once per change of reason, not once a minute
+        logged_why = why;
+        ESP_LOGW(TAG, "periodic advert (flood): %s", why ? why : "queued");
+    }
 }
 
 static bool send_advert_mode(bool flood) {
@@ -1409,10 +1418,20 @@ extern "C" char const *mesh_set_autoadd(advcfg_autoadd_t const *a) {
 
 // The table is full and a new node's advert was not added: one notice per boot would hide a second full table after
 // a clean-up, so it coalesces instead (an unread one gets a count). Under the mesh lock, from MyMesh's loop.
+// Only a flag here: the notice is posted after the unlock (contacts_full_post), as #50 does for its own.
+static bool contacts_full_pending;
+
 extern "C" void mesh_contacts_full(void) {
-    lichen_notify_to("meshcore", LN_WARN, "contacts-full", "Contacts full",
-                     "New nodes are not added. Remove contacts, or turn on Overwrite oldest in Auto-add.",
-                     LN_COALESCE);
+    __atomic_store_n(&contacts_full_pending, true, __ATOMIC_RELEASE);
+}
+
+// The mesh task, after the unlock (the notify service takes its own mutex and may read NVS)
+static void contacts_full_post(void) {
+    if (__atomic_exchange_n(&contacts_full_pending, false, __ATOMIC_ACQ_REL)) {
+        lichen_notify_to("meshcore", LN_WARN, "contacts-full", "Contacts full",
+                         "New nodes are not added. Remove contacts, or turn on Overwrite oldest in Auto-add.",
+                         LN_COALESCE);
+    }
 }
 
 extern "C" size_t mesh_channels_snapshot(char names[][MESH_CHANNEL_MAX + 1], size_t max) {

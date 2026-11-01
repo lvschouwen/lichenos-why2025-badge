@@ -22,6 +22,7 @@ extern "C" {
 #define ADVCFG_MIN_GAP_S 30
 // A periodic advert never goes out before this many seconds after the radio and clock came up
 #define ADVCFG_FIRST_DELAY_S 120
+#define ADVCFG_RETRY_S       60
 
 bool advcfg_interval_ok(uint32_t minutes); // 0 or within the limits
 // "off", or minutes (180), hours "6h", days "2d". NULL when it parsed into *minutes within the limits, else why not
@@ -40,6 +41,9 @@ uint32_t advcfg_next_in_s(uint32_t next_epoch, uint32_t now_epoch);
 // "in 3h", "in 12m", "soon" for a badge (cap >= 8); "" when next_in_s is UINT32_MAX
 void advcfg_next_badge(uint32_t next_in_s, char *out, size_t cap);
 // A manual or periodic advert may go now (the minimum gap since the last, in uptime seconds; 0 = none yet)
+// When to try the periodic advert again after a refusal: a minute on (ADVCFG_RETRY_S) for the soft reasons (clock not
+// set or approximate, not set up, LoRa off, the minimum gap), a whole interval for a hard one (damaged identity)
+uint32_t advcfg_retry_at(uint32_t now_epoch, uint32_t interval_min, bool hard);
 bool advcfg_gap_ok(uint32_t last_s, uint32_t now_s);
 
 // ---- location ----------------------------------------------------------------------------------------------------

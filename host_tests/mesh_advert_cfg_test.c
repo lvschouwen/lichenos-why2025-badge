@@ -73,6 +73,8 @@ static void test_schedule(void) {
     advcfg_next_badge(3 * 86400, b, sizeof(b));
     CHECK(strcmp(b, "in 3d") == 0);
     CHECK(strlen(b) < 8); // MESH_GRID_BADGE_MAX
+    CHECK(advcfg_retry_at(1000, 720, false) == 1000 + ADVCFG_RETRY_S); // soft: again in a minute
+    CHECK(advcfg_retry_at(1000, 720, true) == 1000 + 720 * 60);        // hard: next interval
     CHECK(advcfg_gap_ok(0, 5) && !advcfg_gap_ok(100, 129) && advcfg_gap_ok(100, 130));
 }
 

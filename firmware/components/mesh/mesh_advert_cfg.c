@@ -112,6 +112,10 @@ void advcfg_next_badge(uint32_t next_in_s, char *out, size_t cap) {
     }
 }
 
+uint32_t advcfg_retry_at(uint32_t now_epoch, uint32_t interval_min, bool hard) {
+    return now_epoch + (hard ? interval_min * 60 : ADVCFG_RETRY_S);
+}
+
 bool advcfg_gap_ok(uint32_t last_s, uint32_t now_s) {
     return last_s == 0 || now_s - last_s >= ADVCFG_MIN_GAP_S;
 }
