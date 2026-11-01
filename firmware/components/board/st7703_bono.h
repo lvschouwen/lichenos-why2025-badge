@@ -8,13 +8,13 @@
  * @brief MIPI DPI configuration structure
  *
  * @note  refresh_rate = (dpi_clock_freq_mhz * 1000000) / (h_res + hsync_pulse_width + hsync_back_porch +
- * hsync_front_porch) / (v_res + vsync_pulse_width + vsync_back_porch + vsync_front_porch) 720+60+120+106 = 1006
+ * hsync_front_porch) / (v_res + vsync_pulse_width + vsync_back_porch + vsync_front_porch) 720+60+120+106 = 1006, x 764 lines: 36 MHz = 46.8 Hz
  * 720+4+20+20 = 764
  *
  */
 #define ST7703_720_720_PANEL_60HZ_DPI_CONFIG()                                                                         \
     {.dpi_clk_src        = MIPI_DSI_DPI_CLK_SRC_DEFAULT,                                                               \
-     .dpi_clock_freq_mhz = 47,                                                                                         \
+     .dpi_clock_freq_mhz = 36, /* ~47 Hz; #95: 47 MHz (61 Hz) cost 8-12 % PSRAM bandwidth to scan-out for no visible gain, Lucas prefers the 36 MHz picture */                                                                                         \
      .virtual_channel    = 0,                                                                                          \
      .in_color_format    = LCD_COLOR_FMT_RGB565,                       \
      .num_fbs            = 1,                                                                       \

@@ -39,7 +39,7 @@ static lv_obj_t *tab_hop; // an empty second focusable: Tab moves the focus onto
 
 #define HINT_CHANNEL "Enter: send    /: search    Esc: back"
 #define HINT_DM      "Enter: send    Tab: retry a failed one    /: search    Esc: back"
-#define HINT_SEARCH  "Up/Down: older/newer match    Enter: done    Esc: cancel"
+#define HINT_SEARCH  "Up/Down: match    Enter: done    Esc: cancel" // fits one line at 720 px
 #define HIT_BORDER_W 4 // on every row, shown only on the current hit: a border that came and went would move the text
 
 static lv_obj_t   *list, *ta, *counter, *note;
