@@ -49,6 +49,7 @@ static volatile bool        on;
 static char const *volatile why_off = "not started";
 static volatile uint32_t    log_bytes, log_records, flushes, last_flush_s, last_flush_ms, write_errors, compactions;
 static volatile uint32_t    resyncs, auth_failures;
+static volatile uint32_t    boot_replay_ms, boot_records, boot_bytes; // hardware vs portable crypto on the bench
 static volatile bool        compact_asked; // the mesh task compacts before its next write (boot asks when needed)
 
 static void turn_off(char const *why) {
@@ -266,8 +267,7 @@ static char const *journal_files(work_t *w, int *err) {
 // A new, empty journal: its HEAD with a new salt (the keys the writer uses from now on)
 static char const *journal_fresh(int *err) {
     uint8_t head[MESH_HIST_REC_MAX];
-    mesh_hist_crypt_new(&wcrypt);
-    size_t n  = mesh_hist_encode_head(&wcrypt, head, sizeof(head));
+    size_t n  = mesh_hist_crypt_new(&wcrypt) ? mesh_hist_encode_head(&wcrypt, head, sizeof(head)) : 0;
     FILE  *f  = fopen(LOG_PATH, "wb");
     bool   ok = f && n && fwrite(head, 1, n, f) == n;
     *err      = ok ? 0 : errno;
@@ -303,8 +303,15 @@ static char const *journal_load(work_t *w, int *err) {
     }
     boot_ctx_t       b = {.table = &w->table};
     mesh_hist_scan_t scan;
+    int64_t          started = esp_timer_get_time();
     if (!scan_file(LOG_PATH, w, &wcrypt, boot_rec, &b, &scan, err)) {
         return "journal read failed";
+    }
+    boot_replay_ms = (uint32_t)((esp_timer_get_time() - started) / 1000);
+    boot_records   = scan.records;
+    boot_bytes     = clamp32((uint64_t)st.st_size);
+    if (scan.crypto_error) {
+        return "journal crypto failed"; // no verdict on the journal: it stays as it is
     }
     if (scan.unreadable) {
         return journal_aside(err);
@@ -351,10 +358,22 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), ui
     keep_n    = keep;
     lock_fn   = lock;
     unlock_fn = unlock;
+    // The crypto first: the badge's hardware path must give the portable code's answers, or journals written by one
+    // would be unreadable by the other
+    int64_t t0   = esp_timer_get_time();
+    int     fail = mh_selftest();
+    ESP_LOGW(TAG, "journal crypto %s: self-test %s in %lld us", mh_backend(), fail ? "FAILED" : "passed",
+             (long long)(esp_timer_get_time() - t0));
     uint8_t root[32];
-    mesh_hist_key(root, prv, prv_len);
-    mesh_hist_crypt_init(&wcrypt, root, random_fill);
+    bool    keyed = !fail && mesh_hist_key(root, prv, prv_len);
+    if (keyed) {
+        mesh_hist_crypt_init(&wcrypt, root, random_fill);
+    }
     mh_wipe(root, sizeof(root));
+    if (!keyed) {
+        turn_off("journal crypto failed its self-test");
+        return;
+    }
     if (!boot_buffers()) {
         turn_off("no memory");
         return;
@@ -598,6 +617,8 @@ void mesh_journal_console(char const *args) {
                   "dropped %lu",
                   (unsigned)pending, (unsigned long)pending_records, (unsigned long)(pending ? now - oldest_s : 0),
                   (unsigned)out_len, (unsigned)held, (unsigned long)dropped);
+    console_reply("boot replay %lu ms: %lu records, %lu bytes, %s crypto", (unsigned long)boot_replay_ms,
+                  (unsigned long)boot_records, (unsigned long)boot_bytes, mh_backend());
     console_reply("flushes %lu, last %s (%lu ms) | write errors %lu | compactions %lu%s | auth failures %lu",
                   (unsigned long)flushes, last, (unsigned long)last_flush_ms, (unsigned long)write_errors,
                   (unsigned long)compactions, compact_asked ? " (one due)" : "", (unsigned long)auth_failures);

@@ -55,17 +55,18 @@ typedef enum { MESH_HIST_CHAT = 1, MESH_HIST_MSG = 2, MESH_HIST_READ = 3, MESH_H
 typedef struct {
     uint8_t root[32];
     bool    have_root, open;
+    bool    error; // a primitive failed (hardware crypto, out of key slots): no verdict on any journal
     uint8_t salt[MESH_HIST_SALT];
     uint8_t enc[16], mac[32];
     void (*rand)(void *buf, size_t len); // nonces and salts
 } mesh_hist_crypt_t;
 
 // root = SHA-256("lichen-journal-v1" | prv)
-void mesh_hist_key(uint8_t root[32], uint8_t const *prv, size_t prv_len);
+bool mesh_hist_key(uint8_t root[32], uint8_t const *prv, size_t prv_len);
 // A key holder for root (copied; the caller wipes its own copy), not open yet
 void mesh_hist_crypt_init(mesh_hist_crypt_t *c, uint8_t const root[32], void (*rand)(void *buf, size_t len));
 // A new journal: a random salt and its keys
-void mesh_hist_crypt_new(mesh_hist_crypt_t *c);
+bool mesh_hist_crypt_new(mesh_hist_crypt_t *c);
 // A journal's HEAD: true (and open) when its check value is the one root gives for this salt
 bool mesh_hist_crypt_open(mesh_hist_crypt_t *c, uint8_t const salt[MESH_HIST_SALT],
                           uint8_t const check[MESH_HIST_CHECK]);
@@ -119,6 +120,7 @@ typedef struct {
     bool     head;          // a HEAD opened the keys
     bool     unreadable;    // the first record is not a HEAD, or its check does not match this node's key: stopped
     uint32_t auth_failures; // records whose tag did not match: dropped
+    bool     crypto_error;  // the HEAD could not be checked (a primitive failed): stopped, no verdict
 } mesh_hist_scan_t;
 
 // Decodes the journal from the start, record by record, to its end. A bad record (a torn write, a flipped bit) does

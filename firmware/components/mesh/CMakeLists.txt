@@ -21,7 +21,7 @@ set(COMPANION_SRCS
     ${MC}/src/helpers/IdentityStore.cpp ${MC}/src/helpers/RegionMap.cpp ${MC}/src/helpers/TransportKeyStore.cpp
     ${MC}/examples/companion_radio/MyMesh.cpp ${MC}/examples/companion_radio/DataStore.cpp)
 idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "lora_radio.cpp" "mesh_store.c" "lora_airtime.c"
-                            "mesh_hist.c" "mesh_hist_crypto.cpp" "mesh_journal.c" "mesh_format.c" "mesh_contact_fmt.c" "mesh_tile.c"
+                            "mesh_hist.c" "mesh_hist_crypto.cpp" "mesh_hist_selftest.c" "mesh_journal.c" "mesh_format.c" "mesh_contact_fmt.c" "mesh_tile.c"
                             "meshcore_hdr.c" "meshcore_app.c" "meshcore_chat.c" "meshcore_contact.c" "mesh_chat.c" "meshcore_settings.c" "radio_presets.c" "radio_filter.c" "radio_confirm.c" "channel_input.c" "mc_first.c"
                             "../../../shared/arduino_shim/arduino_shim.cpp"
                             "../../../shared/arduino_shim/fs_shim.cpp" ${THIRD_PARTY_SRCS} ${COMPANION_SRCS}
@@ -29,7 +29,7 @@ idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh
                        PRIV_INCLUDE_DIRS "companion" ${MC}/src ${MC}/examples/companion_radio ${MC}/lib/ed25519 ${CR}
                                          "../../../shared/arduino_shim" "../../../third_party/base64/src"
                        PRIV_REQUIRES lichen_clock lora fw_console nvs_flash esp_timer lichen_random freertos
-                                     esp_system heap lichen_api esp_lvgl_port sdcard)
+                                     esp_system heap lichen_api esp_lvgl_port sdcard mbedtls)
 # MeshCore's sizes on the badge: its tables live in PSRAM (mesh_task.cpp), so far beyond MeshCore's defaults
 target_compile_definitions(${COMPONENT_LIB} PRIVATE MAX_CONTACTS=1000 MAX_GROUP_CHANNELS=40 OFFLINE_QUEUE_SIZE=256
                            LORA_FREQ=869.618 LORA_BW=62.5 LORA_SF=7 LORA_CR=5 LORA_TX_POWER=22 MAX_LORA_TX_POWER=22)
@@ -37,6 +37,7 @@ set_source_files_properties(${COMPANION_SRCS} "mesh_task.cpp" "mesh_link.cpp" PR
 # The app's factory reset must not erase NVS (Wi-Fi credentials): see mesh_nvs_flash_erase() in mesh_task.cpp
 set_property(SOURCE ${MC}/examples/companion_radio/DataStore.cpp APPEND PROPERTY COMPILE_DEFINITIONS
              nvs_flash_erase=mesh_nvs_flash_erase)
+# The journal's crypto (#98): PSA Crypto on the badge (hardware AES/SHA), rweather's portable code only in the host tests
 # Third-party code is built as is
 set_source_files_properties(${THIRD_PARTY_SRCS} ${COMPANION_SRCS} PROPERTIES COMPILE_OPTIONS "-w")
 # MeshCore's headers initialise members out of declaration order and memset() non-trivial structs

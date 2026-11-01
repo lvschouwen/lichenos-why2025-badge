@@ -173,8 +173,8 @@ static void r_key(rd_t *r, mesh_chat_key_t *k) {
 
 static char const KEY_LABEL[] = "lichen-journal-v1";
 
-void mesh_hist_key(uint8_t root[32], uint8_t const *prv, size_t prv_len) {
-    mh_sha256(root, KEY_LABEL, sizeof(KEY_LABEL) - 1, prv, prv_len);
+bool mesh_hist_key(uint8_t root[32], uint8_t const *prv, size_t prv_len) {
+    return mh_sha256(root, KEY_LABEL, sizeof(KEY_LABEL) - 1, prv, prv_len);
 }
 
 void mesh_hist_crypt_init(mesh_hist_crypt_t *c, uint8_t const root[32], void (*rand)(void *buf, size_t len)) {
@@ -184,27 +184,30 @@ void mesh_hist_crypt_init(mesh_hist_crypt_t *c, uint8_t const root[32], void (*r
     c->rand      = rand;
 }
 
-static void check_value(mesh_hist_crypt_t const *c, uint8_t const salt[MESH_HIST_SALT], uint8_t out[MESH_HIST_CHECK]) {
+static bool check_value(mesh_hist_crypt_t const *c, uint8_t const salt[MESH_HIST_SALT], uint8_t out[MESH_HIST_CHECK]) {
     uint8_t mac[32];
-    mh_hmac(mac, c->root, sizeof(c->root), "check", 5, salt, MESH_HIST_SALT, NULL, 0);
+    bool    ok = mh_hmac(mac, c->root, sizeof(c->root), "check", 5, salt, MESH_HIST_SALT, NULL, 0);
     memcpy(out, mac, MESH_HIST_CHECK);
     mh_wipe(mac, sizeof(mac));
+    return ok;
 }
 
-static void file_keys(mesh_hist_crypt_t *c, uint8_t const salt[MESH_HIST_SALT]) {
+static bool file_keys(mesh_hist_crypt_t *c, uint8_t const salt[MESH_HIST_SALT]) {
     uint8_t k[32];
     memcpy(c->salt, salt, MESH_HIST_SALT);
-    mh_hmac(k, c->root, sizeof(c->root), "enc", 3, salt, MESH_HIST_SALT, NULL, 0);
+    bool ok = mh_hmac(k, c->root, sizeof(c->root), "enc", 3, salt, MESH_HIST_SALT, NULL, 0);
     memcpy(c->enc, k, sizeof(c->enc));
-    mh_hmac(c->mac, c->root, sizeof(c->root), "mac", 3, salt, MESH_HIST_SALT, NULL, 0);
+    ok = mh_hmac(c->mac, c->root, sizeof(c->root), "mac", 3, salt, MESH_HIST_SALT, NULL, 0) && ok;
     mh_wipe(k, sizeof(k));
-    c->open = true;
+    c->open = ok;
+    c->error |= !ok;
+    return ok;
 }
 
-void mesh_hist_crypt_new(mesh_hist_crypt_t *c) {
+bool mesh_hist_crypt_new(mesh_hist_crypt_t *c) {
     uint8_t salt[MESH_HIST_SALT];
     c->rand(salt, sizeof(salt));
-    file_keys(c, salt);
+    return file_keys(c, salt);
 }
 
 static bool same16(uint8_t const *a, uint8_t const *b) { // constant time
@@ -222,12 +225,14 @@ bool mesh_hist_crypt_open(mesh_hist_crypt_t *c, uint8_t const salt[MESH_HIST_SAL
     if (!c->have_root) {
         return false;
     }
-    check_value(c, salt, want);
+    if (!check_value(c, salt, want)) {
+        c->error = true; // the crypto failed: says nothing about the journal
+        return false;
+    }
     if (!same16(want, check)) {
         return false;
     }
-    file_keys(c, salt);
-    return true;
+    return file_keys(c, salt);
 }
 
 // ---- codec ---------------------------------------------------------------------------------------------------------
@@ -250,7 +255,9 @@ size_t mesh_hist_encode_head(mesh_hist_crypt_t const *c, uint8_t *out, size_t ca
     }
     out[MESH_HIST_HDR] = MESH_HIST_VERSION;
     memcpy(out + MESH_HIST_HDR + 1, c->salt, MESH_HIST_SALT);
-    check_value(c, c->salt, out + MESH_HIST_HDR + 1 + MESH_HIST_SALT);
+    if (!check_value(c, c->salt, out + MESH_HIST_HDR + 1 + MESH_HIST_SALT)) {
+        return 0;
+    }
     return frame(out, MESH_HIST_HEAD, plen, 0);
 }
 
@@ -281,13 +288,14 @@ static size_t plain_payload(mesh_hist_rec_t const *rec, uint8_t *p, size_t cap) 
 }
 
 // The tag over type | seq | nonce | ciphertext (the payload up to the tag)
-static void record_tag(mesh_hist_crypt_t const *c, uint8_t type, uint32_t seq, uint8_t const *p, size_t n,
+static bool record_tag(mesh_hist_crypt_t const *c, uint8_t type, uint32_t seq, uint8_t const *p, size_t n,
                        uint8_t tag[MESH_HIST_TAG]) {
     uint8_t ad[5], mac[32];
     ad[0] = type;
     put32(ad + 1, seq);
-    mh_hmac(mac, c->mac, sizeof(c->mac), ad, sizeof(ad), p, n, NULL, 0);
+    bool ok = mh_hmac(mac, c->mac, sizeof(c->mac), ad, sizeof(ad), p, n, NULL, 0);
     memcpy(tag, mac, MESH_HIST_TAG);
+    return ok;
 }
 
 static void record_iv(uint32_t seq, uint8_t const nonce[MESH_HIST_NONCE], uint8_t iv[12]) {
@@ -309,8 +317,12 @@ size_t mesh_hist_encode(mesh_hist_rec_t const *rec, mesh_hist_crypt_t const *c, 
     uint8_t iv[12];
     c->rand(p, MESH_HIST_NONCE);
     record_iv(rec->seq, p, iv);
-    mh_aes128_ctr(c->enc, iv, p + MESH_HIST_NONCE, n);
-    record_tag(c, rec->type, rec->seq, p, MESH_HIST_NONCE + n, p + MESH_HIST_NONCE + n);
+    // A failed cipher or MAC never lets a record out: plaintext must not reach the card
+    if (!mh_aes128_ctr(c->enc, iv, p + MESH_HIST_NONCE, n) ||
+        !record_tag(c, rec->type, rec->seq, p, MESH_HIST_NONCE + n, p + MESH_HIST_NONCE + n)) {
+        mh_wipe(out, MESH_HIST_HDR + MESH_HIST_NONCE + n + MESH_HIST_TAG);
+        return 0;
+    }
     return frame(out, rec->type, MESH_HIST_NONCE + n + MESH_HIST_TAG, rec->seq);
 }
 
@@ -346,14 +358,12 @@ static mesh_hist_dec_t decrypt(uint8_t const *p, size_t plen, mesh_hist_crypt_t 
     }
     size_t  n = plen - MESH_HIST_NONCE - MESH_HIST_TAG;
     uint8_t tag[MESH_HIST_TAG], iv[12], plain[MESH_HIST_REC_MAX];
-    record_tag(c, rec->type, rec->seq, p, MESH_HIST_NONCE + n, tag);
-    if (!same16(tag, p + MESH_HIST_NONCE + n)) {
+    if (!record_tag(c, rec->type, rec->seq, p, MESH_HIST_NONCE + n, tag) || !same16(tag, p + MESH_HIST_NONCE + n)) {
         return MESH_HIST_AUTH;
     }
     memcpy(plain, p + MESH_HIST_NONCE, n);
     record_iv(rec->seq, p, iv);
-    mh_aes128_ctr(c->enc, iv, plain, n);
-    mesh_hist_dec_t d = parse_plain(plain, n, rec);
+    mesh_hist_dec_t d = mh_aes128_ctr(c->enc, iv, plain, n) ? parse_plain(plain, n, rec) : MESH_HIST_AUTH;
     mh_wipe(plain, n);
     return d;
 }
@@ -429,7 +439,11 @@ static bool scan_good(mesh_hist_scan_t *out, mesh_hist_dec_t d, mesh_hist_rec_t 
                       uint8_t const *raw, size_t used, mesh_hist_rec_fn on_rec, void *ctx) {
     if (rec->type == MESH_HIST_HEAD && d == MESH_HIST_OK) {
         if (!c || !mesh_hist_crypt_open(c, rec->salt, rec->check)) {
-            out->unreadable = true; // another node's journal, or one from before a new identity
+            if (c && c->error) {
+                out->crypto_error = true; // not the journal's fault: never moved aside for this
+            } else {
+                out->unreadable = true; // another node's journal, or one from before a new identity
+            }
             return false;
         }
         out->head = true;

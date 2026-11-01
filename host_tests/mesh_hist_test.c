@@ -681,6 +681,10 @@ static bool has_bytes(uint8_t const *hay, size_t n, char const *needle) {
 
 // The encryption (#98)
 static void crypto_checks(void) {
+    // Known answers (FIPS 180-2, RFC 4231, NIST SP 800-38A F.5.1, ours): the badge runs the same at boot on its
+    // hardware path, so the two implementations cannot drift apart unnoticed
+    CHECK(mh_selftest() == 0);
+    CHECK(strcmp(mh_backend(), "portable") == 0);
     // Key derivation: SHA-256("lichen-journal-v1" | prv), prv = 00 01 .. 3f (python hashlib)
     static uint8_t const KEY_VECTOR[32] = {0x0f, 0x23, 0x66, 0x80, 0x7d, 0x39, 0x6f, 0x7f, 0x94, 0x22, 0x30,
                                            0x1e, 0x93, 0x58, 0x8e, 0xff, 0x7b, 0xa3, 0x5e, 0xdb, 0x7b, 0x42,
