@@ -16,17 +16,22 @@ typedef struct {
     uint32_t total_ms;
     bool     decided; // a result other than DLG_WAIT was handed out: no second one
     bool     careful; // dlg_countdown_start_careful
+    bool     enter_up; // careful: Enter was seen released since the last Enter press (dlg_countdown_enter_up)
 } dlg_countdown_t;
 
-// A careful dialog arms Enter only this long after it opened, so an Enter held or repeating from the screen before
-// never answers it
+// A careful dialog takes Enter only as a fresh press: one that comes after a release of Enter, and no sooner than this
+// after it opened. So neither an Enter held or repeating from the screen before, nor one Enter press running on into
+// the next careful dialog, ever answers it.
 #define DLG_CAREFUL_ARM_MS 1000
 
 void         dlg_countdown_start(dlg_countdown_t *d, uint32_t now_ms, uint32_t seconds);
 // For a question whose yes cannot be undone (Settings > SD card > Format, #99): the time running out cancels, and
-// Enter counts only from DLG_CAREFUL_ARM_MS on
+// Enter counts only as a fresh press (see DLG_CAREFUL_ARM_MS). It starts with Enter not seen released.
 void         dlg_countdown_start_careful(dlg_countdown_t *d, uint32_t now_ms, uint32_t seconds);
-// A key press: Enter confirms, Esc cancels, any other key does nothing. At most one decision per countdown.
+// Enter is up: the next Enter press is a fresh one
+void         dlg_countdown_enter_up(dlg_countdown_t *d);
+// A key press: Enter confirms, Esc cancels, any other key does nothing. At most one decision per countdown. In a
+// careful countdown every Enter press, also an ignored one, uses up the release seen before it.
 dlg_result_t dlg_countdown_key(dlg_countdown_t *d, dlg_key_t key, uint32_t now_ms);
 // Call regularly: DLG_CONFIRM once the time is up (DLG_CANCEL when careful), once
 dlg_result_t dlg_countdown_tick(dlg_countdown_t *d, uint32_t now_ms);

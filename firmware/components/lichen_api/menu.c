@@ -248,6 +248,12 @@ void menu_set_value(lv_obj_t *row, char const *value) {
     }
 }
 
+void menu_set_label(lv_obj_t *row, char const *label) {
+    if (row && lv_obj_get_user_data(row)) {
+        lv_label_set_text(lv_obj_get_child(row, 0), label); // add_row: the label is the row's first child
+    }
+}
+
 void menu_focus_row(lv_obj_t *menu, int index) {
     uint32_t n = lv_obj_get_child_count(menu);
     int      k = 0;

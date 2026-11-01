@@ -5,6 +5,11 @@ void dlg_countdown_start(dlg_countdown_t *d, uint32_t now_ms, uint32_t seconds) 
     d->total_ms = seconds * 1000u;
     d->decided  = false;
     d->careful  = false;
+    d->enter_up = false;
+}
+
+void dlg_countdown_enter_up(dlg_countdown_t *d) {
+    d->enter_up = true;
 }
 
 void dlg_countdown_start_careful(dlg_countdown_t *d, uint32_t now_ms, uint32_t seconds) {
@@ -23,8 +28,12 @@ static dlg_result_t decide(dlg_countdown_t *d, dlg_result_t r) {
 dlg_result_t dlg_countdown_key(dlg_countdown_t *d, dlg_key_t key, uint32_t now_ms) {
     switch (key) {
     case DLG_KEY_ENTER:
-        if (d->careful && now_ms - d->start_ms < DLG_CAREFUL_ARM_MS) {
-            return DLG_WAIT;
+        if (d->careful) {
+            bool fresh  = d->enter_up && now_ms - d->start_ms >= DLG_CAREFUL_ARM_MS;
+            d->enter_up = false;
+            if (!fresh) {
+                return DLG_WAIT;
+            }
         }
         return decide(d, DLG_CONFIRM);
     case DLG_KEY_ESC:

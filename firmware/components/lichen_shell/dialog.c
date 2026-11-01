@@ -110,6 +110,12 @@ static void on_key(lv_event_t *e) {
     }
 }
 
+// LVGL sends RELEASED to the focused object when Enter goes up (the keyboard driver reports every key's release)
+static void on_released(lv_event_t *e) {
+    (void)e;
+    dlg_countdown_enter_up(&countdown);
+}
+
 static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color) {
     lv_obj_t *label = lv_label_create(parent);
     lv_obj_set_width(label, LV_PCT(100));
@@ -155,6 +161,7 @@ static void build(void) {
     group = lv_group_create();
     lv_group_add_obj(group, backdrop);
     lv_obj_add_event_cb(backdrop, on_key, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(backdrop, on_released, LV_EVENT_RELEASED, NULL);
     timer = lv_timer_create(on_tick, TICK_MS, NULL);
     if (shown.careful) {
         dlg_countdown_start_careful(&countdown, now_ms(), shown.seconds);
@@ -163,6 +170,9 @@ static void build(void) {
     }
     set_message();
     shell_refocus();
+    // shell_refocus made the keypad wait for a release: LVGL drops every press until the keys are up, so the first
+    // Enter this dialog gets is a fresh press, even when the release itself was swallowed by that wait
+    dlg_countdown_enter_up(&countdown);
 }
 
 // Makes the screen match the wanted state

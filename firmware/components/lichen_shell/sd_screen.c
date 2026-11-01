@@ -13,6 +13,7 @@
 #include "shell_parts.h"
 #include "theme.h"
 
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -20,12 +21,22 @@
 static char const TAG[] = "sdpage";
 
 #define SCREEN_SD   106
-#define JOB_STACK   4096 // "fw sd format" runs on the console's 4 KB task; f_mkfs's work buffer is on the heap
+#define JOB_STACK   6144 // "fw sd format" gets by on the console's 4 KB; the job logs its real margin
 #define REFRESH_MS  1000
 #define ASK_SECONDS 20
 
+// The job's answer: JOB_PENDING until the task stores ok (0/1). The task also queues job_done; the page's 1 s refresh
+// collects it too, so a failed lv_async_call never leaves the page saying "Formatting..." for good.
+#define JOB_PENDING (-1)
+static atomic_int job_outcome = JOB_PENDING;
+
+// The format questions (#99): our dialog may be replaced by another one (the C6's) and then never answers. Refresh
+// sees the dialog layer go empty while we still wait (once the other dialog is gone too) and calls that a cancel.
+typedef enum { ASK_NONE, ASK_REQUESTED, ASK_SHOWN } ask_t;
+
 // LVGL task only. The job and its result outlive the page: leaving during a format does not stop it.
 static sds_job_t job;
+static ask_t     asking;
 static char      result[64];
 static struct {
     lv_obj_t *status, *mount, *format, *result;
@@ -50,7 +61,7 @@ static void refresh(void) {
     set_label(page.status, status);
     sds_actions_t a = sds_actions(info.state, job);
     if (a.mount_label != shown.mount_label) {
-        lv_label_set_text(lv_obj_get_child(page.mount, 0), a.mount_label); // a menu row is [label, value]
+        menu_set_label(page.mount, a.mount_label);
     }
     if (a.mount_value != shown.mount_value) {
         menu_set_value(page.mount, a.mount_value);
@@ -69,12 +80,22 @@ static sds_actions_t actions_now(sd_info_t *info) {
 
 // ---- the job, off the LVGL task ----------------------------------------------------------------------------------
 
-static void job_done(void *arg) {
+// From job_done or the refresh timer, whichever comes first; the other finds nothing
+static void job_collect(void) {
+    int outcome = atomic_exchange(&job_outcome, JOB_PENDING);
+    if (outcome == JOB_PENDING || job == SDS_IDLE) {
+        return;
+    }
     sd_info_t info;
     sd_info(&info);
-    sds_result(job, (bool)(intptr_t)arg, &info, result, sizeof(result));
+    sds_result(job, outcome != 0, &info, result, sizeof(result));
     ESP_LOGW(TAG, "%s", result);
     job = SDS_IDLE;
+}
+
+static void job_done(void *arg) {
+    (void)arg;
+    job_collect();
     refresh();
 }
 
@@ -88,9 +109,11 @@ static void job_task(void *arg) {
         break;
     default: ok = sd_mount(); break;
     }
+    ESP_LOGW(TAG, "job stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    atomic_store(&job_outcome, ok ? 1 : 0);
     // lv_async_call is not thread safe: take the LVGL lock like the shell does
     lvgl_port_lock(0);
-    lv_async_call(job_done, (void *)(intptr_t)ok);
+    lv_async_call(job_done, NULL);
     lvgl_port_unlock();
     vTaskDelete(NULL);
 }
@@ -101,6 +124,7 @@ static void job_start(sds_job_t kind) {
     }
     job       = kind;
     result[0] = '\0';
+    atomic_store(&job_outcome, JOB_PENDING);
     if (xTaskCreatePinnedToCore(job_task, "sdjob", JOB_STACK, (void *)(intptr_t)kind, 4, NULL, 0) != pdPASS) {
         job = SDS_IDLE;
         snprintf(result, sizeof(result), "Not started: out of memory");
@@ -120,8 +144,25 @@ static void on_mount(void *arg) {
 }
 
 static void format_cancelled(void) {
+    asking = ASK_NONE;
     snprintf(result, sizeof(result), "Format cancelled");
     refresh();
+}
+
+// Our question went away without an answer (another dialog took its place): no format
+static void ask_check(void) {
+    bool open = shell_dialog_group() != NULL;
+    if (asking == ASK_REQUESTED && open) {
+        asking = ASK_SHOWN;
+    } else if (asking == ASK_SHOWN && !open) {
+        ESP_LOGW(TAG, "format question gone without an answer");
+        format_cancelled();
+    }
+}
+
+static bool ask(shell_dialog_t const *d, shell_dialog_fn done) {
+    asking = ASK_REQUESTED;
+    return shell_dialog_countdown(d, done);
 }
 
 static void format_second_answer(bool yes) {
@@ -130,6 +171,7 @@ static void format_second_answer(bool yes) {
         format_cancelled();
         return;
     }
+    asking = ASK_NONE;
     job_start(SDS_FORMATTING);
 }
 
@@ -142,7 +184,7 @@ static void format_first_answer(bool yes) {
         .seconds      = ASK_SECONDS,
         .careful      = true,
     };
-    if (!yes || !shell_dialog_countdown(&d, format_second_answer)) {
+    if (!yes || !ask(&d, format_second_answer)) {
         format_cancelled();
     }
 }
@@ -158,7 +200,7 @@ static void on_format(void *arg) {
         .seconds      = ASK_SECONDS,
         .careful      = true,
     };
-    if (actions_now(&info).format_enabled && !shell_dialog_countdown(&d, format_first_answer)) {
+    if (actions_now(&info).format_enabled && !ask(&d, format_first_answer)) {
         format_cancelled();
     }
 }
@@ -167,6 +209,8 @@ static void on_format(void *arg) {
 
 static void on_refresh(lv_timer_t *t) {
     (void)t;
+    job_collect();
+    ask_check();
     refresh();
 }
 
@@ -187,9 +231,11 @@ static lv_obj_t *build_sd(void) {
     lv_obj_set_style_text_color(page.result, lv_color_hex(THEME_AMBER), 0);
     menu_note(menu, "Apps' files: " SD_LICHEN_DIR);
     menu_note(menu, "No card detect: after inserting a card, mount it here.");
+    job_collect(); // a job that ended while the page was closed and its lv_async_call failed
     if (job == SDS_IDLE) {
         result[0] = '\0'; // an old outcome is news no more
     }
+    asking = ASK_NONE; // the dialog layer is modal: no question of ours can be open while the page is built
     refresh();
     lv_obj_add_event_cb(screen, on_page_delete, LV_EVENT_DELETE, lv_timer_create(on_refresh, REFRESH_MS, NULL));
     return screen;

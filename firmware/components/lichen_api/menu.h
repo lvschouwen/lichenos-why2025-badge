@@ -15,6 +15,8 @@ lv_obj_t *menu_add_slider(lv_obj_t *menu, char const *label, int min, int max, i
 // A dimmed line that cannot be selected: a section heading or a note
 lv_obj_t *menu_note(lv_obj_t *menu, char const *text);
 void      menu_set_value(lv_obj_t *row, char const *value);
+// A row's label, for a row whose action follows a state (Mount / Unmount)
+void      menu_set_label(lv_obj_t *row, char const *label);
 // Moves the selection to the index-th selectable row (counting menu_add and menu_add_slider rows only)
 void      menu_focus_row(lv_obj_t *menu, int index);
 // Keys no row uses (printable characters and Backspace) go to fn(key, arg),

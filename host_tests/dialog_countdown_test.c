@@ -56,7 +56,9 @@ static void time_wraps(void) {
 static void careful_runs_out_into_cancel(void) {
     dlg_countdown_t d;
     dlg_countdown_start_careful(&d, 1000, 15);
+    dlg_countdown_enter_up(&d);
     CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 1000) == DLG_WAIT);
+    dlg_countdown_enter_up(&d);
     CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 1000 + DLG_CAREFUL_ARM_MS - 1) == DLG_WAIT);
     CHECK(dlg_countdown_tick(&d, 15999) == DLG_WAIT);
     CHECK(dlg_countdown_tick(&d, 16000) == DLG_CANCEL);
@@ -65,6 +67,7 @@ static void careful_runs_out_into_cancel(void) {
     dlg_countdown_start_careful(&d, 1000, 15);
     CHECK(dlg_countdown_key(&d, DLG_KEY_ESC, 1000) == DLG_CANCEL); // Esc always counts
     dlg_countdown_start_careful(&d, 1000, 15);
+    dlg_countdown_enter_up(&d);
     CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 1000 + DLG_CAREFUL_ARM_MS) == DLG_CONFIRM);
     CHECK(dlg_countdown_tick(&d, 16000) == DLG_WAIT);
 
@@ -73,11 +76,32 @@ static void careful_runs_out_into_cancel(void) {
     CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 1000) == DLG_CONFIRM);
 }
 
+// A held Enter that repeats (or one press reaching two dialogs) never answers: only a release, then a press, does
+static void careful_needs_a_fresh_press(void) {
+    dlg_countdown_t d;
+    dlg_countdown_start_careful(&d, 0, 15);
+    for (uint32_t t = 0; t <= 5000; t += 100) {
+        CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, t) == DLG_WAIT);
+    }
+    dlg_countdown_enter_up(&d);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 5100) == DLG_CONFIRM);
+
+    // released at the start, but the first press came inside the arm time: it used the release up, its repeats fail
+    dlg_countdown_start_careful(&d, 0, 15);
+    dlg_countdown_enter_up(&d);
+    for (uint32_t t = 500; t <= 5000; t += 100) {
+        CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, t) == DLG_WAIT);
+    }
+    dlg_countdown_enter_up(&d);
+    CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 5100) == DLG_CONFIRM);
+}
+
 int main(void) {
     runs_out_into_confirm();
     keys_decide_once();
     time_wraps();
     careful_runs_out_into_cancel();
+    careful_needs_a_fresh_press();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;
