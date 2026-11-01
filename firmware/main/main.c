@@ -3,6 +3,7 @@
  */
 
 #include "backlight.h"
+#include "board_i2c.h"
 #include "boot_progress.h"
 #include "c6link.h"
 #include "crash.h"
@@ -246,6 +247,7 @@ void app_main(void) {
         ESP_LOGE(TAG, "no C6 link: no Wi-Fi, no LoRa");
     }
     backlight_start();
+    board_i2c_register_console();
     if (screen) {
         lv_indev_t *keys = NULL; // the keypad is an LVGL input device: LVGL first
         if (keyboard_start(&keys)) {

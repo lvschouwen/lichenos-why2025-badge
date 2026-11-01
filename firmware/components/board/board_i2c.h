@@ -10,3 +10,6 @@
 
 // Created on first use, NULL when the driver refused it (logged)
 i2c_master_bus_handle_t board_i2c_bus(void);
+
+// `fw i2c scan`: which addresses answer on the bus (#11: is the IP5306 the I2C variant at 0x75?)
+void board_i2c_register_console(void);
