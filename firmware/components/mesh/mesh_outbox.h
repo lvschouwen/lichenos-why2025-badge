@@ -78,6 +78,10 @@ bool ob_next_action(ob_t *ob, uint32_t now_ms, uint32_t ts_now, ob_action_t *act
 void ob_on_reply(ob_t *ob, mesh_msg_id_t id, mf_msg_t const *m, uint32_t now_ms);
 // The pipe could not even build the frame (unknown channel or contact): the message fails
 void ob_fail(ob_t *ob, mesh_msg_id_t id);
+// MeshCore stops on request (#103): what has not left yet would go out late after the next start, so it fails now
+// (retry stays possible). Channel messages still queued or taken by MyMesh, and every DM not delivered (its retries
+// would go out late too). Returns how many failed.
+size_t ob_fail_pending(ob_t *ob);
 // A packet of ours left the radio (payload_is_dm: TXT_MSG, else GRP_TXT) or the radio refused it
 void ob_on_tx(ob_t *ob, bool payload_is_dm, uint8_t const hash[OB_HASH_LEN]);
 void ob_on_tx_fail(ob_t *ob, bool payload_is_dm, uint32_t now_ms);

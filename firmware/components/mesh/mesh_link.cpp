@@ -61,6 +61,19 @@ static void contact_to_frame(ContactInfo const &c, mf_contact_t *out) {
     out->gps_lon               = c.gps_lon;
 }
 
+int BadgeMesh::dropOutbound() {
+    int n = 0;
+    while (_mgr->getOutboundTotal() > 0) {
+        mesh::Packet *p = _mgr->removeOutboundByIdx(0);
+        if (!p) {
+            break;
+        }
+        _mgr->free(p);
+        n++;
+    }
+    return n;
+}
+
 BadgeMesh::ContactResult BadgeMesh::contactAction(uint8_t const prefix[MF_PREFIX], mesh_contact_op_t op) {
     ContactInfo *c = lookupContactByPubKey(prefix, MF_PREFIX);
     if (!c) {

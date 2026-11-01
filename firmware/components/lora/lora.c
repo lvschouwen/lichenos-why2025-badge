@@ -72,32 +72,57 @@ static bool             probe_requested;   // lora_c6_probe -> the task, under s
 static SemaphoreHandle_t send_mutex;
 #define SEND_DRAIN_MS 7000 // one send blocks at most about 5 s on a C6 that is gone
 
+// The owner and its callbacks change at runtime (#103: MeshCore releases the radio when it stops, from its own task),
+// while the LoRa task calls them: every read and write of the four is under owner_lock, and the LoRa task calls copies
+// taken under it, never a pointer that a release can turn NULL between its check and its call. A copy taken just
+// before a release may still run once afterwards: the owner's callbacks must stay callable (static functions) and
+// harmless then. Spinlock only around the loads and stores (strcmp on the short owner names included), never a call.
+static portMUX_TYPE owner_lock = portMUX_INITIALIZER_UNLOCKED;
+
 bool lora_claim(char const *who, lora_packet_cb_t cb) {
-    if (owner && strcmp(owner, who) != 0) {
-        ESP_LOGE(TAG, "radio claimed by %s: %s refused", owner, who);
-        return false;
+    portENTER_CRITICAL(&owner_lock);
+    char const *had = owner;
+    bool        ok  = !had || strcmp(had, who) == 0;
+    if (ok) {
+        owner     = who;
+        packet_cb = cb;
     }
-    owner     = who;
-    packet_cb = cb;
-    return true;
+    portEXIT_CRITICAL(&owner_lock);
+    if (!ok) {
+        ESP_LOGE(TAG, "radio claimed by %s: %s refused", had, who);
+    }
+    return ok;
 }
 
 void lora_release(char const *who) {
+    portENTER_CRITICAL(&owner_lock);
     if (owner && strcmp(owner, who) == 0) {
         packet_cb = NULL;
         rx_fmt    = NULL;
         link_cb   = NULL;
         owner     = NULL;
     }
+    portEXIT_CRITICAL(&owner_lock);
 }
 
 bool lora_set_link_callback(char const *who, void (*fn)(bool up)) {
-    if (!who || !owner || strcmp(owner, who) != 0) {
-        ESP_LOGE(TAG, "link callback refused: %s does not hold the radio", who ? who : "?");
-        return false;
+    portENTER_CRITICAL(&owner_lock);
+    bool ok = who && owner && strcmp(owner, who) == 0;
+    if (ok) {
+        link_cb = fn;
     }
-    link_cb = fn;
-    return true;
+    portEXIT_CRITICAL(&owner_lock);
+    if (!ok) {
+        ESP_LOGE(TAG, "link callback refused: %s does not hold the radio", who ? who : "?");
+    }
+    return ok;
+}
+
+static char const *owner_now(void) {
+    portENTER_CRITICAL(&owner_lock);
+    char const *who = owner;
+    portEXIT_CRITICAL(&owner_lock);
+    return who;
 }
 
 void lora_set_send_hook(void (*fn)(bool ok)) {
@@ -105,7 +130,9 @@ void lora_set_send_hook(void (*fn)(bool ok)) {
 }
 
 void lora_set_rx_formatter(lora_rx_formatter_t fmt) {
+    portENTER_CRITICAL(&owner_lock);
     rx_fmt = fmt;
+    portEXIT_CRITICAL(&owner_lock);
 }
 
 static uint32_t now_ms(void);
@@ -312,14 +339,18 @@ static char const *msg_name(uint8_t type) {
 
 static void log_packet(lora_rx_packet_t const *rx) {
     char summary[128];
-    if (!rx_fmt) {
+    portENTER_CRITICAL(&owner_lock);
+    lora_rx_formatter_t fmt = rx_fmt;
+    lora_packet_cb_t    cb  = packet_cb;
+    portEXIT_CRITICAL(&owner_lock);
+    if (!fmt) {
         snprintf(summary, sizeof(summary), "no owner");
-    } else if (!rx_fmt(rx->data, rx->len, summary, sizeof(summary))) {
+    } else if (!fmt(rx->data, rx->len, summary, sizeof(summary))) {
         snprintf(summary, sizeof(summary), "undecodable");
     }
     ESP_LOGW(TAG, "rx %u B rssi %.1f snr %.1f | %s", rx->len, rx->rssi_x10 / 10.0, rx->snr_x10 / 10.0, summary);
-    if (packet_cb) {
-        packet_cb(rx->data, rx->len, rx->rssi_x10, rx->snr_x10);
+    if (cb) {
+        cb(rx->data, rx->len, rx->rssi_x10, rx->snr_x10);
     }
     if (log_raw) {
         char hex[2 * sizeof(rx->data) + 1];
@@ -337,7 +368,9 @@ static void log_packet(lora_rx_packet_t const *rx) {
 }
 
 static void tell_owner(bool up) {
+    portENTER_CRITICAL(&owner_lock);
     void (*fn)(bool) = link_cb;
+    portEXIT_CRITICAL(&owner_lock);
     if (fn) {
         fn(up);
     }
@@ -610,6 +643,6 @@ static void cmd_lora(char const *args) {
     char line[STATUS_LINE_MAX];
     lora_status_format(&config, &st, have, age_s, dropped, bad, line, sizeof(line));
     console_reply("lora %s | tx %lu", line, (unsigned long)sent);
-    char const *who = __atomic_load_n(&owner, __ATOMIC_ACQUIRE);
+    char const *who = owner_now();
     console_reply("lora owner %s", who ? who : "none (unclaimed)"); // #103: MeshCore stopped gives the radio back
 }

@@ -16,6 +16,7 @@
 static char const TAG[] = "meshcore";
 
 #define JOB_STACK    8192 // a first start loads everything, as app_main's 8 KB did at boot
+#define LATE_STOP_MS 60000 // a stop that outlasted mesh_stop's 10 s: the state stays STOPPING this much longer
 #define AUTOSTART    "autostart"
 
 static lichen_app_t const *app;
@@ -81,6 +82,13 @@ mesh_run_t meshcore_run_get(void) {
 static void job_task(void *arg) {
     bool start = arg != NULL;
     bool ok    = start ? start_now() : mesh_stop(MESH_STOP_USER);
+    if (!start && !ok) {
+        // The task still stops (and frees the radio) when it gets there: STOPPING until it has, not RUNNING again
+        for (uint32_t waited = 0; mesh_stop_pending() && waited < LATE_STOP_MS; waited += 100) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+        ok = !mesh_running() && !mesh_stop_pending();
+    }
     apply(ok ? MESH_EV_DONE_OK : MESH_EV_DONE_FAIL);
     ESP_LOGW(TAG, "MeshCore %s", start ? (ok ? "started" : "did not start") : (ok ? "stopped" : "did not stop in time"));
     vTaskDelete(NULL);

@@ -48,6 +48,8 @@ typedef enum {
 // time (it still stops, and releases the radio, when the task gets there). The update stop also settles the journal's
 // held messages and wipes its key; it works on a MeshCore already stopped on request too.
 bool mesh_stop(mesh_stop_reason_t why);
+// A stop was asked and the task has not ended yet (a stop that outlasted mesh_stop's wait): no start meanwhile
+bool mesh_stop_pending(void);
 // "fw mesh", "fw contacts" and friends: registered once, whether MeshCore starts or not (#103)
 void mesh_console_init(void);
 // The node id (the start of the public key) as 8 hex digits, taken once at mesh_start: no lock, so the screens may

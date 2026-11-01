@@ -229,6 +229,25 @@ void ob_fail(ob_t *ob, mesh_msg_id_t id) {
     }
 }
 
+size_t ob_fail_pending(ob_t *ob) {
+    size_t n = 0;
+    for (int i = 0; i < OB_CAP; i++) {
+        ob_entry_t *e = &ob->e[i];
+        if (!e->used || e->state == MESH_OUT_FAILED || e->state == MESH_OUT_DELIVERED) {
+            continue;
+        }
+        bool waiting = e->state == MESH_OUT_QUEUED || e->state == MESH_OUT_SENT;
+        if (e->kind == OB_DM || waiting) {
+            e->state          = MESH_OUT_FAILED;
+            e->awaiting       = false;
+            e->awaiting_reset = false;
+            e->pending_reset  = false;
+            n++;
+        }
+    }
+    return n;
+}
+
 // The oldest message of that kind that MyMesh took but whose packet we have not seen leave yet
 static ob_entry_t *awaiting_air(ob_t *ob, bool dm) {
     ob_entry_t *best = NULL;

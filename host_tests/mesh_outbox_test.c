@@ -258,7 +258,36 @@ static void wrap(void) {
     CHECK(ob_next_action(&w, 0xFFFFFC00u + 3750u, 1, &a) && a.kind == OB_ACT_SEND_DM);
 }
 
+// A stop on request (#103): nothing waiting goes out late after the next start
+static void fail_pending(void) {
+    ob_t ob;
+    ob_init(&ob);
+    char const   *why    = NULL;
+    mesh_msg_id_t queued = ob_add_channel(&ob, "#test", "a", 1, 0, &why);
+    mesh_msg_id_t taken  = ob_add_channel(&ob, "#test", "b", 1, 0, &why);
+    mesh_msg_id_t aired  = ob_add_channel(&ob, "#test", "c", 1, 0, &why);
+    mesh_msg_id_t dm     = ob_add_dm(&ob, PEER, "d", 1, 0, &why);
+    ob_action_t   a      = take(&ob, 0, OB_ACT_SEND_CHANNEL); // queued's frame
+    mf_msg_t      ok     = reply(MF_OK);
+    ob_on_reply(&ob, a.id, &ok, 1);
+    a = take(&ob, 2, OB_ACT_SEND_CHANNEL);
+    ob_on_reply(&ob, a.id, &ok, 3);
+    uint8_t h[OB_HASH_LEN] = {7};
+    ob_on_tx(&ob, false, h); // the oldest taken one is on air now
+    CHECK(state_of(&ob, queued) == MESH_OUT_ON_AIR && state_of(&ob, taken) == MESH_OUT_SENT);
+    CHECK(state_of(&ob, aired) == MESH_OUT_QUEUED && state_of(&ob, dm) == MESH_OUT_QUEUED);
+    CHECK(ob_fail_pending(&ob) == 3);
+    CHECK(state_of(&ob, queued) == MESH_OUT_ON_AIR); // gone out already: its repeats may still be heard
+    CHECK(state_of(&ob, taken) == MESH_OUT_FAILED && state_of(&ob, aired) == MESH_OUT_FAILED);
+    CHECK(state_of(&ob, dm) == MESH_OUT_FAILED);
+    ob_action_t none;
+    CHECK(!ob_next_action(&ob, 10, 1000, &none)); // nothing left to send
+    CHECK(ob_fail_pending(&ob) == 0);
+    CHECK(ob_retry(&ob, dm, 20)); // still retryable by hand
+}
+
 int main(void) {
+    fail_pending();
     channel_flow();
     channel_failures();
     dm_delivered();

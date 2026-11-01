@@ -124,10 +124,54 @@ static void first_home(void) {
     shell_home();
 }
 
+#define FIRST_WAIT_MS 300
+
+static lv_obj_t *first_wait; // "Starting MeshCore..." while an on-demand start runs before the questions (#103)
+
+static void first_wait_due(lv_timer_t *timer) {
+    (void)timer;
+    first_step(NULL); // one-shot: LVGL deletes the timer after this call
+}
+
+// The questions need MeshCore running (#103: it may have just been asked to start): true when it runs; else a retry
+// is set while it is starting, or the grid takes over (saying why) when the start failed
+static bool first_needs_running(void) {
+    if (mesh_running()) {
+        if (first_wait) {
+            lv_obj_delete(first_wait);
+            first_wait = NULL;
+        }
+        return true;
+    }
+    if (mesh_run_busy(meshcore_run_get())) {
+        lv_timer_t *t = lv_timer_create(first_wait_due, FIRST_WAIT_MS, NULL);
+        if (t) {
+            lv_timer_set_repeat_count(t, 1);
+        }
+        return false;
+    }
+    ESP_LOGW(TAG, "MeshCore did not start: first-open questions asked again next open");
+    lv_obj_t   *screen = first_screen;
+    lv_group_t *group  = lv_obj_get_group(screen);
+    first_screen       = NULL;
+    if (first_wait) {
+        lv_obj_delete(first_wait);
+        first_wait = NULL;
+    }
+    if (group) {
+        lv_group_remove_obj(screen);
+    }
+    meshcore_grid_build(screen, group);
+    return false;
+}
+
 static void first_step(void *arg) {
     (void)arg;
     if (!first_screen || lv_screen_active() != first_screen) {
         return; // a question is open (or the screen is gone): it calls us again when it closes
+    }
+    if (!first_needs_running()) {
+        return;
     }
     switch (mc_first_action(&first)) {
         case MC_FIRST_WAIT: break;
@@ -169,6 +213,7 @@ static void on_first_delete(lv_event_t *e) {
     (void)e;
     meshcore_ask_cancel();
     first_screen = NULL;
+    first_wait   = NULL; // a child of the screen: gone with it
 }
 
 static void open(lv_obj_t *screen) {
@@ -178,10 +223,17 @@ static void open(lv_obj_t *screen) {
         char const *why = meshcore_run_request(true);
         ESP_LOGW(TAG, "opened while stopped: start %s", why ? why : "asked");
     }
-    if (mesh_running() && app_settings_get_u8(self(), "mc_name_set", 0) == 0) {
-        ESP_LOGW(TAG, "first open: asking name and region");
+    bool starting = meshcore_run_get().state == MESH_RUN_STARTING;
+    if ((mesh_running() || starting) && app_settings_get_u8(self(), "mc_name_set", 0) == 0) {
+        ESP_LOGW(TAG, "first open: asking name and region%s", starting ? " once MeshCore runs" : "");
         first        = (mc_first_t){0};
         first_screen = screen;
+        first_wait   = NULL;
+        if (starting) {
+            first_wait = lv_label_create(screen);
+            lv_label_set_text(first_wait, "Starting MeshCore...");
+            lv_obj_set_style_text_color(first_wait, lv_color_hex(THEME_AMBER), 0);
+        }
         lv_obj_add_event_cb(screen, on_first_loaded, LV_EVENT_SCREEN_LOADED, NULL);
         lv_obj_add_event_cb(screen, on_first_delete, LV_EVENT_DELETE, NULL);
         return;

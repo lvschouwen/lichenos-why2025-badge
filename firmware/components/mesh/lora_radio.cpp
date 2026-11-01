@@ -59,6 +59,10 @@ static void on_link(bool up) {
 // Every start of MeshCore (#103: again after a stop): one queue for the whole run of the badge, emptied on a restart so
 // packets from before the stop are not handled as new
 void LoraRadio::begin() {
+    claim(); // MeshCore's own begin() has no way to fail: the boot logs it and MeshCore runs deaf, as before
+}
+
+bool LoraRadio::claim() {
     instance = this;
     if (!rx_queue) {
         rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(rx_item_t));
@@ -67,10 +71,11 @@ void LoraRadio::begin() {
     }
     if (!lora_claim("meshcore", on_packet)) {
         ESP_LOGE("mesh", "LoRa radio not ours: MeshCore receives nothing");
-        return;
+        return false;
     }
     lora_set_rx_formatter(rx_summary);
     lora_set_link_callback("meshcore", on_link);
+    return true;
 }
 
 // MeshCore stopped (#103): the radio is free again (the OS keeps it receiving; nobody gets the packets)

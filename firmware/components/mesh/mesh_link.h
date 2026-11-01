@@ -94,6 +94,9 @@ public:
     // after shows them.
     enum ContactResult { CONTACT_QUEUED, CONTACT_GONE, CONTACT_QUEUE_FULL };
     ContactResult contactAction(uint8_t const prefix[MF_PREFIX], mesh_contact_op_t op);
+    // MeshCore stops on request (#103), under the mesh lock: the packets queued for the radio are dropped, so none
+    // goes out late after the next start. Returns how many.
+    int            dropOutbound();
     void           startPipe() {
         startInterface(pipe_);
         pipe_.start();

@@ -542,6 +542,18 @@ static void mesh_task(void *arg) {
         if (__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
             // The task stops itself, between two loops and with the lock held: nothing is half done, and the stack
             // (16 KB, the saves keep File objects on it) is the one that is big enough
+            bool final = __atomic_load_n(&stop_final, __ATOMIC_ACQUIRE);
+            if (!final) {
+                // A stop on request (#103): nothing waiting goes out late after the next start; the journal gets the
+                // failures through sync_outgoing like any other state change
+                mesh_ob_enter();
+                size_t failed = ob_fail_pending(outbox);
+                mesh_ob_exit();
+                int dropped = node->dropOutbound();
+                sync_outgoing();
+                ESP_LOGW(TAG, "stop: %u outgoing message(s) failed, %d queued packet(s) dropped", (unsigned)failed,
+                         dropped);
+            }
             int64_t save_started = esp_timer_get_time();
             store.savePrefs(*node->getNodePrefs());
             int64_t contacts_started = esp_timer_get_time();
@@ -549,7 +561,6 @@ static void mesh_task(void *arg) {
             int64_t contacts_us = esp_timer_get_time() - contacts_started;
             store.saveChannels(node);
             int64_t save_us = esp_timer_get_time() - save_started;
-            bool final = __atomic_load_n(&stop_final, __ATOMIC_ACQUIRE);
             mesh_journal_stop_locked(final);
             __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
             mesh_unlock();
@@ -585,9 +596,9 @@ extern "C" bool mesh_running(void) {
 // Under the run lock
 static bool stop_locked(mesh_stop_reason_t why) {
     bool final = why == MESH_STOP_UPDATE;
-    if (!mesh_running()) {
+    if (!mesh_running() && !mesh_stop_pending()) {
         // Never started, or stopped on request before: an update still settles the journal (held messages, the key)
-        if (final && !__atomic_load_n(&final_stop, __ATOMIC_ACQUIRE) && __atomic_load_n(&node, __ATOMIC_ACQUIRE)) {
+        if (final && __atomic_load_n(&node, __ATOMIC_ACQUIRE)) {
             mesh_lock();
             mesh_journal_stop_locked(true);
             mesh_unlock();
@@ -610,8 +621,19 @@ static bool stop_locked(mesh_stop_reason_t why) {
         ESP_LOGE(TAG, "MeshCore did not stop in 10 s");
         return false;
     }
+    if (final) {
+        // The task read stop_final when it stopped: after a stop on request that outlasted its wait it may have stopped
+        // as one. Settling again is a no-op when it was already final.
+        mesh_lock();
+        mesh_journal_stop_locked(true);
+        mesh_unlock();
+    }
     vTaskDelay(pdMS_TO_TICKS(50)); // the task releases the radio and deletes itself right after giving the lock back
     return true;
+}
+
+extern "C" bool mesh_stop_pending(void) {
+    return __atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE) && !__atomic_load_n(&task_exited, __ATOMIC_ACQUIRE);
 }
 
 extern "C" bool mesh_stop(mesh_stop_reason_t why) {
@@ -1227,7 +1249,7 @@ static void cmd_mesh_run(bool start) {
 
 static void cmd_mesh(char const *args) {
     if (strcmp(args, "start") == 0 || strcmp(args, "stop") == 0) {
-        cmd_mesh_run(args[2] == 'a');
+        cmd_mesh_run(strcmp(args, "start") == 0);
         return;
     }
     if (strncmp(args, "hist", 4) == 0 && (args[4] == ' ' || !args[4])) {
@@ -1494,15 +1516,19 @@ extern "C" void mesh_console_init(void) {
 
 // The mesh task, new each start; false when it could not be made
 static bool task_create(void) {
+    // Before the create: the new task must never see the last run's stopped
+    bool was_running = __atomic_load_n(&task_running, __ATOMIC_ACQUIRE);
     __atomic_store_n(&stop_requested, false, __ATOMIC_RELEASE);
     __atomic_store_n(&task_exited, false, __ATOMIC_RELEASE);
+    __atomic_store_n(&stopped, false, __ATOMIC_RELEASE);
+    __atomic_store_n(&task_running, true, __ATOMIC_RELEASE);
     if (xTaskCreatePinnedToCore(mesh_task, "mesh", MESH_STACK, NULL, 3, &mesh_task_handle, MESH_CORE) != pdPASS) {
+        __atomic_store_n(&task_running, was_running, __ATOMIC_RELEASE);
+        __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
         __atomic_store_n(&task_exited, true, __ATOMIC_RELEASE);
         ESP_LOGE(TAG, "mesh task not started");
         return false;
     }
-    __atomic_store_n(&stopped, false, __ATOMIC_RELEASE);
-    __atomic_store_n(&task_running, true, __ATOMIC_RELEASE);
     return true;
 }
 
@@ -1514,7 +1540,9 @@ static bool resume_locked(void) {
         ESP_LOGE(TAG, "MeshCore is still stopping: not started");
         return false;
     }
-    lora_radio.begin();
+    if (!lora_radio.claim()) {
+        return false; // another owner holds the radio: MeshCore would run deaf
+    }
     mesh_lock();
     NodePrefs const *prefs = node->getNodePrefs();
     radio_driver.setParams(prefs->freq, prefs->bw, prefs->sf, prefs->cr);
@@ -1542,6 +1570,9 @@ extern "C" bool mesh_start(char const *files_dir) {
     bool ok;
     if (__atomic_load_n(&final_stop, __ATOMIC_ACQUIRE)) {
         ESP_LOGE(TAG, "MeshCore stopped for update: no start before the restart");
+        ok = false;
+    } else if (mesh_stop_pending()) {
+        ESP_LOGE(TAG, "MeshCore is still stopping: not started"); // a stop that outlasted its wait (#103 review)
         ok = false;
     } else if (mesh_running()) {
         ok = true; // a second start is not a second MeshCore

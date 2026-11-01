@@ -608,9 +608,11 @@ void mesh_journal_flush(void) {
 }
 
 void mesh_journal_stop_locked(bool final) {
-    if (!hist || !on) {
+    static bool finalised; // the update stop may come twice (#103 review): the second is a no-op
+    if (!hist || !on || finalised) {
         return;
     }
+    finalised = final;
     if (final) {
         mesh_hist_stop(hist, mesh_uptime_s());
     }
