@@ -19,6 +19,9 @@ typedef struct {
     int64_t imu_us;      // esp_timer time of that reading
     // BME690, one forced measurement every environment period (default 1 s)
     bool    env_valid;
+    // Measured inside the BME690. Its gas heater (300 C for 100 ms of every 1 s by default) and the badge's own warmth
+    // reach it, so it reads somewhat above the room and humidity somewhat below; LICHEN_SENSORS_GAS_HEATER=n removes
+    // the heater's part (and the gas reading)
     float   temperature_c;
     float   humidity_pct;
     float   pressure_hpa;
@@ -31,8 +34,9 @@ typedef struct {
     int64_t die_us;
 } lichen_sensors_t;
 
-// Copies the latest readings. Never blocks on the bus; all valid flags are false before the first sample, while the
-// service is stopped, and for a chip that is missing or stopped answering.
+// Copies the latest readings under a short spinlock: call it from a task, never from an ISR. Never blocks on the bus;
+// all valid flags are false before the first sample, while the service is stopped, and for a chip that is missing or
+// stopped answering.
 void lichen_sensors_get(lichen_sensors_t *out);
 
 // The OS starts the service at boot. Stop puts both chips to sleep and clears the valid flags; start wakes them

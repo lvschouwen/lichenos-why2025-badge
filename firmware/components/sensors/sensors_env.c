@@ -1,6 +1,7 @@
 // BME690 through Bosch's BME69x_SensorAPI (third_party/BME69x_SensorAPI), forced mode: one measurement per trigger,
 // the chip sleeps in between
 #include "bme69x.h"
+#include "sdkconfig.h"
 #include "sensors_chips.h"
 #include "sensors_format.h"
 
@@ -33,7 +34,7 @@ bool sensors_env_init(i2c_master_bus_handle_t bus, int *err) {
         .read     = bme_read,
         .write    = bme_write,
         .delay_us = bme_delay,
-        .amb_temp = 25, // only sets the first heater resistance; later measurements use the measured temperature
+        .amb_temp = 25, // the heater resistance for 300 C is computed once from this ambient temperature
     };
     int8_t r = bme69x_init(&bme); // checks the chip id (0x61, BME69x family)
     if (r == BME69X_OK) {
@@ -47,8 +48,14 @@ bool sensors_env_init(i2c_master_bus_handle_t bus, int *err) {
         r = bme69x_set_conf(&conf, &bme);
     }
     if (r == BME69X_OK) {
-        heater = (struct bme69x_heatr_conf){.enable = BME69X_ENABLE, .heatr_temp = 300, .heatr_dur = 100};
-        r      = bme69x_set_heatr_conf(BME69X_FORCED_MODE, &heater, &bme);
+#if CONFIG_LICHEN_SENSORS_GAS_HEATER
+        heater = (struct bme69x_heatr_conf){.enable     = BME69X_ENABLE,
+                                            .heatr_temp = 300,
+                                            .heatr_dur  = CONFIG_LICHEN_SENSORS_HEATER_MS};
+#else
+        heater = (struct bme69x_heatr_conf){.enable = BME69X_DISABLE}; // no gas reading, no self-heating
+#endif
+        r = bme69x_set_heatr_conf(BME69X_FORCED_MODE, &heater, &bme);
     }
     *err = r;
     return r == BME69X_OK;
@@ -58,7 +65,8 @@ uint32_t sensors_env_trigger(void) {
     if (bme69x_set_op_mode(BME69X_FORCED_MODE, &bme) != BME69X_OK) {
         return 0;
     }
-    return bme69x_get_meas_dur(BME69X_FORCED_MODE, &conf, &bme) + (uint32_t)heater.heatr_dur * 1000u;
+    uint32_t heat_us = heater.enable ? (uint32_t)heater.heatr_dur * 1000u : 0;
+    return bme69x_get_meas_dur(BME69X_FORCED_MODE, &conf, &bme) + heat_us;
 }
 
 sensors_read_t sensors_env_read(float *temp_c, float *rh_pct, float *hpa, float *kohm, bool *gas_ok) {

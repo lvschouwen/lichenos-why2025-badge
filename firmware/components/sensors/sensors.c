@@ -18,11 +18,15 @@
 
 static char const TAG[] = "sensors";
 
-#define STACK_BYTES 4096
-#define PRIORITY    2 // below the keyboard (4): a key press never waits for a sample
-#define RETRY_US    (30 * 1000000LL)
-#define IMU_FAILS   5 // in a row, then the chip counts as gone and is re-initialised
-#define ENV_FAILS   3
+#define STACK_BYTES   6144 // the Bosch calls' depth is not measured yet: the margin is logged once (see log_stack)
+#define PRIORITY      2    // below the keyboard (4): a key press never waits for a sample
+#define RETRY_US      (30 * 1000000LL)
+#define IMU_FAILS     5 // in a row, then the chip counts as gone and is re-initialised
+#define ENV_FAILS     3
+#define IMU_STALE_US  1000000LL // no new IMU data for this long counts as a failed read (chip reset, stuck)
+#define ENV_MARGIN_US 5000      // after the measurement time the BME690 reports, before the first read
+#define ENV_RETRY_US  5000      // a measurement not done yet: read again this much later ...
+#define ENV_RETRIES   4         // ... this often (about 20 ms) before it counts as a failure
 
 typedef struct {
     char const *name;
@@ -45,6 +49,10 @@ static _Atomic uint32_t            env_ms = CONFIG_LICHEN_SENSORS_ENV_PERIOD_MS;
 static chip_t                      imu    = {.name = "BMI270", .addr = SENSORS_IMU_ADDR};
 static chip_t                      env    = {.name = "BME690", .addr = SENSORS_ENV_ADDR};
 static temperature_sensor_handle_t tsens;
+static bool                        die_enabled; // tsens installed and enabled
+static int64_t                     imu_last_us; // the last new IMU data (or the init), for the staleness check
+static int                         env_tries;   // reads of the running measurement that found no new data
+static bool                        stack_logged;
 
 static void chip_init(chip_t *c, i2c_master_bus_handle_t bus, int64_t now) {
     int  err = 0;
@@ -58,6 +66,9 @@ static void chip_init(chip_t *c, i2c_master_bus_handle_t bus, int64_t now) {
     taskEXIT_CRITICAL(&lock);
     c->fails = 0;
     c->up    = ok;
+    if (c == &imu) {
+        imu_last_us = esp_timer_get_time();
+    }
     if (ok) {
         if (c->warned) {
             ESP_LOGW(TAG, "%s (0x%02x) is back", c->name, c->addr);
@@ -109,11 +120,21 @@ static void sample_imu(int64_t now) {
     float          a[3], g[3];
     int16_t        raw[6];
     sensors_read_t r = sensors_imu_read(a, g, raw);
+    if (r == SENSORS_READ_NONE) {
+        // Read before the next output sample: try again next pass. Only a long silence counts (a chip that was reset
+        // stops producing data but still answers).
+        if (now - imu_last_us > IMU_STALE_US) {
+            imu_last_us = now;
+            chip_failed(&imu, IMU_FAILS, now);
+        }
+        return;
+    }
     if (r != SENSORS_READ_OK || !sensors_imu_plausible(a, SENSORS_IMU_RANGE_G, g, SENSORS_IMU_RANGE_DPS)) {
         chip_failed(&imu, IMU_FAILS, now);
         return;
     }
-    imu.fails = 0;
+    imu.fails   = 0;
+    imu_last_us = now;
     taskENTER_CRITICAL(&lock);
     snap.imu_valid = true;
     snap.imu_us    = now;
@@ -128,13 +149,32 @@ static void sample_imu(int64_t now) {
     taskEXIT_CRITICAL(&lock);
 }
 
-static void sample_env(int64_t now) {
+// Logged once, at warning level so it shows: the stack headroom after both chips' init and the first environment
+// sample, the deepest calls the task makes (#69 review: STACK_BYTES can shrink once bench logs show the margin)
+static void log_stack(void) {
+    if (!stack_logged) {
+        stack_logged = true;
+        ESP_LOGW(
+            TAG,
+            "task stack: %u of %d B never used",
+            (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
+            STACK_BYTES
+        );
+    }
+}
+
+// False while the measurement is still running and worth another read in ENV_RETRY_US
+static bool sample_env(int64_t now) {
     float          t, rh, hpa, kohm;
     bool           gas_ok = false;
     sensors_read_t r      = sensors_env_read(&t, &rh, &hpa, &kohm, &gas_ok);
+    if (r == SENSORS_READ_NONE && ++env_tries < ENV_RETRIES) {
+        return false;
+    }
+    env_tries = 0;
     if (r != SENSORS_READ_OK || !sensors_env_plausible(t, rh, hpa)) {
         chip_failed(&env, ENV_FAILS, now);
-        return;
+        return true;
     }
     env.fails = 0;
     taskENTER_CRITICAL(&lock);
@@ -147,11 +187,13 @@ static void sample_env(int64_t now) {
     snap.gas_kohm      = gas_ok ? kohm : 0.0f;
     stats.env_samples++;
     taskEXIT_CRITICAL(&lock);
+    log_stack();
+    return true;
 }
 
 static void sample_die(int64_t now) {
     float c     = 0.0f;
-    bool  valid = tsens && temperature_sensor_get_celsius(tsens, &c) == ESP_OK && sensors_die_plausible(c);
+    bool  valid = die_enabled && temperature_sensor_get_celsius(tsens, &c) == ESP_OK && sensors_die_plausible(c);
     taskENTER_CRITICAL(&lock);
     snap.die_valid = valid;
     if (valid) {
@@ -168,15 +210,24 @@ static void set_power(bool on) {
         imu.up       = false;
         imu.retry_us = 0;
     }
+    bool die_on = false;
     if (tsens) {
-        (void)(on ? temperature_sensor_enable(tsens) : temperature_sensor_disable(tsens));
+        esp_err_t err = on ? temperature_sensor_enable(tsens) : temperature_sensor_disable(tsens);
+        die_on        = on && err == ESP_OK;
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "P4 temperature sensor %s: %s", on ? "enable" : "disable", esp_err_to_name(err));
+        }
     }
     taskENTER_CRITICAL(&lock);
     if (!on) {
-        snap.imu_valid = snap.env_valid = snap.gas_valid = snap.die_valid = false;
+        snap.imu_valid = snap.env_valid = snap.gas_valid = false;
     }
-    stats.die_up = on && tsens;
+    if (!die_on) {
+        snap.die_valid = false;
+    }
+    stats.die_up = die_on;
     taskEXIT_CRITICAL(&lock);
+    die_enabled = die_on;
 }
 
 static int64_t earliest(int64_t a, int64_t b) {
@@ -199,6 +250,7 @@ static void sensors_task(void *arg) {
             running = !running;
             set_power(running);
             imu_next = env_next = die_next = now;
+            imu_last_us                    = now; // a long stop is not a silent chip
             env_read_at                    = 0;
         }
         if (running) {
@@ -215,13 +267,13 @@ static void sensors_task(void *arg) {
                 imu_next = now + (int64_t)atomic_load(&imu_ms) * 1000;
             }
             if (env.up && env_read_at && now >= env_read_at) {
-                sample_env(now);
-                env_read_at = 0;
+                env_read_at = sample_env(now) ? 0 : now + ENV_RETRY_US;
             }
             if (env.up && !env_read_at && now >= env_next) {
                 uint32_t dur_us = sensors_env_trigger(); // the heater runs while the bus is free
                 if (dur_us) {
-                    env_read_at = now + dur_us + 2000;
+                    env_read_at = now + dur_us + ENV_MARGIN_US;
+                    env_tries   = 0;
                 } else {
                     chip_failed(&env, ENV_FAILS, now);
                 }

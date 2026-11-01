@@ -30,9 +30,11 @@ sensors_read_t          sensors_imu_read(float accel_g[3], float gyro_dps[3], in
 bool                    sensors_imu_power(bool on); // accel and gyro on, or both off (suspend)
 i2c_master_dev_handle_t sensors_imu_dev(void);
 
-// BME690: soft reset, calibration, forced mode with the heater at 300 C for 100 ms
+// BME690: soft reset, calibration, forced mode with the gas heater at 300 C for CONFIG_LICHEN_SENSORS_HEATER_MS (or
+// off, CONFIG_LICHEN_SENSORS_GAS_HEATER)
 bool                    sensors_env_init(i2c_master_bus_handle_t bus, int *err);
-// Starts one forced measurement; returns how long it takes in us, 0 on a bus error
+// Starts one forced measurement; returns how long it takes in us, 0 on a bus error. sensors_env_read gives
+// SENSORS_READ_NONE while it is still running.
 uint32_t                sensors_env_trigger(void);
 sensors_read_t          sensors_env_read(float *temp_c, float *rh_pct, float *hpa, float *kohm, bool *gas_ok);
 i2c_master_dev_handle_t sensors_env_dev(void);

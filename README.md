@@ -179,7 +179,9 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
   task stacks, per-task core and CPU %), `fw slot [other]`, `fw assets`, `fw reboot`, `fw bl <display> <keyboard>`,
   `fw idle [test <s>]` (screen timeout; `test` fakes s seconds without a key).
 - Sensors: `fw sensors` (BMI270 accel and gyro, BME690 temperature, humidity, pressure and gas, P4 die temperature),
-  `fw sensors raw` (chip ids, status registers, counters), `fw sensors start|stop`, `fw i2c scan`.
+  `fw sensors raw` (chip ids, status registers, counters), `fw sensors start|stop`, `fw i2c scan`. The BME690's gas
+  heater (300 C for 100 ms each second) and the badge's own warmth make its temperature read somewhat above the room
+  and humidity somewhat below; menuconfig "Lichen sensors" can shorten the heater or switch it off (no gas reading).
 - LoRa and the C6: `fw lora [raw on|off]`, `fw c6log [ms]` (the C6's own console, up to 60 s), `fw c6 reflash`, `fw c6` (link state, recoveries), `fw c6 reattach` (re-attach the C6 now), `fw c6 reset [rom]` (pulse C6 EN to test the recovery; `rom` only with someone at the badge).
 - MeshCore: `fw mesh` (identity, clock, packet counters), `fw mesh name <name>`, `fw mesh radio <preset | freq bw sf cr>
   [txdbm]`, `fw contacts`, `fw msgs [n]`, `fw channels`, `fw channel add <name> <base64 key>` or `fw channel add #name`

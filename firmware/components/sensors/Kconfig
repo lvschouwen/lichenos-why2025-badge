@@ -12,7 +12,7 @@ menu "Lichen sensors"
         default 1000
         range 1000 60000
         help
-            One forced BME690 measurement (heater 300 C for 100 ms) and one P4 die temperature read per period.
+            One forced BME690 measurement (with the gas heater, if on) and one P4 die temperature read per period.
 
     config LICHEN_SENSORS_I2C_HZ
         int "I2C clock for the two sensor chips (Hz)"
@@ -20,4 +20,21 @@ menu "Lichen sensors"
         range 100000 400000
         help
             The keyboard chip on the same bus runs at 100 kHz; both sensors can do 400 kHz.
+    config LICHEN_SENSORS_GAS_HEATER
+        bool "BME690 gas heater (gas resistance readings)"
+        default y
+        help
+            The gas reading needs the BME690's hot plate at 300 C for a moment in every measurement. That heat
+            reaches the chip's own temperature and humidity sensors: with the heater on they read somewhat warm
+            (and humidity somewhat low), more so with a longer heater time or a shorter period. Off: no gas
+            reading, no self-heating.
+
+    config LICHEN_SENSORS_HEATER_MS
+        int "Gas heater time per measurement (ms)"
+        depends on LICHEN_SENSORS_GAS_HEATER
+        default 100
+        range 20 500
+        help
+            How long the hot plate is held at 300 C in each measurement (heater duty = this / the environment
+            period, 10 % by default). Shorter heats less but the gas reading may not settle (gas -- in fw sensors).
 endmenu

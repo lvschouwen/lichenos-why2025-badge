@@ -57,18 +57,15 @@ static void print_raw(void) {
     i2c_master_dev_handle_t imu = sensors_imu_dev();
     if (!imu) {
         console_reply("imu 0x%02x: no device (init %d)", SENSORS_IMU_ADDR, st.imu_err);
-    } else if (sensors_bus_read(imu, 0x00, r, 4) || sensors_bus_read(imu, 0x21, r + 4, 3)) {
+    } else if (sensors_bus_read(imu, 0x00, r, 1) || sensors_bus_read(imu, 0x21, r + 4, 3)) {
         console_reply("imu 0x%02x: read failed", SENSORS_IMU_ADDR);
     } else {
-        // 0x00 chip id (0x24), 0x02 error, 0x03 status (drdy acc 0x80, gyr 0x40), 0x21 internal status (1 = init
-        // ok), 0x22/0x23 temperature (0x0000 = 23 C, 1/512 K per count)
+        // 0x00 chip id (0x24), 0x21 internal status (1 = init ok), 0x22/0x23 temperature (0x0000 = 23 C, 1/512 K per
+        // count). Not 0x02/0x03: the error register clears when read, and the data-ready bits belong to the sampler.
         console_reply(
-            "imu 0x%02x: id 0x%02x err 0x%02x status 0x%02x internal 0x%02x temp 0x%02x%02x, acc %d %d %d "
-            "gyr %d %d %d",
+            "imu 0x%02x: id 0x%02x internal 0x%02x temp 0x%02x%02x, acc %d %d %d gyr %d %d %d",
             SENSORS_IMU_ADDR,
             r[0],
-            r[2],
-            r[3],
             r[4],
             r[6],
             r[5],
