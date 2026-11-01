@@ -1,0 +1,23 @@
+menu "Lichen sensors"
+    config LICHEN_SENSORS_IMU_PERIOD_MS
+        int "BMI270 sampling period (ms)"
+        default 100
+        range 20 1000
+        help
+            How often the sensors task reads the IMU (accel 100 Hz, gyro 100 Hz output rate). Apps can change it
+            at run time with lichen_sensors_set_periods().
+
+    config LICHEN_SENSORS_ENV_PERIOD_MS
+        int "BME690 and P4 temperature sampling period (ms)"
+        default 1000
+        range 1000 60000
+        help
+            One forced BME690 measurement (heater 300 C for 100 ms) and one P4 die temperature read per period.
+
+    config LICHEN_SENSORS_I2C_HZ
+        int "I2C clock for the two sensor chips (Hz)"
+        default 100000
+        range 100000 400000
+        help
+            The keyboard chip on the same bus runs at 100 kHz; both sensors can do 400 kHz.
+endmenu

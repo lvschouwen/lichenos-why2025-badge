@@ -178,6 +178,8 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
 - Wi-Fi and device: `fw wifi [scan | reconnect | <ssid> <password> | --clear]`, `fw net`, `fw token`, `fw mem` (heaps,
   task stacks, per-task core and CPU %), `fw slot [other]`, `fw assets`, `fw reboot`, `fw bl <display> <keyboard>`,
   `fw idle [test <s>]` (screen timeout; `test` fakes s seconds without a key).
+- Sensors: `fw sensors` (BMI270 accel and gyro, BME690 temperature, humidity, pressure and gas, P4 die temperature),
+  `fw sensors raw` (chip ids, status registers, counters), `fw sensors start|stop`, `fw i2c scan`.
 - LoRa and the C6: `fw lora [raw on|off]`, `fw c6log [ms]` (the C6's own console, up to 60 s), `fw c6 reflash`, `fw c6` (link state, recoveries), `fw c6 reattach` (re-attach the C6 now), `fw c6 reset [rom]` (pulse C6 EN to test the recovery; `rom` only with someone at the badge).
 - MeshCore: `fw mesh` (identity, clock, packet counters), `fw mesh name <name>`, `fw mesh radio <preset | freq bw sf cr>
   [txdbm]`, `fw contacts`, `fw msgs [n]`, `fw channels`, `fw channel add <name> <base64 key>` or `fw channel add #name`
@@ -208,7 +210,7 @@ corrupts reads. A full 16 MB backup takes about 7 minutes. Run `tools/badge.sh` 
 | `tools/badge.sh` | Backup, flash, console, crash decoding and Wi-Fi updates |
 | `meshcore/` | MeshCore (submodule: our fork, upstream releases plus badge commits) |
 | `esp_hosted/` | ESP-Hosted MCU for the P4 (submodule: our fork, 3.0.10 plus an SDIO receive fix) |
-| `third_party/` | rweather's Crypto and base64 (submodules), used by MeshCore |
+| `third_party/` | rweather's Crypto and base64 (submodules), used by MeshCore; Bosch's BMI270 and BME69x SensorAPIs (submodules) |
 | `docs/` | Architecture and shell design |
 
 ## Acknowledgements
@@ -228,6 +230,7 @@ Lichen stands on a lot of other people's work. Thank you!
 | [rweather/arduinolibs](https://github.com/rweather/arduinolibs) Crypto | Ed25519, AES and SHA for MeshCore | MIT |
 | [base64_arduino](https://github.com/Densaugeo/base64_arduino) | Base64 for MeshCore | MIT |
 | [tomlc17](https://github.com/cktan/tomlc17) | Reading `lora.toml` | MIT |
+| [BMI270 SensorAPI](https://github.com/boschsensortec/BMI270_SensorAPI), [BME69x SensorAPI](https://github.com/boschsensortec/BME69x_SensorAPI) (Bosch Sensortec) | The IMU and environment sensor drivers | BSD-3-Clause |
 | esp_lcd_st7703 (Espressif) | The display panel driver | Apache-2.0 |
 | [esp_tca8418](https://github.com/atanisoft/esp_tca8418) by Mike Dunston | The keyboard controller driver | BSD-2-Clause |
 

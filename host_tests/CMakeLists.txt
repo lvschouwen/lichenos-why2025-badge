@@ -918,10 +918,21 @@ target_include_directories(sd_settings_model_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_compile_options(sd_settings_model_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME sd_settings_model_test COMMAND sd_settings_model_test)
 
+add_executable(sensors_format_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/sensors_format_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sensors/sensors_format.c
+)
+target_include_directories(sensors_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sensors
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(sensors_format_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(sensors_format_test PRIVATE m)
+add_test(NAME sensors_format_test COMMAND sensors_format_test)
+
 add_custom_target(run_tests
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose
     DEPENDS assets_fmt_test font_cover_test c6_image_test ota_proto_test ota_pieces_test backlight_cmd_test backlight_level_test console_cmd_test lora_proto_test meshcore_hdr_test lora_link_test lora_irq_test console_cmd_fw_test c6_paths_test ota_path_test ota_valid_test kbd_map_test tca8418_mask_test meshcore_decode_test mesh_store_test lora_airtime_test mesh_format_test mesh_frame_test mesh_outbox_test radio_presets_test list_filter_test radio_filter_test radio_confirm_test channel_input_test mesh_chat_test mesh_tile_test crash_log_test restart_log_test boot_steps_test log_clean_test fs_shim_test cayenne_lpp_test companion_test lora_tx_test nav_test home_layout_test hold_exit_test key_matrix_test tz_table_test clock_check_test clock_local_test time_fields_test wifi_list_test wifi_cred_test wifi_join_test setup_state_test mc_first_test ui_keys_test boot_text_test update_status_test update_mode_test link_state_test scroll_anchor_test shot_blend_test ota_bmp_test log_ring_test psram_pattern_test psram_tuning_test psram_heap_test ui_perf_stats_test bench_calc_test idle_policy_test c6_watch_test dialog_countdown_test hosted_link_test sd_policy_test fs_path_test display_rot_test
     sd_settings_model_test
     mesh_contact_fmt_test
+    sensors_format_test
     COMMENT "Running all host tests"
 )

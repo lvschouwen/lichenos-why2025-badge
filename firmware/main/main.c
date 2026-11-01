@@ -23,6 +23,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "keyboard.h"
+#include "lichen_sensors.h"
 #include "lichen_app.h"
 #include "lichen_random.h"
 #include "nvs_flash.h"
@@ -33,6 +34,7 @@
 #include "assets.h"
 #include "fonts.h"
 #include "screenshot.h"
+#include "sensors.h"
 #include "sdcard.h"
 #include "storage.h"
 #include "update_mode.h"
@@ -258,6 +260,10 @@ void app_main(void) {
             ESP_LOGE(TAG, "no keyboard");
         }
     }
+    // The sensors (#69) share the keyboard's bus: after it. Their own task initialises the chips (the BMI270's 8 KB
+    // config upload takes a while), so boot does not wait for them
+    lichen_sensors_start();
+    sensors_register_console();
     if (c6link_up()) {
         boot_progress_begin(BOOT_LORA);
         bool lora_ok = lora_start();

@@ -12,3 +12,9 @@
 [submodule "third_party/base64"]
 	path = third_party/base64
 	url = https://github.com/Densaugeo/base64_arduino.git
+[submodule "third_party/BMI270_SensorAPI"]
+	path = third_party/BMI270_SensorAPI
+	url = https://github.com/boschsensortec/BMI270_SensorAPI.git
+[submodule "third_party/BME69x_SensorAPI"]
+	path = third_party/BME69x_SensorAPI
+	url = https://github.com/boschsensortec/BME69x_SensorAPI.git
