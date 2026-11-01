@@ -1,6 +1,8 @@
 // The MeshCore app's home grid model (#88): see mesh_grid.h
 #include "mesh_grid.h"
 
+#include "mesh_advert_cfg.h"
+
 #include <stdio.h>
 
 static char const *const NAMES[MESH_GRID_TILES] = {"Chat", "Contacts", "Repeaters", "Heard", "Advertise", "Settings"};
@@ -56,7 +58,9 @@ void mesh_grid_badge(mesh_grid_tile_t tile, mesh_grid_counts_t const *c, char *o
             }
             break;
         case MESH_GRID_ADVERTISE:
-            if (c->advert_sent) {
+            if (c->advert_scheduled) {
+                advcfg_next_badge(c->advert_next_s, out, cap);
+            } else if (c->advert_sent) {
                 mesh_grid_age_text(c->advert_age_s, out, cap);
             }
             break;

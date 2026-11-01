@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mesh_advert_cfg.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_outbox.h"
 #include "mesh_store.h"
@@ -115,8 +116,32 @@ char const *mesh_contact_export(uint8_t const *prefix_or_null, char *uri, size_t
 // own key, a contact already there (never overwritten), and a full table (MeshCore would replace the oldest). Waits up
 // to a few seconds for MyMesh to take it. NULL when the contact is now there (its name in name_out), else why not.
 char const *mesh_contact_import(uint8_t const *pkt, size_t len, char *name_out, size_t name_cap);
-// A zero-hop advert now: true when queued (the home tile snapshot then has advert_sent and its age)
+// An advert now, as the Advertise setting has it (zero-hop: nodes in direct range hear it; flood: the whole mesh):
+// true when queued (the home tile snapshot then has advert_sent and its age). Refused when the clock is not set, within
+// ADVCFG_MIN_GAP_S of the last advert, or with a damaged identity. This and the periodic advert are the only senders.
 bool mesh_send_advert(void);
+// The same with the mode given (the console: "fw advert flood")
+bool mesh_send_advert_mode(bool flood);
+
+// Advert, location and auto-add settings (#52; the rules are mesh_advert_cfg.h's). Persisted: the interval, the
+// manual mode and the time of the last advert in NVS (the schedule survives a restart), location and auto-add in
+// MeshCore's prefs. Location sharing is off by default. The getter never waits.
+typedef struct {
+    uint32_t         interval_min; // periodic flood advert, minutes, 0 = off
+    uint32_t         next_in_s;    // until the next one, 0 = due, UINT32_MAX = none scheduled
+    bool             flood_manual; // the manual Advertise floods (else zero-hop)
+    double           lat, lon;
+    bool             share_loc;    // adverts carry lat/lon
+    advcfg_autoadd_t autoadd;
+} mesh_advert_cfg_t;
+bool mesh_get_advert_cfg(mesh_advert_cfg_t *out); // false before MeshCore is up
+// Each: NULL when applied (and saved), else why not (nothing changed). The prefs ones take the mesh lock like the other
+// setters: off the LVGL task.
+char const *mesh_set_advert_interval(uint32_t minutes);
+char const *mesh_set_advert_manual_flood(bool flood);
+char const *mesh_set_location(double lat, double lon);
+char const *mesh_set_location_share(bool share); // on needs a location
+char const *mesh_set_autoadd(advcfg_autoadd_t const *a);
 // The channel names in slot order, up to max; MESH_BUSY when the lock wasn't free within MESH_SET_WAIT_MS
 size_t mesh_channels_snapshot(char names[][MESH_CHANNEL_MAX + 1], size_t max);
 // The same, waiting at most wait_ms for the lock (screens call it on the LVGL task)

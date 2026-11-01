@@ -7,6 +7,7 @@
 #include "identity_move.h"
 #include "mesh.h"
 #include "mesh_format.h"
+#include "mesh_advert_cfg.h"
 #include "mesh_chat.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
@@ -199,6 +200,19 @@ static uint32_t     tile_heard_s; // uptime of the newest message, 0 for none
 static uint32_t     tile_advert_s; // uptime + 1 of our last advert, 0 for none (+1: one sent in the first second counts)
 static portMUX_TYPE tile_mux = portMUX_INITIALIZER_UNLOCKED;
 
+// The periodic advert (#52), under tile_mux: the settings' copy, when the last went out and when the next is due
+// (Unix seconds, 0 for none). Stored in NVS (adv_load / adv_store_*): the schedule survives restarts, so a badge that
+// is on for an hour a day still advertises once per interval and a reboot loop never floods.
+static struct {
+    uint32_t interval_min = ADVCFG_INTERVAL_DEFAULT;
+    bool     flood_manual = false; // the manual Advertise: zero-hop unless set
+    uint32_t last_epoch   = 0;
+    uint32_t next_epoch   = 0;
+    uint32_t last_uptime  = 0; // uptime + 1 of the last advert of ours, for the minimum gap
+} adv;
+
+static void advert_tick_locked(void);
+
 // The unread total over all chats, after the store changed (called under the mesh lock)
 static void tile_publish_unread(void) {
     uint32_t total = mesh_store_unread_where(mesh_notify_counts_unread, NULL); // the number the badge and tile share (#50)
@@ -257,6 +271,12 @@ extern "C" void mesh_tile_snapshot(mesh_tile_t *out) {
     out->last_heard_age_s = heard ? now - heard : 0;
     out->advert_sent      = advert != 0;
     out->advert_age_s     = advert ? now + 1 - advert : 0;
+    portENTER_CRITICAL(&tile_mux);
+    uint32_t next = adv.next_epoch;
+    portEXIT_CRITICAL(&tile_mux);
+    uint32_t in_s = advcfg_next_in_s(next, mesh_epoch_now());
+    out->advert_scheduled = in_s != UINT32_MAX;
+    out->advert_next_s    = in_s == UINT32_MAX ? 0 : in_s;
 }
 
 // The chat rings go to PSRAM explicitly: through plain malloc a ring under SPIRAM_MALLOC_ALWAYSINTERNAL would take
@@ -593,6 +613,7 @@ static void mesh_task(void *arg) {
         uint32_t file_us = fs_shim_take_busy_us(&file_ops);
         rx               = radio_driver.getPacketsRecv() - rx;
         tile_set_contacts((size_t)node->getNumContacts());
+        advert_tick_locked();
         mesh_journal_tick_locked(); // a due flush swaps the pending records out; they are written after the unlock
         if (__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
             // The task stops itself, between two loops and with the lock held: nothing is half done, and the stack
@@ -789,6 +810,12 @@ static void apply_boot_radio(MyMesh *n, bool first_boot) {
 
 static mesh_settings_t settings_cache; // what the setters left, for screens that must not wait on the mesh lock
 static bool            settings_known;
+// Location and auto-add (#52), refreshed with settings_cache; interval, manual mode and next time are in `adv`
+static struct {
+    double           lat, lon;
+    bool             share;
+    advcfg_autoadd_t autoadd;
+} acfg_cache;
 static portMUX_TYPE    settings_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static void radio_from_prefs(NodePrefs const *prefs, mesh_radio_t *out);
@@ -808,6 +835,10 @@ static void settings_from_node(MyMesh *n) {
     radio_from_prefs(prefs, &radio_cache);
     portENTER_CRITICAL(&settings_mux);
     settings_cache = s;
+    acfg_cache.lat   = sensors.node_lat; // what an advert carries, and what savePrefs stores
+    acfg_cache.lon   = sensors.node_lon;
+    acfg_cache.share = prefs->advert_loc_policy != ADVERT_LOC_NONE;
+    mesh_prefs_get_autoadd(prefs, &acfg_cache.autoadd);
     settings_known = true;
     portEXIT_CRITICAL(&settings_mux);
 }
@@ -1157,28 +1188,231 @@ extern "C" char const *mesh_contact_import(uint8_t const *pkt, size_t len, char 
     return "not added: a bad signature, or MeshCore's manual add / hop limit setting kept it out";
 }
 
-extern "C" bool mesh_send_advert(void) {
+// ---- our adverts (#52) ---------------------------------------------------------------------------------------------
+
+static void adv_nvs_put_u32(char const *key, uint32_t v) {
+    nvs_handle_t h;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        if (nvs_set_u32(h, key, v) != ESP_OK || nvs_commit(h) != ESP_OK) {
+            ESP_LOGW(TAG, "%s not saved", key);
+        }
+        nvs_close(h);
+    }
+}
+
+// At start, before the task runs
+static void adv_load(void) {
+    nvs_handle_t h;
+    uint32_t     interval = ADVCFG_INTERVAL_DEFAULT, last = 0;
+    uint8_t      flood = 0;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
+        nvs_get_u32(h, "mc_advint", &interval);
+        nvs_get_u32(h, "mc_advlast", &last);
+        nvs_get_u8(h, "mc_advfl", &flood);
+        nvs_close(h);
+    }
+    if (!advcfg_interval_ok(interval)) {
+        interval = ADVCFG_INTERVAL_DEFAULT;
+    }
+    portENTER_CRITICAL(&tile_mux);
+    adv.interval_min = interval;
+    adv.flood_manual = flood != 0;
+    adv.last_epoch   = last;
+    adv.next_epoch   = advcfg_next_due(interval, last, mesh_epoch_now()); // 0 until the clock is set: the tick retries
+    portEXIT_CRITICAL(&tile_mux);
+}
+
+// THE place where an advert of ours goes to the air, with the mesh lock held (the manual ones and the periodic one).
+// NULL when queued, else why not. Radio-off switches (#108) gate here.
+static char const *advert_tx_locked(bool flood) {
     if (!ident_tx_allowed()) {
-        return false; // a damaged identity transmits nothing (#80)
+        return "identity damaged: TX blocked"; // a damaged identity transmits nothing (#80)
     }
     if (!lichen_radio_get(RADIO_LORA)) {
-        return false; // LoRa is switched off (#108): periodic adverts skip, nothing is queued
+        return "LoRa is switched off"; // the one gate for "radio off" (#108): the periodic advert skips to its next time
     }
-    if (mesh_advert_refusal(clock_is_set())) {
-        return false; // nodes that heard us before drop an advert stamped before their last one (#8)
+    if (char const *why = mesh_advert_refusal(clock_is_set())) {
+        return why; // nodes that heard us before drop an advert stamped before their last one (#8)
     }
-    if (settings_lock()) {
-        return false;
+    uint32_t now_s = mesh_uptime_s();
+    portENTER_CRITICAL(&tile_mux);
+    uint32_t last_s = adv.last_uptime ? adv.last_uptime - 1 : 0;
+    portEXIT_CRITICAL(&tile_mux);
+    if (!advcfg_gap_ok(last_s, now_s)) {
+        return "an advert went out a moment ago";
     }
-    bool ok = node->advert();
-    mesh_unlock();
-    if (ok) {
-        uint32_t at = mesh_uptime_s() + 1;
+    if (!node->advertNow(flood)) {
+        return "no free packet";
+    }
+    uint32_t epoch = mesh_epoch_now();
+    portENTER_CRITICAL(&tile_mux);
+    tile_advert_s    = now_s + 1;
+    adv.last_uptime  = now_s + 1;
+    adv.last_epoch   = epoch;
+    adv.next_epoch   = advcfg_next_due(adv.interval_min, epoch, epoch); // the interval counts from any advert
+    portEXIT_CRITICAL(&tile_mux);
+    adv_nvs_put_u32("mc_advlast", epoch);
+    return NULL;
+}
+
+// Once a second from the mesh loop, under the lock: the periodic flood advert. Not before the first-open questions
+// are answered (a fresh badge would advertise its default name), nor on an approximate clock (our advert would carry
+// a time that may be wrong).
+static void advert_tick_locked(void) {
+    static uint32_t checked_s;
+    uint32_t        now_s = mesh_uptime_s();
+    if (now_s == checked_s || now_s < ADVCFG_FIRST_DELAY_S) {
+        return;
+    }
+    checked_s      = now_s;
+    uint32_t epoch = mesh_epoch_now();
+    portENTER_CRITICAL(&tile_mux);
+    uint32_t interval = adv.interval_min, next = adv.next_epoch, last = adv.last_epoch;
+    portEXIT_CRITICAL(&tile_mux);
+    if (interval == 0 || epoch == 0) {
+        return;
+    }
+    if (next == 0) { // the clock came up after the start, or the interval was just set
+        next = advcfg_next_due(interval, last, epoch);
         portENTER_CRITICAL(&tile_mux);
-        tile_advert_s = at;
+        adv.next_epoch = next;
         portEXIT_CRITICAL(&tile_mux);
     }
-    return ok;
+    if (epoch < next) {
+        return;
+    }
+    char const *why = clock_is_approximate() ? "the clock is only approximate"
+                      : !meshcore_setup_done() ? "MeshCore is not set up yet"
+                                               : advert_tx_locked(true);
+    portENTER_CRITICAL(&tile_mux);
+    if (why) {
+        adv.next_epoch = epoch + interval * 60; // refused: skip to the next time, no retry spam
+    }
+    portEXIT_CRITICAL(&tile_mux);
+    ESP_LOGW(TAG, "periodic advert (flood): %s", why ? why : "queued");
+}
+
+static bool send_advert_mode(bool flood) {
+    char const *why = settings_lock();
+    if (!why) {
+        why = advert_tx_locked(flood);
+        mesh_unlock();
+    }
+    if (why) {
+        ESP_LOGW(TAG, "advert not sent: %s", why);
+    }
+    return why == NULL;
+}
+
+extern "C" bool mesh_send_advert_mode(bool flood) {
+    return send_advert_mode(flood);
+}
+
+extern "C" bool mesh_send_advert(void) {
+    portENTER_CRITICAL(&tile_mux);
+    bool flood = adv.flood_manual;
+    portEXIT_CRITICAL(&tile_mux);
+    return send_advert_mode(flood);
+}
+
+extern "C" bool mesh_get_advert_cfg(mesh_advert_cfg_t *out) {
+    portENTER_CRITICAL(&settings_mux);
+    bool known = settings_known;
+    out->lat   = acfg_cache.lat;
+    out->lon   = acfg_cache.lon;
+    out->share_loc = acfg_cache.share;
+    out->autoadd   = acfg_cache.autoadd;
+    portEXIT_CRITICAL(&settings_mux);
+    portENTER_CRITICAL(&tile_mux);
+    out->interval_min = adv.interval_min;
+    out->flood_manual = adv.flood_manual;
+    uint32_t next     = adv.next_epoch;
+    portEXIT_CRITICAL(&tile_mux);
+    out->next_in_s = advcfg_next_in_s(next, mesh_epoch_now());
+    if (!known) {
+        memset(out, 0, sizeof(*out));
+        out->next_in_s = UINT32_MAX;
+    }
+    return known;
+}
+
+extern "C" char const *mesh_set_advert_interval(uint32_t minutes) {
+    if (!advcfg_interval_ok(minutes)) {
+        return "interval is 3 hours to 7 days (180 to 10080 min), or off";
+    }
+    uint32_t epoch = mesh_epoch_now();
+    portENTER_CRITICAL(&tile_mux);
+    adv.interval_min = minutes;
+    uint32_t next    = advcfg_next_due(minutes, adv.last_epoch, epoch);
+    if (next && next < epoch + ADVCFG_FIRST_DELAY_S) {
+        next = epoch + ADVCFG_FIRST_DELAY_S; // a long-overdue schedule does not fire the moment it is set
+    }
+    adv.next_epoch  = next;
+    portEXIT_CRITICAL(&tile_mux);
+    adv_nvs_put_u32("mc_advint", minutes);
+    return NULL;
+}
+
+extern "C" char const *mesh_set_advert_manual_flood(bool flood) {
+    portENTER_CRITICAL(&tile_mux);
+    adv.flood_manual = flood;
+    portEXIT_CRITICAL(&tile_mux);
+    nvs_handle_t h;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "mc_advfl", flood ? 1 : 0);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+    return NULL;
+}
+
+// The prefs setters below: the lock, the change, the save (as the name and radio setters)
+extern "C" char const *mesh_set_location(double lat, double lon) {
+    char const *why = settings_lock();
+    if (why) {
+        return why;
+    }
+    why = mesh_prefs_set_location(node->getNodePrefs(), lat, lon);
+    if (!why) {
+        node->savePrefs();
+        settings_from_node(node);
+    }
+    mesh_unlock();
+    return why;
+}
+
+extern "C" char const *mesh_set_location_share(bool share) {
+    char const *why = settings_lock();
+    if (why) {
+        return why;
+    }
+    why = mesh_prefs_set_loc_share(node->getNodePrefs(), share);
+    if (!why) {
+        node->savePrefs();
+        settings_from_node(node);
+    }
+    mesh_unlock();
+    return why;
+}
+
+extern "C" char const *mesh_set_autoadd(advcfg_autoadd_t const *a) {
+    char const *why = settings_lock();
+    if (why) {
+        return why;
+    }
+    mesh_prefs_set_autoadd(node->getNodePrefs(), a); // MyMesh reads the prefs on each advert: live at once
+    node->savePrefs();
+    settings_from_node(node);
+    mesh_unlock();
+    return NULL;
+}
+
+// The table is full and a new node's advert was not added: one notice per boot would hide a second full table after
+// a clean-up, so it coalesces instead (an unread one gets a count). Under the mesh lock, from MyMesh's loop.
+extern "C" void mesh_contacts_full(void) {
+    lichen_notify_to("meshcore", LN_WARN, "contacts-full", "Contacts full",
+                     "New nodes are not added. Remove contacts, or turn on Overwrite oldest in Auto-add.",
+                     LN_COALESCE);
 }
 
 extern "C" size_t mesh_channels_snapshot(char names[][MESH_CHANNEL_MAX + 1], size_t max) {
@@ -1569,6 +1803,112 @@ static void cmd_mesh_run(bool start) {
     }
 }
 
+// ---- advert, location, auto-add (#52): "fw mesh advert|loc|autoadd" ---------------------------------------------------
+
+static bool arg_onoff(char const *t, bool *v) {
+    if (strcmp(t, "on") == 0 || strcmp(t, "off") == 0) {
+        *v = t[1] == 'n';
+        return true;
+    }
+    return false;
+}
+
+static void reply_result(char const *what, char const *why) {
+    console_reply(why ? "%s not changed: %s" : "%s saved", what, why);
+}
+
+static void cmd_mesh_advert(char const *args) {
+    mesh_advert_cfg_t c;
+    if (strncmp(args, "interval ", 9) == 0) {
+        uint32_t    min;
+        char const *why = advcfg_parse_interval(args + 9, &min);
+        reply_result("advert interval", why ? why : mesh_set_advert_interval(min));
+    } else if (strncmp(args, "manual ", 7) == 0 && (strcmp(args + 7, "zero") == 0 || strcmp(args + 7, "flood") == 0)) {
+        reply_result("manual advert", mesh_set_advert_manual_flood(args[7] == 'f'));
+    } else if (*args) {
+        console_reply("mesh advert | mesh advert interval <off|180|6h|2d> (flood, 3 h to 7 d) | mesh advert manual <zero|flood>");
+        return;
+    }
+    if (!mesh_get_advert_cfg(&c)) {
+        return;
+    }
+    char iv[16], next[12];
+    advcfg_interval_text(c.interval_min, iv, sizeof(iv));
+    advcfg_next_badge(c.next_in_s, next, sizeof(next));
+    console_reply("advert every %s (flood), next %s; the Advertise button sends %s", iv, next[0] ? next : "-",
+                  c.flood_manual ? "flood" : "zero-hop");
+}
+
+static void cmd_mesh_loc(char const *args) {
+    mesh_advert_cfg_t c;
+    double            lat, lon;
+    char              a_lat[24], a_lon[24];
+    if (strncmp(args, "share ", 6) == 0) {
+        bool on;
+        if (arg_onoff(args + 6, &on)) {
+            reply_result("location sharing", mesh_set_location_share(on));
+        } else {
+            console_reply("mesh loc share on|off");
+            return;
+        }
+    } else if (*args) {
+        if (sscanf(args, "%23s %23s", a_lat, a_lon) == 2) {
+            char const *why = advcfg_parse_coord(a_lat, true, &lat);
+            if (!why) {
+                why = advcfg_parse_coord(a_lon, false, &lon);
+            }
+            reply_result("location", why ? why : mesh_set_location(lat, lon));
+        } else {
+            console_reply("mesh loc | mesh loc <lat> <lon> (degrees, 52.3702 4.8952) | mesh loc share on|off");
+            return;
+        }
+    }
+    if (!mesh_get_advert_cfg(&c)) {
+        return;
+    }
+    char pos[40];
+    advcfg_coord_text(c.lat, c.lon, pos, sizeof(pos));
+    console_reply("location %s, %s in adverts", advcfg_location_set(c.lat, c.lon) ? pos : "not set",
+                  c.share_loc ? "shared" : "not shared");
+}
+
+static void cmd_mesh_autoadd(char const *args) {
+    mesh_advert_cfg_t c;
+    if (!mesh_get_advert_cfg(&c)) {
+        return;
+    }
+    advcfg_autoadd_t a = c.autoadd;
+    bool             change = true, on;
+    char const      *why = NULL;
+    if (arg_onoff(args, &on)) {
+        a.on = on;
+        if (on && (a.types & ADVCFG_AA_TYPES) == 0) {
+            a.types = ADVCFG_AA_TYPES;
+        }
+    } else if (strncmp(args, "types ", 6) == 0) {
+        why = advcfg_parse_types(args + 6, &a.types);
+        a.on = true;
+    } else if (strncmp(args, "hops ", 5) == 0) {
+        why = advcfg_parse_hops(args + 5, &a.max_hops);
+    } else if (strncmp(args, "overwrite ", 10) == 0 && arg_onoff(args + 10, &on)) {
+        a.overwrite = on;
+    } else if (*args) {
+        console_reply("mesh autoadd | on|off | types <all|chat,repeater,room,sensor> | hops <any|direct|n> | overwrite on|off");
+        return;
+    } else {
+        change = false;
+    }
+    if (change) {
+        reply_result("auto-add", why ? why : mesh_set_autoadd(&a));
+        mesh_get_advert_cfg(&c);
+    }
+    char types[48], hops[20];
+    advcfg_types_text(c.autoadd.types, types, sizeof(types));
+    advcfg_hops_text(c.autoadd.max_hops, hops, sizeof(hops));
+    console_reply("auto-add %s (%s), max hops %s, overwrite oldest when full: %s", c.autoadd.on ? "on" : "off", types,
+                  hops, c.autoadd.overwrite ? "on" : "off");
+}
+
 static void cmd_mesh(char const *args) {
     if (strcmp(args, "start") == 0 || strcmp(args, "stop") == 0) {
         cmd_mesh_run(strcmp(args, "start") == 0);
@@ -1617,10 +1957,24 @@ static void cmd_mesh(char const *args) {
         cmd_mesh_ident_simulate();
         return;
     }
+    if (strncmp(args, "advert", 6) == 0 && (args[6] == ' ' || !args[6])) {
+        cmd_mesh_advert(args + (args[6] ? 7 : 6));
+        return;
+    }
+    if (strncmp(args, "loc", 3) == 0 && (args[3] == ' ' || !args[3])) {
+        cmd_mesh_loc(args + (args[3] ? 4 : 3));
+        return;
+    }
+    if (strncmp(args, "autoadd", 7) == 0 && (args[7] == ' ' || !args[7])) {
+        cmd_mesh_autoadd(args + (args[7] ? 8 : 7));
+        return;
+    }
     if (*args) {
         console_reply("mesh | mesh start | mesh stop | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
                       "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
-                      "mesh dm <12 hex> <text>");
+                      "mesh dm <12 hex> <text> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
+                      "[<lat> <lon> | share on|off] | mesh autoadd [on|off | types <all|chat,repeater,room,sensor> | hops "
+                      "<any|direct|n> | overwrite on|off]");
         return;
     }
     mesh_lock();
@@ -1936,7 +2290,14 @@ static void cmd_advert(char const *args) {
     if (console_not_running()) {
         return;
     }
-    (void)args;
+    bool flood;
+    mesh_advert_cfg_t cfg;
+    mesh_get_advert_cfg(&cfg);
+    flood = strcmp(args, "flood") == 0 ? true : strcmp(args, "zero") == 0 ? false : cfg.flood_manual;
+    if (*args && strcmp(args, "flood") != 0 && strcmp(args, "zero") != 0) {
+        console_reply("advert [zero|flood] (default: the Advertise setting, now %s)", cfg.flood_manual ? "flood" : "zero");
+        return;
+    }
     if (!ident_tx_allowed()) {
         console_reply("advert not sent: identity %s", mesh_ident_text(MESH_IDENT_MISMATCH));
         return;
@@ -1949,7 +2310,7 @@ static void cmd_advert(char const *args) {
         console_reply("advert not sent: %s (other nodes would drop it)", why);
         return;
     }
-    if (!mesh_send_advert()) {
+    if (!mesh_send_advert_mode(flood)) {
         console_reply("advert not sent");
     } else if (char const *note = mesh_advert_note(clock_is_approximate())) {
         console_reply("advert queued (%s: %s)", note, clock_src_text(CLOCK_SRC_APP)); // allowed, but said (#83)
@@ -2019,7 +2380,7 @@ extern "C" void mesh_console_init(void) {
     console_register("mesh",
                      "mesh | mesh start | mesh stop | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | "
                      "mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
-                     "mesh dm <12 hex> <text> | mesh notify [test dm|chan <name>|fail|mention]",
+                     "mesh dm <12 hex> <text> | mesh notify [test dm|chan <name>|fail|mention] | mesh advert ... | mesh loc ... | mesh autoadd ...",
                      cmd_mesh);
     console_register("contacts", "contacts (nodes heard, newest first) | contacts export [<12 hex>] | contacts import "
                      "<part> | end | cancel", cmd_contacts);
@@ -2027,7 +2388,7 @@ extern "C" void mesh_console_init(void) {
     console_register("channels", "channels (the channels the badge can read)", cmd_channels);
     console_register("channel", "channel add <name> <base64 key> | channel add #name | channel rm <index|name> | "
                      "channel show <index|name> | channel rename <index|name> <new name>", cmd_channel);
-    console_register("advert", "advert (send a zero-hop advert now)", cmd_advert);
+    console_register("advert", "advert [zero|flood] (send an advert now; default as the Advertise setting)", cmd_advert);
 }
 
 // The mesh task, new each start; false when it could not be made
@@ -2133,6 +2494,7 @@ static bool start_locked(char const *files_dir) {
 
     // Everything is loaded before node is published: the screens and the console read MeshCore only through node, and
     // must not walk the contact table while begin() fills it (#65 review)
+    adv_load();
     store.begin();
     migrate_identity();
     bool first_boot = !SPIFFS.exists("/prefs.json") && !SPIFFS.exists("/node_prefs");

@@ -81,6 +81,8 @@ static void refresh(lv_timer_t *t) {
         c->unread       = tile.unread_total;
         c->advert_sent  = tile.advert_sent;
         c->advert_age_s = tile.advert_age_s;
+        c->advert_scheduled = tile.advert_scheduled;
+        c->advert_next_s    = tile.advert_next_s;
         take_contact_counts(c);
     } else {
         *c = (mesh_grid_counts_t){0};
@@ -145,8 +147,11 @@ static void ask_advert(void) {
         advert_status(refusal); // nothing to confirm: it would not be sent
         return;
     }
+    mesh_advert_cfg_t cfg = {0};
+    mesh_get_advert_cfg(&cfg);
     shell_dialog_t const d = {
-        .title        = "Send an advert now? Nodes in direct range hear it.",
+        .title        = cfg.flood_manual ? "Send a flood advert now? The whole mesh hears it."
+                                         : "Send an advert now? Nodes in direct range hear it.",
         .count_prefix = "(cancels in ",
         .count_suffix = " s)",
         .hint         = "Enter: send    Esc: cancel",

@@ -353,6 +353,10 @@ static bool start_background(void) {
     return meshcore_run_boot(); // start at boot on: started here, as before; off: only the console commands (#103)
 }
 
+bool meshcore_setup_done(void) {
+    return app_settings_get_u8(self(), "mc_name_set", 0) != 0;
+}
+
 // "fw setup reset meshcore" / "done meshcore": only the questions' flag; the name and the radio stay
 static void first_run_set(bool done) {
     bool ok = app_settings_set_u8(self(), "mc_name_set", done ? 1 : 0);

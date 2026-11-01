@@ -6,6 +6,8 @@
 
 // The app's settings callback: Name, Region & radio, Channels, Send advert on the page (a menu.h menu)
 void meshcore_settings(lv_obj_t *page);
+// Settings > MeshCore > Advert & contacts (#52: meshcore_advert_settings.c): interval, location, auto-add
+void meshcore_advert_settings_open(void *arg);
 // A zero-hop advert, off the LVGL task (#88: the Settings row and the grid's Advertise tile). status(text) runs on
 // the LVGL task: at once with "sending..." or why nothing is sent (clock not set, busy), later with the result.
 // forget(status) drops a pending result when its screen goes away.

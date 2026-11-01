@@ -597,7 +597,13 @@ target_include_directories(advert_limit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_options(advert_limit_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME advert_limit_test COMMAND advert_limit_test)
 
-add_executable(mesh_grid_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_grid_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_grid.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/home_layout.c)
+add_executable(mesh_advert_cfg_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_advert_cfg_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advert_cfg.c)
+target_include_directories(mesh_advert_cfg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_advert_cfg_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_advert_cfg_test COMMAND mesh_advert_cfg_test)
+
+add_executable(mesh_grid_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_grid_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_grid.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advert_cfg.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/home_layout.c)
 target_include_directories(mesh_grid_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(mesh_grid_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_grid_test COMMAND mesh_grid_test)
@@ -719,6 +725,7 @@ add_executable(companion_test ${CMAKE_CURRENT_SOURCE_DIR}/companion_test.cpp ${L
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_outbox.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/channel_input.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/advert_limit.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advert_cfg.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_link.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_ident.c)
 target_link_libraries(companion_test PRIVATE meshcore_companion_host)
@@ -1068,6 +1075,7 @@ add_custom_target(run_tests
     radio_state_test
     mesh_contact_fmt_test
     advert_limit_test
+    mesh_advert_cfg_test
     mesh_share_test
     mesh_grid_test
     mesh_run_test

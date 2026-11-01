@@ -41,6 +41,8 @@ typedef struct {
     uint32_t heard_age_s; // since the most recently heard contact
     bool     advert_sent; // an advert went out since boot
     uint32_t advert_age_s;
+    bool     advert_scheduled; // a periodic advert is set (#52): the badge says when the next one goes
+    uint32_t advert_next_s;    // in this many seconds
 } mesh_grid_counts_t;
 
 #define MESH_GRID_BADGE_CAP 99 // a count above this reads "99+"
@@ -51,7 +53,7 @@ void mesh_grid_count_text(size_t n, char *out, size_t cap);
 // An age as a badge: "now" under a minute, "5m", "3h", "2d", "99d+" from 100 days
 void mesh_grid_age_text(uint32_t age_s, char *out, size_t cap);
 // The badge of one tile ("" for none): Chat the unread total, Contacts and Repeaters their counts, Heard the age of
-// the newest hearing, Advertise the age of the last advert sent (none before the first), Settings none
+// the newest hearing, Advertise when the next periodic advert is due ("in 3h"), else the age of the last advert sent (none before the first); Settings none
 void mesh_grid_badge(mesh_grid_tile_t tile, mesh_grid_counts_t const *c, char *out, size_t cap);
 
 // The selection after `key` in a grid of `count` tiles, MESH_GRID_COLS wide: the arrows move in 2-D and stop at the

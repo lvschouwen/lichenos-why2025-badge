@@ -419,6 +419,7 @@ void meshcore_settings(lv_obj_t *page) {
     channels_row = menu_add(page, "Channels", "...", open_channels, NULL);
     advert_row   = menu_add(page, "Send advert", "", send_advert, NULL);
     menu_add(page, "Notifications", "", open_notify_page, NULL);
+    menu_add(page, "Advert & contacts", "...", meshcore_advert_settings_open, NULL);
     radio_row_refresh();
     page_channels_refresh();
 }

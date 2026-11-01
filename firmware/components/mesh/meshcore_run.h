@@ -25,6 +25,9 @@ char const *meshcore_run_request(bool start);
 // The app's stop_for_update: final
 bool meshcore_run_stop_for_update(void);
 
+// The first-open questions (name, region) were answered: the periodic advert (#52) waits for it
+bool meshcore_setup_done(void);
+
 bool meshcore_autostart(void);
 bool meshcore_autostart_set(bool on);
 

@@ -17,6 +17,9 @@ void mesh_ob_enter(void);
 void mesh_ob_exit(void);
 // Adverts from new nodes are being dropped (#6): told once per spell, with the total since boot (mesh_task.cpp logs it)
 void mesh_advert_limited(uint32_t refused);
+// The contact table is full and an advert of a new node was not added (#52): called for each such advert, under the
+// mesh lock (mesh_task.cpp raises a coalesced notice)
+void mesh_contacts_full(void);
 }
 
 #define LINK_PUSH_KINDS 0x11 // push codes 0x80..0x90
@@ -92,6 +95,9 @@ public:
         advert_limit_init(&advert_limit_);
     }
     CompanionPipe &pipe() { return pipe_; }
+    // Our own advert, under the mesh lock (#52): zero-hop (heard by nodes in direct range) or flooded with the default
+    // scope as MyMesh's CMD_SEND_SELF_ADVERT does. With the location when the prefs share it. false when no packet.
+    bool advertNow(bool flood);
     // A contact change from the details screen (#49), under the mesh lock. It goes to MyMesh as its own command
     // (RESET_PATH, ADD_UPDATE_CONTACT, REMOVE_CONTACT), so MyMesh saves the contacts itself (its lazy 5 s write) and
     // Remove also drops the stored advert. Reset path and the favourite flag are set at once too, so a copy taken right
@@ -107,6 +113,10 @@ public:
     }
 
 protected:
+    void onContactsFull() override {
+        MyMesh::onContactsFull();
+        mesh_contacts_full();
+    }
     void logRxRaw(float snr, float rssi, uint8_t const raw[], int len) override {} // no LOG_RX_DATA push per packet
     void logRx(mesh::Packet *packet, int len, float score) override;
     void logTx(mesh::Packet *packet, int len) override;

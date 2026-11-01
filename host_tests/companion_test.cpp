@@ -9,6 +9,7 @@
 
 #include "SPIFFS.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -105,6 +106,7 @@ extern "C" void mesh_ob_exit(void) {}
 extern "C" void mesh_advert_limited(uint32_t refused) {
     (void)refused;
 }
+extern "C" void mesh_contacts_full(void) {}
 
 // The app's end of the companion protocol: frames to deliver, frames received
 class FakeApp : public BaseSerialInterface {
@@ -513,6 +515,22 @@ int main(int argc, char **argv) {
         CHECK(tuned_freq == 869.618f && tuned_bw == 62.5f && tuned_sf == 8 && tuned_cr == 8 && tuned_tx == 14);
         CHECK(prefs->path_hash_mode == 1); // MyMesh floods with path_hash_mode + 1 bytes per hop
         mesh.savePrefs();
+
+        // Auto-add, location and its sharing (#52): defaults are MeshCore's (add everything) and private (no location)
+        advcfg_autoadd_t aa;
+        mesh_prefs_get_autoadd(prefs, &aa);
+        CHECK(aa.on && aa.types == ADVCFG_AA_TYPES && !aa.overwrite && aa.max_hops == 0);
+        CHECK(prefs->advert_loc_policy == ADVERT_LOC_NONE);
+        CHECK(mesh_prefs_set_loc_share(prefs, true) != NULL); // no location yet
+        CHECK(prefs->advert_loc_policy == ADVERT_LOC_NONE);
+        CHECK(mesh_prefs_set_location(prefs, 91.0, 0) != NULL && mesh_prefs_set_location(prefs, 0, 181.0) != NULL);
+        CHECK(mesh_prefs_set_location(prefs, NAN, 0) != NULL && sensors.node_lat == 0 && sensors.node_lon == 0);
+        CHECK(mesh_prefs_set_location(prefs, 52.3702, 4.8952) == NULL);
+        CHECK(mesh_prefs_set_loc_share(prefs, true) == NULL && prefs->advert_loc_policy == ADVERT_LOC_SHARE);
+        aa = {true, (uint8_t)(ADVCFG_AA_CHAT | ADVCFG_AA_ROOM), true, 3};
+        mesh_prefs_set_autoadd(prefs, &aa);
+        CHECK(prefs->manual_add_contacts == 1 && prefs->autoadd_config == (ADVCFG_AA_CHAT | ADVCFG_AA_ROOM | 1));
+        mesh.savePrefs();
     }
 
     {
@@ -525,6 +543,12 @@ int main(int argc, char **argv) {
         CHECK(strcmp(mesh.getNodeName(), "Lucas badge") == 0);
         CHECK(prefs->freq == 869.618f && prefs->bw == 62.5f && prefs->sf == 8 && prefs->cr == 8);
         CHECK(prefs->tx_power_dbm == 14 && prefs->path_hash_mode == 1);
+        advcfg_autoadd_t aa;
+        mesh_prefs_get_autoadd(prefs, &aa);
+        CHECK(aa.on && aa.types == (ADVCFG_AA_CHAT | ADVCFG_AA_ROOM) && aa.overwrite && aa.max_hops == 3);
+        CHECK(prefs->advert_loc_policy == ADVERT_LOC_SHARE);
+        CHECK(fabs(sensors.node_lat - 52.3702) < 1e-6 && fabs(sensors.node_lon - 4.8952) < 1e-6);
+        CHECK(mesh_prefs_set_location(prefs, 0, 0) == NULL && prefs->advert_loc_policy == ADVERT_LOC_NONE);
         CHECK(memcmp(self_key(mesh), first_key, PUB_KEY_SIZE) == 0);
     }
 

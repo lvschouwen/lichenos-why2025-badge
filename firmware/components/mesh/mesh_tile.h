@@ -19,6 +19,8 @@ typedef struct {
     char     latest[MESH_TEXT_MAX + 1]; // "[channel] text" of the newest message, "" when none
     bool     advert_sent;  // an advert of ours went out since boot (#88: the grid's Advertise badge)
     uint32_t advert_age_s; // since then
+    bool     advert_scheduled; // a periodic advert is set (#52) ...
+    uint32_t advert_next_s;    // ... and due in this many seconds (0 = due)
 } mesh_tile_t;
 
 #define MESH_TILE_UNREAD_CAP 99 // shown as "99+" above this

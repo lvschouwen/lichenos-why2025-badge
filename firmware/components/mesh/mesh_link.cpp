@@ -75,6 +75,23 @@ static void contact_to_frame(ContactInfo const &c, mf_contact_t *out) {
     out->gps_lon               = c.gps_lon;
 }
 
+bool BadgeMesh::advertNow(bool flood) {
+    if (!flood) {
+        return advert(); // MyMesh's zero-hop advert
+    }
+    NodePrefs const *prefs = getNodePrefs();
+    mesh::Packet    *pkt   = prefs->advert_loc_policy == ADVERT_LOC_NONE
+                                 ? createSelfAdvert(prefs->node_name)
+                                 : createSelfAdvert(prefs->node_name, sensors.node_lat, sensors.node_lon);
+    if (!pkt) {
+        return false;
+    }
+    TransportKey scope; // the default scope, as CMD_SEND_SELF_ADVERT sends it (all zero = unscoped)
+    memcpy(&scope.key, prefs->default_scope_key, sizeof(scope.key));
+    sendFloodScoped(scope, pkt, 0);
+    return true;
+}
+
 int BadgeMesh::dropOutbound() {
     int n = 0;
     while (_mgr->getOutboundTotal() > 0) {

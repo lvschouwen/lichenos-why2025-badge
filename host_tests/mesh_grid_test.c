@@ -101,6 +101,15 @@ static void test_badges(void) {
     c.advert_sent  = true;
     c.advert_age_s = 0;
     CHECK(strcmp(badge(MESH_GRID_ADVERTISE, &c), "now") == 0);
+    // a periodic advert set (#52): the badge says when the next one goes, over the age of the last
+    c.advert_scheduled = true;
+    c.advert_next_s    = 3 * 3600;
+    CHECK(strcmp(badge(MESH_GRID_ADVERTISE, &c), "in 3h") == 0);
+    c.advert_sent = false; // even before the first advert
+    c.advert_next_s = 0;
+    CHECK(strcmp(badge(MESH_GRID_ADVERTISE, &c), "soon") == 0);
+    c.advert_scheduled = false;
+    CHECK(strcmp(badge(MESH_GRID_ADVERTISE, &c), "") == 0);
 }
 
 // The six tiles: Chat Contacts Repeaters / Heard Advertise Settings
