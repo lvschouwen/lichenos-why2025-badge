@@ -93,7 +93,7 @@ bool display_start(lv_display_t **out) {
         .vres          = LCD_V_RES,
         .color_format  = LV_COLOR_FORMAT_RGB565,
         .flags.buff_spiram = 1,
-        .flags.sw_rotate   = 1, // rotation requested; with LVGL_PORT_ENABLE_PPA=y the PPA does it
+        .flags.sw_rotate   = 1, // rotation requested; the port rotates on the CPU (LVGL_PORT_ENABLE_PPA=n since #95: the PPA pass through a second PSRAM buffer was slower)
     };
     lvgl_port_display_dsi_cfg_t const dsi_cfg = {.flags.avoid_tearing = 0};
     *out = lvgl_port_add_disp_dsi(&disp_cfg, &dsi_cfg);

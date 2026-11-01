@@ -101,7 +101,8 @@ CONFIG_LV_USE_SNAPSHOT=y
 # Run code and read-only data from PSRAM: flash writes (settings, file pushes, updates) then no longer suspend the
 # caches, which disturbed the panel's scan-out from its PSRAM framebuffer as yellow flashes (#61)
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
-CONFIG_LVGL_PORT_ENABLE_PPA=y
+# CONFIG_LVGL_PORT_ENABLE_PPA is not set
+# #95: at 120 MHz PSRAM the CPU rotates a 720x80 strip faster than the blocking PPA pass through its second PSRAM buffer (flush 2.3 vs 3.7 ms/strip, scroll 13.9 vs 12.5 fps)
 
 # Keep every crash (#74): the core dump goes to the coredump partition. ELF format and a SHA256 check are the only
 # ones left in ESP-IDF 6.1 (no CRC32 choice). The dump holds every task's stack, so it must fit in 128 KB.
