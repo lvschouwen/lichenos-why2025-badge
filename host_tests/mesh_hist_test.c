@@ -23,12 +23,16 @@ static int failures;
 static mesh_hist_crypt_t kc; // the test journal's keys (open)
 static uint32_t          rand_ctr;
 
-static void test_rand(void *buf, size_t len) { // deterministic, never the same bytes twice in a row
-    uint8_t *p = (uint8_t *)buf;
+static void test_rand(void *buf, size_t len) { // deterministic: xorshift64
+    static uint64_t x = 88172645463325252ull;
+    uint8_t        *p = (uint8_t *)buf;
     for (size_t i = 0; i < len; i++) {
-        uint32_t x = ++rand_ctr * 2654435761u;
-        p[i]       = (uint8_t)(x >> 24);
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        p[i] = (uint8_t)(x >> 32);
     }
+    rand_ctr++;
 }
 
 static void test_root(uint8_t root[32], uint8_t first) {
@@ -91,11 +95,10 @@ static bool mem_write(void *ctx, uint8_t const *buf, size_t len) {
     return true;
 }
 
-// The root of kc, not open: a scan or compaction opens it from the journal's HEAD
+// A copy of kc, open (as the writer's keys a compaction gets on the badge)
 static mesh_hist_crypt_t *kcopy(void) {
     static mesh_hist_crypt_t c;
-    c      = kc;
-    c.open = false;
+    c = kc;
     return &c;
 }
 
@@ -132,7 +135,7 @@ static mesh_hist_rec_t msg_rec(mesh_chat_key_t const *k, uint32_t seq, char cons
     return r;
 }
 
-#define MAX_RECS 256
+#define MAX_RECS 512
 static mesh_hist_rec_t got[MAX_RECS];
 static size_t          got_n;
 
@@ -149,7 +152,8 @@ static mesh_hist_scan_t scan_bytes(uint8_t const *p, size_t len, size_t chunk) {
     static uint8_t   buf[MESH_HIST_SCAN_BUF];
     mem_rd_t          rd = {.p = p, .len = len, .chunk = chunk};
     mesh_hist_scan_t  s;
-    mesh_hist_crypt_t c = kc; // the root; the journal's HEAD opens it
+    mesh_hist_crypt_t c = kc; // the root; the journal's HEAD opens it (as the boot's first pass)
+    c.open              = false;
     got_n               = 0;
     mesh_hist_scan(mem_read, &rd, buf, &c, collect, NULL, &s);
     return s;
@@ -469,7 +473,7 @@ static void writer_checks(void) {
     CHECK(got[got_n - 1].seq == 100 && got[got_n - 1].state == MESH_OUT_FAILED);
 
     // A full buffer drops records and counts them
-    mesh_hist_init(&h, pend, 140, &kc);
+    mesh_hist_init(&h, pend, 200, &kc); // the HEAD that starts a batch, the CHAT and the MSG fit; a second MSG not
     m.seq = 1;
     strcpy(m.channel, "#badgetest");
     CHECK(mesh_hist_add(&h, &ck, &m, 1)); // CHAT + MSG, about 90 bytes
@@ -742,17 +746,19 @@ static void crypto_checks(void) {
     s                       = scan_bytes(file, file_len, 0);
     CHECK(s.unreadable && !s.head && got_n == 0);
     kc = saved;
-    // A journal of the plaintext format (no HEAD; its records do not authenticate either) is unreadable
+    // No HEAD anywhere (the plaintext format of 58e9fef6, or a HEAD lost with nothing after it): nothing read, and
+    // the boot moves the file aside
     s = scan_bytes(file + MESH_HIST_HDR + 1 + MESH_HIST_SALT + MESH_HIST_CHECK,
                    file_len - (MESH_HIST_HDR + 1 + MESH_HIST_SALT + MESH_HIST_CHECK), 0);
-    CHECK(s.unreadable && got_n == 0);
+    CHECK(!s.head && s.before_head == 3 && got_n == 0);
+    CHECK(mesh_hist_load_plan(true, 500, &s, true) == MESH_HIST_LOAD_ASIDE);
     // A HEAD of a newer version is not read either
     uint8_t head[64];
     size_t  hn = mesh_hist_encode_head(&kc, head, sizeof(head));
     head[MESH_HIST_HDR] = MESH_HIST_VERSION + 1;
     fix_crc(head);
     s = scan_bytes(head, hn, 0);
-    CHECK(s.unreadable);
+    CHECK(!s.head && mesh_hist_load_plan(true, hn, &s, true) == MESH_HIST_LOAD_ASIDE);
     // Keys from a salt open only with its check value; a new journal gets a new salt
     mesh_hist_crypt_t c;
     mesh_hist_crypt_init(&c, root, test_rand);
@@ -771,12 +777,181 @@ static void crypto_checks(void) {
     CHECK(na > 0 && na <= MESH_HIST_REC_MAX);
 }
 
+// A damaged first HEAD costs nothing: the repeat brings the keys, a second pass with them reads everything
+static void head_redundancy_checks(void) {
+    mesh_chat_key_t ck = chan_key("#a");
+    start_file();
+    mesh_hist_rec_t r = chat_rec(&ck, "#a");
+    append(&r);
+    for (uint32_t seq = 1; seq <= 10; seq++) {
+        r = msg_rec(&ck, seq, "before the repeat");
+        append(&r);
+    }
+    file_len += mesh_hist_encode_head(&kc, file + file_len, sizeof(file) - file_len); // the repeat
+    for (uint32_t seq = 11; seq <= 20; seq++) {
+        r = msg_rec(&ck, seq, "after");
+        append(&r);
+    }
+    file[MESH_HIST_HDR + 3] ^= 0x40; // the first HEAD's salt: its CRC fails
+    // Pass A, keys closed: the first good HEAD is the repeat; the 11 records before it wait for pass B
+    mesh_hist_scan_t s = scan_bytes(file, file_len, 0);
+    CHECK(s.head && s.resyncs == 1 && s.before_head == 11 && got_n == 10);
+    CHECK(mesh_hist_load_plan(true, file_len, &s, true) == MESH_HIST_LOAD_USE);
+    // Pass B, keys open: everything but the damaged HEAD
+    static uint8_t      buf[MESH_HIST_SCAN_BUF];
+    mem_rd_t            rd = {.p = file, .len = file_len};
+    got_n                  = 0;
+    mesh_hist_scan(mem_read, &rd, buf, kcopy(), collect, NULL, &s);
+    CHECK(s.head && s.heads == 1 && s.before_head == 0 && got_n == 21 && got[20].seq == 20);
+    file[MESH_HIST_HDR + 3] ^= 0x40;
+
+    // A HEAD of another journal mid-file never re-keys: an auth failure, the records after it still read
+    mesh_hist_crypt_t other = kc;
+    CHECK(mesh_hist_crypt_new(&other));
+    size_t at = file_len;
+    file_len += mesh_hist_encode_head(&other, file + file_len, sizeof(file) - file_len);
+    r = msg_rec(&ck, 21, "after a foreign HEAD");
+    append(&r);
+    (void)at;
+    s = scan_bytes(file, file_len, 0);
+    CHECK(s.head && s.heads == 2 && s.auth_failures == 1 && got_n == 22 && got[21].seq == 21);
+
+    // The writer starts each boot's first batch with a HEAD and repeats it every MESH_HIST_HEAD_EVERY records
+    static mesh_hist_t h;
+    static uint8_t     pend[65536];
+    mesh_hist_init(&h, pend, sizeof(pend), &kc);
+    mesh_msg_t m;
+    memset(&m, 0, sizeof(m));
+    strcpy(m.channel, "#a");
+    strcpy(m.text, "x: y");
+    for (uint32_t i = 1; i <= MESH_HIST_HEAD_EVERY + 10; i++) {
+        m.seq = i;
+        CHECK(mesh_hist_add(&h, &ck, &m, 1));
+    }
+    s = scan_bytes(h.buf, h.len, 0); // no HEAD put in front: the buffer brings its own
+    CHECK(s.head && s.heads == 2 && got_n == MESH_HIST_HEAD_EVERY + 11 && h.pending_records == got_n);
+}
+
+// A tampered length field (the CRC made to match) fails the tag; the scan resyncs at the next record
+static void length_checks(void) {
+    mesh_chat_key_t ck = chan_key("#a");
+    start_file();
+    mesh_hist_rec_t r = msg_rec(&ck, 1, "one");
+    size_t          at = file_len;
+    append(&r);
+    r = msg_rec(&ck, 2, "two");
+    append(&r);
+    uint8_t *rec  = file + at;
+    size_t   plen = rec[2] | rec[3] << 8;
+    rec[2]        = (uint8_t)(plen - 1);
+    fix_crc(rec);
+    mesh_hist_rec_t out;
+    size_t          used = 0;
+    CHECK(DEC(rec, file_len - at, &out, &used) == MESH_HIST_AUTH && used == MESH_HIST_HDR + plen - 1);
+    mesh_hist_scan_t s = scan_bytes(file, file_len, 0);
+    CHECK(s.auth_failures == 1 && s.resyncs == 1 && got_n == 1 && got[0].seq == 2);
+}
+
+// 1000 records of one seq (rewrites share it): every nonce differs
+static void nonce_checks(void) {
+    static uint8_t  nonces[1000][MESH_HIST_NONCE];
+    mesh_chat_key_t ck = chan_key("#a");
+    mesh_hist_rec_t r  = msg_rec(&ck, 7, "same text, same seq");
+    uint8_t         rec[MESH_HIST_REC_MAX];
+    for (size_t i = 0; i < 1000; i++) {
+        CHECK(ENC(&r, rec, sizeof(rec)) > 0);
+        memcpy(nonces[i], rec + MESH_HIST_HDR, MESH_HIST_NONCE);
+    }
+    size_t same = 0;
+    for (size_t i = 0; i < 1000; i++) {
+        for (size_t j = i + 1; j < 1000; j++) {
+            same += memcmp(nonces[i], nonces[j], MESH_HIST_NONCE) == 0;
+        }
+    }
+    CHECK(same == 0);
+}
+
+// A failed primitive is no verdict: the scan stops with crypto_error, a compaction refuses, nothing is dropped
+static void fault_checks(void) {
+    mesh_chat_key_t ck = chan_key("#a");
+    start_file();
+    mesh_hist_rec_t r = chat_rec(&ck, "#a");
+    append(&r);
+    r = msg_rec(&ck, 1, "kept");
+    append(&r);
+    mh_test_fail(true);
+    mesh_hist_scan_t s = scan_bytes(file, file_len, 0); // keys closed: the HEAD check fails
+    CHECK(s.crypto_error && !s.unreadable && !s.head && got_n == 0);
+    CHECK(mesh_hist_load_plan(true, file_len, &s, true) == MESH_HIST_LOAD_OFF);
+    static uint8_t      buf[MESH_HIST_SCAN_BUF];
+    mem_rd_t            rd = {.p = file, .len = file_len};
+    got_n                  = 0;
+    mesh_hist_scan(mem_read, &rd, buf, kcopy(), collect, NULL, &s); // keys open: the HEAD repeat check fails
+    CHECK(s.crypto_error && s.auth_failures == 0 && got_n == 0);
+    mesh_hist_table_t t;
+    mesh_hist_table_init(&t, slots, 16);
+    uint8_t             stage[MESH_HIST_REC_MAX * 2];
+    mesh_hist_compact_t st;
+    rd.pos  = 0;
+    out_len = 0;
+    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    CHECK(!st.ok && out_len == 0);
+    uint8_t one[MESH_HIST_REC_MAX];
+    CHECK(ENC(&r, one, sizeof(one)) == 0); // and nothing is written in plaintext either
+    mh_test_fail(false);
+    // A failure inside a record (after a good HEAD): stops there, no auth failure counted
+    s = scan_bytes(file, file_len, 0);
+    CHECK(s.head && got_n == 2);
+}
+
+// The boot's decisions on its files
+static void plan_checks(void) {
+    struct {
+        bool              bin, tmp, clean, bad;
+        mesh_hist_files_t plan;
+    } const files[] = {
+        {true, false, false, false, MESH_HIST_FILES_KEEP},       {false, false, false, true, MESH_HIST_FILES_KEEP},
+        {true, true, true, false, MESH_HIST_FILES_TMP_WINS},     // a rename cut halfway: log.tmp is whole
+        {true, true, false, true, MESH_HIST_FILES_DROP_TMP},     // log.tmp cut while written, log.bin whole
+        {false, true, true, true, MESH_HIST_FILES_TMP_WINS},     // cut between unlink and rename
+        {false, true, false, true, MESH_HIST_FILES_BAD_BACK},    // cut while writing log.tmp from log.bad
+        {false, true, false, false, MESH_HIST_FILES_TMP_WINS},   // all there is
+    };
+    for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++) {
+        CHECK(mesh_hist_files_plan(files[i].bin, files[i].tmp, files[i].clean, files[i].bad) == files[i].plan);
+    }
+    mesh_hist_scan_t ok, none, foreign, broken, crypto;
+    memset(&ok, 0, sizeof(ok));
+    none = foreign = broken = crypto = ok;
+    ok.head                          = true;
+    foreign.unreadable               = true;
+    broken.before_head               = 0; // garbage: no HEAD, no records
+    broken.torn                      = true;
+    crypto.crypto_error              = true;
+    CHECK(mesh_hist_load_plan(false, 0, &none, true) == MESH_HIST_LOAD_FRESH);
+    CHECK(mesh_hist_load_plan(true, 0, &none, true) == MESH_HIST_LOAD_FRESH);        // empty: nothing to keep
+    CHECK(mesh_hist_load_plan(true, 900, &ok, false) == MESH_HIST_LOAD_USE);
+    CHECK(mesh_hist_load_plan(true, 900, &foreign, true) == MESH_HIST_LOAD_ASIDE);
+    CHECK(mesh_hist_load_plan(true, 70000, &broken, true) == MESH_HIST_LOAD_ASIDE);  // never truncated
+    CHECK(mesh_hist_load_plan(true, 900, &foreign, false) == MESH_HIST_LOAD_OFF);    // both log.old names taken
+    CHECK(mesh_hist_load_plan(true, 900, &crypto, true) == MESH_HIST_LOAD_OFF);
+    CHECK(mesh_hist_aside_slot(false, false) == 0 && mesh_hist_aside_slot(true, false) == 1 &&
+          mesh_hist_aside_slot(true, true) == -1 && mesh_hist_aside_slot(false, true) == 0);
+    CHECK(mesh_hist_newest_slot(true, true) == 1 && mesh_hist_newest_slot(true, false) == 0 &&
+          mesh_hist_newest_slot(false, false) == -1);
+}
+
 int main(void) {
     uint8_t root[32];
     test_root(root, 0);
     mesh_hist_crypt_init(&kc, root, test_rand);
     mesh_hist_crypt_new(&kc);
     crypto_checks();
+    head_redundancy_checks();
+    length_checks();
+    nonce_checks();
+    fault_checks();
+    plan_checks();
     codec_checks();
     unknown_type_checks();
     scan_checks();

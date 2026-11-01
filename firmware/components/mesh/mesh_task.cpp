@@ -1378,8 +1378,12 @@ extern "C" bool mesh_start(char const *files_dir) {
     // The history from the SD card (#48), encrypted with a key from the identity begin() just loaded (#98), before the
     // mesh task runs: the replayed messages are older than anything MeshCore adds, which it does only in its loop
     uint8_t prv[PRV_KEY_SIZE];
-    n->self_id.writeTo(prv, sizeof(prv)); // with room for the private key only, that is what it writes
-    mesh_journal_boot(STORE_MESSAGES, mesh_lock, mesh_unlock, prv, sizeof(prv));
+    // With room for the private key only, that is what it writes; anything else: no key (never stack garbage)
+    bool have_prv = n->self_id.writeTo(prv, sizeof(prv)) == PRV_KEY_SIZE;
+    if (!have_prv) {
+        ESP_LOGW(TAG, "identity key not readable: message history off");
+    }
+    mesh_journal_boot(STORE_MESSAGES, mesh_lock, mesh_unlock, have_prv ? prv : NULL, sizeof(prv));
     mh_wipe(prv, sizeof(prv));
     n->setListener(&screen_feed);
     n->startPipe(); // connected, so MyMesh's replies and pushes reach us (#45)

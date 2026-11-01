@@ -17,9 +17,10 @@
 extern "C" {
 #endif
 
-// Boot, after MeshCore's begin() loaded the identity (prv: its private key, for the journal key, #98; not kept) and
+// Boot, after MeshCore's begin() loaded the identity (prv: its private key, for the journal key, #98; not kept;
+// NULL when it could not be read: history off) and
 // before the mesh task runs: replays the journal into the store (taking lock/unlock around each store change, the
-// screens may already be reading it), compacts it when needed, and checks the card. Persistence is off (one
+// screens may already be reading it), asks the mesh task for a compaction when needed, and checks the card. Persistence is off (one
 // ESP_LOGW, RAM history keeps working) without a card, on a full card, or when memory or the journal fail.
 void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), uint8_t const *prv, size_t prv_len);
 

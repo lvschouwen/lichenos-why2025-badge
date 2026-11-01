@@ -358,12 +358,15 @@ static mesh_hist_dec_t decrypt(uint8_t const *p, size_t plen, mesh_hist_crypt_t 
     }
     size_t  n = plen - MESH_HIST_NONCE - MESH_HIST_TAG;
     uint8_t tag[MESH_HIST_TAG], iv[12], plain[MESH_HIST_REC_MAX];
-    if (!record_tag(c, rec->type, rec->seq, p, MESH_HIST_NONCE + n, tag) || !same16(tag, p + MESH_HIST_NONCE + n)) {
+    if (!record_tag(c, rec->type, rec->seq, p, MESH_HIST_NONCE + n, tag)) {
+        return MESH_HIST_CRYPTO; // the primitive failed: no verdict on the record
+    }
+    if (!same16(tag, p + MESH_HIST_NONCE + n)) {
         return MESH_HIST_AUTH;
     }
     memcpy(plain, p + MESH_HIST_NONCE, n);
     record_iv(rec->seq, p, iv);
-    mesh_hist_dec_t d = mh_aes128_ctr(c->enc, iv, plain, n) ? parse_plain(plain, n, rec) : MESH_HIST_AUTH;
+    mesh_hist_dec_t d = mh_aes128_ctr(c->enc, iv, plain, n) ? parse_plain(plain, n, rec) : MESH_HIST_CRYPTO;
     mh_wipe(plain, n);
     return d;
 }
@@ -434,22 +437,42 @@ static void scan_bad(mesh_hist_scan_t *out, uint8_t const *buf, size_t have, siz
     } while (*off < have && buf[*off] != MESH_HIST_MAGIC);
 }
 
+// A HEAD record: false when the scan must stop. While the keys are open, a repeat of this journal's HEAD (same salt,
+// its check) is fine; any other is not ours and never re-keys (counted as an auth failure).
+static bool scan_head(mesh_hist_scan_t *out, mesh_hist_crypt_t *c, mesh_hist_rec_t const *rec) {
+    if (c && c->open) {
+        uint8_t want[MESH_HIST_CHECK];
+        if (!check_value(c, c->salt, want)) {
+            out->crypto_error = true;
+            return false;
+        }
+        if (memcmp(rec->salt, c->salt, MESH_HIST_SALT) != 0 || !same16(want, rec->check)) {
+            out->auth_failures++;
+            return true;
+        }
+    } else if (!c || !mesh_hist_crypt_open(c, rec->salt, rec->check)) {
+        if (c && c->error) {
+            out->crypto_error = true; // not the journal's fault: never moved aside for this
+        } else {
+            out->unreadable = true; // another node's journal, or one from before a new identity
+        }
+        return false;
+    }
+    out->head = true;
+    out->heads++;
+    return true;
+}
+
 // A whole record (decoded, or failing its tag): false when the scan must stop
 static bool scan_good(mesh_hist_scan_t *out, mesh_hist_dec_t d, mesh_hist_rec_t const *rec, mesh_hist_crypt_t *c,
                       uint8_t const *raw, size_t used, mesh_hist_rec_fn on_rec, void *ctx) {
     if (rec->type == MESH_HIST_HEAD && d == MESH_HIST_OK) {
-        if (!c || !mesh_hist_crypt_open(c, rec->salt, rec->check)) {
-            if (c && c->error) {
-                out->crypto_error = true; // not the journal's fault: never moved aside for this
-            } else {
-                out->unreadable = true; // another node's journal, or one from before a new identity
-            }
+        if (!scan_head(out, c, rec)) {
             return false;
         }
-        out->head = true;
-    } else if (!out->head) {
-        out->unreadable = true; // no HEAD first: a plaintext journal of an older build, or not ours
-        return false;
+    } else if (!c || !c->open) {
+        out->before_head++; // no keys yet: a later HEAD brings them, and a second pass reads this one
+        return true;
     }
     if (d == MESH_HIST_AUTH) {
         out->auth_failures++;
@@ -472,6 +495,10 @@ void mesh_hist_scan(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_
     for (;;) {
         size_t          used = 0;
         mesh_hist_dec_t d    = mesh_hist_decode(buf + off, have - off, c, &rec, &used);
+        if (d == MESH_HIST_CRYPTO) {
+            out->crypto_error = true; // stop: dropping good records as if they failed their tag would lose them
+            return;
+        }
         if (d == MESH_HIST_OK || d == MESH_HIST_AUTH) {
             if (skipping) {
                 skipping = false;
@@ -515,24 +542,29 @@ void mesh_hist_scan(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_
 
 void mesh_hist_init(mesh_hist_t *h, uint8_t *buf, size_t cap, mesh_hist_crypt_t const *crypt) {
     memset(h, 0, sizeof(*h));
-    h->buf   = buf;
-    h->cap   = cap;
-    h->crypt = crypt;
+    h->buf        = buf;
+    h->cap        = cap;
+    h->crypt      = crypt;
+    h->since_head = MESH_HIST_HEAD_EVERY; // the first batch after a boot starts with a HEAD
 }
 
+// A record into the pending buffer, after a repeat of the journal's HEAD when one is due (MESH_HIST_HEAD_EVERY)
 static bool emit(mesh_hist_t *h, mesh_hist_rec_t const *rec, uint32_t now_s) {
-    uint8_t tmp[MESH_HIST_REC_MAX];
-    size_t  n = mesh_hist_encode(rec, h->crypt, tmp, sizeof(tmp));
-    if (n == 0 || h->len + n > h->cap) {
+    uint8_t tmp[2 * MESH_HIST_REC_MAX];
+    size_t  head = h->since_head >= MESH_HIST_HEAD_EVERY ? mesh_hist_encode_head(h->crypt, tmp, MESH_HIST_REC_MAX) : 0;
+    size_t  n    = mesh_hist_encode(rec, h->crypt, tmp + head, MESH_HIST_REC_MAX);
+    if (n == 0 || (h->since_head >= MESH_HIST_HEAD_EVERY && head == 0) || h->len + head + n > h->cap) {
+        mh_wipe(tmp, sizeof(tmp));
         h->dropped++;
         return false;
     }
     if (h->len == 0) {
         h->oldest_s = now_s;
     }
-    memcpy(h->buf + h->len, tmp, n);
-    h->len += n;
-    h->pending_records++;
+    memcpy(h->buf + h->len, tmp, head + n);
+    h->len += head + n;
+    h->pending_records++; // the HEAD repeats are not counted: they carry no message
+    h->since_head = head ? 1 : h->since_head + 1;
     return true;
 }
 
@@ -874,7 +906,7 @@ typedef struct {
     mesh_hist_crypt_t   *crypt;
     mesh_hist_table_t   *t;
     size_t               keep;
-    bool                 head_written;
+    uint32_t             since_head;
     mesh_hist_write_fn   write;
     void                *wctx;
     uint8_t             *out;
@@ -900,11 +932,27 @@ static void staged(compact_ctx_t *c, size_t n) {
     c->st->records_out += n ? 1 : 0;
 }
 
-// A record as it is in the journal (same nonce, same ciphertext)
-static bool stage_raw(compact_ctx_t *c, uint8_t const *raw, size_t n) {
+// The journal's HEAD: first in the output, and again every MESH_HIST_HEAD_EVERY records
+static bool stage_head(compact_ctx_t *c) {
     if (!stage_room(c)) {
         return false;
     }
+    size_t n = mesh_hist_encode_head(c->crypt, c->out + c->out_len, c->out_cap - c->out_len);
+    if (n == 0) {
+        c->st->ok = false;
+        return false;
+    }
+    staged(c, n);
+    c->since_head = 0;
+    return true;
+}
+
+// A record as it is in the journal (same nonce, same ciphertext)
+static bool stage_raw(compact_ctx_t *c, uint8_t const *raw, size_t n) {
+    if ((c->since_head >= MESH_HIST_HEAD_EVERY && !stage_head(c)) || !stage_room(c)) {
+        return false;
+    }
+    c->since_head++;
     memcpy(c->out + c->out_len, raw, n);
     staged(c, n);
     return true;
@@ -912,19 +960,23 @@ static bool stage_raw(compact_ctx_t *c, uint8_t const *raw, size_t n) {
 
 // A new record (a chat's CHAT with its last title), encrypted with the journal's keys and a fresh nonce
 static bool stage(compact_ctx_t *c, mesh_hist_rec_t const *rec) {
-    if (!stage_room(c)) {
+    if ((c->since_head >= MESH_HIST_HEAD_EVERY && !stage_head(c)) || !stage_room(c)) {
         return false;
     }
-    staged(c, mesh_hist_encode(rec, c->crypt, c->out + c->out_len, c->out_cap - c->out_len));
+    size_t n = mesh_hist_encode(rec, c->crypt, c->out + c->out_len, c->out_cap - c->out_len);
+    if (n == 0) {
+        c->st->ok = false; // the chat would lose its CHAT record: stop rather than write a journal without it
+        return false;
+    }
+    staged(c, n);
+    c->since_head++;
     return true;
 }
 
 static bool compact_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes, void *ctx) {
     compact_ctx_t *c = (compact_ctx_t *)ctx;
     if (r->type == MESH_HIST_HEAD) {
-        bool first      = !c->head_written;
-        c->head_written = true;
-        return !first || stage_raw(c, raw, bytes); // the same salt: the writer's keys stay valid
+        return true; // the output has its own, with the same salt: the writer's keys stay valid
     }
     if (r->type != MESH_HIST_CHAT && r->type != MESH_HIST_MSG) {
         return true; // READ records go
@@ -981,12 +1033,57 @@ void mesh_hist_compact(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hi
                        .out_cap = out_cap,
                        .st      = st};
     mesh_hist_scan_t scan;
+    if (!crypt->open || !stage_head(&c)) {
+        st->ok = false; // never write a journal without its HEAD
+        return;
+    }
     mesh_hist_scan(read, rctx, buf, crypt, compact_rec, &c, &scan);
     st->auth_failures = scan.auth_failures;
-    if (!scan.head) {
-        st->ok = false; // never write a journal without its HEAD
+    if (scan.crypto_error || scan.unreadable || crypt->error) {
+        st->ok = false; // never rewrite a journal after a primitive failed: records would go missing
     }
     if (st->ok && c.out_len && !write(wctx, out, c.out_len)) {
         st->ok = false;
     }
+}
+
+// ---- boot decisions ------------------------------------------------------------------------------------------------
+
+mesh_hist_files_t mesh_hist_files_plan(bool have_bin, bool have_tmp, bool tmp_clean, bool have_bad) {
+    if (!have_tmp) {
+        return MESH_HIST_FILES_KEEP;
+    }
+    if (tmp_clean) {
+        return MESH_HIST_FILES_TMP_WINS; // a whole compaction: log.bin, if still there, is the older copy
+    }
+    if (have_bin) {
+        return MESH_HIST_FILES_DROP_TMP; // cut while being written: log.bin is still whole
+    }
+    // No log.bin and a log.tmp that is not whole: a compaction from log.bad was cut while writing log.tmp
+    return have_bad ? MESH_HIST_FILES_BAD_BACK : MESH_HIST_FILES_TMP_WINS;
+}
+
+mesh_hist_load_t mesh_hist_load_plan(bool exists, uint64_t size, mesh_hist_scan_t const *s, bool aside_free) {
+    if (!exists) {
+        return MESH_HIST_LOAD_FRESH;
+    }
+    if (s->crypto_error) {
+        return MESH_HIST_LOAD_OFF; // no verdict on the file: leave it
+    }
+    if (s->head && !s->unreadable) {
+        return MESH_HIST_LOAD_USE;
+    }
+    if (size == 0) {
+        return MESH_HIST_LOAD_FRESH; // an empty file holds nothing to keep
+    }
+    // Another key, an older format, or no HEAD anywhere (garbage after a power cut): never truncated, kept aside
+    return aside_free ? MESH_HIST_LOAD_ASIDE : MESH_HIST_LOAD_OFF;
+}
+
+int mesh_hist_aside_slot(bool have_0, bool have_1) {
+    return !have_0 ? 0 : !have_1 ? 1 : -1;
+}
+
+int mesh_hist_newest_slot(bool have_0, bool have_1) {
+    return have_1 ? 1 : have_0 ? 0 : -1;
 }

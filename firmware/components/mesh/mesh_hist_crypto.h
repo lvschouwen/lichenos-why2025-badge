@@ -31,6 +31,10 @@ bool mh_aes128_ctr_at(uint8_t const key[16], uint8_t const iv[12], uint32_t firs
 void mh_wipe(void *p, size_t len);
 // "hardware (PSA)" or "portable"
 char const *mh_backend(void);
+#ifndef ESP_PLATFORM
+// Host tests only: while on, every primitive fails (a hardware error or out of memory on the badge)
+void mh_test_fail(bool on);
+#endif
 // Known-answer tests (mesh_hist_selftest.c): 0 when all pass, else the number of the first that failed
 int mh_selftest(void);
 

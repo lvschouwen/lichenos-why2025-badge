@@ -21,7 +21,9 @@
 #define LOG_PATH      SD_MESSAGES_DIR "/log.bin"
 #define TMP_PATH      SD_MESSAGES_DIR "/log.tmp"
 #define BAD_PATH      SD_MESSAGES_DIR "/log.bad" // a damaged journal as it was, kept when much followed the damage
+#define BAD1_PATH     SD_MESSAGES_DIR "/log.bad.1"
 #define OLD_PATH      SD_MESSAGES_DIR "/log.old" // a journal this node cannot read (another key, an older format)
+#define OLD1_PATH     SD_MESSAGES_DIR "/log.old.1" // two of each are kept; neither is ever overwritten
 #define BAD_KEEP_FROM 4096 // bytes after the first bad spot that make log.bad worth keeping
 #define TABLE_CHATS   1024 // chats a compaction tells apart (PSRAM, about 170 KB while it runs); more keep everything
 #define STAGE_BYTES   4096
@@ -55,6 +57,7 @@ static volatile bool        compact_asked; // the mesh task compacts before its 
 static void turn_off(char const *why) {
     why_off = why;
     on      = false;
+    mh_wipe(&wcrypt, sizeof(wcrypt)); // nothing encrypts or reads the journal any more: the keys go
     ESP_LOGW(TAG, "message history off: %s (messages are kept in RAM until the next restart)", why);
 }
 
@@ -170,8 +173,19 @@ static bool count_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes
     return true;
 }
 
+static bool exists(char const *path) {
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+
+// Copies kept aside are never overwritten: the plain name, else ".1", else none (-1)
+static int aside_slot(char const *base0, char const *base1) {
+    return mesh_hist_aside_slot(exists(base0), exists(base1));
+}
+
 // Pass 1 over log.bin, then the rewrite. A damaged journal with more than BAD_KEEP_FROM bytes after its first bad spot
-// is kept as log.bad (renamed, so it costs no copy) and compacted from there.
+// is kept as log.bad (or log.bad.1; renamed, so it costs no copy) and compacted from there. Nothing is rewritten after
+// a crypto primitive failed: records would go missing.
 static char const *compact_journal(work_t *w, int *err) {
     struct stat      st;
     mesh_hist_scan_t scan;
@@ -185,23 +199,29 @@ static char const *compact_journal(work_t *w, int *err) {
     if (!ok) {
         return "journal read failed"; // compacting now would drop everything after the failed read
     }
+    if (scan.crypto_error) {
+        return "journal crypto failed";
+    }
     if (scan.unreadable) {
         return "journal unreadable"; // it was readable at boot: the file was replaced meanwhile
     }
-    bool kept_bad = false;
+    char const *bad = NULL;
     if (scan.bad_seen && (uint64_t)st.st_size - scan.first_bad > BAD_KEEP_FROM) {
-        unlink(BAD_PATH);
-        if (rename(LOG_PATH, BAD_PATH) != 0) {
+        int slot = aside_slot(BAD_PATH, BAD1_PATH);
+        bad      = slot == 0 ? BAD_PATH : slot == 1 ? BAD1_PATH : NULL;
+        if (!bad) {
+            ESP_LOGW(TAG, "journal damaged, but log.bad and log.bad.1 exist: not kept again");
+        } else if (rename(LOG_PATH, bad) != 0) {
             *err = errno;
             return "log.bad not kept";
+        } else {
+            ESP_LOGW(TAG, "journal damaged at byte %llu of %lu: kept as %s", (unsigned long long)scan.first_bad,
+                     (unsigned long)st.st_size, bad);
         }
-        kept_bad = true;
-        ESP_LOGW(TAG, "journal damaged at byte %llu of %lu: kept as log.bad", (unsigned long long)scan.first_bad,
-                 (unsigned long)st.st_size);
     }
-    char const *why = compact_file(kept_bad ? BAD_PATH : LOG_PATH, &w->table, w->buf, err);
-    if (why && kept_bad && stat(LOG_PATH, &st) != 0) {
-        rename(BAD_PATH, LOG_PATH); // the damaged journal is still better than none
+    char const *why = compact_file(bad ? bad : LOG_PATH, &w->table, w->buf, err);
+    if (why && bad && !exists(LOG_PATH)) {
+        rename(bad, LOG_PATH); // the damaged journal is still better than none
     }
     return why;
 }
@@ -228,48 +248,65 @@ static bool boot_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes,
     return true;
 }
 
-// The messages directory, and what a cut compaction left. FatFs renames by adding the new entry before removing the old
-// one, so log.bin and log.tmp side by side can mean a rename cut halfway (log.tmp whole) or a log.tmp cut while being
-// written: a log.tmp that scans clean replaces log.bin, any other goes.
+// The HEAD search: stops at the first HEAD that opens the keys
+static bool head_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes, void *ctx) {
+    (void)raw, (void)bytes, (void)ctx;
+    return r->type != MESH_HIST_HEAD;
+}
+
+// A file that scans whole with this node's key: its HEAD, no damage, no auth failures
+static bool scans_clean(char const *path, work_t *w, int *err) {
+    mesh_hist_scan_t  scan;
+    mesh_hist_crypt_t c  = wcrypt;
+    bool              ok = scan_file(path, w, &c, NULL, NULL, &scan, err) && scan.head && !scan.torn &&
+              !scan.resyncs && !scan.auth_failures && !scan.before_head && !scan.crypto_error;
+    mh_wipe(&c, sizeof(c));
+    return ok;
+}
+
+// The messages directory, and what a cut compaction left (mesh_hist_files_plan)
 static char const *journal_files(work_t *w, int *err) {
-    struct stat st;
     if (mkdir(SD_MESSAGES_DIR, 0755) != 0 && errno != EEXIST) {
         *err = errno;
         return "no messages directory";
     }
-    if (stat(TMP_PATH, &st) != 0) {
+    bool have_tmp = exists(TMP_PATH), have_bin = exists(LOG_PATH);
+    bool have_bad = exists(BAD_PATH), have_bad1 = exists(BAD1_PATH);
+    bool clean    = have_tmp && scans_clean(TMP_PATH, w, err);
+    switch (mesh_hist_files_plan(have_bin, have_tmp, clean, have_bad || have_bad1)) {
+    case MESH_HIST_FILES_KEEP:
+        return NULL;
+    case MESH_HIST_FILES_DROP_TMP:
+        unlink(TMP_PATH);
+        return NULL;
+    case MESH_HIST_FILES_BAD_BACK: {
+        char const *bad = mesh_hist_newest_slot(have_bad, have_bad1) == 1 ? BAD1_PATH : BAD_PATH;
+        if (rename(bad, LOG_PATH) != 0) {
+            *err = errno;
+            return "log.bad not taken back";
+        }
+        unlink(TMP_PATH);
+        ESP_LOGW(TAG, "journal: a cut compaction left an unfinished log.tmp: %s taken back as log.bin", bad);
         return NULL;
     }
-    bool have_log = stat(LOG_PATH, &st) == 0;
-    if (have_log) {
-        mesh_hist_scan_t  scan;
-        mesh_hist_crypt_t c     = wcrypt;
-        bool              clean = scan_file(TMP_PATH, w, &c, NULL, NULL, &scan, err) && !scan.torn && !scan.resyncs &&
-                     scan.head && !scan.auth_failures;
-        mh_wipe(&c, sizeof(c));
-        if (!clean) {
-            unlink(TMP_PATH);
-            return NULL;
-        }
-        if (unlink(LOG_PATH) != 0) {
-            *err = errno;
-            return "log.bin not replaced by log.tmp";
-        }
+    case MESH_HIST_FILES_TMP_WINS:
+        break;
     }
-    if (rename(TMP_PATH, LOG_PATH) != 0) {
+    if ((have_bin && unlink(LOG_PATH) != 0) || rename(TMP_PATH, LOG_PATH) != 0) {
         *err = errno;
-        return "log.tmp not renamed";
+        return "log.tmp not taken as log.bin";
     }
     ESP_LOGW(TAG, "journal: log.tmp of a cut compaction taken as log.bin");
     return NULL;
 }
 
-// A new, empty journal: its HEAD with a new salt (the keys the writer uses from now on)
+// A new, empty journal: its HEAD with a new salt (the keys the writer uses from now on). Only where there is no
+// journal or an empty one: "wb" truncates.
 static char const *journal_fresh(int *err) {
     uint8_t head[MESH_HIST_REC_MAX];
     size_t n  = mesh_hist_crypt_new(&wcrypt) ? mesh_hist_encode_head(&wcrypt, head, sizeof(head)) : 0;
-    FILE  *f  = fopen(LOG_PATH, "wb");
-    bool   ok = f && n && fwrite(head, 1, n, f) == n;
+    FILE  *f  = n ? fopen(LOG_PATH, "wb") : NULL;
+    bool   ok = f && fwrite(head, 1, n, f) == n;
     *err      = ok ? 0 : errno;
     if (f && fclose(f) != 0 && ok) {
         ok   = false;
@@ -283,27 +320,55 @@ static char const *journal_fresh(int *err) {
     return NULL;
 }
 
-// A journal this node cannot read is moved aside once, never deleted (another badge's card, or a new identity)
+// A journal this node cannot read is moved aside, never deleted or overwritten (another badge's card, a new identity,
+// an older format, or garbage)
 static char const *journal_aside(int *err) {
-    unlink(OLD_PATH);
-    if (rename(LOG_PATH, OLD_PATH) != 0) {
+    char const *old = aside_slot(OLD_PATH, OLD1_PATH) == 0 ? OLD_PATH : OLD1_PATH;
+    if (rename(LOG_PATH, old) != 0) {
         *err = errno;
         return "unreadable journal not moved aside";
     }
-    ESP_LOGW(TAG, "journal unreadable with this node's key (another badge, a new identity or an older format): "
-                  "moved to log.old, starting a new one");
+    ESP_LOGW(TAG, "journal unreadable with this node's key (another badge, a new identity, an older format or "
+                  "garbage): moved to %s, starting a new one", old);
     return journal_fresh(err);
 }
 
-// Replays log.bin into the store; asks for a compaction when the rules say so (the mesh task does it, after start)
-static char const *journal_load(work_t *w, int *err) {
-    struct stat st;
-    if (stat(LOG_PATH, &st) != 0) {
-        return journal_fresh(err); // no journal yet
+static void note_damage(mesh_hist_scan_t const *scan) {
+    auth_failures = scan->auth_failures;
+    resyncs       = scan->resyncs;
+    if (scan->auth_failures) {
+        ESP_LOGW(TAG, "journal: %lu record(s) failed authentication, dropped", (unsigned long)scan->auth_failures);
     }
-    boot_ctx_t       b = {.table = &w->table};
+    if (scan->torn || scan->resyncs) {
+        ESP_LOGW(TAG, "journal damaged: %lu bad spot(s), %llu bytes skipped%s", (unsigned long)scan->resyncs,
+                 (unsigned long long)scan->skipped_bytes, scan->torn ? ", torn end" : "");
+    }
+}
+
+// Finds the HEAD (pass A, usually the first record), then replays log.bin into the store with its keys (pass B, which
+// also reads records a damaged first HEAD left unkeyed); asks for a compaction when the rules say so (the mesh task
+// does it, after start)
+static char const *journal_load(work_t *w, int *err) {
+    struct stat      st;
     mesh_hist_scan_t scan;
-    int64_t          started = esp_timer_get_time();
+    bool             have = stat(LOG_PATH, &st) == 0;
+    memset(&scan, 0, sizeof(scan));
+    if (have && !scan_file(LOG_PATH, w, &wcrypt, head_rec, NULL, &scan, err)) {
+        return "journal read failed";
+    }
+    switch (mesh_hist_load_plan(have, have ? (uint64_t)st.st_size : 0, &scan,
+                                aside_slot(OLD_PATH, OLD1_PATH) >= 0)) {
+    case MESH_HIST_LOAD_FRESH:
+        return journal_fresh(err);
+    case MESH_HIST_LOAD_ASIDE:
+        return journal_aside(err);
+    case MESH_HIST_LOAD_OFF:
+        return scan.crypto_error ? "journal crypto failed" : "journal unreadable, and log.old and log.old.1 are kept";
+    case MESH_HIST_LOAD_USE:
+        break;
+    }
+    boot_ctx_t b       = {.table = &w->table};
+    int64_t    started = esp_timer_get_time();
     if (!scan_file(LOG_PATH, w, &wcrypt, boot_rec, &b, &scan, err)) {
         return "journal read failed";
     }
@@ -313,29 +378,15 @@ static char const *journal_load(work_t *w, int *err) {
     if (scan.crypto_error) {
         return "journal crypto failed"; // no verdict on the journal: it stays as it is
     }
-    if (scan.unreadable) {
-        return journal_aside(err);
-    }
-    if (!scan.head) {
-        return journal_fresh(err); // empty, or cut before its HEAD was whole: nothing in it
-    }
-    auth_failures = scan.auth_failures;
-    if (scan.auth_failures) {
-        ESP_LOGW(TAG, "journal: %lu record(s) failed authentication, dropped", (unsigned long)scan.auth_failures);
-    }
+    note_damage(&scan);
     log_bytes   = clamp32((uint64_t)st.st_size);
     log_records = scan.records;
-    resyncs     = scan.resyncs;
-    if (scan.torn || scan.resyncs) {
-        ESP_LOGW(TAG, "journal damaged: %lu bad spot(s), %llu bytes skipped%s", (unsigned long)scan.resyncs,
-                 (unsigned long long)scan.skipped_bytes, scan.torn ? ", torn end" : "");
-    }
     if (mesh_store_last_seq() < b.max_seq) {
         ESP_LOGW(TAG, "store seq %lu behind the journal's %lu", (unsigned long)mesh_store_last_seq(),
                  (unsigned long)b.max_seq);
     }
     uint64_t live = mesh_hist_live_bytes(&w->table, keep_n);
-    compact_asked = mesh_hist_should_compact((uint64_t)st.st_size, live, scan.torn || scan.resyncs);
+    compact_asked = mesh_hist_should_compact((uint64_t)st.st_size, live, scan.torn || scan.resyncs || scan.heads == 0);
     return NULL;
 }
 
@@ -365,13 +416,13 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), ui
     ESP_LOGW(TAG, "journal crypto %s: self-test %s in %lld us", mh_backend(), fail ? "FAILED" : "passed",
              (long long)(esp_timer_get_time() - t0));
     uint8_t root[32];
-    bool    keyed = !fail && mesh_hist_key(root, prv, prv_len);
+    bool    keyed = !fail && prv && mesh_hist_key(root, prv, prv_len);
     if (keyed) {
         mesh_hist_crypt_init(&wcrypt, root, random_fill);
     }
     mh_wipe(root, sizeof(root));
     if (!keyed) {
-        turn_off("journal crypto failed its self-test");
+        turn_off(fail ? "journal crypto failed its self-test" : prv ? "journal key not derived" : "no identity key");
         return;
     }
     if (!boot_buffers()) {
@@ -575,6 +626,7 @@ void mesh_journal_stop_locked(void) {
         ESP_LOGW(TAG, "message history for the update: %u bytes not written, %lu records dropped earlier",
                  (unsigned)(out_len + hist->len), (unsigned long)hist->dropped);
     }
+    mh_wipe(&wcrypt, sizeof(wcrypt)); // the last write is done: MeshCore does not start again before the restart
 }
 
 // ---- console -------------------------------------------------------------------------------------------------------

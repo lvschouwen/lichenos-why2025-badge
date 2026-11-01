@@ -8,8 +8,9 @@
 // the payload. Little-endian. The framing is plaintext (scan, torn ends and compaction work on it without a key); the
 // payload of every record but HEAD is encrypted (#98):
 //   nonce (8 random bytes) | AES-128-CTR(plain payload) | tag (16 bytes)
-// The counter block is seq | nonce | block index (big-endian); the tag is HMAC-SHA-256(type | seq | nonce | ciphertext)
-// cut to 16 bytes (encrypt-then-MAC). The keys: root = SHA-256("lichen-journal-v1" | node private key), never stored;
+// The 16-byte counter block is seq (4 bytes, little-endian like the rest of the format) | nonce (8) | block index
+// (4 bytes, big-endian, from 0); the tag is HMAC-SHA-256(type | seq (little-endian) | nonce | ciphertext) cut to 16
+// bytes (encrypt-then-MAC). The keys: root = SHA-256("lichen-journal-v1" | node private key), never stored;
 // per journal enc = HMAC(root, "enc" | salt)[0..16), mac = HMAC(root, "mac" | salt), check = HMAC(root, "check" |
 // salt)[0..16). A chat key in a plain payload is its kind, then the 6-byte prefix (DM) or the name's length and bytes
 // (channel, lower-cased). Types:
@@ -17,6 +18,17 @@
 //   CHAT  key, title                         once per chat, again when its title changes
 //   MSG   key, epoch, rssi, flags, state, repeats, trip_ms, text   seq = the store's seq of the message
 //   READ  key, seq read up to                decoded, not written: loaded messages count as read
+//
+// HEAD redundancy: every journal file starts with its HEAD, and the same HEAD (same bytes) is repeated after every
+// MESH_HIST_HEAD_EVERY records, at the start of the first batch a boot appends, and through compaction. A scan takes
+// the first HEAD whose check passes, wherever it is: records before it (their HEAD damaged) are counted in
+// before_head and read by a second pass with the keys. A later HEAD with the same salt is a repeat; any other HEAD
+// counts as an auth failure and never re-keys.
+//
+// Threat model: a lost or copied card must not show messages (confidentiality) and a record must not be altered
+// unnoticed (each one authenticated, with its type and seq). Records are not chained: someone who can write the card
+// can still drop, reorder or replay whole records, or roll the journal back. Accepted: the key never leaves the badge
+// and the journal is a convenience copy of messages, not a record of truth.
 
 #include "mesh_store.h"
 
@@ -48,6 +60,7 @@ extern "C" {
 #define MESH_HIST_NONCE       8
 #define MESH_HIST_TAG         16
 #define MESH_HIST_VERSION     1
+#define MESH_HIST_HEAD_EVERY  256 // records between two copies of the HEAD
 
 typedef enum { MESH_HIST_CHAT = 1, MESH_HIST_MSG = 2, MESH_HIST_READ = 3, MESH_HIST_HEAD = 4 } mesh_hist_type_t;
 
@@ -96,6 +109,7 @@ typedef enum {
     MESH_HIST_MORE, // in[] holds the start of a record only
     MESH_HIST_BAD,  // not a record: wrong magic, length or CRC, or a payload that does not parse (a torn write)
     MESH_HIST_AUTH, // a whole record (*used bytes) that c cannot read: no key open, a wrong tag, or no plaintext
+    MESH_HIST_CRYPTO, // a primitive failed (hardware error, out of memory): no verdict, the scan stops
 } mesh_hist_dec_t;
 // c may be NULL: then only HEAD and unknown types decode
 mesh_hist_dec_t mesh_hist_decode(uint8_t const *in, size_t len, mesh_hist_crypt_t const *c, mesh_hist_rec_t *r,
@@ -120,7 +134,9 @@ typedef struct {
     bool     head;          // a HEAD opened the keys
     bool     unreadable;    // the first record is not a HEAD, or its check does not match this node's key: stopped
     uint32_t auth_failures; // records whose tag did not match: dropped
-    bool     crypto_error;  // the HEAD could not be checked (a primitive failed): stopped, no verdict
+    bool     crypto_error;  // a primitive failed (HEAD check or a record): stopped, no verdict on the journal
+    uint32_t heads;         // HEADs taken (the first and its repeats)
+    uint32_t before_head;   // records before the first good HEAD, not read in this pass (no keys yet)
 } mesh_hist_scan_t;
 
 // Decodes the journal from the start, record by record, to its end. A bad record (a torn write, a flipped bit) does
@@ -154,6 +170,7 @@ typedef struct {
     uint32_t          oldest_s; // when the first pending record came (the caller's clock)
     uint32_t          dropped;  // records that did not fit in the pending buffer
     uint32_t          loaded;   // MSG records replayed into the store
+    uint32_t          since_head; // records since the last HEAD repeat
     mesh_hist_held_t  held[MESH_HIST_HOLD];
     mesh_hist_known_t known[MESH_HIST_KNOWN];
     size_t            known_next;
@@ -238,6 +255,32 @@ typedef struct {
 void mesh_hist_compact(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_crypt_t *c, mesh_hist_table_t *t,
                        size_t keep, mesh_hist_write_fn write, void *wctx, uint8_t *out, size_t out_cap,
                        mesh_hist_compact_t *st);
+
+// ---- boot decisions (mesh_journal.c acts on them; table-tested) ---------------------------------------------------
+
+typedef enum {
+    MESH_HIST_FILES_KEEP,     // no log.tmp
+    MESH_HIST_FILES_TMP_WINS, // log.tmp becomes log.bin (log.bin, if any, removed first)
+    MESH_HIST_FILES_DROP_TMP, // log.tmp removed
+    MESH_HIST_FILES_BAD_BACK, // the newest log.bad becomes log.bin again, log.tmp removed
+} mesh_hist_files_t;
+// What a cut compaction left. tmp_clean: log.tmp scans with a HEAD, no damage and no auth failures. FatFs renames by
+// adding the new entry before removing the old one, so log.bin and log.tmp side by side can be either a rename cut
+// halfway (log.tmp whole) or a log.tmp cut while being written.
+mesh_hist_files_t mesh_hist_files_plan(bool have_bin, bool have_tmp, bool tmp_clean, bool have_bad);
+
+typedef enum {
+    MESH_HIST_LOAD_USE,   // replay it and append to it
+    MESH_HIST_LOAD_FRESH, // start a new journal (no file, or an empty one)
+    MESH_HIST_LOAD_ASIDE, // keep it under the free log.old name, then start a new one
+    MESH_HIST_LOAD_OFF,   // history off: a crypto failure (no verdict), or no free log.old name (never overwritten)
+} mesh_hist_load_t;
+// log.bin after the HEAD search (s): exists and size from stat; aside_free: a log.old name is free
+mesh_hist_load_t mesh_hist_load_plan(bool exists, uint64_t size, mesh_hist_scan_t const *s, bool aside_free);
+// Copies kept aside (log.old, log.bad): 0 for the plain name, 1 for ".1", -1 when both exist (never overwritten)
+int mesh_hist_aside_slot(bool have_0, bool have_1);
+// The newer of the two copies (".1" is made only when the plain name exists): 1, 0, or -1 for none
+int mesh_hist_newest_slot(bool have_0, bool have_1);
 
 #ifdef __cplusplus
 }

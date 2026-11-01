@@ -115,7 +115,16 @@ extern "C" char const *mh_backend(void) {
 #include <Crypto.h>
 #include <SHA256.h>
 
+static bool failing; // mh_test_fail
+
+extern "C" void mh_test_fail(bool on) {
+    failing = on;
+}
+
 extern "C" bool mh_sha256(uint8_t out[32], void const *a, size_t a_len, void const *b, size_t b_len) {
+    if (failing) {
+        return false;
+    }
     SHA256 sha;
     sha.update(a, a_len);
     sha.update(b, b_len);
@@ -125,6 +134,9 @@ extern "C" bool mh_sha256(uint8_t out[32], void const *a, size_t a_len, void con
 
 extern "C" bool mh_hmac(uint8_t out[32], uint8_t const *key, size_t key_len, void const *a, size_t a_len,
                         void const *b, size_t b_len, void const *c, size_t c_len) {
+    if (failing) {
+        return false;
+    }
     SHA256 sha;
     sha.resetHMAC(key, key_len);
     if (a_len) {
@@ -142,6 +154,9 @@ extern "C" bool mh_hmac(uint8_t out[32], uint8_t const *key, size_t key_len, voi
 
 extern "C" bool mh_aes128_ctr_at(uint8_t const key[16], uint8_t const iv[12], uint32_t first, uint8_t *buf,
                                  size_t len) {
+    if (failing) {
+        return false;
+    }
     AES128  aes;
     uint8_t block[16], stream[16];
     aes.setKey(key, 16);
