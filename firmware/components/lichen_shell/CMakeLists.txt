@@ -6,7 +6,7 @@
 idf_component_register(SRCS "log_store.c" "log_ring.c" "nav.c" "shell.c" "home.c" "home_layout.c"
                             "app_settings.c" "app_about.c" "app_keytest.c" "key_matrix.c" "hold_exit.c" "raw_keys.c" "app_icons.c" "wifi_screen.c" "setup_state.c" "setup_screens.c" "ui_keys.c" "ui_probe.c"
                             "boot_screen.c" "status_bar.c" "link_state.c" "logo.c" "update_status.c" "update_mode.c" "update_screen.c" "shot_blend.c" "screenshot.c" "time_fields.c" "time_set_screen.c"
-                            "dialog.c" "dialog_countdown.c"
+                            "dialog.c" "dialog_countdown.c" "ui_check.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api lichen_net
                        PRIV_REQUIRES lichen_boot lichen_clock freertos fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage app_update esp_system)

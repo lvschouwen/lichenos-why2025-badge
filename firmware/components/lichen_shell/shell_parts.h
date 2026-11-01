@@ -25,6 +25,7 @@ void shell_rebuild_home(void);         // after the app list or the layout chang
 // ui_probe.c: bench diagnostics
 void ui_probe_init(void);           // registers "fw ui"
 void ui_probe_send(char const *seq); // "fw keys send <seq>"
+void ui_check_start(void);           // #89: 1 s LVGL object-tree check, registers "fw uicheck"
 
 // app_settings.c, app_about.c: the built-in apps (shell_start registers them)
 void settings_app_register(void);

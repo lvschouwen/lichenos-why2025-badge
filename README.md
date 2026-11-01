@@ -182,7 +182,7 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
   `fw crash clear` drops it. `tools/badge.sh crash <port> [elf]` fetches the dump and decodes it against the crashed
   image's ELF; `flash-fw` and `ota-firmware` keep every ELF in `~/badge-backups/elf` under its SHA-256 and version.
 - Bench: `fw boot [fail <step>]`, `fw home layout tiles|grid`, `fw setup reset [mesh]`, `fw keys on|off|send <keys>` and
-  `fw ui` (press keys and read the screen without looking at it), `fw crash test panic|wdt`.
+  `fw ui` (press keys and read the screen without looking at it), `fw uicheck` (walk every LVGL object now, #89), `fw crash test panic|wdt`.
 
 ## Flashing through a remote USB host
 
