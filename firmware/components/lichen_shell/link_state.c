@@ -14,6 +14,10 @@ link_look_t wifi_look(bool have_credentials, bool joining, bool has_ip, bool rss
     return (link_look_t){have_credentials ? LINK_DOWN : LINK_OFF, 0, THEME_LINK_RED};
 }
 
+bool wifi_fan_part_lit(int bars, int part) {
+    return part >= 0 && part < WIFI_FAN_PARTS && part < bars;
+}
+
 link_look_t lora_look(bool up) {
     return (link_look_t){up ? LINK_UP : LINK_DOWN, 0, up ? THEME_TEAL : THEME_LINK_RED};
 }

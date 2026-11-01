@@ -1,4 +1,4 @@
-// The status bar over every screen after boot (#66, home.html): logo, clock (marked when unverified, #64), Wi-Fi, LoRa. Wi-Fi bars and LoRa label, polled once a second from
+// The status bar over every screen after boot (#66, home.html): logo, clock (marked when unverified, #64), Wi-Fi, LoRa. Wi-Fi fan (#58) and LoRa label, polled once a second from
 // the LVGL task through shell_sources; the LoRa TX/RX chevrons from the packet counters every 100 ms (#29).
 #include "lichen_clock.h"
 #include "link_state.h"
@@ -38,43 +38,74 @@ static lv_obj_t *add_text(lv_obj_t *parent, char const *text, uint32_t color) {
     return label;
 }
 
-#define BAR_COUNT 4
-#define BAR_W     3
-#define BAR_GAP   2
+// The Wi-Fi fan (#58): a dot with three concentric 90-degree arcs above it, all on the dot's centre. 33 x 25 px,
+// about the text height. The rounded caps of the outer arc end at x = 0 and 32, its top at y = 0, the dot at y = 24.
+#define FAN_W         33
+#define FAN_H         25
+#define FAN_CX        16 // the dot's centre, from the box's top left
+#define FAN_CY        22
+#define FAN_DOT_R     3 // 6 px across, centred like lv_draw_arc's circles (cx - r .. cx + r - 1)
+#define FAN_ARC_W     3  // thickness, inward from each outer radius
+#define FAN_ARC_START 225 // LVGL's degrees run clockwise from 3 o'clock: 225-315 opens upwards
+#define FAN_ARC_END   315
 
-static lv_obj_t *wifi_bars_obj[BAR_COUNT];
+static int const fan_radius[WIFI_FAN_PARTS - 1] = {10, 16, 22}; // outer radii, inside out
 
-// Four bars of 25/50/75/100 % of the text height: filled in the look's colour up to `bars`, the rest as outlines in
-// the same colour, so a red empty set reads as "down" without words
-static lv_obj_t *wifi_bars_create(lv_obj_t *parent) {
-    int       h    = lv_font_get_line_height(lichen_font(LICHEN_FONT_SMALL));
-    lv_obj_t *box  = lv_obj_create(parent);
-    lv_obj_remove_style_all(box);
-    lv_obj_set_size(box, BAR_COUNT * BAR_W + (BAR_COUNT - 1) * BAR_GAP, h);
-    lv_obj_set_scrollable(box, false);
-    lv_obj_set_clickable(box, false);
-    for (int i = 0; i < BAR_COUNT; i++) {
-        int       bh  = h * (i + 1) / BAR_COUNT;
-        lv_obj_t *bar = lv_obj_create(box);
-        lv_obj_remove_style_all(bar);
-        lv_obj_set_size(bar, BAR_W, bh);
-        lv_obj_set_pos(bar, i * (BAR_W + BAR_GAP), h - bh);
-        lv_obj_set_style_border_width(bar, 1, 0);
-        lv_obj_set_style_radius(bar, 1, 0);
-        lv_obj_set_clickable(bar, false);
-        wifi_bars_obj[i] = bar;
-    }
-    return box;
+static lv_obj_t *wifi_fan;
+static int       fan_bars  = -1; // what the fan shows; -1 before the first look
+static uint32_t  fan_color = THEME_FAINT;
+
+static lv_color_t fan_part_color(int part) {
+    return lv_color_hex(wifi_fan_part_lit(fan_bars, part) ? fan_color : THEME_FAINT);
 }
 
+static void fan_draw(lv_event_t *e) {
+    lv_layer_t *layer = lv_event_get_layer(e);
+    lv_area_t   box;
+    lv_obj_get_coords(lv_event_get_target_obj(e), &box);
+    int32_t cx = box.x1 + FAN_CX, cy = box.y1 + FAN_CY;
+
+    lv_draw_rect_dsc_t dot;
+    lv_draw_rect_dsc_init(&dot);
+    dot.radius      = LV_RADIUS_CIRCLE;
+    dot.bg_color    = fan_part_color(0);
+    lv_area_t area  = {cx - FAN_DOT_R, cy - FAN_DOT_R, cx + FAN_DOT_R - 1, cy + FAN_DOT_R - 1};
+    lv_draw_rect(layer, &dot, &area);
+
+    lv_draw_arc_dsc_t arc;
+    lv_draw_arc_dsc_init(&arc);
+    arc.center.x    = cx;
+    arc.center.y    = cy;
+    arc.width       = FAN_ARC_W;
+    arc.start_angle = FAN_ARC_START;
+    arc.end_angle   = FAN_ARC_END;
+    arc.rounded     = 1;
+    for (int i = 0; i < WIFI_FAN_PARTS - 1; i++) {
+        arc.radius = fan_radius[i];
+        arc.color  = fan_part_color(i + 1);
+        lv_draw_arc(layer, &arc);
+    }
+}
+
+static lv_obj_t *wifi_fan_create(lv_obj_t *parent) {
+    wifi_fan = lv_obj_create(parent);
+    lv_obj_remove_style_all(wifi_fan);
+    lv_obj_set_size(wifi_fan, FAN_W, FAN_H);
+    lv_obj_set_scrollable(wifi_fan, false);
+    lv_obj_set_clickable(wifi_fan, false);
+    lv_obj_add_event_cb(wifi_fan, fan_draw, LV_EVENT_DRAW_MAIN, NULL);
+    return wifi_fan;
+}
+
+// Lit parts in the look's colour up to its bars, the rest faint; redrawn only when the bars or the colour change
 static void show_wifi(link_look_t look) {
     lv_obj_set_style_text_color(wifi_label, lv_color_hex(look.color), 0);
-    for (int i = 0; i < BAR_COUNT; i++) {
-        lv_color_t c = lv_color_hex(look.color);
-        lv_obj_set_style_border_color(wifi_bars_obj[i], c, 0);
-        lv_obj_set_style_bg_color(wifi_bars_obj[i], c, 0);
-        lv_obj_set_style_bg_opa(wifi_bars_obj[i], i < look.bars ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    if (look.bars == fan_bars && look.color == fan_color) {
+        return;
     }
+    fan_bars  = look.bars;
+    fan_color = look.color;
+    lv_obj_invalidate(wifi_fan);
 }
 
 static void show_lora(link_look_t look) {
@@ -140,7 +171,7 @@ static void show_clock(void) {
     }
 }
 
-// As wide as the widest text it shows, right-aligned: the Wi-Fi bars and the LoRa label never move when a ~ comes
+// As wide as the widest text it shows, right-aligned: the Wi-Fi fan and the LoRa label never move when a ~ comes
 // or goes (#64)
 static void fix_clock_width(void) {
     lv_point_t size;
@@ -214,7 +245,7 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     fix_clock_width();
     lv_obj_t *wifi = add_row(right, 6);
     wifi_label     = add_text(wifi, "Wi-Fi", THEME_DIM);
-    wifi_bars_create(wifi);
+    wifi_fan_create(wifi);
     lv_obj_t *lora = add_row(right, 6);
     lora_label     = add_text(lora, "LoRa", THEME_DIM);
     if (shell_sources.lora_counts) {

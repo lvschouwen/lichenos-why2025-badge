@@ -37,6 +37,18 @@ int main(void) {
     l = lora_look(false);
     CHECK(l.state == LINK_DOWN && l.color == RED);
 
+    // The fan (#58): which of dot, inner, middle, outer arc are lit, for 0..4 bars
+    static bool const fan[5][WIFI_FAN_PARTS] = {
+        {false, false, false, false}, {true, false, false, false}, {true, true, false, false},
+        {true, true, true, false},    {true, true, true, true},
+    };
+    for (int bars = 0; bars <= 4; bars++) {
+        for (int part = 0; part < WIFI_FAN_PARTS; part++) {
+            CHECK(wifi_fan_part_lit(bars, part) == fan[bars][part]);
+        }
+    }
+    CHECK(!wifi_fan_part_lit(4, -1) && !wifi_fan_part_lit(9, WIFI_FAN_PARTS));
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;
