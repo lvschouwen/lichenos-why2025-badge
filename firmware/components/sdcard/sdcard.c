@@ -6,6 +6,7 @@
 #include "board_sdmmc.h"
 #include "diskio_impl.h"
 #include "diskio_sdmmc.h"
+#include "driver/gpio.h"
 #include "driver/sdmmc_host.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -81,6 +82,34 @@ static void refresh_space(void) {
     portEXIT_CRITICAL(&info_lock);
 }
 
+// Slot 0's pins (sdmmc_pins.h, IO-MUX): CLK 43, CMD 44, D0-D3 39-42
+static gpio_num_t const SD_PINS[] = {GPIO_NUM_43, GPIO_NUM_44, GPIO_NUM_39, GPIO_NUM_40, GPIO_NUM_41, GPIO_NUM_42};
+
+// IDF's sdmmc_host_deinit_slot always tries to delete the controller after removing the slot. While the C6 link's
+// slot 1 is registered that fails by design (deinit_slot maps it to ESP_OK), but SD_HOST logs it at E level on every
+// unmount (#100): that one expected line is muted when another slot is registered. The controller is never deleted
+// from here while slot 1 is on it (IDF checks the slot count under its own mutex). Then the six pins are reset: the
+// slot leaves D3 reserved as a GPIO output (a "conflict found for GPIO[42]" warning on the next mount), and the pins
+// stop being SDMMC outputs before VO4 drops, so nothing drives the card's data lines while it has no power.
+static void deinit_slot0(void) {
+    sdmmc_host_state_t state  = {0};
+    bool               shared = sdmmc_host_get_state(&state) == ESP_OK && state.num_of_init_slots > 1;
+    esp_log_level_t    was    = esp_log_level_get("SD_HOST");
+    if (shared) {
+        esp_log_level_set("SD_HOST", ESP_LOG_NONE);
+    }
+    esp_err_t err = sdmmc_host_deinit_slot(SDMMC_HOST_SLOT_0);
+    if (shared) {
+        esp_log_level_set("SD_HOST", was);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "slot 0 deinit: %s", esp_err_to_name(err)); // muted above, so said here
+    }
+    for (size_t i = 0; i < sizeof(SD_PINS) / sizeof(SD_PINS[0]); i++) {
+        gpio_reset_pin(SD_PINS[i]);
+    }
+}
+
 static void bring_down(void) {
     atomic_store(&mounted, false);
     if (vfs_up) {
@@ -99,7 +128,7 @@ static void bring_down(void) {
         // Slot 0 only: the controller stays while the C6 link holds slot 1. If the lock does not come, deinit anyway:
         // leaving the slot behind is worse than the (unlikely) race
         bool locked = board_sdmmc_lock(SD_HOST_WAIT_MS);
-        sdmmc_host_deinit_slot(SDMMC_HOST_SLOT_0);
+        deinit_slot0();
         if (locked) {
             board_sdmmc_unlock();
         }
