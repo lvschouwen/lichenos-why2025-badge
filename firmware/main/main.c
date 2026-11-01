@@ -27,6 +27,7 @@
 #include "lichen_sensors.h"
 #include "lichen_app.h"
 #include "lichen_random.h"
+#include "notify_os.h"
 #include "nvs_flash.h"
 #include "ota_server.h"
 #include "ota_valid.h"
@@ -211,12 +212,15 @@ void app_main(void) {
     boot_progress_nvs_up();
     settings_apply_tz(); // before anything shows the clock
     boot_progress_begin(BOOT_STORAGE);
-    if (!storage_mount()) {
+    bool storage_ok = storage_mount();
+    if (!storage_ok) {
         ESP_LOGE(TAG, "no storage drive");
         boot_progress_end(BOOT_STORAGE, STEP_FAILED, "no storage drive");
     } else {
         boot_progress_end(BOOT_STORAGE, STEP_DONE, NULL);
     }
+    lichen_notify_start(storage_ok); // the history from /storage/lichen/notify.bin (#62); lichen_notify() works from now
+
     assets_mount(); // fonts; without them the UI uses the built-in ones (#22)
     crash_check();
     console_start();
