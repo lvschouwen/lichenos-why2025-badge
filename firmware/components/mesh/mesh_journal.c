@@ -18,7 +18,9 @@
 
 #define LOG_PATH      SD_MESSAGES_DIR "/log.bin"
 #define TMP_PATH      SD_MESSAGES_DIR "/log.tmp"
-#define TABLE_CHATS   2048 // chats a compaction tells apart (PSRAM, about 190 KB while it runs); more keep everything
+#define BAD_PATH      SD_MESSAGES_DIR "/log.bad" // a damaged journal as it was, kept when much followed the damage
+#define BAD_KEEP_FROM 4096 // bytes after the first bad spot that make log.bad worth keeping
+#define TABLE_CHATS   1024 // chats a compaction tells apart (PSRAM, about 170 KB while it runs); more keep everything
 #define STAGE_BYTES   4096
 #define BOOT_WAIT_MS  5000
 #define FLUSH_WAIT_MS 100 // the card's batch mutex: when another batch has it, try again in RETRY_S
@@ -33,6 +35,7 @@ static size_t       out_len;   // mesh task only
 static uint32_t     out_records;
 static uint32_t     retry_after_s;
 static size_t       keep_n;
+static bool         drop_warned;
 static void (*lock_fn)(void);
 static void (*unlock_fn)(void);
 
@@ -41,12 +44,17 @@ static void (*unlock_fn)(void);
 static volatile bool        on;
 static char const *volatile why_off = "not started";
 static volatile uint32_t    log_bytes, log_records, flushes, last_flush_s, last_flush_ms, write_errors, compactions;
-static volatile bool        compact_asked;
+static volatile uint32_t    resyncs;
+static volatile bool        compact_asked; // the mesh task compacts before its next write (boot asks when needed)
 
 static void turn_off(char const *why) {
     why_off = why;
     on      = false;
     ESP_LOGW(TAG, "message history off: %s (messages are kept in RAM until the next restart)", why);
+}
+
+static uint32_t clamp32(uint64_t v) {
+    return v > UINT32_MAX ? UINT32_MAX : (uint32_t)v;
 }
 
 static size_t file_read(void *ctx, uint8_t *buf, size_t cap) {
@@ -59,66 +67,6 @@ static bool file_write(void *ctx, uint8_t const *buf, size_t len) {
 
 static void *psram(size_t bytes) {
     return heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
-}
-
-// ---- compaction (inside an sd_begin batch) -------------------------------------------------------------------------
-
-// Rewrites log.bin as log.tmp with the newest keep_n messages per chat (t holds the counts of log.bin), then swaps the
-// files: unlink log.bin, rename. A cut between the two leaves log.tmp alone, which the next boot renames.
-static char const *compact_file(mesh_hist_table_t *t, uint8_t *buf, int *err) {
-    int64_t  started = esp_timer_get_time();
-    uint8_t *stage   = psram(STAGE_BYTES);
-    FILE    *in      = fopen(LOG_PATH, "rb");
-    FILE    *out     = in ? fopen(TMP_PATH, "wb") : NULL;
-    if (!stage || !in || !out) {
-        *err = stage ? errno : ENOMEM;
-        free(stage);
-        if (in) {
-            fclose(in);
-        }
-        if (out) {
-            fclose(out);
-            unlink(TMP_PATH);
-        }
-        return "compaction could not start";
-    }
-    mesh_hist_compact_t st;
-    mesh_hist_compact(file_read, in, buf, t, keep_n, file_write, out, stage, STAGE_BYTES, &st);
-    bool ok = st.ok && !ferror(in);
-    fclose(in);
-    free(stage);
-    ok    = fflush(out) == 0 && fsync(fileno(out)) == 0 && ok;
-    *err  = ok ? 0 : errno;
-    ok    = fclose(out) == 0 && ok;
-    if (!ok) {
-        unlink(TMP_PATH);
-        return "compaction failed";
-    }
-    if (unlink(LOG_PATH) != 0 || rename(TMP_PATH, LOG_PATH) != 0) {
-        *err = errno;
-        return "compaction could not replace log.bin";
-    }
-    ESP_LOGW(TAG, "journal compacted: %lu -> %lu KB, %lu records, %lld ms", (unsigned long)(log_bytes / 1024),
-             (unsigned long)(st.bytes_out / 1024), (unsigned long)st.records_out,
-             (long long)((esp_timer_get_time() - started) / 1000));
-    log_bytes   = (uint32_t)st.bytes_out;
-    log_records = st.records_out;
-    compactions++;
-    return NULL;
-}
-
-static bool count_rec(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
-    mesh_hist_count((mesh_hist_table_t *)ctx, r, bytes);
-    return true;
-}
-
-// Boot: every record into the store (under the mesh lock, a record at a time) and counted for the compaction
-static bool boot_rec(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
-    lock_fn();
-    mesh_hist_replay(hist, r);
-    unlock_fn();
-    mesh_hist_count((mesh_hist_table_t *)ctx, r, bytes);
-    return true;
 }
 
 typedef struct {
@@ -141,62 +89,187 @@ static void work_free(work_t *w) {
     free(w->buf);
 }
 
-// Reads log.bin through on_rec (pass 1), then compacts it when the rules say so. NULL when all went well.
-static char const *scan_and_compact(work_t *w, mesh_hist_rec_fn on_rec, bool force, int *err) {
-    struct stat st;
-    if (stat(LOG_PATH, &st) != 0) {
-        log_bytes = log_records = 0;
-        return NULL; // no journal yet
-    }
-    FILE *f = fopen(LOG_PATH, "rb");
+// Scans a whole file through on_rec; false (with *err) when it could not be read to its end
+static bool scan_file(char const *path, work_t *w, mesh_hist_rec_fn on_rec, void *ctx, mesh_hist_scan_t *scan,
+                      int *err) {
+    FILE *f = fopen(path, "rb");
     if (!f) {
         *err = errno;
-        return "journal not readable";
+        return false;
     }
-    mesh_hist_scan_t scan;
-    mesh_hist_scan(file_read, f, w->buf, on_rec, &w->table, &scan);
-    bool read_failed = ferror(f);
-    *err             = read_failed ? errno : 0;
+    mesh_hist_scan(file_read, f, w->buf, on_rec, ctx, scan);
+    bool failed = ferror(f);
+    *err        = failed ? errno : 0;
     fclose(f);
-    if (read_failed) {
-        return "journal read failed"; // compacting now would drop everything after the failed read
-    }
-    log_bytes   = (uint32_t)st.st_size;
-    log_records = scan.records;
-    if (scan.torn) {
-        ESP_LOGW(TAG, "journal ends in a torn record after %lu good bytes of %lu: compacting",
-                 (unsigned long)scan.good_bytes, (unsigned long)st.st_size);
-    }
-    uint64_t live = mesh_hist_live_bytes(&w->table, keep_n);
-    if (!force && !mesh_hist_should_compact((uint64_t)st.st_size, live, scan.torn)) {
-        return NULL;
-    }
-    return compact_file(&w->table, w->buf, err);
+    return !failed;
 }
 
-// The messages directory and a leftover of a cut compaction
-static char const *journal_files(int *err) {
+// ---- compaction (inside an sd_begin batch) -------------------------------------------------------------------------
+
+// Rewrites src as log.tmp with the newest keep_n messages per chat (t holds src's counts), then makes it log.bin:
+// unlink log.bin (when src is log.bin), rename. A cut in between leaves log.tmp alone, which the next boot renames.
+static char const *compact_file(char const *src, mesh_hist_table_t *t, uint8_t *buf, int *err) {
+    int64_t  started = esp_timer_get_time();
+    uint8_t *stage   = psram(STAGE_BYTES);
+    FILE    *in      = fopen(src, "rb");
+    FILE    *out     = in ? fopen(TMP_PATH, "wb") : NULL;
+    if (!stage || !in || !out) {
+        *err = stage ? errno : ENOMEM;
+        free(stage);
+        if (in) {
+            fclose(in);
+        }
+        if (out) {
+            fclose(out);
+            unlink(TMP_PATH);
+        }
+        return "compaction could not start";
+    }
+    mesh_hist_compact_t st;
+    mesh_hist_compact(file_read, in, buf, t, keep_n, file_write, out, stage, STAGE_BYTES, &st);
+    bool ok = st.ok && !ferror(in);
+    fclose(in);
+    free(stage);
+    ok   = fflush(out) == 0 && fsync(fileno(out)) == 0 && ok;
+    *err = ok ? 0 : errno;
+    ok   = fclose(out) == 0 && ok;
+    if (!ok) {
+        unlink(TMP_PATH);
+        return "compaction failed";
+    }
+    bool from_log = strcmp(src, LOG_PATH) == 0;
+    if ((from_log && unlink(LOG_PATH) != 0) || rename(TMP_PATH, LOG_PATH) != 0) {
+        *err = errno;
+        return "compaction could not replace log.bin";
+    }
+    ESP_LOGW(TAG, "journal compacted: %lu -> %lu KB, %lu records, %lld ms", (unsigned long)(log_bytes / 1024),
+             (unsigned long)(st.bytes_out / 1024), (unsigned long)st.records_out,
+             (long long)((esp_timer_get_time() - started) / 1000));
+    log_bytes   = clamp32(st.bytes_out);
+    log_records = st.records_out;
+    compactions++;
+    return NULL;
+}
+
+static bool count_rec(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
+    mesh_hist_count((mesh_hist_table_t *)ctx, r, bytes);
+    return true;
+}
+
+// Pass 1 over log.bin, then the rewrite. A damaged journal with more than BAD_KEEP_FROM bytes after its first bad spot
+// is kept as log.bad (renamed, so it costs no copy) and compacted from there.
+static char const *compact_journal(work_t *w, int *err) {
+    struct stat      st;
+    mesh_hist_scan_t scan;
+    if (stat(LOG_PATH, &st) != 0) {
+        log_bytes = log_records = 0;
+        return NULL; // nothing to compact
+    }
+    if (!scan_file(LOG_PATH, w, count_rec, &w->table, &scan, err)) {
+        return "journal read failed"; // compacting now would drop everything after the failed read
+    }
+    bool kept_bad = false;
+    if (scan.bad_seen && (uint64_t)st.st_size - scan.first_bad > BAD_KEEP_FROM) {
+        unlink(BAD_PATH);
+        if (rename(LOG_PATH, BAD_PATH) != 0) {
+            *err = errno;
+            return "log.bad not kept";
+        }
+        kept_bad = true;
+        ESP_LOGW(TAG, "journal damaged at byte %llu of %lu: kept as log.bad", (unsigned long long)scan.first_bad,
+                 (unsigned long)st.st_size);
+    }
+    char const *why = compact_file(kept_bad ? BAD_PATH : LOG_PATH, &w->table, w->buf, err);
+    if (why && kept_bad && stat(LOG_PATH, &st) != 0) {
+        rename(BAD_PATH, LOG_PATH); // the damaged journal is still better than none
+    }
+    return why;
+}
+
+// ---- boot ----------------------------------------------------------------------------------------------------------
+
+typedef struct {
+    mesh_hist_table_t *table;
+    uint32_t           max_seq;
+} boot_ctx_t;
+
+// Every record into the store (under the mesh lock, a record at a time: the screens may read it) and counted, so the
+// compaction decision needs no second pass
+static bool boot_rec(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
+    boot_ctx_t *b = (boot_ctx_t *)ctx;
+    lock_fn();
+    mesh_hist_replay(hist, r);
+    unlock_fn();
+    mesh_hist_count(b->table, r, bytes);
+    if (r->type == MESH_HIST_MSG && r->seq > b->max_seq) {
+        b->max_seq = r->seq;
+    }
+    return true;
+}
+
+// The messages directory, and what a cut compaction left. FatFs renames by adding the new entry before removing the old
+// one, so log.bin and log.tmp side by side can mean a rename cut halfway (log.tmp whole) or a log.tmp cut while being
+// written: a log.tmp that scans clean replaces log.bin, any other goes.
+static char const *journal_files(work_t *w, int *err) {
     struct stat st;
     if (mkdir(SD_MESSAGES_DIR, 0755) != 0 && errno != EEXIST) {
         *err = errno;
         return "no messages directory";
     }
-    bool have_log = stat(LOG_PATH, &st) == 0, have_tmp = stat(TMP_PATH, &st) == 0;
-    if (have_tmp && !have_log && rename(TMP_PATH, LOG_PATH) != 0) {
-        *err = errno; // cut after the unlink: log.tmp is the compacted journal
+    if (stat(TMP_PATH, &st) != 0) {
+        return NULL;
+    }
+    bool have_log = stat(LOG_PATH, &st) == 0;
+    if (have_log) {
+        mesh_hist_scan_t scan;
+        bool clean = scan_file(TMP_PATH, w, NULL, NULL, &scan, err) && !scan.torn && !scan.resyncs;
+        if (!clean) {
+            unlink(TMP_PATH);
+            return NULL;
+        }
+        if (unlink(LOG_PATH) != 0) {
+            *err = errno;
+            return "log.bin not replaced by log.tmp";
+        }
+    }
+    if (rename(TMP_PATH, LOG_PATH) != 0) {
+        *err = errno;
         return "log.tmp not renamed";
     }
-    if (have_tmp && have_log) {
-        unlink(TMP_PATH); // cut while writing log.tmp: log.bin is still whole
-    }
+    ESP_LOGW(TAG, "journal: log.tmp of a cut compaction taken as log.bin");
     return NULL;
 }
 
-void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void)) {
-    keep_n    = keep;
-    lock_fn   = lock;
-    unlock_fn = unlock;
-    hist      = heap_caps_calloc(1, sizeof(*hist), MALLOC_CAP_SPIRAM);
+// Replays log.bin into the store; asks for a compaction when the rules say so (the mesh task does it, after start)
+static char const *journal_load(work_t *w, int *err) {
+    struct stat st;
+    if (stat(LOG_PATH, &st) != 0) {
+        log_bytes = log_records = 0;
+        return NULL; // no journal yet
+    }
+    boot_ctx_t       b = {.table = &w->table};
+    mesh_hist_scan_t scan;
+    if (!scan_file(LOG_PATH, w, boot_rec, &b, &scan, err)) {
+        return "journal read failed";
+    }
+    log_bytes   = clamp32((uint64_t)st.st_size);
+    log_records = scan.records;
+    resyncs     = scan.resyncs;
+    if (scan.torn || scan.resyncs) {
+        ESP_LOGW(TAG, "journal damaged: %lu bad spot(s), %llu bytes skipped%s", (unsigned long)scan.resyncs,
+                 (unsigned long long)scan.skipped_bytes, scan.torn ? ", torn end" : "");
+    }
+    if (mesh_store_last_seq() < b.max_seq) {
+        ESP_LOGW(TAG, "store seq %lu behind the journal's %lu", (unsigned long)mesh_store_last_seq(),
+                 (unsigned long)b.max_seq);
+    }
+    uint64_t live = mesh_hist_live_bytes(&w->table, keep_n);
+    compact_asked = mesh_hist_should_compact((uint64_t)st.st_size, live, scan.torn || scan.resyncs);
+    return NULL;
+}
+
+static bool boot_buffers(void) {
+    hist       = heap_caps_calloc(1, sizeof(*hist), MALLOC_CAP_SPIRAM);
     uint8_t *a = psram(MESH_HIST_PENDING);
     spare      = psram(MESH_HIST_PENDING);
     if (!hist || !a || !spare) {
@@ -204,10 +277,20 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void)) {
         free(a);
         free(spare);
         hist = NULL;
+        return false;
+    }
+    mesh_hist_init(hist, a, MESH_HIST_PENDING);
+    return true;
+}
+
+void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void)) {
+    keep_n    = keep;
+    lock_fn   = lock;
+    unlock_fn = unlock;
+    if (!boot_buffers()) {
         turn_off("no memory");
         return;
     }
-    mesh_hist_init(hist, a, MESH_HIST_PENDING);
     if (!sd_mounted()) {
         turn_off("no SD card");
         return;
@@ -224,8 +307,8 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void)) {
         return;
     }
     int         err = 0;
-    char const *why = journal_files(&err);
-    why             = why ? why : scan_and_compact(&w, boot_rec, false, &err);
+    char const *why = journal_files(&w, &err);
+    why             = why ? why : journal_load(&w, &err);
     sd_end(sd_io_from_errno(err));
     work_free(&w);
     if (why) {
@@ -241,8 +324,8 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void)) {
     }
     why_off = NULL;
     on      = true;
-    ESP_LOGW(TAG, "message history: %lu messages loaded, journal %lu KB in %s", (unsigned long)hist->loaded,
-             (unsigned long)(log_bytes / 1024), SD_MESSAGES_DIR);
+    ESP_LOGW(TAG, "message history: %lu messages loaded, journal %lu KB in %s%s", (unsigned long)hist->loaded,
+             (unsigned long)(log_bytes / 1024), SD_MESSAGES_DIR, compact_asked ? ", compaction due" : "");
 }
 
 // ---- the mesh task -------------------------------------------------------------------------------------------------
@@ -278,7 +361,14 @@ void mesh_journal_out_sweep_locked(uint32_t const *ids, size_t n) {
 }
 
 void mesh_journal_tick_locked(void) {
-    if (!hist || !on || out_len) {
+    if (!hist || !on) {
+        return;
+    }
+    if (hist->dropped && !drop_warned) {
+        drop_warned = true;
+        ESP_LOGW(TAG, "pending buffer full (the card was busy or slow): messages not journaled");
+    }
+    if (out_len) {
         return; // the last swapped-out buffer is still waiting for the card
     }
     uint32_t now = mesh_uptime_s();
@@ -319,7 +409,7 @@ static void write_out(uint32_t wait_ms) {
         turn_off("journal write failed");
         return;
     }
-    log_bytes += (uint32_t)out_len;
+    log_bytes = clamp32((uint64_t)log_bytes + out_len);
     log_records += out_records;
     flushes++;
     last_flush_s  = mesh_uptime_s();
@@ -328,12 +418,12 @@ static void write_out(uint32_t wait_ms) {
 }
 
 // On the mesh task, without the mesh lock: two passes over log.bin, so this blocks MeshCore for as long as reading the
-// journal twice takes. Only on request or past the cap (weeks of traffic); boot does the routine ones.
+// journal twice takes. After boot when it found damage or a journal twice its live size, on request, and past the cap.
 static void compact_now(void) {
     work_t w = {0};
     if (!work_alloc(&w)) {
         work_free(&w);
-        ESP_LOGW(TAG, "no memory to compact the journal");
+        turn_off("no memory to compact the journal"); // appending to a damaged journal would hide what is appended
         return;
     }
     if (!sd_begin(FLUSH_WAIT_MS)) {
@@ -343,33 +433,39 @@ static void compact_now(void) {
         return;
     }
     int         err = 0;
-    char const *why = scan_and_compact(&w, count_rec, true, &err);
+    char const *why = compact_journal(&w, &err);
     sd_end(sd_io_from_errno(err));
     work_free(&w);
     if (why) {
         ESP_LOGW(TAG, "%s (errno %d)", why, err);
         turn_off(why);
-    } else if (log_bytes > MESH_HIST_CAP) {
+        return;
+    }
+    lock_fn();
+    mesh_hist_forget_chats(hist); // a dropped chat's CHAT record went with it: written again with its next message
+    unlock_fn();
+    if (log_bytes > MESH_HIST_CAP) {
         turn_off("journal full: the history kept is over the cap"); // compacting again would not help
     }
 }
 
 void mesh_journal_flush(void) {
-    if (!hist) {
+    if (!hist || !on || mesh_uptime_s() < retry_after_s) {
         return;
     }
-    if (mesh_uptime_s() < retry_after_s) {
-        return;
+    // A compaction goes first: a journal with a torn end must be cleaned before anything is appended to it
+    if (compact_asked) {
+        compact_asked = false;
+        compact_now();
+        if (compact_asked || !on) {
+            return;
+        }
     }
     if (out_len) {
         write_out(FLUSH_WAIT_MS);
-        if (out_len) {
-            return; // the card was busy
-        }
     }
-    if (on && (compact_asked || log_bytes > MESH_HIST_CAP)) {
-        compact_asked = false;
-        compact_now();
+    if (on && log_bytes > MESH_HIST_CAP) {
+        compact_asked = true; // next loop
     }
 }
 
@@ -378,15 +474,19 @@ void mesh_journal_stop_locked(void) {
         return;
     }
     mesh_hist_stop(hist, mesh_uptime_s());
+    // One deadline for both writes: the update waits for this
+    int64_t deadline = esp_timer_get_time() + (int64_t)STOP_WAIT_MS * 1000;
     if (out_len) {
         write_out(STOP_WAIT_MS); // an older buffer first: the journal stays in order
     }
-    if (!out_len && hist->len) {
+    int64_t left_ms = (deadline - esp_timer_get_time()) / 1000;
+    if (!out_len && hist->len && left_ms > 0) {
         spare = mesh_hist_swap(hist, spare, &out_len, &out_records);
-        write_out(STOP_WAIT_MS);
+        write_out((uint32_t)left_ms);
     }
-    if (out_len || hist->len) {
-        ESP_LOGW(TAG, "message history not flushed for the update: the last messages are lost");
+    if (out_len || hist->len || hist->dropped) {
+        ESP_LOGW(TAG, "message history for the update: %u bytes not written, %lu records dropped earlier",
+                 (unsigned)(out_len + hist->len), (unsigned long)hist->dropped);
     }
 }
 
@@ -398,7 +498,7 @@ void mesh_journal_console(char const *args) {
             console_reply("history is off: %s", why_off ? why_off : "?");
         } else {
             compact_asked = true;
-            console_reply("compaction asked: the mesh task flushes, then compacts (\"fw mesh hist\" shows the result)");
+            console_reply("compaction asked: the mesh task compacts, then flushes (\"fw mesh hist\" shows the result)");
         }
         return;
     }
@@ -418,17 +518,19 @@ void mesh_journal_console(char const *args) {
         loaded          = hist->loaded;
         unlock_fn();
     }
-    console_reply("history %s%s%s | journal %s %lu bytes, %lu records | loaded at boot %lu messages",
+    console_reply("history %s%s%s | journal %s %lu bytes, %lu records | loaded at boot %lu messages, %lu bad spot(s)",
                   on ? "on" : "off", on ? "" : ": ", on ? "" : (why_off ? why_off : "?"), LOG_PATH,
-                  (unsigned long)log_bytes, (unsigned long)log_records, (unsigned long)loaded);
+                  (unsigned long)log_bytes, (unsigned long)log_records, (unsigned long)loaded,
+                  (unsigned long)resyncs);
     char last[32] = "never";
     if (flushes) {
         snprintf(last, sizeof(last), "%lu s ago", (unsigned long)(now - last_flush_s));
     }
-    console_reply("pending %u bytes, %lu records (oldest %lu s) + %u bytes swapped out | %u outgoing held | dropped "
-                  "%lu",
+    console_reply("pending %u bytes, %lu records (oldest %lu s) + %u bytes swapped out | %u outgoing held | "
+                  "dropped %lu",
                   (unsigned)pending, (unsigned long)pending_records, (unsigned long)(pending ? now - oldest_s : 0),
                   (unsigned)out_len, (unsigned)held, (unsigned long)dropped);
-    console_reply("flushes %lu, last %s (%lu ms) | write errors %lu | compactions %lu", (unsigned long)flushes, last,
-                  (unsigned long)last_flush_ms, (unsigned long)write_errors, (unsigned long)compactions);
+    console_reply("flushes %lu, last %s (%lu ms) | write errors %lu | compactions %lu%s", (unsigned long)flushes, last,
+                  (unsigned long)last_flush_ms, (unsigned long)write_errors, (unsigned long)compactions,
+                  compact_asked ? " (one due)" : "");
 }

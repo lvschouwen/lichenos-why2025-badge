@@ -248,6 +248,8 @@ static size_t loaded_pos(conv_t const *cv, uint32_t seq, bool *same) {
 }
 
 bool mesh_store_add_loaded(mesh_chat_key_t const *key, char const *title, mesh_msg_t const *in) {
+    // The counter passes every seq in the journal, kept or not: a new message never reuses one
+    next_seq = in->seq > next_seq ? in->seq : next_seq;
     if (!ring_cap) {
         return false;
     }
@@ -283,7 +285,6 @@ bool mesh_store_add_loaded(mesh_chat_key_t const *key, char const *title, mesh_m
         cv->pub.count++;
         *conv_at(cv, pos) = m;
     }
-    next_seq = m.seq > next_seq ? m.seq : next_seq;
     conv_take_last(cv);
     generation++;
     return true;

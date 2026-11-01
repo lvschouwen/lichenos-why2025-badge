@@ -1,8 +1,8 @@
 #pragma once
 // MeshCore's message history on the SD card (#48): an append-only journal of variable-length records that is replayed
 // into mesh_store at boot. Pure logic, no ESP headers (host-tested in host_tests/mesh_hist_test.c); mesh_journal.c
-// does the file work. Not thread-safe: the mesh task calls it under the mesh lock, except the codec, scan and compaction
-// (they touch no shared state).
+// does the file work. Not thread-safe: the mesh task calls it under the mesh lock, except the codec, scan and
+// compaction (they touch no shared state).
 //
 // Record: magic 0xA7, type, payload length (16 bit), seq (32 bit), CRC-16/CCITT over type..seq and the payload, then
 // the payload. Little-endian. A chat key in a payload is its kind, then the 6-byte prefix (DM) or the name's length
@@ -29,10 +29,12 @@ extern "C" {
 #define MESH_HIST_CAP         (16u * 1024u * 1024u)  // journal size that forces a compaction
 #define MESH_HIST_RESERVE     (1u * 1024u * 1024u)   // card space kept free beyond the cap (log.tmp while compacting)
 #define MESH_HIST_COMPACT_MIN (64u * 1024u)          // smaller journals are never compacted for size alone
-#define MESH_HIST_HOLD        16                     // outgoing messages waiting for a final state (the outbox's OB_CAP)
+#define MESH_HIST_HOLD        16                     // outgoing messages held until final (the outbox's OB_CAP)
 #define MESH_HIST_KNOWN       256                    // chats whose CHAT record is known to be in the journal
 #define MESH_HIST_CHUNK       4096                   // the scan reads this much at a time
 #define MESH_HIST_SCAN_BUF    (MESH_HIST_CHUNK + MESH_HIST_REC_MAX)
+#define MESH_HIST_RESYNC_MAX  (64u * 1024u)          // a bad spot longer than this ends the scan (torn)
+#define MESH_HIST_DUP         8                      // outgoing seqs per chat a compaction remembers to spot rewrites
 
 typedef enum { MESH_HIST_CHAT = 1, MESH_HIST_MSG = 2, MESH_HIST_READ = 3 } mesh_hist_type_t;
 
@@ -68,13 +70,18 @@ typedef bool (*mesh_hist_rec_fn)(mesh_hist_rec_t const *r, size_t bytes, void *c
 
 typedef struct {
     uint32_t records;
-    uint64_t good_bytes; // up to the end of the last good record
-    bool     torn;       // stopped at a record that did not decode, or the file ends inside one
-    bool     stopped;    // the callback said stop
+    uint64_t good_bytes;    // up to the end of the last good record
+    uint32_t resyncs;       // bad spots skipped: the scan went on at the next record that decodes
+    uint64_t skipped_bytes; // bytes in them
+    bool     bad_seen;
+    uint64_t first_bad;     // file offset of the first bad spot
+    bool     torn;          // the file ends inside a record or in a bad spot, or a bad spot ran past RESYNC_MAX
+    bool     stopped;       // the callback said stop
 } mesh_hist_scan_t;
 
-// Decodes the journal from the start, record by record, until its end or the first bad record (a torn tail: nothing
-// after it is trusted). buf holds MESH_HIST_SCAN_BUF bytes.
+// Decodes the journal from the start, record by record, to its end. A bad record (a torn write, a flipped bit) does
+// not end it: the scan looks for the next magic byte whose record decodes (header, CRC and payload), up to
+// MESH_HIST_RESYNC_MAX bytes on. buf holds MESH_HIST_SCAN_BUF bytes.
 void mesh_hist_scan(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_rec_fn on_rec, void *ctx,
                     mesh_hist_scan_t *out);
 
@@ -128,6 +135,8 @@ size_t mesh_hist_held_count(mesh_hist_t const *h);
 // Flush the pending records now: always when stopping, else when the oldest has waited MESH_HIST_FLUSH_S or the
 // buffer is 3/4 full. Never with nothing pending.
 bool mesh_hist_should_flush(uint32_t oldest_age_s, size_t fill, bool stopping);
+// After a compaction: the journal may have lost CHAT records of chats it dropped, so every chat gets one again
+void mesh_hist_forget_chats(mesh_hist_t *h);
 // Hands out the pending buffer (its length and record count) and carries on in fresh, empty
 uint8_t *mesh_hist_swap(mesh_hist_t *h, uint8_t *fresh, size_t *len, uint32_t *records);
 
@@ -141,8 +150,11 @@ typedef struct {
     bool            used, written;
     mesh_chat_key_t key;
     char            title[MESH_CHANNEL_MAX + 1];
-    uint32_t        msgs, seen;
+    uint32_t        msgs, seen; // messages (a rewritten outgoing one counts once), and pass 2's position
     uint64_t        msg_bytes;
+    uint32_t        out_seq[MESH_HIST_DUP], out_index[MESH_HIST_DUP]; // its recent outgoing messages: rewrites
+    bool            out_used[MESH_HIST_DUP];
+    uint8_t         out_next;
 } mesh_hist_chat_t;
 
 typedef struct {
@@ -157,8 +169,8 @@ void mesh_hist_table_init(mesh_hist_table_t *t, mesh_hist_chat_t *slots, size_t 
 void mesh_hist_count(mesh_hist_table_t *t, mesh_hist_rec_t const *r, size_t bytes);
 // About what a compacted journal would hold: every chat's CHAT and its newest keep messages
 uint64_t mesh_hist_live_bytes(mesh_hist_table_t const *t, size_t keep);
-// A torn journal is always compacted (appending after a bad record would hide everything appended); else when it is
-// over MESH_HIST_CAP, or over MESH_HIST_COMPACT_MIN and twice the live size
+// A damaged journal (torn tail or bad spots) is always compacted: appending after a torn record would hide the appended
+// ones behind a bad spot. Else when it is over MESH_HIST_CAP, or over MESH_HIST_COMPACT_MIN and twice the live size.
 bool mesh_hist_should_compact(uint64_t file_bytes, uint64_t live_bytes, bool torn);
 // The card can take the journal: room for it to grow to the cap, plus the reserve
 bool mesh_hist_space_ok(uint64_t free_bytes, uint64_t log_bytes);
@@ -170,9 +182,9 @@ typedef struct {
     bool     ok; // every write went through
 } mesh_hist_compact_t;
 
-// Pass 2 over the same journal (counted into t): writes each chat's CHAT (its last title) and its newest keep MSG
-// records, in journal order; READ records go. buf as mesh_hist_scan's, out is a staging buffer of out_cap bytes
-// (at least MESH_HIST_REC_MAX).
+// Pass 2 over the same journal (counted into t): writes each chat's CHAT (its last title) and the MSG records of its
+// newest keep messages (every copy of a rewritten one: the replay keeps the last), in journal order; READ records go.
+// buf as mesh_hist_scan's, out is a staging buffer of out_cap bytes (at least MESH_HIST_REC_MAX).
 void mesh_hist_compact(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_table_t *t, size_t keep,
                        mesh_hist_write_fn write, void *wctx, uint8_t *out, size_t out_cap, mesh_hist_compact_t *st);
 

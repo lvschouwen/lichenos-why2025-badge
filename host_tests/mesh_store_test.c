@@ -67,6 +67,10 @@ static void loaded_checks(void) {
     // The ring is full: an older message than all is dropped, a newer one pushes the oldest out
     m = loaded_msg(5, "too old");
     CHECK(!mesh_store_add_loaded(&key, "#test", &m));
+    // A dropped message still moves the counter past its seq
+    m = loaded_msg(28, "c: twenty-eight");
+    m.seq = 2;
+    CHECK(!mesh_store_add_loaded(&key, "#test", &m) && mesh_store_last_seq() == 30);
     m = loaded_msg(25, "c: twenty-five");
     CHECK(mesh_store_add_loaded(&key, "#test", &m));
     CHECK(mesh_store_chat(&key, out, 4, false) == 3 && out[0].seq == 20 && out[1].seq == 25 && out[2].seq == 30);

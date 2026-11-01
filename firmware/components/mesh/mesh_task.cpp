@@ -179,6 +179,19 @@ static void tile_on_message(char const *channel, char const *text) {
     portEXIT_CRITICAL(&tile_mux);
 }
 
+// Boot (under the mesh lock): the newest message from the history journal as the tile's latest line
+static void tile_seed_latest(void) {
+    mesh_msg_t m;
+    if (mesh_store_recent(&m, 1) != 1) {
+        return;
+    }
+    mesh_tile_t t;
+    mesh_tile_on_message(&t, m.channel, m.text); // the formatting outside the spinlock
+    portENTER_CRITICAL(&tile_mux);
+    memcpy(tile.latest, t.latest, sizeof(tile.latest));
+    portEXIT_CRITICAL(&tile_mux);
+}
+
 static void tile_set_contacts(size_t contacts) {
     portENTER_CRITICAL(&tile_mux);
     tile.contacts = contacts;
@@ -1120,8 +1133,9 @@ static void cmd_mesh(char const *args) {
         return;
     }
     if (*args) {
-        console_reply("mesh | mesh name <name> | mesh radio <preset index | freq bw sf cr> [txdbm] | mesh link | mesh out | mesh chats | mesh hist [compact] | "
-                      "mesh send <channel> <text> | mesh dm <12 hex> <text>");
+        console_reply("mesh | mesh name <name> | mesh radio <preset index | freq bw sf cr> [txdbm] | mesh link | "
+                      "mesh out | mesh chats | mesh hist [compact] | mesh send <channel> <text> | "
+                      "mesh dm <12 hex> <text>");
         return;
     }
     mesh_lock();
@@ -1374,12 +1388,16 @@ extern "C" bool mesh_start(char const *files_dir) {
     tile.unread_total = 0; // nothing unread at boot
     tile.contacts     = (size_t)n->getNumContacts();
     portEXIT_CRITICAL(&tile_mux);
+    tile_seed_latest(); // the history's newest line; tile_heard_s stays 0, so no "just now" for an old message
     __atomic_store_n(&node, n, __ATOMIC_RELEASE);
     mesh_unlock();
     __atomic_store_n(&radio_known, true, __ATOMIC_RELEASE);
     __atomic_store_n(&node_id_known, true, __ATOMIC_RELEASE);
 
-    console_register("mesh", "mesh | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | mesh link | mesh out | mesh chats | mesh hist [compact] | mesh send <channel> <text> | mesh dm <12 hex> <text>", cmd_mesh);
+    console_register("mesh",
+                     "mesh | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | mesh link | mesh out | "
+                     "mesh chats | mesh hist [compact] | mesh send <channel> <text> | mesh dm <12 hex> <text>",
+                     cmd_mesh);
     console_register("contacts", "contacts (nodes heard, newest first)", cmd_contacts);
     console_register("msgs", "msgs [n] (last n messages)", cmd_msgs);
     console_register("channels", "channels (the channels the badge can read)", cmd_channels);

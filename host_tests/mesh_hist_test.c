@@ -218,21 +218,46 @@ static void scan_checks(void) {
     // A torn tail: the last record cut short (power lost mid-write) fails, replay stops there
     mesh_hist_scan_t s = scan_bytes(file, file_len - 3, 7);
     CHECK(s.torn && s.records == 100 && got_n == 100 && got[99].seq == 99);
-    // A torn record in the middle: nothing after it is trusted
-    size_t mid = 0, used = 0;
-    for (int i = 0; i < 51; i++) {
+    // A bad record in the middle: skipped, the scan picks up at the next record that decodes
+    size_t mid = 0, used = 0, len51 = 0;
+    for (int i = 0; i < 52; i++) {
         mesh_hist_rec_t tmp;
         mesh_hist_decode(file + mid, file_len - mid, &tmp, &used);
+        if (i == 51) {
+            len51 = used;
+            break;
+        }
         mid += used;
     }
     file[mid + MESH_HIST_HDR + 3] ^= 0xFF;
-    s = scan_bytes(file, file_len, 0);
-    CHECK(s.torn && s.records == 51 && s.good_bytes == mid);
+    for (size_t c = 0; c < 3; c++) {
+        s = scan_bytes(file, file_len, chunks[c + 1]);
+        CHECK(!s.torn && s.records == 100 && s.resyncs == 1 && s.bad_seen && s.first_bad == mid);
+        CHECK(s.skipped_bytes == len51 && got[50].seq == 50 && got[51].seq == 52);
+    }
     file[mid + MESH_HIST_HDR + 3] ^= 0xFF;
-    // Garbage (zeros, as a FAT cluster that was allocated but never written) is torn too
+    // A run of bad records (a whole sector of zeros) is one bad spot
+    uint8_t saved[600];
+    memcpy(saved, file + mid, sizeof(saved));
+    memset(file + mid, 0, 512);
+    s = scan_bytes(file, file_len, 33);
+    CHECK(!s.torn && s.resyncs == 1 && s.records < 100 && s.records > 80 && got[got_n - 1].seq == 100);
+    memcpy(file + mid, saved, sizeof(saved));
+    // Garbage (zeros, as a FAT cluster that was allocated but never written) at the end is torn
     memset(file + file_len, 0, 32);
     s = scan_bytes(file, file_len + 32, 0);
-    CHECK(s.torn && s.records == 101);
+    CHECK(s.torn && s.records == 101 && s.resyncs == 1 && s.skipped_bytes == 32);
+    // A bad spot longer than MESH_HIST_RESYNC_MAX ends the scan
+    {
+        static uint8_t big[MESH_HIST_RESYNC_MAX + 2000];
+        size_t         first = 0;
+        mesh_hist_decode(file, file_len, &got[0], &first);
+        memcpy(big, file, first);
+        memset(big + first, 0x55, MESH_HIST_RESYNC_MAX + 100);
+        memcpy(big + first + MESH_HIST_RESYNC_MAX + 100, file + first, 200);
+        s = scan_bytes(big, first + MESH_HIST_RESYNC_MAX + 300, 4096);
+        CHECK(s.torn && s.records == 1);
+    }
     // An empty journal is fine
     s = scan_bytes(file, 0, 0);
     CHECK(!s.torn && s.records == 0);
@@ -535,6 +560,65 @@ static void compact_checks(void) {
     CHECK(!s.torn && got_n == 2 + 4); // the tracked chat (b): CHAT + 1 message; the other: CHAT + all 3 of its messages
 }
 
+// A rewritten outgoing message (same seq, newer state) counts once: the chat keeps keep messages, all copies of each
+static void compact_dup_checks(void) {
+    mesh_chat_key_t a = chan_key("#a");
+    file_len          = 0;
+    mesh_hist_rec_t r = chat_rec(&a, "#a");
+    append(&r);
+    for (uint32_t seq = 1; seq <= 4; seq++) {
+        r = msg_rec(&a, seq, "in");
+        append(&r);
+    }
+    r          = msg_rec(&a, 5, "me: out");
+    r.outgoing = 1, r.state = MESH_OUT_ON_AIR;
+    append(&r);
+    r = msg_rec(&a, 6, "in6");
+    append(&r);
+    r          = msg_rec(&a, 5, "me: out");
+    r.outgoing = 1, r.state = MESH_OUT_HEARD, r.repeats = 2;
+    append(&r);
+    mesh_hist_table_t t;
+    mesh_hist_table_init(&t, slots, 16);
+    size_t          at = 0, used;
+    mesh_hist_rec_t tmp;
+    while (at < file_len && mesh_hist_decode(file + at, file_len - at, &tmp, &used) == MESH_HIST_OK) {
+        mesh_hist_count(&t, &tmp, used);
+        at += used;
+    }
+    mesh_hist_chat_t const *c = NULL;
+    for (size_t i = 0; i < 16; i++) {
+        c = slots[i].used ? &slots[i] : c;
+    }
+    CHECK(c && c->msgs == 6); // seqs 1..6, the rewrite of 5 not counted
+    static uint8_t      buf[MESH_HIST_SCAN_BUF];
+    uint8_t             stage[MESH_HIST_REC_MAX * 4];
+    mesh_hist_compact_t st;
+    mem_rd_t            rd = {.p = file, .len = file_len};
+    out_len                = 0;
+    mesh_hist_compact(mem_read, &rd, buf, &t, 2, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_scan_t s = scan_bytes(out_file, out_len, 0);
+    // keep 2: messages 5 and 6, with both copies of 5 (the replay keeps the newest)
+    CHECK(st.ok && !s.torn && got_n == 4 && got[1].seq == 5 && got[2].seq == 6 && got[3].seq == 5 &&
+          got[3].state == MESH_OUT_HEARD);
+}
+
+static void forget_checks(void) {
+    static mesh_hist_t h;
+    static uint8_t     pend[1024];
+    mesh_hist_init(&h, pend, sizeof(pend));
+    mesh_chat_key_t ck = chan_key("#a");
+    mesh_msg_t      m;
+    memset(&m, 0, sizeof(m));
+    strcpy(m.channel, "#a");
+    mesh_hist_add(&h, &ck, &m, 1);
+    mesh_hist_add(&h, &ck, &m, 1);
+    CHECK(h.pending_records == 3);
+    mesh_hist_forget_chats(&h); // after a compaction: the CHAT record comes again
+    mesh_hist_add(&h, &ck, &m, 1);
+    CHECK(h.pending_records == 5);
+}
+
 int main(void) {
     codec_checks();
     unknown_type_checks();
@@ -543,6 +627,8 @@ int main(void) {
     writer_checks();
     policy_checks();
     compact_checks();
+    compact_dup_checks();
+    forget_checks();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

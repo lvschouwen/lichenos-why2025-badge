@@ -6,12 +6,51 @@
 
 // ---- codec ---------------------------------------------------------------------------------------------------------
 
-static uint16_t crc16(uint16_t crc, uint8_t const *p, size_t n) { // CRC-16/CCITT-FALSE
+// The title and channel copies below assume one size for all of them
+_Static_assert(sizeof(((mesh_msg_t *)0)->channel) == sizeof(((mesh_hist_known_t *)0)->title), "title sizes");
+_Static_assert(sizeof(((mesh_hist_chat_t *)0)->title) == sizeof(((mesh_hist_rec_t *)0)->title), "title sizes");
+_Static_assert(sizeof(((mesh_hist_rec_t *)0)->title) == sizeof(((mesh_chat_key_t *)0)->chan), "title sizes");
+_Static_assert(sizeof(((mesh_msg_t *)0)->text) == sizeof(((mesh_hist_rec_t *)0)->text), "text sizes");
+
+// CRC-16/CCITT-FALSE (poly 0x1021), a byte at a time: the scan runs it over every byte of the journal at boot
+static uint16_t const CRC_TABLE[256] = {
+    0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50A5, 0x60C6, 0x70E7,
+    0x8108, 0x9129, 0xA14A, 0xB16B, 0xC18C, 0xD1AD, 0xE1CE, 0xF1EF,
+    0x1231, 0x0210, 0x3273, 0x2252, 0x52B5, 0x4294, 0x72F7, 0x62D6,
+    0x9339, 0x8318, 0xB37B, 0xA35A, 0xD3BD, 0xC39C, 0xF3FF, 0xE3DE,
+    0x2462, 0x3443, 0x0420, 0x1401, 0x64E6, 0x74C7, 0x44A4, 0x5485,
+    0xA56A, 0xB54B, 0x8528, 0x9509, 0xE5EE, 0xF5CF, 0xC5AC, 0xD58D,
+    0x3653, 0x2672, 0x1611, 0x0630, 0x76D7, 0x66F6, 0x5695, 0x46B4,
+    0xB75B, 0xA77A, 0x9719, 0x8738, 0xF7DF, 0xE7FE, 0xD79D, 0xC7BC,
+    0x48C4, 0x58E5, 0x6886, 0x78A7, 0x0840, 0x1861, 0x2802, 0x3823,
+    0xC9CC, 0xD9ED, 0xE98E, 0xF9AF, 0x8948, 0x9969, 0xA90A, 0xB92B,
+    0x5AF5, 0x4AD4, 0x7AB7, 0x6A96, 0x1A71, 0x0A50, 0x3A33, 0x2A12,
+    0xDBFD, 0xCBDC, 0xFBBF, 0xEB9E, 0x9B79, 0x8B58, 0xBB3B, 0xAB1A,
+    0x6CA6, 0x7C87, 0x4CE4, 0x5CC5, 0x2C22, 0x3C03, 0x0C60, 0x1C41,
+    0xEDAE, 0xFD8F, 0xCDEC, 0xDDCD, 0xAD2A, 0xBD0B, 0x8D68, 0x9D49,
+    0x7E97, 0x6EB6, 0x5ED5, 0x4EF4, 0x3E13, 0x2E32, 0x1E51, 0x0E70,
+    0xFF9F, 0xEFBE, 0xDFDD, 0xCFFC, 0xBF1B, 0xAF3A, 0x9F59, 0x8F78,
+    0x9188, 0x81A9, 0xB1CA, 0xA1EB, 0xD10C, 0xC12D, 0xF14E, 0xE16F,
+    0x1080, 0x00A1, 0x30C2, 0x20E3, 0x5004, 0x4025, 0x7046, 0x6067,
+    0x83B9, 0x9398, 0xA3FB, 0xB3DA, 0xC33D, 0xD31C, 0xE37F, 0xF35E,
+    0x02B1, 0x1290, 0x22F3, 0x32D2, 0x4235, 0x5214, 0x6277, 0x7256,
+    0xB5EA, 0xA5CB, 0x95A8, 0x8589, 0xF56E, 0xE54F, 0xD52C, 0xC50D,
+    0x34E2, 0x24C3, 0x14A0, 0x0481, 0x7466, 0x6447, 0x5424, 0x4405,
+    0xA7DB, 0xB7FA, 0x8799, 0x97B8, 0xE75F, 0xF77E, 0xC71D, 0xD73C,
+    0x26D3, 0x36F2, 0x0691, 0x16B0, 0x6657, 0x7676, 0x4615, 0x5634,
+    0xD94C, 0xC96D, 0xF90E, 0xE92F, 0x99C8, 0x89E9, 0xB98A, 0xA9AB,
+    0x5844, 0x4865, 0x7806, 0x6827, 0x18C0, 0x08E1, 0x3882, 0x28A3,
+    0xCB7D, 0xDB5C, 0xEB3F, 0xFB1E, 0x8BF9, 0x9BD8, 0xABBB, 0xBB9A,
+    0x4A75, 0x5A54, 0x6A37, 0x7A16, 0x0AF1, 0x1AD0, 0x2AB3, 0x3A92,
+    0xFD2E, 0xED0F, 0xDD6C, 0xCD4D, 0xBDAA, 0xAD8B, 0x9DE8, 0x8DC9,
+    0x7C26, 0x6C07, 0x5C64, 0x4C45, 0x3CA2, 0x2C83, 0x1CE0, 0x0CC1,
+    0xEF1F, 0xFF3E, 0xCF5D, 0xDF7C, 0xAF9B, 0xBFBA, 0x8FD9, 0x9FF8,
+    0x6E17, 0x7E36, 0x4E55, 0x5E74, 0x2E93, 0x3EB2, 0x0ED1, 0x1EF0,
+};
+
+static uint16_t crc16(uint16_t crc, uint8_t const *p, size_t n) {
     while (n--) {
-        crc ^= (uint16_t)(*p++ << 8);
-        for (int i = 0; i < 8; i++) {
-            crc = (uint16_t)(crc & 0x8000 ? (crc << 1) ^ 0x1021 : crc << 1);
-        }
+        crc = (uint16_t)(crc << 8) ^ CRC_TABLE[(uint8_t)(crc >> 8) ^ *p++];
     }
     return crc;
 }
@@ -219,17 +258,40 @@ mesh_hist_dec_t mesh_hist_decode(uint8_t const *in, size_t len, mesh_hist_rec_t 
     return r.bad ? MESH_HIST_BAD : MESH_HIST_OK;
 }
 
+// A bad spot: skip to the next magic byte; a record that decodes there (CRC and all) ends the skip
+static void scan_bad(mesh_hist_scan_t *out, uint8_t const *buf, size_t have, size_t *off, uint64_t at, bool *skipping,
+                     uint64_t *skip_from) {
+    if (!*skipping) {
+        *skipping  = true;
+        *skip_from = at;
+        out->resyncs++;
+        if (!out->bad_seen) {
+            out->bad_seen  = true;
+            out->first_bad = at;
+        }
+    }
+    do {
+        (*off)++;
+    } while (*off < have && buf[*off] != MESH_HIST_MAGIC);
+}
+
 void mesh_hist_scan(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_rec_fn on_rec, void *ctx,
                     mesh_hist_scan_t *out) {
     mesh_hist_rec_t rec;
     size_t          have = 0, off = 0;
+    uint64_t        base = 0, skip_from = 0; // base: the file offset of buf[0]
+    bool            skipping = false;
     memset(out, 0, sizeof(*out));
     for (;;) {
         size_t          used = 0;
         mesh_hist_dec_t d    = mesh_hist_decode(buf + off, have - off, &rec, &used);
         if (d == MESH_HIST_OK) {
+            if (skipping) {
+                skipping = false;
+                out->skipped_bytes += base + off - skip_from;
+            }
             off += used;
-            out->good_bytes += used;
+            out->good_bytes = base + off;
             out->records++;
             if (on_rec && !on_rec(&rec, used, ctx)) {
                 out->stopped = true;
@@ -238,16 +300,24 @@ void mesh_hist_scan(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_
             continue;
         }
         if (d == MESH_HIST_BAD) {
-            out->torn = true;
-            return;
+            scan_bad(out, buf, have, &off, base + off, &skipping, &skip_from);
+            if (base + off - skip_from > MESH_HIST_RESYNC_MAX) {
+                out->torn = true; // no record within reach: the rest is not trusted
+                return;
+            }
+            continue;
         }
         // Less than one record left (under MESH_HIST_REC_MAX bytes): to the front, then the next chunk behind it
         memmove(buf, buf + off, have - off);
+        base += off;
         have -= off;
         off = 0;
         size_t got = read(rctx, buf + have, MESH_HIST_CHUNK);
         if (got == 0) {
-            out->torn = have > 0;
+            out->torn = have > 0 || skipping; // cut inside a record, or garbage up to the end
+            if (skipping) {
+                out->skipped_bytes += base + have - skip_from;
+            }
             return;
         }
         have += got;
@@ -449,6 +519,11 @@ bool mesh_hist_should_flush(uint32_t oldest_age_s, size_t fill, bool stopping) {
     return stopping || oldest_age_s >= MESH_HIST_FLUSH_S || fill >= MESH_HIST_PENDING / 4 * 3;
 }
 
+void mesh_hist_forget_chats(mesh_hist_t *h) {
+    memset(h->known, 0, sizeof(h->known));
+    h->known_next = 0;
+}
+
 uint8_t *mesh_hist_swap(mesh_hist_t *h, uint8_t *fresh, size_t *len, uint32_t *records) {
     uint8_t *old       = h->buf;
     *len               = h->len;
@@ -537,6 +612,32 @@ static mesh_hist_chat_t *table_slot(mesh_hist_table_t *t, mesh_chat_key_t const 
     return NULL;
 }
 
+// The message's index among its chat's messages: a rewritten outgoing message (same seq, a newer state) gets the index
+// of its first copy, so a chat keeps keep messages, not keep records. *dup: it is such a copy.
+static uint32_t msg_index(mesh_hist_chat_t *c, mesh_hist_rec_t const *r, uint32_t *next, bool *dup) {
+    *dup = false;
+    if (!r->outgoing) {
+        return (*next)++;
+    }
+    for (size_t i = 0; i < MESH_HIST_DUP; i++) {
+        if (c->out_used[i] && c->out_seq[i] == r->seq) {
+            *dup = true;
+            return c->out_index[i];
+        }
+    }
+    size_t at        = c->out_next;
+    c->out_next      = (uint8_t)((c->out_next + 1) % MESH_HIST_DUP);
+    c->out_used[at]  = true;
+    c->out_seq[at]   = r->seq;
+    c->out_index[at] = *next;
+    return (*next)++;
+}
+
+static void forget_outgoing(mesh_hist_chat_t *c) {
+    memset(c->out_used, 0, sizeof(c->out_used));
+    c->out_next = 0;
+}
+
 void mesh_hist_count(mesh_hist_table_t *t, mesh_hist_rec_t const *r, size_t bytes) {
     if (r->type != MESH_HIST_CHAT && r->type != MESH_HIST_MSG) {
         return;
@@ -547,8 +648,11 @@ void mesh_hist_count(mesh_hist_table_t *t, mesh_hist_rec_t const *r, size_t byte
     }
     if (r->type == MESH_HIST_CHAT) {
         memcpy(c->title, r->title, sizeof(c->title));
-    } else {
-        c->msgs++;
+        return;
+    }
+    bool dup;
+    msg_index(c, r, &c->msgs, &dup);
+    if (!dup) {
         c->msg_bytes += bytes;
     }
 }
@@ -616,7 +720,8 @@ static bool compact_rec(mesh_hist_rec_t const *r, size_t bytes, void *ctx) {
     if (r->type == MESH_HIST_CHAT) {
         return true; // written once, before its first kept message, with its last title
     }
-    uint32_t index = slot->seen++;
+    bool     dup;
+    uint32_t index = msg_index(slot, r, &slot->seen, &dup);
     if (slot->msgs > c->keep && index < slot->msgs - c->keep) {
         return true;
     }
@@ -647,6 +752,7 @@ void mesh_hist_compact(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hi
     for (size_t i = 0; i < t->cap; i++) {
         t->slots[i].seen    = 0;
         t->slots[i].written = false;
+        forget_outgoing(&t->slots[i]);
     }
     compact_ctx_t    c = {.t = t, .keep = keep, .write = write, .wctx = wctx, .out = out, .out_cap = out_cap, .st = st};
     mesh_hist_scan_t scan;

@@ -88,7 +88,8 @@ bool mesh_store_update_out(uint32_t id, uint8_t state, uint8_t repeats, uint8_t 
 // A message replayed from the history journal (#48): it goes into its chat in seq order (the journal can hold an
 // outgoing message after later incoming ones, it is written once its state is final), and a message with a seq the
 // chat already holds replaces it (a newer state of the same message). It counts as read, gets loaded = 1, heard_s = 0
-// and id = 0 (outbox ids do not survive a restart), and the store's seq counter continues after it. false when it was
+// and id = 0 (outbox ids do not survive a restart), and the store's seq counter continues after it (also when it is
+// dropped, so a new message never reuses a journal seq). false when it was
 // dropped: table full of channels, no memory, or older than everything in a full ring.
 bool mesh_store_add_loaded(mesh_chat_key_t const *key, char const *title, mesh_msg_t const *m);
 // The newest seq handed out (or loaded): 0 for an empty store
