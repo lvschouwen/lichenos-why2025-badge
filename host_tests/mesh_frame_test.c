@@ -50,6 +50,90 @@ static void encoders(void) {
     CHECK(f[144] == 0x0D && f[147] == 0x0A && f[148] == 0x55);   // lastmod, nothing written after it
 }
 
+// Log in, status, logout and the CLI (#51): MyMesh's offsets for CMD_SEND_LOGIN, _STATUS_REQ, _LOGOUT, SEND_TXT_MSG
+static void remote_encoders(void) {
+    uint8_t f[MF_MAX_FRAME], pub[32], prefix[6] = {1, 2, 3, 4, 5, 6};
+    memset(pub, 9, sizeof(pub));
+    size_t n = mf_encode_login(f, pub, "hunter2");
+    CHECK(n == 1 + 32 + 7 && f[0] == 26 && f[1] == 9 && f[32] == 9 && memcmp(f + 33, "hunter2", 7) == 0);
+    CHECK(mf_encode_login(f, pub, "") == 33);
+    CHECK(mf_encode_login(f, pub, "123456789012345") == 48);
+    CHECK(mf_encode_login(f, pub, "1234567890123456") == 0); // MyMesh would cut it: refused instead
+    CHECK(mf_encode_status_req(f, pub) == 33 && f[0] == 27 && f[32] == 9);
+    CHECK(mf_encode_logout(f, pub) == 33 && f[0] == 29 && f[1] == 9);
+    n = mf_encode_send_cli(f, 0, 0x01020304, prefix, "ver", 3);
+    CHECK(n == 16 && f[0] == 2 && f[1] == 1 /* CLI_DATA */ && f[2] == 0 && f[3] == 4 && memcmp(f + 7, prefix, 6) == 0 &&
+          memcmp(f + 13, "ver", 3) == 0);
+}
+
+static void remote_decoders(void) {
+    mf_msg_t m;
+    // login ok: new layout [0x85, admin, prefix6, tag4, acl, fw_level], legacy has only the prefix
+    uint8_t ok[14] = {0x85, 1, 1, 2, 3, 4, 5, 6, 0, 0, 0, 0, 3, 8};
+    mf_decode(ok, sizeof(ok), &m);
+    CHECK(m.kind == MF_LOGIN_SUCCESS && m.admin == 1 && m.acl == 3 && m.fw_level == 8 && m.rprefix[0] == 1 && m.rprefix[5] == 6);
+    mf_decode(ok, 8, &m);
+    CHECK(m.kind == MF_LOGIN_SUCCESS && m.admin == 1 && m.acl == 0 && m.fw_level == 0);
+    mf_decode(ok, 7, &m);
+    CHECK(m.kind == MF_BAD);
+    uint8_t fail[8] = {0x86, 0, 6, 5, 4, 3, 2, 1};
+    mf_decode(fail, 8, &m);
+    CHECK(m.kind == MF_LOGIN_FAIL && m.rprefix[0] == 6 && m.rprefix[5] == 1);
+    mf_decode(fail, 5, &m);
+    CHECK(m.kind == MF_BAD);
+
+    // status: RepeaterStats after [0x87, 0, prefix6]
+    uint8_t st[8 + 56] = {0x87, 0, 1, 2, 3, 4, 5, 6};
+    uint8_t *s = st + 8;
+    s[0] = 0x10; s[1] = 0x10;           // battery 4112 mV
+    s[2] = 3;                           // queue 3
+    s[4] = 0x90; s[5] = 0xFF;           // noise floor -112
+    s[6] = 0xA0; s[7] = 0xFF;           // last rssi -96
+    s[8] = 100;                         // received
+    s[12] = 50;                         // sent
+    s[16] = 20;                         // air time
+    s[20] = 0x10; s[21] = 0x0E;         // uptime 3600 s
+    s[24] = 1; s[28] = 2; s[32] = 3; s[36] = 4;
+    s[40] = 5;                          // err events
+    s[42] = 0xF6; s[43] = 0xFF;         // last snr -10 (x4)
+    s[44] = 6; s[46] = 7;
+    s[48] = 30; s[52] = 9;
+    mf_decode(st, sizeof(st), &m);
+    CHECK(m.kind == MF_STATUS && m.status.bytes == 56 && m.status.batt_mv == 4112 && m.status.tx_queue == 3);
+    CHECK(m.status.noise_floor == -112 && m.status.last_rssi == -96 && m.status.n_recv == 100 && m.status.n_sent == 50);
+    CHECK(m.status.air_secs == 20 && m.status.up_secs == 3600 && m.status.sent_flood == 1 && m.status.recv_direct == 4);
+    CHECK(m.status.err_events == 5 && m.status.last_snr_q == -10 && m.status.direct_dups == 6 && m.status.flood_dups == 7);
+    CHECK(m.status.rx_air_secs == 30 && m.status.recv_errors == 9 && m.rprefix[2] == 3);
+    mf_decode(st, 8 + 20, &m); // an older repeater: the first fields only, the rest 0
+    CHECK(m.kind == MF_STATUS && m.status.bytes == 20 && m.status.n_recv == 100 && m.status.up_secs == 0 &&
+          m.status.rx_air_secs == 0);
+    mf_decode(st, 7, &m);
+    CHECK(m.kind == MF_BAD);
+
+    // a contact message from the offline queue: V3 [16, snr, 0, 0, prefix6, path_len, type, ts4, text]
+    uint8_t cm[64] = {16, 20, 0, 0, 1, 2, 3, 4, 5, 6, 0xFF, 1, 9, 9, 9, 9};
+    memcpy(cm + 16, "uptime ok", 9);
+    mf_decode(cm, 16 + 9, &m);
+    CHECK(m.kind == MF_MSG_RECV && !m.is_channel && m.msg_ok && m.txt_type == MF_TXT_CLI_DATA && strcmp(m.text, "uptime ok") == 0 &&
+          m.rprefix[0] == 1);
+    // the old layout [7, prefix6, path_len, type, ts4, text]
+    uint8_t old[32] = {7, 1, 2, 3, 4, 5, 6, 0xFF, 0, 9, 9, 9, 9};
+    memcpy(old + 13, "hi", 2);
+    mf_decode(old, 15, &m);
+    CHECK(m.msg_ok && m.txt_type == 0 && strcmp(m.text, "hi") == 0);
+    // a room's post: signed text has the author's 4 key bytes before the text
+    uint8_t post[40] = {16, 0, 0, 0, 1, 2, 3, 4, 5, 6, 0xFF, 2, 9, 9, 9, 9, 0xA1, 0xA2, 0xA3, 0xA4};
+    memcpy(post + 20, "morning", 7);
+    mf_decode(post, 27, &m);
+    CHECK(m.msg_ok && m.txt_type == MF_TXT_SIGNED_PLAIN && m.author[0] == 0xA1 && m.author[3] == 0xA4 && strcmp(m.text, "morning") == 0);
+    mf_decode(post, 18, &m); // signed but cut inside the author
+    CHECK(m.kind == MF_BAD || !m.msg_ok);
+    uint8_t big[MF_MAX_FRAME] = {16, 0, 0, 0, 1, 2, 3, 4, 5, 6, 0xFF, 1, 9, 9, 9, 9};
+    memset(big + 16, 'x', MF_MAX_FRAME - 16);
+    mf_decode(big, MF_MAX_FRAME, &m);
+    CHECK(m.msg_ok && strlen(m.text) == MF_MAX_FRAME - 16);
+}
+
 static void limits(void) {
     uint8_t f[MF_MAX_FRAME];
     char    big[200];
@@ -129,6 +213,8 @@ static void decoders(void) {
 
 int main(void) {
     encoders();
+    remote_encoders();
+    remote_decoders();
     limits();
     text_cut();
     decoders();

@@ -10,6 +10,7 @@
 #include "lichen_settings.h"
 #include "lora.h"
 #include "mesh.h"
+#include "mesh_remote.h"
 
 #include <stdint.h>
 
@@ -32,6 +33,25 @@ static bool apply(mesh_run_ev_t ev) {
 
 void meshcore_run_init(lichen_app_t const *the_app) {
     app = the_app;
+}
+
+bool meshcore_pw_get(uint8_t const prefix[6], char *out, size_t cap) {
+    char key[RR_PW_KEY_MAX];
+    rr_pw_key(prefix, key, sizeof(key));
+    app_settings_get_str(app, key, out, cap, "");
+    return out[0] != 0;
+}
+
+bool meshcore_pw_set(uint8_t const prefix[6], char const *password) {
+    char key[RR_PW_KEY_MAX];
+    rr_pw_key(prefix, key, sizeof(key));
+    return password[0] ? app_settings_set_str(app, key, password) : app_settings_erase(app, key);
+}
+
+bool meshcore_pw_forget(uint8_t const prefix[6]) {
+    char key[RR_PW_KEY_MAX];
+    rr_pw_key(prefix, key, sizeof(key));
+    return app_settings_erase(app, key);
 }
 
 bool meshcore_autostart(void) {

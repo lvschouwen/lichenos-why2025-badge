@@ -4,6 +4,8 @@
 #include "mesh_run.h"
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -27,6 +29,12 @@ bool meshcore_run_stop_for_update(void);
 
 // The first-open questions (name, region) were answered: the periodic advert (#52) waits for it
 bool meshcore_setup_done(void);
+
+// The password remembered for a repeater or room (#51), in the app's settings under the contact's key prefix: the
+// stored one into out (true) or empty (false). Never log what these handle.
+bool meshcore_pw_get(uint8_t const prefix[6], char *out, size_t cap);
+bool meshcore_pw_set(uint8_t const prefix[6], char const *password);
+bool meshcore_pw_forget(uint8_t const prefix[6]);
 
 bool meshcore_autostart(void);
 bool meshcore_autostart_set(bool on);

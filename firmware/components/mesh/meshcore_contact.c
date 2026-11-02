@@ -10,6 +10,7 @@
 #include "mesh_contact_fmt.h"
 #include "mesh.h"
 #include "meshcore_chat.h"
+#include "meshcore_remote.h"
 #include "theme.h"
 
 #include <stdio.h>
@@ -32,6 +33,7 @@ typedef struct {
     mesh_contact_detail_t d;
     mesh_contact_line_t   lines[MESH_CONTACT_LINES];
     char                  uri[MESH_URI_MAX];
+    rr_t                  rr; // the login state, for the Log in row's value (#51)
 } contact_mem_t;
 
 static uint8_t        prefix[6];
@@ -40,8 +42,8 @@ static uint8_t        type;
 static lv_obj_t      *list_screen; // the screen the details were opened from: Remove goes back to it
 static contact_mem_t *mem;         // PSRAM, while the details screen exists
 static bool           have_detail, gone;
-static int            shown_path_len, shown_flags; // what the rows show; -1: nothing yet
-static lv_obj_t      *info[MESH_CONTACT_LINES], *note, *fav_row, *reset_row;
+static int            shown_path_len, shown_flags, shown_login; // what the rows show; -1: nothing yet
+static lv_obj_t      *info[MESH_CONTACT_LINES], *note, *fav_row, *reset_row, *login_row;
 static lv_timer_t    *timer;
 
 static void set_text(lv_obj_t *label, char const *text) {
@@ -87,6 +89,13 @@ static void fill(uint32_t wait_ms) {
         menu_set_value(fav_row, mem->d.flags & MESH_CONTACT_FAV ? "on" : "off");
         shown_path_len = mem->d.path_len;
         shown_flags    = mem->d.flags;
+    }
+    if (login_row && mesh_remote_get(&mem->rr)) {
+        int in = rr_logged_in(&mem->rr, prefix) ? 1 + mem->rr.admin : 0;
+        if (in != shown_login) {
+            menu_set_value(login_row, in == 2 ? "admin" : in ? "logged in" : "");
+            shown_login = in;
+        }
     }
 }
 
@@ -134,6 +143,38 @@ static void on_fav(void *arg) {
     bool on = !(mem && (mem->d.flags & MESH_CONTACT_FAV));
     if (act(on ? MESH_CO_FAV_ON : MESH_CO_FAV_OFF, note)) {
         set_note(note, on ? "Favourite: first in the Contacts list" : "No longer a favourite", false);
+    }
+}
+
+// ---- Repeaters and rooms (#51): the screens are meshcore_remote.c, each starts only on an Enter of the person ---------
+
+static void on_login(void *arg) {
+    (void)arg;
+    meshcore_remote_login(prefix, title);
+}
+
+static void on_status(void *arg) {
+    (void)arg;
+    meshcore_remote_status(prefix, title);
+}
+
+static void on_cli(void *arg) {
+    (void)arg;
+    meshcore_remote_cli(prefix, title);
+}
+
+static void on_posts(void *arg) {
+    (void)arg;
+    meshcore_chat_open_dm(prefix, title[0] ? title : "(no name)");
+}
+
+static void on_logout(void *arg) {
+    (void)arg;
+    if (mesh_remote_logout(prefix, KEY_WAIT_MS)) {
+        set_note(note, "Logged out: MeshCore stops its keep-alives to it", false);
+        fill(0);
+    } else {
+        set_note(note, "MeshCore is busy, try again", true);
     }
 }
 
@@ -337,7 +378,7 @@ static void on_delete(lv_event_t *e) {
     heap_caps_free(mem);
     mem = NULL;
     memset(info, 0, sizeof(info));
-    note = fav_row = reset_row = NULL;
+    note = fav_row = reset_row = login_row = NULL;
 }
 
 static lv_obj_t *build_detail(void) {
@@ -348,7 +389,8 @@ static lv_obj_t *build_detail(void) {
     mem            = heap_caps_calloc(1, sizeof(*mem), MALLOC_CAP_SPIRAM);
     have_detail    = false;
     gone           = false;
-    shown_path_len = shown_flags = -1;
+    shown_path_len = shown_flags = shown_login = -1;
+    login_row      = NULL;
     if (!mem) {
         menu_note(menu, "Not enough memory to show the contact.");
         return screen;
@@ -358,6 +400,15 @@ static lv_obj_t *build_detail(void) {
     }
     if (type == ADV_TYPE_CHAT) {
         menu_add(menu, "Message", "", on_message, NULL); // the first row: Enter Enter is the old "message a contact"
+    }
+    if (type == MESH_ADV_TYPE_REPEATER || type == MESH_ADV_TYPE_ROOM) {
+        login_row = menu_add(menu, "Log in", "", on_login, NULL);
+        if (type == MESH_ADV_TYPE_ROOM) {
+            menu_add(menu, "Posts", "chat", on_posts, NULL); // the room's posts after login, and your own
+        }
+        menu_add(menu, "Status", "", on_status, NULL);
+        menu_add(menu, "CLI", "", on_cli, NULL);
+        menu_add(menu, "Log out", "", on_logout, NULL);
     }
     reset_row = menu_add(menu, "Reset path", "", on_reset, NULL);
     menu_add(menu, "Trace path", "", on_trace, NULL);

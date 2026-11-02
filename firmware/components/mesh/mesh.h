@@ -6,6 +6,7 @@
 #include "mesh_outbox.h"
 #include "mesh_store.h"
 #include "mesh_tile.h"
+#include "mesh_remote.h"
 #include "mesh_trace.h"
 
 #include <stdbool.h>
@@ -235,6 +236,17 @@ size_t mesh_out_list(mesh_out_info_t *out, size_t max);
 uint32_t mesh_trace_start(uint8_t const prefix[6], mt_kind_t kind, char const **why);
 // A copy of the current or last request (an answer that is late is timed out here); false before MeshCore is up
 bool     mesh_trace_get(mt_t *out);
+
+// ---- log in, status and CLI for a repeater or room (#51; mesh_remote.h) ---------------------------------------------
+// Copy-in and non-blocking like the senders (LVGL safe). One request at a time over the whole badge. Nothing is sent
+// unless one of these is called: the screens call them only on an Enter of the person. arg: the password (RR_LOGIN) or
+// the command (RR_CLI), never logged.
+uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char const *arg, char const **why);
+// A copy of the current or last request without its argument (an answer that is late is timed out here); false before
+// MeshCore is up
+bool     mesh_remote_get(rr_t *out);
+// Ends the login (MyMesh stops its keep-alives to the server): local, nothing goes on air. False when MeshCore is busy.
+bool     mesh_remote_logout(uint8_t const prefix[6], uint32_t wait_ms);
 
 #ifdef __cplusplus
 }

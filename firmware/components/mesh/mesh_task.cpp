@@ -48,6 +48,7 @@ extern "C" {
 }
 
 #include <ctype.h>
+#include <strings.h>
 #include <math.h>
 #include <new>
 #include <stdio.h>
@@ -296,6 +297,9 @@ class ScreenFeed : public MyMesh::Listener {
 public:
     void onMessageRecv(mesh::Packet *pkt, ContactInfo const &from, uint8_t txt_type, uint32_t sender_timestamp,
                        char const *text) override {
+        if (txt_type == MF_TXT_CLI_DATA) {
+            return; // a repeater's CLI reply belongs to the CLI screen (mesh_remote.h), not to a chat (#51)
+        }
         char from_name[sizeof(from.name) + 2]; // mesh_store cuts it to MESH_CHANNEL_MAX
         snprintf(from_name, sizeof(from_name), "@%s", from.name);
         // The tile follows the store: a message the store dropped (and logged) is not shown as the latest either
@@ -1727,6 +1731,52 @@ extern "C" bool mesh_trace_get(mt_t *out) {
     return true;
 }
 
+// ---- log in, status and CLI for a repeater or room (#51) -------------------------------------------------------------
+// One request at a time, shared with the pipe under ob_mux like the trace: copy-in, never the mesh lock (LVGL safe)
+
+static rr_t *remote_req; // PSRAM, made with the outbox
+
+extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char const *arg, char const **why) {
+    char const *local;
+    why  = why ? why : &local;
+    *why = NULL;
+    if (!send_ready(why)) {
+        return 0;
+    }
+    if (!remote_req) {
+        *why = "MeshCore is not running";
+        return 0;
+    }
+    mesh_ob_enter();
+    uint32_t seq = rr_request(remote_req, op, prefix, arg, (uint32_t)millis(), why);
+    mesh_ob_exit();
+    return seq;
+}
+
+extern "C" bool mesh_remote_get(rr_t *out) {
+    if (!remote_req) {
+        return false;
+    }
+    mesh_ob_enter();
+    rr_poll(remote_req, (uint32_t)millis(), out); // a plain copy (without the argument): the text is made outside
+    mesh_ob_exit();
+    return true;
+}
+
+extern "C" bool mesh_remote_logout(uint8_t const prefix[6], uint32_t wait_ms) {
+    if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped() || !remote_req || !mesh_lock_within(wait_ms)) {
+        return false;
+    }
+    bool ok = node->remoteLogout(prefix);
+    mesh_unlock();
+    if (ok) {
+        mesh_ob_enter();
+        rr_logout(remote_req, prefix);
+        mesh_ob_exit();
+    }
+    return ok;
+}
+
 // A channel name typed on the console as stored (channel_find_locked), into out (may be typed); false (said why,
 // after `what`) when there is none or MeshCore is not there
 static bool console_channel_name(char const *typed, char *out, size_t cap, char const *what) {
@@ -1878,6 +1928,122 @@ static void cmd_mesh_trace(char const *arg, mt_kind_t kind) {
     free(lines);
 }
 
+// ---- "fw mesh remote": log in, status and CLI for a repeater or room (#51) -------------------------------------------
+
+// A repeater or room by name (starts with, any case) or by the hex digits of its key; prints why not
+static bool console_remote_target(char const *token, uint8_t out[6]) {
+    size_t hex = strspn(token, "0123456789abcdefABCDEF");
+    if (hex == strlen(token) && hex >= 2 && hex % 2 == 0) {
+        return console_contact(token, out);
+    }
+    if (!mesh_lock_within(MESH_SET_WAIT_MS)) {
+        console_reply("MeshCore is busy, try again");
+        return false;
+    }
+    int              found = 0;
+    ContactsIterator it    = node->startContactsIterator();
+    ContactInfo      c;
+    while (it.hasNext(node, c)) {
+        bool remote = c.type == ADV_TYPE_REPEATER || c.type == ADV_TYPE_ROOM;
+        if (remote && strncasecmp(c.name, token, strlen(token)) == 0 && found++ == 0) {
+            memcpy(out, c.id.pub_key, 6);
+        }
+    }
+    mesh_unlock();
+    if (found > 1) {
+        console_reply("%d repeaters or rooms start with %s: give more letters or the key", found, token);
+    } else if (!found) {
+        console_reply("no repeater or room starts with %s", token);
+    }
+    return found == 1;
+}
+
+static void console_remote_show(void) {
+    rr_t *r = (rr_t *)heap_caps_malloc(sizeof(rr_t), MALLOC_CAP_SPIRAM);
+    if (r && mesh_remote_get(r)) {
+        char text[96];
+        rr_state_text(r, text, sizeof(text));
+        static char const *const OPS[] = {"login", "status", "cli"};
+        console_reply("%s #%lu to %02x%02x%02x%02x%02x%02x: %s", r->seq ? OPS[r->op] : "request",
+                      (unsigned long)r->seq, r->prefix[0], r->prefix[1], r->prefix[2], r->prefix[3], r->prefix[4],
+                      r->prefix[5], text);
+        if (r->logged_in) {
+            console_reply("logged in to %02x%02x%02x%02x%02x%02x%s", r->login_prefix[0], r->login_prefix[1],
+                          r->login_prefix[2], r->login_prefix[3], r->login_prefix[4], r->login_prefix[5],
+                          r->admin ? " (admin)" : "");
+        }
+        if (r->have_status) {
+            rr_line_t lines[RR_LINES_MAX];
+            size_t    n = rr_status_lines(&r->status, lines, RR_LINES_MAX);
+            for (size_t i = 0; i < n; i++) {
+                console_reply("  %s", lines[i].text);
+            }
+        }
+        char *log = (char *)heap_caps_malloc(RR_CLI_KEEP * (RR_CMD_MAX + RR_REPLY_MAX + 8), MALLOC_CAP_SPIRAM);
+        if (log) {
+            rr_cli_format(r, log, RR_CLI_KEEP * (RR_CMD_MAX + RR_REPLY_MAX + 8));
+            for (char *line = strtok(log, "\n"); line; line = strtok(NULL, "\n")) {
+                console_reply("  %s", line);
+            }
+            free(log);
+        }
+    }
+    free(r);
+}
+
+// fw mesh remote <name|hex> login [password] | status | cli <text> | logout, and fw mesh remote (the last result).
+// A password typed here is remembered like one from the screen; the screens never show it. Nothing is sent unless
+// this command says login, status or cli.
+static void cmd_mesh_remote(char const *args) {
+    if (!*args) {
+        console_remote_show();
+        return;
+    }
+    char token[40];
+    int  used = 0;
+    if (sscanf(args, "%39s%n", token, &used) != 1 || strlen(token) >= sizeof(token) - 1) {
+        console_reply("mesh remote <name or key digits> login [password] | status | cli <text> | logout");
+        return;
+    }
+    char const *verb = args + used + strspn(args + used, " ");
+    uint8_t     prefix[6];
+    if (!console_remote_target(token, prefix)) {
+        return;
+    }
+    char const *why = NULL;
+    uint32_t    seq = 0;
+    if (strcmp(verb, "logout") == 0) {
+        console_reply(mesh_remote_logout(prefix, MESH_SET_WAIT_MS) ? "logged out" : "MeshCore is busy or the contact is gone");
+        return;
+    }
+    if (strncmp(verb, "login", 5) == 0 && (verb[5] == ' ' || !verb[5])) {
+        char        saved[MF_PASSWORD_MAX + 2];
+        char const *pw = verb[5] ? verb + 6 : "";
+        if (*pw && strlen(pw) <= MF_PASSWORD_MAX) {
+            meshcore_pw_set(prefix, pw);
+        } else if (!*pw && meshcore_pw_get(prefix, saved, sizeof(saved))) {
+            pw = saved;
+        } else {
+            console_reply(*pw ? "the password is at most 15 characters" : "no password remembered: fw mesh remote <who> login <password>");
+            return;
+        }
+        seq = mesh_remote_start(prefix, RR_LOGIN, pw, &why);
+        memset(saved, 0, sizeof(saved));
+    } else if (strcmp(verb, "status") == 0) {
+        seq = mesh_remote_start(prefix, RR_STATUS, NULL, &why);
+    } else if (strncmp(verb, "cli ", 4) == 0) {
+        seq = mesh_remote_start(prefix, RR_CLI, verb + 4, &why);
+    } else {
+        console_reply("mesh remote <name or key digits> login [password] | status | cli <text> | logout");
+        return;
+    }
+    if (seq) {
+        console_reply("#%lu queued: fw mesh remote shows the answer", (unsigned long)seq);
+    } else {
+        console_reply("not started: %s", why ? why : "?");
+    }
+}
+
 static void cmd_mesh_out(void) {
     mesh_out_info_t list[OB_CAP];
     size_t          n = mesh_out_list(list, OB_CAP);
@@ -1905,6 +2071,8 @@ static void cmd_mesh_link(void) {
                   (unsigned long)s.confirmed);
     console_reply("traces back %lu, discoveries answered %lu, paths stored %lu", (unsigned long)s.traces,
                   (unsigned long)s.discoveries, (unsigned long)s.paths_stored);
+    console_reply("repeater/room answers %lu, CLI replies %lu", (unsigned long)s.remote_answers,
+                  (unsigned long)s.cli_replies);
     for (int i = 0; i < LINK_PUSH_KINDS; i++) {
         if (s.push_count[i]) {
             console_reply("  push 0x%02x x %lu", 0x80 + i, (unsigned long)s.push_count[i]);
@@ -2113,6 +2281,10 @@ static void cmd_mesh(char const *args) {
         cmd_mesh_trace(args + 9, MT_DISCOVER);
         return;
     }
+    if (strncmp(args, "remote", 6) == 0 && (args[6] == ' ' || !args[6])) {
+        cmd_mesh_remote(args + (args[6] ? 7 : 6));
+        return;
+    }
     if (strcmp(args, "link") == 0) {
         cmd_mesh_link();
         return;
@@ -2140,7 +2312,7 @@ static void cmd_mesh(char const *args) {
     if (*args) {
         console_reply("mesh | mesh start | mesh stop | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
                       "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
-                      "mesh dm <12 hex> <text> | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
+                      "mesh dm <12 hex> <text> | mesh remote [<name|hex> login [pw]|status|cli <text>|logout] | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
                       "[<lat> <lon> | share on|off] | mesh autoadd [on|off | types <all|chat,repeater,room,sensor> | hops "
                       "<any|direct|n> | overwrite on|off]");
         return;
@@ -2652,16 +2824,18 @@ static bool start_locked(char const *files_dir) {
     void *mesh_mem   = heap_caps_malloc(sizeof(BadgeMesh), MALLOC_CAP_SPIRAM);
     void *ob_mem     = heap_caps_calloc(1, sizeof(ob_t), MALLOC_CAP_SPIRAM);
     void *mt_mem     = heap_caps_calloc(1, sizeof(mt_t), MALLOC_CAP_SPIRAM);
+    void *rr_mem     = heap_caps_calloc(1, sizeof(rr_t), MALLOC_CAP_SPIRAM);
     bool  files      = SPIFFS.begin(true);
     if (!files) {
         mesh_identity_no_files();
     }
-    if (!ok || !tables_mem || !mesh_mem || !ob_mem || !mt_mem || !files) {
+    if (!ok || !tables_mem || !mesh_mem || !ob_mem || !mt_mem || !rr_mem || !files) {
         ESP_LOGE(TAG, "no memory or no /storage");
         free(tables_mem);
         free(mesh_mem);
         free(ob_mem);
         free(mt_mem);
+        free(rr_mem);
         return false;
     }
     tables    = new (tables_mem) SimpleMeshTables();
@@ -2671,6 +2845,9 @@ static bool start_locked(char const *files_dir) {
     mt_init((mt_t *)mt_mem);
     n->attachTrace((mt_t *)mt_mem);
     trace_req = (mt_t *)mt_mem;
+    rr_init((rr_t *)rr_mem);
+    n->attachRemote((rr_t *)rr_mem);
+    remote_req = (rr_t *)rr_mem;
 
     // Everything is loaded before node is published: the screens and the console read MeshCore only through node, and
     // must not walk the contact table while begin() fills it (#65 review)

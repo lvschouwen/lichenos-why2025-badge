@@ -11,6 +11,7 @@
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
 #include "mesh_outbox.h"
+#include "mesh_remote.h"
 #include "mesh_trace.h"
 
 extern "C" {
@@ -25,11 +26,13 @@ void mesh_contacts_full(void);
 
 #define LINK_PUSH_KINDS 0x11 // push codes 0x80..0x90
 #define LINK_FIFO       8
+#define LINK_OVF        4 // the badge's own commands (#49) that found the FIFO full wait here, not dropped (#112)
 
 struct LinkStats {
     uint32_t cmds_out = 0, replies = 0, pushes = 0, msg_waiting = 0, drained = 0, no_more = 0;
     uint32_t self_ok = 0, self_bad = 0, lost_replies = 0, fifo_drops = 0, bad_frames = 0, confirmed = 0;
     uint32_t traces = 0, discoveries = 0, paths_stored = 0; // #53: our answers in, discovered paths stored
+    uint32_t remote_answers = 0, cli_replies = 0; // #51: login/status answers and CLI replies that were ours
     uint32_t push_count[LINK_PUSH_KINDS] = {};
     uint32_t reply_count[32]             = {};
     uint8_t  app_ver                     = 0; // what DEVICE_INFO answered with (the firmware's protocol version)
@@ -46,6 +49,9 @@ public:
     // The trace/discovery request shared with the UI (#53), under mesh_ob_enter/exit like the outbox
     void  attach_trace(mt_t *mt) { mt_ = mt; }
     mt_t *trace() const { return mt_; }
+    // The log in / status / CLI request shared with the UI (#51), under mesh_ob_enter/exit as well
+    void  attach_remote(rr_t *rr) { rr_ = rr; }
+    rr_t *remote() const { return rr_; }
     // Queues the start sequence: DEVICE_QUERY(3) so MyMesh builds the V3 message layouts, APP_START, then a drain
     void start();
     LinkStats const &stats() const { return stats_; }
@@ -59,11 +65,11 @@ public:
     size_t writeFrame(uint8_t const src[], size_t len) override;
     size_t checkRecvFrame(uint8_t dest[]) override;
     // A command of the badge's own (#49) for MyMesh's next loop, like the start sequence; false when the queue is full
-    bool queue_cmd(uint8_t const *frame, size_t len) { return fifo_push(frame, len); }
-    bool can_queue() const { return fifo_n_ < LINK_FIFO; }
+    bool queue_cmd(uint8_t const *frame, size_t len);
+    bool can_queue() const { return fifo_n_ < LINK_FIFO || ovf_n_ < LINK_OVF; }
 
 private:
-    enum CurKind : uint8_t { CUR_NONE, CUR_INTERNAL, CUR_OUTBOX, CUR_TRACE };
+    enum CurKind : uint8_t { CUR_NONE, CUR_INTERNAL, CUR_OUTBOX, CUR_TRACE, CUR_REMOTE };
     struct Frame {
         uint8_t len;
         uint8_t data[MF_MAX_FRAME];
@@ -72,6 +78,7 @@ private:
     size_t take_fifo(uint8_t dest[]);
     size_t take_outbox(uint8_t dest[]);
     size_t take_trace(uint8_t dest[]);
+    size_t take_remote(uint8_t dest[]);
     void   store_discovered_path(mf_discovery_t const &d);
     void   request_drain();
     size_t build_outbox_frame(ob_action_t const &act, uint8_t *dest);
@@ -81,9 +88,13 @@ private:
     MyMesh    *mesh_ = nullptr;
     ob_t      *ob_   = nullptr;
     mt_t      *mt_   = nullptr;
+    rr_t      *rr_   = nullptr;
     mt_plan_t  plan_; // off the stack, as scratch_
     Frame      fifo_[LINK_FIFO];
     uint8_t    fifo_head_ = 0, fifo_n_ = 0;
+    Frame      ovf_[LINK_OVF];
+    uint8_t    ovf_head_ = 0, ovf_n_ = 0;
+    void       refill_from_ovf();
     CurKind    cur_      = CUR_NONE;
     uint8_t    cur_cmd_  = 0;
     mesh_msg_id_t cur_id_ = 0;
@@ -105,6 +116,10 @@ public:
     }
     CompanionPipe &pipe() { return pipe_; }
     void           attachTrace(mt_t *mt) { pipe_.attach_trace(mt); }
+    void           attachRemote(rr_t *rr) { pipe_.attach_remote(rr); }
+    // Log out of a repeater or room (#51), under the mesh lock: MyMesh stops its keep-alives to it. Nothing goes on air.
+    // False when the contact is gone or the command queue is full.
+    bool           remoteLogout(uint8_t const prefix[MF_PREFIX]);
     // Our own advert, under the mesh lock (#52): zero-hop (heard by nodes in direct range) or flooded with the default
     // scope as MyMesh's CMD_SEND_SELF_ADVERT does. With the location when the prefs share it. false when no packet.
     bool advertNow(bool flood);
@@ -131,6 +146,9 @@ protected:
     void logRx(mesh::Packet *packet, int len, float score) override;
     void logTx(mesh::Packet *packet, int len) override;
     void logTxFail(mesh::Packet *packet, int len) override;
+    // A room's post (#51): the screens get "<author>: <text>", as the room's own chat shows it
+    void onSignedMessageRecv(ContactInfo const &from, mesh::Packet *packet, uint32_t sender_timestamp,
+                             uint8_t const *sender_prefix, char const *text) override;
     // Verified adverts: a node not in the contact table goes through the new-node rate limit first (#6)
     void onAdvertRecv(mesh::Packet *packet, mesh::Identity const &id, uint32_t timestamp, uint8_t const *app_data,
                       size_t app_data_len) override;

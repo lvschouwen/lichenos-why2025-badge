@@ -191,8 +191,14 @@ static void clock_uses_real_time(void) {
 
 // Messages seen by the Listener, as the badge's screens get them
 struct CountingListener : MyMesh::Listener {
-    int channel_msgs = 0, dm_msgs = 0, queue_len = -1;
-    void onMessageRecv(mesh::Packet *, ContactInfo const &, uint8_t, uint32_t, char const *) override { dm_msgs++; }
+    int         channel_msgs = 0, dm_msgs = 0, queue_len = -1;
+    std::string last_dm;
+    uint8_t     last_type = 0xFF;
+    void onMessageRecv(mesh::Packet *, ContactInfo const &, uint8_t type, uint32_t, char const *text) override {
+        dm_msgs++;
+        last_dm   = text;
+        last_type = type;
+    }
     void onChannelMessageRecv(mesh::Packet *, ChannelDetails &, char const *) override { channel_msgs++; }
     void onQueueSizeChanged(int n) override { queue_len = n; }
 };
@@ -263,6 +269,29 @@ static void contact_action_checks(BadgeMesh &mesh) {
     CHECK(mesh.contactAction(a.id.pub_key, MESH_CO_FAV_OFF) == BadgeMesh::CONTACT_QUEUED);
     settle(mesh, 3);
     CHECK(pa->flags == 0x02);
+
+    // A full command queue must not drop a favourite toggle (#112): it waits in the overflow and is applied after the
+    // queue drains; only when that is full too is the change refused, and then the flag stays as it was
+    uint8_t sync[1];
+    mf_encode_sync_next(sync);
+    pa->flags = 0;
+    for (int i = 0; i < LINK_FIFO; i++) {
+        CHECK(mesh.pipe().queue_cmd(sync, 1));
+    }
+    CHECK(mesh.pipe().can_queue()); // the overflow still has room
+    CHECK(mesh.contactAction(a.id.pub_key, MESH_CO_FAV_ON) == BadgeMesh::CONTACT_QUEUED);
+    CHECK(pa->flags & MESH_CONTACT_FAV);
+    for (int i = 1; i < LINK_OVF; i++) {
+        CHECK(mesh.pipe().queue_cmd(sync, 1)); // fills the rest of the overflow
+    }
+    pa->flags = 0;
+    CHECK(mesh.contactAction(a.id.pub_key, MESH_CO_FAV_ON) == BadgeMesh::CONTACT_QUEUE_FULL);
+    CHECK(!(pa->flags & MESH_CONTACT_FAV));
+    settle(mesh, 40);
+    CHECK(mesh.pipe().can_queue());
+    pa->flags = MESH_CONTACT_FAV;
+    CHECK(mesh.contactAction(a.id.pub_key, MESH_CO_FAV_OFF) == BadgeMesh::CONTACT_QUEUED);
+    CHECK(!(pa->flags & MESH_CONTACT_FAV));
 }
 
 // Trace path and path discovery (#53) through the pipe on the real MyMesh: the trace goes out along the contact's
@@ -336,6 +365,146 @@ static void trace_checks(BadgeMesh &mesh, mt_t &mt) {
     pc->type = type;
 }
 
+// A packet from a peer to us, as MeshCore sends it: [header][path_len 0][our hash][its hash][MAC + encrypted plain]
+static std::vector<uint8_t> peer_packet(BadgeMesh &mesh, mesh::LocalIdentity &peer, uint8_t type,
+                                        std::vector<uint8_t> const &plain) {
+    uint8_t secret[PUB_KEY_SIZE];
+    peer.calcSharedSecret(secret, mesh.self_id.pub_key);
+    uint8_t raw[200];
+    raw[0]  = (uint8_t)((type << PH_TYPE_SHIFT) | ROUTE_TYPE_FLOOD);
+    raw[1]  = 0;
+    raw[2]  = mesh.self_id.pub_key[0];
+    raw[3]  = peer.pub_key[0];
+    int enc = mesh::Utils::encryptThenMAC(secret, raw + 4, plain.data(), (int)plain.size());
+    return std::vector<uint8_t>(raw, raw + 4 + enc);
+}
+
+static std::vector<uint8_t> with_tag(uint32_t tag, std::vector<uint8_t> rest) {
+    std::vector<uint8_t> v((uint8_t *)&tag, (uint8_t *)&tag + 4);
+    v.insert(v.end(), rest.begin(), rest.end());
+    return v;
+}
+
+// The datagram we put on air to the peer (TXT_MSG), decrypted: its text type and text, or false when there is none
+static bool datagram_to(BadgeMesh &mesh, mesh::LocalIdentity &peer, size_t from, uint8_t want_type, uint8_t *type,
+                        std::string *text) {
+    uint8_t secret[PUB_KEY_SIZE];
+    peer.calcSharedSecret(secret, mesh.self_id.pub_key);
+    for (size_t i = from; i < test_radio.sent.size(); i++) {
+        mesh::Packet pkt;
+        auto const  &raw = test_radio.sent[i];
+        if (!pkt.readFrom(raw.data(), (uint8_t)raw.size()) || pkt.getPayloadType() != want_type || pkt.payload_len < 4 ||
+            pkt.payload[0] != peer.pub_key[0]) {
+            continue;
+        }
+        uint8_t plain[200];
+        int     n = mesh::Utils::MACThenDecrypt(secret, plain, &pkt.payload[2], pkt.payload_len - 2);
+        if (n > 5) {
+            *type = plain[4] >> 2;
+            *text = (char *)&plain[5];
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool sent_has_type(size_t from, uint8_t want_type) {
+    for (size_t i = from; i < test_radio.sent.size(); i++) {
+        mesh::Packet pkt;
+        auto const  &raw = test_radio.sent[i];
+        if (pkt.readFrom(raw.data(), (uint8_t)raw.size()) && pkt.getPayloadType() == want_type) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Log in, status, CLI and a room's posts (#51) through the pipe on the real MyMesh, against a peer that answers as
+// a repeater does (its replies built as simple_repeater builds them)
+static void remote_checks(BadgeMesh &mesh, rr_t &rr, CountingListener &listener) {
+    static Rng          peer_rng;
+    mesh::LocalIdentity peer(&peer_rng);
+    ContactInfo         ci;
+    memset(&ci, 0, sizeof(ci));
+    ci.id            = mesh::Identity(peer.pub_key);
+    ci.type          = ADV_TYPE_REPEATER;
+    ci.out_path_len  = OUT_PATH_UNKNOWN;
+    ci.lastmod       = rtc_clock.getCurrentTime();
+    strcpy(ci.name, "Rpt");
+    CHECK(mesh.addContact(ci));
+    char const *why = NULL;
+    uint32_t    now = (uint32_t)time(NULL) + 5000;
+
+    // Log in: the password leaves the request, an ANON_REQ goes on air, the repeater's answer logs us in
+    size_t before = test_radio.sent.size();
+    CHECK(rr_request(&rr, RR_LOGIN, peer.pub_key, "hunter2", (uint32_t)millis(), &why) != 0);
+    settle(mesh, 10);
+    CHECK(rr.state == RR_SENT && rr.arg[0] == 0 && sent_has_type(before, PAYLOAD_TYPE_ANON_REQ));
+    CHECK(mesh.pipe().stats().reply_count[MF_RESP_SENT] >= 1);
+    test_radio.pending = peer_packet(mesh, peer, PAYLOAD_TYPE_RESPONSE,
+                                     with_tag(now++, {0 /* LOGIN_OK */, 0, 1 /* admin */, 3, 1, 2, 3, 4, 8}));
+    settle(mesh, 5);
+    CHECK(rr.state == RR_DONE && rr.logged_in && rr.admin && rr.acl == 3 && rr.fw_level == 8);
+    CHECK(rr_logged_in(&rr, peer.pub_key) && mesh.pipe().stats().remote_answers == 1);
+
+    // Status: the repeater's RepeaterStats come back as the fields
+    before = test_radio.sent.size();
+    CHECK(rr_request(&rr, RR_STATUS, peer.pub_key, NULL, (uint32_t)millis(), &why) != 0);
+    settle(mesh, 10);
+    CHECK(rr.state == RR_SENT);
+    std::vector<uint8_t> stats(56, 0);
+    stats[0] = 0x10; stats[1] = 0x10; // 4112 mV
+    stats[2] = 2;                     // queue
+    stats[4] = 0x91; stats[5] = 0xFF; // noise -111
+    stats[20] = 0x2C; stats[21] = 0x01; // up 300 s
+    test_radio.pending = peer_packet(mesh, peer, PAYLOAD_TYPE_RESPONSE, with_tag(now++, stats));
+    settle(mesh, 5);
+    CHECK(rr.state == RR_DONE && rr.have_status && rr.status.bytes == 56 && rr.status.batt_mv == 4112 &&
+          rr.status.tx_queue == 2 && rr.status.noise_floor == -111 && rr.status.up_secs == 300);
+
+    // CLI: the command goes out as a CLI_DATA datagram; the reply comes back as a message and is the CLI's, not a chat's
+    before = test_radio.sent.size();
+    int dms = listener.dm_msgs;
+    CHECK(rr_request(&rr, RR_CLI, peer.pub_key, "get name", (uint32_t)millis(), &why) != 0);
+    settle(mesh, 10);
+    uint8_t     type = 0xFF;
+    std::string text;
+    CHECK(rr.state == RR_SENT && datagram_to(mesh, peer, before, PAYLOAD_TYPE_TXT_MSG, &type, &text));
+    CHECK(type == MF_TXT_CLI_DATA && text == "get name");
+    std::vector<uint8_t> reply = with_tag(now++, {(uint8_t)(MF_TXT_CLI_DATA << 2)});
+    for (char c : std::string("> Rpt")) reply.push_back((uint8_t)c);
+    reply.push_back(0);
+    test_radio.pending = peer_packet(mesh, peer, PAYLOAD_TYPE_TXT_MSG, reply);
+    settle(mesh, 20);
+    CHECK(rr.state == RR_DONE && rr.cli_n == 1 && strcmp(rr.cli[rr.cli_head].reply, "> Rpt") == 0);
+    CHECK(mesh.pipe().stats().cli_replies == 1 && listener.dm_msgs == dms + 1 && listener.last_type == MF_TXT_CLI_DATA);
+
+    // A room's post (signed text): the screens see "<author>: <text>"
+    std::vector<uint8_t> post = with_tag(now++, {(uint8_t)(MF_TXT_SIGNED_PLAIN << 2)});
+    post.insert(post.end(), peer.pub_key, peer.pub_key + 4); // the author is the repeater's key, a known contact
+    for (char c : std::string("good morning")) post.push_back((uint8_t)c);
+    post.push_back(0);
+    test_radio.pending = peer_packet(mesh, peer, PAYLOAD_TYPE_TXT_MSG, post);
+    settle(mesh, 20);
+    CHECK(listener.last_type == MF_TXT_SIGNED_PLAIN && listener.last_dm == "Rpt: good morning");
+
+    // Log out: MyMesh answers its OK, nothing goes on air
+    before = test_radio.sent.size();
+    uint32_t oks = mesh.pipe().stats().reply_count[0];
+    CHECK(mesh.remoteLogout(peer.pub_key));
+    rr_logout(&rr, peer.pub_key);
+    settle(mesh, 5);
+    CHECK(!rr_logged_in(&rr, peer.pub_key) && mesh.pipe().stats().reply_count[0] == oks + 1);
+    CHECK(test_radio.sent.size() == before);
+    uint8_t gone[6] = {0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE};
+    CHECK(!mesh.remoteLogout(gone));
+
+    // A contact that is not there: refused by the pipe, not sent
+    CHECK(rr_request(&rr, RR_STATUS, gone, NULL, (uint32_t)millis(), &why) != 0);
+    settle(mesh, 3);
+    CHECK(rr.state == RR_FAILED && strstr(rr.why, "not found"));
+}
+
 // Packets left in MyMesh's pool (16): taken until none is left, then all given back
 static int free_packets(BadgeMesh &mesh) {
     std::vector<mesh::Packet *> got;
@@ -375,9 +544,12 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     static BadgeMesh mesh(radio_driver, rng_for_pipe(), rtc_clock, tables, store, &ob);
     static CountingListener listener;
     static mt_t             mt;
+    static rr_t             rr;
     ob_init(&ob);
     mt_init(&mt);
+    rr_init(&rr);
     mesh.attachTrace(&mt);
+    mesh.attachRemote(&rr);
     store.begin();
     mesh.begin();
     mesh.setListener(&listener);
@@ -463,6 +635,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     CHECK(ob_get(&ob, dm, &state, NULL, NULL, &trip) && state == MESH_OUT_DELIVERED);
     CHECK(st.confirmed == 1);
     trace_checks(mesh, mt);
+    remote_checks(mesh, rr, listener);
     contact_action_checks(mesh);
     import_checks(mesh);
 }

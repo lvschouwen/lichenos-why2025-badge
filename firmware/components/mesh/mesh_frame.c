@@ -61,6 +61,38 @@ size_t mf_encode_send_dm(uint8_t *out, uint8_t attempt, uint32_t timestamp, uint
     return 13 + text_len;
 }
 
+size_t mf_encode_send_cli(uint8_t *out, uint8_t attempt, uint32_t timestamp, uint8_t const prefix[MF_PREFIX],
+                          char const *text, size_t text_len) {
+    size_t n = mf_encode_send_dm(out, attempt, timestamp, prefix, text, text_len);
+    if (n) {
+        out[1] = MF_TXT_CLI_DATA;
+    }
+    return n;
+}
+
+size_t mf_encode_login(uint8_t *out, uint8_t const pub[MF_PUB_LEN], char const *password) {
+    size_t n = strlen(password);
+    if (n > MF_PASSWORD_MAX) {
+        return 0;
+    }
+    out[0] = MF_CMD_SEND_LOGIN;
+    memcpy(out + 1, pub, MF_PUB_LEN);
+    memcpy(out + 1 + MF_PUB_LEN, password, n);
+    return 1 + MF_PUB_LEN + n;
+}
+
+size_t mf_encode_status_req(uint8_t *out, uint8_t const pub[MF_PUB_LEN]) {
+    out[0] = MF_CMD_SEND_STATUS_REQ;
+    memcpy(out + 1, pub, MF_PUB_LEN);
+    return 1 + MF_PUB_LEN;
+}
+
+size_t mf_encode_logout(uint8_t *out, uint8_t const pub[MF_PUB_LEN]) {
+    out[0] = MF_CMD_LOGOUT;
+    memcpy(out + 1, pub, MF_PUB_LEN);
+    return 1 + MF_PUB_LEN;
+}
+
 size_t mf_encode_reset_path(uint8_t *out, uint8_t const pub[MF_PUB_LEN]) {
     out[0] = MF_CMD_RESET_PATH;
     memcpy(out + 1, pub, MF_PUB_LEN);
@@ -182,6 +214,81 @@ static void decode_discovery(uint8_t const *f, size_t len, mf_msg_t *out) {
     out->kind = MF_DISCOVERY;
 }
 
+static uint16_t get16(uint8_t const *p) {
+    return (uint16_t)(p[0] | p[1] << 8);
+}
+
+// [0x85, admin, prefix6] (legacy) or [0x85, perms, prefix6, tag4, acl, fw_level]
+static void decode_login_ok(uint8_t const *f, size_t len, mf_msg_t *out) {
+    if (len < 8) {
+        out->kind = MF_BAD;
+        return;
+    }
+    out->kind  = MF_LOGIN_SUCCESS;
+    out->admin = f[1] & 1;
+    memcpy(out->rprefix, f + 2, MF_PREFIX);
+    if (len >= 14) {
+        out->acl      = f[12];
+        out->fw_level = f[13];
+    }
+}
+
+// [0x87, 0, prefix6, RepeaterStats]: fields are taken as far as the answer goes
+static void decode_status(uint8_t const *f, size_t len, mf_msg_t *out) {
+    if (len < 8) {
+        out->kind = MF_BAD;
+        return;
+    }
+    out->kind = MF_STATUS;
+    memcpy(out->rprefix, f + 2, MF_PREFIX);
+    uint8_t raw[MF_STATUS_BYTES] = {0};
+    size_t  n                    = len - 8 < sizeof(raw) ? len - 8 : sizeof(raw);
+    memcpy(raw, f + 8, n);
+    mf_status_t *s = &out->status;
+    s->bytes       = (uint8_t)n;
+    s->batt_mv     = get16(raw);
+    s->tx_queue    = get16(raw + 2);
+    s->noise_floor = (int16_t)get16(raw + 4);
+    s->last_rssi   = (int16_t)get16(raw + 6);
+    s->n_recv      = get32(raw + 8);
+    s->n_sent      = get32(raw + 12);
+    s->air_secs    = get32(raw + 16);
+    s->up_secs     = get32(raw + 20);
+    s->sent_flood  = get32(raw + 24);
+    s->sent_direct = get32(raw + 28);
+    s->recv_flood  = get32(raw + 32);
+    s->recv_direct = get32(raw + 36);
+    s->err_events  = get16(raw + 40);
+    s->last_snr_q  = (int16_t)get16(raw + 42);
+    s->direct_dups = get16(raw + 44);
+    s->flood_dups  = get16(raw + 46);
+    s->rx_air_secs = get32(raw + 48);
+    s->recv_errors = get32(raw + 52);
+}
+
+// RESP_CONTACT_MSG_RECV [7, prefix6, path_len, txt_type, ts4, (author4 if signed), text] and the V3 layout, which has
+// [16, snr, 0, 0] in front. The text is cut to MF_MAX_TEXT and always terminated.
+static void decode_contact_msg(uint8_t const *f, size_t len, mf_msg_t *out) {
+    size_t at = f[0] == MF_RESP_CONTACT_MSG_RECV_V3 ? 4 : 1;
+    if (len < at + 6 + 6) {
+        return; // msg_ok stays false
+    }
+    memcpy(out->rprefix, f + at, MF_PREFIX);
+    out->txt_type = f[at + 7];
+    at += 12; // prefix, path_len, txt_type, timestamp
+    if (out->txt_type == MF_TXT_SIGNED_PLAIN) {
+        if (len < at + 4) {
+            return;
+        }
+        memcpy(out->author, f + at, 4);
+        at += 4;
+    }
+    size_t n = len - at < MF_MAX_TEXT ? len - at : MF_MAX_TEXT;
+    memcpy(out->text, f + at, n);
+    out->text[n] = 0;
+    out->msg_ok  = true;
+}
+
 void mf_decode(uint8_t const *f, size_t len, mf_msg_t *out) {
     memset(out, 0, sizeof(*out));
     if (len == 0) {
@@ -224,6 +331,9 @@ void mf_decode(uint8_t const *f, size_t len, mf_msg_t *out) {
     case MF_RESP_CHANNEL_MSG_RECV_V3:
         out->kind       = too_short(len, 7) ? MF_BAD : MF_MSG_RECV;
         out->is_channel = f[0] == MF_RESP_CHANNEL_MSG_RECV || f[0] == MF_RESP_CHANNEL_MSG_RECV_V3;
+        if (out->kind == MF_MSG_RECV && !out->is_channel) {
+            decode_contact_msg(f, len, out);
+        }
         break;
     case MF_PUSH_SEND_CONFIRMED:
         if (too_short(len, 9)) {
@@ -241,13 +351,16 @@ void mf_decode(uint8_t const *f, size_t len, mf_msg_t *out) {
         out->kind = MF_PATH_UPDATED;
         break;
     case MF_PUSH_LOGIN_SUCCESS:
-        out->kind = MF_LOGIN_SUCCESS;
+        decode_login_ok(f, len, out);
         break;
     case MF_PUSH_LOGIN_FAIL:
-        out->kind = MF_LOGIN_FAIL;
+        out->kind = too_short(len, 8) ? MF_BAD : MF_LOGIN_FAIL;
+        if (out->kind == MF_LOGIN_FAIL) {
+            memcpy(out->rprefix, f + 2, MF_PREFIX);
+        }
         break;
     case MF_PUSH_STATUS_RESPONSE:
-        out->kind = MF_STATUS;
+        decode_status(f, len, out);
         break;
     case MF_PUSH_TRACE_DATA:
         decode_trace(f, len, out);

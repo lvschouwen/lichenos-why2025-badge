@@ -3,6 +3,7 @@
 
 #include "channel_input.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static void fill_hash(mesh::Packet *pkt, uint8_t hash[MAX_HASH_SIZE]) {
@@ -69,6 +70,33 @@ void BadgeMesh::onAdvertRecv(mesh::Packet *packet, mesh::Identity const &id, uin
         }
     }
     MyMesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len);
+}
+
+// A room's post: the contact table names the author by the first 4 bytes of its key (the room sends only those), else
+// the 8 hex digits. The screens see "<author>: <text>" in the room's chat (#51).
+void BadgeMesh::onSignedMessageRecv(ContactInfo const &from, mesh::Packet *packet, uint32_t sender_timestamp,
+                                    uint8_t const *sender_prefix, char const *text) {
+    char who[MF_NAME_MAX + 1];
+    ContactInfo *a = lookupContactByPubKey(sender_prefix, 4);
+    if (a && a->name[0]) {
+        snprintf(who, sizeof(who), "%s", a->name);
+    } else {
+        snprintf(who, sizeof(who), "%02x%02x%02x%02x", sender_prefix[0], sender_prefix[1], sender_prefix[2],
+                 sender_prefix[3]);
+    }
+    char   line[MF_MAX_TEXT + 1];
+    size_t room = MF_MAX_TEXT - strlen(who) - 2;
+    snprintf(line, sizeof(line), "%s: %.*s", who, (int)mf_text_cut(text, room), text);
+    MyMesh::onSignedMessageRecv(from, packet, sender_timestamp, sender_prefix, line);
+}
+
+bool BadgeMesh::remoteLogout(uint8_t const prefix[MF_PREFIX]) {
+    ContactInfo *c = lookupContactByPubKey(prefix, MF_PREFIX);
+    if (!c || !pipe_.can_queue()) {
+        return false;
+    }
+    uint8_t f[MF_MAX_FRAME];
+    return pipe_.queue_cmd(f, mf_encode_logout(f, c->id.pub_key));
 }
 
 static void contact_to_frame(ContactInfo const &c, mf_contact_t *out) {
@@ -158,6 +186,31 @@ bool CompanionPipe::fifo_push(uint8_t const *data, size_t len) {
     return true;
 }
 
+// A command of the badge's own: into the FIFO, or when that is full into the overflow, which feeds the FIFO as it
+// empties (a favourite toggle must not be lost to a busy queue, #112)
+bool CompanionPipe::queue_cmd(uint8_t const *frame, size_t len) {
+    if (fifo_n_ < LINK_FIFO) {
+        return fifo_push(frame, len);
+    }
+    if (ovf_n_ >= LINK_OVF || len > MF_MAX_FRAME) {
+        return false;
+    }
+    Frame &f = ovf_[(ovf_head_ + ovf_n_) % LINK_OVF];
+    f.len    = (uint8_t)len;
+    memcpy(f.data, frame, len);
+    ovf_n_++;
+    return true;
+}
+
+void CompanionPipe::refill_from_ovf() {
+    while (ovf_n_ > 0 && fifo_n_ < LINK_FIFO) {
+        Frame const &f = ovf_[ovf_head_];
+        fifo_push(f.data, f.len);
+        ovf_head_ = (ovf_head_ + 1) % LINK_OVF;
+        ovf_n_--;
+    }
+}
+
 void CompanionPipe::request_drain() {
     if (draining_) {
         return; // the running drain ends at NO_MORE_MESSAGES and covers what arrived meanwhile
@@ -221,11 +274,24 @@ size_t CompanionPipe::checkRecvFrame(uint8_t dest[]) {
             mesh_ob_enter();
             mt_fail(mt_, "MeshCore did not answer");
             mesh_ob_exit();
+        } else if (cur_ == CUR_REMOTE) {
+            mesh_ob_enter();
+            rr_fail(rr_, "MeshCore did not answer");
+            mesh_ob_exit();
         }
         cur_ = CUR_NONE;
     }
+    if (rr_) {
+        mesh_ob_enter();
+        rr_poll(rr_, (uint32_t)millis(), nullptr); // an answer that never came ends the request, and frees the trace
+        mesh_ob_exit();
+    }
+    refill_from_ovf();
     if (size_t n = take_trace(dest)) {
         return n; // asked for by hand, one at a time: ahead of the queues
+    }
+    if (size_t n = take_remote(dest)) {
+        return n; // asked for by hand with an Enter, as the trace
     }
     bool fifo_has = fifo_n_ > 0;
     bool ob_first = ob_arb_outbox_first(&arb_, fifo_has);
@@ -282,6 +348,14 @@ size_t CompanionPipe::take_trace(uint8_t dest[]) {
     if (!mt_) {
         return 0;
     }
+    if (rr_) {
+        mesh_ob_enter();
+        bool login_busy = rr_busy(rr_) && rr_->op != RR_CLI; // MyMesh holds one pending login/status/discovery
+        mesh_ob_exit();
+        if (login_busy) {
+            return 0;
+        }
+    }
     mt_kind_t kind;
     uint8_t   prefix[MF_PREFIX];
     uint32_t  tag;
@@ -314,6 +388,54 @@ size_t CompanionPipe::take_trace(uint8_t dest[]) {
         return 0;
     }
     cur_     = CUR_TRACE;
+    cur_cmd_ = dest[0];
+    stats_.cmds_out++;
+    return n;
+}
+
+// The login, status request or CLI command the person asked for (#51), as MyMesh's own command. MyMesh keeps one
+// pending login/status/discovery at a time (clearPendingReqs), so this waits while a trace or discovery is running.
+size_t CompanionPipe::take_remote(uint8_t dest[]) {
+    if (!rr_) {
+        return 0;
+    }
+    if (mt_) {
+        mesh_ob_enter();
+        bool trace_busy = mt_busy(mt_);
+        mesh_ob_exit();
+        if (trace_busy) {
+            return 0;
+        }
+    }
+    rr_op_t  op;
+    uint8_t  prefix[MF_PREFIX];
+    char     arg[RR_CMD_MAX + 1];
+    mesh_ob_enter();
+    bool have = rr_take(rr_, &op, prefix, arg, sizeof(arg), (uint32_t)millis());
+    mesh_ob_exit();
+    if (!have) {
+        return 0;
+    }
+    ContactInfo *c   = mesh_->lookupContactByPubKey(prefix, MF_PREFIX);
+    size_t       n   = 0;
+    char const  *why = c ? "the request does not fit in a frame" : "contact not found";
+    if (c) {
+        switch (op) {
+        case RR_LOGIN: n = mf_encode_login(dest, c->id.pub_key, arg); break;
+        case RR_STATUS: n = mf_encode_status_req(dest, c->id.pub_key); break;
+        case RR_CLI:
+            n = mf_encode_send_cli(dest, 0, rtc_clock.getCurrentTimeUnique(), prefix, arg, mf_text_cut(arg, MF_MAX_TEXT));
+            break;
+        }
+    }
+    memset(arg, 0, sizeof(arg)); // the password is on its way (or refused): not kept on this stack
+    if (n == 0) {
+        mesh_ob_enter();
+        rr_fail(rr_, why);
+        mesh_ob_exit();
+        return 0;
+    }
+    cur_     = CUR_REMOTE;
     cur_cmd_ = dest[0];
     stats_.cmds_out++;
     return n;
@@ -359,9 +481,21 @@ void CompanionPipe::on_reply(mf_msg_t const &m) {
         mesh_ob_exit();
         return;
     }
+    if (cur == CUR_REMOTE) {
+        mesh_ob_enter();
+        rr_on_reply(rr_, &m, (uint32_t)millis());
+        mesh_ob_exit();
+        return;
+    }
     switch (m.kind) {
-    case MF_MSG_RECV: // thrown away: the Listener already fed the screens with this message
+    case MF_MSG_RECV: // thrown away: the Listener already fed the screens with this message (a CLI reply is ours)
         stats_.drained++;
+        if (rr_ && m.msg_ok && m.txt_type == MF_TXT_CLI_DATA) {
+            mesh_ob_enter();
+            bool ours = rr_on_message(rr_, &m, (uint32_t)millis());
+            mesh_ob_exit();
+            stats_.cli_replies += ours;
+        }
         {
             uint8_t f[1];
             if (!fifo_push(f, mf_encode_sync_next(f))) {
@@ -422,8 +556,19 @@ void CompanionPipe::on_push(mf_msg_t const &m) {
         }
         break;
     }
+    case MF_LOGIN_SUCCESS:
+    case MF_LOGIN_FAIL:
+    case MF_STATUS:
+        if (rr_) {
+            mesh_ob_enter();
+            bool ours = m.kind == MF_STATUS ? rr_on_status(rr_, &m, (uint32_t)millis())
+                                            : rr_on_login(rr_, &m, (uint32_t)millis());
+            mesh_ob_exit();
+            stats_.remote_answers += ours;
+        }
+        break;
     default:
-        break; // adverts, path updates, login/status replies: counted, #47 and later issues use them
+        break; // adverts, path updates: counted, #47 and later issues use them
     }
 }
 

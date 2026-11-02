@@ -23,6 +23,9 @@ enum {
     MF_CMD_ADD_UPDATE_CONTACT = 9,
     MF_CMD_SYNC_NEXT          = 10,
     MF_CMD_RESET_PATH         = 13,
+    MF_CMD_SEND_LOGIN         = 26,
+    MF_CMD_SEND_STATUS_REQ    = 27,
+    MF_CMD_LOGOUT             = 29,
     MF_CMD_REMOVE_CONTACT     = 15,
     MF_CMD_DEVICE_QUERY       = 22,
     MF_CMD_SEND_TRACE_PATH    = 36,
@@ -49,6 +52,9 @@ enum {
     MF_PUSH_PATH_DISCOVERY      = 0x8D, // PUSH_CODE_PATH_DISCOVERY_RESPONSE
 };
 enum { MF_ERR_NOT_FOUND = 2, MF_ERR_TABLE_FULL = 3 };
+// The text types of a contact message (TxtDataHelpers.h): a repeater's CLI reply is CLI_DATA, a room's post SIGNED_PLAIN
+enum { MF_TXT_PLAIN = 0, MF_TXT_CLI_DATA = 1, MF_TXT_SIGNED_PLAIN = 2, MF_TXT_CLI_COMMAND = 3 };
+#define MF_PASSWORD_MAX 15 // sendLogin keeps 15 characters of the password
 
 typedef enum {
     MF_BAD,     // a known code, but the frame is too short
@@ -94,6 +100,21 @@ typedef struct {
     uint8_t in_path[MF_PATH_MAX];
 } mf_discovery_t;
 
+// A repeater's status (its RepeaterStats, as PUSH_STATUS_RESPONSE carries it, 56 bytes): a shorter answer from an older
+// repeater leaves the rest at 0, `bytes` says how much there was
+#define MF_STATUS_BYTES 56
+typedef struct {
+    uint8_t  bytes;
+    uint16_t batt_mv, tx_queue;
+    int16_t  noise_floor, last_rssi;
+    uint32_t n_recv, n_sent, air_secs, up_secs;
+    uint32_t sent_flood, sent_direct, recv_flood, recv_direct;
+    uint16_t err_events;
+    int16_t  last_snr_q; // dB x 4
+    uint16_t direct_dups, flood_dups;
+    uint32_t rx_air_secs, recv_errors;
+} mf_status_t;
+
 typedef struct {
     mf_kind_t kind;
     uint8_t   code; // the frame's first byte
@@ -108,6 +129,14 @@ typedef struct {
     char      name[MF_NAME_MAX]; // MF_SELF_INFO
     mf_trace_t     trace; // MF_TRACE
     mf_discovery_t disc;  // MF_DISCOVERY
+    // MF_LOGIN_SUCCESS / MF_LOGIN_FAIL / MF_STATUS (and MF_MSG_RECV from a contact): who it is about
+    uint8_t   rprefix[MF_PREFIX];
+    uint8_t   admin, acl, fw_level; // MF_LOGIN_SUCCESS: permissions bit 0 = admin; acl and fw_level only from newer servers
+    mf_status_t status;             // MF_STATUS
+    // MF_MSG_RECV from a contact (not a channel): msg_ok when the frame was whole
+    bool      msg_ok;
+    uint8_t   txt_type, author[4]; // author: a room post's sender (txt_type SIGNED_PLAIN)
+    char      text[MF_MAX_TEXT + 1];
 } mf_msg_t;
 
 // Encoders: the length written to out (>= MF_MAX_FRAME bytes), 0 when the frame would not fit or the text is too long
@@ -117,6 +146,14 @@ size_t mf_encode_sync_next(uint8_t *out);
 size_t mf_encode_send_channel(uint8_t *out, uint8_t channel_idx, uint32_t timestamp, char const *text, size_t text_len);
 size_t mf_encode_send_dm(uint8_t *out, uint8_t attempt, uint32_t timestamp, uint8_t const prefix[MF_PREFIX],
                          char const *text, size_t text_len);
+// CMD_SEND_TXT_MSG with the CLI text type: a command for a repeater we are logged in to (its reply comes back as a
+// CLI_DATA message)
+size_t mf_encode_send_cli(uint8_t *out, uint8_t attempt, uint32_t timestamp, uint8_t const prefix[MF_PREFIX],
+                          char const *text, size_t text_len);
+// CMD_SEND_LOGIN: the password is cut at MF_PASSWORD_MAX characters by MyMesh, so more is refused here (0)
+size_t mf_encode_login(uint8_t *out, uint8_t const pub[MF_PUB_LEN], char const *password);
+size_t mf_encode_status_req(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);
+size_t mf_encode_logout(uint8_t *out, uint8_t const pub[MF_PUB_LEN]); // local: MyMesh stops its keep-alives to the server
 size_t mf_encode_reset_path(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);
 size_t mf_encode_remove_contact(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);
 // CMD_SEND_TRACE_PATH (#53): the trace goes along hashes (hash_len bytes, each 1 << (flags & 3) bytes), every repeater
