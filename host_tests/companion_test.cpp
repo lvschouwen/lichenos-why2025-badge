@@ -868,14 +868,20 @@ int main(int argc, char **argv) {
 
         // Out of range: the reason, and neither the prefs nor the radio change
         tuned_freq = 0;
-        CHECK(mesh_prefs_set_radio(prefs, 850.0f, 62.5f, 7, 5, 1, 22) != NULL);
-        CHECK(mesh_prefs_set_radio(prefs, 869.618f, 62.5f, 7, 5, 4, 22) != NULL); // path hash size 1..3
+        CHECK(mesh_prefs_set_radio(prefs, 850.0f, 62.5f, 7, 5, 22) != NULL);
+        prefs->path_hash_mode = 1;
         CHECK(tuned_freq == 0 && prefs->freq != 850.0f);
 
-        // Netherlands (Limburg): SF8, CR8, 2-byte path hashes, 14 dBm
-        CHECK(mesh_prefs_set_radio(prefs, 869.618f, 62.5f, 8, 8, 2, 14) == NULL);
+        // Netherlands (Limburg): SF8, CR8, 14 dBm
+        CHECK(mesh_prefs_set_radio(prefs, 869.618f, 62.5f, 8, 8, 14) == NULL);
         CHECK(tuned_freq == 869.618f && tuned_bw == 62.5f && tuned_sf == 8 && tuned_cr == 8 && tuned_tx == 14);
-        CHECK(prefs->path_hash_mode == 1); // MyMesh floods with path_hash_mode + 1 bytes per hop
+        CHECK(prefs->path_hash_mode == 1); // the radio does not touch the path hash size (#129)
+        // Its own setting: size 1..3, MyMesh floods with path_hash_mode + 1 bytes per hop
+        CHECK(mesh_prefs_set_path_hash(prefs, 0) != NULL && mesh_prefs_set_path_hash(prefs, 4) != NULL);
+        CHECK(prefs->path_hash_mode == 1);
+        CHECK(mesh_prefs_set_path_hash(prefs, 1) == NULL && prefs->path_hash_mode == 0);
+        CHECK(mesh_prefs_set_path_hash(prefs, 3) == NULL && prefs->path_hash_mode == 2);
+        CHECK(mesh_prefs_set_path_hash(prefs, 2) == NULL && prefs->path_hash_mode == 1);
         mesh.savePrefs();
 
         // Auto-add, location and its sharing (#52): defaults are MeshCore's (add everything) and private (no location)

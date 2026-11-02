@@ -5,30 +5,30 @@
 
 // MeshCore's app list (api.meshcore.nz suggested_radio_settings, 2026-10-30), in its order, 433 MHz entries left out
 static radio_preset_t const presets[] = {
-    {"Netherlands", 869.618f, 62.5f, 7, 5, 1},
-    {"Netherlands (Limburg)", 869.618f, 62.5f, 8, 8, 2},
-    {"EU/UK (Narrow)", 869.618f, 62.5f, 8, 8, 1},
-    {"EU/UK (Deprecated)", 869.525f, 250.0f, 11, 5, 1},
-    {"Czech Republic (Narrow)", 869.432f, 62.5f, 7, 5, 2},
-    {"Hungary", 869.618f, 62.5f, 7, 5, 2},
-    {"Portugal 868", 869.618f, 62.5f, 7, 6, 1},
-    {"Slovakia", 869.618f, 62.5f, 7, 5, 2},
-    {"Switzerland", 869.618f, 62.5f, 8, 8, 1},
-    {"USA", 910.525f, 62.5f, 7, 5, 1},
-    {"USA - Southern California", 927.875f, 62.5f, 7, 5, 3},
-    {"Canada", 910.525f, 62.5f, 7, 5, 3},
-    {"Costa Rica", 910.525f, 125.0f, 11, 5, 1},
-    {"Brazil", 923.125f, 62.5f, 8, 8, 1},
-    {"Australia", 915.800f, 250.0f, 10, 5, 1},
-    {"Australia (Narrow)", 916.575f, 62.5f, 7, 7, 1},
-    {"Australia (Mid)", 915.075f, 125.0f, 9, 5, 1},
-    {"Australia: SA, WA", 923.125f, 62.5f, 8, 8, 1},
-    {"Australia: QLD", 923.125f, 62.5f, 8, 5, 1},
-    {"New Zealand (Narrow)", 917.375f, 62.5f, 7, 5, 2},
-    {"New Zealand (Gisborne)", 917.375f, 250.0f, 11, 5, 1},
-    {"Thailand", 921.000f, 62.5f, 7, 5, 1},
-    {"Vietnam (Narrow)", 920.250f, 62.5f, 8, 5, 1},
-    {"Vietnam (Deprecated)", 920.250f, 250.0f, 11, 5, 1},
+    {"Netherlands", 869.618f, 62.5f, 7, 5},
+    {"Netherlands (Limburg)", 869.618f, 62.5f, 8, 8},
+    {"EU/UK (Narrow)", 869.618f, 62.5f, 8, 8},
+    {"EU/UK (Deprecated)", 869.525f, 250.0f, 11, 5},
+    {"Czech Republic (Narrow)", 869.432f, 62.5f, 7, 5},
+    {"Hungary", 869.618f, 62.5f, 7, 5},
+    {"Portugal 868", 869.618f, 62.5f, 7, 6},
+    {"Slovakia", 869.618f, 62.5f, 7, 5},
+    {"Switzerland", 869.618f, 62.5f, 8, 8},
+    {"USA", 910.525f, 62.5f, 7, 5},
+    {"USA - Southern California", 927.875f, 62.5f, 7, 5},
+    {"Canada", 910.525f, 62.5f, 7, 5},
+    {"Costa Rica", 910.525f, 125.0f, 11, 5},
+    {"Brazil", 923.125f, 62.5f, 8, 8},
+    {"Australia", 915.800f, 250.0f, 10, 5},
+    {"Australia (Narrow)", 916.575f, 62.5f, 7, 7},
+    {"Australia (Mid)", 915.075f, 125.0f, 9, 5},
+    {"Australia: SA, WA", 923.125f, 62.5f, 8, 8},
+    {"Australia: QLD", 923.125f, 62.5f, 8, 5},
+    {"New Zealand (Narrow)", 917.375f, 62.5f, 7, 5},
+    {"New Zealand (Gisborne)", 917.375f, 250.0f, 11, 5},
+    {"Thailand", 921.000f, 62.5f, 7, 5},
+    {"Vietnam (Narrow)", 920.250f, 62.5f, 8, 5},
+    {"Vietnam (Deprecated)", 920.250f, 250.0f, 11, 5},
 };
 
 #define PRESET_COUNT (sizeof(presets) / sizeof(presets[0]))
@@ -52,17 +52,6 @@ int radio_preset_match(float freq, float bw, uint8_t sf, uint8_t cr) {
     for (size_t i = 0; i < PRESET_COUNT; i++) {
         radio_preset_t const *p = &presets[i];
         if (fabsf(p->freq_mhz - freq) <= 0.0005f && same_bw(p->bw_khz, bw) && p->sf == sf && p->cr == cr) {
-            return (int)i;
-        }
-    }
-    return -1;
-}
-
-int radio_preset_match_exact(float freq, float bw, uint8_t sf, uint8_t cr, uint8_t path_hash_size) {
-    for (size_t i = 0; i < PRESET_COUNT; i++) {
-        radio_preset_t const *p = &presets[i];
-        if (fabsf(p->freq_mhz - freq) <= 0.0005f && same_bw(p->bw_khz, bw) && p->sf == sf && p->cr == cr &&
-            p->path_hash_size == path_hash_size) {
             return (int)i;
         }
     }

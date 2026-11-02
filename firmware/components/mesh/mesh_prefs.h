@@ -21,24 +21,30 @@ static inline bool mesh_prefs_set_name(NodePrefs *prefs, char const *name) {
     return true;
 }
 
-// NULL when applied (the radio retuned, TX power set, path_hash_mode = size - 1), else the reason and nothing changed
+// NULL when applied (the radio retuned, TX power set), else the reason and nothing changed
 static inline char const *mesh_prefs_set_radio(NodePrefs *prefs, float freq, float bw, uint8_t sf, uint8_t cr,
-                                               uint8_t path_hash_size, int8_t tx_dbm) {
+                                               int8_t tx_dbm) {
     char const *reason = radio_check(freq, bw, sf, cr, tx_dbm);
     if (reason) {
         return reason;
-    }
-    if (path_hash_size < 1 || path_hash_size > 3) { // MeshCore's CMD_SET_PATH_HASH_MODE takes modes 0..2
-        return "Path hash size must be 1 to 3 bytes";
     }
     prefs->freq           = freq;
     prefs->bw             = bw;
     prefs->sf             = sf;
     prefs->cr             = cr;
     prefs->tx_power_dbm   = tx_dbm;
-    prefs->path_hash_mode = (uint8_t)(path_hash_size - 1); // MyMesh floods with path_hash_mode + 1 bytes per hop
     radio_set_params(freq, bw, sf, cr);
     radio_set_tx_power((uint8_t)tx_dbm); // target.h takes it as uint8_t; LoraRadio reads it back as int8_t
+    return NULL;
+}
+
+// NULL when set (path_hash_mode = size - 1: MyMesh floods with path_hash_mode + 1 bytes per hop), else the reason. Not
+// part of the radio (#129); the caller saves the prefs.
+static inline char const *mesh_prefs_set_path_hash(NodePrefs *prefs, uint8_t size) {
+    if (size < 1 || size > 3) { // MeshCore's CMD_SET_PATH_HASH_MODE takes modes 0..2
+        return "Path hash size must be 1 to 3 bytes";
+    }
+    prefs->path_hash_mode = (uint8_t)(size - 1);
     return NULL;
 }
 

@@ -51,6 +51,7 @@ static char const TAG[] = "meshcore";
 typedef enum {
     JOB_NAME,
     JOB_RADIO,
+    JOB_PATHHASH,
     JOB_CHANNEL_ADD,
     JOB_CHANNEL_RM,
     JOB_ADVERT,
@@ -64,7 +65,7 @@ typedef struct job {
     char        text[64];
     char        key[KEY_MAX + 1];
     float       freq, bw;
-    uint8_t     sf, cr, path_hash_size;
+    uint8_t     sf, cr, path_hash_size; // path_hash_size: JOB_PATHHASH only
     int8_t      tx_dbm;
     char        title[40]; // what is being applied, for the result line
     char const *reason;    // result: NULL = done
@@ -91,8 +92,9 @@ static void job_task(void *arg) {
     switch (job->kind) {
         case JOB_NAME: job->ok = mesh_set_name(job->text); break;
         case JOB_RADIO:
-            job->reason = mesh_set_radio(job->freq, job->bw, job->sf, job->cr, job->path_hash_size, job->tx_dbm);
+            job->reason = mesh_set_radio(job->freq, job->bw, job->sf, job->cr, job->tx_dbm);
             break;
+        case JOB_PATHHASH: job->reason = mesh_set_path_hash(job->path_hash_size); break;
         case JOB_CHANNEL_ADD: job->reason = mesh_channel_add(job->text, job->key[0] ? job->key : NULL); break;
         case JOB_CHANNEL_RM: job->reason = mesh_channel_remove_named(job->text); break;
         case JOB_ADVERT: job->ok = mesh_send_advert(); break;
@@ -156,9 +158,9 @@ static void retry_later(void (*fn)(void)) {
     }
 }
 
-// The preset in use, as fw mesh names it (path hash size included); -1 for Custom
+// The preset in use, as fw mesh names it; -1 for Custom
 static int current_preset(mesh_settings_t const *s) {
-    return radio_preset_match_exact(s->freq, s->bw, s->sf, s->cr, s->path_hash_size);
+    return radio_preset_match(s->freq, s->bw, s->sf, s->cr);
 }
 
 static void radio_values(char *out, size_t cap, float freq, float bw, uint8_t sf, uint8_t cr, bool marked) {
@@ -436,7 +438,7 @@ void meshcore_settings(lv_obj_t *page) {
 // ---- Region & radio ----------------------------------------------------------------------------------------------
 
 static lv_obj_t   *preset_rows[MAX_PRESETS];
-static lv_obj_t   *custom_row, *tx_note;
+static lv_obj_t   *custom_row, *tx_note, *phs_row;
 static lv_timer_t *tx_timer;
 static int8_t      tx_wanted;
 
@@ -547,7 +549,6 @@ static void preset_go(void *arg) {
     job->bw             = p->bw_khz;
     job->sf             = p->sf;
     job->cr             = p->cr;
-    job->path_hash_size = p->path_hash_size;
     job->tx_dbm         = s.tx_dbm;
     job->n              = i; // the row for the result
     menu_set_value(preset_rows[i], "applying...");
@@ -561,8 +562,8 @@ static void pick_preset(void *arg) {
     if (!p || !mesh_get_settings(&s)) {
         return;
     }
-    radio_confirm_t level = radio_confirm_needed(s.freq, s.bw, s.sf, s.cr, s.path_hash_size, p->freq_mhz, p->bw_khz,
-                                                 p->sf, p->cr, p->path_hash_size);
+    radio_confirm_t level = radio_confirm_needed(s.freq, s.bw, s.sf, s.cr, 0, p->freq_mhz, p->bw_khz,
+                                                 p->sf, p->cr, 0);
     if (level == RADIO_CONFIRM_NONE) {
         region_chosen(); // already in use: nothing to switch (the first-run question counts it as the answer)
         return;
@@ -618,7 +619,6 @@ static void tx_apply(void) {
     job->bw             = s.bw;
     job->sf             = s.sf;
     job->cr             = s.cr;
-    job->path_hash_size = s.path_hash_size;
     job->tx_dbm         = tx_wanted;
     job_start(job);
 }
@@ -642,11 +642,46 @@ static void on_tx(int value, void *arg) {
 
 static void open_custom(void *arg);
 
+// Path hash size (#129): its own setting, not part of a preset. Changing it sends nothing, so no confirm page.
+static void phs_show(uint8_t size) {
+    char text[16];
+    snprintf(text, sizeof(text), size == 1 ? "1 byte" : "%u bytes", size);
+    if (phs_row) {
+        menu_set_value(phs_row, text);
+    }
+}
+
+static void phs_done(job_t *job) {
+    mesh_settings_t s;
+    if (!job->reason && mesh_get_settings(&s)) {
+        phs_show(s.path_hash_size);
+    } else if (job->reason && phs_row) {
+        menu_set_value(phs_row, job->reason);
+    }
+}
+
+// Enter: 1 byte <-> 2 bytes (a 3 byte size, set from the console, goes back to 1)
+static void toggle_phs(void *arg) {
+    (void)arg;
+    mesh_settings_t s;
+    if (!mesh_get_settings(&s)) {
+        return;
+    }
+    job_t *job = job_new(JOB_PATHHASH, phs_done);
+    if (!job) {
+        menu_set_value(phs_row, "busy, try again");
+        return;
+    }
+    job->path_hash_size = s.path_hash_size == 1 ? 2 : 1;
+    job_start(job);
+}
+
 static void on_radio_delete(lv_event_t *e) {
     (void)e;
     memset(preset_rows, 0, sizeof(preset_rows));
     custom_row = NULL;
     tx_note    = NULL;
+    phs_row    = NULL;
     first_region_chosen = NULL; // Esc: the question is not answered
     if (tx_timer) { // left before the power settled: saved now, without the screen (tx_note is NULL)
         lv_timer_delete(tx_timer);
@@ -676,6 +711,8 @@ static lv_obj_t *build_radio(void) {
     custom_row = menu_add(menu, "Custom...", "", open_custom, NULL);
     menu_filter_fallback(filter, custom_row);
     menu_note(menu, "Advanced");
+    phs_row = menu_add(menu, "Path hash size", "", toggle_phs, NULL);
+    phs_show(s.path_hash_size);
     tx_wanted = s.tx_dbm;
     menu_add_slider(menu, "TX power (dBm)", -9, 22, s.tx_dbm, on_tx, NULL);
     tx_note = menu_note(menu, "Left / Right: TX power, saved after a second");
@@ -790,7 +827,6 @@ static void custom_go(void *arg) {
     job->bw             = radio_bandwidth_at(draft_bw);
     job->sf             = draft_sf;
     job->cr             = draft_cr;
-    job->path_hash_size = s.path_hash_size;
     job->tx_dbm         = s.tx_dbm;
     set_note(custom_note, "Applying...", false);
     job_start(job);
@@ -808,8 +844,8 @@ static void apply_custom(void *arg) {
         set_note(custom_note, why, true);
         return;
     }
-    radio_confirm_t level = radio_confirm_needed(s.freq, s.bw, s.sf, s.cr, s.path_hash_size, draft_freq,
-                                                 radio_bandwidth_at(draft_bw), draft_sf, draft_cr, s.path_hash_size);
+    radio_confirm_t level = radio_confirm_needed(s.freq, s.bw, s.sf, s.cr, 0, draft_freq,
+                                                 radio_bandwidth_at(draft_bw), draft_sf, draft_cr, 0);
     if (level == RADIO_CONFIRM_NONE) {
         set_note(custom_note, "Already using these values", false);
         region_chosen();

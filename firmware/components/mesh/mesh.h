@@ -92,8 +92,11 @@ typedef struct {
 bool mesh_get_settings(mesh_settings_t *out);
 // Trimmed, cut to 31 bytes; false when empty, MeshCore isn't running or is busy. Others see it in the next advert.
 bool mesh_set_name(char const *name);
-// NULL when applied (radio retuned and saved), else the reason (radio_check()'s, or busy / not running): nothing changed
-char const *mesh_set_radio(float freq, float bw, uint8_t sf, uint8_t cr, uint8_t path_hash_size, int8_t tx_dbm);
+// NULL when applied (radio retuned and saved; the path hash size is untouched), else the reason (radio_check()'s, or busy / not running): nothing changed
+char const *mesh_set_radio(float freq, float bw, uint8_t sf, uint8_t cr, int8_t tx_dbm);
+// The path hash size in bytes per hop of the floods the badge sends (1..3, the default is 2), saved. Its own setting, not
+// part of a radio preset (#129); nothing is sent. NULL when set, else the reason.
+char const *mesh_set_path_hash(uint8_t size);
 // A channel on the first free slot, saved. NULL key: a #hashtag channel (key from its lowercased name, as MeshCore's
 // apps do); else a base64 key of 16 or 32 bytes. NULL when added, else the reason.
 char const *mesh_channel_add(char const *name, char const *b64_key_or_null);

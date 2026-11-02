@@ -17,6 +17,7 @@
 #include "meshcore_run.h"
 #include "mesh_rset_run.h"
 #include "channel_input.h"
+#include "mesh_pathhash.h"
 #include "mesh_prefs.h"
 #include "mesh_share.h"
 #include "radio_presets.h"
@@ -938,8 +939,7 @@ extern "C" bool mesh_set_name(char const *name) {
     return ok;
 }
 
-extern "C" char const *mesh_set_radio(float freq, float bw, uint8_t sf, uint8_t cr, uint8_t path_hash_size,
-                                      int8_t tx_dbm) {
+extern "C" char const *mesh_set_radio(float freq, float bw, uint8_t sf, uint8_t cr, int8_t tx_dbm) {
     char const *why = radio_check(freq, bw, sf, cr, tx_dbm);
     if (why) {
         return why; // checked before the lock: a refusal never waits on MeshCore
@@ -948,7 +948,7 @@ extern "C" char const *mesh_set_radio(float freq, float bw, uint8_t sf, uint8_t 
     if (why) {
         return why;
     }
-    why = mesh_prefs_set_radio(node->getNodePrefs(), freq, bw, sf, cr, path_hash_size, tx_dbm);
+    why = mesh_prefs_set_radio(node->getNodePrefs(), freq, bw, sf, cr, tx_dbm);
     if (!why) {
         node->savePrefs();
         settings_from_node(node);
@@ -957,16 +957,50 @@ extern "C" char const *mesh_set_radio(float freq, float bw, uint8_t sf, uint8_t 
     if (!why) {
         ESP_LOGI(
             TAG,
-            "radio set: %.3f MHz, %.2f kHz, SF%u, CR%u, %d dBm, path hash %u B",
+            "radio set: %.3f MHz, %.2f kHz, SF%u, CR%u, %d dBm",
             freq,
             bw,
             sf,
             cr,
-            tx_dbm,
-            path_hash_size
+            tx_dbm
         );
     }
     return why;
+}
+
+extern "C" char const *mesh_set_path_hash(uint8_t size) {
+    if (size < 1 || size > 3) {
+        return "Path hash size must be 1 to 3 bytes"; // before the lock: a refusal never waits on MeshCore
+    }
+    char const *why = settings_lock();
+    if (why) {
+        return why;
+    }
+    why = mesh_prefs_set_path_hash(node->getNodePrefs(), size);
+    if (!why) {
+        node->savePrefs();
+        settings_from_node(node);
+    }
+    mesh_unlock();
+    if (!why) {
+        ESP_LOGI(TAG, "path hash size set: %u B", size);
+    }
+    return why;
+}
+
+// The first boot of the build that made the size a setting (#129): see mesh_pathhash_migrate. Before the mesh task runs.
+static void migrate_path_hash(MyMesh *n) {
+    NodePrefs *prefs = n->getNodePrefs();
+    bool       mark;
+    uint8_t    to = mesh_pathhash_migrate(meshcore_pathhash_migrated(), (uint8_t)(prefs->path_hash_mode + 1), &mark);
+    if (to) {
+        mesh_prefs_set_path_hash(prefs, to);
+        n->savePrefs();
+        ESP_LOGI(TAG, "path hash size moved from 1 B to %u B (one-time default change)", to);
+    }
+    if (mark && !meshcore_pathhash_migrated_set()) {
+        ESP_LOGW(TAG, "path hash migration flag not saved: it runs again next boot");
+    }
 }
 
 // MeshCore's hashtag channels: the key is the first 16 bytes of SHA-256 of the name, '#' included, lowercase
@@ -1531,7 +1565,7 @@ static void cmd_mesh_radio(char const *args) {
     float    v[5];
     int      n = sscanf(args, "%f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4]);
     float    freq = now.freq, bw = now.bw;
-    uint8_t  sf = now.sf, cr = now.cr, phs = now.path_hash_size;
+    uint8_t  sf = now.sf, cr = now.cr;
     int      tx = now.tx_dbm;
     char     what[48];
     if (n == 1 || n == 2) {
@@ -1540,7 +1574,7 @@ static void cmd_mesh_radio(char const *args) {
             console_reply("no preset %g (0..%u)", v[0], (unsigned)radio_preset_count() - 1);
             return;
         }
-        freq = p->freq_mhz, bw = p->bw_khz, sf = p->sf, cr = p->cr, phs = p->path_hash_size;
+        freq = p->freq_mhz, bw = p->bw_khz, sf = p->sf, cr = p->cr;
         tx   = n == 2 ? (int)lroundf(v[1]) : tx;
         snprintf(what, sizeof(what), "preset %s", p->title);
     } else if (n == 4 || n == 5) {
@@ -1554,18 +1588,42 @@ static void cmd_mesh_radio(char const *args) {
         console_reply("mesh radio <preset index> [txdbm] | mesh radio <freq MHz> <bw kHz> <sf> <cr> [txdbm]");
         for (size_t i = 0; i < radio_preset_count(); i++) {
             radio_preset_t const *p = radio_preset_at(i);
-            console_reply("  %2u %-26s %.3f MHz %g kHz SF%u CR%u, path hash %u B", (unsigned)i, p->title, p->freq_mhz,
-                          p->bw_khz, p->sf, p->cr, p->path_hash_size);
+            console_reply("  %2u %-26s %.3f MHz %g kHz SF%u CR%u", (unsigned)i, p->title, p->freq_mhz, p->bw_khz,
+                          p->sf, p->cr);
         }
         return;
     }
     int8_t      tx8 = tx < -128 ? -128 : tx > 127 ? 127 : (int8_t)tx;
-    char const *why = mesh_set_radio(freq, bw, sf, cr, phs, tx8);
+    char const *why = mesh_set_radio(freq, bw, sf, cr, tx8);
     if (why) {
         console_reply("radio not changed: %s", why);
     } else {
-        console_reply("radio set (%s): %.3f MHz, %g kHz, SF%u, CR%u, %d dBm, path hash %u B", what, freq, bw, sf, cr,
-                      tx8, phs);
+        console_reply("radio set (%s): %.3f MHz, %g kHz, SF%u, CR%u, %d dBm", what, freq, bw, sf, cr, tx8);
+    }
+}
+
+// "fw mesh pathhash [1|2|3]": the size now, or set it (saved, nothing is sent)
+static void cmd_mesh_pathhash(char const *args) {
+    while (*args == ' ') {
+        args++;
+    }
+    if (!*args) {
+        mesh_settings_t st;
+        mesh_get_settings(&st);
+        console_reply("path hash %u B (mesh pathhash <1|2|3> to change)", st.path_hash_size);
+        return;
+    }
+    char *end;
+    long  v = strtol(args, &end, 10);
+    if (end == args || *end || v < 1 || v > 3) {
+        console_reply("mesh pathhash [1|2|3]: bytes per hop in a flood's path");
+        return;
+    }
+    char const *why = mesh_set_path_hash((uint8_t)v);
+    if (why) {
+        console_reply("path hash not changed: %s", why);
+    } else {
+        console_reply("path hash set to %ld B (saved)", v);
     }
 }
 
@@ -2334,6 +2392,10 @@ static void cmd_mesh(char const *args) {
         cmd_mesh_radio(args + 5);
         return;
     }
+    if (strncmp(args, "pathhash", 8) == 0 && (args[8] == ' ' || !args[8])) {
+        cmd_mesh_pathhash(args + 8);
+        return;
+    }
     if (strncmp(args, "send ", 5) == 0) {
         cmd_mesh_send(args + 5);
         return;
@@ -2416,7 +2478,7 @@ static void cmd_mesh(char const *args) {
     console_reply("identity: %s", mesh_ident_text(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE)));
     mesh_settings_t st;
     if (mesh_get_settings(&st)) {
-        int preset = radio_preset_match_exact(st.freq, st.bw, st.sf, st.cr, st.path_hash_size);
+        int preset = radio_preset_match(st.freq, st.bw, st.sf, st.cr);
         console_reply("radio %.3f MHz, %g kHz, SF%u, CR%u, %d dBm, path hash %u B (%s)", st.freq, st.bw, st.sf, st.cr,
                       st.tx_dbm, st.path_hash_size, preset >= 0 ? radio_preset_at((size_t)preset)->title : "custom");
     }
@@ -2932,6 +2994,7 @@ static bool start_locked(char const *files_dir) {
     n->begin();
     ident_verify(n); // before anything can transmit: the task does not exist yet
     apply_boot_radio(n, first_boot);
+    migrate_path_hash(n);
     // The history from the SD card (#48), encrypted with a key from the identity begin() just loaded (#98), before the
     // mesh task runs: the replayed messages are older than anything MeshCore adds, which it does only in its loop
     uint8_t prv[PRV_KEY_SIZE];

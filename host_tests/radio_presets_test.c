@@ -18,15 +18,15 @@ int main(void) {
     CHECK(radio_preset_count() == 24);
     radio_preset_t const *nl = radio_preset_at(0);
     CHECK(nl && strcmp(nl->title, "Netherlands") == 0);
-    CHECK(nl && nl->sf == 7 && nl->cr == 5 && nl->path_hash_size == 1);
+    CHECK(nl && nl->sf == 7 && nl->cr == 5);
     CHECK(radio_preset_at(24) == NULL);
 
     radio_preset_t const *limburg = radio_preset_at(1);
-    CHECK(limburg && strcmp(limburg->title, "Netherlands (Limburg)") == 0 && limburg->path_hash_size == 2);
+    CHECK(limburg && strcmp(limburg->title, "Netherlands (Limburg)") == 0);
     radio_preset_t const *last = radio_preset_at(23);
     CHECK(last && strcmp(last->title, "Vietnam (Deprecated)") == 0 && last->bw_khz == 250.0f && last->sf == 11);
     radio_preset_t const *socal = radio_preset_at(10);
-    CHECK(socal && strcmp(socal->title, "USA - Southern California") == 0 && socal->path_hash_size == 3);
+    CHECK(socal && strcmp(socal->title, "USA - Southern California") == 0);
 
     CHECK(radio_preset_match(869.618f, 62.5f, 7, 5) == 0);
     CHECK(radio_preset_match(869.618f, 62.5f, 8, 8) == 1); // ties go to the first: Limburg before EU/UK (Narrow)
@@ -35,17 +35,13 @@ int main(void) {
     CHECK(radio_preset_match(869.618f, 125.0f, 7, 5) == -1);
     CHECK(radio_preset_match(915.8f, 250.0f, 10, 5) == 14); // Australia
 
-    // With the path hash size: the exact entry, else Custom
-    CHECK(radio_preset_match_exact(869.618f, 62.5f, 7, 5, 1) == 0);  // Netherlands
-    CHECK(radio_preset_match_exact(869.618f, 62.5f, 7, 5, 2) == 5);  // Hungary (before Slovakia, the same values)
-    CHECK(radio_preset_match_exact(869.618f, 62.5f, 7, 5, 3) == -1); // same radio, no entry with 3 bytes: Custom
-    CHECK(radio_preset_match_exact(869.618f, 62.5f, 8, 8, 2) == 1);  // Limburg
-    CHECK(radio_preset_match_exact(869.618f, 62.5f, 8, 8, 1) == 2);  // EU/UK (Narrow)
-    CHECK(radio_preset_match_exact(927.875f, 62.5f, 7, 5, 3) == 10); // USA - Southern California
-    CHECK(radio_preset_match_exact(868.0f, 62.5f, 7, 5, 1) == -1);
+    // The path hash size is its own setting (#129): the match has no say in it, Netherlands stays Netherlands
+    CHECK(radio_preset_match(869.618f, 62.5f, 7, 5) == 0);
+    CHECK(radio_preset_match(927.875f, 62.5f, 7, 5) == 10); // USA - Southern California
+    CHECK(radio_preset_match(868.0f, 62.5f, 7, 5) == -1);
     for (size_t i = 0; i < radio_preset_count(); i++) {
         radio_preset_t const *p = radio_preset_at(i);
-        int                   m = radio_preset_match_exact(p->freq_mhz, p->bw_khz, p->sf, p->cr, p->path_hash_size);
+        int                   m = radio_preset_match(p->freq_mhz, p->bw_khz, p->sf, p->cr);
         CHECK(m >= 0 && m <= (int)i); // every entry finds itself or an identical one before it
     }
 
@@ -59,7 +55,6 @@ int main(void) {
     for (size_t i = 0; i < radio_preset_count(); i++) {
         radio_preset_t const *p = radio_preset_at(i);
         CHECK(p && p->freq_mhz >= 862.0f && p->freq_mhz <= 928.0f);
-        CHECK(p && p->path_hash_size >= 1 && p->path_hash_size <= 3);
         CHECK(p && radio_check(p->freq_mhz, p->bw_khz, p->sf, p->cr, 22) == NULL);
     }
 

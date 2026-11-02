@@ -39,6 +39,10 @@ bool meshcore_pw_get(uint8_t const prefix[6], char *out, size_t cap);
 bool meshcore_pw_set(uint8_t const prefix[6], char const *password);
 bool meshcore_pw_forget(uint8_t const prefix[6]);
 
+// The one-shot move to 2 B path hashes (#129): done already / now done, in the app's settings
+bool meshcore_pathhash_migrated(void);
+bool meshcore_pathhash_migrated_set(void);
+
 bool meshcore_autostart(void);
 bool meshcore_autostart_set(bool on);
 

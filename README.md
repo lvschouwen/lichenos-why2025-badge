@@ -199,7 +199,7 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
 - LoRa and the C6: `fw lora [raw on|off]`, `fw c6log [ms]` (the C6's own console, up to 60 s), `fw c6 reflash`, `fw c6` (link state, recoveries), `fw c6 reattach` (re-attach the C6 now), `fw c6 reset [rom]` (pulse C6 EN to test the recovery; `rom` only with someone at the badge).
 - MeshCore: `fw mesh` (identity, clock, packet counters; or why it is not running), `fw mesh start`, `fw mesh stop`,
   `fw mesh name <name>`, `fw mesh radio <preset | freq bw sf cr>
-  [txdbm]`, `fw contacts`, `fw msgs [n]`, `fw channels`, `fw channel add <name> <base64 key>` or `fw channel add #name`
+  [txdbm]`, `fw mesh pathhash [1|2|3]`, `fw contacts`, `fw msgs [n]`, `fw channels`, `fw channel add <name> <base64 key>` or `fw channel add #name`
   (hashtag channel: key = first 16 bytes of SHA-256 of the lowercased name, `#` included), `fw channel rm <index|name>`
   (a hashtag channel with or without its `#`), `fw channel show <index|name>` (key as hex and base64 and the
   `meshcore://channel/add` link, on the serial console only), `fw channel rename <index|name> <new name>` (the key

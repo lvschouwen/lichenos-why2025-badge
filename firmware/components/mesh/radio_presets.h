@@ -17,17 +17,14 @@ typedef struct {
     float       freq_mhz;
     float       bw_khz;
     uint8_t     sf;
-    uint8_t     cr;             // 5..8 for 4/5..4/8
-    uint8_t     path_hash_size; // bytes per hop in a flood's path (MeshCore's path_hash_mode + 1)
+    uint8_t     cr; // 5..8 for 4/5..4/8
 } radio_preset_t;
 
 size_t                radio_preset_count(void);
 radio_preset_t const *radio_preset_at(size_t index); // NULL past the end
-// The first preset with these values (frequency within 0.0005 MHz), -1 for none (Custom)
+// The first preset with these values (frequency within 0.0005 MHz), -1 for none (Custom). The path hash size is its own
+// setting (#129), not part of a preset: Netherlands stays Netherlands with 1, 2 or 3 bytes.
 int radio_preset_match(float freq, float bw, uint8_t sf, uint8_t cr);
-// The preset in use, path hash size included: the first entry with the same radio and the same size; -1 (Custom) when
-// none has both, even if one has the same radio with another size (Netherlands, Hungary and Slovakia differ only there)
-int radio_preset_match_exact(float freq, float bw, uint8_t sf, uint8_t cr, uint8_t path_hash_size);
 // The SX1262's LoRa bandwidths in kHz, smallest first (radio_check takes exactly these)
 size_t radio_bandwidth_count(void);
 float  radio_bandwidth_at(size_t index); // 0 past the end

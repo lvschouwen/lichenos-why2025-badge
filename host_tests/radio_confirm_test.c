@@ -15,8 +15,8 @@
 
 static radio_confirm_t between(size_t from, size_t to) {
     radio_preset_t const *a = radio_preset_at(from), *b = radio_preset_at(to);
-    return radio_confirm_needed(a->freq_mhz, a->bw_khz, a->sf, a->cr, a->path_hash_size, b->freq_mhz, b->bw_khz, b->sf,
-                                b->cr, b->path_hash_size);
+    return radio_confirm_needed(a->freq_mhz, a->bw_khz, a->sf, a->cr, 0, b->freq_mhz, b->bw_khz, b->sf,
+                                b->cr, 0); // the path hash size is not part of a preset (#129)
 }
 
 int main(void) {
@@ -26,7 +26,7 @@ int main(void) {
     CHECK(radio_band(927.875f) == 1);
     CHECK(between(0, 0) == RADIO_CONFIRM_NONE);
     CHECK(between(0, 1) == RADIO_CONFIRM_SWITCH);  // Netherlands -> Limburg
-    CHECK(between(0, 5) == RADIO_CONFIRM_SWITCH);  // only the path hash size differs
+    CHECK(between(0, 5) == RADIO_CONFIRM_NONE);    // Netherlands -> Hungary: the same radio
     CHECK(between(0, 23) == RADIO_CONFIRM_BAND);   // Netherlands -> Vietnam (Deprecated), the #33 incident
     CHECK(between(9, 0) == RADIO_CONFIRM_BAND);    // USA -> Netherlands
     CHECK(between(9, 14) == RADIO_CONFIRM_SWITCH); // USA -> Australia
