@@ -26,6 +26,8 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
 
 - `lichen_app.h`: register the app (`lichen_register_app`); `id` (a-z 0-9 _, at most 13) names its settings and
   directories; the hooks (`open`, `start_background`, `stop_for_update`, `first_run_set`...) are how the OS calls it.
+- `lichen_ui.h`: text you do not control (names, file names, device values) goes in `lichen_label_line` (one line,
+  "...") or `lichen_label_wrap`, never a bare `lv_label_create`; `fw ui overflow` lists labels that do not fit (#133).
 - `lichen_ui.h`: navigation (`shell_open`, `shell_page_create`, `shell_back_then/_to`, `shell_stack_screen`, `shell_home`, `shell_on_esc`,
   `shell_on_search`, scroll helpers), the countdown dialog, `lichen_screen_locked()`. Screen code runs on the LVGL task;
   never swap the default group or the active screen yourself. `lichen_ui_call(fn, arg)` hands a result from any task

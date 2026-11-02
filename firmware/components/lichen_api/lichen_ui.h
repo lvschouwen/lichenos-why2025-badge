@@ -76,3 +76,14 @@ void lichen_ui_with_group(lv_group_t *group, void (*build)(void *), void *arg);
 // that would act on its own (open a screen for an incoming message) may wait; screens it opens meanwhile stay under the
 // lock. Any task.
 bool lichen_screen_locked(void);
+
+// Labels for text whose length the code does not control (names, file names, values from a device, versions): a plain
+// lv_label grows to fit its text and its parent clips it without a "..." (#131, #133). Use these for any such text;
+// `fw ui overflow` lists labels that still do not fit. LVGL context only. width: LV_PCT(n), pixels or LV_SIZE_CONTENT
+// with a max_width set by the caller.
+// One line, ends in "..." when it does not fit; the height is one line of the font set on it (or inherited) now, so set
+// the font before calling when it differs from the parent's (or call lichen_label_line_fit after changing it)
+lv_obj_t *lichen_label_line(lv_obj_t *parent, int32_t width);
+void      lichen_label_line_fit(lv_obj_t *label);
+// Wraps onto as many lines as it needs
+lv_obj_t *lichen_label_wrap(lv_obj_t *parent, int32_t width);

@@ -33,3 +33,23 @@ void lichen_ui_with_group(lv_group_t *group, void (*build)(void *), void *arg) {
     build(arg);
     lv_group_set_default(previous); // in one place, so it can never be left set to a screen that is gone
 }
+
+void lichen_label_line_fit(lv_obj_t *label) {
+    // DOT only cuts at the label's height: without one line's height LVGL 9 wraps the text instead
+    lv_obj_set_height(label, lv_font_get_line_height(lv_obj_get_style_text_font(label, LV_PART_MAIN)));
+}
+
+lv_obj_t *lichen_label_line(lv_obj_t *parent, int32_t width) {
+    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_set_width(label, width);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lichen_label_line_fit(label);
+    return label;
+}
+
+lv_obj_t *lichen_label_wrap(lv_obj_t *parent, int32_t width) {
+    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_set_width(label, width);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    return label;
+}
