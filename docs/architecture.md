@@ -74,7 +74,8 @@ The rule: **core 1 draws, core 0 talks to the world.**
 ## Apps
 
 - Built into the firmware, each a component with a small C interface: a tile, screens, a settings page, a background
-  part.
+  part. What an app may use, what it must not, and the linker wraps that hold the line: [app-api.md](app-api.md)
+  (#84).
 - **No downloadable apps for now.** Loadable native apps (ELF) were BadgeVMS's biggest source of trouble (per-app
   heaps and stacks, wrapped functions, an export table). A sandboxed script runtime (MicroPython, Lua or WebAssembly)
   is the safe way to open up later and could be one app running scripts through the same interface.

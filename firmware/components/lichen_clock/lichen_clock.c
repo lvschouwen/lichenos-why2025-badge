@@ -1,6 +1,8 @@
 #include "lichen_clock.h"
 
+#include <errno.h>
 #include <pthread.h>
+#include <sys/time.h>
 #include <time.h>
 
 #ifdef ESP_PLATFORM
@@ -36,13 +38,26 @@ static int set_clock(struct timeval const *tv) {
     return __real_settimeofday(tv, NULL);
 }
 
-// Log-only for now: a foreign caller is named by its return address and still sets the clock. The App API boundary
-// work (#84, T9) makes this refuse.
+// Refuses (#84 T9): a foreign caller may only write back the time the clock already shows (clock_resync_only). That is
+// IDF's esp_sync_timekeeping_timers, which runs on every restart and before sleep and must keep working, or the time
+// carried over a reset drifts. Anything that moves the clock goes through clock_propose(); the caller is named by its
+// return address (look it up in build/badge_fw.map).
 int __wrap_settimeofday(struct timeval const *tv, struct timezone const *tz);
 int __wrap_settimeofday(struct timeval const *tv, struct timezone const *tz) {
-    ESP_LOGW("clock", "settimeofday(%lld) outside lichen_clock, from %p", tv ? (long long)tv->tv_sec : -1LL,
-             __builtin_return_address(0));
-    return __real_settimeofday(tv, tz);
+    if (!tv) {
+        return __real_settimeofday(tv, tz); // sets nothing
+    }
+    struct timeval cur;
+    gettimeofday(&cur, NULL);
+    int64_t now_us = (int64_t)cur.tv_sec * 1000000 + cur.tv_usec;
+    int64_t new_us = (int64_t)tv->tv_sec * 1000000 + tv->tv_usec;
+    if (clock_resync_only(now_us, new_us)) {
+        return __real_settimeofday(tv, tz);
+    }
+    ESP_LOGE("clock", "settimeofday(%lld) refused: only lichen_clock sets the time (clock_propose), caller %p",
+             (long long)tv->tv_sec, __builtin_return_address(0));
+    errno = EPERM;
+    return -1;
 }
 #else
 // Host tests: never touch the host's clock (as root it would succeed)

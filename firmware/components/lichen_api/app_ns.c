@@ -25,5 +25,8 @@ bool app_ns_name(char const *id, char *out, size_t cap) {
 }
 
 app_adopt_t app_adopt_plan(bool have_app, bool have_legacy) {
-    return !have_app && have_legacy ? APP_ADOPT_COPY : APP_ADOPT_NONE;
+    if (!have_legacy) {
+        return APP_ADOPT_NONE;
+    }
+    return have_app ? APP_ADOPT_DROP_LEGACY : APP_ADOPT_COPY;
 }

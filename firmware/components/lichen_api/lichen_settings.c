@@ -120,30 +120,50 @@ bool app_settings_erase_all(lichen_app_t const *app) {
     return commit_close(app, "(all)", nvs, nvs_erase_all(nvs));
 }
 
+// Only for APP_ADOPT_DROP_LEGACY: the app's namespace already holds the key, as read back from NVS
+static void drop_legacy(lichen_app_t const *app, char const *key) {
+    nvs_handle_t nvs;
+    esp_err_t    err = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_erase_key(nvs, key);
+        if (err == ESP_OK) {
+            err = nvs_commit(nvs);
+        }
+        nvs_close(nvs);
+    }
+    ESP_LOG_LEVEL(err == ESP_OK ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s: old %s/%s erased (%s)", app->id,
+                  FW_NVS_NAMESPACE, key, esp_err_to_name(err));
+}
+
 bool app_settings_adopt_u8(lichen_app_t const *app, char const *key) {
     nvs_handle_t nvs;
     uint8_t      value       = 0;
+    uint8_t      legacy      = 0;
     bool         have_app    = false;
     bool         have_legacy = false;
     if (open_app(app, NVS_READONLY, &nvs)) {
         have_app = nvs_get_u8(nvs, key, &value) == ESP_OK;
         nvs_close(nvs);
     }
-    if (!have_app && nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        have_legacy = nvs_get_u8(nvs, key, &value) == ESP_OK;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        have_legacy = nvs_get_u8(nvs, key, &legacy) == ESP_OK;
         nvs_close(nvs);
     }
-    if (app_adopt_plan(have_app, have_legacy) != APP_ADOPT_COPY) {
+    app_adopt_t plan = app_adopt_plan(have_app, have_legacy);
+    if (plan == APP_ADOPT_DROP_LEGACY) {
+        drop_legacy(app, key);
+    }
+    if (plan != APP_ADOPT_COPY) {
         return false;
     }
-    bool ok = app_settings_set_u8(app, key, value);
+    bool ok = app_settings_set_u8(app, key, legacy);
     ESP_LOG_LEVEL(
         ok ? ESP_LOG_INFO : ESP_LOG_WARN,
         TAG,
         "%s: %s=%u adopted from %s (%s)",
         app->id,
         key,
-        value,
+        legacy,
         FW_NVS_NAMESPACE,
         ok ? "saved" : "failed"
     );

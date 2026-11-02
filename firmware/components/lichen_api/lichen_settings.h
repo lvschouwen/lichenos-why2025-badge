@@ -26,7 +26,8 @@ bool app_settings_erase(lichen_app_t const *app, char const *key);
 bool app_settings_erase_all(lichen_app_t const *app);
 
 // A u8 key an earlier firmware kept in Lichen's own namespace: copied into the app's once (app_adopt_plan). True when
-// it was copied now. Call it before the first read, e.g. from start_background.
+// it was copied now. A later call that finds it in both erases the old one (#84 T9). Call it before the first read,
+// e.g. from start_background.
 bool app_settings_adopt_u8(lichen_app_t const *app, char const *key);
 
 #ifdef __cplusplus

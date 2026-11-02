@@ -151,3 +151,9 @@ bool clock_src_unverified(clock_src_t cur, clock_src_t was) {
 clock_src_t clock_force_rank(clock_src_t cur) {
     return cur > CLOCK_SRC_MANUAL ? CLOCK_SRC_MANUAL : cur;
 }
+
+bool clock_resync_only(int64_t now_us, int64_t new_us) {
+    // unsigned: the distance between any two int64 values without signed overflow
+    uint64_t d = new_us >= now_us ? (uint64_t)new_us - (uint64_t)now_us : (uint64_t)now_us - (uint64_t)new_us;
+    return d < (uint64_t)CLOCK_RESYNC_US;
+}

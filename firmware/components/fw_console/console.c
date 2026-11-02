@@ -437,12 +437,14 @@ void __wrap_esp_restart(void) {
     __real_esp_restart();
 }
 
-// Log-only for now (#84): the app's DataStore is built with nvs_flash_erase renamed, so any caller seen here is new
-extern esp_err_t __real_nvs_flash_erase(void);
-esp_err_t        __wrap_nvs_flash_erase(void);
-esp_err_t        __wrap_nvs_flash_erase(void) {
-    ESP_LOGW("nvs", "nvs_flash_erase called, caller %p", __builtin_return_address(0));
-    return __real_nvs_flash_erase();
+// Refuses every caller (#84 T9): erasing NVS takes the Wi-Fi credentials, the clock record and every app's settings with
+// it. The OS erases by partition where it means to (main.c on an unusable layout, factory_reset.c for #66); MeshCore's
+// DataStore is built with nvs_flash_erase renamed to its own wipe. The caller is named by its return address.
+esp_err_t __wrap_nvs_flash_erase(void);
+esp_err_t __wrap_nvs_flash_erase(void) {
+    ESP_LOGE("nvs", "nvs_flash_erase refused: only the OS erases NVS (factory reset), caller %p",
+             __builtin_return_address(0));
+    return ESP_ERR_NOT_ALLOWED;
 }
 
 void system_restart(char const *why) {

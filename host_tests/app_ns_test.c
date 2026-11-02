@@ -29,7 +29,7 @@ int main(void) {
     CHECK(!app_ns_name("meshcore", ns, 15));      // a buffer that cannot hold the longest name
 
     CHECK(app_adopt_plan(false, true) == APP_ADOPT_COPY);  // only the old key: copy it once
-    CHECK(app_adopt_plan(true, true) == APP_ADOPT_NONE);   // already adopted: the old key never wins again
+    CHECK(app_adopt_plan(true, true) == APP_ADOPT_DROP_LEGACY); // already adopted: the old key goes, never wins again
     CHECK(app_adopt_plan(true, false) == APP_ADOPT_NONE);
     CHECK(app_adopt_plan(false, false) == APP_ADOPT_NONE); // a fresh badge: nothing to adopt
 

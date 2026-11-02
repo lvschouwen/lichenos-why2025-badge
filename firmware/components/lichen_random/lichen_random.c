@@ -3,6 +3,7 @@
 #include "bootloader_random.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "sdkconfig.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -12,11 +13,19 @@ static bool       s_started = false;
 
 extern void __real_bootloader_random_enable(void);
 
-// Log-only for now: shows who outside the OS touches the entropy source (#84)
+// The only other caller in IDF is nvs_sec_provider, which burns an HMAC key into eFuse from esp_fill_random() while it
+// holds the source on: refusing it would burn a weak key for good. It is linked only with NVS encryption, which is off;
+// turning that on must allow it here first.
+#if CONFIG_NVS_ENCRYPTION
+#error "NVS encryption: nvs_sec_provider calls bootloader_random_enable(); allow it in __wrap_bootloader_random_enable"
+#endif
+
+// Refuses (#84 T9): the OS turns the entropy source on once (lichen_random_start, through __real_) and owns the ADC
+// hand-over (#11, #69); apps take random bytes from lichen_random_fill(). The caller is named by its return address.
 void __wrap_bootloader_random_enable(void);
 void __wrap_bootloader_random_enable(void) {
-    ESP_LOGW(TAG, "bootloader_random_enable called from outside the OS, caller %p", __builtin_return_address(0));
-    __real_bootloader_random_enable();
+    ESP_LOGE(TAG, "bootloader_random_enable refused: the OS owns the entropy source (lichen_random), caller %p",
+             __builtin_return_address(0));
 }
 
 void lichen_random_start(void) {

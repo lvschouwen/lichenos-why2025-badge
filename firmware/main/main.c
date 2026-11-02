@@ -284,7 +284,7 @@ void app_main(void) {
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // Settings from an incompatible layout are lost rather than leaving the badge without settings at all
         ESP_LOGW(TAG, "NVS unusable (%s), erasing it", esp_err_to_name(err));
-        nvs_flash_erase();
+        nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME); // nvs_flash_erase() is refused for everyone (#84 T9)
         err = nvs_flash_init();
     }
     if (err != ESP_OK) {

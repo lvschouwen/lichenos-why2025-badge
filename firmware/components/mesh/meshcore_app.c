@@ -349,7 +349,7 @@ void meshcore_app_settings_open(void) {
 // ---- the background part -----------------------------------------------------------------------------------------
 
 static bool start_background(void) {
-    app_settings_adopt_u8(self(), "mc_name_set"); // firmware before #84 T5 kept the flag in Lichen's namespace
+    app_settings_adopt_u8(self(), "mc_name_set"); // before #84 T5 in Lichen's namespace; erased there once adopted
     return meshcore_run_boot(); // start at boot on: started here, as before; off: only the console commands (#103)
 }
 

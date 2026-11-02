@@ -91,6 +91,12 @@ bool clock_src_unverified(clock_src_t cur, clock_src_t was);
 // manual path can be tried on a badge with Wi-Fi
 clock_src_t clock_force_rank(clock_src_t cur);
 
+// settimeofday() from outside lichen_clock (#84 T9): only a re-sync passes, a call that sets the time the clock already
+// shows (IDF's esp_sync_timekeeping_timers on every restart and before sleep reads the time and writes it back). Any
+// call that moves the clock by CLOCK_RESYNC_US or more is refused: only lichen_clock decides the time. Times in us.
+#define CLOCK_RESYNC_US 1000000LL
+bool clock_resync_only(int64_t now_us, int64_t new_us);
+
 #ifdef __cplusplus
 }
 #endif

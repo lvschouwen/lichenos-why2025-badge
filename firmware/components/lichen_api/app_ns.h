@@ -13,8 +13,9 @@ extern "C" {
 bool app_ns_name(char const *id, char *out, size_t cap);
 
 // A key an earlier firmware kept in badge_fw (MeshCore's mc_name_set): copied into the app's namespace once, only when
-// the app has none yet and the old one exists. The old key stays, so a rollback still sees it (erased in #84 T9).
-typedef enum { APP_ADOPT_NONE, APP_ADOPT_COPY } app_adopt_t;
+// the app has none yet and the old one exists. The old key is erased only on a later boot that finds it already in the
+// app's namespace (#84 T9), so a failed copy never loses it.
+typedef enum { APP_ADOPT_NONE, APP_ADOPT_COPY, APP_ADOPT_DROP_LEGACY } app_adopt_t;
 app_adopt_t app_adopt_plan(bool have_app, bool have_legacy);
 
 #ifdef __cplusplus

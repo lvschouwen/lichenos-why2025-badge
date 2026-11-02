@@ -21,6 +21,14 @@ set(THIRD_PARTY_SRCS
 set(COMPANION_SRCS
     ${MC}/src/helpers/IdentityStore.cpp ${MC}/src/helpers/RegionMap.cpp ${MC}/src/helpers/TransportKeyStore.cpp
     ${MC}/examples/companion_radio/MyMesh.cpp ${MC}/examples/companion_radio/DataStore.cpp)
+# The app's allowlist (#84 T9, docs/app-api.md): Lichen's app API and services, the radio, the console, and plain
+# libraries. The build is the check: a header from any other component does not resolve. Three exceptions, each with
+# its follow-up: nvs_flash (the legacy badge_fw/identity hand-over, kept as is by decision, and the advert keys
+# mc_advint/mc_advlast/mc_advfl still in badge_fw: move them to a.meshcore), esp_lvgl_port (lvgl_port_lock around
+# lv_async_call in the settings jobs: lichen_ui_call, T8a) and sdcard (the message journal's sd_begin/sd_end batches
+# on /sd/lichen/messages, #98: an SD batch call in lichen_fs.h).
+set(MESH_REQUIRES lichen_api lichen_clock lichen_random lora fw_console freertos esp_timer heap mbedtls
+                  nvs_flash esp_lvgl_port sdcard)
 idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "mesh_trace.c" "mesh_remote.c" "meshcore_remote.c" "lora_radio.cpp" "mesh_store.c" "lora_airtime.c" "advert_limit.c" "mesh_advert_cfg.c"
                             "mesh_hist.c" "mesh_hist_crypto.cpp" "mesh_hist_selftest.c" "mesh_ident.c" "mesh_journal.c" "mesh_format.c" "mesh_contact_fmt.c" "mesh_share.c" "mesh_tile.c" "mesh_notify.c" "mesh_notify_run.c" "meshcore_notify.c"
                             "meshcore_hdr.c" "meshcore_app.c" "meshcore_run.c" "mesh_run.c" "meshcore_grid.c" "meshcore_grid_icons.c" "mesh_grid.c" "meshcore_list.c" "meshcore_chats.c" "meshcore_contacts.c" "meshcore_chat.c" "meshcore_contact.c" "mesh_chat.c" "meshcore_settings.c" "meshcore_advert_settings.c" "radio_presets.c" "radio_filter.c" "radio_confirm.c" "channel_input.c" "mc_first.c"
@@ -29,8 +37,7 @@ idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "companion" ${MC}/src ${MC}/examples/companion_radio ${MC}/lib/ed25519 ${CR}
                                          "../../../shared/arduino_shim" "../../../third_party/base64/src"
-                       PRIV_REQUIRES lichen_clock lora fw_console nvs_flash esp_timer lichen_random freertos
-                                     esp_system heap lichen_api esp_lvgl_port sdcard mbedtls)
+                       PRIV_REQUIRES ${MESH_REQUIRES})
 # MeshCore's sizes on the badge: its tables live in PSRAM (mesh_task.cpp), so far beyond MeshCore's defaults
 target_compile_definitions(${COMPONENT_LIB} PRIVATE MAX_CONTACTS=1000 MAX_GROUP_CHANNELS=40 OFFLINE_QUEUE_SIZE=256
                            LORA_FREQ=869.618 LORA_BW=62.5 LORA_SF=7 LORA_CR=5 LORA_TX_POWER=22 MAX_LORA_TX_POWER=22)
