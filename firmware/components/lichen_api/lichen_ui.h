@@ -100,6 +100,7 @@ lv_obj_t *lichen_label_wrap(lv_obj_t *parent, int32_t width);
 lv_obj_t *lichen_heading(lv_obj_t *parent, char const *kind, char const *name);
 // A hint line pinned to the bottom of a screen (R6), dim, out of the scroll flow: "Enter: open \xE2\x80\xA2 Del: delete"
 // from key/verb pairs, NULL-terminated: shell_page_hint(screen, "Enter", "open", "Del", "delete", NULL). Leaves the
-// room at the screen's bottom for it (pad_bottom), so build it before or after the content. No "Esc: back" pairs: Esc
+// room at the screen's bottom for it (pad_bottom), so build it before or after the content. Calling it again replaces
+// the screen's hint (rebuilt pages call it on every rebuild). No "Esc: back" pairs: Esc
 // goes back everywhere. Calling it again on the same screen replaces the text. Returns the label. LVGL context only.
 lv_obj_t *shell_page_hint(lv_obj_t *screen, ...);

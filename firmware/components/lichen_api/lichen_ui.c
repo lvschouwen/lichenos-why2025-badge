@@ -108,13 +108,24 @@ lv_obj_t *lichen_heading(lv_obj_t *parent, char const *kind, char const *name) {
     return box;
 }
 
+#define PAGE_HINT_FLAG LV_OBJ_FLAG_USER_2 // marks the screen's hint (USER_1 is text_entry's secret flag)
+
 lv_obj_t *shell_page_hint(lv_obj_t *screen, ...) {
     char    text[HINT_MAX];
     va_list ap;
     va_start(ap, screen);
     ui_hint_vbuild(text, sizeof(text), ap);
     va_end(ap);
+    // One hint per screen: screens rebuild their rows (Files, notifications, crash log) and call this again each time;
+    // the hint is the screen's child, not the menu's, so the old one would stay and pile up (#135 review)
+    for (int32_t i = (int32_t)lv_obj_get_child_count(screen) - 1; i >= 0; i--) {
+        lv_obj_t *child = lv_obj_get_child(screen, i);
+        if (lv_obj_has_flag(child, PAGE_HINT_FLAG)) {
+            lv_obj_delete(child);
+        }
+    }
     lv_obj_t *label = lichen_label_line(screen, LV_PCT(100));
+    lv_obj_add_flag(label, PAGE_HINT_FLAG);
     lv_obj_add_flag(label, LV_OBJ_FLAG_FLOATING); // out of the flex flow and the scroll: it stays where it is put
     lv_obj_set_style_text_font(label, lichen_font(LICHEN_FONT_SMALL), 0);
     lv_obj_set_style_text_color(label, lv_color_hex(THEME_DIM), 0);

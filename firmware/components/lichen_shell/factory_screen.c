@@ -25,6 +25,7 @@ static void failed_dialog(void) {
 static void go(factory_level_t level) {
     if (!factory_reset_request(level)) {
         ESP_LOGE(TAG, "reset (%s) not saved", factory_level_name(level));
+        shell_restart_note(NULL); // nothing will be erased: a later plain restart must not warn of a dark minute
         failed_dialog();
         return;
     }

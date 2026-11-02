@@ -130,8 +130,21 @@ static void fill_menu(void) {
     }
     lv_group_t *previous = lv_group_get_default();
     lv_group_set_default(s_v.group);
-    // In a folder the path names the page (R1): "Files" small over it, the free space as a dim line
-    s_v.menu = s_v.dir[0] ? menu_create_named(s_v.screen, "Files", s_v.dir) : menu_create(s_v.screen, "Files");
+    // In a folder the folder names the page (R1): its own name large, where it lives small over it ("Files in
+    // /sd/photos"), so a deep path cuts the parents, never the folder you are in (#135 review); the free space as a dim line
+    if (s_v.dir[0]) {
+        char const *slash = strrchr(s_v.dir, '/');
+        char        kind[FILES_PATH_MAX + 16];
+        if (slash && slash != s_v.dir) {
+            snprintf(kind, sizeof(kind), "Files in %.*s", (int)(slash - s_v.dir), s_v.dir);
+        } else {
+            snprintf(kind, sizeof(kind), "Files");
+        }
+        bool nested = slash && slash != s_v.dir; // a volume's own root ("/sd") keeps its full name
+        s_v.menu    = menu_create_named(s_v.screen, kind, nested ? slash + 1 : s_v.dir);
+    } else {
+        s_v.menu = menu_create(s_v.screen, "Files");
+    }
     s_v.note = menu_note(s_v.menu, s_v.message);
     lv_obj_set_style_text_color(s_v.note, lv_color_hex(THEME_AMBER), 0);
     if (s_v.dir[0]) {
