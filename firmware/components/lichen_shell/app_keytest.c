@@ -1,7 +1,8 @@
 // Keyboard Test (#81): every key of the badge keyboard as the TCA8418 reports it, including the ones the OS drops before
-// LVGL (shape keys, Fn, Ctrl ...). The 8 x 10 matrix is drawn in the chip's order (key_matrix.h); a key lights while held
-// and stays marked once seen, and the last event is spelled out. While the screen is open the keys do nothing else: Esc held for
-// 2 s leaves.
+// LVGL (shape keys, Fn, Ctrl ...). The keys are drawn like the printed keyboard (key_layout() in key_matrix.h, the shape
+// keys in their printed colours); a key lights while held and stays marked once seen, and the last event is spelled out.
+// While the screen is open the keys do nothing else: Esc held for 2 s leaves. The raw listener runs from an LVGL timer
+// (raw_keys.c drains its queue there), so the widget calls below need no extra lock.
 #include "app_icons.h"
 #include "esp_log.h"
 #include "fonts.h"
@@ -17,11 +18,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define KEY_W   60
-#define KEY_H   44
-#define KEY_GAP 4
+#define KEY_U     49 // pixels per key (1u); 13u = 637 of the 648 px content width
+#define KEY_H     54
+#define KEY_GAP   4
+#define ROW_PITCH (KEY_H + KEY_GAP)
 
-#define CODES (KEY_MATRIX_ROWS * KEY_MATRIX_COLS)
+#define CODES (KEY_MATRIX_ROWS * KEY_MATRIX_COLS) // indexed by code - 1; the unwired codes keep no cell
 
 typedef struct {
     lv_obj_t   *cell[CODES];
@@ -37,17 +39,20 @@ typedef struct {
 } keytest_t;
 
 static void style_cell(keytest_t const *t, int index) {
+    if (!t->cell[index]) {
+        return;
+    }
+    uint32_t shape = key_matrix_color((uint8_t)(index + 1));
     uint32_t bg = t->down[index] ? THEME_AMBER : t->seen[index] ? THEME_TEAL : THEME_TILE;
     lv_obj_set_style_bg_color(t->cell[index], lv_color_hex(bg), 0);
-    lv_obj_set_style_text_color(lv_obj_get_child(t->cell[index], 0),
-                                lv_color_hex(t->down[index] || t->seen[index] ? THEME_BG : THEME_TEXT), 0);
+    uint32_t fg = t->down[index] || t->seen[index] ? THEME_BG : shape ? shape : THEME_TEXT;
+    lv_obj_set_style_text_color(lv_obj_get_child(t->cell[index], 0), lv_color_hex(fg), 0);
 }
 
 static void on_raw(key_raw_event_t const *ev, void *arg) {
     keytest_t *t = arg;
-    int        row, col;
-    if (key_matrix_pos(ev->code, &row, &col)) {
-        int index        = row * KEY_MATRIX_COLS + col;
+    if (key_layout_index(ev->code) >= 0) {
+        int index        = ev->code - 1;
         t->down[index]   = ev->pressed;
         t->seen[index]  |= ev->pressed;
         style_cell(t, index);
@@ -91,18 +96,18 @@ static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color) {
     return label;
 }
 
-static void add_cell(keytest_t *t, lv_obj_t *grid, int row, int col) {
-    int       index = row * KEY_MATRIX_COLS + col;
+static void add_cell(keytest_t *t, lv_obj_t *grid, key_layout_t const *k) {
+    int       index = k->code - 1;
     lv_obj_t *cell  = lv_obj_create(grid);
     lv_obj_remove_style_all(cell);
-    lv_obj_set_size(cell, KEY_W, KEY_H);
-    lv_obj_set_pos(cell, col * (KEY_W + KEY_GAP), row * (KEY_H + KEY_GAP));
+    lv_obj_set_size(cell, k->w * KEY_U / 4 - KEY_GAP, KEY_H);
+    lv_obj_set_pos(cell, k->x * KEY_U / 4, k->row * ROW_PITCH);
     lv_obj_set_style_radius(cell, 6, 0);
     lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, 0);
     lv_obj_remove_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *label = lv_label_create(cell);
     char      buf[8];
-    lv_label_set_text(label, key_matrix_label(key_matrix_code(row, col), buf, sizeof(buf)));
+    lv_label_set_text(label, key_matrix_label(k->code, buf, sizeof(buf)));
     lv_obj_set_style_text_font(label, lichen_font(LICHEN_FONT_SMALL), 0);
     lv_obj_center(label);
     t->cell[index] = cell;
@@ -127,11 +132,11 @@ static void open_keytest(lv_obj_t *screen) {
 
     lv_obj_t *grid = lv_obj_create(screen);
     lv_obj_remove_style_all(grid);
-    lv_obj_set_size(grid, KEY_MATRIX_COLS * (KEY_W + KEY_GAP) - KEY_GAP, KEY_MATRIX_ROWS * (KEY_H + KEY_GAP) - KEY_GAP);
-    for (int row = 0; row < KEY_MATRIX_ROWS; row++) {
-        for (int col = 0; col < KEY_MATRIX_COLS; col++) {
-            add_cell(t, grid, row, col);
-        }
+    lv_obj_set_size(grid, KEY_LAYOUT_WIDTH * KEY_U / 4, KEY_LAYOUT_ROWS * ROW_PITCH - KEY_GAP);
+    key_layout_t const *keys;
+    size_t              count = key_layout(&keys);
+    for (size_t i = 0; i < count; i++) {
+        add_cell(t, grid, &keys[i]);
     }
 
     add_label(screen, "Hold Esc for 2 s to leave", THEME_DIM);

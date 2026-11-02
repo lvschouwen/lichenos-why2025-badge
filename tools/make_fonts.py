@@ -6,7 +6,7 @@
 Each size merges four sources with lv_font_conv (the first font that has a code point wins):
   Montserrat Medium  Latin, Latin-1/Extended-A/B, Cyrillic, general punctuation, currency signs (the UI's look)
   Font Awesome       the LV_SYMBOL_* icons, same code points as LVGL's own lv_font_montserrat_24.c
-  DejaVu Sans        Greek, arrows, geometric shapes, zero width space
+  DejaVu Sans        Greek, arrows, geometric shapes, zero width space, and the key tops of the Keyboard Test: ✕ ⌫ ⏎ (#81)
   Noto Emoji         monochrome emoji (contact names carry them), plus the zero-width joiner and variation selectors
 
 The sources are downloaded once into --cache (default tools/.font-cache, git-ignored) and checked against the sha256
@@ -54,9 +54,11 @@ SYMBOLS = (
     "62087,62099,62212,62189,62810,63426,63650"
 )
 LATIN = "0x20-0x7E,0xA0-0x24F,0x400-0x4FF,0x2000-0x206F,0x20A0-0x20CF"
-DEJAVU = "0x200B,0x370-0x3FF,0x2190-0x21FF,0x25A0-0x25FF"
+DEJAVU = "0x200B,0x370-0x3FF,0x2190-0x21FF,0x232B,0x23CE,0x25A0-0x25FF,0x2715"
+# Noto's ranges must leave out the code points DejaVu supplies (U+232B, U+23CE, U+2715): lv_font_conv lets the later
+# font's range replace the earlier glyph even where that font has none, and the key would draw as a box (#81).
 # Includes 0x1F900-0x1F9FF (🤖 🦋 🦎 🦫 are in node names); 0x200D/0xFE0E/0xFE0F are zero-width in this font
-EMOJI = "0x200D,0xFE0E,0xFE0F,0x2300-0x23FF,0x2600-0x27BF,0x2B00-0x2BFF,0x1F000-0x1FAFF"
+EMOJI = "0x200D,0xFE0E,0xFE0F,0x2300-0x232A,0x23CF-0x23FF,0x2600-0x2714,0x2716-0x27BF,0x2B00-0x2BFF,0x1F000-0x1FAFF"
 
 # size -> whether it carries the emoji. RLE-compressed (needs LV_USE_FONT_COMPRESSED): 40 px with emoji is 1.5 MB raw
 SIZES = {24: True, 28: True, 40: True}
