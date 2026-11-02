@@ -81,6 +81,7 @@ lv_obj_t *shell_page_create(void) {
     lv_obj_set_style_pad_top(screen, THEME_STATUS_BAR_H + THEME_PAD, 0);
     lv_obj_set_style_pad_hor(screen, THEME_PAD, 0);
     shell_scroll_tame(screen);
+    shell_no_arrow_scroll(screen);
     return screen;
 }
 

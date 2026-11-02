@@ -27,6 +27,9 @@ void shell_scroll_by(lv_obj_t *obj, int32_t dy);
 // opened with shell_open(); put a menu_create() menu on it
 lv_obj_t *shell_page_create(void);
 void shell_scroll_tame(lv_obj_t *obj);
+// Turns off LVGL's own arrow-key scrolling for an object that takes the keys itself (shell_page_create, app screens
+// and screens without focusable widgets have it off already): call it on a scrollable object an app adds to its group
+void shell_no_arrow_scroll(lv_obj_t *obj);
 // Pop one screen / down to `screen` (nothing is popped when it is not on the stack), then call then(arg), all in one
 // async step: the target is showing when then runs, whatever else is queued (LVGL runs async calls newest first).
 // False when the step could not be queued (no memory, the LVGL lock busy): then will not run and arg is still the

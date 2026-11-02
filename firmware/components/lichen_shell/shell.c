@@ -358,6 +358,14 @@ void shell_scroll_by(lv_obj_t *obj, int32_t dy) {
     lv_obj_scroll_to_y(obj, scroll_step_target(end.y, dy, max_y), LV_ANIM_ON);
 }
 
+// LVGL scrolls a focused scrollable object by a quarter of its height on every arrow (Left/Right too, with no
+// animation) before the object's own key handler runs, and that jump kills shell_scroll_by's animation (#34). Every
+// shell page that takes the keys moves its own selection or scrolls itself, so none keeps LVGL's arrow scrolling
+// (#124, #128)
+void shell_no_arrow_scroll(lv_obj_t *obj) {
+    lv_obj_set_scroll_with_arrow(obj, false);
+}
+
 static lichen_app_t const *opening; // for build_app, which shell_open() calls without arguments
 
 static lv_obj_t *build_app(void) {
@@ -366,6 +374,7 @@ static lv_obj_t *build_app(void) {
     lv_obj_set_style_pad_top(screen, THEME_STATUS_BAR_H + THEME_PAD, 0);
     lv_obj_set_style_pad_hor(screen, THEME_PAD, 0);
     shell_scroll_tame(screen);
+    shell_no_arrow_scroll(screen);
     opening->open(screen);
     return screen;
 }
@@ -413,6 +422,7 @@ void shell_open(lv_obj_t *(*build)(void), int screen_id) {
     }
     if (lv_group_get_obj_count(group) == 0) {
         lv_group_add_obj(group, screen); // keys still reach a screen without focusable widgets
+        shell_no_arrow_scroll(screen);
     }
     frames[nav_depth() - 1] = (frame_t){screen, group, on_esc, on_esc_arg, on_search, on_search_arg};
     show_top();
