@@ -49,9 +49,7 @@ int __wrap_settimeofday(struct timeval const *tv, struct timezone const *tz) {
     }
     struct timeval cur;
     gettimeofday(&cur, NULL);
-    int64_t now_us = (int64_t)cur.tv_sec * 1000000 + cur.tv_usec;
-    int64_t new_us = (int64_t)tv->tv_sec * 1000000 + tv->tv_usec;
-    if (clock_resync_only(now_us, new_us)) {
+    if (clock_resync_only(cur.tv_sec, cur.tv_usec, tv->tv_sec, tv->tv_usec)) {
         return __real_settimeofday(tv, tz);
     }
     ESP_LOGE("clock", "settimeofday(%lld) refused: only lichen_clock sets the time (clock_propose), caller %p",

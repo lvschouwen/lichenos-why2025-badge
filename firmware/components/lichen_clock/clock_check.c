@@ -152,7 +152,17 @@ clock_src_t clock_force_rank(clock_src_t cur) {
     return cur > CLOCK_SRC_MANUAL ? CLOCK_SRC_MANUAL : cur;
 }
 
-bool clock_resync_only(int64_t now_us, int64_t new_us) {
+// sec * 1e6 + usec, false when it does not fit
+static bool tv_us(int64_t sec, int64_t usec, int64_t *out) {
+    int64_t us;
+    return !__builtin_mul_overflow(sec, (int64_t)1000000, &us) && !__builtin_add_overflow(us, usec, out);
+}
+
+bool clock_resync_only(int64_t now_sec, int64_t now_usec, int64_t new_sec, int64_t new_usec) {
+    int64_t now_us, new_us;
+    if (!tv_us(now_sec, now_usec, &now_us) || !tv_us(new_sec, new_usec, &new_us)) {
+        return false;
+    }
     // unsigned: the distance between any two int64 values without signed overflow
     uint64_t d = new_us >= now_us ? (uint64_t)new_us - (uint64_t)now_us : (uint64_t)now_us - (uint64_t)new_us;
     return d < (uint64_t)CLOCK_RESYNC_US;

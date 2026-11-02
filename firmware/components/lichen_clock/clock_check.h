@@ -93,9 +93,11 @@ clock_src_t clock_force_rank(clock_src_t cur);
 
 // settimeofday() from outside lichen_clock (#84 T9): only a re-sync passes, a call that sets the time the clock already
 // shows (IDF's esp_sync_timekeeping_timers on every restart and before sleep reads the time and writes it back). Any
-// call that moves the clock by CLOCK_RESYNC_US or more is refused: only lichen_clock decides the time. Times in us.
+// call that moves the clock by CLOCK_RESYNC_US or more is refused: only lichen_clock decides the time. Times as a
+// timeval's seconds and microseconds; a value whose microsecond count does not fit 64 bits is refused (the caller's
+// tv_sec is not trusted: a wrapped multiply could otherwise land within a second of now).
 #define CLOCK_RESYNC_US 1000000LL
-bool clock_resync_only(int64_t now_us, int64_t new_us);
+bool clock_resync_only(int64_t now_sec, int64_t now_usec, int64_t new_sec, int64_t new_usec);
 
 #ifdef __cplusplus
 }

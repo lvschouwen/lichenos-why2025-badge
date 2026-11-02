@@ -206,16 +206,20 @@ int main(void) {
 
     // A foreign settimeofday (#84 T9): only one that writes back the time the clock shows passes
     {
-        int64_t now = (int64_t)B * 1000000;
-        CHECK(clock_resync_only(now, now));                         // esp_sync_timekeeping_timers: read, write back
-        CHECK(clock_resync_only(now, now + 350));                   // the microseconds between its two calls
-        CHECK(clock_resync_only(now, now - 999999));
-        CHECK(!clock_resync_only(now, now + CLOCK_RESYNC_US));      // a second or more moves the clock: refused
-        CHECK(!clock_resync_only(now, now - CLOCK_RESYNC_US));      // backwards too
-        CHECK(!clock_resync_only(now, 0));                          // to 1970
-        CHECK(!clock_resync_only(0, now));                          // an app setting an unset clock
-        CHECK(!clock_resync_only(now, INT64_MAX));                  // no overflow
-        CHECK(!clock_resync_only(now, INT64_MIN + 1));
+        int64_t const S = B; // now: B seconds and 500000 us
+        CHECK(clock_resync_only(S, 500000, S, 500000));          // esp_sync_timekeeping_timers: read, write back
+        CHECK(clock_resync_only(S, 500000, S, 500350));          // the microseconds between its two calls
+        CHECK(clock_resync_only(S, 500000, S - 1, 500001));      // just under a second back
+        CHECK(!clock_resync_only(S, 500000, S + 1, 500000));     // a second or more moves the clock: refused
+        CHECK(!clock_resync_only(S, 500000, S - 1, 500000));     // backwards too
+        CHECK(!clock_resync_only(S, 500000, 0, 0));              // to 1970
+        CHECK(!clock_resync_only(0, 0, S, 0));                   // an app setting an unset clock
+        CHECK(!clock_resync_only(S, 500000, INT64_MAX, 0));      // no overflow
+        CHECK(!clock_resync_only(S, 500000, INT64_MIN, 0));
+        CHECK(!clock_resync_only(S, 500000, S, INT64_MAX));
+        // Crafted: 2^58 s * 1e6 = 15625 * 2^64, so a wrapping multiply lands exactly on now
+        CHECK(!clock_resync_only(S, 500000, S + (1LL << 58), 500000));
+        CHECK(!clock_resync_only(S, 500000, S - (1LL << 58), 500000));
     }
 
     for (int v = CLOCK_OK; v <= CLOCK_NO_SOURCE; v++) {

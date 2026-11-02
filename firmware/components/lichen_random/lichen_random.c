@@ -5,11 +5,12 @@
 #include "esp_random.h"
 #include "sdkconfig.h"
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 static char const TAG[]    = "random";
-static bool       s_started = false;
+static atomic_flag s_started = ATOMIC_FLAG_INIT;
 
 extern void __real_bootloader_random_enable(void);
 
@@ -29,10 +30,9 @@ void __wrap_bootloader_random_enable(void) {
 }
 
 void lichen_random_start(void) {
-    if (s_started) {
+    if (atomic_flag_test_and_set(&s_started)) {
         return;
     }
-    s_started = true;
     __real_bootloader_random_enable();
 }
 
