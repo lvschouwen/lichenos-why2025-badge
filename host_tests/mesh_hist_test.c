@@ -1013,6 +1013,111 @@ static void damage_checks(void) {
     CHECK(!mesh_hist_same_damage(&a, &b));
 }
 
+// #123: the boot's re-reads replay too, so a bad spot that reads clean on a re-read leaves no gap in RAM
+typedef struct {
+    long flip[6]; // per read (from 1): the file offset whose byte that read gets flipped, -1 none
+    bool fail[6]; // per read: the file could not be read
+    int  calls;
+} boot_fake_t;
+
+static bool boot_pass(void *pctx, int read_no, mesh_hist_rec_fn on_rec, void *ctx, mesh_hist_scan_t *scan) {
+    static uint8_t   copy[sizeof(file)], buf[MESH_HIST_SCAN_BUF];
+    boot_fake_t     *f = (boot_fake_t *)pctx;
+    f->calls++;
+    CHECK(read_no == f->calls);
+    if (read_no > 6 || f->fail[read_no - 1]) {
+        return false;
+    }
+    memcpy(copy, file, file_len);
+    if (f->flip[read_no - 1] >= 0) {
+        copy[f->flip[read_no - 1]] ^= 0x08; // bit 3, as the 120 MHz DMA flips (#120)
+    }
+    mem_rd_t          rd = {.p = copy, .len = file_len, .chunk = 0};
+    mesh_hist_crypt_t c  = kc;
+    c.open               = false;
+    mesh_hist_scan(mem_read, &rd, buf, &c, on_rec, ctx, scan);
+    return true;
+}
+
+static int boot_locks;
+static void boot_lock(void) {
+    boot_locks++;
+}
+static void boot_unlock(void) {
+    boot_locks--;
+}
+
+static size_t boot_chat_msgs(mesh_hist_table_t const *t, mesh_chat_key_t const *k) {
+    for (size_t i = 0; i < t->cap; i++) {
+        if (t->slots[i].used && memcmp(&t->slots[i].key, k, sizeof(*k)) == 0) {
+            return t->slots[i].msgs;
+        }
+    }
+    return 0;
+}
+
+static void boot_load_checks(void) {
+    static mesh_hist_t      h;
+    static uint8_t          pend[MESH_HIST_PENDING];
+    static mesh_hist_chat_t bslots[16];
+    mesh_chat_key_t         ck = chan_key("#badgetest");
+    start_file();
+    mesh_hist_rec_t r = chat_rec(&ck, "#badgetest");
+    append(&r);
+    long bad = -1, bad5 = -1;
+    for (uint32_t seq = 1; seq <= 6; seq++) {
+        if (seq == 3 || seq == 5) { // inside the message's payload: its CRC fails
+            *(seq == 3 ? &bad : &bad5) = (long)file_len + MESH_HIST_HDR + 4;
+        }
+        r = msg_rec(&ck, seq, "a: hello");
+        append(&r);
+    }
+    mesh_msg_t m[8];
+    for (int scenario = 0; scenario < 4; scenario++) {
+        boot_fake_t f = {.flip = {-1, -1, -1, -1, -1, -1}};
+        switch (scenario) {
+        case 0: // misread once, clean on the first re-read
+            f.flip[0] = bad;
+            break;
+        case 1: // two different misreads (another spot: not taken for damage in the file), then clean
+            f.flip[0] = bad;
+            f.flip[1] = bad5;
+            break;
+        case 2: // in the file: the same spot on every read
+            for (int i = 0; i < 6; i++) {
+                f.flip[i] = bad;
+            }
+            break;
+        case 3: // the card could not be read
+            f.fail[0] = true;
+            break;
+        }
+        mesh_store_set_hooks(NULL, NULL);
+        CHECK(mesh_store_init(8));
+        mesh_hist_init(&h, pend, sizeof(pend), &kc);
+        mesh_hist_table_t t;
+        mesh_hist_table_init(&t, bslots, 16);
+        mesh_hist_boot_t  b;
+        mesh_hist_boot_load(boot_pass, &f, &h, &t, 5, boot_lock, boot_unlock, &b);
+        CHECK(boot_locks == 0);
+        size_t n = mesh_store_chat(&ck, m, 8, false);
+        if (scenario == 3) {
+            CHECK(b.read_failed && b.reads == 1 && n == 0);
+            continue;
+        }
+        CHECK(!b.read_failed && b.first.resyncs == 1 && b.max_seq == 6);
+        if (scenario == 2) {
+            CHECK(b.damaged && !b.read_error && b.reads == 2 && n == 5 && h.loaded == 5);
+            continue;
+        }
+        CHECK(!b.damaged && b.read_error && b.last.resyncs == 0 && b.reads == (scenario == 0 ? 2 : 3));
+        CHECK(n == 6 && h.loaded == 6 && boot_chat_msgs(&t, &ck) == 6); // whole, nothing twice, counted once
+        for (size_t i = 0; i < n; i++) {
+            CHECK(m[i].seq == i + 1);
+        }
+    }
+}
+
 int main(void) {
     uint8_t root[32];
     test_root(root, 0);
@@ -1035,6 +1140,7 @@ int main(void) {
     compact_dup_checks();
     forget_checks();
     damage_checks();
+    boot_load_checks();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

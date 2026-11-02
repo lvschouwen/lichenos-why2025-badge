@@ -468,6 +468,7 @@ add_test(NAME mesh_store_test COMMAND mesh_store_test)
 add_executable(mesh_hist_test
     ${CMAKE_CURRENT_SOURCE_DIR}/mesh_hist_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_hist.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_hist_boot.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_hist_crypto.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_hist_selftest.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_store.c

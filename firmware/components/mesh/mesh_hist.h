@@ -244,6 +244,24 @@ bool mesh_hist_should_compact(uint64_t file_bytes, uint64_t live_bytes, bool tor
 bool mesh_hist_damage_in_file(mesh_hist_scan_t const *first, bool reread_ok, mesh_hist_scan_t const *again);
 // Two reads saw the same damage (same spots, same bytes, same tail): it is in the file, more re-reads cost boot time
 bool mesh_hist_same_damage(mesh_hist_scan_t const *a, mesh_hist_scan_t const *b);
+// The boot's replay (mesh_hist_boot.c, #120, #123). pass: one whole read of the journal through on_rec (ctx) into *scan
+// (zeroed), read_no counting from 1; false when the file could not be read to its end.
+typedef bool (*mesh_hist_pass_fn)(void *pctx, int read_no, mesh_hist_rec_fn on_rec, void *ctx, mesh_hist_scan_t *scan);
+typedef struct {
+    mesh_hist_scan_t first;       // the first read: the damage the boot reports
+    mesh_hist_scan_t last;        // the last read that went through: after a read error, the clean one
+    int              reads;       // the first and the re-reads
+    bool             read_failed; // the first read could not be done (a crypto failure is first.crypto_error)
+    bool             damaged;     // damage in the file: it stayed on re-reading (compact)
+    bool             read_error;  // a bad spot read clean on a re-read: the file is fine (no compaction)
+    uint32_t         max_seq;     // the newest MSG seq seen
+} mesh_hist_boot_t;
+// Replays the journal into the store and counts it into t (its slots and cap set). A first read with a bad spot is
+// read again, replaying again, up to rereads times: until one reads clean (a read error, and the store then has every
+// record, none twice: a replayed seq replaces itself), or the same damage shows twice in a row (in the file). h->loaded
+// and t are the last read's. lock/unlock: the mesh lock, around each record's replay.
+void mesh_hist_boot_load(mesh_hist_pass_fn pass, void *pctx, mesh_hist_t *h, mesh_hist_table_t *t, int rereads,
+                         void (*lock)(void), void (*unlock)(void), mesh_hist_boot_t *out);
 // The card can take the journal: room for it to grow to the cap, plus the reserve
 bool mesh_hist_space_ok(uint64_t free_bytes, uint64_t log_bytes);
 

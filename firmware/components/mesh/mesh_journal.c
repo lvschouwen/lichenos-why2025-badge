@@ -237,26 +237,6 @@ static char const *compact_journal(work_t *w, int *err) {
 
 // ---- boot ----------------------------------------------------------------------------------------------------------
 
-typedef struct {
-    mesh_hist_table_t *table;
-    uint32_t           max_seq;
-} boot_ctx_t;
-
-// Every record into the store (under the mesh lock, a record at a time: the screens may read it) and counted, so the
-// compaction decision needs no second pass
-static bool boot_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes, void *ctx) {
-    (void)raw;
-    boot_ctx_t *b = (boot_ctx_t *)ctx;
-    lock_fn();
-    mesh_hist_replay(hist, r);
-    unlock_fn();
-    mesh_hist_count(b->table, r, bytes);
-    if (r->type == MESH_HIST_MSG && r->seq > b->max_seq) {
-        b->max_seq = r->seq;
-    }
-    return true;
-}
-
 // The HEAD search: stops at the first HEAD that opens the keys
 static bool head_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes, void *ctx) {
     (void)raw, (void)bytes, (void)ctx;
@@ -342,8 +322,6 @@ static char const *journal_aside(int *err) {
     return journal_fresh(err);
 }
 
-static bool noop_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes, void *ctx);
-
 static void note_damage(mesh_hist_scan_t const *scan) {
     auth_failures = scan->auth_failures;
     resyncs       = scan->resyncs;
@@ -356,9 +334,31 @@ static void note_damage(mesh_hist_scan_t const *scan) {
     }
 }
 
+typedef struct {
+    work_t *w;
+    int     err; // the first read's errno when it failed
+} boot_read_t;
+
+// One whole read of log.bin for mesh_hist_boot_load. The first opens the writer's keys (wcrypt) as the HEAD search
+// did; a re-read gets a copy, so nothing a misread could do to the keys reaches the writer.
+static bool boot_pass(void *pctx, int read_no, mesh_hist_rec_fn on_rec, void *ctx, mesh_hist_scan_t *scan) {
+    boot_read_t *rd = (boot_read_t *)pctx;
+    int          e  = 0;
+    bool         ok;
+    if (read_no == 1) {
+        ok      = scan_file(LOG_PATH, rd->w, &wcrypt, on_rec, ctx, scan, &e);
+        rd->err = e;
+    } else {
+        mesh_hist_crypt_t c = wcrypt;
+        ok                  = scan_file(LOG_PATH, rd->w, &c, on_rec, ctx, scan, &e);
+        mh_wipe(&c, sizeof(c));
+    }
+    return ok;
+}
+
 // Finds the HEAD (pass A, usually the first record), then replays log.bin into the store with its keys (pass B, which
-// also reads records a damaged first HEAD left unkeyed); asks for a compaction when the rules say so (the mesh task
-// does it, after start)
+// also reads records a damaged first HEAD left unkeyed; a bad spot is read again, replaying again, #120/#123); asks
+// for a compaction when the rules say so (the mesh task does it, after start)
 static char const *journal_load(work_t *w, int *err) {
     struct stat      st;
     mesh_hist_scan_t scan;
@@ -385,56 +385,40 @@ static char const *journal_load(work_t *w, int *err) {
     case MESH_HIST_LOAD_USE:
         break;
     }
-    boot_ctx_t b       = {.table = &w->table};
-    int64_t    started = esp_timer_get_time();
-    if (!scan_file(LOG_PATH, w, &wcrypt, boot_rec, &b, &scan, err)) {
+    boot_read_t      rd      = {.w = w};
+    mesh_hist_boot_t b;
+    int64_t          started = esp_timer_get_time();
+    mesh_hist_boot_load(boot_pass, &rd, hist, &w->table, REREADS, lock_fn, unlock_fn, &b);
+    if (b.read_failed) {
+        *err = rd.err;
         return "journal read failed";
     }
     boot_replay_ms = (uint32_t)((esp_timer_get_time() - started) / 1000);
-    boot_records   = scan.records;
+    boot_records   = b.last.records;
     boot_bytes     = clamp32((uint64_t)st.st_size);
-    if (scan.crypto_error) {
+    if (b.first.crypto_error) {
         return "journal crypto failed"; // no verdict on the journal: it stays as it is
     }
-    note_damage(&scan);
+    note_damage(&b.first);
     log_bytes   = clamp32((uint64_t)st.st_size);
-    log_records = scan.records;
+    log_records = b.last.records;
     if (mesh_store_last_seq() < b.max_seq) {
         ESP_LOGW(TAG, "store seq %lu behind the journal's %lu", (unsigned long)mesh_store_last_seq(),
                  (unsigned long)b.max_seq);
     }
-    bool     damaged = scan.torn || scan.resyncs;
-    uint32_t heads   = scan.heads;
-    if (damaged) { // #120: damage in the file reads the same every time; a read error comes and goes, so one clean
-                   // re-read (the records' checks cannot pass a flipped bit) proves the file is fine
-        mesh_hist_scan_t again, prev = scan;
-        int              tries = 0;
-        bool             ok    = false;
-        do {
-            memset(&again, 0, sizeof(again));
-            mesh_hist_crypt_t c  = wcrypt;
-            int               e2 = 0;
-            ok                   = scan_file(LOG_PATH, w, &c, noop_rec, NULL, &again, &e2);
-            mh_wipe(&c, sizeof(c));
-            damaged = mesh_hist_damage_in_file(&scan, ok, &again);
-            if (damaged && ok && mesh_hist_same_damage(&prev, &again)) {
-                break; // the same damage twice in a row: in the file (a torn tail after a power cut), no more reads
-            }
-            prev = again;
-        } while (damaged && ++tries < REREADS);
-        if (damaged) {
-            ESP_LOGW(TAG, "journal: the bad spot stays on re-reading (first at %llu): in the file",
-                     (unsigned long long)(ok ? again.first_bad : scan.first_bad));
-        } else {
-            read_errors++;
-            heads = again.heads; // the clean read's count: a misread HEAD must not force a compaction either
-            ESP_LOGW(TAG, "journal: the bad spot at %llu read clean on re-read %d: a read error, no compaction; the "
-                          "records there show again after the next restart (#120)",
-                     (unsigned long long)scan.first_bad, tries + 1);
-        }
+    if (b.damaged) {
+        ESP_LOGW(TAG, "journal: the bad spot stays on re-reading (first at %llu): in the file",
+                 (unsigned long long)b.first.first_bad);
+    } else if (b.read_error) {
+        read_errors++;
+        ESP_LOGW(TAG, "journal: the bad spot at %llu read clean on read %d: a read error, no compaction; the records "
+                      "there were replayed from the clean read (#123)",
+                 (unsigned long long)b.first.first_bad, b.reads);
     }
-    uint64_t live = mesh_hist_live_bytes(&w->table, keep_n);
-    compact_asked = mesh_hist_should_compact((uint64_t)st.st_size, live, damaged || heads == 0);
+    // The clean read's HEAD count after a read error: a misread HEAD must not force a compaction either
+    uint32_t heads = b.read_error ? b.last.heads : b.first.heads;
+    uint64_t live  = mesh_hist_live_bytes(&w->table, keep_n);
+    compact_asked = mesh_hist_should_compact((uint64_t)st.st_size, live, b.damaged || heads == 0);
     return NULL;
 }
 
