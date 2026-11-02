@@ -685,7 +685,8 @@ void mesh_journal_stop_locked(bool final) {
 // spot that comes and goes, is a read error; a bad spot on every pass at the same offset is in the file. Nothing is
 // written and nothing is compacted.
 
-#define SCAN_MAX_BYTES (1024 * 1024)
+#define SCAN_MAX_BYTES (1024 * 1024) // two raw copies in PSRAM; the journal itself may grow to MESH_HIST_CAP
+#define SCAN_INT_BYTES (64 * 1024)   // "int": the two copies in internal RAM, which is scarce
 #define SCAN_STACK     8192
 
 typedef struct {
@@ -756,7 +757,7 @@ static void report_diff(int pass, uint8_t const *ref, size_t ref_n, uint8_t cons
 }
 
 static uint8_t *scan_buf(size_t bytes, bool internal) {
-    if (internal && bytes > 64 * 1024) {
+    if (internal && bytes > SCAN_INT_BYTES) {
         return NULL; // internal RAM is scarce: the check is for small journals
     }
     return internal ? heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) : psram(bytes);
@@ -768,8 +769,15 @@ static void scan_task_fn(void *arg) {
     struct stat st;
     work_t      w   = {0};
     uint8_t    *ref = NULL, *cur = NULL;
-    if (stat(job.path, &st) != 0 || st.st_size <= 0 || st.st_size > SCAN_MAX_BYTES) {
-        console_reply("scan: %s missing, empty or over %d bytes", job.path, SCAN_MAX_BYTES);
+    if (stat(job.path, &st) != 0 || st.st_size <= 0) {
+        console_reply("scan: %s missing or empty", job.path);
+    } else if (st.st_size > SCAN_MAX_BYTES) {
+        console_reply("scan: %s is %ld bytes, over the scan's %d KB: the scan is a bench tool for small journals (the "
+                      "journal itself grows to %u MB before it is compacted)",
+                      job.path, (long)st.st_size, SCAN_MAX_BYTES / 1024, MESH_HIST_CAP / (1024u * 1024u));
+    } else if (job.internal && st.st_size > SCAN_INT_BYTES) {
+        console_reply("scan: %s is %ld bytes; int keeps two copies in internal RAM, at most %d KB each", job.path,
+                      (long)st.st_size, SCAN_INT_BYTES / 1024);
     } else if (!work_alloc(&w) || !(ref = scan_buf(st.st_size, job.internal)) ||
                !(cur = scan_buf(st.st_size, job.internal))) {
         console_reply("scan: no memory");
@@ -805,6 +813,7 @@ static void scan_task_fn(void *arg) {
                       job.internal ? "raw copies in internal RAM" : "raw copies in PSRAM", job.passes,
                       (long)st.st_size, bad_passes, diff_passes);
     }
+    console_reply("scan task stack: %u of %d bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL), SCAN_STACK);
     free(ref);
     free(cur);
     work_free(&w);
@@ -876,7 +885,10 @@ void mesh_journal_console(char const *args) {
         return;
     }
     if (*args) {
-        console_reply("mesh hist | mesh hist compact | mesh hist scan [n] [bad|bad1] [int] [from<offset>]");
+        console_reply("mesh hist | mesh hist compact | mesh hist scan [n] [bad|bad1] [int] [from<offset>] (scan: "
+                      "read-only bench check of a journal up to %d KB; int: its two copies in internal RAM, up to "
+                      "%d KB each)",
+                      SCAN_MAX_BYTES / 1024, SCAN_INT_BYTES / 1024);
         return;
     }
     size_t   pending = 0, held = 0;
