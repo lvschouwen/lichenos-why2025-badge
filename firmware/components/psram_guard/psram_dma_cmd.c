@@ -39,12 +39,13 @@ typedef struct {
     uint32_t              seed;
     unsigned              errors; // DMA calls refused or timed out, cache syncs refused
     size_t                bad_total;
-    int64_t               us[4];  // time spent per leg over the run, for MB/s
+    int64_t               us[5];  // time spent per leg over the run, for MB/s
     uint32_t              sd_sector; // first card sector of the SD leg
     bool                  sd_skipped;
+    size_t                sd_bad[2]; // bad bytes of the direct and the bounced SD leg
 } run_t;
 
-static char const *const legs[4] = {"psram>int", "int>psram", "psram>psram", "sd>psram"};
+static char const *const legs[5] = {"psram>int", "int>psram", "psram>psram", "sd>psram", "sd>bounce>psram"};
 static psram_dma_sd_t    s_sd;
 
 void psram_dma_set_sd(psram_dma_sd_t const *sd) {
@@ -77,7 +78,7 @@ static bool copy(run_t *r, void *dst, void const *src, size_t len) {
 
 static void show(run_t *r, int leg, psram_dma_report_t const *rep) {
     char  text[112];
-    void *at = leg == 0 ? (void *)r->src : leg == 1 ? (void *)r->dst : leg == 2 ? (void *)r->dst2 : (void *)r->dst;
+    void *at = leg == 0 ? (void *)r->src : leg == 2 ? (void *)r->dst2 : (void *)r->dst;
     psram_dma_hist_text(rep, text, sizeof(text));
     console_reply("psram dma %s %s seed %08x at %p: %u bad bytes, %s", legs[leg], psram_dma_pattern_name(r->pat),
                   (unsigned)r->seed, at, (unsigned)rep->bad_bytes, text);
@@ -161,9 +162,13 @@ static void check_src(run_t *r) {
 }
 
 // Leg 3: the SDMMC controller's DMA reads 1 MB of the card into PSRAM in 32 KB transfers, and the same sectors into
-// internal RAM as the reference (a fixed-spot flip would show in two PSRAM reads alike). Read-only.
-static void leg_sd_to_psram(run_t *r) {
-    if (!s_sd.read || !s_sd.begin(SD_WAIT_MS)) {
+// internal RAM as the reference (a fixed-spot flip would show in two PSRAM reads alike). Leg 4 (bounced): the same
+// sectors through the SD driver's internal bounce buffer and a CPU copy, the path FatFs takes since #121 E4; same
+// clock, same card, so a flip in leg 3 and none in leg 4 pins it on SDMMC DMA into PSRAM. Read-only.
+static void leg_sd(run_t *r, bool bounced) {
+    int  leg  = bounced ? 4 : 3;
+    bool (*read)(void *, uint32_t, uint32_t) = bounced ? s_sd.read_bounced : s_sd.read;
+    if (!read || !s_sd.begin(SD_WAIT_MS)) {
         r->sd_skipped = true;
         return;
     }
@@ -175,22 +180,41 @@ static void leg_sd_to_psram(run_t *r) {
         uint32_t sector = r->sd_sector + (uint32_t)(off / SD_SECTOR);
         sync_mem(r, r->in, SD_PIECE, FLAGS_FLUSH);
         sync_mem(r, r->dst + off, SD_PIECE, FLAGS_FLUSH);
-        failed = !s_sd.read(r->in, sector, SD_PIECE / SD_SECTOR) || !s_sd.read(r->dst + off, sector, SD_PIECE / SD_SECTOR);
+        failed = !s_sd.read(r->in, sector, SD_PIECE / SD_SECTOR) || !read(r->dst + off, sector, SD_PIECE / SD_SECTOR);
         if (!failed) {
             sync_mem(r, r->in, SD_PIECE, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-            sync_mem(r, r->dst + off, SD_PIECE, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+            // DMA wrote the RAM behind the cache: drop the lines. The CPU copy sits in dirty lines: write them back
+            // (an invalidate would throw the data away) and drop them, so the compare reads what reached the PSRAM
+            sync_mem(r, r->dst + off, SD_PIECE, bounced ? FLAGS_FLUSH : ESP_CACHE_MSYNC_FLAG_DIR_M2C);
             psram_dma_compare_buf(r->dst + off, r->in, SD_PIECE, off, &rep);
         }
     }
-    r->us[3] += esp_timer_get_time() - t0;
+    r->us[leg] += esp_timer_get_time() - t0;
     s_sd.end(failed);
     if (failed) {
         r->errors++;
-        console_reply("psram dma %s: card read failed", legs[3]);
+        console_reply("psram dma %s: card read failed", legs[leg]);
     }
+    r->sd_bad[bounced] += rep.bad_bytes;
     if (rep.bad_bytes) {
         r->pat = PSRAM_DMA_PATTERNS; // "?" in the report: the card's bytes, no pattern
-        show(r, 3, &rep);
+        show(r, leg, &rep);
+    }
+}
+
+// "run (direct 0, bounced 0 bad bytes)" or "skipped"
+static char const *sd_text(run_t const *r, char *buf, size_t cap) {
+    if (r->sd_skipped) {
+        return "skipped (no card)";
+    }
+    snprintf(buf, cap, "run (direct %u, bounced %u bad bytes)", (unsigned)r->sd_bad[0], (unsigned)r->sd_bad[1]);
+    return buf;
+}
+
+static void legs_sd(run_t *r) {
+    leg_sd(r, false);
+    if (!r->sd_skipped && !r->errors) {
+        leg_sd(r, true);
     }
 }
 
@@ -245,8 +269,8 @@ static unsigned mbps(int64_t us, unsigned rounds, unsigned mb_per_round) {
 
 // "psram dma sweep [sector]": the same legs over every 1 MB window of the largest free PSRAM block, so an address-
 // dependent fault (#120's two files flipped at different offsets mod 1024: a fixed place in the RAM, not in the file)
-// is met wherever it sits. Per window: DMA write from internal RAM, DMA read back, CPU read-back; then the SD leg
-// window by window, reading on through the card from sector.
+// is met wherever it sits. Per window: DMA write from internal RAM, DMA read back, CPU read-back; then both SD legs
+// (direct, bounced) window by window, reading on through the card from sector.
 static void sweep_windows(run_t *r, uint8_t *block, size_t windows) {
     for (int p = 0; p < PSRAM_DMA_PATTERNS; p++) {
         r->pat  = (psram_dma_pattern_t)p;
@@ -262,7 +286,7 @@ static void sweep_windows(run_t *r, uint8_t *block, size_t windows) {
     for (size_t w = 0; w < windows && !r->errors && !r->sd_skipped; w++) {
         r->dst       = block + w * BIG_BYTES;
         r->sd_sector = first + (uint32_t)(w * (BIG_BYTES / SD_SECTOR));
-        leg_sd_to_psram(r);
+        legs_sd(r);
     }
 }
 
@@ -282,8 +306,9 @@ static void sweep(run_t *r, unsigned burst) {
                       (void *)(block + windows * BIG_BYTES), burst, (unsigned)r->sd_sector);
         int64_t t0 = esp_timer_get_time();
         sweep_windows(r, block, windows);
-        console_reply("psram dma sweep: %u bad bytes over %u MB, %u errors, SD leg %s, %u ms", (unsigned)r->bad_total,
-                      (unsigned)windows, r->errors, r->sd_skipped ? "skipped" : "run", (unsigned)((esp_timer_get_time() - t0) / 1000));
+        char sd[64];
+        console_reply("psram dma sweep: %u bad bytes over %u MB, %u errors, SD legs %s, %u ms", (unsigned)r->bad_total,
+                      (unsigned)windows, r->errors, sd_text(r, sd, sizeof(sd)), (unsigned)((esp_timer_get_time() - t0) / 1000));
     }
     r->src = r->dst = r->dst2 = NULL;
     teardown(r);
@@ -312,22 +337,23 @@ void psram_dma_cmd(char const *args) {
         teardown(&r);
         return;
     }
-    console_reply("psram dma: %u round(s) x %d patterns, 1 MB each, AXI-GDMA burst %u, legs %s %s %s, %s 1 MB from sector %u",
-                  rounds, PSRAM_DMA_PATTERNS, burst, legs[0], legs[1], legs[2], legs[3], sector);
+    console_reply("psram dma: %u round(s) x %d patterns, 1 MB each, AXI-GDMA burst %u, legs %s %s %s, %s and %s 1 MB from sector %u",
+                  rounds, PSRAM_DMA_PATTERNS, burst, legs[0], legs[1], legs[2], legs[3], legs[4], sector);
     int64_t t0 = esp_timer_get_time();
     for (unsigned n = 0; n < rounds && !r.errors; n++) {
         for (int p = 0; p < PSRAM_DMA_PATTERNS; p++) {
             one_pattern(&r, (psram_dma_pattern_t)p);
         }
-        leg_sd_to_psram(&r);
+        legs_sd(&r);
         if (rounds > 1 && ((n + 1) % 10 == 0 || n + 1 == rounds)) {
             console_reply("psram dma: round %u/%u, %u bad bytes so far", n + 1, rounds, (unsigned)r.bad_total);
         }
     }
-    console_reply("psram dma: %u bad bytes in %u round(s), %u errors, %s %u MB/s, %s %u MB/s, %s %u MB/s, %s %s, %u ms%s",
+    char sd[64];
+    console_reply("psram dma: %u bad bytes in %u round(s), %u errors, %s %u MB/s, %s %u MB/s, %s %u MB/s, SD legs %s, %u ms%s",
                   (unsigned)r.bad_total, rounds, r.errors, legs[0], mbps(r.us[0], rounds, PSRAM_DMA_PATTERNS), legs[1],
-                  mbps(r.us[1], rounds, PSRAM_DMA_PATTERNS), legs[2], mbps(r.us[2], rounds, PSRAM_DMA_PATTERNS), legs[3],
-                  r.sd_skipped ? "skipped (no card)" : "run", (unsigned)((esp_timer_get_time() - t0) / 1000),
+                  mbps(r.us[1], rounds, PSRAM_DMA_PATTERNS), legs[2], mbps(r.us[2], rounds, PSRAM_DMA_PATTERNS),
+                  sd_text(&r, sd, sizeof(sd)), (unsigned)((esp_timer_get_time() - t0) / 1000),
                   r.errors ? " (stopped: DMA refused, timed out, a cache sync or a card read failed)" : "");
     teardown(&r);
 }

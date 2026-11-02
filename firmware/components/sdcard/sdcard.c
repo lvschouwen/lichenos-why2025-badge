@@ -5,11 +5,12 @@
 
 #include "board_sdmmc.h"
 #include "diskio_impl.h"
-#include "diskio_sdmmc.h"
+#include "sd_bounce.h"
 #include "driver/gpio.h"
 #include "driver/sdmmc_host.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_memory_utils.h"
 #include "esp_vfs_fat.h"
 #include "ff.h"
 #include "freertos/FreeRTOS.h"
@@ -30,9 +31,9 @@
 
 static char const TAG[] = "sd";
 
-#define SD_LDO_CHAN     4    // LDO_VO4: VDD_IO_5 (GPIO39-48) and the card's VDD
-#define SD_POWER_UP_MS  10   // card VDD ramp before the first command
-#define SD_BOUNCE_BYTES 4096 // our own bounce buffer in PSRAM, so unaligned sector I/O never allocates internal DMA RAM
+#define SD_LDO_CHAN     4   // LDO_VO4: VDD_IO_5 (GPIO39-48) and the card's VDD
+#define SD_POWER_UP_MS  10  // card VDD ramp before the first command
+#define SD_BOUNCE_ALIGN 128 // the L2 cache line: the bounce buffer shares no line with anything else
 #define SD_MAX_FILES    4
 #define SD_MKFS_WORK    (32 * 1024)
 #define SD_LOCK_WAIT_MS 10000 // mount, unmount and format wait this long for a running batch
@@ -47,13 +48,19 @@ static sd_io_count_t     io;
 
 // What is up right now, so bring_down() undoes exactly that. Only touched with `lock` held.
 static sd_pwr_ctrl_handle_t pwr;
-static void                *bounce;
+static uint8_t             *bounce; // internal DMA RAM (sd_bounce.h), bounce_bytes long
+static size_t               bounce_bytes;
 static bool                 slot_up;
 static sdmmc_card_t        *card;
 static BYTE                 pdrv = 0xFF;
 static char                 drv[3];
 static FATFS               *fs;
 static bool                 vfs_up;
+
+// The bounce buffer is shared by FatFs (its volume lock serialises it) and the bounced test leg of "fw psram dma"
+// (under sd_begin only): this keeps the two apart
+static SemaphoreHandle_t bounce_lock;
+static StaticSemaphore_t bounce_lock_buf;
 
 static void set_reason(char *reason, size_t cap, char const *what, esp_err_t err) {
     snprintf(reason, cap, "%s: %s", what, esp_err_to_name(err));
@@ -145,7 +152,8 @@ static void bring_down(void) {
         pwr = NULL;
     }
     heap_caps_free(bounce);
-    bounce = NULL;
+    bounce       = NULL;
+    bounce_bytes = 0;
 }
 
 // After a failed slot init: a controller we just made has no slot at all, so nothing frees it (deinit_slot needs a
@@ -165,9 +173,18 @@ static sd_mount_outcome_t power_and_probe(char *reason, size_t cap) {
         set_reason(reason, cap, "LDO", err);
         return SD_MOUNT_ERROR;
     }
-    // heap_caps adds the cache-line alignment (128 B on the P4's L2) for a DMA buffer in PSRAM
-    bounce = heap_caps_calloc(1, SD_BOUNCE_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
-    card   = calloc(1, sizeof(*card)); // esp_vfs_fat does the same; small
+    // Internal DMA RAM (#121: no SDMMC DMA into PSRAM); smaller on a tight heap, one card command per chunk either way
+    for (bounce_bytes = SD_BOUNCE_BYTES; bounce_bytes >= SD_BOUNCE_MIN_BYTES; bounce_bytes /= 2) {
+        uint32_t caps = MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+        bounce        = heap_caps_aligned_calloc(SD_BOUNCE_ALIGN, 1, bounce_bytes, caps);
+        if (bounce) {
+            break;
+        }
+    }
+    if (bounce && bounce_bytes < SD_BOUNCE_BYTES) {
+        ESP_LOGW(TAG, "bounce buffer %u KB (internal DMA RAM is short)", (unsigned)(bounce_bytes >> 10));
+    }
+    card = calloc(1, sizeof(*card)); // esp_vfs_fat does the same; small
     if (!bounce || !card) {
         snprintf(reason, cap, "out of memory");
         return SD_MOUNT_ERROR;
@@ -178,7 +195,8 @@ static sd_mount_outcome_t power_and_probe(char *reason, size_t cap) {
     host.slot               = SDMMC_HOST_SLOT_0;
     host.max_freq_khz       = SDMMC_FREQ_DEFAULT; // 20 MHz, as BadgeVMS (Lucas, #60)
     host.pwr_ctrl_handle    = pwr;
-    host.dma_aligned_buffer = bounce;
+    // No dma_aligned_buffer: sd_disk_read/write never hand IDF a buffer it would have to bounce itself (IDF's bounce
+    // takes its chunk length from heap_caps_get_allocated_size, which need not be a cache-line multiple)
     // Width 4 explicitly: the default (0) means the slot's maximum, 8, and slot 0's D5 is GPIO46, which is tied to GND
     // on production boards. With width 4 the driver never configures D4-D7. No UHS-I: VO4 is the card's VDD too, a
     // 1.8 V switch would undervolt the card itself.
@@ -229,6 +247,102 @@ static sd_mount_outcome_t power_and_probe(char *reason, size_t cap) {
     return SD_MOUNT_OK;
 }
 
+// ---- the SD volume's FatFs disk driver (#121) ------------------------------------------------------------------
+// Instead of IDF's ff_diskio_register_sdmmc: the same card calls, but a buffer in PSRAM (FatFs hands the caller's
+// buffer through for whole-sector reads and writes: the journal's 32 KB reads, the Files app, f_mkfs) or one the SDMMC
+// DMA cannot use goes through the internal bounce buffer, so the SDMMC controller never DMAs to or from PSRAM. FatFs's
+// own window and file buffers are internal (CONFIG_FATFS_ALLOC_PREFER_EXTRAM=n) and take the direct path.
+
+static esp_err_t bounced(uint8_t *buf, uint32_t sector, uint32_t count, bool write) {
+    sd_bounce_iter_t  it;
+    sd_bounce_chunk_t c;
+    if (!bounce || !sd_bounce_start(&it, sector, count, card->csd.sector_size, bounce_bytes)) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t err = ESP_OK;
+    xSemaphoreTake(bounce_lock, portMAX_DELAY);
+    while (err == ESP_OK && sd_bounce_next(&it, &c)) {
+        if (write) {
+            memcpy(bounce, buf + c.offset, c.bytes);
+            err = sdmmc_write_sectors(card, bounce, c.sector, c.count); // internal and aligned: IDF's direct DMA path
+        } else {
+            err = sdmmc_read_sectors(card, bounce, c.sector, c.count);
+            if (err == ESP_OK) {
+                memcpy(buf + c.offset, bounce, c.bytes);
+            }
+        }
+    }
+    xSemaphoreGive(bounce_lock);
+    return err;
+}
+
+static esp_err_t sd_xfer(uint8_t *buf, uint32_t sector, uint32_t count, bool write) {
+    size_t len     = (size_t)count * card->csd.sector_size;
+    bool   aligned = card->host.check_buffer_alignment(card->host.slot, buf, len);
+    if (sd_bounce_needed(esp_ptr_external_ram(buf), aligned)) {
+        return bounced(buf, sector, count, write);
+    }
+    return write ? sdmmc_write_sectors(card, buf, sector, count) : sdmmc_read_sectors(card, buf, sector, count);
+}
+
+// CMD13 per access, as ff_sdmmc_set_disk_status_check(true) did: a pulled card fails fast instead of timing out
+static DSTATUS sd_disk_status(BYTE drive) {
+    (void)drive;
+    return card && sdmmc_get_status(card) == ESP_OK ? 0 : STA_NOINIT;
+}
+
+static DRESULT sd_disk_read(BYTE drive, BYTE *buf, LBA_t sector, UINT count) {
+    (void)drive;
+    esp_err_t err = sd_xfer(buf, (uint32_t)sector, count, false);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "read %u+%u: %s", (unsigned)sector, (unsigned)count, esp_err_to_name(err));
+    }
+    return err == ESP_OK ? RES_OK : RES_ERROR;
+}
+
+static DRESULT sd_disk_write(BYTE drive, BYTE const *buf, LBA_t sector, UINT count) {
+    (void)drive;
+    esp_err_t err = sd_xfer((uint8_t *)buf, (uint32_t)sector, count, true); // bounced() only reads from buf on a write
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "write %u+%u: %s", (unsigned)sector, (unsigned)count, esp_err_to_name(err));
+    }
+    return err == ESP_OK ? RES_OK : RES_ERROR;
+}
+
+static DRESULT sd_disk_ioctl(BYTE drive, BYTE cmd, void *buf) {
+    (void)drive;
+    switch (cmd) {
+    case CTRL_SYNC:
+        return RES_OK; // every write is complete when sdmmc_write_sectors returns
+    case GET_SECTOR_COUNT:
+        *(LBA_t *)buf = card->csd.capacity;
+        return RES_OK;
+    case GET_SECTOR_SIZE:
+        *(WORD *)buf = (WORD)card->csd.sector_size;
+        return RES_OK;
+#if FF_USE_TRIM
+    case CTRL_TRIM: {
+        if (sdmmc_can_trim(card) != ESP_OK) {
+            return RES_PARERR;
+        }
+        LBA_t const      *range = buf; // first and last sector, inclusive
+        sdmmc_erase_arg_t arg   = sdmmc_can_discard(card) == ESP_OK ? SDMMC_DISCARD_ARG : SDMMC_ERASE_ARG;
+        return sdmmc_erase_sectors(card, range[0], range[1] - range[0] + 1, arg) == ESP_OK ? RES_OK : RES_ERROR;
+    }
+#endif
+    default:
+        return RES_ERROR; // GET_BLOCK_SIZE included, as IDF's driver: FatFs then aligns nothing to erase blocks
+    }
+}
+
+static ff_diskio_impl_t const SD_DISKIO = {
+    .init   = sd_disk_status,
+    .status = sd_disk_status,
+    .read   = sd_disk_read,
+    .write  = sd_disk_write,
+    .ioctl  = sd_disk_ioctl,
+};
+
 // FatFs picks FAT12/16/32 and the cluster size from the card size (au_size 0). esp_vfs_fat's own format would force
 // 512-byte clusters (its allocation unit is at least one sector), which on a 32 GB card means a 250 MB FAT.
 static FRESULT make_fat(void) {
@@ -255,8 +369,7 @@ static sd_mount_outcome_t bring_up(bool format, char *reason, size_t cap) {
         snprintf(reason, cap, "no free FAT volume");
         return SD_MOUNT_ERROR;
     }
-    ff_diskio_register_sdmmc(pdrv, card);
-    ff_sdmmc_set_disk_status_check(pdrv, true); // CMD13 per access: a pulled card fails fast instead of timing out
+    ff_diskio_register(pdrv, &SD_DISKIO);
     drv[0] = (char)('0' + pdrv);
     drv[1] = ':';
     drv[2] = '\0';
@@ -384,8 +497,14 @@ static void raw_end(bool failed) {
     sd_end(failed ? SD_IO_FAILED : SD_IO_NEUTRAL);
 }
 
+// The direct leg: sdmmc_read_sectors DMAs straight into an aligned PSRAM dst, the #120 path FatFs no longer takes
 static bool raw_read(void *dst, uint32_t sector, uint32_t count) {
     return card && sdmmc_read_sectors(card, dst, sector, count) == ESP_OK;
+}
+
+// The bounced leg: the same sectors through the FatFs driver's own path (internal bounce buffer, then a CPU copy)
+static bool raw_read_bounced(void *dst, uint32_t sector, uint32_t count) {
+    return card && bounced(dst, sector, count, false) == ESP_OK;
 }
 
 bool sd_mounted(void) {
@@ -436,8 +555,9 @@ void sd_start(void) {
     if (lock) {
         return; // once per boot
     }
-    lock = xSemaphoreCreateMutexStatic(&lock_buf);
+    lock        = xSemaphoreCreateMutexStatic(&lock_buf);
+    bounce_lock = xSemaphoreCreateMutexStatic(&bounce_lock_buf);
     sd_console_register();
-    psram_dma_set_sd(&(psram_dma_sd_t){.begin = raw_begin, .end = raw_end, .read = raw_read});
+    psram_dma_set_sd(&(psram_dma_sd_t){.begin = raw_begin, .end = raw_end, .read = raw_read, .read_bounced = raw_read_bounced});
     sd_mount();
 }
