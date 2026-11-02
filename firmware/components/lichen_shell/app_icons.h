@@ -10,3 +10,4 @@ void icon_bench(lv_obj_t *parent, int size_px);
 void icon_crashlog(lv_obj_t *parent, int size_px);
 void icon_notify(lv_obj_t *parent, int size_px);
 void icon_power(lv_obj_t *parent, int size_px);
+void icon_notes(lv_obj_t *parent, int size_px); // Release notes (#13)

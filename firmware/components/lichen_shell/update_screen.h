@@ -15,6 +15,8 @@ void update_screen_end(bool ok, bool rebooting);
 // After boot: says "Updated to ..." or "Update failed, back on ..." on home for 4 s when the badge has just been through
 // an update, then forgets it. Call once the shell is started.
 void update_screen_boot_check(void);
+// The "Updated to ..." banner is waiting for home or on screen (any task); the release notes screen waits for it to go
+bool update_screen_banner_active(void);
 // What update_screen_boot_check found (UPD_NONE before it ran or when there was no update) and its line ("Updated to
 // fw-..."), for the "Lichen updated" notification (#62); any task
 upd_result_t update_screen_boot_result(char *line, size_t cap);

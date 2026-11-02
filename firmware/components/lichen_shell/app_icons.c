@@ -113,3 +113,26 @@ void icon_power(lv_obj_t *parent, int size_px) {
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
     lv_obj_align(bar, LV_ALIGN_CENTER, 0, -size_px / 8);
 }
+
+// Release notes (#13): a sheet with a heading line and three text lines
+void icon_notes(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    lv_obj_t *sheet = lv_obj_create(parent);
+    lv_obj_remove_style_all(sheet);
+    lv_obj_set_size(sheet, size_px * 9 / 16, size_px * 11 / 16);
+    lv_obj_set_style_radius(sheet, size_px / 12, 0);
+    lv_obj_set_style_border_width(sheet, size_px >= 64 ? 4 : 2, 0);
+    lv_obj_set_style_border_color(sheet, lv_color_hex(THEME_TEAL), 0);
+    lv_obj_center(sheet);
+    int line_h = size_px >= 64 ? 4 : 2;
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *line = lv_obj_create(sheet);
+        lv_obj_remove_style_all(line);
+        lv_obj_set_size(line, i == 0 ? size_px * 5 / 16 : size_px * 7 / 32, line_h);
+        lv_obj_set_style_bg_color(line, lv_color_hex(i == 0 ? THEME_AMBER : THEME_DIM), 0);
+        lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+        lv_obj_align(line, LV_ALIGN_TOP_LEFT, size_px / 32, size_px / 24 + i * (size_px * 3 / 32));
+    }
+}

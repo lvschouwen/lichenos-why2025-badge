@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "logo.h"
 #include "nav.h"
+#include "notes_app.h"
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "fonts.h"
@@ -409,6 +410,7 @@ static char     banner_line[64];
 static atomic_int boot_result = UPD_NONE; // set once banner_line holds the text (#62 reads it from the LVGL task)
 static lv_obj_t *banner;
 static int64_t  banner_shown_ms;
+static atomic_bool banner_up; // the banner is waiting to show or showing (the release notes screen waits for it, #13)
 
 static void banner_tick(lv_timer_t *t) {
     if (!banner) {
@@ -438,6 +440,7 @@ static void banner_tick(lv_timer_t *t) {
     if (now_ms() - banner_shown_ms >= BANNER_MS) {
         lv_obj_delete(banner);
         banner = NULL;
+        atomic_store(&banner_up, false);
         lv_timer_delete(t);
     }
 }
@@ -466,11 +469,16 @@ bool update_screen_busy(void) {
     return busy;
 }
 
-void update_screen_boot_check(void) {
+bool update_screen_banner_active(void) {
+    return atomic_load(&banner_up);
+}
+
+// Says what the update did; returns the result for the release notes (#13)
+static upd_result_t boot_check(void) {
     char prev[64];
     settings_get_str(UPD_FROM_KEY, prev, sizeof(prev), "");
     if (!prev[0]) {
-        return;
+        return UPD_NONE;
     }
     // The bootloader marks an image that failed its trial; if that is not the one running, it went back
     esp_partition_t const *invalid = esp_ota_get_last_invalid_partition();
@@ -495,13 +503,19 @@ void update_screen_boot_check(void) {
         erase_pending = true; // on trial: main.c calls update_screen_image_valid() once it counts
     }
     if (after.result == UPD_NONE) {
-        return;
+        return UPD_NONE;
     }
     update_line(after.result, prev, run, banner_line, sizeof(banner_line));
     atomic_store(&boot_result, (int)after.result);
+    atomic_store(&banner_up, true);
     lvgl_port_lock(0);
     lv_timer_create(banner_tick, TICK_MS, NULL);
     lvgl_port_unlock();
+    return after.result;
+}
+
+void update_screen_boot_check(void) {
+    notes_boot_check(boot_check() == UPD_UPDATED);
 }
 
 upd_result_t update_screen_boot_result(char *line, size_t cap) {

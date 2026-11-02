@@ -8,6 +8,7 @@
 #include "key_matrix.h"
 #include "lichen_app.h"
 #include "nav.h"
+#include "notes_app.h"
 #include "raw_keys.h"
 #include "scroll_anchor.h"
 #include "settings_store.h"
@@ -499,6 +500,7 @@ void shell_start(lv_display_t *display) {
     crashlog_app_register();
     power_app_register();
     notify_app_register();
+    notes_app_register();
     lvgl_port_lock(0);
     lv_display_set_default(display);
     lv_obj_t *boot = boot_screen_create();
