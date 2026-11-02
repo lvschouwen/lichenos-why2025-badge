@@ -110,7 +110,7 @@ static void stop_for_update(bool apps_stopped) {
     if (apps_stopped) {
         lora_stop();
     } else {
-        ESP_LOGE(TAG, "an app is still running: LoRa left as it is");
+        ESP_LOGW(TAG, "an app is still running: LoRa left as it is");
     }
     c6link_set_updating();
 }
@@ -127,7 +127,7 @@ static void power_finish(bool power_off) {
     backlight_power_off();
     c6link_hold_in_reset();
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-    ESP_LOGW(TAG, "power off: deep sleep, no wake source");
+    ESP_LOGI(TAG, "power off: deep sleep, no wake source");
     esp_deep_sleep_start();
 }
 
@@ -377,7 +377,7 @@ void app_main(void) {
         uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
         if (ota_should_mark_valid(pending, shell_up(), c6link_up(), uptime_s)) {
             esp_ota_mark_app_valid_cancel_rollback();
-            ESP_LOGW(TAG, "this image is now valid");
+            ESP_LOGI(TAG, "this image is now valid");
             update_screen_image_valid();
             pending = false;
         } else if (ota_should_roll_back_now(pending, c6link_up(), uptime_s)) {
@@ -385,7 +385,7 @@ void app_main(void) {
             ESP_LOGE(TAG, "C6 link never came up on a trial image: restarting to roll back");
             system_restart("trial image: no C6 link");
         } else if (uptime_s >= OTA_VALID_AFTER_S) {
-            ESP_LOGE(TAG, "staying on trial (UI or C6 link down): a reset goes back to the previous image");
+            ESP_LOGW(TAG, "staying on trial (UI or C6 link down): a reset goes back to the previous image");
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(1000));

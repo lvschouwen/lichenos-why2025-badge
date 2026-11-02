@@ -238,7 +238,7 @@ static FRESULT make_fat(void) {
     // FM_ANY never means exFAT here: FF_FS_EXFAT is 0 in IDF's ffconf.h, so a big card gets FAT32
     MKFS_PARM const opt = {.fmt = FM_ANY, .n_fat = 2, .align = 0, .n_root = 0, .au_size = 0};
     f_mount(NULL, drv, 0); // f_mkfs invalidates whatever FatFs has registered for this volume: make sure it is nothing
-    ESP_LOGW(TAG, "formatting the card");
+    ESP_LOGI(TAG, "formatting the card");
     FRESULT res = f_mkfs(drv, &opt, work, SD_MKFS_WORK);
     heap_caps_free(work);
     return res;
@@ -324,10 +324,14 @@ static bool mount_locked(bool format) {
     sd_info(&now);
     char line[128];
     sd_status_line(&now, line, sizeof(line));
+    // No card or a mounted one is normal; a card that is there but unusable is not (#113)
+    bool normal = plan.state == SD_STATE_MOUNTED || plan.state == SD_STATE_NO_CARD || plan.state == SD_STATE_OFF;
+    esp_log_level_t level = normal ? ESP_LOG_INFO : ESP_LOG_WARN;
     if (plan.state == SD_STATE_NO_CARD) {
-        ESP_LOGW(TAG, "%s [%s]", line, reason); // the reason tells "no card" from a card that does not answer
+        // the reason tells "no card" from a card that does not answer
+        ESP_LOG_LEVEL(level, TAG, "%s [%s]", line, reason);
     } else {
-        ESP_LOGW(TAG, "%s", line);
+        ESP_LOG_LEVEL(level, TAG, "%s", line);
     }
     return plan.state == SD_STATE_MOUNTED;
 }
@@ -347,7 +351,7 @@ bool sd_mount(void) {
 
 void sd_unmount(void) {
     if (!take(SD_LOCK_WAIT_MS)) {
-        ESP_LOGE(TAG, "unmount: the card stays busy");
+        ESP_LOGW(TAG, "unmount: the card stays busy");
         return;
     }
     portENTER_CRITICAL(&info_lock); // readers never see MOUNTED once mounted is false
@@ -386,7 +390,7 @@ bool sd_begin(uint32_t wait_ms) {
 
 void sd_end(sd_io_t result) {
     if (sd_policy_io(&io, result)) {
-        ESP_LOGW(TAG, "%d failed batches in a row: unmounting the card", SD_IO_ERRORS_TO_UNMOUNT);
+        ESP_LOGE(TAG, "%d failed batches in a row: unmounting the card", SD_IO_ERRORS_TO_UNMOUNT);
         portENTER_CRITICAL(&info_lock);
         info.state      = SD_STATE_REMOVED;
         info.io_errors  = io.total;

@@ -85,7 +85,7 @@ static uint32_t now_ms(void) {
 
 static void post(sup_msg_t const *m) {
     if (!sup_queue || xQueueSend(sup_queue, m, 0) != pdTRUE) {
-        ESP_LOGE(TAG, "queue full: message %u dropped", (unsigned)m->type);
+        ESP_LOGW(TAG, "queue full: message %u dropped", (unsigned)m->type);
     }
 }
 
@@ -255,7 +255,11 @@ static void go_down(void) {
     }
     // ESP-Hosted must not be deinitialised under an esp_wifi call in flight: wait once more before going on anyway
     if (!c6link_wifi_request(false, WIFI_WAIT_MS) && !c6link_wifi_request(false, WIFI_WAIT_MS)) {
-        ESP_LOGE(TAG, "the Wi-Fi task did not take the driver down in %d s, re-attaching anyway", 2 * WIFI_WAIT_MS / 1000);
+        ESP_LOGW(
+            TAG,
+            "the Wi-Fi task did not take the driver down in %d s, re-attaching anyway",
+            2 * WIFI_WAIT_MS / 1000
+        );
     }
 }
 
@@ -265,7 +269,7 @@ static void set_boot_strap(void) {
     if (left > 0) {
         atomic_store(&rom_attempts, left - 1);
         hold_c6_boot(0);
-        ESP_LOGW(TAG, "fw c6 reset rom: this attempt with GPIO13 low (%d more)", left - 1);
+        ESP_LOGI(TAG, "fw c6 reset rom: this attempt with GPIO13 low (%d more)", left - 1);
     } else {
         hold_c6_boot(1);
     }
@@ -278,26 +282,35 @@ static unsigned do_reattach(void) {
     atomic_store(&hosted_quiet, true);
     // One line per step: a step that blocks for good (bench 2026-11-01, second attempt against a C6 in its ROM) is
     // then named by the last line in the console
-    ESP_LOGW(TAG, "re-attach: esp_hosted deinit");
+    ESP_LOGI(TAG, "re-attach: esp_hosted deinit");
     // deinit and init remove and re-add SDMMC slot 1 on the controller the SD card shares (#60): under its lock, which
     // is never held across the connect below
     board_sdmmc_lock(UINT32_MAX);
     int d = esp_hosted_deinit();
     board_sdmmc_unlock();
     set_boot_strap();
-    ESP_LOGW(TAG, "re-attach: esp_hosted init (deinit %d, %u ms)", d, (unsigned)(now_ms() - t0));
+    ESP_LOGI(TAG, "re-attach: esp_hosted init (deinit %d, %u ms)", d, (unsigned)(now_ms() - t0));
     board_sdmmc_lock(UINT32_MAX);
     int i = esp_hosted_init();
     board_sdmmc_unlock();
-    ESP_LOGW(TAG, "re-attach: connect to slave (init %d, %u ms)", i, (unsigned)(now_ms() - t0));
+    ESP_LOGI(TAG, "re-attach: connect to slave (init %d, %u ms)", i, (unsigned)(now_ms() - t0));
     int  c  = i == 0 ? esp_hosted_connect_to_slave() : -1;
     bool ok = i == 0 && c == 0;
     portENTER_CRITICAL(&watch_lock);
     unsigned attempt = watch.attempt;
     unsigned act     = c6_watch_attached(&watch, ok, outage_uptime, now_ms());
     portEXIT_CRITICAL(&watch_lock);
-    ESP_LOGW(TAG, "re-attach attempt %u: %s (deinit %d, init %d, connect %d, %u ms)", attempt, ok ? "ok" : "failed", d,
-             i, c, (unsigned)(now_ms() - t0));
+    ESP_LOG_LEVEL(
+        ok ? ESP_LOG_INFO : ESP_LOG_WARN,
+        TAG,
+        "re-attach attempt %u: %s (deinit %d, init %d, connect %d, %u ms)",
+        attempt,
+        ok ? "ok" : "failed",
+        d,
+        i,
+        c,
+        (unsigned)(now_ms() - t0)
+    );
     return act;
 }
 
@@ -320,7 +333,7 @@ static void go_up(void) {
         if (hooks.ask_cancel) {
             hooks.ask_cancel();
         }
-        ESP_LOGW(TAG, "the C6 is back: restart question withdrawn");
+        ESP_LOGI(TAG, "the C6 is back: restart question withdrawn");
     }
 }
 
@@ -338,8 +351,12 @@ static void note(void) {
     snprintf(why, sizeof(why), "C6 restarted: %s", reason);
     system_restart_note(why); // NVS history: fw crash shows it after a later reboot too (cut to its line length)
     notify_c6_event(why);
-    ESP_LOGW(TAG, "stack free: c6sup %u, c6wifi %u", (unsigned)uxTaskGetStackHighWaterMark(sup_handle),
-             c6link_wifi_stack_free());
+    ESP_LOGI(
+        TAG,
+        "stack free: c6sup %u, c6wifi %u",
+        (unsigned)uxTaskGetStackHighWaterMark(sup_handle),
+        c6link_wifi_stack_free()
+    );
 }
 
 static void restart_for_c6(char const *why) __attribute__((noreturn));
@@ -393,7 +410,7 @@ static void answer(bool restart) {
     }
     asking = false;
     if (up) {
-        ESP_LOGW(TAG, "the C6 is back: no restart");
+        ESP_LOGI(TAG, "the C6 is back: no restart");
     } else if (restart) {
         restart_for_c6("C6 lost at runtime");
     } else {
@@ -445,7 +462,7 @@ static void rt_flag_tick(void) {
         nvs_commit(nvs);
         nvs_close(nvs);
     }
-    ESP_LOGW(TAG, "C6 up for %u min: %s cleared", (unsigned)(C6W_RT_FLAG_CLEAR_MS / 60000), KEY_RT_RESTART);
+    ESP_LOGI(TAG, "C6 up for %u min: %s cleared", (unsigned)(C6W_RT_FLAG_CLEAR_MS / 60000), KEY_RT_RESTART);
 }
 
 // A trial image becomes valid a minute or so after boot: from then on a lost C6 may offer the restart again
@@ -538,7 +555,7 @@ static void reset_pulse(void *arg) {
     portEXIT_CRITICAL(&watch_lock);
     atomic_store(&rom_attempts, rom ? ROM_ATTEMPTS : 0);
     hold_c6_boot(rom ? 0 : 1);
-    ESP_LOGW(TAG, "fw c6 reset%s: C6 EN low for %d ms", rom ? " rom" : "", RESET_PULSE_US / 1000);
+    ESP_LOGI(TAG, "fw c6 reset%s: C6 EN low for %d ms", rom ? " rom" : "", RESET_PULSE_US / 1000);
     gpio_set_level(GPIO_NUM_12, 0);
     esp_rom_delay_us(RESET_PULSE_US);
     gpio_set_level(GPIO_NUM_12, 1);

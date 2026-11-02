@@ -91,7 +91,7 @@ void ota_server_set_enabled(bool on) {
     }
     server_on = on;
     settings_set_u8(OTA_WIFI_KEY, on ? 1 : 0);
-    ESP_LOGW(TAG, "update server over Wi-Fi switched %s", on ? "on" : "off");
+    ESP_LOGI(TAG, "update server over Wi-Fi switched %s", on ? "on" : "off");
 }
 
 uint8_t ota_server_auto_off(void) {
@@ -102,7 +102,7 @@ void ota_server_set_auto_off(uint8_t minutes) {
     armed_s  = (uint32_t)now_s(); // a new time counts from now, not from boot
     auto_min = minutes;
     settings_set_u8(OTA_AUTO_KEY, minutes);
-    ESP_LOGW(TAG, "update server auto-off: %u min (0 = never)", (unsigned)minutes);
+    ESP_LOGI(TAG, "update server auto-off: %u min (0 = never)", (unsigned)minutes);
 }
 
 bool ota_server_auto_closed(void) {
@@ -427,7 +427,7 @@ static bool finish_file(int fd, char const *vms, uint8_t const *data, size_t len
     if (had_old) {
         unlink(backup);
     }
-    ESP_LOGW(TAG, "wrote %s (%zu bytes)", path, len);
+    ESP_LOGI(TAG, "wrote %s (%zu bytes)", path, len);
     respond(fd, 200, "wrote %zu bytes (%lld sent) to %s", len, sent, vms);
     return true;
 }
@@ -443,7 +443,7 @@ static bool install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t h
         respond(fd, 500, "couldn't select %s (%s)", slot->label, esp_err_to_name(err));
         return false;
     }
-    ESP_LOGW(TAG, "firmware installed in %s (%zu bytes)", slot->label, len);
+    ESP_LOGI(TAG, "firmware installed in %s (%zu bytes)", slot->label, len);
     respond(fd, 200, "installed %zu bytes (%lld sent), runs after a reboot", len, sent);
     firmware_installed = true;
     return true;
@@ -516,7 +516,7 @@ static bool finish_assets(int fd, uint8_t const *data, size_t len, long long sen
                 esp_err_to_name(err));
         return false;
     }
-    ESP_LOGW(TAG, "assets written (%zu bytes, %u files)", len, (unsigned)view.count);
+    ESP_LOGI(TAG, "assets written (%zu bytes, %u files)", len, (unsigned)view.count);
     respond(fd, 200, "wrote %zu bytes (%lld sent), %u files, used after a reboot", len, sent, (unsigned)view.count);
     return true;
 }
@@ -671,8 +671,11 @@ static void autooff_check(void) {
     if (server_on && ota_autooff_due(auto_min, armed_s, (uint32_t)now_s(), staged.active)) {
         server_on   = false; // this boot only: the saved setting stays on
         auto_closed = true;
-        ESP_LOGW(TAG, "update server closed by its %u min auto-off (Settings or \"fw ota on\" opens it again)",
-                 (unsigned)auto_min);
+        ESP_LOGI(
+            TAG,
+            "update server closed by its %u min auto-off (Settings or \"fw ota on\" opens it again)",
+            (unsigned)auto_min
+        );
     }
 }
 
@@ -1317,7 +1320,7 @@ static void serve(int ls) {
         }
         close(fd);
         if (reboot) {
-            ESP_LOGW(TAG, "reboot requested over Wi-Fi");
+            ESP_LOGI(TAG, "reboot requested over Wi-Fi");
             vTaskDelay(pdMS_TO_TICKS(300));
             system_restart("ota reboot over Wi-Fi");
         }
@@ -1337,11 +1340,11 @@ static void server_task(void *arg) {
             vTaskDelay(pdMS_TO_TICKS(5000));
             continue;
         }
-        ESP_LOGW(TAG, "update server on port %d", OTA_PORT);
+        ESP_LOGI(TAG, "update server on port %d", OTA_PORT);
         serve(ls);
         close(ls);
         piece_expire(true); // switched off half-way through an upload
-        ESP_LOGW(TAG, "update server closed");
+        ESP_LOGI(TAG, "update server closed");
     }
 }
 

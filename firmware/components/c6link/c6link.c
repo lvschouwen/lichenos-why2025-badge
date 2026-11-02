@@ -191,7 +191,7 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
         char                     text[16];
         snprintf(text, sizeof(text), IPSTR, IP2STR(&got->ip_info.ip));
         set_ip(text);
-        ESP_LOGW(TAG, "wifi: got ip:%s", text);
+        ESP_LOGI(TAG, "wifi: got ip:%s", text);
         m.type = MSG_GOT_IP;
         post(&m);
     }
@@ -228,7 +228,7 @@ static bool load_credentials(wifi_config_t *cfg) {
 }
 
 static void on_time_sync(struct timeval *tv) {
-    ESP_LOGW(TAG, "clock set from SNTP: %lld", (long long)tv->tv_sec);
+    ESP_LOGI(TAG, "clock set from SNTP: %lld", (long long)tv->tv_sec);
     boot_progress_end(BOOT_CLOCK, STEP_DONE, NULL);
 }
 
@@ -244,8 +244,12 @@ void sntp_sync_time(struct timeval *tv) {
     if (v == CLOCK_RECOVERED) {
         ESP_LOGW(TAG, "SNTP: %s, clock moved", clock_verdict_text(v));
     }
-    ESP_LOGW(TAG, "SNTP step %+lld ms after %lld s uptime", (long long)info.step_ms,
-             (long long)(info.step_mono_ms / 1000));
+    ESP_LOGI(
+        TAG,
+        "SNTP step %+lld ms after %lld s uptime",
+        (long long)info.step_ms,
+        (long long)(info.step_mono_ms / 1000)
+    );
     sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
     on_time_sync(tv);
 }
@@ -360,11 +364,11 @@ static drv_result_t wifi_driver_up(char const **why) {
         if (have) {
             esp_wifi_set_config(WIFI_IF_STA, &cfg);
         }
-        ESP_LOGW(TAG, "Wi-Fi is switched off");
+        ESP_LOGI(TAG, "Wi-Fi is switched off");
         return DRV_OFF;
     }
     if (!have) {
-        ESP_LOGW(TAG, "no Wi-Fi credentials, set them in Settings or with: fw wifi <ssid> <password>");
+        ESP_LOGI(TAG, "no Wi-Fi credentials, set them in Settings or with: fw wifi <ssid> <password>");
         // The radio still starts (without connecting) so that the badge can scan and join from Settings.
         // driver_up goes true BEFORE esp_wifi_start: STA_START is handled by the c6wifi task (prio 5) before the
         // boot task gets back from esp_wifi_start, and MSG_CONNECT is dropped while driver_up is false
@@ -595,7 +599,7 @@ static void handle_got_ip(void) {
     if (act == JOIN_ACT_COMMIT) {
         // Only a pair that works is saved: until now NVS held the previous one
         if (!wifi_cred_save(trial_ssid, trial_pass)) {
-            ESP_LOGW(TAG, "wifi: joined, but saving the credentials failed");
+            ESP_LOGE(TAG, "wifi: joined, but saving the credentials failed");
         }
         memset(trial_pass, 0, sizeof(trial_pass));
     } else if (trial && ev == JOIN_EV_GOT_IP_OTHER) {
@@ -687,7 +691,7 @@ static void handle_c6_down(void) {
     esp_netif_action_disconnected(sta_netif, NULL, 0, NULL);
     esp_netif_action_stop(sta_netif, NULL, 0, NULL);
     esp_err_t gone = esp_wifi_deinit();
-    ESP_LOGW(TAG, "wifi: down for the C6 re-attach (stop %s, deinit %s)", esp_err_to_name(stop), esp_err_to_name(gone));
+    ESP_LOGI(TAG, "wifi: down for the C6 re-attach (stop %s, deinit %s)", esp_err_to_name(stop), esp_err_to_name(gone));
     if (scan_held) {
         xSemaphoreGive(scan_lock); // wifi_scan refuses on its own while link_up is false
     }
@@ -706,7 +710,15 @@ static void handle_c6_up(void) {
         esp_wifi_deinit();
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
-    ESP_LOGW(TAG, "wifi: %s after the C6 re-attach", r == DRV_FAILED ? why : r == DRV_OFF ? "ready, switched off" : r == DRV_NO_CREDENTIALS ? "started, no network saved" : "started");
+    ESP_LOG_LEVEL(
+        r == DRV_FAILED ? ESP_LOG_ERROR : ESP_LOG_INFO,
+        TAG,
+        "wifi: %s after the C6 re-attach",
+        r == DRV_FAILED           ? why
+        : r == DRV_OFF            ? "ready, switched off"
+        : r == DRV_NO_CREDENTIALS ? "started, no network saved"
+                                  : "started"
+    );
 }
 
 // Wi-Fi switched off or on (#108). Off stops the radio on a live C6 (stop, not deinit: the next start is quick and the
@@ -725,7 +737,12 @@ static void handle_wifi_sync(void) {
         esp_err_t err = esp_wifi_start();
         atomic_store(&wifi_started, err == ESP_OK);
         atomic_store(&driver_up, err == ESP_OK);
-        ESP_LOGW(TAG, "wifi: switched on (%s)", esp_err_to_name(err));
+        ESP_LOG_LEVEL(
+            err == ESP_OK ? ESP_LOG_INFO : ESP_LOG_ERROR,
+            TAG,
+            "wifi: switched on (%s)",
+            esp_err_to_name(err)
+        );
         return;
     }
     bool scan_held = scan_lock && xSemaphoreTake(scan_lock, pdMS_TO_TICKS(SCAN_WAIT_MS + 2000)) == pdTRUE;
@@ -736,7 +753,7 @@ static void handle_wifi_sync(void) {
     abort_trial();
     esp_err_t stop = esp_wifi_stop();
     atomic_store(&wifi_started, false);
-    ESP_LOGW(TAG, "wifi: switched off (%s)", esp_err_to_name(stop));
+    ESP_LOGI(TAG, "wifi: switched off (%s)", esp_err_to_name(stop));
     if (scan_held) {
         xSemaphoreGive(scan_lock);
     }
@@ -1089,7 +1106,13 @@ static c6_ident_t check_ident(void) {
     bool    answered      = ident_fn && ident_fn(running, C6_IDENT_WAIT_MS);
     boot_info.ident_ms    = (uint32_t)((esp_timer_get_time() - t0) / 1000);
     c6_ident_t r          = c6_ident_check(answered ? running : NULL, have_expected ? expected : NULL);
-    ESP_LOGW(TAG, "C6 IDENT %s after %u ms", c6_ident_name(r), (unsigned)boot_info.ident_ms);
+    ESP_LOG_LEVEL(
+        r == C6_IDENT_MATCH ? ESP_LOG_INFO : ESP_LOG_WARN,
+        TAG,
+        "C6 IDENT %s after %u ms",
+        c6_ident_name(r),
+        (unsigned)boot_info.ident_ms
+    );
     return r;
 }
 
@@ -1222,13 +1245,13 @@ bool c6link_start(void) {
     bool      full = plan_full_check(force, key, sizeof(key));
     esp_err_t err  = ESP_OK;
     if (full) {
-        ESP_LOGW(TAG, "C6 flasher check runs (%s)", boot_info.why);
+        ESP_LOGI(TAG, "C6 flasher check runs (%s)", boot_info.why);
         err = flash_c6_if_needed(force);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "C6 image check: %s (going on with what the C6 has)", esp_err_to_name(err));
         }
     } else {
-        ESP_LOGW(TAG, "C6 bundle unchanged, ROM check skipped (SW reset)");
+        ESP_LOGI(TAG, "C6 bundle unchanged, ROM check skipped (SW reset)");
     }
     // The C6 was reset into its application by the flasher; only now may ESP-Hosted talk to it
     hold_c6_boot(1);
@@ -1263,7 +1286,7 @@ bool c6link_start(void) {
     atomic_store(&link_up, true);
     c6_sup_attached(); // from now on c6sup notices a C6 reset and recovers from it (#14)
     boot_info.c6_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
-    ESP_LOGW(TAG, "C6 step %s: %u ms", boot_info.plan, (unsigned)boot_info.c6_ms);
+    ESP_LOGI(TAG, "C6 step %s: %u ms", boot_info.plan, (unsigned)boot_info.c6_ms);
     char note[BOOT_REASON_LEN];
     char const *how = !full ? "check skipped, " : err != ESP_OK ? "image check failed, " : ""; // a skip has no err
     snprintf(note, sizeof(note), "%s%s%u ms", how, ident_ok ? "" : "not proven, ", (unsigned)boot_info.c6_ms);

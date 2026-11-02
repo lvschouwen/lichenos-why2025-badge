@@ -21,11 +21,11 @@ static bool image_matches(esp_loader_t *loader, partition_attr_t const *image) {
 // Flash one image unless the C6 already holds it. Returns false if flashing was needed and failed.
 static bool flash_if_changed(esp_loader_t *loader, partition_attr_t const *image, char const *what, bool matches) {
     if (matches) {
-        ESP_LOGW(TAG, "%s MD5 match, skipping...", what);
+        ESP_LOGI(TAG, "%s MD5 match, skipping...", what);
         return true;
     }
 
-    ESP_LOGW(TAG, "%s MD5 mismatch, flashing...", what);
+    ESP_LOGI(TAG, "%s MD5 mismatch, flashing...", what);
     if (flash_binary(loader, image->fp, image->size, image->addr) != ESP_LOADER_SUCCESS) {
         ESP_LOGE(TAG, "Flashing %s failed", what);
         return false;
@@ -45,7 +45,7 @@ static bool reset_ota_selection(esp_loader_t *loader, c6_binaries_t *bin) {
         return true;
     }
 
-    ESP_LOGW(TAG, "Erasing otadata at 0x%" PRIx32 " (%" PRIu32 " bytes)", offset, size);
+    ESP_LOGI(TAG, "Erasing otadata at 0x%" PRIx32 " (%" PRIu32 " bytes)", offset, size);
     if (esp_loader_flash_erase_region(loader, offset, size) != ESP_LOADER_SUCCESS) {
         ESP_LOGE(TAG, "Erasing otadata failed");
         return false;
@@ -103,7 +103,7 @@ esp_err_t flash_c6_if_needed(bool force) {
     }
 
     target_chip_t target = esp_loader_get_target(&loader);
-    ESP_LOGW(TAG, "Target = %d", target);
+    ESP_LOGI(TAG, "Target = %d", target);
     if (target != ESP32C6_CHIP) {
         ESP_LOGE(TAG, "wrong target, expecting ESP32C6_CHIP");
         ret = ESP_ERR_INVALID_RESPONSE;
@@ -111,11 +111,11 @@ esp_err_t flash_c6_if_needed(bool force) {
         ret = ESP_FAIL;
     }
 
-    ESP_LOGW(TAG, "Resetting C6!");
+    ESP_LOGI(TAG, "Resetting C6!");
     esp_loader_reset_target(&loader);
 
 out:
-    ESP_LOGW(TAG, "Done (%s)", esp_err_to_name(ret));
+    ESP_LOG_LEVEL(ret == ESP_OK ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "Done (%s)", esp_err_to_name(ret));
     free_c6_binaries(&bin);
     esp_loader_deinit(&loader);
     return ret;
@@ -142,7 +142,7 @@ void c6_log_console(uint32_t duration_ms) {
         uart_set_pin(UART_NUM_1, GPIO_NUM_16, GPIO_NUM_15, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     }
 
-    ESP_LOGW(TAG, "C6 console for %" PRIu32 " ms:", duration_ms);
+    ESP_LOGI(TAG, "C6 console for %" PRIu32 " ms:", duration_ms);
     char    line[160];
     size_t  len      = 0;
     int64_t deadline = esp_timer_get_time() + (int64_t)duration_ms * 1000;
@@ -154,7 +154,7 @@ void c6_log_console(uint32_t duration_ms) {
             if (c == '\n' || len == sizeof(line) - 1) {
                 line[len] = '\0';
                 if (len) {
-                    ESP_LOGW("c6", "%s", line);
+                    ESP_LOGI("c6", "%s", line);
                 }
                 len = 0;
             } else if (c >= 0x20 && c < 0x7F) {
@@ -164,7 +164,7 @@ void c6_log_console(uint32_t duration_ms) {
     }
     if (len) {
         line[len] = '\0';
-        ESP_LOGW("c6", "%s", line);
+        ESP_LOGI("c6", "%s", line);
     }
     if (open_here) {
         uart_driver_delete(UART_NUM_1);

@@ -228,7 +228,7 @@ static void note_result(tca8418_dev_t *tca8418_dev, bool write, uint8_t reg, esp
     uint32_t fails = 0;
     if (err == ESP_OK) {
         if (tca8418_warn_ok(&tca8418_dev->warn, &fails) == TCA8418_WARN_BACK) {
-            ESP_LOGW(TAG, "I2C back after %u failed transfers", (unsigned)fails);
+            ESP_LOGI(TAG, "I2C back after %u failed transfers", (unsigned)fails);
         }
         return;
     }

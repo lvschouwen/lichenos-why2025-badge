@@ -62,7 +62,7 @@ static void cmd_set(char const *a) {
         return;
     }
     if (force) {
-        ESP_LOGW("clock", "fw clock set --force: judged as if SNTP had not set the clock this boot (bench only)");
+        ESP_LOGI("clock", "fw clock set --force: judged as if SNTP had not set the clock this boot (bench only)");
     }
     int64_t         before = (int64_t)time(NULL);
     struct timeval  tv     = {.tv_sec = (time_t)t};

@@ -381,7 +381,7 @@ static void push_restart_line(char const *why, uint32_t caller) {
     char line[RESTART_LINE_MAX];
     restart_line_format(line, sizeof(line), when_p, esp_app_get_description()->version, (uint32_t)(esp_timer_get_time() / 1000000),
                         why, caller);
-    ESP_LOGW(TAG, "restart: %s", line);
+    ESP_LOGI(TAG, "restart: %s", line);
     restart_log_t *log = malloc(sizeof(*log));
     if (!log) {
         return;

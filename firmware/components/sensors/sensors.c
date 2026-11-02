@@ -71,7 +71,7 @@ static void chip_init(chip_t *c, i2c_master_bus_handle_t bus, int64_t now) {
     }
     if (ok) {
         if (c->warned) {
-            ESP_LOGW(TAG, "%s (0x%02x) is back", c->name, c->addr);
+            ESP_LOGI(TAG, "%s (0x%02x) is back", c->name, c->addr);
         }
         c->warned = false;
         return;
@@ -154,7 +154,7 @@ static void sample_imu(int64_t now) {
 static void log_stack(void) {
     if (!stack_logged) {
         stack_logged = true;
-        ESP_LOGW(
+        ESP_LOGI(
             TAG,
             "task stack: %u of %d B never used",
             (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)),
@@ -320,7 +320,7 @@ void lichen_sensors_start(void) {
     }
     // Internal RAM stack: a PSRAM stack would stall whenever flash is written (cache off)
     if (xTaskCreatePinnedToCore(sensors_task, "sensors", STACK_BYTES, NULL, PRIORITY, &task, 0) != pdPASS) {
-        ESP_LOGW(TAG, "sensors task not started");
+        ESP_LOGE(TAG, "sensors task not started");
         atomic_store(&created, false);
         atomic_store(&want_run, false);
     }

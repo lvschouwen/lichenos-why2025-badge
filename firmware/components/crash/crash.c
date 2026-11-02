@@ -425,11 +425,12 @@ void crash_check(void) {
     esp_reset_reason_t const why    = esp_reset_reason();
     crash_reset_t const      reason = crash_reset_of(why);
     s_reset_reason = (int)why;
-    ESP_LOGW(TAG, "reset reason %d (%s)", (int)why, reason_name(reason));
+    ESP_LOGI(TAG, "reset reason %d (%s)", (int)why, reason_name(reason));
     restart_log_t *rl = malloc(sizeof(*rl));
     if (rl) {
         if (system_restart_history(rl) > 0) {
-            ESP_LOGW(TAG, "restart: newest recorded: %s", rl->line[0]); // matches this boot when the reset reason is 3 (SW)
+            // matches this boot when the reset reason is 3 (SW)
+            ESP_LOGI(TAG, "restart: newest recorded: %s", rl->line[0]);
         }
         free(rl);
     }

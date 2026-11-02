@@ -49,7 +49,7 @@ bool assets_mount(void) {
         return false;
     }
     snprintf(status, sizeof(status), "%u files, %u KB", (unsigned)view.count, (unsigned)(view.total_len / 1024));
-    ESP_LOGW(TAG, "%s", status);
+    ESP_LOGI(TAG, "%s", status);
     return true;
 }
 

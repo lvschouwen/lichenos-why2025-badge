@@ -53,7 +53,13 @@ bool factory_reset_request(factory_level_t level) {
     }
     bool ok = nvs_set_u8(nvs, FACTORY_PENDING_KEY, (uint8_t)level) == ESP_OK && nvs_commit(nvs) == ESP_OK;
     nvs_close(nvs);
-    ESP_LOGW(TAG, "factory reset (%s) %s for the next boot", factory_level_name(level), ok ? "saved" : "NOT saved");
+    ESP_LOG_LEVEL(
+        ok ? ESP_LOG_INFO : ESP_LOG_ERROR,
+        TAG,
+        "factory reset (%s) %s for the next boot",
+        factory_level_name(level),
+        ok ? "saved" : "NOT saved"
+    );
     return ok;
 }
 
@@ -146,8 +152,14 @@ static void nvs_wipe_keys(factory_level_t level) {
         }
     }
     free(batch);
-    ESP_LOGW(TAG, "NVS reset (%s): %u entries erased%s", factory_level_name(level), erased,
-             failed ? ", some failed" : "");
+    ESP_LOG_LEVEL(
+        failed ? ESP_LOG_WARN : ESP_LOG_INFO,
+        TAG,
+        "NVS reset (%s): %u entries erased%s",
+        factory_level_name(level),
+        erased,
+        failed ? ", some failed" : ""
+    );
 }
 
 // ---- NVS, everything: the whole partition, the kept entries written back -------------------------------------------
@@ -284,7 +296,7 @@ static void nvs_wipe_full(uint8_t after) {
     }
     free(kept);
     if (erased) {
-        ESP_LOGW(TAG, "nvs partition erased, %u of %u kept entries written back", back, (unsigned)n);
+        ESP_LOGI(TAG, "nvs partition erased, %u of %u kept entries written back", back, (unsigned)n);
     }
 }
 
@@ -292,7 +304,7 @@ void factory_reset_boot_nvs(void) {
     uint8_t        pending = pending_get();
     factory_boot_t plan    = factory_boot_plan(pending);
     if (plan.nvs) {
-        ESP_LOGW(TAG, "factory reset (%s): erasing NVS", factory_level_name(plan.level));
+        ESP_LOGI(TAG, "factory reset (%s): erasing NVS", factory_level_name(plan.level));
         if (plan.nvs_full) {
             nvs_wipe_full(plan.after_nvs);
         } else {
@@ -424,8 +436,14 @@ static void write_back(staged_t const *s, size_t n) {
         }
     }
     esp_vfs_fat_spiflash_unmount_rw_wl(STORAGE_BASE, wl);
-    ESP_LOGW(TAG, "%u of %u kept files written back%s", written, (unsigned)n,
-             images_ok ? "" : " (C6 bundle incomplete: .md5 files left out)");
+    ESP_LOG_LEVEL(
+        images_ok ? ESP_LOG_INFO : ESP_LOG_WARN,
+        TAG,
+        "%u of %u kept files written back%s",
+        written,
+        (unsigned)n,
+        images_ok ? "" : " (C6 bundle incomplete: .md5 files left out)"
+    );
 }
 
 static bool is_dir(char const *path) {
@@ -520,9 +538,9 @@ void factory_reset_boot_storage(void) {
     }
     // From here the PSRAM copy is the only one: a power cut means erase again, without it
     if (!pending_set(FACTORY_PENDING_ERASING)) {
-        ESP_LOGE(TAG, "pending state not saved: erasing anyway");
+        ESP_LOGW(TAG, "pending state not saved: erasing anyway");
     }
-    ESP_LOGW(TAG, "factory reset (all): erasing the %s partition (%u files kept in PSRAM)", STORAGE_PART, (unsigned)n);
+    ESP_LOGI(TAG, "factory reset (all): erasing the %s partition (%u files kept in PSRAM)", STORAGE_PART, (unsigned)n);
     bool erased = erase_partition();
     if (erased) {
         esp_vfs_fat_mount_config_t cfg = MOUNT_CFG;
@@ -546,7 +564,7 @@ void factory_reset_boot_storage(void) {
     carry                 = 0;
     notice_storage_failed = next.notice;
     if (erased) {
-        ESP_LOGW(TAG, "factory reset (all): %s erased from flash", STORAGE_BASE);
+        ESP_LOGI(TAG, "factory reset (all): %s erased from flash", STORAGE_BASE);
     } else if (next.pending) {
         ESP_LOGE(TAG, "factory reset (all): %s not erased from flash, try %u of %u on the next boot", STORAGE_BASE,
                  (unsigned)next.tries + 1, (unsigned)FACTORY_STORAGE_TRIES);

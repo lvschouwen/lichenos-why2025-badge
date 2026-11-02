@@ -195,7 +195,8 @@ bool display_start(lv_display_t **out) {
     lcd_panel = panel;
     void *fb = NULL;
     if (esp_lcd_dpi_panel_get_frame_buffer(panel, 1, &fb) == ESP_OK) {
-        ESP_LOGW(TAG, "panel framebuffer %p, %u KB", fb, (unsigned)(LCD_H_RES * LCD_V_RES * 2 >> 10)); // #86: who owns what in PSRAM
+        // #86: who owns what in PSRAM
+        ESP_LOGI(TAG, "panel framebuffer %p, %u KB", fb, (unsigned)(LCD_H_RES * LCD_V_RES * 2 >> 10));
     }
 
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
@@ -238,7 +239,7 @@ bool display_start(lv_display_t **out) {
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH
     if (direct) {
         lv_display_set_flush_cb(*out, flush_direct);
-        ESP_LOGW(TAG, "direct flush (%s) into the frame buffer", DIRECT_FLUSH_ENGINE);
+        ESP_LOGI(TAG, "direct flush (%s) into the frame buffer", DIRECT_FLUSH_ENGINE);
     }
 #endif
     lv_display_set_rotation(*out, LV_DISPLAY_ROTATION_90);

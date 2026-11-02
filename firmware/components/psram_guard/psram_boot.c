@@ -162,13 +162,28 @@ void psram_boot_check(void) {
     psram_tuning_format(text, sizeof(text), &s_tuning);
     uint8_t ph, dqs, data;
     tuning_regs(&ph, &dqs, &data);
-    ESP_LOGW(TAG, "tuning: %s", text);
-    ESP_LOGW(TAG, "tuning regs: phase id %u, dqs delay %u, data delay %u", ph, dqs, data);
+    ESP_LOGI(TAG, "tuning: %s", text);
+    ESP_LOGI(TAG, "tuning regs: phase id %u, dqs delay %u, data delay %u", ph, dqs, data);
     dense_check();
     s_bad = psram_boot_verdict(&s_tuning, s_verify.bad_bytes, s_why, sizeof(s_why));
-    ESP_LOGW(TAG, "boot check: %u KB dense at %p (pattern + inverted), %u bad bytes (pattern %u, inverted %u; %u single-bit words, first +%u), %u ms; same block again: %u bad: %s%s%s",
-             (unsigned)(s_verify.bytes >> 10), s_check_addr, (unsigned)s_verify.bad_bytes, (unsigned)s_verify.bad_plain, (unsigned)s_verify.bad_inv, (unsigned)s_verify.bit_flips,
-             (unsigned)s_verify.first_bad, (unsigned)(s_verify.us / 1000), (unsigned)s_repeat.bad_bytes, s_bad ? "BAD (" : "ok", s_bad ? s_why : "", s_bad ? ")" : "");
+    ESP_LOG_LEVEL(
+        s_bad ? ESP_LOG_WARN : ESP_LOG_INFO,
+        TAG,
+        "boot check: %u KB dense at %p (pattern + inverted), %u bad bytes (pattern %u, inverted %u; %u single-bit "
+        "words, first +%u), %u ms; same block again: %u bad: %s%s%s",
+        (unsigned)(s_verify.bytes >> 10),
+        s_check_addr,
+        (unsigned)s_verify.bad_bytes,
+        (unsigned)s_verify.bad_plain,
+        (unsigned)s_verify.bad_inv,
+        (unsigned)s_verify.bit_flips,
+        (unsigned)s_verify.first_bad,
+        (unsigned)(s_verify.us / 1000),
+        (unsigned)s_repeat.bad_bytes,
+        s_bad ? "BAD (" : "ok",
+        s_bad ? s_why : "",
+        s_bad ? ")" : ""
+    );
 }
 
 static uint32_t wall_s(void) {

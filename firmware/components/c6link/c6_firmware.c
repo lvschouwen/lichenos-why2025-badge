@@ -262,32 +262,34 @@ esp_loader_error_t connect_to_target_with_stub(
 
     esp_loader_error_t err = esp_loader_connect_with_stub(loader, &connect_config);
     if (err != ESP_LOADER_SUCCESS) {
-        printf("Cannot connect to target. Error: %s\n", get_error_string(err));
-
-        if (err == ESP_LOADER_ERROR_TIMEOUT) {
-            printf("Check if the host and the target are properly connected.\n");
-        } else if (err == ESP_LOADER_ERROR_INVALID_TARGET) {
-            printf("You could be using an unsupported chip, or chip revision.\n");
-        } else if (err == ESP_LOADER_ERROR_INVALID_RESPONSE) {
-            printf("Try lowering the transmission rate or using shorter wires to connect the host and the target.\n");
-        }
+        char const *hint =
+            err == ESP_LOADER_ERROR_TIMEOUT          ? " Check if the host and the target are properly connected."
+            : err == ESP_LOADER_ERROR_INVALID_TARGET ? " You could be using an unsupported chip, or chip revision."
+            : err == ESP_LOADER_ERROR_INVALID_RESPONSE
+                ? " Try lowering the transmission rate or using shorter wires to connect the host and the target."
+                : "";
+        ESP_LOGE(TAG, "Cannot connect to target. Error: %s.%s", get_error_string(err), hint);
 
         // Don't leave the C6 sitting in its ROM bootloader
         esp_loader_reset_target(loader);
         return err;
     }
-    printf("Connected to target\n");
+    ESP_LOGI(TAG, "Connected to target");
 
     if (higher_transmission_rate != current_transmission_rate) {
         // Changes the rate on the target and then on our UART
         err = esp_loader_change_transmission_rate(loader, higher_transmission_rate);
         if (err != ESP_LOADER_SUCCESS) {
-            printf("Unable to change transmission rate (%s), continuing at the current rate\n", get_error_string(err));
+            ESP_LOGW(
+                TAG,
+                "Unable to change transmission rate (%s), continuing at the current rate",
+                get_error_string(err)
+            );
             // The two ends may now disagree on the rate, so start over and stay where we are
             esp_loader_reset_target(loader);
             return connect_to_target_with_stub(loader, current_transmission_rate, current_transmission_rate);
         }
-        printf("Transmission rate changed.\n");
+        ESP_LOGI(TAG, "Transmission rate changed.");
     }
 
     return ESP_LOADER_SUCCESS;
@@ -305,13 +307,13 @@ esp_loader_error_t flash_binary(esp_loader_t *loader, FILE *bin, size_t size, si
         .block_size = sizeof(payload),
     };
 
-    printf("Erasing flash (this may take a while)...\n");
+    ESP_LOGI(TAG, "Erasing flash (this may take a while)...");
     esp_loader_error_t err = esp_loader_flash_start(loader, &flash_cfg);
     if (err != ESP_LOADER_SUCCESS) {
-        printf("Erasing flash failed with error: %s.\n", get_error_string(err));
+        ESP_LOGE(TAG, "Erasing flash failed with error: %s.", get_error_string(err));
         return err;
     }
-    printf("Start programming\n");
+    ESP_LOGI(TAG, "Start programming");
 
     size_t binary_size = size;
     size_t written     = 0;
@@ -319,13 +321,13 @@ esp_loader_error_t flash_binary(esp_loader_t *loader, FILE *bin, size_t size, si
     while (size > 0) {
         size_t to_read = MIN(size, sizeof(payload));
         if (fread(payload, 1, to_read, bin) != to_read) {
-            printf("\nReading the image failed at %zu bytes\n", written);
+            ESP_LOGE(TAG, "Reading the image failed at %zu bytes", written);
             return ESP_LOADER_ERROR_FAIL;
         }
 
         err = esp_loader_flash_write(loader, &flash_cfg, payload, to_read);
         if (err != ESP_LOADER_SUCCESS) {
-            printf("\nPacket could not be written! Error %s.\n", get_error_string(err));
+            ESP_LOGE(TAG, "Packet could not be written! Error %s.", get_error_string(err));
             return err;
         }
 
@@ -333,19 +335,18 @@ esp_loader_error_t flash_binary(esp_loader_t *loader, FILE *bin, size_t size, si
         written += to_read;
 
         int progress = (int)(((float)written / binary_size) * 100);
-        printf("\rProgress: %d %%", progress);
         boot_progress_progress(BOOT_C6, progress); // per image: boot, partition table and app each count 0-100
     };
 
-    printf("\nFinished programming\n");
+    ESP_LOGI(TAG, "Finished programming");
 
     // Also verifies the MD5 of what was written
     err = esp_loader_flash_finish(loader, &flash_cfg);
     if (err != ESP_LOADER_SUCCESS) {
-        printf("Flash verification failed. Error: %s\n", get_error_string(err));
+        ESP_LOGE(TAG, "Flash verification failed. Error: %s", get_error_string(err));
         return err;
     }
-    printf("Flash verified\n");
+    ESP_LOGI(TAG, "Flash verified");
 
     return ESP_LOADER_SUCCESS;
 }
