@@ -66,7 +66,7 @@ uint8_t idle_off_next(uint8_t current_10s) {
 void idle_choice_text(uint8_t value_10s, char *out, size_t cap) {
     unsigned s = value_10s * 10u;
     if (!s) {
-        snprintf(out, cap, "off");
+        snprintf(out, cap, "Off");
     } else if (s < 60 || s % 60) {
         snprintf(out, cap, "%u s", s);
     } else {

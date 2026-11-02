@@ -75,7 +75,7 @@ static void render(void) {
 static void refused(clock_verdict_t v) {
     char text[96];
     if (v == CLOCK_OUTRANKED && clock_sync_info().source == CLOCK_SRC_SNTP) {
-        snprintf(text, sizeof(text), "not set: SNTP set the clock %lld min ago", (long long)(clock_source_age_s() / 60));
+        snprintf(text, sizeof(text), "not set: the network time set the clock %lld min ago", (long long)(clock_source_age_s() / 60));
     } else {
         snprintf(text, sizeof(text), "not set: %s", clock_verdict_text(v));
     }
@@ -188,11 +188,7 @@ lv_obj_t *time_set_build(void) {
     hint_label = add_label(screen, "", THEME_AMBER);
     lv_obj_set_width(hint_label, LV_PCT(100));
     lv_label_set_long_mode(hint_label, LV_LABEL_LONG_MODE_WRAP);
-    lv_obj_t *help = add_label(screen, "Up/Down change, Left/Right move, digits type, Enter sets, Esc cancels",
-                               THEME_DIM);
-    lv_obj_set_width(help, LV_PCT(100));
-    lv_label_set_long_mode(help, LV_LABEL_LONG_MODE_WRAP);
-    lv_obj_set_style_pad_top(help, 24, 0);
+    shell_page_hint(screen, "Up/Down", "change", "Left/Right", "move", "Enter", "set", NULL);
     prefill();
     render();
     lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);

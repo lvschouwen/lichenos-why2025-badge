@@ -10,6 +10,9 @@ typedef struct {
 
 #define TZ_DEFAULT_POSIX "CET-1CEST,M3.5.0,M10.5.0/3" // Amsterdam: the badge's home
 
+// The most zones the table may hold: Settings keeps one row pointer for each (a static_assert in tz_table.c)
+#define TZ_MAX 16
+
 size_t           tz_count(void);
 tz_entry_t const *tz_at(size_t index);       // NULL when out of range
 int              tz_find_posix(char const *posix); // index, or -1 if unknown

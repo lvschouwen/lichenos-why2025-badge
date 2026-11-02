@@ -78,7 +78,7 @@ static void show_question(void) {
                     "into first-run setup.", THEME_TEXT);
     add_label(page, "MeshCore keeps its identity, contacts and channels. Files and the SD card are not touched.",
               THEME_DIM);
-    add_label(page, "Enter: reset settings and restart\nEsc: cancel (by itself after 30 s)", THEME_TEXT);
+    add_label(page, "Enter: reset settings and restart \xE2\x80\xA2 Esc: cancel\n(cancels in 30 s)", THEME_TEXT);
     lvgl_port_unlock();
 }
 

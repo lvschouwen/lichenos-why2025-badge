@@ -153,10 +153,10 @@ static void step_idle(void *arg) {
 static lv_obj_t *saver_row, *style_row, *lock_row;
 
 static void switch_rows_refresh(void) {
-    menu_set_value(saver_row, settings_get_u8(IDLE_SAVER_KEY, 1) ? "On" : "Off");
+    menu_set_on(saver_row, settings_get_u8(IDLE_SAVER_KEY, 1));
     bool digital = settings_get_u8(IDLE_SAVER_STYLE_KEY, SAVER_STYLE_STATION) == SAVER_STYLE_DIGITAL;
     menu_set_value(style_row, digital ? "Digital" : "Station clock");
-    menu_set_value(lock_row, settings_get_u8(IDLE_LOCK_KEY, 0) ? "On" : "Off");
+    menu_set_on(lock_row, settings_get_u8(IDLE_LOCK_KEY, 0));
 }
 
 static void toggle_switch(void *arg) {
@@ -205,19 +205,27 @@ static lv_obj_t *build_display(void) {
     menu_add_slider(menu, "Screen", BACKLIGHT_DISPLAY_MIN, 100, level[0], on_level, (void *)(intptr_t)0);
     menu_add_slider(menu, "Keyboard", 0, 100, level[1], on_level, (void *)(intptr_t)1);
     if (shell_sources.c6_up && !shell_sources.c6_up()) {
-        menu_note(menu, "brightness needs the C6");
+        menu_note(menu, "Brightness can't change right now: the radio chip is not answering. Restart the badge if it "
+                        "stays like this.");
     }
     dim_row    = menu_add(menu, "Dim after", "", step_idle, NULL);
     off_row    = menu_add(menu, "Screen off after", "", step_idle, (void *)1);
+    menu_set_kind(dim_row, MENU_CYCLE);
+    menu_set_kind(off_row, MENU_CYCLE);
     idle_rows_refresh();
     saver_row = menu_add(menu, "Clock screensaver", "", toggle_switch, NULL);
     style_row = menu_add(menu, "Screensaver style", "", toggle_style, NULL);
     lock_row  = menu_add(menu, "Pocket lock", "", toggle_switch, (void *)1);
+    menu_set_kind(saver_row, MENU_TOGGLE);
+    menu_set_kind(style_row, MENU_CYCLE);
+    menu_set_kind(lock_row, MENU_TOGGLE);
     menu_note(menu, "The screensaver shows when the screen dims. The pocket lock comes on with it or when the screen goes "
                     "off; hold " LOCK_COMBO_TEXT " to unlock. It stops stray key presses, it is not security: no PIN.");
     switch_rows_refresh();
     layout_at_open = settings_get_u8("home_layout", HOME_TILES);
     layout_row     = menu_add(menu, "Home layout", layout_name(), toggle_layout, NULL);
+    menu_set_kind(layout_row, MENU_CYCLE);
+    shell_page_hint(screen, "Left/Right", "sliders", "Enter", "change", NULL);
     lv_obj_add_event_cb(screen, on_display_delete, LV_EVENT_DELETE, NULL);
     return screen;
 }
@@ -230,13 +238,16 @@ static void open_display(void *arg) {
 // Time zone
 static void time_tz_changed(void); // Time's page under this one shows the zone
 
-static lv_obj_t *tz_row[16];
+static lv_obj_t *tz_row[TZ_MAX];
 static int       tz_selected = -1;
 
 static void pick_tz(void *arg) {
     int i = (int)(intptr_t)arg;
     settings_set_tz(tz_at((size_t)i)->posix);
-    if (tz_selected >= 0 && tz_row[tz_selected]) {
+    if (i < 0 || i >= TZ_MAX || !tz_row[i]) {
+        return;
+    }
+    if (tz_selected >= 0 && tz_selected < TZ_MAX && tz_row[tz_selected]) {
         menu_set_value(tz_row[tz_selected], "");
     }
     menu_set_value(tz_row[i], LV_SYMBOL_OK);
@@ -255,11 +266,11 @@ static lv_obj_t *build_tz(void) {
     char      saved[64];
     settings_get_str("tz", saved, sizeof(saved), TZ_DEFAULT_POSIX);
     tz_selected = tz_find_posix(saved);
-    for (size_t i = 0; i < tz_count() && i < sizeof(tz_row) / sizeof(tz_row[0]); i++) {
+    for (size_t i = 0; i < tz_count() && i < TZ_MAX; i++) {
         tz_row[i] = menu_add(menu, tz_at(i)->name, (int)i == tz_selected ? LV_SYMBOL_OK : "", pick_tz,
                              (void *)(intptr_t)i);
     }
-    if (tz_selected >= 0) {
+    if (tz_selected >= 0 && tz_selected < TZ_MAX) {
         menu_focus_row(menu, tz_selected);
     }
     lv_obj_add_event_cb(screen, on_tz_delete, LV_EVENT_DELETE, NULL);
@@ -273,7 +284,7 @@ static void open_tz(void *arg) {
 
 // ---- Time (#64): Set date & time, Time zone, where the time came from ------------------------------------------
 
-// Settings' row: "14:05 · SNTP", "~14:05 · mesh", "not set"
+// Settings' row: "14:05", "~14:05" (approximate), "not set"; where the time came from is on the Time page
 static void time_value(char *out, size_t cap) {
     time_t    now = time(NULL);
     struct tm l;
@@ -282,8 +293,7 @@ static void time_value(char *out, size_t cap) {
         snprintf(out, cap, "not set");
         return;
     }
-    snprintf(out, cap, "%s%s · %s", clock_is_approximate() ? "~" : "", hm,
-             clock_src_short(clock_sync_info().source));
+    snprintf(out, cap, "%s%s", clock_is_approximate() ? "~" : "", hm);
 }
 
 // Set date & time's row: the local date and time
@@ -391,8 +401,12 @@ static live_row_t live_row(lv_obj_t *obj, bool note, void (*fill)(char *, size_t
 static lv_obj_t *build_time(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Time");
-    time_rows[0]     = live_row(menu_add(menu, "Set date & time", "", open_time_set, NULL), false, now_value);
-    time_rows[1]     = live_row(menu_add(menu, "Time zone", "", open_tz, NULL), false, tz_value);
+    lv_obj_t *set_row = menu_add(menu, "Set date & time", "", open_time_set, NULL);
+    lv_obj_t *tz_open = menu_add(menu, "Time zone", "", open_tz, NULL);
+    menu_set_kind(set_row, MENU_OPEN);
+    menu_set_kind(tz_open, MENU_OPEN);
+    time_rows[0]     = live_row(set_row, false, now_value);
+    time_rows[1]     = live_row(tz_open, false, tz_value);
     time_rows[2]     = live_row(menu_note(menu, ""), true, source_note);
     lv_obj_add_event_cb(screen, forget_time_page, LV_EVENT_DELETE, lv_timer_create(refresh_time_page, 1000, NULL));
     return screen;
@@ -518,27 +532,27 @@ static void toggle_ota(void *arg) {
         return;
     }
     shell_dialog_t const d = {
-        .title        = "Switch off updates over Wi-Fi? Wi-Fi console too.",
-        .count_prefix = "Cancels in ",
-        .count_suffix = " s",
-        .hint         = "Enter: switch off   Esc: keep on",
-        .seconds      = 10,
-        .careful      = true,
+        .title         = "Switch off updates over Wi-Fi? The Wi-Fi console goes too.",
+        .seconds       = 10,
+        .careful       = true,
+        .confirm_label = "switch off",
     };
     shell_dialog_countdown(&d, ota_off_answer);
 }
 
 // Radio switches (#108): LoRa and airplane mode here, Wi-Fi on its own page. Airplane changes the others too, so every
-// row is refreshed after a toggle.
+// row is refreshed after a toggle. Both act at once without a question (#138): one Enter undoes them, the row shows
+// the state, and turning a radio off or on starts no transmission by itself; a confirm here would only teach people
+// to click through the careful dialogs that guard erasing.
 static lv_obj_t *lora_row, *air_row;
 
 static void radio_rows_refresh(void) {
     live_update(&settings_wifi_row);
     if (lora_row) {
-        menu_set_value(lora_row, lichen_radio_get(RADIO_LORA) ? "On" : "Off");
+        menu_set_on(lora_row, lichen_radio_get(RADIO_LORA));
     }
     if (air_row) {
-        menu_set_value(air_row, lichen_airplane_get() ? "On" : "Off");
+        menu_set_on(air_row, lichen_airplane_get());
     }
 }
 
@@ -559,31 +573,47 @@ static void forget_ota_row(lv_event_t *e) {
     ota_row = ota_auto_row = lora_row = air_row = NULL;
 }
 
+// A row that opens a page (R3): the dim "›" after the value
+static lv_obj_t *open_row(lv_obj_t *menu, char const *label, void (*open)(void *)) {
+    lv_obj_t *row = menu_add(menu, label, "", open, NULL);
+    menu_set_kind(row, MENU_OPEN);
+    return row;
+}
+
 static void open_settings(lv_obj_t *screen) {
     lv_obj_t *menu = menu_create(screen, "Settings");
     char      wifi[48];
     wifi_line(wifi, sizeof(wifi), false);
     menu_note(menu, "Lichen");
     settings_wifi_row = live_row(menu_add(menu, "Wi-Fi", wifi, open_wifi, NULL), false, wifi_value);
+    menu_set_kind(settings_wifi_row.obj, MENU_OPEN);
     strlcpy(settings_wifi_row.shown, wifi, sizeof(settings_wifi_row.shown));
     ota_row = menu_add(menu, "Updates over Wi-Fi", ota_value(), toggle_ota, NULL);
+    menu_set_kind(ota_row, MENU_TOGGLE);
     settings_ota_row = live_row(ota_row, false, ota_fill);
     char auto_text[16];
     ota_auto_value(auto_text, sizeof(auto_text));
     ota_auto_row = menu_add(menu, "Close updates after", auto_text, step_ota_auto, NULL);
-    lora_row = menu_add(menu, "LoRa radio", lichen_radio_get(RADIO_LORA) ? "On" : "Off", toggle_lora, NULL);
-    air_row  = menu_add(menu, "Airplane mode", lichen_airplane_get() ? "On" : "Off", toggle_airplane, NULL);
+    menu_set_kind(ota_auto_row, MENU_CYCLE);
+    lora_row = menu_add(menu, "LoRa radio", "", toggle_lora, NULL);
+    air_row  = menu_add(menu, "Airplane mode", "", toggle_airplane, NULL);
+    menu_set_kind(lora_row, MENU_TOGGLE);
+    menu_set_kind(air_row, MENU_TOGGLE);
+    menu_set_on(lora_row, lichen_radio_get(RADIO_LORA));
+    menu_set_on(air_row, lichen_airplane_get());
     lv_obj_add_event_cb(screen, forget_ota_row, LV_EVENT_DELETE, NULL);
-    menu_add(menu, "Display", "", open_display, NULL);
-    settings_time_row = live_row(menu_add(menu, "Time", "", open_time, NULL), false, time_value);
+    open_row(menu, "Display", open_display);
+    lv_obj_t *time_open = open_row(menu, "Time", open_time);
+    settings_time_row = live_row(time_open, false, time_value);
     lv_obj_add_event_cb(screen, forget_settings_time, LV_EVENT_DELETE,
                         lv_timer_create(refresh_settings_time, 1000, NULL));
-    settings_sd_row = live_row(menu_add(menu, "SD card", "", open_sd, NULL), false, sd_value);
-    settings_notify_row = live_row(menu_add(menu, "Notifications", "", open_notify, NULL), false, notify_value);
-    menu_add(menu, "Battery", "Unprotected cells", battery_open, NULL);
-    menu_add(menu, "Power", "Restart, power off", power_open_from_settings, NULL);
-    menu_add(menu, "Factory reset", "", factory_screen_open, NULL);
-    menu_add(menu, "About Lichen", "", open_about, NULL);
+    settings_sd_row = live_row(open_row(menu, "SD card", open_sd), false, sd_value);
+    settings_notify_row = live_row(open_row(menu, "Notifications", open_notify), false, notify_value);
+    open_row(menu, "Battery", battery_open);
+    lv_obj_t *power_open = open_row(menu, "Power", power_open_from_settings);
+    menu_set_value(power_open, "Restart, power off");
+    open_row(menu, "Factory reset", factory_screen_open);
+    open_row(menu, "About Lichen", open_about);
     bool heading = false;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
@@ -594,7 +624,7 @@ static void open_settings(lv_obj_t *screen) {
             menu_note(menu, "Apps");
             heading = true;
         }
-        menu_add(menu, app->name, "", open_app_page, (void *)(intptr_t)i);
+        menu_set_kind(menu_add(menu, app->name, "", open_app_page, (void *)(intptr_t)i), MENU_OPEN);
     }
 }
 

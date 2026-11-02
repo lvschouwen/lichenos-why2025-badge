@@ -97,14 +97,17 @@ static lv_obj_t *build_bye(void) {
     lv_obj_set_style_pad_row(screen, 24, 0);
     shell_on_esc(eat_esc, NULL);
     if (want_off) {
-        add_line(screen, "Switching off", THEME_TEXT, true);
+        add_line(screen, "Powering off...", THEME_TEXT, true);
         add_line(screen, "Saving, then the screen goes dark.", THEME_DIM, false);
         add_line(screen, "On battery the badge switches itself off after half a minute. Press the power button to "
                          "start it again.", THEME_TEXT, false);
         add_line(screen, "On USB power it stays asleep: unplug it, then press the power button.", THEME_AMBER, false);
     } else {
-        add_line(screen, "Restarting", THEME_TEXT, true);
+        add_line(screen, "Restarting...", THEME_TEXT, true);
         add_line(screen, "Saving first.", THEME_DIM, false);
+        if (shell_restart_note_get()[0]) {
+            add_line(screen, shell_restart_note_get(), THEME_AMBER, false);
+        }
     }
     return screen;
 }
@@ -139,48 +142,20 @@ void power_request_restart(void) {
     start(false);
 }
 
-static void answer_restart(bool yes) {
-    if (yes) {
-        start(false);
-    }
-}
-
-static void answer_off(bool yes) {
-    if (yes) {
-        start(true);
-    }
-}
-
-static void ask_restart(void *arg) {
+static void do_restart(void *arg) {
     (void)arg;
-    shell_dialog_t const d = {
-        .title        = "Restart the badge?",
-        .count_prefix = "(closes in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: restart \xE2\x80\xA2 Esc: cancel",
-        .seconds      = CONFIRM_S,
-        .careful      = true,
-    };
-    shell_dialog_countdown(&d, answer_restart);
+    start(false);
 }
 
-static void ask_off(void *arg) {
+static void do_off(void *arg) {
     (void)arg;
-    shell_dialog_t const d = {
-        .title        = "Switch the badge off?",
-        .count_prefix = "(closes in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: switch off \xE2\x80\xA2 Esc: cancel",
-        .seconds      = CONFIRM_S,
-        .careful      = true,
-    };
-    shell_dialog_countdown(&d, answer_off);
+    start(true);
 }
 
 static void open_power(lv_obj_t *screen) {
     lv_obj_t *menu = menu_create(screen, "Power");
-    menu_add(menu, "Restart", "", ask_restart, NULL);
-    menu_add(menu, "Power off", "", ask_off, NULL);
+    menu_set_danger(menu_add(menu, "Restart", "", do_restart, NULL), "Restart the badge?", "restart");
+    menu_set_danger(menu_add(menu, "Power off", "", do_off, NULL), "Power off the badge?", "power off");
     menu_note(menu, "Power off saves everything, then switches the screen, radio and processors off. On battery the "
                     "power button starts the badge again; on USB power unplug it first.");
 }
@@ -191,7 +166,7 @@ static void cmd_poweroff(char const *args) {
         console_reply("already going down");
         return;
     }
-    console_reply("switching off");
+    console_reply("powering off");
     start(true); // shell_open takes the LVGL lock itself
 }
 

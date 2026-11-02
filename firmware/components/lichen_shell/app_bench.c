@@ -278,7 +278,7 @@ static void tick(lv_timer_t *timer) {
             set_result(ROW_MEM, text);
             s_b.runs++;
             summary();
-            set_hint("Enter: run again    Esc: back");
+            set_hint("Enter: run again");
             s_b.stage = ST_IDLE;
             lv_timer_pause(s_b.timer);
             break;

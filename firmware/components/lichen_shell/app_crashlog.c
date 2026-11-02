@@ -90,9 +90,12 @@ static void add_rows(void) {
     }
     if (s_v.count) {
         s_v.clear_row = menu_add(s_v.menu, "Clear all", NULL, on_clear_all, NULL);
-        menu_note(s_v.menu, "Enter opens an entry. Clear all also resets the crash counter and erases the core dump.");
+        menu_note(s_v.menu, "Clear all also resets the crash counter and erases the core dump.");
+        shell_page_hint(s_v.screen, "Enter", "open", NULL);
+    } else if (s_v.entries) {
+        menu_empty(s_v.menu, "crashes", NULL);
     } else {
-        menu_note(s_v.menu, s_v.entries ? "No crashes stored." : "Not enough memory to show the crash log.");
+        menu_note(s_v.menu, "Not enough memory to show the crash log. Restart the badge.");
     }
 }
 
@@ -214,12 +217,10 @@ static void on_clear_all(void *arg) {
     }
     snprintf(title, sizeof(title), "Clear all %u crash entries, the crash counter and the core dump?", (unsigned)s_v.count);
     shell_dialog_t const d = {
-        .title        = title,
-        .count_prefix = "(cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: clear all \xE2\x80\xA2 Esc: keep",
-        .seconds      = ASK_SECONDS,
-        .careful      = true,
+        .title         = title,
+        .seconds       = ASK_SECONDS,
+        .careful       = true,
+        .confirm_label = "clear all",
     };
     shell_dialog_countdown(&d, clear_answer);
 }
@@ -246,12 +247,10 @@ static void ask_delete(void) {
         return;
     }
     shell_dialog_t const d = {
-        .title        = "Delete this crash entry? The core dump stays; Clear all erases it.",
-        .count_prefix = "(cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: delete \xE2\x80\xA2 Esc: keep",
-        .seconds      = ASK_SECONDS,
-        .careful      = true,
+        .title         = "Delete this crash entry? The core dump stays; Clear all erases it.",
+        .seconds       = ASK_SECONDS,
+        .careful       = true,
+        .confirm_label = "delete",
     };
     shell_dialog_countdown(&d, delete_answer);
 }
@@ -266,8 +265,7 @@ static void on_entry_key(lv_event_t *e) {
 }
 
 static lv_obj_t *add_text(lv_obj_t *parent, char const *text, uint32_t color) {
-    lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_t *label = lichen_label_wrap(parent, LV_PCT(100));
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
     lv_label_set_text(label, text);
     return label;
@@ -296,7 +294,7 @@ static lv_obj_t *build_entry(void) {
     lv_obj_set_style_text_font(title, lichen_font(LICHEN_FONT_LARGE), 0);
     crashlog_full(e, s_v.shown == 0, full, sizeof(full));
     add_text(screen, full, THEME_TEXT);
-    s_v.hint = add_text(screen, "Up/Down: scroll \xE2\x80\xA2 Enter: delete \xE2\x80\xA2 Esc: back", THEME_AMBER);
+    s_v.hint = shell_page_hint(screen, "Up/Down", "scroll", "Enter", "delete", NULL);
     lv_obj_add_event_cb(screen, on_entry_key, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(screen, on_entry_delete, LV_EVENT_DELETE, NULL);
     return screen;
@@ -400,12 +398,10 @@ static void notice_tick(lv_timer_t *timer) {
     }
     lv_timer_delete(timer);
     shell_dialog_t const d = {
-        .title        = "Lichen restarted after a crash. Open the crash log?",
-        .count_prefix = "(closes in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: open \xE2\x80\xA2 Esc: later",
-        .seconds      = NOTICE_SECONDS,
-        .careful      = true, // the countdown closes it instead of opening the viewer
+        .title         = "Lichen restarted after a crash. Open the crash log?",
+        .seconds       = NOTICE_SECONDS,
+        .careful       = true, // the countdown cancels instead of opening the viewer
+        .confirm_label = "open",
     };
     ESP_LOGI(TAG, "after a crash: asking to open the crash log");
     shell_dialog_countdown(&d, notice_answer);

@@ -125,7 +125,7 @@ static void say(ln_level_t level, char const *title, char const *body, uint32_t 
 }
 
 static void cause_text(thermal_info_t const *i, char *out, size_t cap) {
-    snprintf(out, cap, "%s %s at %.0f C.", th_src_name(i->cause), i->cause_rise ? "rose fast, now" : "reached",
+    snprintf(out, cap, "%s %s at %.0f \xC2\xB0""C.", th_src_name(i->cause), i->cause_rise ? "rose fast, now" : "reached",
              (double)i->cause_c);
 }
 
@@ -148,8 +148,8 @@ static void on_events(unsigned ev) {
     if (ev & TH_EV_SHUTDOWN) {
         cause_text(&now, body, sizeof(body));
         size_t n = strlen(body);
-        snprintf(body + n, sizeof(body) - n, " Switching off to protect the cells.");
-        say(LN_ERROR, "Too hot: switching off", body, 0);
+        snprintf(body + n, sizeof(body) - n, " Powering off to protect the cells.");
+        say(LN_ERROR, "Too hot: powering off", body, 0);
         shed_load(true);
         if (!atomic_exchange(&shutdown_asked, true)) {
             power_request_off();

@@ -97,8 +97,7 @@ static char const *console_hint(char const *target) {
 }
 
 static lv_obj_t *add_text(lv_obj_t *parent, char const *text, uint32_t color) {
-    lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_t *label = lichen_label_wrap(parent, LV_PCT(100));
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
     lv_label_set_text(label, text);
     return label;
@@ -143,7 +142,7 @@ static lv_obj_t *build_detail(void) {
         snprintf(line, sizeof(line), "More on the console: %s", hint);
         add_text(screen, line, THEME_DIM);
     }
-    add_text(screen, "Esc: back", THEME_AMBER);
+    shell_page_hint(screen, "Up/Down", "scroll", NULL);
     lv_obj_add_event_cb(screen, on_detail_key, LV_EVENT_KEY, NULL);
     return screen;
 }
@@ -250,12 +249,10 @@ static void ask_clear_all(void) {
     static char title[80];
     snprintf(title, sizeof(title), "Clear all %u notifications?", (unsigned)(s_c.screen ? s_c.count : 0));
     shell_dialog_t const d = {
-        .title        = s_c.screen ? title : "Clear all notifications?",
-        .count_prefix = "(cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: clear all \xE2\x80\xA2 Esc: keep",
-        .seconds      = ASK_SECONDS,
-        .careful      = true, // the countdown cancels; Enter counts only after a second
+        .title         = s_c.screen ? title : "Clear all notifications?",
+        .seconds       = ASK_SECONDS,
+        .careful       = true, // the countdown cancels; Enter counts only after a second
+        .confirm_label = "clear all",
     };
     shell_dialog_countdown(&d, clear_all_answer);
 }
@@ -285,12 +282,10 @@ static bool on_text(uint32_t key, void *arg) {
         if (s_entry.level == LN_ERROR && !s_entry.read) {
             s_ask_id             = s_c.ids[i];
             shell_dialog_t const d = {
-                .title        = "Clear this unread error?",
-                .count_prefix = "(cancels in ",
-                .count_suffix = " s)",
-                .hint         = "Enter: clear \xE2\x80\xA2 Esc: keep",
-                .seconds      = ASK_SECONDS,
-                .careful      = true,
+                .title         = "Clear this unread error?",
+                .seconds       = ASK_SECONDS,
+                .careful       = true,
+                .confirm_label = "clear",
             };
             shell_dialog_countdown(&d, clear_one_answer);
         } else if (lichen_notify_remove(s_c.ids[i])) {
@@ -322,11 +317,13 @@ static void add_rows(void) {
     }
     s_c.count = shown;
     s_c.clear_row = NULL;
+    lv_obj_t *hint = shell_page_hint(s_c.screen, "Enter", "open", "Backspace", "clear", NULL);
     if (shown) {
         s_c.clear_row = menu_add(s_c.menu, "Clear all", NULL, on_clear_all, NULL);
-        menu_note(s_c.menu, "Enter: open \xE2\x80\xA2 Backspace: clear \xE2\x80\xA2 Esc: back");
+        lv_obj_remove_flag(hint, LV_OBJ_FLAG_HIDDEN);
     } else {
-        menu_note(s_c.menu, "No notifications");
+        menu_empty(s_c.menu, "notifications", "apps and Lichen post here when they have news");
+        lv_obj_add_flag(hint, LV_OBJ_FLAG_HIDDEN); // nothing to open or clear
     }
     if (lichen_notify_dnd()) {
         menu_note(s_c.menu, "Do not disturb is on: only errors pop up (Settings \xE2\x80\xBA Notifications).");
@@ -498,15 +495,11 @@ static struct {
     char const *source[MAX_SOURCES];
 } s_s;
 
-static char const *on_off(bool on) {
-    return on ? "On" : "Off";
-}
-
 static void toggle_source(void *arg) {
     size_t i = (size_t)(uintptr_t)arg;
     bool   on = !lichen_notify_source_enabled(s_s.source[i]);
     lichen_notify_set_source_enabled(s_s.source[i], on);
-    menu_set_value(s_s.source_row[i], on_off(lichen_notify_source_enabled(s_s.source[i])));
+    menu_set_on(s_s.source_row[i], lichen_notify_source_enabled(s_s.source[i]));
 }
 
 static void open_app_notify_settings(void *arg) {
@@ -517,19 +510,19 @@ static void open_app_notify_settings(void *arg) {
 static void toggle_dnd(void *arg) {
     (void)arg;
     lichen_notify_set_dnd(!lichen_notify_dnd());
-    menu_set_value(s_s.dnd_row, on_off(lichen_notify_dnd()));
+    menu_set_on(s_s.dnd_row, lichen_notify_dnd());
 }
 
 static void toggle_led(void *arg) {
     (void)arg;
     led_set_enabled(!led_enabled());
-    menu_set_value(s_s.led_row, on_off(led_enabled()));
+    menu_set_on(s_s.led_row, led_enabled());
 }
 
 static void toggle_vib(void *arg) {
     (void)arg;
     lichen_haptics_set_enabled(!lichen_haptics_enabled());
-    menu_set_value(s_s.vib_row, on_off(lichen_haptics_enabled()));
+    menu_set_on(s_s.vib_row, lichen_haptics_enabled());
     if (lichen_haptics_enabled()) {
         lichen_haptics_play(LICHEN_HAPTIC_TICK); // feel what it was switched to
     }
@@ -553,17 +546,10 @@ static void settings_clear_answer(bool yes) {
     }
 }
 
+// The row is a DANGER row (menu_set_danger): this runs after the careful question was confirmed
 static void settings_clear(void *arg) {
     (void)arg;
-    shell_dialog_t const d = {
-        .title        = "Clear all notifications?",
-        .count_prefix = "(cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: clear all \xE2\x80\xA2 Esc: keep",
-        .seconds      = ASK_SECONDS,
-        .careful      = true,
-    };
-    shell_dialog_countdown(&d, settings_clear_answer);
+    settings_clear_answer(true);
 }
 
 static void on_settings_delete(lv_event_t *e) {
@@ -583,31 +569,41 @@ static lv_obj_t *build_settings(void) {
             continue;
         }
         s_s.source[n]     = app->id;
-        s_s.source_row[n] = menu_add(menu, app->name, on_off(lichen_notify_source_enabled(app->id)), toggle_source,
-                                     (void *)(uintptr_t)n);
+        s_s.source_row[n] = menu_add(menu, app->name, "", toggle_source, (void *)(uintptr_t)n);
+        menu_set_kind(s_s.source_row[n], MENU_TOGGLE);
+        menu_set_on(s_s.source_row[n], lichen_notify_source_enabled(app->id));
         n++;
     }
     s_s.source[n]     = "lichen";
-    s_s.source_row[n] = menu_add(menu, "Lichen (system)", on_off(lichen_notify_source_enabled("lichen")), toggle_source,
-                                 (void *)(uintptr_t)n);
+    s_s.source_row[n] = menu_add(menu, "Lichen (system)", "", toggle_source, (void *)(uintptr_t)n);
+    menu_set_kind(s_s.source_row[n], MENU_TOGGLE);
+    menu_set_on(s_s.source_row[n], lichen_notify_source_enabled("lichen"));
     for (size_t i = 0; i < lichen_app_count(); i++) { // what an app sends, if it can be set (#50)
         lichen_app_t const *app = lichen_app_at(i);
         if (app->notify_settings_open) {
             char label[96];
             snprintf(label, sizeof(label), "%s notifications", app->name);
-            menu_add(menu, label, "", open_app_notify_settings, (void *)app);
+            menu_set_kind(menu_add(menu, label, "", open_app_notify_settings, (void *)app), MENU_OPEN);
         }
     }
-    s_s.dnd_row = menu_add(menu, "Do not disturb", on_off(lichen_notify_dnd()), toggle_dnd, NULL);
-    s_s.led_row = menu_add(menu, "Status LED", on_off(led_enabled()), toggle_led, NULL);
-    s_s.vib_row = menu_add(menu, "Vibration", on_off(lichen_haptics_enabled()), toggle_vib, NULL);
+    s_s.dnd_row = menu_add(menu, "Do not disturb", "", toggle_dnd, NULL);
+    s_s.led_row = menu_add(menu, "Status LED", "", toggle_led, NULL);
+    s_s.vib_row = menu_add(menu, "Vibration", "", toggle_vib, NULL);
+    menu_set_kind(s_s.dnd_row, MENU_TOGGLE);
+    menu_set_kind(s_s.led_row, MENU_TOGGLE);
+    menu_set_kind(s_s.vib_row, MENU_TOGGLE);
+    menu_set_on(s_s.dnd_row, lichen_notify_dnd());
+    menu_set_on(s_s.led_row, led_enabled());
+    menu_set_on(s_s.vib_row, lichen_haptics_enabled());
     s_s.vib_str_row = menu_add(menu, "Vibration strength", VIB_STRENGTH[lichen_haptics_strength()], cycle_vib_strength,
                                NULL);
+    menu_set_kind(s_s.vib_str_row, MENU_CYCLE);
     char       count[12];
     ln_stats_t st;
     lichen_notify_stats(&st);
     snprintf(count, sizeof(count), "%u", (unsigned)st.entries);
     s_s.clear_row = menu_add(menu, "Clear all", count, settings_clear, NULL);
+    menu_set_danger(s_s.clear_row, "Clear all notifications?", "clear all");
     menu_note(menu, "A source that is off loses its notices: no history, no badge. Do not disturb keeps them but shows "
                     "no pop-ups, except errors (without sound).");
     lv_obj_add_event_cb(screen, on_settings_delete, LV_EVENT_DELETE, NULL);

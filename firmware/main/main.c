@@ -169,9 +169,9 @@ static void c6_restart_answer(bool confirmed) {
 // keyboard may be dead in exactly this state
 static bool c6_ask_restart(void) {
     shell_dialog_t const d = {
-        .title         = "C6 (radio/Wi-Fi) not responding.",
-        .hint          = "Enter: restart now • Esc: stay without radio",
+        .title         = "The radio chip (Wi-Fi and LoRa) is not responding.",
         .confirm_label = "restart",
+        .cancel_label  = "stay without radio",
         .seconds       = 30,
     };
     return shell_dialog_countdown(&d, c6_restart_answer);

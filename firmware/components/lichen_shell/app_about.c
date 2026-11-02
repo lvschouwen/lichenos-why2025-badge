@@ -6,6 +6,7 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "lichen_clock.h"
+#include "lichen_ui.h"
 #include "lichen_app.h"
 #include "logo.h"
 #include "sdcard.h"
@@ -21,7 +22,7 @@
 
 #define SCROLL_STEP      96
 
-enum { ROW_MEMORY, ROW_C6, ROW_WIFI, ROW_LORA, ROW_STORAGE, ROW_SD, ROW_UP, ROW_CLOCK, ROWS };
+enum { ROW_WIFI, ROW_LORA, ROW_STORAGE, ROW_SD, ROW_UP, ROW_CLOCK, ROW_MEMORY, ROW_C6, ROWS }; // the last two: for developers
 
 static lv_obj_t *value_label[ROWS];
 
@@ -56,14 +57,14 @@ static void refresh(lv_timer_t *timer) {
     (void)timer;
     char text[96];
 
-    snprintf(text, sizeof(text), "%u KB  " LV_SYMBOL_BULLET "  PSRAM %.1f MB free",
+    snprintf(text, sizeof(text), "%u KB internal " LV_SYMBOL_BULLET " %.1f MB PSRAM free",
              (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024),
              (double)heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1048576.0);
     set_text(value_label[ROW_MEMORY], text);
 
     // While the C6 is being recovered, how far it has got (#14 T-B)
     if (!(shell_sources.c6_trouble && shell_sources.c6_trouble(text, sizeof(text)))) {
-        strlcpy(text, shell_sources.c6_up && shell_sources.c6_up() ? "up" : "down", sizeof(text));
+        strlcpy(text, shell_sources.c6_up && shell_sources.c6_up() ? "working" : "not answering", sizeof(text));
     }
     set_text(value_label[ROW_C6], text);
 
@@ -75,13 +76,13 @@ static void refresh(lv_timer_t *timer) {
     }
     set_text(value_label[ROW_WIFI], text);
 
-    set_text(value_label[ROW_LORA], shell_sources.lora_up && shell_sources.lora_up() ? "radio up" : "radio down");
+    set_text(value_label[ROW_LORA], shell_sources.lora_up && shell_sources.lora_up() ? "working" : "not available");
 
     uint64_t free_b, total_b;
     if (storage_free_bytes(&free_b, &total_b)) {
-        snprintf(text, sizeof(text), "%.1f / %.1f MB free", (double)free_b / 1048576.0, (double)total_b / 1048576.0);
+        snprintf(text, sizeof(text), "%.1f MB free of %.1f MB", (double)free_b / 1048576.0, (double)total_b / 1048576.0);
     } else {
-        strlcpy(text, "-", sizeof(text));
+        strlcpy(text, "not available", sizeof(text));
     }
     set_text(value_label[ROW_STORAGE], text);
 
@@ -119,8 +120,7 @@ static void on_delete(lv_event_t *e) {
 }
 
 static lv_obj_t *add_text(lv_obj_t *parent, char const *text, uint32_t color) {
-    lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_t *label = lichen_label_wrap(parent, LV_PCT(100));
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
     lv_label_set_text(label, text);
     return label;
@@ -140,7 +140,7 @@ static int32_t key_col_w(lv_obj_t *obj, char const *const *keys, size_t n) {
 }
 
 static lv_obj_t *add_row(lv_obj_t *parent, char const *key, char const *fixed) {
-    static char const *const KEYS[] = {"version", "memory", "C6 link", "Wi-Fi", "LoRa", "storage", "SD card", "up", "clock"};
+    static char const *const KEYS[] = {"Version", "Memory", "Radio chip", "Wi-Fi", "LoRa", "Internal storage", "SD card", "Uptime", "Clock"};
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -202,18 +202,20 @@ static void open_about(lv_obj_t *screen) {
     lv_obj_set_style_bg_color(rule, lv_color_hex(THEME_RULE), 0);
     lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
 
-    add_row(screen, "version", esp_app_get_description()->version);
-    value_label[ROW_MEMORY]  = add_row(screen, "memory", NULL);
-    value_label[ROW_C6]      = add_row(screen, "C6 link", NULL);
+    add_row(screen, "Version", esp_app_get_description()->version);
     value_label[ROW_WIFI]    = add_row(screen, "Wi-Fi", NULL);
     value_label[ROW_LORA]    = add_row(screen, "LoRa", NULL);
-    value_label[ROW_STORAGE] = add_row(screen, "storage", NULL);
+    value_label[ROW_STORAGE] = add_row(screen, "Internal storage", NULL);
     value_label[ROW_SD]      = add_row(screen, "SD card", NULL);
-    value_label[ROW_UP]      = add_row(screen, "up", NULL);
-    value_label[ROW_CLOCK]   = add_row(screen, "clock", NULL);
+    value_label[ROW_UP]      = add_row(screen, "Uptime", NULL);
+    value_label[ROW_CLOCK]   = add_row(screen, "Clock", NULL);
+    add_text(screen, "For developers", THEME_DIM);
+    value_label[ROW_MEMORY]  = add_row(screen, "Memory", NULL);
+    value_label[ROW_C6]      = add_row(screen, "Radio chip", NULL);
 
     lv_timer_t *timer = lv_timer_create(refresh, 1000, NULL);
     refresh(timer);
+    shell_page_hint(screen, "Up/Down", "scroll", NULL); // after the padding above: it keeps the room it needs
     lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, timer);
 }

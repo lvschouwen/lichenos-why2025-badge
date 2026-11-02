@@ -68,7 +68,7 @@ static lv_timer_t *start_timer;
 
 static void radio_row_refresh(void) {
     if (radio_row) {
-        menu_set_value(radio_row, lichen_radio_get(RADIO_WIFI) ? "On" : "Off");
+        menu_set_on(radio_row, lichen_radio_get(RADIO_WIFI));
     }
 }
 
@@ -138,13 +138,17 @@ static void on_poll(lv_timer_t *timer) {
             setup_done = NULL;
         }
     } else if (st == WIFI_JOIN_FAILED_KEPT_OLD) {
-        set_status(kept[0] ? "Couldn't join %s: kept %s" : "Couldn't join %s: no network saved", a, b);
+        // Why (it did not accept us: usually the password) and what to do (pick it again), and what is still in use
+        set_status(kept[0] ? "Couldn't join %s: wrong password or out of range. Still using %s. Pick the network "
+                             "again to retry."
+                           : "Couldn't join %s: wrong password or out of range. Pick the network again to retry.",
+                   a, b);
     }
 }
 
 static void begin_join(char const *pass) {
     if (!shell_sources.wifi_join || !shell_sources.wifi_join(target, pass)) {
-        set_status("Could not save or apply the settings");
+        set_status("Could not save the network. Try again.");
         return;
     }
     // The request only queues the trial for c6link's own task; the outcome is c6link's, not this screen's
@@ -154,6 +158,8 @@ static void begin_join(char const *pass) {
     }
 }
 
+static void ask_password(char const *initial, bool too_short);
+
 // The entry screen is gone by now (text_entry.h)
 static void on_password(char const *text, void *arg) {
     (void)arg;
@@ -161,10 +167,18 @@ static void on_password(char const *text, void *arg) {
         return;
     }
     if (!wifi_cred_valid(target, text)) {
-        set_status("A password has 8 to 63 characters");
+        ask_password(text, true); // type again instead of picking the network again (text_entry copies initial now)
         return;
     }
     begin_join(text);
+}
+
+static void ask_password(char const *initial, bool wrong_length) {
+    char shown_name[140], title[200];
+    wifi_ssid_sanitize(target, shown_name, sizeof(shown_name));
+    snprintf(title, sizeof(title), wrong_length ? "Password for %.60s: use 8 to 63 characters" : "Password for %.60s",
+             shown_name);
+    text_entry_open(title, initial, true, 63, on_password, NULL);
 }
 
 static void on_pick(void *arg) {
@@ -177,16 +191,13 @@ static void on_pick(void *arg) {
         begin_join("");
         return;
     }
-    char shown_name[140], title[160];
-    wifi_ssid_sanitize(target, shown_name, sizeof(shown_name));
-    snprintf(title, sizeof(title), "Password for %.60s", shown_name);
-    text_entry_open(title, "", true, 63, on_password, NULL);
+    ask_password("", false);
 }
 
 // ---- the list ----------------------------------------------------------------------------------------------------
 
 // Lock label and four signal bars on the right of a network row
-static void decorate(lv_obj_t *row, wifi_ap_t const *ap) {
+static void decorate(lv_obj_t *row, wifi_ap_t const *ap, bool connected) {
     lv_obj_t *name = lv_obj_get_child(row, 0);
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
     lv_obj_set_flex_grow(name, 1);
@@ -201,6 +212,12 @@ static void decorate(lv_obj_t *row, wifi_ap_t const *ap) {
     lv_obj_set_style_pad_column(box, 4, 0);
     lv_obj_set_scrollable(box, false);
     lv_obj_set_clickable(box, false);
+    if (connected) { // a word as well as the colour (R8)
+        lv_obj_t *mark = lv_label_create(box);
+        lv_obj_set_style_text_color(mark, lv_color_hex(THEME_TEAL), 0);
+        lv_obj_set_style_pad_right(mark, 12, 0);
+        lv_label_set_text(mark, LV_SYMBOL_OK " connected");
+    }
     lv_obj_t *lock = lv_label_create(box);
     lv_obj_set_style_text_color(lock, lv_color_hex(THEME_DIM), 0);
     lv_obj_set_style_pad_right(lock, 12, 0);
@@ -252,12 +269,15 @@ static void on_scan_done(void *data) {
     lv_group_set_default(group);
     shown_n = res->ok ? res->n : 0;
     memcpy(shown, res->aps, shown_n * sizeof(shown[0]));
+    char joined[33] = "", ip[16] = "";
+    settings_get_str("wifi_ssid", joined, sizeof(joined), "");
+    bool online = joined[0] && lichen_radio_get(RADIO_WIFI) && shell_sources.wifi_ip && shell_sources.wifi_ip(ip, sizeof(ip));
     for (size_t i = 0; i < shown_n; i++) {
         char name[140];
         wifi_ssid_sanitize(shown[i].ssid, name, sizeof(name));
         lv_obj_t *row = menu_add(menu, name, "", on_pick, (void *)(uintptr_t)i);
         if (row) {
-            decorate(row, &shown[i]);
+            decorate(row, &shown[i], online && strcmp(shown[i].ssid, joined) == 0);
             rows[row_count++] = row;
         }
     }
@@ -271,11 +291,9 @@ static void on_scan_done(void *data) {
     } else if (shown_n == 0) {
         set_status("No networks found.");
     } else if (!poll) { // a join in progress keeps its own status
-        char ssid[33], name[140];
-        settings_get_str("wifi_ssid", ssid, sizeof(ssid), "");
-        wifi_ssid_sanitize(ssid, name, sizeof(name));
-        char ip[16] = "";
-        if (ssid[0] && shell_sources.wifi_ip && shell_sources.wifi_ip(ip, sizeof(ip))) {
+        char name[140];
+        wifi_ssid_sanitize(joined, name, sizeof(name));
+        if (online) {
             set_status("Connected to %s, IP %s", name, ip);
         } else {
             set_status("Choose a network");
@@ -343,7 +361,9 @@ static lv_obj_t *build(void) {
     if (setup_done) {
         menu_add(menu, "Skip for now", "", on_skip, NULL);
     }
-    radio_row = menu_add(menu, "Wi-Fi", lichen_radio_get(RADIO_WIFI) ? "On" : "Off", toggle_radio, NULL);
+    radio_row = menu_add(menu, "Wi-Fi radio", "", toggle_radio, NULL);
+    menu_set_kind(radio_row, MENU_TOGGLE);
+    menu_set_on(radio_row, lichen_radio_get(RADIO_WIFI));
     status    = menu_note(menu, "");
     lv_obj_add_event_cb(scr, on_delete, LV_EVENT_DELETE, NULL);
     if (lichen_radio_get(RADIO_WIFI)) {

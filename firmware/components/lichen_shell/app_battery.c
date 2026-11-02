@@ -31,16 +31,16 @@ static void status_text(char *out, size_t cap) {
     thermal_info(&i);
     char board[24] = "no reading", die[24] = "no reading";
     if (i.valid[TH_SRC_BOARD]) {
-        snprintf(board, sizeof(board), "%.0f C", (double)i.c[TH_SRC_BOARD]);
+        snprintf(board, sizeof(board), "%.0f \xC2\xB0""C", (double)i.c[TH_SRC_BOARD]);
     }
     if (i.valid[TH_SRC_DIE]) {
-        snprintf(die, sizeof(die), "%.0f C", (double)i.c[TH_SRC_DIE]);
+        snprintf(die, sizeof(die), "%.0f \xC2\xB0""C", (double)i.c[TH_SRC_DIE]);
     }
-    char const *state = i.level == TH_SHUTDOWN ? "SWITCHING OFF, too hot"
-                        : i.level == TH_WARN   ? "WARM: screen dimmed, radios off the charger"
-                        : i.blind              ? "no sensor answers, heat is not watched"
+    char const *state = i.level == TH_SHUTDOWN ? "powering off, too hot"
+                        : i.level == TH_WARN   ? "warm, screen dimmed, radios off"
+                        : i.blind              ? "no sensor answers, the heat is not watched"
                                                : "normal";
-    snprintf(out, cap, "Temperature watch: %s\nBoard %s  \xE2\x80\xA2  chip %s\nWarns at 50 C, switches off at 60 C or on a "
+    snprintf(out, cap, "Temperature watch: %s\nBoard %s  \xE2\x80\xA2  processor %s\nWarns at 50 \xC2\xB0""C, powers off at 60 \xC2\xB0""C or on a "
                        "fast rise.", state, board, die);
 }
 
@@ -83,8 +83,9 @@ static lv_obj_t *build_battery(void) {
                     "the holders may not take protected cells.");
     menu_note(menu, "\xE2\x80\xA2 Keep metal away from the battery contacts. A short there can start a fire.");
     menu_note(menu, "\xE2\x80\xA2 Warm, swollen or smelly batteries: unplug, take them out, move away.");
-    menu_note(menu, "The only thing Lichen can do is watch the temperature: it warns, dims the screen, and switches "
+    menu_note(menu, "The only thing Lichen can do is watch the temperature: it warns, dims the screen, and powers "
                     "the badge off when it gets too hot.");
+    shell_page_hint(screen, "Up/Down", "scroll", NULL);
     lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, menu);
     lv_timer_t *timer = lv_timer_create(refresh, REFRESH_MS, status_label);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, timer);

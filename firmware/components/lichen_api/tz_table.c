@@ -15,6 +15,8 @@ static tz_entry_t const zones[] = {
     {"Auckland", "NZST-12NZDT,M9.5.0,M4.1.0/3"},
 };
 
+_Static_assert(sizeof(zones) / sizeof(zones[0]) <= TZ_MAX, "raise TZ_MAX: Settings has a row slot per zone");
+
 size_t tz_count(void) {
     return sizeof(zones) / sizeof(zones[0]);
 }

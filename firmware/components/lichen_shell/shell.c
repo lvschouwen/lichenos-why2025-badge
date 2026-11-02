@@ -542,6 +542,16 @@ void shell_boot_screen(lv_display_t *display) {
 
 #define RESTART_FRAME_MS 700
 
+static char restart_note[160];
+
+void shell_restart_note(char const *text) {
+    snprintf(restart_note, sizeof(restart_note), "%s", text ? text : "");
+}
+
+char const *shell_restart_note_get(void) {
+    return restart_note;
+}
+
 void shell_show_restarting(void) {
     if (!lv_display_get_default() || !lvgl_port_lock(300)) {
         return;
@@ -553,6 +563,7 @@ void shell_show_restarting(void) {
     }
     lv_obj_t *screen = lv_obj_create(NULL);
     lv_obj_t *label  = screen ? lv_label_create(screen) : NULL;
+    lv_obj_t *note   = label && restart_note[0] ? lv_label_create(screen) : NULL;
     if (!label) {
         if (screen) {
             lv_obj_delete(screen);
@@ -564,7 +575,18 @@ void shell_show_restarting(void) {
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_style_text_font(label, lichen_font(LICHEN_FONT_LARGE), 0);
     lv_label_set_text(label, "Restarting...");
-    lv_obj_center(label);
+    if (note) { // e.g. the factory reset's dark minute: said on the frame the user sees last
+        lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(screen, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_row(screen, 24, 0);
+        lv_obj_set_width(note, LV_PCT(100));
+        lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_align(note, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(note, lv_color_hex(THEME_AMBER), 0);
+        lv_label_set_text(note, restart_note);
+    } else {
+        lv_obj_center(label);
+    }
     lv_screen_load(screen); // the old screens stay: the restart frees everything
     lv_refr_now(NULL);
     lvgl_port_unlock();

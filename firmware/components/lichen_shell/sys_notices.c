@@ -60,10 +60,10 @@ static void body_for(sysn_event_t e, sysn_snapshot_t const *s, sd_info_t const *
     case SYSN_STORAGE_LOW:
         sd_fmt_size(s->storage_free, a, sizeof(a));
         sd_fmt_size(s->storage_total, b, sizeof(b));
-        snprintf(out, cap, "%s free of %s on the storage drive.", a, b);
+        snprintf(out, cap, "%s free of %s on the internal storage.", a, b);
         break;
     case SYSN_STORAGE_UNMOUNTED:
-        snprintf(out, cap, "The drive did not mount and was not formatted, so nothing on it is lost. MeshCore stays off.");
+        snprintf(out, cap, "The internal storage did not mount and was not formatted, so nothing on it is lost. MeshCore stays off.");
         break;
     default: break;
     }

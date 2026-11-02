@@ -98,8 +98,7 @@ static lv_obj_t *page_create(void) {
 }
 
 static lv_obj_t *add_text(lv_obj_t *parent, char const *text, uint32_t color, lv_font_t const *font) {
-    lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_t *label = lichen_label_wrap(parent, LV_PCT(100));
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
     if (font) {
         lv_obj_set_style_text_font(label, font, 0);
@@ -129,7 +128,7 @@ static lv_obj_t *build_entry(void) {
     }
     lv_obj_t *screen = page_create();
     notes_render(screen, s_notes[s_shown].text, s_notes[s_shown].date);
-    add_text(screen, "Up/Down: scroll \xE2\x80\xA2 Esc: back", THEME_AMBER, NULL);
+    shell_page_hint(screen, "Up/Down", "scroll", NULL);
     lv_obj_add_event_cb(screen, on_page_key, LV_EVENT_KEY, NULL);
     return screen;
 }
@@ -146,7 +145,7 @@ static lv_obj_t *build_new(void) {
     for (size_t i = 0; i < fresh; i++) {
         notes_render(screen, s_notes[i].text, s_notes[i].date);
     }
-    add_text(screen, "Up/Down: scroll \xE2\x80\xA2 Enter: continue", THEME_AMBER, NULL);
+    shell_page_hint(screen, "Up/Down", "scroll", "Enter", "continue", NULL);
     lv_obj_add_event_cb(screen, on_new_key, LV_EVENT_KEY, NULL);
     mark_seen();
     return screen;
@@ -174,7 +173,7 @@ static void open_notes(lv_obj_t *screen) {
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
     lv_obj_t *menu = menu_create(screen, "Release notes");
     if (!s_count) {
-        menu_note(menu, "No release notes in this build.");
+        menu_empty(menu, "release notes", NULL);
         return;
     }
     // Row texts in PSRAM for as long as the list is open
@@ -190,7 +189,7 @@ static void open_notes(lv_obj_t *screen) {
         snprintf(rows[i].value, sizeof(rows[i].value), "%s%s", fresh ? "new  " : "", s_notes[i].date);
         menu_add(menu, rows[i].title, rows[i].value, on_note, (void *)(intptr_t)i);
     }
-    menu_note(menu, "Enter opens a note. The newest is first.");
+    shell_page_hint(screen, "Enter", "open", NULL);
     mark_seen(); // looking at the list counts as seen; the rows above still say "new"
 }
 

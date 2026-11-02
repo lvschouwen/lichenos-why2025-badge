@@ -113,7 +113,7 @@ int main(void) {
 
     char text[16];
     idle_choice_text(0, text, sizeof(text));
-    CHECK(strcmp(text, "off") == 0);
+    CHECK(strcmp(text, "Off") == 0);
     idle_choice_text(3, text, sizeof(text));
     CHECK(strcmp(text, "30 s") == 0);
     idle_choice_text(6, text, sizeof(text));

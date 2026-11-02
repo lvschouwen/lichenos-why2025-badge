@@ -264,7 +264,7 @@ static void render(state_t const *s) {
             color  = THEME_TEAL;
             break;
         case PH_FAILED:
-            status = "Update failed";
+            status = "Update failed: the new version did not install";
             color  = THEME_RED;
             break;
         default:
@@ -273,7 +273,7 @@ static void render(state_t const *s) {
             } else if (s->firmware && s->total && s->done >= s->total) {
                 status = "Checking the update...";
             } else if (pct >= 0) {
-                snprintf(text, sizeof(text), "%d %%", pct);
+                snprintf(text, sizeof(text), "%d%%", pct);
                 status = text;
             } else {
                 snprintf(text, sizeof(text), "%lu KB", (unsigned long)(s->done / 1024)); // total unknown
@@ -284,7 +284,10 @@ static void render(state_t const *s) {
     lv_obj_set_style_text_color(status_label, lv_color_hex(color), 0);
     lv_bar_set_value(bar, s->phase == PH_FAILED ? 0 : (s->phase == PH_IDLE || pct < 0 ? 0 : pct), LV_ANIM_OFF);
     bool busy = s->phase == PH_RECEIVING || s->phase == PH_RESTARTING;
-    lv_obj_set_hidden(hint_label, !busy);
+    bool failed = s->phase == PH_FAILED;
+    set_text(hint_label, failed ? "The badge still runs the old version. Start the update again from your computer."
+                                : "Don't turn off the badge");
+    lv_obj_set_hidden(hint_label, !(busy || failed));
 }
 
 static void finish_screen(uint32_t gen) {

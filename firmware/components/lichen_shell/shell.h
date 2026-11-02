@@ -48,6 +48,10 @@ void shell_boot_screen(lv_display_t *display);
 // A "Restarting" frame (#39), drawn synchronously right before a soft restart and held ~0.7 s so it can be read (#134). Any task; gives
 // up after 300 ms if LVGL is busy (a restart must never wait on the UI).
 void shell_show_restarting(void);
+// A line for the restart frame and the goodbye screen of the restart that follows ("The screen stays dark for up to a
+// minute"): what the user must know before the panel goes dark (R10, #138). NULL clears it; copied. Any task.
+void shell_restart_note(char const *text);
+char const *shell_restart_note_get(void);
 // The keyboard comes up after the C6 (C6 EN resets its chip), so later than the screen
 void shell_attach_keys(lv_indev_t *keys);
 // Update mode (#76): deletes every screen below the top one, home included, so their LVGL objects are freed. The top

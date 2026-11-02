@@ -1,5 +1,5 @@
 // Files (#71): browse /storage and the SD card, see free space, read text files a screen at a time, delete (after a
-// careful question) and copy between the two volumes. Up/Down select, Enter opens, Del deletes, C copies to the other
+// careful question) and copy between the two volumes. Up/Down select, Enter opens, Backspace deletes, C copies to the other
 // volume, Esc goes up a folder (and out of the app at the top). All file work runs on files_job.c's task; this file is
 // the screens. The OS's own files (MeshCore identity and contacts, staged C6 images, ...) are listed but locked: the
 // rules are files_model.c's and files_ops.c enforces them too.
@@ -98,7 +98,7 @@ static void add_volume_rows(void) {
     volume_value(1, values[1], sizeof(values[1]));
     menu_add(s_v.menu, "Internal storage", values[0], on_row, (void *)(intptr_t)0);
     menu_add(s_v.menu, "SD card", values[1], on_row, (void *)(intptr_t)1);
-    menu_note(s_v.menu, "Enter: open \xE2\x80\xA2 Esc: back");
+    shell_page_hint(s_v.screen, "Enter", "open", NULL);
 }
 
 static void add_entry_rows(void) {
@@ -115,12 +115,9 @@ static void add_entry_rows(void) {
         menu_add(s_v.menu, label, value, on_row, (void *)(intptr_t)i);
     }
     if (!s_v.count) {
-        menu_note(s_v.menu, "Empty.");
+        menu_empty(s_v.menu, "files", "copy some here from the other drive");
     }
-    char const *other = files_volume_of(s_v.dir) && !strcmp(files_volume_of(s_v.dir), FILES_SD) ? "internal" : "SD card";
-    static char hint[96];
-    snprintf(hint, sizeof(hint), "Enter: open \xE2\x80\xA2 Del: delete \xE2\x80\xA2 C: copy to %s \xE2\x80\xA2 Esc: up", other);
-    menu_note(s_v.menu, hint);
+    shell_page_hint(s_v.screen, "Enter", "open", "Backspace", "delete", "C", "copy", NULL);
 }
 
 static bool focused_index(int *out);
@@ -133,13 +130,12 @@ static void fill_menu(void) {
     }
     lv_group_t *previous = lv_group_get_default();
     lv_group_set_default(s_v.group);
-    s_v.menu = menu_create(s_v.screen, "Files");
+    // In a folder the path names the page (R1): "Files" small over it, the free space as a dim line
+    s_v.menu = s_v.dir[0] ? menu_create_named(s_v.screen, "Files", s_v.dir) : menu_create(s_v.screen, "Files");
     s_v.note = menu_note(s_v.menu, s_v.message);
     lv_obj_set_style_text_color(s_v.note, lv_color_hex(THEME_AMBER), 0);
     if (s_v.dir[0]) {
-        static char head[FILES_PATH_MAX + 80];
-        snprintf(head, sizeof(head), "%s  \xE2\x80\xA2  %s", s_v.dir, s_v.space);
-        menu_note(s_v.menu, head);
+        menu_note(s_v.menu, s_v.space);
         add_entry_rows();
     } else {
         add_volume_rows();
@@ -167,7 +163,7 @@ static void list_done(files_job_result_t const *r) {
     clear_message();
     if (r->result != FILES_OK) {
         char msg[96];
-        snprintf(msg, sizeof(msg), "Cannot read this folder: %s", strerror(r->err));
+        snprintf(msg, sizeof(msg), "Can't read this folder (%s). Try again, or check the card.", strerror(r->err));
         say(msg);
         s_v.dir[0] = '\0'; // back to the volume list
         s_v.count  = 0;
@@ -217,8 +213,8 @@ static void show_page(files_job_result_t const *r) {
     lv_label_set_text(s_t->text, s_t->page_text[0] ? s_t->page_text : "(empty)");
     char hint[96], size[16];
     size_text(r->file_size, size, sizeof(size));
-    snprintf(hint, sizeof(hint), "%s%u of %s \xE2\x80\xA2 Up/Down: page \xE2\x80\xA2 Esc: back",
-             s_t->binary ? "Binary data. " : "", (unsigned)(s_t->page + 1), size);
+    snprintf(hint, sizeof(hint), "%sPage %u \xE2\x80\xA2 %s", s_t->binary ? "Binary data. " : "",
+             (unsigned)(s_t->page + 1), size);
     lv_label_set_text(s_t->hint, hint);
 }
 
@@ -274,18 +270,16 @@ static lv_obj_t *build_view(void) {
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUS_KEY);
-    lv_obj_t *title = lv_label_create(screen);
-    lv_obj_set_width(title, LV_PCT(100));
-    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_label_set_text(title, strrchr(s_t->path, '/') + 1);
+    lichen_heading(screen, "File", strrchr(s_t->path, '/') + 1); // the name wraps to two lines (R1, R2)
     s_t->text = lv_label_create(screen);
     lv_obj_set_width(s_t->text, LV_PCT(100));
     lv_label_set_text(s_t->text, "Reading...");
     s_t->poll = lv_timer_create(view_poll, POLL_MS, NULL);
     s_t->hint = lv_label_create(screen);
     lv_obj_set_width(s_t->hint, LV_PCT(100));
-    lv_obj_set_style_text_color(s_t->hint, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_text_color(s_t->hint, lv_color_hex(THEME_DIM), 0); // page and size; messages turn it amber
     lv_label_set_text(s_t->hint, "");
+    shell_page_hint(screen, "Up/Down", "page", NULL);
     lv_group_add_obj(lv_group_get_default(), screen);
     lv_obj_add_event_cb(screen, on_view_key, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(screen, on_view_delete, LV_EVENT_DELETE, NULL);
@@ -323,6 +317,10 @@ static void on_row(void *arg) {
         return;
     }
     if (!s_v.dir[0]) {
+        if (index && !s_v.root.have[1]) { // no card: say what to do, instead of a failed read
+            say("No SD card. Insert one, then see Settings > SD card.");
+            return;
+        }
         snprintf(s_v.dir, sizeof(s_v.dir), "%s", index ? FILES_SD : FILES_STORAGE);
         list_dir();
         return;
@@ -335,7 +333,7 @@ static void on_row(void *arg) {
         snprintf(s_v.dir, sizeof(s_v.dir), "%s", path);
         list_dir();
     } else if (files_secret(path)) {
-        say("Secret: this one is not shown.");
+        say("This file holds secrets, so it is not shown.");
     } else {
         open_view(path);
     }
@@ -359,12 +357,10 @@ static void ask_delete(size_t index) {
     snprintf(title, sizeof(title), "Delete %s%s?", files_job_entries()[index].name,
              files_job_entries()[index].dir ? " (folder)" : "");
     shell_dialog_t const d = {
-        .title        = title,
-        .count_prefix = "(cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: delete \xE2\x80\xA2 Esc: keep",
-        .seconds      = ASK_SECONDS,
-        .careful      = true,
+        .title         = title,
+        .seconds       = ASK_SECONDS,
+        .careful       = true,
+        .confirm_label = "delete",
     };
     shell_dialog_countdown(&d, delete_answer);
 }
@@ -378,7 +374,7 @@ static void start_copy(size_t index) {
     if (e->dir) {
         say(files_result_text(FILES_ERR_NOT_FILE));
     } else if (files_secret(src)) {
-        say("Secret: this one is not copied.");
+        say("This file holds secrets, so it is not copied.");
     } else if (!files_path_join(files_other_volume(files_volume_of(src)), e->name, dst, sizeof(dst))) {
         say(files_result_text(FILES_ERR_ARG));
     } else if (files_job_start(FJ_COPY, src, dst, 0)) {
@@ -457,7 +453,7 @@ static void progress_tick(void) {
     files_job_progress(&done, &total);
     if (s_v.note && total && !strncmp(lv_label_get_text(s_v.note), "Copying", 7)) {
         char msg[96];
-        snprintf(msg, sizeof(msg), "Copying %u%%  (Esc cancels)", (unsigned)((uint64_t)done * 100 / total));
+        snprintf(msg, sizeof(msg), "Copying %u%%. Esc: cancel", (unsigned)((uint64_t)done * 100 / total));
         say(msg);
     }
 }

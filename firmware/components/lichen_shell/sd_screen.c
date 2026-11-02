@@ -177,12 +177,10 @@ static void format_second_answer(bool yes) {
 
 static void format_first_answer(bool yes) {
     shell_dialog_t const d = {
-        .title        = "Sure? All files on the card are lost.",
-        .count_prefix = "(cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: format now · Esc: cancel",
-        .seconds      = ASK_SECONDS,
-        .careful      = true,
+        .title         = "Sure? All files on the card are lost.",
+        .seconds       = ASK_SECONDS,
+        .careful       = true,
+        .confirm_label = "format now",
     };
     if (!yes || !ask(&d, format_second_answer)) {
         format_cancelled();
@@ -193,12 +191,10 @@ static void on_format(void *arg) {
     (void)arg;
     sd_info_t            info;
     shell_dialog_t const d = {
-        .title        = "Erases everything on the card. Format as LICHEN?",
-        .count_prefix = "(cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: continue · Esc: cancel",
-        .seconds      = ASK_SECONDS,
-        .careful      = true,
+        .title         = "Erases everything on the card. Format as LICHEN?",
+        .seconds       = ASK_SECONDS,
+        .careful       = true,
+        .confirm_label = "continue",
     };
     if (actions_now(&info).format_enabled && !ask(&d, format_first_answer)) {
         format_cancelled();
