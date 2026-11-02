@@ -141,7 +141,24 @@ static void test_boxes(void) {
     CHECK(d.x1 == 379 && d.x2 == 421 && d.y1 == 279 && d.y2 == 321);
 }
 
+static void test_layout(void) {
+    // The Clock app (#122): 664 px of content under the status bar, a 30 px date line and a 22 px source line
+    sc_layout_t l = sc_layout(688, 640, 30, 22);
+    CHECK(l.dial_d > 0 && l.dial_d % 2 == 0);
+    CHECK(l.dial_d <= 688 && l.dial_d <= 640);
+    CHECK(l.line1_y >= l.dial_top + l.dial_d);
+    CHECK(l.line2_y >= l.line1_y + 30);
+    CHECK(l.line2_y + 22 <= 640); // everything fits
+    // A wide area is bounded by the height, a tall one by the width
+    CHECK(sc_layout(2000, 640, 30, 22).dial_d == l.dial_d);
+    CHECK(sc_layout(300, 2000, 30, 22).dial_d == 300);
+    // No room: no dial, never negative
+    CHECK(sc_layout(688, 40, 30, 22).dial_d == 0);
+    CHECK(sc_layout(0, 0, 30, 22).dial_d == 0);
+}
+
 int main(void) {
+    test_layout();
     test_schedule();
     test_polar();
     test_dims();

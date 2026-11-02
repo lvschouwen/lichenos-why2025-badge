@@ -55,3 +55,12 @@ sc_box_t sc_bar_box(int32_t cx, int32_t cy, int32_t a, int32_t w, int32_t r0, in
 
 // The box around a disc of radius dr whose centre is r from (cx, cy) at angle a, grown by pad
 sc_box_t sc_disc_box(int32_t cx, int32_t cy, int32_t a, int32_t r, int32_t dr, int32_t pad);
+
+// Where the dial and its two text lines go in an area of w x h (the Clock app, #122): the dial centred at the top, the
+// largest that leaves room for both lines (heights line1_h and line2_h) under it. y is from the area's top. dial_d is
+// even; 0 when there is no room for a dial (SC_MIN_DIAL).
+#define SC_MIN_DIAL 64
+typedef struct {
+    int32_t dial_d, dial_top, line1_y, line2_y;
+} sc_layout_t;
+sc_layout_t sc_layout(int32_t w, int32_t h, int32_t line1_h, int32_t line2_h);

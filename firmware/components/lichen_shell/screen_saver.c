@@ -232,9 +232,6 @@ static void saver_close(void) {
         saver_timer = NULL;
     }
     lv_obj_delete(old);
-    if (saver_style == SAVER_STYLE_STATION) {
-        saver_station_delete();
-    }
 }
 
 void screen_saver_show(bool on) {

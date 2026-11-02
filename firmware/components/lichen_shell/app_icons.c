@@ -158,3 +158,25 @@ void icon_files(lv_obj_t *parent, int size_px) {
     lv_obj_set_style_bg_opa(body, LV_OPA_COVER, 0);
     lv_obj_align(body, LV_ALIGN_CENTER, 0, h / 8);
 }
+
+// Clock (#122): a white station-clock face on the tile, the hour hand to 3, the minute hand to 12, a red centre
+static void icon_bar(lv_obj_t *parent, int w, int h, int x, int y, uint32_t color, int radius) {
+    lv_obj_t *b = lv_obj_create(parent);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, w, h);
+    lv_obj_set_style_radius(b, radius, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_align(b, LV_ALIGN_CENTER, x, y);
+}
+
+void icon_clock(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    int face = size_px * 11 / 16, t = size_px >= 64 ? 4 : 2;
+    icon_bar(parent, face, face, 0, 0, 0xFFFFFF, LV_RADIUS_CIRCLE);
+    icon_bar(parent, t, face * 3 / 8 + t, 0, -face * 3 / 16, 0x111111, 0);       // minute hand, up
+    icon_bar(parent, face / 4 + t, t + t / 2, face / 8, 0, 0x111111, 0);          // hour hand, right
+    icon_bar(parent, t * 2, t * 2, 0, 0, 0xD8101C, LV_RADIUS_CIRCLE);            // the red centre
+}

@@ -9,10 +9,9 @@
 typedef enum { SAVER_STYLE_STATION = 0, SAVER_STYLE_DIGITAL = 1 } saver_style_t;
 
 // The Swiss railway style station clock (saver_station.c, #119), built on the saver screen; LVGL task. false: no PSRAM
-// for the dial (nothing was added; the caller shows the seven-segment clock instead).
+// for the dial (nothing was added; the caller shows the seven-segment clock instead). The view stops and frees itself
+// when the saver screen is deleted (station_view.h).
 bool saver_station_create(lv_obj_t *screen);
-// After the saver screen was deleted: stops the sweep and frees the dial
-void saver_station_delete(void);
 
 // screen_saver.c, for both styles: the date line ("~ " first when the time is unverified); false and "Clock not set"
 // when the clock is not set

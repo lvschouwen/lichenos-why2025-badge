@@ -12,3 +12,4 @@ void icon_notify(lv_obj_t *parent, int size_px);
 void icon_power(lv_obj_t *parent, int size_px);
 void icon_notes(lv_obj_t *parent, int size_px); // Release notes (#13)
 void icon_files(lv_obj_t *parent, int size_px);
+void icon_clock(lv_obj_t *parent, int size_px); // Clock (#122)

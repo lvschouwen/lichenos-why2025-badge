@@ -11,7 +11,7 @@ Like a lichen, which is a fungus and an alga living as one, the badge has two ch
   plus our LoRa service for the SX1262. It has no application logic. The P4 flashes it at boot when its image
   changes.
 
-Apps are built in: **MeshCore** (the first app), Settings and About Lichen. You can't download apps. More on the design
+Apps are built in: **MeshCore** (the first app), Clock (a Swiss railway style station clock), Settings and About Lichen. You can't download apps. More on the design
 in [docs/architecture.md](docs/architecture.md) and [docs/shell-design.md](docs/shell-design.md).
 
 On the badge it's simply called Lichen. It started as a fork of

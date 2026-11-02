@@ -79,3 +79,19 @@ sc_box_t sc_disc_box(int32_t cx, int32_t cy, int32_t a, int32_t r, int32_t dr, i
     sc_point_t p = sc_polar(cx, cy, a, r);
     return (sc_box_t){p.x - dr - pad, p.y - dr - pad, p.x + dr + pad, p.y + dr + pad};
 }
+
+#define LAYOUT_EDGE 8 // free above the dial and below the last line
+#define LAYOUT_GAP  8 // dial to the first line
+
+sc_layout_t sc_layout(int32_t w, int32_t h, int32_t line1_h, int32_t line2_h) {
+    int32_t d = h - 2 * LAYOUT_EDGE - LAYOUT_GAP - line1_h - line2_h;
+    if (d > w) {
+        d = w;
+    }
+    d &= ~1;
+    if (d < SC_MIN_DIAL) {
+        return (sc_layout_t){0};
+    }
+    int32_t y1 = LAYOUT_EDGE + d + LAYOUT_GAP;
+    return (sc_layout_t){d, LAYOUT_EDGE, y1, y1 + line1_h};
+}

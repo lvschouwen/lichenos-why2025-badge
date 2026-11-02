@@ -1,0 +1,104 @@
+// Clock (#122): the Swiss railway style station clock (station_view.c, shared with the screensaver, #119) as a home
+// screen app: the dial sized to the content under the status bar, the date under it and, small, where the clock's time
+// comes from and how old that is (lichen_clock). The idle rules still apply: the screensaver may start over it. Without
+// PSRAM for the dial it shows the time as plain text. Only the OS API: nav and theme, time through lichen_clock.
+#include "app_icons.h"
+#include "fonts.h"
+#include "lichen_app.h"
+#include "lichen_clock.h"
+#include "saver_station.h"
+#include "shell_parts.h"
+#include "station_view.h"
+#include "theme.h"
+
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
+
+// "SNTP, 3 min ago", "mesh, ..."; "approximate" when only an app has set it (unverified), "not set"
+static void source_line(char *out, size_t cap) {
+    char src[48];
+    clock_source_text(src, sizeof(src));
+    snprintf(out, cap, "%s%s", src, clock_is_approximate() ? " (approximate)" : "");
+}
+
+static void update_source(lv_obj_t *line) {
+    char text[80];
+    source_line(text, sizeof(text));
+    if (strcmp(lv_label_get_text(line), text) != 0) {
+        lv_label_set_text(line, text);
+    }
+}
+
+// The fallback when the dial cannot be built: HH:MM:SS and the date in one label, once a second
+static void text_tick(lv_timer_t *t) {
+    lv_obj_t *label = lv_timer_get_user_data(t);
+    char      date[48], text[100];
+    time_t    now = time(NULL);
+    struct tm local;
+    bool      ok = saver_date_text(date, sizeof(date)) && localtime_r(&now, &local);
+    if (ok) {
+        snprintf(text, sizeof(text), "%02d:%02d:%02d\n%s", local.tm_hour, local.tm_min, local.tm_sec, date);
+    } else {
+        snprintf(text, sizeof(text), "%s", date);
+    }
+    if (strcmp(lv_label_get_text(label), text) != 0) {
+        lv_label_set_text(label, text);
+    }
+}
+
+static void on_text_delete(lv_event_t *e) {
+    lv_timer_delete(lv_event_get_user_data(e)); // before the label goes with its screen
+}
+
+static void open_text_clock(lv_obj_t *screen) {
+    lv_obj_t *label = lv_label_create(screen);
+    lv_obj_set_style_text_font(label, lichen_font(LICHEN_FONT_LARGE), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(THEME_TEXT), 0);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_label_set_text(label, "");
+    lv_timer_t *timer = lv_timer_create(text_tick, 1000, label);
+    lv_obj_add_event_cb(screen, on_text_delete, LV_EVENT_DELETE, timer);
+    text_tick(timer);
+}
+
+static void open_clock(lv_obj_t *screen) {
+    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_update_layout(screen);
+    int32_t line1_h = lv_font_get_line_height(lichen_font(LICHEN_FONT_LARGE));
+    int32_t line2_h = lv_font_get_line_height(lichen_font(LICHEN_FONT_SMALL));
+    station_view_cfg_t cfg = {
+        .layout       = sc_layout(lv_obj_get_content_width(screen), lv_obj_get_content_height(screen), line1_h, line2_h),
+        .line2_font   = LICHEN_FONT_SMALL,
+        .line2_color  = THEME_DIM,
+        .update_line2 = update_source,
+    };
+    if (!station_view_create(screen, &cfg)) {
+        open_text_clock(screen);
+    }
+}
+
+static bool clock_tile(char *l1, size_t c1, char *l2, size_t c2) {
+    time_t    now = time(NULL);
+    struct tm local;
+    if (!clock_is_set() || !localtime_r(&now, &local)) {
+        return false;
+    }
+    snprintf(l1, c1, "%s%02d:%02d", clock_is_approximate() ? "~" : "", local.tm_hour, local.tm_min);
+    snprintf(l2, c2, "station clock");
+    return true;
+}
+
+static lichen_app_t const clock_app = {
+    .name      = "Clock",
+    .id        = "clock",
+    .draw_icon = icon_clock,
+    .tile_text = clock_tile,
+    .open      = open_clock,
+};
+
+void clock_app_register(void) {
+    lichen_register_app(&clock_app);
+}
