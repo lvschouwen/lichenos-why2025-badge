@@ -11,6 +11,7 @@
 #include "esp_timer.h"
 #include "log_tap.h"
 #include "logo.h"
+#include "lvgl_private.h" // lv_indev_t.long_pr_sent: a key repeat, not a press (no public getter in LVGL 9)
 #include "shell_parts.h"
 #include "fonts.h"
 #include "theme.h"
@@ -152,6 +153,12 @@ static void apply_view(void) {
 
 static void on_key(lv_event_t *e) {
     (void)e;
+    // A held key comes again every repeat period once LVGL's long press has passed: only the press itself switches,
+    // else a held arrow flickers between the two views (#128)
+    lv_indev_t *indev = lv_indev_active();
+    if (indev && indev->long_pr_sent) {
+        return;
+    }
     show_details = !show_details;
     apply_view();
 }
