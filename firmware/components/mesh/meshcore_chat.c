@@ -174,8 +174,11 @@ static void show_counter(chat_t *c) {
 static void tick(lv_timer_t *t) {
     chat_t  *c = lv_timer_get_user_data(t);
     uint32_t generation;
-    // The chat's own ring (#59), read with mark_read: the chat is on screen, so it counts as read (#48)
-    size_t n = mesh_chat_snapshot(&c->target.key, c->copy, SHOW_MESSAGES, &generation, true, SCREEN_WAIT_MS);
+    // The chat's own ring (#59), read with mark_read while the chat is on screen: then it counts as read (#48). Not
+    // under the screensaver or lock cover, nor with another screen on top such as the notification centre (#127):
+    // nobody reads it there.
+    bool   shown = c->screen == lv_screen_active();
+    size_t n     = mesh_chat_snapshot(&c->target.key, c->copy, SHOW_MESSAGES, &generation, shown, SCREEN_WAIT_MS);
     if (n == MESH_BUSY) {
         return;
     }
