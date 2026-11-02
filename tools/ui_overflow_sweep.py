@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Long-text sweep (#133): walk the badge's screens over Wi-Fi and run "fw ui overflow" on each.
 
-Usage: tools/ui_overflow_sweep.py <badge-ip> [--only NAME] [--list]
+Usage: tools/ui_overflow_sweep.py <badge-ip> [--only NAME] [--list] [--try NAME]
+  Runs only the screens marked verified; --try runs one unverified screen so its sequence can be checked and marked.
   Exit 0: every screen clean. 1: at least one label overflows. 2: a screen could not be driven or read.
   Needs the OTA token like tools/badge.sh (see its header). Talks to the badge only through "badge.sh fw <ip> ...".
 
@@ -30,27 +31,27 @@ import sys
 
 HOME = "esc esc esc esc esc"  # backs out of any depth; Esc on home does nothing (UNVERIFIED)
 
-# (name, key sequence from home). All UNVERIFIED: tile order and menu rows are guesses. Opening only: no sequence may
+# (name, key sequence from home, verified). A sequence is only run by default once it was walked by hand on the bench and
+# set to True (#133 review: a guessed Enter can land on Update now, Send advert or Login). Settings > Updates and a
+# contact's detail page are left out: their rows act on Enter. All UNVERIFIED: tile order and menu rows are guesses. Opening only: no sequence may
 # press Enter on a send/transmit/radio action. Region & radio, TX power and Custom radio are deliberately not visited.
 SCREENS = [
-    ("home", ""),
-    ("settings", "right enter"),
-    ("settings/display", "right enter down enter"),
-    ("settings/sound", "right enter down down enter"),
-    ("settings/wifi list", "right enter down down down enter"),
-    ("settings/notifications", "right enter down down down down enter"),
-    ("settings/sd card", "right enter down down down down down enter"),
-    ("settings/updates", "right enter down down down down down down enter"),
-    ("files", "right right enter"),
-    ("files/first folder", "right right enter down enter"),
-    ("release notes", "right right right enter"),
-    ("notify centre", "right right right right enter"),
-    ("mesh app", "down enter"),
-    ("mesh/contacts", "down enter enter"),
-    ("mesh/contact detail", "down enter enter enter"),
-    ("mesh/repeaters", "down enter down enter"),
-    ("mesh/channels", "down enter down down enter"),
-    ("mesh/chat (#badgetest)", "down enter down down enter enter"),
+    ("home", "", False),
+    ("settings", "right enter", False),
+    ("settings/display", "right enter down enter", False),
+    ("settings/sound", "right enter down down enter", False),
+    ("settings/wifi list", "right enter down down down enter", False),
+    ("settings/notifications", "right enter down down down down enter", False),
+    ("settings/sd card", "right enter down down down down down enter", False),
+    ("files", "right right enter", False),
+    ("files/first folder", "right right enter down enter", False),
+    ("release notes", "right right right enter", False),
+    ("notify centre", "right right right right enter", False),
+    ("mesh app", "down enter", False),
+    ("mesh/contacts", "down enter enter", False),
+    ("mesh/repeaters", "down enter down enter", False),
+    ("mesh/channels", "down enter down down enter", False),
+    ("mesh/chat (#badgetest)", "down enter down down enter enter", False),
 ]
 
 BADGE_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "badge.sh")
@@ -84,14 +85,23 @@ def main():
     ap.add_argument("ip")
     ap.add_argument("--only", help="run just the screens whose name contains this")
     ap.add_argument("--list", action="store_true", help="print the screen table and exit")
+    ap.add_argument("--try", dest="try_name", metavar="NAME",
+                    help="run ONE unverified screen (exact name) to check its sequence by hand, then mark it verified")
     args = ap.parse_args()
     if args.list:
-        for name, seq in SCREENS:
-            print(f"{name:28} {seq}")
+        for name, seq, ok in SCREENS:
+            print(f"{name:28} {'verified  ' if ok else 'UNVERIFIED'} {seq}")
         return 0
     hits, errors = 0, 0
-    for name, seq in SCREENS:
-        if args.only and args.only not in name:
+    skipped = 0
+    for name, seq, ok in SCREENS:
+        if args.try_name:
+            if name != args.try_name:
+                continue
+        elif args.only and args.only not in name:
+            continue
+        elif not ok:
+            skipped += 1
             continue
         try:
             count, detail = check_screen(args.ip, name, seq)
@@ -108,7 +118,7 @@ def main():
         fw(args.ip, f"keys send {HOME}")
     except (RuntimeError, subprocess.TimeoutExpired):
         pass
-    print(f"total: {hits} overflowing label(s), {errors} screen(s) not read")
+    print(f"total: {hits} overflowing label(s), {errors} screen(s) not read, {skipped} unverified screen(s) skipped")
     return 2 if errors else (1 if hits else 0)
 
 
