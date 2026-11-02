@@ -14,7 +14,14 @@ static char const *const keep_keys[] = {
     "upd_from",                                        // the "updated from" note after an update
     "batt_seen", "thermal_shed",                       // battery and thermal safety (#10)
     "clock_src",                                       // where the running clock's time came from (#64)
-    "mc_advlast",                                      // the last advert: the airtime limit holds across a reset (#52)
+    "mc_advlast",                                      // MeshCore's last advert before #123 (adopted into a.meshcore)
+};
+
+// App keys that describe the badge's airtime rather than a choice: kept like keep_keys, the rest of the app's
+// namespace goes. MeshCore's last advert, so the advert interval (#52) holds across a reset and a reset loop never
+// floods; it lives in a.meshcore since #123.
+static char const *const keep_app_keys[][2] = {
+    {"a.meshcore", "mc_advlast"},
 };
 
 static char const *const keep_files[] = {"c6", "lora.toml"};
@@ -55,6 +62,11 @@ bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level) 
         return false;
     }
     if (strncmp(ns, "a.", 2) == 0 && ns[2]) {
+        for (size_t i = 0; i < sizeof(keep_app_keys) / sizeof(keep_app_keys[0]); i++) {
+            if (strcmp(ns, keep_app_keys[i][0]) == 0 && strcmp(key, keep_app_keys[i][1]) == 0) {
+                return false;
+            }
+        }
         return true; // an app's own settings (lichen_settings.h)
     }
     if (strncmp(ns, "badgevms_", 9) == 0 || strcmp(ns, "backlight") == 0) {

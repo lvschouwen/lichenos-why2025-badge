@@ -56,6 +56,27 @@ bool app_settings_set_u8(lichen_app_t const *app, char const *key, uint8_t value
     return commit_close(app, key, nvs, nvs_set_u8(nvs, key, value));
 }
 
+uint32_t app_settings_get_u32(lichen_app_t const *app, char const *key, uint32_t def) {
+    nvs_handle_t nvs;
+    if (!open_app(app, NVS_READONLY, &nvs)) {
+        return def;
+    }
+    uint32_t value = def;
+    if (nvs_get_u32(nvs, key, &value) != ESP_OK) {
+        value = def;
+    }
+    nvs_close(nvs);
+    return value;
+}
+
+bool app_settings_set_u32(lichen_app_t const *app, char const *key, uint32_t value) {
+    nvs_handle_t nvs;
+    if (!open_app(app, NVS_READWRITE, &nvs)) {
+        return false;
+    }
+    return commit_close(app, key, nvs, nvs_set_u32(nvs, key, value));
+}
+
 uint64_t app_settings_get_u64(lichen_app_t const *app, char const *key, uint64_t def) {
     nvs_handle_t nvs;
     if (!open_app(app, NVS_READONLY, &nvs)) {
@@ -120,52 +141,99 @@ bool app_settings_erase_all(lichen_app_t const *app) {
     return commit_close(app, "(all)", nvs, nvs_erase_all(nvs));
 }
 
-// Only for APP_ADOPT_DROP_LEGACY: the app's namespace already holds the key, as read back from NVS
-static void drop_legacy(lichen_app_t const *app, char const *key) {
-    nvs_handle_t nvs;
-    esp_err_t    err = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+// ---- adopting keys an earlier firmware kept in badge_fw (app_adopt_run) -------------------------------------------
+
+typedef struct {
+    lichen_app_t const *app;
+    char const         *key;
+    bool                wide; // u32, else u8
+} adopt_ctx_t;
+
+static bool nvs_get_typed(nvs_handle_t nvs, adopt_ctx_t const *c, uint32_t *value) {
+    if (c->wide) {
+        return nvs_get_u32(nvs, c->key, value) == ESP_OK;
+    }
+    uint8_t v8 = 0;
+    bool    ok = nvs_get_u8(nvs, c->key, &v8) == ESP_OK;
+    *value     = v8;
+    return ok;
+}
+
+static bool adopt_get_app(void *ctx, uint32_t *value) {
+    adopt_ctx_t const *c = ctx;
+    nvs_handle_t       nvs;
+    if (!open_app(c->app, NVS_READONLY, &nvs)) {
+        return false;
+    }
+    bool ok = nvs_get_typed(nvs, c, value);
+    nvs_close(nvs);
+    return ok;
+}
+
+static bool adopt_get_legacy(void *ctx, uint32_t *value) {
+    adopt_ctx_t const *c = ctx;
+    nvs_handle_t       nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    bool ok = nvs_get_typed(nvs, c, value);
+    nvs_close(nvs);
+    return ok;
+}
+
+static bool adopt_set_app(void *ctx, uint32_t value) {
+    adopt_ctx_t const *c = ctx;
+    return c->wide ? app_settings_set_u32(c->app, c->key, value) : app_settings_set_u8(c->app, c->key, (uint8_t)value);
+}
+
+static bool adopt_erase_app(void *ctx) {
+    adopt_ctx_t const *c = ctx;
+    return app_settings_erase(c->app, c->key);
+}
+
+static bool adopt_erase_legacy(void *ctx) {
+    adopt_ctx_t const *c   = ctx;
+    nvs_handle_t       nvs;
+    esp_err_t          err = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
-        err = nvs_erase_key(nvs, key);
+        err = nvs_erase_key(nvs, c->key);
         if (err == ESP_OK) {
             err = nvs_commit(nvs);
         }
         nvs_close(nvs);
     }
-    ESP_LOG_LEVEL(err == ESP_OK ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s: old %s/%s erased (%s)", app->id,
-                  FW_NVS_NAMESPACE, key, esp_err_to_name(err));
+    ESP_LOG_LEVEL(err == ESP_OK ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s: old %s/%s erased (%s)", c->app->id,
+                  FW_NVS_NAMESPACE, c->key, esp_err_to_name(err));
+    return err == ESP_OK;
+}
+
+static bool adopt(lichen_app_t const *app, char const *key, bool wide) {
+    if (!app || !app->id) {
+        return false;
+    }
+    adopt_ctx_t    ctx = {.app = app, .key = key, .wide = wide};
+    app_adopt_io_t io  = {
+         .ctx          = &ctx,
+         .get_app      = adopt_get_app,
+         .get_legacy   = adopt_get_legacy,
+         .set_app      = adopt_set_app,
+         .erase_app    = adopt_erase_app,
+         .erase_legacy = adopt_erase_legacy,
+    };
+    uint32_t      legacy = 0;
+    app_adopted_t done   = app_adopt_run(&io, &legacy);
+    if (done == APP_ADOPTED_COPIED || done == APP_ADOPTED_COPY_FAILED) {
+        bool ok = done == APP_ADOPTED_COPIED;
+        ESP_LOG_LEVEL(ok ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s: %s=%lu adopted from %s (%s)", app->id, key,
+                      (unsigned long)legacy, FW_NVS_NAMESPACE, ok ? "saved" : "failed, tried again next boot");
+    }
+    return done == APP_ADOPTED_COPIED;
 }
 
 bool app_settings_adopt_u8(lichen_app_t const *app, char const *key) {
-    nvs_handle_t nvs;
-    uint8_t      value       = 0;
-    uint8_t      legacy      = 0;
-    bool         have_app    = false;
-    bool         have_legacy = false;
-    if (open_app(app, NVS_READONLY, &nvs)) {
-        have_app = nvs_get_u8(nvs, key, &value) == ESP_OK;
-        nvs_close(nvs);
-    }
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        have_legacy = nvs_get_u8(nvs, key, &legacy) == ESP_OK;
-        nvs_close(nvs);
-    }
-    app_adopt_t plan = app_adopt_plan(have_app, have_legacy);
-    if (plan == APP_ADOPT_DROP_LEGACY) {
-        drop_legacy(app, key);
-    }
-    if (plan != APP_ADOPT_COPY) {
-        return false;
-    }
-    bool ok = app_settings_set_u8(app, key, legacy);
-    ESP_LOG_LEVEL(
-        ok ? ESP_LOG_INFO : ESP_LOG_WARN,
-        TAG,
-        "%s: %s=%u adopted from %s (%s)",
-        app->id,
-        key,
-        legacy,
-        FW_NVS_NAMESPACE,
-        ok ? "saved" : "failed"
-    );
-    return ok;
+    return adopt(app, key, false);
+}
+
+bool app_settings_adopt_u32(lichen_app_t const *app, char const *key) {
+    return adopt(app, key, true);
 }

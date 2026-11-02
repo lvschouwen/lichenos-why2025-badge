@@ -6,6 +6,7 @@
 #include "lichen_app.h"
 #include "lora.h"
 #include "mc_first.h"
+#include "mesh_advert_cfg.h"
 #include "menu.h"
 #include "mesh.h"
 #include "meshcore_run.h"
@@ -349,7 +350,12 @@ void meshcore_app_settings_open(void) {
 // ---- the background part -----------------------------------------------------------------------------------------
 
 static bool start_background(void) {
-    app_settings_adopt_u8(self(), "mc_name_set"); // before #84 T5 in Lichen's namespace; erased there once adopted
+    // Kept in Lichen's namespace by earlier firmware (mc_name_set before #84 T5, the advert schedule before #123): copied
+    // once with the same value, erased there on a later boot
+    app_settings_adopt_u8(self(), "mc_name_set");
+    app_settings_adopt_u32(self(), ADV_KEY_INTERVAL);
+    app_settings_adopt_u32(self(), ADV_KEY_LAST);
+    app_settings_adopt_u8(self(), ADV_KEY_FLOOD);
     return meshcore_run_boot(); // start at boot on: started here, as before; off: only the console commands (#103)
 }
 
@@ -386,7 +392,7 @@ static void open_messages(void) {
 
 static lichen_app_t const meshcore_app = {
     .name             = "MeshCore",
-    .id               = "meshcore",
+    .id               = MESHCORE_APP_ID,
     .draw_icon        = icon,
     .tile_text        = tile_text,
     .open             = open,

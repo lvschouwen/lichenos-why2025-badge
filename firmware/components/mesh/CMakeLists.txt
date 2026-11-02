@@ -23,8 +23,8 @@ set(COMPANION_SRCS
     ${MC}/examples/companion_radio/MyMesh.cpp ${MC}/examples/companion_radio/DataStore.cpp)
 # The app's allowlist (#84 T9, docs/app-api.md): Lichen's app API and services, the radio, the console, and plain
 # libraries. The build is the check: a header from any other component does not resolve. Two exceptions, each with
-# its follow-up: nvs_flash (the legacy badge_fw/identity hand-over, kept as is by decision, and the advert keys
-# mc_advint/mc_advlast/mc_advfl still in badge_fw: move them to a.meshcore) and sdcard (the message journal's
+# its follow-up: nvs_flash (only the legacy badge_fw/identity hand-over in migrate_identity, kept as is by decision:
+# lichen_legacy_blob_take; the advert keys moved to a.meshcore in #123) and sdcard (the message journal's
 # sd_begin/sd_end batches on /sd/lichen/messages, #98: an SD batch call in lichen_fs.h). Results of the settings jobs
 # reach the LVGL task through lichen_ui_call (#84 T8a), so esp_lvgl_port is not needed.
 set(MESH_REQUIRES lichen_api lichen_clock lichen_random lora fw_console freertos esp_timer heap mbedtls

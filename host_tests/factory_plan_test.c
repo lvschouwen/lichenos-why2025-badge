@@ -35,6 +35,9 @@ static void settings_go_at_both_levels(void) {
         CHECK(factory_nvs_erases("badge_fw", settings[i], A));
     }
     CHECK(factory_nvs_erases("a.meshcore", "first_run", S));
+    CHECK(factory_nvs_erases("a.meshcore", "mc_advint", S)); // the advert settings go with the app's (#123)
+    CHECK(factory_nvs_erases("a.meshcore", "mc_advfl", A));
+    CHECK(factory_nvs_erases("a.other", "mc_advlast", A));   // only MeshCore's own last advert is kept
     CHECK(factory_nvs_erases("a.x", "k", A));
 }
 
@@ -46,6 +49,9 @@ static void badge_state_stays(void) {
         CHECK(!factory_nvs_erases("badge_fw", keep[i], S));
         CHECK(!factory_nvs_erases("badge_fw", keep[i], A));
     }
+    // MeshCore's last advert since #123: the advert interval holds across a reset (#52)
+    CHECK(!factory_nvs_erases("a.meshcore", "mc_advlast", S));
+    CHECK(!factory_nvs_erases("a.meshcore", "mc_advlast", A));
 }
 
 static void identity_only_at_all(void) {

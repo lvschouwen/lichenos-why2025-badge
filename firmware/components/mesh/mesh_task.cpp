@@ -34,12 +34,13 @@
 #include "lichen_fs.h"
 #include "lichen_notify.h"
 #include "lichen_radio.h"
+#include "lichen_settings.h"
 #include "mesh_notify_run.h"
 #include "lichen_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "nvs.h"
+#include "nvs.h" // only the legacy badge_fw/identity hand-over (migrate_identity)
 
 extern "C" {
 #include "console_cmd.h" // CONSOLE_WIFI_CMD_MAX
@@ -203,7 +204,7 @@ static uint32_t     tile_advert_s; // uptime + 1 of our last advert, 0 for none 
 static portMUX_TYPE tile_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // The periodic advert (#52), under tile_mux: the settings' copy, when the last went out and when the next is due
-// (Unix seconds, 0 for none). Stored in NVS (adv_load / adv_store_*): the schedule survives restarts, so a badge that
+// (Unix seconds, 0 for none). Stored in the app's settings (adv_load): the schedule survives restarts, so a badge that
 // is on for an hour a day still advertises once per interval and a reboot loop never floods.
 static struct {
     uint32_t interval_min = ADVCFG_INTERVAL_DEFAULT;
@@ -1228,27 +1229,18 @@ extern "C" char const *mesh_contact_import(uint8_t const *pkt, size_t len, char 
 
 // ---- our adverts (#52) ---------------------------------------------------------------------------------------------
 
-static void adv_nvs_put_u32(char const *key, uint32_t v) {
-    nvs_handle_t h;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
-        if (nvs_set_u32(h, key, v) != ESP_OK || nvs_commit(h) != ESP_OK) {
-            ESP_LOGE(TAG, "%s not saved", key);
-        }
-        nvs_close(h);
-    }
+// The advert keys live in the app's settings (a.meshcore) since #123; meshcore_app.c's start_background adopts them
+// from badge_fw before the first start
+static lichen_app_t const *adv_app(void) {
+    return lichen_app_by_id(MESHCORE_APP_ID);
 }
 
 // At start, before the task runs
 static void adv_load(void) {
-    nvs_handle_t h;
-    uint32_t     interval = ADVCFG_INTERVAL_DEFAULT, last = 0;
-    uint8_t      flood = 0;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
-        nvs_get_u32(h, "mc_advint", &interval);
-        nvs_get_u32(h, "mc_advlast", &last);
-        nvs_get_u8(h, "mc_advfl", &flood);
-        nvs_close(h);
-    }
+    lichen_app_t const *app      = adv_app();
+    uint32_t            interval = app_settings_get_u32(app, ADV_KEY_INTERVAL, ADVCFG_INTERVAL_DEFAULT);
+    uint32_t            last     = app_settings_get_u32(app, ADV_KEY_LAST, 0);
+    uint8_t             flood    = app_settings_get_u8(app, ADV_KEY_FLOOD, 0);
     if (!advcfg_interval_ok(interval)) {
         interval = ADVCFG_INTERVAL_DEFAULT;
     }
@@ -1289,7 +1281,7 @@ static char const *advert_tx_locked(bool flood) {
     adv.last_epoch   = epoch;
     adv.next_epoch   = advcfg_next_due(adv.interval_min, epoch, epoch); // the interval counts from any advert
     portEXIT_CRITICAL(&tile_mux);
-    adv_nvs_put_u32("mc_advlast", epoch);
+    app_settings_set_u32(adv_app(), ADV_KEY_LAST, epoch); // logs when it fails
     return NULL;
 }
 
@@ -1394,7 +1386,7 @@ extern "C" char const *mesh_set_advert_interval(uint32_t minutes) {
     }
     adv.next_epoch  = next;
     portEXIT_CRITICAL(&tile_mux);
-    adv_nvs_put_u32("mc_advint", minutes);
+    app_settings_set_u32(adv_app(), ADV_KEY_INTERVAL, minutes);
     return NULL;
 }
 
@@ -1402,12 +1394,7 @@ extern "C" char const *mesh_set_advert_manual_flood(bool flood) {
     portENTER_CRITICAL(&tile_mux);
     adv.flood_manual = flood;
     portEXIT_CRITICAL(&tile_mux);
-    nvs_handle_t h;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
-        nvs_set_u8(h, "mc_advfl", flood ? 1 : 0);
-        nvs_commit(h);
-        nvs_close(h);
-    }
+    app_settings_set_u8(adv_app(), ADV_KEY_FLOOD, flood ? 1 : 0);
     return NULL;
 }
 

@@ -6,6 +6,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // A Lichen app (#66): MeshCore, Settings, About. Everything with an lv_obj_t runs in LVGL's context (core 1);
 // start_background runs from main.c on core 0. Any member except name may be NULL.
 // tile_text is called every second from the LVGL task for each app on home: it must be quick (copy a cached string under
@@ -53,3 +57,7 @@ void lichen_register_app(lichen_app_t const *app);
 size_t lichen_app_count(void);
 lichen_app_t const *lichen_app_at(size_t index);
 lichen_app_t const *lichen_app_by_id(char const *id); // NULL when no registered app has that id
+
+#ifdef __cplusplus
+}
+#endif

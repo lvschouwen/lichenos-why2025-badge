@@ -7,8 +7,8 @@
 // does the erasing at the next boot, before anything else reads NVS or the storage drive.
 //
 // Settings: NVS only. In Lichen's namespace (badge_fw) every key goes except FACTORY_KEEP_KEYS, the badge's own
-// hardware and health record; every app namespace ("a.<id>") goes; any other namespace (a library's) is not ours and
-// stays. Not NVS at all and never touched: otadata (which app slot boots), the app slots, phy_init, coredump, assets.
+// hardware and health record; every app namespace ("a.<id>") goes, except MeshCore's last advert (the airtime limit);
+// any other namespace (a library's) is not ours and stays. Not NVS at all and never touched: otadata (which app slot boots), the app slots, phy_init, coredump, assets.
 // Everything: erased from flash, not just unlinked (the badge has no flash encryption, and a badge handed on must not
 // keep the old MeshCore private key). The kept NVS entries are read into RAM, the whole nvs partition is erased and
 // they are written back (minus the identity's old NVS copy). The OS's own files on /storage (the C6 image and

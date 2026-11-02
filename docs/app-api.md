@@ -34,7 +34,9 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
 - `menu.h`, `menu_filter.h`, `list_filter.h`, `scroll_anchor.h`, `text_entry.h`: the shared list, filter and text
   widgets, so every app behaves the same under the keyboard.
 - `theme.h`, `fonts.h`: Lichen's colours, sizes and fonts. Use them instead of literals.
-- `lichen_settings.h`: the app's own NVS namespace `a.<id>` (u8, u64, strings, erase, erase all). Never open NVS.
+- `lichen_settings.h`: the app's own NVS namespace `a.<id>` (u8, u32, u64, strings, erase, erase all), and adopting a
+  key an earlier firmware kept in `badge_fw` (`app_settings_adopt_u8/_u32`: copied once and read back, the old key
+  erased on a later boot). Never open NVS.
 - `lichen_fs.h`: the app's directory `/storage/<id>` and, with a card in, `/sd/lichen/apps/<id>`; drive sizes. Never
   name a path outside them.
 - `lichen_notify.h`: raise a notification (toast, history, unread dot); from any task.
@@ -90,8 +92,8 @@ in `firmware/build/badge_fw.map`) and refuses:
 
 MeshCore still `PRIV_REQUIRES` two components past the list; each has its follow-up:
 
-- `nvs_flash`: the legacy `badge_fw/identity` hand-over (kept as it is, by decision) and the advert keys `mc_advint`,
-  `mc_advlast`, `mc_advfl` still in `badge_fw` (move them to `a.meshcore`).
+- `nvs_flash`: only the legacy `badge_fw/identity` hand-over (kept as it is, by decision; `lichen_legacy_blob_take`).
+  The advert keys `mc_advint`, `mc_advlast`, `mc_advfl` moved to `a.meshcore` (#123), adopted like `mc_name_set`.
 - `sdcard`: the message journal's `sd_begin`/`sd_end` batches on `/sd/lichen/messages` (#98; an SD batch call in
   `lichen_fs.h`).
 
