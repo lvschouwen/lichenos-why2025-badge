@@ -204,8 +204,14 @@ static void on_trace_again(void *arg) {
     trace_start();
 }
 
+static lv_obj_t *trace_screen; // the result screen that owns trace_mem and trace_timer
+
 static void on_trace_delete(lv_event_t *e) {
-    (void)e;
+    // A late delete of an older result screen must not free what a newer one owns
+    if (lv_event_get_target(e) != trace_screen) {
+        return;
+    }
+    trace_screen = NULL;
     if (trace_timer) {
         lv_timer_delete(trace_timer);
         trace_timer = NULL;
@@ -222,6 +228,11 @@ static lv_obj_t *build_trace(void) {
              title[0] ? title : "(no name)");
     lv_obj_t *menu = menu_create(screen, head);
     lv_obj_add_event_cb(screen, on_trace_delete, LV_EVENT_DELETE, NULL);
+    trace_screen = screen;
+    if (trace_timer) {
+        lv_timer_delete(trace_timer);
+        trace_timer = NULL;
+    }
     heap_caps_free(trace_mem);
     trace_mem = heap_caps_calloc(1, sizeof(*trace_mem), MALLOC_CAP_SPIRAM);
     trace_seq        = 0;

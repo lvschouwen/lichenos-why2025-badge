@@ -319,7 +319,12 @@ static bool stage_one(char const *rel, staged_t *s) {
     char        path[96];
     struct stat st;
     snprintf(path, sizeof(path), STORAGE_BASE "/%s", rel);
-    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0 || (size_t)st.st_size > STAGED_MAX) {
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) {
+        return false;
+    }
+    if ((size_t)st.st_size > STAGED_MAX) {
+        ESP_LOGE(TAG, "%s is %ld bytes, over the %u staging limit: not kept, push it again (badge.sh ota-c6)", rel,
+                 (long)st.st_size, (unsigned)STAGED_MAX);
         return false;
     }
     FILE *f = fopen(path, "rb");
