@@ -135,6 +135,9 @@ void rs_on_unsent(rs_t *s, char const *why);
 // What a row shows: the value (and unit), "..." while unknown or asked, "—" without an answer; "" for the reboot and
 // "change" for the password
 void rs_value_text(rs_t const *s, size_t i, char *out, size_t cap);
+// A raw reply value as a row shows it: the radio as "869.618, 62.5 kHz, SF7, CR5", the decimal rows to a fixed number
+// of places (#131); anything else, or text that does not parse, as it is (trimmed)
+void rs_format_value(size_t i, char const *raw, char *out, size_t cap);
 // The value as the edit field starts with it ("" when none)
 void rs_edit_text(rs_t const *s, size_t i, char *out, size_t cap);
 // How many readable rows are read (answered or not), of how many

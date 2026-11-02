@@ -168,6 +168,12 @@ static void radio_values(char *out, size_t cap, float freq, float bw, uint8_t sf
              marked ? LV_SYMBOL_OK " " : "", freq, bw, sf, cr);
 }
 
+// The value on a preset or custom row: next to a long title only the frequency fits (#131); the rest is in the
+// confirmation and on the Custom radio page
+static void radio_short(char *out, size_t cap, float freq, bool marked) {
+    snprintf(out, cap, "%s%.3f", marked ? LV_SYMBOL_OK " " : "", freq);
+}
+
 static void set_note(lv_obj_t *note, char const *text, bool problem) {
     if (note) {
         lv_label_set_text(note, text);
@@ -451,11 +457,11 @@ static void marks_refresh(void) {
     char text[80];
     for (size_t i = 0; i < radio_preset_count() && i < MAX_PRESETS; i++) {
         radio_preset_t const *p = radio_preset_at(i);
-        radio_values(text, sizeof(text), p->freq_mhz, p->bw_khz, p->sf, p->cr, (int)i == cur);
+        radio_short(text, sizeof(text), p->freq_mhz, (int)i == cur);
         menu_set_value(preset_rows[i], text);
     }
     if (cur < 0) {
-        radio_values(text, sizeof(text), s.freq, s.bw, s.sf, s.cr, true);
+        radio_short(text, sizeof(text), s.freq, true);
         menu_set_value(custom_row, text);
     } else {
         menu_set_value(custom_row, "");

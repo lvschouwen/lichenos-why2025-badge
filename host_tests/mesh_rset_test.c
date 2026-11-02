@@ -316,7 +316,44 @@ static void stops_and_retries(void) {
     CHECK(!s.stopped && rs_busy(&s) && s.misses == 0);
 }
 
+// The repeater's raw floats show with a fixed precision, the radio as the badge shows its own (#131)
+static void formatting(void) {
+    char text[RS_VALUE_MAX];
+    rs_format_value(row("radio"), "869.6179809,62.5,7,5", text, sizeof(text));
+    CHECK(strcmp(text, "869.618, 62.5 kHz, SF7, CR5") == 0);
+    rs_format_value(row("radio"), "910.525,250,10,8", text, sizeof(text));
+    CHECK(strcmp(text, "910.525, 250 kHz, SF10, CR8") == 0);
+    rs_format_value(row("radio"), "garbage", text, sizeof(text));
+    CHECK(strcmp(text, "garbage") == 0);
+    rs_format_value(row("lat"), "52.3702011", text, sizeof(text));
+    CHECK(strcmp(text, "52.3702") == 0);
+    rs_format_value(row("lon"), "-4.9", text, sizeof(text));
+    CHECK(strcmp(text, "-4.9000") == 0);
+    rs_format_value(row("af"), "1", text, sizeof(text));
+    CHECK(strcmp(text, "1.00") == 0);
+    rs_format_value(row("txdelay"), "0.5000001", text, sizeof(text));
+    CHECK(strcmp(text, "0.50") == 0);
+    rs_format_value(row("rxdelay"), "0", text, sizeof(text));
+    CHECK(strcmp(text, "0.00") == 0);
+    rs_format_value(row("name"), "  Keep as is ", text, sizeof(text));
+    CHECK(strcmp(text, "Keep as is") == 0);
+
+    rs_t s;
+    rs_init(&s);
+    s.st[row("radio")] = RS_V_VALUE;
+    snprintf(s.value[row("radio")], RS_VALUE_MAX, "869.6179809,62.5,7,5");
+    rs_value_text(&s, row("radio"), text, sizeof(text));
+    CHECK(strcmp(text, "869.618, 62.5 kHz, SF7, CR5") == 0);
+    rs_edit_text(&s, row("radio"), text, sizeof(text));
+    CHECK(strcmp(text, "869.618,62.5,7,5") == 0 && rs_check(row("radio"), text) == NULL);
+    s.st[row("lat")] = RS_V_VALUE;
+    snprintf(s.value[row("lat")], RS_VALUE_MAX, "52.3702011");
+    rs_edit_text(&s, row("lat"), text, sizeof(text));
+    CHECK(strcmp(text, "52.3702011") == 0); // editing keeps the full value
+}
+
 int main(void) {
+    formatting();
     rows();
     checks();
     commands();

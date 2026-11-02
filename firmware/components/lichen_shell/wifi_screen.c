@@ -190,6 +190,8 @@ static void decorate(lv_obj_t *row, wifi_ap_t const *ap) {
     lv_obj_t *name = lv_obj_get_child(row, 0);
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
     lv_obj_set_flex_grow(name, 1);
+    // The row's empty value label would take half the free width as well (#131)
+    lv_obj_add_flag(lv_obj_get_child(row, 1), LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *box = lv_obj_create(row);
     lv_obj_remove_style_all(box);

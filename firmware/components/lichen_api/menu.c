@@ -14,6 +14,10 @@
 #define ROW_GAP     10
 #define SLIDER_W    300
 #define SLIDER_STEPS 20
+// Share of the row a label may take before its value gets squeezed to nothing (#131): the value keeps the rest. A
+// slider row also holds the slider (300 px) and a 64 px value, which leaves about a third of the 602 px content width.
+#define LABEL_MAX_PCT        68
+#define LABEL_MAX_PCT_SLIDER 34
 #define SCROLL_STEP  96
 
 typedef struct {
@@ -145,8 +149,11 @@ lv_obj_t *menu_create(lv_obj_t *parent, char const *title) {
     lv_obj_set_scrollbar_mode(menu, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(menu, LV_DIR_VER);
     shell_scroll_tame(menu); // it scrolls only when the rows don't fit (focus moves it), never past them
-    lv_obj_t *heading = lv_label_create(menu);
+    // One line at the content width, "..." when the name does not fit: "Settings: <a repeater's name>" ran off the
+    // screen (#131). The font goes on before the line height is taken.
+    lv_obj_t *heading = lichen_label_line(menu, LV_PCT(100));
     lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
+    lichen_label_line_fit(heading);
     lv_obj_set_style_pad_bottom(heading, 8, 0);
     lv_label_set_text(heading, title);
     return menu;
@@ -210,7 +217,7 @@ static lv_obj_t *add_row(lv_obj_t *menu, char const *label_text, char const *val
     int32_t line_h = lv_font_get_line_height(lv_obj_get_style_text_font(r, LV_PART_MAIN));
     lv_obj_t *label = lv_label_create(r);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_max_width(label, LV_PCT(100), 0);
+    lv_obj_set_style_max_width(label, value_text && value_text[0] ? LV_PCT(LABEL_MAX_PCT) : LV_PCT(100), 0);
     lv_obj_set_height(label, line_h);
     lv_label_set_text(label, label_text);
     row->value = lv_label_create(r);
@@ -273,6 +280,7 @@ lv_obj_t *menu_add_slider(lv_obj_t *menu, char const *label, int min, int max, i
     lv_obj_set_style_outline_width(row->slider, 0, LV_STATE_ANY);
     lv_obj_set_style_text_align(row->value, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_width(row->value, 64);
+    lv_obj_set_style_max_width(lv_obj_get_child(r, 0), LV_PCT(LABEL_MAX_PCT_SLIDER), 0); // else a long label pushes the slider out
     return r;
 }
 
@@ -280,6 +288,9 @@ void menu_set_value(lv_obj_t *row, char const *value) {
     row_t *r = row ? lv_obj_get_user_data(row) : NULL;
     if (r) {
         lv_label_set_text(r->value, value);
+        if (!r->slider) { // an empty value gives the label the full row, one that appears leaves it room (#131)
+            lv_obj_set_style_max_width(lv_obj_get_child(row, 0), value && value[0] ? LV_PCT(LABEL_MAX_PCT) : LV_PCT(100), 0);
+        }
     }
 }
 

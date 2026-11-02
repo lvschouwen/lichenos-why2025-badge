@@ -635,6 +635,39 @@ void rs_on_unsent(rs_t *s, char const *why) {
     end_current(s);
 }
 
+// Decimals each fractional row shows (#131): the repeater prints raw floats ("869.6179809", "52.3702011"). 4 on lat/lon
+// is about 10 m, the other rows have two or three significant places.
+static int dec_places(char const *key) {
+    return strcmp(key, "lat") == 0 || strcmp(key, "lon") == 0 ? 4 : 2;
+}
+
+void rs_format_value(size_t i, char const *raw, char *out, size_t cap) {
+    if (!cap) {
+        return;
+    }
+    char v[RS_VALUE_MAX];
+    if (i >= RS_ROWS || !trimmed(raw, v, sizeof(v))) {
+        snprintf(out, cap, "%s", raw);
+        return;
+    }
+    rs_row_t const *row = &ROWS[i];
+    if (row->kind == RS_RADIO) {
+        float   f, bw;
+        uint8_t sf, cr;
+        if (rs_radio_parse(v, &f, &bw, &sf, &cr)) {
+            snprintf(out, cap, "%.3f, %g kHz, SF%u, CR%u", (double)f, (double)bw, sf, cr); // as the badge shows its own
+            return;
+        }
+    } else if (row->kind == RS_DEC) {
+        double d;
+        if (whole_number(v, &d)) {
+            snprintf(out, cap, "%.*f", dec_places(row->key), d);
+            return;
+        }
+    }
+    snprintf(out, cap, "%s", v);
+}
+
 void rs_value_text(rs_t const *s, size_t i, char *out, size_t cap) {
     if (i >= RS_ROWS || !cap) {
         return;
@@ -645,8 +678,10 @@ void rs_value_text(rs_t const *s, size_t i, char *out, size_t cap) {
     } else if (row->kind == RS_PASSWORD) {
         snprintf(out, cap, "change");
     } else if (s->st[i] == RS_V_VALUE) {
-        bool unit = row->unit && s->value[i][0];
-        snprintf(out, cap, "%s%s%s", s->value[i], unit ? " " : "", unit ? row->unit : "");
+        char shown[RS_VALUE_MAX];
+        rs_format_value(i, s->value[i], shown, sizeof(shown));
+        bool unit = row->unit && shown[0];
+        snprintf(out, cap, "%s%s%s", shown, unit ? " " : "", unit ? row->unit : "");
     } else if (s->st[i] == RS_V_NONE) {
         snprintf(out, cap, "\xE2\x80\x94"); // an em dash: no answer
     } else {
@@ -658,7 +693,20 @@ void rs_edit_text(rs_t const *s, size_t i, char *out, size_t cap) {
     if (!cap) {
         return;
     }
-    snprintf(out, cap, "%s", i < RS_ROWS && s->st[i] == RS_V_VALUE ? s->value[i] : "");
+    if (i >= RS_ROWS || s->st[i] != RS_V_VALUE) {
+        out[0] = 0;
+    } else if (ROWS[i].kind == RS_RADIO) {
+        // The edit field starts from the readable form, the same four numbers rs_check takes
+        float   f, bw;
+        uint8_t sf, cr;
+        if (rs_radio_parse(s->value[i], &f, &bw, &sf, &cr)) {
+            snprintf(out, cap, "%.3f,%g,%u,%u", (double)f, (double)bw, sf, cr);
+        } else {
+            snprintf(out, cap, "%s", s->value[i]);
+        }
+    } else {
+        snprintf(out, cap, "%s", s->value[i]);
+    }
 }
 
 void rs_progress(rs_t const *s, size_t *done, size_t *total) {
