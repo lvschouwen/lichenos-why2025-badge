@@ -75,7 +75,9 @@ tools/badge.sh flash-fw <port> --no-storage   # later USB updates: keeps /storag
 Leave out `--no-storage` only on the first install: it rewrites `/storage`, and with it MeshCore's identity, contacts
 and channels.
 
-After that, update over Wi-Fi (the update server runs whenever Wi-Fi is up; put the token from `fw token` in
+After that, update over Wi-Fi (the update server runs whenever Wi-Fi is up and Settings › Updates over Wi-Fi is on,
+`fw ota on|off`; Settings › Close updates after, or `fw ota auto <minutes|off>`, closes it that long after boot or after
+switching it on, for that boot only, default never; put the token from `fw token` in
 `~/.config/why2025-badge/ota-token`):
 
 ```

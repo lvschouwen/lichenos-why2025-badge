@@ -10,7 +10,13 @@ void ota_server_start(void);
 
 // Settings › Updates over Wi-Fi (#44): off closes port OTA_PORT (and with it the Wi-Fi console); saved in NVS
 bool ota_server_enabled(void);
-void ota_server_set_enabled(bool on);
+void ota_server_set_enabled(bool on); // on also starts the auto-off time again
+// Optional auto-off (#110): closes the server this many minutes after boot or after it was switched on, for this boot
+// only (the setting stays on). 0, the default, never closes. Saved in NVS; a new value counts from now.
+uint8_t ota_server_auto_off(void);
+void    ota_server_set_auto_off(uint8_t minutes);
+// The auto-off closed it this boot (ota_server_enabled() is false then)
+bool    ota_server_auto_closed(void);
 
 // Hooks for a screen that shows what an update is doing (#76). They run on the OTA task (core 0): store numbers, never
 // block, never call LVGL without its lock. Any member may be NULL.

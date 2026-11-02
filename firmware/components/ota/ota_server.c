@@ -22,6 +22,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "ota_autooff.h"
 #include "ota_bmp.h"
 #include "ota_path.h"
 #include "ota_pieces.h"
@@ -70,15 +71,42 @@ static char token[OTA_TOKEN_LEN + 1];
 #define OTA_WIFI_KEY     "ota_wifi"
 #define OTA_WIFI_DEFAULT 1
 static volatile bool server_on;
+// Optional auto-off (#110, ota_autooff.h): minutes after boot or the last switch-on, 0 (the default) never. A close by
+// the timer lasts this boot only and leaves the saved setting on.
+#define OTA_AUTO_KEY "ota_auto_min"
+static volatile uint8_t  auto_min;
+static volatile uint32_t armed_s; // monotonic seconds at boot (0) or at the last switch-on
+static volatile bool     auto_closed;
+
+static long now_s(void);
 
 bool ota_server_enabled(void) {
     return server_on;
 }
 
 void ota_server_set_enabled(bool on) {
+    if (on) {
+        armed_s     = (uint32_t)now_s(); // the auto-off counts from now
+        auto_closed = false;
+    }
     server_on = on;
     settings_set_u8(OTA_WIFI_KEY, on ? 1 : 0);
     ESP_LOGW(TAG, "update server over Wi-Fi switched %s", on ? "on" : "off");
+}
+
+uint8_t ota_server_auto_off(void) {
+    return auto_min;
+}
+
+void ota_server_set_auto_off(uint8_t minutes) {
+    armed_s  = (uint32_t)now_s(); // a new time counts from now, not from boot
+    auto_min = minutes;
+    settings_set_u8(OTA_AUTO_KEY, minutes);
+    ESP_LOGW(TAG, "update server auto-off: %u min (0 = never)", (unsigned)minutes);
+}
+
+bool ota_server_auto_closed(void) {
+    return auto_closed;
 }
 
 // One request at a time
@@ -634,6 +662,17 @@ static void piece_expire(bool now) {
         ESP_LOGW(TAG, "upload in pieces abandoned at %zu of %zu bytes: dropped", staged.got, staged.total);
         hook_end(false, false);
         staged_reset();
+    }
+}
+
+// Closes the server when its auto-off time has passed (#110); never during an upload in pieces. Runs about once a
+// second on this task, between connections (one running upload is never cut).
+static void autooff_check(void) {
+    if (server_on && ota_autooff_due(auto_min, armed_s, (uint32_t)now_s(), staged.active)) {
+        server_on   = false; // this boot only: the saved setting stays on
+        auto_closed = true;
+        ESP_LOGW(TAG, "update server closed by its %u min auto-off (Settings or \"fw ota on\" opens it again)",
+                 (unsigned)auto_min);
     }
 }
 
@@ -1254,6 +1293,10 @@ static int open_listener(void) {
 static void serve(int ls) {
     // Closes with Wi-Fi (the OS switch or airplane mode, #108): the C6 stops answering and the IP is gone
     while (server_on && lichen_radio_get(RADIO_WIFI)) {
+        autooff_check();
+        if (!server_on) {
+            break;
+        }
         struct sockaddr_in peer;
         socklen_t          peer_len = sizeof(peer);
         int                fd       = accept(ls, (struct sockaddr *)&peer, &peer_len);
@@ -1287,6 +1330,7 @@ static void server_task(void *arg) {
         // Wi-Fi may come up late or not at all (no credentials), and the server may be switched off (#44)
         while (!server_on || !lichen_radio_get(RADIO_WIFI) || !wifi_has_ip(NULL, 0)) {
             vTaskDelay(pdMS_TO_TICKS(1000));
+            autooff_check(); // the time runs from boot, with or without Wi-Fi
         }
         int ls = open_listener();
         if (ls < 0) {
@@ -1302,13 +1346,26 @@ static void server_task(void *arg) {
 }
 
 static void cmd_ota(char const *args) {
+    uint8_t minutes;
     if (strcmp(args, "on") == 0 || strcmp(args, "off") == 0) {
         ota_server_set_enabled(args[1] == 'n');
+    } else if (strncmp(args, "auto ", 5) == 0 && ota_autooff_parse(args + 5, &minutes)) {
+        ota_server_set_auto_off(minutes);
     } else if (*args) {
-        console_reply("usage: ota [on|off]");
+        console_reply("usage: ota [on|off | auto <off|1-%d minutes>]", OTA_AUTOOFF_MAX_MIN);
         return;
     }
-    console_reply("update server over Wi-Fi: %s", server_on ? "on" : "off");
+    char     when[16];
+    uint8_t  min  = auto_min;
+    uint32_t left = ota_autooff_left(min, armed_s, (uint32_t)now_s());
+    ota_autooff_text(min, when, sizeof(when));
+    if (server_on && min) {
+        console_reply("update server over Wi-Fi: on, closes after %s (%lu s left)", when, (unsigned long)left);
+    } else if (auto_closed) {
+        console_reply("update server over Wi-Fi: closed by its %s auto-off for this boot (setting on)", when);
+    } else {
+        console_reply("update server over Wi-Fi: %s, auto-off %s", server_on ? "on" : "off", min ? when : "never");
+    }
 }
 
 static void cmd_token(char const *args) {
@@ -1317,8 +1374,12 @@ static void cmd_token(char const *args) {
 }
 
 void ota_server_start(void) {
-    console_register("ota", "ota [on|off] (the update server over Wi-Fi, also Settings)", cmd_ota);
+    console_register("ota", "ota [on|off | auto <off|minutes>] (the update server over Wi-Fi, also Settings)",
+                     cmd_ota);
     server_on = settings_get_u8(OTA_WIFI_KEY, OTA_WIFI_DEFAULT) != 0;
+    uint8_t m = settings_get_u8(OTA_AUTO_KEY, 0);
+    auto_min  = m <= OTA_AUTOOFF_MAX_MIN ? m : 0;
+    armed_s   = (uint32_t)now_s(); // boot
     if (!load_or_create_token()) {
         ESP_LOGE(TAG, "couldn't save the token in %s; it changes on every boot", TOKEN_FILE);
     }

@@ -71,6 +71,14 @@ target_compile_options(ota_proto_test PRIVATE
 
 add_test(NAME ota_proto_test COMMAND ota_proto_test)
 
+add_executable(ota_autooff_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/ota_autooff_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota/ota_autooff.c
+)
+target_include_directories(ota_autooff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota)
+target_compile_options(ota_autooff_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME ota_autooff_test COMMAND ota_autooff_test)
+
 add_executable(ota_pieces_test
     ${CMAKE_CURRENT_SOURCE_DIR}/ota_pieces_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota/ota_pieces.c
@@ -1117,5 +1125,6 @@ add_custom_target(run_tests
     notify_view_test
     sys_notice_rules_test
     mesh_ident_test
+    ota_autooff_test
     COMMENT "Running all host tests"
 )

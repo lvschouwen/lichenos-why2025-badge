@@ -13,6 +13,7 @@
 #include "lichen_radio.h"
 #include "lock_combo.h"
 #include "menu.h"
+#include "ota_autooff.h"
 #include "ota_server.h"
 #include "sdcard.h"
 #include "settings_store.h"
@@ -452,12 +453,32 @@ static void open_app_page(void *arg) {
 }
 
 // Updates over Wi-Fi (#44): Enter switches the update server (and with it the Wi-Fi console) on or off
-static lv_obj_t *ota_row;
+static lv_obj_t *ota_row, *ota_auto_row;
+
+static char const *ota_value(void) {
+    return ota_server_enabled() ? "On" : ota_server_auto_closed() ? "Off (timer)" : "Off";
+}
+
+static void ota_auto_value(char *out, size_t cap) {
+    ota_autooff_text(ota_server_auto_off(), out, cap);
+}
 
 static void ota_row_refresh(void) {
     if (ota_row) {
-        menu_set_value(ota_row, ota_server_enabled() ? "On" : "Off");
+        menu_set_value(ota_row, ota_value());
     }
+    if (ota_auto_row) {
+        char text[16];
+        ota_auto_value(text, sizeof(text));
+        menu_set_value(ota_auto_row, text);
+    }
+}
+
+// The optional auto-off (#110): Enter steps Never, 10 min, 30 min, 1 h, 2 h; it counts from now
+static void step_ota_auto(void *arg) {
+    (void)arg;
+    ota_server_set_auto_off(ota_autooff_next(ota_server_auto_off()));
+    ota_row_refresh();
 }
 
 static void ota_off_answer(bool confirmed) {
@@ -514,7 +535,7 @@ static void toggle_airplane(void *arg) {
 
 static void forget_ota_row(lv_event_t *e) {
     (void)e;
-    ota_row = lora_row = air_row = NULL;
+    ota_row = ota_auto_row = lora_row = air_row = NULL;
 }
 
 static void open_settings(lv_obj_t *screen) {
@@ -524,7 +545,10 @@ static void open_settings(lv_obj_t *screen) {
     menu_note(menu, "Lichen");
     settings_wifi_row = live_row(menu_add(menu, "Wi-Fi", wifi, open_wifi, NULL), false, wifi_value);
     strlcpy(settings_wifi_row.shown, wifi, sizeof(settings_wifi_row.shown));
-    ota_row = menu_add(menu, "Updates over Wi-Fi", ota_server_enabled() ? "On" : "Off", toggle_ota, NULL);
+    ota_row = menu_add(menu, "Updates over Wi-Fi", ota_value(), toggle_ota, NULL);
+    char auto_text[16];
+    ota_auto_value(auto_text, sizeof(auto_text));
+    ota_auto_row = menu_add(menu, "Close updates after", auto_text, step_ota_auto, NULL);
     lora_row = menu_add(menu, "LoRa radio", lichen_radio_get(RADIO_LORA) ? "On" : "Off", toggle_lora, NULL);
     air_row  = menu_add(menu, "Airplane mode", lichen_airplane_get() ? "On" : "Off", toggle_airplane, NULL);
     lv_obj_add_event_cb(screen, forget_ota_row, LV_EVENT_DELETE, NULL);

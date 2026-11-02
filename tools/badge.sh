@@ -339,7 +339,7 @@ ota_curl() {
     local rc=0
     printf 'header = "Authorization: Bearer %s"\n' "$token" |
         curl --config - -sS --fail-with-body --connect-timeout 5 "$@" || rc=$?
-    [ $rc -eq 7 ] && echo "the badge's update server doesn't answer: is Wi-Fi up and Settings › Updates over Wi-Fi on? ('fw ota on' on the USB console)" >&2
+    [ $rc -eq 7 ] && echo "the badge's update server doesn't answer: is Wi-Fi up and Settings › Updates over Wi-Fi on, not closed by its auto-off? ('fw ota' / 'fw ota on' on the USB console)" >&2
     return $rc
 }
 
