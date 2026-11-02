@@ -1,0 +1,185 @@
+// Files app (#71): see files_job.h. A job takes the SD card's batch lock (sd_begin/sd_end) when a path is on /sd, so the
+// card is not unmounted under an open file; the copy holds it for the whole file and checks the cancel flag per chunk.
+#include "files_job.h"
+
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "sdcard.h"
+#include "storage.h"
+
+#include <errno.h>
+#include <stdio.h>
+#include <stdatomic.h>
+#include <string.h>
+
+static char const TAG[] = "files";
+
+#define JOB_STACK    6144
+#define COPY_CHUNK   (32 * 1024)
+#define SD_WAIT_MS   3000
+enum { IDLE, RUNNING, DONE };
+
+static atomic_int  s_state;
+static atomic_bool s_cancel;
+static atomic_uint s_done, s_total;
+
+static struct {
+    files_job_kind_t kind;
+    char             path[FILES_PATH_MAX], dst[FILES_PATH_MAX];
+    uint32_t         offset;
+} s_req;
+static files_job_result_t s_result;
+static files_entry_t     *s_entries; // PSRAM, FILES_MAX_ENTRIES; kept for the next job
+static uint8_t           *s_data;    // PSRAM, FILES_READ_CHUNK
+
+static bool on_sd(char const *path) {
+    return path[0] && files_volume_of(path) && !strcmp(files_volume_of(path), FILES_SD);
+}
+
+static void volume_space(int slot, bool sd) {
+    uint64_t free_bytes = 0, total_bytes = 0;
+    bool     ok;
+    if (sd) {
+        sd_info_t info;
+        sd_info(&info);
+        ok          = info.state == SD_STATE_MOUNTED;
+        free_bytes  = info.free_bytes;
+        total_bytes = info.total_bytes;
+    } else {
+        ok = storage_free_bytes(&free_bytes, &total_bytes);
+    }
+    s_result.have[slot]        = ok;
+    s_result.free_bytes[slot]  = ok ? free_bytes : 0;
+    s_result.total_bytes[slot] = ok ? total_bytes : 0;
+}
+
+static bool copy_progress(uint32_t done, uint32_t total, void *ctx) {
+    (void)ctx;
+    atomic_store(&s_done, done);
+    atomic_store(&s_total, total);
+    return !atomic_load(&s_cancel);
+}
+
+static files_result_t run_copy(void) {
+    uint8_t *buf = heap_caps_malloc(COPY_CHUNK, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        return FILES_ERR_NO_MEM;
+    }
+    uint64_t free_bytes = UINT64_MAX;
+    int      slot       = on_sd(s_req.dst) ? 1 : 0;
+    volume_space(slot, slot == 1);
+    if (s_result.have[slot]) {
+        free_bytes = s_result.free_bytes[slot];
+    }
+    files_result_t r = files_copy(s_req.path, s_req.dst, buf, COPY_CHUNK, free_bytes, copy_progress, NULL);
+    heap_caps_free(buf);
+    return r;
+}
+
+static files_result_t run_list(void) {
+    if (!s_entries) {
+        s_entries = heap_caps_malloc(FILES_MAX_ENTRIES * sizeof(*s_entries), MALLOC_CAP_SPIRAM);
+    }
+    if (!s_entries) {
+        return FILES_ERR_NO_MEM;
+    }
+    s_result.err = files_list(s_req.path, s_entries, FILES_MAX_ENTRIES, &s_result.count, &s_result.skipped);
+    volume_space(0, on_sd(s_req.path));
+    return s_result.err ? FILES_ERR_OPEN : FILES_OK;
+}
+
+static files_result_t run_read(void) {
+    if (!s_data) {
+        s_data = heap_caps_malloc(FILES_READ_CHUNK, MALLOC_CAP_SPIRAM);
+    }
+    return s_data ? files_read_at(s_req.path, s_req.offset, s_data, FILES_READ_CHUNK, &s_result.got, &s_result.file_size)
+                  : FILES_ERR_NO_MEM;
+}
+
+static files_result_t run_kind(void) {
+    switch (s_req.kind) {
+    case FJ_ROOT:
+        volume_space(0, false);
+        volume_space(1, true);
+        return FILES_OK;
+    case FJ_LIST:   return run_list();
+    case FJ_READ:   return run_read();
+    case FJ_DELETE: return files_delete(s_req.path);
+    case FJ_COPY:   return run_copy();
+    }
+    return FILES_ERR_ARG;
+}
+
+static void job_task(void *arg) {
+    (void)arg;
+    memset(&s_result, 0, sizeof(s_result));
+    s_result.kind = s_req.kind;
+    bool need_sd  = on_sd(s_req.path) || on_sd(s_req.dst);
+    bool locked   = need_sd && sd_begin(SD_WAIT_MS);
+    if (need_sd && !locked) {
+        s_result.result = FILES_ERR_OPEN; // no card, or the card is busy
+    } else {
+        errno           = 0;
+        s_result.result = run_kind();
+    }
+    if (locked) {
+        int err = errno;
+        sd_end(s_result.result == FILES_ERR_IO || s_result.result == FILES_ERR_OPEN ? sd_io_from_errno(err) : SD_IO_OK);
+    }
+    ESP_LOGI(TAG, "job %d -> %d, stack margin %u", (int)s_req.kind, (int)s_result.result,
+             (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    atomic_store(&s_state, DONE);
+    vTaskDelete(NULL);
+}
+
+bool files_job_start(files_job_kind_t kind, char const *path, char const *dst, uint32_t offset) {
+    int expected = IDLE;
+    if (!atomic_compare_exchange_strong(&s_state, &expected, RUNNING)) {
+        return false;
+    }
+    s_req.kind   = kind;
+    s_req.offset = offset;
+    snprintf(s_req.path, sizeof(s_req.path), "%s", path ? path : "");
+    snprintf(s_req.dst, sizeof(s_req.dst), "%s", dst ? dst : "");
+    atomic_store(&s_cancel, false);
+    atomic_store(&s_done, 0);
+    atomic_store(&s_total, 0);
+    if (xTaskCreatePinnedToCore(job_task, "filesjob", JOB_STACK, NULL, 4, NULL, 0) != pdPASS) {
+        ESP_LOGW(TAG, "no memory for a file job");
+        atomic_store(&s_state, IDLE);
+        return false;
+    }
+    return true;
+}
+
+bool files_job_take(files_job_result_t *out) {
+    if (atomic_load(&s_state) != DONE) {
+        return false;
+    }
+    *out = s_result;
+    atomic_store(&s_state, IDLE);
+    return true;
+}
+
+bool files_job_busy(void) {
+    return atomic_load(&s_state) == RUNNING;
+}
+
+void files_job_cancel(void) {
+    atomic_store(&s_cancel, true);
+}
+
+void files_job_progress(uint32_t *done, uint32_t *total) {
+    *done  = atomic_load(&s_done);
+    *total = atomic_load(&s_total);
+}
+
+files_entry_t const *files_job_entries(void) {
+    return s_entries;
+}
+
+uint8_t const *files_job_data(void) {
+    return s_data;
+}

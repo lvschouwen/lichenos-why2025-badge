@@ -1,0 +1,59 @@
+#pragma once
+// Files app (#71): the pure rules. Paths, what is protected, how a listing sorts, how a text file is cut into screens.
+// ESP-free, host-tested in host_tests/files_model_test.c; files_ops.c does the file work, app_files.c the screens.
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define FILES_PATH_MAX 256
+#define FILES_NAME_MAX 128 // longer names are left out of the listing (counted as skipped)
+#define FILES_STORAGE  "/storage"
+#define FILES_SD       "/sd"
+
+typedef struct {
+    char     name[FILES_NAME_MAX];
+    uint32_t size; // FAT: a file is under 4 GB
+    bool     dir;
+} files_entry_t;
+
+// A usable absolute path: "/storage" or "/sd", then plain components. No "..", ".", empty or over-long components, no
+// trailing slash, no control characters.
+bool files_path_ok(char const *path);
+// A plain file or directory name: not empty, not "." or "..", no '/', no control characters, fits FILES_NAME_MAX
+bool files_name_ok(char const *name);
+// dir + "/" + name; false (out untouched) for a bad name or when it does not fit
+bool files_path_join(char const *dir, char const *name, char *out, size_t cap);
+// "/storage/a/b" -> "/storage/a"; "/storage" -> "" (the volume list). False for a path that is not ok or already ""
+bool files_path_parent(char const *path, char *out, size_t cap);
+// The volume root a path is on ("/storage" or "/sd"), NULL for anything else
+char const *files_volume_of(char const *path);
+// The other volume's root, for a copy
+char const *files_other_volume(char const *volume);
+
+// Never deleted, overwritten, copied or viewed: the MeshCore identity and contacts, the staged C6 images, the crash
+// log, Lichen's own files, the radio and OTA settings, the volume roots, the card's message history. A path that is
+// not ok counts as protected. Case-insensitive and blind to trailing dots and spaces and to 8.3 "~1" aliases, the way
+// FAT matches names.
+bool files_protected(char const *path);
+
+// Directories first, then names without regard to case, then exactly
+void files_sort(files_entry_t *entries, size_t count);
+
+// ---- text paging --------------------------------------------------------------------------------------------------
+
+// Cuts buf[0..len) into at most `lines` lines of at most `cols` characters for one screen. Newlines end a line (CR is
+// dropped), tabs become spaces, other control bytes and invalid UTF-8 show as '.' / '?'. Valid UTF-8 passes through
+// and is never split. Writes out (NUL-terminated) and sets *consumed to the bytes the screen used (> 0 whenever len > 0
+// and at_eof or len is at least 4 bytes more than a screen needs). at_eof false: a sequence cut off at the end of the
+// buffer is left for the next read. *binary is set when more than a tenth of the bytes were control bytes.
+size_t files_text_page(uint8_t const *buf, size_t len, bool at_eof, int cols, int lines, char *out, size_t cap,
+                       size_t *consumed, bool *binary);
+
+#ifdef __cplusplus
+}
+#endif

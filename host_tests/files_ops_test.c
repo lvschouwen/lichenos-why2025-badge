@@ -1,0 +1,145 @@
+// Host test: Files app file work (#71), run on a temp directory (files_ops.c prefixes paths with files_test_root)
+#include "files_ops.h"
+
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+char files_test_root[256];
+
+static int failures;
+
+#define CHECK(cond)                                                                                                    \
+    do {                                                                                                               \
+        if (!(cond)) {                                                                                                 \
+            printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                                                     \
+            failures++;                                                                                                \
+        }                                                                                                              \
+    } while (0)
+
+static void fpath(char const *p, char *out) {
+    snprintf(out, 512, "%s%s", files_test_root, p);
+}
+
+static void write_file(char const *p, size_t n, char fill) {
+    char rp[512];
+    fpath(p, rp);
+    FILE *f = fopen(rp, "wb");
+    for (size_t i = 0; i < n; i++) {
+        fputc(fill, f);
+    }
+    fclose(f);
+}
+
+static bool exists(char const *p) {
+    char rp[512];
+    struct stat st;
+    fpath(p, rp);
+    return stat(rp, &st) == 0;
+}
+
+static void mkdirp(char const *p) {
+    char rp[512];
+    fpath(p, rp);
+    mkdir(rp, 0700);
+}
+
+static bool stop_at;
+static uint32_t calls;
+static bool progress(uint32_t done, uint32_t total, void *ctx) {
+    (void)ctx;
+    CHECK(done <= total);
+    calls++;
+    return !(stop_at && done >= 100);
+}
+
+static void test_list(void) {
+    files_entry_t e[8];
+    size_t n, skipped;
+    write_file("/storage/b.txt", 5, 'x');
+    write_file("/storage/A.txt", 7, 'x');
+    mkdirp("/storage/zdir");
+    CHECK(files_list("/storage", e, 8, &n, &skipped) == 0 && n == 3 && skipped == 0);
+    CHECK(e[0].dir && !strcmp(e[0].name, "zdir") && !strcmp(e[1].name, "A.txt") && e[1].size == 7);
+    CHECK(files_list("/storage", e, 2, &n, &skipped) == 0 && n == 2 && skipped == 1);
+    CHECK(files_list("/storage/nope", e, 8, &n, &skipped) == ENOENT);
+    CHECK(files_list("/etc", e, 8, &n, &skipped) == EINVAL);
+}
+
+static void test_delete(void) {
+    mkdirp("/storage/meshcore");
+    write_file("/storage/meshcore/id", 3, 'k');
+    write_file("/storage/lora.toml", 3, 'k');
+    CHECK(files_delete("/storage/meshcore/id") == FILES_ERR_PROTECTED && exists("/storage/meshcore/id"));
+    CHECK(files_delete("/storage/lora.toml") == FILES_ERR_PROTECTED && exists("/storage/lora.toml"));
+    CHECK(files_delete("/storage") == FILES_ERR_PROTECTED && files_delete("/storage/../x") == FILES_ERR_ARG);
+    CHECK(files_delete("/storage/b.txt") == FILES_OK && !exists("/storage/b.txt"));
+    CHECK(files_delete("/storage/b.txt") == FILES_ERR_OPEN);
+    mkdirp("/storage/full");
+    write_file("/storage/full/f", 1, 'x');
+    CHECK(files_delete("/storage/full") == FILES_ERR_NOT_EMPTY && exists("/storage/full/f"));
+    CHECK(files_delete("/storage/full/f") == FILES_OK && files_delete("/storage/full") == FILES_OK);
+}
+
+static void test_read(void) {
+    uint8_t buf[16];
+    size_t got;
+    uint32_t total;
+    write_file("/storage/r.txt", 10, 'r');
+    CHECK(files_read_at("/storage/r.txt", 4, buf, sizeof(buf), &got, &total) == FILES_OK && got == 6 && total == 10);
+    CHECK(files_read_at("/storage/r.txt", 0, buf, 4, &got, &total) == FILES_OK && got == 4);
+    CHECK(files_read_at("/storage/r.txt", 99, buf, 4, &got, &total) == FILES_OK && got == 0);
+    CHECK(files_read_at("/storage/lora.toml", 0, buf, 4, &got, &total) == FILES_ERR_PROTECTED);
+    CHECK(files_read_at("/storage/none", 0, buf, 4, &got, &total) == FILES_ERR_OPEN);
+}
+
+static void test_copy(void) {
+    static uint8_t buf[64];
+    mkdirp("/sd");
+    write_file("/storage/big.bin", 1000, 'b');
+    CHECK(files_copy("/storage/big.bin", "/sd/big.bin", buf, sizeof(buf), UINT64_MAX, progress, NULL) == FILES_OK);
+    CHECK(exists("/sd/big.bin") && !exists("/sd/big.bin.part") && calls == 16);
+    CHECK(files_copy("/storage/big.bin", "/sd/big.bin", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_EXISTS);
+    CHECK(files_copy("/storage/big.bin", "/sd/x.bin", buf, sizeof(buf), 999, NULL, NULL) == FILES_ERR_SPACE);
+    CHECK(!exists("/sd/x.bin") && !exists("/sd/x.bin.part"));
+    stop_at = true; // cancel part-way: nothing is left behind
+    CHECK(files_copy("/storage/big.bin", "/sd/c.bin", buf, sizeof(buf), UINT64_MAX, progress, NULL) == FILES_CANCELLED);
+    CHECK(!exists("/sd/c.bin") && !exists("/sd/c.bin.part"));
+    stop_at = false;
+    CHECK(files_copy("/storage/lora.toml", "/sd/l", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_PROTECTED);
+    CHECK(files_copy("/storage/big.bin", "/sd/lichen/messages/x", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_PROTECTED);
+    CHECK(files_copy("/storage/zdir", "/sd/zdir", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_NOT_FILE);
+    CHECK(files_copy("/storage/nothing", "/sd/n", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_OPEN);
+    CHECK(files_copy("/storage/big.bin", "/sd/nodir/x", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_OPEN);
+    CHECK(!exists("/sd/nodir/x.part"));
+    CHECK(files_copy("/storage/big.bin", "/sd/y", NULL, 0, UINT64_MAX, NULL, NULL) == FILES_ERR_NO_MEM);
+    write_file("/sd/z.part", 3, 'p'); // a leftover .part is replaced
+    CHECK(files_copy("/storage/big.bin", "/sd/z", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_OK && !exists("/sd/z.part"));
+}
+
+int main(void) {
+    char tmpl[] = "/tmp/files_ops_XXXXXX";
+    if (!mkdtemp(tmpl)) {
+        return 2;
+    }
+    snprintf(files_test_root, sizeof(files_test_root), "%s", tmpl);
+    mkdirp("/storage");
+    test_list();
+    test_delete();
+    test_read();
+    test_copy();
+    char cmd[300];
+    snprintf(cmd, sizeof(cmd), "rm -r %s", tmpl); // test data only, in our own mkdtemp directory
+    if (system(cmd) != 0) {
+        printf("cleanup of %s failed\n", tmpl);
+    }
+    if (failures) {
+        printf("files_ops_test: %d failure(s)\n", failures);
+        return 1;
+    }
+    printf("files_ops_test: all passed\n");
+    return 0;
+}

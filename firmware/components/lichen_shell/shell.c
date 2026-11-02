@@ -495,6 +495,7 @@ void shell_start(lv_display_t *display) {
     }
     settings_app_register();
     about_app_register();
+    files_app_register();
     keytest_app_register();
     bench_app_register();
     crashlog_app_register();

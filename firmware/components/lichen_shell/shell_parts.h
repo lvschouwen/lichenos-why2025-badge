@@ -34,6 +34,7 @@ void ui_perf_cmd(char const *args);
 // app_settings.c, app_about.c: the built-in apps (shell_start registers them)
 void settings_app_register(void);
 void about_app_register(void);
+void files_app_register(void); // app_files.c (#71): browse /storage and the SD card
 void keytest_app_register(void);
 void bench_app_register(void); // app_bench.c (#96); also registers "fw bench"
 bool bench_running(void);      // app_bench.c: a run is measuring (LVGL task)

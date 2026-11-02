@@ -12,6 +12,8 @@
 # factory_screen.c is Settings > Factory reset and factory_combo.c the boot key combo (#66; the logic is lichen_boot's factory_plan.c).
 # app_bench.c is the Bench app (#96), app_crashlog.c the Crash log app (#72, on lichen_crashlog.h), app_power.c the Power app (#65).
 # release_notes.c (release_notes_test.c, #13; notes_app.c is the Release notes app and "This is new", notes_render.c its markdown).
+# app_files.c is the Files app (#71): files_job.c runs its file work off the LVGL task, files_ops.c is plain POSIX
+# (files_ops_test.c) and files_model.c the paths, protected list, sort and text paging (files_model_test.c).
 # shell.c, boot_screen.c, status_bar.c and logo.c are the LVGL screens; shell.c and app_settings.c implement lichen_ui.h.
 # Release notes (#13): firmware/release_notes/<seq>-<date>.md are embedded as rodata; rn_files[] (release_notes.h) is a
 # table of them generated here, so adding a note is just adding a file (CONFIGURE_DEPENDS re-runs this when one appears).
@@ -50,6 +52,7 @@ idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_r
                             "notify_view.c" "notify_ui.c" "notify_centre.c" "sys_notices.c" "sys_notice_rules.c"
                             "shortcut.c" "shortcuts.c" "thermal.c" "thermal_rules.c" "app_battery.c"
                             "factory_screen.c" "factory_combo.c"
+                            "app_files.c" "files_job.c" "files_ops.c" "files_model.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api lichen_net
                        PRIV_REQUIRES lichen_boot lichen_clock freertos fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage sdcard app_update esp_system psram_guard esp_mm lichen_led ota)

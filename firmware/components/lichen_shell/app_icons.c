@@ -136,3 +136,25 @@ void icon_notes(lv_obj_t *parent, int size_px) {
         lv_obj_align(line, LV_ALIGN_TOP_LEFT, size_px / 32, size_px / 24 + i * (size_px * 3 / 32));
     }
 }
+
+// Files (#71): an amber folder on the tile
+void icon_files(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    int w = size_px * 5 / 8, h = size_px * 7 / 20;
+    lv_obj_t *tab = lv_obj_create(parent);
+    lv_obj_remove_style_all(tab);
+    lv_obj_set_size(tab, w * 2 / 5, h / 3);
+    lv_obj_set_style_radius(tab, size_px / 32 + 1, 0);
+    lv_obj_set_style_bg_color(tab, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_bg_opa(tab, LV_OPA_COVER, 0);
+    lv_obj_align(tab, LV_ALIGN_CENTER, -w / 2 + w / 5, -h / 2 - h / 8);
+    lv_obj_t *body = lv_obj_create(parent);
+    lv_obj_remove_style_all(body);
+    lv_obj_set_size(body, w, h);
+    lv_obj_set_style_radius(body, size_px / 16 + 1, 0);
+    lv_obj_set_style_bg_color(body, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_bg_opa(body, LV_OPA_COVER, 0);
+    lv_obj_align(body, LV_ALIGN_CENTER, 0, h / 8);
+}
