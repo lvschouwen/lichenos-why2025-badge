@@ -607,10 +607,9 @@ static lv_obj_t *create_search_line(chat_t *c) {
 
 static void create_widgets(chat_t *c) {
     lv_obj_t *screen = c->screen;
-    lv_obj_t *heading = lv_label_create(screen);
-    lv_obj_set_width(heading, LV_PCT(100));
-    lv_label_set_long_mode(heading, LV_LABEL_LONG_DOT);
+    lv_obj_t *heading = lichen_label_line(screen, LV_PCT(100)); // DOT without a height wraps a long name (#132)
     lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
+    lichen_label_line_fit(heading);
     lv_obj_set_style_text_color(heading, lv_color_hex(THEME_AMBER), 0);
     lv_label_set_text(heading, c->target.title); // "@bob" for a DM, as the Chat list's rows (#101)
 
