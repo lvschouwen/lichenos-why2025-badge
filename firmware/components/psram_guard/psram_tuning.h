@@ -40,6 +40,12 @@ bool psram_tuning_fell_back(psram_tuning_t const *t); // phase run 0 or delaylin
 // First idx of the passing run (valid when dl_len >= 1)
 uint8_t psram_tuning_dl_start(psram_tuning_t const *t);
 
+// "fw psram dl <idx> yes" (#121): true when text is an idx and the literal confirmation "yes", nothing else
+bool psram_tuning_dl_args(char const *text, unsigned *idx);
+// An idx "fw psram dl" may set live: inside the passing run the boot tuning measured (never after a fallback); outside
+// it the CPU path itself fails, and code, data and DMA buffers all live in PSRAM
+bool psram_tuning_dl_in_window(psram_tuning_t const *t, unsigned idx);
+
 // "phase 90 (run 3/4), delayline idx 17 (data 2, dqs 0), window 9..25 len 17" (+ " FELL BACK" when it did)
 size_t psram_tuning_format(char *out, size_t cap, psram_tuning_t const *t);
 

@@ -125,8 +125,21 @@ static void test_compare_buf(void) {
     CHECK(r.flips[0].off == 1027 && r.flips[1].off == 1883 && r.flips[1].got == (uint8_t)(buf[1883] ^ 0x08));
 }
 
+// The sweep leaves a fixed reserve of the free PSRAM and refuses when too few windows fit
+static void test_sweep_windows(void) {
+    size_t const mb = 1024u * 1024;
+    CHECK(psram_dma_sweep_windows(20 * mb, 24 * mb, 8 * mb, mb, 4) == 16);       // the reserve, not the block, limits
+    CHECK(psram_dma_sweep_windows(10 * mb, 24 * mb, 8 * mb, mb, 4) == 10);       // the largest block limits
+    CHECK(psram_dma_sweep_windows(20 * mb, 11 * mb, 8 * mb, mb, 4) == 0);        // 3 windows: below the minimum
+    CHECK(psram_dma_sweep_windows(20 * mb, 12 * mb + 5, 8 * mb, mb, 4) == 4);    // exactly the minimum
+    CHECK(psram_dma_sweep_windows(20 * mb, 8 * mb, 8 * mb, mb, 1) == 0);         // nothing above the reserve
+    CHECK(psram_dma_sweep_windows(20 * mb, 4 * mb, 8 * mb, mb, 1) == 0);
+    CHECK(psram_dma_sweep_windows(20 * mb, 24 * mb, 8 * mb, 0, 1) == 0);
+}
+
 int main(void) {
     test_patterns();
+    test_sweep_windows();
     test_report();
     test_compare_buf();
     if (failures) {

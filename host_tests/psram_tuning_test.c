@@ -2,6 +2,7 @@
 #include "psram_tuning.h"
 
 #include <stdio.h>
+
 #include <string.h>
 
 static int failures;
@@ -40,9 +41,26 @@ int main(void) {
     psram_tuning_format(out, sizeof(out), &t);
     CHECK(strcmp(out, "phase 90.00 (run 2/4), delayline idx 17 (data 2, dqs 0), window 9..25 len 17") == 0);
 
+    // "fw psram dl": only with "yes", only inside the measured window 9..25
+    unsigned idx = 99;
+    CHECK(psram_tuning_dl_args(" 17 yes", &idx) && idx == 17);
+    CHECK(!psram_tuning_dl_args(" 17", &idx));
+    CHECK(!psram_tuning_dl_args(" 17 y", &idx));
+    CHECK(!psram_tuning_dl_args(" 17 yess", &idx));
+    CHECK(!psram_tuning_dl_args(" 17 yes now", &idx));
+    CHECK(!psram_tuning_dl_args(" yes 17", &idx));
+    CHECK(!psram_tuning_dl_args("", &idx));
+    CHECK(!psram_tuning_dl_args(" 17yes", &idx));
+    CHECK(!psram_tuning_dl_args(" -1 yes", &idx));
+    CHECK(!psram_tuning_dl_args(" 4294967313 yes", &idx)); // would wrap to 17
+    CHECK(psram_tuning_dl_args(" 9 yes\n", &idx) && idx == 9);
+    CHECK(psram_tuning_dl_in_window(&t, 9) && psram_tuning_dl_in_window(&t, 17) && psram_tuning_dl_in_window(&t, 25));
+    CHECK(!psram_tuning_dl_in_window(&t, 8) && !psram_tuning_dl_in_window(&t, 26) && !psram_tuning_dl_in_window(&t, 30));
+
     // Fallbacks: delayline run <= 1 goes to idx 0, phase run 0 to id 0
     psram_tuning_note_delayline(&t, 1, 12);
     CHECK(t.dl_idx == 0 && psram_tuning_fell_back(&t));
+    CHECK(!psram_tuning_dl_in_window(&t, 12) && !psram_tuning_dl_in_window(&t, 0)); // nothing after a fallback
     psram_tuning_note_delayline(&t, 0, 0);
     CHECK(t.dl_idx == 0 && psram_tuning_dl_start(&t) == 0);
     psram_tuning_note_delayline(&t, 17, 25);

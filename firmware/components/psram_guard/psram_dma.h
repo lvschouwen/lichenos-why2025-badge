@@ -57,4 +57,8 @@ void psram_dma_compare_buf(void const *got, void const *ref, size_t len, size_t 
 size_t psram_dma_flip_text(psram_dma_flip_t const *f, char *out, size_t cap);
 
 // "bits 0:0 1:0 2:0 3:5 4:0 5:0 6:0 7:0, 5 of 5 at the same offset mod 1024"; returns the length
+// "fw psram dma sweep": how many 1 MB windows (win bytes) to take from the largest free block while leaving `reserve`
+// bytes of the free PSRAM to the rest of the system for the whole run; 0 when fewer than min_windows fit
+size_t psram_dma_sweep_windows(size_t largest, size_t free_total, size_t reserve, size_t win, size_t min_windows);
+
 size_t psram_dma_hist_text(psram_dma_report_t const *r, char *out, size_t cap);

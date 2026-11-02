@@ -22,5 +22,8 @@ typedef struct {
     void (*end)(bool failed);
     bool (*read)(void *dst, uint32_t sector, uint32_t count);
     bool (*read_bounced)(void *dst, uint32_t sector, uint32_t count);
+    bool (*mounted)(void);
 } psram_dma_sd_t;
 void psram_dma_set_sd(psram_dma_sd_t const *sd);
+// True while the SD card is mounted ("fw psram dl" refuses then); false when sdcard.c never registered
+bool psram_dma_sd_mounted(void);

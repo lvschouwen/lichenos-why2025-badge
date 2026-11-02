@@ -20,7 +20,7 @@ extern "C" {
 #define SD_BOUNCE_MIN_BYTES 4096
 
 // True when a transfer has to go through the bounce buffer: the buffer is in PSRAM, or the SDMMC DMA cannot use it
-// directly (dma_aligned: what the host's check_buffer_alignment says for the whole transfer)
+// directly (dma_aligned: DMA-capable internal RAM and the host's check_buffer_alignment passes for the whole transfer)
 bool sd_bounce_needed(bool in_psram, bool dma_aligned);
 
 // One card command's worth of a bounced transfer: `count` sectors from `sector`, at byte `offset` of the caller's

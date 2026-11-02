@@ -1,5 +1,6 @@
 #include "psram_boot.h"
 
+#include "psram_dma_cmd.h"
 #include "psram_pattern.h"
 #include "psram_tuning.h"
 
@@ -89,9 +90,10 @@ static void tuning_regs(uint8_t *phase_id, uint8_t *dqs, uint8_t *data) {
     *data     = (uint8_t)MSPI_IOMUX.psram_pin_group.pin_group0[0].reg_psram_pin_dlc;
 }
 
-// Runs from IRAM while the PSRAM timing changes (code and heap live in PSRAM): the same pin assignment as the IDF's
+// Runs from IRAM while the PSRAM timing changes (code and heap live in PSRAM; noinline, or the compiler folds it into
+// its XIP caller): the same pin assignment as the IDF's
 // mspi_timing_config_psram_set_tuning_delayline
-static void IRAM_ATTR set_delaylines(uint8_t data, uint8_t dqs) {
+static void NOINLINE_ATTR IRAM_ATTR set_delaylines(uint8_t data, uint8_t dqs) {
     for (int pin = 0; pin < MSPI_LL_PIN_MAX; pin++) {
         mspi_timing_ll_set_delayline((mspi_ll_pin_t)pin, pin == MSPI_LL_PIN_DQS0 || pin == MSPI_LL_PIN_DQS1 ? dqs : data);
     }
@@ -99,8 +101,22 @@ static void IRAM_ATTR set_delaylines(uint8_t data, uint8_t dqs) {
 
 void psram_boot_set_delayline(char const *idx_text) {
     unsigned idx;
-    if (sscanf(idx_text, "%u", &idx) != 1 || idx >= PSRAM_DELAYLINES) {
-        console_reply("psram dl <idx 0..%d> (15 = no delay; below: DQS delayed, above: data delayed)", PSRAM_DELAYLINES - 1);
+    if (!psram_tuning_dl_args(idx_text, &idx) || idx >= PSRAM_DELAYLINES) {
+        console_reply("psram dl <idx 0..%d> yes (15 = no delay; below: DQS delayed, above: data delayed). Bench only: a bad "
+                      "idx corrupts code and data in PSRAM",
+                      PSRAM_DELAYLINES - 1);
+        return;
+    }
+    // Only where the boot tuning saw the CPU path pass: outside it the code running this (XIP from PSRAM) and every
+    // DMA buffer go bad at once
+    if (!psram_tuning_dl_in_window(&s_tuning, idx)) {
+        console_reply("psram dl: idx %u refused, outside the boot tuning window %u..%u%s", idx, psram_tuning_dl_start(&s_tuning),
+                      s_tuning.dl_end, psram_tuning_fell_back(&s_tuning) ? " (tuning fell back)" : "");
+        return;
+    }
+    // A wrong idx must not reach the card: FatFs writes from PSRAM-backed caches and buffers
+    if (psram_dma_sd_mounted()) {
+        console_reply("psram dl: refused while the SD card is mounted (fw sd unmount first)");
         return;
     }
     uint8_t data, dqs, ph, dqs_was, data_was;

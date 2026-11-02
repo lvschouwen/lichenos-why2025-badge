@@ -1,6 +1,9 @@
 #include "psram_tuning.h"
 
+#include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define RETRY_GAP_S 600
 
@@ -33,6 +36,37 @@ bool psram_tuning_fell_back(psram_tuning_t const *t) {
 
 uint8_t psram_tuning_dl_start(psram_tuning_t const *t) {
     return t->dl_len ? (uint8_t)(t->dl_end - t->dl_len + 1) : 0;
+}
+
+bool psram_tuning_dl_args(char const *text, unsigned *idx) {
+    while (isspace((unsigned char)*text)) {
+        text++;
+    }
+    if (!isdigit((unsigned char)*text)) {
+        return false;
+    }
+    char         *end;
+    unsigned long v = strtoul(text, &end, 10);
+    if (end - text > 2 || !isspace((unsigned char)*end)) { // idx 0..30: at most two digits, then a space
+        return false;
+    }
+    while (isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (strncmp(end, "yes", 3) != 0) {
+        return false;
+    }
+    for (end += 3; isspace((unsigned char)*end); end++) {
+    }
+    if (*end) {
+        return false;
+    }
+    *idx = (unsigned)v;
+    return true;
+}
+
+bool psram_tuning_dl_in_window(psram_tuning_t const *t, unsigned idx) {
+    return !psram_tuning_fell_back(t) && idx >= psram_tuning_dl_start(t) && idx <= t->dl_end;
 }
 
 size_t psram_tuning_format(char *out, size_t cap, psram_tuning_t const *t) {

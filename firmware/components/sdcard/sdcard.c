@@ -278,8 +278,8 @@ static esp_err_t bounced(uint8_t *buf, uint32_t sector, uint32_t count, bool wri
 
 static esp_err_t sd_xfer(uint8_t *buf, uint32_t sector, uint32_t count, bool write) {
     size_t len     = (size_t)count * card->csd.sector_size;
-    bool   aligned = card->host.check_buffer_alignment(card->host.slot, buf, len);
-    if (sd_bounce_needed(esp_ptr_external_ram(buf), aligned)) {
+    bool   direct = esp_ptr_dma_capable(buf) && card->host.check_buffer_alignment(card->host.slot, buf, len);
+    if (sd_bounce_needed(esp_ptr_external_ram(buf), direct)) {
         return bounced(buf, sector, count, write);
     }
     return write ? sdmmc_write_sectors(card, buf, sector, count) : sdmmc_read_sectors(card, buf, sector, count);
@@ -288,11 +288,22 @@ static esp_err_t sd_xfer(uint8_t *buf, uint32_t sector, uint32_t count, bool wri
 // CMD13 per access, as ff_sdmmc_set_disk_status_check(true) did: a pulled card fails fast instead of timing out
 static DSTATUS sd_disk_status(BYTE drive) {
     (void)drive;
-    return card && sdmmc_get_status(card) == ESP_OK ? 0 : STA_NOINIT;
+    if (!card) {
+        return STA_NOINIT;
+    }
+    esp_err_t err = sdmmc_get_status(card);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "card status: %s", esp_err_to_name(err));
+        return STA_NOINIT;
+    }
+    return 0;
 }
 
 static DRESULT sd_disk_read(BYTE drive, BYTE *buf, LBA_t sector, UINT count) {
     (void)drive;
+    if (!card) {
+        return RES_NOTRDY;
+    }
     esp_err_t err = sd_xfer(buf, (uint32_t)sector, count, false);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "read %u+%u: %s", (unsigned)sector, (unsigned)count, esp_err_to_name(err));
@@ -302,6 +313,9 @@ static DRESULT sd_disk_read(BYTE drive, BYTE *buf, LBA_t sector, UINT count) {
 
 static DRESULT sd_disk_write(BYTE drive, BYTE const *buf, LBA_t sector, UINT count) {
     (void)drive;
+    if (!card) {
+        return RES_NOTRDY;
+    }
     esp_err_t err = sd_xfer((uint8_t *)buf, (uint32_t)sector, count, true); // bounced() only reads from buf on a write
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "write %u+%u: %s", (unsigned)sector, (unsigned)count, esp_err_to_name(err));
@@ -311,6 +325,9 @@ static DRESULT sd_disk_write(BYTE drive, BYTE const *buf, LBA_t sector, UINT cou
 
 static DRESULT sd_disk_ioctl(BYTE drive, BYTE cmd, void *buf) {
     (void)drive;
+    if (!card) {
+        return RES_NOTRDY;
+    }
     switch (cmd) {
     case CTRL_SYNC:
         return RES_OK; // every write is complete when sdmmc_write_sectors returns
@@ -346,7 +363,7 @@ static ff_diskio_impl_t const SD_DISKIO = {
 // FatFs picks FAT12/16/32 and the cluster size from the card size (au_size 0). esp_vfs_fat's own format would force
 // 512-byte clusters (its allocation unit is at least one sector), which on a 32 GB card means a 250 MB FAT.
 static FRESULT make_fat(void) {
-    void *work = heap_caps_calloc(1, SD_MKFS_WORK, MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA);
+    void *work = heap_caps_calloc(1, SD_MKFS_WORK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); // bounced by sd_xfer
     if (!work) {
         return FR_NOT_ENOUGH_CORE;
     }
@@ -493,8 +510,10 @@ static bool raw_begin(uint32_t wait_ms) {
     return sd_begin(wait_ms);
 }
 
+// A failed test read is reported by the test itself; it does not count toward the card's auto-unmount
 static void raw_end(bool failed) {
-    sd_end(failed ? SD_IO_FAILED : SD_IO_NEUTRAL);
+    (void)failed;
+    sd_end(SD_IO_NEUTRAL);
 }
 
 // The direct leg: sdmmc_read_sectors DMAs straight into an aligned PSRAM dst, the #120 path FatFs no longer takes
@@ -558,6 +577,7 @@ void sd_start(void) {
     lock        = xSemaphoreCreateMutexStatic(&lock_buf);
     bounce_lock = xSemaphoreCreateMutexStatic(&bounce_lock_buf);
     sd_console_register();
-    psram_dma_set_sd(&(psram_dma_sd_t){.begin = raw_begin, .end = raw_end, .read = raw_read, .read_bounced = raw_read_bounced});
+    psram_dma_set_sd(&(psram_dma_sd_t){.begin = raw_begin, .end = raw_end, .read = raw_read, .read_bounced = raw_read_bounced,
+                                        .mounted = sd_mounted});
     sd_mount();
 }

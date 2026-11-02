@@ -29,9 +29,10 @@ void psram_boot_print(void);
 // "fw psram test <KB> dense": the same pattern + inverted check on demand, bad bytes per pass
 void psram_boot_dense_test(unsigned kb);
 
-// "fw psram dl <idx>" (#121): set delayline idx 0..30 live (DQS pins get the dqs delay, every other pin the data delay,
-// as the IDF's tuning does), with the other core stalled for the switch. Nothing is stored: a reboot restores the
-// IDF's choice. For sweeping the DMA window (`fw psram dma`) point by point without a reboot per point.
+// "fw psram dl <idx> yes" (#121): set delayline idx 0..30 live (DQS pins get the dqs delay, every other pin the data
+// delay, as the IDF's tuning does), with the other core stalled for the switch. Nothing is stored: a reboot restores the
+// IDF's choice. For sweeping the DMA window (`fw psram dma`) point by point without a reboot per point. Refused without
+// the literal "yes", outside the passing window the boot tuning measured, and while the SD card is mounted.
 void psram_boot_set_delayline(char const *idx_text);
 
 // The tuning line ("phase 67.50 (run 4/4), delayline idx 15 ..."), for the Bench app (#96); returns the length

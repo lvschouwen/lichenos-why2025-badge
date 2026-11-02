@@ -139,6 +139,15 @@ size_t psram_dma_flip_text(psram_dma_flip_t const *f, char *out, size_t cap) {
     return n < 0 ? 0 : (size_t)n;
 }
 
+size_t psram_dma_sweep_windows(size_t largest, size_t free_total, size_t reserve, size_t win, size_t min_windows) {
+    if (win == 0 || free_total <= reserve) {
+        return 0;
+    }
+    size_t usable  = free_total - reserve < largest ? free_total - reserve : largest;
+    size_t windows = usable / win;
+    return windows >= min_windows ? windows : 0;
+}
+
 size_t psram_dma_hist_text(psram_dma_report_t const *r, char *out, size_t cap) {
     size_t n = 0;
     for (int b = 0; b < 8 && n < cap; b++) {

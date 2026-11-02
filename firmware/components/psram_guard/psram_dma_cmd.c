@@ -27,6 +27,8 @@
                                        // destination is sector-aligned, so the SDMMC IDMAC runs several 4 KB descriptors in one
                                        // go; every #120 flip sat beyond the first 4 KB of the file, none inside the first descriptor
 #define SD_WAIT_MS    2000
+#define SWEEP_RESERVE (8u * 1024 * 1024) // free PSRAM the sweep leaves to the rest of the badge for its ~40 s
+#define SWEEP_MIN_WINDOWS 4u
 
 typedef struct {
     async_memcpy_handle_t mcp;
@@ -50,6 +52,10 @@ static psram_dma_sd_t    s_sd;
 
 void psram_dma_set_sd(psram_dma_sd_t const *sd) {
     s_sd = *sd;
+}
+
+bool psram_dma_sd_mounted(void) {
+    return s_sd.mounted && s_sd.mounted();
 }
 
 static bool IRAM_ATTR on_done(async_memcpy_handle_t mcp, async_memcpy_event_t *ev, void *ctx) {
@@ -292,7 +298,8 @@ static void sweep_windows(run_t *r, uint8_t *block, size_t windows) {
 
 static void sweep(run_t *r, unsigned burst) {
     size_t   largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    size_t   windows = largest > 2 * BIG_BYTES ? (largest - BIG_BYTES) / BIG_BYTES : 0;
+    size_t   free_ps = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t   windows = psram_dma_sweep_windows(largest, free_ps, SWEEP_RESERVE, BIG_BYTES, SWEEP_MIN_WINDOWS);
     uint8_t *block   = windows ? heap_caps_aligned_alloc(ALIGN, windows * BIG_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
     async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
     cfg.backlog               = 4;
@@ -300,7 +307,9 @@ static void sweep(run_t *r, unsigned burst) {
     r->done                   = xSemaphoreCreateBinary();
     r->in                     = heap_caps_aligned_alloc(ALIGN, CHUNK_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!block || !r->done || !r->in || esp_async_memcpy_install_gdma_axi(&cfg, &r->mcp) != ESP_OK) {
-        console_reply("psram dma sweep: no memory or no AXI-GDMA (largest free PSRAM block %u KB)", (unsigned)(largest >> 10));
+        console_reply("psram dma sweep: no memory or no AXI-GDMA (largest free PSRAM block %u KB, %u KB free, keeps %u MB, needs %u MB "
+                      "windows)",
+                      (unsigned)(largest >> 10), (unsigned)(free_ps >> 10), (unsigned)(SWEEP_RESERVE >> 20), SWEEP_MIN_WINDOWS);
     } else {
         console_reply("psram dma sweep: %u MB at %p..%p, AXI-GDMA burst %u, SD leg from sector %u", (unsigned)windows, (void *)block,
                       (void *)(block + windows * BIG_BYTES), burst, (unsigned)r->sd_sector);
