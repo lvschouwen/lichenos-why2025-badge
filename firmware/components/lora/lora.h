@@ -16,10 +16,12 @@ typedef struct {
 
 bool lora_start(void);
 // OS only, boot (#36): asks the running C6 app for its ELF sha256 (IDENT) and waits up to timeout_ms, re-asking every
-// quarter second (the C6's LoRa service may not listen yet right after its reset). Only before lora_start: it borrows the
-// peer-data callback, which lora_start takes back. False when no answer came.
+// quarter second (the C6's LoRa service may not listen yet right after its reset). Before lora_start it borrows the
+// peer-data callback, which lora_start takes back; once the task runs it goes through the task. False when no answer came.
 #define LORA_IDENT_LEN 32
 bool lora_ident(uint8_t out[LORA_IDENT_LEN], uint32_t timeout_ms);
+// While the LoRa task runs (lora_ident calls it then): the same question, answered through the task (runtime re-attach)
+bool lora_ident_live(uint8_t out[LORA_IDENT_LEN], uint32_t timeout_ms);
 // The radio task is running: started and not stopped for an update (says nothing about the C6 link)
 bool lora_up(void);
 // OS only (main.c's update hook, #76, #84 T7): tells the C6 to stop receiving, ends the LoRa task and drops what the C6

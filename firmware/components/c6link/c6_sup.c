@@ -327,6 +327,7 @@ static void go_up(void) {
     if (hooks.up) {
         hooks.up(); // keyboard, backlight, LoRa: main.c keeps that order
     }
+    c6link_check_ident_runtime(); // needs LoRa back (the task receives the answer): after the up hooks
     esp_event_post(C6LINK_EVENT, C6LINK_EVENT_UP, NULL, 0, 0);
     if (asking) {
         asking = false;

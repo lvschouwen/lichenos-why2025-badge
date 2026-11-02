@@ -38,7 +38,7 @@ static void on_ident(uint32_t msg_id, uint8_t const *data, size_t len, void *ctx
 
 bool lora_ident(uint8_t out[LORA_IDENT_LEN], uint32_t timeout_ms) {
     if (lora_up()) {
-        return false; // the LoRa task owns the callback now
+        return lora_ident_live(out, timeout_ms); // the LoRa task owns the callback now: it receives the answer
     }
     if (!ident_done && !(ident_done = xSemaphoreCreateBinary())) {
         return false;

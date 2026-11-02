@@ -17,6 +17,8 @@ bool c6link_wifi_request(bool up, uint32_t wait_ms);
 unsigned c6link_wifi_stack_free(void); // the c6wifi task's stack high-water mark (bytes)
 // The next boot checks the C6 fully (NVS c6_verify), the stored bundle key stays
 bool c6link_set_verify_flag(void);
+// IDENT after a runtime re-attach, with LoRa back (#36); a result but a match sets the verify flag
+void c6link_check_ident_runtime(void);
 
 // c6_sup.c
 void c6_sup_start(void);    // before the boot attach: the watch, its NVS flag, the queue and the c6sup task

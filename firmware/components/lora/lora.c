@@ -47,6 +47,8 @@ static lora_status_t c6_status;
 static bool          have_status;
 static uint32_t      status_at_ms;
 static uint32_t      p4_dropped;
+static uint8_t       live_ident_sha[LORA_IDENT_LEN]; // IDENT answer, under state_lock (#36)
+static SemaphoreHandle_t live_ident_done;
 static uint32_t      p4_bad;
 static uint32_t      packets;
 static uint32_t      tx_packets; // sends the C6 answered OK: they went on air (#29, the status bar's TX chevron)
@@ -537,7 +539,15 @@ static void lora_task(void *arg) {
                     );
                 }
                 break;
-            case LORA_MSG_IDENT: break; // a late answer to the boot's IDENT (#36), which asks more than once
+            case LORA_MSG_IDENT:
+                // The answer to lora_ident_live (runtime IDENT, #36); at boot a late duplicate that nobody waits for
+                portENTER_CRITICAL(&state_lock);
+                memcpy(live_ident_sha, msg.u.ident.app_elf_sha256, sizeof(live_ident_sha));
+                portEXIT_CRITICAL(&state_lock);
+                if (live_ident_done) {
+                    xSemaphoreGive(live_ident_done);
+                }
+                break;
             default:
                 portENTER_CRITICAL(&state_lock);
                 p4_bad++;
@@ -550,6 +560,7 @@ static void lora_task(void *arg) {
 bool lora_start(void) {
     lora_c6_link_init(&c6_link);
     send_mutex = xSemaphoreCreateMutex();
+    live_ident_done = xSemaphoreCreateBinary();
     load_config();
     boot_config = config;
     rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(lora_rx_msg_t));
@@ -620,6 +631,31 @@ void lora_c6_back(void) {
     portENTER_CRITICAL(&state_lock);
     lora_c6_link_back(&c6_link);
     portEXIT_CRITICAL(&state_lock);
+}
+
+// IDENT while the LoRa task runs (#36, after a runtime re-attach): the task receives the answer, this asks. The C6's LoRa
+// service may not listen yet right after its reset, so the request is repeated like at boot.
+bool lora_ident_live(uint8_t out[LORA_IDENT_LEN], uint32_t timeout_ms) {
+    if (!live_ident_done || !lora_up() || __atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
+        return false;
+    }
+    xSemaphoreTake(live_ident_done, 0);
+    lora_msg_t req   = {.type = LORA_MSG_IDENT_REQ};
+    TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+    for (;;) {
+        send_to_c6(&req);
+        TickType_t now = xTaskGetTickCount();
+        if ((int32_t)(until - now) <= 0) {
+            return false;
+        }
+        TickType_t wait = until - now < pdMS_TO_TICKS(250) ? until - now : pdMS_TO_TICKS(250);
+        if (xSemaphoreTake(live_ident_done, wait) == pdTRUE) {
+            portENTER_CRITICAL(&state_lock);
+            memcpy(out, live_ident_sha, LORA_IDENT_LEN);
+            portEXIT_CRITICAL(&state_lock);
+            return true;
+        }
+    }
 }
 
 bool lora_c6_probe(uint32_t timeout_ms, uint32_t *uptime_s) {

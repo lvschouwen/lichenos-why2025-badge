@@ -1099,22 +1099,25 @@ static bool bundle_app_sha(uint8_t out[C6_APP_SHA_LEN]) {
 }
 
 // After the attach: does the running C6 app match the bundle? Any doubt is "not proven" (#36).
-static c6_ident_t check_ident(void) {
+static c6_ident_t check_ident(uint32_t *ms_out) {
     uint8_t expected[C6_APP_SHA_LEN], running[C6_IDENT_SHA_LEN];
     bool    have_expected = bundle_app_sha(expected);
     int64_t t0            = esp_timer_get_time();
     bool    answered      = ident_fn && ident_fn(running, C6_IDENT_WAIT_MS);
-    boot_info.ident_ms    = (uint32_t)((esp_timer_get_time() - t0) / 1000);
+    *ms_out               = (uint32_t)((esp_timer_get_time() - t0) / 1000);
     c6_ident_t r          = c6_ident_check(answered ? running : NULL, have_expected ? expected : NULL);
     ESP_LOG_LEVEL(
         r == C6_IDENT_MATCH ? ESP_LOG_INFO : ESP_LOG_WARN,
         TAG,
         "C6 IDENT %s after %u ms",
         c6_ident_name(r),
-        (unsigned)boot_info.ident_ms
+        (unsigned)*ms_out
     );
     return r;
 }
+
+static c6_ident_t rt_ident = C6_IDENT_NOT_ASKED; // the last runtime re-attach's IDENT (#36), for `fw c6`
+static uint32_t   rt_ident_ms;
 
 static void nvs_read_boot_state(char *stored, size_t cap, bool *verify) {
     nvs_handle_t nvs;
@@ -1172,12 +1175,28 @@ bool c6link_set_verify_flag(void) {
     return nvs_write_boot_state(stored[0] ? stored : NULL, true);
 }
 
+// After a runtime re-attach (#14), once LoRa is back: the same proof as at boot. Anything but a match is not proven, so
+// the next boot checks the C6 fully (the stored key stays); no restart here, the C6 works and the badge is in use.
+void c6link_check_ident_runtime(void) {
+    if (c6link_updating()) {
+        return; // LoRa is stopped for the update: lora_ident would borrow a callback nobody gives back
+    }
+    rt_ident = check_ident(&rt_ident_ms);
+    if (rt_ident != C6_IDENT_MATCH) {
+        ESP_LOGW(TAG, "C6 app not proven after the re-attach: full check on the next boot");
+        c6link_set_verify_flag();
+    }
+}
+
 static void cmd_c6_status(void) {
     char stored[C6_BUNDLE_KEY_MAX];
     bool verify = false;
     nvs_read_boot_state(stored, sizeof(stored), &verify);
     console_reply("c6: this boot %s (%s), C6 step %u ms, IDENT %s (%u ms)", boot_info.plan, boot_info.why,
                   (unsigned)boot_info.c6_ms, c6_ident_name(boot_info.ident), (unsigned)boot_info.ident_ms);
+    if (rt_ident != C6_IDENT_NOT_ASKED) {
+        console_reply("c6: last re-attach IDENT %s (%u ms)", c6_ident_name(rt_ident), (unsigned)rt_ident_ms);
+    }
     console_reply("c6: stored key %s, verify flag %d", stored[0] ? stored : "(none)", verify);
     char line[C6W_REASON_MAX + 64];
     c6_sup_watch_line(line, sizeof(line));
@@ -1262,7 +1281,7 @@ bool c6link_start(void) {
     bool attached = inited && esp_hosted_connect_to_slave() == 0;
     // IDENT on both paths: a full boot stores the key only when the running C6 proved the bundled app, so a later skip
     // rests on a C6 that answered IDENT, never on an older image that cannot
-    boot_info.ident = attached ? check_ident() : C6_IDENT_NOT_ASKED;
+    boot_info.ident = attached ? check_ident(&boot_info.ident_ms) : C6_IDENT_NOT_ASKED;
     bool ident_ok   = boot_info.ident == C6_IDENT_MATCH;
     // The key is stored only after a successful attach and IDENT; a failed skip sets the verify flag (full check next
     // boot)
