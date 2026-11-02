@@ -34,6 +34,7 @@
 #define FLUSH_WAIT_MS 100 // the card's batch mutex: when another batch has it, try again in RETRY_S
 #define STOP_WAIT_MS  3000
 #define RETRY_S       5
+#define REREADS       5 // #120: re-reads of a damaged journal before a bad spot counts as in the file
 
 static char const TAG[] = "mesh_hist";
 
@@ -396,21 +397,26 @@ static char const *journal_load(work_t *w, int *err) {
                  (unsigned long)b.max_seq);
     }
     bool damaged = scan.torn || scan.resyncs;
-    if (damaged) { // #120: read it once more before a compaction makes a misread record a lost one
+    if (damaged) { // #120: damage in the file reads the same every time; a read error comes and goes, so one clean
+                   // re-read (the records' checks cannot pass a flipped bit) proves the file is fine
         mesh_hist_scan_t again;
-        memset(&again, 0, sizeof(again));
-        mesh_hist_crypt_t c  = wcrypt;
-        int               e2 = 0;
-        bool              ok = scan_file(LOG_PATH, w, &c, noop_rec, NULL, &again, &e2);
-        mh_wipe(&c, sizeof(c));
-        damaged = mesh_hist_damage_in_file(&scan, ok, &again);
+        int              tries = 0;
+        bool             ok    = false;
+        do {
+            memset(&again, 0, sizeof(again));
+            mesh_hist_crypt_t c  = wcrypt;
+            int               e2 = 0;
+            ok                   = scan_file(LOG_PATH, w, &c, noop_rec, NULL, &again, &e2);
+            mh_wipe(&c, sizeof(c));
+            damaged = mesh_hist_damage_in_file(&scan, ok, &again);
+        } while (damaged && ++tries < REREADS);
         if (damaged) {
-            ESP_LOGW(TAG, "journal: the bad spot is there on a second read too (first at %llu): in the file",
+            ESP_LOGW(TAG, "journal: the bad spot is there on %d re-reads (first at %llu): in the file", REREADS,
                      (unsigned long long)(ok ? again.first_bad : scan.first_bad));
         } else {
             read_errors++;
-            ESP_LOGW(TAG, "journal: the bad spot at %llu is gone on a second read: a read error, no compaction (#120)",
-                     (unsigned long long)scan.first_bad);
+            ESP_LOGW(TAG, "journal: the bad spot at %llu read clean on re-read %d: a read error, no compaction (#120)",
+                     (unsigned long long)scan.first_bad, tries + 1);
         }
     }
     uint64_t live = mesh_hist_live_bytes(&w->table, keep_n);
