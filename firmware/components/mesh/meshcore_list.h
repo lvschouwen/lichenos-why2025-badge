@@ -28,8 +28,9 @@ typedef struct {
 } mc_scroll_t;
 
 // The screen of a list: heading, an optional dim note under it (NULL for none), the list (returned, focusable, in the
-// default group so it gets the keys) and the key hint at the bottom
-lv_obj_t *mc_list_screen(lv_obj_t *screen, char const *title, char const *note, char const *hint);
+// default group so it gets the keys) and the dim key hint at the bottom (shell_page_hint: "Enter: details")
+lv_obj_t *mc_list_screen(lv_obj_t *screen, char const *title, char const *note, char const *hint_key,
+                         char const *hint_verb);
 
 // A label wrapped to the width of its parent / cut to one line with "..."
 lv_obj_t *mc_list_label(lv_obj_t *parent, char const *text, uint32_t color);

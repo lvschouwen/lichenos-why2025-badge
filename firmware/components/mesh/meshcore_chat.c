@@ -33,13 +33,13 @@
 #define MAX_PEERS      100
 #define ADV_TYPE_CHAT  1 // MeshCore: a person's node (repeaters, rooms and sensors have no DMs)
 
-#define HINT_CHANNEL "Enter: send    /: search    Esc: back"
-#define HINT_DM      "Enter: send    Tab: retry a failed one    /: search    Esc: back"
-#define HINT_SEARCH  "Up/Down: match    Enter: done    Esc: cancel" // fits one line at 720 px
+#define HINT_CHANNEL "Enter: send \xE2\x80\xA2 /: search"
+#define HINT_DM      "Enter: send \xE2\x80\xA2 Tab: retry a failed one \xE2\x80\xA2 /: search"
+#define HINT_SEARCH  "Up/Down: match \xE2\x80\xA2 Enter: done \xE2\x80\xA2 Esc: cancel" // fits one line at 720 px
 #define HIT_BORDER_W 4 // on every row, shown only on the current hit: a border that came and went would move the text
 
 // Select mode (#111): Up on an empty compose line frames messages, Enter mentions the sender
-#define HINT_SELECT "Up/Down: message    Enter: reply    Esc: cancel"
+#define HINT_SELECT "Up/Down: message \xE2\x80\xA2 Enter: reply \xE2\x80\xA2 Esc: cancel"
 
 // One chat screen's state (#126): hung on its screen's user_data, made in build_chat, freed in on_delete (its timer
 // first). The target is set once, in build_chat, so the compose line, Tab-retry and mark-read can only ever reach the
@@ -150,7 +150,7 @@ static void rebuild(chat_t *c, size_t n) {
         shown++;
     }
     if (!shown) {
-        add_line(c->list, "No messages here yet.", THEME_DIM);
+        add_line(c->list, c->target.dm ? "No messages yet: write the first one below." : "No messages yet: they appear when someone posts, or write the first one below.", THEME_DIM);
     }
     lv_obj_update_layout(c->list);
     if (!at_end) {
@@ -805,7 +805,7 @@ static lv_obj_t *build_dm_pick(void) {
     peers = heap_caps_malloc(MAX_PEERS * sizeof(*peers), MALLOC_CAP_SPIRAM);
     size_t total, n = peers ? mesh_contacts_snapshot(peers, MAX_PEERS, &total, SCREEN_WAIT_MS) : 0;
     if (!peers || n == MESH_BUSY) {
-        menu_note(menu, "MeshCore is busy, press Esc and try again");
+        menu_note(menu, mc_busy_note());
         return screen;
     }
     size_t shown = 0;
@@ -816,7 +816,7 @@ static lv_obj_t *build_dm_pick(void) {
         }
     }
     if (!shown) {
-        menu_note(menu, "No contacts to message yet");
+        menu_empty(menu, "contacts to message", "chat nodes appear when they advert");
     }
     return screen;
 }

@@ -132,7 +132,7 @@ static void test_lines(void) {
     d.path[1] = 0xcd;
     mesh_contact_line_t l[MESH_CONTACT_LINES];
     CHECK(mesh_contact_lines(&d, l, MESH_CONTACT_LINES) == MESH_CONTACT_LINES);
-    CHECK(strcmp(l[MESH_LINE_TYPE].text, "Type: companion") == 0);
+    CHECK(strcmp(l[MESH_LINE_TYPE].text, "Type: Chat") == 0);
     CHECK(strcmp(l[MESH_LINE_ID].text, "ID: 101112131415") == 0);
     CHECK(strncmp(l[MESH_LINE_KEY].text, "Key: 10111213 14151617 ", 23) == 0 && strlen(l[MESH_LINE_KEY].text) == 76);
     CHECK(strcmp(l[MESH_LINE_HEARD].text, "Last heard: 3 min ago") == 0);
@@ -142,11 +142,11 @@ static void test_lines(void) {
     d.type              = 2;
     d.path_len          = 0xFF;
     CHECK(mesh_contact_lines(&d, l, 2) == 2);
-    CHECK(strcmp(l[MESH_LINE_TYPE].text, "Type: repeater") == 0);
+    CHECK(strcmp(l[MESH_LINE_TYPE].text, "Type: Repeater") == 0);
     mesh_contact_lines(&d, l, MESH_CONTACT_LINES);
     CHECK(strcmp(l[MESH_LINE_ROUTE].text, "Route: flood") == 0);
     CHECK(strcmp(l[MESH_LINE_LOCATION].text, "Location: not shared") == 0);
-    CHECK(strcmp(mesh_contact_type_name(3), "room") == 0 && strcmp(mesh_contact_type_name(9), "unknown") == 0);
+    CHECK(strcmp(mesh_contact_type_name(3), "Room") == 0 && strcmp(mesh_contact_type_name(9), "Unknown") == 0);
 }
 
 // #130: fw mesh path <id> set <hops>

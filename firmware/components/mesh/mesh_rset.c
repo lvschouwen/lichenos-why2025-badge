@@ -32,7 +32,7 @@ static rs_row_t const ROWS[RS_ROWS] = {
     {"role", "Role", RS_READONLY, false, 0, 0, NULL, NULL},
     {"ver", "Firmware", RS_READONLY, false, 0, 0, NULL, NULL},
     {"password", "Admin password", RS_PASSWORD, false, 0, 0, NULL, NULL},
-    {"reboot", "Reboot", RS_REBOOT, false, 0, 0, NULL, NULL},
+    {"reboot", "Restart", RS_REBOOT, false, 0, 0, NULL, NULL},
 };
 
 size_t rs_row_count(void) {
@@ -236,7 +236,7 @@ char const *rs_check(size_t i, char const *value) {
     case RS_ONOFF: return strcmp(v, "on") == 0 || strcmp(v, "off") == 0 ? NULL : "on or off";
     case RS_CHOICE: return is_choice(row->choices, v) ? NULL : "off, minimal, moderate or strict";
     case RS_RADIO:
-        return rs_radio_parse(v, &f, &bw, &sf, &cr) ? NULL : "MHz,kHz,SF,CR (150-2500, 7-500, 5-12, 5-8)";
+        return rs_radio_parse(v, &f, &bw, &sf, &cr) ? NULL : "MHz, kHz, SF, CR (150-2500, 7-500, 5-12, 5-8)";
     default: return "not settable";
     }
 }
@@ -573,7 +573,7 @@ bool rs_on_answer(rs_t *s, char const *reply) {
                 stop_reading(s); // the repeater is out of reach: no point in asking the rest one by one
             }
         } else if (ROWS[row].kind == RS_REBOOT) {
-            set_last(s, row, RS_R_OK, "Reboot sent (a repeater does not answer it)");
+            set_last(s, row, RS_R_OK, "Restart sent (a repeater does not answer it)");
         } else {
             set_last(s, row, RS_R_ERROR, "No answer: it may or may not have taken it");
             if (rs_row_readable((size_t)row)) {
@@ -655,9 +655,13 @@ void rs_format_value(size_t i, char const *raw, char *out, size_t cap) {
         float   f, bw;
         uint8_t sf, cr;
         if (rs_radio_parse(v, &f, &bw, &sf, &cr)) {
-            snprintf(out, cap, "%.3f, %g kHz, SF%u, CR%u", (double)f, (double)bw, sf, cr); // as the badge shows its own
+            snprintf(out, cap, "%.3f MHz, %g kHz, SF%u, CR%u", (double)f, (double)bw, sf, cr); // as the badge shows its own
             return;
         }
+    } else if (row->kind == RS_ONOFF || row->kind == RS_CHOICE) {
+        snprintf(out, cap, "%s", v);
+        out[0] = (char)toupper((unsigned char)out[0]); // On / Off, Minimal: sentence case (#136)
+        return;
     } else if (row->kind == RS_DEC) {
         double d;
         if (whole_number(v, &d)) {
@@ -676,14 +680,14 @@ void rs_value_text(rs_t const *s, size_t i, char *out, size_t cap) {
     if (row->kind == RS_REBOOT) {
         snprintf(out, cap, "%s", "");
     } else if (row->kind == RS_PASSWORD) {
-        snprintf(out, cap, "change");
+        snprintf(out, cap, "%s", "");
     } else if (s->st[i] == RS_V_VALUE) {
         char shown[RS_VALUE_MAX];
         rs_format_value(i, s->value[i], shown, sizeof(shown));
         bool unit = row->unit && shown[0];
         snprintf(out, cap, "%s%s%s", shown, unit ? " " : "", unit ? row->unit : "");
     } else if (s->st[i] == RS_V_NONE) {
-        snprintf(out, cap, "\xE2\x80\x94"); // an em dash: no answer
+        snprintf(out, cap, "No answer"); // R5: a word, not a bare dash
     } else {
         snprintf(out, cap, "...");
     }
@@ -717,4 +721,52 @@ void rs_progress(rs_t const *s, size_t *done, size_t *total) {
             *done += s->st[i] == RS_V_VALUE || s->st[i] == RS_V_NONE;
         }
     }
+}
+
+static bool mentions_reboot(char const *raw) {
+    for (; *raw; raw++) {
+        if (strncasecmp(raw, "reboot", 6) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The repeater's own words for a set, in plain ones (R4): "OK" and "OK - reboot to apply" are protocol text
+void rs_outcome_words(size_t i, rs_reply_t result, char const *raw, char *out, size_t cap) {
+    if (!cap) {
+        return;
+    }
+    bool radio = i < RS_ROWS && ROWS[i].kind == RS_RADIO;
+    if (result == RS_R_OK) {
+        if (i < RS_ROWS && ROWS[i].kind == RS_REBOOT) {
+            snprintf(out, cap, "Restart sent");
+        } else if (radio) {
+            snprintf(out, cap, "Saved. The repeater changes over after a restart");
+        } else if (mentions_reboot(raw)) {
+            snprintf(out, cap, "Saved. It applies after a restart");
+        } else if (strncasecmp(raw, "ok", 2) == 0 || !raw[0]) {
+            snprintf(out, cap, "Saved");
+        } else {
+            snprintf(out, cap, "%s", raw); // already words ("Password changed")
+        }
+        return;
+    }
+    char const *rest = raw;
+    if (strncasecmp(rest, "err", 3) == 0) {
+        rest += 3;
+        while (isalpha((unsigned char)*rest)) {
+            rest++; // "Error", "ERR"
+        }
+        while (*rest == ':' || *rest == ',' || *rest == ' ') {
+            rest++;
+        }
+        if (*rest) {
+            snprintf(out, cap, "The repeater refused it: %s", rest);
+        } else {
+            snprintf(out, cap, "The repeater refused it");
+        }
+        return;
+    }
+    snprintf(out, cap, "%s", raw); // ours already: "Not sent: ...", "No answer: ..."
 }

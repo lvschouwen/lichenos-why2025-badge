@@ -10,6 +10,7 @@
 #include "lichen_settings.h"
 #include "lora.h"
 #include "mesh.h"
+#include "mesh_format.h"
 #include "mesh_remote.h"
 
 #include <stdint.h>
@@ -142,7 +143,7 @@ static void job_task(void *arg) {
 char const *meshcore_run_request(bool start) {
     mesh_run_t r = meshcore_run_get();
     if (mesh_run_busy(r)) {
-        return "busy, try again";
+        return mc_busy_note();
     }
     if (start && r.state == MESH_RUN_RUNNING) {
         return "already running";
@@ -157,7 +158,7 @@ char const *meshcore_run_request(bool start) {
         return "no LoRa radio";
     }
     if (!apply(start ? MESH_EV_START : MESH_EV_STOP)) {
-        return "busy, try again"; // another request got in between
+        return mc_busy_note(); // another request got in between
     }
     if (xTaskCreatePinnedToCore(job_task, "meshrun", JOB_STACK, start ? (void *)1 : NULL, 4, NULL, 0) != pdPASS) {
         // Nothing ran: the start leaves it stopped, the stop running, as they were

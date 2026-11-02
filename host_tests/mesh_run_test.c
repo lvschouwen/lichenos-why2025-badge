@@ -86,7 +86,7 @@ static void texts(void) {
     CHECK(mesh_run_tile_text(r, false, l1, sizeof(l1), l2, sizeof(l2)));
     CHECK(strcmp(l2, "Needs the LoRa radio") == 0);
     CHECK(strcmp(mesh_run_console_text(r), "stopped (autostart off)") == 0);
-    CHECK(strcmp(mesh_run_action_label(r), "Start MeshCore") == 0 && strcmp(mesh_run_action_value(r), "Enter") == 0);
+    CHECK(strcmp(mesh_run_action_label(r), "Start MeshCore") == 0 && mesh_run_action_value(r)[0] == '\0');
     CHECK(strcmp(mesh_run_grid_text(r, true), "MeshCore is not running. Enter starts it.") == 0);
 
     mesh_run_event(&r, MESH_EV_START);
@@ -100,7 +100,7 @@ static void texts(void) {
     CHECK(!mesh_run_tile_text(r, true, l1, sizeof(l1), l2, sizeof(l2))); // the usual tile
     CHECK(mesh_run_console_text(r) == NULL);
     CHECK(mesh_run_grid_text(r, true)[0] == '\0');
-    CHECK(strcmp(mesh_run_action_label(r), "Stop MeshCore") == 0 && strcmp(mesh_run_action_value(r), "Enter") == 0);
+    CHECK(strcmp(mesh_run_action_label(r), "Stop MeshCore") == 0 && mesh_run_action_value(r)[0] == '\0');
 
     mesh_run_event(&r, MESH_EV_STOP);
     CHECK(strcmp(mesh_run_action_label(r), "Stopping...") == 0);
@@ -113,7 +113,7 @@ static void texts(void) {
     CHECK(strcmp(mesh_run_console_text(r), "stopped for update") == 0);
     CHECK(strcmp(mesh_run_action_label(r), "Stopped for update") == 0 && mesh_run_action_value(r)[0] == '\0');
 
-    CHECK(strcmp(mesh_run_autostart_text(true), "on") == 0 && strcmp(mesh_run_autostart_text(false), "off") == 0);
+    CHECK(strcmp(mesh_run_autostart_text(true), "On") == 0 && strcmp(mesh_run_autostart_text(false), "Off") == 0);
     // A tile line cut to its buffer stays terminated
     char tiny[4];
     mesh_run_t s = MESH_RUN_INIT;

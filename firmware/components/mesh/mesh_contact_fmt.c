@@ -29,11 +29,11 @@ void mesh_format_hops(uint8_t path_len, char *out, size_t cap) {
 
 char const *mesh_contact_type_name(uint8_t type) {
     switch (type) {
-        case 1: return "companion";
-        case 2: return "repeater";
-        case 3: return "room";
-        case 4: return "sensor";
-        default: return "unknown";
+        case 1: return "Chat";
+        case 2: return "Repeater";
+        case 3: return "Room";
+        case 4: return "Sensor";
+        default: return "Unknown";
     }
 }
 

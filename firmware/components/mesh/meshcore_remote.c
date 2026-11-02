@@ -6,6 +6,7 @@
 #include "lichen_ui.h"
 #include "menu.h"
 #include "mesh.h"
+#include "mesh_format.h"
 #include "mesh_rset.h"
 #include "meshcore_run.h"
 #include "text_entry.h"
@@ -72,9 +73,7 @@ static void on_delete(lv_event_t *e) {
 // The screen, its PSRAM memory and its poll timer; NULL (the menu says why) when there is no memory
 static lv_obj_t *build_common(char const *heading, lv_timer_cb_t tick, lv_obj_t **menu_out) {
     lv_obj_t *screen = shell_page_create();
-    char      head[MESH_NAME_MAX + 24];
-    snprintf(head, sizeof(head), "%s: %s", heading, title);
-    lv_obj_t *menu = menu_create(screen, head);
+    lv_obj_t *menu   = menu_create_named(screen, heading, title);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     screen_obj = screen;
     if (timer) {
@@ -114,7 +113,7 @@ static void login_tick(lv_timer_t *t) {
     }
     rr_t const *r = &mem->rr;
     if (r->seq != seq) {
-        set_text(result, "Another request to a repeater or room was started (the console?)");
+        set_text(result, "Another request to a repeater or room was started.");
         wipe_pw();
         return;
     }
@@ -151,9 +150,8 @@ static lv_obj_t *build_login(void) {
         return screen;
     }
     menu_note(menu, "Sent now, along the stored path or flooded. A repeater or room answers only with the right password. "
-                    "After a login the badge keeps the session alive on air until you Log out.");
+                    "After a login the badge keeps the session alive on air until you log out.");
     result = add_text(menu, "Sending...");
-    menu_note(menu, "Esc: back");
     login_start();
     return screen;
 }
@@ -183,7 +181,7 @@ static void status_show(void) {
     }
     rr_t const *r = &mem->rr;
     if (r->seq != seq) {
-        set_text(result, "Another request was started (the console?): Enter asks again");
+        set_text(result, "Another request was started: Ask again.");
         return;
     }
     char text[128];
@@ -240,7 +238,6 @@ static lv_obj_t *build_status(void) {
         menu_note(menu, "Not logged in from here: a repeater answers only logged-in clients.");
     }
     result = add_text(menu, "Asking...");
-    menu_note(menu, "Esc: back");
     status_start(NULL);
     return screen;
 }
@@ -258,7 +255,7 @@ static void cli_show(void) {
     }
     rr_t const *r = &mem->rr;
     if (r->cli_n == 0 || memcmp(r->cli_prefix, target, 6) != 0) {
-        set_text(result, "No commands yet. Enter on Command... types one; it is sent when you press Enter.");
+        set_text(result, "No commands yet: Command... types one, it is sent when you press Enter.");
     } else {
         rr_cli_format(r, mem->text, sizeof(mem->text));
         set_text(result, mem->text);
@@ -306,15 +303,14 @@ static void cli_ask(char const *command, bool radio) {
     snprintf(t, sizeof(t), "Send \"%s\" to %s?", command, title);
     shell_dialog_t const d = {
         .title        = t,
-        .count_prefix = radio ? "A wrong radio cuts it off the mesh; only a visit to it undoes that. (cancels in "
-                              : "It reboots or stops the repeater. (cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: send \xC2\xB7 Esc: don't",
+        .count_prefix = radio ? "A wrong radio cuts it off the mesh; only a visit to it undoes that. ("
+                              : "It restarts or stops the repeater. (", // only the sentence before "(" is used
         .seconds      = 30,
         .careful      = true,
+        .confirm_label = "send",
     };
     if (!shell_dialog_countdown(&d, cli_answer)) {
-        set_text(note, "Could not ask, try again");
+        set_text(note, mc_busy_note());
         memset(cli_pending, 0, sizeof(cli_pending));
     }
 }
@@ -341,15 +337,14 @@ static void cli_command(void *arg) {
 
 static lv_obj_t *build_cli(void) {
     lv_obj_t *menu;
-    lv_obj_t *screen = build_common("CLI", cli_tick, &menu);
+    lv_obj_t *screen = build_common("Commands", cli_tick, &menu);
     if (!mem) {
         return screen;
     }
     again = menu_add(menu, "Command...", "", cli_command, NULL);
-    menu_note(menu, "Needs a login with admin rights. The reply comes back newest first; Down scrolls.");
+    menu_note(menu, "Needs a login with admin rights. The newest reply is on top; Down scrolls.");
     note   = menu_note(menu, "");
     result = add_text(menu, "");
-    menu_note(menu, "Esc: back");
     cli_show();
     return screen;
 }

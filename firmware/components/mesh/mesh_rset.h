@@ -27,7 +27,7 @@ typedef enum {
     RS_RADIO,    // freq,bw,sf,cr (the careful one: a wrong value cuts the repeater off the mesh)
     RS_READONLY, // shown, never set (get role, ver)
     RS_PASSWORD, // the admin password: set only ("password <new>"), never read back
-    RS_REBOOT,   // an action ("reboot"), no value
+    RS_REBOOT,   // an action (the CLI word "reboot", shown as Restart), no value
 } rs_kind_t;
 
 typedef struct {
@@ -132,12 +132,15 @@ bool rs_on_answer(rs_t *s, char const *reply);
 // The command in flight could not even be sent: a get goes back in the queue (up to RS_UNSENT_MAX tries in all, then
 // it shows "—"); a set is dropped with why
 void rs_on_unsent(rs_t *s, char const *why);
-// What a row shows: the value (and unit), "..." while unknown or asked, "—" without an answer; "" for the reboot and
-// "change" for the password
+// What a row shows: the value (and unit), "..." while unknown or asked, "No answer" without one; "" for the restart and
+// the password (their rows are actions, not states)
 void rs_value_text(rs_t const *s, size_t i, char *out, size_t cap);
-// A raw reply value as a row shows it: the radio as "869.618, 62.5 kHz, SF7, CR5", the decimal rows to a fixed number
+// A raw reply value as a row shows it: the radio as "869.618 MHz, 62.5 kHz, SF7, CR5", the decimal rows to a fixed number
 // of places (#131); anything else, or text that does not parse, as it is (trimmed)
 void rs_format_value(size_t i, char const *raw, char *out, size_t cap);
+// The last set's outcome (rs_t.last / last_text) in plain words: "Saved", "Saved. It applies after a restart", "The
+// repeater refused it: max 64" (R4). RS_R_OK for a restart reads "Restart sent".
+void rs_outcome_words(size_t i, rs_reply_t result, char const *raw, char *out, size_t cap);
 // The value as the edit field starts with it ("" when none)
 void rs_edit_text(rs_t const *s, size_t i, char *out, size_t cap);
 // How many readable rows are read (answered or not), of how many

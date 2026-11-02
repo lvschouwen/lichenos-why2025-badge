@@ -61,6 +61,9 @@ static lv_obj_t *build_page(void) {
                                       toggle_switch, (void *)(uintptr_t)MN_SW_FAIL);
     sw_row[MN_SW_MENTIONS] = menu_add(menu, "Mentions of my name", on_off(mesh_notify_get_switch(MN_SW_MENTIONS)),
                                       toggle_switch, (void *)(uintptr_t)MN_SW_MENTIONS);
+    for (int i = 0; i < 3; i++) {
+        menu_set_kind(sw_row[i], MENU_TOGGLE);
+    }
     menu_note(menu, "Channels (Enter: All, Mentions, Off):");
     size_t n = mesh_channels_snapshot_wait(chan_name, MAX_CHANNELS, SCREEN_WAIT_MS);
     if (n == MESH_BUSY) {
@@ -70,6 +73,7 @@ static lv_obj_t *build_page(void) {
         for (size_t i = 0; i < n; i++) {
             chan_row[i] = menu_add(menu, chan_name[i], mn_mode_name(mesh_notify_chan_mode(chan_name[i])),
                                    cycle_channel, (void *)(uintptr_t)i);
+            menu_set_kind(chan_row[i], MENU_CYCLE);
         }
     }
     menu_note(menu, "Mentions: @name or @[name]. Public starts on Mentions. Nothing is sent for a chat that is open; "

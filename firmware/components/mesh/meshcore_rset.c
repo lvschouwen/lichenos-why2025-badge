@@ -1,6 +1,6 @@
 // A repeater's Settings page (#117), opened from its details (meshcore_contact.c) after a login as admin. The values are
 // read over the CLI one get at a time (mesh_rset_run.h, stepped by this screen's LVGL timer, so every LVGL call stays on
-// the LVGL task); a row changes only on an Enter on it and a second Enter in its edit field, and the radio and a reboot
+// the LVGL task); a row changes only on an Enter on it and a second Enter in its edit field, and the radio and a restart
 // only after a careful confirm. erase is never sent (mesh_remote.c refuses it).
 #include "meshcore_remote.h"
 
@@ -8,6 +8,7 @@
 #include "lichen_ui.h"
 #include "menu.h"
 #include "mesh.h"
+#include "mesh_format.h"
 #include "mesh_rset_run.h"
 #include "meshcore_run.h"
 #include "text_entry.h"
@@ -30,9 +31,11 @@ typedef struct {
 static uint8_t     target[6];
 static char        title[MESH_NAME_MAX + 1];
 static rset_mem_t *mem; // PSRAM, while the screen exists
-static lv_obj_t   *screen_obj, *note, *again_row, *rows[RS_ROWS];
+static lv_obj_t   *screen_obj, *menu_obj, *note, *again_row, *rows[RS_ROWS];
 static lv_timer_t *timer;
 static bool        shown_busy;
+static bool        reading;      // a read of all rows is under way: the menu's status line follows it and must end (R5)
+static int         shown_done;   // the count the status line shows
 static char        pending[RS_CMD_MAX + 1];         // the radio value between its entry and its confirm
 static char        pw_first[MF_PASSWORD_MAX + 1];  // the new password between its two entries
 static char        pw_hold[MF_PASSWORD_MAX + 1];   // the new password until the repeater took it
@@ -85,29 +88,59 @@ static void settle_password(void) {
     wipe_secrets();
 }
 
+// How many of the readable rows have a value
+static size_t answered_rows(rs_t const *s) {
+    size_t n = 0;
+    for (size_t i = 0; i < RS_ROWS; i++) {
+        n += rs_row_readable(i) && s->st[i] == RS_V_VALUE;
+    }
+    return n;
+}
+
+// The read's status line: "Reading 3 of 17" while it runs, then it ends in "Read 17 of 17" or "Read 14 of 17, 3 did not
+// answer" (R5). Called on every tick, so it ends however the last answer came in.
+static void show_read_status(void) {
+    rs_t const *s = &mem->run.rs;
+    if (!reading || set_waiting()) {
+        return;
+    }
+    size_t done, total;
+    rs_progress(s, &done, &total);
+    if (rs_run_busy(&mem->run)) {
+        if ((int)done != shown_done) {
+            menu_status_progress(menu_obj, (int)done, (int)total);
+            shown_done = (int)done;
+        }
+        return;
+    }
+    reading         = false;
+    size_t got      = answered_rows(s);
+    char   text[64];
+    if (got == total) {
+        snprintf(text, sizeof(text), "Read %u of %u", (unsigned)got, (unsigned)total);
+        menu_status_done(menu_obj, text);
+    } else {
+        snprintf(text, sizeof(text), "Read %u of %u, %u did not answer", (unsigned)got, (unsigned)total,
+                 (unsigned)(total - got));
+        menu_status_fail(menu_obj, text, s->stopped ? "Out of reach? Read again tries again" : "Read again tries again");
+    }
+}
+
+// The line under Read again: the outcome of the last change, or why a read had a problem
 static void show_outcome(void) {
     rs_t const *s = &mem->run.rs;
-    char        text[RS_TEXT_MAX + 64];
-    size_t      done, total;
-    rs_progress(s, &done, &total);
+    char        text[RS_TEXT_MAX + 64], words[RS_TEXT_MAX];
     if (set_waiting()) {
         set_note("Sending the change...", false);
-    } else if (rs_busy(s)) {
-        snprintf(text, sizeof(text), "Reading %u of %u...", (unsigned)(done + 1 > total ? total : done + 1),
-                 (unsigned)total);
-        set_note(text, false);
-    } else if (s->stopped) {
-        set_note("Stopped after 3 gets without an answer (out of reach?): Read again tries again.", true);
     } else if (s->last_row >= 0) {
-        bool radio = rs_row_at((size_t)s->last_row)->kind == RS_RADIO && s->last == RS_R_OK;
-        snprintf(text, sizeof(text), "%s: %s%s", rs_row_at((size_t)s->last_row)->label, s->last_text,
-                 radio ? ". The repeater changes over after a reboot." : "");
+        rs_outcome_words((size_t)s->last_row, (rs_reply_t)s->last, s->last_text, words, sizeof(words));
+        snprintf(text, sizeof(text), "%s: %s", rs_row_at((size_t)s->last_row)->label, words);
         set_note(text, s->last != RS_R_OK);
-    } else if (mem->run.why) {
-        snprintf(text, sizeof(text), "Read %u rows. Last problem: %s", (unsigned)total, mem->run.why);
+    } else if (mem->run.why && !rs_run_busy(&mem->run)) {
+        snprintf(text, sizeof(text), "Last problem: %s", mem->run.why);
         set_note(text, true);
     } else {
-        set_note("Enter on a row changes it; nothing is sent before the Enter in its field.", false);
+        set_note("", false);
     }
 }
 
@@ -122,9 +155,10 @@ static void refresh(void) {
     }
     bool busy = rs_run_busy(&mem->run);
     if (busy != shown_busy) {
-        menu_set_value(again_row, busy ? "..." : "");
+        menu_set_value(again_row, busy ? "Reading..." : "");
         shown_busy = busy;
     }
+    show_read_status();
     show_outcome();
 }
 
@@ -133,10 +167,11 @@ static void tick(lv_timer_t *t) {
     if (!mem) {
         return;
     }
-    if (rs_run_step(&mem->run)) {
-        refresh();
-        settle_password();
-    }
+    rs_run_step(&mem->run);
+    // Not only when the step says something changed: the last answer must always reach the screen, so the read ends
+    // in a final line (R5). refresh() redraws only what differs, so a quiet tick costs a few comparisons.
+    refresh();
+    settle_password();
 }
 
 static void read_all(void *arg) {
@@ -148,8 +183,14 @@ static void read_all(void *arg) {
         set_note("Log in as admin first (Log in on the repeater's details).", true);
         return;
     }
+    if (reading) {
+        return; // still reading: a held Enter does not begin it again
+    }
     mem->run.why = NULL;
     rs_read_all(&mem->run.rs);
+    reading    = true;
+    shown_done = -1;
+    menu_status_begin(menu_obj, "Reading");
     refresh();
 }
 
@@ -181,7 +222,7 @@ static void radio_answer(bool yes) {
     pending[0] = 0;
 }
 
-// The badge's own radio: the repeater set to anything else is lost to this badge once it reboots
+// The badge's own radio: the repeater set to anything else is lost to this badge once it restarts
 static bool same_as_badge(char const *value) {
     mesh_settings_t st;
     float           f, bw;
@@ -191,45 +232,31 @@ static bool same_as_badge(char const *value) {
 }
 
 static void ask_radio(char const *value) {
-    char t[96];
+    char t[160], human[RS_VALUE_MAX];
     bool same = same_as_badge(value);
     snprintf(pending, sizeof(pending), "%s", value);
-    snprintf(t, sizeof(t), "Set the radio of %s to %s?", title, value);
+    rs_format_value((size_t)rs_row_find("radio"), value, human, sizeof(human));
+    snprintf(t, sizeof(t), "Set the radio of %s to %s?", title, human);
     shell_dialog_t const d = {
-        .title        = t,
-        .count_prefix = same ? "Same as this badge. A wrong radio needs a visit to the repeater to undo. (cancels in "
-                             : "NOT this badge's radio: it loses the repeater. Only a visit undoes it. (cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: set it \xC2\xB7 Esc: keep the old one",
-        .seconds      = ASK_S,
-        .careful      = true,
+        .title         = t,
+        .count_prefix  = same ? "Same as this badge. A wrong radio needs a visit to the repeater to undo. ("
+                              : "This is not the badge's radio: the badge loses the repeater. Only a visit undoes it. (",
+        .seconds       = ASK_S,
+        .careful       = true,
+        .confirm_label = "set radio",
     };
     if (!shell_dialog_countdown(&d, radio_answer)) {
-        set_note("Could not ask, try again", true);
+        set_note(mc_busy_note(), true);
     }
 }
 
-static void reboot_answer(bool yes) {
-    if (yes && mem && !admin_here()) {
+// The Restart row is a DANGER row: the careful dialog came before this
+static void restart_go(void *arg) {
+    (void)arg;
+    if (mem && !admin_here()) {
         set_note("No longer logged in as admin: nothing sent.", true);
-    } else if (yes && mem) {
+    } else if (mem) {
         queue((size_t)rs_row_find("reboot"), "");
-    }
-}
-
-static void ask_reboot(void) {
-    char t[96];
-    snprintf(t, sizeof(t), "Reboot %s? It is off the air for a while; log in again after.", title);
-    shell_dialog_t const d = {
-        .title        = t,
-        .count_prefix = "(cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: reboot \xC2\xB7 Esc: keep it running",
-        .seconds      = ASK_S,
-        .careful      = true,
-    };
-    if (!shell_dialog_countdown(&d, reboot_answer)) {
-        set_note("Could not ask, try again", true);
     }
 }
 
@@ -299,7 +326,7 @@ static void hint_for(rs_row_t const *row, char *out, size_t cap) {
         break;
     case RS_ONOFF: snprintf(out, cap, "on or off"); break;
     case RS_CHOICE: snprintf(out, cap, "off, minimal, moderate, strict"); break;
-    case RS_RADIO: snprintf(out, cap, "MHz,kHz,SF,CR"); break;
+    case RS_RADIO: snprintf(out, cap, "MHz, kHz, SF, CR"); break;
     default: snprintf(out, cap, "up to 31 characters"); break;
     }
 }
@@ -315,8 +342,7 @@ static void on_row(void *arg) {
         return;
     }
     if (!rs_row_editable(i)) {
-        set_note("Read only.", false);
-        return;
+        return; // an INFO row: not selectable, so only a console key gets here
     }
     if (set_waiting()) {
         set_note("Wait for the answer to the last change.", true);
@@ -325,10 +351,6 @@ static void on_row(void *arg) {
     uint8_t st = mem->run.rs.st[i];
     if (rs_row_readable(i) && st != RS_V_VALUE) {
         set_note(st == RS_V_NONE ? "The repeater did not answer this one: Read again first." : "Still reading it.", true);
-        return;
-    }
-    if (row->kind == RS_REBOOT) {
-        ask_reboot();
         return;
     }
     char heading[MESH_NAME_MAX + 64];
@@ -359,17 +381,39 @@ static void on_delete(lv_event_t *e) {
     pending[0] = 0;
     heap_caps_free(mem);
     mem       = NULL;
+    reading   = false;
+    menu_obj  = NULL;
     note      = again_row = NULL;
     memset(rows, 0, sizeof(rows));
 }
 
+static void add_rows(lv_obj_t *menu) {
+    for (size_t i = 0; i < RS_ROWS; i++) {
+        rs_row_t const *row = rs_row_at(i);
+        rows[i]             = menu_add(menu, row->label, "", row->kind == RS_REBOOT ? restart_go : on_row,
+                                       (void *)(uintptr_t)i);
+        if (row->kind == RS_READONLY) {
+            menu_set_kind(rows[i], MENU_INFO);
+        } else if (row->kind == RS_PASSWORD) {
+            menu_set_kind(rows[i], MENU_OPEN);
+        } else if (row->kind == RS_REBOOT) {
+            char ask[MESH_NAME_MAX + 80];
+            snprintf(ask, sizeof(ask), "Restart %s? It is off the air for a while; log in again after.", title);
+            menu_set_danger(rows[i], ask, "restart");
+        } else if (row->kind == RS_RADIO) {
+            menu_note(menu, "Careful: a wrong radio cuts the repeater off the mesh. Only a visit to the repeater undoes "
+                            "it.");
+        }
+    }
+}
+
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
-    char      head[MESH_NAME_MAX + 16];
-    snprintf(head, sizeof(head), "Settings: %s", title);
-    lv_obj_t *menu = menu_create(screen, head);
+    lv_obj_t *menu   = menu_create_named(screen, "Repeater settings", title);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     screen_obj = screen;
+    menu_obj   = menu;
+    reading    = false;
     if (timer) {
         lv_timer_delete(timer);
         timer = NULL;
@@ -387,15 +431,8 @@ static lv_obj_t *build(void) {
     shown_busy = false;
     again_row  = menu_add(menu, "Read again", "", read_all, NULL);
     note       = menu_note(menu, "");
-    for (size_t i = 0; i < RS_ROWS; i++) {
-        rs_row_t const *row = rs_row_at(i);
-        if (row->kind == RS_PASSWORD) {
-            menu_note(menu, "Careful: a wrong radio cuts the repeater off the mesh, and only someone at the repeater "
-                            "can undo it. erase is never sent from the badge.");
-        }
-        rows[i] = menu_add(menu, row->label, "", on_row, (void *)(uintptr_t)i);
-    }
-    menu_note(menu, "Esc: back");
+    add_rows(menu);
+    shell_page_hint(screen, "Enter", "change", NULL);
     read_all(NULL); // the values are read as the page opens (gets only), as the Status screen asks as it opens
     timer = lv_timer_create(tick, TICK_MS, NULL);
     return screen;

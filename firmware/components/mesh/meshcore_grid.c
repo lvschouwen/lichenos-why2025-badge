@@ -9,6 +9,7 @@
 #include "lora.h"
 #include "mesh.h"
 #include "mesh_chat.h"
+#include "mesh_format.h"
 #include "mesh_grid.h"
 #include "meshcore_run.h"
 #include "meshcore_screens.h"
@@ -130,7 +131,7 @@ static void advert_answer(bool confirmed) {
         return; // the grid went away meanwhile
     }
     if (!confirmed) {
-        show_status("not sent");
+        show_status("Not sent");
         return;
     }
     ESP_LOGI(TAG, "advert confirmed on the grid");
@@ -152,14 +153,12 @@ static void ask_advert(void) {
     shell_dialog_t const d = {
         .title        = cfg.flood_manual ? "Send a flood advert now? The whole mesh hears it."
                                          : "Send an advert now? Nodes in direct range hear it.",
-        .count_prefix = "(cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: send    Esc: cancel",
-        .seconds      = ADVERT_ASK_S,
-        .careful      = true, // a held Enter never sends it, the countdown ends in a cancel
+        .seconds       = ADVERT_ASK_S,
+        .careful       = true, // a held Enter never sends it, the countdown ends in a cancel
+        .confirm_label = "send",
     };
     if (!shell_dialog_countdown(&d, advert_answer)) {
-        show_status("busy, try again");
+        show_status(mc_busy_note());
     }
 }
 
@@ -291,9 +290,7 @@ void meshcore_grid_build(lv_obj_t *screen, lv_group_t *group) {
     }
     g.status = add_label(screen, "", THEME_TEAL);
     lv_obj_set_width(g.status, LV_PCT(100));
-    lv_obj_t *hint = add_label(screen, "Arrows: choose    Enter: open    Esc: home", THEME_AMBER);
-    lv_obj_set_floating(hint, true);
-    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
+    shell_page_hint(screen, "Enter", "open", NULL); // dim (R8), the same line as every page
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     if (group) {
         lv_group_focus_obj(g.cell[MESH_GRID_CHAT]);

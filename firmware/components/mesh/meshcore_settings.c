@@ -164,20 +164,21 @@ static int current_preset(mesh_settings_t const *s) {
 }
 
 static void radio_values(char *out, size_t cap, float freq, float bw, uint8_t sf, uint8_t cr, bool marked) {
-    snprintf(out, cap, "%s%.3f " LV_SYMBOL_BULLET " %g " LV_SYMBOL_BULLET " SF%u/CR%u",
-             marked ? LV_SYMBOL_OK " " : "", freq, bw, sf, cr);
+    char radio[64];
+    mesh_format_radio(radio, sizeof(radio), freq, bw, sf, cr);
+    snprintf(out, cap, "%s%s", marked ? LV_SYMBOL_OK " " : "", radio);
 }
 
 // The value on a preset or custom row: next to a long title only the frequency fits (#131); the rest is in the
 // confirmation and on the Custom radio page
 static void radio_short(char *out, size_t cap, float freq, bool marked) {
-    snprintf(out, cap, "%s%.3f", marked ? LV_SYMBOL_OK " " : "", freq);
+    snprintf(out, cap, "%s%.3f MHz", marked ? LV_SYMBOL_OK " " : "", freq);
 }
 
 static void set_note(lv_obj_t *note, char const *text, bool problem) {
     if (note) {
         lv_label_set_text(note, text);
-        lv_obj_set_style_text_color(note, lv_color_hex(problem ? THEME_AMBER : THEME_DIM), 0);
+        lv_obj_set_style_text_color(note, lv_color_hex(problem ? THEME_RED : THEME_DIM), 0);
     }
 }
 
@@ -207,7 +208,7 @@ static void name_done(job_t *job) {
         return;
     }
     if (name_row) {
-        menu_set_value(name_row, job->ok && mesh_get_settings(&s) ? s.name : "not saved (MeshCore busy?)");
+        menu_set_value(name_row, job->ok && mesh_get_settings(&s) ? s.name : "Not saved: MeshCore is busy");
     }
 }
 
@@ -222,7 +223,7 @@ static void on_name(char const *text, void *arg) {
             first_name_done    = NULL;
             next(false);
         } else {
-            menu_set_value(name_row, "not saved: a name can't be empty");
+            menu_set_value(name_row, "Not saved: a name can't be empty");
         }
         return;
     }
@@ -233,13 +234,13 @@ static void on_name(char const *text, void *arg) {
             first_name_done    = NULL;
             next(false);
         } else {
-            menu_set_value(name_row, "busy, try again");
+            menu_set_value(name_row, mc_busy_note());
         }
         return;
     }
     snprintf(job->text, sizeof(job->text), "%s", clean);
     if (!first_name_done) {
-        menu_set_value(name_row, "saving...");
+        menu_set_value(name_row, "Saving...");
     }
     void (*submitted)(void) = first_name_submitted;
     if (!job_start(job)) {
@@ -280,12 +281,12 @@ static void channels_line(job_t *job, lv_obj_t *row) {
         return;
     }
     if (job->n == MESH_BUSY) {
-        menu_set_value(row, "busy");
+        menu_set_value(row, mc_busy_note());
         return;
     }
     char line[24];
     snprintf(line, sizeof(line), "%u channel%s", (unsigned)job->n, job->n == 1 ? "" : "s");
-    menu_set_value(row, job->n ? line : "none");
+    menu_set_value(row, job->n ? line : "None");
 }
 
 static void page_channels_done(job_t *job) {
@@ -310,7 +311,7 @@ static void (*advert_status)(char const *status);
 static void advert_done(job_t *job) {
     char const *note = mesh_advert_note(clock_is_approximate()); // allowed, but say so (#83)
     if (advert_status) {
-        advert_status(!job->ok ? "not sent" : note ? "queued, approximate clock" : "queued");
+        advert_status(!job->ok ? "Not sent" : note ? "Queued, approximate clock" : "Queued");
     }
 }
 
@@ -322,14 +323,14 @@ void meshcore_advert_send(void (*status)(char const *text)) {
     }
     job_t *job = job_new(JOB_ADVERT, advert_done);
     if (!job) {
-        status("busy, try again");
+        status(mc_busy_note());
         return;
     }
     advert_status = status;
-    status("sending...");
+    status("Sending...");
     if (!job_start(job)) { // the job is freed: no result will come
         advert_status = NULL;
-        status("busy, try again");
+        status(mc_busy_note());
     }
 }
 
@@ -379,7 +380,7 @@ static void run_row_refresh(lv_timer_t *timer) {
 static void toggle_autostart(void *arg) {
     (void)arg;
     bool on = !meshcore_autostart();
-    menu_set_value(autostart_row, meshcore_autostart_set(on) ? mesh_run_autostart_text(on) : "not saved");
+    menu_set_value(autostart_row, meshcore_autostart_set(on) ? mesh_run_autostart_text(on) : "Not saved");
 }
 
 static void start_stop(void *arg) {
@@ -399,6 +400,7 @@ static void start_stop(void *arg) {
 static void run_rows(lv_obj_t *page) {
     char const *on = mesh_run_autostart_text(meshcore_autostart());
     autostart_row  = menu_add(page, "Start at boot", on, toggle_autostart, NULL);
+    menu_set_kind(autostart_row, MENU_TOGGLE);
     run_row       = menu_add(page, "", "", start_stop, NULL);
     run_refusal   = NULL;
     run_shown     = meshcore_run_get();
@@ -428,15 +430,17 @@ void meshcore_settings(lv_obj_t *page) {
     mesh_settings_t s;
     if (!mesh_running() || !mesh_get_settings(&s)) {
         menu_note(page, "MeshCore is not running: its settings come back when it does.");
-        menu_add(page, "Notifications", "", open_notify_page, NULL);
+        menu_set_kind(menu_add(page, "Notifications", "", open_notify_page, NULL), MENU_OPEN);
         return;
     }
     name_row     = menu_add(page, "Name", s.name, edit_name, NULL);
     radio_row    = menu_add(page, "Region & radio", "", open_radio, NULL);
-    channels_row = menu_add(page, "Channels", "...", open_channels, NULL);
+    channels_row = menu_add(page, "Channels", "", open_channels, NULL);
     advert_row   = menu_add(page, "Send advert", "", send_advert, NULL);
-    menu_add(page, "Notifications", "", open_notify_page, NULL);
-    menu_add(page, "Advert & contacts", "...", meshcore_advert_settings_open, NULL);
+    menu_set_kind(menu_add(page, "Notifications", "", open_notify_page, NULL), MENU_OPEN);
+    menu_set_kind(menu_add(page, "Advert & contacts", "", meshcore_advert_settings_open, NULL), MENU_OPEN);
+    menu_set_kind(radio_row, MENU_OPEN);
+    menu_set_kind(channels_row, MENU_OPEN);
     radio_row_refresh();
     page_channels_refresh();
 }
@@ -508,16 +512,16 @@ static lv_obj_t *build_switch(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Switch radio");
     char      text[96];
-    menu_note(menu, want.title);
+    lv_obj_t *what = menu_note(menu, want.title);
+    lv_obj_set_style_text_color(what, lv_color_hex(THEME_TEXT), 0);
     radio_values(text, sizeof(text), want.freq, want.bw, want.sf, want.cr, false);
     menu_note(menu, text);
-    snprintf(text, sizeof(text), "Switch radio to %s?", want.title);
-    menu_note(menu, text);
+    menu_note(menu, "The badge is on this radio from the next message on.");
     if (want.level == RADIO_CONFIRM_BAND) {
         set_note(menu_note(menu, ""), "Another band than the current radio. It may not be legal where you are.", true);
     }
-    menu_add(menu, "Switch radio", "Enter", switch_yes, NULL);
-    menu_note(menu, "Esc keeps the current radio.");
+    menu_add(menu, "Switch radio", "", switch_yes, NULL);
+    shell_page_hint(screen, "Enter", "switch radio", "Esc", "cancel", NULL);
     return screen;
 }
 
@@ -548,7 +552,7 @@ static void preset_go(void *arg) {
     }
     job_t *job = job_new(JOB_RADIO, preset_done);
     if (!job) {
-        menu_set_value(preset_rows[i], "busy, try again");
+        menu_set_value(preset_rows[i], mc_busy_note());
         return;
     }
     job->freq           = p->freq_mhz;
@@ -557,7 +561,7 @@ static void preset_go(void *arg) {
     job->cr             = p->cr;
     job->tx_dbm         = s.tx_dbm;
     job->n              = i; // the row for the result
-    menu_set_value(preset_rows[i], "applying...");
+    menu_set_value(preset_rows[i], "Applying...");
     job_start(job);
 }
 
@@ -675,7 +679,7 @@ static void toggle_phs(void *arg) {
     }
     job_t *job = job_new(JOB_PATHHASH, phs_done);
     if (!job) {
-        menu_set_value(phs_row, "busy, try again");
+        menu_set_value(phs_row, mc_busy_note());
         return;
     }
     job->path_hash_size = s.path_hash_size == 1 ? 2 : 1;
@@ -709,7 +713,7 @@ static lv_obj_t *build_radio(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Region & radio");
     menu_filter_t *filter = menu_filter_create(screen, menu, radio_row_matches, NULL); // #32
-    menu_note(menu, "Preset  (MHz " LV_SYMBOL_BULLET " kHz " LV_SYMBOL_BULLET " SF " LV_SYMBOL_BULLET " CR)");
+    menu_note(menu, "Presets");
     for (size_t i = 0; i < radio_preset_count() && i < MAX_PRESETS; i++) {
         preset_rows[i] = menu_add(menu, radio_preset_at(i)->title, "", pick_preset, (void *)(uintptr_t)i);
         menu_filter_add(filter, preset_rows[i], i);
@@ -718,6 +722,7 @@ static lv_obj_t *build_radio(void) {
     menu_filter_fallback(filter, custom_row);
     menu_note(menu, "Advanced");
     phs_row = menu_add(menu, "Path hash size", "", toggle_phs, NULL);
+    menu_set_kind(phs_row, MENU_CYCLE);
     phs_show(s.path_hash_size);
     tx_wanted = s.tx_dbm;
     menu_add_slider(menu, "TX power (dBm)", -9, 22, s.tx_dbm, on_tx, NULL);
@@ -761,7 +766,7 @@ static void draft_show(void) {
     menu_set_value(bw_row, text);
     snprintf(text, sizeof(text), "SF%u", draft_sf);
     menu_set_value(sf_row, text);
-    snprintf(text, sizeof(text), "4/%u", draft_cr);
+    snprintf(text, sizeof(text), "CR%u", draft_cr);
     menu_set_value(cr_row, text);
 }
 
@@ -826,7 +831,7 @@ static void custom_go(void *arg) {
     }
     job_t *job = job_new(JOB_RADIO, custom_done);
     if (!job) {
-        set_note(custom_note, "Busy, try again", true);
+        set_note(custom_note, mc_busy_note(), true);
         return;
     }
     job->freq           = draft_freq;
@@ -881,11 +886,14 @@ static lv_obj_t *build_custom(void) {
     }
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Custom radio");
-    menu_note(menu, "Enter changes a value; nothing is used until Apply.");
+    menu_note(menu, "Enter changes a value. Nothing is used until Apply.");
     freq_row    = menu_add(menu, "Frequency", "", edit_freq, NULL);
     bw_row      = menu_add(menu, "Bandwidth", "", next_bw, NULL);
     sf_row      = menu_add(menu, "Spreading factor", "", next_sf, NULL);
     cr_row      = menu_add(menu, "Coding rate", "", next_cr, NULL);
+    menu_set_kind(bw_row, MENU_CYCLE);
+    menu_set_kind(sf_row, MENU_CYCLE);
+    menu_set_kind(cr_row, MENU_CYCLE);
     menu_add(menu, "Apply", "", apply_custom, NULL);
     custom_note = menu_note(menu, "862 to 928 MHz on this badge");
     lv_obj_add_event_cb(screen, on_custom_delete, LV_EVENT_DELETE, NULL);
@@ -930,9 +938,10 @@ static void channel_rows_build(void *arg) {
         // Enter opens the channel's details: key, link, Rename, Remove (#54)
         channel_rows[channel_row_count++] = menu_add(menu, job->names[i], "", open_channel, row_names[i]);
     }
-    if (!n) {
-        channel_rows[channel_row_count++] = menu_add(menu, job->n == MESH_BUSY ? "MeshCore busy" : "No channels", "",
-                                                     NULL, NULL);
+    if (job->n == MESH_BUSY) {
+        channel_rows[channel_row_count++] = menu_add(menu, mc_busy_note(), "", NULL, NULL);
+    } else if (!n) {
+        menu_empty(menu, "channels", "add a #hashtag channel below"); // R11: not a row, gone when the first one comes
     }
 }
 
@@ -957,7 +966,7 @@ static void list_done(job_t *job) {
             lv_obj_move_to_index(channel_rows[i], (int32_t)(1 + i));
         }
     }
-    lv_obj_t *focus = channel_rows[keep < channel_row_count ? keep : channel_row_count - 1];
+    lv_obj_t *focus = channel_row_count ? channel_rows[keep < channel_row_count ? keep : channel_row_count - 1] : NULL;
     if (focus) {
         lv_group_focus_obj(focus);
     }
@@ -995,7 +1004,7 @@ static void add_done(job_t *job) {
 static void add_channel(char const *name, char const *key) {
     job_t *job = job_new(JOB_CHANNEL_ADD, add_done);
     if (!job) {
-        set_note(channel_note, "Busy, try again", true);
+        set_note(channel_note, mc_busy_note(), true);
         return;
     }
     snprintf(job->text, sizeof(job->text), "%s", name);
@@ -1033,7 +1042,7 @@ static void remove_done(job_t *job) {
 static void remove_go(void) {
     job_t *job = job_new(JOB_CHANNEL_RM, remove_done);
     if (!job) {
-        set_note(channel_note, "Busy, try again", true);
+        set_note(channel_note, mc_busy_note(), true);
         return;
     }
     snprintf(job->text, sizeof(job->text), "%s", remove_name);
@@ -1053,15 +1062,13 @@ static void remove_ask(void *arg) {
     char                 title[MESH_CHANNEL_MAX + 64];
     shell_dialog_t const d = {
         .title        = title,
-        .count_prefix = "(cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: remove · Esc: keep it",
         .seconds      = REMOVE_ASK_S,
         .careful      = true,
+        .confirm_label = "remove",
     };
     snprintf(title, sizeof(title), "Remove %s? Messages already received stay.", remove_name);
     if (!shell_dialog_countdown(&d, remove_answer)) {
-        set_note(channel_note, "Busy, try again", true);
+        set_note(channel_note, mc_busy_note(), true);
     }
 }
 
@@ -1143,7 +1150,7 @@ static void on_rename(char const *text, void *arg) {
     (void)arg;
     job_t *job = chan_mem ? job_new(JOB_CHANNEL_RENAME, rename_done) : NULL;
     if (!job) {
-        set_note(chan_note, "Busy, try again", true);
+        set_note(chan_note, mc_busy_note(), true);
         return;
     }
     snprintf(job->text, sizeof(job->text), "%s", chan_mem->name);
@@ -1174,7 +1181,7 @@ static void info_done(job_t *job) {
     lv_obj_delete(chan_loading);
     chan_loading = NULL;
     if (job->n != 1) {
-        menu_note(chan_menu, job->n == 0 ? "This channel is gone." : "MeshCore is busy: Esc and try again.");
+        menu_note(chan_menu, job->n == 0 ? "This channel is gone." : mc_busy_note());
         return;
     }
     mesh_channel_info_t const *info = &job->info;
@@ -1227,7 +1234,7 @@ static lv_obj_t *build_channel(void) {
     chan_group       = lv_group_get_default();
     lv_obj_add_event_cb(screen, on_channel_delete, LV_EVENT_DELETE, NULL);
     chan_mem  = heap_caps_calloc(1, sizeof(*chan_mem), MALLOC_CAP_SPIRAM);
-    chan_menu = menu_create(screen, pending_channel);
+    chan_menu = menu_create_named(screen, "Channel", pending_channel);
     if (!chan_mem) {
         menu_note(chan_menu, "Not enough memory to show the channel.");
         return screen;

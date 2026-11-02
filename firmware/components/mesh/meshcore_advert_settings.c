@@ -9,6 +9,7 @@
 #include "lichen_ui.h"
 #include "menu.h"
 #include "mesh.h"
+#include "mesh_format.h"
 #include "meshcore_settings.h"
 #include "text_entry.h"
 #include "theme.h"
@@ -45,16 +46,12 @@ static struct {
 } ui;
 
 static uint8_t const TYPE_BITS[4]  = {ADVCFG_AA_CHAT, ADVCFG_AA_REPEATER, ADVCFG_AA_ROOM, ADVCFG_AA_SENSOR};
-static char const *const TYPE_NAME[4] = {"Companions", "Repeaters", "Rooms", "Sensors"};
-
-static char const *onoff(bool on) {
-    return on ? "on" : "off";
-}
+static char const *const TYPE_NAME[4] = {"Chat", "Repeaters", "Rooms", "Sensors"};
 
 static void set_note(char const *text, bool problem) {
     if (ui.note) {
         lv_label_set_text(ui.note, text);
-        lv_obj_set_style_text_color(ui.note, lv_color_hex(problem ? THEME_AMBER : THEME_DIM), 0);
+        lv_obj_set_style_text_color(ui.note, lv_color_hex(problem ? THEME_RED : THEME_DIM), 0);
     }
 }
 
@@ -65,29 +62,29 @@ static void rows_refresh(lv_timer_t *t) {
     if (!ui.interval || !mesh_get_advert_cfg(&c)) {
         return;
     }
-    char text[48], badge[12];
+    char text[48], badge[16];
     advcfg_interval_text(c.interval_min, text, sizeof(text));
     menu_set_value(ui.interval, text);
     if (c.next_in_s == UINT32_MAX) {
-        menu_set_value(ui.next, c.interval_min ? "when the clock is set" : "off");
+        menu_set_value(ui.next, c.interval_min ? "When the clock is set" : "Off");
     } else {
-        advcfg_next_badge(c.next_in_s, badge, sizeof(badge));
+        advcfg_next_text(c.next_in_s, badge, sizeof(badge));
         menu_set_value(ui.next, badge);
     }
-    menu_set_value(ui.manual, c.flood_manual ? "flood" : "zero-hop");
+    menu_set_value(ui.manual, c.flood_manual ? "Flood" : "Zero-hop");
     bool have_loc = advcfg_location_set(c.lat, c.lon);
     snprintf(text, sizeof(text), "%.6f", c.lat);
-    menu_set_value(ui.lat, have_loc ? text : "not set");
+    menu_set_value(ui.lat, have_loc ? text : "Not set");
     snprintf(text, sizeof(text), "%.6f", c.lon);
-    menu_set_value(ui.lon, have_loc ? text : "not set");
-    menu_set_value(ui.share, onoff(c.share_loc));
-    menu_set_value(ui.aa_on, onoff(c.autoadd.on));
+    menu_set_value(ui.lon, have_loc ? text : "Not set");
+    menu_set_on(ui.share, c.share_loc);
+    menu_set_on(ui.aa_on, c.autoadd.on);
     for (int i = 0; i < 4; i++) {
-        menu_set_value(ui.aa_types[i], onoff(c.autoadd.types & TYPE_BITS[i]));
+        menu_set_on(ui.aa_types[i], (c.autoadd.types & TYPE_BITS[i]) != 0);
     }
     advcfg_hops_text(c.autoadd.max_hops, text, sizeof(text));
     menu_set_value(ui.aa_hops, text);
-    menu_set_value(ui.aa_overwrite, onoff(c.autoadd.overwrite));
+    menu_set_on(ui.aa_overwrite, c.autoadd.overwrite);
 }
 
 // ---- the change, off the LVGL task ---------------------------------------------------------------------------------
@@ -129,7 +126,7 @@ static void change_task(void *arg) {
 
 static void change_start(change_t const *what) {
     if (busy) {
-        set_note("Busy, try again", true);
+        set_note(mc_busy_note(), true);
         return;
     }
     change_t *ch = heap_caps_calloc(1, sizeof(*ch), MALLOC_CAP_SPIRAM);
@@ -141,7 +138,7 @@ static void change_start(change_t const *what) {
     if (xTaskCreatePinnedToCore(change_task, "meshadv", TASK_STACK, ch, 4, NULL, 0) != pdPASS) {
         ESP_LOGW(TAG, "advert settings task did not start");
         heap_caps_free(ch);
-        set_note("Busy, try again", true);
+        set_note(mc_busy_note(), true);
         return;
     }
     busy = true;
@@ -240,13 +237,17 @@ static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Advert & contacts");
     menu_note(menu, "Advertising");
-    ui.interval = menu_add(menu, "Advert interval", "", cycle_interval, NULL);
+    ui.interval = menu_add(menu, "Advert every", "", cycle_interval, NULL);
     ui.next     = menu_add(menu, "Next advert", "", NULL, NULL);
-    ui.manual   = menu_add(menu, "Advertise button sends", "", toggle_manual, NULL);
+    ui.manual   = menu_add(menu, "Advert button sends", "", toggle_manual, NULL);
+    menu_set_kind(ui.interval, MENU_CYCLE);
+    menu_set_kind(ui.next, MENU_INFO);
+    menu_set_kind(ui.manual, MENU_CYCLE);
     menu_note(menu, "Location");
     ui.lat   = menu_add(menu, "Latitude", "", edit_coord, (void *)1);
     ui.lon   = menu_add(menu, "Longitude", "", edit_coord, NULL);
     ui.share = menu_add(menu, "Share location in advert", "", toggle_share, NULL);
+    menu_set_kind(ui.share, MENU_TOGGLE);
     menu_note(menu, "Auto-add contacts");
     ui.aa_on = menu_add(menu, "Auto-add", "", change_autoadd, (void *)(intptr_t)AA_ON);
     for (int i = 0; i < 4; i++) {
@@ -254,7 +255,13 @@ static lv_obj_t *build(void) {
     }
     ui.aa_hops      = menu_add(menu, "Max hops", "", change_autoadd, (void *)(intptr_t)AA_HOPS);
     ui.aa_overwrite = menu_add(menu, "Overwrite oldest when full", "", change_autoadd, (void *)(intptr_t)AA_OVERWRITE);
-    ui.note = menu_note(menu, "Interval: Enter steps through off, 3 h ... 7 d (flood adverts). Others: fw mesh advert.");
+    menu_set_kind(ui.aa_on, MENU_TOGGLE);
+    for (int i = 0; i < 4; i++) {
+        menu_set_kind(ui.aa_types[i], MENU_TOGGLE);
+    }
+    menu_set_kind(ui.aa_hops, MENU_CYCLE);
+    menu_set_kind(ui.aa_overwrite, MENU_TOGGLE);
+    ui.note = menu_note(menu, "Advert every: Enter steps through Off, 3 h ... 7 d (flood adverts).");
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     ui.timer = lv_timer_create(rows_refresh, REFRESH_MS, NULL); // "next advert" counts down
     rows_refresh(NULL);

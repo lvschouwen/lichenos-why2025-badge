@@ -46,6 +46,8 @@ uint32_t advcfg_next_due(uint32_t interval_min, uint32_t last_epoch, uint32_t no
 uint32_t advcfg_next_in_s(uint32_t next_epoch, uint32_t now_epoch);
 // "in 3h", "in 12m", "soon" for a badge (cap >= 8); "" when next_in_s is UINT32_MAX
 void advcfg_next_badge(uint32_t next_in_s, char *out, size_t cap);
+// The same for a row with room: "In 3 min", "In 12 h", "In 3 d" (a unit with a space, #136)
+void advcfg_next_text(uint32_t next_in_s, char *out, size_t cap);
 // A manual or periodic advert may go now (the minimum gap since the last, in uptime seconds; 0 = none yet)
 // When to try the periodic advert again after a refusal: a minute on (ADVCFG_RETRY_S) for the soft reasons (clock not
 // set or approximate, not set up, LoRa off, the minimum gap), a whole interval for a hard one (damaged identity)

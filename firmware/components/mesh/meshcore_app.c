@@ -9,6 +9,7 @@
 #include "mesh_advert_cfg.h"
 #include "menu.h"
 #include "mesh.h"
+#include "mesh_format.h"
 #include "meshcore_run.h"
 #include "meshcore_screens.h"
 #include "meshcore_settings.h"
@@ -261,7 +262,7 @@ static int32_t key_col_w(lv_obj_t *obj, char const *const *keys, size_t n) {
 }
 
 static lv_obj_t *add_row(lv_obj_t *page, char const *key, char const *value) {
-    static char const *const KEYS[] = {"node id", "radio", "TX power", "version"};
+    static char const *const KEYS[] = {"Node ID", "Radio", "TX power", "Version"};
     lv_obj_t *row = lv_obj_create(page);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -272,29 +273,16 @@ static lv_obj_t *add_row(lv_obj_t *page, char const *key, char const *value) {
     lv_obj_set_width(k, key_col_w(page, KEYS, sizeof(KEYS) / sizeof(KEYS[0])));
     lv_obj_set_style_text_color(k, lv_color_hex(THEME_DIM), 0);
     lv_label_set_text(k, key);
-    lv_obj_t *v = lv_label_create(row);
+    lv_obj_t *v = lichen_label_wrap(row, 0); // a value from the node can be long: it wraps, never clips (R2)
     lv_obj_set_flex_grow(v, 1);
     lv_label_set_text(v, value);
     return v;
 }
 
-// 62500 Hz is "62.5", 125000 Hz is "125"
-static void fmt_khz(char *out, size_t cap, uint32_t hz) {
-    if (hz % 1000 == 0) {
-        snprintf(out, cap, "%" PRIu32, hz / 1000);
-    } else {
-        snprintf(out, cap, "%" PRIu32 ".%" PRIu32, hz / 1000, hz % 1000 / 100);
-    }
-}
-
 static void radio_texts(char *text, size_t cap, char *power, size_t power_cap) {
     mesh_radio_t radio;
     if (mesh_radio_params(&radio, SCREEN_WAIT_MS)) {
-        char khz[12];
-        fmt_khz(khz, sizeof(khz), radio.bw_hz);
-        snprintf(text, cap, "%" PRIu32 ".%03" PRIu32 " MHz  " LV_SYMBOL_BULLET "  %s kHz  " LV_SYMBOL_BULLET
-                 "  SF%u  " LV_SYMBOL_BULLET "  CR%u",
-                 radio.freq_hz / 1000000, radio.freq_hz % 1000000 / 1000, khz, radio.sf, radio.cr);
+        mesh_format_radio(text, cap, (double)radio.freq_hz / 1e6, (double)radio.bw_hz / 1e3, radio.sf, radio.cr);
         snprintf(power, power_cap, "%d dBm", radio.tx_dbm);
     } else {
         strlcpy(text, "-", cap);
@@ -322,15 +310,15 @@ static void about(lv_obj_t *page) {
     if (!mesh_node_id(text, sizeof(text))) {
         strlcpy(text, "-", sizeof(text)); // not running
     }
-    add_row(page, "node id", text);
+    add_row(page, "Node ID", text);
 
     char power[16] = "-";
     radio_texts(text, sizeof(text), power, sizeof(power));
-    about_radio = add_row(page, "radio", text);
+    about_radio = add_row(page, "Radio", text);
     about_power = add_row(page, "TX power", power);
     lv_obj_add_event_cb(about_radio, on_about_delete, LV_EVENT_DELETE, NULL);
     snprintf(text, sizeof(text), "MeshCore %s", mesh_firmware_version());
-    add_row(page, "version", text);
+    add_row(page, "Version", text);
 }
 
 // ---- the grid's Settings tile: the same page as Settings > MeshCore (app_settings.c builds it alike) -------------

@@ -44,10 +44,16 @@ int main(void) {
     mesh_format_msg_age(true, 0, 9000, 160, 5000, a, sizeof(a)); // clock went back
     CHECK(strcmp(a, "just now") == 0);
 
-    CHECK(strcmp(mesh_type_name(1), "chat") == 0);
-    CHECK(strcmp(mesh_type_name(2), "repeater") == 0);
-    CHECK(strcmp(mesh_type_name(3), "room") == 0);
-    CHECK(strcmp(mesh_type_name(4), "sensor") == 0);
+    CHECK(strcmp(mesh_type_name(1), "Chat") == 0);
+    CHECK(strcmp(mesh_type_name(2), "Repeater") == 0);
+    CHECK(strcmp(mesh_type_name(3), "Room") == 0);
+    CHECK(strcmp(mesh_type_name(4), "Sensor") == 0);
+    CHECK(strcmp(mc_busy_note(), "MeshCore is busy, try again") == 0); // the one text (#136)
+    char radio[64];
+    mesh_format_radio(radio, sizeof(radio), 869.618, 62.5, 7, 5);
+    CHECK(strcmp(radio, "869.618 MHz, 62.5 kHz, SF7, CR5") == 0); // one form everywhere (#136)
+    mesh_format_radio(radio, sizeof(radio), 910.525, 250, 10, 8);
+    CHECK(strcmp(radio, "910.525 MHz, 250 kHz, SF10, CR8") == 0);
     CHECK(strcmp(mesh_type_name(0), "?") == 0 && strcmp(mesh_type_name(99), "?") == 0);
 
     char name[32];

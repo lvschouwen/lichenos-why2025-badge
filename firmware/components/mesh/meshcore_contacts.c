@@ -26,11 +26,11 @@ typedef struct {
 } view_text_t;
 
 static view_text_t const VIEWS[] = {
-    [MESH_VIEW_ALL]       = {"Contacts", NULL, "No nodes heard yet."},
-    [MESH_VIEW_CONTACTS]  = {"Contacts", "People: repeaters and rooms are under Repeaters.", "No companions heard yet."},
-    [MESH_VIEW_REPEATERS] = {"Repeaters", "Repeaters and rooms among the contacts.", "No repeaters or rooms heard yet."},
+    [MESH_VIEW_ALL]       = {"Contacts", NULL, "No nodes heard yet: they appear when a node adverts. Send an advert from Settings so others hear you."},
+    [MESH_VIEW_CONTACTS]  = {"Contacts", "People: repeaters and rooms are under Repeaters.", "No chat contacts yet: they appear when a node adverts."},
+    [MESH_VIEW_REPEATERS] = {"Repeaters", "Repeaters and rooms among the contacts.", "No repeaters or rooms yet: they appear when one adverts."},
     [MESH_VIEW_HEARD]     = {"Heard", "Newest first. Only nodes kept as contacts are listed: others are not stored.",
-                             "No nodes heard yet."},
+                             "No nodes heard yet: they appear when a node adverts."},
 };
 
 typedef struct {
@@ -180,7 +180,7 @@ static lv_obj_t *build(void) {
         return screen;
     }
     list      = (mc_list_t){.keys = mem->keys, .items = mem->items, .cap = SHOW_CONTACTS};
-    list.list = mc_list_screen(screen, VIEWS[view].title, VIEWS[view].note, "Up/Down: choose    Enter: details");
+    list.list = mc_list_screen(screen, VIEWS[view].title, VIEWS[view].note, "Enter", "details");
     lv_obj_add_event_cb(list.list, on_key, LV_EVENT_KEY, NULL);
     shown_sig      = UINT32_MAX;
     sel_valid      = false;

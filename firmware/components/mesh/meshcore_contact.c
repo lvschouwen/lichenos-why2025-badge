@@ -9,6 +9,7 @@
 #include "menu.h"
 #include "mesh_contact_fmt.h"
 #include "mesh.h"
+#include "mesh_format.h"
 #include "meshcore_chat.h"
 #include "meshcore_remote.h"
 #include "meshcore_run.h"
@@ -27,7 +28,6 @@ static char const TAG[] = "meshcore";
 #define TICK_MS        1000
 #define TICK_WAIT_MS   20  // the refresh: a busy MeshCore (saving files) skips a tick, the keys never wait on it
 #define KEY_WAIT_MS    100 // a key press, in all (action and the copy after it): a short wait beats "busy"
-#define REMOVE_ASK_S   20  // the careful Remove dialog cancels by itself after this
 #define ADV_TYPE_CHAT  1   // MeshCore: a person's node (repeaters, rooms and sensors have no DMs)
 
 typedef struct {
@@ -87,14 +87,14 @@ static void fill(uint32_t wait_ms) {
         char hops[16];
         mesh_format_hops(mem->d.path_len, hops, sizeof(hops));
         menu_set_value(reset_row, hops);
-        menu_set_value(fav_row, mem->d.flags & MESH_CONTACT_FAV ? "on" : "off");
+        menu_set_on(fav_row, (mem->d.flags & MESH_CONTACT_FAV) != 0);
         shown_path_len = mem->d.path_len;
         shown_flags    = mem->d.flags;
     }
     if (login_row && mesh_remote_head(&mem->rr)) { // the small copy: this runs every second (#117)
         int in = rr_head_logged_in(&mem->rr, prefix) ? 1 + mem->rr.admin : 0;
         if (in != shown_login) {
-            menu_set_value(login_row, in == 2 ? "admin" : in ? "logged in" : "");
+            menu_set_value(login_row, in == 2 ? "Admin" : in ? "Logged in" : "");
             shown_login = in;
         }
     }
@@ -113,7 +113,7 @@ static bool act(mesh_contact_op_t op, lv_obj_t *status) {
     uint32_t start = lv_tick_get();
     size_t   r     = have_detail ? mesh_contact_do(prefix, op, KEY_WAIT_MS) : MESH_BUSY;
     if (r == MESH_BUSY) {
-        set_note(status, "MeshCore is busy, try again", true);
+        set_note(status, mc_busy_note(), true);
         return false;
     }
     if (r == 0) {
@@ -189,7 +189,7 @@ static void on_logout(void *arg) {
         set_note(note, "Logged out: MeshCore stops its keep-alives to it", false);
         fill(0);
     } else {
-        set_note(note, "MeshCore is busy, try again", true);
+        set_note(note, mc_busy_note(), true);
     }
 }
 
@@ -279,10 +279,8 @@ static void on_trace_delete(lv_event_t *e) {
 
 static lv_obj_t *build_trace(void) {
     lv_obj_t *screen = shell_page_create();
-    char      head[MESH_NAME_MAX + 24];
-    snprintf(head, sizeof(head), "%s: %s", trace_kind == MT_TRACE ? "Trace" : "Discover",
-             title[0] ? title : "(no name)");
-    lv_obj_t *menu = menu_create(screen, head);
+    lv_obj_t *menu = menu_create_named(screen, trace_kind == MT_TRACE ? "Trace path" : "Discover path",
+                                       title[0] ? title : "(no name)");
     lv_obj_add_event_cb(screen, on_trace_delete, LV_EVENT_DELETE, NULL);
     trace_screen = screen;
     if (trace_timer) {
@@ -301,7 +299,6 @@ static lv_obj_t *build_trace(void) {
                                            : "Asks the contact over the whole mesh which path to use:");
     trace_label = add_text(menu, "Sending...");
     trace_again = menu_add(menu, "Again", "", on_trace_again, NULL);
-    menu_note(menu, "Esc: back");
     trace_start();
     trace_timer = lv_timer_create(trace_tick, TRACE_TICK_MS, NULL);
     return screen;
@@ -335,16 +332,15 @@ static lv_obj_t *add_text(lv_obj_t *menu, char const *text) {
 
 static lv_obj_t *build_share(void) {
     lv_obj_t *screen = shell_page_create();
-    lv_obj_t *menu   = menu_create(screen, "Share contact");
+    lv_obj_t *menu   = menu_create_named(screen, "Share contact", title[0] ? title : "(no name)");
     if (!mem || !have_detail || !mesh_contact_uri(mem->d.name, mem->d.pub, mem->d.type, mem->uri, sizeof(mem->uri))) {
-        menu_note(menu, "No link: MeshCore was busy, press Esc and try again");
+        menu_note(menu, mc_busy_note());
         return screen;
     }
     menu_note(menu, "Link for MeshCore apps (Add contact, paste):");
     add_text(menu, mem->uri);
     menu_note(menu, "Public key:");
     add_text(menu, mem->lines[MESH_LINE_KEY].text + strlen("Key: "));
-    menu_note(menu, "Esc: back");
     ESP_LOGI(TAG, "share %s", mem->uri); // on the console too, to copy it from there
     return screen;
 }
@@ -354,33 +350,15 @@ static void on_share(void *arg) {
     shell_open(build_share, SCREEN_SHARE);
 }
 
-// ---- Remove: a careful dialog, so a held Enter (LVGL repeats it) never confirms it --------------------------------
-
-static void remove_answer(bool yes) {
-    if (!yes || !mem) { // no, timed out, or the details screen went away meanwhile
-        return;
-    }
-    if (act(MESH_CO_REMOVE, note)) {
-        meshcore_pw_forget(prefix); // a remembered repeater/room password goes with the contact (#51)
-        shell_back_to(list_screen, NULL, NULL); // past the details: the contact is gone
-    }
-}
+// ---- Remove and Reset path: DANGER rows, the careful dialog is the row's own (menu_set_danger) -----------------------
 
 static void on_remove(void *arg) {
     (void)arg;
-    char                 text[MESH_NAME_MAX + 64];
-    shell_dialog_t const d = {
-        .title        = text,
-        .count_prefix = "(cancels in ",
-        .count_suffix = " s)",
-        .hint         = "Enter: remove · Esc: keep it",
-        .seconds      = REMOVE_ASK_S,
-        .careful      = true,
-    };
-    snprintf(text, sizeof(text), "Remove %s from MeshCore? The chat stays.", title[0] ? title : "(no name)");
-    if (!shell_dialog_countdown(&d, remove_answer)) {
-        set_note(note, "Could not ask, try again", true);
+    if (!mem || !act(MESH_CO_REMOVE, note)) { // the details screen went away meanwhile, or MeshCore did not take it
+        return;
     }
+    meshcore_pw_forget(prefix); // a remembered repeater/room password goes with the contact (#51)
+    shell_back_to(list_screen, NULL, NULL); // past the details: the contact is gone
 }
 
 // ---- the details screen ---------------------------------------------------------------------------------------------
@@ -399,7 +377,8 @@ static void on_delete(lv_event_t *e) {
 
 static lv_obj_t *build_detail(void) {
     lv_obj_t *screen = shell_page_create();
-    lv_obj_t *menu   = menu_create(screen, title[0] ? title : "(no name)");
+    lv_obj_t *menu   = menu_create_named(screen, type == ADV_TYPE_CHAT ? "Contact" : mesh_contact_type_name(type),
+                                       title[0] ? title : "(no name)");
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     heap_caps_free(mem);
     mem            = heap_caps_calloc(1, sizeof(*mem), MALLOC_CAP_SPIRAM);
@@ -415,27 +394,34 @@ static lv_obj_t *build_detail(void) {
         info[i] = add_text(menu, "...");
     }
     if (type == ADV_TYPE_CHAT) {
-        menu_add(menu, "Message", "", on_message, NULL); // the first row: Enter Enter is the old "message a contact"
+        menu_set_kind(menu_add(menu, "Message", "", on_message, NULL), MENU_OPEN); // the first row: Enter Enter is the old "message a contact"
     }
     if (type == MESH_ADV_TYPE_REPEATER || type == MESH_ADV_TYPE_ROOM) {
         login_row = menu_add(menu, "Log in", "", on_login, NULL);
+        menu_set_kind(login_row, MENU_OPEN);
         if (type == MESH_ADV_TYPE_ROOM) {
-            menu_add(menu, "Posts", "chat", on_posts, NULL); // the room's posts after login, and your own
+            menu_set_kind(menu_add(menu, "Posts", "", on_posts, NULL), MENU_OPEN); // the room's posts after login
         }
-        menu_add(menu, "Status", "", on_status, NULL);
-        menu_add(menu, "CLI", "", on_cli, NULL);
+        menu_set_kind(menu_add(menu, "Status", "", on_status, NULL), MENU_OPEN);
+        menu_set_kind(menu_add(menu, "Command...", "", on_cli, NULL), MENU_OPEN);
         if (type == MESH_ADV_TYPE_REPEATER) {
-            menu_add(menu, "Settings", "", on_settings, NULL); // #117: needs the admin login above
+            menu_set_kind(menu_add(menu, "Settings", "", on_settings, NULL), MENU_OPEN); // #117: needs the admin login
         }
         menu_add(menu, "Log out", "", on_logout, NULL);
-        menu_add(menu, "Forget password", "", on_forget, NULL);
+        lv_obj_t *forget = menu_add(menu, "Forget password", "", on_forget, NULL);
+        menu_set_danger(forget, "Forget the saved password of this repeater or room? Log in asks for it again.", "forget");
     }
     reset_row = menu_add(menu, "Reset path", "", on_reset, NULL);
-    menu_add(menu, "Trace path", "", on_trace, NULL);
-    menu_add(menu, "Discover path", "", on_discover, NULL);
+    menu_set_danger(reset_row, "Reset the route to this contact? The next message floods to find a new one.", "reset");
+    menu_set_kind(menu_add(menu, "Trace path", "", on_trace, NULL), MENU_OPEN);
+    menu_set_kind(menu_add(menu, "Discover path", "", on_discover, NULL), MENU_OPEN);
     fav_row   = menu_add(menu, "Favourite", "", on_fav, NULL);
-    menu_add(menu, "Share", "link", on_share, NULL);
-    menu_add(menu, "Remove", "", on_remove, NULL);
+    menu_set_kind(fav_row, MENU_TOGGLE);
+    menu_set_kind(menu_add(menu, "Share", "", on_share, NULL), MENU_OPEN);
+    lv_obj_t *remove_row = menu_add(menu, "Remove", "", on_remove, NULL);
+    char      ask[MESH_NAME_MAX + 64];
+    snprintf(ask, sizeof(ask), "Remove %s from MeshCore? The chat stays.", title[0] ? title : "(no name)");
+    menu_set_danger(remove_row, ask, "remove");
     note = menu_note(menu, "");
     fill(KEY_WAIT_MS);
     timer = lv_timer_create(tick, TICK_MS, NULL);

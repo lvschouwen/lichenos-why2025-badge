@@ -32,7 +32,7 @@ static void test_interval(void) {
     CHECK(advcfg_parse_interval("30", &m) != NULL);
     char t[16];
     advcfg_interval_text(0, t, sizeof(t));
-    CHECK(strcmp(t, "off") == 0);
+    CHECK(strcmp(t, "Off") == 0);
     advcfg_interval_text(720, t, sizeof(t));
     CHECK(strcmp(t, "12 h") == 0);
     advcfg_interval_text(2880, t, sizeof(t));
@@ -73,6 +73,14 @@ static void test_schedule(void) {
     advcfg_next_badge(3 * 86400, b, sizeof(b));
     CHECK(strcmp(b, "in 3d") == 0);
     CHECK(strlen(b) < 8); // MESH_GRID_BADGE_MAX
+    advcfg_next_text(125, b, sizeof(b));
+    CHECK(strcmp(b, "In 2 min") == 0);
+    advcfg_next_text(11 * 3600 + 3540, b, sizeof(b));
+    CHECK(strcmp(b, "In 12 h") == 0);
+    advcfg_next_text(3 * 86400, b, sizeof(b));
+    CHECK(strcmp(b, "In 3 d") == 0);
+    advcfg_next_text(10, b, sizeof(b));
+    CHECK(strcmp(b, "Soon") == 0);
     CHECK(advcfg_retry_at(1000, 720, false) == 1000 + ADVCFG_RETRY_S); // soft: again in a minute
     CHECK(advcfg_retry_at(1000, 720, true) == 1000 + 720 * 60);        // hard: next interval
     CHECK(advcfg_gap_ok(0, 5) && !advcfg_gap_ok(100, 129) && advcfg_gap_ok(100, 130));
@@ -170,11 +178,11 @@ static void test_autoadd_decide(void) {
 static void test_texts(void) {
     char t[40];
     advcfg_hops_text(0, t, sizeof(t));
-    CHECK(strcmp(t, "any") == 0);
+    CHECK(strcmp(t, "Any") == 0);
     advcfg_hops_text(1, t, sizeof(t));
-    CHECK(strcmp(t, "direct only") == 0);
+    CHECK(strcmp(t, "Direct only") == 0);
     advcfg_hops_text(4, t, sizeof(t));
-    CHECK(strcmp(t, "up to 3 hops") == 0);
+    CHECK(strcmp(t, "Up to 3 hops") == 0);
     uint8_t h = 0;
     for (int i = 0; i < 8; i++) {
         h = advcfg_hops_cycle(h);
@@ -182,7 +190,7 @@ static void test_texts(void) {
     }
     CHECK(h == 0 && advcfg_hops_cycle(5) == 6);
     advcfg_types_text(ADVCFG_AA_TYPES, t, sizeof(t));
-    CHECK(strcmp(t, "Companions, Repeaters, Rooms, Sensors") == 0);
+    CHECK(strcmp(t, "Chat, Repeaters, Rooms, Sensors") == 0);
     advcfg_types_text(ADVCFG_AA_ROOM, t, sizeof(t));
     CHECK(strcmp(t, "Rooms") == 0);
     advcfg_types_text(0, t, sizeof(t));

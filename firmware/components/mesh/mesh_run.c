@@ -115,11 +115,11 @@ char const *mesh_run_action_value(mesh_run_t r) {
     if (mesh_run_busy(r) || (r.state == MESH_RUN_STOPPED && r.why == MESH_WHY_UPDATE)) {
         return "";
     }
-    return "Enter";
+    return ""; // the row's label says what Enter does; the value slot is for state (R3)
 }
 
 char const *mesh_run_autostart_text(bool on) {
-    return on ? "on" : "off";
+    return on ? "On" : "Off";
 }
 
 char const *mesh_run_console_text(mesh_run_t r) {

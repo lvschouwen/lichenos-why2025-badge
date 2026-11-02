@@ -5,8 +5,6 @@
 #include "lichen_ui.h"
 #include "theme.h"
 
-#define HINT_ROOM 56 // the list's bottom padding: its last row is never under the hint
-
 lv_obj_t *mc_list_label(lv_obj_t *parent, char const *text, uint32_t color) {
     lv_obj_t *label = lv_label_create(parent);
     lv_obj_set_width(label, LV_PCT(100));
@@ -57,7 +55,7 @@ static void no_focus_ring(lv_obj_t *obj) {
     lv_obj_set_style_outline_width(obj, 0, LV_STATE_FOCUS_KEY);
 }
 
-lv_obj_t *mc_list_screen(lv_obj_t *screen, char const *title, char const *note, char const *hint) {
+lv_obj_t *mc_list_screen(lv_obj_t *screen, char const *title, char const *note, char const *hint_key, char const *hint_verb) {
     lv_obj_set_style_pad_bottom(screen, 0, 0);
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
@@ -75,7 +73,6 @@ lv_obj_t *mc_list_screen(lv_obj_t *screen, char const *title, char const *note, 
     lv_obj_set_flex_grow(list, 1);
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(list, 10, 0);
-    lv_obj_set_style_pad_bottom(list, HINT_ROOM, 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ACTIVE);
     shell_scroll_tame(list);
@@ -88,14 +85,7 @@ lv_obj_t *mc_list_screen(lv_obj_t *screen, char const *title, char const *note, 
     if (group) {
         lv_group_add_obj(group, list);
     }
-    lv_obj_t *label = lv_label_create(screen);
-    lv_obj_set_floating(label, true); // over the list's bottom padding, not in the column
-    lv_obj_set_style_text_color(label, lv_color_hex(THEME_AMBER), 0);
-    lv_obj_set_style_bg_color(label, lv_color_hex(THEME_BG), 0);
-    lv_obj_set_style_bg_opa(label, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_all(label, 6, 0);
-    lv_label_set_text(label, hint);
-    lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -8);
+    shell_page_hint(screen, hint_key, hint_verb, NULL); // dim, pinned; the screen keeps the room, so no row is under it
     return list;
 }
 

@@ -27,12 +27,20 @@ void mesh_format_msg_age(bool loaded, uint32_t heard_s, uint32_t epoch, uint32_t
     }
 }
 
+void mesh_format_radio(char *out, size_t cap, double freq_mhz, double bw_khz, unsigned sf, unsigned cr) {
+    snprintf(out, cap, "%.3f MHz, %g kHz, SF%u, CR%u", freq_mhz, bw_khz, sf, cr);
+}
+
+char const *mc_busy_note(void) {
+    return "MeshCore is busy, try again";
+}
+
 char const *mesh_type_name(uint8_t type) {
     switch (type) {
-        case 1: return "chat";
-        case 2: return "repeater";
-        case 3: return "room";
-        case 4: return "sensor";
+        case 1: return "Chat"; // MeshCore's ADV_TYPE_CHAT; its apps and the auto-add flags call it Chat (#136)
+        case 2: return "Repeater";
+        case 3: return "Room";
+        case 4: return "Sensor";
         default: return "?";
     }
 }

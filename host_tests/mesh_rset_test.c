@@ -184,7 +184,7 @@ static void sequence(void) {
     CHECK(rs_next(&s, cmd, sizeof(cmd)) && strstr(cmd, "|get repeat"));
     CHECK(rs_on_answer(&s, NULL)); // no answer
     rs_value_text(&s, row("repeat"), text, sizeof(text));
-    CHECK(strcmp(text, "\xE2\x80\x94") == 0);
+    CHECK(strcmp(text, "No answer") == 0);
     rs_edit_text(&s, row("repeat"), text, sizeof(text));
     CHECK(text[0] == 0);
 
@@ -209,7 +209,7 @@ static void sequence(void) {
     CHECK(rs_next(&s, cmd, sizeof(cmd)) && strstr(cmd, "|get advert.interval"));
     CHECK(rs_on_answer(&s, answer(cmd, "??: advert.interval", buf, sizeof(buf))));
     rs_value_text(&s, row("advert.interval"), text, sizeof(text));
-    CHECK(strcmp(text, "\xE2\x80\x94") == 0);
+    CHECK(strcmp(text, "No answer") == 0);
 
     // the password is wiped from the queue once its command is made; its echo is not kept
     CHECK(rs_queue_set(&s, row("password"), "n3wpw") == NULL && strcmp(s.set_value, "n3wpw") == 0);
@@ -320,9 +320,9 @@ static void stops_and_retries(void) {
 static void formatting(void) {
     char text[RS_VALUE_MAX];
     rs_format_value(row("radio"), "869.6179809,62.5,7,5", text, sizeof(text));
-    CHECK(strcmp(text, "869.618, 62.5 kHz, SF7, CR5") == 0);
+    CHECK(strcmp(text, "869.618 MHz, 62.5 kHz, SF7, CR5") == 0);
     rs_format_value(row("radio"), "910.525,250,10,8", text, sizeof(text));
-    CHECK(strcmp(text, "910.525, 250 kHz, SF10, CR8") == 0);
+    CHECK(strcmp(text, "910.525 MHz, 250 kHz, SF10, CR8") == 0);
     rs_format_value(row("radio"), "garbage", text, sizeof(text));
     CHECK(strcmp(text, "garbage") == 0);
     rs_format_value(row("lat"), "52.3702011", text, sizeof(text));
@@ -335,6 +335,10 @@ static void formatting(void) {
     CHECK(strcmp(text, "0.50") == 0);
     rs_format_value(row("rxdelay"), "0", text, sizeof(text));
     CHECK(strcmp(text, "0.00") == 0);
+    rs_format_value(row("repeat"), "on", text, sizeof(text));
+    CHECK(strcmp(text, "On") == 0);
+    rs_format_value(row("loop.detect"), "minimal", text, sizeof(text));
+    CHECK(strcmp(text, "Minimal") == 0);
     rs_format_value(row("name"), "  Keep as is ", text, sizeof(text));
     CHECK(strcmp(text, "Keep as is") == 0);
 
@@ -343,7 +347,7 @@ static void formatting(void) {
     s.st[row("radio")] = RS_V_VALUE;
     snprintf(s.value[row("radio")], RS_VALUE_MAX, "869.6179809,62.5,7,5");
     rs_value_text(&s, row("radio"), text, sizeof(text));
-    CHECK(strcmp(text, "869.618, 62.5 kHz, SF7, CR5") == 0);
+    CHECK(strcmp(text, "869.618 MHz, 62.5 kHz, SF7, CR5") == 0);
     rs_edit_text(&s, row("radio"), text, sizeof(text));
     CHECK(strcmp(text, "869.618,62.5,7,5") == 0 && rs_check(row("radio"), text) == NULL);
     s.st[row("lat")] = RS_V_VALUE;
@@ -352,7 +356,25 @@ static void formatting(void) {
     CHECK(strcmp(text, "52.3702011") == 0); // editing keeps the full value
 }
 
+// The repeater's protocol words after a set become plain ones (R4, #137)
+static void outcome(void) {
+    char t[RS_TEXT_MAX];
+    rs_outcome_words(row("tx"), RS_R_OK, "OK", t, sizeof(t));
+    CHECK(strcmp(t, "Saved") == 0);
+    rs_outcome_words(row("tx"), RS_R_OK, "OK - reboot to apply", t, sizeof(t));
+    CHECK(strcmp(t, "Saved. It applies after a restart") == 0);
+    rs_outcome_words(row("radio"), RS_R_OK, "OK", t, sizeof(t));
+    CHECK(strstr(t, "changes over after a restart"));
+    rs_outcome_words(row("reboot"), RS_R_OK, "x", t, sizeof(t));
+    CHECK(strcmp(t, "Restart sent") == 0);
+    rs_outcome_words(row("flood.max"), RS_R_ERROR, "Error, max 64", t, sizeof(t));
+    CHECK(strcmp(t, "The repeater refused it: max 64") == 0);
+    rs_outcome_words(row("flood.max"), RS_R_ERROR, "Not sent: busy", t, sizeof(t));
+    CHECK(strcmp(t, "Not sent: busy") == 0);
+}
+
 int main(void) {
+    outcome();
     formatting();
     rows();
     checks();

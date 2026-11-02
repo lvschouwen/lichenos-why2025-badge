@@ -206,7 +206,7 @@ static lv_obj_t *build(void) {
         return screen;
     }
     list = (mc_list_t){.keys = mem->keys, .items = mem->items, .cap = SHOW_ROWS, .sel = 1};
-    list.list = mc_list_screen(screen, "Chat", NULL, "Up/Down: choose    Enter: open");
+    list.list = mc_list_screen(screen, "Chat", NULL, "Enter", "open");
     lv_obj_add_event_cb(list.list, on_key, LV_EVENT_KEY, NULL);
     shown_sig      = UINT32_MAX;
     sel_valid      = false;

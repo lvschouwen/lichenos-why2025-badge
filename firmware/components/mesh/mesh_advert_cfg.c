@@ -55,7 +55,7 @@ void advcfg_interval_text(uint32_t minutes, char *out, size_t cap) {
         return;
     }
     if (minutes == 0) {
-        snprintf(out, cap, "off");
+        snprintf(out, cap, "Off");
     } else if (minutes % 1440 == 0) {
         snprintf(out, cap, "%u d", (unsigned)(minutes / 1440));
     } else if (minutes % 60 == 0) {
@@ -109,6 +109,23 @@ void advcfg_next_badge(uint32_t next_in_s, char *out, size_t cap) {
         snprintf(out, cap, "in %uh", (unsigned)((next_in_s + 1800) / 3600)); // rounded: 11h59m reads 12h
     } else {
         snprintf(out, cap, "in %ud", (unsigned)((next_in_s + 43200) / 86400));
+    }
+}
+
+void advcfg_next_text(uint32_t next_in_s, char *out, size_t cap) {
+    if (cap == 0) {
+        return;
+    }
+    if (next_in_s == UINT32_MAX) {
+        out[0] = '\0';
+    } else if (next_in_s < 60) {
+        snprintf(out, cap, "Soon");
+    } else if (next_in_s < 3600) {
+        snprintf(out, cap, "In %u min", (unsigned)(next_in_s / 60));
+    } else if (next_in_s < 86400) {
+        snprintf(out, cap, "In %u h", (unsigned)((next_in_s + 1800) / 3600));
+    } else {
+        snprintf(out, cap, "In %u d", (unsigned)((next_in_s + 43200) / 86400));
     }
 }
 
@@ -199,11 +216,11 @@ void advcfg_hops_text(uint8_t max_hops, char *out, size_t cap) {
         return;
     }
     if (max_hops == 0) {
-        snprintf(out, cap, "any");
+        snprintf(out, cap, "Any");
     } else if (max_hops == 1) {
-        snprintf(out, cap, "direct only");
+        snprintf(out, cap, "Direct only");
     } else {
-        snprintf(out, cap, "up to %u hops", (unsigned)(max_hops - 1));
+        snprintf(out, cap, "Up to %u hops", (unsigned)(max_hops - 1));
     }
 }
 
@@ -224,7 +241,7 @@ void advcfg_types_text(uint8_t types, char *out, size_t cap) {
     static struct {
         uint8_t     bit;
         char const *name;
-    } const all[] = {{ADVCFG_AA_CHAT, "Companions"},
+    } const all[] = {{ADVCFG_AA_CHAT, "Chat"},
                      {ADVCFG_AA_REPEATER, "Repeaters"},
                      {ADVCFG_AA_ROOM, "Rooms"},
                      {ADVCFG_AA_SENSOR, "Sensors"}};

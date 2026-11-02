@@ -110,9 +110,9 @@ char const *mesh_advert_refusal(bool clock_set) {
 
 char const *mesh_clock_hint(bool clock_set, bool approximate) {
     if (!clock_set) {
-        return "Clock not set, others see a wrong time    Enter: send    /: search    Esc: back";
+        return "Clock not set, others see a wrong time \xE2\x80\xA2 Enter: send \xE2\x80\xA2 /: search";
     }
-    return approximate ? "Clock from mesh contacts, unverified    Enter: send    /: search    Esc: back" : NULL;
+    return approximate ? "Clock from mesh contacts, unverified \xE2\x80\xA2 Enter: send \xE2\x80\xA2 /: search" : NULL;
 }
 
 char const *mesh_advert_note(bool approximate) {
