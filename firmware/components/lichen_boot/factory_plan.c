@@ -26,9 +26,13 @@ factory_boot_t factory_boot_plan(uint8_t pending) {
         p = (factory_boot_t){.nvs = true, .after_nvs = 0, .level = FACTORY_SETTINGS};
         break;
     case FACTORY_ALL:
-        p = (factory_boot_t){.nvs = true, .storage = true, .after_nvs = FACTORY_PENDING_STORAGE, .level = FACTORY_ALL};
+        p = (factory_boot_t){.nvs = true, .nvs_full = true, .storage = true, .restore = true,
+                             .after_nvs = FACTORY_PENDING_STORAGE, .level = FACTORY_ALL};
         break;
     case FACTORY_PENDING_STORAGE:
+        p = (factory_boot_t){.storage = true, .restore = true, .level = FACTORY_ALL};
+        break;
+    case FACTORY_PENDING_ERASING:
         p = (factory_boot_t){.storage = true, .level = FACTORY_ALL};
         break;
     default:
@@ -67,6 +71,11 @@ bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level) 
 
 bool factory_storage_keeps(char const *name) {
     return name && listed(keep_files, sizeof(keep_files) / sizeof(keep_files[0]), name);
+}
+
+bool factory_restore_late(char const *name) {
+    size_t n = name ? strlen(name) : 0;
+    return n >= 4 && strcmp(name + n - 4, ".md5") == 0;
 }
 
 bool factory_level_parse(char const *word, factory_level_t *out) {

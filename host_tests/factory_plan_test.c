@@ -15,8 +15,13 @@ static void boot_plan_per_pending_value(void) {
     CHECK(p.nvs && !p.storage && p.after_nvs == 0 && p.level == S);
     p = factory_boot_plan(FACTORY_ALL);
     CHECK(p.nvs && p.storage && p.after_nvs == FACTORY_PENDING_STORAGE && p.level == A);
-    p = factory_boot_plan(FACTORY_PENDING_STORAGE); // power cut during the drive wipe: NVS is not erased again
-    CHECK(!p.nvs && p.storage && p.level == A);
+    CHECK(p.nvs_full && p.restore);
+    p = factory_boot_plan(FACTORY_SETTINGS);
+    CHECK(!p.nvs_full); // settings: key by key
+    p = factory_boot_plan(FACTORY_PENDING_STORAGE); // power cut before the drive's erase: NVS is not erased again
+    CHECK(!p.nvs && p.storage && p.restore && p.level == A);
+    p = factory_boot_plan(FACTORY_PENDING_ERASING); // power cut during it: the PSRAM copy is gone, erase again
+    CHECK(!p.nvs && p.storage && !p.restore && p.level == A);
     p = factory_boot_plan(77);
     CHECK(!p.nvs && !p.storage);
 }
@@ -64,6 +69,13 @@ static void storage_keeps_os_files(void) {
     CHECK(!factory_storage_keeps("ota_token.txt"));
     CHECK(!factory_storage_keeps("C6x"));
     CHECK(!factory_storage_keeps(NULL));
+}
+
+static void md5_files_go_back_last(void) {
+    CHECK(factory_restore_late("firmware.bin.md5"));
+    CHECK(!factory_restore_late("firmware.bin"));
+    CHECK(!factory_restore_late("md5"));
+    CHECK(!factory_restore_late(NULL));
 }
 
 static void level_words(void) {
@@ -160,6 +172,7 @@ int main(void) {
     other_namespaces_stay();
     storage_keeps_os_files();
     level_words();
+    md5_files_go_back_last();
     hold_three_seconds_then_enter();
     esc_or_timeout_cancels();
     short_hold_or_release_resets();

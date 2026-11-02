@@ -49,7 +49,7 @@ static void all_first_answer(bool yes) {
         return;
     }
     shell_dialog_t const d = {
-        .title        = "Sure? The MeshCore identity is gone forever: nobody's contacts will know this badge.",
+        .title        = "Sure? The MeshCore identity is erased from flash for good: nobody's contacts will know this badge.",
         .count_prefix = "(cancels in ",
         .count_suffix = " s)",
         .hint         = "Enter: erase everything \xE2\x80\xA2 Esc: cancel",
@@ -75,7 +75,7 @@ static void ask_settings(void *arg) {
 static void ask_all(void *arg) {
     (void)arg;
     shell_dialog_t const d = {
-        .title        = "Erase everything? Settings and every file on the badge.",
+        .title        = "Erase everything from flash? Settings and every file on the badge.",
         .count_prefix = "(cancels in ",
         .count_suffix = " s)",
         .hint         = "Enter: continue \xE2\x80\xA2 Esc: cancel",
@@ -92,8 +92,9 @@ static lv_obj_t *build_factory(void) {
     menu_note(menu, "Erases Wi-Fi, time zone, display, radio switches, notification and app settings, then restarts "
                     "into first-run setup. MeshCore keeps its identity, contacts and channels.");
     menu_add(menu, "Reset everything", "", ask_all, NULL);
-    menu_note(menu, "Also erases every file on the badge: the MeshCore identity (for good), contacts, channels, "
-                    "messages and the update token. The SD card is not touched.");
+    menu_note(menu, "Also erases every file on the badge from flash, not just deletes it: the MeshCore identity (for "
+                    "good), contacts, channels, messages and the update token. The restart takes up to a minute with "
+                    "the screen dark. The SD card is not touched.");
     return screen;
 }
 

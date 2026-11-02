@@ -254,7 +254,8 @@ void app_main(void) {
     boot_progress_nvs_up();
     settings_apply_tz(); // before anything shows the clock
     boot_progress_begin(BOOT_STORAGE);
-    bool storage_ok = factory_reset_boot_storage(storage_mount()); // and its /storage part, before anything opens a file
+    factory_reset_boot_storage(); // and its /storage part (#66): unmounted, before anything opens a file
+    bool storage_ok = storage_mount();
     if (!storage_ok) {
         ESP_LOGE(TAG, "no storage drive");
         boot_progress_end(BOOT_STORAGE, STEP_FAILED, "no storage drive");

@@ -93,6 +93,15 @@ static void close_question(void) {
 static void handle(fc_event_t e) {
     switch (e) {
     case FC_EV_ARM:
+        if (lichen_screen_locked()) {
+            // The pocket lock (#75) is unlocked with the same two keys: never also a reset question. It cannot engage
+            // this early (30 s idle at the least), so only "fw lock now" gets here.
+            portENTER_CRITICAL(&lock);
+            combo.state = FC_OVER;
+            portEXIT_CRITICAL(&lock);
+            ESP_LOGW(TAG, "boot keys held while locked: no reset question");
+            break;
+        }
         ESP_LOGW(TAG, "boot keys held: asking for a settings reset");
         show_question();
         break;

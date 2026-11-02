@@ -9,9 +9,11 @@
 // Settings: NVS only. In Lichen's namespace (badge_fw) every key goes except FACTORY_KEEP_KEYS, the badge's own
 // hardware and health record; every app namespace ("a.<id>") goes; any other namespace (a library's) is not ours and
 // stays. Not NVS at all and never touched: otadata (which app slot boots), the app slots, phy_init, coredump, assets.
-// Everything: the same, plus the MeshCore identity's old NVS copy ("identity", else MeshCore would move it back), and
-// every file on /storage except the OS's own (the C6 image and lora.toml, which tools/stage_storage.sh put there).
-// The SD card is never touched.
+// Everything: erased from flash, not just unlinked (the badge has no flash encryption, and a badge handed on must not
+// keep the old MeshCore private key). The kept NVS entries are read into RAM, the whole nvs partition is erased and
+// they are written back (minus the identity's old NVS copy). The OS's own files on /storage (the C6 image and
+// lora.toml, which tools/stage_storage.sh put there) are copied to PSRAM, the whole storage partition is erased and
+// formatted, and they are written back. The SD card is never touched.
 typedef enum {
     FACTORY_NONE     = 0,
     FACTORY_SETTINGS = 1,
@@ -22,10 +24,13 @@ typedef enum {
 // halfway just runs it again
 #define FACTORY_PENDING_KEY     "fr_pending"
 #define FACTORY_PENDING_STORAGE 3 // "everything", NVS already done: only the drive is left
+#define FACTORY_PENDING_ERASING 4 // the drive's erase began: the PSRAM copy of the OS files died with that boot
 
 typedef struct {
     bool    nvs;       // erase NVS for `level`
-    bool    storage;   // then wipe /storage
+    bool    nvs_full;  // by erasing the whole partition and writing the kept entries back (else key by key)
+    bool    storage;   // then erase /storage
+    bool    restore;   // copy the OS files out first and write them back (false: they are already gone)
     uint8_t after_nvs; // what FACTORY_PENDING_KEY holds once NVS is done (0: erase it)
     factory_level_t level;
 } factory_boot_t;
@@ -36,6 +41,8 @@ factory_boot_t factory_boot_plan(uint8_t pending);
 bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level);
 // True when a top-level name on /storage survives "everything"
 bool factory_storage_keeps(char const *name);
+// Write-back order: the C6 bundle's .md5 files after the images, so a half-written bundle never looks complete
+bool factory_restore_late(char const *name);
 // "settings" or "all" (the console's words)
 bool factory_level_parse(char const *word, factory_level_t *out);
 char const *factory_level_name(factory_level_t level);

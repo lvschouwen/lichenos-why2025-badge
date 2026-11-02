@@ -1,14 +1,25 @@
-// Factory reset (#66): the erasing, at boot. NVS goes key by key (factory_plan.c decides), never the whole partition:
-// the badge's own record (crashes, PSRAM tuning, the C6's state) stays, and so does any namespace Lichen does not own.
-// otadata, the app slots, phy_init, coredump and assets are other partitions and are never opened here. /storage is
-// mounted and emptied file by file except the OS's files (the C6 image, lora.toml); only a drive that would not mount
-// is formatted. The SD card is not touched.
+// Factory reset (#66): the erasing, at boot (factory_plan.c decides what goes). otadata, the app slots, phy_init,
+// coredump and assets are other partitions and are never opened here; the SD card is not touched.
+// Settings: NVS key by key; the badge's own record (crashes, PSRAM tuning, the C6's state) and namespaces Lichen does
+// not own stay.
+// Everything: erased from flash, not unlinked. The badge has no flash encryption, so a deleted file or NVS entry would
+// leave the old MeshCore private key readable in the chip. NVS: the kept entries go to RAM, the nvs partition is
+// erased whole, they are written back. /storage: the OS files (C6 bundle, lora.toml) go to PSRAM, the storage
+// partition is erased whole and formatted, they are written back. Each step is a pending state (factory_plan.h), so a
+// power cut repeats the step it hit; one that hits the drive's erase loses the PSRAM copy, and the next boot erases
+// again without it (no C6 bundle: the flasher leaves the C6 alone until "badge.sh ota-c6" brings one; no lora.toml:
+// the default preset).
 #include "factory_reset.h"
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_partition.h"
 #include "esp_vfs_fat.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "fw_console.h"
 #include "nvs.h"
+#include "nvs_flash.h"
 #include "storage.h"
 
 #include <dirent.h>
@@ -16,14 +27,16 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 static char const TAG[] = "factory";
 
-#define ERASE_BATCH 32 // NVS entries or file names collected per pass (no erasing while an iterator is open)
-#define MAX_PASSES  64
-#define PATH_MAX_   256
-#define TREE_DEPTH  8
+#define ERASE_BATCH  32 // NVS entries collected per pass (no erasing while an iterator is open)
+#define MAX_PASSES   64
+#define MAX_KEPT     64 // NVS entries carried over a full erase
+#define MAX_STAGED   16 // OS files carried over the drive's erase
+#define STAGED_MAX   (2u * 1024 * 1024) // one file; the C6 app is ~1.5 MB
+#define ERASE_CHUNK  (64u * 1024)
+#define STORAGE_PART "storage"
 
 typedef struct {
     char ns[NVS_NS_NAME_MAX_SIZE];
@@ -51,24 +64,23 @@ static uint8_t pending_get(void) {
     return v;
 }
 
-static void pending_set(uint8_t v) {
+static bool pending_set(uint8_t v) {
     nvs_handle_t nvs;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
-        return;
+        return false;
     }
-    if (v) {
-        nvs_set_u8(nvs, FACTORY_PENDING_KEY, v);
-    } else {
-        nvs_erase_key(nvs, FACTORY_PENDING_KEY);
-    }
-    nvs_commit(nvs);
+    esp_err_t err = v ? nvs_set_u8(nvs, FACTORY_PENDING_KEY, v) : nvs_erase_key(nvs, FACTORY_PENDING_KEY);
+    bool      ok  = (err == ESP_OK || (!v && err == ESP_ERR_NVS_NOT_FOUND)) && nvs_commit(nvs) == ESP_OK;
     nvs_close(nvs);
+    return ok;
 }
+
+// ---- NVS, settings: key by key ---------------------------------------------------------------------------------------
 
 // Up to cap entries this level erases (or, with print, lists every entry and its fate); returns how many were found
 static size_t nvs_collect(factory_level_t level, nvs_name_t *out, size_t cap, bool print) {
-    nvs_iterator_t it = NULL;
-    size_t         n  = 0;
+    nvs_iterator_t it  = NULL;
+    size_t         n   = 0;
     esp_err_t      err = nvs_entry_find(NVS_DEFAULT_PART_NAME, NULL, NVS_TYPE_ANY, &it);
     while (err == ESP_OK && (print || n < cap)) {
         nvs_entry_info_t info;
@@ -87,14 +99,14 @@ static size_t nvs_collect(factory_level_t level, nvs_name_t *out, size_t cap, bo
     return n;
 }
 
-static void nvs_wipe(factory_level_t level) {
+static void nvs_wipe_keys(factory_level_t level) {
     nvs_name_t *batch  = malloc(ERASE_BATCH * sizeof(*batch));
     unsigned    erased = 0, failed = 0;
     if (!batch) {
         ESP_LOGE(TAG, "no memory: NVS not reset");
         return;
     }
-    for (int pass = 0; pass < MAX_PASSES; pass++) {
+    for (int pass = 0; pass < MAX_PASSES && !failed; pass++) {
         size_t n = nvs_collect(level, batch, ERASE_BATCH, false);
         if (n == 0) {
             break;
@@ -112,12 +124,9 @@ static void nvs_wipe(factory_level_t level) {
             if (err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND) {
                 erased++;
             } else {
-                failed++;
+                failed++; // the same keys would come back every pass
                 ESP_LOGE(TAG, "%s/%s not erased: %s", batch[i].ns, batch[i].key, esp_err_to_name(err));
             }
-        }
-        if (failed) {
-            break; // the same keys would come back every pass
         }
     }
     free(batch);
@@ -125,117 +134,322 @@ static void nvs_wipe(factory_level_t level) {
              failed ? ", some failed" : "");
 }
 
+// ---- NVS, everything: the whole partition, the kept entries written back -------------------------------------------
+
+typedef struct {
+    char       ns[NVS_NS_NAME_MAX_SIZE];
+    char       key[NVS_KEY_NAME_MAX_SIZE];
+    nvs_type_t type;
+    uint64_t   num;  // integer types
+    void      *data; // NVS_TYPE_STR (with its NUL) and NVS_TYPE_BLOB
+    size_t     len;
+} kept_t;
+
+#define GET_NUM(fn, T)                                                                                           \
+    do {                                                                                                         \
+        T v = 0;                                                                                                 \
+        bool ok = fn(h, k->key, &v) == ESP_OK;                                                                   \
+        k->num  = (uint64_t)v;                                                                                   \
+        return ok;                                                                                               \
+    } while (0)
+
+static bool kept_read(nvs_handle_t h, kept_t *k) {
+    switch (k->type) {
+    case NVS_TYPE_U8: GET_NUM(nvs_get_u8, uint8_t);
+    case NVS_TYPE_I8: GET_NUM(nvs_get_i8, int8_t);
+    case NVS_TYPE_U16: GET_NUM(nvs_get_u16, uint16_t);
+    case NVS_TYPE_I16: GET_NUM(nvs_get_i16, int16_t);
+    case NVS_TYPE_U32: GET_NUM(nvs_get_u32, uint32_t);
+    case NVS_TYPE_I32: GET_NUM(nvs_get_i32, int32_t);
+    case NVS_TYPE_U64: GET_NUM(nvs_get_u64, uint64_t);
+    case NVS_TYPE_I64: GET_NUM(nvs_get_i64, int64_t);
+    case NVS_TYPE_STR:
+    case NVS_TYPE_BLOB: {
+        bool      str = k->type == NVS_TYPE_STR;
+        esp_err_t err = str ? nvs_get_str(h, k->key, NULL, &k->len) : nvs_get_blob(h, k->key, NULL, &k->len);
+        if (err != ESP_OK || !(k->data = malloc(k->len ? k->len : 1))) {
+            return false;
+        }
+        return (str ? nvs_get_str(h, k->key, k->data, &k->len) : nvs_get_blob(h, k->key, k->data, &k->len)) == ESP_OK;
+    }
+    default: return false;
+    }
+}
+
+// Integers come back from the u64 they were widened to (signed ones sign-extended there, truncated back here)
+static esp_err_t kept_write(nvs_handle_t h, kept_t const *k) {
+    switch (k->type) {
+    case NVS_TYPE_U8: return nvs_set_u8(h, k->key, (uint8_t)k->num);
+    case NVS_TYPE_I8: return nvs_set_i8(h, k->key, (int8_t)k->num);
+    case NVS_TYPE_U16: return nvs_set_u16(h, k->key, (uint16_t)k->num);
+    case NVS_TYPE_I16: return nvs_set_i16(h, k->key, (int16_t)k->num);
+    case NVS_TYPE_U32: return nvs_set_u32(h, k->key, (uint32_t)k->num);
+    case NVS_TYPE_I32: return nvs_set_i32(h, k->key, (int32_t)k->num);
+    case NVS_TYPE_U64: return nvs_set_u64(h, k->key, k->num);
+    case NVS_TYPE_I64: return nvs_set_i64(h, k->key, (int64_t)k->num);
+    case NVS_TYPE_STR: return nvs_set_str(h, k->key, k->data);
+    case NVS_TYPE_BLOB: return nvs_set_blob(h, k->key, k->data, k->len);
+    default: return ESP_ERR_NOT_SUPPORTED;
+    }
+}
+
+// Every entry "everything" keeps, read into RAM; returns how many (the pending flag itself is not among them)
+static size_t kept_collect(kept_t *out, size_t cap) {
+    nvs_iterator_t it  = NULL;
+    size_t         n   = 0;
+    esp_err_t      err = nvs_entry_find(NVS_DEFAULT_PART_NAME, NULL, NVS_TYPE_ANY, &it);
+    for (; err == ESP_OK; err = nvs_entry_next(&it)) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+        bool pending = strcmp(info.namespace_name, FW_NVS_NAMESPACE) == 0 && strcmp(info.key, FACTORY_PENDING_KEY) == 0;
+        if (pending || factory_nvs_erases(info.namespace_name, info.key, FACTORY_ALL)) {
+            continue;
+        }
+        if (n == cap) {
+            ESP_LOGE(TAG, "more than %u entries to keep: %s/%s lost", (unsigned)cap, info.namespace_name, info.key);
+            continue;
+        }
+        kept_t *k = &out[n];
+        *k        = (kept_t){.type = info.type};
+        strlcpy(k->ns, info.namespace_name, sizeof(k->ns));
+        strlcpy(k->key, info.key, sizeof(k->key));
+        nvs_handle_t h;
+        bool         ok = nvs_open(k->ns, NVS_READONLY, &h) == ESP_OK;
+        if (ok) {
+            ok = kept_read(h, k);
+            nvs_close(h);
+        }
+        if (ok) {
+            n++;
+        } else {
+            free(k->data);
+            ESP_LOGE(TAG, "%s/%s unreadable: not kept", k->ns, k->key);
+        }
+    }
+    nvs_release_iterator(it);
+    return n;
+}
+
+// Returns false when the partition could not be erased (the caller falls back to key by key)
+static bool nvs_wipe_full(uint8_t after) {
+    kept_t *kept = calloc(MAX_KEPT, sizeof(*kept));
+    if (!kept) {
+        return false;
+    }
+    size_t    n   = kept_collect(kept, MAX_KEPT);
+    esp_err_t err = nvs_flash_deinit();
+    if (err == ESP_OK) {
+        err = nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME);
+    }
+    esp_err_t init = nvs_flash_init(); // also after a failed erase: the rest of the boot needs NVS
+    if (err != ESP_OK || init != ESP_OK) {
+        ESP_LOGE(TAG, "nvs partition not erased: %s / %s", esp_err_to_name(err), esp_err_to_name(init));
+    }
+    unsigned back = 0;
+    for (size_t i = 0; i < n; i++) {
+        nvs_handle_t h;
+        if (err == ESP_OK && nvs_open(kept[i].ns, NVS_READWRITE, &h) == ESP_OK) {
+            if (kept_write(h, &kept[i]) == ESP_OK && nvs_commit(h) == ESP_OK) {
+                back++;
+            }
+            nvs_close(h);
+        }
+        free(kept[i].data);
+    }
+    free(kept);
+    if (err != ESP_OK) {
+        return false;
+    }
+    pending_set(after); // the erase took the flag with it: what is left to do
+    ESP_LOGW(TAG, "nvs partition erased, %u of %u kept entries written back", back, (unsigned)n);
+    return true;
+}
+
 void factory_reset_boot_nvs(void) {
-    factory_boot_t plan = factory_boot_plan(pending_get());
+    uint8_t        pending = pending_get();
+    factory_boot_t plan    = factory_boot_plan(pending);
     if (plan.nvs) {
         ESP_LOGW(TAG, "factory reset (%s): erasing NVS", factory_level_name(plan.level));
-        nvs_wipe(plan.level);
-        pending_set(plan.after_nvs);
+        if (!plan.nvs_full || !nvs_wipe_full(plan.after_nvs)) {
+            nvs_wipe_keys(plan.level);
+            pending_set(plan.after_nvs);
+        }
         system_restart_note(plan.level == FACTORY_ALL ? "factory reset: everything" : "factory reset: settings");
-    } else if (!plan.storage && pending_get()) {
+    } else if (!plan.storage && pending) {
         pending_set(0); // a value this firmware does not know
     }
 }
 
-// ---- /storage -------------------------------------------------------------------------------------------------------
+// ---- /storage: copy the OS files out, erase the partition, format, write them back --------------------------------
 
-static bool is_dir(char const *path) {
+typedef struct {
+    char     rel[48]; // "lora.toml", "c6/firmware.bin"
+    uint8_t *buf;     // PSRAM
+    size_t   len;
+} staged_t;
+
+static esp_vfs_fat_mount_config_t const MOUNT_CFG = {.max_files = 4, .allocation_unit_size = 4096};
+
+static bool stage_one(char const *rel, staged_t *s) {
+    char        path[96];
     struct stat st;
-    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+    snprintf(path, sizeof(path), STORAGE_BASE "/%s", rel);
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0 || (size_t)st.st_size > STAGED_MAX) {
+        return false;
+    }
+    FILE *f = fopen(path, "rb");
+    s->buf  = f ? heap_caps_malloc((size_t)st.st_size, MALLOC_CAP_SPIRAM) : NULL;
+    s->len  = s->buf ? fread(s->buf, 1, (size_t)st.st_size, f) : 0;
+    if (f) {
+        fclose(f);
+    }
+    if (!s->buf || s->len != (size_t)st.st_size) {
+        free(s->buf);
+        s->buf = NULL;
+        ESP_LOGE(TAG, "%s not copied: it is lost", rel);
+        return false;
+    }
+    strlcpy(s->rel, rel, sizeof(s->rel));
+    return true;
 }
 
-// Removes everything inside dir (top: except what the plan keeps), then dir itself unless top. Counts what failed.
-static void rm_tree(char *path, size_t len, int depth, bool top, unsigned *failed) {
-    char(*names)[256] = malloc(ERASE_BATCH * sizeof(*names));
-    if (!names) {
-        (*failed)++;
-        return;
+// The drive's own files, into PSRAM. A drive that does not mount has nothing readable to keep.
+static size_t stage_os_files(staged_t *out) {
+    wl_handle_t wl = WL_INVALID_HANDLE;
+    size_t      n  = 0;
+    if (esp_vfs_fat_spiflash_mount_rw_wl(STORAGE_BASE, STORAGE_PART, &MOUNT_CFG, &wl) != ESP_OK) {
+        ESP_LOGE(TAG, "%s does not mount: nothing to keep from it", STORAGE_BASE);
+        return 0;
     }
-    for (int pass = 0; pass < MAX_PASSES * 4; pass++) {
-        DIR *d = opendir(path);
-        if (!d) {
-            break;
-        }
-        size_t         n = 0;
+    if (stage_one("lora.toml", &out[n])) {
+        n++;
+    }
+    DIR *d = opendir(STORAGE_BASE "/c6");
+    if (d) {
         struct dirent *e;
-        while (n < ERASE_BATCH && (e = readdir(d)) != NULL) {
-            if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0 || (top && factory_storage_keeps(e->d_name))) {
-                continue;
+        while (n < MAX_STAGED && (e = readdir(d)) != NULL) {
+            char rel[48];
+            if (snprintf(rel, sizeof(rel), "c6/%s", e->d_name) < (int)sizeof(rel) && stage_one(rel, &out[n])) {
+                n++;
             }
-            strlcpy(names[n++], e->d_name, sizeof(names[0]));
         }
         closedir(d);
-        unsigned before = *failed;
-        for (size_t i = 0; i < n; i++) {
-            int w = snprintf(path + len, PATH_MAX_ - len, "/%s", names[i]);
-            if (w <= 0 || (size_t)w >= PATH_MAX_ - len) {
-                (*failed)++;
-                continue;
-            }
-            if (is_dir(path)) {
-                if (depth < TREE_DEPTH) {
-                    rm_tree(path, len + (size_t)w, depth + 1, false, failed);
-                } else {
-                    (*failed)++;
-                }
-            } else if (unlink(path) != 0) {
-                (*failed)++;
-            }
-            path[len] = '\0';
-        }
-        if (n == 0 || *failed != before) {
-            break; // empty, or stuck on something that will not go
-        }
     }
-    free(names);
-    path[len] = '\0';
-    if (!top && rmdir(path) != 0) {
-        (*failed)++;
-    }
+    esp_vfs_fat_spiflash_unmount_rw_wl(STORAGE_BASE, wl);
+    return n;
 }
 
-bool factory_reset_boot_storage(bool storage_ok) {
-    uint8_t        pending = pending_get();
-    factory_boot_t plan    = factory_boot_plan(pending);
-    if (!plan.storage) {
-        return storage_ok;
+static bool erase_partition(void) {
+    esp_partition_t const *p =
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_FAT, STORAGE_PART);
+    if (!p) {
+        return false;
     }
-    if (storage_ok) {
-        ESP_LOGW(TAG, "factory reset (all): emptying %s (the C6 image and lora.toml stay)", STORAGE_BASE);
-        char     path[PATH_MAX_];
-        unsigned failed = 0;
-        strlcpy(path, STORAGE_BASE, sizeof(path));
-        rm_tree(path, strlen(path), 0, true, &failed);
-        if (failed) {
-            ESP_LOGE(TAG, "%u files or folders on %s would not go", failed, STORAGE_BASE);
+    for (size_t off = 0; off < p->size; off += ERASE_CHUNK) {
+        size_t len = p->size - off < ERASE_CHUNK ? p->size - off : ERASE_CHUNK;
+        if (esp_partition_erase_range(p, off, len) != ESP_OK) {
+            ESP_LOGE(TAG, "erase failed at 0x%x", (unsigned)off);
+            return false;
         }
-    } else {
-        // A drive that does not mount holds nothing readable: format it (the C6 image and lora.toml were lost with it)
-        ESP_LOGW(TAG, "factory reset (all): %s did not mount, formatting it", STORAGE_BASE);
-        esp_vfs_fat_mount_config_t cfg = {.format_if_mount_failed = true, .max_files = 8, .allocation_unit_size = 4096};
-        esp_err_t                  err = esp_vfs_fat_spiflash_format_cfg_rw_wl(STORAGE_BASE, "storage", &cfg);
+        vTaskDelay(1); // the idle task (task watchdog) gets its turn through the ~30 s
+    }
+    return true;
+}
+
+static bool write_one(staged_t const *s) {
+    char path[96];
+    snprintf(path, sizeof(path), STORAGE_BASE "/%s", s->rel);
+    FILE *f  = fopen(path, "wb");
+    bool  ok = f && fwrite(s->buf, 1, s->len, f) == s->len;
+    if (f && fclose(f) != 0) {
+        ok = false;
+    }
+    if (!ok) {
+        ESP_LOGE(TAG, "%s not written back", s->rel);
+    }
+    return ok;
+}
+
+// Images first, the bundle's .md5 files last and only when every image made it: a bundle with a missing or short
+// image then has no .md5 and the C6 flasher leaves the C6 alone instead of flashing half an image
+static void write_back(staged_t const *s, size_t n) {
+    wl_handle_t wl = WL_INVALID_HANDLE;
+    if (esp_vfs_fat_spiflash_mount_rw_wl(STORAGE_BASE, STORAGE_PART, &MOUNT_CFG, &wl) != ESP_OK) {
+        ESP_LOGE(TAG, "fresh drive does not mount: the C6 bundle and lora.toml are lost");
+        return;
+    }
+    mkdir(STORAGE_BASE "/c6", 0775);
+    bool     images_ok = true;
+    unsigned written   = 0;
+    for (int late = 0; late < 2; late++) {
+        for (size_t i = 0; i < n; i++) {
+            if (factory_restore_late(s[i].rel) != (late == 1) || (late && !images_ok)) {
+                continue;
+            }
+            bool ok = write_one(&s[i]);
+            written += ok;
+            if (!ok && strncmp(s[i].rel, "c6/", 3) == 0) {
+                images_ok = false;
+            }
+        }
+    }
+    esp_vfs_fat_spiflash_unmount_rw_wl(STORAGE_BASE, wl);
+    ESP_LOGW(TAG, "%u of %u kept files written back%s", written, (unsigned)n,
+             images_ok ? "" : " (C6 bundle incomplete: .md5 files left out)");
+}
+
+void factory_reset_boot_storage(void) {
+    factory_boot_t plan = factory_boot_plan(pending_get());
+    if (!plan.storage) {
+        return;
+    }
+    staged_t *staged = calloc(MAX_STAGED, sizeof(*staged));
+    size_t    n      = plan.restore && staged ? stage_os_files(staged) : 0;
+    if (!plan.restore) {
+        ESP_LOGE(TAG, "factory reset (all): an earlier erase of %s was cut off; the C6 bundle and lora.toml are gone "
+                      "(badge.sh ota-c6 brings the bundle back)", STORAGE_BASE);
+    }
+    // From here the PSRAM copy is the only one: a power cut means erase again, without it
+    if (!pending_set(FACTORY_PENDING_ERASING)) {
+        ESP_LOGE(TAG, "pending state not saved: erasing anyway");
+    }
+    ESP_LOGW(TAG, "factory reset (all): erasing the %s partition (%u files kept in PSRAM)", STORAGE_PART, (unsigned)n);
+    bool erased = erase_partition();
+    if (erased) {
+        esp_vfs_fat_mount_config_t cfg = MOUNT_CFG;
+        cfg.format_if_mount_failed     = true; // the erased drive fails to mount: this formats it
+        esp_err_t err = esp_vfs_fat_spiflash_format_cfg_rw_wl(STORAGE_BASE, STORAGE_PART, &cfg);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "format failed: %s", esp_err_to_name(err));
-        } else {
-            storage_ok = storage_mount();
         }
+        write_back(staged, n);
     }
-    pending_set(0); // once only: a drive that cannot be emptied must not take each boot's new settings with it
-    return storage_ok;
+    for (size_t i = 0; staged && i < n; i++) {
+        free(staged[i].buf);
+    }
+    free(staged);
+    // Once the write-back is done (or the erase failed outright): a drive that cannot be erased must not take each
+    // boot's new settings with it
+    pending_set(0);
+    ESP_LOGW(TAG, "factory reset (all): %s %s", STORAGE_BASE, erased ? "erased" : "NOT erased");
 }
 
 // ---- console ----------------------------------------------------------------------------------------------------------
 
 static void plan_print(factory_level_t level) {
     console_reply("factory reset '%s', dry run (nothing is erased):", factory_level_name(level));
+    if (level == FACTORY_ALL) {
+        console_reply("  nvs: whole partition erased from flash; the 'keep' entries are written back");
+    }
     nvs_collect(level, NULL, 0, true);
     if (level != FACTORY_ALL) {
         console_reply("  %s: all kept; SD card: not touched", STORAGE_BASE);
         return;
     }
+    console_reply("  %s: whole partition erased from flash and formatted; 'keep' files written back", STORAGE_BASE);
     DIR *d = opendir(STORAGE_BASE);
     if (!d) {
-        console_reply("  %s: not mounted (would be formatted)", STORAGE_BASE);
+        console_reply("  %s: not mounted (nothing to keep)", STORAGE_BASE);
     } else {
         struct dirent *e;
         while ((e = readdir(d)) != NULL) {
@@ -263,7 +477,7 @@ static void cmd_factory(char const *args) {
     }
     if (!factory_level_parse(word, &level)) {
         console_reply("factory-reset plan [settings|all] (dry run) | settings YES | all YES (all: MeshCore identity "
-                      "and every file on the drive too)");
+                      "and every file on the drive too, erased from flash)");
         return;
     }
     if (strcmp(yes, "YES") != 0) {

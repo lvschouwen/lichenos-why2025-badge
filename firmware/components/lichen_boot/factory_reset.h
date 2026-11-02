@@ -12,8 +12,8 @@
 bool factory_reset_request(factory_level_t level);
 // main.c, right after nvs_flash_init: erases NVS for a pending reset
 void factory_reset_boot_nvs(void);
-// main.c, right after storage_mount (storage_ok: it mounted): wipes /storage for a pending "everything". A drive that
-// did not mount is formatted then. Returns whether /storage is mounted afterwards.
-bool factory_reset_boot_storage(bool storage_ok);
+// main.c, right before storage_mount: for a pending "everything", erases the storage partition from flash (the C6
+// bundle and lora.toml are carried over in PSRAM) and formats it. Up to ~30 s with the screen still dark.
+void factory_reset_boot_storage(void);
 // "fw factory-reset": plan (a dry run, erases nothing) | settings YES | all YES
 void factory_reset_console_register(void);
