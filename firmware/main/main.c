@@ -169,11 +169,10 @@ static void c6_restart_answer(bool confirmed) {
 // keyboard may be dead in exactly this state
 static bool c6_ask_restart(void) {
     shell_dialog_t const d = {
-        .title        = "C6 (radio/Wi-Fi) not responding —",
-        .count_prefix = "restarting in ",
-        .count_suffix = " s.",
-        .hint         = "Enter: restart now · Esc: stay without radio",
-        .seconds      = 30,
+        .title         = "C6 (radio/Wi-Fi) not responding.",
+        .hint          = "Enter: restart now • Esc: stay without radio",
+        .confirm_label = "restart",
+        .seconds       = 30,
     };
     return shell_dialog_countdown(&d, c6_restart_answer);
 }

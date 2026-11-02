@@ -35,6 +35,24 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   arg)` adds widgets to a screen's group (LVGL context).
 - `menu.h`, `menu_filter.h`, `list_filter.h`, `scroll_anchor.h`, `text_entry.h`: the shared list, filter and text
   widgets, so every app behaves the same under the keyboard.
+- Shared UI widgets (#135; the UI standard's rules R1-R11). Apps must use these, not their own labels and hint lines:
+  - Headings: `menu_create_named(parent, kind, name)` / `lichen_heading` put a small dim kind line ("Repeater settings")
+    over the name in the large font on its own line (two lines, "..." only past that). `menu_create` stays for fixed
+    titles ("Display"). Never write "Kind: name" in one line.
+  - Row kinds: `menu_set_kind(row, MENU_OPEN | MENU_CYCLE | MENU_TOGGLE | MENU_DANGER | MENU_INFO)`. OPEN shows a dim
+    "›" after the value, TOGGLE takes `menu_set_on(row, bool)` ("On"/"Off"), DANGER (`menu_set_danger(row,
+    question, confirm_label)`) asks in the careful dialog before `on_enter` runs, INFO is dim and cannot be selected.
+    A row with no kind acts at once. `menu_add_wrap` is the two-line row for a long identifying label.
+  - `shell_page_hint(screen, "Enter", "open", "Del", "delete", NULL)`: a dim hint pinned to the screen bottom, not part
+    of the scroll. No "Esc: back" pair; Esc is predictable.
+  - `menu_status_begin / _progress / _done / _fail`: a status line that ends ("Reading 3 of 17", a final text, or a
+    failure in plain words plus what to do). A begin that never ends is logged. `menu_empty(menu, "contacts", "they appear
+    when a node adverts")` explains an empty list and goes away when a row is added.
+  - Focus that survives a refresh: `menu_set_key(row, id)`, then `menu_focus_save` before and `menu_focus_restore` after
+    rebuilding the rows (the key wins, else the same index, else the last row).
+  - `shell_dialog_t`: the dialog writes "(cancels in N s)" itself, leave `count_prefix`/`count_suffix` NULL; give
+    `confirm_label` ("restart") and the hint "Enter: restart • Esc: cancel" is generated; the hint is dim unless `careful`.
+  - The text and choices are pure (`ui_text.h`, `host_tests/ui_text_test.c`).
 - `theme.h`, `fonts.h`: Lichen's colours, sizes and fonts. Use them instead of literals.
 - `lichen_settings.h`: the app's own NVS namespace `a.<id>` (u8, u32, u64, strings, erase, erase all), and adopting a
   key an earlier firmware kept in `badge_fw` (`app_settings_adopt_u8/_u32`: copied once and read back, the old key

@@ -44,8 +44,11 @@ lv_obj_t *shell_stack_screen(int from_top);
 void shell_style_screen(lv_obj_t *screen);
 
 // A warning or confirm dialog over every screen (#14 T-B; apps too: a careful Remove, #49), e.g. "C6 (radio/Wi-Fi)
-// not responding — restarting in 30 s". The message reads "<title> <count_prefix><seconds left><count_suffix>", the hint below it. Enter confirms, Esc
-// cancels, and when the countdown runs out it confirms by itself (the keyboard may be dead), or cancels when careful.
+// not responding". The message is "<title> <lead>(cancels in N s)": the dialog writes the countdown itself, in that one
+// form (#135, R8/R9). A careful dialog says "cancels", any other "(<confirm_label> in N s)" or "(confirms in N s)". lead
+// is whatever count_prefix holds before its last '(' (a sentence of your own ahead of the countdown); count_prefix and
+// count_suffix are otherwise unused now, leave them NULL. The hint below is dim, amber only when careful. Enter confirms,
+// Esc cancels, and when the countdown runs out it confirms by itself (the keyboard may be dead), or cancels when careful.
 // done runs once on the LVGL task with the answer: keep it short (queue the work). One dialog at a time: a second
 // call replaces the first. Safe from any task, never blocks on more than the LVGL lock (2 s); false when it could not
 // be shown.
@@ -53,9 +56,11 @@ typedef struct {
     char const *title;
     char const *count_prefix;
     char const *count_suffix;
-    char const *hint;
+    char const *hint;          // NULL or "": generated from confirm_label and cancel_label
     uint32_t    seconds;
     bool        careful; // the countdown ends in a cancel and Enter counts only after a second (an erase, #99)
+    char const *confirm_label; // the action as a verb ("restart"): the hint reads "Enter: restart • Esc: cancel"
+    char const *cancel_label;  // NULL: "cancel"
 } shell_dialog_t;
 typedef void (*shell_dialog_fn)(bool confirmed);
 bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done);
@@ -87,3 +92,14 @@ lv_obj_t *lichen_label_line(lv_obj_t *parent, int32_t width);
 void      lichen_label_line_fit(lv_obj_t *label);
 // Wraps onto as many lines as it needs
 lv_obj_t *lichen_label_wrap(lv_obj_t *parent, int32_t width);
+
+// Shared page parts (#135; the UI standard's R1 and R6). Apps use these rather than building their own.
+// A page heading that names its subject (R1): a small dim kind line ("Repeater settings") over the name in LARGE on its
+// own line, wrapping to two lines and ending in "..." only past that. kind NULL or "": the name alone, still wrapping.
+// Never fold both into one "Kind: name" line. One container, so a menu keeps it as its first child. LVGL context only.
+lv_obj_t *lichen_heading(lv_obj_t *parent, char const *kind, char const *name);
+// A hint line pinned to the bottom of a screen (R6), dim, out of the scroll flow: "Enter: open \xE2\x80\xA2 Del: delete"
+// from key/verb pairs, NULL-terminated: shell_page_hint(screen, "Enter", "open", "Del", "delete", NULL). Leaves the
+// room at the screen's bottom for it (pad_bottom), so build it before or after the content. No "Esc: back" pairs: Esc
+// goes back everywhere. Calling it again on the same screen replaces the text. Returns the label. LVGL context only.
+lv_obj_t *shell_page_hint(lv_obj_t *screen, ...);

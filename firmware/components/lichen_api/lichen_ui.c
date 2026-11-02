@@ -4,6 +4,11 @@
 
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "fonts.h"
+#include "theme.h"
+#include "ui_text.h"
+
+#include <stdarg.h>
 
 static char const TAG[] = "ui";
 
@@ -55,5 +60,73 @@ lv_obj_t *lichen_label_wrap(lv_obj_t *parent, int32_t width) {
     lv_obj_t *label = lv_label_create(parent);
     lv_obj_set_width(label, width);
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    return label;
+}
+
+#define HEADING_NAME_LINES 2
+#define HEADING_GAP        4
+#define HINT_MAX           128
+#define HINT_EDGE          (THEME_PAD / 2) // gap between the hint and the screen's bottom edge
+
+// How many lines the wrapped name takes at the width the heading will have, capped (the label then ends in "...").
+// Measured with the font's own metrics because a DOT label needs a fixed height to cut at (#135).
+static int32_t name_height(lv_obj_t *parent, char const *name, lv_font_t const *font) {
+    lv_obj_update_layout(parent);
+    int32_t width = lv_obj_get_content_width(parent);
+    int32_t line  = lv_font_get_line_height(font);
+    if (width <= 0) {
+        return line * HEADING_NAME_LINES; // not laid out yet: leave the room
+    }
+    lv_point_t size;
+    lv_text_get_size(&size, name, font, 0, 0, width, LV_TEXT_FLAG_NONE);
+    int32_t lines = (size.y + line - 1) / line;
+    return line * (lines < 1 ? 1 : lines > HEADING_NAME_LINES ? HEADING_NAME_LINES : lines);
+}
+
+lv_obj_t *lichen_heading(lv_obj_t *parent, char const *kind, char const *name) {
+    lv_obj_t *box = lv_obj_create(parent);
+    lv_obj_remove_style_all(box);
+    lv_obj_set_size(box, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(box, HEADING_GAP, 0);
+    lv_obj_set_style_pad_bottom(box, 8, 0); // as the one-line menu heading
+    lv_obj_set_scrollable(box, false);
+    if (kind && kind[0]) {
+        lv_obj_t *k = lichen_label_line(box, LV_PCT(100));
+        lv_obj_set_style_text_color(k, lv_color_hex(THEME_DIM), 0);
+        lv_label_set_text(k, kind);
+    }
+    lv_font_t const *large = lichen_font(LICHEN_FONT_LARGE);
+    char const      *text  = name ? name : "";
+    lv_obj_t        *n     = lv_label_create(box);
+    lv_obj_set_width(n, LV_PCT(100));
+    lv_obj_set_style_text_font(n, large, 0);
+    lv_label_set_long_mode(n, LV_LABEL_LONG_DOT);
+    lv_label_set_text(n, text);
+    lv_obj_update_layout(box); // the box has its width now; the name's height follows from it
+    lv_obj_set_height(n, name_height(box, text, large));
+    return box;
+}
+
+lv_obj_t *shell_page_hint(lv_obj_t *screen, ...) {
+    char    text[HINT_MAX];
+    va_list ap;
+    va_start(ap, screen);
+    ui_hint_vbuild(text, sizeof(text), ap);
+    va_end(ap);
+    lv_obj_t *label = lichen_label_line(screen, LV_PCT(100));
+    lv_obj_add_flag(label, LV_OBJ_FLAG_FLOATING); // out of the flex flow and the scroll: it stays where it is put
+    lv_obj_set_style_text_font(label, lichen_font(LICHEN_FONT_SMALL), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(THEME_DIM), 0);
+    lichen_label_line_fit(label);
+    lv_label_set_text(label, text);
+    // The content area ends above the pad we add; the label sits THEME_PAD / 2 off the screen's bottom edge. So a menu
+    // that fills the screen (100% of the content height) ends above the hint and nothing scrolls under it.
+    int32_t line = lv_obj_get_height(label);
+    int32_t pad  = line + HINT_EDGE;
+    if (lv_obj_get_style_pad_bottom(screen, LV_PART_MAIN) < pad) {
+        lv_obj_set_style_pad_bottom(screen, pad, 0);
+    }
+    lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, lv_obj_get_style_pad_bottom(screen, LV_PART_MAIN) - HINT_EDGE);
     return label;
 }

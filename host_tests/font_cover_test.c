@@ -123,6 +123,8 @@ static char const *const SAMPLES[] = {
     // The Keyboard Test's key tops (#81): shapes, ✕ ☁ ◆, arrows, ⇧ ⌫ ⏎ and the ringed planet of the GUI key
     "\xe2\x96\xa0 \xe2\x96\xb2 \xe2\x9c\x95 \xe2\x97\x8f \xe2\x98\x81 \xe2\x97\x86 \xe2\x86\x90 \xe2\x86\x91 \xe2\x86\x92 \xe2\x86\x93",
     "\xe2\x87\xa7 \xe2\x8c\xab \xe2\x8f\x8e \xf0\x9f\xaa\x90",
+    // The shared widgets' marks (#135): U+203A after an opening row's value, U+2022 between hint pairs, U+00B0 in temperatures
+    "\xe2\x80\xba \xe2\x80\xa2 \xc2\xb0",
     "\xe2\xad\x90", // U+2B50, a favourite in MeshCore's Contacts (#49); U+2605 is not in the fonts
 };
 

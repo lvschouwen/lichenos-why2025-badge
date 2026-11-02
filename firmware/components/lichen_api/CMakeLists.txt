@@ -11,7 +11,7 @@
 idf_component_register(SRCS "lichen_app.c" "menu.c" "menu_filter.c" "list_filter.c" "scroll_anchor.c" "fonts.c" "text_entry.c"
                             "settings_store.c" "tz_table.c" "app_ns.c" "lichen_settings.c" "lichen_fs.c" "fs_path.c"
                             "lichen_crashlog.c" "crashlog_fmt.c" "lichen_badge.c" "badge_table.c" "radio_state.c" "lichen_radio.c"
-                            "lichen_ui.c"
+                            "lichen_ui.c" "ui_text.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_notify
                        PRIV_REQUIRES freertos assets fw_console nvs_flash heap storage sdcard crash esp_lvgl_port)

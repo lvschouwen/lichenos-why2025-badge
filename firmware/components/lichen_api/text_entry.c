@@ -67,18 +67,18 @@ static lv_obj_t *build(void) {
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen, 24, 0);
 
-    // A heading may carry a name on a second line ("Password for\n<name>"): the first line is the large heading, the
-    // name is its own wrapping line below it, so a long name is never lost behind a "..." (#132)
+    // A heading may carry a name on a second line ("Password for\n<name>"): the first line is the kind (small, dim),
+    // the name is the heading proper, LARGE on its own wrapping lines, so a long name is never lost behind a "..."
+    // (#132, R1/#135). Without a name the whole text is the one LARGE line.
     char const *nl = strchr(title, '\n');
-    char        first[sizeof(title)];
-    snprintf(first, sizeof(first), "%.*s", nl ? (int)(nl - title) : (int)sizeof(first), title);
-    lv_obj_t *heading = lichen_label_line(screen, LV_PCT(100));
-    lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
-    lichen_label_line_fit(heading);
-    lv_label_set_text(heading, first);
     if (nl && nl[1]) {
-        lv_obj_t *name = lichen_label_wrap(screen, LV_PCT(100));
-        lv_label_set_text(name, nl + 1);
+        char kind[sizeof(title)];
+        snprintf(kind, sizeof(kind), "%.*s", (int)(nl - title), title);
+        lichen_heading(screen, kind, nl + 1);
+    } else {
+        char one[sizeof(title)];
+        snprintf(one, sizeof(one), "%.*s", nl ? (int)(nl - title) : (int)sizeof(one) - 1, title);
+        lichen_heading(screen, NULL, one);
     }
 
     ta = lv_textarea_create(screen);

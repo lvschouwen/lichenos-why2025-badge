@@ -11,6 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "shell_parts.h"
 #include "theme.h"
+#include "ui_text.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -22,10 +23,12 @@ static char const TAG[] = "dialog";
 #define LOCK_WAIT_MS 2000
 
 typedef struct {
-    char     title[TEXT_MAX]; // shown as "<title> <prefix><seconds><suffix>"
+    char     title[TEXT_MAX]; // shown as "<title> <lead>(cancels in N s)", see ui_countdown_text
     char     prefix[TEXT_MAX];
-    char     suffix[TEXT_MAX];
+    char     suffix[TEXT_MAX]; // unused since #135 (kept for the struct)
     char     hint[TEXT_MAX];
+    char     confirm_label[TEXT_MAX / 4];
+    char     cancel_label[TEXT_MAX / 4];
     uint32_t seconds;
     bool     careful;
     shell_dialog_fn done;
@@ -51,9 +54,9 @@ static uint32_t now_ms(void) {
 }
 
 static void set_message(void) {
-    char text[4 * TEXT_MAX];
-    snprintf(text, sizeof(text), "%s %s%u%s", shown.title, shown.prefix,
-             (unsigned)dlg_countdown_left_s(&countdown, now_ms()), shown.suffix);
+    char text[2 * TEXT_MAX + 40];
+    ui_countdown_text(text, sizeof(text), shown.title, shown.prefix, shown.careful, shown.confirm_label,
+                      dlg_countdown_left_s(&countdown, now_ms()));
     if (strcmp(lv_label_get_text(message), text) != 0) {
         lv_label_set_text(message, text);
     }
@@ -157,7 +160,15 @@ static void build(void) {
     lv_obj_set_style_outline_width(backdrop, 0, LV_STATE_FOCUS_KEY);
     lv_obj_t *panel = build_panel(backdrop);
     message         = add_label(panel, "", THEME_TEXT);
-    add_label(panel, shown.hint, THEME_AMBER);
+    // R8: amber means attention, so only a careful dialog's hint has it; the rest is a dim key hint
+    char hint[2 * TEXT_MAX];
+    if (shown.hint[0]) {
+        snprintf(hint, sizeof(hint), "%s", shown.hint);
+    } else {
+        ui_confirm_hint(hint, sizeof(hint), shown.confirm_label[0] ? shown.confirm_label : "continue",
+                        shown.cancel_label[0] ? shown.cancel_label : NULL);
+    }
+    add_label(panel, hint, shown.careful ? THEME_AMBER : THEME_DIM);
     group = lv_group_create();
     lv_group_add_obj(group, backdrop);
     lv_obj_add_event_cb(backdrop, on_key, LV_EVENT_KEY, NULL);
@@ -203,18 +214,20 @@ static bool queue_apply(void) {
 }
 
 // A bounded copy into one TEXT_MAX field, NULL as "": no snprintf with interrupts off (#5)
-static void copy_text(char dst[TEXT_MAX], char const *src) {
-    size_t n = src ? strnlen(src, TEXT_MAX - 1) : 0;
+static void copy_text(char *dst, size_t max, char const *src) {
+    size_t n = src ? strnlen(src, max - 1) : 0;
     memcpy(dst, src ? src : "", n);
     dst[n] = '\0';
 }
 
 bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done) {
     portENTER_CRITICAL(&want_lock);
-    copy_text(want.title, d->title);
-    copy_text(want.prefix, d->count_prefix);
-    copy_text(want.suffix, d->count_suffix);
-    copy_text(want.hint, d->hint);
+    copy_text(want.title, TEXT_MAX, d->title);
+    copy_text(want.prefix, TEXT_MAX, d->count_prefix);
+    copy_text(want.suffix, TEXT_MAX, d->count_suffix);
+    copy_text(want.hint, TEXT_MAX, d->hint);
+    copy_text(want.confirm_label, sizeof(want.confirm_label), d->confirm_label);
+    copy_text(want.cancel_label, sizeof(want.cancel_label), d->cancel_label);
     want.seconds = d->seconds;
     want.careful = d->careful;
     want.done    = done;
