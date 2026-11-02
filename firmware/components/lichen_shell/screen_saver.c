@@ -1,7 +1,8 @@
 // The clock screensaver and the pocket lock (#75). Both are covers (shell_set_cover): normal screens shown in front of
 // the screen stack without being in it, so whatever opens below them stays put and a screenshot sees them.
-// The saver is screen_idle's dim stage: a seven-segment clock (saver_layout.c) with the date and the unread count on
-// black, drifting a little every minute; the status bar is hidden meanwhile. The lock engages with the saver or the
+// The saver is screen_idle's dim stage, in the style Settings > Display picks (#119): a Swiss railway style station
+// clock (saver_station.c, the default) or a seven-segment clock (saver_layout.c) drifting a little every minute; both
+// with the date and the unread count, the status bar hidden meanwhile. The lock engages with the saver or the
 // dark screen when Settings > Display has it on; its screen swallows every key (a raw listener) until Esc and
 // Backspace are held together (lock_combo.c). It is a pocket lock, not security: no PIN, and an update, power off or a
 // battery warning lifts it. Toasts still show over both (top layer); the shape keys do nothing while locked.
@@ -16,6 +17,7 @@
 #include "lock_combo.h"
 #include "raw_keys.h"
 #include "saver_layout.h"
+#include "saver_station.h"
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "theme.h"
@@ -60,6 +62,10 @@ static lv_obj_t    *lock_bar;
 static lv_timer_t  *lock_timer;
 static lock_combo_t combo;
 static atomic_bool  locked; // read from any task
+static int          saver_style;     // the style on screen
+static int          saver_asked;     // the style it was built for (differs when the dial had no PSRAM)
+static atomic_int   style_setting;   // Settings > Display (screen_saver_reload)
+static atomic_int   style_test = -1; // "fw screensaver test <style>" until the saver goes; -1: none
 
 static lv_obj_t *add_rect(lv_obj_t *parent, seg_rect_t r) {
     lv_obj_t *o = lv_obj_create(parent);
@@ -113,16 +119,11 @@ static void clock_update(big_clock_t *c) {
     time_t    now = time(NULL);
     struct tm local;
     char      digits[8] = "----";
-    char      date[48]  = "Clock not set";
-    uint32_t  color     = THEME_DIM;
-    if (clock_is_set() && localtime_r(&now, &local)) {
-        bool approx = clock_is_approximate();
+    char      date[48];
+    uint32_t  color = THEME_DIM;
+    if (saver_date_text(date, sizeof(date)) && localtime_r(&now, &local)) {
         snprintf(digits, sizeof(digits), "%02d%02d", local.tm_hour % 100, local.tm_min % 100);
-        char day[16], month[16];
-        strftime(day, sizeof(day), "%A", &local);
-        strftime(month, sizeof(month), "%B", &local);
-        snprintf(date, sizeof(date), "%s%s %d %s", approx ? "~ " : "", day, local.tm_mday, month);
-        color = approx ? THEME_AMBER : THEME_TEAL;
+        color = clock_is_approximate() ? THEME_AMBER : THEME_TEAL;
     }
     char key[sizeof(c->shown)];
     snprintf(key, sizeof(key), "%s%c", digits, color == THEME_TEAL ? 't' : color == THEME_AMBER ? 'a' : 'd');
@@ -142,12 +143,30 @@ static void clock_update(big_clock_t *c) {
     if (strcmp(lv_label_get_text(c->date), date) != 0) {
         lv_label_set_text(c->date, date);
     }
+    saver_notes_update(c->notes);
+}
+
+bool saver_date_text(char *out, size_t cap) {
+    time_t    now = time(NULL);
+    struct tm local;
+    if (!clock_is_set() || !localtime_r(&now, &local)) {
+        snprintf(out, cap, "Clock not set");
+        return false;
+    }
+    char day[16], month[16];
+    strftime(day, sizeof(day), "%A", &local);
+    strftime(month, sizeof(month), "%B", &local);
+    snprintf(out, cap, "%s%s %d %s", clock_is_approximate() ? "~ " : "", day, local.tm_mday, month);
+    return true;
+}
+
+void saver_notes_update(lv_obj_t *notes) {
     size_t unread = lichen_notify_unread(NULL);
-    char   notes[40];
-    snprintf(notes, sizeof(notes), "%u unread notification%s", (unsigned)unread, unread == 1 ? "" : "s");
-    lv_obj_set_hidden(c->notes, unread == 0);
-    if (unread && strcmp(lv_label_get_text(c->notes), notes) != 0) {
-        lv_label_set_text(c->notes, notes);
+    char   text[40];
+    snprintf(text, sizeof(text), "%u unread notification%s", (unsigned)unread, unread == 1 ? "" : "s");
+    lv_obj_set_hidden(notes, unread == 0);
+    if (unread && strcmp(lv_label_get_text(notes), text) != 0) {
+        lv_label_set_text(notes, text);
     }
 }
 
@@ -178,12 +197,24 @@ static void saver_tick(lv_timer_t *t) {
     saver_place();
 }
 
+// The style to show: a console test's, else the setting
+static int saver_style_wanted(void) {
+    int test = atomic_load(&style_test);
+    return test >= 0 ? test : atomic_load(&style_setting);
+}
+
 static void saver_build(void) {
     saver_scr = lv_obj_create(NULL);
     lv_obj_remove_style_all(saver_scr);
     lv_obj_set_style_bg_color(saver_scr, lv_color_black(), 0); // as little light as the panel can give
     lv_obj_set_style_bg_opa(saver_scr, LV_OPA_COVER, 0);
     lv_obj_set_scrollbar_mode(saver_scr, LV_SCROLLBAR_MODE_OFF);
+    saver_asked = saver_style_wanted();
+    saver_style = saver_asked;
+    if (saver_style == SAVER_STYLE_STATION && saver_station_create(saver_scr)) {
+        return; // its own timer
+    }
+    saver_style = SAVER_STYLE_DIGITAL;
     clock_create(&saver_clock, saver_scr, SAVER_SIZE);
     lv_obj_set_style_text_color(saver_clock.date, lv_color_hex(THEME_DIM), 0);
     clock_update(&saver_clock);
@@ -192,16 +223,7 @@ static void saver_build(void) {
     saver_timer = lv_timer_create(saver_tick, SAVER_TICK_MS, NULL);
 }
 
-void screen_saver_show(bool on) {
-    if (on == (saver_scr != NULL)) {
-        return;
-    }
-    if (on) {
-        saver_build();
-        cover_update();
-        ESP_LOGI(TAG, "screensaver on");
-        return;
-    }
+static void saver_close(void) {
     lv_obj_t *old = saver_scr;
     saver_scr     = NULL;
     cover_update(); // the screen below is showing before the saver goes
@@ -210,7 +232,33 @@ void screen_saver_show(bool on) {
         saver_timer = NULL;
     }
     lv_obj_delete(old);
+    if (saver_style == SAVER_STYLE_STATION) {
+        saver_station_delete();
+    }
+}
+
+void screen_saver_show(bool on) {
+    if (on && saver_scr && saver_style_wanted() != saver_asked) {
+        saver_close(); // another style asked for while it shows: rebuilt below, before anything is drawn
+        ESP_LOGI(TAG, "screensaver style changed");
+    }
+    if (on == (saver_scr != NULL)) {
+        return;
+    }
+    if (on) {
+        saver_build();
+        cover_update();
+        ESP_LOGI(TAG, "screensaver on (%s)", saver_style == SAVER_STYLE_STATION ? "station clock" : "digital");
+        return;
+    }
+    saver_close();
+    atomic_store(&style_test, -1); // a test's style lasts until its key
     ESP_LOGI(TAG, "screensaver off");
+}
+
+void screen_saver_reload(void) {
+    bool digital = settings_get_u8(IDLE_SAVER_STYLE_KEY, SAVER_STYLE_STATION) == SAVER_STYLE_DIGITAL;
+    atomic_store(&style_setting, digital ? SAVER_STYLE_DIGITAL : SAVER_STYLE_STATION);
 }
 
 // Pocket lock
@@ -347,11 +395,37 @@ static bool set_setting(char const *key, bool on) {
     return true;
 }
 
-// "fw screensaver [on|off|test]"
+#define SAVER_USAGE "screensaver [on|off|test [analog|digital]]"
+
+static char const *style_name(int style) {
+    return style == SAVER_STYLE_DIGITAL ? "digital" : "analog (station clock)";
+}
+
+// "fw screensaver test [analog|digital]": the saver now, in the setting's style or the one named, until the next key
+static void saver_test(char const *style) {
+    int test = -1;
+    if (strcmp(style, "analog") == 0) {
+        test = SAVER_STYLE_STATION;
+    } else if (strcmp(style, "digital") == 0) {
+        test = SAVER_STYLE_DIGITAL;
+    } else if (*style) {
+        console_reply(SAVER_USAGE);
+        return;
+    }
+    atomic_store(&style_test, test);
+    screen_idle_force_saver();
+    console_reply("screensaver (%s) shown until the next key (needs home on screen, nothing holding it bright)",
+                  style_name(test >= 0 ? test : atomic_load(&style_setting)));
+}
+
+// "fw screensaver [on|off|test [analog|digital]]"
 static void cmd_saver(char const *args) {
-    if (strcmp(args, "test") == 0) {
-        screen_idle_force_saver();
-        console_reply("screensaver shown until the next key (needs home on screen, nothing holding it bright)");
+    if (strncmp(args, "test", 4) == 0 && (args[4] == '\0' || args[4] == ' ')) {
+        char const *style = args + 4;
+        while (*style == ' ') {
+            style++;
+        }
+        saver_test(style);
         return;
     }
     if (strcmp(args, "on") == 0 || strcmp(args, "off") == 0) {
@@ -359,11 +433,11 @@ static void cmd_saver(char const *args) {
             return;
         }
     } else if (*args) {
-        console_reply("screensaver [on|off|test]");
+        console_reply(SAVER_USAGE);
         return;
     }
-    console_reply("screensaver %s (the dim stage), screen %s", setting(IDLE_SAVER_KEY, true) ? "on" : "off",
-                  screen_idle_stage_name());
+    console_reply("screensaver %s (the dim stage), %s, screen %s", setting(IDLE_SAVER_KEY, true) ? "on" : "off",
+                  style_name(atomic_load(&style_setting)), screen_idle_stage_name());
 }
 
 // "fw lock [on|off|now|unlock]"
@@ -401,6 +475,7 @@ static void cmd_lock(char const *args) {
 }
 
 void screen_saver_init(void) {
-    console_register("screensaver", "screensaver [on|off|test] (clock screensaver: setting, or show it now)", cmd_saver);
+    screen_saver_reload();
+    console_register("screensaver", SAVER_USAGE " (clock screensaver: setting, or show it now)", cmd_saver);
     console_register("lock", "lock [on|off|now|unlock] (pocket lock: setting, lock at once, lift it)", cmd_lock);
 }

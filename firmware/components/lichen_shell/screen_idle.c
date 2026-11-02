@@ -60,6 +60,7 @@ void screen_idle_reload(void) {
                                          settings_get_u8("idle_off", IDLE_OFF_DEFAULT_10S));
     bool saver = settings_get_u8(IDLE_SAVER_KEY, 1) != 0;
     bool lock_ = settings_get_u8(IDLE_LOCK_KEY, 0) != 0;
+    screen_saver_reload();
     portENTER_CRITICAL(&lock);
     times       = t;
     saver_on    = saver;

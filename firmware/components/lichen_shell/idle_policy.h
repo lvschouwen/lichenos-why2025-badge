@@ -21,6 +21,8 @@ typedef struct {
 // The screensaver and pocket lock switches (#75), u8 0/1 in the same store; the saver is on by default, the lock off
 #define IDLE_SAVER_KEY "saver"
 #define IDLE_LOCK_KEY  "lock"
+// The saver's style (#119), u8: saver_style_t in saver_station.h, the station clock by default
+#define IDLE_SAVER_STYLE_KEY "saver_style"
 
 // What keeps the screen lit regardless of the idle clock. busy (an update running, the Bench app measuring): bright, and
 // the clock starts again, so the timeout counts in full from when it ends. setup (the first-run screens): bright for at

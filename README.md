@@ -125,7 +125,7 @@ fonts; `fw assets` shows their state.
   (a saved network not joined, the radio down, MeshCore wanted but not running), amber while joining or starting, dim
   when switched off (no network saved, MeshCore stopped by choice).
 - **Settings:** Wi-Fi (scan, join; a new network is tried first and the badge goes back to the old one if it doesn't
-  connect), Display (brightness, screen timeout: dim after 1 min, off after 5 min; a clock screensaver while dimmed, on by default; an optional pocket lock, unlocked by holding Esc + Backspace, no PIN; home layout), Time (set date & time by hand, time zone with the Netherlands as the
+  connect), Display (brightness, screen timeout: dim after 1 min, off after 5 min; a clock screensaver while dimmed, on by default: a Swiss railway style station clock or a seven-segment one; an optional pocket lock, unlocked by holding Esc + Backspace, no PIN; home layout), Time (set date & time by hand, time zone with the Netherlands as the
   default, where the time came from), About Lichen, and one page per app that has settings. SNTP still wins over a
   time set by hand; `fw clock set <ISO8601>` and `fw clock sync` do the same from the console.
 - **Power:** a home tile (also Settings > Power) with Restart and Power off, each confirmed with Enter. Both save
@@ -189,7 +189,7 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
 
 - Wi-Fi and device: `fw wifi [scan | reconnect | <ssid> <password> | --clear]`, `fw net`, `fw token`, `fw mem` (heaps,
   task stacks, per-task core and CPU %), `fw slot [other]`, `fw assets`, `fw reboot`, `fw bl <display> <keyboard>`,
-  `fw idle [test <s>]` (screen timeout; `test` fakes s seconds without a key), `fw screensaver [on|off|test]`, `fw lock [on|off|now|unlock]` (#75).
+  `fw idle [test <s>]` (screen timeout; `test` fakes s seconds without a key), `fw screensaver [on|off|test [analog|digital]]`, `fw lock [on|off|now|unlock]` (#75; the station clock style #119).
 - Sensors: `fw sensors` (BMI270 accel and gyro, BME690 temperature, humidity, pressure and gas, P4 die temperature),
   `fw sensors raw` (chip ids, status registers, counters), `fw sensors start|stop`, `fw i2c scan`. The BME690's gas
   heater (300 C for 100 ms each second) and the badge's own warmth make its temperature read somewhat above the room

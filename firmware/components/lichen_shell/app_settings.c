@@ -1,5 +1,5 @@
 // Settings (#66, settings.html top row): Wi-Fi, Display (brightness, screen timeout #43, screensaver and pocket lock
-// #75, home layout), Time (#64: set
+// #75 and its style #119, home layout), Time (#64: set
 // date & time, time zone), SD card (#99, sd_screen.c), Notifications (#62, notify_centre.c), Factory reset (#66, factory_screen.c), About Lichen, then one entry per app that has a settings page.
 // Every screen is a menu.h list; Esc is the shell's.
 #include "app_icons.h"
@@ -15,6 +15,7 @@
 #include "menu.h"
 #include "ota_autooff.h"
 #include "ota_server.h"
+#include "saver_station.h"
 #include "sdcard.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -149,16 +150,27 @@ static void step_idle(void *arg) {
 }
 
 // The clock screensaver (the dim stage) and the pocket lock (#75): Enter switches; saved at once
-static lv_obj_t *saver_row, *lock_row;
+static lv_obj_t *saver_row, *style_row, *lock_row;
 
 static void switch_rows_refresh(void) {
     menu_set_value(saver_row, settings_get_u8(IDLE_SAVER_KEY, 1) ? "On" : "Off");
+    bool digital = settings_get_u8(IDLE_SAVER_STYLE_KEY, SAVER_STYLE_STATION) == SAVER_STYLE_DIGITAL;
+    menu_set_value(style_row, digital ? "Digital" : "Station clock");
     menu_set_value(lock_row, settings_get_u8(IDLE_LOCK_KEY, 0) ? "On" : "Off");
 }
 
 static void toggle_switch(void *arg) {
     char const *key = arg ? IDLE_LOCK_KEY : IDLE_SAVER_KEY;
     settings_set_u8(key, !settings_get_u8(key, arg ? 0 : 1));
+    screen_idle_reload();
+    switch_rows_refresh();
+}
+
+// The screensaver's look (#119): the station clock or the seven-segment one
+static void toggle_style(void *arg) {
+    (void)arg;
+    bool digital = settings_get_u8(IDLE_SAVER_STYLE_KEY, SAVER_STYLE_STATION) == SAVER_STYLE_DIGITAL;
+    settings_set_u8(IDLE_SAVER_STYLE_KEY, digital ? SAVER_STYLE_STATION : SAVER_STYLE_DIGITAL);
     screen_idle_reload();
     switch_rows_refresh();
 }
@@ -179,6 +191,7 @@ static void on_display_delete(lv_event_t *e) {
     dim_row    = NULL;
     off_row    = NULL;
     saver_row  = NULL;
+    style_row  = NULL;
     lock_row   = NULL;
     if (layout_changed) {
         layout_changed = false;
@@ -199,6 +212,7 @@ static lv_obj_t *build_display(void) {
     off_row    = menu_add(menu, "Screen off after", "", step_idle, (void *)1);
     idle_rows_refresh();
     saver_row = menu_add(menu, "Clock screensaver", "", toggle_switch, NULL);
+    style_row = menu_add(menu, "Screensaver style", "", toggle_style, NULL);
     lock_row  = menu_add(menu, "Pocket lock", "", toggle_switch, (void *)1);
     menu_note(menu, "The screensaver shows when the screen dims. The pocket lock comes on with it or when the screen goes "
                     "off; hold " LOCK_COMBO_TEXT " to unlock. It stops stray key presses, it is not security: no PIN.");

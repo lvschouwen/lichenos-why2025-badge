@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 // Lichen's own settings in NVS namespace badge_fw (#66): home_layout (u8), tz (str), setup_done (u8), idle_dim and
-// idle_off (u8, tens of seconds, #43), saver and lock (u8 0/1, #75). Not for apps:
+// idle_off (u8, tens of seconds, #43), saver and lock (u8 0/1, #75), saver_style (u8, #119). Not for apps:
 // they have lichen_settings.h (#84). A missing key or
 // an unreadable NVS gives the default. Keys are at most 15 characters (NVS limit).
 // A factory reset (#66) erases every badge_fw key except the badge's own record listed in lichen_boot/factory_plan.c:

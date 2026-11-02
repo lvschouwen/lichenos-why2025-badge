@@ -84,6 +84,7 @@ void shell_set_cover(lv_obj_t *screen, bool status_bar_shown);
 // screen_saver.c (#75): the clock screensaver and the pocket lock, both covers. LVGL context unless noted.
 void screen_saver_init(void);          // registers "fw screensaver" and "fw lock"; from shell_start
 void screen_saver_show(bool on);       // screen_idle's tick: the idle stage wants the saver (or not)
+void screen_saver_reload(void);        // the saver's style setting changed (#119); any task, from screen_idle_reload
 void screen_lock_engage(void);         // the lock screen until the combo; nothing when already locked
 void screen_lock_release(void);        // unlocks (the combo, an update, power off, a warning that must show)
 void screen_lock_probe_key(uint32_t lv_key); // "fw keys send" while locked: only Esc/Backspace reach the combo (#112)

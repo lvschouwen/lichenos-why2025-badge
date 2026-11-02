@@ -1,0 +1,21 @@
+#pragma once
+
+#include "lvgl.h"
+
+#include <stdbool.h>
+#include <stddef.h>
+
+// The screensaver's styles (#119), u8 in settings_store under IDLE_SAVER_STYLE_KEY (idle_policy.h)
+typedef enum { SAVER_STYLE_STATION = 0, SAVER_STYLE_DIGITAL = 1 } saver_style_t;
+
+// The Swiss railway style station clock (saver_station.c, #119), built on the saver screen; LVGL task. false: no PSRAM
+// for the dial (nothing was added; the caller shows the seven-segment clock instead).
+bool saver_station_create(lv_obj_t *screen);
+// After the saver screen was deleted: stops the sweep and frees the dial
+void saver_station_delete(void);
+
+// screen_saver.c, for both styles: the date line ("~ " first when the time is unverified); false and "Clock not set"
+// when the clock is not set
+bool saver_date_text(char *out, size_t cap);
+// The unread count under the clock, hidden at none
+void saver_notes_update(lv_obj_t *notes);
