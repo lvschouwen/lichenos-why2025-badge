@@ -187,7 +187,19 @@ static void test_path_parse(void) {
     CHECK(mesh_path_err_text(MESH_PATH_ERR_LEN)[0] != 0);
 }
 
+// #130: routes of another hash size are forgotten when the size changes
+static void test_stale(void) {
+    CHECK(!mesh_path_stale(MESH_PATH_FLOOD, 2));
+    CHECK(mesh_path_stale(3, 2));            // 3 hops of 1 B
+    CHECK(mesh_path_stale(0, 2));            // direct, 1 B packing
+    CHECK(!mesh_path_stale(0x40 | 2, 2));    // 2 hops of 2 B
+    CHECK(!mesh_path_stale(0x40, 2));        // direct packed as 2 B
+    CHECK(mesh_path_stale(0x40 | 2, 1) && mesh_path_stale(0x40 | 2, 3));
+    CHECK(!mesh_path_stale(0x80 | 1, 3));
+}
+
 int main(void) {
+    test_stale();
     test_path_parse();
     test_hops();
     test_hex_and_route();

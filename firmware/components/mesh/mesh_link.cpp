@@ -172,6 +172,26 @@ BadgeMesh::ContactResult BadgeMesh::contactAction(uint8_t const prefix[MF_PREFIX
     return n && pipe_.queue_cmd(f, n) ? CONTACT_QUEUED : CONTACT_QUEUE_FULL;
 }
 
+// The live entry for a copy from the iterator when its route is stale
+static ContactInfo *mesh_contact_is_stale_ptr(BadgeMesh *m, ContactInfo const &copy, uint8_t hash_size) {
+    return mesh_path_stale(copy.out_path_len, hash_size) ? m->lookupContactByPubKey(copy.id.pub_key, PUB_KEY_SIZE)
+                                                         : nullptr;
+}
+
+int BadgeMesh::forgetStaleRoutes(uint8_t hash_size) {
+    int          n = 0;
+    ContactInfo  copy;
+    ContactsIterator it = startContactsIterator();
+    while (it.hasNext(this, copy)) {
+        ContactInfo *c = mesh_contact_is_stale_ptr(this, copy, hash_size);
+        if (c) {
+            resetPathTo(*c);
+            n++;
+        }
+    }
+    return n;
+}
+
 // A manual path (#130): set at once, then the whole contact goes to MyMesh as CMD_ADD_UPDATE_CONTACT so it saves it (the
 // same way as store_discovered_path). lastmod stays: setting a path is not hearing the contact.
 BadgeMesh::ContactResult BadgeMesh::contactSetPath(uint8_t const prefix[MF_PREFIX], uint8_t path_len,

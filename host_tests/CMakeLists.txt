@@ -806,6 +806,7 @@ add_executable(companion_test ${CMAKE_CURRENT_SOURCE_DIR}/companion_test.cpp ${L
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_trace.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_remote.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_rset.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_contact_fmt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_link.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_ident.c)
 target_link_libraries(companion_test PRIVATE meshcore_companion_host)

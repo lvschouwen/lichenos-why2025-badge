@@ -200,6 +200,10 @@ size_t mesh_contact_lines(mesh_contact_detail_t const *d, mesh_contact_line_t *o
     return n;
 }
 
+bool mesh_path_stale(uint8_t path_len, uint8_t hash_size) {
+    return path_len != MESH_PATH_FLOOD && (uint8_t)((path_len >> 6) + 1) != hash_size;
+}
+
 // ---- a manual path (#130) --------------------------------------------------------------------------------------------
 
 static int hex_val(char c) {

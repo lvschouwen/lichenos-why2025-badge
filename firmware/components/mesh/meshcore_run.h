@@ -42,6 +42,9 @@ bool meshcore_pw_forget(uint8_t const prefix[6]);
 // The one-shot move to 2 B path hashes (#129): done already / now done, in the app's settings
 bool meshcore_pathhash_migrated(void);
 bool meshcore_pathhash_migrated_set(void);
+// One-time (#130): the stored routes of another hash size than the setting were forgotten
+bool meshcore_routes_forgotten(void);
+bool meshcore_routes_forgotten_set(void);
 
 bool meshcore_autostart(void);
 bool meshcore_autostart_set(bool on);

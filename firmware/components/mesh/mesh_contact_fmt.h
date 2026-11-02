@@ -22,6 +22,10 @@ mesh_path_t mesh_path_decode(uint8_t path_len);
 // "flood", "direct", "1 hop", "N hops"
 void        mesh_format_hops(uint8_t path_len, char *out, size_t cap);
 
+// Whether a stored route is to be forgotten after the path hash size became hash_size (#130): any known route (even a
+// 0-hop direct one) packed with another size. Flood (unknown) has nothing to forget.
+bool mesh_path_stale(uint8_t path_len, uint8_t hash_size);
+
 // A manual path (#130): "854e,a1b2" = hops in hex, each exactly hash_size bytes (hash_size*2 digits). On success *path_len
 // is the packed out_path_len (count + size) and the bytes are in path[]; otherwise one of the errors below.
 typedef enum {

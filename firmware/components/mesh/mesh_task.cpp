@@ -990,13 +990,18 @@ extern "C" char const *mesh_set_path_hash(uint8_t size) {
         return why;
     }
     why = mesh_prefs_set_path_hash(node->getNodePrefs(), size);
+    int forgot = 0;
     if (!why) {
         node->savePrefs();
         settings_from_node(node);
+        forgot = node->forgetStaleRoutes(size); // routes of the old size would be read wrong by the repeaters
+        if (forgot) {
+            store.saveContacts(node, keep_contact);
+        }
     }
     mesh_unlock();
     if (!why) {
-        ESP_LOGI(TAG, "path hash size set: %u B", size);
+        ESP_LOGI(TAG, "path hash size set: %u B (forgot %d stored routes of another size)", size, forgot);
     }
     return why;
 }
@@ -1013,6 +1018,22 @@ static void migrate_path_hash(MyMesh *n) {
     }
     if (mark && !meshcore_pathhash_migrated_set()) {
         ESP_LOGW(TAG, "path hash migration flag not saved: it runs again next boot");
+    }
+}
+
+// Once (#130): the routes learned with 1 B hashes before the 2 B default (#129) are forgotten, so the next DM floods and
+// learns a route of the current size. Before the pipe and the task run: nothing can transmit meanwhile.
+static void forget_stale_routes_once(BadgeMesh *n) {
+    if (meshcore_routes_forgotten()) {
+        return;
+    }
+    int forgot = n->forgetStaleRoutes((uint8_t)(n->getNodePrefs()->path_hash_mode + 1));
+    if (forgot) {
+        store.saveContacts(n, keep_contact);
+    }
+    ESP_LOGI(TAG, "forgot %d stored routes with other hash sizes", forgot);
+    if (!meshcore_routes_forgotten_set()) {
+        ESP_LOGW(TAG, "route cleanup flag not saved: it runs again next boot");
     }
 }
 
@@ -3081,6 +3102,7 @@ static bool start_locked(char const *files_dir) {
     ident_verify(n); // before anything can transmit: the task does not exist yet
     apply_boot_radio(n, first_boot);
     migrate_path_hash(n);
+    forget_stale_routes_once(n);
     // The history from the SD card (#48), encrypted with a key from the identity begin() just loaded (#98), before the
     // mesh task runs: the replayed messages are older than anything MeshCore adds, which it does only in its loop
     uint8_t prv[PRV_KEY_SIZE];

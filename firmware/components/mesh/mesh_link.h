@@ -129,6 +129,8 @@ public:
     // after shows them.
     enum ContactResult { CONTACT_QUEUED, CONTACT_GONE, CONTACT_QUEUE_FULL };
     ContactResult contactAction(uint8_t const prefix[MF_PREFIX], mesh_contact_op_t op);
+    // Resets every stored route whose hash size is not hash_size (#130); the count. The caller saves the contacts.
+    int           forgetStaleRoutes(uint8_t hash_size);
     ContactResult contactSetPath(uint8_t const prefix[MF_PREFIX], uint8_t path_len, uint8_t const *path);
     // MeshCore stops on request (#103), under the mesh lock: the packets queued for the radio are dropped, so none
     // goes out late after the next start. Returns how many.
