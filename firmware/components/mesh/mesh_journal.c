@@ -675,7 +675,7 @@ void mesh_journal_stop_locked(bool final) {
     }
 }
 
-// ---- read check (#120): "fw mesh hist scan [n] [bad|bad1]" ----------------------------------------------------------
+// ---- read check (#120): "fw mesh hist scan [n] [bad|bad1] [int]" ----------------------------------------------------------
 // Read-only: n passes over a journal file, each one inside its own card batch. A pass reads the file raw and compares
 // it byte for byte with the first pass, then runs the boot's decode scan over it. A difference between passes, or a bad
 // spot that comes and goes, is a read error; a bad spot on every pass at the same offset is in the file. Nothing is
@@ -687,6 +687,7 @@ void mesh_journal_stop_locked(bool final) {
 typedef struct {
     char const *path;
     int         passes;
+    bool        internal; // the raw copies in internal RAM instead of PSRAM: tells the PSRAM path from the card
 } scan_job_t;
 
 static atomic_bool scan_running;
@@ -729,17 +730,24 @@ static bool scan_pass(scan_job_t const *job, work_t *w, uint8_t *cur, size_t cap
 }
 
 static void report_diff(int pass, uint8_t const *ref, size_t ref_n, uint8_t const *cur, size_t n) {
-    size_t diffs = 0, first = 0;
+    char   list[96] = "";
+    size_t diffs = 0, used = 0;
     for (size_t i = 0; i < n && i < ref_n; i++) {
-        if (ref[i] != cur[i] && diffs++ == 0) {
-            first = i;
+        if (ref[i] != cur[i] && diffs++ < 4 && used < sizeof(list)) { // offset:xor of the first four
+            used += (size_t)snprintf(list + used, sizeof(list) - used, " %u:%02x", (unsigned)i, ref[i] ^ cur[i]);
         }
     }
     if (diffs || n != ref_n) {
-        console_reply("scan pass %d: RAW DIFFERS from pass 1: %u byte(s), first at %u (%02x vs %02x), size %u vs %u",
-                      pass, (unsigned)diffs, (unsigned)first, diffs ? cur[first] : 0, diffs ? ref[first] : 0,
-                      (unsigned)n, (unsigned)ref_n);
+        console_reply("scan pass %d: RAW DIFFERS from pass 1: %u byte(s) (offset:xor%s), size %u vs %u", pass,
+                      (unsigned)diffs, list, (unsigned)n, (unsigned)ref_n);
     }
+}
+
+static uint8_t *scan_buf(size_t bytes, bool internal) {
+    if (internal && bytes > 64 * 1024) {
+        return NULL; // internal RAM is scarce: the check is for small journals
+    }
+    return internal ? heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) : psram(bytes);
 }
 
 static void scan_task_fn(void *arg) {
@@ -750,7 +758,8 @@ static void scan_task_fn(void *arg) {
     uint8_t    *ref = NULL, *cur = NULL;
     if (stat(job.path, &st) != 0 || st.st_size <= 0 || st.st_size > SCAN_MAX_BYTES) {
         console_reply("scan: %s missing, empty or over %d bytes", job.path, SCAN_MAX_BYTES);
-    } else if (!work_alloc(&w) || !(ref = psram(st.st_size)) || !(cur = psram(st.st_size))) {
+    } else if (!work_alloc(&w) || !(ref = scan_buf(st.st_size, job.internal)) ||
+               !(cur = scan_buf(st.st_size, job.internal))) {
         console_reply("scan: no memory");
     } else {
         size_t ref_n = 0, n = 0;
@@ -773,8 +782,9 @@ static void scan_task_fn(void *arg) {
                               s.torn ? ", torn" : "", (unsigned long)s.auth_failures);
             }
         }
-        console_reply("scan %s: %d pass(es), %ld bytes, %d with bad spots, %d with raw differences", job.path,
-                      job.passes, (long)st.st_size, bad_passes, diff_passes);
+        console_reply("scan %s (%s): %d pass(es), %ld bytes, %d with bad spots, %d with raw differences", job.path,
+                      job.internal ? "raw copies in internal RAM" : "raw copies in PSRAM", job.passes,
+                      (long)st.st_size, bad_passes, diff_passes);
     }
     free(ref);
     free(cur);
@@ -784,17 +794,23 @@ static void scan_task_fn(void *arg) {
 }
 
 static void scan_start(char const *args) {
-    int         passes = 10;
-    char const *path   = LOG_PATH;
-    char        which[8] = "";
-    sscanf(args, "%d %7s", &passes, which);
-    if (!*which) {
-        sscanf(args, "%7s", which); // "scan bad" without a count
-        if (strcmp(which, "bad") != 0 && strcmp(which, "bad1") != 0) {
-            which[0] = 0;
+    int  passes = 10;
+    bool internal = false;
+    char const *path = LOG_PATH;
+    char        tok[12];
+    int         used = 0;
+    while (sscanf(args, "%11s%n", tok, &used) == 1) { // [n] [bad|bad1] [int], any order
+        args += used;
+        if (strcmp(tok, "bad") == 0) {
+            path = BAD_PATH;
+        } else if (strcmp(tok, "bad1") == 0) {
+            path = BAD1_PATH;
+        } else if (strcmp(tok, "int") == 0) {
+            internal = true;
+        } else {
+            passes = atoi(tok);
         }
     }
-    path   = strcmp(which, "bad") == 0 ? BAD_PATH : strcmp(which, "bad1") == 0 ? BAD1_PATH : LOG_PATH;
     passes = passes < 1 ? 1 : passes > 100 ? 100 : passes;
     if (!on) {
         console_reply("scan: history is off (%s): no keys to read with", why_off ? why_off : "?");
@@ -807,8 +823,9 @@ static void scan_start(char const *args) {
     }
     scan_job_t *job = malloc(sizeof(*job));
     if (job) {
-        job->path   = path;
-        job->passes = passes;
+        job->path     = path;
+        job->passes   = passes;
+        job->internal = internal;
     }
     if (!job || xTaskCreatePinnedToCore(scan_task_fn, "histscan", SCAN_STACK, job, 3, NULL, 0) != pdPASS) {
         free(job);
@@ -836,7 +853,7 @@ void mesh_journal_console(char const *args) {
         return;
     }
     if (*args) {
-        console_reply("mesh hist | mesh hist compact | mesh hist scan [n] [bad|bad1]");
+        console_reply("mesh hist | mesh hist compact | mesh hist scan [n] [bad|bad1] [int]");
         return;
     }
     size_t   pending = 0, held = 0;
