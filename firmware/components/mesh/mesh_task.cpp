@@ -2669,6 +2669,9 @@ static bool start_locked(char const *files_dir) {
     __atomic_store_n(&node_id_known, true, __ATOMIC_RELEASE);
 
     if (!task_create()) {
+        // As resume_locked: the claim radio_driver.begin() took is released, so another owner (or the next start,
+        // which resumes the node published above) can have the radio
+        lora_radio.end();
         return false;
     }
     ESP_LOGW(TAG, "MeshCore companion up: %d contacts, BadgeMesh %u bytes in PSRAM, identity %s", n->getNumContacts(),
