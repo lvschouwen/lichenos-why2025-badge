@@ -8,6 +8,7 @@
 // pattern (psram_dma.c) and damage is listed as offset:xor, the offset mod 1024 and a bit histogram. The CPU canaries
 // and the boot check of psram_guard never saw the bit 3 flips of #120 because they only use the cache path.
 // Runs on the console task; needs 3 x 1 MB of PSRAM and 32 KB of internal DMA RAM, all freed afterwards.
+// "fw psram dma sweep [sector]" runs the write/read legs and the SD leg over every 1 MB of the largest free PSRAM block.
 void psram_dma_cmd(char const *args);
 
 // The SD leg (#120 flipped on the SDMMC -> PSRAM path; the AXI-GDMA legs alone did not reproduce it at 120 MHz):

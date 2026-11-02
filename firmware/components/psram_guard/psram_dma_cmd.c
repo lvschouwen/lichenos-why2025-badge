@@ -23,7 +23,9 @@
 #define DMA_WAIT_MS   2000
 #define FLAGS_FLUSH   (ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE)
 #define SD_SECTOR     512
-#define SD_PIECE      4096             // FatFs reads 4 KB sectors (CONFIG_FATFS_SECTOR_4096): the transfer shape of #120
+#define SD_PIECE      CHUNK_BYTES      // one card transfer of 32 KB (64 sectors): FatFs reads a whole cluster at once when the
+                                       // destination is sector-aligned, so the SDMMC IDMAC runs several 4 KB descriptors in one
+                                       // go; every #120 flip sat beyond the first 4 KB of the file, none inside the first descriptor
 #define SD_WAIT_MS    2000
 
 typedef struct {
@@ -74,10 +76,11 @@ static bool copy(run_t *r, void *dst, void const *src, size_t len) {
 }
 
 static void show(run_t *r, int leg, psram_dma_report_t const *rep) {
-    char text[112];
+    char  text[112];
+    void *at = leg == 0 ? (void *)r->src : leg == 1 ? (void *)r->dst : leg == 2 ? (void *)r->dst2 : (void *)r->dst;
     psram_dma_hist_text(rep, text, sizeof(text));
-    console_reply("psram dma %s %s seed %08x: %u bad bytes, %s", legs[leg], psram_dma_pattern_name(r->pat), (unsigned)r->seed,
-                  (unsigned)rep->bad_bytes, text);
+    console_reply("psram dma %s %s seed %08x at %p: %u bad bytes, %s", legs[leg], psram_dma_pattern_name(r->pat),
+                  (unsigned)r->seed, at, (unsigned)rep->bad_bytes, text);
     for (size_t i = 0; i < rep->kept; i++) {
         psram_dma_flip_text(&rep->flips[i], text, sizeof(text));
         console_reply("psram dma   %s", text);
@@ -157,7 +160,7 @@ static void check_src(run_t *r) {
     }
 }
 
-// Leg 3: the SDMMC controller's DMA reads 1 MB of the card into PSRAM in 4 KB pieces, and the same sectors into
+// Leg 3: the SDMMC controller's DMA reads 1 MB of the card into PSRAM in 32 KB transfers, and the same sectors into
 // internal RAM as the reference (a fixed-spot flip would show in two PSRAM reads alike). Read-only.
 static void leg_sd_to_psram(run_t *r) {
     if (!s_sd.read || !s_sd.begin(SD_WAIT_MS)) {
@@ -240,16 +243,69 @@ static unsigned mbps(int64_t us, unsigned rounds, unsigned mb_per_round) {
     return us > 0 ? (unsigned)((uint64_t)rounds * mb_per_round * BIG_BYTES / (uint64_t)us) : 0; // MB/s = bytes/us
 }
 
+// "psram dma sweep [sector]": the same legs over every 1 MB window of the largest free PSRAM block, so an address-
+// dependent fault (#120's two files flipped at different offsets mod 1024: a fixed place in the RAM, not in the file)
+// is met wherever it sits. Per window: DMA write from internal RAM, DMA read back, CPU read-back; then the SD leg
+// window by window, reading on through the card from sector.
+static void sweep_windows(run_t *r, uint8_t *block, size_t windows) {
+    for (int p = 0; p < PSRAM_DMA_PATTERNS; p++) {
+        r->pat  = (psram_dma_pattern_t)p;
+        r->seed = lichen_random_u32();
+        for (size_t w = 0; w < windows && !r->errors; w++) {
+            r->dst = r->src = block + w * BIG_BYTES;
+            leg_int_to_psram(r);
+            leg_psram_to_int(r);
+            check_src(r);
+        }
+    }
+    uint32_t first = r->sd_sector;
+    for (size_t w = 0; w < windows && !r->errors && !r->sd_skipped; w++) {
+        r->dst       = block + w * BIG_BYTES;
+        r->sd_sector = first + (uint32_t)(w * (BIG_BYTES / SD_SECTOR));
+        leg_sd_to_psram(r);
+    }
+}
+
+static void sweep(run_t *r, unsigned burst) {
+    size_t   largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t   windows = largest > 2 * BIG_BYTES ? (largest - BIG_BYTES) / BIG_BYTES : 0;
+    uint8_t *block   = windows ? heap_caps_aligned_alloc(ALIGN, windows * BIG_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
+    async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
+    cfg.backlog               = 4;
+    cfg.dma_burst_size        = burst;
+    r->done                   = xSemaphoreCreateBinary();
+    r->in                     = heap_caps_aligned_alloc(ALIGN, CHUNK_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!block || !r->done || !r->in || esp_async_memcpy_install_gdma_axi(&cfg, &r->mcp) != ESP_OK) {
+        console_reply("psram dma sweep: no memory or no AXI-GDMA (largest free PSRAM block %u KB)", (unsigned)(largest >> 10));
+    } else {
+        console_reply("psram dma sweep: %u MB at %p..%p, AXI-GDMA burst %u, SD leg from sector %u", (unsigned)windows, (void *)block,
+                      (void *)(block + windows * BIG_BYTES), burst, (unsigned)r->sd_sector);
+        int64_t t0 = esp_timer_get_time();
+        sweep_windows(r, block, windows);
+        console_reply("psram dma sweep: %u bad bytes over %u MB, %u errors, SD leg %s, %u ms", (unsigned)r->bad_total,
+                      (unsigned)windows, r->errors, r->sd_skipped ? "skipped" : "run", (unsigned)((esp_timer_get_time() - t0) / 1000));
+    }
+    r->src = r->dst = r->dst2 = NULL;
+    teardown(r);
+    heap_caps_free(block);
+}
+
 void psram_dma_cmd(char const *args) {
     unsigned rounds = 1, burst = 64, sector = 0;
+    static run_t r; // the ISR callback points here; one run at a time (the console runs commands one by one)
+    if (sscanf(args, " sweep %u", &sector) == 1 || strcmp(args, " sweep") == 0 || strcmp(args, "sweep") == 0) {
+        memset(&r, 0, sizeof(r));
+        r.sd_sector = sector;
+        sweep(&r, burst);
+        return;
+    }
     if (sscanf(args, "%u %u %u", &rounds, &burst, &sector) < 1) {
         rounds = 1;
     }
     if (rounds < 1 || rounds > MAX_ROUNDS || (burst != 16 && burst != 32 && burst != 64 && burst != 128)) {
-        console_reply("psram dma [rounds 1..%d] [burst 16|32|64|128] [first card sector of the SD leg]", MAX_ROUNDS);
+        console_reply("psram dma [rounds 1..%d] [burst 16|32|64|128] [first card sector of the SD leg] | dma sweep [sector]", MAX_ROUNDS);
         return;
     }
-    static run_t r; // the ISR callback points here; one run at a time (the console runs commands one by one)
     memset(&r, 0, sizeof(r));
     r.sd_sector = sector;
     if (!setup(&r, burst)) {
