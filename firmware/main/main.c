@@ -243,8 +243,8 @@ static bool show_boot_screen(lv_display_t **display) {
     vTaskDelay(pdMS_TO_TICKS(40)); // the frame is on the panel before the backlight comes up
     ESP_LOGI(TAG, "first frame at %u ms", (unsigned)uptime_ms());
     boot_progress_end(BOOT_DISPLAY, STEP_DONE, NULL);
-    // A restart keeps the backlight lit (#39); after a power-on the C6 comes up at its own default and this sets the saved
-    // level. The same call closes the UART the C6 flasher needs for itself.
+    // A restart switched the backlight off (#134); after a power-on the C6 comes up at its own default. This sets the
+    // saved level. The same call closes the UART the C6 flasher needs for itself.
     backlight_restore();
     ESP_LOGI(TAG, "backlight on at %u ms", (unsigned)uptime_ms());
     return true;
@@ -333,7 +333,7 @@ void app_main(void) {
                                          .c6_restarts = c6_restarts};
         shell_set_sources(&sources);
         shell_start(display);
-        system_restart_set_prepare(shell_show_restarting); // a lit "Restarting" frame instead of blanking (#39)
+        system_restart_set_prepare(shell_show_restarting); // a readable "Restarting" frame, then dark (#39, #134)
     }
     // The SD card (#60): before the C6 link, as BadgeVMS, so the SDMMC controller is set up before esp_hosted shares
     // it, and before the apps start. No card is one warning; nothing else waits for it.

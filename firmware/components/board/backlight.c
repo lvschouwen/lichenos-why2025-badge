@@ -242,44 +242,9 @@ void backlight_r16_release(void) {
     esp_rom_delay_us(100);    // the pad is high-z long before EN rises (the caller's next step)
 }
 
-// Soft restarts keep the backlight and panel on (#39, BadgeVMS's feel): system_restart's hook has drawn a "Restarting"
-// frame. "bl restart dark" brings the #23 blanking back (NVS bl_rst_dark), should the panel show garbage in the gap.
-static atomic_bool blank_on_restart;
-
-static void load_restart_mode(void) {
-    uint8_t      dark = 0;
-    nvs_handle_t nvs;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u8(nvs, "bl_rst_dark", &dark);
-        nvs_close(nvs);
-    }
-    atomic_store(&blank_on_restart, dark != 0);
-}
-
-static void cmd_bl_restart(char const *mode) {
-    bool dark = strcmp(mode, "dark") == 0;
-    if (!dark && strcmp(mode, "lit") != 0) {
-        console_reply("bl restart %s (lit: backlight and panel stay on across a restart; dark: blanked first, #23)",
-                      atomic_load(&blank_on_restart) ? "dark" : "lit");
-        return;
-    }
-    nvs_handle_t nvs;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, "bl_rst_dark", dark);
-        nvs_commit(nvs);
-        nvs_close(nvs);
-    }
-    atomic_store(&blank_on_restart, dark);
-    console_reply("restart: %s", dark ? "dark" : "lit");
-}
-
 static void cmd_bl(char const *args) {
     if (strcmp(args, "r16") == 0) {
         r16_detect();
-        return;
-    }
-    if (strncmp(args, "restart", 7) == 0) {
-        cmd_bl_restart(args[7] == ' ' ? args + 8 : "");
         return;
     }
     char         *end;
@@ -297,9 +262,8 @@ static void cmd_bl(char const *args) {
 
 // Runs inside esp_restart() (before the scheduler stops, newest handler first, so before esp_wifi_stop). The panel
 // has no power switch and the backlight is the C6's: without this, the stopped DSI feed leaves the lit panel showing
-// garbage (yellow, then gray) until the next boot resets it (#23). Backlight off first, so nothing shows while the
-// panel switches off. Not run on panic, abort, watchdog or brownout resets: nothing can be done there. Since #39 only for power off and
-// "bl restart dark"; a normal restart stays lit (restart_handler).
+// garbage (yellow in #23, blue since #106) until the next boot resets it. Backlight off first, so nothing shows while
+// the panel switches off. Not run on panic, abort, watchdog or brownout resets: nothing can be done there.
 static void blank_for_restart(void) {
     if (send_raw(0, 0)) {
         uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
@@ -308,11 +272,10 @@ static void blank_for_restart(void) {
     vTaskDelay(pdMS_TO_TICKS(BL_FRAME_MS));
 }
 
-// The shutdown handler (every esp_restart): blank only in "dark" mode; the lit mode relies on the Restarting frame
+// The shutdown handler (every esp_restart): system_restart's hook has held the "Restarting" frame long enough to read
+// (#134); the boot screen lights the backlight again (backlight_restore after the first frame)
 static void restart_handler(void) {
-    if (atomic_load(&blank_on_restart)) {
-        blank_for_restart();
-    }
+    blank_for_restart();
 }
 
 void backlight_power_off(void) {
@@ -333,8 +296,7 @@ void backlight_restore(void) {
 }
 
 void backlight_start(void) {
-    console_register("bl", "bl <display> <keyboard> (backlight 0-100, screen at least 5) | bl restart [lit|dark] | bl r16 (is R16 fitted?)", cmd_bl);
-    load_restart_mode();
+    console_register("bl", "bl <display> <keyboard> (backlight 0-100, screen at least 5) | bl r16 (is R16 fitted?)", cmd_bl);
     uint8_t display, keyboard;
     backlight_get(&display, &keyboard);
     send_user(display, keyboard, false);

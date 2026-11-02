@@ -540,6 +540,8 @@ void shell_boot_screen(lv_display_t *display) {
     lvgl_port_unlock();
 }
 
+#define RESTART_FRAME_MS 700
+
 void shell_show_restarting(void) {
     if (!lv_display_get_default() || !lvgl_port_lock(300)) {
         return;
@@ -566,7 +568,9 @@ void shell_show_restarting(void) {
     lv_screen_load(screen); // the old screens stay: the restart frees everything
     lv_refr_now(NULL);
     lvgl_port_unlock();
-    vTaskDelay(pdMS_TO_TICKS(40)); // the frame leaves for the panel before the DSI feed stops
+    // Long enough to read (#134): at 40 ms nobody saw it, only the dark panel after it. The shutdown handler turns the
+    // backlight off next, before the feed stops
+    vTaskDelay(pdMS_TO_TICKS(RESTART_FRAME_MS));
 }
 
 void shell_start(lv_display_t *display) {
