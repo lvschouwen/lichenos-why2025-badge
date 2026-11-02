@@ -16,6 +16,7 @@
 #include "mesh_format.h"
 #include "mesh_notify_run.h"
 #include "lichen_ui.h"
+#include "scroll_anchor.h"
 #include "theme.h"
 
 #include <stdio.h>
@@ -108,6 +109,7 @@ static void add_message(chat_t *c, mesh_msg_t const *m, uint32_t now, uint32_t n
     lv_obj_set_style_border_opa(item, LV_OPA_TRANSP, 0);
     lv_obj_set_scrollable(item, false);
     lv_obj_set_clickable(item, false);
+    lv_obj_set_user_data(item, (void *)(uintptr_t)m->seq); // its identity for the scroll anchor (rebuild)
     add_line(item, m->text, m->outgoing ? THEME_AMBER : THEME_TEXT);
     add_line(item, meta, color);
 }
@@ -116,9 +118,25 @@ static void search_apply(chat_t *c, bool scroll);
 static void select_apply(chat_t *c, bool scroll);
 static void select_leave(chat_t *c);
 
+// The message rows on screen as scroll items, keyed by their seq: c->copy may hold the next snapshot already
+static size_t shown_items(chat_t *c, scroll_item_t *items) {
+    size_t n = lv_obj_get_child_count(c->list) >= c->copy_n ? c->copy_n : 0; // copy_n: the rows of the last rebuild
+    for (size_t i = 0; i < n; i++) {
+        lv_obj_t *item  = lv_obj_get_child(c->list, (int32_t)i);
+        items[i].top    = lv_obj_get_y(item); // in the content: does not move with scrolling
+        items[i].bottom = items[i].top + lv_obj_get_height(item);
+        items[i].key    = (uint32_t)(uintptr_t)lv_obj_get_user_data(item);
+    }
+    return n;
+}
+
 static void rebuild(chat_t *c, size_t n) {
-    bool at_end = lv_obj_get_scroll_bottom(c->list) <= 0;
-    int32_t y   = lv_obj_get_scroll_y(c->list);
+    // At the end the view follows new messages. Above it, it stays on the messages being read (#127): by pixels alone
+    // it slid a message on every new one, as the oldest of the window dropped off the top.
+    static scroll_item_t items[SHOW_MESSAGES]; // scratch, only while this runs (LVGL task)
+    bool            at_end = lv_obj_get_scroll_bottom(c->list) <= 0;
+    int32_t         y      = lv_obj_get_scroll_y(c->list);
+    scroll_anchor_t anchor = scroll_anchor_take(items, at_end ? 0 : shown_items(c, items), y);
     lv_obj_clean(c->list);
     c->copy_n = n;
     size_t shown = 0;
@@ -131,6 +149,9 @@ static void rebuild(chat_t *c, size_t n) {
         add_line(c->list, "No messages here yet.", THEME_DIM);
     }
     lv_obj_update_layout(c->list);
+    if (!at_end) {
+        scroll_anchor_find(&anchor, items, shown_items(c, items), &y); // y as it was when none of them is left
+    }
     lv_obj_scroll_to_y(c->list, at_end ? LV_COORD_MAX : y, LV_ANIM_OFF);
     if (c->searching) {
         search_apply(c, false); // new rows: highlight them again, the view stays where it is
