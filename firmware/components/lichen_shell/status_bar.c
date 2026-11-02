@@ -23,7 +23,8 @@ static lv_obj_t *lora_label;
 static lv_obj_t *wifi_label;
 static lv_obj_t *c6_label; // only while the C6 is being recovered or gone (#14)
 static int32_t   c6_max_w; // the room left of the clock (#104): longer C6 text ends in "..."
-static lv_obj_t *hot_label; // "HOT" while the thermal watchdog warns (#10)
+static lv_obj_t *hot_label; // "HOT" while the thermal watchdog warns (#10), left of the clock (#128)
+static int32_t   hot_room;  // what HOT takes from the C6 text's room while it shows
 static lv_obj_t *notify_box; // the unread dot and count (#62), hidden at 0
 static lv_obj_t *notify_dot;
 static lv_obj_t *notify_count;
@@ -207,8 +208,10 @@ static void show_c6(void) {
         return;
     }
     snprintf(text, sizeof(text), "C6: %s", state);
+    // HOT sits before this label in the same room: its width comes off (every refresh, HOT comes and goes)
+    int32_t room = LV_MAX(c6_max_w - (lv_obj_is_hidden(hot_label) ? 0 : hot_room), 0);
+    lv_obj_set_width(c6_label, LV_MIN(text_width(text), room));
     if (strcmp(lv_label_get_text(c6_label), text) != 0) {
-        lv_obj_set_width(c6_label, LV_MIN(text_width(text), c6_max_w));
         lv_label_set_text(c6_label, text);
         bool down = strncmp(state, "down", 4) == 0;
         lv_obj_set_style_text_color(c6_label, lv_color_hex(down ? THEME_LINK_RED : THEME_AMBER), 0);
@@ -293,6 +296,11 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     lv_obj_t *left = add_row(bar, LEFT_GAP);
     logo_create(left, LOGO_PX);
     lv_obj_t *word = add_text(left, "lichen", THEME_DIM);
+    // HOT on the left, in the C6 text's room: on the right it pushed the right group over the clock (#128: about
+    // 82 px with its gap where the right group has ~51 px to spare, 294 px room for 243 px)
+    hot_label      = add_text(left, "HOT", THEME_AMBER);
+    lv_obj_set_hidden(hot_label, true);
+    hot_room       = text_width("HOT") + LEFT_GAP;
     c6_label       = add_text(left, "", THEME_AMBER);
     lv_label_set_long_mode(c6_label, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_hidden(c6_label, true);
@@ -305,8 +313,6 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
 
     // Right-aligned by the bar's SPACE_BETWEEN; about 50 px stay free to the clock for a notification dot (#62)
     lv_obj_t *right = add_row(bar, 28);
-    hot_label       = add_text(right, "HOT", THEME_AMBER);
-    lv_obj_set_hidden(hot_label, true);
     lv_obj_t *wifi  = add_row(right, 6);
     // The unread dot and count (#62) just left of "Wi-Fi", in the room the right group leaves to the clock; hidden
     // (out of the layout) at 0
