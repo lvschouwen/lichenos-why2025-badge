@@ -409,6 +409,9 @@ static char const *journal_load(work_t *w, int *err) {
     if (b.damaged) {
         ESP_LOGW(TAG, "journal: the bad spot stays on re-reading (first at %llu): in the file",
                  (unsigned long long)b.first.first_bad);
+    } else if (b.unknown) {
+        ESP_LOGW(TAG, "journal: a re-read of the bad spot at %llu failed: no verdict, no compaction this boot",
+                 (unsigned long long)b.first.first_bad);
     } else if (b.read_error) {
         read_errors++;
         ESP_LOGW(TAG, "journal: the bad spot at %llu read clean on read %d: a read error, no compaction; the records "
@@ -418,7 +421,7 @@ static char const *journal_load(work_t *w, int *err) {
     // The clean read's HEAD count after a read error: a misread HEAD must not force a compaction either
     uint32_t heads = b.read_error ? b.last.heads : b.first.heads;
     uint64_t live  = mesh_hist_live_bytes(&w->table, keep_n);
-    compact_asked = mesh_hist_should_compact((uint64_t)st.st_size, live, b.damaged || heads == 0);
+    compact_asked = !b.unknown && mesh_hist_should_compact((uint64_t)st.st_size, live, b.damaged || heads == 0);
     return NULL;
 }
 

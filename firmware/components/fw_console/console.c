@@ -503,7 +503,10 @@ static void restart_save_run(void) {
 }
 
 void system_restart(char const *why) {
-    s_restart_why = why ? why : "unspecified";
+    // The first restart's reason stays: a second one only waits for it (restart_save_run)
+    char const *none = NULL;
+    __atomic_compare_exchange_n(&s_restart_why, &none, why ? why : "unspecified", false, __ATOMIC_ACQ_REL,
+                                __ATOMIC_ACQUIRE);
     if (capture.task && capture.task == xTaskGetCurrentTaskHandle()) {
         capture_finish(); // a command from Wi-Fi answers before the badge goes down (#38)
         vTaskDelay(pdMS_TO_TICKS(300)); // the reply leaves the TCP stack

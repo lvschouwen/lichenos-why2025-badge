@@ -254,6 +254,8 @@ typedef struct {
     bool             read_failed; // the first read could not be done (a crypto failure is first.crypto_error)
     bool             damaged;     // damage in the file: it stayed on re-reading (compact)
     bool             read_error;  // a bad spot read clean on a re-read: the file is fine (no compaction)
+    bool             unknown;     // a re-read failed (I/O, crypto): no verdict, so no compaction this boot; h->loaded
+                                  // is the last good read's, t may hold a partial count (not to be used)
     uint32_t         max_seq;     // the newest MSG seq seen
 } mesh_hist_boot_t;
 // Replays the journal into the store and counts it into t (its slots and cap set). A first read with a bad spot is

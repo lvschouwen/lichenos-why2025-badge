@@ -1025,7 +1025,14 @@ static bool boot_pass(void *pctx, int read_no, mesh_hist_rec_fn on_rec, void *ct
     boot_fake_t     *f = (boot_fake_t *)pctx;
     f->calls++;
     CHECK(read_no == f->calls);
-    if (read_no > 6 || f->fail[read_no - 1]) {
+    if (read_no > 6) {
+        return false;
+    }
+    if (f->fail[read_no - 1]) { // reads the first half, then the card errors: a partial replay and count
+        mem_rd_t          rd = {.p = file, .len = file_len / 2, .chunk = 0};
+        mesh_hist_crypt_t c  = kc;
+        c.open               = false;
+        mesh_hist_scan(mem_read, &rd, buf, &c, on_rec, ctx, scan);
         return false;
     }
     memcpy(copy, file, file_len);
@@ -1073,7 +1080,7 @@ static void boot_load_checks(void) {
         append(&r);
     }
     mesh_msg_t m[8];
-    for (int scenario = 0; scenario < 4; scenario++) {
+    for (int scenario = 0; scenario < 5; scenario++) {
         boot_fake_t f = {.flip = {-1, -1, -1, -1, -1, -1}};
         switch (scenario) {
         case 0: // misread once, clean on the first re-read
@@ -1091,6 +1098,10 @@ static void boot_load_checks(void) {
         case 3: // the card could not be read
             f.fail[0] = true;
             break;
+        case 4: // misread, then the re-read fails part-way: no verdict (neither damage nor a read error)
+            f.flip[0] = bad;
+            f.fail[1] = true;
+            break;
         }
         mesh_store_set_hooks(NULL, NULL);
         CHECK(mesh_store_init(8));
@@ -1102,10 +1113,16 @@ static void boot_load_checks(void) {
         CHECK(boot_locks == 0);
         size_t n = mesh_store_chat(&ck, m, 8, false);
         if (scenario == 3) {
-            CHECK(b.read_failed && b.reads == 1 && n == 0);
+            CHECK(b.read_failed && b.reads == 1 && n < 6);
             continue;
         }
         CHECK(!b.read_failed && b.first.resyncs == 1 && b.max_seq == 6);
+        if (scenario == 4) {
+            CHECK(!b.damaged && !b.read_error && b.unknown && b.reads == 2 && b.last.resyncs == 1);
+            CHECK(n == 5 && h.loaded == 5); // the first read's records and count
+            continue;
+        }
+        CHECK(!b.unknown);
         if (scenario == 2) {
             CHECK(b.damaged && !b.read_error && b.reads == 2 && n == 5 && h.loaded == 5);
             continue;

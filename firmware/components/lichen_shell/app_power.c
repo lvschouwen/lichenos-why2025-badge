@@ -64,13 +64,14 @@ static void power_task(void *arg) {
     system_restart(off ? "power off (no hook)" : "power menu restart");
 }
 
+// The notifications first: a short write, so a mesh stop that runs into the restart's bound cannot cut their file
 void shell_save_for_restart(void) {
+    if (!lichen_notify_save_now(NOTIFY_SAVE_MS)) {
+        ESP_LOGW(TAG, "notifications not saved in time");
+    }
     ESP_LOGI(TAG, "restart: stopping the apps");
     if (!shell_stop_apps()) {
         ESP_LOGW(TAG, "restart: an app did not stop, its last changes may be lost");
-    }
-    if (!lichen_notify_save_now(NOTIFY_SAVE_MS)) {
-        ESP_LOGW(TAG, "notifications not saved in time");
     }
 }
 

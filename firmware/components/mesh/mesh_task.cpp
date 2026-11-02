@@ -487,7 +487,8 @@ static bool keep_contact(ContactInfo const &c) {
 // MeshCore's own reboot (an admin's "reboot" CLI command, the companion protocol) runs on the mesh task inside
 // node->loop(), with the mesh lock held. The OS's restart save (system_restart -> stop_for_update, #123) would wait for
 // this very task to stop, so the saves a stop makes are made here first, and stop_locked then has nothing to wait for.
-static bool rebooting; // the mesh task -> stop_locked: saved for MeshCore's own reboot, the task never loops again
+// The mesh task -> stop_locked: saved for MeshCore's own reboot. Never cleared: system_restart does not return.
+static bool rebooting;
 
 void BadgeBoard::reboot() {
     if (mesh_task_handle && xTaskGetCurrentTaskHandle() == mesh_task_handle) {

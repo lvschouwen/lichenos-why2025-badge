@@ -56,8 +56,8 @@ void shell_close_all_but_top(void);
 // The Power app (#65): what the OS does once the apps stopped and the saves are done, on the power task. power_off
 // true: backlight, panel, C6 and P4 down; false: restart. Must not return. Without a hook the badge only restarts.
 void shell_set_power_hook(void (*finish)(bool power_off));
-// Every soft restart (system_restart's save hook, #123): the apps stop and save as for an update (MeshCore: its files,
-// the message journal flushed), then the notifications are saved. Blocks for seconds; fw_console runs it on a task of
+// Every soft restart (system_restart's save hook, #123): the notifications are saved, then the apps stop and save as
+// for an update (MeshCore: its files, the message journal flushed). Blocks for seconds; fw_console runs it on a task of
 // its own with a bound. Safe without a screen, and again after the Power app or an update already stopped the apps.
 void shell_save_for_restart(void);
 // The factory reset key combo (#66, factory_combo.c): right after keyboard_start; watches the keys for 10 s

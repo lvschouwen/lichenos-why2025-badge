@@ -58,13 +58,21 @@ void mesh_hist_boot_load(mesh_hist_pass_fn pass, void *pctx, mesh_hist_t *h, mes
     mesh_hist_scan_t prev    = out->first;
     for (int tries = 0; damaged && tries < rereads; tries++) {
         mesh_hist_scan_t again;
-        ok           = read_once(pass, pctx, ++out->reads, &rc, &again);
-        out->max_seq = rc.max_seq > out->max_seq ? rc.max_seq : out->max_seq;
-        damaged      = mesh_hist_damage_in_file(&out->first, ok, &again);
-        if (ok) {
-            out->last = again;
+        uint32_t         good_loaded = h->loaded; // only the boot writes it; the lock is for the screens' reads
+        ok                           = read_once(pass, pctx, ++out->reads, &rc, &again);
+        out->max_seq                 = rc.max_seq > out->max_seq ? rc.max_seq : out->max_seq;
+        if (!ok) {
+            // A re-read that fails (I/O, crypto) proves nothing either way: taking it for damage in the file would
+            // compact away records a transient fault hid. No verdict; the last good read's count stands.
+            lock();
+            h->loaded = good_loaded;
+            unlock();
+            out->unknown = true;
+            return;
         }
-        if (damaged && ok && mesh_hist_same_damage(&prev, &again)) {
+        damaged   = mesh_hist_damage_in_file(&out->first, true, &again);
+        out->last = again;
+        if (damaged && mesh_hist_same_damage(&prev, &again)) {
             break; // the same damage twice in a row: in the file (a torn tail after a power cut), no more reads
         }
         prev = again;
