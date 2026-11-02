@@ -41,6 +41,7 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   name a path outside them.
 - `lichen_notify.h`: raise a notification (toast, history, unread dot); from any task.
 - `lichen_badge.h`: the count on the app's tile; set it whenever it changes.
+- `lichen_haptics.h`: a short buzz of the vibration motor for feedback of your own; non-blocking, silent when the person switched it off. Notifications buzz by themselves, do not call it for them. Never drive GPIO8.
 - `lichen_radio.h`: read the Wi-Fi/LoRa/Bluetooth switches and airplane mode, listen for changes. Apps never switch
   radios.
 - `lichen_sensors.h`: read the latest IMU / environment / die temperature snapshot. Never talk to the chips or I2C.

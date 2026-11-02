@@ -28,6 +28,7 @@
 #include "freertos/task.h"
 #include "keyboard.h"
 #include "lichen_sensors.h"
+#include "haptics.h"
 #include "led.h"
 #include "lichen_app.h"
 #include "lichen_random.h"
@@ -94,6 +95,7 @@ static void ota_begin(ota_kind_t kind, char const *name, uint32_t total) {
     }
     update_screen_begin(kind != OTA_KIND_FILE, kind == OTA_KIND_FIRMWARE, name, total);
     led_set_updating(true); // fast blink on the status LED (#74)
+    haptics_set_updating(true); // no buzzing while the image arrives (#68)
 }
 
 static void ota_prepare(void) {
@@ -104,6 +106,7 @@ static void ota_prepare(void) {
 static void ota_end(bool ok, bool rebooting) {
     psram_guard_update_end();
     led_set_updating(false);
+    haptics_set_updating(false);
     update_screen_end(ok, rebooting);
 }
 
@@ -127,6 +130,7 @@ static void power_finish(bool power_off) {
         system_restart("power menu restart");
     }
     system_restart_note("power off");
+    haptics_stop();
     backlight_power_off();
     c6link_hold_in_reset();
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
@@ -295,6 +299,7 @@ void app_main(void) {
     }
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
     boot_progress_nvs_up();
+    haptics_start();     // the motor pin low and the setting read, before anything slow (#68)
     settings_apply_tz(); // before anything shows the clock
     crash_check_early(); // cheap: only decides crash_recovered(), which the boot screen reads once
     lv_display_t *display;

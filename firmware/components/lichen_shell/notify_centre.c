@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "fonts.h"
 #include "led.h"
+#include "lichen_haptics.h"
 #include "lichen_app.h"
 #include "lichen_ui.h"
 #include "menu.h"
@@ -427,6 +428,7 @@ void notify_app_register(void) {
 static struct {
     lv_obj_t   *dnd_row;
     lv_obj_t   *led_row;
+    lv_obj_t   *vib_row;
     lv_obj_t   *clear_row;
     lv_obj_t   *source_row[MAX_SOURCES];
     char const *source[MAX_SOURCES];
@@ -458,6 +460,15 @@ static void toggle_led(void *arg) {
     (void)arg;
     led_set_enabled(!led_enabled());
     menu_set_value(s_s.led_row, on_off(led_enabled()));
+}
+
+static void toggle_vib(void *arg) {
+    (void)arg;
+    lichen_haptics_set_enabled(!lichen_haptics_enabled());
+    menu_set_value(s_s.vib_row, on_off(lichen_haptics_enabled()));
+    if (lichen_haptics_enabled()) {
+        lichen_haptics_play(LICHEN_HAPTIC_TICK); // feel what it was switched to
+    }
 }
 
 static void settings_clear_answer(bool yes) {
@@ -516,6 +527,7 @@ static lv_obj_t *build_settings(void) {
     }
     s_s.dnd_row = menu_add(menu, "Do not disturb", on_off(lichen_notify_dnd()), toggle_dnd, NULL);
     s_s.led_row = menu_add(menu, "Status LED", on_off(led_enabled()), toggle_led, NULL);
+    s_s.vib_row = menu_add(menu, "Vibration", on_off(lichen_haptics_enabled()), toggle_vib, NULL);
     char       count[12];
     ln_stats_t st;
     lichen_notify_stats(&st);

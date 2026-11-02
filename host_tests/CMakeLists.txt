@@ -1141,6 +1141,11 @@ target_include_directories(led_pattern_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(led_pattern_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME led_pattern_test COMMAND led_pattern_test)
 
+add_executable(haptics_pattern_test ${CMAKE_CURRENT_SOURCE_DIR}/haptics_pattern_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_haptics/haptics_pattern.c)
+target_include_directories(haptics_pattern_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_haptics)
+target_compile_options(haptics_pattern_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME haptics_pattern_test COMMAND haptics_pattern_test)
+
 add_executable(notify_view_test ${CMAKE_CURRENT_SOURCE_DIR}/notify_view_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/notify_view.c)
 target_include_directories(notify_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(notify_view_test PRIVATE -Wall -Wextra -Werror)
@@ -1190,6 +1195,7 @@ add_custom_target(run_tests
     notify_rate_test
     notify_mute_test
     led_pattern_test
+    haptics_pattern_test
     notify_view_test
     sys_notice_rules_test
     mesh_ident_test

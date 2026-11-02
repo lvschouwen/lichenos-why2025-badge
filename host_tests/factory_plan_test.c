@@ -28,7 +28,7 @@ static void boot_plan_per_pending_value(void) {
 
 static void settings_go_at_both_levels(void) {
     char const *settings[] = {"wifi_ssid", "wifi_pass", "tz", "setup_done", "home_layout", "idle_dim", "idle_off",
-                              "bl_disp", "bl_kbd", "status_led", "notify_dnd", "n.mesh", "radio_on", "radio_saved",
+                              "bl_disp", "bl_kbd", "status_led", "haptics", "haptic_str", "notify_dnd", "n.mesh", "radio_on", "radio_saved",
                               "radio_air", "ota_wifi", "ota_auto_min", "saver", "lock", "mc_advint", "mc_advfl", "some_new_key"};
     for (size_t i = 0; i < sizeof(settings) / sizeof(settings[0]); i++) {
         CHECK(factory_nvs_erases("badge_fw", settings[i], S));
