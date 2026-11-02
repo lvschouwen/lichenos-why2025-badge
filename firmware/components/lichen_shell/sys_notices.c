@@ -62,6 +62,9 @@ static void body_for(sysn_event_t e, sysn_snapshot_t const *s, sd_info_t const *
         sd_fmt_size(s->storage_total, b, sizeof(b));
         snprintf(out, cap, "%s free of %s on the storage drive.", a, b);
         break;
+    case SYSN_STORAGE_UNMOUNTED:
+        snprintf(out, cap, "The drive did not mount and was not formatted, so nothing on it is lost. MeshCore stays off.");
+        break;
     default: break;
     }
 }
@@ -69,6 +72,7 @@ static void body_for(sysn_event_t e, sysn_snapshot_t const *s, sd_info_t const *
 static void read_snapshot(sysn_snapshot_t *s, sd_info_t *sd, unsigned poll) {
     static lichen_sensors_t sensors; // this task only; too big to keep twice on its stack
     s->crash_recovered        = crash_recovered();
+    s->storage_unmounted      = !storage_mounted();
     s->psram_bad              = psram_boot_bad(NULL, 0);
     clock_sync_info_t clock   = clock_sync_info();
     s->clock_refused          = clock.refused;

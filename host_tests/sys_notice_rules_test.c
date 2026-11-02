@@ -57,6 +57,19 @@ static void test_boot_once(void) {
     CHECK(step(&st2, &s) == 0); // a quiet boot says nothing
 }
 
+// #110: a drive that did not mount is told once, as an error; it is never formatted, so this is the user's only hint
+static void test_storage_unmounted(void) {
+    sysn_state_t    st = {0};
+    sysn_snapshot_t s  = quiet();
+    s.storage_unmounted = true;
+    s.storage_known     = false; // no sizes from a drive that is not there
+    size_t n            = step(&st, &s);
+    CHECK(n == 1 && ev[0] == SYSN_STORAGE_UNMOUNTED);
+    CHECK(step(&st, &s) == 0);
+    sysn_info_t info = sysn_info(SYSN_STORAGE_UNMOUNTED);
+    CHECK(info.level == 2 && info.target && strcmp(info.target, "storage") == 0 && strlen(info.title) < 40);
+}
+
 static void test_counters(void) {
     sysn_state_t    st = {0};
     sysn_snapshot_t s  = quiet();
@@ -173,6 +186,7 @@ static void test_info(void) {
 
 int main(void) {
     test_boot_once();
+    test_storage_unmounted();
     test_counters();
     test_sd();
     test_sensors();

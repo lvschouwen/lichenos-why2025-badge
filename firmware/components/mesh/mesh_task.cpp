@@ -759,6 +759,20 @@ static void ident_apply(mesh_ident_t state, bool simulated) {
                   LN_ONCE_BOOT);
 }
 
+extern "C" mesh_ident_t mesh_identity_state(void) {
+    return __atomic_load_n(&ident_state, __ATOMIC_ACQUIRE);
+}
+
+extern "C" void mesh_identity_no_files(void) {
+    mesh_ident_t unchecked = MESH_IDENT_UNCHECKED;
+    if (__atomic_compare_exchange_n(&ident_state, &unchecked, MESH_IDENT_UNREADABLE, false, __ATOMIC_ACQ_REL,
+                                    __ATOMIC_ACQUIRE)) {
+        __atomic_store_n(&lora_radio.tx_blocked, true, __ATOMIC_RELEASE);
+        // the OS raises its own notice for the drive (sys_notices.c): no second one here
+        ESP_LOGE(TAG, "MeshCore's files are not reachable (no storage drive?): identity unreadable, no new one made");
+    }
+}
+
 static void ident_verify(BadgeMesh *n) {
     uint8_t      prv[PRV_KEY_SIZE];
     mesh_ident_t state = MESH_IDENT_MISMATCH; // a key that can't be read is not a sound one either
@@ -1465,6 +1479,10 @@ static bool console_not_running(void) {
     }
     char const *text = mesh_run_console_text(meshcore_run_get());
     console_reply("MeshCore %s", text ? text : "not running");
+    mesh_ident_t state = mesh_identity_state();
+    if (state != MESH_IDENT_UNCHECKED) {
+        console_reply("identity: %s", mesh_ident_text(state)); // #110: also when the drive kept it from starting
+    }
     return true;
 }
 
@@ -2617,7 +2635,11 @@ static bool start_locked(char const *files_dir) {
     void *mesh_mem   = heap_caps_malloc(sizeof(BadgeMesh), MALLOC_CAP_SPIRAM);
     void *ob_mem     = heap_caps_calloc(1, sizeof(ob_t), MALLOC_CAP_SPIRAM);
     void *mt_mem     = heap_caps_calloc(1, sizeof(mt_t), MALLOC_CAP_SPIRAM);
-    if (!ok || !tables_mem || !mesh_mem || !ob_mem || !mt_mem || !SPIFFS.begin(true)) {
+    bool  files      = SPIFFS.begin(true);
+    if (!files) {
+        mesh_identity_no_files();
+    }
+    if (!ok || !tables_mem || !mesh_mem || !ob_mem || !mt_mem || !files) {
         ESP_LOGE(TAG, "no memory or no /storage");
         free(tables_mem);
         free(mesh_mem);

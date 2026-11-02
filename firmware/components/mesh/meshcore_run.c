@@ -51,7 +51,11 @@ static bool start_now(void) {
         return false;
     }
     char const *dir = lichen_fs_app_dir(app); // /storage/meshcore, as before #84 T6
-    return dir && mesh_start(dir);
+    if (!dir) {
+        mesh_identity_no_files(); // #110: no drive is "unreadable", never "no identity yet"
+        return false;
+    }
+    return mesh_start(dir);
 }
 
 bool meshcore_run_boot(void) {

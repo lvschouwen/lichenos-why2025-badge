@@ -25,6 +25,7 @@ typedef struct {
     bool     sensors_running;
     bool     imu_valid;
     bool     env_valid;
+    bool     storage_unmounted; // the boot mount failed (#110): the drive is left as it is, not formatted
     bool     storage_known;
     uint64_t storage_free;
     uint64_t storage_total;
@@ -46,6 +47,7 @@ typedef enum {
     SYSN_IMU_LOST,
     SYSN_ENV_LOST,
     SYSN_STORAGE_LOW,
+    SYSN_STORAGE_UNMOUNTED,
     SYSN_EVENT_COUNT
 } sysn_event_t;
 

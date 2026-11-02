@@ -2,6 +2,7 @@
 
 #include "mesh_advert_cfg.h"
 #include "mesh_contact_fmt.h"
+#include "mesh_ident.h"
 #include "mesh_outbox.h"
 #include "mesh_store.h"
 #include "mesh_tile.h"
@@ -54,6 +55,13 @@ bool mesh_stop(mesh_stop_reason_t why);
 bool mesh_stop_pending(void);
 // "fw mesh", "fw contacts" and friends: registered once, whether MeshCore starts or not (#103)
 void mesh_console_init(void);
+// The MeshCore identity's state (#80, #109, #110), safe from any task: MESH_IDENT_UNCHECKED before the first start,
+// then what the load found. Only MESH_IDENT_OK transmits. MESH_IDENT_UNREADABLE means an identity may exist but could
+// not be read (a damaged file, or no storage drive at all): nothing may make or save a new identity then.
+mesh_ident_t mesh_identity_state(void);
+// MeshCore cannot reach its files (#110: /storage did not mount, and it is never formatted on its own): the identity
+// counts as unreadable, not as missing, so no new one is made and nothing transmits. Only from MESH_IDENT_UNCHECKED.
+void mesh_identity_no_files(void);
 // The node id (the start of the public key) as 8 hex digits, taken once at mesh_start: no lock, so the screens may
 // call it any time. false before MeshCore is up.
 bool mesh_node_id(char *hex, size_t cap);
