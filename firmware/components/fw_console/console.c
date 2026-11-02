@@ -26,7 +26,7 @@
 #include <time.h>
 
 #define MAX_COMMANDS   64
-#define MAX_TASKS_SEEN 32
+#define MAX_TASKS_SEEN 48
 
 static char const TAG[] = "console";
 
@@ -235,31 +235,35 @@ static void cmd_mem(char const *args) {
         console_reply("mem: out of memory for the task list");
         return;
     }
-    uint32_t total = 0;
-    n              = uxTaskGetSystemState(tasks, n, &total);
+    configRUN_TIME_COUNTER_TYPE total = 0; // 64-bit since #125: the 32-bit µs counter wrapped after 71.6 min
+    n                                 = uxTaskGetSystemState(tasks, n, &total);
 
-    // CPU % is over the interval since the previous "fw mem" (since boot on the first call)
+    // CPU % is over the interval since the previous "fw mem" (since boot on the first call). Tasks are matched by
+    // handle over every task; a task the last call did not see ran only since then, so its counter is its use.
     static struct {
-        TaskHandle_t handle;
-        uint32_t     runtime;
+        TaskHandle_t                handle;
+        configRUN_TIME_COUNTER_TYPE runtime;
     } prev[MAX_TASKS_SEEN];
-    static uint32_t prev_total;
-    static bool     have_prev;
-    uint32_t        span = total - prev_total; // unsigned: survives the counter wrapping
-    console_reply("cpu over %s (%u us)", have_prev ? "the interval since the last fw mem" : "the time since boot", (unsigned)span);
+    static configRUN_TIME_COUNTER_TYPE prev_total;
+    static bool                        have_prev;
+    configRUN_TIME_COUNTER_TYPE        span = total - prev_total;
+    console_reply("cpu over %s (%llu us)", have_prev ? "the interval since the last fw mem" : "the time since boot",
+                  (unsigned long long)span);
 
-    uint32_t next_runtime[MAX_TASKS_SEEN] = {0};
     for (UBaseType_t i = 0; i < n; i++) {
-        uint32_t before = 0;
-        for (int j = 0; j < MAX_TASKS_SEEN; j++) {
+        configRUN_TIME_COUNTER_TYPE before = 0;
+        for (int j = 0; have_prev && j < MAX_TASKS_SEEN; j++) {
             if (prev[j].handle == tasks[i].xHandle) {
                 before = prev[j].runtime;
                 break;
             }
         }
-        uint32_t used = tasks[i].ulRunTimeCounter - (have_prev ? before : 0);
-        unsigned pct  = span ? (unsigned)(((uint64_t)used * 1000 + span / 2) / span) : 0; // tenths of a percent
-        char     core[4]; // 0 or 1 on this two-core chip
+        configRUN_TIME_COUNTER_TYPE used = tasks[i].ulRunTimeCounter - before;
+        unsigned pct = span ? (unsigned)(((uint64_t)used * 1000 + span / 2) / span) : 0; // tenths of a percent
+        if (pct > 1000) {
+            pct = 1000; // a sample taken a moment after the total can run slightly ahead of it
+        }
+        char core[4]; // 0 or 1 on this two-core chip
         if (tasks[i].xCoreID == tskNO_AFFINITY) {
             strcpy(core, "-");
         } else {
@@ -273,13 +277,14 @@ static void cmd_mem(char const *args) {
             pct / 10,
             pct % 10
         );
-        if (i < MAX_TASKS_SEEN) {
-            next_runtime[i] = tasks[i].ulRunTimeCounter;
-        }
     }
     for (int j = 0; j < MAX_TASKS_SEEN; j++) {
         prev[j].handle  = j < (int)n ? tasks[j].xHandle : NULL;
-        prev[j].runtime = next_runtime[j];
+        prev[j].runtime = j < (int)n ? tasks[j].ulRunTimeCounter : 0;
+    }
+    if (n > MAX_TASKS_SEEN) {
+        console_reply("mem: %u tasks, only the first %d are remembered for the next cpu interval", (unsigned)n,
+                      MAX_TASKS_SEEN);
     }
     prev_total = total;
     have_prev  = true;
