@@ -24,7 +24,7 @@
 #include <string.h>
 #include <time.h>
 
-#define MAX_COMMANDS   40
+#define MAX_COMMANDS   64
 #define MAX_TASKS_SEEN 32
 
 static char const TAG[] = "console";
