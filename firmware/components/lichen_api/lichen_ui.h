@@ -81,8 +81,8 @@ bool lichen_screen_locked(void);
 // lv_label grows to fit its text and its parent clips it without a "..." (#131, #133). Use these for any such text;
 // `fw ui overflow` lists labels that still do not fit. LVGL context only. width: LV_PCT(n), pixels or LV_SIZE_CONTENT
 // with a max_width set by the caller.
-// One line, ends in "..." when it does not fit; the height is one line of the font set on it (or inherited) now, so set
-// the font before calling when it differs from the parent's (or call lichen_label_line_fit after changing it)
+// One line, ends in "..." when it does not fit; the height is one line of its font plus its padding and border as set
+// now, so call lichen_label_line_fit after changing the font, padding or border
 lv_obj_t *lichen_label_line(lv_obj_t *parent, int32_t width);
 void      lichen_label_line_fit(lv_obj_t *label);
 // Wraps onto as many lines as it needs

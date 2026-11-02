@@ -153,8 +153,8 @@ lv_obj_t *menu_create(lv_obj_t *parent, char const *title) {
     // screen (#131). The font goes on before the line height is taken.
     lv_obj_t *heading = lichen_label_line(menu, LV_PCT(100));
     lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
-    lichen_label_line_fit(heading);
     lv_obj_set_style_pad_bottom(heading, 8, 0);
+    lichen_label_line_fit(heading); // after the font and the padding
     lv_label_set_text(heading, title);
     return menu;
 }

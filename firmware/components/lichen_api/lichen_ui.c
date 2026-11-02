@@ -35,8 +35,12 @@ void lichen_ui_with_group(lv_group_t *group, void (*build)(void *), void *arg) {
 }
 
 void lichen_label_line_fit(lv_obj_t *label) {
-    // DOT only cuts at the label's height: without one line's height LVGL 9 wraps the text instead
-    lv_obj_set_height(label, lv_font_get_line_height(lv_obj_get_style_text_font(label, LV_PART_MAIN)));
+    // DOT only cuts at the label's height: without one line's height LVGL 9 wraps the text instead. The height is the
+    // whole box, so padding and border go on top, or they eat the descenders (the "g" of a heading, #133)
+    int32_t h = lv_font_get_line_height(lv_obj_get_style_text_font(label, LV_PART_MAIN));
+    h += lv_obj_get_style_pad_top(label, LV_PART_MAIN) + lv_obj_get_style_pad_bottom(label, LV_PART_MAIN);
+    h += 2 * lv_obj_get_style_border_width(label, LV_PART_MAIN);
+    lv_obj_set_height(label, h);
 }
 
 lv_obj_t *lichen_label_line(lv_obj_t *parent, int32_t width) {
