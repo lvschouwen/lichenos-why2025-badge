@@ -3,6 +3,7 @@
 // full page per note, a badge for the unread ones) and the "This is new" screen that follows an update.
 // The marker is the highest note sequence the person has seen (NVS notes_seen); release_notes.h has the rules.
 #include "app_icons.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "fonts.h"
@@ -33,7 +34,7 @@ static char const TAG[] = "notes";
 
 static lichen_app_t const notes_app;
 
-static rn_note_t s_notes[RN_MAX_NOTES]; // newest first
+static rn_note_t *s_notes; // newest first; PSRAM, allocated once by load() (internal RAM is scarce)
 static size_t    s_count;
 static bool      s_loaded;
 static bool      s_seen_known;
@@ -46,7 +47,12 @@ static void load(void) {
         return;
     }
     s_loaded = true;
-    s_count  = rn_build_index(rn_files, rn_file_count, s_notes, RN_MAX_NOTES);
+    s_notes  = heap_caps_calloc(RN_MAX_NOTES, sizeof(rn_note_t), MALLOC_CAP_SPIRAM);
+    if (!s_notes) {
+        ESP_LOGW(TAG, "no memory for the release notes index");
+        return; // s_count stays 0: the app says there are no notes
+    }
+    s_count = rn_build_index(rn_files, rn_file_count, s_notes, RN_MAX_NOTES);
     char value[16];
     settings_get_str(SEEN_KEY, value, sizeof(value), "");
     s_seen = rn_parse_seen(value, &s_seen_known);
@@ -151,6 +157,15 @@ static void on_note(void *arg) {
     shell_open(build_entry, SCREEN_NOTES_ENTRY);
 }
 
+typedef struct {
+    char title[TITLE_CAP];
+    char value[RN_DATE_LEN + 8];
+} row_text_t;
+
+static void on_list_delete(lv_event_t *e) {
+    heap_caps_free(lv_event_get_user_data(e));
+}
+
 static void open_notes(lv_obj_t *screen) {
     load();
     s_seen_at_open = s_seen_known ? s_seen : 0;
@@ -160,13 +175,18 @@ static void open_notes(lv_obj_t *screen) {
         menu_note(menu, "No release notes in this build.");
         return;
     }
-    static char values[RN_MAX_NOTES][RN_DATE_LEN + 8];
-    static char titles[RN_MAX_NOTES][TITLE_CAP];
+    // Row texts in PSRAM for as long as the list is open
+    row_text_t *rows = heap_caps_calloc(s_count, sizeof(row_text_t), MALLOC_CAP_SPIRAM);
+    if (!rows) {
+        menu_note(menu, "Not enough memory to list the notes.");
+        return;
+    }
+    lv_obj_add_event_cb(screen, on_list_delete, LV_EVENT_DELETE, rows);
     for (size_t i = 0; i < s_count; i++) {
-        rn_title(s_notes[i].text, titles[i], sizeof(titles[i]));
+        rn_title(s_notes[i].text, rows[i].title, sizeof(rows[i].title));
         bool fresh = s_notes[i].seq > s_seen_at_open;
-        snprintf(values[i], sizeof(values[i]), "%s%s", fresh ? "new  " : "", s_notes[i].date);
-        menu_add(menu, titles[i], values[i], on_note, (void *)(intptr_t)i);
+        snprintf(rows[i].value, sizeof(rows[i].value), "%s%s", fresh ? "new  " : "", s_notes[i].date);
+        menu_add(menu, rows[i].title, rows[i].value, on_note, (void *)(intptr_t)i);
     }
     menu_note(menu, "Enter opens a note. The newest is first.");
     mark_seen(); // looking at the list counts as seen; the rows above still say "new"
