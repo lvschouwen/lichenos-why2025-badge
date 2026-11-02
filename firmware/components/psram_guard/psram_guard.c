@@ -1,6 +1,7 @@
 #include "psram_guard.h"
 
 #include "psram_boot.h"
+#include "psram_dma_cmd.h"
 #include "psram_heap.h"
 #include "psram_pattern.h"
 
@@ -227,6 +228,10 @@ static void cmd_psram(char const *args) {
         psram_test(args + 4);
         return;
     }
+    if (strncmp(args, "dma", 3) == 0) {
+        psram_dma_cmd(args + 3); // #121: the DMA-path gate; the canaries and the boot check only cover the CPU path
+        return;
+    }
     psram_boot_print();
     for (size_t i = 0; i < s_npools; i++) {
         console_reply("psram heap pool %u: %p..%p (%u KB)", (unsigned)i, (void *)s_pools[i].lo, (void *)s_pools[i].hi,
@@ -282,7 +287,7 @@ void psram_guard_start(void) {
     add_spread_blocks();
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);
-    console_register("psram", "psram [test <KB> [dense]] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; or a round-trip test)", cmd_psram);
+    console_register("psram", "psram [test <KB> [dense] | dma [rounds] [burst]] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; a CPU round-trip test; or the AXI-DMA copy test of #121)", cmd_psram);
     if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 3072 /* peak 1.4 KB, #107 */, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "canary task failed to start");
     }

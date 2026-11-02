@@ -1,8 +1,8 @@
 # PSRAM watchdog (#40, #93): canary blocks verified every ~100 ms; psram_boot.c = tuning report + boot check. Pure and
-# host-tested: psram_pattern.c, psram_tuning.c, psram_heap.c.
-idf_component_register(SRCS "psram_guard.c" "psram_pattern.c" "psram_tuning.c" "psram_boot.c" "psram_heap.c"
+# host-tested: psram_pattern.c, psram_tuning.c, psram_heap.c, psram_dma.c (psram_dma_cmd.c = the AXI-DMA copy test of #121).
+idf_component_register(SRCS "psram_guard.c" "psram_pattern.c" "psram_tuning.c" "psram_boot.c" "psram_heap.c" "psram_dma.c" "psram_dma_cmd.c"
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES heap esp_mm esp_hw_support esp_timer freertos fw_console lvgl__lvgl nvs_flash soc hal esp_hal_pmu esp_hal_mspi esp_rom)
+                       PRIV_REQUIRES heap esp_mm esp_hw_support esp_timer freertos fw_console lvgl__lvgl nvs_flash soc hal esp_hal_pmu esp_hal_mspi esp_rom esp_driver_dma lichen_random)
 # The 120 MHz clock is a Lichen patch to the IDF (tools/idf-patches, #94): make sure it really took, an unknown choice
 # would silently become the 200 MHz default that flips bits on this badge
 if(CONFIG_SPIRAM_SPEED_120M AND NOT CONFIG_SPIRAM_SPEED EQUAL 120)
