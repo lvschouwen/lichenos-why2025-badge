@@ -343,6 +343,23 @@ void shell_rebuild_home(void) {
     lvgl_port_unlock();
 }
 
+// The layout changed under the screens on top (Settings > Display, #128): home is rebuilt in its own frame and the
+// stack stays, so Esc goes back to Settings, not home. Home itself showing is swapped like shell_rebuild_home.
+void shell_rebuild_home_below(void) {
+    lvgl_port_lock(0);
+    if (!frames[0].screen || home_settling()) {
+        lvgl_port_unlock();
+        return;
+    }
+    frame_t old = frames[0];
+    new_home_frame(&frames[0]);
+    if (nav_depth() <= 1) {
+        show_top(); // never delete the screen that is showing
+    }
+    drop(&old);
+    lvgl_port_unlock();
+}
+
 void shell_scroll_tame(lv_obj_t *obj) {
     lv_obj_set_scroll_elastic(obj, false);
     lv_obj_set_scroll_momentum(obj, false);

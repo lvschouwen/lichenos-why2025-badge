@@ -22,6 +22,7 @@ void shell_back(void);               // like Esc: pops the top screen (later, ou
 lv_group_t *shell_top_group(void);   // the keypad group of the screen on top (ui_probe, LVGL context)
 void shell_open_app(size_t index);     // opens lichen_app_at(index); from home's Enter
 void shell_rebuild_home(void);         // after the app list or the layout changed
+void shell_rebuild_home_below(void);   // the same, keeping the screens above home open
 
 // ui_probe.c: bench diagnostics
 void ui_probe_init(void);           // registers "fw ui"

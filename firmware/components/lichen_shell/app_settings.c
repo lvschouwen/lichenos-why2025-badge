@@ -93,7 +93,7 @@ static void open_wifi(void *arg) {
 // Display: brightness is applied on every step and saved once it has settled
 static lv_timer_t *save_timer;
 static uint8_t     level[2]; // screen, keyboard
-static bool        layout_changed;
+static uint8_t     layout_at_open; // home is rebuilt on leaving only when the layout really differs from this (#128)
 
 static void save_levels(void) {
     backlight_set_saved(level[0], level[1]);
@@ -126,8 +126,7 @@ static void toggle_layout(void *arg) {
     (void)arg;
     bool grid = settings_get_u8("home_layout", HOME_TILES) != HOME_GRID;
     settings_set_u8("home_layout", grid ? HOME_GRID : HOME_TILES);
-    menu_set_value(layout_row, layout_name());
-    layout_changed = true; // home is rebuilt when this screen is left: a rebuild now would close it
+    menu_set_value(layout_row, layout_name()); // home is rebuilt when this screen is left, once, if still changed
 }
 
 // Screen timeout (#43): Enter steps through the choices; saved at once, the idle clock starts again from it
@@ -178,7 +177,7 @@ static void toggle_style(void *arg) {
 
 static void rebuild_later(void *arg) {
     (void)arg;
-    shell_rebuild_home();
+    shell_rebuild_home_below(); // Settings stays on top
 }
 
 static void on_display_delete(lv_event_t *e) {
@@ -194,8 +193,7 @@ static void on_display_delete(lv_event_t *e) {
     saver_row  = NULL;
     style_row  = NULL;
     lock_row   = NULL;
-    if (layout_changed) {
-        layout_changed = false;
+    if (settings_get_u8("home_layout", HOME_TILES) != layout_at_open) {
         lv_async_call(rebuild_later, NULL); // after the screen being deleted is gone
     }
 }
@@ -218,7 +216,8 @@ static lv_obj_t *build_display(void) {
     menu_note(menu, "The screensaver shows when the screen dims. The pocket lock comes on with it or when the screen goes "
                     "off; hold " LOCK_COMBO_TEXT " to unlock. It stops stray key presses, it is not security: no PIN.");
     switch_rows_refresh();
-    layout_row = menu_add(menu, "Home layout", layout_name(), toggle_layout, NULL);
+    layout_at_open = settings_get_u8("home_layout", HOME_TILES);
+    layout_row     = menu_add(menu, "Home layout", layout_name(), toggle_layout, NULL);
     lv_obj_add_event_cb(screen, on_display_delete, LV_EVENT_DELETE, NULL);
     return screen;
 }
