@@ -1245,33 +1245,73 @@ static bool handle_connection(int fd) {
     }
 }
 
-static bool load_or_create_token(void) {
-    FILE *f = fopen(TOKEN_FILE, "r");
-    if (f) {
-        char text[OTA_TOKEN_LEN + 8] = {0};
-        fread(text, 1, sizeof(text) - 1, f);
-        fclose(f);
-        text[OTA_TOKEN_LEN] = '\0';
-        bool valid          = true;
-        for (int i = 0; i < OTA_TOKEN_LEN; i++) {
-            char c = text[i];
-            valid  = valid && ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
-        }
-        if (valid) {
-            strcpy(token, text);
-            return true;
+#define TOKEN_NVS_KEY "ota_token" // the copy that survives an unmounted /storage (#112)
+
+static bool token_text_valid(char const *text) {
+    for (int i = 0; i < OTA_TOKEN_LEN; i++) {
+        char c = text[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+            return false;
         }
     }
-    // The token guards firmware installs: it must not be predictable (lichen_random keeps the entropy source on)
-    uint8_t raw[OTA_TOKEN_LEN / 2];
-    lichen_random_fill(raw, sizeof(raw));
-    ota_hex(raw, sizeof(raw), token);
-    f = fopen(TOKEN_FILE, "w");
+    return true;
+}
+
+static bool read_token_file(char *out) {
+    FILE *f = fopen(TOKEN_FILE, "r");
+    if (!f) {
+        return false;
+    }
+    char text[OTA_TOKEN_LEN + 8] = {0};
+    fread(text, 1, sizeof(text) - 1, f);
+    fclose(f);
+    text[OTA_TOKEN_LEN] = '\0';
+    if (!token_text_valid(text)) {
+        return false;
+    }
+    strcpy(out, text);
+    return true;
+}
+
+static bool read_token_nvs(char *out) {
+    char text[OTA_TOKEN_LEN + 8] = {0};
+    settings_get_str(TOKEN_NVS_KEY, text, sizeof(text), "");
+    if (strlen(text) != OTA_TOKEN_LEN || !token_text_valid(text)) {
+        return false;
+    }
+    strcpy(out, text);
+    return true;
+}
+
+static bool write_token_file(void) {
+    FILE *f = fopen(TOKEN_FILE, "w");
     if (!f) {
         return false;
     }
     bool written = fprintf(f, "%s\n", token) > 0;
     return fclose(f) == 0 && written;
+}
+
+// /storage first (what tools read), NVS as the copy that still works when /storage is not mounted. True when the
+// token will be the same next boot.
+static bool load_or_create_token(void) {
+    bool from_file = read_token_file(token);
+    bool from_nvs  = !from_file && read_token_nvs(token);
+    if (!from_file && !from_nvs) {
+        // The token guards firmware installs: it must not be predictable (lichen_random keeps the entropy source on)
+        uint8_t raw[OTA_TOKEN_LEN / 2];
+        lichen_random_fill(raw, sizeof(raw));
+        ota_hex(raw, sizeof(raw), token);
+    }
+    bool kept = from_file || from_nvs;
+    if (!from_file && write_token_file()) {
+        kept = true;
+    }
+    char stored[OTA_TOKEN_LEN + 8];
+    if (!(from_nvs || (read_token_nvs(stored) && strcmp(stored, token) == 0))) {
+        kept = settings_set_str(TOKEN_NVS_KEY, token) || kept;
+    }
+    return kept;
 }
 
 // A listening socket on OTA_PORT whose accept() gives up after a second, so a switch-off is noticed; -1 on failure
@@ -1384,7 +1424,7 @@ void ota_server_start(void) {
     auto_min  = m <= OTA_AUTOOFF_MAX_MIN ? m : 0;
     armed_s   = (uint32_t)now_s(); // boot
     if (!load_or_create_token()) {
-        ESP_LOGE(TAG, "couldn't save the token in %s; it changes on every boot", TOKEN_FILE);
+        ESP_LOGE(TAG, "couldn't save the token (no /storage, no settings); it changes on every boot");
     }
     // After the token is final (#5): "fw token" never shows a half-written one or "(none)" while it is being made
     console_register("token", "token (the update token for tools/badge.sh)", cmd_token);
