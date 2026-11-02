@@ -40,6 +40,7 @@ static lv_timer_t *poll;
 static uint32_t    gen;
 static lv_obj_t   *rows[MAX_APS + 2]; // the placeholder or the networks, then "Scan again"
 static size_t      row_count;
+static lv_obj_t   *focus_at_scan; // what had the focus when the scan started: compared, never dereferenced
 static wifi_ap_t   shown[MAX_APS];
 static size_t      shown_n;
 static char        target[33];
@@ -241,6 +242,9 @@ static void on_scan_done(void *data) {
         free(res);
         return;
     }
+    // The user moved while the scan ran (to Skip, say): the result does not take the focus from them (#128)
+    lv_obj_t *now   = group ? lv_group_get_focused(group) : NULL;
+    bool      moved = now != focus_at_scan && !(row_count > 0 && now == rows[0]);
     clear_rows();
     lv_group_t *previous = lv_group_get_default();
     lv_group_set_default(group);
@@ -257,7 +261,9 @@ static void on_scan_done(void *data) {
     }
     rows[row_count++] = menu_add(menu, "Scan again", "", again, NULL);
     lv_group_set_default(previous);
-    menu_focus_row(menu, setup_done ? 1 : 0); // the first network, not Skip
+    if (!moved && rows[0]) {
+        lv_group_focus_obj(rows[0]); // the first network or "Scan again": never the radio switch, one Enter from off
+    }
     if (!res->ok) {
         set_status("The scan failed. Try again.");
     } else if (shown_n == 0) {
@@ -295,6 +301,7 @@ static void start_scan(void) {
     lv_group_set_default(group);
     rows[row_count++] = menu_add(menu, "Scanning...", "", NULL, NULL); // keeps the group's focus on the list
     lv_group_set_default(previous);
+    focus_at_scan = group ? lv_group_get_focused(group) : NULL;
     set_status("Scanning for networks...");
     if (xTaskCreatePinnedToCore(scan_task, "wifiscan", 4096, (void *)(uintptr_t)gen, 4, NULL, 0) != pdPASS) {
         ESP_LOGW(TAG, "scan task did not start");
@@ -316,6 +323,7 @@ static void on_delete(lv_event_t *e) {
     setup_done = NULL;
     screen = menu = status = NULL;
     group                  = NULL;
+    focus_at_scan          = NULL;
     row_count              = 0;
 }
 
