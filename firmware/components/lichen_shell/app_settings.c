@@ -317,6 +317,7 @@ static live_row_t settings_time_row; // Settings' own page: Time
 static live_row_t settings_sd_row;   // and SD card (a mount or unmount on its page or the console shows on return)
 static live_row_t settings_wifi_row;   // Wi-Fi (the radio switch is on its page)
 static live_row_t settings_notify_row; // and Notifications (do-not-disturb, #62)
+static live_row_t settings_ota_row;    // and Updates over Wi-Fi (the auto-off timer closes it by itself, #112)
 
 // The zone row reads NVS: only refreshed when a zone is picked, not every second
 static void refresh_time_page(lv_timer_t *t) {
@@ -335,6 +336,7 @@ static void refresh_settings_time(lv_timer_t *t) {
     live_update(&settings_sd_row);
     live_update(&settings_notify_row);
     live_update(&settings_wifi_row);
+    live_update(&settings_ota_row);
 }
 
 // Each page's timer dies with it, and the rows it filled are forgotten
@@ -349,6 +351,7 @@ static void forget_settings_time(lv_event_t *e) {
     memset(&settings_sd_row, 0, sizeof(settings_sd_row));
     memset(&settings_notify_row, 0, sizeof(settings_notify_row));
     memset(&settings_wifi_row, 0, sizeof(settings_wifi_row));
+    memset(&settings_ota_row, 0, sizeof(settings_ota_row));
 }
 
 static void source_note(char *out, size_t cap) {
@@ -459,6 +462,10 @@ static char const *ota_value(void) {
     return ota_server_enabled() ? "On" : ota_server_auto_closed() ? "Off (timer)" : "Off";
 }
 
+static void ota_fill(char *out, size_t cap) {
+    strlcpy(out, ota_value(), cap);
+}
+
 static void ota_auto_value(char *out, size_t cap) {
     ota_autooff_text(ota_server_auto_off(), out, cap);
 }
@@ -546,6 +553,7 @@ static void open_settings(lv_obj_t *screen) {
     settings_wifi_row = live_row(menu_add(menu, "Wi-Fi", wifi, open_wifi, NULL), false, wifi_value);
     strlcpy(settings_wifi_row.shown, wifi, sizeof(settings_wifi_row.shown));
     ota_row = menu_add(menu, "Updates over Wi-Fi", ota_value(), toggle_ota, NULL);
+    settings_ota_row = live_row(ota_row, false, ota_fill);
     char auto_text[16];
     ota_auto_value(auto_text, sizeof(auto_text));
     ota_auto_row = menu_add(menu, "Close updates after", auto_text, step_ota_auto, NULL);
