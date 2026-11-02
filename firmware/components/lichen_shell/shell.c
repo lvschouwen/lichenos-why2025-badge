@@ -525,6 +525,9 @@ void shell_show_restarting(void) {
 }
 
 void shell_start(lv_display_t *display) {
+    // The boot screen is already up (shell_boot_screen), so the LVGL task renders while this runs: every LVGL call
+    // below (display events, timers, objects) needs the lock, or a realloc races the LVGL task's walk (#118)
+    lvgl_port_lock(0);
     home_init();
     setup_init();
     screen_idle_init();
@@ -545,7 +548,6 @@ void shell_start(lv_display_t *display) {
     power_app_register();
     notify_app_register();
     notes_app_register();
-    lvgl_port_lock(0);
     lv_display_set_default(display);
     if (!boot_screen_shown) {
         lv_obj_t *boot = boot_screen_create();
