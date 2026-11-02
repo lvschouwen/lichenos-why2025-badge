@@ -32,8 +32,12 @@ typedef struct {
 
 // LVGL context only
 static void deliver_key(uint32_t key) {
-    if (screen_idle_key() || screen_lock_active()) {
-        return; // it woke the dark screen (#43), as a real key would; the lock takes every key (#75, "fw lock unlock")
+    if (screen_idle_key()) {
+        return; // it woke the dark screen (#43), as a real key would
+    }
+    if (screen_lock_active()) {
+        screen_lock_probe_key(key); // the lock takes every key but feeds the unlock combo (#75, #112)
+        return;
     }
     lv_group_t *group = shell_top_group();
     if (UI_KEY_IS_SHAPE(key)) {
@@ -69,6 +73,7 @@ static void sequence_step(lv_timer_t *timer) {
         lv_timer_set_period(timer, KEY_GAP_MS);
         return;
     }
+    screen_lock_probe_end();
     xTaskNotifyGive(seq->waiter); // the last gap has passed: the screen has settled
     lv_timer_delete(timer);
 }

@@ -85,6 +85,8 @@ void screen_saver_init(void);          // registers "fw screensaver" and "fw loc
 void screen_saver_show(bool on);       // screen_idle's tick: the idle stage wants the saver (or not)
 void screen_lock_engage(void);         // the lock screen until the combo; nothing when already locked
 void screen_lock_release(void);        // unlocks (the combo, an update, power off, a warning that must show)
+void screen_lock_probe_key(uint32_t lv_key); // "fw keys send" while locked: only Esc/Backspace reach the combo (#112)
+void screen_lock_probe_end(void);      // the sequence is over: let go of the probe's keys
 bool screen_lock_active(void);         // any task
 void screen_lock_wake(void);           // any task: unlock and light the screen for something that must be seen
 

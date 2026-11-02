@@ -305,6 +305,18 @@ void screen_lock_release(void) {
     lv_obj_delete(old);
 }
 
+void screen_lock_probe_key(uint32_t lv_key) {
+    if (lock_scr) {
+        lock_combo_probe_key(&combo, lv_key, lv_tick_get());
+    }
+}
+
+void screen_lock_probe_end(void) {
+    if (lock_scr) {
+        lock_combo_reset(&combo); // a script that stopped half-way must not leave keys "held"
+    }
+}
+
 bool screen_lock_active(void) {
     return atomic_load(&locked);
 }

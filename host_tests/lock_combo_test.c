@@ -76,6 +76,18 @@ int main(void) {
     CHECK(!lock_combo_tick(&c, 500));
     CHECK(lock_combo_tick(&c, LOCK_HOLD_MS - 100));
 
+    // "fw keys send" while locked (#112): esc + bksp held fire the combo, anything else drops and lets go
+    lock_combo_reset(&c);
+    CHECK(lock_combo_probe_key(&c, 27, 100));
+    CHECK(lock_combo_probe_key(&c, 8, 350));
+    CHECK(!lock_combo_tick(&c, 350 + LOCK_HOLD_MS - 1));
+    CHECK(lock_combo_tick(&c, 350 + LOCK_HOLD_MS));
+    lock_combo_reset(&c);
+    lock_combo_probe_key(&c, 27, 0);
+    CHECK(!lock_combo_probe_key(&c, 10, 100)); // enter: dropped, and the held esc is let go
+    lock_combo_probe_key(&c, 8, 200);
+    CHECK(!lock_combo_tick(&c, 5000));
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;
