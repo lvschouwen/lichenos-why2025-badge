@@ -57,6 +57,9 @@ static char          last_summary[LORA_SUMMARY_MAX];
 
 static void cmd_lora(char const *args);
 
+// "fw lora log on": one line per received packet (off by default: on a busy mesh it floods the console
+// and the stored log, #114; `fw lora` keeps the counters and the last packet)
+static bool log_rx;
 // "fw lora raw on": also print each received packet as hex, for test vectors (#61), and every send's answer time
 static bool log_raw;
 
@@ -356,7 +359,9 @@ static void log_packet(lora_rx_packet_t const *rx) {
     } else if (!fmt(rx->data, rx->len, summary, sizeof(summary))) {
         snprintf(summary, sizeof(summary), "undecodable");
     }
-    ESP_LOGI(TAG, "rx %u B rssi %.1f snr %.1f | %s", rx->len, rx->rssi_x10 / 10.0, rx->snr_x10 / 10.0, summary);
+    if (log_rx || log_raw) {
+        ESP_LOGI(TAG, "rx %u B rssi %.1f snr %.1f | %s", rx->len, rx->rssi_x10 / 10.0, rx->snr_x10 / 10.0, summary);
+    }
     if (cb) {
         cb(rx->data, rx->len, rx->rssi_x10, rx->snr_x10);
     }
@@ -572,7 +577,7 @@ bool lora_start(void) {
         ESP_LOGE(TAG, "peer data callback not registered");
         return false;
     }
-    console_register("lora", "lora [on|off | raw on|off] (radio status and switch; raw: print packets as hex and tx answer times)", cmd_lora);
+    console_register("lora", "lora [on|off | log on|off | raw on|off] (radio status and switch; log: a line per received packet; raw: also hex and tx answer times)", cmd_lora);
     if (xTaskCreatePinnedToCore(lora_task, "LoRa", 5120 /* peak 2.7 KB, #107 */, NULL, 3, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "task not started");
         return false;
@@ -703,6 +708,11 @@ void lora_get_counts(uint32_t *rx, uint32_t *tx_count) {
 }
 
 static void cmd_lora(char const *args) {
+    if (strcmp(args, "log on") == 0 || strcmp(args, "log off") == 0) {
+        log_rx = args[5] == 'n';
+        console_reply("lora log %s", log_rx ? "on" : "off");
+        return;
+    }
     if (strcmp(args, "raw on") == 0 || strcmp(args, "raw off") == 0) {
         log_raw = args[5] == 'n';
         console_reply("lora raw %s", log_raw ? "on" : "off");
@@ -714,7 +724,7 @@ static void cmd_lora(char const *args) {
         return;
     }
     if (*args) {
-        console_reply("lora [on|off | raw on|off]");
+        console_reply("lora [on|off | log on|off | raw on|off]");
         return;
     }
     lora_status_t st;
