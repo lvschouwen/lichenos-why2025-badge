@@ -21,6 +21,9 @@
 #include "lichen_notify.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+
+// One of the two callers that erase NVS (the other is main.c): past fw_console's refusing wrap (console.c)
+esp_err_t __real_nvs_flash_erase_partition(char const *part_name);
 #include "storage.h"
 
 #include <dirent.h>
@@ -265,11 +268,11 @@ static void nvs_wipe_full(uint8_t after) {
     size_t    n    = kept ? kept_collect(kept, MAX_KEPT) : 0;
     esp_err_t err  = kept ? nvs_flash_deinit() : ESP_ERR_NO_MEM;
     if (err == ESP_OK) {
-        err = nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME);
+        err = __real_nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME);
     }
     esp_err_t init = nvs_flash_init(); // also after a failed erase: the rest of the boot needs NVS
     if (init == ESP_ERR_NVS_NO_FREE_PAGES || init == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        init = nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME) == ESP_OK ? nvs_flash_init() : init;
+        init = __real_nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME) == ESP_OK ? nvs_flash_init() : init;
     }
     bool erased = err == ESP_OK && init == ESP_OK;
     if (!erased) {

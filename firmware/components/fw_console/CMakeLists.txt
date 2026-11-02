@@ -5,3 +5,4 @@ idf_component_register(SRCS "console.c" "console_cmd.c" "restart_log.c"
 target_compile_definitions(${COMPONENT_LIB} PRIVATE "CONSOLE_CMD_PREFIX=\"fw \"")
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_restart")
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=nvs_flash_erase")
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=nvs_flash_erase_partition")

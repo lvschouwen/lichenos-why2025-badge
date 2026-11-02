@@ -76,15 +76,17 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
 
 ## The wraps
 
-Three calls are wrapped at link time (`-Wl,--wrap=`). The OS's own legitimate caller reaches the real function through
+Five calls are wrapped at link time (`-Wl,--wrap=`). The OS's own legitimate caller reaches the real function through
 `__real_*`; every other caller lands in the wrap, which logs an `E` line with the caller's return address (look it up
 in `firmware/build/badge_fw.map`) and refuses:
 
 | Call | Wrap in | Allowed | Refused with |
 |---|---|---|---|
 | `settimeofday` | `lichen_clock.c` | `lichen_clock` (through `__real_`); any call that writes back the time the clock already shows (under 1 s off, `clock_resync_only`): that is IDF's `esp_sync_timekeeping_timers` on every restart and before sleep | `-1`, `errno = EPERM` |
-| `nvs_flash_erase` | `console.c` | nobody: the OS erases by partition (`main.c` on an unusable layout, `factory_reset.c`); MeshCore's `DataStore` is built with the name changed to its own wipe | `ESP_ERR_NOT_ALLOWED` |
+| `nvs_flash_erase` | `console.c` | nobody: the OS erases by partition (`main.c` on an unusable layout, `factory_reset.c`, past the wrap below); MeshCore's `DataStore` is built with the name changed to its own wipe | `ESP_ERR_NOT_ALLOWED` |
 | `bootloader_random_enable` | `lichen_random.c` | `lichen_random_start` (through `__real_`). IDF's `nvs_sec_provider` (NVS encryption, off) would be refused, so turning NVS encryption on fails the build until the wrap allows it | nothing happens (void) |
+| `bootloader_random_disable` | `lichen_random.c` | nobody today (no caller in the image); the OS's future ADC hand-over (#11, #69) goes through `__real_` in `lichen_random.c`. `nvs_sec_provider` again: covered by the same build error | nothing happens (void) |
+| `nvs_flash_erase_partition` | `console.c` | `main.c` (NVS unusable at boot) and `factory_reset.c` (#66, the full erase), both through `__real_` | `ESP_ERR_NOT_ALLOWED` |
 
 `esp_restart` is wrapped too (`console.c`), but only to record the caller: a restart is never refused.
 

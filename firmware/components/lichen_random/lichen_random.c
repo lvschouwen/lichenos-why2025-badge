@@ -18,7 +18,7 @@ extern void __real_bootloader_random_enable(void);
 // holds the source on: refusing it would burn a weak key for good. It is linked only with NVS encryption, which is off;
 // turning that on must allow it here first.
 #if CONFIG_NVS_ENCRYPTION
-#error "NVS encryption: nvs_sec_provider calls bootloader_random_enable(); allow it in __wrap_bootloader_random_enable"
+#error "NVS encryption: nvs_sec_provider calls bootloader_random_enable()/_disable(); allow it in both wraps"
 #endif
 
 // Refuses (#84 T9): the OS turns the entropy source on once (lichen_random_start, through __real_) and owns the ADC
@@ -26,6 +26,14 @@ extern void __real_bootloader_random_enable(void);
 void __wrap_bootloader_random_enable(void);
 void __wrap_bootloader_random_enable(void) {
     ESP_LOGE(TAG, "bootloader_random_enable refused: the OS owns the entropy source (lichen_random), caller %p",
+             __builtin_return_address(0));
+}
+
+// Refuses every caller (#123): a disable from anyone but the OS turns off the entropy source the OS's random bytes rely
+// on. Nothing in the image calls it today; the OS's own ADC hand-over (#11, #69) will call __real_ from here.
+void __wrap_bootloader_random_disable(void);
+void __wrap_bootloader_random_disable(void) {
+    ESP_LOGE(TAG, "bootloader_random_disable refused: the OS owns the entropy source (lichen_random), caller %p",
              __builtin_return_address(0));
 }
 

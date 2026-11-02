@@ -447,6 +447,15 @@ esp_err_t __wrap_nvs_flash_erase(void) {
     return ESP_ERR_NOT_ALLOWED;
 }
 
+// Refuses every caller but main.c (NVS unusable at boot) and factory_reset.c (#66), which call __real_ (#123): erasing
+// the partition takes the same with it as nvs_flash_erase. The caller is named by its return address.
+esp_err_t __wrap_nvs_flash_erase_partition(char const *part_name);
+esp_err_t __wrap_nvs_flash_erase_partition(char const *part_name) {
+    ESP_LOGE("nvs", "nvs_flash_erase_partition(%s) refused: only the OS erases NVS (factory reset), caller %p",
+             part_name ? part_name : "?", __builtin_return_address(0));
+    return ESP_ERR_NOT_ALLOWED;
+}
+
 void system_restart(char const *why) {
     s_restart_why = why ? why : "unspecified";
     if (capture.task && capture.task == xTaskGetCurrentTaskHandle()) {
