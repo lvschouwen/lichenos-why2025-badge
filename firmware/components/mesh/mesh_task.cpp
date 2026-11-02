@@ -1657,6 +1657,40 @@ extern "C" size_t mesh_out_list(mesh_out_info_t *out, size_t max) {
 
 static char const *const OUT_STATE_NAME[] = {"queued", "sent", "on air", "heard repeated", "delivered", "FAILED"};
 
+// ---- trace path and path discovery (#53) ---------------------------------------------------------------------------
+// One request at a time, shared with the pipe under ob_mux like the outbox: copy-in, never the mesh lock (LVGL safe)
+
+static mt_t *trace_req; // PSRAM, made with the outbox
+
+extern "C" uint32_t mesh_trace_start(uint8_t const prefix[6], mt_kind_t kind, char const **why) {
+    char const *local;
+    why  = why ? why : &local;
+    *why = NULL;
+    if (!send_ready(why)) {
+        return 0;
+    }
+    if (!trace_req) {
+        *why = "MeshCore is not running";
+        return 0;
+    }
+    uint32_t tag;
+    lichen_random_fill(&tag, sizeof(tag)); // a trace is matched by its tag: random, as MeshCore's apps make it
+    mesh_ob_enter();
+    uint32_t seq = mt_request(trace_req, kind, prefix, tag, (uint32_t)millis(), why);
+    mesh_ob_exit();
+    return seq;
+}
+
+extern "C" bool mesh_trace_get(mt_t *out) {
+    if (!trace_req) {
+        return false;
+    }
+    mesh_ob_enter();
+    mt_poll(trace_req, (uint32_t)millis(), out); // a plain copy: the lines are made after the critical section
+    mesh_ob_exit();
+    return true;
+}
+
 // A channel name typed on the console as stored (channel_find_locked), into out (may be typed); false (said why,
 // after `what`) when there is none or MeshCore is not there
 static bool console_channel_name(char const *typed, char *out, size_t cap, char const *what) {
@@ -1739,6 +1773,75 @@ static void cmd_mesh_dm(char const *args) {
     }
 }
 
+// A contact by the start of its key as typed (2 to 12 hex digits): false (said why) when none or more than one
+static bool console_contact(char const *hex, uint8_t out[6]) {
+    size_t   len = strspn(hex, "0123456789abcdefABCDEF");
+    uint8_t  want[6];
+    unsigned b;
+    if (len < 2 || len > 12 || len % 2 || hex[len]) {
+        console_reply("give 2 to 12 hex digits of the contact's key (fw contacts lists them)");
+        return false;
+    }
+    for (size_t i = 0; i < len / 2; i++) {
+        sscanf(hex + 2 * i, "%2x", &b);
+        want[i] = (uint8_t)b;
+    }
+    if (!mesh_lock_within(MESH_SET_WAIT_MS)) {
+        console_reply("MeshCore is busy, try again");
+        return false;
+    }
+    int              found = 0;
+    ContactsIterator it    = node->startContactsIterator();
+    ContactInfo      c;
+    while (it.hasNext(node, c)) {
+        if (memcmp(c.id.pub_key, want, len / 2) == 0 && found++ == 0) {
+            memcpy(out, c.id.pub_key, 6);
+        }
+    }
+    mesh_unlock();
+    if (found > 1) {
+        console_reply("%d contacts start with %s: give more digits", found, hex);
+    } else if (!found) {
+        console_reply("no contact starts with %s", hex);
+    }
+    return found == 1;
+}
+
+static char const *const TRACE_STATE_NAME[] = {"none", "queued", "sent to MeshCore", "waiting", "done", "failed",
+                                               "no answer"};
+
+// "fw mesh trace|discover <hex>": starts one; "fw mesh trace" alone shows the last one and its result
+static void cmd_mesh_trace(char const *arg, mt_kind_t kind) {
+    if (*arg) {
+        uint8_t prefix[6];
+        if (!console_contact(arg, prefix)) {
+            return;
+        }
+        char const *why = NULL;
+        uint32_t    seq = mesh_trace_start(prefix, kind, &why);
+        if (seq) {
+            console_reply("%s #%lu queued: fw mesh trace shows the result", kind == MT_TRACE ? "trace" : "discover",
+                          (unsigned long)seq);
+        } else {
+            console_reply("not started: %s", why ? why : "?");
+        }
+        return;
+    }
+    mt_t      *t     = (mt_t *)heap_caps_malloc(sizeof(mt_t), MALLOC_CAP_SPIRAM);
+    mt_line_t *lines = (mt_line_t *)heap_caps_malloc(MT_LINES_MAX * sizeof(mt_line_t), MALLOC_CAP_SPIRAM);
+    if (t && lines && mesh_trace_get(t)) {
+        console_reply("%s #%lu to %02x%02x%02x%02x%02x%02x: %s", t->kind == MT_TRACE ? "trace" : "discover",
+                      (unsigned long)t->seq, t->prefix[0], t->prefix[1], t->prefix[2], t->prefix[3], t->prefix[4],
+                      t->prefix[5], TRACE_STATE_NAME[t->state]);
+        size_t n = t->seq ? mt_format(t, lines, MT_LINES_MAX) : 0;
+        for (size_t i = 0; i < n; i++) {
+            console_reply("  %s", lines[i].text);
+        }
+    }
+    free(t);
+    free(lines);
+}
+
 static void cmd_mesh_out(void) {
     mesh_out_info_t list[OB_CAP];
     size_t          n = mesh_out_list(list, OB_CAP);
@@ -1764,6 +1867,8 @@ static void cmd_mesh_link(void) {
                   (int)offline_queue_len, (unsigned long)s.drained, (unsigned long)s.msg_waiting, busy,
                   (unsigned long)s.lost_replies, (unsigned long)s.fifo_drops, (unsigned long)s.bad_frames,
                   (unsigned long)s.confirmed);
+    console_reply("traces back %lu, discoveries answered %lu, paths stored %lu", (unsigned long)s.traces,
+                  (unsigned long)s.discoveries, (unsigned long)s.paths_stored);
     for (int i = 0; i < LINK_PUSH_KINDS; i++) {
         if (s.push_count[i]) {
             console_reply("  push 0x%02x x %lu", 0x80 + i, (unsigned long)s.push_count[i]);
@@ -1964,6 +2069,14 @@ static void cmd_mesh(char const *args) {
         cmd_mesh_out();
         return;
     }
+    if (strncmp(args, "trace", 5) == 0 && (args[5] == ' ' || !args[5])) {
+        cmd_mesh_trace(args + (args[5] ? 6 : 5), MT_TRACE);
+        return;
+    }
+    if (strncmp(args, "discover ", 9) == 0) {
+        cmd_mesh_trace(args + 9, MT_DISCOVER);
+        return;
+    }
     if (strcmp(args, "link") == 0) {
         cmd_mesh_link();
         return;
@@ -1991,7 +2104,7 @@ static void cmd_mesh(char const *args) {
     if (*args) {
         console_reply("mesh | mesh start | mesh stop | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
                       "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
-                      "mesh dm <12 hex> <text> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
+                      "mesh dm <12 hex> <text> | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
                       "[<lat> <lon> | share on|off] | mesh autoadd [on|off | types <all|chat,repeater,room,sensor> | hops "
                       "<any|direct|n> | overwrite on|off]");
         return;
@@ -2499,17 +2612,22 @@ static bool start_locked(char const *files_dir) {
     void *tables_mem = heap_caps_malloc(sizeof(SimpleMeshTables), MALLOC_CAP_SPIRAM);
     void *mesh_mem   = heap_caps_malloc(sizeof(BadgeMesh), MALLOC_CAP_SPIRAM);
     void *ob_mem     = heap_caps_calloc(1, sizeof(ob_t), MALLOC_CAP_SPIRAM);
-    if (!ok || !tables_mem || !mesh_mem || !ob_mem || !SPIFFS.begin(true)) {
+    void *mt_mem     = heap_caps_calloc(1, sizeof(mt_t), MALLOC_CAP_SPIRAM);
+    if (!ok || !tables_mem || !mesh_mem || !ob_mem || !mt_mem || !SPIFFS.begin(true)) {
         ESP_LOGE(TAG, "no memory or no /storage");
         free(tables_mem);
         free(mesh_mem);
         free(ob_mem);
+        free(mt_mem);
         return false;
     }
     tables    = new (tables_mem) SimpleMeshTables();
     outbox = (ob_t *)ob_mem;
     ob_init(outbox);
     BadgeMesh *n = new (mesh_mem) BadgeMesh(radio_driver, rng, rtc_clock, *tables, store, outbox);
+    mt_init((mt_t *)mt_mem);
+    n->attachTrace((mt_t *)mt_mem);
+    trace_req = (mt_t *)mt_mem;
 
     // Everything is loaded before node is published: the screens and the console read MeshCore only through node, and
     // must not walk the contact table while begin() fills it (#65 review)

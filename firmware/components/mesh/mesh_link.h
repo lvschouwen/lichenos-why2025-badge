@@ -11,6 +11,7 @@
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
 #include "mesh_outbox.h"
+#include "mesh_trace.h"
 
 extern "C" {
 void mesh_ob_enter(void);
@@ -28,6 +29,7 @@ void mesh_contacts_full(void);
 struct LinkStats {
     uint32_t cmds_out = 0, replies = 0, pushes = 0, msg_waiting = 0, drained = 0, no_more = 0;
     uint32_t self_ok = 0, self_bad = 0, lost_replies = 0, fifo_drops = 0, bad_frames = 0, confirmed = 0;
+    uint32_t traces = 0, discoveries = 0, paths_stored = 0; // #53: our answers in, discovered paths stored
     uint32_t push_count[LINK_PUSH_KINDS] = {};
     uint32_t reply_count[32]             = {};
     uint8_t  app_ver                     = 0; // what DEVICE_INFO answered with (the firmware's protocol version)
@@ -41,6 +43,9 @@ public:
         mesh_ = mesh;
         ob_   = ob;
     }
+    // The trace/discovery request shared with the UI (#53), under mesh_ob_enter/exit like the outbox
+    void  attach_trace(mt_t *mt) { mt_ = mt; }
+    mt_t *trace() const { return mt_; }
     // Queues the start sequence: DEVICE_QUERY(3) so MyMesh builds the V3 message layouts, APP_START, then a drain
     void start();
     LinkStats const &stats() const { return stats_; }
@@ -58,7 +63,7 @@ public:
     bool can_queue() const { return fifo_n_ < LINK_FIFO; }
 
 private:
-    enum CurKind : uint8_t { CUR_NONE, CUR_INTERNAL, CUR_OUTBOX };
+    enum CurKind : uint8_t { CUR_NONE, CUR_INTERNAL, CUR_OUTBOX, CUR_TRACE };
     struct Frame {
         uint8_t len;
         uint8_t data[MF_MAX_FRAME];
@@ -66,6 +71,8 @@ private:
     bool   fifo_push(uint8_t const *data, size_t len);
     size_t take_fifo(uint8_t dest[]);
     size_t take_outbox(uint8_t dest[]);
+    size_t take_trace(uint8_t dest[]);
+    void   store_discovered_path(mf_discovery_t const &d);
     void   request_drain();
     size_t build_outbox_frame(ob_action_t const &act, uint8_t *dest);
     void   on_reply(mf_msg_t const &m);
@@ -73,6 +80,8 @@ private:
 
     MyMesh    *mesh_ = nullptr;
     ob_t      *ob_   = nullptr;
+    mt_t      *mt_   = nullptr;
+    mt_plan_t  plan_; // off the stack, as scratch_
     Frame      fifo_[LINK_FIFO];
     uint8_t    fifo_head_ = 0, fifo_n_ = 0;
     CurKind    cur_      = CUR_NONE;
@@ -95,6 +104,7 @@ public:
         advert_limit_init(&advert_limit_);
     }
     CompanionPipe &pipe() { return pipe_; }
+    void           attachTrace(mt_t *mt) { pipe_.attach_trace(mt); }
     // Our own advert, under the mesh lock (#52): zero-hop (heard by nodes in direct range) or flooded with the default
     // scope as MyMesh's CMD_SEND_SELF_ADVERT does. With the location when the prefs share it. false when no packet.
     bool advertNow(bool flood);

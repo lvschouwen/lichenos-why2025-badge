@@ -5,6 +5,7 @@
 #include "mesh_outbox.h"
 #include "mesh_store.h"
 #include "mesh_tile.h"
+#include "mesh_trace.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -216,6 +217,16 @@ typedef struct {
 } mesh_out_info_t;
 // The newest messages first, up to max (for the console and the chat screens)
 size_t mesh_out_list(mesh_out_info_t *out, size_t max);
+
+// ---- trace path and path discovery (#53; mesh_trace.h) ---------------------------------------------------------------
+// Copy-in and non-blocking like the senders (LVGL safe). One request at a time over the whole badge.
+
+// Starts a trace along the contact's stored path (MT_TRACE) or a path discovery (MT_DISCOVER), whose answer becomes the
+// stored path. Its number, or 0 with *why set (LoRa off, one still running, MeshCore not running...). A trace that
+// cannot go (no path, a direct companion) fails in the mesh task with the reason: mesh_trace_get shows it.
+uint32_t mesh_trace_start(uint8_t const prefix[6], mt_kind_t kind, char const **why);
+// A copy of the current or last request (an answer that is late is timed out here); false before MeshCore is up
+bool     mesh_trace_get(mt_t *out);
 
 #ifdef __cplusplus
 }

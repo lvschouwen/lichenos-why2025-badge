@@ -8,6 +8,7 @@
 #include "lichen_ui.h"
 #include "menu.h"
 #include "mesh_contact_fmt.h"
+#include "mesh.h"
 #include "meshcore_chat.h"
 #include "theme.h"
 
@@ -19,6 +20,8 @@ static char const TAG[] = "meshcore";
 
 #define SCREEN_CONTACT 160
 #define SCREEN_SHARE   161
+#define SCREEN_TRACE   162
+#define TRACE_TICK_MS  250
 #define TICK_MS        1000
 #define TICK_WAIT_MS   20  // the refresh: a busy MeshCore (saving files) skips a tick, the keys never wait on it
 #define KEY_WAIT_MS    100 // a key press, in all (action and the copy after it): a short wait beats "busy"
@@ -134,6 +137,127 @@ static void on_fav(void *arg) {
     }
 }
 
+// ---- Trace path and Discover path (#53): the request goes to the mesh task, this screen polls its copy -----------------
+
+typedef struct {
+    mt_t      t;
+    mt_line_t lines[MT_LINES_MAX];
+    char      text[MT_LINES_MAX * MT_LINE_MAX];
+} trace_mem_t;
+
+static lv_obj_t *add_text(lv_obj_t *menu, char const *text);
+
+static trace_mem_t *trace_mem; // PSRAM, while the result screen exists
+static mt_kind_t    trace_kind;
+static uint32_t     trace_seq; // ours; 0 when it could not start
+static lv_obj_t    *trace_label, *trace_again;
+static lv_timer_t  *trace_timer;
+static bool         trace_shown_busy;
+
+static void trace_show(void) {
+    if (!trace_mem || !trace_label || !trace_seq || !mesh_trace_get(&trace_mem->t)) {
+        return;
+    }
+    mt_t const *t = &trace_mem->t;
+    if (t->seq != trace_seq) {
+        set_text(trace_label, "Another trace or discovery was started (the console?): Enter starts this one again");
+        return;
+    }
+    size_t n   = mt_format(t, trace_mem->lines, MT_LINES_MAX);
+    size_t at  = 0;
+    size_t cap = sizeof(trace_mem->text);
+    trace_mem->text[0] = 0;
+    for (size_t i = 0; i < n && at + 1 < cap; i++) {
+        at += (size_t)snprintf(trace_mem->text + at, cap - at, "%s%s", i ? "\n" : "", trace_mem->lines[i].text);
+    }
+    set_text(trace_label, trace_mem->text);
+    bool busy = mt_busy(t);
+    if (busy != trace_shown_busy) { // the row redraws only on a change
+        menu_set_value(trace_again, busy ? "..." : "");
+        trace_shown_busy = busy;
+    }
+}
+
+static void trace_tick(lv_timer_t *timer) {
+    (void)timer;
+    trace_show();
+}
+
+static void trace_start(void) {
+    char const *why = NULL;
+    trace_seq       = mesh_trace_start(prefix, trace_kind, &why);
+    if (!trace_seq) {
+        char text[96];
+        snprintf(text, sizeof(text), "Not started: %s", why ? why : "?");
+        set_text(trace_label, text);
+        return;
+    }
+    trace_show();
+}
+
+static void on_trace_again(void *arg) {
+    (void)arg;
+    if (trace_mem && trace_seq && mesh_trace_get(&trace_mem->t) && trace_mem->t.seq == trace_seq &&
+        mt_busy(&trace_mem->t)) {
+        return; // still waiting for this one: a held Enter does not queue more
+    }
+    trace_start();
+}
+
+static void on_trace_delete(lv_event_t *e) {
+    (void)e;
+    if (trace_timer) {
+        lv_timer_delete(trace_timer);
+        trace_timer = NULL;
+    }
+    heap_caps_free(trace_mem);
+    trace_mem   = NULL;
+    trace_label = trace_again = NULL;
+}
+
+static lv_obj_t *build_trace(void) {
+    lv_obj_t *screen = shell_page_create();
+    char      head[MESH_NAME_MAX + 24];
+    snprintf(head, sizeof(head), "%s: %s", trace_kind == MT_TRACE ? "Trace" : "Discover",
+             title[0] ? title : "(no name)");
+    lv_obj_t *menu = menu_create(screen, head);
+    lv_obj_add_event_cb(screen, on_trace_delete, LV_EVENT_DELETE, NULL);
+    heap_caps_free(trace_mem);
+    trace_mem = heap_caps_calloc(1, sizeof(*trace_mem), MALLOC_CAP_SPIRAM);
+    trace_seq        = 0;
+    trace_shown_busy = false;
+    if (!trace_mem) {
+        menu_note(menu, "Not enough memory.");
+        return screen;
+    }
+    menu_note(menu, trace_kind == MT_TRACE ? "Along the stored path and back; SNR as each hop heard it:"
+                                           : "Asks the contact over the whole mesh which path to use:");
+    trace_label = add_text(menu, "Sending...");
+    trace_again = menu_add(menu, "Again", "", on_trace_again, NULL);
+    menu_note(menu, "Esc: back");
+    trace_start();
+    trace_timer = lv_timer_create(trace_tick, TRACE_TICK_MS, NULL);
+    return screen;
+}
+
+static void open_trace(mt_kind_t kind) {
+    if (gone) {
+        return;
+    }
+    trace_kind = kind;
+    shell_open(build_trace, SCREEN_TRACE);
+}
+
+static void on_trace(void *arg) {
+    (void)arg;
+    open_trace(MT_TRACE);
+}
+
+static void on_discover(void *arg) {
+    (void)arg;
+    open_trace(MT_DISCOVER);
+}
+
 // ---- Share: the link as text (sending the contact on air is not done yet) ------------------------------------------
 
 static lv_obj_t *add_text(lv_obj_t *menu, char const *text) {
@@ -225,6 +349,8 @@ static lv_obj_t *build_detail(void) {
         menu_add(menu, "Message", "", on_message, NULL); // the first row: Enter Enter is the old "message a contact"
     }
     reset_row = menu_add(menu, "Reset path", "", on_reset, NULL);
+    menu_add(menu, "Trace path", "", on_trace, NULL);
+    menu_add(menu, "Discover path", "", on_discover, NULL);
     fav_row   = menu_add(menu, "Favourite", "", on_fav, NULL);
     menu_add(menu, "Share", "link", on_share, NULL);
     menu_add(menu, "Remove", "", on_remove, NULL);

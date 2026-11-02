@@ -25,6 +25,8 @@ enum {
     MF_CMD_RESET_PATH         = 13,
     MF_CMD_REMOVE_CONTACT     = 15,
     MF_CMD_DEVICE_QUERY       = 22,
+    MF_CMD_SEND_TRACE_PATH    = 36,
+    MF_CMD_PATH_DISCOVERY     = 52, // CMD_SEND_PATH_DISCOVERY_REQ
 };
 enum {
     MF_RESP_OK                  = 0,
@@ -43,6 +45,8 @@ enum {
     MF_PUSH_LOGIN_SUCCESS       = 0x85,
     MF_PUSH_LOGIN_FAIL          = 0x86,
     MF_PUSH_STATUS_RESPONSE     = 0x87,
+    MF_PUSH_TRACE_DATA          = 0x89,
+    MF_PUSH_PATH_DISCOVERY      = 0x8D, // PUSH_CODE_PATH_DISCOVERY_RESPONSE
 };
 enum { MF_ERR_NOT_FOUND = 2, MF_ERR_TABLE_FULL = 3 };
 
@@ -62,7 +66,33 @@ typedef enum {
     MF_LOGIN_SUCCESS,
     MF_LOGIN_FAIL,
     MF_STATUS,
+    MF_TRACE,     // PUSH_TRACE_DATA: a trace came back (#53)
+    MF_DISCOVERY, // PUSH_PATH_DISCOVERY_RESPONSE: the contact answered a path discovery (#53)
 } mf_kind_t;
+
+#define MF_PATH_MAX       64  // MAX_PATH_SIZE
+#define MF_TRACE_HASH_MAX 128 // a trace's hash list: up to 64 hops of 1- or 2-byte hashes (MyMesh refuses > 64 hops)
+
+// A trace's result (#53), as MyMesh::onTraceRecv pushes it: the hashes the trace was sent along, the SNR each hop heard
+// it with (dB x 4, signed), and the SNR we heard the last hop with
+typedef struct {
+    uint32_t tag, auth;
+    uint8_t  flags;     // bits 0-1: log2 of the bytes per hash
+    uint8_t  hash_len;  // bytes in hashes
+    uint8_t  hops;      // hash_len >> (flags & 3): one SNR per hop
+    uint8_t  hashes[MF_TRACE_HASH_MAX];
+    int8_t   snr_q[MF_PATH_MAX];
+    int8_t   final_snr_q;
+} mf_trace_t;
+
+// A path discovery's answer (#53): the path to the contact (to store) and the one its answer came back along, both
+// packed as ContactInfo.out_path_len (hop count in bits 0-5, hash size - 1 in bits 6-7)
+typedef struct {
+    uint8_t prefix[6];
+    uint8_t out_len, in_len;
+    uint8_t out_path[MF_PATH_MAX];
+    uint8_t in_path[MF_PATH_MAX];
+} mf_discovery_t;
 
 typedef struct {
     mf_kind_t kind;
@@ -76,6 +106,8 @@ typedef struct {
     uint32_t  trip_ms;    // MF_SEND_CONFIRMED
     uint8_t   pub[MF_PUB_LEN]; // MF_SELF_INFO
     char      name[MF_NAME_MAX]; // MF_SELF_INFO
+    mf_trace_t     trace; // MF_TRACE
+    mf_discovery_t disc;  // MF_DISCOVERY
 } mf_msg_t;
 
 // Encoders: the length written to out (>= MF_MAX_FRAME bytes), 0 when the frame would not fit or the text is too long
@@ -87,10 +119,14 @@ size_t mf_encode_send_dm(uint8_t *out, uint8_t attempt, uint32_t timestamp, uint
                          char const *text, size_t text_len);
 size_t mf_encode_reset_path(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);
 size_t mf_encode_remove_contact(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);
+// CMD_SEND_TRACE_PATH (#53): the trace goes along hashes (hash_len bytes, each 1 << (flags & 3) bytes), every repeater
+// on it adds the SNR it heard. 0 when the list is empty, not whole hashes, or over 64 hops.
+size_t mf_encode_trace(uint8_t *out, uint32_t tag, uint32_t auth, uint8_t flags, uint8_t const *hashes, size_t hash_len);
+// CMD_SEND_PATH_DISCOVERY_REQ (#53): a flooded request the contact answers along the path it learned
+size_t mf_encode_discovery(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);
 
 // A whole contact for CMD_ADD_UPDATE_CONTACT (#49), as MyMesh::updateContactFromFrame reads it. lastmod goes along so
 // a changed flag does not move the contact in "most recently heard" order.
-#define MF_PATH_MAX 64 // MAX_PATH_SIZE
 typedef struct {
     uint8_t  pub[MF_PUB_LEN];
     uint8_t  type, flags, out_path_len;

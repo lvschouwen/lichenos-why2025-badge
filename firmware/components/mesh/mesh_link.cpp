@@ -27,6 +27,15 @@ void BadgeMesh::logRx(mesh::Packet *packet, int len, float score) {
 }
 
 void BadgeMesh::logTx(mesh::Packet *packet, int len) {
+    mt_t *mt = pipe_.trace();
+    if (packet->getPayloadType() == PAYLOAD_TYPE_TRACE && mt && packet->payload_len >= 4) {
+        uint32_t tag;
+        memcpy(&tag, packet->payload, 4);
+        mesh_ob_enter();
+        mt_on_tx(mt, tag, (uint32_t)millis()); // our trace on air: its round trip counts from here (#53)
+        mesh_ob_exit();
+        return;
+    }
     bool is_dm;
     if (!ours_to_track(packet, &is_dm)) {
         return;
@@ -208,8 +217,15 @@ size_t CompanionPipe::checkRecvFrame(uint8_t dest[]) {
             mesh_ob_enter();
             ob_fail(ob_, cur_id_);
             mesh_ob_exit();
+        } else if (cur_ == CUR_TRACE) {
+            mesh_ob_enter();
+            mt_fail(mt_, "MeshCore did not answer");
+            mesh_ob_exit();
         }
         cur_ = CUR_NONE;
+    }
+    if (size_t n = take_trace(dest)) {
+        return n; // asked for by hand, one at a time: ahead of the queues
     }
     bool fifo_has = fifo_n_ > 0;
     bool ob_first = ob_arb_outbox_first(&arb_, fifo_has);
@@ -261,6 +277,70 @@ size_t CompanionPipe::take_outbox(uint8_t dest[]) {
     return n;
 }
 
+// The trace or path discovery the UI asked for (#53), as MyMesh's own command for the contact
+size_t CompanionPipe::take_trace(uint8_t dest[]) {
+    if (!mt_) {
+        return 0;
+    }
+    mt_kind_t kind;
+    uint8_t   prefix[MF_PREFIX];
+    uint32_t  tag;
+    mesh_ob_enter();
+    bool have = mt_take(mt_, &kind, prefix, &tag, (uint32_t)millis());
+    mesh_ob_exit();
+    if (!have) {
+        return 0;
+    }
+    ContactInfo *c   = mesh_->lookupContactByPubKey(prefix, MF_PREFIX);
+    char const  *why = c ? NULL : "contact not found";
+    size_t       n   = 0;
+    if (c && kind == MT_DISCOVER) {
+        n = mf_encode_discovery(dest, c->id.pub_key);
+    } else if (c) {
+        uint8_t direct_size = (uint8_t)(mesh_->getNodePrefs()->path_hash_mode + 1);
+        why = mt_plan(c->type, c->out_path_len, c->out_path, c->id.pub_key, direct_size, &plan_);
+        if (!why) {
+            n = mf_encode_trace(dest, tag, 0, plan_.flags, plan_.hashes, plan_.hash_len);
+        }
+    }
+    mesh_ob_enter();
+    if (n == 0) {
+        mt_fail(mt_, why ? why : "the path does not fit in a trace");
+    } else if (kind == MT_TRACE) {
+        mt_set_target(mt_, plan_.target);
+    }
+    mesh_ob_exit();
+    if (n == 0) {
+        return 0;
+    }
+    cur_     = CUR_TRACE;
+    cur_cmd_ = dest[0];
+    stats_.cmds_out++;
+    return n;
+}
+
+// A path discovery's answer becomes the contact's stored path. MyMesh does not store it itself (its onContactPathRecv
+// returns before BaseChatMesh's, as the phone app sets the path); it goes back as MyMesh's own CMD_ADD_UPDATE_CONTACT,
+// so MyMesh saves it with its contacts, and is set at once so a copy taken right after shows it.
+void CompanionPipe::store_discovered_path(mf_discovery_t const &d) {
+    ContactInfo *c = mesh_->lookupContactByPubKey(d.prefix, MF_PREFIX);
+    if (!c) {
+        return; // removed meanwhile
+    }
+    size_t bytes = (size_t)(d.out_len & 63) * (size_t)((d.out_len >> 6) + 1); // valid: mf_decode checked it
+    c->out_path_len = d.out_len;
+    memset(c->out_path, 0, sizeof(c->out_path));
+    memcpy(c->out_path, d.out_path, bytes);
+    c->lastmod = rtc_clock.getCurrentTime(); // heard from it just now, as BaseChatMesh does for a new path
+    mf_contact_t mc;
+    contact_to_frame(*c, &mc);
+    uint8_t f[MF_MAX_FRAME];
+    size_t  n = mf_encode_update_contact(f, &mc);
+    if (n && fifo_push(f, n)) { // a full queue counts a fifo drop: the path is set, saved with the next contacts write
+        stats_.paths_stored++;
+    }
+}
+
 void CompanionPipe::on_reply(mf_msg_t const &m) {
     if (m.code < 32) {
         stats_.reply_count[m.code]++;
@@ -270,6 +350,12 @@ void CompanionPipe::on_reply(mf_msg_t const &m) {
     if (cur == CUR_OUTBOX) {
         mesh_ob_enter();
         ob_on_reply(ob_, cur_id_, &m, (uint32_t)millis());
+        mesh_ob_exit();
+        return;
+    }
+    if (cur == CUR_TRACE) {
+        mesh_ob_enter();
+        mt_on_reply(mt_, &m, (uint32_t)millis());
         mesh_ob_exit();
         return;
     }
@@ -319,6 +405,23 @@ void CompanionPipe::on_push(mf_msg_t const &m) {
         ob_on_confirm(ob_, m.ack, m.trip_ms);
         mesh_ob_exit();
         break;
+    case MF_TRACE:
+    case MF_DISCOVERY: {
+        if (!mt_) {
+            break;
+        }
+        uint32_t now = (uint32_t)millis();
+        mesh_ob_enter();
+        bool ours = m.kind == MF_TRACE ? mt_on_trace(mt_, &m.trace, now) : mt_on_discovery(mt_, &m.disc, now);
+        mesh_ob_exit();
+        if (ours) {
+            (m.kind == MF_TRACE ? stats_.traces : stats_.discoveries)++;
+        }
+        if (ours && m.kind == MF_DISCOVERY) {
+            store_discovered_path(m.disc);
+        }
+        break;
+    }
     default:
         break; // adverts, path updates, login/status replies: counted, #47 and later issues use them
     }

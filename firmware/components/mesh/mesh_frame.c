@@ -73,6 +73,26 @@ size_t mf_encode_remove_contact(uint8_t *out, uint8_t const pub[MF_PUB_LEN]) {
     return 1 + MF_PUB_LEN;
 }
 
+size_t mf_encode_trace(uint8_t *out, uint32_t tag, uint32_t auth, uint8_t flags, uint8_t const *hashes, size_t hash_len) {
+    unsigned sz = flags & 3;
+    if (hash_len == 0 || hash_len % (1u << sz) != 0 || (hash_len >> sz) > MF_PATH_MAX || 10 + hash_len > MF_MAX_FRAME) {
+        return 0;
+    }
+    out[0] = MF_CMD_SEND_TRACE_PATH;
+    put32(out + 1, tag);
+    put32(out + 5, auth);
+    out[9] = flags;
+    memcpy(out + 10, hashes, hash_len);
+    return 10 + hash_len;
+}
+
+size_t mf_encode_discovery(uint8_t *out, uint8_t const pub[MF_PUB_LEN]) {
+    out[0] = MF_CMD_PATH_DISCOVERY;
+    out[1] = 0; // reserved: MyMesh only takes 0
+    memcpy(out + 2, pub, MF_PUB_LEN);
+    return 2 + MF_PUB_LEN;
+}
+
 size_t mf_encode_update_contact(uint8_t *out, mf_contact_t const *c) {
     size_t i = 0;
     out[i++] = MF_CMD_ADD_UPDATE_CONTACT;
@@ -110,6 +130,56 @@ static void decode_self_info(uint8_t const *f, size_t len, mf_msg_t *out) {
     }
     memcpy(out->name, f + 58, n);
     out->name[n] = 0;
+}
+
+// Bytes of a packed path length (Packet::isValidPathLen): SIZE_MAX when it is not a valid one
+static size_t path_bytes(uint8_t packed) {
+    size_t count = packed & 63, size = (size_t)(packed >> 6) + 1;
+    return size == 4 || count * size > MF_PATH_MAX ? SIZE_MAX : count * size;
+}
+
+// [0x89, 0, path_len, flags, tag, auth, hashes[path_len], snr[path_len >> sz], final snr]
+static void decode_trace(uint8_t const *f, size_t len, mf_msg_t *out) {
+    out->kind = MF_BAD;
+    if (len < 13) {
+        return;
+    }
+    mf_trace_t *t = &out->trace;
+    t->hash_len   = f[2];
+    t->flags      = f[3];
+    t->hops       = (uint8_t)(t->hash_len >> (t->flags & 3));
+    if (t->hash_len > MF_TRACE_HASH_MAX || t->hops > MF_PATH_MAX || len != 13u + t->hash_len + t->hops) {
+        return;
+    }
+    t->tag  = get32(f + 4);
+    t->auth = get32(f + 8);
+    memcpy(t->hashes, f + 12, t->hash_len);
+    memcpy(t->snr_q, f + 12 + t->hash_len, t->hops);
+    t->final_snr_q = (int8_t)f[12 + t->hash_len + t->hops];
+    out->kind      = MF_TRACE;
+}
+
+// [0x8D, 0, prefix[6], out_len, out path, in_len, in path]
+static void decode_discovery(uint8_t const *f, size_t len, mf_msg_t *out) {
+    out->kind = MF_BAD;
+    if (len < 10) {
+        return;
+    }
+    mf_discovery_t *d = &out->disc;
+    memcpy(d->prefix, f + 2, 6);
+    d->out_len   = f[8];
+    size_t out_b = path_bytes(d->out_len);
+    if (out_b == SIZE_MAX || len < 10 + out_b) {
+        return;
+    }
+    memcpy(d->out_path, f + 9, out_b);
+    d->in_len   = f[9 + out_b];
+    size_t in_b = path_bytes(d->in_len);
+    if (in_b == SIZE_MAX || len != 10 + out_b + in_b) {
+        return;
+    }
+    memcpy(d->in_path, f + 10 + out_b, in_b);
+    out->kind = MF_DISCOVERY;
 }
 
 void mf_decode(uint8_t const *f, size_t len, mf_msg_t *out) {
@@ -178,6 +248,12 @@ void mf_decode(uint8_t const *f, size_t len, mf_msg_t *out) {
         break;
     case MF_PUSH_STATUS_RESPONSE:
         out->kind = MF_STATUS;
+        break;
+    case MF_PUSH_TRACE_DATA:
+        decode_trace(f, len, out);
+        break;
+    case MF_PUSH_PATH_DISCOVERY:
+        decode_discovery(f, len, out);
         break;
     default:
         break;

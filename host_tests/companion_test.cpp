@@ -265,13 +265,87 @@ static void contact_action_checks(BadgeMesh &mesh) {
     CHECK(pa->flags == 0x02);
 }
 
+// Trace path and path discovery (#53) through the pipe on the real MyMesh: the trace goes out along the contact's
+// path, comes back with an SNR per hop; a discovery's answer becomes the stored path through MyMesh's own command
+static void trace_checks(BadgeMesh &mesh, mt_t &mt) {
+    ContactsIterator it = mesh.startContactsIterator();
+    ContactInfo      c;
+    CHECK(it.hasNext(&mesh, c));
+    ContactInfo *pc   = mesh.lookupContactByPubKey(c.id.pub_key, PUB_KEY_SIZE);
+    uint8_t      type = pc->type;
+    pc->type          = ADV_TYPE_REPEATER;
+    pc->out_path_len  = 1;
+    pc->out_path[0]   = 0xA1;
+    char const *why   = NULL;
+    CHECK(mt_request(&mt, MT_TRACE, pc->id.pub_key, 0x12345678, (uint32_t)millis(), &why) != 0);
+    size_t before = test_radio.sent.size();
+    settle(mesh, 10);
+    CHECK(mt.state == MT_SENT && mt.on_air_ms != 0 && mt.target == 1);
+    mesh::Packet pkt;
+    bool         found = false;
+    for (size_t i = before; i < test_radio.sent.size() && !found; i++) {
+        auto const &raw = test_radio.sent[i];
+        found = pkt.readFrom(raw.data(), (uint8_t)raw.size()) && pkt.getPayloadType() == PAYLOAD_TYPE_TRACE;
+    }
+    CHECK(found);
+    uint32_t tag = 0;
+    memcpy(&tag, pkt.payload, 4);
+    uint8_t const want[] = {0xA1, pc->id.pub_key[0], 0xA1};
+    CHECK(tag == 0x12345678 && pkt.payload[8] == 0 && pkt.payload_len == 12 && memcmp(pkt.payload + 9, want, 3) == 0);
+
+    // It comes back from A1 with the three SNRs the hops added
+    pkt.path_len = 3;
+    pkt.path[0]  = 28;
+    pkt.path[1]  = (uint8_t)-8;
+    pkt.path[2]  = 20;
+    uint8_t back[256];
+    uint8_t n    = pkt.writeTo(back);
+    test_radio.pending.assign(back, back + n);
+    settle(mesh, 5);
+    CHECK(mt.state == MT_DONE && mt.trace.hops == 3 && mt.trace.snr_q[0] == 28 && mt.trace.snr_q[1] == -8);
+    CHECK(mt.trace.final_snr_q == 36); // TestRadio's SNR 9 dB, in quarters
+    CHECK(mesh.pipe().stats().traces == 1);
+
+    // A companion with no path: refused before anything goes on air
+    pc->type         = ADV_TYPE_CHAT;
+    pc->out_path_len = OUT_PATH_UNKNOWN;
+    before           = test_radio.sent.size();
+    CHECK(mt_request(&mt, MT_TRACE, pc->id.pub_key, 1, (uint32_t)millis(), &why) != 0);
+    settle(mesh, 3);
+    CHECK(mt.state == MT_FAILED && test_radio.sent.size() == before);
+
+    // Discovery: MyMesh floods its request, the answer (pushed as MyMesh does) is stored as the path
+    CHECK(mt_request(&mt, MT_DISCOVER, pc->id.pub_key, 0, (uint32_t)millis(), &why) != 0);
+    settle(mesh, 10);
+    CHECK(mt.state == MT_SENT && mt.flood == 1 && test_radio.sent.size() > before);
+    uint8_t push[14] = {0x8D, 0};
+    memcpy(push + 2, pc->id.pub_key, 6);
+    push[8]  = 0x41; // one hop, 2-byte hash
+    push[9]  = 0xB1;
+    push[10] = 0xB2;
+    push[11] = 0x02; // came back over two 1-byte hops
+    push[12] = 0xC1;
+    push[13] = 0xC2;
+    uint32_t oks = mesh.pipe().stats().reply_count[0];
+    mesh.pipe().writeFrame(push, sizeof(push));
+    CHECK(mt.state == MT_DONE && pc->out_path_len == 0x41 && pc->out_path[1] == 0xB2);
+    settle(mesh, 3);
+    pc = mesh.lookupContactByPubKey(c.id.pub_key, PUB_KEY_SIZE);
+    CHECK(pc && pc->out_path_len == 0x41 && pc->out_path[0] == 0xB1 && pc->out_path[1] == 0xB2);
+    CHECK(mesh.pipe().stats().reply_count[0] == oks + 1 && mesh.pipe().stats().paths_stored == 1);
+    pc->type = type;
+}
+
 // The companion pipe (#45, #55) on the real MyMesh: start sequence, offline queue drained, sends through the outbox
 static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, SimpleMeshTables &tables) {
     static DataStore store(SPIFFS, rtc_clock);
     static ob_t      ob;
     static BadgeMesh mesh(radio_driver, rng_for_pipe(), rtc_clock, tables, store, &ob);
     static CountingListener listener;
+    static mt_t             mt;
     ob_init(&ob);
+    mt_init(&mt);
+    mesh.attachTrace(&mt);
     store.begin();
     mesh.begin();
     mesh.setListener(&listener);
@@ -356,6 +430,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     uint32_t trip = 0;
     CHECK(ob_get(&ob, dm, &state, NULL, NULL, &trip) && state == MESH_OUT_DELIVERED);
     CHECK(st.confirmed == 1);
+    trace_checks(mesh, mt);
     contact_action_checks(mesh);
 }
 
