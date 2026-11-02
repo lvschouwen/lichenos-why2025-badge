@@ -185,7 +185,7 @@ static void handle_tx_event(bool timed_out) {
     bool sent = !timed_out && (radio.getIrqFlags() & RADIOLIB_SX126X_IRQ_TX_DONE) != 0;
     send_result(LORA_MSG_SEND, sent ? LORA_RESULT_OK : LORA_RESULT_RADIO_ERROR, 0);
     if (!sent) {
-        ESP_LOGE(TAG, "tx %s", timed_out ? "timed out" : "ended without TX_DONE");
+        ESP_LOGW(TAG, "tx %s", timed_out ? "timed out" : "ended without TX_DONE");
     }
     finish_tx();
 }
