@@ -199,3 +199,62 @@ size_t mesh_contact_lines(mesh_contact_detail_t const *d, mesh_contact_line_t *o
     }
     return n;
 }
+
+// ---- a manual path (#130) --------------------------------------------------------------------------------------------
+
+static int hex_val(char c) {
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+mesh_path_err_t mesh_path_parse(char const *text, uint8_t hash_size, uint8_t *path_len, uint8_t path[64]) {
+    if (hash_size < 1 || hash_size > 3) {
+        return MESH_PATH_ERR_HASH;
+    }
+    if (!text || !*text) {
+        return MESH_PATH_ERR_EMPTY;
+    }
+    size_t hops = 0, bytes = 0;
+    char const *p = text;
+    while (1) {
+        size_t digits = 0;
+        while (hex_val(p[digits]) >= 0) {
+            digits++;
+        }
+        if (p[digits] && p[digits] != ',') {
+            return MESH_PATH_ERR_HEX;
+        }
+        if (digits == 0) {
+            return MESH_PATH_ERR_EMPTY; // "", a leading, trailing or doubled comma
+        }
+        if (digits != (size_t)hash_size * 2) {
+            return MESH_PATH_ERR_LEN;
+        }
+        if (hops + 1 > 63 || bytes + hash_size > MESH_CONTACT_PATH_MAX) {
+            return MESH_PATH_ERR_TOO_LONG;
+        }
+        for (size_t i = 0; i < hash_size; i++) {
+            path[bytes++] = (uint8_t)(hex_val(p[2 * i]) << 4 | hex_val(p[2 * i + 1]));
+        }
+        hops++;
+        p += digits;
+        if (!*p) {
+            break;
+        }
+        p++; // the comma
+    }
+    memset(path + bytes, 0, MESH_CONTACT_PATH_MAX - bytes);
+    *path_len = (uint8_t)(((hash_size - 1) << 6) | hops);
+    return MESH_PATH_OK;
+}
+
+char const *mesh_path_err_text(mesh_path_err_t e) {
+    switch (e) {
+    case MESH_PATH_OK: return "ok";
+    case MESH_PATH_ERR_EMPTY: return "give at least one hop (no empty entries)";
+    case MESH_PATH_ERR_HASH: return "path hash size is not 1-3 B";
+    case MESH_PATH_ERR_LEN: return "each hop must be as long as the path hash size (fw mesh pathhash)";
+    case MESH_PATH_ERR_HEX: return "hops are hex digits separated by commas";
+    case MESH_PATH_ERR_TOO_LONG: return "too long: at most 63 hops and 64 bytes";
+    }
+    return "?";
+}

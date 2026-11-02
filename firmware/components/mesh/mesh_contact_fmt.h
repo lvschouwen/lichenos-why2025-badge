@@ -22,6 +22,19 @@ mesh_path_t mesh_path_decode(uint8_t path_len);
 // "flood", "direct", "1 hop", "N hops"
 void        mesh_format_hops(uint8_t path_len, char *out, size_t cap);
 
+// A manual path (#130): "854e,a1b2" = hops in hex, each exactly hash_size bytes (hash_size*2 digits). On success *path_len
+// is the packed out_path_len (count + size) and the bytes are in path[]; otherwise one of the errors below.
+typedef enum {
+    MESH_PATH_OK,
+    MESH_PATH_ERR_EMPTY,    // no hops
+    MESH_PATH_ERR_HASH,     // hash_size not 1-3
+    MESH_PATH_ERR_LEN,      // a hop is not hash_size bytes long
+    MESH_PATH_ERR_HEX,      // not a hex digit
+    MESH_PATH_ERR_TOO_LONG, // more than 63 hops or 64 bytes
+} mesh_path_err_t;
+mesh_path_err_t mesh_path_parse(char const *text, uint8_t hash_size, uint8_t *path_len, uint8_t path[64]);
+char const     *mesh_path_err_text(mesh_path_err_t e);
+
 // ---- a contact's details (#49)
 // ---------------------------------------------------------------------------------------
 #define MESH_CONTACT_PUB_LEN  32

@@ -202,6 +202,11 @@ size_t mesh_contact_detail(uint8_t const prefix[6], mesh_contact_detail_t *out, 
 // favourite flag show in a copy taken right after. 1 when queued, 0 when the contact is gone, MESH_BUSY when the lock
 // was not free within wait_ms, MyMesh's command queue is full or MeshCore is not running.
 size_t mesh_contact_do(uint8_t const prefix[6], mesh_contact_op_t op, uint32_t wait_ms);
+// Sets a contact's stored path by hand (#130; path_len packed as mesh_contact_fmt.h, path MESH_CONTACT_PATH_MAX bytes):
+// set at once and handed to MyMesh as its own update command, which saves it with the contacts. Nothing is sent.
+// Returns as mesh_contact_do.
+size_t mesh_contact_set_path(uint8_t const prefix[6], uint8_t path_len, uint8_t const path[MESH_CONTACT_PATH_MAX],
+                             uint32_t wait_ms);
 
 // ---- sending (#45; the compose screens are #46 and #47) --------------------------------------------------------------
 // All copy-in and non-blocking: they never take the mesh lock (LVGL safe). The mesh task sends from the outbox

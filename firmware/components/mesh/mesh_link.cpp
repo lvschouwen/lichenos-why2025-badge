@@ -172,6 +172,26 @@ BadgeMesh::ContactResult BadgeMesh::contactAction(uint8_t const prefix[MF_PREFIX
     return n && pipe_.queue_cmd(f, n) ? CONTACT_QUEUED : CONTACT_QUEUE_FULL;
 }
 
+// A manual path (#130): set at once, then the whole contact goes to MyMesh as CMD_ADD_UPDATE_CONTACT so it saves it (the
+// same way as store_discovered_path). lastmod stays: setting a path is not hearing the contact.
+BadgeMesh::ContactResult BadgeMesh::contactSetPath(uint8_t const prefix[MF_PREFIX], uint8_t path_len,
+                                                   uint8_t const *path) {
+    ContactInfo *c = lookupContactByPubKey(prefix, MF_PREFIX);
+    if (!c) {
+        return CONTACT_GONE;
+    }
+    if (!pipe_.can_queue()) {
+        return CONTACT_QUEUE_FULL;
+    }
+    c->out_path_len = path_len;
+    memcpy(c->out_path, path, sizeof(c->out_path));
+    uint8_t      f[MF_MAX_FRAME];
+    mf_contact_t mc;
+    contact_to_frame(*c, &mc);
+    size_t n = mf_encode_update_contact(f, &mc);
+    return n && pipe_.queue_cmd(f, n) ? CONTACT_QUEUED : CONTACT_QUEUE_FULL;
+}
+
 // ---- the pipe ------------------------------------------------------------------------------------------------------
 
 bool CompanionPipe::fifo_push(uint8_t const *data, size_t len) {

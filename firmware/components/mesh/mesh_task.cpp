@@ -480,6 +480,19 @@ extern "C" size_t mesh_contact_do(uint8_t const prefix[6], mesh_contact_op_t op,
     return r == BadgeMesh::CONTACT_QUEUED ? 1 : r == BadgeMesh::CONTACT_GONE ? 0 : MESH_BUSY;
 }
 
+extern "C" size_t mesh_contact_set_path(uint8_t const prefix[6], uint8_t path_len,
+                                        uint8_t const path[MESH_CONTACT_PATH_MAX], uint32_t wait_ms) {
+    if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped()) {
+        return MESH_BUSY;
+    }
+    if (!mesh_lock_within(wait_ms)) {
+        return MESH_BUSY;
+    }
+    BadgeMesh::ContactResult r = node->contactSetPath(prefix, path_len, path);
+    mesh_unlock();
+    return r == BadgeMesh::CONTACT_QUEUED ? 1 : r == BadgeMesh::CONTACT_GONE ? 0 : MESH_BUSY;
+}
+
 // MeshCore writes contacts lazily; a firmware update must not lose the last few minutes of them
 static bool keep_contact(ContactInfo const &c) {
     return c.type != ADV_TYPE_NONE; // as MyMesh's own filter: not the transient entries
@@ -1971,6 +1984,75 @@ static bool console_contact(char const *hex, uint8_t out[6]) {
     return found == 1;
 }
 
+// "fw mesh path <hex>" shows the stored path, "... reset" forgets it (the screen's Reset path), "... set <hop>[,<hop>..]"
+// stores one by hand (#130). Nothing is sent: the next DM goes along it, or floods when there is none.
+static void cmd_mesh_path(char const *args) {
+    while (*args == ' ') {
+        args++;
+    }
+    char hex[16];
+    size_t hl = strcspn(args, " ");
+    if (hl == 0 || hl >= sizeof(hex)) {
+        console_reply("mesh path <12 hex digits of the key> [reset | set <hop>[,<hop>...]]");
+        return;
+    }
+    memcpy(hex, args, hl);
+    hex[hl] = 0;
+    char const *rest = args + hl;
+    while (*rest == ' ') {
+        rest++;
+    }
+    uint8_t prefix[6];
+    if (!console_contact(hex, prefix)) {
+        return;
+    }
+    size_t r = 1;
+    if (strcmp(rest, "reset") == 0) {
+        r = mesh_contact_do(prefix, MESH_CO_RESET_PATH, MESH_SET_WAIT_MS);
+    } else if (strncmp(rest, "set", 3) == 0 && (rest[3] == ' ' || !rest[3])) {
+        char const *hops = rest + 3;
+        while (*hops == ' ') {
+            hops++;
+        }
+        mesh_settings_t st;
+        mesh_get_settings(&st);
+        uint8_t         len, path[MESH_CONTACT_PATH_MAX];
+        mesh_path_err_t e = mesh_path_parse(hops, st.path_hash_size, &len, path);
+        if (e != MESH_PATH_OK) {
+            console_reply("path not set (%u B hops): %s", st.path_hash_size, mesh_path_err_text(e));
+            return;
+        }
+        r = mesh_contact_set_path(prefix, len, path, MESH_SET_WAIT_MS);
+    } else if (*rest) {
+        console_reply("mesh path <hex> [reset | set <hop>[,<hop>...]]");
+        return;
+    }
+    if (r != 1) {
+        console_reply(r == 0 ? "that contact is gone" : "MeshCore is busy, try again");
+        return;
+    }
+    mesh_contact_detail_t d;
+    if (mesh_contact_detail(prefix, &d, MESH_SET_WAIT_MS) != 1) {
+        console_reply("path of that contact is not readable now");
+        return;
+    }
+    mesh_path_t p = mesh_path_decode(d.path_len);
+    if (p.flood) {
+        console_reply("path %s: flood", d.name);
+        return;
+    }
+    // mesh_hex groups by hash with spaces: the hops, comma separated
+    char list[MESH_CONTACT_PATH_MAX * 2 + MESH_CONTACT_PATH_MAX + 1];
+    mesh_hex(d.path, (size_t)p.hops * p.hash_size, p.hash_size, list, sizeof(list));
+    for (char *q = list; *q; q++) {
+        if (*q == ' ') {
+            *q = ',';
+        }
+    }
+    console_reply("path %s: direct, %u hop%s, %u B%s%s", d.name, p.hops, p.hops == 1 ? "" : "s", p.hash_size,
+                  p.hops ? ": " : "", list);
+}
+
 static char const *const TRACE_STATE_NAME[] = {"none", "queued", "sent to MeshCore", "waiting", "done", "failed",
                                                "no answer"};
 
@@ -2394,6 +2476,10 @@ static void cmd_mesh(char const *args) {
     }
     if (strncmp(args, "pathhash", 8) == 0 && (args[8] == ' ' || !args[8])) {
         cmd_mesh_pathhash(args + 8);
+        return;
+    }
+    if (strncmp(args, "path ", 5) == 0) {
+        cmd_mesh_path(args + 5);
         return;
     }
     if (strncmp(args, "send ", 5) == 0) {

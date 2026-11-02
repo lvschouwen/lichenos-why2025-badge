@@ -149,7 +149,46 @@ static void test_lines(void) {
     CHECK(strcmp(mesh_contact_type_name(3), "room") == 0 && strcmp(mesh_contact_type_name(9), "unknown") == 0);
 }
 
+// #130: fw mesh path <id> set <hops>
+static void test_path_parse(void) {
+    uint8_t len = 0xEE, path[64];
+    CHECK(mesh_path_parse("854e", 2, &len, path) == MESH_PATH_OK && len == 0x41 && path[0] == 0x85 && path[1] == 0x4e);
+    CHECK(path[2] == 0 && path[63] == 0);
+    CHECK(mesh_path_parse("854E,a1b2,0001", 2, &len, path) == MESH_PATH_OK && len == (0x40 | 3) && path[2] == 0xa1 &&
+          path[5] == 0x01);
+    CHECK(mesh_path_parse("ab", 1, &len, path) == MESH_PATH_OK && len == 1 && path[0] == 0xab);
+    CHECK(mesh_path_parse("aabbcc,010203", 3, &len, path) == MESH_PATH_OK && len == (0x80 | 2));
+    len = 0xEE;
+    CHECK(mesh_path_parse("854", 2, &len, path) == MESH_PATH_ERR_LEN);
+    CHECK(mesh_path_parse("85", 2, &len, path) == MESH_PATH_ERR_LEN);
+    CHECK(mesh_path_parse("854e,12", 2, &len, path) == MESH_PATH_ERR_LEN);
+    CHECK(mesh_path_parse("854e5", 2, &len, path) == MESH_PATH_ERR_LEN);
+    CHECK(mesh_path_parse("", 2, &len, path) == MESH_PATH_ERR_EMPTY);
+    CHECK(mesh_path_parse("854e,", 2, &len, path) == MESH_PATH_ERR_EMPTY);
+    CHECK(mesh_path_parse(",854e", 2, &len, path) == MESH_PATH_ERR_EMPTY);
+    CHECK(mesh_path_parse("854e,,854e", 2, &len, path) == MESH_PATH_ERR_EMPTY);
+    CHECK(mesh_path_parse("85zz", 2, &len, path) == MESH_PATH_ERR_HEX);
+    CHECK(mesh_path_parse("854e 854e", 2, &len, path) == MESH_PATH_ERR_HEX);
+    CHECK(mesh_path_parse("854e", 4, &len, path) == MESH_PATH_ERR_HASH);
+    CHECK(len == 0xEE); // nothing written on an error
+    // 32 hops of 2 B = 64 B fit, a 33rd does not; 1 B hops stop at 63
+    char text[400];
+    size_t n = 0;
+    for (int i = 0; i < 33; i++) {
+        n += (size_t)snprintf(text + n, sizeof(text) - n, "%s0a0b", i ? "," : "");
+        CHECK(mesh_path_parse(text, 2, &len, path) == (i < 32 ? MESH_PATH_OK : MESH_PATH_ERR_TOO_LONG));
+    }
+    CHECK(mesh_path_parse(text, 2, &len, path) == MESH_PATH_ERR_TOO_LONG);
+    n = 0;
+    for (int i = 0; i < 64; i++) {
+        n += (size_t)snprintf(text + n, sizeof(text) - n, "%s0a", i ? "," : "");
+        CHECK(mesh_path_parse(text, 1, &len, path) == (i < 63 ? MESH_PATH_OK : MESH_PATH_ERR_TOO_LONG));
+    }
+    CHECK(mesh_path_err_text(MESH_PATH_ERR_LEN)[0] != 0);
+}
+
 int main(void) {
+    test_path_parse();
     test_hops();
     test_hex_and_route();
     test_uri();
