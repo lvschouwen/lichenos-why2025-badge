@@ -28,7 +28,9 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   directories; the hooks (`open`, `start_background`, `stop_for_update`, `first_run_set`...) are how the OS calls it.
 - `lichen_ui.h`: navigation (`shell_open`, `shell_page_create`, `shell_back_then/_to`, `shell_home`, `shell_on_esc`,
   `shell_on_search`, scroll helpers), the countdown dialog, `lichen_screen_locked()`. Screen code runs on the LVGL task;
-  never swap the default group or the active screen yourself.
+  never swap the default group or the active screen yourself. `lichen_ui_call(fn, arg)` hands a result from any task
+  to the LVGL task (fn runs there, soon; false when it could not be queued) and `lichen_ui_with_group(group, build,
+  arg)` adds widgets to a screen's group (LVGL context).
 - `menu.h`, `menu_filter.h`, `list_filter.h`, `scroll_anchor.h`, `text_entry.h`: the shared list, filter and text
   widgets, so every app behaves the same under the keyboard.
 - `theme.h`, `fonts.h`: Lichen's colours, sizes and fonts. Use them instead of literals.
@@ -66,8 +68,9 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   that must stop for an update returns true from `stop_for_update`; the OS stops LoRa after every app did.
 - Restart the badge with `esp_restart()` (it is recorded as an unknown caller) or call `abort()` to get out of a state.
 - Write outside its own directories, or format anything but its own app directory.
-- Take `lvgl_port_lock` / call `lv_async_call` from its own tasks, or pick a core and priority of its own: today's
-  exceptions are listed below and get `lichen_ui_call` / `lichen_task_start` (#84 T8a).
+- Take `lvgl_port_lock` or call `lv_async_call`: use `lichen_ui_call` (LVGL calls outside the lock while the LVGL
+  task renders corrupted the heap, #118). Nor set the default group: use `lichen_ui_with_group`.
+- Pick a core and priority of its own for a task: today's exception is listed below (`lichen_task_start`, #84 T8a).
 
 ## The wraps
 
@@ -85,15 +88,14 @@ in `firmware/build/badge_fw.map`) and refuses:
 
 ## Exceptions still open
 
-MeshCore still `PRIV_REQUIRES` three components past the list; each has its follow-up:
+MeshCore still `PRIV_REQUIRES` two components past the list; each has its follow-up:
 
 - `nvs_flash`: the legacy `badge_fw/identity` hand-over (kept as it is, by decision) and the advert keys `mc_advint`,
   `mc_advlast`, `mc_advfl` still in `badge_fw` (move them to `a.meshcore`).
-- `esp_lvgl_port`: `lvgl_port_lock` around `lv_async_call` in the settings jobs (`lichen_ui_call`, #84 T8a).
 - `sdcard`: the message journal's `sd_begin`/`sd_end` batches on `/sd/lichen/messages` (#98; an SD batch call in
   `lichen_fs.h`).
 
-Also open from #84: tasks with their own core/priority (T8a), the console prefix per app (T8b), a heap caps wrapper
+Also open from #84: tasks with their own core/priority (`lichen_task_start`, T8a), the console prefix per app (T8b), a heap caps wrapper
 (V12), system apps calling `board/backlight.h` directly (V13).
 
 ## New services

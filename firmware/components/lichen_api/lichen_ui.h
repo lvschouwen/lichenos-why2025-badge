@@ -6,7 +6,8 @@
 #include <stdint.h>
 
 // The shell's navigation for apps (#84): open a screen, go back, scroll. Implemented by the shell (lichen_shell's
-// shell.c and app_settings.c), resolved at link time. All functions take the LVGL port lock themselves and may be called
+// shell.c and app_settings.c), resolved at link time; lichen_ui_call and lichen_ui_with_group are lichen_api's own
+// (lichen_ui.c). All functions take the LVGL port lock themselves and may be called
 // from any task.
 
 void shell_home(void);
@@ -52,6 +53,16 @@ typedef void (*shell_dialog_fn)(bool confirmed);
 bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done);
 // Closes it without an answer (the reason for it went away); safe from any task
 void shell_dialog_close(void);
+
+// Runs fn(arg) on the LVGL task, soon (lv_async_call under the LVGL lock): the way a job on any other task hands its
+// result back to a screen (#84 T8a). Safe from any task, the LVGL task included. fn runs in LVGL context and may touch
+// widgets; the screen it meant may be gone by then, so it checks before it does. False when the call was not queued
+// (the LVGL lock was not free within 2 s, or no memory): fn will not run and arg is still the caller's, so retry or
+// free it. Never take lvgl_port_lock or call lv_async_call in an app.
+bool lichen_ui_call(void (*fn)(void *), void *arg);
+// LVGL context only: runs build(arg) with group as the default group, so the widgets it creates join group (rows added
+// to a screen that is already showing), then puts the previous default back. Never set the default group yourself.
+void lichen_ui_with_group(lv_group_t *group, void (*build)(void *), void *arg);
 
 // The pocket lock (#75) is up: the lock screen covers every screen and no key reaches an app until it is unlocked. An app
 // that would act on its own (open a screen for an incoming message) may wait; screens it opens meanwhile stay under the

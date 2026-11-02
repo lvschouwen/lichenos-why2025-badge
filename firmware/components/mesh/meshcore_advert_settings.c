@@ -4,7 +4,6 @@
 // result. The rules and texts are mesh_advert_cfg.c's (host-tested); the screens never wait on MeshCore.
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_ui.h"
@@ -113,9 +112,10 @@ static void change_task(void *arg) {
         case CH_SHARE: ch->reason = mesh_set_location_share(ch->flag); break;
         case CH_AUTOADD: ch->reason = mesh_set_autoadd(&ch->aa); break;
     }
-    lvgl_port_lock(0); // lv_async_call is not thread safe
-    lv_async_call(change_finish, ch);
-    lvgl_port_unlock();
+    // Until it is queued: change_finish frees ch and clears busy, so the page is never left busy
+    while (!lichen_ui_call(change_finish, ch)) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
     vTaskDelete(NULL);
 }
 

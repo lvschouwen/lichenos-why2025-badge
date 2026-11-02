@@ -22,13 +22,13 @@ set(COMPANION_SRCS
     ${MC}/src/helpers/IdentityStore.cpp ${MC}/src/helpers/RegionMap.cpp ${MC}/src/helpers/TransportKeyStore.cpp
     ${MC}/examples/companion_radio/MyMesh.cpp ${MC}/examples/companion_radio/DataStore.cpp)
 # The app's allowlist (#84 T9, docs/app-api.md): Lichen's app API and services, the radio, the console, and plain
-# libraries. The build is the check: a header from any other component does not resolve. Three exceptions, each with
+# libraries. The build is the check: a header from any other component does not resolve. Two exceptions, each with
 # its follow-up: nvs_flash (the legacy badge_fw/identity hand-over, kept as is by decision, and the advert keys
-# mc_advint/mc_advlast/mc_advfl still in badge_fw: move them to a.meshcore), esp_lvgl_port (lvgl_port_lock around
-# lv_async_call in the settings jobs: lichen_ui_call, T8a) and sdcard (the message journal's sd_begin/sd_end batches
-# on /sd/lichen/messages, #98: an SD batch call in lichen_fs.h).
+# mc_advint/mc_advlast/mc_advfl still in badge_fw: move them to a.meshcore) and sdcard (the message journal's
+# sd_begin/sd_end batches on /sd/lichen/messages, #98: an SD batch call in lichen_fs.h). Results of the settings jobs
+# reach the LVGL task through lichen_ui_call (#84 T8a), so esp_lvgl_port is not needed.
 set(MESH_REQUIRES lichen_api lichen_clock lichen_random lora fw_console freertos esp_timer heap mbedtls
-                  nvs_flash esp_lvgl_port sdcard)
+                  nvs_flash sdcard)
 idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "mesh_trace.c" "mesh_remote.c" "mesh_rset.c" "mesh_rset_run.c" "meshcore_remote.c" "meshcore_rset.c" "lora_radio.cpp" "mesh_store.c" "lora_airtime.c" "advert_limit.c" "mesh_advert_cfg.c"
                             "mesh_hist.c" "mesh_hist_crypto.cpp" "mesh_hist_selftest.c" "mesh_ident.c" "mesh_journal.c" "mesh_format.c" "mesh_contact_fmt.c" "mesh_share.c" "mesh_tile.c" "mesh_notify.c" "mesh_notify_run.c" "meshcore_notify.c"
                             "meshcore_hdr.c" "meshcore_app.c" "meshcore_run.c" "mesh_run.c" "meshcore_grid.c" "meshcore_grid_icons.c" "mesh_grid.c" "meshcore_list.c" "meshcore_chats.c" "meshcore_contacts.c" "meshcore_chat.c" "meshcore_contact.c" "mesh_chat.c" "meshcore_settings.c" "meshcore_advert_settings.c" "radio_presets.c" "radio_filter.c" "radio_confirm.c" "channel_input.c" "mc_first.c"

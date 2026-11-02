@@ -1,11 +1,10 @@
 // Settings > MeshCore (#67, settings.html): Name, Region & radio (MeshCore's presets, Custom..., Advanced: TX power),
 // Channels (list, add a #hashtag, add with a key) and Send advert, then the about rows (meshcore_app.c).
 // The mesh.h setters wait for the mesh lock (MeshCore may be saving contacts for a few hundred ms), so each change runs
-// in a short-lived task on core 0, like the Wi-Fi scan; its result comes back to the LVGL task through lv_async_call
+// in a short-lived task on core 0, like the Wi-Fi scan; its result comes back to the LVGL task through lichen_ui_call
 // and lands on whatever row or note is still on screen. The screens never wait on MeshCore.
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "menu.h"
@@ -100,10 +99,10 @@ static void job_task(void *arg) {
         case JOB_CHANNEL_INFO: job->n = mesh_channel_info(-1, job->text, &job->info, MESH_SET_WAIT_MS); break;
         case JOB_CHANNEL_RENAME: job->reason = mesh_channel_rename(job->text, job->title); break;
     }
-    // lv_async_call is not thread safe: take the LVGL lock like the shell does
-    lvgl_port_lock(0);
-    lv_async_call(job_finish, job);
-    lvgl_port_unlock();
+    // Until it is queued: job_finish frees the job and clears job_running, so the page is never left busy
+    while (!lichen_ui_call(job_finish, job)) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
     vTaskDelete(NULL);
 }
 
@@ -859,22 +858,16 @@ static lv_obj_t *channel_screen;                                // a channel's d
 static void      remove_ask(void *arg);
 static void      open_channel(void *arg);
 
-static void list_done(job_t *job) {
-    channels_line(job, channels_row);
-    if (!add_tag_row) {
-        return; // the screen is gone
-    }
-    lv_obj_t   *menu     = lv_obj_get_parent(add_tag_row);
-    lv_group_t *previous = lv_group_get_default();
-    lv_group_t *group = lv_obj_get_group(add_tag_row);
-    lv_group_set_default(group); // new rows join the screen's group
-    // Where the selection was, so a removal leaves it on the next channel instead of jumping to the last row
-    size_t keep = 0;
-    for (size_t i = 0; i < channel_row_count; i++) {
-        if (channel_rows[i] == lv_group_get_focused(group)) {
-            keep = i;
-        }
-    }
+typedef struct {
+    job_t    *job;
+    lv_obj_t *menu;
+} rows_build_t;
+
+// With the screen's group as the default (lichen_ui_with_group), so the new rows join it
+static void channel_rows_build(void *arg) {
+    rows_build_t const *b    = arg;
+    job_t              *job  = b->job;
+    lv_obj_t           *menu = b->menu;
     for (size_t i = 0; i < channel_row_count; i++) {
         lv_obj_delete(channel_rows[i]);
     }
@@ -889,7 +882,23 @@ static void list_done(job_t *job) {
         channel_rows[channel_row_count++] = menu_add(menu, job->n == MESH_BUSY ? "MeshCore busy" : "No channels", "",
                                                      NULL, NULL);
     }
-    lv_group_set_default(previous);
+}
+
+static void list_done(job_t *job) {
+    channels_line(job, channels_row);
+    if (!add_tag_row) {
+        return; // the screen is gone
+    }
+    lv_group_t *group = lv_obj_get_group(add_tag_row);
+    // Where the selection was, so a removal leaves it on the next channel instead of jumping to the last row
+    size_t keep = 0;
+    for (size_t i = 0; i < channel_row_count; i++) {
+        if (channel_rows[i] == lv_group_get_focused(group)) {
+            keep = i;
+        }
+    }
+    rows_build_t build = {.job = job, .menu = lv_obj_get_parent(add_tag_row)};
+    lichen_ui_with_group(group, channel_rows_build, &build);
     // After the heading, before the add rows
     for (size_t i = 0; i < channel_row_count; i++) {
         if (channel_rows[i]) {
@@ -1098,6 +1107,14 @@ static void ask_rename(void *arg) {
     }
 }
 
+static void channel_actions_build(void *arg) {
+    mesh_channel_info_t const *info = arg;
+    menu_add(chan_menu, "Rename", "", ask_rename, NULL);
+    if (info->index != 0) {
+        menu_add(chan_menu, "Remove", "", remove_ask, chan_mem->name); // Public (slot 0) stays
+    }
+}
+
 static void info_done(job_t *job) {
     if (!chan_menu || !chan_mem) {
         return; // the details are gone
@@ -1112,13 +1129,7 @@ static void info_done(job_t *job) {
     mesh_hex_text(info->secret, info->key_len, chan_mem->hex, sizeof(chan_mem->hex));
     mesh_base64_text(info->secret, info->key_len, chan_mem->b64, sizeof(chan_mem->b64));
     bool link = mesh_channel_uri(info->name, info->secret, info->key_len, chan_mem->uri, sizeof(chan_mem->uri));
-    lv_group_t *previous = lv_group_get_default();
-    lv_group_set_default(chan_group); // the new rows join the screen's group
-    menu_add(chan_menu, "Rename", "", ask_rename, NULL);
-    if (info->index != 0) {
-        menu_add(chan_menu, "Remove", "", remove_ask, chan_mem->name); // Public (slot 0) stays
-    }
-    lv_group_set_default(previous);
+    lichen_ui_with_group(chan_group, channel_actions_build, (void *)info); // the new rows join the screen's group
     menu_focus_row(chan_menu, 0);
     menu_note(chan_menu, info->key_len == 16 ? "Key (16 bytes, hex):" : "Key (32 bytes, hex):");
     add_value(chan_menu, chan_mem->hex);

@@ -206,7 +206,7 @@ static void first_step(void *arg) {
 // LOADED comes while the shell is still switching screens: decide a moment later, after the closing question's own done
 static void on_first_loaded(lv_event_t *e) {
     (void)e;
-    lv_async_call(first_step, NULL);
+    lichen_ui_call(first_step, NULL);
 }
 
 static void on_first_delete(lv_event_t *e) {

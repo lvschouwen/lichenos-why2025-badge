@@ -202,7 +202,7 @@ static void on_key(lv_event_t *e) {
     uint32_t key = lv_event_get_key(e);
     if (key == LV_KEY_ENTER) {
         // Outside the indev's key handling: opening swaps the indev's group (as home.c does)
-        lv_async_call(open_tile, (void *)(intptr_t)at);
+        lichen_ui_call(open_tile, (void *)(intptr_t)at);
         return;
     }
     int to = mesh_grid_move(MESH_GRID_TILES, at, key);
