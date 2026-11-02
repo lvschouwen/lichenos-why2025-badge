@@ -19,6 +19,9 @@ void      menu_set_value(lv_obj_t *row, char const *value);
 void      menu_set_label(lv_obj_t *row, char const *label);
 // Moves the selection to the index-th selectable row (counting menu_add and menu_add_slider rows only)
 void      menu_focus_row(lv_obj_t *menu, int index);
+// Scrolls the menu up so its content from keep_y down (0: the heading) shows too, when the focused row still fits
+// in the view below it; else leaves the scroll alone. The first row does this with 0 by itself.
+void      menu_scroll_keep(lv_obj_t *menu, int32_t keep_y, lv_obj_t *focused, lv_anim_enable_t anim);
 // Keys no row uses (printable characters and Backspace) go to fn(key, arg),
 // from the key handling of whichever row has the focus. For type-to-search (menu_filter.h).
 void      menu_on_text(lv_obj_t *menu, bool (*fn)(uint32_t key, void *arg), void *arg);

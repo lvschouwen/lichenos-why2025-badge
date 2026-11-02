@@ -41,3 +41,10 @@ int32_t scroll_step_target(int32_t from_y, int32_t dy, int32_t max_y) {
     }
     return y < 0 ? 0 : y;
 }
+
+int32_t scroll_keep_top(int32_t from_y, int32_t keep_y, int32_t focus_bottom, int32_t view_h) {
+    if (keep_y >= from_y || focus_bottom - keep_y > view_h) {
+        return from_y;
+    }
+    return keep_y < 0 ? 0 : keep_y;
+}

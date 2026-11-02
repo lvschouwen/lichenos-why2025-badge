@@ -92,6 +92,14 @@ int main(void) {
     CHECK(scroll_step_target(50, 120, 1000) == 0);
     CHECK(scroll_step_target(0, -120, 0) == 0);
 
+    // A menu's heading comes back with its first row (#128): view 600 high
+    CHECK(scroll_keep_top(80, 0, 150, 600) == 0);     // the first row ends at 150: heading and row both fit
+    CHECK(scroll_keep_top(0, 0, 150, 600) == 0);      // already at the top
+    CHECK(scroll_keep_top(500, 0, 700, 600) == 500);  // a row too far down to show with the heading: unchanged
+    CHECK(scroll_keep_top(300, 120, 680, 600) == 120); // the search line at 120 and the row fit together
+    CHECK(scroll_keep_top(300, 120, 760, 600) == 300); // they don't: the row wins
+    CHECK(scroll_keep_top(100, 120, 300, 600) == 100); // the line is in view already
+
     if (failures) {
         printf("%d failures\n", failures);
         return 1;

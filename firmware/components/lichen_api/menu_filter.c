@@ -82,6 +82,10 @@ static void apply(menu_filter_t *f) {
         if (was_hidden && focused != f->fallback) {
             lv_obj_scroll_to_y(f->menu, 0, LV_ANIM_OFF); // a list that just shrank starts at its top
         }
+        // The "Search:" line shows what was typed: in view whenever the focused row fits below it, with the heading
+        // too when that fits (#128)
+        menu_scroll_keep(f->menu, 0, focused, LV_ANIM_OFF);
+        menu_scroll_keep(f->menu, lv_obj_get_y(f->line), focused, LV_ANIM_OFF);
     } else {
         lv_obj_scroll_to_y(f->menu, 0, LV_ANIM_OFF);
     }

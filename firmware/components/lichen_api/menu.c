@@ -3,6 +3,7 @@
 
 #include "lichen_ui.h"
 #include "fonts.h"
+#include "scroll_anchor.h"
 #include "theme.h"
 
 #include <stdio.h>
@@ -44,6 +45,39 @@ static bool is_last_row(lv_obj_t *menu, lv_obj_t *row) {
         }
     }
     return true;
+}
+
+// No selectable row comes before this one (hidden rows don't count)
+static bool is_first_row(lv_obj_t *menu, lv_obj_t *row) {
+    for (uint32_t i = 0; i < lv_obj_get_index(row); i++) {
+        lv_obj_t *child = lv_obj_get_child(menu, (int32_t)i);
+        if (lv_obj_get_user_data(child) && !lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void menu_scroll_keep(lv_obj_t *menu, int32_t keep_y, lv_obj_t *focused, lv_anim_enable_t anim) {
+    lv_obj_update_layout(menu);
+    int32_t from   = lv_obj_get_scroll_y(menu);
+    int32_t bottom = lv_obj_get_y(focused) + lv_obj_get_height(focused);
+    int32_t view_h = lv_obj_get_height(menu) - lv_obj_get_style_pad_top(menu, LV_PART_MAIN);
+    int32_t to     = scroll_keep_top(from, keep_y, bottom, view_h);
+    if (to != from) {
+        lv_obj_scroll_to_y(menu, to, anim);
+    }
+}
+
+// The first row brings the heading (and any note above the rows) back into view: scrolling a row just into view
+// would leave the title off screen for good once the list had scrolled (#128). LVGL's own scroll-on-focus has run
+// by now (class handler first); this replaces its animation only when the target differs.
+static void on_focused(lv_event_t *e) {
+    lv_obj_t *row  = lv_event_get_target(e);
+    lv_obj_t *menu = lv_obj_get_parent(row);
+    if (is_first_row(menu, row)) {
+        menu_scroll_keep(menu, 0, row, LV_ANIM_ON);
+    }
 }
 
 static void pass_to_hook(lv_obj_t *obj, uint32_t key) {
@@ -188,6 +222,7 @@ static lv_obj_t *add_row(lv_obj_t *menu, char const *label_text, char const *val
     lv_obj_set_height(row->value, line_h);
     lv_label_set_text(row->value, value_text ? value_text : "");
     lv_obj_add_event_cb(r, on_key, LV_EVENT_KEY, row);
+    lv_obj_add_event_cb(r, on_focused, LV_EVENT_FOCUSED, NULL);
     lv_obj_add_event_cb(r, on_delete, LV_EVENT_DELETE, row);
     lv_group_t *g = lv_group_get_default();
     if (g) {

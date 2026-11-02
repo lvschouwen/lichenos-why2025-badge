@@ -35,3 +35,8 @@ uint32_t scroll_key_hash(void const *data, size_t len, uint32_t seed);
 // `from_y`, the scroll position it is heading for (the end of a running animation, not where it is drawn: else a key
 // pressed mid-animation drops what is left of the previous one, #34). Clamped to 0..max_y.
 int32_t scroll_step_target(int32_t from_y, int32_t dy, int32_t max_y);
+
+// Where a menu scrolls so the content from keep_y down shows too (its heading at 0, a search line) while the focused
+// row, ending at focus_bottom, stays in a view view_h high (#128): keep_y when both fit, else from_y unchanged (also
+// when keep_y is in view already). Positions in the content, as lv_obj_get_y.
+int32_t scroll_keep_top(int32_t from_y, int32_t keep_y, int32_t focus_bottom, int32_t view_h);
