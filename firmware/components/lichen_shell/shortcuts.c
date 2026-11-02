@@ -69,7 +69,7 @@ static void open_over(char const *id) {
 }
 
 void shortcuts_run(shortcut_t s) {
-    ESP_LOGW(TAG, "%s", shortcut_name(s));
+    ESP_LOGI(TAG, "%s", shortcut_name(s));
     switch (s) {
         case SHORTCUT_HOME: shell_home(); break;
         case SHORTCUT_MESSAGES: open_messages(); break;
@@ -96,7 +96,7 @@ void shortcuts_key(uint8_t code, bool pressed, bool test_open) {
     if (s != SHORTCUT_NONE) {
         shortcuts_run(s);
     } else if (pressed && shortcut_of_code(code) != SHORTCUT_NONE && !test_open) {
-        ESP_LOGW(TAG, "%s: not now", shortcut_name(shortcut_of_code(code)));
+        ESP_LOGI(TAG, "%s: not now", shortcut_name(shortcut_of_code(code)));
     }
 }
 

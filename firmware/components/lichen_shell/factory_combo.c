@@ -99,14 +99,14 @@ static void handle(fc_event_t e) {
             portENTER_CRITICAL(&lock);
             combo.state = FC_OVER;
             portEXIT_CRITICAL(&lock);
-            ESP_LOGW(TAG, "boot keys held while locked: no reset question");
+            ESP_LOGI(TAG, "boot keys held while locked: no reset question");
             break;
         }
-        ESP_LOGW(TAG, "boot keys held: asking for a settings reset");
+        ESP_LOGI(TAG, "boot keys held: asking for a settings reset");
         show_question();
         break;
     case FC_EV_CONFIRM:
-        ESP_LOGW(TAG, "boot keys: settings reset confirmed");
+        ESP_LOGI(TAG, "boot keys: settings reset confirmed");
         if (factory_reset_request(FACTORY_SETTINGS)) {
             system_restart("factory reset settings (boot keys)");
         }
@@ -114,7 +114,7 @@ static void handle(fc_event_t e) {
         close_question();
         break;
     case FC_EV_CANCEL:
-        ESP_LOGW(TAG, "boot keys: reset cancelled");
+        ESP_LOGI(TAG, "boot keys: reset cancelled");
         close_question();
         break;
     default:
@@ -152,11 +152,11 @@ void factory_combo_start(void) {
     factory_combo_init(&combo);
     start_us = esp_timer_get_time();
     if (xTaskCreatePinnedToCore(combo_task, "factory_keys", TASK_STACK, NULL, 3, &task, 1) != pdPASS) {
-        ESP_LOGW(TAG, "no boot key combo: no task");
+        ESP_LOGE(TAG, "no boot key combo: no task");
         task = NULL;
         return;
     }
     if (!keyboard_raw_add(on_raw, NULL)) {
-        ESP_LOGW(TAG, "no boot key combo: no raw key hook free");
+        ESP_LOGE(TAG, "no boot key combo: no raw key hook free");
     }
 }

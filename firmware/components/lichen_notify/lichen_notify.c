@@ -124,7 +124,7 @@ static void save_task(void *arg) {
     }
     if (!told_stack) {
         told_stack = true;
-        ESP_LOGW(TAG, "save task stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        ESP_LOGI(TAG, "save task stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     }
     lock();
     s_saves += ok;
@@ -348,7 +348,7 @@ void lichen_notify_set_source_enabled(char const *source, bool on) {
         nvs_close(nvs);
     }
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "switch for %s not saved: %s", source, esp_err_to_name(err));
+        ESP_LOGE(TAG, "switch for %s not saved: %s", source, esp_err_to_name(err));
     }
 }
 
@@ -582,7 +582,7 @@ void lichen_notify_set_dnd(bool on) {
         nvs_close(nvs);
     }
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "do-not-disturb not saved: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "do-not-disturb not saved: %s", esp_err_to_name(err));
     }
 }
 

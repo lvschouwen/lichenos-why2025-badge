@@ -91,6 +91,11 @@ static void read_snapshot(sysn_snapshot_t *s, sd_info_t *sd, unsigned poll) {
     }
 }
 
+// The log line has the notice's level (#113)
+static esp_log_level_t log_level(ln_level_t level) {
+    return level == LN_ERROR ? ESP_LOG_ERROR : level == LN_WARN ? ESP_LOG_WARN : ESP_LOG_INFO;
+}
+
 static void notices_task(void *arg) {
     (void)arg;
     static sysn_state_t    state;
@@ -109,11 +114,11 @@ static void notices_task(void *arg) {
         for (size_t i = 0; i < n; i++) {
             sysn_info_t const info = sysn_info(events[i]);
             body_for(events[i], &snap, &sd, body, sizeof(body));
-            ESP_LOGW(TAG, "%s: %s", info.title, body);
+            ESP_LOG_LEVEL(log_level((ln_level_t)info.level), TAG, "%s: %s", info.title, body);
             lichen_notify_to("lichen", (ln_level_t)info.level, info.target, info.title, body, info.flags);
         }
         if (poll == STACK_LOG_POLL) {
-            ESP_LOGW(TAG, "stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+            ESP_LOGI(TAG, "stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));
     }

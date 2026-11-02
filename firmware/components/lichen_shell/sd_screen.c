@@ -89,7 +89,7 @@ static void job_collect(void) {
     sd_info_t info;
     sd_info(&info);
     sds_result(job, outcome != 0, &info, result, sizeof(result));
-    ESP_LOGW(TAG, "%s", result);
+    ESP_LOG_LEVEL(outcome ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s", result);
     job = SDS_IDLE;
 }
 
@@ -109,7 +109,7 @@ static void job_task(void *arg) {
         break;
     default: ok = sd_mount(); break;
     }
-    ESP_LOGW(TAG, "job stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    ESP_LOGI(TAG, "job stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     atomic_store(&job_outcome, ok ? 1 : 0);
     // lv_async_call is not thread safe: take the LVGL lock like the shell does
     lvgl_port_lock(0);
@@ -155,7 +155,7 @@ static void ask_check(void) {
     if (asking == ASK_REQUESTED && open) {
         asking = ASK_SHOWN;
     } else if (asking == ASK_SHOWN && !open) {
-        ESP_LOGW(TAG, "format question gone without an answer");
+        ESP_LOGI(TAG, "format question gone without an answer");
         format_cancelled();
     }
 }

@@ -85,7 +85,7 @@ static void decided(bool confirmed) {
     }
     portEXIT_CRITICAL(&want_lock);
     lv_async_call(apply, NULL);
-    ESP_LOGW(TAG, "answered: %s", confirmed ? "confirm" : "cancel");
+    ESP_LOGI(TAG, "answered: %s", confirmed ? "confirm" : "cancel");
     if (done) {
         done(confirmed);
     }

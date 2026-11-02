@@ -94,7 +94,7 @@ static void cmd_setup(char const *args) {
     if (strcmp(args, "reset") == 0) {
         bool ok = settings_set_u8("setup_done", 0); // only this key: Wi-Fi and the rest stay
         console_reply(ok ? "setup_done cleared: the welcome shows after the next reboot" : "could not clear setup_done");
-        ESP_LOGW(TAG, "setup reset (%s)", ok ? "ok" : "failed");
+        ESP_LOG_LEVEL(ok ? ESP_LOG_INFO : ESP_LOG_ERROR, TAG, "setup reset (%s)", ok ? "ok" : "failed");
     } else if (strncmp(args, "reset ", 6) == 0 || strncmp(args, "done ", 5) == 0) {
         // An app's first-run questions (#84 T5): the app keeps the flag itself; "mesh" stays as the short form. "done"
         // is a diagnostic
@@ -114,7 +114,7 @@ static void cmd_setup(char const *args) {
         } else {
             console_reply("%s asks its first-run questions when next opened", app->name);
         }
-        ESP_LOGW(TAG, "setup %s", args);
+        ESP_LOGI(TAG, "setup %s", args);
     } else {
         console_reply("setup reset [<app id>] | setup done <app id> (the first-run welcome, or an app's first-run questions; mesh = meshcore)");
     }

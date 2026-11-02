@@ -117,7 +117,9 @@ static void shed_load(bool on) {
 // ---- reacting --------------------------------------------------------------------------------------------------------
 
 static void say(ln_level_t level, char const *title, char const *body, uint32_t flags) {
-    ESP_LOGW(TAG, "%s: %s", title, body);
+    // The log line has the notice's level (#113)
+    esp_log_level_t log = level == LN_ERROR ? ESP_LOG_ERROR : level == LN_WARN ? ESP_LOG_WARN : ESP_LOG_INFO;
+    ESP_LOG_LEVEL(log, TAG, "%s: %s", title, body);
     log_event(title);
     lichen_notify_to("lichen", level, "battery", title, body, flags);
 }

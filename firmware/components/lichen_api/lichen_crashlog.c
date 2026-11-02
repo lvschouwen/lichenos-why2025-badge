@@ -105,7 +105,13 @@ bool lichen_crashlog_delete(lichen_app_t const *app, size_t index, crashlog_entr
         store_seen(app, crash_count_since_clear(), newest_hash(buf, len, &entries));
     }
     crash_log_unlock();
-    ESP_LOGW(TAG, "delete entry %u: %s", (unsigned)index, ok ? "done" : "not deleted");
+    ESP_LOG_LEVEL(
+        ok ? ESP_LOG_INFO : ESP_LOG_WARN,
+        TAG,
+        "delete entry %u: %s",
+        (unsigned)index,
+        ok ? "done" : "not deleted"
+    );
     free(buf);
     return ok;
 }
@@ -113,7 +119,7 @@ bool lichen_crashlog_delete(lichen_app_t const *app, size_t index, crashlog_entr
 bool lichen_crashlog_clear(lichen_app_t const *app) {
     bool ok = crash_clear_all();
     store_seen(app, 0, 0);
-    ESP_LOGW(TAG, "clear all: %s", ok ? "done" : "the core dump was not erased");
+    ESP_LOG_LEVEL(ok ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "clear all: %s", ok ? "done" : "the core dump was not erased");
     return ok;
 }
 

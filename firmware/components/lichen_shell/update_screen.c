@@ -72,7 +72,7 @@ bool shell_stop_apps(void) {
 }
 
 static void stop_everything(void) {
-    ESP_LOGW(TAG, "firmware update: stopping the apps");
+    ESP_LOGI(TAG, "firmware update: stopping the apps");
     update_mode_run_stop_hook(shell_stop_apps());
 }
 
@@ -345,7 +345,7 @@ static void tick(lv_timer_t *t) {
     bool restart_decided = um.reboot;
     portEXIT_CRITICAL(&lock);
     if (restart) {
-        ESP_LOGW(TAG, "restarting after the update");
+        ESP_LOGI(TAG, "restarting after the update");
         system_restart("after update");
     }
 
@@ -480,7 +480,15 @@ void update_screen_boot_check(void) {
     bool valid = esp_ota_get_state_partition(running, &state) != ESP_OK || state != ESP_OTA_IMG_PENDING_VERIFY;
     char const *run   = esp_app_get_description()->version;
     upd_boot_t  after = update_after_boot(prev, run, rolled, valid);
-    ESP_LOGW(TAG, "update from %s, now %s%s%s", prev, run, rolled ? " (rolled back)" : "", valid ? "" : " (on trial)");
+    ESP_LOG_LEVEL(
+        rolled ? ESP_LOG_WARN : ESP_LOG_INFO,
+        TAG,
+        "update from %s, now %s%s%s",
+        prev,
+        run,
+        rolled ? " (rolled back)" : "",
+        valid ? "" : " (on trial)"
+    );
     if (after.erase) {
         settings_erase(UPD_FROM_KEY); // the banner text is already kept in banner_line
     } else {

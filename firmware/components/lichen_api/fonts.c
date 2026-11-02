@@ -118,8 +118,14 @@ void lichen_fonts_load(void) {
         loaded += slots[i].loaded != NULL;
         bytes += slots[i].ram;
     }
-    // Warning level on purpose: the badge's default log level hides info lines and this is the one to look for
-    ESP_LOGW(TAG, "%u of %u fonts loaded, %u KB PSRAM%s", loaded, (unsigned)SLOT_COUNT, bytes / 1024,
-             loaded == SLOT_COUNT ? "" : " (the rest is built-in)");
+    ESP_LOG_LEVEL(
+        loaded == SLOT_COUNT ? ESP_LOG_INFO : ESP_LOG_WARN,
+        TAG,
+        "%u of %u fonts loaded, %u KB PSRAM%s",
+        loaded,
+        (unsigned)SLOT_COUNT,
+        bytes / 1024,
+        loaded == SLOT_COUNT ? "" : " (the rest is built-in)"
+    );
     console_register("fonts", "fonts [cover] (which fonts are active and their PSRAM size, or sample-text coverage)", cmd_fonts);
 }

@@ -104,7 +104,7 @@ static void drain(lv_timer_t *timer) {
             fill(t.id); // a merged notice: new text, the time starts again
             s_shown_at = lv_tick_get();
         } else if (!nview_push(&s_waiting, v)) {
-            ESP_LOGI(TAG, "toast %u dropped: queue full", (unsigned)t.id);
+            ESP_LOGW(TAG, "toast %u dropped: queue full", (unsigned)t.id);
         }
     }
     uint32_t gen = lichen_notify_generation();

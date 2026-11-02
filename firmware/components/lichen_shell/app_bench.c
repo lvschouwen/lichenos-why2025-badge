@@ -141,7 +141,7 @@ static void set_result(int row, char const *text) {
     if (s_b.value[row]) {
         lv_label_set_text(s_b.value[row], text);
     }
-    ESP_LOGW(TAG, "%s: %s", LOG_KEYS[row], text);
+    ESP_LOGI(TAG, "%s: %s", LOG_KEYS[row], text);
 }
 
 static void set_hint(char const *text) {
@@ -152,10 +152,24 @@ static void set_hint(char const *text) {
 
 // Two lines: the log ring cuts a line at about 200 characters, the tuning text alone is 80
 static void summary(void) {
-    ESP_LOGW(TAG, "run %u psram: %s | write %s | read %s | copy %s | int->psram %s", s_b.runs, s_b.result[ROW_PSRAM],
-             s_b.result[ROW_WRITE], s_b.result[ROW_READ], s_b.result[ROW_COPY], s_b.result[ROW_INT]);
-    ESP_LOGW(TAG, "run %u ui: redraw %s | scroll %s | %s", s_b.runs, s_b.result[ROW_REDRAW], s_b.result[ROW_SCROLL],
-             s_b.result[ROW_MEM]);
+    ESP_LOGI(
+        TAG,
+        "run %u psram: %s | write %s | read %s | copy %s | int->psram %s",
+        s_b.runs,
+        s_b.result[ROW_PSRAM],
+        s_b.result[ROW_WRITE],
+        s_b.result[ROW_READ],
+        s_b.result[ROW_COPY],
+        s_b.result[ROW_INT]
+    );
+    ESP_LOGI(
+        TAG,
+        "run %u ui: redraw %s | scroll %s | %s",
+        s_b.runs,
+        s_b.result[ROW_REDRAW],
+        s_b.result[ROW_SCROLL],
+        s_b.result[ROW_MEM]
+    );
     strlcpy(s_last, "redraw ", sizeof(s_last));
     strlcat(s_last, s_b.result[ROW_REDRAW], sizeof(s_last));
     char *comma = strchr(s_last, ',');

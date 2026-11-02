@@ -140,7 +140,7 @@ char const *lichen_fs_sd_dir(lichen_app_t const *app) {
         return NULL; // no card is normal: the app asks again later
     }
     if (!take_sd_dirs()) {
-        ESP_LOGE(TAG, "%s: SD directory table busy", app->id);
+        ESP_LOGW(TAG, "%s: SD directory table busy", app->id);
         return NULL;
     }
     char const *path = sd_dir_locked(app, info.generation);

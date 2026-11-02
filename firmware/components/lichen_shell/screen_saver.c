@@ -224,7 +224,7 @@ static void lock_tick(lv_timer_t *t) {
     (void)t;
     uint32_t now = lv_tick_get();
     if (lock_combo_tick(&combo, now)) {
-        ESP_LOGW(TAG, "unlocked (combo)");
+        ESP_LOGI(TAG, "unlocked (combo)");
         screen_lock_release();
         return;
     }
@@ -285,7 +285,7 @@ void screen_lock_engage(void) {
     lock_timer = lv_timer_create(lock_tick, LOCK_TICK_MS, NULL);
     atomic_store(&locked, true);
     cover_update();
-    ESP_LOGW(TAG, "locked");
+    ESP_LOGI(TAG, "locked");
 }
 
 void screen_lock_release(void) {

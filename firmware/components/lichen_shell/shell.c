@@ -231,7 +231,7 @@ static void on_key(lv_event_t *e) {
     uint32_t key     = lv_indev_get_key(keys);
     bool     pressed = lv_indev_get_state(keys) == LV_INDEV_STATE_PRESSED;
     if (log_keys && !password_focused()) {
-        ESP_LOGW(TAG, "key %lu (0x%02lx) %s", (unsigned long)key, (unsigned long)key, pressed ? "pressed" : "released");
+        ESP_LOGI(TAG, "key %lu (0x%02lx) %s", (unsigned long)key, (unsigned long)key, pressed ? "pressed" : "released");
     }
     if (key == LV_KEY_ESC && pressed) {
         shell_esc();
@@ -447,7 +447,7 @@ static void on_raw_key(key_raw_event_t const *ev, void *arg) {
     }
     char text[64];
     key_matrix_format(text, sizeof(text), ev);
-    ESP_LOGW(TAG, "raw key %s", text);
+    ESP_LOGI(TAG, "raw key %s", text);
 }
 
 static void set_raw_log(bool on) {

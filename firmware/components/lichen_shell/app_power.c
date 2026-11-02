@@ -45,7 +45,7 @@ static void power_task(void *arg) {
     (void)arg;
     bool       off   = want_off;
     TickType_t begin = xTaskGetTickCount();
-    ESP_LOGW(TAG, "%s: stopping the apps", off ? "power off" : "restart");
+    ESP_LOGI(TAG, "%s: stopping the apps", off ? "power off" : "restart");
     bool all_stopped = shell_stop_apps();
     update_mode_run_stop_hook(all_stopped); // LoRa (when every app stopped), the C6 link's update state
     if (!lichen_notify_save_now(NOTIFY_SAVE_MS)) {

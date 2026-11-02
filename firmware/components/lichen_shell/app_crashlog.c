@@ -146,7 +146,7 @@ static void job_collect(void) {
         snprintf(s_result, sizeof(s_result), "%s",
                  outcome ? "Cleared: the log, the crash counter and the core dump." : "Cleared, but erasing the core dump failed.");
     }
-    ESP_LOGW(TAG, "%s", s_result);
+    ESP_LOG_LEVEL(outcome ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s", s_result);
     s_v.focus = kind == JOB_DELETE ? s_job_index : 0;
     if (s_v.screen) {
         shell_back_to(s_v.screen, refill, NULL); // the entry's screen goes if it is open, then the list is read again
@@ -161,7 +161,7 @@ static void job_done(void *arg) {
 static void job_task(void *arg) {
     bool ok = (job_t)(intptr_t)arg == JOB_CLEAR ? lichen_crashlog_clear(&crashlog_app)
                                                 : lichen_crashlog_delete(&crashlog_app, s_job_index, &s_job_expect);
-    ESP_LOGW(TAG, "job stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    ESP_LOGI(TAG, "job stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     atomic_store(&s_job_outcome, ok ? 1 : 0);
     // lv_async_call is not thread safe: take the LVGL lock like the shell does
     lvgl_port_lock(0);
@@ -407,7 +407,7 @@ static void notice_tick(lv_timer_t *timer) {
         .seconds      = NOTICE_SECONDS,
         .careful      = true, // the countdown closes it instead of opening the viewer
     };
-    ESP_LOGW(TAG, "after a crash: asking to open the crash log");
+    ESP_LOGI(TAG, "after a crash: asking to open the crash log");
     shell_dialog_countdown(&d, notice_answer);
 }
 

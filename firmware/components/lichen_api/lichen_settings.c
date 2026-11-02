@@ -30,7 +30,7 @@ static bool commit_close(lichen_app_t const *app, char const *key, nvs_handle_t 
     }
     nvs_close(nvs);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "%s: saving %s failed: %s", app->id, key, esp_err_to_name(err));
+        ESP_LOGE(TAG, "%s: saving %s failed: %s", app->id, key, esp_err_to_name(err));
     }
     return err == ESP_OK;
 }
@@ -137,6 +137,15 @@ bool app_settings_adopt_u8(lichen_app_t const *app, char const *key) {
         return false;
     }
     bool ok = app_settings_set_u8(app, key, value);
-    ESP_LOGW(TAG, "%s: %s=%u adopted from %s (%s)", app->id, key, value, FW_NVS_NAMESPACE, ok ? "saved" : "failed");
+    ESP_LOG_LEVEL(
+        ok ? ESP_LOG_INFO : ESP_LOG_WARN,
+        TAG,
+        "%s: %s=%u adopted from %s (%s)",
+        app->id,
+        key,
+        value,
+        FW_NVS_NAMESPACE,
+        ok ? "saved" : "failed"
+    );
     return ok;
 }
