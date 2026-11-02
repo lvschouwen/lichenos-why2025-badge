@@ -78,6 +78,10 @@ lv_obj_t *mc_list_screen(lv_obj_t *screen, char const *title, char const *note, 
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ACTIVE);
     shell_scroll_tame(list);
+    // The arrows move the highlight (mc_list_move scrolls its row into view). LVGL's own arrow scrolling (on by
+    // default) would first scroll the list a quarter of its height on every arrow, Left/Right too, so the highlight
+    // crept to the edge and could leave the view (#127, as home's #124)
+    lv_obj_set_scroll_with_arrow(list, false);
     no_focus_ring(list);
     lv_group_t *group = lv_group_get_default();
     if (group) {
