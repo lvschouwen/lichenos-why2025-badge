@@ -32,13 +32,7 @@ static void drive(bool lit) {
     gpio_set_level(LED_GPIO, lit == (LED_ACTIVE_HIGH != 0));
 }
 
-static void tick(void *arg) {
-    (void)arg;
-    uint32_t gen = lichen_notify_generation();
-    if (gen != s_generation) {
-        s_generation = gen;
-        s_unread     = lichen_notify_unread(NULL) > 0;
-    }
+static led_pattern_t pick_now(void) {
     led_inputs_t const in = {
         .enabled  = atomic_load(&s_enabled),
         .dnd      = lichen_notify_dnd(),
@@ -46,7 +40,17 @@ static void tick(void *arg) {
         .updating = atomic_load(&s_updating),
         .override = (led_override_t)atomic_load(&s_override),
     };
-    led_pattern_t p = led_pick(&in);
+    return led_pick(&in);
+}
+
+static void tick(void *arg) {
+    (void)arg;
+    uint32_t gen = lichen_notify_generation();
+    if (gen != s_generation) {
+        s_generation = gen;
+        s_unread     = lichen_notify_unread(NULL) > 0;
+    }
+    led_pattern_t p = pick_now();
     atomic_store(&s_pattern, p);
     bool lit = led_level(p, (uint32_t)(esp_timer_get_time() / 1000));
     if (lit != s_lit) {
@@ -104,6 +108,9 @@ void led_set_updating(bool on) {
 
 void led_set_override(led_override_t o) {
     atomic_store(&s_override, o);
+    if (s_started) {
+        atomic_store(&s_pattern, pick_now()); // "fw led" reads it back at once, not after the next 50 ms tick (#125)
+    }
 }
 
 led_pattern_t led_current(void) {
