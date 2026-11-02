@@ -13,6 +13,9 @@
 #include "notify_os.h"
 #include "nvs.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+
 #include <stdatomic.h>
 
 #define TICK_US      10000
@@ -32,6 +35,9 @@ static atomic_llong      s_start_us;
 static atomic_bool       s_playing;
 static esp_timer_handle_t s_timer;
 static bool              s_ready;
+// tick() runs on the esp_timer task, begin() and haptics_stop() on any core: without the lock a tick that decided the
+// old buzz is over could clear "playing" and stop the timer right after begin() started the next one (#125)
+static SemaphoreHandle_t s_lock;
 static uint8_t           s_duty; // the duty last written
 static hp_gate_t         s_gate;        // the notification hook runs on the LVGL task only
 
@@ -51,6 +57,7 @@ static void motor(uint8_t duty) {
 
 static void tick(void *arg) {
     (void)arg;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
     hp_pattern_t p = (hp_pattern_t)atomic_load(&s_pattern);
     uint32_t     t = (uint32_t)((esp_timer_get_time() - atomic_load(&s_start_us)) / 1000);
     hp_strength_t s    = (hp_strength_t)atomic_load(&s_strength);
@@ -63,12 +70,14 @@ static void tick(void *arg) {
         atomic_store(&s_playing, false);
         esp_timer_stop(s_timer);
     }
+    xSemaphoreGive(s_lock);
 }
 
 static void begin(hp_pattern_t p) {
     if (!s_ready) {
         return;
     }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
     esp_timer_stop(s_timer); // a running buzz is replaced; fails harmlessly when idle
     atomic_store(&s_pattern, p);
     atomic_store(&s_start_us, esp_timer_get_time());
@@ -78,6 +87,7 @@ static void begin(hp_pattern_t p) {
         atomic_store(&s_playing, false);
         motor(0);
     }
+    xSemaphoreGive(s_lock);
 }
 
 void haptics_play(hp_pattern_t p) {
@@ -95,8 +105,10 @@ void haptics_force(hp_pattern_t p) {
 void haptics_stop(void) {
     atomic_store(&s_playing, false);
     if (s_ready) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
         esp_timer_stop(s_timer);
         motor(0);
+        xSemaphoreGive(s_lock);
     }
 }
 
@@ -156,6 +168,11 @@ void haptics_start(void) {
         return;
     }
     load_settings();
+    s_lock = xSemaphoreCreateMutex();
+    if (!s_lock) {
+        ESP_LOGE(TAG, "lock not created, no vibration");
+        return;
+    }
     esp_timer_create_args_t const args = {.callback = tick, .name = "haptics"};
     if (esp_timer_create(&args, &s_timer) != ESP_OK) {
         ESP_LOGE(TAG, "timer not created, no vibration");

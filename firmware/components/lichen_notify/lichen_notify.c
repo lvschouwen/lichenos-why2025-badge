@@ -401,7 +401,8 @@ uint32_t lichen_notify_to(char const *source, ln_level_t level, char const *targ
         ESP_LOGW(TAG, "dropped \"%s\": source \"%s\" is longer than an app id", title ? title : "", source);
         return 0;
     }
-    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    int64_t  now_us = esp_timer_get_time();
+    uint32_t now_ms = (uint32_t)(now_us / 1000); // the rate limiter only compares nearby times
     bool     clock  = s_clock_set && s_clock_set();
     uint32_t once   = key_hash(source, target);
     source_on(source); // fills the switch cache (an NVS read the first time) before the lock is taken
@@ -423,7 +424,7 @@ uint32_t lichen_notify_to(char const *source, ln_level_t level, char const *targ
              .level      = (uint8_t)level,
              .flags      = (uint8_t)flags,
              .epoch      = clock ? (int64_t)time(NULL) : 0,
-             .mono_s     = now_ms / 1000,
+             .mono_s     = (uint32_t)(now_us / 1000000), // from the 64-bit timer: now_ms wraps at 49.7 days (#125)
              .coalesce   = (flags & LN_COALESCE) || !within,
              .restricted = !within,
     };
