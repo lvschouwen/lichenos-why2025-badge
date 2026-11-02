@@ -4,6 +4,9 @@
 #include "log_tap.h"
 #include "settings_store.h"
 
+#include "esp_timer.h"
+
+#include <stdio.h>
 #include <strings.h>
 #include <string.h>
 
@@ -71,7 +74,16 @@ static void cmd_boot(char const *args) {
     boot_view_t              view;
     boot_progress_view(&view);
     for (int i = 0; i < BOOT_STEP_COUNT; i++) {
-        console_reply("boot %-7s %-8s %s", boot_progress_label((boot_step_t)i), state_text[view.state[i]], view.reason[i]);
+        char when[32] = "";
+        if (view.began[i] && view.ended[i]) {
+            snprintf(when, sizeof(when), "%u-%u ms", (unsigned)view.begin_ms[i], (unsigned)view.end_ms[i]);
+        } else if (view.began[i]) {
+            snprintf(when, sizeof(when), "%u- ms", (unsigned)view.begin_ms[i]);
+        } else if (view.ended[i]) {
+            snprintf(when, sizeof(when), "-%u ms", (unsigned)view.end_ms[i]);
+        }
+        console_reply("boot %-7s %-8s %-14s %s", boot_progress_label((boot_step_t)i), state_text[view.state[i]], when,
+                      view.reason[i]);
     }
     console_reply("boot current %s pct %d generation %u", boot_progress_label(view.current), view.pct, (unsigned)view.generation);
     static char lines[LOG_TAP_LINES][LOG_TAP_LINE_LEN]; // console task only
@@ -81,7 +93,12 @@ static void cmd_boot(char const *args) {
     }
 }
 
+static uint32_t uptime_ms(void) {
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
 void boot_progress_start(void) {
+    boot_steps_set_clock(uptime_ms); // from reset: the systimer counts the ROM and bootloader too (to be checked, #39)
     portENTER_CRITICAL(&lock);
     boot_steps_reset();
     portEXIT_CRITICAL(&lock);

@@ -42,6 +42,12 @@ typedef struct {
 void shell_set_sources(shell_sources_t const *sources); // before shell_start; copied
 // Shows the boot screen; it moves on to home by itself 2 s after the apps step ends
 void shell_start(lv_display_t *display);
+// The boot screen alone, as early as the display is up (#39): before storage, notices, assets and the fonts, so with
+// LVGL's built-in fonts. shell_start (later) then only adds the rest. Optional: shell_start does it when it has not run.
+void shell_boot_screen(lv_display_t *display);
+// A "Restarting" frame (#39), drawn synchronously right before a soft restart so the lit panel shows it. Any task; gives
+// up after 300 ms if LVGL is busy (a restart must never wait on the UI).
+void shell_show_restarting(void);
 // The keyboard comes up after the C6 (C6 EN resets its chip), so later than the screen
 void shell_attach_keys(lv_indev_t *keys);
 // Update mode (#76): deletes every screen below the top one, home included, so their LVGL objects are freed. The top

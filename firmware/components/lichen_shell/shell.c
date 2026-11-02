@@ -5,6 +5,8 @@
 #include "esp_log.h"
 #include "fw_console.h"
 #include "esp_lvgl_port.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "key_matrix.h"
 #include "lichen_app.h"
 #include "nav.h"
@@ -481,6 +483,34 @@ static void cmd_keys(char const *args) {
     console_reply("keys %s%s", log_keys ? "logged" : "not logged", keys ? "" : " (no keyboard attached)");
 }
 
+static bool boot_screen_shown;
+
+void shell_boot_screen(lv_display_t *display) {
+    lvgl_port_lock(0);
+    lv_display_set_default(display);
+    lv_obj_t *boot = boot_screen_create();
+    lv_screen_load_anim(boot, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, true); // drops LVGL's empty start screen
+    boot_screen_shown = true;
+    lvgl_port_unlock();
+}
+
+void shell_show_restarting(void) {
+    if (!lv_display_get_default() || !lvgl_port_lock(300)) {
+        return;
+    }
+    lv_obj_t *screen = lv_obj_create(NULL);
+    shell_style_screen(screen);
+    lv_obj_set_scrollable(screen, false);
+    lv_obj_t *label = lv_label_create(screen);
+    lv_obj_set_style_text_font(label, lichen_font(LICHEN_FONT_LARGE), 0);
+    lv_label_set_text(label, "Restarting...");
+    lv_obj_center(label);
+    lv_screen_load(screen); // the old screens stay: the restart frees everything
+    lv_refr_now(NULL);
+    lvgl_port_unlock();
+    vTaskDelay(pdMS_TO_TICKS(40)); // the frame leaves for the panel before the DSI feed stops
+}
+
 void shell_start(lv_display_t *display) {
     home_init();
     setup_init();
@@ -504,8 +534,11 @@ void shell_start(lv_display_t *display) {
     notes_app_register();
     lvgl_port_lock(0);
     lv_display_set_default(display);
-    lv_obj_t *boot = boot_screen_create();
-    lv_screen_load_anim(boot, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, true); // drops LVGL's empty start screen
+    if (!boot_screen_shown) {
+        lv_obj_t *boot = boot_screen_create();
+        lv_screen_load_anim(boot, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, true);
+        boot_screen_shown = true;
+    }
     update_screen_init();
     notify_ui_start();
     shortcuts_start();

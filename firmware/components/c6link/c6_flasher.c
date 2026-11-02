@@ -1,5 +1,6 @@
 #include "c6_flasher.h"
 
+#include "backlight.h"
 #include "c6_firmware.h"
 #include "c6_paths.h"
 #include "driver/gpio.h"
@@ -102,6 +103,7 @@ esp_err_t flash_c6_if_needed(bool force) {
         goto out;
     }
 
+    backlight_r16_hold(); // a no-op unless "fw bl r16" found the bridge
     target_chip_t target = esp_loader_get_target(&loader);
     ESP_LOGI(TAG, "Target = %d", target);
     if (target != ESP32C6_CHIP) {
@@ -111,7 +113,11 @@ esp_err_t flash_c6_if_needed(bool force) {
         ret = ESP_FAIL;
     }
 
+    // R16 (#12): the P4 holds the backlight only from here (the ROM answered, so no C6 application can drive DISPLAY_BL)
+    // until just before the C6 is released. Order: EN low, GPIO5 back to an input, then the library lets EN rise.
     ESP_LOGI(TAG, "Resetting C6!");
+    gpio_set_level(GPIO_NUM_12, 0);
+    backlight_r16_release();
     esp_loader_reset_target(&loader);
 
 out:

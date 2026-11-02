@@ -27,9 +27,15 @@ typedef struct {
     int          pct; // of the current step, -1 when it has none
     boot_step_t  current;
     char         reason[BOOT_STEP_COUNT][BOOT_REASON_LEN];
+    bool         began[BOOT_STEP_COUNT];    // begin ran (a step can end skipped without it)
+    bool         ended[BOOT_STEP_COUNT];
+    uint32_t     begin_ms[BOOT_STEP_COUNT]; // uptime at begin / end (#39 measurement), see boot_steps_set_clock
+    uint32_t     end_ms[BOOT_STEP_COUNT];
     uint32_t     generation; // grows on every change, so a screen can tell when to redraw
 } boot_view_t;
 
+// Where the begin/end uptimes come from (ms since reset); without one they stay 0. Set once, before the first step.
+void        boot_steps_set_clock(uint32_t (*now_ms)(void));
 void        boot_steps_reset(void);
 void        boot_step_begin(boot_step_t step);
 void        boot_step_progress(boot_step_t step, int pct);

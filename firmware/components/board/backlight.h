@@ -28,3 +28,10 @@ void backlight_power_off(void);
 // Sends the last applied levels again (the saved ones if none were applied yet): the C6 starts at its defaults after a
 // reset (#14). Call after backlight_start(), once the C6 runs its application again.
 void backlight_reapply(void);
+
+// R16 (#12): P4 GPIO5 can drive DISPLAY_BL only when the R16 bridge is fitted. Detection is read-only ("fw bl r16": GPIO5 as
+// an input while the C6 PWMs at three levels) and stored in NVS. backlight_r16_hold() drives GPIO5 high ONLY when the
+// stored result says fitted; the caller must have proof that the C6 runs no application (ROM answered). The caller
+// holds C6 EN low, THEN calls backlight_r16_release(), THEN lets EN rise. On a badge without R16 both do nothing.
+void backlight_r16_hold(void);
+void backlight_r16_release(void);

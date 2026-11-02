@@ -413,7 +413,19 @@ void system_restart_note(char const *why) {
 // skip system_restart: those are recorded as "unknown caller" with the address they were called from
 extern void __real_esp_restart(void) __attribute__((noreturn));
 void        __wrap_esp_restart(void) __attribute__((noreturn));
-void        __wrap_esp_restart(void) {
+
+static void (*restart_prepare)(void);
+
+void system_restart_set_prepare(void (*prepare)(void)) {
+    restart_prepare = prepare;
+}
+
+void __wrap_esp_restart(void) {
+    if (restart_prepare) {
+        void (*prepare)(void) = restart_prepare;
+        restart_prepare       = NULL; // a restart from inside the hook must not draw twice
+        prepare();
+    }
     if (s_restart_why) {
         record_restart(s_restart_why, 0);
     } else {

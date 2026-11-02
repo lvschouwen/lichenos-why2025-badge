@@ -417,15 +417,35 @@ static void crash_command(char const *args) {
     }
 }
 
-void crash_check(void) {
+// Split for the early boot screen (#39): the first part decides, cheaply, whether this boot follows a crash (the boot
+// screen reads crash_recovered() once when it is built); the second needs /storage and reads the whole running image
+static struct {
+    crash_reset_t reason;
+    bool          fresh;
+    uint32_t      sum;
+} s_pending;
+
+void crash_check_early(void) {
     crash_log_lock(); // creates the lock before any other task can want it
     crash_log_unlock();
-    check_image_fits();
     console_register("crash", "crash [dump | clear | test panic|wdt] (crash log and core dump)", crash_command);
-    esp_reset_reason_t const why    = esp_reset_reason();
-    crash_reset_t const      reason = crash_reset_of(why);
-    s_reset_reason = (int)why;
-    ESP_LOGI(TAG, "reset reason %d (%s)", (int)why, reason_name(reason));
+    esp_reset_reason_t const why = esp_reset_reason();
+    s_pending.reason             = crash_reset_of(why);
+    s_reset_reason               = (int)why;
+    ESP_LOGI(TAG, "reset reason %d (%s)", (int)why, reason_name(s_pending.reason));
+    s_pending.sum   = 0;
+    s_pending.fresh = dump_sum(&s_pending.sum) && s_pending.sum != stored_dump_sum();
+    if (!crash_is_crash(s_pending.reason, s_pending.fresh)) {
+        if (s_pending.reason == CRASH_RST_WDT) {
+            ESP_LOGI(TAG, "watchdog reset without a new core dump: a USB reset, not recorded");
+        }
+        return;
+    }
+    s_recovered = true;
+}
+
+void crash_check_late(void) {
+    check_image_fits();
     restart_log_t *rl = malloc(sizeof(*rl));
     if (rl) {
         if (system_restart_history(rl) > 0) {
@@ -434,16 +454,12 @@ void crash_check(void) {
         }
         free(rl);
     }
-
-    uint32_t sum   = 0;
-    bool     fresh = dump_sum(&sum) && sum != stored_dump_sum();
-    if (!crash_is_crash(reason, fresh)) {
-        if (reason == CRASH_RST_WDT) {
-            ESP_LOGI(TAG, "watchdog reset without a new core dump: a USB reset, not recorded");
-        }
+    if (!s_recovered) {
         return;
     }
-    s_recovered = true;
+    crash_reset_t const reason = s_pending.reason;
+    bool const          fresh  = s_pending.fresh;
+    uint32_t const      sum    = s_pending.sum;
 
     char     task[16] = "?";
     char     elf[APP_ELF_SHA256_SZ] = "";
@@ -476,4 +492,9 @@ void crash_check(void) {
 
 bool crash_recovered(void) {
     return s_recovered;
+}
+
+void crash_check(void) {
+    crash_check_early();
+    crash_check_late();
 }

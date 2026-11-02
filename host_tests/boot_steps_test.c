@@ -14,7 +14,42 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
+static uint32_t fake_ms;
+
+static uint32_t fake_clock(void) {
+    return fake_ms;
+}
+
+// Begin/end uptimes per step (#39 measurement)
+static void test_timestamps(void) {
+    boot_view_t v;
+    boot_steps_set_clock(fake_clock);
+    boot_steps_reset();
+    fake_ms = 310;
+    boot_step_begin(BOOT_DISPLAY);
+    fake_ms = 655;
+    boot_step_end(BOOT_DISPLAY, STEP_DONE, NULL);
+    boot_step_end(BOOT_WIFI, STEP_SKIPPED, "no C6"); // skipped without a begin
+    boot_steps_view(&v);
+    CHECK(v.began[BOOT_DISPLAY] && v.ended[BOOT_DISPLAY]);
+    CHECK(v.begin_ms[BOOT_DISPLAY] == 310 && v.end_ms[BOOT_DISPLAY] == 655);
+    CHECK(!v.began[BOOT_WIFI] && v.ended[BOOT_WIFI] && v.end_ms[BOOT_WIFI] == 655);
+    CHECK(!v.began[BOOT_C6] && !v.ended[BOOT_C6]);
+    fake_ms = 700;
+    boot_step_begin(BOOT_DISPLAY); // begun again: the old end is forgotten
+    boot_steps_view(&v);
+    CHECK(v.begin_ms[BOOT_DISPLAY] == 700 && !v.ended[BOOT_DISPLAY]);
+    boot_steps_reset();
+    boot_steps_view(&v);
+    CHECK(!v.began[BOOT_DISPLAY] && v.begin_ms[BOOT_DISPLAY] == 0);
+    boot_steps_set_clock(NULL);
+    boot_step_begin(BOOT_C6);
+    boot_steps_view(&v);
+    CHECK(v.begin_ms[BOOT_C6] == 0); // no clock: zeros, no crash
+}
+
 int main(void) {
+    test_timestamps();
     boot_view_t v;
     boot_steps_reset();
     boot_steps_view(&v);

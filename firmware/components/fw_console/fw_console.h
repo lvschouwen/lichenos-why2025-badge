@@ -32,6 +32,9 @@ void console_exec(char const *line, char *buf, size_t cap, console_done_fn done,
 // why: a short reason, kept with the fw version, uptime and time in NVS (last 5, "fw crash") so an unexplained restart
 // can be traced (#41). A bare esp_restart() is caught too and recorded as "unknown caller" with its return address.
 void system_restart(char const *why) __attribute__((noreturn));
+// Runs once, on the restarting task, right before the restart (every esp_restart, not panics): the shell draws its
+// "Restarting" frame so the lit panel does not show a stale or torn screen (#39). Must return quickly.
+void system_restart_set_prepare(void (*prepare)(void));
 
 // Adds a line to the same history without restarting: something worth knowing about this boot (#40: a bad PSRAM tuning)
 void system_restart_note(char const *why);

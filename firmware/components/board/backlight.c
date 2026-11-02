@@ -1,5 +1,8 @@
 #include "backlight.h"
 #include "backlight_level.h"
+#include "r16_hold.h"
+#include "driver/gpio.h"
+#include "esp_rom_sys.h"
 
 #include "display.h"
 #include "driver/uart.h"
@@ -13,6 +16,7 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define BL_UART    UART_NUM_1 // the C6's console UART; the C6 flasher and "fw c6log" use it too
 #define BL_TX_PIN  16
@@ -151,7 +155,121 @@ void backlight_get(uint8_t *display, uint8_t *keyboard) {
     }
 }
 
+// ---- R16 (#12) ----
+#define R16_GPIO      GPIO_NUM_5
+#define R16_SETTLE_MS 150
+#define R16_SAMPLES   20000 // a few ms: over a hundred periods of the C6's 25 kHz PWM
+
+static bool r16_driving;
+
+static r16_fit_t r16_stored(void) {
+    uint8_t      v = 0;
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u8(nvs, "r16", &v);
+        nvs_close(nvs);
+    }
+    return v == R16_FITTED || v == R16_ABSENT ? (r16_fit_t)v : R16_UNKNOWN;
+}
+
+// Input only, no pulls: a pull would turn a floating pin into a plausible reading
+static void r16_sample_pin(r16_samples_t *s, int i) {
+    uint32_t high = 0;
+    for (int n = 0; n < R16_SAMPLES; n++) {
+        high += (uint32_t)gpio_get_level(R16_GPIO);
+    }
+    s->high[i]  = high;
+    s->total[i] = R16_SAMPLES;
+}
+
+static void r16_detect(void) {
+    if (r16_driving) {
+        console_reply("r16: GPIO5 is being driven, not now");
+        return;
+    }
+    gpio_config_t const in = {.pin_bit_mask = 1ULL << R16_GPIO, .mode = GPIO_MODE_INPUT};
+    gpio_config(&in);
+    r16_samples_t s = {0};
+    for (int i = 0; i < R16_LEVELS; i++) {
+        backlight_idle(r16_detect_level[i], 0); // the C6's PWM at this level; not saved
+        vTaskDelay(pdMS_TO_TICKS(R16_SETTLE_MS));
+        r16_sample_pin(&s, i);
+    }
+    backlight_resume();
+    gpio_reset_pin(R16_GPIO); // back to its reset state
+    r16_fit_t fit = r16_classify(&s);
+    console_reply("r16: GPIO5 high at display %u/%u/%u %%: %u/%u/%u of %u -> %s", r16_detect_level[0], r16_detect_level[1],
+                  r16_detect_level[2], (unsigned)s.high[0], (unsigned)s.high[1], (unsigned)s.high[2], R16_SAMPLES,
+                  r16_fit_name(fit));
+    nvs_handle_t nvs;
+    if (fit != R16_UNKNOWN && nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "r16", (uint8_t)fit);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
+void backlight_r16_hold(void) {
+    if (!r16_may_drive(r16_stored(), R16_C6_ROM)) {
+        return;
+    }
+    gpio_set_level(R16_GPIO, 1); // level first, so the pin never glitches low
+    gpio_config_t const out = {.pin_bit_mask = 1ULL << R16_GPIO, .mode = GPIO_MODE_OUTPUT};
+    gpio_config(&out);
+    gpio_set_level(R16_GPIO, 1);
+    r16_driving = true;
+    ESP_LOGI(TAG, "R16 fitted: P4 holds the backlight while the C6 is in its ROM");
+}
+
+void backlight_r16_release(void) {
+    if (!r16_driving) {
+        return;
+    }
+    gpio_reset_pin(R16_GPIO); // input, no pulls
+    r16_driving = false;
+    esp_rom_delay_us(100);    // the pad is high-z long before EN rises (the caller's next step)
+}
+
+// Soft restarts keep the backlight and panel on (#39, BadgeVMS's feel): system_restart's hook has drawn a "Restarting"
+// frame. "bl restart dark" brings the #23 blanking back (NVS bl_rst_dark), should the panel show garbage in the gap.
+static atomic_bool blank_on_restart;
+
+static void load_restart_mode(void) {
+    uint8_t      dark = 0;
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u8(nvs, "bl_rst_dark", &dark);
+        nvs_close(nvs);
+    }
+    atomic_store(&blank_on_restart, dark != 0);
+}
+
+static void cmd_bl_restart(char const *mode) {
+    bool dark = strcmp(mode, "dark") == 0;
+    if (!dark && strcmp(mode, "lit") != 0) {
+        console_reply("bl restart %s (lit: backlight and panel stay on across a restart; dark: blanked first, #23)",
+                      atomic_load(&blank_on_restart) ? "dark" : "lit");
+        return;
+    }
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, "bl_rst_dark", dark);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    atomic_store(&blank_on_restart, dark);
+    console_reply("restart: %s", dark ? "dark" : "lit");
+}
+
 static void cmd_bl(char const *args) {
+    if (strcmp(args, "r16") == 0) {
+        r16_detect();
+        return;
+    }
+    if (strncmp(args, "restart", 7) == 0) {
+        cmd_bl_restart(args[7] == ' ' ? args + 8 : "");
+        return;
+    }
     char         *end;
     unsigned long d = strtoul(args, &end, 10);
     unsigned long k = strtoul(end, &end, 10);
@@ -168,13 +286,21 @@ static void cmd_bl(char const *args) {
 // Runs inside esp_restart() (before the scheduler stops, newest handler first, so before esp_wifi_stop). The panel
 // has no power switch and the backlight is the C6's: without this, the stopped DSI feed leaves the lit panel showing
 // garbage (yellow, then gray) until the next boot resets it (#23). Backlight off first, so nothing shows while the
-// panel switches off. Not run on panic, abort, watchdog or brownout resets: nothing can be done there.
+// panel switches off. Not run on panic, abort, watchdog or brownout resets: nothing can be done there. Since #39 only for power off and
+// "bl restart dark"; a normal restart stays lit (restart_handler).
 static void blank_for_restart(void) {
     if (send_raw(0, 0)) {
         uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
     }
     display_blank();
     vTaskDelay(pdMS_TO_TICKS(BL_FRAME_MS));
+}
+
+// The shutdown handler (every esp_restart): blank only in "dark" mode; the lit mode relies on the Restarting frame
+static void restart_handler(void) {
+    if (atomic_load(&blank_on_restart)) {
+        blank_for_restart();
+    }
 }
 
 void backlight_power_off(void) {
@@ -195,13 +321,14 @@ void backlight_restore(void) {
 }
 
 void backlight_start(void) {
-    console_register("bl", "bl <display> <keyboard> (backlight 0-100, screen at least 5)", cmd_bl);
+    console_register("bl", "bl <display> <keyboard> (backlight 0-100, screen at least 5) | bl restart [lit|dark] | bl r16 (is R16 fitted?)", cmd_bl);
+    load_restart_mode();
     uint8_t display, keyboard;
     backlight_get(&display, &keyboard);
     send_user(display, keyboard, false);
     // After c6link_start(): handlers run newest first, so this runs before esp_wifi_stop (which the C6 Wi-Fi setup
     // registers; there are only 5 slots in all)
-    if (esp_register_shutdown_handler(blank_for_restart) != ESP_OK) {
+    if (esp_register_shutdown_handler(restart_handler) != ESP_OK) {
         ESP_LOGE(TAG, "no shutdown handler slot: the screen will flash on restart");
     }
 }

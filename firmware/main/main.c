@@ -218,7 +218,47 @@ static void log_heap(char const *name, uint32_t caps) {
     );
 }
 
+static uint32_t uptime_ms(void) {
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+// The first thing on the glass (#39): the boot screen, drawn before storage, notices, assets and the image hash. The
+// fonts are LVGL's built-in ones until lichen_fonts_load. Returns false when there is no display.
+static bool show_boot_screen(lv_display_t **display) {
+    boot_progress_begin(BOOT_DISPLAY);
+    if (!display_start(display)) {
+        ESP_LOGE(TAG, "no display");
+        boot_progress_end(BOOT_DISPLAY, STEP_FAILED, "no display");
+        return false;
+    }
+    shell_boot_screen(*display);
+    lvgl_port_lock(0);
+    lv_refr_now(*display);
+    lvgl_port_unlock();
+    vTaskDelay(pdMS_TO_TICKS(40)); // the frame is on the panel before the backlight comes up
+    ESP_LOGI(TAG, "first frame at %u ms", (unsigned)uptime_ms());
+    boot_progress_end(BOOT_DISPLAY, STEP_DONE, NULL);
+    // A restart keeps the backlight lit (#39); after a power-on the C6 comes up at its own default and this sets the saved
+    // level. The same call closes the UART the C6 flasher needs for itself.
+    backlight_restore();
+    ESP_LOGI(TAG, "backlight on at %u ms", (unsigned)uptime_ms());
+    return true;
+}
+
+// Fonts from the assets partition into PSRAM, then the assets copy goes (#22). After the screen exists: LVGL is running,
+// so the lock is held while the fonts are parsed
+static void load_fonts(bool screen) {
+    assets_mount(); // without it the UI uses the built-in fonts
+    if (screen) {
+        lvgl_port_lock(0);
+        lichen_fonts_load(); // before shell_start builds the status bar and home
+        lvgl_port_unlock();
+    }
+    assets_unmount(); // the fonts made their own PSRAM copies
+}
+
 void app_main(void) {
+    ESP_LOGI(TAG, "app_main starts at %u ms of uptime (esp_timer, counted from reset)", (unsigned)uptime_ms());
     lichen_random_start(); // the OS owns the entropy source and leaves it on (#84)
     log_tap_start();
     psram_guard_start(); // canaries early, so they sit low in the PSRAM heap (#40)
@@ -253,6 +293,10 @@ void app_main(void) {
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
     boot_progress_nvs_up();
     settings_apply_tz(); // before anything shows the clock
+    crash_check_early(); // cheap: only decides crash_recovered(), which the boot screen reads once
+    lv_display_t *display;
+    bool          screen = show_boot_screen(&display);
+    console_start();
     boot_progress_begin(BOOT_STORAGE);
     factory_reset_boot_storage(); // and its /storage part (#66): unmounted, before anything opens a file
     bool storage_ok = storage_mount();
@@ -265,23 +309,12 @@ void app_main(void) {
     lichen_notify_start(storage_ok); // the history from /storage/lichen/notify.bin (#62); lichen_notify() works from now
     factory_reset_post_notices();    // a factory reset that could not erase from flash says so (#66)
     led_start();                     // the status LED follows the notices (#74)
-
-    assets_mount(); // fonts; without them the UI uses the built-in ones (#22)
-    crash_check();
-    console_start();
+    crash_check_late();              // the crash record (/storage) and the full-image hash, after the first frame
     factory_reset_console_register();
-    // The screen first, so the boot screen shows the slow C6 check and reflash. The backlight is the C6's (over the
-    // UART the flasher uses) and the keyboard chip is reset with the C6: both come after it.
-    boot_progress_begin(BOOT_DISPLAY);
-    lv_display_t *display;
-    bool          screen = display_start(&display);
+    load_fonts(screen);
     // The apps, in home's order: MeshCore first; shell_start adds Settings and About after it. Registered without a
     // screen too, so their background parts still start.
     meshcore_app_register();
-    if (screen) {
-        lichen_fonts_load(); // before any screen is built
-    }
-    assets_unmount(); // the fonts made their own PSRAM copies
     if (screen) {
         shell_sources_t const sources = {.wifi_up = wifi_up, .lora_up = lora_link_up, .c6_up = c6link_up,
                                          .lora_use = lora_use,
@@ -293,20 +326,8 @@ void app_main(void) {
                                          .c6_restarts = c6_restarts};
         shell_set_sources(&sources);
         shell_start(display);
-        boot_progress_end(BOOT_DISPLAY, STEP_DONE, NULL);
-    } else {
-        ESP_LOGE(TAG, "no display");
-        boot_progress_end(BOOT_DISPLAY, STEP_FAILED, "no display");
+        system_restart_set_prepare(shell_show_restarting); // a lit "Restarting" frame instead of blanking (#39)
     }
-    if (screen) {
-        // A restart leaves the backlight off (#23): once the boot screen has been drawn, turn it on again, before the
-        // slow C6 check
-        lvgl_port_lock(0);
-        lv_refr_now(display);
-        lvgl_port_unlock();
-        vTaskDelay(pdMS_TO_TICKS(40));
-    }
-    backlight_restore();
     // The SD card (#60): before the C6 link, as BadgeVMS, so the SDMMC controller is set up before esp_hosted shares
     // it, and before the apps start. No card is one warning; nothing else waits for it.
     sd_start();

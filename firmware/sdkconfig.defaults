@@ -14,6 +14,9 @@ CONFIG_ESP_BROWNOUT_DET_LVL_SEL_5=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 CONFIG_ESP_SYSTEM_PANIC_REBOOT_DELAY_SECONDS=5
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+# Quiet second-stage bootloader (#39): faster boots and a smaller bootloader.bin (only 0x4e0 B were free in the 0x6000
+# region, #112). Never touch CONFIG_BOOT_ROM_LOG_*: turning the ROM log off burns an eFuse.
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 
 # PSRAM is ordinary malloc memory: big buffers, lwIP and the UI live there, internal RAM stays for DMA
 CONFIG_SPIRAM=y

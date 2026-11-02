@@ -6,6 +6,16 @@ static boot_view_t view = {.pct = -1};
 
 static char const *const labels[BOOT_STEP_COUNT] = {"storage", "display", "PSRAM", "C6", "Wi-Fi", "clock", "LoRa", "apps"};
 
+static uint32_t (*clock_ms)(void);
+
+static uint32_t now(void) {
+    return clock_ms ? clock_ms() : 0;
+}
+
+void boot_steps_set_clock(uint32_t (*now_ms)(void)) {
+    clock_ms = now_ms;
+}
+
 static int valid(boot_step_t step) {
     return step >= 0 && step < BOOT_STEP_COUNT;
 }
@@ -23,6 +33,9 @@ void boot_step_begin(boot_step_t step) {
         return;
     }
     view.state[step]     = STEP_ACTIVE;
+    view.began[step]     = true;
+    view.ended[step]     = false;
+    view.begin_ms[step]  = now();
     view.reason[step][0] = '\0';
     view.current         = step;
     view.pct             = -1;
@@ -42,7 +55,9 @@ void boot_step_end(boot_step_t step, step_state_t state, char const *reason) {
     if (!valid(step)) {
         return;
     }
-    view.state[step] = state;
+    view.state[step]  = state;
+    view.ended[step]  = true;
+    view.end_ms[step] = now();
     size_t len       = reason ? strlen(reason) : 0;
     if (len > BOOT_REASON_LEN - 1) {
         len = BOOT_REASON_LEN - 1;
