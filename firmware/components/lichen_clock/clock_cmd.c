@@ -134,12 +134,16 @@ static void cmd_status(void) {
         console_reply("source: %s", from);
     }
     if (i.synced) {
-        double ppm = i.step_mono_ms ? (double)i.step_ms * 1e6 / (double)i.step_mono_ms : 0;
+        double ppm;
+        char   ppm_txt[24] = "";
+        if (clock_step_ppm(i.step_ms, i.step_span_ms, &ppm)) {
+            snprintf(ppm_txt, sizeof(ppm_txt), " (%+.0f ppm)", ppm);
+        }
         console_reply("now %lld; SNTP answer %lld at %lld ms uptime, clock before it %lld", (long long)time(NULL),
                       (long long)i.last_good_s, (long long)i.step_mono_ms, (long long)(i.last_good_s - i.step_ms / 1000));
-        console_reply("SNTP: synced %lld s ago; last step %+lld ms at %lld s uptime (%+.0f ppm)",
+        console_reply("SNTP: synced %lld s ago; last step %+lld ms at %lld s uptime%s",
                       (long long)(time(NULL) - i.last_good_s), (long long)i.step_ms, (long long)(i.step_mono_ms / 1000),
-                      ppm);
+                      ppm_txt);
     } else {
         console_reply("SNTP: not synced since boot");
     }

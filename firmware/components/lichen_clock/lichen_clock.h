@@ -37,7 +37,8 @@ typedef struct {
     int64_t         last_good_s;  // time(NULL) of the last accepted answer, 0 if none
     int64_t         last_good_mono_ms; // uptime at the last accepted answer
     int64_t         step_ms;      // the last accepted answer minus the clock just before it
-    int64_t         step_mono_ms; // uptime at that step (the step divided by this is the clock's error since boot)
+    int64_t         step_mono_ms; // uptime at that step
+    int64_t         step_span_ms; // time since the SNTP sync before it this boot, 0 for the first (clock_step_ppm())
     clock_verdict_t last_verdict;
     uint32_t        refused;      // answers refused since boot
     clock_src_t     source;       // who set the clock (#83); RTC when a warm reset carried a plausible time over

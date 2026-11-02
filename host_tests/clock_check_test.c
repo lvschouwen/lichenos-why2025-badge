@@ -222,6 +222,15 @@ int main(void) {
         CHECK(!clock_resync_only(S, 500000, S - (1LL << 58), 500000));
     }
 
+    // fw clock ppm: step over the time since the previous SNTP sync, none for the first
+    {
+        double ppm = 99;
+        CHECK(!clock_step_ppm(1700, 0, &ppm) && ppm == 99);      // first sync this boot: no figure
+        CHECK(!clock_step_ppm(1700, -5, &ppm));
+        CHECK(clock_step_ppm(36, 3600 * 1000, &ppm) && ppm > 9.99 && ppm < 10.01); // 36 ms in an hour
+        CHECK(clock_step_ppm(-18, 3600 * 1000, &ppm) && ppm < -4.99 && ppm > -5.01);
+    }
+
     for (int v = CLOCK_OK; v <= CLOCK_NO_SOURCE; v++) {
         CHECK(clock_verdict_text((clock_verdict_t)v)[0] != '?');
     }

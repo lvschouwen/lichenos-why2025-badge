@@ -14,6 +14,7 @@ static char const *const keep_keys[] = {
     "upd_from",                                        // the "updated from" note after an update
     "batt_seen", "thermal_shed",                       // battery and thermal safety (#10)
     "clock_src",                                       // where the running clock's time came from (#64)
+    "r16",                                             // R16 fitted: a hardware record (backlight_r16_hold)
     "mc_advlast",                                      // MeshCore's last advert before #123 (adopted into a.meshcore)
 };
 

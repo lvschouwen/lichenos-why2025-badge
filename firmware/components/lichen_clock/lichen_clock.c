@@ -119,6 +119,7 @@ static clock_verdict_t propose(clock_src_t src, struct timeval const *tv, bool f
         if (src == CLOCK_SRC_SNTP) {
             info.step_ms = ((int64_t)tv->tv_sec - (int64_t)cur.tv_sec) * 1000 +
                            ((int64_t)tv->tv_usec - cur.tv_usec) / 1000;
+            info.step_span_ms      = info.synced ? now_ms - info.last_good_mono_ms : 0;
             info.step_mono_ms      = now_ms;
             info.synced            = true;
             info.last_good_s       = (int64_t)tv->tv_sec;

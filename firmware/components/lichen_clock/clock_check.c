@@ -22,6 +22,14 @@ clock_verdict_t clock_check(int64_t cand, int64_t now, int64_t build_epoch, bool
     return CLOCK_OK;
 }
 
+bool clock_step_ppm(int64_t step_ms, int64_t span_ms, double *ppm) {
+    if (span_ms <= 0) {
+        return false;
+    }
+    *ppm = (double)step_ms * 1e6 / (double)span_ms;
+    return true;
+}
+
 clock_verdict_t clock_check_guarded(clock_guard_t *g, int64_t cand, int64_t now, int64_t build_epoch, bool synced,
                                     int64_t mono_s) {
     clock_verdict_t v = clock_check(cand, now, build_epoch, synced);

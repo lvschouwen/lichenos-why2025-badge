@@ -68,6 +68,11 @@ clock_verdict_t clock_check_guarded(clock_guard_t *g, int64_t cand, int64_t now,
 clock_verdict_t clock_decide(clock_src_t cur, clock_src_t src, clock_guard_t *g, int64_t cand, int64_t now,
                              int64_t build_epoch, int64_t mono_s);
 
+// The clock's error rate shown by "fw clock": the SNTP step divided by the time since the SNTP sync before it in this
+// boot (span_ms). No figure (false) when there was no earlier SNTP sync (span_ms <= 0): the clock before the step was
+// then the RTC, an app or nothing, not a free-running clock that SNTP measured.
+bool clock_step_ppm(int64_t step_ms, int64_t span_ms, double *ppm);
+
 static inline bool clock_accepted(clock_verdict_t v) { return v == CLOCK_OK || v == CLOCK_RECOVERED; }
 
 char const *clock_verdict_text(clock_verdict_t v);
