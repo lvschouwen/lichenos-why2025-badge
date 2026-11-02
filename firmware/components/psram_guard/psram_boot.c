@@ -5,11 +5,14 @@
 
 #include "esp_attr.h"
 #include "esp_cache.h"
+#include "esp_cpu.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "fw_console.h"
+#include "freertos/FreeRTOS.h"
 #include "hal/efuse_hal.h"
+#include "hal/mspi_ll.h"
 #include "nvs.h"
 #include "soc/efuse_struct.h"
 #include "soc/iomux_mspi_pin_reg.h"
@@ -84,6 +87,35 @@ static void tuning_regs(uint8_t *phase_id, uint8_t *dqs, uint8_t *data) {
     *phase_id = (uint8_t)REG_GET_FIELD(IOMUX_MSPI_PIN_PSRAM_DQS_0_PIN0_REG, IOMUX_MSPI_PIN_REG_PSRAM_DQS_0_PHASE);
     *dqs      = (uint8_t)MSPI_IOMUX.psram_pin_group.dqs0.reg_psram_dqs_delay_90;
     *data     = (uint8_t)MSPI_IOMUX.psram_pin_group.pin_group0[0].reg_psram_pin_dlc;
+}
+
+// Runs from IRAM while the PSRAM timing changes (code and heap live in PSRAM): the same pin assignment as the IDF's
+// mspi_timing_config_psram_set_tuning_delayline
+static void IRAM_ATTR set_delaylines(uint8_t data, uint8_t dqs) {
+    for (int pin = 0; pin < MSPI_LL_PIN_MAX; pin++) {
+        mspi_timing_ll_set_delayline((mspi_ll_pin_t)pin, pin == MSPI_LL_PIN_DQS0 || pin == MSPI_LL_PIN_DQS1 ? dqs : data);
+    }
+}
+
+void psram_boot_set_delayline(char const *idx_text) {
+    unsigned idx;
+    if (sscanf(idx_text, "%u", &idx) != 1 || idx >= PSRAM_DELAYLINES) {
+        console_reply("psram dl <idx 0..%d> (15 = no delay; below: DQS delayed, above: data delayed)", PSRAM_DELAYLINES - 1);
+        return;
+    }
+    uint8_t data, dqs, ph, dqs_was, data_was;
+    psram_tuning_delays((uint8_t)idx, &data, &dqs);
+    tuning_regs(&ph, &dqs_was, &data_was);
+    static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+    int                 other = xPortGetCoreID() == 0 ? 1 : 0;
+    portENTER_CRITICAL(&mux);
+    esp_cpu_stall(other);
+    set_delaylines(data, dqs);
+    esp_cpu_unstall(other);
+    portEXIT_CRITICAL(&mux);
+    tuning_regs(&ph, &dqs, &data);
+    console_reply("psram delayline idx %u set live: data %u, dqs %u (was data %u, dqs %u); not stored, a reboot restores the IDF's choice",
+                  idx, data, dqs, data_was, dqs_was);
 }
 
 static void line_flush(uint8_t *mem, size_t len) {
