@@ -23,7 +23,7 @@
 
 static char const TAG[] = "saver";
 
-#define FRAME_MS      66  // ~15 fps: the tip of the second hand moves ~2 px a frame
+#define FRAME_MS      66  // ~15 fps: the second hand moves ~0.4 degrees, ~1.2 px at the disc, a frame
 #define DIAL_D        576 // the dial's diameter; the date and the unread count go under it
 #define DIAL_R        (DIAL_D / 2)
 #define DIAL_TOP      24
@@ -189,7 +189,10 @@ static lv_obj_t *add_line(lv_obj_t *screen, int font, uint32_t color, int32_t y)
 bool saver_station_create(lv_obj_t *screen) {
     dims = sc_dims(DIAL_R);
     if (!dial_create(screen)) {
-        ESP_LOGW(TAG, "no PSRAM for the station clock's dial: the digital clock instead");
+        ESP_LOGW(TAG, "no PSRAM for the station clock's dial (%u bytes; %u free, largest block %u): the digital clock",
+                 (unsigned)(lv_draw_buf_width_to_stride(DIAL_D, LV_COLOR_FORMAT_RGB565) * DIAL_D),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
         return false;
     }
     int32_t line_h = lv_font_get_line_height(lichen_font(LICHEN_FONT_LARGE));

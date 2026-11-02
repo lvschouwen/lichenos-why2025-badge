@@ -242,6 +242,10 @@ void screen_saver_show(bool on) {
         saver_close(); // another style asked for while it shows: rebuilt below, before anything is drawn
         ESP_LOGI(TAG, "screensaver style changed");
     }
+    if (!on && !saver_scr) {
+        atomic_store(&style_test, -1); // a test whose saver did not show (home not up): not kept for a later one
+        return;
+    }
     if (on == (saver_scr != NULL)) {
         return;
     }
@@ -412,8 +416,10 @@ static void saver_test(char const *style) {
         console_reply(SAVER_USAGE);
         return;
     }
+    lvgl_port_lock(0); // with screen_idle's tick held off: it clears a test style while no saver shows
     atomic_store(&style_test, test);
     screen_idle_force_saver();
+    lvgl_port_unlock();
     console_reply("screensaver (%s) shown until the next key (needs home on screen, nothing holding it bright)",
                   style_name(test >= 0 ? test : atomic_load(&style_setting)));
 }
