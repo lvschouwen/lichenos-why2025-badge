@@ -30,9 +30,12 @@ CONFIG_SPIRAM=y
 # (MPLL 480 / 4; the 80 MHz latency codes are good to 133 MHz); build.sh refuses to build without the patch. 133 MHz
 # (400 / 3) does not work: an odd divider gives the DDR bus a 33 % duty clock and the chip is not found at boot. If the
 # bit flips come back (`fw psram` canaries, `ui_check: FOUND`, CORRUPT HEAP), go back to CONFIG_SPIRAM_SPEED_80M=y.
+# Back at 80 MHz since 2026-11-02 (#120, #121): at 120 MHz, DMA transfers between the SD card and PSRAM flipped bit 3
+# at a fixed spot in every 1 KB (29 of 30 journal read passes; 0 of 150 at 80 MHz). The CPU-side canaries never saw it.
+# Any new PSRAM clock needs a DMA-path test (`fw mesh hist scan 100`, #121) before it ships.
 # No ECC: on P4 v1.0 it breaks (esp-idf #17855, OTA; here it crash-looped until power off). A mode change must never
 # go out over Wi-Fi without someone at the badge to power-cycle it.
-CONFIG_SPIRAM_SPEED_120M=y
+CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # Big statics that need no DMA or cache-off access live in PSRAM via EXT_RAM_BSS_ATTR (#107)
