@@ -1041,6 +1041,12 @@ static bool (*ident_fn)(uint8_t out[C6LINK_IDENT_LEN], uint32_t timeout_ms);
 
 _Static_assert(C6LINK_IDENT_LEN == C6_IDENT_SHA_LEN && C6_IDENT_SHA_LEN == C6_APP_SHA_LEN, "IDENT sha size");
 
+static bool (*ident_ready_fn)(void);
+
+void c6link_set_ident_ready(bool (*ready)(void)) {
+    ident_ready_fn = ready;
+}
+
 void c6link_set_ident(bool (*ident)(uint8_t out[C6LINK_IDENT_LEN], uint32_t timeout_ms)) {
     ident_fn = ident;
 }
@@ -1180,6 +1186,10 @@ bool c6link_set_verify_flag(void) {
 void c6link_check_ident_runtime(void) {
     if (c6link_updating()) {
         return; // LoRa is stopped for the update: lora_ident would borrow a callback nobody gives back
+    }
+    if (ident_ready_fn && !ident_ready_fn()) {
+        rt_ident = C6_IDENT_NOT_ASKED; // no LoRa task (radio off): nobody can ask, which proves nothing either way
+        return;
     }
     rt_ident = check_ident(&rt_ident_ms);
     if (rt_ident != C6_IDENT_MATCH) {

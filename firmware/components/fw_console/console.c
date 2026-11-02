@@ -421,15 +421,18 @@ void system_restart_set_prepare(void (*prepare)(void)) {
 }
 
 void __wrap_esp_restart(void) {
-    if (restart_prepare) {
-        void (*prepare)(void) = restart_prepare;
-        restart_prepare       = NULL; // a restart from inside the hook must not draw twice
-        prepare();
-    }
-    if (s_restart_why) {
+    bool deliberate = s_restart_why != NULL;
+    if (deliberate) {
         record_restart(s_restart_why, 0);
     } else {
         record_restart("unknown caller", (uint32_t)(uintptr_t)__builtin_return_address(0));
+    }
+    // After the record: the frame can only be skipped, never cost the history. A bare esp_restart() (no system_restart)
+    // is how IDF components and fault handlers restart, so it gets no frame: the UI may be the problem (#39)
+    if (restart_prepare && deliberate) {
+        void (*prepare)(void) = restart_prepare;
+        restart_prepare       = NULL; // a restart from inside the hook must not draw twice
+        prepare();
     }
     __real_esp_restart();
 }

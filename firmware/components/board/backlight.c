@@ -160,7 +160,20 @@ void backlight_get(uint8_t *display, uint8_t *keyboard) {
 #define R16_SETTLE_MS 150
 #define R16_SAMPLES   20000 // a few ms: over a hundred periods of the C6's 25 kHz PWM
 
-static bool r16_driving;
+static atomic_bool r16_driving;
+static atomic_bool r16_flashing; // a C6 flash check is running (c6_flasher): detection would sample a C6 in its ROM
+
+// A true input: no pulls (gpio_reset_pin leaves the pull-up on), no interrupt
+static void r16_input(void) {
+    gpio_config_t const in = {.pin_bit_mask = 1ULL << R16_GPIO, .mode = GPIO_MODE_INPUT,
+                              .pull_up_en = GPIO_PULLUP_DISABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                              .intr_type = GPIO_INTR_DISABLE};
+    gpio_config(&in);
+}
+
+void backlight_r16_flash(bool on) {
+    atomic_store(&r16_flashing, on);
+}
 
 static r16_fit_t r16_stored(void) {
     uint8_t      v = 0;
@@ -183,12 +196,11 @@ static void r16_sample_pin(r16_samples_t *s, int i) {
 }
 
 static void r16_detect(void) {
-    if (r16_driving) {
-        console_reply("r16: GPIO5 is being driven, not now");
+    if (atomic_load(&r16_driving) || atomic_load(&r16_flashing)) {
+        console_reply("r16: a C6 flash check is running, not now");
         return;
     }
-    gpio_config_t const in = {.pin_bit_mask = 1ULL << R16_GPIO, .mode = GPIO_MODE_INPUT};
-    gpio_config(&in);
+    r16_input();
     r16_samples_t s = {0};
     for (int i = 0; i < R16_LEVELS; i++) {
         backlight_idle(r16_detect_level[i], 0); // the C6's PWM at this level; not saved
@@ -196,7 +208,7 @@ static void r16_detect(void) {
         r16_sample_pin(&s, i);
     }
     backlight_resume();
-    gpio_reset_pin(R16_GPIO); // back to its reset state
+    r16_input();
     r16_fit_t fit = r16_classify(&s);
     console_reply("r16: GPIO5 high at display %u/%u/%u %%: %u/%u/%u of %u -> %s", r16_detect_level[0], r16_detect_level[1],
                   r16_detect_level[2], (unsigned)s.high[0], (unsigned)s.high[1], (unsigned)s.high[2], R16_SAMPLES,
@@ -217,16 +229,16 @@ void backlight_r16_hold(void) {
     gpio_config_t const out = {.pin_bit_mask = 1ULL << R16_GPIO, .mode = GPIO_MODE_OUTPUT};
     gpio_config(&out);
     gpio_set_level(R16_GPIO, 1);
-    r16_driving = true;
+    atomic_store(&r16_driving, true);
     ESP_LOGI(TAG, "R16 fitted: P4 holds the backlight while the C6 is in its ROM");
 }
 
 void backlight_r16_release(void) {
-    if (!r16_driving) {
+    if (!atomic_load(&r16_driving)) {
         return;
     }
-    gpio_reset_pin(R16_GPIO); // input, no pulls
-    r16_driving = false;
+    r16_input();
+    atomic_store(&r16_driving, false);
     esp_rom_delay_us(100);    // the pad is high-z long before EN rises (the caller's next step)
 }
 

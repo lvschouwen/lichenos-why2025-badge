@@ -70,7 +70,7 @@ static bool flash_images(esp_loader_t *loader, c6_binaries_t *bin, bool force) {
            flash_if_changed(loader, &bin->app, "Application", app_ok);
 }
 
-esp_err_t flash_c6_if_needed(bool force) {
+static esp_err_t flash_c6_checked(bool force) {
     c6_binaries_t bin;
 
     if (!get_c6_binaries(&bin)) {
@@ -125,6 +125,13 @@ out:
     free_c6_binaries(&bin);
     esp_loader_deinit(&loader);
     return ret;
+}
+
+esp_err_t flash_c6_if_needed(bool force) {
+    backlight_r16_flash(true);
+    esp_err_t r = flash_c6_checked(force);
+    backlight_r16_flash(false);
+    return r;
 }
 
 void c6_log_console(uint32_t duration_ms) {

@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "fw_console.h"
 #include "esp_lvgl_port.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "key_matrix.h"
@@ -498,10 +499,22 @@ void shell_show_restarting(void) {
     if (!lv_display_get_default() || !lvgl_port_lock(300)) {
         return;
     }
+    // An out-of-memory restart must not allocate more; LVGL's heap is PSRAM
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 64 * 1024) {
+        lvgl_port_unlock();
+        return;
+    }
     lv_obj_t *screen = lv_obj_create(NULL);
+    lv_obj_t *label  = screen ? lv_label_create(screen) : NULL;
+    if (!label) {
+        if (screen) {
+            lv_obj_delete(screen);
+        }
+        lvgl_port_unlock();
+        return;
+    }
     shell_style_screen(screen);
     lv_obj_set_scrollable(screen, false);
-    lv_obj_t *label = lv_label_create(screen);
     lv_obj_set_style_text_font(label, lichen_font(LICHEN_FONT_LARGE), 0);
     lv_label_set_text(label, "Restarting...");
     lv_obj_center(label);

@@ -16,6 +16,9 @@ bool c6link_start(void);
 // Before c6link_start (#36): how to ask the running C6 app for its ELF sha256 (IDENT; main.c gives lora_ident, c6link
 // does not depend on LoRa). Without it no boot ever proves the C6, so every boot checks it fully.
 #define C6LINK_IDENT_LEN 32
+// The runtime re-attach asks IDENT only when this says so (main.c gives lora_up): without a LoRa task the question is
+// not asked and the verify flag stays as it is
+void c6link_set_ident_ready(bool (*ready)(void));
 void c6link_set_ident(bool (*ident)(uint8_t out[C6LINK_IDENT_LEN], uint32_t timeout_ms));
 // False while the C6 supervisor (c6sup, #14) recovers the link, true again once it is back
 bool c6link_up(void);

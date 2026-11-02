@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 // Display and keyboard backlight (0-100), driven by the C6 (its GPIO15/GPIO10 PWM); the P4 sends "BL <d> <k>" on the
@@ -35,3 +36,5 @@ void backlight_reapply(void);
 // holds C6 EN low, THEN calls backlight_r16_release(), THEN lets EN rise. On a badge without R16 both do nothing.
 void backlight_r16_hold(void);
 void backlight_r16_release(void);
+// c6_flasher brackets a whole flash check with this: "fw bl r16" refuses meanwhile
+void backlight_r16_flash(bool on);
