@@ -89,6 +89,9 @@ files_result_t files_delete(char const *path) {
     if (stat(rp, &st) != 0) {
         return FILES_ERR_OPEN;
     }
+    if (files_protected_entry(path, S_ISDIR(st.st_mode))) {
+        return FILES_ERR_PROTECTED;
+    }
     if (S_ISDIR(st.st_mode)) {
         if (rmdir(rp) == 0) {
             return FILES_OK;
@@ -104,7 +107,7 @@ files_result_t files_read_at(char const *path, uint32_t offset, uint8_t *buf, si
     if (!files_path_ok(path)) {
         return FILES_ERR_ARG;
     }
-    if (files_protected(path)) {
+    if (files_secret(path)) {
         return FILES_ERR_PROTECTED;
     }
     char  rb[FILES_PATH_MAX + 64];
@@ -134,10 +137,10 @@ files_result_t files_read_at(char const *path, uint32_t offset, uint8_t *buf, si
 // ---- copy ---------------------------------------------------------------------------------------------------------
 
 static files_result_t copy_checks(char const *src, char const *dst, uint64_t free_bytes, uint32_t *size) {
-    if (!files_path_ok(src) || !files_path_ok(dst) || strlen(dst) + 6 >= FILES_PATH_MAX) {
+    if (!files_path_ok(src) || !files_path_ok(dst) || strlen(dst) + sizeof(FILES_PART_SUFFIX) >= FILES_PATH_MAX) {
         return FILES_ERR_ARG;
     }
-    if (files_protected(src) || files_protected(dst)) {
+    if (files_secret(src) || files_protected(dst)) {
         return FILES_ERR_PROTECTED;
     }
     struct stat st;
@@ -183,10 +186,10 @@ files_result_t files_copy(char const *src, char const *dst, uint8_t *buf, size_t
         return r;
     }
     char part[FILES_PATH_MAX], rpart[FILES_PATH_MAX + 64], rsrc[FILES_PATH_MAX + 64], rdst[FILES_PATH_MAX + 64];
-    snprintf(part, sizeof(part), "%s.part", dst);
+    snprintf(part, sizeof(part), "%s" FILES_PART_SUFFIX, dst);
     real_path(part, rpart, sizeof(rpart));
     struct stat st;
-    if (stat(rpart, &st) == 0 && unlink(rpart) != 0) { // a leftover of an earlier failed copy
+    if (stat(rpart, &st) == 0 && unlink(rpart) != 0) { // our own leftover of a copy that lost power
         return FILES_ERR_IO;
     }
     FILE *in  = fopen(real_path(src, rsrc, sizeof(rsrc)), "rb");

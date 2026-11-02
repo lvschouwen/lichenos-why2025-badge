@@ -36,24 +36,53 @@ static void test_paths(void) {
           !strcmp(files_other_volume("/storage"), "/sd"));
 }
 
+typedef struct {
+    char const *path;
+    bool        protected_file; // files_protected, and for a root entry as a plain file
+    bool        secret;
+} prot_row_t;
+
 static void test_protected(void) {
-    CHECK(files_protected("/storage") && files_protected("/sd"));
-    CHECK(files_protected("/storage/meshcore") && files_protected("/storage/meshcore/_main.id"));
-    CHECK(files_protected("/storage/c6") && files_protected("/storage/c6/firmware.bin"));
-    CHECK(files_protected("/storage/crash/x") && files_protected("/storage/lichen/notify.bin"));
-    CHECK(files_protected("/storage/lora.toml") && files_protected("/storage/ota_token.txt"));
-    CHECK(files_protected("/storage/MeshCore/ID") && files_protected("/storage/C6"));  // FAT ignores case
-    CHECK(files_protected("/storage/meshcore./x") && files_protected("/storage/meshcore /x"));
-    CHECK(files_protected("/storage/MESHCO~1/x"));                                 // 8.3 alias
-    CHECK(files_protected("/sd/lichen") && files_protected("/sd/lichen/apps"));
-    CHECK(files_protected("/sd/lichen/messages") && files_protected("/sd/lichen/messages/a/b"));
-    CHECK(files_protected("/sd/LICHEN/Messages/x"));
-    CHECK(files_protected("/sd/../storage"));                                       // not a usable path
-    CHECK(!files_protected("/storage/notes.txt") && !files_protected("/storage/meshcore2/x"));
-    CHECK(!files_protected("/storage/files/a") && !files_protected("/storage/lora.toml.bak"));
-    CHECK(!files_protected("/sd/photo.jpg") && !files_protected("/sd/lichen/apps/files/a.txt"));
-    CHECK(!files_protected("/sd/meshcore") && !files_protected("/sd/dir/meshcore"));
-    CHECK(!files_protected("/storage/sub/meshcore/x"));                             // only top-level names
+    static prot_row_t const rows[] = {
+        // the volume roots and unusable paths
+        {"/storage", true, true}, {"/sd", true, true}, {"/etc/passwd", true, true}, {"", true, true},
+        {"/storage/../sd/x", true, true}, {"/sd/../storage/meshcore", true, true}, {"/storage/./x", true, true},
+        {"/storage//x", true, true}, {"/storage/x/", true, true},
+        // everything the firmware keeps on /storage
+        {"/storage/meshcore", true, true}, {"/storage/meshcore/_main.id", true, true},
+        {"/storage/meshcore/contacts3", true, true}, {"/storage/c6", true, false},
+        {"/storage/c6/firmware.bin", true, false}, {"/storage/crash/log.txt", true, false},
+        {"/storage/lichen/notify.bin", true, false}, {"/storage/lora.toml", true, false},
+        {"/storage/ota_token.txt", true, true}, {"/storage/ota_other", true, false},
+        {"/storage/loraold.cfg", true, false},
+        // other apps' directories and anything below any directory
+        {"/storage/files/a.txt", true, false}, {"/storage/anyapp/settings.bin", true, false},
+        {"/storage/sub/meshcore/x", true, false}, {"/storage/dir/deep/er/x", true, false},
+        // case, dots, spaces and aliases
+        {"/storage/MeshCore/ID", true, true}, {"/storage/LORA.TOML", true, false}, {"/storage/C6", true, false},
+        {"/storage/meshcore./x", true, true}, {"/storage/meshcore /x", true, true}, {"/storage/MESHCO~1/x", true, true},
+        {"/storage/lora.toml.", true, false}, {"/storage/OTA_TOKEN.TXT", true, true}, {"/storage/LORA~1.TOM", true, true},
+        // /sd: the whole /lichen tree is protected, the rest is the user's
+        {"/sd/lichen", true, false}, {"/sd/lichen/apps", true, true}, {"/sd/lichen/apps/files/a.txt", true, true},
+        {"/sd/lichen/messages/a/b", true, true}, {"/sd/LICHEN/x", true, true}, {"/sd/Lichen./x", true, true},
+        {"/sd/LICHEN~1/x", true, true},
+        {"/sd/photo.jpg", false, false}, {"/sd/meshcore", false, false}, {"/sd/dir/lichen/x", false, false},
+        {"/sd/lichen2/x", false, false}, {"/sd/a/b/c.txt", false, false},
+        // plain files at the /storage root that are the user's
+        {"/storage/notes.txt", false, false}, {"/storage/lora.toml2", true, false},
+    };
+    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+        bool p = files_protected(rows[i].path), sec = files_secret(rows[i].path);
+        if (p != rows[i].protected_file || sec != rows[i].secret) {
+            printf("FAIL protected table: %s protected=%d (want %d) secret=%d (want %d)\n", rows[i].path, p,
+                   rows[i].protected_file, sec, rows[i].secret);
+            failures++;
+        }
+    }
+    // a directory straight under /storage is protected whatever its name; a file of that name is not
+    CHECK(!files_protected_entry("/storage/notes.txt", false) && files_protected_entry("/storage/notes.txt", true));
+    CHECK(files_protected_entry("/storage/anything", true) && !files_protected_entry("/sd/photos", true));
+    CHECK(files_protected_entry("/storage/lora.toml", false));
 }
 
 static void put(files_entry_t *e, char const *name, bool dir) {

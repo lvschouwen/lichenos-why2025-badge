@@ -4,6 +4,7 @@
 // the screens. The OS's own files (MeshCore identity and contacts, staged C6 images, ...) are listed but locked: the
 // rules are files_model.c's and files_ops.c enforces them too.
 #include "app_icons.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "files_job.h"
@@ -45,15 +46,18 @@ static struct {
     bool               have_root;
 } s_v;
 
-static struct {
-    lv_obj_t *text, *hint;
+// The viewer's state, ~5 KB: in PSRAM while a viewer is open, NULL otherwise
+typedef struct {
+    lv_obj_t   *text, *hint;
+    lv_timer_t *poll;
     char      path[FILES_PATH_MAX];
     char      page_text[TEXT_CAP];
     uint32_t  offs[VIEW_PAGES];
     size_t    page, consumed;
     uint32_t  size;
     bool      at_end, binary, loaded;
-} s_t;
+} view_t;
+static view_t *s_t;
 
 static void list_dir(void);
 static void on_row(void *arg);
@@ -103,7 +107,7 @@ static void add_entry_rows(void) {
         char label[FILES_NAME_MAX + 2], value[24] = "";
         char path[FILES_PATH_MAX];
         snprintf(label, sizeof(label), "%s%s", entries[i].name, entries[i].dir ? "/" : "");
-        if (files_path_join(s_v.dir, entries[i].name, path, sizeof(path)) && files_protected(path)) {
+        if (files_path_join(s_v.dir, entries[i].name, path, sizeof(path)) && files_protected_entry(path, entries[i].dir)) {
             snprintf(value, sizeof(value), "locked");
         } else if (!entries[i].dir) {
             size_text(entries[i].size, value, sizeof(value));
@@ -198,54 +202,68 @@ static void list_dir(void) {
 // ---- the viewer ---------------------------------------------------------------------------------------------------
 
 static void show_page(files_job_result_t const *r) {
-    if (r->result != FILES_OK || !s_t.text) {
-        if (s_t.hint) {
-            lv_label_set_text(s_t.hint, files_result_text(r->result));
+    if (!s_t || r->result != FILES_OK || !s_t->text) {
+        if (s_t && s_t->hint) {
+            lv_label_set_text(s_t->hint, files_result_text(r->result));
         }
         return;
     }
     bool eof = r->got < FILES_READ_CHUNK;
-    files_text_page(files_job_data(), r->got, eof, VIEW_COLS, VIEW_LINES, s_t.page_text, sizeof(s_t.page_text),
-                    &s_t.consumed, &s_t.binary);
-    s_t.size   = r->file_size;
-    s_t.at_end = s_t.consumed == 0 || s_t.offs[s_t.page] + s_t.consumed >= r->file_size || s_t.page + 1 >= VIEW_PAGES;
-    s_t.loaded = true;
-    lv_label_set_text(s_t.text, s_t.page_text[0] ? s_t.page_text : "(empty)");
+    files_text_page(files_job_data(), r->got, eof, VIEW_COLS, VIEW_LINES, s_t->page_text, sizeof(s_t->page_text),
+                    &s_t->consumed, &s_t->binary);
+    s_t->size   = r->file_size;
+    s_t->at_end = s_t->consumed == 0 || s_t->offs[s_t->page] + s_t->consumed >= r->file_size || s_t->page + 1 >= VIEW_PAGES;
+    s_t->loaded = true;
+    lv_label_set_text(s_t->text, s_t->page_text[0] ? s_t->page_text : "(empty)");
     char hint[96], size[16];
     size_text(r->file_size, size, sizeof(size));
     snprintf(hint, sizeof(hint), "%s%u of %s \xE2\x80\xA2 Up/Down: page \xE2\x80\xA2 Esc: back",
-             s_t.binary ? "Binary data. " : "", (unsigned)(s_t.page + 1), size);
-    lv_label_set_text(s_t.hint, hint);
+             s_t->binary ? "Binary data. " : "", (unsigned)(s_t->page + 1), size);
+    lv_label_set_text(s_t->hint, hint);
 }
 
 static void read_page(void) {
-    if (!files_job_start(FJ_READ, s_t.path, NULL, s_t.offs[s_t.page])) {
-        lv_label_set_text(s_t.hint, "Busy, try again.");
+    if (!files_job_start(FJ_READ, s_t->path, NULL, s_t->offs[s_t->page])) {
+        lv_label_set_text(s_t->hint, "Busy, try again.");
     }
 }
 
 static void on_view_key(lv_event_t *e) {
     uint32_t key = lv_event_get_key(e);
-    if (files_job_busy() || !s_t.loaded) {
+    if (files_job_busy() || !s_t->loaded) {
         return;
     }
     bool next = key == LV_KEY_DOWN || key == LV_KEY_RIGHT;
     bool prev = key == LV_KEY_UP || key == LV_KEY_LEFT;
-    if (next && !s_t.at_end) {
-        s_t.offs[s_t.page + 1] = s_t.offs[s_t.page] + (uint32_t)s_t.consumed;
-        s_t.page++;
-    } else if (prev && s_t.page > 0) {
-        s_t.page--;
+    if (next && !s_t->at_end) {
+        s_t->offs[s_t->page + 1] = s_t->offs[s_t->page] + (uint32_t)s_t->consumed;
+        s_t->page++;
+    } else if (prev && s_t->page > 0) {
+        s_t->page--;
     } else {
         return;
     }
-    s_t.loaded = false;
+    s_t->loaded = false;
     read_page();
 }
 
 static void on_view_delete(lv_event_t *e) {
     (void)e;
-    s_t.text = s_t.hint = NULL;
+    if (s_t) {
+        lv_timer_delete(s_t->poll);
+        heap_caps_free(s_t);
+        s_t = NULL;
+    }
+}
+
+// The browser collects the page's result while it exists; when the shell closed it under the viewer
+// (shell_close_all_but_top) nobody else would, so the viewer takes it itself
+static void view_poll(lv_timer_t *timer) {
+    (void)timer;
+    files_job_result_t r;
+    if (!s_v.screen && files_job_take(&r) && r.kind == FJ_READ) {
+        show_page(&r);
+    }
 }
 
 static lv_obj_t *build_view(void) {
@@ -259,14 +277,15 @@ static lv_obj_t *build_view(void) {
     lv_obj_t *title = lv_label_create(screen);
     lv_obj_set_width(title, LV_PCT(100));
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_label_set_text(title, strrchr(s_t.path, '/') + 1);
-    s_t.text = lv_label_create(screen);
-    lv_obj_set_width(s_t.text, LV_PCT(100));
-    lv_label_set_text(s_t.text, "Reading...");
-    s_t.hint = lv_label_create(screen);
-    lv_obj_set_width(s_t.hint, LV_PCT(100));
-    lv_obj_set_style_text_color(s_t.hint, lv_color_hex(THEME_AMBER), 0);
-    lv_label_set_text(s_t.hint, "");
+    lv_label_set_text(title, strrchr(s_t->path, '/') + 1);
+    s_t->text = lv_label_create(screen);
+    lv_obj_set_width(s_t->text, LV_PCT(100));
+    lv_label_set_text(s_t->text, "Reading...");
+    s_t->poll = lv_timer_create(view_poll, POLL_MS, NULL);
+    s_t->hint = lv_label_create(screen);
+    lv_obj_set_width(s_t->hint, LV_PCT(100));
+    lv_obj_set_style_text_color(s_t->hint, lv_color_hex(THEME_AMBER), 0);
+    lv_label_set_text(s_t->hint, "");
     lv_group_add_obj(lv_group_get_default(), screen);
     lv_obj_add_event_cb(screen, on_view_key, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(screen, on_view_delete, LV_EVENT_DELETE, NULL);
@@ -275,11 +294,20 @@ static lv_obj_t *build_view(void) {
 }
 
 static void open_view(char const *path) {
-    memset(s_t.offs, 0, sizeof(s_t.offs));
-    s_t.page = s_t.consumed = 0;
-    s_t.loaded = false;
-    snprintf(s_t.path, sizeof(s_t.path), "%s", path);
+    if (s_t) {
+        return;
+    }
+    s_t = heap_caps_calloc(1, sizeof(*s_t), MALLOC_CAP_SPIRAM);
+    if (!s_t) {
+        say("Not enough memory to view it.");
+        return;
+    }
+    snprintf(s_t->path, sizeof(s_t->path), "%s", path);
     shell_open(build_view, SCREEN_FILES_VIEW);
+    if (s_t && !s_t->text) { // the shell did not open it (no builder ran): nothing will free the state
+        heap_caps_free(s_t);
+        s_t = NULL;
+    }
 }
 
 // ---- actions ------------------------------------------------------------------------------------------------------
@@ -306,8 +334,8 @@ static void on_row(void *arg) {
     if (files_job_entries()[index].dir) {
         snprintf(s_v.dir, sizeof(s_v.dir), "%s", path);
         list_dir();
-    } else if (files_protected(path)) {
-        say(files_result_text(FILES_ERR_PROTECTED));
+    } else if (files_secret(path)) {
+        say("Secret: this one is not shown.");
     } else {
         open_view(path);
     }
@@ -324,7 +352,7 @@ static void ask_delete(size_t index) {
     if (!entry_path(index, s_v.target, sizeof(s_v.target))) {
         return;
     }
-    if (files_protected(s_v.target)) {
+    if (files_protected_entry(s_v.target, files_job_entries()[index].dir)) {
         say(files_result_text(FILES_ERR_PROTECTED));
         return;
     }
@@ -349,8 +377,8 @@ static void start_copy(size_t index) {
     }
     if (e->dir) {
         say(files_result_text(FILES_ERR_NOT_FILE));
-    } else if (files_protected(src)) {
-        say(files_result_text(FILES_ERR_PROTECTED));
+    } else if (files_secret(src)) {
+        say("Secret: this one is not copied.");
     } else if (!files_path_join(files_other_volume(files_volume_of(src)), e->name, dst, sizeof(dst))) {
         say(files_result_text(FILES_ERR_ARG));
     } else if (files_job_start(FJ_COPY, src, dst, 0)) {

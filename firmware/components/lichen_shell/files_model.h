@@ -35,11 +35,18 @@ char const *files_volume_of(char const *path);
 // The other volume's root, for a copy
 char const *files_other_volume(char const *volume);
 
-// Never deleted, overwritten, copied or viewed: the MeshCore identity and contacts, the staged C6 images, the crash
-// log, Lichen's own files, the radio and OTA settings, the volume roots, the card's message history. A path that is
-// not ok counts as protected. Case-insensitive and blind to trailing dots and spaces and to 8.3 "~1" aliases, the way
-// FAT matches names.
+// Never deleted, overwritten, copied from or into. Deny by default: on /storage every directory and everything below
+// one (MeshCore, the C6 images, crash log, Lichen state, every app's directory), the root files lora.toml and
+// ota_token.txt (and any "ota_*" or "lora*" root file), and the volume roots; on /sd the whole /lichen tree. What is
+// left is the user's: other plain files at the /storage root and everything else on the card. A path that is not ok
+// counts as protected. Case-insensitive and blind to trailing dots and spaces and to 8.3 "~1" aliases in the first
+// component, the way FAT matches names.
 bool files_protected(char const *path);
+// files_protected plus: a directory directly under /storage is protected whatever its name (the path alone can't say
+// whether a root entry is a file or a directory)
+bool files_protected_entry(char const *path, bool is_dir);
+// Not even shown read-only: the MeshCore identity and keys, the update token, the card's /lichen data
+bool files_secret(char const *path);
 
 // Directories first, then names without regard to case, then exactly
 void files_sort(files_entry_t *entries, size_t count);

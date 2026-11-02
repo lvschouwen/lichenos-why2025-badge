@@ -73,15 +73,19 @@ static void test_delete(void) {
     mkdirp("/storage/meshcore");
     write_file("/storage/meshcore/id", 3, 'k');
     write_file("/storage/lora.toml", 3, 'k');
+    mkdirp("/storage/userdir");
+    CHECK(files_delete("/storage/userdir") == FILES_ERR_PROTECTED && exists("/storage/userdir")); // a root directory
     CHECK(files_delete("/storage/meshcore/id") == FILES_ERR_PROTECTED && exists("/storage/meshcore/id"));
     CHECK(files_delete("/storage/lora.toml") == FILES_ERR_PROTECTED && exists("/storage/lora.toml"));
     CHECK(files_delete("/storage") == FILES_ERR_PROTECTED && files_delete("/storage/../x") == FILES_ERR_ARG);
     CHECK(files_delete("/storage/b.txt") == FILES_OK && !exists("/storage/b.txt"));
     CHECK(files_delete("/storage/b.txt") == FILES_ERR_OPEN);
-    mkdirp("/storage/full");
-    write_file("/storage/full/f", 1, 'x');
-    CHECK(files_delete("/storage/full") == FILES_ERR_NOT_EMPTY && exists("/storage/full/f"));
-    CHECK(files_delete("/storage/full/f") == FILES_OK && files_delete("/storage/full") == FILES_OK);
+    mkdirp("/sd");
+    mkdirp("/sd/full");
+    write_file("/sd/full/f", 1, 'x');
+    CHECK(files_delete("/sd/full") == FILES_ERR_NOT_EMPTY && exists("/sd/full/f"));
+    CHECK(files_delete("/sd/full/f") == FILES_OK && files_delete("/sd/full") == FILES_OK);
+    CHECK(files_delete("/storage/full/f") == FILES_ERR_PROTECTED);
 }
 
 static void test_read(void) {
@@ -92,7 +96,8 @@ static void test_read(void) {
     CHECK(files_read_at("/storage/r.txt", 4, buf, sizeof(buf), &got, &total) == FILES_OK && got == 6 && total == 10);
     CHECK(files_read_at("/storage/r.txt", 0, buf, 4, &got, &total) == FILES_OK && got == 4);
     CHECK(files_read_at("/storage/r.txt", 99, buf, 4, &got, &total) == FILES_OK && got == 0);
-    CHECK(files_read_at("/storage/lora.toml", 0, buf, 4, &got, &total) == FILES_ERR_PROTECTED);
+    CHECK(files_read_at("/storage/lora.toml", 0, buf, 4, &got, &total) == FILES_OK); // protected, not secret
+    CHECK(files_read_at("/storage/meshcore/id", 0, buf, 4, &got, &total) == FILES_ERR_PROTECTED);
     CHECK(files_read_at("/storage/none", 0, buf, 4, &got, &total) == FILES_ERR_OPEN);
 }
 
@@ -101,23 +106,29 @@ static void test_copy(void) {
     mkdirp("/sd");
     write_file("/storage/big.bin", 1000, 'b');
     CHECK(files_copy("/storage/big.bin", "/sd/big.bin", buf, sizeof(buf), UINT64_MAX, progress, NULL) == FILES_OK);
-    CHECK(exists("/sd/big.bin") && !exists("/sd/big.bin.part") && calls == 16);
+    CHECK(exists("/sd/big.bin") && !exists("/sd/big.bin.lichen-part") && calls == 16);
     CHECK(files_copy("/storage/big.bin", "/sd/big.bin", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_EXISTS);
     CHECK(files_copy("/storage/big.bin", "/sd/x.bin", buf, sizeof(buf), 999, NULL, NULL) == FILES_ERR_SPACE);
-    CHECK(!exists("/sd/x.bin") && !exists("/sd/x.bin.part"));
+    CHECK(!exists("/sd/x.bin") && !exists("/sd/x.bin.lichen-part"));
     stop_at = true; // cancel part-way: nothing is left behind
     CHECK(files_copy("/storage/big.bin", "/sd/c.bin", buf, sizeof(buf), UINT64_MAX, progress, NULL) == FILES_CANCELLED);
-    CHECK(!exists("/sd/c.bin") && !exists("/sd/c.bin.part"));
+    CHECK(!exists("/sd/c.bin") && !exists("/sd/c.bin.lichen-part"));
     stop_at = false;
-    CHECK(files_copy("/storage/lora.toml", "/sd/l", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_PROTECTED);
+    mkdirp("/storage/meshcore");
+    write_file("/storage/meshcore/id", 3, 'k');
+    CHECK(files_copy("/storage/meshcore/id", "/sd/l", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_PROTECTED);
+    CHECK(files_copy("/sd/big.bin", "/storage/c6/big.bin", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_PROTECTED);
+    CHECK(files_copy("/sd/big.bin", "/storage/lora.toml", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_PROTECTED);
     CHECK(files_copy("/storage/big.bin", "/sd/lichen/messages/x", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_PROTECTED);
     CHECK(files_copy("/storage/zdir", "/sd/zdir", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_NOT_FILE);
     CHECK(files_copy("/storage/nothing", "/sd/n", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_OPEN);
     CHECK(files_copy("/storage/big.bin", "/sd/nodir/x", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_OPEN);
-    CHECK(!exists("/sd/nodir/x.part"));
+    CHECK(!exists("/sd/nodir/x.lichen-part"));
     CHECK(files_copy("/storage/big.bin", "/sd/y", NULL, 0, UINT64_MAX, NULL, NULL) == FILES_ERR_NO_MEM);
-    write_file("/sd/z.part", 3, 'p'); // a leftover .part is replaced
-    CHECK(files_copy("/storage/big.bin", "/sd/z", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_OK && !exists("/sd/z.part"));
+    write_file("/sd/u.part", 3, 'u'); // a user's own .part file is never touched
+    CHECK(files_copy("/storage/big.bin", "/sd/u", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_OK && exists("/sd/u.part"));
+    write_file("/sd/z.lichen-part", 3, 'p'); // our own leftover (power cut) is replaced
+    CHECK(files_copy("/storage/big.bin", "/sd/z", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_OK && !exists("/sd/z.lichen-part"));
 }
 
 int main(void) {

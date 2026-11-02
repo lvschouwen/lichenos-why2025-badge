@@ -127,76 +127,88 @@ static bool same_comp(char const *a, size_t an, char const *b) {
     return true;
 }
 
-typedef struct {
-    char const *path; // below the volume root, components separated by '/'
-    bool        tree; // everything under it too
-} rule_t;
+// Names at the /storage root that are the OS's (lora.toml: the radio, ota_token.txt: the update token, the four
+// directories it creates; every directory there is protected anyway, see files_protected_entry).
+// Anything else at the root is the user's, e.g. what the Files app copies there.
+static char const *const STORAGE_ROOT_FILES[] = {"lora.toml", "ota_token.txt", "meshcore", "c6", "crash", "lichen"};
+// Secret material: never shown, not even read-only (the MeshCore identity and keys, the update token)
+static char const *const SECRET_ROOT[] = {"meshcore", "ota_token.txt"};
 
-static rule_t const STORAGE_RULES[] = {
-    {"meshcore", true},       // identity, contacts, channels
-    {"c6", true},             // the staged C6 images
-    {"crash", true},          // the crash log
-    {"lichen", true},         // notifications and Lichen's own state
-    {"lora.toml", false},     // radio settings
-    {"ota_token.txt", false}, // the update token
-};
-static rule_t const SD_RULES[] = {
-    {"lichen", false},          // the directory itself; the apps' own directories below can be cleaned
-    {"lichen/apps", false},
-    {"lichen/messages", true},  // MeshCore's message history
-};
-
-// Does the component list `comps` (n entries) match the rule: equal, or below it for a tree rule
-static bool rule_hit(rule_t const *r, char const *const *comps, size_t const *lens, size_t n) {
-    char const *p = r->path;
-    size_t      i = 0;
-    while (*p) {
-        char const *slash = strchr(p, '/');
-        size_t      len   = slash ? (size_t)(slash - p) : strlen(p);
-        char        part[24];
-        memcpy(part, p, len);
-        part[len] = '\0';
-        if (i >= n || !same_comp(comps[i], lens[i], part)) {
-            return false;
-        }
-        i++;
-        p += len + (slash ? 1 : 0);
-    }
-    return r->tree ? true : i == n;
-}
-
-bool files_protected(char const *path) {
-    if (!files_path_ok(path)) {
-        return true;
-    }
-    char const *vol  = files_volume_of(path);
-    char const *rest = path + strlen(vol);
-    if (!*rest) {
-        return true; // the volume roots
-    }
-    char const *comps[FILES_PATH_MAX / 2];
-    size_t      lens[FILES_PATH_MAX / 2];
-    size_t      n = 0;
-    for (char const *p = rest + 1; *p && n < FILES_PATH_MAX / 2;) {
-        char const *end = strchr(p, '/');
-        size_t      len = end ? (size_t)(end - p) : strlen(p);
-        if (has_alias(p, len)) {
-            return true; // could be a short name for anything
-        }
-        comps[n] = p;
-        lens[n]  = len;
-        n++;
-        p += len + (end ? 1 : 0);
-    }
-    bool                 sd    = !strcmp(vol, FILES_SD);
-    rule_t const        *rules = sd ? SD_RULES : STORAGE_RULES;
-    size_t               count = sd ? sizeof(SD_RULES) / sizeof(SD_RULES[0]) : sizeof(STORAGE_RULES) / sizeof(STORAGE_RULES[0]);
-    for (size_t i = 0; i < count; i++) {
-        if (rule_hit(&rules[i], comps, lens, n)) {
+static bool in_list(char const *const *list, size_t n, char const *name, size_t len) {
+    for (size_t i = 0; i < n; i++) {
+        if (same_comp(name, len, list[i])) {
             return true;
         }
     }
     return false;
+}
+
+// The path below the volume root: the number of components and the first one. false when the path is not ok.
+static bool split(char const *path, char const **vol, size_t *n, char const **first, size_t *first_len) {
+    if (!files_path_ok(path)) {
+        return false;
+    }
+    *vol         = files_volume_of(path);
+    char const *rest = path + strlen(*vol);
+    *n           = 0;
+    *first       = NULL;
+    *first_len   = 0;
+    for (char const *p = *rest ? rest + 1 : rest; *p;) {
+        char const *end = strchr(p, '/');
+        size_t      len = end ? (size_t)(end - p) : strlen(p);
+        if (!*n) {
+            *first     = p;
+            *first_len = len;
+        }
+        (*n)++;
+        p += len + (end ? 1 : 0);
+    }
+    return true;
+}
+
+// Deny by default. /storage is the OS's and the apps': every directory in it and everything below one is protected,
+// as are the root files in STORAGE_ROOT_FILES; only other plain files at the root are the user's (see
+// files_protected_entry for the directory case). On /sd the whole /lichen tree is protected, the rest is the user's.
+bool files_protected(char const *path) {
+    char const *vol, *first;
+    size_t      n, first_len;
+    if (!split(path, &vol, &n, &first, &first_len) || n == 0) {
+        return true; // not a usable path, or a volume root
+    }
+    if (has_alias(first, first_len)) {
+        return true; // could be a short name for anything
+    }
+    if (!strcmp(vol, FILES_SD)) {
+        return same_comp(first, first_len, "lichen");
+    }
+    if (n >= 2) {
+        return true;
+    }
+    return in_list(STORAGE_ROOT_FILES, sizeof(STORAGE_ROOT_FILES) / sizeof(STORAGE_ROOT_FILES[0]), first, first_len) ||
+           !strncmp(first, "ota_", 4) || !strncmp(first, "lora", 4);
+}
+
+bool files_protected_entry(char const *path, bool is_dir) {
+    char const *vol, *first;
+    size_t      n, first_len;
+    if (files_protected(path)) {
+        return true;
+    }
+    // a directory straight under /storage is an OS or app directory, whatever its name
+    return is_dir && split(path, &vol, &n, &first, &first_len) && !strcmp(vol, FILES_STORAGE) && n == 1;
+}
+
+bool files_secret(char const *path) {
+    char const *vol, *first;
+    size_t      n, first_len;
+    if (!split(path, &vol, &n, &first, &first_len) || n == 0) {
+        return true;
+    }
+    if (!strcmp(vol, FILES_SD)) {
+        return has_alias(first, first_len) || (same_comp(first, first_len, "lichen") && n >= 2); // the journal and app data on the card: not for the screen
+    }
+    return has_alias(first, first_len) ||
+           in_list(SECRET_ROOT, sizeof(SECRET_ROOT) / sizeof(SECRET_ROOT[0]), first, first_len);
 }
 
 // ---- sorting ------------------------------------------------------------------------------------------------------

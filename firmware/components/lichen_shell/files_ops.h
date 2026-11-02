@@ -33,15 +33,18 @@ int files_list(char const *dir, files_entry_t *out, size_t max, size_t *count, s
 files_result_t files_delete(char const *path);
 
 // Reads up to cap bytes of the file from offset (fseek + fread); *got = bytes read (fewer at the end), *total = file
-// size. Protected files are refused: their content is secret.
+// size. Secret files (files_secret) are refused.
 files_result_t files_read_at(char const *path, uint32_t offset, uint8_t *buf, size_t cap, size_t *got, uint32_t *total);
 
 // Progress during a copy: bytes done of total; return false to cancel
 typedef bool (*files_progress_fn)(uint32_t done, uint32_t total, void *ctx);
 
-// Copies src to dst in chunks of buf. Never overwrites (FILES_ERR_EXISTS), refuses protected paths on either side. The
-// data goes to "<dst>.part" first and is renamed when complete; on failure or cancel the .part file is removed, so
+// Copies src to dst in chunks of buf. Never overwrites (FILES_ERR_EXISTS), refuses secret sources and protected targets (nothing is copied into a protected tree). The
+// data goes to "<dst>.lichen-part" first and is renamed when complete; on failure or cancel the .part file is removed, so
 // dst is either whole or absent. free_bytes: room on dst's volume (UINT64_MAX when unknown).
+// A marker a user is unlikely to have; only a file with this suffix is ever removed as a leftover
+#define FILES_PART_SUFFIX ".lichen-part"
+
 files_result_t files_copy(char const *src, char const *dst, uint8_t *buf, size_t buf_cap, uint64_t free_bytes,
                           files_progress_fn progress, void *ctx);
 
