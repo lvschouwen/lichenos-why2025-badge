@@ -29,7 +29,7 @@ set(COMPANION_SRCS
 # on /sd/lichen/messages, #98: an SD batch call in lichen_fs.h).
 set(MESH_REQUIRES lichen_api lichen_clock lichen_random lora fw_console freertos esp_timer heap mbedtls
                   nvs_flash esp_lvgl_port sdcard)
-idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "mesh_trace.c" "mesh_remote.c" "meshcore_remote.c" "lora_radio.cpp" "mesh_store.c" "lora_airtime.c" "advert_limit.c" "mesh_advert_cfg.c"
+idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "mesh_trace.c" "mesh_remote.c" "mesh_rset.c" "mesh_rset_run.c" "meshcore_remote.c" "meshcore_rset.c" "lora_radio.cpp" "mesh_store.c" "lora_airtime.c" "advert_limit.c" "mesh_advert_cfg.c"
                             "mesh_hist.c" "mesh_hist_crypto.cpp" "mesh_hist_selftest.c" "mesh_ident.c" "mesh_journal.c" "mesh_format.c" "mesh_contact_fmt.c" "mesh_share.c" "mesh_tile.c" "mesh_notify.c" "mesh_notify_run.c" "meshcore_notify.c"
                             "meshcore_hdr.c" "meshcore_app.c" "meshcore_run.c" "mesh_run.c" "meshcore_grid.c" "meshcore_grid_icons.c" "mesh_grid.c" "meshcore_list.c" "meshcore_chats.c" "meshcore_contacts.c" "meshcore_chat.c" "meshcore_contact.c" "mesh_chat.c" "meshcore_settings.c" "meshcore_advert_settings.c" "radio_presets.c" "radio_filter.c" "radio_confirm.c" "channel_input.c" "mc_first.c"
                             "../../../shared/arduino_shim/arduino_shim.cpp"

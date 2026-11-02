@@ -231,6 +231,38 @@ static void cli(void) {
     CHECK(w < sizeof(small) && strlen(small) == w);
 }
 
+// #117: erase never goes out, a password command never stays in the CLI history (command, request or reply)
+static void cli_filter(void) {
+    rr_t        r;
+    char const *why = NULL;
+    rr_init(&r);
+    CHECK(rr_request(&r, RR_CLI, A, "erase", 0, &why) == 0 && why && strstr(why, "erase"));
+    CHECK(rr_request(&r, RR_CLI, A, "a1|erase", 0, &why) == 0 && r.cli_n == 0 && !rr_busy(&r));
+    CHECK(rr_request(&r, RR_CLI, A, "a2|password s3cret", 0, &why) == 1);
+    rr_t copy;
+    rr_poll(&r, 0, &copy);
+    char log[512];
+    rr_cli_format(&copy, log, sizeof(log));
+    CHECK(!strstr(log, "s3cret") && strstr(log, "a2|password (hidden)"));
+    rr_op_t op;
+    uint8_t prefix[6];
+    char    arg[RR_CMD_MAX + 1];
+    CHECK(rr_take(&r, &op, prefix, arg, sizeof(arg), 0) && strcmp(arg, "a2|password s3cret") == 0);
+    CHECK(r.arg[0] == 0); // on its way: not kept in the request
+    mf_msg_t sent = sent_reply(1500);
+    rr_on_reply(&r, &sent, 10);
+    mf_msg_t msg = {.kind = MF_MSG_RECV, .msg_ok = true, .txt_type = MF_TXT_CLI_DATA};
+    memcpy(msg.rprefix, A, 6);
+    strcpy(msg.text, "a2|password now: s3cret");
+    CHECK(rr_on_message(&r, &msg, 100) && r.state == RR_DONE);
+    CHECK(strcmp(r.cli[r.cli_head].reply, "a2|password now: (hidden)") == 0);
+    rr_cli_format(&r, log, sizeof(log));
+    CHECK(!strstr(log, "s3cret"));
+    // a plain command is kept as typed
+    CHECK(rr_request(&r, RR_CLI, A, "get name", 200, &why) == 2);
+    CHECK(strcmp(r.cli[r.cli_head].cmd, "get name") == 0 && !r.cli[r.cli_head].secret);
+}
+
 static void pw_key(void) {
     char key[RR_PW_KEY_MAX];
     uint8_t p[6] = {0xAB, 0x01, 0xFF, 0x00, 0x7E, 0x10};
@@ -247,6 +279,7 @@ int main(void) {
     password_wiped();
     status();
     cli();
+    cli_filter();
     pw_key();
     if (failures) {
         printf("%d failure(s)\n", failures);

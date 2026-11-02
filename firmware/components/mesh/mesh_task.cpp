@@ -15,6 +15,7 @@
 #include "mesh_ident.h"
 #include "mesh_journal.h"
 #include "meshcore_run.h"
+#include "mesh_rset_run.h"
 #include "channel_input.h"
 #include "mesh_prefs.h"
 #include "mesh_share.h"
@@ -2018,7 +2019,8 @@ static void console_remote_show(void) {
     free(r);
 }
 
-// fw mesh remote <name|hex> login [password] | status | cli <text> | logout, and fw mesh remote (the last result).
+// fw mesh remote <name|hex> login [password] | status | cli <text> | settings | logout, and fw mesh remote (the last
+// result) / fw mesh remote settings (the rows of the last settings read, #117: gets only, never a set).
 // A password typed here is remembered like one from the screen; the screens never show it. Nothing is sent unless
 // this command says login, status or cli.
 static void cmd_mesh_remote(char const *args) {
@@ -2027,10 +2029,14 @@ static void cmd_mesh_remote(char const *args) {
         console_remote_show();
         return;
     }
+    if (strcmp(args, "settings") == 0) {
+        mesh_rset_console_show(); // the rows of the last "settings" read (#117)
+        return;
+    }
     char token[40];
     int  used = 0;
     if (sscanf(args, "%39s%n", token, &used) != 1 || strlen(token) >= sizeof(token) - 1) {
-        console_reply("mesh remote <name or key digits> login [password] | status | cli <text> | logout");
+        console_reply("mesh remote <name or key digits> login [password] | status | cli <text> | settings | logout");
         return;
     }
     char const *verb = args + used + strspn(args + used, " ");
@@ -2040,6 +2046,10 @@ static void cmd_mesh_remote(char const *args) {
     }
     char const *why = NULL;
     uint32_t    seq = 0;
+    if (strcmp(verb, "settings") == 0) {
+        mesh_rset_console_read(prefix); // gets only, never a set (#117)
+        return;
+    }
     if (strcmp(verb, "logout") == 0) {
         console_reply(mesh_remote_logout(prefix, MESH_SET_WAIT_MS) ? "logged out" : "MeshCore is busy or the contact is gone");
         return;
@@ -2068,7 +2078,7 @@ static void cmd_mesh_remote(char const *args) {
     } else if (strncmp(verb, "cli ", 4) == 0) {
         seq = mesh_remote_start(prefix, RR_CLI, verb + 4, &why);
     } else {
-        console_reply("mesh remote <name or key digits> login [password] | status | cli <text> | logout");
+        console_reply("mesh remote <name or key digits> login [password] | status | cli <text> | settings | logout");
         return;
     }
     if (seq) {
@@ -2355,7 +2365,7 @@ static void cmd_mesh(char const *args) {
     if (*args) {
         console_reply("mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
                       "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
-                      "mesh dm <12 hex> <text> | mesh remote [<name|hex> login [pw]|status|cli <text>|logout] | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
+                      "mesh dm <12 hex> <text> | mesh remote [<name|hex> login [pw]|status|cli <text>|settings|logout] | mesh remote settings | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
                       "[<lat> <lon> | share on|off] | mesh autoadd [on|off | types <all|chat,repeater,room,sensor> | hops "
                       "<any|direct|n> | overwrite on|off]");
         return;

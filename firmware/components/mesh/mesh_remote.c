@@ -1,6 +1,8 @@
 // Log in, status and CLI for one repeater or room (#51): see mesh_remote.h
 #include "mesh_remote.h"
 
+#include "mesh_rset.h"
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -40,6 +42,10 @@ uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char c
         *why = n ? "the command is too long" : "no command";
         return 0;
     }
+    if (op == RR_CLI && rs_cmd_class(arg) == RS_CMD_FORBIDDEN) {
+        *why = "erase is never sent from the badge (#117)"; // it wipes the repeater's file system
+        return 0;
+    }
     uint32_t seq = r->seq + 1 ? r->seq + 1 : 1;
     r->seq       = seq;
     r->op        = op;
@@ -66,8 +72,13 @@ uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char c
         }
         rr_exchange_t *x = &r->cli[r->cli_head];
         wipe(x, sizeof(*x));
-        x->state = RR_CLI_WAITING;
-        memcpy(x->cmd, arg, n);
+        x->state  = RR_CLI_WAITING;
+        x->secret = rs_cmd_class(arg) == RS_CMD_SECRET;
+        if (x->secret) {
+            rs_redact_cmd(arg, x->cmd, sizeof(x->cmd)); // the history never holds a password (#117)
+        } else {
+            memcpy(x->cmd, arg, n);
+        }
     }
     return seq;
 }
@@ -81,7 +92,7 @@ bool rr_take(rr_t *r, rr_op_t *op, uint8_t prefix[MF_PREFIX], char *arg_out, siz
     *op        = r->op;
     memcpy(prefix, r->prefix, MF_PREFIX);
     snprintf(arg_out, cap, "%s", r->arg);
-    if (r->op == RR_LOGIN) {
+    if (r->op == RR_LOGIN || (r->op == RR_CLI && rs_cmd_class(r->arg) == RS_CMD_SECRET)) {
         wipe(r->arg, sizeof(r->arg)); // the password is not kept in the request once it is on its way
     }
     return true;
@@ -159,6 +170,11 @@ bool rr_on_status(rr_t *r, mf_msg_t const *m, uint32_t now_ms) {
 // The remote's text is shown as it is except for control bytes (they could move the cursor of a terminal): a line
 // break stays one
 static void append_reply(rr_exchange_t *x, char const *text) {
+    char hidden[RR_REPLY_MAX];
+    if (x->secret) {
+        rs_redact_reply(text, hidden, sizeof(hidden)); // "password now: <it>" is the repeater's echo (#117)
+        text = hidden;
+    }
     size_t at = strlen(x->reply);
     if (at && at + 1 < sizeof(x->reply)) {
         x->reply[at++] = '\n';

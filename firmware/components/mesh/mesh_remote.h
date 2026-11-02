@@ -42,6 +42,7 @@ typedef enum {
 typedef enum { RR_CLI_WAITING, RR_CLI_GOT, RR_CLI_NONE } rr_cli_state_t;
 typedef struct {
     uint8_t  state; // rr_cli_state_t
+    bool     secret; // a password command (mesh_rset.h): cmd and reply are kept without it
     uint32_t got_ms;
     char     cmd[RR_CMD_MAX + 1];
     char     reply[RR_REPLY_MAX];
@@ -74,7 +75,8 @@ typedef struct {
 
 void rr_init(rr_t *r);
 bool rr_busy(rr_t const *r);
-// A new request: its seq, or 0 with *why set (one is still running, empty or too long). arg: the password (login, at
+// A new request: its seq, or 0 with *why set (one is still running, empty or too long, or a command the badge never
+// sends: erase, mesh_rset.h). arg: the password (login, at
 // most MF_PASSWORD_MAX characters) or the command; ignored for a status request.
 uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg, uint32_t now_ms,
                     char const **why);

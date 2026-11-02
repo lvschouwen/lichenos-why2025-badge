@@ -164,6 +164,11 @@ static void on_cli(void *arg) {
     meshcore_remote_cli(prefix, title);
 }
 
+static void on_settings(void *arg) {
+    (void)arg;
+    meshcore_remote_settings(prefix, title);
+}
+
 static void on_posts(void *arg) {
     (void)arg;
     meshcore_chat_open_dm(prefix, title[0] ? title : "(no name)");
@@ -419,6 +424,9 @@ static lv_obj_t *build_detail(void) {
         }
         menu_add(menu, "Status", "", on_status, NULL);
         menu_add(menu, "CLI", "", on_cli, NULL);
+        if (type == MESH_ADV_TYPE_REPEATER) {
+            menu_add(menu, "Settings", "", on_settings, NULL); // #117: needs the admin login above
+        }
         menu_add(menu, "Log out", "", on_logout, NULL);
         menu_add(menu, "Forget password", "", on_forget, NULL);
     }

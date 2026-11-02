@@ -12,3 +12,6 @@
 void meshcore_remote_login(uint8_t const prefix[6], char const *title);
 void meshcore_remote_status(uint8_t const prefix[6], char const *title);
 void meshcore_remote_cli(uint8_t const prefix[6], char const *title);
+// The repeater's Settings page (#117, meshcore_rset.c): reads its values over the CLI as it opens (gets only); a row is
+// set only on an Enter on it and the Enter in its edit field, the radio and a reboot after a careful confirm
+void meshcore_remote_settings(uint8_t const prefix[6], char const *title);
