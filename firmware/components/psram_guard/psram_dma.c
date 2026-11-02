@@ -98,21 +98,37 @@ static void note_flip(psram_dma_report_t *r, size_t off, uint8_t want, uint8_t g
     }
 }
 
+static void compare_word(uint32_t want, uint32_t have, size_t off, psram_dma_report_t *r) {
+    for (size_t k = 0; k < 4; k++) {
+        uint8_t w = (uint8_t)(want >> (8 * k));
+        uint8_t g = (uint8_t)(have >> (8 * k));
+        if (w != g) {
+            note_flip(r, off + k, w, g);
+        }
+    }
+}
+
 void psram_dma_compare(void const *got, size_t len, psram_dma_pattern_t p, uint32_t seed, size_t off, psram_dma_report_t *r) {
     uint8_t const *in = got;
     for (size_t i = 0; i + 4 <= len; i += 4) {
         uint32_t want = psram_dma_word(p, seed, off + i);
         uint32_t have;
         memcpy(&have, in + i, 4);
-        if (have == want) {
-            continue;
+        if (have != want) {
+            compare_word(want, have, off + i, r);
         }
-        for (size_t k = 0; k < 4; k++) {
-            uint8_t w = (uint8_t)(want >> (8 * k));
-            uint8_t g = (uint8_t)(have >> (8 * k));
-            if (w != g) {
-                note_flip(r, off + i + k, w, g);
-            }
+    }
+}
+
+void psram_dma_compare_buf(void const *got, void const *ref, size_t len, size_t off, psram_dma_report_t *r) {
+    uint8_t const *in = got;
+    uint8_t const *rf = ref;
+    for (size_t i = 0; i + 4 <= len; i += 4) {
+        uint32_t want, have;
+        memcpy(&want, rf + i, 4);
+        memcpy(&have, in + i, 4);
+        if (have != want) {
+            compare_word(want, have, off + i, r);
         }
     }
 }

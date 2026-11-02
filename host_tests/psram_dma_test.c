@@ -110,9 +110,25 @@ static void test_report(void) {
     CHECK(r.same_mod1k == 1);
 }
 
+// A copy compared with a reference copy: same reporting, offsets carry the logical base
+static void test_compare_buf(void) {
+    psram_dma_report_t r;
+    psram_dma_fill(buf, 2048, PSRAM_DMA_RANDOM, 9, 0);
+    memcpy(chunk, buf + 1024, 1024);
+    psram_dma_report_reset(&r);
+    psram_dma_compare_buf(chunk, buf + 1024, 1024, 1024, &r);
+    CHECK(r.bad_bytes == 0);
+    chunk[859] ^= 0x08;
+    chunk[3] ^= 0x80;
+    psram_dma_compare_buf(chunk, buf + 1024, 1024, 1024, &r);
+    CHECK(r.bad_bytes == 2 && r.bit_hist[3] == 1 && r.bit_hist[7] == 1);
+    CHECK(r.flips[0].off == 1027 && r.flips[1].off == 1883 && r.flips[1].got == (uint8_t)(buf[1883] ^ 0x08));
+}
+
 int main(void) {
     test_patterns();
     test_report();
+    test_compare_buf();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

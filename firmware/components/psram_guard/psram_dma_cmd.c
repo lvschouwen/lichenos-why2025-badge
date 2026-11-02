@@ -22,6 +22,9 @@
 #define MAX_ROUNDS    1000
 #define DMA_WAIT_MS   2000
 #define FLAGS_FLUSH   (ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE)
+#define SD_SECTOR     512
+#define SD_PIECE      4096             // FatFs reads 4 KB sectors (CONFIG_FATFS_SECTOR_4096): the transfer shape of #120
+#define SD_WAIT_MS    2000
 
 typedef struct {
     async_memcpy_handle_t mcp;
@@ -34,10 +37,17 @@ typedef struct {
     uint32_t              seed;
     unsigned              errors; // DMA calls refused or timed out, cache syncs refused
     size_t                bad_total;
-    int64_t               us[3];  // time spent per leg over the run, for MB/s
+    int64_t               us[4];  // time spent per leg over the run, for MB/s
+    uint32_t              sd_sector; // first card sector of the SD leg
+    bool                  sd_skipped;
 } run_t;
 
-static char const *const legs[3] = {"psram>int", "int>psram", "psram>psram"};
+static char const *const legs[4] = {"psram>int", "int>psram", "psram>psram", "sd>psram"};
+static psram_dma_sd_t    s_sd;
+
+void psram_dma_set_sd(psram_dma_sd_t const *sd) {
+    s_sd = *sd;
+}
 
 static bool IRAM_ATTR on_done(async_memcpy_handle_t mcp, async_memcpy_event_t *ev, void *ctx) {
     (void)mcp;
@@ -147,6 +157,40 @@ static void check_src(run_t *r) {
     }
 }
 
+// Leg 3: the SDMMC controller's DMA reads 1 MB of the card into PSRAM in 4 KB pieces, and the same sectors into
+// internal RAM as the reference (a fixed-spot flip would show in two PSRAM reads alike). Read-only.
+static void leg_sd_to_psram(run_t *r) {
+    if (!s_sd.read || !s_sd.begin(SD_WAIT_MS)) {
+        r->sd_skipped = true;
+        return;
+    }
+    psram_dma_report_t rep;
+    psram_dma_report_reset(&rep);
+    bool    failed = false;
+    int64_t t0     = esp_timer_get_time();
+    for (size_t off = 0; off < BIG_BYTES && !failed; off += SD_PIECE) {
+        uint32_t sector = r->sd_sector + (uint32_t)(off / SD_SECTOR);
+        sync_mem(r, r->in, SD_PIECE, FLAGS_FLUSH);
+        sync_mem(r, r->dst + off, SD_PIECE, FLAGS_FLUSH);
+        failed = !s_sd.read(r->in, sector, SD_PIECE / SD_SECTOR) || !s_sd.read(r->dst + off, sector, SD_PIECE / SD_SECTOR);
+        if (!failed) {
+            sync_mem(r, r->in, SD_PIECE, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+            sync_mem(r, r->dst + off, SD_PIECE, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+            psram_dma_compare_buf(r->dst + off, r->in, SD_PIECE, off, &rep);
+        }
+    }
+    r->us[3] += esp_timer_get_time() - t0;
+    s_sd.end(failed);
+    if (failed) {
+        r->errors++;
+        console_reply("psram dma %s: card read failed", legs[3]);
+    }
+    if (rep.bad_bytes) {
+        r->pat = PSRAM_DMA_PATTERNS; // "?" in the report: the card's bytes, no pattern
+        show(r, 3, &rep);
+    }
+}
+
 static void one_pattern(run_t *r, psram_dma_pattern_t pat) {
     r->pat  = pat;
     r->seed = lichen_random_u32();
@@ -192,39 +236,42 @@ static void teardown(run_t *r) {
     }
 }
 
-static unsigned mbps(int64_t us, unsigned rounds) {
-    return us > 0 ? (unsigned)((uint64_t)rounds * PSRAM_DMA_PATTERNS * BIG_BYTES / (uint64_t)us) : 0; // MB/s = bytes/us
+static unsigned mbps(int64_t us, unsigned rounds, unsigned mb_per_round) {
+    return us > 0 ? (unsigned)((uint64_t)rounds * mb_per_round * BIG_BYTES / (uint64_t)us) : 0; // MB/s = bytes/us
 }
 
 void psram_dma_cmd(char const *args) {
-    unsigned rounds = 1, burst = 64;
-    if (sscanf(args, "%u %u", &rounds, &burst) < 1) {
+    unsigned rounds = 1, burst = 64, sector = 0;
+    if (sscanf(args, "%u %u %u", &rounds, &burst, &sector) < 1) {
         rounds = 1;
     }
     if (rounds < 1 || rounds > MAX_ROUNDS || (burst != 16 && burst != 32 && burst != 64 && burst != 128)) {
-        console_reply("psram dma [rounds 1..%d] [burst 16|32|64|128]", MAX_ROUNDS);
+        console_reply("psram dma [rounds 1..%d] [burst 16|32|64|128] [first card sector of the SD leg]", MAX_ROUNDS);
         return;
     }
     static run_t r; // the ISR callback points here; one run at a time (the console runs commands one by one)
     memset(&r, 0, sizeof(r));
+    r.sd_sector = sector;
     if (!setup(&r, burst)) {
         teardown(&r);
         return;
     }
-    console_reply("psram dma: %u round(s) x %d patterns, 1 MB each, AXI-GDMA burst %u, legs %s %s %s", rounds,
-                  PSRAM_DMA_PATTERNS, burst, legs[0], legs[1], legs[2]);
+    console_reply("psram dma: %u round(s) x %d patterns, 1 MB each, AXI-GDMA burst %u, legs %s %s %s, %s 1 MB from sector %u",
+                  rounds, PSRAM_DMA_PATTERNS, burst, legs[0], legs[1], legs[2], legs[3], sector);
     int64_t t0 = esp_timer_get_time();
     for (unsigned n = 0; n < rounds && !r.errors; n++) {
         for (int p = 0; p < PSRAM_DMA_PATTERNS; p++) {
             one_pattern(&r, (psram_dma_pattern_t)p);
         }
+        leg_sd_to_psram(&r);
         if (rounds > 1 && ((n + 1) % 10 == 0 || n + 1 == rounds)) {
             console_reply("psram dma: round %u/%u, %u bad bytes so far", n + 1, rounds, (unsigned)r.bad_total);
         }
     }
-    console_reply("psram dma: %u bad bytes in %u round(s), %u errors, %s %u MB/s, %s %u MB/s, %s %u MB/s, %u ms%s",
-                  (unsigned)r.bad_total, rounds, r.errors, legs[0], mbps(r.us[0], rounds), legs[1], mbps(r.us[1], rounds),
-                  legs[2], mbps(r.us[2], rounds), (unsigned)((esp_timer_get_time() - t0) / 1000),
-                  r.errors ? " (stopped: DMA refused, timed out or a cache sync failed)" : "");
+    console_reply("psram dma: %u bad bytes in %u round(s), %u errors, %s %u MB/s, %s %u MB/s, %s %u MB/s, %s %s, %u ms%s",
+                  (unsigned)r.bad_total, rounds, r.errors, legs[0], mbps(r.us[0], rounds, PSRAM_DMA_PATTERNS), legs[1],
+                  mbps(r.us[1], rounds, PSRAM_DMA_PATTERNS), legs[2], mbps(r.us[2], rounds, PSRAM_DMA_PATTERNS), legs[3],
+                  r.sd_skipped ? "skipped (no card)" : "run", (unsigned)((esp_timer_get_time() - t0) / 1000),
+                  r.errors ? " (stopped: DMA refused, timed out, a cache sync or a card read failed)" : "");
     teardown(&r);
 }

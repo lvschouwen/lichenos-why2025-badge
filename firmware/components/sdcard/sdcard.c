@@ -17,6 +17,7 @@
 #include "freertos/task.h"
 #include "sd_protocol_defs.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#include "psram_dma_cmd.h"
 #include "sdmmc_cmd.h"
 
 #include <errno.h>
@@ -373,6 +374,20 @@ bool sd_format(void) {
     return ok;
 }
 
+// Raw, read-only sector reads for "fw psram dma" (#121): the SDMMC -> PSRAM DMA path of #120 without FatFs. The
+// caller holds the batch mutex through these begin/end wrappers.
+static bool raw_begin(uint32_t wait_ms) {
+    return sd_begin(wait_ms);
+}
+
+static void raw_end(bool failed) {
+    sd_end(failed ? SD_IO_FAILED : SD_IO_NEUTRAL);
+}
+
+static bool raw_read(void *dst, uint32_t sector, uint32_t count) {
+    return card && sdmmc_read_sectors(card, dst, sector, count) == ESP_OK;
+}
+
 bool sd_mounted(void) {
     return atomic_load(&mounted);
 }
@@ -423,5 +438,6 @@ void sd_start(void) {
     }
     lock = xSemaphoreCreateMutexStatic(&lock_buf);
     sd_console_register();
+    psram_dma_set_sd(&(psram_dma_sd_t){.begin = raw_begin, .end = raw_end, .read = raw_read});
     sd_mount();
 }

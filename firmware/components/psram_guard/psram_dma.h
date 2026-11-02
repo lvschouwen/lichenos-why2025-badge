@@ -49,6 +49,10 @@ void psram_dma_report_reset(psram_dma_report_t *r);
 // accumulates into r so one report can cover a buffer checked chunk by chunk
 void psram_dma_compare(void const *got, size_t len, psram_dma_pattern_t p, uint32_t seed, size_t off, psram_dma_report_t *r);
 
+// Compare got with a reference copy ref (both 4-byte aligned, len a multiple of 4) read from somewhere else: for data
+// whose expected value is not a pattern (the SD leg reads the card into PSRAM and into internal RAM). Accumulates.
+void psram_dma_compare_buf(void const *got, void const *ref, size_t len, size_t off, psram_dma_report_t *r);
+
 // "+4955 (859 mod 1024) want 11 got 19 xor 08"; returns the length (snprintf style)
 size_t psram_dma_flip_text(psram_dma_flip_t const *f, char *out, size_t cap);
 
