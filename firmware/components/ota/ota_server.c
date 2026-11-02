@@ -9,7 +9,7 @@
 #include "c6_paths.h"
 #include "c6link.h"
 #include "lichen_radio.h"
-#include "console_cmd.h" // CONSOLE_CMD_MAX
+#include "console_cmd.h" // CONSOLE_WIFI_CMD_MAX
 #include "fw_console.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -1091,22 +1091,29 @@ static void handle_console(int fd, ota_request_t const *req, uint8_t const *pre,
         respond(fd, 409, "a firmware update is running");
         return;
     }
-    if (req->content_length < 1 || req->content_length >= CONSOLE_CMD_MAX) {
-        respond(fd, req->content_length < 0 ? 411 : 400, "body: one command line of 1 to %d characters", CONSOLE_CMD_MAX - 1);
+    if (!console_wifi_len_ok(req->content_length)) {
+        respond(fd, req->content_length < 0 ? 411 : 400, "body: one command line of 1 to %d characters",
+                CONSOLE_WIFI_CMD_MAX - 1);
         return;
     }
-    char line[CONSOLE_CMD_MAX];
-    if (!read_console_line(fd, req, pre, pre_len, line)) {
-        respond(fd, 400, "couldn't read a printable command line");
-        return;
-    }
-    char *out = heap_caps_malloc(CONSOLE_REPLY, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!out) {
+    // Longer than a UART line (#110: a whole contact link), so on the heap rather than this task's stack
+    char *line = heap_caps_malloc(CONSOLE_WIFI_CMD_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    char *out  = heap_caps_malloc(CONSOLE_REPLY, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!line || !out) {
+        free(line);
+        free(out);
         respond(fd, 503, "out of memory, try again");
+        return;
+    }
+    if (!read_console_line(fd, req, pre, pre_len, line)) {
+        free(line);
+        free(out);
+        respond(fd, 400, "couldn't read a printable command line");
         return;
     }
     console_reply_ctx_t ctx = {.fd = fd};
     hooks.console_run(line, out, CONSOLE_REPLY, console_done, &ctx); // may restart the badge, after the reply
+    free(line);
     free(out);
 }
 

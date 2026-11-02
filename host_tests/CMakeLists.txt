@@ -177,7 +177,8 @@ target_compile_options(console_cmd_test PRIVATE
     -Werror
 )
 
-target_include_directories(console_cmd_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
+target_include_directories(console_cmd_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
 add_test(NAME console_cmd_test COMMAND console_cmd_test)
 
 add_executable(lora_proto_test

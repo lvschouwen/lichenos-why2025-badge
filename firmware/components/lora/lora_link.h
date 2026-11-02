@@ -7,7 +7,7 @@
 #include <stdint.h>
 
 // The P4 side of the LoRa bridge that needs no ESP headers (#51): the radio config file, the supervisor that keeps
-// the C6 configured, and the `badgevms lora` status line. Built into the host tests as well as the firmware.
+// the C6 configured, and the `fw lora` status line. Built into the host tests as well as the firmware.
 
 // Parses lora.toml text (NUL-terminated, len excluding the NUL). *out starts as LORA_CONFIG_DEFAULT and missing keys
 // keep their default. On a TOML error, a wrong type or invalid values: false, *out = defaults, reason in err.
@@ -58,7 +58,7 @@ void     lora_c6_link_back(lora_c6_link_t *l); // nothing unless lost
 unsigned lora_c6_link_take(lora_c6_link_t *l); // LORA_C6_REINIT | LORA_C6_TELL_DOWN
 unsigned lora_c6_link_heard(lora_c6_link_t *l); // a message from the C6: LORA_C6_TELL_UP once after a REINIT
 
-// The `badgevms lora` line; returns the length written (excluding the NUL)
+// The `fw lora` line; returns the length written (excluding the NUL)
 size_t lora_status_format(
     lora_config_t const *cfg,
     lora_status_t const *st,

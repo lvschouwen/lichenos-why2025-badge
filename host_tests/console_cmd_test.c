@@ -1,5 +1,6 @@
 // Host test for the console command splitter (#53)
 #include "console_cmd.h"
+#include "mesh_share.h" // MESH_ADVERT_URI_MAX
 
 #include <stdio.h>
 
@@ -55,7 +56,7 @@ int main(void) {
     // A command is taken out of the stream, its line end included
     console_cmd_init(&s);
     memset(&r, 0, sizeof r);
-    feed(&s, &r, "badgevms run ota_receiver\r\nnext\n");
+    feed(&s, &r, "lichen run ota_receiver\r\nnext\n");
     CHECK(r.n_commands == 1);
     CHECK(strcmp(r.commands[0], "run ota_receiver") == 0);
     CHECK(strcmp(r.stdin_out, "next\n") == 0);
@@ -63,21 +64,21 @@ int main(void) {
     // A partial prefix that fails is released in order, nothing lost
     console_cmd_init(&s);
     memset(&r, 0, sizeof r);
-    feed(&s, &r, "badge\nbad apple\nb\n");
-    CHECK(strcmp(r.stdin_out, "badge\nbad apple\nb\n") == 0);
+    feed(&s, &r, "lich\nlie apple\nl\n");
+    CHECK(strcmp(r.stdin_out, "lich\nlie apple\nl\n") == 0);
     CHECK(r.n_commands == 0);
 
     // The prefix only counts at the start of a line
     console_cmd_init(&s);
     memset(&r, 0, sizeof r);
-    feed(&s, &r, "x badgevms run y\n");
-    CHECK(strcmp(r.stdin_out, "x badgevms run y\n") == 0);
+    feed(&s, &r, "x lichen run y\n");
+    CHECK(strcmp(r.stdin_out, "x lichen run y\n") == 0);
     CHECK(r.n_commands == 0);
 
     // Commands and input interleave; a command right after a line of input is still found
     console_cmd_init(&s);
     memset(&r, 0, sizeof r);
-    feed(&s, &r, "abc\nbadgevms help\nbadgevms run a\ndef");
+    feed(&s, &r, "abc\nlichen help\nlichen run a\ndef");
     CHECK(r.n_commands == 2);
     CHECK(strcmp(r.commands[0], "help") == 0);
     CHECK(strcmp(r.commands[1], "run a") == 0);
@@ -91,7 +92,7 @@ int main(void) {
     long_line[sizeof long_line - 1] = '\0';
     feed(&s, &r, CONSOLE_CMD_PREFIX);
     feed(&s, &r, long_line);
-    feed(&s, &r, "\nbadgevms help\n");
+    feed(&s, &r, "\nlichen help\n");
     CHECK(r.too_long == 1);
     CHECK(r.n_commands == 1);
     CHECK(strcmp(r.commands[0], "help") == 0);
@@ -100,7 +101,7 @@ int main(void) {
     // An empty command is still a command (help), and a bare CR ends it too
     console_cmd_init(&s);
     memset(&r, 0, sizeof r);
-    feed(&s, &r, "badgevms \rq");
+    feed(&s, &r, "lichen \rq");
     CHECK(r.n_commands == 1);
     CHECK(strcmp(r.commands[0], "") == 0);
     CHECK(strcmp(r.stdin_out, "q") == 0);
@@ -108,24 +109,24 @@ int main(void) {
     // A held prefix byte is released by an idle flush and the line then can't become a command
     console_cmd_init(&s);
     memset(&r, 0, sizeof r);
-    feed(&s, &r, "b");
+    feed(&s, &r, "l");
     CHECK(r.stdin_out[0] == '\0');
     {
         char const *pass;
         size_t      n;
         CHECK(console_cmd_flush(&s, &pass, &n) == CONSOLE_CMD_PASS);
-        CHECK(n == 1 && pass[0] == 'b');
+        CHECK(n == 1 && pass[0] == 'l');
         strncat(r.stdin_out, pass, n);
         CHECK(console_cmd_flush(&s, &pass, &n) == CONSOLE_CMD_IDLE); // nothing held now
     }
-    feed(&s, &r, "adgevms help\n");
-    CHECK(strcmp(r.stdin_out, "badgevms help\n") == 0);
+    feed(&s, &r, "ichen help\n");
+    CHECK(strcmp(r.stdin_out, "lichen help\n") == 0);
     CHECK(r.n_commands == 0);
 
     // A flush never breaks a command being typed, and cancels the pending line-end swallow after one
     console_cmd_init(&s);
     memset(&r, 0, sizeof r);
-    feed(&s, &r, "badgevms ru");
+    feed(&s, &r, "lichen ru");
     {
         char const *pass;
         size_t      n;
@@ -177,6 +178,13 @@ int main(void) {
     CHECK(!console_memhog_args("4k 30", &left, &secs));
     CHECK(!console_memhog_args("4096 30 1", &left, &secs));
     CHECK(!console_memhog_args("99999999999 30", &left, &secs));
+
+    // The Wi-Fi console's longer line (#110): a whole contact link in one "fw contacts import" line; the UART stays small
+    CHECK(sizeof("fw contacts import ") - 1 + MESH_ADVERT_URI_MAX - 1 < CONSOLE_WIFI_CMD_MAX);
+    CHECK(CONSOLE_CMD_MAX == 96);
+    CHECK(!console_wifi_len_ok(-1) && !console_wifi_len_ok(0));
+    CHECK(console_wifi_len_ok(1) && console_wifi_len_ok(CONSOLE_CMD_MAX) && console_wifi_len_ok(CONSOLE_WIFI_CMD_MAX - 1));
+    CHECK(!console_wifi_len_ok(CONSOLE_WIFI_CMD_MAX) && !console_wifi_len_ok(1L << 20));
 
     if (failures) {
         printf("%d check(s) failed\n", failures);

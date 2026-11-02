@@ -47,7 +47,8 @@ bool mesh_advert_uri(uint8_t const *pkt, size_t len, char *out, size_t cap);
 // is not an advert link (spaces around it are ignored, the scheme is matched without case)
 size_t mesh_advert_uri_parse(char const *text, uint8_t *out, size_t cap, char const **why);
 
-// The console takes at most 95 bytes a line, a link is up to 383: it is pasted in parts. A part starting with
+// The USB console takes at most 95 bytes a line, a link is up to 383: it is pasted in parts there (the Wi-Fi console
+// takes it whole, #110). A part starting with
 // "meshcore://" starts a new link; the others are added to it (spaces dropped). NULL when taken, else why not (the
 // pending text is dropped then).
 #define MESH_IMPORT_TEXT_MAX MESH_ADVERT_URI_MAX

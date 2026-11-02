@@ -468,16 +468,25 @@ static void run(char *line) {
 }
 
 void console_exec(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx) {
-    char cmd[CONSOLE_CMD_MAX];
     while (*line == ' ') {
         line++;
     }
     if (strncmp(line, "fw ", 3) == 0) {
         line += 3;
     }
-    snprintf(cmd, sizeof(cmd), "%s", line); // run() splits it in place
+    // A Wi-Fi line may be up to CONSOLE_WIFI_CMD_MAX (#110): a copy on the heap, not on the caller's stack
+    size_t len = strnlen(line, CONSOLE_WIFI_CMD_MAX - 1);
+    char  *cmd = heap_caps_malloc(len + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!cmd) {
+        static char const no_mem[] = "out of memory, try again\n";
+        done(ctx, no_mem, sizeof(no_mem) - 1);
+        return;
+    }
+    memcpy(cmd, line, len); // run() splits it in place
+    cmd[len] = '\0';
     if (run_mutex && xSemaphoreTake(run_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) != pdTRUE) {
         static char const busy[] = "busy, try again\n";
+        free(cmd);
         done(ctx, busy, sizeof(busy) - 1);
         return;
     }
@@ -485,6 +494,7 @@ void console_exec(char const *line, char *buf, size_t cap, console_done_fn done,
     if (cmd[0]) {
         run(cmd);
     }
+    free(cmd);
     capture_finish();
     capture.task = NULL;
     if (run_mutex) {

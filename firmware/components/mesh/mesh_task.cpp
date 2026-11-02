@@ -42,6 +42,7 @@
 #include "nvs.h"
 
 extern "C" {
+#include "console_cmd.h" // CONSOLE_WIFI_CMD_MAX
 #include "fw_console.h"
 #include "lora.h"
 }
@@ -2143,7 +2144,10 @@ static void cmd_mesh(char const *args) {
 
 // ---- "fw contacts export|import" (#54) ------------------------------------------------------------------------------
 
-static mesh_import_t *import_text; // PSRAM: the parts of a link pasted so far (the console takes 95 bytes a line)
+// PSRAM: the parts of a link pasted so far (the USB console takes 95 bytes a line, the Wi-Fi console a whole link)
+static mesh_import_t *import_text;
+static_assert(sizeof("contacts import ") - 1 + MESH_ADVERT_URI_MAX - 1 < CONSOLE_WIFI_CMD_MAX,
+              "a contact link fits one Wi-Fi console line (#110)");
 
 // "fw contacts export [<12 hex>]": the contact's (or our own) export link
 static void contacts_export(char const *arg) {
@@ -2168,8 +2172,8 @@ static void contacts_export(char const *arg) {
         console_reply("not exported: %s", why);
     } else {
         console_reply("%s", uri);
-        console_reply("(%u characters; to import on a badge paste it in parts with \"fw contacts import <part>\", "
-                      "then \"fw contacts import end\")", (unsigned)strlen(uri));
+        console_reply("(%u characters; to import on a badge: \"fw contacts import <link>\" (over USB in parts of up to "
+                      "79 characters), then \"fw contacts import end\")", (unsigned)strlen(uri));
     }
     free(uri);
 }

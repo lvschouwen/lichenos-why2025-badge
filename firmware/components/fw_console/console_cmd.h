@@ -4,14 +4,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Picks "badgevms <command>" lines out of the console input stream; every other byte goes on to app stdin.
+// Picks "<prefix><command>" lines out of the console input stream; every other byte goes on to app stdin. The badge
+// builds it with "fw " (CMakeLists.txt); "lichen " is only the host tests' default.
 // Pure logic, no ESP headers: built into the host tests as well as the firmware.
 
 // The lean firmware (#61) builds this splitter with its own prefix
 #ifndef CONSOLE_CMD_PREFIX
-#define CONSOLE_CMD_PREFIX "badgevms "
+#define CONSOLE_CMD_PREFIX "lichen "
 #endif
+// A UART line; the splitter's buffer is part of the console task's 4 KB stack, so it stays small
 #define CONSOLE_CMD_MAX    96
+// A Wi-Fi console line (POST /console, #110): room for "fw contacts import " and a whole contact link (up to 383
+// characters, mesh_share.h), so a link goes in one line there instead of parts. Its buffers are on the heap.
+#define CONSOLE_WIFI_CMD_MAX 512
+
+// A POST /console body length the Wi-Fi console takes: 1 to CONSOLE_WIFI_CMD_MAX - 1 bytes (negative: none given)
+bool console_wifi_len_ok(long content_length);
 
 typedef struct {
     char   buf[CONSOLE_CMD_MAX]; // held prefix bytes, or the command after the prefix

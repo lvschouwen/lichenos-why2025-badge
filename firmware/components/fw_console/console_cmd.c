@@ -90,6 +90,10 @@ console_cmd_result_t console_cmd_feed(console_cmd_t *s, char c, char const **pas
     return pass_held(s, pass, pass_len);
 }
 
+bool console_wifi_len_ok(long content_length) {
+    return content_length >= 1 && content_length < CONSOLE_WIFI_CMD_MAX;
+}
+
 bool console_c6_id_valid(char const *id) {
     size_t len = 0;
     for (; id[len]; len++) {
