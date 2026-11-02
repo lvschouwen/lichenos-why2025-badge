@@ -987,6 +987,20 @@ static void plan_checks(void) {
           mesh_hist_newest_slot(false, false) == -1);
 }
 
+// #120: a bad spot that is gone on a second read is a read error, not damage to compact away
+static void damage_checks(void) {
+    mesh_hist_scan_t clean = {0}, spot = {0}, torn = {0};
+    spot.resyncs = 1;
+    torn.torn    = true;
+    CHECK(!mesh_hist_damage_in_file(&clean, true, &clean));
+    CHECK(!mesh_hist_damage_in_file(&clean, false, &spot)); // nothing seen: nothing to confirm
+    CHECK(!mesh_hist_damage_in_file(&spot, true, &clean));  // gone on the re-read: a read error
+    CHECK(!mesh_hist_damage_in_file(&torn, true, &clean));
+    CHECK(mesh_hist_damage_in_file(&spot, true, &spot));    // there both times: in the file
+    CHECK(mesh_hist_damage_in_file(&spot, true, &torn));
+    CHECK(mesh_hist_damage_in_file(&torn, false, &clean)); // no re-read: the old rule (compact)
+}
+
 int main(void) {
     uint8_t root[32];
     test_root(root, 0);
@@ -1008,6 +1022,7 @@ int main(void) {
     compact_checks();
     compact_dup_checks();
     forget_checks();
+    damage_checks();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

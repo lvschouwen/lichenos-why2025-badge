@@ -9,9 +9,12 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lichen_random.h"
 
 #include <errno.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,7 +53,7 @@ static void (*unlock_fn)(void);
 static volatile bool        on;
 static char const *volatile why_off = "not started";
 static volatile uint32_t    log_bytes, log_records, flushes, last_flush_s, last_flush_ms, write_errors, compactions;
-static volatile uint32_t    resyncs, auth_failures;
+static volatile uint32_t    resyncs, auth_failures, read_errors; // read_errors: bad spots gone on a re-read (#120)
 static volatile uint32_t    boot_replay_ms, boot_records, boot_bytes; // hardware vs portable crypto on the bench
 static volatile bool        compact_asked; // the mesh task compacts before its next write (boot asks when needed)
 
@@ -338,6 +341,8 @@ static char const *journal_aside(int *err) {
     return journal_fresh(err);
 }
 
+static bool noop_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes, void *ctx);
+
 static void note_damage(mesh_hist_scan_t const *scan) {
     auth_failures = scan->auth_failures;
     resyncs       = scan->resyncs;
@@ -390,8 +395,26 @@ static char const *journal_load(work_t *w, int *err) {
         ESP_LOGW(TAG, "store seq %lu behind the journal's %lu", (unsigned long)mesh_store_last_seq(),
                  (unsigned long)b.max_seq);
     }
+    bool damaged = scan.torn || scan.resyncs;
+    if (damaged) { // #120: read it once more before a compaction makes a misread record a lost one
+        mesh_hist_scan_t again;
+        memset(&again, 0, sizeof(again));
+        mesh_hist_crypt_t c  = wcrypt;
+        int               e2 = 0;
+        bool              ok = scan_file(LOG_PATH, w, &c, noop_rec, NULL, &again, &e2);
+        mh_wipe(&c, sizeof(c));
+        damaged = mesh_hist_damage_in_file(&scan, ok, &again);
+        if (damaged) {
+            ESP_LOGW(TAG, "journal: the bad spot is there on a second read too (first at %llu): in the file",
+                     (unsigned long long)(ok ? again.first_bad : scan.first_bad));
+        } else {
+            read_errors++;
+            ESP_LOGW(TAG, "journal: the bad spot at %llu is gone on a second read: a read error, no compaction (#120)",
+                     (unsigned long long)scan.first_bad);
+        }
+    }
     uint64_t live = mesh_hist_live_bytes(&w->table, keep_n);
-    compact_asked = mesh_hist_should_compact((uint64_t)st.st_size, live, scan.torn || scan.resyncs || scan.heads == 0);
+    compact_asked = mesh_hist_should_compact((uint64_t)st.st_size, live, damaged || scan.heads == 0);
     return NULL;
 }
 
@@ -652,9 +675,157 @@ void mesh_journal_stop_locked(bool final) {
     }
 }
 
+// ---- read check (#120): "fw mesh hist scan [n] [bad|bad1]" ----------------------------------------------------------
+// Read-only: n passes over a journal file, each one inside its own card batch. A pass reads the file raw and compares
+// it byte for byte with the first pass, then runs the boot's decode scan over it. A difference between passes, or a bad
+// spot that comes and goes, is a read error; a bad spot on every pass at the same offset is in the file. Nothing is
+// written and nothing is compacted.
+
+#define SCAN_MAX_BYTES (1024 * 1024)
+#define SCAN_STACK     8192
+
+typedef struct {
+    char const *path;
+    int         passes;
+} scan_job_t;
+
+static atomic_bool scan_running;
+
+static bool noop_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes, void *ctx) {
+    (void)r, (void)raw, (void)bytes, (void)ctx;
+    return true;
+}
+
+static size_t read_whole(char const *path, uint8_t *buf, size_t cap, int *err) {
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        *err = errno;
+        return 0;
+    }
+    size_t n = fread(buf, 1, cap, f);
+    *err     = ferror(f) ? errno : 0;
+    fclose(f);
+    return n;
+}
+
+// One pass: raw read into cur, decode scan; false when the card could not be had or read
+static bool scan_pass(scan_job_t const *job, work_t *w, uint8_t *cur, size_t cap, size_t *got,
+                      mesh_hist_scan_t *scan) {
+    int err = 0;
+    if (!sd_begin(2000)) {
+        console_reply("scan: SD card busy");
+        return false;
+    }
+    *got = read_whole(job->path, cur, cap, &err);
+    memset(scan, 0, sizeof(*scan));
+    mesh_hist_crypt_t c  = wcrypt; // a copy: the scan opens it with the file's HEAD
+    bool              ok = !err && scan_file(job->path, w, &c, noop_rec, NULL, scan, &err);
+    mh_wipe(&c, sizeof(c));
+    sd_end(sd_io_from_errno(err));
+    if (!ok) {
+        console_reply("scan: read failed (errno %d)", err);
+    }
+    return ok;
+}
+
+static void report_diff(int pass, uint8_t const *ref, size_t ref_n, uint8_t const *cur, size_t n) {
+    size_t diffs = 0, first = 0;
+    for (size_t i = 0; i < n && i < ref_n; i++) {
+        if (ref[i] != cur[i] && diffs++ == 0) {
+            first = i;
+        }
+    }
+    if (diffs || n != ref_n) {
+        console_reply("scan pass %d: RAW DIFFERS from pass 1: %u byte(s), first at %u (%02x vs %02x), size %u vs %u",
+                      pass, (unsigned)diffs, (unsigned)first, diffs ? cur[first] : 0, diffs ? ref[first] : 0,
+                      (unsigned)n, (unsigned)ref_n);
+    }
+}
+
+static void scan_task_fn(void *arg) {
+    scan_job_t job = *(scan_job_t *)arg;
+    free(arg);
+    struct stat st;
+    work_t      w   = {0};
+    uint8_t    *ref = NULL, *cur = NULL;
+    if (stat(job.path, &st) != 0 || st.st_size <= 0 || st.st_size > SCAN_MAX_BYTES) {
+        console_reply("scan: %s missing, empty or over %d bytes", job.path, SCAN_MAX_BYTES);
+    } else if (!work_alloc(&w) || !(ref = psram(st.st_size)) || !(cur = psram(st.st_size))) {
+        console_reply("scan: no memory");
+    } else {
+        size_t ref_n = 0, n = 0;
+        int    bad_passes = 0, diff_passes = 0;
+        for (int p = 1; p <= job.passes; p++) {
+            mesh_hist_scan_t s;
+            if (!scan_pass(&job, &w, p == 1 ? ref : cur, (size_t)st.st_size, p == 1 ? &ref_n : &n, &s)) {
+                break;
+            }
+            if (p > 1) {
+                diff_passes += n != ref_n || memcmp(ref, cur, n) != 0;
+                report_diff(p, ref, ref_n, cur, n);
+            }
+            bad_passes += s.resyncs || s.torn || s.auth_failures;
+            if (p == 1 || s.resyncs || s.torn || s.auth_failures) {
+                console_reply("scan pass %d: %lu records, %lu bad spot(s), %llu bytes skipped, first bad at %llu%s, "
+                              "auth failures %lu",
+                              p, (unsigned long)s.records, (unsigned long)s.resyncs,
+                              (unsigned long long)s.skipped_bytes, (unsigned long long)(s.bad_seen ? s.first_bad : 0),
+                              s.torn ? ", torn" : "", (unsigned long)s.auth_failures);
+            }
+        }
+        console_reply("scan %s: %d pass(es), %ld bytes, %d with bad spots, %d with raw differences", job.path,
+                      job.passes, (long)st.st_size, bad_passes, diff_passes);
+    }
+    free(ref);
+    free(cur);
+    work_free(&w);
+    atomic_store(&scan_running, false);
+    vTaskDelete(NULL);
+}
+
+static void scan_start(char const *args) {
+    int         passes = 10;
+    char const *path   = LOG_PATH;
+    char        which[8] = "";
+    sscanf(args, "%d %7s", &passes, which);
+    if (!*which) {
+        sscanf(args, "%7s", which); // "scan bad" without a count
+        if (strcmp(which, "bad") != 0 && strcmp(which, "bad1") != 0) {
+            which[0] = 0;
+        }
+    }
+    path   = strcmp(which, "bad") == 0 ? BAD_PATH : strcmp(which, "bad1") == 0 ? BAD1_PATH : LOG_PATH;
+    passes = passes < 1 ? 1 : passes > 100 ? 100 : passes;
+    if (!on) {
+        console_reply("scan: history is off (%s): no keys to read with", why_off ? why_off : "?");
+        return;
+    }
+    bool expected = false;
+    if (!atomic_compare_exchange_strong(&scan_running, &expected, true)) {
+        console_reply("scan: one is running");
+        return;
+    }
+    scan_job_t *job = malloc(sizeof(*job));
+    if (job) {
+        job->path   = path;
+        job->passes = passes;
+    }
+    if (!job || xTaskCreatePinnedToCore(scan_task_fn, "histscan", SCAN_STACK, job, 3, NULL, 0) != pdPASS) {
+        free(job);
+        atomic_store(&scan_running, false);
+        console_reply("scan: not started (memory)");
+        return;
+    }
+    console_reply("scan of %s: %d pass(es), read-only; results print as they come", path, passes);
+}
+
 // ---- console -------------------------------------------------------------------------------------------------------
 
 void mesh_journal_console(char const *args) {
+    if (strncmp(args, "scan", 4) == 0 && (args[4] == ' ' || !args[4])) {
+        scan_start(args[4] ? args + 5 : "");
+        return;
+    }
     if (strcmp(args, "compact") == 0) {
         if (!on) {
             console_reply("history is off: %s", why_off ? why_off : "?");
@@ -665,7 +836,7 @@ void mesh_journal_console(char const *args) {
         return;
     }
     if (*args) {
-        console_reply("mesh hist | mesh hist compact");
+        console_reply("mesh hist | mesh hist compact | mesh hist scan [n] [bad|bad1]");
         return;
     }
     size_t   pending = 0, held = 0;
@@ -694,7 +865,9 @@ void mesh_journal_console(char const *args) {
                   (unsigned)out_len, (unsigned)held, (unsigned long)dropped);
     console_reply("boot replay %lu ms: %lu records, %lu bytes, %s crypto", (unsigned long)boot_replay_ms,
                   (unsigned long)boot_records, (unsigned long)boot_bytes, mh_backend());
-    console_reply("flushes %lu, last %s (%lu ms) | write errors %lu | compactions %lu%s | auth failures %lu",
+    console_reply("flushes %lu, last %s (%lu ms) | write errors %lu | compactions %lu%s | auth failures %lu | "
+                  "read errors at boot %lu",
                   (unsigned long)flushes, last, (unsigned long)last_flush_ms, (unsigned long)write_errors,
-                  (unsigned long)compactions, compact_asked ? " (one due)" : "", (unsigned long)auth_failures);
+                  (unsigned long)compactions, compact_asked ? " (one due)" : "", (unsigned long)auth_failures,
+                  (unsigned long)read_errors);
 }

@@ -238,6 +238,9 @@ uint64_t mesh_hist_live_bytes(mesh_hist_table_t const *t, size_t keep);
 // A damaged journal (torn tail or bad spots) is always compacted: appending after a torn record would hide the appended
 // ones behind a bad spot. Else when it is over MESH_HIST_CAP, or over MESH_HIST_COMPACT_MIN and twice the live size.
 bool mesh_hist_should_compact(uint64_t file_bytes, uint64_t live_bytes, bool torn);
+// A bad spot counts as damage in the file only when a second read of it shows damage too (or could not be done): a spot
+// that is gone on the re-read was a read error (#120), and compacting after it would drop a record the file still has
+bool mesh_hist_damage_in_file(mesh_hist_scan_t const *first, bool reread_ok, mesh_hist_scan_t const *again);
 // The card can take the journal: room for it to grow to the cap, plus the reserve
 bool mesh_hist_space_ok(uint64_t free_bytes, uint64_t log_bytes);
 

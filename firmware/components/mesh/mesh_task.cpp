@@ -2378,7 +2378,7 @@ static void cmd_mesh(char const *args) {
     }
     if (*args) {
         console_reply("mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
-                      "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
+                      "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact|scan [n] [bad|bad1]] | mesh send <channel> <text> | "
                       "mesh dm <12 hex> <text> | mesh remote [<name|hex> login [pw]|status|cli <text>|settings|logout] | mesh remote settings | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
                       "[<lat> <lon> | share on|off] | mesh autoadd [on|off | types <all|chat,repeater,room,sensor> | hops "
                       "<any|direct|n> | overwrite on|off]");
@@ -2789,7 +2789,7 @@ extern "C" void mesh_console_init(void) {
     registered = true;
     console_register("mesh",
                      "mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | "
-                     "mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
+                     "mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact|scan [n] [bad|bad1]] | mesh send <channel> <text> | "
                      "mesh dm <12 hex> <text> | mesh notify [test dm|chan <name>|fail|mention] | mesh advert ... | mesh loc ... | mesh autoadd ...",
                      cmd_mesh);
     console_register("contacts", "contacts (nodes heard, newest first) | contacts export [<12 hex>] | contacts import "

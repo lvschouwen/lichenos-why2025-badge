@@ -895,6 +895,13 @@ uint64_t mesh_hist_live_bytes(mesh_hist_table_t const *t, size_t keep) {
     return live;
 }
 
+bool mesh_hist_damage_in_file(mesh_hist_scan_t const *first, bool reread_ok, mesh_hist_scan_t const *again) {
+    if (!first->torn && !first->resyncs) {
+        return false;
+    }
+    return !reread_ok || again->torn || again->resyncs;
+}
+
 bool mesh_hist_should_compact(uint64_t file_bytes, uint64_t live_bytes, bool torn) {
     return torn || file_bytes > MESH_HIST_CAP || (file_bytes > MESH_HIST_COMPACT_MIN && file_bytes > 2 * live_bytes);
 }
