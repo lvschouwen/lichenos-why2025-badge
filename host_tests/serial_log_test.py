@@ -36,3 +36,10 @@ def test_two_ch340_nodes_are_not_guessed() -> None:
 def test_outage_line_names_the_gap_and_node() -> None:
     line = serial_log.outage_text(100.0, 163.4, "/dev/ttyUSB2", "fallback")
     assert line == "--- port back after 63 s: /dev/ttyUSB2 (fallback)"
+
+
+if __name__ == "__main__":  # ctest runs this with the build's python, which may lack pytest
+    tests = [f for name, f in sorted(globals().items()) if name.startswith("test_") and callable(f)]
+    for test in tests:
+        test()
+    print("%d passed" % len(tests))
