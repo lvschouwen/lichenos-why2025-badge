@@ -15,5 +15,7 @@ void factory_reset_boot_nvs(void);
 // main.c, right before storage_mount: for a pending "everything", erases the storage partition from flash (the C6
 // bundle and lora.toml are carried over in PSRAM) and formats it. Up to ~30 s with the screen still dark.
 void factory_reset_boot_storage(void);
+// main.c, right after lichen_notify_start: an error notice when this boot's reset could not erase from flash
+void factory_reset_post_notices(void);
 // "fw factory-reset": plan (a dry run, erases nothing) | settings YES | all YES
 void factory_reset_console_register(void);

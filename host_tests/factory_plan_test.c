@@ -29,7 +29,7 @@ static void boot_plan_per_pending_value(void) {
 static void settings_go_at_both_levels(void) {
     char const *settings[] = {"wifi_ssid", "wifi_pass", "tz", "setup_done", "home_layout", "idle_dim", "idle_off",
                               "bl_disp", "bl_kbd", "status_led", "notify_dnd", "n.mesh", "radio_on", "radio_saved",
-                              "radio_air", "ota_wifi", "mc_advint", "mc_advfl", "some_new_key"};
+                              "radio_air", "ota_wifi", "ota_auto_min", "saver", "lock", "mc_advint", "mc_advfl", "some_new_key"};
     for (size_t i = 0; i < sizeof(settings) / sizeof(settings[0]); i++) {
         CHECK(factory_nvs_erases("badge_fw", settings[i], S));
         CHECK(factory_nvs_erases("badge_fw", settings[i], A));
@@ -76,6 +76,33 @@ static void md5_files_go_back_last(void) {
     CHECK(!factory_restore_late("firmware.bin"));
     CHECK(!factory_restore_late("md5"));
     CHECK(!factory_restore_late(NULL));
+}
+
+static void storage_erase_fails_then_retries_then_gives_up(void) {
+    factory_storage_next_t n = factory_storage_after(true, 0);
+    CHECK(!n.fallback_wipe && n.pending == 0 && n.tries == 0 && !n.notice);
+    n = factory_storage_after(true, 2); // worked on a retry: the count goes too
+    CHECK(!n.fallback_wipe && n.pending == 0 && n.tries == 0 && !n.notice);
+    n = factory_storage_after(false, 0);
+    CHECK(n.fallback_wipe && n.pending == FACTORY_PENDING_STORAGE && n.tries == 1 && !n.notice);
+    n = factory_storage_after(false, 1);
+    CHECK(n.fallback_wipe && n.pending == FACTORY_PENDING_STORAGE && n.tries == 2 && !n.notice);
+    n = factory_storage_after(false, FACTORY_STORAGE_TRIES - 1); // the last try: stop, and say so
+    CHECK(n.fallback_wipe && n.pending == 0 && n.tries == 0 && n.notice);
+    n = factory_storage_after(false, 200); // a stale count never loops
+    CHECK(n.pending == 0 && n.notice);
+}
+
+static void nvs_flag_write_fails_continues_in_this_boot(void) {
+    factory_nvs_next_t n = factory_nvs_after(true, true);
+    CHECK(!n.key_fallback && !n.carry_in_ram);
+    n = factory_nvs_after(true, false);
+    CHECK(!n.key_fallback && n.carry_in_ram);
+    n = factory_nvs_after(false, true);
+    CHECK(n.key_fallback && !n.carry_in_ram);
+    n = factory_nvs_after(false, false);
+    CHECK(n.key_fallback && n.carry_in_ram);
+    CHECK(!factory_nvs_erases("badge_fw", FACTORY_TRIES_KEY, FACTORY_ALL));
 }
 
 static void level_words(void) {
@@ -173,6 +200,8 @@ int main(void) {
     storage_keeps_os_files();
     level_words();
     md5_files_go_back_last();
+    storage_erase_fails_then_retries_then_gives_up();
+    nvs_flag_write_fails_continues_in_this_boot();
     hold_three_seconds_then_enter();
     esc_or_timeout_cancels();
     short_hold_or_release_resets();

@@ -35,6 +35,29 @@ typedef struct {
     factory_level_t level;
 } factory_boot_t;
 
+// The drive's erase is tried this many boots before the reset gives up with an error notice
+#define FACTORY_TRIES_KEY     "fr_tries"
+#define FACTORY_STORAGE_TRIES 3
+
+typedef struct {
+    bool    fallback_wipe; // the erase failed: empty the drive through the filesystem instead (not from flash)
+    uint8_t pending;       // FACTORY_PENDING_KEY afterwards (0: erase it)
+    uint8_t tries;         // FACTORY_TRIES_KEY afterwards (0: erase it)
+    bool    notice;        // gave up: "could not fully erase storage"
+} factory_storage_next_t;
+
+// After the drive step: erased (the partition erase worked) and tries (failed attempts before this one)
+factory_storage_next_t factory_storage_after(bool erased, uint8_t tries);
+
+typedef struct {
+    bool key_fallback; // the partition was not erased: erase key by key (the data stays in flash: say so)
+    bool carry_in_ram; // the next step could not be saved: do it in this boot from RAM
+} factory_nvs_next_t;
+
+// After the NVS step of "everything": erased (deinit, erase and init all worked), flag_saved (the storage stage was
+// written to NVS)
+factory_nvs_next_t factory_nvs_after(bool erased, bool flag_saved);
+
 // What this boot does for the saved pending value (unknown values: nothing, and the key is cleared)
 factory_boot_t factory_boot_plan(uint8_t pending);
 // True when this NVS entry goes at this level

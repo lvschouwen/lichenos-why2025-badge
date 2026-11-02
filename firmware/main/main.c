@@ -263,6 +263,7 @@ void app_main(void) {
         boot_progress_end(BOOT_STORAGE, STEP_DONE, NULL);
     }
     lichen_notify_start(storage_ok); // the history from /storage/lichen/notify.bin (#62); lichen_notify() works from now
+    factory_reset_post_notices();    // a factory reset that could not erase from flash says so (#66)
     led_start();                     // the status LED follows the notices (#74)
 
     assets_mount(); // fonts; without them the UI uses the built-in ones (#22)

@@ -60,8 +60,8 @@ bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level) 
     if (strcmp(ns, OS_NS) != 0) {
         return false; // not Lichen's: leave it
     }
-    if (strcmp(key, FACTORY_PENDING_KEY) == 0) {
-        return false; // factory_reset.c clears it last
+    if (strcmp(key, FACTORY_PENDING_KEY) == 0 || strcmp(key, FACTORY_TRIES_KEY) == 0) {
+        return false; // factory_reset.c's own state
     }
     if (strcmp(key, "identity") == 0) {
         return level == FACTORY_ALL;
@@ -71,6 +71,21 @@ bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level) 
 
 bool factory_storage_keeps(char const *name) {
     return name && listed(keep_files, sizeof(keep_files) / sizeof(keep_files[0]), name);
+}
+
+factory_storage_next_t factory_storage_after(bool erased, uint8_t tries) {
+    if (erased) {
+        return (factory_storage_next_t){0};
+    }
+    uint8_t done = (uint8_t)(tries + 1);
+    if (done >= FACTORY_STORAGE_TRIES) {
+        return (factory_storage_next_t){.fallback_wipe = true, .notice = true}; // stop: no boot loop of erases
+    }
+    return (factory_storage_next_t){.fallback_wipe = true, .pending = FACTORY_PENDING_STORAGE, .tries = done};
+}
+
+factory_nvs_next_t factory_nvs_after(bool erased, bool flag_saved) {
+    return (factory_nvs_next_t){.key_fallback = !erased, .carry_in_ram = !flag_saved};
 }
 
 bool factory_restore_late(char const *name) {

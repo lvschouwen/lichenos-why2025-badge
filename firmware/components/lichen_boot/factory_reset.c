@@ -18,6 +18,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "fw_console.h"
+#include "lichen_notify.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "storage.h"
@@ -27,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 static char const TAG[] = "factory";
 
@@ -37,6 +39,7 @@ static char const TAG[] = "factory";
 #define STAGED_MAX   (2u * 1024 * 1024) // one file; the C6 app is ~1.5 MB
 #define ERASE_CHUNK  (64u * 1024)
 #define STORAGE_PART "storage"
+#define PATH_BUF     256
 
 typedef struct {
     char ns[NVS_NS_NAME_MAX_SIZE];
@@ -54,26 +57,39 @@ bool factory_reset_request(factory_level_t level) {
     return ok;
 }
 
-static uint8_t pending_get(void) {
+static uint8_t state_get(char const *key) {
     nvs_handle_t nvs;
     uint8_t      v = 0;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u8(nvs, FACTORY_PENDING_KEY, &v);
+        nvs_get_u8(nvs, key, &v);
         nvs_close(nvs);
     }
     return v;
 }
 
-static bool pending_set(uint8_t v) {
+static bool state_set(char const *key, uint8_t v) {
     nvs_handle_t nvs;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
         return false;
     }
-    esp_err_t err = v ? nvs_set_u8(nvs, FACTORY_PENDING_KEY, v) : nvs_erase_key(nvs, FACTORY_PENDING_KEY);
+    esp_err_t err = v ? nvs_set_u8(nvs, key, v) : nvs_erase_key(nvs, key);
     bool      ok  = (err == ESP_OK || (!v && err == ESP_ERR_NVS_NOT_FOUND)) && nvs_commit(nvs) == ESP_OK;
     nvs_close(nvs);
     return ok;
 }
+
+static uint8_t pending_get(void) {
+    return state_get(FACTORY_PENDING_KEY);
+}
+
+static bool pending_set(uint8_t v) {
+    return state_set(FACTORY_PENDING_KEY, v);
+}
+
+// This boot's news for the notification service, which starts after the erasing (factory_reset_post_notices)
+static bool    notice_nvs_not_flash;  // "everything" fell back to key by key: the old entries are still in flash
+static bool    notice_storage_failed; // the drive's erase failed every try
+static uint8_t carry;                 // the next step, when NVS could not keep it (factory_nvs_after)
 
 // ---- NVS, settings: key by key ---------------------------------------------------------------------------------------
 
@@ -230,25 +246,35 @@ static size_t kept_collect(kept_t *out, size_t cap) {
     return n;
 }
 
-// Returns false when the partition could not be erased (the caller falls back to key by key)
-static bool nvs_wipe_full(uint8_t after) {
-    kept_t *kept = calloc(MAX_KEPT, sizeof(*kept));
-    if (!kept) {
-        return false;
-    }
-    size_t    n   = kept_collect(kept, MAX_KEPT);
-    esp_err_t err = nvs_flash_deinit();
+// The whole partition erased and the kept entries written back. The next step is saved before them, so a power cut
+// during the write-back loses only kept entries (the badge's own record), never the drive's erase.
+static void nvs_wipe_full(uint8_t after) {
+    kept_t   *kept = calloc(MAX_KEPT, sizeof(*kept));
+    size_t    n    = kept ? kept_collect(kept, MAX_KEPT) : 0;
+    esp_err_t err  = kept ? nvs_flash_deinit() : ESP_ERR_NO_MEM;
     if (err == ESP_OK) {
         err = nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME);
     }
     esp_err_t init = nvs_flash_init(); // also after a failed erase: the rest of the boot needs NVS
-    if (err != ESP_OK || init != ESP_OK) {
-        ESP_LOGE(TAG, "nvs partition not erased: %s / %s", esp_err_to_name(err), esp_err_to_name(init));
+    if (init == ESP_ERR_NVS_NO_FREE_PAGES || init == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        init = nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME) == ESP_OK ? nvs_flash_init() : init;
+    }
+    bool erased = err == ESP_OK && init == ESP_OK;
+    if (!erased) {
+        ESP_LOGE(TAG, "nvs partition not erased (%s / %s): key by key instead, the old entries stay in flash",
+                 esp_err_to_name(err), esp_err_to_name(init));
+        nvs_wipe_keys(FACTORY_ALL);
+    }
+    factory_nvs_next_t next = factory_nvs_after(erased, pending_set(after));
+    notice_nvs_not_flash    = next.key_fallback;
+    if (next.carry_in_ram) {
+        ESP_LOGE(TAG, "next step not saved: the drive is erased in this boot");
+        carry = after;
     }
     unsigned back = 0;
     for (size_t i = 0; i < n; i++) {
         nvs_handle_t h;
-        if (err == ESP_OK && nvs_open(kept[i].ns, NVS_READWRITE, &h) == ESP_OK) {
+        if (erased && nvs_open(kept[i].ns, NVS_READWRITE, &h) == ESP_OK) {
             if (kept_write(h, &kept[i]) == ESP_OK && nvs_commit(h) == ESP_OK) {
                 back++;
             }
@@ -257,12 +283,9 @@ static bool nvs_wipe_full(uint8_t after) {
         free(kept[i].data);
     }
     free(kept);
-    if (err != ESP_OK) {
-        return false;
+    if (erased) {
+        ESP_LOGW(TAG, "nvs partition erased, %u of %u kept entries written back", back, (unsigned)n);
     }
-    pending_set(after); // the erase took the flag with it: what is left to do
-    ESP_LOGW(TAG, "nvs partition erased, %u of %u kept entries written back", back, (unsigned)n);
-    return true;
 }
 
 void factory_reset_boot_nvs(void) {
@@ -270,7 +293,9 @@ void factory_reset_boot_nvs(void) {
     factory_boot_t plan    = factory_boot_plan(pending);
     if (plan.nvs) {
         ESP_LOGW(TAG, "factory reset (%s): erasing NVS", factory_level_name(plan.level));
-        if (!plan.nvs_full || !nvs_wipe_full(plan.after_nvs)) {
+        if (plan.nvs_full) {
+            nvs_wipe_full(plan.after_nvs);
+        } else {
             nvs_wipe_keys(plan.level);
             pending_set(plan.after_nvs);
         }
@@ -398,8 +423,87 @@ static void write_back(staged_t const *s, size_t n) {
              images_ok ? "" : " (C6 bundle incomplete: .md5 files left out)");
 }
 
+static bool is_dir(char const *path) {
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+// Removes everything inside path (top: except what the plan keeps), then path itself unless top. Counts failures.
+static void rm_tree(char *path, size_t len, int depth, bool top, unsigned *failed) {
+    char(*names)[256] = malloc(32 * sizeof(*names));
+    if (!names) {
+        (*failed)++;
+        return;
+    }
+    for (int pass = 0; pass < MAX_PASSES * 4; pass++) {
+        DIR *d = opendir(path);
+        if (!d) {
+            break;
+        }
+        size_t         n = 0;
+        struct dirent *e;
+        while (n < 32 && (e = readdir(d)) != NULL) {
+            if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0 || (top && factory_storage_keeps(e->d_name))) {
+                continue;
+            }
+            strlcpy(names[n++], e->d_name, sizeof(names[0]));
+        }
+        closedir(d);
+        unsigned before = *failed;
+        for (size_t i = 0; i < n; i++) {
+            int w = snprintf(path + len, PATH_BUF - len, "/%s", names[i]);
+            if (w <= 0 || (size_t)w >= PATH_BUF - len) {
+                (*failed)++;
+            } else if (is_dir(path)) {
+                if (depth < 8) {
+                    rm_tree(path, len + (size_t)w, depth + 1, false, failed);
+                } else {
+                    (*failed)++;
+                }
+            } else if (unlink(path) != 0) {
+                (*failed)++;
+            }
+            path[len] = '\0';
+        }
+        if (n == 0 || *failed != before) {
+            break; // empty, or stuck on something that will not go
+        }
+    }
+    free(names);
+    path[len] = '\0';
+    if (!top && rmdir(path) != 0) {
+        (*failed)++;
+    }
+}
+
+// The partition erase failed: nothing may stay readable through the filesystem. Every file goes (MeshCore's _main.id
+// and _main.id.new among them) except the OS's; a drive that does not mount is formatted and gets the PSRAM copy.
+static void fallback_wipe(staged_t const *staged, size_t n) {
+    wl_handle_t wl = WL_INVALID_HANDLE;
+    if (esp_vfs_fat_spiflash_mount_rw_wl(STORAGE_BASE, STORAGE_PART, &MOUNT_CFG, &wl) == ESP_OK) {
+        char     path[PATH_BUF];
+        unsigned failed = 0;
+        strlcpy(path, STORAGE_BASE, sizeof(path));
+        rm_tree(path, strlen(path), 0, true, &failed);
+        esp_vfs_fat_spiflash_unmount_rw_wl(STORAGE_BASE, wl);
+        ESP_LOGE(TAG, "fallback: files deleted (%u would not go), NOT erased from flash", failed);
+        if (n) {
+            write_back(staged, n); // a half-done erase may have hit the OS files: the PSRAM copy goes over them
+        }
+        return;
+    }
+    esp_vfs_fat_mount_config_t cfg = MOUNT_CFG;
+    cfg.format_if_mount_failed     = true;
+    esp_err_t err                  = esp_vfs_fat_spiflash_format_cfg_rw_wl(STORAGE_BASE, STORAGE_PART, &cfg);
+    ESP_LOGE(TAG, "fallback: drive formatted (%s), NOT erased from flash", esp_err_to_name(err));
+    if (err == ESP_OK) {
+        write_back(staged, n);
+    }
+}
+
 void factory_reset_boot_storage(void) {
-    factory_boot_t plan = factory_boot_plan(pending_get());
+    uint8_t        pending = carry ? carry : pending_get();
+    factory_boot_t plan    = factory_boot_plan(pending);
     if (!plan.storage) {
         return;
     }
@@ -424,14 +528,39 @@ void factory_reset_boot_storage(void) {
         }
         write_back(staged, n);
     }
+    factory_storage_next_t next = factory_storage_after(erased, state_get(FACTORY_TRIES_KEY));
+    if (next.fallback_wipe) {
+        fallback_wipe(staged, n);
+    }
     for (size_t i = 0; staged && i < n; i++) {
         free(staged[i].buf);
     }
     free(staged);
-    // Once the write-back is done (or the erase failed outright): a drive that cannot be erased must not take each
-    // boot's new settings with it
-    pending_set(0);
-    ESP_LOGW(TAG, "factory reset (all): %s %s", STORAGE_BASE, erased ? "erased" : "NOT erased");
+    pending_set(next.pending);
+    state_set(FACTORY_TRIES_KEY, next.tries);
+    carry                 = 0;
+    notice_storage_failed = next.notice;
+    if (erased) {
+        ESP_LOGW(TAG, "factory reset (all): %s erased from flash", STORAGE_BASE);
+    } else if (next.pending) {
+        ESP_LOGE(TAG, "factory reset (all): %s not erased from flash, try %u of %u on the next boot", STORAGE_BASE,
+                 (unsigned)next.tries + 1, (unsigned)FACTORY_STORAGE_TRIES);
+    } else {
+        ESP_LOGE(TAG, "factory reset (all): %s could not be erased from flash, giving up", STORAGE_BASE);
+    }
+}
+
+void factory_reset_post_notices(void) {
+    if (notice_nvs_not_flash) {
+        lichen_notify("lichen", LN_ERROR, "Factory reset could not fully erase settings",
+                      "The settings were deleted one by one: their old values are still in the chip's flash.", 0);
+    }
+    if (notice_storage_failed) {
+        lichen_notify("lichen", LN_ERROR, "Factory reset could not fully erase storage",
+                      "The files were deleted, but the drive could not be erased: old data, the MeshCore key "
+                      "among it, may still be in the chip's flash. Run the reset again or reflash the badge.",
+                      0);
+    }
 }
 
 // ---- console ----------------------------------------------------------------------------------------------------------
@@ -447,9 +576,9 @@ static void plan_print(factory_level_t level) {
         return;
     }
     console_reply("  %s: whole partition erased from flash and formatted; 'keep' files written back", STORAGE_BASE);
-    DIR *d = opendir(STORAGE_BASE);
+    DIR *d = storage_mounted() ? opendir(STORAGE_BASE) : NULL;
     if (!d) {
-        console_reply("  %s: not mounted (nothing to keep)", STORAGE_BASE);
+        console_reply("  %s: not mounted (nothing to keep; it would be erased and formatted)", STORAGE_BASE);
     } else {
         struct dirent *e;
         while ((e = readdir(d)) != NULL) {
