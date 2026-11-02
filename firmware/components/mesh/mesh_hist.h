@@ -242,6 +242,8 @@ bool mesh_hist_should_compact(uint64_t file_bytes, uint64_t live_bytes, bool tor
 // done). The caller re-reads a few times: one clean read proves a read error (#120), and compacting after it would drop
 // a record the file still has
 bool mesh_hist_damage_in_file(mesh_hist_scan_t const *first, bool reread_ok, mesh_hist_scan_t const *again);
+// Two reads saw the same damage (same spots, same bytes, same tail): it is in the file, more re-reads cost boot time
+bool mesh_hist_same_damage(mesh_hist_scan_t const *a, mesh_hist_scan_t const *b);
 // The card can take the journal: room for it to grow to the cap, plus the reserve
 bool mesh_hist_space_ok(uint64_t free_bytes, uint64_t log_bytes);
 

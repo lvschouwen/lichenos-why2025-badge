@@ -902,6 +902,11 @@ bool mesh_hist_damage_in_file(mesh_hist_scan_t const *first, bool reread_ok, mes
     return !reread_ok || again->torn || again->resyncs;
 }
 
+bool mesh_hist_same_damage(mesh_hist_scan_t const *a, mesh_hist_scan_t const *b) {
+    return a->resyncs == b->resyncs && a->skipped_bytes == b->skipped_bytes && a->torn == b->torn &&
+           a->bad_seen == b->bad_seen && a->first_bad == b->first_bad && a->good_bytes == b->good_bytes;
+}
+
 bool mesh_hist_should_compact(uint64_t file_bytes, uint64_t live_bytes, bool torn) {
     return torn || file_bytes > MESH_HIST_CAP || (file_bytes > MESH_HIST_COMPACT_MIN && file_bytes > 2 * live_bytes);
 }

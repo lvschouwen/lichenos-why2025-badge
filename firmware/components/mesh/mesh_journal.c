@@ -363,12 +363,19 @@ static char const *journal_load(work_t *w, int *err) {
     struct stat      st;
     mesh_hist_scan_t scan;
     bool             have = stat(LOG_PATH, &st) == 0;
-    memset(&scan, 0, sizeof(scan));
-    if (have && !scan_file(LOG_PATH, w, &wcrypt, head_rec, NULL, &scan, err)) {
-        return "journal read failed";
+    mesh_hist_load_t plan;
+    for (int tries = 1;; tries++) { // #120: a misread HEAD must not set a good journal aside: read it again first
+        memset(&scan, 0, sizeof(scan));
+        if (have && !scan_file(LOG_PATH, w, &wcrypt, head_rec, NULL, &scan, err)) {
+            return "journal read failed";
+        }
+        plan = mesh_hist_load_plan(have, have ? (uint64_t)st.st_size : 0, &scan, aside_slot(OLD_PATH, OLD1_PATH) >= 0);
+        if (plan == MESH_HIST_LOAD_USE || plan == MESH_HIST_LOAD_FRESH || scan.crypto_error || tries >= REREADS) {
+            break;
+        }
+        ESP_LOGW(TAG, "journal: read %d finds no usable HEAD, reading it again (#120)", tries);
     }
-    switch (mesh_hist_load_plan(have, have ? (uint64_t)st.st_size : 0, &scan,
-                                aside_slot(OLD_PATH, OLD1_PATH) >= 0)) {
+    switch (plan) {
     case MESH_HIST_LOAD_FRESH:
         return journal_fresh(err);
     case MESH_HIST_LOAD_ASIDE:
@@ -396,10 +403,11 @@ static char const *journal_load(work_t *w, int *err) {
         ESP_LOGW(TAG, "store seq %lu behind the journal's %lu", (unsigned long)mesh_store_last_seq(),
                  (unsigned long)b.max_seq);
     }
-    bool damaged = scan.torn || scan.resyncs;
+    bool     damaged = scan.torn || scan.resyncs;
+    uint32_t heads   = scan.heads;
     if (damaged) { // #120: damage in the file reads the same every time; a read error comes and goes, so one clean
                    // re-read (the records' checks cannot pass a flipped bit) proves the file is fine
-        mesh_hist_scan_t again;
+        mesh_hist_scan_t again, prev = scan;
         int              tries = 0;
         bool             ok    = false;
         do {
@@ -409,18 +417,24 @@ static char const *journal_load(work_t *w, int *err) {
             ok                   = scan_file(LOG_PATH, w, &c, noop_rec, NULL, &again, &e2);
             mh_wipe(&c, sizeof(c));
             damaged = mesh_hist_damage_in_file(&scan, ok, &again);
+            if (damaged && ok && mesh_hist_same_damage(&prev, &again)) {
+                break; // the same damage twice in a row: in the file (a torn tail after a power cut), no more reads
+            }
+            prev = again;
         } while (damaged && ++tries < REREADS);
         if (damaged) {
-            ESP_LOGW(TAG, "journal: the bad spot is there on %d re-reads (first at %llu): in the file", REREADS,
+            ESP_LOGW(TAG, "journal: the bad spot stays on re-reading (first at %llu): in the file",
                      (unsigned long long)(ok ? again.first_bad : scan.first_bad));
         } else {
             read_errors++;
-            ESP_LOGW(TAG, "journal: the bad spot at %llu read clean on re-read %d: a read error, no compaction (#120)",
+            heads = again.heads; // the clean read's count: a misread HEAD must not force a compaction either
+            ESP_LOGW(TAG, "journal: the bad spot at %llu read clean on re-read %d: a read error, no compaction; the "
+                          "records there show again after the next restart (#120)",
                      (unsigned long long)scan.first_bad, tries + 1);
         }
     }
     uint64_t live = mesh_hist_live_bytes(&w->table, keep_n);
-    compact_asked = mesh_hist_should_compact((uint64_t)st.st_size, live, damaged || scan.heads == 0);
+    compact_asked = mesh_hist_should_compact((uint64_t)st.st_size, live, damaged || heads == 0);
     return NULL;
 }
 
@@ -779,6 +793,9 @@ static void scan_task_fn(void *arg) {
         size_t ref_n = 0, n = 0;
         int    bad_passes = 0, diff_passes = 0;
         for (int p = 1; p <= job.passes; p++) {
+            if (p > 1) {
+                vTaskDelay(pdMS_TO_TICKS(50)); // the mesh task's journal flush waits only 100 ms for the card
+            }
             mesh_hist_scan_t s;
             if (p == 2 && job.skip > 0 && job.skip < st.st_size) {
                 memcpy(cur, ref, (size_t)job.skip); // the skipped head is compared with itself

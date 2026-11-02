@@ -26,8 +26,8 @@ CONFIG_SPIRAM=y
 # reads ~2x slower (the UI feels fine; numbers in #93), no internal RAM (the 12 KB once blamed on it were the c6link
 # supervisor's task stacks, #14). psram_guard stays as the watchdog (canaries + boot check, #93); the quarantine
 # machinery of #86 was removed in #93 (last commit with it: 7392597).
-# 120 MHz trial since 2026-11-01 (#94): not an IDF option; tools/idf-patches/0001-esp32p4-psram-120mhz.patch adds it
-# (MPLL 480 / 4; the 80 MHz latency codes are good to 133 MHz); build.sh refuses to build without the patch. 133 MHz
+# 120 MHz trial 2026-11-01 to -02 (#94, ended by #120 below): not an IDF option; tools/idf-patches/0001-esp32p4-psram-120mhz.patch adds it
+# (MPLL 480 / 4; the 80 MHz latency codes are good to 133 MHz); build.sh refuses to build 120 MHz without the patch. 133 MHz
 # (400 / 3) does not work: an odd divider gives the DDR bus a 33 % duty clock and the chip is not found at boot. If the
 # bit flips come back (`fw psram` canaries, `ui_check: FOUND`, CORRUPT HEAP), go back to CONFIG_SPIRAM_SPEED_80M=y.
 # Back at 80 MHz since 2026-11-02 (#120, #121): at 120 MHz, DMA transfers between the SD card and PSRAM flipped bit 3
@@ -112,7 +112,7 @@ CONFIG_LV_USE_SNAPSHOT=y
 # caches, which disturbed the panel's scan-out from its PSRAM framebuffer as yellow flashes (#61)
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 # CONFIG_LVGL_PORT_ENABLE_PPA is not set
-# #95: at 120 MHz PSRAM the CPU rotates a 720x80 strip faster than the blocking PPA pass through its second PSRAM buffer (flush 2.3 vs 3.7 ms/strip, scroll 13.9 vs 12.5 fps)
+# #95 (measured at 120 MHz PSRAM, PSRAM is at 80 MHz again since #120): the CPU rotates a 720x80 strip faster than the blocking PPA pass through its second PSRAM buffer (flush 2.3 vs 3.7 ms/strip, scroll 13.9 vs 12.5 fps)
 
 # Keep every crash (#74): the core dump goes to the coredump partition. ELF format and a SHA256 check are the only
 # ones left in ESP-IDF 6.1 (no CRC32 choice). The dump holds every task's stack, so it must fit in 128 KB.

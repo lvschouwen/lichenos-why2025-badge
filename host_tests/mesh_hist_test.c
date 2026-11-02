@@ -999,6 +999,18 @@ static void damage_checks(void) {
     CHECK(mesh_hist_damage_in_file(&spot, true, &spot));    // there both times: in the file
     CHECK(mesh_hist_damage_in_file(&spot, true, &torn));
     CHECK(mesh_hist_damage_in_file(&torn, false, &clean)); // no re-read: the old rule (compact)
+    // Same damage twice: in the file; a different spot: still a read error candidate
+    mesh_hist_scan_t a = {0}, b = {0};
+    a.resyncs = b.resyncs = 1;
+    a.skipped_bytes = b.skipped_bytes = 196;
+    a.bad_seen = b.bad_seen = true;
+    a.first_bad = b.first_bad = 7988;
+    CHECK(mesh_hist_same_damage(&a, &b));
+    b.first_bad = 10125;
+    CHECK(!mesh_hist_same_damage(&a, &b));
+    b.first_bad = 7988;
+    b.torn      = true;
+    CHECK(!mesh_hist_same_damage(&a, &b));
 }
 
 int main(void) {
