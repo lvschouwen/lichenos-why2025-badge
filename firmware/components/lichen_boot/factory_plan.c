@@ -57,6 +57,9 @@ bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level) 
     if (strncmp(ns, "a.", 2) == 0 && ns[2]) {
         return true; // an app's own settings (lichen_settings.h)
     }
+    if (strncmp(ns, "badgevms_", 9) == 0 || strcmp(ns, "backlight") == 0) {
+        return true; // left by the factory BadgeVMS firmware (its Wi-Fi password too); nothing in Lichen reads them
+    }
     if (strcmp(ns, OS_NS) != 0) {
         return false; // not Lichen's: leave it
     }

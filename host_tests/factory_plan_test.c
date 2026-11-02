@@ -53,6 +53,16 @@ static void identity_only_at_all(void) {
     CHECK(factory_nvs_erases("badge_fw", "identity", A));
 }
 
+// The factory BadgeVMS firmware left its own namespaces (Wi-Fi password included); nothing in Lichen reads them, and a
+// reset badge must not keep someone's Wi-Fi password
+static void badgevms_leftovers_go(void) {
+    CHECK(factory_nvs_erases("badgevms_wifi", "password", S));
+    CHECK(factory_nvs_erases("badgevms_wifi", "ssid", A));
+    CHECK(factory_nvs_erases("badgevms_init", "sponsors", S));
+    CHECK(factory_nvs_erases("backlight", "display", A));
+    CHECK(!factory_nvs_erases("badgevms", "k", A)); // only the exact prefix
+}
+
 static void other_namespaces_stay(void) {
     CHECK(!factory_nvs_erases("phy", "cal_data", A));
     CHECK(!factory_nvs_erases("nvs.net80211", "sta.ssid", A));
@@ -197,6 +207,7 @@ int main(void) {
     badge_state_stays();
     identity_only_at_all();
     other_namespaces_stay();
+    badgevms_leftovers_go();
     storage_keeps_os_files();
     level_words();
     md5_files_go_back_last();
