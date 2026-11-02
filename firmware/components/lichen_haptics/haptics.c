@@ -31,7 +31,8 @@ static atomic_int        s_pattern;
 static atomic_llong      s_start_us;
 static atomic_bool       s_playing;
 static esp_timer_handle_t s_timer;
-static bool              s_ready, s_on; // s_on: timer callback only
+static bool              s_ready;
+static uint8_t           s_duty; // the duty last written
 static hp_gate_t         s_gate;        // the notification hook runs on the LVGL task only
 
 _Static_assert((int)LICHEN_HAPTIC_ALERT == (int)HP_ALERT && (int)LICHEN_HAPTIC_TICK == (int)HP_TICK &&
@@ -43,25 +44,24 @@ static void drive(uint32_t duty) {
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL);
 }
 
-static void motor(bool on) {
-    s_on = on;
-    drive(on ? hp_duty((hp_strength_t)atomic_load(&s_strength)) : 0);
+static void motor(uint8_t duty) {
+    s_duty = duty;
+    drive(duty);
 }
 
 static void tick(void *arg) {
     (void)arg;
     hp_pattern_t p = (hp_pattern_t)atomic_load(&s_pattern);
     uint32_t     t = (uint32_t)((esp_timer_get_time() - atomic_load(&s_start_us)) / 1000);
-    bool         on = atomic_load(&s_playing) && !hp_done(p, t) && hp_on(p, t);
-    if (on != s_on) {
-        motor(on);
+    hp_strength_t s    = (hp_strength_t)atomic_load(&s_strength);
+    bool          live = atomic_load(&s_playing) && !hp_done(p, s, t);
+    uint8_t       duty = live ? hp_duty_at(p, s, t) : 0;
+    if (duty != s_duty) {
+        motor(duty);
     }
-    if (!atomic_load(&s_playing) || hp_done(p, t)) {
+    if (!live) {
         atomic_store(&s_playing, false);
         esp_timer_stop(s_timer);
-        if (s_on) {
-            motor(false);
-        }
     }
 }
 
@@ -73,10 +73,10 @@ static void begin(hp_pattern_t p) {
     atomic_store(&s_pattern, p);
     atomic_store(&s_start_us, esp_timer_get_time());
     atomic_store(&s_playing, true);
-    motor(true); // the first step starts now, not after a tick
+    motor(hp_duty_at(p, (hp_strength_t)atomic_load(&s_strength), 0)); // the kick starts now, not after a tick
     if (esp_timer_start_periodic(s_timer, TICK_US) != ESP_OK) {
         atomic_store(&s_playing, false);
-        motor(false);
+        motor(0);
     }
 }
 
@@ -96,7 +96,7 @@ void haptics_stop(void) {
     atomic_store(&s_playing, false);
     if (s_ready) {
         esp_timer_stop(s_timer);
-        motor(false);
+        motor(0);
     }
 }
 

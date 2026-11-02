@@ -14,21 +14,32 @@ static int failures;
     } while (0)
 
 int main(void) {
-    // Notify: two 80 ms buzzes with an 80 ms pause, 240 ms in all
-    CHECK(hp_total_ms(HP_NOTIFY) == 240);
-    CHECK(hp_on(HP_NOTIFY, 0) && hp_on(HP_NOTIFY, 79));
-    CHECK(!hp_on(HP_NOTIFY, 80) && !hp_on(HP_NOTIFY, 159));
-    CHECK(hp_on(HP_NOTIFY, 160) && hp_on(HP_NOTIFY, 239));
-    CHECK(!hp_on(HP_NOTIFY, 240) && hp_done(HP_NOTIFY, 240) && !hp_done(HP_NOTIFY, 239));
+    hp_strength_t const M = HP_MEDIUM, L = HP_LOW, H = HP_HIGH;
+    // Notify at medium: two 80 ms pulses with an 80 ms pause, 240 ms in all; each pulse opens with a 30 ms kick
+    CHECK(hp_total_ms(HP_NOTIFY, M) == 240);
+    CHECK(hp_duty_at(HP_NOTIFY, M, 0) == 255 && hp_duty_at(HP_NOTIFY, M, HP_KICK_MS - 1) == 255);
+    CHECK(hp_duty_at(HP_NOTIFY, M, HP_KICK_MS) == hp_hold_duty(M) && hp_duty_at(HP_NOTIFY, M, 79) == hp_hold_duty(M));
+    CHECK(hp_duty_at(HP_NOTIFY, M, 80) == 0 && hp_duty_at(HP_NOTIFY, M, 159) == 0);
+    CHECK(hp_duty_at(HP_NOTIFY, M, 160) == 255 && hp_duty_at(HP_NOTIFY, M, 239) == hp_hold_duty(M)); // second kick
+    CHECK(hp_duty_at(HP_NOTIFY, M, 240) == 0 && hp_done(HP_NOTIFY, M, 240) && !hp_done(HP_NOTIFY, M, 239));
 
-    CHECK(hp_total_ms(HP_TICK) == 40 && hp_on(HP_TICK, 39) && !hp_on(HP_TICK, 40));
-    CHECK(hp_total_ms(HP_ALERT) == 700 && hp_total_ms(HP_ALERT) > hp_total_ms(HP_NOTIFY));
-    CHECK(!hp_on(HP_ALERT, 300) && hp_on(HP_ALERT, 400) && !hp_on(HP_ALERT, 700));
-    CHECK(hp_total_ms((hp_pattern_t)99) == hp_total_ms(HP_TICK)); // unknown = tick
+    // Low is shorter (60 ms pulses), high longer (100 ms)
+    CHECK(hp_total_ms(HP_NOTIFY, L) == 60 + 80 + 60 && hp_total_ms(HP_NOTIFY, H) == 100 + 80 + 100);
+    CHECK(hp_duty_at(HP_NOTIFY, L, 59) != 0 && hp_duty_at(HP_NOTIFY, L, 60) == 0);
+    CHECK(hp_duty_at(HP_NOTIFY, H, 99) != 0 && hp_duty_at(HP_NOTIFY, H, 100) == 0);
 
-    // Strength: the motor needs about half duty to start, high is full
-    CHECK(hp_duty(HP_LOW) >= 128 && hp_duty(HP_LOW) < hp_duty(HP_MEDIUM) && hp_duty(HP_MEDIUM) < hp_duty(HP_HIGH));
-    CHECK(hp_duty(HP_HIGH) == 255);
+    CHECK(hp_total_ms(HP_TICK, M) == 40 && hp_duty_at(HP_TICK, M, 39) != 0 && hp_duty_at(HP_TICK, M, 40) == 0);
+    CHECK(hp_total_ms(HP_ALERT, M) == 700 && hp_total_ms(HP_ALERT, M) > hp_total_ms(HP_NOTIFY, M));
+    CHECK(hp_duty_at(HP_ALERT, M, 300) == 0 && hp_duty_at(HP_ALERT, M, 400) == 255 && hp_duty_at(HP_ALERT, M, 700) == 0);
+    CHECK(hp_total_ms((hp_pattern_t)99, M) == hp_total_ms(HP_TICK, M)); // unknown = tick
+
+    // Hold duties from the datasheet maths: 90 / 95 / 100 %, so the motor sees at least its 2.3 V minimum
+    CHECK(hp_hold_duty(L) == 230 && hp_hold_duty(M) == 242 && hp_hold_duty(H) == 255);
+    for (int s = 0; s < HP_STRENGTH_COUNT; s++) {
+        CHECK(hp_hold_duty((hp_strength_t)s) >= 230);
+        CHECK(hp_duty_at(HP_ALERT, (hp_strength_t)s, 0) == 255); // every strength opens with the kick
+        CHECK(hp_duty_at(HP_TICK, (hp_strength_t)s, 1) == 255);
+    }
 
     // Setting off or an update running = silent
     CHECK(hp_allowed(true, false));

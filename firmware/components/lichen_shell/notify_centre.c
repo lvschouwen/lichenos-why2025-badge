@@ -429,6 +429,7 @@ static struct {
     lv_obj_t   *dnd_row;
     lv_obj_t   *led_row;
     lv_obj_t   *vib_row;
+    lv_obj_t   *vib_str_row;
     lv_obj_t   *clear_row;
     lv_obj_t   *source_row[MAX_SOURCES];
     char const *source[MAX_SOURCES];
@@ -469,6 +470,15 @@ static void toggle_vib(void *arg) {
     if (lichen_haptics_enabled()) {
         lichen_haptics_play(LICHEN_HAPTIC_TICK); // feel what it was switched to
     }
+}
+
+static char const *const VIB_STRENGTH[] = {"Low", "Medium", "High"};
+
+static void cycle_vib_strength(void *arg) {
+    (void)arg;
+    lichen_haptics_set_strength((lichen_haptic_strength_t)((lichen_haptics_strength() + 1) % 3));
+    menu_set_value(s_s.vib_str_row, VIB_STRENGTH[lichen_haptics_strength()]);
+    lichen_haptics_play(LICHEN_HAPTIC_TICK); // feel the new strength
 }
 
 static void settings_clear_answer(bool yes) {
@@ -528,6 +538,8 @@ static lv_obj_t *build_settings(void) {
     s_s.dnd_row = menu_add(menu, "Do not disturb", on_off(lichen_notify_dnd()), toggle_dnd, NULL);
     s_s.led_row = menu_add(menu, "Status LED", on_off(led_enabled()), toggle_led, NULL);
     s_s.vib_row = menu_add(menu, "Vibration", on_off(lichen_haptics_enabled()), toggle_vib, NULL);
+    s_s.vib_str_row = menu_add(menu, "Vibration strength", VIB_STRENGTH[lichen_haptics_strength()], cycle_vib_strength,
+                               NULL);
     char       count[12];
     ln_stats_t st;
     lichen_notify_stats(&st);

@@ -19,46 +19,52 @@ hp_step_t const *hp_steps(hp_pattern_t p, size_t *count) {
     }
 }
 
-uint32_t hp_total_ms(hp_pattern_t p) {
+static uint32_t scaled(hp_strength_t s, uint32_t ms) {
+    uint32_t pct = s == HP_LOW ? 75 : s == HP_MEDIUM ? 100 : 125;
+    return ms * pct / 100;
+}
+
+uint32_t hp_total_ms(hp_pattern_t p, hp_strength_t s) {
     size_t           n;
-    hp_step_t const *s     = hp_steps(p, &n);
+    hp_step_t const *st    = hp_steps(p, &n);
     uint32_t         total = 0;
     for (size_t i = 0; i < n; i++) {
-        total += s[i].on_ms + (i + 1 < n ? s[i].off_ms : 0);
+        total += scaled(s, st[i].on_ms) + (i + 1 < n ? st[i].off_ms : 0);
     }
     return total;
 }
 
-bool hp_on(hp_pattern_t p, uint32_t t_ms) {
-    size_t           n;
-    hp_step_t const *s = hp_steps(p, &n);
-    for (size_t i = 0; i < n; i++) {
-        if (t_ms < s[i].on_ms) {
-            return true;
-        }
-        t_ms -= s[i].on_ms;
-        if (t_ms < s[i].off_ms) {
-            return false;
-        }
-        t_ms -= s[i].off_ms;
-    }
-    return false;
-}
-
-bool hp_done(hp_pattern_t p, uint32_t t_ms) {
-    return t_ms >= hp_total_ms(p);
-}
-
-uint8_t hp_duty(hp_strength_t s) {
+uint8_t hp_hold_duty(hp_strength_t s) {
     switch (s) {
     case HP_LOW:
-        return 128;
+        return 230; // 90 %
     case HP_MEDIUM:
-        return 192;
+        return 242; // 95 %
     case HP_HIGH:
     default:
         return 255;
     }
+}
+
+uint8_t hp_duty_at(hp_pattern_t p, hp_strength_t s, uint32_t t_ms) {
+    size_t           n;
+    hp_step_t const *st = hp_steps(p, &n);
+    for (size_t i = 0; i < n; i++) {
+        uint32_t on = scaled(s, st[i].on_ms);
+        if (t_ms < on) {
+            return t_ms < HP_KICK_MS ? 255 : hp_hold_duty(s); // every pulse starts with the kick
+        }
+        t_ms -= on;
+        if (t_ms < st[i].off_ms) {
+            return 0;
+        }
+        t_ms -= st[i].off_ms;
+    }
+    return 0;
+}
+
+bool hp_done(hp_pattern_t p, hp_strength_t s, uint32_t t_ms) {
+    return t_ms >= hp_total_ms(p, s);
 }
 
 bool hp_allowed(bool enabled, bool updating) {
