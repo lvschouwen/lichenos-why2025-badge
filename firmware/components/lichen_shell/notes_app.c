@@ -197,11 +197,17 @@ static void open_notes(lv_obj_t *screen) {
 static bool notes_tile(char *l1, size_t c1, char *l2, size_t c2) {
     load();
     size_t fresh = rn_count_new(s_notes, s_count, s_seen_known, s_seen);
-    if (!fresh) {
-        return false;
+    // Nothing new says so: "false" would keep "N new" on the tile after the notes were read (#128)
+    if (fresh) {
+        snprintf(l1, c1, "%u new", (unsigned)fresh);
+    } else {
+        snprintf(l1, c1, "Up to date");
     }
-    snprintf(l1, c1, "%u new", (unsigned)fresh);
-    rn_title(s_notes[0].text, l2, c2);
+    if (s_count) {
+        rn_title(s_notes[0].text, l2, c2);
+    } else {
+        l2[0] = '\0';
+    }
     return true;
 }
 
