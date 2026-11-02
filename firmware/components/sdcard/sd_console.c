@@ -16,7 +16,8 @@
 
 static void reply_status(void) {
     if (sd_begin(2000)) {
-        sd_end(SD_IO_OK); // refreshes the free space, here on the console task rather than on LVGL's
+        sd_end(SD_IO_NEUTRAL); // refreshes the free space, here on the console task rather than on LVGL's; no I/O, so it
+                               // says nothing about the card and must not reset its failure streak (#125)
     }
     sd_info_t info;
     sd_info(&info);

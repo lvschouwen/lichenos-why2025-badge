@@ -1006,12 +1006,16 @@ static void cmd_c6(char const *args) {
         return;
     }
     nvs_handle_t nvs;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK || nvs_set_u8(nvs, "c6_force", 1) != ESP_OK ||
-        nvs_commit(nvs) != ESP_OK) {
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
         console_reply("c6: can't save the reflash flag");
         return;
     }
-    nvs_close(nvs);
+    bool saved = nvs_set_u8(nvs, "c6_force", 1) == ESP_OK && nvs_commit(nvs) == ESP_OK;
+    nvs_close(nvs); // on the error path too (#125)
+    if (!saved) {
+        console_reply("c6: can't save the reflash flag");
+        return;
+    }
     console_reply("C6 is flashed again during the next boot, rebooting");
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(200));
