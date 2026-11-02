@@ -86,9 +86,9 @@ bool ota_server_enabled(void) {
 
 void ota_server_set_enabled(bool on) {
     if (on) {
-        armed_s     = (uint32_t)now_s(); // the auto-off counts from now
-        auto_closed = false;
+        armed_s = (uint32_t)now_s(); // the auto-off counts from now
     }
+    auto_closed = false; // on or off by hand supersedes a timer close: the saved setting now says what it says (#125)
     server_on = on;
     settings_set_u8(OTA_WIFI_KEY, on ? 1 : 0);
     ESP_LOGI(TAG, "update server over Wi-Fi switched %s", on ? "on" : "off");
@@ -948,6 +948,10 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
         respond(fd, 409, "%s is a directory, nothing written", req->path);
         return;
     }
+    if (req->offset + req->content_length > req->total_size) { // before piece_start() shows the update screen (#125)
+        respond(fd, 400, "piece runs past X-Total-Size");
+        return;
+    }
     char const *path      = req->route == OTA_ROUTE_FILE ? req->path : "";
     bool        continued = false;
     if (req->offset == 0) {
@@ -958,10 +962,6 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
                strcmp(staged.path, path) != 0 || strcmp(staged.file_sha256, req->file_sha256) != 0 ||
                (size_t)req->offset != staged.got) {
         respond(fd, 409, "expected the piece at offset %zu", staged.active ? staged.got : (size_t)0);
-        return;
-    }
-    if (req->offset + req->content_length > req->total_size) {
-        respond(fd, 400, "piece runs past X-Total-Size");
         return;
     }
     staged.last_s = now_s();
