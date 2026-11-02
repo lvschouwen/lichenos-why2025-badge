@@ -14,6 +14,7 @@
 #include "nav.h"
 #include "notify_os.h"
 #include "notify_view.h"
+#include "scroll_anchor.h"
 #include "shell_parts.h"
 #include "theme.h"
 
@@ -38,8 +39,11 @@ static struct {
     lv_obj_t   *menu;
     lv_obj_t   *rows[NR_SLOTS];
     uint32_t    ids[NR_SLOTS];
+    lv_obj_t   *clear_row; // "Clear all"
     size_t      count;
-    size_t      focus;
+    size_t      focus;        // the selection, kept across rebuilds by id (#128): its row, the notice
+    uint32_t    focus_id;     //   on it (0: none yet)
+    bool        on_clear_all; //   or "Clear all"
     uint32_t    gen;
     uint32_t    minute; // ages are redrawn when the uptime minute changes
     lv_timer_t *poll;
@@ -224,7 +228,8 @@ static void refill(void *arg) {
 static void on_row(void *arg) {
     size_t i = (size_t)(uintptr_t)arg;
     if (i < s_c.count) {
-        s_c.focus = i;
+        s_c.focus    = i;
+        s_c.focus_id = s_c.ids[i];
         notify_open_entry(s_c.ids[i]);
     }
 }
@@ -232,7 +237,9 @@ static void on_row(void *arg) {
 static void clear_all_answer(bool yes) {
     if (yes) {
         lichen_notify_clear_all();
-        s_c.focus = 0;
+        s_c.focus        = 0;
+        s_c.focus_id     = 0;
+        s_c.on_clear_all = false;
         if (s_c.screen) {
             lv_async_call(refill, NULL);
         }
@@ -275,7 +282,6 @@ static bool on_text(uint32_t key, void *arg) {
         if (s_c.rows[i] != focused || !lichen_notify_get(s_c.ids[i], &s_entry)) {
             continue;
         }
-        s_c.focus = i;
         if (s_entry.level == LN_ERROR && !s_entry.read) {
             s_ask_id             = s_c.ids[i];
             shell_dialog_t const d = {
@@ -315,8 +321,9 @@ static void add_rows(void) {
         s_c.rows[shown++] = row;
     }
     s_c.count = shown;
+    s_c.clear_row = NULL;
     if (shown) {
-        menu_add(s_c.menu, "Clear all", NULL, on_clear_all, NULL);
+        s_c.clear_row = menu_add(s_c.menu, "Clear all", NULL, on_clear_all, NULL);
         menu_note(s_c.menu, "Enter: open \xE2\x80\xA2 Backspace: clear \xE2\x80\xA2 Esc: back");
     } else {
         menu_note(s_c.menu, "No notifications");
@@ -326,12 +333,45 @@ static void add_rows(void) {
     }
 }
 
-// (Re)builds the menu; rows join the screen's own group, whatever group is the default now (crash log's pattern)
+// Notes which row has the selection (by the notice on it), so a rebuild puts it back there
+static void note_focus(void) {
+    lv_obj_t *focused = s_c.group ? lv_group_get_focused(s_c.group) : NULL;
+    if (focused && focused == s_c.clear_row) {
+        s_c.on_clear_all = true;
+        return;
+    }
+    for (size_t i = 0; i < s_c.count; i++) {
+        if (s_c.rows[i] == focused) {
+            s_c.focus        = i;
+            s_c.focus_id     = s_c.ids[i];
+            s_c.on_clear_all = false;
+        }
+    }
+}
+
+// The notice rows' places in the menu's content, keyed by notice id, for scroll_anchor
+static size_t row_items(scroll_item_t *items) {
+    for (size_t i = 0; i < s_c.count; i++) {
+        items[i].top    = lv_obj_get_y(s_c.rows[i]); // in the content: does not move with scrolling
+        items[i].bottom = items[i].top + lv_obj_get_height(s_c.rows[i]);
+        items[i].key    = s_c.ids[i];
+    }
+    return s_c.count;
+}
+
+// (Re)builds the menu; rows join the screen's own group, whatever group is the default now (crash log's pattern). The
+// selection stays on its notice and the view where it was: a new notice or a cleared one no longer moves either (#128)
 static void fill_list(void) {
     if (!s_c.screen) {
         return;
     }
+    static scroll_item_t items[NR_SLOTS]; // LVGL task only
+    int32_t              scroll_y = 0;
+    scroll_anchor_t      anchor   = {0};
     if (s_c.menu) {
+        note_focus();
+        scroll_y = lv_obj_get_scroll_y(s_c.menu);
+        anchor   = scroll_anchor_take(items, row_items(items), scroll_y);
         lv_obj_delete(s_c.menu);
     }
     lv_group_t *previous = lv_group_get_default();
@@ -348,25 +388,48 @@ static void fill_list(void) {
         lv_group_remove_obj(s_c.screen);
     }
     if (rows) {
-        menu_focus_row(s_c.menu, (int)(s_c.focus < s_c.count ? s_c.focus : s_c.count - 1));
+        lv_obj_update_layout(s_c.menu);
+        if (scroll_y > 0) {
+            scroll_anchor_find(&anchor, items, row_items(items), &scroll_y);
+            lv_obj_scroll_to_y(s_c.menu, scroll_y, LV_ANIM_OFF); // bounded: a shorter list is not overscrolled
+        }
+        size_t at = nview_focus_after(s_c.ids, s_c.count, s_c.focus_id, s_c.focus, s_c.on_clear_all);
+        menu_focus_row(s_c.menu, (int)at); // rows count from 0, "Clear all" is row count
+        note_focus();
+    } else {
+        s_c.focus        = 0;
+        s_c.focus_id     = 0;
+        s_c.on_clear_all = false;
     }
     s_c.gen    = lichen_notify_generation();
     s_c.minute = uptime_s() / 60;
 }
 
+// A new minute only changes the ages: redrawn in place, the selection and scroll untouched (#128)
+static void update_ages(void) {
+    uint16_t boot = store_boot();
+    for (size_t i = 0; i < s_c.count; i++) {
+        if (lichen_notify_get(s_c.ids[i], &s_entry)) {
+            char age[24];
+            age_text(&s_entry, boot, age, sizeof(age));
+            menu_set_value(s_c.rows[i], age);
+        }
+    }
+    s_c.minute = uptime_s() / 60;
+}
+
 static void on_poll(lv_timer_t *timer) {
     (void)timer;
-    // Only while the centre is on top: a rebuild under another screen would move that screen's focus group
-    if (lichen_notify_generation() == s_c.gen && uptime_s() / 60 == s_c.minute) {
+    bool changed = lichen_notify_generation() != s_c.gen;
+    if (!changed && uptime_s() / 60 == s_c.minute) {
         return;
     }
+    if (!changed) {
+        update_ages(); // labels only: fine under a dialog or another screen too
+        return;
+    }
+    // Only while the centre is on top: a rebuild under another screen would move that screen's focus group
     if (lv_screen_active() == s_c.screen && !shell_dialog_group()) {
-        lv_obj_t *focused = lv_group_get_focused(s_c.group);
-        for (size_t i = 0; i < s_c.count; i++) {
-            if (s_c.rows[i] == focused) {
-                s_c.focus = i;
-            }
-        }
         fill_list();
     }
 }

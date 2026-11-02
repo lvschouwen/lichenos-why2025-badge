@@ -72,9 +72,24 @@ static void test_texts(void) {
     CHECK(strcmp(out, "99+") == 0);
 }
 
+// The centre keeps its selection on the same notice across rebuilds (#128)
+static void test_focus_after(void) {
+    uint32_t const before[] = {9, 7, 4};
+    uint32_t const newer[]  = {12, 9, 7, 4}; // a new notice on top shifts every row down
+    uint32_t const gone[]   = {9, 4};        // 7 was cleared
+    CHECK(nview_focus_after(before, 3, 7, 1, false) == 1);
+    CHECK(nview_focus_after(newer, 4, 7, 1, false) == 2);  // still on 7, not on 9 at the old index
+    CHECK(nview_focus_after(gone, 2, 7, 1, false) == 1);   // 7 went: the one that took its place
+    CHECK(nview_focus_after(gone, 2, 4, 2, false) == 1);   // the last went: the new last
+    CHECK(nview_focus_after(newer, 4, 0, 1, true) == 4);   // "Clear all" stays on "Clear all"
+    CHECK(nview_focus_after(newer, 4, 0, 0, false) == 0);  // nothing noted yet: the top
+    CHECK(nview_focus_after(newer, 0, 7, 1, false) == 0);  // empty
+}
+
 int main(void) {
     test_queue();
     test_texts();
+    test_focus_after();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

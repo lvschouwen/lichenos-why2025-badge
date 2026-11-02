@@ -93,3 +93,18 @@ void nview_count(char *out, size_t cap, size_t unread) {
         snprintf(out, cap, "%u", (unsigned)unread);
     }
 }
+
+size_t nview_focus_after(uint32_t const *ids, size_t n, uint32_t focus_id, size_t focus_index, bool on_clear_all) {
+    if (!n) {
+        return 0;
+    }
+    if (on_clear_all) {
+        return n;
+    }
+    for (size_t i = 0; focus_id && i < n; i++) {
+        if (ids[i] == focus_id) {
+            return i;
+        }
+    }
+    return focus_index < n ? focus_index : n - 1;
+}

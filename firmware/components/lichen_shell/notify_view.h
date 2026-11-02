@@ -40,6 +40,11 @@ void nview_age(char *out, size_t cap, uint16_t boot, uint32_t mono_s, int64_t ep
 // The status bar's count: "" at 0 (hidden), "7", "99+"
 void nview_count(char *out, size_t cap, size_t unread);
 
+// Where the centre's selection goes when its list is rebuilt (#128), with ids[] the notices newest first: the notice
+// that had it, found by id (a new notice above shifts the rows); index n, the "Clear all" row, when that had it; else
+// the row that took the place of the notice that went (focus_index, or the last). 0 for an empty list.
+size_t nview_focus_after(uint32_t const *ids, size_t n, uint32_t focus_id, size_t focus_index, bool on_clear_all);
+
 #ifdef __cplusplus
 }
 #endif
