@@ -675,7 +675,7 @@ void mesh_journal_stop_locked(bool final) {
     }
 }
 
-// ---- read check (#120): "fw mesh hist scan [n] [bad|bad1] [int]" ----------------------------------------------------------
+// ---- read check (#120): "fw mesh hist scan [n] [bad|bad1] [int] [from<offset>]" ----------------------------------------------------------
 // Read-only: n passes over a journal file, each one inside its own card batch. A pass reads the file raw and compares
 // it byte for byte with the first pass, then runs the boot's decode scan over it. A difference between passes, or a bad
 // spot that comes and goes, is a read error; a bad spot on every pass at the same offset is in the file. Nothing is
@@ -688,6 +688,8 @@ typedef struct {
     char const *path;
     int         passes;
     bool        internal; // the raw copies in internal RAM instead of PSRAM: tells the PSRAM path from the card
+    long        skip;     // later passes read from this file offset: a fault that stays at its file offset is on the
+                          // card, one that moves with the transfer is in the host or the bus
 } scan_job_t;
 
 static atomic_bool scan_running;
@@ -697,11 +699,17 @@ static bool noop_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t bytes,
     return true;
 }
 
-static size_t read_whole(char const *path, uint8_t *buf, size_t cap, int *err) {
+static size_t read_whole(char const *path, uint8_t *buf, size_t cap, long skip, int *err) {
     FILE *f = fopen(path, "rb");
     if (!f) {
         *err = errno;
         return 0;
+    }
+    if (skip > 0 && (size_t)skip < cap && fseek(f, skip, SEEK_SET) == 0) {
+        size_t n = fread(buf + skip, 1, cap - (size_t)skip, f) + (size_t)skip; // buf[0..skip) keeps pass 1's bytes
+        *err     = ferror(f) ? errno : 0;
+        fclose(f);
+        return n;
     }
     size_t n = fread(buf, 1, cap, f);
     *err     = ferror(f) ? errno : 0;
@@ -710,14 +718,14 @@ static size_t read_whole(char const *path, uint8_t *buf, size_t cap, int *err) {
 }
 
 // One pass: raw read into cur, decode scan; false when the card could not be had or read
-static bool scan_pass(scan_job_t const *job, work_t *w, uint8_t *cur, size_t cap, size_t *got,
+static bool scan_pass(scan_job_t const *job, work_t *w, uint8_t *cur, size_t cap, size_t *got, long skip,
                       mesh_hist_scan_t *scan) {
     int err = 0;
     if (!sd_begin(2000)) {
         console_reply("scan: SD card busy");
         return false;
     }
-    *got = read_whole(job->path, cur, cap, &err);
+    *got = read_whole(job->path, cur, cap, skip, &err);
     memset(scan, 0, sizeof(*scan));
     mesh_hist_crypt_t c  = wcrypt; // a copy: the scan opens it with the file's HEAD
     bool              ok = !err && scan_file(job->path, w, &c, noop_rec, NULL, scan, &err);
@@ -766,7 +774,11 @@ static void scan_task_fn(void *arg) {
         int    bad_passes = 0, diff_passes = 0;
         for (int p = 1; p <= job.passes; p++) {
             mesh_hist_scan_t s;
-            if (!scan_pass(&job, &w, p == 1 ? ref : cur, (size_t)st.st_size, p == 1 ? &ref_n : &n, &s)) {
+            if (p == 2 && job.skip > 0 && job.skip < st.st_size) {
+                memcpy(cur, ref, (size_t)job.skip); // the skipped head is compared with itself
+            }
+            if (!scan_pass(&job, &w, p == 1 ? ref : cur, (size_t)st.st_size, p == 1 ? &ref_n : &n, p == 1 ? 0 : job.skip,
+                           &s)) {
                 break;
             }
             if (p > 1) {
@@ -796,6 +808,7 @@ static void scan_task_fn(void *arg) {
 static void scan_start(char const *args) {
     int  passes = 10;
     bool internal = false;
+    long skip     = 0;
     char const *path = LOG_PATH;
     char        tok[12];
     int         used = 0;
@@ -807,6 +820,8 @@ static void scan_start(char const *args) {
             path = BAD1_PATH;
         } else if (strcmp(tok, "int") == 0) {
             internal = true;
+        } else if (strncmp(tok, "from", 4) == 0) {
+            skip = atol(tok + 4); // "from700": later passes start reading at byte 700
         } else {
             passes = atoi(tok);
         }
@@ -826,6 +841,7 @@ static void scan_start(char const *args) {
         job->path     = path;
         job->passes   = passes;
         job->internal = internal;
+        job->skip     = skip;
     }
     if (!job || xTaskCreatePinnedToCore(scan_task_fn, "histscan", SCAN_STACK, job, 3, NULL, 0) != pdPASS) {
         free(job);
@@ -853,7 +869,7 @@ void mesh_journal_console(char const *args) {
         return;
     }
     if (*args) {
-        console_reply("mesh hist | mesh hist compact | mesh hist scan [n] [bad|bad1] [int]");
+        console_reply("mesh hist | mesh hist compact | mesh hist scan [n] [bad|bad1] [int] [from<offset>]");
         return;
     }
     size_t   pending = 0, held = 0;
