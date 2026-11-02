@@ -39,6 +39,7 @@ static bool                 up;
 static lv_indev_t          *keys;
 static frame_t              frames[NAV_MAX_DEPTH]; // frames[0] is home once boot is over
 static lv_obj_t            *status_bar;
+static lv_obj_t            *cover; // the screensaver or the lock screen (#75): shown instead of the top, not in the stack
 
 void shell_set_sources(shell_sources_t const *sources) {
     shell_sources = *sources;
@@ -78,9 +79,21 @@ void shell_refocus(void) {
     focus_keys();
 }
 
+// A cover stays in front whatever opens or closes below it; the keys still go to the top screen's group (the lock
+// swallows them before LVGL, the saver's waking key never gets there)
 static void show_top(void) {
-    lv_screen_load(frames[nav_depth() - 1].screen);
+    lv_screen_load(cover ? cover : frames[nav_depth() - 1].screen);
     focus_keys();
+}
+
+void shell_set_cover(lv_obj_t *screen, bool status_bar_shown) {
+    cover = screen;
+    if (status_bar) {
+        lv_obj_set_hidden(status_bar, screen && !status_bar_shown);
+    }
+    if (frames[0].screen && nav_depth() > 0) {
+        show_top();
+    }
 }
 
 static void drop(frame_t *frame) {
@@ -471,6 +484,7 @@ void shell_start(lv_display_t *display) {
     home_init();
     setup_init();
     screen_idle_init();
+    screen_saver_init();
     console_register("keys", "keys on|off (log every key) | keys log on|off (log raw key events) | keys send <up down left right enter esc tab bksp wait square triangle cross circle cloud diamond text:..|>", cmd_keys);
     ui_probe_init();
     ui_check_start();

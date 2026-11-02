@@ -65,10 +65,37 @@ int main(void) {
     CHECK(idle_level(IDLE_SETUP_HOLD_S, (idle_times_t){60, 300},
                      idle_hold(false, true, IDLE_SETUP_HOLD_S) != IDLE_HOLD_NONE) == IDLE_OFF);
 
-    // Only a key that finds the screen off is swallowed; a dimmed screen's key acts
-    CHECK(!idle_key_swallowed(IDLE_BRIGHT));
-    CHECK(!idle_key_swallowed(IDLE_DIM));
-    CHECK(idle_key_swallowed(IDLE_OFF));
+    // Only a key that finds the screen off (or under the screensaver, #75) is swallowed; a dimmed screen's key acts
+    CHECK(!idle_key_swallowed(idle_stage(IDLE_BRIGHT, false, false, false)));
+    CHECK(!idle_key_swallowed(idle_stage(IDLE_DIM, false, false, false)));
+    CHECK(idle_key_swallowed(idle_stage(IDLE_OFF, false, false, false)));
+    CHECK(!idle_key_swallowed(idle_stage(IDLE_BRIGHT, true, true, false)));
+    CHECK(idle_key_swallowed(idle_stage(IDLE_DIM, true, false, false)));
+    CHECK(idle_key_swallowed(idle_stage(IDLE_OFF, true, false, false)));
+
+    // The screensaver is the dim stage when it is on (#75); off is still off
+    idle_stage_t st = idle_stage(IDLE_BRIGHT, true, true, false);
+    CHECK(st.level == IDLE_BRIGHT && !st.saver && !st.lock);
+    st = idle_stage(IDLE_DIM, true, false, false);
+    CHECK(st.level == IDLE_DIM && st.saver && !st.lock);
+    st = idle_stage(IDLE_DIM, false, false, false);
+    CHECK(st.level == IDLE_DIM && !st.saver && !st.lock);
+    st = idle_stage(IDLE_OFF, true, false, false);
+    CHECK(st.level == IDLE_OFF && !st.saver && !st.lock);
+    // The lock engages with the saver or the dark screen, never on a plain dimmed (readable) screen
+    st = idle_stage(IDLE_DIM, true, true, false);
+    CHECK(st.saver && st.lock);
+    st = idle_stage(IDLE_DIM, false, true, false);
+    CHECK(!st.saver && !st.lock);
+    st = idle_stage(IDLE_OFF, false, true, false);
+    CHECK(st.level == IDLE_OFF && st.lock);
+    // "fw screensaver test": the saver now, at the dim backlight, even when the setting is off
+    st = idle_stage(IDLE_BRIGHT, false, false, true);
+    CHECK(st.level == IDLE_DIM && st.saver && !st.lock);
+    st = idle_stage(IDLE_BRIGHT, false, true, true);
+    CHECK(st.saver && st.lock);
+    st = idle_stage(IDLE_OFF, false, false, true);
+    CHECK(st.level == IDLE_OFF && !st.saver);
 
     // Stored tens of seconds
     idle_times_t t = idle_times_from_10s(IDLE_DIM_DEFAULT_10S, IDLE_OFF_DEFAULT_10S);

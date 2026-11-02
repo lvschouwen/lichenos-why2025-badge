@@ -104,6 +104,7 @@ static void alert_task(void *arg) {
     (void)arg;
     alert_mode = true;
     shell_open(build_battery, SCREEN_BATTERY);
+    screen_lock_wake(); // the warning must be seen: no lock or screensaver over it (#75)
     vTaskDelete(NULL);
 }
 

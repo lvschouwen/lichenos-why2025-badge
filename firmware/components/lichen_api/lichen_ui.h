@@ -52,3 +52,8 @@ typedef void (*shell_dialog_fn)(bool confirmed);
 bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done);
 // Closes it without an answer (the reason for it went away); safe from any task
 void shell_dialog_close(void);
+
+// The pocket lock (#75) is up: the lock screen covers every screen and no key reaches an app until it is unlocked. An app
+// that would act on its own (open a screen for an incoming message) may wait; screens it opens meanwhile stay under the
+// lock. Any task.
+bool lichen_screen_locked(void);

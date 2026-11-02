@@ -18,6 +18,9 @@ typedef struct {
 // Settings > Display keeps both as a u8 in tens of seconds (NVS keys idle_dim / idle_off); 0 = off
 #define IDLE_DIM_DEFAULT_10S 6  // 1 min
 #define IDLE_OFF_DEFAULT_10S 30 // 5 min
+// The screensaver and pocket lock switches (#75), u8 0/1 in the same store; the saver is on by default, the lock off
+#define IDLE_SAVER_KEY "saver"
+#define IDLE_LOCK_KEY  "lock"
 
 // What keeps the screen lit regardless of the idle clock. busy (an update running, the Bench app measuring): bright, and
 // the clock starts again, so the timeout counts in full from when it ends. setup (the first-run screens): bright for at
@@ -29,10 +32,20 @@ idle_hold_t idle_hold(bool busy, bool setup, uint32_t idle_s);
 // What the backlight should be after idle_s seconds without a key. inhibit (any hold) keeps it bright. Off wins over dim when both are due (also when off_s <= dim_s).
 idle_level_t idle_level(uint32_t idle_s, idle_times_t t, bool inhibit);
 
-// A key was pressed while the backlight showed `shown`: true when that key only wakes the screen and must not reach
-// the UI (the screen was off, so the person could not see what it would do). A dimmed screen is still readable: its
-// key is delivered.
-bool idle_key_swallowed(idle_level_t shown);
+// What the screen shows at a level (#75): the clock screensaver takes the dim stage (at the dim backlight) when it is on;
+// the pocket lock engages when the screen goes dark-ish (the saver or off) and stays until its key combo. forced: "fw
+// screensaver test", the saver now (dim at least) even with dimming off; pass it only when nothing holds the screen.
+typedef struct {
+    idle_level_t level;
+    bool         saver; // the clock screensaver covers the screens
+    bool         lock;  // the lock engages (it is released by the combo, not by this)
+} idle_stage_t;
+idle_stage_t idle_stage(idle_level_t level, bool saver_on, bool lock_on, bool forced);
+
+// A key was pressed while the screen showed `shown`: true when that key only wakes the screen and must not reach the
+// UI: the screen was off, so the person could not see what it would do, or the screensaver hid the screen (#75). A
+// plain dimmed screen is still readable: its key is delivered.
+bool idle_key_swallowed(idle_stage_t shown);
 
 idle_times_t idle_times_from_10s(uint8_t dim_10s, uint8_t off_10s);
 

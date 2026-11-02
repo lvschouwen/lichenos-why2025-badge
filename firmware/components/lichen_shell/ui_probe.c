@@ -32,8 +32,8 @@ typedef struct {
 
 // LVGL context only
 static void deliver_key(uint32_t key) {
-    if (screen_idle_key()) {
-        return; // it woke the dark screen (#43), as a real key would
+    if (screen_idle_key() || screen_lock_active()) {
+        return; // it woke the dark screen (#43), as a real key would; the lock takes every key (#75, "fw lock unlock")
     }
     lv_group_t *group = shell_top_group();
     if (UI_KEY_IS_SHAPE(key)) {

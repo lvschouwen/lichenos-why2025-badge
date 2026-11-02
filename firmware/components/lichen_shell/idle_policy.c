@@ -25,8 +25,16 @@ idle_level_t idle_level(uint32_t idle_s, idle_times_t t, bool inhibit) {
     return IDLE_BRIGHT;
 }
 
-bool idle_key_swallowed(idle_level_t shown) {
-    return shown == IDLE_OFF;
+idle_stage_t idle_stage(idle_level_t level, bool saver_on, bool lock_on, bool forced) {
+    if (forced && level == IDLE_BRIGHT) {
+        level = IDLE_DIM;
+    }
+    bool saver = (saver_on || forced) && level == IDLE_DIM;
+    return (idle_stage_t){.level = level, .saver = saver, .lock = lock_on && (saver || level == IDLE_OFF)};
+}
+
+bool idle_key_swallowed(idle_stage_t shown) {
+    return shown.level == IDLE_OFF || shown.saver;
 }
 
 idle_times_t idle_times_from_10s(uint8_t dim_10s, uint8_t off_10s) {

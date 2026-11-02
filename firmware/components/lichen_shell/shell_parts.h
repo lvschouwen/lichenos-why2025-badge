@@ -66,8 +66,24 @@ void screen_idle_start(void); // once the keyboard is attached: the key hook and
 // A key press reached the badge (the keyboard task, or "fw keys send" on the LVGL task): restarts the idle clock and
 // lights the screen. True when the key only woke a dark screen and must not act.
 bool screen_idle_key(void);
-// Settings > Display changed the times
+// Settings > Display changed the times, or the screensaver / lock switches (#75)
 void screen_idle_reload(void);
+// "fw screensaver test" (#75): the saver now, as if the dim time had come, until the next key
+void screen_idle_force_saver(void);
+// Shown with the stage the screen is in: "bright", "dim", "screensaver", "off"
+char const *screen_idle_stage_name(void);
+
+// shell.c (#75): screen (NULL: none) is shown in front of the screen stack until it is taken away; status_bar_shown
+// false hides the status bar meanwhile. Only once home is shown (shell_home_shown). LVGL context.
+void shell_set_cover(lv_obj_t *screen, bool status_bar_shown);
+
+// screen_saver.c (#75): the clock screensaver and the pocket lock, both covers. LVGL context unless noted.
+void screen_saver_init(void);          // registers "fw screensaver" and "fw lock"; from shell_start
+void screen_saver_show(bool on);       // screen_idle's tick: the idle stage wants the saver (or not)
+void screen_lock_engage(void);         // the lock screen until the combo; nothing when already locked
+void screen_lock_release(void);        // unlocks (the combo, an update, power off, a warning that must show)
+bool screen_lock_active(void);         // any task
+void screen_lock_wake(void);           // any task: unlock and light the screen for something that must be seen
 
 // dialog.c: the open dialog's keypad group, NULL when none is open (#14 T-B); shell.c: give the keys to the dialog, or
 // back to the top screen once it is gone

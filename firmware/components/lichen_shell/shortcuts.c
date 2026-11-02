@@ -82,6 +82,9 @@ void shortcuts_run(shortcut_t s) {
 }
 
 void shortcuts_key(uint8_t code, bool pressed, bool test_open) {
+    if (screen_lock_active()) {
+        return; // the lock screen owns every key (#75)
+    }
     shortcut_gate_t gate = {
         .dialog_open   = shell_dialog_group() != NULL,
         .test_open     = test_open,
