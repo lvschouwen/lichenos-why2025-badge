@@ -39,7 +39,8 @@ lv_obj_t *mc_list_row(mc_list_t *l, bool selected);
 void      mc_list_style_row(lv_obj_t *row, bool selected);
 
 // Around a rebuild: take where the reader was before lv_obj_clean, then put them back on the same row (by key) or at
-// the top if they were there (a pixel offset jumped a row when the order changed)
+// the top if they were there (a pixel offset jumped a row when the order changed); then the highlighted row (sel) is
+// scrolled into view if the new order took it out of the view
 mc_scroll_t mc_list_save(mc_list_t *l);
 void        mc_list_restore(mc_list_t *l, mc_scroll_t s);
 

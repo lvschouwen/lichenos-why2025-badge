@@ -121,14 +121,21 @@ mc_scroll_t mc_list_save(mc_list_t *l) {
 
 void mc_list_restore(mc_list_t *l, mc_scroll_t s) {
     lv_obj_update_layout(l->list);
-    int32_t y = s.y;
+    int32_t y    = s.y;
+    size_t  rows = keyed_rows(l);
     if (s.at_top) {
         y = 0;
     } else {
-        scroll_anchor_find(&s.anchor, l->items, keyed_rows(l), &y);
+        scroll_anchor_find(&s.anchor, l->items, rows, &y);
     }
     // scroll_to_y is bounded: a list that fits doesn't move, a shorter one doesn't end up overscrolled
     lv_obj_scroll_to_y(l->list, y, LV_ANIM_OFF);
+    // The highlight follows its contact or chat, which may have moved out of the kept view (a re-advert to the top of
+    // Heard, a message to the top of the Chat list): bring it back, the least scroll that shows it, none while it is
+    // in view. Enter must never open a row nobody can see (#127).
+    if (l->sel < rows) {
+        lv_obj_scroll_to_view(lv_obj_get_child(l->list, (int32_t)l->sel), LV_ANIM_OFF);
+    }
 }
 
 bool mc_list_move(mc_list_t *l, int delta) {
