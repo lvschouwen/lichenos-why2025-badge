@@ -13,6 +13,10 @@
 
 // True once ESP-Hosted talks to the C6, with or without Wi-Fi (no credentials, wrong password, out of range)
 bool c6link_start(void);
+// Before c6link_start (#36): how to ask the running C6 app for its ELF sha256 (IDENT; main.c gives lora_ident, c6link
+// does not depend on LoRa). Without it no boot ever proves the C6, so every boot checks it fully.
+#define C6LINK_IDENT_LEN 32
+void c6link_set_ident(bool (*ident)(uint8_t out[C6LINK_IDENT_LEN], uint32_t timeout_ms));
 // False while the C6 supervisor (c6sup, #14) recovers the link, true again once it is back
 bool c6link_up(void);
 

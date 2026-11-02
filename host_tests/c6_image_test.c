@@ -118,7 +118,35 @@ static void test_otadata(void) {
     CHECK(!c6_otadata_region(table, sizeof(table), &offset, &size));
 }
 
+// The app's ELF sha256 sits in its esp_app_desc_t: image magic 0xE9 at 0, the descriptor (magic 0xABCD5432) at 0x20,
+// the sha at 0x20 + 0x90 (#36: compared with what the running C6 reports)
+static void test_app_elf_sha256(void) {
+    uint8_t img[0x200] = {0};
+    uint8_t sha[C6_APP_SHA_LEN];
+    img[0] = 0xE9;
+    put_le32(&img[0x20], 0xABCD5432);
+    for (int i = 0; i < C6_APP_SHA_LEN; i++) {
+        img[0xB0 + i] = (uint8_t)(i + 1);
+    }
+    memset(sha, 0, sizeof(sha));
+    CHECK(c6_app_elf_sha256(img, sizeof(img), sha));
+    CHECK(sha[0] == 1 && sha[31] == 32);
+    CHECK(c6_app_elf_sha256(img, 0xB0 + C6_APP_SHA_LEN, sha)); // just long enough
+    CHECK(!c6_app_elf_sha256(img, 0xB0 + C6_APP_SHA_LEN - 1, sha));
+    CHECK(!c6_app_elf_sha256(NULL, sizeof(img), sha));
+
+    img[0] = 0xE8; // not an ESP image
+    CHECK(!c6_app_elf_sha256(img, sizeof(img), sha));
+    img[0] = 0xE9;
+    put_le32(&img[0x20], 0xABCD5433); // no app descriptor (a bootloader, say)
+    CHECK(!c6_app_elf_sha256(img, sizeof(img), sha));
+    put_le32(&img[0x20], 0xABCD5432);
+    memset(&img[0xB0], 0, C6_APP_SHA_LEN); // never filled in by esptool: proves nothing
+    CHECK(!c6_app_elf_sha256(img, sizeof(img), sha));
+}
+
 int main(void) {
+    test_app_elf_sha256();
     test_firmware_names();
     test_md5();
     test_partition_table();

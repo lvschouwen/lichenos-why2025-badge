@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // Whether a boot may skip the ROM-bootloader check of the C6 flash (#36). Pure logic, no ESP headers: host-tested in
 // host_tests/c6_boot_policy_test.c.
@@ -26,16 +27,32 @@ bool c6_bundle_key(char const *boot_md5, char const *part_md5, char const *app_m
 c6_plan_t c6_boot_plan(c6_reset_kind_t kind, bool force, bool verify_flag, bool trial_image, char const *stored_key,
                        char const *current_key, char const **why);
 
-// What to persist once the ESP-Hosted attach has been tried. write == false: leave NVS alone. Otherwise store_key says
-// whether to store the current bundle key (else erase it) and verify whether to set the "check fully next boot" flag
-// (else clear it). The key is only ever stored after a successful attach on a verified bundle.
+// IDENT (#36): after the attach the P4 asks the running C6 app for its ELF sha256 and compares it with the bundled
+// firmware.bin's. Only MATCH proves the C6 runs the bundle; everything else counts as "not proven".
+#define C6_IDENT_SHA_LEN 32
+typedef enum {
+    C6_IDENT_NOT_ASKED,   // no link, so nothing was asked
+    C6_IDENT_MATCH,
+    C6_IDENT_MISMATCH,    // the C6 runs another app than the bundle holds
+    C6_IDENT_NO_ANSWER,   // an image from before IDENT, or a C6 that is not listening (yet)
+    C6_IDENT_NO_EXPECTED, // the bundle's .bin has no readable app descriptor
+} c6_ident_t;
+// running: what the C6 answered (NULL: no answer); expected: from the bundle (NULL: unreadable)
+c6_ident_t  c6_ident_check(uint8_t const *running, uint8_t const *expected);
+char const *c6_ident_name(c6_ident_t r);
+
+// What to persist once the ESP-Hosted attach and IDENT have been tried. write == false: leave NVS alone. Otherwise
+// store_key says whether to store the current bundle key (else erase it) and verify whether to set the "check fully next
+// boot" flag (else clear it). The key is only ever stored after a successful attach on a verified bundle whose app the
+// running C6 proved (ident_ok), so a boot only skips when the full boot before it saw IDENT match.
 typedef struct {
     bool write;
     bool store_key;
     bool verify;
 } c6_state_write_t;
-c6_state_write_t c6_state_after_attach(bool full_path, bool attached, bool image_ok, bool key_valid);
+c6_state_write_t c6_state_after_attach(bool full_path, bool attached, bool ident_ok, bool image_ok, bool key_valid);
 
-// Restart only after a failed attach on the skip path, and only if the verify flag / key erase really persisted;
-// otherwise the next boot would skip again and loop. Everything else carries on (without a link when not attached).
-bool c6_restart_after_attach(bool full_path, bool attached, bool state_persisted);
+// Restart only after a skip that lost its bet (no attach, or IDENT not proven), and only if the verify flag / key erase
+// really persisted; otherwise the next boot would skip again and loop. The full path never restarts; everything else
+// carries on (without a link when not attached).
+bool c6_restart_after_attach(bool full_path, bool attached, bool ident_ok, bool state_persisted);

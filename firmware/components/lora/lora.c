@@ -533,6 +533,7 @@ static void lora_task(void *arg) {
                     );
                 }
                 break;
+            case LORA_MSG_IDENT: break; // a late answer to the boot's IDENT (#36), which asks more than once
             default:
                 portENTER_CRITICAL(&state_lock);
                 p4_bad++;

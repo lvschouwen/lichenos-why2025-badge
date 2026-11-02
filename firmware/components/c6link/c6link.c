@@ -5,6 +5,7 @@
 #include "c6_boot_policy.h"
 #include "c6link_priv.h"
 #include "c6_flasher.h"
+#include "c6_image.h"
 #include "c6_paths.h"
 #include "fw_console.h"
 #include "lichen_clock.h"
@@ -1006,12 +1007,26 @@ static void cmd_c6(char const *args) {
 static char const KEY_OK[]     = "c6_ok_key";
 static char const KEY_VERIFY[] = "c6_verify";
 
+// How long IDENT may take after the attach (#36): the C6 app has only just booted (the hosted EN reset), and its LoRa
+// service registers for peer data a moment after ESP-Hosted is up. Only a C6 that does not answer waits all of it.
+#define C6_IDENT_WAIT_MS 2000
+
 static struct {
     char const *plan;     // "skip" / "full"
     char const *why;
     uint32_t    c6_ms;    // time spent in the C6 step this boot
+    uint32_t    ident_ms; // of which IDENT
+    c6_ident_t  ident;
     char        key[C6_BUNDLE_KEY_MAX];
 } boot_info = {.plan = "?", .why = "?"};
+
+static bool (*ident_fn)(uint8_t out[C6LINK_IDENT_LEN], uint32_t timeout_ms);
+
+_Static_assert(C6LINK_IDENT_LEN == C6_IDENT_SHA_LEN && C6_IDENT_SHA_LEN == C6_APP_SHA_LEN, "IDENT sha size");
+
+void c6link_set_ident(bool (*ident)(uint8_t out[C6LINK_IDENT_LEN], uint32_t timeout_ms)) {
+    ident_fn = ident;
+}
 
 // md5 text and size of one bundle file, the same files the flasher compares (no hashing of the 1 MB app)
 static bool read_bundle_file(char const *name, char md5[40], unsigned long *size) {
@@ -1048,6 +1063,34 @@ static bool current_bundle_key(char *out, size_t cap) {
         }
     }
     return c6_bundle_key(m[0], m[1], m[2], sz[0], sz[1], sz[2], out, cap);
+}
+
+// The bundled app's ELF sha256, from the first bytes of its .bin (no hashing of the 1 MB app)
+static bool bundle_app_sha(uint8_t out[C6_APP_SHA_LEN]) {
+    char path[64];
+    if (!c6_image_path("firmware.bin", path, sizeof(path))) {
+        return false;
+    }
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return false;
+    }
+    uint8_t head[C6_APP_SHA_NEEDED];
+    size_t  n = fread(head, 1, sizeof(head), f);
+    fclose(f);
+    return c6_app_elf_sha256(head, n, out);
+}
+
+// After the attach: does the running C6 app match the bundle? Any doubt is "not proven" (#36).
+static c6_ident_t check_ident(void) {
+    uint8_t expected[C6_APP_SHA_LEN], running[C6_IDENT_SHA_LEN];
+    bool    have_expected = bundle_app_sha(expected);
+    int64_t t0            = esp_timer_get_time();
+    bool    answered      = ident_fn && ident_fn(running, C6_IDENT_WAIT_MS);
+    boot_info.ident_ms    = (uint32_t)((esp_timer_get_time() - t0) / 1000);
+    c6_ident_t r          = c6_ident_check(answered ? running : NULL, have_expected ? expected : NULL);
+    ESP_LOGW(TAG, "C6 IDENT %s after %u ms", c6_ident_name(r), (unsigned)boot_info.ident_ms);
+    return r;
 }
 
 static void nvs_read_boot_state(char *stored, size_t cap, bool *verify) {
@@ -1110,7 +1153,8 @@ static void cmd_c6_status(void) {
     char stored[C6_BUNDLE_KEY_MAX];
     bool verify = false;
     nvs_read_boot_state(stored, sizeof(stored), &verify);
-    console_reply("c6: this boot %s (%s), C6 step %u ms", boot_info.plan, boot_info.why, (unsigned)boot_info.c6_ms);
+    console_reply("c6: this boot %s (%s), C6 step %u ms, IDENT %s (%u ms)", boot_info.plan, boot_info.why,
+                  (unsigned)boot_info.c6_ms, c6_ident_name(boot_info.ident), (unsigned)boot_info.ident_ms);
     console_reply("c6: stored key %s, verify flag %d", stored[0] ? stored : "(none)", verify);
     char line[C6W_REASON_MAX + 64];
     c6_sup_watch_line(line, sizeof(line));
@@ -1193,16 +1237,24 @@ bool c6link_start(void) {
     bool inited = esp_hosted_init() == 0;
     board_sdmmc_unlock();
     bool attached = inited && esp_hosted_connect_to_slave() == 0;
-    // The key is stored only after a successful attach; a failed one sets the verify flag (full check next boot)
-    c6_state_write_t w         = c6_state_after_attach(full, attached, err == ESP_OK, key[0] != '\0');
+    // IDENT on both paths: a full boot stores the key only when the running C6 proved the bundled app, so a later skip
+    // rests on a C6 that answered IDENT, never on an older image that cannot
+    boot_info.ident = attached ? check_ident() : C6_IDENT_NOT_ASKED;
+    bool ident_ok   = boot_info.ident == C6_IDENT_MATCH;
+    // The key is stored only after a successful attach and IDENT; a failed skip sets the verify flag (full check next
+    // boot)
+    c6_state_write_t w         = c6_state_after_attach(full, attached, ident_ok, err == ESP_OK, key[0] != '\0');
     bool             persisted = w.write && nvs_write_boot_state(w.store_key ? key : NULL, w.verify);
+    // A skip is a bet that the C6 is fine; when it loses, check fully next boot. Never restart when that could not be
+    // saved (next boot would skip again: a loop without Wi-Fi OTA); the full path never restarts. Never on a trial
+    // image either: those always take the full path.
+    if (c6_restart_after_attach(full, attached, ident_ok, persisted)) {
+        ESP_LOGE(TAG, "C6 %s after a skipped check: full check on the next boot",
+                 attached ? "app not proven by IDENT" : "did not attach");
+        system_restart(attached ? "C6 IDENT failed after skip" : "C6 attach failed after skip");
+    }
     if (!attached) {
         ESP_LOGE(TAG, "no connection to the C6 over ESP-Hosted");
-        // A skip is a bet that the C6 is fine; when it loses, check fully next boot. Never restart when that could not
-        // be saved (next boot would skip again: a loop without Wi-Fi OTA); the full path never restarts.
-        if (c6_restart_after_attach(full, attached, persisted)) {
-            system_restart("C6 attach failed after skip");
-        }
         boot_progress_end(BOOT_C6, STEP_FAILED, "no ESP-Hosted link");
         boot_progress_end(BOOT_WIFI, STEP_SKIPPED, "no C6");
         boot_progress_end(BOOT_CLOCK, STEP_SKIPPED, "no C6");
@@ -1213,8 +1265,8 @@ bool c6link_start(void) {
     boot_info.c6_ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
     ESP_LOGW(TAG, "C6 step %s: %u ms", boot_info.plan, (unsigned)boot_info.c6_ms);
     char note[BOOT_REASON_LEN];
-    snprintf(note, sizeof(note), "%s%s%u ms", full ? "" : "check skipped, ", err == ESP_OK ? "" : "image check failed, ",
-             (unsigned)boot_info.c6_ms);
+    char const *how = !full ? "check skipped, " : err != ESP_OK ? "image check failed, " : ""; // a skip has no err
+    snprintf(note, sizeof(note), "%s%s%u ms", how, ident_ok ? "" : "not proven, ", (unsigned)boot_info.c6_ms);
     boot_progress_end(BOOT_C6, STEP_DONE, note);
     if (!start_wifi()) {
         ESP_LOGE(TAG, "Wi-Fi not started");

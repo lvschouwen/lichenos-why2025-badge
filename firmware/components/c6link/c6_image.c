@@ -9,6 +9,11 @@
 #define PART_TYPE_DATA  0x01
 #define PART_SUBTYPE_OTA 0x00
 
+#define IMAGE_MAGIC     0xE9
+#define APP_DESC_OFFSET 0x20 // the image header (24 bytes) and the first segment's header (8)
+#define APP_DESC_MAGIC  0xABCD5432
+#define APP_DESC_SHA    0x90 // magic, secure_version, reserv1[2], version[32], project_name[32], time, date, idf_ver
+
 static uint32_t read_le32(uint8_t const *p) {
     return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24);
 }
@@ -66,4 +71,21 @@ bool c6_otadata_region(uint8_t const *table, size_t table_len, uint32_t *offset,
         }
     }
     return false;
+}
+
+bool c6_app_elf_sha256(uint8_t const *img, size_t len, uint8_t out[C6_APP_SHA_LEN]) {
+    _Static_assert(APP_DESC_OFFSET + APP_DESC_SHA + C6_APP_SHA_LEN == C6_APP_SHA_NEEDED, "sha offset");
+    if (!img || len < C6_APP_SHA_NEEDED || img[0] != IMAGE_MAGIC || read_le32(&img[APP_DESC_OFFSET]) != APP_DESC_MAGIC) {
+        return false;
+    }
+    uint8_t const *sha = &img[APP_DESC_OFFSET + APP_DESC_SHA];
+    uint8_t        any = 0;
+    for (int i = 0; i < C6_APP_SHA_LEN; i++) {
+        any |= sha[i];
+    }
+    if (!any) {
+        return false;
+    }
+    memcpy(out, sha, C6_APP_SHA_LEN);
+    return true;
 }

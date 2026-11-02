@@ -308,6 +308,9 @@ void app_main(void) {
     lichen_radio_listen(radio_changed);
     lichen_radio_apply_all(); // the saved switches, before Wi-Fi and LoRa start
     lichen_radio_console_register();
+    // IDENT (#36): c6link asks the running C6 app through LoRa's peer data, before lora_start takes the callback over
+    _Static_assert(C6LINK_IDENT_LEN == LORA_IDENT_LEN, "IDENT sha size");
+    c6link_set_ident(lora_ident);
     if (!c6link_start()) {
         ESP_LOGE(TAG, "no C6 link: no Wi-Fi, no LoRa");
     }

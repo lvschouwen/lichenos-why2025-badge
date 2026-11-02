@@ -65,18 +65,39 @@ c6_plan_t c6_boot_plan(c6_reset_kind_t kind, bool force, bool verify_flag, bool 
     return plan;
 }
 
-c6_state_write_t c6_state_after_attach(bool full_path, bool attached, bool image_ok, bool key_valid) {
+c6_ident_t c6_ident_check(uint8_t const *running, uint8_t const *expected) {
+    if (!running) {
+        return C6_IDENT_NO_ANSWER;
+    }
+    if (!expected) {
+        return C6_IDENT_NO_EXPECTED;
+    }
+    return memcmp(running, expected, C6_IDENT_SHA_LEN) == 0 ? C6_IDENT_MATCH : C6_IDENT_MISMATCH;
+}
+
+char const *c6_ident_name(c6_ident_t r) {
+    switch (r) {
+        case C6_IDENT_NOT_ASKED: return "not asked";
+        case C6_IDENT_MATCH: return "match";
+        case C6_IDENT_MISMATCH: return "mismatch";
+        case C6_IDENT_NO_ANSWER: return "no answer";
+        case C6_IDENT_NO_EXPECTED: return "bundle app unreadable";
+    }
+    return "?";
+}
+
+c6_state_write_t c6_state_after_attach(bool full_path, bool attached, bool ident_ok, bool image_ok, bool key_valid) {
     c6_state_write_t w = {0};
-    if (!attached) {
+    if (!attached || (!full_path && !ident_ok)) {
         w.write  = true; // key erased, verify set: the next boot checks fully
         w.verify = true;
     } else if (full_path) {
         w.write     = true;
-        w.store_key = image_ok && key_valid;
+        w.store_key = image_ok && key_valid && ident_ok;
     }
     return w;
 }
 
-bool c6_restart_after_attach(bool full_path, bool attached, bool state_persisted) {
-    return !full_path && !attached && state_persisted;
+bool c6_restart_after_attach(bool full_path, bool attached, bool ident_ok, bool state_persisted) {
+    return !full_path && (!attached || !ident_ok) && state_persisted;
 }

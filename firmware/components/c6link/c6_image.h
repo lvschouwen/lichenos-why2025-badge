@@ -20,3 +20,10 @@ bool c6_app_partition_size(uint8_t const *table, size_t table_len, uint32_t app_
 // (0xd000 for esp_hosted, 0xe000 for Arduino's default_8MB.csv), so it has to come from the table being flashed.
 // Returns false if the table has no otadata partition.
 bool c6_otadata_region(uint8_t const *table, size_t table_len, uint32_t *offset, uint32_t *size);
+
+// The ELF sha256 esptool writes into an app image's esp_app_desc_t (#36). The running C6 reports the same 32 bytes
+// (IDENT), so comparing the two proves the C6 runs the bundled app. Needs the first 0xD0 bytes of the .bin. False when
+// it is not an app image (magic 0xE9, app descriptor magic 0xABCD5432 at 0x20) or the sha was never filled in.
+#define C6_APP_SHA_LEN    32
+#define C6_APP_SHA_NEEDED 0xD0
+bool c6_app_elf_sha256(uint8_t const *img, size_t len, uint8_t out[C6_APP_SHA_LEN]);
