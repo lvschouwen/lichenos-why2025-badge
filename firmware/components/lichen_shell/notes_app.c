@@ -46,16 +46,18 @@ static void load(void) {
     if (s_loaded) {
         return;
     }
-    s_loaded = true;
-    s_notes  = heap_caps_calloc(RN_MAX_NOTES, sizeof(rn_note_t), MALLOC_CAP_SPIRAM);
+    // s_loaded last: until then another caller would read a half-built index (#118)
+    s_notes = heap_caps_calloc(RN_MAX_NOTES, sizeof(rn_note_t), MALLOC_CAP_SPIRAM);
     if (!s_notes) {
         ESP_LOGW(TAG, "no memory for the release notes index");
+        s_loaded = true;
         return; // s_count stays 0: the app says there are no notes
     }
     s_count = rn_build_index(rn_files, rn_file_count, s_notes, RN_MAX_NOTES);
     char value[16];
     settings_get_str(SEEN_KEY, value, sizeof(value), "");
-    s_seen = rn_parse_seen(value, &s_seen_known);
+    s_seen   = rn_parse_seen(value, &s_seen_known);
+    s_loaded = true;
 }
 
 static uint32_t newest(void) {
@@ -223,7 +225,10 @@ static void wait_tick(lv_timer_t *timer) {
     shell_open(build_new, SCREEN_NOTES_NEW);
 }
 
+// Main task, while the LVGL task already renders (and reads the notes for home's tile and the pages): the notes state is
+// LVGL-task state, so the whole check holds the recursive LVGL lock (#118)
 void notes_boot_check(bool updated) {
+    lvgl_port_lock(0);
     load();
     rn_boot_t what = rn_boot_decision(updated, s_seen_known, s_seen, newest());
     ESP_LOGI(TAG, "%u notes, marker %s%u, %s: %s", (unsigned)s_count, s_seen_known ? "" : "unset ", (unsigned)s_seen,
@@ -235,30 +240,40 @@ void notes_boot_check(bool updated) {
         update_badge();
     }
     if (what == RN_BOOT_SHOW) {
-        lvgl_port_lock(0);
         lv_timer_create(wait_tick, WAIT_TICK_MS, NULL);
-        lvgl_port_unlock();
     }
+    lvgl_port_unlock();
 }
 
-// fw whatsnew [show|reset]: for the bench
+// fw whatsnew [show|reset]: for the bench. Console task: the notes state is read and changed under the (recursive) LVGL
+// lock, like notes_boot_check (#118); the replies go out after it
 static void cmd_whatsnew(char const *args) {
+    bool reset = strcmp(args, "reset") == 0;
+    bool show  = strcmp(args, "show") == 0;
+    lvgl_port_lock(0);
     load();
-    if (strcmp(args, "reset") == 0) {
+    if (reset) {
         settings_erase(SEEN_KEY);
         s_seen_known = false;
         s_seen       = 0;
         update_badge();
-        console_reply("whatsnew: marker erased, %u notes unread", (unsigned)s_count);
-    } else if (strcmp(args, "show") == 0) {
+    } else if (show) {
         s_seen_known = true;
         s_seen       = s_count > 1 ? s_notes[1].seq : 0; // the newest note counts as new
         shell_open(build_new, SCREEN_NOTES_NEW);
+    }
+    unsigned count  = (unsigned)s_count;
+    bool     known  = s_seen_known;
+    unsigned seen   = (unsigned)s_seen;
+    unsigned unread = (unsigned)rn_count_new(s_notes, s_count, s_seen_known, s_seen);
+    lvgl_port_unlock();
+    if (reset) {
+        console_reply("whatsnew: marker erased, %u notes unread", count);
+    } else if (show) {
         console_reply("whatsnew: showing the newest note");
     } else {
-        console_reply("whatsnew: %u notes, marker %s%u, unread %u (whatsnew show|reset)", (unsigned)s_count,
-                      s_seen_known ? "" : "unset ", (unsigned)s_seen,
-                      (unsigned)rn_count_new(s_notes, s_count, s_seen_known, s_seen));
+        console_reply("whatsnew: %u notes, marker %s%u, unread %u (whatsnew show|reset)", count, known ? "" : "unset ",
+                      seen, unread);
     }
 }
 

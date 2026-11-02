@@ -15,5 +15,8 @@ typedef void (*raw_keys_cb)(key_raw_event_t const *ev, void *arg);
 void raw_keys_set_test_open(bool open);
 bool raw_keys_test_open(void); // what the keyboard task stamps now ("fw keys send" shape keys, #79)
 
+// The listener table has no lock of its own: callers of raw_keys_listen / raw_keys_unlisten hold the LVGL lock
+// (lvgl_port_lock, e.g. from a console command) or run on the LVGL task (event handlers, timers), which is what keeps
+// them from racing the drain timer and each other (#118)
 bool raw_keys_listen(raw_keys_cb cb, void *arg, bool swallow);
 void raw_keys_unlisten(raw_keys_cb cb, void *arg);
