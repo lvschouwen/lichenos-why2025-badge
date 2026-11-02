@@ -39,9 +39,8 @@ typedef enum { TH_OK, TH_WARN, TH_SHUTDOWN } th_level_t;
 #define TH_SAMPLES    16  // history per source: 60 s at 5 s plus room for a faster poll
 #define TH_PLAUSIBLE_MIN (-40.0f)
 #define TH_PLAUSIBLE_MAX 125.0f
-// What the gas heater adds to the BME690's temperature (measured about +17 K at the 100 ms / 1 s default). Taken off
-// a little short on purpose: a board that reads warm warns early, one that reads cold would not warn at all.
-#define TH_BME_HEATER_OFFSET_C 15.0f
+// No heater correction on the BME690 (bench 2026-11-02: raw 26 C in a 17.8 C room, so 'raw - 15' read 11 C, i.e. 7 K
+// cold). The raw value reads a few K warm from the gas heater and the board's own heat: that warns early, the safe side.
 
 typedef struct {
     float warn_c, clear_c, shutdown_c;

@@ -4,8 +4,8 @@
 //   warn      status bar HOT, a notice, a full-screen warning once, load shed (backlight to the minimum, Wi-Fi and LoRa off)
 //   shutdown  a notice (saved by the power task), then Power off (#65): C6 held in reset, P4 in deep sleep, the IP5306
 //             cuts the cells after ~32 s
-// The BME690's temperature reads about 17 K high with the gas heater on (LICHEN_SENSORS_GAS_HEATER), so the board
-// source has TH_BME_HEATER_OFFSET_C taken off; the die sensor needs no correction but has limits of its own. The C6's
+// The board source is the BME690's raw temperature, uncorrected: with the gas heater on it reads a few K above the
+// board (warns early, the safe side); the die sensor has limits of its own. The C6's
 // temperature is not on the C6 link, so it is not a source.
 // Also here: the one-time "your cells are unprotected" notice, and `fw thermal` with a simulation (`test`) that feeds a
 // board reading through the same decision path.
@@ -275,8 +275,8 @@ static void print_status(void) {
             console_reply("  %-15s no reading  (refused %u)", th_src_name((th_src_t)s), (unsigned)i.implausible[s]);
         }
     }
-    console_reply("  BME690 raw %.1f C, heater %s: board = raw - %.0f; C6 temperature is not available",
-                  (double)i.bme_raw_c, HEATER_ON ? "on" : "off", HEATER_ON ? (double)TH_BME_HEATER_OFFSET_C : 0.0);
+    console_reply("  BME690 raw %.1f C, heater %s: board = raw (no correction, reads warm); C6 temperature is not available",
+                  (double)i.bme_raw_c, HEATER_ON ? "on" : "off");
     if (i.level != TH_OK) {
         console_reply("  cause: %s %s at %.1f C", th_src_name(i.cause), i.cause_rise ? "rise" : "level",
                       (double)i.cause_c);

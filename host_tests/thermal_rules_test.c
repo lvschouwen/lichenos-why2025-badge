@@ -149,7 +149,8 @@ static void blind_warning_keeps_its_level(void) {
 }
 
 static void heater_offset(void) {
-    CHECK(th_board_from_bme(40, true) == 40 - TH_BME_HEATER_OFFSET_C);
+    CHECK(th_board_from_bme(40, true) == 40); // no heater correction (bench: it read 7 K cold)
+    CHECK(th_board_from_bme(40, false) == 40);
     CHECK(th_board_from_bme(40, false) == 40);
 }
 

@@ -280,7 +280,7 @@ no I2C and no signal reaches the P4 or the C6, so Lichen cannot see cell voltage
 stop a short circuit or an overcharge (that is hardware only). What it can do is watch the temperature
 (`firmware/components/lichen_shell/thermal.c`, rules in `thermal_rules.c`, host-tested):
 
-- Every 5 s the BME690 (next to the cells; its gas-heater bias of about 17 K is taken off, 15 K) and the P4 die sensor are
+- Every 5 s the BME690 (next to the cells; raw, uncorrected: the gas heater makes it read a few K warm, so it warns early) and the P4 die sensor are
   read. Board: warn at 50 C (clears under 45), switch off at 60 C or after a rise of 10 K within 60 s (from 40 C up).
   Die: warn 75, off 90, rise 20 K. Every decision needs two polls in a row. The C6's temperature is not on the C6 link.
 - Warn: "HOT" in the status bar, a notice, a full-screen warning once, backlight to the minimum, Wi-Fi and LoRa off (switched back on when the warning clears).

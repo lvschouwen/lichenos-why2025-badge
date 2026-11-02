@@ -14,7 +14,8 @@ bool th_plausible(float c) {
 }
 
 float th_board_from_bme(float raw_c, bool heater_on) {
-    return heater_on ? raw_c - TH_BME_HEATER_OFFSET_C : raw_c;
+    (void)heater_on; // no correction: see thermal_rules.h
+    return raw_c;
 }
 
 void th_reset(th_state_t *st) {
