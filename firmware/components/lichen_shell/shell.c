@@ -165,8 +165,12 @@ void shell_esc(void) {
     lv_async_call(go_back, NULL);
 }
 
+// shell_back and the app API's shell_back_then / shell_back_to (lichen_ui.h) may be called from a task other than LVGL's,
+// and lv_malloc / lv_async_call are not thread safe: they take the (recursive) LVGL lock (#118)
 void shell_back(void) {
+    lvgl_port_lock(0);
     lv_async_call(go_back, NULL);
+    lvgl_port_unlock();
 }
 
 typedef struct {
@@ -199,12 +203,15 @@ static void back_step(void *data) {
 }
 
 static void back_later(lv_obj_t *target, void (*then)(void *), void *arg) {
+    lvgl_port_lock(0);
     back_job_t *job = lv_malloc(sizeof(*job));
-    if (!job) {
-        return;
+    if (job) {
+        *job = (back_job_t){target, then, arg};
+        if (lv_async_call(back_step, job) != LV_RESULT_OK) {
+            lv_free(job);
+        }
     }
-    *job = (back_job_t){target, then, arg};
-    lv_async_call(back_step, job);
+    lvgl_port_unlock();
 }
 
 void shell_back_then(void (*then)(void *), void *arg) {

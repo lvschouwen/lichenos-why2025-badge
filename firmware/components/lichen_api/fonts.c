@@ -3,6 +3,7 @@
 #include "assets.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_lvgl_port.h"
 #include "fw_console.h"
 
 #include <string.h>
@@ -97,15 +98,24 @@ static unsigned missing_in(lv_font_t const *font, char const *text) {
     return missing;
 }
 
+// Console task: the glyph lookups write the font's glyph cache, which the LVGL task uses while it renders (#118), so
+// the figures are taken under the LVGL lock and printed after it
 static void cmd_fonts(char const *args) {
-    bool cover = strcmp(args, "cover") == 0;
+    bool     cover = strcmp(args, "cover") == 0;
+    unsigned figure[SLOT_COUNT];
+    lvgl_port_lock(0);
     for (size_t i = 0; i < SLOT_COUNT; i++) {
-        slot_t *s = &slots[i];
+        lv_font_t const *font = lichen_font(slots[i].px);
+        figure[i] = cover ? missing_in(font, SAMPLE) : (unsigned)lv_font_get_line_height(font);
+    }
+    lvgl_port_unlock();
+    for (size_t i = 0; i < SLOT_COUNT; i++) {
+        slot_t const *s = &slots[i];
         if (cover) {
-            console_reply("fonts %d px: %u of the sample's characters missing", s->px, missing_in(lichen_font(s->px), SAMPLE));
+            console_reply("fonts %d px: %u of the sample's characters missing", s->px, figure[i]);
         } else {
-            console_reply("fonts %d px: %s, %u bytes PSRAM, line %d", s->px, s->loaded ? "custom" : "built-in", (unsigned)s->ram,
-                          (int)lv_font_get_line_height(lichen_font(s->px)));
+            console_reply("fonts %d px: %s, %u bytes PSRAM, line %u", s->px, s->loaded ? "custom" : "built-in", (unsigned)s->ram,
+                          figure[i]);
         }
     }
 }
