@@ -17,6 +17,7 @@
 #include "nvs_flash.h"
 
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -456,12 +457,58 @@ esp_err_t __wrap_nvs_flash_erase_partition(char const *part_name) {
     return ESP_ERR_NOT_ALLOWED;
 }
 
+// The apps' saves before a deliberate restart (#123): MeshCore's files and its message journal used to be cut off by
+// ota-reboot and fw reboot. On a task of their own, so a save that hangs (a C6 that is gone, a stuck card) costs the
+// restart SYSTEM_RESTART_SAVE_MS at most, and the restarting task holds nothing the saves wait for while it waits.
+#define RESTART_SAVE_STACK 6144
+
+static void (*restart_save)(void);
+static atomic_bool       restart_saving;
+static StaticSemaphore_t restart_saved_buf;
+static SemaphoreHandle_t restart_saved;
+
+void system_restart_set_save(void (*save)(void)) {
+    restart_saved = xSemaphoreCreateBinaryStatic(&restart_saved_buf);
+    restart_save  = save;
+}
+
+static void restart_save_task(void *arg) {
+    (void)arg;
+    restart_save();
+    xSemaphoreGive(restart_saved);
+    vTaskDelete(NULL);
+}
+
+static void restart_save_run(void) {
+    switch (restart_save_plan(restart_save != NULL, atomic_exchange(&restart_saving, true))) {
+    case RESTART_SAVE_NONE:
+        return;
+    case RESTART_SAVE_WAIT:
+        // The first restart is saving and goes down after at most its bound; this one only goes if that one hangs
+        vTaskDelay(pdMS_TO_TICKS(SYSTEM_RESTART_SAVE_MS + 1000));
+        return;
+    case RESTART_SAVE_RUN:
+        break;
+    }
+    int64_t started = esp_timer_get_time();
+    if (xTaskCreate(restart_save_task, "rstsave", RESTART_SAVE_STACK, NULL, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "restart: no memory for the save task, restarting without the apps' saves");
+        return;
+    }
+    if (xSemaphoreTake(restart_saved, pdMS_TO_TICKS(SYSTEM_RESTART_SAVE_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "restart: the apps' saves did not finish in %d ms, restarting anyway", SYSTEM_RESTART_SAVE_MS);
+        return;
+    }
+    ESP_LOGI(TAG, "restart: the apps saved in %lld ms", (long long)((esp_timer_get_time() - started) / 1000));
+}
+
 void system_restart(char const *why) {
     s_restart_why = why ? why : "unspecified";
     if (capture.task && capture.task == xTaskGetCurrentTaskHandle()) {
         capture_finish(); // a command from Wi-Fi answers before the badge goes down (#38)
         vTaskDelay(pdMS_TO_TICKS(300)); // the reply leaves the TCP stack
     }
+    restart_save_run();
     esp_restart();
 }
 

@@ -318,6 +318,7 @@ void app_main(void) {
     // The apps, in home's order: MeshCore first; shell_start adds Settings and About after it. Registered without a
     // screen too, so their background parts still start.
     meshcore_app_register();
+    system_restart_set_save(shell_save_for_restart); // a soft restart saves first, as an update does (#123)
     if (screen) {
         shell_sources_t const sources = {.wifi_up = wifi_up, .lora_up = lora_link_up, .c6_up = c6link_up,
                                          .lora_use = lora_use,

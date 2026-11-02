@@ -35,3 +35,10 @@ void restart_log_sanitize(restart_log_t *log) {
         log->line[i][RESTART_LINE_MAX - 1] = '\0';
     }
 }
+
+restart_save_t restart_save_plan(bool have_hook, bool already_saving) {
+    if (already_saving) {
+        return RESTART_SAVE_WAIT; // also with no hook: the first restart is on its way
+    }
+    return have_hook ? RESTART_SAVE_RUN : RESTART_SAVE_NONE;
+}

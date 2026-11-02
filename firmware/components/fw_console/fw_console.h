@@ -32,6 +32,11 @@ void console_exec(char const *line, char *buf, size_t cap, console_done_fn done,
 // why: a short reason, kept with the fw version, uptime and time in NVS (last 5, "fw crash") so an unexplained restart
 // can be traced (#41). A bare esp_restart() is caught too and recorded as "unknown caller" with its return address.
 void system_restart(char const *why) __attribute__((noreturn));
+// The OS's saves before every system_restart (not a bare esp_restart, not a panic): the apps stop as for an update, so
+// MeshCore saves its files and flushes its message journal (#123). They run on a task of their own; system_restart
+// waits for them up to SYSTEM_RESTART_SAVE_MS, then restarts anyway (logged). Set once from main.c.
+#define SYSTEM_RESTART_SAVE_MS 5000
+void system_restart_set_save(void (*save)(void));
 // Runs once, on the restarting task, right before the restart (every esp_restart, not panics): the shell draws its
 // "Restarting" frame so the lit panel does not show a stale or torn screen (#39). Must return quickly.
 void system_restart_set_prepare(void (*prepare)(void));

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -26,6 +27,14 @@ void restart_log_push(restart_log_t *log, char const *line);
 
 // Makes a log read back from flash safe to print: count clamped, every line NUL terminated
 void restart_log_sanitize(restart_log_t *log);
+
+// Before a deliberate restart (#123): what the restarting task does about the apps' saves
+typedef enum {
+    RESTART_SAVE_NONE, // no save hook (early boot): restart now
+    RESTART_SAVE_RUN,  // the first restart asked: run the saves on a task of their own, wait for them up to the bound
+    RESTART_SAVE_WAIT, // another restart is saving already and restarts the badge when done: wait, then go anyway
+} restart_save_t;
+restart_save_t restart_save_plan(bool have_hook, bool already_saving);
 
 #ifdef __cplusplus
 }

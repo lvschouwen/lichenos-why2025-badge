@@ -99,9 +99,6 @@ SensorManager    sensors;
 uint16_t BadgeBoard::getBattMilliVolts() {
     return 0; // not measured yet
 }
-void BadgeBoard::reboot() {
-    system_restart("MeshCore reboot");
-}
 bool radio_init() {
     return true;
 }
@@ -487,6 +484,22 @@ static bool keep_contact(ContactInfo const &c) {
     return c.type != ADV_TYPE_NONE; // as MyMesh's own filter: not the transient entries
 }
 
+// MeshCore's own reboot (an admin's "reboot" CLI command, the companion protocol) runs on the mesh task inside
+// node->loop(), with the mesh lock held. The OS's restart save (system_restart -> stop_for_update, #123) would wait for
+// this very task to stop, so the saves a stop makes are made here first, and stop_locked then has nothing to wait for.
+static bool rebooting; // the mesh task -> stop_locked: saved for MeshCore's own reboot, the task never loops again
+
+void BadgeBoard::reboot() {
+    if (mesh_task_handle && xTaskGetCurrentTaskHandle() == mesh_task_handle) {
+        store.savePrefs(*node->getNodePrefs());
+        store.saveContacts(node, keep_contact);
+        store.saveChannels(node);
+        mesh_journal_stop_locked(true);
+        __atomic_store_n(&rebooting, true, __ATOMIC_RELEASE);
+    }
+    system_restart("MeshCore reboot");
+}
+
 // Our channel messages go into the screens' store as "me: <text>", and their outbox state follows (#46). With the mesh
 // lock held (the store is under it); the outbox is read in short spinlock sections, the copies are made outside them.
 struct OutSync {
@@ -696,6 +709,11 @@ extern "C" bool mesh_running(void) {
 // Under the run lock
 static bool stop_locked(mesh_stop_reason_t why) {
     bool final = why == MESH_STOP_UPDATE;
+    if (__atomic_load_n(&rebooting, __ATOMIC_ACQUIRE)) {
+        // MeshCore's own reboot saved on its task, which holds the mesh lock until the restart: nothing to wait for
+        __atomic_store_n(&final_stop, true, __ATOMIC_RELEASE);
+        return true;
+    }
     if (!mesh_running() && !mesh_stop_pending()) {
         // Never started, or stopped on request before: an update still settles the journal (held messages, the key)
         if (final && __atomic_load_n(&node, __ATOMIC_ACQUIRE)) {

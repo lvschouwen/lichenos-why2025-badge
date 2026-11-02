@@ -1,4 +1,4 @@
-// Host test: the restart log ring and line format (#41)
+// Host test: the restart log ring and line format (#41), the restart save plan (#123)
 #include "restart_log.h"
 
 #include <stdio.h>
@@ -40,6 +40,12 @@ int main(void) {
     restart_log_sanitize(&log);
     CHECK(log.count == RESTART_LOG_KEEP);
     CHECK(strlen(log.line[2]) < RESTART_LINE_MAX);
+
+    // #123: the first restart runs the saves, a second one waits for it, none without a hook
+    CHECK(restart_save_plan(true, false) == RESTART_SAVE_RUN);
+    CHECK(restart_save_plan(false, false) == RESTART_SAVE_NONE);
+    CHECK(restart_save_plan(true, true) == RESTART_SAVE_WAIT);
+    CHECK(restart_save_plan(false, true) == RESTART_SAVE_WAIT);
 
     if (failures == 0) {
         printf("restart_log_test: ok\n");
