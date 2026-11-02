@@ -92,7 +92,7 @@ bool lora_claim(char const *who, lora_packet_cb_t cb) {
     }
     portEXIT_CRITICAL(&owner_lock);
     if (!ok) {
-        ESP_LOGE(TAG, "radio claimed by %s: %s refused", had, who);
+        ESP_LOGW(TAG, "radio claimed by %s: %s refused", had, who);
     }
     return ok;
 }
@@ -116,7 +116,7 @@ bool lora_set_link_callback(char const *who, void (*fn)(bool up)) {
     }
     portEXIT_CRITICAL(&owner_lock);
     if (!ok) {
-        ESP_LOGE(TAG, "link callback refused: %s does not hold the radio", who ? who : "?");
+        ESP_LOGW(TAG, "link callback refused: %s does not hold the radio", who ? who : "?");
     }
     return ok;
 }
@@ -296,7 +296,7 @@ static bool send_to_c6(lora_msg_t const *msg) {
     esp_err_t err = len ? eh_host_peer_data_send(LORA_MSG_ID_TO_C6, buf, len) : ESP_ERR_INVALID_SIZE;
     xSemaphoreGive(send_mutex);
     if (err != ESP_OK && !failing) {
-        ESP_LOGE(TAG, "cannot reach the C6: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "cannot reach the C6: %s", esp_err_to_name(err));
     }
     failing = err != ESP_OK;
     if (send_hook) {
@@ -354,7 +354,7 @@ static void log_packet(lora_rx_packet_t const *rx) {
     } else if (!fmt(rx->data, rx->len, summary, sizeof(summary))) {
         snprintf(summary, sizeof(summary), "undecodable");
     }
-    ESP_LOGW(TAG, "rx %u B rssi %.1f snr %.1f | %s", rx->len, rx->rssi_x10 / 10.0, rx->snr_x10 / 10.0, summary);
+    ESP_LOGI(TAG, "rx %u B rssi %.1f snr %.1f | %s", rx->len, rx->rssi_x10 / 10.0, rx->snr_x10 / 10.0, summary);
     if (cb) {
         cb(rx->data, rx->len, rx->rssi_x10, rx->snr_x10);
     }
@@ -403,7 +403,7 @@ static bool c6_link_work(lora_sup_t *sup) {
             ESP_LOGE(TAG, "peer data callback not registered again");
         }
         lora_sup_init(sup, now_ms()); // its first tick re-sends config + RX start with the owner's settings
-        ESP_LOGW(TAG, "C6 back: sending the radio config again");
+        ESP_LOGI(TAG, "C6 back: sending the radio config again");
     }
     if (lost) {
         xQueueReset(rx_queue);
@@ -426,11 +426,11 @@ static void apply_enabled(lora_sup_t *sup) {
         lora_msg_t stop = {.type = LORA_MSG_RX_STOP};
         send_to_c6(&stop);
         __atomic_store_n(&applied_on, false, __ATOMIC_RELEASE);
-        ESP_LOGW(TAG, "LoRa radio switched off");
+        ESP_LOGI(TAG, "LoRa radio switched off");
     } else {
         __atomic_store_n(&applied_on, true, __ATOMIC_RELEASE);
         lora_sup_init(sup, now_ms());
-        ESP_LOGW(TAG, "LoRa radio switched on: sending the radio config");
+        ESP_LOGI(TAG, "LoRa radio switched on: sending the radio config");
     }
 }
 
@@ -446,7 +446,7 @@ static void lora_task(void *arg) {
             lora_msg_t stop = {.type = LORA_MSG_RX_STOP};
             send_to_c6(&stop);
             __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
-            ESP_LOGW(TAG, "LoRa stopped for the update");
+            ESP_LOGI(TAG, "LoRa stopped for the update");
             vTaskDelete(NULL);
         }
         if (c6_link_work(&sup)) {
@@ -459,7 +459,7 @@ static void lora_task(void *arg) {
         config_changed = false;
         portEXIT_CRITICAL(&state_lock);
         if (changed) {
-            ESP_LOGW(TAG, "new radio settings from MeshCore");
+            ESP_LOGI(TAG, "new radio settings from MeshCore");
             run_actions(LORA_ACT_SEND_CONFIG | LORA_ACT_RX_START);
         }
 
@@ -486,7 +486,7 @@ static void lora_task(void *arg) {
             continue; // from before the loss
         }
         if (heard & LORA_C6_TELL_UP) {
-            ESP_LOGW(TAG, "C6 answers again: LoRa back");
+            ESP_LOGI(TAG, "C6 answers again: LoRa back");
             tell_owner(true);
         }
         switch (msg.type) {
@@ -519,12 +519,16 @@ static void lora_task(void *arg) {
                     // The bridge's round trip against MeshCore's airtime estimate (it gives up at 1.5 x estimate):
                     // only with "fw lora raw on" (the console shows info lines too, and it came with every send)
                     if (log_raw) {
-                        ESP_LOGW(TAG, "tx answered after %lu ms (airtime estimate %lu ms)", (unsigned long)took,
-                                 (unsigned long)est);
+                        ESP_LOGI(
+                            TAG,
+                            "tx answered after %lu ms (airtime estimate %lu ms)",
+                            (unsigned long)took,
+                            (unsigned long)est
+                        );
                     }
                 }
                 if (msg.u.result.code != LORA_RESULT_OK) {
-                    ESP_LOGE(
+                    ESP_LOGW(
                         TAG,
                         "C6 refused %s: code %u radio %d",
                         msg_name(msg.u.result.for_type),
@@ -605,7 +609,7 @@ void lora_c6_lost(void) {
     if (send_mutex && xSemaphoreTake(send_mutex, pdMS_TO_TICKS(SEND_DRAIN_MS)) == pdTRUE) {
         xSemaphoreGive(send_mutex);
     } else {
-        ESP_LOGE(TAG, "a send to the C6 is still running after %d ms", SEND_DRAIN_MS);
+        ESP_LOGW(TAG, "a send to the C6 is still running after %d ms", SEND_DRAIN_MS);
     }
 }
 

@@ -123,7 +123,7 @@ mesh::LocalIdentity radio_new_identity() {
 // credentials with it, so DataStore.cpp is built with nvs_flash_erase renamed to this: MeshCore's own files go (the
 // shim's format()), the rest of NVS stays
 extern "C" esp_err_t mesh_nvs_flash_erase(void) {
-    ESP_LOGW(TAG, "factory reset from the app: MeshCore's files erased, NVS (Wi-Fi) kept");
+    ESP_LOGI(TAG, "factory reset from the app: MeshCore's files erased, NVS (Wi-Fi) kept");
     return ESP_OK;
 }
 
@@ -631,8 +631,12 @@ static void mesh_task(void *arg) {
                 mesh_notify_mute_failures(true); // the user asked for this stop: no "not delivered" notices
                 sync_outgoing();
                 mesh_notify_mute_failures(false);
-                ESP_LOGW(TAG, "stop: %u outgoing message(s) failed, %d queued packet(s) dropped", (unsigned)failed,
-                         dropped);
+                ESP_LOGI(
+                    TAG,
+                    "stop: %u outgoing message(s) failed, %d queued packet(s) dropped",
+                    (unsigned)failed,
+                    dropped
+                );
             }
             int64_t save_started = esp_timer_get_time();
             store.savePrefs(*node->getNodePrefs());
@@ -648,9 +652,14 @@ static void mesh_task(void *arg) {
             lora_radio.end();
             lichen_badge_set("meshcore", 0);
             // The contact rewrite is the same one MyMesh does lazily in its loop: its time here says what it costs there
-            ESP_LOGW(TAG, "MeshCore stopped%s: prefs, %d contacts, channels saved in %lld ms (contacts %lld ms)",
-                     final ? " for the update" : "", node->getNumContacts(), (long long)(save_us / 1000),
-                     (long long)(contacts_us / 1000));
+            ESP_LOGI(
+                TAG,
+                "MeshCore stopped%s: prefs, %d contacts, channels saved in %lld ms (contacts %lld ms)",
+                final ? " for the update" : "",
+                node->getNumContacts(),
+                (long long)(save_us / 1000),
+                (long long)(contacts_us / 1000)
+            );
             __atomic_store_n(&task_exited, true, __ATOMIC_RELEASE);
             vTaskDelete(NULL);
         }
@@ -799,7 +808,7 @@ static void migrate_identity(void) {
         if (identity_move(store, id)) {
             nvs_erase_key(nvs, "identity");
             nvs_commit(nvs);
-            ESP_LOGW(TAG, "MeshCore identity moved from NVS to /storage/meshcore");
+            ESP_LOGI(TAG, "MeshCore identity moved from NVS to /storage/meshcore");
         } else {
             ESP_LOGE(TAG, "MeshCore identity not saved to /storage/meshcore (full?): kept in NVS, tried again next boot");
         }
@@ -922,8 +931,16 @@ extern "C" char const *mesh_set_radio(float freq, float bw, uint8_t sf, uint8_t 
     }
     mesh_unlock();
     if (!why) {
-        ESP_LOGW(TAG, "radio set: %.3f MHz, %.2f kHz, SF%u, CR%u, %d dBm, path hash %u B", freq, bw, sf, cr, tx_dbm,
-                 path_hash_size);
+        ESP_LOGI(
+            TAG,
+            "radio set: %.3f MHz, %.2f kHz, SF%u, CR%u, %d dBm, path hash %u B",
+            freq,
+            bw,
+            sf,
+            cr,
+            tx_dbm,
+            path_hash_size
+        );
     }
     return why;
 }
@@ -1022,7 +1039,7 @@ static char const *channel_remove_locked(int index, char const *by_name) {
         return "No such channel";
     }
     store.saveChannels(node);
-    ESP_LOGW(TAG, "channel %d removed", index);
+    ESP_LOGI(TAG, "channel %d removed", index);
     return NULL;
 }
 
@@ -1114,7 +1131,7 @@ extern "C" char const *mesh_channel_rename(char const *name, char const *new_in)
     }
     if (!why) {
         store.saveChannels(node);
-        ESP_LOGW(TAG, "channel %d renamed", at);
+        ESP_LOGI(TAG, "channel %d renamed", at);
     }
     mesh_unlock();
     memset(&slot, 0, sizeof(slot));
@@ -1211,7 +1228,7 @@ static void adv_nvs_put_u32(char const *key, uint32_t v) {
     nvs_handle_t h;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
         if (nvs_set_u32(h, key, v) != ESP_OK || nvs_commit(h) != ESP_OK) {
-            ESP_LOGW(TAG, "%s not saved", key);
+            ESP_LOGE(TAG, "%s not saved", key);
         }
         nvs_close(h);
     }
@@ -1312,7 +1329,7 @@ static void advert_tick_locked(void) {
     }
     if (why != logged_why) { // once per change of reason, not once a minute
         logged_why = why;
-        ESP_LOGW(TAG, "periodic advert (flood): %s", why ? why : "queued");
+        ESP_LOG_LEVEL(why ? ESP_LOG_WARN : ESP_LOG_INFO, TAG, "periodic advert (flood): %s", why ? why : "queued");
     }
 }
 
@@ -2568,7 +2585,7 @@ static bool task_create(void) {
 // task runs. Under the run lock.
 static bool resume_locked(void) {
     if (!__atomic_load_n(&task_exited, __ATOMIC_ACQUIRE)) {
-        ESP_LOGE(TAG, "MeshCore is still stopping: not started");
+        ESP_LOGW(TAG, "MeshCore is still stopping: not started");
         return false;
     }
     if (!lora_radio.claim()) {
@@ -2587,7 +2604,7 @@ static bool resume_locked(void) {
     mesh_lock();
     tile_publish_unread(); // after stopped is cleared: the badge shows the count again
     mesh_unlock();
-    ESP_LOGW(TAG, "MeshCore started again: %d contacts", node->getNumContacts());
+    ESP_LOGI(TAG, "MeshCore started again: %d contacts", node->getNumContacts());
     return true;
 }
 
@@ -2595,15 +2612,15 @@ static bool start_locked(char const *files_dir);
 
 extern "C" bool mesh_start(char const *files_dir) {
     if (xSemaphoreTake(run_lock_handle(), pdMS_TO_TICKS(15000)) != pdTRUE) {
-        ESP_LOGE(TAG, "MeshCore busy stopping: not started");
+        ESP_LOGW(TAG, "MeshCore busy stopping: not started");
         return false;
     }
     bool ok;
     if (__atomic_load_n(&final_stop, __ATOMIC_ACQUIRE)) {
-        ESP_LOGE(TAG, "MeshCore stopped for update: no start before the restart");
+        ESP_LOGW(TAG, "MeshCore stopped for update: no start before the restart");
         ok = false;
     } else if (mesh_stop_pending()) {
-        ESP_LOGE(TAG, "MeshCore is still stopping: not started"); // a stop that outlasted its wait (#103 review)
+        ESP_LOGW(TAG, "MeshCore is still stopping: not started"); // a stop that outlasted its wait (#103 review)
         ok = false;
     } else if (mesh_running()) {
         ok = true; // a second start is not a second MeshCore
@@ -2673,7 +2690,7 @@ static bool start_locked(char const *files_dir) {
     // wrong key and the stored history stays readable once the identity is sound again
     bool have_prv = ident_tx_allowed() && n->self_id.writeTo(prv, sizeof(prv)) == PRV_KEY_SIZE;
     if (!have_prv) {
-        ESP_LOGW(TAG, "identity key not readable or damaged: message history off");
+        ESP_LOGE(TAG, "identity key not readable or damaged: message history off");
     }
     mesh_journal_boot(STORE_MESSAGES, mesh_lock, mesh_unlock, have_prv ? prv : NULL, sizeof(prv));
     mh_wipe(prv, sizeof(prv));
@@ -2700,7 +2717,12 @@ static bool start_locked(char const *files_dir) {
         lora_radio.end();
         return false;
     }
-    ESP_LOGW(TAG, "MeshCore companion up: %d contacts, BadgeMesh %u bytes in PSRAM, identity %s", n->getNumContacts(),
-             (unsigned)sizeof(BadgeMesh), mesh_ident_text(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE)));
+    ESP_LOGI(
+        TAG,
+        "MeshCore companion up: %d contacts, BadgeMesh %u bytes in PSRAM, identity %s",
+        n->getNumContacts(),
+        (unsigned)sizeof(BadgeMesh),
+        mesh_ident_text(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE))
+    );
     return true;
 }

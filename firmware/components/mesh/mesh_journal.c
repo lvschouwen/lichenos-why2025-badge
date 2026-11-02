@@ -158,9 +158,14 @@ static char const *compact_file(char const *src, mesh_hist_table_t *t, uint8_t *
         *err = errno;
         return "compaction could not replace log.bin";
     }
-    ESP_LOGW(TAG, "journal compacted: %lu -> %lu KB, %lu records, %lld ms", (unsigned long)(log_bytes / 1024),
-             (unsigned long)(st.bytes_out / 1024), (unsigned long)st.records_out,
-             (long long)((esp_timer_get_time() - started) / 1000));
+    ESP_LOGI(
+        TAG,
+        "journal compacted: %lu -> %lu KB, %lu records, %lld ms",
+        (unsigned long)(log_bytes / 1024),
+        (unsigned long)(st.bytes_out / 1024),
+        (unsigned long)st.records_out,
+        (long long)((esp_timer_get_time() - started) / 1000)
+    );
     log_bytes   = clamp32(st.bytes_out);
     log_records = st.records_out;
     compactions++;
@@ -413,8 +418,14 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), ui
     // would be unreadable by the other
     int64_t t0   = esp_timer_get_time();
     int     fail = mh_selftest();
-    ESP_LOGW(TAG, "journal crypto %s: self-test %s in %lld us", mh_backend(), fail ? "FAILED" : "passed",
-             (long long)(esp_timer_get_time() - t0));
+    ESP_LOG_LEVEL(
+        fail ? ESP_LOG_ERROR : ESP_LOG_INFO,
+        TAG,
+        "journal crypto %s: self-test %s in %lld us",
+        mh_backend(),
+        fail ? "FAILED" : "passed",
+        (long long)(esp_timer_get_time() - t0)
+    );
     uint8_t root[32];
     bool    keyed = !fail && prv && mesh_hist_key(root, prv, prv_len);
     if (keyed) {
@@ -450,7 +461,7 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), ui
     sd_end(sd_io_from_errno(err));
     work_free(&w);
     if (why) {
-        ESP_LOGW(TAG, "%s (errno %d)", why, err);
+        ESP_LOGE(TAG, "%s (errno %d)", why, err);
         turn_off(why);
         return;
     }
@@ -462,8 +473,14 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), ui
     }
     why_off = NULL;
     on      = true;
-    ESP_LOGW(TAG, "message history: %lu messages loaded, journal %lu KB in %s%s", (unsigned long)hist->loaded,
-             (unsigned long)(log_bytes / 1024), SD_MESSAGES_DIR, compact_asked ? ", compaction due" : "");
+    ESP_LOGI(
+        TAG,
+        "message history: %lu messages loaded, journal %lu KB in %s%s",
+        (unsigned long)hist->loaded,
+        (unsigned long)(log_bytes / 1024),
+        SD_MESSAGES_DIR,
+        compact_asked ? ", compaction due" : ""
+    );
 }
 
 // ---- the mesh task -------------------------------------------------------------------------------------------------
@@ -542,7 +559,7 @@ static void write_out(uint32_t wait_ms) {
     sd_end(ok ? SD_IO_OK : sd_io_from_errno(err));
     if (!ok) {
         write_errors++;
-        ESP_LOGW(TAG, "journal write of %u bytes failed (errno %d)", (unsigned)out_len, err);
+        ESP_LOGE(TAG, "journal write of %u bytes failed (errno %d)", (unsigned)out_len, err);
         out_len = 0;
         turn_off("journal write failed");
         return;
@@ -575,7 +592,7 @@ static void compact_now(void) {
     sd_end(sd_io_from_errno(err));
     work_free(&w);
     if (why) {
-        ESP_LOGW(TAG, "%s (errno %d)", why, err);
+        ESP_LOGE(TAG, "%s (errno %d)", why, err);
         turn_off(why);
         return;
     }

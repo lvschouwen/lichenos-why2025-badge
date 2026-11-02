@@ -133,7 +133,7 @@ static void advert_answer(bool confirmed) {
         show_status("not sent");
         return;
     }
-    ESP_LOGW(TAG, "advert confirmed on the grid");
+    ESP_LOGI(TAG, "advert confirmed on the grid");
     meshcore_advert_send(advert_status);
 }
 
@@ -175,7 +175,7 @@ static bool start_instead(mesh_grid_tile_t tile) {
     }
     if (r.state == MESH_RUN_STOPPED) {
         char const *why = meshcore_run_request(true);
-        ESP_LOGW(TAG, "start from the grid: %s", why ? why : "asked");
+        ESP_LOGI(TAG, "start from the grid: %s", why ? why : "asked");
     }
     refresh(NULL); // "Starting MeshCore..." at once
     return true;   // starting or stopping: the tiles wait for it

@@ -40,7 +40,7 @@ bool meshcore_autostart(void) {
 
 bool meshcore_autostart_set(bool on) {
     bool ok = app_settings_set_u8(app, AUTOSTART, on ? 1 : 0);
-    ESP_LOGW(TAG, "start at boot %s (%s)", on ? "on" : "off", ok ? "saved" : "not saved");
+    ESP_LOGI(TAG, "start at boot %s (%s)", on ? "on" : "off", ok ? "saved" : "not saved");
     return ok;
 }
 
@@ -61,7 +61,7 @@ static bool start_now(void) {
 bool meshcore_run_boot(void) {
     mesh_console_init();
     if (!meshcore_autostart()) {
-        ESP_LOGW(TAG, "start at boot is off: MeshCore not started (Enter on its tile, or fw mesh start)");
+        ESP_LOGI(TAG, "start at boot is off: MeshCore not started (Enter on its tile, or fw mesh start)");
         return true; // as asked: not a failed boot step
     }
     if (!apply(MESH_EV_START)) {
@@ -94,7 +94,12 @@ static void job_task(void *arg) {
         ok = !mesh_running() && !mesh_stop_pending();
     }
     apply(ok ? MESH_EV_DONE_OK : MESH_EV_DONE_FAIL);
-    ESP_LOGW(TAG, "MeshCore %s", start ? (ok ? "started" : "did not start") : (ok ? "stopped" : "did not stop in time"));
+    ESP_LOG_LEVEL(
+        ok ? ESP_LOG_INFO : ESP_LOG_ERROR,
+        TAG,
+        "MeshCore %s",
+        start ? (ok ? "started" : "did not start") : (ok ? "stopped" : "did not stop in time")
+    );
     vTaskDelete(NULL);
 }
 

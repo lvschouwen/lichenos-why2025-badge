@@ -118,7 +118,7 @@ static void first_region_chosen(void) {
 }
 
 static void first_home(void) {
-    ESP_LOGW(TAG, "first-open questions left with Esc or not shown: asked again next open");
+    ESP_LOGI(TAG, "first-open questions left with Esc or not shown: asked again next open");
     meshcore_ask_cancel();
     first_screen = NULL;
     shell_home();
@@ -190,7 +190,7 @@ static void first_step(void *arg) {
         case MC_FIRST_HOME: first_home(); break;
         case MC_FIRST_FINISH: {
             bool saved = app_settings_set_u8(self(), "mc_name_set", 1);
-            ESP_LOGW(TAG, "first-open questions answered (%s)", saved ? "saved" : "not saved");
+            ESP_LOGI(TAG, "first-open questions answered (%s)", saved ? "saved" : "not saved");
             lv_obj_t   *screen = first_screen;
             lv_group_t *group  = lv_obj_get_group(screen);
             first_screen       = NULL;
@@ -221,11 +221,11 @@ static void open(lv_obj_t *screen) {
     mesh_run_t run = meshcore_run_get();
     if (run.state == MESH_RUN_STOPPED && run.why != MESH_WHY_UPDATE && lora_up()) {
         char const *why = meshcore_run_request(true);
-        ESP_LOGW(TAG, "opened while stopped: start %s", why ? why : "asked");
+        ESP_LOGI(TAG, "opened while stopped: start %s", why ? why : "asked");
     }
     bool starting = meshcore_run_get().state == MESH_RUN_STARTING;
     if ((mesh_running() || starting) && app_settings_get_u8(self(), "mc_name_set", 0) == 0) {
-        ESP_LOGW(TAG, "first open: asking name and region%s", starting ? " once MeshCore runs" : "");
+        ESP_LOGI(TAG, "first open: asking name and region%s", starting ? " once MeshCore runs" : "");
         first        = (mc_first_t){0};
         first_screen = screen;
         first_wait   = NULL;
@@ -360,7 +360,12 @@ bool meshcore_setup_done(void) {
 // "fw setup reset meshcore" / "done meshcore": only the questions' flag; the name and the radio stay
 static void first_run_set(bool done) {
     bool ok = app_settings_set_u8(self(), "mc_name_set", done ? 1 : 0);
-    ESP_LOGW(TAG, "first-open questions marked %s (%s)", done ? "answered" : "to ask again", ok ? "saved" : "not saved");
+    ESP_LOGI(
+        TAG,
+        "first-open questions marked %s (%s)",
+        done ? "answered" : "to ask again",
+        ok ? "saved" : "not saved"
+    );
 }
 
 // The mesh saves and stops; the OS stops the radio afterwards, only when this says true (#84 T7)

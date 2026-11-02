@@ -289,7 +289,7 @@ static lv_obj_t *build_share(void) {
     menu_note(menu, "Public key:");
     add_text(menu, mem->lines[MESH_LINE_KEY].text + strlen("Key: "));
     menu_note(menu, "Esc: back");
-    ESP_LOGW(TAG, "share %s", mem->uri); // on the console too, to copy it from there
+    ESP_LOGI(TAG, "share %s", mem->uri); // on the console too, to copy it from there
     return screen;
 }
 

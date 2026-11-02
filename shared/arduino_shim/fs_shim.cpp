@@ -40,9 +40,9 @@ void fs_shim_test_fat_rename(bool on) {
 }
 
 #ifdef ESP_PLATFORM
-#define SHIM_WARN(...) ESP_LOGW("fs_shim", __VA_ARGS__)
+#define SHIM_ERROR(...) ESP_LOGE("fs_shim", __VA_ARGS__)
 #else
-#define SHIM_WARN(...) ((void)0)
+#define SHIM_ERROR(...) ((void)0)
 #endif
 
 uint32_t fs_shim_take_raw_writes(void) {
@@ -355,7 +355,7 @@ bool File::commit() {
         raw_writes++;
     }
     if (!ok) {
-        SHIM_WARN("writing %s failed: errno %d", path_, errno);
+        SHIM_ERROR("writing %s failed: errno %d", path_, errno);
     }
     free(scratch);
     return ok;
@@ -366,12 +366,12 @@ void File::flush() {
         return;
     }
     if (failed_) {
-        SHIM_WARN("%s not saved: a write did not fit in memory (%u bytes)", path_, (unsigned)len_);
+        SHIM_ERROR("%s not saved: a write did not fit in memory (%u bytes)", path_, (unsigned)len_);
         return;
     }
     [[maybe_unused]] Timed timed;
     if (commit() && fsync(fd_) != 0) {
-        SHIM_WARN("syncing %s failed: errno %d", path_, errno);
+        SHIM_ERROR("syncing %s failed: errno %d", path_, errno);
     }
 }
 
@@ -379,14 +379,17 @@ void File::close() {
     [[maybe_unused]] Timed timed;
     if (fd_ >= 0) {
         if (failed_) {
-            SHIM_WARN("%s not saved, the old file is kept: a write did not fit in memory (%u bytes)", path_,
-                      (unsigned)len_);
+            SHIM_ERROR(
+                "%s not saved, the old file is kept: a write did not fit in memory (%u bytes)",
+                path_,
+                (unsigned)len_
+            );
         } else {
             commit();
         }
         // FatFs syncs the file (data, FAT, directory entry) here: on flash when close() returns
         if (::close(fd_) != 0) {
-            SHIM_WARN("closing %s failed: errno %d", path_, errno);
+            SHIM_ERROR("closing %s failed: errno %d", path_, errno);
         }
         fd_ = -1;
         free(buf_);

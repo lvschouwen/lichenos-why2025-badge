@@ -55,7 +55,12 @@ static bool rx_summary(uint8_t const *data, size_t len, char *out, size_t cap) {
 // The radio went away with a C6 reset and came back (#14): nothing to redo, the OS keeps the radio settings and TX
 // power and sends them again; MeshCore's sends just fail while it is gone
 static void on_link(bool up) {
-    ESP_LOGW("mesh", "LoRa radio %s", up ? "back after a C6 reset" : "gone with the C6, sends fail until it is back");
+    ESP_LOG_LEVEL(
+        up ? ESP_LOG_INFO : ESP_LOG_WARN,
+        "mesh",
+        "LoRa radio %s",
+        up ? "back after a C6 reset" : "gone with the C6, sends fail until it is back"
+    );
 }
 
 // Every start of MeshCore (#103: again after a stop): one queue for the whole run of the badge, emptied on a restart so
@@ -118,8 +123,14 @@ void LoraRadio::setParams(float freq_mhz, float bw_khz, uint8_t sf, uint8_t cr) 
     uint32_t freq_hz = (uint32_t)lround(freq_mhz * 1000.0) * 1000;
     uint32_t bw_hz   = (uint32_t)lround(bw_khz * 1000.0);
     if (!lora_set_radio(freq_hz, bw_hz, sf, cr)) {
-        ESP_LOGE("mesh", "radio settings refused: %lu Hz, %lu Hz, SF%u, CR4/%u", (unsigned long)freq_hz,
-                 (unsigned long)bw_hz, sf, cr);
+        ESP_LOGW(
+            "mesh",
+            "radio settings refused: %lu Hz, %lu Hz, SF%u, CR4/%u",
+            (unsigned long)freq_hz,
+            (unsigned long)bw_hz,
+            sf,
+            cr
+        );
     }
 }
 
@@ -164,6 +175,6 @@ void LoraRadio::onSendFinished() {
 // MeshCore's prefs allow up to MAX_LORA_TX_POWER (22, the SX1262's high-power PA and MeshCore's badge variant)
 void LoraRadio::setTxPower(int8_t dbm) {
     if (!lora_set_tx_power(dbm > 22 ? 22 : dbm)) {
-        ESP_LOGE("mesh", "TX power %d dBm refused", dbm);
+        ESP_LOGW("mesh", "TX power %d dBm refused", dbm);
     }
 }
