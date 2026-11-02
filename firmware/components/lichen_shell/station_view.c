@@ -13,7 +13,6 @@
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_clock.h"
-#include "saver_station.h"
 #include "theme.h"
 
 #include <stdint.h>
@@ -143,6 +142,20 @@ static hands_t hands_now(struct timeval const *tv) {
     ){true, sc_hour_angle(local.tm_hour, local.tm_min), sc_minute_angle(local.tm_min), sc_second_angle(ms)};
 }
 
+bool saver_date_text(char *out, size_t cap) {
+    time_t    now = time(NULL);
+    struct tm local;
+    if (!clock_is_set() || !localtime_r(&now, &local)) {
+        snprintf(out, cap, "Clock not set");
+        return false;
+    }
+    char day[16], month[16];
+    strftime(day, sizeof(day), "%A", &local);
+    strftime(month, sizeof(month), "%B", &local);
+    snprintf(out, cap, "%s%s %d %s", clock_is_approximate() ? "~ " : "", day, local.tm_mday, month);
+    return true;
+}
+
 static void labels_update(station_view_t *v) {
     char date[48];
     saver_date_text(date, sizeof(date));
@@ -210,6 +223,17 @@ static void on_dial_delete(lv_event_t *e) {
     lv_async_call(free_later, v);
 }
 
+// A screen covering the app's (the saver) stops the sweep; showing it again redraws the whole screen
+static void on_screen_hidden(lv_event_t *e) {
+    station_view_t *v = lv_event_get_user_data(e);
+    lv_timer_pause(v->timer);
+}
+
+static void on_screen_shown(lv_event_t *e) {
+    station_view_t *v = lv_event_get_user_data(e);
+    lv_timer_resume(v->timer);
+}
+
 static void log_no_psram(int32_t d) {
     ESP_LOGW(TAG, "no PSRAM for the station clock's dial (%u bytes; %u free, largest block %u)",
              (unsigned)(lv_draw_buf_width_to_stride(d, LV_COLOR_FORMAT_RGB565) * d),
@@ -245,6 +269,10 @@ station_view_t *station_view_create(lv_obj_t *parent, station_view_cfg_t const *
     lv_obj_add_event_cb(v->dial, on_dial_delete, LV_EVENT_DELETE, v);
     frame(v); // the first frame now, not in 66 ms
     v->timer = lv_timer_create(tick, FRAME_MS, v);
+    if (cfg->pause_when_hidden) {
+        lv_obj_add_event_cb(parent, on_screen_hidden, LV_EVENT_SCREEN_UNLOADED, v);
+        lv_obj_add_event_cb(parent, on_screen_shown, LV_EVENT_SCREEN_LOADED, v);
+    }
     return v;
 }
 

@@ -6,7 +6,6 @@
 #include "fonts.h"
 #include "lichen_app.h"
 #include "lichen_clock.h"
-#include "saver_station.h"
 #include "shell_parts.h"
 #include "station_view.h"
 #include "theme.h"
@@ -33,12 +32,14 @@ static void update_source(lv_obj_t *line) {
 // The fallback when the dial cannot be built: HH:MM:SS and the date in one label, once a second
 static void text_tick(lv_timer_t *t) {
     lv_obj_t *label = lv_timer_get_user_data(t);
-    char      date[48], text[100];
+    char      date[48], text[200];
     time_t    now = time(NULL);
     struct tm local;
     bool      ok = saver_date_text(date, sizeof(date)) && localtime_r(&now, &local);
     if (ok) {
-        snprintf(text, sizeof(text), "%02d:%02d:%02d\n%s", local.tm_hour, local.tm_min, local.tm_sec, date);
+        char src[80];
+        source_line(src, sizeof(src));
+        snprintf(text, sizeof(text), "%02d:%02d:%02d\n%s\n%s", local.tm_hour, local.tm_min, local.tm_sec, date, src);
     } else {
         snprintf(text, sizeof(text), "%s", date);
     }
@@ -58,13 +59,14 @@ static void open_text_clock(lv_obj_t *screen) {
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(label, LV_PCT(100));
     lv_label_set_text(label, "");
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
     lv_timer_t *timer = lv_timer_create(text_tick, 1000, label);
     lv_obj_add_event_cb(screen, on_text_delete, LV_EVENT_DELETE, timer);
     text_tick(timer);
 }
 
 static void open_clock(lv_obj_t *screen) {
-    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(screen, false);
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
     lv_obj_update_layout(screen);
     int32_t line1_h = lv_font_get_line_height(lichen_font(LICHEN_FONT_LARGE));
@@ -74,6 +76,7 @@ static void open_clock(lv_obj_t *screen) {
         .line2_font   = LICHEN_FONT_SMALL,
         .line2_color  = THEME_DIM,
         .update_line2 = update_source,
+        .pause_when_hidden = true,
     };
     if (!station_view_create(screen, &cfg)) {
         open_text_clock(screen);

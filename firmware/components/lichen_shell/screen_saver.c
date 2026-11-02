@@ -18,6 +18,7 @@
 #include "raw_keys.h"
 #include "saver_layout.h"
 #include "saver_station.h"
+#include "station_view.h"
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "theme.h"
@@ -144,20 +145,6 @@ static void clock_update(big_clock_t *c) {
         lv_label_set_text(c->date, date);
     }
     saver_notes_update(c->notes);
-}
-
-bool saver_date_text(char *out, size_t cap) {
-    time_t    now = time(NULL);
-    struct tm local;
-    if (!clock_is_set() || !localtime_r(&now, &local)) {
-        snprintf(out, cap, "Clock not set");
-        return false;
-    }
-    char day[16], month[16];
-    strftime(day, sizeof(day), "%A", &local);
-    strftime(month, sizeof(month), "%B", &local);
-    snprintf(out, cap, "%s%s %d %s", clock_is_approximate() ? "~ " : "", day, local.tm_mday, month);
-    return true;
 }
 
 void saver_notes_update(lv_obj_t *notes) {

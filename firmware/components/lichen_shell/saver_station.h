@@ -13,8 +13,5 @@ typedef enum { SAVER_STYLE_STATION = 0, SAVER_STYLE_DIGITAL = 1 } saver_style_t;
 // when the saver screen is deleted (station_view.h).
 bool saver_station_create(lv_obj_t *screen);
 
-// screen_saver.c, for both styles: the date line ("~ " first when the time is unverified); false and "Clock not set"
-// when the clock is not set
-bool saver_date_text(char *out, size_t cap);
-// The unread count under the clock, hidden at none
+// screen_saver.c, for both styles: the unread count under the clock, hidden at none
 void saver_notes_update(lv_obj_t *notes);
