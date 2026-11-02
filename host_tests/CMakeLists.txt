@@ -622,6 +622,20 @@ target_include_directories(mesh_chat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..
 target_compile_options(mesh_chat_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_chat_test COMMAND mesh_chat_test)
 
+add_executable(mesh_chat_target_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/mesh_chat_target_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_chat_target.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_store.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/channel_input.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_format.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_frame.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/list_filter.c
+)
+target_include_directories(mesh_chat_target_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(mesh_chat_target_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_chat_target_test COMMAND mesh_chat_target_test)
+
 add_executable(mesh_notify_test
     ${CMAKE_CURRENT_SOURCE_DIR}/mesh_notify_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_notify.c
@@ -1202,5 +1216,6 @@ add_custom_target(run_tests
     ota_autooff_test
     factory_plan_test
     release_notes_test
+    mesh_chat_target_test
     COMMENT "Running all host tests"
 )

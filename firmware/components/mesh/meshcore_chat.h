@@ -9,5 +9,7 @@
 void meshcore_chat_pick_contact(void);
 // Open a chat straight from the conversation list (#48). The channel is named (as MeshCore has it, case does not
 // matter); the DM by the contact's 6-byte key prefix and its title ("@bob", the @ is added when missing).
+// Each chat screen keeps its own target for good (#126). Opening the chat that is showing does nothing (the draft
+// stays); opening another while a chat is showing replaces that one (Esc then goes where it went).
 void meshcore_chat_open_channel(char const *name);
 void meshcore_chat_open_dm(uint8_t const prefix[6], char const *title);

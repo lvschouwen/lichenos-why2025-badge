@@ -3,6 +3,7 @@
 #include "meshcore_chat.h"
 
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "fonts.h"
 #include "lichen_clock.h"
 #include "list_filter.h"
@@ -10,6 +11,7 @@
 #include "menu_filter.h"
 #include "mesh.h"
 #include "mesh_chat.h"
+#include "mesh_chat_target.h"
 #include "mesh_frame.h"
 #include "mesh_format.h"
 #include "mesh_notify_run.h"
@@ -30,39 +32,48 @@
 #define MAX_PEERS      100
 #define ADV_TYPE_CHAT  1 // MeshCore: a person's node (repeaters, rooms and sensors have no DMs)
 
-static char    channel[MESH_NAME_MAX + 2]; // the chat that is open: a channel name, or the contact's name in a DM
-static bool    dm_mode;                       // #47: a chat with one contact
-static uint8_t peer[MF_PREFIX];               // that contact's key prefix
-static size_t  copy_n;
-static lv_obj_t *tab_hop; // an empty second focusable: Tab moves the focus onto it, which retries the failed message
-
 #define HINT_CHANNEL "Enter: send    /: search    Esc: back"
 #define HINT_DM      "Enter: send    Tab: retry a failed one    /: search    Esc: back"
 #define HINT_SEARCH  "Up/Down: match    Enter: done    Esc: cancel" // fits one line at 720 px
 #define HIT_BORDER_W 4 // on every row, shown only on the current hit: a border that came and went would move the text
 
-static lv_obj_t   *list, *ta, *counter, *note;
-static lv_timer_t *timer;
-static mesh_msg_t *copy;
-static uint32_t    shown_generation, shown_s;
-static bool        note_error;
-
-// Search inside the chat (#48): the line that takes the compose line's place, and the hits among copy[]
-static lv_obj_t *search_line;
-static bool      searching;
-static char      query[LIST_FILTER_MAX + 1];
-static uint16_t  hits[SHOW_MESSAGES];
-static size_t    hit_n, hit_pos;
-static bool      have_hit;      // hit_seq names the current hit: it survives a rebuild by seq, not by index
-static uint32_t  hit_seq;
-static int32_t   search_from_y; // where the list was when the search began: Esc goes back there
-static bool      search_from_end; // ... or it was at the end: Esc goes to the end, messages may have come in since
-
 // Select mode (#111): Up on an empty compose line frames messages, Enter mentions the sender
 #define HINT_SELECT "Up/Down: message    Enter: reply    Esc: cancel"
-static bool     selecting;
-static size_t   sel_pos = MESH_CHAT_NO_HIT;
-static uint32_t sel_seq;
+
+// One chat screen's state (#126): hung on its screen's user_data, made in build_chat, freed in on_delete (its timer
+// first). The target is set once, in build_chat, so the compose line, Tab-retry and mark-read can only ever reach the
+// chat this screen shows, whatever opens later. Two chat screens on the stack each keep their own.
+typedef struct chat {
+    struct chat       *next; // the live chat screens (chat_on_top)
+    mesh_chat_target_t target;
+    lv_obj_t          *screen, *list, *ta, *counter, *note;
+    lv_obj_t          *tab_hop; // an empty second focusable: Tab moves the focus onto it, which retries the failed message
+    lv_timer_t        *timer;
+    mesh_msg_t        *copy;
+    size_t             copy_n;
+    uint32_t           shown_generation, shown_s;
+    bool               note_error;
+    bool               loaded; // on screen: mesh_notify knows it as the open chat (#50)
+
+    // Search inside the chat (#48): the line that takes the compose line's place, and the hits among copy[]
+    lv_obj_t *search_line;
+    bool      searching;
+    char      query[LIST_FILTER_MAX + 1];
+    uint16_t  hits[SHOW_MESSAGES];
+    size_t    hit_n, hit_pos;
+    bool      have_hit;        // hit_seq names the current hit: it survives a rebuild by seq, not by index
+    uint32_t  hit_seq;
+    int32_t   search_from_y;   // where the list was when the search began: Esc goes back there
+    bool      search_from_end; // ... or it was at the end: Esc goes to the end, messages may have come in since
+
+    // Select mode (#111)
+    bool     selecting;
+    size_t   sel_pos;
+    uint32_t sel_seq;
+} chat_t;
+
+static chat_t                   *chats;    // every chat screen that exists, newest first
+static mesh_chat_target_t const *building; // the target build_chat commits; set only around its shell_open
 
 static void add_line(lv_obj_t *parent, char const *text, uint32_t color) {
     lv_obj_t *label = lv_label_create(parent);
@@ -72,7 +83,7 @@ static void add_line(lv_obj_t *parent, char const *text, uint32_t color) {
     lv_label_set_text(label, text);
 }
 
-static void add_message(mesh_msg_t const *m, uint32_t now, uint32_t now_epoch) {
+static void add_message(chat_t *c, mesh_msg_t const *m, uint32_t now, uint32_t now_epoch) {
     char age[24], status[32], meta[96];
     mesh_format_msg_age(m->loaded, m->heard_s, m->epoch, now, now_epoch, age, sizeof(age));
     mesh_status_kind_t kind = mesh_msg_status(m, status, sizeof(status));
@@ -82,7 +93,7 @@ static void add_message(mesh_msg_t const *m, uint32_t now, uint32_t now_epoch) {
     } else {
         snprintf(meta, sizeof(meta), "%s, %d dBm", age, m->rssi_x10 / 10);
     }
-    lv_obj_t *item = lv_obj_create(list);
+    lv_obj_t *item = lv_obj_create(c->list);
     lv_obj_remove_style_all(item);
     lv_obj_set_size(item, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(item, LV_FLEX_FLOW_COLUMN);
@@ -101,195 +112,192 @@ static void add_message(mesh_msg_t const *m, uint32_t now, uint32_t now_epoch) {
     add_line(item, meta, color);
 }
 
-static void search_apply(bool scroll);
-static void select_apply(bool scroll);
-static void select_leave(void);
+static void search_apply(chat_t *c, bool scroll);
+static void select_apply(chat_t *c, bool scroll);
+static void select_leave(chat_t *c);
 
-static void rebuild(size_t n) {
-    bool at_end = lv_obj_get_scroll_bottom(list) <= 0;
-    int32_t y   = lv_obj_get_scroll_y(list);
-    lv_obj_clean(list);
-    copy_n = n;
+static void rebuild(chat_t *c, size_t n) {
+    bool at_end = lv_obj_get_scroll_bottom(c->list) <= 0;
+    int32_t y   = lv_obj_get_scroll_y(c->list);
+    lv_obj_clean(c->list);
+    c->copy_n = n;
     size_t shown = 0;
     uint32_t now = mesh_uptime_s(), now_epoch = mesh_epoch_now();
     for (size_t i = 0; i < n; i++) {
-        add_message(&copy[i], now, now_epoch);
+        add_message(c, &c->copy[i], now, now_epoch);
         shown++;
     }
     if (!shown) {
-        add_line(list, "No messages here yet.", THEME_DIM);
+        add_line(c->list, "No messages here yet.", THEME_DIM);
     }
-    lv_obj_update_layout(list);
-    lv_obj_scroll_to_y(list, at_end ? LV_COORD_MAX : y, LV_ANIM_OFF);
-    if (searching) {
-        search_apply(false); // new rows: highlight them again, the view stays where it is
+    lv_obj_update_layout(c->list);
+    lv_obj_scroll_to_y(c->list, at_end ? LV_COORD_MAX : y, LV_ANIM_OFF);
+    if (c->searching) {
+        search_apply(c, false); // new rows: highlight them again, the view stays where it is
     }
-    if (selecting) {
-        select_apply(false);
+    if (c->selecting) {
+        select_apply(c, false);
     }
 }
 
-static size_t text_max(void) {
-    return dm_mode ? MF_MAX_TEXT : mesh_channel_text_max();
+static size_t text_max(chat_t const *c) {
+    return c->target.dm ? MF_MAX_TEXT : mesh_channel_text_max();
 }
 
-static void show_counter(void) {
+static void show_counter(chat_t *c) {
     char text[80];
-    mesh_compose_status(lv_textarea_get_text(ta), text_max(), text, sizeof(text));
-    lv_label_set_text(counter, text);
+    mesh_compose_status(lv_textarea_get_text(c->ta), text_max(c), text, sizeof(text));
+    lv_label_set_text(c->counter, text);
 }
 
 static void tick(lv_timer_t *t) {
-    (void)t;
-    uint32_t        generation;
-    mesh_chat_key_t key;
-    if (dm_mode) {
-        mesh_chat_key_dm(&key, peer);
-    } else {
-        mesh_chat_key_channel(&key, channel);
-    }
+    chat_t  *c = lv_timer_get_user_data(t);
+    uint32_t generation;
     // The chat's own ring (#59), read with mark_read: the chat is on screen, so it counts as read (#48)
-    size_t n = mesh_chat_snapshot(&key, copy, SHOW_MESSAGES, &generation, true, SCREEN_WAIT_MS);
+    size_t n = mesh_chat_snapshot(&c->target.key, c->copy, SHOW_MESSAGES, &generation, true, SCREEN_WAIT_MS);
     if (n == MESH_BUSY) {
         return;
     }
-    if (generation != shown_generation || mesh_uptime_s() - shown_s >= AGE_REFRESH_S) {
-        rebuild(n);
-        shown_generation = generation;
-        shown_s          = mesh_uptime_s();
+    if (generation != c->shown_generation || mesh_uptime_s() - c->shown_s >= AGE_REFRESH_S) {
+        rebuild(c, n);
+        c->shown_generation = generation;
+        c->shown_s          = mesh_uptime_s();
     }
 }
 
-static void set_default_note(void);
+static void set_default_note(chat_t *c);
 
-static void set_note(char const *text, bool error) {
-    lv_label_set_text(note, text);
-    lv_obj_set_style_text_color(note, lv_color_hex(error ? THEME_RED : THEME_DIM), 0);
-    note_error = error;
+static void set_note(chat_t *c, char const *text, bool error) {
+    lv_label_set_text(c->note, text);
+    lv_obj_set_style_text_color(c->note, lv_color_hex(error ? THEME_RED : THEME_DIM), 0);
+    c->note_error = error;
 }
 
 // The usual line under the composer; the clock hint takes its place while the clock is not set (#8) or only
 // approximate (#83)
-static void set_default_note(void) {
+static void set_default_note(chat_t *c) {
     char const *clock = mesh_clock_hint(clock_is_set(), clock_is_approximate());
-    set_note(clock ? clock : (dm_mode ? HINT_DM : HINT_CHANNEL), false);
+    set_note(c, clock ? clock : (c->target.dm ? HINT_DM : HINT_CHANNEL), false);
 }
 
+// Enter: the draft goes to this screen's own target, nothing else (#126)
 static void on_ready(lv_event_t *e) {
-    (void)e;
-    char const *text = lv_textarea_get_text(ta);
+    chat_t     *c    = lv_event_get_user_data(e);
+    char const *text = lv_textarea_get_text(c->ta);
     if (!text[0]) {
         return;
     }
     char const   *why = NULL;
-    mesh_msg_id_t id  = dm_mode ? mesh_send_dm(peer, text, &why) : mesh_send_channel(channel, text, &why);
+    mesh_msg_id_t id  = c->target.dm ? mesh_send_dm(c->target.peer, text, &why)
+                                     : mesh_send_channel(c->target.title, text, &why);
     if (!id) {
-        set_note(why ? why : "not sent", true);
+        set_note(c, why ? why : "not sent", true);
         return;
     }
-    lv_textarea_set_text(ta, "");
-    set_default_note();
-    show_counter();
-    shown_generation = UINT32_MAX; // the mesh task adds it within a few ms: the next tick shows it
+    lv_textarea_set_text(c->ta, "");
+    set_default_note(c);
+    show_counter(c);
+    c->shown_generation = UINT32_MAX; // the mesh task adds it within a few ms: the next tick shows it
 }
 
 static void on_changed(lv_event_t *e) {
-    (void)e;
-    show_counter();
-    if (note_error) {
-        set_default_note();
+    chat_t *c = lv_event_get_user_data(e);
+    show_counter(c);
+    if (c->note_error) {
+        set_default_note(c);
     }
 }
 
 // Tab: start over with the newest failed DM of this chat
-static void retry_failed(void) {
-    for (size_t i = copy_n; i > 0; i--) {
-        mesh_msg_t const *m = &copy[i - 1];
-        if (m->outgoing && mesh_msg_in_dm(m, peer) && m->state == MESH_OUT_FAILED) {
+static void retry_failed(chat_t *c) {
+    for (size_t i = c->copy_n; i > 0; i--) {
+        mesh_msg_t const *m = &c->copy[i - 1];
+        if (m->outgoing && mesh_msg_in_dm(m, c->target.peer) && m->state == MESH_OUT_FAILED) {
             if (mesh_retry(m->id)) {
-                set_note("Trying again", false);
-                shown_generation = UINT32_MAX;
+                set_note(c, "Trying again", false);
+                c->shown_generation = UINT32_MAX;
             } else {
-                set_note("Cannot retry now", true);
+                set_note(c, "Cannot retry now", true);
             }
             return;
         }
     }
-    set_note("Nothing failed to retry", false);
+    set_note(c, "Nothing failed to retry", false);
 }
 
 // ---- search inside the chat (#48) -----------------------------------------------------------------------------------
 
 // Highlights the hits (THEME_TILE) and frames the current one (amber left border); scroll brings the current one into
 // view. Works on copy[], the snapshot the screen already holds: no second mesh lock.
-static void search_apply(bool scroll) {
+static void search_apply(chat_t *c, bool scroll) {
     // copy[] may be a new snapshot already (rebuild): resolve the current hit by its seq, never by an old index
-    hit_n    = mesh_chat_rehit(copy, copy_n, query, hits, SHOW_MESSAGES, have_hit, hit_seq, &hit_pos);
-    have_hit = hit_pos < hit_n;
-    hit_seq  = have_hit ? copy[hits[hit_pos]].seq : 0;
+    c->hit_n = mesh_chat_rehit(c->copy, c->copy_n, c->query, c->hits, SHOW_MESSAGES, c->have_hit, c->hit_seq,
+                               &c->hit_pos);
+    c->have_hit = c->hit_pos < c->hit_n;
+    c->hit_seq  = c->have_hit ? c->copy[c->hits[c->hit_pos]].seq : 0;
     size_t h = 0;
-    for (size_t i = 0; i < copy_n; i++) {
-        lv_obj_t *item = lv_obj_get_child(list, (int32_t)i);
-        bool      hit  = h < hit_n && hits[h] == i;
+    for (size_t i = 0; i < c->copy_n; i++) {
+        lv_obj_t *item = lv_obj_get_child(c->list, (int32_t)i);
+        bool      hit  = h < c->hit_n && c->hits[h] == i;
         if (!item) {
             break;
         }
         lv_obj_set_style_bg_opa(item, hit ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_opa(item, hit && h == hit_pos ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_opa(item, hit && h == c->hit_pos ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         h += hit;
     }
     char text[96];
-    mesh_chat_search_line(query, hit_pos, hit_n, text, sizeof(text));
-    lv_label_set_text(search_line, text);
-    if (scroll && hit_pos < hit_n) {
-        lv_obj_t *item = lv_obj_get_child(list, hits[hit_pos]);
+    mesh_chat_search_line(c->query, c->hit_pos, c->hit_n, text, sizeof(text));
+    lv_label_set_text(c->search_line, text);
+    if (scroll && c->hit_pos < c->hit_n) {
+        lv_obj_t *item = lv_obj_get_child(c->list, c->hits[c->hit_pos]);
         if (item) {
-            lv_obj_update_layout(list);
+            lv_obj_update_layout(c->list);
             lv_obj_scroll_to_view(item, LV_ANIM_OFF);
         }
     }
 }
 
-static void search_enter(void) {
-    lv_group_t *group = lv_obj_get_group(ta);
-    if (!group || !search_line || searching) {
+static void search_enter(chat_t *c) {
+    lv_group_t *group = lv_obj_get_group(c->ta);
+    if (!group || !c->search_line || c->searching) {
         return;
     }
-    searching     = true;
-    query[0]      = '\0';
-    hit_n         = 0;
-    hit_pos         = MESH_CHAT_NO_HIT;
-    have_hit        = false;
-    search_from_y   = lv_obj_get_scroll_y(list);
-    search_from_end = lv_obj_get_scroll_bottom(list) <= 0;
+    c->searching       = true;
+    c->query[0]        = '\0';
+    c->hit_n           = 0;
+    c->hit_pos         = MESH_CHAT_NO_HIT;
+    c->have_hit        = false;
+    c->search_from_y   = lv_obj_get_scroll_y(c->list);
+    c->search_from_end = lv_obj_get_scroll_bottom(c->list) <= 0;
     // The search line takes the focus (and the keys) before the compose line hides: hiding a focused object moves the
     // focus on, which in a DM is the Tab-retry hop
-    lv_group_add_obj(group, search_line);
-    lv_obj_remove_flag(search_line, LV_OBJ_FLAG_HIDDEN);
-    lv_group_focus_obj(search_line);
-    lv_obj_add_flag(ta, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(counter, LV_OBJ_FLAG_HIDDEN);
-    set_note(HINT_SEARCH, false);
-    search_apply(false);
+    lv_group_add_obj(group, c->search_line);
+    lv_obj_remove_flag(c->search_line, LV_OBJ_FLAG_HIDDEN);
+    lv_group_focus_obj(c->search_line);
+    lv_obj_add_flag(c->ta, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(c->counter, LV_OBJ_FLAG_HIDDEN);
+    set_note(c, HINT_SEARCH, false);
+    search_apply(c, false);
 }
 
 // Enter keeps the view where the search took it; Esc (restore) goes back to where the search began
-static void search_leave(bool restore) {
-    if (!searching) {
+static void search_leave(chat_t *c, bool restore) {
+    if (!c->searching) {
         return;
     }
-    searching = false;
-    query[0]  = '\0';
-    search_apply(false); // no query, no hits: every row plain again
-    lv_obj_remove_flag(ta, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(counter, LV_OBJ_FLAG_HIDDEN);
-    lv_group_focus_obj(ta);
-    lv_group_remove_obj(search_line);
-    lv_obj_add_flag(search_line, LV_OBJ_FLAG_HIDDEN);
-    set_default_note();
+    c->searching = false;
+    c->query[0]  = '\0';
+    search_apply(c, false); // no query, no hits: every row plain again
+    lv_obj_remove_flag(c->ta, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(c->counter, LV_OBJ_FLAG_HIDDEN);
+    lv_group_focus_obj(c->ta);
+    lv_group_remove_obj(c->search_line);
+    lv_obj_add_flag(c->search_line, LV_OBJ_FLAG_HIDDEN);
+    set_default_note(c);
     if (restore) {
-        lv_obj_update_layout(list);
-        lv_obj_scroll_to_y(list, search_from_end ? LV_COORD_MAX : search_from_y, LV_ANIM_OFF);
+        lv_obj_update_layout(c->list);
+        lv_obj_scroll_to_y(c->list, c->search_from_end ? LV_COORD_MAX : c->search_from_y, LV_ANIM_OFF);
     }
 }
 
@@ -297,217 +305,226 @@ static void search_leave(bool restore) {
 
 // Frames message sel_pos like search's current hit. The list was rebuilt maybe: the message is found again by its seq,
 // and select mode ends when it scrolled out of the window.
-static void select_apply(bool scroll) {
-    if (selecting) {
-        sel_pos = mesh_chat_select_of_seq(copy, copy_n, sel_seq);
-        if (sel_pos == MESH_CHAT_NO_HIT) {
-            select_leave();
+static void select_apply(chat_t *c, bool scroll) {
+    if (c->selecting) {
+        c->sel_pos = mesh_chat_select_of_seq(c->copy, c->copy_n, c->sel_seq);
+        if (c->sel_pos == MESH_CHAT_NO_HIT) {
+            select_leave(c);
             return;
         }
     }
-    for (size_t i = 0; i < copy_n; i++) {
-        lv_obj_t *item = lv_obj_get_child(list, (int32_t)i);
+    for (size_t i = 0; i < c->copy_n; i++) {
+        lv_obj_t *item = lv_obj_get_child(c->list, (int32_t)i);
         if (!item) {
             break;
         }
-        bool on = selecting && i == sel_pos;
+        bool on = c->selecting && i == c->sel_pos;
         lv_obj_set_style_bg_opa(item, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
         lv_obj_set_style_border_opa(item, on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     }
-    if (scroll && selecting) {
-        lv_obj_t *item = lv_obj_get_child(list, (int32_t)sel_pos);
+    if (scroll && c->selecting) {
+        lv_obj_t *item = lv_obj_get_child(c->list, (int32_t)c->sel_pos);
         if (item) {
-            lv_obj_update_layout(list);
+            lv_obj_update_layout(c->list);
             lv_obj_scroll_to_view(item, LV_ANIM_OFF);
         }
     }
 }
 
-static void select_enter(void) {
-    size_t pos = mesh_chat_select_step(MESH_CHAT_NO_HIT, copy_n, -1);
-    if (selecting || searching || pos == MESH_CHAT_NO_HIT) {
+static void select_enter(chat_t *c) {
+    size_t pos = mesh_chat_select_step(MESH_CHAT_NO_HIT, c->copy_n, -1);
+    if (c->selecting || c->searching || pos == MESH_CHAT_NO_HIT) {
         return;
     }
-    selecting = true;
-    sel_pos   = pos;
-    sel_seq   = copy[pos].seq;
-    set_note(HINT_SELECT, false);
-    select_apply(true);
+    c->selecting = true;
+    c->sel_pos   = pos;
+    c->sel_seq   = c->copy[pos].seq;
+    set_note(c, HINT_SELECT, false);
+    select_apply(c, true);
 }
 
 // Back to typing; the compose line kept the focus all along
-static void select_leave(void) {
-    if (!selecting) {
+static void select_leave(chat_t *c) {
+    if (!c->selecting) {
         return;
     }
-    selecting = false;
-    sel_pos   = MESH_CHAT_NO_HIT;
-    select_apply(false);
-    set_default_note();
+    c->selecting = false;
+    c->sel_pos   = MESH_CHAT_NO_HIT;
+    select_apply(c, false);
+    set_default_note(c);
 }
 
 // Enter on someone else's channel message starts the compose line with their mention; anything else just goes back
-static void select_pick(void) {
+static void select_pick(chat_t *c) {
     char mention[MESH_NAME_MAX * 2 + 8];
-    bool can = !dm_mode && sel_pos < copy_n && mesh_chat_mention(&copy[sel_pos], mention, sizeof(mention));
-    bool own = sel_pos < copy_n && copy[sel_pos].outgoing;
-    select_leave();
+    bool can = !c->target.dm && c->sel_pos < c->copy_n && mesh_chat_mention(&c->copy[c->sel_pos], mention, sizeof(mention));
+    bool own = c->sel_pos < c->copy_n && c->copy[c->sel_pos].outgoing;
+    select_leave(c);
     if (!can) {
-        if (!dm_mode && !own) {
-            set_note("Cannot mention that name", true);
+        if (!c->target.dm && !own) {
+            set_note(c, "Cannot mention that name", true);
         }
         return;
     }
-    char const *draft = lv_textarea_get_text(ta);
-    if (!mesh_chat_mention_fits(draft, mention, text_max())) {
-        set_note("Too long to mention", true);
+    char const *draft = lv_textarea_get_text(c->ta);
+    if (!mesh_chat_mention_fits(draft, mention, text_max(c))) {
+        set_note(c, "Too long to mention", true);
         return;
     }
-    lv_textarea_set_cursor_pos(ta, 0);
-    lv_textarea_add_text(ta, mention);
-    lv_textarea_set_cursor_pos(ta, LV_TEXTAREA_CURSOR_LAST);
+    lv_textarea_set_cursor_pos(c->ta, 0);
+    lv_textarea_add_text(c->ta, mention);
+    lv_textarea_set_cursor_pos(c->ta, LV_TEXTAREA_CURSOR_LAST);
 }
 
 // Keys while selecting: Up/Down step, Enter picks, everything else is swallowed (Esc is the shell's: on_esc)
-static void select_key(uint32_t key) {
+static void select_key(chat_t *c, uint32_t key) {
     if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
-        size_t pos = mesh_chat_select_step(sel_pos, copy_n, key == LV_KEY_UP ? -1 : 1);
+        size_t pos = mesh_chat_select_step(c->sel_pos, c->copy_n, key == LV_KEY_UP ? -1 : 1);
         if (pos == MESH_CHAT_NO_HIT) {
-            select_leave();
+            select_leave(c);
             return;
         }
-        sel_pos = pos;
-        sel_seq = copy[pos].seq;
-        select_apply(true);
+        c->sel_pos = pos;
+        c->sel_seq = c->copy[pos].seq;
+        select_apply(c, true);
     } else if (key == LV_KEY_ENTER) {
-        select_pick();
+        select_pick(c);
     }
 }
 
 // The compose line sees a key before the textarea does: "/" on an empty line starts a search and never reaches the
 // draft
 static void on_compose_key(lv_event_t *e) {
+    chat_t  *c   = lv_event_get_user_data(e);
     uint32_t key = lv_event_get_key(e);
-    if (selecting) {
+    if (c->selecting) {
         lv_event_stop_processing(e);
-        select_key(key);
-    } else if (key == '/' && !lv_textarea_get_text(ta)[0]) {
+        select_key(c, key);
+    } else if (key == '/' && !lv_textarea_get_text(c->ta)[0]) {
         lv_event_stop_processing(e);
-        search_enter();
-    } else if (key == LV_KEY_UP && !lv_textarea_get_text(ta)[0] && copy_n) {
+        search_enter(c);
+    } else if (key == LV_KEY_UP && !lv_textarea_get_text(c->ta)[0] && c->copy_n) {
         lv_event_stop_processing(e); // with a draft Up keeps scrolling the list (on_key)
-        select_enter();
+        select_enter(c);
     }
 }
 
 // Keys while searching (the search line has the focus): typing and Backspace edit the query, Up/Down jump between
 // hits, Enter is done
 static void on_search_key(lv_event_t *e) {
+    chat_t  *c   = lv_event_get_user_data(e);
     uint32_t key = lv_event_get_key(e);
-    if (!searching) {
+    if (!c->searching) {
         return;
     }
     if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
-        if (hit_n == 0) {
+        if (c->hit_n == 0) {
             return;
         }
-        hit_pos  = mesh_chat_hit_step(hit_pos, hit_n, key == LV_KEY_UP ? -1 : 1);
-        hit_seq  = copy[hits[hit_pos]].seq; // hits[] matches copy[]: both were set by the last search_apply
-        have_hit = true;
-        search_apply(true);
+        c->hit_pos  = mesh_chat_hit_step(c->hit_pos, c->hit_n, key == LV_KEY_UP ? -1 : 1);
+        c->hit_seq  = c->copy[c->hits[c->hit_pos]].seq; // hits[] matches copy[]: both were set by the last search_apply
+        c->have_hit = true;
+        search_apply(c, true);
     } else if (key == LV_KEY_ENTER) {
-        search_leave(false);
-    } else if (list_filter_edit(query, sizeof(query), key)) {
-        have_hit = false; // a new query starts at its newest hit
-        search_apply(true);
+        search_leave(c, false);
+    } else if (list_filter_edit(c->query, sizeof(c->query), key)) {
+        c->have_hit = false; // a new query starts at its newest hit
+        search_apply(c, true);
     }
 }
 
+// The group is this screen's own (shell_open makes one per screen): its user_data is the screen's chat
 static void on_focus_move(lv_group_t *group) {
-    if (searching && lv_group_get_focused(group) != search_line) {
-        lv_group_focus_obj(search_line); // Tab does nothing while searching (no retry from a hidden compose line)
+    chat_t *c = lv_group_get_user_data(group);
+    if (!c) {
         return;
     }
-    if (tab_hop && lv_group_get_focused(group) == tab_hop) {
-        if (selecting) {
-            lv_group_focus_obj(ta); // no retry while a message is framed
+    if (c->searching && lv_group_get_focused(group) != c->search_line) {
+        lv_group_focus_obj(c->search_line); // Tab does nothing while searching (no retry from a hidden compose line)
+        return;
+    }
+    if (c->tab_hop && lv_group_get_focused(group) == c->tab_hop) {
+        if (c->selecting) {
+            lv_group_focus_obj(c->ta); // no retry while a message is framed
             return;
         }
-        retry_failed();
-        lv_group_focus_obj(ta); // calls this again, with the compose line focused: a no-op
+        retry_failed(c);
+        lv_group_focus_obj(c->ta); // calls this again, with the compose line focused: a no-op
     }
 }
 
 static void on_key(lv_event_t *e) {
+    chat_t *c = lv_event_get_user_data(e);
     switch (lv_event_get_key(e)) {
-        case LV_KEY_UP: shell_scroll_by(list, SCROLL_STEP_PX); break;
-        case LV_KEY_DOWN: shell_scroll_by(list, -SCROLL_STEP_PX); break;
+        case LV_KEY_UP: shell_scroll_by(c->list, SCROLL_STEP_PX); break;
+        case LV_KEY_DOWN: shell_scroll_by(c->list, -SCROLL_STEP_PX); break;
         default: break;
     }
 }
 
 // Esc leaves select mode or a search first (#48), then clears a draft (#57), then leaves
 static bool on_esc(void *arg) {
-    (void)arg;
-    if (selecting) {
-        select_leave();
+    chat_t *c = arg;
+    if (c->selecting) {
+        select_leave(c);
         return true;
     }
-    if (searching) {
-        search_leave(true);
+    if (c->searching) {
+        search_leave(c, true);
         return true;
     }
-    if (!ta || !lv_textarea_get_text(ta)[0]) {
+    if (!c->ta || !lv_textarea_get_text(c->ta)[0]) {
         return false;
     }
-    lv_textarea_set_text(ta, "");
+    lv_textarea_set_text(c->ta, "");
     return true;
 }
 
-// The chat is on screen (#50): no notice is posted for it and its notices are marked read. The key is the one this
-// screen was loaded with (the statics above belong to whichever chat opened last).
-static mesh_chat_key_t loaded_key;
-static bool            loaded_set;
-
+// The chat is on screen (#50): no notice is posted for it and its notices are marked read
 static void on_loaded(lv_event_t *e) {
-    (void)e;
-    if (dm_mode) {
-        mesh_chat_key_dm(&loaded_key, peer);
-    } else {
-        mesh_chat_key_channel(&loaded_key, channel);
-    }
-    loaded_set = true;
-    mesh_notify_set_open_chat(&loaded_key);
+    chat_t *c = lv_event_get_user_data(e);
+    c->loaded = true;
+    mesh_notify_set_open_chat(&c->target.key);
 }
 
 static void on_unload(lv_event_t *e) {
-    (void)e;
-    if (loaded_set) {
-        mesh_notify_clear_open_chat(&loaded_key); // only if it is still the open one
-        loaded_set = false;
+    chat_t *c = lv_event_get_user_data(e);
+    if (c->loaded) {
+        mesh_notify_clear_open_chat(&c->target.key); // only if it is still the open one
+        c->loaded = false;
     }
 }
 
+static void chat_unlink(chat_t *c) {
+    for (chat_t **p = &chats; *p; p = &(*p)->next) {
+        if (*p == c) {
+            *p = c->next;
+            return;
+        }
+    }
+}
+
+// The screen goes (its children after this): the timer first, so tick never runs on freed state, then the state
 static void on_delete(lv_event_t *e) {
+    chat_t *c = lv_event_get_user_data(e);
     on_unload(e);
-    if (timer) {
-        lv_timer_delete(timer);
-        timer = NULL;
+    if (c->timer) {
+        lv_timer_delete(c->timer);
+        c->timer = NULL;
     }
     // The focus callback was set on this screen's group; the shell usually deletes the group first (then ta has none)
-    lv_group_t *group = ta ? lv_obj_get_group(ta) : NULL;
+    lv_group_t *group = c->ta ? lv_obj_get_group(c->ta) : NULL;
     if (group) {
         lv_group_set_focus_cb(group, NULL);
+        lv_group_set_user_data(group, NULL);
     }
-    heap_caps_free(copy);
-    copy = NULL;
-    list = ta = counter = note = tab_hop = search_line = NULL;
-    searching = false;
-    selecting = false;
-    sel_pos   = MESH_CHAT_NO_HIT;
+    lv_obj_set_user_data(c->screen, NULL);
+    chat_unlink(c);
+    heap_caps_free(c->copy);
+    heap_caps_free(c);
 }
 
-static void style_ta(void) {
+static void style_ta(lv_obj_t *ta) {
     lv_obj_set_width(ta, LV_PCT(100));
     lv_obj_set_style_bg_color(ta, lv_color_hex(THEME_TILE), 0);
     lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, 0);
@@ -525,114 +542,187 @@ static void style_ta(void) {
 
 // The search key (●, #79), as "/" on an empty compose line
 static void on_search(void *arg) {
-    (void)arg;
-    if (!selecting) {
-        search_enter(); // does nothing while a search is open
+    chat_t *c = arg;
+    if (!c->selecting) {
+        search_enter(c); // does nothing while a search is open
     }
 }
 
-static lv_obj_t *build_chat(void) {
-    lv_obj_t *screen = shell_page_create();
-    lv_obj_set_style_pad_bottom(screen, THEME_PAD, 0);
-    lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(screen, 10, 0);
-    lv_obj_set_scrollable(screen, false);
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    lv_obj_add_event_cb(screen, on_loaded, LV_EVENT_SCREEN_LOADED, NULL);
-    lv_obj_add_event_cb(screen, on_unload, LV_EVENT_SCREEN_UNLOAD_START, NULL);
-    shell_on_esc(on_esc, NULL);
-    shell_on_search(on_search, NULL);
+static lv_obj_t *create_search_line(chat_t *c) {
+    // Takes the compose line's place while searching (#48), styled like it so nothing else moves
+    lv_obj_t *line = lv_label_create(c->screen);
+    lv_obj_set_width(line, LV_PCT(100));
+    lv_label_set_long_mode(line, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_bg_color(line, lv_color_hex(THEME_TILE), 0);
+    lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(line, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_text_font(line, lichen_font(LICHEN_FONT_SMALL), 0);
+    lv_obj_set_style_radius(line, 14, 0);
+    lv_obj_set_style_pad_all(line, 14, 0);
+    lv_obj_set_style_border_width(line, 3, 0);
+    lv_obj_set_style_border_color(line, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_outline_width(line, 0, LV_STATE_ANY);
+    lv_obj_add_flag(line, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(line, on_search_key, LV_EVENT_KEY, c);
+    return line;
+}
 
+static void create_widgets(chat_t *c) {
+    lv_obj_t *screen = c->screen;
     lv_obj_t *heading = lv_label_create(screen);
     lv_obj_set_width(heading, LV_PCT(100));
     lv_label_set_long_mode(heading, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
     lv_obj_set_style_text_color(heading, lv_color_hex(THEME_AMBER), 0);
-    lv_label_set_text(heading, channel); // "@bob" for a DM, as the Chat list's rows (#101)
+    lv_label_set_text(heading, c->target.title); // "@bob" for a DM, as the Chat list's rows (#101)
 
-    list = lv_obj_create(screen);
-    lv_obj_remove_style_all(list);
-    lv_obj_set_width(list, LV_PCT(100));
-    lv_obj_set_flex_grow(list, 1);
-    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(list, 8, 0);
-    lv_obj_set_scroll_dir(list, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_ACTIVE);
-    shell_scroll_tame(list);
+    c->list = lv_obj_create(screen);
+    lv_obj_remove_style_all(c->list);
+    lv_obj_set_width(c->list, LV_PCT(100));
+    lv_obj_set_flex_grow(c->list, 1);
+    lv_obj_set_flex_flow(c->list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(c->list, 8, 0);
+    lv_obj_set_scroll_dir(c->list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(c->list, LV_SCROLLBAR_MODE_ACTIVE);
+    shell_scroll_tame(c->list);
 
-    ta = lv_textarea_create(screen);
-    lv_textarea_set_one_line(ta, true);
-    lv_textarea_set_max_length(ta, (uint32_t)text_max());
-    lv_textarea_set_placeholder_text(ta, "Write a message");
-    style_ta();
-    lv_obj_add_event_cb(ta, on_ready, LV_EVENT_READY, NULL);
-    lv_obj_add_event_cb(ta, on_changed, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_add_event_cb(ta, on_key, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(ta, on_compose_key, LV_EVENT_KEY | LV_EVENT_PREPROCESS, NULL);
+    c->ta = lv_textarea_create(screen);
+    lv_textarea_set_one_line(c->ta, true);
+    lv_textarea_set_max_length(c->ta, (uint32_t)text_max(c));
+    lv_textarea_set_placeholder_text(c->ta, "Write a message");
+    style_ta(c->ta);
+    lv_obj_add_event_cb(c->ta, on_ready, LV_EVENT_READY, c);
+    lv_obj_add_event_cb(c->ta, on_changed, LV_EVENT_VALUE_CHANGED, c);
+    lv_obj_add_event_cb(c->ta, on_key, LV_EVENT_KEY, c);
+    lv_obj_add_event_cb(c->ta, on_compose_key, LV_EVENT_KEY | LV_EVENT_PREPROCESS, c);
 
-    // Takes the compose line's place while searching (#48), styled like it so nothing else moves
-    search_line = lv_label_create(screen);
-    lv_obj_set_width(search_line, LV_PCT(100));
-    lv_label_set_long_mode(search_line, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_bg_color(search_line, lv_color_hex(THEME_TILE), 0);
-    lv_obj_set_style_bg_opa(search_line, LV_OPA_COVER, 0);
-    lv_obj_set_style_text_color(search_line, lv_color_hex(THEME_AMBER), 0);
-    lv_obj_set_style_text_font(search_line, lichen_font(LICHEN_FONT_SMALL), 0);
-    lv_obj_set_style_radius(search_line, 14, 0);
-    lv_obj_set_style_pad_all(search_line, 14, 0);
-    lv_obj_set_style_border_width(search_line, 3, 0);
-    lv_obj_set_style_border_color(search_line, lv_color_hex(THEME_AMBER), 0);
-    lv_obj_set_style_outline_width(search_line, 0, LV_STATE_ANY);
-    lv_obj_add_flag(search_line, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_event_cb(search_line, on_search_key, LV_EVENT_KEY, NULL);
+    c->search_line = create_search_line(c);
 
-    counter = lv_label_create(screen);
-    lv_obj_set_width(counter, LV_PCT(100));
-    note = lv_label_create(screen);
-    lv_obj_set_width(note, LV_PCT(100));
-    set_default_note();
-    lv_obj_set_style_text_color(counter, lv_color_hex(THEME_DIM), 0);
-    show_counter();
+    c->counter = lv_label_create(screen);
+    lv_obj_set_width(c->counter, LV_PCT(100));
+    c->note = lv_label_create(screen);
+    lv_obj_set_width(c->note, LV_PCT(100));
+    set_default_note(c);
+    lv_obj_set_style_text_color(c->counter, lv_color_hex(THEME_DIM), 0);
+    show_counter(c);
+}
 
-    lv_group_t *group = lv_group_get_default();
-    tab_hop           = NULL;
-    if (dm_mode && group) {
-        tab_hop = lv_obj_create(screen);
-        lv_obj_remove_style_all(tab_hop);
-        lv_obj_set_size(tab_hop, 0, 0);
-        lv_obj_set_floating(tab_hop, true);
-        lv_obj_set_clickable(tab_hop, false);
-        lv_group_add_obj(group, tab_hop);
-        lv_group_focus_obj(ta);
+// Runs inside shell_open, so only once the shell pushed the screen: the target is committed here and nowhere else
+static lv_obj_t *build_chat(void) {
+    if (!building) {
+        return NULL;
+    }
+    chat_t *c = heap_caps_calloc(1, sizeof(*c), MALLOC_CAP_SPIRAM);
+    mesh_msg_t *copy = c ? heap_caps_malloc(SHOW_MESSAGES * sizeof(*copy), MALLOC_CAP_SPIRAM) : NULL;
+    if (!copy) {
+        ESP_LOGW("meshcore_chat", "no memory for a chat screen");
+        heap_caps_free(c);
+        return NULL; // shell_open takes the screen off the stack again
+    }
+    c->target           = *building;
+    c->copy             = copy;
+    c->sel_pos          = MESH_CHAT_NO_HIT;
+    c->hit_pos          = MESH_CHAT_NO_HIT;
+    c->shown_generation = UINT32_MAX;
+
+    lv_obj_t *screen = shell_page_create();
+    c->screen        = screen;
+    lv_obj_set_user_data(screen, c);
+    lv_obj_set_style_pad_bottom(screen, THEME_PAD, 0);
+    lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(screen, 10, 0);
+    lv_obj_set_scrollable(screen, false);
+    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, c);
+    lv_obj_add_event_cb(screen, on_loaded, LV_EVENT_SCREEN_LOADED, c);
+    lv_obj_add_event_cb(screen, on_unload, LV_EVENT_SCREEN_UNLOAD_START, c);
+    shell_on_esc(on_esc, c);
+    shell_on_search(on_search, c);
+    c->next = chats;
+    chats   = c;
+
+    create_widgets(c);
+
+    lv_group_t *group = lv_group_get_default(); // the screen's own, made by shell_open
+    if (c->target.dm && group) {
+        c->tab_hop = lv_obj_create(screen);
+        lv_obj_remove_style_all(c->tab_hop);
+        lv_obj_set_size(c->tab_hop, 0, 0);
+        lv_obj_set_floating(c->tab_hop, true);
+        lv_obj_set_clickable(c->tab_hop, false);
+        lv_group_add_obj(group, c->tab_hop);
+        lv_group_focus_obj(c->ta);
     }
     if (group) {
-        lv_group_set_focus_cb(group, on_focus_move); // the screen's own group; keeps the focus on a search (#48)
+        lv_group_set_user_data(group, c);
+        lv_group_set_focus_cb(group, on_focus_move); // keeps the focus on a search (#48), Tab retries (#47)
     }
-    searching = false;
-    selecting = false;
-    sel_pos   = MESH_CHAT_NO_HIT;
-    copy_n           = 0;
-    copy             = heap_caps_malloc(SHOW_MESSAGES * sizeof(*copy), MALLOC_CAP_SPIRAM);
-    shown_generation = UINT32_MAX;
-    if (copy) {
-        timer = lv_timer_create(tick, TICK_MS, NULL);
-        tick(timer);
-    }
+    c->timer = lv_timer_create(tick, TICK_MS, c);
+    tick(c->timer);
     return screen;
 }
 
-// ---- a channel chat, from the Chat list (#48) ------------------------------------------------------------------------
+// ---- opening a chat (#126) --------------------------------------------------------------------------------------------
 
-static void open_chat(void *arg) {
-    snprintf(channel, sizeof(channel), "%s", (char const *)arg);
-    dm_mode = false;
-    shell_open(build_chat, SCREEN_CHAT);
+// The chat screen that is showing, NULL when the screen showing is not a chat (or a cover is over it)
+static chat_t *chat_on_top(void) {
+    lv_obj_t *active = lv_screen_active();
+    for (chat_t *c = chats; c; c = c->next) {
+        if (c->screen == active) {
+            return c;
+        }
+    }
+    return NULL;
+}
+
+typedef struct {
+    mesh_chat_target_t want;
+    lv_obj_t          *popped; // compared only, never used: the screen may be gone
+} replace_t;
+
+static void open_target(mesh_chat_target_t const *want);
+
+// shell_back_then's follow-up: the other chat is gone (unless the pop was refused), the one below shows
+static void open_after_pop(void *arg) {
+    replace_t *r = arg;
+    if (lv_screen_active() != r->popped) {
+        open_target(&r->want);
+    }
+    heap_caps_free(r);
+}
+
+// LVGL task. The same chat on top: nothing happens, the draft stays. Another chat on top: that one goes (Esc from the
+// new one then goes where Esc from the old one went), then the new one opens. Otherwise a new chat screen is pushed.
+static void open_target(mesh_chat_target_t const *want) {
+    chat_t *top = chat_on_top();
+    switch (mesh_chat_open_how(top ? &top->target : NULL, want)) {
+        case MESH_CHAT_OPEN_KEEP: return;
+        case MESH_CHAT_OPEN_REPLACE: {
+            replace_t *r = heap_caps_malloc(sizeof(*r), MALLOC_CAP_SPIRAM);
+            if (r) {
+                r->want   = *want;
+                r->popped = top->screen;
+                shell_back_then(open_after_pop, r);
+            }
+            return;
+        }
+        case MESH_CHAT_OPEN_PUSH:
+            building = want;
+            shell_open(build_chat, want->dm ? SCREEN_DM : SCREEN_CHAT);
+            building = NULL;
+            return;
+    }
 }
 
 void meshcore_chat_open_channel(char const *name) {
-    char copy_name[sizeof(channel)]; // name may be a row of a list that is rebuilt while the chat opens
-    snprintf(copy_name, sizeof(copy_name), "%s", name);
-    open_chat(copy_name);
+    mesh_chat_target_t want; // name may be a row of a list that is rebuilt while the chat opens: copied here
+    mesh_chat_target_channel(&want, name);
+    open_target(&want);
+}
+
+void meshcore_chat_open_dm(uint8_t const prefix[6], char const *title) {
+    mesh_chat_target_t want;
+    mesh_chat_target_dm(&want, prefix, title);
+    open_target(&want);
 }
 
 // ---- the contact picker, then the DM chat (#47) --------------------------------------------------------------------
@@ -641,17 +731,7 @@ static mesh_contact_t *peers;
 
 static void open_dm(void *arg) {
     mesh_contact_t const *c = arg;
-    snprintf(channel, sizeof(channel), "@%s", c->name[0] ? c->name : "(no name)");
-    memcpy(peer, c->pubkey, MF_PREFIX);
-    dm_mode = true;
-    shell_open(build_chat, SCREEN_DM);
-}
-
-void meshcore_chat_open_dm(uint8_t const prefix[6], char const *title) {
-    snprintf(channel, sizeof(channel), "%s%s", title[0] == '@' ? "" : "@", title);
-    memcpy(peer, prefix, MF_PREFIX);
-    dm_mode = true;
-    shell_open(build_chat, SCREEN_DM);
+    meshcore_chat_open_dm(c->pubkey, c->name);
 }
 
 static void free_peers(lv_event_t *e) {
