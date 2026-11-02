@@ -20,18 +20,20 @@ typedef struct {
     bool     have_app, have_legacy;
     uint32_t app, legacy;
     bool     fail_set, fail_erase_legacy, corrupt_write; // corrupt_write: the write lands, a different value reads back
+    bool     err_app, err_legacy; // the read fails (not "missing": NVS could not answer)
+    bool     err_read_back;       // the app's read fails once something was written
     int      sets, erases_app, erases_legacy;
 } fake_t;
 
-static bool f_get_app(void *ctx, uint32_t *v) {
+static app_key_read_t f_get_app(void *ctx, uint32_t *v) {
     fake_t *f = ctx;
     *v        = f->app;
-    return f->have_app;
+    return f->err_app || (f->err_read_back && f->sets) ? APP_KEY_ERROR : f->have_app ? APP_KEY_FOUND : APP_KEY_MISSING;
 }
-static bool f_get_legacy(void *ctx, uint32_t *v) {
+static app_key_read_t f_get_legacy(void *ctx, uint32_t *v) {
     fake_t *f = ctx;
     *v        = f->legacy;
-    return f->have_legacy;
+    return f->err_legacy ? APP_KEY_ERROR : f->have_legacy ? APP_KEY_FOUND : APP_KEY_MISSING;
 }
 static bool f_set_app(void *ctx, uint32_t v) {
     fake_t *f = ctx;
@@ -107,6 +109,20 @@ static void adopt_runs(void) {
     CHECK(run(&stuck, &got) == APP_ADOPTED_DROP_FAILED && stuck.have_legacy && stuck.app == 720);
     stuck.fail_erase_legacy = false;
     CHECK(run(&stuck, &got) == APP_ADOPTED_DROPPED && !stuck.have_legacy);
+
+    // The app's key cannot be read this boot (a transient NVS error) while both exist: never mistaken for "missing",
+    // so the newer app value is not overwritten with the old key; nothing is done until a boot that can read it
+    fake_t err = {.have_app = true, .app = 1440, .have_legacy = true, .legacy = 720, .err_app = true};
+    CHECK(run(&err, &got) == APP_ADOPTED_SKIPPED && err.sets == 0 && err.app == 1440 && err.have_legacy);
+    CHECK(err.erases_app == 0 && err.erases_legacy == 0);
+    err.err_app = false;
+    CHECK(run(&err, &got) == APP_ADOPTED_DROPPED && err.app == 1440 && !err.have_legacy);
+    // The old key cannot be read: skipped too (not dropped, not copied)
+    fake_t lerr = {.have_legacy = true, .legacy = 720, .err_legacy = true};
+    CHECK(run(&lerr, &got) == APP_ADOPTED_SKIPPED && lerr.sets == 0 && lerr.have_legacy && lerr.erases_legacy == 0);
+    // The read-back after a copy fails: the copy is not trusted, the old key stays
+    fake_t rb = {.have_legacy = true, .legacy = 720, .err_read_back = true};
+    CHECK(run(&rb, &got) == APP_ADOPTED_COPY_FAILED && !rb.have_app && rb.have_legacy && rb.erases_app == 1);
 }
 
 int main(void) {

@@ -21,10 +21,12 @@ app_adopt_t app_adopt_plan(bool have_app, bool have_legacy);
 
 // The whole adoption of one key (u8 or u32, carried as uint32_t) over a store: lichen_settings.c's NVS, a fake in the
 // host test. Each call does one NVS step and says whether it worked.
+typedef enum { APP_KEY_FOUND, APP_KEY_MISSING, APP_KEY_ERROR } app_key_read_t; // ERROR: NVS could not answer
+
 typedef struct {
     void *ctx;
-    bool (*get_app)(void *ctx, uint32_t *value);    // true when the app's namespace has the key
-    bool (*get_legacy)(void *ctx, uint32_t *value); // true when badge_fw has it
+    app_key_read_t (*get_app)(void *ctx, uint32_t *value);    // the key in the app's namespace
+    app_key_read_t (*get_legacy)(void *ctx, uint32_t *value); // the key in badge_fw
     bool (*set_app)(void *ctx, uint32_t value);     // written and committed
     bool (*erase_app)(void *ctx);                   // a copy that did not read back: gone, so the next boot copies again
     bool (*erase_legacy)(void *ctx);
@@ -36,6 +38,7 @@ typedef enum {
     APP_ADOPTED_COPY_FAILED, // not written, or read back different (that copy erased): the old key stays, next boot tries again
     APP_ADOPTED_DROPPED,     // the app already had it: the old key is erased (its value is ignored)
     APP_ADOPTED_DROP_FAILED, // the same, but the erase failed: tried again next boot
+    APP_ADOPTED_SKIPPED,     // a key could not be read (an NVS error, not "missing"): nothing done, tried again next boot
 } app_adopted_t;
 
 // *legacy gets the old key's value when there was one

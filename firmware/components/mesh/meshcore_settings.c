@@ -44,6 +44,7 @@ static char const TAG[] = "meshcore";
 #define KEY_MAX         44   // a 32-byte key in base64
 #define TX_SETTLE_MS    1000 // TX power is saved this long after the last step, to spare the flash
 #define NAME_CHARS      31
+#define UI_CALL_TRIES   100  // lichen_ui_call tries (up to 2.1 s each) before a job's result is dropped
 
 // ---- the change, off the LVGL task -------------------------------------------------------------------------------
 
@@ -99,8 +100,17 @@ static void job_task(void *arg) {
         case JOB_CHANNEL_INFO: job->n = mesh_channel_info(-1, job->text, &job->info, MESH_SET_WAIT_MS); break;
         case JOB_CHANNEL_RENAME: job->reason = mesh_channel_rename(job->text, job->title); break;
     }
-    // Until it is queued: job_finish frees the job and clears job_running, so the page is never left busy
-    while (!lichen_ui_call(job_finish, job)) {
+    // job_finish frees the job and clears job_running. Each try waits up to 2 s for the LVGL lock: after UI_CALL_TRIES
+    // the LVGL task is stuck, so the result is dropped here and the page is not left busy for good
+    for (int tries = 0; !lichen_ui_call(job_finish, job); tries++) {
+        if (tries + 1 >= UI_CALL_TRIES) {
+            ESP_LOGE(TAG, "settings job %d: result not handed to the screen, dropped", (int)job->kind);
+            memset(job->key, 0, sizeof(job->key));
+            memset(&job->info, 0, sizeof(job->info));
+            heap_caps_free(job);
+            __atomic_store_n(&job_running, false, __ATOMIC_RELEASE);
+            break;
+        }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     vTaskDelete(NULL);

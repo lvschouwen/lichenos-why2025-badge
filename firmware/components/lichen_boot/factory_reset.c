@@ -20,10 +20,8 @@
 #include "fw_console.h"
 #include "lichen_notify.h"
 #include "nvs.h"
+#include "nvs_erase_os.h"
 #include "nvs_flash.h"
-
-// One of the two callers that erase NVS (the other is main.c): past fw_console's refusing wrap (console.c)
-esp_err_t __real_nvs_flash_erase_partition(char const *part_name);
 #include "storage.h"
 
 #include <dirent.h>

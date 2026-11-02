@@ -149,36 +149,41 @@ typedef struct {
     bool                wide; // u32, else u8
 } adopt_ctx_t;
 
-static bool nvs_get_typed(nvs_handle_t nvs, adopt_ctx_t const *c, uint32_t *value) {
-    if (c->wide) {
-        return nvs_get_u32(nvs, c->key, value) == ESP_OK;
-    }
-    uint8_t v8 = 0;
-    bool    ok = nvs_get_u8(nvs, c->key, &v8) == ESP_OK;
-    *value     = v8;
-    return ok;
+static app_key_read_t key_read(esp_err_t err) {
+    return err == ESP_OK ? APP_KEY_FOUND : err == ESP_ERR_NVS_NOT_FOUND ? APP_KEY_MISSING : APP_KEY_ERROR;
 }
 
-static bool adopt_get_app(void *ctx, uint32_t *value) {
-    adopt_ctx_t const *c = ctx;
-    nvs_handle_t       nvs;
-    if (!open_app(c->app, NVS_READONLY, &nvs)) {
-        return false;
+// A namespace that was never written to does not exist yet (ESP_ERR_NVS_NOT_FOUND): the key is missing, not an error
+static app_key_read_t read_typed(char const *ns, adopt_ctx_t const *c, uint32_t *value) {
+    nvs_handle_t nvs;
+    esp_err_t    err = nvs_open(ns, NVS_READONLY, &nvs);
+    if (err == ESP_OK) {
+        if (c->wide) {
+            err = nvs_get_u32(nvs, c->key, value);
+        } else {
+            uint8_t v8 = 0;
+            err        = nvs_get_u8(nvs, c->key, &v8);
+            *value     = v8;
+        }
+        nvs_close(nvs);
     }
-    bool ok = nvs_get_typed(nvs, c, value);
-    nvs_close(nvs);
-    return ok;
+    if (key_read(err) == APP_KEY_ERROR) {
+        ESP_LOGW(TAG, "%s/%s unreadable: %s", ns, c->key, esp_err_to_name(err));
+    }
+    return key_read(err);
 }
 
-static bool adopt_get_legacy(void *ctx, uint32_t *value) {
+static app_key_read_t adopt_get_app(void *ctx, uint32_t *value) {
     adopt_ctx_t const *c = ctx;
-    nvs_handle_t       nvs;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
-        return false;
+    char               ns[16];
+    if (!app_ns_name(c->app->id, ns, sizeof(ns))) {
+        return APP_KEY_ERROR;
     }
-    bool ok = nvs_get_typed(nvs, c, value);
-    nvs_close(nvs);
-    return ok;
+    return read_typed(ns, c, value);
+}
+
+static app_key_read_t adopt_get_legacy(void *ctx, uint32_t *value) {
+    return read_typed(FW_NVS_NAMESPACE, ctx, value);
 }
 
 static bool adopt_set_app(void *ctx, uint32_t value) {
@@ -226,6 +231,8 @@ static bool adopt(lichen_app_t const *app, char const *key, bool wide) {
         bool ok = done == APP_ADOPTED_COPIED;
         ESP_LOG_LEVEL(ok ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s: %s=%lu adopted from %s (%s)", app->id, key,
                       (unsigned long)legacy, FW_NVS_NAMESPACE, ok ? "saved" : "failed, tried again next boot");
+    } else if (done == APP_ADOPTED_SKIPPED) {
+        ESP_LOGW(TAG, "%s: %s not adopted this boot (NVS read error), tried again next boot", app->id, key);
     }
     return done == APP_ADOPTED_COPIED;
 }

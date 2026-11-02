@@ -21,6 +21,7 @@ static char const TAG[] = "meshcore";
 #define SCREEN_ADVERT 138
 #define TASK_STACK    6144 // savePrefs keeps File objects on the stack
 #define REFRESH_MS    1000
+#define UI_CALL_TRIES 100 // lichen_ui_call tries (up to 2.1 s each) before a change's result is dropped
 
 typedef enum { CH_INTERVAL, CH_MANUAL, CH_LOCATION, CH_SHARE, CH_AUTOADD } change_kind_t;
 
@@ -112,8 +113,15 @@ static void change_task(void *arg) {
         case CH_SHARE: ch->reason = mesh_set_location_share(ch->flag); break;
         case CH_AUTOADD: ch->reason = mesh_set_autoadd(&ch->aa); break;
     }
-    // Until it is queued: change_finish frees ch and clears busy, so the page is never left busy
-    while (!lichen_ui_call(change_finish, ch)) {
+    // change_finish frees ch and clears busy. Each try waits up to 2 s for the LVGL lock: after UI_CALL_TRIES the LVGL
+    // task is stuck, so the result is dropped here and the page is not left busy for good
+    for (int tries = 0; !lichen_ui_call(change_finish, ch); tries++) {
+        if (tries + 1 >= UI_CALL_TRIES) {
+            ESP_LOGE(TAG, "advert change %d: result not handed to the screen, dropped", (int)ch->kind);
+            heap_caps_free(ch);
+            __atomic_store_n(&busy, false, __ATOMIC_RELEASE);
+            break;
+        }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     vTaskDelete(NULL);
