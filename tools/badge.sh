@@ -489,7 +489,7 @@ cmd_screenshot() {
     work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-shot.XXXXXX")
     trap "rm -f '$work/shot.bmp'; rmdir '$work' 2>/dev/null" EXIT # the dir stays when it holds the default PNG
     [ -n "$out" ] || out=$work/screenshot.png
-    if ! ota_curl --max-time 30 -o "$work/shot.bmp" "http://$ip:$OTA_PORT/screenshot"; then
+    if ! ota_curl --max-time 90 -o "$work/shot.bmp" "http://$ip:$OTA_PORT/screenshot"; then
         head -c 300 "$work/shot.bmp" 2>/dev/null | tr -d '\000' >&2 # --fail-with-body: the badge's reason is in the file
         echo >&2
         exit 1
