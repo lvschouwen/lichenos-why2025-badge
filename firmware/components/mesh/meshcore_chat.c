@@ -65,6 +65,7 @@ typedef struct chat {
     bool      have_hit;        // hit_seq names the current hit: it survives a rebuild by seq, not by index
     uint32_t  hit_seq;
     int32_t   search_from_y;   // where the list was when the search began: Esc goes back there
+    scroll_anchor_t search_from; // ... on the same messages, which new ones move in the list (#127)
     bool      search_from_end; // ... or it was at the end: Esc goes to the end, messages may have come in since
 
     // Select mode (#111)
@@ -118,6 +119,9 @@ static void search_apply(chat_t *c, bool scroll);
 static void select_apply(chat_t *c, bool scroll);
 static void select_leave(chat_t *c);
 
+// Scratch for shown_items, used within one call only (rebuild, search_enter/leave; all on the LVGL task)
+static scroll_item_t anchor_items[SHOW_MESSAGES];
+
 // The message rows on screen as scroll items, keyed by their seq: c->copy may hold the next snapshot already
 static size_t shown_items(chat_t *c, scroll_item_t *items) {
     size_t n = lv_obj_get_child_count(c->list) >= c->copy_n ? c->copy_n : 0; // copy_n: the rows of the last rebuild
@@ -133,7 +137,7 @@ static size_t shown_items(chat_t *c, scroll_item_t *items) {
 static void rebuild(chat_t *c, size_t n) {
     // At the end the view follows new messages. Above it, it stays on the messages being read (#127): by pixels alone
     // it slid a message on every new one, as the oldest of the window dropped off the top.
-    static scroll_item_t items[SHOW_MESSAGES]; // scratch, only while this runs (LVGL task)
+    scroll_item_t  *items  = anchor_items;
     bool            at_end = lv_obj_get_scroll_bottom(c->list) <= 0;
     int32_t         y      = lv_obj_get_scroll_y(c->list);
     scroll_anchor_t anchor = scroll_anchor_take(items, at_end ? 0 : shown_items(c, items), y);
@@ -294,6 +298,8 @@ static void search_enter(chat_t *c) {
     c->have_hit        = false;
     c->search_from_y   = lv_obj_get_scroll_y(c->list);
     c->search_from_end = lv_obj_get_scroll_bottom(c->list) <= 0;
+    c->search_from     = scroll_anchor_take(anchor_items, c->search_from_end ? 0 : shown_items(c, anchor_items),
+                                            c->search_from_y);
     // The search line takes the focus (and the keys) before the compose line hides: hiding a focused object moves the
     // focus on, which in a DM is the Tab-retry hop
     lv_group_add_obj(group, c->search_line);
@@ -320,8 +326,13 @@ static void search_leave(chat_t *c, bool restore) {
     lv_obj_add_flag(c->search_line, LV_OBJ_FLAG_HIDDEN);
     set_default_note(c);
     if (restore) {
+        // By the messages that were in view, not the pixels: new ones may have pushed them along since (#127)
         lv_obj_update_layout(c->list);
-        lv_obj_scroll_to_y(c->list, c->search_from_end ? LV_COORD_MAX : c->search_from_y, LV_ANIM_OFF);
+        int32_t y = c->search_from_y; // as it was when none of them is left
+        if (!c->search_from_end) {
+            scroll_anchor_find(&c->search_from, anchor_items, shown_items(c, anchor_items), &y);
+        }
+        lv_obj_scroll_to_y(c->list, c->search_from_end ? LV_COORD_MAX : y, LV_ANIM_OFF);
     }
 }
 
