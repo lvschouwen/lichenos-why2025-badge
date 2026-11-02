@@ -514,6 +514,62 @@ static std::vector<uint8_t> file_bytes(std::string const &path) {
     return out;
 }
 
+static void put_bytes(std::string const &path, std::vector<uint8_t> const &bytes) {
+    FILE *f = fopen(path.c_str(), "wb");
+    CHECK(f && fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size());
+    if (f) {
+        fclose(f);
+    }
+}
+
+static bool same_key(mesh::LocalIdentity a, mesh::LocalIdentity b) {
+    uint8_t x[PRV_KEY_SIZE + PUB_KEY_SIZE], y[sizeof(x)];
+    return a.writeTo(x, sizeof(x)) == sizeof(x) && b.writeTo(y, sizeof(y)) == sizeof(y) && memcmp(x, y, sizeof(x)) == 0;
+}
+
+// #110: the identity is saved atomically (written to "<name>.id.new", read back, renamed over "<name>.id"), every
+// point a power cut can stop it at leaves an identity that loads or none at all, and a zeroed one is never saved
+static void identity_store_checks(char const *root, mesh::RNG &rng) {
+    std::string   dir = std::string(root) + "/idtest", path = dir + "/_main.id", tmp = path + ".new";
+    IdentityStore st(SPIFFS, "/idtest");
+    st.begin();
+    mesh::LocalIdentity a(&rng), b(&rng), got;
+    for (int fat = 0; fat < 2; fat++) { // POSIX rename, then FatFs's (no rename over an existing file)
+        fs_shim_test_fat_rename(fat == 1);
+        unlink(path.c_str());
+        CHECK(!st.exists("_main") && !st.load("_main", got));
+        CHECK(st.save("_main", a) && st.load("_main", got) && same_key(got, a));
+        CHECK(st.save("_main", b) && st.load("_main", got) && same_key(got, b)); // over an existing one
+        CHECK(access(tmp.c_str(), F_OK) != 0);                                  // nothing left behind
+    }
+    fs_shim_test_fat_rename(false);
+    std::vector<uint8_t> good = file_bytes(path), half(good.begin(), good.begin() + 40);
+
+    // Cut while writing the new copy: the old file is what loads, the half ".new" is ignored
+    put_bytes(tmp, half);
+    CHECK(st.exists("_main") && st.load("_main", got) && same_key(got, b));
+    // Cut after FatFs's remove, before the rename: the verified ".new" loads and is put in place
+    unlink(path.c_str());
+    put_bytes(tmp, good);
+    CHECK(st.exists("_main") && st.load("_main", got) && same_key(got, b));
+    CHECK(file_bytes(path) == good && access(tmp.c_str(), F_OK) != 0);
+    // The first save ever cut short: no identity at all (a new one may be made), not an unreadable one
+    unlink(path.c_str());
+    put_bytes(tmp, half);
+    CHECK(!st.exists("_main") && !st.load("_main", got));
+    // A damaged "<name>.id" is never replaced by a ".new" on load: it stays unreadable, as #109 wants
+    put_bytes(path, half);
+    put_bytes(tmp, good);
+    CHECK(st.exists("_main") && !st.load("_main", got) && file_bytes(path) == half);
+
+    // What MyMesh holds for an unreadable file (all zeroes) is never saved, and the file stays as it was
+    CHECK(!st.save("_main", mesh::LocalIdentity()));
+    CHECK(file_bytes(path) == half);
+    unlink(path.c_str());
+    unlink(tmp.c_str());
+    rmdir(dir.c_str());
+}
+
 // #109: only a missing identity file makes a new identity. One that exists but can't be read (cut short by a power
 // loss) is kept byte for byte, nothing is saved over it, and the badge must not transmit.
 static void identity_file_checks(char const *root, uint8_t const *first_key, SimpleMeshTables &tables) {
@@ -556,6 +612,7 @@ int main(int argc, char **argv) {
     static Rng              rng;
     static SimpleMeshTables tables1, tables2, tables3, tables4, tables5, tables6, tables7;
     identity_move_checks_the_saved_copy(rng);
+    identity_store_checks(root, rng);
     static FakeApp          app;
     uint8_t                 first_key[PUB_KEY_SIZE];
 
@@ -580,6 +637,16 @@ int main(int argc, char **argv) {
         run(mesh, 2);
         CHECK(!app.from_badge.empty() && (app.from_badge.back()[0] == 8 || app.from_badge.back()[0] == 17) &&
               has_text(app.from_badge.back(), "Test Node: hello from the test vectors"));
+
+        // #110: the badge builds without ENABLE_PRIVATE_KEY_IMPORT, so a key import is answered "disabled" and the
+        // identity file is not touched (and the badge's own pipe never sends this command)
+        std::vector<uint8_t> import_key(65, 0x11);
+        import_key[0] = 24; // CMD_IMPORT_PRIVATE_KEY
+        app.from_badge.clear();
+        app.to_badge.push_back(import_key);
+        run(mesh, 2);
+        CHECK(!app.from_badge.empty() && app.from_badge.back()[0] == 15); // RESP_CODE_DISABLED
+        CHECK(memcmp(self_key(mesh), first_key, PUB_KEY_SIZE) == 0);
 
         run(mesh, 100); // let MyMesh finish its delayed contacts save (5 s after the last change)
     }

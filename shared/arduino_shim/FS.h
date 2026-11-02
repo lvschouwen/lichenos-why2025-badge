@@ -65,6 +65,9 @@ public:
     bool exists(char const *path);
     bool remove(char const *path);
     bool mkdir(char const *path);
+    // Replaces to with from (#110). POSIX does that in one step; FatFs refuses an existing target, so there the target
+    // is removed first: a power cut in between leaves only from, which IdentityStore's load takes back.
+    bool rename(char const *from, char const *to);
 };
 
 class SPIFFSFS : public FS {
@@ -99,3 +102,5 @@ uint32_t fs_shim_take_raw_writes(void);
 #define FS_SHIM_MAX_FILE ((size_t)1 << 20)
 // Host tests only: make buffer allocations fail, or make the reads that compare chunks fail
 void fs_shim_test_faults(bool fail_alloc, bool fail_reads);
+// Host tests only: rename refuses an existing target as FatFs does (EEXIST), so the badge's remove-first path is run
+void fs_shim_test_fat_rename(bool on);

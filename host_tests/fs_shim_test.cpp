@@ -286,6 +286,27 @@ int main(void) {
     CHECK(SPIFFS.totalBytes() == 1000 && SPIFFS.usedBytes() == 250);
     fs_shim_set_drive_bytes(NULL);
 
+    // rename (#110) replaces the target, also where the file system refuses an existing one (FatFs)
+    for (int fat = 0; fat < 2; fat++) {
+        fs_shim_test_fat_rename(fat == 1);
+        out = SPIFFS.open("/r/old", "w");
+        CHECK(out.write((uint8_t const *)"old", 3) == 3);
+        out.close();
+        out = SPIFFS.open("/r/new", "w");
+        CHECK(out.write((uint8_t const *)"newer", 5) == 5);
+        out.close();
+        CHECK(SPIFFS.rename("/r/new", "/r/old"));
+        CHECK(!SPIFFS.exists("/r/new"));
+        File got = SPIFFS.open("/r/old", "r");
+        char text[8] = {0};
+        CHECK(got && got.read((uint8_t *)text, sizeof(text)) == 5 && memcmp(text, "newer", 5) == 0);
+        got.close();
+        CHECK(!SPIFFS.rename("/r/none", "/r/old") && SPIFFS.exists("/r/old")); // no source: the target stays
+        CHECK(!SPIFFS.rename("/r/old", "/../old"));
+        CHECK(SPIFFS.rename("/r/old", "/r/moved") && SPIFFS.exists("/r/moved") && SPIFFS.remove("/r/moved"));
+    }
+    fs_shim_test_fat_rename(false);
+
     // format() empties the root
     out = SPIFFS.open("/c", "w");
     out.close();

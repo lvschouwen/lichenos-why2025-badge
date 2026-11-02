@@ -28,11 +28,15 @@ static void (*drive_fn)(size_t *total, size_t *used);
 // and resets it once per loop, under the mesh lock that every MeshCore file access already runs under.
 static uint32_t busy_us, busy_ops;
 static uint32_t raw_writes; // writes and truncates of buffered "w" files (host tests count them)
-static bool     fail_alloc, fail_reads;
+static bool     fail_alloc, fail_reads, fat_rename;
 
 void fs_shim_test_faults(bool alloc, bool reads) {
     fail_alloc = alloc;
     fail_reads = reads;
+}
+
+void fs_shim_test_fat_rename(bool on) {
+    fat_rename = on;
 }
 
 #ifdef ESP_PLATFORM
@@ -435,6 +439,31 @@ bool FS::remove(char const *path) {
     [[maybe_unused]] Timed timed;
     char full[PATH_MAX_LEN];
     return full_path(path, full) && unlink(full) == 0;
+}
+
+static int rename_raw(char const *from, char const *to) {
+    struct stat st;
+    if (fat_rename && stat(to, &st) == 0) {
+        errno = EEXIST;
+        return -1;
+    }
+    return ::rename(from, to);
+}
+
+bool FS::rename(char const *from, char const *to) {
+    [[maybe_unused]] Timed timed;
+    char a[PATH_MAX_LEN], b[PATH_MAX_LEN];
+    if (!full_path(from, a) || !full_path(to, b)) {
+        return false;
+    }
+    if (rename_raw(a, b) == 0) {
+        return true;
+    }
+    struct stat st;
+    if (errno != EEXIST || stat(a, &st) != 0) { // never remove the target for a source that is not there
+        return false;
+    }
+    return unlink(b) == 0 && rename_raw(a, b) == 0; // FatFs: no rename over an existing file
 }
 
 bool FS::mkdir(char const *path) {
