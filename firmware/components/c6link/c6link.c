@@ -310,6 +310,7 @@ static bool start_wifi(void) {
     esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL, NULL);
     sta_netif = esp_netif_create_default_wifi_sta();
     start_sntp();
+    boot_progress_begin_background(BOOT_CLOCK); // SNTP waits for an IP; the clock step ends in on_time_sync() (#39)
     // The boot steps are ended here, not in wifi_driver_up: a re-attach runs it again without them (#14)
     char const  *why = NULL;
     drv_result_t r   = wifi_driver_up(&why);

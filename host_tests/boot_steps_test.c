@@ -48,8 +48,43 @@ static void test_timestamps(void) {
     CHECK(v.begin_ms[BOOT_C6] == 0); // no clock: zeros, no crash
 }
 
+// The clock step runs in the background from SNTP start to the first sync (#39): "fw boot" printed "-38686 ms" because
+// it had no begin, and SNTP's hourly refresh moved its end
+static void test_background_step(void) {
+    boot_view_t v;
+    boot_steps_set_clock(fake_clock);
+    boot_steps_reset();
+    fake_ms = 1200;
+    boot_step_begin(BOOT_WIFI);
+    fake_ms = 1250;
+    boot_step_begin_background(BOOT_CLOCK);
+    boot_step_end(BOOT_WIFI, STEP_DONE, NULL);
+    fake_ms = 1300;
+    boot_step_begin(BOOT_LORA);
+    boot_steps_view(&v);
+    CHECK(v.began[BOOT_CLOCK] && !v.ended[BOOT_CLOCK] && v.begin_ms[BOOT_CLOCK] == 1250);
+    CHECK(v.state[BOOT_CLOCK] == STEP_PENDING); // nobody waits for it: the boot screen does not name it
+    CHECK(v.current == BOOT_LORA);
+    boot_step_progress(BOOT_LORA, 30);
+    boot_step_begin_background(BOOT_APPS); // does not touch the running step's pct
+    boot_steps_view(&v);
+    CHECK(v.current == BOOT_LORA && v.pct == 30);
+    fake_ms = 38686;
+    boot_step_end(BOOT_CLOCK, STEP_DONE, NULL); // first SNTP sync
+    fake_ms = 3638686;
+    boot_step_end(BOOT_CLOCK, STEP_FAILED, "later"); // hourly refresh: ignored
+    boot_steps_view(&v);
+    CHECK(v.state[BOOT_CLOCK] == STEP_DONE && v.reason[BOOT_CLOCK][0] == '\0');
+    CHECK(v.begin_ms[BOOT_CLOCK] == 1250 && v.end_ms[BOOT_CLOCK] == 38686);
+    CHECK(v.begin_ms[BOOT_CLOCK] <= v.end_ms[BOOT_CLOCK]);
+    boot_step_begin_background(BOOT_STEP_COUNT); // out of range: no crash
+    boot_steps_set_clock(NULL);
+    boot_steps_reset();
+}
+
 int main(void) {
     test_timestamps();
+    test_background_step();
     boot_view_t v;
     boot_steps_reset();
     boot_steps_view(&v);
@@ -120,6 +155,7 @@ int main(void) {
     char text[64];
     memset(text, 'a', 46);
     strcpy(text + 46, "\xC3\xA9\xC3\xA9");
+    boot_step_begin(BOOT_STORAGE); // a second end only counts after a new begin
     boot_step_end(BOOT_STORAGE, STEP_FAILED, text);
     boot_steps_view(&v);
     CHECK(strlen(v.reason[BOOT_STORAGE]) == 46);

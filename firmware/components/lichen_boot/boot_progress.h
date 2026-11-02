@@ -8,6 +8,7 @@
 void        boot_progress_start(void); // resets the model and adds "fw boot"
 void        boot_progress_nvs_up(void); // right after nvs_flash_init: reads the "fw boot fail" flag
 void        boot_progress_begin(boot_step_t step);
+void        boot_progress_begin_background(boot_step_t step);
 void        boot_progress_progress(boot_step_t step, int pct);
 void        boot_progress_end(boot_step_t step, step_state_t state, char const *reason);
 void        boot_progress_view(boot_view_t *out);

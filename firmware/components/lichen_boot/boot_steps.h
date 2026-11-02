@@ -38,7 +38,12 @@ typedef struct {
 void        boot_steps_set_clock(uint32_t (*now_ms)(void));
 void        boot_steps_reset(void);
 void        boot_step_begin(boot_step_t step);
+// A step that runs on its own while the boot goes on (the clock waits for SNTP): only its begin time is noted. Its state,
+// the current step and pct stay as they are, so the boot screen does not wait for it or name it (#39)
+void        boot_step_begin_background(boot_step_t step);
 void        boot_step_progress(boot_step_t step, int pct);
+// The first end after a begin counts; a later one is ignored until the step begins again (SNTP's hourly refresh ends
+// the clock step again, #39)
 void        boot_step_end(boot_step_t step, step_state_t state, char const *reason);
 void        boot_steps_view(boot_view_t *out);
 char const *boot_step_label(boot_step_t step);

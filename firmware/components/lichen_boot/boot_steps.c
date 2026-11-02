@@ -41,6 +41,16 @@ void boot_step_begin(boot_step_t step) {
     view.pct             = -1;
 }
 
+void boot_step_begin_background(boot_step_t step) {
+    view.generation++;
+    if (!valid(step)) {
+        return;
+    }
+    view.began[step]    = true;
+    view.ended[step]    = false;
+    view.begin_ms[step] = now();
+}
+
 void boot_step_progress(boot_step_t step, int pct) {
     view.generation++;
     if (!valid(step) || view.state[step] != STEP_ACTIVE) {
@@ -52,7 +62,7 @@ void boot_step_progress(boot_step_t step, int pct) {
 
 void boot_step_end(boot_step_t step, step_state_t state, char const *reason) {
     view.generation++;
-    if (!valid(step)) {
+    if (!valid(step) || view.ended[step]) {
         return;
     }
     view.state[step]  = state;

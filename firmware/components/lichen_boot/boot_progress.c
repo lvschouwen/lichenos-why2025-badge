@@ -20,6 +20,12 @@ void boot_progress_begin(boot_step_t step) {
     portEXIT_CRITICAL(&lock);
 }
 
+void boot_progress_begin_background(boot_step_t step) {
+    portENTER_CRITICAL(&lock);
+    boot_step_begin_background(step);
+    portEXIT_CRITICAL(&lock);
+}
+
 void boot_progress_progress(boot_step_t step, int pct) {
     portENTER_CRITICAL(&lock);
     boot_step_progress(step, pct);
@@ -80,7 +86,7 @@ static void cmd_boot(char const *args) {
         } else if (view.began[i]) {
             snprintf(when, sizeof(when), "%u- ms", (unsigned)view.begin_ms[i]);
         } else if (view.ended[i]) {
-            snprintf(when, sizeof(when), "-%u ms", (unsigned)view.end_ms[i]);
+            snprintf(when, sizeof(when), "at %u ms", (unsigned)view.end_ms[i]); // ended without a begin
         }
         console_reply("boot %-7s %-8s %-14s %s", boot_progress_label((boot_step_t)i), state_text[view.state[i]], when,
                       view.reason[i]);
