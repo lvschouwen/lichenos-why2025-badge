@@ -7,6 +7,10 @@
 
 void sensors_register_console(void);
 
+// badge_fw u8, 0 = boot leaves the service stopped (`fw sensors boot off`, a #115 diagnosis); missing = start
+#define SENSORS_BOOT_KEY "sens_boot"
+bool sensors_boot_start(void);
+
 // What `fw sensors raw` prints besides the registers
 typedef struct {
     bool     imu_up, env_up, die_up;   // initialised and answering

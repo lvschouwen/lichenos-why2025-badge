@@ -356,7 +356,11 @@ void app_main(void) {
     }
     // The sensors (#69) share the keyboard's bus: after it. Their own task initialises the chips (the BMI270's 8 KB
     // config upload takes a while), so boot does not wait for them
-    lichen_sensors_start();
+    if (sensors_boot_start()) {
+        lichen_sensors_start();
+    } else {
+        ESP_LOGW(TAG, "sensors not started: fw sensors boot off");
+    }
     sensors_register_console();
     if (c6link_up()) {
         boot_progress_begin(BOOT_LORA);

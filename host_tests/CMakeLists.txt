@@ -314,6 +314,10 @@ add_test(NAME assets_pack COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_D
 add_test(NAME assets_fmt_test COMMAND assets_fmt_test ${CMAKE_CURRENT_BINARY_DIR}/assets_test.bin)
 set_tests_properties(assets_fmt_test PROPERTIES DEPENDS assets_pack)
 
+# The flash host's serial logger picks the badge's CH340 after a re-enumeration (#115)
+add_test(NAME serial_log_test COMMAND ${Python3_EXECUTABLE} -m pytest -q -p no:cacheprovider
+    ${CMAKE_CURRENT_SOURCE_DIR}/serial_log_test.py)
+
 # Lichen's generated fonts cover the text the badge shows (#16)
 add_executable(font_cover_test ${CMAKE_CURRENT_SOURCE_DIR}/font_cover_test.c)
 target_compile_options(font_cover_test PRIVATE -Wall -Wextra -Werror)

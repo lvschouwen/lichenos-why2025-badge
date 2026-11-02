@@ -2277,6 +2277,15 @@ static void cmd_mesh(char const *args) {
         cmd_mesh_run(strcmp(args, "start") == 0);
         return;
     }
+    if (strncmp(args, "autostart", 9) == 0 && (args[9] == ' ' || !args[9])) {
+        bool on; // #115: a reboot loop without MeshCore needs the start-at-boot setting from the console
+        if (args[9] && arg_onoff(args + 10, &on)) {
+            console_reply("start at boot %s (%s)", on ? "on" : "off", meshcore_autostart_set(on) ? "saved" : "not saved");
+        } else {
+            console_reply("start at boot: %s (mesh autostart on|off)", meshcore_autostart() ? "on" : "off");
+        }
+        return;
+    }
     if (strncmp(args, "hist", 4) == 0 && (args[4] == ' ' || !args[4])) {
         mesh_journal_console(args[4] ? args + 5 : ""); // the journal's own status: there whether MeshCore runs or not
         return;
@@ -2345,7 +2354,7 @@ static void cmd_mesh(char const *args) {
         return;
     }
     if (*args) {
-        console_reply("mesh | mesh start | mesh stop | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
+        console_reply("mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
                       "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
                       "mesh dm <12 hex> <text> | mesh remote [<name|hex> login [pw]|status|cli <text>|logout] | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
                       "[<lat> <lon> | share on|off] | mesh autoadd [on|off | types <all|chat,repeater,room,sensor> | hops "
@@ -2756,7 +2765,7 @@ extern "C" void mesh_console_init(void) {
     }
     registered = true;
     console_register("mesh",
-                     "mesh | mesh start | mesh stop | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | "
+                     "mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | "
                      "mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact] | mesh send <channel> <text> | "
                      "mesh dm <12 hex> <text> | mesh notify [test dm|chan <name>|fail|mention] | mesh advert ... | mesh loc ... | mesh autoadd ...",
                      cmd_mesh);

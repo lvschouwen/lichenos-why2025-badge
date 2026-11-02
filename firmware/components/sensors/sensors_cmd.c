@@ -1,11 +1,12 @@
 // `fw sensors`: one line per sensor; `fw sensors raw`: chip ids, status registers and the service's counters;
-// `fw sensors start|stop`
+// `fw sensors start|stop`; `fw sensors boot on|off` (#115: whether boot starts the service)
 #include "esp_timer.h"
 #include "fw_console.h"
 #include "lichen_sensors.h"
 #include "sensors.h"
 #include "sensors_chips.h"
 #include "sensors_format.h"
+#include "settings_store.h"
 
 #include <stdio.h>
 
@@ -124,11 +125,21 @@ static void cmd_sensors(char const *args) {
     } else if (strcmp(args, "stop") == 0) {
         lichen_sensors_stop();
         console_reply("sensors: stopped");
+    } else if (strcmp(args, "boot") == 0) {
+        console_reply("sensors: start at boot %s", sensors_boot_start() ? "on" : "off");
+    } else if (strcmp(args, "boot on") == 0 || strcmp(args, "boot off") == 0) {
+        bool on = args[6] == 'n';
+        bool ok = on ? settings_erase(SENSORS_BOOT_KEY) : settings_set_u8(SENSORS_BOOT_KEY, 0); // on is the default
+        console_reply("sensors: start at boot %s (%s)", on ? "on" : "off", ok ? "saved" : "not saved");
     } else {
-        console_reply("sensors [raw|start|stop]");
+        console_reply("sensors [raw|start|stop|boot [on|off]]");
     }
 }
 
+bool sensors_boot_start(void) {
+    return settings_get_u8(SENSORS_BOOT_KEY, 1) != 0;
+}
+
 void sensors_register_console(void) {
-    console_register("sensors", "sensors [raw|start|stop] (IMU, environment, P4 die temperature)", cmd_sensors);
+    console_register("sensors", "sensors [raw|start|stop|boot [on|off]] (IMU, environment, P4 die temperature)", cmd_sensors);
 }
