@@ -11,7 +11,7 @@
 #define SCREEN_TEXT_ENTRY 120
 #define MAX_CHARS         128
 
-static char   title[64];
+static char   title[160];
 static char   initial[MAX_CHARS + 1];
 static bool   secret;
 static size_t max_len;
@@ -67,11 +67,19 @@ static lv_obj_t *build(void) {
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen, 24, 0);
 
-    lv_obj_t *heading = lv_label_create(screen);
-    lv_obj_set_width(heading, LV_PCT(100));
-    lv_label_set_long_mode(heading, LV_LABEL_LONG_DOT);
+    // A heading may carry a name on a second line ("Password for\n<name>"): the first line is the large heading, the
+    // name is its own wrapping line below it, so a long name is never lost behind a "..." (#132)
+    char const *nl = strchr(title, '\n');
+    char        first[sizeof(title)];
+    snprintf(first, sizeof(first), "%.*s", nl ? (int)(nl - title) : (int)sizeof(first), title);
+    lv_obj_t *heading = lichen_label_line(screen, LV_PCT(100));
     lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
-    lv_label_set_text(heading, title);
+    lichen_label_line_fit(heading);
+    lv_label_set_text(heading, first);
+    if (nl && nl[1]) {
+        lv_obj_t *name = lichen_label_wrap(screen, LV_PCT(100));
+        lv_label_set_text(name, nl + 1);
+    }
 
     ta = lv_textarea_create(screen);
     lv_obj_set_width(ta, LV_PCT(100));

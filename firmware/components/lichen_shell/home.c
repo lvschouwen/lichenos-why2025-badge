@@ -8,6 +8,7 @@
 #include "home_layout.h"
 #include "lichen_app.h"
 #include "lichen_badge.h"
+#include "lichen_ui.h"
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "theme.h"
@@ -190,9 +191,8 @@ static lv_obj_t *add_icon(lv_obj_t *parent, lichen_app_t const *app, int px) {
 }
 
 static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color) {
-    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_t *label = lichen_label_line(parent, LV_PCT(100)); // without a width DOT never has anything to cut (#132)
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_label_set_text(label, text);
     return label;
 }

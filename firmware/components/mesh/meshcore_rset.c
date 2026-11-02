@@ -333,7 +333,7 @@ static void on_row(void *arg) {
     }
     char heading[MESH_NAME_MAX + 64];
     if (row->kind == RS_PASSWORD) {
-        snprintf(heading, sizeof(heading), "New admin password for %s", title);
+        snprintf(heading, sizeof(heading), "New admin password for\n%s", title);
         text_entry_open(heading, "", true, MF_PASSWORD_MAX, pw_entered, NULL);
         return;
     }

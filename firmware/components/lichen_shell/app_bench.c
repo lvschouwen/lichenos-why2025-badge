@@ -369,7 +369,7 @@ static void open_bench(lv_obj_t *screen) {
     for (int row = 0; row < ROWS; row++) {
         s_b.value[row] = add_row(screen, KEYS[row], key_w);
     }
-    s_b.hint = lv_label_create(screen);
+    s_b.hint = lichen_label_wrap(screen, LV_PCT(100));
     lv_obj_set_style_text_color(s_b.hint, lv_color_hex(THEME_AMBER), 0);
     lv_label_set_text(s_b.hint, "");
 

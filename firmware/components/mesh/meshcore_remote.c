@@ -168,7 +168,7 @@ static void login_entered(char const *password, void *arg) {
 void meshcore_remote_login(uint8_t const prefix[6], char const *name) {
     set_target(prefix, name);
     char heading[MESH_NAME_MAX + 24], saved[MF_PASSWORD_MAX + 2];
-    snprintf(heading, sizeof(heading), "Password for %s", title);
+    snprintf(heading, sizeof(heading), "Password for\n%s", title);
     saved[0] = 0;
     meshcore_pw_get(target, saved, sizeof(saved));
     text_entry_open(heading, saved, true, MF_PASSWORD_MAX, login_entered, NULL);
@@ -301,9 +301,9 @@ static void cli_answer(bool yes) {
 }
 
 static void cli_ask(char const *command, bool radio) {
-    char t[96];
+    char t[160];
     snprintf(cli_pending, sizeof(cli_pending), "%s", command);
-    snprintf(t, sizeof(t), "Send \"%.40s\" to %.24s?", command, title);
+    snprintf(t, sizeof(t), "Send \"%s\" to %s?", command, title);
     shell_dialog_t const d = {
         .title        = t,
         .count_prefix = radio ? "A wrong radio cuts it off the mesh; only a visit to it undoes that. (cancels in "
@@ -335,7 +335,7 @@ static void cli_entered(char const *command, void *arg) {
 static void cli_command(void *arg) {
     (void)arg;
     char heading[MESH_NAME_MAX + 24];
-    snprintf(heading, sizeof(heading), "Command for %s", title);
+    snprintf(heading, sizeof(heading), "Command for\n%s", title);
     text_entry_open(heading, "", false, RR_CMD_MAX, cli_entered, NULL);
 }
 

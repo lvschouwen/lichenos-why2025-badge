@@ -17,7 +17,7 @@
 
 static char const TAG[] = "dialog";
 
-#define TEXT_MAX     96
+#define TEXT_MAX     192 // a command echoed back in the CLI confirm is up to ~145 characters (#132)
 #define TICK_MS      250
 #define LOCK_WAIT_MS 2000
 

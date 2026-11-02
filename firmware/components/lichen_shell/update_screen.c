@@ -1,6 +1,7 @@
 // "Updating Lichen" (#76): the screen a Wi-Fi update shows while it runs, and the line on home after the reboot into it.
 // The OTA task (core 0) calls begin/progress/end, which only store numbers under a spinlock; an LVGL timer (5 Hz) opens
 // the screen and refreshes it, so the OTA task never waits on LVGL.
+#include "lichen_ui.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -406,7 +407,7 @@ void update_screen_init(void) {
 
 // --- after the reboot ---
 
-static char     banner_line[64];
+static char     banner_line[160]; // "Update failed, back on <git-describe>" wraps on the banner, so it is not cut here (#132)
 static atomic_int boot_result = UPD_NONE; // set once banner_line holds the text (#62 reads it from the LVGL task)
 static lv_obj_t *banner;
 static int64_t  banner_shown_ms;
@@ -419,7 +420,7 @@ static void banner_tick(lv_timer_t *t) {
         }
         banner = lv_obj_create(lv_layer_top());
         lv_obj_remove_style_all(banner);
-        lv_obj_set_size(banner, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_size(banner, LV_PCT(90), LV_SIZE_CONTENT);
         lv_obj_set_style_bg_color(banner, lv_color_hex(THEME_TRACK), 0);
         lv_obj_set_style_bg_opa(banner, LV_OPA_COVER, 0);
         lv_obj_set_style_border_width(banner, 2, 0);
@@ -431,7 +432,7 @@ static void banner_tick(lv_timer_t *t) {
         lv_obj_set_style_text_font(banner, lichen_font(LICHEN_FONT_SMALL), 0);
         lv_obj_set_scrollable(banner, false);
         lv_obj_set_clickable(banner, false);
-        lv_obj_t *label = lv_label_create(banner);
+        lv_obj_t *label = lichen_label_wrap(banner, LV_PCT(100));
         lv_label_set_text(label, banner_line);
         lv_obj_align(banner, LV_ALIGN_TOP_MID, 0, THEME_STATUS_BAR_H + 12);
         banner_shown_ms = now_ms();

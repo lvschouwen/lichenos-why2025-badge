@@ -330,6 +330,8 @@ lv_obj_t *boot_screen_create(void) {
 
     if (crash_recovered()) {
         lv_obj_t *crash = add_label(details, "Recovered from a crash - see the Crash log app", THEME_AMBER, NULL);
+        lv_obj_set_width(crash, LV_PCT(100));
+        lv_label_set_long_mode(crash, LV_LABEL_LONG_MODE_WRAP);
         lv_obj_set_style_margin_top(crash, 16, 0);
     }
 

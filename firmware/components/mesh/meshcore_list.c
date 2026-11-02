@@ -62,8 +62,9 @@ lv_obj_t *mc_list_screen(lv_obj_t *screen, char const *title, char const *note, 
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen, 8, 0);
-    lv_obj_t *heading = lv_label_create(screen);
+    lv_obj_t *heading = lichen_label_line(screen, LV_PCT(100)); // a name in the title must not push past the screen (#132)
     lv_obj_set_style_text_font(heading, lichen_font(LICHEN_FONT_LARGE), 0);
+    lichen_label_line_fit(heading);
     lv_label_set_text(heading, title);
     if (note) {
         mc_list_label(screen, note, THEME_DIM);

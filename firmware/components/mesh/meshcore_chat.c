@@ -588,9 +588,7 @@ static void on_search(void *arg) {
 
 static lv_obj_t *create_search_line(chat_t *c) {
     // Takes the compose line's place while searching (#48), styled like it so nothing else moves
-    lv_obj_t *line = lv_label_create(c->screen);
-    lv_obj_set_width(line, LV_PCT(100));
-    lv_label_set_long_mode(line, LV_LABEL_LONG_DOT);
+    lv_obj_t *line = lichen_label_line(c->screen, LV_PCT(100));
     lv_obj_set_style_bg_color(line, lv_color_hex(THEME_TILE), 0);
     lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(line, lv_color_hex(THEME_AMBER), 0);
@@ -598,6 +596,8 @@ static lv_obj_t *create_search_line(chat_t *c) {
     lv_obj_set_style_radius(line, 14, 0);
     lv_obj_set_style_pad_all(line, 14, 0);
     lv_obj_set_style_border_width(line, 3, 0);
+    // DOT only cuts at a fixed height (else LVGL 9 wraps): one line of the font plus the padding and border (#132)
+    lv_obj_set_height(line, lv_font_get_line_height(lichen_font(LICHEN_FONT_SMALL)) + 2 * 14 + 2 * 3);
     lv_obj_set_style_border_color(line, lv_color_hex(THEME_AMBER), 0);
     lv_obj_set_style_outline_width(line, 0, LV_STATE_ANY);
     lv_obj_add_flag(line, LV_OBJ_FLAG_HIDDEN);

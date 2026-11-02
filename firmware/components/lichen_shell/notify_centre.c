@@ -593,7 +593,7 @@ static lv_obj_t *build_settings(void) {
     for (size_t i = 0; i < lichen_app_count(); i++) { // what an app sends, if it can be set (#50)
         lichen_app_t const *app = lichen_app_at(i);
         if (app->notify_settings_open) {
-            char label[40];
+            char label[96];
             snprintf(label, sizeof(label), "%s notifications", app->name);
             menu_add(menu, label, "", open_app_notify_settings, (void *)app);
         }

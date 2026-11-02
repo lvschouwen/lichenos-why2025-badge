@@ -181,7 +181,9 @@ lv_obj_t *time_set_build(void) {
     add_fields(screen);
     char zone[96];
     zone_line(zone, sizeof(zone));
-    add_label(screen, zone, THEME_DIM);
+    lv_obj_t *zone_label = lichen_label_line(screen, LV_PCT(100)); // a zone not in the list is its raw POSIX string
+    lv_obj_set_style_text_color(zone_label, lv_color_hex(THEME_DIM), 0);
+    lv_label_set_text(zone_label, zone);
     utc_label  = add_label(screen, "", THEME_DIM);
     hint_label = add_label(screen, "", THEME_AMBER);
     lv_obj_set_width(hint_label, LV_PCT(100));
