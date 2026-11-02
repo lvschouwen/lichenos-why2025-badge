@@ -269,6 +269,10 @@ lv_obj_t *home_create(void) {
     lv_obj_set_style_pad_bottom(home, THEME_PAD, 0);
     lv_obj_set_style_pad_hor(home, THEME_PAD, 0);
     lv_obj_set_scrollbar_mode(home, LV_SCROLLBAR_MODE_OFF);
+    // The arrows move the selection, and select() scrolls it into view. LVGL's own arrow scrolling (on by default)
+    // would first jump the screen a quarter down on Right (no horizontal scroll, so it scrolls vertically) and
+    // select() then scroll it back: the icons jumping on the first row (#124)
+    lv_obj_remove_flag(home, LV_OBJ_FLAG_SCROLL_WITH_ARROW);
     // The screen is the group's focus object: no focus ring around all of it
     lv_obj_set_style_outline_width(home, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(home, 0, LV_STATE_FOCUS_KEY);
