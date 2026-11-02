@@ -124,6 +124,10 @@ void power_request_off(void) {
     start(true);
 }
 
+void power_request_restart(void) {
+    start(false);
+}
+
 static void answer_restart(bool yes) {
     if (yes) {
         start(false);

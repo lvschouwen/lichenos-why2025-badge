@@ -1,0 +1,175 @@
+#include "factory_plan.h"
+
+#include <stdio.h>
+
+static int fails;
+#define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
+
+#define S FACTORY_SETTINGS
+#define A FACTORY_ALL
+
+static void boot_plan_per_pending_value(void) {
+    factory_boot_t p = factory_boot_plan(0);
+    CHECK(!p.nvs && !p.storage);
+    p = factory_boot_plan(FACTORY_SETTINGS);
+    CHECK(p.nvs && !p.storage && p.after_nvs == 0 && p.level == S);
+    p = factory_boot_plan(FACTORY_ALL);
+    CHECK(p.nvs && p.storage && p.after_nvs == FACTORY_PENDING_STORAGE && p.level == A);
+    p = factory_boot_plan(FACTORY_PENDING_STORAGE); // power cut during the drive wipe: NVS is not erased again
+    CHECK(!p.nvs && p.storage && p.level == A);
+    p = factory_boot_plan(77);
+    CHECK(!p.nvs && !p.storage);
+}
+
+static void settings_go_at_both_levels(void) {
+    char const *settings[] = {"wifi_ssid", "wifi_pass", "tz", "setup_done", "home_layout", "idle_dim", "idle_off",
+                              "bl_disp", "bl_kbd", "status_led", "notify_dnd", "n.mesh", "radio_on", "radio_saved",
+                              "radio_air", "ota_wifi", "mc_advint", "mc_advfl", "some_new_key"};
+    for (size_t i = 0; i < sizeof(settings) / sizeof(settings[0]); i++) {
+        CHECK(factory_nvs_erases("badge_fw", settings[i], S));
+        CHECK(factory_nvs_erases("badge_fw", settings[i], A));
+    }
+    CHECK(factory_nvs_erases("a.meshcore", "first_run", S));
+    CHECK(factory_nvs_erases("a.x", "k", A));
+}
+
+static void badge_state_stays(void) {
+    char const *keep[] = {"boot_fail", "crash_count", "dump_sum", "rst_log", "psram_rty", "c6_force", "c6_ok_key",
+                          "c6_verify", "c6_rt_restart", "wifi_drv_wiped", "upd_from", "batt_seen", "thermal_shed",
+                          "clock_src", "mc_advlast", FACTORY_PENDING_KEY};
+    for (size_t i = 0; i < sizeof(keep) / sizeof(keep[0]); i++) {
+        CHECK(!factory_nvs_erases("badge_fw", keep[i], S));
+        CHECK(!factory_nvs_erases("badge_fw", keep[i], A));
+    }
+}
+
+static void identity_only_at_all(void) {
+    CHECK(!factory_nvs_erases("badge_fw", "identity", S));
+    CHECK(factory_nvs_erases("badge_fw", "identity", A));
+}
+
+static void other_namespaces_stay(void) {
+    CHECK(!factory_nvs_erases("phy", "cal_data", A));
+    CHECK(!factory_nvs_erases("nvs.net80211", "sta.ssid", A));
+    CHECK(!factory_nvs_erases("a.", "k", A)); // not an app id
+    CHECK(!factory_nvs_erases("badge_fw", "tz", FACTORY_NONE));
+    CHECK(!factory_nvs_erases(NULL, "tz", A));
+}
+
+static void storage_keeps_os_files(void) {
+    CHECK(factory_storage_keeps("c6"));
+    CHECK(factory_storage_keeps("lora.toml"));
+    CHECK(!factory_storage_keeps("meshcore"));
+    CHECK(!factory_storage_keeps("lichen"));
+    CHECK(!factory_storage_keeps("ota_token.txt"));
+    CHECK(!factory_storage_keeps("C6x"));
+    CHECK(!factory_storage_keeps(NULL));
+}
+
+static void level_words(void) {
+    factory_level_t l = FACTORY_NONE;
+    CHECK(factory_level_parse("settings", &l) && l == S);
+    CHECK(factory_level_parse("all", &l) && l == A);
+    CHECK(!factory_level_parse("everything", &l));
+    CHECK(!factory_level_parse("", &l));
+}
+
+// ---- the combo ----
+
+static factory_combo_t held_and_armed(void) {
+    factory_combo_t c;
+    factory_combo_init(&c);
+    CHECK(factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, 500) == FC_EV_NONE);
+    CHECK(factory_combo_key(&c, FACTORY_COMBO_KEY_B, true, 600) == FC_EV_NONE);
+    CHECK(c.state == FC_HOLDING);
+    CHECK(factory_combo_tick(&c, 3500) == FC_EV_NONE);
+    CHECK(factory_combo_tick(&c, 3600) == FC_EV_ARM);
+    CHECK(factory_combo_swallows(&c));
+    return c;
+}
+
+static void hold_three_seconds_then_enter(void) {
+    factory_combo_t c = held_and_armed();
+    CHECK(factory_combo_key(&c, FACTORY_COMBO_KEY_A, false, 3700) == FC_EV_NONE);
+    CHECK(factory_combo_key(&c, FACTORY_COMBO_KEY_B, false, 3700) == FC_EV_NONE);
+    CHECK(factory_combo_key(&c, FACTORY_COMBO_ENTER, true, 4000) == FC_EV_NONE); // too soon after the question
+    CHECK(factory_combo_key(&c, FACTORY_COMBO_ENTER, true, 4700) == FC_EV_CONFIRM);
+    CHECK(c.state == FC_OVER && !factory_combo_swallows(&c));
+}
+
+static void esc_or_timeout_cancels(void) {
+    factory_combo_t c = held_and_armed();
+    CHECK(factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, 5000) == FC_EV_CANCEL);
+    c = held_and_armed();
+    CHECK(factory_combo_key(&c, 0x20, true, 5000) == FC_EV_NONE); // other keys do nothing
+    CHECK(factory_combo_tick(&c, 3600 + FACTORY_COMBO_CONFIRM_MS) == FC_EV_CANCEL);
+    CHECK(c.state == FC_OVER);
+}
+
+static void short_hold_or_release_resets(void) {
+    factory_combo_t c;
+    factory_combo_init(&c);
+    factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, 0);
+    factory_combo_key(&c, FACTORY_COMBO_KEY_B, true, 100);
+    CHECK(factory_combo_key(&c, FACTORY_COMBO_KEY_B, false, 2000) == FC_EV_NONE);
+    CHECK(c.state == FC_IDLE);
+    CHECK(factory_combo_tick(&c, 5000) == FC_EV_NONE); // released: never arms
+    factory_combo_key(&c, FACTORY_COMBO_KEY_B, true, 5100); // again: the hold starts over
+    CHECK(factory_combo_tick(&c, 8000) == FC_EV_NONE);
+    CHECK(factory_combo_tick(&c, 8100) == FC_EV_ARM);
+}
+
+static void third_key_breaks_it(void) {
+    factory_combo_t c;
+    factory_combo_init(&c);
+    factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, 0);
+    factory_combo_key(&c, FACTORY_COMBO_KEY_B, true, 0);
+    factory_combo_key(&c, 0x2a, true, 1000);
+    CHECK(c.state == FC_IDLE);
+    CHECK(factory_combo_tick(&c, 4000) == FC_EV_NONE);
+}
+
+static void one_key_never_arms(void) {
+    factory_combo_t c;
+    factory_combo_init(&c);
+    factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, 0);
+    CHECK(factory_combo_tick(&c, 9000) == FC_EV_NONE);
+    CHECK(c.state == FC_IDLE);
+}
+
+static void window_closes(void) {
+    factory_combo_t c;
+    factory_combo_init(&c);
+    CHECK(factory_combo_tick(&c, FACTORY_COMBO_WINDOW_MS) == FC_EV_NONE);
+    CHECK(c.state == FC_OVER);
+    factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, FACTORY_COMBO_WINDOW_MS + 1);
+    factory_combo_key(&c, FACTORY_COMBO_KEY_B, true, FACTORY_COMBO_WINDOW_MS + 1);
+    CHECK(factory_combo_tick(&c, FACTORY_COMBO_WINDOW_MS + 5000) == FC_EV_NONE);
+    // a hold that started inside the window still completes after it
+    factory_combo_init(&c);
+    factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, 9000);
+    factory_combo_key(&c, FACTORY_COMBO_KEY_B, true, 9500);
+    CHECK(factory_combo_tick(&c, 12500) == FC_EV_ARM);
+}
+
+int main(void) {
+    boot_plan_per_pending_value();
+    settings_go_at_both_levels();
+    badge_state_stays();
+    identity_only_at_all();
+    other_namespaces_stay();
+    storage_keeps_os_files();
+    level_words();
+    hold_three_seconds_then_enter();
+    esc_or_timeout_cancels();
+    short_hold_or_release_resets();
+    third_key_breaks_it();
+    one_key_never_arms();
+    window_closes();
+    if (fails) {
+        printf("factory_plan_test: %d failure(s)\n", fails);
+        return 1;
+    }
+    printf("factory_plan_test: OK\n");
+    return 0;
+}

@@ -39,6 +39,9 @@ void bench_app_register(void); // app_bench.c (#96); also registers "fw bench"
 bool bench_running(void);      // app_bench.c: a run is measuring (LVGL task)
 void power_app_register(void);                   // app_power.c (#65): Restart / Power off, also "fw poweroff"
 void power_open_from_settings(void *arg);        // Settings > Power: opens the Power app
+void power_request_restart(void);                // Power > Restart without the question (factory reset, #66)
+// factory_screen.c: Settings > Factory reset (#66; menu callback, LVGL context)
+void factory_screen_open(void *arg);
 // update_screen.c: every app's stop_for_update (a firmware update, a restart or power off from the Power app, #65);
 // true when all of them stopped. Blocks for seconds: never on the LVGL task.
 bool shell_stop_apps(void);

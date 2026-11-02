@@ -8,6 +8,8 @@
 // idle_off (u8, tens of seconds, #43), saver and lock (u8 0/1, #75). Not for apps:
 // they have lichen_settings.h (#84). A missing key or
 // an unreadable NVS gives the default. Keys are at most 15 characters (NVS limit).
+// A factory reset (#66) erases every badge_fw key except the badge's own record listed in lichen_boot/factory_plan.c:
+// a new key that is not a person's setting belongs on that list.
 uint8_t settings_get_u8(char const *key, uint8_t def);
 bool    settings_set_u8(char const *key, uint8_t value);
 // Copies the value (or def) into out, always NUL-terminated

@@ -1,6 +1,6 @@
 // Settings (#66, settings.html top row): Wi-Fi, Display (brightness, screen timeout #43, screensaver and pocket lock
 // #75, home layout), Time (#64: set
-// date & time, time zone), SD card (#99, sd_screen.c), Notifications (#62, notify_centre.c), About Lichen, then one entry per app that has a settings page.
+// date & time, time zone), SD card (#99, sd_screen.c), Notifications (#62, notify_centre.c), Factory reset (#66, factory_screen.c), About Lichen, then one entry per app that has a settings page.
 // Every screen is a menu.h list; Esc is the shell's.
 #include "app_icons.h"
 #include "backlight.h"
@@ -560,6 +560,7 @@ static void open_settings(lv_obj_t *screen) {
     settings_notify_row = live_row(menu_add(menu, "Notifications", "", open_notify, NULL), false, notify_value);
     menu_add(menu, "Battery", "Unprotected cells", battery_open, NULL);
     menu_add(menu, "Power", "Restart, power off", power_open_from_settings, NULL);
+    menu_add(menu, "Factory reset", "", factory_screen_open, NULL);
     menu_add(menu, "About Lichen", "", open_about, NULL);
     bool heading = false;
     for (size_t i = 0; i < lichen_app_count(); i++) {

@@ -9,6 +9,7 @@
 # shortcut.c (shortcut_test.c, #79; shortcuts.c runs the shape-key shortcuts it decides).
 # thermal_rules.c (thermal_rules_test.c, #10; thermal.c is the watchdog service, app_battery.c Settings > Battery).
 # notify_ui.c and notify_centre.c are the notifications' toast, tile badges, cloud key, centre and settings page (#62).
+# factory_screen.c is Settings > Factory reset and factory_combo.c the boot key combo (#66; the logic is lichen_boot's factory_plan.c).
 # app_bench.c is the Bench app (#96), app_crashlog.c the Crash log app (#72, on lichen_crashlog.h), app_power.c the Power app (#65).
 # shell.c, boot_screen.c, status_bar.c and logo.c are the LVGL screens; shell.c and app_settings.c implement lichen_ui.h.
 idf_component_register(SRCS "log_store.c" "log_ring.c" "nav.c" "shell.c" "home.c" "home_layout.c"
@@ -19,6 +20,7 @@ idf_component_register(SRCS "log_store.c" "log_ring.c" "nav.c" "shell.c" "home.c
                             "idle_policy.c" "screen_idle.c" "lock_combo.c" "saver_layout.c" "screen_saver.c"
                             "notify_view.c" "notify_ui.c" "notify_centre.c" "sys_notices.c" "sys_notice_rules.c"
                             "shortcut.c" "shortcuts.c" "thermal.c" "thermal_rules.c" "app_battery.c"
+                            "factory_screen.c" "factory_combo.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api lichen_net
                        PRIV_REQUIRES lichen_boot lichen_clock freertos fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage sdcard app_update esp_system psram_guard esp_mm lichen_led ota)

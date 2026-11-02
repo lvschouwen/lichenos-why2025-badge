@@ -8,6 +8,7 @@
 #include "c6link.h"
 #include "crash.h"
 #include "display.h"
+#include "factory_reset.h"
 #include "fw_console.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -249,10 +250,11 @@ void app_main(void) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "NVS init failed: %s", esp_err_to_name(err));
     }
+    factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
     boot_progress_nvs_up();
     settings_apply_tz(); // before anything shows the clock
     boot_progress_begin(BOOT_STORAGE);
-    bool storage_ok = storage_mount();
+    bool storage_ok = factory_reset_boot_storage(storage_mount()); // and its /storage part, before anything opens a file
     if (!storage_ok) {
         ESP_LOGE(TAG, "no storage drive");
         boot_progress_end(BOOT_STORAGE, STEP_FAILED, "no storage drive");
@@ -265,6 +267,7 @@ void app_main(void) {
     assets_mount(); // fonts; without them the UI uses the built-in ones (#22)
     crash_check();
     console_start();
+    factory_reset_console_register();
     // The screen first, so the boot screen shows the slow C6 check and reflash. The backlight is the C6's (over the
     // UART the flasher uses) and the keyboard chip is reset with the C6: both come after it.
     boot_progress_begin(BOOT_DISPLAY);
@@ -322,6 +325,7 @@ void app_main(void) {
             shell_attach_keys(keys);
             keyboard_set_reset_hook(c6link_note_keyboard_reset); // the chip resets only with the C6 (#14)
             have_keyboard = true;
+            factory_combo_start(); // Esc + Backspace held now: the settings-only reset for a badge whose UI is stuck
         } else {
             ESP_LOGE(TAG, "no keyboard");
         }
