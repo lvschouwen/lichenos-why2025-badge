@@ -336,6 +336,38 @@ static void trace_checks(BadgeMesh &mesh, mt_t &mt) {
     pc->type = type;
 }
 
+// Packets left in MyMesh's pool (16): taken until none is left, then all given back
+static int free_packets(BadgeMesh &mesh) {
+    std::vector<mesh::Packet *> got;
+    for (mesh::Packet *p; (p = mesh.obtainNewPacket()) != NULL;) {
+        got.push_back(p);
+    }
+    for (mesh::Packet *p : got) {
+        mesh.releasePacket(p);
+    }
+    return (int)got.size();
+}
+
+// #110: a second importContact before MyMesh's loop ran replaced the pending loop-back packet without releasing it,
+// one packet of the pool lost for good per overwrite
+static void import_checks(BadgeMesh &mesh) {
+    uint8_t       raw[MAX_TRANS_UNIT];
+    mesh::Packet *advert = mesh.createSelfAdvert(mesh.getNodeName());
+    CHECK(advert != NULL);
+    if (!advert) {
+        return;
+    }
+    int len = advert->writeTo(raw);
+    mesh.releasePacket(advert);
+    settle(mesh, 3);
+    int before = free_packets(mesh);
+    CHECK(before > 2);
+    CHECK(mesh.importContact(raw, (uint8_t)len));
+    CHECK(mesh.importContact(raw, (uint8_t)len)); // before loop() took the first
+    settle(mesh, 3);
+    CHECK(free_packets(mesh) == before);
+}
+
 // The companion pipe (#45, #55) on the real MyMesh: start sequence, offline queue drained, sends through the outbox
 static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, SimpleMeshTables &tables) {
     static DataStore store(SPIFFS, rtc_clock);
@@ -432,6 +464,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     CHECK(st.confirmed == 1);
     trace_checks(mesh, mt);
     contact_action_checks(mesh);
+    import_checks(mesh);
 }
 
 // Moving the milestone-2 key into DataStore (#65 review): only a saved copy that reads back identical counts, because
