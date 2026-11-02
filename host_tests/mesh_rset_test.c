@@ -260,6 +260,62 @@ static void untagged_repeater(void) {
     CHECK(!rs_on_answer(&t, "Unknown command") && !t.untagged);
 }
 
+// Review fixes (#117): only plain decimal numbers go out as typed
+static void plain_numbers(void) {
+    char out[RS_CMD_MAX + 1];
+    CHECK(rs_check(row("tx"), "3e1") != NULL && rs_check(row("tx"), "0x10") != NULL);
+    CHECK(rs_check(row("af"), ".5e1") != NULL && rs_check(row("af"), ".5") != NULL && rs_check(row("af"), "1.") != NULL);
+    CHECK(rs_check(row("af"), "+1") != NULL && rs_check(row("lat"), "inf") != NULL && rs_check(row("tx"), "-") != NULL);
+    CHECK(rs_check(row("lat"), "-52.5") == NULL && rs_check(row("af"), "0.5") == NULL);
+    CHECK(rs_check(row("radio"), "8.69e2,62.5,7,5") != NULL && rs_check(row("radio"), "869.618,0x3e,7,5") != NULL);
+    CHECK(!rs_set_cmd(row("tx"), "2e1", "a1", out, sizeof(out)));
+}
+
+// A set queued before any get waits for a probing get; a stray untagged line later never turns the tags off
+static void probe_first(void) {
+    rs_t s;
+    char cmd[RS_CMD_MAX + 1], buf[64];
+    rs_init(&s);
+    CHECK(rs_queue_set(&s, row("tx"), "20") == NULL);
+    CHECK(rs_next(&s, cmd, sizeof(cmd)) && strstr(cmd, "|get name") && s.tag_probe);
+    CHECK(rs_on_answer(&s, answer(cmd, "> n", buf, sizeof(buf))));
+    CHECK(rs_next(&s, cmd, sizeof(cmd)) && strstr(cmd, "|set tx 20") && !s.tag_probe);
+    CHECK(!rs_on_answer(&s, "Unknown command") && !s.untagged);
+
+    rs_t t;
+    rs_init(&t);
+    rs_read_all(&t);
+    CHECK(rs_next(&t, cmd, sizeof(cmd)) && t.tag_probe);
+    CHECK(!rs_on_answer(&t, "> a stray untagged reply") && !t.untagged); // not a refusal of the tag
+}
+
+static void stops_and_retries(void) {
+    rs_t s;
+    char cmd[RS_CMD_MAX + 1], buf[64];
+    rs_init(&s);
+    rs_read_all(&s);
+    // a get that could not be sent is tried again, RS_UNSENT_MAX times in all
+    CHECK(rs_next(&s, cmd, sizeof(cmd)) && strstr(cmd, "|get name"));
+    rs_on_unsent(&s, "busy");
+    CHECK(s.st[row("name")] == RS_V_UNKNOWN && !s.probed);
+    CHECK(rs_next(&s, cmd, sizeof(cmd)) && strstr(cmd, "|get name") && s.tag_probe);
+    rs_on_unsent(&s, "busy");
+    CHECK(s.st[row("name")] == RS_V_NONE);
+    // RS_MISSES_MAX gets in a row without an answer stop the read
+    CHECK(rs_next(&s, cmd, sizeof(cmd)));
+    CHECK(rs_on_answer(&s, answer(cmd, "> 869.618,62.5,7,5", buf, sizeof(buf))));
+    for (int i = 0; i < RS_MISSES_MAX - 1; i++) {
+        CHECK(rs_next(&s, cmd, sizeof(cmd)) && rs_on_answer(&s, NULL) && !s.stopped);
+    }
+    CHECK(rs_next(&s, cmd, sizeof(cmd)) && rs_on_answer(&s, NULL));
+    CHECK(s.stopped && !rs_busy(&s) && !rs_next(&s, cmd, sizeof(cmd)));
+    size_t done, total;
+    rs_progress(&s, &done, &total);
+    CHECK(done == total);
+    rs_read_all(&s); // Read again starts over
+    CHECK(!s.stopped && rs_busy(&s) && s.misses == 0);
+}
+
 int main(void) {
     rows();
     checks();
@@ -268,6 +324,9 @@ int main(void) {
     filter();
     sequence();
     untagged_repeater();
+    plain_numbers();
+    probe_first();
+    stops_and_retries();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -432,7 +432,9 @@ size_t CompanionPipe::take_remote(uint8_t dest[]) {
             break;
         }
     }
-    memset(arg, 0, sizeof(arg)); // the password is on its way (or refused): not kept on this stack
+    for (volatile char *v = arg; v < arg + sizeof(arg); v++) {
+        *v = 0; // the password is on its way (or refused): not kept on this stack (volatile: not optimised away)
+    }
     if (n == 0) {
         mesh_ob_enter();
         rr_fail(rr_, why);

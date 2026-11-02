@@ -14,7 +14,7 @@ extern "C" {
 
 typedef struct {
     rs_t        rs;
-    rr_t        rr; // the last copy of the request
+    rr_head_t   head; // the last copy of the request (mesh_remote_head)
     uint8_t     target[6];
     uint32_t    seq;         // our CLI request in flight, 0 for none
     uint32_t    not_ours_ms; // when a reply that is not ours was first seen: ours may still follow it
@@ -26,6 +26,8 @@ void rs_run_init(rs_run_t *x, uint8_t const prefix[6]);
 // have changed. Any task; never blocks.
 bool rs_run_step(rs_run_t *x);
 bool rs_run_busy(rs_run_t const *x);
+// Logged in to the target as admin, by a fresh copy (also kept in x->head)
+bool rs_run_admin(rs_run_t *x);
 
 // The console (mesh_task.cpp's "fw mesh remote"): reads every row of the repeater (logs in first with the remembered
 // password when this badge is not logged in to it) on a job task and prints each row as it comes. Never sends a set.

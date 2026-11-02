@@ -245,6 +245,8 @@ uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char const *arg,
 // A copy of the current or last request without its argument (an answer that is late is timed out here); false before
 // MeshCore is up
 bool     mesh_remote_get(rr_t *out);
+// The small copy for pollers (the login state and the newest CLI exchange): what the screens that only need that use
+bool     mesh_remote_head(rr_head_t *out);
 // Ends the login (MyMesh stops its keep-alives to the server): local, nothing goes on air. False when MeshCore is busy.
 bool     mesh_remote_logout(uint8_t const prefix[6], uint32_t wait_ms);
 

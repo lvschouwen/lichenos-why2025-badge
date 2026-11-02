@@ -61,8 +61,7 @@ static void set_note(char const *text, bool error) {
 }
 
 static bool admin_here(void) {
-    rr_t *rr = mem ? &mem->run.rr : NULL;
-    return rr && mesh_remote_get(rr) && rr_logged_in(rr, target) && rr->admin;
+    return mem && rs_run_admin(&mem->run);
 }
 
 static bool set_waiting(void) {
@@ -97,6 +96,8 @@ static void show_outcome(void) {
         snprintf(text, sizeof(text), "Reading %u of %u...", (unsigned)(done + 1 > total ? total : done + 1),
                  (unsigned)total);
         set_note(text, false);
+    } else if (s->stopped) {
+        set_note("Stopped after 3 gets without an answer (out of reach?): Read again tries again.", true);
     } else if (s->last_row >= 0) {
         bool radio = rs_row_at((size_t)s->last_row)->kind == RS_RADIO && s->last == RS_R_OK;
         snprintf(text, sizeof(text), "%s: %s%s", rs_row_at((size_t)s->last_row)->label, s->last_text,
@@ -170,7 +171,9 @@ static void queue(size_t i, char const *value) {
 // ---- the careful ones -------------------------------------------------------------------------------------------------
 
 static void radio_answer(bool yes) {
-    if (yes && mem) {
+    if (yes && mem && !admin_here()) {
+        set_note("No longer logged in as admin: nothing sent.", true); // the login may have ended during the dialog
+    } else if (yes && mem) {
         queue((size_t)rs_row_find("radio"), pending);
     } else if (mem) {
         set_note("Radio unchanged: nothing sent.", false);
@@ -207,7 +210,9 @@ static void ask_radio(char const *value) {
 }
 
 static void reboot_answer(bool yes) {
-    if (yes && mem) {
+    if (yes && mem && !admin_here()) {
+        set_note("No longer logged in as admin: nothing sent.", true);
+    } else if (yes && mem) {
         queue((size_t)rs_row_find("reboot"), "");
     }
 }
@@ -371,6 +376,7 @@ static lv_obj_t *build(void) {
     }
     heap_caps_free(mem);
     memset(rows, 0, sizeof(rows));
+    note = again_row = NULL; // an older screen's, gone: never touched after a failed calloc below
     wipe_secrets();
     mem = heap_caps_calloc(1, sizeof(*mem), MALLOC_CAP_SPIRAM);
     if (!mem) {

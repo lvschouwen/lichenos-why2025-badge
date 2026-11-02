@@ -34,7 +34,7 @@ typedef struct {
     mesh_contact_detail_t d;
     mesh_contact_line_t   lines[MESH_CONTACT_LINES];
     char                  uri[MESH_URI_MAX];
-    rr_t                  rr; // the login state, for the Log in row's value (#51)
+    rr_head_t             rr; // the login state, for the Log in row's value (#51)
 } contact_mem_t;
 
 static uint8_t        prefix[6];
@@ -91,8 +91,8 @@ static void fill(uint32_t wait_ms) {
         shown_path_len = mem->d.path_len;
         shown_flags    = mem->d.flags;
     }
-    if (login_row && mesh_remote_get(&mem->rr)) {
-        int in = rr_logged_in(&mem->rr, prefix) ? 1 + mem->rr.admin : 0;
+    if (login_row && mesh_remote_head(&mem->rr)) { // the small copy: this runs every second (#117)
+        int in = rr_head_logged_in(&mem->rr, prefix) ? 1 + mem->rr.admin : 0;
         if (in != shown_login) {
             menu_set_value(login_row, in == 2 ? "admin" : in ? "logged in" : "");
             shown_login = in;

@@ -59,6 +59,7 @@ typedef struct {
     bool       refused;    // RR_FAILED: the server said no (wrong password)
     char const *why;       // RR_FAILED: a short reason, static text
     uint32_t   asked_ms, sent_ms, est_ms, done_ms;
+    bool       secret;     // arg is a password (a login, or a password command): wiped once taken
     // the session: whom we are logged in to (one at a time; a new login to someone else ends it)
     bool       logged_in, admin;
     uint8_t    login_prefix[MF_PREFIX];
@@ -73,6 +74,28 @@ typedef struct {
     rr_exchange_t cli[RR_CLI_KEEP];
 } rr_t;
 
+// What rr_request keeps of a command, worked out before the caller enters its lock (mesh_ob_enter is a critical
+// section): the command's class (mesh_rset.h) and the text the CLI history shows (a password hidden)
+typedef struct {
+    uint8_t cls; // rs_cmd_class_t
+    char    shown[RR_CMD_MAX + 1];
+} rr_prep_t;
+void rr_prepare(rr_op_t op, char const *arg, rr_prep_t *p);
+
+// What a poller needs of the request (the settings page, #117): far smaller than rr_t, so it is copied in a critical
+// section without the CLI history
+typedef struct {
+    uint32_t      seq;
+    rr_op_t       op;
+    rr_state_t    state;
+    char const   *why;
+    bool          logged_in, admin;
+    uint8_t       login_prefix[MF_PREFIX];
+    uint8_t       cli_prefix[MF_PREFIX];
+    uint8_t       cli_n;
+    rr_exchange_t cli; // the newest exchange
+} rr_head_t;
+
 void rr_init(rr_t *r);
 bool rr_busy(rr_t const *r);
 // A new request: its seq, or 0 with *why set (one is still running, empty or too long, or a command the badge never
@@ -80,6 +103,9 @@ bool rr_busy(rr_t const *r);
 // most MF_PASSWORD_MAX characters) or the command; ignored for a status request.
 uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg, uint32_t now_ms,
                     char const **why);
+// rr_request with the command prepared (rr_prepare) beforehand: what the badge runs inside its lock
+uint32_t rr_request_prepared(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg,
+                             rr_prep_t const *p, uint32_t now_ms, char const **why);
 // The mesh task: the queued request, now marked taken; false when none is queued. The password is copied to arg_out
 // (cap bytes) and wiped from r.
 bool rr_take(rr_t *r, rr_op_t *op, uint8_t prefix[MF_PREFIX], char *arg_out, size_t cap, uint32_t now_ms);
@@ -100,6 +126,9 @@ bool rr_logged_in(rr_t const *r, uint8_t const prefix[MF_PREFIX]);
 uint32_t rr_deadline_ms(uint32_t est_ms);
 // Times out a request that waited too long, then copies it to out (may be NULL)
 void rr_poll(rr_t *r, uint32_t now_ms, rr_t *out);
+// rr_poll with the small copy
+void rr_poll_head(rr_t *r, uint32_t now_ms, rr_head_t *out);
+bool rr_head_logged_in(rr_head_t const *h, uint8_t const prefix[MF_PREFIX]);
 
 // The NVS key the contact's remembered password is kept under, in the app's settings: "pw" and the 12 hex digits of the
 // key prefix (14 characters, NVS allows 15). Empty out when cap is under RR_PW_KEY_MAX.

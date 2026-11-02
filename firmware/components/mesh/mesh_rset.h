@@ -44,6 +44,8 @@ typedef struct {
 #define RS_VALUE_MAX 48
 #define RS_CMD_MAX   100 // = RR_CMD_MAX
 #define RS_TEXT_MAX  96
+#define RS_MISSES_MAX 3 // gets in a row without an answer stop the read
+#define RS_UNSENT_MAX 2 // a get that could not be sent is tried this often
 
 size_t          rs_row_count(void);
 rs_row_t const *rs_row_at(size_t i); // NULL past the end
@@ -100,8 +102,11 @@ typedef struct {
     char     cur_tag[3];
     uint8_t  tag_n;
     bool     untagged; // the repeater did not reflect the tag: the rest goes untagged
-    bool     tag_probe; // the command in flight is the first one: an untagged "Unknown command" means no tags
+    bool     tag_probe; // the command in flight is the first get: an untagged "Unknown command" means no tags
     bool     probed;
+    uint8_t  tries[RS_ROWS]; // how often a row's get could not be sent
+    uint8_t  misses;         // gets in a row without an answer
+    bool     stopped;        // the read stopped after RS_MISSES_MAX of them: rs_read_all starts again
     // the last set's outcome, for the note under the rows
     int8_t   last_row;
     uint8_t  last; // rs_reply_t, RS_R_NOT_OURS when none yet
@@ -109,20 +114,23 @@ typedef struct {
 } rs_t;
 
 void rs_init(rs_t *s);
-// Reads every readable row again (the screen opening, "Read again", the console)
+// Reads every readable row again (the screen opening, "Read again", the console). The read stops by itself after
+// RS_MISSES_MAX gets in a row without an answer (stopped; the rows not asked show "—").
 void rs_read_all(rs_t *s);
 // Queues a set of row i (the person's Enter). NULL when queued, else why not: the value (rs_check), or another set
 // still waiting. A set is sent before the gets still to read; its row is read back once the repeater took it. The last
 // outcome (last_row) is cleared: the next one is this set's.
 char const *rs_queue_set(rs_t *s, size_t i, char const *value);
 bool        rs_busy(rs_t const *s);
-// The next command to send: true and the command in out, false when nothing is to be sent or one is in flight. The
+// The next command to send: true and the command in out. The first command is a get (it probes the tags), also when a
+// set was queued first., false when nothing is to be sent or one is in flight. The
 // queued value (a password) is wiped from s once its command is made.
 bool rs_next(rs_t *s, char *out, size_t cap);
 // The answer to the command in flight: its text (NULL: none came, the request failed or timed out). false when the
 // text is not ours (RS_R_NOT_OURS): the command stays in flight, call again with a later text or NULL to give up.
 bool rs_on_answer(rs_t *s, char const *reply);
-// The command in flight could not even be sent: back in the queue (a get) or dropped with why (a set)
+// The command in flight could not even be sent: a get goes back in the queue (up to RS_UNSENT_MAX tries in all, then
+// it shows "—"); a set is dropped with why
 void rs_on_unsent(rs_t *s, char const *why);
 // What a row shows: the value (and unit), "..." while unknown or asked, "—" without an answer; "" for the reboot and
 // "change" for the password

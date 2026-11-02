@@ -1747,10 +1747,24 @@ extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char 
         *why = "MeshCore is not running";
         return 0;
     }
+    rr_prep_t prep; // classified and redacted here, outside the critical section (#117)
+    rr_prepare(op, arg, &prep);
     mesh_ob_enter();
-    uint32_t seq = rr_request(remote_req, op, prefix, arg, (uint32_t)millis(), why);
+    uint32_t seq = rr_request_prepared(remote_req, op, prefix, arg, &prep, (uint32_t)millis(), why);
     mesh_ob_exit();
     return seq;
+}
+
+extern "C" bool mesh_remote_head(rr_head_t *out) {
+    if (!remote_req) {
+        return false;
+    }
+    rr_head_t h; // internal RAM: the critical section copies only this, never into PSRAM
+    mesh_ob_enter();
+    rr_poll_head(remote_req, (uint32_t)millis(), &h);
+    mesh_ob_exit();
+    *out = h;
+    return true;
 }
 
 extern "C" bool mesh_remote_get(rr_t *out) {

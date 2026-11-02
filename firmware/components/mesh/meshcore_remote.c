@@ -6,6 +6,7 @@
 #include "lichen_ui.h"
 #include "menu.h"
 #include "mesh.h"
+#include "mesh_rset.h"
 #include "meshcore_run.h"
 #include "text_entry.h"
 #include "theme.h"
@@ -274,11 +275,7 @@ static void cli_tick(lv_timer_t *t) {
     cli_show();
 }
 
-static void cli_entered(char const *command, void *arg) {
-    (void)arg;
-    if (!*command || !mem || !note) { // nothing typed, or the screen went away meanwhile
-        return;
-    }
+static void cli_send(char const *command) {
     char const *why = NULL;
     if (mesh_remote_start(target, RR_CLI, command, &why)) {
         set_text(note, "");
@@ -288,6 +285,51 @@ static void cli_entered(char const *command, void *arg) {
         snprintf(text, sizeof(text), "Not sent: %s", why ? why : "?");
         set_text(note, text);
     }
+}
+
+// A radio change or a reboot typed on the free line asks first, as on the Settings page (#117); erase never goes out
+// (mesh_remote.c refuses it)
+static char cli_pending[RR_CMD_MAX + 1];
+
+static void cli_answer(bool yes) {
+    if (yes && mem && note) {
+        cli_send(cli_pending);
+    } else if (mem && note) {
+        set_text(note, "Not sent.");
+    }
+    memset(cli_pending, 0, sizeof(cli_pending));
+}
+
+static void cli_ask(char const *command, bool radio) {
+    char t[96];
+    snprintf(cli_pending, sizeof(cli_pending), "%s", command);
+    snprintf(t, sizeof(t), "Send \"%.40s\" to %.24s?", command, title);
+    shell_dialog_t const d = {
+        .title        = t,
+        .count_prefix = radio ? "A wrong radio cuts it off the mesh; only a visit to it undoes that. (cancels in "
+                              : "It reboots or stops the repeater. (cancels in ",
+        .count_suffix = " s)",
+        .hint         = "Enter: send \xC2\xB7 Esc: don't",
+        .seconds      = 30,
+        .careful      = true,
+    };
+    if (!shell_dialog_countdown(&d, cli_answer)) {
+        set_text(note, "Could not ask, try again");
+        memset(cli_pending, 0, sizeof(cli_pending));
+    }
+}
+
+static void cli_entered(char const *command, void *arg) {
+    (void)arg;
+    if (!*command || !mem || !note) { // nothing typed, or the screen went away meanwhile
+        return;
+    }
+    rs_cmd_class_t cls = rs_cmd_class(command);
+    if (cls == RS_CMD_RADIO || cls == RS_CMD_REBOOT) {
+        cli_ask(command, cls == RS_CMD_RADIO);
+        return;
+    }
+    cli_send(command);
 }
 
 static void cli_command(void *arg) {

@@ -13,6 +13,13 @@
 
 #define LATE_PART_MS (RR_APPEND_MS + 500) // our tagged reply may follow a stray one by this much
 
+static void wipe(void *p, size_t n) {
+    volatile char *v = p; // volatile: a wipe right before the buffer goes out of scope is not optimised away
+    while (n--) {
+        *v++ = 0;
+    }
+}
+
 static uint32_t now_ms(void) {
     uint32_t t = (uint32_t)(esp_timer_get_time() / 1000);
     return t ? t : 1;
@@ -31,13 +38,13 @@ bool rs_run_busy(rs_run_t const *x) {
 // Our request ended (or was replaced by someone else's): its answer to rs. false while a reply that is not ours may
 // still be followed by ours.
 static bool settle(rs_run_t *x, bool have) {
-    rr_t const *r = &x->rr;
+    rr_head_t const *r = &x->head;
     if (!have || r->seq != x->seq) {
         x->why = have ? "another request to a repeater was started (the console?)" : "MeshCore is not running";
         rs_on_answer(&x->rs, NULL);
         return true;
     }
-    rr_exchange_t const *e     = &r->cli[r->cli_head];
+    rr_exchange_t const *e     = &r->cli;
     bool                 mine  = r->cli_n && memcmp(r->cli_prefix, x->target, 6) == 0;
     char const          *reply = r->state == RR_DONE && mine && e->state == RR_CLI_GOT ? e->reply : NULL;
     if (!reply) {
@@ -60,11 +67,19 @@ static bool settle(rs_run_t *x, bool have) {
     return true;
 }
 
+static bool head_busy(rr_head_t const *h) {
+    return h->state == RR_QUEUED || h->state == RR_TAKEN || h->state == RR_SENT;
+}
+
+bool rs_run_admin(rs_run_t *x) {
+    return mesh_remote_head(&x->head) && rr_head_logged_in(&x->head, x->target) && x->head.admin;
+}
+
 bool rs_run_step(rs_run_t *x) {
-    bool have    = mesh_remote_get(&x->rr);
+    bool have    = mesh_remote_head(&x->head);
     bool changed = false;
     if (x->seq) {
-        if (have && x->rr.seq == x->seq && rr_busy(&x->rr)) {
+        if (have && x->head.seq == x->seq && head_busy(&x->head)) {
             return false; // still on its way
         }
         if (!settle(x, have)) {
@@ -74,14 +89,14 @@ bool rs_run_step(rs_run_t *x) {
         x->not_ours_ms = 0;
         changed        = true;
     }
-    if (have && rr_busy(&x->rr)) {
+    if (have && head_busy(&x->head)) {
         return changed; // someone else's request: ours waits its turn
     }
     char cmd[RS_CMD_MAX + 1];
     if (rs_next(&x->rs, cmd, sizeof(cmd))) {
         char const *why = NULL;
         x->seq          = mesh_remote_start(x->target, RR_CLI, cmd, &why);
-        memset(cmd, 0, sizeof(cmd)); // may hold a new password
+        wipe(cmd, sizeof(cmd)); // may hold a new password
         if (!x->seq) {
             x->why = why;
             rs_on_unsent(&x->rs, why);
@@ -109,7 +124,7 @@ static void print_row(size_t i) {
 
 // Logs in with the remembered password when this badge is not logged in as admin; false (said why) when that failed
 static bool con_login(void) {
-    if (mesh_remote_get(&con->rr) && rr_logged_in(&con->rr, con->target) && con->rr.admin) {
+    if (rs_run_admin(con)) {
         return true;
     }
     char pw[MF_PASSWORD_MAX + 2];
@@ -119,7 +134,7 @@ static bool con_login(void) {
     }
     char const *why = NULL;
     uint32_t    seq = mesh_remote_start(con->target, RR_LOGIN, pw, &why);
-    memset(pw, 0, sizeof(pw));
+    wipe(pw, sizeof(pw));
     if (!seq) {
         console_reply("settings: login not started: %s", why ? why : "?");
         return false;
@@ -127,21 +142,24 @@ static bool con_login(void) {
     console_reply("settings: logging in with the remembered password...");
     for (uint32_t waited = 0; waited < LOGIN_CAP_MS; waited += CON_STEP_MS) {
         vTaskDelay(pdMS_TO_TICKS(CON_STEP_MS));
-        if (!mesh_remote_get(&con->rr) || con->rr.seq != seq) {
+        if (!mesh_remote_head(&con->head) || con->head.seq != seq) {
             console_reply("settings: the login was replaced by another request");
             return false;
         }
-        if (!rr_busy(&con->rr)) {
+        if (!head_busy(&con->head)) {
             break;
         }
     }
-    char text[96];
-    rr_state_text(&con->rr, text, sizeof(text));
-    if (con->rr.state != RR_DONE || !con->rr.admin) {
-        console_reply("settings: %s%s", text, con->rr.state == RR_DONE ? " (not as admin: the CLI needs admin)" : "");
+    rr_head_t const *h = &con->head;
+    if (h->state != RR_DONE) {
+        console_reply("settings: %s", h->why ? h->why : "no answer to the login");
         return false;
     }
-    console_reply("settings: %s", text);
+    if (!h->admin) {
+        console_reply("settings: logged in, but not as admin: the CLI needs admin");
+        return false;
+    }
+    console_reply("settings: logged in as admin");
     return true;
 }
 
@@ -168,7 +186,10 @@ static void con_task(void *arg) {
             answered += con->rs.st[i] == RS_V_VALUE;
         }
         console_reply("settings: %u of %u rows answered%s%s%s", (unsigned)answered, (unsigned)total,
-                      done < total ? " (stopped: took too long)" : "", con->why ? "; last problem: " : "",
+                      con->rs.stopped  ? " (stopped after 3 gets without an answer)"
+                      : done < total   ? " (stopped: took too long)"
+                                       : "",
+                      con->why ? "; last problem: " : "",
                       con->why ? con->why : "");
     }
     __atomic_store_n(&con_running, false, __ATOMIC_RELEASE);

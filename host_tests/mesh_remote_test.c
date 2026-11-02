@@ -249,6 +249,14 @@ static void cli_filter(void) {
     char    arg[RR_CMD_MAX + 1];
     CHECK(rr_take(&r, &op, prefix, arg, sizeof(arg), 0) && strcmp(arg, "a2|password s3cret") == 0);
     CHECK(r.arg[0] == 0); // on its way: not kept in the request
+    rr_head_t h;
+    rr_poll_head(&r, 0, &h);
+    CHECK(h.seq == 1 && h.state == RR_TAKEN && h.cli_n == 1 && strcmp(h.cli.cmd, "a2|password (hidden)") == 0);
+    rr_t r3; // rr_take cuts to the caller's buffer
+    char tiny[4];
+    rr_init(&r3);
+    CHECK(rr_request(&r3, RR_CLI, A, "get name", 0, &why) == 1);
+    CHECK(rr_take(&r3, &op, prefix, tiny, sizeof(tiny), 0) && strcmp(tiny, "get") == 0 && !r3.secret);
     mf_msg_t sent = sent_reply(1500);
     rr_on_reply(&r, &sent, 10);
     mf_msg_t msg = {.kind = MF_MSG_RECV, .msg_ok = true, .txt_type = MF_TXT_CLI_DATA};
@@ -258,8 +266,15 @@ static void cli_filter(void) {
     CHECK(strcmp(r.cli[r.cli_head].reply, "a2|password now: (hidden)") == 0);
     rr_cli_format(&r, log, sizeof(log));
     CHECK(!strstr(log, "s3cret"));
+    // a late echo of a password that lands on the next exchange is hidden too (review fix)
+    CHECK(rr_request(&r, RR_CLI, A, "ver", 150, &why) == 2);
+    take(&r, 150);
+    rr_on_reply(&r, &sent, 151);
+    strcpy(msg.text, "password now: s3cret");
+    CHECK(rr_on_message(&r, &msg, 160));
+    CHECK(strcmp(r.cli[r.cli_head].reply, "password now: (hidden)") == 0);
     // a plain command is kept as typed
-    CHECK(rr_request(&r, RR_CLI, A, "get name", 200, &why) == 2);
+    CHECK(rr_request(&r, RR_CLI, A, "get name", 200, &why) == 3);
     CHECK(strcmp(r.cli[r.cli_head].cmd, "get name") == 0 && !r.cli[r.cli_head].secret);
 }
 

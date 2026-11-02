@@ -86,9 +86,30 @@ static bool has_control(char const *s) {
     return false;
 }
 
+// Only plain decimal numbers ([-]digits[.digits]): the repeater reads the text with atoi/atof, which would take "3e1",
+// "0x10" or ".5e1" otherwise than strtod does, and the text is what is sent
+static bool plain_number(char const *s) {
+    if (*s == '-') {
+        s++;
+    }
+    size_t whole = strspn(s, "0123456789");
+    if (!whole) {
+        return false;
+    }
+    s += whole;
+    if (*s == '.') {
+        size_t frac = strspn(s + 1, "0123456789");
+        if (!frac) {
+            return false;
+        }
+        s += 1 + frac;
+    }
+    return *s == 0;
+}
+
 static bool whole_number(char const *s, double *out) {
     char *end = NULL;
-    if (!*s) {
+    if (!plain_number(s)) {
         return false;
     }
     double v = strtod(s, &end);
@@ -427,6 +448,9 @@ void rs_init(rs_t *s) {
 }
 
 void rs_read_all(rs_t *s) {
+    s->misses  = 0;
+    s->stopped = false;
+    memset(s->tries, 0, sizeof(s->tries));
     for (size_t i = 0; i < RS_ROWS; i++) {
         if (rs_row_readable(i) && !(s->cur_row == (int)i && !s->cur_set)) {
             s->want |= 1u << i;
@@ -474,9 +498,13 @@ static void set_last(rs_t *s, int row, rs_reply_t r, char const *text) {
 bool rs_next(rs_t *s, char *out, size_t cap) {
     while (s->cur_row < 0 && (s->set_row >= 0 || s->want)) {
         next_tag(s);
-        char const *tag = s->untagged ? NULL : s->cur_tag;
+        char const *tag   = s->untagged ? NULL : s->cur_tag;
+        bool        probe = !s->untagged && !s->probed; // the first command is a get: it learns whether tags work
         bool        ok;
-        if (s->set_row >= 0) {
+        if (probe && !s->want) {
+            s->want |= 1u << 0; // a set queued before any get: the name is read first
+        }
+        if (s->set_row >= 0 && !probe) {
             int row  = s->set_row;
             ok       = rs_set_cmd((size_t)row, s->set_value, tag, out, cap);
             s->set_row = -1;
@@ -498,22 +526,33 @@ bool rs_next(rs_t *s, char *out, size_t cap) {
             s->cur_row = (int8_t)row;
             s->cur_set = false;
         }
-        s->tag_probe = !s->untagged && !s->probed;
-        s->probed    = true;
+        s->tag_probe = probe && !s->cur_set;
+        s->probed    = s->probed || s->tag_probe;
         return true;
     }
     return false;
 }
 
-static bool any_untagged_line(char const *reply) {
+// An untagged "Unknown command": a repeater that does not strip the tag read "a7|get name" as one unknown word
+static bool untagged_refusal(char const *reply) {
     for (char const *line = reply; *line;) {
         size_t n = strcspn(line, "\n");
-        if (n && !tagged(line, n)) {
+        if (n && !tagged(line, n) && starts(line, n, "unknown command")) {
             return true;
         }
         line += n + (line[n] == '\n');
     }
     return false;
+}
+
+static void stop_reading(rs_t *s) {
+    for (size_t i = 0; i < RS_ROWS; i++) {
+        if (s->want & (1u << i)) {
+            s->st[i] = RS_V_NONE;
+        }
+    }
+    s->want    = 0;
+    s->stopped = true;
 }
 
 static void end_current(rs_t *s) {
@@ -530,6 +569,9 @@ bool rs_on_answer(rs_t *s, char const *reply) {
     if (!reply) {
         if (!s->cur_set) {
             s->st[row] = RS_V_NONE;
+            if (++s->misses >= RS_MISSES_MAX) {
+                stop_reading(s); // the repeater is out of reach: no point in asking the rest one by one
+            }
         } else if (ROWS[row].kind == RS_REBOOT) {
             set_last(s, row, RS_R_OK, "Reboot sent (a repeater does not answer it)");
         } else {
@@ -544,7 +586,7 @@ bool rs_on_answer(rs_t *s, char const *reply) {
     char       text[RS_TEXT_MAX];
     rs_reply_t r = rs_parse_reply((size_t)row, s->cur_set, s->untagged ? NULL : s->cur_tag, reply, text, sizeof(text));
     if (r == RS_R_NOT_OURS) {
-        if (!(s->tag_probe && any_untagged_line(reply))) {
+        if (!(s->tag_probe && untagged_refusal(reply))) {
             return false;
         }
         s->untagged = true; // this repeater does not reflect the tag: everything again without one
@@ -557,6 +599,7 @@ bool rs_on_answer(rs_t *s, char const *reply) {
         end_current(s);
         return true;
     }
+    s->misses = 0;
     if (!s->cur_set) {
         s->st[row] = r == RS_R_VALUE ? RS_V_VALUE : RS_V_NONE;
         snprintf(s->value[row], RS_VALUE_MAX, "%.*s", RS_VALUE_MAX - 1, r == RS_R_VALUE ? text : "");
@@ -580,10 +623,15 @@ void rs_on_unsent(rs_t *s, char const *why) {
         char text[RS_TEXT_MAX];
         snprintf(text, sizeof(text), "Not sent: %s", why ? why : "?");
         set_last(s, row, RS_R_ERROR, text);
+    } else if (++s->tries[row] < RS_UNSENT_MAX) {
+        s->want |= 1u << row; // asked again (after the others): MeshCore may have been busy
+        s->st[row] = RS_V_UNKNOWN;
     } else {
         s->st[row] = RS_V_NONE;
     }
-    s->probed = false; // nothing went out: the next command probes the tag
+    if (s->tag_probe) {
+        s->probed = false; // the probe did not go out: the next get probes
+    }
     end_current(s);
 }
 

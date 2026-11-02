@@ -27,8 +27,25 @@ uint32_t rr_deadline_ms(uint32_t est_ms) {
     return d < RR_FLOOR_MS ? RR_FLOOR_MS : d > RR_CAP_MS ? RR_CAP_MS : d;
 }
 
+void rr_prepare(rr_op_t op, char const *arg, rr_prep_t *p) {
+    p->cls      = op == RR_CLI && arg ? (uint8_t)rs_cmd_class(arg) : (uint8_t)RS_CMD_PLAIN;
+    p->shown[0] = 0;
+    if (p->cls == RS_CMD_SECRET) {
+        rs_redact_cmd(arg, p->shown, sizeof(p->shown)); // the history never holds a password (#117)
+    } else if (op == RR_CLI && arg) {
+        snprintf(p->shown, sizeof(p->shown), "%s", arg);
+    }
+}
+
 uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg, uint32_t now_ms,
                     char const **why) {
+    rr_prep_t p;
+    rr_prepare(op, arg, &p);
+    return rr_request_prepared(r, op, prefix, arg, &p, now_ms, why);
+}
+
+uint32_t rr_request_prepared(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg,
+                             rr_prep_t const *p, uint32_t now_ms, char const **why) {
     if (rr_busy(r)) {
         *why = "another request to a repeater or room is still running";
         return 0;
@@ -42,7 +59,7 @@ uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char c
         *why = n ? "the command is too long" : "no command";
         return 0;
     }
-    if (op == RR_CLI && rs_cmd_class(arg) == RS_CMD_FORBIDDEN) {
+    if (op == RR_CLI && p->cls == RS_CMD_FORBIDDEN) {
         *why = "erase is never sent from the badge (#117)"; // it wipes the repeater's file system
         return 0;
     }
@@ -54,6 +71,7 @@ uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char c
     r->refused        = false;
     r->why            = NULL;
     r->asked_ms       = now_ms;
+    r->secret         = op == RR_LOGIN || p->cls == RS_CMD_SECRET;
     r->sent_ms = r->est_ms = r->done_ms = 0;
     memcpy(r->prefix, prefix, MF_PREFIX);
     wipe(r->arg, sizeof(r->arg));
@@ -73,12 +91,8 @@ uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char c
         rr_exchange_t *x = &r->cli[r->cli_head];
         wipe(x, sizeof(*x));
         x->state  = RR_CLI_WAITING;
-        x->secret = rs_cmd_class(arg) == RS_CMD_SECRET;
-        if (x->secret) {
-            rs_redact_cmd(arg, x->cmd, sizeof(x->cmd)); // the history never holds a password (#117)
-        } else {
-            memcpy(x->cmd, arg, n);
-        }
+        x->secret = p->cls == RS_CMD_SECRET;
+        memcpy(x->cmd, p->shown, strnlen(p->shown, RR_CMD_MAX)); // made by rr_prepare, outside the lock
     }
     return seq;
 }
@@ -91,8 +105,13 @@ bool rr_take(rr_t *r, rr_op_t *op, uint8_t prefix[MF_PREFIX], char *arg_out, siz
     r->sent_ms = now_ms;
     *op        = r->op;
     memcpy(prefix, r->prefix, MF_PREFIX);
-    snprintf(arg_out, cap, "%s", r->arg);
-    if (r->op == RR_LOGIN || (r->op == RR_CLI && rs_cmd_class(r->arg) == RS_CMD_SECRET)) {
+    size_t n = strnlen(r->arg, sizeof(r->arg) - 1); // no snprintf here: the caller holds a critical section
+    n        = cap && n >= cap ? cap - 1 : n;
+    if (cap) {
+        memcpy(arg_out, r->arg, n);
+        arg_out[n] = 0;
+    }
+    if (r->secret) {
         wipe(r->arg, sizeof(r->arg)); // the password is not kept in the request once it is on its way
     }
     return true;
@@ -171,8 +190,9 @@ bool rr_on_status(rr_t *r, mf_msg_t const *m, uint32_t now_ms) {
 // break stays one
 static void append_reply(rr_exchange_t *x, char const *text) {
     char hidden[RR_REPLY_MAX];
-    if (x->secret) {
-        rs_redact_reply(text, hidden, sizeof(hidden)); // "password now: <it>" is the repeater's echo (#117)
+    if (strstr(text, "password now:")) {
+        // the repeater's echo of a new password (#117), also when it comes late, onto the exchange after it
+        rs_redact_reply(text, hidden, sizeof(hidden));
         text = hidden;
     }
     size_t at = strlen(x->reply);
@@ -234,7 +254,35 @@ bool rr_logged_in(rr_t const *r, uint8_t const prefix[MF_PREFIX]) {
     return r->logged_in && memcmp(r->login_prefix, prefix, MF_PREFIX) == 0;
 }
 
+static void poll_timeouts(rr_t *r, uint32_t now_ms);
+
 void rr_poll(rr_t *r, uint32_t now_ms, rr_t *out) {
+    poll_timeouts(r, now_ms);
+    if (out) {
+        *out = *r;
+        wipe(out->arg, sizeof(out->arg)); // a copy for a screen never carries a password
+    }
+}
+
+void rr_poll_head(rr_t *r, uint32_t now_ms, rr_head_t *out) {
+    poll_timeouts(r, now_ms);
+    out->seq       = r->seq;
+    out->op        = r->op;
+    out->state     = r->state;
+    out->why       = r->why;
+    out->logged_in = r->logged_in;
+    out->admin     = r->admin;
+    memcpy(out->login_prefix, r->login_prefix, MF_PREFIX);
+    memcpy(out->cli_prefix, r->cli_prefix, MF_PREFIX);
+    out->cli_n = r->cli_n;
+    out->cli   = r->cli[r->cli_head];
+}
+
+bool rr_head_logged_in(rr_head_t const *h, uint8_t const prefix[MF_PREFIX]) {
+    return h->logged_in && memcmp(h->login_prefix, prefix, MF_PREFIX) == 0;
+}
+
+static void poll_timeouts(rr_t *r, uint32_t now_ms) {
     if (r->state == RR_SENT && now_ms - r->sent_ms > rr_deadline_ms(r->est_ms)) {
         r->state = RR_TIMEOUT;
         r->why   = r->op == RR_LOGIN    ? "no answer to the login"
@@ -246,10 +294,6 @@ void rr_poll(rr_t *r, uint32_t now_ms, rr_t *out) {
         r->state = RR_TIMEOUT; // the pipe never got to it (MeshCore stopped?)
         r->why   = "MeshCore did not get to it";
         cli_end(r, RR_CLI_NONE);
-    }
-    if (out) {
-        *out = *r;
-        wipe(out->arg, sizeof(out->arg)); // a copy for a screen never carries a password
     }
 }
 
