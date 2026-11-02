@@ -183,6 +183,37 @@ static void decode_rejects_bad_input(void) {
     CHECK(lora_decode(send_max, sizeof(send_max), &out) == LORA_DEC_OK && out.u.tx.len == 255);
 }
 
+// IDENT (#36): the P4 asks the running C6 app for its ELF sha256, so a warm boot can trust what the C6 flash holds
+static void ident_round_trip(void) {
+    size_t     n;
+    uint8_t    buf[LORA_MSG_MAX];
+    lora_msg_t out;
+
+    lora_msg_t req = {.type = LORA_MSG_IDENT_REQ};
+    round_trip(&req, &n);
+    CHECK(n == 2);
+    uint8_t req_long[] = {LORA_PROTO_VERSION, LORA_MSG_IDENT_REQ, 0};
+    CHECK(lora_decode(req_long, sizeof(req_long), &out) == LORA_DEC_BAD_LEN);
+
+    lora_msg_t id = {.type = LORA_MSG_IDENT};
+    for (int i = 0; i < LORA_IDENT_SHA_LEN; i++) {
+        id.u.ident.app_elf_sha256[i] = (uint8_t)(0xF0 - i);
+    }
+    lora_msg_t got = round_trip(&id, &n);
+    CHECK(n == 2 + LORA_IDENT_SHA_LEN);
+    CHECK(memcmp(got.u.ident.app_elf_sha256, id.u.ident.app_elf_sha256, LORA_IDENT_SHA_LEN) == 0);
+
+    // the sha follows the header byte for byte
+    CHECK(lora_encode(&id, buf, sizeof(buf)) == n);
+    CHECK(buf[0] == LORA_PROTO_VERSION && buf[1] == LORA_MSG_IDENT && buf[2] == 0xF0 && buf[n - 1] == 0xF0 - 31);
+    CHECK(lora_encode(&id, buf, n - 1) == 0); // too small
+    CHECK(lora_decode(buf, n - 1, &out) == LORA_DEC_BAD_LEN);
+    buf[n] = 0;
+    CHECK(lora_decode(buf, n + 1, &out) == LORA_DEC_BAD_LEN);
+    buf[0] = LORA_PROTO_VERSION + 1;
+    CHECK(lora_decode(buf, n, &out) == LORA_DEC_BAD_VERSION);
+}
+
 static void config_valid_ranges(void) {
     lora_config_t const def = LORA_CONFIG_DEFAULT;
     lora_config_t       c   = def;
@@ -238,6 +269,7 @@ int main(void) {
     encode_short_buffer();
     decode_rejects_bad_input();
     config_valid_ranges();
+    ident_round_trip();
 
     if (failures) {
         printf("%d failure(s)\n", failures);

@@ -10,6 +10,7 @@
 #define TX_FIXED_LEN (HDR_LEN + 1) // the length byte
 #define STATUS_LEN   (HDR_LEN + 39)
 #define RESULT_LEN   (HDR_LEN + 4)
+#define IDENT_LEN    (HDR_LEN + LORA_IDENT_SHA_LEN)
 #define BODYLESS_LEN HDR_LEN
 
 static uint8_t *put_u16(uint8_t *p, uint16_t v) {
@@ -39,11 +40,13 @@ static size_t encoded_len(lora_msg_t const *msg) {
         case LORA_MSG_CONFIG: return CONFIG_LEN;
         case LORA_MSG_RX_START:
         case LORA_MSG_RX_STOP:
-        case LORA_MSG_STATUS_REQ: return BODYLESS_LEN;
+        case LORA_MSG_STATUS_REQ:
+        case LORA_MSG_IDENT_REQ: return BODYLESS_LEN;
         case LORA_MSG_SEND: return msg->u.tx.len ? TX_FIXED_LEN + msg->u.tx.len : 0;
         case LORA_MSG_RX_PACKET: return RX_FIXED_LEN + msg->u.rx.len;
         case LORA_MSG_STATUS: return STATUS_LEN;
         case LORA_MSG_RESULT: return RESULT_LEN;
+        case LORA_MSG_IDENT: return IDENT_LEN;
         default: return 0;
     }
 }
@@ -106,6 +109,7 @@ size_t lora_encode(lora_msg_t const *msg, uint8_t *buf, size_t cap) {
             put_u16(p, (uint16_t)r->radio_err);
             break;
         }
+        case LORA_MSG_IDENT: memcpy(p, msg->u.ident.app_elf_sha256, LORA_IDENT_SHA_LEN); break;
         default: break; // bodyless
     }
     return len;
@@ -139,7 +143,8 @@ lora_dec_t lora_decode(uint8_t const *buf, size_t len, lora_msg_t *out) {
         }
         case LORA_MSG_RX_START:
         case LORA_MSG_RX_STOP:
-        case LORA_MSG_STATUS_REQ: return len == BODYLESS_LEN ? LORA_DEC_OK : LORA_DEC_BAD_LEN;
+        case LORA_MSG_STATUS_REQ:
+        case LORA_MSG_IDENT_REQ: return len == BODYLESS_LEN ? LORA_DEC_OK : LORA_DEC_BAD_LEN;
         case LORA_MSG_SEND: {
             if (len < TX_FIXED_LEN || buf[TX_FIXED_LEN - 1] == 0 ||
                 len != (size_t)TX_FIXED_LEN + buf[TX_FIXED_LEN - 1]) {
@@ -191,6 +196,12 @@ lora_dec_t lora_decode(uint8_t const *buf, size_t len, lora_msg_t *out) {
             r->radio_err     = (int16_t)get_u16(&p);
             return LORA_DEC_OK;
         }
+        case LORA_MSG_IDENT:
+            if (len != IDENT_LEN) {
+                return LORA_DEC_BAD_LEN;
+            }
+            memcpy(out->u.ident.app_elf_sha256, p, LORA_IDENT_SHA_LEN);
+            return LORA_DEC_OK;
         default: return LORA_DEC_BAD_TYPE;
     }
 }

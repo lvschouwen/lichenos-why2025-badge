@@ -15,7 +15,9 @@ extern "C" {
 //
 // Every message starts with [version][type]; the fields follow little-endian in the order of the structs below.
 
-#define LORA_PROTO_VERSION 3 // 2: STATUS carries the C6 uptime, heap and stack (#56); 3: transmit (#65)
+// 2: STATUS carries the C6 uptime, heap and stack (#56); 3: transmit (#65). IDENT (#36) is new message types only, no
+// layout change, so no bump: an older peer answers nothing to IDENT_REQ (BAD_TYPE), which the P4 treats as "not proven"
+#define LORA_PROTO_VERSION 3
 #define LORA_MSG_ID_TO_C6  0x4C01
 #define LORA_MSG_ID_TO_P4  0x4C02
 #define LORA_MSG_MAX       300 // largest encoded message (RX_PACKET with 255 bytes is 266)
@@ -27,10 +29,12 @@ typedef enum {
     LORA_MSG_RX_STOP,
     LORA_MSG_STATUS_REQ,
     LORA_MSG_SEND, // a packet to transmit; answered by a RESULT once it left the radio (or failed)
+    LORA_MSG_IDENT_REQ, // which app does the C6 run? Answered by IDENT (#36)
     // C6 -> P4
     LORA_MSG_RX_PACKET = 0x81,
     LORA_MSG_STATUS,
     LORA_MSG_RESULT,
+    LORA_MSG_IDENT,
 } lora_msg_type_t;
 
 typedef struct {
@@ -97,6 +101,11 @@ typedef struct {
     int16_t radio_err;
 } lora_result_t;
 
+#define LORA_IDENT_SHA_LEN 32
+typedef struct {
+    uint8_t app_elf_sha256[LORA_IDENT_SHA_LEN]; // esp_app_desc_t of the running C6 app: the same bytes as in its .bin
+} lora_ident_t;
+
 typedef struct {
     uint8_t type; // lora_msg_type_t
     union {
@@ -105,6 +114,7 @@ typedef struct {
         lora_tx_packet_t tx;
         lora_status_t    status;
         lora_result_t    result;
+        lora_ident_t     ident;
     } u;
 } lora_msg_t;
 

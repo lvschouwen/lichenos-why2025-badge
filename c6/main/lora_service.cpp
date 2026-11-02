@@ -3,7 +3,7 @@
 /*
  * LoRa radio service for the P4 (#51, #65).
  *
- * The P4 drives it over ESP-Hosted peer data (lora_proto.h): CONFIG, RX_START, RX_STOP, STATUS_REQ, SEND. One task
+ * The P4 drives it over ESP-Hosted peer data (lora_proto.h): CONFIG, RX_START, RX_STOP, STATUS_REQ, SEND, IDENT_REQ. One task
  * owns the SX1262 through RadioLib; the peer-data callback only queues the command and the DIO1 interrupt only wakes
  * the task. A SEND interrupts receiving for one packet, is answered by a RESULT once it left the radio (or failed),
  * and receiving starts again.
@@ -12,6 +12,7 @@
 #include "lora_service.h"
 
 #include "driver/gpio.h"
+#include "esp_app_desc.h"
 #include "eh_cp_feat_peer_data.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -241,6 +242,17 @@ static void handle_command(lora_cmd_t const *cmd) {
             if (status.state == LORA_STATE_RX) {
                 reply.u.status.rssi_x10 = (int16_t)(radio.getRSSI(false) * 10);
             }
+            send_msg(&reply);
+            return;
+        }
+        case LORA_MSG_IDENT_REQ: {
+            // The running app's, not the flash's: the P4 compares it with the bundled .bin before trusting a warm boot
+            // (#36). Answered whatever the radio's state.
+            lora_msg_t reply = {};
+            reply.type       = LORA_MSG_IDENT;
+            static_assert(sizeof(reply.u.ident.app_elf_sha256) == sizeof(esp_app_get_description()->app_elf_sha256),
+                          "IDENT sha size");
+            memcpy(reply.u.ident.app_elf_sha256, esp_app_get_description()->app_elf_sha256, LORA_IDENT_SHA_LEN);
             send_msg(&reply);
             return;
         }

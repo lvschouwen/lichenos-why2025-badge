@@ -4,4 +4,4 @@
 idf_component_register(SRCS "app_main.c" "backlight_cmd.c" "lora_service.cpp" "lora_irq.c" "../../shared/lora/lora_proto.c"
                     INCLUDE_DIRS "." "../../shared/lora"
                     REQUIRES esp_hosted
-                    PRIV_REQUIRES nvs_flash esp_event esp_driver_ledc esp_driver_uart esp_driver_gpio esp_timer)
+                    PRIV_REQUIRES nvs_flash esp_event esp_driver_ledc esp_driver_uart esp_driver_gpio esp_timer esp_app_format)
