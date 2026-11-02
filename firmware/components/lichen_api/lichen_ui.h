@@ -28,9 +28,14 @@ void shell_scroll_by(lv_obj_t *obj, int32_t dy);
 lv_obj_t *shell_page_create(void);
 void shell_scroll_tame(lv_obj_t *obj);
 // Pop one screen / down to `screen` (nothing is popped when it is not on the stack), then call then(arg), all in one
-// async step: the target is showing when then runs, whatever else is queued (LVGL runs async calls newest first)
-void shell_back_then(void (*then)(void *), void *arg);
-void shell_back_to(lv_obj_t *screen, void (*then)(void *), void *arg);
+// async step: the target is showing when then runs, whatever else is queued (LVGL runs async calls newest first).
+// False when the step could not be queued (no memory, the LVGL lock busy): then will not run and arg is still the
+// caller's.
+bool shell_back_then(void (*then)(void *), void *arg);
+bool shell_back_to(lv_obj_t *screen, void (*then)(void *), void *arg);
+// The screen from_top places below the top of the shell's stack (0: the top one, 1: the one under it), NULL past the
+// bottom. The stack, not what is drawn: a screensaver or lock cover over it does not count (#126).
+lv_obj_t *shell_stack_screen(int from_top);
 // The shell's screen style (background, text colour, the small font), as shell_page_create uses it; text_entry.c's
 // screen too
 void shell_style_screen(lv_obj_t *screen);

@@ -202,24 +202,35 @@ static void back_step(void *data) {
     lv_free(job);
 }
 
-static void back_later(lv_obj_t *target, void (*then)(void *), void *arg) {
+static bool back_later(lv_obj_t *target, void (*then)(void *), void *arg) {
     lvgl_port_lock(0);
-    back_job_t *job = lv_malloc(sizeof(*job));
+    back_job_t *job    = lv_malloc(sizeof(*job));
+    bool        queued = false;
     if (job) {
-        *job = (back_job_t){target, then, arg};
-        if (lv_async_call(back_step, job) != LV_RESULT_OK) {
+        *job   = (back_job_t){target, then, arg};
+        queued = lv_async_call(back_step, job) == LV_RESULT_OK;
+        if (!queued) {
             lv_free(job);
         }
     }
     lvgl_port_unlock();
+    return queued;
 }
 
-void shell_back_then(void (*then)(void *), void *arg) {
-    back_later(NULL, then, arg);
+bool shell_back_then(void (*then)(void *), void *arg) {
+    return back_later(NULL, then, arg);
 }
 
-void shell_back_to(lv_obj_t *screen, void (*then)(void *), void *arg) {
-    back_later(screen, then, arg);
+bool shell_back_to(lv_obj_t *screen, void (*then)(void *), void *arg) {
+    return back_later(screen, then, arg);
+}
+
+lv_obj_t *shell_stack_screen(int from_top) {
+    lvgl_port_lock(0);
+    int       at     = nav_depth() - 1 - from_top;
+    lv_obj_t *screen = from_top >= 0 && at >= 0 ? frames[at].screen : NULL;
+    lvgl_port_unlock();
+    return screen;
 }
 
 lv_group_t *shell_top_group(void) {

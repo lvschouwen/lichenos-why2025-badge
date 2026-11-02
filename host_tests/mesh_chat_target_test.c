@@ -55,6 +55,23 @@ int main(void) {
     mesh_chat_target_dm(&b, CAROL, long_name);
     CHECK(strlen(b.title) == MESH_CHAT_TITLE_MAX - 1 && b.title[0] == '@');
 
+    // Channel names at MeshCore's limit (31 chars) are kept whole and still keyed; a longer one is cut, never overflows
+    char chan31[MESH_CHANNEL_MAX + 1], chan40[41];
+    memset(chan31, 'c', MESH_CHANNEL_MAX);
+    chan31[MESH_CHANNEL_MAX] = '\0';
+    mesh_chat_target_channel(&a, chan31);
+    CHECK(strcmp(a.title, chan31) == 0 && strlen(a.key.chan) == MESH_CHANNEL_MAX);
+    CHECK(strncmp(a.key.chan, chan31, MESH_CHANNEL_MAX) == 0);
+    memset(chan40, 'c', 40);
+    chan40[40] = '\0';
+    mesh_chat_target_channel(&b, chan40);
+    CHECK(strlen(b.title) < sizeof(b.title) && b.key.kind == MESH_CHAT_CHANNEL && strlen(b.key.chan) <= MESH_CHANNEL_MAX);
+    // NULL or empty: an empty title, a channel key all the same (no crash)
+    mesh_chat_target_channel(&a, NULL);
+    CHECK(a.title[0] == '\0' && a.key.kind == MESH_CHAT_CHANNEL && !a.dm);
+    mesh_chat_target_channel(&b, "");
+    CHECK(b.title[0] == '\0' && mesh_chat_target_same(&a, &b));
+
     // Opening: nothing chat-like on top pushes; the same chat keeps (the draft stays); another chat is replaced
     // (the bug of #126: the DM with bob on top, a notice for carol must not leave bob's screen sending to carol)
     mesh_chat_target_t bob, carol, chan, chan_upper;

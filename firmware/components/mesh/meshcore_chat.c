@@ -175,8 +175,7 @@ static void show_counter(chat_t *c) {
     lv_label_set_text(c->counter, text);
 }
 
-static void tick(lv_timer_t *t) {
-    chat_t  *c = lv_timer_get_user_data(t);
+static void refresh(chat_t *c) {
     uint32_t generation;
     // The chat's own ring (#59), read with mark_read while the chat is on screen: then it counts as read (#48). Not
     // under the screensaver or lock cover, nor with another screen on top such as the notification centre (#127):
@@ -191,6 +190,10 @@ static void tick(lv_timer_t *t) {
         c->shown_generation = generation;
         c->shown_s          = mesh_uptime_s();
     }
+}
+
+static void tick(lv_timer_t *t) {
+    refresh(lv_timer_get_user_data(t));
 }
 
 static void set_default_note(chat_t *c);
@@ -691,18 +694,19 @@ static lv_obj_t *build_chat(void) {
         lv_group_set_user_data(group, c);
         lv_group_set_focus_cb(group, on_focus_move); // keeps the focus on a search (#48), Tab retries (#47)
     }
-    c->timer = lv_timer_create(tick, TICK_MS, c);
-    tick(c->timer);
+    c->timer = lv_timer_create(tick, TICK_MS, c); // NULL without memory: the chat then shows what refresh found once
+    refresh(c);
     return screen;
 }
 
 // ---- opening a chat (#126) --------------------------------------------------------------------------------------------
 
-// The chat screen that is showing, NULL when the screen showing is not a chat (or a cover is over it)
+// The chat screen on top of the shell's stack, NULL when the top screen is not a chat. The stack, not lv_screen_active:
+// under a screensaver or lock cover the chat is still the one a new chat would land on.
 static chat_t *chat_on_top(void) {
-    lv_obj_t *active = lv_screen_active();
-    for (chat_t *c = chats; c; c = c->next) {
-        if (c->screen == active) {
+    lv_obj_t *top = shell_stack_screen(0);
+    for (chat_t *c = chats; top && c; c = c->next) {
+        if (c->screen == top) {
             return c;
         }
     }
@@ -711,32 +715,39 @@ static chat_t *chat_on_top(void) {
 
 typedef struct {
     mesh_chat_target_t want;
-    lv_obj_t          *popped; // compared only, never used: the screen may be gone
+    lv_obj_t          *below; // the screen under the chat being replaced; compared only, it may be gone
 } replace_t;
 
 static void open_target(mesh_chat_target_t const *want);
 
-// shell_back_then's follow-up: the other chat is gone (unless the pop was refused), the one below shows
+// shell_back_to's follow-up: when the screen below the old chat is on top now, open (a queued Esc may have popped the
+// chat already: back_to then pops nothing). Anything else (the pop refused by the update screen, more popped by
+// further Escs): open nothing.
 static void open_after_pop(void *arg) {
     replace_t *r = arg;
-    if (lv_screen_active() != r->popped) {
+    if (shell_stack_screen(0) == r->below) {
         open_target(&r->want);
     }
     heap_caps_free(r);
 }
 
-// LVGL task. The same chat on top: nothing happens, the draft stays. Another chat on top: that one goes (Esc from the
-// new one then goes where Esc from the old one went), then the new one opens. Otherwise a new chat screen is pushed.
+// LVGL task. The same chat on top: nothing happens, the draft stays. Another chat on top: back to the screen below it
+// (Esc from the new one then goes where Esc from the old one went), then the new one opens. Otherwise a new chat screen
+// is pushed.
 static void open_target(mesh_chat_target_t const *want) {
     chat_t *top = chat_on_top();
     switch (mesh_chat_open_how(top ? &top->target : NULL, want)) {
         case MESH_CHAT_OPEN_KEEP: return;
         case MESH_CHAT_OPEN_REPLACE: {
-            replace_t *r = heap_caps_malloc(sizeof(*r), MALLOC_CAP_SPIRAM);
-            if (r) {
-                r->want   = *want;
-                r->popped = top->screen;
-                shell_back_then(open_after_pop, r);
+            lv_obj_t  *below = shell_stack_screen(1);
+            replace_t *r     = below ? heap_caps_malloc(sizeof(*r), MALLOC_CAP_SPIRAM) : NULL;
+            if (!r) {
+                return;
+            }
+            r->want  = *want;
+            r->below = below;
+            if (!shell_back_to(below, open_after_pop, r)) {
+                heap_caps_free(r); // not queued: open_after_pop will never run
             }
             return;
         }
