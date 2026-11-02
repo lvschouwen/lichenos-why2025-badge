@@ -1958,7 +1958,35 @@ static bool console_remote_target(char const *token, uint8_t out[6]) {
     return found == 1;
 }
 
+// A password typed on the console is remembered only once the login succeeded, as on the screen
+static char     console_pw[MF_PASSWORD_MAX + 1];
+static uint8_t  console_pw_prefix[6];
+static uint32_t console_pw_seq;
+
+static void console_pw_settle(void) {
+    if (!console_pw_seq) {
+        return;
+    }
+    rr_t *r = (rr_t *)heap_caps_malloc(sizeof(rr_t), MALLOC_CAP_SPIRAM);
+    if (!r || !mesh_remote_get(r)) {
+        free(r);
+        return;
+    }
+    bool mine = r->seq == console_pw_seq;
+    if (mine && rr_busy(r)) {
+        free(r);
+        return; // still waiting for the answer
+    }
+    if (mine && r->state == RR_DONE) {
+        meshcore_pw_set(console_pw_prefix, console_pw);
+    }
+    memset(console_pw, 0, sizeof(console_pw)); // done, refused, timed out or replaced: not kept
+    console_pw_seq = 0;
+    free(r);
+}
+
 static void console_remote_show(void) {
+    console_pw_settle();
     rr_t *r = (rr_t *)heap_caps_malloc(sizeof(rr_t), MALLOC_CAP_SPIRAM);
     if (r && mesh_remote_get(r)) {
         char text[96];
@@ -1995,6 +2023,7 @@ static void console_remote_show(void) {
 // A password typed here is remembered like one from the screen; the screens never show it. Nothing is sent unless
 // this command says login, status or cli.
 static void cmd_mesh_remote(char const *args) {
+    console_pw_settle();
     if (!*args) {
         console_remote_show();
         return;
@@ -2019,8 +2048,9 @@ static void cmd_mesh_remote(char const *args) {
     if (strncmp(verb, "login", 5) == 0 && (verb[5] == ' ' || !verb[5])) {
         char        saved[MF_PASSWORD_MAX + 2];
         char const *pw = verb[5] ? verb + 6 : "";
-        if (*pw && strlen(pw) <= MF_PASSWORD_MAX) {
-            meshcore_pw_set(prefix, pw);
+        bool typed = *pw && strlen(pw) <= MF_PASSWORD_MAX;
+        if (typed) {
+            // kept below, once the login succeeded
         } else if (!*pw && meshcore_pw_get(prefix, saved, sizeof(saved))) {
             pw = saved;
         } else {
@@ -2028,6 +2058,11 @@ static void cmd_mesh_remote(char const *args) {
             return;
         }
         seq = mesh_remote_start(prefix, RR_LOGIN, pw, &why);
+        if (seq && typed) {
+            snprintf(console_pw, sizeof(console_pw), "%s", pw);
+            memcpy(console_pw_prefix, prefix, 6);
+            console_pw_seq = seq;
+        }
         memset(saved, 0, sizeof(saved));
     } else if (strcmp(verb, "status") == 0) {
         seq = mesh_remote_start(prefix, RR_STATUS, NULL, &why);

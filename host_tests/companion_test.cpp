@@ -292,6 +292,20 @@ static void contact_action_checks(BadgeMesh &mesh) {
     pa->flags = MESH_CONTACT_FAV;
     CHECK(mesh.contactAction(a.id.pub_key, MESH_CO_FAV_OFF) == BadgeMesh::CONTACT_QUEUED);
     CHECK(!(pa->flags & MESH_CONTACT_FAV));
+
+    // Order (review of #112): while commands wait in the overflow, a later one does not jump ahead through the FIFO.
+    // ON waits in the overflow, one loop frees a FIFO place, OFF must queue behind ON: the contact ends up off.
+    settle(mesh, 40);
+    pa->flags = 0;
+    for (int i = 0; i < LINK_FIFO; i++) {
+        CHECK(mesh.pipe().queue_cmd(sync, 1));
+    }
+    CHECK(mesh.contactAction(a.id.pub_key, MESH_CO_FAV_ON) == BadgeMesh::CONTACT_QUEUED);
+    settle(mesh, 1); // takes one frame: the FIFO has room, the overflow still holds ON
+    CHECK(mesh.contactAction(a.id.pub_key, MESH_CO_FAV_OFF) == BadgeMesh::CONTACT_QUEUED);
+    settle(mesh, 40);
+    pa = mesh.lookupContactByPubKey(a.id.pub_key, PUB_KEY_SIZE);
+    CHECK(pa && !(pa->flags & MESH_CONTACT_FAV));
 }
 
 // Trace path and path discovery (#53) through the pipe on the real MyMesh: the trace goes out along the contact's

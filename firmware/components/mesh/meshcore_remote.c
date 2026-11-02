@@ -34,6 +34,8 @@ static lv_obj_t   *result, *again, *note;
 static uint32_t    seq; // the request this screen made; 0 when it could not start
 static bool        shown_busy;
 
+static void wipe_pw(void);
+
 static void set_text(lv_obj_t *label, char const *text) {
     if (label && strcmp(lv_label_get_text(label), text) != 0) {
         lv_label_set_text(label, text); // only on a change: the same text every tick would redraw for nothing
@@ -56,6 +58,7 @@ static void on_delete(lv_event_t *e) {
         return; // a late delete of an older screen must not free what a newer one owns
     }
     screen_obj = NULL;
+    wipe_pw(); // leaving before the answer: the password is not kept
     if (timer) {
         lv_timer_delete(timer);
         timer = NULL;
@@ -146,7 +149,8 @@ static lv_obj_t *build_login(void) {
         wipe_pw();
         return screen;
     }
-    menu_note(menu, "Sent now, along the stored path or flooded. A repeater or room answers only with the right password.");
+    menu_note(menu, "Sent now, along the stored path or flooded. A repeater or room answers only with the right password. "
+                    "After a login the badge keeps the session alive on air until you Log out.");
     result = add_text(menu, "Sending...");
     menu_note(menu, "Esc: back");
     login_start();

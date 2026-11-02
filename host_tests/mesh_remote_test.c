@@ -114,6 +114,19 @@ static void login_refused_and_timeout(void) {
     CHECK(r.state == RR_TIMEOUT);
 }
 
+// A queued login holds its password only until the pipe takes it, fails it or the request times out (review of #51)
+static void password_wiped(void) {
+    rr_t        r;
+    char const *why = NULL;
+    rr_init(&r);
+    rr_request(&r, RR_LOGIN, A, "secret", 0, &why);
+    rr_fail(&r, "contact not found");
+    CHECK(r.arg[0] == 0 && memcmp(r.arg, r.arg + 1, 6) == 0 && strstr(r.arg, "ecret") == NULL);
+    rr_request(&r, RR_LOGIN, A, "secret", 0, &why);
+    rr_poll(&r, RR_CAP_MS + 1, NULL);
+    CHECK(r.state == RR_TIMEOUT && r.arg[0] == 0 && strstr(r.arg + 1, "ecret") == NULL);
+}
+
 static void status(void) {
     rr_t        r;
     char const *why = NULL;
@@ -231,6 +244,7 @@ static void pw_key(void) {
 int main(void) {
     login();
     login_refused_and_timeout();
+    password_wiped();
     status();
     cli();
     pw_key();

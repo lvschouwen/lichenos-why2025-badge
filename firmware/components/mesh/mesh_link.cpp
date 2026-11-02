@@ -189,8 +189,8 @@ bool CompanionPipe::fifo_push(uint8_t const *data, size_t len) {
 // A command of the badge's own: into the FIFO, or when that is full into the overflow, which feeds the FIFO as it
 // empties (a favourite toggle must not be lost to a busy queue, #112)
 bool CompanionPipe::queue_cmd(uint8_t const *frame, size_t len) {
-    if (fifo_n_ < LINK_FIFO) {
-        return fifo_push(frame, len);
+    if (fifo_n_ < LINK_FIFO && ovf_n_ == 0) {
+        return fifo_push(frame, len); // never past commands already waiting in the overflow: they keep their order
     }
     if (ovf_n_ >= LINK_OVF || len > MF_MAX_FRAME) {
         return false;
@@ -205,7 +205,9 @@ bool CompanionPipe::queue_cmd(uint8_t const *frame, size_t len) {
 void CompanionPipe::refill_from_ovf() {
     while (ovf_n_ > 0 && fifo_n_ < LINK_FIFO) {
         Frame const &f = ovf_[ovf_head_];
-        fifo_push(f.data, f.len);
+        if (!fifo_push(f.data, f.len)) {
+            stats_.fifo_drops++; // cannot happen (room checked above); counted so it would show in fw mesh link
+        }
         ovf_head_ = (ovf_head_ + 1) % LINK_OVF;
         ovf_n_--;
     }
@@ -349,8 +351,10 @@ size_t CompanionPipe::take_trace(uint8_t dest[]) {
         return 0;
     }
     if (rr_) {
+        // MyMesh holds one pending login/status/discovery: a login/status running, or asked before this trace, goes first
         mesh_ob_enter();
-        bool login_busy = rr_busy(rr_) && rr_->op != RR_CLI; // MyMesh holds one pending login/status/discovery
+        bool login_busy = rr_busy(rr_) && rr_->op != RR_CLI &&
+                          (rr_->state != RR_QUEUED || (int32_t)(mt_->asked_ms - rr_->asked_ms) >= 0);
         mesh_ob_exit();
         if (login_busy) {
             return 0;
@@ -401,7 +405,7 @@ size_t CompanionPipe::take_remote(uint8_t dest[]) {
     }
     if (mt_) {
         mesh_ob_enter();
-        bool trace_busy = mt_busy(mt_);
+        bool trace_busy = mt_busy(mt_) && (mt_->state != MT_QUEUED || (int32_t)(rr_->asked_ms - mt_->asked_ms) > 0);
         mesh_ob_exit();
         if (trace_busy) {
             return 0;

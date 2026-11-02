@@ -11,6 +11,7 @@
 #include "mesh.h"
 #include "meshcore_chat.h"
 #include "meshcore_remote.h"
+#include "meshcore_run.h"
 #include "theme.h"
 
 #include <stdio.h>
@@ -166,6 +167,15 @@ static void on_cli(void *arg) {
 static void on_posts(void *arg) {
     (void)arg;
     meshcore_chat_open_dm(prefix, title[0] ? title : "(no name)");
+}
+
+static void on_forget(void *arg) {
+    (void)arg;
+    char saved[MF_PASSWORD_MAX + 2];
+    bool had = meshcore_pw_get(prefix, saved, sizeof(saved));
+    memset(saved, 0, sizeof(saved));
+    meshcore_pw_forget(prefix);
+    set_note(note, had ? "Password forgotten" : "No password was remembered", false);
 }
 
 static void on_logout(void *arg) {
@@ -346,6 +356,7 @@ static void remove_answer(bool yes) {
         return;
     }
     if (act(MESH_CO_REMOVE, note)) {
+        meshcore_pw_forget(prefix); // a remembered repeater/room password goes with the contact (#51)
         shell_back_to(list_screen, NULL, NULL); // past the details: the contact is gone
     }
 }
@@ -409,6 +420,7 @@ static lv_obj_t *build_detail(void) {
         menu_add(menu, "Status", "", on_status, NULL);
         menu_add(menu, "CLI", "", on_cli, NULL);
         menu_add(menu, "Log out", "", on_logout, NULL);
+        menu_add(menu, "Forget password", "", on_forget, NULL);
     }
     reset_row = menu_add(menu, "Reset path", "", on_reset, NULL);
     menu_add(menu, "Trace path", "", on_trace, NULL);

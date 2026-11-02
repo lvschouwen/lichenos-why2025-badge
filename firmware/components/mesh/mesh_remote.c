@@ -95,6 +95,7 @@ static void cli_end(rr_t *r, rr_cli_state_t st) {
 
 void rr_fail(rr_t *r, char const *why) {
     if (r->state == RR_QUEUED || r->state == RR_TAKEN) {
+        wipe(r->arg, sizeof(r->arg)); // a queued login still holds its password
         r->state = RR_FAILED;
         r->why   = why;
         cli_end(r, RR_CLI_NONE);
@@ -126,6 +127,7 @@ bool rr_on_login(rr_t *r, mf_msg_t const *m, uint32_t now_ms) {
         return false;
     }
     r->done_ms = now_ms;
+    wipe(r->arg, sizeof(r->arg));
     if (m->kind == MF_LOGIN_SUCCESS) {
         r->state    = RR_DONE;
         r->logged_in = true;
@@ -224,6 +226,7 @@ void rr_poll(rr_t *r, uint32_t now_ms, rr_t *out) {
                                         : "no reply (log in as admin first?)";
         cli_end(r, RR_CLI_NONE);
     } else if ((r->state == RR_QUEUED || r->state == RR_TAKEN) && now_ms - r->asked_ms > RR_CAP_MS) {
+        wipe(r->arg, sizeof(r->arg));
         r->state = RR_TIMEOUT; // the pipe never got to it (MeshCore stopped?)
         r->why   = "MeshCore did not get to it";
         cli_end(r, RR_CLI_NONE);

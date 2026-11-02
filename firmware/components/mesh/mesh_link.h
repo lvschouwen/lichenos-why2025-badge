@@ -66,7 +66,7 @@ public:
     size_t checkRecvFrame(uint8_t dest[]) override;
     // A command of the badge's own (#49) for MyMesh's next loop, like the start sequence; false when the queue is full
     bool queue_cmd(uint8_t const *frame, size_t len);
-    bool can_queue() const { return fifo_n_ < LINK_FIFO || ovf_n_ < LINK_OVF; }
+    bool can_queue() const { return (fifo_n_ < LINK_FIFO && ovf_n_ == 0) || ovf_n_ < LINK_OVF; }
 
 private:
     enum CurKind : uint8_t { CUR_NONE, CUR_INTERNAL, CUR_OUTBOX, CUR_TRACE, CUR_REMOTE };
