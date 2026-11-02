@@ -9,6 +9,7 @@
 #include "raw_keys.h"
 #include "shell_parts.h"
 #include "ui_keys.h"
+#include "ui_overflow.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -202,9 +203,116 @@ static void settle(void) {
     }
 }
 
+// ---- "fw ui overflow" (#133): labels whose text is cut off -------------------------------------------------------------
+
+#define OVF_TEXT_CHARS 60
+
+typedef struct {
+    int32_t px, have, x, y;
+    char    text[OVF_TEXT_CHARS + 4];
+} hit_t;
+
+static ovf_mode_t overflow_mode(lv_label_long_mode_t m) {
+    switch (m) {
+    case LV_LABEL_LONG_MODE_CLIP:
+        return OVF_CLIP;
+    case LV_LABEL_LONG_MODE_DOTS:
+        return OVF_DOT;
+    case LV_LABEL_LONG_MODE_SCROLL:
+    case LV_LABEL_LONG_MODE_SCROLL_CIRCULAR:
+        return OVF_SCROLL;
+    default:
+        return OVF_WRAP;
+    }
+}
+
+// The label's visible box: its coords cut by every ancestor's coords and the screen
+static void visible_box(lv_obj_t *obj, lv_area_t *box) {
+    lv_obj_get_coords(obj, box);
+    for (lv_obj_t *p = lv_obj_get_parent(obj); p; p = lv_obj_get_parent(p)) {
+        lv_area_t a;
+        lv_obj_get_coords(p, &a);
+        box->x1 = LV_MAX(box->x1, a.x1);
+        box->y1 = LV_MAX(box->y1, a.y1);
+        box->x2 = LV_MIN(box->x2, a.x2);
+        box->y2 = LV_MIN(box->y2, a.y2);
+    }
+    box->x1 = LV_MAX(box->x1, 0);
+    box->y1 = LV_MAX(box->y1, 0);
+    box->x2 = LV_MIN(box->x2, lv_display_get_horizontal_resolution(NULL) - 1);
+    box->y2 = LV_MIN(box->y2, lv_display_get_vertical_resolution(NULL) - 1);
+}
+
+static void overflow_walk(lv_obj_t *obj, hit_t *hits, size_t *n, size_t *total) {
+    if (lv_obj_is_hidden(obj)) {
+        return;
+    }
+    if (lv_obj_check_type(obj, &lv_label_class)) {
+        char const *text = lv_label_get_text(obj);
+        lv_area_t   a, box;
+        lv_obj_get_coords(obj, &a);
+        visible_box(obj, &box);
+        if (text && *text && box.x1 <= box.x2 && box.y1 <= box.y2 && a.y2 >= box.y1 && a.y1 <= box.y2) {
+            lv_point_t size;
+            lv_text_get_size(&size, text, lv_obj_get_style_text_font(obj, LV_PART_MAIN),
+                             lv_obj_get_style_text_letter_space(obj, LV_PART_MAIN),
+                             lv_obj_get_style_text_line_space(obj, LV_PART_MAIN), LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            int32_t have = 0;
+            int32_t over = ui_overflow_px(size.x, (ovf_span_t){a.x1, a.x2}, (ovf_span_t){box.x1, box.x2},
+                                          overflow_mode(lv_label_get_long_mode(obj)), &have);
+            if (over > 0) {
+                (*total)++;
+                if (*n < MAX_LINES) {
+                    hit_t *h = &hits[(*n)++];
+                    h->px    = size.x;
+                    h->have  = have;
+                    h->x     = a.x1;
+                    h->y     = a.y1;
+                    snprintf(h->text, sizeof(h->text), "%.*s", OVF_TEXT_CHARS, text);
+                    for (char *c = h->text; *c; c++) {
+                        if (*c == '\n' || *c == '\r') {
+                            *c = ' ';
+                        }
+                    }
+                }
+            }
+        }
+    }
+    uint32_t count = lv_obj_get_child_count(obj);
+    for (uint32_t i = 0; i < count; i++) {
+        overflow_walk(lv_obj_get_child(obj, (int32_t)i), hits, n, total);
+    }
+}
+
+// The active screen, then the top layer (status bar, toast, dialogs) and the sys layer
+static void cmd_ui_overflow(void) {
+    settle();
+    hit_t *hits = malloc(sizeof(hit_t) * MAX_LINES);
+    if (!hits) {
+        console_reply("ui overflow: no memory");
+        return;
+    }
+    size_t n = 0, total = 0;
+    lvgl_port_lock(0);
+    overflow_walk(lv_screen_active(), hits, &n, &total);
+    overflow_walk(lv_layer_top(), hits, &n, &total);
+    overflow_walk(lv_layer_sys(), hits, &n, &total);
+    lvgl_port_unlock();
+    console_reply("ui overflow: %u", (unsigned)total);
+    for (size_t i = 0; i < n; i++) {
+        console_reply("  %d,%d %d/%d px \"%s\"", (int)hits[i].x, (int)hits[i].y, (int)hits[i].px, (int)hits[i].have,
+                      hits[i].text);
+    }
+    free(hits);
+}
+
 static void cmd_ui(char const *args) {
     if (strncmp(args, "perf", 4) == 0) {
         ui_perf_cmd(args + 4);
+        return;
+    }
+    if (strncmp(args, "overflow", 8) == 0) {
+        cmd_ui_overflow();
         return;
     }
     settle();
@@ -236,5 +344,5 @@ static void cmd_ui(char const *args) {
 }
 
 void ui_probe_init(void) {
-    console_register("ui", "ui [perf [reset | bench [n]]] (screen ids on the stack, the focused row, every visible label; perf: frame timing, #93)", cmd_ui);
+    console_register("ui", "ui [perf [reset | bench [n]] | overflow] (overflow: labels whose text is cut off, #133; screen ids on the stack, the focused row, every visible label; perf: frame timing, #93)", cmd_ui);
 }
