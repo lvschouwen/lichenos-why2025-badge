@@ -1265,6 +1265,11 @@ target_compile_options(sensors_format_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(sensors_format_test PRIVATE m)
 add_test(NAME sensors_format_test COMMAND sensors_format_test)
 
+add_executable(settings_backup_test ${CMAKE_CURRENT_SOURCE_DIR}/settings_backup_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/settings_backup.c)
+target_include_directories(settings_backup_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(settings_backup_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME settings_backup_test COMMAND settings_backup_test)
+
 add_executable(crashlog_fmt_test ${CMAKE_CURRENT_SOURCE_DIR}/crashlog_fmt_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/crashlog_fmt.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/crash/crash_log.c)
 target_include_directories(crashlog_fmt_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/crash)
 target_compile_options(crashlog_fmt_test PRIVATE -Wall -Wextra -Werror)
@@ -1349,6 +1354,7 @@ add_custom_target(run_tests
     weather_series_test
     thermal_rules_test
     crashlog_fmt_test
+    settings_backup_test
     lora_activity_test
     notify_ring_test
     notify_rate_test

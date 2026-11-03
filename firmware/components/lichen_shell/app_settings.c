@@ -646,6 +646,8 @@ static void open_settings(lv_obj_t *screen) {
     open_row(menu, "Battery", battery_open);
     lv_obj_t *power_open = open_row(menu, "Power", power_open_from_settings);
     menu_set_value(power_open, "Restart, power off");
+    lv_obj_t *backup_open = open_row(menu, "Backup", backup_screen_open);
+    menu_set_value(backup_open, "Settings on SD card");
     open_row(menu, "Factory reset", factory_screen_open);
     open_row(menu, "About Lichen", open_about);
     menu_note(menu, "For developers");

@@ -10,7 +10,7 @@
 # (#84 T8a), so apps need no esp_lvgl_port. qr_screen.c is the QR code screen (#153; LVGL's QR widget, needs CONFIG_LV_USE_QRCODE), qr_payload.c its pure text (qr_payload_test.c). REQUIRES lichen_notify publicly: notifications (lichen_notify.h, #62) are part of the app API.
 idf_component_register(SRCS "lichen_app.c" "menu.c" "menu_filter.c" "list_filter.c" "scroll_anchor.c" "fonts.c" "text_entry.c"
                             "settings_store.c" "tz_table.c" "app_ns.c" "lichen_settings.c" "lichen_fs.c" "fs_path.c"
-                            "lichen_crashlog.c" "crashlog_fmt.c" "lichen_badge.c" "badge_table.c" "radio_state.c" "lichen_radio.c"
+                            "lichen_crashlog.c" "crashlog_fmt.c" "settings_backup.c" "settings_backup_io.c" "lichen_badge.c" "badge_table.c" "radio_state.c" "lichen_radio.c"
                             "lichen_ui.c" "ui_text.c" "qr_payload.c" "qr_screen.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_notify
