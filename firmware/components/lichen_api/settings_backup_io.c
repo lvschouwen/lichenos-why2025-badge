@@ -108,7 +108,7 @@ static char *read_file(size_t *len, sbk_status_t *status) {
         *status = SBK_NO_CARD;
         return NULL;
     }
-    char *buf = heap_caps_malloc(FILE_CAP + 1, MALLOC_CAP_SPIRAM);
+    char *buf = heap_caps_malloc(FILE_CAP + 2, MALLOC_CAP_SPIRAM) /* read FILE_CAP + 1 bytes to spot an oversize file, plus the NUL */;
     if (!buf) {
         *status = SBK_MEMORY;
         return NULL;
