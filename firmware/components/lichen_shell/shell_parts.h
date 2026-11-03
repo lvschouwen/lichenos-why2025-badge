@@ -63,6 +63,8 @@ lv_obj_t *time_set_build(void);
 
 // wifi_screen.c: Settings > Wi-Fi
 void wifi_screen_open(void);
+// wifi_analyser_screen.c: Settings > Wi-Fi > Wi-Fi analyser (#159)
+void wifi_analyser_open(void);
 // The same screen as the first-run Wi-Fi step: a Skip row on top; done() runs (LVGL task) after a join or a skip
 void wifi_screen_open_setup(void (*done)(void));
 

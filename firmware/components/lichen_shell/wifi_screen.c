@@ -304,6 +304,11 @@ static void clear_rows(void) {
     row_count = 0;
 }
 
+static void open_analyser(void *arg) {
+    (void)arg;
+    wifi_analyser_open();
+}
+
 // The scan list, "Scan again", the saved networks and the analyser, from `shown`; the radio row stays
 static void fill_rows(void) {
     clear_rows();
@@ -322,6 +327,11 @@ static void fill_rows(void) {
         }
     }
     rows[row_count++] = menu_add(menu, "Scan again", "", again, NULL);
+    lv_obj_t *an = menu_add(menu, "Wi-Fi analyser", "", open_analyser, NULL);
+    if (an) {
+        menu_set_kind(an, MENU_OPEN);
+        rows[row_count++] = an;
+    }
     lv_group_set_default(previous);
     add_saved_rows();
 }
