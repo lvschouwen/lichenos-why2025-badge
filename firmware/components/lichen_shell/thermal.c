@@ -56,10 +56,12 @@ static portMUX_TYPE   lock = portMUX_INITIALIZER_UNLOCKED;
 static thermal_info_t info;       // under lock
 static event_t        events[EVENT_LOG];
 static unsigned       event_count; // under lock
-static _Atomic int32_t sim_mc = NO_SIM; // simulated board temperature in milli-degrees
+// Simulated board temperature: generation in the high 32 bits, milli-degrees (or NO_SIM) in the low 32. One word, so a
+// reading and the generation it belongs to are always read together.
+static _Atomic uint64_t sim_state = (uint32_t)NO_SIM;
+#define SIM_MC(v)  ((int32_t)(uint32_t)(v))
+#define SIM_GEN(v) ((uint32_t)((v) >> 32))
 static _Atomic uint32_t sim_since_s;
-// Set when the simulation starts or stops: the board history is of the other source and must not count as a rise
-static _Atomic bool sim_swapped;
 static atomic_bool    shutdown_asked;
 
 static uint32_t up_s(void) {
@@ -176,7 +178,20 @@ static void on_events(unsigned ev) {
 
 // ---- reading ---------------------------------------------------------------------------------------------------------
 
-static void read_sources(th_input_t *in, float *bme_raw) {
+// Swaps the simulation (NO_SIM = off) under a new generation. Switching off with nothing running changes nothing, so
+// the real history is kept. Returns whether anything changed.
+static bool sim_write(int32_t mc, bool start) {
+    uint64_t old = atomic_load(&sim_state);
+    do {
+        if (!start && SIM_MC(old) == NO_SIM) {
+            return false;
+        }
+    } while (!atomic_compare_exchange_weak(&sim_state, &old, ((uint64_t)(SIM_GEN(old) + 1) << 32) | (uint32_t)mc));
+    return true;
+}
+
+// Returns the simulation generation the board reading was taken under
+static uint32_t read_sources(th_input_t *in, float *bme_raw) {
     static lichen_sensors_t s; // this task only
     lichen_sensors_get(&s);
     int64_t now = esp_timer_get_time();
@@ -184,22 +199,22 @@ static void read_sources(th_input_t *in, float *bme_raw) {
     in->src[TH_SRC_BOARD] = (th_reading_t){s.env_valid && now - s.env_us < STALE_US,
                                            th_board_from_bme(s.temperature_c, HEATER_ON)};
     in->src[TH_SRC_DIE]   = (th_reading_t){s.die_valid && now - s.die_us < STALE_US, s.die_c};
-    int32_t sim = atomic_load(&sim_mc);
-    if (sim != NO_SIM) {
+    uint64_t state = atomic_load(&sim_state);
+    if (SIM_MC(state) != NO_SIM) {
         if (up_s() - atomic_load(&sim_since_s) > SIM_MAX_S) {
-            atomic_store(&sim_mc, NO_SIM);
-            atomic_store(&sim_swapped, true);
+            sim_write(NO_SIM, false); // this poll still reads the real sensor, the next one sees the new generation
         } else {
-            in->src[TH_SRC_BOARD] = (th_reading_t){true, (float)sim / 1000.0f};
+            in->src[TH_SRC_BOARD] = (th_reading_t){true, (float)SIM_MC(state) / 1000.0f};
         }
     }
+    return SIM_GEN(state);
 }
 
 static void publish(th_state_t const *st, th_input_t const *in, float bme_raw) {
     taskENTER_CRITICAL(&lock);
     info.level      = st->level;
     info.blind      = st->blind;
-    info.simulated  = atomic_load(&sim_mc) != NO_SIM;
+    info.simulated  = SIM_MC(atomic_load(&sim_state)) != NO_SIM;
     info.bme_raw_c  = bme_raw;
     info.cause      = st->cause;
     info.cause_rise = st->cause_rise;
@@ -243,12 +258,14 @@ static void thermal_task(void *arg) {
     static th_state_t st;
     th_reset(&st);
     unsigned settled = 0;
+    uint32_t last_gen = 0; // the simulation generation the board history belongs to
     for (unsigned poll = 0;; poll++) {
         th_input_t in = {0};
         float      bme_raw;
-        read_sources(&in, &bme_raw);
-        if (atomic_exchange(&sim_swapped, false)) {
+        uint32_t gen = read_sources(&in, &bme_raw);
+        if (gen != last_gen) { // the board source changed under this very reading: start a fresh rise window
             th_forget_rise(&st, TH_SRC_BOARD);
+            last_gen = gen;
         }
         unsigned ev = th_step(&st, &in, up_s());
         publish(&st, &in, bme_raw);
@@ -304,8 +321,7 @@ static void print_status(void) {
 
 static void sim_set(float c) {
     atomic_store(&sim_since_s, up_s());
-    atomic_store(&sim_mc, (int32_t)(c * 1000.0f));
-    atomic_store(&sim_swapped, true);
+    sim_write((int32_t)(c * 1000.0f), true);
 }
 
 static void cmd_test(char const *what) {
@@ -320,8 +336,7 @@ static void cmd_test(char const *what) {
     } else if (strcmp(what, "shutdown") == 0) {
         console_reply("thermal test shutdown really powers the badge off: add the word YES (test shutdown YES)");
     } else if (strcmp(what, "clear") == 0) {
-        atomic_store(&sim_mc, NO_SIM);
-        atomic_store(&sim_swapped, true);
+        sim_write(NO_SIM, false);
         console_reply("thermal test: simulation off; a warning ends after %d cool readings", TH_CONFIRM);
     } else {
         console_reply("thermal test warn | clear | shutdown YES");
