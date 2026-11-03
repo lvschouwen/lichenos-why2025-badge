@@ -50,6 +50,7 @@ typedef struct {
     lv_obj_t   *text, *hint;
     lv_timer_t *poll;
     lv_font_t const *font; // the text's font: widths for the word wrap come from it
+    int         letter_space;
     int         width_px, lines; // the room between the heading and the page line, measured when the viewer is built
     char      path[FILES_PATH_MAX];
     char      page_text[TEXT_CAP];
@@ -235,7 +236,7 @@ static int glyph_width(void *ctx, char const *utf8, size_t n) {
     one[n < 4 ? n : 4] = '\0';
     lv_point_t size;
     lv_text_get_size(&size, one, v->font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    return size.x;
+    return size.x + v->letter_space;
 }
 
 static void show_page(files_job_result_t const *r) {
@@ -305,10 +306,15 @@ static void view_poll(lv_timer_t *timer) {
 
 // The page is as many lines as fit between the heading and the "Page N" line, measured from the laid-out screen (its
 // bottom padding already holds the pinned key hint), so neither goes off screen whatever the heading's height
+#define VIEW_WIDTH_MARGIN 6
+
 static void size_page(lv_obj_t *screen, lv_obj_t *heading) {
     lv_obj_update_layout(screen);
     s_t->font     = lv_obj_get_style_text_font(s_t->text, LV_PART_MAIN);
-    s_t->width_px = lv_obj_get_content_width(s_t->text);
+    s_t->letter_space = lv_obj_get_style_text_letter_space(s_t->text, LV_PART_MAIN);
+    // A few px short of the label: the glyph sum leaves out kerning, and a line that comes out too wide is clipped at
+    // the right edge instead of wrapping onto a row the page has no room for
+    s_t->width_px = lv_obj_get_content_width(s_t->text) - VIEW_WIDTH_MARGIN;
     int32_t line  = lv_font_get_line_height(s_t->font) + lv_obj_get_style_text_line_space(s_t->text, LV_PART_MAIN);
     int32_t gap   = lv_obj_get_style_pad_row(screen, LV_PART_MAIN);
     int32_t free_h = lv_obj_get_content_height(screen) - lv_obj_get_height(heading) -
@@ -331,7 +337,9 @@ static lv_obj_t *build_view(void) {
     lv_obj_t *heading = lichen_heading(screen, "File", strrchr(s_t->path, '/') + 1); // the name wraps to two lines (R1, R2)
     s_t->text = lv_label_create(screen);
     lv_obj_set_width(s_t->text, LV_PCT(100));
-    lv_label_set_long_mode(s_t->text, LV_LABEL_LONG_WRAP); // a safety net; the page is already cut to this width
+    // No wrap of its own: files_text_page already broke the lines for this width, and a second wrap here would add
+    // rows that push the page's last lines below the fixed height, where nobody ever sees them (#144)
+    lv_label_set_long_mode(s_t->text, LV_LABEL_LONG_MODE_CLIP);
     lv_label_set_text(s_t->text, "Reading...");
     s_t->poll = lv_timer_create(view_poll, POLL_MS, NULL);
     s_t->hint = lv_label_create(screen);
