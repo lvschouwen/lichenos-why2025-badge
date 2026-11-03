@@ -193,112 +193,105 @@ static void on_logout(void *arg) {
 
 // ---- Trace path and Discover path (#53): the request goes to the mesh task, this screen polls its copy -----------------
 
+// One trace/discovery result screen's state (#149): made in build, hung on the screen's user_data, freed in on_delete
+// (timer first). Another trace of the same contact with the other kind is a separate screen on the stack and must not
+// share any of it. One PSRAM block; the mt_t is the big part.
 typedef struct {
-    mt_t      t;
-    mt_line_t lines[MT_LINES_MAX];
-    char      text[MT_LINES_MAX * MT_LINE_MAX];
-} trace_mem_t;
+    mt_t       t;
+    mt_line_t  lines[MT_LINES_MAX];
+    char       text[MT_LINES_MAX * MT_LINE_MAX];
+    mt_kind_t  kind;
+    uint8_t    prefix[sizeof(prefix)]; // the contact this screen is about (the file statics follow the contact page)
+    uint32_t   seq;                    // ours; 0 when it could not start
+    lv_obj_t  *label, *again;
+    lv_timer_t *timer;
+    bool       shown_busy;
+} trace_t;
 
 static lv_obj_t *add_text(lv_obj_t *menu, char const *text);
 
-static trace_mem_t *trace_mem; // PSRAM, while the result screen exists
-static mt_kind_t    trace_kind;
-static uint32_t     trace_seq; // ours; 0 when it could not start
-static lv_obj_t    *trace_label, *trace_again;
-static lv_timer_t  *trace_timer;
-static bool         trace_shown_busy;
+// What open_trace wants built: read once, by build_trace, which runs inside shell_open_keyed under the LVGL lock
+static mt_kind_t want_kind;
 
-static void trace_show(void) {
-    if (!trace_mem || !trace_label || !trace_seq || !mesh_trace_get(&trace_mem->t)) {
+static void trace_show(trace_t *tr) {
+    if (!tr->label || !tr->seq || !mesh_trace_get(&tr->t)) {
         return;
     }
-    mt_t const *t = &trace_mem->t;
-    if (t->seq != trace_seq) {
-        set_text(trace_label, "Another trace or discovery was started (the console?): Enter starts this one again");
+    mt_t const *t = &tr->t;
+    if (t->seq != tr->seq) {
+        set_text(tr->label, "Another trace or discovery was started (the console?): Enter starts this one again");
         return;
     }
-    size_t n   = mt_format(t, trace_mem->lines, MT_LINES_MAX);
+    size_t n   = mt_format(t, tr->lines, MT_LINES_MAX);
     size_t at  = 0;
-    size_t cap = sizeof(trace_mem->text);
-    trace_mem->text[0] = 0;
+    size_t cap = sizeof(tr->text);
+    tr->text[0] = 0;
     for (size_t i = 0; i < n && at + 1 < cap; i++) {
-        at += (size_t)snprintf(trace_mem->text + at, cap - at, "%s%s", i ? "\n" : "", trace_mem->lines[i].text);
+        at += (size_t)snprintf(tr->text + at, cap - at, "%s%s", i ? "\n" : "", tr->lines[i].text);
     }
-    set_text(trace_label, trace_mem->text);
+    set_text(tr->label, tr->text);
     bool busy = mt_busy(t);
-    if (busy != trace_shown_busy) { // the row redraws only on a change
-        menu_set_value(trace_again, busy ? "..." : "");
-        trace_shown_busy = busy;
+    if (busy != tr->shown_busy) { // the row redraws only on a change
+        menu_set_value(tr->again, busy ? "..." : "");
+        tr->shown_busy = busy;
     }
 }
 
 static void trace_tick(lv_timer_t *timer) {
-    (void)timer;
-    trace_show();
+    trace_show(lv_timer_get_user_data(timer));
 }
 
-static void trace_start(void) {
+static void trace_start(trace_t *tr) {
     char const *why = NULL;
-    trace_seq       = mesh_trace_start(prefix, trace_kind, &why);
-    if (!trace_seq) {
+    tr->seq         = mesh_trace_start(tr->prefix, tr->kind, &why);
+    if (!tr->seq) {
         char text[96];
         snprintf(text, sizeof(text), "Not started: %s", why ? why : "?");
-        set_text(trace_label, text);
+        set_text(tr->label, text);
         return;
     }
-    trace_show();
+    trace_show(tr);
 }
 
 static void on_trace_again(void *arg) {
-    (void)arg;
-    if (trace_mem && trace_seq && mesh_trace_get(&trace_mem->t) && trace_mem->t.seq == trace_seq &&
-        mt_busy(&trace_mem->t)) {
+    trace_t *tr = arg;
+    if (tr->seq && mesh_trace_get(&tr->t) && tr->t.seq == tr->seq && mt_busy(&tr->t)) {
         return; // still waiting for this one: a held Enter does not queue more
     }
-    trace_start();
+    trace_start(tr);
 }
 
-static lv_obj_t *trace_screen; // the result screen that owns trace_mem and trace_timer
-
 static void on_trace_delete(lv_event_t *e) {
-    // A late delete of an older result screen must not free what a newer one owns
-    if (lv_event_get_target(e) != trace_screen) {
+    trace_t *tr = lv_obj_get_user_data(lv_event_get_target(e));
+    if (!tr) {
         return;
     }
-    trace_screen = NULL;
-    if (trace_timer) {
-        lv_timer_delete(trace_timer);
-        trace_timer = NULL;
+    if (tr->timer) {
+        lv_timer_delete(tr->timer);
     }
-    heap_caps_free(trace_mem);
-    trace_mem   = NULL;
-    trace_label = trace_again = NULL;
+    heap_caps_free(tr);
 }
 
 static lv_obj_t *build_trace(void) {
+    mt_kind_t kind   = want_kind;
     lv_obj_t *screen = shell_page_create();
-    lv_obj_t *menu = menu_create_named(screen, trace_kind == MT_TRACE ? "Trace path" : "Discover path",
+    lv_obj_t *menu = menu_create_named(screen, kind == MT_TRACE ? "Trace path" : "Discover path",
                                        title[0] ? title : "(no name)");
-    lv_obj_add_event_cb(screen, on_trace_delete, LV_EVENT_DELETE, NULL);
-    trace_screen = screen;
-    if (trace_timer) {
-        lv_timer_delete(trace_timer);
-        trace_timer = NULL;
-    }
-    heap_caps_free(trace_mem);
-    trace_mem = heap_caps_calloc(1, sizeof(*trace_mem), MALLOC_CAP_SPIRAM);
-    trace_seq        = 0;
-    trace_shown_busy = false;
-    if (!trace_mem) {
+    trace_t *tr = heap_caps_calloc(1, sizeof(*tr), MALLOC_CAP_SPIRAM);
+    if (!tr) {
         menu_note(menu, "Not enough memory.");
         return screen;
     }
-    menu_note(menu, trace_kind == MT_TRACE ? "Along the stored path and back; SNR as each hop heard it:"
-                                           : "Asks the contact over the whole mesh which path to use:");
-    trace_label = add_text(menu, "Sending...");
-    trace_again = menu_add(menu, "Again", "", on_trace_again, NULL);
-    trace_start();
-    trace_timer = lv_timer_create(trace_tick, TRACE_TICK_MS, NULL);
+    tr->kind = kind;
+    memcpy(tr->prefix, prefix, sizeof(tr->prefix));
+    lv_obj_set_user_data(screen, tr);
+    lv_obj_add_event_cb(screen, on_trace_delete, LV_EVENT_DELETE, NULL);
+    menu_note(menu, kind == MT_TRACE ? "Along the stored path and back; SNR as each hop heard it:"
+                                     : "Asks the contact over the whole mesh which path to use:");
+    tr->label = add_text(menu, "Sending...");
+    tr->again = menu_add(menu, "Again", "", on_trace_again, tr);
+    trace_start(tr);
+    tr->timer = lv_timer_create(trace_tick, TRACE_TICK_MS, tr);
     return screen;
 }
 
@@ -306,7 +299,7 @@ static void open_trace(mt_kind_t kind) {
     if (gone) {
         return;
     }
-    trace_kind = kind;
+    want_kind = kind;
     uint8_t id[sizeof(prefix) + 1];
     memcpy(id, prefix, sizeof(prefix));
     id[sizeof(prefix)] = (uint8_t)kind;

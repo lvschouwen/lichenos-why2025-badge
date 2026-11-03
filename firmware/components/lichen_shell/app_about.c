@@ -212,6 +212,8 @@ static void open_about(lv_obj_t *screen) {
     add_text(screen, "For developers", THEME_DIM);
     value_label[ROW_MEMORY]  = add_row(screen, "Memory", NULL);
     value_label[ROW_C6]      = add_row(screen, "Radio chip", NULL);
+    // The last row ended flush on the pinned hint at the scroll end (#149): its own bottom pad is room that scrolls
+    lv_obj_set_style_pad_bottom(lv_obj_get_parent(value_label[ROW_C6]), 12, 0);
 
     lv_timer_t *timer = lv_timer_create(refresh, 1000, NULL);
     refresh(timer);

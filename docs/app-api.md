@@ -40,7 +40,8 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   to the LVGL task (fn runs there, soon; false when it could not be queued) and `lichen_ui_with_group(group, build,
   arg)` adds widgets to a screen's group (LVGL context).
 - `menu.h`, `menu_filter.h`, `list_filter.h`, `scroll_anchor.h`, `text_entry.h`: the shared list, filter and text
-  widgets, so every app behaves the same under the keyboard.
+  widgets, so every app behaves the same under the keyboard. `text_entry_open(...)` returns `bool`: false when an entry
+  is already open (there is one at a time; nothing is opened and `done` is never called), so a caller can say so.
 - Shared UI widgets (#135; the UI standard's rules R1-R11). Apps must use these, not their own labels and hint lines:
   - Headings: `menu_create_named(parent, kind, name)` / `lichen_heading` put a small dim kind line ("Repeater settings")
     over the name in the large font on its own line (two lines, "..." only past that). `menu_create` stays for fixed

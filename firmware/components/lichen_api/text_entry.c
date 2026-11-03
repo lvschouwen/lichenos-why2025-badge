@@ -129,11 +129,11 @@ static lv_obj_t *build(void) {
     return screen;
 }
 
-void text_entry_open(char const *heading, char const *start, bool is_secret, size_t max, void (*done)(char const *, void *),
+bool text_entry_open(char const *heading, char const *start, bool is_secret, size_t max, void (*done)(char const *, void *),
                      void *arg) {
     if (shell_screen_open(SCREEN_TEXT_ENTRY, 0)) { // its statics belong to the open one: never hand them to a new owner
         ESP_LOGW("text_entry", "an entry is already open, not opening \"%s\"", heading ? heading : "");
-        return;
+        return false;
     }
     snprintf(title, sizeof(title), "%s", heading ? heading : "");
     snprintf(initial, sizeof(initial), "%s", start ? start : "");
@@ -142,4 +142,5 @@ void text_entry_open(char const *heading, char const *start, bool is_secret, siz
     done_cb  = done;
     done_arg = arg;
     shell_open(build, SCREEN_TEXT_ENTRY);
+    return true;
 }

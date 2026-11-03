@@ -42,6 +42,7 @@ static struct {
     lv_obj_t   *lat, *lon, *share;
     lv_obj_t   *aa_on, *aa_types[4], *aa_hops, *aa_overwrite;
     lv_obj_t   *note;
+    lv_obj_t   *loc_note; // a refused coordinate, under the Longitude row where the user is looking
     lv_timer_t *timer;
 } ui;
 
@@ -52,6 +53,19 @@ static void set_note(char const *text, bool problem) {
     if (ui.note) {
         lv_label_set_text(ui.note, text);
         lv_obj_set_style_text_color(ui.note, lv_color_hex(problem ? THEME_RED : THEME_DIM), 0);
+    }
+}
+
+// A refused coordinate shows under the Location rows, not in the page's one note at the bottom (off screen from them)
+static void set_loc_note(char const *text) {
+    if (!ui.loc_note) {
+        return;
+    }
+    if (text) {
+        lv_label_set_text(ui.loc_note, text);
+        lv_obj_remove_flag(ui.loc_note, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(ui.loc_note, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -169,9 +183,10 @@ static void on_coord(char const *text, void *arg) {
     double            v;
     char const       *why = advcfg_parse_coord(text, is_lat, &v);
     if (why) {
-        set_note(why, true);
+        set_loc_note(why);
         return;
     }
+    set_loc_note(NULL);
     if (mesh_get_advert_cfg(&c)) {
         change_start(&(change_t){.kind = CH_LOCATION, .lat = is_lat ? v : c.lat, .lon = is_lat ? c.lon : v});
     }
@@ -184,8 +199,10 @@ static void edit_coord(void *arg) {
     if (mesh_get_advert_cfg(&c) && advcfg_location_set(c.lat, c.lon)) {
         snprintf(now, sizeof(now), "%.6f", is_lat ? c.lat : c.lon);
     }
-    text_entry_open(is_lat ? "Latitude in degrees (-90 to 90)" : "Longitude in degrees (-180 to 180)", now, false, 16,
-                    on_coord, arg);
+    if (!text_entry_open(is_lat ? "Latitude in degrees (-90 to 90)" : "Longitude in degrees (-180 to 180)", now, false, 16,
+                         on_coord, arg)) {
+        set_note("A text entry is already open", true);
+    }
 }
 
 static void toggle_share(void *arg) {
@@ -246,6 +263,9 @@ static lv_obj_t *build(void) {
     menu_note(menu, "Location");
     ui.lat   = menu_add(menu, "Latitude", "", edit_coord, (void *)1);
     ui.lon   = menu_add(menu, "Longitude", "", edit_coord, NULL);
+    ui.loc_note = menu_note(menu, "");
+    lv_obj_set_style_text_color(ui.loc_note, lv_color_hex(THEME_RED), 0);
+    lv_obj_add_flag(ui.loc_note, LV_OBJ_FLAG_HIDDEN);
     ui.share = menu_add(menu, "Share location in advert", "", toggle_share, NULL);
     menu_set_kind(ui.share, MENU_TOGGLE);
     menu_note(menu, "Auto-add contacts");

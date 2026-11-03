@@ -14,5 +14,6 @@
 // the key log can tell a secret field without looking at the password mode
 #define TEXT_ENTRY_SECRET_FLAG LV_OBJ_FLAG_USER_1
 
-void text_entry_open(char const *title, char const *initial, bool secret, size_t max,
+// Returns false, and calls nothing, when an entry is already open (there is one at a time); true once it is opening.
+bool text_entry_open(char const *title, char const *initial, bool secret, size_t max,
                      void (*done)(char const *text, void *arg), void *arg);
