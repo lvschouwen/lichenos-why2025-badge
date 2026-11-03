@@ -40,6 +40,8 @@ static char        pending[RS_CMD_MAX + 1];         // the radio value between i
 static char        pw_first[MF_PASSWORD_MAX + 1];  // the new password between its two entries
 static char        pw_hold[MF_PASSWORD_MAX + 1];   // the new password until the repeater took it
 static bool        pw_wait;
+static char        local_text[160]; // the note of the last action: show_outcome() owns the label and redraws it every tick
+static bool        local_err, local_on;
 
 static void wipe(void *p, size_t n) {
     volatile char *v = p;
@@ -63,6 +65,18 @@ static void set_note(char const *text, bool error) {
     }
 }
 
+// A one-off note from an action: kept (and shown by show_outcome) until the next action or the change on its way
+static void set_local(char const *text, bool error) {
+    snprintf(local_text, sizeof(local_text), "%s", text);
+    local_err = error;
+    local_on  = true;
+    set_note(text, error);
+}
+
+static void clear_local(void) {
+    local_on = false;
+}
+
 static bool admin_here(void) {
     return mem && rs_run_admin(&mem->run);
 }
@@ -81,7 +95,7 @@ static void settle_password(void) {
     }
     if (s->last == RS_R_OK) {
         bool saved = meshcore_pw_set(target, pw_hold);
-        set_note(saved ? "Password changed, and remembered on this badge." : "Password changed; this badge could not "
+        set_local(saved ? "Password changed, and remembered on this badge." : "Password changed; this badge could not "
                                                                              "save it (Log in asks for it).",
                  !saved);
     }
@@ -130,17 +144,24 @@ static void show_read_status(void) {
 static void show_outcome(void) {
     rs_t const *s = &mem->run.rs;
     char        text[RS_TEXT_MAX + 64], words[RS_TEXT_MAX];
-    if (set_waiting()) {
-        set_note("Sending the change...", false);
-    } else if (s->last_row >= 0) {
+    bool        waiting = set_waiting();
+    bool        problem = mem->run.why && !rs_run_busy(&mem->run);
+    if (waiting) {
+        local_on = false; // the answer to the change is the newer news
+    }
+    switch (rs_note_pick(waiting, local_on, s->last_row >= 0, problem)) {
+    case RS_NOTE_SENDING: set_note("Sending the change...", false); break;
+    case RS_NOTE_LOCAL: set_note(local_text, local_err); break;
+    case RS_NOTE_OUTCOME:
         rs_outcome_words((size_t)s->last_row, (rs_reply_t)s->last, s->last_text, words, sizeof(words));
         snprintf(text, sizeof(text), "%s: %s", rs_row_at((size_t)s->last_row)->label, words);
         set_note(text, s->last != RS_R_OK);
-    } else if (mem->run.why && !rs_run_busy(&mem->run)) {
+        break;
+    case RS_NOTE_PROBLEM:
         snprintf(text, sizeof(text), "Last problem: %s", mem->run.why);
         set_note(text, true);
-    } else {
-        set_note("", false);
+        break;
+    default: set_note("", false); break;
     }
 }
 
@@ -180,12 +201,13 @@ static void read_all(void *arg) {
         return;
     }
     if (!admin_here()) {
-        set_note("Log in as admin first (Log in on the repeater's details).", true);
+        set_local("Log in as admin first (Log in on the repeater's details).", true);
         return;
     }
     if (reading) {
         return; // still reading: a held Enter does not begin it again
     }
+    clear_local();
     mem->run.why = NULL;
     rs_read_all(&mem->run.rs);
     reading    = true;
@@ -198,12 +220,13 @@ static void queue(size_t i, char const *value) {
     if (!mem) {
         return; // the screen went away meanwhile
     }
+    clear_local();
     mem->run.why    = NULL;
     char const *why = rs_queue_set(&mem->run.rs, i, value);
     if (why) {
         char text[96];
         snprintf(text, sizeof(text), "Not sent: %s", why);
-        set_note(text, true);
+        set_local(text, true);
         return;
     }
     refresh();
@@ -213,11 +236,11 @@ static void queue(size_t i, char const *value) {
 
 static void radio_answer(bool yes) {
     if (yes && mem && !admin_here()) {
-        set_note("No longer logged in as admin: nothing sent.", true); // the login may have ended during the dialog
+        set_local("No longer logged in as admin: nothing sent.", true); // the login may have ended during the dialog
     } else if (yes && mem) {
         queue((size_t)rs_row_find("radio"), pending);
     } else if (mem) {
-        set_note("Radio unchanged: nothing sent.", false);
+        set_local("Radio unchanged: nothing sent.", false);
     }
     pending[0] = 0;
 }
@@ -246,7 +269,7 @@ static void ask_radio(char const *value) {
         .confirm_label = "set radio",
     };
     if (!shell_dialog_countdown(&d, radio_answer)) {
-        set_note(mc_busy_note(), true);
+        set_local(mc_busy_note(), true);
     }
 }
 
@@ -254,7 +277,7 @@ static void ask_radio(char const *value) {
 static void restart_go(void *arg) {
     (void)arg;
     if (mem && !admin_here()) {
-        set_note("No longer logged in as admin: nothing sent.", true);
+        set_local("No longer logged in as admin: nothing sent.", true);
     } else if (mem) {
         queue((size_t)rs_row_find("reboot"), "");
     }
@@ -265,7 +288,7 @@ static void pw_second(char const *text, void *arg) {
     bool same = strcmp(text, pw_first) == 0;
     if (!mem || !same) {
         wipe_secrets();
-        set_note("The two passwords differ: nothing sent.", true);
+        set_local("The two passwords differ: nothing sent.", true);
         return;
     }
     snprintf(pw_hold, sizeof(pw_hold), "%s", pw_first);
@@ -283,7 +306,7 @@ static void pw_entered(char const *text, void *arg) {
     if (why) {
         char t[80];
         snprintf(t, sizeof(t), "Not sent: %s", why);
-        set_note(t, true);
+        set_local(t, true);
         return;
     }
     snprintf(pw_first, sizeof(pw_first), "%s", text);
@@ -300,14 +323,14 @@ static void value_entered(char const *text, void *arg) {
     char now[RS_VALUE_MAX];
     rs_edit_text(&mem->run.rs, i, now, sizeof(now));
     if (strcmp(text, now) == 0) {
-        set_note("Unchanged: nothing sent.", false);
+        set_local("Unchanged: nothing sent.", false);
         return;
     }
     char const *why = rs_check(i, text);
     if (why) {
         char t[96];
         snprintf(t, sizeof(t), "Not sent: %s", why);
-        set_note(t, true);
+        set_local(t, true);
         return;
     }
     if (rs_row_at(i)->kind == RS_RADIO) {
@@ -338,19 +361,19 @@ static void on_row(void *arg) {
         return;
     }
     if (!admin_here()) {
-        set_note("Log in as admin first (Log in on the repeater's details).", true);
+        set_local("Log in as admin first (Log in on the repeater's details).", true);
         return;
     }
     if (!rs_row_editable(i)) {
         return; // an INFO row: not selectable, so only a console key gets here
     }
     if (set_waiting()) {
-        set_note("Wait for the answer to the last change.", true);
+        set_local("Wait for the answer to the last change.", true);
         return;
     }
     uint8_t st = mem->run.rs.st[i];
     if (rs_row_readable(i) && st != RS_V_VALUE) {
-        set_note(st == RS_V_NONE ? "The repeater did not answer this one: Read again first." : "Still reading it.", true);
+        set_local(st == RS_V_NONE ? "The repeater did not answer this one: Read again first." : "Still reading it.", true);
         return;
     }
     char heading[MESH_NAME_MAX + 64];
@@ -427,6 +450,7 @@ static lv_obj_t *build(void) {
         menu_note(menu, "Not enough memory.");
         return screen;
     }
+    clear_local();
     rs_run_init(&mem->run, target);
     shown_busy = false;
     again_row  = menu_add(menu, "Read again", "", read_all, NULL);

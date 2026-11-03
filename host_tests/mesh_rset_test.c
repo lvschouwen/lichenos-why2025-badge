@@ -373,7 +373,19 @@ static void outcome(void) {
     CHECK(strcmp(t, "Not sent: busy") == 0);
 }
 
+static void note_pick(void) {
+    // a one-off note with nothing sent yet must survive the tick (#140)
+    CHECK(rs_note_pick(false, true, false, false) == RS_NOTE_LOCAL);
+    // it is the newer event, so it shows over an older outcome or problem
+    CHECK(rs_note_pick(false, true, true, true) == RS_NOTE_LOCAL);
+    CHECK(rs_note_pick(true, true, true, true) == RS_NOTE_SENDING);
+    CHECK(rs_note_pick(false, false, true, true) == RS_NOTE_OUTCOME);
+    CHECK(rs_note_pick(false, false, false, true) == RS_NOTE_PROBLEM);
+    CHECK(rs_note_pick(false, false, false, false) == RS_NOTE_NONE);
+}
+
 int main(void) {
+    note_pick();
     outcome();
     formatting();
     rows();

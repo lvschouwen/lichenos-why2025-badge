@@ -770,3 +770,13 @@ void rs_outcome_words(size_t i, rs_reply_t result, char const *raw, char *out, s
     }
     snprintf(out, cap, "%s", raw); // ours already: "Not sent: ...", "No answer: ..."
 }
+
+rs_note_src_t rs_note_pick(bool waiting, bool local, bool outcome, bool problem) {
+    if (waiting) {
+        return RS_NOTE_SENDING;
+    }
+    if (local) {
+        return RS_NOTE_LOCAL;
+    }
+    return outcome ? RS_NOTE_OUTCOME : problem ? RS_NOTE_PROBLEM : RS_NOTE_NONE;
+}

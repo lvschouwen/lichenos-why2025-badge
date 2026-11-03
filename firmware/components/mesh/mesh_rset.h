@@ -146,6 +146,12 @@ void rs_edit_text(rs_t const *s, size_t i, char *out, size_t cap);
 // How many readable rows are read (answered or not), of how many
 void rs_progress(rs_t const *s, size_t *done, size_t *total);
 
+// Which line the note under Read again shows (#140). The tick redraws it every 250 ms, so a one-off note set by an
+// action ("Unchanged: nothing sent.") only stays if it is one of the sources: in order, a change on its way, the note
+// of the last action (cleared by the next action), the last change's outcome, the last read problem, nothing.
+typedef enum { RS_NOTE_SENDING, RS_NOTE_LOCAL, RS_NOTE_OUTCOME, RS_NOTE_PROBLEM, RS_NOTE_NONE } rs_note_src_t;
+rs_note_src_t rs_note_pick(bool waiting, bool local, bool outcome, bool problem);
+
 // The radio as typed or as "get radio" gives it ("869.618,62.5,7,5"; spaces also separate): false when it is not four
 // numbers within simple_repeater's limits (150-2500 MHz, 7-500 kHz, SF 5-12, CR 5-8)
 bool rs_radio_parse(char const *text, float *freq, float *bw, uint8_t *sf, uint8_t *cr);
