@@ -660,11 +660,20 @@ static void handle_join(msg_t const *m, uint32_t now) {
     }
 }
 
-static void handle_reconnect(void) {
+// force: a saved network was forgotten (#160); the driver may still hold it, even in the middle of a trial, so the trial
+// is dropped and the pair in NVS is applied
+static void handle_reconnect(bool force) {
     char s[33], p[64];
     portENTER_CRITICAL(&state_lock);
     bool trying = join.state == WIFI_JOIN_TRYING || join.state == WIFI_JOIN_PENDING;
+    if (trying && force) {
+        wifi_join_init(&join);
+        trying = false;
+    }
     portEXIT_CRITICAL(&state_lock);
+    if (force) {
+        memset(trial_pass, 0, sizeof(trial_pass));
+    }
     if (trying || !atomic_load(&wifi_enabled) || !wifi_cred_load(s, p)) {
         return;
     }
@@ -905,8 +914,14 @@ bool wifi_forget_network(char const *name) {
     xSemaphoreTake(saved_lock, portMAX_DELAY);
     bool ok = wifi_cred_forget(name, &was_active, &left);
     xSemaphoreGive(saved_lock);
-    if (ok && was_active) { // the driver still has it: the next saved one (or none) takes over
-        msg_t m = {.type = left ? MSG_RECONNECT : MSG_FORGET};
+    // The driver may hold it without NVS saying so (a saved network joined by choose_network, or a trial under way)
+    char cur[33], tried[33];
+    portENTER_CRITICAL(&state_lock);
+    copy_text(cur, sizeof(cur), ssid);
+    copy_text(tried, sizeof(tried), trial_ssid);
+    portEXIT_CRITICAL(&state_lock);
+    if (ok && (was_active || strcmp(cur, name) == 0 || strcmp(tried, name) == 0)) { // the next saved one (or none) takes over
+        msg_t m = {.type = left ? MSG_RECONNECT : MSG_FORGET, .reason = 1};
         post(&m);
     }
     return ok;
@@ -975,7 +990,7 @@ static void wifi_task(void *arg) {
                     break;
                 }
                 case MSG_JOIN: handle_join(&m, now); break;
-                case MSG_RECONNECT: handle_reconnect(); break;
+                case MSG_RECONNECT: handle_reconnect(m.reason == 1); break;
                 case MSG_FORGET: handle_forget(); break;
                 case MSG_DISCONNECTED: handle_disconnected(m.reason, now); break;
                 case MSG_GOT_IP: handle_got_ip(); break;

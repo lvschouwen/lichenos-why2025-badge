@@ -28,7 +28,8 @@ bool wifi_saved_forget(wifi_saved_t *l, char const *ssid);
 // The pre-#160 single pair becomes the first entry of an empty list. True if the list changed.
 bool wifi_saved_migrate(wifi_saved_t *l, char const *old_ssid, char const *old_pass);
 // The strongest scanned AP that is a saved network and whose bit (1 << index) is not in skip_mask; returns its index in
-// the list or -1. An open AP never matches a saved network that has a password (an open twin would be a trap).
+// the list or -1. Saved open networks (empty password) are never picked, and an open AP never matches a saved
+// network that has a password (an open twin would be a trap): those are joined only when the user picks them.
 int  wifi_saved_pick(wifi_saved_t const *l, wifi_ap_t const *aps, size_t n, uint32_t skip_mask);
 // Wipes the passwords from memory
 void wifi_saved_wipe(wifi_saved_t *l);

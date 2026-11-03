@@ -56,7 +56,9 @@ int wifi_saved_pick(wifi_saved_t const *l, wifi_ap_t const *aps, size_t n, uint3
     int    best_rssi = -1000;
     for (size_t i = 0; i < n; i++) {
         int at = wifi_saved_find(l, aps[i].ssid);
-        if (at < 0 || (skip_mask >> at & 1) || (aps[i].open && l->e[at].pass[0])) {
+        // A saved open network (empty password) is never joined by itself: anyone can broadcast its name. Secured ones
+        // only match an AP that is secured too (an open twin of a secured name is a trap)
+        if (at < 0 || (skip_mask >> at & 1) || l->e[at].pass[0] == '\0' || aps[i].open) {
             continue;
         }
         if (aps[i].rssi > best_rssi) {

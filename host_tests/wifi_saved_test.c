@@ -54,27 +54,36 @@ static void pick(void) {
     wifi_saved_t l = {0};
     wifi_saved_add(&l, "home", "homepassword");
     wifi_saved_add(&l, "work", "workpassword");
-    wifi_saved_add(&l, "cafe", "");
-    wifi_ap_t aps[] = {ap("stranger", -30, false), ap("home", -70, false), ap("work", -50, false), ap("cafe", -80, true)};
-    int       at    = wifi_saved_pick(&l, aps, 4, 0);
+    wifi_ap_t aps[] = {ap("stranger", -30, false), ap("home", -70, false), ap("work", -50, false)};
+    int       at    = wifi_saved_pick(&l, aps, 3, 0);
     CHECK(at >= 0 && strcmp(l.e[at].ssid, "work") == 0); // strongest known, not the strongest AP
     uint32_t mask = 1u << at;
-    at            = wifi_saved_pick(&l, aps, 4, mask);
+    at            = wifi_saved_pick(&l, aps, 3, mask);
     CHECK(at >= 0 && strcmp(l.e[at].ssid, "home") == 0); // work was tried: the next one
     mask |= 1u << at;
-    at = wifi_saved_pick(&l, aps, 4, mask);
-    CHECK(at >= 0 && strcmp(l.e[at].ssid, "cafe") == 0);
-    mask |= 1u << at;
-    CHECK(wifi_saved_pick(&l, aps, 4, mask) == -1); // all tried
+    CHECK(wifi_saved_pick(&l, aps, 3, mask) == -1); // all tried
     wifi_ap_t twin[] = {ap("home", -40, true)}; // an open AP with a saved secured name is not that network
     CHECK(wifi_saved_pick(&l, twin, 1, 0) == -1);
     CHECK(wifi_saved_pick(&l, aps, 0, 0) == -1);
+}
+
+// Evil twin: a saved OPEN network is never joined by itself, whoever broadcasts its name
+static void open_never_auto(void) {
+    wifi_saved_t l = {0};
+    wifi_saved_add(&l, "cafe", "");
+    wifi_ap_t aps[] = {ap("cafe", -30, true)};
+    CHECK(wifi_saved_pick(&l, aps, 1, 0) == -1);
+    wifi_saved_add(&l, "home", "homepassword");
+    wifi_ap_t both[] = {ap("cafe", -30, true), ap("home", -80, false)};
+    int       at     = wifi_saved_pick(&l, both, 2, 0);
+    CHECK(at >= 0 && strcmp(l.e[at].ssid, "home") == 0); // the weaker secured one, not the stronger open one
 }
 
 int main(void) {
     add_forget();
     migrate();
     pick();
+    open_never_auto();
     if (failures) {
         return 1;
     }
