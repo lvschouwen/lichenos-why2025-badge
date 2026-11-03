@@ -15,6 +15,8 @@
 #include "lock_combo.h"
 #include "menu.h"
 #include "ota_autooff.h"
+#include "mdns_name.h"
+#include "lichen_mdns.h"
 #include "ota_server.h"
 #include "psram_speed.h"
 #include "saver_station.h"
@@ -620,6 +622,9 @@ static void open_settings(lv_obj_t *screen) {
     ota_row = menu_add(menu, "Updates over Wi-Fi", ota_value(), toggle_ota, NULL);
     menu_set_kind(ota_row, MENU_TOGGLE);
     settings_ota_row = live_row(ota_row, false, ota_fill);
+    char net_name[MDNS_NAME_MAX + 8];
+    snprintf(net_name, sizeof(net_name), "%s.local", lichen_mdns_name());
+    menu_add(menu, "Name on the network", net_name, NULL, NULL); // for badge.sh and the browser (#156)
     char auto_text[16];
     ota_auto_value(auto_text, sizeof(auto_text));
     ota_auto_row = menu_add(menu, "Close updates after", auto_text, step_ota_auto, NULL);

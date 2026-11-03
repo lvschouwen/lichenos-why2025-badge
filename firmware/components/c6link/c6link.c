@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_netif.h"
+#include "lichen_mdns.h"
 #include "esp_system.h"
 #include "esp_netif_sntp.h"
 #include "esp_sntp.h"
@@ -963,9 +964,10 @@ static void cmd_wifi(char const *args) {
         } else if (wifi_has_ip(ip, sizeof(ip))) {
             int8_t rssi;
             if (wifi_rssi(&rssi)) {
-                console_reply("wifi: \"%s\" connected, ip %s, rssi %d dBm, %d/4 bars", a, ip, rssi, wifi_bars(rssi));
+                console_reply("wifi: \"%s\" connected, ip %s (%s.local), rssi %d dBm, %d/4 bars", a, ip, lichen_mdns_name(),
+                              rssi, wifi_bars(rssi));
             } else {
-                console_reply("wifi: \"%s\" connected, ip %s, rssi not read yet", a, ip);
+                console_reply("wifi: \"%s\" connected, ip %s (%s.local), rssi not read yet", a, ip, lichen_mdns_name());
             }
         } else {
             console_reply("wifi: \"%s\" not connected", a);

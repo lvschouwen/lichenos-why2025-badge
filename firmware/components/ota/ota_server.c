@@ -9,6 +9,7 @@
 
 #include "c6_paths.h"
 #include "c6link.h"
+#include "lichen_mdns.h"
 #include "lichen_radio.h"
 #include "console_cmd.h" // CONSOLE_WIFI_CMD_MAX
 #include "fw_console.h"
@@ -1455,7 +1456,13 @@ static void server_task(void *arg) {
     (void)arg;
     for (;;) {
         // Wi-Fi may come up late or not at all (no credentials), and the server may be switched off (#44)
-        while (!server_on || !lichen_radio_get(RADIO_WIFI) || !wifi_has_ip(NULL, 0)) {
+        // The .local name follows Wi-Fi (#156), the _http service the server switch
+        for (;;) {
+            bool net = lichen_radio_get(RADIO_WIFI) && wifi_has_ip(NULL, 0);
+            lichen_mdns_update(net, net && server_on, OTA_PORT);
+            if (net && server_on) {
+                break;
+            }
             vTaskDelay(pdMS_TO_TICKS(1000));
             autooff_check(); // the time runs from boot, with or without Wi-Fi
         }
@@ -1467,6 +1474,7 @@ static void server_task(void *arg) {
         ESP_LOGI(TAG, "update server on port %d", OTA_PORT);
         serve(ls);
         close(ls);
+        lichen_mdns_update(lichen_radio_get(RADIO_WIFI) && wifi_has_ip(NULL, 0), false, OTA_PORT);
         piece_expire(true); // switched off half-way through an upload
         ESP_LOGI(TAG, "update server closed");
     }

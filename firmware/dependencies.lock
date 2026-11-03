@@ -127,6 +127,16 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.5.2
+  espressif/mdns:
+    component_hash: ef0766474b37459f6ad22461e453a8713e780e831a7c993b16919d817988dff6
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.14.1
   espressif/usb:
     component_hash: 99eee72ea224d9117d4c342442717a1f20bf8112e2ab5d7d7038b827874f4c92
     dependencies:
@@ -249,8 +259,9 @@ direct_dependencies:
 - espressif/esp_lvgl_port
 - espressif/esp_wifi_remote
 - espressif/i2c_bus
+- espressif/mdns
 - idf
 - lvgl/lvgl
-manifest_hash: 6fe78363a6034a162d5458476d22b628335d23e6f9aaf40a64152987213b0e1b
+manifest_hash: 8ccc73f63b3fbd41a954f75a00f2eacee3473a9d57c9e65baa984ce2f376b74d
 target: esp32p4
 version: 3.0.0

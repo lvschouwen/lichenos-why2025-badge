@@ -115,6 +115,7 @@ APACHE = [
     ("ESP-IDF (Espressif's own code, Wi-Fi/Bluetooth/PHY libraries, Mbed TLS, NimBLE)", "P4, C6"),
     ("ESP-Hosted MCU (our fork; dual GPL-2.0-only OR Apache-2.0 files used under Apache-2.0)", "P4, C6"),
     ("esp_lcd_st7703", "P4"),
+    ("mdns (Espressif's mDNS responder, #156)", "P4"),
     ("esp_lvgl_port, esp-serial-flasher, esp_serial_slave_link, esp_wifi_remote, eppp_link, i2c_bus,"
      " usb, usb_host_cdc_acm, usb_host_ch34x_vcp, usb_host_cp210x_vcp", "P4"),
 ]

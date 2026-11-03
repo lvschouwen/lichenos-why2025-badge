@@ -137,3 +137,14 @@ CONFIG_HEAP_POISONING_LIGHT=y
 
 # #116: encrypted NVS is built in but off; docs/nvs-encryption.md before turning it on (it never burns a key by itself)
 # CONFIG_LICHEN_NVS_ENCRYPT is not set
+
+# #156: mDNS answers to lichen-xxxx.local on the Wi-Fi station only. Task stack and its buffers live in PSRAM (internal
+# RAM is tight, #107); browsing, the CLI and the AP/Ethernet netifs are not used.
+CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y
+CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y
+# CONFIG_MDNS_ENABLE_BROWSE is not set
+# CONFIG_MDNS_ENABLE_CONSOLE_CLI is not set
+# CONFIG_MDNS_PREDEF_NETIF_AP is not set
+# CONFIG_MDNS_PREDEF_NETIF_ETH is not set
+CONFIG_MDNS_MAX_INTERFACES=2
+CONFIG_MDNS_MAX_SERVICES=2

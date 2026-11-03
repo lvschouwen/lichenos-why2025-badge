@@ -1293,3 +1293,11 @@ add_custom_target(run_tests
     nvs_image_test
     COMMENT "Running all host tests"
 )
+
+add_executable(mdns_name_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/mdns_name_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_mdns/mdns_name.c
+)
+target_include_directories(mdns_name_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_mdns)
+target_compile_options(mdns_name_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mdns_name_test COMMAND mdns_name_test)
