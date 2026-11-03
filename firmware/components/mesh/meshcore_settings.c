@@ -15,6 +15,7 @@
 #include "mesh_chat.h"
 #include "mesh_format.h"
 #include "mesh_share.h"
+#include "qr_screen.h"
 #include "meshcore_run.h"
 #include "meshcore_screens.h"
 #include "meshcore_settings.h"
@@ -1164,9 +1165,19 @@ static void ask_rename(void *arg) {
     }
 }
 
+static void show_channel_qr(void *arg) {
+    (void)arg;
+    if (chan_mem) {
+        qr_screen_open("Channel QR code", chan_mem->name, chan_mem->uri, NULL);
+    }
+}
+
 static void channel_actions_build(void *arg) {
     mesh_channel_info_t const *info = arg;
     menu_add(chan_menu, "Rename", "", ask_rename, NULL);
+    if (chan_mem->uri[0]) { // an app link exists only for 16-byte keys
+        menu_set_kind(menu_add(chan_menu, "Show as QR", "", show_channel_qr, NULL), MENU_OPEN);
+    }
     if (info->index != 0) {
         menu_add(chan_menu, "Remove", "", remove_ask, chan_mem->name); // Public (slot 0) stays
     }

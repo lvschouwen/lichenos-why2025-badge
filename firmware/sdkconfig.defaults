@@ -113,6 +113,9 @@ CONFIG_LV_FONT_MONTSERRAT_28=y
 # Lichen's name and the boot screen's current step (#66)
 CONFIG_LV_FONT_MONTSERRAT_40=y
 
+# QR codes (#153): lv_qrcode with qrcodegen (MIT), only for the QR code screen (contact and channel links, the QR code app)
+CONFIG_LV_USE_QRCODE=y
+
 # Screenshots (#30): lv_snapshot renders the screen into a PSRAM buffer
 CONFIG_LV_USE_SNAPSHOT=y
 

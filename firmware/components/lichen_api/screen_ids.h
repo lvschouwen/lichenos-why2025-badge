@@ -3,7 +3,7 @@
 // Every screen id in one place (#148). The shell's identity of a screen is (id, key), so two screens must never share an
 // id: host_tests/screen_ids_test.c fails on a duplicate and on an overlap with the app ranges. Add new ids here.
 //   1..SCREEN_APP_MAX      the apps' own screens (shell_open_app: 1 + app index)
-//   99..191                Lichen's and MeshCore's fixed screens (below)
+//   99..197                Lichen's and MeshCore's fixed screens (below)
 //   SCREEN_APP_BASE + i    app i's Settings / About page (app_settings.c)
 
 #define SCREEN_APP_MAX  32  // most apps the id ranges allow
@@ -54,7 +54,8 @@
     X(SCREEN_NOTES_NEW, 191) \
     X(SCREEN_TIMER_PAGE, 250) \
     X(SCREEN_STOPWATCH_PAGE, 251) \
-    X(SCREEN_WORLD_PAGE, 252)
+    X(SCREEN_WORLD_PAGE, 252) \
+    X(SCREEN_QR, 197)
 
 #define SCREEN_ID_DEFINE(name, value) name = value,
 enum { SCREEN_ID_LIST(SCREEN_ID_DEFINE) };

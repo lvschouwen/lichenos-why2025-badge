@@ -74,6 +74,8 @@ ENTRIES = [
      ("file", "repo", "firmware/components/esp_tca8418/LICENSE")),
     ("LVGL", "https://github.com/lvgl/lvgl", "P4", "MIT",
      ("file", "fw", "lvgl__lvgl/LICENCE.txt")),
+    ("QR Code generator library by Project Nayuki (in LVGL)", "https://www.nayuki.io/page/qr-code-generator-library", "P4",
+     "MIT", ("file", "fw", "lvgl__lvgl/src/libs/qrcode/LICENSE.txt")),
     ("printf by Marco Paland (in LVGL)", "https://github.com/mpaland/printf", "P4", "MIT",
      ("header", "fw", "lvgl__lvgl/src/stdlib/builtin/lv_sprintf_builtin.c")),
     ("Montserrat font (in LVGL)", "https://github.com/JulietaUla/Montserrat", "P4", "OFL-1.1",

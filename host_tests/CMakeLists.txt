@@ -1229,6 +1229,10 @@ target_include_directories(weather_series_test PRIVATE ${CMAKE_CURRENT_SOURCE_DI
 target_compile_options(weather_series_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(weather_series_test PRIVATE m)
 add_test(NAME weather_series_test COMMAND weather_series_test)
+add_executable(qr_payload_test ${CMAKE_CURRENT_SOURCE_DIR}/qr_payload_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/qr_payload.c)
+target_include_directories(qr_payload_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(qr_payload_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME qr_payload_test COMMAND qr_payload_test)
 
 add_executable(sensors_format_test
     ${CMAKE_CURRENT_SOURCE_DIR}/sensors_format_test.c
@@ -1334,6 +1338,7 @@ add_custom_target(run_tests
     ota_autooff_test
     factory_plan_test
     release_notes_test
+    qr_payload_test
     mesh_chat_target_test
     nvs_image_test
     COMMENT "Running all host tests"

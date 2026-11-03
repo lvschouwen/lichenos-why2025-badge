@@ -15,6 +15,7 @@
 #include "meshcore_chat.h"
 #include "meshcore_remote.h"
 #include "meshcore_run.h"
+#include "qr_screen.h"
 #include "theme.h"
 
 #include <stdio.h>
@@ -340,6 +341,11 @@ static lv_obj_t *add_text(lv_obj_t *menu, char const *text) {
     return label;
 }
 
+static void on_share_qr(void *arg) {
+    contact_t *ct = arg;
+    qr_screen_open("Contact QR code", ct->title[0] ? ct->title : "(no name)", ct->uri, NULL);
+}
+
 static lv_obj_t *build_share(void) {
     contact_t *ct    = want_ct; // the details screen is open under this one, so it lives as long as this build
     lv_obj_t  *screen = shell_page_create();
@@ -348,6 +354,7 @@ static lv_obj_t *build_share(void) {
         menu_note(menu, mc_busy_note());
         return screen;
     }
+    menu_set_kind(menu_add(menu, "Show as QR", NULL, on_share_qr, ct), MENU_OPEN);
     menu_note(menu, "Link for MeshCore apps (Add contact, paste):");
     add_text(menu, ct->uri);
     menu_note(menu, "Public key:");
