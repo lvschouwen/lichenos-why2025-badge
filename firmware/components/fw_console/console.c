@@ -528,6 +528,14 @@ static void cmd_reboot(char const *args) {
     system_restart("console reboot");
 }
 
+// Volatile, so the compiler cannot drop it as a dead store before a free (a console line may hold a password, #123)
+static void wipe_bytes(void *p, size_t n) {
+    volatile uint8_t *v = p;
+    while (n--) {
+        *v++ = 0;
+    }
+}
+
 static void run(char *line) {
     char *args = strchr(line, ' ');
     if (args) {
@@ -575,6 +583,7 @@ void console_exec(char const *line, char *buf, size_t cap, console_done_fn done,
     if (cmd[0]) {
         run(cmd);
     }
+    wipe_bytes(cmd, len + 1); // run() split it in place; a line may hold a password (#123). There is no history.
     free(cmd);
     capture_finish();
     capture.task = NULL;
@@ -601,6 +610,7 @@ static void console_task(void *arg) {
             case CONSOLE_CMD_READY:
                 if (!run_mutex || xSemaphoreTake(run_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) == pdTRUE) {
                     run(state.buf);
+                    wipe_bytes(state.buf, sizeof(state.buf)); // the splitter reset len; the text is not kept
                     if (run_mutex) {
                         xSemaphoreGive(run_mutex);
                     }

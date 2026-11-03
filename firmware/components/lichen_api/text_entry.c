@@ -52,8 +52,21 @@ static void on_indev_key(lv_event_t *e) {
     }
 }
 
+// Volatile, so it is not dropped as a dead store (the text may be a password)
+static void wipe_bytes(void *p, size_t n) {
+    volatile char *v = p;
+    while (n--) {
+        *v++ = 0;
+    }
+}
+
 static void on_delete(lv_event_t *e) {
     (void)e;
+    if (ta) {
+        char *text = (char *)lv_textarea_get_text(ta); // LVGL's own buffer: it is freed with the widget, not cleared
+        wipe_bytes(text, strlen(text));
+    }
+    wipe_bytes(initial, sizeof(initial));
     if (tab_indev) {
         lv_indev_remove_event_cb_with_user_data(tab_indev, on_indev_key, NULL);
         tab_indev = NULL;

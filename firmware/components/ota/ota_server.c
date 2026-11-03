@@ -1114,6 +1114,14 @@ static void console_done(void *ctx, char const *out, size_t len) {
 }
 
 // The command line comes in the body (never logged, it can hold a Wi-Fi password): printable ASCII only
+// Volatile, so the compiler cannot drop it as a dead store before a free (a console line may hold a password, #123)
+static void wipe_bytes(void *p, size_t n) {
+    volatile uint8_t *v = p;
+    while (n--) {
+        *v++ = 0;
+    }
+}
+
 static bool read_console_line(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len, char *line) {
     size_t want = (size_t)req->content_length;
     size_t have = pre_len < want ? pre_len : want;
@@ -1161,6 +1169,7 @@ static void handle_console(int fd, ota_request_t const *req, uint8_t const *pre,
         return;
     }
     if (!read_console_line(fd, req, pre, pre_len, line)) {
+        wipe_bytes(line, CONSOLE_WIFI_CMD_MAX);
         free(line);
         free(out);
         respond(fd, 400, "couldn't read a printable command line");
@@ -1168,6 +1177,7 @@ static void handle_console(int fd, ota_request_t const *req, uint8_t const *pre,
     }
     console_reply_ctx_t ctx = {.fd = fd};
     hooks.console_run(line, out, CONSOLE_REPLY, console_done, &ctx); // may restart the badge, after the reply
+    wipe_bytes(line, CONSOLE_WIFI_CMD_MAX);
     free(line);
     free(out);
 }
@@ -1284,7 +1294,10 @@ static bool handle_connection(int fd) {
         case OTA_ROUTE_DELETE: handle_delete(fd, &req); return false;
         case OTA_ROUTE_SCREENSHOT: start_screenshot(fd); return false;
         case OTA_ROUTE_LOG: handle_log(fd, &req); return false;
-        case OTA_ROUTE_CONSOLE: handle_console(fd, &req, pre, pre_len); return false;
+        case OTA_ROUTE_CONSOLE:
+            handle_console(fd, &req, pre, pre_len);
+            wipe_bytes(head_buf + head_len, pre_len); // the body's first bytes were read into the request buffer
+            return false;
         case OTA_ROUTE_REBOOT:
             respond(fd, 200, "rebooting");
             hook_end(true, firmware_installed); // a plain reboot with no new firmware is not an update
