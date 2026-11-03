@@ -34,6 +34,12 @@ void mc_list_style_row(lv_obj_t *row, bool selected) {
     lv_obj_set_style_border_width(row, SEL_BORDER_W, 0);
     lv_obj_set_style_border_color(row, lv_color_hex(THEME_AMBER), 0);
     lv_obj_set_style_border_opa(row, selected ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    // The list holds the group focus, not the row: this state is how `fw ui` finds the highlighted row (#145)
+    if (selected) {
+        lv_obj_add_state(row, LV_STATE_USER_1);
+    } else {
+        lv_obj_remove_state(row, LV_STATE_USER_1);
+    }
 }
 
 lv_obj_t *mc_list_row(mc_list_t *l, bool selected) {

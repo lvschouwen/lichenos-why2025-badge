@@ -168,6 +168,19 @@ static void first_label(lv_obj_t *obj, char *out, size_t cap) {
     }
 }
 
+// A list that keeps the group focus on itself marks its highlighted row with LV_STATE_USER_1 (mc_list_style_row, #145):
+// the row is what Enter would open, so that is the focus to report
+static lv_obj_t *highlighted_child(lv_obj_t *foc) {
+    uint32_t count = lv_obj_get_child_count(foc);
+    for (uint32_t i = 0; i < count; i++) {
+        lv_obj_t *child = lv_obj_get_child(foc, (int32_t)i);
+        if (lv_obj_has_state(child, LV_STATE_USER_1)) {
+            return child;
+        }
+    }
+    return foc;
+}
+
 // What the focus object stands for when its own first label is not it: the home screen holds the focus for all its
 // tiles, a tabview for all its tabs (#27)
 static void describe_focus(lv_obj_t *foc, char *out, size_t cap) {
@@ -181,7 +194,7 @@ static void describe_focus(lv_obj_t *foc, char *out, size_t cap) {
             first_label(button, out, cap);
         }
     } else {
-        first_label(foc, out, cap);
+        first_label(highlighted_child(foc), out, cap);
     }
 }
 
