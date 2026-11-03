@@ -75,7 +75,7 @@ static void policy_table(void) {
     CHECK(nvs_image_decide(true, true, NVS_IMG_EMPTY) == NVS_ACT_SECURE_INIT);
     CHECK(nvs_image_decide(true, true, NVS_IMG_ENCRYPTED) == NVS_ACT_SECURE_INIT);
     CHECK(nvs_image_decide(true, true, NVS_IMG_PLAIN) == NVS_ACT_MIGRATE);
-    CHECK(nvs_image_decide(true, true, NVS_IMG_UNKNOWN) == NVS_ACT_PLAIN_INIT); // never secure_init what was not classified
+    CHECK(nvs_image_decide(true, true, NVS_IMG_UNKNOWN) == NVS_ACT_REFUSE); // not classified: no init that could end in an erase
 }
 
 static void key_pair_checks(void) {

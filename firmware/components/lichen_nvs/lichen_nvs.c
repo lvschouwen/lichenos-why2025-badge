@@ -60,7 +60,7 @@ static bool derive_keys(nvs_sec_cfg_t *cfg) {
 
 // ---- what is in the partition -------------------------------------------------------------------------------------
 
-static nvs_image_kind_t scan_partition(void) {
+static nvs_image_kind_t scan_once(void) {
     esp_partition_t const *p =
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, NVS_DEFAULT_PART_NAME);
     uint8_t *page = p ? malloc(NVS_IMG_PAGE_SIZE) : NULL;
@@ -78,6 +78,15 @@ static nvs_image_kind_t scan_partition(void) {
     }
     free(page);
     return read_failed ? NVS_IMG_UNKNOWN : nvs_image_tally_kind(&t);
+}
+
+// A read error may be transient: look a few times before giving up
+static nvs_image_kind_t scan_partition(void) {
+    nvs_image_kind_t k = NVS_IMG_UNKNOWN;
+    for (int i = 0; i < 3 && k == NVS_IMG_UNKNOWN; i++) {
+        k = scan_once();
+    }
+    return k;
 }
 
 // ---- the RAM copy --------------------------------------------------------------------------------------------------
@@ -239,11 +248,13 @@ esp_err_t lichen_nvs_init(void) {
         return nvs_flash_init();
     }
     nvs_image_kind_t kind = scan_partition();
-    if (kind == NVS_IMG_UNKNOWN) {
-        ESP_LOGE(TAG, "nvs partition could not be classified: plain init, nothing encrypted or migrated");
-        return nvs_flash_init();
-    }
     nvs_action_t     act  = nvs_image_decide(true, burned, kind);
+    if (act == NVS_ACT_REFUSE) {
+        // Not nvs_flash_init(): on an encrypted partition that finds noise and main.c then erases it. NVS stays down
+        // this boot (main.c only logs, the settings are intact in flash); ESP_ERR_INVALID_STATE matches none of its erase cases.
+        ESP_LOGE(TAG, "nvs partition unreadable with a key burned: NVS unavailable this boot, nothing erased");
+        return ESP_ERR_INVALID_STATE;
+    }
     nvs_sec_cfg_t    cfg;
     if (!derive_keys(&cfg)) {
         // Plain data stays reachable; an encrypted partition cannot be opened, and returning the error (not

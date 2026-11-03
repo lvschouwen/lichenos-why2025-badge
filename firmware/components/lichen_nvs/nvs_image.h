@@ -36,11 +36,12 @@ nvs_image_kind_t nvs_image_tally_kind(nvs_image_tally_t const *t);
 typedef enum {
     NVS_ACT_PLAIN_INIT,  // nvs_flash_init(): the behaviour of a build without this feature
     NVS_ACT_SECURE_INIT, // open the encrypted partition with the derived keys
+    NVS_ACT_REFUSE,      // key present, partition not classifiable: touch nothing, NVS stays down this boot
     NVS_ACT_MIGRATE,     // plaintext now, key present: copy to RAM, erase, init encrypted, write back
 } nvs_action_t;
 
 // The one policy. `enabled` is the Kconfig switch; `key_burned` says an HMAC key already sits in the configured eFuse
-// block. An UNKNOWN partition is never encrypted or migrated. Nothing here ever asks for a key to be created: no key means plain NVS, whatever the partition holds.
+// block. With a key, an UNKNOWN partition is neither opened, migrated nor erased (REFUSE); without one it is plain as ever. Nothing here ever asks for a key to be created: no key means plain NVS, whatever the partition holds.
 nvs_action_t nvs_image_decide(bool enabled, bool key_burned, nvs_image_kind_t kind);
 
 // 64 bytes, the XTS key pair as IDF's nvs_sec_cfg_t lays it out (eky then tky). False when either half is all zero

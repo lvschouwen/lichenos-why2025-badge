@@ -62,8 +62,11 @@ nvs_image_kind_t nvs_image_tally_kind(nvs_image_tally_t const *t) {
 }
 
 nvs_action_t nvs_image_decide(bool enabled, bool key_burned, nvs_image_kind_t kind) {
-    if (!enabled || !key_burned || kind == NVS_IMG_UNKNOWN) {
+    if (!enabled || !key_burned) {
         return NVS_ACT_PLAIN_INIT;
+    }
+    if (kind == NVS_IMG_UNKNOWN) {
+        return NVS_ACT_REFUSE; // a plain init on what may be an encrypted partition ends in main.c's erase
     }
     return kind == NVS_IMG_PLAIN ? NVS_ACT_MIGRATE : NVS_ACT_SECURE_INIT;
 }
