@@ -33,6 +33,7 @@
 #include "lichen_app.h"
 #include "lichen_random.h"
 #include "notify_os.h"
+#include "lichen_nvs.h"
 #include "nvs_erase_os.h"
 #include "nvs_flash.h"
 #include "ota_server.h"
@@ -284,12 +285,12 @@ void app_main(void) {
         boot_progress_end(BOOT_PSRAM, STEP_FAILED, "no PSRAM");
     }
 
-    esp_err_t err = nvs_flash_init();
+    esp_err_t err = lichen_nvs_init(); // nvs_flash_init(), or the encrypted path when a key is burned (#116)
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // Settings from an incompatible layout are lost rather than leaving the badge without settings at all
         ESP_LOGW(TAG, "NVS unusable (%s), erasing it", esp_err_to_name(err));
         __real_nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME); // the wrap refuses every other caller (#84 T9, #123)
-        err = nvs_flash_init();
+        err = lichen_nvs_init();
     }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "NVS init failed: %s", esp_err_to_name(err));

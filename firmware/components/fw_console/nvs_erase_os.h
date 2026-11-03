@@ -1,6 +1,7 @@
 #pragma once
 // OS only, never an app (#84 T9, #123): the real nvs_flash_erase_partition, past the refusing wrap in console.c. Its
-// two callers are main.c (NVS unusable at boot) and factory_reset.c (#66); every other caller lands in the wrap.
+// callers are main.c (NVS unusable at boot), factory_reset.c (#66) and lichen_nvs.c (the one-time migration to encrypted
+// NVS, #116, only with LICHEN_NVS_ENCRYPT); every other caller lands in the wrap.
 
 #include "esp_err.h"
 

@@ -19,6 +19,7 @@
 #include "freertos/task.h"
 #include "fw_console.h"
 #include "lichen_notify.h"
+#include "lichen_nvs.h"
 #include "nvs.h"
 #include "nvs_erase_os.h"
 #include "nvs_flash.h"
@@ -268,9 +269,9 @@ static void nvs_wipe_full(uint8_t after) {
     if (err == ESP_OK) {
         err = __real_nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME);
     }
-    esp_err_t init = nvs_flash_init(); // also after a failed erase: the rest of the boot needs NVS
+    esp_err_t init = lichen_nvs_init(); // also after a failed erase: the rest of the boot needs NVS
     if (init == ESP_ERR_NVS_NO_FREE_PAGES || init == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        init = __real_nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME) == ESP_OK ? nvs_flash_init() : init;
+        init = __real_nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME) == ESP_OK ? lichen_nvs_init() : init;
     }
     bool erased = err == ESP_OK && init == ESP_OK;
     if (!erased) {

@@ -1,0 +1,28 @@
+menu "Lichen NVS encryption (#116)"
+    config LICHEN_NVS_ENCRYPT
+        bool "Keep NVS encrypted once an HMAC key is burned"
+        default n
+        help
+            Compiles the encrypted-NVS boot path. It only ever USES a key: with no HMAC key in the configured eFuse
+            block (LICHEN_NVS_HMAC_KEY_ID) NVS stays plain, exactly as with this option off. It never creates or burns a
+            key. With a key present, a plaintext NVS is copied to RAM once, the partition is erased and the entries are
+            written back encrypted. Do not turn on IDF's CONFIG_NVS_ENCRYPTION instead: its init burns a key by itself.
+            Read docs/nvs-encryption.md first.
+
+    config LICHEN_NVS_HMAC_KEY_ID
+        int "eFuse key block holding the NVS HMAC key (0..5 = KEY0..KEY5)"
+        depends on LICHEN_NVS_ENCRYPT
+        range 0 5
+        default 5
+        help
+            Last block, so KEY0.. stay free for secure boot or flash encryption later.
+
+    config LICHEN_NVS_ENCRYPT_BURN_CMD
+        bool "Compile fw nvs-enc burn (IRREVERSIBLE eFuse burn)"
+        depends on LICHEN_NVS_ENCRYPT
+        default n
+        help
+            Adds "fw nvs-enc burn YES": writes a random 32-byte key with purpose HMAC_UP into the configured block, read
+            and write protected. Irreversible; the key cannot be read back or changed. Leave off in every build that is
+            not the one deliberate burn build.
+endmenu

@@ -16,7 +16,8 @@ extern void __real_bootloader_random_enable(void);
 
 // The only other caller in IDF is nvs_sec_provider, which burns an HMAC key into eFuse from esp_fill_random() while it
 // holds the source on: refusing it would burn a weak key for good. It is linked only with NVS encryption, which is off;
-// turning that on must allow it here first.
+// turning that on must allow it here first. Lichen's own encrypted NVS (#116, lichen_nvs) is not that: it never calls
+// bootloader_random_enable and takes its key from the eFuse, so CONFIG_NVS_ENCRYPTION stays off.
 #if CONFIG_NVS_ENCRYPTION
 #error "NVS encryption: nvs_sec_provider calls bootloader_random_enable()/_disable(); allow it in both wraps"
 #endif
