@@ -80,6 +80,19 @@ int main(void) {
     CHECK(nav_key_hash("ab", 2) != nav_key_hash("ba", 2));
     CHECK(nav_key_hash("ab", 2) == nav_key_hash("ab", 2));
     CHECK(nav_key_hash("", 0) != NAV_KEY_UNIQUE);
+    // 0xf0 0x9a 0xee 0x00 0xcc hashes to exactly NAV_KEY_UNIQUE under FNV-1a: it is remapped, never handed out
+    CHECK(nav_key_hash("\xf0\x9a\xee\x00\xcc", 5) == 0);
+
+    // A full stack still answers for the screens on it: the bottom one goes BACK_TO, a new one is refused
+    nav_reset();
+    for (int id = 1; id < NAV_MAX_DEPTH; id++) {
+        CHECK(nav_push_keyed(id, (uint32_t)id));
+    }
+    CHECK(nav_depth() == NAV_MAX_DEPTH);
+    CHECK(nav_decide(1, 1, &frame) == NAV_OPEN_BACK_TO && frame == 1);
+    CHECK(nav_decide(NAV_MAX_DEPTH - 1, NAV_MAX_DEPTH - 1, &frame) == NAV_OPEN_KEEP);
+    CHECK(nav_decide(50, 0, &frame) == NAV_OPEN_NEW);
+    CHECK(!nav_push_keyed(50, 0) && nav_depth() == NAV_MAX_DEPTH);
     nav_reset();
 
     if (failures) {

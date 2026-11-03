@@ -1,6 +1,7 @@
 // Log in, Status and CLI screens for a repeater or room (#51): see meshcore_remote.h. Everything with an lv_obj_t runs
 // in the LVGL task; MeshCore is only reached through mesh_remote_start / mesh_remote_get, which never wait for it.
 #include "meshcore_remote.h"
+#include "screen_ids.h"
 
 #include "esp_heap_caps.h"
 #include "lichen_ui.h"
@@ -15,9 +16,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SCREEN_LOGIN  163
-#define SCREEN_STATUS 164
-#define SCREEN_CLI    165
 #define POLL_MS       250
 #define CLI_TEXT_MAX  (RR_CLI_KEEP * (RR_CMD_MAX + RR_REPLY_MAX + 8) + 16)
 
@@ -158,9 +156,13 @@ static lv_obj_t *build_login(void) {
 
 static void login_entered(char const *password, void *arg) {
     (void)arg;
-    snprintf(pw_hold, sizeof(pw_hold), "%s", password);
-    pw_pending = true;
-    shell_open_keyed(build_login, SCREEN_LOGIN, shell_key_hash(target, sizeof(target))); // the Enter that closed the entry is the person's go-ahead
+    uint32_t key = shell_key_hash(target, sizeof(target));
+    if (!shell_screen_open(SCREEN_LOGIN, key)) { // an open login page has its password already
+        snprintf(pw_hold, sizeof(pw_hold), "%s", password);
+        pw_pending = true;
+    }
+    // the Enter that closed the entry is the person's go-ahead
+    shell_open_keyed(build_login, SCREEN_LOGIN, key);
 }
 
 void meshcore_remote_login(uint8_t const prefix[6], char const *name) {

@@ -3,6 +3,7 @@
 // Settings and its background part (the mesh task, started from main.c whatever screen is open). Esc on the grid is
 // the shell's. Everything with an lv_obj_t runs in the LVGL task; it reads MeshCore only through mesh.h copies.
 #include "esp_log.h"
+#include "screen_ids.h"
 #include "lichen_app.h"
 #include "lora.h"
 #include "mc_first.h"
@@ -27,7 +28,6 @@ static char const TAG[] = "meshcore";
 static lichen_app_t const *self(void); // the app table entry, defined with the rest of the table at the end
 
 #define SCREEN_WAIT_MS  20  // for the mesh lock; LVGL (and with it the keys) must not wait on MeshCore's file saves
-#define SCREEN_SETTINGS 172 // the grid's Settings tile
 
 // ---- the icon (home.html <g id="mc">: two arcs over a dot, in a 60x60 view) ---------------------------------------
 

@@ -2,6 +2,7 @@
 // ESP-Hosted, so it never runs on the LVGL task; its result comes back through lv_async_call and is dropped if the
 // screen is gone by then.
 #include "esp_log.h"
+#include "screen_ids.h"
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -19,7 +20,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SCREEN_WIFI     100
 #define MAX_APS         20
 #define POLL_MS         500
 

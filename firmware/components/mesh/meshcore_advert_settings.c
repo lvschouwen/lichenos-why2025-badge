@@ -3,6 +3,7 @@
 // change runs in a short-lived task on core 0 (the mesh.h setters may wait for the mesh lock) and the page shows the
 // result. The rules and texts are mesh_advert_cfg.c's (host-tested); the screens never wait on MeshCore.
 #include "esp_heap_caps.h"
+#include "screen_ids.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -19,7 +20,6 @@
 
 static char const TAG[] = "meshcore";
 
-#define SCREEN_ADVERT 138
 #define TASK_STACK    6144 // savePrefs keeps File objects on the stack
 #define REFRESH_MS    1000
 #define UI_CALL_TRIES 100 // lichen_ui_call tries (up to 2.1 s each) before a change's result is dropped

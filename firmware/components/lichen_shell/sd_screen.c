@@ -4,6 +4,7 @@
 // once a second (a "fw sd mount" on the console shows up here too). Format asks twice, each time with a careful
 // dialog whose countdown cancels: never an erase without two deliberate Enters.
 #include "esp_log.h"
+#include "screen_ids.h"
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,7 +21,6 @@
 
 static char const TAG[] = "sdpage";
 
-#define SCREEN_SD   106
 #define JOB_STACK   6144 // "fw sd format" gets by on the console's 4 KB; the job logs its real margin
 #define REFRESH_MS  1000
 #define ASK_SECONDS 20

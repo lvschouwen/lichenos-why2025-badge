@@ -4,6 +4,7 @@
 // in a short-lived task on core 0, like the Wi-Fi scan; its result comes back to the LVGL task through lichen_ui_call
 // and lands on whatever row or note is still on screen. The screens never wait on MeshCore.
 #include "esp_heap_caps.h"
+#include "screen_ids.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -32,11 +33,6 @@
 
 static char const TAG[] = "meshcore";
 
-#define SCREEN_RADIO    130
-#define SCREEN_CUSTOM   131
-#define SCREEN_CHANNELS 132
-#define SCREEN_SWITCH   134
-#define SCREEN_CHANNEL  135
 #define REMOVE_ASK_S    20 // the careful remove dialog cancels by itself after this
 #define JOB_STACK       6144 // savePrefs / saveChannels keep File objects on the stack (the console's 4 KB suffices)
 #define MAX_CHANNELS    40   // MAX_GROUP_CHANNELS in the mesh component's build

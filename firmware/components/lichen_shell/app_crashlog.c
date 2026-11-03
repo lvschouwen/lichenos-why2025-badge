@@ -5,6 +5,7 @@
 // A delete or a clear writes flash and NVS: it runs on a short-lived task on core 0 (as sd_screen.c's jobs do) and the
 // outcome comes back through lv_async_call; the list's 1 s timer collects it too, should that call have failed.
 #include "app_icons.h"
+#include "screen_ids.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
@@ -27,7 +28,6 @@
 
 static char const TAG[] = "crashlog";
 
-#define SCREEN_CRASH_ENTRY 107
 #define ASK_SECONDS        20
 #define NOTICE_SECONDS     30
 #define SCROLL_STEP        96

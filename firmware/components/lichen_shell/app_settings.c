@@ -3,6 +3,7 @@
 // date & time, time zone), SD card (#99, sd_screen.c), Notifications (#62, notify_centre.c), Factory reset (#66, factory_screen.c), About Lichen, then one entry per app that has a settings page.
 // Every screen is a menu.h list; Esc is the shell's.
 #include "app_icons.h"
+#include "screen_ids.h"
 #include "backlight.h"
 #include "backlight_level.h"
 #include "home_layout.h"
@@ -29,12 +30,6 @@
 #include <string.h>
 #include <time.h>
 
-#define SCREEN_DISPLAY 101
-#define SCREEN_TZ      102
-#define SCREEN_ABOUT   103
-#define SCREEN_TIME    104
-#define SCREEN_TIME_SET 105
-#define SCREEN_APP     110 // + app index
 #define SAVE_AFTER_MS  1000 // brightness is saved this long after the last step, to spare the flash
 
 // ---- tile text and the Wi-Fi line --------------------------------------------------------------------------------
@@ -479,6 +474,7 @@ static void open_app_page(void *arg) {
     size_t index = (size_t)(intptr_t)arg;
     page_app     = lichen_app_at(index);
     if (page_app && (page_app->settings || page_app->about)) {
+        _Static_assert(LICHEN_MAX_APPS <= SCREEN_APP_MAX, "app page ids would overlap");
         shell_open(build_app_page, SCREEN_APP + (int)index);
     }
 }

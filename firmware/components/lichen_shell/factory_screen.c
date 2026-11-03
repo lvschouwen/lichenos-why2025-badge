@@ -3,11 +3,11 @@
 // A yes saves the reset as pending (factory_reset.h) and restarts the way Power > Restart does, so the apps save and
 // stop first; the next boot erases.
 #include "esp_log.h"
+#include "screen_ids.h"
 #include "factory_reset.h"
 #include "menu.h"
 #include "shell_parts.h"
 
-#define SCREEN_FACTORY 174 // not 170: the Chat list
 #define ASK_SECONDS    15
 
 static char const TAG[] = "factory";

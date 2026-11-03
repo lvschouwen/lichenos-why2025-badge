@@ -3,6 +3,7 @@
 // the LVGL task); a row changes only on an Enter on it and a second Enter in its edit field, and the radio and a restart
 // only after a careful confirm. erase is never sent (mesh_remote.c refuses it).
 #include "meshcore_remote.h"
+#include "screen_ids.h"
 
 #include "esp_heap_caps.h"
 #include "lichen_ui.h"
@@ -18,7 +19,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SCREEN_RSET 166
 #define TICK_MS     250
 #define ASK_S       30 // the careful dialogs cancel by themselves after this
 #define SHOWN_MAX   (RS_VALUE_MAX + 8)

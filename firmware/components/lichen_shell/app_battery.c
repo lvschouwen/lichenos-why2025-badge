@@ -3,6 +3,7 @@
 // the temperature (thermal.c). The same page, headed by a red warning, is the full-screen warning when the watchdog
 // raises its alarm. Up/Down scroll; the live lines refresh once a second.
 #include "esp_log.h"
+#include "screen_ids.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "menu.h"
@@ -12,7 +13,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SCREEN_BATTERY 152 // not 160: that was the MeshCore contact page, and ids are identities now (#148)
 #define SCROLL_STEP    96
 #define REFRESH_MS     1000
 #define ALERT_STACK    6144

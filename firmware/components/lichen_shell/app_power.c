@@ -4,6 +4,7 @@
 // the load that low the IP5306 cuts the battery after ~32 s and the power button starts the badge again. On USB power
 // the IP5306 never cuts, and nothing the P4 can see wakes it: unplug, then press the power button.
 #include "app_icons.h"
+#include "screen_ids.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "freertos/FreeRTOS.h"
@@ -22,7 +23,6 @@
 #include <string.h>
 
 #define TAG              "power"
-#define SCREEN_POWER_BYE 151
 #define CONFIRM_S        10
 #define NOTIFY_SAVE_MS   2000
 #define BYE_MIN_MS       3000 // the goodbye screen stays readable this long before the backlight goes

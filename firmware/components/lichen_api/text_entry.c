@@ -1,5 +1,7 @@
 // Full-screen text entry (#66): see text_entry.h
 #include "text_entry.h"
+#include "esp_log.h"
+#include "screen_ids.h"
 
 #include "lichen_ui.h"
 #include "fonts.h"
@@ -9,7 +11,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SCREEN_TEXT_ENTRY 120
 #define MAX_CHARS         128
 
 static char   title[160];
@@ -130,6 +131,10 @@ static lv_obj_t *build(void) {
 
 void text_entry_open(char const *heading, char const *start, bool is_secret, size_t max, void (*done)(char const *, void *),
                      void *arg) {
+    if (shell_screen_open(SCREEN_TEXT_ENTRY, 0)) { // its statics belong to the open one: never hand them to a new owner
+        ESP_LOGW("text_entry", "an entry is already open, not opening \"%s\"", heading ? heading : "");
+        return;
+    }
     snprintf(title, sizeof(title), "%s", heading ? heading : "");
     snprintf(initial, sizeof(initial), "%s", start ? start : "");
     secret   = is_secret;

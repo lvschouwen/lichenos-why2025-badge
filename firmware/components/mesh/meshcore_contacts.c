@@ -2,6 +2,7 @@
 // (mesh_contacts_view), from the old Contacts tab. Enter opens the highlighted contact's details (#49). The store keeps
 // only contacts (MeshCore adds the nodes it hears unless manual add is on), so Heard is the contacts by last heard.
 #include "esp_heap_caps.h"
+#include "screen_ids.h"
 #include "esp_log.h"
 #include "lichen_ui.h"
 #include "mesh.h"
@@ -16,7 +17,6 @@
 
 static char const TAG[] = "meshcore";
 
-#define SCREEN_CONTACTS 171
 #define SHOW_CONTACTS   100
 #define AGE_REFRESH_S   30
 #define SCREEN_WAIT_MS  20

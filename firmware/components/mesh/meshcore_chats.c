@@ -3,6 +3,7 @@
 // a message arrives, a count changes or the channels do, and every AGE_REFRESH_S so "N min ago" stays right. Copies
 // are taken from the mesh (PSRAM) under its lock, the widgets are built from them afterwards.
 #include "esp_heap_caps.h"
+#include "screen_ids.h"
 #include "esp_log.h"
 #include "lichen_ui.h"
 #include "mesh.h"
@@ -18,7 +19,6 @@
 
 static char const TAG[] = "meshcore";
 
-#define SCREEN_CHATS   170
 #define SHOW_CONVS     MESH_CONV_MAX // one row per chat
 #define SHOW_ROWS      (SHOW_CONVS + 1) // and "New message..." on top
 #define NEW_ROW_KEY    0x4E45574Du // "NEWM": the scroll anchor's key of that row

@@ -2,6 +2,7 @@
 // network yet. Lives on top of home on the shell's stack, so Esc from Wi-Fi lands on the welcome. setup_done is saved
 // only when the setup ends (joined, skipped, or Enter on the welcome of a badge that already has Wi-Fi).
 #include "esp_log.h"
+#include "screen_ids.h"
 #include "lichen_app.h"
 #include "esp_lvgl_port.h"
 #include "fw_console.h"
@@ -14,7 +15,6 @@
 
 #include <string.h>
 
-#define SCREEN_WELCOME 99 // not 101: Settings > Display
 
 static char const TAG[] = "setup";
 

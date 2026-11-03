@@ -2,6 +2,7 @@
 // The OTA task (core 0) calls begin/progress/end, which only store numbers under a spinlock; an LVGL timer (5 Hz) opens
 // the screen and refreshes it, so the OTA task never waits on LVGL.
 #include "lichen_ui.h"
+#include "screen_ids.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -27,7 +28,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SCREEN_UPDATE   150
 #define TICK_MS         200
 #define FILE_MIN_MS     1000  // a small file would otherwise flash past
 #define FAILED_MS       3000

@@ -4,6 +4,7 @@
 // Opening a notice goes to its source: the app's open_notification, or the app itself; Lichen's own notices to the
 // place they are about (the Crash log, Settings › SD card), else their page here.
 #include "app_icons.h"
+#include "screen_ids.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "led.h"
@@ -23,8 +24,6 @@
 #include <string.h>
 #include <time.h>
 
-#define SCREEN_NOTIFY_DETAIL   108
-#define SCREEN_NOTIFY_SETTINGS 109
 #define POLL_MS                1000
 #define ASK_SECONDS            20
 #define SCROLL_STEP            96

@@ -4,6 +4,7 @@
 // Esc here is the shell's: back to Lichen home. Badges refresh once a second from copies (mesh.h), never waiting on
 // MeshCore for more than a tick.
 #include "esp_log.h"
+#include "screen_ids.h"
 #include "lichen_clock.h"
 #include "lichen_ui.h"
 #include "lora.h"

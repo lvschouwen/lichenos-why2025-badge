@@ -416,15 +416,27 @@ unsigned shell_open_reuse_count(void) {
     return reused_count;
 }
 
-// (id, key) is already on the stack (#148): nothing for the top one, else go back to it instead of building a second copy.
-// A dialog over everything is not closed from under its owner: the person answers it
-// first (the dialog keeps its callback's screen alive), so the open is refused then. A screensaver or lock cover
-// needs no care: back_step only touches the stack and show_top keeps the cover in front.
+bool shell_screen_open(int screen_id, uint32_t key) {
+    int frame;
+    lvgl_port_lock(0);
+    bool open = nav_decide(screen_id, key, &frame) != NAV_OPEN_NEW;
+    lvgl_port_unlock();
+    return open;
+}
+
+void shell_open_count_reuse(void) {
+    reused_count++;
+}
+
+// (id, key) is already on the stack (#148): nothing for the top one, else go back to it instead of building a second
+// copy. Refused (and not counted as shown) while a dialog is open, so it is not closed from under its owner: the person
+// answers it first. Refused too where pop_one would refuse (the update screen), so the count stays true. A screensaver
+// or lock cover needs no care: back_step only touches the stack and show_top keeps the cover in front.
 static void reuse_open(nav_open_t how, int frame, int screen_id) {
     if (how == NAV_OPEN_KEEP) {
         reused_count++;
-    } else if (shell_dialog_group()) {
-        ESP_LOGW(TAG, "screen %d is open below, not going back while a dialog is open", screen_id);
+    } else if (shell_dialog_group() || update_screen_blocks_back()) {
+        ESP_LOGW(TAG, "screen %d is open below, not going back (a dialog or the update screen is up)", screen_id);
     } else if (!back_later(frames[frame].screen, NULL, NULL)) {
         ESP_LOGW(TAG, "screen %d is open below, going back to it failed", screen_id);
     } else {

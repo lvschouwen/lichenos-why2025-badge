@@ -3,6 +3,7 @@
 // OS's own per-app switch stays in the centre's settings (lichen_notify_source_enabled); these rows are what MeshCore
 // sends once that is on.
 #include "esp_log.h"
+#include "screen_ids.h"
 #include "lichen_ui.h"
 #include "menu.h"
 #include "mesh.h"
@@ -15,7 +16,6 @@
 #include <string.h>
 #include <strings.h>
 
-#define SCREEN_NOTIFY_PAGE 173
 #define MAX_CHANNELS       40 // MAX_GROUP_CHANNELS in the mesh component's build
 #define SCREEN_WAIT_MS     20
 

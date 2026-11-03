@@ -4,6 +4,7 @@
 // the screens. The OS's own files (MeshCore identity and contacts, staged C6 images, ...) are listed but locked: the
 // rules are files_model.c's and files_ops.c enforces them too.
 #include "app_icons.h"
+#include "screen_ids.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fonts.h"
@@ -21,7 +22,6 @@
 
 static char const TAG[] = "files";
 
-#define SCREEN_FILES_VIEW 180
 #define POLL_MS           100
 #define ASK_SECONDS       20
 #define VIEW_FALLBACK_LINES 12 // if the screen has no size yet when the viewer is built

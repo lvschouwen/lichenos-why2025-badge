@@ -2,6 +2,7 @@
 // MeshCore is read through mesh_contact_detail() copies and changed through mesh_contact_do(), which only queues the
 // change for MyMesh (it applies and saves it in its own loop, as for a phone app's command).
 #include "meshcore_contact.h"
+#include "screen_ids.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -21,9 +22,6 @@
 
 static char const TAG[] = "meshcore";
 
-#define SCREEN_CONTACT 160
-#define SCREEN_SHARE   161
-#define SCREEN_TRACE   162
 #define TRACE_TICK_MS  250
 #define TICK_MS        1000
 #define TICK_WAIT_MS   20  // the refresh: a busy MeshCore (saving files) skips a tick, the keys never wait on it
@@ -309,7 +307,10 @@ static void open_trace(mt_kind_t kind) {
         return;
     }
     trace_kind = kind;
-    shell_open_keyed(build_trace, SCREEN_TRACE, shell_key_hash(prefix, sizeof(prefix)) + (uint32_t)kind);
+    uint8_t id[sizeof(prefix) + 1];
+    memcpy(id, prefix, sizeof(prefix));
+    id[sizeof(prefix)] = (uint8_t)kind;
+    shell_open_keyed(build_trace, SCREEN_TRACE, shell_key_hash(id, sizeof(id)));
 }
 
 static void on_trace(void *arg) {
@@ -429,9 +430,14 @@ static lv_obj_t *build_detail(void) {
 }
 
 void meshcore_contact_open(mesh_contact_t const *c) {
+    uint32_t key = shell_key_hash(c->pubkey, sizeof(prefix));
+    if (shell_screen_open(SCREEN_CONTACT, key)) { // list_screen and the rest belong to the page that is open
+        shell_open_keyed(build_detail, SCREEN_CONTACT, key);
+        return;
+    }
     memcpy(prefix, c->pubkey, sizeof(prefix));
     snprintf(title, sizeof(title), "%s", c->name);
     type        = c->type;
     list_screen = lv_screen_active();
-    shell_open_keyed(build_detail, SCREEN_CONTACT, shell_key_hash(prefix, sizeof(prefix))); // one page per contact
+    shell_open_keyed(build_detail, SCREEN_CONTACT, key); // one page per contact
 }

@@ -3,6 +3,7 @@
 // full page per note, a badge for the unread ones) and the "This is new" screen that follows an update.
 // The marker is the highest note sequence the person has seen (NVS notes_seen); release_notes.h has the rules.
 #include "app_icons.h"
+#include "screen_ids.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
@@ -25,8 +26,6 @@
 
 static char const TAG[] = "notes";
 
-#define SCREEN_NOTES_ENTRY 190
-#define SCREEN_NOTES_NEW   191
 #define SEEN_KEY           "notes_seen"
 #define SCROLL_STEP        96
 #define WAIT_TICK_MS       250

@@ -28,6 +28,11 @@ uint32_t shell_key_hash(void const *data, size_t len);
 // How many shell_open calls found their screen already open (on top, or went back to it); an opener that marks
 // something done only when a screen really opened compares it before and after (notify_centre.c)
 unsigned shell_open_reuse_count(void);
+// An opener that shows its screen another way (meshcore_chat.c: it replaces the chat) counts it as a reuse
+void shell_open_count_reuse(void);
+// Whether (screen_id, key) is on the stack now. Check it before writing a screen's file statics for a shell_open that
+// would only reuse the screen (and so not run the builder that reads them)
+bool shell_screen_open(int screen_id, uint32_t key);
 // Called from inside a builder: the screen gets first use of Esc. fn(arg) runs on Esc (LVGL context); when it returns
 // true the Esc is used up (a search or a draft was cleared), otherwise the screen goes back as usual (#32).
 void shell_on_esc(bool (*fn)(void *arg), void *arg);

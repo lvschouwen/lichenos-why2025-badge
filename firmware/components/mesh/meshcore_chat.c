@@ -1,6 +1,7 @@
 // One channel's chat with a compose line (#46): see meshcore_chat.h. Everything with an lv_obj_t runs in the LVGL task;
 // MeshCore is read through mesh.h copies and written through mesh_send_channel (neither blocks on the mesh task).
 #include "meshcore_chat.h"
+#include "screen_ids.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -22,14 +23,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SCREEN_CHAT    142
 #define SHOW_MESSAGES  50
 #define SCREEN_WAIT_MS 20
 #define SCROLL_STEP_PX 120
 #define AGE_REFRESH_S  30
 #define TICK_MS        500
-#define SCREEN_DM_PICK 143
-#define SCREEN_DM      144
 #define MAX_PEERS      100
 #define ADV_TYPE_CHAT  1 // MeshCore: a person's node (repeaters, rooms and sensors have no DMs)
 
@@ -735,7 +733,7 @@ static void open_after_pop(void *arg) {
 static void open_target(mesh_chat_target_t const *want) {
     chat_t *top = chat_on_top();
     switch (mesh_chat_open_how(top ? &top->target : NULL, want)) {
-        case MESH_CHAT_OPEN_KEEP: return;
+        case MESH_CHAT_OPEN_KEEP: shell_open_count_reuse(); return; // shown: the notice counts as opened
         case MESH_CHAT_OPEN_REPLACE: {
             lv_obj_t  *below = shell_stack_screen(1);
             replace_t *r     = below ? heap_caps_malloc(sizeof(*r), MALLOC_CAP_SPIRAM) : NULL;
@@ -746,6 +744,8 @@ static void open_target(mesh_chat_target_t const *want) {
             r->below = below;
             if (!shell_back_to(below, open_after_pop, r)) {
                 heap_caps_free(r); // not queued: open_after_pop will never run
+            } else {
+                shell_open_count_reuse(); // the chat is shown in a moment
             }
             return;
         }
