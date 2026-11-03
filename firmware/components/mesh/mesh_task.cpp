@@ -3005,6 +3005,48 @@ extern "C" size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t
     return n;
 }
 
+// ---- the signal history (#166) ---------------------------------------------------------------------------------------
+// Written on the mesh task (mesh lock held) from the advert and message hooks, read by the contact's Signal page. As
+// the air log: its own spinlock covers only the note and the copy, never held with the mesh lock's work or LVGL's lock.
+
+static portMUX_TYPE  signal_mux = portMUX_INITIALIZER_UNLOCKED;
+static sig_table_t  *signal_table;
+static bool          signal_failed;
+
+extern "C" void mesh_signal_note(uint8_t const *pub_key, bool is_advert, uint8_t path_len, uint8_t const *path,
+                                 float rssi, float snr) {
+    if (!signal_table) { // the first packet from a contact; only this task writes the pointer
+        if (signal_failed) {
+            return;
+        }
+        auto *mem = (sig_table_t *)heap_caps_calloc(1, sizeof(sig_table_t), MALLOC_CAP_SPIRAM);
+        if (!mem) {
+            signal_failed = true;
+            ESP_LOGW(TAG, "signal history: no memory, contact signal graphs stay empty");
+            return;
+        }
+        sig_init(mem);
+        __atomic_store_n(&signal_table, mem, __ATOMIC_RELEASE);
+    }
+    int16_t  rssi_x10 = (int16_t)lroundf(rssi * 10.0f);
+    int16_t  snr_x10  = (int16_t)lroundf(snr * 10.0f);
+    uint32_t at_s     = mesh_uptime_s();
+    portENTER_CRITICAL(&signal_mux);
+    sig_note(signal_table, pub_key, is_advert ? SIG_ADVERT : SIG_MESSAGE, rssi_x10, snr_x10, path_len, path, at_s);
+    portEXIT_CRITICAL(&signal_mux);
+}
+
+extern "C" bool mesh_signal_get(uint8_t const prefix[6], sig_contact_t *out) {
+    sig_table_t *t = __atomic_load_n(&signal_table, __ATOMIC_ACQUIRE);
+    if (!t) {
+        return false;
+    }
+    portENTER_CRITICAL(&signal_mux);
+    bool found = sig_get(t, prefix, out);
+    portEXIT_CRITICAL(&signal_mux);
+    return found;
+}
+
 #define HEALTH_NOISE_MAX_AGE_S 60 // the C6's channel reading older than this is not shown
 
 // Lock order: only the mesh lock, nothing else held; lora_get_channel_rssi takes the LoRa state spinlock for a copy

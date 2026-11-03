@@ -26,6 +26,10 @@ void mesh_contacts_full(void);
 // A packet MeshCore received (#165), headers only, on the mesh task under the mesh lock: header and path_len as the
 // packet carries them, the path bytes, bytes on air, RSSI in dBm and SNR in dB. mesh_task.cpp keeps the air log ring.
 void mesh_airlog_note(uint8_t header, uint8_t path_len, uint8_t const *path, uint8_t raw_len, float rssi, float snr);
+// An advert or a direct message from a contact in the table (#166), on the mesh task under the mesh lock: its public key
+// (the first 6 bytes name it), the signal of the packet and, for an advert, the path it came by. mesh_task.cpp keeps it.
+void mesh_signal_note(uint8_t const *pub_key, bool is_advert, uint8_t path_len, uint8_t const *path, float rssi,
+                      float snr);
 }
 
 #define LINK_PUSH_KINDS 0x11 // push codes 0x80..0x90
@@ -164,6 +168,9 @@ protected:
     // Verified adverts: a node not in the contact table goes through the new-node rate limit first (#6)
     void onAdvertRecv(mesh::Packet *packet, mesh::Identity const &id, uint32_t timestamp, uint8_t const *app_data,
                       size_t app_data_len) override;
+    // A direct message from a contact: its signal goes to the signal history (#166), then MyMesh queues the message
+    void onMessageRecv(ContactInfo const &from, mesh::Packet *packet, uint32_t sender_timestamp,
+                       char const *text) override;
 
 private:
     ob_t          *ob_;

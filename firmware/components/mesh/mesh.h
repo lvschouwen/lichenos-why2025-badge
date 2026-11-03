@@ -2,6 +2,7 @@
 
 #include "mesh_advert_cfg.h"
 #include "mesh_airlog.h"
+#include "mesh_signal.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_health.h"
 #include "mesh_ident.h"
@@ -80,6 +81,10 @@ bool mesh_health_snapshot(mesh_health_t *out, uint32_t wait_ms);
 // the mesh lock, never waits on MeshCore). *seq is the newest entry's sequence number (0: none yet), which changes
 // whenever a packet was added. The ring lives from the first packet on and survives MeshCore stopping and starting.
 size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq);
+
+// A contact's signal history (#166): the samples of its adverts and direct messages heard since start, copied in a short
+// spinlock section (not the mesh lock, never waits on MeshCore). false when nothing was heard from it. Receive only.
+bool mesh_signal_get(uint8_t const prefix[6], sig_contact_t *out);
 
 // The radio as MeshCore's prefs have it; the prefs are read under the mesh lock (up to wait_ms), else the copy taken at
 // start is given. false before MeshCore is up.

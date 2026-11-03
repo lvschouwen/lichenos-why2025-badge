@@ -65,7 +65,10 @@ void BadgeMesh::logTxFail(mesh::Packet *packet, int len) {
 
 void BadgeMesh::onAdvertRecv(mesh::Packet *packet, mesh::Identity const &id, uint32_t timestamp,
                              uint8_t const *app_data, size_t app_data_len) {
-    if (!lookupContactByPubKey(id.pub_key, PUB_KEY_SIZE)) {
+    if (lookupContactByPubKey(id.pub_key, PUB_KEY_SIZE)) {
+        // Only a known contact has a history (#166); the advert's path is what MeshCore keeps for it too
+        mesh_signal_note(id.pub_key, true, packet->path_len, packet->path, _radio->getLastRSSI(), _radio->getLastSNR());
+    } else {
         advert_limit_result_t r = advert_limit_take(&advert_limit_, (uint32_t)millis());
         if (r != ADVERT_LIMIT_OK) {
             if (r == ADVERT_LIMIT_REFUSED_FIRST) {
@@ -75,6 +78,12 @@ void BadgeMesh::onAdvertRecv(mesh::Packet *packet, mesh::Identity const &id, uin
         }
     }
     MyMesh::onAdvertRecv(packet, id, timestamp, app_data, app_data_len);
+}
+
+void BadgeMesh::onMessageRecv(ContactInfo const &from, mesh::Packet *packet, uint32_t sender_timestamp,
+                              char const *text) {
+    mesh_signal_note(from.id.pub_key, false, 0, NULL, _radio->getLastRSSI(), _radio->getLastSNR());
+    MyMesh::onMessageRecv(from, packet, sender_timestamp, text);
 }
 
 // A room's post: the contact table names the author by the first 4 bytes of its key (the room sends only those), else

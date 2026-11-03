@@ -15,6 +15,7 @@
 #include "meshcore_chat.h"
 #include "meshcore_remote.h"
 #include "meshcore_run.h"
+#include "meshcore_screens.h"
 #include "qr_screen.h"
 #include "theme.h"
 
@@ -145,6 +146,11 @@ static bool act(contact_t *ct, mesh_contact_op_t op) {
 static void on_message(void *arg) {
     contact_t *ct = arg;
     meshcore_chat_open_dm(ct->prefix, ct->title[0] ? ct->title : "(no name)");
+}
+
+static void on_signal(void *arg) {
+    contact_t *ct = arg;
+    meshcore_signal_open(ct->prefix, ct->title); // reads what was already heard; sends nothing
 }
 
 static void on_reset(void *arg) {
@@ -437,6 +443,7 @@ static lv_obj_t *build_detail(void) {
     }
     ct->reset_row = menu_add(menu, "Reset path", "", on_reset, ct);
     menu_set_danger(ct->reset_row, "Reset the route to this contact? The next message floods to find a new one.", "reset");
+    menu_set_kind(menu_add(menu, "Signal", "", on_signal, ct), MENU_OPEN);
     menu_set_kind(menu_add(menu, "Trace path", "", on_trace, ct), MENU_OPEN);
     menu_set_kind(menu_add(menu, "Discover path", "", on_discover, ct), MENU_OPEN);
     ct->fav_row = menu_add(menu, "Favourite", "", on_fav, ct);

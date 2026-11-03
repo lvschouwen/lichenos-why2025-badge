@@ -710,6 +710,10 @@ add_executable(mesh_airlog_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_airlog_test.c $
 target_include_directories(mesh_airlog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
 target_compile_options(mesh_airlog_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_airlog_test COMMAND mesh_airlog_test)
+add_executable(mesh_signal_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_signal_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_signal.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_health.c)
+target_include_directories(mesh_signal_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_signal_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_signal_test COMMAND mesh_signal_test)
 
 add_executable(crash_log_test
     ${CMAKE_CURRENT_SOURCE_DIR}/crash_log_test.c
@@ -1340,6 +1344,7 @@ add_custom_target(run_tests
     mesh_run_test
     mesh_health_test
     mesh_airlog_test
+    mesh_signal_test
     sensors_format_test
     weather_series_test
     thermal_rules_test
