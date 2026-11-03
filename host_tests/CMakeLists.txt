@@ -1196,6 +1196,15 @@ target_compile_definitions(files_ops_test PRIVATE FILES_HOST_TEST)
 target_compile_options(files_ops_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME files_ops_test COMMAND files_ops_test)
 
+add_executable(weather_series_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/weather_series_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/weather_series.c
+)
+target_include_directories(weather_series_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(weather_series_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(weather_series_test PRIVATE m)
+add_test(NAME weather_series_test COMMAND weather_series_test)
+
 add_executable(sensors_format_test
     ${CMAKE_CURRENT_SOURCE_DIR}/sensors_format_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sensors/sensors_format.c
@@ -1285,6 +1294,7 @@ add_custom_target(run_tests
     mesh_health_test
     mesh_airlog_test
     sensors_format_test
+    weather_series_test
     thermal_rules_test
     crashlog_fmt_test
     lora_activity_test
