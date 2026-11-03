@@ -39,6 +39,7 @@ void files_app_register(void); // app_files.c (#71): browse /storage and the SD 
 void keytest_app_register(void);
 void clock_app_register(void); // app_clock.c (#122)
 void weather_app_register(void); // weather_app.c (#155)
+void timer_app_register(void); // app_timer.c (#152)
 void bench_app_register(void); // app_bench.c (#96); also registers "fw bench"
 bool bench_running(void);      // app_bench.c: a run is measuring (LVGL task)
 void power_app_register(void);                   // app_power.c (#65): Restart / Power off, also "fw poweroff"

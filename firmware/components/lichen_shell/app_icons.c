@@ -180,3 +180,17 @@ void icon_clock(lv_obj_t *parent, int size_px) {
     icon_bar(parent, face / 4 + t, t + t / 2, face / 8, 0, 0x111111, 0);          // hour hand, right
     icon_bar(parent, t * 2, t * 2, 0, 0, 0xD8101C, LV_RADIUS_CIRCLE);            // the red centre
 }
+
+// Timer (#152): a stopwatch, a white face with its button on top, a teal arc-less hand pair and the red centre
+void icon_timer(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    int face = size_px * 10 / 16, t = size_px >= 64 ? 4 : 2;
+    int cy = size_px / 16; // the face sits a little low, the button above it
+    icon_bar(parent, size_px / 6, size_px / 10, 0, -(face / 2 + size_px / 16) + cy, THEME_AMBER, 2);
+    icon_bar(parent, face, face, 0, cy, 0xFFFFFF, LV_RADIUS_CIRCLE);
+    icon_bar(parent, t, face * 3 / 8 + t, 0, cy - face * 3 / 16, 0x111111, 0);          // the hand, up
+    icon_bar(parent, face / 5 + t, t, face / 10, cy, THEME_TEAL, 0);                    // the second hand, right
+    icon_bar(parent, t * 2, t * 2, 0, cy, 0xD8101C, LV_RADIUS_CIRCLE);
+}
