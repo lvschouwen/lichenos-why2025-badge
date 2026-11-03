@@ -117,6 +117,14 @@ int main(void) {
     CHECK(psram_oneshot_verdict(&os, &never) == PSRAM_ONESHOT_FELL_BACK);
     CHECK(strcmp(psram_oneshot_verdict_text(PSRAM_ONESHOT_APPLY), "applied") == 0);
 
+    // LP register carrier (#121 spike): magic + value round trip; zero, noise and a wrong magic read as empty
+    uint16_t cv = 99;
+    CHECK(psram_carrier_unpack(psram_carrier_pack(120), &cv) && cv == 120);
+    CHECK(psram_carrier_unpack(psram_carrier_pack(0), &cv) && cv == 0);
+    CHECK(!psram_carrier_unpack(0, &cv));
+    CHECK(!psram_carrier_unpack(0xFFFFFFFFu, &cv));
+    CHECK(!psram_carrier_unpack(0x0000C4A1u, &cv)); // the magic in the wrong half
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

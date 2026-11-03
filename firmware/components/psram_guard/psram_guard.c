@@ -228,6 +228,10 @@ static void cmd_psram(char const *args) {
         psram_test(args + 4);
         return;
     }
+    if (strncmp(args, "carrier", 7) == 0) {
+        psram_boot_carrier(args + 7);
+        return;
+    }
     if (strncmp(args, "dlboot", 6) == 0) {
         psram_boot_oneshot_arm(args + 6); // #121: the same sweep across reboots, one index per boot
         return;
@@ -295,7 +299,7 @@ void psram_guard_start(void) {
     add_spread_blocks();
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);
-    console_register("psram", "psram [test <KB> [dense] | dma [rounds] [burst] | dl <idx> | dlboot <idx> yes|clear] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; a CPU round-trip test; the AXI-DMA copy test of #121; or set the delayline live)", cmd_psram);
+    console_register("psram", "psram [test <KB> [dense] | dma [rounds] [burst] | dl <idx> | dlboot <idx> yes|clear | carrier [set <n>|clear]] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; a CPU round-trip test; the AXI-DMA copy test of #121; or set the delayline live)", cmd_psram);
     if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 3072 /* peak 1.4 KB, #107 */, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "canary task failed to start");
     }

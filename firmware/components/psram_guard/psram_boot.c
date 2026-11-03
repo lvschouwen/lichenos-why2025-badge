@@ -18,6 +18,7 @@
 #include "soc/efuse_struct.h"
 #include "soc/iomux_mspi_pin_reg.h"
 #include "soc/iomux_mspi_pin_struct.h"
+#include "soc/lp_system_reg.h"
 #include "soc/pmu_struct.h"
 #include "soc/soc.h"
 
@@ -300,7 +301,44 @@ void psram_boot_dense_test(unsigned kb) {
     heap_caps_free(mem);
 }
 
+// LP_SYSTEM_REG_LP_STORE15_REG: ROM rtc.h (esp_rom/esp32p4/include/esp32p4/rom/rtc.h:45-85) claims STORE0..11; IDF uses none of
+// 12..15 (grep over components/); nothing in this tree. Survives resets that keep the LP domain; the spike checks which.
+#define CARRIER_REG LP_SYSTEM_REG_LP_STORE15_REG
+static uint32_t s_carrier_boot; // the register as found at boot, before anything of ours writes it
+
+static void carrier_log_boot(void) {
+    s_carrier_boot = REG_READ(CARRIER_REG);
+    uint16_t v;
+    if (psram_carrier_unpack(s_carrier_boot, &v)) {
+        ESP_LOGI(TAG, "carrier at boot: magic ok, value %u", (unsigned)v);
+    } else {
+        ESP_LOGI(TAG, "carrier at boot: empty (raw %08x)", (unsigned)s_carrier_boot);
+    }
+}
+
+// "fw psram carrier [set <n> | clear]" (#121 spike): diagnostic only, nothing acts on the value
+void psram_boot_carrier(char const *args) {
+    unsigned n;
+    if (sscanf(args, " set %u", &n) == 1 && n <= 0xFFFF) {
+        REG_WRITE(CARRIER_REG, psram_carrier_pack((uint16_t)n));
+    } else if (strstr(args, "clear")) {
+        REG_WRITE(CARRIER_REG, 0);
+    } else if (args[strspn(args, " ")]) {
+        console_reply("psram carrier [set <0..65535> | clear]");
+        return;
+    }
+    uint16_t v, vb;
+    uint32_t now = REG_READ(CARRIER_REG);
+    bool     ok = psram_carrier_unpack(now, &v), okb = psram_carrier_unpack(s_carrier_boot, &vb);
+    char     a[24], b[24];
+    snprintf(a, sizeof(a), ok ? "magic ok, value %u" : "empty", (unsigned)v);
+    snprintf(b, sizeof(b), okb ? "magic ok, value %u" : "empty", (unsigned)vb);
+    console_reply("psram carrier (LP_STORE15): now %s (raw %08x); at boot %s (raw %08x)", a, (unsigned)now, b,
+                  (unsigned)s_carrier_boot);
+}
+
 void psram_boot_check(void) {
+    carrier_log_boot();
     if (s_raw.phase_seen) {
         psram_tuning_note_phase(&s_tuning, s_raw.phase_len, s_raw.phase_end);
     }

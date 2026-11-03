@@ -69,6 +69,18 @@ bool psram_tuning_dl_in_window(psram_tuning_t const *t, unsigned idx) {
     return !psram_tuning_fell_back(t) && idx >= psram_tuning_dl_start(t) && idx <= t->dl_end;
 }
 
+uint32_t psram_carrier_pack(uint16_t value) {
+    return ((uint32_t)PSRAM_CARRIER_MAGIC << 16) | value;
+}
+
+bool psram_carrier_unpack(uint32_t word, uint16_t *value) {
+    if ((word >> 16) != PSRAM_CARRIER_MAGIC) {
+        return false;
+    }
+    *value = (uint16_t)(word & 0xFFFF);
+    return true;
+}
+
 psram_oneshot_verdict_t psram_oneshot_verdict(psram_oneshot_t const *rec, psram_tuning_t const *t) {
     if (rec->magic != PSRAM_ONESHOT_MAGIC || rec->idx >= PSRAM_DELAYLINES) {
         return PSRAM_ONESHOT_BAD_RECORD;

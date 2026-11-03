@@ -42,5 +42,9 @@ void psram_boot_set_delayline(char const *idx_text);
 void psram_boot_oneshot_arm(char const *args);
 void psram_boot_oneshot_apply(void);
 
+// "fw psram carrier [set <n> | clear]" (#121 spike): one LP store register (STORE15) holding a magic + 16-bit value, to
+// learn which resets keep it. The value found at boot is logged by psram_boot_check. Nothing reads it for any decision.
+void psram_boot_carrier(char const *args);
+
 // The tuning line ("phase 67.50 (run 4/4), delayline idx 15 ..."), for the Bench app (#96); returns the length
 size_t psram_boot_tuning_text(char *out, size_t cap);

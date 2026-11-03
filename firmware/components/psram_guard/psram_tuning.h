@@ -46,6 +46,12 @@ bool psram_tuning_dl_args(char const *text, unsigned *idx);
 // it the CPU path itself fails, and code, data and DMA buffers all live in PSRAM
 bool psram_tuning_dl_in_window(psram_tuning_t const *t, unsigned idx);
 
+// LP store register carrier spike (#121): a 16-bit magic and a 16-bit value in one 32-bit word, so a stale or foreign
+// value (power-on reset leaves 0 or noise) never reads as set
+#define PSRAM_CARRIER_MAGIC 0xC4A1u
+uint32_t psram_carrier_pack(uint16_t value);
+bool     psram_carrier_unpack(uint32_t word, uint16_t *value); // false = empty or not ours
+
 // One-shot delayline override for the 120 MHz bench (#121): "fw psram dlboot <idx> yes" stores a record in NVS, the next
 // boot consumes it (erased BEFORE it is applied, so a crash or a bad idx never repeats) and sets the delayline once NVS is
 // up. Anything the verdict does not accept leaves the IDF's own choice in place.
