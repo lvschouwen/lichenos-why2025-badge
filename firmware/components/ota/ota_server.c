@@ -27,6 +27,7 @@
 #include "ota_path.h"
 #include "ota_pieces.h"
 #include "ota_proto.h"
+#include "ota_rle.h"
 #include "ota_valid.h"
 #include "miniz.h" // the ROM inflater
 #include "settings_store.h"
@@ -53,12 +54,14 @@
 #define HEAD_DEADLINE_S 15
 #define BODY_MIN_RATE   (16 * 1024) // bytes/s a body must average, on top of BODY_GRACE_S
 #define BODY_GRACE_S    30
-#define SHOT_SLICE      (16 * 1024) // bytes per write of a screenshot, straight from its PSRAM buffer
-#define SHOT_SEND_S     10
+#define SHOT_SLICE      (16 * 1024) // bytes of pixels compressed and sent per round of a screenshot
+#define SHOT_SEND_S     4   // one send of a screenshot (about 10x fewer bytes than raw, so a dead link frees the task fast)
+#define SHOT_TOTAL_S    10  // whole screenshot send (#146)
+#define BODY_SEND_S     10
 #define LOG_SLICE       2048  // bytes copied out of the log store per call (interrupts are off meanwhile)
 #define LOG_REPLY_MAX   (24 * 1024) // one GET /log answer; the client asks again from X-Next-Seq
 #define CONSOLE_REPLY   4096
-#define SHOT_TOTAL_S    45 // whole send: a client that drips bytes must not hold the one server task and the buffer
+#define BODY_TOTAL_S    45 // whole send: a client that drips bytes must not hold the one server task
 // Flash writes happen on this task, so its stack must be in internal RAM; peaks measured in BadgeVMS: 7 KB
 #define SERVER_STACK    16384
 
@@ -993,6 +996,28 @@ static void handle_delete(int fd, ota_request_t const *req) {
     respond(fd, 200, "deleted %s", req->path);
 }
 
+// The body: the BMP header, then the pixels as ota_rle packets, compressed slice by slice into one small PSRAM buffer
+// (a UI frame is mostly flat colour: about 10:1). There is no Content-Length (the size isn't known up front), so the
+// client checks the pixel count; a cut connection leaves it short.
+static void send_shot(int fd, uint8_t const *pixels, size_t total, uint8_t const *head) {
+    uint8_t *out = heap_caps_malloc(ota_rle_bound(SHOT_SLICE / 2), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!out) {
+        respond(fd, 503, "out of memory, try again");
+        return;
+    }
+    struct timeval tv = {.tv_sec = SHOT_SEND_S};
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    static char const reply[] = "HTTP/1.1 200 OK\r\nContent-Type: application/x-lichen-bmp-rle\r\n"
+                                "Cache-Control: no-store\r\nConnection: close\r\n\r\n";
+    bool ok   = send_all(fd, reply, sizeof(reply) - 1) && send_all(fd, head, OTA_BMP_HEADER_LEN);
+    long stop = now_s() + SHOT_TOTAL_S;
+    for (size_t off = 0; ok && off < total; off += SHOT_SLICE) {
+        size_t n = total - off < SHOT_SLICE ? total - off : SHOT_SLICE;
+        ok       = now_s() <= stop && send_all(fd, out, ota_rle_encode(pixels + off, n / 2, out));
+    }
+    free(out);
+}
+
 // GET /screenshot (#30): the screen as a BMP. The picture is rendered by the hook (LVGL stays out of this component),
 // sent from its PSRAM buffer in slices and freed. It is never logged: it can show private messages.
 static void handle_screenshot(int fd) {
@@ -1018,21 +1043,7 @@ static void handle_screenshot(int fd) {
     if (!size || stride != row || ota_bmp565_row_bytes(w) != row || !ota_bmp565_header(w, h, head)) {
         respond(fd, 500, "unsupported screen shape");
     } else {
-        struct timeval tv = {.tv_sec = SHOT_SEND_S};
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        char reply[160];
-        int  n = snprintf(reply, sizeof(reply),
-                          "HTTP/1.1 200 OK\r\nContent-Type: image/bmp\r\nContent-Length: %u\r\nCache-Control: no-store\r\n"
-                          "Connection: close\r\n\r\n",
-                          (unsigned)size);
-        bool ok = send_all(fd, reply, (size_t)n) && send_all(fd, head, sizeof(head));
-        long stop = now_s() + SHOT_TOTAL_S;
-        for (size_t off = 0, total = row * h; ok && off < total; off += SHOT_SLICE) {
-            if (now_s() > stop) {
-                break;
-            }
-            ok = send_all(fd, pixels + off, total - off < SHOT_SLICE ? total - off : SHOT_SLICE);
-        }
+        send_shot(fd, pixels, row * h, head);
     }
     if (hooks.screenshot_free) {
         hooks.screenshot_free();
@@ -1041,10 +1052,10 @@ static void handle_screenshot(int fd) {
 
 // A reply with a body that is not a short text: head then body in slices, within one total deadline
 static void send_body(int fd, char const *head, size_t head_len, char const *body, size_t len) {
-    struct timeval tv = {.tv_sec = SHOT_SEND_S};
+    struct timeval tv = {.tv_sec = BODY_SEND_S};
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     bool ok   = send_all(fd, head, head_len);
-    long stop = now_s() + SHOT_TOTAL_S;
+    long stop = now_s() + BODY_TOTAL_S;
     for (size_t off = 0; ok && off < len; off += SHOT_SLICE) {
         ok = now_s() <= stop && send_all(fd, body + off, len - off < SHOT_SLICE ? len - off : SHOT_SLICE);
     }

@@ -482,22 +482,42 @@ cmd_ota_assets() {
     [ "$reboot" = --no-reboot ] || cmd_ota_reboot "$ip"
 }
 
-# GET /screenshot (#30): a 16-bit BMP of the screen, converted to PNG with python3-pil
+# GET /screenshot (#30, #146): the screen as a 16-bit BMP header plus run/literal packets (firmware/components/ota/
+# ota_rle.h), decoded here and converted to PNG with python3-pil
 cmd_screenshot() {
     local ip=$1 out=${2:-} work
     umask 077 # the picture can show private messages: nobody else reads it
     work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-shot.XXXXXX")
     trap "rm -f '$work/shot.bmp'; rmdir '$work' 2>/dev/null" EXIT # the dir stays when it holds the default PNG
     [ -n "$out" ] || out=$work/screenshot.png
-    if ! ota_curl --max-time 90 -o "$work/shot.bmp" "http://$ip:$OTA_PORT/screenshot"; then
+    if ! ota_curl --max-time 30 -o "$work/shot.bmp" "http://$ip:$OTA_PORT/screenshot"; then
         head -c 300 "$work/shot.bmp" 2>/dev/null | tr -d '\000' >&2 # --fail-with-body: the badge's reason is in the file
         echo >&2
         exit 1
     fi
     python3 -I - "$work/shot.bmp" "$out" <<'PY' || exit 1
-import sys
+import io, struct, sys
 from PIL import Image
-Image.open(sys.argv[1]).convert("RGB").save(sys.argv[2])
+d = open(sys.argv[1], "rb").read()
+if d[:2] != b"BM" or len(d) < 66:
+    sys.exit("screenshot: not a picture from the badge")
+off, w, h = struct.unpack_from("<I", d, 10)[0], struct.unpack_from("<i", d, 18)[0], abs(struct.unpack_from("<i", d, 22)[0])
+want, px, i = w * h, bytearray(), off
+while i < len(d) and len(px) < want * 2:
+    c = d[i]; i += 1
+    if c < 0x80:
+        px += d[i:i + 2 * (c + 1)]; i += 2 * (c + 1)
+    else:
+        if c == 0xFF:
+            n = 128 + struct.unpack_from("<H", d, i)[0]; i += 2
+        else:
+            n = (c & 0x7F) + 1
+        px += d[i:i + 2] * n; i += 2
+if len(px) != want * 2 or i != len(d):
+    sys.exit("screenshot: the picture was cut short (%d of %d pixels)" % (len(px) // 2, want))
+bmp = bytearray(d[:off]) + px
+struct.pack_into("<I", bmp, 2, len(bmp))
+Image.open(io.BytesIO(bytes(bmp))).convert("RGB").save(sys.argv[2])
 PY
     echo "$out"
 }
