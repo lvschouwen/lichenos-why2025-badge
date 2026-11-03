@@ -2,6 +2,7 @@
 #include "console_model.h"
 
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 
 static bool contains_nocase(char const *s, char const *word) {
@@ -22,6 +23,103 @@ bool console_line_is_secret(char const *line) {
     return line && (contains_nocase(line, "password") || contains_nocase(line, "login"));
 }
 
+typedef struct {
+    char const *cmd;
+    char const *subs; // space-separated subcommands allowed after it ("-" stands for none); NULL: any arguments
+} allow_t;
+
+// Built from the console_register calls: only commands that take no secret, and only the subcommands that take none.
+// Left out on purpose: wifi <ssid> <password>, channel, mesh send/dm/name/remote..., nvs-enc, token, keys (types into
+// the focused field), factory-reset, reboot and the like (not secret, but not worth a recall from history).
+static allow_t const allowed[] = {
+    {"help", NULL},   {"mem", NULL},     {"assets", NULL}, {"net", NULL},      {"uicheck", NULL}, {"fonts", NULL},
+    {"bench", NULL},  {"boot", NULL},    {"ui", NULL},     {"idle", NULL},     {"thermal", NULL}, {"i2c", NULL},
+    {"sensors", NULL}, {"psram", NULL},  {"led", NULL},    {"vib", NULL},      {"screensaver", NULL}, {"bl", NULL},
+    {"whatsnew", NULL}, {"home", NULL},  {"airplane", NULL}, {"msgs", NULL},   {"channels", NULL}, {"advert", NULL},
+    {"contacts", "-"},
+    {"wifi", "- on off scan reconnect stats ps tx bw proto"},
+    {"mesh", "- link out chats hist"},
+    {"sd", "- status mount unmount test"},
+    {"crash", "- dump"},
+    {"ota", "- on off auto"},
+    {"lora", "- on off log raw"},
+    {"clock", "- sync"},
+};
+
+static bool word_in(char const *list, char const *word) {
+    size_t w = strlen(word);
+    for (char const *p = list; *p;) {
+        size_t n = strcspn(p, " ");
+        if (n == w && strncmp(p, word, n) == 0) {
+            return true;
+        }
+        p += n + (p[n] ? 1 : 0);
+    }
+    return false;
+}
+
+static char const *skip_fw(char const *line) {
+    while (*line == ' ') {
+        line++;
+    }
+    if (strncmp(line, "fw ", 3) == 0) {
+        line += 3;
+        while (*line == ' ') {
+            line++;
+        }
+    }
+    return line;
+}
+
+void console_first_word(char const *line, char *out, size_t n) {
+    line     = skip_fw(line);
+    size_t k = strcspn(line, " ");
+    if (k >= n) {
+        k = n - 1;
+    }
+    memcpy(out, line, k);
+    out[k] = '\0';
+}
+
+static bool has_word(char const *line, char const *word) {
+    size_t w = strlen(word);
+    for (char const *p = line; *p;) {
+        p += strspn(p, " ");
+        size_t n = strcspn(p, " ");
+        if (n == w && strncmp(p, word, n) == 0) {
+            return true;
+        }
+        p += n;
+    }
+    return false;
+}
+
+bool console_line_is_public(char const *line) {
+    if (!line || console_line_is_secret(line)) {
+        return false;
+    }
+    line = skip_fw(line);
+    if (has_word(line, "YES")) {
+        return false;
+    }
+    char cmd[24], sub[24];
+    console_first_word(line, cmd, sizeof(cmd));
+    char const *rest = line + strcspn(line, " ");
+    rest += strspn(rest, " ");
+    size_t k = strcspn(rest, " ");
+    snprintf(sub, sizeof(sub), "%.*s", (int)(k < sizeof(sub) - 1 ? k : sizeof(sub) - 1), rest);
+    if (strlen(cmd) >= sizeof(cmd) - 1) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
+        if (strcmp(allowed[i].cmd, cmd) != 0) {
+            continue;
+        }
+        return !allowed[i].subs || word_in(allowed[i].subs, sub[0] ? sub : "-");
+    }
+    return false;
+}
+
 void console_hist_init(console_hist_t *h) {
     memset(h, 0, sizeof(*h));
     h->pos = -1;
@@ -33,7 +131,7 @@ static char *slot(console_hist_t *h, int back) { // back 0 = newest
 
 bool console_hist_push(console_hist_t *h, char const *line) {
     h->pos = -1;
-    if (!line || !line[0] || console_line_is_secret(line) || strlen(line) > CONSOLE_LINE_MAX) {
+    if (!line || !line[0] || !console_line_is_public(line) || strlen(line) > CONSOLE_LINE_MAX) {
         return false;
     }
     if (h->count && strcmp(slot(h, 0), line) == 0) {

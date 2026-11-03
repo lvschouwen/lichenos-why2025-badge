@@ -9,9 +9,17 @@
 #define CONSOLE_LINE_MAX 160 // the longest line the entry takes (a UART line is shorter, a Wi-Fi one longer)
 #define CONSOLE_HIST_N   16
 
-// A line that may hold a password or a login: never kept in the history and not echoed into the output. Matches
+// A line that may hold a password or a login (an extra deny on top of the allow-list): never kept in the history and not echoed into the output. Matches
 // "password" and "login" anywhere, in any case ("wifi password ...", "mesh remote login ...").
 bool console_line_is_secret(char const *line);
+
+// A line that is safe to keep and to show: its command (and subcommand where it matters) is on an allow-list of commands
+// that never take a secret argument, no word is YES (a confirm is typed each time, never recalled), and it is not
+// secret by the keyword check above. Everything else is hidden: not stored, echoed as "> <first word> (arguments
+// hidden)". A leading "fw " is ignored.
+bool console_line_is_public(char const *line);
+// The first word of line (after a leading "fw ") copied to out
+void console_first_word(char const *line, char *out, size_t n);
 
 typedef struct {
     char line[CONSOLE_HIST_N][CONSOLE_LINE_MAX + 1]; // a ring: [start] is the oldest

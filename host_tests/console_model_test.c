@@ -23,6 +23,31 @@ static void test_secret(void) {
     CHECK(!console_line_is_secret(""));
 }
 
+static void test_public(void) {
+    CHECK(console_line_is_public("help"));
+    CHECK(console_line_is_public("fw wifi stats"));
+    CHECK(console_line_is_public("wifi"));
+    CHECK(console_line_is_public("mesh link"));
+    CHECK(console_line_is_public("mem blocks internal"));
+    CHECK(!console_line_is_public("wifi MyNet hunter2")); // an ssid + password
+    CHECK(!console_line_is_public("wifi --clear"));
+    CHECK(!console_line_is_public("channel add secret AAAA"));
+    CHECK(!console_line_is_public("mesh remote abc cli reboot"));
+    CHECK(!console_line_is_public("mesh send chan hello"));
+    CHECK(!console_line_is_public("nvs-enc burn"));
+    CHECK(!console_line_is_public("token"));
+    CHECK(!console_line_is_public("factory-reset all"));
+    CHECK(!console_line_is_public("unknowncmd"));
+    CHECK(!console_line_is_public("wifi scan password")); // keyword deny on top
+    CHECK(!console_line_is_public("sd format YES")); // a confirm is typed each time
+    CHECK(!console_line_is_public("thermal test shutdown YES"));
+    CHECK(console_line_is_public("thermal test warn"));
+    CHECK(!console_line_is_public("wifi"" ""on YES"));
+    char w[24];
+    console_first_word("  fw wifi a b", w, sizeof(w));
+    CHECK(strcmp(w, "wifi") == 0);
+}
+
 static void test_hist(void) {
     console_hist_t h;
     console_hist_init(&h);
@@ -32,6 +57,8 @@ static void test_hist(void) {
     CHECK(!console_hist_push(&h, "wifi")); // same as the newest
     CHECK(!console_hist_push(&h, ""));
     CHECK(!console_hist_push(&h, "wifi password abc")); // secret: not kept
+    CHECK(!console_hist_push(&h, "sd format YES"));
+    CHECK(!console_hist_push(&h, "reboot")); // not on the allow-list
     CHECK(!console_hist_push(&h, "mesh remote x login y"));
     CHECK(console_hist_push(&h, "mesh"));
     CHECK(h.count == 2);
@@ -53,16 +80,16 @@ static void test_hist_ring(void) {
     console_hist_init(&h);
     char line[16];
     for (int i = 0; i < CONSOLE_HIST_N + 4; i++) {
-        snprintf(line, sizeof(line), "cmd%d", i);
+        snprintf(line, sizeof(line), "mem %d", i);
         CHECK(console_hist_push(&h, line));
     }
     CHECK(h.count == CONSOLE_HIST_N);
-    CHECK(strcmp(console_hist_older(&h), "cmd19") == 0);
+    CHECK(strcmp(console_hist_older(&h), "mem 19") == 0);
     char const *last = NULL;
     for (int i = 0; i < 40; i++) {
         last = console_hist_older(&h);
     }
-    CHECK(strcmp(last, "cmd4") == 0); // the 4 oldest fell out
+    CHECK(strcmp(last, "mem 4") == 0); // the 4 oldest fell out
     char too_long[CONSOLE_LINE_MAX + 20];
     memset(too_long, 'a', sizeof(too_long) - 1);
     too_long[sizeof(too_long) - 1] = '\0';
@@ -115,6 +142,7 @@ static void test_out(void) {
 
 int main(void) {
     test_secret();
+    test_public();
     test_hist();
     test_hist_ring();
     test_out();

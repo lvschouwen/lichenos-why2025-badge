@@ -32,9 +32,9 @@
 #define SCROLL_STEP 96
 // The UART console runs every command on a 4 KB stack and the Wi-Fi console on the OTA server's 16 KB. This task is
 // created per command and freed after it, so the stack costs internal RAM only while a command runs: the UART's 4 KB
-// plus 2 KB for console_exec's own frame and the done callback. Internal, not PSRAM: some commands write flash. The
+// plus margin for console_exec's own frame and the done callback (8 KB after review: a few seconds of internal RAM). Internal, not PSRAM: some commands write flash. The
 // high-water mark is logged after each run so a bench pass can confirm the margin.
-#define WORKER_STACK 6144
+#define WORKER_STACK 8192
 #define WORKER_PRIO  4
 
 static char const TAG[] = "console_app";
@@ -54,7 +54,7 @@ typedef struct {
 static con_t              *cur;    // the open screen; shell_open keeps it to one (SCREEN_CONSOLE)
 static uint32_t            s_gen;
 static volatile bool       s_busy; // a worker is alive (set on the LVGL task, cleared by the worker as its last act)
-static console_hist_t     *s_hist; // PSRAM, kept while the badge runs: lines with a password or login never get in
+static console_hist_t     *s_hist; // PSRAM, kept while the badge runs: only allow-listed commands, never a YES line (console_model.c)
 
 typedef struct {
     uint32_t gen;
@@ -105,13 +105,25 @@ static void reply_free(reply_t *r) {
 static void on_reply(void *arg) {
     reply_t *r = arg;
     con_t   *c = cur;
+    static char const lost[]    = "(the output could not be shown)\n";
+    static char const dropped[] = "(the last command's output was dropped when the screen closed)\n";
+    static char const none[]    = "(no output; some commands answer only on the USB console)\n";
     if (c && c->gen == r->gen) {
-        out_add(c, r->text, r->len);
+        // console_reply_private output is not captured, so "nothing printed" and "private only" look the same
+        if (!r->text) {
+            out_add(c, lost, sizeof(lost) - 1);
+        } else if (r->len == 0) {
+            out_add(c, none, sizeof(none) - 1);
+        } else {
+            out_add(c, r->text, r->len);
+        }
         set_status(c, "Ready", false);
         show_output(c, true);
     } else if (c && c->waiting_old) { // the screen was reopened while this ran
         c->waiting_old = false;
+        out_add(c, dropped, sizeof(dropped) - 1);
         set_status(c, "Ready", false);
+        show_output(c, true);
     }
     reply_free(r);
 }
@@ -216,10 +228,13 @@ static void on_ready(lv_event_t *e) {
         secure_wipe(line, sizeof(line));
         return;
     }
-    bool secret = console_line_is_secret(start);
-    console_hist_push(s_hist, start); // refuses a secret line itself
-    char echo[CONSOLE_LINE_MAX + 8];
-    int  m = snprintf(echo, sizeof(echo), "> %s\n", secret ? "(hidden)" : start);
+    bool public = console_line_is_public(start); // an allow-list: anything not known to take no secret is hidden
+    console_hist_push(s_hist, start);            // refuses a line that is not public
+    char echo[CONSOLE_LINE_MAX + 32];
+    char word[24];
+    console_first_word(start, word, sizeof(word));
+    int m = public ? snprintf(echo, sizeof(echo), "> %s\n", start)
+                   : snprintf(echo, sizeof(echo), "> %s (arguments hidden)\n", word);
     out_add(c, echo, (size_t)m);
     clear_entry(c);
     if (start_job(c, start)) {
