@@ -415,7 +415,7 @@ static bool datagram_to(BadgeMesh &mesh, mesh::LocalIdentity &peer, size_t from,
         int     n = mesh::Utils::MACThenDecrypt(secret, plain, &pkt.payload[2], pkt.payload_len - 2);
         if (n > 5) {
             *type = plain[4] >> 2;
-            *text = (char *)&plain[5];
+            *text = std::string((char *)&plain[5], strnlen((char *)&plain[5], (size_t)n - 5)); // a full block has no NUL
             return true;
         }
     }
@@ -484,14 +484,22 @@ static void remote_checks(BadgeMesh &mesh, rr_t &rr, CountingListener &listener)
     uint8_t     type = 0xFF;
     std::string text;
     CHECK(rr.state == RR_SENT && datagram_to(mesh, peer, before, PAYLOAD_TYPE_TXT_MSG, &type, &text));
-    CHECK(type == MF_TXT_CLI_DATA && text == "get name");
+    // the badge's tag in front (#123): the repeater reflects it, a reply with another one is not the answer
+    CHECK(type == MF_TXT_CLI_DATA && text.size() == 11 && text[2] == '|' && text.substr(3) == "get name");
+    std::string tag = text.substr(0, 3);
+    std::vector<uint8_t> stray = with_tag(now++, {(uint8_t)(MF_TXT_CLI_DATA << 2)});
+    for (char c : std::string("ZZ|late reply")) stray.push_back((uint8_t)c);
+    stray.push_back(0);
+    test_radio.pending = peer_packet(mesh, peer, PAYLOAD_TYPE_TXT_MSG, stray);
+    settle(mesh, 15);
+    CHECK(rr.state == RR_SENT && mesh.pipe().stats().cli_replies == 0);
     std::vector<uint8_t> reply = with_tag(now++, {(uint8_t)(MF_TXT_CLI_DATA << 2)});
-    for (char c : std::string("> Rpt")) reply.push_back((uint8_t)c);
+    for (char c : tag + "> Rpt") reply.push_back((uint8_t)c);
     reply.push_back(0);
     test_radio.pending = peer_packet(mesh, peer, PAYLOAD_TYPE_TXT_MSG, reply);
     settle(mesh, 20);
     CHECK(rr.state == RR_DONE && rr.cli_n == 1 && strcmp(rr.cli[rr.cli_head].reply, "> Rpt") == 0);
-    CHECK(mesh.pipe().stats().cli_replies == 1 && listener.dm_msgs == dms + 1 && listener.last_type == MF_TXT_CLI_DATA);
+    CHECK(mesh.pipe().stats().cli_replies == 1 && listener.dm_msgs == dms + 2 && listener.last_type == MF_TXT_CLI_DATA);
 
     // A room's post (signed text): the screens see "<author>: <text>"
     std::vector<uint8_t> post = with_tag(now++, {(uint8_t)(MF_TXT_SIGNED_PLAIN << 2)});

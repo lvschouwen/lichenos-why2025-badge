@@ -288,6 +288,110 @@ static void pw_key(void) {
     CHECK(tiny[0] == 0);
 }
 
+// #123: a free CLI command goes out with a tag of its own; a reply that carries another tag (a late answer to an earlier
+// command that timed out) is not the answer to this one
+static void cli_tags(void) {
+    rr_t        r;
+    char const *why = NULL;
+    rr_op_t     op;
+    uint8_t     prefix[6];
+    char        out[RR_ARG_MAX + 1];
+    mf_msg_t    sent = sent_reply(1500);
+    mf_msg_t    msg  = {.kind = MF_MSG_RECV, .msg_ok = true, .txt_type = MF_TXT_CLI_DATA};
+    memcpy(msg.rprefix, A, 6);
+    rr_init(&r);
+
+    CHECK(rr_request(&r, RR_CLI, A, "get name", 0, &why) == 1);
+    CHECK(rr_take(&r, &op, prefix, out, sizeof(out), 0) && strcmp(out, "AB|get name") == 0);
+    CHECK(strcmp(r.cli[r.cli_head].cmd, "get name") == 0); // the history shows what was typed
+    rr_on_reply(&r, &sent, 1);
+    rr_poll(&r, 1 + 20000, NULL); // timed out
+    CHECK(r.state == RR_TIMEOUT);
+
+    // the next command: the late reply of the first (tag AB) is dropped, its own reply (tag AC) is taken
+    CHECK(rr_request(&r, RR_CLI, A, "ver", 30000, &why) == 2);
+    CHECK(rr_take(&r, &op, prefix, out, sizeof(out), 30000) && strcmp(out, "AC|ver") == 0);
+    rr_on_reply(&r, &sent, 30001);
+    strcpy(msg.text, "AB|Lichen");
+    CHECK(!rr_on_message(&r, &msg, 30100) && r.state == RR_SENT && r.cli[r.cli_head].state == RR_CLI_WAITING);
+    strcpy(msg.text, "AC|v1.18.0");
+    CHECK(rr_on_message(&r, &msg, 30200) && r.state == RR_DONE);
+    CHECK(strcmp(r.cli[r.cli_head].reply, "v1.18.0") == 0);
+    // a stray reply right after ours does not join it either; an untagged part of ours does
+    strcpy(msg.text, "AB|late");
+    CHECK(!rr_on_message(&r, &msg, 30300) && strcmp(r.cli[r.cli_head].reply, "v1.18.0") == 0);
+    strcpy(msg.text, "more");
+    CHECK(rr_on_message(&r, &msg, 30400) && strcmp(r.cli[r.cli_head].reply, "v1.18.0\nmore") == 0);
+
+    // a command with a tag of its own (the settings page) and a one-character command go as they are
+    CHECK(rr_request(&r, RR_CLI, A, "a7|get name", 40000, &why) == 3);
+    CHECK(rr_take(&r, &op, prefix, out, sizeof(out), 40000) && strcmp(out, "a7|get name") == 0);
+    CHECK(r.cli[r.cli_head].tag[0] == 0);
+    rr_on_reply(&r, &sent, 40001);
+    strcpy(msg.text, "a7|Badge repeater");
+    CHECK(rr_on_message(&r, &msg, 40100) && strcmp(r.cli[r.cli_head].reply, "a7|Badge repeater") == 0);
+    CHECK(rr_request(&r, RR_CLI, A, "x", 50000, &why) == 4);
+    CHECK(rr_take(&r, &op, prefix, out, sizeof(out), 50000) && strcmp(out, "x") == 0);
+
+    // the longest command still fits with its tag
+    char longest[RR_CMD_MAX + 1];
+    memset(longest, 'y', RR_CMD_MAX);
+    longest[RR_CMD_MAX] = 0;
+    r.state             = RR_DONE;
+    CHECK(rr_request(&r, RR_CLI, A, longest, 60000, &why) == 5);
+    CHECK(rr_take(&r, &op, prefix, out, sizeof(out), 60000) && strlen(out) == RR_CMD_MAX + 3 && out[2] == '|');
+}
+
+// #123: a repeater that does not reflect tags answers "Unknown command" without one: no tag from then on
+static void cli_no_tags(void) {
+    rr_t        r;
+    char const *why = NULL;
+    rr_op_t     op;
+    uint8_t     prefix[6];
+    char        out[RR_ARG_MAX + 1];
+    mf_msg_t    sent = sent_reply(1500);
+    mf_msg_t    msg  = {.kind = MF_MSG_RECV, .msg_ok = true, .txt_type = MF_TXT_CLI_DATA};
+    memcpy(msg.rprefix, A, 6);
+    rr_init(&r);
+    CHECK(rr_request(&r, RR_CLI, A, "ver", 0, &why) == 1);
+    CHECK(rr_take(&r, &op, prefix, out, sizeof(out), 0));
+    rr_on_reply(&r, &sent, 1);
+    strcpy(msg.text, "Unknown command");
+    CHECK(rr_on_message(&r, &msg, 100) && strstr(r.cli[r.cli_head].reply, "does not read tags"));
+    r.state = RR_DONE;
+    CHECK(rr_request(&r, RR_CLI, A, "ver", 200, &why) == 2);
+    CHECK(rr_take(&r, &op, prefix, out, sizeof(out), 200) && strcmp(out, "ver") == 0);
+    r.state = RR_DONE;
+    CHECK(rr_request(&r, RR_CLI, B, "ver", 300, &why) == 3); // another repeater is asked again with a tag
+    CHECK(rr_take(&r, &op, prefix, out, sizeof(out), 300) && out[2] == '|');
+    // a tagged "Unknown command" is a real one
+    rr_on_reply(&r, &sent, 301);
+    memcpy(msg.rprefix, B, 6);
+    snprintf(msg.text, sizeof(msg.text), "%.2s|Unknown command", out);
+    CHECK(rr_on_message(&r, &msg, 400) && strcmp(r.cli[r.cli_head].reply, "Unknown command") == 0);
+}
+
+// #123: a password command's tagged echo is hidden too
+static void cli_tag_secret(void) {
+    rr_t        r;
+    char const *why = NULL;
+    rr_op_t     op;
+    uint8_t     prefix[6];
+    char        out[RR_ARG_MAX + 1];
+    mf_msg_t    sent = sent_reply(1500);
+    mf_msg_t    msg  = {.kind = MF_MSG_RECV, .msg_ok = true, .txt_type = MF_TXT_CLI_DATA};
+    memcpy(msg.rprefix, A, 6);
+    rr_init(&r);
+    CHECK(rr_request(&r, RR_CLI, A, "password s3cret", 0, &why) == 1);
+    CHECK(strcmp(r.cli[r.cli_head].cmd, "password (hidden)") == 0);
+    CHECK(rr_take(&r, &op, prefix, out, sizeof(out), 0) && strcmp(out, "AB|password s3cret") == 0);
+    CHECK(r.arg[0] == 0);
+    rr_on_reply(&r, &sent, 1);
+    strcpy(msg.text, "AB|password now: s3cret");
+    CHECK(rr_on_message(&r, &msg, 100));
+    CHECK(strcmp(r.cli[r.cli_head].reply, "password now: (hidden)") == 0);
+}
+
 int main(void) {
     login();
     login_refused_and_timeout();
@@ -296,6 +400,9 @@ int main(void) {
     cli();
     cli_filter();
     pw_key();
+    cli_tags();
+    cli_no_tags();
+    cli_tag_secret();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

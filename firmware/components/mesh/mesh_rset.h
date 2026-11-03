@@ -83,6 +83,16 @@ typedef enum {
 } rs_cmd_class_t;
 // As the repeater reads the command: leading spaces and the optional "xx|" tag are skipped
 rs_cmd_class_t rs_cmd_class(char const *cmd);
+// The commands that need a yes before they go (a radio change, a reboot): the screen asks with a dialog, the console
+// wants the word YES after the command. One predicate for both so they cannot drift (#123).
+bool rs_cmd_needs_confirm(char const *cmd);
+typedef enum {
+    RS_CONF_NOT_NEEDED, // out = cmd as it is
+    RS_CONF_MISSING,    // needs a yes and has none
+    RS_CONF_GIVEN,      // out = cmd without the trailing " YES"
+} rs_confirm_t;
+// The console's form: "reboot YES". Only a command that needs a confirm loses the word; "set name YES" is a name.
+rs_confirm_t rs_cmd_confirm(char const *cmd, char *out, size_t cap);
 // A secret command for the CLI history: "password (hidden)", "a7|set guest.password (hidden)"
 void rs_redact_cmd(char const *cmd, char *out, size_t cap);
 // A reply to a secret command: "password now: <pw>" (the repeater echoes it) becomes "password now: (hidden)"

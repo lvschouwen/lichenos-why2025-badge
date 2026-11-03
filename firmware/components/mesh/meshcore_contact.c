@@ -5,6 +5,7 @@
 #include "screen_ids.h"
 
 #include "esp_heap_caps.h"
+#include "mesh_wipe.h"
 #include "esp_log.h"
 #include "lichen_ui.h"
 #include "menu.h"
@@ -191,7 +192,7 @@ static void on_forget(void *arg) {
     contact_t *ct = arg;
     char saved[MF_PASSWORD_MAX + 2];
     bool had = meshcore_pw_get(ct->prefix, saved, sizeof(saved));
-    memset(saved, 0, sizeof(saved));
+    mesh_wipe(saved, sizeof(saved));
     meshcore_pw_forget(ct->prefix);
     set_note(ct->note, had ? "Password forgotten" : "No password was remembered", false);
 }

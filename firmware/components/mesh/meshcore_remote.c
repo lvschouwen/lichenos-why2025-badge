@@ -4,6 +4,7 @@
 #include "screen_ids.h"
 
 #include "esp_heap_caps.h"
+#include "mesh_wipe.h"
 #include "lichen_ui.h"
 #include "menu.h"
 #include "mesh.h"
@@ -172,7 +173,7 @@ void meshcore_remote_login(uint8_t const prefix[6], char const *name) {
     saved[0] = 0;
     meshcore_pw_get(target, saved, sizeof(saved));
     text_entry_open(heading, saved, true, MF_PASSWORD_MAX, login_entered, NULL);
-    memset(saved, 0, sizeof(saved));
+    mesh_wipe(saved, sizeof(saved));
 }
 
 // ---- Status -----------------------------------------------------------------------------------------------------------
@@ -322,9 +323,8 @@ static void cli_entered(char const *command, void *arg) {
     if (!*command || !mem || !note) { // nothing typed, or the screen went away meanwhile
         return;
     }
-    rs_cmd_class_t cls = rs_cmd_class(command);
-    if (cls == RS_CMD_RADIO || cls == RS_CMD_REBOOT) {
-        cli_ask(command, cls == RS_CMD_RADIO);
+    if (rs_cmd_needs_confirm(command)) { // the console wants YES for the same commands
+        cli_ask(command, rs_cmd_class(command) == RS_CMD_RADIO);
         return;
     }
     cli_send(command);

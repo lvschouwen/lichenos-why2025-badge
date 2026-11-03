@@ -241,11 +241,13 @@ char const *rs_check(size_t i, char const *value) {
     }
 }
 
+static void wipe(void *p, size_t n);
+
 static bool put(char *out, size_t cap, char const *tag, char const *body, char const *value) {
     int n = snprintf(out, cap, "%s%s%s%s%s", tag ? tag : "", tag ? "|" : "", body, value ? " " : "", value ? value : "");
     if (n < 0 || (size_t)n >= cap || n > RS_CMD_MAX) {
         if (cap) {
-            memset(out, 0, cap); // a password must not stay behind half written
+            wipe(out, cap); // a password must not stay behind half written (volatile: not optimised away)
         }
         return false;
     }
@@ -402,6 +404,35 @@ rs_cmd_class_t rs_cmd_class(char const *cmd) {
         }
     }
     return RS_CMD_PLAIN;
+}
+
+bool rs_cmd_needs_confirm(char const *cmd) {
+    rs_cmd_class_t c = rs_cmd_class(cmd);
+    return c == RS_CMD_RADIO || c == RS_CMD_REBOOT;
+}
+
+rs_confirm_t rs_cmd_confirm(char const *cmd, char *out, size_t cap) {
+    if (!cap) {
+        return RS_CONF_MISSING;
+    }
+    snprintf(out, cap, "%s", cmd);
+    size_t n = strlen(out); // what fits: the caller refuses a command over RS_CMD_MAX anyway
+    while (n && out[n - 1] == ' ') {
+        n--; // as typed: trailing spaces are not part of the word
+    }
+    bool yes = n >= 5 && strncmp(out + n - 4, " YES", 4) == 0;
+    if (yes) {
+        size_t m = n - 4;
+        while (m && out[m - 1] == ' ') {
+            m--;
+        }
+        out[m] = 0;
+        if (rs_cmd_needs_confirm(out)) {
+            return RS_CONF_GIVEN;
+        }
+    }
+    snprintf(out, cap, "%s", cmd); // not a confirm word: the command goes as typed
+    return rs_cmd_needs_confirm(cmd) ? RS_CONF_MISSING : RS_CONF_NOT_NEEDED;
 }
 
 void rs_redact_cmd(char const *cmd, char *out, size_t cap) {

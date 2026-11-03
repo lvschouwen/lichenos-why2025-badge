@@ -99,6 +99,8 @@ private:
     uint8_t    cur_cmd_  = 0;
     mesh_msg_id_t cur_id_ = 0;
     bool       draining_ = false;
+    uint8_t   *wipe_frame_ = nullptr; // the last login/CLI frame handed out, wiped at the next call
+    size_t     wipe_len_   = 0;
     ob_arb_t   arb_      = {};
     LinkStats  stats_;
     mf_msg_t   scratch_; // off the mesh task's stack: writeFrame runs deep inside loop()

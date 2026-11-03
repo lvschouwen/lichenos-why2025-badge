@@ -1,6 +1,8 @@
 // MeshCore on the badge (#61, #65): MeshCore's own companion (examples/companion_radio MyMesh + DataStore) runs in one
 // task over the LoRa bridge; the screens and the console are its user interface and read copies taken under
 // mesh_lock (no app port: nothing to expose on a network). MyMesh's loop() holds the lock, so its callbacks (the Listener below) already run under it.
+#include "mesh_wipe.h"
+#include "mesh_rset.h"
 #include "mesh_link.h"
 
 #include "lora_radio.h"
@@ -2161,7 +2163,7 @@ static void console_pw_settle(void) {
     if (mine && r->state == RR_DONE) {
         meshcore_pw_set(console_pw_prefix, console_pw);
     }
-    memset(console_pw, 0, sizeof(console_pw)); // done, refused, timed out or replaced: not kept
+    mesh_wipe(console_pw, sizeof(console_pw)); // done, refused, timed out or replaced: not kept
     console_pw_seq = 0;
     free(r);
 }
@@ -2198,6 +2200,27 @@ static void console_remote_show(void) {
         }
     }
     free(r);
+}
+
+// A CLI command from the console. A reboot or a radio change needs the word YES after it, as the screen asks with a
+// dialog (rs_cmd_confirm: one list for both, #123); erase is refused further down. 0 with *why NULL: asked for the YES.
+static uint32_t console_remote_cli(uint8_t const prefix[6], char const *text, char const **why) {
+    char big[RR_CMD_MAX + 5]; // room for " YES": a longer command is refused by rr_request, not cut
+    char cmd[RR_CMD_MAX + 5];
+    snprintf(big, sizeof(big), "%s", text);
+    rs_confirm_t c = rs_cmd_confirm(big, cmd, sizeof(cmd));
+    mesh_wipe(big, sizeof(big));
+    if (c == RS_CONF_MISSING) {
+        bool radio = rs_cmd_class(text) == RS_CMD_RADIO;
+        console_reply("%s: nothing sent. Add YES at the end to send it: fw mesh remote <who> cli <command> YES",
+                      radio ? "a wrong radio setting cuts the repeater off the mesh; only a visit to it undoes that"
+                            : "this restarts or stops the repeater");
+        *why = NULL;
+        return 0;
+    }
+    uint32_t seq = mesh_remote_start(prefix, RR_CLI, cmd, why); // erase is refused in there, YES or not
+    mesh_wipe(cmd, sizeof(cmd)); // may hold a new password
+    return seq;
 }
 
 // fw mesh remote <name|hex> login [password] | status | cli <text> | settings | logout, and fw mesh remote (the last
@@ -2253,11 +2276,14 @@ static void cmd_mesh_remote(char const *args) {
             memcpy(console_pw_prefix, prefix, 6);
             console_pw_seq = seq;
         }
-        memset(saved, 0, sizeof(saved));
+        mesh_wipe(saved, sizeof(saved));
     } else if (strcmp(verb, "status") == 0) {
         seq = mesh_remote_start(prefix, RR_STATUS, NULL, &why);
     } else if (strncmp(verb, "cli ", 4) == 0) {
-        seq = mesh_remote_start(prefix, RR_CLI, verb + 4, &why);
+        seq = console_remote_cli(prefix, verb + 4, &why);
+        if (!seq && !why) {
+            return; // asked for the YES and said so
+        }
     } else {
         console_reply("mesh remote <name or key digits> login [password] | status | cli <text> | settings | logout");
         return;

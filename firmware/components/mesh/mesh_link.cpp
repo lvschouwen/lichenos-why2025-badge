@@ -2,6 +2,7 @@
 #include "mesh_link.h"
 
 #include "channel_input.h"
+#include "mesh_wipe.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -305,6 +306,12 @@ size_t CompanionPipe::build_outbox_frame(ob_action_t const &act, uint8_t *dest) 
 }
 
 size_t CompanionPipe::checkRecvFrame(uint8_t dest[]) {
+    if (wipe_frame_) {
+        // The last remote frame (a login or a command, maybe a password) was handled in the loop that took it: it does
+        // not stay in MyMesh's command buffer (#123)
+        mesh_wipe(wipe_frame_, wipe_len_);
+        wipe_frame_ = nullptr;
+    }
     if (cur_ != CUR_NONE) {
         // The last command got no reply (MyMesh ignores a frame it does not understand): do not wait for it
         stats_.lost_replies++;
@@ -453,7 +460,7 @@ size_t CompanionPipe::take_remote(uint8_t dest[]) {
     }
     rr_op_t  op;
     uint8_t  prefix[MF_PREFIX];
-    char     arg[RR_CMD_MAX + 1];
+    char     arg[RR_ARG_MAX + 1];
     mesh_ob_enter();
     bool have = rr_take(rr_, &op, prefix, arg, sizeof(arg), (uint32_t)millis());
     mesh_ob_exit();
@@ -472,8 +479,10 @@ size_t CompanionPipe::take_remote(uint8_t dest[]) {
             break;
         }
     }
-    for (volatile char *v = arg; v < arg + sizeof(arg); v++) {
-        *v = 0; // the password is on its way (or refused): not kept on this stack (volatile: not optimised away)
+    mesh_wipe(arg, sizeof(arg)); // the password is on its way (or refused): not kept on this stack
+    if (n) {
+        wipe_frame_ = dest; // MyMesh reads the frame after this returns: it goes at the next call, see checkRecvFrame
+        wipe_len_   = n;
     }
     if (n == 0) {
         mesh_ob_enter();

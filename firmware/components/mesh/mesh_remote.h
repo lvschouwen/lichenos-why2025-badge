@@ -22,6 +22,7 @@ extern "C" {
 
 #define RR_CMD_MAX    100 // a command typed on the badge (MF_MAX_TEXT is the frame's limit)
 #define RR_REPLY_MAX  161
+#define RR_ARG_MAX    (RR_CMD_MAX + 4) // what rr_take may hand out: a command and the free CLI's "XY|" tag
 #define RR_CLI_KEEP   6   // exchanges kept for the CLI screen
 #define RR_GRACE_MS   5000
 #define RR_FLOOR_MS   8000
@@ -44,6 +45,7 @@ typedef struct {
     uint8_t  state; // rr_cli_state_t
     bool     secret; // a password command (mesh_rset.h): cmd and reply are kept without it
     uint32_t got_ms;
+    char     tag[3];   // the "XY" this free CLI command went out with (#123), "" when it carries its own or none
     char     cmd[RR_CMD_MAX + 1];
     char     reply[RR_REPLY_MAX];
 } rr_exchange_t;
@@ -72,6 +74,9 @@ typedef struct {
     uint8_t       cli_prefix[MF_PREFIX];
     uint8_t       cli_n, cli_head;
     rr_exchange_t cli[RR_CLI_KEEP];
+    // a repeater that did not reflect our tag ("Unknown command" without one): its commands go untagged from then on
+    bool    notag;
+    uint8_t notag_prefix[MF_PREFIX];
 } rr_t;
 
 // What rr_request keeps of a command, worked out before the caller enters its lock (mesh_ob_enter is a critical
@@ -107,7 +112,9 @@ uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char c
 uint32_t rr_request_prepared(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg,
                              rr_prep_t const *p, uint32_t now_ms, char const **why);
 // The mesh task: the queued request, now marked taken; false when none is queued. The password is copied to arg_out
-// (cap bytes) and wiped from r.
+// (cap bytes, RR_ARG_MAX fits everything) and wiped from r. A free CLI command gets a two-letter tag ("QX|get name"):
+// simple_repeater and the room server reflect it, and rr_on_message drops a reply that carries another one, so a late
+// reply to an earlier (timed-out) command is never shown as the answer to this one (#123).
 bool rr_take(rr_t *r, rr_op_t *op, uint8_t prefix[MF_PREFIX], char *arg_out, size_t cap, uint32_t now_ms);
 // The taken request could not be sent (contact gone, no frame): why is static text
 void rr_fail(rr_t *r, char const *why);

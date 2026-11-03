@@ -6,6 +6,11 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
+
+static bool has_tag(char const *s) {
+    return strlen(s) >= 3 && s[2] == '|'; // as simple_repeater reads "xx|" (it wants more than 4 characters in all)
+}
 
 static void wipe(void *p, size_t n) {
     volatile uint8_t *v = p;
@@ -92,6 +97,16 @@ uint32_t rr_request_prepared(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX
         wipe(x, sizeof(*x));
         x->state  = RR_CLI_WAITING;
         x->secret = p->cls == RS_CMD_SECRET;
+        char const *c = arg;
+        while (*c == ' ') {
+            c++;
+        }
+        // two letters from the request number; a command with a tag of its own (the settings page) is left alone, and
+        // one under two characters would not be read as tagged ("xx|" needs more than 4 characters in all)
+        if (strlen(c) >= 2 && !has_tag(c) && !(r->notag && memcmp(r->notag_prefix, prefix, MF_PREFIX) == 0)) {
+            x->tag[0] = (char)('A' + seq / 26 % 26);
+            x->tag[1] = (char)('A' + seq % 26);
+        }
         memcpy(x->cmd, p->shown, strnlen(p->shown, RR_CMD_MAX)); // made by rr_prepare, outside the lock
     }
     return seq;
@@ -106,10 +121,20 @@ bool rr_take(rr_t *r, rr_op_t *op, uint8_t prefix[MF_PREFIX], char *arg_out, siz
     *op        = r->op;
     memcpy(prefix, r->prefix, MF_PREFIX);
     size_t n = strnlen(r->arg, sizeof(r->arg) - 1); // no snprintf here: the caller holds a critical section
-    n        = cap && n >= cap ? cap - 1 : n;
+    size_t t = 0;
+    rr_exchange_t *x = &r->cli[r->cli_head];
+    if (r->op == RR_CLI && x->tag[0] && cap > n + 3) {
+        arg_out[0] = x->tag[0];
+        arg_out[1] = x->tag[1];
+        arg_out[2] = '|';
+        t          = 3;
+    } else if (r->op == RR_CLI) {
+        x->tag[0] = 0; // no room for it: this one is not protected
+    }
+    n = cap && n + t >= cap ? cap - t - 1 : n;
     if (cap) {
-        memcpy(arg_out, r->arg, n);
-        arg_out[n] = 0;
+        memcpy(arg_out + t, r->arg, n);
+        arg_out[t + n] = 0;
     }
     if (r->secret) {
         wipe(r->arg, sizeof(r->arg)); // the password is not kept in the request once it is on its way
@@ -223,25 +248,51 @@ void rr_pw_key(uint8_t const prefix[MF_PREFIX], char *out, size_t cap) {
     out[2 + 2 * MF_PREFIX] = 0;
 }
 
+// The reply of a command we tagged: its text without our tag; NULL for a reply that carries another one (it answers an
+// earlier command that timed out, or the settings page's). Untagged text stays: some of the repeater's replies are made
+// before it reads the tag.
+static char const *untag(rr_exchange_t const *x, char const *text, bool *no_tags) {
+    *no_tags = false;
+    if (!x->tag[0]) {
+        return text;
+    }
+    if (has_tag(text)) {
+        return text[0] == x->tag[0] && text[1] == x->tag[1] ? text + 3 : NULL;
+    }
+    // a repeater that does not read tags took "QX|get name" for one unknown word
+    *no_tags = strncasecmp(text, "unknown command", 15) == 0;
+    return text;
+}
+
 bool rr_on_message(rr_t *r, mf_msg_t const *m, uint32_t now_ms) {
     if (!m->msg_ok || m->txt_type != MF_TXT_CLI_DATA || r->cli_n == 0 ||
         memcmp(m->rprefix, r->cli_prefix, MF_PREFIX) != 0) {
         return false;
     }
     rr_exchange_t *x = &r->cli[r->cli_head];
-    if (r->op == RR_CLI && x->state == RR_CLI_WAITING && (r->state == RR_SENT || r->state == RR_TAKEN)) {
-        append_reply(x, m->text);
-        x->state  = RR_CLI_GOT;
-        x->got_ms = now_ms ? now_ms : 1;
-        r->state  = RR_DONE;
+    bool waiting     = r->op == RR_CLI && x->state == RR_CLI_WAITING && (r->state == RR_SENT || r->state == RR_TAKEN);
+    bool append      = x->state == RR_CLI_GOT && now_ms - x->got_ms <= RR_APPEND_MS;
+    if (!waiting && !append) {
+        return false;
+    }
+    bool        no_tags;
+    char const *text = untag(x, m->text, &no_tags);
+    if (!text) {
+        return false; // not the answer to this command
+    }
+    if (no_tags && waiting) {
+        r->notag = true;
+        memcpy(r->notag_prefix, r->cli_prefix, MF_PREFIX);
+        text = "Unknown command (this repeater does not read tags: send it again)";
+    }
+    append_reply(x, text); // a second message within RR_APPEND_MS is a reply in several parts
+    if (waiting) {
+        x->state   = RR_CLI_GOT;
+        x->got_ms  = now_ms ? now_ms : 1;
+        r->state   = RR_DONE;
         r->done_ms = now_ms;
-        return true;
     }
-    if (x->state == RR_CLI_GOT && now_ms - x->got_ms <= RR_APPEND_MS) {
-        append_reply(x, m->text); // a reply in several messages
-        return true;
-    }
-    return false;
+    return true;
 }
 
 void rr_logout(rr_t *r, uint8_t const prefix[MF_PREFIX]) {

@@ -131,6 +131,23 @@ static void filter(void) {
     CHECK(rs_cmd_class("reboot") == RS_CMD_REBOOT && rs_cmd_class("b2|clkreboot") == RS_CMD_REBOOT);
     CHECK(rs_cmd_class("start ota") == RS_CMD_REBOOT && rs_cmd_class("get name") == RS_CMD_PLAIN);
 
+    // #123: the console's confirm and the screen's dialog use one list
+    CHECK(rs_cmd_needs_confirm("reboot") && rs_cmd_needs_confirm("set radio 869,62.5,7,5") && rs_cmd_needs_confirm("a7|reboot"));
+    CHECK(!rs_cmd_needs_confirm("get name") && !rs_cmd_needs_confirm("password x") && !rs_cmd_needs_confirm("erase"));
+    char cf[64];
+    CHECK(rs_cmd_confirm("reboot", cf, sizeof(cf)) == RS_CONF_MISSING && strcmp(cf, "reboot") == 0);
+    CHECK(rs_cmd_confirm("reboot YES", cf, sizeof(cf)) == RS_CONF_GIVEN && strcmp(cf, "reboot") == 0);
+    CHECK(rs_cmd_confirm("reboot   YES  ", cf, sizeof(cf)) == RS_CONF_GIVEN && strcmp(cf, "reboot") == 0);
+    CHECK(rs_cmd_confirm("set radio 869,62.5,7,5 YES", cf, sizeof(cf)) == RS_CONF_GIVEN && strcmp(cf, "set radio 869,62.5,7,5") == 0);
+    CHECK(rs_cmd_confirm("reboot yes", cf, sizeof(cf)) == RS_CONF_MISSING && strcmp(cf, "reboot yes") == 0); // YES only
+    CHECK(rs_cmd_confirm("reboot YESTERDAY", cf, sizeof(cf)) == RS_CONF_MISSING);
+    CHECK(rs_cmd_confirm("get name", cf, sizeof(cf)) == RS_CONF_NOT_NEEDED && strcmp(cf, "get name") == 0);
+    CHECK(rs_cmd_confirm("set name YES", cf, sizeof(cf)) == RS_CONF_NOT_NEEDED && strcmp(cf, "set name YES") == 0);
+    CHECK(rs_cmd_confirm("erase YES", cf, sizeof(cf)) == RS_CONF_NOT_NEEDED && rs_cmd_class(cf) == RS_CMD_FORBIDDEN);
+    CHECK(rs_cmd_confirm("YES", cf, sizeof(cf)) == RS_CONF_NOT_NEEDED);
+    char tiny[8];
+    CHECK(rs_cmd_confirm("set radio 869,62.5,7,5 YES", tiny, sizeof(tiny)) == RS_CONF_MISSING); // cut: never "given"
+
     char out[64];
     rs_redact_cmd("password s3cret", out, sizeof(out));
     CHECK(strcmp(out, "password (hidden)") == 0);
