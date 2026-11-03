@@ -4,6 +4,7 @@
 #include "channel_input.h"
 #include "mesh_wipe.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -639,4 +640,21 @@ size_t CompanionPipe::writeFrame(uint8_t const src[], size_t len) {
         on_reply(scratch_);
     }
     return len;
+}
+
+void BadgeMesh::fillHealth(mesh_health_t *h) {
+    h->have_last     = radio_driver.getPacketsRecv() > 0;
+    h->last_rssi_x10 = (int16_t)lroundf(radio_driver.getLastRSSI() * 10.0f);
+    h->last_snr_x10  = (int16_t)lroundf(radio_driver.getLastSNR() * 10.0f);
+    h->tx_air_ms     = (uint32_t)getTotalAirTime();
+    h->rx_air_ms     = (uint32_t)getReceiveAirTime();
+    h->uptime_s      = (uint32_t)(millis() / 1000);
+    h->recv_flood    = getNumRecvFlood();
+    h->recv_direct   = getNumRecvDirect();
+    h->sent_flood    = getNumSentFlood();
+    h->sent_direct   = getNumSentDirect();
+    h->recv_errors   = radio_driver.getPacketsRecvErrors();
+    h->err_flags     = _err_flags;
+    int queued       = _mgr->getOutboundTotal();
+    h->queue_len     = (uint8_t)(queued < 0 ? 0 : queued > 255 ? 255 : queued);
 }

@@ -74,3 +74,6 @@ void lora_get_stats(lora_ui_stats_t *out);
 // Packets received (every one the C6 handed over) and sent on air (the C6 answered OK); both only go up. Two loads under
 // the state lock, cheap enough for the status bar's 100 ms poll (#29).
 void lora_get_counts(uint32_t *rx, uint32_t *tx);
+// The C6's last channel reading (its status poll, #157), dBm * 10: with no packet being received this is the noise floor.
+// False before the first answer or when it is older than max_age_s.
+bool lora_get_channel_rssi(int16_t *rssi_x10, uint32_t max_age_s);

@@ -707,6 +707,17 @@ void lora_get_counts(uint32_t *rx, uint32_t *tx_count) {
     portEXIT_CRITICAL(&state_lock);
 }
 
+bool lora_get_channel_rssi(int16_t *rssi_x10, uint32_t max_age_s) {
+    portENTER_CRITICAL(&state_lock);
+    bool     ok  = have_status && (now_ms() - status_at_ms) / 1000 <= max_age_s;
+    int16_t  val = c6_status.rssi_x10;
+    portEXIT_CRITICAL(&state_lock);
+    if (ok) {
+        *rssi_x10 = val;
+    }
+    return ok;
+}
+
 static void cmd_lora(char const *args) {
     if (strcmp(args, "log on") == 0 || strcmp(args, "log off") == 0) {
         log_rx = args[5] == 'n';

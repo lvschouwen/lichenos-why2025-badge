@@ -10,6 +10,7 @@
 #include "advert_limit.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
+#include "mesh_health.h"
 #include "mesh_outbox.h"
 #include "mesh_remote.h"
 #include "mesh_trace.h"
@@ -137,6 +138,9 @@ public:
     // MeshCore stops on request (#103), under the mesh lock: the packets queued for the radio are dropped, so none
     // goes out late after the next start. Returns how many.
     int            dropOutbound();
+    // MeshCore's own counters for the radio health page (#157), under the mesh lock: what upstream's CMD_GET_STATS
+    // answers (core, radio, packets). Reads only. The C6 reading and the LoRa task's drop counts are filled by the caller.
+    void           fillHealth(mesh_health_t *h);
     void           startPipe() {
         startInterface(pipe_);
         pipe_.start();

@@ -2,6 +2,7 @@
 
 #include "mesh_advert_cfg.h"
 #include "mesh_contact_fmt.h"
+#include "mesh_health.h"
 #include "mesh_ident.h"
 #include "mesh_outbox.h"
 #include "mesh_store.h"
@@ -69,6 +70,10 @@ bool mesh_node_id(char *hex, size_t cap);
 
 // The home tile (#67): a copy of what the mesh task keeps up to date (a spinlock, never the mesh lock), safe any time
 void mesh_tile_snapshot(mesh_tile_t *out);
+
+// The radio health page (#157): MeshCore's counters, the C6's channel reading and the LoRa task's drop counts, taken
+// under the mesh lock (up to wait_ms). false when MeshCore isn't running or the lock was busy. Reads only.
+bool mesh_health_snapshot(mesh_health_t *out, uint32_t wait_ms);
 
 // The radio as MeshCore's prefs have it; the prefs are read under the mesh lock (up to wait_ms), else the copy taken at
 // start is given. false before MeshCore is up.

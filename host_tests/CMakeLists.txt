@@ -696,6 +696,10 @@ add_executable(mesh_run_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_run_test.c ${CMAKE
 target_include_directories(mesh_run_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
 target_compile_options(mesh_run_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_run_test COMMAND mesh_run_test)
+add_executable(mesh_health_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_health_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_health.c)
+target_include_directories(mesh_health_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_health_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_health_test COMMAND mesh_health_test)
 
 add_executable(crash_log_test
     ${CMAKE_CURRENT_SOURCE_DIR}/crash_log_test.c
@@ -1274,6 +1278,7 @@ add_custom_target(run_tests
     mesh_share_test
     mesh_grid_test
     mesh_run_test
+    mesh_health_test
     sensors_format_test
     thermal_rules_test
     crashlog_fmt_test

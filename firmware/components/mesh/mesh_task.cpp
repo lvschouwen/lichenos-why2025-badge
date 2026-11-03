@@ -2949,6 +2949,23 @@ extern "C" bool mesh_radio_params(mesh_radio_t *out, uint32_t wait_ms) {
     return true;
 }
 
+#define HEALTH_NOISE_MAX_AGE_S 60 // the C6's channel reading older than this is not shown
+
+// Lock order: only the mesh lock, nothing else held; lora_get_channel_rssi takes the LoRa state spinlock for a copy
+extern "C" bool mesh_health_snapshot(mesh_health_t *out, uint32_t wait_ms) {
+    mesh_health_t h = {};
+    if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped() || !mesh_lock_within(wait_ms)) {
+        return false;
+    }
+    node->fillHealth(&h);
+    h.rx_dropped  = lora_radio.rx_dropped();
+    h.send_failed = lora_radio.send_failed;
+    mesh_unlock();
+    h.have_noise = lora_get_channel_rssi(&h.noise_x10, HEALTH_NOISE_MAX_AGE_S);
+    *out         = h;
+    return true;
+}
+
 extern "C" char const *mesh_firmware_version(void) {
     return FIRMWARE_VERSION;
 }
