@@ -53,13 +53,18 @@ void files_sort(files_entry_t *entries, size_t count);
 
 // ---- text paging --------------------------------------------------------------------------------------------------
 
-// Cuts buf[0..len) into at most `lines` lines of at most `cols` characters for one screen. Newlines end a line (CR is
+// Width of one character (UTF-8 bytes, n long) in whatever unit `cols` is given in, e.g. pixels
+typedef int (*files_width_fn)(void *ctx, char const *utf8, size_t n);
+
+// Cuts buf[0..len) into at most `lines` lines of at most `cols` width for one screen: 1 per character, or the width
+// from `measure` (NULL: 1). A line breaks at its last blank so words stay whole, and inside a word only when the word
+// alone is longer than a line (#144); a blank at the break is dropped. Newlines end a line (CR is
 // dropped), tabs become spaces, other control bytes and invalid UTF-8 show as '.' / '?'. Valid UTF-8 passes through
 // and is never split. Writes out (NUL-terminated) and sets *consumed to the bytes the screen used (> 0 whenever len > 0
 // and at_eof or len is at least 4 bytes more than a screen needs). at_eof false: a sequence cut off at the end of the
 // buffer is left for the next read. *binary is set when more than a tenth of the bytes were control bytes.
 size_t files_text_page(uint8_t const *buf, size_t len, bool at_eof, int cols, int lines, char *out, size_t cap,
-                       size_t *consumed, bool *binary);
+                       size_t *consumed, bool *binary, files_width_fn measure, void *measure_ctx);
 
 #ifdef __cplusplus
 }

@@ -24,10 +24,9 @@ static char const TAG[] = "files";
 #define SCREEN_FILES_VIEW 180
 #define POLL_MS           100
 #define ASK_SECONDS       20
-#define VIEW_COLS         44
-#define VIEW_LINES        16
+#define VIEW_FALLBACK_LINES 12 // if the screen has no size yet when the viewer is built
 #define VIEW_PAGES        512 // 512 screens is about 300 KB of text: the viewer is for configs and logs, not for books
-#define TEXT_CAP          (VIEW_COLS * VIEW_LINES * 4 + VIEW_LINES + 1)
+#define TEXT_CAP          4096 // one screen of text; a page that would not fit just ends sooner
 
 // The browser; zeroed while closed. LVGL task only.
 static struct {
@@ -50,6 +49,8 @@ static struct {
 typedef struct {
     lv_obj_t   *text, *hint;
     lv_timer_t *poll;
+    lv_font_t const *font; // the text's font: widths for the word wrap come from it
+    int         width_px, lines; // the room between the heading and the page line, measured when the viewer is built
     char      path[FILES_PATH_MAX];
     char      page_text[TEXT_CAP];
     uint32_t  offs[VIEW_PAGES];
@@ -226,6 +227,17 @@ static void list_dir(void) {
 
 // ---- the viewer ---------------------------------------------------------------------------------------------------
 
+// Pixel width of one character in the viewer's font, so lines fill the screen whatever the letters (#144)
+static int glyph_width(void *ctx, char const *utf8, size_t n) {
+    view_t *v = ctx;
+    char    one[5];
+    memcpy(one, utf8, n < 4 ? n : 4);
+    one[n < 4 ? n : 4] = '\0';
+    lv_point_t size;
+    lv_text_get_size(&size, one, v->font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return size.x;
+}
+
 static void show_page(files_job_result_t const *r) {
     if (!s_t || r->result != FILES_OK || !s_t->text) {
         if (s_t && s_t->hint) {
@@ -234,8 +246,8 @@ static void show_page(files_job_result_t const *r) {
         return;
     }
     bool eof = r->got < FILES_READ_CHUNK;
-    files_text_page(files_job_data(), r->got, eof, VIEW_COLS, VIEW_LINES, s_t->page_text, sizeof(s_t->page_text),
-                    &s_t->consumed, &s_t->binary);
+    files_text_page(files_job_data(), r->got, eof, s_t->width_px, s_t->lines, s_t->page_text, sizeof(s_t->page_text),
+                    &s_t->consumed, &s_t->binary, glyph_width, s_t);
     s_t->size   = r->file_size;
     s_t->at_end = s_t->consumed == 0 || s_t->offs[s_t->page] + s_t->consumed >= r->file_size || s_t->page + 1 >= VIEW_PAGES;
     s_t->loaded = true;
@@ -291,6 +303,23 @@ static void view_poll(lv_timer_t *timer) {
     }
 }
 
+// The page is as many lines as fit between the heading and the "Page N" line, measured from the laid-out screen (its
+// bottom padding already holds the pinned key hint), so neither goes off screen whatever the heading's height
+static void size_page(lv_obj_t *screen, lv_obj_t *heading) {
+    lv_obj_update_layout(screen);
+    s_t->font     = lv_obj_get_style_text_font(s_t->text, LV_PART_MAIN);
+    s_t->width_px = lv_obj_get_content_width(s_t->text);
+    int32_t line  = lv_font_get_line_height(s_t->font) + lv_obj_get_style_text_line_space(s_t->text, LV_PART_MAIN);
+    int32_t gap   = lv_obj_get_style_pad_row(screen, LV_PART_MAIN);
+    int32_t free_h = lv_obj_get_content_height(screen) - lv_obj_get_height(heading) -
+                     lv_font_get_line_height(lv_obj_get_style_text_font(s_t->hint, LV_PART_MAIN)) - 2 * gap;
+    s_t->lines    = line > 0 && free_h >= line ? (int)(free_h / line) : VIEW_FALLBACK_LINES;
+    if (s_t->width_px < 1) {
+        s_t->width_px = 400;
+    }
+    lv_obj_set_height(s_t->text, s_t->lines * line); // the page line sits right under the last text line
+}
+
 static lv_obj_t *build_view(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
@@ -299,9 +328,10 @@ static lv_obj_t *build_view(void) {
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUS_KEY);
-    lichen_heading(screen, "File", strrchr(s_t->path, '/') + 1); // the name wraps to two lines (R1, R2)
+    lv_obj_t *heading = lichen_heading(screen, "File", strrchr(s_t->path, '/') + 1); // the name wraps to two lines (R1, R2)
     s_t->text = lv_label_create(screen);
     lv_obj_set_width(s_t->text, LV_PCT(100));
+    lv_label_set_long_mode(s_t->text, LV_LABEL_LONG_WRAP); // a safety net; the page is already cut to this width
     lv_label_set_text(s_t->text, "Reading...");
     s_t->poll = lv_timer_create(view_poll, POLL_MS, NULL);
     s_t->hint = lv_label_create(screen);
@@ -309,6 +339,7 @@ static lv_obj_t *build_view(void) {
     lv_obj_set_style_text_color(s_t->hint, lv_color_hex(THEME_DIM), 0); // page and size; messages turn it amber
     lv_label_set_text(s_t->hint, "");
     shell_page_hint(screen, "Up/Down", "page", NULL);
+    size_page(screen, heading);
     lv_group_add_obj(lv_group_get_default(), screen);
     lv_obj_add_event_cb(screen, on_view_key, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(screen, on_view_delete, LV_EVENT_DELETE, NULL);

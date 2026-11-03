@@ -109,8 +109,64 @@ static void test_sort(void) {
 
 static size_t page(char const *in, size_t len, bool eof, int cols, int lines, char *out, size_t cap, bool *bin) {
     size_t used = 0;
-    files_text_page((uint8_t const *)in, len, eof, cols, lines, out, cap, &used, bin);
+    files_text_page((uint8_t const *)in, len, eof, cols, lines, out, cap, &used, bin, NULL, NULL);
     return used;
+}
+
+// 2 units per letter, 1 per blank: a stand-in for a proportional font
+static int narrow_blank(void *ctx, char const *utf8, size_t n) {
+    (void)ctx;
+    (void)n;
+    return utf8[0] == ' ' ? 1 : 2;
+}
+
+static void test_wrap(void) {
+    char out[512];
+    bool bin;
+    size_t used = page("the quick brown fox", 19, true, 10, 5, out, sizeof(out), &bin);
+    CHECK(!strcmp(out, "the quick\nbrown fox") && used == 19); // wraps at the blank, never inside "quick" (#144)
+    used = page("the quick brown fox", 19, true, 10, 1, out, sizeof(out), &bin);
+    CHECK(!strcmp(out, "the quick") && used == 10);          // the next page starts at the word
+    used = page("jumps over the lazy dog.", 24, true, 12, 5, out, sizeof(out), &bin);
+    CHECK(!strcmp(out, "jumps over\nthe lazy\ndog.") && used == 24);
+    used = page("abcdefghijklmnop qr", 19, true, 8, 5, out, sizeof(out), &bin);
+    CHECK(!strcmp(out, "abcdefgh\nijklmnop\nqr") && used == 19); // a word longer than a line is split
+    used = page("ab    cdefghi", 13, true, 6, 5, out, sizeof(out), &bin);
+    CHECK(!strcmp(out, "ab\ncdefgh\ni"));                      // blanks at the break are dropped
+    used = page("    indent", 10, true, 20, 2, out, sizeof(out), &bin);
+    CHECK(!strcmp(out, "    indent") && used == 10);         // leading blanks stay on their line
+    used = page("abc defgh", 9, true, 5, 5, out, sizeof(out), &bin);
+    CHECK(!strcmp(out, "abc\ndefgh") && used == 9);
+    used = page("abc d\x01" "efg", 9, true, 5, 5, out, sizeof(out), &bin);
+    CHECK(!strcmp(out, "abc\nd.efg") && used == 9);         // a retried control byte is shown once
+    used = page("one two three", 13, true, 14, 5, out, sizeof(out), &bin);
+    CHECK(!strcmp(out, "one two three") && used == 13);      // 13 characters fit exactly
+    used = page("one two three", 13, true, 12, 5, out, sizeof(out), &bin);
+    CHECK(!strcmp(out, "one two\nthree"));
+    // measured width: letters 2 units, blanks 1: "ab cd" is exactly 9
+    files_text_page((uint8_t const *)"ab cd ef", 8, true, 9, 5, out, sizeof(out), &used, &bin, narrow_blank, NULL);
+    CHECK(!strcmp(out, "ab cd\nef"));
+    // paging a whole text word by word loses nothing: the words come back in order
+    char text[300];
+    size_t n = 0;
+    for (int i = 0; n < sizeof(text) - 12; i++) {
+        n += (size_t)snprintf(text + n, sizeof(text) - n, "w%d ", i);
+    }
+    size_t at = 0, pages = 0;
+    char   joined[600] = "";
+    while (at < n && pages < 100) {
+        size_t m = page(text + at, n - at, true, 11, 3, out, sizeof(out), &bin);
+        CHECK(m > 0);
+        for (char *q = out; *q; q++) {
+            *q = *q == '\n' ? ' ' : *q;
+        }
+        strcat(joined, out);
+        strcat(joined, " ");
+        at += m;
+        pages++;
+    }
+    CHECK(at == n && pages > 3);
+    CHECK(strstr(joined, "w0 w1 w2 w3") && strstr(joined, "w20 w21"));
 }
 
 static void test_text(void) {
@@ -163,6 +219,7 @@ int main(void) {
     test_protected();
     test_sort();
     test_text();
+    test_wrap();
     if (failures) {
         printf("files_model_test: %d failure(s)\n", failures);
         return 1;

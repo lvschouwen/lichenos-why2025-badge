@@ -270,11 +270,38 @@ static bool put(sink_t *s, char const *bytes, size_t n) {
     return true;
 }
 
+// Where the page is: the line being filled and the last place it can be broken (after a space, #144)
+typedef struct {
+    sink_t sink;
+    size_t used, ctrl, seen; // input bytes taken, control bytes shown as '.', characters shown
+    int    line, col;        // col in width units
+    bool   can_break;
+    size_t brk_out, brk_used, brk_ctrl, brk_seen; // the state at the break: the line goes on from brk_used
+    bool   skip_blanks; // just wrapped: blanks at the start of the new line are dropped
+} page_t;
+
+static bool wrap_line(page_t *p, int lines, bool at_space) {
+    if (p->can_break && !at_space) { // back to the last blank: the word moves to the next line whole
+        p->sink.used = p->brk_out;
+        p->used      = p->brk_used;
+        p->ctrl      = p->brk_ctrl;
+        p->seen      = p->brk_seen;
+    }
+    p->can_break   = false;
+    p->skip_blanks = true;
+    p->col         = 0;
+    return ++p->line < lines && put(&p->sink, "\n", 1);
+}
+
+// Width of the character in units: 1 each, or the caller's measure (pixels) so a proportional font fills its lines
+static int cell_width(files_width_fn measure, void *ctx, char const *shown, size_t n) {
+    int w = measure ? measure(ctx, shown, n) : 1;
+    return w > 0 ? w : 1;
+}
+
 size_t files_text_page(uint8_t const *buf, size_t len, bool at_eof, int cols, int lines, char *out, size_t cap,
-                       size_t *consumed, bool *binary) {
-    size_t used = 0, ctrl = 0, seen = 0;
-    int    line = 0, col = 0;
-    sink_t sink = {out, cap, 0};
+                       size_t *consumed, bool *binary, files_width_fn measure, void *measure_ctx) {
+    page_t p = {.sink = {out, cap, 0}};
     if (cap) {
         out[0] = '\0';
     }
@@ -283,60 +310,85 @@ size_t files_text_page(uint8_t const *buf, size_t len, bool at_eof, int cols, in
         *binary   = false;
         return 0;
     }
-    while (used < len) {
-        uint8_t c = buf[used];
+    while (p.used < len) {
+        uint8_t c = buf[p.used];
         if (c == '\r') {
-            used++;
+            p.used++;
             continue;
         }
         if (c == '\n') {
-            if (!put(&sink, "\n", 1)) {
+            if (!put(&p.sink, "\n", 1)) {
                 break;
             }
-            used++;
-            if (++line >= lines) {
+            p.used++;
+            if (++p.line >= lines) {
                 break;
             }
-            col = 0;
+            p.col         = 0;
+            p.can_break   = false;
+            p.skip_blanks = false;
             continue;
         }
-        char    shown[4];
-        size_t  width = 1, take = 1;
+        if ((c == ' ' || c == '\t') && p.skip_blanks) {
+            p.used++;
+            continue;
+        }
+        p.skip_blanks = false;
+        char   shown[4];
+        size_t take = 1;
+        bool   bad  = false; // shown as '.' or '?': counted once the character is placed, not when it is retried
         if (c == '\t') {
             shown[0] = ' ';
         } else if (control(c)) {
             shown[0] = '.';
-            ctrl++;
+            bad      = true;
         } else if (c < 0x80) {
             shown[0] = (char)c;
         } else {
-            int u = utf8_len(buf + used, len - used);
+            int u = utf8_len(buf + p.used, len - p.used);
             if (u < 0 && !at_eof) {
                 break; // cut off by the end of the buffer: the next read completes it
             }
             if (u > 0) {
-                memcpy(shown, buf + used, (size_t)u);
-                width = take = (size_t)u;
+                memcpy(shown, buf + p.used, (size_t)u);
+                take = (size_t)u;
             } else {
                 shown[0] = '?';
-                ctrl++;
+                bad      = true;
             }
         }
-        if (col >= cols) { // wrap before this character
-            if (++line >= lines || !put(&sink, "\n", 1)) {
+        size_t width = take;
+        int    w     = cell_width(measure, measure_ctx, shown, width);
+        bool   blank = shown[0] == ' ';
+        if (p.col > 0 && p.col + w > cols) { // does not fit: wrap at the last blank, or inside a word too long for a line
+            if (blank) {
+                p.used += take; // the blank at the edge is the break itself
+            }
+            if (!wrap_line(&p, lines, blank)) {
                 break;
             }
-            col = 0;
+            if (blank) {
+                continue;
+            }
+            continue; // the word is read again from the start of the new line
         }
-        if (!put(&sink, shown, width)) {
+        if (blank && p.col > 0 && p.sink.used > 0 && out[p.sink.used - 1] != ' ') {
+            p.can_break = true; // a break before this blank; the line resumes after it
+            p.brk_out   = p.sink.used;
+            p.brk_used  = p.used + take;
+            p.brk_ctrl  = p.ctrl;
+            p.brk_seen  = p.seen;
+        }
+        if (!put(&p.sink, shown, width)) {
             break;
         }
-        col++;
-        used += take;
-        seen++;
+        p.col += w;
+        p.ctrl += bad;
+        p.used += take;
+        p.seen++;
     }
-    out[sink.used] = '\0';
-    *consumed      = used;
-    *binary        = (seen + ctrl) > 0 && ctrl * 10 > used;
-    return sink.used;
+    out[p.sink.used] = '\0';
+    *consumed        = p.used;
+    *binary          = (p.seen + p.ctrl) > 0 && p.ctrl * 10 > p.used;
+    return p.sink.used;
 }
