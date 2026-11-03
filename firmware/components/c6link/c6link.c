@@ -189,9 +189,19 @@ static void apply_wifi_tx(void) {
     }
 }
 
+// 802.11ax on or off for the station (#146): 0 = driver default (b/g/n/ax), 'n' = b/g/n only, no HE (no TWT)
+static _Atomic int wifi_proto;
+
 static void apply_wifi_bw(void) {
     int       bw = atomic_load(&wifi_bw_mhz);
+    int       proto = atomic_load(&wifi_proto);
     esp_err_t err;
+    if (proto) {
+        uint8_t mask = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | (proto == 'n' ? 0 : WIFI_PROTOCOL_11AX);
+        if ((err = esp_wifi_set_protocol(WIFI_IF_STA, mask)) != ESP_OK) {
+            ESP_LOGW(TAG, "wifi: protocol not set: %s", esp_err_to_name(err));
+        }
+    }
     if (bw && (err = esp_wifi_set_bandwidth(WIFI_IF_STA, bw == 20 ? WIFI_BW20 : WIFI_BW40)) != ESP_OK) {
         ESP_LOGW(TAG, "wifi: bandwidth not set: %s", esp_err_to_name(err));
     }
@@ -1023,6 +1033,15 @@ static void cmd_wifi(char const *args) {
             set_wifi_tx(raw ? raw : WIFI_TX_DEFAULT_RAW);
         }
         console_reply("wifi: max TX power %s (not saved; fw wifi stats reads it back)", raw ? "set" : "back to 20 dBm");
+    } else if (strcmp(args, "proto n") == 0 || strcmp(args, "proto ax") == 0 || strcmp(args, "proto") == 0) {
+        if (!args[5]) {
+            console_reply("wifi proto n | ax (n: b/g/n only, no Wi-Fi 6; reconnects to apply, not saved)");
+            return;
+        }
+        atomic_store(&wifi_proto, args[6] == 'n' ? 'n' : 'x');
+        msg_t m = {.type = MSG_RECONNECT}; // the protocol is agreed at association
+        console_reply(post(&m) ? "wifi: protocol %s, reconnecting (a few seconds)" : "wifi: busy, try again",
+                      args[6] == 'n' ? "b/g/n" : "b/g/n/ax");
     } else if (strcmp(args, "bw 20") == 0 || strcmp(args, "bw 40") == 0 || strcmp(args, "bw") == 0) {
         if (!args[2]) {
             console_reply("wifi bw 20 | 40 (reconnects to apply, not saved)");
@@ -1368,7 +1387,7 @@ bool c6link_start(void) {
     console_register("c6", "c6 [reflash | verify | reset [rom] | reattach]", cmd_c6);
     clock_console_register();
     console_register("net", "net (Wi-Fi state and IP)", cmd_net);
-    console_register("wifi", "wifi [on | off | scan | reconnect | stats | ps [none | min] | tx <8-80> | bw 20|40 | <ssid> <password> | --clear]", cmd_wifi);
+    console_register("wifi", "wifi [on | off | scan | reconnect | stats | ps [none | min] | tx <8-80> | bw 20|40 | proto n|ax | <ssid> <password> | --clear]", cmd_wifi);
     c6_sup_start();
     scan_done   = xSemaphoreCreateBinary();
     scan_lock   = xSemaphoreCreateMutex();
