@@ -27,7 +27,7 @@ set(COMPANION_SRCS
 # lichen_legacy_blob_take; the advert keys moved to a.meshcore in #123) and sdcard (the message journal's
 # sd_begin/sd_end batches on /sd/lichen/messages, #98: an SD batch call in lichen_fs.h). Results of the settings jobs
 # reach the LVGL task through lichen_ui_call (#84 T8a), so esp_lvgl_port is not needed.
-set(MESH_REQUIRES lichen_api lichen_clock lichen_random lora fw_console freertos esp_timer heap mbedtls
+set(MESH_REQUIRES psram_guard lichen_api lichen_clock lichen_random lora fw_console freertos esp_timer heap mbedtls
                   nvs_flash sdcard)
 idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "mesh_trace.c" "mesh_remote.c" "mesh_rset.c" "mesh_rset_run.c" "meshcore_remote.c" "meshcore_rset.c" "lora_radio.cpp" "mesh_store.c" "lora_airtime.c" "advert_limit.c" "mesh_advert_cfg.c"
                             "mesh_hist.c" "mesh_hist_boot.c" "mesh_hist_crypto.cpp" "mesh_hist_selftest.c" "mesh_ident.c" "mesh_journal.c" "mesh_format.c" "mesh_contact_fmt.c" "mesh_share.c" "mesh_tile.c" "mesh_notify.c" "mesh_notify_run.c" "meshcore_notify.c"

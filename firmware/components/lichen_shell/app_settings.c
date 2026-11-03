@@ -16,6 +16,7 @@
 #include "menu.h"
 #include "ota_autooff.h"
 #include "ota_server.h"
+#include "psram_speed.h"
 #include "saver_station.h"
 #include "sdcard.h"
 #include "settings_store.h"
@@ -576,6 +577,27 @@ static lv_obj_t *open_row(lv_obj_t *menu, char const *label, void (*open)(void *
     return row;
 }
 
+// PSRAM speed (#121): 80 MHz is the default; 120 MHz is tried after a restart and falls back to 80 on its own
+static void psram_speed_enter(void *arg) {
+    unsigned target = (unsigned)(uintptr_t)arg;
+    if (psram_speed_choice(target)) {
+        power_request_restart(); // saves the apps, shows "Restarting...", lands in the new speed
+    }
+}
+
+static void add_psram_speed_row(lv_obj_t *menu) {
+    if (!psram_speed_supported()) {
+        return;
+    }
+    char value[40];
+    psram_speed_value(value, sizeof(value));
+    unsigned other = psram_speed_other();
+    lv_obj_t *row  = menu_add(menu, "PSRAM speed", value, psram_speed_enter, (void *)(uintptr_t)other);
+    menu_set_danger(row, other == 120 ? "Switch PSRAM to 120 MHz? Restarts the badge. If 120 MHz fails, it comes back at 80."
+                                       : "Switch PSRAM to 80 MHz? Restarts the badge.",
+                    "restart");
+}
+
 static void open_settings(lv_obj_t *screen) {
     lv_obj_t *menu = menu_create(screen, "Settings");
     char      wifi[48];
@@ -612,6 +634,7 @@ static void open_settings(lv_obj_t *screen) {
     open_row(menu, "About Lichen", open_about);
     menu_note(menu, "For developers");
     menu_set_value(open_row(menu, "Console", console_open_from_settings), "Run fw commands");
+    add_psram_speed_row(menu);
     bool heading = false;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);

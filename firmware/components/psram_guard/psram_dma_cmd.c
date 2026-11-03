@@ -1,3 +1,4 @@
+#include "psram_speed.h"
 #include "psram_dma_cmd.h"
 
 #include "psram_dma.h"
@@ -296,7 +297,14 @@ static void sweep_windows(run_t *r, uint8_t *block, size_t windows) {
     }
 }
 
+// The gate of #121 for the 120 MHz switch: any bad byte on the AXI-GDMA legs or the bounced SD leg (what the badge ships
+// since E4) or a DMA error. The direct SD leg is the unbounced path nothing uses any more: it is reported, not judged.
+static bool gate_failed(run_t const *r) {
+    return r->bad_total > r->sd_bad[0] || r->errors > 0;
+}
+
 static void sweep(run_t *r, unsigned burst) {
+    bool gate = false;
     size_t   largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     size_t   free_ps = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     size_t   windows = psram_dma_sweep_windows(largest, free_ps, SWEEP_RESERVE, BIG_BYTES, SWEEP_MIN_WINDOWS);
@@ -318,10 +326,12 @@ static void sweep(run_t *r, unsigned burst) {
         char sd[64];
         console_reply("psram dma sweep: %u bad bytes over %u MB, %u errors, SD legs %s, %u ms", (unsigned)r->bad_total,
                       (unsigned)windows, r->errors, sd_text(r, sd, sizeof(sd)), (unsigned)((esp_timer_get_time() - t0) / 1000));
+        gate = gate_failed(r);
     }
     r->src = r->dst = r->dst2 = NULL;
     teardown(r);
     heap_caps_free(block);
+    psram_speed_gate_result(gate); // after the buffers are freed: a failed gate at 120 MHz restarts the badge
 }
 
 void psram_dma_cmd(char const *args) {
@@ -365,4 +375,5 @@ void psram_dma_cmd(char const *args) {
                   sd_text(&r, sd, sizeof(sd)), (unsigned)((esp_timer_get_time() - t0) / 1000),
                   r.errors ? " (stopped: DMA refused, timed out, a cache sync or a card read failed)" : "");
     teardown(&r);
+    psram_speed_gate_result(gate_failed(&r));
 }

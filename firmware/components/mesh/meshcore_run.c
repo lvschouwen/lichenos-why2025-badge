@@ -1,6 +1,7 @@
 // MeshCore running or not (#103): the state machine of mesh_run.c under a spinlock, the starts and stops on a job task.
 // The mesh task itself (mesh_task.cpp) serialises mesh_start and mesh_stop as well, so the update path and a job can
 // never overlap.
+#include "psram_speed.h"
 #include "meshcore_run.h"
 
 #include "esp_log.h"
@@ -95,8 +96,22 @@ static bool start_now(void) {
     return mesh_start(dir);
 }
 
+// A 120 MHz PSRAM trial (#121) is on: nothing may be written over a bus that is on trial, MeshCore's journal included. When
+// the trial passes MeshCore starts as it would have at boot.
+static void start_after_trial(void) {
+    if (meshcore_autostart()) {
+        char const *why = meshcore_run_request(true);
+        ESP_LOGI(TAG, "120 MHz trial passed: MeshCore starts now (%s)", why ? why : "requested");
+    }
+}
+
 bool meshcore_run_boot(void) {
     mesh_console_init();
+    if (psram_speed_trial_pending()) {
+        ESP_LOGW(TAG, "120 MHz PSRAM trial running: MeshCore waits until it passes (60 s), start it by hand to skip");
+        psram_speed_on_pass(start_after_trial);
+        return true;
+    }
     if (!meshcore_autostart()) {
         ESP_LOGI(TAG, "start at boot is off: MeshCore not started (Enter on its tile, or fw mesh start)");
         return true; // as asked: not a failed boot step

@@ -1,0 +1,231 @@
+Lichen patch for ESP-IDF v6.1 (lichenos-why2025-badge #121): the PSRAM speed, 80 or 120 MHz, is chosen at PSRAM init instead
+of at compile time.
+
+Applies ON TOP OF 0001-esp32p4-psram-120mhz.patch (same IDF checkout; 0002 is the alternative to 0001 and not used with this).
+Adds CONFIG_SPIRAM_SPEED_RUNTIME_SELECT (depends on SPIRAM_SPEED_80M, default n). With it off nothing changes. With it on,
+esp_psram_impl_enable() first calls mspi_timing_psram_speed_select(): it reads LP_SYSTEM_REG_LP_STORE15; the word
+0xC4A1 << 16 | 120 selects 120 MHz (MPLL 480 / 4), anything else 80 MHz (MPLL 320 / 4, exactly the stock 80 MHz setting);
+the register is cleared by that read. The running speed is g_mspi_psram_speed_mhz, the raw word found is
+g_mspi_psram_carrier_found (esp_private/mspi_timing_tuning.h). The 2nd stage bootloader does not compile
+mspi_timing_tuning.c nor init PSRAM, so it is unaffected. The latency codes and the DQS tuning tables are the same for
+80 and 120 MHz (0001), so only the MPLL frequency and the clock divider are runtime.
+
+    git -C <idf> apply "$PWD/tools/idf-patches/0003-esp32p4-psram-runtime-80-120.patch"
+
+diff --git a/components/esp_driver_spi/src/gpspi/spi_master.c b/components/esp_driver_spi/src/gpspi/spi_master.c
+--- a/components/esp_driver_spi/src/gpspi/spi_master.c
++++ b/components/esp_driver_spi/src/gpspi/spi_master.c
+@@ -116,6 +116,7 @@
+ #include "esp_private/spi_common_internal.h"
+ #include "esp_private/spi_master_internal.h"
+ #include "esp_private/esp_clk_tree_common.h"
++#include "esp_private/mspi_timing_tuning.h"
+ #include "esp_private/cache_utils.h"
+ #include "driver/spi_master.h"
+ #include "esp_clk_tree.h"
+@@ -169,7 +170,11 @@
+  */
+ #define K_EDMA_SETUP_RATIO      1 / 50000
+ #define B_EDMA_SETUP_TIME_US    1
++#if CONFIG_SPIRAM_SPEED_RUNTIME_SELECT
++#define SPI_EDMA_SETUP_TIME_US(spi_speed) ((spi_speed) * K_EDMA_SETUP_RATIO / g_mspi_psram_speed_mhz + B_EDMA_SETUP_TIME_US)
++#else
+ #define SPI_EDMA_SETUP_TIME_US(spi_speed) ((spi_speed) * K_EDMA_SETUP_RATIO / CONFIG_SPIRAM_SPEED + B_EDMA_SETUP_TIME_US)
++#endif
+ 
+ ESP_LOG_ATTR_TAG_DRAM(SPI_TAG, "spi_master");
+ #define SPI_CHECK(a, str, ret_val, ...)  ESP_RETURN_ON_FALSE_ISR(a, ret_val, SPI_TAG, str, ##__VA_ARGS__)
+diff --git a/components/esp_hw_support/clk_utils.c b/components/esp_hw_support/clk_utils.c
+--- a/components/esp_hw_support/clk_utils.c
++++ b/components/esp_hw_support/clk_utils.c
+@@ -20,7 +20,7 @@
+ // Not directly divide to avoid truncation issue
+ // DIG-498
+ #if CONFIG_IDF_TARGET_ESP32P4
+-#define BELOW_FREQ_THRESHOLD(freq) ((freq) < CONFIG_SPIRAM_SPEED)
++#define BELOW_FREQ_THRESHOLD(freq) ((freq) < MSPI_TIMING_PSRAM_SPEED_MHZ)
+ #elif CONFIG_IDF_TARGET_ESP32C5 || CONFIG_IDF_TARGET_ESP32C61 || CONFIG_IDF_TARGET_ESP32H4
+ #define BELOW_FREQ_THRESHOLD(freq) ((freq) * 8 < CONFIG_SPIRAM_SPEED)
+ #elif CONFIG_IDF_TARGET_ESP32S31
+diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/include/esp_private/mspi_timing_tuning.h b/components/esp_hw_support/mspi/mspi_timing_tuning/include/esp_private/mspi_timing_tuning.h
+--- a/components/esp_hw_support/mspi/mspi_timing_tuning/include/esp_private/mspi_timing_tuning.h
++++ b/components/esp_hw_support/mspi/mspi_timing_tuning/include/esp_private/mspi_timing_tuning.h
+@@ -14,10 +14,28 @@
+ #include <stdint.h>
+ #include <stdbool.h>
+ 
++#include "sdkconfig.h"
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+ 
++// Modified by Lichen (lichenos-why2025-badge #121, tools/idf-patches/0003): the PSRAM speed (80 or 120 MHz) is chosen at
++// PSRAM init from LP_SYSTEM_REG_LP_STORE15 instead of at compile time. Without the option every use below is the stock
++// CONFIG_SPIRAM_SPEED.
++#if CONFIG_SPIRAM_SPEED_RUNTIME_SELECT
++extern uint32_t g_mspi_psram_speed_mhz;      // 80 or 120, valid once esp_psram_impl_enable has started
++extern uint32_t g_mspi_psram_carrier_found;  // the raw word STORE15 held when it was read (and cleared)
++/**
++ * @brief Read LP_STORE15 (magic 0xC4A1 << 16 | 120 selects 120 MHz, anything else 80), clear it, remember both. Once only.
++ */
++void mspi_timing_psram_speed_select(void);
++#define MSPI_TIMING_PSRAM_SPEED_MHZ  (g_mspi_psram_speed_mhz)
++#define MSPI_TIMING_PSRAM_MPLL_MHZ   (g_mspi_psram_speed_mhz > 80 ? 480 : 320)   // 480 / 4 = 120, 320 / 4 = 80
++#else
++#define MSPI_TIMING_PSRAM_SPEED_MHZ  CONFIG_SPIRAM_SPEED
++#endif
++
+ /**
+  * @brief Make MSPI work under 20Mhz, remove the timing tuning required delays.
+  * @param control_spi1  Select whether to control SPI1. For tuning, we need to use SPI1. After tuning (during startup stage), let the flash driver to control SPI1
+diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/mspi_timing_tuning.c b/components/esp_hw_support/mspi/mspi_timing_tuning/mspi_timing_tuning.c
+--- a/components/esp_hw_support/mspi/mspi_timing_tuning/mspi_timing_tuning.c
++++ b/components/esp_hw_support/mspi/mspi_timing_tuning/mspi_timing_tuning.c
+@@ -39,6 +39,28 @@
+ #include "esp_ipc_isr.h"
+ #endif
+ 
++#if CONFIG_SPIRAM_SPEED_RUNTIME_SELECT
++#include "soc/lp_system_reg.h"
++// Modified by Lichen (lichenos-why2025-badge #121, 0003). Plain DRAM variables: PSRAM init runs before anything else could
++// set them, and the clock helpers that read them run from IRAM.
++uint32_t g_mspi_psram_speed_mhz = 80;
++uint32_t g_mspi_psram_carrier_found;
++
++void mspi_timing_psram_speed_select(void)
++{
++    static bool done;
++    if (done) {
++        return;
++    }
++    done = true;
++    uint32_t word = REG_READ(LP_SYSTEM_REG_LP_STORE15_REG);
++    g_mspi_psram_carrier_found = word;
++    g_mspi_psram_speed_mhz = (word == ((0xC4A1u << 16) | 120u)) ? 120 : 80;
++    // Cleared right away: a crash during a 120 MHz boot comes back at 80 unless the app arms it again
++    REG_WRITE(LP_SYSTEM_REG_LP_STORE15_REG, 0);
++}
++#endif
++
+ #if CONFIG_ESPTOOLPY_FLASHFREQ_120M
+ #define FLASH_FREQUENCY_MHZ 120
+ #elif CONFIG_ESPTOOLPY_FLASHFREQ_80M
+@@ -335,7 +357,7 @@
+ #endif
+ #if MSPI_TIMING_PSRAM_NEEDS_TUNING
+     if (!is_flash) {
+-        s_tuning_cfg_drv.psram_init_mspi(CONFIG_SPIRAM_SPEED);
++        s_tuning_cfg_drv.psram_init_mspi(MSPI_TIMING_PSRAM_SPEED_MHZ);
+     }
+ #endif
+ 
+@@ -550,7 +572,7 @@
+      */
+     mspi_timing_config_set_flash_clock(FLASH_FREQUENCY_MHZ, MSPI_TIMING_SPEED_MODE_NORMAL_PERF, control_spi1);
+ #if CONFIG_SPIRAM
+-    mspi_timing_config_set_psram_clock(CONFIG_SPIRAM_SPEED, MSPI_TIMING_SPEED_MODE_NORMAL_PERF, control_spi1);
++    mspi_timing_config_set_psram_clock(MSPI_TIMING_PSRAM_SPEED_MHZ, MSPI_TIMING_SPEED_MODE_NORMAL_PERF, control_spi1);
+ #endif  //#if CONFIG_SPIRAM
+ #endif  //#if SOC_SPI_MEM_SUPPORT_TIMING_TUNING
+ 
+diff --git a/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_config.c b/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_config.c
+--- a/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_config.c
++++ b/components/esp_hw_support/mspi/mspi_timing_tuning/port/esp32p4/mspi_timing_config.c
+@@ -14,6 +14,7 @@
+ #include "esp_private/periph_ctrl.h"
+ #include "esp_private/mspi_timing_config.h"
+ #include "mspi_timing_tuning_configs.h"
++#include "esp_private/mspi_timing_tuning.h"
+ #include "hal/psram_ctrlr_ll.h"
+ #include "hal/mspi_ll.h"
+ #include "soc/hp_sys_clkrst_struct.h"
+@@ -23,7 +24,12 @@
+ //-------------------------------------MSPI Clock Setting-------------------------------------//
+ void mspi_timing_config_set_psram_clock(uint32_t psram_freq_mhz, mspi_timing_speed_mode_t speed_mode, bool control_both_mspi)
+ {
+-    uint32_t freqdiv = MSPI_TIMING_MPLL_FREQ_MHZ / MSPI_TIMING_CORE_CLOCK_DIV / psram_freq_mhz;
++    #if CONFIG_SPIRAM_SPEED_RUNTIME_SELECT
++    uint32_t mpll_mhz = MSPI_TIMING_PSRAM_MPLL_MHZ;   // Lichen #121: 320 at 80 MHz, 480 at 120 MHz
++#else
++    uint32_t mpll_mhz = MSPI_TIMING_MPLL_FREQ_MHZ;
++#endif
++    uint32_t freqdiv = mpll_mhz / MSPI_TIMING_CORE_CLOCK_DIV / psram_freq_mhz;
+     assert(freqdiv > 0);
+     ESP_DRAM_LOGD(TAG, "psram_freq_mhz: %" PRIu32 " mhz, bus clock div: %" PRIu32, psram_freq_mhz, freqdiv);
+     PERIPH_RCC_ATOMIC() {
+diff --git a/components/esp_psram/device/esp_psram_impl_ap_hex.c b/components/esp_psram/device/esp_psram_impl_ap_hex.c
+--- a/components/esp_psram/device/esp_psram_impl_ap_hex.c
++++ b/components/esp_psram/device/esp_psram_impl_ap_hex.c
+@@ -67,6 +67,12 @@
+ #define AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ 400
+ #endif
+ 
++#if CONFIG_SPIRAM_SPEED_RUNTIME_SELECT
++// Modified by Lichen (lichenos-why2025-badge #121, 0003): 320 / 4 = 80 MHz or 480 / 4 = 120 MHz, chosen at init
++#undef AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ
++#define AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ MSPI_TIMING_PSRAM_MPLL_MHZ
++#endif
++
+ #define AP_HEX_PSRAM_REF_DATA              0x5a6b7c8d
+ 
+ #define AP_HEX_PSRAM_ULP_MODE_HALFSLEEP    0xF0
+@@ -422,6 +428,9 @@
+ 
+ esp_err_t esp_psram_impl_enable(void)
+ {
++#if CONFIG_SPIRAM_SPEED_RUNTIME_SELECT
++    mspi_timing_psram_speed_select();
++#endif
+ #if SOC_CLK_MPLL_SUPPORTED
+     // We need to use the acquire and freq_set functions directly instead of general clk_tree API for IRAM safe function
+     esp_clk_tree_mpll_acquire();
+@@ -447,8 +456,8 @@
+     s_configure_psram_ecc();
+ #endif
+     //enter MSPI slow mode to init PSRAM device registers
+-    psram_ctrlr_ll_set_bus_clock(PSRAM_CTRLR_LL_MSPI_ID_2, AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ / CONFIG_SPIRAM_SPEED);
+-    psram_ctrlr_ll_set_bus_clock(PSRAM_CTRLR_LL_MSPI_ID_3, AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ / CONFIG_SPIRAM_SPEED);
++    psram_ctrlr_ll_set_bus_clock(PSRAM_CTRLR_LL_MSPI_ID_2, AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ / MSPI_TIMING_PSRAM_SPEED_MHZ);
++    psram_ctrlr_ll_set_bus_clock(PSRAM_CTRLR_LL_MSPI_ID_3, AP_HEX_PSRAM_MPLL_DEFAULT_FREQ_MHZ / MSPI_TIMING_PSRAM_SPEED_MHZ);
+     psram_ctrlr_ll_enable_dll(PSRAM_CTRLR_LL_MSPI_ID_2, true);
+     psram_ctrlr_ll_enable_dll(PSRAM_CTRLR_LL_MSPI_ID_3, true);
+ 
+diff --git a/components/esp_psram/esp32p4/Kconfig.spiram b/components/esp_psram/esp32p4/Kconfig.spiram
+--- a/components/esp_psram/esp32p4/Kconfig.spiram
++++ b/components/esp_psram/esp32p4/Kconfig.spiram
+@@ -49,6 +49,14 @@
+             bool "20MHz clock speed"
+     endchoice
+ 
++    # Modified by Lichen (lichenos-why2025-badge #121, tools/idf-patches/0003). With the choice at 80 MHz, PSRAM init reads
++    # LP_SYSTEM_REG_LP_STORE15 (magic 0xC4A1 << 16 | 120) and runs at 120 MHz (MPLL 480 / 4) when it is set; any other value
++    # stays at 80 MHz (MPLL 320 / 4). The register is cleared by that read.
++    config SPIRAM_SPEED_RUNTIME_SELECT
++        bool "Lichen: choose 80 or 120 MHz at boot from LP_STORE15"
++        depends on SPIRAM_SPEED_80M
++        default n
++
+     config SPIRAM_SPEED
+         int
+         default 20 if SPIRAM_SPEED_20M
+diff --git a/components/esp_psram/system_layer/esp_psram.c b/components/esp_psram/system_layer/esp_psram.c
+--- a/components/esp_psram/system_layer/esp_psram.c
++++ b/components/esp_psram/system_layer/esp_psram.c
+@@ -31,6 +31,7 @@
+ #include "esp_private/esp_mmu_map_private.h"
+ #include "esp_private/esp_psram_impl.h"
+ #include "esp_private/esp_psram_mspi.h"
++#include "esp_private/mspi_timing_tuning.h"
+ #include "esp_private/startup_internal.h"
+ #if SOC_SPIRAM_XIP_SUPPORTED
+ #include "esp_private/mmu_psram_flash.h"
+@@ -231,7 +232,7 @@
+     assert(ret == ESP_OK);
+ 
+     PSRAM_EARLY_LOGI(TAG, "Found %" PRIu32 "MB PSRAM device", psram_physical_size / (1024 * 1024));
+-    PSRAM_EARLY_LOGI(TAG, "Speed: %dMHz", CONFIG_SPIRAM_SPEED);
++    PSRAM_EARLY_LOGI(TAG, "Speed: %dMHz", (int)MSPI_TIMING_PSRAM_SPEED_MHZ);
+ #if CONFIG_IDF_TARGET_ESP32
+ #if CONFIG_ESP_SYSTEM_SINGLE_CORE_MODE
+     ESP_EARLY_LOGI(TAG, "PSRAM initialized, cache is in normal (1-core) mode.");

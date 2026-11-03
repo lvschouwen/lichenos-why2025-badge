@@ -4,6 +4,7 @@
 #include "psram_dma_cmd.h"
 #include "psram_heap.h"
 #include "psram_pattern.h"
+#include "psram_speed.h"
 
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
@@ -193,6 +194,7 @@ static void guard_task(void *arg) {
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(PERIOD_MS));
         verify_all();
+        psram_speed_tick(); // a live 120 MHz trial passes or fails here (#121)
     }
 }
 
@@ -228,6 +230,10 @@ static void cmd_psram(char const *args) {
         psram_test(args + 4);
         return;
     }
+    if (strncmp(args, "speed", 5) == 0) {
+        psram_speed_cmd(args + 5); // #121: 80 or 120 MHz, applied by a restart
+        return;
+    }
     if (strncmp(args, "carrier", 7) == 0) {
         psram_boot_carrier(args + 7);
         return;
@@ -245,6 +251,7 @@ static void cmd_psram(char const *args) {
         return;
     }
     psram_boot_print();
+    psram_speed_print();
     for (size_t i = 0; i < s_npools; i++) {
         console_reply("psram heap pool %u: %p..%p (%u KB)", (unsigned)i, (void *)s_pools[i].lo, (void *)s_pools[i].hi,
                       (unsigned)((s_pools[i].hi - s_pools[i].lo) >> 10));
@@ -299,7 +306,7 @@ void psram_guard_start(void) {
     add_spread_blocks();
     add_block(SMALL_BYTES, "4K", false);
     add_block(SMALL_BYTES, "4K-lvgl", true);
-    console_register("psram", "psram [test <KB> [dense] | dma [rounds] [burst] | dl <idx> | dlboot <idx> yes|clear | carrier [set <n>|clear]] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; a CPU round-trip test; the AXI-DMA copy test of #121; or set the delayline live)", cmd_psram);
+    console_register("psram", "psram [test <KB> [dense] | dma [rounds] [burst] | dl <idx> | dlboot <idx> yes|clear | speed [80|120] [yes] | carrier] (bus tuning, boot check, heap pools, canary blocks in PSRAM: checks, damage seen, last hit; a CPU round-trip test; the AXI-DMA copy test of #121; or set the delayline live)", cmd_psram);
     if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 3072 /* peak 1.4 KB, #107 */, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "canary task failed to start");
     }

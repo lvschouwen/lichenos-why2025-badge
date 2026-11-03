@@ -2,6 +2,7 @@
 
 #include "psram_dma_cmd.h"
 #include "psram_pattern.h"
+#include "psram_speed.h"
 #include "psram_tuning.h"
 
 #include "esp_attr.h"
@@ -18,7 +19,6 @@
 #include "soc/efuse_struct.h"
 #include "soc/iomux_mspi_pin_reg.h"
 #include "soc/iomux_mspi_pin_struct.h"
-#include "soc/lp_system_reg.h"
 #include "soc/pmu_struct.h"
 #include "soc/soc.h"
 
@@ -301,40 +301,26 @@ void psram_boot_dense_test(unsigned kb) {
     heap_caps_free(mem);
 }
 
-// LP_SYSTEM_REG_LP_STORE15_REG: ROM rtc.h (esp_rom/esp32p4/include/esp32p4/rom/rtc.h:45-85) claims STORE0..11; IDF uses none of
-// 12..15 (grep over components/); nothing in this tree. Survives resets that keep the LP domain; the spike checks which.
-#define CARRIER_REG LP_SYSTEM_REG_LP_STORE15_REG
-static uint32_t s_carrier_boot; // the register as found at boot, before anything of ours writes it
-
+// The LP register carrier (#121 spike, now the speed switch's way to reach PSRAM init): PSRAM init reads and clears it, the
+// word it found is psram_speed_carrier_raw(). "fw psram carrier" only shows it.
 static void carrier_log_boot(void) {
-    s_carrier_boot = REG_READ(CARRIER_REG);
+    uint32_t raw = psram_speed_carrier_raw();
     uint16_t v;
-    if (psram_carrier_unpack(s_carrier_boot, &v)) {
+    if (psram_carrier_unpack(raw, &v)) {
         ESP_LOGI(TAG, "carrier at boot: magic ok, value %u", (unsigned)v);
     } else {
-        ESP_LOGI(TAG, "carrier at boot: empty (raw %08x)", (unsigned)s_carrier_boot);
+        ESP_LOGI(TAG, "carrier at boot: empty (raw %08x)", (unsigned)raw);
     }
 }
 
-// "fw psram carrier [set <n> | clear]" (#121 spike): diagnostic only, nothing acts on the value
 void psram_boot_carrier(char const *args) {
-    unsigned n;
-    if (sscanf(args, " set %u", &n) == 1 && n <= 0xFFFF) {
-        REG_WRITE(CARRIER_REG, psram_carrier_pack((uint16_t)n));
-    } else if (strstr(args, "clear")) {
-        REG_WRITE(CARRIER_REG, 0);
-    } else if (args[strspn(args, " ")]) {
-        console_reply("psram carrier [set <0..65535> | clear]");
-        return;
-    }
-    uint16_t v, vb;
-    uint32_t now = REG_READ(CARRIER_REG);
-    bool     ok = psram_carrier_unpack(now, &v), okb = psram_carrier_unpack(s_carrier_boot, &vb);
-    char     a[24], b[24];
+    (void)args;
+    uint16_t v;
+    uint32_t raw = psram_speed_carrier_raw();
+    bool     ok  = psram_carrier_unpack(raw, &v);
+    char     a[24];
     snprintf(a, sizeof(a), ok ? "magic ok, value %u" : "empty", (unsigned)v);
-    snprintf(b, sizeof(b), okb ? "magic ok, value %u" : "empty", (unsigned)vb);
-    console_reply("psram carrier (LP_STORE15): now %s (raw %08x); at boot %s (raw %08x)", a, (unsigned)now, b,
-                  (unsigned)s_carrier_boot);
+    console_reply("psram carrier (LP_STORE15) at PSRAM init: %s (raw %08x); set by fw psram speed, cleared by that init", a, (unsigned)raw);
 }
 
 void psram_boot_check(void) {

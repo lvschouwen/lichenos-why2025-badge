@@ -36,6 +36,9 @@ CONFIG_SPIRAM=y
 # No ECC: on P4 v1.0 it breaks (esp-idf #17855, OTA; here it crash-looped until power off). A mode change must never
 # go out over Wi-Fi without someone at the badge to power-cycle it.
 CONFIG_SPIRAM_SPEED_80M=y
+# 80 or 120 MHz chosen at boot (#121): needs tools/idf-patches/0001 + 0003 in the IDF; without 0003 this symbol is unknown to
+# Kconfig and the build is a plain 80 MHz one (Settings > PSRAM speed is then hidden). Default stays 80 MHz.
+CONFIG_SPIRAM_SPEED_RUNTIME_SELECT=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # Big statics that need no DMA or cache-off access live in PSRAM via EXT_RAM_BSS_ATTR (#107)
