@@ -194,3 +194,19 @@ void icon_timer(lv_obj_t *parent, int size_px) {
     icon_bar(parent, face / 5 + t, t, face / 10, cy, THEME_TEAL, 0);                    // the second hand, right
     icon_bar(parent, t * 2, t * 2, 0, cy, 0xD8101C, LV_RADIUS_CIRCLE);
 }
+
+// Calculator (#158): the display strip over a 3 x 3 grid of keys, one of them amber
+void icon_calc(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    int w = size_px * 9 / 16, strip_h = size_px / 6, key = size_px / 8, gap = size_px / 14;
+    int top = -size_px * 5 / 16;
+    icon_bar(parent, w, strip_h, 0, top + strip_h / 2, THEME_TEAL, 3);
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
+            uint32_t color = (r == 2 && c == 2) ? THEME_AMBER : 0xFFFFFF;
+            icon_bar(parent, key, key, (c - 1) * (key + gap), top + strip_h + gap * 2 + key / 2 + r * (key + gap), color, 2);
+        }
+    }
+}

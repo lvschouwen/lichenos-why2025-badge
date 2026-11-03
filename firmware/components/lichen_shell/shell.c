@@ -671,6 +671,7 @@ void shell_start(lv_display_t *display) {
     clock_app_register();
     weather_app_register();
     timer_app_register();
+    calc_app_register();
     bench_app_register();
     crashlog_app_register();
     power_app_register();

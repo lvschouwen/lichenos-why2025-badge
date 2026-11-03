@@ -15,3 +15,4 @@ void icon_files(lv_obj_t *parent, int size_px);
 void icon_clock(lv_obj_t *parent, int size_px); // Clock (#122)
 void icon_weather(lv_obj_t *parent, int size_px); // Weather (#155), weather_screen.c
 void icon_timer(lv_obj_t *parent, int size_px); // Timer (#152)
+void icon_calc(lv_obj_t *parent, int size_px);  // Calculator (#158)
