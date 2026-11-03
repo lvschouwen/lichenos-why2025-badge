@@ -436,6 +436,7 @@ void meshcore_settings(lv_obj_t *page) {
     menu_set_kind(menu_add(page, "Notifications", "", open_notify_page, NULL), MENU_OPEN);
     menu_set_kind(menu_add(page, "Advert & contacts", "", meshcore_advert_settings_open, NULL), MENU_OPEN);
     menu_set_kind(menu_add(page, "Radio health", "", meshcore_health_open, NULL), MENU_OPEN);
+    menu_set_kind(menu_add(page, "Air log", "", meshcore_airlog_open, NULL), MENU_OPEN);
     menu_set_kind(radio_row, MENU_OPEN);
     menu_set_kind(channels_row, MENU_OPEN);
     radio_row_refresh();

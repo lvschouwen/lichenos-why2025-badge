@@ -107,6 +107,7 @@ extern "C" void mesh_advert_limited(uint32_t refused) {
     (void)refused;
 }
 extern "C" void mesh_contacts_full(void) {}
+extern "C" void mesh_airlog_note(uint8_t, uint8_t, uint8_t const *, uint8_t, float, float) {}
 
 // The app's end of the companion protocol: frames to deliver, frames received
 class FakeApp : public BaseSerialInterface {

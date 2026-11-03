@@ -24,3 +24,6 @@ void meshcore_open_notification(char const *target, uint32_t id);
 // Radio health (#157): MeshCore's counters and the radio's channel reading, read only (meshcore_health.c). Opened from
 // the app's Settings page; a menu row callback.
 void meshcore_health_open(void *arg);
+// Air log (#165): the received packets, headers only, newest first (meshcore_airlog.c). Opened from the app's Settings
+// page; a menu row callback.
+void meshcore_airlog_open(void *arg);

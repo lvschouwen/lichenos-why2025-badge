@@ -23,6 +23,9 @@ void mesh_advert_limited(uint32_t refused);
 // The contact table is full and an advert of a new node was not added (#52): called for each such advert, under the
 // mesh lock (mesh_task.cpp raises a coalesced notice)
 void mesh_contacts_full(void);
+// A packet MeshCore received (#165), headers only, on the mesh task under the mesh lock: header and path_len as the
+// packet carries them, the path bytes, bytes on air, RSSI in dBm and SNR in dB. mesh_task.cpp keeps the air log ring.
+void mesh_airlog_note(uint8_t header, uint8_t path_len, uint8_t const *path, uint8_t raw_len, float rssi, float snr);
 }
 
 #define LINK_PUSH_KINDS 0x11 // push codes 0x80..0x90

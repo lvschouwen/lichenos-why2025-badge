@@ -19,6 +19,9 @@ static bool ours_to_track(mesh::Packet *pkt, bool *is_dm) {
 }
 
 void BadgeMesh::logRx(mesh::Packet *packet, int len, float score) {
+    // Every packet that parsed, headers only (#165): before the filter below, which is about our own channel messages
+    mesh_airlog_note(packet->header, (uint8_t)packet->path_len, packet->path, (uint8_t)len, _radio->getLastRSSI(),
+                     _radio->getLastSNR());
     if (packet->getPayloadType() != PAYLOAD_TYPE_GRP_TXT) {
         return;
     }

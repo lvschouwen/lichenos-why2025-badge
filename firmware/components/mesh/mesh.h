@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mesh_advert_cfg.h"
+#include "mesh_airlog.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_health.h"
 #include "mesh_ident.h"
@@ -74,6 +75,11 @@ void mesh_tile_snapshot(mesh_tile_t *out);
 // The radio health page (#157): MeshCore's counters, the C6's channel reading and the LoRa task's drop counts, taken
 // under the mesh lock (up to wait_ms). false when MeshCore isn't running or the lock was busy. Reads only.
 bool mesh_health_snapshot(mesh_health_t *out, uint32_t wait_ms);
+
+// The air log (#165): up to max received packets, newest first, copied from the ring in a short spinlock section (not
+// the mesh lock, never waits on MeshCore). *seq is the newest entry's sequence number (0: none yet), which changes
+// whenever a packet was added. The ring lives from the first packet on and survives MeshCore stopping and starting.
+size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq);
 
 // The radio as MeshCore's prefs have it; the prefs are read under the mesh lock (up to wait_ms), else the copy taken at
 // start is given. false before MeshCore is up.

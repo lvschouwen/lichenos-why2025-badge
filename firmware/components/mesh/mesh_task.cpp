@@ -2949,6 +2949,46 @@ extern "C" bool mesh_radio_params(mesh_radio_t *out, uint32_t wait_ms) {
     return true;
 }
 
+// ---- the air log (#165) ----------------------------------------------------------------------------------------
+// The ring is written on the mesh task (inside MyMesh::loop(), mesh lock held) and read by the screen. Its own
+// spinlock covers only the push and the copy, never held together with the mesh lock's work or LVGL's lock.
+
+static portMUX_TYPE   airlog_mux = portMUX_INITIALIZER_UNLOCKED;
+static airlog_t       airlog_ring;
+static bool           airlog_failed;
+
+extern "C" void mesh_airlog_note(uint8_t header, uint8_t path_len, uint8_t const *path, uint8_t raw_len, float rssi,
+                                 float snr) {
+    if (!airlog_ring.e) { // the first packet; only this task writes the pointer, readers see NULL or the whole ring
+        if (airlog_failed) {
+            return;
+        }
+        auto *mem = (airlog_entry_t *)heap_caps_calloc(AIRLOG_CAP, sizeof(airlog_entry_t), MALLOC_CAP_SPIRAM);
+        if (!mem) {
+            airlog_failed = true;
+            ESP_LOGW(TAG, "air log: no memory, packets are not listed");
+            return;
+        }
+        portENTER_CRITICAL(&airlog_mux);
+        airlog_init(&airlog_ring, mem, AIRLOG_CAP);
+        portEXIT_CRITICAL(&airlog_mux);
+    }
+    int16_t rssi_x10 = (int16_t)lroundf(rssi * 10.0f);
+    int16_t snr_x10  = (int16_t)lroundf(snr * 10.0f);
+    uint32_t at_s    = mesh_uptime_s();
+    portENTER_CRITICAL(&airlog_mux);
+    airlog_push(&airlog_ring, header, path_len, path, raw_len, rssi_x10, snr_x10, at_s);
+    portEXIT_CRITICAL(&airlog_mux);
+}
+
+extern "C" size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq) {
+    portENTER_CRITICAL(&airlog_mux);
+    size_t n = airlog_ring.e ? airlog_copy(&airlog_ring, out, max) : 0;
+    *seq     = airlog_ring.seq;
+    portEXIT_CRITICAL(&airlog_mux);
+    return n;
+}
+
 #define HEALTH_NOISE_MAX_AGE_S 60 // the C6's channel reading older than this is not shown
 
 // Lock order: only the mesh lock, nothing else held; lora_get_channel_rssi takes the LoRa state spinlock for a copy
