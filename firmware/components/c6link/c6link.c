@@ -928,12 +928,8 @@ static void cmd_wifi(char const *args) {
         } else {
             console_reply("wifi: \"%s\" not connected", a);
         }
-        if (atomic_load(&wifi_started)) {
-            wifi_ps_type_t ps;
-            if (esp_wifi_get_ps(&ps) == ESP_OK) {
-                console_reply("wifi: power save %s", wifi_ps_name(ps));
-            }
-        }
+        // The chosen mode, not a read-back: the status line must not wait on a C6 RPC (`fw wifi ps` reads back)
+        console_reply("wifi: power save %s", wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode)));
         char tried[33], kept[33];
         wifi_join_state_t st = wifi_join_state(tried, sizeof(tried), kept, sizeof(kept));
         clean(tried, a, sizeof(a));
@@ -948,7 +944,11 @@ static void cmd_wifi(char const *args) {
     } else if (strcmp(args, "on") == 0 || strcmp(args, "off") == 0) {
         lichen_radio_set(RADIO_WIFI, args[1] == 'n'); // saved; c6link_wifi_enable follows through the listener
         console_reply("wifi: radio %s", lichen_radio_get(RADIO_WIFI) ? "on" : "off");
-    } else if (strcmp(args, "ps") == 0 || strcmp(args, "ps none") == 0 || strcmp(args, "ps min") == 0) {
+    } else if (strcmp(args, "ps") == 0 || strncmp(args, "ps ", 3) == 0) {
+        if (args[2] && strcmp(args + 3, "none") != 0 && strcmp(args + 3, "min") != 0) {
+            console_reply("wifi ps [none | min]"); // a typo must not fall through to joining an SSID called "ps"
+            return;
+        }
         if (args[2]) {
             atomic_store(&wifi_ps_mode, args[3] == 'n' ? WIFI_PS_NONE : WIFI_PS_MIN_MODEM);
             if (atomic_load(&wifi_started)) {
