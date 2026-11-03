@@ -1,4 +1,4 @@
-// Release Notes (#13): the notes in firmware/release_notes/ are compiled into the image (rodata, read through plain
+// What's new (#13, was "Release notes"): the notes in firmware/release_notes/ are compiled into the image (rodata, read through plain
 // pointers: no flash mapping, #31), so they always match the running build. This file is the app on home (a list, one
 // full page per note, a badge for the unread ones) and the "This is new" screen that follows an update.
 // The marker is the highest note sequence the person has seen (NVS notes_seen); release_notes.h has the rules.
@@ -170,7 +170,7 @@ static void open_notes(lv_obj_t *screen) {
     load();
     s_seen_at_open = s_seen_known ? s_seen : 0;
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_t *menu = menu_create(screen, "Release notes");
+    lv_obj_t *menu = menu_create(screen, "What's new");
     if (!s_count) {
         menu_empty(menu, "release notes", NULL);
         return;
@@ -210,7 +210,7 @@ static bool notes_tile(char *l1, size_t c1, char *l2, size_t c2) {
 }
 
 static lichen_app_t const notes_app = {
-    .name      = "Release notes",
+    .name      = "What's new",
     .id        = "relnotes",
     .draw_icon = icon_notes,
     .tile_text = notes_tile,

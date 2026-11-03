@@ -1234,6 +1234,16 @@ target_include_directories(qr_payload_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
 target_compile_options(qr_payload_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME qr_payload_test COMMAND qr_payload_test)
 
+add_executable(notes_model_test ${CMAKE_CURRENT_SOURCE_DIR}/notes_model_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/notes_model.c)
+target_include_directories(notes_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(notes_model_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME notes_model_test COMMAND notes_model_test)
+
+add_executable(notes_store_test ${CMAKE_CURRENT_SOURCE_DIR}/notes_store_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/notes_store.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/notes_model.c)
+target_include_directories(notes_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(notes_store_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME notes_store_test COMMAND notes_store_test)
+
 add_executable(sensors_format_test
     ${CMAKE_CURRENT_SOURCE_DIR}/sensors_format_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sensors/sensors_format.c
@@ -1339,6 +1349,8 @@ add_custom_target(run_tests
     factory_plan_test
     release_notes_test
     qr_payload_test
+    notes_model_test
+    notes_store_test
     mesh_chat_target_test
     nvs_image_test
     COMMENT "Running all host tests"

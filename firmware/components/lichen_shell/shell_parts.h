@@ -41,6 +41,7 @@ void clock_app_register(void); // app_clock.c (#122)
 void weather_app_register(void); // weather_app.c (#155)
 void timer_app_register(void); // app_timer.c (#152)
 void calc_app_register(void);  // app_calc.c (#158)
+void notepad_app_register(void); // app_notes.c (#154): notes and to dos on the SD card
 void qr_app_register(void);      // app_qr.c (#153)
 void bench_app_register(void); // app_bench.c (#96); also registers "fw bench"
 bool bench_running(void);      // app_bench.c: a run is measuring (LVGL task)

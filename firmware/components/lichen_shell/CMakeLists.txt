@@ -17,7 +17,8 @@
 # app_files.c is the Files app (#71): files_job.c runs its file work off the LVGL task, files_ops.c is plain POSIX
 # (files_ops_test.c) and files_model.c the paths, protected list, sort and text paging (files_model_test.c).
 # weather_series.c (weather_series_test.c, #155) is the Weather app's ring, graph range, air trend and CSV line; weather_app.c samples and logs, weather_screen.c draws.
-# app_qr.c is the QR code app (#153; the screen is lichen_api's qr_screen.c).
+# app_notes.c is the Notes app (#154: notes and to dos as text files on the SD card): notes_model.c is its rules (notes_model_test.c)
+# and notes_store.c its file work (notes_store_test.c). app_qr.c is the QR code app (#153; the screen is lichen_api's qr_screen.c).
 # shell.c, boot_screen.c, status_bar.c and logo.c are the LVGL screens; shell.c and app_settings.c implement lichen_ui.h.
 # Release notes (#13): firmware/release_notes/<seq>-<date>.md are embedded as rodata; rn_files[] (release_notes.h) is a
 # table of them generated here, so adding a note is just adding a file (CONFIGURE_DEPENDS re-runs this when one appears).
@@ -58,7 +59,7 @@ idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_r
                             "factory_screen.c" "factory_combo.c"
                             "app_files.c" "files_job.c" "files_ops.c" "files_model.c"
                             "weather_app.c" "weather_screen.c" "weather_series.c"
-                            "app_qr.c"
+                            "app_notes.c" "notes_model.c" "notes_store.c" "app_qr.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api lichen_net
                        PRIV_REQUIRES lichen_boot lichen_clock freertos fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage sdcard app_update esp_system psram_guard esp_mm lichen_led ota lichen_mdns)

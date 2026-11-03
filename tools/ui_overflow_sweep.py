@@ -37,7 +37,7 @@ HOME = "esc esc esc esc esc"  # backs out of any depth; Esc on home does nothing
 # Home remembers its selection (home.c keeps h->sel), so every walk first goes to the top. In Tiles, Up clamps at the
 # first tile (home_layout.c move_tiles), 12 ups cover the 11 tiles. Tile order = registration order: MeshCore
 # (main.c, before shell_start), then shell_start (shell.c): Settings, About, Files, Keyboard test, Clock, Bench,
-# Crash log, Power, Notifications, Release notes.
+# Crash log, Power, Notifications, What's new.
 TILE = {"mesh": 0, "settings": 1, "about": 2, "files": 3, "crashlog": 7, "notifications": 9, "relnotes": 10}
 
 
@@ -104,7 +104,7 @@ SCREENS = [
     ("crash log", seq(tile("crashlog"), "enter", "wait"), False),
     # Notifications tile (9): the list; Backspace and Enter are not pressed
     ("notify centre", seq(tile("notifications"), "enter", "wait"), False),
-    # Release notes tile (10): the list
+    # What's new tile (10): the list
     ("release notes", seq(tile("relnotes"), "enter", "wait"), False),
     # MeshCore tile (0): the app's grid. Tiles: 0 Chat, 1 Contacts, 2 Repeaters / 3 Heard, 4 Advertise, 5 Settings
     # (meshcore_grid.c, mesh_grid.h; 3 columns, Chat has the focus on arrival). Advertise (4) is never entered. MeshCore must
