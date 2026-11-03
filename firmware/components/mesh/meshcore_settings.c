@@ -19,6 +19,7 @@
 #include "meshcore_run.h"
 #include "meshcore_screens.h"
 #include "meshcore_settings.h"
+#include "mesh_scope.h"
 #include "radio_confirm.h"
 #include "radio_filter.h"
 #include "radio_presets.h"
@@ -55,6 +56,7 @@ typedef enum {
     JOB_CHANNELS,
     JOB_CHANNEL_INFO,
     JOB_CHANNEL_RENAME,
+    JOB_SCOPE,
 } job_kind_t;
 
 typedef struct job {
@@ -98,6 +100,7 @@ static void job_task(void *arg) {
         case JOB_CHANNELS: job->n = mesh_channels_snapshot(job->names, MAX_CHANNELS); break;
         case JOB_CHANNEL_INFO: job->n = mesh_channel_info(-1, job->text, &job->info, MESH_SET_WAIT_MS); break;
         case JOB_CHANNEL_RENAME: job->reason = mesh_channel_rename(job->text, job->title); break;
+        case JOB_SCOPE: job->reason = mesh_set_scope(job->text); break;
     }
     // job_finish frees the job and clears job_running. Each try waits up to 2 s for the LVGL lock: after UI_CALL_TRIES
     // the LVGL task is stuck, so the result is dropped here and the page is not left busy for good
@@ -181,7 +184,7 @@ static void set_note(lv_obj_t *note, char const *text, bool problem) {
 
 // ---- the page ----------------------------------------------------------------------------------------------------
 
-static lv_obj_t *name_row, *radio_row, *channels_row, *advert_row;
+static lv_obj_t *name_row, *radio_row, *channels_row, *advert_row, *scope_row;
 
 static void radio_row_refresh(void) {
     mesh_settings_t s;
@@ -271,6 +274,96 @@ static void edit_name(void *arg) {
     mesh_settings_t s;
     mesh_get_settings(&s);
     text_entry_open("Your name on the mesh", s.name, false, NAME_CHARS, on_name, NULL);
+}
+
+// ---- Flood scope (#163) ------------------------------------------------------------------------------------------
+// The default region adverts and messages flood in. Setting a region is the careful part (contacts outside it can no
+// longer reach you), so it asks first; None (everywhere) is the safe state and resets at once. Sends nothing itself.
+
+static char scope_pending[MESH_SCOPE_MAX + 1]; // the region waiting for the dialog's answer
+
+static void scope_row_refresh(void) {
+    mesh_settings_t s;
+    char            text[40];
+    if (scope_row && mesh_get_settings(&s)) {
+        mesh_scope_text(s.scope, text, sizeof(text));
+        menu_set_value(scope_row, text);
+    }
+}
+
+static void scope_done(job_t *job) {
+    if (!scope_row) {
+        return;
+    }
+    if (job->reason) {
+        menu_set_value(scope_row, job->reason);
+    } else {
+        scope_row_refresh();
+    }
+}
+
+static void scope_apply(char const *name) {
+    job_t *job = job_new(JOB_SCOPE, scope_done);
+    if (!job) {
+        menu_set_value(scope_row, mc_busy_note());
+        return;
+    }
+    snprintf(job->text, sizeof(job->text), "%s", name);
+    menu_set_value(scope_row, "Saving...");
+    if (!job_start(job)) {
+        menu_set_value(scope_row, mc_busy_note());
+    }
+}
+
+static void scope_answer(bool confirmed) {
+    if (confirmed && scope_row) {
+        scope_apply(scope_pending);
+    }
+    memset(scope_pending, 0, sizeof(scope_pending));
+}
+
+static void on_scope(char const *text, void *arg) {
+    (void)arg;
+    char        name[MESH_SCOPE_MAX + 1];
+    char const *why = mesh_scope_parse(text, name, sizeof(name));
+    if (!scope_row) {
+        return;
+    }
+    if (why) {
+        char line[80];
+        snprintf(line, sizeof(line), "Not saved: %s", why);
+        menu_set_value(scope_row, line);
+        return;
+    }
+    mesh_settings_t s;
+    if (mesh_get_settings(&s) && strcmp(s.scope, name) == 0) {
+        scope_row_refresh(); // nothing changes
+        return;
+    }
+    if (!name[0]) {
+        scope_apply(name); // None (everywhere): always, no dialog
+        return;
+    }
+    char                 ask[160];
+    shell_dialog_t const d = {
+        .title         = ask,
+        .seconds       = REMOVE_ASK_S,
+        .careful       = true,
+        .confirm_label = "set region",
+    };
+    snprintf(scope_pending, sizeof(scope_pending), "%s", name);
+    mesh_scope_ask_text(name, ask, sizeof(ask));
+    if (!shell_dialog_countdown(&d, scope_answer)) {
+        menu_set_value(scope_row, mc_busy_note());
+    }
+}
+
+static void edit_scope(void *arg) {
+    (void)arg;
+    mesh_settings_t s;
+    mesh_get_settings(&s);
+    text_entry_open("Flood scope: region name, empty = None (everywhere)", s.scope, false, MESH_SCOPE_MAX, on_scope,
+                    NULL);
 }
 
 static void channels_line(job_t *job, lv_obj_t *row) {
@@ -407,7 +500,7 @@ static void run_rows(lv_obj_t *page) {
 
 static void on_page_delete(lv_event_t *e) {
     (void)e;
-    name_row = radio_row = channels_row = advert_row = NULL;
+    name_row = radio_row = channels_row = advert_row = scope_row = NULL;
     autostart_row = run_row = NULL;
     if (run_timer) {
         lv_timer_delete(run_timer);
@@ -432,6 +525,8 @@ void meshcore_settings(lv_obj_t *page) {
     }
     name_row     = menu_add(page, "Name", s.name, edit_name, NULL);
     radio_row    = menu_add(page, "Region & radio", "", open_radio, NULL);
+    scope_row    = menu_add(page, "Flood scope", "", edit_scope, NULL);
+    scope_row_refresh();
     channels_row = menu_add(page, "Channels", "", open_channels, NULL);
     advert_row   = menu_add(page, "Send advert", "", send_advert, NULL);
     menu_set_kind(menu_add(page, "Notifications", "", open_notify_page, NULL), MENU_OPEN);

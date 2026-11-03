@@ -98,6 +98,7 @@ typedef struct {
     float   freq, bw; // MHz, kHz
     uint8_t sf, cr, path_hash_size;
     int8_t  tx_dbm;
+    char    scope[31]; // default flood scope (#163): the region name, "" = None (everywhere)
 } mesh_settings_t;
 // false before MeshCore is up (out zeroed)
 bool mesh_get_settings(mesh_settings_t *out);
@@ -108,6 +109,10 @@ char const *mesh_set_radio(float freq, float bw, uint8_t sf, uint8_t cr, int8_t 
 // The path hash size in bytes per hop of the floods the badge sends (1..3, the default is 2), saved. Its own setting, not
 // part of a radio preset (#129); nothing is sent. NULL when set, else the reason.
 char const *mesh_set_path_hash(uint8_t size);
+// The default flood scope (#163, MeshCore's CMD_SET_DEFAULT_FLOOD_SCOPE): a region name (mesh_scope.h's rules), "" for
+// None (everywhere). Saved in MeshCore's prefs and live at once: adverts and messages flood only inside the region.
+// NULL when set, else why not. Sends nothing itself.
+char const *mesh_set_scope(char const *name);
 // A channel on the first free slot, saved. NULL key: a #hashtag channel (key from its lowercased name, as MeshCore's
 // apps do); else a base64 key of 16 or 32 bytes. NULL when added, else the reason.
 char const *mesh_channel_add(char const *name, char const *b64_key_or_null);

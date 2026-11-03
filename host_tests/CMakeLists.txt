@@ -688,6 +688,12 @@ target_include_directories(mesh_advert_cfg_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_options(mesh_advert_cfg_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_advert_cfg_test COMMAND mesh_advert_cfg_test)
 
+add_executable(mesh_scope_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_scope_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_scope.c)
+target_include_directories(mesh_scope_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_scope_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_scope_test COMMAND mesh_scope_test)
+
 add_executable(mesh_grid_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_grid_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_grid.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advert_cfg.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/home_layout.c)
 target_include_directories(mesh_grid_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(mesh_grid_test PRIVATE -Wall -Wextra -Werror)
@@ -819,6 +825,7 @@ add_executable(companion_test ${CMAKE_CURRENT_SOURCE_DIR}/companion_test.cpp ${L
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/channel_input.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/advert_limit.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advert_cfg.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_scope.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_trace.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_remote.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_rset.c
@@ -1327,6 +1334,7 @@ add_custom_target(run_tests
     mesh_contact_fmt_test
     advert_limit_test
     mesh_advert_cfg_test
+    mesh_scope_test
     mesh_share_test
     mesh_grid_test
     mesh_run_test

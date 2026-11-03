@@ -898,6 +898,7 @@ static void settings_from_node(MyMesh *n) {
     s.cr             = prefs->cr;
     s.path_hash_size = (uint8_t)(prefs->path_hash_mode + 1);
     s.tx_dbm         = prefs->tx_power_dbm;
+    snprintf(s.scope, sizeof(s.scope), "%s", prefs->default_scope_name);
     radio_from_prefs(prefs, &radio_cache);
     portENTER_CRITICAL(&settings_mux);
     settings_cache = s;
@@ -980,6 +981,21 @@ extern "C" char const *mesh_set_radio(float freq, float bw, uint8_t sf, uint8_t 
             tx_dbm
         );
     }
+    return why;
+}
+
+extern "C" char const *mesh_set_scope(char const *name) {
+    char const *why = settings_lock();
+    if (why) {
+        return why;
+    }
+    why = mesh_prefs_set_scope(node->getNodePrefs(), name);
+    if (!why) {
+        node->savePrefs();
+        settings_from_node(node);
+        ESP_LOGI(TAG, "default flood scope: %s", node->getNodePrefs()->default_scope_name[0] ? "set" : "none");
+    }
+    mesh_unlock();
     return why;
 }
 

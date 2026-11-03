@@ -1,0 +1,56 @@
+// Host test: the default flood scope's name rules and texts (#163)
+#include "mesh_scope.h"
+
+#include <stdio.h>
+#include <string.h>
+
+static int failures;
+
+#define CHECK(cond)                                                                                                    \
+    do {                                                                                                               \
+        if (!(cond)) {                                                                                                 \
+            printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                                                     \
+            failures++;                                                                                                \
+        }                                                                                                              \
+    } while (0)
+
+static char const *parse(char const *in, char *out) {
+    return mesh_scope_parse(in, out, 40);
+}
+
+int main(void) {
+    char out[40], text[200];
+    // None: empty (also spaces, a lone '#') is no scope
+    CHECK(parse("", out) == NULL && out[0] == 0);
+    CHECK(parse("   ", out) == NULL && out[0] == 0);
+    CHECK(parse("#", out) == NULL && out[0] == 0);
+    // A name: lowercased, '#' and spaces gone
+    CHECK(parse("NL-Limburg", out) == NULL && strcmp(out, "nl-limburg") == 0);
+    CHECK(parse("  #eu  ", out) == NULL && strcmp(out, "eu") == 0);
+    CHECK(parse("caf\xc3\xa9", out) == NULL && strcmp(out, "caf\xc3\xa9") == 0);
+    // Refused: out is left empty
+    CHECK(parse("a b", out) != NULL && out[0] == 0);
+    CHECK(parse("a,b", out) != NULL && parse("a:b", out) != NULL && parse("a?b", out) != NULL);
+    CHECK(parse("$private", out) != NULL && parse("a#b", out) != NULL && parse("a_b", out) != NULL);
+    CHECK(parse("a[b", out) != NULL && parse("a\\b", out) != NULL && parse("a*b", out) != NULL);
+    // 30 characters fit, 31 do not; a small buffer never overflows
+    CHECK(parse("abcdefghijklmnopqrstuvwxyz0123", out) == NULL && strlen(out) == 30);
+    CHECK(parse("abcdefghijklmnopqrstuvwxyz01234", out) != NULL);
+    CHECK(mesh_scope_parse("abcdef", out, 4) != NULL && out[0] == 0);
+    CHECK(mesh_scope_parse("abc", out, 4) == NULL && strcmp(out, "abc") == 0);
+    // Texts
+    mesh_scope_text("", text, sizeof(text));
+    CHECK(strcmp(text, "None (everywhere)") == 0);
+    mesh_scope_text(NULL, text, sizeof(text));
+    CHECK(strcmp(text, "None (everywhere)") == 0);
+    mesh_scope_text("nl", text, sizeof(text));
+    CHECK(strcmp(text, "nl") == 0);
+    mesh_scope_ask_text("nl", text, sizeof(text));
+    CHECK(strcmp(text, "Adverts and messages will only travel in region nl. Contacts outside it can no longer reach you.") == 0);
+    mesh_scope_key_text("nl", text, sizeof(text));
+    CHECK(strcmp(text, "#nl") == 0);
+    if (failures == 0) {
+        printf("mesh_scope_test: ok\n");
+    }
+    return failures ? 1 : 0;
+}

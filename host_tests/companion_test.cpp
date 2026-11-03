@@ -921,6 +921,18 @@ int main(int argc, char **argv) {
         aa = {true, (uint8_t)(ADVCFG_AA_CHAT | ADVCFG_AA_ROOM), true, 3};
         mesh_prefs_set_autoadd(prefs, &aa);
         CHECK(prefs->manual_add_contacts == 1 && prefs->autoadd_config == (ADVCFG_AA_CHAT | ADVCFG_AA_ROOM | 1));
+
+        // Default flood scope (#163): None by default (name and key all zero), a name keeps SHA-256("#name") as its key
+        uint8_t zero_key[16] = {};
+        CHECK(prefs->default_scope_name[0] == 0 && memcmp(prefs->default_scope_key, zero_key, 16) == 0);
+        CHECK(mesh_prefs_set_scope(prefs, "a b") != NULL && prefs->default_scope_name[0] == 0);
+        CHECK(mesh_prefs_set_scope(prefs, " #NL-Limburg ") == NULL && strcmp(prefs->default_scope_name, "nl-limburg") == 0);
+        {
+            TransportKey want;
+            TransportKeyStore ks;
+            ks.getAutoKeyFor(0, "#nl-limburg", want);
+            CHECK(memcmp(prefs->default_scope_key, want.key, 16) == 0 && memcmp(want.key, zero_key, 16) != 0);
+        }
         mesh.savePrefs();
     }
 
@@ -938,6 +950,13 @@ int main(int argc, char **argv) {
         mesh_prefs_get_autoadd(prefs, &aa);
         CHECK(aa.on && aa.types == (ADVCFG_AA_CHAT | ADVCFG_AA_ROOM) && aa.overwrite && aa.max_hops == 3);
         CHECK(prefs->advert_loc_policy == ADVERT_LOC_SHARE);
+        {
+            // the scope survives the restart; None clears name and key
+            uint8_t zero_key[16] = {};
+            CHECK(strcmp(prefs->default_scope_name, "nl-limburg") == 0 && memcmp(prefs->default_scope_key, zero_key, 16) != 0);
+            CHECK(mesh_prefs_set_scope(prefs, "") == NULL && prefs->default_scope_name[0] == 0
+                  && memcmp(prefs->default_scope_key, zero_key, 16) == 0);
+        }
         CHECK(fabs(sensors.node_lat - 52.3702) < 1e-6 && fabs(sensors.node_lon - 4.8952) < 1e-6);
         CHECK(mesh_prefs_set_location(prefs, 0, 0) == NULL && prefs->advert_loc_policy == ADVERT_LOC_NONE);
         CHECK(memcmp(self_key(mesh), first_key, PUB_KEY_SIZE) == 0);
