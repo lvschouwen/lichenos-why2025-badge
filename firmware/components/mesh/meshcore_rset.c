@@ -128,6 +128,7 @@ static void show_read_status(void) {
         return;
     }
     reading         = false;
+    clear_local(); // a "Still reading it." must not hide the read's own "Last problem"
     size_t got      = answered_rows(s);
     char   text[64];
     if (got == total) {
@@ -368,8 +369,7 @@ static void on_row(void *arg) {
         return; // an INFO row: not selectable, so only a console key gets here
     }
     if (set_waiting()) {
-        set_local("Wait for the answer to the last change.", true);
-        return;
+        return; // the line already says "Sending the change..."
     }
     uint8_t st = mem->run.rs.st[i];
     if (rs_row_readable(i) && st != RS_V_VALUE) {
