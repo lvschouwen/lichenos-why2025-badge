@@ -4,6 +4,7 @@
 // synthetic 100-row list scrolled for three seconds, then memory. Enter runs it again; every result is also one
 // "bench" log line and the run ends with a one-line summary, so `badge.sh log` keeps the baseline. "fw bench" runs the
 // same minus the scroll stage from the console.
+#include "psram_speed.h"
 #include "app_icons.h"
 #include "bench_calc.h"
 #include "esp_cache.h"
@@ -128,7 +129,7 @@ static void mem_line(char *out, size_t cap) {
 }
 
 static void psram_line(char *out, size_t cap) {
-    int n = snprintf(out, cap, "%u MHz, ", (unsigned)CONFIG_SPIRAM_SPEED);
+    int n = snprintf(out, cap, "%u MHz, ", psram_speed_running());
     if (n > 0 && (size_t)n < cap) {
         psram_boot_tuning_text(out + n, cap - (size_t)n);
     }
@@ -381,7 +382,7 @@ static void open_bench(lv_obj_t *screen) {
 }
 
 static bool bench_tile(char *l1, size_t c1, char *l2, size_t c2) {
-    snprintf(l1, c1, "PSRAM %u MHz", (unsigned)CONFIG_SPIRAM_SPEED);
+    snprintf(l1, c1, "PSRAM %u MHz", psram_speed_running());
     snprintf(l2, c2, "%s", s_last[0] ? s_last : "Enter: run");
     return true;
 }

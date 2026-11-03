@@ -578,10 +578,19 @@ static lv_obj_t *open_row(lv_obj_t *menu, char const *label, void (*open)(void *
 }
 
 // PSRAM speed (#121): 80 MHz is the default; 120 MHz is tried after a restart and falls back to 80 on its own
+static lv_obj_t *psram_speed_row; // NULL once the page is gone
+
+static void forget_psram_speed_row(lv_event_t *e) {
+    (void)e;
+    psram_speed_row = NULL;
+}
+
 static void psram_speed_enter(void *arg) {
     unsigned target = (unsigned)(uintptr_t)arg;
     if (psram_speed_choice(target)) {
         power_request_restart(); // saves the apps, shows "Restarting...", lands in the new speed
+    } else if (psram_speed_row) {
+        menu_set_value(psram_speed_row, "Not saved"); // NVS refused, or this image is still on trial and a restart would undo it
     }
 }
 
@@ -593,6 +602,8 @@ static void add_psram_speed_row(lv_obj_t *menu) {
     psram_speed_value(value, sizeof(value));
     unsigned other = psram_speed_other();
     lv_obj_t *row  = menu_add(menu, "PSRAM speed", value, psram_speed_enter, (void *)(uintptr_t)other);
+    psram_speed_row = row;
+    lv_obj_add_event_cb(row, forget_psram_speed_row, LV_EVENT_DELETE, NULL);
     menu_set_danger(row, other == 120 ? "Switch PSRAM to 120 MHz? Restarts the badge. If 120 MHz fails, it comes back at 80."
                                        : "Switch PSRAM to 80 MHz? Restarts the badge.",
                     "restart");

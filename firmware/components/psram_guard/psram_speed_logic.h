@@ -31,8 +31,23 @@ typedef enum {
 // A record read from NVS that is not ours becomes the default (80, nothing pending)
 void psram_speed_rec_sane(psram_speed_rec_t *r);
 
+// A restart of an image that is still PENDING_VERIFY makes the bootloader roll it back (a good OTA lost), so nothing here
+// restarts while pending: the arm waits until the image is valid, a fail only records itself.
+// 120 MHz is wanted, not failed, nothing pending, and this boot is at 80: arm and restart once
+bool psram_speed_arm_wanted(psram_speed_rec_t const *r, unsigned running_mhz, bool patched, bool image_pending);
+// Running 120 MHz although the record says 80 or failed (a fail while the image was pending), and a restart is now safe
+bool psram_speed_leave_120_wanted(psram_speed_rec_t const *r, unsigned running_mhz, bool image_pending);
+// The record is saved before anything is armed. save false (NVS refused): nothing may be armed, and the badge treats
+// itself as wanting 80 (RAM only). Sets trial for an arm; returns true when saved and the caller may arm.
+bool psram_speed_arm_commit(psram_speed_rec_t *r, bool (*save)(psram_speed_rec_t const *));
+
 // At boot, once NVS is up. patched = the IDF can run 120 MHz. trial_live is set when this boot is a 120 MHz trial.
-psram_speed_act_t psram_speed_boot_decide(psram_speed_rec_t *r, unsigned running_mhz, bool patched, bool *trial_live);
+psram_speed_act_t psram_speed_boot_decide(psram_speed_rec_t *r, unsigned running_mhz, bool patched, bool image_pending,
+                                          bool *trial_live);
+
+// "fw psram speed [80|120] [yes]": no arguments = status; a strict parse (whole tokens, digits only, "yes" exactly)
+typedef enum { PSRAM_SPEED_CMD_STATUS, PSRAM_SPEED_CMD_INVALID, PSRAM_SPEED_CMD_ASK, PSRAM_SPEED_CMD_DO } psram_speed_cmd_t;
+psram_speed_cmd_t psram_speed_parse(char const *args, unsigned *target);
 
 typedef enum { PSRAM_SPEED_TRIAL_RUNNING, PSRAM_SPEED_TRIAL_PASS, PSRAM_SPEED_TRIAL_FAIL } psram_speed_trial_t;
 // Every tick of a live trial: boot_bad = the tuning fell back or the boot check flipped bits, gate_failed = `fw psram dma`

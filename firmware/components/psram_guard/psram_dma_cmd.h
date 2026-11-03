@@ -10,6 +10,10 @@
 // Runs on the console task; needs 3 x 1 MB of PSRAM and 32 KB of internal DMA RAM, all freed afterwards.
 // "fw psram dma sweep [sector]" runs the write/read legs and both SD legs over every 1 MB of the largest free PSRAM block.
 void psram_dma_cmd(char const *args);
+// One quick round (all patterns, the SD legs when a card is mounted) for the 120 MHz trial (#121): true = clean. A bad byte
+// on the AXI-GDMA legs or the bounced SD leg, or a DMA error, is false. Needs 3 MB of PSRAM and 32 KB of internal DMA RAM
+// for a few seconds; on its own task, not on the guard task.
+bool psram_dma_quick_gate(void);
 
 // The SD leg (#120 flipped on the SDMMC -> PSRAM path; the AXI-GDMA legs alone did not reproduce it at 120 MHz):
 // sdcard.c registers a read-only raw sector reader at start. psram_guard cannot depend on sdcard (board -> psram_guard

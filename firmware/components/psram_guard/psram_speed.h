@@ -19,8 +19,9 @@ uint32_t psram_speed_carrier_raw(void);
 // armed 120 wanted at 80 = arm and restart once), registers the shutdown hook that keeps a clean restart at 120 MHz.
 void psram_speed_boot(void);
 
-// Guard task, every ~100 ms: supervises a live 120 MHz trial (passes after PSRAM_SPEED_TRIAL_SECONDS with a clean boot
-// check, fails on a bad one), then keeps 120 MHz armed for clean restarts.
+// Guard task, every ~100 ms: supervises a live 120 MHz trial (after PSRAM_SPEED_TRIAL_SECONDS with a clean boot check a
+// job task runs one DMA gate round, then passes it; a bad boot check or gate fails it) and starts the arm / leave that had
+// to wait for the image to be valid. Quick: the work runs on the trial job task, not here.
 void psram_speed_tick(void);
 
 // A 120 MHz trial is running (MeshCore does not start meanwhile: nothing may be written over a bus that is on trial)
@@ -36,4 +37,6 @@ bool   psram_speed_choice(unsigned target_mhz); // record + register for the nex
 size_t psram_speed_value(char *out, size_t cap);   // "120 MHz failed, back at 80"
 unsigned psram_speed_other(void);                  // the speed the row would switch to
 void   psram_speed_cmd(char const *args);          // fw psram speed [80|120] [yes]
+// A factory reset is under way: the restart that follows must come back at 80 MHz (STORE15 cleared, no re-arm)
+void   psram_speed_no_rearm(void);
 void   psram_speed_print(void);                    // the status lines of fw psram

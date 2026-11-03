@@ -9,6 +9,7 @@
 // power cut repeats the step it hit; one that hits the drive's erase loses the PSRAM copy, and the next boot erases
 // again without it (no C6 bundle: the flasher leaves the C6 alone until "badge.sh ota-c6" brings one; no lora.toml:
 // the default preset).
+#include "psram_speed.h"
 #include "factory_reset.h"
 
 #include "esp_heap_caps.h"
@@ -49,6 +50,7 @@ typedef struct {
 } nvs_name_t;
 
 bool factory_reset_request(factory_level_t level) {
+    psram_speed_no_rearm(); // the restart that follows comes back at 80 MHz whatever the old record said (#121)
     nvs_handle_t nvs;
     if (level == FACTORY_NONE || nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
         return false;

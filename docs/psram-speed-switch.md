@@ -23,12 +23,17 @@ The badge ships at 80 MHz PSRAM. 120 MHz can be tried from Settings > For develo
      `want = 80`, `failed = 1`, `trial = 0`. Never re-armed by itself.
    - want 120, running 80, not failed: `trial = 1`, arm STORE15, `esp_restart` once (log: "restarting once to boot at 120 MHz").
    - running 120 with the record agreeing: this boot is a trial (`trial = 1`).
-3. A live trial passes after 60 s with a clean boot check (`psram_speed_tick`, guard task). It fails at once on a fallback
-   tuning, a bad boot check, or a failed `fw psram dma` gate. A fail: `want = 80`, `failed = 1`, restart at 80.
+3. A live trial (`psram_speed_tick`) passes after 60 s with a clean boot check AND one automatic DMA gate round (all
+   patterns, the SD legs only with a card; on the 6 KB `psram_trial` task). It fails at once on a fallback tuning, a bad boot
+   check, or a failed gate. A fail: `want = 80`, `failed = 1`, `esp_restart` at 80 (no app save hooks).
+   While the running image is still PENDING_VERIFY (OTA not yet marked valid) nothing restarts for the speed: the arm waits
+   until the image is valid, a fail only records itself and the tick leaves 120 once valid, so a good OTA is never rolled back.
+   A record that cannot be saved arms nothing.
 4. While a trial is live MeshCore does not start (its journal is not read or written over a bus on trial). It starts
    by itself when the trial passes (if start at boot is on), or by hand (`fw mesh start`).
-5. A clean restart at 120 (`esp_restart`: update, Power > Restart, `fw reboot`) keeps 120 MHz through a shutdown hook that
-   re-arms STORE15 (RAM flag only). A panic, WDT or brownout runs no hook, so it comes back at 80. A cold power-on is 80
+5. After a PASSED trial a clean restart at 120 (`esp_restart`: update, Power > Restart, `fw reboot`) keeps 120 MHz through a
+   shutdown hook that re-arms STORE15 (RAM flag only, set only after the pass: a restart mid-trial comes back at 80 and
+   counts as a failed trial; a factory reset clears it). A panic, WDT or brownout runs no hook, so it comes back at 80. A cold power-on is 80
    first, then one restart into 120.
 
 A failed `fw psram dma` / `fw psram dma sweep` at 120 MHz counts as a failed trial (any bad byte on the AXI-GDMA legs or the

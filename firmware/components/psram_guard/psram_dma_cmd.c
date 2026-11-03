@@ -12,6 +12,7 @@
 #include "fw_console.h"
 #include "lichen_random.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,7 @@ typedef struct {
 
 static char const *const legs[5] = {"psram>int", "int>psram", "psram>psram", "sd>psram", "sd>bounce>psram"};
 static psram_dma_sd_t    s_sd;
+static atomic_flag       s_busy = ATOMIC_FLAG_INIT; // one DMA gate at a time: the console command or the trial's
 
 void psram_dma_set_sd(psram_dma_sd_t const *sd) {
     s_sd = *sd;
@@ -334,7 +336,39 @@ static void sweep(run_t *r, unsigned burst) {
     psram_speed_gate_result(gate); // after the buffers are freed: a failed gate at 120 MHz restarts the badge
 }
 
+// One automatic round for the 120 MHz trial (#121): every pattern on the three AXI-GDMA legs and the SD legs (skipped
+// without a card, not a failure). Runs on the trial's own task, not the console; refuses to overlap a console run.
+bool psram_dma_quick_gate(void) {
+    static run_t r;
+    if (atomic_flag_test_and_set(&s_busy)) {
+        return true; // a console run is on: its result reaches psram_speed_gate_result itself
+    }
+    memset(&r, 0, sizeof(r));
+    bool ok = setup(&r, 64);
+    if (ok) {
+        for (int p = 0; p < PSRAM_DMA_PATTERNS && !r.errors; p++) {
+            one_pattern(&r, (psram_dma_pattern_t)p);
+        }
+        legs_sd(&r);
+        ok = !gate_failed(&r);
+    }
+    teardown(&r);
+    atomic_flag_clear(&s_busy);
+    return ok;
+}
+
+static void psram_dma_cmd_locked(char const *args);
+
 void psram_dma_cmd(char const *args) {
+    if (atomic_flag_test_and_set(&s_busy)) {
+        console_reply("psram dma: another DMA gate is running (the 120 MHz trial's), try again in a few seconds");
+        return;
+    }
+    psram_dma_cmd_locked(args);
+    atomic_flag_clear(&s_busy);
+}
+
+static void psram_dma_cmd_locked(char const *args) {
     unsigned rounds = 1, burst = 64, sector = 0;
     static run_t r; // the ISR callback points here; one run at a time (the console runs commands one by one)
     if (sscanf(args, " sweep %u", &sector) == 1 || strcmp(args, " sweep") == 0 || strcmp(args, "sweep") == 0) {
