@@ -112,12 +112,21 @@ static void test_focus(void) {
     CHECK(ui_focus_pick(NULL, 3, 5, 1) == 1);
 }
 
+static void test_hint_pad(void) {
+    CHECK(ui_hint_pad(0, 22, 18, 8) == 48);      // no padding yet: line + edge + gap
+    CHECK(ui_hint_pad(36, 22, 18, 8) == 48);     // a screen with less than that is raised to it
+    CHECK(ui_hint_pad(60, 22, 18, 8) == 60);     // more than that stays
+    CHECK(ui_hint_pad(ui_hint_pad(0, 22, 18, 8), 22, 18, 8) == 48); // a rebuild does not add it twice
+    CHECK(ui_hint_pad(0, 0, 18, 8) == 26);       // an unmeasured line must not be trusted as the hint's height
+}
+
 int main(void) {
     test_hint();
     test_countdown();
     test_status();
     test_empty();
     test_focus();
+    test_hint_pad();
     if (failures) {
         printf("%d failures\n", failures);
         return 1;

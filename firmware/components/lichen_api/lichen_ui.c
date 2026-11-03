@@ -66,6 +66,7 @@ lv_obj_t *lichen_label_wrap(lv_obj_t *parent, int32_t width) {
 #define HEADING_NAME_LINES 2
 #define HEADING_GAP        4
 #define HINT_MAX           128
+#define HINT_GAP           8 // between the end of the content and the hint (#142)
 #define HINT_EDGE          (THEME_PAD / 2) // gap between the hint and the screen's bottom edge
 
 // How many lines the wrapped name takes at the width the heading will have, capped (the label then ends in "...").
@@ -131,13 +132,20 @@ lv_obj_t *shell_page_hint(lv_obj_t *screen, ...) {
     lv_obj_set_style_text_color(label, lv_color_hex(THEME_DIM), 0);
     lichen_label_line_fit(label);
     lv_label_set_text(label, text);
-    // The content area ends above the pad we add; the label sits THEME_PAD / 2 off the screen's bottom edge. So a menu
-    // that fills the screen (100% of the content height) ends above the hint and nothing scrolls under it.
-    int32_t line = lv_obj_get_height(label);
-    int32_t pad  = line + HINT_EDGE;
-    if (lv_obj_get_style_pad_bottom(screen, LV_PART_MAIN) < pad) {
+    // The content area ends above the pad we add; the label sits HINT_EDGE off the screen's bottom edge, and the content
+    // keeps HINT_GAP clear of it. The line is the font's, not lv_obj_get_height(): the label has no layout yet, so its
+    // height reads 0 and the pad came out too small to clear the hint (#142).
+    int32_t line = lv_font_get_line_height(lichen_font(LICHEN_FONT_SMALL));
+    int32_t keep = lv_obj_get_style_pad_bottom(screen, LV_PART_MAIN);
+    int32_t pad  = ui_hint_pad(keep, line, HINT_EDGE, HINT_GAP);
+    if (pad != keep) {
         lv_obj_set_style_pad_bottom(screen, pad, 0);
+        // Children sized in percent (the menu's 100%) were laid out against the old content height, and a pad change
+        // does not re-size them: mark them so the next layout does
+        for (uint32_t i = 0; i < lv_obj_get_child_count(screen); i++) {
+            lv_obj_mark_layout_as_dirty(lv_obj_get_child(screen, i));
+        }
     }
-    lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, lv_obj_get_style_pad_bottom(screen, LV_PART_MAIN) - HINT_EDGE);
+    lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, pad - HINT_EDGE);
     return label;
 }

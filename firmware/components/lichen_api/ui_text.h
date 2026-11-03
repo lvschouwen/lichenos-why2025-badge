@@ -13,6 +13,11 @@
 size_t ui_hint_build(char *out, size_t n, ...); // key, verb, key, verb, ..., NULL
 size_t ui_hint_vbuild(char *out, size_t n, va_list ap);
 
+// The bottom padding a screen needs so its content ends above the pinned hint (#142): the hint's line, the gap the hint
+// keeps off the screen edge, and a gap between content and hint. keep is the padding the screen already has: the result
+// is never smaller, and calling it again with its own result changes nothing (a rebuilt screen does not grow).
+int32_t ui_hint_pad(int32_t keep, int32_t line, int32_t edge, int32_t gap);
+
 // Dialog hint from the labels of a confirm: "Enter: restart • Esc: cancel" (cancel_label NULL: "cancel")
 size_t ui_confirm_hint(char *out, size_t n, char const *confirm_label, char const *cancel_label);
 

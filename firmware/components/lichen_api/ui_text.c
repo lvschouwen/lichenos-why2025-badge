@@ -48,6 +48,11 @@ size_t ui_hint_build(char *out, size_t n, ...) {
     return len;
 }
 
+int32_t ui_hint_pad(int32_t keep, int32_t line, int32_t edge, int32_t gap) {
+    int32_t need = (line > 0 ? line : 0) + (edge > 0 ? edge : 0) + (gap > 0 ? gap : 0);
+    return keep > need ? keep : need;
+}
+
 size_t ui_confirm_hint(char *out, size_t n, char const *confirm_label, char const *cancel_label) {
     return ui_hint_build(out, n, "Enter", confirm_label, "Esc", cancel_label ? cancel_label : "cancel", NULL);
 }
