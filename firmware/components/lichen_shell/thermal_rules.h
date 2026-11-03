@@ -96,6 +96,8 @@ void th_reset(th_state_t *st);
 unsigned th_step(th_state_t *st, th_input_t const *in, uint32_t now_s);
 // A source's rise inside the window, 0 when it has no history
 float th_rise(th_state_t const *st, th_src_t src, uint32_t now_s);
+// Forget a source's rise history: its next reading starts a fresh window (the test simulation swaps the source)
+void th_forget_rise(th_state_t *st, th_src_t src);
 char const *th_src_name(th_src_t src);
 char const *th_level_name(th_level_t level);
 

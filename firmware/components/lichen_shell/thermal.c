@@ -58,6 +58,8 @@ static event_t        events[EVENT_LOG];
 static unsigned       event_count; // under lock
 static _Atomic int32_t sim_mc = NO_SIM; // simulated board temperature in milli-degrees
 static _Atomic uint32_t sim_since_s;
+// Set when the simulation starts or stops: the board history is of the other source and must not count as a rise
+static _Atomic bool sim_swapped;
 static atomic_bool    shutdown_asked;
 
 static uint32_t up_s(void) {
@@ -186,6 +188,7 @@ static void read_sources(th_input_t *in, float *bme_raw) {
     if (sim != NO_SIM) {
         if (up_s() - atomic_load(&sim_since_s) > SIM_MAX_S) {
             atomic_store(&sim_mc, NO_SIM);
+            atomic_store(&sim_swapped, true);
         } else {
             in->src[TH_SRC_BOARD] = (th_reading_t){true, (float)sim / 1000.0f};
         }
@@ -244,6 +247,9 @@ static void thermal_task(void *arg) {
         th_input_t in = {0};
         float      bme_raw;
         read_sources(&in, &bme_raw);
+        if (atomic_exchange(&sim_swapped, false)) {
+            th_forget_rise(&st, TH_SRC_BOARD);
+        }
         unsigned ev = th_step(&st, &in, up_s());
         publish(&st, &in, bme_raw);
         if (ev) {
@@ -299,6 +305,7 @@ static void print_status(void) {
 static void sim_set(float c) {
     atomic_store(&sim_since_s, up_s());
     atomic_store(&sim_mc, (int32_t)(c * 1000.0f));
+    atomic_store(&sim_swapped, true);
 }
 
 static void cmd_test(char const *what) {
@@ -314,6 +321,7 @@ static void cmd_test(char const *what) {
         console_reply("thermal test shutdown really powers the badge off: add the word YES (test shutdown YES)");
     } else if (strcmp(what, "clear") == 0) {
         atomic_store(&sim_mc, NO_SIM);
+        atomic_store(&sim_swapped, true);
         console_reply("thermal test: simulation off; a warning ends after %d cool readings", TH_CONFIRM);
     } else {
         console_reply("thermal test warn | clear | shutdown YES");

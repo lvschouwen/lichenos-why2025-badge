@@ -55,6 +55,10 @@ static float hist_rise(th_hist_t const *h, uint32_t now_s) {
     return cur - low;
 }
 
+void th_forget_rise(th_state_t *st, th_src_t src) {
+    hist_clear(&st->hist[src]);
+}
+
 float th_rise(th_state_t const *st, th_src_t src, uint32_t now_s) {
     return hist_rise(&st->hist[src], now_s);
 }

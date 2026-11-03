@@ -58,6 +58,19 @@ static void rise_of_ten_in_a_minute_shuts_down(void) {
     CHECK(st.cause_rise);
 }
 
+// #139: the test simulation swaps the board source for a fixed 55 C; the real ~27 C history must not count as a rise
+static void simulated_source_starts_a_fresh_window(void) {
+    th_state_t st; th_reset(&st);
+    th_input_t real = board(27), sim = board(55);
+    th_step(&st, &real, 0);
+    th_step(&st, &real, 5);
+    th_forget_rise(&st, TH_SRC_BOARD);
+    CHECK(th_step(&st, &sim, 10) == 0);
+    CHECK(th_step(&st, &sim, 15) == TH_EV_WARN);
+    CHECK(!st.cause_rise);
+    CHECK(st.level == TH_WARN);
+}
+
 static void slow_rise_is_not_a_surge(void) {
     th_state_t st; th_reset(&st);
     for (uint32_t i = 0; i < 40; i++) { // +1 K per 10 s up to 56: warns, never shuts down
@@ -186,6 +199,7 @@ int main(void) {
     single_glitch_does_nothing();
     shutdown_at_limit_latches();
     rise_of_ten_in_a_minute_shuts_down();
+    simulated_source_starts_a_fresh_window();
     slow_rise_is_not_a_surge();
     rise_needs_the_floor();
     gap_restarts_the_window();
