@@ -163,6 +163,22 @@ static bool post(msg_t const *m) {
     return ok;
 }
 
+// Wi-Fi power save (#146). The IDF default WIFI_PS_MIN_MODEM wakes the C6 only at DTIM beacons: RTT spikes of a few
+// hundred ms and truncated screenshots on a busy channel, without a disconnect. Off by default; `fw wifi ps` switches
+// it for a comparison (not saved). Applied on every STA_START, i.e. after each esp_wifi_start. Battery policy: #76.
+static _Atomic int wifi_ps_mode = WIFI_PS_NONE;
+
+static void apply_wifi_ps(void) {
+    esp_err_t err = esp_wifi_set_ps((wifi_ps_type_t)atomic_load(&wifi_ps_mode));
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "wifi: power save not set: %s", esp_err_to_name(err));
+    }
+}
+
+static char const *wifi_ps_name(wifi_ps_type_t ps) {
+    return ps == WIFI_PS_NONE ? "off" : ps == WIFI_PS_MIN_MODEM ? "min (modem sleep)" : "max (modem sleep)";
+}
+
 static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg;
     msg_t m = {0};
@@ -807,6 +823,9 @@ static void wifi_task(void *arg) {
                     portENTER_CRITICAL(&state_lock);
                     bool have = have_credentials;
                     portEXIT_CRITICAL(&state_lock);
+                    if (atomic_load(&driver_up)) {
+                        apply_wifi_ps(); // STA_START: the driver is up, also without credentials (scan only)
+                    }
                     if (have && atomic_load(&driver_up)) {
                         esp_wifi_connect();
                     }
@@ -909,6 +928,12 @@ static void cmd_wifi(char const *args) {
         } else {
             console_reply("wifi: \"%s\" not connected", a);
         }
+        if (atomic_load(&wifi_started)) {
+            wifi_ps_type_t ps;
+            if (esp_wifi_get_ps(&ps) == ESP_OK) {
+                console_reply("wifi: power save %s", wifi_ps_name(ps));
+            }
+        }
         char tried[33], kept[33];
         wifi_join_state_t st = wifi_join_state(tried, sizeof(tried), kept, sizeof(kept));
         clean(tried, a, sizeof(a));
@@ -923,6 +948,19 @@ static void cmd_wifi(char const *args) {
     } else if (strcmp(args, "on") == 0 || strcmp(args, "off") == 0) {
         lichen_radio_set(RADIO_WIFI, args[1] == 'n'); // saved; c6link_wifi_enable follows through the listener
         console_reply("wifi: radio %s", lichen_radio_get(RADIO_WIFI) ? "on" : "off");
+    } else if (strcmp(args, "ps") == 0 || strcmp(args, "ps none") == 0 || strcmp(args, "ps min") == 0) {
+        if (args[2]) {
+            atomic_store(&wifi_ps_mode, args[3] == 'n' ? WIFI_PS_NONE : WIFI_PS_MIN_MODEM);
+            if (atomic_load(&wifi_started)) {
+                apply_wifi_ps();
+            }
+        }
+        wifi_ps_type_t ps = (wifi_ps_type_t)atomic_load(&wifi_ps_mode);
+        if (atomic_load(&wifi_started) && esp_wifi_get_ps(&ps) != ESP_OK) {
+            console_reply("wifi: power save not readable (no C6 link?)");
+            return;
+        }
+        console_reply("wifi: power save %s (fw wifi ps none | min, not saved)", wifi_ps_name(ps));
     } else if (strcmp(args, "--clear") == 0) {
         msg_t m = {.type = MSG_FORGET};
         console_reply(post(&m) ? "wifi: credentials removed" : "wifi: busy, try again");
@@ -1259,7 +1297,7 @@ bool c6link_start(void) {
     console_register("c6", "c6 [reflash | verify | reset [rom] | reattach]", cmd_c6);
     clock_console_register();
     console_register("net", "net (Wi-Fi state and IP)", cmd_net);
-    console_register("wifi", "wifi [on | off | scan | reconnect | <ssid> <password> | --clear]", cmd_wifi);
+    console_register("wifi", "wifi [on | off | scan | reconnect | ps [none | min] | <ssid> <password> | --clear]", cmd_wifi);
     c6_sup_start();
     scan_done   = xSemaphoreCreateBinary();
     scan_lock   = xSemaphoreCreateMutex();
