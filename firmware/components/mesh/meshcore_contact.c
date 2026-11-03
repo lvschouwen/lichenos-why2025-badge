@@ -28,22 +28,37 @@ static char const TAG[] = "meshcore";
 #define KEY_WAIT_MS    100 // a key press, in all (action and the copy after it): a short wait beats "busy"
 #define ADV_TYPE_CHAT  1   // MeshCore: a person's node (repeaters, rooms and sensors have no DMs)
 
+#define PREFIX_LEN 6
+
+// One details screen's state (#149, #148): made in build_detail, hung on the screen's user_data, freed in on_delete
+// (timer first). Every row callback and the timer get it as their arg, so a second contact page on the stack, a trace or
+// a share screen never reads another page's contact. One PSRAM block.
 typedef struct {
     mesh_contact_detail_t d;
     mesh_contact_line_t   lines[MESH_CONTACT_LINES];
     char                  uri[MESH_URI_MAX];
     rr_head_t             rr; // the login state, for the Log in row's value (#51)
-} contact_mem_t;
+    uint8_t               prefix[PREFIX_LEN];
+    char                  title[MESH_NAME_MAX + 1];
+    uint8_t               type;
+    lv_obj_t             *list_screen; // the screen the details were opened from: Remove goes back to it
+    bool                  have_detail, gone;
+    int                   shown_path_len, shown_flags, shown_login; // what the rows show; -1: nothing yet
+    lv_obj_t             *info[MESH_CONTACT_LINES], *note, *fav_row, *reset_row, *login_row;
+    lv_timer_t           *timer;
+} contact_t;
 
-static uint8_t        prefix[6];
-static char           title[MESH_NAME_MAX + 1];
-static uint8_t        type;
-static lv_obj_t      *list_screen; // the screen the details were opened from: Remove goes back to it
-static contact_mem_t *mem;         // PSRAM, while the details screen exists
-static bool           have_detail, gone;
-static int            shown_path_len, shown_flags, shown_login; // what the rows show; -1: nothing yet
-static lv_obj_t      *info[MESH_CONTACT_LINES], *note, *fav_row, *reset_row, *login_row;
-static lv_timer_t    *timer;
+// What meshcore_contact_open wants built: read once by build_detail, which runs inside shell_open_keyed (build takes no
+// arguments) under the LVGL lock
+static struct {
+    uint8_t    prefix[PREFIX_LEN];
+    char       name[MESH_NAME_MAX + 1];
+    uint8_t    type;
+    lv_obj_t  *list_screen;
+} want_contact;
+
+// The same for the trace and share screens: the details screen they were opened from
+static contact_t *want_ct;
 
 static void set_text(lv_obj_t *label, char const *text) {
     if (label && strcmp(lv_label_get_text(label), text) != 0) {
@@ -58,136 +73,136 @@ static void set_note(lv_obj_t *label, char const *text, bool error) {
     }
 }
 
-static void mark_gone(void) {
-    gone = true;
-    set_note(note, "This contact is no longer in MeshCore's list", true);
+static void mark_gone(contact_t *ct) {
+    ct->gone = true;
+    set_note(ct->note, "This contact is no longer in MeshCore's list", true);
 }
 
 // The copy under the mesh lock, the widgets after it
-static void fill(uint32_t wait_ms) {
-    if (gone || !mem) {
+static void fill(contact_t *ct, uint32_t wait_ms) {
+    if (ct->gone) {
         return;
     }
-    size_t r = mesh_contact_detail(prefix, &mem->d, wait_ms);
+    size_t r = mesh_contact_detail(ct->prefix, &ct->d, wait_ms);
     if (r == MESH_BUSY) {
         return;
     }
     if (r == 0) {
-        mark_gone();
+        mark_gone(ct);
         return;
     }
-    have_detail = true;
-    size_t n    = mesh_contact_lines(&mem->d, mem->lines, MESH_CONTACT_LINES);
+    ct->have_detail = true;
+    size_t n        = mesh_contact_lines(&ct->d, ct->lines, MESH_CONTACT_LINES);
     for (size_t i = 0; i < n; i++) {
-        set_text(info[i], mem->lines[i].text);
+        set_text(ct->info[i], ct->lines[i].text);
     }
-    if (mem->d.path_len != shown_path_len || mem->d.flags != shown_flags) { // the rows redraw only on a change
+    if (ct->d.path_len != ct->shown_path_len || ct->d.flags != ct->shown_flags) { // the rows redraw only on a change
         char hops[16];
-        mesh_format_hops(mem->d.path_len, hops, sizeof(hops));
-        menu_set_value(reset_row, hops);
-        menu_set_on(fav_row, (mem->d.flags & MESH_CONTACT_FAV) != 0);
-        shown_path_len = mem->d.path_len;
-        shown_flags    = mem->d.flags;
+        mesh_format_hops(ct->d.path_len, hops, sizeof(hops));
+        menu_set_value(ct->reset_row, hops);
+        menu_set_on(ct->fav_row, (ct->d.flags & MESH_CONTACT_FAV) != 0);
+        ct->shown_path_len = ct->d.path_len;
+        ct->shown_flags    = ct->d.flags;
     }
-    if (login_row && mesh_remote_head(&mem->rr)) { // the small copy: this runs every second (#117)
-        int in = rr_head_logged_in(&mem->rr, prefix) ? 1 + mem->rr.admin : 0;
-        if (in != shown_login) {
-            menu_set_value(login_row, in == 2 ? "Admin" : in ? "Logged in" : "");
-            shown_login = in;
+    if (ct->login_row && mesh_remote_head(&ct->rr)) { // the small copy: this runs every second (#117)
+        int in = rr_head_logged_in(&ct->rr, ct->prefix) ? 1 + ct->rr.admin : 0;
+        if (in != ct->shown_login) {
+            menu_set_value(ct->login_row, in == 2 ? "Admin" : in ? "Logged in" : "");
+            ct->shown_login = in;
         }
     }
 }
 
 static void tick(lv_timer_t *t) {
-    (void)t;
-    fill(TICK_WAIT_MS);
+    fill(lv_timer_get_user_data(t), TICK_WAIT_MS);
 }
 
 // An action, then the copy again so the rows show it. MyMesh saves the contacts itself a few seconds later.
-static bool act(mesh_contact_op_t op, lv_obj_t *status) {
-    if (gone) {
+static bool act(contact_t *ct, mesh_contact_op_t op) {
+    lv_obj_t *status = ct->note;
+    if (ct->gone) {
         return false;
     }
     uint32_t start = lv_tick_get();
-    size_t   r     = have_detail ? mesh_contact_do(prefix, op, KEY_WAIT_MS) : MESH_BUSY;
+    size_t   r     = ct->have_detail ? mesh_contact_do(ct->prefix, op, KEY_WAIT_MS) : MESH_BUSY;
     if (r == MESH_BUSY) {
         set_note(status, mc_busy_note(), true);
         return false;
     }
     if (r == 0) {
-        mark_gone();
+        mark_gone(ct);
         return false;
     }
     uint32_t spent = lv_tick_elaps(start);
     if (spent < KEY_WAIT_MS) {
-        fill(KEY_WAIT_MS - spent); // else the next tick shows it: the keys never wait more than KEY_WAIT_MS in all
+        fill(ct, KEY_WAIT_MS - spent); // else the next tick shows it: the keys never wait more than KEY_WAIT_MS in all
     }
     return true;
 }
 
 static void on_message(void *arg) {
-    (void)arg;
-    meshcore_chat_open_dm(prefix, title[0] ? title : "(no name)");
+    contact_t *ct = arg;
+    meshcore_chat_open_dm(ct->prefix, ct->title[0] ? ct->title : "(no name)");
 }
 
 static void on_reset(void *arg) {
-    (void)arg;
-    if (act(MESH_CO_RESET_PATH, note)) {
-        set_note(note, "Path reset: the next message floods and finds a new one", false);
+    contact_t *ct = arg;
+    if (act(ct, MESH_CO_RESET_PATH)) {
+        set_note(ct->note, "Path reset: the next message floods and finds a new one", false);
     }
 }
 
 static void on_fav(void *arg) {
-    (void)arg;
-    bool on = !(mem && (mem->d.flags & MESH_CONTACT_FAV));
-    if (act(on ? MESH_CO_FAV_ON : MESH_CO_FAV_OFF, note)) {
-        set_note(note, on ? "Favourite: first in the Contacts list" : "No longer a favourite", false);
+    contact_t *ct = arg;
+    bool on = !(ct->d.flags & MESH_CONTACT_FAV);
+    if (act(ct, on ? MESH_CO_FAV_ON : MESH_CO_FAV_OFF)) {
+        set_note(ct->note, on ? "Favourite: first in the Contacts list" : "No longer a favourite", false);
     }
 }
 
 // ---- Repeaters and rooms (#51): the screens are meshcore_remote.c, each starts only on an Enter of the person ---------
 
 static void on_login(void *arg) {
-    (void)arg;
-    meshcore_remote_login(prefix, title);
+    contact_t *ct = arg;
+    meshcore_remote_login(ct->prefix, ct->title);
 }
 
 static void on_status(void *arg) {
-    (void)arg;
-    meshcore_remote_status(prefix, title);
+    contact_t *ct = arg;
+    meshcore_remote_status(ct->prefix, ct->title);
 }
 
 static void on_cli(void *arg) {
-    (void)arg;
-    meshcore_remote_cli(prefix, title);
+    contact_t *ct = arg;
+    meshcore_remote_cli(ct->prefix, ct->title);
 }
 
 static void on_settings(void *arg) {
-    (void)arg;
-    meshcore_remote_settings(prefix, title);
+    contact_t *ct = arg;
+    meshcore_remote_settings(ct->prefix, ct->title);
 }
 
 static void on_posts(void *arg) {
-    (void)arg;
-    meshcore_chat_open_dm(prefix, title[0] ? title : "(no name)");
+    contact_t *ct = arg;
+    meshcore_chat_open_dm(ct->prefix, ct->title[0] ? ct->title : "(no name)");
 }
 
 static void on_forget(void *arg) {
-    (void)arg;
+    contact_t *ct = arg;
     char saved[MF_PASSWORD_MAX + 2];
-    bool had = meshcore_pw_get(prefix, saved, sizeof(saved));
+    bool had = meshcore_pw_get(ct->prefix, saved, sizeof(saved));
     memset(saved, 0, sizeof(saved));
-    meshcore_pw_forget(prefix);
-    set_note(note, had ? "Password forgotten" : "No password was remembered", false);
+    meshcore_pw_forget(ct->prefix);
+    set_note(ct->note, had ? "Password forgotten" : "No password was remembered", false);
 }
 
 static void on_logout(void *arg) {
-    (void)arg;
-    if (mesh_remote_logout(prefix, KEY_WAIT_MS)) {
-        set_note(note, "Logged out: MeshCore stops its keep-alives to it", false);
-        fill(0);
+    contact_t *ct = arg;
+    if (mesh_remote_logout(ct->prefix, KEY_WAIT_MS)) {
+        set_note(ct->note, "Logged out: MeshCore stops its keep-alives to it", false);
+        fill(ct, 0);
     } else {
-        set_note(note, mc_busy_note(), true);
+        set_note(ct->note, mc_busy_note(), true);
     }
 }
 
@@ -201,7 +216,7 @@ typedef struct {
     mt_line_t  lines[MT_LINES_MAX];
     char       text[MT_LINES_MAX * MT_LINE_MAX];
     mt_kind_t  kind;
-    uint8_t    prefix[sizeof(prefix)]; // the contact this screen is about (the file statics follow the contact page)
+    uint8_t    prefix[PREFIX_LEN]; // the contact this screen is about
     uint32_t   seq;                    // ours; 0 when it could not start
     lv_obj_t  *label, *again;
     lv_timer_t *timer;
@@ -273,17 +288,18 @@ static void on_trace_delete(lv_event_t *e) {
 }
 
 static lv_obj_t *build_trace(void) {
-    mt_kind_t kind   = want_kind;
+    contact_t *ct    = want_ct;
+    mt_kind_t  kind  = want_kind;
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu = menu_create_named(screen, kind == MT_TRACE ? "Trace path" : "Discover path",
-                                       title[0] ? title : "(no name)");
+                                       ct->title[0] ? ct->title : "(no name)");
     trace_t *tr = heap_caps_calloc(1, sizeof(*tr), MALLOC_CAP_SPIRAM);
     if (!tr) {
         menu_note(menu, "Not enough memory.");
         return screen;
     }
     tr->kind = kind;
-    memcpy(tr->prefix, prefix, sizeof(tr->prefix));
+    memcpy(tr->prefix, ct->prefix, sizeof(tr->prefix));
     lv_obj_set_user_data(screen, tr);
     lv_obj_add_event_cb(screen, on_trace_delete, LV_EVENT_DELETE, NULL);
     menu_note(menu, kind == MT_TRACE ? "Along the stored path and back; SNR as each hop heard it:"
@@ -295,25 +311,24 @@ static lv_obj_t *build_trace(void) {
     return screen;
 }
 
-static void open_trace(mt_kind_t kind) {
-    if (gone) {
+static void open_trace(contact_t *ct, mt_kind_t kind) {
+    if (ct->gone) {
         return;
     }
     want_kind = kind;
-    uint8_t id[sizeof(prefix) + 1];
-    memcpy(id, prefix, sizeof(prefix));
-    id[sizeof(prefix)] = (uint8_t)kind;
+    want_ct   = ct;
+    uint8_t id[PREFIX_LEN + 1];
+    memcpy(id, ct->prefix, PREFIX_LEN);
+    id[PREFIX_LEN] = (uint8_t)kind;
     shell_open_keyed(build_trace, SCREEN_TRACE, shell_key_hash(id, sizeof(id)));
 }
 
 static void on_trace(void *arg) {
-    (void)arg;
-    open_trace(MT_TRACE);
+    open_trace(arg, MT_TRACE);
 }
 
 static void on_discover(void *arg) {
-    (void)arg;
-    open_trace(MT_DISCOVER);
+    open_trace(arg, MT_DISCOVER);
 }
 
 // ---- Share: the link as text (sending the contact on air is not done yet) ------------------------------------------
@@ -325,112 +340,115 @@ static lv_obj_t *add_text(lv_obj_t *menu, char const *text) {
 }
 
 static lv_obj_t *build_share(void) {
-    lv_obj_t *screen = shell_page_create();
-    lv_obj_t *menu   = menu_create_named(screen, "Share contact", title[0] ? title : "(no name)");
-    if (!mem || !have_detail || !mesh_contact_uri(mem->d.name, mem->d.pub, mem->d.type, mem->uri, sizeof(mem->uri))) {
+    contact_t *ct    = want_ct; // the details screen is open under this one, so it lives as long as this build
+    lv_obj_t  *screen = shell_page_create();
+    lv_obj_t  *menu   = menu_create_named(screen, "Share contact", ct->title[0] ? ct->title : "(no name)");
+    if (!ct->have_detail || !mesh_contact_uri(ct->d.name, ct->d.pub, ct->d.type, ct->uri, sizeof(ct->uri))) {
         menu_note(menu, mc_busy_note());
         return screen;
     }
     menu_note(menu, "Link for MeshCore apps (Add contact, paste):");
-    add_text(menu, mem->uri);
+    add_text(menu, ct->uri);
     menu_note(menu, "Public key:");
-    add_text(menu, mem->lines[MESH_LINE_KEY].text + strlen("Key: "));
-    ESP_LOGI(TAG, "share %s", mem->uri); // on the console too, to copy it from there
+    add_text(menu, ct->lines[MESH_LINE_KEY].text + strlen("Key: "));
+    ESP_LOGI(TAG, "share %s", ct->uri); // on the console too, to copy it from there
     return screen;
 }
 
 static void on_share(void *arg) {
-    (void)arg;
-    shell_open_keyed(build_share, SCREEN_SHARE, shell_key_hash(prefix, sizeof(prefix)));
+    contact_t *ct = arg;
+    want_ct       = ct;
+    shell_open_keyed(build_share, SCREEN_SHARE, shell_key_hash(ct->prefix, PREFIX_LEN));
 }
 
 // ---- Remove and Reset path: DANGER rows, the careful dialog is the row's own (menu_set_danger) -----------------------
 
 static void on_remove(void *arg) {
-    (void)arg;
-    if (!mem || !act(MESH_CO_REMOVE, note)) { // the details screen went away meanwhile, or MeshCore did not take it
+    contact_t *ct = arg;
+    if (!act(ct, MESH_CO_REMOVE)) { // MeshCore did not take it
         return;
     }
-    meshcore_pw_forget(prefix); // a remembered repeater/room password goes with the contact (#51)
-    shell_back_to(list_screen, NULL, NULL); // past the details: the contact is gone
+    meshcore_pw_forget(ct->prefix); // a remembered repeater/room password goes with the contact (#51)
+    shell_back_to(ct->list_screen, NULL, NULL); // past the details: the contact is gone
 }
 
 // ---- the details screen ---------------------------------------------------------------------------------------------
 
 static void on_delete(lv_event_t *e) {
-    (void)e;
-    if (timer) {
-        lv_timer_delete(timer);
-        timer = NULL;
+    contact_t *ct = lv_obj_get_user_data(lv_event_get_target(e));
+    if (!ct) {
+        return;
     }
-    heap_caps_free(mem);
-    mem = NULL;
-    memset(info, 0, sizeof(info));
-    note = fav_row = reset_row = login_row = NULL;
+    if (ct->timer) {
+        lv_timer_delete(ct->timer);
+    }
+    heap_caps_free(ct);
+}
+
+static void add_remote_rows(lv_obj_t *menu, contact_t *ct) {
+    uint8_t type = ct->type;
+    ct->login_row = menu_add(menu, "Log in", "", on_login, ct);
+    menu_set_kind(ct->login_row, MENU_OPEN);
+    if (type == MESH_ADV_TYPE_ROOM) {
+        menu_set_kind(menu_add(menu, "Posts", "", on_posts, ct), MENU_OPEN); // the room's posts after login
+    }
+    menu_set_kind(menu_add(menu, "Status", "", on_status, ct), MENU_OPEN);
+    menu_set_kind(menu_add(menu, "Command...", "", on_cli, ct), MENU_OPEN);
+    if (type == MESH_ADV_TYPE_REPEATER) {
+        menu_set_kind(menu_add(menu, "Settings", "", on_settings, ct), MENU_OPEN); // #117: needs the admin login
+    }
+    menu_add(menu, "Log out", "", on_logout, ct);
+    lv_obj_t *forget = menu_add(menu, "Forget password", "", on_forget, ct);
+    menu_set_danger(forget, "Forget the saved password of this repeater or room? Log in asks for it again.", "forget");
 }
 
 static lv_obj_t *build_detail(void) {
     lv_obj_t *screen = shell_page_create();
-    lv_obj_t *menu   = menu_create_named(screen, type == ADV_TYPE_CHAT ? "Contact" : mesh_contact_type_name(type),
-                                       title[0] ? title : "(no name)");
-    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    heap_caps_free(mem);
-    mem            = heap_caps_calloc(1, sizeof(*mem), MALLOC_CAP_SPIRAM);
-    have_detail    = false;
-    gone           = false;
-    shown_path_len = shown_flags = shown_login = -1;
-    login_row      = NULL;
-    if (!mem) {
+    lv_obj_t *menu   = menu_create_named(screen, want_contact.type == ADV_TYPE_CHAT ? "Contact" : mesh_contact_type_name(want_contact.type),
+                                       want_contact.name[0] ? want_contact.name : "(no name)");
+    contact_t *ct = heap_caps_calloc(1, sizeof(*ct), MALLOC_CAP_SPIRAM);
+    if (!ct) {
         menu_note(menu, "Not enough memory to show the contact.");
         return screen;
     }
+    memcpy(ct->prefix, want_contact.prefix, PREFIX_LEN);
+    snprintf(ct->title, sizeof(ct->title), "%s", want_contact.name);
+    ct->type           = want_contact.type;
+    ct->list_screen    = want_contact.list_screen;
+    ct->shown_path_len = ct->shown_flags = ct->shown_login = -1;
+    lv_obj_set_user_data(screen, ct);
+    lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     for (size_t i = 0; i < MESH_CONTACT_LINES; i++) {
-        info[i] = add_text(menu, "...");
+        ct->info[i] = add_text(menu, "...");
     }
-    if (type == ADV_TYPE_CHAT) {
-        menu_set_kind(menu_add(menu, "Message", "", on_message, NULL), MENU_OPEN); // the first row: Enter Enter is the old "message a contact"
+    if (ct->type == ADV_TYPE_CHAT) {
+        menu_set_kind(menu_add(menu, "Message", "", on_message, ct), MENU_OPEN); // the first row: Enter Enter is the old "message a contact"
     }
-    if (type == MESH_ADV_TYPE_REPEATER || type == MESH_ADV_TYPE_ROOM) {
-        login_row = menu_add(menu, "Log in", "", on_login, NULL);
-        menu_set_kind(login_row, MENU_OPEN);
-        if (type == MESH_ADV_TYPE_ROOM) {
-            menu_set_kind(menu_add(menu, "Posts", "", on_posts, NULL), MENU_OPEN); // the room's posts after login
-        }
-        menu_set_kind(menu_add(menu, "Status", "", on_status, NULL), MENU_OPEN);
-        menu_set_kind(menu_add(menu, "Command...", "", on_cli, NULL), MENU_OPEN);
-        if (type == MESH_ADV_TYPE_REPEATER) {
-            menu_set_kind(menu_add(menu, "Settings", "", on_settings, NULL), MENU_OPEN); // #117: needs the admin login
-        }
-        menu_add(menu, "Log out", "", on_logout, NULL);
-        lv_obj_t *forget = menu_add(menu, "Forget password", "", on_forget, NULL);
-        menu_set_danger(forget, "Forget the saved password of this repeater or room? Log in asks for it again.", "forget");
+    if (ct->type == MESH_ADV_TYPE_REPEATER || ct->type == MESH_ADV_TYPE_ROOM) {
+        add_remote_rows(menu, ct);
     }
-    reset_row = menu_add(menu, "Reset path", "", on_reset, NULL);
-    menu_set_danger(reset_row, "Reset the route to this contact? The next message floods to find a new one.", "reset");
-    menu_set_kind(menu_add(menu, "Trace path", "", on_trace, NULL), MENU_OPEN);
-    menu_set_kind(menu_add(menu, "Discover path", "", on_discover, NULL), MENU_OPEN);
-    fav_row   = menu_add(menu, "Favourite", "", on_fav, NULL);
-    menu_set_kind(fav_row, MENU_TOGGLE);
-    menu_set_kind(menu_add(menu, "Share", "", on_share, NULL), MENU_OPEN);
-    lv_obj_t *remove_row = menu_add(menu, "Remove", "", on_remove, NULL);
+    ct->reset_row = menu_add(menu, "Reset path", "", on_reset, ct);
+    menu_set_danger(ct->reset_row, "Reset the route to this contact? The next message floods to find a new one.", "reset");
+    menu_set_kind(menu_add(menu, "Trace path", "", on_trace, ct), MENU_OPEN);
+    menu_set_kind(menu_add(menu, "Discover path", "", on_discover, ct), MENU_OPEN);
+    ct->fav_row = menu_add(menu, "Favourite", "", on_fav, ct);
+    menu_set_kind(ct->fav_row, MENU_TOGGLE);
+    menu_set_kind(menu_add(menu, "Share", "", on_share, ct), MENU_OPEN);
+    lv_obj_t *remove_row = menu_add(menu, "Remove", "", on_remove, ct);
     char      ask[MESH_NAME_MAX + 64];
-    snprintf(ask, sizeof(ask), "Remove %s from MeshCore? The chat stays.", title[0] ? title : "(no name)");
+    snprintf(ask, sizeof(ask), "Remove %s from MeshCore? The chat stays.", ct->title[0] ? ct->title : "(no name)");
     menu_set_danger(remove_row, ask, "remove");
-    note = menu_note(menu, "");
-    fill(KEY_WAIT_MS);
-    timer = lv_timer_create(tick, TICK_MS, NULL);
+    ct->note = menu_note(menu, "");
+    fill(ct, KEY_WAIT_MS);
+    ct->timer = lv_timer_create(tick, TICK_MS, ct);
     return screen;
 }
 
 void meshcore_contact_open(mesh_contact_t const *c) {
-    uint32_t key = shell_key_hash(c->pubkey, sizeof(prefix));
-    if (shell_screen_open(SCREEN_CONTACT, key)) { // list_screen and the rest belong to the page that is open
-        shell_open_keyed(build_detail, SCREEN_CONTACT, key);
-        return;
-    }
-    memcpy(prefix, c->pubkey, sizeof(prefix));
-    snprintf(title, sizeof(title), "%s", c->name);
-    type        = c->type;
-    list_screen = lv_screen_active();
-    shell_open_keyed(build_detail, SCREEN_CONTACT, key); // one page per contact
+    memcpy(want_contact.prefix, c->pubkey, PREFIX_LEN);
+    snprintf(want_contact.name, sizeof(want_contact.name), "%s", c->name);
+    want_contact.type        = c->type;
+    want_contact.list_screen = lv_screen_active();
+    // One page per contact; an open one is reused and build_detail does not run, so these are only read by a new page
+    shell_open_keyed(build_detail, SCREEN_CONTACT, shell_key_hash(c->pubkey, PREFIX_LEN));
 }
