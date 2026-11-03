@@ -325,7 +325,7 @@ static void about(lv_obj_t *page) {
 
 static lv_obj_t *build_settings(void) {
     lv_obj_t *screen = shell_page_create();
-    lv_obj_t *menu   = menu_create(screen, self()->name);
+    lv_obj_t *menu   = menu_create_named(screen, "App settings", self()->name);
     meshcore_settings(menu);
     about(menu);
     return screen;

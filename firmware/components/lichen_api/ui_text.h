@@ -44,7 +44,3 @@ size_t ui_status_fail_text(char *out, size_t n, char const *why, char const *nex
 
 // An empty list: "No contacts yet: they appear when a node adverts." (how NULL: "No contacts yet.") (R11)
 size_t ui_empty_text(char *out, size_t n, char const *what, char const *how);
-
-// Where the focus goes when a list is rebuilt (R6): the row whose key is want_key (0: no key), else the row at
-// want_index clamped into the list ("nearest"). keys[i] is the key of the i-th selectable row (0: none). -1 when n <= 0.
-int ui_focus_pick(uint32_t const *keys, int n, uint32_t want_key, int want_index);

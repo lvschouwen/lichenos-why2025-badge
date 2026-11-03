@@ -127,7 +127,7 @@ sysn_info_t sysn_info(sysn_event_t event) {
         [SYSN_IMU_LOST]          = {1, F_ONCE_BOOT, "sensors", "Motion sensor stopped"},
         [SYSN_ENV_LOST]          = {1, F_ONCE_BOOT, "sensors_env", "Air sensor stopped"},
         [SYSN_STORAGE_LOW]       = {1, F_COALESCE, "storage", "Storage almost full"},
-        [SYSN_STORAGE_UNMOUNTED] = {2, F_ONCE_BOOT, "storage", "Storage drive not mounted"},
+        [SYSN_STORAGE_UNMOUNTED] = {2, F_ONCE_BOOT, "storage", "Internal storage not mounted"},
     };
     (void)F_SILENT;
     return event < SYSN_EVENT_COUNT ? table[event] : table[SYSN_CRASH];

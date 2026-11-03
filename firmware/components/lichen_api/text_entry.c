@@ -4,6 +4,7 @@
 #include "lichen_ui.h"
 #include "fonts.h"
 #include "theme.h"
+#include "ui_text.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -108,7 +109,13 @@ static lv_obj_t *build(void) {
     lv_obj_t *hint = lv_label_create(screen);
     lv_obj_set_width(hint, LV_PCT(100));
     lv_obj_set_style_text_color(hint, lv_color_hex(THEME_DIM), 0);
-    lv_label_set_text(hint, secret ? "Enter: done    Esc: cancel    Tab: show / hide" : "Enter: done    Esc: cancel");
+    char hint_text[64];
+    if (secret) {
+        ui_hint_build(hint_text, sizeof(hint_text), "Enter", "done", "Esc", "cancel", "Tab", "show / hide", NULL);
+    } else {
+        ui_hint_build(hint_text, sizeof(hint_text), "Enter", "done", "Esc", "cancel", NULL);
+    }
+    lv_label_set_text(hint, hint_text);
 
     fired = false;
     for (lv_indev_t *i = lv_indev_get_next(NULL); i; i = lv_indev_get_next(i)) {

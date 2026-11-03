@@ -101,17 +101,6 @@ static void test_empty(void) {
     CHECK_STR(b, "No files yet.");
 }
 
-static void test_focus(void) {
-    uint32_t keys[] = {10, 0, 30, 40};
-    CHECK(ui_focus_pick(keys, 4, 30, 0) == 2);   // an inserted row moved it: the key wins over the index
-    CHECK(ui_focus_pick(keys, 4, 99, 2) == 2);   // key gone: the same index
-    CHECK(ui_focus_pick(keys, 4, 99, 9) == 3);   // list shrank: the last row
-    CHECK(ui_focus_pick(keys, 4, 0, 1) == 1);    // no key: index, a key of 0 never matches the keyless row
-    CHECK(ui_focus_pick(keys, 4, 0, -3) == 0);
-    CHECK(ui_focus_pick(keys, 0, 10, 0) == -1);
-    CHECK(ui_focus_pick(NULL, 3, 5, 1) == 1);
-}
-
 static void test_hint_pad(void) {
     CHECK(ui_hint_pad(0, 22, 18, 8) == 48);      // no padding yet: line + edge + gap
     CHECK(ui_hint_pad(36, 22, 18, 8) == 48);     // a screen with less than that is raised to it
@@ -125,7 +114,6 @@ int main(void) {
     test_countdown();
     test_status();
     test_empty();
-    test_focus();
     test_hint_pad();
     if (failures) {
         printf("%d failures\n", failures);

@@ -30,7 +30,7 @@ static void show_line(menu_filter_t *f, size_t shown) {
     if (f->query[0]) {
         snprintf(text, sizeof(text), "Search: %s_  (%u of %u)", f->query, (unsigned)shown, (unsigned)f->n);
     } else {
-        snprintf(text, sizeof(text), "Type to search...");
+        snprintf(text, sizeof(text), "Type to search");
     }
     lv_label_set_text(f->line, text);
     lv_obj_set_style_text_color(f->line, lv_color_hex(f->query[0] ? THEME_AMBER : THEME_DIM), 0);

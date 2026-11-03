@@ -128,17 +128,3 @@ size_t ui_empty_text(char *out, size_t n, char const *what, char const *how) {
     }
     return finish(out, n, snprintf(out, n, "No %s yet: %s%s", w, how, stop ? "" : "."));
 }
-
-int ui_focus_pick(uint32_t const *keys, int n, uint32_t want_key, int want_index) {
-    if (n <= 0) {
-        return -1;
-    }
-    if (want_key != 0 && keys) {
-        for (int i = 0; i < n; i++) {
-            if (keys[i] == want_key) {
-                return i;
-            }
-        }
-    }
-    return want_index < 0 ? 0 : want_index >= n ? n - 1 : want_index;
-}

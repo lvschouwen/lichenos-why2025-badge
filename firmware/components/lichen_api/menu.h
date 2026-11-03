@@ -46,21 +46,6 @@ void menu_set_on(lv_obj_t *row, bool on);
 // Makes the row a DANGER row: Enter shows question with a 10 s careful countdown ("Enter: <confirm_label> \xE2\x80\xA2 Esc:
 // cancel"); on_enter runs only when confirmed. The strings are copied. NULL question: "Are you sure?", NULL confirm_label: "continue".
 void menu_set_danger(lv_obj_t *row, char const *question, char const *confirm_label);
-// Like menu_add, for a long identifying label (R2): the label wraps over the full row width and the value drops under
-// it (dim, wrapping too) instead of sharing the line. No value, no second line.
-lv_obj_t *menu_add_wrap(lv_obj_t *menu, char const *label, char const *value, void (*on_enter)(void *), void *arg);
-
-// Focus survives a refresh (R6): give rows that exist across rebuilds a key (an id that is not their index, 0 for none),
-// save before tearing the rows down, restore after adding them. The row with the saved key gets the focus; if it is
-// gone, the row at the saved index (or the last one). INFO rows are not selectable and so not counted.
-typedef struct {
-    uint32_t key;
-    int      index;
-} menu_focus_t;
-void         menu_set_key(lv_obj_t *row, uint32_t key);
-menu_focus_t menu_focus_save(lv_obj_t *menu);
-void         menu_focus_restore(lv_obj_t *menu, menu_focus_t f);
-
 // A status line under the heading that ends (R5). begin shows "<verb>...", progress "<verb> 3 of 17", then exactly one
 // of done(text) (teal) or fail(why, next) (red, "<why>. <next>" in plain words). A begin that is never ended is logged
 // (warning) when the menu goes away or the next begin comes. progress/done/fail without a begin do nothing.

@@ -42,14 +42,12 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   - Row kinds: `menu_set_kind(row, MENU_OPEN | MENU_CYCLE | MENU_TOGGLE | MENU_DANGER | MENU_INFO)`. OPEN shows a dim
     "›" after the value, TOGGLE takes `menu_set_on(row, bool)` ("On"/"Off"), DANGER (`menu_set_danger(row,
     question, confirm_label)`) asks in the careful dialog before `on_enter` runs, INFO is dim and cannot be selected.
-    A row with no kind acts at once. `menu_add_wrap` is the two-line row for a long identifying label.
+    A row with no kind acts at once.
   - `shell_page_hint(screen, "Enter", "open", "Backspace", "delete", NULL)`: a dim hint pinned to the screen bottom, not part
     of the scroll. No "Esc: back" pair; Esc is predictable.
   - `menu_status_begin / _progress / _done / _fail`: a status line that ends ("Reading 3 of 17", a final text, or a
     failure in plain words plus what to do). A begin that never ends is logged. `menu_empty(menu, "contacts", "they appear
     when a node adverts")` explains an empty list and goes away when a row is added.
-  - Focus that survives a refresh: `menu_set_key(row, id)`, then `menu_focus_save` before and `menu_focus_restore` after
-    rebuilding the rows (the key wins, else the same index, else the last row).
   - `shell_dialog_t`: the dialog writes "(cancels in N s)" itself, leave `count_prefix`/`count_suffix` NULL; give
     `confirm_label` ("restart") and the hint "Enter: restart • Esc: cancel" is generated; the hint is dim unless `careful`.
   - The text and choices are pure (`ui_text.h`, `host_tests/ui_text_test.c`).

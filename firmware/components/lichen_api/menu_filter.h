@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-// Type-to-search on a menu (#32, #57): a line under the heading ("Type to search..." / "Search: jac (1 of 7)") and the
+// Type-to-search on a menu (#32, #57): a line under the heading ("Type to search" / "Search: jac (1 of 7)") and the
 // rows that do not match are hidden, not rebuilt (so Up/Down and the caller's row pointers stay valid). Typing and
 // Backspace come in through menu_on_text; Esc clears the query first (shell_on_esc), then leaves. Matching is the
 // caller's (list_filter.h has the pieces).

@@ -464,7 +464,7 @@ static void on_page_key(lv_event_t *e) {
 
 static lv_obj_t *build_app_page(void) {
     lv_obj_t *screen = shell_page_create();
-    lv_obj_t *menu   = menu_create(screen, page_app->name);
+    lv_obj_t *menu   = menu_create_named(screen, "App settings", page_app->name);
     if (page_app->settings) {
         page_app->settings(menu);
     }

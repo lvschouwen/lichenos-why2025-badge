@@ -23,7 +23,6 @@
 #define LABEL_MAX_PCT        68
 #define LABEL_MAX_PCT_SLIDER 34
 #define SCROLL_STEP  96
-#define ROW_WRAP_GAP 6
 #define CHEVRON      "\xE2\x80\xBA" // U+203A, after the value of a row that opens a page (R3, #135)
 #define DANGER_SECS  10
 
@@ -37,8 +36,6 @@ typedef struct {
     lv_obj_t *slider; // slider rows only
     int       min, max;
     menu_kind_t kind;
-    uint32_t    key;    // menu_set_key: the row's identity across a refresh, 0 for none
-    bool        wrap;   // menu_add_wrap: the value sits under the label
     lv_obj_t   *chev;   // MENU_OPEN's mark, made when first needed
     lv_group_t *group;  // the group the row joined, to put an INFO row back
     char       *danger_question; // MENU_DANGER's dialog
@@ -306,15 +303,9 @@ static lv_obj_t *add_row(lv_obj_t *menu, char const *label_text, char const *val
     lv_obj_set_style_border_opa(r, LV_OPA_COVER, LV_STATE_FOCUS_KEY);
     lv_obj_set_style_outline_width(r, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(r, 0, LV_STATE_FOCUS_KEY);
-    if (row->wrap) { // R2: a long identifying label gets the full width, the value drops under it
-        lv_obj_set_flex_flow(r, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-        lv_obj_set_style_pad_row(r, ROW_WRAP_GAP, 0);
-    } else {
-        lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(r, 16, 0);
-    }
+    lv_obj_set_flex_flow(r, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(r, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(r, 16, 0);
     lv_obj_set_scrollable(r, false);
     lv_obj_set_scroll_on_focus(r, true);
 
@@ -324,24 +315,14 @@ static lv_obj_t *add_row(lv_obj_t *menu, char const *label_text, char const *val
     lv_obj_t *label = lv_label_create(r);
     row->value      = lv_label_create(r);
     lv_obj_set_style_text_color(row->value, lv_color_hex(THEME_DIM), 0);
-    if (row->wrap) {
-        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(label, LV_PCT(100));
-        lv_label_set_long_mode(row->value, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(row->value, LV_PCT(100));
-        if (!value_text || !value_text[0]) {
-            lv_obj_add_flag(row->value, LV_OBJ_FLAG_HIDDEN);
-        }
-    } else {
-        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-        lv_obj_set_style_max_width(label, value_text && value_text[0] ? LV_PCT(LABEL_MAX_PCT) : LV_PCT(100), 0);
-        lv_obj_set_height(label, line_h);
-        lv_label_set_long_mode(row->value, LV_LABEL_LONG_DOT);
-        lv_obj_set_style_text_align(row->value, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_width(row->value, 0);
-        lv_obj_set_flex_grow(row->value, 1);
-        lv_obj_set_height(row->value, line_h);
-    }
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_max_width(label, value_text && value_text[0] ? LV_PCT(LABEL_MAX_PCT) : LV_PCT(100), 0);
+    lv_obj_set_height(label, line_h);
+    lv_label_set_long_mode(row->value, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(row->value, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_width(row->value, 0);
+    lv_obj_set_flex_grow(row->value, 1);
+    lv_obj_set_height(row->value, line_h);
     lv_label_set_text(label, label_text);
     lv_label_set_text(row->value, value_text ? value_text : "");
     lv_obj_add_event_cb(r, on_key, LV_EVENT_KEY, row);
@@ -354,26 +335,20 @@ static lv_obj_t *add_row(lv_obj_t *menu, char const *label_text, char const *val
     return r;
 }
 
-static lv_obj_t *add_plain(lv_obj_t *menu, char const *label, char const *value, void (*on_enter)(void *), void *arg,
-                           bool wrap) {
+static lv_obj_t *add_plain(lv_obj_t *menu, char const *label, char const *value, void (*on_enter)(void *), void *arg) {
     row_t *row = calloc(1, sizeof(*row));
     if (!row) {
         return NULL;
     }
     row->on_enter = on_enter;
     row->arg      = arg;
-    row->wrap     = wrap;
     lv_obj_t *r   = add_row(menu, label, value, row);
     lv_obj_set_user_data(r, row);
     return r;
 }
 
 lv_obj_t *menu_add(lv_obj_t *menu, char const *label, char const *value, void (*on_enter)(void *), void *arg) {
-    return add_plain(menu, label, value, on_enter, arg, false);
-}
-
-lv_obj_t *menu_add_wrap(lv_obj_t *menu, char const *label, char const *value, void (*on_enter)(void *), void *arg) {
-    return add_plain(menu, label, value, on_enter, arg, true);
+    return add_plain(menu, label, value, on_enter, arg);
 }
 
 lv_obj_t *menu_add_slider(lv_obj_t *menu, char const *label, int min, int max, int value,
@@ -414,13 +389,7 @@ void menu_set_value(lv_obj_t *row, char const *value) {
     row_t *r = row ? lv_obj_get_user_data(row) : NULL;
     if (r) {
         lv_label_set_text(r->value, value);
-        if (r->wrap) { // no value, no empty line under the label
-            if (value && value[0]) {
-                lv_obj_remove_flag(r->value, LV_OBJ_FLAG_HIDDEN);
-            } else {
-                lv_obj_add_flag(r->value, LV_OBJ_FLAG_HIDDEN);
-            }
-        } else if (!r->slider) { // an empty value gives the label the full row, one that appears leaves it room (#131)
+        if (!r->slider) { // an empty value gives the label the full row, one that appears leaves it room (#131)
             lv_obj_set_style_max_width(lv_obj_get_child(row, 0), value && value[0] ? LV_PCT(LABEL_MAX_PCT) : LV_PCT(100), 0);
         }
     }
@@ -454,11 +423,6 @@ static void set_chevron(lv_obj_t *r, row_t *row, bool shown) {
         row->chev = lv_label_create(r);
         lv_obj_set_style_text_color(row->chev, lv_color_hex(THEME_DIM), 0);
         lv_label_set_text(row->chev, CHEVRON);
-        if (row->wrap) { // the column layout has no right-hand side: float it there and keep the text clear of it
-            lv_obj_add_flag(row->chev, LV_OBJ_FLAG_FLOATING);
-            lv_obj_align(row->chev, LV_ALIGN_RIGHT_MID, 0, 0);
-            lv_obj_set_style_pad_right(r, ROW_PAD_H + 24, 0);
-        }
     }
     if (row->chev) {
         if (shown) {
@@ -513,63 +477,6 @@ void menu_set_danger(lv_obj_t *row, char const *question, char const *confirm_la
     r->danger_question = question ? strdup(question) : NULL;
     r->danger_confirm  = confirm_label ? strdup(confirm_label) : NULL;
     menu_set_kind(row, MENU_DANGER);
-}
-
-// ---- focus keys (R6) -------------------------------------------------------------------------------------------
-
-void menu_set_key(lv_obj_t *row, uint32_t key) {
-    row_t *r = row ? lv_obj_get_user_data(row) : NULL;
-    if (r) {
-        r->key = key;
-    }
-}
-
-static int count_selectable(lv_obj_t *menu) {
-    int n = 0;
-    for (uint32_t i = 0; i < lv_obj_get_child_count(menu); i++) {
-        n += is_selectable(lv_obj_get_child(menu, (int32_t)i)) ? 1 : 0;
-    }
-    return n;
-}
-
-menu_focus_t menu_focus_save(lv_obj_t *menu) {
-    menu_focus_t f = {0, 0};
-    int          k = 0;
-    for (uint32_t i = 0; i < lv_obj_get_child_count(menu); i++) {
-        lv_obj_t *child = lv_obj_get_child(menu, (int32_t)i);
-        if (!is_selectable(child)) {
-            continue;
-        }
-        if (lv_obj_has_state(child, LV_STATE_FOCUSED)) {
-            row_t *row = lv_obj_get_user_data(child);
-            f.key      = row->key;
-            f.index    = k;
-            break;
-        }
-        k++;
-    }
-    return f;
-}
-
-void menu_focus_restore(lv_obj_t *menu, menu_focus_t f) {
-    int      n    = count_selectable(menu);
-    uint32_t *keys = n > 0 ? malloc((size_t)n * sizeof(*keys)) : NULL;
-    if (n > 0 && !keys) {
-        menu_focus_row(menu, f.index); // out of memory: the index alone
-        return;
-    }
-    int k = 0;
-    for (uint32_t i = 0; i < lv_obj_get_child_count(menu) && k < n; i++) {
-        lv_obj_t *child = lv_obj_get_child(menu, (int32_t)i);
-        if (is_selectable(child)) {
-            keys[k++] = ((row_t *)lv_obj_get_user_data(child))->key;
-        }
-    }
-    int pick = ui_focus_pick(keys, n, f.key, f.index);
-    free(keys);
-    if (pick >= 0) {
-        menu_focus_row(menu, pick);
-    }
 }
 
 // ---- status line and empty state (R5, R11) -------------------------------------------------------------------------

@@ -40,10 +40,10 @@ static void fmt_uptime(char *out, size_t cap) {
 }
 
 static bool about_tile(char *l1, size_t c1, char *l2, size_t c2) {
-    snprintf(l1, c1, "version %s", esp_app_get_description()->version);
+    snprintf(l1, c1, "Version %s", esp_app_get_description()->version);
     char up[24];
     fmt_uptime(up, sizeof(up));
-    snprintf(l2, c2, "up %s", up);
+    snprintf(l2, c2, "Uptime %s", up);
     return true;
 }
 
