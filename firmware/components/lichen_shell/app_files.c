@@ -228,15 +228,23 @@ static void list_dir(void) {
 
 // ---- the viewer ---------------------------------------------------------------------------------------------------
 
-// Pixel width of one character in the viewer's font, so lines fill the screen whatever the letters (#144)
+// Pixel width of one character in the viewer's font, so lines fill the screen whatever the letters (#144). The glyph
+// advance, as the label draws it: lv_text_get_size trims a trailing blank, so a lone space would measure 0 px and the
+// lines would come out wider than the label
 static int glyph_width(void *ctx, char const *utf8, size_t n) {
-    view_t *v = ctx;
-    char    one[5];
-    memcpy(one, utf8, n < 4 ? n : 4);
-    one[n < 4 ? n : 4] = '\0';
-    lv_point_t size;
-    lv_text_get_size(&size, one, v->font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    return size.x + v->letter_space;
+    view_t const        *v = ctx;
+    unsigned char const *b = (unsigned char const *)utf8;
+    uint32_t             letter;
+    if (n >= 4 && (b[0] & 0xf8) == 0xf0) {
+        letter = (uint32_t)(b[0] & 0x07) << 18 | (uint32_t)(b[1] & 0x3f) << 12 | (uint32_t)(b[2] & 0x3f) << 6 | (b[3] & 0x3f);
+    } else if (n >= 3 && (b[0] & 0xf0) == 0xe0) {
+        letter = (uint32_t)(b[0] & 0x0f) << 12 | (uint32_t)(b[1] & 0x3f) << 6 | (b[2] & 0x3f);
+    } else if (n >= 2 && (b[0] & 0xe0) == 0xc0) {
+        letter = (uint32_t)(b[0] & 0x1f) << 6 | (b[1] & 0x3f);
+    } else {
+        letter = b[0];
+    }
+    return (int)lv_font_get_glyph_width(v->font, letter, 0) + v->letter_space;
 }
 
 static void show_page(files_job_result_t const *r) {
