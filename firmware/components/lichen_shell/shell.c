@@ -540,7 +540,7 @@ void shell_boot_screen(lv_display_t *display) {
     lvgl_port_unlock();
 }
 
-#define RESTART_FRAME_MS 700
+#define RESTART_FRAME_MS 2000
 
 static char restart_note[160];
 
@@ -590,7 +590,7 @@ void shell_show_restarting(void) {
     lv_screen_load(screen); // the old screens stay: the restart frees everything
     lv_refr_now(NULL);
     lvgl_port_unlock();
-    // Long enough to read (#134): at 40 ms nobody saw it, only the dark panel after it. The shutdown handler turns the
+    // Long enough to judge by eye (#134): at 40 ms nobody saw it, only the dark panel after it. The shutdown handler turns the
     // backlight off next, before the feed stops
     vTaskDelay(pdMS_TO_TICKS(RESTART_FRAME_MS));
 }
