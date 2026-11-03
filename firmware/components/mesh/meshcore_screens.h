@@ -13,6 +13,8 @@ void meshcore_grid_icon(lv_obj_t *parent, int tile, int size_px);
 
 // Chat: the conversation list, Enter opens the chat (meshcore_chats.c, #48)
 void meshcore_chats_open(void);
+// The Chat list, without stacking a second one: back down to the one on the stack, or open it (#147)
+void meshcore_chats_show(void);
 // Contacts, Repeaters, Heard: one contact list, Enter opens the contact's details (meshcore_contacts.c, #49)
 void meshcore_contacts_open(mesh_contact_view_t view);
 // Settings: the app's settings page with its about rows, as Settings > MeshCore shows it (meshcore_app.c, #17)

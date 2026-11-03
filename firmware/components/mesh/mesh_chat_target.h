@@ -35,6 +35,11 @@ bool mesh_chat_target_same(mesh_chat_target_t const *a, mesh_chat_target_t const
 typedef enum { MESH_CHAT_OPEN_PUSH, MESH_CHAT_OPEN_KEEP, MESH_CHAT_OPEN_REPLACE } mesh_chat_open_t;
 mesh_chat_open_t mesh_chat_open_how(mesh_chat_target_t const *top, mesh_chat_target_t const *want);
 
+// What showing the Chat list does (#147), given how far below the top of the stack the nearest Chat list is (0: on top,
+// -1: none): OPEN a new one, go BACK down to the one that is there, or KEEP (it is on top already). Never a second list.
+typedef enum { MESH_CHATS_SHOW_OPEN, MESH_CHATS_SHOW_BACK, MESH_CHATS_SHOW_KEEP } mesh_chats_show_t;
+mesh_chats_show_t mesh_chats_show_how(int list_depth);
+
 #ifdef __cplusplus
 }
 #endif
