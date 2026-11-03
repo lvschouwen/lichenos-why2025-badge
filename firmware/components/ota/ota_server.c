@@ -64,7 +64,7 @@
 #define BODY_TOTAL_S    45 // whole send: a client that drips bytes must not hold the one server task
 // Flash writes happen on this task, so its stack must be in internal RAM; peaks measured in BadgeVMS: 7 KB
 #define SERVER_STACK    16384
-// The screenshot worker only renders, compresses and sends from PSRAM, so a small internal stack does (#146)
+// The screenshot worker only compresses and sends from PSRAM, so a small internal stack does (#146)
 #define SHOT_STACK      4096
 
 static char const TAG[] = "ota";
@@ -1020,36 +1020,46 @@ static void send_shot(int fd, uint8_t const *pixels, size_t total, uint8_t const
     free(out);
 }
 
-// GET /screenshot (#30): the screen as a BMP. The picture is rendered by the hook (LVGL stays out of this component),
-// sent from its PSRAM buffer in slices and freed. It is never logged: it can show private messages.
-static void handle_screenshot(int fd) {
+typedef struct {
+    int            fd;
+    uint8_t const *pixels;
+    size_t         total; // bytes of pixels
+    uint8_t        head[OTA_BMP_HEADER_LEN];
+} shot_t;
+
+// GET /screenshot (#30), first half, on the server task (its big stack runs the LVGL render inside the hook; a small
+// task would overflow). Answers the error itself and returns false; true means the picture is held and must be sent
+// and freed by shot_send. It is never logged: it can show private messages.
+static bool shot_render(int fd, shot_t *shot) {
     if (!hooks.screenshot) {
         respond(fd, 404, "no screen here");
-        return;
+        return false;
     }
     if (!file_allowed()) {
         respond(fd, 409, "a firmware update is running");
-        return;
+        return false;
     }
     uint8_t const *pixels;
     uint32_t       w, h, stride;
     int            status = hooks.screenshot(&pixels, &w, &h, &stride);
     if (status) {
         respond(fd, status, status == 503 ? "the screen is busy, try again" : "no screenshot");
-        return;
+        return false;
     }
-    uint8_t head[OTA_BMP_HEADER_LEN];
-    size_t  row  = (size_t)w * 2;
-    size_t  size = ota_bmp565_file_size(w, h);
+    size_t row  = (size_t)w * 2;
+    size_t size = ota_bmp565_file_size(w, h);
     // Rows go out as they sit in memory: only a tightly packed picture with 4-byte rows is supported
-    if (!size || stride != row || ota_bmp565_row_bytes(w) != row || !ota_bmp565_header(w, h, head)) {
+    if (!size || stride != row || ota_bmp565_row_bytes(w) != row || !ota_bmp565_header(w, h, shot->head)) {
         respond(fd, 500, "unsupported screen shape");
-    } else {
-        send_shot(fd, pixels, row * h, head);
+        if (hooks.screenshot_free) {
+            hooks.screenshot_free();
+        }
+        return false;
     }
-    if (hooks.screenshot_free) {
-        hooks.screenshot_free();
-    }
+    shot->fd     = fd;
+    shot->pixels = pixels;
+    shot->total  = row * h;
+    return true;
 }
 
 // A reply with a body that is not a short text: head then body in slices, within one total deadline
@@ -1113,7 +1123,6 @@ static void console_done(void *ctx, char const *out, size_t len) {
     send_body(((console_reply_ctx_t *)ctx)->fd, head, (size_t)n, out, len);
 }
 
-// The command line comes in the body (never logged, it can hold a Wi-Fi password): printable ASCII only
 // Volatile, so the compiler cannot drop it as a dead store before a free (a console line may hold a password, #123)
 static void wipe_bytes(void *p, size_t n) {
     volatile uint8_t *v = p;
@@ -1122,6 +1131,7 @@ static void wipe_bytes(void *p, size_t n) {
     }
 }
 
+// The command line comes in the body (never logged, it can hold a Wi-Fi password): printable ASCII only
 static bool read_console_line(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len, char *line) {
     size_t want = (size_t)req->content_length;
     size_t have = pre_len < want ? pre_len : want;
@@ -1197,10 +1207,17 @@ static void close_lingering(int fd) {
 }
 
 static void screenshot_task(void *arg) {
-    int fd = (int)(intptr_t)arg;
-    handle_screenshot(fd);
+    shot_t *shot = arg;
+    int     fd   = shot->fd;
+    send_shot(fd, shot->pixels, shot->total, shot->head);
+    if (hooks.screenshot_free) {
+        hooks.screenshot_free();
+    }
     close_lingering(fd);
+    free(shot);
     shot_busy = false;
+    ESP_LOGI(TAG, "screenshot sent, task stack never below %u bytes free",
+             (unsigned)uxTaskGetStackHighWaterMark(NULL));
     vTaskDelete(NULL);
 }
 
@@ -1209,7 +1226,22 @@ static void start_screenshot(int fd) {
         respond(fd, 503, "another screenshot is being sent, try again");
         return;
     }
-    if (xTaskCreate(screenshot_task, "ota_shot", SHOT_STACK, (void *)(intptr_t)fd, 4, NULL) != pdPASS) {
+    shot_t *shot = heap_caps_malloc(sizeof(*shot), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!shot) {
+        shot_busy = false;
+        respond(fd, 503, "out of memory, try again");
+        return;
+    }
+    if (!shot_render(fd, shot)) {
+        free(shot);
+        shot_busy = false;
+        return;
+    }
+    if (xTaskCreate(screenshot_task, "ota_shot", SHOT_STACK, shot, 4, NULL) != pdPASS) {
+        if (hooks.screenshot_free) {
+            hooks.screenshot_free();
+        }
+        free(shot);
         shot_busy = false;
         respond(fd, 503, "out of memory, try again");
         return;
