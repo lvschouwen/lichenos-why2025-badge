@@ -142,6 +142,19 @@ def preflight_tiles(ip):
     return True
 
 
+# console_not_running (mesh_task.cpp) opens a stopped MeshCore's "fw mesh" reply with "MeshCore " and one of these
+NOT_RUNNING = ("MeshCore stopped", "MeshCore starting", "MeshCore stopping", "MeshCore not running")
+
+
+def mesh_running(ip):
+    """False when "fw mesh" (read only) says MeshCore is not running: Enter on a grid tile then STARTS it (start_instead)."""
+    try:
+        lines = fw(ip, "mesh")
+    except (RuntimeError, subprocess.TimeoutExpired):
+        return False  # unknown counts as not running: the mesh/* walks are skipped
+    return not any(l.strip().startswith(NOT_RUNNING) for l in lines)
+
+
 def check_screen(ip, name, seq):
     if "text:" in seq:
         raise RuntimeError(f"{name}: text: tokens are not allowed in the sweep")
@@ -171,6 +184,9 @@ def main():
         return 0
     if not preflight_tiles(args.ip):
         return 2
+    mesh_ok = mesh_running(args.ip)
+    if not mesh_ok:
+        print("note: MeshCore is not running (or unreadable): the mesh app entries are skipped; start it by hand first")
     hits, errors = 0, 0
     skipped = 0
     for name, seq, ok in SCREENS:
@@ -180,6 +196,9 @@ def main():
         elif args.only and args.only not in name:
             continue
         elif not ok:
+            skipped += 1
+            continue
+        if name.startswith("mesh") and not mesh_ok:
             skipped += 1
             continue
         try:
