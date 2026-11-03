@@ -168,11 +168,42 @@ static bool post(msg_t const *m) {
 // it for a comparison (not saved). Applied on every STA_START, i.e. after each esp_wifi_start. Battery policy: #76.
 static _Atomic int wifi_ps_mode = WIFI_PS_NONE;
 
+// TX power and STA bandwidth for the #146 link tests: 0 = the driver's own choice (20 dBm, HT40 allowed). `fw wifi tx`
+// and `fw wifi bw` set them at runtime (not saved). TX power is in the driver's 0.25 dBm unit (52 = 13 dBm).
+static _Atomic int wifi_tx_raw;
+static _Atomic int wifi_bw_mhz;
+
+#define WIFI_TX_DEFAULT_RAW 80 // 20 dBm, CONFIG_ESP_PHY_MAX_WIFI_TX_POWER on the C6
+
+static void set_wifi_tx(int raw) {
+    esp_err_t err = esp_wifi_set_max_tx_power((int8_t)raw);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "wifi: TX power not set: %s", esp_err_to_name(err));
+    }
+}
+
+static void apply_wifi_tx(void) {
+    int raw = atomic_load(&wifi_tx_raw);
+    if (raw) {
+        set_wifi_tx(raw);
+    }
+}
+
+static void apply_wifi_bw(void) {
+    int       bw = atomic_load(&wifi_bw_mhz);
+    esp_err_t err;
+    if (bw && (err = esp_wifi_set_bandwidth(WIFI_IF_STA, bw == 20 ? WIFI_BW20 : WIFI_BW40)) != ESP_OK) {
+        ESP_LOGW(TAG, "wifi: bandwidth not set: %s", esp_err_to_name(err));
+    }
+}
+
 static void apply_wifi_ps(void) {
     esp_err_t err = esp_wifi_set_ps((wifi_ps_type_t)atomic_load(&wifi_ps_mode));
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "wifi: power save not set: %s", esp_err_to_name(err));
     }
+    apply_wifi_bw(); // before esp_wifi_connect: the bandwidth is agreed when associating
+    apply_wifi_tx();
 }
 
 static char const *wifi_ps_name(wifi_ps_type_t ps) {
@@ -573,6 +604,7 @@ static void handle_reconnect(void) {
     portEXIT_CRITICAL(&state_lock);
     set_ip("");
     esp_wifi_disconnect();
+    apply_wifi_bw(); // `fw wifi bw` reconnects to apply it (#146)
     if (apply_config(s, p)) {
         esp_wifi_connect();
     }
@@ -961,6 +993,45 @@ static void cmd_wifi(char const *args) {
             return;
         }
         console_reply("wifi: power save %s (fw wifi ps none | min, not saved)", wifi_ps_name(ps));
+    } else if (strcmp(args, "stats") == 0) {
+        wifi_ap_record_t ap;
+        if (!atomic_load(&wifi_started) || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+            console_reply("wifi: not connected");
+            return;
+        }
+        wifi_bandwidth_t bw  = 0;
+        int8_t           pwr = 0;
+        bool             bw_ok  = esp_wifi_get_bandwidth(WIFI_IF_STA, &bw) == ESP_OK;
+        bool             pwr_ok = esp_wifi_get_max_tx_power(&pwr) == ESP_OK;
+        console_reply("wifi: rssi %d dBm, channel %u%s, phy%s%s%s%s", ap.rssi, ap.primary,
+                      ap.second == WIFI_SECOND_CHAN_ABOVE   ? "+above"
+                      : ap.second == WIFI_SECOND_CHAN_BELOW ? "+below"
+                                                            : "", ap.phy_11b ? " b" : "", ap.phy_11g ? " g" : "",
+                      ap.phy_11n ? " n" : "", ap.phy_11ax ? " ax" : "");
+        console_reply("wifi: bandwidth %s, max TX power %s%d.%02d dBm (%s), power save %s",
+                      !bw_ok ? "?" : bw == WIFI_BW20 ? "HT20" : bw == WIFI_BW40 ? "HT40" : "other",
+                      pwr_ok ? "" : "? ", pwr / 4, (pwr % 4) * 25, atomic_load(&wifi_tx_raw) ? "set" : "default",
+                      wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode)));
+    } else if (strncmp(args, "tx ", 3) == 0 || strcmp(args, "tx") == 0) {
+        int raw = args[2] ? atoi(args + 3) : -1;
+        if (raw != 0 && (raw < 8 || raw > 80)) {
+            console_reply("wifi tx <8-80> (0.25 dBm units: 34 = 8.5, 52 = 13, 80 = 20 dBm) | wifi tx 0 (default)");
+            return;
+        }
+        atomic_store(&wifi_tx_raw, raw);
+        if (atomic_load(&wifi_started)) {
+            set_wifi_tx(raw ? raw : WIFI_TX_DEFAULT_RAW);
+        }
+        console_reply("wifi: max TX power %s (not saved; fw wifi stats reads it back)", raw ? "set" : "back to 20 dBm");
+    } else if (strcmp(args, "bw 20") == 0 || strcmp(args, "bw 40") == 0 || strcmp(args, "bw") == 0) {
+        if (!args[2]) {
+            console_reply("wifi bw 20 | 40 (reconnects to apply, not saved)");
+            return;
+        }
+        atomic_store(&wifi_bw_mhz, args[3] == '2' ? 20 : 40);
+        msg_t m = {.type = MSG_RECONNECT}; // the bandwidth is agreed at association; STA_START/connect apply it
+        console_reply(post(&m) ? "wifi: bandwidth %s MHz, reconnecting (a few seconds)" : "wifi: busy, try again",
+                      args + 3);
     } else if (strcmp(args, "--clear") == 0) {
         msg_t m = {.type = MSG_FORGET};
         console_reply(post(&m) ? "wifi: credentials removed" : "wifi: busy, try again");
@@ -1297,7 +1368,7 @@ bool c6link_start(void) {
     console_register("c6", "c6 [reflash | verify | reset [rom] | reattach]", cmd_c6);
     clock_console_register();
     console_register("net", "net (Wi-Fi state and IP)", cmd_net);
-    console_register("wifi", "wifi [on | off | scan | reconnect | ps [none | min] | <ssid> <password> | --clear]", cmd_wifi);
+    console_register("wifi", "wifi [on | off | scan | reconnect | stats | ps [none | min] | tx <8-80> | bw 20|40 | <ssid> <password> | --clear]", cmd_wifi);
     c6_sup_start();
     scan_done   = xSemaphoreCreateBinary();
     scan_lock   = xSemaphoreCreateMutex();
