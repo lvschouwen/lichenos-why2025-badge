@@ -12,8 +12,13 @@ static bool up, service_up;
 
 char const *lichen_mdns_name(void) {
     if (!name[0]) {
-        uint8_t mac[6] = {0};
-        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+        // The P4 has no Wi-Fi of its own: ESP_MAC_WIFI_STA is not a MAC type here (esp_read_mac fails, the name came
+        // out lichen-0000). The factory base MAC in eFuse is unique per chip.
+        uint8_t   mac[6] = {0};
+        esp_err_t err    = esp_efuse_mac_get_default(mac);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "no factory MAC (%s): the name ends in 0000", esp_err_to_name(err));
+        }
         mdns_name_from_mac(mac, name, sizeof(name));
     }
     return name;
