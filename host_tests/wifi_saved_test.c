@@ -79,11 +79,21 @@ static void open_never_auto(void) {
     CHECK(at >= 0 && strcmp(l.e[at].ssid, "home") == 0); // the weaker secured one, not the stronger open one
 }
 
+// A stronger open twin of a saved secured name must not hide the real AP in a raw scan
+static void raw_scan_twin(void) {
+    wifi_saved_t l = {0};
+    wifi_saved_add(&l, "home", "homepassword");
+    wifi_ap_t raw[] = {ap("home", -30, true), ap("home", -60, false)};
+    int       at    = wifi_saved_pick(&l, raw, 2, 0);
+    CHECK(at == 0);
+}
+
 int main(void) {
     add_forget();
     migrate();
     pick();
     open_never_auto();
+    raw_scan_twin();
     if (failures) {
         return 1;
     }

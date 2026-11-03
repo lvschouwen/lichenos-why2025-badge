@@ -213,6 +213,13 @@ static void scan_task(void *arg) {
         lvgl_port_lock(0); // lv_async_call is not thread safe
         lv_async_call(on_scan_done, res);
         lvgl_port_unlock();
+    } else {
+        lvgl_port_lock(0); // no memory: the screen must not wait for a scan that will never report
+        if (an && (uint32_t)(uintptr_t)arg == gen) {
+            an->scanning = false;
+            set_status("Out of memory. Trying again.");
+        }
+        lvgl_port_unlock();
     }
     vTaskDelete(NULL);
 }

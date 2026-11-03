@@ -216,15 +216,16 @@ bool wifi_cred_forget(char const *ssid, bool *was_active, bool *left) {
     wifi_cred_load(act, pass);
     bool active = strcmp(act, ssid) == 0;
     bool ok     = wifi_saved_forget(&l, ssid) && saved_store(&l);
-    if (ok && active) {
-        set_active(l.n ? l.e[0].ssid : NULL, l.n ? l.e[0].pass : "");
-    }
+    // If the pair in use cannot be replaced, wifi_ssid still names the forgotten network: that is a failure, and the
+    // caller still has to drop it from the driver (was_active)
+    bool swapped = !(ok && active) || set_active(l.n ? l.e[0].ssid : NULL, l.n ? l.e[0].pass : "");
     if (ok) {
         generation++;
     }
     if (was_active) {
         *was_active = ok && active;
     }
+    ok = ok && swapped;
     if (left) {
         *left = l.n > 0;
     }

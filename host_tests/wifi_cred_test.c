@@ -71,6 +71,14 @@ static void saved_networks(void) {
     CHECK(wifi_saved_load(&l) && l.n == 2 && strcmp(l.e[0].ssid, "b-net") == 0);
     CHECK(!wifi_cred_activate("nope"));
 
+    // Forgetting the pair in use when the pair cannot be replaced: failure, but the caller still learns it was in use
+    CHECK(wifi_cred_clear());
+    CHECK(wifi_cred_save("x-net", "passwordxxx"));
+    CHECK(wifi_cred_save("y-net", "passwordyyy"));
+    nvs_stub_fail_set(3); // two writes for the list, then wifi_ssid
+    CHECK(!wifi_cred_forget("y-net", &active, &left) && active);
+    nvs_stub_fail_set(0);
+
     // The factory reset and "fw wifi --clear" remove every saved network, not only the one in use
     CHECK(wifi_cred_clear());
     CHECK(wifi_saved_load(&l) && l.n == 0 && !wifi_cred_load(s, p));

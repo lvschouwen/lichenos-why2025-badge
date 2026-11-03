@@ -10,6 +10,7 @@
 #include "fw_console.h"
 #include "lichen_clock.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_hosted.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -579,8 +580,7 @@ static uint8_t  fail_count;
 static uint32_t next_scan_at;
 
 static void choose_network(bool current_failed) {
-    static wifi_saved_t list;
-    static wifi_ap_t    aps[SCAN_RECORDS];
+    static wifi_saved_t list, fresh;
     uint32_t            now = now_ms();
     size_t              n   = 0;
     if (atomic_load(&updating) || (int32_t)(now - next_scan_at) < 0) {
@@ -602,16 +602,33 @@ static void choose_network(bool current_failed) {
         tried_mask |= (uint8_t)(1u << at);
     }
     next_scan_at = now + SCAN_GAP_MS;
-    int pick     = wifi_scan(aps, SCAN_RECORDS, &n) ? wifi_saved_pick(&list, aps, n, tried_mask) : -1;
-    if (pick < 0 && tried_mask && n) { // all tried: start over with the strongest
-        tried_mask = 0;
-        pick       = wifi_saved_pick(&list, aps, n, 0);
+    // Raw scan (every BSSID): a stronger open twin of a saved secured name must not hide the real AP. In PSRAM: ~2 KB
+    wifi_ap_t *aps = heap_caps_calloc(SCAN_RECORDS, sizeof(*aps), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    int        pick = -1;
+    if (aps && wifi_scan_raw(aps, SCAN_RECORDS, &n)) {
+        pick = wifi_saved_pick(&list, aps, n, tried_mask);
+        if (pick < 0 && tried_mask) { // all tried: start over with the strongest
+            tried_mask = 0;
+            pick       = wifi_saved_pick(&list, aps, n, 0);
+        }
     }
-    if (pick >= 0 && apply_config(list.e[pick].ssid, list.e[pick].pass)) {
-        portENTER_CRITICAL(&state_lock);
-        copy_text(ssid, sizeof(ssid), list.e[pick].ssid);
-        portEXIT_CRITICAL(&state_lock);
-        ESP_LOGI(TAG, "wifi: %d saved networks, joining the strongest in range", (int)list.n); // no names in the log
+    heap_caps_free(aps);
+    if (pick >= 0) {
+        // The scan took seconds: a Forget may have come in meanwhile. Under the lock Forget also takes, check the
+        // pick against the list as it is now and apply it; Forget then sees it as the driver's network and revokes it.
+        char name[33];
+        copy_text(name, sizeof(name), list.e[pick].ssid);
+        xSemaphoreTake(saved_lock, portMAX_DELAY);
+        wifi_saved_load(&fresh);
+        int now_at = wifi_saved_find(&fresh, name);
+        if (now_at >= 0 && apply_config(fresh.e[now_at].ssid, fresh.e[now_at].pass)) {
+            portENTER_CRITICAL(&state_lock);
+            copy_text(ssid, sizeof(ssid), name);
+            portEXIT_CRITICAL(&state_lock);
+            ESP_LOGI(TAG, "wifi: %d saved networks, joining the strongest in range", (int)fresh.n); // no names
+        }
+        xSemaphoreGive(saved_lock);
+        wifi_saved_wipe(&fresh);
     }
     wifi_saved_wipe(&list);
 }
@@ -741,8 +758,12 @@ static void handle_got_ip(void) {
         copy_text(cur, sizeof(cur), ssid);
         portEXIT_CRITICAL(&state_lock);
         xSemaphoreTake(saved_lock, portMAX_DELAY);
-        wifi_cred_activate(cur);
+        bool kept = wifi_cred_activate(cur);
         xSemaphoreGive(saved_lock);
+        if (!kept) { // forgotten while it was being joined: drop it
+            msg_t m = {.type = MSG_RECONNECT, .reason = 1};
+            post(&m);
+        }
     } else if (trial && ev == JOIN_EV_GOT_IP_OTHER) {
         ESP_LOGW(TAG, "wifi: an IP, but not on the network being tried: not saved, still trying");
     }
@@ -920,7 +941,7 @@ bool wifi_forget_network(char const *name) {
     copy_text(cur, sizeof(cur), ssid);
     copy_text(tried, sizeof(tried), trial_ssid);
     portEXIT_CRITICAL(&state_lock);
-    if (ok && (was_active || strcmp(cur, name) == 0 || strcmp(tried, name) == 0)) { // the next saved one (or none) takes over
+    if ((ok || was_active) && (was_active || strcmp(cur, name) == 0 || strcmp(tried, name) == 0)) { // the next saved one (or none) takes over
         msg_t m = {.type = left ? MSG_RECONNECT : MSG_FORGET, .reason = 1};
         post(&m);
     }
