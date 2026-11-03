@@ -155,7 +155,7 @@ static lv_obj_t *build_new(void) {
 
 static void on_note(void *arg) {
     s_shown = (size_t)(intptr_t)arg;
-    shell_open(build_entry, SCREEN_NOTES_ENTRY);
+    shell_open_keyed(build_entry, SCREEN_NOTES_ENTRY, (uint32_t)(intptr_t)arg + 1); // one screen per note
 }
 
 typedef struct {

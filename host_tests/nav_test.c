@@ -55,6 +55,33 @@ int main(void) {
     CHECK(nav_current() == NAV_HOME);
     CHECK(nav_depth() == 1);
 
+    // Identity is (id, key) (#148): the same id with another key is another screen
+    int frame;
+    nav_reset();
+    CHECK(nav_decide(5, 0, &frame) == NAV_OPEN_NEW && frame == -1);
+    CHECK(nav_push_keyed(5, 7));
+    CHECK(nav_push_keyed(6, 0));
+    CHECK(nav_decide(6, 0, &frame) == NAV_OPEN_KEEP && frame == 2); // on top
+    CHECK(nav_decide(5, 7, &frame) == NAV_OPEN_BACK_TO && frame == 1); // lower: go back, not a second copy
+    CHECK(nav_decide(5, 8, &frame) == NAV_OPEN_NEW);                   // another chat of the same screen id
+    CHECK(nav_decide(5, 0, &frame) == NAV_OPEN_NEW);
+    CHECK(!nav_push_keyed(5, 7)); // a second copy is refused by the stack itself
+    CHECK(nav_depth() == 3);
+    CHECK(nav_push_keyed(5, 8)); // different keys stack
+    CHECK(nav_key_at(1) == 7 && nav_key_at(3) == 8 && nav_key_at(4) == 0);
+    CHECK(nav_decide(NAV_HOME, 0, &frame) == NAV_OPEN_BACK_TO && frame == 0);
+    CHECK(nav_back() == 6);
+    CHECK(nav_decide(5, 8, &frame) == NAV_OPEN_NEW); // left: opens again
+    nav_reset();
+    CHECK(nav_push_keyed(9, NAV_KEY_UNIQUE));
+    CHECK(nav_decide(9, NAV_KEY_UNIQUE, &frame) == NAV_OPEN_NEW); // "always new" never matches
+    CHECK(nav_push_keyed(9, NAV_KEY_UNIQUE));
+    CHECK(nav_decide(9, 0, &frame) == NAV_OPEN_NEW);
+    CHECK(nav_key_hash("ab", 2) != nav_key_hash("ba", 2));
+    CHECK(nav_key_hash("ab", 2) == nav_key_hash("ab", 2));
+    CHECK(nav_key_hash("", 0) != NAV_KEY_UNIQUE);
+    nav_reset();
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

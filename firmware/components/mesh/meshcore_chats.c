@@ -233,29 +233,3 @@ static lv_obj_t *build(void) {
 void meshcore_chats_open(void) {
     shell_open(build, SCREEN_CHATS);
 }
-
-// How far below the top of the shell's stack the nearest Chat list is (0: on top), -1 when there is none
-static int list_depth(void) {
-    int depth = 0;
-    for (lv_obj_t *s = shell_stack_screen(0); s; s = shell_stack_screen(++depth)) {
-        for (chats_t *c = live; c; c = c->next) {
-            if (c->screen == s) {
-                return depth;
-            }
-        }
-    }
-    return -1;
-}
-
-static void no_follow_up(void *arg) {
-    (void)arg;
-}
-
-void meshcore_chats_show(void) {
-    int depth = list_depth();
-    switch (mesh_chats_show_how(depth)) {
-        case MESH_CHATS_SHOW_OPEN: meshcore_chats_open(); break;
-        case MESH_CHATS_SHOW_BACK: shell_back_to(shell_stack_screen(depth), no_follow_up, NULL); break;
-        case MESH_CHATS_SHOW_KEEP: break;
-    }
-}

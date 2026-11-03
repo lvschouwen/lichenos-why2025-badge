@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SCREEN_BATTERY 160
+#define SCREEN_BATTERY 152 // not 160: that was the MeshCore contact page, and ids are identities now (#148)
 #define SCROLL_STEP    96
 #define REFRESH_MS     1000
 #define ALERT_STACK    6144

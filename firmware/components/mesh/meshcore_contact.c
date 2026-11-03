@@ -309,7 +309,7 @@ static void open_trace(mt_kind_t kind) {
         return;
     }
     trace_kind = kind;
-    shell_open(build_trace, SCREEN_TRACE);
+    shell_open_keyed(build_trace, SCREEN_TRACE, shell_key_hash(prefix, sizeof(prefix)) + (uint32_t)kind);
 }
 
 static void on_trace(void *arg) {
@@ -347,7 +347,7 @@ static lv_obj_t *build_share(void) {
 
 static void on_share(void *arg) {
     (void)arg;
-    shell_open(build_share, SCREEN_SHARE);
+    shell_open_keyed(build_share, SCREEN_SHARE, shell_key_hash(prefix, sizeof(prefix)));
 }
 
 // ---- Remove and Reset path: DANGER rows, the careful dialog is the row's own (menu_set_danger) -----------------------
@@ -433,5 +433,5 @@ void meshcore_contact_open(mesh_contact_t const *c) {
     snprintf(title, sizeof(title), "%s", c->name);
     type        = c->type;
     list_screen = lv_screen_active();
-    shell_open(build_detail, SCREEN_CONTACT);
+    shell_open_keyed(build_detail, SCREEN_CONTACT, shell_key_hash(prefix, sizeof(prefix))); // one page per contact
 }

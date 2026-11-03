@@ -751,7 +751,7 @@ static void open_target(mesh_chat_target_t const *want) {
         }
         case MESH_CHAT_OPEN_PUSH:
             building = want;
-            shell_open(build_chat, want->dm ? SCREEN_DM : SCREEN_CHAT);
+            shell_open_keyed(build_chat, want->dm ? SCREEN_DM : SCREEN_CHAT, shell_key_hash(&want->key, sizeof(want->key)));
             building = NULL;
             return;
     }

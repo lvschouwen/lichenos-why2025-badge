@@ -192,5 +192,5 @@ static lv_obj_t *build(void) {
 
 void meshcore_contacts_open(mesh_contact_view_t v) {
     view = v <= MESH_VIEW_CONTACTS ? v : MESH_VIEW_CONTACTS;
-    shell_open(build, SCREEN_CONTACTS);
+    shell_open_keyed(build, SCREEN_CONTACTS, (uint32_t)view + 1); // Contacts, Repeaters, Heard: one screen each
 }

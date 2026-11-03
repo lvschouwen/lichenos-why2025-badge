@@ -28,10 +28,3 @@ mesh_chat_open_t mesh_chat_open_how(mesh_chat_target_t const *top, mesh_chat_tar
     }
     return mesh_chat_target_same(top, want) ? MESH_CHAT_OPEN_KEEP : MESH_CHAT_OPEN_REPLACE;
 }
-
-mesh_chats_show_t mesh_chats_show_how(int list_depth) {
-    if (list_depth < 0) {
-        return MESH_CHATS_SHOW_OPEN;
-    }
-    return list_depth == 0 ? MESH_CHATS_SHOW_KEEP : MESH_CHATS_SHOW_BACK;
-}

@@ -303,7 +303,7 @@ static lv_obj_t *build_entry(void) {
 static void on_entry(void *arg) {
     s_v.shown = (size_t)(intptr_t)arg;
     s_v.focus = s_v.shown;
-    shell_open(build_entry, SCREEN_CRASH_ENTRY);
+    shell_open_keyed(build_entry, SCREEN_CRASH_ENTRY, (uint32_t)(uintptr_t)arg + 1); // one screen per entry
 }
 
 // ---- the app ------------------------------------------------------------------------------------------------------

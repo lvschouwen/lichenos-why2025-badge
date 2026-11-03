@@ -410,11 +410,52 @@ void shell_open_app(size_t index) {
     lvgl_port_unlock();
 }
 
+static unsigned reused_count; // shell_open calls answered by a screen that was already open (#148)
+
+unsigned shell_open_reuse_count(void) {
+    return reused_count;
+}
+
+// (id, key) is already on the stack (#148): nothing for the top one, else go back to it instead of building a second copy.
+// A dialog over everything is not closed from under its owner: the person answers it
+// first (the dialog keeps its callback's screen alive), so the open is refused then. A screensaver or lock cover
+// needs no care: back_step only touches the stack and show_top keeps the cover in front.
+static void reuse_open(nav_open_t how, int frame, int screen_id) {
+    if (how == NAV_OPEN_KEEP) {
+        reused_count++;
+    } else if (shell_dialog_group()) {
+        ESP_LOGW(TAG, "screen %d is open below, not going back while a dialog is open", screen_id);
+    } else if (!back_later(frames[frame].screen, NULL, NULL)) {
+        ESP_LOGW(TAG, "screen %d is open below, going back to it failed", screen_id);
+    } else {
+        reused_count++;
+    }
+}
+
+uint32_t shell_key_hash(void const *data, size_t len) {
+    return nav_key_hash(data, len);
+}
+
 void shell_open(lv_obj_t *(*build)(void), int screen_id) {
+    shell_open_keyed(build, screen_id, 0);
+}
+
+void shell_open_keyed(lv_obj_t *(*build)(void), int screen_id, uint32_t key) {
     lvgl_port_lock(0);
-    if (!frames[0].screen || home_settling() || !nav_push(screen_id)) {
-        ESP_LOGW(TAG, "screen %d not opened (%s)", screen_id,
-                 !frames[0].screen || fading ? "still booting" : "stack full or already open");
+    if (!frames[0].screen || home_settling()) {
+        ESP_LOGW(TAG, "screen %d not opened (still booting)", screen_id);
+        lvgl_port_unlock();
+        return;
+    }
+    int        frame = -1;
+    nav_open_t how   = nav_decide(screen_id, key, &frame);
+    if (how != NAV_OPEN_NEW) {
+        reuse_open(how, frame, screen_id);
+        lvgl_port_unlock();
+        return;
+    }
+    if (!nav_push_keyed(screen_id, key)) {
+        ESP_LOGW(TAG, "screen %d not opened (stack full)", screen_id);
         lvgl_port_unlock();
         return;
     }
@@ -456,11 +497,12 @@ void shell_close_all_but_top(void) {
     // The top screen is showing: delete the others only once it has its own slot, so none is deleted twice
     frame_t old[NAV_MAX_DEPTH];
     int     top_id = nav_current();
+    uint32_t top_key = nav_key_at(depth - 1);
     frame_t top    = frames[depth - 1];
     memcpy(old, frames, sizeof(old));
     memset(frames, 0, sizeof(frames));
     nav_reset();
-    nav_push(top_id);
+    nav_push_keyed(top_id, top_key);
     frames[1] = top;
     show_top();
     for (int i = 0; i < depth - 1; i++) {

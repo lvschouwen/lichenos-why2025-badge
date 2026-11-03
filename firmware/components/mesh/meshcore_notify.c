@@ -112,5 +112,5 @@ void meshcore_open_notification(char const *target, uint32_t id) {
             }
         }
     }
-    meshcore_chats_show(); // not a second list on top of one that is already on the stack (#147)
+    meshcore_chats_open(); // the shell goes back to a Chat list that is already on the stack (#148)
 }

@@ -14,7 +14,7 @@
 
 #include <string.h>
 
-#define SCREEN_WELCOME 101
+#define SCREEN_WELCOME 99 // not 101: Settings > Display
 
 static char const TAG[] = "setup";
 

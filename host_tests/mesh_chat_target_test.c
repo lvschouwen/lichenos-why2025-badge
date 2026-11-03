@@ -86,11 +86,6 @@ int main(void) {
     CHECK(mesh_chat_open_how(&chan, &bob) == MESH_CHAT_OPEN_REPLACE);
     CHECK(mesh_chat_open_how(&bob, &chan) == MESH_CHAT_OPEN_REPLACE);
 
-    // Showing the Chat list (#147): a notice whose chat is gone must not stack a second list
-    CHECK(mesh_chats_show_how(-1) == MESH_CHATS_SHOW_OPEN);
-    CHECK(mesh_chats_show_how(0) == MESH_CHATS_SHOW_KEEP);
-    CHECK(mesh_chats_show_how(3) == MESH_CHATS_SHOW_BACK);
-
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

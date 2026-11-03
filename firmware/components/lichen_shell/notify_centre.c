@@ -149,7 +149,7 @@ static lv_obj_t *build_detail(void) {
 
 static void open_detail(uint32_t id) {
     s_detail_id = id;
-    shell_open(build_detail, SCREEN_NOTIFY_DETAIL);
+    shell_open_keyed(build_detail, SCREEN_NOTIFY_DETAIL, id); // one page per notice
 }
 
 // ---- opening a notice --------------------------------------------------------------------------------------------------
@@ -198,9 +198,10 @@ void notify_open_entry(uint32_t id) {
     if (!lichen_notify_get(id, &s_entry)) {
         return;
     }
-    int depth = nav_depth();
+    int      depth  = nav_depth();
+    unsigned reused = shell_open_reuse_count();
     open_where(id);
-    if (nav_depth() > depth) {
+    if (nav_depth() > depth || shell_open_reuse_count() != reused) { // a new screen, or the one already open
         lichen_notify_mark_read_id(id);
     }
 }

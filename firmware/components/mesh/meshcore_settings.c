@@ -1248,7 +1248,7 @@ static lv_obj_t *build_channel(void) {
 
 static void open_channel(void *arg) {
     snprintf(pending_channel, sizeof(pending_channel), "%s", (char const *)arg);
-    shell_open(build_channel, SCREEN_CHANNEL);
+    shell_open_keyed(build_channel, SCREEN_CHANNEL, shell_key_hash(pending_channel, strlen(pending_channel)));
 }
 
 static lv_obj_t *build_channels(void) {

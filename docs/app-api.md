@@ -28,6 +28,12 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   directories; the hooks (`open`, `start_background`, `stop_for_update`, `first_run_set`...) are how the OS calls it.
 - `lichen_ui.h`: text you do not control (names, file names, device values) goes in `lichen_label_line` (one line,
   "...") or `lichen_label_wrap`, never a bare `lv_label_create`; `fw ui overflow` lists labels that do not fit (#133).
+- Screen identity (#148): a screen is (`screen_id`, key); `shell_open` uses key 0. The shell never stacks a second copy of
+  an identity that is already open: on top it does nothing, lower down it goes back to it (`shell_back_to`; refused
+  while a dialog is open), so a screen may keep its state in file statics. A screen id that shows one of many things (a
+  chat, a contact, a file) opens with `shell_open_keyed(build, id, key)`, the key from `shell_key_hash(bytes, len)` of what
+  identifies it; different keys stack. `SHELL_KEY_UNIQUE` means always new (the state must then hang on the screen).
+  Give each screen its own `screen_id` across the whole firmware: the same id with key 0 is the same screen.
 - `lichen_ui.h`: navigation (`shell_open`, `shell_page_create`, `shell_back_then/_to`, `shell_stack_screen`, `shell_home`, `shell_on_esc`,
   `shell_on_search`, scroll helpers), the countdown dialog, `lichen_screen_locked()`. Screen code runs on the LVGL task;
   never swap the default group or the active screen yourself. `lichen_ui_call(fn, arg)` hands a result from any task

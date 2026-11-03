@@ -13,7 +13,21 @@
 void shell_home(void);
 // Builds a screen (lv_obj_create(NULL), runs in LVGL context) and shows it on top of the stack; Esc goes back. The
 // builder's focusable widgets are put in a group of their own (the default group while it runs).
+//
+// One screen per identity (#148): a screen is (screen_id, key), shell_open's key is 0. Opening an identity that is
+// already on the stack never builds a second copy: on top it does nothing (a repeated Enter), lower down the shell goes
+// back to it (as shell_back_to; refused while a dialog is open). So a screen may keep its state in file statics.
 void shell_open(lv_obj_t *(*build)(void), int screen_id);
+// shell_open for a screen id that shows one of many things (a chat, a contact, a file): key says which one, e.g.
+// shell_key_hash() of what identifies it. Different keys stack as separate screens, the same key is the same screen.
+// SHELL_KEY_UNIQUE: always a new screen, never matched (state must then live in the screen, not in statics).
+#define SHELL_KEY_UNIQUE 0xFFFFFFFFu
+void shell_open_keyed(lv_obj_t *(*build)(void), int screen_id, uint32_t key);
+// A key from bytes (a contact's key prefix, a path, a chat key); never SHELL_KEY_UNIQUE
+uint32_t shell_key_hash(void const *data, size_t len);
+// How many shell_open calls found their screen already open (on top, or went back to it); an opener that marks
+// something done only when a screen really opened compares it before and after (notify_centre.c)
+unsigned shell_open_reuse_count(void);
 // Called from inside a builder: the screen gets first use of Esc. fn(arg) runs on Esc (LVGL context); when it returns
 // true the Esc is used up (a search or a draft was cleared), otherwise the screen goes back as usual (#32).
 void shell_on_esc(bool (*fn)(void *arg), void *arg);

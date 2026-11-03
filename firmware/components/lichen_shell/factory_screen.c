@@ -7,7 +7,7 @@
 #include "menu.h"
 #include "shell_parts.h"
 
-#define SCREEN_FACTORY 170
+#define SCREEN_FACTORY 174 // not 170: the Chat list
 #define ASK_SECONDS    15
 
 static char const TAG[] = "factory";

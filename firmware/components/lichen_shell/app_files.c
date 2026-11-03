@@ -373,7 +373,7 @@ static void open_view(char const *path) {
         return;
     }
     snprintf(s_t->path, sizeof(s_t->path), "%s", path);
-    shell_open(build_view, SCREEN_FILES_VIEW);
+    shell_open_keyed(build_view, SCREEN_FILES_VIEW, shell_key_hash(path, strlen(path))); // one viewer per file
     if (s_t && !s_t->text) { // the shell did not open it (no builder ran): nothing will free the state
         heap_caps_free(s_t);
         s_t = NULL;

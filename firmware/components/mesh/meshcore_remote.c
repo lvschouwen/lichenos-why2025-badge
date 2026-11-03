@@ -160,7 +160,7 @@ static void login_entered(char const *password, void *arg) {
     (void)arg;
     snprintf(pw_hold, sizeof(pw_hold), "%s", password);
     pw_pending = true;
-    shell_open(build_login, SCREEN_LOGIN); // the Enter that closed the entry is the person's go-ahead
+    shell_open_keyed(build_login, SCREEN_LOGIN, shell_key_hash(target, sizeof(target))); // the Enter that closed the entry is the person's go-ahead
 }
 
 void meshcore_remote_login(uint8_t const prefix[6], char const *name) {
@@ -244,7 +244,7 @@ static lv_obj_t *build_status(void) {
 
 void meshcore_remote_status(uint8_t const prefix[6], char const *name) {
     set_target(prefix, name);
-    shell_open(build_status, SCREEN_STATUS);
+    shell_open_keyed(build_status, SCREEN_STATUS, shell_key_hash(target, sizeof(target)));
 }
 
 // ---- CLI --------------------------------------------------------------------------------------------------------------
@@ -351,5 +351,5 @@ static lv_obj_t *build_cli(void) {
 
 void meshcore_remote_cli(uint8_t const prefix[6], char const *name) {
     set_target(prefix, name);
-    shell_open(build_cli, SCREEN_CLI);
+    shell_open_keyed(build_cli, SCREEN_CLI, shell_key_hash(target, sizeof(target)));
 }

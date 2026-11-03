@@ -465,5 +465,5 @@ static lv_obj_t *build(void) {
 void meshcore_remote_settings(uint8_t const prefix[6], char const *name) {
     memcpy(target, prefix, sizeof(target));
     snprintf(title, sizeof(title), "%s", name[0] ? name : "(no name)");
-    shell_open(build, SCREEN_RSET);
+    shell_open_keyed(build, SCREEN_RSET, shell_key_hash(target, sizeof(target)));
 }
