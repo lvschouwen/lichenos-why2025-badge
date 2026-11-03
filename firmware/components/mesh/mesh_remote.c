@@ -183,6 +183,9 @@ bool rr_on_login(rr_t *r, mf_msg_t const *m, uint32_t now_ms) {
     }
     r->done_ms = now_ms;
     wipe(r->arg, sizeof(r->arg));
+    if (r->notag && memcmp(r->notag_prefix, r->prefix, MF_PREFIX) == 0) {
+        r->notag = false; // a login is a fresh start with that repeater (it may have been updated since)
+    }
     if (m->kind == MF_LOGIN_SUCCESS) {
         r->state    = RR_DONE;
         r->logged_in = true;
@@ -283,7 +286,8 @@ bool rr_on_message(rr_t *r, mf_msg_t const *m, uint32_t now_ms) {
     if (no_tags && waiting) {
         r->notag = true;
         memcpy(r->notag_prefix, r->cli_prefix, MF_PREFIX);
-        text = "Unknown command (this repeater does not read tags: send it again)";
+        append_reply(x, text); // the repeater's own words stay, the explanation follows
+        text = "(this repeater does not read tags: send it again)";
     }
     append_reply(x, text); // a second message within RR_APPEND_MS is a reply in several parts
     if (waiting) {
@@ -296,6 +300,9 @@ bool rr_on_message(rr_t *r, mf_msg_t const *m, uint32_t now_ms) {
 }
 
 void rr_logout(rr_t *r, uint8_t const prefix[MF_PREFIX]) {
+    if (r->notag && memcmp(r->notag_prefix, prefix, MF_PREFIX) == 0) {
+        r->notag = false; // a new session may be to a repeater that was updated meanwhile: ask with a tag again
+    }
     if (r->logged_in && memcmp(r->login_prefix, prefix, MF_PREFIX) == 0) {
         r->logged_in = r->admin = false;
     }

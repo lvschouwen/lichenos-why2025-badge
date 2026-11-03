@@ -2203,7 +2203,7 @@ static void console_remote_show(void) {
 }
 
 // A CLI command from the console. A reboot or a radio change needs the word YES after it, as the screen asks with a
-// dialog (rs_cmd_confirm: one list for both, #123); erase is refused further down. 0 with *why NULL: asked for the YES.
+// dialog (rs_cmd_confirm: one list for both, #123); erase is refused further down. 0 with *why saying why (the YES is missing, or MeshCore refused).
 static uint32_t console_remote_cli(uint8_t const prefix[6], char const *text, char const **why) {
     char big[RR_CMD_MAX + 5]; // room for " YES": a longer command is refused by rr_request, not cut
     char cmd[RR_CMD_MAX + 5];
@@ -2212,10 +2212,10 @@ static uint32_t console_remote_cli(uint8_t const prefix[6], char const *text, ch
     mesh_wipe(big, sizeof(big));
     if (c == RS_CONF_MISSING) {
         bool radio = rs_cmd_class(text) == RS_CMD_RADIO;
-        console_reply("%s: nothing sent. Add YES at the end to send it: fw mesh remote <who> cli <command> YES",
-                      radio ? "a wrong radio setting cuts the repeater off the mesh; only a visit to it undoes that"
-                            : "this restarts or stops the repeater");
-        *why = NULL;
+        *why = radio ? "a wrong radio setting cuts the repeater off the mesh (only a visit to it undoes that): add YES at "
+                     "the end to send it, fw mesh remote <who> cli <command> YES"
+                     : "this restarts or stops the repeater: add YES at the end to send it, fw mesh remote <who> cli "
+                       "<command> YES";
         return 0;
     }
     uint32_t seq = mesh_remote_start(prefix, RR_CLI, cmd, why); // erase is refused in there, YES or not
@@ -2281,9 +2281,6 @@ static void cmd_mesh_remote(char const *args) {
         seq = mesh_remote_start(prefix, RR_STATUS, NULL, &why);
     } else if (strncmp(verb, "cli ", 4) == 0) {
         seq = console_remote_cli(prefix, verb + 4, &why);
-        if (!seq && !why) {
-            return; // asked for the YES and said so
-        }
     } else {
         console_reply("mesh remote <name or key digits> login [password] | status | cli <text> | settings | logout");
         return;

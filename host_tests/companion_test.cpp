@@ -525,6 +525,20 @@ static void remote_checks(BadgeMesh &mesh, rr_t &rr, CountingListener &listener)
     CHECK(rr_request(&rr, RR_STATUS, gone, NULL, (uint32_t)millis(), &why) != 0);
     settle(mesh, 3);
     CHECK(rr.state == RR_FAILED && strstr(rr.why, "not found"));
+
+    // #123: the frame with a password is wiped from the buffer MyMesh was handed when the pipe is asked for the next one
+    // (MyMesh has handled it by then), not left in its command buffer
+    CHECK(rr_request(&rr, RR_LOGIN, peer.pub_key, "hunter3", (uint32_t)millis(), &why) != 0);
+    uint8_t frame[MF_MAX_FRAME + 1], other[MF_MAX_FRAME + 1];
+    size_t  n = mesh.pipe().checkRecvFrame(frame);
+    CHECK(n > 7 && memmem(frame, n, "hunter3", 7) != NULL);
+    mesh.pipe().checkRecvFrame(other);
+    bool zero = true;
+    for (size_t i = 0; i < n; i++) {
+        zero = zero && frame[i] == 0;
+    }
+    CHECK(zero);
+    settle(mesh, 3);
 }
 
 // Packets left in MyMesh's pool (16): taken until none is left, then all given back

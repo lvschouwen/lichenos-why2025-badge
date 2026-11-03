@@ -2,6 +2,7 @@
 // (sdk_apps/ota_receiver/main.c): same protocol (ota_proto.h) so tools/badge.sh ota-* works unchanged. It runs
 // whenever Wi-Fi is up and Settings › Updates over Wi-Fi is on (#44); the token guards every route. Bodies are
 // received into memory and checked before anything touches flash: flash writes while the network is receiving corrupted the stream on this badge (#40).
+#include "secure_wipe.h"
 #include "ota_server.h"
 
 #include "esp_attr.h"
@@ -1123,14 +1124,6 @@ static void console_done(void *ctx, char const *out, size_t len) {
     send_body(((console_reply_ctx_t *)ctx)->fd, head, (size_t)n, out, len);
 }
 
-// Volatile, so the compiler cannot drop it as a dead store before a free (a console line may hold a password, #123)
-static void wipe_bytes(void *p, size_t n) {
-    volatile uint8_t *v = p;
-    while (n--) {
-        *v++ = 0;
-    }
-}
-
 // The command line comes in the body (never logged, it can hold a Wi-Fi password): printable ASCII only
 static bool read_console_line(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len, char *line) {
     size_t want = (size_t)req->content_length;
@@ -1179,7 +1172,7 @@ static void handle_console(int fd, ota_request_t const *req, uint8_t const *pre,
         return;
     }
     if (!read_console_line(fd, req, pre, pre_len, line)) {
-        wipe_bytes(line, CONSOLE_WIFI_CMD_MAX);
+        secure_wipe(line, CONSOLE_WIFI_CMD_MAX);
         free(line);
         free(out);
         respond(fd, 400, "couldn't read a printable command line");
@@ -1187,7 +1180,7 @@ static void handle_console(int fd, ota_request_t const *req, uint8_t const *pre,
     }
     console_reply_ctx_t ctx = {.fd = fd};
     hooks.console_run(line, out, CONSOLE_REPLY, console_done, &ctx); // may restart the badge, after the reply
-    wipe_bytes(line, CONSOLE_WIFI_CMD_MAX);
+    secure_wipe(line, CONSOLE_WIFI_CMD_MAX);
     free(line);
     free(out);
 }
@@ -1328,7 +1321,7 @@ static bool handle_connection(int fd) {
         case OTA_ROUTE_LOG: handle_log(fd, &req); return false;
         case OTA_ROUTE_CONSOLE:
             handle_console(fd, &req, pre, pre_len);
-            wipe_bytes(head_buf + head_len, pre_len); // the body's first bytes were read into the request buffer
+            secure_wipe(head_buf + head_len, pre_len); // the body's first bytes were read into the request buffer
             return false;
         case OTA_ROUTE_REBOOT:
             respond(fd, 200, "rebooting");

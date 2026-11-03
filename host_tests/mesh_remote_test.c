@@ -358,12 +358,32 @@ static void cli_no_tags(void) {
     rr_on_reply(&r, &sent, 1);
     strcpy(msg.text, "Unknown command");
     CHECK(rr_on_message(&r, &msg, 100) && strstr(r.cli[r.cli_head].reply, "does not read tags"));
+    CHECK(strncmp(r.cli[r.cli_head].reply, "Unknown command\n", 16) == 0); // the repeater's own words stay
     r.state = RR_DONE;
     CHECK(rr_request(&r, RR_CLI, A, "ver", 200, &why) == 2);
     CHECK(rr_take(&r, &op, prefix, out, sizeof(out), 200) && strcmp(out, "ver") == 0);
     r.state = RR_DONE;
     CHECK(rr_request(&r, RR_CLI, B, "ver", 300, &why) == 3); // another repeater is asked again with a tag
     CHECK(rr_take(&r, &op, prefix, out, sizeof(out), 300) && out[2] == '|');
+    // logging out of that repeater (or logging in again) forgets it: it may have been updated since
+    CHECK(r.notag);
+    memcpy(r.login_prefix, A, 6);
+    r.logged_in = true;
+    rr_logout(&r, A);
+    CHECK(!r.notag);
+    r.notag = true;
+    memcpy(r.notag_prefix, A, 6);
+    r.state = RR_DONE;
+    CHECK(rr_request(&r, RR_LOGIN, A, "pw", 350, &why) != 0);
+    rr_take(&r, &op, prefix, out, sizeof(out), 350);
+    rr_on_reply(&r, &sent, 351);
+    mf_msg_t lok = {.kind = MF_LOGIN_SUCCESS};
+    memcpy(lok.rprefix, A, 6);
+    CHECK(rr_on_login(&r, &lok, 360) && !r.notag);
+    r.state = RR_DONE;
+    CHECK(rr_request(&r, RR_CLI, B, "ver", 370, &why) != 0);
+    rr_take(&r, &op, prefix, out, sizeof(out), 370);
+    rr_on_reply(&r, &sent, 371);
     // a tagged "Unknown command" is a real one
     rr_on_reply(&r, &sent, 301);
     memcpy(msg.rprefix, B, 6);

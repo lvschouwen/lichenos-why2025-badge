@@ -810,7 +810,7 @@ add_executable(companion_test ${CMAKE_CURRENT_SOURCE_DIR}/companion_test.cpp ${L
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_link.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_ident.c)
 target_link_libraries(companion_test PRIVATE meshcore_companion_host)
-target_include_directories(companion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_include_directories(companion_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
 target_compile_options(companion_test PRIVATE -Wall -Wextra -Wno-unused-parameter)
 add_test(NAME companion_test COMMAND companion_test ${CMAKE_CURRENT_SOURCE_DIR}/vectors/meshcore_rx.txt)
 
