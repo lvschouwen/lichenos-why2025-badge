@@ -278,7 +278,7 @@ static void on_trace_again(void *arg) {
 }
 
 static void on_trace_delete(lv_event_t *e) {
-    trace_t *tr = lv_obj_get_user_data(lv_event_get_target(e));
+    trace_t *tr = lv_obj_get_user_data(lv_event_get_current_target(e));
     if (!tr) {
         return;
     }
@@ -376,7 +376,7 @@ static void on_remove(void *arg) {
 // ---- the details screen ---------------------------------------------------------------------------------------------
 
 static void on_delete(lv_event_t *e) {
-    contact_t *ct = lv_obj_get_user_data(lv_event_get_target(e));
+    contact_t *ct = lv_obj_get_user_data(lv_event_get_current_target(e));
     if (!ct) {
         return;
     }

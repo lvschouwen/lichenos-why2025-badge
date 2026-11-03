@@ -45,16 +45,31 @@ typedef struct {
 static void apply_kind(lv_obj_t *r, row_t *row);
 
 // The one careful dialog at a time that a DANGER row may have open, with what to run on a yes (#135). The row may be
-// gone by the answer, so the action is copied here rather than reached through the row.
+// gone by the answer, so the action is copied here rather than reached through the row. But arg usually belongs to the
+// row's screen: when the row is deleted before the action ran, drop it (on_delete) rather than run it on freed memory
+// (#149). row is only compared, never dereferenced.
 static struct {
     void (*on_enter)(void *);
-    void *arg;
+    void  *arg;
+    row_t *row;
 } danger;
 
 static void fire_danger(void *unused) {
     (void)unused;
-    if (danger.on_enter) {
-        danger.on_enter(danger.arg);
+    void (*fn)(void *) = danger.on_enter;
+    void *arg          = danger.arg;
+    danger.on_enter    = NULL;
+    danger.row         = NULL;
+    if (fn) {
+        fn(arg);
+    }
+}
+
+static void danger_drop(row_t *row) {
+    if (danger.row == row) {
+        lv_async_call_cancel(fire_danger, NULL);
+        danger.on_enter = NULL;
+        danger.row      = NULL;
     }
 }
 
@@ -64,12 +79,14 @@ static void danger_done(bool confirmed) {
         lv_async_call(fire_danger, NULL);
     } else {
         danger.on_enter = NULL;
+        danger.row      = NULL;
     }
 }
 
 static void ask_danger(row_t *row) {
     danger.on_enter = row->on_enter;
     danger.arg      = row->arg;
+    danger.row      = row;
     shell_dialog_t d = {
         .title         = row->danger_question ? row->danger_question : "Are you sure?",
         .hint          = NULL, // generated from confirm_label
@@ -80,6 +97,7 @@ static void ask_danger(row_t *row) {
     };
     if (!shell_dialog_countdown(&d, danger_done)) {
         danger.on_enter = NULL;
+        danger.row      = NULL;
     }
 }
 
@@ -211,6 +229,7 @@ static void on_key(lv_event_t *e) {
 static void on_delete(lv_event_t *e) {
     row_t *row = lv_event_get_user_data(e);
     lv_async_call_cancel(fire_enter, row);
+    danger_drop(row);
     free(row->danger_question);
     free(row->danger_confirm);
     free(row);
