@@ -174,10 +174,12 @@ static lv_obj_t *build(void) {
     s->drawn_heard = UINT32_MAX;
     lv_obj_set_user_data(screen, s);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    // Plain rows without an action, not MENU_INFO: a page whose only rows are info rows opens scrolled to the bottom
+    // with nothing for Up/Down to move to (the #157 Radio health bug, night bench 2026-11-03). Focus starts on top.
     for (int i = 0; i < ROWS; i++) {
         s->row[i] = menu_add(menu, LABELS[i], "", NULL, NULL);
-        menu_set_kind(s->row[i], MENU_INFO);
     }
+    lv_group_focus_obj(s->row[0]);
     s->empty = menu_note(menu, "");
     s->path  = menu_note(menu, "");
     s->rssi_note  = menu_note(menu, "");

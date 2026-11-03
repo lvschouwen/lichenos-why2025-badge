@@ -82,7 +82,8 @@ void BadgeMesh::onAdvertRecv(mesh::Packet *packet, mesh::Identity const &id, uin
 
 void BadgeMesh::onMessageRecv(ContactInfo const &from, mesh::Packet *packet, uint32_t sender_timestamp,
                               char const *text) {
-    mesh_signal_note(from.id.pub_key, false, 0, NULL, _radio->getLastRSSI(), _radio->getLastSNR());
+    // the hop count it came over (review #166: was always 0 = "direct"); the path itself is kept for adverts only
+    mesh_signal_note(from.id.pub_key, false, packet->path_len, NULL, _radio->getLastRSSI(), _radio->getLastSNR());
     MyMesh::onMessageRecv(from, packet, sender_timestamp, text);
 }
 

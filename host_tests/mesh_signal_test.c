@@ -28,7 +28,20 @@ static void key(uint8_t out[SIG_PREFIX], uint8_t n) {
     memset(out, n, SIG_PREFIX);
 }
 
+// A routed direct message keeps its hop count (BadgeMesh::onMessageRecv now passes packet->path_len, review #166);
+// a message never sets the advert path, also with no path bytes given.
+static void routed_message(void) {
+    static sig_table_t t2;
+    sig_init(&t2);
+    uint8_t       k[SIG_PREFIX] = {9, 8, 7, 6, 5, 4};
+    sig_contact_t c;
+    sig_sample_t  s[SIG_SAMPLES];
+    sig_note(&t2, k, SIG_MESSAGE, -950, 20, (uint8_t)((1 << 6) | 3), NULL, 10);
+    CHECK(sig_get(&t2, k, &c) && sig_samples(&c, s, SIG_SAMPLES) == 1 && s[0].hops == 3 && !c.have_path);
+}
+
 int main(void) {
+    routed_message();
     uint8_t a[SIG_PREFIX], b[SIG_PREFIX];
     key(a, 1);
     key(b, 2);
