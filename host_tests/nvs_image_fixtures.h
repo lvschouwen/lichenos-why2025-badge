@@ -1,4 +1,7 @@
 #pragma once
+// SPDX-License-Identifier: Apache-2.0
+// Test data taken from Espressif's ESP-IDF (Apache-2.0, Copyright Espressif Systems (Shanghai) CO LTD): the plain page
+// was generated with their nvs_partition_gen.py, the encrypted one is cut from their nvs_bootloader example image.
 // First 320 bytes (page header, entry table, first 8 entries) of page 0 of two real NVS images, the rest of the page is
 // 0xFF in the tests. nvs_plain_page0: made by IDF's nvs_partition_gen.py (esp-idf-nvs-partition-gen) from a csv with
 // a namespace, a string, a u8 and a blob. nvs_enc_page0: page 0 of IDF's examples/storage/nvs/nvs_bootloader/main/

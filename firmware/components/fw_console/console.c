@@ -549,6 +549,10 @@ static void run(char *line) {
     console_reply("unknown command '%s', try 'fw help'", line);
 }
 
+bool console_from_uart(void) {
+    return capture.task != xTaskGetCurrentTaskHandle();
+}
+
 void console_exec(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx) {
     while (*line == ' ') {
         line++;

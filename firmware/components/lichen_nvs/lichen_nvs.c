@@ -65,16 +65,19 @@ static nvs_image_kind_t scan_partition(void) {
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, NVS_DEFAULT_PART_NAME);
     uint8_t *page = p ? malloc(NVS_IMG_PAGE_SIZE) : NULL;
     if (!page) {
-        return NVS_IMG_EMPTY; // nothing readable: the plain path decides what to do
+        return NVS_IMG_UNKNOWN; // could not look: never encrypt or migrate what was not classified
     }
-    nvs_image_tally_t t = {0};
+    nvs_image_tally_t t           = {0};
+    bool              read_failed = false;
     for (size_t off = 0; off + NVS_IMG_PAGE_SIZE <= p->size; off += NVS_IMG_PAGE_SIZE) {
         if (esp_partition_read(p, off, page, NVS_IMG_PAGE_SIZE) == ESP_OK) {
             nvs_image_tally_page(&t, page);
+        } else {
+            read_failed = true;
         }
     }
     free(page);
-    return nvs_image_tally_kind(&t);
+    return read_failed ? NVS_IMG_UNKNOWN : nvs_image_tally_kind(&t);
 }
 
 // ---- the RAM copy --------------------------------------------------------------------------------------------------
@@ -236,6 +239,10 @@ esp_err_t lichen_nvs_init(void) {
         return nvs_flash_init();
     }
     nvs_image_kind_t kind = scan_partition();
+    if (kind == NVS_IMG_UNKNOWN) {
+        ESP_LOGE(TAG, "nvs partition could not be classified: plain init, nothing encrypted or migrated");
+        return nvs_flash_init();
+    }
     nvs_action_t     act  = nvs_image_decide(true, burned, kind);
     nvs_sec_cfg_t    cfg;
     if (!derive_keys(&cfg)) {
@@ -252,7 +259,7 @@ esp_err_t lichen_nvs_init(void) {
 // ---- fw nvs-enc ----------------------------------------------------------------------------------------------------
 
 static char const *kind_name(nvs_image_kind_t k) {
-    return k == NVS_IMG_PLAIN ? "plaintext" : k == NVS_IMG_ENCRYPTED ? "encrypted" : "empty";
+    return k == NVS_IMG_PLAIN ? "plaintext" : k == NVS_IMG_ENCRYPTED ? "encrypted" : k == NVS_IMG_UNKNOWN ? "unreadable" : "empty";
 }
 
 #if CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD
@@ -260,9 +267,26 @@ static char const *kind_name(nvs_image_kind_t k) {
 
 // The one place in the image that writes an eFuse (and it is only compiled with LICHEN_NVS_ENCRYPT_BURN_CMD). Refuses
 // anything but an unused block; the random key never leaves this function, esp_efuse_write_key read-protects it.
+static bool key_block_all_zero(void) {
+    uint8_t data[32];
+    if (esp_efuse_read_block(KEY_BLK, data, 0, sizeof(data) * 8) != ESP_OK) {
+        return false; // cannot tell: do not burn
+    }
+    uint8_t acc = 0;
+    for (size_t i = 0; i < sizeof(data); i++) {
+        acc |= data[i];
+    }
+    return acc == 0;
+}
+
 static void burn(void) {
-    if (!esp_efuse_key_block_unused(KEY_BLK)) {
-        console_reply("KEY%d is not unused (purpose %d): nothing burned", CONFIG_LICHEN_NVS_HMAC_KEY_ID,
+    if (!console_from_uart()) {
+        console_reply("refused: the eFuse burn runs only from the USB console, not over Wi-Fi");
+        return;
+    }
+    // Both checks: a block with purpose unset can still hold key bits that a second write would OR into a bad key
+    if (!esp_efuse_key_block_unused(KEY_BLK) || !key_block_all_zero()) {
+        console_reply("KEY%d is not empty (purpose %d): nothing burned", CONFIG_LICHEN_NVS_HMAC_KEY_ID,
                       (int)esp_efuse_get_key_purpose(KEY_BLK));
         return;
     }

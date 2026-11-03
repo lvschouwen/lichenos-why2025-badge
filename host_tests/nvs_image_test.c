@@ -66,8 +66,8 @@ static void the_majority_decides(void) {
 // The safety property of #116: no combination asks for a key to be made, and nothing but "enabled + key + plaintext"
 // rewrites the partition
 static void policy_table(void) {
-    nvs_image_kind_t kinds[] = {NVS_IMG_EMPTY, NVS_IMG_PLAIN, NVS_IMG_ENCRYPTED};
-    for (int k = 0; k < 3; k++) {
+    nvs_image_kind_t kinds[] = {NVS_IMG_EMPTY, NVS_IMG_PLAIN, NVS_IMG_ENCRYPTED, NVS_IMG_UNKNOWN};
+    for (int k = 0; k < 4; k++) {
         CHECK(nvs_image_decide(false, false, kinds[k]) == NVS_ACT_PLAIN_INIT);
         CHECK(nvs_image_decide(false, true, kinds[k]) == NVS_ACT_PLAIN_INIT);  // option off: the old behaviour
         CHECK(nvs_image_decide(true, false, kinds[k]) == NVS_ACT_PLAIN_INIT);  // no key burned: never encrypt
@@ -75,6 +75,7 @@ static void policy_table(void) {
     CHECK(nvs_image_decide(true, true, NVS_IMG_EMPTY) == NVS_ACT_SECURE_INIT);
     CHECK(nvs_image_decide(true, true, NVS_IMG_ENCRYPTED) == NVS_ACT_SECURE_INIT);
     CHECK(nvs_image_decide(true, true, NVS_IMG_PLAIN) == NVS_ACT_MIGRATE);
+    CHECK(nvs_image_decide(true, true, NVS_IMG_UNKNOWN) == NVS_ACT_PLAIN_INIT); // never secure_init what was not classified
 }
 
 static void key_pair_checks(void) {

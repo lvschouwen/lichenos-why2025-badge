@@ -5,6 +5,7 @@
 // Serial console on UART0 (#61): lines starting with "fw " are commands, everything else is ignored.
 // Replies are printed as "fw: ...". Modules add their own commands with console_register().
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #define FW_NVS_NAMESPACE "badge_fw"
@@ -25,6 +26,9 @@ void console_set_tap(void (*tap)(char const *text, size_t len));
 // command returns, or earlier if it restarts the badge (system_restart calls it first, so a reply can be sent before
 // the restart). Output of printf/ESP_LOG calls is not collected. Not reentrant.
 typedef void (*console_done_fn)(void *ctx, char const *out, size_t len);
+// True when the calling task runs a line typed on the UART, false inside console_exec (Wi-Fi POST /console). For
+// commands only a person at the cable may run (#116).
+bool console_from_uart(void);
 void console_exec(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx);
 
 // Every deliberate restart goes through here (console, OTA, slot switch, C6 reflash, after an update), not through a

@@ -19,6 +19,7 @@ typedef enum {
     NVS_IMG_EMPTY,     // no written entry anywhere: fresh or erased
     NVS_IMG_PLAIN,     // readable without a key
     NVS_IMG_ENCRYPTED, // entries that do not check out as plaintext
+    NVS_IMG_UNKNOWN,   // could not be looked at (no partition, no memory, read error): never acted on
 } nvs_image_kind_t;
 
 typedef struct {
@@ -39,7 +40,7 @@ typedef enum {
 } nvs_action_t;
 
 // The one policy. `enabled` is the Kconfig switch; `key_burned` says an HMAC key already sits in the configured eFuse
-// block. Nothing here ever asks for a key to be created: no key means plain NVS, whatever the partition holds.
+// block. An UNKNOWN partition is never encrypted or migrated. Nothing here ever asks for a key to be created: no key means plain NVS, whatever the partition holds.
 nvs_action_t nvs_image_decide(bool enabled, bool key_burned, nvs_image_kind_t kind);
 
 // 64 bytes, the XTS key pair as IDF's nvs_sec_cfg_t lays it out (eky then tky). False when either half is all zero
