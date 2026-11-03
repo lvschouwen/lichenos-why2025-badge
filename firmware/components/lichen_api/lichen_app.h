@@ -50,7 +50,7 @@ typedef struct lichen_app {
 
 // Size of the app table. Home scrolls to the selection, so this only bounds the arrays; lichen_register_app logs an error
 // when it is full.
-#define LICHEN_MAX_APPS 16
+#define LICHEN_MAX_APPS 24 // #173: 16 was full with the 2026-11-03 apps; ~110 B internal .bss per slot; ids allow 32 (SCREEN_APP_MAX)
 
 // Before shell_home(). The app struct must stay valid for as long as the badge runs (a static const).
 void lichen_register_app(lichen_app_t const *app);

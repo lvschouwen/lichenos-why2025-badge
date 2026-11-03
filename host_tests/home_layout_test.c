@@ -34,7 +34,7 @@ int main(void) {
     CHECK(home_move(HOME_GRID, 5, 1, HOME_KEY_UP) == 1);
     CHECK(home_move(HOME_GRID, 5, 4, HOME_KEY_LEFT) == 3);
 
-    // More apps than the old table of 8 (LICHEN_MAX_APPS is 16 now): 13 apps, tiles walk to the end and back
+    // More apps than the old table of 8 (LICHEN_MAX_APPS is 24 now, #173): 13 apps, tiles walk to the end and back
     int at = 0;
     for (int i = 0; i < 20; i++) {
         at = home_move(HOME_TILES, 13, at, HOME_KEY_DOWN);

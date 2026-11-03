@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 #define BADGE_ID_CAP 14 // an app id is 1..13 of a-z 0-9 _ (app_ns.h)
-#define BADGE_SLOTS  16 // LICHEN_MAX_APPS (lichen_badge.c checks); lichen_app.h needs LVGL, this is host-built
+#define BADGE_SLOTS  24 // LICHEN_MAX_APPS (lichen_badge.c checks); lichen_app.h needs LVGL, this is host-built
 
 typedef struct {
     struct {
