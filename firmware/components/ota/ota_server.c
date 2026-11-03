@@ -64,6 +64,8 @@
 #define BODY_TOTAL_S    45 // whole send: a client that drips bytes must not hold the one server task
 // Flash writes happen on this task, so its stack must be in internal RAM; peaks measured in BadgeVMS: 7 KB
 #define SERVER_STACK    16384
+// The screenshot worker only renders, compresses and sends from PSRAM, so a small internal stack does (#146)
+#define SHOT_STACK      4096
 
 static char const TAG[] = "ota";
 
@@ -1170,6 +1172,41 @@ static void handle_console(int fd, ota_request_t const *req, uint8_t const *pre,
     free(out);
 }
 
+// A screenshot runs on its own short-lived task so a slow link doesn't hold the one server task: the `fw` console and
+// uploads keep being served meanwhile (#146). Only one at a time: the screen buffer is a single one.
+static volatile bool shot_busy;
+static bool          fd_detached; // set by the handler that took the connection over: serve() must not close it
+
+static void close_lingering(int fd) {
+    // Let the client close first so the TIME_WAIT lands on its side, not on our port
+    set_read_timeout(fd, 0, 500000);
+    uint8_t scratch[64];
+    for (int i = 0; i < 16 && read(fd, scratch, sizeof(scratch)) > 0; i++) {
+    }
+    close(fd);
+}
+
+static void screenshot_task(void *arg) {
+    int fd = (int)(intptr_t)arg;
+    handle_screenshot(fd);
+    close_lingering(fd);
+    shot_busy = false;
+    vTaskDelete(NULL);
+}
+
+static void start_screenshot(int fd) {
+    if (__atomic_exchange_n(&shot_busy, true, __ATOMIC_ACQ_REL)) {
+        respond(fd, 503, "another screenshot is being sent, try again");
+        return;
+    }
+    if (xTaskCreate(screenshot_task, "ota_shot", SHOT_STACK, (void *)(intptr_t)fd, 4, NULL) != pdPASS) {
+        shot_busy = false;
+        respond(fd, 503, "out of memory, try again");
+        return;
+    }
+    fd_detached = true;
+}
+
 // Handle one connection. Returns true when the badge should reboot.
 static bool handle_connection(int fd) {
     size_t len      = 0;
@@ -1245,7 +1282,7 @@ static bool handle_connection(int fd) {
                     (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA));
             return false;
         case OTA_ROUTE_DELETE: handle_delete(fd, &req); return false;
-        case OTA_ROUTE_SCREENSHOT: handle_screenshot(fd); return false;
+        case OTA_ROUTE_SCREENSHOT: start_screenshot(fd); return false;
         case OTA_ROUTE_LOG: handle_log(fd, &req); return false;
         case OTA_ROUTE_CONSOLE: handle_console(fd, &req, pre, pre_len); return false;
         case OTA_ROUTE_REBOOT:
@@ -1363,13 +1400,11 @@ static void serve(int ls) {
         }
         piece_expire(false); // also between connections: a /log poll every second must not keep it alive
         set_read_timeout(fd, READ_TIMEOUT_S, 0);
+        fd_detached = false;
         bool reboot = handle_connection(fd);
-
-        // Let the client close first so the TIME_WAIT lands on its side, not on our port
-        set_read_timeout(fd, 0, 500000);
-        for (int i = 0; i < 16 && read(fd, body_buf, sizeof(body_buf)) > 0; i++) {
+        if (!fd_detached) {
+            close_lingering(fd);
         }
-        close(fd);
         if (reboot) {
             ESP_LOGI(TAG, "reboot requested over Wi-Fi");
             vTaskDelay(pdMS_TO_TICKS(300));
