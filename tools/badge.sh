@@ -68,6 +68,8 @@ Settings and by "fw wifi"; needs mDNS on this machine, e.g. avahi/nss-mdns):
                                       sequence numbers and uptimes); --follow keeps polling every second. Lines printed
                                       by ROM code (panics, the DPI underrun note) are not in it. It can show node names
                                       and messages: treat it like a screenshot
+  crashes <ip>                        print the crash records stored on the badge (reason, task, pc, backtrace, firmware
+                                      version; no RAM dump) over Wi-Fi, the same text as Crash log > Copy to SD card
   fw <ip> <command...>                run one console command over Wi-Fi and print its output, e.g.
                                       "fw 192.0.2.7 mem" ("fw " in front of the command is optional)
   screenshot <ip> [out.png]           save what the screen shows as a PNG (default: a private dir under \$XDG_RUNTIME_DIR or \$TMPDIR; it
@@ -565,6 +567,19 @@ cmd_log() {
     done
 }
 
+# GET /crashes (#170): the stored crash records as text. Nothing is sent from the badge unless this is run.
+cmd_crashes() {
+    local ip=$1 work
+    umask 077
+    work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-crashes.XXXXXX")
+    trap "rm -f '$work/body'; rmdir '$work' 2>/dev/null" EXIT
+    if ! ota_curl --max-time 20 -o "$work/body" "http://$ip:$OTA_PORT/crashes"; then
+        head -c 300 "$work/body" 2>/dev/null | printable >&2
+        exit 1
+    fi
+    printable < "$work/body"
+}
+
 # POST /console (#38): one fw command; the badge runs it like the UART console and answers with its output
 cmd_fw() {
     local ip=$1 work
@@ -648,6 +663,7 @@ case "${1:-}" in
     ota-rm)       [ $# -eq 3 ] || usage; cmd_ota_rm "$2" "$3" ;;
     ota-reboot)   [ $# -eq 2 ] || usage; cmd_ota_reboot "$2" ;;
     log)          { [ $# -eq 2 ] || { [ $# -eq 3 ] && [ "$3" = --follow ]; }; } || usage; cmd_log "$2" "${3:-}" ;;
+    crashes)      [ $# -eq 2 ] || usage; cmd_crashes "$2" ;;
     fw)           [ $# -ge 3 ] || usage; ip=$2; shift 2; cmd_fw "$ip" "$@" ;;
     screenshot)   [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_screenshot "$2" "${3:-}" ;;
     *)        usage ;;

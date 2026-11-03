@@ -4,15 +4,22 @@
 #include "crash.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_app_desc.h"
 #include "lichen_settings.h"
+#include "sdcard.h"
 
+#include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <string.h>
 
 static char const TAG[] = "crashlog";
 
 // crash.c keeps 20 lines of at most 256 bytes; room for a few more so an odd line never cuts the newest off
 #define LOG_CAP (CRASHLOG_MAX * CRASHLOG_LINE_MAX + 1024)
+
+#define EXPORT_CAP (CRASHLOG_MAX * (CRASHLOG_LINE_MAX + 1) + 512)
 
 // The app's seen marker: crash.c's counter and the newest line's hash when the viewer was last opened
 #define KEY_SEEN "seen"
@@ -139,6 +146,39 @@ bool lichen_crashlog_status(lichen_app_t const *app, lichen_crashlog_status_t *o
     out->ok      = buf != NULL;
     free(buf);
     return out->ok;
+}
+
+size_t lichen_crashlog_export(char *out, size_t cap) {
+    size_t len;
+    char  *buf = load(&len);
+    if (!buf) {
+        return 0;
+    }
+    size_t n = crashlog_export(buf, len, esp_app_get_description()->version, out, cap);
+    free(buf);
+    return n;
+}
+
+bool lichen_crashlog_export_sd(char *path, size_t cap) {
+    if (!sd_mounted()) {
+        return false;
+    }
+    char  *text = heap_caps_malloc(EXPORT_CAP, MALLOC_CAP_SPIRAM);
+    size_t n    = text ? lichen_crashlog_export(text, EXPORT_CAP) : 0;
+    bool   ok   = false;
+    char   name[48];
+    crashlog_export_name((int64_t)time(NULL), crash_count_since_clear(), name, sizeof(name));
+    if (n && snprintf(path, cap, "%s/%s", SD_LICHEN_DIR, name) < (int)cap && sd_begin(2000)) {
+        FILE *f = fopen(path, "w");
+        ok      = f && fwrite(text, 1, n, f) == n;
+        ok      = (f && fclose(f) == 0) && ok;
+        if (!ok) {
+            ESP_LOGW(TAG, "export to the SD card failed: errno %d", errno);
+        }
+        sd_end(ok ? SD_IO_OK : sd_io_from_errno(errno));
+    }
+    free(text);
+    return ok;
 }
 
 uint32_t lichen_crashlog_generation(void) {

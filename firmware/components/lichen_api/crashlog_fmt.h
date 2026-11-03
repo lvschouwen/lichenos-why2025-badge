@@ -66,6 +66,15 @@ void crashlog_badge(size_t n, char *out, size_t cap);
 // The home tile: line1 "2 new • 5 crashes" ("5 crashes", "No crashes stored"), line2 the newest entry's row title
 void crashlog_tile(size_t entries, size_t unseen, crashlog_entry_t const *newest, char *l1, size_t c1, char *l2, size_t c2);
 
+// The text export of the log (#170): GET /crashes and the copy on the SD card. A header (firmware, record count), then the
+// stored lines newest first, exactly as crash.c wrote them (reason, task, pc, backtrace; never RAM dump bytes). Anything
+// outside printable ASCII in a line becomes '?'. Whole lines only: when cap is too small the oldest are left out and the
+// header says so. Returns the length (NUL terminated); 0 when cap cannot hold the header.
+size_t crashlog_export(char const *text, size_t len, char const *version, char *out, size_t cap);
+// File name for the SD copy: "crashes-20261103-120000.txt" when now (UTC seconds) is a set clock, else
+// "crashes-n<count>.txt" (count: crashes since the last clear, so two copies of different logs differ)
+void crashlog_export_name(int64_t now, uint32_t count, char *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

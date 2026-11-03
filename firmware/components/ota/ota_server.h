@@ -41,6 +41,9 @@ typedef struct {
     // GET /log (#38): up to cap bytes of log lines from sequence number since on (zero bytes: nothing new); *next is the
     // number to ask for next, *missed the lines that were gone already. NULL = no log here (404).
     size_t (*log_read)(uint32_t since, char *out, size_t cap, uint32_t *next, uint32_t *missed);
+    // GET /crashes (#170): the crash records as text into out (at most cap bytes, no NUL needed); returns the length, 0 =
+    // none could be made. NULL = no crash export here (404).
+    size_t (*crashes_read)(char *out, size_t cap);
     // POST /console (#38): runs one command line on this task, output collected in buf; done(ctx, out, len) is called
     // exactly once, before the command restarts the badge if it does. NULL = the Wi-Fi console is off (404).
     void (*console_run)(char const *line, char *buf, size_t cap, void (*done)(void *ctx, char const *out, size_t len),

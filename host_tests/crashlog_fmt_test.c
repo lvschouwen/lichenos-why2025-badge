@@ -170,7 +170,48 @@ static void test_tile(void) {
     CHECK(strcmp(l1, "99+ new " DOT " 5 crashes") == 0);
 }
 
+static void test_export(void) {
+    char           log[1024], out[2048];
+    uint32_t const bt[2] = {0x40001234, 0x4ff00010};
+    size_t         n = 0;
+    n += crash_record_format(log + n, sizeof(log) - n, "2026-10-30T12:00:00", "fw-a", "1a2b", "panic", "console", 0x4ff0abcd, bt, 2);
+    log[n++] = '\n';
+    n += crash_record_format(log + n, sizeof(log) - n, "#2", "fw-b", NULL, "task_wdt", "wifi", 0x40000001, NULL, 0);
+    log[n++] = '\n';
+    size_t len = crashlog_export(log, n, "fw-b", out, sizeof(out));
+    CHECK(len == strlen(out) && len > 0);
+    CHECK(strstr(out, "# firmware: fw-b\n") != NULL);
+    CHECK(strstr(out, "# records: 2 of 2 stored") != NULL);
+    // newest (second line) comes first, backtrace and reason kept
+    char *a = strstr(out, "task_wdt"), *b = strstr(out, "bt=0x40001234,0x4ff00010");
+    CHECK(a && b && a < b);
+    // control bytes and a non-ASCII byte are cut to '?'
+    char dirty[] = "#9 fw panic task=x\x01y pc=0x0 \xC3\xA9\n";
+    len = crashlog_export(dirty, strlen(dirty), NULL, out, sizeof(out));
+    CHECK(strstr(out, "# firmware: unknown") && strstr(out, "task=x?y") && strstr(out, "??") && !strchr(out, '\x01'));
+    // empty log: header only; too small a buffer: nothing
+    len = crashlog_export("", 0, "v", out, sizeof(out));
+    CHECK(len > 0 && strstr(out, "0 of 0") != NULL);
+    CHECK(crashlog_export(log, n, "v", out, 40) == 0 && out[0] == '\0');
+    // room for one line only: the oldest is left out and the header says so
+    char   small[300];
+    len = crashlog_export(log, n, "fw-b", small, 270);
+    CHECK(len > 0 && strstr(small, "1 of 2 stored") && strstr(small, "task_wdt") && !strstr(small, "panic"));
+}
+
+static void test_export_name(void) {
+    char name[48];
+    crashlog_export_name(1793707200, 3, name, sizeof(name)); // 2026-11-03 12:00:00 UTC
+    CHECK(strcmp(name, "crashes-20261103-120000.txt") == 0);
+    crashlog_export_name(0, 3, name, sizeof(name));
+    CHECK(strcmp(name, "crashes-n3.txt") == 0);
+    crashlog_export_name(1000, 12, name, sizeof(name));
+    CHECK(strcmp(name, "crashes-n12.txt") == 0);
+}
+
 int main(void) {
+    test_export();
+    test_export_name();
     test_parse();
     test_text();
     test_split_remove();

@@ -23,6 +23,7 @@
 #include "psram_guard.h"
 #include "log_tap.h"
 #include "lora.h"
+#include "lichen_crashlog.h"
 #include "lichen_radio.h"
 #include "mesh.h"
 #include "meshcore_run.h"
@@ -386,7 +387,7 @@ void app_main(void) {
     c6_wire_hooks(screen); // after keyboard and LoRa: from now on a C6 reset is recovered from
     start_apps();
     // Wi-Fi console and log (#38) work without a screen; the update screen hooks need one
-    ota_hooks_t hooks = {.log_read = log_store_read};
+    ota_hooks_t hooks = {.log_read = log_store_read, .crashes_read = lichen_crashlog_export};
 #if CONFIG_OTA_WIFI_CONSOLE
     hooks.console_run = console_exec;
 #endif

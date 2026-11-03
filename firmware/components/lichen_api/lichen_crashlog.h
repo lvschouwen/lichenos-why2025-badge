@@ -36,6 +36,12 @@ typedef struct {
 bool lichen_crashlog_status(lichen_app_t const *app, lichen_crashlog_status_t *out); // out->ok
 // The app was opened: what is stored now is no longer new. False (logged once) when the log could not be read.
 bool lichen_crashlog_mark_seen(lichen_app_t const *app);
+// The log as the text export of #170 (crashlog_export): GET /crashes and the SD copy. Any task; returns the length, 0 when
+// the log could not be read or cap is too small.
+size_t lichen_crashlog_export(char *out, size_t cap);
+// Writes that text to the SD card as /sd/lichen/crashes-<date or count>.txt (name copied to path). Not on the LVGL task.
+// false: no card, not enough memory or the write failed (reason in the log).
+bool lichen_crashlog_export_sd(char *path, size_t cap);
 // Changes whenever the log is written or cleared (also from the console)
 uint32_t lichen_crashlog_generation(void);
 // This boot follows a crash

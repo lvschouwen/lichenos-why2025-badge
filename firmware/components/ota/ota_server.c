@@ -61,6 +61,7 @@
 #define SHOT_TOTAL_S    10  // whole screenshot send (#146)
 #define BODY_SEND_S     10
 #define LOG_SLICE       2048  // bytes copied out of the log store per call (interrupts are off meanwhile)
+#define CRASHES_REPLY_MAX (12 * 1024) // 20 records of 256 bytes and the header
 #define LOG_REPLY_MAX   (24 * 1024) // one GET /log answer; the client asks again from X-Next-Seq
 #define CONSOLE_REPLY   4096
 #define BODY_TOTAL_S    45 // whole send: a client that drips bytes must not hold the one server task
@@ -1112,6 +1113,33 @@ static void handle_log(int fd, ota_request_t const *req) {
     free(reply);
 }
 
+// GET /crashes (#170): the stored crash records as text. Private enough (task names, addresses): token required, never
+// logged here.
+static void handle_crashes(int fd) {
+    if (!hooks.crashes_read) {
+        respond(fd, 404, "no crash export here");
+        return;
+    }
+    char *reply = heap_caps_malloc(CRASHES_REPLY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!reply) {
+        respond(fd, 503, "out of memory, try again");
+        return;
+    }
+    size_t total = hooks.crashes_read(reply, CRASHES_REPLY_MAX);
+    if (total == 0 || total > CRASHES_REPLY_MAX) {
+        respond(fd, 503, "the crash log could not be read, try again");
+        free(reply);
+        return;
+    }
+    char head[160];
+    int  n = snprintf(head, sizeof(head),
+                      "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: %u\r\n"
+                      "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
+                      (unsigned)total);
+    send_body(fd, head, (size_t)n, reply, total);
+    free(reply);
+}
+
 typedef struct {
     int fd;
 } console_reply_ctx_t;
@@ -1320,6 +1348,7 @@ static bool handle_connection(int fd) {
         case OTA_ROUTE_DELETE: handle_delete(fd, &req); return false;
         case OTA_ROUTE_SCREENSHOT: start_screenshot(fd); return false;
         case OTA_ROUTE_LOG: handle_log(fd, &req); return false;
+        case OTA_ROUTE_CRASHES: handle_crashes(fd); return false;
         case OTA_ROUTE_CONSOLE:
             handle_console(fd, &req, pre, pre_len);
             secure_wipe(head_buf + head_len, pre_len); // the body's first bytes were read into the request buffer

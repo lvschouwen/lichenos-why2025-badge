@@ -7,6 +7,8 @@
 //   GET  /screenshot                   the screen as a 16-bit BMP (ota_bmp.h, #30); the token is required
 //   GET  /log[?since=<seq>]            the badge's log lines from sequence number <seq> on (log_ring.h, #38); the token
 //                                      is required. Reply headers: X-Next-Seq (ask for this next), X-Log-Missed
+//   GET  /crashes                      the stored crash records as text (#170): reason, task, pc, backtrace, firmware version;
+//                                      never RAM dump bytes. The token is required
 //   POST /console                      body = one fw command line; the reply is its output (#38); the token is required
 //   POST /reboot
 //   POST /prepare                      lean firmware: stop everything else for a firmware update, reply "ready" (#76)
@@ -39,6 +41,7 @@ typedef enum {
     OTA_ROUTE_SCREENSHOT,
     OTA_ROUTE_LOG,
     OTA_ROUTE_CONSOLE,
+    OTA_ROUTE_CRASHES,
 } ota_route_t;
 
 // Every route needs the token since #44, /info included (it names the firmware version)

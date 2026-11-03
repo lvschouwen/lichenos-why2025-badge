@@ -136,6 +136,12 @@ static void test_parse(void) {
     CHECK(parse("GET /log?since=1x HTTP/1.1\r\n\r\n", &req) == 400);
     CHECK(parse("GET /log?x=1 HTTP/1.1\r\n\r\n", &req) == 400);
     CHECK(parse("POST /log HTTP/1.1\r\n\r\n", &req) == 405);
+    // #170: GET /crashes takes the token like the rest, no query, no other method
+    CHECK(parse("GET /crashes HTTP/1.1\r\nAuthorization: Bearer " TOKEN "\r\n\r\n", &req) == 0);
+    CHECK(req.route == OTA_ROUTE_CRASHES && req.has_token);
+    CHECK(parse("POST /crashes HTTP/1.1\r\n\r\n", &req) == 405);
+    CHECK(parse("DELETE /crashes HTTP/1.1\r\n\r\n", &req) == 405);
+    CHECK(parse("GET /crashes?x=1 HTTP/1.1\r\n\r\n", &req) == 404);
     CHECK(parse("POST /console HTTP/1.1\r\nContent-Length: 6\r\nAuthorization: Bearer " TOKEN "\r\n\r\n", &req) == 0);
     CHECK(req.route == OTA_ROUTE_CONSOLE && req.content_length == 6 && req.has_token);
     CHECK(parse("GET /console HTTP/1.1\r\n\r\n", &req) == 405);
@@ -209,7 +215,7 @@ static void test_token(void) {
 static void test_routes_need_token(void) {
     ota_route_t const routes[] = {OTA_ROUTE_INFO,  OTA_ROUTE_FIRMWARE,   OTA_ROUTE_FILE, OTA_ROUTE_REBOOT,
                                   OTA_ROUTE_DELETE, OTA_ROUTE_PREPARE,   OTA_ROUTE_ASSETS, OTA_ROUTE_SCREENSHOT,
-                                  OTA_ROUTE_LOG,   OTA_ROUTE_CONSOLE};
+                                  OTA_ROUTE_LOG,   OTA_ROUTE_CONSOLE, OTA_ROUTE_CRASHES};
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         CHECK(ota_route_needs_token(routes[i]));
     }

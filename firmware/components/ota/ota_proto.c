@@ -74,6 +74,7 @@ static int parse_request_line(char *line, ota_request_t *req) {
         {"/screenshot", "GET", OTA_ROUTE_SCREENSHOT},
         {"/log", "GET", OTA_ROUTE_LOG},
         {"/console", "POST", OTA_ROUTE_CONSOLE},
+        {"/crashes", "GET", OTA_ROUTE_CRASHES},
     };
     // Only /log takes a query: "?since=<seq>" (digits). Every other target with a '?' stays unknown.
     char *query = strchr(target, '?');

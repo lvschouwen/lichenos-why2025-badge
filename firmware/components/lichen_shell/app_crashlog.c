@@ -16,6 +16,7 @@
 #include "lichen_badge.h"
 #include "lichen_crashlog.h"
 #include "lichen_ui.h"
+#include "sdcard.h"
 #include "menu.h"
 #include "nav.h"
 #include "shell_parts.h"
@@ -53,16 +54,18 @@ static struct {
     size_t            focus; // the row to select after a rebuild
     size_t            shown; // the entry on the full screen (and the one a delete question is about)
     lv_obj_t         *clear_row;
+    lv_obj_t         *copy_row;
     lv_obj_t         *hint;  // the full screen's key hint, NULL while it is closed
     lv_timer_t       *poll;
 } s_v;
 
 // The running delete or clear; it outlives the viewer. s_job and s_result: LVGL task only.
-typedef enum { JOB_NONE, JOB_DELETE, JOB_CLEAR } job_t;
+typedef enum { JOB_NONE, JOB_DELETE, JOB_CLEAR, JOB_COPY } job_t;
 static job_t            s_job;
 static atomic_int       s_job_outcome = JOB_PENDING; // the task stores 0/1, the LVGL task takes it
 static size_t           s_job_index;
 static crashlog_entry_t s_job_expect;                // the job's copy: the list may be rebuilt meanwhile
+static char             s_copy_path[RESULT_CAP];     // the SD copy's path; the task writes it before it stores the outcome
 static char             s_result[RESULT_CAP];        // the last job's outcome, shown above the list
 
 // The tile's lines, read again only when the log changed or the viewer marked it seen
@@ -78,6 +81,7 @@ static lichen_crashlog_status_t s_status; // too big for the LVGL task's stack
 
 static void on_entry(void *arg);
 static void on_clear_all(void *arg);
+static void on_copy(void *arg);
 
 static void add_rows(void) {
     if (s_result[0]) {
@@ -89,6 +93,7 @@ static void add_rows(void) {
         menu_add(s_v.menu, title, task, on_entry, (void *)(intptr_t)i);
     }
     if (s_v.count) {
+        s_v.copy_row  = menu_add(s_v.menu, "Copy to SD card", NULL, on_copy, NULL);
         s_v.clear_row = menu_add(s_v.menu, "Clear all", NULL, on_clear_all, NULL);
         menu_note(s_v.menu, "Clear all also resets the crash counter and erases the core dump.");
         shell_page_hint(s_v.screen, "Enter", "open", NULL);
@@ -108,6 +113,7 @@ static void fill_list(void) {
         lv_obj_delete(s_v.menu);
     }
     s_v.clear_row = NULL;
+    s_v.copy_row  = NULL;
     s_v.count = s_v.entries ? lichen_crashlog_list(s_v.entries, CRASHLOG_MAX) : 0;
     lv_group_t *previous = lv_group_get_default();
     lv_group_set_default(s_v.group);
@@ -122,7 +128,7 @@ static void fill_list(void) {
         lv_group_remove_obj(s_v.screen);
     }
     if (rows) {
-        menu_focus_row(s_v.menu, (int)(s_v.focus < s_v.count ? s_v.focus : s_v.count - 1));
+        menu_focus_row(s_v.menu, (int)(s_v.focus <= s_v.count + 1 ? s_v.focus : s_v.count + 1));
     }
 }
 
@@ -142,7 +148,13 @@ static void job_collect(void) {
     job_t kind   = s_job;
     s_job        = JOB_NONE;
     s_tile.valid = false;
-    if (kind == JOB_DELETE) {
+    if (kind == JOB_COPY) {
+        if (outcome) {
+            snprintf(s_result, sizeof(s_result), "Copied to %.80s", s_copy_path);
+        } else {
+            snprintf(s_result, sizeof(s_result), "Not copied: the SD card could not be written.");
+        }
+    } else if (kind == JOB_DELETE) {
         snprintf(s_result, sizeof(s_result), "%s",
                  outcome ? "Entry deleted." : "Entry was not deleted: the log changed or could not be written.");
     } else {
@@ -150,7 +162,7 @@ static void job_collect(void) {
                  outcome ? "Cleared: the log, the crash counter and the core dump." : "Cleared, but erasing the core dump failed.");
     }
     ESP_LOG_LEVEL(outcome ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s", s_result);
-    s_v.focus = kind == JOB_DELETE ? s_job_index : 0;
+    s_v.focus = kind == JOB_DELETE ? s_job_index : kind == JOB_COPY ? s_v.count : 0;
     if (s_v.screen) {
         shell_back_to(s_v.screen, refill, NULL); // the entry's screen goes if it is open, then the list is read again
     }
@@ -162,8 +174,10 @@ static void job_done(void *arg) {
 }
 
 static void job_task(void *arg) {
-    bool ok = (job_t)(intptr_t)arg == JOB_CLEAR ? lichen_crashlog_clear(&crashlog_app)
-                                                : lichen_crashlog_delete(&crashlog_app, s_job_index, &s_job_expect);
+    job_t kind = (job_t)(intptr_t)arg;
+    bool  ok   = kind == JOB_COPY    ? lichen_crashlog_export_sd(s_copy_path, sizeof(s_copy_path))
+                 : kind == JOB_CLEAR ? lichen_crashlog_clear(&crashlog_app)
+                                     : lichen_crashlog_delete(&crashlog_app, s_job_index, &s_job_expect);
     ESP_LOGI(TAG, "job stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     atomic_store(&s_job_outcome, ok ? 1 : 0);
     // lv_async_call is not thread safe: take the LVGL lock like the shell does
@@ -206,6 +220,24 @@ static void clear_answer(bool yes) {
         }
     } else {
         lv_async_call(refill, NULL); // shows why; not from inside the dialog's key handling
+    }
+}
+
+// The same text GET /crashes serves, in a file on the card; nothing leaves the badge by itself
+static void on_copy(void *arg) {
+    (void)arg;
+    if (s_job != JOB_NONE) {
+        return;
+    }
+    if (!sd_mounted()) {
+        snprintf(s_result, sizeof(s_result), "No SD card in the badge: nothing copied.");
+        lv_async_call(refill, NULL);
+        return;
+    }
+    if (!job_start(JOB_COPY)) {
+        lv_async_call(refill, NULL); // shows why
+    } else if (s_v.copy_row) {
+        menu_set_value(s_v.copy_row, "Copying...");
     }
 }
 

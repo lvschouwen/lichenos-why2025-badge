@@ -274,3 +274,53 @@ void crashlog_tile(size_t entries, size_t unseen, crashlog_entry_t const *newest
         l2[0] = '\0';
     }
 }
+
+// ---- the text export (#170) ----------------------------------------------------------------------------------------
+
+#include <time.h>
+
+size_t crashlog_export(char const *text, size_t len, char const *version, char *out, size_t cap) {
+    crashlog_span_t spans[CRASHLOG_MAX];
+    size_t          total = crashlog_split(text, len, spans, CRASHLOG_MAX);
+    // Which lines fit: each costs its length plus '\n'; the header is written once the count is known
+    char   head[200];
+    size_t room = cap > sizeof(head) ? cap - sizeof(head) : 0, shown = 0, used = 0;
+    while (shown < total && used + spans[shown].len + 1 < room) {
+        used += spans[shown].len + 1;
+        shown++;
+    }
+    int n = snprintf(head, sizeof(head),
+                     "# Lichen crash report\n# firmware: %s\n# records: %u of %u stored, newest first\n"
+                     "# line: when version reason task pc [elf] [bt]; decode with addr2line on the ELF of that version\n",
+                     version && version[0] ? version : "unknown", (unsigned)shown, (unsigned)total);
+    if (cap == 0 || n < 0 || (size_t)n >= sizeof(head) || (size_t)n + used >= cap) {
+        if (cap) {
+            out[0] = '\0';
+        }
+        return 0;
+    }
+    size_t pos = (size_t)n;
+    memcpy(out, head, pos);
+    for (size_t i = 0; i < shown; i++) {
+        for (size_t k = 0; k < spans[i].len; k++) {
+            unsigned char c = (unsigned char)text[spans[i].start + k];
+            out[pos++]      = (c >= 0x20 && c < 0x7f) ? (char)c : '?';
+        }
+        out[pos++] = '\n';
+    }
+    out[pos] = '\0';
+    return pos;
+}
+
+void crashlog_export_name(int64_t now, uint32_t count, char *out, size_t cap) {
+    if (now > 1700000000) { // the clock is set only once Wi-Fi time arrived (as crash.c decides)
+        time_t    t = (time_t)now;
+        struct tm tm;
+        if (gmtime_r(&t, &tm)) {
+            snprintf(out, cap, "crashes-%04d%02d%02d-%02d%02d%02d.txt", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour,
+                     tm.tm_min, tm.tm_sec);
+            return;
+        }
+    }
+    snprintf(out, cap, "crashes-n%u.txt", (unsigned)count);
+}
