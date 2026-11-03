@@ -37,7 +37,6 @@ static allow_t const allowed[] = {
     {"sensors", NULL}, {"psram", NULL},  {"led", NULL},    {"vib", NULL},      {"screensaver", NULL}, {"bl", NULL},
     {"whatsnew", NULL}, {"home", NULL},  {"airplane", NULL}, {"msgs", NULL},   {"channels", NULL}, {"advert", NULL},
     {"contacts", "-"},
-    {"wifi", "- on off scan reconnect stats ps tx bw proto"},
     {"mesh", "- link out chats hist"},
     {"sd", "- status mount unmount test"},
     {"crash", "- dump"},
@@ -94,6 +93,28 @@ static bool has_word(char const *line, char const *word) {
     return false;
 }
 
+// cmd_wifi (c6link.c) matches its subcommands as whole strings and reads ANY other line as "<ssid> <password>":
+// `wifi on hunter2` joins a network called "on". So only these exact argument strings count as public.
+static bool wifi_public(char const *rest) {
+    static char const *const exact[] = {"",      "on",      "off",    "scan",  "reconnect", "stats", "ps",
+                                        "ps none", "ps min", "bw",    "bw 20", "bw 40",     "proto", "proto n",
+                                        "proto ax", "tx"};
+    for (size_t i = 0; i < sizeof(exact) / sizeof(exact[0]); i++) {
+        if (strcmp(rest, exact[i]) == 0) {
+            return true;
+        }
+    }
+    if (strncmp(rest, "tx ", 3) != 0 || !rest[3]) { // tx <level>: digits only
+        return false;
+    }
+    for (char const *p = rest + 3; *p; p++) {
+        if (!isdigit((unsigned char)*p)) {
+            return false;
+        }
+    }
+    return strlen(rest + 3) <= 3;
+}
+
 bool console_line_is_public(char const *line) {
     if (!line || console_line_is_secret(line)) {
         return false;
@@ -110,6 +131,9 @@ bool console_line_is_public(char const *line) {
     snprintf(sub, sizeof(sub), "%.*s", (int)(k < sizeof(sub) - 1 ? k : sizeof(sub) - 1), rest);
     if (strlen(cmd) >= sizeof(cmd) - 1) {
         return false;
+    }
+    if (strcmp(cmd, "wifi") == 0) {
+        return wifi_public(rest);
     }
     for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i++) {
         if (strcmp(allowed[i].cmd, cmd) != 0) {

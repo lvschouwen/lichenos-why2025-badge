@@ -31,6 +31,13 @@ static void test_public(void) {
     CHECK(console_line_is_public("mem blocks internal"));
     CHECK(!console_line_is_public("wifi MyNet hunter2")); // an ssid + password
     CHECK(!console_line_is_public("wifi --clear"));
+    CHECK(!console_line_is_public("wifi on hunter2pass")); // cmd_wifi reads this as ssid "on" + a password
+    CHECK(!console_line_is_public("wifi scan secret"));
+    CHECK(!console_line_is_public("wifi tx 52abc"));
+    CHECK(!console_line_is_public("wifi ps none x"));
+    CHECK(console_line_is_public("wifi tx 52"));
+    CHECK(console_line_is_public("wifi ps min"));
+    CHECK(console_line_is_public("wifi proto ax"));
     CHECK(!console_line_is_public("channel add secret AAAA"));
     CHECK(!console_line_is_public("mesh remote abc cli reboot"));
     CHECK(!console_line_is_public("mesh send chan hello"));
