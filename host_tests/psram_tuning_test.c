@@ -94,6 +94,29 @@ int main(void) {
     CHECK(!psram_retry_decide(&nc, true, 5000));
     CHECK(!psram_retry_decide(&nc, false, 0) && psram_retry_decide(&nc, true, 0));
 
+    // One-shot delayline override (#121): window 9..25 here; only a well-formed idx inside it is applied
+    psram_tuning_note_delayline(&t, 17, 25);
+    psram_oneshot_t os = {PSRAM_ONESHOT_MAGIC, 13};
+    CHECK(psram_oneshot_verdict(&os, &t) == PSRAM_ONESHOT_APPLY);
+    os.idx = 9;
+    CHECK(psram_oneshot_verdict(&os, &t) == PSRAM_ONESHOT_APPLY);
+    os.idx = 25;
+    CHECK(psram_oneshot_verdict(&os, &t) == PSRAM_ONESHOT_APPLY);
+    os.idx = 8;
+    CHECK(psram_oneshot_verdict(&os, &t) == PSRAM_ONESHOT_OUTSIDE);
+    os.idx = 26;
+    CHECK(psram_oneshot_verdict(&os, &t) == PSRAM_ONESHOT_OUTSIDE);
+    os.idx = PSRAM_DELAYLINES;
+    CHECK(psram_oneshot_verdict(&os, &t) == PSRAM_ONESHOT_BAD_RECORD);
+    os = (psram_oneshot_t){0x12345678u, 13};
+    CHECK(psram_oneshot_verdict(&os, &t) == PSRAM_ONESHOT_BAD_RECORD);
+    os = (psram_oneshot_t){PSRAM_ONESHOT_MAGIC, 13};
+    psram_tuning_note_delayline(&t, 1, 5); // fell back: no window to stay in
+    CHECK(psram_oneshot_verdict(&os, &t) == PSRAM_ONESHOT_FELL_BACK);
+    psram_tuning_t never = {0};
+    CHECK(psram_oneshot_verdict(&os, &never) == PSRAM_ONESHOT_FELL_BACK);
+    CHECK(strcmp(psram_oneshot_verdict_text(PSRAM_ONESHOT_APPLY), "applied") == 0);
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

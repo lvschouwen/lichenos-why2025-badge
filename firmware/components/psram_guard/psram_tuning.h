@@ -46,6 +46,26 @@ bool psram_tuning_dl_args(char const *text, unsigned *idx);
 // it the CPU path itself fails, and code, data and DMA buffers all live in PSRAM
 bool psram_tuning_dl_in_window(psram_tuning_t const *t, unsigned idx);
 
+// One-shot delayline override for the 120 MHz bench (#121): "fw psram dlboot <idx> yes" stores a record in NVS, the next
+// boot consumes it (erased BEFORE it is applied, so a crash or a bad idx never repeats) and sets the delayline once NVS is
+// up. Anything the verdict does not accept leaves the IDF's own choice in place.
+#define PSRAM_ONESHOT_MAGIC 0x314C4450u // "PDL1"
+
+typedef struct {
+    uint32_t magic;
+    uint32_t idx;
+} psram_oneshot_t;
+
+typedef enum {
+    PSRAM_ONESHOT_APPLY,       // set it
+    PSRAM_ONESHOT_BAD_RECORD,  // wrong magic or idx not 0..30
+    PSRAM_ONESHOT_FELL_BACK,   // the boot tuning fell back: there is no window to stay in
+    PSRAM_ONESHOT_OUTSIDE,     // outside the window this boot's tuning measured (the window differs between boots, #94)
+} psram_oneshot_verdict_t;
+
+psram_oneshot_verdict_t psram_oneshot_verdict(psram_oneshot_t const *rec, psram_tuning_t const *t);
+char const             *psram_oneshot_verdict_text(psram_oneshot_verdict_t v);
+
 // "phase 90 (run 3/4), delayline idx 17 (data 2, dqs 0), window 9..25 len 17" (+ " FELL BACK" when it did)
 size_t psram_tuning_format(char *out, size_t cap, psram_tuning_t const *t);
 

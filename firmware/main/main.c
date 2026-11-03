@@ -18,6 +18,7 @@
 #include "esp_sleep.h"
 #include "esp_timer.h"
 #include "log_store.h"
+#include "psram_boot.h"
 #include "psram_guard.h"
 #include "log_tap.h"
 #include "lora.h"
@@ -296,6 +297,7 @@ void app_main(void) {
         ESP_LOGE(TAG, "NVS init failed: %s", esp_err_to_name(err));
     }
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
+    psram_boot_oneshot_apply(); // #121: a one-shot delayline for the PSRAM bench, before storage and MeshCore load anything
     boot_progress_nvs_up();
     haptics_start();     // the motor pin low and the setting read, before anything slow (#68)
     settings_apply_tz(); // before anything shows the clock

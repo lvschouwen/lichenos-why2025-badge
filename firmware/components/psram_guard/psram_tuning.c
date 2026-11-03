@@ -69,6 +69,26 @@ bool psram_tuning_dl_in_window(psram_tuning_t const *t, unsigned idx) {
     return !psram_tuning_fell_back(t) && idx >= psram_tuning_dl_start(t) && idx <= t->dl_end;
 }
 
+psram_oneshot_verdict_t psram_oneshot_verdict(psram_oneshot_t const *rec, psram_tuning_t const *t) {
+    if (rec->magic != PSRAM_ONESHOT_MAGIC || rec->idx >= PSRAM_DELAYLINES) {
+        return PSRAM_ONESHOT_BAD_RECORD;
+    }
+    if (psram_tuning_fell_back(t)) {
+        return PSRAM_ONESHOT_FELL_BACK;
+    }
+    return psram_tuning_dl_in_window(t, rec->idx) ? PSRAM_ONESHOT_APPLY : PSRAM_ONESHOT_OUTSIDE;
+}
+
+char const *psram_oneshot_verdict_text(psram_oneshot_verdict_t v) {
+    switch (v) {
+        case PSRAM_ONESHOT_APPLY: return "applied";
+        case PSRAM_ONESHOT_BAD_RECORD: return "ignored: bad record";
+        case PSRAM_ONESHOT_FELL_BACK: return "ignored: the boot tuning fell back";
+        case PSRAM_ONESHOT_OUTSIDE: return "ignored: outside this boot's tuning window";
+    }
+    return "ignored";
+}
+
 size_t psram_tuning_format(char *out, size_t cap, psram_tuning_t const *t) {
     if (!t->phase_seen || !t->dl_seen) {
         return (size_t)snprintf(out, cap, "tuning not captured");

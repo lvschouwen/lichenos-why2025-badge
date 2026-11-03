@@ -99,6 +99,22 @@ static void NOINLINE_ATTR IRAM_ATTR set_delaylines(uint8_t data, uint8_t dqs) {
     }
 }
 
+// Both the console command and the boot one-shot: the other core stalled for the switch. Returns what the registers held
+// before and now.
+static void apply_delayline(unsigned idx, uint8_t *data, uint8_t *dqs, uint8_t *data_was, uint8_t *dqs_was) {
+    uint8_t ph;
+    psram_tuning_delays((uint8_t)idx, data, dqs);
+    tuning_regs(&ph, dqs_was, data_was);
+    static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+    int                 other = xPortGetCoreID() == 0 ? 1 : 0;
+    portENTER_CRITICAL(&mux);
+    esp_cpu_stall(other);
+    set_delaylines(*data, *dqs);
+    esp_cpu_unstall(other);
+    portEXIT_CRITICAL(&mux);
+    tuning_regs(&ph, dqs, data);
+}
+
 void psram_boot_set_delayline(char const *idx_text) {
     unsigned idx;
     if (!psram_tuning_dl_args(idx_text, &idx) || idx >= PSRAM_DELAYLINES) {
@@ -119,19 +135,100 @@ void psram_boot_set_delayline(char const *idx_text) {
         console_reply("psram dl: refused while the SD card is mounted (fw sd unmount first)");
         return;
     }
-    uint8_t data, dqs, ph, dqs_was, data_was;
-    psram_tuning_delays((uint8_t)idx, &data, &dqs);
-    tuning_regs(&ph, &dqs_was, &data_was);
-    static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-    int                 other = xPortGetCoreID() == 0 ? 1 : 0;
-    portENTER_CRITICAL(&mux);
-    esp_cpu_stall(other);
-    set_delaylines(data, dqs);
-    esp_cpu_unstall(other);
-    portEXIT_CRITICAL(&mux);
-    tuning_regs(&ph, &dqs, &data);
+    uint8_t data, dqs, data_was, dqs_was;
+    apply_delayline(idx, &data, &dqs, &data_was, &dqs_was);
     console_reply("psram delayline idx %u set live: data %u, dqs %u (was data %u, dqs %u); not stored, a reboot restores the IDF's choice",
                   idx, data, dqs, data_was, dqs_was);
+}
+
+// ---- one-shot override at boot (#121 E2) ----
+
+static char const ONESHOT_KEY[] = "psram_dl1";
+static bool       s_os_applied;
+static unsigned   s_os_idx;
+static verify_t   s_os_verify, s_os_repeat;
+static char       s_os_line[112] = "none armed";
+
+// "psram dlboot <idx> yes | clear": arms (or disarms) the override for the NEXT boot only
+void psram_boot_oneshot_arm(char const *args) {
+    nvs_handle_t nvs;
+    unsigned     idx;
+    bool         clear = strstr(args, "clear") != NULL;
+    if (!clear && !psram_tuning_dl_args(args, &idx)) {
+        console_reply("psram dlboot <idx 0..%d> yes | clear: use delayline idx for the NEXT boot only (consumed at that boot, "
+                      "never repeated; refused there when outside that boot's tuning window). Last boot: %s",
+                      PSRAM_DELAYLINES - 1, s_os_line);
+        return;
+    }
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        console_reply("psram dlboot: NVS not available");
+        return;
+    }
+    esp_err_t err;
+    if (clear) {
+        err = nvs_erase_key(nvs, ONESHOT_KEY);
+        err = err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
+    } else if (idx >= PSRAM_DELAYLINES || !psram_tuning_dl_in_window(&s_tuning, idx)) {
+        nvs_close(nvs);
+        console_reply("psram dlboot: idx %u refused, outside this boot's tuning window %u..%u (the window moves between boots, "
+                      "the apply checks again)",
+                      idx, psram_tuning_dl_start(&s_tuning), s_tuning.dl_end);
+        return;
+    } else {
+        psram_oneshot_t rec = {PSRAM_ONESHOT_MAGIC, idx};
+        err                 = nvs_set_blob(nvs, ONESHOT_KEY, &rec, sizeof(rec));
+    }
+    err = err == ESP_OK ? nvs_commit(nvs) : err;
+    nvs_close(nvs);
+    if (err != ESP_OK) {
+        console_reply("psram dlboot: NVS write failed (%s)", esp_err_to_name(err));
+    } else if (clear) {
+        console_reply("psram dlboot: cleared");
+    } else {
+        console_reply("psram dlboot: idx %u armed for the next boot only (fw reboot)", idx);
+    }
+}
+
+// Consume first, then apply: a crash or a wrong idx leaves the next boot on the IDF's choice. Returns the record when one
+// was armed.
+static bool oneshot_take(psram_oneshot_t *rec) {
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        return false;
+    }
+    size_t size = sizeof(*rec);
+    bool   have = nvs_get_blob(nvs, ONESHOT_KEY, rec, &size) == ESP_OK && size == sizeof(*rec);
+    if (have && (nvs_erase_key(nvs, ONESHOT_KEY) != ESP_OK || nvs_commit(nvs) != ESP_OK)) {
+        have = false; // cannot prove it is gone: do not apply it
+        snprintf(s_os_line, sizeof(s_os_line), "ignored: could not consume the record");
+        ESP_LOGE(TAG, "one-shot delayline: %s", s_os_line);
+    }
+    nvs_close(nvs);
+    return have;
+}
+
+static void dense_check_into(verify_t *first, verify_t *again);
+
+void psram_boot_oneshot_apply(void) {
+    psram_oneshot_t rec;
+    if (!oneshot_take(&rec)) {
+        return;
+    }
+    psram_oneshot_verdict_t v = psram_oneshot_verdict(&rec, &s_tuning);
+    if (v != PSRAM_ONESHOT_APPLY) {
+        snprintf(s_os_line, sizeof(s_os_line), "idx %u %s (window %u..%u, boot choice idx %u)", (unsigned)rec.idx,
+                 psram_oneshot_verdict_text(v), psram_tuning_dl_start(&s_tuning), s_tuning.dl_end, s_tuning.dl_idx);
+        ESP_LOGW(TAG, "one-shot delayline %s", s_os_line);
+        return;
+    }
+    uint8_t data, dqs, data_was, dqs_was;
+    apply_delayline(rec.idx, &data, &dqs, &data_was, &dqs_was);
+    s_os_applied = true;
+    s_os_idx     = rec.idx;
+    dense_check_into(&s_os_verify, &s_os_repeat);
+    snprintf(s_os_line, sizeof(s_os_line), "idx %u APPLIED (data %u, dqs %u; boot choice idx %u): dense check %u bad bytes, again %u",
+             (unsigned)rec.idx, data, dqs, s_tuning.dl_idx, (unsigned)s_os_verify.bad_bytes, (unsigned)s_os_repeat.bad_bytes);
+    ESP_LOGW(TAG, "one-shot delayline %s", s_os_line);
 }
 
 static void line_flush(uint8_t *mem, size_t len) {
@@ -165,7 +262,7 @@ static void dense_run(uint8_t *mem, size_t len, verify_t *v) {
     v->ran   = true;
 }
 
-static void dense_check(void) {
+static void dense_check_into(verify_t *first, verify_t *again) {
     size_t   len = CHECK_BYTES;
     uint8_t *mem = heap_caps_aligned_alloc(LINE, len, PSRAM_CAPS);
     if (!mem) {
@@ -176,12 +273,16 @@ static void dense_check(void) {
         ESP_LOGW(TAG, "boot check: no PSRAM block for the dense check");
         return;
     }
-    dense_run(mem, len, &s_verify);
+    dense_run(mem, len, first);
     s_check_addr = mem;
-    if (s_verify.bad_bytes) { // the same block again: the same bad bytes point at the place, new ones at the moment
-        dense_run(mem, len, &s_repeat);
+    if (first->bad_bytes) { // the same block again: the same bad bytes point at the place, new ones at the moment
+        dense_run(mem, len, again);
     }
     heap_caps_free(mem);
+}
+
+static void dense_check(void) {
+    dense_check_into(&s_verify, &s_repeat);
 }
 
 // "fw psram test <KB> dense": the boot check on demand, with the bad bytes per pass
@@ -296,7 +397,7 @@ void psram_boot_print(void) {
     console_reply("psram tuning: %s", text);
     uint8_t ph, dqs, data, edata, edqs;
     tuning_regs(&ph, &dqs, &data);
-    psram_tuning_delays(s_tuning.dl_idx, &edata, &edqs);
+    psram_tuning_delays(s_os_applied ? (uint8_t)s_os_idx : s_tuning.dl_idx, &edata, &edqs);
     bool match = ph == s_tuning.phase_id && dqs == edqs && data == edata;
     console_reply("psram tuning regs: phase id %u, dqs delay %u, data delay %u (%s)", ph, dqs, data,
                   match ? "match the captured choice" : "DIFFER from the captured choice");
@@ -304,6 +405,7 @@ void psram_boot_print(void) {
                   (unsigned)(s_verify.bytes >> 10), s_check_addr, (unsigned)s_verify.bad_bytes, (unsigned)s_verify.bad_plain,
                   (unsigned)s_verify.bad_inv, (unsigned)s_verify.bit_flips, (unsigned)s_verify.first_bad, (unsigned)s_verify.first_xor, (unsigned)(s_verify.us / 1000),
                   (unsigned)s_repeat.bad_bytes, s_bad ? "BAD " : "ok", s_bad ? s_why : "");
+    console_reply("psram one-shot delayline (this boot): %s", s_os_line);
     console_reply("psram boot policy: %s", s_policy_done ? s_policy_line : "not evaluated yet");
     print_ldo();
 }

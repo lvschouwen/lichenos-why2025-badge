@@ -35,5 +35,12 @@ void psram_boot_dense_test(unsigned kb);
 // the literal "yes", outside the passing window the boot tuning measured, and while the SD card is mounted.
 void psram_boot_set_delayline(char const *idx_text);
 
+// "fw psram dlboot <idx> yes | clear" (#121): arm a one-shot delayline for the NEXT boot. psram_boot_oneshot_apply runs
+// once NVS is up (app_main, before storage and MeshCore): it erases the record first, then, only for an idx inside that
+// boot's own tuning window, sets it and runs the dense check; the result is in "fw psram" and the boot log. A failed or
+// unknown idx therefore never sticks: the boot after it is back on the IDF's choice.
+void psram_boot_oneshot_arm(char const *args);
+void psram_boot_oneshot_apply(void);
+
 // The tuning line ("phase 67.50 (run 4/4), delayline idx 15 ..."), for the Bench app (#96); returns the length
 size_t psram_boot_tuning_text(char *out, size_t cap);
