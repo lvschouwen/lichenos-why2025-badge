@@ -610,6 +610,8 @@ static void open_settings(lv_obj_t *screen) {
     menu_set_value(power_open, "Restart, power off");
     open_row(menu, "Factory reset", factory_screen_open);
     open_row(menu, "About Lichen", open_about);
+    menu_note(menu, "For developers");
+    menu_set_value(open_row(menu, "Console", console_open_from_settings), "Run fw commands");
     bool heading = false;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);

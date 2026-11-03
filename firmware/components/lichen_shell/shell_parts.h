@@ -45,6 +45,8 @@ void power_open_from_settings(void *arg);        // Settings > Power: opens the 
 void power_request_restart(void);                // Power > Restart without the question (factory reset, #66)
 // factory_screen.c: Settings > Factory reset (#66; menu callback, LVGL context)
 void factory_screen_open(void *arg);
+// app_console.c: Settings > For developers > Console (#150; menu callback, LVGL context)
+void console_open_from_settings(void *arg);
 // update_screen.c: every app's stop_for_update (a firmware update, a restart or power off from the Power app, #65);
 // true when all of them stopped. Blocks for seconds: never on the LVGL task.
 bool shell_stop_apps(void);
