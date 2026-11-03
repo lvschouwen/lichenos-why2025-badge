@@ -1,5 +1,7 @@
 #include "wifi_list.h"
 
+#include "wifi_saved.h"
+
 #include "fw_console.h"
 #include "nvs.h"
 
@@ -112,6 +114,141 @@ bool wifi_cred_valid(char const *ssid, char const *pass) {
 
 static uint32_t generation;
 
+// ---- the saved list (#160) ---------------------------------------------------------------------------------------
+
+static char *slot_key(char key[10], char kind, int i) {
+    key[0] = 'w'; key[1] = 'i'; key[2] = 'f'; key[3] = 'i'; key[4] = '_';
+    key[5] = kind;
+    key[6] = (char)('0' + i);
+    key[7] = '\0';
+    return key;
+}
+
+static bool saved_store(wifi_saved_t const *l) {
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        return false;
+    }
+    esp_err_t err = ESP_OK;
+    for (int i = 0; i < WIFI_SAVED_MAX && err == ESP_OK; i++) {
+        char ks[10], kp[10];
+        slot_key(ks, 's', i);
+        slot_key(kp, 'p', i);
+        if ((size_t)i < l->n) {
+            err = nvs_set_str(nvs, ks, l->e[i].ssid);
+            if (err == ESP_OK) {
+                err = nvs_set_str(nvs, kp, l->e[i].pass);
+            }
+        } else {
+            nvs_erase_key(nvs, ks);
+            nvs_erase_key(nvs, kp);
+        }
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    return err == ESP_OK;
+}
+
+bool wifi_saved_load(wifi_saved_t *l) {
+    memset(l, 0, sizeof(*l));
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    for (int i = 0; i < WIFI_SAVED_MAX; i++) {
+        char   ks[10], kp[10];
+        size_t sl = sizeof(l->e[0].ssid), pl = sizeof(l->e[0].pass);
+        if (nvs_get_str(nvs, slot_key(ks, 's', i), l->e[l->n].ssid, &sl) == ESP_OK &&
+            nvs_get_str(nvs, slot_key(kp, 'p', i), l->e[l->n].pass, &pl) == ESP_OK &&
+            wifi_cred_valid(l->e[l->n].ssid, l->e[l->n].pass)) {
+            l->n++;
+        }
+    }
+    nvs_close(nvs);
+    if (l->n == 0) { // first boot after #160: the single saved pair becomes entry 1
+        char s[33], p[64];
+        if (wifi_cred_load(s, p) && wifi_saved_migrate(l, s, p)) {
+            saved_store(l);
+        }
+        memset(p, 0, sizeof(p));
+    }
+    return true;
+}
+
+// The pair just joined goes to the front of the list (l was loaded before wifi_ssid changed, so a pre-#160 pair has
+// been migrated by then). Best effort: the pair in use is already safe in wifi_ssid.
+static void saved_remember(wifi_saved_t *l, char const *ssid, char const *pass) {
+    if (wifi_saved_add(l, ssid, pass)) {
+        saved_store(l);
+    }
+    wifi_saved_wipe(l);
+}
+
+static bool set_active(char const *ssid, char const *pass) {
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        return false;
+    }
+    esp_err_t err;
+    if (ssid) {
+        err = nvs_set_str(nvs, "wifi_ssid", ssid);
+        if (err == ESP_OK) {
+            err = nvs_set_str(nvs, "wifi_pass", pass);
+        }
+    } else {
+        nvs_erase_key(nvs, "wifi_ssid");
+        nvs_erase_key(nvs, "wifi_pass");
+        err = ESP_OK;
+    }
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
+    nvs_close(nvs);
+    return err == ESP_OK;
+}
+
+bool wifi_cred_forget(char const *ssid, bool *was_active, bool *left) {
+    wifi_saved_t l;
+    wifi_saved_load(&l);
+    char act[33] = "", pass[64];
+    wifi_cred_load(act, pass);
+    bool active = strcmp(act, ssid) == 0;
+    bool ok     = wifi_saved_forget(&l, ssid) && saved_store(&l);
+    if (ok && active) {
+        set_active(l.n ? l.e[0].ssid : NULL, l.n ? l.e[0].pass : "");
+    }
+    if (ok) {
+        generation++;
+    }
+    if (was_active) {
+        *was_active = ok && active;
+    }
+    if (left) {
+        *left = l.n > 0;
+    }
+    wifi_saved_wipe(&l);
+    memset(pass, 0, sizeof(pass));
+    return ok;
+}
+
+bool wifi_cred_activate(char const *ssid) {
+    wifi_saved_t l;
+    wifi_saved_load(&l);
+    int  at = wifi_saved_find(&l, ssid);
+    bool ok = at >= 0;
+    if (ok && at > 0) {
+        char pass[64];
+        strcpy(pass, l.e[at].pass);
+        ok = wifi_saved_add(&l, ssid, pass) && saved_store(&l) && set_active(ssid, pass);
+        memset(pass, 0, sizeof(pass));
+        generation++;
+    }
+    wifi_saved_wipe(&l);
+    return ok;
+}
+
 uint32_t wifi_cred_generation(void) {
     return generation;
 }
@@ -123,9 +260,12 @@ bool wifi_cred_save(char const *ssid, char const *pass) {
     }
     char old_ssid[33], old_pass[64];
     bool had = wifi_cred_load(old_ssid, old_pass);
+    wifi_saved_t list;
+    wifi_saved_load(&list);
     nvs_handle_t nvs;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
         memset(old_pass, 0, sizeof(old_pass));
+        wifi_saved_wipe(&list);
         return false;
     }
     esp_err_t err = nvs_set_str(nvs, "wifi_ssid", ssid);
@@ -149,6 +289,9 @@ bool wifi_cred_save(char const *ssid, char const *pass) {
     memset(old_pass, 0, sizeof(old_pass));
     if (err == ESP_OK) {
         generation++;
+        saved_remember(&list, ssid, pass);
+    } else {
+        wifi_saved_wipe(&list);
     }
     return err == ESP_OK;
 }
@@ -160,6 +303,11 @@ bool wifi_cred_clear(void) {
     }
     nvs_erase_key(nvs, "wifi_ssid");
     nvs_erase_key(nvs, "wifi_pass");
+    for (int i = 0; i < WIFI_SAVED_MAX; i++) {
+        char key[10];
+        nvs_erase_key(nvs, slot_key(key, 's', i));
+        nvs_erase_key(nvs, slot_key(key, 'p', i));
+    }
     esp_err_t err = nvs_commit(nvs);
     nvs_close(nvs);
     generation++;

@@ -88,6 +88,12 @@ bool wifi_has_credentials(void);
 // Blocking Wi-Fi scan, at most about 6 s: never call it on the LVGL task. Fills out with up to max cleaned entries
 // (wifi_list_clean: no empty names, one per SSID, strongest first). False if the scan could not run.
 bool wifi_scan(wifi_ap_t *out, size_t max, size_t *n);
+// The same scan without wifi_list_clean: every AP the driver reports (up to 32), with its channel, duplicates and hidden
+// names included. For the Wi-Fi analyser (#159), which counts APs per channel.
+bool wifi_scan_raw(wifi_ap_t *out, size_t max, size_t *n);
+// Forgets one saved network (#160). If it was the pair in use, the next saved one takes over (or the radio is left
+// without a network). False if it was not saved. The password never leaves NVS. Not on the c6wifi task.
+bool wifi_forget_network(char const *ssid);
 // Starts a trial join of the pair (empty password for an open network) and returns at once: the pair is applied to the
 // driver but saved to NVS (badge_fw wifi_ssid / wifi_pass) only once it gets an IP. Without one in 20 s, or on an
 // authentication failure, the previous pair is put back and NVS was never touched. False if the pair is invalid or the

@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-#define SLOTS 8
+#define SLOTS 24
 
 static struct {
     char key[16];

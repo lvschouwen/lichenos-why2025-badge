@@ -13,6 +13,7 @@
 #include "text_entry.h"
 #include "theme.h"
 #include "wifi_list.h"
+#include "wifi_saved.h"
 
 #include <stdarg.h>
 #include <stdint.h>
@@ -38,7 +39,7 @@ static lv_obj_t   *status;
 static lv_group_t *group;
 static lv_timer_t *poll;
 static uint32_t    gen;
-static lv_obj_t   *rows[MAX_APS + 2]; // the placeholder or the networks, then "Scan again"
+static lv_obj_t   *rows[MAX_APS + WIFI_SAVED_MAX + 4]; // the placeholder or the networks, "Scan again", then the saved ones
 static size_t      row_count;
 static lv_obj_t   *focus_at_scan; // what had the focus when the scan started: compared, never dereferenced
 static wifi_ap_t   shown[MAX_APS];
@@ -60,6 +61,7 @@ __attribute__((format(printf, 1, 2))) static void set_status(char const *fmt, ..
 
 static void start_scan(void);
 static void clear_rows(void);
+static void add_saved_rows(void);
 
 // The Wi-Fi radio switch (#108) is the first row: off clears the list, on scans once the driver has had a moment to start
 static lv_obj_t   *radio_row;
@@ -95,6 +97,7 @@ static void toggle_radio(void *arg) {
         set_status("Starting Wi-Fi...");
         start_timer = lv_timer_create(scan_after_start, RADIO_START_MS, NULL);
     } else {
+        add_saved_rows();
         set_status("Wi-Fi is off");
     }
 }
@@ -233,6 +236,53 @@ static void decorate(lv_obj_t *row, wifi_ap_t const *ap, bool connected) {
     }
 }
 
+// ---- saved networks (#160) ---------------------------------------------------------------------------------------
+
+static char forget_name[WIFI_SAVED_MAX][33]; // the row's own copy: the list may change under it
+
+static void rebuild_rows(void);
+
+// The careful dialog was confirmed
+static void on_forget(void *arg) {
+    size_t i = (size_t)(uintptr_t)arg;
+    if (i >= WIFI_SAVED_MAX || !shell_sources.wifi_forget) {
+        return;
+    }
+    char name[140];
+    wifi_ssid_sanitize(forget_name[i], name, sizeof(name));
+    bool ok = shell_sources.wifi_forget(forget_name[i]);
+    rebuild_rows();
+    set_status(ok ? "Forgot %s" : "Could not forget %s. Try again.", name);
+}
+
+// "Saved networks" with one Forget row per network: name left, "Forget" right, asks first (R3)
+static void add_saved_rows(void) {
+    wifi_saved_t *l = calloc(1, sizeof(*l));
+    if (!l) {
+        return;
+    }
+    wifi_saved_load(l);
+    lv_group_t *previous = lv_group_get_default();
+    lv_group_set_default(group);
+    rows[row_count++] = menu_note(menu, l->n ? "Saved networks" : "No saved networks yet: pick one above to join and save it.");
+    for (size_t i = 0; i < l->n; i++) {
+        char name[140], question[200];
+        snprintf(forget_name[i], sizeof(forget_name[i]), "%s", l->e[i].ssid);
+        wifi_ssid_sanitize(l->e[i].ssid, name, sizeof(name));
+        lv_obj_t *row = menu_add(menu, name, "Forget", on_forget, (void *)(uintptr_t)i);
+        if (!row) {
+            continue;
+        }
+        snprintf(question, sizeof(question), "Forget %.100s? Its password is deleted.", name);
+        menu_set_kind(row, MENU_DANGER);
+        menu_set_danger(row, question, "forget");
+        rows[row_count++] = row;
+    }
+    lv_group_set_default(previous);
+    wifi_saved_wipe(l);
+    free(l);
+}
+
 static void on_skip(void *arg) {
     (void)arg;
     if (setup_done) {
@@ -247,7 +297,6 @@ static void again(void *arg) {
     start_scan();
 }
 
-// Replaces the rows with "Scanning..." and starts the scan task
 static void clear_rows(void) {
     for (size_t i = 0; i < row_count; i++) {
         lv_obj_delete(rows[i]);
@@ -255,20 +304,11 @@ static void clear_rows(void) {
     row_count = 0;
 }
 
-static void on_scan_done(void *data) {
-    scan_result_t *res = data;
-    if (!screen || res->gen != gen) { // Esc was pressed (or the screen was reopened) while the scan ran
-        free(res);
-        return;
-    }
-    // The user moved while the scan ran (to Skip, say): the result does not take the focus from them (#128)
-    lv_obj_t *now   = group ? lv_group_get_focused(group) : NULL;
-    bool      moved = now != focus_at_scan && !(row_count > 0 && now == rows[0]);
+// The scan list, "Scan again", the saved networks and the analyser, from `shown`; the radio row stays
+static void fill_rows(void) {
     clear_rows();
     lv_group_t *previous = lv_group_get_default();
     lv_group_set_default(group);
-    shown_n = res->ok ? res->n : 0;
-    memcpy(shown, res->aps, shown_n * sizeof(shown[0]));
     char joined[33] = "", ip[16] = "";
     settings_get_str("wifi_ssid", joined, sizeof(joined), "");
     bool online = joined[0] && lichen_radio_get(RADIO_WIFI) && shell_sources.wifi_ip && shell_sources.wifi_ip(ip, sizeof(ip));
@@ -283,9 +323,40 @@ static void on_scan_done(void *data) {
     }
     rows[row_count++] = menu_add(menu, "Scan again", "", again, NULL);
     lv_group_set_default(previous);
+    add_saved_rows();
+}
+
+// After a forget: the same list again, nothing scanned
+static void rebuild_rows(void) {
+    if (lichen_radio_get(RADIO_WIFI) && row_count > 0) {
+        fill_rows();
+    } else {
+        clear_rows();
+        add_saved_rows();
+    }
+    if (rows[0]) {
+        lv_group_focus_obj(rows[0]);
+    }
+}
+
+static void on_scan_done(void *data) {
+    scan_result_t *res = data;
+    if (!screen || res->gen != gen) { // Esc was pressed (or the screen was reopened) while the scan ran
+        free(res);
+        return;
+    }
+    // The user moved while the scan ran (to Skip, say): the result does not take the focus from them (#128)
+    lv_obj_t *now   = group ? lv_group_get_focused(group) : NULL;
+    bool      moved = now != focus_at_scan && !(row_count > 0 && now == rows[0]);
+    shown_n         = res->ok ? res->n : 0;
+    memcpy(shown, res->aps, shown_n * sizeof(shown[0]));
+    fill_rows();
     if (!moved && rows[0]) {
         lv_group_focus_obj(rows[0]); // the first network or "Scan again": never the radio switch, one Enter from off
     }
+    char joined[33] = "", ip[16] = "";
+    settings_get_str("wifi_ssid", joined, sizeof(joined), "");
+    bool online = joined[0] && lichen_radio_get(RADIO_WIFI) && shell_sources.wifi_ip && shell_sources.wifi_ip(ip, sizeof(ip));
     if (!res->ok) {
         set_status("The scan failed. Try again.");
     } else if (shown_n == 0) {
@@ -369,6 +440,7 @@ static lv_obj_t *build(void) {
     if (lichen_radio_get(RADIO_WIFI)) {
         start_scan();
     } else {
+        add_saved_rows();
         set_status(lichen_airplane_get() ? "Wi-Fi is off (airplane mode)" : "Wi-Fi is off");
     }
     wifi_join_state_t now = shell_sources.wifi_join_state ? shell_sources.wifi_join_state(target, sizeof(target), NULL, 0)

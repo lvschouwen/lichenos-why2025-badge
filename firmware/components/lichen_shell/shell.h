@@ -26,6 +26,8 @@ typedef struct {
     bool (*wifi_ip)(char *ip, size_t cap); // false while there is no IP
     wifi_join_state_t (*wifi_join_state)(char *tried, size_t tried_cap, char *kept, size_t kept_cap);
     bool (*wifi_join)(char const *ssid, char const *pass);
+    bool (*wifi_forget)(char const *ssid); // forgets one saved network (#160)
+    bool (*wifi_scan_raw)(wifi_ap_t *out, size_t max, size_t *n); // every AP with its channel, for the analyser (#159)
     bool (*wifi_rssi)(int8_t *out);     // signal of the connected AP, false while unknown (status bar bars)
     bool (*wifi_joining)(void);         // a join is under way (status bar amber)
     bool (*wifi_has_credentials)(void); // first-run setup skips the Wi-Fi step when the badge has a network saved

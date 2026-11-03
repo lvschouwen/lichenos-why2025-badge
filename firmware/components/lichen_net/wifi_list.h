@@ -10,6 +10,7 @@ typedef struct {
     char   ssid[33];
     int8_t rssi;
     bool   open; // no password needed
+    uint8_t channel; // 1-13 on 2.4 GHz, 0 when unknown (#159)
 } wifi_ap_t;
 
 // Drops empty SSIDs, keeps the strongest entry per SSID, sorts by RSSI (strongest first); returns the new count
@@ -29,3 +30,13 @@ bool     wifi_cred_save(char const *ssid, char const *pass);
 bool     wifi_cred_load(char ssid[33], char pass[64]);
 bool     wifi_cred_clear(void);
 uint32_t wifi_cred_generation(void);
+
+// The saved networks (#160), keys wifi_s0..wifi_s4 / wifi_p0..wifi_p4, most recently joined first. wifi_ssid/wifi_pass
+// above stay the pair in use (the front of the list). All of these are called with c6link's saved-list lock held.
+struct wifi_saved_s;
+// Loads the list; an empty list takes the pre-#160 single pair as entry 1 (and is written back)
+bool wifi_saved_load(struct wifi_saved_s *l);
+// Removes one network. was_active: it was the pair in use; the next entry (if any) takes its place, left = entries remain
+bool wifi_cred_forget(char const *ssid, bool *was_active, bool *left);
+// Makes a saved network the pair in use (front of the list); false if it is not saved. No change if it is already.
+bool wifi_cred_activate(char const *ssid);
