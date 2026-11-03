@@ -19,7 +19,10 @@ typedef enum {
     CALC_DIV_ZERO,    // / or % by zero
     CALC_OVERFLOW,    // does not fit in 64 bits
     CALC_BAD_SHIFT,   // a shift count below 0 or above 63
+    CALC_TOO_DEEP,    // more than CALC_MAX_DEPTH brackets / signs inside each other (the parser recurses per level)
 } calc_err_t;
+
+#define CALC_MAX_DEPTH 10 // nesting levels: one bracket level is 288 B of the caller's stack (-Os, riscv32), and the caller is the LVGL task (10 KB, ~4 KB spare)
 
 // Evaluates expr. On success *out holds the value. On an error *err_pos (when not NULL) is the byte offset the problem
 // was found at, for a caret or a message.

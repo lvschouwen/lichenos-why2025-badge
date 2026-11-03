@@ -30,6 +30,9 @@ void wx_ring_push(wx_ring_t *r, wx_sample_t const *s) {
 }
 
 size_t wx_series(wx_ring_t const *r, wx_qty_t q, float offset_k, float *out, size_t max) {
+    if (r->cap == 0) { // never initialised (no memory at start): nothing to show, and no % 0
+        return 0;
+    }
     size_t n     = r->count < max ? r->count : max;
     size_t skip  = r->count - n; // the oldest ones do not fit: keep the newest
     size_t start = (r->head + r->cap - r->count + skip) % r->cap;

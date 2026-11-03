@@ -162,9 +162,16 @@ static void take_sample(void) {
     wx_ring_push(&s_ring, &s);
     xSemaphoreGive(s_lock);
     atomic_fetch_add(&s_version, 1);
-    ESP_LOGI(TAG, "sample %u: %.1f C, %.0f%%, %.0f hPa, gas %.0f kOhm", (unsigned)s_ring.count, (double)s.v[WX_TEMP],
+    // Debug only: float printf is the deepest stack user here after FATFS, and `fw sensors` shows the same values
+    ESP_LOGD(TAG, "sample %u: %.1f C, %.0f%%, %.0f hPa, gas %.0f kOhm", (unsigned)s_ring.count, (double)s.v[WX_TEMP],
              (double)s.v[WX_HUM], (double)s.v[WX_PRESS], (double)s.v[WX_GAS]);
     log_sample(&s);
+    // The task stack is internal RAM (it writes NVS when the log fails): report its margin once an hour (review #155)
+    static unsigned samples;
+    if (samples++ % 60 == 0) {
+        ESP_LOGI(TAG, "sampler stack never below %u bytes free (of %u), log %s", (unsigned)uxTaskGetStackHighWaterMark(NULL),
+                 (unsigned)TASK_STACK, atomic_load(&s_log_on) ? "on" : "off");
+    }
 }
 
 static void sampler_task(void *arg) {
@@ -185,6 +192,10 @@ static bool start_background(void) {
     if (!store || !s_lock) {
         ESP_LOGE(TAG, "no memory for the history");
         heap_caps_free(store);
+        if (s_lock) {
+            vSemaphoreDelete(s_lock);
+            s_lock = NULL;
+        }
         return false;
     }
     wx_ring_init(&s_ring, store, WX_RING_CAP);

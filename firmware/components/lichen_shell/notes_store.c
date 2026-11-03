@@ -37,9 +37,44 @@ static int by_name(void const *a, void const *b) {
     return notes_name_compare(((notes_item_t const *)a)->name, ((notes_item_t const *)b)->name);
 }
 
+// write_file removes the old note before renaming <name>.new over it (FAT's rename does not replace). Cut off in
+// between, only the finished <name>.new is left: rename it back. A .new beside its note is an unfinished write and is
+// left alone. Collected first, renamed after: no renames while the directory is being read.
+#define ORPHANS_MAX 8
+static void recover_orphans(char const *dir) {
+    char  names[ORPHANS_MAX][NOTES_NAME_MAX];
+    size_t n = 0;
+    DIR   *d = opendir(dir);
+    if (!d) {
+        return;
+    }
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL && n < ORPHANS_MAX) {
+        size_t len = strlen(e->d_name);
+        if (len <= 4 || len - 4 >= NOTES_NAME_MAX || strcmp(e->d_name + len - 4, ".new") != 0) {
+            continue;
+        }
+        memcpy(names[n], e->d_name, len - 4);
+        names[n][len - 4] = '\0';
+        if (notes_name_ok(names[n])) {
+            n++;
+        }
+    }
+    closedir(d);
+    for (size_t i = 0; i < n; i++) {
+        char        path[PATH_CAP], tmp[PATH_CAP];
+        struct stat st;
+        if (path_join(dir, names[i], "", path, sizeof(path)) && path_join(dir, names[i], ".new", tmp, sizeof(tmp)) &&
+            stat(path, &st) != 0) {
+            rename(tmp, path);
+        }
+    }
+}
+
 notes_result_t notes_store_list(char const *dir, notes_item_t *out, size_t max, size_t *count, size_t *skipped) {
     *count   = 0;
     *skipped = 0;
+    recover_orphans(dir);
     DIR *d   = opendir(dir);
     if (!d) {
         return NOTES_ERR_OPEN;

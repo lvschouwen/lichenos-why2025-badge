@@ -53,6 +53,11 @@ static void ask_text(void *arg) {
 
 // ---- Wi-Fi: name, password, then the careful question ---------------------------------------------------------------
 
+static void wipe_later(lv_timer_t *t) {
+    (void)t; // repeat count 1: LVGL deletes it after this call
+    wifi_wipe();
+}
+
 static void shown_answer(bool yes) {
     if (yes) {
         char caption[96];
@@ -76,6 +81,15 @@ static void on_password(char const *password, void *arg) {
         .confirm_label = "show",
     };
     if (!shell_dialog_countdown(&d, shown_answer)) {
+        wifi_wipe();
+        return;
+    }
+    // A dialog replaced by another one never answers: wipe the password-holding payload anyway, a little after the
+    // countdown would have ended (review #153). The QR screen keeps its own copy, wiped when it closes.
+    lv_timer_t *t = lv_timer_create(wipe_later, (ASK_SECONDS + 2) * 1000, NULL);
+    if (t) {
+        lv_timer_set_repeat_count(t, 1);
+    } else {
         wifi_wipe();
     }
 }

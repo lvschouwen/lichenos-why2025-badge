@@ -78,6 +78,9 @@ static void rebuild(size_t count) {
     mc_list_restore(&list, s);
 }
 
+#define REBUILD_MIN_MS 3000
+static uint32_t last_rebuild_ms;
+
 static void refresh(lv_timer_t *t) {
     if (t && lv_screen_active() != screen_obj) {
         return;
@@ -85,10 +88,14 @@ static void refresh(lv_timer_t *t) {
     uint32_t seq;
     size_t   count = mesh_airlog_snapshot(mem->entries, SHOW_ENTRIES, &seq);
     bool     stale = mesh_uptime_s() - last_rebuild_s >= AGE_REFRESH_S;
-    if (seq != shown_seq || stale) {
+    // A busy mesh brings a packet about every second: rebuilding 100 rows each time costs frames, so new packets
+    // show at most every REBUILD_MIN_MS (review #165). The first fill (t == NULL) is immediate.
+    bool due = !t || lv_tick_elaps(last_rebuild_ms) >= REBUILD_MIN_MS;
+    if ((seq != shown_seq && due) || stale) {
         rebuild(count);
-        shown_seq      = seq;
-        last_rebuild_s = mesh_uptime_s();
+        shown_seq       = seq;
+        last_rebuild_s  = mesh_uptime_s();
+        last_rebuild_ms = lv_tick_get();
     }
 }
 

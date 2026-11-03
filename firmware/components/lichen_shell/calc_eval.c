@@ -13,6 +13,7 @@ typedef struct {
     size_t      err_pos;
     bool        allow_min; // set by a unary minus right in front of a decimal literal: 2^63 is then -2^63's magnitude
     bool        got_min;   // the literal just read was exactly 2^63 and returned as INT64_MIN
+    unsigned    depth;     // parse_unary calls in progress: every bracket and sign level passes through it
 } parser_t;
 
 static int64_t parse_or(parser_t *p);
@@ -155,7 +156,22 @@ static int64_t parse_primary(parser_t *p) {
     return 0;
 }
 
+static int64_t parse_unary_level(parser_t *p);
+
+// Bounded recursion: the deepest chain is ( ... ( via parse_or..parse_primary, or ~~~~ via parse_unary itself, and
+// every level of either passes here, so one counter caps both.
 static int64_t parse_unary(parser_t *p) {
+    if (p->depth >= CALC_MAX_DEPTH) {
+        fail(p, CALC_TOO_DEEP, p->pos);
+        return 0;
+    }
+    p->depth++;
+    int64_t v = parse_unary_level(p);
+    p->depth--;
+    return v;
+}
+
+static int64_t parse_unary_level(parser_t *p) {
     char c = peek(p);
     if (c == '-') {
         size_t at = p->pos;
@@ -325,6 +341,7 @@ char const *calc_err_text(calc_err_t err) {
     case CALC_DIV_ZERO:   return "Division by zero";
     case CALC_OVERFLOW:   return "Result does not fit in 64 bits";
     case CALC_BAD_SHIFT:  return "Shift by 0 to 63 places only";
+    case CALC_TOO_DEEP:   return "Too many brackets or signs inside each other";
     }
     return "Error";
 }

@@ -60,7 +60,34 @@ static void formats(void) {
     CHECK(calc_fmt_hex(tiny, sizeof(tiny), 0x123456) == 5 && strcmp(tiny, "0x123") == 0);
 }
 
+// The parser recurses once per bracket or unary sign, on the LVGL task (10 KB stack): deep input must be refused,
+// not recursed into (#158 review). 8 levels still work (CALC_MAX_DEPTH 10: 8 brackets, each also passing one unary level).
+static void nesting(void) {
+    char s[128];
+    size_t n = 0;
+    for (int i = 0; i < 8; i++) s[n++] = '(';
+    s[n++] = '7';
+    for (int i = 0; i < 8; i++) s[n++] = ')';
+    s[n] = '\0';
+    expect(s, 7);
+    n = 0;
+    for (int i = 0; i < 60; i++) s[n++] = '(';
+    s[n++] = '1';
+    for (int i = 0; i < 60; i++) s[n++] = ')';
+    s[n] = '\0';
+    int64_t v = 0;
+    size_t  at = 0;
+    CHECK(calc_eval(s, &v, &at) == CALC_TOO_DEEP);
+    n = 0;
+    for (int i = 0; i < 99; i++) s[n++] = '~';
+    s[n++] = '1';
+    s[n] = '\0';
+    CHECK(calc_eval(s, &v, &at) == CALC_TOO_DEEP);
+    CHECK(strcmp(calc_err_text(CALC_TOO_DEEP), "Error") != 0);
+}
+
 int main(void) {
+    nesting();
     // numbers
     expect("0", 0);
     expect("42", 42);

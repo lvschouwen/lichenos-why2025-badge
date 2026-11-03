@@ -123,6 +123,26 @@ static void test_list_edges(void) {
     CHECK(cut);
 }
 
+// A save cut off between "remove the old note" and "rename .new over it" (power, card pulled) leaves only
+// <name>.new: the next listing brings it back instead of the note vanishing. A .new next to its note is an
+// unfinished write and stays untouched (review #154).
+static void test_recover_orphan(void) {
+    clean_dir();
+    notes_item_t items[4];
+    size_t       count, skipped;
+    put("lost.txt.new", "saved just before the power went");
+    put("kept.txt", "old text");
+    put("kept.txt.new", "half written");
+    CHECK(notes_store_list(dir, items, 4, &count, &skipped) == NOTES_OK && count == 2);
+    CHECK(has("lost.txt") && !has("lost.txt.new"));
+    CHECK(has("kept.txt") && has("kept.txt.new"));
+    bool found = false;
+    for (size_t i = 0; i < count; i++) {
+        found |= strcmp(items[i].name, "lost.txt") == 0 && strcmp(items[i].line, "saved just before the power went") == 0;
+    }
+    CHECK(found);
+}
+
 int main(void) {
     snprintf(dir, sizeof(dir), "/tmp/notes_store_test_XXXXXX");
     if (!mkdtemp(dir)) {
@@ -133,6 +153,7 @@ int main(void) {
     test_write();
     test_delete();
     test_list_edges();
+    test_recover_orphan();
     clean_dir();
     rmdir(dir);
     if (failures) {

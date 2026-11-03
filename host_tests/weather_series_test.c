@@ -134,7 +134,15 @@ static void test_csv(void) {
     CHECK(wx_csv_line(line, 20, 0, &s, 0) == 0); // too small a buffer writes nothing
 }
 
+// A ring that never got its memory (start_background failed) is all zero: no samples, and no % 0 (review #155)
+static void empty_ring(void) {
+    wx_ring_t r = {0};
+    float     out[4];
+    CHECK(wx_series(&r, WX_TEMP, 0.0f, out, 4) == 0);
+}
+
 int main(void) {
+    empty_ring();
     test_ring();
     test_range();
     test_air();
