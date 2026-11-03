@@ -123,6 +123,18 @@ static void add_entry_rows(void) {
 static bool focused_index(int *out);
 static bool on_text(uint32_t key, void *arg);
 
+// shell_open puts the screen into the group when the first build has no rows yet (the volume job is still running); it
+// then stayed a stop of its own, and Down past the last row wrapped onto it: no row highlighted, keys dead (#143). With
+// rows the screen leaves the group; without rows (an empty folder) it takes the keys, Esc included.
+static void keep_only_rows_focusable(void) {
+    bool rows = s_v.dir[0] ? s_v.count > 0 : s_v.have_root;
+    if (rows && lv_obj_get_group(s_v.screen) == s_v.group) {
+        lv_group_remove_obj(s_v.screen);
+    } else if (!rows && lv_obj_get_group(s_v.screen) != s_v.group) {
+        lv_group_add_obj(s_v.group, s_v.screen);
+    }
+}
+
 // (Re)builds the menu from s_v.dir and the last listing; rows join the screen's group
 static void fill_menu(void) {
     if (s_v.menu) {
@@ -155,12 +167,16 @@ static void fill_menu(void) {
     }
     menu_on_text(s_v.menu, on_text, NULL);
     lv_group_set_default(previous);
+    keep_only_rows_focusable();
     int focus = 0;
     files_entry_t const *entries = files_job_entries();
     for (size_t i = 0; s_v.dir[0] && s_v.select[0] && i < s_v.count; i++) {
         if (!strcmp(entries[i].name, s_v.select)) {
             focus = (int)i;
         }
+    }
+    if (!s_v.dir[0] && !strcmp(s_v.select, "sd")) {
+        focus = 1; // back from the SD card: the volume you came from, not the first
     }
     s_v.select[0] = '\0';
     menu_focus_row(s_v.menu, focus);
