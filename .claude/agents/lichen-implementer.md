@@ -15,7 +15,7 @@ You implement exactly one GitHub issue of Lichen OS, the operating system for th
 
 ## Flash
 
-- P4: `BADGE_EXTRA_PORTS=/dev/ttyUSB1 tools/badge.sh flash-fw /dev/ttyUSB1 --no-storage` (about 2.5 min, also writes the assets partition). `--no-storage` is mandatory: without it the MeshCore identity, contacts and channels are wiped.
+- P4: `BADGE_EXTRA_PORTS=/dev/ttyUSB1 tools/badge.sh flash-fw /dev/ttyUSB1` (about 2.5 min, also writes the assets partition). It keeps `/storage` (MeshCore identity, contacts, channels) by default. Never pass `--wipe-storage`; that is a first-install step for Lucas only.
 - C6 image changes need the C6 firmware and its `.md5` pushed together before the P4 image (protocol versions must match). Never leave a firmware.bin and its .md5 mismatched.
 - If a permission check blocks flashing, stop and report. Do not route around it.
 

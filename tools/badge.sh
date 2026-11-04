@@ -37,10 +37,11 @@ Usage: $(basename "$0") <command> [args]
 
   ports                     list Espressif ports on $HOST and the chip behind each
   backup <port>             read the whole flash of the chip on <port> into $BACKUPS
-  flash-fw <port> [--no-storage]
-                            write firmware/build (Lichen: bootloader, partitions, app, assets, storage) to the P4;
-                            storage replaces everything on the badge's flash drive (MeshCore identity,
-                            contacts, settings), --no-storage leaves it alone
+  flash-fw <port> [--wipe-storage]
+                            write firmware/build (Lichen: bootloader, partitions, app, assets) to the P4 and keep
+                            the storage partition (MeshCore identity, contacts, settings); --wipe-storage also
+                            writes storage.bin, which replaces everything on the badge's flash drive (first
+                            install only). --no-storage is accepted as the old name of the default.
   crash <port> [elf]        fetch the core dump over the console ("fw crash dump"), check it and decode it with
                             the ELF kept by flash-fw/ota-firmware in $ELFS (or [elf])
   restore <port> <file> --yes
@@ -150,28 +151,35 @@ archive_elf() {
     cp "$build/badge_fw.elf" "$ELFS/$version.elf" && echo "ELF kept as $ELFS/$version.elf"
 }
 
-# cmd_flash_fw <port> [--no-storage] [build dir]: Lichen from firmware/build
+# cmd_flash_fw <port> [--wipe-storage|--no-storage] [build dir]: Lichen from firmware/build.
+# Keeps the storage partition unless --wipe-storage is given (#183); --no-storage is the old name of the default.
 cmd_flash_fw() {
-    local port=$1 no_storage=${2:-} build=${3:-$REPO/firmware/build}
+    local port=$1 mode=${2:-} build=${3:-$REPO/firmware/build}
     require_espressif_port "$port"
     local args="$build/flash_args"
     [ -f "$args" ] || { echo "no $args, build first" >&2; exit 1; }
+    local wipe_storage=0
+    case "$mode" in
+        --wipe-storage) wipe_storage=1 ;;
+        ''|--no-storage) ;;
+        *) echo "flash-fw: unknown option $mode (use --wipe-storage to overwrite /storage)" >&2; exit 1 ;;
+    esac
     # flash_args lists offset/file pairs relative to build/; mirror exactly those files.
     local files
     files=$(grep -oE '[^ ]+\.bin' "$args")
     local flash_args=@flash_args
-    if [ "$no_storage" = --no-storage ]; then
+    if [ "$wipe_storage" = 1 ]; then
+        echo "warning: --wipe-storage overwrites the storage partition (everything on the badge's flash drive: MeshCore identity, contacts, channels, settings)" >&2
+    else
         # Keep the storage partition (MeshCore, settings) by dropping its offset/file pair from the arguments
         files=$(grep -v 'storage.bin' <<<"$files" || true)
         grep -v 'storage.bin' "$args" > "$args.nostorage" || true
         flash_args=@flash_args.nostorage
-    else
-        echo "warning: this overwrites the storage partition (everything on the badge's flash drive); use --no-storage to keep it" >&2
     fi
     remote "rm -rf $REMOTE_DIR/images/p4 && mkdir -p $REMOTE_DIR/images/p4"
     # shellcheck disable=SC2086  # one word per file is intended
     (cd "$build" && tar cf - flash_args $files) | remote "tar xf - -C $REMOTE_DIR/images/p4"
-    if [ "$no_storage" = --no-storage ]; then
+    if [ "$wipe_storage" != 1 ]; then
         scp "$args.nostorage" "$HOST:$REMOTE_DIR/images/p4/flash_args.nostorage"
         rm -f "$args.nostorage"
     fi
@@ -625,7 +633,7 @@ cmd_ota_c6() {
             if ! ota_put "$ip" file "$dir/$f" "FLASH0:[c6]$f"; then
                 echo "FAILED at $f. The badge holds a mixed C6 bundle and was NOT rebooted: it keeps running and its" >&2
                 echo "C6 is untouched. Run ota-c6 again (all six files are rewritten); do not reboot it before that works." >&2
-                echo "If a reboot happened anyway and Wi-Fi stays away, use the USB rescue (flash-fw --no-storage)." >&2
+                echo "If a reboot happened anyway and Wi-Fi stays away, use the USB rescue (flash-fw, which keeps /storage)." >&2
                 exit 1
             fi
         done

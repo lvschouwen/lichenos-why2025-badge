@@ -113,7 +113,7 @@ never opens any partition but `nvs`, `storage` (see its header). The key itself 
 
 ## What it means for flashing and updates
 
-- **`badge.sh flash-fw ... --no-storage` (USB)**: unchanged. `build/flash_args` does not contain `0x9000`, so NVS is
+- **`badge.sh flash-fw ...` (USB, keeps `/storage` by default)**: unchanged. `build/flash_args` does not contain `0x9000`, so NVS is
   not rewritten; the eFuse key and the encrypted NVS stay. It also writes the partition table (unchanged here).
 - **A MacBook recipe**: `esptool --chip esp32p4 write-flash @flash_args` as before, without `0x9000` and without
   `erase-flash`. `erase-flash` wipes NVS (settings, not the key); the next boot of an encrypted-capable image brings up
@@ -135,7 +135,7 @@ usual ones from the flash host (`tools/badge.sh`).
    `esptool --chip esp32p4 -p <port> read-flash 0x9000 0x6000 nvs-plain.bin` and
    `esptool ... read-flash 0xB40000 0x4C0000 storage.bin`. Keep both off-repo: `nvs-plain.bin` contains the passwords.
 2. Build the **burn image**: `CONFIG_LICHEN_NVS_ENCRYPT=y` and `CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD=y` in an sdkconfig
-   override (not in `sdkconfig.defaults`), `firmware/build.sh build`. Flash with `--no-storage`.
+   override (not in `sdkconfig.defaults`), `firmware/build.sh build`. Flash with `badge.sh flash-fw <port>` (storage is kept by default).
 3. Boot. `fw nvs-enc` must say `key KEY5 not burned, nvs partition plaintext, this boot plain`. The log has the W line
    "no HMAC key in KEY5: NVS stays plaintext".
 4. **IRREVERSIBLE.** `fw nvs-enc burn YES` (from the USB console). Expected reply `burn KEY5: ESP_OK`. Any other

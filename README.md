@@ -68,12 +68,12 @@ SSH (see [Flashing through a remote USB host](#flashing-through-a-remote-usb-hos
 
 ```
 tools/badge.sh backup <port>                  # full flash dump into ~/badge-backups: do this first
-tools/badge.sh flash-fw <port>                # first install: bootloader, partitions, Lichen, assets and storage
-tools/badge.sh flash-fw <port> --no-storage   # later USB updates: keeps /storage
+tools/badge.sh flash-fw <port> --wipe-storage # first install: bootloader, partitions, Lichen, assets and storage
+tools/badge.sh flash-fw <port>                # later USB updates: keeps /storage
 ```
 
-Leave out `--no-storage` only on the first install: it rewrites `/storage`, and with it MeshCore's identity, contacts
-and channels.
+Pass `--wipe-storage` only on the first install: it rewrites `/storage`, and with it MeshCore's identity, contacts
+and channels. Without it `flash-fw` leaves `/storage` alone (`--no-storage` is still accepted as the old name).
 
 After that, update over Wi-Fi (the update server runs whenever Wi-Fi is up and Settings › Updates over Wi-Fi is on,
 `fw ota on|off`; Settings › Close updates after, or `fw ota auto <minutes|off>`, closes it that long after boot or after

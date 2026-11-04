@@ -108,6 +108,6 @@ Not kept: foreign ELF apps with their own heaps, MicroPython as the app layer, t
 ## Flashing on the bench
 
 - P4 firmware over USB without touching `/storage` (MeshCore identity, contacts, channels):
-  `BADGE_EXTRA_PORTS=/dev/ttyUSB1 tools/badge.sh flash-fw /dev/ttyUSB1 --no-storage`.
+  `BADGE_EXTRA_PORTS=/dev/ttyUSB1 tools/badge.sh flash-fw /dev/ttyUSB1` (keeps `/storage` by default; `--wipe-storage` is the first-install form).
 - The C6 image is a file in `/storage/c6`. A full USB flash replaces `/storage` and loses the identity, so C6 updates
   go as two files over Wi-Fi (`firmware.bin`, then its `.md5`) before the P4 flash.
