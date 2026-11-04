@@ -72,7 +72,9 @@ void mesh_order_console(char const *args) {
             console_reply("mesh order not reset: the store failed");
             return;
         }
-        lichen_ui_call(reload_grid, NULL); // a grid on screen takes the first order at once
+        if (!lichen_ui_call(reload_grid, NULL)) { // a grid on screen takes the first order at once
+            console_reply("mesh order reset; reopen the grid to see it");
+        }
     } else if (*args) {
         console_reply("mesh order [reset]");
         return;

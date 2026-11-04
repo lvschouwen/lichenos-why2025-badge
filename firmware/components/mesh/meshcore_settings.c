@@ -16,6 +16,7 @@
 #include "mesh_chat.h"
 #include "mesh_format.h"
 #include "mesh_order.h"
+#include "lichen_notify.h"
 #include "mesh_share.h"
 #include "qr_screen.h"
 #include "meshcore_run.h"
@@ -520,6 +521,9 @@ static void reset_order_answer(bool yes) {
     if (yes) {
         if (!mesh_order_reset()) {
             ESP_LOGE(TAG, "tile order not reset");
+            lichen_notify("meshcore", LN_WARN, "Tile order not reset",
+                          "The tiles kept their places. Try again; if it keeps failing, restart the badge.", 0);
+            return;
         }
         meshcore_grid_reload(); // a grid under this page shows the first order at once
         order_row_refresh();
@@ -540,7 +544,7 @@ static void ask_reset_order(void *arg) {
 // "Arrange tiles" only where the grid is under this page (Settings tile): from Lichen's Settings the app is not open
 static void order_rows(lv_obj_t *page) {
     if (meshcore_grid_arrange_possible()) {
-        menu_set_kind(menu_add(page, "Arrange tiles", "", arrange_tiles, NULL), MENU_OPEN);
+        menu_add(page, "Arrange tiles", "", arrange_tiles, NULL); // an action, not a page: it returns to the grid
     }
     order_row = menu_add(page, "Reset tile order", "", ask_reset_order, NULL);
     order_row_refresh();

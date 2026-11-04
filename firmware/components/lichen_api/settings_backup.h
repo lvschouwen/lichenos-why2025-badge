@@ -11,6 +11,7 @@
 // counters, hardware records).
 // Not yet in the table: badge_fw.home_order (#189, the arranged home tiles), whose text (up to ~400 characters) is
 // longer than SB_STR_MAX; it needs a larger value cap first, which costs internal RAM in settings_backup_io.c.
+// Likewise a.meshcore.mesh_order (#189, the arranged MeshCore tiles) is not in the backup yet.
 //
 // File: lines "namespace.key = value"; blank lines and lines starting with '#' are comments. Numbers are decimal,
 // text is the rest of the line.

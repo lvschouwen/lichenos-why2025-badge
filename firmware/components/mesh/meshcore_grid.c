@@ -91,6 +91,9 @@ static void refresh(lv_timer_t *t) {
     }
     mesh_grid_counts_t *c   = &g.counts;
     char const         *run = mesh_run_grid_text(meshcore_run_get(), lora_up());
+    if (g.arranging && run[0]) {
+        run = "Arranging tiles"; // Enter picks up now, it does not start MeshCore
+    }
     set_text(g.run, run);
     if (g.run && lv_obj_is_hidden(g.run) != (run[0] == '\0')) {
         lv_obj_set_hidden(g.run, run[0] == '\0'); // only on a change, as set_text
@@ -349,6 +352,7 @@ static void arrange_set(bool on) {
     }
     g.arranging = on;
     set_hint();
+    refresh(NULL); // the run line says "Arranging tiles" (or its own text again) at once
 }
 
 // The shell's Esc hook (shell_on_esc, set in meshcore_grid_open): a held tile goes back, else arranging ends; true when
