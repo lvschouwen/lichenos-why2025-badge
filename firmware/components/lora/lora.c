@@ -107,14 +107,25 @@ bool lora_claim(char const *who, lora_packet_cb_t cb) {
     return ok;
 }
 
+// The packet on its way out through the C6 (one at a time), under state_lock
+static lora_tx_t tx;
+
 void lora_release(char const *who) {
     portENTER_CRITICAL(&owner_lock);
-    if (lora_owner_release(&owner, who)) {
+    bool released = lora_owner_release(&owner, who);
+    if (released) {
         packet_cb = NULL;
         rx_fmt    = NULL;
         link_cb   = NULL;
     }
     portEXIT_CRITICAL(&owner_lock);
+    if (released) {
+        // The old owner's unread result is nobody's now (#179). A packet still on air keeps the radio until its RESULT
+        // or its deadline (lora_tx_begin), so a late RESULT is never counted against the next owner's send.
+        portENTER_CRITICAL(&state_lock);
+        lora_tx_finish(&tx);
+        portEXIT_CRITICAL(&state_lock);
+    }
 }
 
 // Every owner-only call asks here first (#179): false, with one log line per 10 s at most, unless who holds the radio
@@ -171,8 +182,6 @@ bool lora_set_rx_formatter(char const *who, lora_rx_formatter_t fmt) {
 
 static bool     send_to_c6(lora_msg_t const *msg);
 
-// The packet on its way out through the C6 (one at a time), under state_lock
-static lora_tx_t tx;
 static uint32_t  tx_sent_ms, tx_airtime_ms; // the current send, for the round-trip log
 
 // Set by lora_set_radio(), sent to the C6 by the LoRa task

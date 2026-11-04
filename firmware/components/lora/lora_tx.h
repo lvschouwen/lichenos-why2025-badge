@@ -29,7 +29,7 @@ typedef struct {
 
 // Whether the C6 can be reached: while it can't, a send fails at once (each peer-data send would block ~5 s)
 void            lora_tx_link(lora_tx_t *tx, bool reachable);
-// false while a packet is still on its way
+// false while a packet is still on its way (BUSY and before its deadline; past it the next send may start)
 bool            lora_tx_begin(lora_tx_t *tx, uint32_t now_ms, uint32_t airtime_ms);
 void            lora_tx_result(lora_tx_t *tx, uint8_t code); // lora_result_code_t of the C6's RESULT for the SEND
 lora_tx_state_t lora_tx_poll(lora_tx_t *tx, uint32_t now_ms);

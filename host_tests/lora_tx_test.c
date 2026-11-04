@@ -20,6 +20,7 @@ int main(void) {
     // Sent, and the C6 says it left the radio
     CHECK(lora_tx_begin(&tx, 1000, 300));
     CHECK(!lora_tx_begin(&tx, 1001, 300)); // one at a time
+    CHECK(!lora_tx_begin(&tx, 1000 + 300 + LORA_TX_GRACE_MS - 1, 300)); // until its deadline
     CHECK(lora_tx_poll(&tx, 1100) == LORA_TX_BUSY);
     lora_tx_result(&tx, LORA_RESULT_OK);
     CHECK(lora_tx_poll(&tx, 1200) == LORA_TX_DONE);
@@ -38,6 +39,16 @@ int main(void) {
     CHECK(lora_tx_poll(&tx, 5000 + 300 + 2000) == LORA_TX_FAILED);
     lora_tx_result(&tx, LORA_RESULT_OK);
     CHECK(lora_tx_poll(&tx, 9000) == LORA_TX_FAILED);
+    lora_tx_finish(&tx);
+
+    // Abandoned mid-send (the owner released the radio, #179) and never polled again: the next send may start once the
+    // old one's deadline passed, without anyone polling in between
+    CHECK(lora_tx_begin(&tx, 7000, 300));
+    CHECK(!lora_tx_begin(&tx, 7000 + 300 + LORA_TX_GRACE_MS - 1, 300));
+    CHECK(lora_tx_begin(&tx, 7000 + 300 + LORA_TX_GRACE_MS, 300));
+    CHECK(lora_tx_poll(&tx, 7000 + 300 + LORA_TX_GRACE_MS) == LORA_TX_BUSY); // the new one
+    lora_tx_result(&tx, LORA_RESULT_OK);
+    CHECK(lora_tx_poll(&tx, 9000) == LORA_TX_DONE);
     lora_tx_finish(&tx);
 
     // An answer nobody waits for is ignored
