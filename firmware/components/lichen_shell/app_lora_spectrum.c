@@ -23,7 +23,7 @@ static char const TAG[] = "spectrum";
 
 #define OWNER            "spectrum" // the radio's owner name while the screen is open (lora_app.h)
 #define GRAPH_W          648        // 720 - 2 * THEME_PAD
-#define GRAPH_H          200
+#define GRAPH_H          160        // 200 pushed the status line's second row under the pinned hint (#161 bench)
 #define PEAK_H           2
 #define SWEEP_TIMEOUT_MS 3000 // a pass over 128 steps: 0.5-1 s on the C6 by estimate, to measure on the bench
 #define SWEEP_GAP_MS     100  // between sweeps: the C6 does its other work, the screen redraws
