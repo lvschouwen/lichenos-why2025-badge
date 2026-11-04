@@ -106,7 +106,8 @@ static void on_reply(void *arg) {
     reply_t *r = arg;
     con_t   *c = cur;
     static char const lost[]    = "(the output could not be shown)\n";
-    static char const dropped[] = "(the last command's output was dropped when the screen closed)\n";
+    static char const dropped[] = "(the previous command was still running when the screen closed, so its output is gone; it did run. "
+                                  "Run it again to see the output)\n";
     static char const none[]    = "(no output; some commands answer only on the USB console)\n";
     if (c && c->gen == r->gen) {
         // console_reply_private output is not captured, so "nothing printed" and "private only" look the same
