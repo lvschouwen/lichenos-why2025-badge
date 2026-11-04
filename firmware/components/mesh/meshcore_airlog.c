@@ -55,8 +55,8 @@ static void add_entry_row(airlog_entry_t const *e, uint32_t now_s, bool selected
     mesh_format_age(now_s > e->at_s ? now_s - e->at_s : 0, age, sizeof(age));
     airlog_detail(e, age, detail, sizeof(detail));
     lv_obj_t *row = mc_list_row(&list, selected);
-    mc_list_line(row, title, THEME_TEXT);
-    mc_list_line(row, detail, THEME_DIM);
+    lv_obj_set_width(mc_list_line(row, title, THEME_TEXT), LV_PCT(100)); // full width: DOT cuts a long line
+    lv_obj_set_width(mc_list_line(row, detail, THEME_DIM), LV_PCT(100));
 }
 
 static void rebuild(size_t count) {

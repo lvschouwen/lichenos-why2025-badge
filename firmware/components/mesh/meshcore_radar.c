@@ -108,8 +108,9 @@ static void add_entry_row(radar_entry_t const *e, bool selected) {
     radar_format_dist(e->dist_m, dist, sizeof(dist));
     snprintf(detail, sizeof(detail), "%s %s, %s", dist, radar_compass(e->bearing_deg), mesh_type_name(e->type));
     lv_obj_t *row = mc_list_row(&list, selected);
-    mc_list_line(row, e->name[0] ? e->name : "(no name)", THEME_TEXT);
-    mc_list_line(row, detail, THEME_DIM);
+    // full width, so DOT cuts a long name with "..." (a content-sized label never cuts; #133 sweep hit)
+    lv_obj_set_width(mc_list_line(row, e->name[0] ? e->name : "(no name)", THEME_TEXT), LV_PCT(100));
+    lv_obj_set_width(mc_list_line(row, detail, THEME_DIM), LV_PCT(100));
 }
 
 // An empty note is hidden, so it does not leave a gap under the heading

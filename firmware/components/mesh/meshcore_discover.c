@@ -66,8 +66,8 @@ static void add_answer_row(disc_answer_t const *a, uint32_t now_s, bool selected
     disc_row_title(a, title, sizeof(title));
     disc_row_detail(a, now_s, detail, sizeof(detail));
     lv_obj_t *row = mc_list_row(&list, selected);
-    mc_list_line(row, title, THEME_TEXT);
-    mc_list_line(row, detail, THEME_DIM);
+    lv_obj_set_width(mc_list_line(row, title, THEME_TEXT), LV_PCT(100)); // full width: DOT cuts a long name
+    lv_obj_set_width(mc_list_line(row, detail, THEME_DIM), LV_PCT(100));
 }
 
 static void rebuild(size_t answers, uint32_t now_s, uint32_t wait_s) {

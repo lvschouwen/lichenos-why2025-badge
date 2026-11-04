@@ -466,6 +466,11 @@ static void build_axis(lv_obj_t *screen) {
     lv_label_set_text(ui->axis_hi, "");
 }
 
+// Two lines of the label's own font: a fixed 64 px cut the second line by 2 px (33 px lines, #133 sweep)
+static int32_t two_lines(lv_obj_t *label) {
+    return 2 * lv_font_get_line_height(lv_obj_get_style_text_font(label, LV_PART_MAIN));
+}
+
 static void open_spectrum(lv_obj_t *screen) {
     if (!sh) {
         sh = lichen_alloc(&spectrum_app, sizeof(*sh), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // kept for good
@@ -481,7 +486,7 @@ static void open_spectrum(lv_obj_t *screen) {
     }
     ui->caption = lichen_label_wrap(screen, LV_PCT(100));
     lv_obj_set_style_text_color(ui->caption, lv_color_hex(THEME_DIM), 0);
-    lv_obj_set_height(ui->caption, 64); // two lines, whatever the text: the graph does not jump (R7)
+    lv_obj_set_height(ui->caption, two_lines(ui->caption)); // two lines, whatever the text: the graph does not jump (R7)
     build_graph(screen);
     build_axis(screen);
     ui->channel = lichen_label_line(screen, LV_PCT(100));
@@ -489,7 +494,7 @@ static void open_spectrum(lv_obj_t *screen) {
     ui->highest = lichen_label_line(screen, LV_PCT(100));
     ui->status  = lichen_label_wrap(screen, LV_PCT(100));
     lv_obj_set_style_text_color(ui->status, lv_color_hex(THEME_DIM), 0);
-    lv_obj_set_height(ui->status, 64);
+    lv_obj_set_height(ui->status, two_lines(ui->status));
     shell_page_hint(screen, "Enter", "other band", "Backspace", "clear highest", NULL);
     lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
