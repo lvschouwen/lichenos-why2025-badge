@@ -215,6 +215,8 @@ static struct {
 } adv;
 
 static void advert_tick_locked(void);
+static void discover_note_locked(mesh::Packet const *pkt); // #167
+static void discover_tick_locked(void);
 static void contacts_full_post(void);
 
 // The unread total over all chats, after the store changed (called under the mesh lock)
@@ -323,6 +325,7 @@ public:
         }
     }
     void onQueueSizeChanged(int msgcount) override { offline_queue_len = msgcount; }
+    void onControlDataRecv(mesh::Packet const *pkt) override { discover_note_locked(pkt); }
 };
 static ScreenFeed screen_feed;
 
@@ -651,6 +654,7 @@ static void mesh_task(void *arg) {
         rx               = radio_driver.getPacketsRecv() - rx;
         tile_set_contacts((size_t)node->getNumContacts());
         advert_tick_locked();
+        discover_tick_locked();
         mesh_journal_tick_locked(); // a due flush swaps the pending records out; they are written after the unlock
         if (__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
             // The task stops itself, between two loops and with the lock held: nothing is half done, and the stack
@@ -3003,6 +3007,84 @@ extern "C" size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t
     *seq     = airlog_ring.seq;
     portEXIT_CRITICAL(&airlog_mux);
     return n;
+}
+
+// ---- Discover nearby (#167) ----------------------------------------------------------------------------------------
+// The screen asks (any task, no mesh lock): the request is only marked pending; the mesh loop puts it on air under the
+// lock and its listener feeds the answers into the table. The table has its own spinlock, as the air log.
+
+static portMUX_TYPE disc_mux = portMUX_INITIALIZER_UNLOCKED;
+static disc_t       disc_table; // zero = DISC_IDLE
+
+extern "C" bool mesh_discover_start(char const **why) {
+    char const *local;
+    why  = why ? why : &local;
+    *why = NULL;
+    if (!send_ready(why)) {
+        return false;
+    }
+    uint32_t tag;
+    lichen_random_fill(&tag, sizeof(tag));
+    portENTER_CRITICAL(&disc_mux);
+    bool ok = disc_start(&disc_table, tag, mesh_uptime_s(), why);
+    portEXIT_CRITICAL(&disc_mux);
+    return ok;
+}
+
+extern "C" void mesh_discover_get(disc_t *out) {
+    portENTER_CRITICAL(&disc_mux);
+    disc_poll(&disc_table, mesh_uptime_s());
+    *out = disc_table;
+    portEXIT_CRITICAL(&disc_mux);
+}
+
+// From the mesh loop, under the lock: sends a pending request
+static void discover_tick_locked(void) {
+    portENTER_CRITICAL(&disc_mux);
+    bool     pending = disc_table.state == DISC_PENDING;
+    uint32_t tag     = disc_table.tag;
+    portEXIT_CRITICAL(&disc_mux);
+    if (!pending) {
+        return;
+    }
+    char const *why = NULL;
+    if (!ident_tx_allowed()) {
+        why = "identity damaged: TX blocked";
+    } else if (!lichen_radio_get(RADIO_LORA)) {
+        why = "LoRa is switched off";
+    } else {
+        uint8_t req[DISC_REQ_LEN];
+        disc_request(tag, req);
+        mesh::Packet *p = node->createControlData(req, sizeof(req));
+        if (p) {
+            node->sendZeroHop(p);
+        } else {
+            why = "no free packet";
+        }
+    }
+    portENTER_CRITICAL(&disc_mux);
+    if (why) {
+        disc_failed(&disc_table, why);
+    } else {
+        disc_sent(&disc_table, mesh_uptime_s());
+    }
+    portEXIT_CRITICAL(&disc_mux);
+    ESP_LOGI(TAG, "discover nearby: %s", why ? why : "request sent (zero hop)");
+}
+
+// An answer (a control packet) heard, under the lock; MyMesh passes every control packet here
+static void discover_note_locked(mesh::Packet const *pkt) {
+    if (pkt->payload_len < 6 + DISC_PREFIX) {
+        return;
+    }
+    char const *name = NULL;
+    if (ContactInfo *c = node->lookupContactByPubKey(&pkt->payload[6], DISC_PREFIX)) {
+        name = c->name;
+    }
+    int16_t snr_x10 = (int16_t)lroundf(pkt->getSNR() * 10.0f);
+    portENTER_CRITICAL(&disc_mux);
+    disc_on_payload(&disc_table, pkt->payload, pkt->payload_len, snr_x10, name, mesh_uptime_s());
+    portEXIT_CRITICAL(&disc_mux);
 }
 
 // ---- the signal history (#166) ---------------------------------------------------------------------------------------

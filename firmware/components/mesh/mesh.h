@@ -4,6 +4,7 @@
 #include "mesh_airlog.h"
 #include "mesh_signal.h"
 #include "mesh_contact_fmt.h"
+#include "mesh_discover.h"
 #include "mesh_health.h"
 #include "mesh_ident.h"
 #include "mesh_outbox.h"
@@ -81,6 +82,12 @@ bool mesh_health_snapshot(mesh_health_t *out, uint32_t wait_ms);
 // the mesh lock, never waits on MeshCore). *seq is the newest entry's sequence number (0: none yet), which changes
 // whenever a packet was added. The ring lives from the first packet on and survives MeshCore stopping and starting.
 size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq);
+
+// Discover nearby (#167): one zero-hop request that nearby nodes answer. Start only after the user confirmed: it
+// transmits. false with *why when it cannot go (MeshCore stopped, LoRa off, asked a moment ago, still running). Not the
+// mesh lock: the mesh loop sends it a moment later. mesh_discover_get copies the answers (also ends the window by time).
+bool mesh_discover_start(char const **why);
+void mesh_discover_get(disc_t *out);
 
 // A contact's signal history (#166): the samples of its adverts and direct messages heard since start, copied in a short
 // spinlock section (not the mesh lock, never waits on MeshCore). false when nothing was heard from it. Receive only.

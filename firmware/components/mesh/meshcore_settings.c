@@ -529,6 +529,7 @@ void meshcore_settings(lv_obj_t *page) {
     scope_row_refresh();
     channels_row = menu_add(page, "Channels", "", open_channels, NULL);
     advert_row   = menu_add(page, "Send advert", "", send_advert, NULL);
+    menu_set_kind(menu_add(page, "Discover nearby", "", meshcore_discover_open, NULL), MENU_OPEN);
     menu_set_kind(menu_add(page, "Notifications", "", open_notify_page, NULL), MENU_OPEN);
     menu_set_kind(menu_add(page, "Advert & contacts", "", meshcore_advert_settings_open, NULL), MENU_OPEN);
     menu_set_kind(menu_add(page, "Radio health", "", meshcore_health_open, NULL), MENU_OPEN);
