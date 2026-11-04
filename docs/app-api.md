@@ -122,12 +122,11 @@ in `firmware/build/badge_fw.map`) and refuses:
 
 ## Exceptions still open
 
-MeshCore still `PRIV_REQUIRES` two components past the list (the only exceptions, listed in `tools/app_boundary.conf`); each has its follow-up:
-
-- `nvs_flash`: only the legacy `badge_fw/identity` hand-over (kept as it is, by decision; `lichen_legacy_blob_take`).
-  The advert keys `mc_advint`, `mc_advlast`, `mc_advfl` moved to `a.meshcore` (#123), adopted like `mc_name_set`.
-- `sdcard`: the message journal's `sd_begin`/`sd_end` batches on `/sd/lichen/messages` (#98; an SD batch call in
-  `lichen_fs.h`).
+No component or header exception is open: MeshCore's identity hand-over goes through `lichen_legacy_blob_take`
+(`lichen_legacy.h`: the OS reads the old `badge_fw/identity` blob, the app stores it, and only then is it erased) and the
+message journal's SD batches through `lichen_fs_sd_begin`/`lichen_fs_sd_end` (`lichen_fs.h`). The journal still lives at
+`/sd/lichen/messages` instead of `lichen_fs_sd_dir`: moving the history is a separate decision. MeshCore's `DataStore`
+includes `<nvs_flash.h>`; `shared/arduino_shim/nvs_flash.h` stands in for it.
 
 Also open from #84: tasks with their own core/priority (`lichen_task_start`, T8a, planned in #181 and not in the tree yet), the console prefix per app (T8b), a heap caps wrapper
 (V12), system apps calling `board/backlight.h` directly (V13).
