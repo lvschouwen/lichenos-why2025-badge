@@ -1,4 +1,4 @@
-// The MeshCore app's home grid (#88): six tiles in Lichen home's grid look (home.c add_grid_cell) and key rules
+// The MeshCore app's home grid (#88): eight tiles in three rows in Lichen home's grid look (home.c add_grid_cell) and key rules
 // (mesh_grid_move = home_move). Each tile is a focusable object in the screen's group, so "fw ui" names the focused
 // tile; the arrows move the focus, Enter opens the tile's screen on the shell's stack (Esc there comes back here) and
 // Esc here is the shell's: back to Lichen home. Badges refresh once a second from copies (mesh.h), never waiting on
@@ -29,9 +29,10 @@ static_assert(MESH_GRID_KEY_UP == LV_KEY_UP && MESH_GRID_KEY_DOWN == LV_KEY_DOWN
 static char const TAG[] = "meshcore";
 
 #define ICON_PX        64 // home.c GRID_ICON_PX and the rest of its grid sizes
-#define GRID_GAP       24
-#define CELL_PAD       32
-#define ICON_GAP       14
+#define GRID_GAP       24 // between columns
+#define ROW_GAP        16 // between rows: three rows plus the status line must clear the status bar and the hint (#171)
+#define CELL_PAD       18
+#define ICON_GAP       12
 #define TILE_RADIUS    20
 #define REFRESH_MS     1000
 #define SCREEN_WAIT_MS 20
@@ -98,9 +99,20 @@ static void refresh(lv_timer_t *t) {
 
 // ---- Advertise: confirmed first, the result under the grid ----------------------------------------------------------
 
+// The result line takes no room while empty: a fourth flow row would push the tiles into the hint
+static void set_status(char const *text) {
+    if (!g.status) {
+        return;
+    }
+    set_text(g.status, text);
+    if (lv_obj_is_hidden(g.status) != (text[0] == '\0')) {
+        lv_obj_set_hidden(g.status, text[0] == '\0');
+    }
+}
+
 static void clear_status(lv_timer_t *t) {
     (void)t;
-    set_text(g.status, "");
+    set_status("");
     if (g.status_timer) {
         lv_timer_pause(g.status_timer); // until the next result
     }
@@ -113,7 +125,7 @@ static void show_status(char const *text) {
     }
     char line[64];
     snprintf(line, sizeof(line), "Advert: %s", text);
-    set_text(g.status, line);
+    set_status(line);
     if (g.status_timer) {
         lv_timer_reset(g.status_timer);
         lv_timer_resume(g.status_timer);
@@ -191,6 +203,8 @@ static void open_tile(void *arg) {
         case MESH_GRID_CONTACTS: meshcore_contacts_open(MESH_VIEW_CONTACTS); break;
         case MESH_GRID_REPEATERS: meshcore_contacts_open(MESH_VIEW_REPEATERS); break;
         case MESH_GRID_HEARD: meshcore_contacts_open(MESH_VIEW_HEARD); break;
+        case MESH_GRID_NEARBY: meshcore_discover_open(NULL); break;
+        case MESH_GRID_RADAR: meshcore_radar_open(NULL); break;
         case MESH_GRID_ADVERTISE: ask_advert(); break;
         case MESH_GRID_SETTINGS: meshcore_app_settings_open(); break;
         default: break;
@@ -279,7 +293,7 @@ void meshcore_grid_build(lv_obj_t *screen, lv_group_t *group) {
     g.screen = screen;
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_pad_row(screen, GRID_GAP, 0);
+    lv_obj_set_style_pad_row(screen, ROW_GAP, 0);
     lv_obj_set_style_pad_column(screen, GRID_GAP, 0);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUS_KEY);
@@ -291,6 +305,7 @@ void meshcore_grid_build(lv_obj_t *screen, lv_group_t *group) {
     }
     g.status = add_label(screen, "", THEME_TEAL);
     lv_obj_set_width(g.status, LV_PCT(100));
+    lv_obj_set_hidden(g.status, true); // set_status shows it with a result
     shell_page_hint(screen, "Enter", "open", NULL); // dim (R8), the same line as every page
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     if (group) {

@@ -23,12 +23,17 @@ static char const *badge(mesh_grid_tile_t tile, mesh_grid_counts_t const *c) {
 }
 
 static void test_tiles(void) {
-    CHECK(MESH_GRID_TILES == 6);
+    CHECK(MESH_GRID_TILES == 8);
     CHECK(strcmp(mesh_grid_name(MESH_GRID_CHAT), "Chat") == 0);
     CHECK(strcmp(mesh_grid_name(MESH_GRID_CONTACTS), "Contacts") == 0);
     CHECK(strcmp(mesh_grid_name(MESH_GRID_REPEATERS), "Repeaters") == 0);
     CHECK(strcmp(mesh_grid_name(MESH_GRID_HEARD), "Heard") == 0);
+    CHECK(strcmp(mesh_grid_name(MESH_GRID_NEARBY), "Nearby") == 0);
+    CHECK(strcmp(mesh_grid_name(MESH_GRID_RADAR), "Radar") == 0);
     CHECK(strcmp(mesh_grid_name(MESH_GRID_ADVERTISE), "Advertise") == 0);
+    // the order on the grid (#171): Chat Contacts Repeaters / Heard Nearby Radar / Advertise Settings
+    CHECK(MESH_GRID_HEARD == 3 && MESH_GRID_NEARBY == 4 && MESH_GRID_RADAR == 5);
+    CHECK(MESH_GRID_ADVERTISE == 6 && MESH_GRID_SETTINGS == 7);
     CHECK(strcmp(mesh_grid_name(MESH_GRID_SETTINGS), "Settings") == 0);
     CHECK(strcmp(mesh_grid_name(MESH_GRID_TILES), "") == 0);
     CHECK(strcmp(mesh_grid_name((mesh_grid_tile_t)-1), "") == 0);
@@ -112,14 +117,24 @@ static void test_badges(void) {
     CHECK(strcmp(badge(MESH_GRID_ADVERTISE, &c), "") == 0);
 }
 
-// The six tiles: Chat Contacts Repeaters / Heard Advertise Settings
+// The eight tiles: Chat Contacts Repeaters / Heard Nearby Radar / Advertise Settings (#171)
 static void test_moves(void) {
     int n = MESH_GRID_TILES;
     CHECK(mesh_grid_move(n, MESH_GRID_CHAT, MESH_GRID_KEY_RIGHT) == MESH_GRID_CONTACTS);
     CHECK(mesh_grid_move(n, MESH_GRID_REPEATERS, MESH_GRID_KEY_RIGHT) == MESH_GRID_REPEATERS); // no wrap
     CHECK(mesh_grid_move(n, MESH_GRID_HEARD, MESH_GRID_KEY_LEFT) == MESH_GRID_HEARD);
     CHECK(mesh_grid_move(n, MESH_GRID_CHAT, MESH_GRID_KEY_DOWN) == MESH_GRID_HEARD);
-    CHECK(mesh_grid_move(n, MESH_GRID_SETTINGS, MESH_GRID_KEY_UP) == MESH_GRID_REPEATERS);
+    CHECK(mesh_grid_move(n, MESH_GRID_HEARD, MESH_GRID_KEY_RIGHT) == MESH_GRID_NEARBY);
+    CHECK(mesh_grid_move(n, MESH_GRID_NEARBY, MESH_GRID_KEY_RIGHT) == MESH_GRID_RADAR);
+    CHECK(mesh_grid_move(n, MESH_GRID_RADAR, MESH_GRID_KEY_RIGHT) == MESH_GRID_RADAR);
+    CHECK(mesh_grid_move(n, MESH_GRID_REPEATERS, MESH_GRID_KEY_DOWN) == MESH_GRID_RADAR);
+    CHECK(mesh_grid_move(n, MESH_GRID_RADAR, MESH_GRID_KEY_UP) == MESH_GRID_REPEATERS);
+    CHECK(mesh_grid_move(n, MESH_GRID_NEARBY, MESH_GRID_KEY_DOWN) == MESH_GRID_SETTINGS);
+    CHECK(mesh_grid_move(n, MESH_GRID_RADAR, MESH_GRID_KEY_DOWN) == MESH_GRID_RADAR); // no tile below: stays
+    CHECK(mesh_grid_move(n, MESH_GRID_HEARD, MESH_GRID_KEY_DOWN) == MESH_GRID_ADVERTISE);
+    CHECK(mesh_grid_move(n, MESH_GRID_ADVERTISE, MESH_GRID_KEY_RIGHT) == MESH_GRID_SETTINGS);
+    CHECK(mesh_grid_move(n, MESH_GRID_SETTINGS, MESH_GRID_KEY_RIGHT) == MESH_GRID_SETTINGS); // end of the last row
+    CHECK(mesh_grid_move(n, MESH_GRID_SETTINGS, MESH_GRID_KEY_UP) == MESH_GRID_NEARBY);
     CHECK(mesh_grid_move(n, MESH_GRID_ADVERTISE, MESH_GRID_KEY_DOWN) == MESH_GRID_ADVERTISE);
     CHECK(mesh_grid_move(n, MESH_GRID_CONTACTS, MESH_GRID_KEY_UP) == MESH_GRID_CONTACTS);
     CHECK(mesh_grid_move(n, MESH_GRID_CONTACTS, 10) == MESH_GRID_CONTACTS); // Enter is not a move

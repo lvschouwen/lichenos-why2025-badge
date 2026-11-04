@@ -94,6 +94,25 @@ static void draw_heard(pen_t const *p) {
     arc(p, 18, 30, 34, 325, 35, LV_OPA_40);
 }
 
+// A signal pulse reaching out to dots around it: who is within reach
+static void draw_nearby(pen_t const *p) {
+    disc(p, 30, 30, 5, THEME_AMBER);
+    arc(p, 30, 30, 13, 0, 360, LV_OPA_COVER);
+    arc(p, 30, 30, 24, 0, 360, LV_OPA_50);
+    disc(p, 46, 16, 3, THEME_AMBER);
+    disc(p, 12, 38, 3, THEME_AMBER);
+    disc(p, 38, 50, 3, THEME_AMBER);
+}
+
+// A radar: a ring, a sweep arm and a blip
+static void draw_radar(pen_t const *p) {
+    arc(p, 30, 30, 23, 0, 360, LV_OPA_COVER);
+    arc(p, 30, 30, 11, 0, 360, LV_OPA_50);
+    line(p, 30, 30, 46, 14);
+    disc(p, 40, 40, 3, THEME_AMBER);
+    disc(p, 30, 30, 3, THEME_AMBER);
+}
+
 // A node calling out in every direction
 static void draw_advertise(pen_t const *p) {
     disc(p, 30, 30, 6, THEME_AMBER);
@@ -123,6 +142,8 @@ static void on_draw(lv_event_t *e) {
         case MESH_GRID_CONTACTS: draw_contacts(&p); break;
         case MESH_GRID_REPEATERS: draw_repeaters(&p); break;
         case MESH_GRID_HEARD: draw_heard(&p); break;
+        case MESH_GRID_NEARBY: draw_nearby(&p); break;
+        case MESH_GRID_RADAR: draw_radar(&p); break;
         case MESH_GRID_ADVERTISE: draw_advertise(&p); break;
         case MESH_GRID_SETTINGS: draw_settings(&p); break;
         default: break;

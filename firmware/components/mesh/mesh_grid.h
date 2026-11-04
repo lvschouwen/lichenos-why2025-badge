@@ -16,12 +16,14 @@ typedef enum {
     MESH_GRID_CONTACTS,  // every contact, details on Enter (#49)
     MESH_GRID_REPEATERS, // contacts that are repeaters or rooms (#51)
     MESH_GRID_HEARD,     // contacts by when they were last heard, newest first
+    MESH_GRID_NEARBY,    // discover nearby nodes (#171, was under Settings)
+    MESH_GRID_RADAR,     // the contact radar (#171, was under Settings)
     MESH_GRID_ADVERTISE, // a zero-hop advert, confirmed first (#52)
     MESH_GRID_SETTINGS,  // the app's settings page (#17)
     MESH_GRID_TILES
 } mesh_grid_tile_t;
 
-// Three columns, as Lichen's home grid (home_layout.h HOME_GRID_COLS)
+// Three columns (eight tiles make three rows, the last one partial), as Lichen's home grid (home_layout.h HOME_GRID_COLS)
 #define MESH_GRID_COLS 3
 // The key values LVGL's keypad sends (LV_KEY_*); meshcore_grid.c static_asserts them against lvgl.h
 #define MESH_GRID_KEY_UP    17

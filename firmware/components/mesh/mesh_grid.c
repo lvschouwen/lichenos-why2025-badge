@@ -5,7 +5,7 @@
 
 #include <stdio.h>
 
-static char const *const NAMES[MESH_GRID_TILES] = {"Chat", "Contacts", "Repeaters", "Heard", "Advertise", "Settings"};
+static char const *const NAMES[MESH_GRID_TILES] = {"Chat", "Contacts", "Repeaters", "Heard", "Nearby", "Radar", "Advertise", "Settings"};
 
 char const *mesh_grid_name(mesh_grid_tile_t tile) {
     return (unsigned)tile < MESH_GRID_TILES ? NAMES[tile] : "";
@@ -64,7 +64,7 @@ void mesh_grid_badge(mesh_grid_tile_t tile, mesh_grid_counts_t const *c, char *o
                 mesh_grid_age_text(c->advert_age_s, out, cap);
             }
             break;
-        default: break; // Settings: nothing to count
+        default: break; // Nearby, Radar, Settings: nothing to count
     }
 }
 
