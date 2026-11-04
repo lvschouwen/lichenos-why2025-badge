@@ -65,29 +65,32 @@ static SemaphoreHandle_t run_mutex;
 static SemaphoreHandle_t reply_mutex;
 static char              reply_text[REPLY_MAX];
 
-// A secret line (#123) is printed on the UART and handed to a capturing caller (console_capture.h decides whether it is
-// kept), never to the tap: the log store is readable over Wi-Fi later by anyone with the token, and on the screen.
-// The formatted copy is wiped once used.
+// Where a line goes is console_route's decision (console_capture.c, host-tested): a secret line (#123) reaches only the
+// one who asked, never the tap (the log store is read over Wi-Fi and on the screen later). Its formatted copy is wiped.
 static void reply_v(bool secret, char const *fmt, va_list ap) {
     va_list copy;
     va_copy(copy, ap);
-    printf("fw: ");
-    vprintf(fmt, ap);
-    printf("\n");
+    console_route_t to = console_route(secret, capture.task && capture.task == xTaskGetCurrentTaskHandle());
+    if (to.uart) {
+        printf("fw: ");
+        vprintf(fmt, ap);
+        printf("\n");
+    } else {
+        printf("fw: " CONSOLE_SECRET_UART "\n");
+    }
     if (secret) {
         fflush(stdout); // out of stdio's buffer now rather than whenever the next line comes
     }
-    bool capturing = capture.task && capture.task == xTaskGetCurrentTaskHandle();
-    if ((!secret || capturing) && reply_mutex && xSemaphoreTake(reply_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) == pdTRUE) {
+    if ((to.tap || to.capture) && reply_mutex && xSemaphoreTake(reply_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) == pdTRUE) {
         char *text = reply_text;
         int   n    = vsnprintf(text, REPLY_MAX, fmt, copy);
         if (n > 0) {
             size_t len = (size_t)n < REPLY_MAX ? (size_t)n : REPLY_MAX - 1;
-            if (tap && !secret) {
+            if (tap && to.tap) {
                 text[len] = '\n';
                 tap(text, len + 1);
             }
-            if (capturing) {
+            if (to.capture) {
                 console_capture_add(&capture.out, text, len, secret);
             }
         }
@@ -545,7 +548,9 @@ static void run(char *line) {
             return;
         }
     }
-    console_reply("unknown command '%s', try 'fw help'", line);
+    // Not echoed: a mistyped line may be a password, and the reply goes to the log store (#123); the asker sees what
+    // they typed on their own side
+    console_reply("unknown command, try 'fw help'");
 }
 
 bool console_from_uart(void) {

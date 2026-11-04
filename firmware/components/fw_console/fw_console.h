@@ -16,8 +16,8 @@ void console_start(void);
 void console_register(char const *name, char const *usage, console_fn_t fn);
 void console_reply(char const *fmt, ...) __attribute__((format(printf, 1, 2)));
 // Like console_reply for a line that holds a secret (a channel key, the update token, a repeater's guest password; #123):
-// it reaches only the person who asked, on the UART or in the Wi-Fi console's reply (console_exec_with_secrets). It is
-// never given to the tap (the log store), the Console app shows a note instead (console_exec), and the formatted copy is
+// it reaches only the person who asked: the UART when typed there (a command run through console_exec prints only
+// "fw: (secret line)" on the UART), or the Wi-Fi console's reply (console_exec_with_secrets). It is never given to the tap (the log store), the Console app shows a note instead (console_exec), and the formatted copy is
 // wiped. A caller wipes its own copies of the secret after the call.
 void console_reply_secret(char const *fmt, ...) __attribute__((format(printf, 1, 2)));
 
@@ -28,10 +28,11 @@ void console_set_tap(void (*tap)(char const *text, size_t len));
 void console_set_mem_report(void (*report)(void));
 
 // Runs one command line (with or without the "fw " prefix) on the calling task and collects what console_reply prints
-// from it in buf; a console_reply_secret line becomes one CONSOLE_SECRET_NOTE (console_capture.h), for output that is
-// kept on the screen (the Console app). The caller wipes buf after done. (cap bytes; output past that is cut with a note). done runs exactly once with the output: when the
-// command returns, or earlier if it restarts the badge (system_restart calls it first, so a reply can be sent before
-// the restart). Output of printf/ESP_LOG calls is not collected. Not reentrant.
+// from it in buf (cap bytes; output past that is cut with a note). A console_reply_secret line becomes one
+// CONSOLE_SECRET_NOTE (console_capture.h): this is for output kept on the screen (the Console app). done runs exactly
+// once with the output: when the command returns, or earlier if it restarts the badge (system_restart calls it first,
+// so a reply can be sent before the restart). Output of printf/ESP_LOG calls is not collected. Not reentrant. The
+// caller wipes buf after done.
 typedef void (*console_done_fn)(void *ctx, char const *out, size_t len);
 // True when the calling task runs a line typed on the UART, false inside console_exec (Wi-Fi POST /console). For
 // commands only a person at the cable may run (#116).

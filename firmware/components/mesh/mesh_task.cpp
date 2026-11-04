@@ -2242,9 +2242,11 @@ static void console_pw_settle(void) {
     lichen_free(meshcore_self(), r);
 }
 
-// The CLI exchanges, newest first, as rr_cli_format orders them. The reply to a read of the guest password or the
-// private key goes out with console_reply_secret (#123): to the one who asked, never into the log store. The reply is
-// split in place: r is the caller's copy, wiped after.
+// The CLI exchanges, newest first, as rr_cli_format orders them. Every reply line goes out with console_reply_secret
+// (#123): a reply may hold the guest password or the private key ("get guest.password", "get prv.key"), and a late
+// answer to a timed-out read can be attached to the next exchange, so no command decides that its reply is safe. The
+// command echo stays public: secret commands are stored redacted (rs_redact_cmd). The reply is split in place: r is the
+// caller's copy, wiped after.
 static void console_remote_cli_show(rr_t *r) {
     for (unsigned i = 0; i < r->cli_n; i++) {
         rr_exchange_t *x = &r->cli[(r->cli_head + RR_CLI_KEEP - i) % RR_CLI_KEEP];
@@ -2253,14 +2255,9 @@ static void console_remote_cli_show(rr_t *r) {
             console_reply("  %s", x->state == RR_CLI_WAITING ? "(waiting...)" : "(no reply)");
             continue;
         }
-        bool  secret = rs_reply_is_secret(x->cmd);
-        char *save   = NULL;
+        char *save = NULL;
         for (char *line = strtok_r(x->reply, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
-            if (secret) {
-                console_reply_secret("  %s", line);
-            } else {
-                console_reply("  %s", line);
-            }
+            console_reply_secret("  %s", line);
         }
     }
 }
@@ -3018,11 +3015,13 @@ static void cmd_channel(char const *args) {
     }
     char name[48] = "", key[64] = "";
     if (sscanf(args, "add %47s %63s", name, key) < 1) {
+        mesh_wipe(key, sizeof(key)); // sscanf may have stopped after a partial match
         console_reply("channel add <name> <base64 key> | channel add #name | channel rm <index|name> | "
                       "channel show <index|name> | channel rename <index|name> <new name>");
         return;
     }
     char const *why = mesh_channel_add(name, key[0] ? key : NULL);
+    mesh_wipe(key, sizeof(key)); // a channel key: not left on the console task's stack (#123)
     if (why) {
         console_reply("channel %s not added: %s", name, why);
     } else {

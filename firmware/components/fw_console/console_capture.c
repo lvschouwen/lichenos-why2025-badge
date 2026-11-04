@@ -27,3 +27,11 @@ void console_capture_add(console_capture_t *c, char const *text, size_t n, bool 
         add(c, CONSOLE_SECRET_NOTE, sizeof(CONSOLE_SECRET_NOTE) - 1);
     }
 }
+
+console_route_t console_route(bool secret, bool capturing) {
+    return (console_route_t){
+        .uart    = !secret || !capturing,
+        .tap     = !secret,
+        .capture = capturing,
+    };
+}

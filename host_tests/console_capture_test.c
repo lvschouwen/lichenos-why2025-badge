@@ -69,7 +69,20 @@ static void cut(void) {
     CHECK(tiny.len == 0);
 }
 
+// A secret line goes only to the one who asked, never to the log tap (#123)
+static void route(void) {
+    console_route_t uart_line = console_route(true, false); // typed on the UART
+    CHECK(uart_line.uart && !uart_line.tap && !uart_line.capture);
+    console_route_t exec_line = console_route(true, true); // the Wi-Fi console or the Console app asked
+    CHECK(!exec_line.uart && !exec_line.tap && exec_line.capture);
+    console_route_t pub = console_route(false, true);
+    CHECK(pub.uart && pub.tap && pub.capture);
+    pub = console_route(false, false);
+    CHECK(pub.uart && pub.tap && !pub.capture);
+}
+
 int main(void) {
+    route();
     screen_hides_secrets();
     wifi_keeps_secrets();
     cut();

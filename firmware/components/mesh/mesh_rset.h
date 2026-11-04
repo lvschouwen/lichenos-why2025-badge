@@ -97,10 +97,6 @@ rs_confirm_t rs_cmd_confirm(char const *cmd, char *out, size_t cap);
 void rs_redact_cmd(char const *cmd, char *out, size_t cap);
 // A reply to a secret command: "password now: <pw>" (the repeater echoes it) becomes "password now: (hidden)"
 void rs_redact_reply(char const *reply, char *out, size_t cap);
-// A command whose reply holds a secret: the reads of the guest password and the private key ("get guest.password",
-// "get prv.key"; the repeater answers with the value) and the secret commands above. The console prints such a reply
-// with console_reply_secret (#123); the CLI screen still shows it to the one holding the badge.
-bool rs_reply_is_secret(char const *cmd);
 
 // ---- reading and changing the values, one command at a time -------------------------------------------------------
 typedef enum { RS_V_UNKNOWN, RS_V_ASKING, RS_V_VALUE, RS_V_NONE } rs_vstate_t;

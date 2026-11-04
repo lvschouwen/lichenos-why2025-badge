@@ -401,17 +401,7 @@ static void note_pick(void) {
     CHECK(rs_note_pick(false, false, false, false) == RS_NOTE_NONE);
 }
 
-// The console prints these replies with console_reply_secret, never into the log store (#123)
-static void secret_replies(void) {
-    CHECK(rs_reply_is_secret("get guest.password") && rs_reply_is_secret("get prv.key"));
-    CHECK(rs_reply_is_secret("a7|get prv.key") && rs_reply_is_secret("  get guest.password "));
-    CHECK(rs_reply_is_secret("password hunter2") && rs_reply_is_secret("set prv.key 00"));
-    CHECK(!rs_reply_is_secret("get name") && !rs_reply_is_secret("get guest.passwords") && !rs_reply_is_secret("ver"));
-    CHECK(!rs_reply_is_secret("get prv.keyx") && !rs_reply_is_secret(""));
-}
-
 int main(void) {
-    secret_replies();
     note_pick();
     outcome();
     formatting();

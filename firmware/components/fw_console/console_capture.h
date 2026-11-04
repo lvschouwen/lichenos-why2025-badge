@@ -22,6 +22,17 @@ typedef struct {
     bool   secret_noted; // CONSOLE_SECRET_NOTE is in buf already
 } console_capture_t;
 
+// Where one console_reply line may go. A secret line (#123) reaches only the one who asked: the UART when the line was
+// typed there, the capture when the command runs through console_exec; the log tap never.
+typedef struct {
+    bool uart;    // printed on the UART (else the UART gets CONSOLE_SECRET_UART, so a bench log shows a line was there)
+    bool tap;     // given to the log store
+    bool capture; // handed to console_capture_add (which keeps it or puts the note in its place)
+} console_route_t;
+#define CONSOLE_SECRET_UART "(secret line)"
+// capturing: the calling task runs console_exec (the Wi-Fi console or the Console app), not a UART line
+console_route_t console_route(bool secret, bool capturing);
+
 // Appends text (n bytes, no newline) and a '\n'. Output past cap is dropped with CONSOLE_CUT_NOTE (room for it is
 // always kept). A secret line is collected only when keep_secret; otherwise the note stands in for it.
 void console_capture_add(console_capture_t *c, char const *text, size_t n, bool secret);
