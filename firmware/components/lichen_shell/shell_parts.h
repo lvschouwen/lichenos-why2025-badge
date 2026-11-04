@@ -10,6 +10,7 @@ extern shell_sources_t shell_sources;
 lv_obj_t *boot_screen_create(void);       // the boot screen; calls shell_home() itself when boot is done
 lv_group_t *boot_screen_group(void);     // the keypad group of the boot screen, NULL once it is gone
 lv_obj_t *status_bar_create(lv_obj_t *parent); // on the top layer, over every screen after boot
+lv_obj_t *shell_status_bar(void);              // the bar once created (NULL before); `fw ui overflow` keeps content off it
 
 // home.c
 lv_obj_t *home_create(void);   // a fresh home screen for the registered apps and the saved layout; focus object = itself

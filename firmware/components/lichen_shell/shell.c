@@ -49,6 +49,10 @@ void shell_set_sources(shell_sources_t const *sources) {
     shell_sources = *sources;
 }
 
+lv_obj_t *shell_status_bar(void) {
+    return status_bar;
+}
+
 bool shell_up(void) {
     return up;
 }

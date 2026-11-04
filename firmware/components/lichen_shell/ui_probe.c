@@ -5,6 +5,7 @@
 #include "fw_console.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lichen_ui.h"
 #include "nav.h"
 #include "raw_keys.h"
 #include "shell_parts.h"
@@ -216,14 +217,30 @@ static void settle(void) {
     }
 }
 
-// ---- "fw ui overflow" (#133): labels whose text is cut off -------------------------------------------------------------
+// ---- "fw ui overflow" (#133): text that is cut off, runs off the screen or sits under the hint or the status bar ------
 
 #define OVF_TEXT_CHARS 60
 
+typedef enum { HIT_WIDTH, HIT_HEIGHT, HIT_UNDER, HIT_CLIPPED } hit_kind_t;
+
+static char const *const HIT_NAME[] = {"width", "height", "under-hint", "clipped"};
+
 typedef struct {
-    int32_t px, have, x, y;
-    char    text[OVF_TEXT_CHARS + 4];
+    hit_kind_t  kind;
+    int32_t     a, b, x, y; // width: text px / px available. height: wrapped text / box. clipped: rows lost / height.
+                            // under-hint: rows covered / height
+    char const *target;     // under-hint: "hint" or "bar"
+    char        text[OVF_TEXT_CHARS + 4];
 } hit_t;
+
+typedef struct {
+    hit_t     *hits;
+    size_t     n, total; // total counts every hit, hits holds the first MAX_LINES
+    bool       in_screen; // walking the active screen: its content must stay off the hint and the bar
+    lv_obj_t  *hint_obj;
+    bool       has_hint, has_bar;
+    ovf_rect_t hint, bar;
+} ovf_ctx_t;
 
 static ovf_mode_t overflow_mode(lv_label_long_mode_t m) {
     switch (m) {
@@ -256,67 +273,212 @@ static void visible_box(lv_obj_t *obj, lv_area_t *box) {
     box->y2 = LV_MIN(box->y2, lv_display_get_vertical_resolution(NULL) - 1);
 }
 
-static void overflow_walk(lv_obj_t *obj, hit_t *hits, size_t *n, size_t *total) {
+// Counts the hit; keeps the first MAX_LINES with their text (the label's own, or the first label inside a container)
+static void add_hit(ovf_ctx_t *ctx, hit_kind_t kind, lv_obj_t *obj, int32_t a, int32_t b, char const *target) {
+    ctx->total++;
+    if (ctx->n >= MAX_LINES) {
+        return;
+    }
+    hit_t    *h = &ctx->hits[ctx->n++];
+    lv_area_t area;
+    lv_obj_get_coords(obj, &area);
+    h->kind   = kind;
+    h->a      = a;
+    h->b      = b;
+    h->x      = area.x1;
+    h->y      = area.y1;
+    h->target = target;
+    h->text[0] = 0;
+    first_label(obj, h->text, sizeof(h->text));
+    if (!h->text[0]) {
+        snprintf(h->text, sizeof(h->text), "(object)");
+    }
+    h->text[OVF_TEXT_CHARS] = 0;
+    for (char *c = h->text; *c; c++) {
+        if (*c == '\n' || *c == '\r') {
+            *c = ' ';
+        }
+    }
+}
+
+// Width: the text is longer than the room the label has to show it (#133)
+static void check_width(ovf_ctx_t *ctx, lv_obj_t *obj, char const *text) {
+    lv_area_t a, box;
+    lv_obj_get_coords(obj, &a);
+    visible_box(obj, &box);
+    if (box.x1 > box.x2 || box.y1 > box.y2 || a.y2 < box.y1 || a.y1 > box.y2) {
+        return;
+    }
+    lv_point_t size;
+    lv_text_get_size(&size, text, lv_obj_get_style_text_font(obj, LV_PART_MAIN),
+                     lv_obj_get_style_text_letter_space(obj, LV_PART_MAIN),
+                     lv_obj_get_style_text_line_space(obj, LV_PART_MAIN), LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    int32_t have = 0;
+    int32_t over = ui_overflow_px(size.x, (ovf_span_t){a.x1, a.x2}, (ovf_span_t){box.x1, box.x2},
+                                  overflow_mode(lv_label_get_long_mode(obj)), &have);
+    if (over > 0) {
+        add_hit(ctx, HIT_WIDTH, obj, size.x, have, NULL);
+    }
+}
+
+// Height: a wrapping label of fixed height whose wrapped text needs more rows than it has
+static void check_wrap_height(ovf_ctx_t *ctx, lv_obj_t *obj, char const *text) {
+    int32_t width = lv_obj_get_content_width(obj);
+    if (lv_label_get_long_mode(obj) != LV_LABEL_LONG_MODE_WRAP || width <= 0) {
+        return;
+    }
+    lv_point_t size;
+    lv_text_get_size(&size, text, lv_obj_get_style_text_font(obj, LV_PART_MAIN),
+                     lv_obj_get_style_text_letter_space(obj, LV_PART_MAIN),
+                     lv_obj_get_style_text_line_space(obj, LV_PART_MAIN), width, LV_TEXT_FLAG_NONE);
+    int32_t box = lv_obj_get_content_height(obj);
+    if (ovf_wrap_lost_px(size.y, box) > 0) {
+        add_hit(ctx, HIT_HEIGHT, obj, size.y, box, NULL);
+    }
+}
+
+// Where the object sits in scrolling content: the nearest ancestor that really scrolls splits the ancestors into those
+// that move with the object (inner) and those that stay put (outer); up / down = how far the content can still move
+typedef struct {
+    ovf_span_t inner, outer;
+    int32_t    up, down;
+} vgeom_t;
+
+static bool scrolls(lv_obj_t *o) {
+    return lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) && (lv_obj_get_scroll_dir(o) & LV_DIR_VER) &&
+           (lv_obj_get_scroll_bottom(o) > 0 || lv_obj_get_scroll_top(o) > 0);
+}
+
+static void vgeom(lv_obj_t *obj, vgeom_t *g) {
+    g->inner   = OVF_NO_LIMIT;
+    g->outer   = OVF_NO_LIMIT;
+    g->up      = 0;
+    g->down    = 0;
+    ovf_span_t *clip = &g->inner;
+    for (lv_obj_t *p = lv_obj_get_parent(obj); p; p = lv_obj_get_parent(p)) {
+        lv_area_t a;
+        if (clip == &g->inner && scrolls(p)) {
+            clip    = &g->outer;
+            g->up   = LV_MAX(lv_obj_get_scroll_bottom(p), 0);
+            g->down = LV_MAX(lv_obj_get_scroll_top(p), 0);
+        }
+        lv_obj_get_coords(p, &a);
+        clip->x1 = LV_MAX(clip->x1, a.y1);
+        clip->x2 = LV_MIN(clip->x2, a.y2);
+    }
+}
+
+// What the user reads or sees: a label with text, or a leaf with a background (bars, swatches)
+static bool is_content(lv_obj_t *obj) {
+    if (lv_obj_check_type(obj, &lv_label_class)) {
+        char const *t = lv_label_get_text(obj);
+        return t && *t;
+    }
+    return lv_obj_get_child_count(obj) == 0 && lv_obj_get_style_bg_opa(obj, LV_PART_MAIN) > LV_OPA_TRANSP;
+}
+
+static void check_cover(ovf_ctx_t *ctx, lv_obj_t *obj, lv_area_t const *a, vgeom_t const *g) {
+    if (!ctx->in_screen || obj == ctx->hint_obj || !is_content(obj)) {
+        return;
+    }
+    ovf_rect_t r = {a->x1, a->y1, a->x2, a->y2};
+    int32_t    h = a->y2 - a->y1 + 1;
+    if (ctx->has_hint) {
+        int32_t over = ovf_cover_rows(r, g->inner, g->outer, ctx->hint, g->up, g->down);
+        if (over > 0) {
+            add_hit(ctx, HIT_UNDER, obj, over, h, "hint");
+        }
+    }
+    if (ctx->has_bar) {
+        int32_t over = ovf_cover_rows(r, g->inner, g->outer, ctx->bar, g->up, g->down);
+        if (over > 0) {
+            add_hit(ctx, HIT_UNDER, obj, over, h, "bar");
+        }
+    }
+}
+
+// Clipped: rows no scroll position shows (off the screen, or beyond a parent that does not scroll), then the cover
+// check. Returns true for a container that is wholly hidden: reported once, its children are not walked.
+static bool check_vertical(ovf_ctx_t *ctx, lv_obj_t *obj) {
+    lv_area_t a;
+    lv_obj_get_coords(obj, &a);
+    int32_t h = a.y2 - a.y1 + 1;
+    if (h <= 0 || a.x2 < a.x1) {
+        return false;
+    }
+    vgeom_t g;
+    vgeom(obj, &g);
+    int32_t hidden    = ovf_hidden_rows((ovf_span_t){a.y1, a.y2}, g.inner, g.outer, g.up, g.down);
+    bool    container = lv_obj_get_child_count(obj) > 0 && !lv_obj_check_type(obj, &lv_label_class);
+    if (hidden > 0 && (!container || hidden >= h)) {
+        add_hit(ctx, HIT_CLIPPED, obj, hidden, h, NULL);
+    }
+    check_cover(ctx, obj, &a, &g);
+    return container && hidden >= h;
+}
+
+static void overflow_walk(ovf_ctx_t *ctx, lv_obj_t *obj, bool root) {
     if (lv_obj_is_hidden(obj)) {
         return;
     }
     if (lv_obj_check_type(obj, &lv_label_class)) {
         char const *text = lv_label_get_text(obj);
-        lv_area_t   a, box;
-        lv_obj_get_coords(obj, &a);
-        visible_box(obj, &box);
-        if (text && *text && box.x1 <= box.x2 && box.y1 <= box.y2 && a.y2 >= box.y1 && a.y1 <= box.y2) {
-            lv_point_t size;
-            lv_text_get_size(&size, text, lv_obj_get_style_text_font(obj, LV_PART_MAIN),
-                             lv_obj_get_style_text_letter_space(obj, LV_PART_MAIN),
-                             lv_obj_get_style_text_line_space(obj, LV_PART_MAIN), LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-            int32_t have = 0;
-            int32_t over = ui_overflow_px(size.x, (ovf_span_t){a.x1, a.x2}, (ovf_span_t){box.x1, box.x2},
-                                          overflow_mode(lv_label_get_long_mode(obj)), &have);
-            if (over > 0) {
-                (*total)++;
-                if (*n < MAX_LINES) {
-                    hit_t *h = &hits[(*n)++];
-                    h->px    = size.x;
-                    h->have  = have;
-                    h->x     = a.x1;
-                    h->y     = a.y1;
-                    snprintf(h->text, sizeof(h->text), "%.*s", OVF_TEXT_CHARS, text);
-                    for (char *c = h->text; *c; c++) {
-                        if (*c == '\n' || *c == '\r') {
-                            *c = ' ';
-                        }
-                    }
-                }
-            }
+        if (text && *text) {
+            check_width(ctx, obj, text);
+            check_wrap_height(ctx, obj, text);
         }
+    }
+    if (!root && check_vertical(ctx, obj)) {
+        return;
     }
     uint32_t count = lv_obj_get_child_count(obj);
     for (uint32_t i = 0; i < count; i++) {
-        overflow_walk(lv_obj_get_child(obj, (int32_t)i), hits, n, total);
+        overflow_walk(ctx, lv_obj_get_child(obj, (int32_t)i), false);
     }
 }
 
-// The active screen, then the top layer (status bar, toast, dialogs) and the sys layer
+static bool area_rect(lv_obj_t *obj, ovf_rect_t *out) {
+    if (!obj || lv_obj_is_hidden(obj)) {
+        return false;
+    }
+    lv_area_t a;
+    lv_obj_get_coords(obj, &a);
+    *out = (ovf_rect_t){a.x1, a.y1, a.x2, a.y2};
+    return true;
+}
+
+// The active screen (checked against the pinned hint and the status bar), then the top layer (status bar, toast,
+// dialogs) and the sys layer. Those draw over the screen on purpose, so they are not checked against the hint.
+//   ui overflow: <n>
+//     <kind> x,y a/b px ["hint"|"bar" ]"<text>"      kind: width | height | clipped | under-hint (see hit_t)
 static void cmd_ui_overflow(void) {
     settle();
-    hit_t *hits = malloc(sizeof(hit_t) * MAX_LINES);
-    if (!hits) {
+    ovf_ctx_t ctx = {.hits = malloc(sizeof(hit_t) * MAX_LINES)};
+    if (!ctx.hits) {
         console_reply("ui overflow: no memory");
         return;
     }
-    size_t n = 0, total = 0;
     lvgl_port_lock(0);
-    overflow_walk(lv_screen_active(), hits, &n, &total);
-    overflow_walk(lv_layer_top(), hits, &n, &total);
-    overflow_walk(lv_layer_sys(), hits, &n, &total);
+    lv_obj_t *screen = lv_screen_active();
+    ctx.hint_obj     = lichen_page_hint_of(screen);
+    ctx.has_hint     = area_rect(ctx.hint_obj, &ctx.hint);
+    ctx.has_bar      = area_rect(shell_status_bar(), &ctx.bar);
+    ctx.in_screen    = true;
+    overflow_walk(&ctx, screen, true);
+    ctx.in_screen = false;
+    overflow_walk(&ctx, lv_layer_top(), true);
+    overflow_walk(&ctx, lv_layer_sys(), true);
     lvgl_port_unlock();
-    console_reply("ui overflow: %u", (unsigned)total);
-    for (size_t i = 0; i < n; i++) {
-        console_reply("  %d,%d %d/%d px \"%s\"", (int)hits[i].x, (int)hits[i].y, (int)hits[i].px, (int)hits[i].have,
-                      hits[i].text);
+    console_reply("ui overflow: %u", (unsigned)ctx.total);
+    for (size_t i = 0; i < ctx.n; i++) {
+        hit_t const *h = &ctx.hits[i];
+        console_reply("  %s %d,%d %d/%d px %s%s\"%s\"", HIT_NAME[h->kind], (int)h->x, (int)h->y, (int)h->a, (int)h->b,
+                      h->target ? h->target : "", h->target ? " " : "", h->text);
     }
-    free(hits);
+    if (ctx.total > ctx.n) {
+        console_reply("  ... %u more not shown", (unsigned)(ctx.total - ctx.n));
+    }
+    free(ctx.hits);
 }
 
 static void cmd_ui(char const *args) {
@@ -357,5 +519,5 @@ static void cmd_ui(char const *args) {
 }
 
 void ui_probe_init(void) {
-    console_register("ui", "ui [perf [reset | bench [n]] | overflow] (overflow: labels whose text is cut off, #133; screen ids on the stack, the focused row, every visible label; perf: frame timing, #93)", cmd_ui);
+    console_register("ui", "ui [perf [reset | bench [n]] | overflow] (overflow: text cut off, off the screen or under the hint/status bar, #133; screen ids on the stack, the focused row, every visible label; perf: frame timing, #93)", cmd_ui);
 }

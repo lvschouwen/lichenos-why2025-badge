@@ -123,3 +123,6 @@ lv_obj_t *lichen_heading(lv_obj_t *parent, char const *kind, char const *name);
 // the screen's hint (rebuilt pages call it on every rebuild). No "Esc: back" pairs: Esc
 // goes back everywhere. Calling it again on the same screen replaces the text. Returns the label. LVGL context only.
 lv_obj_t *shell_page_hint(lv_obj_t *screen, ...);
+// The hint shell_page_hint put on `screen`, NULL if it has none. For `fw ui overflow` (#133), which checks that no
+// content runs under it. LVGL context only.
+lv_obj_t *lichen_page_hint_of(lv_obj_t *screen);

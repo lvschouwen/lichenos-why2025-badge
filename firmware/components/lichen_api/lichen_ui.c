@@ -111,6 +111,16 @@ lv_obj_t *lichen_heading(lv_obj_t *parent, char const *kind, char const *name) {
 
 #define PAGE_HINT_FLAG LV_OBJ_FLAG_USER_2 // marks the screen's hint (USER_1 is text_entry's secret flag)
 
+lv_obj_t *lichen_page_hint_of(lv_obj_t *screen) {
+    for (uint32_t i = 0; screen && i < lv_obj_get_child_count(screen); i++) {
+        lv_obj_t *child = lv_obj_get_child(screen, (int32_t)i);
+        if (lv_obj_has_flag(child, PAGE_HINT_FLAG)) {
+            return child;
+        }
+    }
+    return NULL;
+}
+
 lv_obj_t *shell_page_hint(lv_obj_t *screen, ...) {
     char    text[HINT_MAX];
     va_list ap;

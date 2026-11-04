@@ -23,3 +23,30 @@ typedef struct {
 // but their box can still be cut by a parent. Text alignment is ignored (left-aligned assumed). *have_out, if given,
 // gets the px available from the label's left edge to the clip's right edge.
 int32_t ui_overflow_px(int32_t text_w, ovf_span_t label, ovf_span_t clip, ovf_mode_t mode, int32_t *have_out);
+
+// ---- vertical and overlap checks (#133, decision 2026-11-04) -----------------------------------------------------------
+// The width check above missed a status label that sat under the pinned hint: the page was taller than the screen.
+// These decide the vertical cases from plain numbers; ui_probe.c reads the geometry from LVGL.
+
+typedef struct {
+    int32_t x1, y1, x2, y2; // inclusive, as lv_area_t
+} ovf_rect_t;
+
+// "No limit" for a span: used when an object has no ancestor on that side of the scroller
+#define OVF_NO_LIMIT ((ovf_span_t){-0x40000000, 0x3fffffff})
+
+// A scrollable page can move its content, so a row hidden now is not lost if scrolling shows it. The object sits in
+// content that scrolls by up px further up (content moves up: the page's scroll_bottom) and by down px further down
+// (scroll_top). inner is the intersection of the object's ancestors below the scroller (they move with the content),
+// outer the scroller and everything above it (they stay put). All y spans (x1 = top, x2 = bottom), inclusive.
+// With no scroller pass up = down = 0 and put every ancestor in inner (outer = OVF_NO_LIMIT).
+
+// Rows of the object that no scroll position shows (fewest over the positions 0, +up, -down). 0 = fully reachable.
+int32_t ovf_hidden_rows(ovf_span_t obj, ovf_span_t inner, ovf_span_t outer, int32_t up, int32_t down);
+
+// Rows of the object's visible part that lie inside `cover` (the pinned hint or the status bar) when both overlap
+// in x as well; the fewest over the scroll positions, so content that scrolls clear of the cover is not a hit.
+int32_t ovf_cover_rows(ovf_rect_t obj, ovf_span_t inner, ovf_span_t outer, ovf_rect_t cover, int32_t up, int32_t down);
+
+// Rows of wrapped text that do not fit a label of fixed height (text_h at the label's width, box_h its content height).
+int32_t ovf_wrap_lost_px(int32_t text_h, int32_t box_h);
