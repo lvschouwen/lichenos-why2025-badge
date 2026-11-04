@@ -26,6 +26,9 @@ void console_set_tap(void (*tap)(char const *text, size_t len));
 // Adds lines to "fw mem" after the heaps: lichen_mem.c's per-app use (#181; fw_console cannot depend on lichen_api,
 // which uses it). Set once at boot.
 void console_set_mem_report(void (*report)(void));
+// Called at the start and the end of every command (UART and Wi-Fi): the remote key lock's timeout counts from the
+// last one (#190). Must be quick. Set once at boot.
+void console_set_activity(void (*activity)(void));
 
 // Runs one command line (with or without the "fw " prefix) on the calling task and collects what console_reply prints
 // from it in buf (cap bytes; output past that is cut with a note). A console_reply_secret line becomes one

@@ -19,6 +19,11 @@ void keyboard_set_reset_hook(void (*fn)(void));
 // no raw hook and not LVGL sees it, nor its release. Keyboard task, keep it short; NULL removes it.
 void keyboard_set_wake_hook(bool (*fn)(void));
 
+// The remote key lock (#190): called for every key event before everything else (the wake hook included). True = the
+// event is dropped: nothing sees it, so the screen does not even wake. The gate must drop the release of every press
+// it dropped. Keyboard task, keep it short; NULL removes it.
+void keyboard_set_gate_hook(bool (*fn)(uint8_t key, bool pressed));
+
 // Raw key hooks (#81, #79): up to KEYBOARD_RAW_MAX; false when full. Called from any task. A hook that swallows an
 // event stops the mapped key reaching LVGL (its release too); other hooks still see it.
 #define KEYBOARD_RAW_MAX 4

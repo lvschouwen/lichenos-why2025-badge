@@ -51,6 +51,13 @@ int main(void) {
     CHECK(!hold_exit_tick(&h, 1000));
     CHECK(hold_exit_tick(&h, 1600));
 
+    // A longer hold (the remote key lock's escape, #190)
+    hold_exit_t r = {0};
+    hold_exit_event(&r, true, true, 100);
+    CHECK(!hold_exit_tick_after(&r, 3099, 3000));
+    CHECK(hold_exit_tick_after(&r, 3100, 3000));
+    CHECK(!hold_exit_tick_after(&r, 3200, 3000));
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -531,7 +531,29 @@ static void cmd_reboot(char const *args) {
     system_restart("console reboot");
 }
 
+static void (*_Atomic activity_hook)(void);
+
+void console_set_activity(void (*activity)(void)) {
+    atomic_store(&activity_hook, activity);
+}
+
+static void activity(void) {
+    void (*fn)(void) = atomic_load(&activity_hook);
+    if (fn) {
+        fn();
+    }
+}
+
+static void run_command(char *line);
+
+// Every command line, from the UART and from Wi-Fi
 static void run(char *line) {
+    activity();
+    run_command(line);
+    activity();
+}
+
+static void run_command(char *line) {
     char *args = strchr(line, ' ');
     if (args) {
         *args++ = '\0';

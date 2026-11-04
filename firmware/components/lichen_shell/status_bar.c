@@ -28,6 +28,8 @@ static int32_t   hot_room;  // what HOT takes from the C6 text's room while it s
 static lv_obj_t *notify_box; // the unread dot and count (#62), hidden at 0
 static lv_obj_t *notify_dot;
 static lv_obj_t *notify_count;
+static lv_obj_t *bar_obj;
+static lv_obj_t *remote_banner; // "fw ui lock" (#190): over the whole bar while the physical keys are off
 
 #define NOTIFY_DOT 10
 
@@ -276,8 +278,36 @@ static int32_t c6_room(lv_obj_t *word, int32_t clock_w) {
     return LV_MAX(half - clock_w / 2 - CLOCK_GAP - taken, 0);
 }
 
+// Over the bar's own content, not under it: the screen below keeps its layout, and the holder cannot miss why the
+// keys do nothing (R8: amber is attention, and it says so in words). Made on first use.
+void status_bar_remote_lock(bool on) {
+    if (!bar_obj) {
+        return;
+    }
+    if (on && !remote_banner) {
+        remote_banner = lv_obj_create(bar_obj);
+        lv_obj_remove_style_all(remote_banner);
+        lv_obj_add_flag(remote_banner, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_set_size(remote_banner, LV_PCT(100), LV_PCT(100));
+        lv_obj_align(remote_banner, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_set_style_bg_color(remote_banner, lv_color_hex(THEME_BG), 0);
+        lv_obj_set_style_bg_opa(remote_banner, LV_OPA_COVER, 0);
+        lv_obj_set_scrollable(remote_banner, false);
+        lv_obj_set_clickable(remote_banner, false);
+        lv_obj_t *text = add_text(remote_banner, "Remote control: keys locked", THEME_AMBER);
+        lv_obj_center(text);
+    }
+    if (remote_banner) {
+        lv_obj_set_hidden(remote_banner, !on);
+        if (on) {
+            lv_obj_move_foreground(remote_banner);
+        }
+    }
+}
+
 lv_obj_t *status_bar_create(lv_obj_t *parent) {
     lv_obj_t *bar = lv_obj_create(parent);
+    bar_obj       = bar;
     lv_obj_remove_style_all(bar);
     lv_obj_set_size(bar, LV_PCT(100), THEME_STATUS_BAR_H);
     lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 0);

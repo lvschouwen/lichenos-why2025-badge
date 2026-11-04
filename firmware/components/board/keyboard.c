@@ -37,6 +37,7 @@ static bool           raw_down[0x51]; // keys the raw hooks saw pressed, so a ch
 static atomic_bool    reinit_asked;            // keyboard_reinit(): honoured by the poll task, which owns the chip
 static void (*_Atomic reset_hook)(void);       // told when the readback finds the chip reset (#14)
 static bool (*_Atomic wake_hook)(void);        // the screen timeout (#43)
+static bool (*_Atomic gate_hook)(uint8_t key, bool pressed); // the remote key lock (#190)
 static bool           woke[0x51];              // presses the wake hook swallowed: their releases go nowhere either
 
 static struct {
@@ -94,6 +95,15 @@ void keyboard_set_reset_hook(void (*fn)(void)) {
 
 void keyboard_set_wake_hook(bool (*fn)(void)) {
     atomic_store(&wake_hook, fn);
+}
+
+void keyboard_set_gate_hook(bool (*fn)(uint8_t key, bool pressed)) {
+    atomic_store(&gate_hook, fn);
+}
+
+static bool gate_drops(uint8_t key, bool pressed) {
+    bool (*gate)(uint8_t, bool) = atomic_load(&gate_hook);
+    return gate && gate(key, pressed);
 }
 
 // A press that only woke the screen, or the release of one: nobody else hears of it
@@ -170,7 +180,7 @@ static void poll_task(void *arg) {
             if (kbd_map_is_shift(key)) {
                 shift = pressed;
             }
-            if (wake_swallows(key, pressed)) {
+            if (gate_drops(key, pressed) || wake_swallows(key, pressed)) {
                 continue;
             }
             raw_down[key]          = pressed;

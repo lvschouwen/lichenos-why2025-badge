@@ -12,12 +12,17 @@ its fixed label), clipped (an object that no scroll position shows: off the scre
 object that runs under the pinned key hint or the status bar). This script only counts the lines; a hit is a bug in the
 screen, not in the script.
 
-What it sends: "fw keys send <seq>" (a fresh walk from home for every screen), "fw ui" (read only) and, for the QR
-screen, "fw qr <text>" (shows a code, sends nothing). Never "text:" tokens, nothing that transmits or changes a setting.
+What it sends: "fw ui lock on" at the start and "fw ui lock off" at the end (#190: the badge ignores its own keyboard
+meanwhile and shows "Remote control: keys locked"), "fw ui open <app>" (the app as from its home tile, or home),
+"fw keys send <seq>" (one per route), "fw ui" (read only) and, for the QR screen, "fw qr <text>" (shows a code, sends
+nothing). Never "text:" tokens, nothing that transmits or changes a setting.
 
-How the walks stay safe: every Enter is directly preceded by a guard. A guard reads "fw ui" and compares the focused row
-with the one the route expects; when it differs, the screen is reported as an error and the Enter is NOT sent. So a stale
-route (the home tiles or a menu changed) can open the wrong page at worst, never press a switch. Steps:
+How the walks stay safe: every Enter is directly preceded by a guard. The guards go in the same "keys send" as the keys
+(focus:<text> / row:<text>, ui_keys.h): the badge compares the focused row with the one the route expects right before
+the Enter, and when it differs stops the sequence there, so the Enter is NOT sent and the screen is reported as an
+error (a row guard first gets the old correction: single steps, each read back with "fw ui"). So a stale route (a menu
+changed) can open the wrong page at worst, never press a switch. One route costs about five requests (read, open, keys,
+read, overflow) instead of three per key group. Steps:
   "up" "enter" "wait" ...      key tokens of firmware/components/lichen_shell/ui_keys.h
   ("row", label, ROWS)         move down to row `label` of the list ROWS (the labels of the focusable rows in order),
                                correcting by single steps if the page differs; then the focus must equal the label
@@ -27,9 +32,12 @@ route (the home tiles or a menu changed) can open the wrong page at worst, never
 Forbidden targets (rows that switch, send, restart or erase) are refused when the table is loaded, and the focused row
 is checked against the same list at run time. Only the keys up down left right enter esc wait are ever sent.
 
-A person may be holding the badge: before every key the script compares "fw ui" (screen stack and focus) with what it
-saw after its own last action. Any other change stops the whole run with "badge in use: stopped" and sends NO key, not
-even Esc. When the run ends any other way (also on Ctrl-C) it sends Esc x5 to leave the badge on home.
+A person may be holding the badge: the key lock keeps their keys out, and they can take the badge back by holding Esc
+for 3 s (the lock also ends 60 s after the last command, so a dead script never leaves the badge deaf). Before every
+route the script compares "fw ui" (screen stack and focus) with what it saw after its own last action, and checks the
+lock still holds; a refused lock, an ended lock or any other change stops the whole run with "badge in use: stopped"
+and sends NO key. A sequence the lock ended under stops on the badge itself. When the run ends any other way (also on
+Ctrl-C) it opens home; the lock is always released at the end.
 "--selftest" feeds fake "fw" replies through this logic (no badge needed).
 
 Fixtures (set up by hand first; bench rules: on-air targets are ONLY #badgetest and the Heltec test node, never real
@@ -45,8 +53,7 @@ Without the fixtures the sweep still runs but only proves short data fits.
 UNVERIFIED: no route below has been walked on the badge yet (written from the code, #133). Run "--try NAME" for one,
 look at "fw ui", then set its flag to True.
 
-The walk assumes Home's Tiles layout (the default); the sweep reads "fw home" (read only) first and refuses on Grid.
-Restoring the layout is a manual step ("fw home layout tiles"): this script never changes a setting.
+Apps are opened by name ("fw ui open"), so Home's layout and order no longer matter.
 """
 import argparse
 import os
@@ -55,11 +62,7 @@ import subprocess
 import sys
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
 
-HOME = "esc esc esc esc esc"  # backs out of any depth; Esc on home does nothing
-
-# Home tiles in order: MeshCore (main.c, before shell_start), then shell_start's register calls (shell.c): Settings,
-# About, Files, Keyboard test, Clock, Weather, Timer, Calculator, Bench, Crash log, Power, Notifications, What's new,
-# Notes, QR code, LoRa spectrum. The label is the app's name (home_selected_name).
+# The apps "fw ui open" takes by name (lichen_app_t.name: MeshCore from main.c, the rest from shell_start, shell.c)
 TILES = ["MeshCore", "Settings", "About Lichen", "Files", "Keyboard test", "Clock", "Weather", "Timer", "Calculator",
          "Bench", "Crash log", "Power", "Notifications", "What's new", "Notes", "QR code", "LoRa spectrum"]
 # Settings (app_settings.c open_settings): the focusable rows in order. "Name on the network" has no action; if it takes
@@ -86,10 +89,12 @@ FORBIDDEN = ("Updates over", "Close updates", "LoRa radio", "Airplane", "PSRAM",
              "Clear all", "Backup now", "Update now", "Switch radio", "Apply", "Custom", "Save settings",
              "Load settings", "Rename", "Add channel", "Add ")
 ALLOWED_KEYS = ("up", "down", "left", "right", "enter", "esc", "wait")
+HOME_APP = "home"  # "fw ui open home": back to home from any depth
 
 
 def tile(name):
-    return [("row", name, TILES), "enter", "wait"]
+    """The app as from its home tile: "fw ui open <name>" (#190)."""
+    return [("open", name)]
 
 
 def settings_page(label):
@@ -262,10 +267,17 @@ def forbidden(text: str) -> Optional[str]:
 def lint_steps(name: str, steps: Sequence[Step]) -> None:
     """Allowlist: only known keys, guarded Enters, no forbidden row, no empty guard."""
     guarded = False
-    for st in steps:
+    for i, st in enumerate(steps):
         if isinstance(st, tuple):
             kind = st[0]
-            if kind == "row":
+            if kind in ("row", "focus") and "|" in st[1]:
+                raise ValueError(f"{name}: a guard text may not hold '|'")
+            if kind == "open":
+                if i != 0:
+                    raise ValueError(f"{name}: open is only the first step")
+                if st[1] not in TILES:
+                    raise ValueError(f"{name}: open {st[1]!r} is no known app")
+            elif kind == "row":
                 if forbidden(st[1]):
                     raise ValueError(f"{name}: row {st[1]!r} is forbidden")
                 if st[1] not in st[2]:
@@ -280,7 +292,7 @@ def lint_steps(name: str, steps: Sequence[Step]) -> None:
                     raise ValueError(f"{name}: console command {st[1]!r} is not allowed")
             elif kind != "any_row":
                 raise ValueError(f"{name}: unknown step {st!r}")
-            guarded = kind in ("row", "focus", "any_row")
+            guarded = kind in ("row", "focus", "any_row")  # open: a fresh screen, no row checked yet
         elif st not in ALLOWED_KEYS:
             raise ValueError(f"{name}: key {st!r} is not allowed in the sweep")
         elif st == "enter":
@@ -332,8 +344,31 @@ def parse_snapshot(lines: Sequence[str]) -> Snap:
     raise RouteError(f"unreadable 'fw ui' reply: {' / '.join(lines)[:120]!r}")
 
 
+def parse_lock(lines: Sequence[str]) -> Optional[bool]:
+    """The "ui lock: on, N s left" / "ui lock: off" line of "fw ui" (#190); None when there is none."""
+    for line in lines:
+        m = re.match(r"\s*ui lock: (on|off)\b", line)
+        if m:
+            return m.group(1) == "on"
+    return None
+
+
 def same_row(focus: str, label: str) -> bool:
     return focus.lstrip("* ").strip() == label
+
+
+class Guard(NamedTuple):
+    """A focus check the badge runs inside "keys send" right before the next key (ui_keys.h)."""
+    kind: str  # "row": the focus is label; "focus": the focus contains label
+    label: str
+    rows: Sequence[str] = ()
+
+    def token(self) -> str:
+        return f"{self.kind}:{self.label}|"
+
+
+Token = Union[str, Guard]
+GUARD_FAILED = re.compile(r"\s*keys send: guard (\d+) failed: focus '(.*)';")
 
 
 class Badge:
@@ -342,12 +377,25 @@ class Badge:
     def __init__(self, fw: FwFn) -> None:
         self.fw = fw
         self.last: Optional[Snap] = None
+        self.locked: Optional[bool] = None  # what the last "fw ui" said about the key lock
 
     def snap(self) -> Snap:
-        return parse_snapshot(self.fw("ui"))
+        lines = self.fw("ui")
+        snap = parse_snapshot(lines)
+        self.locked = parse_lock(lines)
+        return snap
 
     def start(self) -> None:
         self.last = self.snap()
+
+    def lock(self) -> None:
+        """The badge ignores its own keyboard until unlock (#190). A refusal stops the run before any key."""
+        reply = self.fw("ui lock on")
+        if not any(l.strip().startswith("ui lock: on") for l in reply):
+            raise InUse(f"the key lock was refused: {' / '.join(reply)[:120]}")
+
+    def unlock(self) -> None:
+        self.fw("ui lock off")
 
     def _unchanged(self, now: Snap) -> bool:
         last = self.last
@@ -356,12 +404,20 @@ class Badge:
         # a list filled by a background job gives the focus to its first row; the screen is the same
         return now.stack == last.stack and last.no_focus() and not now.no_focus()
 
-    def send(self, keys: Sequence[str]) -> None:
-        if not keys:
-            return
+    def _check(self, require_lock: bool) -> Snap:
+        """Reads the screen; stops the run when someone else changed it or the key lock is gone."""
         now = self.snap()
         if not self._unchanged(now):
             raise InUse(f"{self.last} -> {now}")
+        if require_lock and self.locked is False:
+            raise InUse("the key lock ended (Esc held on the badge, or its timeout)")
+        return now
+
+    def send(self, keys: Sequence[str]) -> None:
+        """A few keys, read before and after (the correction steps): Enter must open something."""
+        if not keys:
+            return
+        now = self._check(False)
         reply = self.fw("keys send " + " ".join(keys))
         if not any(l.strip().startswith("keys sent") for l in reply):
             raise RouteError(f"keys send said: {' / '.join(reply)}")
@@ -370,10 +426,9 @@ class Badge:
         if "enter" in keys and len(after.stack) <= len(now.stack):
             raise RouteError(f"Enter opened nothing (stack {list(now.stack)} -> {list(after.stack)})")
 
-    def seek(self, label: str, rows: Sequence[str]) -> None:
-        """Down to `label` in `rows`, then check the focus; corrects by single steps (a row that takes no focus)."""
+    def correct(self, label: str, rows: Sequence[str]) -> None:
+        """Single steps to row `label` of `rows` (one row took no focus, or a row was added), each read back."""
         target = rows.index(label)
-        self.send(["down"] * target)
         for _ in range(4):
             cur = self._focus()
             if same_row(cur, label):
@@ -404,52 +459,83 @@ class Badge:
             raise RouteError(f"the focused row {cur!r} is forbidden ({bad!r}); nothing pressed")
 
     def console(self, line: str) -> None:
-        now = self.snap()
-        if not self._unchanged(now):
-            raise InUse(f"{self.last} -> {now}")
+        self._check(False)
         self.fw(line)
         self.last = self.snap()
 
+    def open(self, app: str) -> None:
+        """"fw ui open": from home, as from the app's tile. "Not now" (a dialog, a lock screen) stops the run."""
+        reply = self.fw(f"ui open {app}")
+        text = " / ".join(l.strip() for l in reply)
+        if any(l.strip() == f"ui open: {app}" for l in reply):
+            self.last = None  # a new screen: the guards in the next "keys send" check it
+            return
+        if "not now" in text:
+            raise InUse(f"ui open {app}: {text}")
+        raise RouteError(f"ui open {app}: {text or 'no reply'}")
+
     def home(self) -> None:
-        self.send(HOME.split())
+        self._check(False)
+        self.open(HOME_APP)
+        self.last = self.snap()
+
+    def keys(self, tokens: Sequence[Token]) -> None:
+        """One "keys send" for a run of keys and guards; a row guard that fails gets the single-step correction once."""
+        corrected = set()
+        todo = list(tokens)
+        # No reading before each send: the walk read the screen just before (and the lock keeps the keyboard out); a
+        # sequence the lock ended under is stopped by the badge itself
+        while todo:
+            guards = [t for t in todo if isinstance(t, Guard)]
+            line = "keys send " + " ".join(t.token() if isinstance(t, Guard) else t for t in todo)
+            reply = self.fw(line)
+            self.last = None
+            if any(l.strip().startswith("keys sent") for l in reply):
+                return
+            failed = next((GUARD_FAILED.match(l) for l in reply if GUARD_FAILED.match(l)), None)
+            if any("key lock ended" in l for l in reply):
+                raise InUse("the key lock ended during a sequence (Esc held on the badge, or its timeout)")
+            if not failed:
+                raise RouteError(f"keys send said: {' / '.join(reply)}")
+            g = guards[int(failed.group(1)) - 1]
+            if g.kind != "row" or g in corrected:
+                raise RouteError(f"expected focus {'on' if g.kind == 'row' else 'containing'} {g.label!r} before "
+                                 f"Enter, found {failed.group(2)!r}; nothing pressed")
+            corrected.add(g)
+            self.last = self.snap()
+            self.correct(g.label, g.rows)
+            todo = todo[todo.index(g):]  # again from the guard: the badge checks it once more before the Enter
 
     def walk(self, name: str, steps: Sequence[Step], expect_top: Optional[int] = None) -> None:
         lint_steps(name, steps)
-        self.send(HOME.split() + ["wait"])
-        pending: List[str] = []
-        for st in steps:
+        self._check(True)
+        opened = bool(steps) and isinstance(steps[0], tuple) and steps[0][0] == "open"
+        self.open(steps[0][1] if opened else HOME_APP)
+        enters = sum(1 for st in steps if st == "enter")
+        pending: List[Token] = []
+        for st in steps[1:] if opened else steps:
             if isinstance(st, str):
                 pending.append(st)
-                continue
-            self.send(pending)
-            pending = []
-            if st[0] == "row":
-                if st[2] is TILES:
-                    self.send(["up"] * len(TILES))  # Home remembers its selection: to the top (Up clamps)
-                self.seek(st[1], st[2])
+            elif st[0] == "row":
+                pending += ["down"] * st[2].index(st[1]) + [Guard("row", st[1], tuple(st[2]))]
             elif st[0] == "focus":
-                self.guard(st[1])
-            elif st[0] == "any_row":
-                self.any_row()
-            elif st[0] == "fw":
-                self.console(st[1])
-        self.send(pending)
-        top = self.last.stack[-1] if self.last and self.last.stack else None
+                pending.append(Guard("focus", st[1]))
+            else:  # any_row and fw need a reading first: send what is pending
+                self.keys(pending)
+                pending = []
+                if st[0] == "any_row":
+                    self.last = self.snap()
+                    self.any_row()
+                else:
+                    self.console(st[1])
+        self.keys(pending)
+        self.last = self.snap()
+        depth = len(self.last.stack)
+        if depth < 1 + int(opened) + enters:
+            raise RouteError(f"an Enter opened nothing (stack {list(self.last.stack)}, {enters} Enter(s))")
+        top = self.last.stack[-1] if self.last.stack else None
         if expect_top is not None and top != expect_top:
             raise RouteError(f"route ended on screen {top}, expected {expect_top}")
-
-
-def preflight_tiles(ip: str) -> bool:
-    """The key walks assume Tiles; "fw home" without arguments only reports the layout."""
-    try:
-        reply = " ".join(run_badge_sh(ip, "home"))
-    except RouteError as e:
-        print(f"ERROR reading the home layout: {e}")
-        return False
-    if "layout is tiles" not in reply:
-        print(f"ERROR the walks need the Tiles layout ({reply.strip()}); set it by hand: fw home layout tiles")
-        return False
-    return True
 
 
 # console_not_running (mesh_task.cpp) opens a stopped MeshCore's "fw mesh" reply with "MeshCore " and one of these
@@ -495,23 +581,97 @@ def print_list() -> int:
 # ---- --selftest: fake "fw" replies through the guard logic ------------------------------------------------------------
 
 class FakeFw:
-    """Answers `fw ui` from a queue (the last one repeats) and records every `keys send`."""
+    """Answers `fw ui` from a queue (the last one repeats), `keys send` from a queue (then "keys sent"), `ui open` and
+    `ui lock` with fixed replies, and records every line."""
 
-    def __init__(self, ui_replies: Sequence[Sequence[str]]) -> None:
+    def __init__(self, ui_replies: Sequence[Sequence[str]], keys: Sequence[str] = (), open_reply: Optional[str] = None,
+                 lock_reply: str = "ui lock: on, 60 s after the last command (Esc held 3 s ends it)") -> None:
         self.ui = [list(r) for r in ui_replies]
+        self.keys = list(keys)
+        self.open_reply = open_reply
+        self.lock_reply = lock_reply
         self.sent: List[str] = []
+        self.lines: List[str] = []
 
     def __call__(self, line: str) -> List[str]:
+        self.lines.append(line)
         if line.startswith("keys send"):
             self.sent.append(line)
-            return ["keys sent: 1"]
+            return [self.keys.pop(0) if self.keys else "keys sent: 1"]
         if line == "ui":
             return self.ui.pop(0) if len(self.ui) > 1 else list(self.ui[0])
+        if line == "ui lock on":
+            return [self.lock_reply]
+        if line == "ui lock off":
+            return ["ui lock: off"]
+        if line.startswith("ui open "):
+            return [self.open_reply if self.open_reply is not None else "ui open: " + line[len("ui open "):]]
         return []
 
+    def opens(self) -> List[str]:
+        return [l for l in self.lines if l.startswith("ui open ")]
 
-def ui(stack: str, focus: str) -> List[str]:
-    return [f"ui stack: {stack} | focus: {focus}", "ui   x"]
+
+def ui(stack: str, focus: str, locked: bool = True) -> List[str]:
+    return [f"ui stack: {stack} | focus: {focus}", f"ui lock: {'on, 50 s left' if locked else 'off'}", "ui   x"]
+
+
+def selftest_remote(expect: Callable[..., None], failures: List[str]) -> None:
+    """#190: the key lock, "fw ui open" and one "keys send" per route with the guards inside it."""
+    expect("lock refused", InUse, FakeFw([ui("0", "Settings")], lock_reply="unknown command 'ui'"),
+           lambda b: b.lock(), 0)
+    expect("lock ended before a route", InUse, FakeFw([ui("0", "Settings"), ui("0", "Settings", locked=False)]),
+           lambda b: b.walk("weather", tile("Weather")), 0)
+    fake = FakeFw([ui("0", "Settings"), ui("0", "Settings"), ui("0 > 7", "(none)")])
+    expect("open, no keys", None, fake, lambda b: b.walk("weather", tile("Weather")), 0)
+    if fake.opens() != ["ui open Weather"]:
+        failures.append(f"open, no keys: opened {fake.opens()}")
+    expect("open refused (dialog)", InUse, FakeFw([ui("0", "Settings")], open_reply="ui open: not now (a dialog is "
+           "open)"), lambda b: b.walk("weather", tile("Weather")), 0)
+    expect("open failed", RouteError, FakeFw([ui("0", "Settings")], open_reply="ui open: no app 'Weather'"),
+           lambda b: b.walk("weather", tile("Weather")), 0)
+    route = settings_page("Time") + [("row", "Time zone", TIME), "enter", "wait"]
+    fake = FakeFw([ui("0", "Settings"), ui("0", "Settings"), ui("0 > 2 > 100 > 101", "Europe")])
+    expect("one keys send per route", None, fake, lambda b: b.walk("tz", route), 1)
+    want = "keys send " + "down " * 7 + "row:Time| enter wait down row:Time zone| enter wait"
+    if fake.sent and fake.sent[0] != want:
+        failures.append(f"one keys send per route: sent {fake.sent[0]!r}, wanted {want!r}")
+    expect("focus guard fails", RouteError, FakeFw([ui("0", "MeshCore"), ui("0", "MeshCore")],
+           keys=["keys send: guard 1 failed: focus 'Contacts'; 1 of 4 sent"]),
+           lambda b: b.walk("chats", mc_grid(CHAT_TILE) + [("focus", "#badgetest"), "enter"]), 1)
+    # The row guard finds "Time" (a row took no focus): one Up, read back, then the rest again from the guard
+    fake = FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2", "Time"), ui("0 > 2", "Time"), ui("0 > 2", "Display"),
+                   ui("0 > 2 > 101", "Brightness")],
+                  keys=["keys send: guard 1 failed: focus 'Time'; 7 of 10 sent"])
+    expect("row guard corrected", None, fake, lambda b: b.walk("display", settings_page("Display")), 3)
+    if len(fake.sent) == 3 and fake.sent[2] != "keys send row:Display| enter wait":
+        failures.append(f"row guard corrected: resent {fake.sent[2]!r}")
+    expect("row guard fails twice", RouteError, FakeFw(
+        [ui("0", "S"), ui("0", "S"), ui("0 > 2", "Time"), ui("0 > 2", "Time"), ui("0 > 2", "Display"),
+         ui("0 > 2", "Display")], keys=["keys send: guard 1 failed: focus 'Time'; 7 of 10 sent", "keys sent: 1",
+                                        "keys send: guard 1 failed: focus 'Time'; 0 of 3 sent"]),
+        lambda b: b.walk("display", settings_page("Display")), 3)
+    expect("lock ended in a sequence", InUse, FakeFw([ui("0", "S")], keys=[
+        "keys send: stopped, the key lock ended; 3 of 10 sent"]), lambda b: b.walk("display", settings_page("Display")), 1)
+    expect("any_row reads first", None, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2 > 3", "Alice"),
+                                                ui("0 > 2 > 3 > 4", "Message")]),
+           lambda b: b.walk("contact", mc_grid(CONTACTS_TILE) + [("any_row",), "enter", "wait"]), 2)
+    expect("any_row forbidden", RouteError, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2 > 3", "Remove")]),
+           lambda b: b.walk("contact", mc_grid(CONTACTS_TILE) + [("any_row",), "enter", "wait"]), 1)
+    expect("enter opened nothing", RouteError, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2", "Display")]),
+           lambda b: b.walk("display", settings_page("Display")), 1)
+    fake = FakeFw([ui("0", "S")], keys=["keys send: guard 1 failed: focus 'x'; 0 of 2 sent"])
+    badge = Badge(fake)
+    try:
+        badge.start()
+        badge.lock()
+        badge.walk("chats", mc_grid(CHAT_TILE) + [("focus", "#badgetest"), "enter"])
+    except RouteError:
+        pass
+    finally:
+        release(badge)
+    if fake.lines[-1] != "ui lock off":
+        failures.append(f"unlock in finally: last line {fake.lines[-1]!r}")
 
 
 def selftest() -> int:
@@ -546,7 +706,11 @@ def selftest() -> int:
     expect("enter opens a page", None, FakeFw([ui("1", "Settings"), ui("1", "Settings"), ui("1 > 100", "Wi-Fi")]),
            lambda b: b.send(["enter"]), 1)
     expect("enter opens nothing", RouteError, FakeFw([ui("1", "Settings")]), lambda b: b.send(["enter"]), 1)
-    for bad in ([("focus", "")], ["bksp"], [("focus", "Remove")], ["enter"], [("row", "Wi-Fi", ["Wi-Fi"]), "tab"]):
+    expect("stack changed between routes", InUse, FakeFw([ui("0", "Settings"), ui("0 > 3", "Wi-Fi")]),
+           lambda b: b.walk("weather", tile("Weather")), 0)
+    selftest_remote(expect, failures)
+    for bad in ([("focus", "")], ["bksp"], [("focus", "Remove")], ["enter"], [("row", "Wi-Fi", ["Wi-Fi"]), "tab"],
+                [("open", "Nope")], ["down", ("open", "Settings")], [("focus", "a|b"), "enter"]):
         try:
             lint_steps("selftest", bad)
             failures.append(f"lint accepted {bad!r}")
@@ -584,9 +748,15 @@ def main() -> int:
     if stale:
         print(f"ERROR screen_ids.h has ids this script knows nothing about: {', '.join(stale)}")
         return 2
-    if not preflight_tiles(args.ip):
-        return 2
     return run(args)
+
+
+def release(badge: Badge) -> None:
+    """The key lock off, whatever happened: the person holding the badge gets the keys back at once."""
+    try:
+        badge.unlock()
+    except RouteError as e:
+        print(f"WARNING the key lock was not released ({e}); it ends by itself 60 s after the last command")
 
 
 def run(args: argparse.Namespace) -> int:
@@ -598,6 +768,7 @@ def run(args: argparse.Namespace) -> int:
     in_use = False
     try:
         badge.start()
+        badge.lock()
         for name, sids, steps, ok in SCREENS:
             if args.try_name:
                 if name != args.try_name:
@@ -635,8 +806,9 @@ def run(args: argparse.Namespace) -> int:
             try:
                 badge.home()
             except (InUse, RouteError):
-                print("badge in use: stopped (no key sent to go home)")
+                print("badge in use: stopped (not sent home)")
                 in_use = True
+        release(badge)
     by_kind = ", ".join(f"{k} {n}" for k, n in kinds.items())
     print(f"total: {hits} hit(s) ({by_kind}), {ran} screen(s) read, {errors} not read, {skipped} skipped")
     print(f"not reachable: {len(UNREACHABLE) + len(UNREACHABLE_APPS)} (python3 tools/ui_overflow_sweep.py --list)")

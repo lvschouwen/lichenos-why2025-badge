@@ -13,12 +13,16 @@ void hold_exit_event(hold_exit_t *h, bool is_esc, bool pressed, uint32_t now) {
     }
 }
 
-bool hold_exit_tick(hold_exit_t *h, uint32_t now) {
-    if (!h->down || h->fired || (uint32_t)(now - h->since) < HOLD_EXIT_MS) {
+bool hold_exit_tick_after(hold_exit_t *h, uint32_t now, uint32_t ms) {
+    if (!h->down || h->fired || (uint32_t)(now - h->since) < ms) {
         return false;
     }
     h->fired = true;
     return true;
+}
+
+bool hold_exit_tick(hold_exit_t *h, uint32_t now) {
+    return hold_exit_tick_after(h, now, HOLD_EXIT_MS);
 }
 
 int hold_exit_percent(hold_exit_t const *h, uint32_t now) {

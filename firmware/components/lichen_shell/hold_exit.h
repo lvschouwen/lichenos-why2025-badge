@@ -17,5 +17,7 @@ typedef struct {
 void hold_exit_event(hold_exit_t *h, bool is_esc, bool pressed, uint32_t now);
 // Call regularly. True exactly once per hold, when Esc has been down HOLD_EXIT_MS
 bool hold_exit_tick(hold_exit_t *h, uint32_t now);
+// The same for a hold of ms (the remote key lock's escape, #190, is longer than the keyboard test's)
+bool hold_exit_tick_after(hold_exit_t *h, uint32_t now, uint32_t ms);
 // 0-100 how far the hold has got, 0 when Esc is up
 int  hold_exit_percent(hold_exit_t const *h, uint32_t now);

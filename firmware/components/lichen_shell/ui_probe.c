@@ -1,5 +1,7 @@
 // Bench diagnostics (console only, #67): `fw keys send <seq>` feeds keys to the screen on top and `fw ui` prints what
 // is on it, so a screen can be driven and read without anyone at the badge. Tokens: see ui_keys.h.
+#include "console_cmd.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "fw_console.h"
@@ -11,6 +13,7 @@
 #include "shell_parts.h"
 #include "ui_keys.h"
 #include "ui_overflow.h"
+#include "ui_remote.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -55,16 +58,56 @@ static void deliver_key(uint32_t key) {
     }
 }
 
+static void describe_focus(lv_obj_t *foc, char *out, size_t cap);
+
+// What "fw ui" reports as the focus; "" for none. LVGL context.
+static void current_focus(char *out, size_t cap) {
+    out[0]            = 0;
+    lv_group_t *group = shell_top_group();
+    lv_obj_t   *foc   = group ? lv_group_get_focused(group) : NULL;
+    if (foc) {
+        describe_focus(foc, out, cap);
+    }
+}
+
 // The key handlers (and what they build) run on the LVGL task, one key per timer tick: the console task's 4 KB stack
-// is too small for them. The console task waits for the end.
+// is too small for them. The console task waits for the end. A failed guard (#190) or the end of the remote key lock
+// the sequence started under stops it there: no later key is sent.
 typedef struct {
     uint32_t     keys[MAX_KEYS];
     size_t       n, next;
     TaskHandle_t waiter;
+    bool         locked;      // the remote key lock was on when the sequence started
+    bool         lock_lost;   // ... and ended before it was through
+    size_t       failed;      // the guard that failed, 1-based among the guards; 0 = none
+    size_t       guards;
+    char         focus[LINE_CHARS]; // the focus a failed guard found
+    char         text[CONSOLE_WIFI_CMD_MAX]; // the sequence as sent: the guards' texts are read from it
 } sequence_t;
+
+static void sequence_finish(lv_timer_t *timer, sequence_t *seq) {
+    screen_lock_probe_end();
+    xTaskNotifyGive(seq->waiter); // the last gap has passed: the screen has settled
+    lv_timer_delete(timer);
+}
 
 static void sequence_step(lv_timer_t *timer) {
     sequence_t *seq = lv_timer_get_user_data(timer);
+    if (seq->locked && !ui_remote_locked()) {
+        seq->lock_lost = true; // the holder took the keys back (or the lock timed out): hands off
+        sequence_finish(timer, seq);
+        return;
+    }
+    while (seq->next < seq->n && UI_KEY_IS_GUARD(seq->keys[seq->next])) {
+        uint32_t guard = seq->keys[seq->next++];
+        seq->guards++;
+        current_focus(seq->focus, sizeof(seq->focus));
+        if (!ui_keys_guard_ok(guard, seq->text, seq->focus)) {
+            seq->failed = seq->guards;
+            sequence_finish(timer, seq);
+            return;
+        }
+    }
     if (seq->next < seq->n) {
         uint32_t key = seq->keys[seq->next++];
         if (key == UI_KEY_WAIT) {
@@ -75,25 +118,36 @@ static void sequence_step(lv_timer_t *timer) {
         lv_timer_set_period(timer, KEY_GAP_MS);
         return;
     }
-    screen_lock_probe_end();
-    xTaskNotifyGive(seq->waiter); // the last gap has passed: the screen has settled
-    lv_timer_delete(timer);
+    sequence_finish(timer, seq);
+}
+
+static void sequence_report(sequence_t const *seq) {
+    if (seq->failed) {
+        console_reply("keys send: guard %u failed: focus '%s'; %u of %u sent", (unsigned)seq->failed,
+                      seq->focus[0] ? seq->focus : "(none)", (unsigned)seq->next, (unsigned)seq->n);
+    } else if (seq->lock_lost) {
+        console_reply("keys send: stopped, the key lock ended; %u of %u sent", (unsigned)seq->next, (unsigned)seq->n);
+    } else {
+        console_reply("keys sent: %u", (unsigned)seq->n);
+    }
 }
 
 // "fw keys send <seq>" (shell.c's keys command hands it over)
 void ui_probe_send(char const *seq_text) {
     size_t      pos;
-    sequence_t *seq = calloc(1, sizeof(*seq));
+    sequence_t *seq = heap_caps_calloc(1, sizeof(*seq), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!seq) {
         console_reply("keys send: no memory");
         return;
     }
-    seq->n = ui_keys_parse(seq_text, seq->keys, MAX_KEYS, &pos);
+    snprintf(seq->text, sizeof(seq->text), "%s", seq_text);
+    seq->n = ui_keys_parse(seq->text, seq->keys, MAX_KEYS, &pos);
     if (seq->n == UI_KEYS_ERR) {
         console_reply("keys send: not understood at offset %u", (unsigned)pos);
         free(seq);
         return;
     }
+    seq->locked = ui_remote_locked();
     seq->waiter = xTaskGetCurrentTaskHandle();
     ulTaskNotifyTake(pdTRUE, 0); // a stale notification would end the wait early
     lvgl_port_lock(0);
@@ -110,7 +164,7 @@ void ui_probe_send(char const *seq_text) {
         console_reply("keys send: timed out");
         return;
     }
-    console_reply("keys sent: %u", (unsigned)seq->n);
+    sequence_report(seq);
     free(seq);
 }
 
@@ -496,6 +550,15 @@ static void cmd_ui(char const *args) {
         cmd_ui_overflow();
         return;
     }
+    if (strncmp(args, "lock", 4) == 0 && (args[4] == 0 || args[4] == ' ')) {
+        ui_remote_lock_cmd(args + 4);
+        return;
+    }
+    if (strncmp(args, "open", 4) == 0 && (args[4] == 0 || args[4] == ' ')) {
+        ui_remote_open_cmd(args + 4);
+        settle();
+        return;
+    }
     settle();
     line_t *lines = malloc(sizeof(line_t) * MAX_LINES);
     if (!lines) {
@@ -509,15 +572,12 @@ static void cmd_ui(char const *args) {
         size_t used = strlen(stack);
         snprintf(stack + used, sizeof(stack) - used, "%s%d", i ? " > " : "", nav_at(i));
     }
-    lv_group_t *group = shell_top_group();
-    lv_obj_t   *foc   = group ? lv_group_get_focused(group) : NULL;
-    if (foc) {
-        describe_focus(foc, focus, sizeof(focus));
-    }
+    current_focus(focus, sizeof(focus));
     collect(lv_screen_active(), lines, &n);
     lvgl_port_unlock();
     qsort(lines, n, sizeof(line_t), by_position);
     console_reply("ui stack: %s | focus: %s", stack, focus[0] ? focus : "(none)");
+    ui_remote_report();
     for (size_t i = 0; i < n; i++) {
         console_reply("ui   %s", lines[i].text);
     }
@@ -525,5 +585,5 @@ static void cmd_ui(char const *args) {
 }
 
 void ui_probe_init(void) {
-    console_register("ui", "ui [perf [reset | bench [n]] | overflow] (overflow: text cut off, off the screen or under the hint/status bar, #133; screen ids on the stack, the focused row, every visible label; perf: frame timing, #93)", cmd_ui);
+    console_register("ui", "ui [perf [reset | bench [n]] | overflow | lock [on [s] | off] | open <app>] (lock: physical keys off until off, s seconds (default 60, max 600) after the last command, or Esc held 3 s; open: an app as from its home tile, or home; #190. overflow: text cut off, off the screen or under the hint/status bar, #133; screen ids on the stack, the focused row, every visible label; perf: frame timing, #93)", cmd_ui);
 }

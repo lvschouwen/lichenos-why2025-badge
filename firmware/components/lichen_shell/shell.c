@@ -16,6 +16,7 @@
 #include "scroll_anchor.h"
 #include "settings_store.h"
 #include "shell_parts.h"
+#include "ui_remote.h"
 #include "fonts.h"
 #include "text_entry.h"
 #include "theme.h"
@@ -662,8 +663,9 @@ void shell_start(lv_display_t *display) {
     screen_idle_init();
     attention_init();
     screen_saver_init();
-    console_register("keys", "keys on|off (log every key) | keys log on|off (log raw key events) | keys send <up down left right enter esc tab bksp wait square triangle cross circle cloud diamond text:..|>", cmd_keys);
+    console_register("keys", "keys on|off (log every key) | keys log on|off (log raw key events) | keys send <up down left right enter esc tab bksp wait square triangle cross circle cloud diamond text:..| focus:..| row:..|> (focus/row: guards, the sequence stops when the focused row does not match, #190)", cmd_keys);
     ui_probe_init();
+    ui_remote_start();
     ui_check_start();
     ui_perf_start();
     if (!getenv("TZ")) {
