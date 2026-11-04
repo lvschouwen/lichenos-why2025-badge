@@ -1,7 +1,7 @@
 // Screen timeout (#43): after a while without a key the backlight dims (screen to its minimum, keyboard off), later
 // both go off. Any key lights them again; a key that finds the screen off only wakes it. The keyboard is the activity
 // source (its wake hook, ahead of the raw key hooks), plus "fw keys send" so the bench can wake the badge, plus a
-// backlight change (fw bl, a slider). idle_policy.c decides; an
+// backlight change (fw bl, a slider). The remote key lock holds it bright like an update. idle_policy.c decides; an
 // LVGL timer applies the level, so the inhibits (update, first-run setup, Bench) are read on the task that owns them.
 // The clock screensaver takes the dim stage and the pocket lock engages with it or the dark screen (#75,
 // screen_saver.c); a key that finds the saver up is swallowed like one that finds the screen off.
@@ -16,6 +16,7 @@
 #include "lvgl.h"
 #include "settings_store.h"
 #include "shell_parts.h"
+#include "ui_remote.h"
 #include "update_screen.h"
 
 #include <stdio.h>
@@ -104,7 +105,8 @@ char const *screen_idle_stage_name(void) {
 static void tick(lv_timer_t *timer) {
     (void)timer;
     bool     must_show = update_screen_busy() || power_going_down(); // nothing may cover these (#75)
-    bool     busy      = must_show || bench_running() || flashlight_active();
+    // the remote key lock (#190, #192): a script drives the UI, so no key of it may only wake the screen
+    bool     busy      = must_show || bench_running() || flashlight_active() || ui_remote_locked();
     bool     setup     = setup_running();
     bool     home      = shell_home_shown(); // no cover over the boot screen or home's fade-in
     uint32_t gen   = backlight_user_generation();
