@@ -22,6 +22,7 @@ void      home_init(void);     // registers the "fw home" console command
 // Arrange mode (#189): on starts it on this home screen, off ends it (a held tile goes back). LVGL context.
 void home_arrange(lv_obj_t *home, bool on);
 bool home_arrange_esc(void *home); // home's shell_on_esc hook: a held tile goes back, else arranging ends
+bool home_order_arranged(void);    // a saved order differs from the registration order (any task)
 
 // shell.c
 void shell_esc(void);                // Esc pressed: the top screen's shell_on_esc() hook first, else shell_back()

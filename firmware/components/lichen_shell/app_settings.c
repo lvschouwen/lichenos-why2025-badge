@@ -205,10 +205,20 @@ static void open_arrange(void *arg) {
     lv_async_call(arrange_later, relayout ? (void *)1 : NULL); // outside this row's key handling: the page is deleted
 }
 
+static lv_obj_t *order_row;
+
+// The row's value is the state (R3) and so also the answer to a reset (R5): "Arranged" or "Default"
+static void order_row_refresh(void) {
+    if (order_row) {
+        menu_set_value(order_row, home_order_arranged() ? "Arranged" : "Default");
+    }
+}
+
 static void reset_order_answer(bool yes) {
     if (yes) {
         settings_erase(HOME_ORDER_KEY);
         shell_rebuild_home_below(); // Settings stays on top
+        order_row_refresh();
     }
 }
 
@@ -217,6 +227,7 @@ static void ask_reset_order(void *arg) {
     shell_dialog_t const d = {
         .title         = "Reset the home order? The tiles go back to their first places.",
         .seconds       = 10,
+        .careful       = true, // an arrangement takes work to redo: running out of time cancels
         .confirm_label = "reset",
     };
     shell_dialog_countdown(&d, reset_order_answer);
@@ -235,6 +246,7 @@ static void on_display_delete(lv_event_t *e) {
         save_levels();
     }
     layout_row = NULL;
+    order_row  = NULL;
     pulse_row  = NULL;
     dim_row    = NULL;
     off_row    = NULL;
@@ -277,7 +289,8 @@ static lv_obj_t *build_display(void) {
     layout_row     = menu_add(menu, "Home layout", layout_name(), toggle_layout, NULL);
     menu_set_kind(layout_row, MENU_CYCLE);
     menu_set_kind(menu_add(menu, "Arrange home", "", open_arrange, NULL), MENU_OPEN);
-    menu_add(menu, "Reset order", "", ask_reset_order, NULL);
+    order_row = menu_add(menu, "Reset order", "", ask_reset_order, NULL);
+    order_row_refresh();
     shell_page_hint(screen, "Left/Right", "sliders", "Enter", "change", NULL);
     lv_obj_add_event_cb(screen, on_display_delete, LV_EVENT_DELETE, NULL);
     return screen;

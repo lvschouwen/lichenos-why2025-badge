@@ -33,7 +33,7 @@ that is on the mesh, and everything set up then must be changeable later on the 
      picks the selected tile up (amber "Moving" on it), the arrows move it (insert and shift), Enter drops it and saves,
      Esc puts a held tile back or ends arrange mode; ■ also ends it. Hints: "Enter: pick up • Esc: done", holding
      "Arrows: move • Enter: drop • Esc: cancel". Enter never opens an app while arranging. Settings › Display › Reset
-     order (a confirm) and `fw home order reset` go back to the registration order; `fw home` prints the order.
+     order (value "Arranged"/"Default"; a careful confirm, the timeout cancels) and `fw home order reset` go back to the registration order; `fw home` prints the order.
    - A status bar: Lichen logo, clock, Wi-Fi, LoRa.
 4. **Apps**: built into the firmware (no loading of foreign binaries: BadgeVMS's lesson). Each app provides:
    - a name, an icon and its home tile/line;

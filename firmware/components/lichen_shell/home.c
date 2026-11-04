@@ -15,6 +15,7 @@
 #include "home_layout.h"
 #include "lichen_app.h"
 #include "lichen_badge.h"
+#include "lichen_notify.h"
 #include "lichen_ui.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -44,7 +45,10 @@ static char const TAG[] = "home";
 #define REFRESH_MS    1000
 #define BADGE_RED     THEME_LINK_RED // the count circle (#102): white on red, like a phone's app badge
 #define BADGE_PAD_HOR 6
-#define ORDER_CAP     512 // LICHEN_MAX_APPS ids with their commas; a longer stored value reads as the default
+#define HOME_ID_MAX   32  // an app id's length, generously (app_ns.h allows 13)
+#define ORDER_CAP     800 // "1:" + LICHEN_MAX_APPS ids with their commas + NUL; a longer stored value reads as default
+#define ORDER_LINE_APPS 6 // per "fw home" reply line: far under the console's 384-byte log line
+static_assert(ORDER_CAP >= 2 + LICHEN_MAX_APPS * (HOME_ID_MAX + 1) + 1, "ORDER_CAP holds every app's id");
 
 typedef struct {
     home_layout_t layout;
@@ -66,8 +70,18 @@ typedef struct {
     lv_timer_t   *timer;
 } home_t;
 
-// The app selected last, over rebuilds: a layout switch keeps it (#189). -1: the first tile.
-static int last_app = -1;
+// The app selected last, over rebuilds: a layout switch keeps it (#189). By id, not registry index, so a change in
+// the registration order still finds it. NULL: the first tile. App structs live as long as the badge runs.
+static char const *last_app;
+
+static int app_index(char const *id) {
+    for (size_t i = 0; id && i < lichen_app_count(); i++) {
+        if (strcmp(lichen_app_at(i)->id, id) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
 
 static void style_cell(home_t const *h, int i) {
     bool selected = i == h->sel;
@@ -80,7 +94,7 @@ static void style_cell(home_t const *h, int i) {
 static void select(home_t *h, int sel) {
     int old = h->sel;
     h->sel  = sel;
-    last_app = sel;
+    last_app = lichen_app_at((size_t)sel)->id;
     style_cell(h, old);
     style_cell(h, sel);
     lv_obj_scroll_to_view(h->cell[sel], LV_ANIM_ON);
@@ -181,17 +195,6 @@ static void move_held(home_t *h, int from, int to) {
     scroll_to_sel(h);
 }
 
-static void hold(home_t *h, lv_obj_t *home, bool on) {
-    if (on) {
-        memcpy(h->picked, h->order, sizeof(h->picked));
-    } else if (memcmp(h->picked, h->order, (size_t)h->count * sizeof(*h->order)) != 0) {
-        save_order(h->order, h->count); // a real move: only now does anything reach NVS
-    }
-    h->holding = on;
-    show_moving(h, on);
-    arrange_hint(h, home);
-}
-
 static void cancel_hold(home_t *h, lv_obj_t *home) {
     memcpy(h->order, h->picked, sizeof(h->order));
     tile_order_slots(h->order, h->count, h->slot_of);
@@ -200,6 +203,23 @@ static void cancel_hold(home_t *h, lv_obj_t *home) {
     show_moving(h, false);
     arrange_hint(h, home);
     scroll_to_sel(h);
+}
+
+static void hold(home_t *h, lv_obj_t *home, bool on) {
+    bool moved = !on && memcmp(h->picked, h->order, (size_t)h->count * sizeof(*h->order)) != 0;
+    // A real move: only now does anything reach NVS. A failed save must not look saved: the tile goes back
+    if (moved && !save_order(h->order, h->count)) {
+        cancel_hold(h, home);
+        lichen_notify("lichen", LN_WARN, "Home order not saved",
+                      "The tile went back to its place. Try again; if it keeps failing, restart the badge.", 0);
+        return;
+    }
+    if (on) {
+        memcpy(h->picked, h->order, sizeof(h->picked));
+    }
+    h->holding = on;
+    show_moving(h, on);
+    arrange_hint(h, home);
 }
 
 void home_arrange(lv_obj_t *home, bool on) {
@@ -478,7 +498,8 @@ lv_obj_t *home_create(void) {
     lv_obj_set_user_data(home, h);
     load_order(h->order, h->count);
     tile_order_slots(h->order, h->count, h->slot_of);
-    h->sel = last_app >= 0 && last_app < h->count ? last_app : h->order[0];
+    int kept = app_index(last_app);
+    h->sel   = kept >= 0 && kept < h->count ? kept : h->order[0];
     for (int slot = 0; slot < h->count; slot++) {
         int app = h->order[slot];
         if (h->layout == HOME_GRID) {
@@ -504,23 +525,30 @@ lv_obj_t *home_create(void) {
 
 // ---- "fw home": the console side of Settings > Display > Home layout, Arrange home and Reset order ---------------
 
+bool home_order_arranged(void) {
+    int n = (int)lichen_app_count();
+    int order[LICHEN_MAX_APPS];
+    return load_order(order, n) && !tile_order_is_default(order, n);
+}
+
+// The whole order, ORDER_LINE_APPS ids a line, so no line is cut in the log or the Wi-Fi console
 static void reply_order(void) {
     int  n = (int)lichen_app_count();
     int  order[LICHEN_MAX_APPS];
-    bool saved = load_order(order, n);
-    char *list = heap_caps_malloc(ORDER_CAP, MALLOC_CAP_SPIRAM);
-    if (!list) {
-        console_reply("home order: out of memory");
-        return;
+    bool arranged = load_order(order, n) && !tile_order_is_default(order, n);
+    console_reply("home order (%s), %d apps:", arranged ? "arranged" : "default", n);
+    for (int first = 0; first < n; first += ORDER_LINE_APPS) {
+        char   line[ORDER_LINE_APPS * (HOME_ID_MAX + 2) + 1];
+        size_t len  = 0;
+        int    last = first + ORDER_LINE_APPS < n ? first + ORDER_LINE_APPS : n;
+        line[0]     = '\0';
+        for (int slot = first; slot < last && len < sizeof(line); slot++) {
+            int w = snprintf(line + len, sizeof(line) - len, "%s%s", slot > first ? ", " : "",
+                             lichen_app_at((size_t)order[slot])->id);
+            len += w > 0 ? (size_t)w : 0;
+        }
+        console_reply("  %d-%d: %s", first + 1, last, line);
     }
-    size_t len = 0;
-    list[0]    = '\0';
-    for (int slot = 0; slot < n && len < ORDER_CAP; slot++) {
-        int w = snprintf(list + len, ORDER_CAP - len, "%s%s", slot ? ", " : "", lichen_app_at((size_t)order[slot])->id);
-        len += w > 0 ? (size_t)w : 0;
-    }
-    console_reply("home order (%s): %s", saved ? "arranged" : "default", list);
-    free(list);
 }
 
 static void cmd_home(char const *args) {

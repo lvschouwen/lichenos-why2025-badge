@@ -9,6 +9,8 @@
 // on purpose besides secrets: everything that changes what the badge transmits (radio switches, MeshCore advert and
 // autostart), switches that open the network (Updates over Wi-Fi) and state the OS keeps for itself (seen markers,
 // counters, hardware records).
+// Not yet in the table: badge_fw.home_order (#189, the arranged home tiles), whose text (up to ~400 characters) is
+// longer than SB_STR_MAX; it needs a larger value cap first, which costs internal RAM in settings_backup_io.c.
 //
 // File: lines "namespace.key = value"; blank lines and lines starting with '#' are comments. Numbers are decimal,
 // text is the rest of the line.
