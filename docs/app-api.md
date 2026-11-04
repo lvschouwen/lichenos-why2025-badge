@@ -19,6 +19,7 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
 | `lichen_random` | random bytes |
 | `lora` | the LoRa radio, as its one owner |
 | `fw_console` | console commands and a deliberate restart |
+| `psram_guard` | `psram_speed.h`, the PSRAM speed switch some large-buffer code asks about |
 | `freertos`, `esp_timer`, `heap` | tasks, timers, memory (PSRAM for anything large) |
 | plain libraries | e.g. `mbedtls` (PSA Crypto); no driver, no storage, no network component |
 
@@ -98,11 +99,11 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
 - Write outside its own directories, or format anything but its own app directory.
 - Take `lvgl_port_lock` or call `lv_async_call`: use `lichen_ui_call` (LVGL calls outside the lock while the LVGL
   task renders corrupted the heap, #118). Nor set the default group: use `lichen_ui_with_group`.
-- Pick a core and priority of its own for a task: today's exception is listed below (`lichen_task_start`, #84 T8a).
+- Pick a core and priority of its own for a task: `lichen_task_start` (#84 T8a, planned in #181) does not exist yet, so apps still call `xTaskCreate*` themselves.
 
 ## The wraps
 
-Five calls are wrapped at link time (`-Wl,--wrap=`). The OS's own legitimate caller reaches the real function through
+Six calls are wrapped at link time (`-Wl,--wrap=`). The OS's own legitimate caller reaches the real function through
 `__real_*`; every other caller lands in the wrap, which logs an `E` line with the caller's return address (look it up
 in `firmware/build/badge_fw.map`) and refuses:
 
@@ -114,19 +115,34 @@ in `firmware/build/badge_fw.map`) and refuses:
 | `bootloader_random_disable` | `lichen_random.c` | nobody today (no caller in the image); the OS's future ADC hand-over (#11, #69) goes through `__real_` in `lichen_random.c`. `nvs_sec_provider` again: covered by the same build error | nothing happens (void) |
 | `nvs_flash_erase_partition` | `console.c` | `main.c` (NVS unusable at boot), `factory_reset.c` (#66, the full erase) and `lichen_nvs.c` (#116, the one-time migration to encrypted NVS, only with `LICHEN_NVS_ENCRYPT`), all through `__real_` | `ESP_ERR_NOT_ALLOWED` |
 
-`esp_restart` is wrapped too (`console.c`), but only to record the caller: a restart is never refused.
+`esp_restart` is the sixth wrap (`console.c`), but only to record the caller: a restart is never refused, so it has no row above.
 
 ## Exceptions still open
 
-MeshCore still `PRIV_REQUIRES` two components past the list; each has its follow-up:
+MeshCore still `PRIV_REQUIRES` two components past the list (the only exceptions, listed in `tools/app_boundary.conf`); each has its follow-up:
 
 - `nvs_flash`: only the legacy `badge_fw/identity` hand-over (kept as it is, by decision; `lichen_legacy_blob_take`).
   The advert keys `mc_advint`, `mc_advlast`, `mc_advfl` moved to `a.meshcore` (#123), adopted like `mc_name_set`.
 - `sdcard`: the message journal's `sd_begin`/`sd_end` batches on `/sd/lichen/messages` (#98; an SD batch call in
   `lichen_fs.h`).
 
-Also open from #84: tasks with their own core/priority (`lichen_task_start`, T8a), the console prefix per app (T8b), a heap caps wrapper
+Also open from #84: tasks with their own core/priority (`lichen_task_start`, T8a, planned in #181 and not in the tree yet), the console prefix per app (T8b), a heap caps wrapper
 (V12), system apps calling `board/backlight.h` directly (V13).
+
+## Boundary check
+
+`tools/check_app_boundary.sh` runs at the end of `firmware/build.sh build` (after the IDF build) and fails the build with
+`file:line` and the rule. Its allow-lists and the open exceptions live in `tools/app_boundary.conf`; a new app component
+is added to `APP_COMPONENTS` there.
+
+- Rule A: the app's `REQUIRES`/`PRIV_REQUIRES` (variables expanded) must be on the allow-list above.
+- Rule B: every `#include` in the app's sources is its own or bundled third-party header, a header of an allowed
+  component, or a listed libc/plain-library header. `#include "backlight.h"` fails here.
+- Rule C: `nm -u` on the app's built archive may not show `esp_ota_*`, `esp_wifi_*`, `esp_efuse_*`, `gpio_*`,
+  `esp_partition_*`, `nvs_flash_init*`/`nvs_flash_erase*`, `ledc_*`, `i2c_*` or `esp_restart`. `xTaskCreate*` joins the
+  list once `lichen_task_start` exists (#181).
+
+The system apps in `lichen_shell` are not checked yet (#180).
 
 ## New services
 

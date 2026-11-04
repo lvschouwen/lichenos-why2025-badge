@@ -58,6 +58,8 @@ fi
 
 if [ "$building" = 1 ]; then
     idf.py -C "$here" "$@"
+    # Apps stay behind lichen_api: requires, includes and undefined symbols of the app components (#178)
+    "$repo/tools/check_app_boundary.sh"
     # Released images ship this file; it must match the dependencies just built (#18)
     BADGE_IDF_PATH="$IDF_DIR" python3 "$repo/tools/third_party_licenses.py" --check
 else
