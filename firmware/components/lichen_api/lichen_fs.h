@@ -31,6 +31,18 @@ char const *lichen_fs_sd_dir(lichen_app_t const *app);
 // LVGL): false (zeros) when no card is mounted. 64-bit: a card is larger than size_t.
 bool lichen_fs_sd_bytes(uint64_t *total, uint64_t *used);
 
+
+// One batch of file work on the SD card (open, write, close) under the card's lock, for an app that keeps its own files
+// outside lichen_fs_sd_dir (MeshCore's message journal, #48). False when no card is mounted or the lock is not free
+// within wait_ms (then do no file work and do not call lichen_fs_sd_end; the log names the app that holds it). Never
+// from the LVGL task. The card can fail or be pulled at any time: end the batch with what happened.
+bool lichen_fs_sd_begin(lichen_app_t const *app, uint32_t wait_ms);
+// err is 0 when the batch worked, else the errno of the failing call: only a card that fails (EIO, ENODEV, ETIMEDOUT)
+// counts toward the auto-unmount, not a full card or a bad name
+void lichen_fs_sd_end(lichen_app_t const *app, int err);
+// Lock-free, any task: whether a card is mounted right now (it can still go away before the batch starts)
+bool lichen_fs_sd_mounted(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -4,7 +4,8 @@
 #include "mesh.h"
 #include "mesh_hist.h"
 #include "mesh_hist_crypto.h"
-#include "sdcard.h"
+#include "lichen_fs.h"
+#include "meshcore_run.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -20,6 +21,14 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+// The journal lives at /sd/lichen/messages (not in the app's lichen_fs_sd_dir): moving it would strand the history of
+// every badge in the field, so it stays until a migration is planned
+#define SD_MESSAGES_DIR "/sd/lichen/messages"
+
+static lichen_app_t const *journal_app(void) {
+    return lichen_app_by_id(MESHCORE_APP_ID);
+}
 
 #define LOG_PATH      SD_MESSAGES_DIR "/log.bin"
 #define TMP_PATH      SD_MESSAGES_DIR "/log.tmp"
@@ -121,7 +130,7 @@ static bool scan_file(char const *path, work_t *w, mesh_hist_crypt_t *c, mesh_hi
     return !failed;
 }
 
-// ---- compaction (inside an sd_begin batch) -------------------------------------------------------------------------
+// ---- compaction (inside an SD batch) -------------------------------------------------------------------------
 
 // Rewrites src as log.tmp with the newest keep_n messages per chat (t holds src's counts), then makes it log.bin:
 // unlink log.bin (when src is log.bin), rename. A cut in between leaves log.tmp alone, which the next boot renames.
@@ -470,7 +479,7 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), ui
         turn_off("no memory");
         return;
     }
-    if (!sd_mounted()) {
+    if (!lichen_fs_sd_mounted()) {
         turn_off("no SD card");
         return;
     }
@@ -480,7 +489,7 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), ui
         turn_off("no memory");
         return;
     }
-    if (!sd_begin(BOOT_WAIT_MS)) {
+    if (!lichen_fs_sd_begin(journal_app(), BOOT_WAIT_MS)) {
         work_free(&w);
         turn_off("SD card busy");
         return;
@@ -488,16 +497,16 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), ui
     int         err = 0;
     char const *why = journal_files(&w, &err);
     why             = why ? why : journal_load(&w, &err);
-    sd_end(sd_io_from_errno(err));
+    lichen_fs_sd_end(journal_app(), err);
     work_free(&w);
     if (why) {
         ESP_LOGE(TAG, "%s (errno %d)", why, err);
         turn_off(why);
         return;
     }
-    sd_info_t info;
-    sd_info(&info); // free space as sd_end left it
-    if (!info.free_known || !mesh_hist_space_ok(info.free_bytes, log_bytes)) {
+    uint64_t total = 0, used = 0;
+    bool     known = lichen_fs_sd_bytes(&total, &used); // free space as the batch left it
+    if (!known || !mesh_hist_space_ok(total - used, log_bytes)) {
         turn_off("SD card full");
         return;
     }
@@ -569,12 +578,12 @@ static void write_out(uint32_t wait_ms) {
         out_len = 0; // dropped: persistence went off meanwhile
         return;
     }
-    if (!sd_mounted()) {
+    if (!lichen_fs_sd_mounted()) {
         out_len = 0;
         turn_off("SD card removed");
         return;
     }
-    if (!sd_begin(wait_ms)) {
+    if (!lichen_fs_sd_begin(journal_app(), wait_ms)) {
         retry_after_s = mesh_uptime_s() + RETRY_S;
         return;
     }
@@ -586,7 +595,7 @@ static void write_out(uint32_t wait_ms) {
         ok  = false;
         err = errno;
     }
-    sd_end(ok ? SD_IO_OK : sd_io_from_errno(err));
+    lichen_fs_sd_end(journal_app(), ok ? 0 : err);
     if (!ok) {
         write_errors++;
         ESP_LOGE(TAG, "journal write of %u bytes failed (errno %d)", (unsigned)out_len, err);
@@ -611,7 +620,7 @@ static void compact_now(void) {
         turn_off("no memory to compact the journal"); // appending to a damaged journal would hide what is appended
         return;
     }
-    if (!sd_begin(FLUSH_WAIT_MS)) {
+    if (!lichen_fs_sd_begin(journal_app(), FLUSH_WAIT_MS)) {
         work_free(&w);
         compact_asked = true; // the card was busy: again in RETRY_S
         retry_after_s = mesh_uptime_s() + RETRY_S;
@@ -619,7 +628,7 @@ static void compact_now(void) {
     }
     int         err = 0;
     char const *why = compact_journal(&w, &err);
-    sd_end(sd_io_from_errno(err));
+    lichen_fs_sd_end(journal_app(), err);
     work_free(&w);
     if (why) {
         ESP_LOGE(TAG, "%s (errno %d)", why, err);
@@ -729,7 +738,7 @@ static size_t read_whole(char const *path, uint8_t *buf, size_t cap, long skip, 
 static bool scan_pass(scan_job_t const *job, work_t *w, uint8_t *cur, size_t cap, size_t *got, long skip,
                       mesh_hist_scan_t *scan) {
     int err = 0;
-    if (!sd_begin(2000)) {
+    if (!lichen_fs_sd_begin(journal_app(), 2000)) {
         console_reply("scan: SD card busy");
         return false;
     }
@@ -738,7 +747,7 @@ static bool scan_pass(scan_job_t const *job, work_t *w, uint8_t *cur, size_t cap
     mesh_hist_crypt_t c  = wcrypt; // a copy: the scan opens it with the file's HEAD
     bool              ok = !err && scan_file(job->path, w, &c, noop_rec, NULL, scan, &err);
     mh_wipe(&c, sizeof(c));
-    sd_end(sd_io_from_errno(err));
+    lichen_fs_sd_end(journal_app(), err);
     if (!ok) {
         console_reply("scan: read failed (errno %d)", err);
     }

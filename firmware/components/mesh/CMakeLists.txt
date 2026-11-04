@@ -27,8 +27,7 @@ set(COMPANION_SRCS
 # lichen_legacy_blob_take; the advert keys moved to a.meshcore in #123) and sdcard (the message journal's
 # sd_begin/sd_end batches on /sd/lichen/messages, #98: an SD batch call in lichen_fs.h). Results of the settings jobs
 # reach the LVGL task through lichen_ui_call (#84 T8a), so esp_lvgl_port is not needed.
-set(MESH_REQUIRES psram_guard lichen_api lichen_clock lichen_random lora fw_console freertos esp_timer heap mbedtls
-                  nvs_flash sdcard)
+set(MESH_REQUIRES psram_guard lichen_api lichen_clock lichen_random lora fw_console freertos esp_timer heap mbedtls)
 idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "mesh_trace.c" "mesh_remote.c" "mesh_telem.c" "meshcore_telem.c" "mesh_rset.c" "mesh_rset_run.c" "meshcore_remote.c" "meshcore_rset.c" "lora_radio.cpp" "mesh_store.c" "lora_airtime.c" "advert_limit.c" "mesh_advert_cfg.c" "mesh_scope.c"
                             "mesh_hist.c" "mesh_hist_boot.c" "mesh_hist_crypto.cpp" "mesh_hist_selftest.c" "mesh_ident.c" "mesh_journal.c" "mesh_format.c" "mesh_contact_fmt.c" "mesh_share.c" "mesh_tile.c" "mesh_notify.c" "mesh_notify_run.c" "meshcore_notify.c"
                             "meshcore_hdr.c" "mesh_health.c" "meshcore_health.c" "mesh_airlog.c" "meshcore_airlog.c" "mesh_discover.c" "meshcore_discover.c" "mesh_signal.c" "meshcore_signal.c" "meshcore_app.c" "meshcore_run.c" "mesh_run.c" "meshcore_grid.c" "meshcore_grid_icons.c" "mesh_grid.c" "meshcore_list.c" "meshcore_chats.c" "meshcore_contacts.c" "meshcore_chat.c" "meshcore_contact.c" "mesh_chat.c" "mesh_chat_target.c" "meshcore_settings.c" "meshcore_advert_settings.c" "radio_presets.c" "radio_filter.c" "radio_confirm.c" "channel_input.c" "mc_first.c"

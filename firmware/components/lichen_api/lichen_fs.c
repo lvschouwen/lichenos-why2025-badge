@@ -159,3 +159,31 @@ bool lichen_fs_sd_bytes(uint64_t *total, uint64_t *used) {
     *used  = info.total_bytes - info.free_bytes;
     return true;
 }
+
+// Who holds the batch lock, for the log line of whoever waits in vain. A hint only: written under the lock, read racily.
+static char const *volatile sd_holder;
+
+bool lichen_fs_sd_begin(lichen_app_t const *app, uint32_t wait_ms) {
+    if (!app || !app->id) {
+        return false;
+    }
+    if (!sd_begin(wait_ms)) {
+        char const *holder = sd_holder;
+        if (sd_mounted()) {
+            ESP_LOGW(TAG, "%s: SD card busy (held by %s)", app->id, holder ? holder : "the OS");
+        }
+        return false;
+    }
+    sd_holder = app->id;
+    return true;
+}
+
+void lichen_fs_sd_end(lichen_app_t const *app, int err) {
+    (void)app;
+    sd_holder = NULL;
+    sd_end(sd_io_from_errno(err));
+}
+
+bool lichen_fs_sd_mounted(void) {
+    return sd_mounted();
+}
