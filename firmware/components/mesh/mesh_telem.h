@@ -22,7 +22,8 @@ typedef struct {
 // The values of a Cayenne LPP buffer (channel, type, data ...) as human lines: "Battery: 4.12 V", "Temperature: 21.5 °C",
 // "Location: 52.37403, 4.88969, 3 m". The sensor's own channel 1 voltage is the battery (MeshCore's TELEM_CHANNEL_SELF);
 // other channels carry "(channel N)". A type we do not know, or a cut value, ends the list with a line saying so (the
-// length of a value is not known without its type). Returns the lines written (at most max).
+// length of a value is not known without its type). When there are more values than max lines, the last line reads
+// "N more values not shown". Returns the lines written (at most max).
 size_t tl_lpp_lines(uint8_t const *lpp, size_t len, tl_line_t *out, size_t max);
 
 // ---- rate limit: one request per contact per TL_RATE_MS ------------------------------------------------------------

@@ -76,11 +76,11 @@ static void tick(lv_timer_t *t) {
 
 // The one place a request leaves: called after the person's confirm only
 static void start_request(void) {
-    char const *why = NULL;
-    seq             = mesh_remote_start(target, RR_TELEMETRY, NULL, &why);
+    char why[96];
+    seq = mesh_telemetry_start(target, why, sizeof(why));
     if (!seq) {
-        char text[96];
-        snprintf(text, sizeof(text), "Not sent: %s", why ? why : "?");
+        char text[128];
+        snprintf(text, sizeof(text), "Not sent: %s", why);
         set_text(note, text);
         return;
     }
@@ -112,7 +112,14 @@ static lv_obj_t *build_page(void) {
     result = menu_note(menu, "Asking...");
     lv_obj_set_style_text_color(result, lv_color_hex(THEME_TEXT), 0);
     timer = lv_timer_create(tick, POLL_MS, NULL);
-    start_request();
+    // Normally a new page asks as it is built. If a request to this contact is running already, adopt it instead.
+    if (mesh_remote_get(&mem->rr) && mem->rr.op == RR_TELEMETRY && rr_busy(&mem->rr) &&
+        memcmp(mem->rr.prefix, target, sizeof(target)) == 0) {
+        seq = mem->rr.seq;
+        show();
+    } else {
+        start_request();
+    }
     return screen;
 }
 

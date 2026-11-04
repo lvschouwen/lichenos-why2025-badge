@@ -1872,16 +1872,26 @@ extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char 
     rr_prep_t prep; // classified and redacted here, outside the critical section (#117)
     rr_prepare(op, arg, &prep);
     mesh_ob_enter();
-    uint32_t wait = op == RR_TELEMETRY ? tl_rate_wait_s(&telem_rate, prefix, (uint32_t)millis()) : 0;
-    uint32_t seq  = wait ? 0 : rr_request_prepared(remote_req, op, prefix, arg, &prep, (uint32_t)millis(), why);
-    if (seq && op == RR_TELEMETRY) {
-        tl_rate_note(&telem_rate, prefix, (uint32_t)millis());
-    }
+    uint32_t seq = rr_request_prepared(remote_req, op, prefix, arg, &prep, (uint32_t)millis(), why);
     mesh_ob_exit();
+    return seq;
+}
+
+extern "C" uint32_t mesh_telemetry_start(uint8_t const prefix[6], char *why, size_t cap) {
+    why[0] = 0;
+    uint32_t wait = mesh_telemetry_wait_s(prefix);
     if (wait) {
-        static char text[24]; // read by the caller right after, on its own task: one request per press, so never raced
-        snprintf(text, sizeof(text), "Wait %lu s", (unsigned long)wait);
-        *why = text;
+        snprintf(why, cap, "Wait %lu s", (unsigned long)wait);
+        return 0;
+    }
+    char const *reason = NULL;
+    uint32_t    seq    = mesh_remote_start(prefix, RR_TELEMETRY, NULL, &reason);
+    if (seq) {
+        mesh_ob_enter();
+        tl_rate_note(&telem_rate, prefix, (uint32_t)millis());
+        mesh_ob_exit();
+    } else {
+        snprintf(why, cap, "%s", reason ? reason : "?");
     }
     return seq;
 }
@@ -2344,12 +2354,12 @@ static void cmd_mesh_telemetry(char const *arg) {
             console_reply("this sends a request on air: add YES at the end, fw mesh telemetry <key digits> YES");
             return;
         }
-        char const *why = NULL;
-        uint32_t    seq = mesh_remote_start(prefix, RR_TELEMETRY, NULL, &why);
+        char     why[96];
+        uint32_t seq = mesh_telemetry_start(prefix, why, sizeof(why));
         if (seq) {
             console_reply("telemetry #%lu queued: fw mesh telemetry shows the answer", (unsigned long)seq);
         } else {
-            console_reply("not started: %s", why ? why : "?");
+            console_reply("not started: %s", why);
         }
         return;
     }

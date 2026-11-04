@@ -44,7 +44,14 @@ static void lpp(void) {
     uint8_t unk[] = {1, 116, 0x01, 0x9C, 1, 77, 0x00, 0x00};
     CHECK(tl_lpp_lines(unk, sizeof(unk), l, TL_LINES_MAX) == 2 && strstr(l[1].text, "type 77"));
     CHECK(tl_lpp_lines(d, 0, l, TL_LINES_MAX) == 0);
-    CHECK(tl_lpp_lines(d, sizeof(d), l, 2) == 2); // never past max
+    // more values than lines: the last line says how many are not shown (the replaced one included)
+    CHECK(tl_lpp_lines(d, sizeof(d), l, 2) == 2);
+    CHECK(strcmp(l[0].text, "Battery: 4.12 V") == 0 && strcmp(l[1].text, "2 more values not shown") == 0);
+    CHECK(tl_lpp_lines(d, sizeof(d), l, 3) == 3 && strstr(l[2].text, "channel 2")); // fits exactly: no extra line
+    // channel 0 digital input is a value, not padding
+    uint8_t z[] = {0, 0, 1, 1, 116, 0x01, 0x9C};
+    CHECK(tl_lpp_lines(z, sizeof(z), l, TL_LINES_MAX) == 2);
+    CHECK(strcmp(l[0].text, "Input (channel 0): on") == 0 && strcmp(l[1].text, "Battery: 4.12 V") == 0);
 }
 
 static void rate(void) {

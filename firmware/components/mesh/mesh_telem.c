@@ -223,16 +223,29 @@ static void one_value(tl_line_t *out, size_t max, size_t *n, uint8_t ch, uint8_t
 
 size_t tl_lpp_lines(uint8_t const *lpp, size_t len, tl_line_t *out, size_t max) {
     size_t n = 0, at = 0;
-    while (at < len && n < max) {
+    while (at < len) {
+        if (n == max) {
+            // more values than lines: count the rest (a value we cannot size ends the count) and say so
+            size_t more = 0;
+            for (; at + 2 <= len; more++) {
+                lpp_type_t u;
+                if (!lpp_type(lpp[at + 1], &u) || len - at - 2 < u.size) {
+                    more++;
+                    break;
+                }
+                at += 2u + u.size;
+            }
+            if (max > 0 && more > 0) {
+                snprintf(out[max - 1].text, TL_LINE_MAX, "%u more values not shown", (unsigned)more + 1u); // replaces the last
+            }
+            break;
+        }
         if (len - at < 2) {
             put(out, max, &n, "(the answer is cut off)");
             break;
         }
         uint8_t    ch = lpp[at], type = lpp[at + 1];
         lpp_type_t lt;
-        if (ch == 0 && type == 0) {
-            break; // zero padding after the last value
-        }
         if (!lpp_type(type, &lt)) {
             put(out, max, &n, "(a value of type %u could not be read)", type);
             break;
