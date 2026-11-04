@@ -50,16 +50,14 @@ static bool action_row_wanted(disc_t const *d) {
 }
 
 static void add_action_row(disc_t const *d, uint32_t wait_s) {
-    char        detail[64];
-    bool        first = d->state == DISC_IDLE;
-    lv_obj_t   *row   = mc_list_row(&list, list.sel == 0);
-    if (wait_s) {
-        snprintf(detail, sizeof(detail), "Wait %u s before asking again", (unsigned)wait_s);
-    } else {
-        snprintf(detail, sizeof(detail), "Sends one short request on air");
-    }
+    char      detail[64];
+    bool      first = d->state == DISC_IDLE;
+    lv_obj_t *row   = mc_list_row(&list, list.sel == 0);
     mc_list_line(row, first ? "Send request" : "Ask again", wait_s ? THEME_DIM : THEME_AMBER);
-    mc_list_line(row, detail, THEME_DIM);
+    if (wait_s) { // the intro under the heading says what sending does: no second line otherwise
+        snprintf(detail, sizeof(detail), "Wait %u s before asking again", (unsigned)wait_s);
+        mc_list_line(row, detail, THEME_DIM);
+    }
 }
 
 static void add_answer_row(disc_answer_t const *a, uint32_t now_s, bool selected) {
@@ -88,6 +86,13 @@ static void rebuild(size_t answers, uint32_t now_s, uint32_t wait_s) {
     for (size_t i = 0; i < answers; i++) {
         mem->keys[at++] = scroll_key_hash(mem->shown[i].prefix, DISC_PREFIX, 2);
         add_answer_row(&mem->shown[i], now_s, at - 1 == list.sel);
+    }
+    if (have_action_row && mem->d.state == DISC_IDLE) {
+        shell_page_hint(screen_obj, "Enter", "send", "Up/Down", "scroll", NULL);
+    } else if (have_action_row) {
+        shell_page_hint(screen_obj, "Enter", "ask again", "Up/Down", "scroll", NULL);
+    } else {
+        shell_page_hint(screen_obj, "Up/Down", "scroll", NULL);
     }
     if (!answers && mem->d.state == DISC_LISTENING) {
         mc_list_label(list.list, "Nobody has answered yet.", THEME_DIM);
@@ -188,7 +193,10 @@ static lv_obj_t *build(void) {
         return screen;
     }
     list         = (mc_list_t){.keys = mem->keys, .items = mem->items, .cap = DISC_MAX + 1};
-    list.list    = mc_list_screen(screen, "MeshCore: Discover nearby", "", "Up/Down", "scroll");
+    list.list = mc_list_screen(screen, "", "", "Up/Down", "scroll");
+    // R1: the kind small and dim over the name, in place of the list screen's one-line heading
+    lv_obj_delete(lv_obj_get_child(screen, 0));
+    lv_obj_move_to_index(lichen_heading(screen, "MeshCore", "Discover nearby"), 0);
     status_label = lv_obj_get_child(screen, 1); // the note under the heading
     lv_obj_add_event_cb(list.list, on_key, LV_EVENT_KEY, NULL);
     refusal  = NULL;
