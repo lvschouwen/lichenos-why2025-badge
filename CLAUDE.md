@@ -30,7 +30,7 @@ Lichen OS is the operating system for the WHY2025 badge: the ESP32-P4 runs Liche
 ## Agents
 - Subagents are build-only: never flash, ssh, push or touch the badge; stop at a green `build.sh build` + a local commit. Agent file: `.claude/agents/lichen-implementer.md`; reviewer: `lichen-reviewer.md`.
 - Pass `model` on every dispatch: Opus for concurrency, memory, protocol, crypto/auth or hardware-adjacent work, Sonnet otherwise.
-- Worktree pool: agents work in `.claude/worktrees/*`. Never `git checkout`/`switch`/`reset` in the main checkout (a hook asks); main merges one branch at a time, ff-only, then runs the full check.
+- Worktree pool: agents work in `.claude/worktrees/*`. Never `git checkout`/`switch`/`reset` in the main checkout (a hook asks); main merges one branch at a time, ff-only, then runs the full check. Manage slots with `tools/agent-wt.sh` (`list`, `reset <slot> <branch>`, `new`, `done`); it keeps `firmware/build` warm.
 
 ## Issues and memory
 - The issue is the spec: `gh issue view N --json body,comments --jq '.body, .comments[].body'` (plain `--comments` is broken here); the latest decision comment wins.

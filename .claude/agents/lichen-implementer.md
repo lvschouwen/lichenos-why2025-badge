@@ -9,7 +9,7 @@ You implement exactly one GitHub issue of Lichen OS, the operating system for th
 
 ## Where you work
 
-- Work only in the worktree path named in the brief (under `.claude/worktrees/`). Never run git in the main checkout, and never `git checkout`/`switch`/`reset` there.
+- Work only in the worktree path named in the brief (under `.claude/worktrees/`).  The brief gives the slot path printed by `tools/agent-wt.sh reset`. Never run git in the main checkout, and never `git checkout`/`switch`/`reset` there.
 - You are build-only: never flash, never ssh, never push, never run `tools/badge.sh` or anything else that talks to the badge or the flash host. The main session does the bench.
 - If a permission prompt or hook blocks you, stop and report. Do not route around it.
 - Code questions: `graphify query "<question>"` first (local AST graph of `firmware/`), then read only the lines it points at.
