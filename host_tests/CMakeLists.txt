@@ -727,6 +727,11 @@ add_executable(mesh_discover_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_discover_test
 target_include_directories(mesh_discover_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
 target_compile_options(mesh_discover_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_discover_test COMMAND mesh_discover_test)
+add_executable(mesh_radar_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_radar_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_radar.c)
+target_include_directories(mesh_radar_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_radar_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(mesh_radar_test PRIVATE m)
+add_test(NAME mesh_radar_test COMMAND mesh_radar_test)
 
 add_executable(crash_log_test
     ${CMAKE_CURRENT_SOURCE_DIR}/crash_log_test.c
@@ -1408,6 +1413,7 @@ add_custom_target(run_tests
     mesh_airlog_test
     mesh_signal_test
     mesh_discover_test
+    mesh_radar_test
     sensors_format_test
     weather_series_test
     thermal_rules_test

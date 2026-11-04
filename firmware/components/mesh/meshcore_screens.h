@@ -30,6 +30,8 @@ void meshcore_signal_open(uint8_t const prefix[6], char const *name);
 // Discover nearby (#167): one zero-hop request after a careful confirm, then who answered with SNR (meshcore_discover.c).
 // Opened from the app's Settings page; a menu row callback. Opening it sends nothing.
 void meshcore_discover_open(void *arg);
+// Contact radar (#171): contacts that advertise a position, by distance and bearing from our own (meshcore_radar.c).
+void meshcore_radar_open(void *arg);
 // Air log (#165): the received packets, headers only, newest first (meshcore_airlog.c). Opened from the app's Settings
 // page; a menu row callback.
 void meshcore_airlog_open(void *arg);

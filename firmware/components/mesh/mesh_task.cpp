@@ -474,6 +474,29 @@ extern "C" size_t mesh_contact_detail(uint8_t const prefix[6], mesh_contact_deta
     return c ? 1 : 0;
 }
 
+// The contacts' advertised positions for the Contact radar (#171): one pass under the lock, no copy of what it does not need
+extern "C" size_t mesh_contacts_positions(radar_contact_t *out, size_t max, uint32_t wait_ms) {
+    if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped() || !mesh_lock_within(wait_ms)) {
+        return MESH_BUSY;
+    }
+    size_t           n  = 0;
+    ContactsIterator it = node->startContactsIterator();
+    ContactInfo      c;
+    while (n < max && it.hasNext(node, c)) {
+        if (c.gps_lat == 0 && c.gps_lon == 0) {
+            continue;
+        }
+        radar_contact_t *e = &out[n++];
+        memcpy(e->prefix, c.id.pub_key, sizeof(e->prefix));
+        mesh_sanitize(c.name, strnlen(c.name, sizeof(c.name)), e->name, sizeof(e->name));
+        e->type   = c.type;
+        e->lat_e6 = c.gps_lat;
+        e->lon_e6 = c.gps_lon;
+    }
+    mesh_unlock();
+    return n;
+}
+
 extern "C" size_t mesh_contact_do(uint8_t const prefix[6], mesh_contact_op_t op, uint32_t wait_ms) {
     if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped()) {
         return MESH_BUSY; // as mesh_contact_detail

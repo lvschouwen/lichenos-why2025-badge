@@ -5,6 +5,7 @@
 #include "mesh_signal.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_discover.h"
+#include "mesh_radar.h"
 #include "mesh_health.h"
 #include "mesh_ident.h"
 #include "mesh_outbox.h"
@@ -225,6 +226,9 @@ bool mesh_contacts_stats(mesh_contact_stats_t *out, uint32_t wait_ms);
 // One contact by its 6-byte key prefix (#49): 1, 0 when it is not (or no longer) there, MESH_BUSY when the lock was
 // not free in time or MeshCore is not running (not up yet, stopped for an update)
 size_t mesh_contact_detail(uint8_t const prefix[6], mesh_contact_detail_t *out, uint32_t wait_ms);
+// Contact radar (#171): up to max contacts that advertise a position (lat/lon not both 0), in table order; returns how
+// many, or MESH_BUSY when MeshCore is not up, stopped or the lock was not free in time.
+size_t mesh_contacts_positions(radar_contact_t *out, size_t max, uint32_t wait_ms);
 // Reset path / favourite on or off / remove (#49): handed to MyMesh as its own command, which it runs in its next loop
 // and saves with its contacts a few seconds later (Remove also drops the contact's stored advert). Reset path and the
 // favourite flag show in a copy taken right after. 1 when queued, 0 when the contact is gone, MESH_BUSY when the lock
