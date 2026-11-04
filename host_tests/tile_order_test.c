@@ -149,7 +149,20 @@ static void always_a_permutation(void) {
     }
 }
 
+// #193: both grids take this size; on the 720 px panel (36 px side pads), 24 px font lines are 32 px high
+static void cell_size(void) {
+    tile_cell_t c = tile_cell_size(720 - 2 * 36, 3, 32);
+    CHECK(c.w == 200 && c.h == 160 && c.pad_bottom == 38);
+    // three rows and their gaps clear the status bar (56) + pad (36) and leave room for a hint line above 720
+    CHECK(56 + 36 + 3 * c.h + 2 * TILE_GRID_ROW_GAP <= 720 - 80);
+    // a taller font grows the cell by twice its growth (the name and the "Moving" room), never squeezing the icon
+    tile_cell_t big = tile_cell_size(648, 3, 40);
+    CHECK(big.h == c.h + 16 && big.pad_bottom == 46);
+    CHECK(tile_cell_size(648, 0, 32).w == 0);
+}
+
 int main(void) {
+    cell_size();
     identity_when_nothing_saved();
     saved_order_new_and_removed();
     duplicates_and_junk();

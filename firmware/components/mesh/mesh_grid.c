@@ -56,9 +56,9 @@ void mesh_grid_age_text(uint32_t age_s, char *out, size_t cap) {
     }
 }
 
-void mesh_grid_badge(mesh_grid_tile_t tile, mesh_grid_counts_t const *c, char *out, size_t cap) {
+bool mesh_grid_badge(mesh_grid_tile_t tile, mesh_grid_counts_t const *c, char *out, size_t cap) {
     if (cap == 0) {
-        return;
+        return false;
     }
     out[0] = '\0';
     switch (tile) {
@@ -73,12 +73,14 @@ void mesh_grid_badge(mesh_grid_tile_t tile, mesh_grid_counts_t const *c, char *o
         case MESH_GRID_ADVERTISE:
             if (c->advert_scheduled) {
                 advcfg_next_badge(c->advert_next_s, out, cap);
+                return out[0] != '\0';
             } else if (c->advert_sent) {
                 mesh_grid_age_text(c->advert_age_s, out, cap);
             }
             break;
         default: break; // Nearby, Radar, Settings: nothing to count
     }
+    return false;
 }
 
 // The same rules as home_layout.c's grid: mesh may not depend on lichen_shell (#84), so the host test holds the two

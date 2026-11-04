@@ -2541,7 +2541,8 @@ static void cmd_mesh_advert(char const *args) {
     char iv[16], next[12];
     advcfg_interval_text(c.interval_min, iv, sizeof(iv));
     advcfg_next_badge(c.next_in_s, next, sizeof(next));
-    console_reply("advert every %s (flood), next %s; the Advertise button sends %s", iv, next[0] ? next : "-",
+    console_reply("advert every %s (flood), next %s%s; the Advertise button sends %s", iv, next[0] ? "in " : "",
+                  next[0] ? next : "-",
                   c.flood_manual ? "flood" : "zero-hop");
 }
 

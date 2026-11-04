@@ -102,13 +102,13 @@ void advcfg_next_badge(uint32_t next_in_s, char *out, size_t cap) {
     if (next_in_s == UINT32_MAX) {
         out[0] = '\0';
     } else if (next_in_s < 60) {
-        snprintf(out, cap, "soon");
+        snprintf(out, cap, "<1m");
     } else if (next_in_s < 3600) {
-        snprintf(out, cap, "in %um", (unsigned)(next_in_s / 60));
+        snprintf(out, cap, "%um", (unsigned)(next_in_s / 60));
     } else if (next_in_s < 86400) {
-        snprintf(out, cap, "in %uh", (unsigned)((next_in_s + 1800) / 3600)); // rounded: 11h59m reads 12h
+        snprintf(out, cap, "%uh", (unsigned)((next_in_s + 1800) / 3600)); // rounded: 11h59m reads 12h
     } else {
-        snprintf(out, cap, "in %ud", (unsigned)((next_in_s + 43200) / 86400));
+        snprintf(out, cap, "%ud", (unsigned)((next_in_s + 43200) / 86400));
     }
 }
 

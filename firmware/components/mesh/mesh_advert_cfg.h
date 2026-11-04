@@ -44,7 +44,8 @@ uint32_t advcfg_interval_cycle(uint32_t minutes);
 uint32_t advcfg_next_due(uint32_t interval_min, uint32_t last_epoch, uint32_t now_epoch);
 // Seconds until it, 0 when due; UINT32_MAX when there is none
 uint32_t advcfg_next_in_s(uint32_t next_epoch, uint32_t now_epoch);
-// "in 3h", "in 12m", "soon" for a badge (cap >= 8); "" when next_in_s is UINT32_MAX
+// The time to the next advert for a badge: "3h", "12m", "<1m" (cap >= 8); "" when next_in_s is UINT32_MAX. Short
+// enough for the space beside a grid icon (#193): the grid marks it as a countdown with a dot, the console says "in"
 void advcfg_next_badge(uint32_t next_in_s, char *out, size_t cap);
 // The same for a row with room: "In 3 min", "In 12 h", "In 3 d" (a unit with a space, #136)
 void advcfg_next_text(uint32_t next_in_s, char *out, size_t cap);

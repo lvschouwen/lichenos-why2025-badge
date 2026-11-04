@@ -34,3 +34,25 @@ bool tile_order_is_default(int const *order, int n);
 
 // slot_of[index] = the slot index is shown in
 void tile_order_slots(int const *order, int n, int *slot_of);
+
+// One cell size for both tile grids, home's and MeshCore's (#193): they looked alike but sized their cells apart and
+// drifted. Three columns of TILE_GRID_ICON_PX icons; the rows are compact enough for MeshCore's three rows plus its hint
+// line. Inside a cell, top to bottom: the 3 px border (always there, only its opacity changes), TILE_GRID_PAD_TOP, the
+// icon, TILE_GRID_ICON_GAP, the name (one line), then a bottom pad that holds arrange mode's floating "Moving" (one line
+// plus TILE_GRID_MOVING_EDGE), so the icon never moves when it shows.
+#define TILE_GRID_ICON_PX     64
+#define TILE_GRID_COL_GAP     24
+#define TILE_GRID_ROW_GAP     16
+#define TILE_GRID_BORDER_W    3
+#define TILE_GRID_PAD_TOP     8
+#define TILE_GRID_ICON_GAP    12
+#define TILE_GRID_MOVING_EDGE 4 // "Moving" off the cell's bottom edge, clear of the focus border
+
+typedef struct {
+    int w, h;       // the cell's outer size
+    int pad_bottom; // under the name, for "Moving"
+} tile_cell_t;
+
+// The cell for a grid of cols columns across avail_w pixels (the screen minus its side pads), names in a font of
+// line_h. Sizes from the font, so a taller font never pushes the name out of the cell (#28).
+tile_cell_t tile_cell_size(int avail_w, int cols, int line_h);

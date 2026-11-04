@@ -34,13 +34,8 @@ static_assert(HOME_KEY_UP == LV_KEY_UP && HOME_KEY_DOWN == LV_KEY_DOWN && HOME_K
 static char const TAG[] = "home";
 
 #define TILE_ICON_PX  32
-#define GRID_ICON_PX  64
 #define TILE_GAP      16
 #define TILE_RADIUS   20
-#define GRID_GAP      24
-#define GRID_CELL_PAD 38 // above the icon and below the name; below, room for arrange mode's "Moving" (#189)
-#define MOVING_EDGE   4  // "Moving" off the cell's bottom edge, clear of the 3 px focus border
-#define GRID_ICON_GAP 14
 #define LINE_CAP      64
 #define REFRESH_MS    1000
 #define BADGE_RED     THEME_LINK_RED // the count circle (#102): white on red, like a phone's app badge
@@ -166,10 +161,12 @@ static void show_moving(home_t *h, bool on) {
     lv_obj_set_style_text_color(label, lv_color_hex(THEME_AMBER), 0);
     lv_label_set_text(label, "Moving");
     if (h->layout == HOME_GRID) {
-        // Floating in the cell's empty bottom pad (one SMALL line plus MOVING_EDGE fits under the name): in the flex
-        // flow it would push the icon up, away from its badge
+        // Floating in the cell's bottom pad, under the name (tile_cell_size keeps a line for it): in the flex flow it
+        // would push the icon up, away from its badge. The pad lies outside the content area the alignment uses, so
+        // its height is added back (as meshcore_grid.c's)
+        int32_t pad = lv_obj_get_style_pad_bottom(cell, LV_PART_MAIN);
         lv_obj_set_floating(label, true);
-        lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -MOVING_EDGE);
+        lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, pad - TILE_GRID_MOVING_EDGE);
     }
     h->moving = label;
 }
@@ -439,16 +436,18 @@ static void add_tile(home_t *h, lv_obj_t *home, int i) {
 static void add_grid_cell(home_t *h, lv_obj_t *home, int i) {
     lichen_app_t const *app  = lichen_app_at(i);
     lv_obj_t           *cell = base_cell(home);
-    int                 w    = (LV_HOR_RES - 2 * THEME_PAD - (HOME_GRID_COLS - 1) * GRID_GAP) / HOME_GRID_COLS;
-    // Height from the font, so a taller font never pushes the name out of the cell (#28)
-    int32_t line_h = lv_font_get_line_height(lv_obj_get_style_text_font(cell, LV_PART_MAIN));
-    lv_obj_set_size(cell, w, GRID_ICON_PX + GRID_ICON_GAP + line_h + 2 * GRID_CELL_PAD);
+    // The same cell as MeshCore's grid (#193), sized from the font (#28)
+    int32_t     line_h = lv_font_get_line_height(lv_obj_get_style_text_font(cell, LV_PART_MAIN));
+    tile_cell_t size   = tile_cell_size(LV_HOR_RES - 2 * THEME_PAD, HOME_GRID_COLS, line_h);
+    lv_obj_set_style_pad_top(cell, TILE_GRID_PAD_TOP, 0);
+    lv_obj_set_style_pad_bottom(cell, size.pad_bottom, 0);
+    lv_obj_set_size(cell, size.w, size.h);
     lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(cell, GRID_ICON_GAP, 0);
-    h->icon[i] = add_icon(cell, app, GRID_ICON_PX);
+    lv_obj_set_style_pad_row(cell, TILE_GRID_ICON_GAP, 0);
+    h->icon[i] = add_icon(cell, app, TILE_GRID_ICON_PX);
     lv_obj_t *name = add_label(cell, app->name, THEME_TEXT);
-    lv_obj_set_width(name, w - 16);
+    lv_obj_set_width(name, size.w - 16);
     lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
     h->badge[i] = add_badge(cell);
     h->cell[i]  = cell;
@@ -489,8 +488,8 @@ lv_obj_t *home_create(void) {
         lv_obj_center(empty);
     } else if (h->layout == HOME_GRID) {
         lv_obj_set_flex_flow(home, LV_FLEX_FLOW_ROW_WRAP);
-        lv_obj_set_style_pad_row(home, GRID_GAP, 0);
-        lv_obj_set_style_pad_column(home, GRID_GAP, 0);
+        lv_obj_set_style_pad_row(home, TILE_GRID_ROW_GAP, 0);
+        lv_obj_set_style_pad_column(home, TILE_GRID_COL_GAP, 0);
     } else {
         lv_obj_set_flex_flow(home, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_style_pad_row(home, TILE_GAP, 0);

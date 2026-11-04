@@ -65,14 +65,16 @@ static void test_schedule(void) {
     advcfg_next_badge(UINT32_MAX, b, sizeof(b));
     CHECK(b[0] == '\0');
     advcfg_next_badge(0, b, sizeof(b));
-    CHECK(strcmp(b, "soon") == 0);
+    CHECK(strcmp(b, "<1m") == 0);
     advcfg_next_badge(125, b, sizeof(b));
-    CHECK(strcmp(b, "in 2m") == 0);
+    CHECK(strcmp(b, "2m") == 0);
     advcfg_next_badge(11 * 3600 + 3540, b, sizeof(b));
-    CHECK(strcmp(b, "in 12h") == 0);
+    CHECK(strcmp(b, "12h") == 0);
     advcfg_next_badge(3 * 86400, b, sizeof(b));
-    CHECK(strcmp(b, "in 3d") == 0);
+    CHECK(strcmp(b, "3d") == 0);
     CHECK(strlen(b) < 8); // MESH_GRID_BADGE_MAX
+    advcfg_next_badge(59 * 60, b, sizeof(b));
+    CHECK(strlen(b) <= 3); // #193: three characters beside the 64 px icon, with the countdown dot
     advcfg_next_text(125, b, sizeof(b));
     CHECK(strcmp(b, "In 2 min") == 0);
     advcfg_next_text(11 * 3600 + 3540, b, sizeof(b));

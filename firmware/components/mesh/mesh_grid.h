@@ -61,8 +61,10 @@ void mesh_grid_count_text(size_t n, char *out, size_t cap);
 // An age as a badge: "now" under a minute, "5m", "3h", "2d", "99d+" from 100 days
 void mesh_grid_age_text(uint32_t age_s, char *out, size_t cap);
 // The badge of one tile ("" for none): Chat the unread total, Contacts and Repeaters their counts, Heard the age of
-// the newest hearing, Advertise when the next periodic advert is due ("in 3h"), else the age of the last advert sent (none before the first); Settings none
-void mesh_grid_badge(mesh_grid_tile_t tile, mesh_grid_counts_t const *c, char *out, size_t cap);
+// the newest hearing, Advertise when the next periodic advert is due ("3h"), else the age of the last advert sent (none
+// before the first); Settings none. True when the text is a countdown (the time until, not since): the grid marks it with a
+// dot, so "40m" does not read as Heard's "40m ago" (#193)
+bool mesh_grid_badge(mesh_grid_tile_t tile, mesh_grid_counts_t const *c, char *out, size_t cap);
 
 // The selection after `key` in a grid of `count` tiles, MESH_GRID_COLS wide: the arrows move in 2-D and stop at the
 // edges and where there is no tile, exactly as home_move(HOME_GRID, ...) does (no wrap). Other keys keep `index`; an

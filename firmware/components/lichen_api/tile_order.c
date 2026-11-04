@@ -116,3 +116,14 @@ void tile_order_slots(int const *order, int n, int *slot_of) {
         slot_of[order[s]] = s;
     }
 }
+
+tile_cell_t tile_cell_size(int avail_w, int cols, int line_h) {
+    tile_cell_t c = {0};
+    if (cols <= 0) {
+        return c;
+    }
+    c.w          = (avail_w - (cols - 1) * TILE_GRID_COL_GAP) / cols;
+    c.pad_bottom = line_h + TILE_GRID_MOVING_EDGE + 2;
+    c.h = 2 * TILE_GRID_BORDER_W + TILE_GRID_PAD_TOP + TILE_GRID_ICON_PX + TILE_GRID_ICON_GAP + line_h + c.pad_bottom;
+    return c;
+}

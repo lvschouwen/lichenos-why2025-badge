@@ -36,13 +36,8 @@ static_assert(MESH_GRID_KEY_UP == LV_KEY_UP && MESH_GRID_KEY_DOWN == LV_KEY_DOWN
 
 static char const TAG[] = "meshcore";
 
-#define ICON_PX        64 // home.c GRID_ICON_PX and the rest of its grid sizes
-#define GRID_GAP       24 // between columns
-#define ROW_GAP        16 // between rows: three rows plus the status line must clear the status bar and the hint (#171)
-#define CELL_PAD_TOP   8
-#define MOVING_EDGE    4 // "Moving" off the cell's bottom edge, clear of the 3 px focus border
-#define BORDER_W       3
-#define ICON_GAP       12
+#define BADGE_DOT_PX   8 // before a countdown badge (#193): the time until, not since
+#define BADGE_EDGE     6 // the badge off the cell's inner right edge
 #define TILE_RADIUS    20
 #define REFRESH_MS     1000
 #define SCREEN_WAIT_MS 20
@@ -53,6 +48,7 @@ static struct {
     lv_obj_t          *screen;
     lv_obj_t          *cell[MESH_GRID_TILES];
     lv_obj_t          *badge[MESH_GRID_TILES];
+    lv_obj_t          *badge_dot[MESH_GRID_TILES]; // shown before a countdown (#193)
     lv_obj_t          *status; // the Advertise result; NULL once the grid is gone
     lv_obj_t          *run;    // "MeshCore is not running. Enter starts it." over the tiles, hidden while it runs
     lv_timer_t        *timer;
@@ -112,8 +108,11 @@ static void refresh(lv_timer_t *t) {
     }
     for (int i = 0; i < MESH_GRID_TILES; i++) {
         char text[MESH_GRID_BADGE_MAX];
-        mesh_grid_badge((mesh_grid_tile_t)i, c, text, sizeof(text));
+        bool countdown = mesh_grid_badge((mesh_grid_tile_t)i, c, text, sizeof(text));
         set_text(g.badge[i], text);
+        if (g.badge_dot[i] && lv_obj_has_flag(g.badge_dot[i], LV_OBJ_FLAG_HIDDEN) == countdown) {
+            lv_obj_set_hidden(g.badge_dot[i], !countdown);
+        }
     }
 }
 
@@ -280,7 +279,7 @@ static void show_moving(int tile, bool on) {
     // The pad lies outside the content area the alignment uses, so its height is added back.
     int32_t pad = lv_obj_get_style_pad_bottom(g.cell[tile], LV_PART_MAIN);
     lv_obj_set_floating(label, true);
-    lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, pad - MOVING_EDGE);
+    lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, pad - TILE_GRID_MOVING_EDGE);
     g.moving = label;
 }
 
@@ -436,7 +435,7 @@ static void style_cell(lv_obj_t *cell) {
     lv_obj_set_style_bg_color(cell, lv_color_hex(THEME_TILE), 0);
     lv_obj_set_style_bg_color(cell, lv_color_hex(THEME_TRACK), LV_STATE_FOCUSED);
     lv_obj_set_style_border_color(cell, lv_color_hex(THEME_AMBER), 0);
-    lv_obj_set_style_border_width(cell, BORDER_W, 0);
+    lv_obj_set_style_border_width(cell, TILE_GRID_BORDER_W, 0);
     lv_obj_set_style_border_opa(cell, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_opa(cell, LV_OPA_COVER, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(cell, 0, LV_STATE_FOCUS_KEY);
@@ -456,23 +455,41 @@ static void add_cell(lv_obj_t *grid, lv_group_t *group, int i) {
     lv_obj_t *cell = lv_obj_create(grid);
     lv_obj_remove_style_all(cell);
     style_cell(cell);
-    int32_t w      = (LV_HOR_RES - 2 * THEME_PAD - (MESH_GRID_COLS - 1) * GRID_GAP) / MESH_GRID_COLS;
-    int32_t line_h = lv_font_get_line_height(lv_obj_get_style_text_font(cell, LV_PART_MAIN)); // a taller font (#28)
-    // Room under the name for arrange mode's "Moving" (one line plus its edge), so the icon does not move when it shows
-    int32_t pad_bottom = line_h + MOVING_EDGE + 2;
-    lv_obj_set_style_pad_top(cell, CELL_PAD_TOP, 0);
-    lv_obj_set_style_pad_bottom(cell, pad_bottom, 0);
-    lv_obj_set_size(cell, w, ICON_PX + ICON_GAP + line_h + 2 * BORDER_W + CELL_PAD_TOP + pad_bottom);
+    // The same cell as home's grid (#193), sized from the font (#28); the bottom pad holds arrange mode's "Moving"
+    int32_t     line_h = lv_font_get_line_height(lv_obj_get_style_text_font(cell, LV_PART_MAIN));
+    tile_cell_t size   = tile_cell_size(LV_HOR_RES - 2 * THEME_PAD, MESH_GRID_COLS, line_h);
+    lv_obj_set_style_pad_top(cell, TILE_GRID_PAD_TOP, 0);
+    lv_obj_set_style_pad_bottom(cell, size.pad_bottom, 0);
+    lv_obj_set_size(cell, size.w, size.h);
     lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(cell, ICON_GAP, 0);
-    meshcore_grid_icon(cell, i, ICON_PX);
+    lv_obj_set_style_pad_row(cell, TILE_GRID_ICON_GAP, 0);
+    meshcore_grid_icon(cell, i, TILE_GRID_ICON_PX);
     lv_obj_t *name = add_label(cell, mesh_grid_name((mesh_grid_tile_t)i), THEME_TEXT);
-    lv_obj_set_width(name, w - 16);
+    lv_obj_set_width(name, size.w - 16);
     lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
-    g.badge[i] = add_label(cell, "", THEME_AMBER);
-    lv_obj_set_floating(g.badge[i], true);
-    lv_obj_align(g.badge[i], LV_ALIGN_TOP_RIGHT, -14, 10);
+    // The badge in the top right corner, beside the icon: a dot (a countdown, #193) and the text, in a row that grows
+    // to the left, so the text keeps its place whether the dot shows or not
+    lv_obj_t *row = lv_obj_create(cell);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 4, 0);
+    lv_obj_set_scrollable(row, false);
+    lv_obj_set_clickable(row, false);
+    lv_obj_set_floating(row, true);
+    // The cell's padding is outside the content area the alignment uses: back to the inner edge, then BADGE_EDGE in
+    lv_obj_align(row, LV_ALIGN_TOP_RIGHT, -BADGE_EDGE, -TILE_GRID_PAD_TOP + BADGE_EDGE);
+    lv_obj_t *dot = lv_obj_create(row);
+    lv_obj_remove_style_all(dot);
+    lv_obj_set_size(dot, BADGE_DOT_PX, BADGE_DOT_PX);
+    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(dot, lv_color_hex(THEME_TEAL), 0);
+    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+    lv_obj_set_hidden(dot, true);
+    g.badge_dot[i] = dot;
+    g.badge[i]     = add_label(row, "", THEME_AMBER);
     lv_obj_add_event_cb(cell, on_key, LV_EVENT_KEY, (void *)(intptr_t)i);
     if (group) {
         lv_group_add_obj(group, cell);
@@ -497,8 +514,8 @@ void meshcore_grid_build(lv_obj_t *screen, lv_group_t *group) {
     g.screen = screen;
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_pad_row(screen, ROW_GAP, 0);
-    lv_obj_set_style_pad_column(screen, GRID_GAP, 0);
+    lv_obj_set_style_pad_row(screen, TILE_GRID_ROW_GAP, 0);
+    lv_obj_set_style_pad_column(screen, TILE_GRID_COL_GAP, 0);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUS_KEY);
     g.run = add_label(screen, "", THEME_AMBER);

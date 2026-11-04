@@ -110,11 +110,16 @@ static void test_badges(void) {
     // a periodic advert set (#52): the badge says when the next one goes, over the age of the last
     c.advert_scheduled = true;
     c.advert_next_s    = 3 * 3600;
-    CHECK(strcmp(badge(MESH_GRID_ADVERTISE, &c), "in 3h") == 0);
+    CHECK(strcmp(badge(MESH_GRID_ADVERTISE, &c), "3h") == 0);
+    CHECK(mesh_grid_badge(MESH_GRID_ADVERTISE, &c, out, sizeof(out))); // a countdown: the grid adds its dot (#193)
     c.advert_sent = false; // even before the first advert
     c.advert_next_s = 0;
-    CHECK(strcmp(badge(MESH_GRID_ADVERTISE, &c), "soon") == 0);
+    CHECK(strcmp(badge(MESH_GRID_ADVERTISE, &c), "<1m") == 0);
     c.advert_scheduled = false;
+    c.advert_sent      = true;
+    CHECK(!mesh_grid_badge(MESH_GRID_ADVERTISE, &c, out, sizeof(out))); // an age: no dot
+    CHECK(!mesh_grid_badge(MESH_GRID_HEARD, &c, out, sizeof(out)));
+    c.advert_sent = false;
     CHECK(strcmp(badge(MESH_GRID_ADVERTISE, &c), "") == 0);
 }
 
