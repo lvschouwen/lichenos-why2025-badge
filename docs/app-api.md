@@ -94,7 +94,8 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
 - `lora_app.h`: `lora_claim(owner, cb)` / `lora_release(owner)` (one owner at a time), `lora_send(owner, ...)` /
   `lora_send_state(owner)`, `lora_set_radio(owner, ...)` / `lora_set_tx_power(owner, ...)` (the owner's radio
   settings, checked by `lora_config_valid`), `lora_set_link_callback(owner, ...)`, `lora_set_rx_formatter(owner, ...)`,
-  and the read-only stats (`lora_up`, `lora_get_radio`, `lora_get_counts`, ...). Every call that takes `owner` is
+  `lora_sweep(owner, ...)` (an RSSI sweep, receive only, blocking: never from the LVGL task, #161), and the read-only
+  stats (`lora_up`, `lora_get_radio`, `lora_get_freq`, `lora_get_counts`, ...). Every call that takes `owner` is
   refused, with a rate-limited log line, unless that name holds the claim (#179). `lora_os.h` (start, stop, the radio
   switch, the C6 hooks) is the OS's: apps never include it.
 - `fw_console.h`: `console_register` / `console_reply` for `fw <name>` commands; `system_restart(why)` when a restart

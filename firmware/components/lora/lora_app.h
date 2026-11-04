@@ -44,11 +44,39 @@ bool lora_set_tx_power(char const *owner, int8_t dbm);
 bool lora_send(char const *owner, uint8_t const *bytes, size_t len, uint32_t airtime_ms);
 int  lora_send_state(char const *owner);
 
+// RSSI sweep (#161) for the owner: the C6 leaves receiving for one pass over count frequencies from start_hz in steps of
+// step_hz, each measured with the channel's bandwidth, then receives on the channel again. Receive only: nothing is sent
+// on air. Blocks the caller up to timeout_ms (a pass over 128 steps takes about 0.4 s): never from the LVGL task.
+#define LORA_SWEEP_BINS 128
+
+typedef struct {
+    uint32_t start_hz;
+    uint32_t step_hz;
+    uint8_t  count;
+    int16_t  channel_rssi_x10; // the channel's noise once receiving again, as lora_get_channel_rssi, dBm * 10
+    int16_t  rssi_x10[LORA_SWEEP_BINS]; // dBm * 10, one per step
+} lora_sweep_result_t;
+
+typedef enum {
+    LORA_SWEEP_OK,
+    LORA_SWEEP_REFUSED,       // not the owner, or the steps are outside 862-928 MHz / too many
+    LORA_SWEEP_OFF,           // the radio is switched off, stopped for an update, or the C6 is being recovered
+    LORA_SWEEP_BUSY,          // another sweep is under way
+    LORA_SWEEP_NOT_RECEIVING, // the C6 is not receiving (not configured yet, or sending a packet)
+    LORA_SWEEP_FAILED,        // the radio reported an error
+    LORA_SWEEP_NO_ANSWER,     // the C6 did not answer within timeout_ms
+} lora_sweep_err_t;
+
+lora_sweep_err_t lora_sweep(char const *owner, uint32_t start_hz, uint32_t step_hz, uint8_t count,
+                            lora_sweep_result_t *out, uint32_t timeout_ms);
+
 // Read-only, for anyone
 // The radio task is running: started and not stopped for an update (says nothing about the C6 link)
 bool lora_up(void);
 // The radio settings in use (from lora.toml or the owner), for airtime estimates
 void lora_get_radio(uint8_t *sf, uint32_t *bw_hz, uint8_t *cr, uint16_t *preamble);
+// The channel's frequency in use (from lora.toml or the owner), Hz
+uint32_t lora_get_freq(void);
 // What lora.toml (or the built-in default) gave at boot: MeshCore's first-boot radio settings
 void lora_get_boot_radio(uint32_t *freq_hz, uint32_t *bw_hz, uint8_t *sf, uint8_t *cr);
 void lora_get_stats(lora_ui_stats_t *out);

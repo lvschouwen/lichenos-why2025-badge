@@ -112,7 +112,7 @@ static void round_trip_each_type(void) {
 
 static void encode_layout_pinned(void) {
     lora_msg_t    cfg      = {.type = LORA_MSG_CONFIG, .u.config = LORA_CONFIG_DEFAULT};
-    uint8_t const expect[] = {0x03, 0x01, 0x50, 0x51, 0xD5, 0x33, 0x24, 0xF4, 0x00,
+    uint8_t const expect[] = {0x04, 0x01, 0x50, 0x51, 0xD5, 0x33, 0x24, 0xF4, 0x00,
                               0x00, 0x07, 0x05, 0x12, 0x10, 0x00, 0x16};
     uint8_t       buf[LORA_MSG_MAX];
     CHECK(lora_encode(&cfg, buf, sizeof(buf)) == sizeof(expect));
@@ -140,10 +140,10 @@ static void decode_rejects_bad_input(void) {
     lora_msg_t cfg = {.type = LORA_MSG_CONFIG, .u.config = LORA_CONFIG_DEFAULT};
     size_t     n   = lora_encode(&cfg, buf, sizeof(buf));
 
-    // Both chips must run the same protocol: older (v2, receive only) and newer images are not understood
-    buf[0] = 2;
+    // Both chips must run the same protocol: older (v3, no sweep, #161) and newer images are not understood
+    buf[0] = 3;
     CHECK(lora_decode(buf, n, &out) == LORA_DEC_BAD_VERSION);
-    buf[0] = 4;
+    buf[0] = 5;
     CHECK(lora_decode(buf, n, &out) == LORA_DEC_BAD_VERSION);
     buf[0] = LORA_PROTO_VERSION;
 
@@ -263,6 +263,89 @@ static void config_valid_ranges(void) {
     }
 }
 
+// RSSI sweep (#161): request and answer round trip, the layout pinned, every bad length refused
+static void sweep_round_trip(void) {
+    size_t     n;
+    uint8_t    buf[LORA_MSG_MAX];
+    lora_msg_t out;
+
+    lora_msg_t req = {.type = LORA_MSG_SWEEP_REQ};
+    req.u.sweep_req = (lora_sweep_req_t){.start_hz = 868000000, .step_hz = 62500, .count = 32, .samples = 4, .seq = 7};
+    lora_msg_t got = round_trip(&req, &n);
+    CHECK(n == 13);
+    CHECK(got.u.sweep_req.start_hz == 868000000 && got.u.sweep_req.step_hz == 62500);
+    CHECK(got.u.sweep_req.count == 32 && got.u.sweep_req.samples == 4 && got.u.sweep_req.seq == 7);
+    CHECK(lora_encode(&req, buf, sizeof(buf)) == 13);
+    uint8_t const req_bytes[] = {LORA_PROTO_VERSION, LORA_MSG_SWEEP_REQ, 0x00, 0xA1, 0xBC, 0x33, 0x24, 0xF4, 0, 0, 32, 4, 7};
+    CHECK(memcmp(buf, req_bytes, sizeof(req_bytes)) == 0);
+    CHECK(lora_decode(buf, 12, &out) == LORA_DEC_BAD_LEN);
+
+    lora_msg_t sw = {.type = LORA_MSG_SWEEP};
+    sw.u.sweep.start_hz         = 863000000;
+    sw.u.sweep.step_hz          = 62500;
+    sw.u.sweep.seq              = 200;
+    sw.u.sweep.channel_rssi_x10 = -1125;
+    sw.u.sweep.count            = LORA_SWEEP_MAX_BINS;
+    for (int i = 0; i < LORA_SWEEP_MAX_BINS; i++) {
+        sw.u.sweep.rssi_x10[i] = (int16_t)(-1300 + 7 * i);
+    }
+    got = round_trip(&sw, &n);
+    CHECK(n == 270 && n <= LORA_MSG_MAX);
+    CHECK(got.u.sweep.start_hz == 863000000 && got.u.sweep.step_hz == 62500 && got.u.sweep.seq == 200);
+    CHECK(got.u.sweep.channel_rssi_x10 == -1125 && got.u.sweep.count == LORA_SWEEP_MAX_BINS);
+    CHECK(memcmp(got.u.sweep.rssi_x10, sw.u.sweep.rssi_x10, sizeof(sw.u.sweep.rssi_x10)) == 0);
+
+    sw.u.sweep.count = 2;
+    n                = lora_encode(&sw, buf, sizeof(buf));
+    CHECK(n == 18);
+    // count, then the steps little-endian: -1300 = 0xFAEC, -1293 = 0xFAF3
+    CHECK(buf[13] == 2 && buf[14] == 0xEC && buf[15] == 0xFA && buf[16] == 0xF3 && buf[17] == 0xFA);
+    CHECK(lora_decode(buf, n - 1, &out) == LORA_DEC_BAD_LEN);
+    CHECK(lora_decode(buf, n + 1, &out) == LORA_DEC_BAD_LEN);
+    CHECK(lora_decode(buf, 13, &out) == LORA_DEC_BAD_LEN);
+    buf[13] = 0; // no steps
+    CHECK(lora_decode(buf, 14, &out) == LORA_DEC_BAD_LEN);
+    buf[13] = LORA_SWEEP_MAX_BINS + 1;
+    CHECK(lora_decode(buf, 14 + 2 * (LORA_SWEEP_MAX_BINS + 1), &out) == LORA_DEC_BAD_LEN);
+
+    sw.u.sweep.count = 0;
+    CHECK(lora_encode(&sw, buf, sizeof(buf)) == 0);
+    sw.u.sweep.count = LORA_SWEEP_MAX_BINS + 1;
+    CHECK(lora_encode(&sw, buf, sizeof(buf)) == 0);
+}
+
+static void sweep_valid_ranges(void) {
+    lora_sweep_req_t const ok = {.start_hz = 868000000, .step_hz = 62500, .count = 32, .samples = 4};
+    lora_sweep_req_t       r  = ok;
+    CHECK(lora_sweep_req_valid(&r));
+    r.count = 0;
+    CHECK(!lora_sweep_req_valid(&r));
+    r.count = LORA_SWEEP_MAX_BINS;
+    CHECK(lora_sweep_req_valid(&r));
+    r.count = LORA_SWEEP_MAX_BINS + 1;
+    CHECK(!lora_sweep_req_valid(&r));
+    r = ok, r.samples = 0;
+    CHECK(!lora_sweep_req_valid(&r));
+    r.samples = LORA_SWEEP_MAX_SAMPLES;
+    CHECK(lora_sweep_req_valid(&r));
+    r.samples = LORA_SWEEP_MAX_SAMPLES + 1;
+    CHECK(!lora_sweep_req_valid(&r));
+    r = ok, r.step_hz = LORA_SWEEP_MIN_STEP_HZ - 1;
+    CHECK(!lora_sweep_req_valid(&r));
+    r.step_hz = LORA_SWEEP_MAX_STEP_HZ + 1;
+    CHECK(!lora_sweep_req_valid(&r));
+    r = ok, r.start_hz = 861999999;
+    CHECK(!lora_sweep_req_valid(&r));
+    // the last step decides the top: 927.9375 + 0.0625 = 928 MHz is in, one hertz more is not
+    r = ok, r.start_hz = 928000000 - 31 * 62500;
+    CHECK(lora_sweep_req_valid(&r));
+    r.start_hz++;
+    CHECK(!lora_sweep_req_valid(&r));
+    // no wrap past 32 bits
+    r = ok, r.start_hz = 0xFFFFFF00u, r.count = 2;
+    CHECK(!lora_sweep_req_valid(&r));
+}
+
 int main(void) {
     round_trip_each_type();
     encode_layout_pinned();
@@ -270,6 +353,8 @@ int main(void) {
     decode_rejects_bad_input();
     config_valid_ranges();
     ident_round_trip();
+    sweep_round_trip();
+    sweep_valid_ranges();
 
     if (failures) {
         printf("%d failure(s)\n", failures);

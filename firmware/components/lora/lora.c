@@ -17,6 +17,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "lora_internal.h"
 #include "lora_link.h"
 #include "lora_owner.h"
 #include "lora_proto.h"
@@ -263,6 +264,13 @@ void lora_get_radio(uint8_t *sf, uint32_t *bw_hz, uint8_t *cr, uint16_t *preambl
     portEXIT_CRITICAL(&state_lock);
 }
 
+uint32_t lora_get_freq(void) {
+    portENTER_CRITICAL(&state_lock);
+    uint32_t hz = config.freq_hz;
+    portEXIT_CRITICAL(&state_lock);
+    return hz;
+}
+
 bool lora_set_radio(char const *who, uint32_t freq_hz, uint32_t bw_hz, uint8_t sf, uint8_t cr) {
     if (!owner_check(who, "radio settings")) {
         return false;
@@ -390,6 +398,7 @@ static char const *msg_name(uint8_t type) {
         case LORA_MSG_RX_STOP: return "rx stop";
         case LORA_MSG_STATUS_REQ: return "status";
         case LORA_MSG_SEND: return "send";
+        case LORA_MSG_SWEEP_REQ: return "sweep";
         default: return "?";
     }
 }
@@ -544,6 +553,7 @@ static void lora_task(void *arg) {
         }
         switch (msg.type) {
             case LORA_MSG_RX_PACKET: log_packet(&msg.u.rx); break;
+            case LORA_MSG_SWEEP: lora_sweep_answer(&msg.u.sweep); break; // #161
             case LORA_MSG_STATUS:
                 portENTER_CRITICAL(&state_lock);
                 c6_status    = msg.u.status;
@@ -580,6 +590,9 @@ static void lora_task(void *arg) {
                         );
                     }
                 }
+                if (msg.u.result.for_type == LORA_MSG_SWEEP_REQ) {
+                    lora_sweep_refused(msg.u.result.code); // a sweep's only RESULT is a refusal (#161)
+                }
                 if (msg.u.result.code != LORA_RESULT_OK) {
                     ESP_LOGW(
                         TAG,
@@ -615,7 +628,7 @@ bool lora_start(void) {
     load_config();
     boot_config = config;
     rx_queue = xQueueCreate(RX_QUEUE_DEPTH, sizeof(lora_rx_msg_t));
-    if (!rx_queue || !send_mutex) {
+    if (!rx_queue || !send_mutex || !lora_sweep_init()) {
         ESP_LOGE(TAG, "no memory for the receive queue");
         return false;
     }
@@ -630,6 +643,23 @@ bool lora_start(void) {
     }
     __atomic_store_n(&started, true, __ATOMIC_RELEASE);
     return true;
+}
+
+// For lora_sweep.c (lora_internal.h)
+bool lora_internal_send(lora_msg_t const *msg) {
+    return send_to_c6(msg);
+}
+
+bool lora_internal_owner(char const *who, char const *what) {
+    return owner_check(who, what);
+}
+
+bool lora_internal_usable(void) {
+    portENTER_CRITICAL(&state_lock);
+    bool lost = c6_link.lost;
+    portEXIT_CRITICAL(&state_lock);
+    return lora_up() && !lost && __atomic_load_n(&applied_on, __ATOMIC_ACQUIRE) &&
+           !__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE);
 }
 
 void lora_set_enabled(bool on) {

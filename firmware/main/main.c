@@ -83,6 +83,44 @@ static lora_use_t lora_use(void) {
     return r.state == MESH_RUN_RUNNING ? LORA_USE_RUNNING : LORA_USE_FAILED;
 }
 
+// The LoRa spectrum (#161) borrows the radio: MeshCore stops, which gives the radio back (#103), and starts again
+// afterwards. From the spectrum's own task: waits for a start or stop under way first, then for this stop.
+#define USER_PAUSE_WAIT_MS 20000
+
+static bool meshcore_settled(void) {
+    for (uint32_t waited = 0; waited < USER_PAUSE_WAIT_MS; waited += 100) {
+        if (!mesh_run_busy(meshcore_run_get())) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    return false;
+}
+
+static bool lora_user_pause(bool *was_running) {
+    *was_running = false;
+    if (!meshcore_settled()) {
+        return false;
+    }
+    if (meshcore_run_get().state != MESH_RUN_RUNNING) {
+        return true;
+    }
+    char const *why = meshcore_run_request(false);
+    if (why) {
+        ESP_LOGW(TAG, "MeshCore not paused for the LoRa spectrum: %s", why);
+        return false;
+    }
+    *was_running = true; // asked to stop: started again afterwards even if the stop is late
+    return meshcore_settled() && meshcore_run_get().state == MESH_RUN_STOPPED;
+}
+
+static void lora_user_resume(void) {
+    char const *why = meshcore_run_request(true);
+    if (why) {
+        ESP_LOGW(TAG, "MeshCore not started again after the LoRa spectrum: %s", why);
+    }
+}
+
 // The OS radio switches (#108) reach the hardware here: the services own the radios, everyone else reads the state
 static void radio_changed(radio_id_t id, bool on) {
     if (id == RADIO_WIFI) {
@@ -340,7 +378,8 @@ void app_main(void) {
                                          .wifi_has_credentials = wifi_has_credentials,
                                          .wifi_rssi = wifi_rssi, .wifi_joining = wifi_joining,
                                          .c6_trouble = c6link_trouble, .lora_counts = lora_get_counts,
-                                         .c6_restarts = c6_restarts};
+                                         .c6_restarts = c6_restarts,
+                                         .lora_user_pause = lora_user_pause, .lora_user_resume = lora_user_resume};
         shell_set_sources(&sources);
         shell_start(display);
         system_restart_set_prepare(shell_show_restarting); // a readable "Restarting" frame, then dark (#39, #134)

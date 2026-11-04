@@ -43,6 +43,7 @@ void timer_app_register(void); // app_timer.c (#152)
 void calc_app_register(void);  // app_calc.c (#158)
 void notepad_app_register(void); // app_notes.c (#154): notes and to dos on the SD card
 void qr_app_register(void);      // app_qr.c (#153)
+void lora_spectrum_app_register(void); // app_lora_spectrum.c (#161)
 void bench_app_register(void); // app_bench.c (#96); also registers "fw bench"
 bool bench_running(void);      // app_bench.c: a run is measuring (LVGL task)
 // attention.c (#164): the keyboard light pulse for a new message and the flashlight (Settings > Display, "fw flashlight")

@@ -3,10 +3,11 @@
 /*
  * LoRa radio service for the P4 (#51, #65).
  *
- * The P4 drives it over ESP-Hosted peer data (lora_proto.h): CONFIG, RX_START, RX_STOP, STATUS_REQ, SEND, IDENT_REQ. One task
- * owns the SX1262 through RadioLib; the peer-data callback only queues the command and the DIO1 interrupt only wakes
- * the task. A SEND interrupts receiving for one packet, is answered by a RESULT once it left the radio (or failed),
- * and receiving starts again.
+ * The P4 drives it over ESP-Hosted peer data (lora_proto.h): CONFIG, RX_START, RX_STOP, STATUS_REQ, SEND, IDENT_REQ,
+ * SWEEP_REQ. One task owns the SX1262 through RadioLib; the peer-data callback only queues the command and the DIO1
+ * interrupt only wakes the task. A SEND interrupts receiving for one packet, is answered by a RESULT once it left the
+ * radio (or failed), and receiving starts again. A SWEEP_REQ (#161) interrupts receiving for one pass over the band,
+ * receive only, and receiving starts again on the channel.
  */
 
 #include "lora_service.h"
@@ -15,6 +16,7 @@
 #include "esp_app_desc.h"
 #include "eh_cp_feat_peer_data.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -46,6 +48,11 @@ static_assert(LORA_IRQ_FLAG_HEADER_ERR == RADIOLIB_SX126X_IRQ_HEADER_ERR, "SX126
 #define CURRENT_LIMIT_MA 140
 // A transmission not done by its airtime plus this is given up (a missed DIO1)
 #define TX_SLACK_US (1000 * 1000LL)
+
+// RSSI sweep (#161): after entering RX on a new frequency the SX1262 needs about a millisecond before its instantaneous
+// RSSI means anything (2 ticks at 1 kHz: at least one full millisecond), then the readings are spread a little
+#define SWEEP_SETTLE_TICKS 2
+#define SWEEP_SAMPLE_US    100
 
 #define CMD_QUEUE_DEPTH 4
 #define HEARTBEAT_US    (60 * 1000000LL)
@@ -190,6 +197,86 @@ static void handle_tx_event(bool timed_out) {
     finish_tx();
 }
 
+// The average of samples instantaneous readings in the receive mode the radio is in, dBm * 10
+static int16_t sample_rssi_x10(uint8_t samples) {
+    int32_t sum = 0;
+    for (uint8_t i = 0; i < samples; i++) {
+        esp_rom_delay_us(SWEEP_SAMPLE_US);
+        sum += (int32_t)(radio.getRSSI(false) * 10);
+    }
+    return (int16_t)(sum / samples);
+}
+
+// One step of a sweep: frequencies are only set in standby, and RSSI is only read while receiving
+static int16_t sweep_step(uint32_t freq_hz, uint8_t samples, int16_t *rssi_x10) {
+    int16_t err = radio.standby();
+    if (err == RADIOLIB_ERR_NONE) {
+        err = radio.setFrequency(freq_hz / 1e6f);
+    }
+    if (err == RADIOLIB_ERR_NONE) {
+        err = radio.startReceive();
+    }
+    if (err == RADIOLIB_ERR_NONE) {
+        vTaskDelay(SWEEP_SETTLE_TICKS);
+        *rssi_x10 = sample_rssi_x10(samples);
+    }
+    return err;
+}
+
+// Back to receiving on the channel as before the sweep. The modem settings were never touched, so the frequency and a
+// new receive are enough; if that fails, the full start CONFIG uses.
+static int16_t sweep_restore(void) {
+    int16_t err = radio.standby();
+    if (err == RADIOLIB_ERR_NONE) {
+        err = radio.setFrequency(config.freq_hz / 1e6f);
+    }
+    if (err == RADIOLIB_ERR_NONE) {
+        radio.setPacketReceivedAction(on_dio1);
+        err = arm_receive(); // clears the IRQ flags a packet heard during the sweep left behind
+    }
+    if (err != RADIOLIB_ERR_NONE) {
+        ESP_LOGW(TAG, "back to the channel after the sweep failed (%d): starting the radio again", err);
+        err = start_rx();
+    }
+    status.last_radio_err = err;
+    status.state          = err == RADIOLIB_ERR_NONE ? LORA_STATE_RX : LORA_STATE_ERROR;
+    return err;
+}
+
+// RSSI sweep (#161): receive only, never transmits. Only from receiving (not while a packet goes out, not while the P4
+// has the radio switched off), and receiving again afterwards. Answered by SWEEP, or by a RESULT when refused or failed.
+static void handle_sweep(lora_sweep_req_t const *req) {
+    if (status.state != LORA_STATE_RX) {
+        send_result(LORA_MSG_SWEEP_REQ, LORA_RESULT_BAD_STATE, 0);
+        return;
+    }
+    if (!lora_sweep_req_valid(req)) {
+        send_result(LORA_MSG_SWEEP_REQ, LORA_RESULT_BAD_PARAM, 0);
+        return;
+    }
+    static lora_msg_t reply; // 270 bytes: off the task's stack
+    memset(&reply, 0, sizeof(reply));
+    reply.type              = LORA_MSG_SWEEP;
+    lora_sweep_t *sw        = &reply.u.sweep;
+    sw->start_hz            = req->start_hz;
+    sw->step_hz             = req->step_hz;
+    sw->seq                 = req->seq;
+    sw->count               = req->count;
+    int16_t err             = RADIOLIB_ERR_NONE;
+    for (uint8_t i = 0; i < req->count && err == RADIOLIB_ERR_NONE; i++) {
+        err = sweep_step(req->start_hz + req->step_hz * i, req->samples, &sw->rssi_x10[i]);
+    }
+    int16_t back = sweep_restore();
+    if (err != RADIOLIB_ERR_NONE || back != RADIOLIB_ERR_NONE) {
+        ESP_LOGW(TAG, "sweep failed: %d, back to the channel: %d", err, back);
+        send_result(LORA_MSG_SWEEP_REQ, LORA_RESULT_RADIO_ERROR, err != RADIOLIB_ERR_NONE ? err : back);
+        return;
+    }
+    vTaskDelay(SWEEP_SETTLE_TICKS);
+    sw->channel_rssi_x10 = sample_rssi_x10(req->samples);
+    send_msg(&reply);
+}
+
 static void handle_command(lora_cmd_t const *cmd) {
     lora_msg_t msg;
     if (lora_decode(cmd->buf, cmd->len, &msg) != LORA_DEC_OK) {
@@ -274,6 +361,7 @@ static void handle_command(lora_cmd_t const *cmd) {
             ESP_LOGI(TAG, "tx %u B", (unsigned)msg.u.tx.len);
             return;
         }
+        case LORA_MSG_SWEEP_REQ: handle_sweep(&msg.u.sweep_req); return;
         default: status.ignored++; return; // a C6 -> P4 type sent our way
     }
 }

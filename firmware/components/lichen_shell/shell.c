@@ -680,6 +680,7 @@ void shell_start(lv_display_t *display) {
     notes_app_register();
     notepad_app_register();
     qr_app_register();
+    lora_spectrum_app_register();
     lv_display_set_default(display);
     if (!boot_screen_shown) {
         lv_obj_t *boot = boot_screen_create();

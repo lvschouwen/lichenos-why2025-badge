@@ -11,6 +11,8 @@
 #define STATUS_LEN   (HDR_LEN + 39)
 #define RESULT_LEN   (HDR_LEN + 4)
 #define IDENT_LEN    (HDR_LEN + LORA_IDENT_SHA_LEN)
+#define SWEEP_REQ_LEN (HDR_LEN + 11)
+#define SWEEP_FIXED_LEN (HDR_LEN + 12) // up to and including the count byte; 2 bytes per step follow
 #define BODYLESS_LEN HDR_LEN
 
 static uint8_t *put_u16(uint8_t *p, uint16_t v) {
@@ -47,6 +49,11 @@ static size_t encoded_len(lora_msg_t const *msg) {
         case LORA_MSG_STATUS: return STATUS_LEN;
         case LORA_MSG_RESULT: return RESULT_LEN;
         case LORA_MSG_IDENT: return IDENT_LEN;
+        case LORA_MSG_SWEEP_REQ: return SWEEP_REQ_LEN;
+        case LORA_MSG_SWEEP: {
+            uint8_t count = msg->u.sweep.count;
+            return count && count <= LORA_SWEEP_MAX_BINS ? SWEEP_FIXED_LEN + 2u * count : 0;
+        }
         default: return 0;
     }
 }
@@ -110,9 +117,50 @@ size_t lora_encode(lora_msg_t const *msg, uint8_t *buf, size_t cap) {
             break;
         }
         case LORA_MSG_IDENT: memcpy(p, msg->u.ident.app_elf_sha256, LORA_IDENT_SHA_LEN); break;
+        case LORA_MSG_SWEEP_REQ: {
+            lora_sweep_req_t const *r = &msg->u.sweep_req;
+            p                         = put_u32(p, r->start_hz);
+            p                         = put_u32(p, r->step_hz);
+            *p++                      = r->count;
+            *p++                      = r->samples;
+            *p                        = r->seq;
+            break;
+        }
+        case LORA_MSG_SWEEP: {
+            lora_sweep_t const *sw = &msg->u.sweep;
+            p                      = put_u32(p, sw->start_hz);
+            p                      = put_u32(p, sw->step_hz);
+            *p++                   = sw->seq;
+            p                      = put_u16(p, (uint16_t)sw->channel_rssi_x10);
+            *p++                   = sw->count;
+            for (uint8_t i = 0; i < sw->count; i++) {
+                p = put_u16(p, (uint16_t)sw->rssi_x10[i]);
+            }
+            break;
+        }
         default: break; // bodyless
     }
     return len;
+}
+
+static lora_dec_t decode_sweep(uint8_t const *buf, size_t len, lora_sweep_t *sw) {
+    if (len < SWEEP_FIXED_LEN) {
+        return LORA_DEC_BAD_LEN;
+    }
+    uint8_t count = buf[SWEEP_FIXED_LEN - 1];
+    if (count == 0 || count > LORA_SWEEP_MAX_BINS || len != SWEEP_FIXED_LEN + 2u * count) {
+        return LORA_DEC_BAD_LEN;
+    }
+    uint8_t const *p     = buf + HDR_LEN;
+    sw->start_hz         = get_u32(&p);
+    sw->step_hz          = get_u32(&p);
+    sw->seq              = *p++;
+    sw->channel_rssi_x10 = (int16_t)get_u16(&p);
+    sw->count            = *p++;
+    for (uint8_t i = 0; i < count; i++) {
+        sw->rssi_x10[i] = (int16_t)get_u16(&p);
+    }
+    return LORA_DEC_OK;
 }
 
 lora_dec_t lora_decode(uint8_t const *buf, size_t len, lora_msg_t *out) {
@@ -202,6 +250,19 @@ lora_dec_t lora_decode(uint8_t const *buf, size_t len, lora_msg_t *out) {
             }
             memcpy(out->u.ident.app_elf_sha256, p, LORA_IDENT_SHA_LEN);
             return LORA_DEC_OK;
+        case LORA_MSG_SWEEP_REQ: {
+            if (len != SWEEP_REQ_LEN) {
+                return LORA_DEC_BAD_LEN;
+            }
+            lora_sweep_req_t *r = &out->u.sweep_req;
+            r->start_hz         = get_u32(&p);
+            r->step_hz          = get_u32(&p);
+            r->count            = *p++;
+            r->samples          = *p++;
+            r->seq              = *p;
+            return LORA_DEC_OK;
+        }
+        case LORA_MSG_SWEEP: return decode_sweep(buf, len, &out->u.sweep);
         default: return LORA_DEC_BAD_TYPE;
     }
 }
@@ -215,4 +276,13 @@ bool lora_config_valid(lora_config_t const *c) {
     }
     return bw_ok && c->freq_hz >= 862000000 && c->freq_hz <= 928000000 && c->sf >= 5 && c->sf <= 12 && c->cr >= 5 &&
            c->cr <= 8 && c->preamble >= 6 && c->tx_power_dbm >= -9 && c->tx_power_dbm <= 22;
+}
+
+bool lora_sweep_req_valid(lora_sweep_req_t const *r) {
+    if (r->count == 0 || r->count > LORA_SWEEP_MAX_BINS || r->samples == 0 || r->samples > LORA_SWEEP_MAX_SAMPLES ||
+        r->step_hz < LORA_SWEEP_MIN_STEP_HZ || r->step_hz > LORA_SWEEP_MAX_STEP_HZ) {
+        return false;
+    }
+    uint64_t last = (uint64_t)r->start_hz + (uint64_t)r->step_hz * (r->count - 1u);
+    return r->start_hz >= 862000000 && last <= 928000000;
 }

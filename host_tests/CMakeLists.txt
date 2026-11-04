@@ -1469,3 +1469,12 @@ target_include_directories(mesh_telem_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
 target_compile_options(mesh_telem_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(mesh_telem_test PRIVATE m)
 add_test(NAME mesh_telem_test COMMAND mesh_telem_test)
+
+# LoRa spectrum app (#161): sweep plan, graph scale, peak hold, texts
+add_executable(lora_spectrum_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/lora_spectrum_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/lora_spectrum.c
+)
+target_include_directories(lora_spectrum_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(lora_spectrum_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME lora_spectrum_test COMMAND lora_spectrum_test)
