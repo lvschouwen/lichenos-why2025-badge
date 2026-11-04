@@ -11,6 +11,7 @@
 #include "lichen_notify.h"
 #include "lichen_ui.h"
 #include "lvgl.h"
+#include "nav.h"
 #include "notify_os.h"
 #include "screen_ids.h"
 #include "settings_store.h"
@@ -47,17 +48,20 @@ static void pulse_end(void) {
         lv_timer_delete(pulse_timer);
         pulse_timer = NULL;
     }
+    if (flashlight_active()) {
+        return; // the flashlight owns the levels now
+    }
     if (screen_idle_lit()) {
         backlight_resume(); // exactly the person's levels
     } else {
-        backlight_temporary_keyboard(0); // the screen dimmed meanwhile: the dim stage has no keyboard light
+        backlight_temporary_keyboard(0); // the screen dimmed meanwhile: the dim stage has no keyboard light, its display level stays
     }
 }
 
 static void pulse_tick(lv_timer_t *timer) {
     (void)timer;
     int level = attn_keyboard_at(lv_tick_elaps(pulse_start));
-    if (level < 0 || flashlight_active()) {
+    if (level < 0 || flashlight_active() || hot() || !screen_idle_lit()) {
         pulse_end();
     } else {
         backlight_temporary_keyboard((uint8_t)level);
@@ -132,7 +136,6 @@ static lv_obj_t *build_flashlight(void) {
     lv_obj_set_style_text_color(hint, lv_color_hex(0x707070), 0);
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -12);
     lv_obj_add_event_cb(screen, on_flash_delete, LV_EVENT_DELETE, NULL);
-    atomic_store(&flash_on, true); // the idle clock holds the screen bright (screen_idle.c)
     flash_timer = lv_timer_create(flash_tick, FLASH_TICK_MS, NULL);
     flash_apply();
     return screen;
@@ -140,7 +143,11 @@ static lv_obj_t *build_flashlight(void) {
 
 void flashlight_open(void) {
     if (!flashlight_active()) {
+        atomic_store(&flash_on, true); // before the build: a second call finds it taken; the idle clock holds the screen bright
         shell_open(build_flashlight, SCREEN_FLASHLIGHT);
+        if (nav_current() != SCREEN_FLASHLIGHT) {
+            atomic_store(&flash_on, false); // refused (a dialog is up): nothing will delete a screen
+        }
     }
 }
 

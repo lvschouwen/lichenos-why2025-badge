@@ -133,7 +133,7 @@ void backlight_temporary(uint8_t display, uint8_t keyboard) {
 
 void backlight_temporary_keyboard(uint8_t keyboard) {
     portENTER_CRITICAL(&applied_lock);
-    uint8_t display = user_display;
+    uint8_t display = applied_known ? applied_display : user_display; // whatever the screen timeout set stays
     portEXIT_CRITICAL(&applied_lock);
     send(display, backlight_keyboard_level(keyboard));
 }
