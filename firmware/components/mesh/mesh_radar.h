@@ -29,6 +29,7 @@ typedef struct {
     uint8_t  type;
     uint32_t dist_m;
     uint16_t bearing_deg; // 0 = north, clockwise, 0-359
+    uint16_t src;         // index in the radar_build input (internal)
 } radar_entry_t;
 
 // Great-circle distance in metres (haversine, mean earth radius) and the initial bearing in degrees 0-359

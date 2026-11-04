@@ -12,7 +12,9 @@ double radar_distance_m(double lat1, double lon1, double lat2, double lon2) {
     double p1 = lat1 * DEG2RAD, p2 = lat2 * DEG2RAD;
     double dp = p2 - p1, dl = (lon2 - lon1) * DEG2RAD;
     double a = sin(dp / 2) * sin(dp / 2) + cos(p1) * cos(p2) * sin(dl / 2) * sin(dl / 2);
-    if (a > 1.0) {
+    if (!(a >= 0.0)) {
+        a = 0.0; // NaN from a bad input must not reach a cast
+    } else if (a > 1.0) {
         a = 1.0;
     }
     return 2.0 * EARTH_M * asin(sqrt(a));
@@ -38,24 +40,32 @@ static int cmp_entry(void const *pa, void const *pb) {
     return c ? c : memcmp(a->prefix, b->prefix, sizeof(a->prefix));
 }
 
-static void fill_entry(radar_entry_t *e, radar_contact_t const *c, double own_lat, double own_lon) {
-    double lat = c->lat_e6 / 1e6, lon = c->lon_e6 / 1e6;
+// The bearing is filled in for the kept entries only (radar_build), the loop needs the distance alone
+static void fill_entry(radar_entry_t *e, radar_contact_t const *c, size_t src, double own_lat, double own_lon) {
     memcpy(e->prefix, c->prefix, sizeof(e->prefix));
     memcpy(e->name, c->name, sizeof(e->name));
     e->name[sizeof(e->name) - 1] = 0;
-    e->type        = c->type;
-    e->dist_m      = (uint32_t)(radar_distance_m(own_lat, own_lon, lat, lon) + 0.5);
-    e->bearing_deg = (uint16_t)(radar_bearing_deg(own_lat, own_lon, lat, lon) + 0.5) % 360;
+    e->type   = c->type;
+    e->src    = (uint16_t)src;
+    e->dist_m = (uint32_t)(radar_distance_m(own_lat, own_lon, c->lat_e6 / 1e6, c->lon_e6 / 1e6) + 0.5);
+}
+
+// A position another node advertised is not trusted: out of range means garbage, left out
+static bool position_ok(radar_contact_t const *c) {
+    if (c->lat_e6 == 0 && c->lon_e6 == 0) {
+        return false; // shares no position
+    }
+    return c->lat_e6 >= -90000000 && c->lat_e6 <= 90000000 && c->lon_e6 >= -180000000 && c->lon_e6 <= 180000000;
 }
 
 size_t radar_build(double own_lat, double own_lon, radar_contact_t const *in, size_t n, radar_entry_t *out, size_t max) {
     size_t k = 0;
-    for (size_t i = 0; i < n && max; i++) {
-        if (in[i].lat_e6 == 0 && in[i].lon_e6 == 0) {
-            continue; // shares no position
+    for (size_t i = 0; i < n && max && i <= UINT16_MAX; i++) {
+        if (!position_ok(&in[i])) {
+            continue;
         }
         radar_entry_t e;
-        fill_entry(&e, &in[i], own_lat, own_lon);
+        fill_entry(&e, &in[i], i, own_lat, own_lon);
         if (k < max) {
             out[k++] = e;
             continue;
@@ -67,6 +77,10 @@ size_t radar_build(double own_lat, double own_lon, radar_contact_t const *in, si
         if (cmp_entry(&e, &out[far]) < 0) {
             out[far] = e;
         }
+    }
+    for (size_t j = 0; j < k; j++) {
+        radar_contact_t const *c = &in[out[j].src];
+        out[j].bearing_deg = (uint16_t)(radar_bearing_deg(own_lat, own_lon, c->lat_e6 / 1e6, c->lon_e6 / 1e6) + 0.5) % 360;
     }
     qsort(out, k, sizeof(*out), cmp_entry);
     return k;

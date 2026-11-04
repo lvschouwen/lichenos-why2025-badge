@@ -77,6 +77,46 @@ static void test_build(void) {
     CHECK(radar_build(52.0, 4.0, in, 0, out, 2) == 0);
 }
 
+static void test_bad_input(void) {
+    radar_contact_t in[4] = {
+        contact("lat", 200000000, 4000000),    // latitude out of range
+        contact("lon", 52000000, -181000000),  // longitude out of range
+        contact("ok", 52001000, 4000000),
+        contact("neg", -90000001, 0),
+    };
+    radar_entry_t out[RADAR_MAX];
+    size_t        n = radar_build(52.0, 4.0, in, 4, out, RADAR_MAX);
+    CHECK(n == 1);
+    CHECK_STR(out[0].name, "ok");
+    CHECK(radar_range_m(out[0].dist_m) == 200); // the outliers do not set the range
+    double nan = NAN;
+    CHECK(radar_distance_m(nan, 4.0, 52.0, 4.0) == 0.0);
+    CHECK(radar_distance_m(52.0, 4.0, INFINITY, 4.0) >= 0.0);
+}
+
+static void test_full_buffer(void) {
+    // five contacts at the same distance (ties by name), room for three: the first three names stay
+    radar_contact_t in[6] = {contact("e", 52001000, 4000000), contact("d", 52001000, 4000000),
+                             contact("c", 52001000, 4000000), contact("b", 52001000, 4000000),
+                             contact("a", 52001000, 4000000), contact("far", 53000000, 4000000)};
+    radar_entry_t out[3];
+    size_t        n = radar_build(52.0, 4.0, in, 6, out, 3);
+    CHECK(n == 3);
+    CHECK_STR(out[0].name, "a");
+    CHECK_STR(out[1].name, "b");
+    CHECK_STR(out[2].name, "c");
+    CHECK(out[0].bearing_deg == 0); // bearing of the kept entries comes from the right source contact
+}
+
+static void test_poles(void) {
+    CHECK(fabs(radar_distance_m(90, 0, -90, 0) - 20015000.0) < 1000.0);
+    CHECK(fabs(radar_distance_m(90, 10, 90, 170)) < 1.0);
+    CHECK(fabs(radar_bearing_deg(89, 0, 90, 0) - 0.0) < 0.01);
+    double b = radar_bearing_deg(-89, 0, -90, 0);
+    CHECK(b >= 0 && b < 360 && fabs(b - 180.0) < 0.01);
+    CHECK(radar_bearing_deg(90, 0, 52, 4) >= 0.0);
+}
+
 static void test_range(void) {
     CHECK(radar_range_m(0) == 100);
     CHECK(radar_range_m(100) == 100);
@@ -132,6 +172,9 @@ int main(void) {
     test_distance();
     test_bearing();
     test_build();
+    test_bad_input();
+    test_full_buffer();
+    test_poles();
     test_range();
     test_plot();
     test_format();

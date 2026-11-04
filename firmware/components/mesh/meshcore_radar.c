@@ -19,12 +19,12 @@
 
 static char const TAG[] = "meshcore";
 
-#define TICK_MS       2000
+#define TICK_MS        2000
 #define SCREEN_WAIT_MS 20
-#define PLOT_PX       270 // the plot's square; the list gets the rest of the width
-#define PLOT_R        118 // ring radius, leaving room for the dots at the edge
-#define DOT_PX        10
-#define DOT_SEL_PX    18
+#define PLOT_PX        270 // the plot's square; the list gets the rest of the width
+#define PLOT_R         118 // ring radius, leaving room for the dots at the edge
+#define DOT_PX         10
+#define DOT_SEL_PX     18
 
 typedef struct {
     radar_contact_t in[RADAR_IN_MAX];
@@ -40,6 +40,10 @@ static lv_obj_t    *screen_obj, *note_label, *plot, *body;
 static uint8_t      sel_key[6]; // the highlighted contact, kept when the order changes
 static bool         sel_valid;
 static uint32_t     shown_sig;
+static uint32_t     shown_range_m; // the ring of the rows on screen, for redrawing the plot alone
+// What the screen shows now: the empty states are built once, not every tick (that would reset the scroll)
+typedef enum { SHOWN_NONE, SHOWN_READING, SHOWN_NOT_RUNNING, SHOWN_NO_POSITION, SHOWN_NO_CONTACTS, SHOWN_RADAR } shown_t;
+static shown_t shown_state;
 
 static void settle_selection(size_t n) {
     size_t at = list.sel < n ? list.sel : (n ? n - 1 : 0);
@@ -107,21 +111,30 @@ static void add_entry_row(radar_entry_t const *e, bool selected) {
     mc_list_line(row, detail, THEME_DIM);
 }
 
+// An empty note is hidden, so it does not leave a gap under the heading
 static void set_note(char const *text) {
     if (strcmp(lv_label_get_text(note_label), text) != 0) {
         lv_label_set_text(note_label, text);
     }
+    if (text[0]) {
+        lv_obj_remove_flag(note_label, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(note_label, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
-// What to show instead of the radar, or NULL when there is something to plot
-static void show_empty(char const *why) {
-    mc_scroll_t s = mc_list_save(&list);
+// The list's place says why there is nothing to plot; once per state
+static void show_empty(shown_t state, char const *why) {
+    if (shown_state == state) {
+        return;
+    }
     lv_obj_clean(list.list);
     list.n = 0;
     lv_obj_clean(plot);
     mc_list_label(list.list, why, THEME_DIM);
-    mc_list_restore(&list, s);
     set_note("");
+    shown_state = state;
+    shown_sig   = UINT32_MAX;
 }
 
 static void rebuild(size_t n, uint32_t range_m, double own_lat, double own_lon) {
@@ -134,10 +147,13 @@ static void rebuild(size_t n, uint32_t range_m, double own_lat, double own_lon) 
         add_entry_row(&mem->shown[i], i == list.sel);
     }
     mc_list_restore(&list, s);
-    char ring[16], text[96];
+    char ring[16], where[40], text[112];
     radar_format_dist(range_m, ring, sizeof(ring));
-    snprintf(text, sizeof(text), "Outer ring %s, north up. Around %.4f %.4f.", ring, own_lat, own_lon);
+    advcfg_coord_text(own_lat, own_lon, where, sizeof(where));
+    snprintf(text, sizeof(text), "Outer ring %s, north up. Around %s.", ring, where);
     set_note(text);
+    shown_range_m = range_m;
+    shown_state   = SHOWN_RADAR;
     draw_plot(n, range_m);
 }
 
@@ -147,6 +163,8 @@ static uint32_t signature(size_t n, double lat, double lon) {
     for (size_t i = 0; i < n; i++) {
         h = scroll_key_hash(mem->shown[i].prefix, sizeof(mem->shown[i].prefix), h);
         h = scroll_key_hash(&mem->shown[i].dist_m, sizeof(mem->shown[i].dist_m), h);
+        h = scroll_key_hash(&mem->shown[i].bearing_deg, sizeof(mem->shown[i].bearing_deg), h);
+        h = scroll_key_hash(mem->shown[i].name, strnlen(mem->shown[i].name, sizeof(mem->shown[i].name)), h);
     }
     return h;
 }
@@ -157,24 +175,24 @@ static void refresh(lv_timer_t *t) {
     }
     mesh_advert_cfg_t cfg;
     if (!mesh_running() || !mesh_get_advert_cfg(&cfg)) {
-        show_empty("MeshCore is not running: the radar comes back when it does.");
-        shown_sig = UINT32_MAX;
+        show_empty(SHOWN_NOT_RUNNING, "MeshCore is not running: the radar comes back when it does.");
         return;
     }
     if (!advcfg_location_set(cfg.lat, cfg.lon)) {
-        show_empty("Your own position is not set. Enter it under MeshCore settings > Advert & contacts "
-                   "(Latitude, Longitude): the radar then shows contacts around it.");
-        shown_sig = UINT32_MAX;
+        show_empty(SHOWN_NO_POSITION, "Your own position is not set. Enter it under MeshCore settings > Advert & contacts "
+                                      "(Latitude, Longitude): the radar then shows contacts around it.");
         return;
     }
     size_t got = mesh_contacts_positions(mem->in, RADAR_IN_MAX, SCREEN_WAIT_MS);
     if (got == MESH_BUSY) {
+        if (shown_state == SHOWN_NONE) {
+            show_empty(SHOWN_READING, "Reading contacts..."); // first open only, never a blank screen (R10)
+        }
         return; // MeshCore is busy: the screen stays as it is until the next tick
     }
     size_t n = radar_build(cfg.lat, cfg.lon, mem->in, got, mem->shown, RADAR_MAX);
     if (!n) {
-        show_empty("No contact has shared a position yet: they appear when a node adverts with its location.");
-        shown_sig = UINT32_MAX;
+        show_empty(SHOWN_NO_CONTACTS, "No contact has shared a position yet: they appear when a node adverts with its location.");
         return;
     }
     uint32_t sig = signature(n, cfg.lat, cfg.lon);
@@ -189,8 +207,7 @@ static void on_key(lv_event_t *e) {
     if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
         if (list.n && mc_list_move(&list, key == LV_KEY_UP ? -1 : 1)) {
             memcpy(sel_key, mem->shown[list.sel].prefix, sizeof(sel_key));
-            shown_sig = UINT32_MAX; // the plot moves its highlight on the next tick's rebuild...
-            refresh(NULL);          // ...or now
+            draw_plot(list.n, shown_range_m); // only the highlight moves: no mesh read, no rebuild
         }
     } else if (key == LV_KEY_ENTER && list.n) {
         radar_entry_t const *r = &mem->shown[list.sel];
@@ -250,8 +267,9 @@ static lv_obj_t *build(void) {
     note_label = lv_obj_get_child(screen, 1);
     build_body(screen);
     lv_obj_add_event_cb(list.list, on_key, LV_EVENT_KEY, NULL);
-    shown_sig = UINT32_MAX;
-    sel_valid = false;
+    shown_sig   = UINT32_MAX;
+    shown_state = SHOWN_NONE;
+    sel_valid   = false;
     timer     = lv_timer_create(refresh, TICK_MS, NULL);
     refresh(NULL);
     return screen;
