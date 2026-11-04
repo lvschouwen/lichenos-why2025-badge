@@ -81,9 +81,12 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   (MeshCore from its contacts) calls `clock_propose(CLOCK_SRC_APP, tv)`. SNTP and a time set by hand outrank it and the
   clock never goes backwards.
 - `lichen_random.h`: `lichen_random_fill()`, `lichen_random_u32()`. The OS keeps the entropy source on.
-- `lora.h`, the app section: `lora_claim(owner, cb)` / `lora_release(owner)` (one owner at a time), `lora_send`,
-  `lora_set_radio` / `lora_set_tx_power` (the owner's radio settings, checked by `lora_config_valid`),
-  `lora_set_link_callback`, `lora_set_rx_formatter`, the stats. Everything marked "OS only" there is not for apps.
+- `lora_app.h`: `lora_claim(owner, cb)` / `lora_release(owner)` (one owner at a time), `lora_send(owner, ...)` /
+  `lora_send_state(owner)`, `lora_set_radio(owner, ...)` / `lora_set_tx_power(owner, ...)` (the owner's radio
+  settings, checked by `lora_config_valid`), `lora_set_link_callback(owner, ...)`, `lora_set_rx_formatter(owner, ...)`,
+  and the read-only stats (`lora_up`, `lora_get_radio`, `lora_get_counts`, ...). Every call that takes `owner` is
+  refused, with a rate-limited log line, unless that name holds the claim (#179). `lora_os.h` (start, stop, the radio
+  switch, the C6 hooks) is the OS's: apps never include it.
 - `fw_console.h`: `console_register` / `console_reply` for `fw <name>` commands; `system_restart(why)` when a restart
   is what the user asked for (it records why).
 

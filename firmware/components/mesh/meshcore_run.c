@@ -9,7 +9,7 @@
 #include "freertos/task.h"
 #include "lichen_fs.h"
 #include "lichen_settings.h"
-#include "lora.h"
+#include "lora_app.h"
 #include "mesh.h"
 #include "mesh_format.h"
 #include "mesh_remote.h"

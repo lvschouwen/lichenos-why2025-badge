@@ -22,7 +22,7 @@
 #include "psram_speed.h"
 #include "psram_guard.h"
 #include "log_tap.h"
-#include "lora.h"
+#include "lora_os.h"
 #include "lichen_crashlog.h"
 #include "lichen_radio.h"
 #include "mesh.h"

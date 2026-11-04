@@ -48,7 +48,7 @@
 extern "C" {
 #include "console_cmd.h" // CONSOLE_WIFI_CMD_MAX
 #include "fw_console.h"
-#include "lora.h"
+#include "lora_app.h"
 }
 
 #include <ctype.h>

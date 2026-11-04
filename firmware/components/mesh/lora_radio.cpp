@@ -6,7 +6,7 @@
 #include "freertos/queue.h"
 
 extern "C" {
-#include "lora.h"
+#include "lora_app.h"
 #include "lichen_radio.h"
 #include "meshcore_hdr.h"
 #include "lora_airtime.h"
@@ -16,6 +16,8 @@ extern "C" {
 #include <string.h>
 
 #define RX_QUEUE_DEPTH 8
+
+static char const OWNER[] = "meshcore"; // MeshCore's name on the radio claim: every send and setting carries it (#179)
 
 typedef struct {
     uint8_t len;
@@ -76,18 +78,18 @@ bool LoraRadio::claim() {
     } else {
         xQueueReset(rx_queue);
     }
-    if (!lora_claim("meshcore", on_packet)) {
+    if (!lora_claim(OWNER, on_packet)) {
         ESP_LOGE("mesh", "LoRa radio not ours: MeshCore receives nothing");
         return false;
     }
-    lora_set_rx_formatter(rx_summary);
-    lora_set_link_callback("meshcore", on_link);
+    lora_set_rx_formatter(OWNER, rx_summary);
+    lora_set_link_callback(OWNER, on_link);
     return true;
 }
 
 // MeshCore stopped (#103): the radio is free again (the OS keeps it receiving; nobody gets the packets)
 void LoraRadio::end() {
-    lora_release("meshcore");
+    lora_release(OWNER);
 }
 
 int LoraRadio::recvRaw(uint8_t *bytes, int sz) {
@@ -122,7 +124,7 @@ float LoraRadio::packetScore(float snr, int packet_len) {
 void LoraRadio::setParams(float freq_mhz, float bw_khz, uint8_t sf, uint8_t cr) {
     uint32_t freq_hz = (uint32_t)lround(freq_mhz * 1000.0) * 1000;
     uint32_t bw_hz   = (uint32_t)lround(bw_khz * 1000.0);
-    if (!lora_set_radio(freq_hz, bw_hz, sf, cr)) {
+    if (!lora_set_radio(OWNER, freq_hz, bw_hz, sf, cr)) {
         ESP_LOGW(
             "mesh",
             "radio settings refused: %lu Hz, %lu Hz, SF%u, CR4/%u",
@@ -142,7 +144,7 @@ bool LoraRadio::startSendRaw(uint8_t const *bytes, int len) {
     if (len <= 0 || __atomic_load_n(&tx_blocked, __ATOMIC_ACQUIRE) || !lichen_radio_get(RADIO_LORA)) {
         return false; // a damaged identity, or LoRa switched off (#108)
     }
-    if (!lora_send(bytes, (size_t)len, getEstAirtimeFor(len))) {
+    if (!lora_send(OWNER, bytes, (size_t)len, getEstAirtimeFor(len))) {
         send_refused++;
         return false;
     }
@@ -152,7 +154,7 @@ bool LoraRadio::startSendRaw(uint8_t const *bytes, int len) {
 }
 
 bool LoraRadio::isSendComplete() {
-    int state = lora_send_state();
+    int state = lora_send_state(OWNER);
     if (state == 0) {
         return false;
     }
@@ -174,7 +176,7 @@ void LoraRadio::onSendFinished() {
 
 // MeshCore's prefs allow up to MAX_LORA_TX_POWER (22, the SX1262's high-power PA and MeshCore's badge variant)
 void LoraRadio::setTxPower(int8_t dbm) {
-    if (!lora_set_tx_power(dbm > 22 ? 22 : dbm)) {
+    if (!lora_set_tx_power(OWNER, dbm > 22 ? 22 : dbm)) {
         ESP_LOGW("mesh", "TX power %d dBm refused", dbm);
     }
 }

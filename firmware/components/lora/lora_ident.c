@@ -3,7 +3,7 @@
  * check. Runs before lora_start, so before the LoRa task exists: it sends on its own and borrows the peer-data callback.
  */
 
-#include "lora.h"
+#include "lora_os.h"
 
 #include "eh_host_feat_peer_data.h"
 #include "esp_log.h"

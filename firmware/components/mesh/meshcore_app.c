@@ -5,7 +5,7 @@
 #include "esp_log.h"
 #include "screen_ids.h"
 #include "lichen_app.h"
-#include "lora.h"
+#include "lora_app.h"
 #include "mc_first.h"
 #include "mesh_advert_cfg.h"
 #include "menu.h"

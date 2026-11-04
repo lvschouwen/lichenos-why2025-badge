@@ -7,7 +7,7 @@
 #include "screen_ids.h"
 #include "lichen_clock.h"
 #include "lichen_ui.h"
-#include "lora.h"
+#include "lora_app.h"
 #include "mesh.h"
 #include "mesh_chat.h"
 #include "mesh_format.h"

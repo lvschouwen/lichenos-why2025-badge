@@ -6,7 +6,7 @@
  * every send happens in this task, since a send blocks until the C6 acks it.
  */
 
-#include "lora.h"
+#include "lora_os.h"
 #include "lichen_radio.h"
 
 #include "fw_console.h"
@@ -18,6 +18,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lora_link.h"
+#include "lora_owner.h"
 #include "lora_proto.h"
 #include "lora_tx.h"
 
@@ -64,7 +65,8 @@ static bool log_rx;
 static bool log_raw;
 
 static lora_packet_cb_t    packet_cb;
-static char const         *owner;  // who claimed the radio (#84 T7)
+static lora_owner_t        owner;  // who claimed the radio (#84 T7)
+static lora_refusal_log_t  refusals; // non-owner calls (#179), logged at most every 10 s
 static lora_rx_formatter_t rx_fmt;
 static bool             stop_requested; // lora_stop -> the task
 static bool             stopped;        // the task -> everyone
@@ -84,51 +86,68 @@ static SemaphoreHandle_t send_mutex;
 // while the LoRa task calls them: every read and write of the four is under owner_lock, and the LoRa task calls copies
 // taken under it, never a pointer that a release can turn NULL between its check and its call. A copy taken just
 // before a release may still run once afterwards: the owner's callbacks must stay callable (static functions) and
-// harmless then. Spinlock only around the loads and stores (strcmp on the short owner names included), never a call.
+// harmless then. Spinlock only around the loads and stores (strcmp on the short owner names included), never a call
+// beyond the pure lora_owner.c helpers (strcmp and a few stores). Owner-only calls (send, radio settings, TX power, #179) check before
+// they act: a release just after the check lets that one call through, as a copied callback runs once more.
 static portMUX_TYPE owner_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static uint32_t now_ms(void);
 
 bool lora_claim(char const *who, lora_packet_cb_t cb) {
     portENTER_CRITICAL(&owner_lock);
-    char const *had = owner;
-    bool        ok  = !had || strcmp(had, who) == 0;
+    char const *had = owner.name;
+    bool        ok  = lora_owner_claim(&owner, who);
     if (ok) {
-        owner     = who;
         packet_cb = cb;
     }
     portEXIT_CRITICAL(&owner_lock);
     if (!ok) {
-        ESP_LOGW(TAG, "radio claimed by %s: %s refused", had, who);
+        ESP_LOGW(TAG, "radio claimed by %s: %s refused", had ? had : "?", who ? who : "?");
     }
     return ok;
 }
 
 void lora_release(char const *who) {
     portENTER_CRITICAL(&owner_lock);
-    if (owner && strcmp(owner, who) == 0) {
+    if (lora_owner_release(&owner, who)) {
         packet_cb = NULL;
         rx_fmt    = NULL;
         link_cb   = NULL;
-        owner     = NULL;
     }
     portEXIT_CRITICAL(&owner_lock);
 }
 
-bool lora_set_link_callback(char const *who, void (*fn)(bool up)) {
+// Every owner-only call asks here first (#179): false, with one log line per 10 s at most, unless who holds the radio
+static bool owner_check(char const *who, char const *what) {
+    uint32_t t = now_ms(); // outside the spinlock: no calls in there
+    uint32_t skipped = 0;
     portENTER_CRITICAL(&owner_lock);
-    bool ok = who && owner && strcmp(owner, who) == 0;
+    bool ok  = lora_owner_is(&owner, who);
+    bool log = !ok && lora_refusal_due(&refusals, t, &skipped);
+    portEXIT_CRITICAL(&owner_lock);
+    if (log) {
+        ESP_LOGW(TAG, "%s refused: %s does not hold the radio (%lu more not logged)", what, who ? who : "?",
+                 (unsigned long)skipped);
+    }
+    return ok;
+}
+
+bool lora_set_link_callback(char const *who, void (*fn)(bool up)) {
+    if (!owner_check(who, "link callback")) {
+        return false;
+    }
+    portENTER_CRITICAL(&owner_lock);
+    bool ok = lora_owner_is(&owner, who); // again: a release may have come in between
     if (ok) {
         link_cb = fn;
     }
     portEXIT_CRITICAL(&owner_lock);
-    if (!ok) {
-        ESP_LOGW(TAG, "link callback refused: %s does not hold the radio", who ? who : "?");
-    }
     return ok;
 }
 
 static char const *owner_now(void) {
     portENTER_CRITICAL(&owner_lock);
-    char const *who = owner;
+    char const *who = owner.name;
     portEXIT_CRITICAL(&owner_lock);
     return who;
 }
@@ -137,13 +156,19 @@ void lora_set_send_hook(void (*fn)(bool ok)) {
     send_hook = fn;
 }
 
-void lora_set_rx_formatter(lora_rx_formatter_t fmt) {
+bool lora_set_rx_formatter(char const *who, lora_rx_formatter_t fmt) {
+    if (!owner_check(who, "rx formatter")) {
+        return false;
+    }
     portENTER_CRITICAL(&owner_lock);
-    rx_fmt = fmt;
+    bool ok = lora_owner_is(&owner, who); // again: a release may have come in between
+    if (ok) {
+        rx_fmt = fmt;
+    }
     portEXIT_CRITICAL(&owner_lock);
+    return ok;
 }
 
-static uint32_t now_ms(void);
 static bool     send_to_c6(lora_msg_t const *msg);
 
 // The packet on its way out through the C6 (one at a time), under state_lock
@@ -154,7 +179,10 @@ static uint32_t  tx_sent_ms, tx_airtime_ms; // the current send, for the round-t
 static bool          config_changed;
 static lora_config_t boot_config = LORA_CONFIG_DEFAULT;
 
-bool lora_set_tx_power(int8_t dbm) {
+bool lora_set_tx_power(char const *who, int8_t dbm) {
+    if (!owner_check(who, "TX power")) {
+        return false;
+    }
     portENTER_CRITICAL(&state_lock);
     lora_config_t c = config;
     c.tx_power_dbm  = dbm;
@@ -167,7 +195,10 @@ bool lora_set_tx_power(int8_t dbm) {
     return ok;
 }
 
-bool lora_send(uint8_t const *bytes, size_t len, uint32_t airtime_ms) {
+bool lora_send(char const *who, uint8_t const *bytes, size_t len, uint32_t airtime_ms) {
+    if (!owner_check(who, "send")) {
+        return false;
+    }
     if (len == 0 || len > sizeof(((lora_tx_packet_t *)0)->data)) {
         return false;
     }
@@ -196,7 +227,10 @@ bool lora_send(uint8_t const *bytes, size_t len, uint32_t airtime_ms) {
     return true;
 }
 
-int lora_send_state(void) {
+int lora_send_state(char const *who) {
+    if (!owner_check(who, "send state")) {
+        return -1;
+    }
     portENTER_CRITICAL(&state_lock);
     lora_tx_state_t st = lora_tx_poll(&tx, now_ms());
     lora_tx_finish(&tx);
@@ -220,7 +254,10 @@ void lora_get_radio(uint8_t *sf, uint32_t *bw_hz, uint8_t *cr, uint16_t *preambl
     portEXIT_CRITICAL(&state_lock);
 }
 
-bool lora_set_radio(uint32_t freq_hz, uint32_t bw_hz, uint8_t sf, uint8_t cr) {
+bool lora_set_radio(char const *who, uint32_t freq_hz, uint32_t bw_hz, uint8_t sf, uint8_t cr) {
+    if (!owner_check(who, "radio settings")) {
+        return false;
+    }
     portENTER_CRITICAL(&state_lock);
     lora_config_t c = config;
     c.freq_hz       = freq_hz;
