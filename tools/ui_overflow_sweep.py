@@ -27,6 +27,10 @@ read, overflow) instead of three per key group. Steps:
   ("row", label, ROWS)         move down to row `label` of the list ROWS (the labels of the focusable rows in order),
                                correcting by single steps if the page differs; then the focus must equal the label
   ("focus", text)              the focused row must contain text (never empty; "(none)" and a missing focus never match)
+  ("seek", text, N)            move down (at most N times, each read back with "fw ui") until the focused row contains
+                               text, then guard it on the badge (focus:text) so Enter never lands on another row
+  ("inplace",)                 the next Enter rebuilds the same screen (Files: a volume opens in place), so the stack
+                               does not grow; ("maybe_inplace",): it either does that or pushes a page (folder or file)
   ("any_row",)                 the first row of a list of contacts or files, which only opens a read-only page: any
                                focused row except a forbidden one (notfocus: checked on the badge before the Enter)
 Forbidden targets (rows that switch, send, restart or erase) are refused when the table is loaded, and the focused row
@@ -43,10 +47,11 @@ Ctrl-C) it opens home; the lock is always released at the end.
 
 Fixtures (set up by hand first; bench rules: on-air targets are ONLY #badgetest and the Heltec test node, never real
 contacts; this script sends nothing on air):
-  - a channel with a 31-character name (a #badgetest-style channel, e.g. "#badgetest-0123456789-abcdefghij"), first in
-    the chat list
+  - the #badgetest channel in the chat list; its position is NOT fixed (on one badge: #alkmaar, Public, #badgetest), the
+    route seeks it by name with at most 15 Downs. For a 31-character name use "#badgetest-0123456789-abcdefghij"
   - the Heltec test node renamed to a 32-character name, heard so it is in the contact list (and a repeater entry)
-  - a file with a 127-character name on the SD card (and one long folder name) in the root Files shows first
+  - a file with a 127-character name on the SD card (and one long folder name); Files lists folders first, so the first
+    entry is a folder, which opens in place, and only a root without folders opens a viewer
   - a saved Wi-Fi network with a 32-character SSID in range or in the saved list
   - a few notifications in the centre with long text (a long channel-name message from #badgetest)
 Without the fixtures the sweep still runs but only proves short data fits.
@@ -89,6 +94,8 @@ FORBIDDEN = ("Updates over", "Close updates", "LoRa radio", "Airplane", "PSRAM",
              "Remove", "Favourite", "Message", "Log in", "Log out", "Forget", "Restart", "Power off", "Delete",
              "Clear all", "Backup now", "Update now", "Switch radio", "Apply", "Custom", "Save settings",
              "Load settings", "Rename", "Add channel", "Add ")
+SEEK_MAX = 15  # most Downs a seek-by-name may send
+ASYNC_REREADS = 2  # a slow open: this many "wait"s and re-reads before "an Enter opened nothing"
 ALLOWED_KEYS = ("up", "down", "left", "right", "enter", "esc", "wait")
 HOME_APP = "home"  # "fw ui open home": back to home from any depth
 
@@ -146,16 +153,21 @@ SCREENS = [
     ("settings/power", (), settings_page("Power"), False),
     ("settings/backup", ("SCREEN_BACKUP",), settings_page("Backup"), False),
     ("settings/factory reset", ("SCREEN_FACTORY",), settings_page("Factory reset"), False),
-    ("settings/about", ("SCREEN_ABOUT",), settings_page("About Lichen"), False),
+    # Settings > About Lichen opens the About APP (shell_open_app, app_settings.c open_about): a stack entry of the app's
+    # index, not the unused SCREEN_ABOUT (103)
+    ("settings/about", (), settings_page("About Lichen"), False),
     ("settings/console", ("SCREEN_CONSOLE",), settings_page("Console"), False),
     ("settings/apps/meshcore", (), settings_page("MeshCore"), False),
     ("about tile", (), tile("About Lichen"), False),
     ("files", (), tile("Files"), False),
-    ("files/internal", (), tile("Files") + [("row", "Internal storage", FILES), "enter", "wait"], False),
-    ("files/sd card", (), tile("Files") + [("row", "SD card", FILES), "enter", "wait"], False),
-    # first row of the SD listing: a folder or a file; both only open (a viewer or a folder), no Backspace or C
+    # Files opens a volume or a folder IN PLACE (app_files.c fill_menu): the stack stays [home, Files]
+    ("files/internal", (), tile("Files") + [("row", "Internal storage", FILES), ("inplace",), "enter", "wait"], False),
+    ("files/sd card", (), tile("Files") + [("row", "SD card", FILES), ("inplace",), "enter", "wait"], False),
+    # first row of the SD listing: a folder (in place, folders sort first) or a file (the viewer page); both only open,
+    # no Backspace or C
     ("files/sd first entry", ("SCREEN_FILES_VIEW",),
-     tile("Files") + [("row", "SD card", FILES), "enter", "wait", ("any_row",), "enter", "wait"], False),
+     tile("Files") + [("row", "SD card", FILES), ("inplace",), "enter", "wait", ("any_row",), ("maybe_inplace",),
+                      "enter", "wait"], False),
     ("clock", (), tile("Clock"), False),
     ("weather", (), tile("Weather"), False),
     ("timer hub", (), tile("Timer"), False),
@@ -183,8 +195,10 @@ SCREENS = [
     # Keyboard test is not here: leaving it needs Esc held for 2 s, which "keys send" cannot do (see UNREACHABLE)
     ("mesh app", (), mc_grid(), False),
     ("mesh/chats", ("SCREEN_CHATS",), mc_grid(CHAT_TILE), False),
-    # the chat list's first row must be the #badgetest channel (fixture); any other first row aborts before Enter
-    ("mesh/chat #badgetest", ("SCREEN_CHAT",), mc_grid(CHAT_TILE) + [("focus", "#badgetest"), "enter", "wait"], False),
+    # the chat list's order is not fixed: seek the #badgetest row by name (<= 15 Downs); Enter only behind a badge-side
+    # focus:#badgetest guard, so it never opens another chat
+    ("mesh/chat #badgetest", ("SCREEN_CHAT",),
+     mc_grid(CHAT_TILE) + [("seek", "#badgetest", 15), "enter", "wait"], False),
     ("mesh/contacts", ("SCREEN_CONTACTS",), mc_grid(CONTACTS_TILE), False),
     ("mesh/contact", ("SCREEN_CONTACT",), mc_grid(CONTACTS_TILE) + [("any_row",), "enter", "wait"], False),
     ("mesh/contact signal", ("SCREEN_MC_SIGNAL",),
@@ -234,6 +248,7 @@ UNREACHABLE = {
     "SCREEN_NOTES_NEW": "the 'This is new' page after an update; shows once",
     "SCREEN_NOTE_ITEM": "needs a saved note on the SD card",
     "SCREEN_FLASHLIGHT": "a white screen at full brightness: nothing to measure, a key press ends it",
+    "SCREEN_ABOUT": "unused: Settings > About Lichen opens the About app (screen id = its app index) instead",
     "SCREEN_KEYTEST": "Keyboard test ends only on Esc held 2 s, which 'keys send' cannot do",
 }
 # Screens that have no id of their own (the apps' first screens) and cannot be reached either
@@ -291,9 +306,16 @@ def lint_steps(name: str, steps: Sequence[Step]) -> None:
             elif kind == "fw":
                 if not st[1].startswith("qr "):
                     raise ValueError(f"{name}: console command {st[1]!r} is not allowed")
+            elif kind == "seek":
+                if not st[1].strip() or "|" in st[1] or st[1] == "(none)" or forbidden(st[1]):
+                    raise ValueError(f"{name}: seek {st[1]!r} is not a safe guard text")
+                if not 1 <= st[2] <= SEEK_MAX:
+                    raise ValueError(f"{name}: seek limit {st[2]!r} is out of 1..{SEEK_MAX}")
+            elif kind in ("inplace", "maybe_inplace"):
+                continue  # a marker for the depth check; guards and Enters are not affected
             elif kind != "any_row":
                 raise ValueError(f"{name}: unknown step {st!r}")
-            guarded = kind in ("row", "focus", "any_row")  # open: a fresh screen, no row checked yet
+            guarded = kind in ("row", "focus", "any_row", "seek")  # open: a fresh screen, no row checked yet
         elif st not in ALLOWED_KEYS:
             raise ValueError(f"{name}: key {st!r} is not allowed in the sweep")
         elif st == "enter":
@@ -551,18 +573,50 @@ class Badge:
                 pending.append(Guard("focus", st[1]))
             elif st[0] == "any_row":
                 pending.append(ANY_ROW)
+            elif st[0] == "seek":
+                self.keys(pending)
+                pending = []
+                self.seek(st[1], st[2])
+                pending.append(Guard("focus", st[1]))  # the badge checks it again right before the Enter
+            elif st[0] in ("inplace", "maybe_inplace"):
+                continue
             else:  # fw: the keys so far first
                 self.keys(pending)
                 pending = []
                 self.console(st[1])
         self.keys(pending)
+        in_place = sum(1 for st in steps if isinstance(st, tuple) and st[0] in ("inplace", "maybe_inplace"))
+        maybe = any(isinstance(st, tuple) and st[0] == "maybe_inplace" for st in steps)
+        need = 1 + int(opened) + enters - in_place
         self.last = self.snap()
+        # a slow open (a page built after the key): a short wait and a re-read before calling it an error
+        for _ in range(ASYNC_REREADS):
+            if len(self.last.stack) >= need:
+                break
+            self.keys(["wait"])
+            self.last = self.snap()
         depth = len(self.last.stack)
-        if depth < 1 + int(opened) + enters:
+        if depth < need:
             raise RouteError(f"an Enter opened nothing (stack {list(self.last.stack)}, {enters} Enter(s))")
         top = self.last.stack[-1] if self.last.stack else None
-        if expect_top is not None and top != expect_top:
+        # a maybe_inplace Enter that rebuilt the list instead of pushing a page has no page to compare
+        if expect_top is not None and top != expect_top and not (maybe and depth == need):
             raise RouteError(f"route ended on screen {top}, expected {expect_top}")
+
+    def seek(self, text: str, limit: int) -> None:
+        """Down until the focused row contains `text` (at most `limit` Downs, each read back). The caller guards the
+        Enter on the badge; this only decides whether the row is there at all."""
+        self._check(True)
+        for n in range(limit + 1):
+            cur = self._focus()
+            if self.last is not None and not self.last.no_focus() and text in cur:
+                return
+            if n == limit:
+                break
+            self.keys(["down"])
+            self.last = self.snap()
+        raise RouteError(f"expected focus containing {text!r} before Enter, not found in {limit} Down(s) "
+                         f"(last {self._focus()!r}); nothing pressed")
 
 
 # console_not_running (mesh_task.cpp) opens a stopped MeshCore's "fw mesh" reply with "MeshCore " and one of these
@@ -688,6 +742,43 @@ def selftest_remote(expect: Callable[..., None], failures: List[str]) -> None:
     expect("any_row forbidden", RouteError, FakeFw([ui("0", "S"), ui("0", "S")], keys=[
         "keys send: guard 2 failed: focus 'Remove'; 4 of 6 sent"]),
            lambda b: b.walk("contact", mc_grid(CONTACTS_TILE) + [("any_row",), "enter", "wait"]), 1)
+    chat = mc_grid(CHAT_TILE) + [("seek", "#badgetest", 15), "enter", "wait"]
+    fake = FakeFw([ui("0", "M"), ui("0", "M"), ui("0 > 1", "#alkmaar"), ui("0 > 1 > 5", "Public"), ui("0 > 1 > 5", "#badgetest"),
+                   ui("0 > 1 > 5 > 6", "msg")])
+    expect("seek by name", None, fake, lambda b: b.walk("chat", chat, 6), 4)
+    if len(fake.sent) == 4 and (fake.sent[1:3] != ["keys send needlock| down"] * 2 or
+                                not fake.sent[3].startswith("keys send needlock| focus:#badgetest| enter")):
+        failures.append(f"seek by name: sent {fake.sent!r}")
+    fake = FakeFw([ui("0", "M"), ui("0", "M"), ui("0 > 1", "Public")])
+    expect("seek gives up after 15 Downs, no Enter", RouteError, fake, lambda b: b.walk("chat", chat, 6), 16)
+    if any("enter" in l.split()[2:] and "#badgetest" in l for l in fake.sent):
+        failures.append("seek gives up: an Enter was sent")
+    expect("seek: no focus", RouteError, FakeFw([ui("0", "M"), ui("0", "M"), ui("0 > 1", "(none)")]),
+           lambda b: b.walk("chat", chat, 6), 16)
+    for bad in ([("seek", "", 5)], [("seek", "Remove", 5)], [("seek", "a|b", 5)], [("seek", "x", 16)]):
+        try:
+            lint_steps("seek", bad)
+            failures.append(f"lint accepted {bad!r}")
+        except ValueError:
+            pass
+    # a slow open: the page is there after one wait and a re-read; never there is still an error
+    fake = FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2", "Wi-Fi"), ui("0 > 2 > 100", "Wi-Fi radio")])
+    expect("slow open, re-read", None, fake, lambda b: b.walk("wifi", settings_page("Wi-Fi"), 100), 2)
+    if len(fake.sent) == 2 and fake.sent[1] != "keys send needlock| wait":
+        failures.append(f"slow open: {fake.sent[1]!r}")
+    expect("never opens", RouteError, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2", "Wi-Fi")]),
+           lambda b: b.walk("wifi", settings_page("Wi-Fi"), 100), 1 + ASYNC_REREADS)
+    # Files opens a volume in place: the stack does not grow, and that is no error
+    files = tile("Files") + [("row", "SD card", FILES), ("inplace",), "enter", "wait"]
+    expect("in-place open", None, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 4", "Backup")]), lambda b: b.walk("sd", files), 1)
+    expect("in-place open is not a free pass", RouteError, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 4", "Backup")]),
+           lambda b: b.walk("sd", tile("Files") + [("row", "SD card", FILES), "enter", "wait"]), 1 + ASYNC_REREADS)
+    first = tile("Files") + [("row", "SD card", FILES), ("inplace",), "enter", "wait", ("any_row",),
+                             ("maybe_inplace",), "enter", "wait"]
+    expect("folder opens in place", None, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 4", "docs")]),
+           lambda b: b.walk("first", first, 180), 1)
+    expect("file opens a viewer", None, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 4 > 180", "")]),
+           lambda b: b.walk("first", first, 180), 1)
     fake = FakeFw([ui("0", "S")])
     expect("every keys send needs the lock", None, fake, lambda b: (b.keys(["down"]), b.send(["down"])), 2)
     if not all(l.startswith("keys send " + NEEDLOCK) for l in fake.sent[:1]):
@@ -705,7 +796,7 @@ def selftest_remote(expect: Callable[..., None], failures: List[str]) -> None:
     elif not fake.sent[2].endswith("row:Time| enter"):
         failures.append(f"long route split: resent {fake.sent[2][-40:]!r}")
     expect("enter opened nothing", RouteError, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2", "Display")]),
-           lambda b: b.walk("display", settings_page("Display")), 1)
+           lambda b: b.walk("display", settings_page("Display")), 1 + ASYNC_REREADS)
     fake = FakeFw([ui("0", "S")], keys=["keys send: guard 1 failed: focus 'x'; 0 of 2 sent"])
     badge = Badge(fake)
     try:
