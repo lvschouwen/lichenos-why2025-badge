@@ -3,6 +3,7 @@
 // mesh_lock (no app port: nothing to expose on a network). MyMesh's loop() holds the lock, so its callbacks (the Listener below) already run under it.
 #include "mesh_wipe.h"
 #include "mesh_rset.h"
+#include "mesh_telem.h"
 #include "mesh_link.h"
 
 #include "lora_radio.h"
@@ -1855,6 +1856,7 @@ extern "C" bool mesh_trace_get(mt_t *out) {
 // One request at a time, shared with the pipe under ob_mux like the trace: copy-in, never the mesh lock (LVGL safe)
 
 static rr_t *remote_req; // PSRAM, made with the outbox
+static tl_rate_t telem_rate; // when each contact was last asked for telemetry (#162), under mesh_ob_enter/exit
 
 extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char const *arg, char const **why) {
     char const *local;
@@ -1870,9 +1872,25 @@ extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char 
     rr_prep_t prep; // classified and redacted here, outside the critical section (#117)
     rr_prepare(op, arg, &prep);
     mesh_ob_enter();
-    uint32_t seq = rr_request_prepared(remote_req, op, prefix, arg, &prep, (uint32_t)millis(), why);
+    uint32_t wait = op == RR_TELEMETRY ? tl_rate_wait_s(&telem_rate, prefix, (uint32_t)millis()) : 0;
+    uint32_t seq  = wait ? 0 : rr_request_prepared(remote_req, op, prefix, arg, &prep, (uint32_t)millis(), why);
+    if (seq && op == RR_TELEMETRY) {
+        tl_rate_note(&telem_rate, prefix, (uint32_t)millis());
+    }
     mesh_ob_exit();
+    if (wait) {
+        static char text[24]; // read by the caller right after, on its own task: one request per press, so never raced
+        snprintf(text, sizeof(text), "Wait %lu s", (unsigned long)wait);
+        *why = text;
+    }
     return seq;
+}
+
+extern "C" uint32_t mesh_telemetry_wait_s(uint8_t const prefix[6]) {
+    mesh_ob_enter();
+    uint32_t wait = tl_rate_wait_s(&telem_rate, prefix, (uint32_t)millis());
+    mesh_ob_exit();
+    return wait;
 }
 
 extern "C" bool mesh_remote_head(rr_head_t *out) {
@@ -2312,6 +2330,46 @@ static void cmd_mesh_remote(char const *args) {
     }
 }
 
+// "fw mesh telemetry <hex> YES" asks a contact for its sensor values (it transmits: YES as for the repeater commands);
+// "fw mesh telemetry" shows the last answer (#162)
+static void cmd_mesh_telemetry(char const *arg) {
+    if (*arg) {
+        char    token[16];
+        int     used = 0;
+        uint8_t prefix[6];
+        if (sscanf(arg, "%15s%n", token, &used) != 1 || !console_contact(token, prefix)) {
+            return;
+        }
+        if (strcmp(arg + used + strspn(arg + used, " "), "YES") != 0) {
+            console_reply("this sends a request on air: add YES at the end, fw mesh telemetry <key digits> YES");
+            return;
+        }
+        char const *why = NULL;
+        uint32_t    seq = mesh_remote_start(prefix, RR_TELEMETRY, NULL, &why);
+        if (seq) {
+            console_reply("telemetry #%lu queued: fw mesh telemetry shows the answer", (unsigned long)seq);
+        } else {
+            console_reply("not started: %s", why ? why : "?");
+        }
+        return;
+    }
+    rr_t *r = (rr_t *)heap_caps_malloc(sizeof(rr_t), MALLOC_CAP_SPIRAM);
+    if (r && mesh_remote_get(r) && r->op == RR_TELEMETRY && r->seq) {
+        char text[128];
+        rr_state_text(r, text, sizeof(text));
+        console_reply("telemetry #%lu: %s", (unsigned long)r->seq, text);
+        tl_line_t *lines = (tl_line_t *)heap_caps_malloc(TL_LINES_MAX * sizeof(tl_line_t), MALLOC_CAP_SPIRAM);
+        size_t     n     = lines && r->have_telem ? tl_lpp_lines(r->telem, r->telem_len, lines, TL_LINES_MAX) : 0;
+        for (size_t i = 0; i < n; i++) {
+            console_reply("  %s", lines[i].text);
+        }
+        free(lines);
+    } else {
+        console_reply("no telemetry asked yet: fw mesh telemetry <key digits> YES");
+    }
+    free(r);
+}
+
 static void cmd_mesh_out(void) {
     mesh_out_info_t list[OB_CAP];
     size_t          n = mesh_out_list(list, OB_CAP);
@@ -2564,6 +2622,10 @@ static void cmd_mesh(char const *args) {
     }
     if (strncmp(args, "discover ", 9) == 0) {
         cmd_mesh_trace(args + 9, MT_DISCOVER);
+        return;
+    }
+    if (strncmp(args, "telemetry", 9) == 0 && (args[9] == ' ' || !args[9])) {
+        cmd_mesh_telemetry(args + (args[9] ? 10 : 9));
         return;
     }
     if (strncmp(args, "remote", 6) == 0 && (args[6] == ' ' || !args[6])) {
@@ -3310,6 +3372,7 @@ static bool start_locked(char const *files_dir) {
     rr_init((rr_t *)rr_mem);
     n->attachRemote((rr_t *)rr_mem);
     remote_req = (rr_t *)rr_mem;
+    tl_rate_init(&telem_rate);
 
     // Everything is loaded before node is published: the screens and the console read MeshCore only through node, and
     // must not walk the contact table while begin() fills it (#65 review)

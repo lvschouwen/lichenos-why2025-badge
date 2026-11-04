@@ -16,6 +16,7 @@
 #include "meshcore_remote.h"
 #include "meshcore_run.h"
 #include "meshcore_screens.h"
+#include "meshcore_telem.h"
 #include "qr_screen.h"
 #include "theme.h"
 
@@ -331,6 +332,20 @@ static void open_trace(contact_t *ct, mt_kind_t kind) {
     shell_open_keyed(build_trace, SCREEN_TRACE, shell_key_hash(id, sizeof(id)));
 }
 
+// Request telemetry (#162): transmits, so the careful dialog comes first (meshcore_telem.c); one request per 30 s
+static void on_telemetry(void *arg) {
+    contact_t *ct = arg;
+    if (ct->gone) {
+        return;
+    }
+    uint32_t wait = meshcore_telem_ask(ct->prefix, ct->title);
+    if (wait) {
+        char text[24];
+        snprintf(text, sizeof(text), "Wait %lu s", (unsigned long)wait);
+        set_note(ct->note, text, true);
+    }
+}
+
 static void on_trace(void *arg) {
     open_trace(arg, MT_TRACE);
 }
@@ -444,6 +459,7 @@ static lv_obj_t *build_detail(void) {
     ct->reset_row = menu_add(menu, "Reset path", "", on_reset, ct);
     menu_set_danger(ct->reset_row, "Reset the route to this contact? The next message floods to find a new one.", "reset");
     menu_set_kind(menu_add(menu, "Signal", "", on_signal, ct), MENU_OPEN);
+    menu_set_kind(menu_add(menu, "Request telemetry", "", on_telemetry, ct), MENU_OPEN);
     menu_set_kind(menu_add(menu, "Trace path", "", on_trace, ct), MENU_OPEN);
     menu_set_kind(menu_add(menu, "Discover path", "", on_discover, ct), MENU_OPEN);
     ct->fav_row = menu_add(menu, "Favourite", "", on_fav, ct);

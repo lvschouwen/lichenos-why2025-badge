@@ -87,6 +87,13 @@ size_t mf_encode_status_req(uint8_t *out, uint8_t const pub[MF_PUB_LEN]) {
     return 1 + MF_PUB_LEN;
 }
 
+size_t mf_encode_telemetry_req(uint8_t *out, uint8_t const pub[MF_PUB_LEN]) {
+    out[0] = MF_CMD_SEND_TELEMETRY_REQ;
+    out[1] = out[2] = out[3] = 0; // reserved
+    memcpy(out + 4, pub, MF_PUB_LEN);
+    return 4 + MF_PUB_LEN;
+}
+
 size_t mf_encode_logout(uint8_t *out, uint8_t const pub[MF_PUB_LEN]) {
     out[0] = MF_CMD_LOGOUT;
     memcpy(out + 1, pub, MF_PUB_LEN);
@@ -233,6 +240,19 @@ static void decode_login_ok(uint8_t const *f, size_t len, mf_msg_t *out) {
     }
 }
 
+// [0x8B, 0, prefix6, Cayenne LPP]: the bytes are kept whole, mesh_telem.h reads them
+static void decode_telemetry(uint8_t const *f, size_t len, mf_msg_t *out) {
+    if (len < 8) {
+        out->kind = MF_BAD;
+        return;
+    }
+    out->kind = MF_TELEMETRY;
+    memcpy(out->rprefix, f + 2, MF_PREFIX);
+    size_t n       = len - 8 < MF_TELEM_MAX ? len - 8 : MF_TELEM_MAX;
+    out->telem_len = (uint8_t)n;
+    memcpy(out->telem, f + 8, n);
+}
+
 // [0x87, 0, prefix6, RepeaterStats]: fields are taken as far as the answer goes
 static void decode_status(uint8_t const *f, size_t len, mf_msg_t *out) {
     if (len < 8) {
@@ -361,6 +381,9 @@ void mf_decode(uint8_t const *f, size_t len, mf_msg_t *out) {
         break;
     case MF_PUSH_STATUS_RESPONSE:
         decode_status(f, len, out);
+        break;
+    case MF_PUSH_TELEMETRY_RESPONSE:
+        decode_telemetry(f, len, out);
         break;
     case MF_PUSH_TRACE_DATA:
         decode_trace(f, len, out);

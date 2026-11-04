@@ -285,6 +285,9 @@ bool     mesh_remote_get(rr_t *out);
 bool     mesh_remote_head(rr_head_t *out);
 // Ends the login (MyMesh stops its keep-alives to the server): local, nothing goes on air. False when MeshCore is busy.
 bool     mesh_remote_logout(uint8_t const prefix[6], uint32_t wait_ms);
+// Telemetry from any contact (#162): mesh_remote_start with RR_TELEMETRY, at most one per contact per 30 s (mesh_telem.h;
+// the refusal reads "Wait N s"). This is the seconds left before the contact may be asked again, 0 = now.
+uint32_t mesh_telemetry_wait_s(uint8_t const prefix[6]);
 
 #ifdef __cplusplus
 }

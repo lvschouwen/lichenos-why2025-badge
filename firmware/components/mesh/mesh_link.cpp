@@ -488,6 +488,7 @@ size_t CompanionPipe::take_remote(uint8_t dest[]) {
         switch (op) {
         case RR_LOGIN: n = mf_encode_login(dest, c->id.pub_key, arg); break;
         case RR_STATUS: n = mf_encode_status_req(dest, c->id.pub_key); break;
+        case RR_TELEMETRY: n = mf_encode_telemetry_req(dest, c->id.pub_key); break;
         case RR_CLI:
             n = mf_encode_send_cli(dest, 0, rtc_clock.getCurrentTimeUnique(), prefix, arg, mf_text_cut(arg, MF_MAX_TEXT));
             break;
@@ -627,11 +628,13 @@ void CompanionPipe::on_push(mf_msg_t const &m) {
     }
     case MF_LOGIN_SUCCESS:
     case MF_LOGIN_FAIL:
+    case MF_TELEMETRY:
     case MF_STATUS:
         if (rr_) {
             mesh_ob_enter();
-            bool ours = m.kind == MF_STATUS ? rr_on_status(rr_, &m, (uint32_t)millis())
-                                            : rr_on_login(rr_, &m, (uint32_t)millis());
+            bool ours = m.kind == MF_STATUS      ? rr_on_status(rr_, &m, (uint32_t)millis())
+                        : m.kind == MF_TELEMETRY ? rr_on_telemetry(rr_, &m, (uint32_t)millis())
+                                                 : rr_on_login(rr_, &m, (uint32_t)millis());
             mesh_ob_exit();
             stats_.remote_answers += ours;
         }

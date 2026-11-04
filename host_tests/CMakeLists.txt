@@ -1432,3 +1432,15 @@ add_executable(mdns_name_test
 target_include_directories(mdns_name_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_mdns)
 target_compile_options(mdns_name_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mdns_name_test COMMAND mdns_name_test)
+
+add_executable(mesh_telem_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/mesh_telem_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_telem.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_remote.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_rset.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_frame.c
+)
+target_include_directories(mesh_telem_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_telem_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(mesh_telem_test PRIVATE m)
+add_test(NAME mesh_telem_test COMMAND mesh_telem_test)

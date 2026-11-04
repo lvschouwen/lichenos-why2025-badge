@@ -25,6 +25,7 @@ enum {
     MF_CMD_RESET_PATH         = 13,
     MF_CMD_SEND_LOGIN         = 26,
     MF_CMD_SEND_STATUS_REQ    = 27,
+    MF_CMD_SEND_TELEMETRY_REQ = 39, // [39, 0, 0, 0, pub key]
     MF_CMD_LOGOUT             = 29,
     MF_CMD_REMOVE_CONTACT     = 15,
     MF_CMD_DEVICE_QUERY       = 22,
@@ -48,6 +49,7 @@ enum {
     MF_PUSH_LOGIN_SUCCESS       = 0x85,
     MF_PUSH_LOGIN_FAIL          = 0x86,
     MF_PUSH_STATUS_RESPONSE     = 0x87,
+    MF_PUSH_TELEMETRY_RESPONSE  = 0x8B,
     MF_PUSH_TRACE_DATA          = 0x89,
     MF_PUSH_PATH_DISCOVERY      = 0x8D, // PUSH_CODE_PATH_DISCOVERY_RESPONSE
 };
@@ -72,6 +74,7 @@ typedef enum {
     MF_LOGIN_SUCCESS,
     MF_LOGIN_FAIL,
     MF_STATUS,
+    MF_TELEMETRY, // PUSH_TELEMETRY_RESPONSE: a contact's sensor values, Cayenne LPP (#162)
     MF_TRACE,     // PUSH_TRACE_DATA: a trace came back (#53)
     MF_DISCOVERY, // PUSH_PATH_DISCOVERY_RESPONSE: the contact answered a path discovery (#53)
 } mf_kind_t;
@@ -115,6 +118,9 @@ typedef struct {
     uint32_t rx_air_secs, recv_errors;
 } mf_status_t;
 
+// The Cayenne LPP bytes of a telemetry answer: what fits in a frame after [0x8B, 0, prefix6]
+#define MF_TELEM_MAX (MF_MAX_FRAME - 8)
+
 typedef struct {
     mf_kind_t kind;
     uint8_t   code; // the frame's first byte
@@ -133,6 +139,8 @@ typedef struct {
     uint8_t   rprefix[MF_PREFIX];
     uint8_t   admin, acl, fw_level; // MF_LOGIN_SUCCESS: permissions bit 0 = admin; acl and fw_level only from newer servers
     mf_status_t status;             // MF_STATUS
+    uint8_t   telem_len;            // MF_TELEMETRY (who: rprefix)
+    uint8_t   telem[MF_TELEM_MAX];
     // MF_MSG_RECV from a contact (not a channel): msg_ok when the frame was whole
     bool      msg_ok;
     uint8_t   txt_type, author[4]; // author: a room post's sender (txt_type SIGNED_PLAIN)
@@ -153,6 +161,8 @@ size_t mf_encode_send_cli(uint8_t *out, uint8_t attempt, uint32_t timestamp, uin
 // CMD_SEND_LOGIN: the password is cut at MF_PASSWORD_MAX characters by MyMesh, so more is refused here (0)
 size_t mf_encode_login(uint8_t *out, uint8_t const pub[MF_PUB_LEN], char const *password);
 size_t mf_encode_status_req(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);
+// CMD_SEND_TELEMETRY_REQ (#162): asks the contact for its sensor values; the answer is PUSH_TELEMETRY_RESPONSE
+size_t mf_encode_telemetry_req(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);
 size_t mf_encode_logout(uint8_t *out, uint8_t const pub[MF_PUB_LEN]); // local: MyMesh stops its keep-alives to the server
 size_t mf_encode_reset_path(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);
 size_t mf_encode_remove_contact(uint8_t *out, uint8_t const pub[MF_PUB_LEN]);

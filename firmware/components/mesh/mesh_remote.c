@@ -52,7 +52,7 @@ uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char c
 uint32_t rr_request_prepared(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg,
                              rr_prep_t const *p, uint32_t now_ms, char const **why) {
     if (rr_busy(r)) {
-        *why = "another request to a repeater or room is still running";
+        *why = "another request to a contact is still running";
         return 0;
     }
     size_t n = arg && op != RR_STATUS ? strlen(arg) : 0;
@@ -214,6 +214,19 @@ bool rr_on_status(rr_t *r, mf_msg_t const *m, uint32_t now_ms) {
     return true;
 }
 
+bool rr_on_telemetry(rr_t *r, mf_msg_t const *m, uint32_t now_ms) {
+    if (r->op != RR_TELEMETRY || r->state != RR_SENT || memcmp(m->rprefix, r->prefix, MF_PREFIX) != 0) {
+        return false;
+    }
+    r->state      = RR_DONE;
+    r->done_ms    = now_ms;
+    r->have_telem = true;
+    r->telem_len  = m->telem_len;
+    memcpy(r->telem, m->telem, m->telem_len);
+    memcpy(r->telem_prefix, r->prefix, MF_PREFIX);
+    return true;
+}
+
 // The remote's text is shown as it is except for control bytes (they could move the cursor of a terminal): a line
 // break stays one
 static void append_reply(rr_exchange_t *x, char const *text) {
@@ -343,9 +356,10 @@ bool rr_head_logged_in(rr_head_t const *h, uint8_t const prefix[MF_PREFIX]) {
 static void poll_timeouts(rr_t *r, uint32_t now_ms) {
     if (r->state == RR_SENT && now_ms - r->sent_ms > rr_deadline_ms(r->est_ms)) {
         r->state = RR_TIMEOUT;
-        r->why   = r->op == RR_LOGIN    ? "no answer to the login"
-                   : r->op == RR_STATUS ? "no answer (log in first?)"
-                                        : "no reply (log in as admin first?)";
+        r->why   = r->op == RR_LOGIN       ? "no answer to the login"
+                   : r->op == RR_STATUS    ? "no answer (log in first?)"
+                   : r->op == RR_TELEMETRY ? "No answer: out of range, or it does not share telemetry with you"
+                                           : "no reply (log in as admin first?)";
         cli_end(r, RR_CLI_NONE);
     } else if ((r->state == RR_QUEUED || r->state == RR_TAKEN) && now_ms - r->asked_ms > RR_CAP_MS) {
         wipe(r->arg, sizeof(r->arg));
@@ -414,7 +428,10 @@ size_t rr_status_lines(mf_status_t const *s, rr_line_t *out, size_t max) {
 }
 
 void rr_state_text(rr_t const *r, char *out, size_t cap) {
-    char const *what = r->op == RR_LOGIN ? "Logging in" : r->op == RR_STATUS ? "Asking for the status" : "Sending";
+    char const *what = r->op == RR_LOGIN       ? "Logging in"
+                       : r->op == RR_STATUS    ? "Asking for the status"
+                       : r->op == RR_TELEMETRY ? "Asking for telemetry"
+                                               : "Sending";
     switch (r->state) {
     case RR_IDLE: snprintf(out, cap, "Nothing asked yet"); break;
     case RR_QUEUED:

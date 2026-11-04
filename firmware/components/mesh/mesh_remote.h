@@ -29,7 +29,7 @@ extern "C" {
 #define RR_CAP_MS     90000
 #define RR_APPEND_MS  4000 // a second CLI_DATA message this soon after the first belongs to the same reply
 
-typedef enum { RR_LOGIN, RR_STATUS, RR_CLI } rr_op_t;
+typedef enum { RR_LOGIN, RR_STATUS, RR_CLI, RR_TELEMETRY } rr_op_t; // RR_TELEMETRY (#162): any contact, not only a repeater
 typedef enum {
     RR_IDLE,    // nothing asked since boot
     RR_QUEUED,  // waiting for the mesh task
@@ -70,6 +70,11 @@ typedef struct {
     bool        have_status;
     uint8_t     status_prefix[MF_PREFIX];
     mf_status_t status;
+    // the last telemetry answer (#162): the Cayenne LPP bytes as the contact sent them
+    bool    have_telem;
+    uint8_t telem_prefix[MF_PREFIX];
+    uint8_t telem_len;
+    uint8_t telem[MF_TELEM_MAX];
     // the CLI exchanges with cli_prefix, newest at cli[cli_head]
     uint8_t       cli_prefix[MF_PREFIX];
     uint8_t       cli_n, cli_head;
@@ -123,6 +128,8 @@ void rr_on_reply(rr_t *r, mf_msg_t const *m, uint32_t now_ms);
 // PUSH_LOGIN_SUCCESS / PUSH_LOGIN_FAIL / PUSH_STATUS_RESPONSE: true when they answer the running request
 bool rr_on_login(rr_t *r, mf_msg_t const *m, uint32_t now_ms);
 bool rr_on_status(rr_t *r, mf_msg_t const *m, uint32_t now_ms);
+// PUSH_TELEMETRY_RESPONSE (#162): true when it answers the running telemetry request
+bool rr_on_telemetry(rr_t *r, mf_msg_t const *m, uint32_t now_ms);
 // A contact message from the drained offline queue: true when it is the CLI reply (CLI_DATA) we wait for or a
 // following part of it
 bool rr_on_message(rr_t *r, mf_msg_t const *m, uint32_t now_ms);
