@@ -1,8 +1,8 @@
 // lichen_alloc (#181): heap_caps with the placement rule and the per-app count (mem_book.c) on top. The count is under
-// a spinlock: an allocation can come from any task, and the book's work is a few compares.
+// a spinlock: an allocation can come from any task, and the book's work is a few compares. The book is in internal RAM
+// so a critical section never touches PSRAM (whose cache can be off during a flash write).
 #include "lichen_mem.h"
 
-#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_memory_utils.h"
@@ -13,8 +13,9 @@ _Static_assert(MEM_BOOK_OWNERS >= LICHEN_MAX_APPS + 1, "a row for every app and 
 
 static char const TAG[] = "mem";
 
-EXT_RAM_BSS_ATTR static mem_book_t book; // ~1 KB: PSRAM
-static portMUX_TYPE                book_mux = portMUX_INITIALIZER_UNLOCKED;
+static mem_book_t   book; // ~1 KB internal .bss
+static portMUX_TYPE book_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool         went_unbooked; // the owner table was full once: frees without a row are expected from then on
 
 void *lichen_alloc(lichen_app_t const *app, size_t size, uint32_t flags) {
     char const *owner    = app ? app->id : MEM_BOOK_OS;
@@ -25,23 +26,31 @@ void *lichen_alloc(lichen_app_t const *app, size_t size, uint32_t flags) {
         return NULL;
     }
     portENTER_CRITICAL(&book_mux);
-    bool charged = mem_book_charge(&book, owner, internal, (uint32_t)size);
+    mem_charge_t charge = mem_book_charge(&book, owner, internal, (uint32_t)size);
+    bool         first  = charge == MEM_CHARGE_NO_ROW && !went_unbooked;
+    went_unbooked       = went_unbooked || charge == MEM_CHARGE_NO_ROW;
     portEXIT_CRITICAL(&book_mux);
-    if (!charged) {
+    if (charge == MEM_CHARGE_QUOTA) {
         ESP_LOGW(TAG, "%s: %u B of internal RAM refused: over the app's %u B", owner, (unsigned)size,
                  MEM_BOOK_INTERNAL_QUOTA);
         return NULL;
     }
+    if (first) {
+        // Bookkeeping never fails an allocation: this owner's memory is not counted (logged once)
+        ESP_LOGW(TAG, "%s: no row left in the memory book (%d): allocated, but not counted", owner, MEM_BOOK_OWNERS);
+    }
     uint32_t caps = (internal ? MALLOC_CAP_INTERNAL : MALLOC_CAP_SPIRAM) | MALLOC_CAP_8BIT;
     void    *p    = (flags & LICHEN_MEM_ZERO) ? heap_caps_calloc(1, size, caps) : heap_caps_malloc(size, caps);
     size_t   got  = p ? heap_caps_get_allocated_size(p) : 0;
-    portENTER_CRITICAL(&book_mux);
-    if (!p) {
-        mem_book_release(&book, owner, internal, (uint32_t)size);
-    } else if (got > size) {
-        mem_book_adjust(&book, owner, internal, (uint32_t)(got - size)); // the free gives back what the heap says
+    if (charge == MEM_CHARGE_OK) {
+        portENTER_CRITICAL(&book_mux);
+        if (!p) {
+            mem_book_release(&book, owner, internal, (uint32_t)size);
+        } else if (got > size) {
+            mem_book_adjust(&book, owner, internal, (uint32_t)(got - size)); // the free gives back what the heap says
+        }
+        portEXIT_CRITICAL(&book_mux);
     }
-    portEXIT_CRITICAL(&book_mux);
     return p;
 }
 
@@ -51,31 +60,33 @@ void lichen_free(lichen_app_t const *app, void *ptr) {
     }
     bool     internal = !esp_ptr_external_ram(ptr);
     uint32_t bytes    = (uint32_t)heap_caps_get_allocated_size(ptr);
+    char const *owner = app ? app->id : MEM_BOOK_OS;
     portENTER_CRITICAL(&book_mux);
-    mem_book_release(&book, app ? app->id : MEM_BOOK_OS, internal, bytes);
+    mem_release_t rel      = mem_book_release(&book, owner, internal, bytes);
+    bool          unbooked = went_unbooked;
     portEXIT_CRITICAL(&book_mux);
+    if (rel == MEM_RELEASE_OVER || (rel == MEM_RELEASE_NO_ROW && !unbooked)) {
+        // Freed under another owner than it was allocated with, or never from lichen_alloc: some count is now wrong
+        ESP_LOGW(TAG, "%s: lichen_free of %p (%u B) is more than it holds: freed under the wrong owner?", owner, ptr,
+                 (unsigned)bytes);
+    }
     heap_caps_free(ptr);
 }
 
 // The lines "fw mem" adds: what each owner holds through lichen_alloc now, its peak, and refusals
 static void mem_report(void) {
-    mem_book_t *snap = heap_caps_malloc(sizeof(*snap), MALLOC_CAP_SPIRAM); // 1 KB, off the console's stack
-    if (!snap) {
-        console_reply("mem apps: out of memory");
-        return;
-    }
-    portENTER_CRITICAL(&book_mux);
-    *snap = book;
-    portEXIT_CRITICAL(&book_mux);
     for (int i = 0; i < MEM_BOOK_OWNERS; i++) {
-        mem_use_t const *r = &snap->row[i];
+        mem_use_t row; // one row at a time onto the stack: a short critical section, and no PSRAM inside it
+        portENTER_CRITICAL(&book_mux);
+        row = book.row[i];
+        portEXIT_CRITICAL(&book_mux);
+        mem_use_t const *r = &row;
         if (r->owner[0]) {
             console_reply("mem app %s internal %u (peak %u, quota %u) psram %u (peak %u) blocks %u refused %u", r->owner,
                           (unsigned)r->internal, (unsigned)r->internal_peak, MEM_BOOK_INTERNAL_QUOTA,
                           (unsigned)r->bulk, (unsigned)r->bulk_peak, (unsigned)r->blocks, (unsigned)r->refused);
         }
     }
-    heap_caps_free(snap);
 }
 
 void lichen_mem_console_register(void) {

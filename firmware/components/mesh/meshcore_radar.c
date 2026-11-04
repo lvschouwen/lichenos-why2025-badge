@@ -1,7 +1,8 @@
 // The MeshCore app's Contact radar (#171): contacts that advertise a position, plotted by distance and bearing around
 // our own manual position (#52), with the same contacts closest first in a list beside the plot. No map tiles. The ring
 // is the smallest 1-2-5 step holding the farthest contact. Enter opens the highlighted contact's details (#49).
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
+#include "meshcore_run.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_ui.h"
@@ -224,7 +225,7 @@ static void on_delete(lv_event_t *e) {
         lv_timer_delete(timer);
         timer = NULL;
     }
-    heap_caps_free(mem);
+    lichen_free(meshcore_self(), mem);
     mem        = NULL;
     screen_obj = note_label = plot = body = NULL;
     list       = (mc_list_t){0};
@@ -253,7 +254,7 @@ static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     screen_obj       = screen;
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    mem = heap_caps_calloc(1, sizeof(*mem), MALLOC_CAP_SPIRAM);
+    mem = lichen_alloc(meshcore_self(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!mem) {
         ESP_LOGE(TAG, "no memory for the contact radar");
         mc_list_label(screen, "Not enough memory for this page.", THEME_DIM);

@@ -40,6 +40,12 @@ void meshcore_run_init(lichen_app_t const *the_app) {
 }
 
 lichen_app_t const *meshcore_self(void) {
+    static bool told;
+    if (!app && !told) {
+        // Before meshcore_app_register: the task or memory would be booked as the OS's, and freed as MeshCore's later
+        told = true;
+        ESP_LOGE(TAG, "meshcore_self() before meshcore_run_init: booked as the OS's");
+    }
     return app;
 }
 

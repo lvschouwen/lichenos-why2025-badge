@@ -3,7 +3,6 @@
 // runs right before vTaskDelete and must not block.
 #include "lichen_task.h"
 
-#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fw_console.h"
@@ -18,8 +17,9 @@ static char const TAG[] = "task";
 
 #define LEFTOVER_POLL_MS 20
 
-EXT_RAM_BSS_ATTR static task_book_t book; // ~2 KB: PSRAM, internal RAM is the scarce one
-static portMUX_TYPE                 book_mux = portMUX_INITIALIZER_UNLOCKED;
+// Internal .bss (~1.7 KB): a critical section must never touch PSRAM, whose cache can be off during a flash write
+static task_book_t  book;
+static portMUX_TYPE book_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static void trampoline(void *arg) {
     int slot = (int)(intptr_t)arg;
@@ -157,9 +157,13 @@ static void cmd_tasks(char const *args) {
         return;
     }
     n = uxTaskGetSystemState(tasks, n, NULL);
-    portENTER_CRITICAL(&book_mux);
-    memcpy(snap, &book, sizeof(*snap));
-    portEXIT_CRITICAL(&book_mux);
+    for (int i = 0; i < TASK_BOOK_SLOTS; i++) {
+        task_slot_t slot; // one slot at a time onto the stack: short critical sections, the PSRAM copy outside them
+        portENTER_CRITICAL(&book_mux);
+        slot = book.slot[i];
+        portEXIT_CRITICAL(&book_mux);
+        snap->slot[i] = slot;
+    }
     print_tasks(snap, tasks, n);
     size_t booked = 0;
     for (int i = 0; i < TASK_BOOK_SLOTS; i++) {

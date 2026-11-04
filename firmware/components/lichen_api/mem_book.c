@@ -45,19 +45,19 @@ static void add(mem_use_t *r, bool internal, uint32_t bytes) {
     }
 }
 
-bool mem_book_charge(mem_book_t *b, char const *owner, bool internal, uint32_t bytes) {
+mem_charge_t mem_book_charge(mem_book_t *b, char const *owner, bool internal, uint32_t bytes) {
     mem_use_t *r = row_of(b, owner, true);
     if (!r) {
-        return false;
+        return MEM_CHARGE_NO_ROW;
     }
     bool limited = strcmp(r->owner, MEM_BOOK_OS) != 0;
     if (internal && limited && (bytes > MEM_BOOK_INTERNAL_QUOTA || r->internal > MEM_BOOK_INTERNAL_QUOTA - bytes)) {
         r->refused++;
-        return false;
+        return MEM_CHARGE_QUOTA;
     }
     add(r, internal, bytes);
     r->blocks++;
-    return true;
+    return MEM_CHARGE_OK;
 }
 
 void mem_book_adjust(mem_book_t *b, char const *owner, bool internal, uint32_t extra) {
@@ -67,16 +67,18 @@ void mem_book_adjust(mem_book_t *b, char const *owner, bool internal, uint32_t e
     }
 }
 
-void mem_book_release(mem_book_t *b, char const *owner, bool internal, uint32_t bytes) {
+mem_release_t mem_book_release(mem_book_t *b, char const *owner, bool internal, uint32_t bytes) {
     mem_use_t *r = row_of(b, owner, false);
     if (!r) {
-        return;
+        return MEM_RELEASE_NO_ROW;
     }
     uint32_t *held = internal ? &r->internal : &r->bulk;
-    *held          = *held > bytes ? *held - bytes : 0;
+    bool      over = bytes > *held || !r->blocks;
+    *held          = over ? 0 : *held - bytes;
     if (r->blocks) {
         r->blocks--;
     }
+    return over ? MEM_RELEASE_OVER : MEM_RELEASE_OK;
 }
 
 mem_use_t const *mem_book_find(mem_book_t const *b, char const *owner) {

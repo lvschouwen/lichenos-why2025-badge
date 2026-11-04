@@ -28,14 +28,27 @@ typedef struct {
     mem_use_t row[MEM_BOOK_OWNERS];
 } mem_book_t;
 
-// Before an allocation of bytes: false when an app's internal total would pass the quota (counted in refused) or the
-// table has no row for a new owner. Charged on true; give it back with mem_book_release when the allocation fails.
-bool mem_book_charge(mem_book_t *b, char const *owner, bool internal, uint32_t bytes);
+typedef enum {
+    MEM_CHARGE_OK,     // charged
+    MEM_CHARGE_QUOTA,  // refused: an app's internal total would pass the quota (counted in refused)
+    MEM_CHARGE_NO_ROW, // not charged: no row left for a new owner. Bookkeeping never fails an allocation: the caller
+                       // allocates anyway, unbooked
+} mem_charge_t;
+
+// Before an allocation of bytes. Give a charge back with mem_book_release when the allocation fails.
+mem_charge_t mem_book_charge(mem_book_t *b, char const *owner, bool internal, uint32_t bytes);
 // After the allocation: the heap may hand out a little more than asked (alignment). Added without the quota check, so
 // the free, which only knows the block's real size, gives back exactly what was charged.
 void mem_book_adjust(mem_book_t *b, char const *owner, bool internal, uint32_t extra);
+typedef enum {
+    MEM_RELEASE_OK,
+    MEM_RELEASE_NO_ROW, // the owner has no row: allocated unbooked (table full), or freed under the wrong owner
+    MEM_RELEASE_OVER,   // more than the owner holds: freed under the wrong owner, or allocated outside lichen_alloc.
+                        // The count stops at zero.
+} mem_release_t;
+
 // A free, or the charge of an allocation that failed: one block fewer. Never goes below zero.
-void mem_book_release(mem_book_t *b, char const *owner, bool internal, uint32_t bytes);
+mem_release_t mem_book_release(mem_book_t *b, char const *owner, bool internal, uint32_t bytes);
 mem_use_t const *mem_book_find(mem_book_t const *b, char const *owner); // NULL: the owner never allocated
 
 #ifdef __cplusplus

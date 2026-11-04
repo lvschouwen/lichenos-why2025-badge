@@ -19,40 +19,50 @@ static void test_quota(void) {
     static mem_book_t b;
     memset(&b, 0, sizeof(b));
     CHECK(mem_book_find(&b, "meshcore") == NULL);
-    CHECK(mem_book_charge(&b, "meshcore", true, 32 * 1024));
-    CHECK(mem_book_charge(&b, "meshcore", true, 32 * 1024)); // exactly the quota
-    CHECK(!mem_book_charge(&b, "meshcore", true, 1));        // one byte over
+    CHECK(mem_book_charge(&b, "meshcore", true, 32 * 1024) == MEM_CHARGE_OK);
+    CHECK(mem_book_charge(&b, "meshcore", true, 32 * 1024) == MEM_CHARGE_OK); // exactly the quota
+    CHECK(mem_book_charge(&b, "meshcore", true, 1) == MEM_CHARGE_QUOTA);        // one byte over
     mem_use_t const *m = mem_book_find(&b, "meshcore");
     CHECK(m && m->internal == MEM_BOOK_INTERNAL_QUOTA && m->blocks == 2 && m->refused == 1);
-    CHECK(mem_book_charge(&b, "meshcore", false, 4u * 1024 * 1024)); // PSRAM has no quota
+    CHECK(mem_book_charge(&b, "meshcore", false, 4u * 1024 * 1024) == MEM_CHARGE_OK); // PSRAM has no quota
     CHECK(m->bulk == 4u * 1024 * 1024 && m->blocks == 3);
-    CHECK(!mem_book_charge(&b, "weather", true, MEM_BOOK_INTERNAL_QUOTA + 1)); // alone over the quota
-    CHECK(!mem_book_charge(&b, "weather", true, UINT32_MAX));                  // no overflow past the check
-    CHECK(mem_book_charge(&b, "weather", true, 1024)); // another app has its own quota
+    CHECK(mem_book_charge(&b, "weather", true, MEM_BOOK_INTERNAL_QUOTA + 1) == MEM_CHARGE_QUOTA); // alone over the quota
+    CHECK(mem_book_charge(&b, "weather", true, UINT32_MAX) == MEM_CHARGE_QUOTA);                  // no overflow past the check
+    CHECK(mem_book_charge(&b, "weather", true, 1024) == MEM_CHARGE_OK); // another app has its own quota
     // The OS is never refused
-    CHECK(mem_book_charge(&b, NULL, true, 2 * MEM_BOOK_INTERNAL_QUOTA));
+    CHECK(mem_book_charge(&b, NULL, true, 2 * MEM_BOOK_INTERNAL_QUOTA) == MEM_CHARGE_OK);
     CHECK(mem_book_find(&b, MEM_BOOK_OS)->internal == 2 * MEM_BOOK_INTERNAL_QUOTA);
     // Free one: room again, the peak stays
     mem_book_release(&b, "meshcore", true, 32 * 1024);
     CHECK(m->internal == 32 * 1024 && m->internal_peak == MEM_BOOK_INTERNAL_QUOTA && m->blocks == 2);
-    CHECK(mem_book_charge(&b, "meshcore", true, 16 * 1024));
+    CHECK(mem_book_charge(&b, "meshcore", true, 16 * 1024) == MEM_CHARGE_OK);
 }
 
 static void test_adjust_release(void) {
     static mem_book_t b;
     memset(&b, 0, sizeof(b));
-    CHECK(mem_book_charge(&b, "bench", true, 100));
+    CHECK(mem_book_charge(&b, "bench", true, 100) == MEM_CHARGE_OK);
     mem_book_adjust(&b, "bench", true, 4); // the heap gave 104
     mem_use_t const *r = mem_book_find(&b, "bench");
     CHECK(r->internal == 104 && r->blocks == 1);
-    mem_book_release(&b, "bench", true, 104);
+    CHECK(mem_book_release(&b, "bench", true, 104) == MEM_RELEASE_OK);
     CHECK(r->internal == 0 && r->blocks == 0);
-    mem_book_release(&b, "bench", true, 50); // a stray free: stays at zero
+    CHECK(mem_book_release(&b, "bench", true, 50) == MEM_RELEASE_OVER); // a stray free: reported, stays at zero
     CHECK(r->internal == 0 && r->blocks == 0);
-    mem_book_release(&b, "nobody", false, 50); // never allocated: nothing made
+    CHECK(mem_book_release(&b, "nobody", false, 50) == MEM_RELEASE_NO_ROW); // never allocated: nothing made
     CHECK(mem_book_find(&b, "nobody") == NULL);
     mem_book_adjust(&b, "nobody", false, 8);
     CHECK(mem_book_find(&b, "nobody") == NULL);
+    // Owner drift: MeshCore's block freed as the weather app's, which holds less: reported, never below zero, and
+    // MeshCore's own count stays up (what "fw mem" then shows)
+    CHECK(mem_book_charge(&b, "meshcore", false, 4096) == MEM_CHARGE_OK);
+    CHECK(mem_book_charge(&b, "weather", false, 100) == MEM_CHARGE_OK);
+    CHECK(mem_book_release(&b, "weather", false, 4096) == MEM_RELEASE_OVER);
+    CHECK(mem_book_find(&b, "weather")->bulk == 0 && mem_book_find(&b, "weather")->blocks == 0);
+    CHECK(mem_book_find(&b, "meshcore")->bulk == 4096 && mem_book_find(&b, "meshcore")->blocks == 1);
+    // Internal and PSRAM are separate: an internal free does not eat a PSRAM count
+    CHECK(mem_book_release(&b, "meshcore", true, 4096) == MEM_RELEASE_OVER);
+    CHECK(mem_book_find(&b, "meshcore")->bulk == 4096);
 }
 
 static void test_full_table(void) {
@@ -61,10 +71,14 @@ static void test_full_table(void) {
     char id[8];
     for (int i = 0; i < MEM_BOOK_OWNERS; i++) {
         snprintf(id, sizeof(id), "app%d", i);
-        CHECK(mem_book_charge(&b, id, false, 10));
+        CHECK(mem_book_charge(&b, id, false, 10) == MEM_CHARGE_OK);
     }
-    CHECK(!mem_book_charge(&b, "late", false, 10));
-    CHECK(mem_book_charge(&b, "app3", false, 10)); // known owners still go
+    // A new owner finds no row: reported apart from the quota, so the caller can allocate unbooked
+    CHECK(mem_book_charge(&b, "late", false, 10) == MEM_CHARGE_NO_ROW);
+    CHECK(mem_book_charge(&b, "late", true, 10) == MEM_CHARGE_NO_ROW);
+    CHECK(mem_book_find(&b, "late") == NULL);
+    CHECK(mem_book_release(&b, "late", false, 10) == MEM_RELEASE_NO_ROW); // its free: no row, nothing changes
+    CHECK(mem_book_charge(&b, "app3", false, 10) == MEM_CHARGE_OK); // known owners still go
 }
 
 int main(void) {
