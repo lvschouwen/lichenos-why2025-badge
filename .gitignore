@@ -12,3 +12,6 @@ __pycache__/
 firmware/storage_staging/
 tools/.font-cache/
 firmware/build-*/
+
+# graphify: local AST knowledge graph, never committed (#184)
+graphify-out/
