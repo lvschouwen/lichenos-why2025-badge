@@ -101,6 +101,13 @@ static void show_outcome(void) {
 
 static void job_done(void *arg) {
     (void)arg;
+    // The wait is over: "Saving..."/"Reading..." go (#175). NULL once the page is gone.
+    if (s_save_row) {
+        menu_set_value(s_save_row, "");
+    }
+    if (s_load_row) {
+        menu_set_value(s_load_row, "");
+    }
     show_outcome();
     s_job = JOB_NONE;
 }
