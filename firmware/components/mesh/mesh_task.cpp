@@ -44,7 +44,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "nvs.h" // only the legacy badge_fw/identity hand-over (migrate_identity)
+#include "lichen_legacy.h"
 
 extern "C" {
 #include "console_cmd.h" // CONSOLE_WIFI_CMD_MAX
@@ -839,26 +839,26 @@ static void ident_verify(BadgeMesh *n) {
 
 // Milestone 2 kept the key pair in NVS; MeshCore's DataStore keeps it in /storage/meshcore. Moved once, so the
 // contacts that already know the badge keep knowing it.
+// The OS hands the old blob over (lichen_legacy_blob_take) and erases it only once this says the identity is saved
+static bool identity_store(void *, uint8_t const *blob, size_t len) {
+    mesh::LocalIdentity id;
+    id.readFrom(blob, len);
+    if (identity_move(store, id)) {
+        ESP_LOGI(TAG, "MeshCore identity moved from NVS to /storage/meshcore");
+        return true;
+    }
+    ESP_LOGE(TAG, "MeshCore identity not saved to /storage/meshcore (full?): kept in NVS, tried again next boot");
+    return false;
+}
+
 static void migrate_identity(void) {
-    nvs_handle_t nvs;
-    uint8_t      blob[128];
-    size_t       len = sizeof(blob);
     // A file that is there but unreadable (#109) is kept too: never written over, not even with the NVS copy
-    if (store.hasMainIdentity() || nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+    if (store.hasMainIdentity()) {
         return;
     }
-    if (nvs_get_blob(nvs, "identity", blob, &len) == ESP_OK && len >= PRV_KEY_SIZE + PUB_KEY_SIZE) {
-        mesh::LocalIdentity id;
-        id.readFrom(blob, len);
-        if (identity_move(store, id)) {
-            nvs_erase_key(nvs, "identity");
-            nvs_commit(nvs);
-            ESP_LOGI(TAG, "MeshCore identity moved from NVS to /storage/meshcore");
-        } else {
-            ESP_LOGE(TAG, "MeshCore identity not saved to /storage/meshcore (full?): kept in NVS, tried again next boot");
-        }
-    }
-    nvs_close(nvs);
+    uint8_t blob[128];
+    lichen_legacy_blob_take(lichen_app_by_id(MESHCORE_APP_ID), "identity", blob, sizeof(blob), PRV_KEY_SIZE + PUB_KEY_SIZE, identity_store, nullptr);
+    mh_wipe(blob, sizeof(blob));
 }
 
 // First boot of MyMesh (no prefs file yet): the radio settings come from lora.toml instead of MeshCore's defaults

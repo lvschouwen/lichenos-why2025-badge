@@ -924,6 +924,14 @@ target_include_directories(app_ns_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../fi
 target_compile_options(app_ns_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME app_ns_test COMMAND app_ns_test)
 
+add_executable(legacy_blob_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/legacy_blob_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/legacy_blob.c
+)
+target_include_directories(legacy_blob_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(legacy_blob_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME legacy_blob_test COMMAND legacy_blob_test)
+
 add_executable(badge_table_test
     ${CMAKE_CURRENT_SOURCE_DIR}/badge_table_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/badge_table.c
