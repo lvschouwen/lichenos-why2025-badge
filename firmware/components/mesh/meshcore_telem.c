@@ -3,7 +3,7 @@
 #include "meshcore_telem.h"
 #include "screen_ids.h"
 
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "lichen_ui.h"
 #include "menu.h"
 #include "mesh.h"
@@ -46,7 +46,7 @@ static void on_delete(lv_event_t *e) {
         lv_timer_delete(timer);
         timer = NULL;
     }
-    heap_caps_free(mem);
+    lichen_free(meshcore_self(), mem);
     mem    = NULL;
     result = again = note = NULL;
 }
@@ -99,8 +99,8 @@ static lv_obj_t *build_page(void) {
         lv_timer_delete(timer);
         timer = NULL;
     }
-    heap_caps_free(mem);
-    mem        = heap_caps_calloc(1, sizeof(*mem), MALLOC_CAP_SPIRAM);
+    lichen_free(meshcore_self(), mem);
+    mem        = lichen_alloc(meshcore_self(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     seq        = 0;
     shown_busy = false;
     if (!mem) {

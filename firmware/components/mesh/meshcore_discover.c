@@ -1,7 +1,8 @@
 // The MeshCore app's Discover nearby page (#167): one zero-hop request, then a live list of who answered (name or hash,
 // type, SNR, age), newest first. Opening the page sends nothing: the first row asks, behind a careful confirm. After the
 // listening window the status says "Heard N" or that nobody answered, and the first row asks again (not within a minute).
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
+#include "meshcore_run.h"
 #include "esp_log.h"
 #include "lichen_ui.h"
 #include "mesh.h"
@@ -175,7 +176,7 @@ static void on_delete(lv_event_t *e) {
         lv_timer_delete(timer);
         timer = NULL;
     }
-    heap_caps_free(mem);
+    lichen_free(meshcore_self(), mem);
     mem          = NULL;
     screen_obj   = NULL;
     status_label = NULL;
@@ -186,7 +187,7 @@ static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     screen_obj       = screen;
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    mem = heap_caps_calloc(1, sizeof(*mem), MALLOC_CAP_SPIRAM);
+    mem = lichen_alloc(meshcore_self(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!mem) {
         ESP_LOGE(TAG, "no memory for discover nearby");
         mc_list_label(screen, "Not enough memory for this page.", THEME_DIM);

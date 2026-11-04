@@ -6,7 +6,6 @@
 #include "weather_app.h"
 
 #include "app_icons.h"
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -17,7 +16,9 @@
 #include "lichen_fs.h"
 #include "lichen_notify.h"
 #include "lichen_sensors.h"
+#include "lichen_mem.h"
 #include "lichen_settings.h"
+#include "lichen_task.h"
 #include "menu.h"
 #include "sdcard.h"
 #include "shell_parts.h"
@@ -187,11 +188,11 @@ static void sampler_task(void *arg) {
 }
 
 static bool start_background(void) {
-    wx_sample_t *store = heap_caps_calloc(WX_RING_CAP, sizeof(wx_sample_t), MALLOC_CAP_SPIRAM);
+    wx_sample_t *store = lichen_alloc(&weather_app, WX_RING_CAP * sizeof(wx_sample_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     s_lock             = xSemaphoreCreateMutex();
     if (!store || !s_lock) {
         ESP_LOGE(TAG, "no memory for the history");
-        heap_caps_free(store);
+        lichen_free(&weather_app, store);
         if (s_lock) {
             vSemaphoreDelete(s_lock);
             s_lock = NULL;
@@ -201,7 +202,7 @@ static bool start_background(void) {
     wx_ring_init(&s_ring, store, WX_RING_CAP);
     atomic_store(&s_offset_half, wx_offset_half_from_byte(app_settings_get_u8(&weather_app, KEY_OFFSET, wx_offset_byte(0))));
     atomic_store(&s_log_on, app_settings_get_u8(&weather_app, KEY_LOG, 0) != 0);
-    if (xTaskCreatePinnedToCore(sampler_task, "weather", TASK_STACK, NULL, 2, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(&weather_app, "weather", sampler_task, NULL, TASK_STACK, LICHEN_PRIO_BACKGROUND, NULL)) {
         ESP_LOGE(TAG, "no memory for the sampler task");
         return false;
     }

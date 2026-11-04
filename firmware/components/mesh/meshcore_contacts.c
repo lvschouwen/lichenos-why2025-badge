@@ -1,7 +1,8 @@
 // The Contacts, Repeaters and Heard tiles' screen (#88): one contact list in the view's filter and order
 // (mesh_contacts_view), from the old Contacts tab. Enter opens the highlighted contact's details (#49). The store keeps
 // only contacts (MeshCore adds the nodes it hears unless manual add is on), so Heard is the contacts by last heard.
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
+#include "meshcore_run.h"
 #include "screen_ids.h"
 #include "esp_log.h"
 #include "lichen_ui.h"
@@ -163,7 +164,7 @@ static void on_delete(lv_event_t *e) {
         lv_timer_delete(timer);
         timer = NULL;
     }
-    heap_caps_free(mem);
+    lichen_free(meshcore_self(), mem);
     mem        = NULL;
     screen_obj = NULL;
     list       = (mc_list_t){0};
@@ -173,7 +174,7 @@ static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     screen_obj       = screen;
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    mem = heap_caps_calloc(1, sizeof(*mem), MALLOC_CAP_SPIRAM);
+    mem = lichen_alloc(meshcore_self(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!mem) {
         ESP_LOGE(TAG, "no memory for the contacts");
         mc_list_label(screen, "Not enough memory to show the contacts.", THEME_DIM);

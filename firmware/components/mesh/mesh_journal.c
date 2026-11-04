@@ -7,7 +7,8 @@
 #include "lichen_fs.h"
 #include "meshcore_run.h"
 
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
+#include "lichen_task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -86,8 +87,13 @@ static bool file_write(void *ctx, uint8_t const *buf, size_t len) {
     return fwrite(buf, 1, len, (FILE *)ctx) == len;
 }
 
+// Every buffer of the journal is MeshCore's in the OS's count (#181): freed with unalloc, never free()
 static void *psram(size_t bytes) {
-    return heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+    return lichen_alloc(meshcore_self(), bytes, LICHEN_MEM_BULK);
+}
+
+static void unalloc(void *p) {
+    lichen_free(meshcore_self(), p);
 }
 
 typedef struct {
@@ -106,8 +112,8 @@ static bool work_alloc(work_t *w) {
 }
 
 static void work_free(work_t *w) {
-    free(w->slots);
-    free(w->buf);
+    unalloc(w->slots);
+    unalloc(w->buf);
 }
 
 static void random_fill(void *buf, size_t len) {
@@ -141,7 +147,7 @@ static char const *compact_file(char const *src, mesh_hist_table_t *t, uint8_t *
     FILE    *out     = in ? fopen(TMP_PATH, "wb") : NULL;
     if (!stage || !in || !out) {
         *err = stage ? errno : ENOMEM;
-        free(stage);
+        unalloc(stage);
         if (in) {
             fclose(in);
         }
@@ -158,7 +164,7 @@ static char const *compact_file(char const *src, mesh_hist_table_t *t, uint8_t *
     auth_failures += st.auth_failures;
     bool ok = st.ok && !ferror(in);
     fclose(in);
-    free(stage);
+    unalloc(stage);
     ok   = fflush(out) == 0 && fsync(fileno(out)) == 0 && ok;
     *err = ok ? 0 : errno;
     ok   = fclose(out) == 0 && ok;
@@ -435,13 +441,13 @@ static char const *journal_load(work_t *w, int *err) {
 }
 
 static bool boot_buffers(void) {
-    hist       = heap_caps_calloc(1, sizeof(*hist), MALLOC_CAP_SPIRAM);
+    hist       = lichen_alloc(meshcore_self(), sizeof(*hist), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     uint8_t *a = psram(MESH_HIST_PENDING);
     spare      = psram(MESH_HIST_PENDING);
     if (!hist || !a || !spare) {
-        free(hist);
-        free(a);
-        free(spare);
+        unalloc(hist);
+        unalloc(a);
+        unalloc(spare);
         hist = NULL;
         return false;
     }
@@ -698,7 +704,9 @@ void mesh_journal_stop_locked(bool final) {
 // written and nothing is compacted.
 
 #define SCAN_MAX_BYTES (1024 * 1024) // two raw copies in PSRAM; the journal itself may grow to MESH_HIST_CAP
-#define SCAN_INT_BYTES (64 * 1024)   // "int": the two copies in internal RAM, which is scarce
+// "int": the two copies in internal RAM, which is scarce: both fit in the app's internal quota (#181), with room for the
+// heap's rounding
+#define SCAN_INT_BYTES (MEM_BOOK_INTERNAL_QUOTA / 2 - 1024)
 #define SCAN_STACK     8192
 
 typedef struct {
@@ -772,7 +780,7 @@ static uint8_t *scan_buf(size_t bytes, bool internal) {
     if (internal && bytes > SCAN_INT_BYTES) {
         return NULL; // internal RAM is scarce: the check is for small journals
     }
-    return internal ? heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) : psram(bytes);
+    return internal ? lichen_alloc(meshcore_self(), bytes, LICHEN_MEM_INTERNAL) : psram(bytes);
 }
 
 static void scan_task_fn(void *arg) {
@@ -826,11 +834,10 @@ static void scan_task_fn(void *arg) {
                       (long)st.st_size, bad_passes, diff_passes);
     }
     console_reply("scan task stack: %u of %d bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL), SCAN_STACK);
-    free(ref);
-    free(cur);
+    unalloc(ref);
+    unalloc(cur);
     work_free(&w);
     atomic_store(&scan_running, false);
-    vTaskDelete(NULL);
 }
 
 static void scan_start(char const *args) {
@@ -871,7 +878,7 @@ static void scan_start(char const *args) {
         job->internal = internal;
         job->skip     = skip;
     }
-    if (!job || xTaskCreatePinnedToCore(scan_task_fn, "histscan", SCAN_STACK, job, 3, NULL, 0) != pdPASS) {
+    if (!job || !lichen_task_start(meshcore_self(), "histscan", scan_task_fn, job, SCAN_STACK, LICHEN_PRIO_SERVICE, NULL)) {
         free(job);
         atomic_store(&scan_running, false);
         console_reply("scan: not started (memory)");

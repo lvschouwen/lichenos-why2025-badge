@@ -2,7 +2,9 @@
 // whether adverts carry it, and the auto-add rules. One page of rows: Enter cycles a value or opens a text entry, each
 // change runs in a short-lived task on core 0 (the mesh.h setters may wait for the mesh lock) and the page shows the
 // result. The rules and texts are mesh_advert_cfg.c's (host-tested); the screens never wait on MeshCore.
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
+#include "lichen_task.h"
+#include "meshcore_run.h"
 #include "screen_ids.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -112,7 +114,7 @@ static void change_finish(void *data) {
         set_note("Saved", false);
     }
     rows_refresh(NULL);
-    heap_caps_free(ch);
+    lichen_free(meshcore_self(), ch);
 }
 
 static void change_task(void *arg) {
@@ -129,13 +131,12 @@ static void change_task(void *arg) {
     for (int tries = 0; !lichen_ui_call(change_finish, ch); tries++) {
         if (tries + 1 >= UI_CALL_TRIES) {
             ESP_LOGE(TAG, "advert change %d: result not handed to the screen, dropped", (int)ch->kind);
-            heap_caps_free(ch);
+            lichen_free(meshcore_self(), ch);
             __atomic_store_n(&busy, false, __ATOMIC_RELEASE);
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    vTaskDelete(NULL);
 }
 
 static void change_start(change_t const *what) {
@@ -143,15 +144,15 @@ static void change_start(change_t const *what) {
         set_note(mc_busy_note(), true);
         return;
     }
-    change_t *ch = heap_caps_calloc(1, sizeof(*ch), MALLOC_CAP_SPIRAM);
+    change_t *ch = lichen_alloc(meshcore_self(), sizeof(*ch), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!ch) {
         set_note("Out of memory", true);
         return;
     }
     *ch = *what;
-    if (xTaskCreatePinnedToCore(change_task, "meshadv", TASK_STACK, ch, 4, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(meshcore_self(), "meshadv", change_task, ch, TASK_STACK, LICHEN_PRIO_JOB, NULL)) {
         ESP_LOGW(TAG, "advert settings task did not start");
-        heap_caps_free(ch);
+        lichen_free(meshcore_self(), ch);
         set_note(mc_busy_note(), true);
         return;
     }

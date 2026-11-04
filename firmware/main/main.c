@@ -34,6 +34,8 @@
 #include "haptics.h"
 #include "led.h"
 #include "lichen_app.h"
+#include "lichen_mem.h"
+#include "lichen_task.h"
 #include "lichen_random.h"
 #include "notify_os.h"
 #include "lichen_nvs.h"
@@ -322,6 +324,8 @@ void app_main(void) {
     led_start();                     // the status LED follows the notices (#74)
     crash_check_late();              // the crash record (/storage) and the full-image hash, after the first frame
     factory_reset_console_register();
+    lichen_task_console_register(); // fw tasks (#181)
+    lichen_mem_console_register();  // the per-app lines of fw mem (#181)
     load_fonts(screen);
     // The apps, in home's order: MeshCore first; shell_start adds Settings and About after it. Registered without a
     // screen too, so their background parts still start.

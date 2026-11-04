@@ -937,6 +937,17 @@ target_include_directories(legacy_blob_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(legacy_blob_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME legacy_blob_test COMMAND legacy_blob_test)
 
+# lichen_task_start's bookkeeping and lichen_alloc's per-app accounting (#181)
+foreach(book task_book mem_book)
+    add_executable(${book}_test
+        ${CMAKE_CURRENT_SOURCE_DIR}/${book}_test.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/${book}.c
+    )
+    target_include_directories(${book}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+    target_compile_options(${book}_test PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME ${book}_test COMMAND ${book}_test)
+endforeach()
+
 add_executable(badge_table_test
     ${CMAKE_CURRENT_SOURCE_DIR}/badge_table_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/badge_table.c

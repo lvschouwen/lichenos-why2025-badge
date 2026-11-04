@@ -17,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "fw_console.h"
+#include "lichen_task.h"
 #include "lichen_ui.h"
 #include "screen_ids.h"
 #include "secure_wipe.h"
@@ -35,7 +36,6 @@
 // plus margin for console_exec's own frame and the done callback (8 KB after review: a few seconds of internal RAM). Internal, not PSRAM: some commands write flash. The
 // high-water mark is logged after each run so a bench pass can confirm the margin.
 #define WORKER_STACK 8192
-#define WORKER_PRIO  4
 
 static char const TAG[] = "console_app";
 
@@ -171,7 +171,6 @@ static void worker(void *arg) {
     free(j->exec_buf);
     free(j);
     s_busy = false; // after the free: the next run may start from the LVGL task at once
-    vTaskDelete(NULL);
 }
 
 // LVGL task: starts the worker for line (already trimmed). False when it could not start (nothing is left allocated).
@@ -186,7 +185,7 @@ static bool start_job(con_t *c, char const *line) {
     if (j->line && j->exec_buf) {
         strlcpy(j->line, line, CONSOLE_LINE_MAX + 1);
         s_busy = true;
-        if (xTaskCreate(worker, "console_app", WORKER_STACK, j, WORKER_PRIO, NULL) == pdPASS) {
+        if (lichen_task_start(NULL, "console_app", worker, j, WORKER_STACK, LICHEN_PRIO_JOB, NULL)) {
             return true;
         }
         s_busy = false;

@@ -3,7 +3,8 @@
 #include "meshcore_chat.h"
 #include "screen_ids.h"
 
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
+#include "meshcore_run.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_clock.h"
@@ -556,8 +557,8 @@ static void on_delete(lv_event_t *e) {
     }
     lv_obj_set_user_data(c->screen, NULL);
     chat_unlink(c);
-    heap_caps_free(c->copy);
-    heap_caps_free(c);
+    lichen_free(meshcore_self(), c->copy);
+    lichen_free(meshcore_self(), c);
 }
 
 static void style_ta(lv_obj_t *ta) {
@@ -646,11 +647,11 @@ static lv_obj_t *build_chat(void) {
     if (!building) {
         return NULL;
     }
-    chat_t *c = heap_caps_calloc(1, sizeof(*c), MALLOC_CAP_SPIRAM);
-    mesh_msg_t *copy = c ? heap_caps_malloc(SHOW_MESSAGES * sizeof(*copy), MALLOC_CAP_SPIRAM) : NULL;
+    chat_t *c = lichen_alloc(meshcore_self(), sizeof(*c), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    mesh_msg_t *copy = c ? lichen_alloc(meshcore_self(), SHOW_MESSAGES * sizeof(*copy), LICHEN_MEM_BULK) : NULL;
     if (!copy) {
         ESP_LOGW("meshcore_chat", "no memory for a chat screen");
-        heap_caps_free(c);
+        lichen_free(meshcore_self(), c);
         return NULL; // shell_open takes the screen off the stack again
     }
     c->target           = *building;
@@ -724,7 +725,7 @@ static void open_after_pop(void *arg) {
     if (shell_stack_screen(0) == r->below) {
         open_target(&r->want);
     }
-    heap_caps_free(r);
+    lichen_free(meshcore_self(), r);
 }
 
 // LVGL task. The same chat on top: nothing happens, the draft stays. Another chat on top: back to the screen below it
@@ -736,14 +737,14 @@ static void open_target(mesh_chat_target_t const *want) {
         case MESH_CHAT_OPEN_KEEP: shell_open_count_reuse(); return; // shown: the notice counts as opened
         case MESH_CHAT_OPEN_REPLACE: {
             lv_obj_t  *below = shell_stack_screen(1);
-            replace_t *r     = below ? heap_caps_malloc(sizeof(*r), MALLOC_CAP_SPIRAM) : NULL;
+            replace_t *r     = below ? lichen_alloc(meshcore_self(), sizeof(*r), LICHEN_MEM_BULK) : NULL;
             if (!r) {
                 return;
             }
             r->want  = *want;
             r->below = below;
             if (!shell_back_to(below, open_after_pop, r)) {
-                heap_caps_free(r); // not queued: open_after_pop will never run
+                lichen_free(meshcore_self(), r); // not queued: open_after_pop will never run
             } else {
                 shell_open_count_reuse(); // the chat is shown in a moment
             }
@@ -780,7 +781,7 @@ static void open_dm(void *arg) {
 
 static void free_peers(lv_event_t *e) {
     (void)e;
-    heap_caps_free(peers);
+    lichen_free(meshcore_self(), peers);
     peers = NULL;
 }
 
@@ -801,8 +802,8 @@ static lv_obj_t *build_dm_pick(void) {
     lv_obj_t *menu   = menu_create(screen, "Message a contact");
     menu_filter_t *filter = menu_filter_create(screen, menu, contact_matches, NULL); // #57
     lv_obj_add_event_cb(screen, free_peers, LV_EVENT_DELETE, NULL);
-    heap_caps_free(peers);
-    peers = heap_caps_malloc(MAX_PEERS * sizeof(*peers), MALLOC_CAP_SPIRAM);
+    lichen_free(meshcore_self(), peers);
+    peers = lichen_alloc(meshcore_self(), MAX_PEERS * sizeof(*peers), LICHEN_MEM_BULK);
     size_t total, n = peers ? mesh_contacts_snapshot(peers, MAX_PEERS, &total, SCREEN_WAIT_MS) : 0;
     if (!peers || n == MESH_BUSY) {
         menu_note(menu, mc_busy_note());

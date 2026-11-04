@@ -7,6 +7,7 @@
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lichen_task.h"
 #include "menu.h"
 #include "screen_ids.h"
 #include "settings_backup_io.h"
@@ -125,7 +126,6 @@ static void job_task(void *arg) {
     lvgl_port_lock(0); // lv_async_call is not thread safe
     lv_async_call(job_done, NULL);
     lvgl_port_unlock();
-    vTaskDelete(NULL);
 }
 
 static bool job_start(job_t kind) {
@@ -133,7 +133,7 @@ static bool job_start(job_t kind) {
         return false;
     }
     s_job = kind;
-    if (xTaskCreatePinnedToCore(job_task, "backupjob", JOB_STACK, (void *)(intptr_t)kind, 4, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(NULL, "backupjob", job_task, (void *)(intptr_t)kind, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         s_job = JOB_NONE;
         tell("Not started: out of memory.");
         return false;

@@ -221,6 +221,12 @@ static void mem_blocks(char const *args) {
                   (unsigned)ctx.min, ctx.big_bytes, ctx.big_n > ctx.listed ? " (first ones listed)" : "");
 }
 
+static void (*mem_report)(void);
+
+void console_set_mem_report(void (*report)(void)) {
+    mem_report = report;
+}
+
 static void cmd_mem(char const *args) {
     if (strncmp(args, "blocks", 6) == 0) {
         mem_blocks(args + 6 + (args[6] == ' '));
@@ -229,6 +235,9 @@ static void cmd_mem(char const *args) {
     print_heap("internal", MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     print_heap("dma", MALLOC_CAP_DMA);
     print_heap("psram", MALLOC_CAP_SPIRAM);
+    if (mem_report) {
+        mem_report();
+    }
 
     UBaseType_t   n     = uxTaskGetNumberOfTasks();
     TaskStatus_t *tasks = malloc(n * sizeof(TaskStatus_t));
@@ -626,7 +635,7 @@ void console_start(void) {
     run_mutex   = xSemaphoreCreateMutex();
     reply_mutex = xSemaphoreCreateMutex();
     console_register("help", "help", cmd_help);
-    console_register("mem", "mem [blocks [internal|dma|psram] [min bytes]] (heaps, task stacks, per-task core and CPU %; blocks: who holds a heap)", cmd_mem);
+    console_register("mem", "mem [blocks [internal|dma|psram] [min bytes]] (heaps, per-app use, task stacks, per-task core and CPU %; blocks: who holds a heap)", cmd_mem);
     console_register("assets", "assets (state of the assets partition and its files)", cmd_assets);
     console_register("slot", "slot [other] (show the app slots, or boot the other one)", cmd_slot);
     console_register("reboot", "reboot", cmd_reboot);

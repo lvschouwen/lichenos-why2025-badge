@@ -8,6 +8,7 @@
 #include "esp_lvgl_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lichen_task.h"
 #include "menu.h"
 #include "sd_settings_model.h"
 #include "sdcard.h"
@@ -115,7 +116,6 @@ static void job_task(void *arg) {
     lvgl_port_lock(0);
     lv_async_call(job_done, NULL);
     lvgl_port_unlock();
-    vTaskDelete(NULL);
 }
 
 static void job_start(sds_job_t kind) {
@@ -125,7 +125,7 @@ static void job_start(sds_job_t kind) {
     job       = kind;
     result[0] = '\0';
     atomic_store(&job_outcome, JOB_PENDING);
-    if (xTaskCreatePinnedToCore(job_task, "sdjob", JOB_STACK, (void *)(intptr_t)kind, 4, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(NULL, "sdjob", job_task, (void *)(intptr_t)kind, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         job = SDS_IDLE;
         snprintf(result, sizeof(result), "Not started: out of memory");
         ESP_LOGW(TAG, "%s", result);

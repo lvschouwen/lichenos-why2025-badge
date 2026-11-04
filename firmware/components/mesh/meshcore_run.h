@@ -19,6 +19,8 @@ extern "C" {
 
 // meshcore_app_register: the app, for its settings and its directory
 void meshcore_run_init(lichen_app_t const *app);
+// The app itself, for the OS calls that take it (lichen_task_start, lichen_alloc, #181); set before any task runs
+lichen_app_t const *meshcore_self(void);
 // The app's start_background: registers the console commands, then starts MeshCore when start at boot is on (on this
 // task, as before). True when it started or was not meant to.
 bool meshcore_run_boot(void);

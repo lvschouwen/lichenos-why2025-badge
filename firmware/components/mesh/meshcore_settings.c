@@ -3,7 +3,8 @@
 // The mesh.h setters wait for the mesh lock (MeshCore may be saving contacts for a few hundred ms), so each change runs
 // in a short-lived task on core 0, like the Wi-Fi scan; its result comes back to the LVGL task through lichen_ui_call
 // and lands on whatever row or note is still on screen. The screens never wait on MeshCore.
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
+#include "lichen_task.h"
 #include "screen_ids.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -83,7 +84,7 @@ static void job_finish(void *data) {
     job->done(job);
     memset(job->key, 0, sizeof(job->key)); // a channel key: not left in the heap
     memset(&job->info, 0, sizeof(job->info));
-    heap_caps_free(job);
+    lichen_free(meshcore_self(), job);
 }
 
 static void job_task(void *arg) {
@@ -109,20 +110,19 @@ static void job_task(void *arg) {
             ESP_LOGE(TAG, "settings job %d: result not handed to the screen, dropped", (int)job->kind);
             memset(job->key, 0, sizeof(job->key));
             memset(&job->info, 0, sizeof(job->info));
-            heap_caps_free(job);
+            lichen_free(meshcore_self(), job);
             __atomic_store_n(&job_running, false, __ATOMIC_RELEASE);
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    vTaskDelete(NULL);
 }
 
 static job_t *job_new(job_kind_t kind, void (*done)(job_t *)) {
     if (job_running) {
         return NULL;
     }
-    job_t *job = heap_caps_calloc(1, sizeof(*job), MALLOC_CAP_SPIRAM);
+    job_t *job = lichen_alloc(meshcore_self(), sizeof(*job), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (job) {
         job->kind = kind;
         job->done = done;
@@ -132,9 +132,9 @@ static job_t *job_new(job_kind_t kind, void (*done)(job_t *)) {
 
 // false (job freed) when it could not start
 static bool job_start(job_t *job) {
-    if (xTaskCreatePinnedToCore(job_task, "meshset", JOB_STACK, job, 4, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(meshcore_self(), "meshset", job_task, job, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         ESP_LOGW(TAG, "settings task did not start");
-        heap_caps_free(job);
+        lichen_free(meshcore_self(), job);
         return false;
     }
     job_running = true;
@@ -1311,7 +1311,7 @@ static void on_channel_delete(lv_event_t *e) {
     (void)e;
     if (chan_mem) {
         memset(chan_mem, 0, sizeof(*chan_mem));
-        heap_caps_free(chan_mem);
+        lichen_free(meshcore_self(), chan_mem);
     }
     chan_mem       = NULL;
     chan_menu      = chan_loading = chan_note = NULL;
@@ -1339,7 +1339,7 @@ static lv_obj_t *build_channel(void) {
     channel_screen   = screen;
     chan_group       = lv_group_get_default();
     lv_obj_add_event_cb(screen, on_channel_delete, LV_EVENT_DELETE, NULL);
-    chan_mem  = heap_caps_calloc(1, sizeof(*chan_mem), MALLOC_CAP_SPIRAM);
+    chan_mem  = lichen_alloc(meshcore_self(), sizeof(*chan_mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     chan_menu = menu_create_named(screen, "Channel", pending_channel);
     if (!chan_mem) {
         menu_note(chan_menu, "Not enough memory to show the channel.");

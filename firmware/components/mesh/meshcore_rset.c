@@ -5,7 +5,7 @@
 #include "meshcore_remote.h"
 #include "screen_ids.h"
 
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "lichen_ui.h"
 #include "menu.h"
 #include "mesh.h"
@@ -402,7 +402,7 @@ static void on_delete(lv_event_t *e) {
     }
     wipe_secrets(); // an answer that comes after this is not waited for: the password is then not remembered
     pending[0] = 0;
-    heap_caps_free(mem);
+    lichen_free(meshcore_self(), mem);
     mem       = NULL;
     reading   = false;
     menu_obj  = NULL;
@@ -441,11 +441,11 @@ static lv_obj_t *build(void) {
         lv_timer_delete(timer);
         timer = NULL;
     }
-    heap_caps_free(mem);
+    lichen_free(meshcore_self(), mem);
     memset(rows, 0, sizeof(rows));
     note = again_row = NULL; // an older screen's, gone: never touched after a failed calloc below
     wipe_secrets();
-    mem = heap_caps_calloc(1, sizeof(*mem), MALLOC_CAP_SPIRAM);
+    mem = lichen_alloc(meshcore_self(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!mem) {
         menu_note(menu, "Not enough memory.");
         return screen;

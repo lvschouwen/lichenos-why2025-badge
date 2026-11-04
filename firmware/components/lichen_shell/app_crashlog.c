@@ -17,6 +17,7 @@
 #include "lichen_crashlog.h"
 #include "lichen_ui.h"
 #include "sdcard.h"
+#include "lichen_task.h"
 #include "menu.h"
 #include "nav.h"
 #include "shell_parts.h"
@@ -184,7 +185,6 @@ static void job_task(void *arg) {
     lvgl_port_lock(0);
     lv_async_call(job_done, NULL);
     lvgl_port_unlock();
-    vTaskDelete(NULL);
 }
 
 static bool job_start(job_t kind) {
@@ -194,7 +194,7 @@ static bool job_start(job_t kind) {
     s_job       = kind;
     s_result[0] = '\0';
     atomic_store(&s_job_outcome, JOB_PENDING);
-    if (xTaskCreatePinnedToCore(job_task, "crashjob", JOB_STACK, (void *)(intptr_t)kind, 4, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(&crashlog_app, "crashjob", job_task, (void *)(intptr_t)kind, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         s_job = JOB_NONE;
         snprintf(s_result, sizeof(s_result), "Not started: out of memory.");
         ESP_LOGW(TAG, "%s", s_result);

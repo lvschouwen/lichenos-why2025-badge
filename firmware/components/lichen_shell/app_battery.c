@@ -6,6 +6,7 @@
 #include "screen_ids.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lichen_task.h"
 #include "menu.h"
 #include "shell_parts.h"
 #include "theme.h"
@@ -106,11 +107,10 @@ static void alert_task(void *arg) {
     alert_mode = true;
     shell_open(build_battery, SCREEN_BATTERY);
     screen_lock_wake(); // the warning must be seen: no lock or screensaver over it (#75)
-    vTaskDelete(NULL);
 }
 
 void battery_open_alert(void) {
-    if (xTaskCreatePinnedToCore(alert_task, "battalert", ALERT_STACK, NULL, 3, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(NULL, "battalert", alert_task, NULL, ALERT_STACK, LICHEN_PRIO_SERVICE, NULL)) {
         ESP_LOGW("battery", "no memory for the warning screen");
     }
 }

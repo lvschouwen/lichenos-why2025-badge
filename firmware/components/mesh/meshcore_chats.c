@@ -2,7 +2,8 @@
 // conversation list with unread badges (#48), from the old Messages tab. Rebuilt when
 // a message arrives, a count changes or the channels do, and every AGE_REFRESH_S so "N min ago" stays right. Copies
 // are taken from the mesh (PSRAM) under its lock, the widgets are built from them afterwards.
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
+#include "meshcore_run.h"
 #include "screen_ids.h"
 #include "esp_log.h"
 #include "lichen_ui.h"
@@ -203,12 +204,12 @@ static void on_delete(lv_event_t *e) {
     if (st->timer) {
         lv_timer_delete(st->timer);
     }
-    heap_caps_free(st);
+    lichen_free(meshcore_self(), st);
 }
 
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
-    chats_t  *st     = heap_caps_calloc(1, sizeof(*st), MALLOC_CAP_SPIRAM);
+    chats_t  *st     = lichen_alloc(meshcore_self(), sizeof(*st), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!st) {
         ESP_LOGE(TAG, "no memory for the chats");
         mc_list_label(screen, "Not enough memory to show the chats.", THEME_DIM);

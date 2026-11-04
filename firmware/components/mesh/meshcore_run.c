@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "lichen_fs.h"
 #include "lichen_settings.h"
+#include "lichen_task.h"
 #include "lora_app.h"
 #include "mesh.h"
 #include "mesh_format.h"
@@ -19,6 +20,7 @@
 static char const TAG[] = "meshcore";
 
 #define JOB_STACK    8192 // a first start loads everything, as app_main's 8 KB did at boot
+#define LEFTOVER_MS  500   // after a stop: the mesh task leaves the OS's book a moment after it said it stopped
 #define LATE_STOP_MS 60000 // a stop that outlasted mesh_stop's 10 s: the state stays STOPPING this much longer
 #define AUTOSTART    "autostart"
 
@@ -35,6 +37,10 @@ static bool apply(mesh_run_ev_t ev) {
 
 void meshcore_run_init(lichen_app_t const *the_app) {
     app = the_app;
+}
+
+lichen_app_t const *meshcore_self(void) {
+    return app;
 }
 
 bool meshcore_pw_get(uint8_t const prefix[6], char *out, size_t cap) {
@@ -152,7 +158,11 @@ static void job_task(void *arg) {
         "MeshCore %s",
         start ? (ok ? "started" : "did not start") : (ok ? "stopped" : "did not stop in time")
     );
-    vTaskDelete(NULL);
+    if (!start && ok) {
+        // A stopped MeshCore runs nothing: a job still running (a scan, a settings save) is named by the OS (#181)
+        size_t left = lichen_task_leftovers(app, LEFTOVER_MS);
+        ESP_LOGI(TAG, "MeshCore stopped: %u task(s) left over", (unsigned)left);
+    }
 }
 
 char const *meshcore_run_request(bool start) {
@@ -175,7 +185,7 @@ char const *meshcore_run_request(bool start) {
     if (!apply(start ? MESH_EV_START : MESH_EV_STOP)) {
         return mc_busy_note(); // another request got in between
     }
-    if (xTaskCreatePinnedToCore(job_task, "meshrun", JOB_STACK, start ? (void *)1 : NULL, 4, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(app, "meshrun", job_task, start ? (void *)1 : NULL, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         // Nothing ran: the start leaves it stopped, the stop running, as they were
         apply(MESH_EV_DONE_FAIL);
         return "no memory for the job";

@@ -20,7 +20,7 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
 | `lora` | the LoRa radio, as its one owner |
 | `fw_console` | console commands and a deliberate restart |
 | `psram_guard` | `psram_speed.h`, the PSRAM speed switch some large-buffer code asks about |
-| `freertos`, `esp_timer`, `heap` | tasks, timers, memory (PSRAM for anything large) |
+| `freertos`, `esp_timer`, `heap` | queues, semaphores, timers; tasks through `lichen_task.h` and memory through `lichen_mem.h` (below) |
 | plain libraries | e.g. `mbedtls` (PSA Crypto); no driver, no storage, no network component |
 
 ### `lichen_api` headers, one line each
@@ -72,6 +72,16 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   radios.
 - `lichen_sensors.h`: read the latest IMU / environment / die temperature snapshot. Never talk to the chips or I2C.
 - `lichen_crashlog.h`: the crash log, for the Crash log app; not from the LVGL task for writes.
+- `lichen_task.h` (#181): `lichen_task_start(app, name, fn, arg, stack_bytes, prio, &handle)` with a priority class
+  instead of a core and a number: `LICHEN_PRIO_BACKGROUND` (2, core 0), `_SERVICE` (3, core 0), `_JOB` (4, core 0),
+  `_URGENT` (5, core 0, power off only) and `_APP_LOOP` (3, core 1 with LVGL, an app's main loop). Names are cut to 15
+  characters (logged). `fn` ends by returning, never with `vTaskDelete(NULL)`: the OS takes it out of its book first.
+  `fw tasks` lists every task with its owner app; after a stop `lichen_task_leftovers(app, wait_ms)` names what of
+  the app still runs (MeshCore logs "MeshCore stopped: N task(s) left over").
+- `lichen_mem.h` (#181): `lichen_alloc(app, size, LICHEN_MEM_BULK | LICHEN_MEM_INTERNAL [| LICHEN_MEM_ZERO])` and
+  `lichen_free(app, ptr)`. BULK is PSRAM, for anything big; INTERNAL counts against the app's internal-RAM quota of
+  64 KB (`MEM_BOOK_INTERNAL_QUOTA`) and is refused past it. `fw mem` lists what every app holds ("mem app <id> ...").
+  Free with `lichen_free`, never `free()`, or the app's count stays up.
 - `radio_state.h`, `tz_table.h`: types and the time zone table used by the headers above.
 - `settings_store.h` is Lichen's own (`badge_fw`) and sits here only because `lichen_boot` needs it: apps do not use it.
 
@@ -102,7 +112,8 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
 - Write outside its own directories, or format anything but its own app directory.
 - Take `lvgl_port_lock` or call `lv_async_call`: use `lichen_ui_call` (LVGL calls outside the lock while the LVGL
   task renders corrupted the heap, #118). Nor set the default group: use `lichen_ui_with_group`.
-- Pick a core and priority of its own for a task: `lichen_task_start` (#84 T8a, planned in #181) does not exist yet, so apps still call `xTaskCreate*` themselves.
+- Pick a core and priority of its own for a task, or call `xTaskCreate*`: use `lichen_task_start` (#181; the boundary
+  check refuses `xTaskCreate*`). Nor place memory with `heap_caps_*`: use `lichen_alloc`.
 
 ## The wraps
 
@@ -128,8 +139,10 @@ message journal's SD batches through `lichen_fs_sd_begin`/`lichen_fs_sd_end` (`l
 `/sd/lichen/messages` instead of `lichen_fs_sd_dir`: moving the history is a separate decision. MeshCore's `DataStore`
 includes `<nvs_flash.h>`; `shared/arduino_shim/nvs_flash.h` stands in for it.
 
-Also open from #84: tasks with their own core/priority (`lichen_task_start`, T8a, planned in #181 and not in the tree yet), the console prefix per app (T8b), a heap caps wrapper
-(V12), system apps calling `board/backlight.h` directly (V13).
+Also open from #84: the console prefix per app (T8b) and system apps calling `board/backlight.h` directly (V13).
+`lichen_task_start` (T8a) and the heap caps wrapper `lichen_alloc` (V12) landed in #181; MeshCore's chat rings
+(`store_alloc_ring` in `mesh_task.cpp`, freed with `free()` by the pure `mesh_store.c`) and the Arduino shim's
+`fs_shim.cpp` still call `heap_caps_*` directly.
 
 ## Boundary check
 
@@ -141,8 +154,8 @@ is added to `APP_COMPONENTS` there.
 - Rule B: every `#include` in the app's sources is its own or bundled third-party header, a header of an allowed
   component, or a listed libc/plain-library header. `#include "backlight.h"` fails here.
 - Rule C: `nm -u` on the app's built archive may not show `esp_ota_*`, `esp_wifi_*`, `esp_efuse_*`, `gpio_*`,
-  `esp_partition_*`, `nvs_flash_init*`/`nvs_flash_erase*`, `ledc_*`, `i2c_*` or `esp_restart`. `xTaskCreate*` joins the
-  list once `lichen_task_start` exists (#181).
+  `esp_partition_*`, `nvs_flash_init*`/`nvs_flash_erase*`, `ledc_*`, `i2c_*`, `esp_restart` or `xTaskCreate*` (apps use
+  `lichen_task_start`, #181).
 
 The system apps in `lichen_shell` are not checked yet (#180).
 

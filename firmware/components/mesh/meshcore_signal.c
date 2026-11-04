@@ -1,7 +1,8 @@
 // A contact's Signal page (#166): RSSI and SNR of the adverts and direct messages heard from it since start as two small
 // graphs, the last hop count, the last advert path and how often it was heard. The samples are the RAM history of
 // mesh_task.cpp (mesh_signal_get: a spinlock copy, never the mesh lock). Receive only: nothing here transmits.
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
+#include "meshcore_run.h"
 #include "lichen_ui.h"
 #include "menu.h"
 #include "mesh.h"
@@ -158,13 +159,13 @@ static void on_delete(lv_event_t *e) {
     if (s->timer) {
         lv_timer_delete(s->timer);
     }
-    heap_caps_free(s);
+    lichen_free(meshcore_self(), s);
 }
 
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create_named(screen, "Signal", want.name[0] ? want.name : "(no name)");
-    signal_t *s      = heap_caps_calloc(1, sizeof(*s), MALLOC_CAP_SPIRAM);
+    signal_t *s      = lichen_alloc(meshcore_self(), sizeof(*s), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!s) {
         menu_note(menu, "Not enough memory to show the signal.");
         return screen;

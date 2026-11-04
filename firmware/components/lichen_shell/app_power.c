@@ -12,6 +12,7 @@
 #include "fw_console.h"
 #include "lichen_app.h"
 #include "notify_os.h"
+#include "lichen_task.h"
 #include "menu.h"
 #include "sdcard.h"
 #include "shell.h"
@@ -29,6 +30,7 @@
 #define POWER_STACK      6144
 #define BYE_UI_STACK     6144 // builds the goodbye screen
 
+static lichen_app_t const power_app; // its tasks are booked under it (#181)
 static void (*finish_hook)(bool power_off);
 static atomic_bool running;
 static bool        want_off; // set before the task starts
@@ -115,7 +117,6 @@ static lv_obj_t *build_bye(void) {
 static void bye_task(void *arg) {
     (void)arg;
     shell_open(build_bye, SCREEN_POWER_BYE);
-    vTaskDelete(NULL);
 }
 
 static void start(bool off) {
@@ -125,11 +126,11 @@ static void start(bool off) {
     want_off = off;
     // The task first: a busy or stuck LVGL lock must not hold up a (thermal) shutdown. The goodbye screen is opened by
     // a short task of its own, which may wait for the lock as long as it needs.
-    if (xTaskCreatePinnedToCore(power_task, "power", POWER_STACK, NULL, 5, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(&power_app, "power", power_task, NULL, POWER_STACK, LICHEN_PRIO_URGENT, NULL)) {
         ESP_LOGE(TAG, "no memory for the power task: restarting as is");
         system_restart("power menu (no task)");
     }
-    if (xTaskCreatePinnedToCore(bye_task, "pwrui", BYE_UI_STACK, NULL, 5, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(&power_app, "pwrui", bye_task, NULL, BYE_UI_STACK, LICHEN_PRIO_URGENT, NULL)) {
         ESP_LOGW(TAG, "no memory for the goodbye screen");
     }
 }

@@ -1,7 +1,8 @@
 // A repeater's settings (#117): see mesh_rset_run.h
 #include "mesh_rset_run.h"
 
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
+#include "lichen_task.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -193,7 +194,6 @@ static void con_task(void *arg) {
                       con->why ? con->why : "");
     }
     __atomic_store_n(&con_running, false, __ATOMIC_RELEASE);
-    vTaskDelete(NULL);
 }
 
 void mesh_rset_console_read(uint8_t const prefix[6]) {
@@ -202,7 +202,7 @@ void mesh_rset_console_read(uint8_t const prefix[6]) {
         return;
     }
     if (!con) {
-        con = heap_caps_malloc(sizeof(*con), MALLOC_CAP_SPIRAM);
+        con = lichen_alloc(meshcore_self(), sizeof(*con), LICHEN_MEM_BULK);
         if (!con) {
             console_reply("settings: not enough memory");
             return;
@@ -210,7 +210,7 @@ void mesh_rset_console_read(uint8_t const prefix[6]) {
     }
     rs_run_init(con, prefix);
     __atomic_store_n(&con_running, true, __ATOMIC_RELEASE);
-    if (xTaskCreatePinnedToCore(con_task, "meshrset", CON_STACK, NULL, 4, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(meshcore_self(), "meshrset", con_task, NULL, CON_STACK, LICHEN_PRIO_JOB, NULL)) {
         __atomic_store_n(&con_running, false, __ATOMIC_RELEASE);
         console_reply("settings: no memory for the job");
         return;

@@ -20,6 +20,9 @@ void console_reply_private(char const *fmt, ...) __attribute__((format(printf, 1
 
 // Gets every console_reply line (without the "fw: " prefix) for the log store (#38). Set once at boot.
 void console_set_tap(void (*tap)(char const *text, size_t len));
+// Adds lines to "fw mem" after the heaps: lichen_mem.c's per-app use (#181; fw_console cannot depend on lichen_api,
+// which uses it). Set once at boot.
+void console_set_mem_report(void (*report)(void));
 
 // Runs one command line (with or without the "fw " prefix) on the calling task and collects what console_reply prints
 // from it in buf (cap bytes; output past that is cut with a note). done runs exactly once with the output: when the

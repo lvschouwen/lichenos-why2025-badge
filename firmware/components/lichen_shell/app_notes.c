@@ -10,6 +10,7 @@
 #include "lichen_app.h"
 #include "lichen_fs.h"
 #include "lichen_ui.h"
+#include "lichen_task.h"
 #include "menu.h"
 #include "notes_model.h"
 #include "notes_store.h"
@@ -104,7 +105,6 @@ static void job_task(void *arg) {
     ESP_LOGI(TAG, "job %d -> %d, %u notes, stack margin %u", (int)s_req.kind, (int)s_res.result, (unsigned)s_res.count,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));
     atomic_store(&s_state, ST_DONE);
-    vTaskDelete(NULL);
 }
 
 static bool job_start(void) {
@@ -112,7 +112,7 @@ static bool job_start(void) {
     if (!s_v.items || !atomic_compare_exchange_strong(&s_state, &expected, ST_RUNNING)) {
         return false;
     }
-    if (xTaskCreatePinnedToCore(job_task, "notesjob", JOB_STACK, NULL, 4, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(&notes_list_app, "notesjob", job_task, NULL, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         ESP_LOGW(TAG, "no memory for a notes job");
         atomic_store(&s_state, ST_IDLE);
         return false;

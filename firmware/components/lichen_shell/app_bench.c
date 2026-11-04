@@ -15,6 +15,7 @@
 #include "fonts.h"
 #include "fw_console.h"
 #include "lichen_app.h"
+#include "lichen_mem.h"
 #include "lichen_ui.h"
 #include "psram_boot.h"
 #include "sdkconfig.h"
@@ -33,6 +34,8 @@
 #define TICK_MS     50
 #define LIST_ROWS   100
 #define SCROLL_STEP_UI 96
+
+static lichen_app_t const bench_app;
 #define VALUE_CHARS 96
 
 static char const TAG[] = "bench";
@@ -76,11 +79,11 @@ static void drop_cache(void *p, size_t n) {
 static bool bandwidth_run(bw_t *out) {
     uint8_t *a  = heap_caps_aligned_alloc(128, BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     uint8_t *b  = heap_caps_aligned_alloc(128, BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    uint8_t *in = heap_caps_malloc(INT_CHUNK, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint8_t *in = lichen_alloc(&bench_app, INT_CHUNK, LICHEN_MEM_INTERNAL); // counted against the quota (#181)
     if (!a || !b || !in) {
         heap_caps_free(a);
         heap_caps_free(b);
-        heap_caps_free(in);
+        lichen_free(&bench_app, in);
         return false;
     }
     memset(in, 0x5A, INT_CHUNK);
@@ -107,7 +110,7 @@ static bool bandwidth_run(bw_t *out) {
     int64_t t4 = esp_timer_get_time();
     heap_caps_free(a);
     heap_caps_free(b);
-    heap_caps_free(in);
+    lichen_free(&bench_app, in);
     *out = (bw_t){.write_us = (uint64_t)(t1 - t0), .read_us = (uint64_t)(t2 - t1), .copy_us = (uint64_t)(t3 - t2), .int_us = (uint64_t)(t4 - t3)};
     return true;
 }
