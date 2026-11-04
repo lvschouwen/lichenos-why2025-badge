@@ -15,3 +15,15 @@ firmware/build-*/
 
 # graphify: local AST knowledge graph, never committed (#184)
 graphify-out/
+
+# Claude Code runtime and personal files (the tracked .claude/ holds settings.json, agents, hooks, skills)
+.claude/settings.local.json
+.claude/worktrees/
+.claude/scheduled_tasks.*
+.claude/routines/.state/
+.claude/checkpoints/
+.claude/mailbox/
+.claude/agent-registry.json
+.claude/agent-memory-local
+.claude/first-run
+.claude/assistant-daemon-state.json

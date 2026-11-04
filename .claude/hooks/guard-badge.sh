@@ -18,7 +18,8 @@ if printf '%s' "$cmd" | grep -qE 'badge\.sh[^|;&]*flash-fw[^|;&]*--wipe-storage'
   ask "flash-fw --wipe-storage erases the MeshCore identity, contacts and channels on the badge. First-install only; needs Lucas."
 fi
 main_dir=$(git -C "${cwd:-.}" rev-parse --show-toplevel 2>/dev/null || true)
-if [ "$main_dir" = "/home/lucas/coding/why2025-badge" ] && printf '%s' "$cmd" | grep -qE '(^|[;&|]\s*)git\s+(-C\s+\S+\s+)?(checkout\s+-[bB]\b|switch\b|reset\b)'; then
+main_checkout=${CLAUDE_PROJECT_DIR:-/home/lucas/coding/why2025-badge}
+if [ "$main_dir" = "$main_checkout" ] && printf '%s' "$cmd" | grep -qE '(^|[;&|]\s*)git\s+(-C\s+\S+\s+)?(checkout\s+-[bB]\b|switch\b|reset\b)'; then
   case "$cmd" in *"/.claude/worktrees/"*) exit 0 ;; esac
   ask "git checkout -b/-B, switch or reset in the MAIN checkout: agents work in .claude/worktrees/*; main only merges ff-only. Confirm if this is deliberate."
 fi
