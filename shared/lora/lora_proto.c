@@ -4,16 +4,16 @@
 
 #include <string.h>
 
-#define HDR_LEN      2
-#define CONFIG_LEN   (HDR_LEN + 14)
-#define RX_FIXED_LEN (HDR_LEN + 9) // up to and including the length byte
-#define TX_FIXED_LEN (HDR_LEN + 1) // the length byte
-#define STATUS_LEN   (HDR_LEN + 39)
-#define RESULT_LEN   (HDR_LEN + 4)
-#define IDENT_LEN    (HDR_LEN + LORA_IDENT_SHA_LEN)
-#define SWEEP_REQ_LEN (HDR_LEN + 11)
+#define HDR_LEN         2
+#define CONFIG_LEN      (HDR_LEN + 14)
+#define RX_FIXED_LEN    (HDR_LEN + 9) // up to and including the length byte
+#define TX_FIXED_LEN    (HDR_LEN + 1) // the length byte
+#define STATUS_LEN      (HDR_LEN + 39)
+#define RESULT_LEN      (HDR_LEN + 4)
+#define IDENT_LEN       (HDR_LEN + LORA_IDENT_SHA_LEN)
+#define SWEEP_REQ_LEN   (HDR_LEN + 11)
 #define SWEEP_FIXED_LEN (HDR_LEN + 12) // up to and including the count byte; 2 bytes per step follow
-#define BODYLESS_LEN HDR_LEN
+#define BODYLESS_LEN    HDR_LEN
 
 static uint8_t *put_u16(uint8_t *p, uint16_t v) {
     p[0] = (uint8_t)v;

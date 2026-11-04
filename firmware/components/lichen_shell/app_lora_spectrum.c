@@ -3,12 +3,13 @@
 // The radio has one owner (#179), so while the screen is open MeshCore is paused (it gives the radio back when it stops,
 // #103) and started again when the screen closes. The pause, the sweeps and the hand-back run on a task of their own,
 // never on the LVGL task; the screen only draws what that task hands over.
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_app.h"
+#include "lichen_mem.h"
 #include "lichen_radio.h"
+#include "lichen_task.h"
 #include "lichen_ui.h"
 #include "lora_app.h"
 #include "lora_spectrum.h"
@@ -24,7 +25,7 @@ static char const TAG[] = "spectrum";
 #define GRAPH_W          648        // 720 - 2 * THEME_PAD
 #define GRAPH_H          200
 #define PEAK_H           2
-#define SWEEP_TIMEOUT_MS 3000 // a pass over 128 steps takes about 0.4 s on the C6
+#define SWEEP_TIMEOUT_MS 3000 // a pass over 128 steps: 0.5-1 s on the C6 by estimate, to measure on the bench
 #define SWEEP_GAP_MS     100  // between sweeps: the C6 does its other work, the screen redraws
 #define RETRY_MS         1000
 #define WORKER_STACK     4096
@@ -57,7 +58,8 @@ typedef struct {
     lora_sweep_result_t result;
 } shared_t;
 
-static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+static lichen_app_t const spectrum_app; // defined at the end: the owner of the task and the buffers (#181)
+static portMUX_TYPE        mux = portMUX_INITIALIZER_UNLOCKED;
 static shared_t    *sh;
 
 // The screen's own, LVGL task only, in PSRAM while it is open
@@ -129,7 +131,7 @@ static void sweep_once(lora_sweep_result_t *res) {
     uint8_t     sf, cr;
     uint16_t    preamble;
     uint32_t    bw;
-    spec_plan_t plan;
+    spec_plan_t plan = {0};
     lora_get_radio(&sf, &bw, &cr, &preamble);
     if (!spec_plan(&spec_bands[band], lora_get_freq(), bw, LORA_SWEEP_BINS, &plan)) {
         set_state(ST_FAILED);
@@ -137,6 +139,12 @@ static void sweep_once(lora_sweep_result_t *res) {
         return;
     }
     lora_sweep_err_t err = lora_sweep(OWNER, plan.first_hz, plan.step_hz, plan.count, res, SWEEP_TIMEOUT_MS);
+    if (err == LORA_SWEEP_OK && (res->count != plan.count || res->start_hz != plan.first_hz ||
+                                 res->step_hz != plan.step_hz)) {
+        ESP_LOGW(TAG, "sweep answer does not match the request: dropped");
+        wait_while_wanted(SWEEP_GAP_MS);
+        return;
+    }
     if (err != LORA_SWEEP_OK) {
         ESP_LOGD(TAG, "sweep: %d", (int)err);
         set_state(state_of(err));
@@ -166,8 +174,10 @@ static void borrow_and_sweep(lora_sweep_result_t *res) {
     }
     set_state(ST_STARTING);
     bool was_running = false;
-    bool paused      = !shell_sources.lora_user_pause || shell_sources.lora_user_pause(&was_running);
-    bool claimed     = paused && lora_claim(OWNER, NULL);
+    // Claimed only after a pause that finished: a MeshCore still stopping holds the radio. The wait ends early when the
+    // screen closes (or an update asks this app to stop).
+    bool paused  = !shell_sources.lora_user_pause || shell_sources.lora_user_pause(&was_running, wanted);
+    bool claimed = paused && wanted() && lora_claim(OWNER, NULL);
     portENTER_CRITICAL(&mux);
     sh->paused_mesh = was_running;
     portEXIT_CRITICAL(&mux);
@@ -191,15 +201,16 @@ static void borrow_and_sweep(lora_sweep_result_t *res) {
     if (claimed) {
         lora_release(OWNER);
     }
+    ESP_LOGI(TAG, "radio given back");
     if (was_running && shell_sources.lora_user_resume) {
-        shell_sources.lora_user_resume();
+        shell_sources.lora_user_resume(); // waits for a late stop to finish, then starts MeshCore (logged there)
     }
-    ESP_LOGI(TAG, "radio given back%s", was_running ? ", MeshCore starts again" : "");
 }
 
+// Ends by returning: lichen_task_start takes it out of the book (#181)
 static void worker(void *arg) {
     (void)arg;
-    lora_sweep_result_t *res = heap_caps_malloc(sizeof(*res), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    lora_sweep_result_t *res = lichen_alloc(&spectrum_app, sizeof(*res), LICHEN_MEM_BULK);
     if (!res) {
         set_state(ST_NO_MEMORY);
     }
@@ -216,8 +227,7 @@ static void worker(void *arg) {
             break;
         }
     }
-    heap_caps_free(res);
-    vTaskDelete(NULL);
+    lichen_free(&spectrum_app, res);
 }
 
 // LVGL task, from open: the worker starts, or the one still giving back carries on
@@ -229,7 +239,8 @@ static void worker_want(void) {
     bool create = !sh->alive;
     sh->alive   = true;
     portEXIT_CRITICAL(&mux);
-    if (create && xTaskCreatePinnedToCore(worker, "spectrum", WORKER_STACK, NULL, 2, NULL, 0) != pdPASS) {
+    if (create &&
+        !lichen_task_start(&spectrum_app, "spectrum", worker, NULL, WORKER_STACK, LICHEN_PRIO_BACKGROUND, NULL)) {
         portENTER_CRITICAL(&mux);
         sh->alive = false;
         sh->state = ST_NO_MEMORY;
@@ -375,7 +386,7 @@ static void on_update(void *arg) {
         return; // closed meanwhile
     }
     if (fresh && plan.count) {
-        if (memcmp(&plan, &ui->plan, sizeof(plan)) != 0) {
+        if (!spec_plan_equal(&plan, &ui->plan)) {
             lay_out(&plan);
         }
         draw_bars(&ui->shown);
@@ -398,7 +409,7 @@ static void on_key(lv_event_t *e) {
         sh->band  = ui->band;
         sh->fresh = false;
         portEXIT_CRITICAL(&mux);
-        spec_plan_t none = {0};
+        spec_plan_t none = {0}; // count 0: no bars until the new band's first sweep
         lay_out(&none);
         char text[64];
         snprintf(text, sizeof(text), "Switching to %s...", spec_bands[ui->band].name);
@@ -420,7 +431,7 @@ static void on_delete(lv_event_t *e) {
     portENTER_CRITICAL(&mux);
     sh->want = false; // the worker gives the radio back and MeshCore starts again
     portEXIT_CRITICAL(&mux);
-    heap_caps_free(ui);
+    lichen_free(&spectrum_app, ui);
     ui = NULL;
 }
 
@@ -457,9 +468,9 @@ static void build_axis(lv_obj_t *screen) {
 
 static void open_spectrum(lv_obj_t *screen) {
     if (!sh) {
-        sh = heap_caps_calloc(1, sizeof(*sh), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        sh = lichen_alloc(&spectrum_app, sizeof(*sh), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // kept for good
     }
-    ui = sh ? heap_caps_calloc(1, sizeof(*ui), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
+    ui = sh ? lichen_alloc(&spectrum_app, sizeof(*ui), LICHEN_MEM_BULK | LICHEN_MEM_ZERO) : NULL;
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen, 8, 0);
     lichen_heading(screen, NULL, "LoRa spectrum");
@@ -496,7 +507,8 @@ static void open_spectrum(lv_obj_t *screen) {
     draw_status(st, 0, false);
 }
 
-// A firmware update (#76): the screen is closed by then; wait for the radio to be given back
+// A firmware update (#76): the screen is closed by then; wait for the radio to be given back. The worker's waits end as
+// soon as want is false (a pause under way included), so this takes at most a sweep's timeout.
 static bool spectrum_stop_for_update(void) {
     if (!sh) {
         return true;

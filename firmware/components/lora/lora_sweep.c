@@ -43,18 +43,23 @@ void lora_sweep_answer(lora_sweep_t const *sweep) {
     }
 }
 
-// A RESULT carries no sequence number; the C6 refuses at once, before it sweeps, so it is the waiting request's
-void lora_sweep_refused(uint8_t code) {
+// A RESULT carries no sequence number; the C6 refuses at once, before it sweeps, so it is the waiting request's. One
+// that comes while no request is outstanding (a caller that gave up) is dropped, and so is an OK (the C6 never sends one).
+bool lora_sweep_refused(uint8_t code) {
+    if (code == LORA_RESULT_OK) {
+        return false;
+    }
     portENTER_CRITICAL(&sweep_lock);
     bool ours = waiting;
     if (ours) {
-        refused_code = code == LORA_RESULT_OK ? LORA_RESULT_RADIO_ERROR : code;
+        refused_code = code;
         waiting      = false;
     }
     portEXIT_CRITICAL(&sweep_lock);
     if (ours) {
         xSemaphoreGive(sweep_done);
     }
+    return ours;
 }
 
 static lora_sweep_err_t from_result(uint8_t code) {

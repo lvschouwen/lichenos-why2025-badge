@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 spec_band_t const spec_bands[SPEC_BANDS] = {
     {"868-870 MHz", 868000000, 870000000},
@@ -10,6 +11,7 @@ spec_band_t const spec_bands[SPEC_BANDS] = {
 };
 
 bool spec_plan(spec_band_t const *band, uint32_t channel_hz, uint32_t bw_hz, uint8_t max_bins, spec_plan_t *out) {
+    memset(out, 0, sizeof(*out)); // padding too: a copy compares the same however it is compared
     if (!bw_hz || !max_bins || band->end_hz <= band->start_hz) {
         return false;
     }
@@ -33,6 +35,11 @@ bool spec_plan(spec_band_t const *band, uint32_t channel_hz, uint32_t bw_hz, uin
     out->step_hz    = step;
     out->channel_bin = inside && below < out->count ? (int)below : -1;
     return true;
+}
+
+bool spec_plan_equal(spec_plan_t const *a, spec_plan_t const *b) {
+    return a->first_hz == b->first_hz && a->step_hz == b->step_hz && a->count == b->count &&
+           a->channel_bin == b->channel_bin;
 }
 
 int spec_bar_px(int16_t rssi_x10, int height_px) {

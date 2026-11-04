@@ -34,6 +34,8 @@ typedef struct {
 } spec_plan_t;
 
 bool spec_plan(spec_band_t const *band, uint32_t channel_hz, uint32_t bw_hz, uint8_t max_bins, spec_plan_t *out);
+// Field by field (the struct has padding, so never memcmp two plans)
+bool spec_plan_equal(spec_plan_t const *a, spec_plan_t const *b);
 
 // The graph's scale: SPEC_FLOOR_DBM at the bottom, SPEC_TOP_DBM at the top. The SX1262's noise floor with 62.5 kHz is
 // about -120 dBm; a badge on the table is about -40.

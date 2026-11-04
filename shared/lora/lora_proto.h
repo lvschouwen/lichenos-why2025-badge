@@ -17,8 +17,8 @@ extern "C" {
 
 // 2: STATUS carries the C6 uptime, heap and stack (#56); 3: transmit (#65). IDENT (#36) is new message types only, no
 // layout change, so no bump: an older peer answers nothing to IDENT_REQ (BAD_TYPE), which the P4 treats as "not proven"
-// 4: the RSSI sweep (#161, SWEEP_REQ / SWEEP). A C6 without it would ignore the request, so both chips move together:
-// an older C6 ignores every v4 message, IDENT included, and the P4 updates it from the bundled image
+// 4: the RSSI sweep (#161, SWEEP_REQ / SWEEP). A v3 C6 drops every v4 message (BAD_VERSION), IDENT_REQ included, so its
+// IDENT never comes: the P4 counts it as not proven and takes the existing path that reflashes the bundled C6 image
 #define LORA_PROTO_VERSION 4
 #define LORA_MSG_ID_TO_C6  0x4C01
 #define LORA_MSG_ID_TO_P4  0x4C02
@@ -111,8 +111,8 @@ typedef struct {
 } lora_ident_t;
 
 // The RSSI sweep (#161): the C6 leaves receiving, measures the instantaneous RSSI on count frequencies from start_hz in
-// steps of step_hz (each with the channel's bandwidth, the average of samples readings), and goes back to receiving on
-// the channel as before. It never transmits. Only while receiving (else RESULT BAD_STATE).
+// steps of step_hz (each with the channel's bandwidth, the average of samples readings; 0.5-1 s for 128 steps by
+// estimate, to measure on the bench), and goes back to receiving on the channel as before. It never transmits. Only while receiving (else RESULT BAD_STATE).
 #define LORA_SWEEP_MAX_BINS    128 // SWEEP is then 2 + 12 + 256 = 270 bytes, under LORA_MSG_MAX
 #define LORA_SWEEP_MAX_SAMPLES 16
 #define LORA_SWEEP_MIN_STEP_HZ 7800    // the narrowest LoRa bandwidth

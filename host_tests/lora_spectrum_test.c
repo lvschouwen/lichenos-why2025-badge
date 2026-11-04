@@ -66,6 +66,24 @@ static void plan_refuses(void) {
     CHECK(!spec_plan(&tiny, 868025000, 62500, 128, &p));
 }
 
+// Two plans of the same band from poisoned memory are equal, field by field and byte by byte; another band is not
+static void plan_compare(void) {
+    spec_plan_t a, b;
+    memset(&a, 0xA5, sizeof(a));
+    memset(&b, 0x5A, sizeof(b));
+    CHECK(spec_plan(&spec_bands[0], 869618000, 62500, 128, &a));
+    CHECK(spec_plan(&spec_bands[0], 869618000, 62500, 128, &b));
+    CHECK(spec_plan_equal(&a, &b));
+    CHECK(memcmp(&a, &b, sizeof(a)) == 0);
+    CHECK(spec_plan(&spec_bands[1], 869618000, 62500, 128, &b));
+    CHECK(!spec_plan_equal(&a, &b));
+    spec_plan_t none = {0};
+    CHECK(!spec_plan_equal(&a, &none));
+    memset(&b, 0xA5, sizeof(b));
+    CHECK(!spec_plan(&spec_bands[0], 869618000, 0, 128, &b)); // refused: zeroed, never half-written
+    CHECK(spec_plan_equal(&b, &none));
+}
+
 static void bar_scale(void) {
     CHECK(spec_bar_px(SPEC_FLOOR_DBM * 10, 200) == SPEC_MIN_BAR);
     CHECK(spec_bar_px(-1500, 200) == SPEC_MIN_BAR); // below the floor
@@ -130,6 +148,7 @@ int main(void) {
     plan_wide_band();
     plan_channel_outside();
     plan_refuses();
+    plan_compare();
     bar_scale();
     bin_spans();
     peak_hold();

@@ -590,8 +590,8 @@ static void lora_task(void *arg) {
                         );
                     }
                 }
-                if (msg.u.result.for_type == LORA_MSG_SWEEP_REQ) {
-                    lora_sweep_refused(msg.u.result.code); // a sweep's only RESULT is a refusal (#161)
+                if (msg.u.result.for_type == LORA_MSG_SWEEP_REQ && !lora_sweep_refused(msg.u.result.code)) {
+                    break; // #161: no sweep request outstanding (its caller gave up): ignored
                 }
                 if (msg.u.result.code != LORA_RESULT_OK) {
                     ESP_LOGW(

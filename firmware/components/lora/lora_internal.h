@@ -15,6 +15,7 @@ bool lora_internal_usable(void);
 
 // lora_sweep.c, called by the LoRa task: a SWEEP, or the RESULT that refused a SWEEP_REQ (#161)
 void lora_sweep_answer(lora_sweep_t const *sweep);
-void lora_sweep_refused(uint8_t code);
+// True when a sweep request was outstanding and took it; false: stale or not a refusal, ignored
+bool lora_sweep_refused(uint8_t code);
 // lora_sweep.c, from lora_start: false without memory
 bool lora_sweep_init(void);

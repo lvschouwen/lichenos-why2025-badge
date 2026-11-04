@@ -84,22 +84,32 @@ static lora_use_t lora_use(void) {
 }
 
 // The LoRa spectrum (#161) borrows the radio: MeshCore stops, which gives the radio back (#103), and starts again
-// afterwards. From the spectrum's own task: waits for a start or stop under way first, then for this stop.
-#define USER_PAUSE_WAIT_MS 20000
+// afterwards. From the spectrum's own task. MeshCore must never stay off because of it: resume waits out a late stop
+// (meshcore_run keeps STOPPING up to its LATE_STOP_MS, 60 s) before it starts MeshCore.
+#define USER_PAUSE_WAIT_MS  20000
+#define USER_RESUME_WAIT_MS 75000
 
-static bool meshcore_settled(void) {
-    for (uint32_t waited = 0; waited < USER_PAUSE_WAIT_MS; waited += 100) {
+static bool mesh_updating(void) {
+    mesh_run_t r = meshcore_run_get();
+    return r.state == MESH_RUN_STOPPED && r.why == MESH_WHY_UPDATE;
+}
+
+// No start or stop under way. False after wait_ms, when keep_going (may be NULL) says stop waiting, or during an update
+static bool meshcore_settled(uint32_t wait_ms, bool (*keep_going)(void)) {
+    for (uint32_t waited = 0;; waited += 100) {
         if (!mesh_run_busy(meshcore_run_get())) {
             return true;
         }
+        if (waited >= wait_ms || (keep_going && !keep_going()) || mesh_updating()) {
+            return false;
+        }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    return false;
 }
 
-static bool lora_user_pause(bool *was_running) {
+static bool lora_user_pause(bool *was_running, bool (*keep_going)(void)) {
     *was_running = false;
-    if (!meshcore_settled()) {
+    if (!meshcore_settled(USER_PAUSE_WAIT_MS, keep_going)) {
         return false;
     }
     if (meshcore_run_get().state != MESH_RUN_RUNNING) {
@@ -110,14 +120,32 @@ static bool lora_user_pause(bool *was_running) {
         ESP_LOGW(TAG, "MeshCore not paused for the LoRa spectrum: %s", why);
         return false;
     }
-    *was_running = true; // asked to stop: started again afterwards even if the stop is late
-    return meshcore_settled() && meshcore_run_get().state == MESH_RUN_STOPPED;
+    *was_running = true; // asked to stop: resume follows even if this stop is late
+    return meshcore_settled(USER_PAUSE_WAIT_MS, keep_going) && meshcore_run_get().state == MESH_RUN_STOPPED;
 }
 
 static void lora_user_resume(void) {
-    char const *why = meshcore_run_request(true);
-    if (why) {
-        ESP_LOGW(TAG, "MeshCore not started again after the LoRa spectrum: %s", why);
+    for (int attempt = 1; attempt <= 2; attempt++) {
+        if (!meshcore_settled(USER_RESUME_WAIT_MS, NULL)) {
+            ESP_LOGW(TAG, "MeshCore %s: not started again after the LoRa spectrum",
+                     mesh_updating() ? "stopped for an update" : "still busy");
+            return;
+        }
+        mesh_run_t r = meshcore_run_get();
+        if (r.state == MESH_RUN_RUNNING) {
+            ESP_LOGI(TAG, "MeshCore runs again after the LoRa spectrum");
+            return;
+        }
+        if (r.why == MESH_WHY_UPDATE) {
+            ESP_LOGI(TAG, "MeshCore stopped for an update: not started again after the LoRa spectrum");
+            return;
+        }
+        char const *why = meshcore_run_request(true);
+        if (!why) {
+            ESP_LOGI(TAG, "MeshCore starting again after the LoRa spectrum");
+            return;
+        }
+        ESP_LOGW(TAG, "MeshCore start after the LoRa spectrum refused (%s)%s", why, attempt == 1 ? ": trying again" : "");
     }
 }
 

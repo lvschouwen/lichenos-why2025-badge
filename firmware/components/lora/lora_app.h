@@ -46,7 +46,8 @@ int  lora_send_state(char const *owner);
 
 // RSSI sweep (#161) for the owner: the C6 leaves receiving for one pass over count frequencies from start_hz in steps of
 // step_hz, each measured with the channel's bandwidth, then receives on the channel again. Receive only: nothing is sent
-// on air. Blocks the caller up to timeout_ms (a pass over 128 steps takes about 0.4 s): never from the LVGL task.
+// on air. Blocks the caller up to timeout_ms (a pass over 128 steps: 0.5-1 s by estimate, to measure on the bench):
+// never from the LVGL task.
 #define LORA_SWEEP_BINS 128
 
 typedef struct {

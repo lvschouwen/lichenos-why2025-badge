@@ -39,10 +39,11 @@ typedef struct {
     void (*lora_counts)(uint32_t *rx, uint32_t *tx);
     // C6 outages the badge came back from (#14) and the last recovery in words, for the notification (#62)
     uint32_t (*c6_restarts)(char *reason, size_t cap);
-    // The LoRa spectrum (#161) borrows the radio from its user: pause stops MeshCore and waits until it gave the radio
-    // back (seconds; off the LVGL task), true when the radio is free, *was_running when MeshCore ran and so must be
-    // resumed afterwards. resume starts it again without waiting.
-    bool (*lora_user_pause)(bool *was_running);
+    // The LoRa spectrum (#161) borrows the radio from its user (off the LVGL task, both block). pause stops MeshCore and
+    // waits until its stop finished: true when the radio is free; *was_running when a stop was asked for, so resume must
+    // follow even when pause failed. The wait ends early (false) once keep_going() says false. resume waits for a stop
+    // still under way, then starts MeshCore (one retry) and logs the outcome; it returns at once during an update.
+    bool (*lora_user_pause)(bool *was_running, bool (*keep_going)(void));
     void (*lora_user_resume)(void);
 } shell_sources_t;
 

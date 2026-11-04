@@ -22,7 +22,7 @@ with canaries), 16 MB flash.
 ```
                     P4 (Lichen)                                C6 (radio coprocessor)
  display ST7703 ─MIPI DSI─┤                          SDIO 4-bit ├─ ESP-Hosted: Wi-Fi, BLE HCI, RPC,
- keyboard TCA8418 ─I2C────┤ ◄══════════════════════════════════►│   peer data = LoRa protocol v3
+ keyboard TCA8418 ─I2C────┤ ◄══════════════════════════════════►│   peer data = LoRa protocol v4
  BMI270 / BME690 ─I2C─────┤   UART: flashing the C6 at boot,    ├─ SPI ─ SX1262 (RA-01SH) + bodges
  SD card ─────────────────┤         backlight commands          ├─ PWM: screen + keyboard backlight
  flash: Lichen ×2, /storage│   GPIO12 → C6 EN (resets TCA8418 too)
@@ -30,7 +30,7 @@ with canaries), 16 MB flash.
 ```
 
 Links between the chips:
-- **SDIO (4-bit):** ESP-Hosted carries Wi-Fi, BLE HCI, RPC and peer data. Our LoRa protocol v3 runs on peer data
+- **SDIO (4-bit):** ESP-Hosted carries Wi-Fi, BLE HCI, RPC and peer data. Our LoRa protocol v4 runs on peer data
   (IDs 0x4C01 P4→C6, 0x4C02 C6→P4, `shared/lora/lora_proto.h`). Both chips must run the same protocol version.
 - **UART:** the P4 flashes the C6 at boot from `/storage/c6` when the image's MD5 differs; afterwards the same UART
   carries the backlight commands.
