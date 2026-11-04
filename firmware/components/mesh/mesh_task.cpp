@@ -2637,6 +2637,10 @@ static void cmd_mesh(char const *args) {
         mesh_notify_console(args[6] ? args + 7 : ""); // #50: the settings and counters are there whether MeshCore runs or not
         return;
     }
+    if (strncmp(args, "order", 5) == 0 && (args[5] == ' ' || !args[5])) {
+        mesh_order_console(args + 5); // #189: the grid's order is there whether MeshCore runs or not
+        return;
+    }
     if (console_not_running()) {
         return;
     }
@@ -3301,7 +3305,7 @@ extern "C" void mesh_console_init(void) {
     console_register("mesh",
                      "mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | "
                      "mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact|scan [n] [bad|bad1] [int] [from<offset>]] | mesh send <channel> <text> | "
-                     "mesh dm <12 hex> <text> | mesh notify [test dm|chan <name>|fail|mention] | mesh advert ... | mesh loc ... | mesh autoadd ...",
+                     "mesh dm <12 hex> <text> | mesh notify [test dm|chan <name>|fail|mention] | mesh order [reset] | mesh advert ... | mesh loc ... | mesh autoadd ...",
                      cmd_mesh);
     console_register("contacts", "contacts (nodes heard, newest first) | contacts export [<12 hex>] | contacts import "
                      "<part> | end | cancel", cmd_contacts);

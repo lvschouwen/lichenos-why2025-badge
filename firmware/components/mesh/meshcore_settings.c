@@ -15,6 +15,7 @@
 #include "mesh.h"
 #include "mesh_chat.h"
 #include "mesh_format.h"
+#include "mesh_order.h"
 #include "mesh_share.h"
 #include "qr_screen.h"
 #include "meshcore_run.h"
@@ -498,10 +499,57 @@ static void run_rows(lv_obj_t *page) {
     run_timer = lv_timer_create(run_row_refresh, RUN_POLL_MS, NULL); // a start or stop ends on the job task
 }
 
+// ---- the grid's tile order (#189) --------------------------------------------------------------------------------
+
+static lv_obj_t *order_row; // "Reset tile order": its value says Default or Arranged
+
+static void order_row_refresh(void) {
+    if (order_row) {
+        menu_set_value(order_row, mesh_order_arranged() ? "Arranged" : "Default");
+    }
+}
+
+static void arrange_tiles(void *arg) {
+    (void)arg;
+    if (!meshcore_grid_arrange_start()) {
+        ESP_LOGW(TAG, "arrange tiles: the grid is not under this page");
+    }
+}
+
+static void reset_order_answer(bool yes) {
+    if (yes) {
+        if (!mesh_order_reset()) {
+            ESP_LOGE(TAG, "tile order not reset");
+        }
+        meshcore_grid_reload(); // a grid under this page shows the first order at once
+        order_row_refresh();
+    }
+}
+
+static void ask_reset_order(void *arg) {
+    (void)arg;
+    shell_dialog_t const d = {
+        .title         = "Reset the tile order? The tiles go back to their first places.",
+        .seconds       = 10,
+        .careful       = true, // an arrangement takes work to redo: running out of time cancels
+        .confirm_label = "reset",
+    };
+    shell_dialog_countdown(&d, reset_order_answer);
+}
+
+// "Arrange tiles" only where the grid is under this page (Settings tile): from Lichen's Settings the app is not open
+static void order_rows(lv_obj_t *page) {
+    if (meshcore_grid_arrange_possible()) {
+        menu_set_kind(menu_add(page, "Arrange tiles", "", arrange_tiles, NULL), MENU_OPEN);
+    }
+    order_row = menu_add(page, "Reset tile order", "", ask_reset_order, NULL);
+    order_row_refresh();
+}
+
 static void on_page_delete(lv_event_t *e) {
     (void)e;
     name_row = radio_row = channels_row = advert_row = scope_row = NULL;
-    autostart_row = run_row = NULL;
+    autostart_row = run_row = order_row = NULL;
     if (run_timer) {
         lv_timer_delete(run_timer);
         run_timer = NULL;
@@ -521,6 +569,7 @@ void meshcore_settings(lv_obj_t *page) {
     if (!mesh_running() || !mesh_get_settings(&s)) {
         menu_note(page, "MeshCore is not running: its settings come back when it does.");
         menu_set_kind(menu_add(page, "Notifications", "", open_notify_page, NULL), MENU_OPEN);
+        order_rows(page);
         return;
     }
     name_row     = menu_add(page, "Name", s.name, edit_name, NULL);
@@ -533,6 +582,7 @@ void meshcore_settings(lv_obj_t *page) {
     menu_set_kind(menu_add(page, "Advert & contacts", "", meshcore_advert_settings_open, NULL), MENU_OPEN);
     menu_set_kind(menu_add(page, "Radio health", "", meshcore_health_open, NULL), MENU_OPEN);
     menu_set_kind(menu_add(page, "Air log", "", meshcore_airlog_open, NULL), MENU_OPEN);
+    order_rows(page);
     menu_set_kind(radio_row, MENU_OPEN);
     menu_set_kind(channels_row, MENU_OPEN);
     radio_row_refresh();

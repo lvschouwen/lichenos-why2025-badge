@@ -1,6 +1,7 @@
 // Host test: the MeshCore app's home grid (#88): tiles, badges, and keys that move exactly as on Lichen's home
 #include "home_layout.h"
 #include "mesh_grid.h"
+#include "tile_order.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -156,6 +157,61 @@ static void test_same_as_home(void) {
     }
 }
 
+// The ids the saved order stores (#189): fixed, unique, and fit tile_order's format
+static void test_ids(void) {
+    static char const *const want[MESH_GRID_TILES] = {"chat",  "contacts", "repeaters", "heard",
+                                                      "nearby", "radar",   "advertise", "settings"};
+    char const *ids[MESH_GRID_TILES];
+    mesh_grid_ids(ids);
+    for (int i = 0; i < MESH_GRID_TILES; i++) {
+        CHECK(strcmp(mesh_grid_id((mesh_grid_tile_t)i), want[i]) == 0);
+        CHECK(strcmp(ids[i], want[i]) == 0);
+        CHECK(strpbrk(ids[i], ",:") == NULL && ids[i][0] != '\0');
+        for (char const *c = ids[i]; *c; c++) {
+            CHECK(*c >= 'a' && *c <= 'z');
+        }
+        for (int j = 0; j < i; j++) {
+            CHECK(strcmp(ids[i], ids[j]) != 0);
+        }
+    }
+    CHECK(strcmp(mesh_grid_id(MESH_GRID_TILES), "") == 0);
+    CHECK(strcmp(mesh_grid_id((mesh_grid_tile_t)-1), "") == 0);
+}
+
+// An arranged order saves by id, comes back through the merge, and a tile added later goes last
+static void test_order_by_id(void) {
+    char const *ids[MESH_GRID_TILES];
+    mesh_grid_ids(ids);
+    int order[MESH_GRID_TILES], back[MESH_GRID_TILES];
+    for (int i = 0; i < MESH_GRID_TILES; i++) {
+        order[i] = i;
+    }
+    CHECK(tile_order_move(order, MESH_GRID_TILES, MESH_GRID_SETTINGS, 0)); // Settings first
+    char text[128];
+    CHECK(tile_order_encode(ids, order, MESH_GRID_TILES, text, sizeof(text)) > 0);
+    CHECK(strcmp(text, "1:settings,chat,contacts,repeaters,heard,nearby,radar,advertise") == 0);
+    CHECK(tile_order_merge(text, ids, MESH_GRID_TILES, back));
+    CHECK(memcmp(order, back, sizeof(order)) == 0);
+    // a saved list from a build with one tile fewer: the missing tile (Radar) goes last
+    CHECK(tile_order_merge("1:settings,advertise,chat", ids, MESH_GRID_TILES, back));
+    CHECK(back[0] == MESH_GRID_SETTINGS && back[1] == MESH_GRID_ADVERTISE && back[2] == MESH_GRID_CHAT);
+    CHECK(back[3] == MESH_GRID_CONTACTS && back[7] == MESH_GRID_RADAR);
+    CHECK(!tile_order_merge("", ids, MESH_GRID_TILES, back) && back[0] == MESH_GRID_CHAT); // nothing saved: first order
+}
+
+// The arrows move in slots: with the tiles rearranged, the neighbour of a slot is the same as in the first order
+static void test_slots_follow_order(void) {
+    int order[MESH_GRID_TILES] = {0, 1, 2, 3, 4, 5, 6, 7};
+    CHECK(tile_order_move(order, MESH_GRID_TILES, 7, 1)); // Settings into slot 1
+    int slot_of[MESH_GRID_TILES];
+    tile_order_slots(order, MESH_GRID_TILES, slot_of);
+    CHECK(slot_of[MESH_GRID_SETTINGS] == 1 && slot_of[MESH_GRID_CONTACTS] == 2);
+    int to = mesh_grid_move(MESH_GRID_TILES, slot_of[MESH_GRID_SETTINGS], MESH_GRID_KEY_RIGHT);
+    CHECK(order[to] == MESH_GRID_CONTACTS);
+    to = mesh_grid_move(MESH_GRID_TILES, slot_of[MESH_GRID_SETTINGS], MESH_GRID_KEY_DOWN);
+    CHECK(order[to] == MESH_GRID_HEARD); // slot 4 holds Heard after the shift
+}
+
 int main(void) {
     test_tiles();
     test_counts();
@@ -163,6 +219,9 @@ int main(void) {
     test_badges();
     test_moves();
     test_same_as_home();
+    test_ids();
+    test_order_by_id();
+    test_slots_follow_order();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

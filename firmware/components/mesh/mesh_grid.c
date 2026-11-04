@@ -7,8 +7,21 @@
 
 static char const *const NAMES[MESH_GRID_TILES] = {"Chat", "Contacts", "Repeaters", "Heard", "Nearby", "Radar", "Advertise", "Settings"};
 
+// Never change an id: a saved order refers to it (#189)
+static char const *const IDS[MESH_GRID_TILES] = {"chat", "contacts", "repeaters", "heard", "nearby", "radar", "advertise", "settings"};
+
 char const *mesh_grid_name(mesh_grid_tile_t tile) {
     return (unsigned)tile < MESH_GRID_TILES ? NAMES[tile] : "";
+}
+
+char const *mesh_grid_id(mesh_grid_tile_t tile) {
+    return (unsigned)tile < MESH_GRID_TILES ? IDS[tile] : "";
+}
+
+void mesh_grid_ids(char const **ids) {
+    for (int i = 0; i < MESH_GRID_TILES; i++) {
+        ids[i] = IDS[i];
+    }
 }
 
 void mesh_grid_count_text(size_t n, char *out, size_t cap) {

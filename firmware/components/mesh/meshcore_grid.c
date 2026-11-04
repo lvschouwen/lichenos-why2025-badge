@@ -3,6 +3,11 @@
 // tile; the arrows move the focus, Enter opens the tile's screen on the shell's stack (Esc there comes back here) and
 // Esc here is the shell's: back to Lichen home. Badges refresh once a second from copies (mesh.h), never waiting on
 // MeshCore for more than a tick.
+//
+// Arrange mode (#189), as home's: g.cell[], g.badge[] and the tile ids stay indexed by tile; g.order[slot] / g.slot_of[tile]
+// are only where a tile is shown, and the arrows move in slots (mesh_grid_move). Settings > Arrange tiles starts it:
+// Enter picks the focused tile up, the arrows move it (insert and shift, the cells are reordered in place), Enter drops
+// and saves, Esc puts it back or ends the mode. The order is saved only on a real move (mesh_order.h).
 #include "esp_log.h"
 #include "screen_ids.h"
 #include "lichen_clock.h"
@@ -12,6 +17,9 @@
 #include "mesh_chat.h"
 #include "mesh_format.h"
 #include "mesh_grid.h"
+#include "mesh_order.h"
+#include "lichen_notify.h"
+#include "tile_order.h"
 #include "meshcore_run.h"
 #include "meshcore_screens.h"
 #include "meshcore_settings.h"
@@ -31,7 +39,9 @@ static char const TAG[] = "meshcore";
 #define ICON_PX        64 // home.c GRID_ICON_PX and the rest of its grid sizes
 #define GRID_GAP       24 // between columns
 #define ROW_GAP        16 // between rows: three rows plus the status line must clear the status bar and the hint (#171)
-#define CELL_PAD       18
+#define CELL_PAD_TOP   8
+#define MOVING_EDGE    4 // "Moving" off the cell's bottom edge, clear of the 3 px focus border
+#define BORDER_W       3
 #define ICON_GAP       12
 #define TILE_RADIUS    20
 #define REFRESH_MS     1000
@@ -47,6 +57,13 @@ static struct {
     lv_obj_t          *run;    // "MeshCore is not running. Enter starts it." over the tiles, hidden while it runs
     lv_timer_t        *timer;
     lv_timer_t        *status_timer; // clears the status line
+    lv_group_t        *group;
+    int                order[MESH_GRID_TILES];   // order[slot] = the tile shown there
+    int                slot_of[MESH_GRID_TILES];
+    int                picked[MESH_GRID_TILES];  // the order when the tile was picked up: Esc puts it back
+    bool               arranging;
+    bool               holding;
+    lv_obj_t          *moving; // the amber "Moving" label on the held tile
 
     mesh_grid_counts_t counts;
 } g;
@@ -211,18 +228,197 @@ static void open_tile(void *arg) {
     }
 }
 
+// ---- arrange mode (#189) -----------------------------------------------------------------------------------------
+
+static void set_hint(void) {
+    if (!g.screen) {
+        return;
+    }
+    if (g.holding) {
+        shell_page_hint(g.screen, "Arrows", "move", "Enter", "drop", "Esc", "cancel", NULL);
+    } else if (g.arranging) {
+        shell_page_hint(g.screen, "Enter", "pick up", "Esc", "done", NULL);
+    } else {
+        shell_page_hint(g.screen, "Enter", "open", NULL); // dim (R8), the same line as every page
+    }
+}
+
+// The cells are the screen's children after the run line, in display order; the Advertise result line and the hint
+// stay behind them. The key group follows, so Tab visits them in the order they are shown.
+static void place_cells(int focus) {
+    for (int slot = 0; slot < MESH_GRID_TILES; slot++) {
+        lv_obj_move_to_index(g.cell[g.order[slot]], 1 + slot);
+    }
+    if (g.group) {
+        for (int slot = 0; slot < MESH_GRID_TILES; slot++) {
+            lv_group_remove_obj(g.cell[g.order[slot]]);
+        }
+        for (int slot = 0; slot < MESH_GRID_TILES; slot++) {
+            lv_group_add_obj(g.group, g.cell[g.order[slot]]);
+        }
+        lv_group_focus_obj(g.cell[focus]);
+    }
+    lv_obj_update_layout(g.screen);
+}
+
+static void show_moving(int tile, bool on) {
+    if (g.moving) {
+        lv_obj_delete(g.moving);
+        g.moving = NULL;
+    }
+    if (!on) {
+        return;
+    }
+    lv_obj_t *label = lichen_label_line(g.cell[tile], LV_SIZE_CONTENT);
+    lv_obj_set_style_max_width(label, LV_PCT(100), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(THEME_AMBER), 0);
+    lv_label_set_text(label, "Moving");
+    // Floating in the cell's bottom pad, under the name: in the flow it would push the icon up, away from its badge.
+    // The pad lies outside the content area the alignment uses, so its height is added back.
+    int32_t pad = lv_obj_get_style_pad_bottom(g.cell[tile], LV_PART_MAIN);
+    lv_obj_set_floating(label, true);
+    lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, pad - MOVING_EDGE);
+    g.moving = label;
+}
+
+static int focused_tile(void) {
+    lv_obj_t *f = g.group ? lv_group_get_focused(g.group) : NULL;
+    for (int i = 0; i < MESH_GRID_TILES; i++) {
+        if (g.cell[i] == f) {
+            return i;
+        }
+    }
+    return g.order[0];
+}
+
+static void cancel_hold(void) {
+    int tile = focused_tile();
+    memcpy(g.order, g.picked, sizeof(g.order));
+    tile_order_slots(g.order, MESH_GRID_TILES, g.slot_of);
+    g.holding = false;
+    show_moving(tile, false);
+    place_cells(tile);
+    set_hint();
+}
+
+static void drop(void) {
+    int  tile  = focused_tile();
+    bool moved = memcmp(g.picked, g.order, sizeof(g.order)) != 0;
+    // Only a real move reaches the store; a failed save must not look saved: the tile goes back
+    if (moved && !mesh_order_save(g.order)) {
+        cancel_hold();
+        lichen_notify("meshcore", LN_WARN, "Tile order not saved",
+                      "The tile went back to its place. Try again; if it keeps failing, restart the badge.", 0);
+        return;
+    }
+    g.holding = false;
+    show_moving(tile, false);
+    set_hint();
+}
+
+static void pick_up(void) {
+    memcpy(g.picked, g.order, sizeof(g.picked));
+    g.holding = true;
+    show_moving(focused_tile(), true);
+    set_hint();
+}
+
+static void arrange_key(int at, uint32_t key) {
+    int from = g.slot_of[at];
+    int to   = mesh_grid_move(MESH_GRID_TILES, from, key);
+    if (to == from) {
+        return;
+    }
+    if (g.holding) {
+        tile_order_move(g.order, MESH_GRID_TILES, from, to);
+        tile_order_slots(g.order, MESH_GRID_TILES, g.slot_of);
+        place_cells(at); // re-focus the moved cell
+    } else {
+        lv_group_focus_obj(g.cell[g.order[to]]);
+    }
+    lv_obj_scroll_to_view(g.cell[g.holding ? at : g.order[to]], LV_ANIM_OFF);
+}
+
+// Settings > Arrange tiles: arrange mode on (a held tile goes back when it ends)
+static void arrange_set(bool on) {
+    if (!g.screen || on == g.arranging) {
+        return;
+    }
+    if (g.holding) {
+        cancel_hold();
+    }
+    g.arranging = on;
+    set_hint();
+}
+
+// The shell's Esc hook (shell_on_esc, set in meshcore_grid_open): a held tile goes back, else arranging ends; true when
+// that used the Esc
+bool meshcore_grid_esc(void *arg) {
+    (void)arg;
+    if (!g.screen || !g.arranging) {
+        return false;
+    }
+    if (g.holding) {
+        cancel_hold();
+    } else {
+        arrange_set(false);
+    }
+    return true;
+}
+
+static void arrange_begin(void *arg) {
+    (void)arg;
+    arrange_set(true);
+}
+
+bool meshcore_grid_arrange_possible(void) {
+    return g.screen != NULL;
+}
+
+bool meshcore_grid_arrange_start(void) {
+    // Back to the grid under Settings, then arranging; the grid is under the top when Settings was opened from its tile
+    return g.screen && shell_back_to(g.screen, arrange_begin, NULL);
+}
+
+// The saved order changed behind the grid's back (reset): show it, keeping the focus
+void meshcore_grid_reload(void) {
+    if (!g.screen) {
+        return;
+    }
+    if (g.holding) {
+        cancel_hold();
+    }
+    int tile = focused_tile();
+    mesh_order_load(g.order);
+    tile_order_slots(g.order, MESH_GRID_TILES, g.slot_of);
+    place_cells(tile);
+}
+
 static void on_key(lv_event_t *e) {
     int      at  = (int)(intptr_t)lv_event_get_user_data(e);
     uint32_t key = lv_event_get_key(e);
+    if (key == LV_KEY_ENTER && g.arranging) {
+        if (g.holding) {
+            drop();
+        } else {
+            pick_up(); // never opens a tile while arranging
+        }
+        return;
+    }
     if (key == LV_KEY_ENTER) {
         // Outside the indev's key handling: opening swaps the indev's group (as home.c does)
         lichen_ui_call(open_tile, (void *)(intptr_t)at);
         return;
     }
-    int to = mesh_grid_move(MESH_GRID_TILES, at, key);
-    if (to != at) {
-        lv_group_focus_obj(g.cell[to]);
-        lv_obj_scroll_to_view(g.cell[to], LV_ANIM_OFF);
+    if (g.arranging) {
+        arrange_key(at, key);
+        return;
+    }
+    int from = g.slot_of[at];
+    int to   = mesh_grid_move(MESH_GRID_TILES, from, key);
+    if (to != from) {
+        lv_group_focus_obj(g.cell[g.order[to]]);
+        lv_obj_scroll_to_view(g.cell[g.order[to]], LV_ANIM_OFF);
     }
 }
 
@@ -236,7 +432,7 @@ static void style_cell(lv_obj_t *cell) {
     lv_obj_set_style_bg_color(cell, lv_color_hex(THEME_TILE), 0);
     lv_obj_set_style_bg_color(cell, lv_color_hex(THEME_TRACK), LV_STATE_FOCUSED);
     lv_obj_set_style_border_color(cell, lv_color_hex(THEME_AMBER), 0);
-    lv_obj_set_style_border_width(cell, 3, 0);
+    lv_obj_set_style_border_width(cell, BORDER_W, 0);
     lv_obj_set_style_border_opa(cell, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_opa(cell, LV_OPA_COVER, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(cell, 0, LV_STATE_FOCUS_KEY);
@@ -258,7 +454,11 @@ static void add_cell(lv_obj_t *grid, lv_group_t *group, int i) {
     style_cell(cell);
     int32_t w      = (LV_HOR_RES - 2 * THEME_PAD - (MESH_GRID_COLS - 1) * GRID_GAP) / MESH_GRID_COLS;
     int32_t line_h = lv_font_get_line_height(lv_obj_get_style_text_font(cell, LV_PART_MAIN)); // a taller font (#28)
-    lv_obj_set_size(cell, w, ICON_PX + ICON_GAP + line_h + 2 * CELL_PAD);
+    // Room under the name for arrange mode's "Moving" (one line plus its edge), so the icon does not move when it shows
+    int32_t pad_bottom = line_h + MOVING_EDGE + 2;
+    lv_obj_set_style_pad_top(cell, CELL_PAD_TOP, 0);
+    lv_obj_set_style_pad_bottom(cell, pad_bottom, 0);
+    lv_obj_set_size(cell, w, ICON_PX + ICON_GAP + line_h + 2 * BORDER_W + CELL_PAD_TOP + pad_bottom);
     lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(cell, ICON_GAP, 0);
@@ -300,16 +500,19 @@ void meshcore_grid_build(lv_obj_t *screen, lv_group_t *group) {
     g.run = add_label(screen, "", THEME_AMBER);
     lv_obj_set_width(g.run, LV_PCT(100));
     lv_obj_set_hidden(g.run, true); // refresh shows it when MeshCore does not run
-    for (int i = 0; i < MESH_GRID_TILES; i++) {
-        add_cell(screen, group, i);
+    g.group = group;
+    mesh_order_load(g.order); // the first order unless the person arranged them; nothing is written here
+    tile_order_slots(g.order, MESH_GRID_TILES, g.slot_of);
+    for (int slot = 0; slot < MESH_GRID_TILES; slot++) {
+        add_cell(screen, group, g.order[slot]); // children and group in display order
     }
     g.status = add_label(screen, "", THEME_TEAL);
     lv_obj_set_width(g.status, LV_PCT(100));
     lv_obj_set_hidden(g.status, true); // set_status shows it with a result
-    shell_page_hint(screen, "Enter", "open", NULL); // dim (R8), the same line as every page
+    set_hint();
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     if (group) {
-        lv_group_focus_obj(g.cell[MESH_GRID_CHAT]);
+        lv_group_focus_obj(g.cell[g.order[0]]);
     }
     g.status_timer = lv_timer_create(clear_status, STATUS_KEEP_MS, NULL);
     if (g.status_timer) {

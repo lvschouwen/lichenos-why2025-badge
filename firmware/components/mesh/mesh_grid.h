@@ -33,6 +33,12 @@ typedef enum {
 
 // The tile's name ("Chat", ...); "" for a value outside the enum
 char const *mesh_grid_name(mesh_grid_tile_t tile);
+// The tile's stable id ("chat", "contacts", "repeaters", "heard", "nearby", "radar", "advertise", "settings"): what the
+// saved display order stores (#189), so a renamed tile keeps its place. "" for a value outside the enum. Lowercase,
+// no ',' or ':' (tile_order.h's format).
+char const *mesh_grid_id(mesh_grid_tile_t tile);
+// All the ids, indexed by tile (the ids[] of tile_order_merge)
+void mesh_grid_ids(char const **ids);
 
 // What the badges are made from: copies the grid takes once a second
 typedef struct {

@@ -8,6 +8,13 @@
 
 // The app's home grid on its own screen (meshcore_grid.c): the screen the shell made for the app, its key group
 void meshcore_grid_build(lv_obj_t *screen, lv_group_t *group);
+// Arrange mode (#189): Settings > Arrange tiles (meshcore_settings.c). _possible: the grid is on the stack (a Settings page
+// opened from its tile); _start closes the screens above it and starts arranging, false when it could not be queued.
+// _reload shows the saved order again (after a reset). _esc is the shell_on_esc hook the grid's builder sets.
+bool meshcore_grid_arrange_possible(void);
+bool meshcore_grid_arrange_start(void);
+void meshcore_grid_reload(void);
+bool meshcore_grid_esc(void *arg);
 // A tile's drawing (meshcore_grid_icons.c), mesh_grid_tile_t; size_px square, on its own object in parent
 void meshcore_grid_icon(lv_obj_t *parent, int tile, int size_px);
 

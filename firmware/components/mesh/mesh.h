@@ -61,6 +61,8 @@ bool mesh_stop(mesh_stop_reason_t why);
 bool mesh_stop_pending(void);
 // "fw mesh", "fw contacts" and friends: registered once, whether MeshCore starts or not (#103)
 void mesh_console_init(void);
+// "fw mesh order [reset]" (#189): the grid's tile order, or back to the first one; args is what follows "order"
+void mesh_order_console(char const *args);
 // The MeshCore identity's state (#80, #109, #110), safe from any task: MESH_IDENT_UNCHECKED before the first start,
 // then what the load found. Only MESH_IDENT_OK transmits. MESH_IDENT_UNREADABLE means an identity may exist but could
 // not be read (a damaged file, or no storage drive at all): nothing may make or save a new identity then.

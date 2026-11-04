@@ -712,8 +712,8 @@ target_include_directories(mesh_scope_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
 target_compile_options(mesh_scope_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_scope_test COMMAND mesh_scope_test)
 
-add_executable(mesh_grid_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_grid_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_grid.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advert_cfg.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/home_layout.c)
-target_include_directories(mesh_grid_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+add_executable(mesh_grid_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_grid_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_grid.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_advert_cfg.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/home_layout.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/tile_order.c)
+target_include_directories(mesh_grid_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(mesh_grid_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_grid_test COMMAND mesh_grid_test)
 add_executable(mesh_run_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_run_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_run.c)

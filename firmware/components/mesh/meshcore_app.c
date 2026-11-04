@@ -219,6 +219,7 @@ static void on_first_delete(lv_event_t *e) {
 }
 
 static void open(lv_obj_t *screen) {
+    shell_on_esc(meshcore_grid_esc, NULL); // arranging the tiles is a state of the grid, not a screen (#189)
     // "Enter to start" (#103): a stopped MeshCore starts on the job task; the grid says so until it runs
     mesh_run_t run = meshcore_run_get();
     if (run.state == MESH_RUN_STOPPED && run.why != MESH_WHY_UPDATE && lora_up()) {
