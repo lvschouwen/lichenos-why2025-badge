@@ -186,7 +186,7 @@ static void cmd_idle(char const *args) {
         return;
     }
     console_reply("idle: %s, %lu s since the last key, %s%s", screen_idle_stage_name(), (unsigned long)idle_s, what,
-                  inhibit ? " (held bright: update, setup or Bench)" : "");
+                  inhibit ? " (held bright: update, setup, Bench or key lock)" : "");
 }
 
 void screen_idle_init(void) {
