@@ -49,6 +49,19 @@ int main(void) {
     CHECK(ui_keys_parse("row:", k, 16, &pos) == UI_KEYS_ERR && pos == 0); // nothing to compare with
     CHECK(ui_keys_parse("down focus:|enter", k, 16, &pos) == UI_KEYS_ERR && pos == 5);
     CHECK(ui_keys_parse("down row:Wi-Fi", k, 1, &pos) == UI_KEYS_ERR && pos == 5); // does not fit
+    // needlock and notfocus (#190)
+    char const *any = "needlock notfocus:Remove;Send advert;Add |enter";
+    CHECK(ui_keys_parse(any, k, 16, &pos) == 3);
+    CHECK(k[0] == UI_KEY_NEEDLOCK && !UI_KEY_IS_GUARD(k[0]) && !UI_KEY_IS_SHAPE(k[0]));
+    CHECK(UI_KEY_IS_GUARD(k[1]) && k[2] == 10);
+    CHECK(ui_keys_guard_ok(k[1], any, "Alice"));
+    CHECK(ui_keys_guard_ok(k[1], any, "Address book")); // "Add " with its space: not in "Address"
+    CHECK(!ui_keys_guard_ok(k[1], any, "Remove"));
+    CHECK(!ui_keys_guard_ok(k[1], any, "* Send advert now"));
+    CHECK(!ui_keys_guard_ok(k[1], any, "Add channel"));
+    CHECK(!ui_keys_guard_ok(k[1], any, "(none)"));
+    CHECK(!ui_keys_guard_ok(k[1], any, ""));
+    CHECK(ui_keys_parse("notfocus:|enter", k, 16, &pos) == UI_KEYS_ERR);
     if (failures) {
         return 1;
     }

@@ -211,8 +211,9 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
   image's ELF; `flash-fw` and `ota-firmware` keep every ELF in `~/badge-backups/elf` under its SHA-256 and version.
 - Bench: `fw boot [fail <step>]`, `fw home layout tiles|grid`, `fw setup reset [mesh]`, `fw keys on|off|send <keys>` and
   `fw ui` (press keys and read the screen without looking at it; `keys send` takes `focus:<text>|` / `row:<text>|`
-  guards that stop the sequence before a wrong Enter), `fw ui lock on [s]|off` (the badge's own keys off, "Remote control:
-  keys locked" in the status bar; ends s seconds (default 60, max 600) after the last command, on Esc held 3 s or a
+  `notfocus:<a;b>|` guards that stop the sequence before a wrong Enter, and `needlock` which
+  refuses the keys unless the lock is on), `fw ui lock on [s]|off` (the badge's own keys off, "Keys locked: hold
+  Esc 3 s" in the status bar; ends s seconds (default 60, max 600) after the last command, on Esc held 3 s or a
   restart, #190), `fw ui open <app id|name|home>` (an app as from its home tile), `fw uicheck` (walk every LVGL object now, #89), `fw crash test panic|wdt`.
 
 ## Flashing through a remote USB host

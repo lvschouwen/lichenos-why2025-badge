@@ -78,7 +78,7 @@ typedef struct {
     size_t       n, next;
     TaskHandle_t waiter;
     bool         locked;      // the remote key lock was on when the sequence started
-    bool         lock_lost;   // ... and ended before it was through
+    bool         lock_lost;   // ... and ended before it was through, or a needlock found it off
     size_t       failed;      // the guard that failed, 1-based among the guards; 0 = none
     size_t       guards;
     char         focus[LINE_CHARS]; // the focus a failed guard found
@@ -98,8 +98,18 @@ static void sequence_step(lv_timer_t *timer) {
         sequence_finish(timer, seq);
         return;
     }
-    while (seq->next < seq->n && UI_KEY_IS_GUARD(seq->keys[seq->next])) {
+    while (seq->next < seq->n &&
+           (UI_KEY_IS_GUARD(seq->keys[seq->next]) || seq->keys[seq->next] == UI_KEY_NEEDLOCK)) {
         uint32_t guard = seq->keys[seq->next++];
+        if (guard == UI_KEY_NEEDLOCK) {
+            if (!ui_remote_locked()) {
+                seq->lock_lost = true;
+                sequence_finish(timer, seq);
+                return;
+            }
+            seq->locked = true; // from here on the lock must hold to the end
+            continue;
+        }
         seq->guards++;
         current_focus(seq->focus, sizeof(seq->focus));
         if (!ui_keys_guard_ok(guard, seq->text, seq->focus)) {
@@ -126,7 +136,7 @@ static void sequence_report(sequence_t const *seq) {
         console_reply("keys send: guard %u failed: focus '%s'; %u of %u sent", (unsigned)seq->failed,
                       seq->focus[0] ? seq->focus : "(none)", (unsigned)seq->next, (unsigned)seq->n);
     } else if (seq->lock_lost) {
-        console_reply("keys send: stopped, the key lock ended; %u of %u sent", (unsigned)seq->next, (unsigned)seq->n);
+        console_reply("keys send: stopped, the key lock is off; %u of %u sent", (unsigned)seq->next, (unsigned)seq->n);
     } else {
         console_reply("keys sent: %u", (unsigned)seq->n);
     }

@@ -18,8 +18,12 @@
 // focus:<text> (the focused row contains text) and row:<text> (it is text, a leading "* " ignored), text up to the next
 // '|' or the end like text:. A guard that fails stops the sequence there; no later key is sent. No focus, or "(none)",
 // never passes. The value holds where the text is in the sequence string (ui_keys_guard_ok reads it from there).
+// notfocus:<a;b;...> passes only on a focused row that contains none of the ';'-separated texts (the sweep's rows that
+// switch, send or erase, #190). needlock: the remote key lock must be on here and stay on to the end of the sequence.
 #define UI_KEY_GUARD_BIT      0x40000000u
 #define UI_KEY_GUARD_EXACT    0x01000000u
+#define UI_KEY_GUARD_NOT      0x02000000u
+#define UI_KEY_NEEDLOCK       0x20000000u
 #define UI_KEY_IS_GUARD(k)    (!UI_KEY_IS_SHAPE(k) && (k) != UI_KEY_WAIT && ((k) & UI_KEY_GUARD_BIT) != 0)
 #define UI_KEY_GUARD_MAX_TEXT 0xfffu
 

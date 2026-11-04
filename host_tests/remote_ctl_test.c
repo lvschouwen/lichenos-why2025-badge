@@ -60,6 +60,24 @@ static void test_held_before_lock(void) {
     CHECK(!rlock_key(&l, 40, false, true, 500));
 }
 
+// A press dropped under the lock whose release never came (lost, or a chip reset) must not eat a later release
+static void test_stale_drop(void) {
+    rlock_t l = {0};
+    rlock_on(&l, 60, 0);
+    CHECK(rlock_key(&l, KEY, false, true, 100)); // dropped; no release follows
+    rlock_off(&l);
+    CHECK(!rlock_key(&l, KEY, false, true, 200));  // unlocked press reaches LVGL
+    CHECK(!rlock_key(&l, KEY, false, false, 300)); // and so does its release
+    // The keyboard reset its chip: every key counts as released, the Esc hold too
+    rlock_on(&l, 60, 1000);
+    CHECK(rlock_key(&l, 40, false, true, 1100));
+    CHECK(rlock_key(&l, ESC, true, true, 1200));
+    rlock_keys_reset(&l);
+    CHECK(rlock_tick(&l, 5000)); // the Esc hold was forgotten: no escape
+    rlock_off(&l);
+    CHECK(!rlock_key(&l, 40, false, false, 5100)); // a release after the reset is no longer swallowed
+}
+
 static void test_esc_hold(void) {
     rlock_t l = {0};
     rlock_on(&l, 600, 0);
@@ -126,6 +144,7 @@ int main(void) {
     test_timeout();
     test_lazy_expiry_and_wrap();
     test_held_before_lock();
+    test_stale_drop();
     test_esc_hold();
     test_parse();
     test_find_app();

@@ -35,6 +35,8 @@ void rlock_touch(rlock_t *l, uint32_t now); // a console command ran: the timeou
 bool rlock_key(rlock_t *l, uint8_t code, bool is_esc, bool pressed, uint32_t now);
 // Ends the lock when its time is up or Esc has been held long enough; call regularly. True while the lock holds.
 bool rlock_tick(rlock_t *l, uint32_t now);
+// The keyboard released every key (its chip was reset, keyboard.c release_held): no key is down any more
+void rlock_keys_reset(rlock_t *l);
 uint32_t rlock_left_s(rlock_t const *l, uint32_t now); // seconds until the timeout (rounded up), 0 when off
 rlock_end_t rlock_take_end(rlock_t *l);               // why it ended (once), RLOCK_END_NONE when nothing new
 char const *rlock_end_name(rlock_end_t e);           // "timeout", "Esc held", "console"

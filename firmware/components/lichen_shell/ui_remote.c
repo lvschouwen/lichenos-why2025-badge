@@ -10,6 +10,7 @@
 #include "keyboard.h"
 #include "lichen_app.h"
 #include "nav.h"
+#include "raw_keys.h"
 #include "remote_ctl.h"
 #include "shell_parts.h"
 #include "ui_remote.h"
@@ -39,6 +40,13 @@ static bool gate(uint8_t code, bool pressed) {
     return drop;
 }
 
+// Keyboard task: the chip was reset, every key is up
+static void gate_reset(void) {
+    portENTER_CRITICAL(&lock_mux);
+    rlock_keys_reset(&lock);
+    portEXIT_CRITICAL(&lock_mux);
+}
+
 // Console task, at the start and the end of every command: the timeout counts from the last one
 static void console_activity(void) {
     portENTER_CRITICAL(&lock_mux);
@@ -61,6 +69,9 @@ static void tick(lv_timer_t *t) {
     if (end != RLOCK_END_NONE) {
         ESP_LOGI(TAG, "key lock off (%s)", rlock_end_name(end));
     }
+    if (end == RLOCK_END_ESC) {
+        screen_idle_key(); // the holder took the keys back: light the screen as a key would (it may have dimmed)
+    }
     if (on != banner) {
         banner = on;
         status_bar_remote_lock(on);
@@ -71,7 +82,7 @@ static void tick(lv_timer_t *t) {
 }
 
 void ui_remote_start(void) {
-    keyboard_set_gate_hook(gate);
+    keyboard_set_gate_hook(gate, gate_reset);
     console_set_activity(console_activity);
 }
 
@@ -144,6 +155,9 @@ static char const *open_refused(void) {
     }
     if (setup_running()) {
         return "the first-run setup is on screen";
+    }
+    if (raw_keys_test_open()) {
+        return "the Keyboard test is open"; // it owns the keys, like the shape-key shortcuts see it
     }
     return NULL;
 }

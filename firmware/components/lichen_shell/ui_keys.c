@@ -7,20 +7,38 @@ static struct {
     char const *name;
     uint32_t    key;
 } const NAMES[] = {{"up", 17},   {"down", 18}, {"left", 20}, {"right", 19}, {"enter", 10},
-                   {"esc", 27},  {"tab", 9},   {"bksp", 8},  {"wait", UI_KEY_WAIT},
+                   {"esc", 27},  {"tab", 9},   {"bksp", 8},  {"wait", UI_KEY_WAIT}, {"needlock", UI_KEY_NEEDLOCK},
                    {"square", UI_KEY_SHAPE(2)}, {"triangle", UI_KEY_SHAPE(3)}, {"cross", UI_KEY_SHAPE(4)},
                    {"circle", UI_KEY_SHAPE(5)}, {"cloud", UI_KEY_SHAPE(6)},    {"diamond", UI_KEY_SHAPE(7)}};
 
-static uint32_t guard_value(bool exact, size_t offset, size_t len) {
-    return UI_KEY_GUARD_BIT | (exact ? UI_KEY_GUARD_EXACT : 0) | ((uint32_t)len << 12) | (uint32_t)offset;
+static uint32_t guard_value(uint32_t kind, size_t offset, size_t len) {
+    return UI_KEY_GUARD_BIT | kind | ((uint32_t)len << 12) | (uint32_t)offset;
 }
 
-// "focus:" / "row:" at p: one guard key for the text after it (up to '|' or the end). Returns the end of the token,
+static bool prefix(char const *p, char const *word, size_t *skip) {
+    size_t n = strlen(word);
+    if (strncmp(p, word, n) != 0) {
+        return false;
+    }
+    *skip = n;
+    return true;
+}
+
+static bool is_guard_token(char const *p) {
+    size_t skip;
+    return prefix(p, "row:", &skip) || prefix(p, "focus:", &skip) || prefix(p, "notfocus:", &skip);
+}
+
+// "focus:" / "row:" / "notfocus:" at p: one guard key for the text after it (up to '|' or the end). Returns the end of the token,
 // NULL when p is no guard or the text is empty or too long.
 static char const *parse_guard(char const *seq, char const *p, uint32_t *out) {
-    bool   exact = strncmp(p, "row:", 4) == 0;
-    size_t skip  = exact ? 4 : (strncmp(p, "focus:", 6) == 0 ? 6 : 0);
-    if (!skip) {
+    size_t   skip = 0;
+    uint32_t kind = 0;
+    if (prefix(p, "row:", &skip)) {
+        kind = UI_KEY_GUARD_EXACT;
+    } else if (prefix(p, "notfocus:", &skip)) {
+        kind = UI_KEY_GUARD_NOT;
+    } else if (!prefix(p, "focus:", &skip)) {
         return NULL;
     }
     char const *text = p + skip;
@@ -29,8 +47,32 @@ static char const *parse_guard(char const *seq, char const *p, uint32_t *out) {
     if (!len || len > UI_KEY_GUARD_MAX_TEXT || off > UI_KEY_GUARD_MAX_TEXT) {
         return NULL;
     }
-    *out = guard_value(exact, off, len);
+    *out = guard_value(kind, off, len);
     return text + len;
+}
+
+// want (len bytes, not terminated) occurs in focus
+static bool contains(char const *focus, char const *want, size_t len) {
+    for (char const *f = focus; strlen(f) >= len; f++) {
+        if (strncmp(f, want, len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// None of the ';'-separated texts in want occurs in focus
+static bool contains_none(char const *focus, char const *want, size_t len) {
+    char const *end = want + len;
+    while (want < end) {
+        char const *semi = memchr(want, ';', (size_t)(end - want));
+        size_t      n    = (size_t)((semi ? semi : end) - want);
+        if (n && contains(focus, want, n)) {
+            return false;
+        }
+        want += n + 1;
+    }
+    return true;
 }
 
 bool ui_keys_guard_ok(uint32_t guard, char const *seq, char const *focus) {
@@ -39,13 +81,11 @@ bool ui_keys_guard_ok(uint32_t guard, char const *seq, char const *focus) {
     }
     char const *want = seq + (guard & UI_KEY_GUARD_MAX_TEXT);
     size_t      len  = (guard >> 12) & UI_KEY_GUARD_MAX_TEXT;
+    if (guard & UI_KEY_GUARD_NOT) {
+        return contains_none(focus, want, len);
+    }
     if (!(guard & UI_KEY_GUARD_EXACT)) {
-        for (char const *f = focus; strlen(f) >= len; f++) {
-            if (strncmp(f, want, len) == 0) {
-                return true;
-            }
-        }
-        return false;
+        return contains(focus, want, len);
     }
     while (*focus == '*' || *focus == ' ') {
         focus++; // a checked row's "* " (ui_probe.c)
@@ -77,7 +117,7 @@ size_t ui_keys_parse(char const *seq, uint32_t *out, size_t max, size_t *err_pos
             }
             continue;
         }
-        if (strncmp(p, "focus:", 6) == 0 || strncmp(p, "row:", 4) == 0) {
+        if (is_guard_token(p)) {
             uint32_t    guard = 0;
             char const *end   = parse_guard(seq, p, &guard);
             if (!end || n >= max) {

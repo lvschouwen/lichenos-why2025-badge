@@ -38,6 +38,7 @@ static atomic_bool    reinit_asked;            // keyboard_reinit(): honoured by
 static void (*_Atomic reset_hook)(void);       // told when the readback finds the chip reset (#14)
 static bool (*_Atomic wake_hook)(void);        // the screen timeout (#43)
 static bool (*_Atomic gate_hook)(uint8_t key, bool pressed); // the remote key lock (#190)
+static void (*_Atomic gate_reset_hook)(void);                // ... told when every key was released
 static bool           woke[0x51];              // presses the wake hook swallowed: their releases go nowhere either
 
 static struct {
@@ -97,8 +98,9 @@ void keyboard_set_wake_hook(bool (*fn)(void)) {
     atomic_store(&wake_hook, fn);
 }
 
-void keyboard_set_gate_hook(bool (*fn)(uint8_t key, bool pressed)) {
+void keyboard_set_gate_hook(bool (*fn)(uint8_t key, bool pressed), void (*reset)(void)) {
     atomic_store(&gate_hook, fn);
+    atomic_store(&gate_reset_hook, reset);
 }
 
 static bool gate_drops(uint8_t key, bool pressed) {
@@ -120,6 +122,10 @@ static bool wake_swallows(uint8_t key, bool pressed) {
 
 // The chip forgot its pressed keys with its configuration: release them all, so LVGL never sees a key held forever
 static void release_held(void) {
+    void (*gate_reset)(void) = atomic_load(&gate_reset_hook);
+    if (gate_reset) {
+        gate_reset(); // the gate's dropped presses get no release from the chip now either
+    }
     shift = false;
     memset(woke, 0, sizeof(woke));
     xQueueReset(events); // queued presses are moot now, and the releases must not be dropped by a full queue

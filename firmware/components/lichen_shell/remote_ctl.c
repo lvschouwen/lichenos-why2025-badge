@@ -59,6 +59,9 @@ bool rlock_key(rlock_t *l, uint8_t code, bool is_esc, bool pressed, uint32_t now
         }
         return true;
     }
+    if (pressed) {
+        l->dropped[code] = false; // a release that never came (lost, or the chip was reset) leaves no stale flag
+    }
     if (!l->on) {
         return false;
     }
@@ -68,6 +71,11 @@ bool rlock_key(rlock_t *l, uint8_t code, bool is_esc, bool pressed, uint32_t now
     l->dropped[code] = true;
     hold_exit_event(&l->esc, is_esc, true, now);
     return true;
+}
+
+void rlock_keys_reset(rlock_t *l) {
+    memset(l->dropped, 0, sizeof(l->dropped));
+    l->esc = (hold_exit_t){0};
 }
 
 uint32_t rlock_left_s(rlock_t const *l, uint32_t now) {

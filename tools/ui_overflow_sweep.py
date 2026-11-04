@@ -13,12 +13,12 @@ object that runs under the pinned key hint or the status bar). This script only 
 screen, not in the script.
 
 What it sends: "fw ui lock on" at the start and "fw ui lock off" at the end (#190: the badge ignores its own keyboard
-meanwhile and shows "Remote control: keys locked"), "fw ui open <app>" (the app as from its home tile, or home),
-"fw keys send <seq>" (one per route), "fw ui" (read only) and, for the QR screen, "fw qr <text>" (shows a code, sends
+meanwhile and shows "Keys locked: hold Esc 3 s"), "fw ui open <app>" (the app as from its home tile, or home),
+"fw keys send needlock| <seq>" (one per route, more only past the 511-byte line limit), "fw ui" (read only) and, for the QR screen, "fw qr <text>" (shows a code, sends
 nothing). Never "text:" tokens, nothing that transmits or changes a setting.
 
 How the walks stay safe: every Enter is directly preceded by a guard. The guards go in the same "keys send" as the keys
-(focus:<text> / row:<text>, ui_keys.h): the badge compares the focused row with the one the route expects right before
+(focus:<text> / row:<text> / notfocus:<texts>, ui_keys.h): the badge compares the focused row with the one the route expects right before
 the Enter, and when it differs stops the sequence there, so the Enter is NOT sent and the screen is reported as an
 error (a row guard first gets the old correction: single steps, each read back with "fw ui"). So a stale route (a menu
 changed) can open the wrong page at worst, never press a switch. One route costs about five requests (read, open, keys,
@@ -28,15 +28,16 @@ read, overflow) instead of three per key group. Steps:
                                correcting by single steps if the page differs; then the focus must equal the label
   ("focus", text)              the focused row must contain text (never empty; "(none)" and a missing focus never match)
   ("any_row",)                 the first row of a list of contacts or files, which only opens a read-only page: any
-                               focused row except a forbidden one (checked against what is actually focused)
+                               focused row except a forbidden one (notfocus: checked on the badge before the Enter)
 Forbidden targets (rows that switch, send, restart or erase) are refused when the table is loaded, and the focused row
-is checked against the same list at run time. Only the keys up down left right enter esc wait are ever sent.
+is checked against the same list on the badge at run time. Only the keys up down left right enter esc wait are ever sent.
 
 A person may be holding the badge: the key lock keeps their keys out, and they can take the badge back by holding Esc
 for 3 s (the lock also ends 60 s after the last command, so a dead script never leaves the badge deaf). Before every
 route the script compares "fw ui" (screen stack and focus) with what it saw after its own last action, and checks the
 lock still holds; a refused lock, an ended lock or any other change stops the whole run with "badge in use: stopped"
-and sends NO key. A sequence the lock ended under stops on the badge itself. When the run ends any other way (also on
+and sends NO key. Every "keys send" opens with needlock: the badge sends none of it unless the lock is on, and stops
+the sequence if the lock ends during it. When the run ends any other way (also on
 Ctrl-C) it opens home; the lock is always released at the end.
 "--selftest" feeds fake "fw" replies through this logic (no badge needed).
 
@@ -304,6 +305,8 @@ def lint_steps(name: str, steps: Sequence[Step]) -> None:
 
 
 def lint_all() -> None:
+    if any(";" in f or "|" in f for f in FORBIDDEN):
+        raise ValueError("a FORBIDDEN text may not hold ';' or '|' (the badge-side notfocus guard)")
     for name, _ids, steps, _ok in SCREENS:
         lint_steps(name, steps)
 
@@ -359,7 +362,7 @@ def same_row(focus: str, label: str) -> bool:
 
 class Guard(NamedTuple):
     """A focus check the badge runs inside "keys send" right before the next key (ui_keys.h)."""
-    kind: str  # "row": the focus is label; "focus": the focus contains label
+    kind: str  # "row": the focus is label; "focus": it contains label; "notfocus": it contains none of the ';' texts
     label: str
     rows: Sequence[str] = ()
 
@@ -369,6 +372,30 @@ class Guard(NamedTuple):
 
 Token = Union[str, Guard]
 GUARD_FAILED = re.compile(r"\s*keys send: guard (\d+) failed: focus '(.*)';")
+LOCK_OFF = "the key lock is off"  # ui_probe.c: a needlock found it off, or it ended during the sequence
+NEEDLOCK = "needlock|"  # first in every "keys send": the badge refuses the keys unless the lock holds (#190)
+LINE_MAX = 480  # a Wi-Fi console line is at most CONSOLE_WIFI_CMD_MAX - 1 = 511 bytes (console_cmd.h)
+# any_row: any focused row that is none of the forbidden ones, checked on the badge right before its Enter
+ANY_ROW = Guard("notfocus", ";".join(FORBIDDEN))
+
+
+def render(t: Token) -> str:
+    return t.token() if isinstance(t, Guard) else t
+
+
+def cut(tokens: Sequence[Token], start: int) -> int:
+    """Where the "keys send" from tokens[start] ends: within LINE_MAX, and never between a guard and its key."""
+    used = len("keys send ") + len(NEEDLOCK)
+    end = start
+    while end < len(tokens):
+        add = len(render(tokens[end])) + 1
+        if used + add > LINE_MAX and end > start:
+            break
+        used += add
+        end += 1
+    while end < len(tokens) and end - 1 > start and isinstance(tokens[end - 1], Guard):
+        end -= 1
+    return end
 
 
 class Badge:
@@ -394,8 +421,9 @@ class Badge:
         if not any(l.strip().startswith("ui lock: on") for l in reply):
             raise InUse(f"the key lock was refused: {' / '.join(reply)[:120]}")
 
-    def unlock(self) -> None:
-        self.fw("ui lock off")
+    def unlock(self) -> bool:
+        """True when the badge says the lock is off."""
+        return any(l.strip() == "ui lock: off" for l in self.fw("ui lock off"))
 
     def _unchanged(self, now: Snap) -> bool:
         last = self.last
@@ -450,14 +478,6 @@ class Badge:
         if text not in cur:
             raise RouteError(f"expected focus containing {text!r} before Enter, found {cur!r}; nothing pressed")
 
-    def any_row(self) -> None:
-        cur = self._focus()
-        if self.last is None or self.last.no_focus():
-            raise RouteError("expected a focused row before Enter, found none; nothing pressed")
-        bad = forbidden(cur)
-        if bad:
-            raise RouteError(f"the focused row {cur!r} is forbidden ({bad!r}); nothing pressed")
-
     def console(self, line: str) -> None:
         self._check(False)
         self.fw(line)
@@ -480,31 +500,33 @@ class Badge:
         self.last = self.snap()
 
     def keys(self, tokens: Sequence[Token]) -> None:
-        """One "keys send" for a run of keys and guards; a row guard that fails gets the single-step correction once."""
-        corrected = set()
-        todo = list(tokens)
-        # No reading before each send: the walk read the screen just before (and the lock keeps the keyboard out); a
-        # sequence the lock ended under is stopped by the badge itself
-        while todo:
-            guards = [t for t in todo if isinstance(t, Guard)]
-            line = "keys send " + " ".join(t.token() if isinstance(t, Guard) else t for t in todo)
-            reply = self.fw(line)
+        """As few "keys send" as fit (each opens with needlock); a row guard that fails gets the single-step
+        correction once, then the keys go again from that guard (the badge checks it once more before the Enter)."""
+        corrected = set()  # positions in tokens
+        start = 0
+        # No reading before each send: the walk read the screen just before, and the lock keeps the keyboard out
+        while start < len(tokens):
+            end = cut(tokens, start)
+            reply = self.fw("keys send " + NEEDLOCK + " " + " ".join(render(t) for t in tokens[start:end]))
             self.last = None
             if any(l.strip().startswith("keys sent") for l in reply):
-                return
-            failed = next((GUARD_FAILED.match(l) for l in reply if GUARD_FAILED.match(l)), None)
-            if any("key lock ended" in l for l in reply):
-                raise InUse("the key lock ended during a sequence (Esc held on the badge, or its timeout)")
+                start = end
+                continue
+            if any(LOCK_OFF in l for l in reply):
+                raise InUse("the key lock is off (Esc held on the badge, or its timeout); no key sent after that")
+            failed = next((m for m in (GUARD_FAILED.match(l) for l in reply) if m), None)
             if not failed:
                 raise RouteError(f"keys send said: {' / '.join(reply)}")
-            g = guards[int(failed.group(1)) - 1]
-            if g.kind != "row" or g in corrected:
-                raise RouteError(f"expected focus {'on' if g.kind == 'row' else 'containing'} {g.label!r} before "
-                                 f"Enter, found {failed.group(2)!r}; nothing pressed")
-            corrected.add(g)
+            at = [i for i in range(start, end) if isinstance(tokens[i], Guard)][int(failed.group(1)) - 1]
+            g = tokens[at]
+            assert isinstance(g, Guard)
+            if g.kind != "row" or at in corrected:
+                what = {"row": f"on {g.label!r}", "focus": f"containing {g.label!r}"}.get(g.kind, "on an allowed row")
+                raise RouteError(f"expected focus {what} before Enter, found {failed.group(2)!r}; nothing pressed")
+            corrected.add(at)
             self.last = self.snap()
             self.correct(g.label, g.rows)
-            todo = todo[todo.index(g):]  # again from the guard: the badge checks it once more before the Enter
+            start = at
 
     def walk(self, name: str, steps: Sequence[Step], expect_top: Optional[int] = None) -> None:
         lint_steps(name, steps)
@@ -520,14 +542,12 @@ class Badge:
                 pending += ["down"] * st[2].index(st[1]) + [Guard("row", st[1], tuple(st[2]))]
             elif st[0] == "focus":
                 pending.append(Guard("focus", st[1]))
-            else:  # any_row and fw need a reading first: send what is pending
+            elif st[0] == "any_row":
+                pending.append(ANY_ROW)
+            else:  # fw: the keys so far first
                 self.keys(pending)
                 pending = []
-                if st[0] == "any_row":
-                    self.last = self.snap()
-                    self.any_row()
-                else:
-                    self.console(st[1])
+                self.console(st[1])
         self.keys(pending)
         self.last = self.snap()
         depth = len(self.last.stack)
@@ -633,7 +653,7 @@ def selftest_remote(expect: Callable[..., None], failures: List[str]) -> None:
     route = settings_page("Time") + [("row", "Time zone", TIME), "enter", "wait"]
     fake = FakeFw([ui("0", "Settings"), ui("0", "Settings"), ui("0 > 2 > 100 > 101", "Europe")])
     expect("one keys send per route", None, fake, lambda b: b.walk("tz", route), 1)
-    want = "keys send " + "down " * 7 + "row:Time| enter wait down row:Time zone| enter wait"
+    want = "keys send needlock| " + "down " * 7 + "row:Time| enter wait down row:Time zone| enter wait"
     if fake.sent and fake.sent[0] != want:
         failures.append(f"one keys send per route: sent {fake.sent[0]!r}, wanted {want!r}")
     expect("focus guard fails", RouteError, FakeFw([ui("0", "MeshCore"), ui("0", "MeshCore")],
@@ -644,20 +664,39 @@ def selftest_remote(expect: Callable[..., None], failures: List[str]) -> None:
                    ui("0 > 2 > 101", "Brightness")],
                   keys=["keys send: guard 1 failed: focus 'Time'; 7 of 10 sent"])
     expect("row guard corrected", None, fake, lambda b: b.walk("display", settings_page("Display")), 3)
-    if len(fake.sent) == 3 and fake.sent[2] != "keys send row:Display| enter wait":
+    if len(fake.sent) == 3 and fake.sent[2] != "keys send needlock| row:Display| enter wait":
         failures.append(f"row guard corrected: resent {fake.sent[2]!r}")
     expect("row guard fails twice", RouteError, FakeFw(
         [ui("0", "S"), ui("0", "S"), ui("0 > 2", "Time"), ui("0 > 2", "Time"), ui("0 > 2", "Display"),
          ui("0 > 2", "Display")], keys=["keys send: guard 1 failed: focus 'Time'; 7 of 10 sent", "keys sent: 1",
                                         "keys send: guard 1 failed: focus 'Time'; 0 of 3 sent"]),
         lambda b: b.walk("display", settings_page("Display")), 3)
-    expect("lock ended in a sequence", InUse, FakeFw([ui("0", "S")], keys=[
-        "keys send: stopped, the key lock ended; 3 of 10 sent"]), lambda b: b.walk("display", settings_page("Display")), 1)
-    expect("any_row reads first", None, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2 > 3", "Alice"),
-                                                ui("0 > 2 > 3 > 4", "Message")]),
-           lambda b: b.walk("contact", mc_grid(CONTACTS_TILE) + [("any_row",), "enter", "wait"]), 2)
-    expect("any_row forbidden", RouteError, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2 > 3", "Remove")]),
+    expect("lock off in a sequence", InUse, FakeFw([ui("0", "S")], keys=[
+        "keys send: stopped, the key lock is off; 3 of 10 sent"]), lambda b: b.walk("display", settings_page("Display")), 1)
+    fake = FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2 > 3 > 4", "Message")])
+    expect("any_row guarded on the badge", None, fake,
            lambda b: b.walk("contact", mc_grid(CONTACTS_TILE) + [("any_row",), "enter", "wait"]), 1)
+    if fake.sent and ANY_ROW.token() + " enter" not in fake.sent[0]:
+        failures.append(f"any_row: no notfocus right before Enter in {fake.sent[0][:80]!r}")
+    expect("any_row forbidden", RouteError, FakeFw([ui("0", "S"), ui("0", "S")], keys=[
+        "keys send: guard 2 failed: focus 'Remove'; 4 of 6 sent"]),
+           lambda b: b.walk("contact", mc_grid(CONTACTS_TILE) + [("any_row",), "enter", "wait"]), 1)
+    fake = FakeFw([ui("0", "S")])
+    expect("every keys send needs the lock", None, fake, lambda b: (b.keys(["down"]), b.send(["down"])), 2)
+    if not all(l.startswith("keys send " + NEEDLOCK) for l in fake.sent[:1]):
+        failures.append(f"needlock: {fake.sent[:1]!r}")
+    # A long route goes in several sends, never with a guard cut off from its key; guard 1 of the 2nd send is found
+    long_route: List[Token] = (["down"] * 70 + [Guard("focus", "x" * 30), "enter"] + ["down"] * 40 +
+                               [Guard("row", "Time", ("Time",)), "enter"])
+    fake = FakeFw([ui("0", "S"), ui("0", "Time"), ui("0", "Time")],
+                  keys=["keys sent: 1", "keys send: guard 1 failed: focus 'Date'; 1 of 2 sent"])
+    expect("long route split", None, fake, lambda b: b.keys(long_route), 3)
+    if any(len(l) > LINE_MAX for l in fake.sent) or len(fake.sent) != 3:
+        failures.append(f"long route split: {[len(l) for l in fake.sent]}")
+    elif not all(l.split()[-1] in ("enter", "down") for l in fake.sent[:1]):
+        failures.append(f"long route split: a send ends on a guard: {fake.sent[0][-40:]!r}")
+    elif not fake.sent[2].endswith("row:Time| enter"):
+        failures.append(f"long route split: resent {fake.sent[2][-40:]!r}")
     expect("enter opened nothing", RouteError, FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2", "Display")]),
            lambda b: b.walk("display", settings_page("Display")), 1)
     fake = FakeFw([ui("0", "S")], keys=["keys send: guard 1 failed: focus 'x'; 0 of 2 sent"])
@@ -672,6 +711,22 @@ def selftest_remote(expect: Callable[..., None], failures: List[str]) -> None:
         release(badge)
     if fake.lines[-1] != "ui lock off":
         failures.append(f"unlock in finally: last line {fake.lines[-1]!r}")
+    class CtrlC(FakeFw):
+        def __call__(self, line: str) -> List[str]:
+            if line.startswith("ui open"):
+                raise KeyboardInterrupt
+            return super().__call__(line)
+
+    fake = CtrlC([ui("0", "S")])
+    try:
+        finish(Badge(fake), False)
+        failures.append("Ctrl-C in home(): not raised")
+    except KeyboardInterrupt:
+        pass
+    if fake.lines[-1:] != ["ui lock off"]:
+        failures.append(f"Ctrl-C in home(): lock not released, lines {fake.lines!r}")
+    if not Badge(FakeFw([ui("0", "S")])).unlock() or Badge(lambda line: ["busy, try again"]).unlock():
+        failures.append("unlock does not check for 'ui lock: off'")
 
 
 def selftest() -> int:
@@ -692,8 +747,6 @@ def selftest() -> int:
     expect("garbled reply", RouteError, FakeFw([["garbage", "ui stack"]]), lambda b: b.send(["down"]), 0)
     expect("no focus line", RouteError, FakeFw([["ui stack: 1 > 3"]]), lambda b: b.send(["down"]), 0)
     expect("(none) at a guard", RouteError, FakeFw([ui("1 > 3", "(none)")]), lambda b: b.guard("Display"), 0)
-    expect("empty focus at any_row", RouteError, FakeFw([ui("1 > 3", "")]), lambda b: b.any_row(), 0)
-    expect("forbidden focus at any_row", RouteError, FakeFw([ui("1 > 3", "Remove")]), lambda b: b.any_row(), 0)
     expect("wrong row", RouteError, FakeFw([ui("1 > 3", "Time")]), lambda b: b.guard("Display"), 0)
     expect("dialog appeared", InUse, FakeFw([ui("1 > 3", "Display"), ui("1 > 3", "Cancel")]),
            lambda b: b.send(["enter"]), 0)
@@ -754,9 +807,27 @@ def main() -> int:
 def release(badge: Badge) -> None:
     """The key lock off, whatever happened: the person holding the badge gets the keys back at once."""
     try:
-        badge.unlock()
+        if badge.unlock():
+            return
+        why = "the badge did not answer 'ui lock: off'"
     except RouteError as e:
-        print(f"WARNING the key lock was not released ({e}); it ends by itself 60 s after the last command")
+        why = str(e)
+    print(f"WARNING the key lock was not released ({why}); it ends by itself 60 s after the last command")
+
+
+def finish(badge: Badge, in_use: bool) -> bool:
+    """Home unless someone has the badge, then the lock off; returns in_use. Also on Ctrl-C, and a second Ctrl-C
+    during home() still releases the keys."""
+    try:
+        if not in_use:
+            try:
+                badge.home()
+            except (InUse, RouteError):
+                print("badge in use: stopped (not sent home)")
+                in_use = True
+    finally:
+        release(badge)
+    return in_use
 
 
 def run(args: argparse.Namespace) -> int:
@@ -802,13 +873,7 @@ def run(args: argparse.Namespace) -> int:
         in_use = True
         print(f"badge in use: stopped ({e})")
     finally:
-        if not in_use:  # also on Ctrl-C: leave the badge on home
-            try:
-                badge.home()
-            except (InUse, RouteError):
-                print("badge in use: stopped (not sent home)")
-                in_use = True
-        release(badge)
+        in_use = finish(badge, in_use)
     by_kind = ", ".join(f"{k} {n}" for k, n in kinds.items())
     print(f"total: {hits} hit(s) ({by_kind}), {ran} screen(s) read, {errors} not read, {skipped} skipped")
     print(f"not reachable: {len(UNREACHABLE) + len(UNREACHABLE_APPS)} (python3 tools/ui_overflow_sweep.py --list)")

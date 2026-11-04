@@ -29,7 +29,8 @@ static lv_obj_t *notify_box; // the unread dot and count (#62), hidden at 0
 static lv_obj_t *notify_dot;
 static lv_obj_t *notify_count;
 static lv_obj_t *bar_obj;
-static lv_obj_t *remote_banner; // "fw ui lock" (#190): over the whole bar while the physical keys are off
+static lv_obj_t *remote_banner; // "fw ui lock" (#190): over the bar's right part while the physical keys are off
+static int32_t   clock_w_shown; // the clock's fixed width: the banner starts at its left edge
 
 #define NOTIFY_DOT 10
 
@@ -278,30 +279,45 @@ static int32_t c6_room(lv_obj_t *word, int32_t clock_w) {
     return LV_MAX(half - clock_w / 2 - CLOCK_GAP - taken, 0);
 }
 
-// Over the bar's own content, not under it: the screen below keeps its layout, and the holder cannot miss why the
-// keys do nothing (R8: amber is attention, and it says so in words). Made on first use.
+// Over the clock and the right group only: HOT and the C6 state on the left stay readable (they are safety state). On
+// the top layer beside the bar, not in it, so it still shows on the covers that hide the bar (screensaver, pocket
+// lock). Says how to get the keys back (R5, R8: amber is attention, in words). Made on first use.
+static char const *const LOCK_TEXTS[] = {"Keys locked: hold Esc 3 s", "Locked: hold Esc 3 s"};
+
+static void remote_banner_create(void) {
+    int32_t screen_w = lv_display_get_horizontal_resolution(lv_obj_get_display(bar_obj));
+    int32_t x        = screen_w / 2 - clock_w_shown / 2;
+    int32_t room     = screen_w - x - BAR_PAD - LEFT_GAP;
+    char const *text = LOCK_TEXTS[1];
+    for (size_t i = 0; i < sizeof(LOCK_TEXTS) / sizeof(LOCK_TEXTS[0]); i++) {
+        if (text_width(LOCK_TEXTS[i]) <= room) {
+            text = LOCK_TEXTS[i];
+            break;
+        }
+    }
+    remote_banner = lv_obj_create(lv_obj_get_parent(bar_obj));
+    lv_obj_remove_style_all(remote_banner);
+    lv_obj_set_size(remote_banner, screen_w - x, THEME_STATUS_BAR_H - 2); // the bar's bottom rule stays
+    lv_obj_align(remote_banner, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_set_style_bg_color(remote_banner, lv_color_hex(THEME_BG), 0);
+    lv_obj_set_style_bg_opa(remote_banner, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_right(remote_banner, BAR_PAD, 0);
+    lv_obj_set_style_text_font(remote_banner, lichen_font(LICHEN_FONT_SMALL), 0);
+    lv_obj_set_scrollable(remote_banner, false);
+    lv_obj_set_clickable(remote_banner, false);
+    lv_obj_t *label = add_text(remote_banner, text, THEME_AMBER);
+    lv_obj_align(label, LV_ALIGN_RIGHT_MID, 0, 0);
+}
+
 void status_bar_remote_lock(bool on) {
     if (!bar_obj) {
         return;
     }
     if (on && !remote_banner) {
-        remote_banner = lv_obj_create(bar_obj);
-        lv_obj_remove_style_all(remote_banner);
-        lv_obj_add_flag(remote_banner, LV_OBJ_FLAG_IGNORE_LAYOUT);
-        lv_obj_set_size(remote_banner, LV_PCT(100), LV_PCT(100));
-        lv_obj_align(remote_banner, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_set_style_bg_color(remote_banner, lv_color_hex(THEME_BG), 0);
-        lv_obj_set_style_bg_opa(remote_banner, LV_OPA_COVER, 0);
-        lv_obj_set_scrollable(remote_banner, false);
-        lv_obj_set_clickable(remote_banner, false);
-        lv_obj_t *text = add_text(remote_banner, "Remote control: keys locked", THEME_AMBER);
-        lv_obj_center(text);
+        remote_banner_create();
     }
     if (remote_banner) {
         lv_obj_set_hidden(remote_banner, !on);
-        if (on) {
-            lv_obj_move_foreground(remote_banner);
-        }
     }
 }
 
@@ -337,6 +353,7 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
 
     clock_label     = add_text(bar, "--:--", THEME_DIM);
     int32_t clock_w = fix_clock_width();
+    clock_w_shown   = clock_w;
     lv_obj_add_flag(clock_label, LV_OBJ_FLAG_IGNORE_LAYOUT);
     lv_obj_align(clock_label, LV_ALIGN_CENTER, 0, 0);
     c6_max_w = c6_room(word, clock_w);
