@@ -15,8 +15,11 @@ typedef void (*console_fn_t)(char const *args); // args: the text after the comm
 void console_start(void);
 void console_register(char const *name, char const *usage, console_fn_t fn);
 void console_reply(char const *fmt, ...) __attribute__((format(printf, 1, 2)));
-// Like console_reply for secrets (the update token): UART only, never stored in the log (#38) or sent over Wi-Fi
-void console_reply_private(char const *fmt, ...) __attribute__((format(printf, 1, 2)));
+// Like console_reply for a line that holds a secret (a channel key, the update token, a repeater's guest password; #123):
+// it reaches only the person who asked, on the UART or in the Wi-Fi console's reply (console_exec_with_secrets). It is
+// never given to the tap (the log store), the Console app shows a note instead (console_exec), and the formatted copy is
+// wiped. A caller wipes its own copies of the secret after the call.
+void console_reply_secret(char const *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 // Gets every console_reply line (without the "fw: " prefix) for the log store (#38). Set once at boot.
 void console_set_tap(void (*tap)(char const *text, size_t len));
@@ -25,7 +28,8 @@ void console_set_tap(void (*tap)(char const *text, size_t len));
 void console_set_mem_report(void (*report)(void));
 
 // Runs one command line (with or without the "fw " prefix) on the calling task and collects what console_reply prints
-// from it in buf (cap bytes; output past that is cut with a note). done runs exactly once with the output: when the
+// from it in buf; a console_reply_secret line becomes one CONSOLE_SECRET_NOTE (console_capture.h), for output that is
+// kept on the screen (the Console app). The caller wipes buf after done. (cap bytes; output past that is cut with a note). done runs exactly once with the output: when the
 // command returns, or earlier if it restarts the badge (system_restart calls it first, so a reply can be sent before
 // the restart). Output of printf/ESP_LOG calls is not collected. Not reentrant.
 typedef void (*console_done_fn)(void *ctx, char const *out, size_t len);
@@ -33,6 +37,9 @@ typedef void (*console_done_fn)(void *ctx, char const *out, size_t len);
 // commands only a person at the cable may run (#116).
 bool console_from_uart(void);
 void console_exec(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx);
+// The same, but secret lines are collected too: for POST /console, whose reply goes only to the one who asked (with the
+// update token). The caller wipes buf after done.
+void console_exec_with_secrets(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx);
 
 // Every deliberate restart goes through here (console, OTA, slot switch, C6 reflash, after an update), not through a
 // bare esp_restart(). The screen is blanked by a shutdown handler (backlight.c), so any esp_restart() gets it.

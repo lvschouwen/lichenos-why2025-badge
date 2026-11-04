@@ -110,7 +110,7 @@ static void on_reply(void *arg) {
                                   "Run it again to see the output)\n";
     static char const none[]    = "(no output; some commands answer only on the USB console)\n";
     if (c && c->gen == r->gen) {
-        // console_reply_private output is not captured, so "nothing printed" and "private only" look the same
+        // a console_reply_secret line arrives as CONSOLE_SECRET_NOTE (console_exec, #123), never as the secret
         if (!r->text) {
             out_add(c, lost, sizeof(lost) - 1);
         } else if (r->len == 0) {

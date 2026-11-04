@@ -1210,6 +1210,7 @@ static void handle_console(int fd, ota_request_t const *req, uint8_t const *pre,
     console_reply_ctx_t ctx = {.fd = fd};
     hooks.console_run(line, out, CONSOLE_REPLY, console_done, &ctx); // may restart the badge, after the reply
     secure_wipe(line, CONSOLE_WIFI_CMD_MAX);
+    secure_wipe(out, CONSOLE_REPLY); // the reply may hold a secret line (a channel key, the token; #123)
     free(line);
     free(out);
 }
@@ -1534,7 +1535,7 @@ static void cmd_ota(char const *args) {
 
 static void cmd_token(char const *args) {
     (void)args;
-    console_reply_private("token %s", token[0] ? token : "(none: storage unavailable?)");
+    console_reply_secret("token %s", token[0] ? token : "(none: storage unavailable?)");
 }
 
 void ota_server_start(void) {

@@ -2,6 +2,7 @@
 #include "fw_console.h"
 
 #include "assets.h"
+#include "console_capture.h"
 #include "console_cmd.h"
 #include "driver/uart.h"
 #include "esp_heap_caps.h"
@@ -50,33 +51,12 @@ void console_set_tap(void (*fn)(char const *text, size_t len)) {
 
 // The output of console_exec (#38): only the task that runs it is collected, so the UART console keeps working
 static struct {
-    TaskHandle_t    task;
-    char           *buf;
-    size_t          cap;
-    size_t          len;
-    bool            cut;
-    bool            done_called;
-    console_done_fn done;
-    void           *ctx;
+    TaskHandle_t      task;
+    console_capture_t out;
+    bool              done_called;
+    console_done_fn   done;
+    void             *ctx;
 } capture;
-
-#define CUT_NOTE "[output cut]\n"
-
-static void capture_add(char const *text, size_t n) {
-    if (capture.cut || capture.cap < sizeof(CUT_NOTE) + 2) {
-        return;
-    }
-    size_t room = capture.cap - capture.len - sizeof(CUT_NOTE); // always keeps room for the note
-    if (n + 1 > room) {
-        memcpy(capture.buf + capture.len, CUT_NOTE, sizeof(CUT_NOTE) - 1);
-        capture.len += sizeof(CUT_NOTE) - 1;
-        capture.cut  = true;
-        return;
-    }
-    memcpy(capture.buf + capture.len, text, n);
-    capture.buf[capture.len + n] = '\n';
-    capture.len                 += n + 1;
-}
 
 // One command runs at a time, from the UART or from Wi-Fi: commands share state (the capture, the commands' statics)
 static SemaphoreHandle_t run_mutex;
@@ -85,24 +65,34 @@ static SemaphoreHandle_t run_mutex;
 static SemaphoreHandle_t reply_mutex;
 static char              reply_text[REPLY_MAX];
 
-static void reply_v(bool private, char const *fmt, va_list ap) {
+// A secret line (#123) is printed on the UART and handed to a capturing caller (console_capture.h decides whether it is
+// kept), never to the tap: the log store is readable over Wi-Fi later by anyone with the token, and on the screen.
+// The formatted copy is wiped once used.
+static void reply_v(bool secret, char const *fmt, va_list ap) {
     va_list copy;
     va_copy(copy, ap);
     printf("fw: ");
     vprintf(fmt, ap);
     printf("\n");
-    if (!private && reply_mutex && xSemaphoreTake(reply_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) == pdTRUE) {
+    if (secret) {
+        fflush(stdout); // out of stdio's buffer now rather than whenever the next line comes
+    }
+    bool capturing = capture.task && capture.task == xTaskGetCurrentTaskHandle();
+    if ((!secret || capturing) && reply_mutex && xSemaphoreTake(reply_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) == pdTRUE) {
         char *text = reply_text;
         int   n    = vsnprintf(text, REPLY_MAX, fmt, copy);
         if (n > 0) {
             size_t len = (size_t)n < REPLY_MAX ? (size_t)n : REPLY_MAX - 1;
-            if (tap) {
+            if (tap && !secret) {
                 text[len] = '\n';
                 tap(text, len + 1);
             }
-            if (capture.task && capture.task == xTaskGetCurrentTaskHandle()) {
-                capture_add(text, len);
+            if (capturing) {
+                console_capture_add(&capture.out, text, len, secret);
             }
+        }
+        if (secret) {
+            secure_wipe(reply_text, sizeof(reply_text));
         }
         xSemaphoreGive(reply_mutex);
     }
@@ -116,7 +106,7 @@ void console_reply(char const *fmt, ...) {
     va_end(ap);
 }
 
-void console_reply_private(char const *fmt, ...) {
+void console_reply_secret(char const *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     reply_v(true, fmt, ap);
@@ -359,7 +349,7 @@ static void cmd_slot(char const *args) {
 static void capture_finish(void) {
     if (capture.task && !capture.done_called) {
         capture.done_called = true;
-        capture.done(capture.ctx, capture.buf, capture.len);
+        capture.done(capture.ctx, capture.out.buf, capture.out.len);
     }
 }
 
@@ -562,7 +552,7 @@ bool console_from_uart(void) {
     return capture.task != xTaskGetCurrentTaskHandle();
 }
 
-void console_exec(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx) {
+static void exec(char const *line, char *buf, size_t cap, bool keep_secret, console_done_fn done, void *ctx) {
     while (*line == ' ') {
         line++;
     }
@@ -586,7 +576,12 @@ void console_exec(char const *line, char *buf, size_t cap, console_done_fn done,
         done(ctx, busy, sizeof(busy) - 1);
         return;
     }
-    capture = (typeof(capture)){.task = xTaskGetCurrentTaskHandle(), .buf = buf, .cap = cap, .done = done, .ctx = ctx};
+    capture = (typeof(capture)){
+        .task = xTaskGetCurrentTaskHandle(),
+        .out  = {.buf = buf, .cap = cap, .keep_secret = keep_secret},
+        .done = done,
+        .ctx  = ctx,
+    };
     if (cmd[0]) {
         run(cmd);
     }
@@ -597,6 +592,14 @@ void console_exec(char const *line, char *buf, size_t cap, console_done_fn done,
     if (run_mutex) {
         xSemaphoreGive(run_mutex);
     }
+}
+
+void console_exec(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx) {
+    exec(line, buf, cap, false, done, ctx);
+}
+
+void console_exec_with_secrets(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx) {
+    exec(line, buf, cap, true, done, ctx);
 }
 
 static void console_task(void *arg) {

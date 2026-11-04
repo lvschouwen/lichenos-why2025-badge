@@ -98,8 +98,9 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   stats (`lora_up`, `lora_get_radio`, `lora_get_freq`, `lora_get_counts`, ...). Every call that takes `owner` is
   refused, with a rate-limited log line, unless that name holds the claim (#179). `lora_os.h` (start, stop, the radio
   switch, the C6 hooks) is the OS's: apps never include it.
-- `fw_console.h`: `console_register` / `console_reply` for `fw <name>` commands; `system_restart(why)` when a restart
-  is what the user asked for (it records why).
+- `fw_console.h`: `console_register` / `console_reply` for `fw <name>` commands; `console_reply_secret` for a line
+  that holds a key or a password (only the USB console and the Wi-Fi reply get it, never the log store or the Console
+  app, #123); `system_restart(why)` when a restart is what the user asked for (it records why).
 
 ## What an app must not do
 

@@ -2242,6 +2242,29 @@ static void console_pw_settle(void) {
     lichen_free(meshcore_self(), r);
 }
 
+// The CLI exchanges, newest first, as rr_cli_format orders them. The reply to a read of the guest password or the
+// private key goes out with console_reply_secret (#123): to the one who asked, never into the log store. The reply is
+// split in place: r is the caller's copy, wiped after.
+static void console_remote_cli_show(rr_t *r) {
+    for (unsigned i = 0; i < r->cli_n; i++) {
+        rr_exchange_t *x = &r->cli[(r->cli_head + RR_CLI_KEEP - i) % RR_CLI_KEEP];
+        console_reply("  > %s", x->cmd);
+        if (x->state != RR_CLI_GOT) {
+            console_reply("  %s", x->state == RR_CLI_WAITING ? "(waiting...)" : "(no reply)");
+            continue;
+        }
+        bool  secret = rs_reply_is_secret(x->cmd);
+        char *save   = NULL;
+        for (char *line = strtok_r(x->reply, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+            if (secret) {
+                console_reply_secret("  %s", line);
+            } else {
+                console_reply("  %s", line);
+            }
+        }
+    }
+}
+
 static void console_remote_show(void) {
     console_pw_settle();
     rr_t *r = (rr_t *)lichen_alloc(meshcore_self(), sizeof(rr_t), LICHEN_MEM_BULK);
@@ -2264,14 +2287,10 @@ static void console_remote_show(void) {
                 console_reply("  %s", lines[i].text);
             }
         }
-        char *log = (char *)lichen_alloc(meshcore_self(), RR_CLI_KEEP * (RR_CMD_MAX + RR_REPLY_MAX + 8), LICHEN_MEM_BULK);
-        if (log) {
-            rr_cli_format(r, log, RR_CLI_KEEP * (RR_CMD_MAX + RR_REPLY_MAX + 8));
-            for (char *line = strtok(log, "\n"); line; line = strtok(NULL, "\n")) {
-                console_reply("  %s", line);
-            }
-            lichen_free(meshcore_self(), log);
-        }
+        console_remote_cli_show(r);
+    }
+    if (r) {
+        mesh_wipe(r, sizeof(*r)); // a CLI reply may hold the guest password or the private key
     }
     lichen_free(meshcore_self(), r);
 }
@@ -2923,8 +2942,8 @@ static bool console_channel_info(char const *arg, mesh_channel_info_t *info) {
     return found == 1;
 }
 
-// "fw channel show <index|name>" (#54): the key and the link MeshCore's apps add a channel from. UART only, as the
-// update token: a private channel's key does not belong in the log or the Wi-Fi console.
+// "fw channel show <index|name>" (#54): the key and the link MeshCore's apps add a channel from. Secret lines, as the
+// update token (#123): to the USB or Wi-Fi console that asked, never the log store or the Console app's scrollback.
 static void channel_show(char const *arg) {
     struct ShowMem {
         mesh_channel_info_t info;
@@ -2939,17 +2958,17 @@ static void channel_show(char const *arg) {
         mesh_channel_info_t const &info = m->info;
         mesh_hex_text(info.secret, info.key_len, m->hex, sizeof(m->hex));
         mesh_base64_text(info.secret, info.key_len, m->b64, sizeof(m->b64));
-        console_reply("channel %d: %s (hash %02x, %u-byte key; key and link on the serial console only)", info.index,
+        console_reply("channel %d: %s (hash %02x, %u-byte key; key and link only to you, never logged)", info.index,
                       info.name, info.hash, info.key_len);
-        console_reply_private("key (hex) %s", m->hex);
-        console_reply_private("key (base64) %s", m->b64);
+        console_reply_secret("key (hex) %s", m->hex);
+        console_reply_secret("key (base64) %s", m->b64);
         if (mesh_channel_uri(info.name, info.secret, info.key_len, m->uri, sizeof(m->uri))) {
-            console_reply_private("link %s", m->uri);
+            console_reply_secret("link %s", m->uri);
         } else {
-            console_reply_private("no link: MeshCore's apps only take 16-byte keys");
+            console_reply_secret("no link: MeshCore's apps only take 16-byte keys");
         }
     }
-    memset(m, 0, sizeof(*m)); // a channel key: not left in the heap
+    mesh_wipe(m, sizeof(*m)); // a channel key: not left in the heap (volatile: a memset before a free may be dropped)
     lichen_free(meshcore_self(), m);
 }
 

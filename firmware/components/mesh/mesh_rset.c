@@ -463,6 +463,18 @@ void rs_redact_reply(char const *reply, char *out, size_t cap) {
     }
 }
 
+bool rs_reply_is_secret(char const *cmd) {
+    static char const *const READS[] = {"get guest.password", "get prv.key"};
+    char const *c = skip_tag(cmd);
+    for (size_t k = 0; k < sizeof(READS) / sizeof(READS[0]); k++) {
+        size_t len = strlen(READS[k]);
+        if (strncmp(c, READS[k], len) == 0 && (c[len] == 0 || c[len] == ' ')) {
+            return true;
+        }
+    }
+    return rs_cmd_class(cmd) == RS_CMD_SECRET;
+}
+
 // ---- the sequence -----------------------------------------------------------------------------------------------------
 
 static void wipe(void *p, size_t n) {

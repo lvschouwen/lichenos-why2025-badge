@@ -1,0 +1,27 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+
+// The output of one console_exec run (#38), collected line by line. Pure, so it is host-tested
+// (host_tests/console_capture_test.c); console.c holds the task and lock around it.
+//
+// Secret lines (console_reply_secret: a channel key, the update token, a repeater's guest password, #123) go to the one
+// who asked and nowhere else. The Wi-Fi console's reply is that person (keep_secret); the Console app's scrollback
+// lives on the screen for anyone to read later, so there a secret line becomes CONSOLE_SECRET_NOTE, once per run.
+
+#define CONSOLE_CUT_NOTE    "[output cut]\n"
+#define CONSOLE_SECRET_NOTE "(secret output hidden here: run it on the USB or Wi-Fi console to see it)"
+
+typedef struct {
+    char  *buf;
+    size_t cap;
+    size_t len;
+    bool   cut;
+    bool   keep_secret;  // the caller is the person who asked (the Wi-Fi reply): secret lines are collected
+    bool   secret_noted; // CONSOLE_SECRET_NOTE is in buf already
+} console_capture_t;
+
+// Appends text (n bytes, no newline) and a '\n'. Output past cap is dropped with CONSOLE_CUT_NOTE (room for it is
+// always kept). A secret line is collected only when keep_secret; otherwise the note stands in for it.
+void console_capture_add(console_capture_t *c, char const *text, size_t n, bool secret);

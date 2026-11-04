@@ -39,7 +39,7 @@ static void test_public(void) {
     CHECK(console_line_is_public("wifi ps min"));
     CHECK(console_line_is_public("wifi proto ax"));
     CHECK(!console_line_is_public("channel add secret AAAA"));
-    CHECK(!console_line_is_public("channel show 0")); // its key lines are console_reply_private: never captured either (#123)
+    CHECK(!console_line_is_public("channel show 0")); // its key lines are console_reply_secret: a note on the screen (#123)
     CHECK(!console_line_is_public("fw channel show #badgetest"));
     CHECK(!console_line_is_public("mesh remote abc cli reboot"));
     CHECK(!console_line_is_public("mesh send chan hello"));

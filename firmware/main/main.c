@@ -472,7 +472,7 @@ void app_main(void) {
     // Wi-Fi console and log (#38) work without a screen; the update screen hooks need one
     ota_hooks_t hooks = {.log_read = log_store_read, .crashes_read = lichen_crashlog_export};
 #if CONFIG_OTA_WIFI_CONSOLE
-    hooks.console_run = console_exec;
+    hooks.console_run = console_exec_with_secrets; // the reply goes only to the one who asked (#123)
 #endif
     if (screen) {
         hooks.begin = ota_begin;

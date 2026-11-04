@@ -320,6 +320,15 @@ target_compile_options(console_cmd_fw_test PRIVATE
 target_include_directories(console_cmd_fw_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
 add_test(NAME console_cmd_fw_test COMMAND console_cmd_fw_test)
 
+# One console_exec run's output and its secret lines (#123)
+add_executable(console_capture_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/console_capture_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console/console_capture.c
+)
+target_include_directories(console_capture_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
+target_compile_options(console_capture_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME console_capture_test COMMAND console_capture_test)
+
 # The assets image format (#22); the packer builds the test image from host_tests/vectors/assets/
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_executable(assets_fmt_test
