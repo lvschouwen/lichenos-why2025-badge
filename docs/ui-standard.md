@@ -1,6 +1,6 @@
 # UI standard
 
-Every screen (OS and apps) is checked against these rules. Panel 720x720, keyboard only, THEME_PAD 36, status bar 56, LARGE 40 px (~27 chars/line), SMALL 24 px (~14 px/char), menu row content ~600 px. Origin: "Settings: NL-HHW-HUYGENH..." (#131), hiding the name behind "..." is a safety net, not a design.
+Every screen (OS and apps) is checked against these rules. Panel 720x720, keyboard only, THEME_PAD 36, status bar 56, LARGE 40 px (~27 chars/line), SMALL 24 px (~14 px/char), menu row content ~600 px. Origin: a repeater settings heading that clipped a 32-char node name to "Settings: NL-HHW-..." (#131), hiding the name behind "..." is a safety net, not a design.
 
 1. **Headings name the subject.** A page about one thing: small dim kind line ("Repeater settings") + the subject's
    name LARGE on its own line, wrapping to 2 lines, "..." only past that. Never "Kind: name" on one line. Fixed pages
