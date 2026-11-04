@@ -50,3 +50,7 @@ int32_t ovf_cover_rows(ovf_rect_t obj, ovf_span_t inner, ovf_span_t outer, ovf_r
 
 // Rows of wrapped text that do not fit a label of fixed height (text_h at the label's width, box_h its content height).
 int32_t ovf_wrap_lost_px(int32_t text_h, int32_t box_h);
+
+// Rows of a label's line box that may be cut without cutting the text: a font's line height carries leading above and
+// below the glyphs (~13% each for Lichen's fonts), so a "K" centred in a box a little shorter than its line shows whole.
+int32_t ovf_line_slack_px(int32_t line_h);

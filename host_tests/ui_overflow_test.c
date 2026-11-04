@@ -61,11 +61,26 @@ static void test_vertical(void) {
     CHECK(ovf_hidden_rows(span(300, 399), span(0, 349), span(0, 719), 500, 500) == 50);
     CHECK(ovf_hidden_rows(span(10, 20), OVF_NO_LIMIT, span(0, 719), 0, 0) == 0);
 
+    // a row in the middle of a long scrolling list (#133 review): reachable, though neither end of the scroll shows it
+    CHECK(ovf_hidden_rows(span(3000, 3059), OVF_NO_LIMIT, span(0, 719), 5000, 0) == 0);
+    CHECK(ovf_hidden_rows(span(3000, 3059), OVF_NO_LIMIT, span(0, 719), 5000, 5000) == 0);
+    CHECK(ovf_hidden_rows(span(-3000, -2941), OVF_NO_LIMIT, span(0, 719), 0, 5000) == 0);
+    CHECK(ovf_hidden_rows(span(3000, 3059), OVF_NO_LIMIT, span(0, 719), 2000, 0) == 60); // not far enough
+    CHECK(ovf_hidden_rows(span(3000, 3059), OVF_NO_LIMIT, span(0, 719), 2300, 0) == 40); // 700..759: 20 rows
+    CHECK(ovf_hidden_rows(span(3000, 3059), OVF_NO_LIMIT, span(0, 719), 2400, 0) == 0);
+    // under the hint: clear only at a middle scroll (the end of the range scrolls it out of sight, which is no cure)
+    CHECK(cover(640, 699, hint, 700, 0) == 0);
+    CHECK(cover(640, 699, hint, 20, 0) == 18); // cannot get clear: best is 20 up, 662..679
+    CHECK(cover(640, 699, hint, 38, 0) == 0);
+
     // wrapped text taller than the label's fixed height
     CHECK(ovf_wrap_lost_px(96, 64) == 32);
     CHECK(ovf_wrap_lost_px(64, 64) == 0);
     CHECK(ovf_wrap_lost_px(32, 64) == 0);
     CHECK(ovf_wrap_lost_px(96, 0) == 0);
+    // a glyph centred in a box a little shorter than its line (home's "K" icon: 54 px line, 14 px cut) is not a hit
+    CHECK(ovf_line_slack_px(54) >= 14);
+    CHECK(ovf_line_slack_px(54) < 54);
 }
 
 int main(void) {

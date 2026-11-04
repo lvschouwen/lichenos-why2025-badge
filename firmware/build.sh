@@ -51,6 +51,7 @@ if [ "$building" = 1 ]; then
     cmake -S "$repo/host_tests" -B "$here/build/host_tests" -G Ninja >/dev/null
     cmake --build "$here/build/host_tests"
     ctest --test-dir "$here/build/host_tests" --output-on-failure
+    python3 -I "$repo/tools/ui_overflow_sweep.py" --selftest # the sweep's guard logic, no badge needed (#133)
 
     IDF_TARGET=esp32c6 idf.py -C "$repo/c6" build
     "$here/tools/stage_storage.sh"

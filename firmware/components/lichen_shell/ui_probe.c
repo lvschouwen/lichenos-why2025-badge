@@ -221,9 +221,10 @@ static void settle(void) {
 
 #define OVF_TEXT_CHARS 60
 
-typedef enum { HIT_WIDTH, HIT_HEIGHT, HIT_UNDER, HIT_CLIPPED } hit_kind_t;
+typedef enum { HIT_WIDTH, HIT_HEIGHT, HIT_UNDER, HIT_CLIPPED, HIT_COUNT } hit_kind_t;
 
 static char const *const HIT_NAME[] = {"width", "height", "under-hint", "clipped"};
+static_assert(sizeof(HIT_NAME) / sizeof(HIT_NAME[0]) == HIT_COUNT, "HIT_NAME must name every hit kind");
 
 typedef struct {
     hit_kind_t  kind;
@@ -409,6 +410,10 @@ static bool check_vertical(ovf_ctx_t *ctx, lv_obj_t *obj) {
     vgeom_t g;
     vgeom(obj, &g);
     int32_t hidden    = ovf_hidden_rows((ovf_span_t){a.y1, a.y2}, g.inner, g.outer, g.up, g.down);
+    if (lv_obj_check_type(obj, &lv_label_class) &&
+        hidden <= ovf_line_slack_px(lv_font_get_line_height(lv_obj_get_style_text_font(obj, LV_PART_MAIN)))) {
+        hidden = 0; // the cut rows are the line's leading, the glyphs show whole (an icon letter in a snug box)
+    }
     bool    container = lv_obj_get_child_count(obj) > 0 && !lv_obj_check_type(obj, &lv_label_class);
     if (hidden > 0 && (!container || hidden >= h)) {
         add_hit(ctx, HIT_CLIPPED, obj, hidden, h, NULL);
@@ -460,6 +465,7 @@ static void cmd_ui_overflow(void) {
     }
     lvgl_port_lock(0);
     lv_obj_t *screen = lv_screen_active();
+    lv_obj_update_layout(screen); // scroll ranges and sizes are read below
     ctx.hint_obj     = lichen_page_hint_of(screen);
     ctx.has_hint     = area_rect(ctx.hint_obj, &ctx.hint);
     ctx.has_bar      = area_rect(shell_status_bar(), &ctx.bar);
