@@ -21,6 +21,7 @@ static sb_key_t const keys[] = {
     {NS_FW, "lock", "Pocket lock", SB_U8, 0, 1, 0, NULL},
     {NS_FW, "bl_disp", "Screen brightness", SB_U8, 5, 100, 30, NULL},
     {NS_FW, "bl_kbd", "Keyboard brightness", SB_U8, 0, 100, 10, NULL},
+    {NS_FW, "kbd_pulse", "Message light", SB_U8, 0, 2, 1, NULL},
     {NS_FW, "haptics", "Vibration", SB_U8, 0, 1, 1, NULL},
     {NS_FW, "haptic_str", "Vibration strength", SB_U8, 0, 2, 2, NULL},
     {NS_FW, "status_led", "Status LED", SB_U8, 0, 1, 1, NULL},

@@ -14,6 +14,11 @@ void backlight_set(uint8_t display, uint8_t keyboard);
 void backlight_idle(uint8_t display, uint8_t keyboard);
 // Back to the person's levels: the last ones backlight_set*() asked for (a slider not yet saved included), from RAM
 void backlight_resume(void);
+// A temporary override (#164: the keyboard pulse for a new message, the flashlight): sent like backlight_idle() but
+// clamped like backlight_set(), never taken as the person's levels, never saved. backlight_resume() ends it. The keyboard
+// form keeps the person's screen level.
+void backlight_temporary(uint8_t display, uint8_t keyboard);
+void backlight_temporary_keyboard(uint8_t keyboard);
 // Counts backlight_set() / backlight_set_saved() calls: the screen timeout takes a change as activity (fw bl, a slider)
 uint32_t backlight_user_generation(void);
 // Applies and saves (NVS bl_disp / bl_kbd, what "fw bl" writes)

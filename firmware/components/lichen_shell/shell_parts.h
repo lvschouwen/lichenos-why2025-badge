@@ -45,6 +45,11 @@ void notepad_app_register(void); // app_notes.c (#154): notes and to dos on the 
 void qr_app_register(void);      // app_qr.c (#153)
 void bench_app_register(void); // app_bench.c (#96); also registers "fw bench"
 bool bench_running(void);      // app_bench.c: a run is measuring (LVGL task)
+// attention.c (#164): the keyboard light pulse for a new message and the flashlight (Settings > Display, "fw flashlight")
+void attention_init(void);                           // registers "fw flashlight"; from shell_start
+void attention_on_toast(uint32_t id, uint8_t level); // notify_ui.c, LVGL task: a toast with feedback starts to show
+void flashlight_open(void);                          // LVGL context
+bool flashlight_active(void);                        // any task: the screen timeout keeps the screen bright meanwhile
 void power_app_register(void);                   // app_power.c (#65): Restart / Power off, also "fw poweroff"
 void power_open_from_settings(void *arg);        // Settings > Power: opens the Power app
 void power_request_restart(void);                // Power > Restart without the question (factory reset, #66)
@@ -86,6 +91,8 @@ bool screen_idle_key(void);
 void screen_idle_reload(void);
 // "fw screensaver test" (#75): the saver now, as if the dim time had come, until the next key
 void screen_idle_force_saver(void);
+// Fully bright and no screensaver (the keyboard light pulse only runs then, #164)
+bool screen_idle_lit(void);
 // Shown with the stage the screen is in: "bright", "dim", "screensaver", "off"
 char const *screen_idle_stage_name(void);
 

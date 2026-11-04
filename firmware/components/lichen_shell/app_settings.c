@@ -4,6 +4,7 @@
 // Every screen is a menu.h list; Esc is the shell's.
 #include "app_icons.h"
 #include "screen_ids.h"
+#include "attention_policy.h"
 #include "backlight.h"
 #include "backlight_level.h"
 #include "home_layout.h"
@@ -114,6 +115,24 @@ static void on_level(int value, void *arg) {
     }
 }
 
+// Message light (#164): the keyboard light blinks twice for a new message; Enter steps Off / Direct messages / All
+static lv_obj_t *pulse_row;
+
+static attn_mode_t pulse_mode(void) {
+    return attn_mode_from_u8(settings_get_u8(ATTN_MODE_KEY, ATTN_MODE_DEFAULT));
+}
+
+static void step_pulse(void *arg) {
+    (void)arg;
+    settings_set_u8(ATTN_MODE_KEY, (uint8_t)attn_mode_next(pulse_mode()));
+    menu_set_value(pulse_row, attn_mode_name(pulse_mode()));
+}
+
+static void open_flashlight(void *arg) {
+    (void)arg;
+    flashlight_open();
+}
+
 static lv_obj_t *layout_row;
 
 static char const *layout_name(void) {
@@ -186,6 +205,7 @@ static void on_display_delete(lv_event_t *e) {
         save_levels();
     }
     layout_row = NULL;
+    pulse_row  = NULL;
     dim_row    = NULL;
     off_row    = NULL;
     saver_row  = NULL;
@@ -206,6 +226,9 @@ static lv_obj_t *build_display(void) {
         menu_note(menu, "Brightness can't change right now: the radio chip is not answering. Restart the badge if it "
                         "stays like this.");
     }
+    pulse_row = menu_add(menu, "Message light", attn_mode_name(pulse_mode()), step_pulse, NULL);
+    menu_set_kind(pulse_row, MENU_CYCLE);
+    menu_add(menu, "Flashlight", "", open_flashlight, NULL);
     dim_row    = menu_add(menu, "Dim after", "", step_idle, NULL);
     off_row    = menu_add(menu, "Screen off after", "", step_idle, (void *)1);
     menu_set_kind(dim_row, MENU_CYCLE);
@@ -217,7 +240,7 @@ static lv_obj_t *build_display(void) {
     menu_set_kind(saver_row, MENU_TOGGLE);
     menu_set_kind(style_row, MENU_CYCLE);
     menu_set_kind(lock_row, MENU_TOGGLE);
-    menu_note(menu, "The screensaver shows when the screen dims. The pocket lock comes on with it or when the screen goes "
+    menu_note(menu, "Message light blinks the keyboard light for a new message (not under do-not-disturb or with the screen dark). Flashlight: white screen at full brightness until a key. The screensaver shows when the screen dims. The pocket lock comes on with it or when the screen goes "
                     "off; hold " LOCK_COMBO_TEXT " to unlock. It stops stray key presses, it is not security: no PIN.");
     switch_rows_refresh();
     layout_at_open = settings_get_u8("home_layout", HOME_TILES);

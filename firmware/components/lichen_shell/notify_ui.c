@@ -72,6 +72,7 @@ static void show_next(void) {
             lv_obj_set_hidden(s_toast, false);
             if (next.feedback) {
                 lichen_notify_feedback((ln_level_t)next.level, true);
+                attention_on_toast(next.id, next.level); // the keyboard light (#164)
             }
             return;
         }

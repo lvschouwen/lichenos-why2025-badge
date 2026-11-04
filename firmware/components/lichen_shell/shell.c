@@ -656,6 +656,7 @@ void shell_start(lv_display_t *display) {
     home_init();
     setup_init();
     screen_idle_init();
+    attention_init();
     screen_saver_init();
     console_register("keys", "keys on|off (log every key) | keys log on|off (log raw key events) | keys send <up down left right enter esc tab bksp wait square triangle cross circle cloud diamond text:..|>", cmd_keys);
     ui_probe_init();

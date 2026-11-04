@@ -53,16 +53,27 @@ static void test(char const *args) {
         }
     }
     if (level < 0) {
-        console_reply("notify test <info|warn|error> [text]");
+        console_reply("notify test <info|warn|error> [@target] [text]");
         return;
     }
     while (*args == ' ') {
         args++;
     }
+    // "@dm:bench" names the target (an app's own place key), so the bench can try what the OS does with a DM (#164)
+    char target[NR_TARGET_CAP];
+    snprintf(target, sizeof(target), "%s", LEVEL_NAME[level]);
+    if (*args == '@') {
+        size_t n = strcspn(args + 1, " ");
+        snprintf(target, sizeof(target), "%.*s", (int)n, args + 1);
+        args += 1 + n;
+        while (*args == ' ') {
+            args++;
+        }
+    }
     char title[NR_TITLE_CAP];
     snprintf(title, sizeof(title), "Test %s", LEVEL_NAME[level]);
     // Target = the level: repeats of one level merge (count goes up), levels stay apart
-    uint32_t id = lichen_notify_to("test", (ln_level_t)level, LEVEL_NAME[level], title,
+    uint32_t id = lichen_notify_to("test", (ln_level_t)level, target, title,
                                    *args ? args : "Raised with fw notify test", LN_COALESCE);
     console_reply("notify test %s: %s %u", LEVEL_NAME[level], id ? "id" : "dropped", (unsigned)id);
 }
@@ -82,10 +93,10 @@ static void cmd_notify(char const *args) {
         lichen_notify_set_dnd(args[5] == 'n');
         console_reply("notify: do-not-disturb %s", lichen_notify_dnd() ? "on" : "off");
     } else {
-        console_reply("notify | notify test <info|warn|error> [text] | notify clear | notify read | notify dnd on|off");
+        console_reply("notify | notify test <info|warn|error> [@target] [text] | notify clear | notify read | notify dnd on|off");
     }
 }
 
 void notify_cmd_register(void) {
-    console_register("notify", "notify [test <info|warn|error> [text] | clear | read | dnd on|off]", cmd_notify);
+    console_register("notify", "notify [test <info|warn|error> [@target] [text] | clear | read | dnd on|off]", cmd_notify);
 }

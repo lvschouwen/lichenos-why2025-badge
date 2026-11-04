@@ -44,6 +44,13 @@ static int64_t now_us(void) {
     return esp_timer_get_time();
 }
 
+bool screen_idle_lit(void) {
+    portENTER_CRITICAL(&lock);
+    bool lit = started && shown.level == IDLE_BRIGHT && !shown.saver;
+    portEXIT_CRITICAL(&lock);
+    return lit;
+}
+
 bool screen_idle_key(void) {
     portENTER_CRITICAL(&lock);
     bool swallow = started && idle_key_swallowed(shown);
@@ -97,7 +104,7 @@ char const *screen_idle_stage_name(void) {
 static void tick(lv_timer_t *timer) {
     (void)timer;
     bool     must_show = update_screen_busy() || power_going_down(); // nothing may cover these (#75)
-    bool     busy      = must_show || bench_running();
+    bool     busy      = must_show || bench_running() || flashlight_active();
     bool     setup     = setup_running();
     bool     home      = shell_home_shown(); // no cover over the boot screen or home's fade-in
     uint32_t gen   = backlight_user_generation();

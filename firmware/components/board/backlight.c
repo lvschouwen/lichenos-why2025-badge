@@ -127,6 +127,17 @@ void backlight_resume(void) {
     send(display, keyboard);
 }
 
+void backlight_temporary(uint8_t display, uint8_t keyboard) {
+    send(backlight_display_level(display), backlight_keyboard_level(keyboard));
+}
+
+void backlight_temporary_keyboard(uint8_t keyboard) {
+    portENTER_CRITICAL(&applied_lock);
+    uint8_t display = user_display;
+    portEXIT_CRITICAL(&applied_lock);
+    send(display, backlight_keyboard_level(keyboard));
+}
+
 void backlight_set(uint8_t display, uint8_t keyboard) {
     send_user(backlight_display_level(display), backlight_keyboard_level(keyboard), true);
 }
