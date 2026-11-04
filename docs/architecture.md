@@ -85,6 +85,12 @@ The rule: **core 1 draws, core 0 talks to the world.**
   keeps a history of 48 in `/storage/lichen/notify.bin` (the Notifications tile, the cloud key). The user switches
   sources on or off and sets do-not-disturb in Settings › Notifications. Lichen raises its own notices too (a crash,
   the PSRAM check, the clock, an update, the C6 coming back, the SD card, a sensor, low storage).
+- Home's tile order (#189) is a display order only: the app's registry index stays its identity (screen ids, the nav
+  stack, shortcuts, badges, notifications). Stored as `badge_fw/home_order`, text `"1:settings,about,files,..."`
+  (version, then app ids; `lichen_api/tile_order.h`): unknown and duplicate ids are skipped, apps not named follow in
+  registration order (a new app goes to the end), a corrupt or other-version value gives the registration order.
+  Written only on a real move; back at the registration order the key is erased. A factory reset erases it; it is
+  not in the settings backup (the backup's text values are capped at 63 characters).
 - The six shape keys between Esc and Backspace are OS shortcuts (#79), the same on every screen: ■ home, ▲ messages
   (the app with `open_messages`, MeshCore's Chat), ✕ back to the previous app, ● search (the screen's
   `shell_on_search` hook: list filters, a chat), ☁ notifications, ◆ the Power app. The shell hears them as raw key

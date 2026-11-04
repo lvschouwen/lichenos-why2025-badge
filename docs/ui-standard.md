@@ -18,7 +18,8 @@ Every screen (OS and apps) is checked against these rules. Panel 720x720, keyboa
    failed + why); no "..." left standing after the work is done. Errors in plain words + what to do next.
 6. **Keys are predictable.** Arrows choose, Enter opens/acts, Esc goes back one level (clears a search/draft first).
    Focus always visible (amber border), lands on the first useful item, survives a refresh. Non-obvious keys get a dim
-   hint line at the bottom.
+   hint line at the bottom. A mode that changes what keys do (home's arrange mode, #189) says so in its hint, Enter
+   never does the normal action meanwhile, and Esc leaves the mode before it goes back.
 7. **Layout is calm.** Edges THEME_PAD, nothing under the status bar, one heading size (LARGE) and one body size
    (SMALL), dim for secondary, scroll only when it does not fit, no jumps when values update.
 8. **Colour has one meaning each.** Amber = focus/attention, teal = OK/live, red = failed/down. Never colour alone

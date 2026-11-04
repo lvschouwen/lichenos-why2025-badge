@@ -2,7 +2,14 @@
 // focusable object; it takes the arrow keys, moves a selection with home_move() and opens the app on Enter. Tiles
 // refresh their text once a second from the LVGL task, and every icon carries the red count circle of lichen_badge.h
 // (#102), redrawn when a count changed.
+//
+// Arrange mode (#189): the person's own display order. Every per-app array here is indexed by the app's registry index
+// (its identity for the shell, the badges and the notifications); order[slot] / slot_of[app] are only where it is
+// shown. Settings > Display > Arrange home starts it: Enter picks the selected tile up, the arrows move it (insert and
+// shift, the cells are reordered in place so the selection stays), Enter drops it and saves, Esc puts it back or ends
+// arrange mode. The order is saved in badge_fw/home_order (tile_order.h) on a real change only.
 #include "fw_console.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "home_layout.h"
@@ -12,6 +19,7 @@
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "theme.h"
+#include "tile_order.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -29,17 +37,25 @@ static char const TAG[] = "home";
 #define TILE_GAP      16
 #define TILE_RADIUS   20
 #define GRID_GAP      24
-#define GRID_CELL_PAD 32 // above the icon and below the name
+#define GRID_CELL_PAD 38 // above the icon and below the name; below, room for arrange mode's "Moving" (#189)
+#define MOVING_EDGE   4  // "Moving" off the cell's bottom edge, clear of the 3 px focus border
 #define GRID_ICON_GAP 14
 #define LINE_CAP      64
 #define REFRESH_MS    1000
 #define BADGE_RED     THEME_LINK_RED // the count circle (#102): white on red, like a phone's app badge
 #define BADGE_PAD_HOR 6
+#define ORDER_CAP     512 // LICHEN_MAX_APPS ids with their commas; a longer stored value reads as the default
 
 typedef struct {
     home_layout_t layout;
     int           count;
-    int           sel;
+    int           sel;                    // the selected app (a registry index, like every array here)
+    int           order[LICHEN_MAX_APPS]; // order[slot] = the app shown there
+    int           slot_of[LICHEN_MAX_APPS];
+    int           picked[LICHEN_MAX_APPS]; // the order when the tile was picked up: Esc puts it back
+    bool          arranging;
+    bool          holding;
+    lv_obj_t     *moving; // the amber "Moving" label on the held tile
     lv_obj_t     *cell[LICHEN_MAX_APPS];
     lv_obj_t     *line1[LICHEN_MAX_APPS]; // tiles only
     lv_obj_t     *line2[LICHEN_MAX_APPS];
@@ -49,6 +65,9 @@ typedef struct {
     bool          badges_drawn;
     lv_timer_t   *timer;
 } home_t;
+
+// The app selected last, over rebuilds: a layout switch keeps it (#189). -1: the first tile.
+static int last_app = -1;
 
 static void style_cell(home_t const *h, int i) {
     bool selected = i == h->sel;
@@ -61,6 +80,7 @@ static void style_cell(home_t const *h, int i) {
 static void select(home_t *h, int sel) {
     int old = h->sel;
     h->sel  = sel;
+    last_app = sel;
     style_cell(h, old);
     style_cell(h, sel);
     lv_obj_scroll_to_view(h->cell[sel], LV_ANIM_ON);
@@ -70,17 +90,178 @@ static void open_selected(void *arg) {
     shell_open_app((size_t)(intptr_t)arg);
 }
 
+// ---- The saved order (#189) ----------------------------------------------------------------------------------------
+
+static void app_ids(char const **ids, int n) {
+    for (int i = 0; i < n; i++) {
+        ids[i] = lichen_app_at((size_t)i)->id;
+    }
+}
+
+// order gets the saved order merged with the apps registered now; true when a saved order was used
+static bool load_order(int *order, int n) {
+    char const *ids[LICHEN_MAX_APPS];
+    app_ids(ids, n);
+    char *text = heap_caps_malloc(ORDER_CAP, MALLOC_CAP_SPIRAM); // the console task's stack is small too
+    if (text) {
+        settings_get_str(HOME_ORDER_KEY, text, ORDER_CAP, "");
+    }
+    bool used = tile_order_merge(text, ids, n, order);
+    free(text);
+    return used;
+}
+
+// The registration order is not stored: back to it, the key goes, as for someone who never arranged
+static bool save_order(int const *order, int n) {
+    if (tile_order_is_default(order, n)) {
+        return settings_erase(HOME_ORDER_KEY);
+    }
+    char const *ids[LICHEN_MAX_APPS];
+    app_ids(ids, n);
+    char *text = heap_caps_malloc(ORDER_CAP, MALLOC_CAP_SPIRAM);
+    bool  ok   = text && tile_order_encode(ids, order, n, text, ORDER_CAP) > 0 && settings_set_str(HOME_ORDER_KEY, text);
+    free(text);
+    if (!ok) {
+        ESP_LOGE(TAG, "home order not saved");
+    }
+    return ok;
+}
+
+// ---- Arrange mode (#189) -------------------------------------------------------------------------------------------
+
+static void arrange_hint(home_t *h, lv_obj_t *home) {
+    if (h->holding) {
+        shell_page_hint(home, "Arrows", "move", "Enter", "drop", "Esc", "cancel", NULL);
+    } else {
+        shell_page_hint(home, "Enter", "pick up", "Esc", "done", NULL);
+    }
+}
+
+// The amber "Moving" on the held tile: in the tile's row after its text, or under the grid cell's name
+static void show_moving(home_t *h, bool on) {
+    if (h->moving) {
+        lv_obj_delete(h->moving);
+        h->moving = NULL;
+    }
+    if (!on) {
+        return;
+    }
+    lv_obj_t *cell  = h->cell[h->sel];
+    lv_obj_t *label = lichen_label_line(cell, LV_SIZE_CONTENT);
+    lv_obj_set_style_max_width(label, LV_PCT(h->layout == HOME_GRID ? 100 : 40), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(THEME_AMBER), 0);
+    lv_label_set_text(label, "Moving");
+    if (h->layout == HOME_GRID) {
+        // Floating in the cell's empty bottom pad (one SMALL line plus MOVING_EDGE fits under the name): in the flex
+        // flow it would push the icon up, away from its badge
+        lv_obj_set_floating(label, true);
+        lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, -MOVING_EDGE);
+    }
+    h->moving = label;
+}
+
+// The cells in the children's order of order[] (after a cancel); the hint, floating and last, stays where it is
+static void place_cells(home_t *h) {
+    for (int slot = 0; slot < h->count; slot++) {
+        lv_obj_move_to_index(h->cell[h->order[slot]], slot);
+    }
+}
+
+static void scroll_to_sel(home_t *h) {
+    lv_obj_update_layout(lv_obj_get_parent(h->cell[h->sel]));
+    lv_obj_scroll_to_view(h->cell[h->sel], LV_ANIM_ON);
+}
+
+static void move_held(home_t *h, int from, int to) {
+    if (!tile_order_move(h->order, h->count, from, to)) {
+        return;
+    }
+    tile_order_slots(h->order, h->count, h->slot_of);
+    lv_obj_move_to_index(h->cell[h->sel], to); // insert and shift, as the order: no rebuild, the selection stays
+    scroll_to_sel(h);
+}
+
+static void hold(home_t *h, lv_obj_t *home, bool on) {
+    if (on) {
+        memcpy(h->picked, h->order, sizeof(h->picked));
+    } else if (memcmp(h->picked, h->order, (size_t)h->count * sizeof(*h->order)) != 0) {
+        save_order(h->order, h->count); // a real move: only now does anything reach NVS
+    }
+    h->holding = on;
+    show_moving(h, on);
+    arrange_hint(h, home);
+}
+
+static void cancel_hold(home_t *h, lv_obj_t *home) {
+    memcpy(h->order, h->picked, sizeof(h->order));
+    tile_order_slots(h->order, h->count, h->slot_of);
+    place_cells(h);
+    h->holding = false;
+    show_moving(h, false);
+    arrange_hint(h, home);
+    scroll_to_sel(h);
+}
+
+void home_arrange(lv_obj_t *home, bool on) {
+    home_t *h = home ? lv_obj_get_user_data(home) : NULL;
+    if (!h || h->count == 0 || on == h->arranging) {
+        return;
+    }
+    if (h->holding) {
+        cancel_hold(h, home);
+    }
+    h->arranging = on;
+    if (on) {
+        arrange_hint(h, home);
+        scroll_to_sel(h);
+        return;
+    }
+    lv_obj_t *hint = lichen_page_hint_of(home);
+    if (hint) {
+        lv_obj_delete(hint);
+    }
+    lv_obj_set_style_pad_bottom(home, THEME_PAD, 0); // as home_create left it
+}
+
+bool home_arrange_esc(void *arg) {
+    lv_obj_t *home = arg;
+    home_t   *h    = lv_obj_get_user_data(home);
+    if (!h || !h->arranging) {
+        return false;
+    }
+    if (h->holding) {
+        cancel_hold(h, home);
+    } else {
+        home_arrange(home, false);
+    }
+    return true;
+}
+
 static void on_key(lv_event_t *e) {
-    home_t  *h   = lv_event_get_user_data(e);
-    uint32_t key = lv_event_get_key(e);
+    home_t   *h    = lv_event_get_user_data(e);
+    lv_obj_t *home = lv_event_get_current_target(e);
+    uint32_t  key  = lv_event_get_key(e);
+    if (h->count == 0) {
+        return;
+    }
+    if (key == LV_KEY_ENTER && h->arranging) {
+        hold(h, home, !h->holding); // never opens an app while arranging
+        return;
+    }
     if (key == LV_KEY_ENTER) {
         // Outside the indev's key handling: opening swaps the indev's group
         lv_async_call(open_selected, (void *)(intptr_t)h->sel);
         return;
     }
-    int sel = home_move(h->layout, h->count, h->sel, key);
-    if (sel != h->sel) {
-        select(h, sel);
+    int from = h->slot_of[h->sel];
+    int to   = home_move(h->layout, h->count, from, key);
+    if (to == from) {
+        return;
+    }
+    if (h->holding) {
+        move_held(h, from, to);
+    } else {
+        select(h, h->order[to]);
     }
 }
 
@@ -295,17 +476,24 @@ lv_obj_t *home_create(void) {
         lv_obj_set_style_pad_row(home, TILE_GAP, 0);
     }
     lv_obj_set_user_data(home, h);
-    for (int i = 0; i < h->count; i++) {
+    load_order(h->order, h->count);
+    tile_order_slots(h->order, h->count, h->slot_of);
+    h->sel = last_app >= 0 && last_app < h->count ? last_app : h->order[0];
+    for (int slot = 0; slot < h->count; slot++) {
+        int app = h->order[slot];
         if (h->layout == HOME_GRID) {
-            add_grid_cell(h, home, i);
+            add_grid_cell(h, home, app);
         } else {
-            add_tile(h, home, i);
+            add_tile(h, home, app);
         }
-        style_cell(h, i);
+        style_cell(h, app);
     }
     lv_obj_update_layout(home); // the icons' final places, for the badges
     for (int i = 0; i < h->count; i++) {
         place_badge(h->badge[i], h->icon[i]);
+    }
+    if (h->count > 0 && h->slot_of[h->sel] > 0) {
+        lv_obj_scroll_to_view(h->cell[h->sel], LV_ANIM_OFF); // a kept selection further down shows at once
     }
     h->timer = lv_timer_create(refresh, REFRESH_MS, h);
     refresh(h->timer); // no blank lines or missing bubbles for the first second
@@ -314,7 +502,26 @@ lv_obj_t *home_create(void) {
     return home;
 }
 
-// ---- "fw home layout": the console setter of Settings > Display > Home layout ------------------------------------
+// ---- "fw home": the console side of Settings > Display > Home layout, Arrange home and Reset order ---------------
+
+static void reply_order(void) {
+    int  n = (int)lichen_app_count();
+    int  order[LICHEN_MAX_APPS];
+    bool saved = load_order(order, n);
+    char *list = heap_caps_malloc(ORDER_CAP, MALLOC_CAP_SPIRAM);
+    if (!list) {
+        console_reply("home order: out of memory");
+        return;
+    }
+    size_t len = 0;
+    list[0]    = '\0';
+    for (int slot = 0; slot < n && len < ORDER_CAP; slot++) {
+        int w = snprintf(list + len, ORDER_CAP - len, "%s%s", slot ? ", " : "", lichen_app_at((size_t)order[slot])->id);
+        len += w > 0 ? (size_t)w : 0;
+    }
+    console_reply("home order (%s): %s", saved ? "arranged" : "default", list);
+    free(list);
+}
 
 static void cmd_home(char const *args) {
     if (strcmp(args, "layout tiles") == 0 || strcmp(args, "layout grid") == 0) {
@@ -322,13 +529,24 @@ static void cmd_home(char const *args) {
         settings_set_u8("home_layout", grid ? HOME_GRID : HOME_TILES);
         shell_rebuild_home();
         console_reply("home layout: %s (saved)", grid ? "grid" : "tiles");
+    } else if (strcmp(args, "order reset") == 0) {
+        settings_erase(HOME_ORDER_KEY);
+        shell_rebuild_home_below();
+        reply_order();
+    } else if (strcmp(args, "order") == 0) {
+        reply_order();
     } else {
-        console_reply("home layout tiles|grid  (layout is %s)",
+        // tools/ui_overflow_sweep.py reads "layout is tiles" from this first line
+        console_reply("home layout tiles|grid | home order [reset]  (layout is %s)",
                       settings_get_u8("home_layout", 0) == HOME_GRID ? "grid" : "tiles");
+        reply_order();
     }
 }
 
 void home_init(void) {
-    console_register("home", "home layout tiles|grid (the home screen's layout, as in Settings > Display)", cmd_home);
+    console_register("home",
+                     "home layout tiles|grid | home order [reset] (the home screen's layout and tile order, as in "
+                     "Settings > Display)",
+                     cmd_home);
     ESP_LOGI(TAG, "ready");
 }

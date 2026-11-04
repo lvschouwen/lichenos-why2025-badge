@@ -29,6 +29,11 @@ that is on the mesh, and everything set up then must be changeable later on the 
    - **Live tiles** (option B) by default: one wide tile per app with a line of what is going on (MeshCore: unread
      count, latest message, nodes and last heard; Settings: Wi-Fi network; About: version, uptime).
    - An **app grid** (option A) as the alternative, switched in Settings › Display › Home layout.
+   - **Arrange home** (#189, Settings › Display): Settings closes and home is in arrange mode, in either layout. Enter
+     picks the selected tile up (amber "Moving" on it), the arrows move it (insert and shift), Enter drops it and saves,
+     Esc puts a held tile back or ends arrange mode; ■ also ends it. Hints: "Enter: pick up • Esc: done", holding
+     "Arrows: move • Enter: drop • Esc: cancel". Enter never opens an app while arranging. Settings › Display › Reset
+     order (a confirm) and `fw home order reset` go back to the registration order; `fw home` prints the order.
    - A status bar: Lichen logo, clock, Wi-Fi, LoRa.
 4. **Apps**: built into the firmware (no loading of foreign binaries: BadgeVMS's lesson). Each app provides:
    - a name, an icon and its home tile/line;
@@ -37,7 +42,7 @@ that is on the mesh, and everything set up then must be changeable later on the 
    - a background part (MeshCore keeps listening while you are on home or in another app).
    - First apps: MeshCore, Settings, About Lichen.
 5. **Settings** (mockup `settings.html`, top row):
-   - Lichen: Wi-Fi, Display (screen and keyboard brightness, home layout), About Lichen.
+   - Lichen: Wi-Fi, Display (screen and keyboard brightness, home layout, arrange home, reset order), About Lichen.
    - MeshCore's page: name, region & radio (presets plus Custom…, Advanced: TX power and the separate frequency,
      bandwidth, SF, CR), channels (including adding a #hashtag channel), send advert.
 6. **About Lichen** (mockup `lichen.html`): logo, a short text on what a lichen is (a fungus and an alga living as one,

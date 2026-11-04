@@ -27,7 +27,7 @@ static void boot_plan_per_pending_value(void) {
 }
 
 static void settings_go_at_both_levels(void) {
-    char const *settings[] = {"wifi_ssid", "wifi_pass", "wifi_s0", "wifi_p0", "wifi_s4", "wifi_p4", "tz", "setup_done", "home_layout", "idle_dim", "idle_off",
+    char const *settings[] = {"wifi_ssid", "wifi_pass", "wifi_s0", "wifi_p0", "wifi_s4", "wifi_p4", "tz", "setup_done", "home_layout", "home_order", "idle_dim", "idle_off",
                               "bl_disp", "bl_kbd", "status_led", "haptics", "haptic_str", "notify_dnd", "n.mesh", "radio_on", "radio_saved",
                               "radio_air", "ota_wifi", "ota_auto_min", "saver", "lock", "mc_advint", "mc_advfl", "some_new_key"};
     for (size_t i = 0; i < sizeof(settings) / sizeof(settings[0]); i++) {

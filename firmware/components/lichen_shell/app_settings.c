@@ -1,5 +1,5 @@
 // Settings (#66, settings.html top row): Wi-Fi, Display (brightness, screen timeout #43, screensaver and pocket lock
-// #75 and its style #119, home layout), Time (#64: set
+// #75 and its style #119, home layout, arrange home and reset order #189), Time (#64: set
 // date & time, time zone), SD card (#99, sd_screen.c), Notifications (#62, notify_centre.c), Factory reset (#66, factory_screen.c), About Lichen, then one entry per app that has a settings page.
 // Every screen is a menu.h list; Esc is the shell's.
 #include "app_icons.h"
@@ -192,6 +192,36 @@ static void toggle_style(void *arg) {
     switch_rows_refresh();
 }
 
+// Arrange home (#189): Settings closes and home takes the keys in arrange mode
+static void arrange_later(void *arg) {
+    shell_arrange_home(arg != NULL);
+}
+
+static void open_arrange(void *arg) {
+    (void)arg;
+    uint8_t now      = settings_get_u8("home_layout", HOME_TILES);
+    bool    relayout = now != layout_at_open;
+    layout_at_open   = now; // on_display_delete's own rebuild would come after and replace the arranging home
+    lv_async_call(arrange_later, relayout ? (void *)1 : NULL); // outside this row's key handling: the page is deleted
+}
+
+static void reset_order_answer(bool yes) {
+    if (yes) {
+        settings_erase(HOME_ORDER_KEY);
+        shell_rebuild_home_below(); // Settings stays on top
+    }
+}
+
+static void ask_reset_order(void *arg) {
+    (void)arg;
+    shell_dialog_t const d = {
+        .title         = "Reset the home order? The tiles go back to their first places.",
+        .seconds       = 10,
+        .confirm_label = "reset",
+    };
+    shell_dialog_countdown(&d, reset_order_answer);
+}
+
 static void rebuild_later(void *arg) {
     (void)arg;
     shell_rebuild_home_below(); // Settings stays on top
@@ -246,6 +276,8 @@ static lv_obj_t *build_display(void) {
     layout_at_open = settings_get_u8("home_layout", HOME_TILES);
     layout_row     = menu_add(menu, "Home layout", layout_name(), toggle_layout, NULL);
     menu_set_kind(layout_row, MENU_CYCLE);
+    menu_set_kind(menu_add(menu, "Arrange home", "", open_arrange, NULL), MENU_OPEN);
+    menu_add(menu, "Reset order", "", ask_reset_order, NULL);
     shell_page_hint(screen, "Left/Right", "sliders", "Enter", "change", NULL);
     lv_obj_add_event_cb(screen, on_display_delete, LV_EVENT_DELETE, NULL);
     return screen;

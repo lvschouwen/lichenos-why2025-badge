@@ -9,6 +9,9 @@
 
 typedef enum { HOME_TILES = 0, HOME_GRID = 1 } home_layout_t;
 
+// badge_fw key of the arranged tile order (#189, tile_order.h's text); absent: registration order
+#define HOME_ORDER_KEY "home_order"
+
 #define HOME_GRID_COLS 3
 
 // The key values LVGL's keypad sends (LV_KEY_*); home.c static_asserts them against lvgl.h

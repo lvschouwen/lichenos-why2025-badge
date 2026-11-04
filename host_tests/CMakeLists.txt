@@ -1496,3 +1496,12 @@ add_executable(lora_spectrum_test
 target_include_directories(lora_spectrum_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(lora_spectrum_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME lora_spectrum_test COMMAND lora_spectrum_test)
+
+# A grid's saved display order (#189): merge, parse, encode, move
+add_executable(tile_order_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/tile_order_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/tile_order.c
+)
+target_include_directories(tile_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(tile_order_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME tile_order_test COMMAND tile_order_test)

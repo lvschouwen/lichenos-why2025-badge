@@ -290,6 +290,8 @@ static void new_home_frame(frame_t *frame) {
     frame->screen = home_create();
     frame->group  = lv_group_create();
     lv_group_add_obj(frame->group, frame->screen);
+    frame->on_esc     = home_arrange_esc; // arranging is a state of home, not a screen of its own (#189)
+    frame->on_esc_arg = frame->screen;
 }
 
 static void first_run_cb(lv_timer_t *timer) {
@@ -305,6 +307,7 @@ void shell_home(void) {
         while (nav_depth() > 1) {
             nav_back();
         }
+        home_arrange(frames[0].screen, false); // the home key also ends arranging (#189)
         show_top();
         for (int i = 1; i < depth; i++) {
             drop(&frames[i]);
@@ -362,6 +365,21 @@ void shell_rebuild_home_below(void) {
         show_top(); // never delete the screen that is showing
     }
     drop(&old);
+    lvgl_port_unlock();
+}
+
+// Settings > Display > Arrange home (#189): every screen closes and home starts arranging; rebuilt first when the layout
+// changed on that page (its own deferred rebuild would replace the arranging home)
+void shell_arrange_home(bool rebuild) {
+    lvgl_port_lock(0);
+    if (rebuild) {
+        shell_rebuild_home();
+    } else {
+        shell_home();
+    }
+    if (frames[0].screen && nav_depth() == 1 && !home_settling()) {
+        home_arrange(frames[0].screen, true);
+    }
     lvgl_port_unlock();
 }
 

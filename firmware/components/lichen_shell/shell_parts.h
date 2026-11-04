@@ -19,6 +19,9 @@ void status_bar_remote_lock(bool on);
 lv_obj_t *home_create(void);   // a fresh home screen for the registered apps and the saved layout; focus object = itself
 char const *home_selected_name(lv_obj_t *home); // the selected tile's app name; NULL if none or not a home screen
 void      home_init(void);     // registers the "fw home" console command
+// Arrange mode (#189): on starts it on this home screen, off ends it (a held tile goes back). LVGL context.
+void home_arrange(lv_obj_t *home, bool on);
+bool home_arrange_esc(void *home); // home's shell_on_esc hook: a held tile goes back, else arranging ends
 
 // shell.c
 void shell_esc(void);                // Esc pressed: the top screen's shell_on_esc() hook first, else shell_back()
@@ -27,6 +30,7 @@ lv_group_t *shell_top_group(void);   // the keypad group of the screen on top (u
 void shell_open_app(size_t index);     // opens lichen_app_at(index); from home's Enter
 void shell_rebuild_home(void);         // after the app list or the layout changed
 void shell_rebuild_home_below(void);   // the same, keeping the screens above home open
+void shell_arrange_home(bool rebuild); // Settings > Display > Arrange home: back to home (rebuilt first), arranging
 
 // ui_probe.c: bench diagnostics
 void ui_probe_init(void);           // registers "fw ui"
