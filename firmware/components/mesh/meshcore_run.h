@@ -29,6 +29,9 @@ mesh_run_t meshcore_run_get(void);
 // Asks for a start (true) or a stop (false) on a job task: NULL when it was taken, else why not ("busy, try again",
 // "already running", ...). The screens see the result through meshcore_run_get.
 char const *meshcore_run_request(bool start);
+// The OS holds the radio for a while (LoRa spectrum, #188): true marks the state paused (tile, grid and "fw mesh" say
+// why, starts are refused with MESH_RUN_PAUSED_REFUSAL), false clears it. Mark before the stop, clear before the start.
+void meshcore_run_set_paused(bool paused);
 // The app's stop_for_update: final
 bool meshcore_run_stop_for_update(void);
 

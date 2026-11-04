@@ -115,16 +115,22 @@ static bool lora_user_pause(bool *was_running, bool (*keep_going)(void)) {
     if (meshcore_run_get().state != MESH_RUN_RUNNING) {
         return true;
     }
+    meshcore_run_set_paused(true); // the screens say "Paused", not "Not running"; a start is refused with the reason
     char const *why = meshcore_run_request(false);
     if (why) {
+        meshcore_run_set_paused(false);
         ESP_LOGW(TAG, "MeshCore not paused for the LoRa spectrum: %s", why);
         return false;
     }
     *was_running = true; // asked to stop: resume follows even if this stop is late
-    return meshcore_settled(USER_PAUSE_WAIT_MS, keep_going) && meshcore_run_get().state == MESH_RUN_STOPPED;
+    if (meshcore_settled(USER_PAUSE_WAIT_MS, keep_going) && meshcore_run_get().state == MESH_RUN_STOPPED) {
+        return true;
+    }
+    meshcore_run_set_paused(false); // not stopped: nothing is paused (a late stop is finished by resume)
+    return false;
 }
 
-static void lora_user_resume(void) {
+static void lora_user_resume_start(void) {
     for (int attempt = 1; attempt <= 2; attempt++) {
         if (!meshcore_settled(USER_RESUME_WAIT_MS, NULL)) {
             ESP_LOGW(TAG, "MeshCore %s: not started again after the LoRa spectrum",
@@ -147,6 +153,11 @@ static void lora_user_resume(void) {
         }
         ESP_LOGW(TAG, "MeshCore start after the LoRa spectrum refused (%s)%s", why, attempt == 1 ? ": trying again" : "");
     }
+}
+
+static void lora_user_resume(void) {
+    meshcore_run_set_paused(false); // a start is refused while paused; every way out of the resume leaves it cleared
+    lora_user_resume_start();
 }
 
 // The OS radio switches (#108) reach the hardware here: the services own the radios, everyone else reads the state

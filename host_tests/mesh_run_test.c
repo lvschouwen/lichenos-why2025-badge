@@ -66,7 +66,7 @@ static void machine(void) {
     // An update is final, from any state
     mesh_run_state_t const from[] = {MESH_RUN_STOPPED, MESH_RUN_STARTING, MESH_RUN_RUNNING, MESH_RUN_STOPPING};
     for (size_t i = 0; i < sizeof(from) / sizeof(from[0]); i++) {
-        mesh_run_t u = {from[i], MESH_WHY_USER};
+        mesh_run_t u = {from[i], MESH_WHY_USER, false};
         CHECK(mesh_run_event(&u, MESH_EV_UPDATE));
         CHECK(is(u, MESH_RUN_STOPPED, MESH_WHY_UPDATE));
         CHECK(!mesh_run_event(&u, MESH_EV_START));
@@ -76,6 +76,37 @@ static void machine(void) {
         CHECK(!mesh_run_event(&u, MESH_EV_UPDATE));
         CHECK(mesh_run_wants_radio(u));
     }
+}
+
+// The OS pauses MeshCore for the LoRa spectrum (#188)
+static void paused(void) {
+    char       l1[32], l2[32];
+    mesh_run_t r = MESH_RUN_INIT;
+    mesh_run_event(&r, MESH_EV_START);
+    mesh_run_event(&r, MESH_EV_DONE_OK);
+    CHECK(mesh_run_event(&r, MESH_EV_PAUSE) && r.paused);
+    CHECK(!mesh_run_event(&r, MESH_EV_PAUSE));
+    CHECK(mesh_run_event(&r, MESH_EV_STOP));
+    CHECK(mesh_run_event(&r, MESH_EV_DONE_OK));
+    CHECK(is(r, MESH_RUN_STOPPED, MESH_WHY_USER) && r.paused); // the pause survives the stop it asked for
+    CHECK(!mesh_run_wants_radio(r));                           // the status bar dims, not red
+    CHECK(mesh_run_tile_text(r, true, l1, sizeof(l1), l2, sizeof(l2)));
+    CHECK(strcmp(l1, "Paused") == 0 && strcmp(l2, "LoRa spectrum is open") == 0);
+    CHECK(strcmp(mesh_run_grid_text(r, true), "MeshCore is paused: LoRa spectrum is open.") == 0);
+    CHECK(strcmp(mesh_run_console_text(r), "paused (LoRa spectrum is open)") == 0);
+    CHECK(strcmp(mesh_run_action_label(r), "Paused") == 0);
+    CHECK(!mesh_run_event(&r, MESH_EV_START)); // refused while paused
+    CHECK(mesh_run_event(&r, MESH_EV_UNPAUSE) && !r.paused);
+    CHECK(!mesh_run_event(&r, MESH_EV_UNPAUSE));
+    CHECK(mesh_run_tile_text(r, true, l1, sizeof(l1), l2, sizeof(l2)) && strcmp(l1, "Not running") == 0);
+    CHECK(mesh_run_event(&r, MESH_EV_START)); // resume clears the reason
+    CHECK(mesh_run_event(&r, MESH_EV_DONE_OK) && !r.paused && r.state == MESH_RUN_RUNNING);
+
+    // An update beats a pause, and clears it
+    mesh_run_event(&r, MESH_EV_PAUSE);
+    mesh_run_event(&r, MESH_EV_UPDATE);
+    CHECK(!r.paused && !mesh_run_event(&r, MESH_EV_PAUSE));
+    CHECK(strcmp(mesh_run_console_text(r), "stopped for update") == 0);
 }
 
 static void texts(void) {
@@ -122,6 +153,7 @@ static void texts(void) {
 
 int main(void) {
     machine();
+    paused();
     texts();
     if (failures) {
         printf("%d failure(s)\n", failures);

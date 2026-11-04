@@ -29,15 +29,21 @@ typedef enum {
     MESH_EV_UPDATE,     // a firmware update stopped it: from any state, final
     MESH_EV_SEEN_UP,    // the mesh task is found running (a sync, e.g. after a stop that finished late)
     MESH_EV_SEEN_DOWN,  // the mesh task is found not running
+    MESH_EV_PAUSE,      // the OS takes the radio for a while (LoRa spectrum, #188): the next stop is a pause, no start
+    MESH_EV_UNPAUSE,    // it gives the radio back: starts are accepted again
 } mesh_run_ev_t;
 
 typedef struct {
     mesh_run_state_t state;
     mesh_run_why_t   why; // meaningful while stopped
+    bool             paused; // the OS holds the radio (#188): shown instead of "Not running", starts refused
 } mesh_run_t;
 
 // The state before anything happened: stopped, start at boot off (boot sends START when the setting is on)
-#define MESH_RUN_INIT ((mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_AUTOSTART_OFF})
+#define MESH_RUN_INIT ((mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_AUTOSTART_OFF, false})
+
+// Why a start is refused while paused (also the console's reply)
+#define MESH_RUN_PAUSED_REFUSAL "LoRa spectrum has the radio; close it first"
 
 // Applies ev. True when it changed the state; for START and STOP that means the caller now runs the start or stop and
 // reports DONE_OK or DONE_FAIL. False: refused (busy, already there, or stopped for an update), nothing to do.

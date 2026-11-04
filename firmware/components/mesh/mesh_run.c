@@ -6,7 +6,7 @@ bool mesh_run_event(mesh_run_t *r, mesh_run_ev_t ev) {
     mesh_run_state_t s = r->state;
     switch (ev) {
         case MESH_EV_START:
-            if (s != MESH_RUN_STOPPED || r->why == MESH_WHY_UPDATE) {
+            if (s != MESH_RUN_STOPPED || r->why == MESH_WHY_UPDATE || r->paused) {
                 return false;
             }
             r->state = MESH_RUN_STARTING;
@@ -23,13 +23,14 @@ bool mesh_run_event(mesh_run_t *r, mesh_run_ev_t ev) {
                 return true;
             }
             if (s == MESH_RUN_STOPPING) {
-                *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_USER};
+                r->state = MESH_RUN_STOPPED; // paused stays: this stop may be the pause's
+                r->why   = MESH_WHY_USER;
                 return true;
             }
             return false;
         case MESH_EV_DONE_FAIL:
             if (s == MESH_RUN_STARTING) {
-                *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_FAILED};
+                *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_FAILED, r->paused};
                 return true;
             }
             if (s == MESH_RUN_STOPPING) {
@@ -41,7 +42,7 @@ bool mesh_run_event(mesh_run_t *r, mesh_run_ev_t ev) {
             if (s == MESH_RUN_STOPPED && r->why == MESH_WHY_UPDATE) {
                 return false;
             }
-            *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_UPDATE};
+            *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_UPDATE, false};
             return true;
         case MESH_EV_SEEN_UP:
             // Only a settled state is corrected: a start or stop under way reports for itself
@@ -54,7 +55,19 @@ bool mesh_run_event(mesh_run_t *r, mesh_run_ev_t ev) {
             if (s != MESH_RUN_RUNNING) {
                 return false;
             }
-            *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_FAILED};
+            *r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_FAILED, false};
+            return true;
+        case MESH_EV_PAUSE:
+            if ((s == MESH_RUN_STOPPED && r->why == MESH_WHY_UPDATE) || r->paused) {
+                return false;
+            }
+            r->paused = true;
+            return true;
+        case MESH_EV_UNPAUSE:
+            if (!r->paused) {
+                return false;
+            }
+            r->paused = false;
             return true;
     }
     return false;
@@ -74,6 +87,9 @@ bool mesh_run_tile_text(mesh_run_t r, bool lora_ok, char *line1, size_t c1, char
         case MESH_RUN_STOPPED:
             if (r.why == MESH_WHY_UPDATE) {
                 l2 = "Stopped for update";
+            } else if (r.paused) {
+                l1 = "Paused";
+                l2 = "LoRa spectrum is open";
             } else if (!lora_ok) {
                 l2 = "Needs the LoRa radio";
             }
@@ -94,6 +110,9 @@ char const *mesh_run_grid_text(mesh_run_t r, bool lora_ok) {
     if (r.why == MESH_WHY_UPDATE) {
         return "MeshCore stopped for update.";
     }
+    if (r.paused) {
+        return "MeshCore is paused: LoRa spectrum is open.";
+    }
     if (!lora_ok) {
         return "MeshCore is not running: it needs the LoRa radio.";
     }
@@ -107,6 +126,9 @@ char const *mesh_run_action_label(mesh_run_t r) {
         case MESH_RUN_STARTING: return "Starting...";
         case MESH_RUN_STOPPING: return "Stopping...";
         case MESH_RUN_STOPPED: break;
+    }
+    if (r.why != MESH_WHY_UPDATE && r.paused) {
+        return "Paused";
     }
     return r.why == MESH_WHY_UPDATE ? "Stopped for update" : "Start MeshCore";
 }
@@ -129,6 +151,9 @@ char const *mesh_run_console_text(mesh_run_t r) {
         case MESH_RUN_STOPPING: return "stopping...";
         case MESH_RUN_STOPPED: break;
     }
+    if (r.paused && r.why != MESH_WHY_UPDATE) {
+        return "paused (LoRa spectrum is open)";
+    }
     switch (r.why) {
         case MESH_WHY_AUTOSTART_OFF: return "stopped (autostart off)";
         case MESH_WHY_USER: return "stopped";
@@ -139,5 +164,6 @@ char const *mesh_run_console_text(mesh_run_t r) {
 }
 
 bool mesh_run_wants_radio(mesh_run_t r) {
-    return !(r.state == MESH_RUN_STOPPED && (r.why == MESH_WHY_AUTOSTART_OFF || r.why == MESH_WHY_USER));
+    // Paused by the OS counts as by choice: the spectrum has the radio, nothing is broken
+    return !(r.state == MESH_RUN_STOPPED && (r.why == MESH_WHY_AUTOSTART_OFF || r.why == MESH_WHY_USER || r.paused));
 }

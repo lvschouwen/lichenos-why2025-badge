@@ -171,8 +171,15 @@ static void job_task(void *arg) {
     }
 }
 
+void meshcore_run_set_paused(bool paused) {
+    apply(paused ? MESH_EV_PAUSE : MESH_EV_UNPAUSE);
+}
+
 char const *meshcore_run_request(bool start) {
     mesh_run_t r = meshcore_run_get();
+    if (start && r.paused) {
+        return MESH_RUN_PAUSED_REFUSAL; // before "busy": the reason is the radio's owner, not a job
+    }
     if (mesh_run_busy(r)) {
         return mc_busy_note();
     }
