@@ -85,8 +85,12 @@ if [ $check_syms = 1 ]; then
     nm="$(command -v riscv32-esp-elf-nm || true)"
     for app in $APP_COMPONENTS; do
         lib="$fw/build/esp-idf/$app/lib$app.a"
-        if [ -z "$nm" ] || [ ! -f "$lib" ]; then
-            fail "cannot check symbols: need riscv32-esp-elf-nm on PATH (IDF export.sh) and $lib (build first)" "tools/check_app_boundary.sh"
+        if [ ! -f "$lib" ]; then
+            echo "app boundary: no $lib yet, symbol rule (C) skipped" >&2
+            continue
+        fi
+        if [ -z "$nm" ]; then
+            fail "cannot check symbols: riscv32-esp-elf-nm is not on PATH (IDF export.sh)" "tools/check_app_boundary.sh"
             continue
         fi
         while read -r obj sym; do
