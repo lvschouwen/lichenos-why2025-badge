@@ -54,3 +54,9 @@ int32_t ovf_wrap_lost_px(int32_t text_h, int32_t box_h);
 // Rows of a label's line box that may be cut without cutting the text: a font's line height carries leading above and
 // below the glyphs (~13% each for Lichen's fonts), so a "K" centred in a box a little shorter than its line shows whole.
 int32_t ovf_line_slack_px(int32_t line_h);
+
+// Which of the scrolling ancestors of an object is "the page": range[i] = scroll_top + scroll_bottom of the i-th
+// scrolling ancestor, nearest first. A small object may scroll by a few px on its own (a 40 px ring holding a 54 px
+// line: the "!" of the Crash log icon, #133); that is no page, it cannot bring the object on the screen. The page is
+// the one with the largest range, the nearest on a tie. -1 when none scrolls (n = 0 or every range 0).
+int ovf_pick_scroller(int32_t const range[], int n);

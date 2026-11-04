@@ -285,6 +285,16 @@ static void settle(void) {
 
 #define OVF_TEXT_CHARS 60
 
+// Where the object sits in scrolling content: the page (the ancestor with the most room to scroll) splits the ancestors into those
+// that move with the object (inner) and those that stay put (outer); up / down = how far the content can still move
+typedef struct {
+    ovf_span_t inner, outer;
+    int32_t    up, down;
+    lv_area_t  scroller; // the page's own box (for "-v"); valid when has_scroller
+    bool       has_scroller;
+    int        scrollers; // how many ancestors scroll at all
+} vgeom_t;
+
 typedef enum { HIT_WIDTH, HIT_HEIGHT, HIT_UNDER, HIT_CLIPPED, HIT_COUNT } hit_kind_t;
 
 static char const *const HIT_NAME[] = {"width", "height", "under-hint", "clipped"};
@@ -295,6 +305,8 @@ typedef struct {
     int32_t     a, b, x, y; // width: text px / px available. height: wrapped text / box. clipped: rows lost / height.
                             // under-hint: rows covered / height
     char const *target;     // under-hint: "hint" or "bar"
+    vgeom_t     geom;       // "-v": where the object sat in scrolling content (clipped / under-hint only)
+    bool        has_geom;
     char        text[OVF_TEXT_CHARS + 4];
 } hit_t;
 
@@ -305,6 +317,7 @@ typedef struct {
     lv_obj_t  *hint_obj;
     bool       has_hint, has_bar;
     ovf_rect_t hint, bar;
+    vgeom_t const *geom; // set while the vertical checks of one object run
 } ovf_ctx_t;
 
 static ovf_mode_t overflow_mode(lv_label_long_mode_t m) {
@@ -353,6 +366,10 @@ static void add_hit(ovf_ctx_t *ctx, hit_kind_t kind, lv_obj_t *obj, int32_t a, i
     h->x      = area.x1;
     h->y      = area.y1;
     h->target = target;
+    h->has_geom = ctx->geom != NULL;
+    if (ctx->geom) {
+        h->geom = *ctx->geom;
+    }
     h->text[0] = 0;
     first_label(obj, h->text, sizeof(h->text));
     if (!h->text[0]) {
@@ -402,32 +419,48 @@ static void check_wrap_height(ovf_ctx_t *ctx, lv_obj_t *obj, char const *text) {
     }
 }
 
-// Where the object sits in scrolling content: the nearest ancestor that really scrolls splits the ancestors into those
-// that move with the object (inner) and those that stay put (outer); up / down = how far the content can still move
-typedef struct {
-    ovf_span_t inner, outer;
-    int32_t    up, down;
-} vgeom_t;
-
 static bool scrolls(lv_obj_t *o) {
     return lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) && (lv_obj_get_scroll_dir(o) & LV_DIR_VER) &&
            (lv_obj_get_scroll_bottom(o) > 0 || lv_obj_get_scroll_top(o) > 0);
 }
 
+#define MAX_DEPTH 32
+
+// The page is the scrolling ancestor with the most room to scroll, not the nearest: a snug icon box can scroll by a
+// few px (its label is taller than it) and would hide that the home screen scrolls the icon into view (#133)
+static lv_obj_t *page_scroller(lv_obj_t *obj, int *count) {
+    lv_obj_t *cand[MAX_DEPTH];
+    int32_t   range[MAX_DEPTH];
+    int       n = 0;
+    for (lv_obj_t *p = lv_obj_get_parent(obj); p && n < MAX_DEPTH; p = lv_obj_get_parent(p)) {
+        if (scrolls(p)) {
+            cand[n]    = p;
+            range[n++] = LV_MAX(lv_obj_get_scroll_bottom(p), 0) + LV_MAX(lv_obj_get_scroll_top(p), 0);
+        }
+    }
+    *count = n;
+    int best = ovf_pick_scroller(range, n);
+    return best < 0 ? NULL : cand[best];
+}
+
 static void vgeom(lv_obj_t *obj, vgeom_t *g) {
-    g->inner   = OVF_NO_LIMIT;
-    g->outer   = OVF_NO_LIMIT;
-    g->up      = 0;
-    g->down    = 0;
+    g->inner        = OVF_NO_LIMIT;
+    g->outer        = OVF_NO_LIMIT;
+    g->up           = 0;
+    g->down         = 0;
+    g->has_scroller = false;
+    lv_obj_t   *page = page_scroller(obj, &g->scrollers);
     ovf_span_t *clip = &g->inner;
     for (lv_obj_t *p = lv_obj_get_parent(obj); p; p = lv_obj_get_parent(p)) {
         lv_area_t a;
-        if (clip == &g->inner && scrolls(p)) {
-            clip    = &g->outer;
-            g->up   = LV_MAX(lv_obj_get_scroll_bottom(p), 0);
-            g->down = LV_MAX(lv_obj_get_scroll_top(p), 0);
-        }
         lv_obj_get_coords(p, &a);
+        if (p == page) {
+            clip            = &g->outer;
+            g->up           = LV_MAX(lv_obj_get_scroll_bottom(p), 0);
+            g->down         = LV_MAX(lv_obj_get_scroll_top(p), 0);
+            g->scroller     = a;
+            g->has_scroller = true;
+        }
         clip->x1 = LV_MAX(clip->x1, a.y1);
         clip->x2 = LV_MIN(clip->x2, a.y2);
     }
@@ -473,6 +506,7 @@ static bool check_vertical(ovf_ctx_t *ctx, lv_obj_t *obj) {
     }
     vgeom_t g;
     vgeom(obj, &g);
+    ctx->geom = &g;
     int32_t hidden    = ovf_hidden_rows((ovf_span_t){a.y1, a.y2}, g.inner, g.outer, g.up, g.down);
     if (lv_obj_check_type(obj, &lv_label_class) &&
         hidden <= ovf_line_slack_px(lv_font_get_line_height(lv_obj_get_style_text_font(obj, LV_PART_MAIN)))) {
@@ -483,6 +517,7 @@ static bool check_vertical(ovf_ctx_t *ctx, lv_obj_t *obj) {
         add_hit(ctx, HIT_CLIPPED, obj, hidden, h, NULL);
     }
     check_cover(ctx, obj, &a, &g);
+    ctx->geom = NULL;
     return container && hidden >= h;
 }
 
@@ -520,7 +555,18 @@ static bool area_rect(lv_obj_t *obj, ovf_rect_t *out) {
 // dialogs) and the sys layer. Those draw over the screen on purpose, so they are not checked against the hint.
 //   ui overflow: <n>
 //     <kind> x,y a/b px ["hint"|"bar" ]"<text>"      kind: width | height | clipped | under-hint (see hit_t)
-static void cmd_ui_overflow(void) {
+static void print_geom(vgeom_t const *g) {
+    console_reply("    inner %d..%d outer %d..%d up %d down %d scrollers %d", (int)g->inner.x1, (int)g->inner.x2,
+                  (int)g->outer.x1, (int)g->outer.x2, (int)g->up, (int)g->down, g->scrollers);
+    if (g->has_scroller) {
+        console_reply("    page box %d,%d %d,%d", (int)g->scroller.x1, (int)g->scroller.y1, (int)g->scroller.x2,
+                      (int)g->scroller.y2);
+    } else {
+        console_reply("    page none");
+    }
+}
+
+static void cmd_ui_overflow(bool verbose) {
     settle();
     ovf_ctx_t ctx = {.hits = malloc(sizeof(hit_t) * MAX_LINES)};
     if (!ctx.hits) {
@@ -544,6 +590,9 @@ static void cmd_ui_overflow(void) {
         hit_t const *h = &ctx.hits[i];
         console_reply("  %s %d,%d %d/%d px %s%s\"%s\"", HIT_NAME[h->kind], (int)h->x, (int)h->y, (int)h->a, (int)h->b,
                       h->target ? h->target : "", h->target ? " " : "", h->text);
+        if (verbose && h->has_geom) {
+            print_geom(&h->geom);
+        }
     }
     if (ctx.total > ctx.n) {
         console_reply("  ... %u more not shown", (unsigned)(ctx.total - ctx.n));
@@ -557,7 +606,7 @@ static void cmd_ui(char const *args) {
         return;
     }
     if (strncmp(args, "overflow", 8) == 0) {
-        cmd_ui_overflow();
+        cmd_ui_overflow(strstr(args + 8, "-v") != NULL);
         return;
     }
     if (strncmp(args, "lock", 4) == 0 && (args[4] == 0 || args[4] == ' ')) {
@@ -595,5 +644,5 @@ static void cmd_ui(char const *args) {
 }
 
 void ui_probe_init(void) {
-    console_register("ui", "ui [perf [reset | bench [n]] | overflow | lock [on [s] | off] | open <app>] (lock: physical keys off until off, s seconds (default 60, max 600) after the last command, or Esc held 3 s; open: an app as from its home tile, or home; #190. overflow: text cut off, off the screen or under the hint/status bar, #133; screen ids on the stack, the focused row, every visible label; perf: frame timing, #93)", cmd_ui);
+    console_register("ui", "ui [perf [reset | bench [n]] | overflow [-v] | lock [on [s] | off] | open <app>] (lock: physical keys off until off, s seconds (default 60, max 600) after the last command, or Esc held 3 s; open: an app as from its home tile, or home; #190. overflow: text cut off, off the screen or under the hint/status bar, #133; -v: the scroll geometry of each hit; screen ids on the stack, the focused row, every visible label; perf: frame timing, #93)", cmd_ui);
 }

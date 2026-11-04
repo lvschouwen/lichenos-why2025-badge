@@ -115,3 +115,13 @@ int32_t ovf_wrap_lost_px(int32_t text_h, int32_t box_h) {
 int32_t ovf_line_slack_px(int32_t line_h) {
     return line_h * 3 / 10;
 }
+
+int ovf_pick_scroller(int32_t const range[], int n) {
+    int best = -1;
+    for (int i = 0; i < n; i++) {
+        if (range[i] > 0 && (best < 0 || range[i] > range[best])) {
+            best = i;
+        }
+    }
+    return best;
+}

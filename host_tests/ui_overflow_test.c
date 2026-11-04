@@ -83,6 +83,29 @@ static void test_vertical(void) {
     CHECK(ovf_line_slack_px(54) < 54);
 }
 
+// #133: the "!" of the Crash log tile on the grid home (first on-badge sweep: "clipped 355,768 54/54 px"). 720 px panel,
+// 17 apps in 3 columns = 6 rows of about 190 px (64 icon + 14 gap + line + 2 x 38 pad), 24 px between,
+// the home pads 56 + 36 above and 36 below: content ends at 92 + 6 * 190 + 5 * 24 + 36 = 1388, so the home scrolls
+// up by 1388 - 720 = 668 and the third-row tile is reachable. The "!" (large font, 54 px line) sits in a 40 px ring
+// (border 5) that is itself scrollable by the 12 px the line sticks out above and below.
+static void test_crashlog_icon(void) {
+    ovf_span_t label = span(768, 821), ring = span(775, 814), home = span(0, 719);
+    int32_t    range[2] = {12 + 12, 668}; // nearest first: the ring, then the home screen
+    CHECK(ovf_pick_scroller(range, 2) == 1);
+    CHECK(ovf_pick_scroller(range, 0) == -1);
+    int32_t none[2] = {0, 0};
+    CHECK(ovf_pick_scroller(none, 2) == -1);
+    int32_t tie[2] = {40, 40};
+    CHECK(ovf_pick_scroller(tie, 2) == 0); // the nearest wins a tie
+    // the old choice (the ring as the page): its own box is "outer", the label can never come on the screen
+    CHECK(ovf_hidden_rows(label, OVF_NO_LIMIT, (ovf_span_t){775, 719}, 12, 12) == 54);
+    // the page (home): the ring clips with the content, the home scrolls the whole tile up. Only the 14 rows the
+    // ring cuts off the line box stay hidden: leading, not glyph (ovf_line_slack_px(54) = 16)
+    int32_t hidden = ovf_hidden_rows(label, ring, home, 668, 0);
+    CHECK(hidden == 14);
+    CHECK(hidden <= ovf_line_slack_px(54));
+}
+
 int main(void) {
     // content-sized label (as wide as its text) grown past its parent: the classic default label
     CHECK(px(300, 100, 399, 0, 299, OVF_WRAP) == 100);
@@ -111,6 +134,7 @@ int main(void) {
     CHECK(px(0, 100, 399, 0, 299, OVF_WRAP) == 0);
 
     test_vertical();
+    test_crashlog_icon();
 
     if (failures) {
         printf("%d failures\n", failures);

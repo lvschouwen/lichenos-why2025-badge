@@ -429,14 +429,21 @@ class Badge:
         last = self.last
         if last is None or now == last:
             return True
+        if now.stack != last.stack:
+            return False
         # a list filled by a background job gives the focus to its first row; the screen is the same
-        return now.stack == last.stack and last.no_focus() and not now.no_focus()
+        if last.no_focus() and not now.no_focus():
+            return True
+        # while the key lock is confirmed on no person can move the focus: a list that refilled after its scan did
+        # (Wi-Fi page). The badge-side row:/focus:/notfocus: guards protect every Enter anyway.
+        return self.locked is True
 
     def _check(self, require_lock: bool) -> Snap:
         """Reads the screen; stops the run when someone else changed it or the key lock is gone."""
         now = self.snap()
         if not self._unchanged(now):
             raise InUse(f"{self.last} -> {now}")
+        self.last = now  # the focus the next row guards and corrections start from
         if require_lock and self.locked is False:
             raise InUse("the key lock ended (Esc held on the badge, or its timeout)")
         return now
@@ -748,11 +755,17 @@ def selftest() -> int:
     expect("no focus line", RouteError, FakeFw([["ui stack: 1 > 3"]]), lambda b: b.send(["down"]), 0)
     expect("(none) at a guard", RouteError, FakeFw([ui("1 > 3", "(none)")]), lambda b: b.guard("Display"), 0)
     expect("wrong row", RouteError, FakeFw([ui("1 > 3", "Time")]), lambda b: b.guard("Display"), 0)
-    expect("dialog appeared", InUse, FakeFw([ui("1 > 3", "Display"), ui("1 > 3", "Cancel")]),
+    expect("dialog appeared", InUse, FakeFw([ui("1 > 3", "Display", locked=False), ui("1 > 3", "Cancel", locked=False)]),
            lambda b: b.send(["enter"]), 0)
     expect("stack changed", InUse, FakeFw([ui("1 > 3", "Display"), ui("1", "Settings")]),
            lambda b: b.send(["enter"]), 0)
-    expect("focus moved by a person", InUse, FakeFw([ui("1 > 3", "Display"), ui("1 > 3", "Time")]),
+    expect("focus moved by a person", InUse, FakeFw([ui("1 > 3", "Display", locked=False),
+                                                     ui("1 > 3", "Time", locked=False)]),
+           lambda b: b.send(["down"]), 0)
+    expect("focus moved by the badge itself, lock on", None, FakeFw([ui("0 > 2 > 100", "Wi-Fi radio"),
+                                                                    ui("0 > 2 > 100", "Luchthaven")]),
+           lambda b: b.send(["down"]), 1)
+    expect("stack changed, lock on", InUse, FakeFw([ui("0 > 2 > 100", "Wi-Fi radio"), ui("0 > 2", "Settings")]),
            lambda b: b.send(["down"]), 0)
     expect("list filled by a job", None, FakeFw([ui("1 > 3", "(none)"), ui("1 > 3", "SD card"),
                                                        ui("1 > 3", "SD card")]), lambda b: b.send(["down"]), 1)
