@@ -130,7 +130,13 @@ lv_obj_t *shell_page_hint(lv_obj_t *screen, ...) {
     lv_obj_add_flag(label, LV_OBJ_FLAG_FLOATING); // out of the flex flow and the scroll: it stays where it is put
     lv_obj_set_style_text_font(label, lichen_font(LICHEN_FONT_SMALL), 0);
     lv_obj_set_style_text_color(label, lv_color_hex(THEME_DIM), 0);
-    lichen_label_line_fit(label);
+    // A page that scrolls as a whole (This is new, a note, a QR code) moves its text under the floating hint: the hint
+    // is a solid strip from the content's end to the screen's edge, so it covers what passes below it (#177)
+    lv_obj_set_style_bg_color(label, lv_color_hex(THEME_BG), 0);
+    lv_obj_set_style_bg_opa(label, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_top(label, HINT_GAP, 0);
+    lv_obj_set_style_pad_bottom(label, HINT_EDGE, 0);
+    lichen_label_line_fit(label); // after the padding: the height is the whole strip
     lv_label_set_text(label, text);
     // The content area ends above the pad we add; the label sits HINT_EDGE off the screen's bottom edge, and the content
     // keeps HINT_GAP clear of it. The line is the font's, not lv_obj_get_height(): the label has no layout yet, so its
@@ -146,6 +152,7 @@ lv_obj_t *shell_page_hint(lv_obj_t *screen, ...) {
             lv_obj_mark_layout_as_dirty(lv_obj_get_child(screen, i));
         }
     }
-    lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, pad - HINT_EDGE);
+    lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, pad); // the strip ends at the screen's bottom edge
+    lv_obj_move_foreground(label); // drawn over whatever scrolls below it
     return label;
 }

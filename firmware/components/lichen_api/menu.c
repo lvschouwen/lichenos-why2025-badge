@@ -235,6 +235,52 @@ static void on_delete(lv_event_t *e) {
     free(row);
 }
 
+// A menu with no selectable row (a page of only INFO rows: Radio health, a contact's Signal page) takes the focus
+// itself: else the last row added had scrolled it to the bottom on its way out of the group, with nothing left for
+// Up/Down to move to and the heading out of reach (#174). It opens at the top and Up/Down scroll it.
+static bool has_selectable(lv_obj_t *menu) {
+    for (uint32_t i = 0; i < lv_obj_get_child_count(menu); i++) {
+        if (is_selectable(lv_obj_get_child(menu, (int32_t)i))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void focus_fallback(lv_obj_t *menu, lv_group_t *g) {
+    if (!g || !menu_data(menu)) {
+        return;
+    }
+    if (has_selectable(menu)) {
+        if (lv_obj_get_group(menu)) {
+            lv_group_remove_obj(menu);
+        }
+        return;
+    }
+    if (!lv_obj_get_group(menu)) {
+        lv_group_add_obj(g, menu);
+    }
+    lv_group_focus_obj(menu);
+    lv_obj_scroll_to_y(menu, 0, LV_ANIM_OFF);
+}
+
+static void on_menu_key(lv_event_t *e) {
+    lv_obj_t *menu = lv_event_get_current_target(e);
+    if (lv_event_get_target(e) != menu) {
+        return; // a row's key, handled by on_key
+    }
+    uint32_t key = lv_event_get_key(e);
+    if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
+        shell_scroll_by(menu, key == LV_KEY_UP ? SCROLL_STEP : -SCROLL_STEP);
+    } else if (key != LV_KEY_ESC && key != LV_KEY_NEXT && key != LV_KEY_PREV && key != LV_KEY_LEFT &&
+               key != LV_KEY_RIGHT && key != LV_KEY_ENTER) {
+        menu_t *m = menu_data(menu);
+        if (m && m->hook.fn) {
+            m->hook.fn(key, m->hook.arg);
+        }
+    }
+}
+
 static void on_menu_delete(lv_event_t *e) {
     menu_t *m = lv_event_get_user_data(e);
     if (m->status_state.state == UI_STATUS_RUNNING) { // R5: a wait must end; say which one did not
@@ -257,6 +303,7 @@ static lv_obj_t *menu_base(lv_obj_t *parent) {
     if (m) {
         lv_obj_set_user_data(menu, m);
         lv_obj_add_event_cb(menu, on_menu_delete, LV_EVENT_DELETE, m);
+        lv_obj_add_event_cb(menu, on_menu_key, LV_EVENT_KEY, NULL);
     }
     return menu;
 }
@@ -350,6 +397,9 @@ static lv_obj_t *add_row(lv_obj_t *menu, char const *label_text, char const *val
     row->group = lv_group_get_default();
     if (row->group) {
         lv_group_add_obj(row->group, r);
+    }
+    if (lv_obj_get_group(menu)) { // the menu held the focus (#174): a selectable row takes it back
+        lv_group_remove_obj(menu);
     }
     return r;
 }
@@ -471,6 +521,7 @@ static void apply_kind(lv_obj_t *r, row_t *row) {
         } else if (lv_obj_get_group(r) == NULL) {
             lv_group_add_obj(row->group, r);
         }
+        focus_fallback(lv_obj_get_parent(r), row->group);
     }
 }
 
