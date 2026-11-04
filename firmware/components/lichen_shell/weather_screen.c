@@ -13,13 +13,13 @@
 #include <string.h>
 
 #define REFRESH_MS 1000
-#define CHART_H    250
-#define TEXT_CAP   96
+#define CHART_H    160 // 250 pushed the lines under the chart below the pinned hint (bench 2026-11-04)
+#define TEXT_CAP   128 // high, low and span (31 each) plus the separators
 
 typedef struct {
     lv_obj_t          *name[WX_QTY];
     lv_obj_t          *value[WX_QTY];
-    lv_obj_t          *chart, *high_low, *since, *note;
+    lv_obj_t          *chart, *high_low, *note;
     lv_chart_series_t *ser;
     wx_qty_t           sel;
     unsigned           drawn_version;
@@ -66,7 +66,6 @@ static void show_chart(void) {
         lv_chart_set_series_value_by_id(s_ui.chart, s_ui.ser, 0, LV_CHART_POINT_NONE);
         lv_chart_set_series_value_by_id(s_ui.chart, s_ui.ser, 1, LV_CHART_POINT_NONE);
         set_text(s_ui.high_low, "Collecting: one reading a minute.");
-        set_text(s_ui.since, "");
         return;
     }
     lv_chart_set_axis_range(s_ui.chart, LV_CHART_AXIS_PRIMARY_Y, wx_chart_value(floorf(lo)), wx_chart_value(ceilf(hi)));
@@ -78,16 +77,16 @@ static void show_chart(void) {
     wx_minmax(s_ui.series, n, &lo, &hi);
     wx_fmt_value(a, sizeof(a), s_ui.sel, hi);
     wx_fmt_value(b, sizeof(b), s_ui.sel, lo);
-    snprintf(text, sizeof(text), "High %s  \xE2\x80\xA2  Low %s", a, b);
+    char span[32];
+    wx_span_text(span, sizeof(span), n);
+    // one line: a second line for the span pushed the gas note under the hint
+    snprintf(text, sizeof(text), "High %s  \xE2\x80\xA2  Low %s  \xE2\x80\xA2  last %s", a, b, span);
     set_text(s_ui.high_low, text);
-    wx_span_text(b, sizeof(b), n);
-    snprintf(text, sizeof(text), "%s ago", b);
-    set_text(s_ui.since, n > 1 ? text : "");
 }
 
 static void show_note(void) {
-    set_text(s_ui.note, s_ui.sel == WX_GAS ? "Gas resistance in kOhm: higher is cleaner air. The trend compares the last "
-                                              "minutes with the hours before in this room; it is not an absolute index."
+    set_text(s_ui.note, s_ui.sel == WX_GAS ? "Gas resistance in kOhm: higher is cleaner air. Compared with earlier "
+                                              "in this room, not an absolute index."
                                             : "");
 }
 
@@ -166,7 +165,6 @@ void weather_screen_open(lv_obj_t *screen) {
     }
     build_chart(screen);
     s_ui.high_low = dim_label(screen);
-    s_ui.since    = dim_label(screen);
     s_ui.note     = dim_label(screen);
     shell_page_hint(screen, "Left/Right", "quantity", NULL);
     lv_timer_t *timer = lv_timer_create(refresh, REFRESH_MS, NULL);
