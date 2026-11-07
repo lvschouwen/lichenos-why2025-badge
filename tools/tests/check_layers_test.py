@@ -109,6 +109,13 @@ class Rules(unittest.TestCase):
         fx = Fixture(self, overrides={"app": (BASE_FILES["app"][0], {"a.c": src, "mine.h": ""})})
         self.assertEqual(keys(fx), {("B!", "app -> stdio.h")})
 
+    def test_comp_headers_allow_one_component_only(self):
+        src = "#include <stdio.h>\nint %s(void){return 4;}\n"
+        two = dict(BASE_FILES, app2=("idf_component_register(SRCS \"a2.c\" REQUIRES gate freertos)", {"a2.c": src % "app2_fn"}))
+        conf = CONF.replace("component app L3", "component app app2 L3") + "comp-headers app stdio.h\n"
+        fx = Fixture(self, conf=conf, overrides={"app": (BASE_FILES["app"][0], {"a.c": src % "app_fn"}), "app2": two["app2"]})
+        self.assertEqual(keys(fx), {("B!", "app2 -> stdio.h")})  # app may, its sibling on the same layer may not
+
     def test_rule_c_link_time_upward_edge_without_requires(self):
         fx = Fixture(self, overrides={"drv": ("idf_component_register(SRCS \"d.c\" REQUIRES base)", {"d.c": "int gate_fn(void);\nint drv_fn(void){return gate_fn();}\n"})})
         self.assertEqual(keys(fx), {("C", "drv:gate_fn")})
@@ -349,6 +356,36 @@ class Ratchet(unittest.TestCase):
         self.assertEqual(cl.check_grew({}, base), [])
         self.assertIn("raised 1 -> 2", cl.check_grew({("A", "x -> y"): 2}, base)[0])
         self.assertIn("not in the merge-base", cl.check_grew({("A", "n -> m"): 1}, base)[0])
+
+    def test_allow_grow_only_for_marked_new_entries(self):
+        mark = "# moved from shell, #221 removes"
+        text = "C\tapp:fn\t1\t" + mark + "\nC\tapp:other\t1\n"
+        cur, marks = cl.parse_baseline(text), cl.baseline_marks(text)
+        self.assertEqual(cur, {("C", "app:fn"): 1, ("C", "app:other"): 1})  # the mark is not part of the count
+        self.assertEqual(len(cl.check_grew(cur, {}, marks, None)), 2)       # no escape: both are GREW
+        self.assertEqual(len(cl.check_grew(cur, {}, marks, "300")), 2)      # another issue's number: no help
+        out = cl.check_grew(cur, {}, marks, "221")
+        self.assertEqual(len(out), 1)                                        # only the unmarked one still fails
+        self.assertIn("app:other", out[0])
+        raised = {("C", "app:fn"): 2}
+        self.assertIn("raised", cl.check_grew(raised, {("C", "app:fn"): 1}, {("C", "app:fn"): mark}, "221")[0])
+
+    def test_shrink_keeps_marks(self):
+        text = "C\tapp:fn\t1\t# moved from shell, #221 removes\n"
+        out = cl.format_baseline("# h", cl.parse_baseline(text), cl.baseline_marks(text))
+        self.assertIn("C\tapp:fn\t1\t# moved from shell, #221 removes", out)
+
+    def test_allow_grow_matches_the_whole_issue_number(self):
+        mark = "# moved from shell, #221 removes"
+        cur, marks = {("C", "app:fn"): 1}, {("C", "app:fn"): mark}
+        for bad in ("22", "2", "1", "221x", "#221", "", "abc"):
+            self.assertEqual(len(cl.check_grew(cur, {}, marks, bad)), 1, bad)
+        self.assertEqual(cl.check_grew(cur, {}, marks, "221"), [])
+
+    def test_allow_grow_is_for_rule_c_only(self):
+        mark = "# moved from shell, #221 removes"
+        cur, marks = {("A", "x -> y"): 1}, {("A", "x -> y"): mark}
+        self.assertEqual(len(cl.check_grew(cur, {}, marks, "221")), 1)
 
     def test_shrink_never_adds_or_raises(self):
         out = cl.shrink({("A", "a"): 5, ("A", "new"): 1}, {("A", "a"): 3, ("A", "gone"): 1})

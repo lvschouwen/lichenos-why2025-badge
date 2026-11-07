@@ -52,12 +52,11 @@ B	lichen_led -> lichen_notify	2
 B	lichen_shell -> board	15
 B	lichen_shell -> crash	2
 B	lichen_shell -> lichen_boot	6
-B	lichen_shell -> lichen_clock	13
+B	lichen_shell -> lichen_clock	10
 B	lichen_shell -> lichen_led	1
 B	lichen_shell -> lichen_mdns	2
 B	lichen_shell -> lichen_net	7
-B	lichen_shell -> lichen_notify	13
-B	lichen_shell -> lora	1
+B	lichen_shell -> lichen_notify	11
 B	lichen_shell -> ota	2
 B	lichen_shell -> sdcard	9
 B	lichen_shell -> storage	3
@@ -122,6 +121,16 @@ C	lichen_api:shell_scroll_by	2
 C	lichen_api:shell_scroll_tame	2
 C	lichen_api:shell_style_screen	1
 C	lichen_api:storage_free_bytes	1
+C	lichen_apps:lichen_date_text	1	# moved from shell, #221 removes
+C	lichen_apps:lichen_keys_raw_release	1	# moved from shell, #221 removes
+C	lichen_apps:lichen_keys_raw_take	1	# moved from shell, #221 removes
+C	lichen_apps:lichen_sensors_get	1	# moved from shell, #221 removes
+C	lichen_apps:lichen_station_clock	1	# moved from shell, #221 removes
+C	lichen_apps:shell_back	1	# moved from shell, #221 removes
+C	lichen_apps:shell_back_to	1	# moved from shell, #221 removes
+C	lichen_apps:shell_dialog_countdown	1	# moved from shell, #221 removes
+C	lichen_apps:shell_open	2	# moved from shell, #221 removes
+C	lichen_apps:shell_page_create	2	# moved from shell, #221 removes
 C	lichen_boot:settings_get_u8	1
 C	lichen_boot:settings_set_u8	1
 C	lichen_clock:settings_get_u8	1
@@ -150,13 +159,13 @@ C	lichen_shell:clock_back_hint	1
 C	lichen_shell:clock_build_epoch	1
 C	lichen_shell:clock_days_in_month	1
 C	lichen_shell:clock_in_window	1
-C	lichen_shell:clock_is_approximate	5
-C	lichen_shell:clock_is_set	9
+C	lichen_shell:clock_is_approximate	4
+C	lichen_shell:clock_is_set	6
 C	lichen_shell:clock_local_hint	1
 C	lichen_shell:clock_local_to_utc	1
 C	lichen_shell:clock_set_manual	1
 C	lichen_shell:clock_source_age_s	1
-C	lichen_shell:clock_source_text	3
+C	lichen_shell:clock_source_text	2
 C	lichen_shell:clock_sync_info	2
 C	lichen_shell:clock_verdict_text	1
 C	lichen_shell:crash_recovered	2
@@ -167,7 +176,7 @@ C	lichen_shell:factory_combo_tick	1
 C	lichen_shell:factory_level_name	1
 C	lichen_shell:factory_reset_request	2
 C	lichen_shell:heap_caps_aligned_alloc	2
-C	lichen_shell:heap_caps_calloc	7
+C	lichen_shell:heap_caps_calloc	6
 C	lichen_shell:heap_caps_check_integrity	1
 C	lichen_shell:heap_caps_free	9
 C	lichen_shell:heap_caps_get_free_size	3
@@ -187,14 +196,13 @@ C	lichen_shell:lichen_haptics_set_enabled	1
 C	lichen_shell:lichen_haptics_set_strength	1
 C	lichen_shell:lichen_haptics_strength	1
 C	lichen_shell:lichen_mdns_name	1
-C	lichen_shell:lichen_notify	3
+C	lichen_shell:lichen_notify	1
 C	lichen_shell:lichen_notify_clear_all	1
 C	lichen_shell:lichen_notify_dnd	3
 C	lichen_shell:lichen_notify_feedback	1
 C	lichen_shell:lichen_notify_generation	2
 C	lichen_shell:lichen_notify_get	3
 C	lichen_shell:lichen_notify_ids	1
-C	lichen_shell:lichen_notify_mark_read	1
 C	lichen_shell:lichen_notify_mark_read_id	1
 C	lichen_shell:lichen_notify_mark_read_upto	1
 C	lichen_shell:lichen_notify_next_toast	1
@@ -208,15 +216,10 @@ C	lichen_shell:lichen_notify_stats	1
 C	lichen_shell:lichen_notify_to	2
 C	lichen_shell:lichen_notify_unread	4
 C	lichen_shell:lichen_notify_unread_top	1
-C	lichen_shell:lichen_sensors_get	3
+C	lichen_shell:lichen_sensors_get	2
 C	lichen_shell:lichen_sensors_running	1
 C	lichen_shell:log_clean	1
 C	lichen_shell:log_tap_last	1
-C	lichen_shell:lora_claim	1
-C	lichen_shell:lora_get_freq	1
-C	lichen_shell:lora_get_radio	1
-C	lichen_shell:lora_release	1
-C	lichen_shell:lora_sweep	1
 C	lichen_shell:lv_group_set_default	5
 C	lichen_shell:lvgl_port_lock	18
 C	lichen_shell:lvgl_port_unlock	18

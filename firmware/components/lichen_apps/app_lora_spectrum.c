@@ -13,7 +13,7 @@
 #include "lichen_ui.h"
 #include "lora_app.h"
 #include "lora_spectrum.h"
-#include "shell_parts.h" // lora_spectrum_app_register only (until #180 moves the app)
+#include "lichen_apps.h"
 #include "theme.h"
 
 #include <stdio.h>

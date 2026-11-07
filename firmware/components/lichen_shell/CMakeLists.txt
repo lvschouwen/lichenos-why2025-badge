@@ -17,10 +17,6 @@
 # release_notes.c (release_notes_test.c, #13; notes_app.c is the Release notes app and "This is new", notes_render.c its markdown).
 # app_files.c is the Files app (#71): files_job.c runs its file work off the LVGL task, files_ops.c is plain POSIX
 # (files_ops_test.c) and files_model.c the paths, protected list, sort and text paging (files_model_test.c).
-# weather_series.c (weather_series_test.c, #155) is the Weather app's ring, graph range, air trend and CSV line; weather_app.c samples and logs, weather_screen.c draws.
-# app_notes.c is the Notes app (#154: notes and to dos as text files on the SD card): notes_model.c is its rules (notes_model_test.c)
-# and notes_store.c its file work (notes_store_test.c). app_qr.c is the QR code app (#153; the screen is lichen_api's qr_screen.c).
-# app_lora_spectrum.c is the LoRa spectrum app (#161); lora_spectrum.c its sweep plan and scale (lora_spectrum_test.c).
 # shell.c, boot_screen.c, status_bar.c and logo.c are the LVGL screens; shell.c and app_settings.c implement lichen_ui.h.
 # Release notes (#13): firmware/release_notes/<seq>-<date>.md are embedded as rodata; rn_files[] (release_notes.h) is a
 # table of them generated here, so adding a note is just adding a file (CONFIGURE_DEPENDS re-runs this when one appears).
@@ -51,7 +47,7 @@ if(NOT "${RN_OLD}" STREQUAL "${RN_C}")
 endif()
 
 idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_render.c" "log_store.c" "log_ring.c" "nav.c" "shell.c" "home.c" "home_layout.c"
-                            "app_settings.c" "attention.c" "attention_policy.c" "app_about.c" "app_keytest.c" "app_clock.c" "app_timer.c" "timer_service.c" "timer_calc.c" "app_calc.c" "calc_eval.c" "calc_units.c" "station_view.c" "raw_keys.c" "app_icons.c" "wifi_screen.c" "wifi_analyser_screen.c" "setup_state.c" "setup_screens.c" "ui_keys.c" "ui_overflow.c" "ui_probe.c" "remote_ctl.c" "ui_remote.c"
+                            "app_settings.c" "attention.c" "attention_policy.c" "app_about.c" "station_view.c" "raw_keys.c" "app_icons.c" "wifi_screen.c" "wifi_analyser_screen.c" "setup_state.c" "setup_screens.c" "ui_keys.c" "ui_overflow.c" "ui_probe.c" "remote_ctl.c" "ui_remote.c"
                             "boot_screen.c" "status_bar.c" "lora_activity.c" "link_state.c" "logo.c" "update_status.c" "update_mode.c" "update_screen.c" "shot_blend.c" "screenshot.c" "time_fields.c" "time_set_screen.c"
                             "dialog.c" "dialog_countdown.c" "ui_check.c" "ui_perf.c" "ui_perf_stats.c" "app_bench.c" "bench_calc.c" "app_crashlog.c" "app_power.c" "app_console.c" "console_model.c"
                             "sd_screen.c" "sd_settings_model.c"
@@ -59,10 +55,7 @@ idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_r
                             "notify_view.c" "notify_ui.c" "notify_centre.c" "sys_notices.c" "sys_notice_rules.c"
                             "shortcut.c" "shortcuts.c" "thermal.c" "thermal_rules.c" "app_battery.c"
                             "factory_screen.c" "factory_combo.c"
-                            "app_files.c" "files_job.c" "files_ops.c" "files_model.c"
-                            "weather_app.c" "weather_screen.c" "weather_series.c"
-                            "app_notes.c" "notes_model.c" "notes_store.c" "app_qr.c" "backup_screen.c"
-                            "app_lora_spectrum.c" "lora_spectrum.c"
+                            "app_files.c" "files_job.c" "files_ops.c" "files_model.c" "backup_screen.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api lichen_net
                        PRIV_REQUIRES lichen_boot lichen_clock freertos fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage sdcard app_update esp_system psram_guard esp_mm lichen_led ota lichen_mdns lora)

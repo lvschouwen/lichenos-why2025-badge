@@ -58,6 +58,7 @@ class Conf:
         self.peers = collections.defaultdict(set)  # component -> extra allowed component dependencies
         self.closed = {}            # layer -> set of allowed external libraries
         self.headers = collections.defaultdict(list)  # layer -> system header globs
+        self.comp_headers = collections.defaultdict(list)  # component -> extra system header globs
         self.own_dirs = collections.defaultdict(list)  # component -> include roots relative to firmware/
         self.forbid = collections.defaultdict(list)    # layer -> symbol globs
         self.owner_only = []        # (glob, [owner spec]) first match wins
@@ -106,6 +107,8 @@ def apply_directive(conf, key, args):
         conf.closed.setdefault(args[0], set()).update(args[1:])
     elif key == "headers":
         conf.headers[args[0]].extend(args[1:])
+    elif key == "comp-headers":
+        conf.comp_headers[args[0]].extend(args[1:])
     elif key == "own-dir":
         conf.own_dirs[args[0]].extend(args[1:])
     elif key == "forbid":
@@ -124,6 +127,9 @@ def check_conf(conf):
     for c in conf.own_dirs:
         if c not in conf.comp_layer:
             raise LayerError("layers.conf: own-dir line names unknown component %s" % c)
+    for c in conf.comp_headers:
+        if c not in conf.comp_layer:
+            raise LayerError("layers.conf: comp-headers line names unknown component %s" % c)
     for glob, owners in conf.owner_only:
         for o in owners:
             if not o.startswith("<=") and o not in conf.comp_layer:
@@ -288,7 +294,8 @@ def include_violation(conf, name, layer, fw, path, inc, owners):
         if name in cands or any(conf.edge_ok(name, c) for c in cands):
             return None, False
         return sorted(cands)[0], False
-    if layer in conf.closed and not any(fnmatch.fnmatchcase(inc, g) for g in conf.headers[layer]):
+    if layer in conf.closed and not any(
+            fnmatch.fnmatchcase(inc, g) for g in conf.headers[layer] + conf.comp_headers[name]):
         return inc, True
     return None, False
 
@@ -380,6 +387,8 @@ def parse_baseline(text):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         p = line.split("\t")
+        if len(p) == 4 and p[3].startswith("#"):
+            p = p[:3]  # the optional mark (baseline_marks) is not part of the count
         if len(p) != 3 or p[0] not in RULES or not p[2].strip().isdigit():
             raise LayerError("layers-baseline line %d is not 'rule<TAB>key<TAB>count' (rule A, B or C): %r" % (n, line))
         if (p[0], p[1]) in out:
@@ -388,9 +397,20 @@ def parse_baseline(text):
     return out
 
 
-def format_baseline(header, entries):
+def baseline_marks(text):
+    """{(rule, key): mark} of the entries that carry a trailing '# ...' field (moved debt, see check_grew)."""
+    out = {}
+    for line in text.splitlines():
+        p = line.split("\t")
+        if len(p) == 4 and p[3].startswith("#"):
+            out[(p[0], p[1])] = p[3]
+    return out
+
+
+def format_baseline(header, entries, marks=None):
     lines = [header.rstrip("\n")]
-    lines += ["%s\t%s\t%d" % (r, k, v) for (r, k), v in sorted(entries.items())]
+    lines += ["%s\t%s\t%d%s" % (r, k, v, "\t" + marks[(r, k)] if marks and (r, k) in marks else "")
+              for (r, k), v in sorted(entries.items())]
     return "\n".join(lines) + "\n"
 
 
@@ -431,12 +451,26 @@ def compare(measured, baseline, rules=RULES, where=None):
     return fails, stale
 
 
-def check_grew(baseline, base_baseline):
-    """The 'baseline only shrinks' rule against the merge-base version of the file."""
+ALLOW_GROW_ENV = "BADGE_LAYERS_ALLOW_GROW"
+
+
+def allow_ok(allow, mark):
+    """True when allow is a plain issue number and the mark names exactly that issue ('#221' is not '#22')."""
+    return bool(allow) and allow.isdigit() and re.search(r"(?:^|\s)#%s(?!\d)" % allow, mark) is not None
+
+
+def check_grew(baseline, base_baseline, marks=None, allow=None):
+    """The 'baseline only shrinks' rule against the merge-base version of the file. allow (an issue number, from
+    BADGE_LAYERS_ALLOW_GROW) is a one-off escape for NEW entries only: an entry whose mark names '#<allow>' passes (moved
+    debt, a move that cannot be done without the gate function that issue adds). Raised counts are never allowed."""
     out = []
     for (rule, key), v in sorted(baseline.items()):
         b = base_baseline.get((rule, key))
-        if b is None:
+        if b is None and rule == "C" and allow_ok(allow, (marks or {}).get((rule, key), "")):
+            print("layers: WARNING: %s=%s lets the baseline grow by %s %s (marked %r); never set it in build.sh or a hook, "
+                  "the entry goes away with #%s" % (ALLOW_GROW_ENV, allow, rule, key, marks[(rule, key)], allow),
+                  file=sys.stderr)
+        elif b is None:
             out.append("GREW  baseline %s %s = %d is not in the merge-base baseline (new entries are not allowed)" % (rule, key, v))
         elif v > b:
             out.append("GREW  baseline %s %s raised %d -> %d (a baseline only shrinks)" % (rule, key, b, v))
@@ -478,7 +512,7 @@ def base_baseline_text(root, ref):
     return r.stdout if r.returncode == 0 else None
 
 
-def grew_problems(root, baseline, skip):
+def grew_problems(root, baseline, skip, marks=None):
     """GREW failures against the merge-base baseline. Without a merge base the check cannot run: that is a failure
     (not a pass) unless --no-merge-base asked for the skip; the commit that introduces the baseline has nothing to
     compare with and passes."""
@@ -490,7 +524,7 @@ def grew_problems(root, baseline, skip):
         print("layers: warning: no merge base with main or origin/main (shallow clone? no git?)", file=sys.stderr)
         return ["no merge base, so the baseline cannot be compared with main (--no-merge-base skips on purpose)"]
     text = base_baseline_text(root, ref)
-    return [] if text is None else check_grew(baseline, parse_baseline(text))
+    return [] if text is None else check_grew(baseline, parse_baseline(text), marks, os.environ.get(ALLOW_GROW_ENV))
 
 
 # --- gate manifest --------------------------------------------------------------------------------------------
@@ -674,12 +708,12 @@ def ratchet(args, root, conf, all_measured, symbols, where=None):
         baseline = {k: v for k, v in baseline.items() if conf.comp_layer.get(re.split(r"[ :]", k[1])[0]) == args.only_layer}
     if args.shrink:
         new = shrink(measured, parse_baseline(text), rules)
-        write_atomic(path, format_baseline(split_header(text), new))
+        write_atomic(path, format_baseline(split_header(text), new, baseline_marks(text)))
         print("layers: baseline now %d entries (was %d)" % (len(new), len(parse_baseline(text))))
         return 0
     fails, stale = compare(all_measured, baseline, rules, where)
     fails += ["STALE baseline %s (run: tools/check_layers.sh --shrink)" % s for s in stale]
-    fails += grew_problems(root, baseline, args.no_merge_base)
+    fails += grew_problems(root, baseline, args.no_merge_base, baseline_marks(text))
     return finish(root, fails, measured, baseline)
 
 

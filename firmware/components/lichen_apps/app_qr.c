@@ -10,7 +10,7 @@
 #include "menu.h"
 #include "qr_payload.h"
 #include "qr_screen.h"
-#include "shell_parts.h" // qr_app_register only (until #180 moves the app)
+#include "lichen_apps.h"
 #include "text_entry.h"
 #include "theme.h"
 

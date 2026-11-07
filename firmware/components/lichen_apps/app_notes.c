@@ -2,20 +2,20 @@
 // so they survive a restart and a computer can read them. A to do is a note whose line starts with "[ ] " or "[x] ".
 // The file work (notes_store.c, plain POSIX) runs on a short-lived task on core 0 with the card's batch lock held; the
 // screens poll for its result with an LVGL timer (as app_crashlog.c does). The rules are in notes_model.c.
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_app.h"
 #include "lichen_fs.h"
+#include "lichen_mem.h"
 #include "lichen_ui.h"
 #include "lichen_task.h"
 #include "menu.h"
 #include "notes_model.h"
 #include "notes_store.h"
 #include "screen_ids.h"
-#include "shell_parts.h" // notepad_app_register only (until #180 moves the app)
+#include "lichen_apps.h"
 #include "text_entry.h"
 #include "theme.h"
 
@@ -287,7 +287,7 @@ static void on_screen_delete(lv_event_t *e) {
 static void open_notes(lv_obj_t *screen) {
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
     if (!s_v.items) {
-        s_v.items = heap_caps_calloc(MAX_NOTES, sizeof(notes_item_t), MALLOC_CAP_SPIRAM);
+        s_v.items = lichen_alloc(&notes_list_app, MAX_NOTES * sizeof(notes_item_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // kept for good
     }
     s_v.screen = screen;
     s_v.menu   = NULL;

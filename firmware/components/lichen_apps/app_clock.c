@@ -6,7 +6,7 @@
 #include "lichen_app.h"
 #include "lichen_clock.h"
 #include "lichen_ui.h"
-#include "shell_parts.h" // clock_app_register only (until #180 moves the app)
+#include "lichen_apps.h"
 #include "theme.h"
 
 #include <stdio.h>

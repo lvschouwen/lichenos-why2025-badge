@@ -19,7 +19,7 @@
 #include "lichen_settings.h"
 #include "lichen_task.h"
 #include "menu.h"
-#include "shell_parts.h" // weather_app_register only (until #180 moves the app)
+#include "lichen_apps.h"
 #include "theme.h"
 
 #include <errno.h>

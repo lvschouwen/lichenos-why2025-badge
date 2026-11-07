@@ -698,19 +698,11 @@ void shell_start(lv_display_t *display) {
     settings_app_register();
     about_app_register();
     files_app_register();
-    keytest_app_register();
-    clock_app_register();
-    weather_app_register();
-    timer_app_register();
-    calc_app_register();
     bench_app_register();
     crashlog_app_register();
     power_app_register();
     notify_app_register();
     notes_app_register();
-    notepad_app_register();
-    qr_app_register();
-    lora_spectrum_app_register();
     lv_display_set_default(display);
     if (!boot_screen_shown) {
         lv_obj_t *boot = boot_screen_create();

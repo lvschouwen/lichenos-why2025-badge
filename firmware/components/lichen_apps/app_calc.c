@@ -7,7 +7,7 @@
 #include "lichen_app.h"
 #include "lichen_ui.h"
 #include "menu.h"
-#include "shell_parts.h" // calc_app_register only (until #180 moves the app)
+#include "lichen_apps.h"
 #include "text_entry.h"
 #include "theme.h"
 

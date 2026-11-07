@@ -1096,26 +1096,26 @@ add_test(NAME shortcut_test COMMAND shortcut_test)
 
 add_executable(calc_eval_test
     ${CMAKE_CURRENT_SOURCE_DIR}/calc_eval_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/calc_eval.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps/calc_eval.c
 )
-target_include_directories(calc_eval_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_include_directories(calc_eval_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps)
 target_compile_options(calc_eval_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME calc_eval_test COMMAND calc_eval_test)
 
 add_executable(calc_units_test
     ${CMAKE_CURRENT_SOURCE_DIR}/calc_units_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/calc_units.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps/calc_units.c
 )
-target_include_directories(calc_units_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_include_directories(calc_units_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps)
 target_compile_options(calc_units_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(calc_units_test PRIVATE m)
 add_test(NAME calc_units_test COMMAND calc_units_test)
 
 add_executable(timer_calc_test
     ${CMAKE_CURRENT_SOURCE_DIR}/timer_calc_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/timer_calc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps/timer_calc.c
 )
-target_include_directories(timer_calc_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_include_directories(timer_calc_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps)
 target_compile_options(timer_calc_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME timer_calc_test COMMAND timer_calc_test)
 
@@ -1348,9 +1348,9 @@ add_test(NAME files_ops_test COMMAND files_ops_test)
 
 add_executable(weather_series_test
     ${CMAKE_CURRENT_SOURCE_DIR}/weather_series_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/weather_series.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps/weather_series.c
 )
-target_include_directories(weather_series_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_include_directories(weather_series_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps)
 target_compile_options(weather_series_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(weather_series_test PRIVATE m)
 add_test(NAME weather_series_test COMMAND weather_series_test)
@@ -1359,13 +1359,13 @@ target_include_directories(qr_payload_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
 target_compile_options(qr_payload_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME qr_payload_test COMMAND qr_payload_test)
 
-add_executable(notes_model_test ${CMAKE_CURRENT_SOURCE_DIR}/notes_model_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/notes_model.c)
-target_include_directories(notes_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+add_executable(notes_model_test ${CMAKE_CURRENT_SOURCE_DIR}/notes_model_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps/notes_model.c)
+target_include_directories(notes_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps)
 target_compile_options(notes_model_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME notes_model_test COMMAND notes_model_test)
 
-add_executable(notes_store_test ${CMAKE_CURRENT_SOURCE_DIR}/notes_store_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/notes_store.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/notes_model.c)
-target_include_directories(notes_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+add_executable(notes_store_test ${CMAKE_CURRENT_SOURCE_DIR}/notes_store_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps/notes_store.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps/notes_model.c)
+target_include_directories(notes_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps)
 target_compile_options(notes_store_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME notes_store_test COMMAND notes_store_test)
 
@@ -1514,9 +1514,9 @@ add_test(NAME mesh_telem_test COMMAND mesh_telem_test)
 # LoRa spectrum app (#161): sweep plan, graph scale, peak hold, texts
 add_executable(lora_spectrum_test
     ${CMAKE_CURRENT_SOURCE_DIR}/lora_spectrum_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/lora_spectrum.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps/lora_spectrum.c
 )
-target_include_directories(lora_spectrum_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_include_directories(lora_spectrum_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps)
 target_compile_options(lora_spectrum_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME lora_spectrum_test COMMAND lora_spectrum_test)
 

@@ -215,9 +215,10 @@ just that L6 profile.
 `check_layers.sh` (#218) generalises this check to every layer and absorbs these rules; today's violations are in its
 baseline, which reaches 0 at W9 (#237).
 
-The system apps in `lichen_shell` are not checked yet (#180). The eight plain apps there (Timer, Calculator, QR code,
-Clock, Keyboard test, LoRa spectrum, Weather, Notepad) use only the headers above plus `shell_parts.h` for their
-`*_app_register` prototype, until they move into a `lichen_apps` component that the check covers (#180, 2A).
+The eight plain apps (Timer, Calculator, QR code, Clock, Keyboard test, LoRa spectrum, Weather, Notepad) live in the
+`lichen_apps` component (#180) and are checked as layer L6, like `mesh`. The system apps in `lichen_shell` are not.
+`lichen_apps` is the only component allowed `dirent.h` (Notepad lists a directory; `lichen_fs` has no listing call yet).
+The shell functions the apps still call (`shell_open` and friends) are baselined as moved debt until #221.
 
 ## New services
 
