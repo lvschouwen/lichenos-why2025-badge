@@ -124,8 +124,9 @@ cmd_rename() {
   echo "$new/.git" > "$new_admin/gitdir"
   git -C "$ROOT" worktree repair "$new" >/dev/null 2>&1 || true
   git -C "$new" status --porcelain >/dev/null || die "slot $to is broken after the move: check $new_admin"
-  for d in firmware/build firmware/build/host_tests c6/build host_tests/build; do
-    if [[ -f "$new/$d/CMakeCache.txt" ]]; then rm -f "$new/$d/CMakeCache.txt"; fi
+  # Every cache, nested ones included: IDF builds the bootloader as its own CMake project (<build>/bootloader)
+  for d in firmware/build c6/build host_tests/build; do
+    if [[ -d "$new/$d" ]]; then find "$new/$d" -name CMakeCache.txt -type f -delete; fi
   done
   echo "$new"
 }
