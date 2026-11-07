@@ -67,7 +67,7 @@ Settings and by "fw wifi"; needs mDNS on this machine, e.g. avahi/nss-mdns):
                                       firmware/storage_staging/c6) in a safe order, reboot, wait for Wi-Fi
   ota-rm <host> <badge-path>            delete one file on the badge
   ota-reboot <host>
-  log <ip> [--follow]                 print the badge's log (what its console prints, kept in RAM since boot, with
+  log <ip> [--follow]                 print the badge's whole log (all pages; what its console prints, kept in RAM, with
                                       sequence numbers and uptimes); --follow keeps polling every second. Lines printed
                                       by ROM code (panics, the DPI underrun note) are not in it. It can show node names
                                       and messages: treat it like a screenshot
@@ -535,7 +535,7 @@ printable() {
 # GET /log (#38): lines after a sequence number; the badge answers the number to ask for next in X-Next-Seq. A smaller
 # number than asked (the badge restarted) just starts over.
 cmd_log() {
-    local ip=$1 follow=${2:-} since=0 hdr body next missed code work
+    local ip=$1 follow=${2:-} since=0 hdr body next missed code work full
     umask 077
     work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-log.XXXXXX")
     trap "rm -f '$work/hdr' '$work/body'; rmdir '$work' 2>/dev/null" EXIT
@@ -557,13 +557,17 @@ cmd_log() {
         if [ "${missed:-0}" != 0 ]; then
             echo "-- $missed older line(s) were already dropped from the badge's log --" >&2
         fi
+        # A full answer (24 KB cap) means more is waiting: ask again at once
+        full=0
+        [ "$(wc -c < "$body")" -lt 20000 ] || full=1
+        if [ -z "$follow" ]; then
+            # Drain: stop on a short page or when the badge stops advancing the number
+            { [ "$full" = 1 ] && [ -n "$next" ] && [ "$next" != "$since" ]; } || break
+        elif [ "$full" = 0 ]; then
+            sleep 1
+        fi
         if [ -n "$next" ]; then
             since=$next
-        fi
-        [ -n "$follow" ] || break
-        # A full answer (24 KB cap) means more is waiting: ask again at once
-        if [ "$(wc -c < "$body")" -lt 20000 ]; then
-            sleep 1
         fi
     done
 }
