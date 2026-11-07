@@ -46,5 +46,11 @@ void backlight_reapply(void);
 // holds C6 EN low, THEN calls backlight_r16_release(), THEN lets EN rise. On a badge without R16 both do nothing.
 void backlight_r16_hold(void);
 void backlight_r16_release(void);
+// UART1 lend (#250): the C6 flasher and "fw c6log" borrow the backlight's UART for their whole use. While lent the
+// backlight never installs the driver nor writes; the newest levels asked for meanwhile go out on return. take_driver
+// deletes the backlight's driver (the flasher installs its own); without it a borrower reads through an installed
+// driver. False when it is already lent. Never blocks for the lend's length: senders only skip the write.
+bool backlight_uart_lend(bool take_driver);
+void backlight_uart_return(void);
 // c6_flasher brackets a whole flash check with this: "fw bl r16" refuses meanwhile
 void backlight_r16_flash(bool on);

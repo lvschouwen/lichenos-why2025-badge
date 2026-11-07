@@ -1,6 +1,7 @@
 #include "backlight.h"
 #include "backlight_level.h"
 #include "r16_hold.h"
+#include "uart_lend.h"
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
 
@@ -37,6 +38,10 @@ void backlight_bind_store(backlight_get_u8_fn get, backlight_set_u8_fn set) {
 // for one short write (the 20-byte line, a few ms at 115200) or the bounded tx-done wait before the delete, never across
 // anything else. PTHREAD_MUTEX_INITIALIZER needs no create call, so there is no first-use race on the lock itself.
 static pthread_mutex_t uart_lock = PTHREAD_MUTEX_INITIALIZER;
+// Under uart_lock: UART1 lent to the C6 flasher or "fw c6log" (#250). A flag and not the lock held for the lend: the
+// flasher keeps UART1 for seconds and c6log for up to a minute, and the senders are the UI and console tasks (a slider,
+// the screen timeout), which must not stall that long. While lent a send only records its levels.
+static uart_lend_t lend;
 
 // Call with uart_lock held
 static bool open_uart(void) {
@@ -69,9 +74,44 @@ static bool send_raw(unsigned display, unsigned keyboard) {
         return false;
     }
     pthread_mutex_lock(&uart_lock);
-    bool ok = open_uart() && uart_write_bytes(BL_UART, cmd, len) == (int)len;
+    bool ok = uart_lend_send(&lend, (uint8_t)display, (uint8_t)keyboard) && open_uart() &&
+              uart_write_bytes(BL_UART, cmd, len) == (int)len;
     pthread_mutex_unlock(&uart_lock);
     return ok;
+}
+
+static bool uart_lent(void) {
+    pthread_mutex_lock(&uart_lock);
+    bool lent = lend.lent;
+    pthread_mutex_unlock(&uart_lock);
+    return lent;
+}
+
+bool backlight_uart_lend(bool take_driver) {
+    pthread_mutex_lock(&uart_lock);
+    bool ok = uart_lend_take(&lend);
+    if (ok && take_driver && uart_is_driver_installed(BL_UART)) {
+        uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50)); // a BL line still going out
+        uart_driver_delete(BL_UART);
+    }
+    pthread_mutex_unlock(&uart_lock);
+    return ok;
+}
+
+void backlight_uart_return(void) {
+    char    cmd[24];
+    size_t  len = 0;
+    uint8_t display, keyboard;
+    pthread_mutex_lock(&uart_lock);
+    if (uart_lend_give(&lend, &display, &keyboard)) {
+        len = backlight_cmd_format(cmd, sizeof(cmd), display, keyboard);
+    }
+    // Still under the lock, so a newer send from another task cannot be overtaken by these older levels
+    bool ok = !len || (open_uart() && uart_write_bytes(BL_UART, cmd, len) == (int)len);
+    pthread_mutex_unlock(&uart_lock);
+    if (!ok) {
+        ESP_LOGW(TAG, "backlight held back during the UART1 lend not sent");
+    }
 }
 
 // The last levels asked for (a slider included, not only the saved ones): a C6 reset brings back its 30/10 defaults and
@@ -207,6 +247,10 @@ static void r16_detect(void) {
         console_reply("r16: a C6 flash check is running, not now");
         return;
     }
+    if (uart_lent()) { // "fw c6log": the levels would not reach the C6 until it ends
+        console_reply("r16: UART1 to the C6 is busy, not now");
+        return;
+    }
     r16_input();
     r16_samples_t s = {0};
     for (int i = 0; i < R16_LEVELS; i++) {
@@ -298,7 +342,7 @@ void backlight_restore(void) {
     // again after the C6 check. The lock keeps a send from another task out of the driver while it goes away; its
     // next send opens it again, which only happens before the flasher runs if a task sends in that window.
     pthread_mutex_lock(&uart_lock);
-    if (uart_is_driver_installed(BL_UART)) {
+    if (!lend.lent && uart_is_driver_installed(BL_UART)) { // a lent UART1 is the borrower's driver
         if (sent) {
             uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
         }
