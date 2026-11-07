@@ -1,6 +1,6 @@
 # The sensors service (#69): the BMI270 IMU and BME690 environment sensor on the shared badge I2C bus and the P4's
-# temperature sensor, sampled by one task and exposed to apps through lichen_api/lichen_sensors.h (#84). The chips are
-# driven by Bosch's SensorAPIs (git submodules under third_party/, BSD-3-Clause): only the BMI270 variant of the
+# temperature sensor, sampled by one task and exposed to apps through lichen_api/lichen_sensors.h (#84), which lichen_os
+# implements over sensors.h (#221). The chips are driven by Bosch's SensorAPIs (git submodules under third_party/, BSD-3-Clause): only the BMI270 variant of the
 # BMI2 family (bmi2.c, bmi270.c) and bme69x.c are compiled. sensors_format.c is pure and host-tested
 # (host_tests/sensors_format_test.c).
 set(bmi ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/BMI270_SensorAPI)

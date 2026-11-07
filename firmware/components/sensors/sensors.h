@@ -1,9 +1,19 @@
 #pragma once
-// The sensors service's OS side (#69). Apps use lichen_sensors.h; main starts the service (lichen_sensors_start)
-// after the keyboard has the bus, and registers `fw sensors`.
+// The sensors service's OS side (#69). Apps use lichen_sensors.h, which lichen_os implements over the calls below
+// (#221: a driver never defines a gate function); main starts the service (lichen_sensors_start) after the keyboard
+// has the bus, and registers `fw sensors`.
+
+#include "sensors_format.h" // lichen_sensors_t
 
 #include <stdbool.h>
 #include <stdint.h>
+
+// lichen_sensors.h's calls, with the same rules (see there)
+void sensors_get(lichen_sensors_t *out);
+void sensors_start(void);
+void sensors_stop(void);
+bool sensors_running(void);
+void sensors_set_periods(uint32_t imu_ms, uint32_t env_ms);
 
 void sensors_register_console(void);
 

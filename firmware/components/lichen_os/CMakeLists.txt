@@ -9,9 +9,12 @@
 # assets partition at boot into the gate's slots (#16, font_slots.h); lichen_ui_call.c hands work to the LVGL task
 # under the port lock (#84 T8a, #221 owns it next). key_matrix.c (pure, key_matrix_test.c) names the keyboard's
 # codes over board's keymap headers (#180).
+# lichen_sensors.c and lichen_haptics.c: lichen_sensors.h and lichen_haptics.h over the sensors and haptics drivers,
+# so apps and the shell never link to a driver (#221).
 idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c"
                             "lichen_crashlog.c" "lichen_legacy.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
+                            "lichen_sensors.c" "lichen_haptics.c"
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES lichen_api freertos esp_hw_support assets fw_console nvs_flash heap storage sdcard
-                                     crash esp_lvgl_port esp_app_format board sensors)
+                                     crash esp_lvgl_port esp_app_format board sensors lichen_haptics)

@@ -9,7 +9,6 @@
 #include "esp_timer.h"
 #include "fw_console.h"
 #include "haptics_cmd.h"
-#include "lichen_haptics.h"
 #include "notify_os.h"
 #include "nvs.h"
 
@@ -41,9 +40,7 @@ static SemaphoreHandle_t s_lock;
 static uint8_t           s_duty; // the duty last written
 static hp_gate_t         s_gate;        // the notification hook runs on the LVGL task only
 
-_Static_assert((int)LICHEN_HAPTIC_ALERT == (int)HP_ALERT && (int)LICHEN_HAPTIC_TICK == (int)HP_TICK &&
-                   (int)LICHEN_HAPTIC_NOTIFY == (int)HP_NOTIFY && (int)LICHEN_HAPTIC_HIGH == (int)HP_HIGH,
-               "public enums mirror the pure ones");
+// lichen_os/lichen_haptics.c checks that the gate's enums mirror the pure ones (#221)
 
 static void drive(uint32_t duty) {
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL, duty);
@@ -199,11 +196,11 @@ static void save_u8(char const *key, uint8_t v, uint8_t dflt) {
     nvs_close(nvs);
 }
 
-bool lichen_haptics_enabled(void) {
+bool haptics_enabled(void) {
     return atomic_load(&s_enabled);
 }
 
-void lichen_haptics_set_enabled(bool on) {
+void haptics_set_enabled(bool on) {
     atomic_store(&s_enabled, on);
     if (!on) {
         haptics_stop();
@@ -211,20 +208,14 @@ void lichen_haptics_set_enabled(bool on) {
     save_u8(ENABLED_KEY, on, 1);
 }
 
-lichen_haptic_strength_t lichen_haptics_strength(void) {
-    return (lichen_haptic_strength_t)atomic_load(&s_strength);
+hp_strength_t haptics_strength(void) {
+    return (hp_strength_t)atomic_load(&s_strength);
 }
 
-void lichen_haptics_set_strength(lichen_haptic_strength_t s) {
+void haptics_set_strength(hp_strength_t s) {
     if ((int)s < 0 || (int)s >= HP_STRENGTH_COUNT) {
         return;
     }
     atomic_store(&s_strength, (int)s);
     save_u8(STRENGTH_KEY, (uint8_t)s, HP_HIGH);
-}
-
-void lichen_haptics_play(lichen_haptic_t pattern) {
-    if ((int)pattern >= 0 && (int)pattern < HP_COUNT) {
-        haptics_play((hp_pattern_t)pattern);
-    }
 }

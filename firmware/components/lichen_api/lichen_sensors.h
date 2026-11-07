@@ -1,8 +1,8 @@
 #pragma once
 // The badge's sensors (#69): the BMI270 IMU (0x69) and BME690 environment sensor (0x76) on the shared I2C bus, and
 // the P4's own die temperature. The OS owns the chips and samples them from one task (components/sensors); apps read
-// the latest snapshot here and never talk to the chips or the bus (#84). Implemented by the sensors component, which
-// the firmware always links. Plain C types only, so pure code and host tests can use the struct.
+// the latest snapshot here and never talk to the chips or the bus (#84). lichen_os implements these over the sensors
+// driver (#221). Plain C types only, so pure code and host tests can use the struct.
 
 #include <stdbool.h>
 #include <stdint.h>

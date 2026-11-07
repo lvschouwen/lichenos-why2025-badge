@@ -20,6 +20,11 @@ void haptics_force(hp_pattern_t p);         // "fw vib test": ignores the rate l
 void haptics_stop(void);                    // motor off now (power off / restart)
 void haptics_set_updating(bool on);         // main.c's OTA hooks: silent while an update is received
 bool haptics_playing(void);
+// The person's setting (default on, strength high), saved; lichen_os's lichen_haptics.h calls these (#221)
+bool          haptics_enabled(void);
+void          haptics_set_enabled(bool on); // off stops a buzz at once
+hp_strength_t haptics_strength(void);
+void          haptics_set_strength(hp_strength_t s); // out of range: ignored
 
 #ifdef __cplusplus
 }

@@ -299,7 +299,7 @@ static void sensors_task(void *arg) {
     }
 }
 
-void lichen_sensors_get(lichen_sensors_t *out) {
+void sensors_get(lichen_sensors_t *out) {
     taskENTER_CRITICAL(&lock);
     *out = snap;
     taskEXIT_CRITICAL(&lock);
@@ -311,7 +311,7 @@ static void poke(void) {
     }
 }
 
-void lichen_sensors_start(void) {
+void sensors_start(void) {
     atomic_store(&want_run, true);
     bool expected = false;
     if (!atomic_compare_exchange_strong(&created, &expected, true)) {
@@ -326,16 +326,16 @@ void lichen_sensors_start(void) {
     }
 }
 
-void lichen_sensors_stop(void) {
+void sensors_stop(void) {
     atomic_store(&want_run, false);
     poke();
 }
 
-bool lichen_sensors_running(void) {
+bool sensors_running(void) {
     return task && atomic_load(&want_run);
 }
 
-void lichen_sensors_set_periods(uint32_t imu_req, uint32_t env_req) {
+void sensors_set_periods(uint32_t imu_req, uint32_t env_req) {
     atomic_store(&imu_ms, sensors_period(imu_req, atomic_load(&imu_ms), SENSORS_IMU_MIN_MS, SENSORS_IMU_MAX_MS));
     atomic_store(&env_ms, sensors_period(env_req, atomic_load(&env_ms), SENSORS_ENV_MIN_MS, SENSORS_ENV_MAX_MS));
     poke();

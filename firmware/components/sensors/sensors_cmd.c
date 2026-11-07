@@ -40,9 +40,9 @@ static char const *why(bool running, bool up, int err, uint32_t inits, char *buf
 static void print_lines(void) {
     lichen_sensors_t s;
     sensors_stats_t  st;
-    lichen_sensors_get(&s);
+    sensors_get(&s);
     sensors_stats(&st);
-    bool    run = lichen_sensors_running();
+    bool    run = sensors_running();
     int64_t now = esp_timer_get_time();
     char    line[160], reason[40];
     sensors_fmt_imu(line, sizeof line, &s, now, why(run, st.imu_up, st.imu_err, st.imu_inits, reason, sizeof reason));
@@ -111,7 +111,7 @@ static void print_raw(void) {
     }
     console_reply(
         "service: %s, imu %lu ms, env %lu ms; samples %lu/%lu, fails %lu/%lu, inits %lu/%lu, stack free %lu B",
-        lichen_sensors_running() ? "running" : "stopped",
+        sensors_running() ? "running" : "stopped",
         (unsigned long)st.imu_ms,
         (unsigned long)st.env_ms,
         (unsigned long)st.imu_samples,
@@ -138,10 +138,10 @@ static void cmd_sensors(char const *args) {
     } else if (strcmp(args, "raw") == 0) {
         print_raw();
     } else if (strcmp(args, "start") == 0) {
-        lichen_sensors_start();
+        sensors_start();
         console_reply("sensors: started");
     } else if (strcmp(args, "stop") == 0) {
-        lichen_sensors_stop();
+        sensors_stop();
         console_reply("sensors: stopped");
     } else if (strcmp(args, "boot") == 0) {
         console_reply("sensors: start at boot %s", sensors_boot_start() ? "on" : "off");

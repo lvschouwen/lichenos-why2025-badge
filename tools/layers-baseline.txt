@@ -14,7 +14,6 @@ A	c6link -> lichen_net	1
 A	lichen_api -> lichen_notify	1
 A	lichen_boot -> lichen_api	1
 A	lichen_clock -> lichen_api	1
-A	lichen_haptics -> lichen_api	1
 A	lichen_haptics -> lichen_notify	1
 A	lichen_led -> lichen_notify	1
 A	lichen_shell -> board	1
@@ -38,7 +37,6 @@ B	c6link -> lichen_mdns	1
 B	c6link -> lichen_net	5
 B	lichen_boot -> lichen_api	1
 B	lichen_clock -> lichen_api	1
-B	lichen_haptics -> lichen_api	2
 B	lichen_haptics -> lichen_notify	1
 B	lichen_led -> lichen_notify	2
 B	lichen_shell -> board	15
@@ -88,7 +86,6 @@ C	c6link:wifi_saved_pick	1
 C	c6link:wifi_saved_wipe	1
 C	c6link:wifi_ssid_sanitize	1
 C	fw_console:nvs_open	1
-C	lichen_apps:lichen_sensors_get	1	# moved from shell, #221 removes
 C	lichen_haptics:lichen_notify_set_feedback	1
 C	lichen_haptics:nvs_open	1
 C	lichen_led:lichen_notify_dnd	1
@@ -144,11 +141,6 @@ C	lichen_shell:keyboard_set_gate_hook	1
 C	lichen_shell:keyboard_set_wake_hook	1
 C	lichen_shell:led_enabled	1
 C	lichen_shell:led_set_enabled	1
-C	lichen_shell:lichen_haptics_enabled	1
-C	lichen_shell:lichen_haptics_play	1
-C	lichen_shell:lichen_haptics_set_enabled	1
-C	lichen_shell:lichen_haptics_set_strength	1
-C	lichen_shell:lichen_haptics_strength	1
 C	lichen_shell:lichen_mdns_name	1
 C	lichen_shell:lichen_notify	1
 C	lichen_shell:lichen_notify_clear_all	1
@@ -170,8 +162,6 @@ C	lichen_shell:lichen_notify_stats	1
 C	lichen_shell:lichen_notify_to	2
 C	lichen_shell:lichen_notify_unread	4
 C	lichen_shell:lichen_notify_unread_top	1
-C	lichen_shell:lichen_sensors_get	2
-C	lichen_shell:lichen_sensors_running	1
 C	lichen_shell:log_clean	1
 C	lichen_shell:log_tap_last	1
 C	lichen_shell:lv_group_set_default	5
