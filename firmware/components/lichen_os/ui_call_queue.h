@@ -38,3 +38,17 @@ void ui_call_queue_unpush(ui_call_queue_t *q);
 size_t ui_call_queue_begin_drain(ui_call_queue_t *q);
 // The oldest call, taken off the queue before it runs (so it may queue again). False when the queue is empty.
 bool ui_call_queue_pop(ui_call_queue_t *q, ui_call_t *out);
+
+// An LVGL async call as the queue sees it (lv_async_call in lichen_ui_call.c, a fake in the host test): true when
+// fn(arg) will run on the LVGL task later.
+typedef bool (*ui_call_async_t)(ui_call_fn_t fn, void *arg);
+
+// The hand-over lichen_sys_ui_call makes, lock held: queues fn(arg) and, for the first call since the last drain
+// started, schedules the drain as schedule(ui_call_queue_drain, q); when that fails the call is taken back. A full
+// queue hands fn(arg) to fallback instead (one async call of its own, which may overtake the queue). True when fn
+// will run; false leaves arg with the caller.
+bool ui_call_queue_hand_over(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t schedule,
+                             ui_call_async_t fallback);
+// The drain hand_over schedules (arg is the queue), on the LVGL task with the lock held: runs the batch queued before it
+// started, oldest first.
+void ui_call_queue_drain(void *queue);

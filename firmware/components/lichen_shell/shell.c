@@ -116,9 +116,10 @@ static void drop(frame_t *frame) {
     frame->screen = NULL;
 }
 
-// Runs from lv_async_call, outside the indev's key handling, so deleting the screen that had the key is safe.
-// Note: LVGL 9 runs async calls queued together newest first, so a pop and its follow-up must be ONE async step
-// (back_job below), never two lv_async_call()s expected to run in order.
+// Runs as an async call (lv_async_call or the UI service's lichen_sys_ui_call), outside the indev's key handling, so
+// deleting the screen that had the key is safe. Note: UI-service calls run FIFO among themselves, but a raw
+// lv_async_call (shell_esc) runs newest first and the two do not order against each other (#225), so a pop and its
+// follow-up stay ONE async step (back_job below), never two calls expected to run in order.
 static bool pop_one(void) {
     int depth = nav_depth();
     if (depth <= 1 || !frames[0].screen || update_screen_blocks_back()) {

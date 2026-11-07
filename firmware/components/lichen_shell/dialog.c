@@ -1,8 +1,9 @@
 // The shell's dialog layer (#14 T-B): one OS warning at a time on lv_layer_top(), over every screen and the status
 // bar, with its own keypad group. Enter confirms, Esc cancels, and a countdown confirms by itself when nobody answers
 // (dialog_countdown.c, host-tested). Other tasks never touch LVGL here: they set the wanted state under a spinlock and
-// queue one lv_async_call that makes the screen match it, so an open and a close queued together still end right
-// (LVGL 9 runs async calls queued together newest first, see shell.c).
+// queue one async call (lichen_sys_ui_call, or lv_async_call on the LVGL task) that makes the screen match it, so an
+// open and a close queued together still end right whatever order the calls run in (UI-service calls are FIFO, raw
+// lv_async_call newest first, and the two do not order against each other: see shell.c).
 #include "dialog_countdown.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"

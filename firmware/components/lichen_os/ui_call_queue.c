@@ -35,3 +35,29 @@ bool ui_call_queue_pop(ui_call_queue_t *q, ui_call_t *out) {
     q->count--;
     return true;
 }
+
+bool ui_call_queue_hand_over(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t schedule,
+                             ui_call_async_t fallback) {
+    switch (ui_call_queue_push(q, fn, arg)) {
+    case UI_CALL_QUEUED:
+        return true;
+    case UI_CALL_QUEUED_SCHEDULE:
+        if (schedule(ui_call_queue_drain, q)) {
+            return true;
+        }
+        ui_call_queue_unpush(q); // else the next push finds a drain "on its way" that never comes: calls stranded
+        return false;
+    case UI_CALL_FULL:
+    default:
+        return fallback(fn, arg);
+    }
+}
+
+void ui_call_queue_drain(void *queue) {
+    ui_call_queue_t *q = queue;
+    size_t           n = ui_call_queue_begin_drain(q);
+    ui_call_t        call;
+    while (n-- > 0 && ui_call_queue_pop(q, &call)) {
+        call.fn(call.arg);
+    }
+}

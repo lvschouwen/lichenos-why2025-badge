@@ -1506,11 +1506,12 @@ target_include_directories(nvs_image_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..
 target_compile_options(nvs_image_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME nvs_image_test COMMAND nvs_image_test)
 
-# The UI service's call queue and lock-owner bookkeeping (#225), threaded
+# The UI service's call queue, hand-over, lock-owner bookkeeping and hit table (#225), threaded
 find_package(Threads REQUIRED)
 add_executable(ui_call_queue_test ${CMAKE_CURRENT_SOURCE_DIR}/ui_call_queue_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ui_call_queue.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ui_lock_owner.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ui_lock_owner.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ui_lock_hits.c)
 target_include_directories(ui_call_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
 set_target_properties(ui_call_queue_test PROPERTIES C_STANDARD 11)
 target_compile_options(ui_call_queue_test PRIVATE -Wall -Wextra -Werror)

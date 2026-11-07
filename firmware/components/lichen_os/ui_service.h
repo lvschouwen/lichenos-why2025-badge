@@ -6,3 +6,5 @@
 
 // Whether the calling task may touch LVGL now: the LVGL task, or the task inside lichen_sys_ui_lock (#225).
 ui_lock_verdict_t ui_service_lock_check(void);
+// The check is armed (main.c start_keyboard has run and the LVGL task took the arm call).
+bool ui_service_armed(void);

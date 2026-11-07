@@ -4,6 +4,10 @@ void ui_lock_owner_arm(ui_lock_owner_t *o, uintptr_t lvgl_task) {
     atomic_store_explicit(&o->lvgl_task, lvgl_task, memory_order_relaxed);
 }
 
+bool ui_lock_owner_armed(ui_lock_owner_t *o) {
+    return atomic_load_explicit(&o->lvgl_task, memory_order_relaxed) != 0;
+}
+
 void ui_lock_owner_taken(ui_lock_owner_t *o, uintptr_t self) {
     if (atomic_load_explicit(&o->owner, memory_order_relaxed) == self) {
         o->depth++;

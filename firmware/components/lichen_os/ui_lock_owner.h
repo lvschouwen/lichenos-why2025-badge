@@ -22,6 +22,8 @@ typedef enum {
 } ui_lock_verdict_t;
 
 void ui_lock_owner_arm(ui_lock_owner_t *o, uintptr_t lvgl_task);
+// Armed yet: the check's cheap first test, before the caller looks up its own task (#225 cost).
+bool ui_lock_owner_armed(ui_lock_owner_t *o);
 void ui_lock_owner_taken(ui_lock_owner_t *o, uintptr_t self);
 // False when self is not the owner (an unlock without its lock): nothing changes.
 bool ui_lock_owner_given(ui_lock_owner_t *o, uintptr_t self);

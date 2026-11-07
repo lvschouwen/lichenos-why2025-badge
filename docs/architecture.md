@@ -275,10 +275,13 @@ The two-chip protocol is a separate contract: see "Two-chip contract" in this fi
   `lichen_sys_ui_lock`/`_unlock` and hand work over with `lichen_sys_ui_call` (`lichen_sys_ui.h`, system surface,
   forbidden to apps); apps use `lichen_ui_call`; builders set the default group only through `lichen_ui_with_group`.
   Calls for the LVGL task wait in a 16-entry FIFO that one `lv_async_call` drains per batch (a burst past it falls back
-  to one async call each, as before). `board` keeps the port lock for the port setup at boot (display, keyboard). With
-  `CONFIG_LICHEN_UI_LOCK_ASSERT` (default on wherever assertions are enabled) the linker wraps LVGL's allocator and
-  `lv_inv_area`, and once `main.c` arms it after the keyboard is set up, LVGL touched by a task that is neither the LVGL
-  task nor inside `lichen_sys_ui_lock` logs the task and asserts.
+  to one async call each, as before). Order is FIFO among UI-service calls; a raw `lv_async_call` (LVGL-task code)
+  stays newest first, and the two do not order against each other. `board` keeps the port lock for the port setup at
+  boot (display, keyboard). The lock-owner check (`CONFIG_LICHEN_UI_LOCK_CHECK_MODE`: off, count (default), assert)
+  has the linker wrap LVGL's allocator and `lv_inv_area`; once `main.c` arms it after the keyboard is set up, LVGL
+  touched by a task that is neither the LVGL task nor inside `lichen_sys_ui_lock` is a hit: counted with the first hit
+  per call site logged (`fw ui lockcheck [reset]`), or an assert. This project has no build with assertions off, so the
+  chosen mode is in every image.
 - **Where things sit:** the shell and the system screens (Settings, About, Files, Power, Update...) are L5; MeshCore and
   the plain apps are L6; the C6 is a second chip behind the c6link driver (L2) and its protocol is the two-chip
   contract, not a layer.

@@ -6,7 +6,7 @@
 // The UI service's system surface (#225, #216 decision 1): the LVGL lock for the shell and main, never for an app
 // (tools/layers.conf forbids lichen_sys_* in L6). The UI service in lichen_os is the only code that takes the port
 // lock (board's port setup aside); everyone else comes through here, so the debug lock-owner check
-// (CONFIG_LICHEN_UI_LOCK_ASSERT) knows who holds it. Apps use lichen_ui_call (lichen_ui.h).
+// (CONFIG_LICHEN_UI_LOCK_CHECK_MODE) knows who holds it. Apps use lichen_ui_call (lichen_ui.h).
 
 // Takes the (recursive) LVGL lock, as lvgl_port_lock: timeout_ms 0 waits forever. True when it is held; then call
 // lichen_sys_ui_unlock once. Any task, the LVGL task included (it already holds the lock while LVGL runs its timers,
@@ -18,3 +18,6 @@ void lichen_sys_ui_unlock(void);
 // as lvgl_port_lock) instead of lichen_ui_call's 2 s. False when the lock was not free in time or there was no memory:
 // fn will not run and arg is still the caller's. Any task, the LVGL task included.
 bool lichen_sys_ui_call(void (*fn)(void *), void *arg, uint32_t timeout_ms);
+// `fw ui lockcheck [reset]`: the lock-owner check's mode, whether it is armed, its hit count and the first call sites
+// (CONFIG_LICHEN_UI_LOCK_CHECK_MODE), or resets the counts. Any task (the console's; it replies with console_reply).
+void lichen_sys_ui_lockcheck_cmd(char const *args);

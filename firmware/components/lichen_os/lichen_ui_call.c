@@ -4,7 +4,8 @@
 //
 // Calls for the LVGL task wait in a small FIFO (ui_call_queue.c) and one LVGL async call drains each batch: the same
 // scheduling as one lv_async_call per call had (the drain runs on the next lv_timer_handler pass, in the same pass when
-// queued from the LVGL task), one allocation per batch instead of per call, and calls run in the order they came.
+// queued from the LVGL task) and one allocation per batch instead of per call. FIFO among UI-service calls; a raw
+// lv_async_call (LVGL-task code still makes them) stays newest first, and the two do not order against each other.
 #include "lichen_os.h"
 #include "lichen_sys_ui.h"
 #include "lichen_ui.h"
@@ -22,7 +23,7 @@ static char const TAG[] = "ui";
 #define UI_CALL_LOCK_MS 2000 // as the dialog: a render takes milliseconds, a lock held this long is a stuck LVGL task
 
 static ui_call_queue_t s_queue;     // LVGL lock held
-static ui_lock_owner_t s_owner;     // also read by the lock-owner check (ui_lock_assert.c)
+static ui_lock_owner_t s_owner;     // also read by the lock-owner check (ui_lock_check.c)
 
 static uintptr_t self_task(void) {
     return (uintptr_t)xTaskGetCurrentTaskHandle();
@@ -46,36 +47,20 @@ void lichen_sys_ui_unlock(void) {
 }
 
 ui_lock_verdict_t ui_service_lock_check(void) {
+    if (!ui_lock_owner_armed(&s_owner)) {
+        return UI_LOCK_UNARMED; // boot: one load, no task lookup
+    }
     return ui_lock_owner_check(&s_owner, self_task());
 }
 
-// LVGL task, under the lock: the batch queued before this drain started. A call that queues another one schedules the
-// next drain (ui_call_queue_begin_drain), so it never runs inline here.
-static void drain(void *unused) {
-    (void)unused;
-    size_t    n = ui_call_queue_begin_drain(&s_queue);
-    ui_call_t call;
-    while (n-- > 0 && ui_call_queue_pop(&s_queue, &call)) {
-        call.fn(call.arg);
-    }
+bool ui_service_armed(void) {
+    return ui_lock_owner_armed(&s_owner);
 }
 
-// Lock held: queued, or (a burst past the queue) an async call of its own as before #225
-static bool hand_over(void (*fn)(void *), void *arg) {
-    switch (ui_call_queue_push(&s_queue, fn, arg)) {
-    case UI_CALL_QUEUED:
-        return true;
-    case UI_CALL_QUEUED_SCHEDULE:
-        // lv_async_call creates an LVGL timer: only under the lock, or it races the LVGL task's timer list (#118)
-        if (lv_async_call(drain, NULL) == LV_RESULT_OK) {
-            return true;
-        }
-        ui_call_queue_unpush(&s_queue);
-        return false;
-    case UI_CALL_FULL:
-    default:
-        return lv_async_call(fn, arg) == LV_RESULT_OK;
-    }
+// lv_async_call creates an LVGL timer: only under the lock, or it races the LVGL task's timer list (#118). It is both
+// the drain's scheduler and the full queue's fallback (ui_call_queue_hand_over).
+static bool async_call(ui_call_fn_t fn, void *arg) {
+    return lv_async_call(fn, arg) == LV_RESULT_OK;
 }
 
 bool lichen_sys_ui_call(void (*fn)(void *), void *arg, uint32_t timeout_ms) {
@@ -86,7 +71,7 @@ bool lichen_sys_ui_call(void (*fn)(void *), void *arg, uint32_t timeout_ms) {
         ESP_LOGW(TAG, "ui call %p not queued: the LVGL lock was not free in %u ms", (void *)fn, (unsigned)timeout_ms);
         return false;
     }
-    bool ok = hand_over(fn, arg);
+    bool ok = ui_call_queue_hand_over(&s_queue, fn, arg, async_call, async_call);
     lichen_sys_ui_unlock();
     if (!ok) {
         ESP_LOGE(TAG, "ui call %p not queued: out of memory", (void *)fn);
@@ -105,7 +90,7 @@ void lichen_ui_with_group(lv_group_t *group, void (*build)(void *), void *arg) {
     lv_group_set_default(previous); // in one place, so it can never be left set to a screen that is gone
 }
 
-#if CONFIG_LICHEN_UI_LOCK_ASSERT
+#if CONFIG_LICHEN_UI_LOCK_CHECK
 static void arm(void *unused) {
     (void)unused;
     ui_lock_owner_arm(&s_owner, self_task()); // runs on the LVGL task: that is its handle
@@ -113,7 +98,7 @@ static void arm(void *unused) {
 #endif
 
 void lichen_ui_service_arm(void) {
-#if CONFIG_LICHEN_UI_LOCK_ASSERT
+#if CONFIG_LICHEN_UI_LOCK_CHECK
     if (!lichen_sys_ui_call(arm, NULL, 0)) {
         ESP_LOGW(TAG, "lock-owner check not armed");
     }

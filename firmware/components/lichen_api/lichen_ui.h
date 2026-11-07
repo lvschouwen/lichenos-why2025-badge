@@ -107,8 +107,9 @@ bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done);
 // Closes it without an answer (the reason for it went away). Any task.
 void shell_dialog_close(void);
 
-// Runs fn(arg) on the LVGL task, soon (the UI service's queue, drained on the next LVGL timer pass; calls run in the
-// order they were made unless a burst overflows the queue): the way a job on any other task hands its result back to a
+// Runs fn(arg) on the LVGL task, soon (the UI service's queue, drained on the next LVGL timer pass; FIFO among UI-service
+// calls unless a burst overflows the queue, while a raw lv_async_call runs newest first and the two do not order
+// against each other): the way a job on any other task hands its result back to a
 // screen (#84 T8a, #225). Any task (takes the lock), the LVGL task included; never inline, also from the LVGL task. fn runs
 // in LVGL context and may touch widgets; the screen it meant may be gone by then, so it checks before it does. False when
 // the call was not queued (the LVGL lock was not free within 2 s, or no memory): fn will not run and arg is still the

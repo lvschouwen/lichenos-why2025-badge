@@ -607,6 +607,10 @@ static void cmd_ui(char const *args) {
         cmd_ui_overflow(strstr(args + 8, "-v") != NULL);
         return;
     }
+    if (strncmp(args, "lockcheck", 9) == 0 && (args[9] == 0 || args[9] == ' ')) {
+        lichen_sys_ui_lockcheck_cmd(args + 9); // the debug lock-owner check's hits (#225)
+        return;
+    }
     if (strncmp(args, "lock", 4) == 0 && (args[4] == 0 || args[4] == ' ')) {
         ui_remote_lock_cmd(args + 4);
         return;
@@ -642,5 +646,5 @@ static void cmd_ui(char const *args) {
 }
 
 void ui_probe_init(void) {
-    console_register("ui", "ui [perf [reset | bench [n]] | overflow [-v] | lock [on [s] | off] | open <app>] (lock: physical keys off until off, s seconds (default 60, max 600) after the last command, or Esc held 3 s; open: an app as from its home tile, or home; #190. overflow: text cut off, off the screen or under the hint/status bar, #133; -v: the scroll geometry of each hit; screen ids on the stack, the focused row, every visible label; perf: frame timing, #93)", cmd_ui);
+    console_register("ui", "ui [perf [reset | bench [n]] | overflow [-v] | lock [on [s] | off] | open <app> | lockcheck [reset]] (lockcheck: LVGL calls made without the LVGL lock, #225; lock: physical keys off until off, s seconds (default 60, max 600) after the last command, or Esc held 3 s; open: an app as from its home tile, or home; #190. overflow: text cut off, off the screen or under the hint/status bar, #133; -v: the scroll geometry of each hit; screen ids on the stack, the focused row, every visible label; perf: frame timing, #93)", cmd_ui);
 }

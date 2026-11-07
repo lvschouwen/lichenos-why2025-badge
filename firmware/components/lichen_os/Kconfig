@@ -1,12 +1,26 @@
 menu "Lichen UI service"
-    config LICHEN_UI_LOCK_ASSERT
-        bool "Debug lock-owner check: assert when LVGL is touched without the LVGL lock (#225)"
-        depends on COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE
-        default y
+    choice LICHEN_UI_LOCK_CHECK_MODE
+        prompt "Debug lock-owner check: LVGL touched without the LVGL lock (#225)"
+        default LICHEN_UI_LOCK_CHECK_COUNT
         help
-            Wraps LVGL's allocator and lv_inv_area at link time: a call from a task that is neither the LVGL task nor
-            inside lichen_sys_ui_lock logs the task and asserts. Armed once boot has set up the display and keyboard
-            (board takes the port lock directly for that). On by default wherever assertions are enabled (a debug
-            build); a build with silent or disabled assertions (a release) leaves it out, wraps and all. Cost: some
-            20-30 cycles per wrapped call, well under 0.1 ms per frame.
+            Wraps LVGL's allocator (lv_malloc, lv_malloc_zeroed, lv_calloc, lv_zalloc, lv_realloc, lv_reallocf,
+            lv_free) and lv_inv_area at link time. A call from a task that is neither the LVGL task nor inside
+            lichen_sys_ui_lock is a hit. Armed once boot has set up the display and keyboard (board takes the port
+            lock directly for that). This project has no build with assertions off, so whatever mode is chosen here
+            is in every image. Cost once armed: some 40-60 cycles per wrapped call, about 0.3-0.7 ms of a full-screen
+            frame. LVGL must run without draw threads (LV_USE_OS none, as now): with LV_USE_OS set, LVGL's draw
+            threads would allocate off the LVGL task and trip the check.
+
+        config LICHEN_UI_LOCK_CHECK_OFF
+            bool "Off (no wraps)"
+        config LICHEN_UI_LOCK_CHECK_COUNT
+            bool "Count and log the first hit per call site (fw ui lockcheck)"
+        config LICHEN_UI_LOCK_CHECK_ASSERT
+            bool "Log and assert on the first hit"
+            depends on COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE
+    endchoice
+
+    config LICHEN_UI_LOCK_CHECK
+        bool
+        default y if LICHEN_UI_LOCK_CHECK_COUNT || LICHEN_UI_LOCK_CHECK_ASSERT
 endmenu
