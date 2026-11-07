@@ -15,6 +15,8 @@ usage:
   agent-wt.sh list
   agent-wt.sh reset [--force] <slot> <branch> [base]
   agent-wt.sh new <slot> [base]
+  agent-wt.sh new --next [base]      (next free generic name wt-N)
+  agent-wt.sh rename <old> <new>
   agent-wt.sh done <slot>
 USAGE
   exit 2
@@ -79,15 +81,53 @@ cmd_reset() {
   echo "$d"
 }
 
+# Slots are generic (wt-1, wt-2, ...): a slot is reused for many issues, the branch names the issue (#203).
+next_slot() {
+  local n=1
+  while [[ -e "$POOL/wt-$n" ]]; do n=$((n + 1)); done
+  echo "wt-$n"
+}
+
 cmd_new() {
   [[ $# -ge 1 && $# -le 2 ]] || usage
   local slot="$1" base="${2:-main}" d
+  if [[ "$slot" == --next ]]; then slot="$(next_slot)"; fi
   d="$(slot_dir "$slot")"
   [[ ! -e "$d" ]] || die "slot $slot already exists"
   git -C "$ROOT" worktree add --detach "$d" "$base"
   git -C "$d" -c protocol.file.allow=always submodule update --init --recursive -q
   echo "agent-wt: note: the first build in $slot is cold (about 15 minutes)" >&2
   echo "$d"
+}
+
+# Moves a slot (#203). `git worktree move` refuses worktrees with submodules, so this moves by hand: the slot dir,
+# git's admin dir (.git/worktrees/<name>), the slot's and every submodule's .git pointer, and core.worktree in each
+# submodule config, then `git worktree repair`. CMake caches absolute paths, so each build dir's CMakeCache.txt is
+# dropped: the next build reconfigures in place (ccache keeps the recompile cheap). The objects stay.
+cmd_rename() {
+  [[ $# -eq 2 ]] || usage
+  local old new from to admin new_admin d
+  old="$(need_slot "$1")"
+  new="$(slot_dir "$2")"
+  from="$1" to="$2"
+  [[ ! -e "$new" ]] || die "slot $to already exists"
+  is_dirty "$old" && die "slot $from is dirty"
+  admin="$(git -C "$old" rev-parse --absolute-git-dir)"
+  new_admin="$(dirname "$admin")/$to"
+  [[ ! -e "$new_admin" ]] || die "git admin dir $new_admin already exists"
+  mv "$old" "$new"
+  mv "$admin" "$new_admin"
+  find "$new" -name .git -type f -exec sed -i "s#/worktrees/$from/#/worktrees/$to/#; s#/worktrees/$from\$#/worktrees/$to#" {} +
+  if [[ -d "$new_admin/modules" ]]; then
+    find "$new_admin/modules" -name config -type f -exec sed -i "s#/worktrees/$from/#/worktrees/$to/#" {} +
+  fi
+  echo "$new/.git" > "$new_admin/gitdir"
+  git -C "$ROOT" worktree repair "$new" >/dev/null 2>&1 || true
+  git -C "$new" status --porcelain >/dev/null || die "slot $to is broken after the move: check $new_admin"
+  for d in firmware/build firmware/build/host_tests c6/build host_tests/build; do
+    if [[ -f "$new/$d/CMakeCache.txt" ]]; then rm -f "$new/$d/CMakeCache.txt"; fi
+  done
+  echo "$new"
 }
 
 cmd_done() {
@@ -110,5 +150,6 @@ case "$sub" in
   reset) cmd_reset "$@" ;;
   new) cmd_new "$@" ;;
   done) cmd_done "$@" ;;
+  rename) cmd_rename "$@" ;;
   *) usage ;;
 esac
