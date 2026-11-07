@@ -124,10 +124,18 @@ cmd_rename() {
   echo "$new/.git" > "$new_admin/gitdir"
   git -C "$ROOT" worktree repair "$new" >/dev/null 2>&1 || true
   git -C "$new" status --porcelain >/dev/null || die "slot $to is broken after the move: check $new_admin"
-  # Every cache, nested ones included: IDF builds the bootloader as its own CMake project (<build>/bootloader)
+  # Generated build files hold the absolute slot path in many places (CMake caches, IDF's toolchain/*flags, the
+  # bootloader sub-builds; #204, #215), so the build dirs are moved aside whole instead of patched: the next build
+  # starts clean and ccache keeps it cheap. Nothing is deleted; empty $POOL/.stale by hand when it gets big.
+  local stale
+  stale="$POOL/.stale/$to-$(date +%Y%m%d-%H%M%S)"
   for d in firmware/build c6/build host_tests/build; do
-    if [[ -d "$new/$d" ]]; then find "$new/$d" -name CMakeCache.txt -type f -delete; fi
+    if [[ -d "$new/$d" ]]; then
+      mkdir -p "$stale/$(dirname "$d")"
+      mv "$new/$d" "$stale/$d"
+    fi
   done
+  [[ ! -d "$stale" ]] || echo "agent-wt: old build dirs moved to $stale (the next build in $to is cold, ccache-backed)" >&2
   echo "$new"
 }
 
