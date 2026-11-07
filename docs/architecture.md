@@ -200,7 +200,7 @@ The rule: **core 1 draws, core 0 talks to the world.**
   part. What an app may use, what it must not, and the linker wraps that hold the line: [app-api.md](app-api.md)
   (#84).
 - **No downloadable apps for now.** Loadable native apps (ELF) were BadgeVMS's biggest source of trouble (per-app
-  heaps and stacks, wrapped functions, an export table). A sandboxed script runtime (MicroPython, Lua or WebAssembly)
+  heaps and stacks, wrapped functions, an export table). A sandboxed script runtime (WebAssembly through WAMR, #78)
   is the safe way to open up later and could be one app running scripts through the same interface (v2: WAMR, below).
 - Others can already write an app as a component and build their own Lichen.
 - Notifications (#62) are an OS service in the app API: `lichen_notify(source, level, title, body, flags)` from any

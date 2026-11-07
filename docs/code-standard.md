@@ -21,17 +21,17 @@ JPL "Power of 10" rule 4 (only via a secondary page). Not reachable: Barr Group,
 | Parameters | 6 | 8 | J | lizard PARAM |
 | Stack frame | 512 B | 1 KB | J; `-fstack-usage` V (Memfault) | `.su` files of our components |
 | Task stack high-water | <25 % free | <15 % or <256 B | J; IDF V "some safety margin" | `fw mem` (`stack_free`) vs `fw tasks` (size) |
-| Min free internal heap | <15 % | <8 % | J; IDF V "some headroom" | `fw mem` (`internal ... min`) |
+| Min free internal heap | <15 % | <8 % | J; IDF V "some headroom" | `fw mem` (`internal ... min_pct`) |
 | Largest internal block | <50 % of free | <25 % of free | V fragmentation view, J numbers | `fw mem` (`internal ... largest` vs `free`) |
-| PSRAM use | >75 % | >90 % | J | `fw mem` (`psram` free; no total printed yet, gap) |
+| PSRAM use | >75 % | >90 % | J | `fw mem` (`psram ... used_pct`) |
 | App image vs OTA slot | >85 % | >92 % | J | `badge_fw.bin` vs `ota_0` in `firmware/partitions.csv` |
 | Per-archive growth per change | +2 KB | +8 KB | J; delta against a baseline V (Memfault) | `esp_idf_size --archives` vs the baseline |
 | CPU idle per core | <30 % | <15 % | V NASA 50-70 % utilisation; numbers J | `fw mem` (`task IDLE0/IDLE1 ... cpu`) |
 | ISR / interrupts off | >50 us | >200 us | J; IWDT 300/800 ms V is the crash line | cycle counter or scope (no read-out; known gap, not yet tracked) |
 | Task watchdog margin | longest run >25 % of 5 s | >50 % | V TWDT 5 s; J ratios | trace (no read-out; known gap, not yet tracked) |
 | Frame time | >16.7 ms | >33 ms p95 | V LVGL 33 ms default | `fw ui perf` |
-| Input-to-display | >100 ms | >200 ms | J | key timestamp vs flush (no read-out; tracked in #205) |
-| Boot to first frame | >3 s | >5 s | J | `fw boot` step times; no first-frame stamp yet (gap) |
+| Input-to-display | >100 ms | >200 ms | J | `fw ui perf` (`key-to-flush ... p95`, physical keys only) |
+| Boot to first frame | >3 s | >5 s | J | `fw ui perf` (`first frame at <ms> ms`) |
 | Draw buffer (partial mode) | | <1/10 screen | V LVGL | `lv_display_set_buffers` call |
 
 The first six rows and the two size rows are gated by the build. The rest are read on the badge by the main session.
