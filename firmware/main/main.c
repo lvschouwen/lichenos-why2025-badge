@@ -328,6 +328,7 @@ static bool show_boot_screen(lv_display_t **display) {
         boot_progress_end(BOOT_DISPLAY, STEP_FAILED, "no display");
         return false;
     }
+    lichen_ui_service_port_up();
     shell_boot_screen(*display);
     lichen_sys_ui_lock(0);
     lv_refr_now(*display);

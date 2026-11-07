@@ -29,3 +29,8 @@ void settings_bind_net(void);
 // once, after the last boot step that takes the port lock directly (board's display and keyboard setup) and only with
 // a display.
 void lichen_ui_service_arm(void);
+
+// The LVGL port is up (#248): called once, by the boot step whose display_start succeeded. Until then lichen_sys_ui_lock,
+// lichen_sys_ui_call, lichen_ui_call and lichen_ui_with_group refuse (false / nothing) instead of asserting in
+// lvgl_port_lock, so a badge with no display still boots to Wi-Fi and OTA.
+void lichen_ui_service_port_up(void);

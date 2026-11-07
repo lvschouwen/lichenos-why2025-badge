@@ -29,7 +29,26 @@ static uintptr_t self_task(void) {
     return (uintptr_t)xTaskGetCurrentTaskHandle();
 }
 
+void lichen_ui_service_port_up(void) {
+    ui_lock_owner_set_port_up(&s_owner);
+}
+
+// With no display lvgl_port_lock would assert (#248): refuse, and say so once.
+static bool port_allows_lock(void) {
+    bool first;
+    if (ui_lock_owner_may_lock(&s_owner, &first)) {
+        return true;
+    }
+    if (first) {
+        ESP_LOGW(TAG, "no display: UI calls are refused");
+    }
+    return false;
+}
+
 bool lichen_sys_ui_lock(uint32_t timeout_ms) {
+    if (!port_allows_lock()) {
+        return false;
+    }
     if (!lvgl_port_lock(timeout_ms)) {
         return false;
     }
@@ -84,6 +103,9 @@ bool lichen_ui_call(void (*fn)(void *), void *arg) {
 }
 
 void lichen_ui_with_group(lv_group_t *group, void (*build)(void *), void *arg) {
+    if (!ui_lock_owner_port_is_up(&s_owner)) {
+        return; // no display: nothing to build on
+    }
     lv_group_t *previous = lv_group_get_default();
     lv_group_set_default(group);
     build(arg);

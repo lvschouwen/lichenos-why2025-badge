@@ -1,5 +1,22 @@
 #include "ui_lock_owner.h"
 
+void ui_lock_owner_set_port_up(ui_lock_owner_t *o) {
+    atomic_store_explicit(&o->port_up, true, memory_order_release);
+}
+
+bool ui_lock_owner_port_is_up(ui_lock_owner_t *o) {
+    return atomic_load_explicit(&o->port_up, memory_order_acquire);
+}
+
+bool ui_lock_owner_may_lock(ui_lock_owner_t *o, bool *first_refusal) {
+    *first_refusal = false;
+    if (ui_lock_owner_port_is_up(o)) {
+        return true;
+    }
+    *first_refusal = !atomic_exchange_explicit(&o->refused, true, memory_order_relaxed);
+    return false;
+}
+
 void ui_lock_owner_arm(ui_lock_owner_t *o, uintptr_t lvgl_task) {
     atomic_store_explicit(&o->lvgl_task, lvgl_task, memory_order_relaxed);
 }

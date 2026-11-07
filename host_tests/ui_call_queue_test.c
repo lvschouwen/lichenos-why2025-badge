@@ -312,6 +312,21 @@ static void test_hits(void) {
 
 // ---- lock owner: recursion, foreign unlock, unarmed ----
 
+// #248: no display, no port: a lock request is refused (and reported once) until the boot step marks the port up
+static void test_port_gate(void) {
+    ui_lock_owner_t o = {0};
+    bool            first;
+    CHECK(!ui_lock_owner_port_is_up(&o));
+    CHECK(!ui_lock_owner_may_lock(&o, &first));
+    CHECK(first);
+    CHECK(!ui_lock_owner_may_lock(&o, &first));
+    CHECK(!first); // logged once
+    ui_lock_owner_set_port_up(&o);
+    CHECK(ui_lock_owner_port_is_up(&o));
+    CHECK(ui_lock_owner_may_lock(&o, &first));
+    CHECK(!first);
+}
+
 static void test_owner(void) {
     ui_lock_owner_t o = {0};
     CHECK(!ui_lock_owner_armed(&o));
@@ -337,6 +352,7 @@ int main(void) {
     test_full_and_unpush();
     test_reentrant_push();
     test_owner();
+    test_port_gate();
     test_threads();
     test_hits();
     if (failures) {
