@@ -90,7 +90,11 @@ static volatile bool     auto_closed;
 static long now_s(void);
 
 bool ota_server_enabled(void) {
-    return server_on;
+    return ota_server_listens(server_on, !token_refused);
+}
+
+bool ota_server_refused(void) {
+    return token_refused;
 }
 
 void ota_server_set_enabled(bool on) {

@@ -86,6 +86,9 @@ bool ota_token_equal(char const *a, char const *b);
 // /storage or settings or saved to one of them. A token kept nowhere (no /storage and NVS down, e.g. a burned key whose
 // partition could not be opened) is one no tool knows and the next boot replaces: Wi-Fi updates are refused instead.
 bool ota_token_kept(bool from_file, bool from_nvs, bool wrote_file, bool wrote_nvs);
+// The server listens (and Settings shows it on) only with the setting on AND a kept token. Before #116 the setting
+// alone decided, and a badge without a kept token listened behind a token no tool knew.
+bool ota_server_listens(bool setting_on, bool token_kept);
 
 // Lowercase hex of bytes; out holds 2 * len + 1 characters
 void ota_hex(uint8_t const *bytes, size_t len, char *out);

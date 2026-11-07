@@ -11,11 +11,12 @@ menu "Lichen NVS encryption (#116)"
 
     config LICHEN_NVS_HMAC_KEY_ID
         int "eFuse key block holding the NVS HMAC key (0..5 = KEY0..KEY5)"
-        depends on LICHEN_NVS_ENCRYPT
         range 0 5
         default 5
         help
-            Last block, so KEY0.. stay free for secure boot or flash encryption later.
+            Last block, so KEY0.. stay free for secure boot or flash encryption later. Set in every build, not only
+            with LICHEN_NVS_ENCRYPT: a build without it still reads this block's key purpose (read only) and leaves
+            NVS alone when a key is burned, since a plain init would erase an encrypted partition entry by entry.
 
     config LICHEN_NVS_ENCRYPT_BURN_CMD
         bool "Compile fw nvs-enc burn (IRREVERSIBLE eFuse burn)"
@@ -25,4 +26,12 @@ menu "Lichen NVS encryption (#116)"
             Adds "fw nvs-enc burn YES": writes a random 32-byte key with purpose HMAC_UP into the configured block, read
             and write protected. Irreversible; the key cannot be read back or changed. Leave off in every build that is
             not the one deliberate burn build.
+
+    config LICHEN_NVS_DEBUG_FORCE_DOWN
+        bool "Compile fw nvs-down YES (bench only: the next boot leaves NVS down)"
+        default n
+        help
+            Adds "fw nvs-down YES" (USB console only): the next boot takes the burned-key "stays down" path once,
+            without initialising or erasing NVS, so the boot without settings and the refused Wi-Fi updates can be
+            seen on a badge with no key burned. Nothing is written to flash or eFuse; the boot after is normal again.
 endmenu

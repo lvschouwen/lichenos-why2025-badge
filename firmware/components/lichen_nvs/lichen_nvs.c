@@ -2,6 +2,9 @@
 
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
+#include "esp_attr.h"
+#include "esp_efuse.h"
+#include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "fw_console.h"
@@ -10,7 +13,9 @@
 #include "nvs_mark.h"
 #include "sdkconfig.h"
 
+#include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 _Static_assert(NVS_BOOT_ERR_NO_FREE_PAGES == ESP_ERR_NVS_NO_FREE_PAGES, "nvs_boot_policy.h out of step with IDF");
 _Static_assert(NVS_BOOT_ERR_NEW_VERSION == ESP_ERR_NVS_NEW_VERSION_FOUND, "nvs_boot_policy.h out of step with IDF");
@@ -36,11 +41,20 @@ _Static_assert(sizeof(nvs_mark_t) == 12, "nvs_mark_t is read from flash byte for
 __attribute__((section(".rodata_custom_desc"), used)) nvs_mark_t const lichen_nvs_mark = {
     .tag     = NVS_MARK_TAG,
     .version = NVS_MARK_VERSION,
-    .flags   = MARK_ENCRYPT | MARK_BURN,
+    .flags   = MARK_ENCRYPT | MARK_BURN | NVS_MARK_F_GUARD, // the guard: lichen_nvs_init() below, in every build
 };
+
+static char const TAG[] = "nvs-enc";
+
+#define KEY_BLK ((esp_efuse_block_t)(EFUSE_BLK_KEY0 + CONFIG_LICHEN_NVS_HMAC_KEY_ID))
 
 static nvs_boot_path_t s_path = NVS_BOOT_PATH_PLAIN;
 static int             s_boot = -1; // -1 not reported yet, 0 down, 1 up
+
+// The only eFuse call on the boot path, in every build, and it only reads the purpose field
+static bool key_burned(void) {
+    return esp_efuse_get_key_purpose(KEY_BLK) == ESP_EFUSE_KEY_PURPOSE_HMAC_UP;
+}
 
 nvs_boot_path_t lichen_nvs_boot_path(void) {
     return s_path;
@@ -50,66 +64,162 @@ void lichen_nvs_boot_done(bool up) {
     s_boot = up;
 }
 
-// Reads with esp_partition_read, never a mapping (#31): the slot's app description and the mark after it
-static nvs_mark_kind_t slot_mark(esp_partition_t const *slot, char *version, size_t cap) {
-    esp_app_desc_t desc;
-    bool           has_app = slot && esp_ota_get_partition_description(slot, &desc) == ESP_OK;
-    snprintf(version, cap, "%s", has_app ? desc.version : "-");
+#define DESC_OFFSET (sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t))
+#define DESC_HEAD   (offsetof(esp_app_desc_t, version) + sizeof(((esp_app_desc_t *)0)->version))
+
+// Reads with esp_partition_read, never a mapping (#31): only the head of the app description (magic word to version,
+// 48 bytes, not the whole 256-byte struct on the console stack) and the mark after it. The version of a foreign image
+// may lack its NUL: printed with a bound.
+static nvs_mark_info_t slot_mark(esp_partition_t const *slot, char *version, size_t cap) {
+    uint8_t  head[DESC_HEAD];
+    uint32_t magic   = 0;
+    bool     has_app = slot && esp_partition_read(slot, DESC_OFFSET, head, sizeof(head)) == ESP_OK;
+    if (has_app) {
+        memcpy(&magic, head + offsetof(esp_app_desc_t, magic_word), sizeof(magic));
+        has_app = magic == ESP_APP_DESC_MAGIC_WORD;
+    }
+    int const vlen = (int)sizeof(((esp_app_desc_t *)0)->version);
+    snprintf(version, cap, "%.*s", has_app ? vlen : 1, has_app ? (char const *)head + offsetof(esp_app_desc_t, version) : "-");
     uint8_t buf[sizeof(nvs_mark_t)];
     bool    read = has_app && esp_partition_read(slot, NVS_MARK_OFFSET, buf, sizeof(buf)) == ESP_OK;
     return nvs_mark_parse(has_app, read ? buf : NULL, read ? sizeof(buf) : 0);
+}
+
+static void slots_verdict_reply(nvs_mark_info_t r, nvs_mark_info_t o) {
+    switch (nvs_slots_verdict(r, o)) {
+        case NVS_SLOTS_SAFE:
+            console_reply("nvs-slots: both slots guarded encrypt images: a rollback keeps an encrypted NVS readable");
+            break;
+        case NVS_SLOTS_GUARDED:
+            console_reply("nvs-slots: both guarded, NOT both encrypt: do not burn yet (a rollback would leave NVS down)");
+            break;
+        case NVS_SLOTS_UNSAFE:
+            console_reply("nvs-slots: a slot without the guard: do not burn (a rollback would erase an encrypted NVS)");
+            break;
+    }
+    if (r.burn || o.burn) {
+        console_reply("nvs-slots: a burn image is on the badge: replace it once the key is burned");
+    }
 }
 
 static void cmd_nvs_slots(char const *args) {
     (void)args;
     esp_partition_t const *running = esp_ota_get_running_partition();
     esp_partition_t const *other   = esp_ota_get_next_update_partition(NULL);
-    char                   ver_r[32], ver_o[32];
-    nvs_mark_kind_t        r = slot_mark(running, ver_r, sizeof(ver_r));
-    nvs_mark_kind_t        o = slot_mark(other, ver_o, sizeof(ver_o));
-    console_reply("nvs-slots: %s (running) %s: %s", running ? running->label : "?", ver_r, nvs_mark_name(r));
-    console_reply("nvs-slots: %s %s: %s", other ? other->label : "none", ver_o, nvs_mark_name(o));
-    if (nvs_marks_rollback_safe(r, o)) {
-        console_reply("nvs-slots: both slots encrypt: a rollback keeps an encrypted NVS");
-    } else {
-        console_reply("nvs-slots: NOT both encrypt: do not burn the key yet (a rollback would erase an encrypted NVS)");
-    }
-    if (r == NVS_MARK_ENCRYPT_BURN || o == NVS_MARK_ENCRYPT_BURN) {
-        console_reply("nvs-slots: a burn image is on the badge: replace it once the key is burned");
-    }
+    char                   ver_r[33], ver_o[33], what[48];
+    nvs_mark_info_t        r = slot_mark(running, ver_r, sizeof(ver_r));
+    nvs_mark_info_t        o = slot_mark(other, ver_o, sizeof(ver_o));
+    nvs_mark_describe(r, what, sizeof(what));
+    console_reply("nvs-slots: %s (running) %s: %s", running ? running->label : "?", ver_r, what);
+    nvs_mark_describe(o, what, sizeof(what));
+    console_reply("nvs-slots: %s %s: %s", other ? other->label : "none", ver_o, what);
+    slots_verdict_reply(r, o);
 }
 
 static void register_slots(void) {
     static bool done;
     if (!done) {
         done = true;
-        console_register("nvs-slots", "nvs-slots (are both OTA slots LICHEN_NVS_ENCRYPT images; read only)",
+        console_register("nvs-slots", "nvs-slots (do both OTA slots hold guarded encrypt images; read only)",
                          cmd_nvs_slots);
     }
 }
 
-#if !CONFIG_LICHEN_NVS_ENCRYPT
+// ---- fw nvs-down YES (bench only, LICHEN_NVS_DEBUG_FORCE_DOWN) ------------------------------------------------------
 
-esp_err_t lichen_nvs_init(void) {
-    register_slots();
-    return nvs_flash_init(); // the default build: no eFuse read, no secure init, the plain path
+#if CONFIG_LICHEN_NVS_DEBUG_FORCE_DOWN
+// Survives the software restart, not a power cut (power-on RAM is noise: two words make a false hit unlikely)
+static __NOINIT_ATTR uint32_t s_force_down[2];
+#define FORCE_DOWN_A 0x4E56444Fu
+#define FORCE_DOWN_B 0xB16B00B5u
+
+static bool force_down_take(void) {
+    bool set        = s_force_down[0] == FORCE_DOWN_A && s_force_down[1] == FORCE_DOWN_B;
+    s_force_down[0] = s_force_down[1] = 0; // once
+    return set;
 }
 
-#else // CONFIG_LICHEN_NVS_ENCRYPT
+static void cmd_nvs_down(char const *args) {
+    if (!console_from_uart() || strcmp(args, "YES") != 0) {
+        console_reply("nvs-down YES (USB console only): the next boot leaves NVS down once, nothing erased");
+        return;
+    }
+    s_force_down[0] = FORCE_DOWN_A;
+    s_force_down[1] = FORCE_DOWN_B;
+    console_reply("nvs-down: restarting; the next boot runs without NVS");
+    system_restart("nvs-down (bench)");
+}
 
-#include "esp_efuse.h"
+static void register_debug(void) {
+    static bool done;
+    if (!done) {
+        done = true;
+        console_register("nvs-down", "nvs-down YES (bench: next boot without NVS, nothing erased)", cmd_nvs_down);
+    }
+}
+#else
+static bool force_down_take(void) {
+    return false;
+}
+static void register_debug(void) {
+}
+#endif
+
+#if CONFIG_LICHEN_NVS_ENCRYPT
+static void      register_console(void);
+static esp_err_t keyed_init(void);
+#define ENCRYPT_BUILD true
+#else
+static void register_console(void) {
+}
+static esp_err_t keyed_init(void) {
+    return ESP_ERR_INVALID_STATE; // nvs_boot_init() never picks it in this build
+}
+#define ENCRYPT_BUILD false
+#endif
+
+// The guard, in every build: the eFuse is read before NVS is touched, and nothing but the encrypt build's keyed path
+// ever initialises NVS on a chip with a key burned
+esp_err_t lichen_nvs_init(void) {
+    register_console();
+    register_slots();
+    register_debug();
+    bool            forced = force_down_take();
+    nvs_boot_init_t how    = forced ? NVS_BOOT_INIT_NONE : nvs_boot_init(ENCRYPT_BUILD, key_burned());
+    s_path                 = nvs_boot_path_of(how); // every return below, failures included
+    esp_err_t err;
+    if (how == NVS_BOOT_INIT_NONE) {
+        if (forced) {
+            ESP_LOGE(TAG, "nvs-down (bench): this boot without NVS, nothing initialised or erased");
+        } else {
+            ESP_LOGE(TAG, "HMAC key burned in KEY%d but this image has no NVS encryption: NVS not initialised, nothing "
+                          "erased", CONFIG_LICHEN_NVS_HMAC_KEY_ID);
+        }
+        err = ESP_ERR_INVALID_STATE;
+    } else if (how == NVS_BOOT_INIT_KEYED) {
+        err = keyed_init();
+    } else {
+        if (ENCRYPT_BUILD) {
+            ESP_LOGW(TAG, "no HMAC key in KEY%d: NVS stays plaintext (nothing is burned from here)",
+                     CONFIG_LICHEN_NVS_HMAC_KEY_ID);
+        }
+        err = nvs_flash_init();
+    }
+    if (err == ESP_OK) {
+        s_boot = 1; // also a re-init after a factory reset's erase
+    }
+    return err;
+}
+
+#if CONFIG_LICHEN_NVS_ENCRYPT
+
 #include "esp_hmac.h"
-#include "esp_log.h"
 #include "nvs_erase_os.h"
 #include "nvs_image.h"
 
 #include <stdlib.h>
-#include <string.h>
-
-static char const TAG[] = "nvs-enc";
 
 #define KEY_ID   ((hmac_key_id_t)CONFIG_LICHEN_NVS_HMAC_KEY_ID)
-#define KEY_BLK  ((esp_efuse_block_t)(EFUSE_BLK_KEY0 + CONFIG_LICHEN_NVS_HMAC_KEY_ID))
 // IDF's nvs_sec_provider seeds (private header nvs_sec_provider_private.h): the same derivation, so a key burned here
 // opens the partition with IDF's own HMAC scheme and tools too
 #define EKEY_SEED 0xAEBE5A5Au
@@ -117,12 +227,7 @@ static char const TAG[] = "nvs-enc";
 
 static bool s_encrypted; // this boot's NVS is the encrypted one
 
-// ---- the eFuse: read only here ------------------------------------------------------------------------------------
-
-// The only eFuse call on the boot path, and it only reads the purpose field. Nothing below writes an eFuse.
-static bool key_burned(void) {
-    return esp_efuse_get_key_purpose(KEY_BLK) == ESP_EFUSE_KEY_PURPOSE_HMAC_UP;
-}
+// ---- the HMAC keys (nothing here writes an eFuse) -----------------------------------------------------------------
 
 static bool derive_keys(nvs_sec_cfg_t *cfg) {
     uint32_t eseed[8], tseed[8];
@@ -319,20 +424,11 @@ static esp_err_t migrate(nvs_sec_cfg_t const *cfg) {
     return err;
 }
 
-static void register_console(void);
-
-esp_err_t lichen_nvs_init(void) {
-    register_console();
-    register_slots();
-    bool burned = key_burned();
-    s_path      = burned ? NVS_BOOT_PATH_KEYED : NVS_BOOT_PATH_PLAIN; // every return below, failures included
-    if (!burned) {
-        ESP_LOGW(TAG, "no HMAC key in KEY%d: NVS stays plaintext (nothing is burned from here)",
-                 CONFIG_LICHEN_NVS_HMAC_KEY_ID);
-        return nvs_flash_init();
-    }
+// A key is burned (lichen_nvs_init checked): secure init, migration or refusal. Never a plain init on an encrypted
+// partition, and never an erase but the migration's own.
+static esp_err_t keyed_init(void) {
     nvs_image_kind_t kind = scan_partition();
-    nvs_action_t     act  = nvs_image_decide(true, burned, kind);
+    nvs_action_t     act  = nvs_image_decide(true, true, kind);
     if (act == NVS_ACT_REFUSE) {
         // Not nvs_flash_init(): on an encrypted partition that takes every entry for damaged and erases it. NVS stays
         // down this boot (the KEYED path: main.c never erases, nvs_boot_policy.h), the settings intact in flash.

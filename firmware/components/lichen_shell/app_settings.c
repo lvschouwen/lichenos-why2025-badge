@@ -554,6 +554,9 @@ static void open_app_page(void *arg) {
 static lv_obj_t *ota_row, *ota_auto_row;
 
 static char const *ota_value(void) {
+    if (ota_server_refused()) {
+        return "Off (no token)"; // #116: no token in /storage or settings this boot, refused until a reboot
+    }
     return ota_server_enabled() ? "On" : ota_server_auto_closed() ? "Off (timer)" : "Off";
 }
 

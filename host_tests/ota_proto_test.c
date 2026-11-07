@@ -230,8 +230,18 @@ static void test_token_kept(void) {
     CHECK(ota_token_kept(false, false, false, true));  // new token, saved to settings only (no /storage)
 }
 
+// #116: the setting alone used to decide; without a kept token the server must not listen even with it on
+static void test_server_listens(void) {
+    CHECK(!ota_server_listens(true, false));
+    CHECK(ota_server_listens(true, true));
+    CHECK(!ota_server_listens(false, true));
+    CHECK(!ota_server_listens(false, false));
+    CHECK(!ota_server_listens(true, ota_token_kept(false, false, false, false))); // nothing read, nothing saved
+}
+
 int main(void) {
     test_token_kept();
+    test_server_listens();
     test_routes_need_token();
     test_sha256();
     test_head_length();

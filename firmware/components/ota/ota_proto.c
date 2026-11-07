@@ -282,6 +282,10 @@ bool ota_token_kept(bool from_file, bool from_nvs, bool wrote_file, bool wrote_n
     return from_file || from_nvs || wrote_file || wrote_nvs;
 }
 
+bool ota_server_listens(bool setting_on, bool token_kept) {
+    return setting_on && token_kept;
+}
+
 void ota_hex(uint8_t const *bytes, size_t len, char *out) {
     static char const digits[] = "0123456789abcdef";
     for (size_t i = 0; i < len; i++) {

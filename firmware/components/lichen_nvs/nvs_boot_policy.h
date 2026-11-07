@@ -29,3 +29,16 @@ typedef enum {
 
 // err is the esp_err_t of the init (0 = ESP_OK); retried says this init already followed the erase
 nvs_boot_step_t nvs_boot_next(nvs_boot_path_t path, int err, bool retried);
+
+// What lichen_nvs_init() does before any NVS call. Every build reads the key purpose of the eFuse block (read only),
+// because plain nvs_flash_init() on an encrypted partition takes each entry for damaged and erases it: a build without
+// LICHEN_NVS_ENCRYPT that finds a key burned must not call it at all.
+typedef enum {
+    NVS_BOOT_INIT_PLAIN, // nvs_flash_init(): no key burned
+    NVS_BOOT_INIT_KEYED, // the encrypt build's keyed path: secure init, migration or refusal
+    NVS_BOOT_INIT_NONE,  // a build without the option on a burned chip: no init, NVS stays down, nothing erased
+} nvs_boot_init_t;
+
+nvs_boot_init_t nvs_boot_init(bool encrypt_build, bool key_burned);
+// The path main.c's nvs_boot_next() is asked with: PLAIN only for INIT_PLAIN
+nvs_boot_path_t nvs_boot_path_of(nvs_boot_init_t init);

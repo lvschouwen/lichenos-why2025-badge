@@ -76,7 +76,31 @@ static void boot_sequence_erases_at_most_once(void) {
     }
 }
 
+// The guard (review H1): every build reads the eFuse first; a build without the option never inits on a burned chip
+static void init_choice(void) {
+    CHECK(nvs_boot_init(false, false) == NVS_BOOT_INIT_PLAIN);
+    CHECK(nvs_boot_init(true, false) == NVS_BOOT_INIT_PLAIN);
+    CHECK(nvs_boot_init(true, true) == NVS_BOOT_INIT_KEYED);
+    CHECK(nvs_boot_init(false, true) == NVS_BOOT_INIT_NONE); // default build + burned key: no init at all
+    CHECK(nvs_boot_path_of(NVS_BOOT_INIT_PLAIN) == NVS_BOOT_PATH_PLAIN);
+    CHECK(nvs_boot_path_of(NVS_BOOT_INIT_KEYED) == NVS_BOOT_PATH_KEYED);
+    CHECK(nvs_boot_path_of(NVS_BOOT_INIT_NONE) == NVS_BOOT_PATH_KEYED);
+}
+
+// Default build on a burned chip, end to end: no init, then main.c's policy on the error it gets (INVALID_STATE, and
+// the two layout codes for good measure): down, no erase
+static void default_build_burned_key_stays_down(void) {
+    nvs_boot_init_t how = nvs_boot_init(false, true);
+    CHECK(how == NVS_BOOT_INIT_NONE);
+    nvs_boot_path_t path = nvs_boot_path_of(how);
+    CHECK(erases_for(path, 0x103) == 0);
+    CHECK(erases_for(path, NVS_BOOT_ERR_NO_FREE_PAGES) == 0);
+    CHECK(nvs_boot_next(path, 0x103, false) == NVS_BOOT_DOWN);
+}
+
 int main(void) {
+    init_choice();
+    default_build_burned_key_stays_down();
     ok_is_up_on_both_paths();
     plain_layout_errors_erase_once();
     plain_other_errors_stay_down();
