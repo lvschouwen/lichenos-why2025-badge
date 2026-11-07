@@ -85,7 +85,9 @@ P4 image is built, about 3 s. It runs `tools/check_standard.py`. Nothing passes 
 ### Editing the baseline
 
 - Fixed or lowered an offender: `python3 -I tools/check_standard.py --shrink` (drops and lowers; never adds or raises; refuses
-  when the measurement is incomplete).
+  when the measurement is incomplete). Run the baseline commands inside the IDF Python environment
+  (`. ~/esp/esp-idf-v6.1/export.sh` first): the size part needs `esp_idf_size`, and without it the measurement counts
+  as incomplete and the command refuses.
 - Moved a file or renamed a function that is a baselined offender: `python3 -I tools/check_standard.py --rename OLD NEW`.
   OLD/NEW are a path (all its entries move, `file:function` keys follow) or `path:function`. The values are kept and
   `moved` records tell the shrink-only check the new key is the old entry, so it passes only if the value did not grow.
