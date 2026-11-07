@@ -10,6 +10,7 @@ Lichen OS is the operating system for the WHY2025 badge: the ESP32-P4 runs Liche
 ## Build and check
 - Full check: `BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build` = static checks (`tools/static_checks.sh`: shellcheck, cppcheck on changed C/C++ with `tools/cppcheck-baseline.txt`) + host tests (ctest, ASan+UBSan) + C6 image + storage staging + P4 image + app boundary check (`tools/check_app_boundary.sh`) + licence check. It must be green before a commit.
 - ccache is on when installed (shared across worktree slots); `build.sh build` writes a gitignored `.clangd` for clangd/LSP.
+- The standard gate `tools/check_standard.sh` runs inside `build` after the P4 image (lizard + `-fstack-usage` + app image and per-archive size against `tools/standard-baseline.txt`; limits and ratchet rule in `docs/code-standard.md`). New files and functions past the fail line fail the build; the baseline only shrinks.
 - Host tests only: `cmake -S host_tests -B host_tests/build && cmake --build host_tests/build -j8 && ctest --test-dir host_tests/build`.
 - After committing run `./firmware/build.sh reconfigure build` so the image label `fw-<sha>` matches the commit.
 - The build reformats `dependencies.lock`: `git restore dependencies.lock` unless dependencies really changed.
@@ -22,7 +23,7 @@ Lichen OS is the operating system for the WHY2025 badge: the ESP32-P4 runs Liche
 - Enable LVGL bundled extras (QR, PNG/GIF/JPEG decoders, TinyTTF, LZ4, ThorVG, FrogFS, ...) or other third-party libs only when a feature needs them; name the option and its licence (all LVGL extras are GPL-3-compatible) before adding.
 
 ## Docs
-- `docs/architecture.md` (tasks, memory, boot), `docs/app-api.md` (what apps may call), `docs/shell-design.md` (UI shell, screens, navigation), `docs/ui-standard.md` (the 12 UI rules: new screens are designed against them, reviews and audit agents cite rule numbers).
+- `docs/architecture.md` (tasks, memory, boot), `docs/app-api.md` (what apps may call), `docs/shell-design.md` (UI shell, screens, navigation), `docs/code-standard.md` (size, complexity and resource limits, how to measure them), `docs/ui-standard.md` (the 12 UI rules: new screens are designed against them, reviews and audit agents cite rule numbers).
 
 ## Hardware (main session only)
 - `tools/badge.sh flash-fw <port>` keeps `/storage` (MeshCore identity, contacts, channels) by default. `--wipe-storage` is first-install only and only Lucas decides it (a hook asks).
