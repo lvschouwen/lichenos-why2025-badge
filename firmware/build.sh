@@ -38,6 +38,16 @@ fi
 # shellcheck disable=SC1091
 . "$IDF_DIR/export.sh" >/dev/null
 
+# ccache (#196): shared by every worktree slot, so paths are hashed relative to the checkout it builds
+if command -v ccache >/dev/null; then
+    export IDF_CCACHE_ENABLE=${IDF_CCACHE_ENABLE:-1}
+    export CCACHE_BASEDIR=${CCACHE_BASEDIR:-$repo} CCACHE_NOHASHDIR=${CCACHE_NOHASHDIR:-1}
+    host_launcher=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+else
+    echo "note: ccache not installed, builds run uncached (#196)" >&2
+    host_launcher=()
+fi
+
 if [ "$building" = 1 ]; then
     # sdkconfig is generated from sdkconfig.defaults once and then kept, so later edits to the defaults would
     # silently have no effect: set a stale one aside (as sdkconfig.old) so it is regenerated
@@ -48,7 +58,10 @@ if [ "$building" = 1 ]; then
         fi
     done
 
-    cmake -S "$repo/host_tests" -B "$here/build/host_tests" -G Ninja >/dev/null
+    # Static checks first, they take seconds (#196)
+    "$repo/tools/static_checks.sh"
+
+    cmake -S "$repo/host_tests" -B "$here/build/host_tests" -G Ninja "${host_launcher[@]}" >/dev/null
     cmake --build "$here/build/host_tests"
     ctest --test-dir "$here/build/host_tests" --output-on-failure
     python3 -I "$repo/tools/ui_overflow_sweep.py" --selftest # the sweep's guard logic, no badge needed (#133)
@@ -66,6 +79,7 @@ if [ "$building" = 1 ]; then
         case $arg in build|all|app|flash|app-flash) syms= ;; esac
     done
     "$repo/tools/check_app_boundary.sh" $syms
+    "$repo/tools/gen_clangd.sh" # .clangd for clangd/LSP over this build's compile_commands.json (#196)
     # Released images ship this file; it must match the dependencies just built (#18)
     BADGE_IDF_PATH="$IDF_DIR" python3 "$repo/tools/third_party_licenses.py" --check
 else

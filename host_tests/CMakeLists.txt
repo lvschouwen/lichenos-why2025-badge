@@ -12,6 +12,17 @@ message(STATUS "Host test compiler version: ${CMAKE_C_COMPILER_VERSION}")
 # Enable testing
 enable_testing()
 
+# ASan + UBSan on every host test (#196): memory bugs in pure logic fail here, not on the badge.
+# -DHOST_SANITIZE=OFF builds without them (e.g. under valgrind).
+option(HOST_SANITIZE "Build host tests with AddressSanitizer and UndefinedBehaviorSanitizer" ON)
+if(HOST_SANITIZE)
+    add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address,undefined)
+    # Vendored ed25519 (ref10, MeshCore submodule) left-shifts negative values by design; GCC defines the result
+    file(GLOB ED25519_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/../meshcore/lib/ed25519/*.c)
+    set_source_files_properties(${ED25519_SRCS} PROPERTIES COMPILE_OPTIONS -fno-sanitize=shift-base)
+endif()
+
 
 add_executable(c6_image_test
     ${CMAKE_CURRENT_SOURCE_DIR}/c6_image_test.c

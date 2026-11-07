@@ -74,7 +74,9 @@ for app in $APP_COMPONENTS; do
             fail "#include \"$inc\" belongs to component '$owner', which apps may not use (rule B)" "$rel:$line"
             continue
         fi
-        ok=0; for pat in $SYSTEM_HEADERS; do case "$inc" in $pat) ok=1 ;; esac; done
+        ok=0
+        # shellcheck disable=SC2254  # the patterns are globs on purpose
+        for pat in $SYSTEM_HEADERS; do case "$inc" in $pat) ok=1 ;; esac; done
         [ $ok = 1 ] && continue
         fail "#include \"$inc\" is not an allowed header (rule B; add it to SYSTEM_HEADERS only if it is libc or a plain library)" "$rel:$line"
     done < <(grep -rnE '^[[:space:]]*#[[:space:]]*include[[:space:]]*[<"]' --include='*.c' --include='*.cpp' --include='*.h' "$dir" | grep -v '/build/')
@@ -95,6 +97,7 @@ if [ $check_syms = 1 ]; then
         fi
         while read -r obj sym; do
             for pat in $FORBIDDEN_SYMBOLS; do
+                # shellcheck disable=SC2254  # the patterns are globs on purpose
                 case "$sym" in $pat)
                     excepted "$app" "$sym" "$EXCEPT_SYMBOLS" || fail "object references OS-only symbol '$sym' (rule C)" "$obj" ;;
                 esac

@@ -492,6 +492,7 @@ cmd_screenshot() {
     local ip=$1 out=${2:-} work
     umask 077 # the picture can show private messages: nobody else reads it
     work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-shot.XXXXXX")
+    # shellcheck disable=SC2064  # expand now: the temp paths are fixed when the trap is set
     trap "rm -f '$work/shot.bmp'; rmdir '$work' 2>/dev/null" EXIT # the dir stays when it holds the default PNG
     [ -n "$out" ] || out=$work/screenshot.png
     if ! ota_curl --max-time 20 -o "$work/shot.bmp" "http://$ip:$OTA_PORT/screenshot"; then
@@ -538,6 +539,7 @@ cmd_log() {
     local ip=$1 follow=${2:-} since=0 hdr body next missed code work full
     umask 077
     work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-log.XXXXXX")
+    # shellcheck disable=SC2064  # expand now: the temp paths are fixed when the trap is set
     trap "rm -f '$work/hdr' '$work/body'; rmdir '$work' 2>/dev/null" EXIT
     hdr=$work/hdr body=$work/body
     while :; do
@@ -577,6 +579,7 @@ cmd_crashes() {
     local ip=$1 work
     umask 077
     work=$(mktemp -d "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-crashes.XXXXXX")
+    # shellcheck disable=SC2064  # expand now: the temp paths are fixed when the trap is set
     trap "rm -f '$work/body'; rmdir '$work' 2>/dev/null" EXIT
     if ! ota_curl --max-time 20 -o "$work/body" "http://$ip:$OTA_PORT/crashes"; then
         head -c 300 "$work/body" 2>/dev/null | printable >&2
@@ -593,6 +596,7 @@ cmd_fw() {
     # In a private file, not on the command line: the line can hold a Wi-Fi password (the token goes in on stdin)
     umask 077
     work=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-fw.XXXXXX")
+    # shellcheck disable=SC2064  # expand now: the temp paths are fixed when the trap is set
     trap "rm -f '$work'" EXIT
     printf '%s' "$line" > "$work"
     ota_curl --max-time 60 -X POST -H 'Content-Type: text/plain' --data-binary "@$work" "http://$ip:$OTA_PORT/console" | printable

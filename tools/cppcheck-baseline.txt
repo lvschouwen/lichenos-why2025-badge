@@ -1,0 +1,12 @@
+# Accepted cppcheck findings in existing code (#196), id:file. Each was checked by hand: false positives
+# (arrays filled before use, a pointer reset before return, buffers written by an encoder). Don't add new code here.
+autoVariables:firmware/components/lichen_shell/ui_probe.c
+ctunullpointer:firmware/components/c6link/c6link.c
+identicalInnerCondition:firmware/components/sensors/sensors_bus.c
+memsetClassFloat:firmware/components/mesh/mesh_task.cpp
+uninitvar:firmware/components/lichen_shell/shortcuts.c
+uninitvar:firmware/components/lichen_shell/ui_probe.c
+uninitvar:firmware/components/lichen_shell/ui_remote.c
+uninitvar:firmware/components/mesh/mesh_link.cpp
+uninitvar:firmware/components/mesh/mesh_task.cpp
+uninitvar:firmware/components/psram_guard/psram_guard.c

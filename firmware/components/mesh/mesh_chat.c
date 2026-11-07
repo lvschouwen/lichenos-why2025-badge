@@ -20,7 +20,7 @@ void mesh_format_trip(uint32_t ms, char *out, size_t cap) {
 static mesh_status_kind_t dm_status(mesh_msg_t const *m, char *out, size_t cap) {
     char try_[16] = "";
     if (m->attempt > 1) {
-        snprintf(try_, sizeof(try_), ", try %u/%u", (unsigned)m->attempt, OB_MAX_ATTEMPTS);
+        snprintf(try_, sizeof(try_), ", try %u/%u", (unsigned)m->attempt, (unsigned)OB_MAX_ATTEMPTS);
     }
     switch ((mesh_out_state_t)m->state) {
     case MESH_OUT_QUEUED:

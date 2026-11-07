@@ -18,7 +18,7 @@ bool rn_parse_name(char const *name, uint32_t *seq, char *date) {
     }
     size_t   i = 0;
     uint32_t v = 0;
-    while (isdigit((unsigned char)name[i]) && i < 9) {
+    while (i < 9 && isdigit((unsigned char)name[i])) {
         v = v * 10 + (uint32_t)(name[i] - '0');
         i++;
     }

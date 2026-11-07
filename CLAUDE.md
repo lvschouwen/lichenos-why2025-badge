@@ -8,7 +8,8 @@ Lichen OS is the operating system for the WHY2025 badge: the ESP32-P4 runs Liche
 - Submodules: `meshcore/` (fork, branch why2025-badge), `esp_hosted/` (fork), `third_party/*`.
 
 ## Build and check
-- Full check: `BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build` = host tests (ctest) + C6 image + storage staging + P4 image + app boundary check (`tools/check_app_boundary.sh`) + licence check. It must be green before a commit.
+- Full check: `BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build` = static checks (`tools/static_checks.sh`: shellcheck, cppcheck on changed C/C++ with `tools/cppcheck-baseline.txt`) + host tests (ctest, ASan+UBSan) + C6 image + storage staging + P4 image + app boundary check (`tools/check_app_boundary.sh`) + licence check. It must be green before a commit.
+- ccache is on when installed (shared across worktree slots); `build.sh build` writes a gitignored `.clangd` for clangd/LSP.
 - Host tests only: `cmake -S host_tests -B host_tests/build && cmake --build host_tests/build -j8 && ctest --test-dir host_tests/build`.
 - After committing run `./firmware/build.sh reconfigure build` so the image label `fw-<sha>` matches the commit.
 - The build reformats `dependencies.lock`: `git restore dependencies.lock` unless dependencies really changed.
