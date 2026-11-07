@@ -1542,3 +1542,11 @@ add_executable(mesh_rhist_test
 target_include_directories(mesh_rhist_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
 target_compile_options(mesh_rhist_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_rhist_test COMMAND mesh_rhist_test)
+# Notification sounds (#67): tone patterns, volume curve, gating, rate limit, sample generator
+add_executable(audio_pattern_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio_pattern_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_audio/audio_pattern.c
+)
+target_include_directories(audio_pattern_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_audio)
+target_compile_options(audio_pattern_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME audio_pattern_test COMMAND audio_pattern_test)
