@@ -4,18 +4,19 @@
 // The keypad is attached after the C6 comes up (main.c), so the key works from then on, not during the first steps.
 // Shows nothing app-specific (no MeshCore version or node id): the OS speaks only for itself.
 // Reads lichen_sys_boot_view() only. Moves on to home by itself 2 s after the last step ends (5 s after a failure).
-#include "lichen_sys_boot.h"
-#include "lichen_sys_crash.h"
 #include "esp_app_desc.h"
 #include "esp_timer.h"
-#include "logo.h"
-#include "os_name.h"
-#include "lvgl_private.h" // lv_indev_t.long_pr_sent: a key repeat, not a press (no public getter in LVGL 9)
-#include "shell_parts.h"
 #include "fonts.h"
+#include "lichen_sys_boot.h"
+#include "lichen_sys_crash.h"
+#include "logo.h"
+#include "lvgl_private.h" // lv_indev_t.long_pr_sent: a key repeat, not a press (no public getter in LVGL 9)
+#include "os_name.h"
+#include "shell_parts.h"
 #include "theme.h"
 
 #include <stdio.h>
+
 #include <string.h>
 
 #define TICK_MS        100
@@ -25,14 +26,22 @@
 #define SHOW_LOG_LINES 5
 
 // The mockup's short names, so eight fit under the bar at a readable size
-static char const *const short_labels[LICHEN_BOOT_STEP_COUNT] = {"stor", "disp", "psram", "c6", "wifi", "clock", "lora", "apps"};
-static char const *const doing[LICHEN_BOOT_STEP_COUNT]        = {
-    "mounting storage", "starting the display", "checking PSRAM", "checking the C6",
-    "joining Wi-Fi",    "setting the clock",    "starting LoRa",  "starting apps",
+static char const *const short_labels[LICHEN_BOOT_STEP_COUNT] = {
+    "stor", "disp", "psram", "c6", "wifi", "clock", "lora", "apps"
+};
+static char const *const doing[LICHEN_BOOT_STEP_COUNT] = {
+    "mounting storage",
+    "starting the display",
+    "checking PSRAM",
+    "checking the C6",
+    "joining Wi-Fi",
+    "setting the clock",
+    "starting LoRa",
+    "starting apps",
 };
 
-static lv_obj_t  *segments[LICHEN_BOOT_STEP_COUNT];
-static lv_obj_t  *seg_labels[LICHEN_BOOT_STEP_COUNT];
+static lv_obj_t          *segments[LICHEN_BOOT_STEP_COUNT];
+static lv_obj_t          *seg_labels[LICHEN_BOOT_STEP_COUNT];
 static lv_obj_t  *step_text;
 static lv_obj_t  *step_pct;
 static lv_obj_t  *failures;
@@ -125,18 +134,32 @@ static void show_steps(void) {
     lv_bar_set_value(calm_bar, lichen_sys_boot_overall_pct(&view), LV_ANIM_OFF);
     if (running >= 0) {
         char buf[48];
-        set_text(calm_text, lichen_sys_boot_sentence((lichen_boot_step_t)running, running == (int)view.current ? view.pct : -1, buf, sizeof(buf)));
+        set_text(
+            calm_text,
+            lichen_sys_boot_sentence(
+                (lichen_boot_step_t)running,
+                running == (int)view.current ? view.pct : -1,
+                buf,
+                sizeof(buf)
+            )
+        );
     } else if (ended(view.state[LICHEN_BOOT_APPS])) {
         set_text(calm_text, "Ready");
     }
 
     // A failed step keeps its reason on screen (boot carries on where it can)
-    char text[LICHEN_BOOT_STEP_COUNT * (LICHEN_BOOT_REASON_LEN + 16)] = "";
+    char   text[LICHEN_BOOT_STEP_COUNT * (LICHEN_BOOT_REASON_LEN + 16)] = "";
     size_t used = 0;
     for (int i = 0; i < LICHEN_BOOT_STEP_COUNT && used < sizeof(text); i++) {
         if (view.state[i] == LICHEN_STEP_FAILED) {
-            used += snprintf(text + used, sizeof(text) - used, "%s%s failed: %s", used ? "\n" : "",
-                             lichen_sys_boot_label((lichen_boot_step_t)i), view.reason[i][0] ? view.reason[i] : "?");
+            used += snprintf(
+                text + used,
+                sizeof(text) - used,
+                "%s%s failed: %s",
+                used ? "\n" : "",
+                lichen_sys_boot_label((lichen_boot_step_t)i),
+                view.reason[i][0] ? view.reason[i] : "?"
+            );
         }
     }
     set_text(failures, text);

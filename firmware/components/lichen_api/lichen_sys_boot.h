@@ -4,10 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// The boot progress and the console log tap, the shell's side (#244, #216 decision 1): the boot screen and the log store
-// read them through here, never from lichen_boot headers. System surface: tools/layers.conf forbids lichen_sys_* in L6.
-// The types repeat lichen_boot's (the gate cannot include it); lichen_sys_pure_view.c keeps them equal with asserts.
-// Everything is safe from any task unless it says otherwise.
+// The boot progress and the console log tap, the shell's side (#244, #216 decision 1): the boot screen and the log
+// store read them through here, never from lichen_boot headers. System surface: tools/layers.conf forbids lichen_sys_*
+// in L6. The types repeat lichen_boot's (the gate cannot include it); lichen_sys_pure_view.c keeps them equal with
+// asserts. Everything is safe from any task unless it says otherwise.
 
 typedef enum {
     LICHEN_BOOT_STORAGE,
@@ -47,16 +47,16 @@ typedef struct {
 #define LICHEN_LOG_TAP_LINE_LEN 96
 
 // A copy of the boot progress. Any task.
-void lichen_sys_boot_view(lichen_boot_view_t *out);
+void        lichen_sys_boot_view(lichen_boot_view_t *out);
 // The step's short name ("storage"). Static text, pure, any task.
 char const *lichen_sys_boot_label(lichen_boot_step_t step);
 // The one human line for a step, written into buf (terminated, cut if cap is small); pct counts only for the C6 image
 // update, pass -1 otherwise. Pure, any task.
 char const *lichen_sys_boot_sentence(lichen_boot_step_t step, int pct, char *buf, size_t cap);
 // Steps done, failed or skipped over all steps, 0..100. Pure, any task.
-int lichen_sys_boot_overall_pct(lichen_boot_view_t const *v);
+int         lichen_sys_boot_overall_pct(lichen_boot_view_t const *v);
 // Up to max of the last console lines, newest last, ANSI colour codes stripped; returns how many. Any task.
-size_t lichen_sys_log_tap_last(char lines[][LICHEN_LOG_TAP_LINE_LEN], size_t max);
+size_t      lichen_sys_log_tap_last(char lines[][LICHEN_LOG_TAP_LINE_LEN], size_t max);
 // Drops ESC [ ... colour sequences and every CR and LF; out holds len + 1 bytes, in and out may be the same buffer;
 // returns the new length. Pure, any task.
-size_t lichen_sys_log_clean(char const *in, size_t len, char *out);
+size_t      lichen_sys_log_clean(char const *in, size_t len, char *out);

@@ -1,15 +1,15 @@
 #include "log_store.h"
 
-#include "lichen_sys_boot.h"
-#include "log_ring.h"
-
-#include "lichen_mem.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "lichen_mem.h"
+#include "lichen_sys_boot.h"
+#include "log_ring.h"
 
 #include <stdarg.h>
 #include <stdio.h>
+
 #include <string.h>
 
 static log_ring_t     ring;
@@ -77,8 +77,9 @@ static int hook(char const *fmt, va_list args) {
         if (n > 0) {
             size_t len      = (size_t)n < sizeof(text) - 1 ? (size_t)n : sizeof(text) - 2;
             bool   newline  = (size_t)n >= sizeof(text) - 1 || text[len - 1] == '\n'; // a cut-off line ends too
-            // lichen_sys_log_clean drops colour codes and line ends; esp_log sends one line per call, so a line end goes back
-            len = lichen_sys_log_clean(text, len, text);
+            // lichen_sys_log_clean drops colour codes and line ends; esp_log sends one line per call, so a line end
+            // goes back
+            len             = lichen_sys_log_clean(text, len, text);
             if (newline) {
                 text[len++] = '\n';
             }

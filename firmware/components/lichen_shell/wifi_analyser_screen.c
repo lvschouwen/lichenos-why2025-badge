@@ -1,22 +1,23 @@
 // Settings > Wi-Fi > Wi-Fi analyser (#159): access points per 2.4 GHz channel as bars, and a signal history for one
-// chosen network to walk towards it. One scan every LICHEN_SYS_WIFI_AN_SCAN_GAP_MS at most (scans disturb the link, #146); wifi_scan
-// itself refuses during a firmware update. The scan runs on its own task, never on the LVGL task. Network names are
-// shown here only: nothing is logged.
-#include "lichen_mem.h"
+// chosen network to walk towards it. One scan every LICHEN_SYS_WIFI_AN_SCAN_GAP_MS at most (scans disturb the link,
+// #146); wifi_scan itself refuses during a firmware update. The scan runs on its own task, never on the LVGL task.
+// Network names are shown here only: nothing is logged.
 #include "esp_log.h"
-#include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lichen_mem.h"
+#include "lichen_sys_net.h"
+#include "lichen_sys_ui.h"
 #include "lichen_task.h"
 #include "lichen_ui.h"
 #include "screen_ids.h"
 #include "shell_parts.h"
 #include "theme.h"
-#include "lichen_sys_net.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <string.h>
 
 #define MAX_RAW   32
@@ -31,20 +32,20 @@
 static char const TAG[] = "wifi-an";
 
 typedef struct {
-    lichen_sys_wifi_ap_t         raw[MAX_RAW];   // the last scan, every AP
-    lichen_sys_wifi_ap_t         list[MAX_RAW];  // the same, one per name, strongest first: what Up/Down choose from
+    lichen_sys_wifi_ap_t    raw[MAX_RAW];  // the last scan, every AP
+    lichen_sys_wifi_ap_t    list[MAX_RAW]; // the same, one per name, strongest first: what Up/Down choose from
     size_t            raw_n, list_n;
-    lichen_sys_wifi_meter_t      meter;
+    lichen_sys_wifi_meter_t meter;
     char              watched[33];    // the network being followed ("" = the strongest one)
     bool              scanned;        // at least one scan came back
     bool              scanning;
     bool              ever;           // a scan was started
     uint32_t          last_ms;        // when the last scan started
-    lichen_sys_wifi_ap_t         last_seen;      // the watched AP in the last scan
+    lichen_sys_wifi_ap_t    last_seen;      // the watched AP in the last scan
     bool              seen;
-    lv_obj_t         *count[LICHEN_SYS_WIFI_AN_CHANNELS + 1];
-    lv_obj_t         *bar[LICHEN_SYS_WIFI_AN_CHANNELS + 1];
-    lv_obj_t         *meter_bar[LICHEN_SYS_WIFI_METER_LEN];
+    lv_obj_t               *count[LICHEN_SYS_WIFI_AN_CHANNELS + 1];
+    lv_obj_t               *bar[LICHEN_SYS_WIFI_AN_CHANNELS + 1];
+    lv_obj_t               *meter_bar[LICHEN_SYS_WIFI_METER_LEN];
     lv_obj_t         *status, *name, *value;
     lv_timer_t       *timer;
 } an_t;
@@ -137,13 +138,18 @@ static void draw_channels(void) {
 static void draw_meter(void) {
     for (int i = 0; i < LICHEN_SYS_WIFI_METER_LEN; i++) {
         // The newest reading is on the right; the older ones are to its left
-        size_t  age = LICHEN_SYS_WIFI_METER_LEN - 1 - (size_t)i;
-        int8_t  r   = age < an->meter.n ? lichen_sys_wifi_meter_at(&an->meter, an->meter.n - 1 - age) : LICHEN_SYS_WIFI_RSSI_NONE;
-        int     h   = r == LICHEN_SYS_WIFI_RSSI_NONE ? 2 : lichen_sys_wifi_level_pct(r) * METER_H / 100;
+        size_t age = LICHEN_SYS_WIFI_METER_LEN - 1 - (size_t)i;
+        int8_t r =
+            age < an->meter.n ? lichen_sys_wifi_meter_at(&an->meter, an->meter.n - 1 - age) : LICHEN_SYS_WIFI_RSSI_NONE;
+        int h       = r == LICHEN_SYS_WIFI_RSSI_NONE ? 2 : lichen_sys_wifi_level_pct(r) * METER_H / 100;
         h           = h < 2 ? 2 : h;
         lv_obj_set_size(an->meter_bar[i], METER_BAR, h);
         lv_obj_set_y(an->meter_bar[i], METER_H - h);
-        lv_obj_set_style_bg_color(an->meter_bar[i], lv_color_hex(r == LICHEN_SYS_WIFI_RSSI_NONE ? THEME_FAINT : THEME_TEAL), 0);
+        lv_obj_set_style_bg_color(
+            an->meter_bar[i],
+            lv_color_hex(r == LICHEN_SYS_WIFI_RSSI_NONE ? THEME_FAINT : THEME_TEAL),
+            0
+        );
     }
 }
 
@@ -158,8 +164,14 @@ static void draw_watched(void) {
     lichen_sys_wifi_ssid_sanitize(an->watched, shown, sizeof(shown));
     lv_label_set_text(an->name, shown);
     if (an->seen) {
-        snprintf(text, sizeof(text), "%d dBm, %d of 4 bars, channel %u", an->last_seen.rssi, lichen_sys_wifi_bars(an->last_seen.rssi),
-                 an->last_seen.channel);
+        snprintf(
+            text,
+            sizeof(text),
+            "%d dBm, %d of 4 bars, channel %u",
+            an->last_seen.rssi,
+            lichen_sys_wifi_bars(an->last_seen.rssi),
+            an->last_seen.channel
+        );
     } else {
         snprintf(text, sizeof(text), "Not seen in the last scan");
     }

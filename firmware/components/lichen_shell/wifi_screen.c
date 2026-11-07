@@ -2,24 +2,25 @@
 // ESP-Hosted, so it never runs on the LVGL task; its result comes back through lv_async_call and is dropped if the
 // screen is gone by then.
 #include "esp_log.h"
-#include "screen_ids.h"
-#include "lichen_sys_ui.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_radio.h"
+#include "lichen_sys_net.h"
+#include "lichen_sys_ui.h"
 #include "lichen_task.h"
 #include "lichen_ui.h"
 #include "menu.h"
+#include "screen_ids.h"
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "text_entry.h"
 #include "theme.h"
-#include "lichen_sys_net.h"
 
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <string.h>
 
 #define MAX_APS         20
@@ -40,10 +41,11 @@ static lv_obj_t   *status;
 static lv_group_t *group;
 static lv_timer_t *poll;
 static uint32_t    gen;
-static lv_obj_t   *rows[MAX_APS + LICHEN_SYS_WIFI_SAVED_MAX + 4]; // the placeholder or the networks, "Scan again", then the saved ones
+static lv_obj_t *
+    rows[MAX_APS + LICHEN_SYS_WIFI_SAVED_MAX + 4]; // the placeholder or the networks, "Scan again", then the saved ones
 static size_t      row_count;
 static lv_obj_t   *focus_at_scan; // what had the focus when the scan started: compared, never dereferenced
-static lichen_sys_wifi_ap_t   shown[MAX_APS];
+static lichen_sys_wifi_ap_t shown[MAX_APS];
 static size_t      shown_n;
 static char        target[33];
 static void      (*setup_done)(void); // set while this is the first-run Wi-Fi step
@@ -260,7 +262,7 @@ static void on_forget(void *arg) {
 // builder, in the screen's group
 static void build_saved_rows(void *arg) {
     (void)arg;
-    char names[LICHEN_SYS_WIFI_SAVED_MAX][33];
+    char   names[LICHEN_SYS_WIFI_SAVED_MAX][33];
     size_t n = shell_sources.wifi_saved_names ? shell_sources.wifi_saved_names(names, LICHEN_SYS_WIFI_SAVED_MAX) : 0;
     rows[row_count++] = menu_note(menu, n ? "Saved networks" : "No saved networks yet: pick one above to join and save it.");
     for (size_t i = 0; i < n; i++) {
@@ -453,8 +455,9 @@ static lv_obj_t *build(void) {
         add_saved_rows();
         set_status(lichen_airplane_get() ? "Wi-Fi is off (airplane mode)" : "Wi-Fi is off");
     }
-    lichen_sys_wifi_join_t now = shell_sources.wifi_join_state ? shell_sources.wifi_join_state(target, sizeof(target), NULL, 0)
-                                                          : LICHEN_SYS_WIFI_JOIN_NONE;
+    lichen_sys_wifi_join_t now = shell_sources.wifi_join_state
+                                     ? shell_sources.wifi_join_state(target, sizeof(target), NULL, 0)
+                                     : LICHEN_SYS_WIFI_JOIN_NONE;
     if (now == LICHEN_SYS_WIFI_JOIN_TRYING || now == LICHEN_SYS_WIFI_JOIN_PENDING) {
         poll = lv_timer_create(on_poll, POLL_MS, NULL); // a trial started earlier is still running
     }

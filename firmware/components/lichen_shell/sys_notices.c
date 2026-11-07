@@ -3,21 +3,22 @@
 // (pure) decides what is news and this raises it as source "lichen". Nothing here touches the radio or the C6 link
 // beyond reading their status, and nothing touches LVGL: lichen_notify() is safe from any task. The storage drive's
 // free space is read once a minute (FatFs may scan its table).
-#include "lichen_sys_crash.h"
-#include "lichen_sys_storage.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "lichen_sys_clock.h"
 #include "lichen_notify.h"
-#include "lichen_task.h"
 #include "lichen_sensors.h"
+#include "lichen_sys_clock.h"
+#include "lichen_sys_crash.h"
+#include "lichen_sys_storage.h"
+#include "lichen_task.h"
 #include "psram_boot.h"
 #include "shell_parts.h"
 #include "sys_notice_rules.h"
 #include "update_screen.h"
 
 #include <stdio.h>
+
 #include <string.h>
 
 static char const TAG[] = "sys_notices";
@@ -74,7 +75,7 @@ static void read_snapshot(sysn_snapshot_t *s, lichen_sd_info_t *sd, unsigned pol
     s->crash_recovered        = lichen_sys_crash_recovered();
     s->storage_unmounted      = !lichen_sys_storage_mounted();
     s->psram_bad              = psram_boot_bad(NULL, 0);
-    lichen_clock_sync_t clock   = lichen_sys_clock_sync_info();
+    lichen_clock_sync_t clock = lichen_sys_clock_sync_info();
     s->clock_refused          = clock.refused;
     s->clock_recovered        = clock.last_verdict == LICHEN_CLOCK_RECOVERED;
     s->update                 = (int)update_screen_boot_result(NULL, 0);

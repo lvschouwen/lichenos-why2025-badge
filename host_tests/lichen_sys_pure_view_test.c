@@ -3,10 +3,10 @@
 // mirrors are checked at compile time by lichen_sys_pure_view.c itself.
 #include "lichen_sys_boot.h"
 #include "lichen_sys_clock.h"
-#include "lichen_sys_keys.h"
 #include "lichen_sys_net.h"
 
 #include <stdio.h>
+
 #include <string.h>
 
 static int failures;
@@ -29,8 +29,10 @@ static void test_clock(void) {
     CHECK(lichen_sys_clock_back_hint(1000, 999) == NULL && lichen_sys_clock_back_hint(10000, 1000) != NULL);
     CHECK(strcmp(lichen_sys_clock_verdict_text(LICHEN_CLOCK_OK), "ok") == 0);
     CHECK(lichen_sys_clock_in_window(1800000000, 1800000000) && !lichen_sys_clock_in_window(1000, 1800000000));
-    CHECK(lichen_sys_clock_accepted(LICHEN_CLOCK_OK) && lichen_sys_clock_accepted(LICHEN_CLOCK_RECOVERED) &&
-          !lichen_sys_clock_accepted(LICHEN_CLOCK_OUTRANKED));
+    CHECK(
+        lichen_sys_clock_accepted(LICHEN_CLOCK_OK) && lichen_sys_clock_accepted(LICHEN_CLOCK_RECOVERED) &&
+        !lichen_sys_clock_accepted(LICHEN_CLOCK_OUTRANKED)
+    );
 }
 
 static void test_net(void) {
@@ -40,11 +42,21 @@ static void test_net(void) {
     CHECK(lichen_sys_wifi_cred_valid("home", "") && lichen_sys_wifi_cred_valid("home", "12345678"));
     CHECK(!lichen_sys_wifi_cred_valid("", "12345678") && !lichen_sys_wifi_cred_valid("home", "short"));
     char out[16];
-    CHECK(lichen_sys_wifi_ssid_sanitize("a\x01" "b", out, sizeof(out)) == 6 && strcmp(out, "a\\x01b") == 0);
+    CHECK(
+        lichen_sys_wifi_ssid_sanitize(
+            "a\x01"
+            "b",
+            out,
+            sizeof(out)
+        ) == 6 &&
+        strcmp(out, "a\\x01b") == 0
+    );
 
-    lichen_sys_wifi_ap_t aps[3] = {{.ssid = "b", .rssi = -70, .channel = 6},
-                                   {.ssid = "", .rssi = -40, .channel = 1},
-                                   {.ssid = "a", .rssi = -50, .channel = 6}};
+    lichen_sys_wifi_ap_t aps[3] = {
+        {.ssid = "b", .rssi = -70, .channel = 6},
+        {.ssid = "", .rssi = -40, .channel = 1},
+        {.ssid = "a", .rssi = -50, .channel = 6}
+    };
     CHECK(lichen_sys_wifi_list_clean(aps, 3) == 2 && strcmp(aps[0].ssid, "a") == 0 && strcmp(aps[1].ssid, "b") == 0);
     lichen_sys_wifi_chan_stats_t cs;
     lichen_sys_wifi_chan_stats(aps, 2, &cs);
@@ -63,6 +75,14 @@ static void test_net(void) {
     CHECK(lichen_sys_wifi_an_scan_due(true, 1000, 1000 + LICHEN_SYS_WIFI_AN_SCAN_GAP_MS));
 }
 
+static void test_join(void) {
+    CHECK(lichen_sys_wifi_join_of(0) == LICHEN_SYS_WIFI_JOIN_NONE);
+    CHECK(lichen_sys_wifi_join_of(1) == LICHEN_SYS_WIFI_JOIN_PENDING);
+    CHECK(lichen_sys_wifi_join_of(2) == LICHEN_SYS_WIFI_JOIN_TRYING);
+    CHECK(lichen_sys_wifi_join_of(3) == LICHEN_SYS_WIFI_JOIN_JOINED);
+    CHECK(lichen_sys_wifi_join_of(4) == LICHEN_SYS_WIFI_JOIN_FAILED_KEPT_OLD);
+}
+
 static void test_boot(void) {
     lichen_boot_view_t v;
     memset(&v, 0, sizeof(v));
@@ -73,14 +93,15 @@ static void test_boot(void) {
     CHECK(lichen_sys_boot_overall_pct(&v) == 100);
     char buf[64];
     CHECK(lichen_sys_boot_sentence(LICHEN_BOOT_C6, -1, buf, sizeof(buf)) == buf && buf[0] != '\0');
-    char text[] = "\x1b[31mred\x1b[0m\r\n";
-    size_t n = lichen_sys_log_clean(text, strlen(text), text);
+    char   text[] = "\x1b[31mred\x1b[0m\r\n";
+    size_t n      = lichen_sys_log_clean(text, strlen(text), text);
     CHECK(n == 3 && strcmp(text, "red") == 0);
 }
 
 int main(void) {
     test_clock();
     test_net();
+    test_join();
     test_boot();
     if (failures) {
         printf("lichen_sys_pure_view_test: %d failure(s)\n", failures);

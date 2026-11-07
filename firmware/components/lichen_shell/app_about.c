@@ -3,20 +3,21 @@
 // storage, the SD card, uptime and the local clock. Up/Down scroll when it doesn't fit; the detail lines refresh once a second.
 #include "app_icons.h"
 #include "esp_app_desc.h"
-#include "lichen_sys_mem.h"
 #include "esp_timer.h"
-#include "lichen_sys_clock.h"
-#include "lichen_ui.h"
-#include "lichen_app.h"
-#include "os_name.h"
-#include "logo.h"
-#include "lichen_sys_storage.h"
-#include "shell_parts.h"
 #include "fonts.h"
+#include "lichen_app.h"
+#include "lichen_sys_clock.h"
+#include "lichen_sys_mem.h"
+#include "lichen_sys_storage.h"
+#include "lichen_ui.h"
+#include "logo.h"
+#include "os_name.h"
+#include "shell_parts.h"
 #include "theme.h"
 
 #include <inttypes.h>
 #include <stdio.h>
+
 #include <string.h>
 #include <time.h>
 

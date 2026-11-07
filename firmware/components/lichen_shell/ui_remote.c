@@ -1,22 +1,24 @@
 // "fw ui lock" and "fw ui open" (#190). The lock state is shared by the keyboard task (every physical key), the console
 // task (commands) and the LVGL task (the timer that ends it and draws the banner), so it lives under a spinlock; the
 // rules themselves are remote_ctl.c. It is RAM only: a restart always ends it.
+#include "ui_remote.h"
+
 #include "esp_log.h"
-#include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "fw_console.h"
 #include "key_matrix.h"
-#include "lichen_sys_keys.h"
 #include "lichen_app.h"
+#include "lichen_sys_keys.h"
+#include "lichen_sys_ui.h"
 #include "nav.h"
 #include "raw_keys.h"
 #include "remote_ctl.h"
 #include "shell_parts.h"
-#include "ui_remote.h"
 #include "update_screen.h"
 
 #include <stdio.h>
+
 #include <string.h>
 
 static char const TAG[] = "ui_remote";

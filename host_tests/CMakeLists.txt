@@ -1176,7 +1176,7 @@ set(SYS_VIEW_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/log_clean.c
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs/nvs_stub.c)
 set(SYS_VIEW_INCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_clock ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_clock ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_mdns ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
 
 add_executable(lichen_sys_pure_view_test ${CMAKE_CURRENT_SOURCE_DIR}/lichen_sys_pure_view_test.c ${SYS_VIEW_SRCS})
 target_include_directories(lichen_sys_pure_view_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs)

@@ -1,29 +1,40 @@
-// The ESP-free part of lichen_sys_clock.h, lichen_sys_net.h, lichen_sys_boot.h and lichen_sys_keys.h (#244): the pure
+// The ESP-free part of lichen_sys_clock.h, lichen_sys_net.h and lichen_sys_boot.h (#244): the pure
 // helpers the shell's views call, one-for-one over lichen_clock's clock_check.c / clock_local.c, lichen_net's
 // wifi_list.c / wifi_analyser.c and lichen_boot's boot_text.c / log_clean.c. Kept apart from the glue so
 // host_tests/lichen_sys_pure_view_test.c links it. The gate's types repeat the components' (it cannot include them);
 // the asserts below keep them equal, so the conversions are plain casts and copies.
-#include "lichen_sys_boot.h"
-#include "lichen_sys_clock.h"
-#include "lichen_sys_keys.h"
-#include "lichen_sys_net.h"
-
 #include "boot_text.h"
 #include "clock_check.h"
 #include "clock_local.h"
-#include "key_raw.h"
+#include "lichen_sys_boot.h"
+#include "lichen_sys_clock.h"
+#include "lichen_sys_net.h"
 #include "log_clean.h"
+#include "mdns_name.h"
 #include "wifi_analyser.h"
+#include "wifi_join.h"
 #include "wifi_list.h"
+#include "wifi_saved.h"
 
 #include <stddef.h>
+
 #include <string.h>
 
-// A mirror field matches when it sits at the same offset with the same size (and so the same type width)
+// A mirror field matches when it sits at the same offset, has the same size and is the same C type. An enum field is
+// a different enum type on each side by construction: MIRROR_ENUM_FIELD checks offset and size only (its values are
+// pinned by MIRROR_ENUM).
+#define MIRROR_ENUM_FIELD(mine, theirs, field)                                                                         \
+    _Static_assert(                                                                                                    \
+        offsetof(mine, field) == offsetof(theirs, field) &&                                                            \
+            sizeof(((mine *)0)->field) == sizeof(((theirs *)0)->field),                                                \
+        "the gate's " #mine "." #field " follows " #theirs                                                             \
+    )
 #define MIRROR_FIELD(mine, theirs, field)                                                                              \
-    _Static_assert(offsetof(mine, field) == offsetof(theirs, field) &&                                                 \
-                       sizeof(((mine *)0)->field) == sizeof(((theirs *)0)->field),                                     \
-                   "the gate's " #mine "." #field " follows " #theirs)
+    MIRROR_ENUM_FIELD(mine, theirs, field);                                                                            \
+    _Static_assert(                                                                                                    \
+        __builtin_types_compatible_p(__typeof__(((mine *)0)->field), __typeof__(((theirs *)0)->field)),                \
+        "the gate's " #mine "." #field " has the type of " #theirs                                                     \
+    )
 #define MIRROR_ENUM(mine, theirs) _Static_assert((int)(mine) == (int)(theirs), "the gate's " #mine " follows " #theirs)
 
 MIRROR_ENUM(LICHEN_CLOCK_OK, CLOCK_OK);
@@ -44,17 +55,22 @@ MIRROR_ENUM(LICHEN_CLOCK_LOCAL_GAP, CLOCK_LOCAL_GAP);
 MIRROR_ENUM(LICHEN_CLOCK_LOCAL_TWICE, CLOCK_LOCAL_TWICE);
 MIRROR_ENUM(LICHEN_CLOCK_LOCAL_BAD_DATE, CLOCK_LOCAL_BAD_DATE);
 
-_Static_assert(LICHEN_SYS_WIFI_SSID_MAX + 1 == sizeof(((wifi_ap_t *)0)->ssid), "the gate's SSID size follows lichen_net's");
+_Static_assert(
+    LICHEN_SYS_WIFI_SSID_MAX + 1 == sizeof(((wifi_ap_t *)0)->ssid), "the gate's SSID size follows lichen_net's"
+);
 _Static_assert(sizeof(lichen_sys_wifi_ap_t) == sizeof(wifi_ap_t), "the gate's AP follows lichen_net's");
 MIRROR_FIELD(lichen_sys_wifi_ap_t, wifi_ap_t, ssid);
 MIRROR_FIELD(lichen_sys_wifi_ap_t, wifi_ap_t, rssi);
 MIRROR_FIELD(lichen_sys_wifi_ap_t, wifi_ap_t, open);
 MIRROR_FIELD(lichen_sys_wifi_ap_t, wifi_ap_t, channel);
-_Static_assert(LICHEN_SYS_WIFI_AN_CHANNELS == WIFI_AN_CHANNELS && LICHEN_SYS_WIFI_METER_LEN == WIFI_METER_LEN &&
-                   LICHEN_SYS_WIFI_RSSI_NONE == WIFI_RSSI_NONE && LICHEN_SYS_WIFI_AN_SCAN_GAP_MS == WIFI_AN_SCAN_GAP_MS,
-               "the gate's analyser sizes follow lichen_net's");
-_Static_assert(sizeof(lichen_sys_wifi_chan_stats_t) == sizeof(wifi_chan_stats_t),
-               "the gate's channel stats follow lichen_net's");
+_Static_assert(
+    LICHEN_SYS_WIFI_AN_CHANNELS == WIFI_AN_CHANNELS && LICHEN_SYS_WIFI_METER_LEN == WIFI_METER_LEN &&
+        LICHEN_SYS_WIFI_RSSI_NONE == WIFI_RSSI_NONE && LICHEN_SYS_WIFI_AN_SCAN_GAP_MS == WIFI_AN_SCAN_GAP_MS,
+    "the gate's analyser sizes follow lichen_net's"
+);
+_Static_assert(
+    sizeof(lichen_sys_wifi_chan_stats_t) == sizeof(wifi_chan_stats_t), "the gate's channel stats follow lichen_net's"
+);
 MIRROR_FIELD(lichen_sys_wifi_chan_stats_t, wifi_chan_stats_t, count);
 MIRROR_FIELD(lichen_sys_wifi_chan_stats_t, wifi_chan_stats_t, best);
 _Static_assert(sizeof(lichen_sys_wifi_meter_t) == sizeof(wifi_meter_t), "the gate's meter follows lichen_net's");
@@ -78,9 +94,9 @@ MIRROR_ENUM(LICHEN_STEP_FAILED, STEP_FAILED);
 MIRROR_ENUM(LICHEN_STEP_SKIPPED, STEP_SKIPPED);
 _Static_assert(LICHEN_BOOT_REASON_LEN == BOOT_REASON_LEN, "the gate's boot reason size follows lichen_boot's");
 _Static_assert(sizeof(lichen_boot_view_t) == sizeof(boot_view_t), "the gate's boot view follows lichen_boot's");
-MIRROR_FIELD(lichen_boot_view_t, boot_view_t, state);
+MIRROR_ENUM_FIELD(lichen_boot_view_t, boot_view_t, state);
 MIRROR_FIELD(lichen_boot_view_t, boot_view_t, pct);
-MIRROR_FIELD(lichen_boot_view_t, boot_view_t, current);
+MIRROR_ENUM_FIELD(lichen_boot_view_t, boot_view_t, current);
 MIRROR_FIELD(lichen_boot_view_t, boot_view_t, reason);
 MIRROR_FIELD(lichen_boot_view_t, boot_view_t, began);
 MIRROR_FIELD(lichen_boot_view_t, boot_view_t, ended);
@@ -88,11 +104,13 @@ MIRROR_FIELD(lichen_boot_view_t, boot_view_t, begin_ms);
 MIRROR_FIELD(lichen_boot_view_t, boot_view_t, end_ms);
 MIRROR_FIELD(lichen_boot_view_t, boot_view_t, generation);
 
-_Static_assert(sizeof(lichen_sys_key_event_t) == sizeof(key_raw_event_t), "the gate's key event follows board's");
-MIRROR_FIELD(lichen_sys_key_event_t, key_raw_event_t, code);
-MIRROR_FIELD(lichen_sys_key_event_t, key_raw_event_t, pressed);
-MIRROR_FIELD(lichen_sys_key_event_t, key_raw_event_t, test_open);
-MIRROR_FIELD(lichen_sys_key_event_t, key_raw_event_t, shift);
+MIRROR_ENUM(LICHEN_SYS_WIFI_JOIN_NONE, WIFI_JOIN_NONE);
+MIRROR_ENUM(LICHEN_SYS_WIFI_JOIN_PENDING, WIFI_JOIN_PENDING);
+MIRROR_ENUM(LICHEN_SYS_WIFI_JOIN_TRYING, WIFI_JOIN_TRYING);
+MIRROR_ENUM(LICHEN_SYS_WIFI_JOIN_JOINED, WIFI_JOIN_JOINED);
+MIRROR_ENUM(LICHEN_SYS_WIFI_JOIN_FAILED_KEPT_OLD, WIFI_JOIN_FAILED_KEPT_OLD);
+_Static_assert(LICHEN_SYS_MDNS_NAME_MAX == MDNS_NAME_MAX, "the gate's mDNS name size follows lichen_mdns's");
+_Static_assert(LICHEN_SYS_WIFI_SAVED_MAX == WIFI_SAVED_MAX, "the gate's saved-network count follows lichen_net's");
 
 bool lichen_sys_clock_in_window(int64_t t, int64_t build_epoch) {
     return clock_in_window(t, build_epoch);
@@ -182,4 +200,8 @@ int lichen_sys_boot_overall_pct(lichen_boot_view_t const *v) {
 
 size_t lichen_sys_log_clean(char const *in, size_t len, char *out) {
     return log_clean(in, len, out);
+}
+
+lichen_sys_wifi_join_t lichen_sys_wifi_join_of(int state) {
+    return (lichen_sys_wifi_join_t)(wifi_join_state_t)state;
 }

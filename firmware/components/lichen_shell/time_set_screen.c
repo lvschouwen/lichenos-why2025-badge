@@ -2,8 +2,8 @@
 // focusable widgets: shell_open puts the screen itself in the group, so every key arrives here as LV_EVENT_KEY.
 // Up/Down change the field under the cursor (amber), Left/Right move, digits type, Backspace restarts the field,
 // Enter sets the clock (seconds :00), Esc is the shell's (cancel).
-#include "lichen_sys_clock.h"
 #include "fonts.h"
+#include "lichen_sys_clock.h"
 #include "lichen_ui.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -12,6 +12,7 @@
 #include "tz_table.h"
 
 #include <stdio.h>
+
 #include <string.h>
 #include <time.h>
 
@@ -74,7 +75,12 @@ static void render(void) {
 static void refused(lichen_clock_verdict_t v) {
     char text[96];
     if (v == LICHEN_CLOCK_OUTRANKED && lichen_sys_clock_sync_info().source == LICHEN_CLOCK_SRC_SNTP) {
-        snprintf(text, sizeof(text), "not set: the network time set the clock %lld min ago", (long long)(lichen_sys_clock_source_age_s() / 60));
+        snprintf(
+            text,
+            sizeof(text),
+            "not set: the network time set the clock %lld min ago",
+            (long long)(lichen_sys_clock_source_age_s() / 60)
+        );
     } else {
         snprintf(text, sizeof(text), "not set: %s", lichen_sys_clock_verdict_text(v));
     }

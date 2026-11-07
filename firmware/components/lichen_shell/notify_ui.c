@@ -15,6 +15,7 @@
 #include "update_screen.h"
 
 #include <stdio.h>
+
 #include <string.h>
 
 static char const TAG[] = "notify_ui";

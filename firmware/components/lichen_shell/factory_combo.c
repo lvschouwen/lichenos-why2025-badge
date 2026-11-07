@@ -8,14 +8,14 @@
 // the UI underneath sees none. If the LVGL lock cannot be had (the UI is stuck) the question still works blind:
 // Enter resets, Esc or 30 s cancel, and the log says so.
 #include "esp_log.h"
-#include "lichen_sys_ui.h"
 #include "esp_timer.h"
-#include "lichen_sys_factory.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "lichen_task.h"
 #include "fw_console.h"
+#include "lichen_sys_factory.h"
 #include "lichen_sys_keys.h"
+#include "lichen_sys_ui.h"
+#include "lichen_task.h"
 #include "shell.h"
 #include "theme.h"
 
@@ -38,7 +38,7 @@ static uint32_t now_ms(void) {
 }
 
 // Keyboard task: quick, no LVGL
-static bool on_raw(lichen_sys_key_event_t const *ev, void *arg) {
+static bool on_raw(key_raw_event_t const *ev, void *arg) {
     (void)arg;
     portENTER_CRITICAL(&lock);
     bool              was = lichen_sys_factory_combo_swallows(&combo);

@@ -158,13 +158,13 @@ uint32_t key_matrix_color(uint8_t code) {
 
 key_shape_t key_matrix_shape(uint8_t code) {
     switch (scancode_of(code)) {
-    case KEY_SCANCODE_SQUARE: return KEY_SHAPE_SQUARE;
-    case KEY_SCANCODE_TRIANGLE: return KEY_SHAPE_TRIANGLE;
-    case KEY_SCANCODE_CROSS: return KEY_SHAPE_CROSS;
-    case KEY_SCANCODE_CIRCLE: return KEY_SHAPE_CIRCLE;
-    case KEY_SCANCODE_CLOUD: return KEY_SHAPE_CLOUD;
-    case KEY_SCANCODE_DIAMOND: return KEY_SHAPE_DIAMOND;
-    default: return KEY_SHAPE_NONE;
+        case KEY_SCANCODE_SQUARE: return KEY_SHAPE_SQUARE;
+        case KEY_SCANCODE_TRIANGLE: return KEY_SHAPE_TRIANGLE;
+        case KEY_SCANCODE_CROSS: return KEY_SHAPE_CROSS;
+        case KEY_SCANCODE_CIRCLE: return KEY_SHAPE_CIRCLE;
+        case KEY_SCANCODE_CLOUD: return KEY_SHAPE_CLOUD;
+        case KEY_SCANCODE_DIAMOND: return KEY_SHAPE_DIAMOND;
+        default: return KEY_SHAPE_NONE;
     }
 }
 

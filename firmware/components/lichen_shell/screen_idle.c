@@ -5,12 +5,12 @@
 // LVGL timer applies the level, so the inhibits (update, first-run setup, Bench) are read on the task that owns them.
 // The clock screensaver takes the dim stage and the pocket lock engages with it or the dark screen (#75,
 // screen_saver.c); a key that finds the saver up is swallowed like one that finds the screen off.
-#include "lichen_sys_display.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "fw_console.h"
 #include "idle_policy.h"
+#include "lichen_sys_display.h"
 #include "lichen_sys_keys.h"
 #include "lvgl.h"
 #include "settings_store.h"
@@ -20,6 +20,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <string.h>
 
 #define TICK_MS 100 // how late a wake can light the screen

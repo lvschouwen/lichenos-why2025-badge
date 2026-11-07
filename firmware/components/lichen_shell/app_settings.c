@@ -3,31 +3,32 @@
 // date & time, time zone), SD card (#99, sd_screen.c), Notifications (#62, notify_centre.c), Factory reset (#66, factory_screen.c), About Lichen, then one entry per app that has a settings page.
 // Every screen is a menu.h list; Esc is the shell's.
 #include "app_icons.h"
-#include "screen_ids.h"
 #include "attention_policy.h"
-#include "lichen_sys_display.h"
 #include "home_layout.h"
 #include "idle_policy.h"
-#include "lichen_sys_clock.h"
 #include "lichen_app.h"
 #include "lichen_notify.h"
 #include "lichen_radio.h"
-#include "lock_combo.h"
-#include "menu.h"
+#include "lichen_sys_clock.h"
+#include "lichen_sys_display.h"
+#include "lichen_sys_net.h"
 #include "lichen_sys_storage.h"
 #include "lichen_sys_update.h"
-#include "lichen_sys_net.h"
+#include "lock_combo.h"
+#include "menu.h"
 #include "psram_speed.h"
 #include "saver_station.h"
+#include "screen_ids.h"
 #include "settings_store.h"
 #include "shell_parts.h"
+#include "shell_ui_ops.h"
 #include "theme.h"
 #include "tz_table.h"
-#include "shell_ui_ops.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <string.h>
 #include <time.h>
 

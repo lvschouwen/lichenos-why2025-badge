@@ -7,25 +7,26 @@
 // Backspace are held together (lock_combo.c). It is a pocket lock, not security: no PIN, and an update, power off or a
 // battery warning lifts it. Toasts still show over both (top layer); the shape keys do nothing while locked.
 #include "esp_log.h"
-#include "lichen_sys_ui.h"
 #include "fonts.h"
 #include "fw_console.h"
 #include "idle_policy.h"
-#include "lichen_sys_clock.h"
 #include "lichen_notify.h"
+#include "lichen_sys_clock.h"
+#include "lichen_sys_ui.h"
 #include "lichen_ui.h"
 #include "lock_combo.h"
 #include "raw_keys.h"
 #include "saver_layout.h"
 #include "saver_station.h"
-#include "station_view.h"
 #include "settings_store.h"
 #include "shell_parts.h"
-#include "theme.h"
 #include "shell_ui_ops.h"
+#include "station_view.h"
+#include "theme.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
+
 #include <string.h>
 #include <time.h>
 
@@ -252,7 +253,7 @@ void screen_saver_reload(void) {
 
 // Pocket lock
 
-static void on_lock_key(lichen_sys_key_event_t const *ev, void *arg) {
+static void on_lock_key(key_raw_event_t const *ev, void *arg) {
     (void)arg;
     lock_combo_event(&combo, ev->code, ev->pressed, lv_tick_get());
 }

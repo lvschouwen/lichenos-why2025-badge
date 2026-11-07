@@ -10,18 +10,19 @@
 // Everything here runs on the LVGL task (the timer and the callers' builds).
 #include "station_view.h"
 
-#include "lichen_sys_mem.h"
-#include "lichen_mem.h"
 #include "esp_log.h"
 #include "fonts.h"
+#include "lichen_mem.h"
 #include "lichen_sys_clock.h"
+#include "lichen_sys_mem.h"
 #include "lichen_ui.h"
-#include "theme.h"
 #include "shell_ui_ops.h"
+#include "theme.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>

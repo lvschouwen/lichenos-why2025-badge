@@ -4,12 +4,13 @@
 #include <stdint.h>
 
 // A raw TCA8418 key event (#81), before kbd_map_key drops the keys LVGL has no value for (shape keys, Fn, Ctrl ...).
-// Pure header: also built into the host tests.
+// Pure header: also built into the host tests. It lives in fw_console (L0) so board's keyboard.h and the gate's
+// lichen_sys_keys.h share this one type (#244).
 typedef struct {
-    uint8_t code;    // 1-0x50, without the press bit
+    uint8_t code; // 1-0x50, without the press bit
     bool    pressed;
     bool    test_open; // stamped at capture: the Keyboard Test was the foreground screen (gates "fw keys log")
-    bool    shift;   // a Shift key is down (for a Shift key's own event: after the event)
+    bool    shift;     // a Shift key is down (for a Shift key's own event: after the event)
 } key_raw_event_t;
 
 // Runs on the keyboard task for every event, before it is mapped: it must be quick and must not touch LVGL (queue the

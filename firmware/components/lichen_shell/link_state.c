@@ -1,7 +1,7 @@
 #include "link_state.h"
 
-#include "theme.h"
 #include "lichen_sys_net.h"
+#include "theme.h"
 
 link_look_t wifi_look(bool enabled, bool have_credentials, bool joining, bool has_ip, bool rssi_known, int8_t rssi) {
     if (!enabled) {

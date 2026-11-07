@@ -2,8 +2,8 @@
 # board_sdmmc.c is the lock around the SDMMC controller the C6 link and the SD card share (#60).
 idf_component_register(SRCS "display.c" "backlight.c" "backlight_level.c" "r16_hold.c" "keyboard.c" "board_i2c.c" "board_sdmmc.c" "kbd_map.c" "lv_mem_psram.c" "display_rot.c"
                        INCLUDE_DIRS "."
-                       REQUIRES lvgl__lvgl esp_lvgl_port
+                       REQUIRES lvgl__lvgl esp_lvgl_port fw_console
                        PRIV_REQUIRES esp_lcd esp_lcd_st7703 esp_driver_ppa esp_mm esp_tca8418 esp_hw_support esp_driver_uart
-                                     esp_driver_gpio esp_driver_i2c fw_console psram_guard)
+                                     esp_driver_gpio esp_driver_i2c psram_guard)
 # nothing outside LVGL references the allocator, so pull it in before liblvgl is scanned
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-u lv_malloc_core")
