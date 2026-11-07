@@ -39,9 +39,14 @@ void lora_set_send_hook(void (*fn)(bool ok));
 
 // The OS radio switch (#108; lichen_radio.h is the user-facing one, main.c wires it here): off sends the C6 RX_STOP (the
 // SX1262 idles, nothing is received or sent) and holds back the supervisor's config + RX start; lora_send is refused.
-// On starts them again. Takes effect on the LoRa task within a second; callable before lora_start.
+// On starts them again. Takes effect on the LoRa task within a second; callable before lora_start. Default: on.
 void lora_set_enabled(bool on);
 bool lora_enabled(void);
+// Who owns that switch (#222): "fw lora on|off" hands the request to it, and the owner saves the switch and calls
+// lora_set_enabled (main.c: the OS switch, whose listener does). lora never calls the layers above it. Unset (NULL, the
+// default): the console switches LoRa alone through lora_set_enabled, not saved. Set it before lora_start registers
+// the console command; not safe after.
+void lora_set_switch_owner(void (*request)(bool on));
 
 #ifdef __cplusplus
 }

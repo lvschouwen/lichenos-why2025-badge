@@ -916,6 +916,14 @@ target_include_directories(lora_owner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
 target_compile_options(lora_owner_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME lora_owner_test COMMAND lora_owner_test)
 
+add_executable(lora_switch_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/lora_switch_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lora/lora_switch.c
+)
+target_include_directories(lora_switch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lora)
+target_compile_options(lora_switch_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME lora_switch_test COMMAND lora_switch_test)
+
 add_executable(nav_test
     ${CMAKE_CURRENT_SOURCE_DIR}/nav_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/nav.c

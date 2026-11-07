@@ -22,7 +22,6 @@ A	lichen_shell -> lora	1
 A	lichen_shell -> ota	1
 A	lichen_shell -> sdcard	1
 A	lichen_shell -> storage	1
-A	lora -> lichen_api	1
 A	ota -> lichen_api	1
 A	sensors -> lichen_api	1
 B	lichen_boot -> lichen_api	1
@@ -40,7 +39,6 @@ B	lichen_shell -> lichen_notify	11
 B	lichen_shell -> ota	2
 B	lichen_shell -> sdcard	9
 B	lichen_shell -> storage	3
-B	lora -> lichen_api	1
 B	ota -> lichen_api	2
 B	sensors -> lichen_api	3
 C	fw_console:nvs_open	1
@@ -161,8 +159,6 @@ C	lichen_shell:wifi_saved_load	1
 C	lichen_shell:wifi_saved_wipe	1
 C	lichen_shell:wifi_ssid_sanitize	3
 C	lichen_shell:xTaskCreatePinnedToCore	6
-C	lora:lichen_radio_get	1
-C	lora:lichen_radio_set	1
 C	main:heap_caps_get_free_size	1
 C	main:heap_caps_get_largest_free_block	1
 C	main:heap_caps_get_total_size	1

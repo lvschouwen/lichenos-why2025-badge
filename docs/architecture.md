@@ -96,7 +96,7 @@ when one breaks:
 | Id | Direction | Service | Registered at |
 |---|---|---|---|
 | `0x4C01` `LORA_MSG_ID_TO_C6` | P4 to C6 | LoRa | `c6/main/lora_service.cpp:463` |
-| `0x4C02` `LORA_MSG_ID_TO_P4` | C6 to P4 | LoRa | `lora/lora.c:464` and `:635`, `lora/lora_ident.c:46` |
+| `0x4C02` `LORA_MSG_ID_TO_P4` | C6 to P4 | LoRa | `lora/lora.c:463` and `:634`, `lora/lora_ident.c:46` |
 | `0x4C03` `I154_MSG_ID_TO_C6` | P4 to C6 | 802.15.4 scanner | reserved, not wired yet (#172) |
 | `0x4C04` `I154_MSG_ID_TO_P4` | C6 to P4 | 802.15.4 scanner | reserved, not wired yet (#172) |
 
@@ -109,14 +109,18 @@ when one breaks:
   trailing fields; every other length is exact.
 - **CONFIG (type 1, 14 bytes of body, 16 in all):** freq u32, bw u32, sf u8, cr u8 (5..8 = 4/5..4/8), sync u8,
   preamble u16, tx power i8 dBm. The P4 sends it on every (re)start of the link (`LORA_ACT_SEND_CONFIG`,
-  `lora/lora.c:378`); the C6 starts unconfigured after its own reset. Default: 869.618 MHz, 62.5 kHz, SF7, CR 4/5, sync 0x12,
+  `lora/lora.c:377`); the C6 starts unconfigured after its own reset. Default: 869.618 MHz, 62.5 kHz, SF7, CR 4/5, sync 0x12,
   preamble 16, 22 dBm.
 - **Callback handover (0x4C02):** at boot `lora_ident` (`lora/lora_ident.c:39`, registered at :46) owns the id and takes the
-  IDENT answer; `lora_start` registers `on_peer_data` (`lora/lora.c:635`) and takes it over. From then on `lora_ident`
-  forwards to `lora_ident_live` (answer received by the LoRa task, `lora.c:719`). A second owner of the id would starve one
+  IDENT answer; `lora_start` registers `on_peer_data` (`lora/lora.c:634`) and takes it over. From then on `lora_ident`
+  forwards to `lora_ident_live` (answer received by the LoRa task, `lora.c:710`). A second owner of the id would starve one
   of them.
-- **After a C6 reset:** `lora_c6_lost` / `lora_c6_back` (`lora/lora.c:689`, `:708`) stop and restart the polling and
+- **After a C6 reset:** `lora_c6_lost` / `lora_c6_back` (`lora/lora.c:680`, `:699`) stop and restart the polling and
   re-send CONFIG, then `RX_START`.
+- **Radio switch (#108, #222):** off sends `RX_STOP` and holds CONFIG + `RX_START` back until on, while `lora_send`
+  refuses. The state lives in `lora/lora_switch.c` (`lora_set_enabled`, `lora_enabled`); `fw lora on|off` hands the
+  request to the owner main.c injects (`lora_set_switch_owner`, the OS switch `lichen_radio_set`), never to a header
+  above L2. No owner: the console switches LoRa alone, not saved (`host_tests/lora_switch_test.c`).
 
 ### 3. C6 boot, flash and IDENT
 - **Files** in `/storage/c6` (`C6_IMAGE_DIR`, `c6link/c6_paths.h`): `bootloader.bin`, `partitions.bin`, `firmware.bin`,

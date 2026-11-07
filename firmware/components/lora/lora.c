@@ -7,7 +7,6 @@
  */
 
 #include "lora_os.h"
-#include "lichen_radio.h"
 
 #include "fw_console.h"
 #include "eh_host_feat_peer_data.h"
@@ -21,6 +20,7 @@
 #include "lora_link.h"
 #include "lora_owner.h"
 #include "lora_proto.h"
+#include "lora_switch.h"
 #include "lora_tx.h"
 
 #include <stdio.h>
@@ -71,7 +71,6 @@ static lora_refusal_log_t  refusals; // non-owner calls (#179), logged at most e
 static lora_rx_formatter_t rx_fmt;
 static bool             stop_requested; // lora_stop -> the task
 static bool             stopped;        // the task -> everyone
-static bool             want_on = true;    // the OS radio switch (#108), set by lora_set_enabled
 static bool             applied_on = true; // what the task has told the C6; only the task writes it
 static bool             started;        // lora_start succeeded
 static void           (*link_cb)(bool up); // the owner's, #14
@@ -212,7 +211,7 @@ bool lora_send(char const *who, uint8_t const *bytes, size_t len, uint32_t airti
     if (len == 0 || len > sizeof(((lora_tx_packet_t *)0)->data)) {
         return false;
     }
-    if (__atomic_load_n(&stopped, __ATOMIC_ACQUIRE) || !__atomic_load_n(&want_on, __ATOMIC_ACQUIRE)) {
+    if (__atomic_load_n(&stopped, __ATOMIC_ACQUIRE) || !lora_enabled()) {
         return false; // stopped for an update, or switched off (#108)
     }
     portENTER_CRITICAL(&state_lock);
@@ -480,7 +479,7 @@ static bool c6_link_work(lora_sup_t *sup) {
 // receiving (SX1262 in standby, no TX since the C6 only sends in RX) and the supervisor's config + RX start are held back
 // by run_actions. On: the supervisor starts over, whose first tick sends config + RX start again.
 static void apply_enabled(lora_sup_t *sup) {
-    bool want = __atomic_load_n(&want_on, __ATOMIC_ACQUIRE);
+    bool want = lora_enabled();
     if (want == applied_on) {
         return;
     }
@@ -662,14 +661,6 @@ bool lora_internal_usable(void) {
            !__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE);
 }
 
-void lora_set_enabled(bool on) {
-    __atomic_store_n(&want_on, on, __ATOMIC_RELEASE);
-}
-
-bool lora_enabled(void) {
-    return __atomic_load_n(&want_on, __ATOMIC_ACQUIRE);
-}
-
 bool lora_up(void) {
     return __atomic_load_n(&started, __ATOMIC_ACQUIRE) && !__atomic_load_n(&stopped, __ATOMIC_ACQUIRE);
 }
@@ -806,8 +797,7 @@ static void cmd_lora(char const *args) {
         return;
     }
     if (strcmp(args, "on") == 0 || strcmp(args, "off") == 0) {
-        lichen_radio_set(RADIO_LORA, args[1] == 'n'); // saved, and lora_set_enabled follows through the listener
-        console_reply("lora radio %s", lichen_radio_get(RADIO_LORA) ? "on" : "off");
+        console_reply("lora radio %s", lora_switch_request(args[1] == 'n') ? "on" : "off"); // the owner saves it (#222)
         return;
     }
     if (*args) {

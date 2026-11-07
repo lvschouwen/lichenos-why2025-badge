@@ -577,8 +577,14 @@ static void start_sensors(boot_ctx_t *ctx) {
     sensors_register_console();
 }
 
+// "fw lora on|off" (#222): the OS switch saves it, and radio_changed hands it back to lora_set_enabled
+static void lora_switch_requested(bool on) {
+    lichen_radio_set(RADIO_LORA, on);
+}
+
 static void start_lora(boot_ctx_t *ctx) {
     (void)ctx;
+    lora_set_switch_owner(lora_switch_requested); // before lora_start registers the console command
     if (!c6link_up()) {
         boot_progress_end(BOOT_LORA, STEP_FAILED, "no C6 link");
         return;
