@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "fw_console.h"
 
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +33,12 @@ void backlight_bind_store(backlight_get_u8_fn get, backlight_set_u8_fn set) {
     store_set = set;
 }
 
+// Guards the UART1 driver's lifetime: check-and-install, every write, and backlight_restore's delete (#246). Held only
+// for one short write (the 20-byte line, a few ms at 115200) or the bounded tx-done wait before the delete, never across
+// anything else. PTHREAD_MUTEX_INITIALIZER needs no create call, so there is no first-use race on the lock itself.
+static pthread_mutex_t uart_lock = PTHREAD_MUTEX_INITIALIZER;
+
+// Call with uart_lock held
 static bool open_uart(void) {
     if (uart_is_driver_installed(BL_UART)) {
         return true;
@@ -58,7 +65,13 @@ static bool open_uart(void) {
 static bool send_raw(unsigned display, unsigned keyboard) {
     char   cmd[24];
     size_t len = backlight_cmd_format(cmd, sizeof(cmd), display, keyboard);
-    return len && open_uart() && uart_write_bytes(BL_UART, cmd, len) == (int)len;
+    if (!len) {
+        return false;
+    }
+    pthread_mutex_lock(&uart_lock);
+    bool ok = open_uart() && uart_write_bytes(BL_UART, cmd, len) == (int)len;
+    pthread_mutex_unlock(&uart_lock);
+    return ok;
 }
 
 // The last levels asked for (a slider included, not only the saved ones): a C6 reset brings back its 30/10 defaults and
@@ -257,7 +270,11 @@ static void cmd_bl(char const *args) {
 // the panel switches off. Not run on panic, abort, watchdog or brownout resets: nothing can be done there.
 static void blank_for_restart(void) {
     if (send_raw(0, 0)) {
-        uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
+        pthread_mutex_lock(&uart_lock); // a restore cannot delete the driver under the wait
+        if (uart_is_driver_installed(BL_UART)) {
+            uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
+        }
+        pthread_mutex_unlock(&uart_lock);
     }
     display_blank();
     vTaskDelay(pdMS_TO_TICKS(BL_FRAME_MS));
@@ -276,14 +293,18 @@ void backlight_power_off(void) {
 void backlight_restore(void) {
     uint8_t display, keyboard;
     backlight_get(&display, &keyboard);
-    if (send_user(display, keyboard, false)) {
-        uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
-    }
+    bool sent = send_user(display, keyboard, false);
     // The C6 flasher installs the UART driver itself and fails if it is already there; backlight_start() opens it
-    // again after the C6 check
+    // again after the C6 check. The lock keeps a send from another task out of the driver while it goes away; its
+    // next send opens it again, which only happens before the flasher runs if a task sends in that window.
+    pthread_mutex_lock(&uart_lock);
     if (uart_is_driver_installed(BL_UART)) {
+        if (sent) {
+            uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
+        }
         uart_driver_delete(BL_UART);
     }
+    pthread_mutex_unlock(&uart_lock);
 }
 
 void backlight_start(void) {
