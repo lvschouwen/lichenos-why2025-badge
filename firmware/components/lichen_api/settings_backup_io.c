@@ -78,26 +78,31 @@ static bool write_file(char const *buf, size_t len) {
     return ok;
 }
 
+// The values and the file text of one save, in PSRAM: VALUES_MAX values on the stack would be a 2.3 KB frame (#209)
+typedef struct {
+    sb_value_t vals[VALUES_MAX];
+    char       buf[FILE_CAP];
+} save_scratch_t;
+
 sbk_status_t settings_backup_save(void) {
     if (!sd_mounted()) {
         return SBK_NO_CARD;
     }
-    char *buf = heap_caps_malloc(FILE_CAP, MALLOC_CAP_SPIRAM);
-    if (!buf) {
+    save_scratch_t *s = heap_caps_malloc(sizeof(*s), MALLOC_CAP_SPIRAM);
+    if (!s) {
         return SBK_MEMORY;
     }
-    sb_value_t vals[VALUES_MAX];
-    size_t     n   = read_all(vals);
-    size_t     len = sb_format(esp_app_get_description()->version, vals, n, buf, FILE_CAP);
+    size_t       n      = read_all(s->vals);
+    size_t       len    = sb_format(esp_app_get_description()->version, s->vals, n, s->buf, FILE_CAP);
     sbk_status_t status = SBK_IO;
     if (len && sd_begin(2000)) {
-        bool ok = write_file(buf, len);
+        bool ok = write_file(s->buf, len);
         sd_end(ok ? SD_IO_OK : sd_io_from_errno(errno));
         status = ok ? SBK_OK : SBK_IO;
     } else if (!len) {
         status = SBK_MEMORY;
     }
-    free(buf);
+    free(s);
     ESP_LOGI(TAG, "save: %d", (int)status);
     return status;
 }
@@ -150,11 +155,16 @@ sbk_status_t settings_backup_plan(settings_backup_plan_t *plan) {
     if (!text) {
         return status;
     }
-    sb_value_t parsed[VALUES_MAX];
-    size_t     n = 0;
+    sb_value_t *parsed = heap_caps_malloc(VALUES_MAX * sizeof(*parsed), MALLOC_CAP_SPIRAM); // 2.3 KB, off the caller's stack (#209)
+    if (!parsed) {
+        free(text);
+        return SBK_MEMORY;
+    }
+    size_t n     = 0;
     plan->result = status == SBK_INVALID ? (sb_result_t){SB_ERR_TOO_LONG, 1, 0} : sb_parse(text, len, parsed, VALUES_MAX, &n);
     free(text);
     if (plan->result.err != SB_OK) {
+        free(parsed);
         return SBK_INVALID;
     }
     for (size_t i = 0; i < n; i++) {
@@ -164,6 +174,7 @@ sbk_status_t settings_backup_plan(settings_backup_plan_t *plan) {
             s_held[s_held_count++] = parsed[i];
         }
     }
+    free(parsed);
     plan->changed = s_held_count;
     sb_summary(s_held, s_held_count, plan->result.ignored, plan->summary, sizeof(plan->summary));
     return s_held_count ? SBK_OK : SBK_NOTHING;
