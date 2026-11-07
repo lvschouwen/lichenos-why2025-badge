@@ -39,7 +39,17 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   `shell_on_search`, scroll helpers), the countdown dialog, `lichen_screen_locked()`. Screen code runs on the LVGL task;
   never swap the default group or the active screen yourself. `lichen_ui_call(fn, arg)` hands a result from any task
   to the LVGL task (fn runs there, soon; false when it could not be queued) and `lichen_ui_with_group(group, build,
-  arg)` adds widgets to a screen's group (LVGL context).
+  arg)` adds widgets to a screen's group (LVGL context). `shell_back()` pops the top screen like Esc, for a screen that
+  takes Esc itself (the Keyboard test).
+- `lichen_ui.h` for home tiles and clocks (#180): `lichen_icon_box(parent, w, h, x, y, color, radius)` is a filled box
+  centred off the icon's middle (`draw_icon` builds its picture from them, `LV_RADIUS_CIRCLE` for a dot);
+  `lichen_station_clock(screen, update_line2)` fills a screen with the screensaver's station clock (false without PSRAM
+  for the dial: show the time another way) and `lichen_date_text(out, cap)` is its date line ("~ " while unverified).
+- `lichen_keys.h` (#180): `lichen_keys_raw_take(fn, arg)` / `lichen_keys_raw_release(fn, arg)` give one app at a time
+  every keyboard event below LVGL (shape keys, Fn, Ctrl), on the LVGL task, as `lichen_raw_key_t` (code, pressed,
+  shift); no key acts as a normal key meanwhile, Esc included. Only for a screen that tests the keyboard; release it in
+  the screen's delete event. `key_matrix.h` names the codes and holds the printed layout, `hold_exit.h` is hold-Esc-to-
+  leave (both pure).
 - `menu.h`, `menu_filter.h`, `list_filter.h`, `scroll_anchor.h`, `text_entry.h`: the shared list, filter and text
   widgets, so every app behaves the same under the keyboard. `text_entry_open(...)` returns `bool`: false when an entry
   is already open (there is one at a time; nothing is opened and `done` is never called), so a caller can say so.
@@ -64,12 +74,18 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   key an earlier firmware kept in `badge_fw` (`app_settings_adopt_u8/_u32`: copied once and read back, the old key
   erased on a later boot). Never open NVS.
 - `lichen_fs.h`: the app's directory `/storage/<id>` and, with a card in, `/sd/lichen/apps/<id>`; drive sizes. Never
-  name a path outside them.
+  name a path outside them. Every file call on the card is inside one batch: `lichen_fs_sd_begin(app, wait_ms)` (false:
+  no card, or busy past `wait_ms`; then no file work and no end), the work, `lichen_fs_sd_end(app, errno_or_0)` (only
+  EIO/ENODEV/ETIMEDOUT count toward the auto-unmount). `lichen_fs_sd_mounted()` is a lock-free check. Never from the
+  LVGL task; get `lichen_fs_sd_dir` before the batch (it takes the card's lock itself). Never include `sdcard.h`.
 - `lichen_notify.h`: raise a notification (toast, history, unread dot); from any task.
 - `lichen_badge.h`: the count on the app's tile; set it whenever it changes.
 - `lichen_haptics.h`: a short buzz of the vibration motor for feedback of your own; non-blocking, silent when the person switched it off. Notifications buzz by themselves, do not call it for them. Never drive GPIO8.
 - `lichen_radio.h`: read the Wi-Fi/LoRa/Bluetooth switches and airplane mode, listen for changes. Apps never switch
-  radios.
+  radios. An app that needs the LoRa radio for itself (the LoRa spectrum, #161) borrows it from MeshCore:
+  `lichen_radio_lora_pause(&was_running, keep_going)` (blocks until MeshCore stopped; false when it did not or
+  `keep_going()` turned false), then `lora_claim`; afterwards `lora_release` and, when `was_running`, always
+  `lichen_radio_lora_resume()`. Both block: never from the LVGL task.
 - `lichen_sensors.h`: read the latest IMU / environment / die temperature snapshot. Never talk to the chips or I2C.
 - `lichen_crashlog.h`: the crash log, for the Crash log app; not from the LVGL task for writes.
 - `lichen_task.h` (#181): `lichen_task_start(app, name, fn, arg, stack_bytes, prio, &handle)` with a priority class
@@ -161,7 +177,9 @@ is added to `APP_COMPONENTS` there.
   `esp_partition_*`, `nvs_flash_init*`/`nvs_flash_erase*`, `ledc_*`, `i2c_*`, `esp_restart` or `xTaskCreate*` (apps use
   `lichen_task_start`, #181).
 
-The system apps in `lichen_shell` are not checked yet (#180).
+The system apps in `lichen_shell` are not checked yet (#180). The eight plain apps there (Timer, Calculator, QR code,
+Clock, Keyboard test, LoRa spectrum, Weather, Notepad) use only the headers above plus `shell_parts.h` for their
+`*_app_register` prototype, until they move into a `lichen_apps` component that the check covers (#180, 2A).
 
 ## New services
 

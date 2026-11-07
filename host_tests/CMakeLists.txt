@@ -1014,17 +1014,18 @@ add_test(NAME home_layout_test COMMAND home_layout_test)
 add_executable(remote_ctl_test
     ${CMAKE_CURRENT_SOURCE_DIR}/remote_ctl_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/remote_ctl.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/hold_exit.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/hold_exit.c
 )
-target_include_directories(remote_ctl_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_include_directories(remote_ctl_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(remote_ctl_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME remote_ctl_test COMMAND remote_ctl_test)
 
 add_executable(hold_exit_test
     ${CMAKE_CURRENT_SOURCE_DIR}/hold_exit_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/hold_exit.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/hold_exit.c
 )
-target_include_directories(hold_exit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_include_directories(hold_exit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(hold_exit_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME hold_exit_test COMMAND hold_exit_test)
 
@@ -1063,10 +1064,10 @@ add_test(NAME dialog_countdown_test COMMAND dialog_countdown_test)
 
 add_executable(key_matrix_test
     ${CMAKE_CURRENT_SOURCE_DIR}/key_matrix_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/key_matrix.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/key_matrix.c
 )
 target_include_directories(key_matrix_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board
 )
 target_compile_options(key_matrix_test PRIVATE -Wall -Wextra -Werror)

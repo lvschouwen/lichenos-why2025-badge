@@ -13,7 +13,7 @@
 #include "lichen_ui.h"
 #include "lora_app.h"
 #include "lora_spectrum.h"
-#include "shell_parts.h"
+#include "shell_parts.h" // lora_spectrum_app_register only (until #180 moves the app)
 #include "theme.h"
 
 #include <stdio.h>
@@ -176,7 +176,7 @@ static void borrow_and_sweep(lora_sweep_result_t *res) {
     bool was_running = false;
     // Claimed only after a pause that finished: a MeshCore still stopping holds the radio. The wait ends early when the
     // screen closes (or an update asks this app to stop).
-    bool paused  = !shell_sources.lora_user_pause || shell_sources.lora_user_pause(&was_running, wanted);
+    bool paused  = lichen_radio_lora_pause(&was_running, wanted);
     bool claimed = paused && wanted() && lora_claim(OWNER, NULL);
     portENTER_CRITICAL(&mux);
     sh->paused_mesh = was_running;
@@ -202,8 +202,8 @@ static void borrow_and_sweep(lora_sweep_result_t *res) {
         lora_release(OWNER);
     }
     ESP_LOGI(TAG, "radio given back");
-    if (was_running && shell_sources.lora_user_resume) {
-        shell_sources.lora_user_resume(); // waits for a late stop to finish, then starts MeshCore (logged there)
+    if (was_running) {
+        lichen_radio_lora_resume(); // waits for a late stop to finish, then starts MeshCore (logged there)
     }
 }
 

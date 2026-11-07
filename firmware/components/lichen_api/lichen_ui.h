@@ -3,6 +3,7 @@
 #include "lvgl.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // The shell's navigation for apps (#84): open a screen, go back, scroll. Implemented by the shell (lichen_shell's
@@ -11,6 +12,8 @@
 // from any task.
 
 void shell_home(void);
+// Like Esc: pops the top screen, later (outside key handling). For a screen that takes Esc itself (the Keyboard test)
+void shell_back(void);
 // Builds a screen (lv_obj_create(NULL), runs in LVGL context) and shows it on top of the stack; Esc goes back. The
 // builder's focusable widgets are put in a group of their own (the default group while it runs).
 //
@@ -100,6 +103,20 @@ void lichen_ui_with_group(lv_group_t *group, void (*build)(void *), void *arg);
 // that would act on its own (open a screen for an incoming message) may wait; screens it opens meanwhile stay under the
 // lock. Any task.
 bool lichen_screen_locked(void);
+
+// The Swiss railway style station clock (#122), the screensaver's dial as an app's view: fills screen's content area
+// with the dial, the date under it and a small dim second line that update_line2(line2) sets once a second (NULL: left
+// empty). Its own timer and PSRAM canvas, freed with the screen; the sweep pauses while another screen covers it. False
+// when there is no PSRAM for the dial (nothing was added): show the time another way. Implemented by the shell
+// (station_view.c). LVGL context only.
+bool lichen_station_clock(lv_obj_t *screen, void (*update_line2)(lv_obj_t *line2));
+// The date line as the station clock writes it ("~ " first while the time is unverified); false and "Clock not set"
+// when the clock is not set. Any task.
+bool lichen_date_text(char *out, size_t cap);
+
+// A filled box for a home icon (lichen_app_t.draw_icon): w x h, centred at (x, y) off the parent's centre, in colour
+// (0xRRGGBB) with radius (LV_RADIUS_CIRCLE for a dot). LVGL context only.
+lv_obj_t *lichen_icon_box(lv_obj_t *parent, int32_t w, int32_t h, int32_t x, int32_t y, uint32_t color, int32_t radius);
 
 // Labels for text whose length the code does not control (names, file names, values from a device, versions): a plain
 // lv_label grows to fit its text and its parent clips it without a "..." (#131, #133). Use these for any such text;

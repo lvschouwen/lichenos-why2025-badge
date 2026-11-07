@@ -1,6 +1,6 @@
 #pragma once
 
-#include "key_raw.h"
+#include "lichen_keys.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -9,7 +9,8 @@
 // The badge keyboard as the TCA8418 sees it (#81): an 8 x 10 matrix, code = row * 10 + col + 1 (1-0x50), labels from
 // board/tca8418_keymap.h. Codes 0x47-0x4f are not wired. The drawing follows the printed keyboard instead of the matrix
 // order: key_layout() holds the 71 keys with their printed row and width, taken from the Carrier PCB's keyboard
-// footprint U14 (hardware repo @797d883; its ROW_5/ROW_6 net names are swapped against the chip's codes). Pure,
+// footprint U14 (hardware repo @797d883; its ROW_5/ROW_6 net names are swapped against the chip's codes). Part of the
+// app API (#180: lichen_api; the keymap headers are board's, read at build time only). Pure,
 // host-tested in host_tests/key_matrix_test.c.
 #define KEY_MATRIX_ROWS 8
 #define KEY_MATRIX_COLS 10
@@ -41,4 +42,4 @@ char const *key_matrix_label(uint8_t code, char *buf, size_t cap);
 // The BadgeVMS scancode name ("ESCAPE", "A", "SQUARE", "UNKNOWN")
 char const *key_matrix_name(uint8_t code);
 // "0x1f (31)  FN  pressed  Shift off"
-size_t key_matrix_format(char *out, size_t cap, key_raw_event_t const *ev);
+size_t key_matrix_format(char *out, size_t cap, lichen_raw_key_t const *ev);

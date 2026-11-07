@@ -39,6 +39,17 @@ void lichen_ui_with_group(lv_group_t *group, void (*build)(void *), void *arg) {
     lv_group_set_default(previous); // in one place, so it can never be left set to a screen that is gone
 }
 
+lv_obj_t *lichen_icon_box(lv_obj_t *parent, int32_t w, int32_t h, int32_t x, int32_t y, uint32_t color, int32_t radius) {
+    lv_obj_t *b = lv_obj_create(parent);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, w, h);
+    lv_obj_set_style_radius(b, radius, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_align(b, LV_ALIGN_CENTER, x, y);
+    return b;
+}
+
 void lichen_label_line_fit(lv_obj_t *label) {
     // DOT only cuts at the label's height: without one line's height LVGL 9 wraps the text instead. The height is the
     // whole box, so padding and border go on top, or they eat the descenders (the "g" of a heading, #133)

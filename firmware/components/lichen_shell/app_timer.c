@@ -2,14 +2,13 @@
 // pages with what each is doing. Both timers live in timer_service.c, so they go on when the screen is left, and the
 // tile shows the one that runs. Nothing here writes flash. At zero the service raises a notice (toast, status dot, tile
 // badge); this file is only the screens. Only the OS API: menu, text entry, nav, theme; time from the C library.
-#include "app_icons.h"
 #include "fonts.h"
 #include "lichen_app.h"
 #include "lichen_clock.h"
 #include "lichen_ui.h"
 #include "menu.h"
 #include "screen_ids.h"
-#include "shell_parts.h"
+#include "shell_parts.h" // timer_app_register only (until #180 moves the app)
 #include "text_entry.h"
 #include "theme.h"
 #include "timer_calc.h"
@@ -411,6 +410,20 @@ static bool timer_tile(char *l1, size_t c1, char *l2, size_t c2) {
         return true;
     }
     return false;
+}
+
+// Timer (#152): a stopwatch, a white face with its button on top, a teal arc-less hand pair and the red centre
+static void icon_timer(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    int face = size_px * 10 / 16, t = size_px >= 64 ? 4 : 2;
+    int cy = size_px / 16; // the face sits a little low, the button above it
+    lichen_icon_box(parent, size_px / 6, size_px / 10, 0, -(face / 2 + size_px / 16) + cy, THEME_AMBER, 2);
+    lichen_icon_box(parent, face, face, 0, cy, 0xFFFFFF, LV_RADIUS_CIRCLE);
+    lichen_icon_box(parent, t, face * 3 / 8 + t, 0, cy - face * 3 / 16, 0x111111, 0);          // the hand, up
+    lichen_icon_box(parent, face / 5 + t, t, face / 10, cy, THEME_TEAL, 0);                    // the second hand, right
+    lichen_icon_box(parent, t * 2, t * 2, 0, cy, 0xD8101C, LV_RADIUS_CIRCLE);
 }
 
 static lichen_app_t const timer_app = {

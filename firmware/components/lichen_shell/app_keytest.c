@@ -1,17 +1,16 @@
 // Keyboard Test (#81): every key of the badge keyboard as the TCA8418 reports it, including the ones the OS drops before
 // LVGL (shape keys, Fn, Ctrl ...). The keys are drawn like the printed keyboard (key_layout() in key_matrix.h, the shape
 // keys in their printed colours); a key lights while held and stays marked once seen, and the last event is spelled out.
-// While the screen is open the keys do nothing else: Esc held for 2 s leaves. The raw listener runs from an LVGL timer
-// (raw_keys.c drains its queue there), so the widget calls below need no extra lock.
-#include "app_icons.h"
+// While the screen is open the keys do nothing else: Esc held for 2 s leaves. The raw keys come on the LVGL task
+// (lichen_keys.h), so the widget calls below need no extra lock.
 #include "esp_log.h"
 #include "fonts.h"
 #include "hold_exit.h"
 #include "key_matrix.h"
 #include "lichen_app.h"
-#include "raw_keys.h"
-#include "shell.h"
-#include "shell_parts.h"
+#include "lichen_keys.h"
+#include "lichen_ui.h"
+#include "shell_parts.h" // keytest_app_register only (until #180 moves the app)
 #include "theme.h"
 
 #include <stdio.h>
@@ -49,7 +48,7 @@ static void style_cell(keytest_t const *t, int index) {
     lv_obj_set_style_text_color(lv_obj_get_child(t->cell[index], 0), lv_color_hex(fg), 0);
 }
 
-static void on_raw(key_raw_event_t const *ev, void *arg) {
+static void on_raw(lichen_raw_key_t const *ev, void *arg) {
     keytest_t *t = arg;
     if (key_layout_index(ev->code) >= 0) {
         int index        = ev->code - 1;
@@ -80,9 +79,8 @@ static void tick(lv_timer_t *timer) {
 
 static void on_delete(lv_event_t *e) {
     keytest_t *t = lv_event_get_user_data(e);
-    raw_keys_set_test_open(false);
     if (t->listening) {
-        raw_keys_unlisten(on_raw, t);
+        lichen_keys_raw_release(on_raw, t);
     }
     lv_timer_delete(t->timer);
     free(t);
@@ -146,9 +144,8 @@ static void open_keytest(lv_obj_t *screen) {
     lv_obj_set_style_bg_color(t->hold_bar, lv_color_hex(THEME_TRACK), 0);
     lv_obj_set_style_bg_color(t->hold_bar, lv_color_hex(THEME_AMBER), LV_PART_INDICATOR);
 
-    raw_keys_set_test_open(true);
     t->timer     = lv_timer_create(tick, 50, t);
-    t->listening = raw_keys_listen(on_raw, t, true);
+    t->listening = lichen_keys_raw_take(on_raw, t);
     if (!t->listening) {
         lv_label_set_text(t->event_line, "raw keys unavailable");
     }
@@ -159,6 +156,25 @@ static bool keytest_tile(char *l1, size_t c1, char *l2, size_t c2) {
     snprintf(l1, c1, "every key, raw");
     snprintf(l2, c2, "hold Esc to leave");
     return true;
+}
+
+// A keycap with a K on it
+static void icon_keytest(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    lv_obj_t *cap = lv_obj_create(parent);
+    lv_obj_remove_style_all(cap);
+    lv_obj_set_size(cap, size_px * 5 / 8, size_px * 5 / 8);
+    lv_obj_set_style_radius(cap, size_px / 10, 0);
+    lv_obj_set_style_border_width(cap, size_px >= 64 ? 4 : 2, 0);
+    lv_obj_set_style_border_color(cap, lv_color_hex(THEME_TEAL), 0);
+    lv_obj_center(cap);
+    lv_obj_t *k = lv_label_create(cap);
+    lv_obj_set_style_text_color(k, lv_color_hex(THEME_TEXT), 0);
+    lv_obj_set_style_text_font(k, size_px >= 64 ? lichen_font(LICHEN_FONT_LARGE) : lichen_font(LICHEN_FONT_SMALL), 0);
+    lv_label_set_text(k, "K");
+    lv_obj_center(k);
 }
 
 static lichen_app_t const keytest_app = {

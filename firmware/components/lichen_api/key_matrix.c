@@ -181,7 +181,7 @@ char const *key_matrix_name(uint8_t code) {
     return letter[0] ? letter : "UNKNOWN";
 }
 
-size_t key_matrix_format(char *out, size_t cap, key_raw_event_t const *ev) {
+size_t key_matrix_format(char *out, size_t cap, lichen_raw_key_t const *ev) {
     int n = snprintf(out, cap, "0x%02x (%u)  %s  %s  Shift %s", ev->code, ev->code, key_matrix_name(ev->code),
                      ev->pressed ? "pressed" : "released", ev->shift ? "on" : "off");
     return n < 0 ? 0 : (size_t)n;

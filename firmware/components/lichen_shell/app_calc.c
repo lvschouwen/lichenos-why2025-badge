@@ -1,13 +1,13 @@
 // Calculator (#158): type an expression, see it in decimal, hex and binary; below, a few unit conversions for radio
 // work. The arithmetic is calc_eval.c (integers in 64 bits, hex 0x, binary 0b, C operators), the units calc_units.c; this
 // file is the screen. What was typed stays until the badge restarts (RAM only, no flash). Only the OS API.
-#include "app_icons.h"
 #include "calc_eval.h"
 #include "calc_units.h"
 #include "fonts.h"
 #include "lichen_app.h"
+#include "lichen_ui.h"
 #include "menu.h"
-#include "shell_parts.h"
+#include "shell_parts.h" // calc_app_register only (until #180 moves the app)
 #include "text_entry.h"
 #include "theme.h"
 
@@ -147,6 +147,22 @@ static void open_calc(lv_obj_t *screen) {
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     show_expression();
     show_unit();
+}
+
+// Calculator (#158): the display strip over a 3 x 3 grid of keys, one of them amber
+static void icon_calc(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    int w = size_px * 9 / 16, strip_h = size_px / 6, key = size_px / 8, gap = size_px / 14;
+    int top = -size_px * 5 / 16;
+    lichen_icon_box(parent, w, strip_h, 0, top + strip_h / 2, THEME_TEAL, 3);
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
+            uint32_t color = (r == 2 && c == 2) ? THEME_AMBER : 0xFFFFFF;
+            lichen_icon_box(parent, key, key, (c - 1) * (key + gap), top + strip_h + gap * 2 + key / 2 + r * (key + gap), color, 2);
+        }
+    }
 }
 
 static lichen_app_t const calc_app = {

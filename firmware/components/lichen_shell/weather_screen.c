@@ -1,10 +1,8 @@
 // Weather (#155): the app's screen. Four rows with the readings now (temperature, humidity, pressure and the air
 // quality as a trend), the chosen quantity drawn as a graph of the history below. Left/Right (or Enter) switch the
 // quantity. The rows refresh every second; the graph only when a new minute sample or a new offset arrives.
-#include "app_icons.h"
 #include "fonts.h"
 #include "lichen_ui.h"
-#include "shell_parts.h"
 #include "theme.h"
 #include "weather_app.h"
 

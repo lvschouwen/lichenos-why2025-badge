@@ -26,7 +26,6 @@ bool home_order_arranged(void);    // a saved order differs from the registratio
 
 // shell.c
 void shell_esc(void);                // Esc pressed: the top screen's shell_on_esc() hook first, else shell_back()
-void shell_back(void);               // like Esc: pops the top screen (later, outside key handling)
 lv_group_t *shell_top_group(void);   // the keypad group of the screen on top (ui_probe, LVGL context)
 void shell_open_app(size_t index);     // opens lichen_app_at(index); from home's Enter
 void shell_rebuild_home(void);         // after the app list or the layout changed

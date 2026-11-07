@@ -43,6 +43,7 @@ typedef struct {
     // waits until its stop finished: true when the radio is free; *was_running when a stop was asked for, so resume must
     // follow even when pause failed. The wait ends early (false) once keep_going() says false. resume waits for a stop
     // still under way, then starts MeshCore (one retry) and logs the outcome; it returns at once during an update.
+    // Apps call them through lichen_radio_lora_pause / _resume (lichen_radio.h; shell_set_sources hands them over).
     bool (*lora_user_pause)(bool *was_running, bool (*keep_going)(void));
     void (*lora_user_resume)(void);
 } shell_sources_t;

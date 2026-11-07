@@ -28,6 +28,17 @@ typedef void (*lichen_radio_cb_t)(radio_id_t id, bool on);
 bool lichen_radio_listen(lichen_radio_cb_t cb);
 // Calls every listener with the current state: boot applies the saved state to the backends with it
 void lichen_radio_apply_all(void);
+// Borrowing the LoRa radio from its user (#161, #180): an app that needs the radio for itself (the LoRa spectrum) pauses
+// MeshCore first and claims it with lora_claim (lora_app.h), then gives it back. Both block (seconds): never on the LVGL
+// task. pause stops the radio's user and waits until that stop finished: true when the radio is free. *was_running is
+// true when a stop was asked for, so lichen_radio_lora_resume must follow even when pause returned false. The wait ends
+// early (false) once keep_going() says false (the screen closed). Without a user (no MeshCore) pause is true at once and
+// *was_running false. resume waits for a stop still under way, then starts the user again and logs the outcome.
+bool lichen_radio_lora_pause(bool *was_running, bool (*keep_going)(void));
+void lichen_radio_lora_resume(void);
+// The OS (the shell, from its sources) says who the radio's user is, once at boot before any app runs
+void lichen_radio_set_lora_user(bool (*pause)(bool *was_running, bool (*keep_going)(void)), void (*resume)(void));
+
 // "fw wifi on|off", "fw lora on|off", "fw airplane on|off" and the status line; registers the airplane command
 void lichen_radio_console_register(void);
 

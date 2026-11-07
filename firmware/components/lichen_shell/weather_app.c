@@ -5,7 +5,6 @@
 // or a write fails (no retries: the person turns it on again). Only OS APIs: sensors, settings, fs, notify, clock.
 #include "weather_app.h"
 
-#include "app_icons.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -20,8 +19,7 @@
 #include "lichen_settings.h"
 #include "lichen_task.h"
 #include "menu.h"
-#include "sdcard.h"
-#include "shell_parts.h"
+#include "shell_parts.h" // weather_app_register only (until #180 moves the app)
 #include "theme.h"
 
 #include <errno.h>
@@ -108,8 +106,8 @@ static log_result_t log_append(int64_t unix_s, wx_sample_t const *s) {
     }
     char path[96];
     snprintf(path, sizeof(path), "%s/" LOG_FILE, dir);
-    if (!sd_begin(SD_WAIT_MS)) {
-        return sd_mounted() ? LOG_SKIP : LOG_FAIL;
+    if (!lichen_fs_sd_begin(&weather_app, SD_WAIT_MS)) {
+        return lichen_fs_sd_mounted() ? LOG_SKIP : LOG_FAIL;
     }
     char   line[128], header[96];
     size_t n = wx_csv_line(line, sizeof(line), unix_s, s, weather_offset_k());
@@ -127,7 +125,7 @@ static log_result_t log_append(int64_t unix_s, wx_sample_t const *s) {
         ok = false;
     }
     int err = ok ? 0 : (errno ? errno : EIO);
-    sd_end(sd_io_from_errno(err));
+    lichen_fs_sd_end(&weather_app, err);
     if (!ok) {
         ESP_LOGW(TAG, "log write failed (errno %d)", err);
     }
@@ -260,7 +258,7 @@ static bool offset_text_key(uint32_t key, void *arg) {
 static void log_toggle(void *arg) {
     (void)arg;
     bool on = !atomic_load(&s_log_on);
-    if (on && !sd_mounted()) {
+    if (on && !lichen_fs_sd_mounted()) {
         lichen_notify("weather", LN_WARN, "No SD card", "Put an SD card in the badge to log the weather.", 0);
         return;
     }

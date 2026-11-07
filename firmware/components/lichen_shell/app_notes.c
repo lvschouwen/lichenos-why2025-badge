@@ -15,8 +15,7 @@
 #include "notes_model.h"
 #include "notes_store.h"
 #include "screen_ids.h"
-#include "sdcard.h"
-#include "shell_parts.h"
+#include "shell_parts.h" // notepad_app_register only (until #180 moves the app)
 #include "text_entry.h"
 #include "theme.h"
 
@@ -89,8 +88,8 @@ static void run_op(char const *dir) {
 static void job_task(void *arg) {
     (void)arg;
     memset(&s_res, 0, sizeof(s_res));
-    char const *dir = lichen_fs_sd_dir(&notes_list_app); // before sd_begin: it takes the lock itself
-    if (!dir || !sd_begin(SD_WAIT_MS)) {
+    char const *dir = lichen_fs_sd_dir(&notes_list_app); // before the batch: it takes the card's lock itself
+    if (!dir || !lichen_fs_sd_begin(&notes_list_app, SD_WAIT_MS)) {
         s_res.no_card = true;
         s_res.result  = NOTES_ERR_OPEN;
     } else {
@@ -100,7 +99,7 @@ static void job_task(void *arg) {
         errno      = 0;
         s_res.listed = notes_store_list(dir, s_v.items, MAX_NOTES, &s_res.count, &s_res.skipped) == NOTES_OK;
         int err      = op_err ? op_err : s_res.listed ? 0 : errno;
-        sd_end(err ? sd_io_from_errno(err) : SD_IO_OK);
+        lichen_fs_sd_end(&notes_list_app, err);
     }
     ESP_LOGI(TAG, "job %d -> %d, %u notes, stack margin %u", (int)s_req.kind, (int)s_res.result, (unsigned)s_res.count,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));
@@ -177,6 +176,13 @@ static int focus_row(void) {
     return 0;
 }
 
+// lichen_ui_with_group's build: the menu and its rows, into the screen's group
+static void build_menu(void *arg) {
+    (void)arg;
+    s_v.menu = menu_create(s_v.screen, "Notes");
+    add_rows(s_v.menu);
+}
+
 // (Re)builds the menu; rows join the screen's own group, whatever group is the default now
 static void fill_list(void) {
     if (!s_v.screen) {
@@ -185,11 +191,7 @@ static void fill_list(void) {
     if (s_v.menu) {
         lv_obj_delete(s_v.menu);
     }
-    lv_group_t *previous = lv_group_get_default();
-    lv_group_set_default(s_v.group);
-    lv_obj_t *menu = s_v.menu = menu_create(s_v.screen, "Notes");
-    add_rows(menu);
-    lv_group_set_default(previous);
+    lichen_ui_with_group(s_v.group, build_menu, NULL);
     bool rows = !s_v.busy && !s_v.no_card;
     // Without rows the screen itself takes the keys (Esc); with rows it must not be a stop of its own
     if (!rows && lv_obj_get_group(s_v.screen) != s_v.group) {
@@ -198,7 +200,7 @@ static void fill_list(void) {
         lv_group_remove_obj(s_v.screen);
     }
     if (rows) {
-        menu_focus_row(menu, focus_row());
+        menu_focus_row(s_v.menu, focus_row());
         shell_page_hint(s_v.screen, "Enter", "open", NULL);
     }
 }

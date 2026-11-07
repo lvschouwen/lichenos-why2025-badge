@@ -125,11 +125,11 @@ int main(void) {
     CHECK(key_matrix_color(0x06) == 0x4C9AFF && key_matrix_color(0x07) == 0xA371F7);
     CHECK(key_matrix_color(0x01) == 0 && key_matrix_color(0x20) == 0 && key_matrix_color(0x47) == 0);
 
-    key_raw_event_t ev = {.code = 0x1f, .pressed = true, .shift = false};
+    lichen_raw_key_t ev = {.code = 0x1f, .pressed = true, .shift = false};
     char            text[80];
     key_matrix_format(text, sizeof(text), &ev);
     CHECK(strcmp(text, "0x1f (31)  FN  pressed  Shift off") == 0);
-    ev = (key_raw_event_t){.code = 0x29, .pressed = false, .shift = true};
+    ev = (lichen_raw_key_t){.code = 0x29, .pressed = false, .shift = true};
     key_matrix_format(text, sizeof(text), &ev);
     CHECK(strcmp(text, "0x29 (41)  LSHIFT  released  Shift on") == 0);
 

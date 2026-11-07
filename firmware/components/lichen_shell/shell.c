@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "key_matrix.h"
 #include "lichen_app.h"
+#include "lichen_radio.h"
 #include "nav.h"
 #include "notes_app.h"
 #include "raw_keys.h"
@@ -48,6 +49,8 @@ static lv_obj_t            *cover; // the screensaver or the lock screen (#75): 
 
 void shell_set_sources(shell_sources_t const *sources) {
     shell_sources = *sources;
+    // Apps borrow the radio through lichen_radio.h (#180), not through the shell's sources
+    lichen_radio_set_lora_user(sources->lora_user_pause, sources->lora_user_resume);
 }
 
 lv_obj_t *shell_status_bar(void) {
@@ -571,8 +574,9 @@ static void on_raw_key(key_raw_event_t const *ev, void *arg) {
     if (!ev->test_open) {
         return;
     }
-    char text[64];
-    key_matrix_format(text, sizeof(text), ev);
+    char             text[64];
+    lichen_raw_key_t key = {.code = ev->code, .pressed = ev->pressed, .shift = ev->shift};
+    key_matrix_format(text, sizeof(text), &key);
     ESP_LOGI(TAG, "raw key %s", text);
 }
 

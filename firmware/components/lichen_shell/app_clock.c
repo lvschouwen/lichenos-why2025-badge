@@ -1,13 +1,12 @@
-// Clock (#122): the Swiss railway style station clock (station_view.c, shared with the screensaver, #119) as a home
+// Clock (#122): the Swiss railway style station clock (lichen_station_clock, the screensaver's station_view.c, #119) as a home
 // screen app: the dial sized to the content under the status bar, the date under it and, small, where the clock's time
 // comes from and how old that is (lichen_clock). The idle rules still apply: the screensaver may start over it. Without
 // PSRAM for the dial it shows the time as plain text. Only the OS API: nav and theme, time through lichen_clock.
-#include "app_icons.h"
 #include "fonts.h"
 #include "lichen_app.h"
 #include "lichen_clock.h"
-#include "shell_parts.h"
-#include "station_view.h"
+#include "lichen_ui.h"
+#include "shell_parts.h" // clock_app_register only (until #180 moves the app)
 #include "theme.h"
 
 #include <stdio.h>
@@ -35,7 +34,7 @@ static void text_tick(lv_timer_t *t) {
     char      date[48], text[200];
     time_t    now = time(NULL);
     struct tm local;
-    bool      ok = saver_date_text(date, sizeof(date)) && localtime_r(&now, &local);
+    bool      ok = lichen_date_text(date, sizeof(date)) && localtime_r(&now, &local);
     if (ok) {
         char src[80];
         source_line(src, sizeof(src));
@@ -68,17 +67,7 @@ static void open_text_clock(lv_obj_t *screen) {
 static void open_clock(lv_obj_t *screen) {
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_update_layout(screen);
-    int32_t line1_h = lv_font_get_line_height(lichen_font(LICHEN_FONT_LARGE));
-    int32_t line2_h = lv_font_get_line_height(lichen_font(LICHEN_FONT_SMALL));
-    station_view_cfg_t cfg = {
-        .layout       = sc_layout(lv_obj_get_content_width(screen), lv_obj_get_content_height(screen), line1_h, line2_h),
-        .line2_font   = LICHEN_FONT_SMALL,
-        .line2_color  = THEME_DIM,
-        .update_line2 = update_source,
-        .pause_when_hidden = true,
-    };
-    if (!station_view_create(screen, &cfg)) {
+    if (!lichen_station_clock(screen, update_source)) {
         open_text_clock(screen);
     }
 }
@@ -92,6 +81,18 @@ static bool clock_tile(char *l1, size_t c1, char *l2, size_t c2) {
     snprintf(l1, c1, "%s%02d:%02d", clock_is_approximate() ? "~" : "", local.tm_hour, local.tm_min);
     snprintf(l2, c2, "station clock");
     return true;
+}
+
+// Clock (#122): a white station-clock face on the tile, the hour hand to 3, the minute hand to 12, a red centre
+static void icon_clock(lv_obj_t *parent, int size_px) {
+    lv_obj_set_style_radius(parent, size_px / 4, 0);
+    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    int face = size_px * 11 / 16, t = size_px >= 64 ? 4 : 2;
+    lichen_icon_box(parent, face, face, 0, 0, 0xFFFFFF, LV_RADIUS_CIRCLE);
+    lichen_icon_box(parent, t, face * 3 / 8 + t, 0, -face * 3 / 16, 0x111111, 0);       // minute hand, up
+    lichen_icon_box(parent, face / 4 + t, t + t / 2, face / 8, 0, 0x111111, 0);          // hour hand, right
+    lichen_icon_box(parent, t * 2, t * 2, 0, 0, 0xD8101C, LV_RADIUS_CIRCLE);            // the red centre
 }
 
 static lichen_app_t const clock_app = {

@@ -159,3 +159,23 @@ void lichen_radio_console_register(void) {
     console_register("airplane", "airplane [on|off] (all radios off; each can be switched on again; off restores them)",
                      cmd_airplane);
 }
+
+// Set once at boot (shell_set_sources) before any app runs, read later from the borrowing app's task
+static bool (*lora_user_pause)(bool *was_running, bool (*keep_going)(void));
+static void (*lora_user_resume)(void);
+
+void lichen_radio_set_lora_user(bool (*pause)(bool *was_running, bool (*keep_going)(void)), void (*resume)(void)) {
+    lora_user_pause  = pause;
+    lora_user_resume = resume;
+}
+
+bool lichen_radio_lora_pause(bool *was_running, bool (*keep_going)(void)) {
+    *was_running = false;
+    return !lora_user_pause || lora_user_pause(was_running, keep_going);
+}
+
+void lichen_radio_lora_resume(void) {
+    if (lora_user_resume) {
+        lora_user_resume();
+    }
+}

@@ -5,7 +5,8 @@
 // ~15 fps timer invalidates only the second hand's old and new places, split along the hand so a diagonal hand is a
 // few small boxes instead of one big one. The minute and hour hands are invalidated once a minute, when they move.
 // No drift (unlike the seven-segment clock): the dial fills its area and the panel is an LCD.
-// Shared by the screensaver and the Clock app, which can be up at the same time, so all state is in a station_view_t.
+// Shared by the screensaver and the Clock app (through lichen_station_clock, lichen_ui.h), which can be up at the same
+// time, so all state is in a station_view_t.
 // Everything here runs on the LVGL task (the timer and the callers' builds).
 #include "station_view.h"
 
@@ -13,6 +14,7 @@
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_clock.h"
+#include "lichen_ui.h"
 #include "theme.h"
 
 #include <stdint.h>
@@ -278,4 +280,23 @@ station_view_t *station_view_create(lv_obj_t *parent, station_view_cfg_t const *
 
 lv_obj_t *station_view_line2(station_view_t const *v) {
     return v->line2;
+}
+
+// lichen_ui.h's station clock for an app (#180): the Clock app's layout, under the status bar, a small dim second line
+bool lichen_station_clock(lv_obj_t *screen, void (*update_line2)(lv_obj_t *line2)) {
+    lv_obj_update_layout(screen);
+    int32_t line1_h = lv_font_get_line_height(lichen_font(LICHEN_FONT_LARGE));
+    int32_t line2_h = lv_font_get_line_height(lichen_font(LICHEN_FONT_SMALL));
+    station_view_cfg_t cfg = {
+        .layout = sc_layout(lv_obj_get_content_width(screen), lv_obj_get_content_height(screen), line1_h, line2_h),
+        .line2_font        = LICHEN_FONT_SMALL,
+        .line2_color       = THEME_DIM,
+        .update_line2      = update_line2,
+        .pause_when_hidden = true,
+    };
+    return station_view_create(screen, &cfg) != NULL;
+}
+
+bool lichen_date_text(char *out, size_t cap) {
+    return saver_date_text(out, cap);
 }
