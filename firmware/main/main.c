@@ -56,6 +56,7 @@
 #include "update_screen.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static char const TAG[] = "badge_fw";
@@ -636,8 +637,20 @@ static void ota_trial_wait(void) {
     }
 }
 
+// A step added to boot_order.h without its start function would be a NULL call on every boot: say which, and stop
+static void check_start_fns(void) {
+    _Static_assert(sizeof(start_fns) / sizeof(start_fns[0]) == START_COUNT, "one start function slot per step");
+    for (int s = 0; s < START_COUNT; s++) {
+        if (!start_fns[s]) {
+            ESP_LOGE(TAG, "boot step %s has no start function", boot_start_name((boot_start_t)s));
+            abort();
+        }
+    }
+}
+
 void app_main(void) {
     ESP_LOGI(TAG, "app_main starts at %u ms of uptime (esp_timer, counted from reset)", (unsigned)uptime_ms());
+    check_start_fns();
     boot_ctx_t ctx = {0};
     // boot_order.c is the order (the two-chip contract, host_tests/boot_order_test.c); this only walks it
     for (size_t i = 0; i < boot_order_len; i++) {

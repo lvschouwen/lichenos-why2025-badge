@@ -62,6 +62,11 @@ static void os_rules(void) {
     before(START_RADIO_SWITCHES, START_C6LINK);    // the saved switches before Wi-Fi and LoRa start
     before(START_KEYBOARD, START_SENSORS);         // the sensors share the keyboard's bus
     before(START_C6_HOOKS, START_APPS);
+    before(START_FONTS, START_SHELL);    // the status bar and home are built with the loaded fonts
+    before(START_SHELL, START_KEYBOARD); // the keypad attaches to the shell's input group
+    before(START_STORAGE, START_SHELL);  // the shell's screens read /storage
+    before(START_STORAGE, START_APPS);   // app background parts open their files
+    before(START_APPS, START_OTA);       // the update hooks stop apps that already run
 }
 
 int main(void) {

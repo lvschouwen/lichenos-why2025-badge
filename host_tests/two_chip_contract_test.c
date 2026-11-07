@@ -1,6 +1,6 @@
 // Host test: the P4 <-> C6 contract of docs/architecture.md "Two-chip contract" (#234). It pins what both images must
-// keep agreeing on: the peer-data message ids, the wire bytes of CONFIG and the IDENT compare. The start order is not
-// testable here (it lives in main.c): see the doc; #210 pins it with a boot-step table test. A failure here means one
+// keep agreeing on: the peer-data message ids, the wire bytes of CONFIG and the IDENT compare. The start order is pinned
+// by host_tests/boot_order_test.c (the table main.c walks, #210). A failure here means one
 // chip would stop understanding the other: change both images and the doc together.
 #include "c6_boot_policy.h"
 #include "c6_paths.h"

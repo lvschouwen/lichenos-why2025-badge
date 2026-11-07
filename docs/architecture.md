@@ -138,13 +138,13 @@ when one breaks:
 - **C6 reset resets the keyboard:** GPIO12 (C6 EN) also resets the TCA8418. The C6 starts before the keyboard
   (`START_C6LINK`, then `START_KEYBOARD`, then `START_LORA` in `firmware/main/boot_order.c`; `START_C6_HOOKS` only after
   all three, pinned by `host_tests/boot_order_test.c`). A later C6 reset runs `keyboard_reinit`, `backlight_reapply`, `lora_c6_back` in that order
-  (`main.c:232` `c6_up`).
+  (`main.c` `c6_up`).
 - **Backlights go through the C6:** UART1 text command `\nBL <display> <keyboard>\n`
   (`board/backlight_level.c` `backlight_cmd_format`, sent from `board/backlight.c`). With the C6 down brightness does not
   change, and Settings says so.
 - **R16 / GPIO5 hold (#12, #39):** stock badges have no R16 so GPIO5 is not on `DISPLAY_BL`; with the bridge fitted the P4
   holds the backlight while the C6 is in reset or its ROM (`board/r16_hold.c`; flasher order in `c6_flasher.c:106-120`: EN
-  low, GPIO5 back to input, then EN rises). Power off drives backlights off (`main.c:215`), then `c6link_hold_in_reset` (`main.c:216`, defined at `c6link.c:473`). The hold starts once the ROM answered, not before.
+  low, GPIO5 back to input, then EN rises). Power off drives backlights off (`backlight_power_off` in `main.c` `power_finish`), then `c6link_hold_in_reset` (same function, defined at `c6link.c:473`). The hold starts once the ROM answered, not before.
 - **C6 bootloader and backlight (#39):** there is no C6 bootloader hook (dropped by decision). The P4 rewrites the C6
   bootloader at 0x0 when its MD5 differs from the bundle's (`c6_flasher.c:68`); a broken C6 bootloader means USB-only
   recovery. Until the first `BL` line arrives (`c6/main/backlight_cmd.c`) the C6 backlights run at their boot levels
