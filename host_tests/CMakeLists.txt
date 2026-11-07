@@ -1564,3 +1564,12 @@ add_executable(nvs_mark_test ${CMAKE_CURRENT_SOURCE_DIR}/nvs_mark_test.c ${CMAKE
 target_include_directories(nvs_mark_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_nvs)
 target_compile_options(nvs_mark_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME nvs_mark_test COMMAND nvs_mark_test)
+
+# 802.15.4 scanner protocol (#172): messages, MAC header parser on captured-style frames, dedupe, the old-C6 probe
+add_executable(i154_proto_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/i154_proto_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/i154/i154_proto.c
+)
+target_include_directories(i154_proto_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/i154)
+target_compile_options(i154_proto_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME i154_proto_test COMMAND i154_proto_test)
