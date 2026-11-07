@@ -1551,3 +1551,7 @@ add_executable(audio_pattern_test
 target_include_directories(audio_pattern_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_audio)
 target_compile_options(audio_pattern_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME audio_pattern_test COMMAND audio_pattern_test)
+
+
+# tools/check_standard.py: the code and resource standard gate's baseline compare, ratchet and size deltas (#202)
+add_test(NAME check_standard_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_standard_test.py)

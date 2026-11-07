@@ -79,6 +79,8 @@ if [ "$building" = 1 ]; then
         case $arg in build|all|app|flash|app-flash) syms= ;; esac
     done
     "$repo/tools/check_app_boundary.sh" $syms
+    # Size, complexity and stack standard with its ratchet baseline (#202); needs the image just built
+    "$repo/tools/check_standard.sh"
     "$repo/tools/gen_clangd.sh" # .clangd for clangd/LSP over this build's compile_commands.json (#196)
     # Released images ship this file; it must match the dependencies just built (#18)
     BADGE_IDF_PATH="$IDF_DIR" python3 "$repo/tools/third_party_licenses.py" --check
