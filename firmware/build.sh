@@ -80,6 +80,9 @@ if [ "$building" = 1 ]; then
         case $arg in build|all|app|flash|app-flash) syms= ;; esac
     done
     "$repo/tools/check_layers.sh" $syms
+    # The console table must keep headroom (#243); reads the sdkconfig this build just wrote
+    python3 -I "$repo/tools/check_console_slots.py" --selftest
+    python3 -I "$repo/tools/check_console_slots.py"
     # Size, complexity and stack standard with its ratchet baseline (#202); needs the image just built, so only the
     # commands that build it (reconfigure and storage do not)
     for arg in "$@"; do

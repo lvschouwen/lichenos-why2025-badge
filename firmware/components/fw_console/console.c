@@ -27,7 +27,8 @@
 #include <string.h>
 #include <time.h>
 
-#define MAX_COMMANDS   64
+// 12 B of .bss per slot (name, usage, fn). tools/check_console_slots.py fails the build above 80 % of this (#243)
+#define MAX_COMMANDS   96
 #define MAX_TASKS_SEEN 48
 
 static char const TAG[] = "console";
@@ -135,7 +136,7 @@ void console_register(char const *name, char const *usage, console_fn_t fn) {
     }
     portEXIT_CRITICAL(&commands_lock);
     if (!room) {
-        ESP_LOGE(TAG, "no room for command %s", name);
+        ESP_LOGE(TAG, "no room for command %s (table of %d is full, raise MAX_COMMANDS)", name, MAX_COMMANDS);
     }
 }
 
@@ -145,6 +146,7 @@ static void cmd_help(char const *args) {
     for (int i = 0; i < n; i++) {
         console_reply("%s", commands[i].usage);
     }
+    console_reply("%d of %d commands registered", n, MAX_COMMANDS);
 }
 
 static void print_heap(char const *name, uint32_t caps) {
