@@ -72,13 +72,14 @@ fi
 
 if [ "$building" = 1 ]; then
     idf.py -C "$here" "$@"
-    # Apps stay behind lichen_api: requires, includes and undefined symbols of the app components (#178)
+    # Layers: requires, includes and undefined symbols of every component against tools/layers.conf, ratcheted by
+    # tools/layers-baseline.txt (#218; the app boundary of #178 is its L6 profile)
     # The symbol rule needs freshly compiled objects: only commands that compile the app get it
     syms=--no-symbols
     for arg in "$@"; do
         case $arg in build|all|app|flash|app-flash) syms= ;; esac
     done
-    "$repo/tools/check_app_boundary.sh" $syms
+    "$repo/tools/check_layers.sh" $syms
     # Size, complexity and stack standard with its ratchet baseline (#202); needs the image just built, so only the
     # commands that build it (reconfigure and storage do not)
     for arg in "$@"; do

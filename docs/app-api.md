@@ -199,9 +199,11 @@ Also open from #84: the console prefix per app (T8b) and system apps calling `bo
 
 ## Boundary check
 
-`tools/check_app_boundary.sh` runs at the end of `firmware/build.sh build` (after the IDF build) and fails the build with
-`file:line` and the rule. Its allow-lists and the open exceptions live in `tools/app_boundary.conf`; a new app component
-is added to `APP_COMPONENTS` there.
+The layer checker `tools/check_layers.sh` runs at the end of `firmware/build.sh build` (after the IDF build) and fails
+the build with `file:line` and the rule for a violation that is not in `tools/layers-baseline.txt` (#218). Apps are
+layer L6, a closed profile in `tools/layers.conf` (allowed peers, libraries, system headers, own include roots and
+forbidden symbols); a new app component is added there with `component <name> L6`. `tools/check_app_boundary.sh` runs
+just that L6 profile.
 
 - Rule A: the app's `REQUIRES`/`PRIV_REQUIRES` (variables expanded) must be on the allow-list above.
 - Rule B: every `#include` in the app's sources is its own or bundled third-party header, a header of an allowed

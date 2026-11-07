@@ -8,7 +8,7 @@ Lichen OS is the operating system for the WHY2025 badge: the ESP32-P4 runs Liche
 - Submodules: `meshcore/` (fork, branch why2025-badge), `esp_hosted/` (fork), `third_party/*`.
 
 ## Build and check
-- Full check: `BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build` = static checks (`tools/static_checks.sh`: shellcheck, cppcheck on changed C/C++ with `tools/cppcheck-baseline.txt`) + host tests (ctest, ASan+UBSan) + C6 image + storage staging + P4 image + app boundary check (`tools/check_app_boundary.sh`) + licence check. It must be green before a commit.
+- Full check: `BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build` = static checks (`tools/static_checks.sh`: shellcheck, cppcheck on changed C/C++ with `tools/cppcheck-baseline.txt`) + host tests (ctest, ASan+UBSan) + C6 image + storage staging + P4 image + layer check (`tools/check_layers.sh`, `tools/layers.conf` + shrink-only `tools/layers-baseline.txt`; the app boundary is its L6 profile via `tools/check_app_boundary.sh`) + licence check. It must be green before a commit.
 - ccache is on when installed (shared across worktree slots); `build.sh build` writes a gitignored `.clangd` for clangd/LSP.
 - The standard gate `tools/check_standard.sh` runs inside `build` after the P4 image (lizard + `-fstack-usage` + P4/C6 image vs slot and per-archive size; fails when lizard is missing, `BADGE_SKIP_STANDARD=1` skips on purpose against `tools/standard-baseline.txt`; limits and ratchet rule in `docs/code-standard.md`). New files and functions past the fail line fail the build; the baseline only shrinks.
 - Host tests only: `cmake -S host_tests -B host_tests/build && cmake --build host_tests/build -j8 && ctest --test-dir host_tests/build`.

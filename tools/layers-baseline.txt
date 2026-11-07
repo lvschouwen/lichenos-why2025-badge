@@ -1,0 +1,288 @@
+# Layer baseline (#218), rules and layers in tools/layers.conf. Format: rule<TAB>key<TAB>count.
+#   A  key "from -> to": a REQUIRES / PRIV_REQUIRES edge the layers do not allow (count 1)
+#   B  key "from -> to": #include lines of another component's header the layers do not allow
+#   C  key "component:symbol": object files whose undefined symbol breaks an edge, an owner-only or a forbid rule
+# The entries are existing violations held at their current value and may only SHRINK (the gate checks NEW, WORSE,
+# STALE, and GREW against the merge-base copy of this file). Fixed one? `tools/check_layers.sh --shrink` drops or lowers
+# entries (never adds). `tools/check_layers.sh --report` lists every violation with its place.
+# First version created by --init (2026-11-07).
+A	c6link -> lichen_api	1
+A	c6link -> lichen_boot	1
+A	c6link -> lichen_clock	1
+A	c6link -> lichen_net	1
+A	lichen_api -> board	1
+A	lichen_api -> crash	1
+A	lichen_api -> lichen_notify	1
+A	lichen_api -> sdcard	1
+A	lichen_api -> storage	1
+A	lichen_boot -> lichen_api	1
+A	lichen_clock -> lichen_api	1
+A	lichen_haptics -> lichen_api	1
+A	lichen_haptics -> lichen_notify	1
+A	lichen_led -> lichen_notify	1
+A	lichen_shell -> board	1
+A	lichen_shell -> crash	1
+A	lichen_shell -> lichen_boot	1
+A	lichen_shell -> lichen_clock	1
+A	lichen_shell -> lichen_led	1
+A	lichen_shell -> lichen_mdns	1
+A	lichen_shell -> lichen_net	1
+A	lichen_shell -> lora	1
+A	lichen_shell -> ota	1
+A	lichen_shell -> sdcard	1
+A	lichen_shell -> storage	1
+A	lora -> lichen_api	1
+A	ota -> lichen_api	1
+A	sensors -> lichen_api	1
+B	c6link -> lichen_api	1
+B	c6link -> lichen_boot	2
+B	c6link -> lichen_clock	1
+B	c6link -> lichen_net	5
+B	lichen_api -> board	2
+B	lichen_api -> crash	1
+B	lichen_api -> sdcard	3
+B	lichen_api -> storage	1
+B	lichen_boot -> lichen_api	1
+B	lichen_clock -> lichen_api	1
+B	lichen_haptics -> lichen_api	2
+B	lichen_haptics -> lichen_notify	1
+B	lichen_led -> lichen_notify	2
+B	lichen_shell -> board	15
+B	lichen_shell -> crash	2
+B	lichen_shell -> lichen_boot	6
+B	lichen_shell -> lichen_clock	13
+B	lichen_shell -> lichen_led	1
+B	lichen_shell -> lichen_mdns	2
+B	lichen_shell -> lichen_net	7
+B	lichen_shell -> lichen_notify	13
+B	lichen_shell -> lora	1
+B	lichen_shell -> ota	2
+B	lichen_shell -> sdcard	9
+B	lichen_shell -> storage	3
+B	lora -> lichen_api	1
+B	ota -> lichen_api	2
+B	sensors -> lichen_api	4
+C	board:nvs_open	1
+C	c6link:boot_progress_begin	1
+C	c6link:boot_progress_begin_background	1
+C	c6link:boot_progress_end	1
+C	c6link:boot_progress_progress	1
+C	c6link:clock_console_register	1
+C	c6link:clock_offer_sntp	1
+C	c6link:clock_sync_info	1
+C	c6link:clock_verdict_text	1
+C	c6link:lichen_airplane_get	1
+C	c6link:lichen_radio_get	1
+C	c6link:lichen_radio_set	1
+C	c6link:wifi_bars	1
+C	c6link:wifi_cred_activate	1
+C	c6link:wifi_cred_clear	1
+C	c6link:wifi_cred_forget	1
+C	c6link:wifi_cred_load	1
+C	c6link:wifi_cred_save	1
+C	c6link:wifi_cred_valid	1
+C	c6link:wifi_join_event	1
+C	c6link:wifi_join_got_ip	1
+C	c6link:wifi_join_init	1
+C	c6link:wifi_join_request	1
+C	c6link:wifi_join_start	1
+C	c6link:wifi_link_connected	1
+C	c6link:wifi_link_down	1
+C	c6link:wifi_list_clean	1
+C	c6link:wifi_saved_find	1
+C	c6link:wifi_saved_load	1
+C	c6link:wifi_saved_pick	1
+C	c6link:wifi_saved_wipe	1
+C	c6link:wifi_ssid_sanitize	1
+C	fw_console:nvs_open	1
+C	lichen_api:crash_clear_all	1
+C	lichen_api:crash_count_since_clear	1
+C	lichen_api:crash_log_generation	1
+C	lichen_api:crash_log_load	1
+C	lichen_api:crash_log_lock	1
+C	lichen_api:crash_log_store	1
+C	lichen_api:crash_log_unlock	1
+C	lichen_api:crash_recovered	1
+C	lichen_api:sd_begin	3
+C	lichen_api:sd_end	3
+C	lichen_api:sd_info	1
+C	lichen_api:sd_io_from_errno	3
+C	lichen_api:sd_mounted	3
+C	lichen_api:shell_back_then	1
+C	lichen_api:shell_dialog_countdown	1
+C	lichen_api:shell_on_esc	1
+C	lichen_api:shell_on_search	1
+C	lichen_api:shell_open	2
+C	lichen_api:shell_page_create	1
+C	lichen_api:shell_screen_open	2
+C	lichen_api:shell_scroll_by	2
+C	lichen_api:shell_scroll_tame	2
+C	lichen_api:shell_style_screen	1
+C	lichen_api:storage_free_bytes	1
+C	lichen_boot:settings_get_u8	1
+C	lichen_boot:settings_set_u8	1
+C	lichen_clock:settings_get_u8	1
+C	lichen_clock:settings_set_u8	1
+C	lichen_haptics:lichen_notify_set_feedback	1
+C	lichen_haptics:nvs_open	1
+C	lichen_led:lichen_notify_dnd	1
+C	lichen_led:lichen_notify_generation	1
+C	lichen_led:lichen_notify_unread	1
+C	lichen_led:nvs_open	1
+C	lichen_net:nvs_open	1
+C	lichen_notify:nvs_open	1
+C	lichen_shell:backlight_get	2
+C	lichen_shell:backlight_idle	1
+C	lichen_shell:backlight_resume	2
+C	lichen_shell:backlight_set	2
+C	lichen_shell:backlight_set_saved	1
+C	lichen_shell:backlight_temporary	1
+C	lichen_shell:backlight_temporary_keyboard	1
+C	lichen_shell:backlight_user_generation	1
+C	lichen_shell:boot_overall_pct	1
+C	lichen_shell:boot_progress_label	1
+C	lichen_shell:boot_progress_view	1
+C	lichen_shell:boot_step_sentence	1
+C	lichen_shell:clock_back_hint	1
+C	lichen_shell:clock_build_epoch	1
+C	lichen_shell:clock_days_in_month	1
+C	lichen_shell:clock_in_window	1
+C	lichen_shell:clock_is_approximate	5
+C	lichen_shell:clock_is_set	9
+C	lichen_shell:clock_local_hint	1
+C	lichen_shell:clock_local_to_utc	1
+C	lichen_shell:clock_set_manual	1
+C	lichen_shell:clock_source_age_s	1
+C	lichen_shell:clock_source_text	3
+C	lichen_shell:clock_sync_info	2
+C	lichen_shell:clock_verdict_text	1
+C	lichen_shell:crash_recovered	2
+C	lichen_shell:factory_combo_init	1
+C	lichen_shell:factory_combo_key	1
+C	lichen_shell:factory_combo_swallows	1
+C	lichen_shell:factory_combo_tick	1
+C	lichen_shell:factory_level_name	1
+C	lichen_shell:factory_reset_request	2
+C	lichen_shell:heap_caps_aligned_alloc	2
+C	lichen_shell:heap_caps_calloc	7
+C	lichen_shell:heap_caps_check_integrity	1
+C	lichen_shell:heap_caps_free	9
+C	lichen_shell:heap_caps_get_free_size	3
+C	lichen_shell:heap_caps_get_info	1
+C	lichen_shell:heap_caps_get_largest_free_block	2
+C	lichen_shell:heap_caps_malloc	4
+C	lichen_shell:heap_caps_walk	1
+C	lichen_shell:keyboard_raw_add	2
+C	lichen_shell:keyboard_raw_remove	1
+C	lichen_shell:keyboard_set_gate_hook	1
+C	lichen_shell:keyboard_set_wake_hook	1
+C	lichen_shell:led_enabled	1
+C	lichen_shell:led_set_enabled	1
+C	lichen_shell:lichen_haptics_enabled	1
+C	lichen_shell:lichen_haptics_play	1
+C	lichen_shell:lichen_haptics_set_enabled	1
+C	lichen_shell:lichen_haptics_set_strength	1
+C	lichen_shell:lichen_haptics_strength	1
+C	lichen_shell:lichen_mdns_name	1
+C	lichen_shell:lichen_notify	3
+C	lichen_shell:lichen_notify_clear_all	1
+C	lichen_shell:lichen_notify_dnd	3
+C	lichen_shell:lichen_notify_feedback	1
+C	lichen_shell:lichen_notify_generation	2
+C	lichen_shell:lichen_notify_get	3
+C	lichen_shell:lichen_notify_ids	1
+C	lichen_shell:lichen_notify_mark_read	1
+C	lichen_shell:lichen_notify_mark_read_id	1
+C	lichen_shell:lichen_notify_mark_read_upto	1
+C	lichen_shell:lichen_notify_next_toast	1
+C	lichen_shell:lichen_notify_remove	1
+C	lichen_shell:lichen_notify_save_now	1
+C	lichen_shell:lichen_notify_set_clock	1
+C	lichen_shell:lichen_notify_set_dnd	1
+C	lichen_shell:lichen_notify_set_source_enabled	1
+C	lichen_shell:lichen_notify_source_enabled	1
+C	lichen_shell:lichen_notify_stats	1
+C	lichen_shell:lichen_notify_to	2
+C	lichen_shell:lichen_notify_unread	4
+C	lichen_shell:lichen_notify_unread_top	1
+C	lichen_shell:lichen_sensors_get	3
+C	lichen_shell:lichen_sensors_running	1
+C	lichen_shell:log_clean	1
+C	lichen_shell:log_tap_last	1
+C	lichen_shell:lora_claim	1
+C	lichen_shell:lora_get_freq	1
+C	lichen_shell:lora_get_radio	1
+C	lichen_shell:lora_release	1
+C	lichen_shell:lora_sweep	1
+C	lichen_shell:lv_group_set_default	5
+C	lichen_shell:lvgl_port_lock	18
+C	lichen_shell:lvgl_port_unlock	18
+C	lichen_shell:ota_autooff_next	1
+C	lichen_shell:ota_autooff_text	1
+C	lichen_shell:ota_server_auto_closed	1
+C	lichen_shell:ota_server_auto_off	1
+C	lichen_shell:ota_server_enabled	1
+C	lichen_shell:ota_server_refused	1
+C	lichen_shell:ota_server_set_auto_off	1
+C	lichen_shell:ota_server_set_enabled	1
+C	lichen_shell:sd_begin	1
+C	lichen_shell:sd_end	1
+C	lichen_shell:sd_fmt_size	3
+C	lichen_shell:sd_format	1
+C	lichen_shell:sd_info	5
+C	lichen_shell:sd_io_from_errno	1
+C	lichen_shell:sd_mount	1
+C	lichen_shell:sd_mounted	3
+C	lichen_shell:sd_short_text	2
+C	lichen_shell:sd_status_line	1
+C	lichen_shell:sd_unmount	2
+C	lichen_shell:storage_free_bytes	3
+C	lichen_shell:storage_mounted	1
+C	lichen_shell:wifi_an_lookup	1
+C	lichen_shell:wifi_an_scan_due	1
+C	lichen_shell:wifi_bars	3
+C	lichen_shell:wifi_chan_stats	1
+C	lichen_shell:wifi_cred_generation	1
+C	lichen_shell:wifi_cred_valid	1
+C	lichen_shell:wifi_level_pct	1
+C	lichen_shell:wifi_list_clean	1
+C	lichen_shell:wifi_meter_at	1
+C	lichen_shell:wifi_meter_clear	1
+C	lichen_shell:wifi_meter_push	1
+C	lichen_shell:wifi_saved_load	1
+C	lichen_shell:wifi_saved_wipe	1
+C	lichen_shell:wifi_ssid_sanitize	3
+C	lichen_shell:xTaskCreatePinnedToCore	6
+C	lora:lichen_radio_get	1
+C	lora:lichen_radio_set	1
+C	main:heap_caps_get_free_size	1
+C	main:heap_caps_get_largest_free_block	1
+C	main:heap_caps_get_total_size	1
+C	main:lvgl_port_lock	1
+C	main:lvgl_port_unlock	1
+C	mesh:heap_caps_calloc	1
+C	mesh:heap_caps_malloc	1
+C	mesh:heap_caps_realloc	1
+C	mesh:shell_back_then	1
+C	mesh:shell_back_to	5
+C	mesh:shell_dialog_countdown	7
+C	mesh:shell_home	1
+C	mesh:shell_key_hash	8
+C	mesh:shell_on_esc	2
+C	mesh:shell_on_search	1
+C	mesh:shell_open	10
+C	mesh:shell_open_count_reuse	1
+C	mesh:shell_open_keyed	9
+C	mesh:shell_page_create	17
+C	mesh:shell_screen_open	2
+C	mesh:shell_scroll_by	1
+C	mesh:shell_scroll_tame	2
+C	mesh:shell_stack_screen	1
+C	ota:lichen_radio_get	1
+C	ota:settings_get_str	1
+C	ota:settings_get_u8	1
+C	ota:settings_set_str	1
+C	ota:settings_set_u8	1
+C	sensors:settings_erase	1
+C	sensors:settings_get_u8	1
+C	sensors:settings_set_u8	1

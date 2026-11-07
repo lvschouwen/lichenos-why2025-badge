@@ -1598,3 +1598,6 @@ target_include_directories(two_chip_contract_test PRIVATE
 )
 target_compile_options(two_chip_contract_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME two_chip_contract_test COMMAND two_chip_contract_test)
+
+# tools/check_layers.py: the layer checker, rules A/B/C on fixture components and every ratchet state (#218)
+add_test(NAME check_layers_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_layers_test.py)
