@@ -752,7 +752,7 @@ toml_result_t toml_parse(const char *src, int len) {
       if (0xD800 <= ch && ch <= 0xDFFF) {
         // explicitly prohibit surrogates (non-scalar unicode code point)
         snprintf(result.errmsg, sizeof(result.errmsg),
-                 "invalid UTF8 char \\u%04lx on line %d", ch, line);
+                 "invalid UTF8 char \\u%04lx on line %d", (unsigned long)ch, line); // Lichen: ch is uint32_t (-Wformat)
         goto bail;
       }
       line += (ch == '\n' ? 1 : 0);

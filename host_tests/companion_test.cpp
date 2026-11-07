@@ -396,7 +396,10 @@ static std::vector<uint8_t> peer_packet(BadgeMesh &mesh, mesh::LocalIdentity &pe
 }
 
 static std::vector<uint8_t> with_tag(uint32_t tag, std::vector<uint8_t> rest) {
-    std::vector<uint8_t> v((uint8_t *)&tag, (uint8_t *)&tag + 4);
+    uint8_t bytes[4];
+    memcpy(bytes, &tag, sizeof(bytes));
+    // cppcheck-suppress returnDanglingLifetime  # the vector copies the 4 bytes, it keeps no pointer to them
+    std::vector<uint8_t> v(bytes, bytes + sizeof(bytes));
     v.insert(v.end(), rest.begin(), rest.end());
     return v;
 }
@@ -440,8 +443,7 @@ static bool sent_has_type(size_t from, uint8_t want_type) {
 static void remote_checks(BadgeMesh &mesh, rr_t &rr, CountingListener &listener) {
     static Rng          peer_rng;
     mesh::LocalIdentity peer(&peer_rng);
-    ContactInfo         ci;
-    memset(&ci, 0, sizeof(ci));
+    ContactInfo         ci{}; // value-initialised: Identity has a constructor, so no memset (-Wclass-memaccess)
     ci.id            = mesh::Identity(peer.pub_key);
     ci.type          = ADV_TYPE_REPEATER;
     ci.out_path_len  = OUT_PATH_UNKNOWN;
