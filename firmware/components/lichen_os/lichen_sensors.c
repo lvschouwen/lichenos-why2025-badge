@@ -1,18 +1,18 @@
 // lichen_sensors.h for apps and the shell (#221): the gate's calls, defined here over the sensors driver (L2) so no
 // caller links to a driver; the driver's own console keeps its sensors_* names. The driver keeps its own snapshot type
-// (sensors_snap_t, #245: it includes no gate header); the asserts below keep it equal to the gate's, so it converts by
-// copy.
+// (sensors_snap_t, #245: it includes no gate header); the asserts below keep it equal to the gate's, so the caller's
+// struct is filled in place (sensors_get copies bytes with memcpy, never through a sensors_snap_t lvalue).
 #include "lichen_sensors.h"
 
 #include "sensors.h"
 
 #include <stddef.h>
-#include <string.h>
 
-// A mirror field matches when it sits at the same offset with the same size (lichen_sys_pure.c's check)
+// A mirror field matches when it sits at the same offset with the same type (so a float never mirrors an int32)
 #define MIRROR_FIELD(field)                                                                                            \
     _Static_assert(offsetof(lichen_sensors_t, field) == offsetof(sensors_snap_t, field) &&                             \
-                       sizeof(((lichen_sensors_t *)0)->field) == sizeof(((sensors_snap_t *)0)->field),                 \
+                       __builtin_types_compatible_p(__typeof__(((lichen_sensors_t *)0)->field),                       \
+                                                    __typeof__(((sensors_snap_t *)0)->field)),                         \
                    "the gate's lichen_sensors_t." #field " follows sensors_snap_t")
 _Static_assert(sizeof(lichen_sensors_t) == sizeof(sensors_snap_t), "the gate's sensor readings follow the driver's");
 MIRROR_FIELD(imu_valid);
@@ -31,9 +31,7 @@ MIRROR_FIELD(die_c);
 MIRROR_FIELD(die_us);
 
 void lichen_sensors_get(lichen_sensors_t *out) {
-    sensors_snap_t in;
-    sensors_get(&in);
-    memcpy(out, &in, sizeof(*out));
+    sensors_get((sensors_snap_t *)(void *)out);
 }
 
 void lichen_sensors_start(void) {

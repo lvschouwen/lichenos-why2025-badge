@@ -38,7 +38,8 @@ static int8_t       fail_step = -1;
 static fw_get_u8_fn s_get; // the settings service (#245): lichen_boot opens no settings of its own
 static fw_set_u8_fn s_set;
 
-void boot_progress_bind_store(uint8_t (*get)(char const *key, uint8_t def), bool (*set)(char const *key, uint8_t value)) {
+void boot_progress_bind_store(uint8_t (*get)(char const *key, uint8_t def),
+                              bool (*set)(char const *key, uint8_t value)) {
     s_get = get;
     s_set = set;
 }

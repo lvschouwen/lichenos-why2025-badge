@@ -20,8 +20,8 @@ extern "C" {
 // Where the setting is kept (the settings service, #235): led opens no NVS. Bound at START_EARLY, before led_start;
 // until then the default (on) applies and nothing is saved.
 void led_bind_store(fw_get_u8_fn get, fw_set_u8_fn set);
-// main.c, once after lichen_notify_start (which pushes the kept history's unread state before): reads the setting ("status_led", default on), configures the
-// pin and starts the 50 ms esp_timer. "fw led".
+// main.c, once after lichen_notify_start (which has told led_set_unread about the kept history by then): reads the
+// setting ("status_led", default on), configures the pin and starts the 50 ms esp_timer. "fw led".
 void led_start(void);
 bool led_enabled(void);
 void led_set_enabled(bool on);     // Settings › Notifications › Status LED; saved

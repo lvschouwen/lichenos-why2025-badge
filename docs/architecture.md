@@ -225,7 +225,8 @@ The rule: **core 1 draws, core 0 talks to the world.**
   implemented by the `lichen_notify` service (L3) like `lichen_os` implements the rest (#245). The drivers below it
   never call it: lichen_os (`os_bind.c`) binds the status LED's `led_set_dnd`/`led_set_unread`, which notify calls
   on every do-not-disturb change and history change, and `haptics_notice` as the vibrate feedback the shell fires on
-  the LVGL task for a toast. L3 services that raise a notice (the factory reset) get a hook bound the same way.
+  the LVGL task for a toast. lichen_boot's factory reset is an L3 service like notify and could call it, but it may not
+  include the gate's `lichen_notify.h` (L3 may not use L4), so its notices go through a hook bound the same way.
 - Home's tile order (#189) is a display order only: the app's registry index stays its identity (screen ids, the nav
   stack, shortcuts, badges, notifications). Stored as `badge_fw/home_order`, text `"1:settings,about,files,..."`
   (version, then app ids; `lichen_api/tile_order.h`): unknown and duplicate ids are skipped, apps not named follow in

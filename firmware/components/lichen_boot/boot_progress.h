@@ -13,7 +13,8 @@ void        boot_progress_nvs_up(void); // right after nvs_flash_init: reads the
 // Where that flag (badge_fw "boot_fail") is kept (the settings service, #245): lichen_os binds it in start_nvs, before
 // boot_progress_nvs_up. Unbound, no flag is read or saved. Plain pointer types (fw_store.h's), so includers need no
 // fw_console.
-void        boot_progress_bind_store(uint8_t (*get)(char const *key, uint8_t def), bool (*set)(char const *key, uint8_t value));
+void        boot_progress_bind_store(uint8_t (*get)(char const *key, uint8_t def),
+                                     bool (*set)(char const *key, uint8_t value));
 void        boot_progress_begin(boot_step_t step);
 void        boot_progress_begin_background(boot_step_t step);
 void        boot_progress_progress(boot_step_t step, int pct);

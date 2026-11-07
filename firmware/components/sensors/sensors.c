@@ -14,6 +14,7 @@
 #include "sensors_format.h"
 
 #include <stdatomic.h>
+#include <string.h>
 
 static char const TAG[] = "sensors";
 
@@ -300,7 +301,7 @@ static void sensors_task(void *arg) {
 
 void sensors_get(sensors_snap_t *out) {
     taskENTER_CRITICAL(&lock);
-    *out = snap;
+    memcpy(out, &snap, sizeof(snap)); // bytes, not a struct store: lichen_os hands in the gate's mirror type (#245)
     taskEXIT_CRITICAL(&lock);
 }
 

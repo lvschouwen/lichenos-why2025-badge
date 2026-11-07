@@ -8,7 +8,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// lichen_sensors.h's calls, with the same rules (see there); sensors_snap_t is lichen_sensors_t field for field
+// lichen_sensors.h's calls, with the same rules (see there); sensors_snap_t is lichen_sensors_t field for field.
+// sensors_get copies with memcpy, so lichen_os may pass the gate's struct (asserted identical) straight in.
 void sensors_get(sensors_snap_t *out);
 void sensors_start(void);
 void sensors_stop(void);

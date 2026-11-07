@@ -76,7 +76,7 @@ lichen_fonts_load	-	unspecified	fonts.h
 lichen_free	-	unspecified	lichen_mem.h
 lichen_fs_app_dir	SD	unspecified	lichen_fs.h
 lichen_fs_drive_bytes	SD	unspecified	lichen_fs.h
-lichen_fs_sd_begin	SD	lvgl	lichen_fs.h
+lichen_fs_sd_begin	SD	not-lvgl	lichen_fs.h
 lichen_fs_sd_bytes	SD	unspecified	lichen_fs.h
 lichen_fs_sd_dir	SD	not-lvgl	lichen_fs.h
 lichen_fs_sd_end	SD	unspecified	lichen_fs.h
@@ -108,7 +108,7 @@ lichen_notify_mark_read_id	SYSTEM	unspecified	notify_os.h
 lichen_notify_mark_read_upto	SYSTEM	unspecified	notify_os.h
 lichen_notify_next_toast	SYSTEM	unspecified	notify_os.h
 lichen_notify_remove	SYSTEM	unspecified	notify_os.h
-lichen_notify_save_now	SYSTEM	lvgl	notify_os.h
+lichen_notify_save_now	SYSTEM	not-lvgl	notify_os.h
 lichen_notify_set_clock	SYSTEM	unspecified	notify_os.h
 lichen_notify_set_dnd	SYSTEM	unspecified	notify_os.h
 lichen_notify_set_feedback	SYSTEM	unspecified	notify_os.h
@@ -126,7 +126,7 @@ lichen_radio_apply_all	RADIO	unspecified	lichen_radio.h
 lichen_radio_console_register	RADIO	unspecified	lichen_radio.h
 lichen_radio_get	RADIO	unspecified	lichen_radio.h
 lichen_radio_listen	RADIO	unspecified	lichen_radio.h
-lichen_radio_lora_pause	RADIO	lvgl	lichen_radio.h
+lichen_radio_lora_pause	RADIO	not-lvgl	lichen_radio.h
 lichen_radio_lora_resume	RADIO	unspecified	lichen_radio.h
 lichen_radio_name	RADIO	unspecified	lichen_radio.h
 lichen_radio_set	RADIO	unspecified	lichen_radio.h

@@ -44,7 +44,8 @@ CONF_REL = "tools/layers.conf"
 BASELINE_REL = "tools/layers-baseline.txt"
 MANIFEST_REL = "tools/gate_manifest.txt"
 GATE = "lichen_api"      # the gate: its headers are the app API
-GATE_IMPL = "lichen_os"  # the services that implement the gate's headers (#220)
+# The services that implement the gate's headers: lichen_os (#220) and lichen_notify (#245, notifications)
+GATE_IMPL = frozenset(("lichen_os", "lichen_notify"))
 SKIP_PARTS = ("/build/", "/managed_components/")
 SOURCE_EXT = (".c", ".cpp", ".h", ".hpp")
 REQ_KEYS = ("REQUIRES", "PRIV_REQUIRES")
@@ -344,9 +345,10 @@ def undefined_symbols(nm, lib):
 
 
 def gate_call_ok(conf, comp, sym, owner, gate_syms):
-    """A call to a gate-declared function that lichen_os defines is a call to the gate (#220). Not for the gate itself:
-    the gate calling into lichen_os is a downward edge it may not have (L4 uses L0 and L4 only)."""
-    return (owner == GATE_IMPL and comp != GATE and sym in gate_syms and GATE in conf.comp_layer
+    """A call to a gate-declared function that an implementer (GATE_IMPL: lichen_os, lichen_notify) defines is a call to
+    the gate (#220, #245). Not for the gate itself: the gate calling into an implementer is a downward edge it may not
+    have (L4 uses L0 and L4 only)."""
+    return (owner in GATE_IMPL and comp != GATE and sym in gate_syms and GATE in conf.comp_layer
             and conf.edge_ok(comp, GATE))
 
 
@@ -561,7 +563,7 @@ def thread_rule(comment):
     c = comment.replace("\n", " ")
     c = re.sub(r"//\s*", " ", c)
     c = re.sub(r"\s+", " ", c)
-    if re.search(r"\b[Nn]ot (?:on|from) the LVGL task", c):
+    if re.search(r"\b(?:[Nn]ot|[Nn]ever) (?:on|from) the LVGL task", c):
         return "not-lvgl"
     if re.search(r"any task", c, re.I):
         return "any"

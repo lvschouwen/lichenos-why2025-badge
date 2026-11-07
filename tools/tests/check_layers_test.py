@@ -234,19 +234,31 @@ class HardAndConf(unittest.TestCase):
             self.assertIn(g, globs)
         self.assertLess(globs.index("heap_caps_walk"), globs.index("heap_caps_*"))
         self.assertLess(globs.index("heap_caps_get_*"), globs.index("heap_caps_*"))
+        # notify_os.h and notify_bind.h are the OS's side (#245): every one of their functions is forbidden to apps,
+        # and none of lichen_notify.h's
+        for f in ("lichen_notify_start", "lichen_notify_save_now", "lichen_notify_set_clock", "lichen_notify_generation",
+                  "lichen_notify_ids", "lichen_notify_get", "lichen_notify_mark_read_id", "lichen_notify_mark_read_upto",
+                  "lichen_notify_mark_all_read", "lichen_notify_remove", "lichen_notify_clear_all", "lichen_notify_set_dnd",
+                  "lichen_notify_set_source_enabled", "lichen_notify_next_toast", "lichen_notify_set_feedback",
+                  "lichen_notify_feedback", "lichen_notify_stats", "lichen_notify_bind_store",
+                  "lichen_notify_set_state_hooks"):
+            self.assertIn(f, conf.forbid["L6"])
+        for f in ("lichen_notify", "lichen_notify_to", "lichen_notify_unread", "lichen_notify_unread_top",
+                  "lichen_notify_mark_read", "lichen_notify_source_enabled", "lichen_notify_dnd"):
+            self.assertFalse(any(cl.fnmatch.fnmatchcase(f, g) for g in conf.forbid["L6"]), f)
         # the console's LoRa switch saves "off" (#222): lora alone may call it, never a peer app
         self.assertIn(("lora_switch_request", ["lora"]), conf.owner_only)
 
 
     def test_real_gate_requires_no_hardware_layer(self):
-        """The gate must not require L1/L2 (#220). Its public lichen_notify (L3) is baselined debt, not checked here."""
+        """The gate must not require L1/L2 (#220), nor lichen_notify since its headers moved into the gate (#245)."""
         tools = os.path.dirname(cl.__file__)
         conf = cl.parse_conf(cl.read(os.path.join(tools, "layers.conf")))
         self.assertEqual(conf.comp_layer["lichen_api"], "L4")
         self.assertEqual(conf.allowed_layers("L4"), {"L0", "L4"})
         self.assertEqual(conf.comp_layer["lichen_os"], "L3")
         cm = cl.read(os.path.join(tools, "..", "firmware", "components", "lichen_api", "CMakeLists.txt"))
-        bad = [d for _, d in cl.parse_requires(cm) if conf.comp_layer.get(d) in ("L1", "L2")]
+        bad = [d for _, d in cl.parse_requires(cm) if conf.comp_layer.get(d) in ("L1", "L2", "L3")]
         self.assertEqual(bad, [])
 
 
@@ -260,7 +272,7 @@ layer L4 system
 layer L5 apps
 component base L0
 component drv L1
-component lichen_os L2
+component lichen_os lichen_notify L2
 component gate lichen_api L3
 component shell L4
 component app L5
@@ -268,9 +280,10 @@ layer-may L3 L0 L3
 layer-may L4 L0 L3 L4
 layer-may L5 L3 L5
 peer lichen_os lichen_api
+peer lichen_notify lichen_api
 owner-only os_lock lichen_os
 """
-GATE_HEADER = "int os_fn(void);\nint shell_fn(void);\nint os_lock(void);\n"
+GATE_HEADER = "int os_fn(void);\nint shell_fn(void);\nint os_lock(void);\nint notify_fn(void);\n"
 
 
 class GateAttribution(unittest.TestCase):
@@ -280,6 +293,8 @@ class GateAttribution(unittest.TestCase):
         files = {
             "lichen_os": ("idf_component_register(SRCS \"o.c\" PRIV_REQUIRES lichen_api drv)",
                           {"o.c": "int os_fn(void){return 1;}\nint os_private(void){return 2;}\nint os_lock(void){return 6;}\n"}),
+            "lichen_notify": ("idf_component_register(SRCS \"n.c\" REQUIRES lichen_api)",
+                              {"n.c": "int notify_fn(void){return 7;}\nint notify_private(void){return 8;}\n"}),
             "lichen_api": ("idf_component_register(SRCS \"x.c\" INCLUDE_DIRS \".\" REQUIRES base)",
                            {"x.c": "int api_fn(void){return 5;}\n", "lichen_x.h": GATE_HEADER}),
             "shell": ("idf_component_register(SRCS \"s.c\" REQUIRES lichen_api)", {"s.c": "int shell_fn(void){return 3;}\n"}),
@@ -293,6 +308,24 @@ class GateAttribution(unittest.TestCase):
 
     def test_app_call_to_a_gate_function_lichen_os_defines_passes(self):
         self.assertEqual(keys(self.fixture(["os_fn"])), set())
+
+    def test_app_call_to_a_gate_function_lichen_notify_defines_passes(self):
+        self.assertEqual(keys(self.fixture(["notify_fn"])), set())  # the second implementer (#245)
+
+    def test_shell_call_to_a_gate_function_lichen_notify_defines_passes(self):
+        fx = self.fixture([])
+        fx.write("firmware/components/shell/s.c", "int notify_fn(void);\nint shell_fn(void){return notify_fn();}\n")
+        fx.build()
+        self.assertEqual(keys(fx), set())
+
+    def test_app_call_to_a_lichen_notify_function_no_header_declares_fails(self):
+        self.assertEqual(keys(self.fixture(["notify_private"])), {("C", "app:notify_private")})
+
+    def test_the_gate_calling_into_lichen_notify_stays_a_violation(self):
+        fx = self.fixture([])
+        fx.write("firmware/components/lichen_api/x.c", "int notify_fn(void);\nint api_fn(void){return notify_fn();}\n")
+        fx.build()
+        self.assertEqual(keys(fx), {("C", "lichen_api:notify_fn")})  # an implementer is still below the gate
 
     def test_app_call_to_a_lichen_os_function_no_header_declares_fails(self):
         self.assertEqual(keys(self.fixture(["os_private"])), {("C", "app:os_private")})
@@ -525,6 +558,13 @@ static inline int skipped(void) { return 0; }
 
     def test_header_functions_and_thread_rules(self):
         self.assertEqual(cl.header_functions(self.HEADER), [("one", "any"), ("two", "not-lvgl")])
+
+    def test_never_on_the_lvgl_task_is_not_lvgl(self):
+        # notify_os.h's lichen_notify_save_now says "Blocks: never on the LVGL task" (#245 review)
+        self.assertEqual(cl.thread_rule("// Restart / power off: waits. Blocks: never on the LVGL task."), "not-lvgl")
+        self.assertEqual(cl.thread_rule("// Never from the LVGL task"), "not-lvgl")
+        self.assertEqual(cl.thread_rule("// not on the LVGL task"), "not-lvgl")
+        self.assertEqual(cl.thread_rule("// on the LVGL task only"), "lvgl")
 
     def test_manifest_roundtrip_and_warning(self):
         fx = Fixture(self, overrides={"gate": (BASE_FILES["gate"][0], {"g.c": "", "gate.h": self.HEADER})})

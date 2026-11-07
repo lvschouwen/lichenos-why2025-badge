@@ -59,7 +59,8 @@ void led_set_unread(bool any) {
 void haptics_notice(uint8_t level) {
     s_notice = level;
 }
-void boot_progress_bind_store(uint8_t (*get)(char const *key, uint8_t def), bool (*set)(char const *key, uint8_t value)) {
+void boot_progress_bind_store(uint8_t (*get)(char const *key, uint8_t def),
+                              bool (*set)(char const *key, uint8_t value)) {
     s_boot_get = get;
     s_boot_set = set;
 }
