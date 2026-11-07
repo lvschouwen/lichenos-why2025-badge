@@ -11,7 +11,7 @@
 // worker task as not-the-UART (console_from_uart() is false inside it), so `nvs-enc burn` stays USB-only (#116).
 #include "app_icons.h"
 #include "console_model.h"
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "freertos/FreeRTOS.h"
@@ -70,7 +70,7 @@ typedef struct {
 } reply_t;
 
 static char *psram_alloc(size_t n) {
-    return heap_caps_calloc(1, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return lichen_alloc(NULL, n, LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
 }
 
 static void set_status(con_t *c, char const *text, bool amber) {
@@ -97,7 +97,7 @@ static void out_add(con_t *c, char const *text, size_t n) {
 static void reply_free(reply_t *r) {
     if (r->text) {
         secure_wipe(r->text, r->len);
-        free(r->text);
+        lichen_free(NULL, r->text);
     }
     free(r);
 }
@@ -167,8 +167,8 @@ static void worker(void *arg) {
     secure_wipe(j->line, CONSOLE_LINE_MAX + 1);
     secure_wipe(j->exec_buf, EXEC_CAP);
     ESP_LOGI(TAG, "command done, stack never below %u bytes free", (unsigned)uxTaskGetStackHighWaterMark(NULL));
-    free(j->line);
-    free(j->exec_buf);
+    lichen_free(NULL, j->line);
+    lichen_free(NULL, j->exec_buf);
     free(j);
     s_busy = false; // after the free: the next run may start from the LVGL task at once
 }
@@ -193,8 +193,8 @@ static bool start_job(con_t *c, char const *line) {
     if (j->line) {
         secure_wipe(j->line, CONSOLE_LINE_MAX + 1);
     }
-    free(j->line);
-    free(j->exec_buf);
+    lichen_free(NULL, j->line);
+    lichen_free(NULL, j->exec_buf);
     free(j);
     return false;
 }
@@ -282,7 +282,7 @@ static void on_delete(lv_event_t *e) {
     con_t *c = lv_event_get_user_data(e);
     lv_label_set_text_static(c->label, ""); // the label must not point into the buffer freed next
     secure_wipe(c->buf, OUT_CAP);
-    free(c->buf);
+    lichen_free(NULL, c->buf);
     cur = NULL;
     free(c);
 }
@@ -344,7 +344,7 @@ static lv_obj_t *build_console(void) {
         }
     }
     if (!c->buf || !s_hist) {
-        free(c->buf);
+        lichen_free(NULL, c->buf);
         free(c);
         lv_label_set_text(lv_label_create(screen), "Out of memory");
         return screen;

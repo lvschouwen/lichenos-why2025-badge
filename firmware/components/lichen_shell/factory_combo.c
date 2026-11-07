@@ -13,6 +13,7 @@
 #include "lichen_sys_factory.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lichen_task.h"
 #include "fw_console.h"
 #include "keyboard.h"
 #include "shell.h"
@@ -145,13 +146,12 @@ static void combo_task(void *arg) {
     }
     close_question();
     task = NULL;
-    vTaskDelete(NULL);
 }
 
 void factory_combo_start(void) {
     lichen_sys_factory_combo_init(&combo);
     start_us = esp_timer_get_time();
-    if (xTaskCreatePinnedToCore(combo_task, "factory_keys", TASK_STACK, NULL, 3, &task, 1) != pdPASS) {
+    if (!lichen_task_start(NULL, "factory_keys", combo_task, NULL, TASK_STACK, LICHEN_PRIO_APP_LOOP, &task)) {
         ESP_LOGE(TAG, "no boot key combo: no task");
         task = NULL;
         return;

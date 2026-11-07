@@ -23,6 +23,20 @@ static void fake_drive(size_t *total, size_t *used) {
 
 static char root_dir[64];
 
+// Buffer hooks that count: every block the shim takes is given back (the badge books them as the app's memory)
+static int live_blocks, total_blocks;
+static void *count_alloc(size_t n) {
+    live_blocks++;
+    total_blocks++;
+    return malloc(n);
+}
+static void count_free(void *p) {
+    if (p) {
+        live_blocks--;
+    }
+    free(p);
+}
+
 // The file's bytes as the file system has them, read past the shim
 static size_t disk_read(char const *name, uint8_t *out, size_t cap) {
     char path[300];
@@ -110,6 +124,19 @@ static void buffered_writes(void) {
     CHECK(fs_shim_take_raw_writes() == 0);
     CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 30 * REC_SIZE && memcmp(disk, expect, 30 * REC_SIZE) == 0);
 
+    // Through the hooks: a save that grows the buffer and compares chunks takes blocks and gives all of them back
+    fs_shim_set_buffer_hooks(count_alloc, count_free);
+    save_contacts(expect, 30, 999, 0);
+    CHECK(total_blocks >= 2 && live_blocks == 0);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 30 * REC_SIZE && memcmp(disk, expect, 30 * REC_SIZE) == 0);
+    fs_shim_test_faults(true, false); // a failed grow leaves nothing behind either
+    File nomem2 = SPIFFS.open("/contacts3", "w", true);
+    CHECK(nomem2 && nomem2.write(expect, 10) == 0);
+    nomem2.close();
+    fs_shim_test_faults(false, false);
+    CHECK(live_blocks == 0);
+    fs_shim_set_buffer_hooks(NULL, NULL);
+
     // A write past FS_SHIM_MAX_FILE (or one that would wrap) fails instead of growing the buffer: old file kept
     File huge = SPIFFS.open("/contacts3", "w", true);
     CHECK(huge.write(expect, 0) == 0); // nothing to write, nothing allocated
@@ -184,17 +211,17 @@ static void buffered_writes(void) {
         memset(&blobs[i], 0x10 * (i + 1), sizeof(blobs[i]));
     }
     f = SPIFFS.open("/blobs", "w");
-    CHECK(f.write((uint8_t *)blobs, sizeof(blobs)) == sizeof(blobs));
+    CHECK(f.write(reinterpret_cast<uint8_t *>(blobs), sizeof(blobs)) == sizeof(blobs));
     f.close();
     f = SPIFFS.open("/blobs", "w");
     CHECK(f.seek(0));
     uint32_t pos = 0, found = 0;
-    while (f.read((uint8_t *)&tmp, sizeof(tmp)) == sizeof(tmp)) { // a fresh "w" File has nothing to read yet
+    while (f.read(reinterpret_cast<uint8_t *>(&tmp), sizeof(tmp)) == sizeof(tmp)) { // a fresh "w" File has nothing to read yet
         pos += sizeof(tmp);
     }
     CHECK(pos == 0);
-    CHECK(f.write((uint8_t *)blobs, sizeof(blobs)) == sizeof(blobs) && f.seek(0));
-    while (f.read((uint8_t *)&tmp, sizeof(tmp)) == sizeof(tmp)) {
+    CHECK(f.write(reinterpret_cast<uint8_t *>(blobs), sizeof(blobs)) == sizeof(blobs) && f.seek(0));
+    while (f.read(reinterpret_cast<uint8_t *>(&tmp), sizeof(tmp)) == sizeof(tmp)) {
         if (tmp.key[0] == 0x20) {
             found = pos;
         }
@@ -202,7 +229,7 @@ static void buffered_writes(void) {
     }
     CHECK(pos == sizeof(blobs) && found == sizeof(Blob));
     memset(&tmp, 0x77, sizeof(tmp));
-    CHECK(f.seek(found) && f.write((uint8_t *)&tmp, sizeof(tmp)) == sizeof(tmp));
+    CHECK(f.seek(found) && f.write(reinterpret_cast<uint8_t *>(&tmp), sizeof(tmp)) == sizeof(tmp));
     f.close();
     blobs[1] = tmp;
     CHECK(disk_read("/blobs", disk, sizeof(disk)) == sizeof(blobs) && memcmp(disk, blobs, sizeof(blobs)) == 0);

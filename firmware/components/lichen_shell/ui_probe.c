@@ -1,7 +1,7 @@
 // Bench diagnostics (console only, #67): `fw keys send <seq>` feeds keys to the screen on top and `fw ui` prints what
 // is on it, so a screen can be driven and read without anyone at the badge. Tokens: see ui_keys.h.
 #include "console_cmd.h"
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "fw_console.h"
@@ -145,7 +145,7 @@ static void sequence_report(sequence_t const *seq) {
 // "fw keys send <seq>" (shell.c's keys command hands it over)
 void ui_probe_send(char const *seq_text) {
     size_t      pos;
-    sequence_t *seq = heap_caps_calloc(1, sizeof(*seq), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    sequence_t *seq = lichen_alloc(NULL, sizeof(*seq), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!seq) {
         console_reply("keys send: no memory");
         return;
@@ -154,7 +154,7 @@ void ui_probe_send(char const *seq_text) {
     seq->n = ui_keys_parse(seq->text, seq->keys, MAX_KEYS, &pos);
     if (seq->n == UI_KEYS_ERR) {
         console_reply("keys send: not understood at offset %u", (unsigned)pos);
-        free(seq);
+        lichen_free(NULL, seq);
         return;
     }
     seq->locked = ui_remote_locked();
@@ -165,7 +165,7 @@ void ui_probe_send(char const *seq_text) {
     lichen_sys_ui_unlock();
     if (!timer) {
         console_reply("keys send: no timer");
-        free(seq);
+        lichen_free(NULL, seq);
         return;
     }
     uint32_t total_ms = (uint32_t)(seq->n + 2) * (KEY_GAP_MS + WAIT_MS);
@@ -175,7 +175,7 @@ void ui_probe_send(char const *seq_text) {
         return;
     }
     sequence_report(seq);
-    free(seq);
+    lichen_free(NULL, seq);
 }
 
 static bool visible(lv_obj_t *obj) {

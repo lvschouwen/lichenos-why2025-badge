@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_radio.h"
+#include "lichen_task.h"
 #include "lichen_ui.h"
 #include "menu.h"
 #include "settings_store.h"
@@ -392,7 +393,6 @@ static void scan_task(void *arg) {
         res->ok  = shell_sources.wifi_scan && shell_sources.wifi_scan(res->aps, MAX_APS, &res->n);
         lichen_sys_ui_call(on_scan_done, res, 0); // waits for the LVGL lock as long as it takes
     }
-    vTaskDelete(NULL);
 }
 
 static void add_scanning_row(void *arg) {
@@ -405,7 +405,7 @@ static void start_scan(void) {
     lichen_ui_with_group(group, add_scanning_row, NULL); // keeps the group's focus on the list
     focus_at_scan = group ? lv_group_get_focused(group) : NULL;
     set_status("Scanning for networks...");
-    if (xTaskCreatePinnedToCore(scan_task, "wifiscan", 4096, (void *)(uintptr_t)gen, 4, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(NULL, "wifiscan", scan_task, (void *)(uintptr_t)gen, 4096, LICHEN_PRIO_JOB, NULL)) {
         ESP_LOGW(TAG, "scan task did not start");
         set_status("Could not start the scan");
     }

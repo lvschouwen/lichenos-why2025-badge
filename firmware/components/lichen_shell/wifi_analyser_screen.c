@@ -2,12 +2,13 @@
 // chosen network to walk towards it. One scan every WIFI_AN_SCAN_GAP_MS at most (scans disturb the link, #146); wifi_scan
 // itself refuses during a firmware update. The scan runs on its own task, never on the LVGL task. Network names are
 // shown here only: nothing is logged.
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lichen_task.h"
 #include "lichen_ui.h"
 #include "screen_ids.h"
 #include "shell_parts.h"
@@ -219,7 +220,6 @@ static void scan_task(void *arg) {
         }
         lichen_sys_ui_unlock();
     }
-    vTaskDelete(NULL);
 }
 
 static void start_scan(void) {
@@ -227,7 +227,7 @@ static void start_scan(void) {
     an->ever     = true;
     an->last_ms  = now_ms();
     set_status("Scanning...");
-    if (xTaskCreatePinnedToCore(scan_task, "wifian", 4096, (void *)(uintptr_t)gen, 4, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(NULL, "wifian", scan_task, (void *)(uintptr_t)gen, 4096, LICHEN_PRIO_JOB, NULL)) {
         an->scanning = false;
         ESP_LOGW(TAG, "scan task did not start");
         set_status("Could not start the scan. Trying again.");
@@ -293,14 +293,14 @@ static void on_delete(lv_event_t *e) {
         if (an->timer) {
             lv_timer_delete(an->timer);
         }
-        heap_caps_free(an);
+        lichen_free(NULL, an);
         an = NULL;
     }
 }
 
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
-    an               = heap_caps_calloc(1, sizeof(*an), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); // history and scans: PSRAM
+    an               = lichen_alloc(NULL, sizeof(*an), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // history and scans: PSRAM
     if (!an) {
         return screen;
     }

@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "lichen_clock.h"
 #include "lichen_notify.h"
+#include "lichen_task.h"
 #include "lichen_sensors.h"
 #include "psram_boot.h"
 #include "shell_parts.h"
@@ -124,7 +125,7 @@ static void notices_task(void *arg) {
 }
 
 void sys_notices_start(void) {
-    if (xTaskCreatePinnedToCore(notices_task, "sys_notices", TASK_STACK, NULL, 2, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(NULL, "sys_notices", notices_task, NULL, TASK_STACK, LICHEN_PRIO_BACKGROUND, NULL)) {
         ESP_LOGE(TAG, "no memory: Lichen raises no notifications of its own");
     }
 }

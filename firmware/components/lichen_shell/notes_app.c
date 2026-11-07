@@ -4,7 +4,7 @@
 // The marker is the highest note sequence the person has seen (NVS notes_seen); release_notes.h has the rules.
 #include "app_icons.h"
 #include "screen_ids.h"
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "fonts.h"
@@ -46,7 +46,7 @@ static void load(void) {
         return;
     }
     // s_loaded last: until then another caller would read a half-built index (#118)
-    s_notes = heap_caps_calloc(RN_MAX_NOTES, sizeof(rn_note_t), MALLOC_CAP_SPIRAM);
+    s_notes = lichen_alloc(NULL, RN_MAX_NOTES * sizeof(rn_note_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!s_notes) {
         ESP_LOGW(TAG, "no memory for the release notes index");
         s_loaded = true;
@@ -163,7 +163,7 @@ typedef struct {
 } row_text_t;
 
 static void on_list_delete(lv_event_t *e) {
-    heap_caps_free(lv_event_get_user_data(e));
+    lichen_free(NULL, lv_event_get_user_data(e));
 }
 
 static void open_notes(lv_obj_t *screen) {
@@ -176,7 +176,7 @@ static void open_notes(lv_obj_t *screen) {
         return;
     }
     // Row texts in PSRAM for as long as the list is open
-    row_text_t *rows = heap_caps_calloc(s_count, sizeof(row_text_t), MALLOC_CAP_SPIRAM);
+    row_text_t *rows = lichen_alloc(NULL, s_count * sizeof(row_text_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!rows) {
         menu_note(menu, "Not enough memory to list the notes.");
         return;

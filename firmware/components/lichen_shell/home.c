@@ -9,7 +9,7 @@
 // shift, the cells are reordered in place so the selection stays), Enter drops it and saves, Esc puts it back or ends
 // arrange mode. The order is saved in badge_fw/home_order (tile_order.h) on a real change only.
 #include "fw_console.h"
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "home_layout.h"
@@ -24,6 +24,7 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -111,12 +112,12 @@ static void app_ids(char const **ids, int n) {
 static bool load_order(int *order, int n) {
     char const *ids[LICHEN_MAX_APPS];
     app_ids(ids, n);
-    char *text = heap_caps_malloc(ORDER_CAP, MALLOC_CAP_SPIRAM); // the console task's stack is small too
+    char *text = lichen_alloc(NULL, ORDER_CAP, LICHEN_MEM_BULK); // the console task's stack is small too
     if (text) {
         settings_get_str(HOME_ORDER_KEY, text, ORDER_CAP, "");
     }
     bool used = tile_order_merge(text, ids, n, order);
-    free(text);
+    lichen_free(NULL, text);
     return used;
 }
 
@@ -127,9 +128,9 @@ static bool save_order(int const *order, int n) {
     }
     char const *ids[LICHEN_MAX_APPS];
     app_ids(ids, n);
-    char *text = heap_caps_malloc(ORDER_CAP, MALLOC_CAP_SPIRAM);
+    char *text = lichen_alloc(NULL, ORDER_CAP, LICHEN_MEM_BULK);
     bool  ok   = text && tile_order_encode(ids, order, n, text, ORDER_CAP) > 0 && settings_set_str(HOME_ORDER_KEY, text);
-    free(text);
+    lichen_free(NULL, text);
     if (!ok) {
         ESP_LOGE(TAG, "home order not saved");
     }

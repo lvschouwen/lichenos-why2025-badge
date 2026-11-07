@@ -15,9 +15,13 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
-static int fail_alloc, warned;
+static int fail_alloc, warned, ring_frees;
 static void *test_alloc(size_t count, size_t size) {
     return fail_alloc ? NULL : calloc(count, size);
+}
+static void test_free(void *ring) {
+    ring_frees += ring != NULL;
+    free(ring);
 }
 static void test_warn(char const *what) {
     (void)what;
@@ -342,6 +346,16 @@ int main(void) {
         CHECK(mesh_store_chat(&k, b, 2, false) == 0);
         CHECK(mesh_store_add_dm("@new", "x", 0, 6, peer)); // and it works once memory is back
     }
+    mesh_store_set_hooks(NULL, NULL);
+
+    // A ring goes back through the free hook that pairs with the alloc hook: every ring is returned
+    mesh_store_set_hooks(test_alloc, NULL);
+    mesh_store_set_free_hook(test_free);
+    CHECK(mesh_store_init(2));
+    ring_frees = 0; // the rings of the blocks above were released through it too
+    CHECK(mesh_store_add_message("#a", "x", 0, 1) && mesh_store_add_message("#b", "x", 0, 1));
+    CHECK(mesh_store_init(2) && ring_frees == 2); // a new init releases the old rings
+    mesh_store_set_free_hook(NULL);
     mesh_store_set_hooks(NULL, NULL);
 
     // A DM from a contact whose name could not be looked up ("@?") does not replace the name we know

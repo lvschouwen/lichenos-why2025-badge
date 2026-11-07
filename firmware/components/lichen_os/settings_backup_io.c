@@ -1,7 +1,7 @@
 #include "settings_backup_io.h"
 
 #include "esp_app_desc.h"
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "esp_log.h"
 #include "nvs.h"
 #include "sdcard.h"
@@ -18,8 +18,16 @@ static char const TAG[] = "backup";
 #define PATH_NEW  SD_LICHEN_DIR "/settings.new"
 #define VALUES_MAX SB_KEYS_MAX // read_all writes sb_key_count() values, which the table caps at SB_KEYS_MAX
 
-static sb_value_t s_held[VALUES_MAX]; // the changes of the last plan; one load at a time (the screen guards it)
-static size_t     s_held_count;
+// The changes of the last plan; one load at a time (the screen guards it). A PSRAM grant that lives from plan to apply
+// only: freed by apply or by the next plan, so the 2.3 KB is not held for good in internal .bss
+static sb_value_t *s_held;
+static size_t      s_held_count;
+
+static void held_release(void) {
+    lichen_free(NULL, s_held);
+    s_held       = NULL;
+    s_held_count = 0;
+}
 
 static void current_value(sb_key_t const *key, sb_value_t *out) {
     memset(out, 0, sizeof(*out));
@@ -88,7 +96,7 @@ sbk_status_t settings_backup_save(void) {
     if (!sd_mounted()) {
         return SBK_NO_CARD;
     }
-    save_scratch_t *s = heap_caps_malloc(sizeof(*s), MALLOC_CAP_SPIRAM);
+    save_scratch_t *s = lichen_alloc(NULL, sizeof(*s), LICHEN_MEM_BULK);
     if (!s) {
         return SBK_MEMORY;
     }
@@ -102,7 +110,7 @@ sbk_status_t settings_backup_save(void) {
     } else if (!len) {
         status = SBK_MEMORY;
     }
-    free(s);
+    lichen_free(NULL, s);
     ESP_LOGI(TAG, "save: %d", (int)status);
     return status;
 }
@@ -113,14 +121,14 @@ static char *read_file(size_t *len, sbk_status_t *status) {
         *status = SBK_NO_CARD;
         return NULL;
     }
-    char *buf = heap_caps_malloc(FILE_CAP + 2, MALLOC_CAP_SPIRAM) /* read FILE_CAP + 1 bytes to spot an oversize file, plus the NUL */;
+    char *buf = lichen_alloc(NULL, FILE_CAP + 2, LICHEN_MEM_BULK) /* read FILE_CAP + 1 bytes to spot an oversize file, plus the NUL */;
     if (!buf) {
         *status = SBK_MEMORY;
         return NULL;
     }
     *status = SBK_IO;
     if (!sd_begin(2000)) {
-        free(buf);
+        lichen_free(NULL, buf);
         return NULL;
     }
     FILE *f = fopen(SETTINGS_BACKUP_PATH, "r");
@@ -139,7 +147,7 @@ static char *read_file(size_t *len, sbk_status_t *status) {
         *status = SBK_INVALID;
     }
     if (*status != SBK_OK && *status != SBK_INVALID) {
-        free(buf);
+        lichen_free(NULL, buf);
         return NULL;
     }
     buf[*len] = '\0';
@@ -148,7 +156,7 @@ static char *read_file(size_t *len, sbk_status_t *status) {
 
 sbk_status_t settings_backup_plan(settings_backup_plan_t *plan) {
     memset(plan, 0, sizeof(*plan));
-    s_held_count = 0;
+    held_release();
     size_t       len;
     sbk_status_t status;
     char        *text = read_file(&len, &status);
@@ -156,21 +164,25 @@ sbk_status_t settings_backup_plan(settings_backup_plan_t *plan) {
         return status;
     }
     if (status == SBK_INVALID) { // oversize: no values to hold, so no allocation that could turn it into SBK_MEMORY
-        free(text);
+        lichen_free(NULL, text);
         plan->result = (sb_result_t){SB_ERR_TOO_LONG, 1, 0};
         return SBK_INVALID;
     }
     // 2.3 KB of values, off the caller's stack (#209)
-    sb_value_t *parsed = heap_caps_malloc(VALUES_MAX * sizeof(*parsed), MALLOC_CAP_SPIRAM);
-    if (!parsed) {
-        free(text);
+    sb_value_t *parsed = lichen_alloc(NULL, VALUES_MAX * sizeof(*parsed), LICHEN_MEM_BULK);
+    s_held             = lichen_alloc(NULL, VALUES_MAX * sizeof(*s_held), LICHEN_MEM_BULK);
+    if (!parsed || !s_held) {
+        lichen_free(NULL, parsed);
+        held_release();
+        lichen_free(NULL, text);
         return SBK_MEMORY;
     }
     size_t n     = 0;
     plan->result = sb_parse(text, len, parsed, VALUES_MAX, &n);
-    free(text);
+    lichen_free(NULL, text);
     if (plan->result.err != SB_OK) {
-        free(parsed);
+        lichen_free(NULL, parsed);
+        held_release();
         return SBK_INVALID;
     }
     for (size_t i = 0; i < n; i++) {
@@ -180,10 +192,14 @@ sbk_status_t settings_backup_plan(settings_backup_plan_t *plan) {
             s_held[s_held_count++] = parsed[i];
         }
     }
-    free(parsed);
+    lichen_free(NULL, parsed);
     plan->changed = s_held_count;
     sb_summary(s_held, s_held_count, plan->result.ignored, plan->summary, sizeof(plan->summary));
-    return s_held_count ? SBK_OK : SBK_NOTHING;
+    sbk_status_t st = s_held_count ? SBK_OK : SBK_NOTHING;
+    if (!s_held_count) {
+        held_release(); // nothing to apply: nothing to hold
+    }
+    return st;
 }
 
 static bool store(sb_value_t const *v) {
@@ -211,6 +227,6 @@ sbk_status_t settings_backup_apply(size_t *applied) {
     }
     bool all = *applied == s_held_count;
     ESP_LOGI(TAG, "load: %u of %u stored", (unsigned)*applied, (unsigned)s_held_count);
-    s_held_count = 0;
+    held_release();
     return all ? SBK_OK : SBK_IO;
 }

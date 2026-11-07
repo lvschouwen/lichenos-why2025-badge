@@ -5,7 +5,7 @@
 // rules are files_model.c's and files_ops.c enforces them too.
 #include "app_icons.h"
 #include "screen_ids.h"
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "files_job.h"
@@ -300,7 +300,7 @@ static void on_view_delete(lv_event_t *e) {
     (void)e;
     if (s_t) {
         lv_timer_delete(s_t->poll);
-        heap_caps_free(s_t);
+        lichen_free(NULL, s_t);
         s_t = NULL;
     }
 }
@@ -370,7 +370,7 @@ static void open_view(char const *path) {
     if (s_t) {
         return;
     }
-    s_t = heap_caps_calloc(1, sizeof(*s_t), MALLOC_CAP_SPIRAM);
+    s_t = lichen_alloc(NULL, sizeof(*s_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!s_t) {
         say("Not enough memory to view it.");
         return;
@@ -378,7 +378,7 @@ static void open_view(char const *path) {
     snprintf(s_t->path, sizeof(s_t->path), "%s", path);
     shell_open_keyed(build_view, SCREEN_FILES_VIEW, shell_key_hash(path, strlen(path))); // one viewer per file
     if (s_t && !s_t->text) { // the shell did not open it (no builder ran): nothing will free the state
-        heap_caps_free(s_t);
+        lichen_free(NULL, s_t);
         s_t = NULL;
     }
 }

@@ -16,6 +16,7 @@
 #include "lichen_sys_display.h"
 #include "fw_console.h"
 #include "lichen_notify.h"
+#include "lichen_task.h"
 #include "lichen_radio.h"
 #include "lichen_sensors.h"
 #include "sdkconfig.h"
@@ -358,7 +359,7 @@ static void cmd_thermal(char const *args) {
 void thermal_start(void) {
     console_register("thermal", "thermal [test warn|clear|shutdown YES] (temperature watchdog, battery safety)",
                      cmd_thermal);
-    if (xTaskCreatePinnedToCore(thermal_task, "thermal", STACK_BYTES, NULL, 3, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(NULL, "thermal", thermal_task, NULL, STACK_BYTES, LICHEN_PRIO_SERVICE, NULL)) {
         ESP_LOGE(TAG, "no memory: nothing watches the temperature");
     }
 }

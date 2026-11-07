@@ -3,7 +3,7 @@
 #include "log_clean.h"
 #include "log_ring.h"
 
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -92,14 +92,14 @@ void log_store_start(void) {
     if (ready) {
         return;
     }
-    uint8_t *mem = heap_caps_malloc(LOG_STORE_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *mem = lichen_alloc(NULL, LOG_STORE_BYTES, LICHEN_MEM_BULK);
     if (!mem) {
         ESP_LOGW("log_store", "no PSRAM for the log store, GET /log stays empty");
         return;
     }
-    raw = heap_caps_malloc(RAW_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    raw = lichen_alloc(NULL, RAW_BYTES, LICHEN_MEM_BULK);
     if (!raw) {
-        heap_caps_free(mem);
+        lichen_free(NULL, mem);
         ESP_LOGW("log_store", "no PSRAM for the log store, GET /log stays empty");
         return;
     }

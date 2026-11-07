@@ -22,6 +22,7 @@
 #include "mesh_rhist_run.h"
 #include "channel_input.h"
 #include "mesh_pathhash.h"
+#include "mesh_mem.h"
 #include "mesh_prefs.h"
 #include "mesh_share.h"
 #include "radio_presets.h"
@@ -288,12 +289,6 @@ extern "C" void mesh_tile_snapshot(mesh_tile_t *out) {
     uint32_t in_s = advcfg_next_in_s(next, mesh_epoch_now());
     out->advert_scheduled = in_s != UINT32_MAX;
     out->advert_next_s    = in_s == UINT32_MAX ? 0 : in_s;
-}
-
-// The chat rings go to PSRAM explicitly: through plain malloc a ring under SPIRAM_MALLOC_ALWAYSINTERNAL would take
-// internal RAM, which the display needs (L6 of #59)
-static void *store_alloc_ring(size_t count, size_t size) {
-    return heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM); // freed by mesh_store.c with free(): not lichen_alloc
 }
 
 static void store_warn(char const *what) {
@@ -3444,7 +3439,9 @@ static bool start_locked(char const *files_dir) {
     fs_shim_set_root(files_dir);
     fs_shim_set_drive_bytes(drive_bytes);
     mesh_lock();
-    mesh_store_set_hooks(store_alloc_ring, store_warn);
+    mesh_store_set_hooks(mesh_mem_ring_alloc, store_warn);
+    mesh_store_set_free_hook(mesh_mem_free);
+    fs_shim_set_buffer_hooks(mesh_mem_file_alloc, mesh_mem_free);
     mesh_store_set_clock(mesh_epoch_now);
     bool ok = mesh_store_init(STORE_MESSAGES);
     mesh_unlock();

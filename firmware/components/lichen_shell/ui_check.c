@@ -6,7 +6,7 @@
 // not single bits, in boot-time-stable addresses. This walker checks exactly those two fields on every object of every
 // screen, logs the first bad one with the 128-byte cache line around the bad slot and the heap blocks around it, and
 // writes a restart-log note so "fw crash" shows the finding after the reboot that usually follows.
-#include "esp_heap_caps.h"
+#include "lichen_sys_mem.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "esp_timer.h"
@@ -41,17 +41,16 @@ static bool in_ram(void const *p) {
 }
 
 // Heap blocks around the bad slot: the neighbour that overran or whose cache line was clipped shows up here
-static bool near_cb(walker_heap_into_t heap, walker_block_info_t b, void *user) {
-    (void)heap;
+static bool near_cb(void const *ptr, size_t size, bool used, void *user) {
     near_ctx_t *ctx   = user;
-    uintptr_t   start = (uintptr_t)b.ptr;
-    uintptr_t   end   = start + b.size;
+    uintptr_t   start = (uintptr_t)ptr;
+    uintptr_t   end   = start + size;
     if (end + NEAR_BYTES < ctx->at || start > ctx->at + NEAR_BYTES) {
         return true;
     }
     if (ctx->shown < 12) {
-        ESP_LOGE(TAG, "  heap block %p..%p %u B %s%s", (void *)start, (void *)end, (unsigned)b.size,
-                 b.used ? "used" : "free", start <= ctx->at && ctx->at < end ? "  <- holds the bad slot" : "");
+        ESP_LOGE(TAG, "  heap block %p..%p %u B %s%s", (void *)start, (void *)end, (unsigned)size,
+                 used ? "used" : "free", start <= ctx->at && ctx->at < end ? "  <- holds the bad slot" : "");
         ctx->shown++;
     }
     return true;
@@ -108,9 +107,9 @@ static void report(lv_obj_t *obj, unsigned depth, char const *what, void const *
         dump_line(slot);
     }
     near_ctx_t ctx = {.at = (uintptr_t)slot};
-    heap_caps_walk(MALLOC_CAP_SPIRAM, near_cb, &ctx);
+    lichen_sys_mem_walk(LICHEN_SYS_MEM_PSRAM, near_cb, &ctx);
     if (ctx.shown == 0) {
-        heap_caps_walk(MALLOC_CAP_INTERNAL, near_cb, &ctx);
+        lichen_sys_mem_walk(LICHEN_SYS_MEM_INTERNAL, near_cb, &ctx);
     }
     snprintf(last_finding, sizeof(last_finding), "ui check: obj %p %s slot %p holds %p (walk %" PRIu32 ")", (void *)obj, what,
              slot, value, walks);
@@ -197,7 +196,7 @@ static void heap_tick(void) {
     if (++n % 10) {
         return;
     }
-    if (!heap_caps_check_integrity(MALLOC_CAP_SPIRAM, true)) {
+    if (!lichen_sys_mem_check(LICHEN_SYS_MEM_PSRAM)) {
         ESP_LOGE(TAG, "FOUND: PSRAM heap integrity check failed (details above), walk %" PRIu32, walks);
         if (reports < MAX_REPORTS) {
             reports++;

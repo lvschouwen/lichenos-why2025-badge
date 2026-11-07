@@ -52,6 +52,7 @@ legacy_blob_run	-	unspecified	legacy_blob.h
 lichen_airplane_get	RADIO	unspecified	lichen_radio.h
 lichen_airplane_set	RADIO	unspecified	lichen_radio.h
 lichen_alloc	-	unspecified	lichen_mem.h
+lichen_alloc_aligned	-	unspecified	lichen_mem.h
 lichen_app_at	-	unspecified	lichen_app.h
 lichen_app_by_id	-	unspecified	lichen_app.h
 lichen_app_count	-	unspecified	lichen_app.h
@@ -129,6 +130,12 @@ lichen_sys_factory_combo_swallows	SYSTEM	any	lichen_sys_factory.h
 lichen_sys_factory_combo_tick	SYSTEM	any	lichen_sys_factory.h
 lichen_sys_factory_level_name	SYSTEM	any	lichen_sys_factory.h
 lichen_sys_factory_request	SYSTEM	any	lichen_sys_factory.h
+lichen_sys_mem_check	-	unspecified	lichen_sys_mem.h
+lichen_sys_mem_free	-	unspecified	lichen_sys_mem.h
+lichen_sys_mem_internal	-	unspecified	lichen_sys_mem.h
+lichen_sys_mem_largest	-	unspecified	lichen_sys_mem.h
+lichen_sys_mem_total	-	unspecified	lichen_sys_mem.h
+lichen_sys_mem_walk	-	unspecified	lichen_sys_mem.h
 lichen_sys_power_screen_off	SYSTEM	unspecified	lichen_sys_power.h
 lichen_sys_sd_begin	SYSTEM	not-lvgl	lichen_sys_storage.h
 lichen_sys_sd_end	SYSTEM	not-lvgl	lichen_sys_storage.h

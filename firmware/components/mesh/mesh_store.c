@@ -22,6 +22,7 @@ EXT_RAM_BSS_ATTR static conv_t convs[MESH_CONV_MAX]; // 17 KB: PSRAM on the badg
 static size_t   ring_cap;
 static uint32_t generation, own_changes, next_seq, dropped;
 static void *(*ring_alloc)(size_t, size_t);
+static void (*ring_free)(void *);
 static void (*warn_hook)(char const *);
 static uint32_t (*clock_hook)(void);
 
@@ -31,6 +32,18 @@ void mesh_store_set_clock(uint32_t (*epoch_now)(void)) {
 
 uint32_t mesh_store_last_seq(void) {
     return next_seq;
+}
+
+void mesh_store_set_free_hook(void (*free_ring)(void *ptr)) {
+    ring_free = free_ring;
+}
+
+static void release_ring(void *ring) {
+    if (ring_free) {
+        ring_free(ring);
+    } else {
+        free(ring);
+    }
 }
 
 void mesh_store_set_hooks(void *(*alloc_ring)(size_t, size_t), void (*warn)(char const *)) {
@@ -51,7 +64,7 @@ static void drop(char const *why) {
 
 bool mesh_store_init(size_t chat_keep) {
     for (size_t i = 0; i < MESH_CONV_MAX; i++) {
-        free(convs[i].ring);
+        release_ring(convs[i].ring);
     }
     memset(convs, 0, sizeof(convs));
     ring_cap = chat_keep;
@@ -116,7 +129,7 @@ static conv_t *new_conv(mesh_chat_key_t const *key) {
         drop("no memory for a chat ring");
         return NULL;
     }
-    free(slot->ring);
+    release_ring(slot->ring);
     memset(slot, 0, sizeof(*slot));
     slot->ring    = ring;
     slot->used    = true;

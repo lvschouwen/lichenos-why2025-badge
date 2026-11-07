@@ -14,7 +14,7 @@
 #include "factory_reset.h"
 #include "fw_console.h"
 #include "esp_app_desc.h"
-#include "esp_heap_caps.h"
+#include "lichen_sys_mem.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "esp_ota_ops.h"
@@ -304,13 +304,13 @@ static void start_apps(void) {
     }
 }
 
-static void log_heap(char const *name, uint32_t caps) {
+static void log_heap(char const *name, lichen_sys_mem_kind_t kind) {
     ESP_LOGI(
         TAG,
         "%s free %u largest %u",
         name,
-        (unsigned)heap_caps_get_free_size(caps),
-        (unsigned)heap_caps_get_largest_free_block(caps)
+        (unsigned)lichen_sys_mem_free(kind),
+        (unsigned)lichen_sys_mem_largest(kind)
     );
 }
 
@@ -393,16 +393,16 @@ static void start_logs(boot_ctx_t *ctx) {
     console_set_tap(log_store_add);
     boot_progress_start();
     ESP_LOGI(TAG, "badge_fw %s starting", esp_app_get_description()->version);
-    log_heap("default", MALLOC_CAP_DEFAULT);
-    log_heap("internal", MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    log_heap("dma", MALLOC_CAP_DMA);
-    log_heap("psram", MALLOC_CAP_SPIRAM);
+    log_heap("default", LICHEN_SYS_MEM_DEFAULT);
+    log_heap("internal", LICHEN_SYS_MEM_INTERNAL);
+    log_heap("dma", LICHEN_SYS_MEM_DMA);
+    log_heap("psram", LICHEN_SYS_MEM_PSRAM);
 }
 
 static void start_psram(boot_ctx_t *ctx) {
     (void)ctx;
     boot_progress_begin(BOOT_PSRAM);
-    size_t psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    size_t psram = lichen_sys_mem_total(LICHEN_SYS_MEM_PSRAM);
     if (psram > 0) {
         char mb[16];
         snprintf(mb, sizeof(mb), "%u MB", (unsigned)(psram >> 20));

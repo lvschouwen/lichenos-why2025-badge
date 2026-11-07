@@ -68,6 +68,8 @@ bool mesh_store_init(size_t chat_keep);
 // PSRAM explicitly, host tests can fail it); warn is told when a message is dropped (out of memory, or a table full of
 // channels). Set before mesh_store_init.
 void mesh_store_set_hooks(void *(*alloc_ring)(size_t count, size_t size), void (*warn)(char const *what));
+// What gives a ring back (NULL = free): the pair of alloc_ring, so a ring the OS booked is released through the OS.
+void mesh_store_set_free_hook(void (*free_ring)(void *ptr));
 // The wall clock for mesh_msg_t.epoch (NULL or returning 0: not set). Kept across mesh_store_init.
 void mesh_store_set_clock(uint32_t (*epoch_now)(void));
 // Messages dropped since mesh_store_init

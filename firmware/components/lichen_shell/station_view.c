@@ -10,7 +10,8 @@
 // Everything here runs on the LVGL task (the timer and the callers' builds).
 #include "station_view.h"
 
-#include "esp_heap_caps.h"
+#include "lichen_sys_mem.h"
+#include "lichen_mem.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_clock.h"
@@ -19,6 +20,7 @@
 #include "shell_ui_ops.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
@@ -79,7 +81,7 @@ static void draw_disc(lv_layer_t *layer, sc_point_t c, int32_t r, uint32_t color
 // The white face and its 60 bars, once, into the canvas (canvas coordinates)
 static bool dial_create(station_view_t *v, lv_obj_t *parent, sc_layout_t const *lay) {
     uint32_t stride = lv_draw_buf_width_to_stride(v->d, LV_COLOR_FORMAT_RGB565);
-    v->dial_buf     = heap_caps_aligned_alloc(LV_DRAW_BUF_ALIGN, (size_t)stride * v->d, MALLOC_CAP_SPIRAM);
+    v->dial_buf     = lichen_alloc_aligned(NULL, LV_DRAW_BUF_ALIGN, (size_t)stride * v->d, LICHEN_MEM_BULK);
     if (!v->dial_buf) {
         return false;
     }
@@ -214,7 +216,7 @@ static lv_obj_t *add_line(lv_obj_t *parent, int font, uint32_t color, int32_t y)
 // cache entry for it)
 static void free_later(void *arg) {
     station_view_t *v = arg;
-    heap_caps_free(v->dial_buf);
+    lichen_free(NULL, v->dial_buf);
     free(v);
 }
 
@@ -240,8 +242,8 @@ static void on_screen_shown(lv_event_t *e) {
 static void log_no_psram(int32_t d) {
     ESP_LOGW(TAG, "no PSRAM for the station clock's dial (%u bytes; %u free, largest block %u)",
              (unsigned)(lv_draw_buf_width_to_stride(d, LV_COLOR_FORMAT_RGB565) * d),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+             (unsigned)lichen_sys_mem_free(LICHEN_SYS_MEM_PSRAM),
+             (unsigned)lichen_sys_mem_largest(LICHEN_SYS_MEM_PSRAM));
 }
 
 station_view_t *station_view_create(lv_obj_t *parent, station_view_cfg_t const *cfg) {

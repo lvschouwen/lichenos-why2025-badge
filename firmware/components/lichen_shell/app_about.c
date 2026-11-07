@@ -3,7 +3,7 @@
 // storage, the SD card, uptime and the local clock. Up/Down scroll when it doesn't fit; the detail lines refresh once a second.
 #include "app_icons.h"
 #include "esp_app_desc.h"
-#include "esp_heap_caps.h"
+#include "lichen_sys_mem.h"
 #include "esp_timer.h"
 #include "lichen_clock.h"
 #include "lichen_ui.h"
@@ -59,8 +59,8 @@ static void refresh(lv_timer_t *timer) {
     char text[96];
 
     snprintf(text, sizeof(text), "%u KB internal " LV_SYMBOL_BULLET " %.1f MB PSRAM free",
-             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) / 1024),
-             (double)heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1048576.0);
+             (unsigned)(lichen_sys_mem_free(LICHEN_SYS_MEM_INTERNAL) / 1024),
+             (double)lichen_sys_mem_free(LICHEN_SYS_MEM_PSRAM) / 1048576.0);
     set_text(value_label[ROW_MEMORY], text);
 
     // While the C6 is being recovered, how far it has got (#14 T-B)

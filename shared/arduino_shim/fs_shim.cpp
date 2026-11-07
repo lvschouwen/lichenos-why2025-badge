@@ -10,7 +10,6 @@
 #include <unistd.h>
 
 #ifdef ESP_PLATFORM
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #else
@@ -51,27 +50,37 @@ uint32_t fs_shim_take_raw_writes(void) {
     return n;
 }
 
-// A "w" file's buffer lives in PSRAM (contacts3 alone is 152 bytes a contact, up to 1000 contacts); when PSRAM is
-// full, internal RAM, so a small prefs or identity save still lands. A buffer grows in the heap it started in (*caps).
-static void *buf_realloc(void *p, size_t n, uint32_t *caps) {
+// A "w" file's buffer comes from the owner's hooks (the badge: lichen_alloc, PSRAM first and internal RAM when PSRAM is
+// full, so a small prefs or identity save still lands; contacts3 alone is 152 bytes a contact, up to 1000 contacts).
+// Without hooks (host tests) it is plain malloc.
+static void *(*buf_alloc_hook)(size_t);
+static void (*buf_free_hook)(void *);
+
+void fs_shim_set_buffer_hooks(void *(*alloc)(size_t bytes), void (*release)(void *ptr)) {
+    buf_alloc_hook = alloc;
+    buf_free_hook  = release;
+}
+
+static void buf_free(void *p) {
+    if (buf_free_hook) {
+        buf_free_hook(p);
+    } else {
+        free(p);
+    }
+}
+
+// Grows p to n bytes (p NULL: a fresh buffer): a new block, the old bytes copied, the old block released. old is the
+// size of what p holds.
+static void *buf_grow(void *p, size_t old, size_t n) {
     if (fail_alloc) {
         return NULL;
     }
-#ifdef ESP_PLATFORM
-    if (p) {
-        return heap_caps_realloc(p, n, *caps);
-    }
-    *caps   = MALLOC_CAP_SPIRAM;
-    void *q = heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
-    if (!q) {
-        *caps = MALLOC_CAP_8BIT;
-        q     = heap_caps_malloc(n, MALLOC_CAP_8BIT);
+    void *q = buf_alloc_hook ? buf_alloc_hook(n) : malloc(n);
+    if (q && p) {
+        memcpy(q, p, old < n ? old : n);
+        buf_free(p);
     }
     return q;
-#else
-    (void)caps;
-    return realloc(p, n);
-#endif
 }
 
 static bool read_full(int fd, uint8_t *dst, size_t n) {
@@ -208,7 +217,6 @@ File &File::operator=(File &&other) noexcept {
         buf_    = other.buf_;
         len_    = other.len_;
         cap_    = other.cap_;
-        caps_   = other.caps_;
         pos_    = other.pos_;
         failed_ = other.failed_;
         memcpy(path_, other.path_, sizeof(path_));
@@ -217,7 +225,6 @@ File &File::operator=(File &&other) noexcept {
         other.fd_  = -1;
         other.buf_ = nullptr;
         other.len_ = other.cap_ = other.pos_ = 0;
-        other.caps_ = 0;
         other.failed_ = false;
     }
     return *this;
@@ -290,7 +297,7 @@ size_t File::write(uint8_t const *buf, size_t len) {
             while (cap < end) {
                 cap *= 2;
             }
-            uint8_t *grown = (uint8_t *)buf_realloc(buf_, cap, &caps_);
+            uint8_t *grown = (uint8_t *)buf_grow(buf_, cap_, cap);
             if (!grown) {
                 failed_ = true; // a half-written file must not replace the old one
                 return 0;
@@ -338,8 +345,7 @@ bool File::commit() {
         return false;
     }
     size_t   old     = (size_t)st.st_size;
-    uint32_t caps    = 0;
-    uint8_t *scratch = old ? (uint8_t *)buf_realloc(NULL, FS_SHIM_CHUNK, &caps) : NULL; // none: all are rewritten
+    uint8_t *scratch = old ? (uint8_t *)buf_grow(NULL, 0, FS_SHIM_CHUNK) : NULL; // none: all are rewritten
     bool     ok      = true;
     for (size_t off = 0; ok && off < len_; off += FS_SHIM_CHUNK) {
         size_t n    = len_ - off < FS_SHIM_CHUNK ? len_ - off : FS_SHIM_CHUNK;
@@ -357,7 +363,7 @@ bool File::commit() {
     if (!ok) {
         SHIM_ERROR("writing %s failed: errno %d", path_, errno);
     }
-    free(scratch);
+    buf_free(scratch);
     return ok;
 }
 
@@ -392,10 +398,9 @@ void File::close() {
             SHIM_ERROR("closing %s failed: errno %d", path_, errno);
         }
         fd_ = -1;
-        free(buf_);
+        buf_free(buf_);
         buf_    = nullptr;
         len_    = cap_ = pos_ = 0;
-        caps_   = 0;
         failed_ = false;
     }
     if (f_) {

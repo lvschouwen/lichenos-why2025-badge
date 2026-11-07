@@ -58,15 +58,6 @@ C	lichen_shell:clock_source_age_s	1
 C	lichen_shell:clock_source_text	2
 C	lichen_shell:clock_sync_info	2
 C	lichen_shell:clock_verdict_text	1
-C	lichen_shell:heap_caps_aligned_alloc	2
-C	lichen_shell:heap_caps_calloc	6
-C	lichen_shell:heap_caps_check_integrity	1
-C	lichen_shell:heap_caps_free	9
-C	lichen_shell:heap_caps_get_free_size	3
-C	lichen_shell:heap_caps_get_info	1
-C	lichen_shell:heap_caps_get_largest_free_block	2
-C	lichen_shell:heap_caps_malloc	4
-C	lichen_shell:heap_caps_walk	1
 C	lichen_shell:keyboard_raw_add	2
 C	lichen_shell:keyboard_raw_remove	1
 C	lichen_shell:keyboard_set_gate_hook	1
@@ -108,10 +99,3 @@ C	lichen_shell:wifi_meter_at	1
 C	lichen_shell:wifi_meter_clear	1
 C	lichen_shell:wifi_meter_push	1
 C	lichen_shell:wifi_ssid_sanitize	3
-C	lichen_shell:xTaskCreatePinnedToCore	6
-C	main:heap_caps_get_free_size	1
-C	main:heap_caps_get_largest_free_block	1
-C	main:heap_caps_get_total_size	1
-C	mesh:heap_caps_calloc	1
-C	mesh:heap_caps_malloc	1
-C	mesh:heap_caps_realloc	1

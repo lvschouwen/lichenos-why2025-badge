@@ -16,12 +16,13 @@
 # passwords, never backed up or kept by a reset; settings_secret_keys.c, pure, names the class) and settings_store.c
 # binds it into lichen_net, which may not open NVS itself.
 # lichen_sys_display.c: lichen_sys_display.h and lichen_sys_power.h (#226) over board's backlight driver.
+# lichen_sys_mem.c: the heap figures and the diagnostic walk for the shell and main (#228).
 # lichen_sys_storage.c / lichen_sys_update.c: lichen_sys_storage.h (SD card and storage drive), lichen_sys_update.h,
 # lichen_sys_crash.h and lichen_sys_factory.h's request (#227); lichen_sys_pure.c their ESP-free parts (host-tested).
 idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c"
                             "lichen_crashlog.c" "lichen_legacy.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
-                            "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c"
+                            "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c"
                             "ui_call_queue.c" "ui_lock_owner.c" "ui_lock_hits.c" "ui_lock_check.c"
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES lichen_api freertos esp_hw_support assets fw_console nvs_flash heap storage sdcard

@@ -9,6 +9,8 @@
 #include "fw_console.h"
 #include "freertos/FreeRTOS.h"
 
+#include <string.h>
+
 _Static_assert(MEM_BOOK_OWNERS >= LICHEN_MAX_APPS + 1, "a row for every app and the OS");
 
 static char const TAG[] = "mem";
@@ -17,7 +19,8 @@ static mem_book_t   book; // ~1 KB internal .bss
 static portMUX_TYPE book_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool         went_unbooked; // the owner table was full once: frees without a row are expected from then on
 
-void *lichen_alloc(lichen_app_t const *app, size_t size, uint32_t flags) {
+// align 0: the heap's default
+static void *alloc_aligned(lichen_app_t const *app, size_t align, size_t size, uint32_t flags) {
     char const *owner    = app ? app->id : MEM_BOOK_OS;
     bool        internal = (flags & LICHEN_MEM_INTERNAL) != 0;
     if (internal == ((flags & LICHEN_MEM_BULK) != 0) || size == 0 || size > UINT32_MAX) {
@@ -40,7 +43,15 @@ void *lichen_alloc(lichen_app_t const *app, size_t size, uint32_t flags) {
         ESP_LOGW(TAG, "%s: no row left in the memory book (%d): allocated, but not counted", owner, MEM_BOOK_OWNERS);
     }
     uint32_t caps = (internal ? MALLOC_CAP_INTERNAL : MALLOC_CAP_SPIRAM) | MALLOC_CAP_8BIT;
-    void    *p    = (flags & LICHEN_MEM_ZERO) ? heap_caps_calloc(1, size, caps) : heap_caps_malloc(size, caps);
+    void    *p;
+    if (align) {
+        p = heap_caps_aligned_alloc(align, size, caps);
+        if (p && (flags & LICHEN_MEM_ZERO)) {
+            memset(p, 0, size);
+        }
+    } else {
+        p = (flags & LICHEN_MEM_ZERO) ? heap_caps_calloc(1, size, caps) : heap_caps_malloc(size, caps);
+    }
     size_t   got  = p ? heap_caps_get_allocated_size(p) : 0;
     if (charge == MEM_CHARGE_OK) {
         portENTER_CRITICAL(&book_mux);
@@ -52,6 +63,14 @@ void *lichen_alloc(lichen_app_t const *app, size_t size, uint32_t flags) {
         portEXIT_CRITICAL(&book_mux);
     }
     return p;
+}
+
+void *lichen_alloc(lichen_app_t const *app, size_t size, uint32_t flags) {
+    return alloc_aligned(app, 0, size, flags);
+}
+
+void *lichen_alloc_aligned(lichen_app_t const *app, size_t align, size_t size, uint32_t flags) {
+    return align ? alloc_aligned(app, align, size, flags) : NULL; // 0 is not an alignment: lichen_alloc is the plain one
 }
 
 void lichen_free(lichen_app_t const *app, void *ptr) {

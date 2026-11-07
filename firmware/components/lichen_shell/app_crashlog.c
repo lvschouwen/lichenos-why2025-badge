@@ -6,7 +6,7 @@
 // outcome comes back through lv_async_call; the list's 1 s timer collects it too, should that call have failed.
 #include "app_icons.h"
 #include "screen_ids.h"
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "freertos/FreeRTOS.h"
@@ -343,7 +343,7 @@ static void on_entry(void *arg) {
 static void on_screen_delete(lv_event_t *e) {
     (void)e;
     lv_timer_delete(s_v.poll);
-    heap_caps_free(s_v.entries);
+    lichen_free(NULL, s_v.entries);
     memset(&s_v, 0, sizeof(s_v));
 }
 
@@ -351,7 +351,7 @@ static void open_crashlog(lv_obj_t *screen) {
     memset(&s_v, 0, sizeof(s_v));
     s_v.screen  = screen;
     s_v.group   = lv_group_get_default(); // shell_open's group for this screen while it is built
-    s_v.entries = heap_caps_calloc(CRASHLOG_MAX, sizeof(crashlog_entry_t), MALLOC_CAP_SPIRAM);
+    s_v.entries = lichen_alloc(NULL, CRASHLOG_MAX * sizeof(crashlog_entry_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     lichen_crashlog_mark_seen(&crashlog_app); // logs once when it cannot
     lichen_badge_set(crashlog_app.id, 0);     // seen now; badge_tick reads the log again within a second
     s_tile.valid = false;

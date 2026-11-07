@@ -2,11 +2,12 @@
 // card is not unmounted under an open file; the copy holds it for the whole file and checks the cancel flag per chunk.
 #include "files_job.h"
 
-#include "esp_heap_caps.h"
+#include "lichen_mem.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_sys_storage.h"
+#include "lichen_task.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -62,7 +63,7 @@ static bool copy_progress(uint32_t done, uint32_t total, void *ctx) {
 }
 
 static files_result_t run_copy(void) {
-    uint8_t *buf = heap_caps_malloc(COPY_CHUNK, MALLOC_CAP_SPIRAM);
+    uint8_t *buf = lichen_alloc(NULL, COPY_CHUNK, LICHEN_MEM_BULK);
     if (!buf) {
         return FILES_ERR_NO_MEM;
     }
@@ -73,13 +74,13 @@ static files_result_t run_copy(void) {
         free_bytes = s_result.free_bytes[slot];
     }
     files_result_t r = files_copy(s_req.path, s_req.dst, buf, COPY_CHUNK, free_bytes, copy_progress, NULL);
-    heap_caps_free(buf);
+    lichen_free(NULL, buf);
     return r;
 }
 
 static files_result_t run_list(void) {
     if (!s_entries) {
-        s_entries = heap_caps_malloc(FILES_MAX_ENTRIES * sizeof(*s_entries), MALLOC_CAP_SPIRAM);
+        s_entries = lichen_alloc(NULL, FILES_MAX_ENTRIES * sizeof(*s_entries), LICHEN_MEM_BULK);
     }
     if (!s_entries) {
         return FILES_ERR_NO_MEM;
@@ -91,7 +92,7 @@ static files_result_t run_list(void) {
 
 static files_result_t run_read(void) {
     if (!s_data) {
-        s_data = heap_caps_malloc(FILES_READ_CHUNK, MALLOC_CAP_SPIRAM);
+        s_data = lichen_alloc(NULL, FILES_READ_CHUNK, LICHEN_MEM_BULK);
     }
     return s_data ? files_read_at(s_req.path, s_req.offset, s_data, FILES_READ_CHUNK, &s_result.got, &s_result.file_size)
                   : FILES_ERR_NO_MEM;
@@ -131,7 +132,6 @@ static void job_task(void *arg) {
     ESP_LOGI(TAG, "job %d -> %d, stack margin %u", (int)s_req.kind, (int)s_result.result,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));
     atomic_store(&s_state, DONE);
-    vTaskDelete(NULL);
 }
 
 bool files_job_start(files_job_kind_t kind, char const *path, char const *dst, uint32_t offset) {
@@ -146,7 +146,7 @@ bool files_job_start(files_job_kind_t kind, char const *path, char const *dst, u
     atomic_store(&s_cancel, false);
     atomic_store(&s_done, 0);
     atomic_store(&s_total, 0);
-    if (xTaskCreatePinnedToCore(job_task, "filesjob", JOB_STACK, NULL, 4, NULL, 0) != pdPASS) {
+    if (!lichen_task_start(NULL, "filesjob", job_task, NULL, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         ESP_LOGW(TAG, "no memory for a file job");
         atomic_store(&s_state, IDLE);
         return false;

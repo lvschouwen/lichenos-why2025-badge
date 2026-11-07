@@ -8,7 +8,7 @@
 #include "app_icons.h"
 #include "bench_calc.h"
 #include "esp_cache.h"
-#include "esp_heap_caps.h"
+#include "lichen_sys_mem.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "esp_timer.h"
@@ -77,12 +77,12 @@ static void drop_cache(void *p, size_t n) {
 // Four passes over 1 MB of PSRAM: stores pushed out to the RAM, loads that miss the (256 KB) cache, a PSRAM-to-PSRAM
 // memcpy and a copy from a 32 KB internal chunk. false = no memory for the buffers.
 static bool bandwidth_run(bw_t *out) {
-    uint8_t *a  = heap_caps_aligned_alloc(128, BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    uint8_t *b  = heap_caps_aligned_alloc(128, BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *a  = lichen_alloc_aligned(&bench_app, 128, BYTES, LICHEN_MEM_BULK);
+    uint8_t *b  = lichen_alloc_aligned(&bench_app, 128, BYTES, LICHEN_MEM_BULK);
     uint8_t *in = lichen_alloc(&bench_app, INT_CHUNK, LICHEN_MEM_INTERNAL); // counted against the quota (#181)
     if (!a || !b || !in) {
-        heap_caps_free(a);
-        heap_caps_free(b);
+        lichen_free(&bench_app, a);
+        lichen_free(&bench_app, b);
         lichen_free(&bench_app, in);
         return false;
     }
@@ -108,8 +108,8 @@ static bool bandwidth_run(bw_t *out) {
     }
     drop_cache(b, BYTES);
     int64_t t4 = esp_timer_get_time();
-    heap_caps_free(a);
-    heap_caps_free(b);
+    lichen_free(&bench_app, a);
+    lichen_free(&bench_app, b);
     lichen_free(&bench_app, in);
     *out = (bw_t){.write_us = (uint64_t)(t1 - t0), .read_us = (uint64_t)(t2 - t1), .copy_us = (uint64_t)(t3 - t2), .int_us = (uint64_t)(t4 - t3)};
     return true;
@@ -125,10 +125,9 @@ static void redraw_run(char *out, size_t cap) {
 }
 
 static void mem_line(char *out, size_t cap) {
-    multi_heap_info_t in;
-    heap_caps_get_info(&in, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    bench_fmt_mem(out, cap, in.total_free_bytes, in.minimum_free_bytes, heap_caps_get_free_size(MALLOC_CAP_DMA),
-                  heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    size_t now, least;
+    lichen_sys_mem_internal(&now, &least);
+    bench_fmt_mem(out, cap, now, least, lichen_sys_mem_free(LICHEN_SYS_MEM_DMA), lichen_sys_mem_free(LICHEN_SYS_MEM_PSRAM));
 }
 
 static void psram_line(char *out, size_t cap) {

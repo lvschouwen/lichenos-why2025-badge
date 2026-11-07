@@ -5,7 +5,7 @@
 #include "esp_log.h"
 #include "fw_console.h"
 #include "lichen_sys_ui.h"
-#include "esp_heap_caps.h"
+#include "lichen_sys_mem.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "key_matrix.h"
@@ -648,7 +648,7 @@ void shell_show_restarting(void) {
         return;
     }
     // An out-of-memory restart must not allocate more; LVGL's heap is PSRAM
-    if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 64 * 1024) {
+    if (lichen_sys_mem_largest(LICHEN_SYS_MEM_PSRAM) < 64 * 1024) {
         lichen_sys_ui_unlock();
         return;
     }
