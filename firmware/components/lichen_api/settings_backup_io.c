@@ -16,7 +16,7 @@ static char const TAG[] = "backup";
 
 #define FILE_CAP  8192 // 18 short lines and a header are about 1 KB; anything larger is not ours
 #define PATH_NEW  SD_LICHEN_DIR "/settings.new"
-#define VALUES_MAX 32
+#define VALUES_MAX SB_KEYS_MAX // read_all writes sb_key_count() values, which the table caps at SB_KEYS_MAX
 
 static sb_value_t s_held[VALUES_MAX]; // the changes of the last plan; one load at a time (the screen guards it)
 static size_t     s_held_count;
@@ -155,13 +155,19 @@ sbk_status_t settings_backup_plan(settings_backup_plan_t *plan) {
     if (!text) {
         return status;
     }
-    sb_value_t *parsed = heap_caps_malloc(VALUES_MAX * sizeof(*parsed), MALLOC_CAP_SPIRAM); // 2.3 KB, off the caller's stack (#209)
+    if (status == SBK_INVALID) { // oversize: no values to hold, so no allocation that could turn it into SBK_MEMORY
+        free(text);
+        plan->result = (sb_result_t){SB_ERR_TOO_LONG, 1, 0};
+        return SBK_INVALID;
+    }
+    // 2.3 KB of values, off the caller's stack (#209)
+    sb_value_t *parsed = heap_caps_malloc(VALUES_MAX * sizeof(*parsed), MALLOC_CAP_SPIRAM);
     if (!parsed) {
         free(text);
         return SBK_MEMORY;
     }
     size_t n     = 0;
-    plan->result = status == SBK_INVALID ? (sb_result_t){SB_ERR_TOO_LONG, 1, 0} : sb_parse(text, len, parsed, VALUES_MAX, &n);
+    plan->result = sb_parse(text, len, parsed, VALUES_MAX, &n);
     free(text);
     if (plan->result.err != SB_OK) {
         free(parsed);

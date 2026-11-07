@@ -32,6 +32,7 @@ static sb_key_t const keys[] = {
     {NS_WX, "toff", "Temperature offset", SB_U8, 0, 20, 20, NULL},
     {NS_WX, "csv", "Weather log", SB_U8, 0, 1, 0, NULL},
 };
+_Static_assert(sizeof(keys) / sizeof(keys[0]) <= SB_KEYS_MAX, "the key table outgrew SB_KEYS_MAX");
 
 size_t sb_key_count(void) {
     return sizeof(keys) / sizeof(keys[0]);

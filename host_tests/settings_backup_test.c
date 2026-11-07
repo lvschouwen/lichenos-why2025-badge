@@ -41,6 +41,7 @@ static void test_table(void) {
         }
         CHECK(sb_value_parse(k, text, &v));
     }
+    CHECK(sb_key_count() <= SB_KEYS_MAX); // settings_backup_io.c sizes its value arrays by SB_KEYS_MAX
     CHECK(sb_find("badge_fw", "home_layout") != NULL);
     CHECK(sb_find("badge_fw", "wifi_pass") == NULL);
     CHECK(sb_find("a.meshcore", "identity") == NULL);

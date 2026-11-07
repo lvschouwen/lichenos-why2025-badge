@@ -37,6 +37,9 @@ typedef struct {
 } sb_key_t;
 
 #define SB_STR_MAX 64 // longest text value including the NUL
+// Most keys the table may hold: callers size their value arrays by it (settings_backup_io.c, in PSRAM), and
+// settings_backup.c fails the build when the table outgrows it
+#define SB_KEYS_MAX 32
 
 size_t          sb_key_count(void);
 sb_key_t const *sb_key_at(size_t index);
