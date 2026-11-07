@@ -8,6 +8,7 @@
 #include "lichen_clock.h"
 #include "lichen_ui.h"
 #include "lichen_app.h"
+#include "os_name.h"
 #include "logo.h"
 #include "sdcard.h"
 #include "shell_parts.h"
@@ -40,7 +41,8 @@ static void fmt_uptime(char *out, size_t cap) {
 }
 
 static bool about_tile(char *l1, size_t c1, char *l2, size_t c2) {
-    snprintf(l1, c1, "Version %s", esp_app_get_description()->version);
+    char name[48];
+    snprintf(l1, c1, "%s", lichen_os_version_line(esp_app_get_description()->version, name, sizeof(name)));
     char up[24];
     fmt_uptime(up, sizeof(up));
     snprintf(l2, c2, "Uptime %s", up);
@@ -180,8 +182,8 @@ static void open_about(lv_obj_t *screen) {
     lv_obj_set_style_pad_row(names, 4, 0);
     lv_obj_t *name = lv_label_create(names);
     lv_obj_set_style_text_font(name, lichen_font(LICHEN_FONT_LARGE), 0);
-    lv_obj_set_style_text_letter_space(name, 6, 0);
-    lv_label_set_text(name, "lichen");
+    lv_obj_set_style_text_letter_space(name, 3, 0);
+    lv_label_set_text(name, lichen_os_name());
     lv_obj_t *sub = lv_label_create(names);
     lv_obj_set_style_text_color(sub, lv_color_hex(THEME_DIM), 0);
     lv_label_set_text(sub, "firmware for the WHY2025 badge");

@@ -15,11 +15,12 @@
 # names and printed layout, key_matrix_test.c) are pure; board only lends key_matrix.c its keymap headers. lichen_keys.h
 # (raw keys) and lichen_ui.h's station clock are implemented by lichen_shell, lichen_radio.c's LoRa borrowing hands on
 # the shell's sources.
+# os_name.c: the OS name and version line (#236; pure, os_name_test.c).
 idf_component_register(SRCS "lichen_app.c" "menu.c" "menu_filter.c" "list_filter.c" "scroll_anchor.c" "fonts.c" "text_entry.c"
                             "settings_store.c" "tz_table.c" "app_ns.c" "lichen_settings.c" "lichen_fs.c" "fs_path.c"
                             "lichen_crashlog.c" "crashlog_fmt.c" "legacy_blob.c" "lichen_legacy.c" "settings_backup.c" "settings_backup_io.c" "lichen_badge.c" "badge_table.c" "radio_state.c" "lichen_radio.c"
                             "lichen_ui.c" "ui_text.c" "qr_payload.c" "qr_screen.c" "tile_order.c"
-                            "lichen_task.c" "task_book.c" "lichen_mem.c" "mem_book.c" "hold_exit.c" "key_matrix.c"
+                            "os_name.c" "lichen_task.c" "task_book.c" "lichen_mem.c" "mem_book.c" "hold_exit.c" "key_matrix.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_notify
                        PRIV_REQUIRES freertos esp_hw_support assets fw_console nvs_flash heap storage sdcard crash esp_lvgl_port esp_app_format board)

@@ -11,6 +11,7 @@
 #include "esp_timer.h"
 #include "log_tap.h"
 #include "logo.h"
+#include "os_name.h"
 #include "lvgl_private.h" // lv_indev_t.long_pr_sent: a key repeat, not a press (no public getter in LVGL 9)
 #include "shell_parts.h"
 #include "fonts.h"
@@ -254,8 +255,8 @@ lv_obj_t *boot_screen_create(void) {
     lv_obj_set_scrollable(calm, false);
     lv_obj_set_clickable(calm, false);
     logo_create(calm, 100);
-    lv_obj_t *calm_name = add_label(calm, "lichen", THEME_TEXT, lichen_font(LICHEN_FONT_LARGE));
-    lv_obj_set_style_text_letter_space(calm_name, 6, 0);
+    lv_obj_t *calm_name = add_label(calm, lichen_os_name(), THEME_TEXT, lichen_font(LICHEN_FONT_LARGE));
+    lv_obj_set_style_text_letter_space(calm_name, 3, 0);
     calm_bar = lv_bar_create(calm);
     lv_obj_set_size(calm_bar, LV_PCT(50), 8);
     lv_obj_set_style_margin_top(calm_bar, 16, 0);
@@ -285,8 +286,8 @@ lv_obj_t *boot_screen_create(void) {
     lv_obj_set_size(names, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(names, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(names, 4, 0);
-    lv_obj_t *name = add_label(names, "lichen", THEME_TEXT, lichen_font(LICHEN_FONT_LARGE));
-    lv_obj_set_style_text_letter_space(name, 6, 0);
+    lv_obj_t *name = add_label(names, lichen_os_name(), THEME_TEXT, lichen_font(LICHEN_FONT_LARGE));
+    lv_obj_set_style_text_letter_space(name, 3, 0);
     add_label(names, esp_app_get_description()->version, THEME_DIM, NULL);
 
     // The segmented bar and its labels

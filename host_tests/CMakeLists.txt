@@ -1610,3 +1610,12 @@ add_executable(boot_order_test
 target_include_directories(boot_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main)
 target_compile_options(boot_order_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME boot_order_test COMMAND boot_order_test)
+
+# The OS name on the boot screen and in About (#236)
+add_executable(os_name_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/os_name_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/os_name.c
+)
+target_include_directories(os_name_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(os_name_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME os_name_test COMMAND os_name_test)
