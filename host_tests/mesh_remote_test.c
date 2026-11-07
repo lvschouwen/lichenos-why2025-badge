@@ -418,7 +418,31 @@ static void cli_tag_secret(void) {
     CHECK(strcmp(r.cli[r.cli_head].reply, "password now: (hidden)") == 0);
 }
 
+// The status history's poll gives way to the person (#168 review): replaced while queued or sent, never while the pipe
+// has it; and it never replaces anything itself
+static void background_gives_way(void) {
+    rr_t        r;
+    char const *why = NULL;
+    rr_init(&r);
+    uint32_t bg = rr_request_background(&r, A, 0, &why);
+    CHECK(bg == 1 && r.background && r.op == RR_STATUS);
+    CHECK(rr_request(&r, RR_CLI, B, "ver", 1, &why) == 2 && !r.background && r.op == RR_CLI); // queued: replaced
+    CHECK(rr_request_background(&r, A, 2, &why) == 0 && r.seq == 2); // the person's runs: refused
+    take(&r, 3);
+    mf_msg_t sent = sent_reply(1000);
+    rr_on_reply(&r, &sent, 4);
+    rr_poll(&r, 20000, NULL); // the CLI request times out
+    CHECK(rr_request_background(&r, A, 20001, &why) == 3);
+    CHECK(take(&r, 20002) == RR_STATUS);
+    CHECK(rr_request(&r, RR_LOGIN, A, "pw", 20003, &why) == 0 && r.seq == 3); // the pipe has it: refused
+    rr_on_reply(&r, &sent, 20004);
+    CHECK(r.state == RR_SENT);
+    CHECK(rr_request(&r, RR_LOGIN, A, "pw", 20005, &why) == 4 && r.op == RR_LOGIN && r.state == RR_QUEUED); // sent: replaced
+    CHECK(rr_request(&r, RR_CLI, A, "ver", 20006, &why) == 0); // the person's own request is never replaced
+}
+
 int main(void) {
+    background_gives_way();
     login();
     login_refused_and_timeout();
     password_wiped();

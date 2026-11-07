@@ -46,6 +46,11 @@ that is on the mesh, and everything set up then must be changeable later on the 
    - Lichen: Wi-Fi, Display (screen and keyboard brightness, home layout, arrange home, reset order), About Lichen.
    - MeshCore's page: name, region & radio (presets plus Custom…, Advanced: TX power and the separate frequency,
      bandwidth, SF, CR), channels (including adding a #hashtag channel), send advert.
+   - A repeater's page (Contacts › the repeater): Log in, Status, Command..., Settings (#51, #117) and Status history
+     (#168): an opt-in switch (off by default, asks first in the careful dialog) that asks the repeater for its status
+     every 10 min to 3 h, at most 3 repeaters, and graphs battery, noise floor, traffic and uptime from a RAM ring.
+     No scheduled ask starts while Log in, Status, Command or Settings is open, and the person's own request replaces a
+     scheduled one. Console: `fw mesh history [<who> [on [min] YES | off | interval <min> [YES]]]`.
 6. **About Lichen** (mockup `lichen.html`): logo, a short text on what a lichen is (a fungus and an alga living as one,
    like the P4 that thinks and the C6 that talks to the world, spreading slowly from stone to stone), then version,
    node id, radio, storage, uptime and clock.

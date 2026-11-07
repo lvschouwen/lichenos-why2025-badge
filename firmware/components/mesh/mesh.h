@@ -284,6 +284,9 @@ bool     mesh_trace_get(mt_t *out);
 // unless one of these is called: the screens call them only on an Enter of the person. arg: the password (RR_LOGIN) or
 // the command (RR_CLI), never logged.
 uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char const *arg, char const **why);
+// The status history's poll (#168, mesh_rhist_run.c): a status request that any request of the person replaces while
+// it is queued or waiting for the answer. The seq, or 0 with *why set.
+uint32_t mesh_remote_start_background(uint8_t const prefix[6], char const **why);
 // A copy of the current or last request without its argument (an answer that is late is timed out here); false before
 // MeshCore is up
 bool     mesh_remote_get(rr_t *out);

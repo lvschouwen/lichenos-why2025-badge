@@ -434,6 +434,7 @@ static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create_named(screen, "Repeater settings", title);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    meshcore_remote_hold(screen); // no scheduled status ask while the settings are read or set (#168)
     screen_obj = screen;
     menu_obj   = menu;
     reading    = false;

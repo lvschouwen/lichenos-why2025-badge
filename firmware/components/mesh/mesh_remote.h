@@ -62,6 +62,7 @@ typedef struct {
     char const *why;       // RR_FAILED: a short reason, static text
     uint32_t   asked_ms, sent_ms, est_ms, done_ms;
     bool       secret;     // arg is a password (a login, or a password command): wiped once taken
+    bool       background; // the status history's poll (#168): a request of the person replaces it
     // the session: whom we are logged in to (one at a time; a new login to someone else ends it)
     bool       logged_in, admin;
     uint8_t    login_prefix[MF_PREFIX];
@@ -119,6 +120,10 @@ bool rr_busy(rr_t const *r);
 // most MF_PASSWORD_MAX characters) or the command; ignored for a status request.
 uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg, uint32_t now_ms,
                     char const **why);
+// A status request of the status history's poll (#168): refused while any request runs; a request of the person
+// replaces it while it is queued or sent (waiting for the answer), not while the pipe has it (TAKEN, a few ms: the
+// reply to its frame would be taken for the new one's)
+uint32_t rr_request_background(rr_t *r, uint8_t const prefix[MF_PREFIX], uint32_t now_ms, char const **why);
 // rr_request with the command prepared (rr_prepare) beforehand: what the badge runs inside its lock
 uint32_t rr_request_prepared(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg,
                              rr_prep_t const *p, uint32_t now_ms, char const **why);

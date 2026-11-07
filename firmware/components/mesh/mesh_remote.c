@@ -49,9 +49,21 @@ uint32_t rr_request(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char c
     return rr_request_prepared(r, op, prefix, arg, &p, now_ms, why);
 }
 
+uint32_t rr_request_background(rr_t *r, uint8_t const prefix[MF_PREFIX], uint32_t now_ms, char const **why) {
+    if (rr_busy(r)) {
+        *why = "another request to a contact is still running";
+        return 0;
+    }
+    rr_prep_t p;
+    rr_prepare(RR_STATUS, NULL, &p);
+    uint32_t seq = rr_request_prepared(r, RR_STATUS, prefix, NULL, &p, now_ms, why);
+    r->background = seq != 0;
+    return seq;
+}
+
 uint32_t rr_request_prepared(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg,
                              rr_prep_t const *p, uint32_t now_ms, char const **why) {
-    if (rr_busy(r)) {
+    if (rr_busy(r) && !(r->background && r->state != RR_TAKEN)) {
         *why = "another request to a contact is still running";
         return 0;
     }
@@ -77,6 +89,7 @@ uint32_t rr_request_prepared(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX
     r->why            = NULL;
     r->asked_ms       = now_ms;
     r->secret         = op == RR_LOGIN || p->cls == RS_CMD_SECRET;
+    r->background     = false; // the person's; rr_request_background marks its own after this
     r->sent_ms = r->est_ms = r->done_ms = 0;
     memcpy(r->prefix, prefix, MF_PREFIX);
     wipe(r->arg, sizeof(r->arg));

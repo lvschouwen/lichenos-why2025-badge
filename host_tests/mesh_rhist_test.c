@@ -56,12 +56,12 @@ static rr_head_t head(uint32_t seq, rr_state_t state, uint8_t const prefix[RH_PR
 static void off_by_default(void) {
     rh_init(&t);
     for (uint32_t now = 0; now < 100000; now += 37) {
-        CHECK(rh_due(&t, now, false, UINT32_MAX) == -1);
+        CHECK(rh_due(&t, now, false, UINT32_MAX, false) == -1);
     }
     uint8_t p[1][RH_PREFIX];
     uint16_t m[1];
-    rh_load(&t, p, m, 0, 10);
-    CHECK(rh_on_count(&t) == 0 && rh_due(&t, 5000, false, UINT32_MAX) == -1);
+    rh_load(&t, p, m, 0, 10, false);
+    CHECK(rh_on_count(&t) == 0 && rh_due(&t, 5000, false, UINT32_MAX, false) == -1);
 }
 
 static void switched_on_and_interval(void) {
@@ -72,11 +72,11 @@ static void switched_on_and_interval(void) {
     CHECK(rh_set(&t, a, true, 11, 1000) == RH_BAD); // not offered
     CHECK(rh_on_count(&t) == 0);
     CHECK(rh_set(&t, a, true, 10, 1000) == RH_OK);
-    CHECK(rh_due(&t, 1000 + RH_SOON_S - 1, false, UINT32_MAX) == -1);
-    int idx = rh_due(&t, 1000 + RH_SOON_S, false, UINT32_MAX);
+    CHECK(rh_due(&t, 1000 + RH_SOON_S - 1, false, UINT32_MAX, false) == -1);
+    int idx = rh_due(&t, 1000 + RH_SOON_S, false, UINT32_MAX, false);
     CHECK(idx == 0);
     rh_asked(&t, idx, 7, 1020);
-    CHECK(rh_due(&t, 1021, false, UINT32_MAX) == -1); // ours runs
+    CHECK(rh_due(&t, 1021, false, UINT32_MAX, false) == -1); // ours runs
     rr_head_t h = head(7, RR_SENT, a, 0, 0, 0);
     CHECK(!rh_observe(&t, &h, 1025));
     h = head(7, RR_DONE, a, 4120, 100, 3600);
@@ -85,14 +85,14 @@ static void switched_on_and_interval(void) {
     CHECK(!rh_observe(&t, &h, 1031)); // the same answer is taken once
     CHECK(t.slot[0].count == 1);
     // the next ask: 10 min after the last, never sooner
-    CHECK(rh_due(&t, 1020 + 599, false, UINT32_MAX) == -1);
-    CHECK(rh_due(&t, 1020 + 600, false, UINT32_MAX) == 0);
+    CHECK(rh_due(&t, 1020 + 599, false, UINT32_MAX, false) == -1);
+    CHECK(rh_due(&t, 1020 + 600, false, UINT32_MAX, false) == 0);
     // off and on again right away does not ask before the interval is over
     CHECK(rh_set(&t, a, false, 10, 1100) == RH_OK);
-    CHECK(rh_due(&t, 1020 + 600, false, UINT32_MAX) == -1);
+    CHECK(rh_due(&t, 1020 + 600, false, UINT32_MAX, false) == -1);
     CHECK(rh_set(&t, a, true, 10, 1101) == RH_OK);
-    CHECK(rh_due(&t, 1101 + RH_SOON_S, false, UINT32_MAX) == -1);
-    CHECK(rh_due(&t, 1020 + 600, false, UINT32_MAX) == 0);
+    CHECK(rh_due(&t, 1101 + RH_SOON_S, false, UINT32_MAX, false) == -1);
+    CHECK(rh_due(&t, 1020 + 600, false, UINT32_MAX, false) == 0);
     CHECK(t.slot[0].count == 1); // the history survived off and on
     // a longer interval counts from the last ask
     CHECK(rh_set(&t, a, true, 60, 1200) == RH_OK);
@@ -123,20 +123,20 @@ static void start_is_staggered(void) {
         key(k[i], (uint8_t)(20 + i));
     }
     rh_init(&t);
-    rh_load(&t, k, m, 3, 30);
+    rh_load(&t, k, m, 3, 30, false);
     CHECK(rh_on_count(&t) == 3);
-    CHECK(rh_due(&t, 30 + RH_FIRST_S - 1, false, UINT32_MAX) == -1);
-    CHECK(rh_due(&t, 30 + RH_FIRST_S, false, UINT32_MAX) == 0);
+    CHECK(rh_due(&t, 30 + RH_FIRST_S - 1, false, UINT32_MAX, false) == -1);
+    CHECK(rh_due(&t, 30 + RH_FIRST_S, false, UINT32_MAX, false) == 0);
     CHECK(t.slot[1].next_s == 30 + RH_FIRST_S + RH_STAGGER_S && t.slot[2].next_s == 30 + RH_FIRST_S + 2 * RH_STAGGER_S);
     // all overdue at once: still one at a time, RH_GAP_S apart
     uint32_t now = 30 + RH_FIRST_S + 2 * RH_STAGGER_S;
-    int      idx = rh_due(&t, now, false, UINT32_MAX);
+    int      idx = rh_due(&t, now, false, UINT32_MAX, false);
     CHECK(idx == 0);
     rh_asked(&t, idx, 1, now);
     rr_head_t h = head(1, RR_DONE, k[0], 4000, 10, 100);
     rh_observe(&t, &h, now + 2);
-    CHECK(rh_due(&t, now + RH_GAP_S - 1, false, UINT32_MAX) == -1);
-    CHECK(rh_due(&t, now + RH_GAP_S, false, UINT32_MAX) == 1);
+    CHECK(rh_due(&t, now + RH_GAP_S - 1, false, UINT32_MAX, false) == -1);
+    CHECK(rh_due(&t, now + RH_GAP_S, false, UINT32_MAX, false) == 1);
 }
 
 static void busy_and_quiet(void) {
@@ -144,9 +144,9 @@ static void busy_and_quiet(void) {
     key(a, 3);
     rh_init(&t);
     rh_set(&t, a, true, 10, 0);
-    CHECK(rh_due(&t, 100, true, UINT32_MAX) == -1);             // another request runs
-    CHECK(rh_due(&t, 100, false, RH_QUIET_S - 1) == -1);        // the person asked a moment ago
-    CHECK(rh_due(&t, 100, false, RH_QUIET_S) == 0);
+    CHECK(rh_due(&t, 100, true, UINT32_MAX, false) == -1);             // another request runs
+    CHECK(rh_due(&t, 100, false, RH_QUIET_S - 1, false) == -1);        // the person asked a moment ago
+    CHECK(rh_due(&t, 100, false, RH_QUIET_S, false) == 0);
     rr_head_t h = head(5, RR_DONE, a, 0, 0, 0);
     h.age_ms    = 30000;
     CHECK(rh_other_age_s(&t, &h) == 30);
@@ -168,13 +168,13 @@ static void backoff(void) {
     uint32_t now = RH_SOON_S, seq = 1;
     uint32_t want[] = {1200, 2400, 4800, 4800, 4800};
     for (int i = 0; i < 5; i++) {
-        CHECK(rh_due(&t, now, false, UINT32_MAX) == 0);
+        CHECK(rh_due(&t, now, false, UINT32_MAX, false) == 0);
         rh_asked(&t, 0, seq, now);
         rr_head_t h = head(seq, RR_TIMEOUT, a, 0, 0, 0);
         CHECK(rh_observe(&t, &h, now + 10));
         CHECK(t.slot[0].misses == i + 1);
         CHECK(t.slot[0].next_s - now == want[i]);
-        CHECK(rh_due(&t, t.slot[0].next_s - 1, false, UINT32_MAX) == -1);
+        CHECK(rh_due(&t, t.slot[0].next_s - 1, false, UINT32_MAX, false) == -1);
         now = t.slot[0].next_s;
         seq++;
     }
@@ -316,6 +316,87 @@ static void setting(void) {
     CHECK_STR(small, "a1b2c3d4e5f6:30");
 }
 
+// A screen that asks a repeater holds the poll back (review #168): nothing is due while it is open
+static void held_by_screen(void) {
+    uint8_t a[RH_PREFIX];
+    key(a, 30);
+    rh_init(&t);
+    rh_set(&t, a, true, 10, 0);
+    CHECK(rh_due(&t, 5000, false, UINT32_MAX, true) == -1);
+    CHECK(rh_due(&t, 5000, false, UINT32_MAX, false) == 0);
+}
+
+// After a crash, a watchdog or a brownout every repeater waits its whole interval: a restart loop cannot ask under it
+static void crash_boot_waits_interval(void) {
+    uint8_t  k[2][RH_PREFIX];
+    uint16_t m[2] = {30, 10};
+    key(k[0], 31);
+    key(k[1], 32);
+    rh_init(&t);
+    rh_load(&t, k, m, 2, 40, true);
+    CHECK(t.slot[0].next_s == 40 + 1800 && t.slot[1].next_s == 40 + 600 + RH_STAGGER_S);
+    CHECK(rh_due(&t, 40 + 600 + RH_STAGGER_S - 1, false, UINT32_MAX, false) == -1);
+    rh_init(&t);
+    rh_load(&t, k, m, 2, 40, false); // a clean start: the short wait
+    CHECK(t.slot[0].next_s == 40 + RH_FIRST_S && t.slot[1].next_s == 40 + RH_FIRST_S + RH_STAGGER_S);
+}
+
+// What raises the on-air rate asks first; off and a longer interval never do
+static void confirm_policy(void) {
+    uint8_t a[RH_PREFIX];
+    key(a, 33);
+    rh_init(&t);
+    CHECK(rh_needs_confirm(&t, a, true, 30));  // on
+    CHECK(!rh_needs_confirm(&t, a, false, 30)); // off
+    rh_set(&t, a, true, 30, 0);
+    CHECK(!rh_needs_confirm(&t, a, true, 60)); // longer
+    CHECK(!rh_needs_confirm(&t, a, true, 30)); // the same
+    CHECK(rh_needs_confirm(&t, a, true, 10));  // shorter
+    rh_set(&t, a, false, 30, 0);
+    CHECK(rh_needs_confirm(&t, a, true, 60)); // on again, even with a longer interval
+}
+
+// A repeater whose slot went to another keeps its last ask: switched on again it waits the rest of its interval
+static void last_ask_survives_eviction(void) {
+    uint8_t a[RH_PREFIX], o[3][RH_PREFIX];
+    key(a, 40);
+    for (int i = 0; i < 3; i++) {
+        key(o[i], (uint8_t)(41 + i));
+    }
+    rh_init(&t);
+    rh_set(&t, a, true, 30, 0);
+    CHECK(rh_due(&t, RH_SOON_S, false, UINT32_MAX, false) == 0);
+    rh_asked(&t, 0, 1, 100);
+    rr_head_t h = head(1, RR_DONE, a, 4000, 1, 1);
+    rh_observe(&t, &h, 105);
+    rh_set(&t, a, false, 30, 110);
+    for (int i = 0; i < 3; i++) {
+        CHECK(rh_set(&t, o[i], true, 30, 120) == RH_OK); // the third takes a's slot
+    }
+    CHECK(rh_find(&t, a) == -1);
+    rh_set(&t, o[0], false, 30, 130);
+    CHECK(rh_set(&t, a, true, 30, 140) == RH_OK);
+    int idx = rh_find(&t, a);
+    CHECK(idx >= 0 && t.slot[idx].next_s == 100 + 1800);
+    // a full recent table drops its oldest entry, never the newest
+    rh_init(&t);
+    uint8_t p[RH_RECENT + 1][RH_PREFIX];
+    for (int i = 0; i <= RH_RECENT; i++) {
+        key(p[i], (uint8_t)(100 + i));
+        CHECK(rh_set(&t, p[i], true, 30, 0) == RH_OK);
+        rh_asked(&t, rh_find(&t, p[i]), (uint32_t)i + 1, 1000 + (uint32_t)i);
+        rr_head_t hh = head((uint32_t)i + 1, RR_TIMEOUT, p[i], 0, 0, 0);
+        rh_observe(&t, &hh, 1001 + (uint32_t)i);
+        rh_set(&t, p[i], false, 30, 1001 + (uint32_t)i);
+    }
+    bool first = false, last = false;
+    for (int i = 0; i < RH_RECENT; i++) {
+        first = first || memcmp(t.recent[i].prefix, p[0], RH_PREFIX) == 0;
+        last  = last || (memcmp(t.recent[i].prefix, p[RH_RECENT], RH_PREFIX) == 0 && t.recent[i].ask_s == 1000 + RH_RECENT);
+    }
+    CHECK(!first && last);
+}
+
 int main(void) {
     off_by_default();
     switched_on_and_interval();
@@ -327,6 +408,10 @@ int main(void) {
     ring_and_series();
     texts();
     setting();
+    held_by_screen();
+    crash_boot_waits_interval();
+    confirm_policy();
+    last_ask_survives_eviction();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -10,6 +10,7 @@
 #include "mesh.h"
 #include "mesh_format.h"
 #include "mesh_rset.h"
+#include "mesh_rhist_run.h"
 #include "meshcore_run.h"
 #include "text_entry.h"
 #include "theme.h"
@@ -69,11 +70,22 @@ static void on_delete(lv_event_t *e) {
     result = again = note = NULL;
 }
 
+static void on_hold_delete(lv_event_t *e) {
+    (void)e;
+    mesh_rhist_hold(false);
+}
+
+void meshcore_remote_hold(lv_obj_t *screen) {
+    mesh_rhist_hold(true);
+    lv_obj_add_event_cb(screen, on_hold_delete, LV_EVENT_DELETE, NULL); // per screen: a newer one never ends an older one's
+}
+
 // The screen, its PSRAM memory and its poll timer; NULL (the menu says why) when there is no memory
 static lv_obj_t *build_common(char const *heading, lv_timer_cb_t tick, lv_obj_t **menu_out) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create_named(screen, heading, title);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
+    meshcore_remote_hold(screen); // Log in, Status, Command: no scheduled status ask meanwhile
     screen_obj = screen;
     if (timer) {
         lv_timer_delete(timer);

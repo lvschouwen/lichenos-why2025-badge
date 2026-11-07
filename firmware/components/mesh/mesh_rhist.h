@@ -7,10 +7,13 @@
 //  - nothing is asked for a repeater that was not switched on (rh_set); a fresh table asks nobody
 //  - at most RH_SLOTS repeaters are on; each is asked at most once per interval (RH_INTERVAL_MIN or more), also when it
 //    is switched off and on again (the next ask counts from the last one)
-//  - at a start the switched-on repeaters wait RH_FIRST_S, RH_STAGGER_S apart, and any two asks are RH_GAP_S apart
+//  - at a start the switched-on repeaters wait RH_FIRST_S, RH_STAGGER_S apart, and any two asks are RH_GAP_S apart;
+//    after a crash, a watchdog or a brownout each waits its whole interval, so a restart loop never asks more often
+//  - the last ask of a repeater is remembered (RH_RECENT of them) when its slot goes to another one
 //  - a repeater that does not answer is asked less often: the interval doubles per miss, up to RH_BACKOFF_MAX doublings
 //  - never while another request to a repeater runs (the one-at-a-time remote request), nor within RH_QUIET_S of a
-//    request of the person (Status, CLI, Settings), so the poll never takes the request slot from under a screen
+//    request of the person, nor while a screen that asks a repeater (Log in, Status, Command, Settings) is open; a
+//    request of the person replaces a poll that has not gone to MeshCore's pipe (mesh_remote.h, rr_request_background)
 //
 // Times are seconds since boot (mesh_uptime_s); the history is lost at a restart.
 #include "mesh_remote.h"
@@ -37,6 +40,7 @@ extern "C" {
 #define RH_QUIET_S      120 // after a request of the person
 #define RH_RETRY_S      60  // when the request could not start (LoRa off, MeshCore busy)
 #define RH_BACKOFF_MAX  3   // at most interval x 8 after misses
+#define RH_RECENT       8   // last asks remembered past their slot
 #define RH_NONE         INT32_MIN // a point the graph leaves out
 
 // The intervals the screen and the console offer, in minutes
@@ -66,7 +70,13 @@ typedef struct {
 } rh_slot_t;
 
 typedef struct {
-    rh_slot_t slot[RH_SLOTS];
+    uint8_t  prefix[RH_PREFIX];
+    uint32_t ask_s; // 0: unused
+} rh_recent_t;
+
+typedef struct {
+    rh_slot_t   slot[RH_SLOTS];
+    rh_recent_t recent[RH_RECENT]; // the last ask per repeater, also of those whose slot was taken
     uint32_t  last_ask_s; // any slot, for RH_GAP_S; 0 = none since start
     int8_t    asking;     // the slot whose request runs, -1 for none
     uint32_t  seq;        // its request's number
@@ -85,14 +95,19 @@ size_t rh_on_count(rh_t const *t);
 rh_result_t rh_set(rh_t *t, uint8_t const prefix[RH_PREFIX], bool on, uint16_t interval_min, uint32_t now_s);
 // The slot goes with its history (the contact was removed)
 void rh_forget(rh_t *t, uint8_t const prefix[RH_PREFIX]);
-// At a start: the switched-on repeaters from the settings, each asked first at RH_FIRST_S + i * RH_STAGGER_S
-void rh_load(rh_t *t, uint8_t const prefix[][RH_PREFIX], uint16_t const *interval_min, size_t n, uint32_t now_s);
+// At a start: the switched-on repeaters from the settings, each asked first at RH_FIRST_S + i * RH_STAGGER_S, or after
+// a crash restart (panic, watchdog, brownout) at its whole interval (at least RH_FIRST_S) + i * RH_STAGGER_S
+void rh_load(rh_t *t, uint8_t const prefix[][RH_PREFIX], uint16_t const *interval_min, size_t n, uint32_t now_s,
+             bool after_crash);
+// The change asks the person first (careful dialog, YES on the console): switching on, or a shorter interval for one
+// that is on (both raise how often it transmits). Switching off and a longer interval never ask.
+bool rh_needs_confirm(rh_t const *t, uint8_t const prefix[RH_PREFIX], bool on, uint16_t interval_min);
 
 // The wait after the last ask: the interval, doubled per miss up to RH_BACKOFF_MAX times
 uint32_t rh_wait_s(rh_slot_t const *s);
 // The slot to ask now, or -1. busy: another remote request runs; other_age_s: how long ago the newest request that is
-// not ours was asked (UINT32_MAX for none).
-int rh_due(rh_t const *t, uint32_t now_s, bool busy, uint32_t other_age_s);
+// not ours was asked (UINT32_MAX for none); held: a screen that asks a repeater is open.
+int rh_due(rh_t const *t, uint32_t now_s, bool busy, uint32_t other_age_s, bool held);
 // Our request for the slot started under seq / could not start (why: static text)
 void rh_asked(rh_t *t, int idx, uint32_t seq, uint32_t now_s);
 void rh_not_started(rh_t *t, int idx, char const *why, uint32_t now_s);

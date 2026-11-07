@@ -1,7 +1,8 @@
 // A repeater's Status history page (#168): the switch for the scheduled status asks, their interval, when the next one
 // goes, and small graphs of the answers kept since start (battery, noise floor, traffic, uptime). The schedule and the
-// ring are mesh_rhist_run.c's (mesh_rhist_view: a spinlock copy, never the mesh lock). Opening the page sends nothing;
-// switching on asks first in the careful dialog, because from then on the badge transmits on its own.
+// ring are mesh_rhist_run.c's (mesh_rhist_view: a copy under its mutex, never the mesh lock). Opening the page sends
+// nothing; switching on and a shorter interval ask first in the careful dialog (they make the badge transmit on its
+// own, or more often: R3).
 #include "lichen_mem.h"
 #include "lichen_ui.h"
 #include "menu.h"
@@ -47,6 +48,7 @@ static rhv_t *live; // the page that is open (one per repeater; the dialog's ans
 static struct {
     uint8_t  prefix[RH_PREFIX];
     uint16_t minutes;
+    bool     was_on; // a shorter interval, not a switch on
 } pending;
 
 static void set_text(lv_obj_t *label, char const *text) {
@@ -157,12 +159,14 @@ static void show_rows(rhv_t *v) {
         snprintf(text, sizeof(text), "None yet");
     }
     set_value(v->answers_row, v->shown_answers, sizeof(v->shown_answers), text);
-    text[0] = 0;
+    char const *saved = w->unsaved ? "Not saved yet: the badge keeps trying, a restart may undo the last change. " : "";
     if (on && s->why) {
         char wait[16];
         rh_interval_text((uint16_t)(rh_wait_s(s) / 60), wait, sizeof(wait));
-        snprintf(text, sizeof(text), "Last ask: %s.%s%s%s", s->why, s->misses ? " Asked less often after misses: every " : "",
-                 s->misses ? wait : "", s->misses ? " now." : "");
+        snprintf(text, sizeof(text), "%sLast ask: %s.%s%s%s", saved, s->why,
+                 s->misses ? " Asked less often after misses: every " : "", s->misses ? wait : "", s->misses ? " now." : "");
+    } else {
+        snprintf(text, sizeof(text), "%s", saved);
     }
     set_text(v->problem, text);
 }
@@ -208,7 +212,32 @@ static void on_answer(bool yes) {
     if (yes) {
         apply(v, pending.prefix, true, pending.minutes);
     } else {
-        say(v, "Not switched on: nothing is sent.");
+        say(v, pending.was_on ? "Interval not changed." : "Not switched on: nothing is sent.");
+    }
+}
+
+// The careful dialog before a change that makes it transmit on its own or more often (R3)
+static void ask(rhv_t *v, uint16_t minutes, bool was_on) {
+    live = v; // the page whose row asked: the answer goes there
+    memcpy(pending.prefix, v->prefix, RH_PREFIX);
+    pending.minutes = minutes;
+    pending.was_on  = was_on;
+    char t[MESH_NAME_MAX + 80], every[16];
+    rh_interval_text(minutes, every, sizeof(every));
+    if (was_on) {
+        snprintf(t, sizeof(t), "Ask %s for its status more often, every %s?", v->name[0] ? v->name : "(no name)", every);
+    } else {
+        snprintf(t, sizeof(t), "Ask %s for its status every %s?", v->name[0] ? v->name : "(no name)", every);
+    }
+    shell_dialog_t const d = {
+        .title         = t,
+        .count_prefix  = "Each ask is a short request on air, until you switch it off. (", // the sentence before "("
+        .seconds       = 30,
+        .careful       = true,
+        .confirm_label = was_on ? "change" : "switch on",
+    };
+    if (!shell_dialog_countdown(&d, on_answer)) {
+        say(v, mc_busy_note());
     }
 }
 
@@ -222,30 +251,20 @@ static void on_toggle(void *arg) {
         say(v, mesh_rhist_result_text(RHS_FULL));
         return;
     }
-    live = v; // the page whose row asked: the dialog's answer goes there
-    memcpy(pending.prefix, v->prefix, RH_PREFIX);
-    pending.minutes = v->minutes;
-    char t[MESH_NAME_MAX + 64], every[16];
-    rh_interval_text(v->minutes, every, sizeof(every));
-    snprintf(t, sizeof(t), "Ask %s for its status every %s?", v->name[0] ? v->name : "(no name)", every);
-    shell_dialog_t const d = {
-        .title         = t,
-        .count_prefix  = "Each ask is a short request on air, until you switch it off. (", // the sentence before "("
-        .seconds       = 30,
-        .careful       = true,
-        .confirm_label = "switch on",
-    };
-    if (!shell_dialog_countdown(&d, on_answer)) {
-        say(v, mc_busy_note());
-    }
+    ask(v, v->minutes, false);
 }
 
 static void on_interval(void *arg) {
-    rhv_t *v   = arg;
-    v->minutes = rh_interval_next(v->minutes);
+    rhv_t   *v    = arg;
+    uint16_t next = rh_interval_next(v->minutes);
     if (v->view.have && v->view.slot.on) {
-        apply(v, v->prefix, true, v->minutes); // already switched on: a new interval, never under 10 min
+        if (mesh_rhist_needs_confirm(v->prefix, true, next)) {
+            ask(v, next, true); // shorter: more asks on air (R3)
+        } else {
+            apply(v, v->prefix, true, next); // longer: fewer asks, at once
+        }
     } else {
+        v->minutes = next;
         char every[16];
         rh_interval_text(v->minutes, every, sizeof(every));
         set_value(v->interval, v->shown_interval, sizeof(v->shown_interval), every); // used when it is switched on
@@ -317,7 +336,7 @@ static lv_obj_t *build(void) {
     v->msg = menu_note(menu, "");
     lv_obj_set_style_text_color(v->msg, lv_color_hex(THEME_TEXT), 0);
     menu_note(menu, "Asked on air at the interval, at most 3 repeaters at a time. A repeater answers only clients it "
-                    "knows: log in to it once. The answers are kept until the badge restarts.");
+                    "knows: log in to it first. The answers are kept until the badge restarts.");
     v->empty = menu_note(menu, "");
     for (int f = 0; f < RH_FIELDS; f++) {
         v->note[f]  = menu_note(menu, "");

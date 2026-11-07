@@ -1905,6 +1905,25 @@ extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char 
     return seq;
 }
 
+// The status history's poll (#168): as mesh_remote_start for a status request, but marked as background, so a request
+// of the person replaces it (rr_request_background)
+extern "C" uint32_t mesh_remote_start_background(uint8_t const prefix[6], char const **why) {
+    char const *local;
+    why  = why ? why : &local;
+    *why = NULL;
+    if (!send_ready(why)) {
+        return 0;
+    }
+    if (!remote_req) {
+        *why = "MeshCore is not running";
+        return 0;
+    }
+    mesh_ob_enter();
+    uint32_t seq = rr_request_background(remote_req, prefix, (uint32_t)millis(), why);
+    mesh_ob_exit();
+    return seq;
+}
+
 extern "C" uint32_t mesh_telemetry_start(uint8_t const prefix[6], char *why, size_t cap) {
     why[0] = 0;
     uint32_t wait = mesh_telemetry_wait_s(prefix);

@@ -66,6 +66,33 @@ static int take_slot(rh_t *t) {
     return best;
 }
 
+static rh_recent_t *recent_of(rh_t *t, uint8_t const prefix[RH_PREFIX]) {
+    for (int i = 0; i < RH_RECENT; i++) {
+        if (t->recent[i].ask_s && memcmp(t->recent[i].prefix, prefix, RH_PREFIX) == 0) {
+            return &t->recent[i];
+        }
+    }
+    return NULL;
+}
+
+// The repeater's last ask, kept past its slot; the oldest entry makes room
+static void note_recent(rh_t *t, uint8_t const prefix[RH_PREFIX], uint32_t ask_s) {
+    rh_recent_t *r = recent_of(t, prefix);
+    for (int i = 0; !r && i < RH_RECENT; i++) {
+        if (!t->recent[i].ask_s) {
+            r = &t->recent[i];
+        }
+    }
+    for (int i = 0; !r && i < RH_RECENT; i++) {
+        r = &t->recent[i]; // full: the oldest goes (its interval is long over by now, or nearly)
+        for (int k = 0; k < RH_RECENT; k++) {
+            r = t->recent[k].ask_s < r->ask_s ? &t->recent[k] : r;
+        }
+    }
+    memcpy(r->prefix, prefix, RH_PREFIX);
+    r->ask_s = ask_s;
+}
+
 // The earliest a repeater may be asked: never sooner than one interval after its last ask (a quick off and on does
 // not make an extra ask)
 static uint32_t earliest_s(rh_slot_t const *s, uint32_t want_s) {
@@ -98,6 +125,8 @@ rh_result_t rh_set(rh_t *t, uint8_t const prefix[RH_PREFIX], bool on, uint16_t i
         memset(&t->slot[idx], 0, sizeof(t->slot[idx]));
         t->slot[idx].used = true;
         memcpy(t->slot[idx].prefix, prefix, RH_PREFIX);
+        rh_recent_t const *r = recent_of(t, prefix);
+        t->slot[idx].ask_s   = r ? r->ask_s : 0; // asked before its slot went to another one: the interval still counts
     }
     rh_slot_t *s   = &t->slot[idx];
     bool       was = s->on;
@@ -122,19 +151,32 @@ void rh_forget(rh_t *t, uint8_t const prefix[RH_PREFIX]) {
     }
 }
 
-void rh_load(rh_t *t, uint8_t const prefix[][RH_PREFIX], uint16_t const *interval_min, size_t n, uint32_t now_s) {
+void rh_load(rh_t *t, uint8_t const prefix[][RH_PREFIX], uint16_t const *interval_min, size_t n, uint32_t now_s,
+             bool after_crash) {
     size_t k = 0;
     for (size_t i = 0; i < n; i++) {
         if (rh_set(t, prefix[i], true, interval_min[i], now_s) != RH_OK) {
             continue;
         }
-        int idx = rh_find(t, prefix[i]);
-        t->slot[idx].next_s = now_s + RH_FIRST_S + (uint32_t)k++ * RH_STAGGER_S; // no burst at a start
+        int      idx   = rh_find(t, prefix[i]);
+        uint32_t first = RH_FIRST_S;
+        if (after_crash && (uint32_t)interval_min[i] * 60u > first) {
+            first = (uint32_t)interval_min[i] * 60u; // a restart loop must not ask more often than the interval
+        }
+        t->slot[idx].next_s = now_s + first + (uint32_t)k++ * RH_STAGGER_S; // no burst at a start
     }
 }
 
-int rh_due(rh_t const *t, uint32_t now_s, bool busy, uint32_t other_age_s) {
-    if (busy || t->asking >= 0 || other_age_s < RH_QUIET_S) {
+bool rh_needs_confirm(rh_t const *t, uint8_t const prefix[RH_PREFIX], bool on, uint16_t interval_min) {
+    if (!on) {
+        return false;
+    }
+    int idx = rh_find(t, prefix);
+    return idx < 0 || !t->slot[idx].on || interval_min < t->slot[idx].interval_min;
+}
+
+int rh_due(rh_t const *t, uint32_t now_s, bool busy, uint32_t other_age_s, bool held) {
+    if (busy || held || t->asking >= 0 || other_age_s < RH_QUIET_S) {
         return -1;
     }
     if (t->last_ask_s && now_s - t->last_ask_s < RH_GAP_S) {
@@ -157,6 +199,7 @@ void rh_asked(rh_t *t, int idx, uint32_t seq, uint32_t now_s) {
     t->last_ask_s = now_s;
     s->ask_s      = now_s;
     s->asks++;
+    note_recent(t, s->prefix, now_s);
     s->next_s = now_s + rh_wait_s(s); // also when the end is never seen: the schedule cannot run away
 }
 
