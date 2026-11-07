@@ -120,6 +120,39 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   why). The Wi-Fi console (`POST /console`) is plain HTTP on the LAN, guarded by the update token only: a secret in its
   reply crosses the network unencrypted, as the token itself does.
 
+## The two surfaces, capabilities and lifecycle (design; lands in waves L-A..L-E)
+
+Everything in this section is the **target of OS v2 (#216)**, not what the code does today. The sections above and
+below describe today's single app surface and its build-time boundary check. Layers and the call rules:
+[architecture.md](architecture.md) "Layers".
+
+**App surface:** `lichen_*.h`, what this page lists. Available to every app, subject to its capabilities.
+
+**System surface:** `lichen_sys_*.h`, for the shell and the system screens (display and power, update, storage, crash,
+tasks and memory books). Needs the `SYSTEM` capability, which only `lichen_shell` has; an app component that includes
+a `lichen_sys_*` header fails the layer check. The shell uses it instead of reaching drivers, `board` or NVS (waves
+L-C, #225-#228).
+
+**One gate behind both:** an ops table that the OS (L3) and the shell (L5) fill at boot, so `lichen_api` no longer
+depends upward on them, and `tools/gate_manifest.txt` (function -> capability -> thread rule). No syscall trap.
+
+**Capabilities (#229, wave L-D):** `LORA_TX`, `LORA_RX`, `LORA_BORROW`, `SD`, `NET`, `SECRETS`, `RAW_KEYS`, `CONSOLE`,
+`RESTART`, `BACKGROUND`, `HAPTICS`, `SENSORS`, `NOTIFY`, `RADIO_SCAN`, `BT`, `AUDIO`, `BATTERY`, the quotas
+`INTERNAL_RAM=` and `PSRAM=`, and `SYSTEM`.
+- Declared per app in `tools/layers.conf` (reviewed like code) and mirrored in `lichen_app_t`.
+- Checked at build time (`nm`: every symbol an app uses maps to a capability it declared) and at run time (a call
+  without the capability is refused and logs a line).
+- **An accident and audit guard, not a security boundary:** apps are compiled in and share the address space.
+- Identity: an opaque `lichen_ctx_t` handed out at registration, plus the calling task's TLS (#230).
+
+**Lifecycle (#231, wave L-E):** an app is registered, started, running, suspended (screen off or another app in front),
+stopping (cooperative, with a deadline; the OS never deletes an app's tasks) and stopped. On stop the OS frees the app's
+grants whole (memory, PSRAM quota, booked timers). Two crashes attributed to one app in three boots turn its
+background part off and notify (#232). Settings > Apps shows state and capabilities (#233).
+
+**Not in v2:** loadable apps. A future "Scripts" app may host WAMR (WebAssembly) modules, each with its own
+capabilities (#78).
+
 ## What an app must not do
 
 - Touch drivers or buses: no `driver/*`, I2C, SPI, GPIO, ADC, LEDC, the display, the backlight or the keyboard chip.
@@ -176,6 +209,9 @@ is added to `APP_COMPONENTS` there.
 - Rule C: `nm -u` on the app's built archive may not show `esp_ota_*`, `esp_wifi_*`, `esp_efuse_*`, `gpio_*`,
   `esp_partition_*`, `nvs_flash_init*`/`nvs_flash_erase*`, `ledc_*`, `i2c_*`, `esp_restart` or `xTaskCreate*` (apps use
   `lichen_task_start`, #181).
+
+`check_layers.sh` (#218) generalises this check to every layer and absorbs these rules; today's violations are in its
+baseline, which reaches 0 at W9 (#237).
 
 The system apps in `lichen_shell` are not checked yet (#180). The eight plain apps there (Timer, Calculator, QR code,
 Clock, Keyboard test, LoRa spectrum, Weather, Notepad) use only the headers above plus `shell_parts.h` for their

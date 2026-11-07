@@ -201,7 +201,7 @@ The rule: **core 1 draws, core 0 talks to the world.**
   (#84).
 - **No downloadable apps for now.** Loadable native apps (ELF) were BadgeVMS's biggest source of trouble (per-app
   heaps and stacks, wrapped functions, an export table). A sandboxed script runtime (MicroPython, Lua or WebAssembly)
-  is the safe way to open up later and could be one app running scripts through the same interface.
+  is the safe way to open up later and could be one app running scripts through the same interface (v2: WAMR, below).
 - Others can already write an app as a component and build their own Lichen.
 - Notifications (#62) are an OS service in the app API: `lichen_notify(source, level, title, body, flags)` from any
   task. Lichen shows a toast that never takes the focus, the unread count on the app's tile and in the status bar, and
@@ -220,6 +220,68 @@ The rule: **core 1 draws, core 0 talks to the world.**
   events before any focus; apps never get them as keys or text. Not while a dialog, the Keyboard Test, first-run
   setup, an update or a power-down is on screen. Bench: `fw keys send square|triangle|cross|circle|cloud|diamond`.
 
+## Layers
+
+Status: **target design (OS v2, #216)**. Today the tree has three levels in practice (IDF/board/drivers, everything
+else, MeshCore) and about 300 call sites that break the layering below. They are listed in the layer baseline
+(`tools/layers-baseline.txt`, #218); new violations fail the build, the baseline only shrinks, and it reaches 0 at the
+W9 close-out (#237). Until then read this section as where the code is going, and the baseline as how far it is.
+The two-chip protocol is a separate contract: see "Two-chip contract" in this file.
+
+| Layer | What | Component(s) |
+|---|---|---|
+| L0 platform | IDF, FreeRTOS, the LVGL library, `fw_console` | |
+| L1 board/HAL | pins, buses, panel, no NVS | `board` |
+| L2 drivers | LoRa, C6 link, SD, sensors, keyboard chip | `lora`, `c6link`, ... |
+| L3 OS services | settings (the only NVS owner), fs, notify, clock, radio, net, power, display/UI (the only LVGL-lock owner), OTA, boot, app registry | `lichen_os` (new, #220) |
+| L4 the gate | headers, capability and identity checks, one ops table; no hardware dependencies | `lichen_api` |
+| L5 system | the shell and the system screens, a privileged client of the gate | `lichen_shell` |
+| L6 apps | the plain apps, MeshCore | `lichen_apps`, `mesh` |
+
+`main` is the composition root: it may only call init, start and stop of the layers.
+
+**Allowed calls (a layer calls itself and the layers below it, with two exceptions):**
+
+| From \ To | L0 | L1 | L2 | L3 | L4 | L5 |
+|---|---|---|---|---|---|---|
+| L1 board | yes | | | | | |
+| L2 drivers | yes | yes | | | | |
+| L3 services | yes | yes | yes | | | |
+| L4 gate | yes | | | ops table only | | |
+| L5 shell | yes | no | no | no | yes (both surfaces) | |
+| L6 apps | yes (plain libs) | no | no | no | app surface only | no |
+
+- **Callbacks go up, calls go down.** A lower layer never names a higher one. When it must tell a higher layer
+  something (the radio switch, a C6 event, a UI request) the higher layer registers a callback or fills an ops table
+  at boot (the Flipper "record" and Zephyr driver pattern). That also removes today's upward link-time edges (the gate
+  defining functions that live in the shell, drivers calling the gate).
+- **The shell reaches hardware and shared state only through the system surface**, never through drivers or
+  `board` directly. `lvgl_port_lock`, `nvs_open`, `heap_caps_*`, `xTaskCreate*` and `lv_group_set_default` become
+  owner-only symbols, with the owner listed per symbol.
+- **Where things sit:** the shell and the system screens (Settings, About, Files, Power, Update...) are L5; MeshCore and
+  the plain apps are L6; the C6 is a second chip behind the c6link driver (L2) and its protocol is the two-chip
+  contract, not a layer.
+
+**Enforcement** (`tools/check_layers.sh` with `tools/layers.conf`, #218; it absorbs `tools/check_app_boundary.sh`'s
+rules and runs at the end of `build.sh build`): A, `REQUIRES` rules; B, includes; C, symbol ownership through `nm`,
+which catches link-time upward edges; D, capabilities. Ratchet: report mode, then fail on new violations, then a
+baseline of 0 after wave L-C.
+
+**The gate has two surfaces,** detailed in [app-api.md](app-api.md): the app surface (`lichen_*.h`) for L6, and the
+system surface (`lichen_sys_*.h`) for L5, only with the `SYSTEM` capability. There is no syscall trap and no export
+table: the P4 runs everything in M-mode with no configurable MPU, and U-mode/TEE is not available on it, so a trap would
+protect nothing and cost a context switch.
+
+**Capabilities are an accident and audit guard, not a security boundary.** Apps are compiled into the image and
+share its address space, so a determined app can bypass any check. The point is to catch mistakes (an app that quietly
+starts transmitting or opens the SD card) and to give review a list of what each app asked for.
+
+**Fault isolation is detection and containment, not protection:** per-app grants (memory, PSRAM quota, booked timers)
+freed whole on stop; cooperative stop with a deadline (foreign tasks are never deleted); crash attribution through RTC
+no-init and a boot-loop breaker (2 crashes attributed to one app in 3 boots switch its background off and notify);
+task-watchdog heartbeats; quotas that refuse rather than exhaust. Waves L-D (capabilities) and L-E (identity,
+lifecycle, crash attribution) come after the MVP.
+
 ## Lessons from BadgeVMS
 
 Kept:
@@ -233,6 +295,15 @@ Kept:
 5. **A new image is valid only after it has run properly** (45 s with UI and C6 up): rollback stays.
 
 Not kept: foreign ELF apps with their own heaps, MicroPython as the app layer, the launcher process model.
+
+OS v2 (#216) on the same lessons:
+- **No U-mode on the P4:** it runs everything in M-mode, PMP gives W^X only and ESP-TEE/U-mode is not available, so a
+  syscall trap would add a context switch and protect nothing. The gate is a header API plus an ops table (see Layers).
+- **BadgeVMS's per-process PSRAM remap is studied, not adopted:** a cost on every switch, DMA and LVGL cannot cross it,
+  and its own README says processes are isolated from each other but not from the OS.
+- **WAMR (WebAssembly) is the future sandbox,** the only real isolation the P4 allows: one built-in "Scripts" app
+  hosting modules, each with its own capabilities (#78 probe, not in v2). It replaces MicroPython as the candidate.
+- Concepts only: no BadgeVMS code, and none ever in `c6/` or `shared/`.
 
 ## Flashing on the bench
 
