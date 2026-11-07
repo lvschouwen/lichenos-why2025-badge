@@ -8,7 +8,7 @@ commit; `<...>` is a value that differs per badge. Procedure and rules: the `lic
 Rules for the whole pass:
 - Wait 75 s after every reboot before a console command. Console lines are `fw <command>`.
 - On air only `#badgetest` (or the named test DM target). No send to anyone else, no radio setting changes.
-- **Bold** = destructive or hard to undo. Only Lucas decides the flash with `--wipe-storage`.
+- **Bold** = destructive or hard to undo. Only Lucas decides the fallback flash with `--wipe-storage`.
 - No IPs, MACs, host names, SSIDs or tokens in issue comments; screenshots stay out of the repo.
 
 ## Bench check (fw-<build>)
@@ -29,36 +29,43 @@ text). Nothing should look or behave differently except the "Lichen OS 2" name a
 - [ ] `fw wifi` -> **Expected:** `wifi: "<ssid>" connected, ip <ip> (lichen-xxxx.local), rssi ..`. Note the SSID.
 - [ ] `fw mem` -> note the `mem dma free .. min ..` line (the pre-MVP baseline was free 99979 / min 89611).
 - [ ] `fw bl` -> note `backlight <display> <keyboard>`; `fw clock` -> note the source.
-- [ ] `tools/badge.sh backup <port>` -> a full flash image in the backups directory (it holds `/storage`: identity,
-  contacts, channels, the C6 bundle). Check the `.sha256` next to it. **This is the only copy of the identity.**
-- [ ] Extract the MeshCore files from the backup's storage partition on the host (the FAT image at the storage offset)
-  and keep the identity file (`/storage/meshcore/identity`) and the contacts and channels files beside the backup.
-  Read-only: never write to the backup.
+- [ ] `tools/badge.sh backup <port>` -> a full flash image in the backups directory (it holds `/storage` and NVS).
+  Check the `.sha256` next to it. **This is the only copy of the identity.** Read-only from here on: never write to it.
+- [ ] Optional, for the fallback in step 3: list the backup's FAT storage slice read-only and keep these files beside
+  the backup: `/meshcore/identity/_main.id` (96 B), `/meshcore/contacts3`, `/meshcore/channels2`, `/meshcore/prefs.json`,
+  `/lora.toml`, `/lichen/notify.bin`. `/ota_token.txt` and `/c6/*` are not restored (below).
 
 ### 2. Flash (Lucas only)
 
-- [ ] **`BADGE_EXTRA_PORTS=<port> tools/badge.sh flash-fw <port> --wipe-storage`** -> replaces the whole storage
-  partition (identity, contacts, channels, the C6 bundle come from `storage_staging`). NVS (settings, Wi-Fi) is not on
-  that partition and stays. Cold-boot (power cycle) and wait 75 s.
+Recommended: **without** `--wipe-storage` (`badge.sh flash-fw`'s default). The whole-tree review found that v2 changed no
+storage format and no NVS key, so `/storage` and NVS carry over and nothing needs restoring.
+
+- [ ] `BADGE_EXTRA_PORTS=<port> tools/badge.sh flash-fw <port>` -> writes bootloader, partitions, app and assets and
+  keeps the storage partition. Power-cycle and wait 75 s.
 - [ ] Boot screen -> **Expected:** the mark with `Lichen OS 2` in large text under it and the fw version at the bottom
   (#236). Any key during boot shows the details view with the mark, `Lichen OS 2` and the version.
 
-### 3. Restore `/storage` identity and Wi-Fi
+### 3. Restore (only after the fallback flash) and Wi-Fi
 
-- [ ] The wipe gave MeshCore a new identity: `fw mesh` -> `mesh id` differs from the one noted in step 1.
-- [ ] Wi-Fi: settings survived the wipe, so it rejoins by itself: `fw wifi` -> `wifi: "<ssid>" connected, ip ...`. If
-  not: Settings > Wi-Fi > scan, pick the network, enter the password; a bad password first, then the good one shows the
-  failure and then the join. **Expected:** no `Wi-Fi driver restore` warning on this first boot (#235).
-- [ ] Settings > Wi-Fi lists the network under `Saved networks` (or `No saved networks yet: pick one above to join and
-  save it.` when none).
-- [ ] **Put the old identity back (replaces the new one):** `tools/badge.sh ota-file <host> <identity file>
-  FLASH0:[meshcore]identity`, then the contacts and channels files the same way, then `tools/badge.sh ota-reboot <host>`.
-  Wait 75 s.
+- [ ] Recommended path: nothing to restore. Wi-Fi comes back from NVS: `fw wifi` -> `wifi: "<ssid>" connected, ip ...`,
+  **Expected:** no `Wi-Fi driver restore` warning on this first boot (#235). Settings > Wi-Fi lists the network under
+  `Saved networks`. Go to step 4.
+- [ ] **Fallback (Lucas decides): `tools/badge.sh flash-fw <port> --wipe-storage`** replaces the whole storage
+  partition from `storage_staging`; the C6 images in `/c6` come back from the build, the rest is gone. MeshCore then
+  makes a new identity (`fw mesh` -> `mesh id` differs from step 1). NVS (settings, Wi-Fi) stays, so Wi-Fi rejoins; if
+  not, Settings > Wi-Fi > scan, pick the network, enter the password.
+- [ ] **Fallback: restore the files from the backup slice** (replaces the new identity), each with its exact path
+  (`ota_path.c`: `FLASH0:[a.b]name` is `/storage/a/b/name`, `FLASH0:name` is `/storage/name`):
+  `tools/badge.sh ota-file <host> <file> <target>` for
+  `FLASH0:[meshcore.identity]_main.id`, `FLASH0:[meshcore]contacts3`, `FLASH0:[meshcore]channels2`,
+  `FLASH0:[meshcore]prefs.json`, `FLASH0:lora.toml` and `FLASH0:[lichen]notify.bin`. Do not push `/ota_token.txt`
+  (the OTA token is the new image's own; use the new one for `badge.sh`) or `/c6/*`. Then `tools/badge.sh ota-reboot
+  <host>` and wait 75 s.
 
 ### 4. Identity check
 
-- [ ] `fw mesh` -> **Expected:** `mesh id` equals the id noted in step 1 (same 4 bytes and name), `identity: ok`, and the
-  contacts and messages counts match the snapshot.
+- [ ] `fw mesh` -> **Expected:** `mesh id` shows the same 4-byte prefix and name as the pre-flash snapshot,
+  `identity: ok`, and the contacts and messages counts match.
 - [ ] `fw mesh` does not say `identity: MISMATCH, TX blocked` or `identity: file unreadable, TX blocked` (those block
   all TX; if seen, stop and report).
 - [ ] One message to `#badgetest` goes out and is heard by the other badge (identity accepted on air).
