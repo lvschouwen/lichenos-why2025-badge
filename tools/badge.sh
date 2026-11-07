@@ -9,6 +9,8 @@
 #                  ${XDG_CONFIG_HOME:-~/.config}/why2025-badge/host)
 #   BADGE_VENV     venv with esptool on that host        (default: ~/badge-venv)
 #   BADGE_BACKUPS  local dir for flash backups           (default: ~/badge-backups)
+#   BADGE_ELFS     ELFs kept for crash decoding           (default: $BADGE_BACKUPS/elf)
+#   BADGE_ELF_KEEP how many firmware images keep their ELF (default: 20; older ones are deleted)
 #   BADGE_BAUD     esptool baud rate (default: 460800; 921600 corrupts reads over CH340)
 #   BADGE_EXTRA_PORTS  space-separated non-Espressif ports that are known to be
 #                      the badge, e.g. a CH340 bridge   (default: none)
@@ -82,6 +84,7 @@ EOF
 }
 
 ELFS=${BADGE_ELFS:-$BACKUPS/elf}
+ELF_KEEP=${BADGE_ELF_KEEP:-20}
 IDF=${BADGE_IDF_PATH:-$HOME/esp/esp-idf-v6.1}
 
 remote() {
@@ -138,18 +141,8 @@ cmd_backup() {
     echo "backup kept on $HOST:$REMOTE_DIR/backups and in $BACKUPS"
 }
 
-# Keeps the ELF of the firmware just built under its version and under its SHA-256, so a core dump from it can be
-# decoded later (#74). The SHA-256 of the ELF file is what the image carries as its "ELF file SHA256" and what a core
-# dump names the crashed image by: after a rollback the running version is not the crashed one, the SHA still is
-archive_elf() {
-    local build=$1 version sha
-    mkdir -p "$ELFS"
-    sha=$(sha256sum "$build/badge_fw.elf" | cut -d' ' -f1)
-    cp "$build/badge_fw.elf" "$ELFS/sha-$sha.elf" && echo "ELF kept as $ELFS/sha-$sha.elf"
-    version=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1] + "/project_description.json"))["project_version"])' "$build") ||
-        { echo "warning: no project_version in $build, ELF kept by SHA only" >&2; return 0; }
-    cp "$build/badge_fw.elf" "$ELFS/$version.elf" && echo "ELF kept as $ELFS/$version.elf"
-}
+# shellcheck source=tools/elf_archive.sh
+. "$REPO/tools/elf_archive.sh"
 
 # cmd_flash_fw <port> [--wipe-storage|--no-storage] [build dir]: Lichen from firmware/build.
 # Keeps the storage partition unless --wipe-storage is given (#183); --no-storage is the old name of the default.

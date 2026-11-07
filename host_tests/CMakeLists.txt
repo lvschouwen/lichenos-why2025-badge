@@ -1505,3 +1505,6 @@ add_executable(tile_order_test
 target_include_directories(tile_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(tile_order_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME tile_order_test COMMAND tile_order_test)
+
+# tools/elf_archive.sh: ELF archive for crash decoding (#194)
+add_test(NAME elf_archive_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/elf_archive_test.sh)

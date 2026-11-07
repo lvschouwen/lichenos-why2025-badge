@@ -208,7 +208,7 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
   USB paste it in parts of up to 79 characters; `cancel` drops it; existing contacts are never changed), `fw advert` (send a zero-hop advert now).
 - Crashes: every crash keeps a core dump and a log line. `fw crash` shows them, `fw crash dump` prints the dump,
   `fw crash clear` drops it. `tools/badge.sh crash <port> [elf]` fetches the dump and decodes it against the crashed
-  image's ELF; `flash-fw` and `ota-firmware` keep every ELF in `~/badge-backups/elf` under its SHA-256 and version.
+  image's ELF; `flash-fw` and `ota-firmware` keep the ELF in `~/badge-backups/elf` under its SHA-256 and version (one hardlinked copy; the newest `BADGE_ELF_KEEP`, default 20, images stay).
 - Bench: `fw boot [fail <step>]`, `fw home layout tiles|grid`, `fw setup reset [mesh]`, `fw keys on|off|send <keys>` and
   `fw ui` (press keys and read the screen without looking at it; `keys send` takes `focus:<text>|` / `row:<text>|`
   `notfocus:<a;b>|` guards that stop the sequence before a wrong Enter, and `needlock` which
