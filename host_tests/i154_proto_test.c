@@ -241,6 +241,112 @@ static void test_garbage(void) {
     }
 }
 
+// Key id modes 0-3 add 0, 1, 5 and 9 bytes after the frame counter; a cut anywhere inside is SHORT
+static void test_aux_key_modes(void) {
+    static uint8_t const key_len[4] = {0, 1, 5, 9};
+    uint8_t              f[40]      = {0};
+    i154_mac_t           m;
+    memcpy(f, th_secured, 9);
+    for (uint8_t mode = 0; mode < 4; mode++) {
+        f[9]       = (uint8_t)(0x05 | mode << 3);
+        size_t hdr = 9 + 1 + 4 + key_len[mode];
+        for (size_t n = 9; n < hdr; n++) {
+            CHECK(parse_n(f, n, &m) == I154_MAC_SHORT);
+        }
+        CHECK(parse_n(f, hdr, &m) == I154_MAC_OK && m.hdr_len == hdr);
+    }
+    // 2015: frame counter suppression drops the 4 counter bytes
+    uint8_t v2[] = {0x09, 0xA8, 0x01, 0x34, 0x12, 0x01, 0x00, 0x78, 0x56, 0x02, 0x00, 0x2D, 0x01};
+    CHECK(parse_n(v2, sizeof(v2), &m) == I154_MAC_OK && m.security && m.hdr_len == 13);
+    CHECK(parse_n(v2, sizeof(v2) - 1, &m) == I154_MAC_SHORT);
+}
+
+// GTS and pending address fields that announce more bytes than the frame has
+static void test_beacon_field_overrun(void) {
+    i154_mac_t m;
+    uint8_t    f[sizeof(zb_beacon)];
+    memcpy(f, zb_beacon, sizeof(f));
+    f[9] = 0x07; // 7 GTS descriptors: 1 + 21 bytes
+    CHECK(parse_n(f, sizeof(f), &m) == I154_MAC_SHORT);
+    memcpy(f, zb_beacon, sizeof(f));
+    f[10] = 0x77; // 7 short and 7 extended pending addresses: 70 bytes
+    CHECK(parse_n(f, sizeof(f), &m) == I154_MAC_SHORT);
+    f[10] = 0x01; // one short address fits, then 13 bytes of beacon payload: too short for Zigbee
+    CHECK(parse_n(f, sizeof(f), &m) == I154_MAC_OK && m.guess == I154_NET_UNKNOWN);
+}
+
+static uint8_t guess_of_payload(uint8_t first) {
+    uint8_t f[sizeof(zb_data)];
+    memcpy(f, zb_data, sizeof(f));
+    f[9] = first;
+    i154_mac_t m;
+    CHECK(parse_n(f, sizeof(f), &m) == I154_MAC_OK);
+    return m.guess;
+}
+
+// The first payload byte: Zigbee NWK frame control (v2/v3, data/command/inter-PAN) or a 6LoWPAN dispatch
+static void test_dispatch_edges(void) {
+    CHECK(guess_of_payload(0x41) == I154_NET_THREAD);  // uncompressed IPv6
+    CHECK(guess_of_payload(0x49) == I154_NET_ZIGBEE);  // NWK command, v2, discover route
+    CHECK(guess_of_payload(0x0C) == I154_NET_ZIGBEE);  // NWK data, v3
+    CHECK(guess_of_payload(0x4A) == I154_NET_UNKNOWN); // NWK frame type 2 is reserved, no dispatch either
+    CHECK(guess_of_payload(0x60) == I154_NET_THREAD);  // IPHC
+    CHECK(guess_of_payload(0x88) == I154_NET_THREAD);  // mesh header, not NWK (discover route 2 is reserved)
+    CHECK(guess_of_payload(0xC2) == I154_NET_THREAD);  // FRAG1
+    CHECK(guess_of_payload(0xE5) == I154_NET_THREAD);  // FRAGN
+    CHECK(guess_of_payload(0x00) == I154_NET_UNKNOWN);
+}
+
+static void test_thread_beacon_edges(void) {
+    i154_mac_t m;
+    // One byte short of a Thread beacon payload (25 of 26): no guess, no name; joining falls back to the superframe
+    CHECK(parse_n(th_beacon, sizeof(th_beacon) - 1, &m) == I154_MAC_OK);
+    CHECK(m.guess == I154_NET_UNKNOWN && !m.has_ext_pan && m.name[0] == '\0' && !m.permit_join);
+
+    uint8_t f[sizeof(th_beacon)];
+    memcpy(f, th_beacon, sizeof(f));
+    memcpy(f + 19, "Caf\xC3\xA9\x80", 6); // UTF-8 and stray high bytes are not printed as such
+    CHECK(parse_n(f, sizeof(f), &m) == I154_MAC_OK && strcmp(m.name, "Caf???") == 0);
+}
+
+static void test_broadcast_source_pan(void) {
+    i154_mac_t m;
+    uint16_t   pan = 0;
+    uint8_t    f[sizeof(zb_beacon)];
+    memcpy(f, zb_beacon, sizeof(f));
+    f[3] = f[4] = 0xFF; // a beacon from PAN 0xFFFF belongs to no network
+    CHECK(parse_n(f, sizeof(f), &m) == I154_MAC_OK && m.src_pan == 0xFFFF && !i154_mac_pan(&m, &pan));
+
+    // Uncompressed short -> short with a broadcast source PAN: the destination PAN names the network
+    uint8_t d[] = {0x01, 0x88, 0x01, 0x34, 0x12, 0x01, 0x00, 0xFF, 0xFF, 0x02, 0x00};
+    CHECK(parse_n(d, sizeof(d), &m) == I154_MAC_OK && m.src_pan == 0xFFFF);
+    CHECK(i154_mac_pan(&m, &pan) && pan == 0x1234);
+}
+
+// A valid frame control field with random rest: the parser goes deep, and must only ever answer OK or SHORT
+static void test_garbage_valid_fcf(void) {
+    static uint8_t const modes[3]         = {I154_ADDR_NONE, I154_ADDR_SHORT, I154_ADDR_EXT};
+    uint32_t             x                = 0xC0FFEE11u;
+    uint8_t              f[I154_PSDU_MAX] = {0};
+    i154_mac_t           m;
+    for (int round = 0; round < 20000; round++) {
+        size_t n = 2 + (size_t)(round % (I154_PSDU_MAX - 1));
+        for (size_t i = 0; i < n; i++) {
+            x    = x * 1664525u + 1013904223u;
+            f[i] = (uint8_t)(x >> 24);
+        }
+        uint16_t fcf = (uint16_t)((f[0] | f[1] << 8) & 0x03F8); // keep security, pending, ack, compression, IE bits
+        fcf  |= (uint16_t)(round & 3) | (uint16_t)(modes[(round >> 2) % 3] << 10) | (uint16_t)((round >> 4) % 3 << 12);
+        fcf  |= (uint16_t)(modes[(round >> 6) % 3] << 14);
+        f[0] = (uint8_t)fcf, f[1] = (uint8_t)(fcf >> 8);
+        i154_mac_res_t res = parse_n(f, n, &m);
+        CHECK(res == I154_MAC_OK || res == I154_MAC_SHORT);
+        if (res == I154_MAC_OK) {
+            CHECK(m.hdr_len + m.payload_len == n && strlen(m.name) <= I154_NAME_LEN);
+        }
+    }
+}
+
 // ---- messages ----
 
 static i154_msg_t round_trip(i154_msg_t const *in, size_t expect_len) {
@@ -250,9 +356,10 @@ static i154_msg_t round_trip(i154_msg_t const *in, size_t expect_len) {
     size_t n = i154_encode(in, buf, sizeof(buf));
     CHECK(n == expect_len);
     CHECK(i154_decode(buf, n, &out) == I154_DEC_OK && out.type == in->type);
-    // One byte short or long is a bad length, never a misread
+    // One byte short or long is a bad length, never a misread; only CAPS may grow in a later version
+    i154_dec_t longer = in->type == I154_MSG_CAPS ? I154_DEC_OK : I154_DEC_BAD_LEN;
     CHECK(i154_decode(buf, n - 1, &out) == I154_DEC_BAD_LEN);
-    CHECK(i154_decode(buf, n + 1, &out) == I154_DEC_BAD_LEN);
+    CHECK(i154_decode(buf, n + 1, &out) == longer);
     CHECK(i154_encode(in, buf, n - 1) == 0);
     i154_decode(buf, n, &out);
     return out;
@@ -279,10 +386,43 @@ static void test_messages_small(void) {
     got = round_trip(&m, 5);
     CHECK(got.u.ed.seq == 3 && got.u.ed.channel == 26 && got.u.ed.level_dbm == -87);
 
-    m   = (i154_msg_t){.type = I154_MSG_DONE, .u.done = {4, I154_DONE_STOPPED, 0x01020304u, 513, 31, 65535}};
-    got = round_trip(&m, 13);
+    m   = (i154_msg_t){.type = I154_MSG_DONE, .u.done = {4, I154_DONE_STOPPED, 0x01020304u, 513, 31, 65535, 7, 300}};
+    got = round_trip(&m, 17);
     CHECK(got.u.done.seq == 4 && got.u.done.code == I154_DONE_STOPPED && got.u.done.frames_rx == 0x01020304u);
     CHECK(got.u.done.frames_bad == 513 && got.u.done.networks == 31 && got.u.done.dropped == 65535);
+    CHECK(got.u.done.evicted == 7 && got.u.done.send_failed == 300);
+
+    m = (i154_msg_t){.type = I154_MSG_ACK, .u.ack_seq = 11};
+    CHECK(round_trip(&m, 3).u.ack_seq == 11);
+}
+
+static void test_message_checks(void) {
+    uint8_t    buf[I154_MSG_MAX];
+    i154_msg_t req = {.type = I154_MSG_CAPS_REQ};
+    size_t     n   = i154_encode(&req, buf, sizeof(buf));
+    CHECK(i154_is_caps_req(buf, n));
+    buf[0] = I154_PROTO_VERSION + 3; // the C6 answers a CAPS_REQ of any version
+    CHECK(i154_is_caps_req(buf, n));
+    CHECK(!i154_is_caps_req(buf, 1));
+    buf[1] = I154_MSG_SCAN_START;
+    CHECK(!i154_is_caps_req(buf, n));
+
+    i154_ed_t ed = {0, 11, -90};
+    CHECK(i154_ed_valid(&ed));
+    ed.channel = 10;
+    CHECK(!i154_ed_valid(&ed));
+    ed.channel = 27;
+    CHECK(!i154_ed_valid(&ed));
+    CHECK(i154_channel_valid(26) && !i154_channel_valid(0));
+
+    i154_frame_sum_t f = {.channel = 20, .guess = I154_NET_ZIGBEE, .src_mode = I154_ADDR_EXT};
+    CHECK(i154_frame_sum_valid(&f));
+    f.src_mode = 1;
+    CHECK(!i154_frame_sum_valid(&f));
+    f.src_mode = I154_ADDR_NONE, f.guess = 3;
+    CHECK(!i154_frame_sum_valid(&f));
+    f.guess = I154_NET_THREAD, f.channel = 27;
+    CHECK(!i154_frame_sum_valid(&f));
 }
 
 static void test_message_frame(void) {
@@ -309,6 +449,13 @@ static void test_message_frame(void) {
 
     strcpy(m.u.frame.name, "Hue");
     CHECK(strcmp(round_trip(&m, 50).u.frame.name, "Hue") == 0);
+
+    // A name off the wire is made printable on decode too: control bytes and bytes from 0x7F become '?'
+    uint8_t buf[I154_MSG_MAX];
+    size_t  n = i154_encode(&m, buf, sizeof(buf));
+    memcpy(buf + n - I154_NAME_LEN, "a\x01\x7F\x80\xFFz", 6);
+    i154_msg_t out;
+    CHECK(i154_decode(buf, n, &out) == I154_DEC_OK && strcmp(out.u.frame.name, "a????z") == 0);
 }
 
 static void test_message_rejects(void) {
@@ -376,12 +523,21 @@ static void test_caps_and_deadline(void) {
 
     i154_scan_req_t p = I154_SCAN_REQ_DEFAULT;
     uint32_t        e = i154_scan_expected_ms(&p);
-    CHECK(e == 16u * (2000 + I154_CHANNEL_OVERHEAD_MS));
+    CHECK(e == 16u * (2000 + I154_CHANNEL_OVERHEAD_MS + I154_SCAN_ED_MS)); // passive measures the energy first
+    i154_scan_req_t ed = {0, I154_MODE_ED, 1u << 11, 5};
+    CHECK(i154_scan_expected_ms(&ed) == 5 + I154_CHANNEL_OVERHEAD_MS);
     CHECK(!i154_scan_overdue(&p, 1000, 1000 + e + I154_SCAN_GRACE_MS));
     CHECK(i154_scan_overdue(&p, 1000, 1000 + e + I154_SCAN_GRACE_MS + 1));
     uint32_t start = 0xFFFFF000u; // the ms clock wraps during the scan
     CHECK(!i154_scan_overdue(&p, start, start + e));
     CHECK(i154_scan_overdue(&p, start, start + e + I154_SCAN_GRACE_MS + 1));
+    start = 0xFFFFFF00u; // wraps within the first second
+    CHECK(!i154_scan_overdue(&p, start, start + e + I154_SCAN_GRACE_MS));
+    CHECK(i154_scan_overdue(&p, start, start + e + I154_SCAN_GRACE_MS + 1));
+
+    // A lost SCAN_START shows after I154_SCAN_ACK_MS, not after the whole scan
+    CHECK(!i154_scan_no_start(start, start + I154_SCAN_ACK_MS));
+    CHECK(i154_scan_no_start(start, start + I154_SCAN_ACK_MS + 1));
 }
 
 // ---- dedupe ----
@@ -392,18 +548,25 @@ static i154_mac_t mac_of(uint8_t const *frame, size_t n) {
     return m;
 }
 
+static i154_mac_t with_pan(i154_mac_t m, uint16_t pan) {
+    m.dst_pan = m.src_pan = pan;
+    return m;
+}
+
 static void test_dedupe_basic(void) {
-    i154_dedupe_t t;
-    int           idx = -1;
+    i154_dedupe_t  t;
+    int            idx = -1;
+    i154_rx_meta_t a = {15, -60, 180}, b = {15, -50, 190}, c = {15, -70, 100}, other = {20, -60, 180};
     i154_dedupe_init(&t);
 
     i154_mac_t data = mac_of(zb_data, sizeof(zb_data)), beacon = mac_of(zb_beacon, sizeof(zb_beacon));
     i154_mac_t req = mac_of(beacon_req, sizeof(beacon_req));
-    CHECK(i154_dedupe_add(&t, 15, -60, 180, &req, 0, &idx) == I154_DD_IGNORED);
-    CHECK(i154_dedupe_add(&t, 15, -60, 180, &data, 10, &idx) == I154_DD_NEW && i154_dedupe_count(&t) == 1);
-    CHECK(i154_dedupe_add(&t, 15, -50, 190, &data, 20, &idx) == I154_DD_SEEN);
-    CHECK(i154_dedupe_add(&t, 15, -70, 100, &beacon, 30, &idx) == I154_DD_CHANGED); // beacon details arrived
-    CHECK(i154_dedupe_add(&t, 15, -70, 100, &beacon, 40, &idx) == I154_DD_SEEN);
+    CHECK(i154_dedupe_add(&t, &a, &req, 0, &idx) == I154_DD_IGNORED);
+    CHECK(i154_dedupe_add(&t, &a, &data, 10, &idx) == I154_DD_PENDING && i154_dedupe_count(&t) == 0);
+    CHECK(i154_dedupe_add(&t, &a, &data, 20, &idx) == I154_DD_NEW && i154_dedupe_count(&t) == 1);
+    CHECK(i154_dedupe_add(&t, &b, &data, 30, &idx) == I154_DD_SEEN);
+    CHECK(i154_dedupe_add(&t, &c, &beacon, 40, &idx) == I154_DD_CHANGED); // beacon details arrived
+    CHECK(i154_dedupe_add(&t, &c, &beacon, 50, &idx) == I154_DD_SEEN);
 
     i154_frame_sum_t const *s = &t.e[idx].sum;
     CHECK(s->channel == 15 && s->pan_id == 0x1A62 && s->frames == 4 && s->beacons == 2);
@@ -411,45 +574,110 @@ static void test_dedupe_basic(void) {
     CHECK(s->flags == (I154_FRAME_F_BEACON | I154_FRAME_F_PERMIT_JOIN | I154_FRAME_F_EXT_PAN));
     CHECK(s->stack_profile == 2 && memcmp(s->ext_pan_id, zb_beacon + 14, 8) == 0);
 
-    // The same PAN on another channel is another network
-    CHECK(i154_dedupe_add(&t, 20, -60, 180, &data, 50, NULL) == I154_DD_NEW && i154_dedupe_count(&t) == 2);
+    // The same PAN on another channel is another network; a recognised beacon gets in on its own (active scan)
+    CHECK(i154_dedupe_add(&t, &other, &beacon, 60, NULL) == I154_DD_NEW && i154_dedupe_count(&t) == 2);
+}
+
+// A one-off frame (a phantom PAN) never enters; a second frame long after the first starts the window again
+static void test_dedupe_confirm(void) {
+    i154_dedupe_t  t;
+    i154_rx_meta_t rx = {11, -60, 0};
+    i154_dedupe_init(&t);
+    i154_mac_t m = mac_of(zb_data, sizeof(zb_data));
+    CHECK(i154_dedupe_add(&t, &rx, &m, 0, NULL) == I154_DD_PENDING);
+    CHECK(i154_dedupe_add(&t, &rx, &m, I154_DEDUPE_CONFIRM_MS + 1, NULL) == I154_DD_PENDING);
+    CHECK(i154_dedupe_add(&t, &rx, &m, I154_DEDUPE_CONFIRM_MS + 2, NULL) == I154_DD_NEW);
+
+    // A flood of single frames from random PANs cycles through the candidates and admits nothing
+    for (int i = 0; i < 1000; i++) {
+        i154_mac_t f = with_pan(m, (uint16_t)(0x2000 + i));
+        CHECK(i154_dedupe_add(&t, &rx, &f, 100000u + (uint32_t)i, NULL) == I154_DD_PENDING);
+    }
+    CHECK(i154_dedupe_count(&t) == 1);
 }
 
 static void test_dedupe_votes(void) {
-    i154_dedupe_t t;
-    int           idx;
+    i154_dedupe_t  t;
+    int            idx;
+    i154_rx_meta_t rx = {11, -60, 0};
     i154_dedupe_init(&t);
-    i154_mac_t zb = mac_of(zb_data, sizeof(zb_data)), th = mac_of(th_secured, sizeof(th_secured));
-    th.dst_pan = th.src_pan = 0x1A62; // the same PAN heard with conflicting frames
+    i154_mac_t zb = mac_of(zb_data, sizeof(zb_data));
+    i154_mac_t th = with_pan(mac_of(th_secured, sizeof(th_secured)), 0x1A62); // conflicting frames on one PAN
 
-    i154_dedupe_add(&t, 11, -60, 0, &zb, 0, &idx);
+    i154_dedupe_add(&t, &rx, &zb, 0, &idx);
+    i154_dedupe_add(&t, &rx, &zb, 1, &idx);
     CHECK(t.e[idx].sum.guess == I154_NET_ZIGBEE);
-    CHECK(i154_dedupe_add(&t, 11, -60, 0, &th, 1, &idx) == I154_DD_CHANGED); // secured flag
-    CHECK(t.e[idx].sum.guess == I154_NET_ZIGBEE);                            // a tie keeps the guess
-    CHECK(i154_dedupe_add(&t, 11, -60, 0, &th, 2, &idx) == I154_DD_CHANGED); // majority flips it
+    CHECK(i154_dedupe_add(&t, &rx, &th, 2, &idx) == I154_DD_CHANGED); // secured flag
+    CHECK(t.e[idx].sum.guess == I154_NET_ZIGBEE);                     // a tie keeps the guess
+    CHECK(i154_dedupe_add(&t, &rx, &th, 3, &idx) == I154_DD_CHANGED); // majority flips it
     CHECK(t.e[idx].sum.guess == I154_NET_THREAD);
 }
 
+static void fill_table(i154_dedupe_t *t, i154_mac_t const *m, uint32_t base_ms) {
+    i154_rx_meta_t rx = {11, -60, 0};
+    for (int i = 0; i < I154_DEDUPE_SIZE; i++) {
+        i154_mac_t f = with_pan(*m, (uint16_t)(0x100 + i));
+        CHECK(i154_dedupe_add(t, &rx, &f, base_ms + (uint32_t)i, NULL) == I154_DD_PENDING);
+        CHECK(i154_dedupe_add(t, &rx, &f, base_ms + (uint32_t)i, NULL) == I154_DD_NEW);
+    }
+}
+
 static void test_dedupe_full(void) {
+    i154_dedupe_t  t;
+    i154_rx_meta_t rx = {11, -60, 0};
+    i154_dedupe_init(&t);
+    i154_mac_t m = mac_of(zb_data, sizeof(zb_data));
+    fill_table(&t, &m, 1000);
+
+    // Everyone was heard within I154_DEDUPE_KEEP_MS: a new network is dropped, not let in. A beacon is admitted on
+    // its first frame, which keeps this test short
+    i154_mac_t n = with_pan(mac_of(zb_beacon, sizeof(zb_beacon)), 0x999);
+    CHECK(i154_dedupe_add(&t, &rx, &n, 1000 + I154_DEDUPE_KEEP_MS - 1, NULL) == I154_DD_FULL);
+    CHECK(t.dropped == 1 && t.evicted == 0);
+
+    // Refresh the first one; later the second is the least recently heard and quiet long enough
+    i154_mac_t first = with_pan(m, 0x100);
+    CHECK(i154_dedupe_add(&t, &rx, &first, 20000, NULL) == I154_DD_SEEN);
+    int idx = -1;
+    CHECK(i154_dedupe_add(&t, &rx, &n, 20001, &idx) == I154_DD_NEW);
+    CHECK(i154_dedupe_count(&t) == I154_DEDUPE_SIZE && t.evicted == 1 && idx == 1);
+    CHECK(t.e[idx].sum.pan_id == 0x999 && t.e[idx].sum.frames == 1);
+}
+
+// FRAMEs leave new networks first, then refreshes no more than one per network per interval, within a global budget
+static void test_dedupe_rate(void) {
     i154_dedupe_t t;
     i154_dedupe_init(&t);
     i154_mac_t m = mac_of(zb_data, sizeof(zb_data));
-    for (int i = 0; i < I154_DEDUPE_SIZE; i++) {
-        m.dst_pan = m.src_pan = (uint16_t)(0x100 + i);
-        CHECK(i154_dedupe_add(&t, 11, -60, 0, &m, (uint32_t)(1000 + i), NULL) == I154_DD_NEW);
+    fill_table(&t, &m, 0);
+
+    uint32_t now  = 100;
+    int      sent = 0;
+    while (i154_dedupe_next_due(&t, now, false) >= 0) {
+        sent++;
     }
-    // Refresh the first one, so the second is now the least recently heard
-    m.dst_pan = m.src_pan = 0x100;
-    CHECK(i154_dedupe_add(&t, 11, -60, 0, &m, 5000, NULL) == I154_DD_SEEN);
+    CHECK(sent == I154_FRAME_BUDGET);
+    now += I154_FRAME_WINDOW_MS;
+    CHECK(i154_dedupe_next_due(&t, now, false) == I154_FRAME_BUDGET); // the next window goes on where it stopped
 
-    int idx   = -1;
-    m.dst_pan = m.src_pan = 0x999;
-    CHECK(i154_dedupe_add(&t, 11, -60, 0, &m, 6000, &idx) == I154_DD_NEW);
-    CHECK(i154_dedupe_count(&t) == I154_DEDUPE_SIZE && t.evicted == 1 && idx == 1);
-    CHECK(t.e[idx].sum.pan_id == 0x999 && t.e[idx].sum.frames == 1);
+    // A flush at the end of a scan sends the rest at once
+    sent = 1;
+    while (i154_dedupe_next_due(&t, now, true) >= 0) {
+        sent++;
+    }
+    CHECK(sent == I154_DEDUPE_SIZE - I154_FRAME_BUDGET);
+    CHECK(i154_dedupe_next_due(&t, now + 5000, false) == -1); // nothing dirty
 
-    m.dst_pan = m.src_pan = 0x101; // the evicted network comes back as new
-    CHECK(i154_dedupe_add(&t, 11, -60, 0, &m, 7000, NULL) == I154_DD_NEW && t.evicted == 2);
+    // A refresh waits for the per-network interval; a failed send is given back
+    i154_rx_meta_t rx = {11, -55, 0};
+    i154_mac_t     f  = with_pan(m, 0x100);
+    i154_dedupe_add(&t, &rx, &f, now + 10, NULL);
+    CHECK(i154_dedupe_next_due(&t, now + 10, false) == -1);
+    CHECK(i154_dedupe_next_due(&t, now + I154_FRAME_MIN_INTERVAL_MS, false) == 0);
+    i154_dedupe_mark(&t, 0);
+    i154_dedupe_mark(&t, -1); // out of range: ignored
+    i154_dedupe_mark(&t, I154_DEDUPE_SIZE);
+    CHECK(i154_dedupe_next_due(&t, now + 2 * I154_FRAME_MIN_INTERVAL_MS, false) == 0);
 }
 
 // ---- capability probe: an old C6 never answers, the scanner must not wait forever ----
@@ -469,6 +697,10 @@ static void test_probe_old_c6(void) {
 
     i154_probe_t idle = {0};
     CHECK(!i154_probe_poll(&idle, 0) && idle.state == I154_PROBE_IDLE);
+
+    // Opening the scanner again starts over, e.g. after an ota-c6
+    i154_probe_start(&p);
+    CHECK(p.state == I154_PROBE_PENDING && i154_probe_poll(&p, 0));
 }
 
 static void test_probe_answers(void) {
@@ -481,21 +713,41 @@ static void test_probe_answers(void) {
     i154_probe_poll(&p, 0);
     size_t n = i154_encode(&ed, buf, sizeof(buf));
     i154_probe_on_msg(&p, buf, n); // not an answer
+    buf[0] = I154_PROTO_VERSION + 1;
+    i154_probe_on_msg(&p, buf, n); // a version mismatch counts only on a CAPS
     i154_probe_on_msg(&p, buf, 1); // too short to tell
     CHECK(p.state == I154_PROBE_PENDING);
     n = i154_encode(&caps, buf, sizeof(buf));
+    i154_probe_on_msg(&p, buf, n - 1); // shorter than the frozen prefix
+    CHECK(p.state == I154_PROBE_PENDING);
     i154_probe_on_msg(&p, buf, n);
     CHECK(p.state == I154_PROBE_OK && p.caps.modes == 0x06 && p.caps.table_size == 32);
     CHECK(!i154_probe_poll(&p, 5000));
 
+    // A newer C6 appends to CAPS: still read as a CAPS, and told apart as newer, not as too old
+    i154_probe_start(&p);
+    buf[0] = I154_PROTO_VERSION + 1;
+    i154_probe_on_msg(&p, buf, n + 4);
+    CHECK(p.state == I154_PROBE_C6_NEWER && p.caps.table_size == 32);
     i154_probe_start(&p);
     buf[0] = I154_PROTO_VERSION - 1;
     i154_probe_on_msg(&p, buf, n);
     CHECK(p.state == I154_PROBE_C6_TOO_OLD);
+}
+
+// A C6 slow to answer (busy after boot) still counts once its CAPS arrives
+static void test_probe_late_caps(void) {
+    uint8_t      buf[I154_MSG_MAX];
+    i154_probe_t p;
+    i154_msg_t   caps = {.type = I154_MSG_CAPS, .u.caps = {0x0E, I154_CHANNEL_MASK_ALL, 32}};
     i154_probe_start(&p);
-    buf[0] = I154_PROTO_VERSION + 1;
+    for (uint32_t t = 0; t <= 4 * I154_PROBE_INTERVAL_MS; t += 100) {
+        i154_probe_poll(&p, t);
+    }
+    CHECK(p.state == I154_PROBE_C6_TOO_OLD);
+    size_t n = i154_encode(&caps, buf, sizeof(buf));
     i154_probe_on_msg(&p, buf, n);
-    CHECK(p.state == I154_PROBE_C6_NEWER);
+    CHECK(p.state == I154_PROBE_OK && p.caps.modes == 0x0E);
 }
 
 int main(void) {
@@ -509,16 +761,26 @@ int main(void) {
     test_rejects();
     test_frame_version_2015();
     test_garbage();
+    test_aux_key_modes();
+    test_beacon_field_overrun();
+    test_dispatch_edges();
+    test_thread_beacon_edges();
+    test_broadcast_source_pan();
+    test_garbage_valid_fcf();
     test_messages_small();
+    test_message_checks();
     test_message_frame();
     test_message_rejects();
     test_scan_req();
     test_caps_and_deadline();
     test_dedupe_basic();
+    test_dedupe_confirm();
     test_dedupe_votes();
     test_dedupe_full();
+    test_dedupe_rate();
     test_probe_old_c6();
     test_probe_answers();
+    test_probe_late_caps();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

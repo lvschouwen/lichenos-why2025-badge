@@ -13,9 +13,20 @@
 #define CAPS_LEN       (HDR_LEN + 6)
 #define ED_LEN         (HDR_LEN + 3)
 #define FRAME_LEN      (HDR_LEN + 32 + I154_NAME_LEN)
-#define DONE_LEN       (HDR_LEN + 11)
+#define DONE_LEN       (HDR_LEN + 15)
+#define ACK_LEN        (HDR_LEN + 1)
 
 _Static_assert(FRAME_LEN <= I154_MSG_MAX, "FRAME must fit I154_MSG_MAX");
+
+// Up to I154_NAME_LEN bytes or a NUL; anything but printable ASCII becomes '?', as the UI prints it in a font that
+// has no glyphs for control bytes, and a byte from 0x80 is no complete UTF-8 character on its own
+static void copy_name(char *dst, uint8_t const *src) {
+    size_t i = 0;
+    for (; i < I154_NAME_LEN && src[i]; i++) {
+        dst[i] = src[i] < 0x20 || src[i] >= 0x7F ? '?' : (char)src[i];
+    }
+    dst[i] = '\0';
+}
 
 static uint8_t *put_u16(uint8_t *p, uint16_t v) {
     p[0] = (uint8_t)v;
@@ -151,8 +162,7 @@ static void dec_frame(uint8_t const *p, i154_msg_t *m) {
     memcpy(f->ext_pan_id, p, 8);
     p                += 8;
     f->stack_profile  = *p++;
-    memcpy(f->name, p, I154_NAME_LEN);
-    f->name[I154_NAME_LEN] = '\0';
+    copy_name(f->name, p);
 }
 
 static void enc_done(i154_msg_t const *m, uint8_t *p) {
@@ -162,7 +172,9 @@ static void enc_done(i154_msg_t const *m, uint8_t *p) {
     p                    = put_u32(p, d->frames_rx);
     p                    = put_u16(p, d->frames_bad);
     *p++                 = d->networks;
-    put_u16(p, d->dropped);
+    p                    = put_u16(p, d->dropped);
+    p                    = put_u16(p, d->evicted);
+    put_u16(p, d->send_failed);
 }
 
 static void dec_done(uint8_t const *p, i154_msg_t *m) {
@@ -173,23 +185,35 @@ static void dec_done(uint8_t const *p, i154_msg_t *m) {
     d->frames_bad  = get_u16(&p);
     d->networks    = *p++;
     d->dropped     = get_u16(&p);
+    d->evicted     = get_u16(&p);
+    d->send_failed = get_u16(&p);
+}
+
+static void enc_ack(i154_msg_t const *m, uint8_t *p) {
+    *p = m->u.ack_seq;
+}
+
+static void dec_ack(uint8_t const *p, i154_msg_t *m) {
+    m->u.ack_seq = *p;
 }
 
 typedef struct {
     uint8_t type;
     uint8_t len;
+    bool    prefix; // a longer message is accepted and its prefix read (the frozen CAPS)
     void (*enc)(i154_msg_t const *m, uint8_t *body);
     void (*dec)(uint8_t const *body, i154_msg_t *m);
 } msg_layout_t;
 
 static msg_layout_t const layouts[] = {
-    {I154_MSG_CAPS_REQ, CAPS_REQ_LEN, enc_none, dec_none},
-    {I154_MSG_SCAN_START, SCAN_START_LEN, enc_scan, dec_scan},
-    {I154_MSG_SCAN_STOP, SCAN_STOP_LEN, enc_stop, dec_stop},
-    {I154_MSG_CAPS, CAPS_LEN, enc_caps, dec_caps},
-    {I154_MSG_ED, ED_LEN, enc_ed, dec_ed},
-    {I154_MSG_FRAME, FRAME_LEN, enc_frame, dec_frame},
-    {I154_MSG_DONE, DONE_LEN, enc_done, dec_done},
+    {I154_MSG_CAPS_REQ, CAPS_REQ_LEN, false, enc_none, dec_none},
+    {I154_MSG_SCAN_START, SCAN_START_LEN, false, enc_scan, dec_scan},
+    {I154_MSG_SCAN_STOP, SCAN_STOP_LEN, false, enc_stop, dec_stop},
+    {I154_MSG_CAPS, CAPS_LEN, true, enc_caps, dec_caps},
+    {I154_MSG_ED, ED_LEN, false, enc_ed, dec_ed},
+    {I154_MSG_FRAME, FRAME_LEN, false, enc_frame, dec_frame},
+    {I154_MSG_DONE, DONE_LEN, false, enc_done, dec_done},
+    {I154_MSG_ACK, ACK_LEN, false, enc_ack, dec_ack},
 };
 
 static msg_layout_t const *layout_of(uint8_t type) {
@@ -223,13 +247,30 @@ i154_dec_t i154_decode(uint8_t const *buf, size_t len, i154_msg_t *out) {
     if (!l) {
         return I154_DEC_BAD_TYPE;
     }
-    if (len != l->len) {
+    if (len < l->len || (len > l->len && !l->prefix)) {
         return I154_DEC_BAD_LEN;
     }
     memset(out, 0, sizeof(*out));
     out->type = buf[1];
     l->dec(buf + HDR_LEN, out);
     return I154_DEC_OK;
+}
+
+bool i154_is_caps_req(uint8_t const *buf, size_t len) {
+    return len >= CAPS_REQ_LEN && buf[1] == I154_MSG_CAPS_REQ;
+}
+
+bool i154_channel_valid(uint8_t channel) {
+    return channel >= I154_CHANNEL_MIN && channel <= I154_CHANNEL_MAX;
+}
+
+bool i154_ed_valid(i154_ed_t const *ed) {
+    return i154_channel_valid(ed->channel);
+}
+
+bool i154_frame_sum_valid(i154_frame_sum_t const *f) {
+    bool mode_ok = f->src_mode == I154_ADDR_NONE || f->src_mode == I154_ADDR_SHORT || f->src_mode == I154_ADDR_EXT;
+    return i154_channel_valid(f->channel) && f->guess <= I154_NET_THREAD && mode_ok;
 }
 
 // ---- scan requests ----
@@ -268,11 +309,19 @@ bool i154_caps_allow(i154_caps_t const *caps, i154_scan_req_t const *r) {
 }
 
 uint32_t i154_scan_expected_ms(i154_scan_req_t const *r) {
-    return channel_count(r->channel_mask) * ((uint32_t)r->dwell_ms + I154_CHANNEL_OVERHEAD_MS);
+    uint32_t per_channel = (uint32_t)r->dwell_ms + I154_CHANNEL_OVERHEAD_MS;
+    if (r->mode != I154_MODE_ED) {
+        per_channel += I154_SCAN_ED_MS; // passive and active measure the energy before listening
+    }
+    return channel_count(r->channel_mask) * per_channel;
 }
 
 bool i154_scan_overdue(i154_scan_req_t const *r, uint32_t started_ms, uint32_t now_ms) {
     return now_ms - started_ms > i154_scan_expected_ms(r) + I154_SCAN_GRACE_MS;
+}
+
+bool i154_scan_no_start(uint32_t started_ms, uint32_t now_ms) {
+    return now_ms - started_ms > I154_SCAN_ACK_MS;
 }
 
 // ---- MAC header parser ----
@@ -346,21 +395,25 @@ static i154_mac_res_t parse_fcf(reader_t *r, i154_mac_t *m) {
     return m->frame_type > I154_FT_CMD ? I154_MAC_UNSUPPORTED : I154_MAC_OK;
 }
 
+// A PAN ID when the header carries one; *pan stays 0 when it does not
+static bool take_pan(reader_t *r, bool present, uint16_t *pan) {
+    uint64_t v;
+    if (!present) {
+        return true;
+    }
+    if (!take_le(r, 2, &v)) {
+        return false;
+    }
+    *pan = (uint16_t)v;
+    return true;
+}
+
 static bool parse_addrs(reader_t *r, i154_mac_t *m) {
-    uint64_t v = 0;
     pan_presence(m, &m->has_dst_pan, &m->has_src_pan);
-    if (m->has_dst_pan && !take_le(r, 2, &v)) {
+    if (!take_pan(r, m->has_dst_pan, &m->dst_pan) || !take_le(r, addr_len(m->dst_mode), &m->dst_addr)) {
         return false;
     }
-    m->dst_pan = (uint16_t)v;
-    if (!take_le(r, addr_len(m->dst_mode), &m->dst_addr)) {
-        return false;
-    }
-    if (m->has_src_pan && !take_le(r, 2, &v)) {
-        return false;
-    }
-    m->src_pan = (uint16_t)v;
-    if (!take_le(r, addr_len(m->src_mode), &m->src_addr)) {
+    if (!take_pan(r, m->has_src_pan, &m->src_pan) || !take_le(r, addr_len(m->src_mode), &m->src_addr)) {
         return false;
     }
     if (!m->has_src_pan && m->src_mode != I154_ADDR_NONE && m->has_dst_pan) {
@@ -380,14 +433,6 @@ static bool skip_aux_security(reader_t *r, i154_mac_t const *m) {
     bool   counter_suppressed = m->version >= 2 && (*ctl >> 5) & 1;
     size_t n                  = (counter_suppressed ? 0 : 4) + key_id_len[(*ctl >> 3) & 3];
     return take(r, n) != NULL;
-}
-
-static void copy_name(char *dst, uint8_t const *src) {
-    size_t i = 0;
-    for (; i < I154_NAME_LEN && src[i]; i++) {
-        dst[i] = src[i] < 0x20 || src[i] == 0x7F ? '?' : (char)src[i]; // the UI prints it
-    }
-    dst[i] = '\0';
 }
 
 // The beacon payload after superframe, GTS and pending address fields: Zigbee (protocol id 0) or Thread (3)
@@ -492,6 +537,7 @@ bool i154_mac_pan(i154_mac_t const *m, uint16_t *pan) {
     return false;
 }
 
+
 // ---- dedupe table ----
 
 void i154_dedupe_init(i154_dedupe_t *t) {
@@ -502,33 +548,77 @@ static uint16_t sat_inc(uint16_t v) {
     return v == UINT16_MAX ? v : (uint16_t)(v + 1);
 }
 
-static int find_or_claim(i154_dedupe_t *t, uint8_t channel, uint16_t pan, uint32_t now_ms, bool *is_new) {
-    int free_i = -1, oldest = 0;
+static int find_entry(i154_dedupe_t const *t, uint8_t channel, uint16_t pan) {
     for (int i = 0; i < I154_DEDUPE_SIZE; i++) {
-        i154_dedupe_entry_t const *e = &t->e[i];
-        if (e->used && e->sum.channel == channel && e->sum.pan_id == pan) {
-            *is_new = false;
+        if (t->e[i].used && t->e[i].sum.channel == channel && t->e[i].sum.pan_id == pan) {
             return i;
         }
-        if (!e->used && free_i < 0) {
-            free_i = i;
+    }
+    return -1;
+}
+
+// A free entry, else the least recently heard one if it was quiet long enough; -1 when all are recent
+static int claim_entry(i154_dedupe_t *t, uint32_t now_ms) {
+    int oldest = 0;
+    for (int i = 0; i < I154_DEDUPE_SIZE; i++) {
+        if (!t->e[i].used) {
+            return i;
         }
-        if (now_ms - e->last_ms > now_ms - t->e[oldest].last_ms) {
+        if (now_ms - t->e[i].last_ms > now_ms - t->e[oldest].last_ms) {
             oldest = i;
         }
     }
-    if (free_i < 0) {
-        free_i     = oldest;
-        t->evicted = sat_inc(t->evicted);
+    if (now_ms - t->e[oldest].last_ms < I154_DEDUPE_KEEP_MS) {
+        return -1;
     }
-    i154_dedupe_entry_t *e = &t->e[free_i];
-    memset(e, 0, sizeof(*e));
-    e->used          = true;
-    e->sum.channel   = channel;
-    e->sum.pan_id    = pan;
-    e->sum.rssi_best = INT8_MIN;
-    *is_new          = true;
-    return free_i;
+    t->evicted = sat_inc(t->evicted);
+    return oldest;
+}
+
+static i154_dedupe_cand_t *find_cand(i154_dedupe_t *t, uint8_t channel, uint16_t pan) {
+    for (int i = 0; i < I154_DEDUPE_CANDIDATES; i++) {
+        i154_dedupe_cand_t *c = &t->cand[i];
+        if (c->used && c->channel == channel && c->pan == pan) {
+            return c;
+        }
+    }
+    return NULL;
+}
+
+static i154_dedupe_cand_t *claim_cand(i154_dedupe_t *t, uint32_t now_ms) {
+    int oldest = 0;
+    for (int i = 0; i < I154_DEDUPE_CANDIDATES; i++) {
+        if (!t->cand[i].used) {
+            return &t->cand[i];
+        }
+        if (now_ms - t->cand[i].ms > now_ms - t->cand[oldest].ms) {
+            oldest = i;
+        }
+    }
+    return &t->cand[oldest];
+}
+
+// True when an unknown PAN may enter the table: its second frame within the confirm window, or a recognised beacon
+static bool admit(i154_dedupe_t *t, uint8_t channel, uint16_t pan, i154_mac_t const *m, uint32_t now_ms) {
+    i154_dedupe_cand_t *c = find_cand(t, channel, pan);
+    if (m->frame_type == I154_FT_BEACON && m->has_ext_pan) {
+        if (c) {
+            c->used = false;
+        }
+        return true;
+    }
+    if (c && now_ms - c->ms <= I154_DEDUPE_CONFIRM_MS) {
+        c->used = false;
+        return true;
+    }
+    if (!c) {
+        c          = claim_cand(t, now_ms);
+        c->used    = true;
+        c->channel = channel;
+        c->pan     = pan;
+    }
+    c->ms = now_ms; // a stale candidate starts its window again
+    return false;
 }
 
 static void vote(i154_dedupe_entry_t *e, uint8_t guess) {
@@ -560,12 +650,12 @@ static void take_beacon(i154_frame_sum_t *s, i154_mac_t const *m) {
     }
 }
 
-static void take_frame(i154_dedupe_entry_t *e, int8_t rssi, uint8_t lqi, i154_mac_t const *m) {
+static void take_frame(i154_dedupe_entry_t *e, i154_rx_meta_t const *rx, i154_mac_t const *m) {
     i154_frame_sum_t *s = &e->sum;
     s->frames           = sat_inc(s->frames);
-    s->rssi_last        = rssi;
-    s->rssi_best        = rssi > s->rssi_best ? rssi : s->rssi_best;
-    s->lqi_last         = lqi;
+    s->rssi_last        = rx->rssi;
+    s->rssi_best        = rx->rssi > s->rssi_best ? rx->rssi : s->rssi_best;
+    s->lqi_last         = rx->lqi;
     s->last_type        = m->frame_type;
     if (m->src_mode != I154_ADDR_NONE) {
         s->src_mode = m->src_mode;
@@ -586,24 +676,48 @@ static bool summary_changed(i154_frame_sum_t const *a, i154_frame_sum_t const *b
            strcmp(a->name, b->name) != 0;
 }
 
-i154_dd_res_t i154_dedupe_add(
-    i154_dedupe_t *t, uint8_t channel, int8_t rssi, uint8_t lqi, i154_mac_t const *m, uint32_t now_ms, int *index
-) {
+// The entry for a PAN not in the table yet, or a PENDING/FULL result
+static i154_dd_res_t
+    new_entry(i154_dedupe_t *t, uint8_t channel, uint16_t pan, i154_mac_t const *m, uint32_t now_ms, int *index) {
+    if (!admit(t, channel, pan, m, now_ms)) {
+        return I154_DD_PENDING;
+    }
+    int i = claim_entry(t, now_ms);
+    if (i < 0) {
+        t->dropped = sat_inc(t->dropped);
+        return I154_DD_FULL;
+    }
+    i154_dedupe_entry_t *e = &t->e[i];
+    memset(e, 0, sizeof(*e));
+    e->used          = true;
+    e->sum.channel   = channel;
+    e->sum.pan_id    = pan;
+    e->sum.rssi_best = INT8_MIN;
+    *index           = i;
+    return I154_DD_NEW;
+}
+
+i154_dd_res_t
+    i154_dedupe_add(i154_dedupe_t *t, i154_rx_meta_t const *rx, i154_mac_t const *m, uint32_t now_ms, int *index) {
     uint16_t pan;
     if (!i154_mac_pan(m, &pan)) {
         return I154_DD_IGNORED;
     }
-    bool                 is_new;
-    int                  i      = find_or_claim(t, channel, pan, now_ms, &is_new);
+    i154_dd_res_t res = I154_DD_SEEN;
+    int           i   = find_entry(t, rx->channel, pan);
+    if (i < 0 && (res = new_entry(t, rx->channel, pan, m, now_ms, &i)) != I154_DD_NEW) {
+        return res;
+    }
     i154_dedupe_entry_t *e      = &t->e[i];
     i154_frame_sum_t     before = e->sum;
     e->last_ms                  = now_ms;
-    take_frame(e, rssi, lqi, m);
+    e->dirty                    = true;
+    take_frame(e, rx, m);
     if (index) {
         *index = i;
     }
-    if (is_new) {
-        return I154_DD_NEW;
+    if (res == I154_DD_NEW) {
+        return res;
     }
     return summary_changed(&before, &e->sum) ? I154_DD_CHANGED : I154_DD_SEEN;
 }
@@ -614,6 +728,49 @@ int i154_dedupe_count(i154_dedupe_t const *t) {
         n += t->e[i].used;
     }
     return n;
+}
+
+static int pick_due(i154_dedupe_t const *t, uint32_t now_ms, bool flush) {
+    for (int i = 0; i < I154_DEDUPE_SIZE; i++) {
+        if (t->e[i].used && t->e[i].dirty && !t->e[i].ever_sent) {
+            return i;
+        }
+    }
+    for (int i = 0; i < I154_DEDUPE_SIZE; i++) {
+        i154_dedupe_entry_t const *e = &t->e[i];
+        if (e->used && e->dirty && (flush || now_ms - e->sent_ms >= I154_FRAME_MIN_INTERVAL_MS)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int i154_dedupe_next_due(i154_dedupe_t *t, uint32_t now_ms, bool flush) {
+    if (now_ms - t->window_ms >= I154_FRAME_WINDOW_MS) {
+        t->window_ms   = now_ms;
+        t->window_used = 0;
+    }
+    if (!flush && t->window_used >= I154_FRAME_BUDGET) {
+        return -1;
+    }
+    int i = pick_due(t, now_ms, flush);
+    if (i < 0) {
+        return -1;
+    }
+    i154_dedupe_entry_t *e = &t->e[i];
+    e->dirty               = false;
+    e->ever_sent           = true;
+    e->sent_ms             = now_ms;
+    if (t->window_used < UINT8_MAX) {
+        t->window_used++;
+    }
+    return i;
+}
+
+void i154_dedupe_mark(i154_dedupe_t *t, int index) {
+    if (index >= 0 && index < I154_DEDUPE_SIZE && t->e[index].used) {
+        t->e[index].dirty = true; // retried after the per-network interval
+    }
 }
 
 // ---- capability probe ----
@@ -639,17 +796,18 @@ bool i154_probe_poll(i154_probe_t *p, uint32_t now_ms) {
     return true;
 }
 
+// The CAPS prefix is frozen across versions, so it is read whatever the version byte says
 void i154_probe_on_msg(i154_probe_t *p, uint8_t const *buf, size_t len) {
-    if (p->state != I154_PROBE_PENDING || len < HDR_LEN) {
-        return;
-    }
-    if (buf[0] != I154_PROTO_VERSION) {
-        p->state = buf[0] < I154_PROTO_VERSION ? I154_PROBE_C6_TOO_OLD : I154_PROBE_C6_NEWER;
+    bool listening = p->state == I154_PROBE_PENDING || p->state == I154_PROBE_C6_TOO_OLD; // a late CAPS counts
+    if (!listening || len < CAPS_LEN || buf[1] != I154_MSG_CAPS) {
         return;
     }
     i154_msg_t msg;
-    if (i154_decode(buf, len, &msg) == I154_DEC_OK && msg.type == I154_MSG_CAPS) {
-        p->caps  = msg.u.caps;
+    dec_caps(buf + HDR_LEN, &msg);
+    p->caps = msg.u.caps;
+    if (buf[0] == I154_PROTO_VERSION) {
         p->state = I154_PROBE_OK;
+    } else {
+        p->state = buf[0] > I154_PROTO_VERSION ? I154_PROBE_C6_NEWER : I154_PROBE_C6_TOO_OLD;
     }
 }
