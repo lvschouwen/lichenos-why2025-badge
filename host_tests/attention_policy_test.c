@@ -1,8 +1,11 @@
 // Host test: keyboard light pulse decision, pattern and flashlight levels (#164)
 #include "attention_policy.h"
 #include "backlight_level.h"
+#include "lichen_sys_display.h"
 
 #include <stdio.h>
+
+_Static_assert(LICHEN_SYS_DISPLAY_MIN == BACKLIGHT_DISPLAY_MIN, "the gate's screen minimum follows board's");
 
 static int failures;
 

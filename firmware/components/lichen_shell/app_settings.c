@@ -5,8 +5,7 @@
 #include "app_icons.h"
 #include "screen_ids.h"
 #include "attention_policy.h"
-#include "backlight.h"
-#include "backlight_level.h"
+#include "lichen_sys_display.h"
 #include "home_layout.h"
 #include "idle_policy.h"
 #include "lichen_clock.h"
@@ -96,7 +95,7 @@ static uint8_t     level[2]; // screen, keyboard
 static uint8_t     layout_at_open; // home is rebuilt on leaving only when the layout really differs from this (#128)
 
 static void save_levels(void) {
-    backlight_set_saved(level[0], level[1]);
+    lichen_sys_display_set_saved(level[0], level[1]);
 }
 
 static void save_due(lv_timer_t *timer) {
@@ -107,7 +106,7 @@ static void save_due(lv_timer_t *timer) {
 
 static void on_level(int value, void *arg) {
     level[(intptr_t)arg] = (uint8_t)value;
-    backlight_set(level[0], level[1]);
+    lichen_sys_display_set(level[0], level[1]);
     if (save_timer) {
         lv_timer_reset(save_timer);
     } else {
@@ -262,8 +261,8 @@ static void on_display_delete(lv_event_t *e) {
 static lv_obj_t *build_display(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Display");
-    backlight_get(&level[0], &level[1]);
-    menu_add_slider(menu, "Screen", BACKLIGHT_DISPLAY_MIN, 100, level[0], on_level, (void *)(intptr_t)0);
+    lichen_sys_display_get(&level[0], &level[1]);
+    menu_add_slider(menu, "Screen", LICHEN_SYS_DISPLAY_MIN, 100, level[0], on_level, (void *)(intptr_t)0);
     menu_add_slider(menu, "Keyboard", 0, 100, level[1], on_level, (void *)(intptr_t)1);
     if (shell_sources.c6_up && !shell_sources.c6_up()) {
         menu_note(menu, "Brightness can't change right now: the radio chip is not answering. Restart the badge if it "

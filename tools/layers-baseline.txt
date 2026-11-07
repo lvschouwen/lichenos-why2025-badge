@@ -28,7 +28,7 @@ B	lichen_boot -> lichen_api	1
 B	lichen_clock -> lichen_api	1
 B	lichen_haptics -> lichen_notify	1
 B	lichen_led -> lichen_notify	2
-B	lichen_shell -> board	15
+B	lichen_shell -> board	6
 B	lichen_shell -> crash	2
 B	lichen_shell -> lichen_boot	6
 B	lichen_shell -> lichen_clock	10
@@ -45,14 +45,6 @@ C	lichen_haptics:lichen_notify_set_feedback	1
 C	lichen_led:lichen_notify_dnd	1
 C	lichen_led:lichen_notify_generation	1
 C	lichen_led:lichen_notify_unread	1
-C	lichen_shell:backlight_get	2
-C	lichen_shell:backlight_idle	1
-C	lichen_shell:backlight_resume	2
-C	lichen_shell:backlight_set	2
-C	lichen_shell:backlight_set_saved	1
-C	lichen_shell:backlight_temporary	1
-C	lichen_shell:backlight_temporary_keyboard	1
-C	lichen_shell:backlight_user_generation	1
 C	lichen_shell:boot_overall_pct	1
 C	lichen_shell:boot_progress_label	1
 C	lichen_shell:boot_progress_view	1

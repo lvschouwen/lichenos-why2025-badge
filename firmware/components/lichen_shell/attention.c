@@ -3,8 +3,7 @@
 // drives hardware. The pulse hooks the toast that comes with feedback (notify_ui.c), so do-not-disturb, LN_SILENT and
 // the per-source rate are already honoured. Decisions are attention_policy.c (host-tested).
 #include "attention_policy.h"
-#include "backlight.h"
-#include "backlight_level.h"
+#include "lichen_sys_display.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "fw_console.h"
@@ -52,9 +51,9 @@ static void pulse_end(void) {
         return; // the flashlight owns the levels now
     }
     if (screen_idle_lit()) {
-        backlight_resume(); // exactly the person's levels
+        lichen_sys_display_resume(); // exactly the person's levels
     } else {
-        backlight_temporary_keyboard(0); // the screen dimmed meanwhile: the dim stage has no keyboard light, its display level stays
+        lichen_sys_display_temporary_keyboard(0); // the screen dimmed meanwhile: the dim stage has no keyboard light, its display level stays
     }
 }
 
@@ -64,7 +63,7 @@ static void pulse_tick(lv_timer_t *timer) {
     if (level < 0 || flashlight_active() || hot() || !screen_idle_lit()) {
         pulse_end();
     } else {
-        backlight_temporary_keyboard((uint8_t)level);
+        lichen_sys_display_temporary_keyboard((uint8_t)level);
     }
 }
 
@@ -82,7 +81,7 @@ void attention_on_toast(uint32_t id, uint8_t level) {
     pulse_start = lv_tick_get();
     pulse_timer = lv_timer_create(pulse_tick, PULSE_TICK_MS, NULL);
     if (pulse_timer) {
-        backlight_temporary_keyboard((uint8_t)attn_keyboard_at(0));
+        lichen_sys_display_temporary_keyboard((uint8_t)attn_keyboard_at(0));
     }
 }
 
@@ -92,7 +91,7 @@ static lv_timer_t *flash_timer;
 
 static void flash_apply(void) {
     attn_levels_t l = attn_flash_levels(hot());
-    backlight_temporary(l.display, l.keyboard);
+    lichen_sys_display_temporary(l.display, l.keyboard);
 }
 
 static void flash_tick(lv_timer_t *timer) {
@@ -112,7 +111,7 @@ static void on_flash_delete(lv_event_t *e) {
         flash_timer = NULL;
     }
     atomic_store(&flash_on, false);
-    backlight_resume(); // the person's levels, as they were
+    lichen_sys_display_resume(); // the person's levels, as they were
 }
 
 static lv_obj_t *build_flashlight(void) {

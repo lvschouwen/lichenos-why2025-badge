@@ -3,6 +3,7 @@
  */
 
 #include "backlight.h"
+#include "lichen_sys_power.h"
 #include "board_i2c.h"
 #include "boot_order.h"
 #include "boot_progress.h"
@@ -217,7 +218,7 @@ static void power_finish(bool power_off) {
     }
     system_restart_note("power off");
     haptics_stop();
-    backlight_power_off();
+    lichen_sys_power_screen_off();
     c6link_hold_in_reset();
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
     ESP_LOGI(TAG, "power off: deep sleep, no wake source");

@@ -186,7 +186,7 @@ add_executable(attention_policy_test
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/attention_policy.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/backlight_level.c
 )
-target_include_directories(attention_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board)
+target_include_directories(attention_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(attention_policy_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME attention_policy_test COMMAND attention_policy_test)
 

@@ -5,8 +5,7 @@
 // LVGL timer applies the level, so the inhibits (update, first-run setup, Bench) are read on the task that owns them.
 // The clock screensaver takes the dim stage and the pocket lock engages with it or the dark screen (#75,
 // screen_saver.c); a key that finds the saver up is swallowed like one that finds the screen off.
-#include "backlight.h"
-#include "backlight_level.h"
+#include "lichen_sys_display.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -39,7 +38,7 @@ static bool         inhibited;
 static bool         started;
 
 static idle_level_t applied = IDLE_BRIGHT; // LVGL task: what the backlight was last set to
-static uint32_t     seen_gen;              // LVGL task: backlight_user_generation() at the last tick
+static uint32_t     seen_gen;              // LVGL task: lichen_sys_display_user_generation() at the last tick
 
 static int64_t now_us(void) {
     return esp_timer_get_time();
@@ -79,11 +78,11 @@ void screen_idle_reload(void) {
 
 static void apply(idle_level_t level) {
     if (level == IDLE_OFF) {
-        backlight_idle(0, 0);
+        lichen_sys_display_idle(0, 0);
     } else if (level == IDLE_DIM) {
-        backlight_idle(BACKLIGHT_DISPLAY_MIN, 0);
+        lichen_sys_display_idle(LICHEN_SYS_DISPLAY_MIN, 0);
     } else {
-        backlight_resume(); // the live levels, a slider not yet saved included
+        lichen_sys_display_resume(); // the live levels, a slider not yet saved included
     }
     ESP_LOGI(TAG, "backlight %s", idle_level_name(level));
     applied = level;
@@ -109,7 +108,7 @@ static void tick(lv_timer_t *timer) {
     bool     busy      = must_show || bench_running() || flashlight_active() || ui_remote_locked();
     bool     setup     = setup_running();
     bool     home      = shell_home_shown(); // no cover over the boot screen or home's fade-in
-    uint32_t gen   = backlight_user_generation();
+    uint32_t gen   = lichen_sys_display_user_generation();
     bool     touch = gen != seen_gen; // fw bl or a slider lit the screen: that is activity too
     seen_gen       = gen;
     portENTER_CRITICAL(&lock);
@@ -198,7 +197,7 @@ void screen_idle_start(void) {
         return;
     }
     screen_idle_reload();
-    seen_gen = backlight_user_generation();
+    seen_gen = lichen_sys_display_user_generation();
     if (!lv_timer_create(tick, TICK_MS, NULL)) {
         ESP_LOGE(TAG, "no timer: no screen timeout");
         return;

@@ -1,6 +1,6 @@
 #include "attention_policy.h"
 
-#include "backlight_level.h"
+#include "lichen_sys_display.h"
 
 #include <string.h>
 
@@ -35,6 +35,6 @@ int attn_keyboard_at(uint32_t elapsed_ms) {
 }
 
 attn_levels_t attn_flash_levels(bool hot) {
-    attn_levels_t l = hot ? (attn_levels_t){BACKLIGHT_DISPLAY_MIN, 0} : (attn_levels_t){100, 100};
+    attn_levels_t l = hot ? (attn_levels_t){LICHEN_SYS_DISPLAY_MIN, 0} : (attn_levels_t){100, 100};
     return l;
 }

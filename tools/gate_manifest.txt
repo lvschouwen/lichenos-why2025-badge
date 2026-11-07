@@ -114,6 +114,15 @@ lichen_sensors_set_periods	SENSORS	unspecified	lichen_sensors.h
 lichen_sensors_start	SENSORS	unspecified	lichen_sensors.h
 lichen_sensors_stop	SENSORS	unspecified	lichen_sensors.h
 lichen_station_clock	-	lvgl	lichen_ui.h
+lichen_sys_display_get	SYSTEM	any	lichen_sys_display.h
+lichen_sys_display_idle	SYSTEM	any	lichen_sys_display.h
+lichen_sys_display_resume	SYSTEM	any	lichen_sys_display.h
+lichen_sys_display_set	SYSTEM	any	lichen_sys_display.h
+lichen_sys_display_set_saved	SYSTEM	any	lichen_sys_display.h
+lichen_sys_display_temporary	SYSTEM	any	lichen_sys_display.h
+lichen_sys_display_temporary_keyboard	SYSTEM	any	lichen_sys_display.h
+lichen_sys_display_user_generation	SYSTEM	any	lichen_sys_display.h
+lichen_sys_power_screen_off	SYSTEM	unspecified	lichen_sys_power.h
 lichen_sys_ui_call	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lock	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_cmd	SYSTEM	any	lichen_sys_ui.h

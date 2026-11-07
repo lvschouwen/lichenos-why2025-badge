@@ -13,8 +13,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "backlight.h"
-#include "backlight_level.h"
+#include "lichen_sys_display.h"
 #include "fw_console.h"
 #include "lichen_notify.h"
 #include "lichen_radio.h"
@@ -100,11 +99,11 @@ static void shed_load(bool on) {
     shed = on;
     if (on) {
         settings_set_u8(SHED_KEY, 1);
-        backlight_get(&saved[0], &saved[1]);
-        backlight_set(BACKLIGHT_DISPLAY_MIN, 0);
+        lichen_sys_display_get(&saved[0], &saved[1]);
+        lichen_sys_display_set(LICHEN_SYS_DISPLAY_MIN, 0);
     } else {
         settings_erase(SHED_KEY);
-        backlight_set(saved[0], saved[1]);
+        lichen_sys_display_set(saved[0], saved[1]);
     }
     for (int k = 0; k < 2; k++) {
         if (on) {
