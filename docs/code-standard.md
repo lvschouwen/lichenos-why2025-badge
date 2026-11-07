@@ -50,6 +50,7 @@ because `firmware/CMakeLists.txt` turns `-fstack-usage` on for every directory u
 - Stack frames: `-fstack-usage` writes `<file>.su` next to each object (`firmware/build/esp-idf/<component>/CMakeFiles/`,
   `c6/build/...`). It does not change the generated code. A line is `file:line:col:function<TAB>bytes<TAB>static|dynamic|bounded`.
   Frames are per function; the real use of a task is the deepest call chain, which `fw mem` shows as `stack_free` on the badge.
+  Only `.su` files whose object is an output in that build dir's `compile_commands.json` count: ninja leaves the `.obj`/`.su` of a moved or dropped source behind (#239).
 - Image and archives: `idf.py -C firmware size` (totals), `idf.py -C firmware size-components` (per component),
   `python -m esp_idf_size --archives --format csv firmware/build/badge_fw.map` (what the gate reads). Slot size: the
   `ota_0` row of `firmware/partitions.csv`.

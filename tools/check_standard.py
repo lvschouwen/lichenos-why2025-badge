@@ -15,6 +15,7 @@ pool of the whole link, not one archive's: they are taken out of the archive num
 Nothing passes silently: a tool that is missing, fails, or measures less than was asked for fails the gate."""
 import csv
 import io
+import json
 import os
 import re
 import shutil
@@ -196,17 +197,41 @@ def measure_lizard(root, files, lizard=("lizard",)):
     return out, problems
 
 
+def live_objects(bdir):
+    """Set of object paths the build dir's compile_commands.json lists, or None when it is missing or unreadable.
+    ninja never deletes the .obj/.su of a source that left the build (moved or dropped from SRCS), so the files on
+    disk say nothing about the current build; the compile database is rewritten at every cmake run and does."""
+    try:
+        with open(os.path.join(bdir, "compile_commands.json")) as f:
+            db = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return {os.path.realpath(os.path.join(e.get("directory", bdir), e["output"])) for e in db if e.get("output")}
+
+
 def measure_stack(root, build_dirs):
-    """Returns (measured, problems): every build dir must hold .su files, else -fstack-usage is not active."""
+    """Returns (measured, problems): every build dir must hold current .su files, else -fstack-usage is not active.
+    A .su counts only when its object (`x.c.su` -> `x.c.obj`) is an output of the current compile database."""
     out, problems = {}, []
     for bdir in build_dirs:
-        found = 0
+        found, stale = 0, 0
+        live = live_objects(bdir)
+        if live is None:
+            problems.append("no readable compile_commands.json in %s: cannot tell current .su files from stale ones" % bdir)
+            continue
         for dirpath, _dirs, names in os.walk(bdir):
             for name in names:
-                if name.endswith(".su"):
-                    found += 1
-                    with open(os.path.join(dirpath, name), errors="replace") as f:
-                        merge_max(out, parse_stack_usage(f.read(), root, bdir))
+                if not name.endswith(".su"):
+                    continue
+                path = os.path.join(dirpath, name)
+                if os.path.realpath(path[: -len(".su")] + ".obj") not in live:
+                    stale += 1
+                    continue
+                found += 1
+                with open(path, errors="replace") as f:
+                    merge_max(out, parse_stack_usage(f.read(), root, bdir))
+        if stale:
+            print("standard: ignored %d stale .su files under %s (source no longer built)" % (stale, bdir), file=sys.stderr)
         if not found:
             problems.append("no .su files under %s: build it first, and -fstack-usage must be on for the components" % bdir)
     return out, problems

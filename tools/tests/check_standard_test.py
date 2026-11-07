@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Host test of the standard gate's own logic (#202): parsing, ratchet, size deltas. Run with python3 -I."""
+import json
 import os
 import subprocess
 import sys
@@ -187,6 +188,30 @@ class Tooling(unittest.TestCase):
             m, problems = cs.measure_stack(tmp, [tmp])
             self.assertEqual(m, {})
             self.assertEqual(len(problems), 1)
+
+    def test_h3b_stale_su_of_a_source_that_left_the_build_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bdir = os.path.join(tmp, "firmware", "build")
+            d = os.path.join(bdir, "esp-idf", "x", "CMakeFiles", "__idf_x.dir")
+            os.makedirs(d)
+            su = "../components/x/%s.c:1:1:f\t%d\tstatic\n"
+            for name, size in (("live", 100), ("moved", 900)):  # moved.c now lives in another component
+                with open(os.path.join(d, name + ".c.su"), "w") as f:
+                    f.write(su % (name, size))
+                open(os.path.join(d, name + ".c.obj"), "w").close()  # ninja leaves the old .obj behind too
+            with open(os.path.join(bdir, "compile_commands.json"), "w") as f:
+                json.dump([{"directory": bdir, "file": "live.c", "output": os.path.join(d, "live.c.obj")}], f)
+            m, problems = cs.measure_stack(tmp, [bdir])
+            self.assertEqual(problems, [])
+            self.assertEqual(m, {("stack", "firmware/components/x/live.c:f"): 100})
+
+    def test_h3c_missing_compile_database_is_a_problem(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "a.c.su"), "w") as f:
+                f.write("../components/x/a.c:1:1:f\t100\tstatic\n")
+            m, problems = cs.measure_stack(tmp, [tmp])
+            self.assertEqual(m, {})
+            self.assertIn("compile_commands.json", problems[0])
 
     def test_h4_missing_image_is_a_problem(self):
         with tempfile.TemporaryDirectory() as tmp:
