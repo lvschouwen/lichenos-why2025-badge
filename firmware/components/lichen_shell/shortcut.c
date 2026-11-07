@@ -1,20 +1,17 @@
 #include "shortcut.h"
 
-#include "tca8418_keymap.h"
+#include "key_matrix.h"
 
 #include <stddef.h>
 
 shortcut_t shortcut_of_code(uint8_t code) {
-    if (code < 1 || code > sizeof(tca8418_keymap) / sizeof(tca8418_keymap[0])) {
-        return SHORTCUT_NONE;
-    }
-    switch (tca8418_keymap[code - 1]) {
-        case KEY_SCANCODE_SQUARE: return SHORTCUT_HOME;
-        case KEY_SCANCODE_TRIANGLE: return SHORTCUT_MESSAGES;
-        case KEY_SCANCODE_CROSS: return SHORTCUT_SWITCH_APP;
-        case KEY_SCANCODE_CIRCLE: return SHORTCUT_SEARCH;
-        case KEY_SCANCODE_CLOUD: return SHORTCUT_NOTIFICATIONS;
-        case KEY_SCANCODE_DIAMOND: return SHORTCUT_POWER;
+    switch (key_matrix_shape(code)) {
+        case KEY_SHAPE_SQUARE: return SHORTCUT_HOME;
+        case KEY_SHAPE_TRIANGLE: return SHORTCUT_MESSAGES;
+        case KEY_SHAPE_CROSS: return SHORTCUT_SWITCH_APP;
+        case KEY_SHAPE_CIRCLE: return SHORTCUT_SEARCH;
+        case KEY_SHAPE_CLOUD: return SHORTCUT_NOTIFICATIONS;
+        case KEY_SHAPE_DIAMOND: return SHORTCUT_POWER;
         default: return SHORTCUT_NONE;
     }
 }

@@ -19,16 +19,19 @@
 # lichen_sys_mem.c: the heap figures and the diagnostic walk for the shell and main (#228).
 # lichen_sys_storage.c / lichen_sys_update.c: lichen_sys_storage.h (SD card and storage drive), lichen_sys_update.h,
 # lichen_sys_crash.h and lichen_sys_factory.h's request (#227); lichen_sys_pure.c their ESP-free parts (host-tested).
+# lichen_sys_pure_view.c / lichen_sys_view.c (#244): the shell's clock, Wi-Fi, mDNS, boot progress, keyboard-hook and LED
+# calls (lichen_sys_clock.h, _net.h, _boot.h, _keys.h, _led.h) forward to the services it may not include; the pure
+# half (lichen_sys_pure_view_test.c) holds the type asserts.
 # os_bind.c (ESP-free, os_bind_test.c, #245) wires the layers below the gate: settings for lichen_boot, lichen_clock and
 # ota, notify's state and feedback for the LED and the motor.
 idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c"
                             "lichen_crashlog.c" "lichen_legacy.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
-                            "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "os_bind.c"
+                            "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "os_bind.c" "lichen_sys_pure_view.c" "lichen_sys_view.c"
                             "ui_call_queue.c" "ui_lock_owner.c" "ui_lock_hits.c" "ui_lock_check.c"
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES lichen_api freertos esp_hw_support assets fw_console nvs_flash heap storage sdcard
-                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock)
+                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns)
 
 # The debug lock-owner check (#225): LVGL's allocator and lv_inv_area go through ui_lock_check.c
 if(CONFIG_LICHEN_UI_LOCK_CHECK)

@@ -8,7 +8,7 @@
 #include "lichen_sys_display.h"
 #include "home_layout.h"
 #include "idle_policy.h"
-#include "lichen_clock.h"
+#include "lichen_sys_clock.h"
 #include "lichen_app.h"
 #include "lichen_notify.h"
 #include "lichen_radio.h"
@@ -16,15 +16,13 @@
 #include "menu.h"
 #include "lichen_sys_storage.h"
 #include "lichen_sys_update.h"
-#include "mdns_name.h"
-#include "lichen_mdns.h"
+#include "lichen_sys_net.h"
 #include "psram_speed.h"
 #include "saver_station.h"
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "theme.h"
 #include "tz_table.h"
-#include "wifi_list.h"
 #include "shell_ui_ops.h"
 
 #include <stdint.h>
@@ -43,17 +41,17 @@ static void wifi_line(char *out, size_t cap, bool with_prefix) {
     static uint32_t generation;
     bool            up = shell_sources.wifi_up && shell_sources.wifi_up() && lichen_radio_get(RADIO_WIFI);
     // The NVS read only when something changed: the link flipped or the credentials were saved (screen or console)
-    if (!have || up != was_up || generation != wifi_cred_generation()) {
+    if (!have || up != was_up || generation != lichen_sys_wifi_cred_generation()) {
         settings_get_str("wifi_ssid", ssid, sizeof(ssid), "");
         have       = true;
         was_up     = up;
-        generation = wifi_cred_generation();
+        generation = lichen_sys_wifi_cred_generation();
     }
     if (!lichen_radio_get(RADIO_WIFI)) { // the OS switch or airplane mode (#108)
         snprintf(out, cap, with_prefix ? "Wi-Fi: off" : "off");
     } else if (up && ssid[0]) {
         char name[140]; // the name came over the air: no control bytes on a label
-        wifi_ssid_sanitize(ssid, name, sizeof(name));
+        lichen_sys_wifi_ssid_sanitize(ssid, name, sizeof(name));
         snprintf(out, cap, with_prefix ? "Wi-Fi: %s" : "%s", name);
     } else {
         snprintf(out, cap, with_prefix ? "Wi-Fi: not connected" : "not connected");
@@ -354,18 +352,18 @@ static void time_value(char *out, size_t cap) {
     time_t    now = time(NULL);
     struct tm l;
     char      hm[8];
-    if (!clock_is_set() || !localtime_r(&now, &l) || !strftime(hm, sizeof(hm), "%H:%M", &l)) {
+    if (!lichen_sys_clock_is_set() || !localtime_r(&now, &l) || !strftime(hm, sizeof(hm), "%H:%M", &l)) {
         snprintf(out, cap, "not set");
         return;
     }
-    snprintf(out, cap, "%s%s", clock_is_approximate() ? "~" : "", hm);
+    snprintf(out, cap, "%s%s", lichen_sys_clock_is_approximate() ? "~" : "", hm);
 }
 
 // Set date & time's row: the local date and time
 static void now_value(char *out, size_t cap) {
     time_t    now = time(NULL);
     struct tm l;
-    if (!clock_is_set() || !localtime_r(&now, &l) || !strftime(out, cap, "%Y-%m-%d %H:%M", &l)) {
+    if (!lichen_sys_clock_is_set() || !localtime_r(&now, &l) || !strftime(out, cap, "%Y-%m-%d %H:%M", &l)) {
         snprintf(out, cap, "not set");
     }
 }
@@ -444,7 +442,7 @@ static void forget_settings_time(lv_event_t *e) {
 }
 
 static void source_note(char *out, size_t cap) {
-    clock_source_text(out, cap);
+    lichen_sys_clock_source_text(out, cap);
 }
 
 static void open_time_set(void *arg) {
@@ -692,8 +690,8 @@ static void open_settings(lv_obj_t *screen) {
     ota_row = menu_add(menu, "Updates over Wi-Fi", ota_value(), toggle_ota, NULL);
     menu_set_kind(ota_row, MENU_TOGGLE);
     settings_ota_row = live_row(ota_row, false, ota_fill);
-    char net_name[MDNS_NAME_MAX + 8];
-    snprintf(net_name, sizeof(net_name), "%s.local", lichen_mdns_name());
+    char net_name[LICHEN_SYS_MDNS_NAME_MAX + 8];
+    snprintf(net_name, sizeof(net_name), "%s.local", lichen_sys_mdns_name());
     menu_add(menu, "Name on the network", net_name, NULL, NULL); // for badge.sh and the browser (#156)
     char auto_text[16];
     ota_auto_value(auto_text, sizeof(auto_text));

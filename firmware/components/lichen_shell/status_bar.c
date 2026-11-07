@@ -2,7 +2,7 @@
 // trouble label) left, the clock centred (marked when unverified, #64), the unread notifications (#62), Wi-Fi and
 // LoRa right. The unread count, Wi-Fi fan (#58) and LoRa label are polled once a second from the LVGL task (the
 // latter two through shell_sources); the LoRa TX/RX chevrons from the packet counters every 100 ms (#29).
-#include "lichen_clock.h"
+#include "lichen_sys_clock.h"
 #include "lichen_radio.h"
 #include "link_state.h"
 #include "lora_activity.h"
@@ -172,8 +172,8 @@ static void show_clock(void) {
     uint32_t        color   = THEME_DIM;
     time_t          now     = time(NULL);
     struct tm       local;
-    if (clock_is_set() && localtime_r(&now, &local)) {
-        bool approx = clock_is_approximate();
+    if (lichen_sys_clock_is_set() && localtime_r(&now, &local)) {
+        bool approx = lichen_sys_clock_is_approximate();
         strftime(text, sizeof(text), approx ? "~%H:%M" : "%H:%M", &local);
         color = approx ? THEME_AMBER : THEME_TEXT;
     }

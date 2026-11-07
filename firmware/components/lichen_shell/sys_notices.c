@@ -8,7 +8,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "lichen_clock.h"
+#include "lichen_sys_clock.h"
 #include "lichen_notify.h"
 #include "lichen_task.h"
 #include "lichen_sensors.h"
@@ -74,9 +74,9 @@ static void read_snapshot(sysn_snapshot_t *s, lichen_sd_info_t *sd, unsigned pol
     s->crash_recovered        = lichen_sys_crash_recovered();
     s->storage_unmounted      = !lichen_sys_storage_mounted();
     s->psram_bad              = psram_boot_bad(NULL, 0);
-    clock_sync_info_t clock   = clock_sync_info();
+    lichen_clock_sync_t clock   = lichen_sys_clock_sync_info();
     s->clock_refused          = clock.refused;
-    s->clock_recovered        = clock.last_verdict == CLOCK_RECOVERED;
+    s->clock_recovered        = clock.last_verdict == LICHEN_CLOCK_RECOVERED;
     s->update                 = (int)update_screen_boot_result(NULL, 0);
     char reason[4];
     s->c6_restarts = shell_sources.c6_restarts ? shell_sources.c6_restarts(reason, sizeof(reason)) : 0;

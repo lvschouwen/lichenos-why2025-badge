@@ -7,7 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "fw_console.h"
 #include "key_matrix.h"
-#include "keyboard.h"
+#include "lichen_sys_keys.h"
 #include "lichen_app.h"
 #include "nav.h"
 #include "raw_keys.h"
@@ -82,7 +82,7 @@ static void tick(lv_timer_t *t) {
 }
 
 void ui_remote_start(void) {
-    keyboard_set_gate_hook(gate, gate_reset);
+    lichen_sys_keys_set_gate(gate, gate_reset);
     console_set_activity(console_activity);
 }
 

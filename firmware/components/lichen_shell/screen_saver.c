@@ -11,7 +11,7 @@
 #include "fonts.h"
 #include "fw_console.h"
 #include "idle_policy.h"
-#include "lichen_clock.h"
+#include "lichen_sys_clock.h"
 #include "lichen_notify.h"
 #include "lichen_ui.h"
 #include "lock_combo.h"
@@ -125,7 +125,7 @@ static void clock_update(big_clock_t *c) {
     uint32_t  color = THEME_DIM;
     if (saver_date_text(date, sizeof(date)) && localtime_r(&now, &local)) {
         snprintf(digits, sizeof(digits), "%02d%02d", local.tm_hour % 100, local.tm_min % 100);
-        color = clock_is_approximate() ? THEME_AMBER : THEME_TEAL;
+        color = lichen_sys_clock_is_approximate() ? THEME_AMBER : THEME_TEAL;
     }
     char key[sizeof(c->shown)];
     snprintf(key, sizeof(key), "%s%c", digits, color == THEME_TEAL ? 't' : color == THEME_AMBER ? 'a' : 'd');
@@ -252,7 +252,7 @@ void screen_saver_reload(void) {
 
 // Pocket lock
 
-static void on_lock_key(key_raw_event_t const *ev, void *arg) {
+static void on_lock_key(lichen_sys_key_event_t const *ev, void *arg) {
     (void)arg;
     lock_combo_event(&combo, ev->code, ev->pressed, lv_tick_get());
 }

@@ -577,7 +577,7 @@ void shell_attach_keys(lv_indev_t *indev) {
 // the Keyboard Test was open: anywhere else the codes could spell a password. Not persisted.
 static bool log_raw;
 
-static void on_raw_key(key_raw_event_t const *ev, void *arg) {
+static void on_raw_key(lichen_sys_key_event_t const *ev, void *arg) {
     (void)arg;
     if (!ev->test_open) {
         return;

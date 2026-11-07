@@ -125,6 +125,12 @@ int main(void) {
     CHECK(key_matrix_color(0x06) == 0x4C9AFF && key_matrix_color(0x07) == 0xA371F7);
     CHECK(key_matrix_color(0x01) == 0 && key_matrix_color(0x20) == 0 && key_matrix_color(0x47) == 0);
 
+    CHECK(key_matrix_shape(0x02) == KEY_SHAPE_SQUARE && key_matrix_shape(0x03) == KEY_SHAPE_TRIANGLE);
+    CHECK(key_matrix_shape(0x04) == KEY_SHAPE_CROSS && key_matrix_shape(0x05) == KEY_SHAPE_CIRCLE);
+    CHECK(key_matrix_shape(0x06) == KEY_SHAPE_CLOUD && key_matrix_shape(0x07) == KEY_SHAPE_DIAMOND);
+    CHECK(key_matrix_shape(0x01) == KEY_SHAPE_NONE && key_matrix_shape(0x20) == KEY_SHAPE_NONE &&
+          key_matrix_shape(0) == KEY_SHAPE_NONE && key_matrix_shape(0x51) == KEY_SHAPE_NONE);
+
     lichen_raw_key_t ev = {.code = 0x1f, .pressed = true, .shift = false};
     char            text[80];
     key_matrix_format(text, sizeof(text), &ev);

@@ -7,7 +7,7 @@
 #include "fonts.h"
 #include "lichen_app.h"
 #include "lichen_badge.h"
-#include "lichen_clock.h"
+#include "lichen_sys_clock.h"
 #include "notify_os.h"
 #include "notify_view.h"
 #include "shell_parts.h"
@@ -147,7 +147,7 @@ static lv_obj_t *add_label(lv_obj_t *parent, uint32_t color) {
 
 // Made before the status bar and any dialog: as the first child of the top layer it stays under both
 void notify_ui_start(void) {
-    lichen_notify_set_clock(clock_is_set);
+    lichen_notify_set_clock(lichen_sys_clock_is_set);
     s_toast = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(s_toast);
     lv_obj_set_size(s_toast, TOAST_W, LV_SIZE_CONTENT);

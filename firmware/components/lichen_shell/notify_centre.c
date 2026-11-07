@@ -7,7 +7,7 @@
 #include "screen_ids.h"
 #include "esp_log.h"
 #include "fonts.h"
-#include "led.h"
+#include "lichen_sys_led.h"
 #include "lichen_haptics.h"
 #include "lichen_app.h"
 #include "lichen_ui.h"
@@ -518,8 +518,8 @@ static void toggle_dnd(void *arg) {
 
 static void toggle_led(void *arg) {
     (void)arg;
-    led_set_enabled(!led_enabled());
-    menu_set_on(s_s.led_row, led_enabled());
+    lichen_sys_led_set_enabled(!lichen_sys_led_enabled());
+    menu_set_on(s_s.led_row, lichen_sys_led_enabled());
 }
 
 static void toggle_vib(void *arg) {
@@ -596,7 +596,7 @@ static lv_obj_t *build_settings(void) {
     menu_set_kind(s_s.led_row, MENU_TOGGLE);
     menu_set_kind(s_s.vib_row, MENU_TOGGLE);
     menu_set_on(s_s.dnd_row, lichen_notify_dnd());
-    menu_set_on(s_s.led_row, led_enabled());
+    menu_set_on(s_s.led_row, lichen_sys_led_enabled());
     menu_set_on(s_s.vib_row, lichen_haptics_enabled());
     s_s.vib_str_row = menu_add(menu, "Vibration strength", VIB_STRENGTH[lichen_haptics_strength()], cycle_vib_strength,
                                NULL);

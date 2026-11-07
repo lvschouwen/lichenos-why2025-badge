@@ -37,6 +37,9 @@ size_t key_layout(key_layout_t const **keys);
 int key_layout_index(uint8_t code);
 // Printed colour (0xRRGGBB) of the six shape keys, 0 for every other key
 uint32_t key_matrix_color(uint8_t code);
+// The six shape keys (#244: the shell's shortcuts), NONE for every other key. Pure, any task.
+typedef enum { KEY_SHAPE_NONE, KEY_SHAPE_SQUARE, KEY_SHAPE_TRIANGLE, KEY_SHAPE_CROSS, KEY_SHAPE_CIRCLE, KEY_SHAPE_CLOUD, KEY_SHAPE_DIAMOND } key_shape_t;
+key_shape_t key_matrix_shape(uint8_t code);
 // Up to 4 characters to draw on a key ("Esc", "A", "Spc"); unmapped codes show their hex code
 char const *key_matrix_label(uint8_t code, char *buf, size_t cap);
 // The BadgeVMS scancode name ("ESCAPE", "A", "SQUARE", "UNKNOWN")

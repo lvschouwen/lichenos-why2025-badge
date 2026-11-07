@@ -11,7 +11,7 @@
 #include "freertos/FreeRTOS.h"
 #include "fw_console.h"
 #include "idle_policy.h"
-#include "keyboard.h"
+#include "lichen_sys_keys.h"
 #include "lvgl.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -205,5 +205,5 @@ void screen_idle_start(void) {
     portENTER_CRITICAL(&lock);
     started = true;
     portEXIT_CRITICAL(&lock);
-    keyboard_set_wake_hook(screen_idle_key); // presses only: the keyboard drops the release of a swallowed one
+    lichen_sys_keys_set_wake(screen_idle_key); // presses only: the keyboard drops the release of a swallowed one
 }

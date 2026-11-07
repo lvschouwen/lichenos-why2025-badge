@@ -5,7 +5,7 @@
 #include "esp_app_desc.h"
 #include "lichen_sys_mem.h"
 #include "esp_timer.h"
-#include "lichen_clock.h"
+#include "lichen_sys_clock.h"
 #include "lichen_ui.h"
 #include "lichen_app.h"
 #include "os_name.h"
@@ -97,10 +97,10 @@ static void refresh(lv_timer_t *timer) {
 
     time_t    now = time(NULL);
     struct tm local;
-    if (clock_is_set() && localtime_r(&now, &local)) {
+    if (lichen_sys_clock_is_set() && localtime_r(&now, &local)) {
         size_t n = strftime(text, sizeof(text), "%Y-%m-%d %H:%M", &local);
         char   src[48];
-        clock_source_text(src, sizeof(src)); // where the time came from (#83)
+        lichen_sys_clock_source_text(src, sizeof(src)); // where the time came from (#83)
         snprintf(text + n, sizeof(text) - n, ", %s", src);
     } else {
         strlcpy(text, "not set", sizeof(text));

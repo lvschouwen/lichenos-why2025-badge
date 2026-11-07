@@ -14,7 +14,7 @@
 #include "lichen_mem.h"
 #include "esp_log.h"
 #include "fonts.h"
-#include "lichen_clock.h"
+#include "lichen_sys_clock.h"
 #include "lichen_ui.h"
 #include "theme.h"
 #include "shell_ui_ops.h"
@@ -137,7 +137,7 @@ static void invalidate_second(station_view_t *v, int32_t a) {
 
 static hands_t hands_now(struct timeval const *tv) {
     struct tm local;
-    if (!clock_is_set() || !localtime_r(&tv->tv_sec, &local)) {
+    if (!lichen_sys_clock_is_set() || !localtime_r(&tv->tv_sec, &local)) {
         return (hands_t){0};
     }
     // tm_sec 60 (a leap second) counts as the pause at 12
@@ -150,14 +150,14 @@ static hands_t hands_now(struct timeval const *tv) {
 bool saver_date_text(char *out, size_t cap) {
     time_t    now = time(NULL);
     struct tm local;
-    if (!clock_is_set() || !localtime_r(&now, &local)) {
+    if (!lichen_sys_clock_is_set() || !localtime_r(&now, &local)) {
         snprintf(out, cap, "Clock not set");
         return false;
     }
     char day[16], month[16];
     strftime(day, sizeof(day), "%A", &local);
     strftime(month, sizeof(month), "%B", &local);
-    snprintf(out, cap, "%s%s %d %s", clock_is_approximate() ? "~ " : "", day, local.tm_mday, month);
+    snprintf(out, cap, "%s%s %d %s", lichen_sys_clock_is_approximate() ? "~ " : "", day, local.tm_mday, month);
     return true;
 }
 

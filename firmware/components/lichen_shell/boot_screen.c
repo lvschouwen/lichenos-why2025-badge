@@ -3,13 +3,11 @@
 // start-up step, the current step large, the last log lines, uptime) and a failed step switches to them by itself.
 // The keypad is attached after the C6 comes up (main.c), so the key works from then on, not during the first steps.
 // Shows nothing app-specific (no MeshCore version or node id): the OS speaks only for itself.
-// Reads boot_progress_view() only. Moves on to home by itself 2 s after the last step ends (5 s after a failure).
-#include "boot_progress.h"
-#include "boot_text.h"
+// Reads lichen_sys_boot_view() only. Moves on to home by itself 2 s after the last step ends (5 s after a failure).
+#include "lichen_sys_boot.h"
 #include "lichen_sys_crash.h"
 #include "esp_app_desc.h"
 #include "esp_timer.h"
-#include "log_tap.h"
 #include "logo.h"
 #include "os_name.h"
 #include "lvgl_private.h" // lv_indev_t.long_pr_sent: a key repeat, not a press (no public getter in LVGL 9)
@@ -27,14 +25,14 @@
 #define SHOW_LOG_LINES 5
 
 // The mockup's short names, so eight fit under the bar at a readable size
-static char const *const short_labels[BOOT_STEP_COUNT] = {"stor", "disp", "psram", "c6", "wifi", "clock", "lora", "apps"};
-static char const *const doing[BOOT_STEP_COUNT]        = {
+static char const *const short_labels[LICHEN_BOOT_STEP_COUNT] = {"stor", "disp", "psram", "c6", "wifi", "clock", "lora", "apps"};
+static char const *const doing[LICHEN_BOOT_STEP_COUNT]        = {
     "mounting storage", "starting the display", "checking PSRAM", "checking the C6",
     "joining Wi-Fi",    "setting the clock",    "starting LoRa",  "starting apps",
 };
 
-static lv_obj_t  *segments[BOOT_STEP_COUNT];
-static lv_obj_t  *seg_labels[BOOT_STEP_COUNT];
+static lv_obj_t  *segments[LICHEN_BOOT_STEP_COUNT];
+static lv_obj_t  *seg_labels[LICHEN_BOOT_STEP_COUNT];
 static lv_obj_t  *step_text;
 static lv_obj_t  *step_pct;
 static lv_obj_t  *failures;
@@ -54,7 +52,7 @@ static bool       generation_shown;
 static uint32_t   apps_ended_at; // lv_tick of the first refresh that saw the apps step over, 0 before
 static bool       leaving;
 static bool       failed;
-static boot_view_t view; // the LVGL task's copy
+static lichen_boot_view_t view; // the LVGL task's copy
 
 static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color, lv_font_t const *font) {
     lv_obj_t *label = lv_label_create(parent);
@@ -82,17 +80,17 @@ static void set_text(lv_obj_t *label, char const *text) {
     }
 }
 
-static bool ended(step_state_t state) {
-    return state == STEP_DONE || state == STEP_FAILED || state == STEP_SKIPPED;
+static bool ended(lichen_step_state_t state) {
+    return state == LICHEN_STEP_DONE || state == LICHEN_STEP_FAILED || state == LICHEN_STEP_SKIPPED;
 }
 
 // The step to name in large text: the one begun last while it runs, else any other still running
 static int running_step(void) {
-    if (view.state[view.current] == STEP_ACTIVE) {
+    if (view.state[view.current] == LICHEN_STEP_ACTIVE) {
         return view.current;
     }
-    for (int i = 0; i < BOOT_STEP_COUNT; i++) {
-        if (view.state[i] == STEP_ACTIVE) {
+    for (int i = 0; i < LICHEN_BOOT_STEP_COUNT; i++) {
+        if (view.state[i] == LICHEN_STEP_ACTIVE) {
             return i;
         }
     }
@@ -102,7 +100,7 @@ static int running_step(void) {
 static void show_steps(void) {
     static uint32_t const seg_color[]   = {THEME_TRACK, THEME_AMBER, THEME_AMBER, THEME_RED, THEME_FAINT};
     static uint32_t const label_color[] = {THEME_DIM, THEME_AMBER, THEME_DIM, THEME_RED, THEME_DIM};
-    for (int i = 0; i < BOOT_STEP_COUNT; i++) {
+    for (int i = 0; i < LICHEN_BOOT_STEP_COUNT; i++) {
         lv_obj_set_style_bg_color(segments[i], lv_color_hex(seg_color[view.state[i]]), 0);
         lv_obj_set_style_bg_opa(segments[i], LV_OPA_COVER, 0);
         lv_obj_set_style_text_color(seg_labels[i], lv_color_hex(label_color[view.state[i]]), 0);
@@ -110,35 +108,35 @@ static void show_steps(void) {
 
     int running = running_step();
     if (running >= 0) {
-        set_text(step_text, running == BOOT_C6 && view.pct >= 0 ? "flashing the C6" : doing[running]);
+        set_text(step_text, running == LICHEN_BOOT_C6 && view.pct >= 0 ? "flashing the C6" : doing[running]);
         lv_obj_set_style_text_color(step_text, lv_color_hex(THEME_TEXT), 0);
         char pct[16] = "";
         if (running == (int)view.current && view.pct >= 0) {
             snprintf(pct, sizeof(pct), "%d%%", view.pct); // the C6 counts 0-100 once per image (3 images)
         }
         set_text(step_pct, pct);
-    } else if (ended(view.state[BOOT_APPS])) {
+    } else if (ended(view.state[LICHEN_BOOT_APPS])) {
         set_text(step_text, "ready");
         lv_obj_set_style_text_color(step_text, lv_color_hex(THEME_TEAL), 0);
         set_text(step_pct, "");
     }
 
     // The calm view: the bar and one sentence
-    lv_bar_set_value(calm_bar, boot_overall_pct(&view), LV_ANIM_OFF);
+    lv_bar_set_value(calm_bar, lichen_sys_boot_overall_pct(&view), LV_ANIM_OFF);
     if (running >= 0) {
         char buf[48];
-        set_text(calm_text, boot_step_sentence((boot_step_t)running, running == (int)view.current ? view.pct : -1, buf, sizeof(buf)));
-    } else if (ended(view.state[BOOT_APPS])) {
+        set_text(calm_text, lichen_sys_boot_sentence((lichen_boot_step_t)running, running == (int)view.current ? view.pct : -1, buf, sizeof(buf)));
+    } else if (ended(view.state[LICHEN_BOOT_APPS])) {
         set_text(calm_text, "Ready");
     }
 
     // A failed step keeps its reason on screen (boot carries on where it can)
-    char text[BOOT_STEP_COUNT * (BOOT_REASON_LEN + 16)] = "";
+    char text[LICHEN_BOOT_STEP_COUNT * (LICHEN_BOOT_REASON_LEN + 16)] = "";
     size_t used = 0;
-    for (int i = 0; i < BOOT_STEP_COUNT && used < sizeof(text); i++) {
-        if (view.state[i] == STEP_FAILED) {
+    for (int i = 0; i < LICHEN_BOOT_STEP_COUNT && used < sizeof(text); i++) {
+        if (view.state[i] == LICHEN_STEP_FAILED) {
             used += snprintf(text + used, sizeof(text) - used, "%s%s failed: %s", used ? "\n" : "",
-                             boot_progress_label((boot_step_t)i), view.reason[i][0] ? view.reason[i] : "?");
+                             lichen_sys_boot_label((lichen_boot_step_t)i), view.reason[i][0] ? view.reason[i] : "?");
         }
     }
     set_text(failures, text);
@@ -165,8 +163,8 @@ static void on_key(lv_event_t *e) {
 }
 
 static void show_log(void) {
-    static char lines[SHOW_LOG_LINES][LOG_TAP_LINE_LEN]; // LVGL task only
-    size_t      n = log_tap_last(lines, SHOW_LOG_LINES);
+    static char lines[SHOW_LOG_LINES][LICHEN_LOG_TAP_LINE_LEN]; // LVGL task only
+    size_t      n = lichen_sys_log_tap_last(lines, SHOW_LOG_LINES);
     for (size_t i = 0; i < SHOW_LOG_LINES; i++) {
         set_text(log_labels[i], i < n ? lines[i] : "");
     }
@@ -177,7 +175,7 @@ static void tick(lv_timer_t *t) {
     if (leaving) {
         return; // home is fading in, this screen goes when it is done
     }
-    boot_progress_view(&view);
+    lichen_sys_boot_view(&view);
     if (!generation_shown || view.generation != shown_generation) {
         show_steps();
         shown_generation = view.generation;
@@ -188,8 +186,8 @@ static void tick(lv_timer_t *t) {
     uint32_t phase = lv_tick_get() % PULSE_MS;
     uint32_t level = phase < PULSE_MS / 2 ? phase : PULSE_MS - phase; // 0 .. PULSE_MS/2
     lv_opa_t opa   = (lv_opa_t)(LV_OPA_40 + (LV_OPA_COVER - LV_OPA_40) * level / (PULSE_MS / 2));
-    for (int i = 0; i < BOOT_STEP_COUNT; i++) {
-        if (view.state[i] == STEP_ACTIVE) {
+    for (int i = 0; i < LICHEN_BOOT_STEP_COUNT; i++) {
+        if (view.state[i] == LICHEN_STEP_ACTIVE) {
             lv_obj_set_style_bg_opa(segments[i], opa, 0);
         }
     }
@@ -197,8 +195,8 @@ static void tick(lv_timer_t *t) {
     show_log();
 
     failed = false;
-    for (int i = 0; i < BOOT_STEP_COUNT; i++) {
-        failed = failed || view.state[i] == STEP_FAILED;
+    for (int i = 0; i < LICHEN_BOOT_STEP_COUNT; i++) {
+        failed = failed || view.state[i] == LICHEN_STEP_FAILED;
     }
     if (failed && !failure_shown) {
         failure_shown = true;
@@ -211,7 +209,7 @@ static void tick(lv_timer_t *t) {
     snprintf(text, sizeof(text), "uptime %lu.%lu s", (unsigned long)(ms / 1000), (unsigned long)(ms % 1000 / 100));
     set_text(uptime_label, text);
 
-    if (ended(view.state[BOOT_APPS])) {
+    if (ended(view.state[LICHEN_BOOT_APPS])) {
         uint32_t now = lv_tick_get();
         if (!apps_ended_at) {
             apps_ended_at = now ? now : 1;
@@ -297,7 +295,7 @@ lv_obj_t *boot_screen_create(void) {
     lv_obj_t *names_row = add_box(details, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_margin_top(names_row, 8, 0);
     lv_obj_set_style_pad_column(names_row, 6, 0);
-    for (int i = 0; i < BOOT_STEP_COUNT; i++) {
+    for (int i = 0; i < LICHEN_BOOT_STEP_COUNT; i++) {
         segments[i] = lv_obj_create(bar);
         lv_obj_remove_style_all(segments[i]);
         lv_obj_set_height(segments[i], 20);

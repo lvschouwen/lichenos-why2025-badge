@@ -2,9 +2,8 @@
 // focusable widgets: shell_open puts the screen itself in the group, so every key arrives here as LV_EVENT_KEY.
 // Up/Down change the field under the cursor (amber), Left/Right move, digits type, Backspace restarts the field,
 // Enter sets the clock (seconds :00), Esc is the shell's (cancel).
-#include "clock_local.h"
+#include "lichen_sys_clock.h"
 #include "fonts.h"
-#include "lichen_clock.h"
 #include "lichen_ui.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -29,10 +28,10 @@ static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color) {
 }
 
 // The fields as they would be set: a part-typed field counts as finished (a copy, the cursor stays)
-static clock_local_t pending_utc(int64_t *utc) {
+static lichen_clock_local_t pending_utc(int64_t *utc) {
     time_fields_t t = tf;
     tf_commit(&t);
-    return clock_local_to_utc(t.v[TF_YEAR], t.v[TF_MONTH], t.v[TF_DAY], t.v[TF_HOUR], t.v[TF_MINUTE], utc);
+    return lichen_sys_clock_local_to_utc(t.v[TF_YEAR], t.v[TF_MONTH], t.v[TF_DAY], t.v[TF_HOUR], t.v[TF_MINUTE], utc);
 }
 
 // "= 2026-10-31 13:05 UTC, Saturday": a typo in the day or the hour shows up here
@@ -47,11 +46,11 @@ static void show_utc(int64_t utc) {
 }
 
 // The DST hint and the "earlier than before" hint, one per line
-static void show_hints(clock_local_t how, int64_t utc) {
+static void show_hints(lichen_clock_local_t how, int64_t utc) {
     char        text[160] = "";
-    char const *local     = clock_local_hint(how);
-    char const *back      = clock_is_set() ? clock_back_hint((int64_t)time(NULL), utc) : NULL;
-    if (!clock_in_window(utc, clock_build_epoch())) {
+    char const *local     = lichen_sys_clock_local_hint(how);
+    char const *back      = lichen_sys_clock_is_set() ? lichen_sys_clock_back_hint((int64_t)time(NULL), utc) : NULL;
+    if (!lichen_sys_clock_in_window(utc, lichen_sys_clock_build_epoch())) {
         snprintf(text, sizeof(text), "outside the dates this firmware accepts");
     } else {
         snprintf(text, sizeof(text), "%s%s%s", local ? local : "", local && back ? "\n" : "", back ? back : "");
@@ -67,17 +66,17 @@ static void render(void) {
         lv_obj_set_style_text_color(field_label[f], lv_color_hex(f == tf.cursor ? THEME_AMBER : THEME_TEXT), 0);
     }
     int64_t       utc = 0;
-    clock_local_t how = pending_utc(&utc);
+    lichen_clock_local_t how = pending_utc(&utc);
     show_utc(utc);
     show_hints(how, utc);
 }
 
-static void refused(clock_verdict_t v) {
+static void refused(lichen_clock_verdict_t v) {
     char text[96];
-    if (v == CLOCK_OUTRANKED && clock_sync_info().source == CLOCK_SRC_SNTP) {
-        snprintf(text, sizeof(text), "not set: the network time set the clock %lld min ago", (long long)(clock_source_age_s() / 60));
+    if (v == LICHEN_CLOCK_OUTRANKED && lichen_sys_clock_sync_info().source == LICHEN_CLOCK_SRC_SNTP) {
+        snprintf(text, sizeof(text), "not set: the network time set the clock %lld min ago", (long long)(lichen_sys_clock_source_age_s() / 60));
     } else {
-        snprintf(text, sizeof(text), "not set: %s", clock_verdict_text(v));
+        snprintf(text, sizeof(text), "not set: %s", lichen_sys_clock_verdict_text(v));
     }
     lv_label_set_text(hint_label, text);
 }
@@ -92,8 +91,8 @@ static void set_clock(void) {
     int64_t utc = 0;
     pending_utc(&utc);
     struct timeval  tv = {.tv_sec = (time_t)utc};
-    clock_verdict_t v  = clock_set_manual(&tv, false);
-    if (clock_accepted(v)) {
+    lichen_clock_verdict_t v  = lichen_sys_clock_set_manual(&tv, false);
+    if (lichen_sys_clock_accepted(v)) {
         done = true;
         shell_back(); // later, outside the key handling; Time's page refreshes itself
         return;
@@ -127,7 +126,7 @@ static void on_key(lv_event_t *e) {
 // Local now when the clock is set (by anyone), else noon on the build's date: the field a person changes least is
 // then already close. Years: the build's .. +2, the clock's plausible window.
 static void prefill(void) {
-    time_t    build = (time_t)clock_build_epoch();
+    time_t    build = (time_t)lichen_sys_clock_build_epoch();
     time_t    now   = time(NULL);
     struct tm b, l;
     if (!localtime_r(&build, &b)) {
@@ -135,7 +134,7 @@ static void prefill(void) {
         b.tm_year = 126, b.tm_mon = 0, b.tm_mday = 1;
     }
     int ymin = b.tm_year + 1900;
-    if (clock_is_set() && localtime_r(&now, &l)) {
+    if (lichen_sys_clock_is_set() && localtime_r(&now, &l)) {
         tf_init(&tf, l.tm_year + 1900, l.tm_mon + 1, l.tm_mday, l.tm_hour, l.tm_min, ymin, ymin + 2);
     } else {
         tf_init(&tf, ymin, b.tm_mon + 1, b.tm_mday, 12, 0, ymin, ymin + 2);

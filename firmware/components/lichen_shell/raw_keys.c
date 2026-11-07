@@ -3,7 +3,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include "keyboard.h"
+#include "lichen_sys_keys.h"
 #include "lichen_keys.h"
 #include "lvgl.h"
 #include "shell_ui_ops.h"
@@ -37,10 +37,10 @@ bool raw_keys_test_open(void) {
 }
 
 // Keyboard task
-static bool hook(key_raw_event_t const *ev, void *arg) {
+static bool hook(lichen_sys_key_event_t const *ev, void *arg) {
     (void)arg;
     if (atomic_load(&active) > 0) {
-        key_raw_event_t stamped = *ev;
+        lichen_sys_key_event_t stamped = *ev;
         stamped.test_open       = atomic_load(&test_open);
         xQueueSend(queue, &stamped, 0); // a full queue drops events rather than blocking the keyboard
     }
@@ -49,7 +49,7 @@ static bool hook(key_raw_event_t const *ev, void *arg) {
 
 static void drain(lv_timer_t *t) {
     (void)t;
-    key_raw_event_t ev;
+    lichen_sys_key_event_t ev;
     while (xQueueReceive(queue, &ev, 0) == pdTRUE) {
         for (int i = 0; i < MAX_LISTENERS; i++) {
             if (listeners[i].cb) {
@@ -61,10 +61,10 @@ static void drain(lv_timer_t *t) {
 
 static bool ensure_started(void) {
     if (!queue) {
-        queue = xQueueCreate(QUEUE_DEPTH, sizeof(key_raw_event_t));
+        queue = xQueueCreate(QUEUE_DEPTH, sizeof(lichen_sys_key_event_t));
     }
     if (queue && !hooked) {
-        hooked = keyboard_raw_add(hook, NULL);
+        hooked = lichen_sys_keys_hook_add(hook, NULL);
     }
     if (queue && hooked && !timer) {
         timer = lv_timer_create(drain, DRAIN_MS, NULL);
@@ -115,7 +115,7 @@ void raw_keys_unlisten(raw_keys_cb cb, void *arg) {
 static lichen_raw_key_fn app_fn;
 static void             *app_arg;
 
-static void to_app(key_raw_event_t const *ev, void *arg) {
+static void to_app(lichen_sys_key_event_t const *ev, void *arg) {
     (void)arg;
     if (app_fn) {
         lichen_raw_key_t key = {.code = ev->code, .pressed = ev->pressed, .shift = ev->shift};

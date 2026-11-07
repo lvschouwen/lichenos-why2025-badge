@@ -1,6 +1,6 @@
 #include "time_fields.h"
 
-#include "clock_local.h"
+#include "lichen_sys_clock.h"
 
 #include <stdio.h>
 
@@ -12,7 +12,7 @@ static void range(time_fields_t const *tf, int field, int *lo, int *hi) {
     switch (field) {
         case TF_YEAR: *lo = tf->year_min, *hi = tf->year_max; break;
         case TF_MONTH: *lo = 1, *hi = 12; break;
-        case TF_DAY: *lo = 1, *hi = clock_days_in_month(tf->v[TF_YEAR], tf->v[TF_MONTH]); break;
+        case TF_DAY: *lo = 1, *hi = lichen_sys_clock_days_in_month(tf->v[TF_YEAR], tf->v[TF_MONTH]); break;
         case TF_HOUR: *lo = 0, *hi = 23; break;
         default: *lo = 0, *hi = 59; break;
     }

@@ -1103,9 +1103,11 @@ add_executable(shortcut_test
     ${CMAKE_CURRENT_SOURCE_DIR}/shortcut_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/shortcut.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/ui_keys.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/key_matrix.c
 )
 target_include_directories(shortcut_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board
 )
 target_compile_options(shortcut_test PRIVATE -Wall -Wextra -Werror)
@@ -1160,13 +1162,35 @@ target_include_directories(clock_local_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(clock_local_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME clock_local_test COMMAND clock_local_test)
 
+# The shell's view of the clock, Wi-Fi and boot progress goes through lichen_sys_pure_view.c (#244): every host test that
+# builds one of those shell files links it with the pure code behind it.
+set(SYS_VIEW_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/lichen_sys_pure_view.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_clock/clock_check.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_clock/clock_local.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_list.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_saved.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_analyser.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/boot_text.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/boot_steps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/log_clean.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs/nvs_stub.c)
+set(SYS_VIEW_INCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_clock ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
+
+add_executable(lichen_sys_pure_view_test ${CMAKE_CURRENT_SOURCE_DIR}/lichen_sys_pure_view_test.c ${SYS_VIEW_SRCS})
+target_include_directories(lichen_sys_pure_view_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs)
+target_include_directories(lichen_sys_pure_view_test PRIVATE ${SYS_VIEW_INCS})
+target_compile_options(lichen_sys_pure_view_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME lichen_sys_pure_view_test COMMAND lichen_sys_pure_view_test)
+
 add_executable(time_fields_test
     ${CMAKE_CURRENT_SOURCE_DIR}/time_fields_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/time_fields.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_clock/clock_local.c
+    ${SYS_VIEW_SRCS}
 )
-target_include_directories(time_fields_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_clock)
+target_include_directories(time_fields_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs)
+target_include_directories(time_fields_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${SYS_VIEW_INCS})
 target_compile_options(time_fields_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME time_fields_test COMMAND time_fields_test)
 
@@ -1185,15 +1209,10 @@ add_test(NAME wifi_list_test COMMAND wifi_list_test)
 add_executable(link_state_test
     ${CMAKE_CURRENT_SOURCE_DIR}/link_state_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/link_state.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_list.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_saved.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/stubs/nvs_stub.c
+    ${SYS_VIEW_SRCS}
 )
 target_include_directories(link_state_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs)
-target_include_directories(link_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
-                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net
-                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api # theme.h
-                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
+target_include_directories(link_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${SYS_VIEW_INCS})
 target_compile_options(link_state_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME link_state_test COMMAND link_state_test)
 
@@ -1550,6 +1569,7 @@ add_custom_target(run_tests
     DEPENDS attention_policy_test mesh_hist_test assets_fmt_test font_cover_test c6_image_test ota_proto_test ota_pieces_test backlight_cmd_test backlight_level_test console_cmd_test lora_proto_test meshcore_hdr_test lora_link_test lora_irq_test console_cmd_fw_test c6_paths_test ota_path_test ota_valid_test kbd_map_test tca8418_mask_test meshcore_decode_test mesh_store_test lora_airtime_test mesh_format_test mesh_frame_test mesh_outbox_test mesh_trace_test mesh_remote_test mesh_rset_test radio_presets_test mesh_pathhash_test list_filter_test radio_filter_test radio_confirm_test channel_input_test mesh_chat_test mesh_tile_test mesh_notify_test crash_log_test restart_log_test boot_steps_test r16_hold_test log_clean_test fs_shim_test cayenne_lpp_test companion_test lora_tx_test lora_owner_test nav_test screen_ids_test home_layout_test badge_table_test hold_exit_test remote_ctl_test key_matrix_test tz_table_test clock_check_test clock_local_test time_fields_test wifi_list_test wifi_cred_test wifi_saved_test wifi_analyser_test wifi_join_test setup_state_test mc_first_test ui_keys_test ui_overflow_test boot_text_test update_status_test update_mode_test link_state_test scroll_anchor_test ui_text_test shot_blend_test ota_bmp_test ota_rle_test log_ring_test console_model_test psram_pattern_test psram_tuning_test psram_speed_test psram_heap_test ui_perf_stats_test mem_fmt_test bench_calc_test idle_policy_test lock_combo_test saver_layout_test station_clock_test c6_watch_test dialog_countdown_test hosted_link_test sd_policy_test fs_path_test display_rot_test shortcut_test psram_dma_test sd_bounce_test calc_eval_test calc_units_test timer_calc_test
     sd_settings_model_test
     lichen_sys_pure_test
+    lichen_sys_pure_view_test
     files_model_test
     files_ops_test
     radio_state_test

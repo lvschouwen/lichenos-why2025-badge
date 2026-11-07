@@ -15,7 +15,7 @@
 #include "freertos/task.h"
 #include "lichen_task.h"
 #include "fw_console.h"
-#include "keyboard.h"
+#include "lichen_sys_keys.h"
 #include "shell.h"
 #include "theme.h"
 
@@ -38,7 +38,7 @@ static uint32_t now_ms(void) {
 }
 
 // Keyboard task: quick, no LVGL
-static bool on_raw(key_raw_event_t const *ev, void *arg) {
+static bool on_raw(lichen_sys_key_event_t const *ev, void *arg) {
     (void)arg;
     portENTER_CRITICAL(&lock);
     bool              was = lichen_sys_factory_combo_swallows(&combo);
@@ -138,7 +138,7 @@ static void combo_task(void *arg) {
             break;
         }
     }
-    keyboard_raw_remove(on_raw, NULL);
+    lichen_sys_keys_hook_remove(on_raw, NULL);
     // A notification the hook sent between the last wait and the remove: Enter or Esc on an open question
     uint32_t v = LICHEN_FC_EV_NONE;
     if (xTaskNotifyWait(0, UINT32_MAX, &v, 0) == pdTRUE) {
@@ -156,7 +156,7 @@ void factory_combo_start(void) {
         task = NULL;
         return;
     }
-    if (!keyboard_raw_add(on_raw, NULL)) {
+    if (!lichen_sys_keys_hook_add(on_raw, NULL)) {
         ESP_LOGE(TAG, "no boot key combo: no raw key hook free");
     }
 }

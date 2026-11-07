@@ -100,7 +100,7 @@ void shortcuts_key(uint8_t code, bool pressed, bool test_open) {
     }
 }
 
-static void on_raw_key(key_raw_event_t const *ev, void *arg) {
+static void on_raw_key(lichen_sys_key_event_t const *ev, void *arg) {
     (void)arg;
     shortcuts_key(ev->code, ev->pressed, ev->test_open);
 }

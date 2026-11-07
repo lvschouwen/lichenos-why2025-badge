@@ -14,8 +14,7 @@
 #include "shell_parts.h"
 #include "text_entry.h"
 #include "theme.h"
-#include "wifi_list.h"
-#include "wifi_saved.h"
+#include "lichen_sys_net.h"
 
 #include <stdarg.h>
 #include <stdint.h>
@@ -29,7 +28,7 @@
 static char const TAG[] = "wifi";
 
 typedef struct {
-    wifi_ap_t aps[MAX_APS];
+    lichen_sys_wifi_ap_t aps[MAX_APS];
     size_t    n;
     bool      ok;
     uint32_t  gen; // the screen build this scan belongs to
@@ -41,10 +40,10 @@ static lv_obj_t   *status;
 static lv_group_t *group;
 static lv_timer_t *poll;
 static uint32_t    gen;
-static lv_obj_t   *rows[MAX_APS + WIFI_SAVED_MAX + 4]; // the placeholder or the networks, "Scan again", then the saved ones
+static lv_obj_t   *rows[MAX_APS + LICHEN_SYS_WIFI_SAVED_MAX + 4]; // the placeholder or the networks, "Scan again", then the saved ones
 static size_t      row_count;
 static lv_obj_t   *focus_at_scan; // what had the focus when the scan started: compared, never dereferenced
-static wifi_ap_t   shown[MAX_APS];
+static lichen_sys_wifi_ap_t   shown[MAX_APS];
 static size_t      shown_n;
 static char        target[33];
 static void      (*setup_done)(void); // set while this is the first-run Wi-Fi step
@@ -124,15 +123,15 @@ static void on_poll(lv_timer_t *timer) {
         stop_poll();
         return;
     }
-    wifi_join_state_t st = shell_sources.wifi_join_state(tried, sizeof(tried), kept, sizeof(kept));
-    wifi_ssid_sanitize(tried, a, sizeof(a));
-    wifi_ssid_sanitize(kept, b, sizeof(b));
-    if (st == WIFI_JOIN_TRYING || st == WIFI_JOIN_PENDING) {
+    lichen_sys_wifi_join_t st = shell_sources.wifi_join_state(tried, sizeof(tried), kept, sizeof(kept));
+    lichen_sys_wifi_ssid_sanitize(tried, a, sizeof(a));
+    lichen_sys_wifi_ssid_sanitize(kept, b, sizeof(b));
+    if (st == LICHEN_SYS_WIFI_JOIN_TRYING || st == LICHEN_SYS_WIFI_JOIN_PENDING) {
         set_status("Connecting to %s...", a);
         return;
     }
     stop_poll();
-    if (st == WIFI_JOIN_JOINED) {
+    if (st == LICHEN_SYS_WIFI_JOIN_JOINED) {
         if (shell_sources.wifi_ip && shell_sources.wifi_ip(ip, sizeof(ip))) {
             set_status("Connected to %s, IP %s", a, ip);
         } else {
@@ -142,7 +141,7 @@ static void on_poll(lv_timer_t *timer) {
             lv_async_call(run_done, setup_done); // the screen goes: not from inside its timer
             setup_done = NULL;
         }
-    } else if (st == WIFI_JOIN_FAILED_KEPT_OLD) {
+    } else if (st == LICHEN_SYS_WIFI_JOIN_FAILED_KEPT_OLD) {
         // Why (it did not accept us: usually the password) and what to do (pick it again), and what is still in use
         set_status(kept[0] ? "Couldn't join %s: wrong password or out of range. Still using %s. Pick the network "
                              "again to retry."
@@ -171,7 +170,7 @@ static void on_password(char const *text, void *arg) {
     if (!screen) {
         return;
     }
-    if (!wifi_cred_valid(target, text)) {
+    if (!lichen_sys_wifi_cred_valid(target, text)) {
         ask_password(text, true); // type again instead of picking the network again (text_entry copies initial now)
         return;
     }
@@ -180,7 +179,7 @@ static void on_password(char const *text, void *arg) {
 
 static void ask_password(char const *initial, bool wrong_length) {
     char shown_name[140], title[200];
-    wifi_ssid_sanitize(target, shown_name, sizeof(shown_name));
+    lichen_sys_wifi_ssid_sanitize(target, shown_name, sizeof(shown_name));
     snprintf(title, sizeof(title), wrong_length ? "Password for %.60s: use 8 to 63 characters" : "Password for %.60s",
              shown_name);
     text_entry_open(title, initial, true, 63, on_password, NULL);
@@ -202,7 +201,7 @@ static void on_pick(void *arg) {
 // ---- the list ----------------------------------------------------------------------------------------------------
 
 // Lock label and four signal bars on the right of a network row
-static void decorate(lv_obj_t *row, wifi_ap_t const *ap, bool connected) {
+static void decorate(lv_obj_t *row, lichen_sys_wifi_ap_t const *ap, bool connected) {
     lv_obj_t *name = lv_obj_get_child(row, 0);
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
     lv_obj_set_flex_grow(name, 1);
@@ -227,7 +226,7 @@ static void decorate(lv_obj_t *row, wifi_ap_t const *ap, bool connected) {
     lv_obj_set_style_text_color(lock, lv_color_hex(THEME_DIM), 0);
     lv_obj_set_style_pad_right(lock, 12, 0);
     lv_label_set_text(lock, ap->open ? "open" : "locked");
-    int bars = wifi_bars(ap->rssi);
+    int bars = lichen_sys_wifi_bars(ap->rssi);
     for (int b = 0; b < 4; b++) {
         lv_obj_t *bar = lv_obj_create(box);
         lv_obj_remove_style_all(bar);
@@ -240,18 +239,18 @@ static void decorate(lv_obj_t *row, wifi_ap_t const *ap, bool connected) {
 
 // ---- saved networks (#160) ---------------------------------------------------------------------------------------
 
-static char forget_name[WIFI_SAVED_MAX][33]; // the row's own copy: the list may change under it
+static char forget_name[LICHEN_SYS_WIFI_SAVED_MAX][33]; // the row's own copy: the list may change under it
 
 static void rebuild_rows(void);
 
 // The careful dialog was confirmed
 static void on_forget(void *arg) {
     size_t i = (size_t)(uintptr_t)arg;
-    if (i >= WIFI_SAVED_MAX || !shell_sources.wifi_forget) {
+    if (i >= LICHEN_SYS_WIFI_SAVED_MAX || !shell_sources.wifi_forget) {
         return;
     }
     char name[140];
-    wifi_ssid_sanitize(forget_name[i], name, sizeof(name));
+    lichen_sys_wifi_ssid_sanitize(forget_name[i], name, sizeof(name));
     bool ok = shell_sources.wifi_forget(forget_name[i]);
     rebuild_rows();
     set_status(ok ? "Forgot %s" : "Could not forget %s. Try again.", name);
@@ -261,13 +260,13 @@ static void on_forget(void *arg) {
 // builder, in the screen's group
 static void build_saved_rows(void *arg) {
     (void)arg;
-    char names[WIFI_SAVED_MAX][33];
-    size_t n = shell_sources.wifi_saved_names ? shell_sources.wifi_saved_names(names, WIFI_SAVED_MAX) : 0;
+    char names[LICHEN_SYS_WIFI_SAVED_MAX][33];
+    size_t n = shell_sources.wifi_saved_names ? shell_sources.wifi_saved_names(names, LICHEN_SYS_WIFI_SAVED_MAX) : 0;
     rows[row_count++] = menu_note(menu, n ? "Saved networks" : "No saved networks yet: pick one above to join and save it.");
     for (size_t i = 0; i < n; i++) {
         char name[140], question[200];
         memcpy(forget_name[i], names[i], sizeof(forget_name[i]));
-        wifi_ssid_sanitize(names[i], name, sizeof(name));
+        lichen_sys_wifi_ssid_sanitize(names[i], name, sizeof(name));
         lv_obj_t *row = menu_add(menu, name, "Forget", on_forget, (void *)(uintptr_t)i);
         if (!row) {
             continue;
@@ -317,7 +316,7 @@ static void build_scan_rows(void *arg) {
     bool online = joined[0] && lichen_radio_get(RADIO_WIFI) && shell_sources.wifi_ip && shell_sources.wifi_ip(ip, sizeof(ip));
     for (size_t i = 0; i < shown_n; i++) {
         char name[140];
-        wifi_ssid_sanitize(shown[i].ssid, name, sizeof(name));
+        lichen_sys_wifi_ssid_sanitize(shown[i].ssid, name, sizeof(name));
         lv_obj_t *row = menu_add(menu, name, "", on_pick, (void *)(uintptr_t)i);
         if (row) {
             decorate(row, &shown[i], online && strcmp(shown[i].ssid, joined) == 0);
@@ -376,7 +375,7 @@ static void on_scan_done(void *data) {
         set_status("No networks found.");
     } else if (!poll) { // a join in progress keeps its own status
         char name[140];
-        wifi_ssid_sanitize(joined, name, sizeof(name));
+        lichen_sys_wifi_ssid_sanitize(joined, name, sizeof(name));
         if (online) {
             set_status("Connected to %s, IP %s", name, ip);
         } else {
@@ -454,9 +453,9 @@ static lv_obj_t *build(void) {
         add_saved_rows();
         set_status(lichen_airplane_get() ? "Wi-Fi is off (airplane mode)" : "Wi-Fi is off");
     }
-    wifi_join_state_t now = shell_sources.wifi_join_state ? shell_sources.wifi_join_state(target, sizeof(target), NULL, 0)
-                                                          : WIFI_JOIN_NONE;
-    if (now == WIFI_JOIN_TRYING || now == WIFI_JOIN_PENDING) {
+    lichen_sys_wifi_join_t now = shell_sources.wifi_join_state ? shell_sources.wifi_join_state(target, sizeof(target), NULL, 0)
+                                                          : LICHEN_SYS_WIFI_JOIN_NONE;
+    if (now == LICHEN_SYS_WIFI_JOIN_TRYING || now == LICHEN_SYS_WIFI_JOIN_PENDING) {
         poll = lv_timer_create(on_poll, POLL_MS, NULL); // a trial started earlier is still running
     }
     return scr;
