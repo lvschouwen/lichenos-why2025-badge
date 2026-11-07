@@ -4,6 +4,7 @@
 // Do-not-disturb keeps the notice pulse dark. Not part of the app API.
 
 #include <stdbool.h>
+#include "fw_store.h"
 #include "led_pattern.h"
 
 #ifdef __cplusplus
@@ -15,7 +16,10 @@ extern "C" {
 #define LED_GPIO        51
 #define LED_ACTIVE_HIGH 1
 
-// main.c, once after lichen_notify_start: reads the setting (NVS badge_fw "status_led", default on), configures the
+// Where the setting is kept (the settings service, #235): led opens no NVS. Bound at START_EARLY, before led_start;
+// until then the default (on) applies and nothing is saved.
+void led_bind_store(fw_get_u8_fn get, fw_set_u8_fn set);
+// main.c, once after lichen_notify_start: reads the setting ("status_led", default on), configures the
 // pin and starts the 50 ms esp_timer. "fw led".
 void led_start(void);
 bool led_enabled(void);

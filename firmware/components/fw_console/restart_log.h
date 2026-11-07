@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "fw_store.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -27,6 +29,13 @@ void restart_log_push(restart_log_t *log, char const *line);
 
 // Makes a log read back from flash safe to print: count clamped, every line NUL terminated
 void restart_log_sanitize(restart_log_t *log);
+
+// The log lives in the settings service (#235) as one blob under this badge_fw key (the one from before the move)
+#define RESTART_LOG_KEY "rst_log"
+// Reads it back sanitized; an empty log (and 0) when there is no getter, no blob or the size is not ours
+int  restart_log_load(fw_get_blob_fn get, restart_log_t *out);
+// Writes it; false when there is no setter or the write failed
+bool restart_log_store(fw_set_blob_fn set, restart_log_t const *log);
 
 // Before a deliberate restart (#123): what the restarting task does about the apps' saves
 typedef enum {

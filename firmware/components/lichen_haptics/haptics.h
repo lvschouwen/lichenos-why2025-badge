@@ -4,6 +4,7 @@
 // The pin is driven low and handed to LEDC PWM (timer 3, channel 7) as early as main.c can; a buzz is one 10 ms
 // esp_timer that runs only while it plays (no task, no allocation).
 
+#include "fw_store.h"
 #include "haptics_pattern.h"
 
 #ifdef __cplusplus
@@ -12,7 +13,10 @@ extern "C" {
 
 #define HAPTICS_GPIO 8
 
-// main.c, right after NVS is up: pin low, settings (NVS badge_fw "haptics" default on, "haptic_str" default high),
+// Where the settings are kept (the settings service, #235): haptics opens no NVS. Bound at START_EARLY, before
+// haptics_start; until then the defaults apply and nothing is saved.
+void haptics_bind_store(fw_get_u8_fn get, fw_set_u8_fn set);
+// main.c, right after NVS is up: pin low, settings ("haptics" default on, "haptic_str" default high),
 // hooks the notification feedback ("vibrate": a toast with feedback buzzes), "fw vib".
 void haptics_start(void);
 void haptics_play(hp_pattern_t p);          // honours the setting and updates; replaces a running buzz

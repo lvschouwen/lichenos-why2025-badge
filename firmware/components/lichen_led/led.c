@@ -2,6 +2,7 @@
 // re-read from lichen_notify only when its history changed (the generation counter is lock-free).
 #include "led.h"
 #include "led_cmd.h"
+#include "led_setting.h"
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -9,15 +10,15 @@
 #include "fw_console.h"
 #include "lichen_notify.h"
 #include "notify_os.h"
-#include "nvs.h"
 
 #include <stdatomic.h>
 
 #define TICK_US     50000
-#define ENABLED_KEY "status_led"
 
 static char const *const TAG = "led";
 
+static fw_get_u8_fn s_get;
+static fw_set_u8_fn s_set;
 static atomic_bool  s_enabled = true;
 static atomic_bool  s_updating;
 static atomic_int   s_override = LED_AUTO;
@@ -58,17 +59,16 @@ static void tick(void *arg) {
     }
 }
 
+void led_bind_store(fw_get_u8_fn get, fw_set_u8_fn set) {
+    s_get = get;
+    s_set = set;
+}
+
 void led_start(void) {
     if (s_started) {
         return;
     }
-    nvs_handle_t nvs;
-    uint8_t      on = 1;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u8(nvs, ENABLED_KEY, &on);
-        nvs_close(nvs);
-    }
-    atomic_store(&s_enabled, on != 0);
+    atomic_store(&s_enabled, led_setting_load(s_get));
     gpio_config_t const cfg = {.pin_bit_mask = 1ULL << LED_GPIO, .mode = GPIO_MODE_OUTPUT};
     if (gpio_config(&cfg) != ESP_OK) {
         ESP_LOGE(TAG, "GPIO%d not configured", LED_GPIO);
@@ -90,15 +90,8 @@ bool led_enabled(void) {
 
 void led_set_enabled(bool on) {
     atomic_store(&s_enabled, on);
-    nvs_handle_t nvs;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        esp_err_t err = on ? nvs_erase_key(nvs, ENABLED_KEY) : nvs_set_u8(nvs, ENABLED_KEY, 0); // on is the default
-        if (err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND) {
-            nvs_commit(nvs);
-        } else {
-            ESP_LOGE(TAG, "setting not saved: %s", esp_err_to_name(err));
-        }
-        nvs_close(nvs);
+    if (!led_setting_save(s_set, on)) {
+        ESP_LOGE(TAG, "setting not saved");
     }
 }
 

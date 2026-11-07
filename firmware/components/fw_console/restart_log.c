@@ -42,3 +42,17 @@ restart_save_t restart_save_plan(bool have_hook, bool already_saving) {
     }
     return have_hook ? RESTART_SAVE_RUN : RESTART_SAVE_NONE;
 }
+
+int restart_log_load(fw_get_blob_fn get, restart_log_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (!get || !get(RESTART_LOG_KEY, out, sizeof(*out))) {
+        memset(out, 0, sizeof(*out));
+        return 0;
+    }
+    restart_log_sanitize(out);
+    return (int)out->count;
+}
+
+bool restart_log_store(fw_set_blob_fn set, restart_log_t const *log) {
+    return set && set(RESTART_LOG_KEY, log, sizeof(*log));
+}

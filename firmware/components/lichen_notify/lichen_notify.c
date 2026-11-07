@@ -16,7 +16,7 @@
 #include "fw_console.h"
 #include "notify_mute.h"
 #include "notify_rate.h"
-#include "nvs.h"
+#include "notify_store.h"
 #include "storage.h"
 
 #include <errno.h>
@@ -39,7 +39,6 @@ static char const TAG[] = "notify";
 #define SAVE_STACK   4096 // peak 1.4 KB measured (#107)
 #define TOAST_DEPTH  8
 #define ONCE_SLOTS   64
-#define DND_KEY      "notify_dnd"
 
 void notify_cmd_register(void); // notify_cmd.c
 
@@ -57,6 +56,8 @@ static int64_t           s_save_due_us; // when the armed timer fires, 0 when it
 static bool              s_storage;
 static atomic_bool       s_started;
 static atomic_bool       s_dnd;
+static fw_get_u8_fn      s_get; // the settings service (#235); NULL until lichen_os binds it
+static fw_set_u8_fn      s_set;
 static atomic_uint       s_generation;
 static bool (*s_clock_set)(void);
 static ln_feedback_t     s_feedback;
@@ -281,21 +282,20 @@ void lichen_notify_start(bool storage_ok) {
     } else {
         nr_init(s_ring, 1);
     }
-    nvs_handle_t nvs;
-    uint8_t      dnd = 0;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u8(nvs, DND_KEY, &dnd);
-        nvs_close(nvs);
-    }
-    atomic_store(&s_dnd, dnd != 0);
+    atomic_store(&s_dnd, nstore_dnd_load(s_get));
     atomic_store(&s_generation, s_ring->generation);
     atomic_store(&s_started, true);
     notify_cmd_register();
 }
 
+void lichen_notify_bind_store(fw_get_u8_fn get, fw_set_u8_fn set) {
+    s_get = get;
+    s_set = set;
+}
+
 // ---- per-source switches --------------------------------------------------------------------------------------------
 
-// The switch of source, from the cache, else from NVS (default on). The NVS read runs outside s_lock: a first notice
+// The switch of source, from the cache, else from the settings (default on). The read runs outside s_lock: a first notice
 // from a source must not hold every other task's notices behind a flash read.
 static bool source_on(char const *source) {
     lock();
@@ -304,13 +304,7 @@ static bool source_on(char const *source) {
     if (state != NMUTE_UNKNOWN) {
         return state == NMUTE_ON;
     }
-    char         key[NMUTE_KEY_CAP];
-    uint8_t      on = 1;
-    nvs_handle_t nvs;
-    if (nmute_key(source, key, sizeof(key)) && nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u8(nvs, key, &on);
-        nvs_close(nvs);
-    }
+    bool on = nstore_source_load(s_get, source);
     lock();
     if (nmute_get(&s_mute, source) == NMUTE_UNKNOWN) { // a setter may have been quicker: its value wins
         nmute_put(&s_mute, source, on != 0);
@@ -333,22 +327,10 @@ void lichen_notify_set_source_enabled(char const *source, bool on) {
         return;
     }
     lock();
-    nmute_put(&s_mute, source, on); // takes effect at once; NVS follows outside the lock
+    nmute_put(&s_mute, source, on); // takes effect at once; the settings follow outside the lock
     unlock();
-    nvs_handle_t nvs;
-    esp_err_t    err = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err == ESP_OK) {
-        err = on ? nvs_erase_key(nvs, key) : nvs_set_u8(nvs, key, 0); // on is the default: no key
-        if (err == ESP_ERR_NVS_NOT_FOUND) {
-            err = ESP_OK;
-        }
-        if (err == ESP_OK) {
-            err = nvs_commit(nvs);
-        }
-        nvs_close(nvs);
-    }
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "switch for %s not saved: %s", source, esp_err_to_name(err));
+    if (!nstore_source_save(s_set, source, on)) {
+        ESP_LOGE(TAG, "switch for %s not saved", source);
     }
 }
 
@@ -405,7 +387,7 @@ uint32_t lichen_notify_to(char const *source, ln_level_t level, char const *targ
     uint32_t now_ms = (uint32_t)(now_us / 1000); // the rate limiter only compares nearby times
     bool     clock  = s_clock_set && s_clock_set();
     uint32_t once   = key_hash(source, target);
-    source_on(source); // fills the switch cache (an NVS read the first time) before the lock is taken
+    source_on(source); // fills the switch cache (a settings read the first time) before the lock is taken
     lock();
     if (nmute_drop(&s_mute, source)) { // switched off in Settings › Notifications: no history, no badge
         unlock();
@@ -573,17 +555,8 @@ bool lichen_notify_dnd(void) {
 
 void lichen_notify_set_dnd(bool on) {
     atomic_store(&s_dnd, on);
-    nvs_handle_t nvs;
-    esp_err_t    err = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err == ESP_OK) {
-        err = nvs_set_u8(nvs, DND_KEY, on ? 1 : 0);
-        if (err == ESP_OK) {
-            err = nvs_commit(nvs);
-        }
-        nvs_close(nvs);
-    }
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "do-not-disturb not saved: %s", esp_err_to_name(err));
+    if (!nstore_dnd_save(s_set, on)) {
+        ESP_LOGE(TAG, "do-not-disturb not saved");
     }
 }
 

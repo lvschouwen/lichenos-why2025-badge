@@ -1431,6 +1431,21 @@ target_include_directories(haptics_pattern_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_options(haptics_pattern_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME haptics_pattern_test COMMAND haptics_pattern_test)
 
+add_executable(led_setting_test ${CMAKE_CURRENT_SOURCE_DIR}/led_setting_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_led/led_setting.c)
+target_include_directories(led_setting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_led ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
+target_compile_options(led_setting_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME led_setting_test COMMAND led_setting_test)
+
+add_executable(haptics_setting_test ${CMAKE_CURRENT_SOURCE_DIR}/haptics_setting_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_haptics/haptics_setting.c)
+target_include_directories(haptics_setting_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_haptics ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
+target_compile_options(haptics_setting_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME haptics_setting_test COMMAND haptics_setting_test)
+
+add_executable(notify_store_test ${CMAKE_CURRENT_SOURCE_DIR}/notify_store_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_notify/notify_store.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_notify/notify_mute.c)
+target_include_directories(notify_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_notify ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
+target_compile_options(notify_store_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME notify_store_test COMMAND notify_store_test)
+
 add_executable(notify_view_test ${CMAKE_CURRENT_SOURCE_DIR}/notify_view_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/notify_view.c)
 target_include_directories(notify_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(notify_view_test PRIVATE -Wall -Wextra -Werror)
@@ -1492,6 +1507,9 @@ add_custom_target(run_tests
     notify_ring_test
     notify_rate_test
     notify_mute_test
+    notify_store_test
+    led_setting_test
+    haptics_setting_test
     led_pattern_test
     haptics_pattern_test
     notify_view_test

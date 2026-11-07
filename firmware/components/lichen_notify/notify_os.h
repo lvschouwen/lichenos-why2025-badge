@@ -2,12 +2,17 @@
 // The notification service's OS side (#62): the shell's toast, centre and status bar, main.c and the console. Not for
 // apps (they use lichen_notify.h). Everything is safe from any task unless it says otherwise.
 
+#include "fw_store.h"
 #include "lichen_notify.h"
 #include "notify_ring.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Where do-not-disturb and the per-source switches are kept (the settings service, #235): notify opens no NVS. Bound
+// at START_EARLY, before lichen_notify_start; until then the defaults apply and nothing is saved.
+void lichen_notify_bind_store(fw_get_u8_fn get, fw_set_u8_fn set);
 
 // main.c, once, right after storage_mount (whatever it returned): the mutex, the PSRAM history, the saved file (when
 // the drive is up), the do-not-disturb setting, "fw notify". lichen_notify() returns 0 before this.

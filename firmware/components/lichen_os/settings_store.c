@@ -1,6 +1,9 @@
 #include "settings_store.h"
 
 #include "backlight.h"
+#include "haptics.h"
+#include "led.h"
+#include "notify_os.h"
 #include "lichen_os.h"
 #include "esp_log.h"
 #include "fw_console.h"
@@ -76,6 +79,31 @@ bool settings_set_str(char const *key, char const *value) {
     return err == ESP_OK;
 }
 
+bool settings_get_blob(char const *key, void *out, size_t size) {
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return false;
+    }
+    size_t    len = size;
+    esp_err_t err = nvs_get_blob(nvs, key, out, &len);
+    nvs_close(nvs);
+    return err == ESP_OK && len == size;
+}
+
+// No log line: the restart history writes this on the way into esp_restart()
+bool settings_set_blob(char const *key, void const *data, size_t size) {
+    nvs_handle_t nvs;
+    esp_err_t    err = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_set_blob(nvs, key, data, size);
+        if (err == ESP_OK) {
+            err = nvs_commit(nvs);
+        }
+        nvs_close(nvs);
+    }
+    return err == ESP_OK;
+}
+
 bool settings_erase(char const *key) {
     nvs_handle_t nvs;
     esp_err_t    err = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs);
@@ -108,4 +136,8 @@ bool settings_set_tz(char const *posix) {
 void settings_bind_services(void) {
     backlight_bind_store(settings_get_u8, settings_set_u8);
     sensors_bind_store(settings_get_u8, settings_set_u8, settings_erase);
+    lichen_notify_bind_store(settings_get_u8, settings_set_u8);
+    led_bind_store(settings_get_u8, settings_set_u8);
+    haptics_bind_store(settings_get_u8, settings_set_u8);
+    system_restart_bind_store(settings_get_blob, settings_set_blob);
 }

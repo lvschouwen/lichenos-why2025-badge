@@ -17,4 +17,4 @@ idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_bac
                             "lichen_sensors.c" "lichen_haptics.c"
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES lichen_api freertos esp_hw_support assets fw_console nvs_flash heap storage sdcard
-                                     crash esp_lvgl_port esp_app_format board sensors lichen_haptics)
+                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics)

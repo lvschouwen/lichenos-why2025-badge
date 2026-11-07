@@ -41,15 +41,11 @@ B	lichen_shell -> sdcard	9
 B	lichen_shell -> storage	3
 B	ota -> lichen_api	2
 B	sensors -> lichen_api	3
-C	fw_console:nvs_open	1
 C	lichen_haptics:lichen_notify_set_feedback	1
-C	lichen_haptics:nvs_open	1
 C	lichen_led:lichen_notify_dnd	1
 C	lichen_led:lichen_notify_generation	1
 C	lichen_led:lichen_notify_unread	1
-C	lichen_led:nvs_open	1
 C	lichen_net:nvs_open	1
-C	lichen_notify:nvs_open	1
 C	lichen_shell:backlight_get	2
 C	lichen_shell:backlight_idle	1
 C	lichen_shell:backlight_resume	2

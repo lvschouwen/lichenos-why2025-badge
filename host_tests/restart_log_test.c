@@ -13,6 +13,23 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
+static unsigned char blob[sizeof(restart_log_t)];
+static size_t        blob_len;
+static char          last_key[16];
+static bool          fake_get(char const *key, void *out, size_t size) {
+    if (strcmp(key, "rst_log") != 0 || size != blob_len) {
+        return false;
+    }
+    memcpy(out, blob, size);
+    return true;
+}
+static bool fake_set(char const *key, void const *data, size_t size) {
+    snprintf(last_key, sizeof(last_key), "%s", key);
+    memcpy(blob, data, size);
+    blob_len = size;
+    return true;
+}
+
 int main(void) {
     char out[RESTART_LINE_MAX];
     restart_line_format(out, sizeof(out), "2026-10-31T13:14:05Z", "fw-abc", 42, "console reboot", 0);
@@ -46,6 +63,20 @@ int main(void) {
     CHECK(restart_save_plan(false, false) == RESTART_SAVE_NONE);
     CHECK(restart_save_plan(true, true) == RESTART_SAVE_WAIT);
     CHECK(restart_save_plan(false, true) == RESTART_SAVE_WAIT);
+
+    // #235: the history is kept by the settings service as one blob under the badge_fw key from before the move
+    CHECK(strcmp(RESTART_LOG_KEY, "rst_log") == 0);
+    CHECK(restart_log_load(NULL, &log) == 0 && log.count == 0); // not bound yet
+    memset(blob, 0, sizeof(blob));
+    CHECK(!restart_log_store(NULL, &log));
+    restart_log_push(&log, "kept");
+    CHECK(restart_log_store(fake_set, &log) && blob_len == sizeof(log) && strcmp(last_key, "rst_log") == 0);
+    restart_log_t back;
+    CHECK(restart_log_load(fake_get, &back) == 1 && strcmp(back.line[0], "kept") == 0);
+    blob_len--; // a blob of another size is not ours: empty, not a half-read log
+    CHECK(restart_log_load(fake_get, &back) == 0 && back.count == 0);
+    blob_len = 0;
+    CHECK(restart_log_load(fake_get, &back) == 0); // nothing saved
 
     if (failures == 0) {
         printf("restart_log_test: ok\n");

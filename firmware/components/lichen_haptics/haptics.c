@@ -9,8 +9,8 @@
 #include "esp_timer.h"
 #include "fw_console.h"
 #include "haptics_cmd.h"
+#include "haptics_setting.h"
 #include "notify_os.h"
-#include "nvs.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -19,12 +19,18 @@
 
 #define TICK_US      10000
 #define PWM_HZ       20000 // above hearing; the motor smooths it
-#define ENABLED_KEY  "haptics"
-#define STRENGTH_KEY "haptic_str"
 #define LEDC_TIMER   LEDC_TIMER_3
 #define LEDC_CHANNEL LEDC_CHANNEL_7
 
 static char const *const TAG = "haptics";
+
+static fw_get_u8_fn s_get;
+static fw_set_u8_fn s_set;
+
+void haptics_bind_store(fw_get_u8_fn get, fw_set_u8_fn set) {
+    s_get = get;
+    s_set = set;
+}
 
 static atomic_bool       s_enabled = true;
 static atomic_bool       s_updating;
@@ -145,15 +151,11 @@ static bool pwm_init(void) {
 }
 
 static void load_settings(void) {
-    nvs_handle_t nvs;
-    uint8_t      on = 1, str = HP_HIGH;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u8(nvs, ENABLED_KEY, &on);
-        nvs_get_u8(nvs, STRENGTH_KEY, &str);
-        nvs_close(nvs);
-    }
-    atomic_store(&s_enabled, on != 0);
-    atomic_store(&s_strength, str < HP_STRENGTH_COUNT ? str : HP_HIGH);
+    bool          on;
+    hp_strength_t str;
+    haptics_setting_load(s_get, &on, &str);
+    atomic_store(&s_enabled, on);
+    atomic_store(&s_strength, str);
 }
 
 void haptics_start(void) {
@@ -181,21 +183,6 @@ void haptics_start(void) {
     haptics_register_console();
 }
 
-// The person's choices: a default value is stored as an absent key
-static void save_u8(char const *key, uint8_t v, uint8_t dflt) {
-    nvs_handle_t nvs;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
-        return;
-    }
-    esp_err_t err = v == dflt ? nvs_erase_key(nvs, key) : nvs_set_u8(nvs, key, v);
-    if (err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND) {
-        nvs_commit(nvs);
-    } else {
-        ESP_LOGE(TAG, "setting not saved: %s", esp_err_to_name(err));
-    }
-    nvs_close(nvs);
-}
-
 bool haptics_enabled(void) {
     return atomic_load(&s_enabled);
 }
@@ -205,7 +192,9 @@ void haptics_set_enabled(bool on) {
     if (!on) {
         haptics_stop();
     }
-    save_u8(ENABLED_KEY, on, 1);
+    if (!haptics_setting_save_enabled(s_set, on)) {
+        ESP_LOGE(TAG, "setting not saved");
+    }
 }
 
 hp_strength_t haptics_strength(void) {
@@ -217,5 +206,7 @@ void haptics_set_strength(hp_strength_t s) {
         return;
     }
     atomic_store(&s_strength, (int)s);
-    save_u8(STRENGTH_KEY, (uint8_t)s, HP_HIGH);
+    if (!haptics_setting_save_strength(s_set, s)) {
+        ESP_LOGE(TAG, "setting not saved");
+    }
 }

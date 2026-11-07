@@ -16,7 +16,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "nvs.h"
 #include "nvs_flash.h"
 
 #include <stdarg.h>
@@ -355,26 +354,19 @@ static void capture_finish(void) {
     }
 }
 
-#define RESTART_KEY "rst_log"
+static fw_get_blob_fn s_log_get; // the settings service (#235); NULL until lichen_os binds it
+static fw_set_blob_fn s_log_set;
+
+void system_restart_bind_store(fw_get_blob_fn get, fw_set_blob_fn set) {
+    s_log_get = get;
+    s_log_set = set;
+}
 
 static char const *s_restart_why; // set by system_restart; NULL when something else called esp_restart (#41)
 static bool        s_restart_recorded;
 
 int system_restart_history(restart_log_t *out) {
-    memset(out, 0, sizeof(*out));
-    nvs_handle_t nvs;
-    size_t       size = sizeof(*out);
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
-        return 0;
-    }
-    esp_err_t err = nvs_get_blob(nvs, RESTART_KEY, out, &size);
-    nvs_close(nvs);
-    if (err != ESP_OK || size != sizeof(*out)) {
-        memset(out, 0, sizeof(*out));
-        return 0;
-    }
-    restart_log_sanitize(out);
-    return (int)out->count;
+    return restart_log_load(s_log_get, out);
 }
 
 // NVS, not RTC_NOINIT: that does not survive a software restart on the P4 (#4). One small blob write, no flash mapping
@@ -396,12 +388,7 @@ static void push_restart_line(char const *why, uint32_t caller) {
     }
     system_restart_history(log);
     restart_log_push(log, line);
-    nvs_handle_t nvs;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_blob(nvs, RESTART_KEY, log, sizeof(*log));
-        nvs_commit(nvs);
-        nvs_close(nvs);
-    }
+    restart_log_store(s_log_set, log);
     free(log);
 }
 
