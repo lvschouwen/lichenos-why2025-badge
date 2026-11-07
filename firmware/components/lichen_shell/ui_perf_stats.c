@@ -42,3 +42,45 @@ size_t ui_perf_format(char *out, size_t cap, ui_perf_t const *p, uint32_t now_ms
                            wa % 10, wm / 10, wm % 10);
     return n < 0 ? 0 : (size_t)n;
 }
+
+void perf_hist_add(perf_hist_t *h, uint32_t us) {
+    uint32_t ms = us / 1000;
+    unsigned i  = ms > PERF_HIST_MAX_MS ? PERF_HIST_MAX_MS : ms;
+    if (h->bucket[i] < UINT16_MAX) {
+        h->bucket[i]++;
+    }
+    h->n++;
+}
+
+uint32_t perf_hist_p95_ms(perf_hist_t const *h) {
+    if (h->n == 0) {
+        return 0;
+    }
+    uint64_t need = ((uint64_t)h->n * 95 + 99) / 100; // samples at or below the 95th percentile, rounded up
+    uint64_t seen = 0;
+    for (unsigned i = 0; i <= PERF_HIST_MAX_MS; i++) {
+        seen += h->bucket[i];
+        if (seen >= need) {
+            return i + 1;
+        }
+    }
+    return PERF_HIST_MAX_MS + 1; // a saturated bucket lost counts: report "slow"
+}
+
+size_t ui_perf_format_latency(char *out, size_t cap, ui_perf_lat_t const *p, uint32_t first_frame_ms) {
+    char first[32] = "none yet";
+    if (first_frame_ms) {
+        snprintf(first, sizeof(first), "%u ms", (unsigned)first_frame_ms);
+    }
+    int n;
+    if (p->key.n == 0) {
+        n = snprintf(out, cap, "ui perf latency: render p95 %u ms, key-to-flush none, first frame at %s",
+                     (unsigned)perf_hist_p95_ms(&p->render_hist), first);
+    } else {
+        unsigned ka = tenths(perf_acc_avg_us(&p->key)), km = tenths(p->key.max_us);
+        n = snprintf(out, cap, "ui perf latency: render p95 %u ms, key-to-flush %u keys avg %u.%u max %u.%u p95 %u ms, first frame at %s",
+                     (unsigned)perf_hist_p95_ms(&p->render_hist), (unsigned)p->key.n, ka / 10, ka % 10, km / 10, km % 10,
+                     (unsigned)perf_hist_p95_ms(&p->key_hist), first);
+    }
+    return n < 0 ? 0 : (size_t)n;
+}

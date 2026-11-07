@@ -1,5 +1,6 @@
 #include "secure_wipe.h"
 #include "fw_console.h"
+#include "mem_fmt.h"
 
 #include "assets.h"
 #include "console_capture.h"
@@ -150,13 +151,11 @@ static void cmd_help(char const *args) {
 static void print_heap(char const *name, uint32_t caps) {
     multi_heap_info_t info;
     heap_caps_get_info(&info, caps);
-    console_reply(
-        "mem %s free %u largest %u min %u",
-        name,
-        (unsigned)info.total_free_bytes,
-        (unsigned)info.largest_free_block,
-        (unsigned)info.minimum_free_bytes
-    );
+    char line[160];
+    // total = free + allocated: what the heap manages, so the percentages in the standard have a denominator (#205)
+    mem_fmt_heap(line, sizeof(line), name, (uint32_t)info.total_free_bytes, (uint32_t)info.largest_free_block,
+                 (uint32_t)info.minimum_free_bytes, (uint32_t)(info.total_free_bytes + info.total_allocated_bytes));
+    console_reply("%s", line);
 }
 
 // "mem blocks [internal|dma|psram] [min bytes]": the allocated blocks of a heap, the ones of at least min bytes listed

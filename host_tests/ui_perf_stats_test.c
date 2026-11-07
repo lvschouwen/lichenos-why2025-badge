@@ -48,6 +48,41 @@ int main(void) {
     ui_perf_format(line, sizeof(line), &p, 0x00000100u);
     CHECK(strncmp(line, "ui perf: 1 frames in 0.5 s", 26) == 0);
 
+    // p95 (#205): 100 frames, 94 at 10.x ms and 6 at 40 ms: the 95th sample is a 40 ms one -> upper edge 41
+    perf_hist_t h = {0};
+    CHECK(perf_hist_p95_ms(&h) == 0);
+    for (int i = 0; i < 94; i++) {
+        perf_hist_add(&h, 10500);
+    }
+    for (int i = 0; i < 6; i++) {
+        perf_hist_add(&h, 40000);
+    }
+    CHECK(perf_hist_p95_ms(&h) == 41);
+    // 95 fast of 100: the 95th sample is still fast -> 11
+    perf_hist_t h2 = {0};
+    for (int i = 0; i < 95; i++) {
+        perf_hist_add(&h2, 10500);
+    }
+    for (int i = 0; i < 5; i++) {
+        perf_hist_add(&h2, 80000);
+    }
+    CHECK(perf_hist_p95_ms(&h2) == 11);
+    perf_hist_t h3 = {0};
+    perf_hist_add(&h3, 5000000); // slower than the last bucket
+    CHECK(perf_hist_p95_ms(&h3) == PERF_HIST_MAX_MS + 1);
+
+    // The latency line: no keys yet, then keys
+    ui_perf_lat_t lat = {0};
+    ui_perf_format_latency(line, sizeof(line), &lat, 0);
+    CHECK(strcmp(line, "ui perf latency: render p95 0 ms, key-to-flush none, first frame at none yet") == 0);
+    perf_acc_add(&lat.key, 20000);
+    perf_hist_add(&lat.key_hist, 20000);
+    perf_acc_add(&lat.key, 40000);
+    perf_hist_add(&lat.key_hist, 40000);
+    perf_hist_add(&lat.render_hist, 12000);
+    ui_perf_format_latency(line, sizeof(line), &lat, 1234);
+    CHECK(strcmp(line, "ui perf latency: render p95 13 ms, key-to-flush 2 keys avg 30.0 max 40.0 p95 41 ms, first frame at 1234 ms") == 0);
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -37,6 +37,8 @@ void ui_probe_init(void);           // registers "fw ui"
 void ui_probe_send(char const *seq); // "fw keys send <seq>"
 void ui_check_start(void);           // #89: 1 s LVGL object-tree check, registers "fw uicheck"
 // ui_perf.c: frame timing from the display events (#93); "fw ui perf ..." (ui_probe.c dispatches it)
+void ui_perf_early(lv_display_t *disp); // the display events, from the boot screen on, so the first flush is seen (#205)
+void ui_perf_watch_keys(lv_indev_t *keys); // stamps key presses for the key-to-flush latency (#205)
 void ui_perf_start(void);
 void ui_perf_cmd(char const *args);
 

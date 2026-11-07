@@ -556,6 +556,7 @@ void shell_attach_keys(lv_indev_t *indev) {
     lvgl_port_lock(0);
     keys = indev;
     lv_indev_add_event_cb(keys, on_key, LV_EVENT_KEY, NULL);
+    ui_perf_watch_keys(keys);
     screen_idle_start(); // no keyboard, no timeout: nothing could wake the screen
     if (frames[0].screen) {
         focus_keys();
@@ -615,6 +616,7 @@ static bool boot_screen_shown;
 void shell_boot_screen(lv_display_t *display) {
     lvgl_port_lock(0);
     lv_display_set_default(display);
+    ui_perf_early(display);
     lv_obj_t *boot = boot_screen_create();
     lv_screen_load_anim(boot, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, true); // drops LVGL's empty start screen
     boot_screen_shown = true;
