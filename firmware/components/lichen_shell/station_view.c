@@ -16,6 +16,7 @@
 #include "lichen_clock.h"
 #include "lichen_ui.h"
 #include "theme.h"
+#include "shell_ui_ops.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -283,7 +284,7 @@ lv_obj_t *station_view_line2(station_view_t const *v) {
 }
 
 // lichen_ui.h's station clock for an app (#180): the Clock app's layout, under the status bar, a small dim second line
-bool lichen_station_clock(lv_obj_t *screen, void (*update_line2)(lv_obj_t *line2)) {
+bool lichen_station_clock_impl(lv_obj_t *screen, void (*update_line2)(lv_obj_t *line2)) {
     lv_obj_update_layout(screen);
     int32_t line1_h = lv_font_get_line_height(lichen_font(LICHEN_FONT_LARGE));
     int32_t line2_h = lv_font_get_line_height(lichen_font(LICHEN_FONT_SMALL));
@@ -297,6 +298,6 @@ bool lichen_station_clock(lv_obj_t *screen, void (*update_line2)(lv_obj_t *line2
     return station_view_create(screen, &cfg) != NULL;
 }
 
-bool lichen_date_text(char *out, size_t cap) {
+bool lichen_date_text_impl(char *out, size_t cap) {
     return saver_date_text(out, cap);
 }

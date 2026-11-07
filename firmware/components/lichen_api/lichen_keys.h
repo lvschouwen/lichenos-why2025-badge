@@ -1,8 +1,8 @@
 #pragma once
 // The keyboard below LVGL for an app (#180): every TCA8418 event, the keys the OS drops before LVGL included (shape keys,
 // Fn, Ctrl ...). For a screen that tests or remaps the keyboard (the Keyboard test); any other app takes keys as LVGL
-// keys through its group. Implemented by the shell (lichen_shell's raw_keys.c), resolved at link time as lichen_ui.h's
-// navigation. key_matrix.h names the codes and draws the printed layout.
+// keys through its group. The shell's (raw_keys.c), forwarded by the gate as lichen_ui.h's navigation
+// (lichen_ui_ops.h, #221). key_matrix.h names the codes and draws the printed layout.
 
 #include <stdbool.h>
 #include <stdint.h>

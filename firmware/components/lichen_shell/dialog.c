@@ -12,6 +12,7 @@
 #include "shell_parts.h"
 #include "theme.h"
 #include "ui_text.h"
+#include "shell_ui_ops.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -220,7 +221,7 @@ static void copy_text(char *dst, size_t max, char const *src) {
     dst[n] = '\0';
 }
 
-bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done) {
+bool shell_dialog_countdown_impl(shell_dialog_t const *d, shell_dialog_fn done) {
     portENTER_CRITICAL(&want_lock);
     copy_text(want.title, TEXT_MAX, d->title);
     copy_text(want.prefix, TEXT_MAX, d->count_prefix);
@@ -244,7 +245,7 @@ bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done) {
     return ok;
 }
 
-void shell_dialog_close(void) {
+void shell_dialog_close_impl(void) {
     portENTER_CRITICAL(&want_lock);
     bool was = want_open;
     want_open = false;

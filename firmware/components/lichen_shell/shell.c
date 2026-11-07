@@ -22,6 +22,7 @@
 #include "text_entry.h"
 #include "theme.h"
 #include "update_screen.h"
+#include "shell_ui_ops.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -61,7 +62,7 @@ bool shell_up(void) {
     return up;
 }
 
-void shell_style_screen(lv_obj_t *screen) {
+void shell_style_screen_impl(lv_obj_t *screen) {
     lv_obj_set_style_bg_color(screen, lv_color_hex(THEME_BG), 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(screen, lv_color_hex(THEME_TEXT), 0);
@@ -137,7 +138,7 @@ static void go_back(void *arg) {
 static bool   (*building_esc)(void *); // set by shell_on_esc() while shell_open() runs a builder
 static void    *building_esc_arg;
 
-void shell_on_esc(bool (*fn)(void *arg), void *arg) {
+void shell_on_esc_impl(bool (*fn)(void *arg), void *arg) {
     building_esc     = fn;
     building_esc_arg = arg;
 }
@@ -145,7 +146,7 @@ void shell_on_esc(bool (*fn)(void *arg), void *arg) {
 static void  (*building_search)(void *); // shell_on_search(), the same way
 static void   *building_search_arg;
 
-void shell_on_search(void (*fn)(void *arg), void *arg) {
+void shell_on_search_impl(void (*fn)(void *arg), void *arg) {
     building_search     = fn;
     building_search_arg = arg;
 }
@@ -175,7 +176,7 @@ void shell_esc(void) {
 
 // shell_back and the app API's shell_back_then / shell_back_to (lichen_ui.h) may be called from a task other than LVGL's,
 // and lv_malloc / lv_async_call are not thread safe: they take the (recursive) LVGL lock (#118)
-void shell_back(void) {
+void shell_back_impl(void) {
     lvgl_port_lock(0);
     lv_async_call(go_back, NULL);
     lvgl_port_unlock();
@@ -225,15 +226,15 @@ static bool back_later(lv_obj_t *target, void (*then)(void *), void *arg) {
     return queued;
 }
 
-bool shell_back_then(void (*then)(void *), void *arg) {
+bool shell_back_then_impl(void (*then)(void *), void *arg) {
     return back_later(NULL, then, arg);
 }
 
-bool shell_back_to(lv_obj_t *screen, void (*then)(void *), void *arg) {
+bool shell_back_to_impl(lv_obj_t *screen, void (*then)(void *), void *arg) {
     return back_later(screen, then, arg);
 }
 
-lv_obj_t *shell_stack_screen(int from_top) {
+lv_obj_t *shell_stack_screen_impl(int from_top) {
     lvgl_port_lock(0);
     int       at     = nav_depth() - 1 - from_top;
     lv_obj_t *screen = from_top >= 0 && at >= 0 ? frames[at].screen : NULL;
@@ -302,7 +303,7 @@ static void first_run_cb(lv_timer_t *timer) {
     setup_start();
 }
 
-void shell_home(void) {
+void shell_home_impl(void) {
     lvgl_port_lock(0);
     if (frames[0].screen) {
         // Home first, then the screens it replaces: never delete the one that is showing
@@ -386,12 +387,12 @@ void shell_arrange_home(bool rebuild) {
     lvgl_port_unlock();
 }
 
-void shell_scroll_tame(lv_obj_t *obj) {
+void shell_scroll_tame_impl(lv_obj_t *obj) {
     lv_obj_set_scroll_elastic(obj, false);
     lv_obj_set_scroll_momentum(obj, false);
 }
 
-void shell_scroll_by(lv_obj_t *obj, int32_t dy) {
+void shell_scroll_by_impl(lv_obj_t *obj, int32_t dy) {
     // From where a running animation is heading, not from where it is drawn (a burst of keys would lose steps, #34);
     // clamped to the content: content that fits has nothing to scroll
     lv_point_t end;
@@ -405,7 +406,7 @@ void shell_scroll_by(lv_obj_t *obj, int32_t dy) {
 // animation) before the object's own key handler runs, and that jump kills shell_scroll_by's animation (#34). Every
 // shell page that takes the keys moves its own selection or scrolls itself, so none keeps LVGL's arrow scrolling
 // (#124, #128)
-void shell_no_arrow_scroll(lv_obj_t *obj) {
+void shell_no_arrow_scroll_impl(lv_obj_t *obj) {
     lv_obj_set_scroll_with_arrow(obj, false);
 }
 
@@ -438,11 +439,11 @@ void shell_open_app(size_t index) {
 
 static unsigned reused_count; // shell_open calls answered by a screen that was already open (#148)
 
-unsigned shell_open_reuse_count(void) {
+unsigned shell_open_reuse_count_impl(void) {
     return reused_count;
 }
 
-bool shell_screen_open(int screen_id, uint32_t key) {
+bool shell_screen_open_impl(int screen_id, uint32_t key) {
     int frame;
     lvgl_port_lock(0);
     bool open = nav_decide(screen_id, key, &frame) != NAV_OPEN_NEW;
@@ -450,7 +451,7 @@ bool shell_screen_open(int screen_id, uint32_t key) {
     return open;
 }
 
-void shell_open_count_reuse(void) {
+void shell_open_count_reuse_impl(void) {
     reused_count++;
 }
 
@@ -470,15 +471,7 @@ static void reuse_open(nav_open_t how, int frame, int screen_id) {
     }
 }
 
-uint32_t shell_key_hash(void const *data, size_t len) {
-    return nav_key_hash(data, len);
-}
-
-void shell_open(lv_obj_t *(*build)(void), int screen_id) {
-    shell_open_keyed(build, screen_id, 0);
-}
-
-void shell_open_keyed(lv_obj_t *(*build)(void), int screen_id, uint32_t key) {
+void shell_open_keyed_impl(lv_obj_t *(*build)(void), int screen_id, uint32_t key) {
     lvgl_port_lock(0);
     if (!frames[0].screen || home_settling()) {
         ESP_LOGW(TAG, "screen %d not opened (still booting)", screen_id);
@@ -614,6 +607,7 @@ static void cmd_keys(char const *args) {
 static bool boot_screen_shown;
 
 void shell_boot_screen(lv_display_t *display) {
+    shell_ui_ops_register(); // the boot screen styles itself through the gate (#221)
     lvgl_port_lock(0);
     lv_display_set_default(display);
     ui_perf_early(display);
@@ -679,6 +673,7 @@ void shell_show_restarting(void) {
 }
 
 void shell_start(lv_display_t *display) {
+    shell_ui_ops_register(); // the gate's navigation calls reach this shell from now on (#221); again if the boot screen did
     // The boot screen is already up (shell_boot_screen), so the LVGL task renders while this runs: every LVGL call
     // below (display events, timers, objects) needs the lock, or a realloc races the LVGL task's walk (#118)
     lvgl_port_lock(0);

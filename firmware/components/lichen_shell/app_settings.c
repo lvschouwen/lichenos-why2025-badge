@@ -27,6 +27,7 @@
 #include "theme.h"
 #include "tz_table.h"
 #include "wifi_list.h"
+#include "shell_ui_ops.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -74,7 +75,7 @@ static bool settings_tile(char *l1, size_t c1, char *l2, size_t c2) {
 
 // ---- screens -----------------------------------------------------------------------------------------------------
 
-lv_obj_t *shell_page_create(void) {
+lv_obj_t *shell_page_create_impl(void) {
     lv_obj_t *screen = lv_obj_create(NULL);
     shell_style_screen(screen);
     lv_obj_set_style_pad_top(screen, THEME_STATUS_BAR_H + THEME_PAD, 0);

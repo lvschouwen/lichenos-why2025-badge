@@ -17,7 +17,9 @@
 # release_notes.c (release_notes_test.c, #13; notes_app.c is the Release notes app and "This is new", notes_render.c its markdown).
 # app_files.c is the Files app (#71): files_job.c runs its file work off the LVGL task, files_ops.c is plain POSIX
 # (files_ops_test.c) and files_model.c the paths, protected list, sort and text paging (files_model_test.c).
-# shell.c, boot_screen.c, status_bar.c and logo.c are the LVGL screens; shell.c and app_settings.c implement lichen_ui.h.
+# shell.c, boot_screen.c, status_bar.c and logo.c are the LVGL screens; shell_ui_ops.c hands the gate the table of the
+# shell functions behind lichen_ui.h and lichen_keys.h (#221: shell.c, app_settings.c, dialog.c, screen_saver.c,
+# station_view.c, raw_keys.c), so nothing below the shell links to them.
 # Release notes (#13): firmware/release_notes/<seq>-<date>.md are embedded as rodata; rn_files[] (release_notes.h) is a
 # table of them generated here, so adding a note is just adding a file (CONFIGURE_DEPENDS re-runs this when one appears).
 if(CMAKE_SCRIPT_MODE_FILE) # IDF's early requirements pass: CONFIGURE_DEPENDS is not allowed there
@@ -46,7 +48,7 @@ if(NOT "${RN_OLD}" STREQUAL "${RN_C}")
     file(WRITE ${RN_TABLE} "${RN_C}")
 endif()
 
-idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_render.c" "log_store.c" "log_ring.c" "nav.c" "shell.c" "home.c" "home_layout.c"
+idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_render.c" "log_store.c" "log_ring.c" "nav.c" "shell.c" "shell_ui_ops.c" "home.c" "home_layout.c"
                             "app_settings.c" "attention.c" "attention_policy.c" "app_about.c" "station_view.c" "raw_keys.c" "app_icons.c" "wifi_screen.c" "wifi_analyser_screen.c" "setup_state.c" "setup_screens.c" "ui_keys.c" "ui_overflow.c" "ui_probe.c" "remote_ctl.c" "ui_remote.c"
                             "boot_screen.c" "status_bar.c" "lora_activity.c" "link_state.c" "logo.c" "update_status.c" "update_mode.c" "update_screen.c" "shot_blend.c" "screenshot.c" "time_fields.c" "time_set_screen.c"
                             "dialog.c" "dialog_countdown.c" "ui_check.c" "ui_perf.c" "ui_perf_stats.c" "app_bench.c" "bench_calc.c" "app_crashlog.c" "app_power.c" "app_console.c" "console_model.c"

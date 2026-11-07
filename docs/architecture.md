@@ -273,7 +273,9 @@ that no baseline can excuse: forbidden symbols, libraries and headers outside th
 `${VAR}` in a `REQUIRES` list. Rule C counts per object file, A per edge, B per include line. A function a
 `lichen_api` header declares and `lichen_os` defines counts as the gate's for rule C (#220: `lichen_os` implements the
 header API, its `peer lichen_os lichen_api` line says so); the headers decide, and `tools/gate_manifest.txt` must match
-them on every build (`--gen-manifest`). Gate functions the shell defines stay upward edges until the ops table (#221). Apps (`mesh`) still have
+them on every build (`--gen-manifest`). The shell's navigation, dialog, station clock and raw keys (`lichen_ui.h`, `lichen_keys.h`) are defined by the gate
+itself: `lichen_ui_ops.c` forwards them to the `lichen_ui_ops_t` table the shell sets in `shell_boot_screen` and
+`shell_start`, with a defined "not up" answer before (#221), so no caller links upward to the shell. Apps (`mesh`) still have
 named `peer` lines in `layers.conf` for `lichen_notify`, `lichen_clock`, `lichen_random`, `lora`, `fw_console` and
 `psram_guard`: they are debts the app surface removes, not part of the target matrix above.
 

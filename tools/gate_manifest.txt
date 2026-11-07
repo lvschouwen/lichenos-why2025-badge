@@ -118,6 +118,7 @@ lichen_task_console_register	BACKGROUND	unspecified	lichen_task.h
 lichen_task_leftovers	BACKGROUND	unspecified	lichen_task.h
 lichen_task_start	BACKGROUND	unspecified	lichen_task.h
 lichen_ui_call	-	any	lichen_ui.h
+lichen_ui_ops_set	SYSTEM	any	lichen_ui_ops.h
 lichen_ui_with_group	-	lvgl	lichen_ui.h
 list_filter_edit	-	unspecified	list_filter.h
 list_filter_is_hex	-	unspecified	list_filter.h

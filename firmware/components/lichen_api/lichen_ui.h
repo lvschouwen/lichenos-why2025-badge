@@ -6,9 +6,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// The shell's navigation for apps (#84): open a screen, go back, scroll. Implemented by the shell (lichen_shell's
-// shell.c and app_settings.c), resolved at link time; lichen_ui_call and lichen_ui_with_group are the UI service's
-// (lichen_os/lichen_ui_call.c, #220), the label and heading helpers the gate's own (lichen_ui.c).
+// The shell's navigation for apps (#84): open a screen, go back, scroll. The shell does the work: the gate forwards
+// these calls to the table the shell sets at boot (lichen_ui_ops.h, #221), and until then each has a defined "not up"
+// answer (nothing, false, NULL, 0). shell_key_hash is the gate's own; lichen_ui_call and lichen_ui_with_group are the UI
+// service's (lichen_os/lichen_ui_call.c, #220), the label and heading helpers the gate's own (lichen_ui.c).
 //
 // Thread rule (#238), stated in each function's comment and copied into tools/gate_manifest.txt: "any task" = the
 // function takes the LVGL port lock itself (or touches no LVGL state), so any task may call it; "LVGL task only" = it
@@ -123,8 +124,8 @@ bool lichen_screen_locked(void);
 // The Swiss railway style station clock (#122), the screensaver's dial as an app's view: fills screen's content area
 // with the dial, the date under it and a small dim second line that update_line2(line2) sets once a second (NULL: left
 // empty). Its own timer and PSRAM canvas, freed with the screen; the sweep pauses while another screen covers it. False
-// when there is no PSRAM for the dial (nothing was added): show the time another way. Implemented by the shell
-// (station_view.c). LVGL task only.
+// when there is no PSRAM for the dial (nothing was added), or before the shell is up: show the time another way. The
+// shell's (station_view.c). LVGL task only.
 bool lichen_station_clock(lv_obj_t *screen, void (*update_line2)(lv_obj_t *line2));
 // The date line as the station clock writes it ("~ " first while the time is unverified); false and "Clock not set"
 // when the clock is not set. Any task (no LVGL state).

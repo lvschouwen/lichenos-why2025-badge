@@ -6,6 +6,7 @@
 #include "keyboard.h"
 #include "lichen_keys.h"
 #include "lvgl.h"
+#include "shell_ui_ops.h"
 
 #include <stdatomic.h>
 
@@ -122,7 +123,7 @@ static void to_app(key_raw_event_t const *ev, void *arg) {
     }
 }
 
-bool lichen_keys_raw_take(lichen_raw_key_fn fn, void *arg) {
+bool lichen_keys_raw_take_impl(lichen_raw_key_fn fn, void *arg) {
     if (!fn || app_fn) {
         ESP_LOGW(TAG, "raw keys %s", fn ? "already taken by an app" : "taken without a listener");
         return false;
@@ -137,7 +138,7 @@ bool lichen_keys_raw_take(lichen_raw_key_fn fn, void *arg) {
     return true;
 }
 
-void lichen_keys_raw_release(lichen_raw_key_fn fn, void *arg) {
+void lichen_keys_raw_release_impl(lichen_raw_key_fn fn, void *arg) {
     if (!app_fn || app_fn != fn || app_arg != arg) {
         return;
     }

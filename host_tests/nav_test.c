@@ -77,11 +77,7 @@ int main(void) {
     CHECK(nav_decide(9, NAV_KEY_UNIQUE, &frame) == NAV_OPEN_NEW); // "always new" never matches
     CHECK(nav_push_keyed(9, NAV_KEY_UNIQUE));
     CHECK(nav_decide(9, 0, &frame) == NAV_OPEN_NEW);
-    CHECK(nav_key_hash("ab", 2) != nav_key_hash("ba", 2));
-    CHECK(nav_key_hash("ab", 2) == nav_key_hash("ab", 2));
-    CHECK(nav_key_hash("", 0) != NAV_KEY_UNIQUE);
-    // 0xf0 0x9a 0xee 0x00 0xcc hashes to exactly NAV_KEY_UNIQUE under FNV-1a: it is remapped, never handed out
-    CHECK(nav_key_hash("\xf0\x9a\xee\x00\xcc", 5) == 0);
+    // The keys themselves come from the gate's shell_key_hash (ui_ops_test.c, #221)
 
     // A full stack still answers for the screens on it: the bottom one goes BACK_TO, a new one is refused
     nav_reset();

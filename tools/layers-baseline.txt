@@ -88,26 +88,7 @@ C	c6link:wifi_saved_pick	1
 C	c6link:wifi_saved_wipe	1
 C	c6link:wifi_ssid_sanitize	1
 C	fw_console:nvs_open	1
-C	lichen_api:shell_back_then	1
-C	lichen_api:shell_dialog_countdown	1
-C	lichen_api:shell_on_esc	1
-C	lichen_api:shell_on_search	1
-C	lichen_api:shell_open	2
-C	lichen_api:shell_page_create	1
-C	lichen_api:shell_screen_open	2
-C	lichen_api:shell_scroll_by	2
-C	lichen_api:shell_scroll_tame	2
-C	lichen_api:shell_style_screen	1
-C	lichen_apps:lichen_date_text	1	# moved from shell, #221 removes
-C	lichen_apps:lichen_keys_raw_release	1	# moved from shell, #221 removes
-C	lichen_apps:lichen_keys_raw_take	1	# moved from shell, #221 removes
 C	lichen_apps:lichen_sensors_get	1	# moved from shell, #221 removes
-C	lichen_apps:lichen_station_clock	1	# moved from shell, #221 removes
-C	lichen_apps:shell_back	1	# moved from shell, #221 removes
-C	lichen_apps:shell_back_to	1	# moved from shell, #221 removes
-C	lichen_apps:shell_dialog_countdown	1	# moved from shell, #221 removes
-C	lichen_apps:shell_open	2	# moved from shell, #221 removes
-C	lichen_apps:shell_page_create	2	# moved from shell, #221 removes
 C	lichen_haptics:lichen_notify_set_feedback	1
 C	lichen_haptics:nvs_open	1
 C	lichen_led:lichen_notify_dnd	1
@@ -242,18 +223,3 @@ C	main:lvgl_port_unlock	1
 C	mesh:heap_caps_calloc	1
 C	mesh:heap_caps_malloc	1
 C	mesh:heap_caps_realloc	1
-C	mesh:shell_back_then	1
-C	mesh:shell_back_to	5
-C	mesh:shell_dialog_countdown	7
-C	mesh:shell_home	1
-C	mesh:shell_key_hash	8
-C	mesh:shell_on_esc	2
-C	mesh:shell_on_search	1
-C	mesh:shell_open	10
-C	mesh:shell_open_count_reuse	1
-C	mesh:shell_open_keyed	9
-C	mesh:shell_page_create	17
-C	mesh:shell_screen_open	2
-C	mesh:shell_scroll_by	1
-C	mesh:shell_scroll_tame	2
-C	mesh:shell_stack_screen	1

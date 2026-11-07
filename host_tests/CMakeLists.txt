@@ -1619,3 +1619,15 @@ add_executable(os_name_test
 target_include_directories(os_name_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(os_name_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME os_name_test COMMAND os_name_test)
+
+# The gate forwards lichen_ui.h / lichen_keys.h to the shell's table, with a defined answer before it is set (#221)
+add_executable(ui_ops_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/ui_ops_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/lichen_ui_ops.c
+)
+target_include_directories(ui_ops_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs_lvgl
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
+)
+target_compile_options(ui_ops_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME ui_ops_test COMMAND ui_ops_test)

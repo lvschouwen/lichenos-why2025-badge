@@ -28,8 +28,6 @@ nav_open_t nav_decide(int screen_id, uint32_t key, int *frame);
 bool nav_push_keyed(int screen_id, uint32_t key);
 // nav_push_keyed with key 0
 bool nav_push(int screen_id);
-// FNV-1a of data, a key for a screen that shows one of many things (never NAV_KEY_UNIQUE)
-uint32_t nav_key_hash(void const *data, size_t len);
 // The key at stack position index, 0 past the top
 uint32_t nav_key_at(int index);
 // Leaves the current screen; returns the one now on top. At home it stays home.

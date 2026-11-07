@@ -22,6 +22,7 @@
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "theme.h"
+#include "shell_ui_ops.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -357,7 +358,7 @@ bool screen_lock_active(void) {
     return atomic_load(&locked);
 }
 
-bool lichen_screen_locked(void) {
+bool lichen_screen_locked_impl(void) {
     return screen_lock_active();
 }
 

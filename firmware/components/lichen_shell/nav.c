@@ -39,14 +39,6 @@ bool nav_push(int screen_id) {
     return nav_push_keyed(screen_id, 0);
 }
 
-uint32_t nav_key_hash(void const *data, size_t len) {
-    uint32_t h = 2166136261u; // FNV-1a
-    for (size_t i = 0; i < len; i++) {
-        h = (h ^ ((uint8_t const *)data)[i]) * 16777619u;
-    }
-    return h == NAV_KEY_UNIQUE ? 0 : h;
-}
-
 uint32_t nav_key_at(int index) {
     return index >= 0 && index < depth ? keys[index] : 0;
 }
