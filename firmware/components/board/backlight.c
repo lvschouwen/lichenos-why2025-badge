@@ -207,8 +207,8 @@ static void r16_detect(void) {
     console_reply("r16: GPIO5 high at display %u/%u/%u %%: %u/%u/%u of %u -> %s", r16_detect_level[0], r16_detect_level[1],
                   r16_detect_level[2], (unsigned)s.high[0], (unsigned)s.high[1], (unsigned)s.high[2], R16_SAMPLES,
                   r16_fit_name(fit));
-    if (fit != R16_UNKNOWN && store_set) {
-        store_set(BACKLIGHT_KEY_R16, (uint8_t)fit);
+    if (fit != R16_UNKNOWN && !(store_set && store_set(BACKLIGHT_KEY_R16, (uint8_t)fit))) {
+        console_reply("r16: not saved");
     }
 }
 

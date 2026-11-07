@@ -32,6 +32,10 @@ static bool fake_set(char const *key, uint8_t value) {
 }
 
 static void test_store(void) {
+    // the keys are the badge_fw ones from before #224: renaming one would silently reset the saved levels
+    CHECK(strcmp(BACKLIGHT_KEY_DISPLAY, "bl_disp") == 0);
+    CHECK(strcmp(BACKLIGHT_KEY_KEYBOARD, "bl_kbd") == 0);
+    CHECK(strcmp(BACKLIGHT_KEY_R16, "r16") == 0);
     uint8_t d = 1, k = 1;
     backlight_levels_load(NULL, &d, &k); // not bound yet
     CHECK(d == BACKLIGHT_DEFAULT_DISPLAY && k == BACKLIGHT_DEFAULT_KEYBOARD);

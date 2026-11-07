@@ -1,5 +1,7 @@
 #pragma once
 
+#include "backlight_level.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -9,7 +11,7 @@
 void backlight_start(void);
 // Where the levels and the R16 result are kept (the settings service, #224): board opens no NVS. Call before
 // backlight_restore(); until then the defaults apply and nothing is saved.
-void backlight_bind_store(uint8_t (*get)(char const *key, uint8_t def), bool (*set)(char const *key, uint8_t value));
+void backlight_bind_store(backlight_get_u8_fn get, backlight_set_u8_fn set);
 // Applies the levels now, saves nothing (a slider being dragged)
 void backlight_set(uint8_t display, uint8_t keyboard);
 // Screen timeout (#43): its own levels (dim, or 0 0 = off), not clamped to BACKLIGHT_DISPLAY_MIN, never saved and not

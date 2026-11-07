@@ -124,6 +124,14 @@ static void print_raw(void) {
     );
 }
 
+// on is the default, so on is no key at all
+static bool save_boot(bool on) {
+    if (on) {
+        return store_erase && store_erase(SENSORS_BOOT_KEY);
+    }
+    return store_set && store_set(SENSORS_BOOT_KEY, 0);
+}
+
 static void cmd_sensors(char const *args) {
     if (args[0] == '\0') {
         print_lines();
@@ -139,7 +147,7 @@ static void cmd_sensors(char const *args) {
         console_reply("sensors: start at boot %s", sensors_boot_start() ? "on" : "off");
     } else if (strcmp(args, "boot on") == 0 || strcmp(args, "boot off") == 0) {
         bool on = args[6] == 'n';
-        bool ok = on ? store_erase && store_erase(SENSORS_BOOT_KEY) : store_set && store_set(SENSORS_BOOT_KEY, 0); // on is the default
+        bool ok = save_boot(on);
         console_reply("sensors: start at boot %s (%s)", on ? "on" : "off", ok ? "saved" : "not saved");
     } else {
         console_reply("sensors [raw|start|stop|boot [on|off]]");
