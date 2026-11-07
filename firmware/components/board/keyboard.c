@@ -6,6 +6,7 @@
 #include "esp_tca8418.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "kbd_map.h"
 #include "raw_hooks.h"
@@ -43,12 +44,42 @@ static void (*_Atomic gate_reset_hook)(void);                // ... told when ev
 static bool           woke[0x51];              // presses the wake hook swallowed: their releases go nowhere either
 
 static raw_hooks_t hooks;              // raw_hooks.h: no lock, so this task never waits on a hook's remover (#251)
-static _Atomic(TaskHandle_t) poll_handle; // the keyboard task: a hook that removes a hook runs here and must not wait
+static _Atomic(TaskHandle_t) poll_handle; // the keyboard task: a hook that adds or removes a hook runs here
+// One add or remove at a time from the other tasks, held through a remover's wait. The keyboard task never takes it:
+// its holder may be waiting for the hook call the keyboard task is in.
+static StaticSemaphore_t            mutators_buf;
+static _Atomic(SemaphoreHandle_t)   mutators;
+static atomic_int                   mutators_once; // 0 none, 1 being made, 2 made
 
 static_assert(KEYBOARD_RAW_MAX == RAW_HOOKS_MAX, "keyboard.h promises the table's size");
 
+// Made on first use: a hook may be added before keyboard_start
+static SemaphoreHandle_t mutators_lock(void) {
+    int none = 0;
+    if (atomic_compare_exchange_strong(&mutators_once, &none, 1)) {
+        atomic_store(&mutators, xSemaphoreCreateMutexStatic(&mutators_buf)); // static: cannot fail
+        atomic_store(&mutators_once, 2);
+    }
+    while (atomic_load(&mutators_once) != 2) {
+        vTaskDelay(1);
+    }
+    SemaphoreHandle_t m = atomic_load(&mutators);
+    xSemaphoreTake(m, portMAX_DELAY);
+    return m;
+}
+
+static bool in_hook(void) {
+    return xTaskGetCurrentTaskHandle() == atomic_load(&poll_handle);
+}
+
 bool keyboard_raw_add(key_raw_fn fn, void *arg) {
-    return raw_hooks_add(&hooks, fn, arg);
+    if (in_hook()) {
+        return raw_hooks_add(&hooks, fn, arg); // lock-free: the table's own exchange guards the claim
+    }
+    SemaphoreHandle_t m  = mutators_lock();
+    bool              ok = raw_hooks_add(&hooks, fn, arg);
+    xSemaphoreGive(m);
+    return ok;
 }
 
 static void wait_a_tick(void) {
@@ -56,8 +87,13 @@ static void wait_a_tick(void) {
 }
 
 void keyboard_raw_remove(key_raw_fn fn, void *arg) {
-    bool in_hook = xTaskGetCurrentTaskHandle() == atomic_load(&poll_handle);
-    raw_hooks_remove(&hooks, fn, arg, in_hook ? NULL : wait_a_tick);
+    if (in_hook()) {
+        raw_hooks_remove(&hooks, fn, arg, NULL); // no lock and no wait: the call in flight is this task's own
+        return;
+    }
+    SemaphoreHandle_t m = mutators_lock();
+    raw_hooks_remove(&hooks, fn, arg, wait_a_tick);
+    xSemaphoreGive(m);
 }
 
 // Offers the event to every hook; true = swallowed

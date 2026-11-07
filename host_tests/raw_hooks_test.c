@@ -37,6 +37,8 @@ static bool count(key_raw_event_t const *ev, void *arg) {
 static void test_add_run_remove(void) {
     raw_hooks_t h = {0};
     CHECK(!raw_hooks_run(&h, &EV)); // empty: nothing swallows
+    CHECK(!raw_hooks_add(&h, NULL, NULL)); // no live slot without a function: the run would call NULL
+    CHECK(!raw_hooks_run(&h, &EV));
     for (int i = 0; i < RAW_HOOKS_MAX; i++) {
         CHECK(raw_hooks_add(&h, count, (void *)(intptr_t)i));
     }

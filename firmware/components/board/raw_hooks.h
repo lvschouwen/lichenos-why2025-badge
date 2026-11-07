@@ -14,10 +14,14 @@
 //
 // A hook that removes itself (or another hook) runs on the calling task, and that call is still in flight: it passes
 // wait = NULL, which removes without waiting (waiting there would wait for itself forever).
+//
+// Adds and removes may race each other and the caller: a claim is a compare-exchange, and a generation in each slot's
+// state word keeps a remover from taking out a hook that took the slot over meanwhile. keyboard.c still serialises
+// the mutators on other tasks (a mutex), so at most one of them waits at a time.
 #define RAW_HOOKS_MAX 4
 
 typedef struct {
-    atomic_int          state;    // raw_hook_state_t
+    atomic_uint         word;     // state and generation, see raw_hooks.c
     _Atomic(key_raw_fn) fn;       // written only while claiming: stable while live or removing
     void *_Atomic       arg;
     atomic_uint         inflight; // raw_hooks_run is between looking at this slot and leaving it
@@ -27,7 +31,7 @@ typedef struct {
     raw_hook_slot_t slot[RAW_HOOKS_MAX];
 } raw_hooks_t; // all zero (static storage) is an empty table
 
-// False when every slot is taken. Any task.
+// False when every slot is taken or fn is NULL. Any task.
 bool raw_hooks_add(raw_hooks_t *h, key_raw_fn fn, void *arg);
 // Removes every slot holding (fn, arg). wait (e.g. a one-tick sleep) is called while a removed hook is still running;
 // NULL only from inside a hook (the task that runs them), where it does not wait.

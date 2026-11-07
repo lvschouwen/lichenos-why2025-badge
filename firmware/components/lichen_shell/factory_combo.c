@@ -160,6 +160,8 @@ void factory_combo_start(void) {
         ESP_LOGE(TAG, "no boot key combo: no task");
         return;
     }
+    // The task runs at least the 10 s window, so it is still alive for the store and the hook add below; only a
+    // stall of this task longer than that could let it end first (and leave the hook added after its remove)
     atomic_store(&task, started);
     if (!lichen_sys_keys_hook_add(on_raw, NULL)) {
         ESP_LOGE(TAG, "no boot key combo: no raw key hook free");
