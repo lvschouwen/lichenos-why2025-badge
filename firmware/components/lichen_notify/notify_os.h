@@ -43,7 +43,9 @@ typedef struct {
 } ln_toast_t;
 bool lichen_notify_next_toast(ln_toast_t *out); // false when none is waiting
 
-// Sound (#67), vibration (#68), status LED (#74): none yet, every member may be NULL. The shell fires them when it
+// Sound (#67), vibration (#68), status LED (#74): every member may be NULL; lichen_haptics sets vibrate.
+// lichen_notify_set_feedback replaces the whole struct: one owner registers all members, or a second caller drops
+// the first one's (sound must merge into the haptics registration, not call it again). The shell fires them when it
 // shows a toast that has feedback (led on), and when that toast goes (led off).
 typedef struct {
     void (*sound)(ln_level_t level);

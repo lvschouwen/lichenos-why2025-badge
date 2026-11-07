@@ -1,6 +1,6 @@
 #pragma once
 // The vibration motor service, OS side (#68). Apps use lichen_haptics.h. Motor M1 is switched by Q4 (BC847, low side)
-// from P4 GPIO8 through R49 (bridged at assembly on the badges that have it): high = motor on.
+// from P4 GPIO8 through R49 (not always bridged: on the bench badge no vibration was felt, #68, so it may need a solder bridge): high = motor on.
 // The pin is driven low and handed to LEDC PWM (timer 3, channel 7) as early as main.c can; a buzz is one 10 ms
 // esp_timer that runs only while it plays (no task, no allocation).
 
