@@ -47,8 +47,9 @@ Pure parts are pinned by `host_tests/two_chip_contract_test.c` (ids, CONFIG byte
 top of `lora_proto_test`, `i154_proto_test`, `c6_boot_policy_test`, `c6_watch_test`, `c6_paths_test` and `r16_hold_test`.
 No data migration: stored keys named here start from their defaults if they change.
 
-**Layer rule:** `c6link`, `lora` and `esp_hosted` are L2 drivers that own the link; services reach the C6 only through
-them (`tools/layers.conf` enforces it: the `esp_hosted_*` and `eh_*` symbols are owner-only for `c6link` and `lora`). The C6 image (`c6/`, Apache-2.0) stays outside the P4 layer model and
+**Layer rule:** `c6link` and `lora` are the L2 drivers that own the link, and `esp_hosted` (a vendored IDF component with
+no layer line) is reached only through them; services reach the C6 only through them too (`tools/layers.conf` enforces
+it: the `esp_hosted_*` and `eh_*` symbols are owner-only for `c6link` and `lora`). The C6 image (`c6/`, Apache-2.0) stays outside the P4 layer model and
 is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the P4 image.
 
 ### 1. ESP-Hosted Wi-Fi over SDIO
@@ -187,8 +188,8 @@ when one breaks:
 - FreeRTOS: Espressif's dual-core fork, V10.5.1 (ESP-IDF 6.1). The upstream SMP kernel (V11.1.0,
   `CONFIG_FREERTOS_SMP`) can't be selected for the P4: it depends on `IDF_TARGET_ESP32` and is marked "feature under
   development". Revisit when Espressif supports it on the P4.
-- Tick: move the P4 from 100 Hz to **1000 Hz** (the C6 already runs 1000). Gives 1 ms sleeps for the mesh loop, the
-  keyboard and LVGL, at under 0.5% CPU. Measure idle CPU and free DMA RAM before and after.
+- Tick: **1000 Hz** on both chips (`CONFIG_FREERTOS_HZ=1000`, #69): 1 ms sleeps for the mesh loop, the keyboard and
+  LVGL, at under 0.5% CPU.
 
 ## Cores on the P4
 
@@ -196,14 +197,13 @@ The rule: **core 1 draws, core 0 talks to the world.**
 
 | Core | Runs |
 |---|---|
-| 0, connectivity and services | ESP-Hosted SDIO tasks (prio 22), esp_timer (22), lwIP tcpip (18, pinned), LoRa link task (3), MeshCore and other apps' background parts (3), OTA server (5), console (5), keyboard polling (4), main |
-| 1, screen | the LVGL task (pinned; today it floats) and every app's screen code, which runs in LVGL's context |
+| 0, connectivity and services | ESP-Hosted SDIO tasks (prio 22), esp_timer (22), lwIP tcpip (18, pinned), LoRa link task (3), apps' background tasks (`lichen_task_start` classes BACKGROUND, SERVICE, JOB, URGENT), OTA server (5), console (5), keyboard polling (4), main |
+| 1, screen | the LVGL task (pinned: `board/display.c`, `task_affinity = 1`), every app's screen code, which runs in LVGL's context, and an app's main loop (`LICHEN_PRIO_APP_LOOP`: MeshCore's mesh task) |
 
 - The screen never stutters because of signature checks, Wi-Fi traffic or OTA decompression.
 - The radio path (C6 → LoRa task → queue → MeshCore) stays on one core.
 - The cost: during a large Wi-Fi push MeshCore gets less time; its queue absorbs that, because packets arrive seconds
   apart.
-- Today MeshCore is pinned to core 1 and LVGL floats: both change.
 - Apps never call LVGL from core 0; they hand data to their screen code through a copy taken under a lock (as
   `mesh_*_snapshot` does).
 
@@ -249,25 +249,26 @@ The rule: **core 1 draws, core 0 talks to the world.**
 
 ## Layers
 
-Status: **target design (OS v2, #216)**. Today the tree has three levels in practice (IDF/board/drivers, everything
-else, MeshCore) and about 300 call sites that break the layering below. They are listed in the layer baseline
-(`tools/layers-baseline.txt`, #218); new violations fail the build, the baseline only shrinks, and it reaches 0 at the
-W9 close-out (#237). Until then read this section as where the code is going, and the baseline as how far it is.
-The two-chip protocol is a separate contract: see "Two-chip contract" in this file.
+Status: **in force (OS v2, #216)**. `tools/check_layers.sh` reads `tools/layers.conf` and runs at the end of
+`build.sh build`; the layer baseline (`tools/layers-baseline.txt`, #218) is **0** since the W9 close-out (#237), so
+any new violation fails the build. The two-chip protocol is a separate contract: see "Two-chip contract" in this file.
 
-| Layer | What | Component(s) |
+| Layer | What | Component(s) in `tools/layers.conf` |
 |---|---|---|
-| L0 platform | IDF, FreeRTOS, the LVGL library, `fw_console` | `fw_console`, `psram_guard`, `lichen_random`, `assets`, `lichen_nvs` (#235 revisits it) |
-| L1 board/HAL | pins, buses, panel, no NVS | `board`, `storage`, `esp_lcd_st7703`, `esp_tca8418` |
-| L2 drivers | LoRa, C6 link, SD, sensors, keyboard chip | `lora`, `c6link`, `sdcard`, `sensors`, `lichen_led`, `lichen_haptics`, `battery`, `lichen_audio` |
-| L3 OS services | settings (the only NVS owner), fs, notify, clock, radio, net, power, display/UI (the only LVGL-lock owner), OTA, boot, app registry | `lichen_os` (the gate's implementations: settings, fs, crash log, radio, task and memory books, fonts, the LVGL-lock calls; #220), `lichen_notify`, `lichen_clock`, `lichen_net`, `lichen_boot`, `lichen_mdns`, `ota`, `crash` |
-| L4 the gate | headers and their pure logic, the gate's widgets, capability and identity checks, one ops table; no hardware dependencies | `lichen_api` |
+| L0 platform | IDF-level helpers every layer may use: console, PSRAM guard, random, assets, NVS init and encryption | `fw_console`, `psram_guard`, `lichen_random`, `assets`, `lichen_nvs` |
+| L1 board/HAL | pins, buses, panel, keyboard chip, storage drive; no NVS of its own (#224: settings arrive through a bound getter/setter) | `board`, `esp_lcd_st7703`, `esp_tca8418`, `storage` |
+| L2 drivers | radios (LoRa, the C6 link), SD card, sensors, LED, haptics, battery, audio | `sdcard`, `sensors`, `lora`, `c6link`, `lichen_led`, `lichen_haptics`, `battery`, `lichen_audio` |
+| L3 OS services | the gate's implementations and the services behind it | `lichen_os` (settings, fs, crash log, radio, task and memory books, fonts, the UI service; implements the gate's headers, #220), `lichen_notify` (implements the notification headers, #245), `lichen_clock`, `lichen_net`, `lichen_boot`, `lichen_mdns`, `ota`, `crash` |
+| L4 the gate | headers and their pure logic, the gate's widgets, one ops table; no hardware dependencies (may use L0 and itself only) | `lichen_api` |
 | L5 system | the shell and the system screens, a privileged client of the gate | `lichen_shell` |
-| L6 apps | the plain apps, MeshCore | `lichen_apps` (#180), `mesh` |
+| L6 apps | the plain apps and MeshCore, a closed profile | `lichen_apps` (#180), `mesh` |
+| main | the composition root, may use every layer | `main` |
 
-`main` is the composition root: it may only call init, start and stop of the layers. `layers.conf` lets `main` depend on every layer for now and catches its owner-only symbol uses; tightening that comes with #210.
+`main` should only call init, start and stop of the layers; `layers.conf` lets it depend on every layer and still
+catches its owner-only symbol uses. `esp_hosted` is a vendored IDF component, not a repo component: it has no layer
+line and is reached only through `c6link` and `lora`.
 
-**Allowed calls (a layer calls itself and the layers below it, with two exceptions):**
+**Allowed calls (a layer calls itself and the layers below it, with exceptions):**
 
 | From \ To | L0 | L1 | L2 | L3 | L4 | L5 |
 |---|---|---|---|---|---|---|
@@ -278,57 +279,100 @@ The two-chip protocol is a separate contract: see "Two-chip contract" in this fi
 | L5 shell | yes | no | no | no | yes (both surfaces) | |
 | L6 apps | yes (plain libs) | no | no | no | app surface only | no |
 
+(`layer-may` lines in `layers.conf`: L4 may use L0 and L4; L5 L0, L4 and L5; L6 L4 and L6, plus the named `peer` lines.)
+
 - **Callbacks go up, calls go down.** A lower layer never names a higher one. When it must tell a higher layer
-  something (the radio switch, a C6 event, a UI request) the higher layer registers a callback or fills an ops table
-  at boot (the Flipper "record" and Zephyr driver pattern). That also removes today's upward link-time edges (the gate
-  defining functions that live in the shell, drivers calling the gate).
-- **The shell reaches hardware and shared state only through the system surface**, never through drivers or
-  `board` directly. `lvgl_port_lock`, `nvs_open`, `heap_caps_*`, `xTaskCreate*` and `lv_group_set_default` become
-  owner-only symbols, with the owner listed per symbol.
+  something (the radio switch, a C6 event, a UI request, a notification's feedback) the higher layer registers a
+  callback or fills an ops table at boot (the Flipper "record" and Zephyr driver pattern). Examples: c6link's boot and
+  net hooks (`c6link/c6_hooks.h`), board's settings getter/setter, the shell's `lichen_ui_ops_t`.
+- **The shell reaches hardware and shared state only through the system surface**, never through drivers or `board`
+  directly. `lvgl_port_lock`, `nvs_open*`, `heap_caps_*`, `xTaskCreate*` and `lv_group_set_default` are owner-only
+  symbols with the owners listed per symbol in `layers.conf` (rule C).
+
+### The gate: its headers
+
+The gate **is its headers**: every function a `lichen_api` header declares is the gate. The implementers are `lichen_os`
+(L3, #220) and `lichen_notify` (L3, #245); `layers.conf` gives each a `peer ... lichen_api` line, and a call to such a
+function counts as a call to the gate, not to the service (`GATE_IMPL` in `tools/check_layers.py`). The gate itself
+never depends on the implementers. `tools/gate_manifest.txt` lists every declared function with its capability and
+thread rule and must match the headers on every build (`check_layers.sh --gen-manifest` regenerates it). Where a header
+needs a type that lives in a lower component, the gate repeats it and `lichen_os` (`lichen_sys_pure_view.c` and the
+like) asserts that the copies stay equal.
+
+The shell's navigation, dialog, station clock and raw keys (`lichen_ui.h`, `lichen_keys.h`) are defined by the gate
+itself: `lichen_ui_ops.c` forwards them to the `lichen_ui_ops_t` table the shell sets in `shell_boot_screen` and
+`shell_start`, with a defined "not up" answer before (#221), so no caller links upward to the shell.
+
+**Two surfaces** (per-header lines in [app-api.md](app-api.md)):
+- **App surface:** `lichen_*.h`, for L6 (the shell uses it too).
+- **System surface:** `lichen_sys_*.h`, for L5 and `main`. `forbid L6 lichen_sys_*` in `layers.conf` makes any app use a
+  rule C violation. The headers: `lichen_sys_ui.h` (the LVGL lock and UI calls, #225), `lichen_sys_display.h` (backlight
+  levels, #226), `lichen_sys_power.h` (screen off for power-off, #226), `lichen_sys_storage.h` (drive and SD card, #227),
+  `lichen_sys_update.h` (Wi-Fi update server setting, #227), `lichen_sys_crash.h` (crash-recovered flag, #227),
+  `lichen_sys_factory.h` (factory reset, #227), `lichen_sys_mem.h` (heap figures, #228), and from #244
+  `lichen_sys_clock.h`, `lichen_sys_net.h` (Wi-Fi and mDNS), `lichen_sys_boot.h` (boot progress and the console log
+  tap), `lichen_sys_keys.h` (keyboard hooks) and `lichen_sys_led.h` (status LED setting).
+- No syscall trap and no export table: the P4 runs everything in M-mode with no configurable MPU, and U-mode/TEE is
+  not available on it, so a trap would protect nothing and cost a context switch.
+
+**Capabilities (#229, still to come):** the manifest's capability column is a per-header seed (`-` = none). Per-app
+declarations in `layers.conf`, a build-time `nm` check (rule D) and a run-time refusal come with #229, and the
+identity, lifecycle and crash-attribution waves (#230-#233) after the MVP. Capabilities are an accident and audit
+guard, not a security boundary: apps are compiled in and share the address space.
+
+### Services behind the gate
+
 - **The UI service owns the LVGL lock** (#225, `lichen_os/lichen_ui_call.c`): the shell and main take it through
-  `lichen_sys_ui_lock`/`_unlock` and hand work over with `lichen_sys_ui_call` (`lichen_sys_ui.h`, system surface,
-  forbidden to apps); apps use `lichen_ui_call`; builders set the default group only through `lichen_ui_with_group`.
-  Calls for the LVGL task wait in a 16-entry FIFO that one `lv_async_call` drains per batch (a burst past it falls back
-  to one async call each, as before). Order is FIFO among UI-service calls; a raw `lv_async_call` (LVGL-task code)
-  stays newest first, and the two do not order against each other. `board` keeps the port lock for the port setup at
-  boot (display, keyboard). The lock-owner check (`CONFIG_LICHEN_UI_LOCK_CHECK_MODE`: off, count (default), assert)
-  has the linker wrap LVGL's allocator and `lv_inv_area`; once `main.c` arms it after the keyboard is set up, LVGL
-  touched by a task that is neither the LVGL task nor inside `lichen_sys_ui_lock` is a hit: counted with the first hit
-  per call site logged (`fw ui lockcheck [reset]`), or an assert. This project has no build with assertions off, so the
-  chosen mode is in every image.
+  `lichen_sys_ui_lock`/`_unlock` and hand work over with `lichen_sys_ui_call`; apps use `lichen_ui_call`; builders set
+  the default group only through `lichen_ui_with_group`. Calls for the LVGL task wait in a 16-entry FIFO that one
+  `lv_async_call` drains per batch (a burst past it falls back to one async call each). Order is FIFO among
+  UI-service calls; a raw `lv_async_call` stays newest first, and the two do not order against each other. `board`
+  keeps the port lock for the port setup at boot (display, keyboard) only: it sits below `lichen_os`.
+- **The lock-owner check** (`CONFIG_LICHEN_UI_LOCK_CHECK_MODE`: off, **count (default)**, assert): the linker wraps
+  LVGL's allocator and `lv_inv_area`; once `main.c` arms it after the keyboard is set up, LVGL touched by a task that
+  is neither the LVGL task nor inside `lichen_sys_ui_lock` is a hit. In count mode the hits are counted and the first
+  per call site is logged; read them with `fw ui lockcheck` (`lockcheck reset` clears). The MVP bench wants 0 hits
+  (`docs/mvp-bench.md`). Assert mode aborts instead. This project has no build with assertions off, so the chosen mode
+  is in every image.
+- **The task book and the memory book** (#181, `lichen_task.h`, `lichen_mem.h`; pure parts `task_book.c`, `mem_book.c`):
+  every task started through `lichen_task_start` is booked under its app (32 slots; a priority class maps to a core and
+  a priority, the app loop sits on core 1 next to LVGL), every `lichen_alloc` is counted per app (25 owners; a 64 KB
+  internal-RAM quota, bulk goes to PSRAM). `xTaskCreate*` and `heap_caps_*` are owner-only symbols, so apps and the
+  shell cannot bypass the books. Read them with `fw tasks` and `fw mem`.
+- **Notifications reach the LED and the haptics by a push from above** (#245): the drivers (L2) never call the
+  notification service. `lichen_os` (`os_bind.c`) binds the status LED's `led_set_dnd`/`led_set_unread`, which
+  `lichen_notify` calls on every do-not-disturb and history change, and `haptics_notice` as the vibrate feedback the
+  shell fires on the LVGL task for a toast. `lichen_sys_led.h` is Settings' side of the LED.
+- **The console table** (`fw_console`, `MAX_COMMANDS` = 96): `console_register` refuses past it and logs "no room for
+  command ..."; `fw help` ends with "N of 96 commands registered". `tools/check_console_slots.py` runs in
+  `build.sh build` and fails when the image's `console_register` calls pass 80 % of the table (#243). Raise
+  `MAX_COMMANDS` (12 B of .bss per slot) before the guard trips, not after.
+
+### Enforcement
+
+`tools/check_layers.sh` with `tools/layers.conf` (#218; it absorbs `tools/check_app_boundary.sh`'s rules and runs at the
+end of `build.sh build`): A, `REQUIRES` rules; B, includes; C, symbol ownership through `nm`, which catches link-time
+upward edges; D, capabilities (#229, not in the checker yet). Rule C counts per object file, A per edge, B per include
+line. The app profile (L6) is a closed set of libraries, headers and forbidden symbols that no baseline can excuse.
+
+- **The ratchet is at 0.** `tools/layers-baseline.txt` holds no entries (only its header comment). A violation fails as
+  NEW or WORSE; a baseline entry added against the merge-base copy fails as GREW ("the baseline only shrinks"); STALE
+  catches an entry that was fixed and not removed. Do not add entries: fix the edge, give the symbol an owner in
+  `layers.conf` with a reason, or add a hook.
+- **The escape hatch is `BADGE_LAYERS_ALLOW_GROW=<issue number>`**, a one-off for NEW rule-C entries only: an entry whose
+  mark names `#<issue>` may be added, as moved debt that the named later issue removes (the move cannot be done without
+  a gate function that issue adds). It prints a WARNING, never applies to raised counts, and is never set in
+  `build.sh` or a hook.
+- Apps (`mesh`, `lichen_apps`) keep named `peer` lines in `layers.conf` (`lichen_notify`, `lichen_clock`,
+  `lichen_random`, `lora`, `fw_console`, `psram_guard`): reasoned exceptions that the app surface may still remove.
 - **Where things sit:** the shell and the system screens (Settings, About, Files, Power, Update...) are L5; MeshCore and
   the plain apps are L6; the C6 is a second chip behind the c6link driver (L2) and its protocol is the two-chip
   contract, not a layer.
 
-**Enforcement** (`tools/check_layers.sh` with `tools/layers.conf`, #218; it absorbs `tools/check_app_boundary.sh`'s
-rules and runs at the end of `build.sh build`): A, `REQUIRES` rules; B, includes; C, symbol ownership through `nm`,
-which catches link-time upward edges; D, capabilities (#229, not in the checker yet). Ratchet: the build fails on a
-violation that is not in the baseline (NEW, WORSE), on a baseline entry that was fixed and not removed (STALE) and on one
-that grew against `main` (GREW), until the baseline is 0 after wave L-C. The app profile keeps the old hard guarantees
-that no baseline can excuse: forbidden symbols, libraries and headers outside the closed L6 lists, an unresolved
-`${VAR}` in a `REQUIRES` list. Rule C counts per object file, A per edge, B per include line. A function a
-`lichen_api` header declares and `lichen_os` defines counts as the gate's for rule C (#220: `lichen_os` implements the
-header API, its `peer lichen_os lichen_api` line says so); the headers decide, and `tools/gate_manifest.txt` must match
-them on every build (`--gen-manifest`). The shell's navigation, dialog, station clock and raw keys (`lichen_ui.h`, `lichen_keys.h`) are defined by the gate
-itself: `lichen_ui_ops.c` forwards them to the `lichen_ui_ops_t` table the shell sets in `shell_boot_screen` and
-`shell_start`, with a defined "not up" answer before (#221), so no caller links upward to the shell. Apps (`mesh`) still have
-named `peer` lines in `layers.conf` for `lichen_notify`, `lichen_clock`, `lichen_random`, `lora`, `fw_console` and
-`psram_guard`: they are debts the app surface removes, not part of the target matrix above.
-
-**The gate has two surfaces,** detailed in [app-api.md](app-api.md): the app surface (`lichen_*.h`) for L6, and the
-system surface (`lichen_sys_*.h`) for L5, only with the `SYSTEM` capability. There is no syscall trap and no export
-table: the P4 runs everything in M-mode with no configurable MPU, and U-mode/TEE is not available on it, so a trap would
-protect nothing and cost a context switch.
-
-**Capabilities are an accident and audit guard, not a security boundary.** Apps are compiled into the image and
-share its address space, so a determined app can bypass any check. The point is to catch mistakes (an app that quietly
-starts transmitting or opens the SD card) and to give review a list of what each app asked for.
-
-**Fault isolation is detection and containment, not protection:** per-app grants (memory, PSRAM quota, booked timers)
-freed whole on stop; cooperative stop with a deadline (foreign tasks are never deleted); crash attribution through RTC
-no-init and a boot-loop breaker (2 crashes attributed to one app in 3 boots switch its background off and notify);
-task-watchdog heartbeats; quotas that refuse rather than exhaust. Waves L-D (capabilities) and L-E (identity,
-lifecycle, crash attribution) come after the MVP.
+**Fault isolation is detection and containment, not protection** (waves L-D and L-E, after the MVP): per-app grants
+(memory, PSRAM quota, booked timers) freed whole on stop; cooperative stop with a deadline (foreign tasks are never
+deleted); crash attribution through RTC no-init and a boot-loop breaker (2 crashes attributed to one app in 3 boots
+switch its background off and notify); task-watchdog heartbeats; quotas that refuse rather than exhaust.
 
 ## Lessons from BadgeVMS
 

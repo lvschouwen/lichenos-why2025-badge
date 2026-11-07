@@ -123,36 +123,58 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   why). The Wi-Fi console (`POST /console`) is plain HTTP on the LAN, guarded by the update token only: a secret in its
   reply crosses the network unencrypted, as the token itself does.
 
-## The two surfaces, capabilities and lifecycle (design; lands in waves L-A..L-E)
+## The two surfaces, the gate, capabilities and lifecycle
 
-Everything in this section is the **target of OS v2 (#216)**, not what the code does today. The sections above and
-below describe today's single app surface and its build-time boundary check. Layers and the call rules:
-[architecture.md](architecture.md) "Layers".
+Layers and the call rules: [architecture.md](architecture.md) "Layers". The surfaces and the gate are in force since
+OS v2 (#216); capabilities and the lifecycle are still to come.
 
-**App surface:** `lichen_*.h`, what this page lists. Available to every app, subject to its capabilities.
+**App surface:** `lichen_*.h` (and the helper headers listed above), what this page lists above. Available to every app.
 
-**System surface:** `lichen_sys_*.h`, for the shell and the system screens (display and power, update, storage, crash,
-tasks and memory books). Needs the `SYSTEM` capability, which only `lichen_shell` has; an app component that includes
-a `lichen_sys_*` header fails the layer check. The shell uses it instead of reaching drivers, `board` or NVS (waves
-L-C, #225-#228).
+**System surface:** `lichen_sys_*.h`, for the shell (L5) and `main`, never for an app: `forbid L6 lichen_sys_*` in
+`tools/layers.conf` makes any app use a rule C violation (an include also fails rule B). The shell uses it instead of
+reaching drivers, `board` or NVS. The headers, all in `lichen_api`:
 
-**One gate behind both:** the headers are in `lichen_api` (L4, no hardware dependencies), the OS implementations
-behind them in `lichen_os` (L3, #220); an ops table that the shell (L5) fills at boot, so `lichen_api` no longer
-depends upward on it, and `tools/gate_manifest.txt` (function -> capability -> thread rule). No syscall trap.
+| Header | Purpose |
+|---|---|
+| `lichen_sys_ui.h` | the LVGL lock (`lichen_sys_ui_lock`/`_unlock`) and `lichen_sys_ui_call` for the shell and main; the UI service owns the lock (#225) |
+| `lichen_sys_display.h` | screen and keyboard backlight levels, the attention light, timeout and thermal shed; the levels reach the C6 over UART1 (#226) |
+| `lichen_sys_power.h` | the display's share of power-off: both backlights off, then the panel, before the C6 is held in reset (#226) |
+| `lichen_sys_storage.h` | the storage drive and the SD card: sizes, mount state, policy, for About, Files, SD card and notices (#227) |
+| `lichen_sys_update.h` | the Wi-Fi update server's on/off setting and token state for Settings > Updates (#227) |
+| `lichen_sys_crash.h` | whether this boot follows a crash (#227) |
+| `lichen_sys_factory.h` | ask for a factory reset (settings or all): saved as pending, done by the next boot (#227) |
+| `lichen_sys_mem.h` | heap figures (free, largest block) for About, Benchmark and the boot log, and the diagnostic walk (#228) |
+| `lichen_sys_clock.h` | the clock service's view for Time settings, the status bar, About and notices (#244) |
+| `lichen_sys_net.h` | Wi-Fi and mDNS: saved networks, scan, connect state, the analyser's pure helpers (#244) |
+| `lichen_sys_boot.h` | boot progress steps and the console log tap for the boot screen and the log store (#244) |
+| `lichen_sys_keys.h` | raw key hooks, the screen-wake hook and the remote key gate (an app's raw keys are `lichen_keys.h`) (#244) |
+| `lichen_sys_led.h` | the status LED setting for Settings > Notifications > Status LED (#244) |
 
-**Capabilities (#229, wave L-D):** `LORA_TX`, `LORA_RX`, `LORA_BORROW`, `SD`, `NET`, `SECRETS`, `RAW_KEYS`, `CONSOLE`,
-`RESTART`, `BACKGROUND`, `HAPTICS`, `SENSORS`, `NOTIFY`, `RADIO_SCAN`, `BT`, `AUDIO`, `BATTERY`, the quotas
-`INTERNAL_RAM=` and `PSRAM=`, and `SYSTEM`.
-- Declared per app in `tools/layers.conf` (reviewed like code) and mirrored in `lichen_app_t`.
-- Checked at build time (`nm`: every symbol an app uses maps to a capability it declared) and at run time (a call
+`notify_os.h` (history of every app, do-not-disturb, toast queue, feedback hooks) is also the shell's side, forbidden
+to apps by name in `layers.conf`; apps have `lichen_notify.h` only (#245). Types that live in a lower component are
+repeated in these headers and `lichen_os` asserts they stay equal.
+
+**One gate behind both:** the gate is its headers (`lichen_api`, L4, no hardware dependencies). The implementations are
+`lichen_os` and `lichen_notify` (both L3, `peer ... lichen_api` in `layers.conf`; a call to a function a gate header
+declares counts as a call to the gate). The shell's navigation goes through the ops table the shell fills at boot
+(`lichen_ui_ops_t`), so `lichen_api` does not depend upward. `tools/gate_manifest.txt` lists every declared function
+with its capability and thread rule, and the build checks that it matches the headers. No syscall trap.
+
+**Capabilities (#229, still to come):** `LORA_TX`, `LORA_RX`, `LORA_BORROW`, `SD`, `NET`, `SECRETS`, `RAW_KEYS`,
+`CONSOLE`, `RESTART`, `BACKGROUND`, `HAPTICS`, `SENSORS`, `NOTIFY`, `RADIO_SCAN`, `BT`, `AUDIO`, `BATTERY`, the quotas
+`INTERNAL_RAM=` and `PSRAM=`, and `SYSTEM`. Today the manifest's capability column is only a per-header seed.
+- To be declared per app in `tools/layers.conf` (reviewed like code) and mirrored in `lichen_app_t`.
+- To be checked at build time (`nm`: every symbol an app uses maps to a capability it declared) and at run time (a call
   without the capability is refused and logs a line).
 - **An accident and audit guard, not a security boundary:** apps are compiled in and share the address space.
 - Identity: an opaque `lichen_ctx_t` handed out at registration, plus the calling task's TLS (#230).
 
-**Lifecycle (#231, wave L-E):** an app is registered, started, running, suspended (screen off or another app in front),
-stopping (cooperative, with a deadline; the OS never deletes an app's tasks) and stopped. On stop the OS frees the app's
-grants whole (memory, PSRAM quota, booked timers). Two crashes attributed to one app in three boots turn its
-background part off and notify (#232). Settings > Apps shows state and capabilities (#233).
+**Lifecycle (#231, after the MVP):** an app is registered, started, running, suspended (screen off or another app in
+front), stopping (cooperative, with a deadline; the OS never deletes an app's tasks) and stopped. On stop the OS frees
+the app's grants whole (memory, PSRAM quota, booked timers). Two crashes attributed to one app in three boots turn its
+background part off and notify (#232). Settings > Apps shows state and capabilities (#233). Today the OS already books
+every app's tasks and allocations (`lichen_task.h`, `lichen_mem.h`; `fw tasks`, `fw mem`) and
+`lichen_task_leftovers` names what runs after a stop.
 
 **Not in v2:** loadable apps. A future "Scripts" app may host WAMR (WebAssembly) modules, each with its own
 capabilities (#78).
@@ -168,7 +190,8 @@ capabilities (#78).
 - Restart the badge with `esp_restart()` (it is recorded as an unknown caller) or call `abort()` to get out of a state.
 - Write outside its own directories, or format anything but its own app directory.
 - Take `lvgl_port_lock` or call `lv_async_call`: use `lichen_ui_call` (LVGL calls outside the lock while the LVGL
-  task renders corrupted the heap, #118). Nor set the default group: use `lichen_ui_with_group`.
+  task renders corrupted the heap, #118; `fw ui lockcheck` counts such calls). Nor set the default group: use
+  `lichen_ui_with_group`.
 - Pick a core and priority of its own for a task, or call `xTaskCreate*`: use `lichen_task_start` (#181; the boundary
   check refuses `xTaskCreate*`). Nor place memory with `heap_caps_*`: use `lichen_alloc`.
 
@@ -204,7 +227,8 @@ Also open from #84: the console prefix per app (T8b) and system apps calling `bo
 ## Boundary check
 
 The layer checker `tools/check_layers.sh` runs at the end of `firmware/build.sh build` (after the IDF build) and fails
-the build with `file:line` and the rule for a violation that is not in `tools/layers-baseline.txt` (#218). Apps are
+the build with `file:line` and the rule for any violation: the baseline `tools/layers-baseline.txt` is empty (0, #237)
+and may not grow (#218; `BADGE_LAYERS_ALLOW_GROW` is the one-off hatch, architecture.md "Enforcement"). Apps are
 layer L6, a closed profile in `tools/layers.conf` (allowed peers, libraries, system headers, own include roots and
 forbidden symbols); a new app component is added there with `component <name> L6`. `tools/check_app_boundary.sh` runs
 just that L6 profile.
@@ -216,13 +240,13 @@ just that L6 profile.
   `esp_partition_*`, `nvs_flash_init*`/`nvs_flash_erase*`, `ledc_*`, `i2c_*`, `esp_restart` or `xTaskCreate*` (apps use
   `lichen_task_start`, #181).
 
-`check_layers.sh` (#218) generalises this check to every layer and absorbs these rules; today's violations are in its
-baseline, which reaches 0 at W9 (#237).
+`check_layers.sh` (#218) generalises this check to every layer and absorbs these rules. Rule C also forbids the
+system surface (`lichen_sys_*`), `lichen_ui_ops_set` and the shell's side of notifications to apps.
 
 The eight plain apps (Timer, Calculator, QR code, Clock, Keyboard test, LoRa spectrum, Weather, Notepad) live in the
 `lichen_apps` component (#180) and are checked as layer L6, like `mesh`. The system apps in `lichen_shell` are not.
 `lichen_apps` is the only component allowed `dirent.h` (Notepad lists a directory; `lichen_fs` has no listing call yet).
-The shell functions the apps still call (`shell_open` and friends) are baselined as moved debt until #221.
+The navigation calls (`shell_open` and friends) are the gate's own since #221: they forward to the shell's ops table.
 
 ## New services
 

@@ -85,10 +85,10 @@ that is on the mesh, and everything set up then must be changeable later on the 
 
 - ESP-IDF 6.1 on the P4, LVGL 9 via esp_lvgl_port, 720×720 panel shown rotated 90°, keyboard as an LVGL input device
   (TCA8418).
-- Internal DMA-capable RAM stays at 150 KB or more free (`fw mem`); large UI state goes in PSRAM. LVGL runs on core 0,
-  the mesh task on core 1.
-- The boot screen must be up before the slow steps (C6 check and reflash, about 40 s), so the display starts first,
-  as today.
+- Internal DMA-capable RAM stays at 150 KB or more free (`fw mem`); large UI state goes in PSRAM. LVGL runs pinned on core 1 together
+  with an app's main loop (MeshCore's mesh task); connectivity and services run on core 0 (docs/architecture.md "Cores").
+- The boot screen must be up before the slow steps (C6 check and reflash, about 40 s), so the display starts first
+  (`START_BOOT_SCREEN` before `START_C6LINK` in `firmware/main/boot_order.c`, #210).
 - MeshCore code stays unchanged in the submodule; everything badge-specific stays in our shim and target.
 - The console (`fw …`) keeps working for everything; screens and console show the same facts. The boot screen's log
   lines come from the same place as the console log.
@@ -118,7 +118,7 @@ that is on the mesh, and everything set up then must be changeable later on the 
 
 I checked the design against the code before planning. The findings:
 
-1. **Boot order: the spec says "display starts first, as today", but today it starts after the C6.** `app_main` runs
+1. **Boot order (since fixed, see `boot_order.c`): the spec said "display starts first, as today", but then it started after the C6.** `app_main` runs
    storage → console → `c6link_start` (C6 image check/reflash, ESP-Hosted, Wi-Fi; since #223 Wi-Fi is the
    `lichen_net` service `wifi_service.c`, started through c6link's `attached` net hook) → backlight → display → keyboard
    → LoRa → mesh. For the boot screen to show the C6 step, the display (and LVGL) must move before `c6link_start`.
