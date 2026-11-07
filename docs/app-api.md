@@ -27,6 +27,9 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
 
 - `lichen_app.h`: register the app (`lichen_register_app`); `id` (a-z 0-9 _, at most 13) names its settings and
   directories; the hooks (`open`, `start_background`, `stop_for_update`, `first_run_set`...) are how the OS calls it.
+  An app's `*_register()` runs on the main task during boot, not on the LVGL task: it makes no LVGL objects or timers
+  itself and hands that work over with `lichen_ui_call` (the Timer app's poll, #242). With the lock-owner check on, a
+  direct LVGL call there is reported (#225).
 - `lichen_ui.h`: text you do not control (names, file names, device values) goes in `lichen_label_line` (one line,
   "...") or `lichen_label_wrap`, never a bare `lv_label_create`; `fw ui overflow` lists labels that do not fit (#133).
 - Screen identity (#148): a screen is (`screen_id`, key); `shell_open` uses key 0. The shell never stacks a second copy of

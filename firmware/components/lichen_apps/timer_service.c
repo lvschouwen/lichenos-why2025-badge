@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "lichen_badge.h"
 #include "lichen_notify.h"
+#include "lichen_ui.h"
 #include "lvgl.h"
 
 #include <stdio.h>
@@ -62,7 +63,17 @@ static void poll(lv_timer_t *timer) {
     }
 }
 
+static void start_poll(void *arg) {
+    (void)arg;
+    if (!lv_timer_create(poll, POLL_MS, NULL)) {
+        ESP_LOGE(TAG, "no poll timer: a finished countdown will not be noticed");
+    }
+}
+
+// timer_app_register runs on the main task (start_apps), outside the LVGL task: the poll timer is made there (#242)
 void timer_svc_start(void) {
     ensure_init();
-    lv_timer_create(poll, POLL_MS, NULL);
+    if (!lichen_ui_call(start_poll, NULL)) {
+        ESP_LOGE(TAG, "poll timer not queued: a finished countdown will not be noticed");
+    }
 }
