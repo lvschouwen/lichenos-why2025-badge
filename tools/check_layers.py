@@ -11,6 +11,10 @@ Every repo component has a layer in tools/layers.conf (L0 platform ... L6 apps, 
      xTaskCreate* ...) may only be used by their listed owners; `forbid` symbols may not be used at all.
 Rule D (capabilities) is #229's and not here.
 
+Rule C counts per object file (an object that calls a symbol three times counts once), A per edge, B per include line.
+Hard failures, never baselined and never ratcheted: a `forbid` symbol, a library or header outside a closed layer's
+list, an unresolved ${VAR} in a REQUIRES list (reported as rule A!, B!, C!). They keep the old app boundary guarantee.
+
 Violations are ratcheted against tools/layers-baseline.txt (metric = rule, key = from -> to or from:symbol, value =
 count): a violation that is not in the baseline is NEW, a higher one is WORSE, a baseline entry that is fixed, lowered
 or gone is STALE (run --shrink), and a baseline entry that is new or higher than in the merge-base version of the file
@@ -91,6 +95,8 @@ def apply_directive(conf, key, args):
         conf.layers.append(args[0])
     elif key == "component":
         for c in args[:-1]:
+            if c in conf.comp_layer:
+                raise ValueError("component %s is listed twice" % c)
             conf.comp_layer[c] = args[-1]
     elif key == "layer-may":
         conf.may[args[0]] = set(args[1:])
@@ -111,6 +117,17 @@ def apply_directive(conf, key, args):
 
 
 def check_conf(conf):
+    for c, deps in conf.peers.items():
+        for d in [c] + sorted(deps):
+            if d not in conf.comp_layer:
+                raise LayerError("layers.conf: peer line names unknown component %s" % d)
+    for c in conf.own_dirs:
+        if c not in conf.comp_layer:
+            raise LayerError("layers.conf: own-dir line names unknown component %s" % c)
+    for glob, owners in conf.owner_only:
+        for o in owners:
+            if not o.startswith("<=") and o not in conf.comp_layer:
+                raise LayerError("layers.conf: owner-only %s names unknown owner %s" % (glob, o))
     for c, layer in conf.comp_layer.items():
         if layer not in conf.layers:
             raise LayerError("layers.conf: component %s is on the undeclared layer %s" % (c, layer))
@@ -176,10 +193,10 @@ def expand_vars(items, setv):
     res = []
     for n, w in items:
         m = re.fullmatch(r"\$\{(\w+)\}", w)
-        if m:
+        if m and m.group(1) in setv:
             res.extend(setv.get(m.group(1), []))
-        elif "$" not in w:
-            res.append((n, w))
+        else:
+            res.append((n, w))  # a leftover ${...} is reported by rule A, never dropped
     return res
 
 
@@ -214,8 +231,8 @@ def includes_of(path):
 
 # --- rules A and B --------------------------------------------------------------------------------------------
 
-def add(found, rule, key, where):
-    found[(rule, key)].append(where)
+def add(found, rule, key, where, hard=False):
+    found[(rule + "!" if hard else rule, key)].append(where)
 
 
 def rule_a(conf, comps, found, root, selected):
@@ -231,11 +248,13 @@ def rule_a(conf, comps, found, root, selected):
                 continue
             seen.add(dep)
             where = "%s:%d" % (os.path.relpath(cm, root), n)
-            if dep in comps:
+            if "$" in dep:
+                add(found, "A", "%s -> %s (unresolved variable)" % (name, dep), where, hard=True)
+            elif dep in comps:
                 if not conf.edge_ok(name, dep):
                     add(found, "A", "%s -> %s" % (name, dep), where)
             elif layer in conf.closed and dep not in conf.closed[layer]:
-                add(found, "A", "%s -> %s" % (name, dep), where)
+                add(found, "A", "%s -> %s" % (name, dep), where, hard=True)
 
 
 def own_include(conf, name, fw, path, inc):
@@ -251,26 +270,27 @@ def rule_b(conf, comps, found, root, selected):
     for name in selected:
         layer = conf.comp_layer[name]
         for path in source_files(comps[name]):
-            if any(p in path.replace(os.sep, "/") for p in SKIP_PARTS):
+            if any(p in "/" + os.path.relpath(path, comps[name]).replace(os.sep, "/") for p in SKIP_PARTS):
                 continue
             for n, inc in includes_of(path):
-                bad = include_violation(conf, name, layer, fw, path, inc, owners)
+                bad, hard = include_violation(conf, name, layer, fw, path, inc, owners)
                 if bad:
-                    add(found, "B", "%s -> %s" % (name, bad), "%s:%d" % (os.path.relpath(path, root), n))
+                    add(found, "B", "%s -> %s" % (name, bad), "%s:%d" % (os.path.relpath(path, root), n), hard)
 
 
 def include_violation(conf, name, layer, fw, path, inc, owners):
-    """The key target of a violating include (a component, or the header for a closed layer), else None."""
+    """(key target, hard) of a violating include: a component, or the header itself for a closed layer; (None, False)
+    when it is fine. A header outside a closed layer's list is a hard failure, an upward component include is not."""
     if own_include(conf, name, fw, path, inc):
-        return None
+        return None, False
     cands = owners.get(os.path.basename(inc), set())
     if cands:
         if name in cands or any(conf.edge_ok(name, c) for c in cands):
-            return None
-        return sorted(cands)[0]
+            return None, False
+        return sorted(cands)[0], False
     if layer in conf.closed and not any(fnmatch.fnmatchcase(inc, g) for g in conf.headers[layer]):
-        return inc
-    return None
+        return inc, True
+    return None, False
 
 
 # --- rule C ---------------------------------------------------------------------------------------------------
@@ -311,19 +331,19 @@ def undefined_symbols(nm, lib):
 
 
 def sym_violation(conf, comp, layer, sym, defs):
-    """Why this reference breaks a rule: None, or the (key suffix) describing it."""
+    """(symbol, hard) when this reference breaks a rule, else (None, False). Forbidden symbols are hard."""
     for g in conf.forbid[layer]:
         if fnmatch.fnmatchcase(sym, g):
-            return "%s" % sym
+            return sym, True
     for glob, owners in conf.owner_only:
         if fnmatch.fnmatchcase(sym, glob):
             if sym in defs and defs[sym] == comp:
-                return None
-            return None if any(owner_matches(conf, o, comp) for o in owners) else sym
+                return None, False
+            return (None if any(owner_matches(conf, o, comp) for o in owners) else sym), False
     owner = defs.get(sym)
     if owner and owner != comp and not conf.edge_ok(comp, owner):
-        return sym
-    return None
+        return sym, False
+    return None, False
 
 
 def rule_c(conf, comps, found, build, nm, selected):
@@ -338,15 +358,18 @@ def rule_c(conf, comps, found, build, nm, selected):
         lib = libs[name]
         layer = conf.comp_layer[name]
         objs = collections.defaultdict(set)
+        hard = set()
         for obj, sym in undefined_symbols(nm, lib):
             if defs.get(sym) == name:
                 continue
-            bad = sym_violation(conf, name, layer, sym, defs)
+            bad, is_hard = sym_violation(conf, name, layer, sym, defs)
             if bad:
                 objs[bad].add(obj)
+                if is_hard:
+                    hard.add(bad)
         for sym, o in objs.items():
             for ob in sorted(o):
-                add(found, "C", "%s:%s" % (name, sym), "%s(%s)" % (lib, ob))
+                add(found, "C", "%s:%s" % (name, sym), "%s(%s)" % (lib, ob), sym in hard)
 
 
 # --- baseline -------------------------------------------------------------------------------------------------
@@ -385,6 +408,10 @@ def compare(measured, baseline, rules=RULES, where=None):
     """The ratchet. measured/baseline: {(rule, key): count}. Returns (failures, stale) as lists of strings."""
     fails, stale = [], []
     for (rule, key), n in sorted(measured.items()):
+        if rule.endswith("!"):
+            at = " at " + "; ".join((where or {}).get((rule, key), [])[:3]) if where else ""
+            fails.append("HARD  %s %s (x%d, never baselined)%s" % (rule[0], key, n, at))
+            continue
         if rule not in rules:
             continue
         base = baseline.get((rule, key))
@@ -429,21 +456,41 @@ def shrink(measured, baseline, rules=RULES):
     return out
 
 
+def _git_ok(root, *args):
+    r = subprocess.run(["git", "-C", root] + list(args), capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
 def merge_base(root):
-    for ref in ("origin/main", "main"):
-        r = subprocess.run(["git", "-C", root, "merge-base", "HEAD", ref], capture_output=True, text=True)
-        if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip()
-    return ""
+    """The merge base with main. Local main and origin/main are both tried and the newer base wins, because
+    origin/main is stale in the worktrees. "" when there is none (shallow clone, no main, no git)."""
+    bases = [b for b in (_git_ok(root, "merge-base", "HEAD", ref) for ref in ("main", "origin/main")) if b]
+    best = ""
+    for b in bases:
+        if not best or subprocess.run(["git", "-C", root, "merge-base", "--is-ancestor", best, b]).returncode == 0:
+            best = b
+    return best
 
 
-def base_baseline_text(root):
+def base_baseline_text(root, ref):
     """The baseline at the merge base; None when it is not there yet (the change that introduces it)."""
-    ref = merge_base(root)
-    if not ref:
-        return None
     r = subprocess.run(["git", "-C", root, "show", "%s:%s" % (ref, BASELINE_REL)], capture_output=True, text=True)
     return r.stdout if r.returncode == 0 else None
+
+
+def grew_problems(root, baseline, skip):
+    """GREW failures against the merge-base baseline. Without a merge base the check cannot run: that is a failure
+    (not a pass) unless --no-merge-base asked for the skip; the commit that introduces the baseline has nothing to
+    compare with and passes."""
+    if skip:
+        print("layers: warning: GREW check skipped (--no-merge-base)", file=sys.stderr)
+        return []
+    ref = merge_base(root)
+    if not ref:
+        print("layers: warning: no merge base with main or origin/main (shallow clone? no git?)", file=sys.stderr)
+        return ["no merge base, so the baseline cannot be compared with main (--no-merge-base skips on purpose)"]
+    text = base_baseline_text(root, ref)
+    return [] if text is None else check_grew(baseline, parse_baseline(text))
 
 
 # --- gate manifest --------------------------------------------------------------------------------------------
@@ -572,6 +619,7 @@ def parse_args(argv):
     ap.add_argument("--report", action="store_true", help="print every violation with its place, exit 0")
     ap.add_argument("--shrink", action="store_true", help="drop or lower baseline entries that were fixed (never adds)")
     ap.add_argument("--init", action="store_true", help="write the first baseline from what is measured now")
+    ap.add_argument("--no-merge-base", action="store_true", help="skip the GREW check against main (tests, no git)")
     ap.add_argument("--gen-manifest", action="store_true", help="write tools/gate_manifest.txt from the lichen_api headers")
     return ap.parse_args(argv)
 
@@ -583,7 +631,7 @@ def report(found):
         print("%s %s (x%d)" % (rule, key, len(wheres)))
         for w in wheres:
             print("    " + w)
-    per = collections.Counter(r for (r, _k), w in found.items() for _ in w)
+    per = collections.Counter(r[0] for (r, _k), w in found.items() for _ in w)
     print("layers: %d violation(s) in %d entries (A %d, B %d, C %d)" % (total, len(found), per["A"], per["B"], per["C"]))
 
 
@@ -605,10 +653,15 @@ def run(args):
     return ratchet(args, root, conf, {k: len(v) for k, v in found.items()}, symbols, found)
 
 
-def ratchet(args, root, conf, measured, symbols, where=None):
+def ratchet(args, root, conf, all_measured, symbols, where=None):
     path = os.path.join(root, BASELINE_REL)
     rules = RULES if symbols else ("A", "B")
+    measured = {k: v for k, v in all_measured.items() if not k[0].endswith("!")}
+    if (args.init or args.shrink) and args.only_layer:
+        raise LayerError("--init and --shrink work on the whole baseline, not with --only-layer")
     if args.init:
+        if len(measured) != len(all_measured):
+            raise LayerError("hard violations (never baselined) exist; fix them first (run with --report)")
         if os.path.exists(path):
             raise LayerError("%s exists; --init refuses to overwrite it" % BASELINE_REL)
         write_atomic(path, format_baseline("# Layer baseline (#218), see tools/layers.conf. rule<TAB>key<TAB>count.", measured))
@@ -624,11 +677,9 @@ def ratchet(args, root, conf, measured, symbols, where=None):
         write_atomic(path, format_baseline(split_header(text), new))
         print("layers: baseline now %d entries (was %d)" % (len(new), len(parse_baseline(text))))
         return 0
-    fails, stale = compare(measured, baseline, rules, where)
+    fails, stale = compare(all_measured, baseline, rules, where)
     fails += ["STALE baseline %s (run: tools/check_layers.sh --shrink)" % s for s in stale]
-    base_text = base_baseline_text(root)
-    if base_text is not None:
-        fails += check_grew(baseline, parse_baseline(base_text))
+    fails += grew_problems(root, baseline, args.no_merge_base)
     return finish(root, fails, measured, baseline)
 
 

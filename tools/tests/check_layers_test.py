@@ -70,9 +70,10 @@ class Fixture:
                 os.remove(lib)
             subprocess.run(["ar", "rcs", lib] + objs, check=True)
 
-    def run(self, *args):
+    def run(self, *args, git=False):
+        extra = [] if git else ["--no-merge-base"]  # fixtures are no git repos unless a test says so
         r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(cl.__file__), "check_layers.py"),
-                            "--root", self.root, "--nm", "nm"] + list(args), capture_output=True, text=True)
+                            "--root", self.root, "--nm", "nm"] + extra + list(args), capture_output=True, text=True)
         return r.returncode, r.stdout + r.stderr
 
 
@@ -97,7 +98,7 @@ class Rules(unittest.TestCase):
 
     def test_rule_a_closed_layer_external_library(self):
         fx = Fixture(self, overrides={"app": ("idf_component_register(SRCS \"a.c\" REQUIRES gate esp_wifi)", {"a.c": "int app_fn(void){return 4;}\n"})})
-        self.assertEqual(keys(fx), {("A", "app -> esp_wifi")})
+        self.assertEqual(keys(fx), {("A!", "app -> esp_wifi")})
 
     def test_rule_b_upward_include(self):
         fx = Fixture(self, overrides={"drv": ("idf_component_register(SRCS \"d.c\" REQUIRES base)", {"d.c": "#include \"gate.h\"\nint drv_fn(void){return 2;}\n"})})
@@ -106,7 +107,7 @@ class Rules(unittest.TestCase):
     def test_rule_b_closed_layer_system_header_and_own_header(self):
         src = "#include <stdint.h>\n#include <stdio.h>\n#include \"mine.h\"\nint app_fn(void){return 4;}\n"
         fx = Fixture(self, overrides={"app": (BASE_FILES["app"][0], {"a.c": src, "mine.h": ""})})
-        self.assertEqual(keys(fx), {("B", "app -> stdio.h")})
+        self.assertEqual(keys(fx), {("B!", "app -> stdio.h")})
 
     def test_rule_c_link_time_upward_edge_without_requires(self):
         fx = Fixture(self, overrides={"drv": ("idf_component_register(SRCS \"d.c\" REQUIRES base)", {"d.c": "int gate_fn(void);\nint drv_fn(void){return gate_fn();}\n"})})
@@ -127,7 +128,7 @@ class Rules(unittest.TestCase):
     def test_rule_c_forbidden_symbol(self):
         src = "void esp_restart(void);\nint app_fn(void){esp_restart();return 4;}\n"
         fx = Fixture(self, overrides={"app": (BASE_FILES["app"][0], {"a.c": src})})
-        self.assertEqual(keys(fx), {("C", "app:esp_restart")})
+        self.assertEqual(keys(fx), {("C!", "app:esp_restart")})
 
     def test_rule_c_missing_archive_fails_instead_of_skipping(self):
         fx = Fixture(self)
@@ -154,6 +155,140 @@ class Rules(unittest.TestCase):
         code, out = fx.run("--only-layer", "L3", "--report")
         self.assertEqual(code, 0)
         self.assertIn("0 violation", out)
+
+
+class HardAndConf(unittest.TestCase):
+    def test_hard_failures_ignore_the_baseline(self):
+        src = "void esp_restart(void);\nint app_fn(void){esp_restart();return 4;}\n"
+        fx = Fixture(self, overrides={"app": ("idf_component_register(SRCS \"a.c\" REQUIRES gate esp_wifi ${NOPE})", {"a.c": "#include <stdio.h>\n" + src})})
+        fx.write("tools/layers-baseline.txt", "A\tapp -> esp_wifi\t1\nB\tapp -> stdio.h\t1\nC\tapp:esp_restart\t1\n")
+        code, out = fx.run()
+        self.assertEqual(code, 1)
+        for want in ("HARD  A app -> esp_wifi", "HARD  B app -> stdio.h", "HARD  C app:esp_restart",
+                     "app -> ${NOPE} (unresolved variable)"):
+            self.assertIn(want, out)
+        self.assertEqual(out.count("STALE"), 3)  # the baselined copies are not accepted as the entry either
+        code, out = fx.run("--init")
+        self.assertEqual(code, 1)
+        self.assertIn("hard violations", out)
+
+    def test_duplicate_component_and_unknown_peer_are_rejected(self):
+        with self.assertRaises(cl.LayerError):
+            cl.parse_conf("layer L0 x\ncomponent c L0\ncomponent c L0\n")
+        with self.assertRaises(cl.LayerError):
+            cl.parse_conf("layer L0 x\ncomponent c L0\npeer c ghost\n")
+        with self.assertRaises(cl.LayerError):
+            cl.parse_conf("layer L0 x\ncomponent c L0\nowner-only nvs_open ghost\n")
+
+    def test_peer_allows_an_upward_edge_and_include(self):
+        drv = ("idf_component_register(SRCS \"d.c\" PRIV_REQUIRES gate)", {"d.c": "#include \"gate.h\"\nint drv_fn(void){return 2;}\n"})
+        self.assertEqual(keys(Fixture(self, overrides={"drv": drv})), {("A", "drv -> gate"), ("B", "drv -> gate")})
+        self.assertEqual(keys(Fixture(self, conf=CONF + "peer drv gate\n", overrides={"drv": drv})), set())
+
+    def test_owner_only_first_match_wins(self):
+        src = "int heap_caps_walk(void);\nint %s(void){return heap_caps_walk();}\n"
+        conf = CONF + "owner-only heap_caps_walk gate\nowner-only heap_caps_* drv\n"
+        fx = Fixture(self, conf=conf, overrides={"drv": (BASE_FILES["drv"][0], {"d.c": src % "drv_fn"}),
+                                                 "gate": (BASE_FILES["gate"][0], {"g.c": src % "gate_fn", "gate.h": ""})})
+        self.assertEqual(keys(fx), {("C", "drv:heap_caps_walk")})  # the narrow line before the glob decides
+        conf2 = CONF + "owner-only heap_caps_* drv\nowner-only heap_caps_walk gate\n"
+        fx2 = Fixture(self, conf=conf2, overrides={"drv": (BASE_FILES["drv"][0], {"d.c": src % "drv_fn"}),
+                                                   "gate": (BASE_FILES["gate"][0], {"g.c": src % "gate_fn", "gate.h": ""})})
+        self.assertEqual(keys(fx2), {("C", "gate:heap_caps_walk")})  # glob first: the narrow line never applies
+
+    def test_shrink_and_init_refuse_only_layer(self):
+        fx = Fixture(self)
+        fx.write("tools/layers-baseline.txt", "")
+        for flag in ("--shrink", "--init"):
+            code, out = fx.run(flag, "--only-layer", "L3")
+            self.assertEqual(code, 1)
+            self.assertIn("not with --only-layer", out)
+
+    def test_real_conf_keeps_the_app_boundary_lists(self):
+        """The L6 profile must keep what tools/app_boundary.conf (#178) said before #218 absorbed it."""
+        conf = cl.parse_conf(cl.read(os.path.join(os.path.dirname(cl.__file__), "layers.conf")))
+        self.assertEqual(conf.comp_layer["mesh"], "L6")
+        self.assertEqual(conf.closed["L6"], {"freertos", "esp_timer", "heap", "mbedtls", "lvgl", "lvgl__lvgl"})
+        self.assertEqual(conf.peers["mesh"], {"lichen_notify", "lichen_clock", "lichen_random", "lora", "fw_console", "psram_guard"})
+        self.assertEqual(conf.allowed_layers("L6"), {"L4", "L6"})
+        for h in ("stdio.h", "sys/*.h", "freertos/*.h", "esp_log.h", "esp_timer.h", "esp_heap_caps.h", "esp_attr.h",
+                  "mbedtls/*.h", "psa/*.h", "lvgl.h", "stdatomic.h", "new"):
+            self.assertIn(h, conf.headers["L6"])
+        for f in ("esp_ota_*", "esp_wifi_*", "esp_efuse_*", "gpio_*", "esp_partition_*", "nvs_flash_init*", "nvs_flash_erase*",
+                  "ledc_*", "i2c_*", "esp_restart", "lora_start", "lora_ident", "lora_ident_live", "lora_stop", "lora_c6_*",
+                  "lora_set_send_hook", "lora_set_enabled", "lora_enabled", "xTaskCreate*"):
+            self.assertIn(f, conf.forbid["L6"])
+        self.assertIn("components/mesh/companion", conf.own_dirs["mesh"])
+        self.assertIn("../meshcore/src", conf.own_dirs["mesh"])
+        self.assertIn("../third_party/base64/src", conf.own_dirs["mesh"])
+        # owner-only symbols the issue names, with the narrow heap lines before their glob
+        globs = [g for g, _ in conf.owner_only]
+        for g in ("lvgl_port_lock", "nvs_open*", "xTaskCreate*", "heap_caps_*", "lv_group_set_default"):
+            self.assertIn(g, globs)
+        self.assertLess(globs.index("heap_caps_walk"), globs.index("heap_caps_*"))
+        self.assertLess(globs.index("heap_caps_get_*"), globs.index("heap_caps_*"))
+
+
+class GitBase(unittest.TestCase):
+    def git(self, fx, *args):
+        subprocess.run(["git", "-C", fx.root, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"] + list(args),
+                       check=True, capture_output=True)
+
+    def repo(self, base_text):
+        """A repo whose main has `base_text` as the baseline (None: no baseline yet) and a branch from it."""
+        fx = Fixture(self)
+        self.git(fx, "init", "-q", "-b", "main")
+        self.git(fx, "config", "core.excludesFile", "/dev/null")
+        with open(os.path.join(fx.root, ".gitignore"), "w") as f:
+            f.write("firmware/build/\n")
+        if base_text is not None:
+            fx.write("tools/layers-baseline.txt", base_text)
+        self.git(fx, "add", "-A")
+        self.git(fx, "commit", "-q", "-m", "base")
+        self.git(fx, "checkout", "-q", "-b", "work")
+        return fx
+
+    def test_baseline_introduced_on_the_branch_passes(self):
+        fx = self.repo(None)
+        fx.write("tools/layers-baseline.txt", "")
+        self.assertEqual(fx.run(git=True)[0], 0)
+
+    def test_grew_new_and_raised_entries_fail_shrunk_passes(self):
+        fx = self.repo("A\tdrv -> gate\t2\n")
+        fx.write("firmware/components/drv/CMakeLists.txt", "idf_component_register(SRCS \"d.c\" PRIV_REQUIRES gate)")
+        fx.write("tools/layers-baseline.txt", "A\tdrv -> gate\t2\n")
+        self.assertEqual(fx.run("--report", git=True)[0], 0)
+        fx.write("tools/layers-baseline.txt", "A\tdrv -> gate\t1\n")
+        self.assertEqual(fx.run(git=True)[0], 0)
+        fx.write("tools/layers-baseline.txt", "A\tdrv -> gate\t3\n")
+        code, out = fx.run(git=True)
+        self.assertEqual(code, 1)
+        self.assertIn("raised 2 -> 3", out)
+        fx.write("tools/layers-baseline.txt", "A\tdrv -> gate\t1\nB\tdrv -> gate\t1\n")
+        self.assertIn("not in the merge-base", fx.run(git=True)[1])
+
+    def test_no_merge_base_fails_loudly(self):
+        fx = self.repo(None)
+        self.git(fx, "branch", "-m", "work", "other")
+        self.git(fx, "branch", "-m", "main", "trunk")
+        fx.write("tools/layers-baseline.txt", "")
+        code, out = fx.run(git=True)
+        self.assertEqual(code, 1)
+        self.assertIn("no merge base", out)
+
+    def test_local_main_beats_a_stale_origin_main(self):
+        fx = self.repo("A\tdrv -> gate\t1\n")
+        old = subprocess.run(["git", "-C", fx.root, "rev-parse", "main"], capture_output=True, text=True).stdout.strip()
+        self.git(fx, "checkout", "-q", "main")
+        fx.write("tools/layers-baseline.txt", "")  # main shrank it since origin/main
+        self.git(fx, "commit", "-q", "-am", "shrink")
+        self.git(fx, "update-ref", "refs/remotes/origin/main", old)
+        self.git(fx, "checkout", "-q", "-b", "newer")
+        fx.write("firmware/components/drv/CMakeLists.txt", "idf_component_register(SRCS \"d.c\" PRIV_REQUIRES gate)")
+        fx.write("tools/layers-baseline.txt", "A\tdrv -> gate\t1\n")  # raised again against the newer main
+        code, out = fx.run(git=True)
+        self.assertEqual(code, 1)
+        self.assertIn("GREW", out)
 
 
 class Ratchet(unittest.TestCase):

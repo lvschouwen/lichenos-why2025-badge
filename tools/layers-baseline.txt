@@ -9,6 +9,7 @@
 A	c6link -> lichen_api	1
 A	c6link -> lichen_boot	1
 A	c6link -> lichen_clock	1
+A	c6link -> lichen_mdns	1
 A	c6link -> lichen_net	1
 A	lichen_api -> board	1
 A	lichen_api -> crash	1
@@ -37,6 +38,7 @@ A	sensors -> lichen_api	1
 B	c6link -> lichen_api	1
 B	c6link -> lichen_boot	2
 B	c6link -> lichen_clock	1
+B	c6link -> lichen_mdns	1
 B	c6link -> lichen_net	5
 B	lichen_api -> board	2
 B	lichen_api -> crash	1
@@ -72,6 +74,7 @@ C	c6link:clock_offer_sntp	1
 C	c6link:clock_sync_info	1
 C	c6link:clock_verdict_text	1
 C	c6link:lichen_airplane_get	1
+C	c6link:lichen_mdns_name	1
 C	c6link:lichen_radio_get	1
 C	c6link:lichen_radio_set	1
 C	c6link:wifi_bars	1
