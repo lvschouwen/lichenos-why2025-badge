@@ -3,6 +3,7 @@
 #include "wifi_saved.h"
 
 
+#include <assert.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -219,14 +220,28 @@ size_t wifi_saved_names_with(wifi_lock_t const *lock, uint32_t wait_ms, char (*o
 
 #define LOCK_FOREVER UINT32_MAX // the c6wifi task may wait for the lock; only the UI paths time out
 
-wifi_apply_t wifi_saved_apply_with(wifi_lock_t const *lock, char const *name, bool (*apply)(char const *, char const *)) {
+static void *(*list_alloc)(size_t size);
+static void (*list_release)(void *p);
+void wifi_list_bind_alloc(void *(*alloc)(size_t size), void (*release)(void *p)) {
+    list_alloc   = alloc;
+    list_release = release;
+}
+
+static void load_locked(wifi_lock_t const *lock, wifi_saved_t *l) {
+    bool got = lock->take(LOCK_FOREVER);
+    assert(got); // an unbounded wait cannot time out
+    (void)got;
+    wifi_saved_load(l);
+}
+
+wifi_apply_t wifi_saved_apply_with(wifi_lock_t const *lock, char const *name,
+                                   bool (*apply)(char const *, char const *), void (*committed)(char const *)) {
     wifi_saved_t *l = lock->alloc(sizeof(*l));
     if (!l) {
         return WIFI_APPLY_NOT_SAVED;
     }
     wifi_apply_t res = WIFI_APPLY_NOT_SAVED;
-    lock->take(LOCK_FOREVER);
-    wifi_saved_load(l);
+    load_locked(lock, l);
     lock->give();
     int at = wifi_saved_find(l, name);
     if (at >= 0) {
@@ -234,12 +249,13 @@ wifi_apply_t wifi_saved_apply_with(wifi_lock_t const *lock, char const *name, bo
     }
     wifi_saved_wipe(l);
     if (res == WIFI_APPLY_APPLIED) {
-        lock->take(LOCK_FOREVER);
-        wifi_saved_load(l);
-        lock->give();
+        load_locked(lock, l);
         if (wifi_saved_find(l, name) < 0) {
             res = WIFI_APPLY_FORGOTTEN;
+        } else if (committed) {
+            committed(name); // under the lock: a Forget after this sees the new driver network
         }
+        lock->give();
         wifi_saved_wipe(l);
     }
     lock->release(l);
@@ -255,15 +271,19 @@ static void saved_remember(wifi_saved_t *l, char const *ssid, char const *pass) 
 }
 
 bool wifi_cred_forget(char const *ssid, bool *was_active, bool *left) {
-    wifi_saved_t l;
-    wifi_saved_load(&l);
+    wifi_saved_t *lp = list_alloc ? list_alloc(sizeof(*lp)) : NULL; // 528 B: the UI calls this on the LVGL task
+    if (!lp) {
+        return false;
+    }
+    wifi_saved_t *l = lp;
+    wifi_saved_load(l);
     char act[33] = "", pass[64];
     wifi_cred_load(act, pass);
     bool active = strcmp(act, ssid) == 0;
-    bool ok     = wifi_saved_forget(&l, ssid) && saved_store(&l);
+    bool ok     = wifi_saved_forget(l, ssid) && saved_store(l);
     // If the pair in use cannot be replaced, wifi_ssid still names the forgotten network: that is a failure, and the
     // caller still has to drop it from the driver (was_active)
-    bool swapped = !(ok && active) || set_active(l.n ? l.e[0].ssid : NULL, l.n ? l.e[0].pass : "");
+    bool swapped = !(ok && active) || set_active(l->n ? l->e[0].ssid : NULL, l->n ? l->e[0].pass : "");
     if (ok) {
         generation++;
     }
@@ -272,9 +292,10 @@ bool wifi_cred_forget(char const *ssid, bool *was_active, bool *left) {
     }
     ok = ok && swapped;
     if (left) {
-        *left = l.n > 0;
+        *left = l->n > 0;
     }
-    wifi_saved_wipe(&l);
+    wifi_saved_wipe(l);
+    list_release(lp);
     memset(pass, 0, sizeof(pass));
     return ok;
 }

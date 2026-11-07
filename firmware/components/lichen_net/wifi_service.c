@@ -512,7 +512,7 @@ static bool apply_config(char const *s, char const *p) {
 EXT_RAM_BSS_ATTR static wifi_ap_t pick_aps[SCAN_RECORDS];
 
 // The UI asks from the LVGL task: a short wait, never the C6 RPC's length (#249)
-#define SAVED_UI_WAIT_MS 50
+#define SAVED_UI_WAIT_MS 200 // longer than the NVS writes at GOT_IP (wifi_cred_save/activate hold the lock for them)
 #define SAVED_FORGET_WAIT_MS 500
 
 static bool saved_take(uint32_t wait_ms) {
@@ -525,7 +525,15 @@ static void saved_give(void) {
 static void *(*bound_alloc)(size_t size);
 static void (*bound_release)(void *p);
 static void *saved_alloc(size_t size) {
-    return bound_alloc ? bound_alloc(size) : NULL; // unbound: the screen shows "busy"
+    if (!bound_alloc) { // a boot-order bug: the saved list, Forget and failover between saved networks all stop
+        static bool warned;
+        if (!warned) {
+            warned = true;
+            ESP_LOGW(TAG, "wifi: no allocator bound (wifi_bind_alloc): saved networks unusable");
+        }
+        return NULL;
+    }
+    return bound_alloc(size);
 }
 static void saved_release(void *p) {
     if (bound_release) {
@@ -535,7 +543,18 @@ static void saved_release(void *p) {
 void wifi_bind_alloc(void *(*alloc)(size_t size), void (*release)(void *p)) {
     bound_alloc   = alloc;
     bound_release = release;
+    wifi_list_bind_alloc(alloc, release);
 }
+
+// Under saved_lock, once the RPC went through and the name is still saved: from here on Forget compares against it
+static void pick_committed(char const *name) {
+    portENTER_CRITICAL(&state_lock);
+    copy_text(ssid, sizeof(ssid), name);
+    portEXIT_CRITICAL(&state_lock);
+}
+
+static void handle_forget(void);
+static void handle_reconnect(bool force);
 
 static wifi_lock_t const saved_ops = {
     .take = saved_take, .give = saved_give, .alloc = saved_alloc, .release = saved_release};
@@ -587,16 +606,20 @@ static void choose_network(bool current_failed) {
         // more afterwards, since a Forget in that window does not know the driver holds the name yet.
         char name[33];
         copy_text(name, sizeof(name), list.e[pick].ssid);
-        wifi_apply_t res = wifi_saved_apply_with(&saved_ops, name, apply_config);
-        if (res == WIFI_APPLY_APPLIED || res == WIFI_APPLY_FORGOTTEN) {
-            portENTER_CRITICAL(&state_lock);
-            copy_text(ssid, sizeof(ssid), name);
-            portEXIT_CRITICAL(&state_lock);
+        wifi_apply_t res = wifi_saved_apply_with(&saved_ops, name, apply_config, pick_committed);
+        if (res == WIFI_APPLY_APPLIED) {
             ESP_LOGI(TAG, "wifi: %d saved networks, joining the strongest in range", (int)list.n); // no names
-        }
-        if (res == WIFI_APPLY_FORGOTTEN) {
-            msg_t m = {.type = MSG_RECONNECT, .reason = 1};
-            post(&m);
+        } else if (res == WIFI_APPLY_FORGOTTEN) {
+            // Forgotten during the RPC: the driver holds it. We are the c6wifi task, so revoke directly (a queue post
+            // could be dropped): clear the driver when nothing is saved any more, else apply the pair now in use
+            char s[33], p[64];
+            bool left = wifi_cred_load(s, p);
+            memset(p, 0, sizeof(p));
+            if (left) {
+                handle_reconnect(true);
+            } else {
+                handle_forget();
+            }
         }
     }
     wifi_saved_wipe(&list);
@@ -660,7 +683,13 @@ static void handle_reconnect(bool force) {
     if (force) {
         memset(trial_pass, 0, sizeof(trial_pass));
     }
-    if (trying || !atomic_load(&wifi_on) || !wifi_cred_load(s, p)) {
+    if (trying || !atomic_load(&wifi_on)) {
+        return;
+    }
+    if (!wifi_cred_load(s, p)) {
+        if (force) { // the forgotten network was the last: do not leave it in the driver, or have_credentials/ssid stale
+            handle_forget();
+        }
         return;
     }
     portENTER_CRITICAL(&state_lock);
@@ -918,7 +947,8 @@ bool wifi_forget_network(char const *name) {
     portEXIT_CRITICAL(&state_lock);
     if ((ok || was_active) && (was_active || strcmp(cur, name) == 0 || strcmp(tried, name) == 0)) { // the next saved one (or none) takes over
         msg_t m = {.type = left ? MSG_RECONNECT : MSG_FORGET, .reason = 1};
-        post(&m);
+        for (int tries = 0; tries < 3 && !post(&m); tries++) { // a dropped revoke leaves the forgotten network in the driver
+        }
     }
     return ok;
 }

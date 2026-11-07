@@ -76,7 +76,12 @@ size_t wifi_saved_names_with(wifi_lock_t const *lock, uint32_t wait_ms, char (*o
 // no memory), apply not called; APPLY_FAILED: apply said no; FORGOTTEN: applied, but a Forget came in during the RPC
 // (the caller revokes it); APPLIED: applied and still saved.
 typedef enum { WIFI_APPLY_NOT_SAVED, WIFI_APPLY_FAILED, WIFI_APPLY_FORGOTTEN, WIFI_APPLY_APPLIED } wifi_apply_t;
-wifi_apply_t wifi_saved_apply_with(wifi_lock_t const *lock, char const *name, bool (*apply)(char const *ssid, char const *pass));
+// committed (may be NULL) runs with the lock held, when the name is still saved: the caller records the new driver
+// network there, so a Forget that takes the lock afterwards sees it (a Forget before it makes the result FORGOTTEN).
+wifi_apply_t wifi_saved_apply_with(wifi_lock_t const *lock, char const *name,
+                                   bool (*apply)(char const *ssid, char const *pass), void (*committed)(char const *name));
+// Where wifi_cred_forget gets its list copy (the heap, not the caller's stack); unbound or out of memory it fails.
+void wifi_list_bind_alloc(void *(*alloc)(size_t size), void (*release)(void *p));
 // Removes one network. was_active: it was the pair in use; the next entry (if any) takes its place, left = entries remain
 bool wifi_cred_forget(char const *ssid, bool *was_active, bool *left);
 // Makes a saved network the pair in use (front of the list); false if it is not saved. No change if it is already.

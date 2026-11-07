@@ -26,15 +26,28 @@ static bool lock_take(uint32_t wait_ms) {
     return true;
 }
 static void lock_give(void) { lock_gives++; held--; }
+static bool   alloc_fail;
+static size_t blk_size;
 static void *blk_alloc(size_t n) {
+    if (alloc_fail) {
+        return NULL;
+    }
     allocs++;
-    return calloc(1, n); // zeroed so an unused block (busy path) is clean too
+    blk_size = n;
+    void *p  = malloc(n);
+    if (p) {
+        memset(p, 0xAA, n); // a block that is never wiped stays visibly dirty
+    }
+    return p;
 }
 static void blk_release(void *p) {
-    // wipe-before-free: the first bytes of a list block that held a password must be zero again
-    static const char zero[64];
-    if (memcmp(p, zero, sizeof(zero)) != 0) {
-        dirty_release++;
+    // wipe-before-free: the whole block must be zero again, not only its start
+    unsigned char const *b = p;
+    for (size_t i = 0; i < blk_size; i++) {
+        if (b[i] != 0) {
+            dirty_release++;
+            break;
+        }
     }
     releases++;
     free(p);
@@ -220,17 +233,30 @@ static void names_only(void) {
     CHECK(memmem(out, sizeof(out), "uniquepass", 10) == NULL);
     CHECK(wifi_saved_names_with(&test_lock, 50, out, 1) == 1 && lock_takes == 2 && lock_gives == 2);
     // #249: the copy is on the heap and wiped before it is freed
-    CHECK(allocs == 2 && releases == 2 && dirty_release == 0);
+    CHECK(allocs == releases && dirty_release == 0);
 }
 
 // #249: a busy lock returns at once with BUSY, the copy is released, nothing was read
 static void names_busy(void) {
     char out[WIFI_SAVED_MAX][33];
     int  takes = lock_takes, a = allocs, r = releases;
+    int  d = dirty_release;
     lock_busy = true;
     CHECK(wifi_saved_names_with(&test_lock, 50, out, WIFI_SAVED_MAX) == WIFI_SAVED_BUSY);
     lock_busy = false;
+    CHECK(dirty_release == d + 1); // the block was never filled, so it is still the 0xAA pattern: nothing was wiped
+    dirty_release = d;
+    alloc_fail = true; // no memory: busy as well, and the lock is never taken
+    CHECK(wifi_saved_names_with(&test_lock, 50, out, WIFI_SAVED_MAX) == WIFI_SAVED_BUSY && lock_takes == takes);
+    alloc_fail = false;
     CHECK(lock_takes == takes && held == 0 && allocs == a + 1 && releases == r + 1);
+}
+
+static int  committed_held = -1;
+static char committed_name[33];
+static void committed_hook(char const *name) {
+    committed_held = held;
+    snprintf(committed_name, sizeof(committed_name), "%s", name);
 }
 
 static bool rpc_hook(char const *ssid, char const *pass) {
@@ -244,11 +270,12 @@ static void apply_outside_lock(void) {
     CHECK(wifi_cred_save("homenet", "uniquepass1") && wifi_cred_save("campnet", "uniquepass2"));
     int takes = lock_takes;
     held_at_rpc = -1;
-    CHECK(wifi_saved_apply_with(&test_lock, "homenet", rpc_hook) == WIFI_APPLY_APPLIED);
+    CHECK(wifi_saved_apply_with(&test_lock, "homenet", rpc_hook, committed_hook) == WIFI_APPLY_APPLIED);
     CHECK(held_at_rpc == 0 && held == 0 && lock_takes == takes + 2 && lock_takes == lock_gives);
+    CHECK(committed_held == 1 && strcmp(committed_name, "homenet") == 0); // recorded under the lock (#249 TOCTOU)
     held_at_rpc = -1;
-    CHECK(wifi_saved_apply_with(&test_lock, "nonet", rpc_hook) == WIFI_APPLY_NOT_SAVED && held_at_rpc == -1);
-    CHECK(wifi_saved_apply_with(&test_lock, "campnet", rpc_hook) == WIFI_APPLY_FAILED && held_at_rpc == 0);
+    CHECK(wifi_saved_apply_with(&test_lock, "nonet", rpc_hook, committed_hook) == WIFI_APPLY_NOT_SAVED && held_at_rpc == -1);
+    CHECK(wifi_saved_apply_with(&test_lock, "campnet", rpc_hook, committed_hook) == WIFI_APPLY_FAILED && held_at_rpc == 0);
     CHECK(dirty_release == 0 && allocs == releases);
 }
 
@@ -262,12 +289,25 @@ static bool forgetting_rpc(char const *ssid, char const *pass) {
 static void apply_forgotten(void) {
     CHECK(wifi_cred_clear());
     CHECK(wifi_cred_save("homenet", "uniquepass1") && wifi_cred_save("campnet", "uniquepass2"));
-    CHECK(wifi_saved_apply_with(&test_lock, "homenet", forgetting_rpc) == WIFI_APPLY_FORGOTTEN && held_at_rpc == 0);
+    committed_held = -1;
+    CHECK(wifi_saved_apply_with(&test_lock, "homenet", forgetting_rpc, committed_hook) == WIFI_APPLY_FORGOTTEN && held_at_rpc == 0);
+    CHECK(committed_held == -1); // a forgotten pick is never recorded as the driver's network
+    alloc_fail = true;
+    held_at_rpc = -1;
+    CHECK(wifi_saved_apply_with(&test_lock, "campnet", rpc_hook, committed_hook) == WIFI_APPLY_NOT_SAVED && held_at_rpc == -1);
+    alloc_fail = false;
+    // Forget without memory fails and leaves the list alone
+    bool was = false, left = false;
+    wifi_list_bind_alloc(NULL, NULL);
+    CHECK(!wifi_cred_forget("campnet", &was, &left));
+    wifi_list_bind_alloc(blk_alloc, blk_release);
+    CHECK(wifi_cred_forget("campnet", &was, &left) && left == false);
 }
 
 int main(void) {
     unbound();
     wifi_list_bind_store(&test_store);
+    wifi_list_bind_alloc(blk_alloc, blk_release);
     char s[40], p[80];
     CHECK(!wifi_cred_valid(text(s, 0), "password"));
     CHECK(wifi_cred_valid(text(s, 1), "password"));

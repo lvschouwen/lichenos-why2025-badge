@@ -20,10 +20,11 @@ typedef struct {
     bool (*airplane)(void);
 } wifi_radio_hooks_t;
 
+// Once at boot, before wifi_service_init: where the saved-list copies come from (PSRAM, #249). Unbound, the saved list
+// reports busy, Forget fails and failover between saved networks stops (logged once).
+void wifi_bind_alloc(void *(*alloc)(size_t size), void (*release)(void *p));
 // Once at boot, before c6link_start: the console commands (clock, net, wifi), the c6wifi task and the hooks c6link calls
 // when the link is up, missing or being re-attached. radio may be NULL (all defaults).
-// Once at boot: where the saved-list copy of wifi_saved_names comes from (PSRAM, #249). Unbound, it reports busy.
-void wifi_bind_alloc(void *(*alloc)(size_t size), void (*release)(void *p));
 void wifi_service_init(wifi_radio_hooks_t const *radio);
 
 // The OS Wi-Fi switch (#108; main.c wires lichen_radio to it): off stops the Wi-Fi driver on the C6 and closes everything

@@ -65,6 +65,21 @@ __attribute__((format(printf, 1, 2))) static void set_status(char const *fmt, ..
 static void start_scan(void);
 static void clear_rows(void);
 static void add_saved_rows(void);
+static void rebuild_rows(void);
+
+// "Saved networks are busy" (#249) retries once after SAVED_RETRY_MS; a second busy shows the line until the next rebuild
+#define SAVED_RETRY_MS 300
+static lv_timer_t *busy_timer;
+static bool        busy_retrying; // the rebuild of the retry itself does not arm another timer
+static void retry_saved_rows(lv_timer_t *timer) {
+    (void)timer;
+    busy_timer    = NULL; // one-shot: LVGL deletes it after the run
+    busy_retrying = true;
+    if (screen) {
+        rebuild_rows();
+    }
+    busy_retrying = false;
+}
 
 // The Wi-Fi radio switch (#108) is the first row: off clears the list, on scans once the driver has had a moment to start
 static lv_obj_t   *radio_row;
@@ -243,7 +258,6 @@ static void decorate(lv_obj_t *row, lichen_sys_wifi_ap_t const *ap, bool connect
 
 static char forget_name[LICHEN_SYS_WIFI_SAVED_MAX][33]; // the row's own copy: the list may change under it
 
-static void rebuild_rows(void);
 
 // The careful dialog was confirmed
 static void on_forget(void *arg) {
@@ -264,8 +278,12 @@ static void build_saved_rows(void *arg) {
     (void)arg;
     char   names[LICHEN_SYS_WIFI_SAVED_MAX][33];
     size_t n = shell_sources.wifi_saved_names ? shell_sources.wifi_saved_names(names, LICHEN_SYS_WIFI_SAVED_MAX) : 0;
-    if (n == SIZE_MAX) { // the Wi-Fi task holds the list (#249); the next rebuild shows it
+    if (n == SIZE_MAX) { // the Wi-Fi task holds the list (#249): say so and look again shortly
         rows[row_count++] = menu_note(menu, "Saved networks are busy");
+        if (!busy_timer && !busy_retrying) {
+            busy_timer = lv_timer_create(retry_saved_rows, SAVED_RETRY_MS, NULL);
+            lv_timer_set_repeat_count(busy_timer, 1);
+        }
         return;
     }
     rows[row_count++] = menu_note(menu, n ? "Saved networks" : "No saved networks yet: pick one above to join and save it.");
@@ -424,6 +442,10 @@ static void on_delete(lv_event_t *e) {
     if (start_timer) {
         lv_timer_delete(start_timer);
         start_timer = NULL;
+    }
+    if (busy_timer) {
+        lv_timer_delete(busy_timer);
+        busy_timer = NULL;
     }
     radio_row = NULL;
     gen++; // a scan still running is dropped when it reports
