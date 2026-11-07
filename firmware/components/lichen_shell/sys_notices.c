@@ -97,12 +97,12 @@ static esp_log_level_t log_level(ln_level_t level) {
 
 static void notices_task(void *arg) {
     (void)arg;
-    static sysn_state_t    state;
-    static sysn_snapshot_t snap;
-    static lichen_sd_info_t       sd;
-    sysn_event_t           events[SYSN_EVENT_COUNT];
-    char                   body[BODY_CAP];
-    unsigned               settled = 0;
+    static sysn_state_t     state;
+    static sysn_snapshot_t  snap;
+    static lichen_sd_info_t sd;
+    sysn_event_t            events[SYSN_EVENT_COUNT];
+    char                    body[BODY_CAP];
+    unsigned                settled = 0;
     while (settled < SETTLE_POLLS) { // the boot screen first, then a moment for the last boot steps
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));
         settled = shell_home_shown() ? settled + 1 : 0;

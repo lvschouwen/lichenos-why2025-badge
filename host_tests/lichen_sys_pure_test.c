@@ -7,6 +7,7 @@
 #include "factory_plan.h"
 #include "ota_autooff.h"
 #include "sd_policy.h"
+#include "sdcard.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -25,10 +26,15 @@ static int failures;
 
 static void test_sd_text(void) {
     lichen_sd_info_t info = {.state = LICHEN_SD_MOUNTED, .total_bytes = 29 * GIB, .free_bytes = 28 * GIB, .free_known = true,
-                             .freq_khz = 20000, .width = 4, .io_errors = 2};
+                             .freq_khz = 20000, .width = 4, .io_errors = 2, .generation = 3};
     strcpy(info.kind, "SDHC");
-    sd_info_t raw;
-    memcpy(&raw, &info, sizeof(raw));
+    strcpy(info.reason, "none");
+    // filled by field, not by copying the gate's struct: a mirror that drifted would show here
+    sd_info_t raw = {.state = SD_STATE_MOUNTED, .total_bytes = 29 * GIB, .free_bytes = 28 * GIB, .free_known = true,
+                     .freq_khz = 20000, .width = 4, .io_errors = 2, .generation = 3};
+    strcpy(raw.kind, "SDHC");
+    strcpy(raw.reason, "none");
+    CHECK(strcmp(LICHEN_SYS_SD_LICHEN_DIR, SD_LICHEN_DIR) == 0);
     char a[96], b[96];
     lichen_sys_sd_short_text(&info, a, sizeof(a));
     sd_short_text(&raw, b, sizeof(b));

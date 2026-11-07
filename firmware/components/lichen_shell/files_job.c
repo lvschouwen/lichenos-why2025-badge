@@ -125,7 +125,8 @@ static void job_task(void *arg) {
     }
     if (locked) {
         int err = errno;
-        lichen_sys_sd_end(s_result.result == FILES_ERR_IO || s_result.result == FILES_ERR_OPEN ? lichen_sys_sd_io_from_errno(err) : LICHEN_SD_IO_OK);
+        bool card_error = s_result.result == FILES_ERR_IO || s_result.result == FILES_ERR_OPEN;
+        lichen_sys_sd_end(card_error ? lichen_sys_sd_io_from_errno(err) : LICHEN_SD_IO_OK);
     }
     ESP_LOGI(TAG, "job %d -> %d, stack margin %u", (int)s_req.kind, (int)s_result.result,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));

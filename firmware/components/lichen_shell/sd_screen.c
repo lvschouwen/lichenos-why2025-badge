@@ -186,7 +186,7 @@ static void format_first_answer(bool yes) {
 
 static void on_format(void *arg) {
     (void)arg;
-    lichen_sd_info_t            info;
+    lichen_sd_info_t     info;
     shell_dialog_t const d = {
         .title         = "Erases everything on the card. Format as LICHEN?",
         .seconds       = ASK_SECONDS,

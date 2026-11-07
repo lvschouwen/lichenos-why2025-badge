@@ -26,10 +26,10 @@ static char const TAG[] = "factory";
 #define LOCK_MS    2000
 #define TASK_STACK 6144 // builds the question page (the Power goodbye page needs as much)
 
-static portMUX_TYPE     lock = portMUX_INITIALIZER_UNLOCKED;
-static lichen_fc_combo_t  combo;
-static int64_t          start_us;
-static TaskHandle_t     task;
+static portMUX_TYPE      lock = portMUX_INITIALIZER_UNLOCKED;
+static lichen_fc_combo_t combo;
+static int64_t           start_us;
+static TaskHandle_t      task;
 static lv_obj_t        *page; // on the top layer while the question is up
 
 static uint32_t now_ms(void) {
@@ -40,9 +40,9 @@ static uint32_t now_ms(void) {
 static bool on_raw(key_raw_event_t const *ev, void *arg) {
     (void)arg;
     portENTER_CRITICAL(&lock);
-    bool       was = lichen_sys_factory_combo_swallows(&combo);
+    bool              was = lichen_sys_factory_combo_swallows(&combo);
     lichen_fc_event_t e   = lichen_sys_factory_combo_key(&combo, ev->code, ev->pressed, now_ms());
-    bool       now = lichen_sys_factory_combo_swallows(&combo);
+    bool              now = lichen_sys_factory_combo_swallows(&combo);
     portEXIT_CRITICAL(&lock);
     if (e != LICHEN_FC_EV_NONE && task) {
         xTaskNotify(task, (uint32_t)e, eSetValueWithOverwrite);

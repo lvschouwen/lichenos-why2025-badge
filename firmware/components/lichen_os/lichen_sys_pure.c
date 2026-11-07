@@ -10,6 +10,7 @@
 #include "ota_autooff.h"
 #include "sd_policy.h"
 
+#include <stddef.h>
 #include <string.h>
 
 _Static_assert((int)LICHEN_SD_OFF == (int)SD_STATE_OFF && (int)LICHEN_SD_NO_CARD == (int)SD_STATE_NO_CARD &&
@@ -19,7 +20,23 @@ _Static_assert((int)LICHEN_SD_OFF == (int)SD_STATE_OFF && (int)LICHEN_SD_NO_CARD
 _Static_assert((int)LICHEN_SD_IO_OK == (int)SD_IO_OK && (int)LICHEN_SD_IO_FAILED == (int)SD_IO_FAILED &&
                    (int)LICHEN_SD_IO_NEUTRAL == (int)SD_IO_NEUTRAL,
                "the gate's SD batch results follow sdcard's");
+
+// A mirror field matches when it sits at the same offset with the same size (and so the same type width)
+#define MIRROR_FIELD(mine, theirs, field)                                                                              \
+    _Static_assert(offsetof(mine, field) == offsetof(theirs, field) &&                                                 \
+                       sizeof(((mine *)0)->field) == sizeof(((theirs *)0)->field),                                     \
+                   "the gate's " #mine "." #field " follows " #theirs)
 _Static_assert(sizeof(lichen_sd_info_t) == sizeof(sd_info_t), "the gate's SD info follows sdcard's");
+MIRROR_FIELD(lichen_sd_info_t, sd_info_t, state);
+MIRROR_FIELD(lichen_sd_info_t, sd_info_t, total_bytes);
+MIRROR_FIELD(lichen_sd_info_t, sd_info_t, free_bytes);
+MIRROR_FIELD(lichen_sd_info_t, sd_info_t, free_known);
+MIRROR_FIELD(lichen_sd_info_t, sd_info_t, kind);
+MIRROR_FIELD(lichen_sd_info_t, sd_info_t, freq_khz);
+MIRROR_FIELD(lichen_sd_info_t, sd_info_t, width);
+MIRROR_FIELD(lichen_sd_info_t, sd_info_t, io_errors);
+MIRROR_FIELD(lichen_sd_info_t, sd_info_t, generation);
+MIRROR_FIELD(lichen_sd_info_t, sd_info_t, reason);
 _Static_assert((int)LICHEN_FACTORY_NONE == (int)FACTORY_NONE && (int)LICHEN_FACTORY_SETTINGS == (int)FACTORY_SETTINGS &&
                    (int)LICHEN_FACTORY_ALL == (int)FACTORY_ALL,
                "the gate's factory levels follow lichen_boot's");
@@ -29,6 +46,10 @@ _Static_assert((int)LICHEN_FC_IDLE == (int)FC_IDLE && (int)LICHEN_FC_HOLDING == 
                    (int)LICHEN_FC_EV_CONFIRM == (int)FC_EV_CONFIRM && (int)LICHEN_FC_EV_CANCEL == (int)FC_EV_CANCEL,
                "the gate's factory combo follows lichen_boot's");
 _Static_assert(sizeof(lichen_fc_combo_t) == sizeof(factory_combo_t), "the gate's factory combo follows lichen_boot's");
+MIRROR_FIELD(lichen_fc_combo_t, factory_combo_t, state);
+MIRROR_FIELD(lichen_fc_combo_t, factory_combo_t, a_down);
+MIRROR_FIELD(lichen_fc_combo_t, factory_combo_t, b_down);
+MIRROR_FIELD(lichen_fc_combo_t, factory_combo_t, since);
 
 // The same fields in the same order, checked by sizeof above: a copy converts
 static void info_from(sd_info_t *dst, lichen_sd_info_t const *src) {
