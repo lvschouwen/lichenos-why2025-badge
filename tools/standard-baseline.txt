@@ -32,7 +32,6 @@ ccn	firmware/components/ota/ota_server.c:handle_piece	31
 ccn	firmware/components/sensors/sensors.c:sensors_task	26
 ccn	shared/lora/lora_proto.c:lora_decode	27
 len	firmware/components/c6link/c6link.c:cmd_wifi	151
-len	firmware/main/main.c:app_main	163
 nest	firmware/components/c6link/c6_boot_policy.c:c6_boot_plan	7
 nest	firmware/components/c6link/c6link.c:cmd_wifi	12
 nest	firmware/components/mesh/mesh_notify.c:mn_decide	7

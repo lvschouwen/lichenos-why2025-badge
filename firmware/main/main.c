@@ -1,9 +1,10 @@
 /*
- * Lean badge firmware (#61): entry point. Modules are started here in order; for now it only reports itself.
+ * Lean badge firmware (#61): entry point. app_main walks boot_order.c (#210) and runs one start function per entry.
  */
 
 #include "backlight.h"
 #include "board_i2c.h"
+#include "boot_order.h"
 #include "boot_progress.h"
 #include "c6link.h"
 #include "crash.h"
@@ -366,8 +367,17 @@ static void nvs_boot(void) {
     lichen_nvs_boot_done(step == NVS_BOOT_UP);
 }
 
-void app_main(void) {
-    ESP_LOGI(TAG, "app_main starts at %u ms of uptime (esp_timer, counted from reset)", (unsigned)uptime_ms());
+// ---- The boot steps (#210): one function per boot_order.h entry, run in boot_order.c's order ----
+
+// What one step leaves for a later one
+typedef struct {
+    lv_display_t *display;
+    bool          screen;     // a display came up
+    bool          storage_ok; // /storage is mounted
+} boot_ctx_t;
+
+static void start_logs(boot_ctx_t *ctx) {
+    (void)ctx;
     lichen_random_start(); // the OS owns the entropy source and leaves it on (#84)
     log_tap_start();
     psram_guard_start(); // canaries early, so they sit low in the PSRAM heap (#40)
@@ -379,6 +389,10 @@ void app_main(void) {
     log_heap("internal", MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     log_heap("dma", MALLOC_CAP_DMA);
     log_heap("psram", MALLOC_CAP_SPIRAM);
+}
+
+static void start_psram(boot_ctx_t *ctx) {
+    (void)ctx;
     boot_progress_begin(BOOT_PSRAM);
     size_t psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
     if (psram > 0) {
@@ -388,106 +402,174 @@ void app_main(void) {
     } else {
         boot_progress_end(BOOT_PSRAM, STEP_FAILED, "no PSRAM");
     }
+}
 
+static void start_nvs(boot_ctx_t *ctx) {
+    (void)ctx;
     nvs_boot(); // #116: plain or encrypted, and never an erase with a key burned
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
     psram_speed_boot(); // #121: the 80/120 MHz record: a failed 120 MHz trial falls back, a wanted 120 arms and restarts once
     psram_boot_oneshot_apply(); // #121: a one-shot delayline for the PSRAM bench, before storage and MeshCore load anything
     boot_progress_nvs_up();
+}
+
+static void start_early(boot_ctx_t *ctx) {
+    (void)ctx;
     haptics_start();     // the motor pin low and the setting read, before anything slow (#68)
     settings_apply_tz(); // before anything shows the clock
     crash_check_early(); // cheap: only decides crash_recovered(), which the boot screen reads once
-    lv_display_t *display;
-    bool          screen = show_boot_screen(&display);
+}
+
+static void start_boot_screen(boot_ctx_t *ctx) {
+    ctx->screen = show_boot_screen(&ctx->display);
+}
+
+static void start_console(boot_ctx_t *ctx) {
+    (void)ctx;
     console_start();
+}
+
+static void start_storage(boot_ctx_t *ctx) {
     boot_progress_begin(BOOT_STORAGE);
     factory_reset_boot_storage(); // and its /storage part (#66): unmounted, before anything opens a file
-    bool storage_ok = storage_mount();
-    if (!storage_ok) {
+    ctx->storage_ok = storage_mount();
+    if (!ctx->storage_ok) {
         ESP_LOGE(TAG, "no storage drive");
         boot_progress_end(BOOT_STORAGE, STEP_FAILED, "no storage drive");
     } else {
         boot_progress_end(BOOT_STORAGE, STEP_DONE, NULL);
     }
-    lichen_notify_start(storage_ok); // the history from /storage/lichen/notify.bin (#62); lichen_notify() works from now
-    factory_reset_post_notices();    // a factory reset that could not erase from flash says so (#66)
-    led_start();                     // the status LED follows the notices (#74)
-    crash_check_late();              // the crash record (/storage) and the full-image hash, after the first frame
+}
+
+static void start_notices(boot_ctx_t *ctx) {
+    lichen_notify_start(ctx->storage_ok); // the history from /storage/lichen/notify.bin (#62); lichen_notify() works from now
+    factory_reset_post_notices();         // a factory reset that could not erase from flash says so (#66)
+    led_start();                          // the status LED follows the notices (#74)
+    crash_check_late();                   // the crash record (/storage) and the full-image hash, after the first frame
     factory_reset_console_register();
     lichen_task_console_register(); // fw tasks (#181)
     lichen_mem_console_register();  // the per-app lines of fw mem (#181)
-    load_fonts(screen);
-    // The apps, in home's order: MeshCore first; shell_start adds Settings and About after it. Registered without a
-    // screen too, so their background parts still start.
+}
+
+static void start_fonts(boot_ctx_t *ctx) {
+    load_fonts(ctx->screen);
+}
+
+// The apps, in home's order: MeshCore first; shell_start adds Settings and About after it. Registered without a screen
+// too, so their background parts still start.
+static void start_shell(boot_ctx_t *ctx) {
     meshcore_app_register();
     system_restart_set_save(shell_save_for_restart); // a soft restart saves first, as an update does (#123)
-    if (screen) {
-        shell_sources_t const sources = {.wifi_up = wifi_up, .lora_up = lora_link_up, .c6_up = c6link_up,
-                                         .lora_use = lora_use,
-                                         .wifi_scan = wifi_scan, .wifi_join = wifi_set_credentials, .wifi_forget = wifi_forget_network,
-                                         .wifi_scan_raw = wifi_scan_raw, .wifi_ip = wifi_has_ip,
-                                         .wifi_join_state = wifi_join_state,
-                                         .wifi_has_credentials = wifi_has_credentials,
-                                         .wifi_rssi = wifi_rssi, .wifi_joining = wifi_joining,
-                                         .c6_trouble = c6link_trouble, .lora_counts = lora_get_counts,
-                                         .c6_restarts = c6_restarts,
-                                         .lora_user_pause = lora_user_pause, .lora_user_resume = lora_user_resume};
-        shell_set_sources(&sources);
-        shell_start(display);
-        system_restart_set_prepare(shell_show_restarting); // a readable "Restarting" frame, then dark (#39, #134)
+    if (!ctx->screen) {
+        return;
     }
-    // The SD card (#60): before the C6 link, as BadgeVMS, so the SDMMC controller is set up before esp_hosted shares
-    // it, and before the apps start. No card is one warning; nothing else waits for it.
+    shell_sources_t const sources = {.wifi_up = wifi_up, .lora_up = lora_link_up, .c6_up = c6link_up,
+                                     .lora_use = lora_use,
+                                     .wifi_scan = wifi_scan, .wifi_join = wifi_set_credentials, .wifi_forget = wifi_forget_network,
+                                     .wifi_scan_raw = wifi_scan_raw, .wifi_ip = wifi_has_ip,
+                                     .wifi_join_state = wifi_join_state,
+                                     .wifi_has_credentials = wifi_has_credentials,
+                                     .wifi_rssi = wifi_rssi, .wifi_joining = wifi_joining,
+                                     .c6_trouble = c6link_trouble, .lora_counts = lora_get_counts,
+                                     .c6_restarts = c6_restarts,
+                                     .lora_user_pause = lora_user_pause, .lora_user_resume = lora_user_resume};
+    shell_set_sources(&sources);
+    shell_start(ctx->display);
+    system_restart_set_prepare(shell_show_restarting); // a readable "Restarting" frame, then dark (#39, #134)
+}
+
+// The SD card (#60): before the C6 link, as BadgeVMS, so the SDMMC controller is set up before esp_hosted shares it,
+// and before the apps start. No card is one warning; nothing else waits for it.
+static void start_sd(boot_ctx_t *ctx) {
+    (void)ctx;
     sd_start();
+}
+
+static void start_radio_switches(boot_ctx_t *ctx) {
+    (void)ctx;
     lichen_radio_listen(radio_changed);
     lichen_radio_apply_all(); // the saved switches, before Wi-Fi and LoRa start
     lichen_radio_console_register();
-    // IDENT (#36): c6link asks the running C6 app through LoRa's peer data, before lora_start takes the callback over
+}
+
+// IDENT (#36): c6link asks the running C6 app through LoRa's peer data, before lora_start takes the callback over
+static void start_lora_ident(boot_ctx_t *ctx) {
+    (void)ctx;
     _Static_assert(C6LINK_IDENT_LEN == LORA_IDENT_LEN, "IDENT sha size");
     c6link_set_ident(lora_ident);
     c6link_set_ident_ready(lora_up);
+}
+
+static void start_c6link(boot_ctx_t *ctx) {
+    (void)ctx;
     if (!c6link_start()) {
         ESP_LOGE(TAG, "no C6 link: no Wi-Fi, no LoRa");
     }
+}
+
+static void start_backlight(boot_ctx_t *ctx) {
+    (void)ctx;
     backlight_start();
     board_i2c_register_console();
-    if (screen) {
-        lv_indev_t *keys = NULL; // the keypad is an LVGL input device: LVGL first
-        if (keyboard_start(&keys)) {
-            shell_attach_keys(keys);
-            keyboard_set_reset_hook(c6link_note_keyboard_reset); // the chip resets only with the C6 (#14)
-            have_keyboard = true;
-            factory_combo_start(); // Esc + Backspace held now: the settings-only reset for a badge whose UI is stuck
-        } else {
-            ESP_LOGE(TAG, "no keyboard");
-        }
+}
+
+static void start_keyboard(boot_ctx_t *ctx) {
+    if (!ctx->screen) {
+        return;
     }
-    // The sensors (#69) share the keyboard's bus: after it. Their own task initialises the chips (the BMI270's 8 KB
-    // config upload takes a while), so boot does not wait for them
+    lv_indev_t *keys = NULL; // the keypad is an LVGL input device: LVGL first
+    if (!keyboard_start(&keys)) {
+        ESP_LOGE(TAG, "no keyboard");
+        return;
+    }
+    shell_attach_keys(keys);
+    keyboard_set_reset_hook(c6link_note_keyboard_reset); // the chip resets only with the C6 (#14)
+    have_keyboard = true;
+    factory_combo_start(); // Esc + Backspace held now: the settings-only reset for a badge whose UI is stuck
+}
+
+// The sensors (#69) share the keyboard's bus: after it. Their own task initialises the chips (the BMI270's 8 KB config
+// upload takes a while), so boot does not wait for them
+static void start_sensors(boot_ctx_t *ctx) {
+    (void)ctx;
     if (sensors_boot_start()) {
         lichen_sensors_start();
     } else {
         ESP_LOGW(TAG, "sensors not started: fw sensors boot off");
     }
     sensors_register_console();
-    if (c6link_up()) {
-        boot_progress_begin(BOOT_LORA);
-        bool lora_ok = lora_start();
-        if (!lora_ok) {
-            ESP_LOGE(TAG, "LoRa not started");
-        }
-        boot_progress_end(BOOT_LORA, lora_ok ? STEP_DONE : STEP_FAILED, lora_ok ? NULL : "LoRa not started");
-    } else {
+}
+
+static void start_lora(boot_ctx_t *ctx) {
+    (void)ctx;
+    if (!c6link_up()) {
         boot_progress_end(BOOT_LORA, STEP_FAILED, "no C6 link");
+        return;
     }
-    c6_wire_hooks(screen); // after keyboard and LoRa: from now on a C6 reset is recovered from
+    boot_progress_begin(BOOT_LORA);
+    bool lora_ok = lora_start();
+    if (!lora_ok) {
+        ESP_LOGE(TAG, "LoRa not started");
+    }
+    boot_progress_end(BOOT_LORA, lora_ok ? STEP_DONE : STEP_FAILED, lora_ok ? NULL : "LoRa not started");
+}
+
+static void start_c6_hooks(boot_ctx_t *ctx) {
+    c6_wire_hooks(ctx->screen); // after keyboard and LoRa: from now on a C6 reset is recovered from
+}
+
+static void start_apps_step(boot_ctx_t *ctx) {
+    (void)ctx;
     start_apps();
+}
+
+static void start_ota(boot_ctx_t *ctx) {
     // Wi-Fi console and log (#38) work without a screen; the update screen hooks need one
     ota_hooks_t hooks = {.log_read = log_store_read, .crashes_read = lichen_crashlog_export};
 #if CONFIG_OTA_WIFI_CONSOLE
     hooks.console_run = console_exec_with_secrets; // the reply goes only to the one who asked (#123)
 #endif
-    if (screen) {
+    if (ctx->screen) {
         hooks.begin = ota_begin;
         hooks.progress = update_screen_progress;
         hooks.end = ota_end;
@@ -501,9 +583,37 @@ void app_main(void) {
     }
     ota_server_set_hooks(&hooks);
     ota_server_start();
+}
 
-    // A freshly installed image runs on trial until it has been up for a while; a reset before that boots the
-    // previous one again
+typedef void (*boot_start_fn_t)(boot_ctx_t *ctx);
+
+static boot_start_fn_t const start_fns[START_COUNT] = {
+    [START_LOGS]           = start_logs,
+    [START_PSRAM]          = start_psram,
+    [START_NVS]            = start_nvs,
+    [START_EARLY]          = start_early,
+    [START_BOOT_SCREEN]    = start_boot_screen,
+    [START_CONSOLE]        = start_console,
+    [START_STORAGE]        = start_storage,
+    [START_NOTICES]        = start_notices,
+    [START_FONTS]          = start_fonts,
+    [START_SHELL]          = start_shell,
+    [START_SD]             = start_sd,
+    [START_RADIO_SWITCHES] = start_radio_switches,
+    [START_LORA_IDENT]     = start_lora_ident,
+    [START_C6LINK]         = start_c6link,
+    [START_BACKLIGHT]      = start_backlight,
+    [START_KEYBOARD]       = start_keyboard,
+    [START_SENSORS]        = start_sensors,
+    [START_LORA]           = start_lora,
+    [START_C6_HOOKS]       = start_c6_hooks,
+    [START_APPS]           = start_apps_step,
+    [START_OTA]            = start_ota,
+};
+
+// A freshly installed image runs on trial until it has been up for a while; a reset before that boots the previous one
+// again
+static void ota_trial_wait(void) {
     esp_ota_img_states_t state;
     bool                 pending = esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
                    state == ESP_OTA_IMG_PENDING_VERIFY;
@@ -524,7 +634,16 @@ void app_main(void) {
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
+}
 
+void app_main(void) {
+    ESP_LOGI(TAG, "app_main starts at %u ms of uptime (esp_timer, counted from reset)", (unsigned)uptime_ms());
+    boot_ctx_t ctx = {0};
+    // boot_order.c is the order (the two-chip contract, host_tests/boot_order_test.c); this only walks it
+    for (size_t i = 0; i < boot_order_len; i++) {
+        start_fns[boot_order[i]](&ctx);
+    }
+    ota_trial_wait();
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(60000));
     }

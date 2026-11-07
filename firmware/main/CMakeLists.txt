@@ -1,4 +1,4 @@
-idf_component_register(SRCS "main.c"
+idf_component_register(SRCS "main.c" "boot_order.c"
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES esp_hw_support esp_app_format esp_partition heap nvs_flash storage sdcard fw_console c6link ota app_update lora board esp_timer mesh crash lichen_shell lichen_api lichen_boot lichen_net lichen_random assets psram_guard sensors lichen_led lichen_haptics lichen_nvs)
 

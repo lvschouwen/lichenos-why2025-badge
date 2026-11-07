@@ -76,12 +76,14 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
   (:90, C6 `CP_SDIO_HIGH_SPEED=y`, :21). Change one side and the other in the same wave.
 
 ### Start order (main.c)
-Text only: no host test can see it, #210 will pin it with a boot-step table test. The rules:
-1. Storage and the SD card (`sd_start`, #60) come before `c6link_start`: the C6 image files are on `/storage`, and
-   `esp_hosted_init` adds SDMMC slot 1 to the controller the card shares.
-2. The IDENT hooks (`c6link_set_ident`, `c6link_set_ident_ready`, `main.c:447-448`) are set before `c6link_start`.
-3. `c6link_start` (`main.c:449`) comes before `backlight_start` (:452), `keyboard_start` (:456) and `lora_start` (:475);
-   `c6_wire_hooks` (:483) only after those. The boot step enum in `lichen_boot/boot_steps.h` is a display order only.
+`app_main` walks the table `boot_order[]` in `firmware/main/boot_order.c` (#210) and runs one `start_*` function per
+entry (`start_fns[]` in `main.c`); moving an entry moves the boot. `host_tests/boot_order_test.c` pins the rules and fails
+when one breaks:
+1. Storage and the SD card (`START_STORAGE`, `START_SD`, #60) come before `START_C6LINK`: the C6 image files are on
+   `/storage`, and `esp_hosted_init` adds SDMMC slot 1 to the controller the card shares.
+2. The IDENT hooks (`START_LORA_IDENT`: `c6link_set_ident`, `c6link_set_ident_ready`) are set before `START_C6LINK`.
+3. `START_C6LINK` (`c6link_start`) comes before `START_BACKLIGHT`, `START_KEYBOARD` and `START_LORA`; `START_C6_HOOKS`
+   (`c6_wire_hooks`) only after those three. The boot step enum in `lichen_boot/boot_steps.h` is a display order only.
 
 ### 2. Peer-data channel (ESP-Hosted `eh_*_peer_data`)
 | Id | Direction | Service | Registered at |
@@ -123,7 +125,7 @@ Text only: no host test can see it, #210 will pin it with a boot-step table test
   (`ota/ota_server.c:405-408`) before touching the file, so the stored key is forgotten and the next boot checks fully.
   Every writer of that directory must do the same.
 - **P4 OTA validity needs the C6:** a pending image is marked valid only with the UI up and `c6link_up()` after
-  `OTA_VALID_AFTER_S` (`ota/ota_valid.c:3-5`, `main.c:513-521`), and it is rolled back when the link never comes up
+  `OTA_VALID_AFTER_S` (`ota/ota_valid.c:3-5`, `main.c` `ota_trial_wait`), and it is rolled back when the link never comes up
   (`ota_valid.c:7-9`). A broken C6 link rolls back every P4 OTA; this is why `ota-c6` goes first.
 - **IDENT** (#36): after attach the P4 asks the running C6 app for its ELF sha256 (32 bytes, `LORA_MSG_IDENT`) and
   compares with the bundled `firmware.bin` (`c6_ident_check`; wait `C6_IDENT_WAIT_MS` 2000, `c6link.c:1300`). Only MATCH
@@ -134,8 +136,8 @@ Text only: no host test can see it, #210 will pin it with a boot-step table test
 
 ### 4. Hardware couplings
 - **C6 reset resets the keyboard:** GPIO12 (C6 EN) also resets the TCA8418. The C6 starts before the keyboard
-  (`firmware/main/main.c:449` `c6link_start`, then `keyboard_start` :456, then `lora_start` :475; `c6_wire_hooks` :483 only
-  after all three). A later C6 reset runs `keyboard_reinit`, `backlight_reapply`, `lora_c6_back` in that order
+  (`START_C6LINK`, then `START_KEYBOARD`, then `START_LORA` in `firmware/main/boot_order.c`; `START_C6_HOOKS` only after
+  all three, pinned by `host_tests/boot_order_test.c`). A later C6 reset runs `keyboard_reinit`, `backlight_reapply`, `lora_c6_back` in that order
   (`main.c:232` `c6_up`).
 - **Backlights go through the C6:** UART1 text command `\nBL <display> <keyboard>\n`
   (`board/backlight_level.c` `backlight_cmd_format`, sent from `board/backlight.c`). With the C6 down brightness does not

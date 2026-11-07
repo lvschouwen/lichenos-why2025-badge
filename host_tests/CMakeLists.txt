@@ -1601,3 +1601,12 @@ add_test(NAME two_chip_contract_test COMMAND two_chip_contract_test)
 
 # tools/check_layers.py: the layer checker, rules A/B/C on fixture components and every ratchet state (#218)
 add_test(NAME check_layers_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_layers_test.py)
+
+# app_main's start order, the two-chip start rules (#210, #234)
+add_executable(boot_order_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/boot_order_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/boot_order.c
+)
+target_include_directories(boot_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main)
+target_compile_options(boot_order_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME boot_order_test COMMAND boot_order_test)
