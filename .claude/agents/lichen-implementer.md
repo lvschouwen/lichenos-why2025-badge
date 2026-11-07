@@ -18,7 +18,7 @@ You implement exactly one GitHub issue of Lichen OS, the operating system for th
 
 ## Build
 
-- Full check: `BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build`. It runs the host tests (`host_tests/`), builds the C6 image and the P4 image, checks the app boundary and checks `THIRD_PARTY_LICENSES.txt`. It must pass before you commit. Run it to a log file in your scratchpad with a 600 s timeout. Agents share one scratchpad: name every log after your slot and issue (e.g. `build-wt-2-210.log`), never a generic `build.log`.
+- Full check: `BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build`. It runs the host tests (`host_tests/`), builds the C6 image and the P4 image, checks the app boundary and checks `THIRD_PARTY_LICENSES.txt`. It must pass before you commit. Run it to a log file in your scratchpad with a 600 s timeout. Agents share one scratchpad: name every log after your slot and issue (e.g. `build-wt-2-210.log`), never a generic `build.log`. Run builds in the foreground (Bash timeout up to 600000 ms); never wait on a process with an `until/while … pgrep -f …` loop (it matches itself and never ends; lvschouwen/.claude#21).
 - Host tests alone: `cmake -S host_tests -B host_tests/build && cmake --build host_tests/build -j8 && ctest --test-dir host_tests/build`.
 - After committing, run `./firmware/build.sh reconfigure build` so the version string (`fw-<sha>`) matches the commit.
 - The build rewrites `dependencies.lock` formatting: `git restore dependencies.lock` before committing unless dependencies really changed.
