@@ -5,8 +5,9 @@
 #include <stddef.h>
 
 static bool want_on = true; // the OS radio switch, read by lora_send and the LoRa task on every turn
-// Set by main's boot task before lora_start registers the console command that calls it (the task start orders the
-// write before every read), read-only after that: no lock
+// Set by main's boot task before lora_start registers the console command that calls it: console_register publishes
+// the command with a release store (n_commands), which orders this write before the console task's read. Read-only
+// after that: no lock
 static void (*owner)(bool on);
 
 void lora_set_switch_owner(void (*request)(bool on)) {

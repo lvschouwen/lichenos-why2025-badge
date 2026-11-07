@@ -34,12 +34,21 @@ static void stubborn_switch(bool on) {
     last_request = on;
 }
 
+// Every case starts from the boot state, so the order of the cases does not matter
+static void reset(void) {
+    lora_set_switch_owner(NULL);
+    lora_set_enabled(true);
+    requests     = 0;
+    last_request = false;
+    saved        = true;
+}
+
 static void test_default_on(void) {
-    CHECK(lora_enabled()); // a boot without saved switches sends
+    CHECK(lora_enabled()); // a boot without saved switches sends; main runs this first, before any reset
 }
 
 static void test_no_owner_switches_lora_alone(void) {
-    lora_set_switch_owner(NULL);
+    reset();
     CHECK(!lora_switch_request(false));
     CHECK(!lora_enabled()); // TX refused
     CHECK(lora_switch_request(true));
@@ -47,7 +56,7 @@ static void test_no_owner_switches_lora_alone(void) {
 }
 
 static void test_owner_gets_the_request(void) {
-    requests = 0;
+    reset();
     lora_set_switch_owner(os_switch);
     CHECK(!lora_switch_request(false));
     CHECK(requests == 1 && !last_request);
@@ -60,7 +69,7 @@ static void test_owner_gets_the_request(void) {
 }
 
 static void test_owner_decides(void) {
-    requests = 0;
+    reset();
     lora_set_enabled(false);
     lora_set_switch_owner(stubborn_switch);
     CHECK(!lora_switch_request(true)); // the reply is what lora_send goes by, not what was asked

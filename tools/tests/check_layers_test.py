@@ -223,7 +223,7 @@ class HardAndConf(unittest.TestCase):
             self.assertIn(h, conf.headers["L6"])
         for f in ("esp_ota_*", "esp_wifi_*", "esp_efuse_*", "gpio_*", "esp_partition_*", "nvs_flash_init*", "nvs_flash_erase*",
                   "ledc_*", "i2c_*", "esp_restart", "lora_start", "lora_ident", "lora_ident_live", "lora_stop", "lora_c6_*",
-                  "lora_set_send_hook", "lora_set_enabled", "lora_enabled", "xTaskCreate*"):
+                  "lora_set_send_hook", "lora_set_enabled", "lora_enabled", "lora_set_switch_owner", "xTaskCreate*"):
             self.assertIn(f, conf.forbid["L6"])
         self.assertIn("components/mesh/companion", conf.own_dirs["mesh"])
         self.assertIn("../meshcore/src", conf.own_dirs["mesh"])
@@ -234,6 +234,8 @@ class HardAndConf(unittest.TestCase):
             self.assertIn(g, globs)
         self.assertLess(globs.index("heap_caps_walk"), globs.index("heap_caps_*"))
         self.assertLess(globs.index("heap_caps_get_*"), globs.index("heap_caps_*"))
+        # the console's LoRa switch saves "off" (#222): lora alone may call it, never a peer app
+        self.assertIn(("lora_switch_request", ["lora"]), conf.owner_only)
 
 
     def test_real_gate_requires_no_hardware_layer(self):

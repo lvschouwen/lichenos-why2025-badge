@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 // LoRa receive over the C6 bridge (#51, #61), the OS side (#179): start, stop, the radio switch, the C6 identity and the
-// supervisor's hooks. Only OS components (main, c6link, lichen_shell, lichen_radio) include this; apps use lora_app.h.
+// supervisor's hooks. Only main and lora itself include this; apps use lora_app.h.
 // "fw lora" shows the status.
 
 bool lora_start(void);
