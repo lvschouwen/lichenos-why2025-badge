@@ -559,7 +559,7 @@ def thread_rule(comment):
     c = re.sub(r"\s+", " ", c)
     if re.search(r"\b[Nn]ot (?:on|from) the LVGL task", c):
         return "not-lvgl"
-    if re.search(r"any task", c):
+    if re.search(r"any task", c, re.I):
         return "any"
     if re.search(r"LVGL (?:task|context)", c):
         return "lvgl"
