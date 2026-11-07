@@ -16,6 +16,10 @@ bool    settings_set_u8(char const *key, uint8_t value);
 // Copies the value (or def) into out, always NUL-terminated
 void    settings_get_str(char const *key, char *out, size_t cap, char const *def);
 bool    settings_set_str(char const *key, char const *value);
+// A small binary value (the restart history, #235): get is true only when exactly size bytes are stored. OS-internal:
+// lichen_os binds these into fw_console.
+bool    settings_get_blob(char const *key, void *out, size_t size);
+bool    settings_set_blob(char const *key, void const *data, size_t size);
 // Removes a key; true when it is gone (also when it was never there)
 bool    settings_erase(char const *key);
 // Applies the saved time zone (default Amsterdam) to the C library: setenv("TZ") and tzset(). Before the clock shows

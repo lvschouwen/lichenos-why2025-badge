@@ -414,6 +414,9 @@ static void start_psram(boot_ctx_t *ctx) {
 static void start_nvs(boot_ctx_t *ctx) {
     (void)ctx;
     nvs_boot(); // #116: plain or encrypted, and never an erase with a key burned
+    // Right after NVS is up and before anything can restart: the restart history (the "factory reset: ..." note, the PSRAM
+    // restarts below) is written through this binding. It only stores function pointers (#235).
+    settings_bind_services();
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
     psram_speed_boot(); // #121: the 80/120 MHz record: a failed 120 MHz trial falls back, a wanted 120 arms and restarts once
     psram_boot_oneshot_apply(); // #121: a one-shot delayline for the PSRAM bench, before storage and MeshCore load anything
@@ -422,7 +425,6 @@ static void start_nvs(boot_ctx_t *ctx) {
 
 static void start_early(boot_ctx_t *ctx) {
     (void)ctx;
-    settings_bind_services(); // the backlight levels and sensors flag live in the settings (#224)
     haptics_start();     // the motor pin low and the setting read, before anything slow (#68)
     settings_apply_tz(); // before anything shows the clock
     crash_check_early(); // cheap: only decides crash_recovered(), which the boot screen reads once

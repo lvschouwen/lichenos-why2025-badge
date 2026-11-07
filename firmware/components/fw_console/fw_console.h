@@ -62,8 +62,8 @@ void system_restart_set_prepare(void (*prepare)(void));
 // Adds a line to the same history without restarting: something worth knowing about this boot (#40: a bad PSRAM tuning)
 void system_restart_note(char const *why);
 
-// Where the restart history is kept (the settings service, #235): fw_console opens no NVS. Bound at START_EARLY; a
-// restart before that is not recorded.
+// Where the restart history is kept (the settings service, #235): fw_console opens no NVS. Bound in start_nvs right after
+// nvs_boot(); a restart before that is not recorded.
 void system_restart_bind_store(fw_get_blob_fn get, fw_set_blob_fn set);
 // The recorded restarts, newest first; returns how many
 int system_restart_history(restart_log_t *out);

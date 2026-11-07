@@ -75,6 +75,8 @@ int main(void) {
     CHECK(restart_log_load(fake_get, &back) == 1 && strcmp(back.line[0], "kept") == 0);
     blob_len--; // a blob of another size is not ours: empty, not a half-read log
     CHECK(restart_log_load(fake_get, &back) == 0 && back.count == 0);
+    blob_len = sizeof(log) + 1; // a larger blob is not ours either
+    CHECK(restart_log_load(fake_get, &back) == 0 && back.count == 0);
     blob_len = 0;
     CHECK(restart_log_load(fake_get, &back) == 0); // nothing saved
 

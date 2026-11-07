@@ -1,6 +1,6 @@
 #pragma once
 // How a lower-layer component reaches its saved values without opening NVS itself (#235, rule C of #218): the
-// settings service (lichen_os) binds these in settings_bind_services() at START_EARLY. Same badge_fw keys as before the
+// settings service (lichen_os) binds these in settings_bind_services() in start_nvs. Same badge_fw keys as before the
 // move. Pure types, no ESP headers.
 
 #include <stdbool.h>

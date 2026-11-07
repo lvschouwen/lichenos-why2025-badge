@@ -1,12 +1,12 @@
 #include "settings_store.h"
 
 #include "backlight.h"
-#include "haptics.h"
-#include "led.h"
-#include "notify_os.h"
-#include "lichen_os.h"
 #include "esp_log.h"
 #include "fw_console.h"
+#include "haptics.h"
+#include "led.h"
+#include "lichen_os.h"
+#include "notify_os.h"
 #include "nvs.h"
 #include "sensors.h"
 
