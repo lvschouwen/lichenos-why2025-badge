@@ -128,7 +128,7 @@ bool lichen_screen_locked(void);
 // shell's (station_view.c). LVGL task only.
 bool lichen_station_clock(lv_obj_t *screen, void (*update_line2)(lv_obj_t *line2));
 // The date line as the station clock writes it ("~ " first while the time is unverified); false and "Clock not set"
-// when the clock is not set. Any task (no LVGL state).
+// when the clock is not set, or false and "" before the shell is up. Any task (no LVGL state).
 bool lichen_date_text(char *out, size_t cap);
 
 // A filled box for a home icon (lichen_app_t.draw_icon): w x h, centred at (x, y) off the parent's centre, in colour

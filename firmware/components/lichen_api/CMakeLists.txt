@@ -8,6 +8,7 @@
 # crashlog_fmt.c (the Crash log app's text), badge_table.c (the tile badges home draws, #102), legacy_blob.c,
 # settings_backup.c, qr_payload.c (#153), task_book.c and mem_book.c (#181), tile_order.c (#189), hold_exit.c (#180),
 # ui_text.c, menu_filter.c, os_name.c (the OS name and version line, #236); each has its <name>_test.c in host_tests/.
+# lichen_ui_ops.c (the forwarding to the shell's table, #221) is pure too, tested by host_tests/ui_ops_test.c.
 # Widgets: lichen_app.c (the app registry), menu.c (the menu widget: it uses the shell's screen calls, so it stays a
 # gate widget rather than a lichen_os service, #220), text_entry.c, qr_screen.c (LVGL's QR widget, needs
 # CONFIG_LV_USE_QRCODE) and lichen_ui.c's plain LVGL helpers (heading, labels, icon box, page hint).

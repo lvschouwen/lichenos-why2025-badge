@@ -23,6 +23,7 @@ static struct {
     int32_t     dy;
     void const *fn;
     void       *arg;
+    size_t      cap;
 } seen;
 
 static lv_obj_t *const OBJ    = (lv_obj_t *)0x1000;
@@ -120,6 +121,7 @@ static bool f_station(lv_obj_t *screen, void (*update)(lv_obj_t *)) {
 }
 static bool f_date(char *out, size_t cap) {
     note("date");
+    seen.cap = cap;
     snprintf(out, cap, "Fri 7 Nov");
     return true;
 }
@@ -193,8 +195,9 @@ static void forwards_nav(void) {
     CHECK(shell_screen_open(6, 8) && seen.id == 6 && seen.key == 8);
     shell_on_esc(esc_fn, &token);
     CHECK(strcmp(seen.call, "on_esc") == 0 && seen.fn == (void const *)esc_fn && seen.arg == &token);
+    seen.arg = NULL;
     shell_on_search(void_fn, &token);
-    CHECK(strcmp(seen.call, "on_search") == 0 && seen.fn == (void const *)void_fn);
+    CHECK(strcmp(seen.call, "on_search") == 0 && seen.fn == (void const *)void_fn && seen.arg == &token);
     shell_scroll_by(OBJ, -24);
     CHECK(strcmp(seen.call, "scroll_by") == 0 && seen.obj == OBJ && seen.dy == -24);
     CHECK(shell_page_create() == SCREEN);
@@ -202,8 +205,13 @@ static void forwards_nav(void) {
     CHECK(strcmp(seen.call, "scroll_tame") == 0 && seen.obj == SCREEN);
     shell_no_arrow_scroll(OBJ);
     CHECK(strcmp(seen.call, "no_arrow") == 0 && seen.obj == OBJ);
+    seen.fn  = NULL; // so each check below sees what this call forwarded, not the last one's
+    seen.arg = NULL;
     CHECK(shell_back_then(void_fn, &token) && strcmp(seen.call, "back_then") == 0 && seen.arg == &token);
+    CHECK(seen.fn == (void const *)void_fn);
+    seen.arg = NULL;
     CHECK(shell_back_to(SCREEN, void_fn, &token) && seen.obj == SCREEN && seen.fn == (void const *)void_fn);
+    CHECK(seen.arg == &token);
     CHECK(shell_stack_screen(2) == SCREEN && seen.id == 2);
     shell_style_screen(OBJ);
     CHECK(strcmp(seen.call, "style_screen") == 0 && seen.obj == OBJ);
@@ -217,10 +225,15 @@ static void forwards_rest(void) {
     CHECK(lichen_screen_locked());
     CHECK(lichen_station_clock(SCREEN, line2_fn) && seen.obj == SCREEN && seen.fn == (void const *)line2_fn);
     char date[16];
-    CHECK(lichen_date_text(date, sizeof(date)) && strcmp(date, "Fri 7 Nov") == 0);
+    CHECK(lichen_date_text(date, sizeof(date)) && strcmp(date, "Fri 7 Nov") == 0 && seen.cap == sizeof(date));
+    seen.fn  = NULL;
+    seen.arg = NULL;
     CHECK(lichen_keys_raw_take(raw_fn, &token) && strcmp(seen.call, "take") == 0 && seen.arg == &token);
+    CHECK(seen.fn == (void const *)raw_fn);
+    seen.fn  = NULL;
+    seen.arg = NULL;
     lichen_keys_raw_release(raw_fn, &token);
-    CHECK(strcmp(seen.call, "release") == 0 && seen.fn == (void const *)raw_fn);
+    CHECK(strcmp(seen.call, "release") == 0 && seen.fn == (void const *)raw_fn && seen.arg == &token);
 }
 
 // The key hash is the gate's own (pure): the same before the shell is up as after, never SHELL_KEY_UNIQUE
@@ -235,7 +248,7 @@ static void key_hash(void) {
 int main(void) {
     key_hash();
     not_up(); // before the shell sets its table (the steps before START_SHELL's boot screen)
-    lichen_ui_ops_t const empty = {0};
+    static lichen_ui_ops_t const empty; // all members NULL
     lichen_ui_ops_set(&empty); // a table with members left out answers as no table
     not_up();
     lichen_ui_ops_set(&full);
