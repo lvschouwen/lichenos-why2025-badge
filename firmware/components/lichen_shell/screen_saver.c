@@ -7,7 +7,7 @@
 // Backspace are held together (lock_combo.c). It is a pocket lock, not security: no PIN, and an update, power off or a
 // battery warning lifts it. Toasts still show over both (top layer); the shape keys do nothing while locked.
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "fonts.h"
 #include "fw_console.h"
 #include "idle_policy.h"
@@ -363,10 +363,10 @@ bool lichen_screen_locked_impl(void) {
 }
 
 void screen_lock_wake(void) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     screen_lock_release();
     screen_idle_key(); // a fresh idle clock: the saver goes and the backlight comes up on the next tick
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 // Console (bench)
@@ -401,10 +401,10 @@ static void saver_test(char const *style) {
         console_reply(SAVER_USAGE);
         return;
     }
-    lvgl_port_lock(0); // with screen_idle's tick held off: it clears a test style while no saver shows
+    lichen_sys_ui_lock(0); // with screen_idle's tick held off: it clears a test style while no saver shows
     atomic_store(&style_test, test);
     screen_idle_force_saver();
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     console_reply("screensaver (%s) shown until the next key (needs home on screen, nothing holding it bright)",
                   style_name(test >= 0 ? test : atomic_load(&style_setting)));
 }
@@ -434,7 +434,7 @@ static void cmd_saver(char const *args) {
 // "fw lock [on|off|now|unlock]"
 static void cmd_lock(char const *args) {
     if (strcmp(args, "now") == 0 || strcmp(args, "unlock") == 0) {
-        lvgl_port_lock(0);
+        lichen_sys_ui_lock(0);
         bool home = shell_home_shown();
         if (args[0] == 'n' && home) {
             screen_lock_engage();
@@ -442,7 +442,7 @@ static void cmd_lock(char const *args) {
         } else if (args[0] == 'u') {
             screen_lock_release();
         }
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         if (args[0] == 'n' && !home) {
             console_reply("not now: home is not up yet");
             return;
@@ -453,9 +453,9 @@ static void cmd_lock(char const *args) {
             return;
         }
         if (!on) {
-            lvgl_port_lock(0);
+            lichen_sys_ui_lock(0);
             screen_lock_release();
-            lvgl_port_unlock();
+            lichen_sys_ui_unlock();
         }
     } else if (*args) {
         console_reply("lock [on|off|now|unlock] (pocket lock: setting, lock at once, lift it)");

@@ -3,7 +3,7 @@
 #include "console_cmd.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "fw_console.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -160,9 +160,9 @@ void ui_probe_send(char const *seq_text) {
     seq->locked = ui_remote_locked();
     seq->waiter = xTaskGetCurrentTaskHandle();
     ulTaskNotifyTake(pdTRUE, 0); // a stale notification would end the wait early
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     lv_timer_t *timer = lv_timer_create(sequence_step, 1, seq);
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     if (!timer) {
         console_reply("keys send: no timer");
         free(seq);
@@ -272,9 +272,7 @@ static void settle_done(void *arg) {
 static void settle(void) {
     for (int round = 0; round < 3; round++) {
         ulTaskNotifyTake(pdTRUE, 0);
-        lvgl_port_lock(0);
-        lv_async_call(settle_done, xTaskGetCurrentTaskHandle());
-        lvgl_port_unlock();
+        lichen_sys_ui_call(settle_done, xTaskGetCurrentTaskHandle(), 0);
         if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(300)) == 0) {
             return;
         }
@@ -573,7 +571,7 @@ static void cmd_ui_overflow(bool verbose) {
         console_reply("ui overflow: no memory");
         return;
     }
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     lv_obj_t *screen = lv_screen_active();
     lv_obj_update_layout(screen); // scroll ranges and sizes are read below
     ctx.hint_obj     = lichen_page_hint_of(screen);
@@ -584,7 +582,7 @@ static void cmd_ui_overflow(bool verbose) {
     ctx.in_screen = false;
     overflow_walk(&ctx, lv_layer_top(), true);
     overflow_walk(&ctx, lv_layer_sys(), true);
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     console_reply("ui overflow: %u", (unsigned)ctx.total);
     for (size_t i = 0; i < ctx.n; i++) {
         hit_t const *h = &ctx.hits[i];
@@ -626,14 +624,14 @@ static void cmd_ui(char const *args) {
     }
     size_t n = 0;
     char   stack[64] = "", focus[LINE_CHARS] = "";
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     for (int i = 0; i < nav_depth(); i++) {
         size_t used = strlen(stack);
         snprintf(stack + used, sizeof(stack) - used, "%s%d", i ? " > " : "", nav_at(i));
     }
     current_focus(focus, sizeof(focus));
     collect(lv_screen_active(), lines, &n);
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     qsort(lines, n, sizeof(line_t), by_position);
     console_reply("ui stack: %s | focus: %s", stack, focus[0] ? focus : "(none)");
     ui_remote_report();

@@ -4,7 +4,7 @@
 // how many settings will change; only a yes writes them. The rules and the list of settings are
 // lichen_api/settings_backup.c; secrets are not in it, so they are neither saved nor loaded.
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_task.h"
@@ -123,9 +123,7 @@ static void job_task(void *arg) {
         s_status = settings_backup_apply(&s_applied);
     }
     ESP_LOGI(TAG, "job stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
-    lvgl_port_lock(0); // lv_async_call is not thread safe
-    lv_async_call(job_done, NULL);
-    lvgl_port_unlock();
+    lichen_sys_ui_call(job_done, NULL, 0); // waits for the LVGL lock as long as it takes
 }
 
 static bool job_start(job_t kind) {

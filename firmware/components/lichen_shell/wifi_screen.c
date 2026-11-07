@@ -3,10 +3,11 @@
 // screen is gone by then.
 #include "esp_log.h"
 #include "screen_ids.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_radio.h"
+#include "lichen_ui.h"
 #include "menu.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -255,12 +256,12 @@ static void on_forget(void *arg) {
     set_status(ok ? "Forgot %s" : "Could not forget %s. Try again.", name);
 }
 
-// "Saved networks" with one Forget row per network: name left, "Forget" right, asks first (R3)
-static void add_saved_rows(void) {
+// "Saved networks" with one Forget row per network: name left, "Forget" right, asks first (R3). lichen_ui_with_group's
+// builder, in the screen's group
+static void build_saved_rows(void *arg) {
+    (void)arg;
     char names[WIFI_SAVED_MAX][33];
     size_t n = shell_sources.wifi_saved_names ? shell_sources.wifi_saved_names(names, WIFI_SAVED_MAX) : 0;
-    lv_group_t *previous = lv_group_get_default();
-    lv_group_set_default(group);
     rows[row_count++] = menu_note(menu, n ? "Saved networks" : "No saved networks yet: pick one above to join and save it.");
     for (size_t i = 0; i < n; i++) {
         char name[140], question[200];
@@ -275,7 +276,10 @@ static void add_saved_rows(void) {
         menu_set_danger(row, question, "forget");
         rows[row_count++] = row;
     }
-    lv_group_set_default(previous);
+}
+
+static void add_saved_rows(void) {
+    lichen_ui_with_group(group, build_saved_rows, NULL);
 }
 
 static void on_skip(void *arg) {
@@ -304,11 +308,9 @@ static void open_analyser(void *arg) {
     wifi_analyser_open();
 }
 
-// The scan list, "Scan again", the saved networks and the analyser, from `shown`; the radio row stays
-static void fill_rows(void) {
-    clear_rows();
-    lv_group_t *previous = lv_group_get_default();
-    lv_group_set_default(group);
+// lichen_ui_with_group's builder for fill_rows: the scan list, "Scan again" and the analyser, in the screen's group
+static void build_scan_rows(void *arg) {
+    (void)arg;
     char joined[33] = "", ip[16] = "";
     settings_get_str("wifi_ssid", joined, sizeof(joined), "");
     bool online = joined[0] && lichen_radio_get(RADIO_WIFI) && shell_sources.wifi_ip && shell_sources.wifi_ip(ip, sizeof(ip));
@@ -327,7 +329,12 @@ static void fill_rows(void) {
         menu_set_kind(an, MENU_OPEN);
         rows[row_count++] = an;
     }
-    lv_group_set_default(previous);
+}
+
+// The scan list, "Scan again", the saved networks and the analyser, from `shown`; the radio row stays
+static void fill_rows(void) {
+    clear_rows();
+    lichen_ui_with_group(group, build_scan_rows, NULL);
     add_saved_rows();
 }
 
@@ -383,20 +390,19 @@ static void scan_task(void *arg) {
     if (res) {
         res->gen = (uint32_t)(uintptr_t)arg;
         res->ok  = shell_sources.wifi_scan && shell_sources.wifi_scan(res->aps, MAX_APS, &res->n);
-        // lv_async_call is not thread safe: take the LVGL lock like the shell does
-        lvgl_port_lock(0);
-        lv_async_call(on_scan_done, res);
-        lvgl_port_unlock();
+        lichen_sys_ui_call(on_scan_done, res, 0); // waits for the LVGL lock as long as it takes
     }
     vTaskDelete(NULL);
 }
 
+static void add_scanning_row(void *arg) {
+    (void)arg;
+    rows[row_count++] = menu_add(menu, "Scanning...", "", NULL, NULL);
+}
+
 static void start_scan(void) {
     clear_rows();
-    lv_group_t *previous = lv_group_get_default();
-    lv_group_set_default(group);
-    rows[row_count++] = menu_add(menu, "Scanning...", "", NULL, NULL); // keeps the group's focus on the list
-    lv_group_set_default(previous);
+    lichen_ui_with_group(group, add_scanning_row, NULL); // keeps the group's focus on the list
     focus_at_scan = group ? lv_group_get_focused(group) : NULL;
     set_status("Scanning for networks...");
     if (xTaskCreatePinnedToCore(scan_task, "wifiscan", 4096, (void *)(uintptr_t)gen, 4, NULL, 0) != pdPASS) {

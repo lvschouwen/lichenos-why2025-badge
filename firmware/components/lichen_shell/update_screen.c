@@ -6,7 +6,7 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "logo.h"
@@ -512,9 +512,9 @@ static upd_result_t boot_check(void) {
     update_line(after.result, prev, run, banner_line, sizeof(banner_line));
     atomic_store(&boot_result, (int)after.result);
     atomic_store(&banner_up, true);
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     lv_timer_create(banner_tick, TICK_MS, NULL);
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     return after.result;
 }
 

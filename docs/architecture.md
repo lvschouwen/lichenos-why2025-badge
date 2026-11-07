@@ -271,6 +271,14 @@ The two-chip protocol is a separate contract: see "Two-chip contract" in this fi
 - **The shell reaches hardware and shared state only through the system surface**, never through drivers or
   `board` directly. `lvgl_port_lock`, `nvs_open`, `heap_caps_*`, `xTaskCreate*` and `lv_group_set_default` become
   owner-only symbols, with the owner listed per symbol.
+- **The UI service owns the LVGL lock** (#225, `lichen_os/lichen_ui_call.c`): the shell and main take it through
+  `lichen_sys_ui_lock`/`_unlock` and hand work over with `lichen_sys_ui_call` (`lichen_sys_ui.h`, system surface,
+  forbidden to apps); apps use `lichen_ui_call`; builders set the default group only through `lichen_ui_with_group`.
+  Calls for the LVGL task wait in a 16-entry FIFO that one `lv_async_call` drains per batch (a burst past it falls back
+  to one async call each, as before). `board` keeps the port lock for the port setup at boot (display, keyboard). With
+  `CONFIG_LICHEN_UI_LOCK_ASSERT` (default on wherever assertions are enabled) the linker wraps LVGL's allocator and
+  `lv_inv_area`, and once `main.c` arms it after the keyboard is set up, LVGL touched by a task that is neither the LVGL
+  task nor inside `lichen_sys_ui_lock` logs the task and asserts.
 - **Where things sit:** the shell and the system screens (Settings, About, Files, Power, Update...) are L5; MeshCore and
   the plain apps are L6; the C6 is a second chip behind the c6link driver (L2) and its protocol is the two-chip
   contract, not a layer.

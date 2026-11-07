@@ -4,7 +4,7 @@
 
 #include "esp_log.h"
 #include "fw_console.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -175,11 +175,10 @@ void shell_esc(void) {
 }
 
 // shell_back and the app API's shell_back_then / shell_back_to (lichen_ui.h) may be called from a task other than LVGL's,
-// and lv_malloc / lv_async_call are not thread safe: they take the (recursive) LVGL lock (#118)
+// and lv_malloc / lv_async_call are not thread safe: they go through the UI service, which takes the (recursive) LVGL
+// lock (#118, #225)
 void shell_back_impl(void) {
-    lvgl_port_lock(0);
-    lv_async_call(go_back, NULL);
-    lvgl_port_unlock();
+    lichen_sys_ui_call(go_back, NULL, 0);
 }
 
 typedef struct {
@@ -212,17 +211,17 @@ static void back_step(void *data) {
 }
 
 static bool back_later(lv_obj_t *target, void (*then)(void *), void *arg) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     back_job_t *job    = lv_malloc(sizeof(*job));
     bool        queued = false;
     if (job) {
         *job   = (back_job_t){target, then, arg};
-        queued = lv_async_call(back_step, job) == LV_RESULT_OK;
+        queued = lichen_sys_ui_call(back_step, job, 0); // the lock is held: no wait
         if (!queued) {
             lv_free(job);
         }
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     return queued;
 }
 
@@ -235,10 +234,10 @@ bool shell_back_to_impl(lv_obj_t *screen, void (*then)(void *), void *arg) {
 }
 
 lv_obj_t *shell_stack_screen_impl(int from_top) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     int       at     = nav_depth() - 1 - from_top;
     lv_obj_t *screen = from_top >= 0 && at >= 0 ? frames[at].screen : NULL;
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     return screen;
 }
 
@@ -284,9 +283,9 @@ static bool home_settling(void) {
 
 bool shell_home_shown(void) {
     bool shown;
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     shown = frames[0].screen && !home_settling();
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     return shown;
 }
 
@@ -304,7 +303,7 @@ static void first_run_cb(lv_timer_t *timer) {
 }
 
 void shell_home_impl(void) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     if (frames[0].screen) {
         // Home first, then the screens it replaces: never delete the one that is showing
         int depth = nav_depth();
@@ -316,7 +315,7 @@ void shell_home_impl(void) {
         for (int i = 1; i < depth; i++) {
             drop(&frames[i]);
         }
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         return;
     }
     nav_reset();
@@ -332,14 +331,14 @@ void shell_home_impl(void) {
     // First run: the welcome opens once home has settled (shell_open refuses while it fades)
     lv_timer_t *first = lv_timer_create(first_run_cb, FADE_SETTLE_MS + 50, NULL);
     lv_timer_set_repeat_count(first, 1);
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 // The app list or the layout changed: a fresh home, and back to it from wherever the badge is
 void shell_rebuild_home(void) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     if (!frames[0].screen || home_settling()) {
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         return;
     }
     frame_t old[NAV_MAX_DEPTH];
@@ -352,15 +351,15 @@ void shell_rebuild_home(void) {
     for (int i = 0; i < depth; i++) {
         drop(&old[i]);
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 // The layout changed under the screens on top (Settings > Display, #128): home is rebuilt in its own frame and the
 // stack stays, so Esc goes back to Settings, not home. Home itself showing is swapped like shell_rebuild_home.
 void shell_rebuild_home_below(void) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     if (!frames[0].screen || home_settling()) {
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         return;
     }
     frame_t old = frames[0];
@@ -369,13 +368,13 @@ void shell_rebuild_home_below(void) {
         show_top(); // never delete the screen that is showing
     }
     drop(&old);
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 // Settings > Display > Arrange home (#189): every screen closes and home starts arranging; rebuilt first when the layout
 // changed on that page (its own deferred rebuild would replace the arranging home)
 void shell_arrange_home(bool rebuild) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     if (rebuild) {
         shell_rebuild_home();
     } else {
@@ -384,7 +383,7 @@ void shell_arrange_home(bool rebuild) {
     if (frames[0].screen && nav_depth() == 1 && !home_settling()) {
         home_arrange(frames[0].screen, true);
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 void shell_scroll_tame_impl(lv_obj_t *obj) {
@@ -428,13 +427,13 @@ void shell_open_app(size_t index) {
     if (!app || !app->open) {
         return;
     }
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     opening = app;
     shell_open(build_app, 1 + (int)index);
     if (nav_current() == 1 + (int)index) {
         shortcuts_app_opened(index); // ✕ goes back here later (#79)
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 static unsigned reused_count; // shell_open calls answered by a screen that was already open (#148)
@@ -445,9 +444,9 @@ unsigned shell_open_reuse_count_impl(void) {
 
 bool shell_screen_open_impl(int screen_id, uint32_t key) {
     int frame;
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     bool open = nav_decide(screen_id, key, &frame) != NAV_OPEN_NEW;
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     return open;
 }
 
@@ -471,58 +470,72 @@ static void reuse_open(nav_open_t how, int frame, int screen_id) {
     }
 }
 
+typedef struct {
+    lv_obj_t *(*build)(void);
+    lv_obj_t *screen;
+    bool (*on_esc)(void *);
+    void *on_esc_arg;
+    void (*on_search)(void *);
+    void *on_search_arg;
+} build_job_t;
+
+// lichen_ui_with_group's builder: the screen, its widgets in the new group, and the Esc and search hooks it set
+static void build_in_group(void *arg) {
+    build_job_t *job = arg;
+    shell_on_esc(NULL, NULL);
+    shell_on_search(NULL, NULL);
+    job->screen        = job->build();
+    job->on_esc        = building_esc;
+    job->on_esc_arg    = building_esc_arg;
+    job->on_search     = building_search;
+    job->on_search_arg = building_search_arg;
+    shell_on_esc(NULL, NULL);
+    shell_on_search(NULL, NULL);
+}
+
 void shell_open_keyed_impl(lv_obj_t *(*build)(void), int screen_id, uint32_t key) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     if (!frames[0].screen || home_settling()) {
         ESP_LOGW(TAG, "screen %d not opened (still booting)", screen_id);
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         return;
     }
     int        frame = -1;
     nav_open_t how   = nav_decide(screen_id, key, &frame);
     if (how != NAV_OPEN_NEW) {
         reuse_open(how, frame, screen_id);
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         return;
     }
     if (!nav_push_keyed(screen_id, key)) {
         ESP_LOGW(TAG, "screen %d not opened (stack full)", screen_id);
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         return;
     }
-    lv_group_t *group    = lv_group_create();
-    lv_group_t *previous = lv_group_get_default();
-    lv_group_set_default(group);
-    shell_on_esc(NULL, NULL);
-    shell_on_search(NULL, NULL);
-    lv_obj_t *screen = build();
-    bool (*on_esc)(void *) = building_esc;
-    void *on_esc_arg       = building_esc_arg;
-    void (*on_search)(void *) = building_search;
-    void *on_search_arg       = building_search_arg;
-    shell_on_esc(NULL, NULL);
-    shell_on_search(NULL, NULL);
-    lv_group_set_default(previous);
+    lv_group_t *group = lv_group_create();
+    build_job_t job   = {.build = build};
+    lichen_ui_with_group(group, build_in_group, &job);
+    lv_obj_t *screen = job.screen;
     if (!screen) {
         nav_back();
         lv_group_delete(group);
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         return;
     }
     if (lv_group_get_obj_count(group) == 0) {
         lv_group_add_obj(group, screen); // keys still reach a screen without focusable widgets
         shell_no_arrow_scroll(screen);
     }
-    frames[nav_depth() - 1] = (frame_t){screen, group, on_esc, on_esc_arg, on_search, on_search_arg};
+    frames[nav_depth() - 1] = (frame_t){screen, group, job.on_esc, job.on_esc_arg, job.on_search, job.on_search_arg};
     show_top();
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 void shell_close_all_but_top(void) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     int depth = nav_depth();
     if (depth <= 1 || !frames[0].screen) {
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         return;
     }
     // The top screen is showing: delete the others only once it has its own slot, so none is deleted twice
@@ -539,14 +552,14 @@ void shell_close_all_but_top(void) {
     for (int i = 0; i < depth - 1; i++) {
         drop(&old[i]);
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 void shell_attach_keys(lv_indev_t *indev) {
     if (!indev) {
         return;
     }
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     keys = indev;
     lv_indev_add_event_cb(keys, on_key, LV_EVENT_KEY, NULL);
     ui_perf_watch_keys(keys);
@@ -556,7 +569,7 @@ void shell_attach_keys(lv_indev_t *indev) {
     } else if (boot_screen_group()) {
         lv_indev_set_group(keys, boot_screen_group()); // any key shows the boot details
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 // "fw keys log on": raw key events (before the keyboard maps it, so shape keys and Fn show too), only those captured while
@@ -575,14 +588,14 @@ static void on_raw_key(key_raw_event_t const *ev, void *arg) {
 }
 
 static void set_raw_log(bool on) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     if (on && !log_raw) {
         log_raw = raw_keys_listen(on_raw_key, NULL, false);
     } else if (!on && log_raw) {
         raw_keys_unlisten(on_raw_key, NULL);
         log_raw = false;
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 static void cmd_keys(char const *args) {
@@ -608,13 +621,13 @@ static bool boot_screen_shown;
 
 void shell_boot_screen(lv_display_t *display) {
     shell_ui_ops_register(); // the boot screen styles itself through the gate (#221)
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     lv_display_set_default(display);
     ui_perf_early(display);
     lv_obj_t *boot = boot_screen_create();
     lv_screen_load_anim(boot, LV_SCREEN_LOAD_ANIM_NONE, 0, 0, true); // drops LVGL's empty start screen
     boot_screen_shown = true;
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 #define RESTART_FRAME_MS 2000
@@ -630,12 +643,12 @@ char const *shell_restart_note_get(void) {
 }
 
 void shell_show_restarting(void) {
-    if (!lv_display_get_default() || !lvgl_port_lock(300)) {
+    if (!lv_display_get_default() || !lichen_sys_ui_lock(300)) {
         return;
     }
     // An out-of-memory restart must not allocate more; LVGL's heap is PSRAM
     if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < 64 * 1024) {
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         return;
     }
     lv_obj_t *screen = lv_obj_create(NULL);
@@ -645,7 +658,7 @@ void shell_show_restarting(void) {
         if (screen) {
             lv_obj_delete(screen);
         }
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         return;
     }
     shell_style_screen(screen);
@@ -666,7 +679,7 @@ void shell_show_restarting(void) {
     }
     lv_screen_load(screen); // the old screens stay: the restart frees everything
     lv_refr_now(NULL);
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     // Long enough to judge by eye (#134): at 40 ms nobody saw it, only the dark panel after it. The shutdown handler turns the
     // backlight off next, before the feed stops
     vTaskDelay(pdMS_TO_TICKS(RESTART_FRAME_MS));
@@ -676,7 +689,7 @@ void shell_start(lv_display_t *display) {
     shell_ui_ops_register(); // the gate's navigation calls reach this shell from now on (#221); again if the boot screen did
     // The boot screen is already up (shell_boot_screen), so the LVGL task renders while this runs: every LVGL call
     // below (display events, timers, objects) needs the lock, or a realloc races the LVGL task's walk (#118)
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     home_init();
     setup_init();
     screen_idle_init();
@@ -708,7 +721,7 @@ void shell_start(lv_display_t *display) {
     notify_ui_start();
     shortcuts_start();
     up = true;
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     sys_notices_start();
     thermal_start();
 }

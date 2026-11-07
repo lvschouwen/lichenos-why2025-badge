@@ -5,7 +5,7 @@
 // (LVGL 9 runs async calls queued together newest first, see shell.c).
 #include "dialog_countdown.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "fonts.h"
 #include "freertos/FreeRTOS.h"
@@ -206,12 +206,7 @@ static void apply(void *arg) {
 }
 
 static bool queue_apply(void) {
-    if (!lvgl_port_lock(LOCK_WAIT_MS)) {
-        return false;
-    }
-    bool ok = lv_async_call(apply, NULL) == LV_RESULT_OK;
-    lvgl_port_unlock();
-    return ok;
+    return lichen_sys_ui_call(apply, NULL, LOCK_WAIT_MS);
 }
 
 // A bounded copy into one TEXT_MAX field, NULL as "": no snprintf with interrupts off (#5)

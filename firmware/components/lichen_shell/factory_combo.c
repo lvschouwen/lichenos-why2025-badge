@@ -8,7 +8,7 @@
 // the UI underneath sees none. If the LVGL lock cannot be had (the UI is stuck) the question still works blind:
 // Enter resets, Esc or 30 s cancel, and the log says so.
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "factory_reset.h"
 #include "freertos/FreeRTOS.h"
@@ -59,7 +59,7 @@ static void add_label(lv_obj_t *parent, char const *text, uint32_t colour) {
 }
 
 static void show_question(void) {
-    if (!lvgl_port_lock(LOCK_MS)) {
+    if (!lichen_sys_ui_lock(LOCK_MS)) {
         ESP_LOGW(TAG, "boot keys: no screen (UI stuck); Enter resets the settings, Esc cancels");
         return;
     }
@@ -79,14 +79,14 @@ static void show_question(void) {
     add_label(page, "MeshCore keeps its identity, contacts and channels. Files and the SD card are not touched.",
               THEME_DIM);
     add_label(page, "Enter: reset settings and restart \xE2\x80\xA2 Esc: cancel\n(cancels in 30 s)", THEME_TEXT);
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 static void close_question(void) {
-    if (page && lvgl_port_lock(LOCK_MS)) {
+    if (page && lichen_sys_ui_lock(LOCK_MS)) {
         lv_obj_delete(page);
         page = NULL;
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
     }
 }
 

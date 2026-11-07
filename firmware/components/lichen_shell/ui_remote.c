@@ -2,7 +2,7 @@
 // task (commands) and the LVGL task (the timer that ends it and draws the banner), so it lives under a spinlock; the
 // rules themselves are remote_ctl.c. It is RAM only: a restart always ends it.
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "fw_console.h"
@@ -101,7 +101,7 @@ void ui_remote_report(void) {
 
 // The banner and the timer follow the state at once, not at the next tick
 static void kick_timer(void) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     if (!timer) {
         timer = lv_timer_create(tick, TICK_MS, NULL);
     }
@@ -109,7 +109,7 @@ static void kick_timer(void) {
         lv_timer_resume(timer);
         tick(timer);
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 void ui_remote_lock_cmd(char const *args) {
@@ -191,7 +191,7 @@ void ui_remote_open_cmd(char const *args) {
         list_ids();
         return;
     }
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     char const *why = open_refused();
     bool        ok  = false;
     if (!why) {
@@ -201,7 +201,7 @@ void ui_remote_open_cmd(char const *args) {
         }
         ok = to_home ? nav_depth() == 1 : nav_current() == 1 + index;
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     char const *name = to_home ? "home" : lichen_app_at((size_t)index)->name;
     if (why) {
         console_reply("ui open: not now (%s)", why);

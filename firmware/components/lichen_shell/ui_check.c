@@ -8,7 +8,7 @@
 // writes a restart-log note so "fw crash" shows the finding after the reboot that usually follows.
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "esp_memory_utils.h"
 #include "fw_console.h"
@@ -215,9 +215,9 @@ static void tick(lv_timer_t *t) {
 
 static void cmd_uicheck(char const *args) {
     (void)args;
-    lvgl_port_lock(0); // console commands run on the console task, outside LVGL's lock
+    lichen_sys_ui_lock(0); // console commands run on the console task, outside LVGL's lock
     walk_all();
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     console_reply("ui check: %" PRIu32 " walks, %" PRIu32 " objects in %" PRId64 " us, %" PRIu32 " finding(s)%s%s", walks, objects_last,
                   last_walk_us, reports, reports ? ": " : "", reports ? last_finding : "");
 }

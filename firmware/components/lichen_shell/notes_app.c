@@ -6,7 +6,7 @@
 #include "screen_ids.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "fonts.h"
 #include "fw_console.h"
 #include "lichen_app.h"
@@ -232,7 +232,7 @@ static void wait_tick(lv_timer_t *timer) {
 // Main task, while the LVGL task already renders (and reads the notes for home's tile and the pages): the notes state is
 // LVGL-task state, so the whole check holds the recursive LVGL lock (#118)
 void notes_boot_check(bool updated) {
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     load();
     rn_boot_t what = rn_boot_decision(updated, s_seen_known, s_seen, newest());
     ESP_LOGI(TAG, "%u notes, marker %s%u, %s: %s", (unsigned)s_count, s_seen_known ? "" : "unset ", (unsigned)s_seen,
@@ -246,7 +246,7 @@ void notes_boot_check(bool updated) {
     if (what == RN_BOOT_SHOW) {
         lv_timer_create(wait_tick, WAIT_TICK_MS, NULL);
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }
 
 // fw whatsnew [show|reset]: for the bench. Console task: the notes state is read and changed under the (recursive) LVGL
@@ -254,7 +254,7 @@ void notes_boot_check(bool updated) {
 static void cmd_whatsnew(char const *args) {
     bool reset = strcmp(args, "reset") == 0;
     bool show  = strcmp(args, "show") == 0;
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     load();
     if (reset) {
         settings_erase(SEEN_KEY);
@@ -270,7 +270,7 @@ static void cmd_whatsnew(char const *args) {
     bool     known  = s_seen_known;
     unsigned seen   = (unsigned)s_seen;
     unsigned unread = (unsigned)rn_count_new(s_notes, s_count, s_seen_known, s_seen);
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     if (reset) {
         console_reply("whatsnew: marker erased, %u notes unread", count);
     } else if (show) {

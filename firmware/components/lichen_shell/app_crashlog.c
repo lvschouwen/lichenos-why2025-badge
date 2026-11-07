@@ -8,7 +8,7 @@
 #include "screen_ids.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "fonts.h"
@@ -105,6 +105,13 @@ static void add_rows(void) {
     }
 }
 
+// lichen_ui_with_group's builder: the menu and its rows, in the screen's group
+static void build_menu(void *arg) {
+    (void)arg;
+    s_v.menu = menu_create(s_v.screen, "Crash log");
+    add_rows();
+}
+
 // (Re)builds the menu from the log; rows join the screen's own group, whatever group is the default now
 static void fill_list(void) {
     if (!s_v.screen) {
@@ -116,11 +123,7 @@ static void fill_list(void) {
     s_v.clear_row = NULL;
     s_v.copy_row  = NULL;
     s_v.count = s_v.entries ? lichen_crashlog_list(s_v.entries, CRASHLOG_MAX) : 0;
-    lv_group_t *previous = lv_group_get_default();
-    lv_group_set_default(s_v.group);
-    s_v.menu = menu_create(s_v.screen, "Crash log");
-    add_rows();
-    lv_group_set_default(previous);
+    lichen_ui_with_group(s_v.group, build_menu, NULL);
     // Without rows the screen itself takes the keys (Esc); with rows it must not be a stop of its own
     bool rows = s_v.count > 0;
     if (!rows && lv_obj_get_group(s_v.screen) != s_v.group) {
@@ -181,10 +184,7 @@ static void job_task(void *arg) {
                                      : lichen_crashlog_delete(&crashlog_app, s_job_index, &s_job_expect);
     ESP_LOGI(TAG, "job stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     atomic_store(&s_job_outcome, ok ? 1 : 0);
-    // lv_async_call is not thread safe: take the LVGL lock like the shell does
-    lvgl_port_lock(0);
-    lv_async_call(job_done, NULL);
-    lvgl_port_unlock();
+    lichen_sys_ui_call(job_done, NULL, 0); // waits for the LVGL lock as long as it takes
 }
 
 static bool job_start(job_t kind) {
@@ -441,10 +441,10 @@ static void notice_tick(lv_timer_t *timer) {
 
 void crashlog_app_register(void) {
     lichen_register_app(&crashlog_app);
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     lv_timer_create(badge_tick, BADGE_TICK_MS, NULL);
     if (lichen_crashlog_after_crash()) {
         lv_timer_create(notice_tick, NOTICE_TICK_MS, NULL);
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
 }

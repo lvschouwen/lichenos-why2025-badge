@@ -137,13 +137,9 @@ static void keep_only_rows_focusable(void) {
     }
 }
 
-// (Re)builds the menu from s_v.dir and the last listing; rows join the screen's group
-static void fill_menu(void) {
-    if (s_v.menu) {
-        lv_obj_delete(s_v.menu);
-    }
-    lv_group_t *previous = lv_group_get_default();
-    lv_group_set_default(s_v.group);
+// lichen_ui_with_group's builder: the menu, its notes and rows, in the screen's group
+static void build_menu(void *arg) {
+    (void)arg;
     // In a folder the folder names the page (R1): its own name large, where it lives small over it ("Files in
     // /sd/photos"), so a deep path cuts the parents, never the folder you are in (#135 review); the free space as a dim line
     if (s_v.dir[0]) {
@@ -168,7 +164,14 @@ static void fill_menu(void) {
         add_volume_rows();
     }
     menu_on_text(s_v.menu, on_text, NULL);
-    lv_group_set_default(previous);
+}
+
+// (Re)builds the menu from s_v.dir and the last listing; rows join the screen's group
+static void fill_menu(void) {
+    if (s_v.menu) {
+        lv_obj_delete(s_v.menu);
+    }
+    lichen_ui_with_group(s_v.group, build_menu, NULL);
     keep_only_rows_focusable();
     int focus = 0;
     files_entry_t const *entries = files_job_entries();

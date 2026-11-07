@@ -9,7 +9,8 @@
 // The shell's navigation for apps (#84): open a screen, go back, scroll. The shell does the work: the gate forwards
 // these calls to the table the shell sets at boot (lichen_ui_ops.h, #221), and until then each has a defined "not up"
 // answer (nothing, false, NULL, 0). shell_key_hash is the gate's own; lichen_ui_call and lichen_ui_with_group are the UI
-// service's (lichen_os/lichen_ui_call.c, #220), the label and heading helpers the gate's own (lichen_ui.c).
+// service's (lichen_os/lichen_ui_call.c, #220, #225: the only owner of the LVGL lock and the default group; the shell
+// takes the lock through lichen_sys_ui.h), the label and heading helpers the gate's own (lichen_ui.c).
 //
 // Thread rule (#238), stated in each function's comment and copied into tools/gate_manifest.txt: "any task" = the
 // function takes the LVGL port lock itself (or touches no LVGL state), so any task may call it; "LVGL task only" = it
@@ -106,11 +107,12 @@ bool shell_dialog_countdown(shell_dialog_t const *d, shell_dialog_fn done);
 // Closes it without an answer (the reason for it went away). Any task.
 void shell_dialog_close(void);
 
-// Runs fn(arg) on the LVGL task, soon (lv_async_call under the LVGL lock): the way a job on any other task hands its
-// result back to a screen (#84 T8a). Any task (takes the lock), the LVGL task included. fn runs in LVGL context and may touch
-// widgets; the screen it meant may be gone by then, so it checks before it does. False when the call was not queued
-// (the LVGL lock was not free within 2 s, or no memory): fn will not run and arg is still the caller's, so retry or
-// free it. Never take lvgl_port_lock or call lv_async_call in an app.
+// Runs fn(arg) on the LVGL task, soon (the UI service's queue, drained on the next LVGL timer pass; calls run in the
+// order they were made unless a burst overflows the queue): the way a job on any other task hands its result back to a
+// screen (#84 T8a, #225). Any task (takes the lock), the LVGL task included; never inline, also from the LVGL task. fn runs
+// in LVGL context and may touch widgets; the screen it meant may be gone by then, so it checks before it does. False when
+// the call was not queued (the LVGL lock was not free within 2 s, or no memory): fn will not run and arg is still the
+// caller's, so retry or free it. Never take lvgl_port_lock or call lv_async_call in an app.
 bool lichen_ui_call(void (*fn)(void *), void *arg);
 // LVGL task only: runs build(arg) with group as the default group, so the widgets it creates join group (rows added
 // to a screen that is already showing), then puts the previous default back. Never set the default group yourself.

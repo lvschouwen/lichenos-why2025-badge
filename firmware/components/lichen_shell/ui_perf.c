@@ -4,7 +4,7 @@
 // app (#96) uses the same two calls (ui_perf.h).
 #include "ui_perf.h"
 
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "fw_console.h"
 #include "lvgl.h"
@@ -87,11 +87,11 @@ uint64_t ui_perf_redraw_us(unsigned n) {
 
 static void bench(unsigned n) {
     n = n == 0 ? 10 : n > BENCH_MAX ? BENCH_MAX : n;
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     uint32_t renders = s_perf.render.n;
     uint64_t us      = ui_perf_redraw_us(n);
     renders          = s_perf.render.n - renders;
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     unsigned per10 = (unsigned)((us / n + 50) / 100);
     console_reply("ui perf bench: %u full-screen redraws in %u ms, %u.%u ms per frame (%u renders counted)", n,
                   (unsigned)(us / 1000), per10 / 10, per10 % 10, (unsigned)renders);
@@ -102,10 +102,10 @@ void ui_perf_cmd(char const *args) {
         args++;
     }
     if (strncmp(args, "reset", 5) == 0) {
-        lvgl_port_lock(0);
+        lichen_sys_ui_lock(0);
         ui_perf_reset(&s_perf, now_ms());
         s_lat = (ui_perf_lat_t){0};
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
         console_reply("ui perf: counters reset");
         return;
     }
@@ -115,10 +115,10 @@ void ui_perf_cmd(char const *args) {
     }
     // Formatted under the lock (no copy of the histograms onto the console task's small stack), replied after it
     char line[200], line2[200];
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     ui_perf_format(line, sizeof(line), &s_perf, now_ms());
     ui_perf_format_latency(line2, sizeof(line2), &s_lat, s_first_frame_ms);
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     console_reply("%s", line);
     console_reply("%s", line2);
 }

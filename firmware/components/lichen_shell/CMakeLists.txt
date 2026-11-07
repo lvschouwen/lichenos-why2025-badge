@@ -60,7 +60,7 @@ idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_r
                             "app_files.c" "files_job.c" "files_ops.c" "files_model.c" "backup_screen.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api lichen_net
-                       PRIV_REQUIRES lichen_boot lichen_clock freertos fw_console heap esp_hw_support esp_lvgl_port esp_app_format esp_timer crash board storage sdcard app_update esp_system psram_guard esp_mm lichen_led ota lichen_mdns lora)
+                       PRIV_REQUIRES lichen_boot lichen_clock freertos fw_console heap esp_hw_support esp_app_format esp_timer crash board storage sdcard app_update esp_system psram_guard esp_mm lichen_led ota lichen_mdns lora)
 
 set(RN_I 0)
 foreach(f ${RN_FILES})

@@ -4,7 +4,6 @@
 #include "esp_log.h"
 #include "screen_ids.h"
 #include "lichen_app.h"
-#include "esp_lvgl_port.h"
 #include "fw_console.h"
 #include "logo.h"
 #include "settings_store.h"

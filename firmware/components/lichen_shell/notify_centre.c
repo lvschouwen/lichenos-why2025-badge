@@ -356,6 +356,14 @@ static size_t row_items(scroll_item_t *items) {
     return s_c.count;
 }
 
+// lichen_ui_with_group's builder: the menu and its rows, in the screen's group
+static void build_menu(void *arg) {
+    (void)arg;
+    s_c.menu = menu_create(s_c.screen, "Notifications");
+    menu_on_text(s_c.menu, on_text, NULL);
+    add_rows();
+}
+
 // (Re)builds the menu; rows join the screen's own group, whatever group is the default now (crash log's pattern). The
 // selection stays on its notice and the view where it was: a new notice or a cleared one no longer moves either (#128)
 static void fill_list(void) {
@@ -371,12 +379,7 @@ static void fill_list(void) {
         anchor   = scroll_anchor_take(items, row_items(items), scroll_y);
         lv_obj_delete(s_c.menu);
     }
-    lv_group_t *previous = lv_group_get_default();
-    lv_group_set_default(s_c.group);
-    s_c.menu = menu_create(s_c.screen, "Notifications");
-    menu_on_text(s_c.menu, on_text, NULL);
-    add_rows();
-    lv_group_set_default(previous);
+    lichen_ui_with_group(s_c.group, build_menu, NULL);
     // With rows the screen must not be a stop of its own; without rows it takes the keys (Esc)
     bool rows = s_c.count > 0;
     if (!rows && lv_obj_get_group(s_c.screen) != s_c.group) {

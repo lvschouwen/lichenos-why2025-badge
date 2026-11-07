@@ -6,7 +6,7 @@
 #include "backlight.h"
 #include "backlight_level.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "fw_console.h"
 #include "lichen_notify.h"
 #include "lichen_ui.h"
@@ -153,9 +153,9 @@ void flashlight_open(void) {
 
 static void cmd_flashlight(char const *args) {
     (void)args;
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     flashlight_open();
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     console_reply("flashlight: on, any key (fw keys send enter) turns it off");
 }
 

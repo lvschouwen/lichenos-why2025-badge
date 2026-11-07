@@ -115,9 +115,6 @@ C	lichen_shell:lichen_notify_unread	4
 C	lichen_shell:lichen_notify_unread_top	1
 C	lichen_shell:log_clean	1
 C	lichen_shell:log_tap_last	1
-C	lichen_shell:lv_group_set_default	5
-C	lichen_shell:lvgl_port_lock	18
-C	lichen_shell:lvgl_port_unlock	18
 C	lichen_shell:ota_autooff_next	1
 C	lichen_shell:ota_autooff_text	1
 C	lichen_shell:ota_server_auto_closed	1
@@ -155,8 +152,6 @@ C	lichen_shell:xTaskCreatePinnedToCore	6
 C	main:heap_caps_get_free_size	1
 C	main:heap_caps_get_largest_free_block	1
 C	main:heap_caps_get_total_size	1
-C	main:lvgl_port_lock	1
-C	main:lvgl_port_unlock	1
 C	mesh:heap_caps_calloc	1
 C	mesh:heap_caps_malloc	1
 C	mesh:heap_caps_realloc	1

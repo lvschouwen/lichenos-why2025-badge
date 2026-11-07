@@ -5,7 +5,7 @@
 // dialog whose countdown cancels: never an erase without two deliberate Enters.
 #include "esp_log.h"
 #include "screen_ids.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_task.h"
@@ -112,10 +112,7 @@ static void job_task(void *arg) {
     }
     ESP_LOGI(TAG, "job stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     atomic_store(&job_outcome, ok ? 1 : 0);
-    // lv_async_call is not thread safe: take the LVGL lock like the shell does
-    lvgl_port_lock(0);
-    lv_async_call(job_done, NULL);
-    lvgl_port_unlock();
+    lichen_sys_ui_call(job_done, NULL, 0); // waits for the LVGL lock as long as it takes
 }
 
 static void job_start(sds_job_t kind) {

@@ -114,6 +114,9 @@ lichen_sensors_set_periods	SENSORS	unspecified	lichen_sensors.h
 lichen_sensors_start	SENSORS	unspecified	lichen_sensors.h
 lichen_sensors_stop	SENSORS	unspecified	lichen_sensors.h
 lichen_station_clock	-	lvgl	lichen_ui.h
+lichen_sys_ui_call	SYSTEM	any	lichen_sys_ui.h
+lichen_sys_ui_lock	SYSTEM	any	lichen_sys_ui.h
+lichen_sys_ui_unlock	SYSTEM	any	lichen_sys_ui.h
 lichen_task_console_register	BACKGROUND	unspecified	lichen_task.h
 lichen_task_leftovers	BACKGROUND	unspecified	lichen_task.h
 lichen_task_start	BACKGROUND	unspecified	lichen_task.h

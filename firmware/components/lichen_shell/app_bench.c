@@ -10,7 +10,7 @@
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "fonts.h"
 #include "fw_console.h"
@@ -409,9 +409,9 @@ static void cmd_bench(char const *args) {
     } else {
         console_reply("bench: no memory for the 1 MB buffers");
     }
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     redraw_run(text, sizeof(text));
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     console_reply("bench redraw (current screen, %u frames): %s", REDRAWS, text);
     mem_line(text, sizeof(text));
     console_reply("bench memory: %s", text);

@@ -6,7 +6,7 @@
 #include "assets.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "fw_console.h"
 
 #include <string.h>
@@ -89,12 +89,12 @@ static unsigned missing_in(lv_font_t const *font, char const *text) {
 static void cmd_fonts(char const *args) {
     bool     cover = strcmp(args, "cover") == 0;
     unsigned figure[SLOT_COUNT];
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     for (size_t i = 0; i < SLOT_COUNT; i++) {
         lv_font_t const *font = lichen_font(slots[i].px);
         figure[i] = cover ? missing_in(font, SAMPLE) : (unsigned)lv_font_get_line_height(font);
     }
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     for (size_t i = 0; i < SLOT_COUNT; i++) {
         slot_t const *s = &slots[i];
         if (cover) {

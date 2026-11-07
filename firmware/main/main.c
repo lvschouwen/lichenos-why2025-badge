@@ -15,7 +15,7 @@
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "esp_ota_ops.h"
 #include "esp_sleep.h"
 #include "esp_timer.h"
@@ -327,9 +327,9 @@ static bool show_boot_screen(lv_display_t **display) {
         return false;
     }
     shell_boot_screen(*display);
-    lvgl_port_lock(0);
+    lichen_sys_ui_lock(0);
     lv_refr_now(*display);
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     vTaskDelay(pdMS_TO_TICKS(40)); // the frame is on the panel before the backlight comes up
     ESP_LOGI(TAG, "first frame at %u ms", (unsigned)uptime_ms());
     boot_progress_end(BOOT_DISPLAY, STEP_DONE, NULL);
@@ -345,9 +345,9 @@ static bool show_boot_screen(lv_display_t **display) {
 static void load_fonts(bool screen) {
     assets_mount(); // without it the UI uses the built-in fonts
     if (screen) {
-        lvgl_port_lock(0);
+        lichen_sys_ui_lock(0);
         lichen_fonts_load(); // before shell_start builds the status bar and home
-        lvgl_port_unlock();
+        lichen_sys_ui_unlock();
     }
     assets_unmount(); // the fonts made their own PSRAM copies
 }
@@ -559,7 +559,10 @@ static void start_keyboard(boot_ctx_t *ctx) {
         return;
     }
     lv_indev_t *keys = NULL; // the keypad is an LVGL input device: LVGL first
-    if (!keyboard_start(&keys)) {
+    bool        up   = keyboard_start(&keys);
+    // keyboard_start was the last boot step to take the port lock directly (board): the lock-owner check starts now
+    lichen_ui_service_arm();
+    if (!up) {
         ESP_LOGE(TAG, "no keyboard");
         return;
     }

@@ -1,0 +1,12 @@
+menu "Lichen UI service"
+    config LICHEN_UI_LOCK_ASSERT
+        bool "Debug lock-owner check: assert when LVGL is touched without the LVGL lock (#225)"
+        depends on COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE
+        default y
+        help
+            Wraps LVGL's allocator and lv_inv_area at link time: a call from a task that is neither the LVGL task nor
+            inside lichen_sys_ui_lock logs the task and asserts. Armed once boot has set up the display and keyboard
+            (board takes the port lock directly for that). On by default wherever assertions are enabled (a debug
+            build); a build with silent or disabled assertions (a release) leaves it out, wraps and all. Cost: some
+            20-30 cycles per wrapped call, well under 0.1 ms per frame.
+endmenu

@@ -3,7 +3,7 @@
 #include "shot_blend.h"
 
 #include "esp_heap_caps.h"
-#include "esp_lvgl_port.h"
+#include "lichen_sys_ui.h"
 #include "lvgl.h"
 
 #define LOCK_MS 2000
@@ -72,12 +72,12 @@ static int render(lv_obj_t *scr) {
 
 int screenshot_take(uint8_t const **pixels, uint32_t *width, uint32_t *height, uint32_t *stride) {
     screenshot_free();
-    if (!lvgl_port_lock(LOCK_MS)) {
+    if (!lichen_sys_ui_lock(LOCK_MS)) {
         return 503;
     }
     lv_obj_t *scr = lv_screen_active();
     int       rc  = scr ? render(scr) : 404;
-    lvgl_port_unlock();
+    lichen_sys_ui_unlock();
     if (rc) {
         screenshot_free();
         return rc;

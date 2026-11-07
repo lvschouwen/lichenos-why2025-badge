@@ -18,3 +18,8 @@ bool settings_set_blob(char const *key, void const *data, size_t size);
 // Hands lichen_net its store (#235): the SSIDs and the wifi_drv_wiped flag as plain settings, the Wi-Fi passwords as
 // secrets (settings_secret.h). Call once after NVS is up, before wifi_service_init().
 void settings_bind_net(void);
+
+// Arms the UI service's debug lock-owner check (#225, CONFIG_LICHEN_UI_LOCK_ASSERT; nothing without it): from here,
+// LVGL touched by a task that is neither the LVGL task nor inside lichen_sys_ui_lock asserts. Call once, after the last
+// boot step that takes the port lock directly (board's display and keyboard setup) and only with a display.
+void lichen_ui_service_arm(void);
