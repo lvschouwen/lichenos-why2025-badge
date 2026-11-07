@@ -1508,3 +1508,4 @@ add_test(NAME tile_order_test COMMAND tile_order_test)
 
 # tools/elf_archive.sh: ELF archive for crash decoding (#194)
 add_test(NAME elf_archive_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/elf_archive_test.sh)
+add_test(NAME badge_usage_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_usage_test.sh)

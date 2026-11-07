@@ -59,9 +59,9 @@ Usage: $(basename "$0") <command> [args]
 Over Wi-Fi, while the badge is on Wi-Fi. <host> is an address or the badge's name, lichen-xxxx.local (shown in
 Settings and by "fw wifi"; needs mDNS on this machine, e.g. avahi/nss-mdns):
   ota-info <host>                       show the firmware version the badge runs
-  ota-firmware <host> [--no-reboot]     install firmware/build/badge_fw.bin (or $BADGE_FIRMWARE_BIN) and reboot into it
+  ota-firmware <host> [--no-reboot]     install firmware/build/badge_fw.bin (or \$BADGE_FIRMWARE_BIN) and reboot into it
   ota-file <host> <file> <badge-path>   push one file, e.g. 'FLASH0:[c6]firmware.bin'
-  ota-assets <host> [--no-reboot]       write firmware/build/assets.bin (or $BADGE_ASSETS_BIN) into the assets
+  ota-assets <host> [--no-reboot]       write firmware/build/assets.bin (or \$BADGE_ASSETS_BIN) into the assets
                                       partition (fonts) and reboot
   ota-c6 <host> [dir]                   push the C6 bundle (bootloader, partitions, firmware + .md5; default dir
                                       firmware/storage_staging/c6) in a safe order, reboot, wait for Wi-Fi
