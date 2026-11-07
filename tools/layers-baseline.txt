@@ -6,11 +6,6 @@
 # STALE, and GREW against the merge-base copy of this file). Fixed one? `tools/check_layers.sh --shrink` drops or lowers
 # entries (never adds). `tools/check_layers.sh --report` lists every violation with its place.
 # First version created by --init (2026-11-07).
-A	c6link -> lichen_api	1
-A	c6link -> lichen_boot	1
-A	c6link -> lichen_clock	1
-A	c6link -> lichen_mdns	1
-A	c6link -> lichen_net	1
 A	lichen_api -> lichen_notify	1
 A	lichen_boot -> lichen_api	1
 A	lichen_clock -> lichen_api	1
@@ -30,11 +25,6 @@ A	lichen_shell -> storage	1
 A	lora -> lichen_api	1
 A	ota -> lichen_api	1
 A	sensors -> lichen_api	1
-B	c6link -> lichen_api	1
-B	c6link -> lichen_boot	2
-B	c6link -> lichen_clock	1
-B	c6link -> lichen_mdns	1
-B	c6link -> lichen_net	5
 B	lichen_boot -> lichen_api	1
 B	lichen_clock -> lichen_api	1
 B	lichen_haptics -> lichen_notify	1
@@ -53,38 +43,6 @@ B	lichen_shell -> storage	3
 B	lora -> lichen_api	1
 B	ota -> lichen_api	2
 B	sensors -> lichen_api	3
-C	c6link:boot_progress_begin	1
-C	c6link:boot_progress_begin_background	1
-C	c6link:boot_progress_end	1
-C	c6link:boot_progress_progress	1
-C	c6link:clock_console_register	1
-C	c6link:clock_offer_sntp	1
-C	c6link:clock_sync_info	1
-C	c6link:clock_verdict_text	1
-C	c6link:lichen_airplane_get	1
-C	c6link:lichen_mdns_name	1
-C	c6link:lichen_radio_get	1
-C	c6link:lichen_radio_set	1
-C	c6link:wifi_bars	1
-C	c6link:wifi_cred_activate	1
-C	c6link:wifi_cred_clear	1
-C	c6link:wifi_cred_forget	1
-C	c6link:wifi_cred_load	1
-C	c6link:wifi_cred_save	1
-C	c6link:wifi_cred_valid	1
-C	c6link:wifi_join_event	1
-C	c6link:wifi_join_got_ip	1
-C	c6link:wifi_join_init	1
-C	c6link:wifi_join_request	1
-C	c6link:wifi_join_start	1
-C	c6link:wifi_link_connected	1
-C	c6link:wifi_link_down	1
-C	c6link:wifi_list_clean	1
-C	c6link:wifi_saved_find	1
-C	c6link:wifi_saved_load	1
-C	c6link:wifi_saved_pick	1
-C	c6link:wifi_saved_wipe	1
-C	c6link:wifi_ssid_sanitize	1
 C	fw_console:nvs_open	1
 C	lichen_haptics:lichen_notify_set_feedback	1
 C	lichen_haptics:nvs_open	1

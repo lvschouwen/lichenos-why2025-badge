@@ -7,6 +7,7 @@
 #include "boot_order.h"
 #include "boot_progress.h"
 #include "c6link.h"
+#include "wifi_service.h"
 #include "crash.h"
 #include "display.h"
 #include "factory_reset.h"
@@ -167,7 +168,7 @@ static void lora_user_resume(void) {
 // The OS radio switches (#108) reach the hardware here: the services own the radios, everyone else reads the state
 static void radio_changed(radio_id_t id, bool on) {
     if (id == RADIO_WIFI) {
-        c6link_wifi_enable(on);
+        wifi_enable(on);
     } else if (id == RADIO_LORA) {
         lora_set_enabled(on);
     } // RADIO_BT: no Bluetooth service before #73
@@ -507,8 +508,37 @@ static void start_lora_ident(boot_ctx_t *ctx) {
     c6link_set_ident_ready(lora_up);
 }
 
+// c6link (L2) reports its boot step through these (#223); lichen_boot has no business knowing the C6
+_Static_assert(C6LINK_STEP_NOTE_LEN <= BOOT_REASON_LEN, "the C6 step note must fit the boot step's reason");
+
+static void c6_step_begin(void) {
+    boot_progress_begin(BOOT_C6);
+}
+
+static void c6_step_progress(int percent) {
+    boot_progress_progress(BOOT_C6, percent);
+}
+
+static void c6_step_end(bool ok, char const *note) {
+    boot_progress_end(BOOT_C6, ok ? STEP_DONE : STEP_FAILED, note);
+}
+
+// The Wi-Fi service (L3) may not call the gate's radio switch: `fw wifi on|off` reaches it through these
+static bool wifi_radio_get(void) {
+    return lichen_radio_get(RADIO_WIFI);
+}
+
+static bool wifi_radio_set(bool on) {
+    return lichen_radio_set(RADIO_WIFI, on);
+}
+
 static void start_c6link(boot_ctx_t *ctx) {
     (void)ctx;
+    c6link_boot_hooks_t const boot = {.begin = c6_step_begin, .progress = c6_step_progress, .end = c6_step_end};
+    c6link_set_boot_hooks(&boot);
+    wifi_radio_hooks_t const radio = {.get = wifi_radio_get, .set = wifi_radio_set, .airplane = lichen_airplane_get};
+    // Before c6link_start: it registers the net hooks, and c6link_start ends by bringing Wi-Fi up through them
+    wifi_service_init(&radio);
     if (!c6link_start()) {
         ESP_LOGE(TAG, "no C6 link: no Wi-Fi, no LoRa");
     }

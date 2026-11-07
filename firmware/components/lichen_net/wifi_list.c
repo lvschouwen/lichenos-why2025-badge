@@ -315,6 +315,27 @@ bool wifi_cred_clear(void) {
     return err == ESP_OK;
 }
 
+bool wifi_driver_wiped(void) {
+    nvs_handle_t nvs;
+    uint8_t      done = 0;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        return true;
+    }
+    bool wiped = nvs_get_u8(nvs, "wifi_drv_wiped", &done) == ESP_OK && done;
+    nvs_close(nvs);
+    return wiped;
+}
+
+void wifi_driver_wiped_set(void) {
+    nvs_handle_t nvs;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        return;
+    }
+    nvs_set_u8(nvs, "wifi_drv_wiped", 1);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
 bool wifi_cred_load(char ssid[33], char pass[64]) {
     nvs_handle_t nvs;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {

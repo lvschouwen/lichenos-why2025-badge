@@ -30,9 +30,13 @@ bool     wifi_cred_save(char const *ssid, char const *pass);
 bool     wifi_cred_load(char ssid[33], char pass[64]);
 bool     wifi_cred_clear(void);
 uint32_t wifi_cred_generation(void);
+// NVS badge_fw wifi_drv_wiped: the C6 driver's own flash copy was wiped once (esp_wifi_restore, after the move of the
+// credentials to badge_fw). True when it was, and also when NVS cannot be opened (then nothing is wiped this boot).
+bool wifi_driver_wiped(void);
+void wifi_driver_wiped_set(void);
 
 // The saved networks (#160), keys wifi_s0..wifi_s4 / wifi_p0..wifi_p4, most recently joined first. wifi_ssid/wifi_pass
-// above stay the pair in use (the front of the list). All of these are called with c6link's saved-list lock held.
+// above stay the pair in use (the front of the list). All of these are called with wifi_service.c's saved_lock held.
 struct wifi_saved_s;
 // Loads the list; an empty list takes the pre-#160 single pair as entry 1 (and is written back)
 bool wifi_saved_load(struct wifi_saved_s *l);

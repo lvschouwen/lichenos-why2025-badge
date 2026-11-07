@@ -137,6 +137,14 @@ int main(void) {
     CHECK(wifi_cred_clear());
     CHECK(!wifi_cred_load(ssid_back, pass_back));
 
+    // The once-only wipe of the C6 driver's own copy (#223 moved it from c6link): not done until marked, and a forget
+    // (wifi_cred_clear) does not make it run again
+    CHECK(!wifi_driver_wiped());
+    wifi_driver_wiped_set();
+    CHECK(wifi_driver_wiped());
+    CHECK(wifi_cred_clear());
+    CHECK(wifi_driver_wiped());
+
     saved_networks();
 
     if (failures) {

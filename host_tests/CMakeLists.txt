@@ -66,6 +66,15 @@ target_compile_options(c6_watch_test PRIVATE
 target_include_directories(c6_watch_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link)
 add_test(NAME c6_watch_test COMMAND c6_watch_test)
 
+# c6link's hooks to the layers above it (#223): an unset hook does its default
+add_executable(c6_hooks_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/c6_hooks_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link/c6_hooks.c
+)
+target_compile_options(c6_hooks_test PRIVATE -Wall -Wextra -Werror)
+target_include_directories(c6_hooks_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link)
+add_test(NAME c6_hooks_test COMMAND c6_hooks_test)
+
 add_executable(ota_proto_test
     ${CMAKE_CURRENT_SOURCE_DIR}/ota_proto_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota/ota_proto.c

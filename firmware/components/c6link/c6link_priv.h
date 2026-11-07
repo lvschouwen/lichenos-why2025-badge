@@ -8,13 +8,9 @@
 
 // c6link.c
 void c6link_set_link(bool up);
-bool c6link_updating(void);
 bool c6link_image_is_trial(void);
 // GPIO13 (the C6 GPIO9 boot strap): 1 boots the application at the next EN reset, 0 the ROM download mode
 void hold_c6_boot(int level);
-// Ask the c6wifi task to take the driver down (up=false) or bring it up again, and wait at most wait_ms for it
-bool c6link_wifi_request(bool up, uint32_t wait_ms);
-unsigned c6link_wifi_stack_free(void); // the c6wifi task's stack high-water mark (bytes)
 // The next boot checks the C6 fully (NVS c6_verify), the stored bundle key stays
 bool c6link_set_verify_flag(void);
 // IDENT after a runtime re-attach, with LoRa back (#36); a result but a match sets the verify flag

@@ -72,6 +72,26 @@ esp_err_t nvs_get_str(nvs_handle_t h, char const *key, char *out, size_t *len) {
     return ESP_ERR_NVS_NOT_FOUND;
 }
 
+// u8 values share the string table (as decimal text): enough for flags
+esp_err_t nvs_set_u8(nvs_handle_t h, char const *key, uint8_t value) {
+    char text[4];
+    text[0] = (char)('0' + value / 100);
+    text[1] = (char)('0' + value / 10 % 10);
+    text[2] = (char)('0' + value % 10);
+    text[3] = '\0';
+    return nvs_set_str(h, key, text);
+}
+
+esp_err_t nvs_get_u8(nvs_handle_t h, char const *key, uint8_t *out) {
+    char      text[8];
+    size_t    len = sizeof(text);
+    esp_err_t err = nvs_get_str(h, key, text, &len);
+    if (err == ESP_OK) {
+        *out = (uint8_t)((text[0] - '0') * 100 + (text[1] - '0') * 10 + (text[2] - '0'));
+    }
+    return err;
+}
+
 esp_err_t nvs_erase_key(nvs_handle_t h, char const *key) {
     (void)h;
     for (int i = 0; i < SLOTS; i++) {

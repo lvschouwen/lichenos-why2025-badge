@@ -10,6 +10,7 @@
 #include "c6_paths.h"
 #include "c6link.h"
 #include "lichen_mdns.h"
+#include "wifi_service.h"
 #include "lichen_radio.h"
 #include "console_cmd.h" // CONSOLE_WIFI_CMD_MAX
 #include "fw_console.h"

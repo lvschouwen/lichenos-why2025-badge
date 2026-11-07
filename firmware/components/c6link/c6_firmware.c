@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
-#include "boot_progress.h"
 #include "esp_attr.h"
 #include "c6_firmware.h"
+#include "c6_hooks_priv.h"
 #include "c6_image.h"
 #include "c6_paths.h"
 
@@ -335,7 +335,7 @@ esp_loader_error_t flash_binary(esp_loader_t *loader, FILE *bin, size_t size, si
         written += to_read;
 
         int progress = (int)(((float)written / binary_size) * 100);
-        boot_progress_progress(BOOT_C6, progress); // per image: boot, partition table and app each count 0-100
+        c6_hooks_step_progress(progress); // per image: boot, partition table and app each count 0-100
     };
 
     ESP_LOGI(TAG, "Finished programming");

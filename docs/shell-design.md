@@ -119,7 +119,8 @@ that is on the mesh, and everything set up then must be changeable later on the 
 I checked the design against the code before planning. The findings:
 
 1. **Boot order: the spec says "display starts first, as today", but today it starts after the C6.** `app_main` runs
-   storage → console → `c6link_start` (C6 image check/reflash, ESP-Hosted, Wi-Fi) → backlight → display → keyboard
+   storage → console → `c6link_start` (C6 image check/reflash, ESP-Hosted, Wi-Fi; since #223 Wi-Fi is the
+   `lichen_net` service `wifi_service.c`, started through c6link's `attached` net hook) → backlight → display → keyboard
    → LoRa → mesh. For the boot screen to show the C6 step, the display (and LVGL) must move before `c6link_start`.
    The keyboard still starts after the C6, because C6 EN resets the TCA8418. **Risk:** the display backlight is a PWM
    pin on the C6 (GPIO15). While the C6 is held in reset or sits in its ROM bootloader during a reflash, the
@@ -128,8 +129,8 @@ I checked the design against the code before planning. The findings:
    screen catches up when the backlight returns, and the C6 percentage is shown on the console only.
 2. **Wi-Fi credentials are not in `badgevms_wifi`.** `fw wifi` stores `wifi_ssid`/`wifi_pass` in the NVS namespace
    `badge_fw` (`FW_NVS_NAMESPACE`); the BadgeVMS namespace was only migrated from once. Setup and Settings › Wi-Fi
-   use `badge_fw`. Scanning goes through ESP-Hosted's `esp_wifi_scan_start` RPC. Changing networks needs a reconnect
-   path in `c6link`; today credentials are only read at boot.
+   use `badge_fw`. Scanning goes through ESP-Hosted's `esp_wifi_scan_start` RPC. Changing networks needed a reconnect
+   path, then in `c6link`; that path (trial joins, reconnects) now lives in `lichen_net/wifi_service.c` (#223).
 3. **MeshCore settings need no MeshCore changes.** `MyMesh::getNodePrefs()` and `savePrefs()` are public. Name, radio
    (freq/bw/sf/cr) and TX power go into `NodePrefs` and are applied with `radio_set_params` / `radio_set_tx_power`
    from target.h, on the mesh task under the mesh lock. Channels use the existing `fw channel add` code, moved into a

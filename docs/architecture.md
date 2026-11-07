@@ -54,15 +54,22 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
 ### 1. ESP-Hosted Wi-Fi over SDIO
 - **No auto-init:** `CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n` (`firmware/sdkconfig.defaults`). The C6
   flasher must release the C6 first; auto-init races it into a boot loop. Init order in `c6link_start`
-  (`c6link/c6link.c:1523`): flasher check (or skip), `hold_c6_boot(1)` (:1558), `esp_hosted_init` under the SDMMC lock
-  (:1561, the SD card shares the controller, #60), `esp_hosted_connect_to_slave`, IDENT, then `start_wifi`. A runtime
-  re-attach repeats deinit, init, connect in `c6link/c6_sup.c:289`.
+  (`c6link/c6link.c:356`): flasher check (or skip), `hold_c6_boot(1)` (:377), `esp_hosted_init` under the SDMMC lock
+  (:380, the SD card shares the controller, #60), `esp_hosted_connect_to_slave`, IDENT, then the net hook `attached`,
+  which is `start_wifi` in `lichen_net/wifi_service.c` (#223). A runtime re-attach repeats deinit, init, connect in
+  `c6link/c6_sup.c:290`; around it c6sup takes the Wi-Fi driver down and up through the net hooks `driver_down` /
+  `driver_up` (the c6wifi task's MSG_C6_DOWN / MSG_C6_UP).
+- **Hooks, not upward calls (#223):** c6link (L2) reaches the boot step and the Wi-Fi service only through
+  `c6link/c6_hooks.h`: `c6link_set_boot_hooks` (main.c `start_c6link`, onto `boot_progress_*` for `BOOT_C6`) and
+  `c6link_set_net_hooks` (`wifi_service_init`, called from `start_c6link` before `c6link_start`). An unset hook does its
+  default (pinned by `host_tests/c6_hooks_test.c`): no boot step shown, no Wi-Fi started, the re-attach does not wait
+  for a driver. The supervisor's hooks (`c6link_set_hooks`, `START_C6_HOOKS`) are unchanged.
 - **Reset settle:** `CONFIG_ESP_HOSTED_HOST_CP_RESET_SETTLE_MS=700` (the C6 answers on SDIO about 700 ms after reset, #87);
   host reset on GPIO12. `TRANSPORT_RESTART_ON_FAILURE=n`: a failed transfer posts `TRANSPORT_FAILURE`, which c6sup
   recovers from instead of aborting the P4.
 - **Lost-wakeup fix:** lives in our `esp_hosted/` fork (submodule). Do not bump or replace the submodule without it.
 - **TCP window:** `CONFIG_LWIP_TCP_WND_DEFAULT=16384` (16 KiB), `LWIP_TCP_RECVMBOX_SIZE=16`.
-- **`WIFI_PS_NONE`:** `c6link/c6link.c:173` (`wifi_ps_mode`, #146/#76). The IDF default modem sleep gives RTT spikes of
+- **`WIFI_PS_NONE`:** `lichen_net/wifi_service.c:152` (`wifi_ps_mode`, #146/#76). The IDF default modem sleep gives RTT spikes of
   seconds; `fw wifi ps` changes it.
 - **PSRAM DMA to SDIO (#121):** SDIO transfers use buffers the DMA reads; PSRAM at 120 MHz is only kept after the DMA gate
   (`docs/psram-speed-switch.md`). Internal DMA RAM stays scarce: bench gate `fw mem`.
@@ -117,9 +124,9 @@ when one breaks:
   (`c6_md5_matches`). **`ota-c6` order: the `.bin` first, then its `.md5`**, all six files each time; the C6 stays
   untouched if it fails, so repeat before any reboot.
 - **Plan** (`c6_boot_plan`): a warm software restart with an unchanged bundle key skips the ROM check; everything else,
-  a forced reflash (NVS `c6_force`, `c6link.c:268`), a `c6_verify` flag or a trial image, checks fully. NVS keys:
+  a forced reflash (NVS `c6_force`, `c6link.c:48`), a `c6_verify` flag or a trial image, checks fully. NVS keys:
   `c6_ok_key` (bundle key `md5,md5,md5,size,size,size`, stored only after attach and IDENT MATCH), `c6_verify`
-  (`c6link.c:1296`), `c6_rt_restart` (`c6_sup.c:44`), `c6_force`. A skip that loses its bet (no attach, IDENT not
+  (`c6link.c:129`), `c6_rt_restart` (`c6_sup.c:45`), `c6_force`. A skip that loses its bet (no attach, IDENT not
   proven) restarts once with the verify flag, only if that flag persisted (`c6_restart_after_attach`).
 - **Bundle changes:** a push into `/storage/c6` over Wi-Fi (`[c6]` file) calls `c6link_bundle_changed`
   (`ota/ota_server.c:405-408`) before touching the file, so the stored key is forgotten and the next boot checks fully.
@@ -128,9 +135,9 @@ when one breaks:
   `OTA_VALID_AFTER_S` (`ota/ota_valid.c:3-5`, `main.c` `ota_trial_wait`), and it is rolled back when the link never comes up
   (`ota_valid.c:7-9`). A broken C6 link rolls back every P4 OTA; this is why `ota-c6` goes first.
 - **IDENT** (#36): after attach the P4 asks the running C6 app for its ELF sha256 (32 bytes, `LORA_MSG_IDENT`) and
-  compares with the bundled `firmware.bin` (`c6_ident_check`; wait `C6_IDENT_WAIT_MS` 2000, `c6link.c:1300`). Only MATCH
+  compares with the bundled `firmware.bin` (`c6_ident_check`; wait `C6_IDENT_WAIT_MS` 2000, `c6link.c:133`). Only MATCH
   proves the C6; NO_ANSWER, MISMATCH, NO_EXPECTED, NOT_ASKED are all "not proven". After a runtime re-attach IDENT is
-  asked again (`c6_sup.c:330`) once LoRa is back. `fw c6` shows the result.
+  asked again (`c6_sup.c:331`) once LoRa is back. `fw c6` shows the result.
 - **Flasher** (`c6link/c6_flasher.c`): UART1 on GPIO15/16, reset GPIO12 (EN), boot strap GPIO13; it releases the C6 into its
   application before ESP-Hosted may talk to it.
 
@@ -144,14 +151,14 @@ when one breaks:
   change, and Settings says so.
 - **R16 / GPIO5 hold (#12, #39):** stock badges have no R16 so GPIO5 is not on `DISPLAY_BL`; with the bridge fitted the P4
   holds the backlight while the C6 is in reset or its ROM (`board/r16_hold.c`; flasher order in `c6_flasher.c:106-120`: EN
-  low, GPIO5 back to input, then EN rises). Power off drives backlights off (`backlight_power_off` in `main.c` `power_finish`), then `c6link_hold_in_reset` (same function, defined at `c6link.c:473`). The hold starts once the ROM answered, not before.
+  low, GPIO5 back to input, then EN rises). Power off drives backlights off (`backlight_power_off` in `main.c` `power_finish`), then `c6link_hold_in_reset` (same function, defined at `c6link.c:64`). The hold starts once the ROM answered, not before.
 - **C6 bootloader and backlight (#39):** there is no C6 bootloader hook (dropped by decision). The P4 rewrites the C6
   bootloader at 0x0 when its MD5 differs from the bundle's (`c6_flasher.c:68`); a broken C6 bootloader means USB-only
   recovery. Until the first `BL` line arrives (`c6/main/backlight_cmd.c`) the C6 backlights run at their boot levels
   (`c6/main/app_main.c`, `backlights_start`), so a P4 that never sends one leaves the panel at the C6 default.
 - **UART1 is shared** by the flasher, `fw c6log` and the backlight commands (`board/backlight.c:21`); only one may own it
   at a time. `backlight_start` must come after `c6link_start` (it needs the UART the flasher released).
-- **`esp_hosted_init` failure is sticky** until the next boot (`c6_sup.c:278`); only a failed connect is retried by a
+- **`esp_hosted_init` failure is sticky** until the next boot (`c6_sup.c:279`); only a failed connect is retried by a
   re-attach.
 
 ### 5. Watchdog, recovery, Bluetooth

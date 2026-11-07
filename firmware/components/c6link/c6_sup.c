@@ -8,6 +8,7 @@
 #include "c6link.h"
 #include "board_sdmmc.h"
 #include "c6link_priv.h"
+#include "c6_hooks_priv.h"
 
 #include "c6_watch.h"
 #include "driver/gpio.h"
@@ -254,7 +255,7 @@ static void go_down(void) {
         hooks.down();
     }
     // ESP-Hosted must not be deinitialised under an esp_wifi call in flight: wait once more before going on anyway
-    if (!c6link_wifi_request(false, WIFI_WAIT_MS) && !c6link_wifi_request(false, WIFI_WAIT_MS)) {
+    if (!c6_hooks_driver_down(WIFI_WAIT_MS) && !c6_hooks_driver_down(WIFI_WAIT_MS)) {
         ESP_LOGW(
             TAG,
             "the Wi-Fi task did not take the driver down in %d s, re-attaching anyway",
@@ -315,7 +316,7 @@ static unsigned do_reattach(void) {
 }
 
 static void go_up(void) {
-    if (!c6link_wifi_request(true, WIFI_WAIT_MS)) {
+    if (!c6_hooks_driver_up(WIFI_WAIT_MS)) {
         ESP_LOGE(TAG, "the Wi-Fi task did not bring the driver up in %d s", WIFI_WAIT_MS / 1000);
     }
     // TRANSPORT_UP normally cleared it long ago (the driver bring-up took seconds); if a flood of failure posts made the
@@ -356,7 +357,7 @@ static void note(void) {
         TAG,
         "stack free: c6sup %u, c6wifi %u",
         (unsigned)uxTaskGetStackHighWaterMark(sup_handle),
-        c6link_wifi_stack_free()
+        c6_hooks_stack_free()
     );
 }
 

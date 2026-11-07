@@ -17,6 +17,8 @@ typedef enum { NVS_READONLY, NVS_READWRITE } nvs_open_mode_t;
 esp_err_t nvs_open(char const *name, nvs_open_mode_t mode, nvs_handle_t *out);
 esp_err_t nvs_set_str(nvs_handle_t h, char const *key, char const *value);
 esp_err_t nvs_get_str(nvs_handle_t h, char const *key, char *out, size_t *len);
+esp_err_t nvs_set_u8(nvs_handle_t h, char const *key, uint8_t value);
+esp_err_t nvs_get_u8(nvs_handle_t h, char const *key, uint8_t *out);
 esp_err_t nvs_erase_key(nvs_handle_t h, char const *key);
 esp_err_t nvs_commit(nvs_handle_t h);
 void      nvs_close(nvs_handle_t h);
