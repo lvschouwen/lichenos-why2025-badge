@@ -1533,3 +1533,12 @@ add_executable(battery_model_test
 target_include_directories(battery_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/battery)
 target_compile_options(battery_model_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME battery_model_test COMMAND battery_model_test)
+
+# Repeater status history (#168): the poll schedule (off by default, cap, stagger, backoff), the ring, graphs, setting
+add_executable(mesh_rhist_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/mesh_rhist_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_rhist.c
+)
+target_include_directories(mesh_rhist_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_rhist_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_rhist_test COMMAND mesh_rhist_test)

@@ -34,6 +34,10 @@ void meshcore_health_open(void *arg);
 // A contact's Signal page (#166): graphs of the RSSI and SNR of its adverts and messages heard since start, the hop count
 // and the last advert path (meshcore_signal.c). Opened from the contact's page; receive only. prefix: 6 key bytes.
 void meshcore_signal_open(uint8_t const prefix[6], char const *name);
+// A repeater's Status history (#168): the switch for its scheduled status asks (on air: asks first), the interval and
+// small graphs of the answers kept since start (meshcore_rhist.c). Opened from the repeater's page; opening it sends
+// nothing.
+void meshcore_rhist_open(uint8_t const prefix[6], char const *name);
 // Discover nearby (#167): one zero-hop request after a careful confirm, then who answered with SNR (meshcore_discover.c).
 // Opened from the app's Settings page; a menu row callback. Opening it sends nothing.
 void meshcore_discover_open(void *arg);

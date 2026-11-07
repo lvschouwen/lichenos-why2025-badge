@@ -17,6 +17,7 @@
 #include "meshcore_run.h"
 #include "meshcore_screens.h"
 #include "meshcore_telem.h"
+#include "mesh_rhist_run.h"
 #include "qr_screen.h"
 #include "theme.h"
 
@@ -47,8 +48,8 @@ typedef struct {
     uint8_t               type;
     lv_obj_t             *list_screen; // the screen the details were opened from: Remove goes back to it
     bool                  have_detail, gone;
-    int                   shown_path_len, shown_flags, shown_login; // what the rows show; -1: nothing yet
-    lv_obj_t             *info[MESH_CONTACT_LINES], *note, *fav_row, *reset_row, *login_row;
+    int                   shown_path_len, shown_flags, shown_login, shown_hist; // what the rows show; -1: nothing yet
+    lv_obj_t             *info[MESH_CONTACT_LINES], *note, *fav_row, *reset_row, *login_row, *hist_row;
     lv_timer_t           *timer;
 } contact_t;
 
@@ -113,6 +114,13 @@ static void fill(contact_t *ct, uint32_t wait_ms) {
         if (in != ct->shown_login) {
             menu_set_value(ct->login_row, in == 2 ? "Admin" : in ? "Logged in" : "");
             ct->shown_login = in;
+        }
+    }
+    if (ct->hist_row) { // the Status history page may have switched it (#168)
+        int on = mesh_rhist_is_on(ct->prefix);
+        if (on != ct->shown_hist) {
+            menu_set_value(ct->hist_row, on ? "On" : "Off");
+            ct->shown_hist = on;
         }
     }
 }
@@ -184,6 +192,11 @@ static void on_status(void *arg) {
 static void on_cli(void *arg) {
     contact_t *ct = arg;
     meshcore_remote_cli(ct->prefix, ct->title);
+}
+
+static void on_history(void *arg) {
+    contact_t *ct = arg;
+    meshcore_rhist_open(ct->prefix, ct->title); // opening sends nothing; switching on asks first
 }
 
 static void on_settings(void *arg) {
@@ -398,6 +411,7 @@ static void on_remove(void *arg) {
         return;
     }
     meshcore_pw_forget(ct->prefix); // a remembered repeater/room password goes with the contact (#51)
+    mesh_rhist_forget(ct->prefix);  // and its status history and scheduled asks (#168)
     shell_back_to(ct->list_screen, NULL, NULL); // past the details: the contact is gone
 }
 
@@ -425,6 +439,8 @@ static void add_remote_rows(lv_obj_t *menu, contact_t *ct) {
     menu_set_kind(menu_add(menu, "Command...", "", on_cli, ct), MENU_OPEN);
     if (type == MESH_ADV_TYPE_REPEATER) {
         menu_set_kind(menu_add(menu, "Settings", "", on_settings, ct), MENU_OPEN); // #117: needs the admin login
+        ct->hist_row = menu_add(menu, "Status history", "", on_history, ct); // #168
+        menu_set_kind(ct->hist_row, MENU_OPEN);
     }
     menu_add(menu, "Log out", "", on_logout, ct);
     lv_obj_t *forget = menu_add(menu, "Forget password", "", on_forget, ct);
@@ -444,7 +460,7 @@ static lv_obj_t *build_detail(void) {
     snprintf(ct->title, sizeof(ct->title), "%s", want_contact.name);
     ct->type           = want_contact.type;
     ct->list_screen    = want_contact.list_screen;
-    ct->shown_path_len = ct->shown_flags = ct->shown_login = -1;
+    ct->shown_path_len = ct->shown_flags = ct->shown_login = ct->shown_hist = -1;
     lv_obj_set_user_data(screen, ct);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     for (size_t i = 0; i < MESH_CONTACT_LINES; i++) {

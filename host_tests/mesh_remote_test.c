@@ -146,6 +146,12 @@ static void status(void) {
     memcpy(st.rprefix, A, 6);
     CHECK(rr_on_status(&r, &st, 10) && r.state == RR_DONE && r.have_status);
     CHECK(!rr_on_status(&r, &st, 11)); // a second answer is not for a request that is done
+    // the small copy carries what the status history needs (#168): target, age and the last status
+    rr_head_t h;
+    rr_poll_head(&r, 2500, &h);
+    CHECK(h.op == RR_STATUS && h.state == RR_DONE && memcmp(h.prefix, A, 6) == 0 && h.age_ms == 2500 && !rr_head_busy(&h));
+    CHECK(h.have_status && memcmp(h.status_prefix, A, 6) == 0 && h.status.batt_mv == 4123 &&
+          h.status.noise_floor == -111);
     rr_line_t lines[RR_LINES_MAX];
     size_t    n = rr_status_lines(&r.status, lines, RR_LINES_MAX);
     CHECK(n == 10);

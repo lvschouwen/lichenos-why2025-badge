@@ -104,6 +104,12 @@ typedef struct {
     uint8_t       cli_prefix[MF_PREFIX];
     uint8_t       cli_n;
     rr_exchange_t cli; // the newest exchange
+    // for the status history (#168): whom the request is to, how long ago it was asked, and the last status answer
+    uint8_t     prefix[MF_PREFIX];
+    uint32_t    age_ms;
+    bool        have_status;
+    uint8_t     status_prefix[MF_PREFIX];
+    mf_status_t status;
 } rr_head_t;
 
 void rr_init(rr_t *r);
@@ -143,6 +149,8 @@ void rr_poll(rr_t *r, uint32_t now_ms, rr_t *out);
 // rr_poll with the small copy
 void rr_poll_head(rr_t *r, uint32_t now_ms, rr_head_t *out);
 bool rr_head_logged_in(rr_head_t const *h, uint8_t const prefix[MF_PREFIX]);
+// rr_busy for the small copy: queued, taken or sent
+bool rr_head_busy(rr_head_t const *h);
 
 // The NVS key the contact's remembered password is kept under, in the app's settings: "pw" and the 12 hex digits of the
 // key prefix (14 characters, NVS allows 15). Empty out when cap is under RR_PW_KEY_MAX.

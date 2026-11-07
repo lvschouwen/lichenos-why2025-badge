@@ -347,6 +347,15 @@ void rr_poll_head(rr_t *r, uint32_t now_ms, rr_head_t *out) {
     memcpy(out->cli_prefix, r->cli_prefix, MF_PREFIX);
     out->cli_n = r->cli_n;
     out->cli   = r->cli[r->cli_head];
+    memcpy(out->prefix, r->prefix, MF_PREFIX);
+    out->age_ms      = r->seq ? now_ms - r->asked_ms : 0;
+    out->have_status = r->have_status;
+    memcpy(out->status_prefix, r->status_prefix, MF_PREFIX);
+    out->status = r->status;
+}
+
+bool rr_head_busy(rr_head_t const *h) {
+    return h->state == RR_QUEUED || h->state == RR_TAKEN || h->state == RR_SENT;
 }
 
 bool rr_head_logged_in(rr_head_t const *h, uint8_t const prefix[MF_PREFIX]) {

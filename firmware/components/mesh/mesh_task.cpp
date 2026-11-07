@@ -19,6 +19,7 @@
 #include "mesh_journal.h"
 #include "meshcore_run.h"
 #include "mesh_rset_run.h"
+#include "mesh_rhist_run.h"
 #include "channel_input.h"
 #include "mesh_pathhash.h"
 #include "mesh_prefs.h"
@@ -682,6 +683,7 @@ static void mesh_task(void *arg) {
         tile_set_contacts((size_t)node->getNumContacts());
         advert_tick_locked();
         discover_tick_locked();
+        mesh_rhist_tick(); // the status history's poll (#168): only repeaters the person switched on
         mesh_journal_tick_locked(); // a due flush swaps the pending records out; they are written after the unlock
         if (__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
             // The task stops itself, between two loops and with the lock held: nothing is half done, and the stack
@@ -2382,6 +2384,25 @@ static void cmd_mesh_remote(char const *args) {
     }
 }
 
+// "fw mesh history": the status history's slots and schedule (#168); "fw mesh history <who>" one repeater's samples;
+// "<who> on [minutes] YES | off | interval <minutes>" switches it as its Status history page does
+static void cmd_mesh_history(char const *args) {
+    if (!*args) {
+        mesh_rhist_console(NULL, NULL);
+        return;
+    }
+    char token[40];
+    int  used = 0;
+    if (sscanf(args, "%39s%n", token, &used) != 1 || strlen(token) >= sizeof(token) - 1) {
+        console_reply("mesh history [<name or key digits> [on [10|30|60|180] YES | off | interval <min>]]");
+        return;
+    }
+    uint8_t prefix[6];
+    if (console_remote_target(token, prefix)) {
+        mesh_rhist_console(prefix, args + used + strspn(args + used, " "));
+    }
+}
+
 // "fw mesh telemetry <hex> YES" asks a contact for its sensor values (it transmits: YES as for the repeater commands);
 // "fw mesh telemetry" shows the last answer (#162)
 static void cmd_mesh_telemetry(char const *arg) {
@@ -2685,6 +2706,10 @@ static void cmd_mesh(char const *args) {
         cmd_mesh_telemetry(args + (args[9] ? 10 : 9));
         return;
     }
+    if (strncmp(args, "history", 7) == 0 && (args[7] == ' ' || !args[7])) {
+        cmd_mesh_history(args + (args[7] ? 8 : 7));
+        return;
+    }
     if (strncmp(args, "remote", 6) == 0 && (args[6] == ' ' || !args[6])) {
         cmd_mesh_remote(args + (args[6] ? 7 : 6));
         return;
@@ -2716,7 +2741,7 @@ static void cmd_mesh(char const *args) {
     if (*args) {
         console_reply("mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
                       "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact|scan [n] [bad|bad1] [int] [from<offset>]] | mesh send <channel> <text> | "
-                      "mesh dm <12 hex> <text> | mesh remote [<name|hex> login [pw]|status|cli <text>|settings|logout] | mesh remote settings | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
+                      "mesh dm <12 hex> <text> | mesh remote [<name|hex> login [pw]|status|cli <text>|settings|logout] | mesh remote settings | mesh history [<name|hex> [on [min] YES|off|interval <min>]] | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
                       "[<lat> <lon> | share on|off] | mesh autoadd [on|off | types <all|chat,repeater,room,sensor> | hops "
                       "<any|direct|n> | overwrite on|off]");
         return;
