@@ -48,7 +48,7 @@ top of `lora_proto_test`, `i154_proto_test`, `c6_boot_policy_test`, `c6_watch_te
 No data migration: stored keys named here start from their defaults if they change.
 
 **Layer rule:** `c6link`, `lora` and `esp_hosted` are L2 drivers that own the link; services reach the C6 only through
-them (the `tools/layers.conf` lines follow #218). The C6 image (`c6/`, Apache-2.0) stays outside the P4 layer model and
+them (`tools/layers.conf` enforces it: the `esp_hosted_*` and `eh_*` symbols are owner-only for `c6link` and `lora`). The C6 image (`c6/`, Apache-2.0) stays outside the P4 layer model and
 is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the P4 image.
 
 ### 1. ESP-Hosted Wi-Fi over SDIO
@@ -230,15 +230,15 @@ The two-chip protocol is a separate contract: see "Two-chip contract" in this fi
 
 | Layer | What | Component(s) |
 |---|---|---|
-| L0 platform | IDF, FreeRTOS, the LVGL library, `fw_console` | |
-| L1 board/HAL | pins, buses, panel, no NVS | `board` |
-| L2 drivers | LoRa, C6 link, SD, sensors, keyboard chip | `lora`, `c6link`, ... |
-| L3 OS services | settings (the only NVS owner), fs, notify, clock, radio, net, power, display/UI (the only LVGL-lock owner), OTA, boot, app registry | `lichen_os` (new, #220) |
+| L0 platform | IDF, FreeRTOS, the LVGL library, `fw_console` | `fw_console`, `psram_guard`, `lichen_random`, `assets`, `lichen_nvs` (#235 revisits it) |
+| L1 board/HAL | pins, buses, panel, no NVS | `board`, `storage`, `esp_lcd_st7703`, `esp_tca8418` |
+| L2 drivers | LoRa, C6 link, SD, sensors, keyboard chip | `lora`, `c6link`, `sdcard`, `sensors`, `lichen_led`, `lichen_haptics`, `battery`, `lichen_audio` |
+| L3 OS services | settings (the only NVS owner), fs, notify, clock, radio, net, power, display/UI (the only LVGL-lock owner), OTA, boot, app registry | `lichen_os` (new, #220); today `lichen_notify`, `lichen_clock`, `lichen_net`, `lichen_boot`, `lichen_mdns`, `ota`, `crash` |
 | L4 the gate | headers, capability and identity checks, one ops table; no hardware dependencies | `lichen_api` |
 | L5 system | the shell and the system screens, a privileged client of the gate | `lichen_shell` |
-| L6 apps | the plain apps, MeshCore | `lichen_apps`, `mesh` |
+| L6 apps | the plain apps, MeshCore | `lichen_apps` (#180), `mesh` |
 
-`main` is the composition root: it may only call init, start and stop of the layers.
+`main` is the composition root: it may only call init, start and stop of the layers. `layers.conf` lets `main` depend on every layer for now and catches its owner-only symbol uses; tightening that comes with #210.
 
 **Allowed calls (a layer calls itself and the layers below it, with two exceptions):**
 
@@ -264,8 +264,13 @@ The two-chip protocol is a separate contract: see "Two-chip contract" in this fi
 
 **Enforcement** (`tools/check_layers.sh` with `tools/layers.conf`, #218; it absorbs `tools/check_app_boundary.sh`'s
 rules and runs at the end of `build.sh build`): A, `REQUIRES` rules; B, includes; C, symbol ownership through `nm`,
-which catches link-time upward edges; D, capabilities. Ratchet: report mode, then fail on new violations, then a
-baseline of 0 after wave L-C.
+which catches link-time upward edges; D, capabilities (#229, not in the checker yet). Ratchet: the build fails on a
+violation that is not in the baseline (NEW, WORSE), on a baseline entry that was fixed and not removed (STALE) and on one
+that grew against `main` (GREW), until the baseline is 0 after wave L-C. The app profile keeps the old hard guarantees
+that no baseline can excuse: forbidden symbols, libraries and headers outside the closed L6 lists, an unresolved
+`${VAR}` in a `REQUIRES` list. Rule C counts per object file, A per edge, B per include line. Apps (`mesh`) still have
+named `peer` lines in `layers.conf` for `lichen_notify`, `lichen_clock`, `lichen_random`, `lora`, `fw_console` and
+`psram_guard`: they are debts the app surface removes, not part of the target matrix above.
 
 **The gate has two surfaces,** detailed in [app-api.md](app-api.md): the app surface (`lichen_*.h`) for L6, and the
 system surface (`lichen_sys_*.h`) for L5, only with the `SYSTEM` capability. There is no syscall trap and no export
