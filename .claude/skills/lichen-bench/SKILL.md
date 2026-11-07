@@ -24,6 +24,21 @@ Subagents never run any of this; they stop at a green build and a local commit. 
 - Keep bench walks short; Lucas watches them. Reuse "before" screenshots instead of re-walking. One pass: one screenshot per page, long lists only downward in batches (`fw keys send down down down`), no back-and-forth.
 - MeshCore on air: never open a DM or compose screen addressed to a real person, and never send to anyone but the agreed test targets (channel `#badgetest`, or a named test DM target). An open compose screen is one stray Enter from a message to a stranger from Lucas's identity.
 
+## Two-chip gate (#234)
+
+Main runs this after every v2 wave merge, on the freshly flashed image (`ota-c6` first when a wave touched `c6/` or `shared/`), and each wave issue lists it. Contract: `docs/architecture.md` "Two-chip contract". Wait 75 s after each reboot.
+
+1. Cold boot (power cycle, not `fw restart`) reaches home; `fw boot` shows the C6 step done and `fw c6` shows `IDENT match`.
+2. Wi-Fi joins and `tools/badge.sh ota-info <host>` answers.
+3. MeshCore RX: `fw mesh` shows packets counting up; one TX to `#badgetest` only (see Bench console).
+4. `fw c6 reset`: keyboard (`fw keys` / a physical key), LoRa (RX counts again) and Wi-Fi all come back, `fw c6` reads `up`, restarts 1.
+5. Brightness changes (this path runs through the C6): change it in Settings or `fw bl`, the panel follows.
+6. `fw mem`: DMA free and DMA min not below the pre-MVP baseline (free 99979, min 89611) minus 10 %. Why: that baseline is what today's image measures, so a fixed 150 KB floor would fail the current firmware; the gate catches a regression, not the existing level.
+7. BT off after boot (#197): `airplane` shows `bluetooth off`.
+8. `fw tasks`: no owner-less task. This applies to Lichen tasks only; IDF, esp_hosted and LVGL tasks are exempt.
+
+Any failure blocks the next wave merge: report it, do not carry on.
+
 ## Never
 
 - Touch other serial adapters or the docker services on the flash host. `tools/badge.sh` only talks to the badge; keep it that way.

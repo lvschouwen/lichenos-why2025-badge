@@ -38,6 +38,98 @@ Links between the chips:
   wrong, #15. GPIO14 ← C6 interrupt.
 - **GPIO0/GPIO1:** XTAL_32K, the Y1 crystal for the RTC slow clock (#63). Reserved: nothing else may claim them.
 
+## Two-chip contract
+
+What the P4 (Lichen) and the C6 (radio coprocessor) rely on from each other (#234, part of #216). It must hold through
+the whole v2 migration: a wave that touches any line below re-runs the two-chip bench gate (lichen-bench skill) before
+it counts as merged. Line numbers are in `firmware/components/` unless noted and drift; the symbol names are the anchor.
+Pure parts are pinned by `host_tests/two_chip_contract_test.c` (ids, CONFIG bytes, IDENT compare, boot step order) on
+top of `lora_proto_test`, `i154_proto_test`, `c6_boot_policy_test`, `c6_watch_test`, `c6_paths_test` and `r16_hold_test`.
+No data migration: stored keys named here start from their defaults if they change.
+
+**Layer rule:** `c6link`, `lora` and `esp_hosted` are L2 drivers that own the link; services reach the C6 only through
+them (the `tools/layers.conf` lines follow #218). The C6 image (`c6/`, Apache-2.0) stays outside the P4 layer model and
+is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the P4 image.
+
+### 1. ESP-Hosted Wi-Fi over SDIO
+- **No auto-init:** `CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n` (`firmware/sdkconfig.defaults`). The C6
+  flasher must release the C6 first; auto-init races it into a boot loop. Init order in `c6link_start`
+  (`c6link/c6link.c:1523`): flasher check (or skip), `hold_c6_boot(1)` (:1558), `esp_hosted_init` under the SDMMC lock
+  (:1561, the SD card shares the controller, #60), `esp_hosted_connect_to_slave`, IDENT, then `start_wifi`. A runtime
+  re-attach repeats deinit, init, connect in `c6link/c6_sup.c:289`.
+- **Reset settle:** `CONFIG_ESP_HOSTED_HOST_CP_RESET_SETTLE_MS=700` (the C6 answers on SDIO about 700 ms after reset, #87);
+  host reset on GPIO12. `TRANSPORT_RESTART_ON_FAILURE=n`: a failed transfer posts `TRANSPORT_FAILURE`, which c6sup
+  recovers from instead of aborting the P4.
+- **Lost-wakeup fix:** lives in our `esp_hosted/` fork (submodule). Do not bump or replace the submodule without it.
+- **TCP window:** `CONFIG_LWIP_TCP_WND_DEFAULT=16384` (16 KiB), `LWIP_TCP_RECVMBOX_SIZE=16`.
+- **`WIFI_PS_NONE`:** `c6link/c6link.c:173` (`wifi_ps_mode`, #146/#76). The IDF default modem sleep gives RTT spikes of
+  seconds; `fw wifi ps` changes it.
+- **PSRAM DMA to SDIO (#121):** SDIO transfers use buffers the DMA reads; PSRAM at 120 MHz is only kept after the DMA gate
+  (`docs/psram-speed-switch.md`). Internal DMA RAM stays scarce: bench gate `fw mem`.
+
+### 2. Peer-data channel (ESP-Hosted `eh_*_peer_data`)
+| Id | Direction | Service | Registered at |
+|---|---|---|---|
+| `0x4C01` `LORA_MSG_ID_TO_C6` | P4 to C6 | LoRa | `c6/main/lora_service.cpp:463` |
+| `0x4C02` `LORA_MSG_ID_TO_P4` | C6 to P4 | LoRa | `lora/lora.c:464` and `:635`, `lora/lora_ident.c:46` |
+| `0x4C03` `I154_MSG_ID_TO_C6` | P4 to C6 | 802.15.4 scanner | `shared/i154` |
+| `0x4C04` `I154_MSG_ID_TO_P4` | C6 to P4 | 802.15.4 scanner | `shared/i154` |
+
+- A new service takes the next free id in the `0x4C0x` block and adds a row to `peer_ids` in the contract test.
+- **Message framing:** `[version][type]` then little-endian fields. P4 to C6 types count from 1; C6 to P4 types from 0x81.
+  Both images build the same headers: `shared/lora/lora_proto.h` (v4) and `shared/i154/i154_proto.h` (v1).
+- **Versions:** the version byte must match exactly. LoRa v4 (RSSI sweep, #161): a v3 C6 drops every v4 message
+  (`BAD_VERSION`), IDENT_REQ included, so IDENT never comes and the P4 reflashes the bundled C6 image. IDENT itself was
+  new types only (no bump); an old peer answers nothing, which counts as "not proven". i154 CAPS may carry newer
+  trailing fields; every other length is exact.
+- **CONFIG (type 1, 14 bytes of body, 16 in all):** freq u32, bw u32, sf u8, cr u8 (5..8 = 4/5..4/8), sync u8,
+  preamble u16, tx power i8 dBm. The P4 sends it on every (re)start of the link (`LORA_ACT_SEND_CONFIG`,
+  `lora/lora.c:378`); the C6 starts unconfigured after its own reset. Default: 869.618 MHz, 62.5 kHz, SF7, CR 4/5, sync 0x12,
+  preamble 16, 22 dBm.
+- **After a C6 reset:** `lora_c6_lost` / `lora_c6_back` (`lora/lora.c:689`, `:708`) stop and restart the polling and
+  re-send CONFIG, then `RX_START`.
+
+### 3. C6 boot, flash and IDENT
+- **Files** in `/storage/c6` (`C6_IMAGE_DIR`, `c6link/c6_paths.h`): `bootloader.bin`, `partitions.bin`, `firmware.bin`,
+  each with a `.md5` (`c6link/c6_firmware.c:214`). A `.md5` that does not describe its `.bin` is refused
+  (`c6_md5_matches`). **`ota-c6` order: the `.bin` first, then its `.md5`**, all six files each time; the C6 stays
+  untouched if it fails, so repeat before any reboot.
+- **Plan** (`c6_boot_plan`): a warm software restart with an unchanged bundle key skips the ROM check; everything else,
+  a forced reflash (NVS `c6_force`, `c6link.c:268`), a `c6_verify` flag or a trial image, checks fully. NVS keys:
+  `c6_ok_key` (bundle key `md5,md5,md5,size,size,size`, stored only after attach and IDENT MATCH), `c6_verify`
+  (`c6link.c:1295`), `c6_rt_restart` (`c6_sup.c:44`), `c6_force`. A skip that loses its bet (no attach, IDENT not
+  proven) restarts once with the verify flag, only if that flag persisted (`c6_restart_after_attach`).
+- **IDENT** (#36): after attach the P4 asks the running C6 app for its ELF sha256 (32 bytes, `LORA_MSG_IDENT`) and
+  compares with the bundled `firmware.bin` (`c6_ident_check`; wait `C6_IDENT_WAIT_MS` 2000, `c6link.c:1300`). Only MATCH
+  proves the C6; NO_ANSWER, MISMATCH, NO_EXPECTED, NOT_ASKED are all "not proven". After a runtime re-attach IDENT is
+  asked again (`c6_sup.c:330`) once LoRa is back. `fw c6` shows the result.
+- **Flasher** (`c6link/c6_flasher.c`): UART1 on GPIO15/16, reset GPIO12 (EN), boot strap GPIO13; it releases the C6 into its
+  application before ESP-Hosted may talk to it.
+
+### 4. Hardware couplings
+- **C6 reset resets the keyboard:** GPIO12 (C6 EN) also resets the TCA8418. The C6 starts before the keyboard
+  (`firmware/main/main.c:449` `c6link_start`, then `keyboard_start` :456, then `lora_start` :475; `c6_wire_hooks` :483 only
+  after all three). A later C6 reset runs `keyboard_reinit`, `backlight_reapply`, `lora_c6_back` in that order
+  (`main.c:230`). The boot step enum (`lichen_boot/boot_steps.h`) pins storage, C6, Wi-Fi/clock/LoRa, apps.
+- **Backlights go through the C6:** UART1 text command `\nBL <display> <keyboard>\n`
+  (`board/backlight_level.c` `backlight_cmd_format`, sent from `board/backlight.c`). With the C6 down brightness does not
+  change, and Settings says so.
+- **R16 / GPIO5 hold (#12, #39):** stock badges have no R16 so GPIO5 is not on `DISPLAY_BL`; with the bridge fitted the P4
+  holds the backlight while the C6 is in reset or its ROM (`board/r16_hold.c`; flasher order in `c6_flasher.c:106-120`: EN
+  low, GPIO5 back to input, then EN rises). Power off drives backlights off, then `c6link_hold_in_reset` (:473).
+- **C6 bootloader and backlight (#39):** the C6 is flashed with its own `bootloader.bin` from the bundle, and the C6
+  application parses the `BL` command (`c6/main/backlight_cmd.c`). Any change to either needs the cold-boot bench pass and
+  `ota-c6` first.
+
+### 5. Watchdog, recovery, Bluetooth
+- **Watchdog:** the C6 LoRa service sends STATUS (uptime, heap, stack) about every 60 s (`c6/main/lora_service.cpp:58`);
+  a drop in uptime means it restarted. `c6_watch` (pure) turns signals into actions: hard (SDIO `TRANSPORT_FAILURE`,
+  keyboard reset hook) or soft (three failed LoRa sends then a probe). Up to 3 re-attaches (2 s then 10 s apart), then
+  a slow retry every 5 min, one offered restart of the badge (never on a trial image). Down hooks stop users of the
+  link; up hooks restore keyboard, backlight, LoRa.
+- **BT VHCI:** the C6 image builds the BLE controller with HCI over VHCI (`c6/sdkconfig.defaults`), but the P4 starts no
+  host stack: Bluetooth is off after boot (#197). Bench gate: `airplane` shows `bluetooth off`.
+
 ## Kernel and tick
 
 - FreeRTOS: Espressif's dual-core fork, V10.5.1 (ESP-IDF 6.1). The upstream SMP kernel (V11.1.0,
