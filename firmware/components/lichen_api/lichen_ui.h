@@ -7,9 +7,9 @@
 #include <stdint.h>
 
 // The shell's navigation for apps (#84): open a screen, go back, scroll. Implemented by the shell (lichen_shell's
-// shell.c and app_settings.c), resolved at link time; lichen_ui_call and lichen_ui_with_group are lichen_api's own
-// (lichen_ui.c). All functions take the LVGL port lock themselves and may be called
-// from any task.
+// shell.c and app_settings.c), resolved at link time; lichen_ui_call and lichen_ui_with_group are the UI service's
+// (lichen_os/lichen_ui_call.c, #220), the label and heading helpers the gate's own (lichen_ui.c). All functions take
+// the LVGL port lock themselves and may be called from any task.
 
 void shell_home(void);
 // Like Esc: pops the top screen, later (outside key handling). For a screen that takes Esc itself (the Keyboard test)

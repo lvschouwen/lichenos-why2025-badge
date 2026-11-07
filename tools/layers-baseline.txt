@@ -11,11 +11,7 @@ A	c6link -> lichen_boot	1
 A	c6link -> lichen_clock	1
 A	c6link -> lichen_mdns	1
 A	c6link -> lichen_net	1
-A	lichen_api -> board	1
-A	lichen_api -> crash	1
 A	lichen_api -> lichen_notify	1
-A	lichen_api -> sdcard	1
-A	lichen_api -> storage	1
 A	lichen_boot -> lichen_api	1
 A	lichen_clock -> lichen_api	1
 A	lichen_haptics -> lichen_api	1
@@ -40,10 +36,6 @@ B	c6link -> lichen_boot	2
 B	c6link -> lichen_clock	1
 B	c6link -> lichen_mdns	1
 B	c6link -> lichen_net	5
-B	lichen_api -> board	2
-B	lichen_api -> crash	1
-B	lichen_api -> sdcard	3
-B	lichen_api -> storage	1
 B	lichen_boot -> lichen_api	1
 B	lichen_clock -> lichen_api	1
 B	lichen_haptics -> lichen_api	2
@@ -97,19 +89,6 @@ C	c6link:wifi_saved_pick	1
 C	c6link:wifi_saved_wipe	1
 C	c6link:wifi_ssid_sanitize	1
 C	fw_console:nvs_open	1
-C	lichen_api:crash_clear_all	1
-C	lichen_api:crash_count_since_clear	1
-C	lichen_api:crash_log_generation	1
-C	lichen_api:crash_log_load	1
-C	lichen_api:crash_log_lock	1
-C	lichen_api:crash_log_store	1
-C	lichen_api:crash_log_unlock	1
-C	lichen_api:crash_recovered	1
-C	lichen_api:sd_begin	3
-C	lichen_api:sd_end	3
-C	lichen_api:sd_info	1
-C	lichen_api:sd_io_from_errno	3
-C	lichen_api:sd_mounted	3
 C	lichen_api:shell_back_then	1
 C	lichen_api:shell_dialog_countdown	1
 C	lichen_api:shell_on_esc	1
@@ -120,7 +99,6 @@ C	lichen_api:shell_screen_open	2
 C	lichen_api:shell_scroll_by	2
 C	lichen_api:shell_scroll_tame	2
 C	lichen_api:shell_style_screen	1
-C	lichen_api:storage_free_bytes	1
 C	lichen_apps:lichen_date_text	1	# moved from shell, #221 removes
 C	lichen_apps:lichen_keys_raw_release	1	# moved from shell, #221 removes
 C	lichen_apps:lichen_keys_raw_take	1	# moved from shell, #221 removes
@@ -131,10 +109,6 @@ C	lichen_apps:shell_back_to	1	# moved from shell, #221 removes
 C	lichen_apps:shell_dialog_countdown	1	# moved from shell, #221 removes
 C	lichen_apps:shell_open	2	# moved from shell, #221 removes
 C	lichen_apps:shell_page_create	2	# moved from shell, #221 removes
-C	lichen_boot:settings_get_u8	1
-C	lichen_boot:settings_set_u8	1
-C	lichen_clock:settings_get_u8	1
-C	lichen_clock:settings_set_u8	1
 C	lichen_haptics:lichen_notify_set_feedback	1
 C	lichen_haptics:nvs_open	1
 C	lichen_led:lichen_notify_dnd	1
@@ -284,11 +258,6 @@ C	mesh:shell_screen_open	2
 C	mesh:shell_scroll_by	1
 C	mesh:shell_scroll_tame	2
 C	mesh:shell_stack_screen	1
-C	ota:lichen_radio_get	1
-C	ota:settings_get_str	1
-C	ota:settings_get_u8	1
-C	ota:settings_set_str	1
-C	ota:settings_set_u8	1
 C	sensors:settings_erase	1
 C	sensors:settings_get_u8	1
 C	sensors:settings_set_u8	1

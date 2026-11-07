@@ -236,6 +236,97 @@ class HardAndConf(unittest.TestCase):
         self.assertLess(globs.index("heap_caps_get_*"), globs.index("heap_caps_*"))
 
 
+    def test_real_gate_requires_no_hardware_layer(self):
+        """The gate must not require L1/L2 (#220). Its public lichen_notify (L3) is baselined debt, not checked here."""
+        tools = os.path.dirname(cl.__file__)
+        conf = cl.parse_conf(cl.read(os.path.join(tools, "layers.conf")))
+        self.assertEqual(conf.comp_layer["lichen_api"], "L4")
+        self.assertEqual(conf.allowed_layers("L4"), {"L0", "L4"})
+        self.assertEqual(conf.comp_layer["lichen_os"], "L3")
+        cm = cl.read(os.path.join(tools, "..", "firmware", "components", "lichen_api", "CMakeLists.txt"))
+        bad = [d for _, d in cl.parse_requires(cm) if conf.comp_layer.get(d) in ("L1", "L2")]
+        self.assertEqual(bad, [])
+
+
+# Gate attribution (#220): lichen_os implements the gate's headers. Layers as the real tree, fewer of them.
+GATE_CONF = """\
+layer L0 platform
+layer L1 drivers
+layer L2 services
+layer L3 gate
+layer L4 system
+layer L5 apps
+component base L0
+component drv L1
+component lichen_os L2
+component gate lichen_api L3
+component shell L4
+component app L5
+layer-may L3 L0 L3
+layer-may L4 L0 L3 L4
+layer-may L5 L3 L5
+peer lichen_os lichen_api
+"""
+GATE_HEADER = "int os_fn(void);\nint shell_fn(void);\n"
+
+
+class GateAttribution(unittest.TestCase):
+    def fixture(self, app_calls, manifest=True):
+        decl = "".join("int %s(void);\n" % f for f in app_calls)
+        body = "+".join("%s()" % f for f in app_calls) or "0"
+        files = {
+            "lichen_os": ("idf_component_register(SRCS \"o.c\" PRIV_REQUIRES lichen_api drv)",
+                          {"o.c": "int os_fn(void){return 1;}\nint os_private(void){return 2;}\n"}),
+            "lichen_api": ("idf_component_register(SRCS \"x.c\" INCLUDE_DIRS \".\" REQUIRES base)",
+                           {"x.c": "int api_fn(void){return 5;}\n", "lichen_x.h": GATE_HEADER}),
+            "shell": ("idf_component_register(SRCS \"s.c\" REQUIRES lichen_api)", {"s.c": "int shell_fn(void){return 3;}\n"}),
+            "app": ("idf_component_register(SRCS \"a.c\" REQUIRES lichen_api)",
+                    {"a.c": decl + "int app_fn(void){return %s;}\n" % body}),
+        }
+        fx = Fixture(self, conf=GATE_CONF, overrides=files)
+        if manifest:
+            self.assertEqual(fx.run("--gen-manifest")[0], 0)
+        return fx
+
+    def test_app_call_to_a_gate_function_lichen_os_defines_passes(self):
+        self.assertEqual(keys(self.fixture(["os_fn"])), set())
+
+    def test_app_call_to_a_lichen_os_function_no_header_declares_fails(self):
+        self.assertEqual(keys(self.fixture(["os_private"])), {("C", "app:os_private")})
+
+    def test_gate_function_the_shell_defines_stays_an_upward_edge(self):
+        self.assertEqual(keys(self.fixture(["shell_fn"])), {("C", "app:shell_fn")})
+
+    def test_a_manifest_line_alone_frees_nothing(self):
+        fx = self.fixture(["os_private"])
+        mf = os.path.join(fx.root, "tools/gate_manifest.txt")
+        fx.write("tools/gate_manifest.txt", cl.read(mf) + "os_private\t-\tany\tlichen_x.h\n")
+        self.assertEqual(keys(fx), {("C", "app:os_private")})  # rule C reads the headers, not the manifest
+        fx.write("tools/layers-baseline.txt", "C\tapp:os_private\t1\n")
+        code, out = fx.run()
+        self.assertEqual(code, 1)
+        self.assertIn("os_private is in tools/gate_manifest.txt but no header declares it", out)
+
+    def test_manifest_must_match_the_headers(self):
+        fx = self.fixture(["os_fn"], manifest=False)
+        fx.write("tools/layers-baseline.txt", "")
+        code, out = fx.run()
+        self.assertEqual(code, 1)
+        self.assertIn("gate_manifest.txt is missing", out)
+        self.assertEqual(fx.run("--gen-manifest")[0], 0)
+        self.assertEqual(fx.run()[0], 0, fx.run()[1])
+        fx.write("firmware/components/lichen_api/lichen_x.h", GATE_HEADER + "int new_fn(void);\n")
+        code, out = fx.run()
+        self.assertEqual(code, 1)
+        self.assertIn("new_fn is declared in a lichen_api header but not in tools/gate_manifest.txt", out)
+
+    def test_gate_must_not_require_l1_or_l2(self):
+        fx = self.fixture([])
+        fx.write("firmware/components/lichen_api/CMakeLists.txt",
+                 "idf_component_register(SRCS \"x.c\" REQUIRES base PRIV_REQUIRES drv lichen_os)")
+        self.assertEqual(keys(fx), {("A", "lichen_api -> drv"), ("A", "lichen_api -> lichen_os")})
+
+
 class GitBase(unittest.TestCase):
     def git(self, fx, *args):
         subprocess.run(["git", "-C", fx.root, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"] + list(args),

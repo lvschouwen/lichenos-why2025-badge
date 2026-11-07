@@ -1073,7 +1073,7 @@ add_test(NAME dialog_countdown_test COMMAND dialog_countdown_test)
 
 add_executable(key_matrix_test
     ${CMAKE_CURRENT_SOURCE_DIR}/key_matrix_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/key_matrix.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/key_matrix.c
 )
 target_include_directories(key_matrix_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
@@ -1248,7 +1248,7 @@ add_test(NAME scroll_anchor_test COMMAND scroll_anchor_test)
 
 add_executable(radio_state_test
     ${CMAKE_CURRENT_SOURCE_DIR}/radio_state_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/radio_state.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/radio_state.c
 )
 target_include_directories(radio_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(radio_state_test PRIVATE -Wall -Wextra -Werror)

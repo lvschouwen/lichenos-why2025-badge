@@ -1,43 +1,13 @@
-// lichen_ui.h's calls that are the API's own rather than the shell's (#84 T8a): handing work to the LVGL task, and
-// building rows into a screen's group. Apps never take the LVGL port lock themselves.
+// lichen_ui.h's plain LVGL helpers that are the gate's own rather than the shell's: icon boxes, one-line and wrapped
+// labels, the page heading and the screen hint. They run on the LVGL task like every other widget call; the calls that
+// take the LVGL lock (lichen_ui_call, lichen_ui_with_group) are the UI service's, in lichen_os/lichen_ui_call.c (#220).
 #include "lichen_ui.h"
 
-#include "esp_log.h"
-#include "esp_lvgl_port.h"
 #include "fonts.h"
 #include "theme.h"
 #include "ui_text.h"
 
 #include <stdarg.h>
-
-static char const TAG[] = "ui";
-
-#define UI_CALL_LOCK_MS 2000 // as the dialog: a render takes milliseconds, a lock held this long is a stuck LVGL task
-
-bool lichen_ui_call(void (*fn)(void *), void *arg) {
-    if (!fn) {
-        return false;
-    }
-    // lv_async_call creates an LVGL timer: done outside the lock it races the LVGL task's own timer list (#118)
-    if (!lvgl_port_lock(UI_CALL_LOCK_MS)) {
-        ESP_LOGW(TAG, "ui call %p not queued: the LVGL lock was not free in %d ms", (void *)fn, UI_CALL_LOCK_MS);
-        return false;
-    }
-    lv_result_t res = lv_async_call(fn, arg);
-    lvgl_port_unlock();
-    if (res != LV_RESULT_OK) {
-        ESP_LOGE(TAG, "ui call %p not queued: out of memory", (void *)fn);
-        return false;
-    }
-    return true;
-}
-
-void lichen_ui_with_group(lv_group_t *group, void (*build)(void *), void *arg) {
-    lv_group_t *previous = lv_group_get_default();
-    lv_group_set_default(group);
-    build(arg);
-    lv_group_set_default(previous); // in one place, so it can never be left set to a screen that is gone
-}
 
 lv_obj_t *lichen_icon_box(lv_obj_t *parent, int32_t w, int32_t h, int32_t x, int32_t y, uint32_t color, int32_t radius) {
     lv_obj_t *b = lv_obj_create(parent);

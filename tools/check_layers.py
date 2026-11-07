@@ -8,7 +8,10 @@ Every repo component has a layer in tools/layers.conf (L0 platform ... L6 apps, 
      include its own headers, allowed components and the listed system headers.
   C  nm on the built archives: an undefined symbol that another component defines follows the same edges (this is
      the link-time upward edge REQUIRES does not show); owner-only symbols (lvgl_port_lock, nvs_open, heap_caps_*,
-     xTaskCreate* ...) may only be used by their listed owners; `forbid` symbols may not be used at all.
+     xTaskCreate* ...) may only be used by their listed owners; `forbid` symbols may not be used at all. A function
+     a lichen_api header declares and lichen_os defines counts as the gate's (#220: the gate is a header API, lichen_os
+     implements it), so the caller needs an edge to lichen_api. Only lichen_os gets this; a gate function the shell
+     defines stays an upward edge.
 Rule D (capabilities) is #229's and not here.
 
 Rule C counts per object file (an object that calls a symbol three times counts once), A per edge, B per include line.
@@ -20,8 +23,9 @@ count): a violation that is not in the baseline is NEW, a higher one is WORSE, a
 or gone is STALE (run --shrink), and a baseline entry that is new or higher than in the merge-base version of the file
 GREW. The baseline only shrinks. Report mode (--report) prints every violation and exits 0.
 
-Also: --gen-manifest writes tools/gate_manifest.txt from the lichen_api headers; a header function missing there is a
-warning (the capability column is #229's).
+Also: --gen-manifest writes tools/gate_manifest.txt from the lichen_api headers. The manifest must match what the
+headers declare (a failure otherwise, #220), and rule C takes the gate's functions from the headers themselves, so
+a header is the only way in: a line added to the manifest by hand frees nothing. The capability column is #229's.
 
 Nothing passes silently: a tool that is missing or a build that lacks an archive fails rule C instead of skipping it,
 unless --no-symbols asked for the skip."""
@@ -39,6 +43,8 @@ RULES = ("A", "B", "C")
 CONF_REL = "tools/layers.conf"
 BASELINE_REL = "tools/layers-baseline.txt"
 MANIFEST_REL = "tools/gate_manifest.txt"
+GATE = "lichen_api"      # the gate: its headers are the app API
+GATE_IMPL = "lichen_os"  # the services that implement the gate's headers (#220)
 SKIP_PARTS = ("/build/", "/managed_components/")
 SOURCE_EXT = (".c", ".cpp", ".h", ".hpp")
 REQ_KEYS = ("REQUIRES", "PRIV_REQUIRES")
@@ -337,8 +343,14 @@ def undefined_symbols(nm, lib):
     return out
 
 
-def sym_violation(conf, comp, layer, sym, defs):
-    """(symbol, hard) when this reference breaks a rule, else (None, False). Forbidden symbols are hard."""
+def gate_call_ok(conf, comp, sym, owner, gate_syms):
+    """A call to a gate-declared function that lichen_os defines is a call to the gate (#220)."""
+    return owner == GATE_IMPL and sym in gate_syms and GATE in conf.comp_layer and conf.edge_ok(comp, GATE)
+
+
+def sym_violation(conf, comp, layer, sym, defs, gate_syms=frozenset()):
+    """(symbol, hard) when this reference breaks a rule, else (None, False). Forbidden symbols are hard. gate_syms:
+    the functions the lichen_api headers declare."""
     for g in conf.forbid[layer]:
         if fnmatch.fnmatchcase(sym, g):
             return sym, True
@@ -348,12 +360,12 @@ def sym_violation(conf, comp, layer, sym, defs):
                 return None, False
             return (None if any(owner_matches(conf, o, comp) for o in owners) else sym), False
     owner = defs.get(sym)
-    if owner and owner != comp and not conf.edge_ok(comp, owner):
+    if owner and owner != comp and not conf.edge_ok(comp, owner) and not gate_call_ok(conf, comp, sym, owner, gate_syms):
         return sym, False
     return None, False
 
 
-def rule_c(conf, comps, found, build, nm, selected):
+def rule_c(conf, comps, found, build, nm, selected, gate_syms=frozenset()):
     libs = {}
     for name in comps:
         lib = os.path.join(build, "esp-idf", name, "lib%s.a" % name)
@@ -369,7 +381,7 @@ def rule_c(conf, comps, found, build, nm, selected):
         for obj, sym in undefined_symbols(nm, lib):
             if defs.get(sym) == name:
                 continue
-            bad, is_hard = sym_violation(conf, name, layer, sym, defs)
+            bad, is_hard = sym_violation(conf, name, layer, sym, defs, gate_syms)
             if bad:
                 objs[bad].add(obj)
                 if is_hard:
@@ -582,10 +594,16 @@ def header_functions(text):
     return out
 
 
+def gate_dir(root):
+    return os.path.join(root, "firmware", "components", GATE)
+
+
 def gate_functions(root):
-    """[(function, header, thread rule)] over the lichen_api headers."""
-    d = os.path.join(root, "firmware", "components", "lichen_api")
+    """[(function, header, thread rule)] over the lichen_api headers (none when the tree has no gate)."""
+    d = gate_dir(root)
     out = []
+    if not os.path.isdir(d):
+        return out
     for fn in sorted(os.listdir(d)):
         if fn.endswith(".h"):
             with open(os.path.join(d, fn), encoding="utf-8", errors="replace") as f:
@@ -596,9 +614,10 @@ def gate_functions(root):
 MANIFEST_HEAD = (
     "# Gate manifest (#218, #216): every function the lichen_api headers declare, with the capability that guards it and\n"
     "# the thread it may be called from. Format: function<TAB>capability<TAB>thread<TAB>header.\n"
-    "# Generated once by `tools/check_layers.sh --gen-manifest`; the capability column is a seed (per header, '-' = none)\n"
-    "# and #229 (capabilities) owns making it right. thread: any, lvgl (LVGL task only), not-lvgl, unspecified (the header\n"
-    "# comment does not say; fix the comment, then the entry).\n"
+    "# Generated by `tools/check_layers.sh --gen-manifest`, checked against the headers on every build (#220). The\n"
+    "# capability column is a seed (per header, '-' = none) and #229 (capabilities) owns making it right.\n"
+    "# thread: any, lvgl (LVGL task only), not-lvgl, unspecified (the header comment does not say; fix the comment,\n"
+    "# then the entry).\n"
 )
 
 
@@ -615,6 +634,20 @@ def manifest_warnings(root, manifest):
     return out
 
 
+def manifest_problems(root):
+    """Failures when tools/gate_manifest.txt is not what --gen-manifest writes from the headers today (#220)."""
+    if not os.path.isdir(gate_dir(root)):
+        return []
+    mf = os.path.join(root, MANIFEST_REL)
+    if not os.path.exists(mf):
+        return ["%s is missing (run: tools/check_layers.sh --gen-manifest)" % MANIFEST_REL]
+    text = read(mf)
+    if text == manifest_text(gate_functions(root)):
+        return []
+    return manifest_warnings(root, text) + [
+        "%s does not match the lichen_api headers (run: tools/check_layers.sh --gen-manifest)" % MANIFEST_REL]
+
+
 # --- driver ---------------------------------------------------------------------------------------------------
 
 def measure(conf, root, build, nm, symbols, layer_filter=None):
@@ -627,7 +660,7 @@ def measure(conf, root, build, nm, symbols, layer_filter=None):
     rule_a(conf, comps, found, root, selected)
     rule_b(conf, comps, found, root, selected)
     if symbols:
-        rule_c(conf, comps, found, build, nm, selected)
+        rule_c(conf, comps, found, build, nm, selected, frozenset(f for f, _, _ in gate_functions(root)))
     return found
 
 
@@ -718,10 +751,7 @@ def ratchet(args, root, conf, all_measured, symbols, where=None):
 
 
 def finish(root, fails, measured, baseline):
-    mf = os.path.join(root, MANIFEST_REL)
-    if os.path.exists(mf):
-        for w in manifest_warnings(root, read(mf)):
-            print("warn: " + w, file=sys.stderr)
+    fails = fails + manifest_problems(root)
     for f in fails:
         print("layers: " + f, file=sys.stderr)
     if fails:

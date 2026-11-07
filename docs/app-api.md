@@ -133,8 +133,9 @@ tasks and memory books). Needs the `SYSTEM` capability, which only `lichen_shell
 a `lichen_sys_*` header fails the layer check. The shell uses it instead of reaching drivers, `board` or NVS (waves
 L-C, #225-#228).
 
-**One gate behind both:** an ops table that the OS (L3) and the shell (L5) fill at boot, so `lichen_api` no longer
-depends upward on them, and `tools/gate_manifest.txt` (function -> capability -> thread rule). No syscall trap.
+**One gate behind both:** the headers are in `lichen_api` (L4, no hardware dependencies), the OS implementations
+behind them in `lichen_os` (L3, #220); an ops table that the shell (L5) fills at boot, so `lichen_api` no longer
+depends upward on it, and `tools/gate_manifest.txt` (function -> capability -> thread rule). No syscall trap.
 
 **Capabilities (#229, wave L-D):** `LORA_TX`, `LORA_RX`, `LORA_BORROW`, `SD`, `NET`, `SECRETS`, `RAW_KEYS`, `CONSOLE`,
 `RESTART`, `BACKGROUND`, `HAPTICS`, `SENSORS`, `NOTIFY`, `RADIO_SCAN`, `BT`, `AUDIO`, `BATTERY`, the quotas

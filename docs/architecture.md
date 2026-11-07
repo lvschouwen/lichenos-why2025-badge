@@ -235,8 +235,8 @@ The two-chip protocol is a separate contract: see "Two-chip contract" in this fi
 | L0 platform | IDF, FreeRTOS, the LVGL library, `fw_console` | `fw_console`, `psram_guard`, `lichen_random`, `assets`, `lichen_nvs` (#235 revisits it) |
 | L1 board/HAL | pins, buses, panel, no NVS | `board`, `storage`, `esp_lcd_st7703`, `esp_tca8418` |
 | L2 drivers | LoRa, C6 link, SD, sensors, keyboard chip | `lora`, `c6link`, `sdcard`, `sensors`, `lichen_led`, `lichen_haptics`, `battery`, `lichen_audio` |
-| L3 OS services | settings (the only NVS owner), fs, notify, clock, radio, net, power, display/UI (the only LVGL-lock owner), OTA, boot, app registry | `lichen_os` (new, #220); today `lichen_notify`, `lichen_clock`, `lichen_net`, `lichen_boot`, `lichen_mdns`, `ota`, `crash` |
-| L4 the gate | headers, capability and identity checks, one ops table; no hardware dependencies | `lichen_api` |
+| L3 OS services | settings (the only NVS owner), fs, notify, clock, radio, net, power, display/UI (the only LVGL-lock owner), OTA, boot, app registry | `lichen_os` (the gate's implementations: settings, fs, crash log, radio, task and memory books, fonts, the LVGL-lock calls; #220), `lichen_notify`, `lichen_clock`, `lichen_net`, `lichen_boot`, `lichen_mdns`, `ota`, `crash` |
+| L4 the gate | headers and their pure logic, the gate's widgets, capability and identity checks, one ops table; no hardware dependencies | `lichen_api` |
 | L5 system | the shell and the system screens, a privileged client of the gate | `lichen_shell` |
 | L6 apps | the plain apps, MeshCore | `lichen_apps` (#180), `mesh` |
 
@@ -270,7 +270,10 @@ which catches link-time upward edges; D, capabilities (#229, not in the checker 
 violation that is not in the baseline (NEW, WORSE), on a baseline entry that was fixed and not removed (STALE) and on one
 that grew against `main` (GREW), until the baseline is 0 after wave L-C. The app profile keeps the old hard guarantees
 that no baseline can excuse: forbidden symbols, libraries and headers outside the closed L6 lists, an unresolved
-`${VAR}` in a `REQUIRES` list. Rule C counts per object file, A per edge, B per include line. Apps (`mesh`) still have
+`${VAR}` in a `REQUIRES` list. Rule C counts per object file, A per edge, B per include line. A function a
+`lichen_api` header declares and `lichen_os` defines counts as the gate's for rule C (#220: `lichen_os` implements the
+header API, its `peer lichen_os lichen_api` line says so); the headers decide, and `tools/gate_manifest.txt` must match
+them on every build (`--gen-manifest`). Gate functions the shell defines stay upward edges until the ops table (#221). Apps (`mesh`) still have
 named `peer` lines in `layers.conf` for `lichen_notify`, `lichen_clock`, `lichen_random`, `lora`, `fw_console` and
 `psram_guard`: they are debts the app surface removes, not part of the target matrix above.
 

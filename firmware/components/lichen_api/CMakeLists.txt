@@ -1,26 +1,19 @@
-# Lichen's app API (#84): what an app may use. Apps PRIV_REQUIRE lichen_api and never lichen_shell. lichen_ui.h's
-# navigation calls are implemented by lichen_shell and resolve at link time (main requires both). Pure and host-tested:
-# list_filter.c (list_filter_test.c), scroll_anchor.c (scroll_anchor_test.c), tz_table.c (tz_table_test.c).
-# app_ns.c (app_ns_test.c). lichen_settings.c is an app's own NVS namespace (T5); settings_store is Lichen's (badge_fw,
-# with tz_table for its default zone) and stays here because lichen_boot needs it; apps use lichen_settings.h.
-# lichen_fs.c: an app's directory on the storage drive (T6) and on the SD card (#60); fs_path.c builds both paths
-# (pure, fs_path_test.c). lichen_crashlog.c is the Crash log app's view of crash.c's log (#72); crashlog_fmt.c is its
-# text (pure, crashlog_fmt_test.c). lichen_badge.c: the tile badges home draws (#102), over badge_table.c (pure,
-# badge_table_test.c). lichen_ui.c: lichen_ui_call (lv_async_call under the LVGL lock, from any task) and lichen_ui_with_group
-# (#84 T8a), so apps need no esp_lvgl_port. qr_screen.c is the QR code screen (#153; LVGL's QR widget, needs CONFIG_LV_USE_QRCODE), qr_payload.c its pure text (qr_payload_test.c). REQUIRES lichen_notify publicly: notifications (lichen_notify.h, #62) are part of the app API.
-# lichen_task.c: lichen_task_start, tasks booked per app (#181, over task_book.c, pure, task_book_test.c); lichen_mem.c:
-# lichen_alloc with the per-app internal quota (#181, over mem_book.c, pure, mem_book_test.c). tile_order.c: a grid's
-# arranged display order (#189; home now, MeshCore's grid later; pure, tile_order_test.c).
-# For the plain apps (#180): hold_exit.c (hold Esc to leave, hold_exit_test.c) and key_matrix.c (the keyboard's codes,
-# names and printed layout, key_matrix_test.c) are pure; board only lends key_matrix.c its keymap headers. lichen_keys.h
-# (raw keys) and lichen_ui.h's station clock are implemented by lichen_shell, lichen_radio.c's LoRa borrowing hands on
-# the shell's sources.
-# os_name.c: the OS name and version line (#236; pure, os_name_test.c).
-idf_component_register(SRCS "lichen_app.c" "menu.c" "menu_filter.c" "list_filter.c" "scroll_anchor.c" "fonts.c" "text_entry.c"
-                            "settings_store.c" "tz_table.c" "app_ns.c" "lichen_settings.c" "lichen_fs.c" "fs_path.c"
-                            "lichen_crashlog.c" "crashlog_fmt.c" "legacy_blob.c" "lichen_legacy.c" "settings_backup.c" "settings_backup_io.c" "lichen_badge.c" "badge_table.c" "radio_state.c" "lichen_radio.c"
-                            "lichen_ui.c" "ui_text.c" "qr_payload.c" "qr_screen.c" "tile_order.c"
-                            "os_name.c" "lichen_task.c" "task_book.c" "lichen_mem.c" "mem_book.c" "hold_exit.c" "key_matrix.c"
+# Lichen's app API (#84), the gate (L4, #216/#220): the headers apps may use, the pure logic behind them and the gate's
+# own LVGL widgets. No hardware dependencies: the implementations that need NVS, the storage drive, the SD card, the
+# crash log, the LVGL port lock or the board live in lichen_os (L3) and resolve at link time (main requires both), as
+# do lichen_ui.h's navigation calls, which lichen_shell implements. Apps PRIV_REQUIRE lichen_api, never lichen_os or
+# lichen_shell. REQUIRES lichen_notify publicly: notifications (lichen_notify.h, #62) are part of the app API.
+# Pure and host-tested: list_filter.c, scroll_anchor.c, tz_table.c, app_ns.c, fs_path.c (an app's directory paths),
+# crashlog_fmt.c (the Crash log app's text), badge_table.c (the tile badges home draws, #102), legacy_blob.c,
+# settings_backup.c, qr_payload.c (#153), task_book.c and mem_book.c (#181), tile_order.c (#189), hold_exit.c (#180),
+# ui_text.c, menu_filter.c, os_name.c (the OS name and version line, #236); each has its <name>_test.c in host_tests/.
+# Widgets: lichen_app.c (the app registry), menu.c (the menu widget: it uses the shell's screen calls, so it stays a
+# gate widget rather than a lichen_os service, #220), text_entry.c, qr_screen.c (LVGL's QR widget, needs
+# CONFIG_LV_USE_QRCODE) and lichen_ui.c's plain LVGL helpers (heading, labels, icon box, page hint).
+idf_component_register(SRCS "lichen_app.c" "menu.c" "menu_filter.c" "list_filter.c" "scroll_anchor.c" "text_entry.c"
+                            "tz_table.c" "app_ns.c" "fs_path.c" "crashlog_fmt.c" "legacy_blob.c" "settings_backup.c"
+                            "badge_table.c" "lichen_ui.c" "ui_text.c" "qr_payload.c" "qr_screen.c" "tile_order.c"
+                            "task_book.c" "mem_book.c" "hold_exit.c" "os_name.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_notify
-                       PRIV_REQUIRES freertos esp_hw_support assets fw_console nvs_flash heap storage sdcard crash esp_lvgl_port esp_app_format board)
+                       PRIV_REQUIRES freertos fw_console)
