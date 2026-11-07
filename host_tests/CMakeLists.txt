@@ -821,7 +821,10 @@ add_library(meshcore_companion_host STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/arduino_shim/arduino_shim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/arduino_shim/fs_shim.cpp
 )
-target_include_directories(meshcore_companion_host SYSTEM PUBLIC
+# stubs first: shared/arduino_shim/nvs_flash.h only declares nvs_flash_erase (the firmware renames and defines it), so
+# it must not win over the host stub's inline definition; which header won depended on the generator
+target_include_directories(meshcore_companion_host SYSTEM BEFORE PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${MESHCORE_DIR}/src
     ${MESHCORE_DIR}/examples/companion_radio
     ${MESHCORE_DIR}/lib/ed25519
@@ -830,7 +833,6 @@ target_include_directories(meshcore_companion_host SYSTEM PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/base64/src
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/companion
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_clock
-    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
 )
 target_compile_definitions(meshcore_companion_host PUBLIC MAX_CONTACTS=1000 MAX_GROUP_CHANNELS=40
                            OFFLINE_QUEUE_SIZE=256)
