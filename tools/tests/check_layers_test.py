@@ -266,8 +266,9 @@ layer-may L3 L0 L3
 layer-may L4 L0 L3 L4
 layer-may L5 L3 L5
 peer lichen_os lichen_api
+owner-only os_lock lichen_os
 """
-GATE_HEADER = "int os_fn(void);\nint shell_fn(void);\n"
+GATE_HEADER = "int os_fn(void);\nint shell_fn(void);\nint os_lock(void);\n"
 
 
 class GateAttribution(unittest.TestCase):
@@ -276,7 +277,7 @@ class GateAttribution(unittest.TestCase):
         body = "+".join("%s()" % f for f in app_calls) or "0"
         files = {
             "lichen_os": ("idf_component_register(SRCS \"o.c\" PRIV_REQUIRES lichen_api drv)",
-                          {"o.c": "int os_fn(void){return 1;}\nint os_private(void){return 2;}\n"}),
+                          {"o.c": "int os_fn(void){return 1;}\nint os_private(void){return 2;}\nint os_lock(void){return 6;}\n"}),
             "lichen_api": ("idf_component_register(SRCS \"x.c\" INCLUDE_DIRS \".\" REQUIRES base)",
                            {"x.c": "int api_fn(void){return 5;}\n", "lichen_x.h": GATE_HEADER}),
             "shell": ("idf_component_register(SRCS \"s.c\" REQUIRES lichen_api)", {"s.c": "int shell_fn(void){return 3;}\n"}),
@@ -296,6 +297,21 @@ class GateAttribution(unittest.TestCase):
 
     def test_gate_function_the_shell_defines_stays_an_upward_edge(self):
         self.assertEqual(keys(self.fixture(["shell_fn"])), {("C", "app:shell_fn")})
+
+    def test_the_gate_calling_into_lichen_os_stays_a_violation(self):
+        fx = self.fixture([])
+        fx.write("firmware/components/lichen_api/x.c", "int os_fn(void);\nint api_fn(void){return os_fn();}\n")
+        fx.build()
+        self.assertEqual(keys(fx), {("C", "lichen_api:os_fn")})  # L4 may not use L3, header or not
+
+    def test_a_lower_layer_calling_a_gate_function_lichen_os_defines_stays_flagged(self):
+        fx = self.fixture([])
+        fx.write("firmware/components/drv/d.c", "int os_fn(void);\nint drv_fn(void){return os_fn();}\n")
+        fx.build()
+        self.assertEqual(keys(fx), {("C", "drv:os_fn")})  # L1 may reach neither lichen_os (L2) nor the gate (L3)
+
+    def test_a_header_declared_owner_only_symbol_stays_restricted(self):
+        self.assertEqual(keys(self.fixture(["os_lock"])), {("C", "app:os_lock")})
 
     def test_a_manifest_line_alone_frees_nothing(self):
         fx = self.fixture(["os_private"])

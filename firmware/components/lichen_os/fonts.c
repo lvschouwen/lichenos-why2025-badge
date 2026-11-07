@@ -1,4 +1,7 @@
+// Loads the asset fonts into PSRAM at boot and hands them to the gate's slots (font_slots.h, #220); "fw fonts" reports
+// them. lichen_font() itself is the gate's (lichen_api/fonts.c).
 #include "fonts.h"
+#include "font_slots.h"
 
 #include "assets.h"
 #include "esp_heap_caps.h"
@@ -17,17 +20,16 @@
 static char const *TAG = "fonts";
 
 typedef struct {
-    int                    px;
-    char const            *file;
-    lv_font_t const       *builtin;
-    lv_font_t             *loaded; // NULL: use the built-in one
-    uint32_t               ram;    // PSRAM the loaded font took
+    int         px;
+    char const *file;
+    lv_font_t  *loaded; // NULL: the gate's slot keeps the built-in one
+    uint32_t    ram;    // PSRAM the loaded font took
 } slot_t;
 
 static slot_t slots[] = {
-    {LICHEN_FONT_SMALL, "fonts/lichen_24.bin", &lv_font_montserrat_24, NULL, 0},
-    {LICHEN_FONT_MEDIUM, "fonts/lichen_28.bin", &lv_font_montserrat_28, NULL, 0},
-    {LICHEN_FONT_LARGE, "fonts/lichen_40.bin", &lv_font_montserrat_40, NULL, 0},
+    {LICHEN_FONT_SMALL, "fonts/lichen_24.bin", NULL, 0},
+    {LICHEN_FONT_MEDIUM, "fonts/lichen_28.bin", NULL, 0},
+    {LICHEN_FONT_LARGE, "fonts/lichen_40.bin", NULL, 0},
 };
 #define SLOT_COUNT (sizeof(slots) / sizeof(slots[0]))
 
@@ -37,23 +39,6 @@ static char const *const SAMPLE = "\xc3\xa9 \xc3\xbc \xc3\x9f \xe2\x80\x99 \xe2\
                                   "\xe2\x82\xac \xd0\x96 \xce\xbb \xe2\x98\x80\xef\xb8\x8f \xf0\x9f\x8d\x84 \xf0\x9f\x90\x8c "
                                   "\xf0\x9f\x91\x80 \xf0\x9f\x94\x8b \xf0\x9f\x94\xb1 \xf0\x9f\xa4\x96 \xf0\x9f\xa6\x8b "
                                   "\xf0\x9f\xa6\x8e \xf0\x9f\xa6\xab \xe2\x80\x8d " LV_SYMBOL_WIFI LV_SYMBOL_BATTERY_FULL;
-
-static slot_t *slot_for(int px) {
-    for (size_t i = 0; i < SLOT_COUNT; i++) {
-        if (slots[i].px == px) {
-            return &slots[i];
-        }
-    }
-    return NULL;
-}
-
-lv_font_t const *lichen_font(int px) {
-    slot_t *s = slot_for(px);
-    if (!s) {
-        s = &slots[0];
-    }
-    return s->loaded ? s->loaded : s->builtin;
-}
 
 // lv_binfont_create_from_buffer parses the file into its own lv_malloc'd (PSRAM) structures; nothing keeps pointing
 // into the mapped partition, which a Wi-Fi assets update rewrites (assets.h).
@@ -72,6 +57,7 @@ static void load_one(slot_t *s) {
     }
     size_t after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     s->ram       = before > after ? (uint32_t)(before - after) : 0;
+    lichen_font_set(s->px, s->loaded);
 }
 
 // Next code point of a valid UTF-8 string (the sample is ours), advancing *s

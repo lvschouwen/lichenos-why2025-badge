@@ -10,7 +10,9 @@
 # Widgets: lichen_app.c (the app registry), menu.c (the menu widget: it uses the shell's screen calls, so it stays a
 # gate widget rather than a lichen_os service, #220), text_entry.c, qr_screen.c (LVGL's QR widget, needs
 # CONFIG_LV_USE_QRCODE) and lichen_ui.c's plain LVGL helpers (heading, labels, icon box, page hint).
-idf_component_register(SRCS "lichen_app.c" "menu.c" "menu_filter.c" "list_filter.c" "scroll_anchor.c" "text_entry.c"
+# fonts.c holds the font slots lichen_font() reads; lichen_os loads the asset fonts into them (font_slots.h).
+idf_component_register(SRCS "lichen_app.c" "fonts.c" "menu.c" "menu_filter.c" "list_filter.c" "scroll_anchor.c"
+                            "text_entry.c"
                             "tz_table.c" "app_ns.c" "fs_path.c" "crashlog_fmt.c" "legacy_blob.c" "settings_backup.c"
                             "badge_table.c" "lichen_ui.c" "ui_text.c" "qr_payload.c" "qr_screen.c" "tile_order.c"
                             "task_book.c" "mem_book.c" "hold_exit.c" "os_name.c"

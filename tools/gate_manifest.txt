@@ -70,6 +70,7 @@ lichen_crashlog_read	SYSTEM	unspecified	lichen_crashlog.h
 lichen_crashlog_status	SYSTEM	unspecified	lichen_crashlog.h
 lichen_date_text	-	unspecified	lichen_ui.h
 lichen_font	-	unspecified	fonts.h
+lichen_font_set	SYSTEM	unspecified	font_slots.h
 lichen_fonts_load	-	unspecified	fonts.h
 lichen_free	-	unspecified	lichen_mem.h
 lichen_fs_app_dir	SD	unspecified	lichen_fs.h

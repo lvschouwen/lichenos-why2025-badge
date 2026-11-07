@@ -344,8 +344,10 @@ def undefined_symbols(nm, lib):
 
 
 def gate_call_ok(conf, comp, sym, owner, gate_syms):
-    """A call to a gate-declared function that lichen_os defines is a call to the gate (#220)."""
-    return owner == GATE_IMPL and sym in gate_syms and GATE in conf.comp_layer and conf.edge_ok(comp, GATE)
+    """A call to a gate-declared function that lichen_os defines is a call to the gate (#220). Not for the gate itself:
+    the gate calling into lichen_os is a downward edge it may not have (L4 uses L0 and L4 only)."""
+    return (owner == GATE_IMPL and comp != GATE and sym in gate_syms and GATE in conf.comp_layer
+            and conf.edge_ok(comp, GATE))
 
 
 def sym_violation(conf, comp, layer, sym, defs, gate_syms=frozenset()):
@@ -545,7 +547,7 @@ def grew_problems(root, baseline, skip, marks=None):
 HEADER_CAP = {
     "lichen_fs.h": "SD", "lichen_haptics.h": "HAPTICS", "lichen_sensors.h": "SENSORS", "lichen_task.h": "BACKGROUND",
     "lichen_legacy.h": "RAW_KEYS", "lichen_radio.h": "RADIO", "settings_backup.h": "SYSTEM",
-    "settings_backup_io.h": "SYSTEM", "lichen_crashlog.h": "SYSTEM", "lichen_badge.h": "SYSTEM",
+    "settings_backup_io.h": "SYSTEM", "lichen_crashlog.h": "SYSTEM", "lichen_badge.h": "SYSTEM", "font_slots.h": "SYSTEM",
 }
 PROTO_RE = re.compile(r"(?:^|\n)([A-Za-z_][\w \t\*]*?[\s\*](\w+)\s*\([^;{}]*\))\s*;", re.S)
 SKIP_PROTO = ("typedef", "static", "extern \"C\"", "return", "define")

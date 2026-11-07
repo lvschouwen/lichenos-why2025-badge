@@ -6,8 +6,9 @@
 # lichen_legacy.c hands the shell's old blobs to their app. lichen_badge.c: the tile badges home draws (#102).
 # radio_state.c (pure, radio_state_test.c, #197) and lichen_radio.c: the radios' on/off state and LoRa borrowing.
 # lichen_task.c / lichen_mem.c: tasks and internal memory booked per app (#181). fonts.c loads the fonts from the
-# assets partition at boot (#16); lichen_ui_call.c hands work to the LVGL task under the port lock (#84 T8a, #221 owns
-# it next). key_matrix.c (pure, key_matrix_test.c) names the keyboard's codes over board's keymap headers (#180).
+# assets partition at boot into the gate's slots (#16, font_slots.h); lichen_ui_call.c hands work to the LVGL task
+# under the port lock (#84 T8a, #221 owns it next). key_matrix.c (pure, key_matrix_test.c) names the keyboard's
+# codes over board's keymap headers (#180).
 idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c"
                             "lichen_crashlog.c" "lichen_legacy.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"

@@ -1,7 +1,7 @@
 # Which time to believe (#8): clock_check.c is pure and host-tested (host_tests/clock_check_test.c). lichen_clock.c
 # holds the state (clock_is_set, last SNTP step); the build epoch is the commit time of the checkout, so the build is
 # reproducible (unlike __DATE__). clock_local.c (local time to UTC, "fw clock set" parsing, #64) is pure and host-tested
-# too (clock_local_test.c); clock_store.c keeps the source across a warm reset in Lichen's NVS (lichen_api), and
+# too (clock_local_test.c); clock_store.c keeps the source across a warm reset in Lichen's NVS (lichen_os), and
 # "fw clock sync" restarts lwIP's SNTP client (lwip).
 execute_process(
     COMMAND git log -1 --format=%ct
