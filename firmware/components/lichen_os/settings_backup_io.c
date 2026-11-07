@@ -218,6 +218,10 @@ static bool store(sb_value_t const *v) {
     return err == ESP_OK;
 }
 
+void settings_backup_discard(void) {
+    held_release();
+}
+
 sbk_status_t settings_backup_apply(size_t *applied) {
     *applied = 0;
     for (size_t i = 0; i < s_held_count; i++) {

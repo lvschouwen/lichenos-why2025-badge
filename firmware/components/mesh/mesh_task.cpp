@@ -3439,8 +3439,7 @@ static bool start_locked(char const *files_dir) {
     fs_shim_set_root(files_dir);
     fs_shim_set_drive_bytes(drive_bytes);
     mesh_lock();
-    mesh_store_set_hooks(mesh_mem_ring_alloc, store_warn);
-    mesh_store_set_free_hook(mesh_mem_free);
+    mesh_store_set_hooks(mesh_mem_ring_alloc, mesh_mem_free, store_warn);
     fs_shim_set_buffer_hooks(mesh_mem_file_alloc, mesh_mem_free);
     mesh_store_set_clock(mesh_epoch_now);
     bool ok = mesh_store_init(STORE_MESSAGES);

@@ -314,7 +314,7 @@ static void scan_checks(void) {
 static void replay_checks(void) {
     static mesh_hist_t h;
     static uint8_t     pend[MESH_HIST_PENDING];
-    mesh_store_set_hooks(NULL, NULL);
+    mesh_store_set_hooks(NULL, NULL, NULL);
     CHECK(mesh_store_init(3));
     mesh_hist_init(&h, pend, sizeof(pend), &kc);
     mesh_chat_key_t ck = chan_key("#BadgeTest"), dk = dm_key(7);
@@ -1103,7 +1103,7 @@ static void boot_load_checks(void) {
             f.fail[1] = true;
             break;
         }
-        mesh_store_set_hooks(NULL, NULL);
+        mesh_store_set_hooks(NULL, NULL, NULL);
         CHECK(mesh_store_init(8));
         mesh_hist_init(&h, pend, sizeof(pend), &kc);
         mesh_hist_table_t t;

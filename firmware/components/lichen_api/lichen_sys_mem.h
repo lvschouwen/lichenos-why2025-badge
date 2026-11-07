@@ -19,17 +19,22 @@ typedef enum {
     LICHEN_SYS_MEM_PSRAM,
 } lichen_sys_mem_kind_t;
 
+// The figures below: any task but not an interrupt.
+// Free bytes of that heap. Any task.
 size_t lichen_sys_mem_free(lichen_sys_mem_kind_t kind);
-size_t lichen_sys_mem_largest(lichen_sys_mem_kind_t kind); // largest block that can still be allocated
-size_t lichen_sys_mem_total(lichen_sys_mem_kind_t kind);   // 0 when the badge has none (no PSRAM)
-// Free internal bytes now and the least there ever were since boot
+// Largest block that can still be allocated. Any task.
+size_t lichen_sys_mem_largest(lichen_sys_mem_kind_t kind);
+// Size of that heap; 0 when the badge has none (no PSRAM). Any task.
+size_t lichen_sys_mem_total(lichen_sys_mem_kind_t kind);
+// Free internal bytes now and the least there ever were since boot. Any task.
 void lichen_sys_mem_internal(size_t *free_now, size_t *free_min);
 
 // A block of the walk: its address and size, whether it is in use
 typedef bool (*lichen_sys_mem_walk_fn)(void const *ptr, size_t size, bool used, void *user);
-// Calls fn for every block of the heap, until it returns false
+// Calls fn for every block of the heap, until it returns false. fn runs with that heap locked: no allocation, no
+// blocking. Diagnostic: any task but an interrupt.
 void lichen_sys_mem_walk(lichen_sys_mem_kind_t kind, lichen_sys_mem_walk_fn fn, void *user);
-// Heap integrity check (true = sound, details are logged); slow, a diagnostic
+// Heap integrity check (true = sound, details are logged); slow, a diagnostic. Any task but an interrupt.
 bool lichen_sys_mem_check(lichen_sys_mem_kind_t kind);
 
 #ifdef __cplusplus

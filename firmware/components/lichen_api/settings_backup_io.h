@@ -33,3 +33,5 @@ typedef struct {
 sbk_status_t settings_backup_plan(settings_backup_plan_t *plan);
 // Writes the held changes to NVS; *applied counts the ones stored. SBK_IO when any failed (the others stay written)
 sbk_status_t settings_backup_apply(size_t *applied);
+// Drops the held changes (the person said no, or left the screen). Any task, but not while a plan or apply runs.
+void settings_backup_discard(void);

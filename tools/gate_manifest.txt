@@ -130,12 +130,12 @@ lichen_sys_factory_combo_swallows	SYSTEM	any	lichen_sys_factory.h
 lichen_sys_factory_combo_tick	SYSTEM	any	lichen_sys_factory.h
 lichen_sys_factory_level_name	SYSTEM	any	lichen_sys_factory.h
 lichen_sys_factory_request	SYSTEM	any	lichen_sys_factory.h
-lichen_sys_mem_check	-	unspecified	lichen_sys_mem.h
-lichen_sys_mem_free	-	unspecified	lichen_sys_mem.h
-lichen_sys_mem_internal	-	unspecified	lichen_sys_mem.h
-lichen_sys_mem_largest	-	unspecified	lichen_sys_mem.h
-lichen_sys_mem_total	-	unspecified	lichen_sys_mem.h
-lichen_sys_mem_walk	-	unspecified	lichen_sys_mem.h
+lichen_sys_mem_check	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_free	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_internal	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_largest	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_total	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_walk	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_power_screen_off	SYSTEM	unspecified	lichen_sys_power.h
 lichen_sys_sd_begin	SYSTEM	not-lvgl	lichen_sys_storage.h
 lichen_sys_sd_end	SYSTEM	not-lvgl	lichen_sys_storage.h
@@ -226,6 +226,7 @@ scroll_key_hash	-	unspecified	scroll_anchor.h
 scroll_step_target	-	unspecified	scroll_anchor.h
 settings_apply_tz	-	unspecified	settings_store.h
 settings_backup_apply	SYSTEM	unspecified	settings_backup_io.h
+settings_backup_discard	SYSTEM	any	settings_backup_io.h
 settings_backup_plan	SYSTEM	unspecified	settings_backup_io.h
 settings_backup_save	SYSTEM	unspecified	settings_backup_io.h
 settings_erase	-	unspecified	settings_store.h

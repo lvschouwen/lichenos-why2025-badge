@@ -55,7 +55,11 @@ static char const *status_words(sbk_status_t s) {
 static bool job_start(job_t kind);
 
 static void apply_answer(bool yes) {
-    if (!yes || s_job != JOB_NONE) {
+    if (s_job != JOB_NONE) {
+        return;
+    }
+    if (!yes) {
+        settings_backup_discard(); // the held PSRAM goes back now, not at the next plan
         return;
     }
     job_start(JOB_APPLY);
@@ -156,6 +160,9 @@ static void on_load(void *arg) {
 static void forget_rows(lv_event_t *e) {
     (void)e;
     s_save_row = s_load_row = NULL;
+    if (s_job == JOB_NONE) {
+        settings_backup_discard();
+    }
 }
 
 static lv_obj_t *build_backup(void) {

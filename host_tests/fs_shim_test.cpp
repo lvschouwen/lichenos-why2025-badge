@@ -24,8 +24,12 @@ static void fake_drive(size_t *total, size_t *used) {
 static char root_dir[64];
 
 // Buffer hooks that count: every block the shim takes is given back (the badge books them as the app's memory)
-static int live_blocks, total_blocks;
+static int live_blocks, total_blocks, alloc_calls, fail_from; // fail_from: the Nth call on returns NULL, 0 = never
 static void *count_alloc(size_t n) {
+    alloc_calls++;
+    if (fail_from && alloc_calls >= fail_from) {
+        return NULL;
+    }
     live_blocks++;
     total_blocks++;
     return malloc(n);
@@ -129,12 +133,17 @@ static void buffered_writes(void) {
     save_contacts(expect, 30, 999, 0);
     CHECK(total_blocks >= 2 && live_blocks == 0);
     CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 30 * REC_SIZE && memcmp(disk, expect, 30 * REC_SIZE) == 0);
-    fs_shim_test_faults(true, false); // a failed grow leaves nothing behind either
+    // A grow that fails (the 2nd block, past the first chunk) fails the write, releases the block it had, and the old
+    // file stays as it was
+    alloc_calls = 0;
+    fail_from   = 2;
     File nomem2 = SPIFFS.open("/contacts3", "w", true);
-    CHECK(nomem2 && nomem2.write(expect, 10) == 0);
+    CHECK(nomem2 && nomem2.write(expect, 100) == 100 && live_blocks == 1);
+    CHECK(nomem2.write(expect, FS_SHIM_CHUNK) == 0); // 100 + 4096 needs a second chunk: the hook says no
     nomem2.close();
-    fs_shim_test_faults(false, false);
+    fail_from = 0;
     CHECK(live_blocks == 0);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 30 * REC_SIZE && memcmp(disk, expect, 30 * REC_SIZE) == 0);
     fs_shim_set_buffer_hooks(NULL, NULL);
 
     // A write past FS_SHIM_MAX_FILE (or one that would wrap) fails instead of growing the buffer: old file kept

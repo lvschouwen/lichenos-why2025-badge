@@ -34,10 +34,6 @@ uint32_t mesh_store_last_seq(void) {
     return next_seq;
 }
 
-void mesh_store_set_free_hook(void (*free_ring)(void *ptr)) {
-    ring_free = free_ring;
-}
-
 static void release_ring(void *ring) {
     if (ring_free) {
         ring_free(ring);
@@ -46,8 +42,9 @@ static void release_ring(void *ring) {
     }
 }
 
-void mesh_store_set_hooks(void *(*alloc_ring)(size_t, size_t), void (*warn)(char const *)) {
+void mesh_store_set_hooks(void *(*alloc_ring)(size_t, size_t), void (*free_ring)(void *), void (*warn)(char const *)) {
     ring_alloc = alloc_ring;
+    ring_free  = free_ring;
     warn_hook  = warn;
 }
 

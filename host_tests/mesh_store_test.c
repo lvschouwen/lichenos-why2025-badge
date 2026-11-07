@@ -47,7 +47,7 @@ static mesh_msg_t loaded_msg(uint32_t seq, char const *text) {
 
 // The history journal's entry point (#48): seq order, same seq replaces, counted as read, the counter continues
 static void loaded_checks(void) {
-    mesh_store_set_hooks(NULL, NULL);
+    mesh_store_set_hooks(NULL, NULL, NULL);
     CHECK(mesh_store_init(3));
     mesh_chat_key_t key;
     mesh_chat_key_channel(&key, "#test");
@@ -300,7 +300,7 @@ int main(void) {
 
     // A table of 64 channels: a DM has no room and is dropped, nothing breaks
     CHECK(mesh_store_init(2));
-    mesh_store_set_hooks(NULL, test_warn);
+    mesh_store_set_hooks(NULL, NULL, test_warn);
     warned = 0;
     {
         char    name[16];
@@ -319,7 +319,7 @@ int main(void) {
 
     // No memory for a new ring: the new message is dropped and the DM that would have made room stays, with its messages
     CHECK(mesh_store_init(2));
-    mesh_store_set_hooks(test_alloc, test_warn);
+    mesh_store_set_hooks(test_alloc, NULL, test_warn);
     warned = 0;
     {
         uint8_t peer[6] = {0};
@@ -346,17 +346,15 @@ int main(void) {
         CHECK(mesh_store_chat(&k, b, 2, false) == 0);
         CHECK(mesh_store_add_dm("@new", "x", 0, 6, peer)); // and it works once memory is back
     }
-    mesh_store_set_hooks(NULL, NULL);
+    mesh_store_set_hooks(NULL, NULL, NULL);
 
     // A ring goes back through the free hook that pairs with the alloc hook: every ring is returned
-    mesh_store_set_hooks(test_alloc, NULL);
-    mesh_store_set_free_hook(test_free);
+    mesh_store_set_hooks(test_alloc, test_free, NULL);
     CHECK(mesh_store_init(2));
     ring_frees = 0; // the rings of the blocks above were released through it too
     CHECK(mesh_store_add_message("#a", "x", 0, 1) && mesh_store_add_message("#b", "x", 0, 1));
     CHECK(mesh_store_init(2) && ring_frees == 2); // a new init releases the old rings
-    mesh_store_set_free_hook(NULL);
-    mesh_store_set_hooks(NULL, NULL);
+    mesh_store_set_hooks(NULL, NULL, NULL);
 
     // A DM from a contact whose name could not be looked up ("@?") does not replace the name we know
     CHECK(mesh_store_init(2));
