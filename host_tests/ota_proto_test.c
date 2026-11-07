@@ -221,7 +221,17 @@ static void test_routes_need_token(void) {
     }
 }
 
+// #116: no token read or saved anywhere this boot means the server does not listen
+static void test_token_kept(void) {
+    CHECK(!ota_token_kept(false, false, false, false));
+    CHECK(ota_token_kept(true, false, false, false));
+    CHECK(ota_token_kept(false, true, false, false));
+    CHECK(ota_token_kept(false, false, true, false));  // new token, saved to /storage only (NVS down)
+    CHECK(ota_token_kept(false, false, false, true));  // new token, saved to settings only (no /storage)
+}
+
 int main(void) {
+    test_token_kept();
     test_routes_need_token();
     test_sha256();
     test_head_length();

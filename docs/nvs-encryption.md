@@ -58,6 +58,52 @@ with keys derived from an existing eFuse key:
 | on, key present, partition plaintext | one-time migration (below) |
 | on, key present, HMAC derivation fails | encrypted partition: NVS unavailable (error returned, nothing erased); plain partition: plain init |
 
+### What boot does with the result (`nvs_boot_policy.c`)
+
+`main.c` hands every `lichen_nvs_init()` result to `nvs_boot_next()` together with the path that init took
+(`lichen_nvs_boot_path()`: KEYED when it found an HMAC_UP key in KEY5). Pure, `host_tests/nvs_boot_policy_test.c`.
+
+| Path | Result | Boot does |
+|---|---|---|
+| either | `ESP_OK` | NVS up |
+| plain (option off, or no key) | `NO_FREE_PAGES` / `NEW_VERSION_FOUND` | erase once, init again (as before); a second failure stays down |
+| plain | anything else | stays down, nothing erased |
+| keyed (key burned) | **any error**, the two layout codes included | stays down, **nothing erased**: E line `NVS init failed: <err> (HMAC key burned: nothing erased, settings unavailable this boot)` |
+
+A badge that stays down boots without settings (defaults, no Wi-Fi password, Wi-Fi updates refused, see below);
+`fw nvs-enc` then says `this boot down (nothing erased)`. The data is intact in flash for a later boot or a USB
+restore of the backup. To start over on purpose: `esptool erase-region 0x9000 0x6000` over USB; the next boot finds an
+empty partition and opens it encrypted.
+
+Factory reset (`factory_reset.c`) keeps its own erase-and-retry: it erases NVS on purpose anyway.
+
+### Wi-Fi updates without a token
+
+The OTA token lives in `/storage/ota_token.txt` with a copy in NVS (`ota_token`). If neither can be read nor written this
+boot (NVS down and no `/storage`), the update server does not start: one E line `Wi-Fi updates refused this boot: no
+saved token (no /storage, no settings); USB flashing works`, `fw ota` says `update server over Wi-Fi: refused this boot
+(no saved token); USB flashing still works`, `fw token` shows none. Before, the server listened with a fresh random
+token that no tool knew and the next boot replaced. With NVS down but `/storage` mounted the file token still works.
+USB flashing (`badge.sh flash-fw`) never needs the token. Pure part: `ota_token_kept()` in `ota_proto.c`.
+
+### Both OTA slots: `fw nvs-slots`
+
+Every image now carries a 12-byte mark (`nvs_mark.h`) in IDF's custom app description section
+(`.rodata_custom_desc`), which the linker places right after `esp_app_desc_t`: offset 288 from the start of the slot.
+Tag `LICHENNV`, version 1, flags bit 0 = built with `LICHEN_NVS_ENCRYPT`, bit 1 = with the burn command.
+`fw nvs-slots` (every build, read only, `esp_partition_read`, no mapping) prints both slots:
+
+```
+nvs-slots: ota_0 (running) fw-1234abc: encrypt
+nvs-slots: ota_1 fw-5678def: plain (built before the mark)
+nvs-slots: NOT both encrypt: do not burn the key yet (a rollback would erase an encrypted NVS)
+```
+
+Kinds: `no app`, `plain (built before the mark)` (any image older than the mark), `plain`, `encrypt`,
+`encrypt + burn command` (adds `a burn image is on the badge: replace it once the key is burned`). Only two encrypt
+kinds give `both slots encrypt: a rollback keeps an encrypted NVS`. An empty slot counts as not safe: the next OTA
+lands there.
+
 The only code that writes an eFuse is `burn()` in `lichen_nvs.c`, compiled only with `LICHEN_NVS_ENCRYPT_BURN_CMD`
 (default n, depends on `LICHEN_NVS_ENCRYPT`). It runs only from `fw nvs-enc burn YES` (the exact text `YES`), refuses a
 block that is not unused, and takes its random bytes from `lichen_random_fill` (the entropy source the OS already
@@ -120,7 +166,9 @@ never opens any partition but `nvs`, `storage` (see its header). The key itself 
   a fresh encrypted NVS and the setup screens run again.
 - **Wi-Fi OTA**: only the app slots change; NVS and the OTA token are untouched and keep working.
 - **Rollback to an image without this feature is destructive.** An older image calls plain `nvs_flash_init()` on an
-  encrypted partition; it finds noise (not tested: IDF may report no free pages, which makes `main.c` erase the partition, or load nothing). Expect to lose every setting and the OTA token.
+  encrypted partition. IDF's page loader (`nvs_page.cpp`, `mLoadEntryTable`) checks each written entry's CRC
+  (`Item::checkHeaderConsistency`), which an encrypted entry fails, and erases that entry and its span: every setting
+  and the OTA token copy are gone after that one init, whatever `main.c` does next. Read from IDF 6.1 source, not tried.
   After the burn, both OTA slots must hold a `lichen_nvs` build before anything can roll back (OTA twice, or flash
   over USB), and every later build must keep `LICHEN_NVS_ENCRYPT=y` (with `BURN_CMD` off). An image built with the
   option off is "an older image" in this sense.
@@ -136,7 +184,8 @@ usual ones from the flash host (`tools/badge.sh`).
    `esptool ... read-flash 0xB40000 0x4C0000 storage.bin`. Keep both off-repo: `nvs-plain.bin` contains the passwords.
 2. Build the **burn image**: `CONFIG_LICHEN_NVS_ENCRYPT=y` and `CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD=y` in an sdkconfig
    override (not in `sdkconfig.defaults`), `firmware/build.sh build`. Flash with `badge.sh flash-fw <port>` (storage is kept by default).
-3. Boot. `fw nvs-enc` must say `key KEY5 not burned, nvs partition plaintext, this boot plain`. The log has the W line
+3. Boot. `fw nvs-slots` must say `both slots encrypt` before step 4 (the running slot `encrypt + burn command`, the
+   other an encrypt image): otherwise a rollback right after the burn reaches a plain image. `fw nvs-enc` must say `key KEY5 not burned, nvs partition plaintext, this boot plain`. The log has the W line
    "no HMAC key in KEY5: NVS stays plaintext".
 4. **IRREVERSIBLE.** `fw nvs-enc burn YES` (from the USB console). Expected reply `burn KEY5: ESP_OK`. Any other
    text only prints the warning. If the block is not unused it says so and burns nothing.
@@ -144,7 +193,8 @@ usual ones from the flash host (`tools/badge.sh`).
    `N of N entries written back encrypted`. If it says `incomplete`, restore the backup (step 1, `write-flash 0x9000
    nvs-plain.bin`): the next boot migrates again.
 6. Build the **normal image** with `LICHEN_NVS_ENCRYPT=y` and the burn command off, flash it over USB and OTA it so
-   both slots hold it (see rollback above). Make that the new `sdkconfig.defaults` value only then.
+   both slots hold it (see rollback above). `fw nvs-slots` must say `both slots encrypt` and name no burn image.
+   Make that the new `sdkconfig.defaults` value only then.
 7. `fw nvs-enc` now says `burned (HMAC_UP), nvs partition encrypted, this boot encrypted`.
 
 ## Verify

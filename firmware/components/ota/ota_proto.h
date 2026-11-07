@@ -82,5 +82,10 @@ bool ota_temp_path(char const *path, char *out, size_t cap);
 // Compare two tokens without leaking how much of them matched
 bool ota_token_equal(char const *a, char const *b);
 
+// Whether the update server may listen this boot (#116): only with a token the next boot has too, read from
+// /storage or settings or saved to one of them. A token kept nowhere (no /storage and NVS down, e.g. a burned key whose
+// partition could not be opened) is one no tool knows and the next boot replaces: Wi-Fi updates are refused instead.
+bool ota_token_kept(bool from_file, bool from_nvs, bool wrote_file, bool wrote_nvs);
+
 // Lowercase hex of bytes; out holds 2 * len + 1 characters
 void ota_hex(uint8_t const *bytes, size_t len, char *out);

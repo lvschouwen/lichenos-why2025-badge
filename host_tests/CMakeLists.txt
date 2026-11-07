@@ -1555,3 +1555,12 @@ add_test(NAME audio_pattern_test COMMAND audio_pattern_test)
 
 # tools/check_standard.py: the code and resource standard gate's baseline compare, ratchet and size deltas (#202)
 add_test(NAME check_standard_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_standard_test.py)
+# NVS encryption (#116): the boot policy (the burned-key path never erases) and the OTA slots' image mark
+add_executable(nvs_boot_policy_test ${CMAKE_CURRENT_SOURCE_DIR}/nvs_boot_policy_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_nvs/nvs_boot_policy.c)
+target_include_directories(nvs_boot_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_nvs)
+target_compile_options(nvs_boot_policy_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME nvs_boot_policy_test COMMAND nvs_boot_policy_test)
+add_executable(nvs_mark_test ${CMAKE_CURRENT_SOURCE_DIR}/nvs_mark_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_nvs/nvs_mark.c)
+target_include_directories(nvs_mark_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_nvs)
+target_compile_options(nvs_mark_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME nvs_mark_test COMMAND nvs_mark_test)

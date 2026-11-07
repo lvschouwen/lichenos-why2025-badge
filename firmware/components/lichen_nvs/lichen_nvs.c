@@ -1,12 +1,98 @@
 #include "lichen_nvs.h"
 
+#include "esp_app_desc.h"
+#include "esp_app_format.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
+#include "fw_console.h"
+#include "nvs.h"
 #include "nvs_flash.h"
+#include "nvs_mark.h"
 #include "sdkconfig.h"
+
+#include <stdio.h>
+
+_Static_assert(NVS_BOOT_ERR_NO_FREE_PAGES == ESP_ERR_NVS_NO_FREE_PAGES, "nvs_boot_policy.h out of step with IDF");
+_Static_assert(NVS_BOOT_ERR_NEW_VERSION == ESP_ERR_NVS_NEW_VERSION_FOUND, "nvs_boot_policy.h out of step with IDF");
+_Static_assert(NVS_MARK_OFFSET == sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t) + sizeof(esp_app_desc_t),
+               "nvs_mark.h offset out of step with IDF's image format");
+_Static_assert(sizeof(nvs_mark_t) == 12, "nvs_mark_t is read from flash byte for byte");
+
+// ---- the image mark (every build) ----------------------------------------------------------------------------------
+
+#if CONFIG_LICHEN_NVS_ENCRYPT
+#define MARK_ENCRYPT NVS_MARK_F_ENCRYPT
+#else
+#define MARK_ENCRYPT 0
+#endif
+#if CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD
+#define MARK_BURN NVS_MARK_F_BURN
+#else
+#define MARK_BURN 0
+#endif
+
+// Right after esp_app_desc_t in the image (IDF's custom app description section): "fw nvs-slots" reads it from both
+// slots. Kept by "-u lichen_nvs_mark" in CMakeLists.txt, since nothing references it.
+__attribute__((section(".rodata_custom_desc"), used)) nvs_mark_t const lichen_nvs_mark = {
+    .tag     = NVS_MARK_TAG,
+    .version = NVS_MARK_VERSION,
+    .flags   = MARK_ENCRYPT | MARK_BURN,
+};
+
+static nvs_boot_path_t s_path = NVS_BOOT_PATH_PLAIN;
+static int             s_boot = -1; // -1 not reported yet, 0 down, 1 up
+
+nvs_boot_path_t lichen_nvs_boot_path(void) {
+    return s_path;
+}
+
+void lichen_nvs_boot_done(bool up) {
+    s_boot = up;
+}
+
+// Reads with esp_partition_read, never a mapping (#31): the slot's app description and the mark after it
+static nvs_mark_kind_t slot_mark(esp_partition_t const *slot, char *version, size_t cap) {
+    esp_app_desc_t desc;
+    bool           has_app = slot && esp_ota_get_partition_description(slot, &desc) == ESP_OK;
+    snprintf(version, cap, "%s", has_app ? desc.version : "-");
+    uint8_t buf[sizeof(nvs_mark_t)];
+    bool    read = has_app && esp_partition_read(slot, NVS_MARK_OFFSET, buf, sizeof(buf)) == ESP_OK;
+    return nvs_mark_parse(has_app, read ? buf : NULL, read ? sizeof(buf) : 0);
+}
+
+static void cmd_nvs_slots(char const *args) {
+    (void)args;
+    esp_partition_t const *running = esp_ota_get_running_partition();
+    esp_partition_t const *other   = esp_ota_get_next_update_partition(NULL);
+    char                   ver_r[32], ver_o[32];
+    nvs_mark_kind_t        r = slot_mark(running, ver_r, sizeof(ver_r));
+    nvs_mark_kind_t        o = slot_mark(other, ver_o, sizeof(ver_o));
+    console_reply("nvs-slots: %s (running) %s: %s", running ? running->label : "?", ver_r, nvs_mark_name(r));
+    console_reply("nvs-slots: %s %s: %s", other ? other->label : "none", ver_o, nvs_mark_name(o));
+    if (nvs_marks_rollback_safe(r, o)) {
+        console_reply("nvs-slots: both slots encrypt: a rollback keeps an encrypted NVS");
+    } else {
+        console_reply("nvs-slots: NOT both encrypt: do not burn the key yet (a rollback would erase an encrypted NVS)");
+    }
+    if (r == NVS_MARK_ENCRYPT_BURN || o == NVS_MARK_ENCRYPT_BURN) {
+        console_reply("nvs-slots: a burn image is on the badge: replace it once the key is burned");
+    }
+}
+
+static void register_slots(void) {
+    static bool done;
+    if (!done) {
+        done = true;
+        console_register("nvs-slots", "nvs-slots (are both OTA slots LICHEN_NVS_ENCRYPT images; read only)",
+                         cmd_nvs_slots);
+    }
+}
 
 #if !CONFIG_LICHEN_NVS_ENCRYPT
 
 esp_err_t lichen_nvs_init(void) {
-    return nvs_flash_init(); // the default build: nothing of #116 is compiled in
+    register_slots();
+    return nvs_flash_init(); // the default build: no eFuse read, no secure init, the plain path
 }
 
 #else // CONFIG_LICHEN_NVS_ENCRYPT
@@ -14,11 +100,7 @@ esp_err_t lichen_nvs_init(void) {
 #include "esp_efuse.h"
 #include "esp_hmac.h"
 #include "esp_log.h"
-#include "esp_partition.h"
-#include "fw_console.h"
-#include "nvs.h"
 #include "nvs_erase_os.h"
-#include "nvs_flash.h"
 #include "nvs_image.h"
 
 #include <stdlib.h>
@@ -92,7 +174,7 @@ static nvs_image_kind_t scan_partition(void) {
 // ---- the RAM copy --------------------------------------------------------------------------------------------------
 
 static bool read_num(nvs_handle_t h, char const *key, uint8_t type, uint64_t *out) {
-    union { uint8_t u8; int8_t i8; uint16_t u16; int16_t i16; uint32_t u32; int32_t i32; uint64_t u64; int64_t i64; } v = {0};
+    union { uint64_t u64; int64_t i64; uint32_t u32; int32_t i32; uint16_t u16; int16_t i16; uint8_t u8; int8_t i8; } v = {0}; // widest first: {0} clears it all
     esp_err_t err;
     switch (type) {
     case NVS_TYPE_U8: err = nvs_get_u8(h, key, &v.u8); *out = v.u8; break;
@@ -241,7 +323,9 @@ static void register_console(void);
 
 esp_err_t lichen_nvs_init(void) {
     register_console();
+    register_slots();
     bool burned = key_burned();
+    s_path      = burned ? NVS_BOOT_PATH_KEYED : NVS_BOOT_PATH_PLAIN; // every return below, failures included
     if (!burned) {
         ESP_LOGW(TAG, "no HMAC key in KEY%d: NVS stays plaintext (nothing is burned from here)",
                  CONFIG_LICHEN_NVS_HMAC_KEY_ID);
@@ -250,8 +334,8 @@ esp_err_t lichen_nvs_init(void) {
     nvs_image_kind_t kind = scan_partition();
     nvs_action_t     act  = nvs_image_decide(true, burned, kind);
     if (act == NVS_ACT_REFUSE) {
-        // Not nvs_flash_init(): on an encrypted partition that finds noise and main.c then erases it. NVS stays down
-        // this boot (main.c only logs, the settings are intact in flash); ESP_ERR_INVALID_STATE matches none of its erase cases.
+        // Not nvs_flash_init(): on an encrypted partition that takes every entry for damaged and erases it. NVS stays
+        // down this boot (the KEYED path: main.c never erases, nvs_boot_policy.h), the settings intact in flash.
         ESP_LOGE(TAG, "nvs partition unreadable with a key burned: NVS unavailable this boot, nothing erased");
         return ESP_ERR_INVALID_STATE;
     }
@@ -325,7 +409,7 @@ static void cmd_nvs_enc(char const *args) {
 #endif
     console_reply("nvs-enc: key KEY%d %s, nvs partition %s, this boot %s", CONFIG_LICHEN_NVS_HMAC_KEY_ID,
                   key_burned() ? "burned (HMAC_UP)" : "not burned", kind_name(scan_partition()),
-                  s_encrypted ? "encrypted" : "plain");
+                  s_boot == 0 ? "down (nothing erased)" : s_encrypted ? "encrypted" : "plain");
 }
 
 static void register_console(void) {

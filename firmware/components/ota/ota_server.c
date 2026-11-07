@@ -73,6 +73,7 @@
 static char const TAG[] = "ota";
 
 static char token[OTA_TOKEN_LEN + 1];
+static bool token_refused; // no token kept anywhere this boot (#116): the server never listens
 
 // Settings › Updates over Wi-Fi (#44). On by default while Lichen is in development: tools/badge.sh, the Wi-Fi console,
 // the log and screenshots all go through this server. Off closes the port; the USB console (`fw ota on`) reopens it.
@@ -1420,15 +1421,13 @@ static bool load_or_create_token(void) {
         lichen_random_fill(raw, sizeof(raw));
         ota_hex(raw, sizeof(raw), token);
     }
-    bool kept = from_file || from_nvs;
-    if (!from_file && write_token_file()) {
-        kept = true;
-    }
+    bool wrote_file = !from_file && write_token_file();
+    bool wrote_nvs  = false;
     char stored[OTA_TOKEN_LEN + 8];
     if (!(from_nvs || (read_token_nvs(stored) && strcmp(stored, token) == 0))) {
-        kept = settings_set_str(TOKEN_NVS_KEY, token) || kept;
+        wrote_nvs = settings_set_str(TOKEN_NVS_KEY, token);
     }
-    return kept;
+    return ota_token_kept(from_file, from_nvs, wrote_file, wrote_nvs);
 }
 
 // A listening socket on OTA_PORT whose accept() gives up after a second, so a switch-off is noticed; -1 on failure
@@ -1520,6 +1519,10 @@ static void cmd_ota(char const *args) {
         console_reply("usage: ota [on|off | auto <off|1-%d minutes>]", OTA_AUTOOFF_MAX_MIN);
         return;
     }
+    if (token_refused) {
+        console_reply("update server over Wi-Fi: refused this boot (no saved token); USB flashing still works");
+        return;
+    }
     char     when[16];
     uint8_t  min  = auto_min;
     uint32_t left = ota_autooff_left(min, armed_s, (uint32_t)now_s());
@@ -1535,7 +1538,7 @@ static void cmd_ota(char const *args) {
 
 static void cmd_token(char const *args) {
     (void)args;
-    console_reply_secret("token %s", token[0] ? token : "(none: storage unavailable?)");
+    console_reply_secret("token %s", token[0] ? token : "(none: no /storage and no settings; Wi-Fi updates refused)");
 }
 
 void ota_server_start(void) {
@@ -1545,11 +1548,17 @@ void ota_server_start(void) {
     uint8_t m = settings_get_u8(OTA_AUTO_KEY, 0);
     auto_min  = m <= OTA_AUTOOFF_MAX_MIN ? m : 0;
     armed_s   = (uint32_t)now_s(); // boot
-    if (!load_or_create_token()) {
-        ESP_LOGE(TAG, "couldn't save the token (no /storage, no settings); it changes on every boot");
+    token_refused = !load_or_create_token();
+    if (token_refused) {
+        // An empty token also fails every comparison (ota_token_equal), should anything still reach the check
+        secure_wipe(token, sizeof(token));
+        ESP_LOGE(TAG, "Wi-Fi updates refused this boot: no saved token (no /storage, no settings); USB flashing works");
     }
     // After the token is final (#5): "fw token" never shows a half-written one or "(none)" while it is being made
     console_register("token", "token (the update token for tools/badge.sh)", cmd_token);
+    if (token_refused) {
+        return; // no listener, no mDNS service, no Wi-Fi console
+    }
     if (xTaskCreatePinnedToCore(server_task, "ota", SERVER_STACK, NULL, 5, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "update server task failed to start");
     }

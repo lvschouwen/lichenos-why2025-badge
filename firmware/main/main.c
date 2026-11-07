@@ -367,16 +367,23 @@ void app_main(void) {
         boot_progress_end(BOOT_PSRAM, STEP_FAILED, "no PSRAM");
     }
 
-    esp_err_t err = lichen_nvs_init(); // nvs_flash_init(), or the encrypted path when a key is burned (#116)
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        // Settings from an incompatible layout are lost rather than leaving the badge without settings at all
+    esp_err_t       err  = lichen_nvs_init(); // nvs_flash_init(), or the encrypted path when a key is burned (#116)
+    nvs_boot_step_t step = nvs_boot_next(lichen_nvs_boot_path(), err, false);
+    if (step == NVS_BOOT_ERASE_RETRY) {
+        // Plain path only: settings from an incompatible layout are lost rather than leaving the badge without any
         ESP_LOGW(TAG, "NVS unusable (%s), erasing it", esp_err_to_name(err));
         __real_nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME); // the wrap refuses every other caller (#84 T9, #123)
-        err = lichen_nvs_init();
+        err  = lichen_nvs_init();
+        step = nvs_boot_next(lichen_nvs_boot_path(), err, true);
     }
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "NVS init failed: %s", esp_err_to_name(err));
+    if (step == NVS_BOOT_DOWN) {
+        // With a key burned an erase could destroy what a later boot or a USB restore still reads: stay up without
+        ESP_LOGE(TAG, "NVS init failed: %s%s", esp_err_to_name(err),
+                 lichen_nvs_boot_path() == NVS_BOOT_PATH_KEYED
+                     ? " (HMAC key burned: nothing erased, settings unavailable this boot)"
+                     : "");
     }
+    lichen_nvs_boot_done(step == NVS_BOOT_UP);
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
     psram_speed_boot(); // #121: the 80/120 MHz record: a failed 120 MHz trial falls back, a wanted 120 arms and restarts once
     psram_boot_oneshot_apply(); // #121: a one-shot delayline for the PSRAM bench, before storage and MeshCore load anything
