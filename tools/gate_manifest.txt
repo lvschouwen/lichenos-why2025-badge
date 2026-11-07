@@ -181,10 +181,8 @@ settings_backup_apply	SYSTEM	unspecified	settings_backup_io.h
 settings_backup_plan	SYSTEM	unspecified	settings_backup_io.h
 settings_backup_save	SYSTEM	unspecified	settings_backup_io.h
 settings_erase	-	unspecified	settings_store.h
-settings_get_blob	-	unspecified	settings_store.h
 settings_get_str	-	unspecified	settings_store.h
 settings_get_u8	-	unspecified	settings_store.h
-settings_set_blob	-	unspecified	settings_store.h
 settings_set_str	-	unspecified	settings_store.h
 settings_set_tz	-	unspecified	settings_store.h
 settings_set_u8	-	unspecified	settings_store.h
