@@ -181,6 +181,13 @@ Notifications, LED, haptics (#245):
 - [ ] A toast with feedback -> one buzz per toast, none during an OTA receive. Reboot with unread history -> the LED
   pulses after boot without a new notice.
 
+Bug-fix issues merged after the review (main fills in each list after merging; the wave must not be called passed
+while a placeholder is empty):
+- [ ] #248 (lichen_os UI service): TODO bench steps.
+- [ ] #249 (lichen_net Wi-Fi, wifi_screen.c): TODO bench steps.
+- [ ] #250 (board backlight, c6link flasher; also the two-chip contract's UART1 bullet): TODO bench steps.
+- [ ] #251 (board keyboard, factory combo): TODO bench steps.
+
 ### 7. Lock-owner check
 
 - [ ] After the walk above: `fw ui lockcheck` -> **Expected:** `ui lockcheck: count mode, armed, 0 hit(s) without the

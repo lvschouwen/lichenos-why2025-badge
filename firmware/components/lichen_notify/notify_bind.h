@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 // Where do-not-disturb and the per-source switches are kept (the settings service, #235): notify opens no NVS. Bound
-// at START_EARLY, before lichen_notify_start; until then the defaults apply and nothing is saved.
+// at START_NVS, before lichen_notify_start; until then the defaults apply and nothing is saved.
 void lichen_notify_bind_store(fw_get_u8_fn get, fw_set_u8_fn set);
 
 // Told the state a driver below shows (the status LED, #74). dnd: do-not-disturb, pushed on every lichen_notify_set_dnd
