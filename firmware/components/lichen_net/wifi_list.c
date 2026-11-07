@@ -196,6 +196,23 @@ bool wifi_saved_load(wifi_saved_t *l) {
     return true;
 }
 
+size_t wifi_saved_names_with(wifi_lock_t const *lock, char (*out)[33], size_t max) {
+    wifi_saved_t l;
+    if (lock) {
+        lock->take();
+    }
+    wifi_saved_load(&l);
+    if (lock) {
+        lock->give();
+    }
+    size_t n = l.n < max ? l.n : max;
+    for (size_t i = 0; i < n; i++) {
+        memcpy(out[i], l.e[i].ssid, sizeof(out[i]));
+    }
+    wifi_saved_wipe(&l); // the copy of the passwords does not outlive the call
+    return n;
+}
+
 // The pair just joined goes to the front of the list. Best effort: the pair in use is already safe in wifi_ssid.
 static void saved_remember(wifi_saved_t *l, char const *ssid, char const *pass) {
     if (wifi_saved_add(l, ssid, pass)) {

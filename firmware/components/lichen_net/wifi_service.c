@@ -866,6 +866,18 @@ static void handle_wifi_sync(void) {
     }
 }
 
+static void saved_take(void) {
+    xSemaphoreTake(saved_lock, portMAX_DELAY);
+}
+static void saved_give(void) {
+    xSemaphoreGive(saved_lock);
+}
+
+size_t wifi_saved_names(char (*out)[33], size_t max) {
+    static wifi_lock_t const lock = {.take = saved_take, .give = saved_give};
+    return saved_lock && out ? wifi_saved_names_with(&lock, out, max) : 0;
+}
+
 bool wifi_forget_network(char const *name) {
     if (!name || !saved_lock) {
         return false;

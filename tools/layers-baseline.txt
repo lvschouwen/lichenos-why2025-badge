@@ -150,8 +150,6 @@ C	lichen_shell:wifi_list_clean	1
 C	lichen_shell:wifi_meter_at	1
 C	lichen_shell:wifi_meter_clear	1
 C	lichen_shell:wifi_meter_push	1
-C	lichen_shell:wifi_saved_load	1
-C	lichen_shell:wifi_saved_wipe	1
 C	lichen_shell:wifi_ssid_sanitize	3
 C	lichen_shell:xTaskCreatePinnedToCore	6
 C	main:heap_caps_get_free_size	1

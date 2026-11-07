@@ -476,6 +476,7 @@ static void start_shell(boot_ctx_t *ctx) {
     shell_sources_t const sources = {.wifi_up = wifi_up, .lora_up = lora_link_up, .c6_up = c6link_up,
                                      .lora_use = lora_use,
                                      .wifi_scan = wifi_scan, .wifi_join = wifi_set_credentials, .wifi_forget = wifi_forget_network,
+                                     .wifi_saved_names = wifi_saved_names,
                                      .wifi_scan_raw = wifi_scan_raw, .wifi_ip = wifi_has_ip,
                                      .wifi_join_state = wifi_join_state,
                                      .wifi_has_credentials = wifi_has_credentials,

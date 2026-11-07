@@ -57,6 +57,14 @@ bool wifi_driver_wiped_set(bool wiped);
 struct wifi_saved_s;
 // Loads the list (empty when nothing is saved; v2 migrates no older pair into it, #216); false when no store is bound
 bool wifi_saved_load(struct wifi_saved_s *l);
+// The saved SSIDs only, for the Wi-Fi screen (#240): the passwords stay in this component. take/give wrap the load in
+// wifi_service.c's saved_lock, so a join or Forget cannot rewrite the list under the reader. Returns the count (at most
+// max, most recently joined first); out[i] are NUL-terminated.
+typedef struct {
+    void (*take)(void);
+    void (*give)(void);
+} wifi_lock_t;
+size_t wifi_saved_names_with(wifi_lock_t const *lock, char (*out)[33], size_t max);
 // Removes one network. was_active: it was the pair in use; the next entry (if any) takes its place, left = entries remain
 bool wifi_cred_forget(char const *ssid, bool *was_active, bool *left);
 // Makes a saved network the pair in use (front of the list); false if it is not saved. No change if it is already.

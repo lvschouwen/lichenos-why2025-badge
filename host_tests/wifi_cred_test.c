@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 // Host test: Wi-Fi credential rules and the round trip through the settings service, passwords as secrets (#66, #235)
 #include "nvs.h"
 #include "settings_secret.h"
@@ -9,6 +10,9 @@
 #include <string.h>
 
 static int failures;
+static int lock_takes, lock_gives, held;
+static void lock_take(void) { lock_takes++; held++; }
+static void lock_give(void) { lock_gives++; held--; }
 
 #define CHECK(cond)                                                                                                    \
     do {                                                                                                               \
@@ -177,6 +181,20 @@ static void saved_networks(void) {
     CHECK(wifi_saved_load(&l) && l.n == 0 && !wifi_cred_load(s, p));
 }
 
+// #240: the Wi-Fi screen gets the SSIDs only, read under the list lock; no password byte reaches its buffer
+static void names_only(void) {
+    static wifi_lock_t const lock = {.take = lock_take, .give = lock_give};
+    char                     out[WIFI_SAVED_MAX][33];
+    memset(out, 0, sizeof(out));
+    CHECK(wifi_cred_clear());
+    CHECK(wifi_cred_save("homenet", "uniquepass1") && wifi_cred_save("campnet", "uniquepass2"));
+    size_t n = wifi_saved_names_with(&lock, out, WIFI_SAVED_MAX);
+    CHECK(n == 2 && strcmp(out[0], "campnet") == 0 && strcmp(out[1], "homenet") == 0);
+    CHECK(lock_takes == 1 && lock_gives == 1 && held == 0);
+    CHECK(memmem(out, sizeof(out), "uniquepass", 10) == NULL);
+    CHECK(wifi_saved_names_with(&lock, out, 1) == 1 && lock_takes == 2 && lock_gives == 2);
+}
+
 int main(void) {
     unbound();
     wifi_list_bind_store(&test_store);
@@ -244,6 +262,7 @@ int main(void) {
 
     secrets_and_defaults();
     saved_networks();
+    names_only();
 
     if (failures) {
         return 1;

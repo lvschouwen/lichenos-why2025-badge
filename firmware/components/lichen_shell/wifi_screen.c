@@ -257,18 +257,15 @@ static void on_forget(void *arg) {
 
 // "Saved networks" with one Forget row per network: name left, "Forget" right, asks first (R3)
 static void add_saved_rows(void) {
-    wifi_saved_t *l = calloc(1, sizeof(*l));
-    if (!l) {
-        return;
-    }
-    wifi_saved_load(l);
+    char names[WIFI_SAVED_MAX][33];
+    size_t n = shell_sources.wifi_saved_names ? shell_sources.wifi_saved_names(names, WIFI_SAVED_MAX) : 0;
     lv_group_t *previous = lv_group_get_default();
     lv_group_set_default(group);
-    rows[row_count++] = menu_note(menu, l->n ? "Saved networks" : "No saved networks yet: pick one above to join and save it.");
-    for (size_t i = 0; i < l->n; i++) {
+    rows[row_count++] = menu_note(menu, n ? "Saved networks" : "No saved networks yet: pick one above to join and save it.");
+    for (size_t i = 0; i < n; i++) {
         char name[140], question[200];
-        snprintf(forget_name[i], sizeof(forget_name[i]), "%s", l->e[i].ssid);
-        wifi_ssid_sanitize(l->e[i].ssid, name, sizeof(name));
+        memcpy(forget_name[i], names[i], sizeof(forget_name[i]));
+        wifi_ssid_sanitize(names[i], name, sizeof(name));
         lv_obj_t *row = menu_add(menu, name, "Forget", on_forget, (void *)(uintptr_t)i);
         if (!row) {
             continue;
@@ -279,8 +276,6 @@ static void add_saved_rows(void) {
         rows[row_count++] = row;
     }
     lv_group_set_default(previous);
-    wifi_saved_wipe(l);
-    free(l);
 }
 
 static void on_skip(void *arg) {
