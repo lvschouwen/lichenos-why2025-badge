@@ -20,7 +20,8 @@ static int failures;
 int main(void) {
     radio_state_t s;
     radio_state_init(&s);
-    CHECK(radio_state_get(&s, RADIO_WIFI) && radio_state_get(&s, RADIO_LORA) && radio_state_get(&s, RADIO_BT));
+    CHECK(radio_state_get(&s, RADIO_WIFI) && radio_state_get(&s, RADIO_LORA) && !radio_state_get(&s, RADIO_BT));
+    radio_state_set(&s, RADIO_BT, true); // the cases below use all three radios on
     CHECK(!s.airplane);
 
     // single switches report what changed, and nothing when already there
@@ -50,11 +51,12 @@ int main(void) {
     radio_state_set_airplane(&s, true);
     radio_state_set(&s, RADIO_WIFI, true);
     radio_state_set(&s, RADIO_WIFI, false);
-    CHECK(radio_state_set_airplane(&s, false) == RADIO_MASK_ALL);
-    CHECK(s.on == RADIO_MASK_ALL);
+    CHECK(radio_state_set_airplane(&s, false) == RADIO_MASK_DEFAULT);
+    CHECK(s.on == RADIO_MASK_DEFAULT);
 
     // off before airplane stays off after it
     radio_state_init(&s);
+    radio_state_set(&s, RADIO_BT, true);
     radio_state_set(&s, RADIO_LORA, false);
     radio_state_set_airplane(&s, true);
     radio_state_set_airplane(&s, false);
@@ -62,6 +64,7 @@ int main(void) {
 
     // persistence round trip: every field, mid-airplane included
     radio_state_init(&s);
+    radio_state_set(&s, RADIO_BT, true);
     radio_state_set(&s, RADIO_BT, false);
     radio_state_set_airplane(&s, true);
     radio_state_set(&s, RADIO_WIFI, true);
@@ -73,9 +76,34 @@ int main(void) {
 
     // garbage in NVS gives the defaults
     radio_state_load(&r, 0xFF, 1, 0);
-    CHECK(r.on == RADIO_MASK_ALL && !r.airplane);
+    CHECK(r.on == RADIO_MASK_DEFAULT && !r.airplane);
     radio_state_load(&r, 1, 1, 7);
-    CHECK(r.on == RADIO_MASK_ALL && !r.airplane);
+    CHECK(r.on == RADIO_MASK_DEFAULT && !r.airplane);
+
+    // #197: Bluetooth is off on a fresh badge, in the saved mask too
+    radio_state_init(&s);
+    CHECK(!radio_state_get(&s, RADIO_BT) && s.on == (W | L) && s.saved == (W | L));
+    radio_state_set_airplane(&s, true);
+    radio_state_set_airplane(&s, false);
+    CHECK(!radio_state_get(&s, RADIO_BT));
+
+    // a pre-#197 mask (0x07, saved 0x07, mid-airplane) loses BT once; Wi-Fi and LoRa are untouched
+    radio_state_load(&r, RADIO_MASK_ALL, RADIO_MASK_ALL, 1);
+    CHECK(radio_state_migrate(&r, 0) == RADIO_STATE_VERSION);
+    CHECK(r.on == (W | L) && r.saved == (W | L) && r.airplane);
+    CHECK(!radio_state_get(&r, RADIO_BT));
+    radio_state_load(&r, W, RADIO_MASK_ALL, 0); // user had BT off in a saved mask
+    radio_state_migrate(&r, 0);
+    CHECK(r.on == W && r.saved == (W | L));
+
+    // after the migration the user turns BT on: a reload at the stored version keeps it
+    radio_state_load(&r, RADIO_MASK_ALL, RADIO_MASK_ALL, 0);
+    radio_state_migrate(&r, 0);
+    radio_state_set(&r, RADIO_BT, true);
+    radio_state_t again;
+    radio_state_load(&again, r.on, r.saved, 0);
+    CHECK(radio_state_migrate(&again, RADIO_STATE_VERSION) == RADIO_STATE_VERSION);
+    CHECK(radio_state_get(&again, RADIO_BT) && again.on == RADIO_MASK_ALL);
 
     if (failures) {
         printf("%d failure(s)\n", failures);

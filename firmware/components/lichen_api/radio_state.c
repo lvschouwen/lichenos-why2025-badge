@@ -1,8 +1,8 @@
 #include "radio_state.h"
 
 void radio_state_init(radio_state_t *s) {
-    s->on       = RADIO_MASK_ALL;
-    s->saved    = RADIO_MASK_ALL;
+    s->on       = RADIO_MASK_DEFAULT;
+    s->saved    = RADIO_MASK_DEFAULT;
     s->airplane = false;
 }
 
@@ -14,6 +14,14 @@ void radio_state_load(radio_state_t *s, uint8_t on, uint8_t saved, uint8_t airpl
     s->on       = on;
     s->saved    = saved;
     s->airplane = airplane == 1;
+}
+
+uint8_t radio_state_migrate(radio_state_t *s, uint8_t version) {
+    if (version < 1) {
+        s->on    = (uint8_t)(s->on & ~(1u << RADIO_BT));
+        s->saved = (uint8_t)(s->saved & ~(1u << RADIO_BT));
+    }
+    return RADIO_STATE_VERSION;
 }
 
 bool radio_state_get(radio_state_t const *s, radio_id_t id) {
