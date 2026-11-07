@@ -9,7 +9,8 @@ function) are ratcheted: a value past the fail line fails unless tools/standard-
 more. The baseline may only shrink, and the gate enforces that against the merge-base version of the file.
 Warn-line hits print for the files changed since the merge base.
 Size: the app image against its OTA slot, the C6 image against its slot, and every linked P4 archive against the
-baseline (growth in one change).
+baseline (growth in one change). Merged string/constant pools (SHF_MERGE, `.str1.4`, `.cst8`) are the image-wide
+pool of the whole link, not one archive's: they are taken out of the archive numbers and gated as the line `<merged-strings>`.
 
 Nothing passes silently: a tool that is missing, fails, or measures less than was asked for fails the gate."""
 import csv
@@ -231,6 +232,45 @@ def parse_archive_sizes(csv_text):
     return out
 
 
+POOLS = "<merged-strings>"  # baseline key of the merged string/constant pools, never an archive name
+# An input section of a SHF_MERGE pool: `.rodata.<fn>.str1.4`, `.srodata.cst8`, `.rodata.str4.4`.
+POOL_SECTION = re.compile(r"^ (\.\S*\.(?:str\d+\.\d+|cst\d+))(?:\s+(0x[0-9a-f]+)\s+(0x[0-9a-f]+)\s+(.*\S))?\s*$")
+POOL_ARCHIVE = re.compile(r"([^/()]+\.a)\(")
+
+
+def parse_merged_pools(map_text):
+    """{archive: bytes} of the merged pools in a link map. The linker merges every contributor into one blob and the
+    map (and esp_idf_size) books all of it on the first contributor; the others show size 0 or address 0 (discarded)."""
+    out = {}
+    lines = map_text.split("\n")
+    for i, line in enumerate(lines):
+        m = POOL_SECTION.match(line)
+        if not m:
+            continue
+        if m.group(2):
+            addr, size, owner = m.group(2), m.group(3), m.group(4)
+        else:  # long section name: the numbers are on the next line
+            nxt = lines[i + 1].split(None, 2) if i + 1 < len(lines) else []
+            if len(nxt) < 3:
+                continue
+            addr, size, owner = nxt
+        arc = POOL_ARCHIVE.search(owner)
+        if arc and int(addr, 16) and int(size, 16):
+            out[arc.group(1)] = out.get(arc.group(1), 0) + int(size, 16)
+    return out
+
+
+def split_pools(archives, pools):
+    """Archive sizes without the merged pools, plus the pool line, so moving the first contributor moves nothing."""
+    out = dict(archives)
+    for arc, size in pools.items():
+        key = ("size", arc)
+        if key in out:
+            out[key] = max(0, out[key] - size)
+    out[("size", POOLS)] = sum(pools.values())
+    return out
+
+
 def gather_size(root, build):
     """Returns (image_bytes, slot_bytes, archive sizes, problems)."""
     bin_path = os.path.join(build, "badge_fw.bin")
@@ -247,6 +287,8 @@ def gather_size(root, build):
     archives = parse_archive_sizes(res.stdout)
     if not archives:
         return 0, 0, {}, ["esp_idf_size gave no archive sizes: %s" % res.stdout.strip()[:200]]
+    with open(map_path, errors="replace") as f:
+        archives = split_pools(archives, parse_merged_pools(f.read()))
     return os.path.getsize(bin_path), slot, archives, []
 
 

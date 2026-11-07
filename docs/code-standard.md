@@ -81,6 +81,12 @@ P4 image is built, about 3 s. It runs `tools/check_standard.py`. Nothing passes 
   `idf.py size-components`: the archive list is machine-readable and stable, and `size-components` only prints a table
   whose columns shift with the memory layout. An archive that grows by more than 8 KB over its baseline fails (a new
   archive counts from zero), more than 2 KB warns. There is no per-archive baseline for the C6 image (gap).
+- **Merged string pools are their own line, `size <merged-strings>`.** The linker folds every `.rodata.*.str1.*` and
+  `.cst*` input section (SHF_MERGE) into one image-wide blob and books all of it on the first contributing object, so
+  the pool (~240 KB) used to sit under `libesp_stdio.a` and any change of link order moved it to another archive as a
+  false GREW and a fake shrink. The gate reads the pool input sections from `badge_fw.map`, subtracts them from their
+  owning archive and sums them into one line, gated with the same +2 KB warn / +8 KB fail rules. Growth of the pool
+  means more or longer strings anywhere in the image; look at the diff of the strings, not at one archive.
 
 ### Editing the baseline
 
@@ -116,5 +122,5 @@ Measured over 548 files, 4198 functions, 63492 NLOC (lizard), 3052 functions in 
 | Stack frame | 16 B | 2448 B (`settings_backup_plan`) | 32 | 9 |
 
 App image: 2,554,160 B of the 4 MiB OTA slot = 60.9 % (warn at 85 %). Internal RAM (DIRAM, static): 199,000 of 441,296 B
-(45 %). Largest archives: `liblvgl` 542 KB, `libmesh` 374 KB, `libesp_stdio` 234 KB (almost all rodata, worth a look),
+(45 %). Largest archives: `liblvgl` 542 KB, `libmesh` 374 KB, `libesp_stdio` 234 KB (this was the merged string pool, now its own line),
 `liblichen_shell` 217 KB. The offenders past the fail line are the baseline file itself; the ranked list is in #202.

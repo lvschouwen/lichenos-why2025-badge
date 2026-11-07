@@ -111,6 +111,36 @@ class Sizes(unittest.TestCase):
         self.assertEqual(len(cs.compare_image('x', 930, slot)[0]), 1)
         self.assertEqual(cs.compare_image('x', 920, slot)[0], [])  # exactly 92 % is not past the line
 
+    POOL_MAP = (" .rodata.a_fn.str1.4\n                0x00000000        0x0 esp-idf/x/liba.a(a.c.obj)\n"
+                " .rodata.first_fn.str1.4\n                0x48000000     0x1000 esp-idf/x/%s(f.c.obj)\n"
+                " .rodata.z.str1.4\n                0x48001000        0x0 esp-idf/x/libb.a(b.c.obj)\n"
+                " .srodata.cst8   0x48002000      0x20 esp-idf/y/libc.a(c.c.obj)\n"
+                " .rodata.keep   0x48003000      0x99 esp-idf/y/libb.a(b.c.obj)\n")
+
+    def pooled(self, owner, pool_bytes):
+        arcs = {("size", "liba.a"): 100000, ("size", "libb.a"): 500, ("size", "libc.a"): 300}
+        arcs[("size", owner)] += pool_bytes
+        return cs.split_pools(arcs, cs.parse_merged_pools(self.POOL_MAP % owner))
+
+    def test_pool_parsing(self):
+        self.assertEqual(cs.parse_merged_pools(self.POOL_MAP % "libb.a"), {"libb.a": 0x1000, "libc.a": 0x20})
+
+    def test_pool_moving_to_another_archive_is_not_growth(self):
+        base = self.pooled("liba.a", 0x1000)
+        moved = self.pooled("libb.a", 0x1000)
+        self.assertEqual(base, moved)
+        self.assertEqual(base[("size", cs.POOLS)], 0x1020)
+        f, w, s = cs.compare_sizes(moved, base)
+        self.assertEqual((f, w, s), ([], [], []))
+
+    def test_pool_growth_is_gated_as_its_own_line(self):
+        base = self.pooled("liba.a", 0x1000)
+        grown = dict(base)
+        grown[("size", cs.POOLS)] += 9000
+        f, w, s = cs.compare_sizes(grown, base)
+        self.assertEqual(len(f), 1)
+        self.assertIn(cs.POOLS, f[0])
+
     def test_growth_per_archive(self):
         base = {("size", "a.a"): 1000, ("size", "b.a"): 1000, ("size", "c.a"): 100000}
         meas = {("size", "a.a"): 1000 + 3000, ("size", "b.a"): 1000 + 9000, ("size", "c.a"): 100000 - 9000,
