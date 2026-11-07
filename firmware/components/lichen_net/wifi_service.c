@@ -300,7 +300,7 @@ static bool wifi_failed(char const *reason) {
 // Once after an update that moved the credentials to NVS badge_fw: whatever the C6's driver persisted earlier (BadgeVMS,
 // older firmware) is wiped. The restore also resets the driver's storage mode, so it comes before set_storage(RAM).
 static void wipe_driver_store_once(void) {
-    if (wifi_driver_wiped()) { // also when NVS cannot be opened: no restore then, as before
+    if (wifi_driver_wiped()) { // also when no store is bound: no restore then, as before
         return;
     }
     esp_err_t err = esp_wifi_restore();

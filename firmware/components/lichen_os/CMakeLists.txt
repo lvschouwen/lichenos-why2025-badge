@@ -10,11 +10,13 @@
 # under the port lock (#84 T8a, #221 owns it next). key_matrix.c (pure, key_matrix_test.c) names the keyboard's
 # codes over board's keymap headers (#180).
 # lichen_sensors.c and lichen_haptics.c: lichen_sensors.h and lichen_haptics.h over the sensors and haptics drivers,
-# so apps and the shell never link to a driver (#221).
+# so apps and the shell never link to a driver (#221). settings_secret.c is the settings' secrets class (#235: the Wi-Fi
+# passwords, never backed up or kept by a reset; settings_secret_keys.c, pure, names the class) and settings_store.c
+# binds it into lichen_net, which may not open NVS itself.
 idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c"
                             "lichen_crashlog.c" "lichen_legacy.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
-                            "lichen_sensors.c" "lichen_haptics.c"
+                            "lichen_sensors.c" "lichen_haptics.c" "settings_secret.c" "settings_secret_keys.c"
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES lichen_api freertos esp_hw_support assets fw_console nvs_flash heap storage sdcard
-                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics)
+                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net)

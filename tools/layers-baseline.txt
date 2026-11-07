@@ -45,7 +45,6 @@ C	lichen_haptics:lichen_notify_set_feedback	1
 C	lichen_led:lichen_notify_dnd	1
 C	lichen_led:lichen_notify_generation	1
 C	lichen_led:lichen_notify_unread	1
-C	lichen_net:nvs_open	1
 C	lichen_shell:backlight_get	2
 C	lichen_shell:backlight_idle	1
 C	lichen_shell:backlight_resume	2

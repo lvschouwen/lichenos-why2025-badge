@@ -1,4 +1,4 @@
-// Host test: the saved Wi-Fi networks list (#160): add / forget / migrate / pick the strongest known one
+// Host test: the saved Wi-Fi networks list (#160): add / forget / pick the strongest known one
 #include "wifi_saved.h"
 
 #include <stdio.h>
@@ -42,14 +42,6 @@ static void add_forget(void) {
     CHECK(l.e[l.n].ssid[0] == '\0' && l.e[l.n].pass[0] == '\0'); // the freed slot holds nothing
 }
 
-static void migrate(void) {
-    wifi_saved_t l = {0};
-    CHECK(wifi_saved_migrate(&l, "old", "oldpassword") && l.n == 1 && strcmp(l.e[0].ssid, "old") == 0);
-    CHECK(!wifi_saved_migrate(&l, "other", "otherpassword") && l.n == 1); // only into an empty list
-    wifi_saved_t e = {0};
-    CHECK(!wifi_saved_migrate(&e, "", "") && e.n == 0);
-}
-
 static void pick(void) {
     wifi_saved_t l = {0};
     wifi_saved_add(&l, "home", "homepassword");
@@ -57,9 +49,15 @@ static void pick(void) {
     wifi_ap_t aps[] = {ap("stranger", -30, false), ap("home", -70, false), ap("work", -50, false)};
     int       at    = wifi_saved_pick(&l, aps, 3, 0);
     CHECK(at >= 0 && strcmp(l.e[at].ssid, "work") == 0); // strongest known, not the strongest AP
+    if (at < 0) {
+        return; // the CHECK failed: no index to shift by
+    }
     uint32_t mask = 1u << at;
     at            = wifi_saved_pick(&l, aps, 3, mask);
     CHECK(at >= 0 && strcmp(l.e[at].ssid, "home") == 0); // work was tried: the next one
+    if (at < 0) {
+        return;
+    }
     mask |= 1u << at;
     CHECK(wifi_saved_pick(&l, aps, 3, mask) == -1); // all tried
     wifi_ap_t twin[] = {ap("home", -40, true)}; // an open AP with a saved secured name is not that network
@@ -90,7 +88,6 @@ static void raw_scan_twin(void) {
 
 int main(void) {
     add_forget();
-    migrate();
     pick();
     open_never_auto();
     raw_scan_twin();

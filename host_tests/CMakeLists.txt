@@ -1206,10 +1206,13 @@ add_executable(wifi_cred_test
     ${CMAKE_CURRENT_SOURCE_DIR}/wifi_cred_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_list.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_saved.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/settings_secret.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/settings_secret_keys.c
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs/nvs_stub.c
 )
 target_include_directories(wifi_cred_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs)
 target_include_directories(wifi_cred_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
                            ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
 target_compile_options(wifi_cred_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME wifi_cred_test COMMAND wifi_cred_test)
@@ -1466,6 +1469,17 @@ target_include_directories(factory_plan_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_options(factory_plan_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME factory_plan_test COMMAND factory_plan_test)
 
+# The settings' secrets class (#235): out of the backup table and the factory reset's keep list
+add_executable(settings_secret_test ${CMAKE_CURRENT_SOURCE_DIR}/settings_secret_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/settings_secret_keys.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/settings_backup.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/factory_plan.c)
+target_include_directories(settings_secret_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot)
+target_compile_options(settings_secret_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME settings_secret_test COMMAND settings_secret_test)
+
 add_executable(release_notes_test
     ${CMAKE_CURRENT_SOURCE_DIR}/release_notes_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/release_notes.c
@@ -1517,6 +1531,7 @@ add_custom_target(run_tests
     mesh_ident_test
     ota_autooff_test
     factory_plan_test
+    settings_secret_test
     release_notes_test
     qr_payload_test
     notes_model_test

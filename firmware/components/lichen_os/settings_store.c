@@ -9,6 +9,8 @@
 #include "notify_os.h"
 #include "nvs.h"
 #include "sensors.h"
+#include "settings_secret.h"
+#include "wifi_list.h"
 
 #include "tz_table.h"
 
@@ -53,7 +55,8 @@ void settings_get_str(char const *key, char *out, size_t cap, char const *def) {
     }
     nvs_handle_t nvs;
     size_t       len = cap;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+    // A secret reads as missing here: only settings_secret_get() hands one out (#235)
+    if (!settings_key_secret(FW_NVS_NAMESPACE, key) && nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
         esp_err_t err = nvs_get_str(nvs, key, out, &len);
         nvs_close(nvs);
         if (err == ESP_OK) {
@@ -64,6 +67,10 @@ void settings_get_str(char const *key, char *out, size_t cap, char const *def) {
 }
 
 bool settings_set_str(char const *key, char const *value) {
+    if (settings_key_secret(FW_NVS_NAMESPACE, key)) {
+        ESP_LOGE(TAG, "%s is a secret: settings_secret_set", key);
+        return false;
+    }
     nvs_handle_t nvs;
     esp_err_t    err = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err == ESP_OK) {
@@ -140,4 +147,19 @@ void settings_bind_services(void) {
     led_bind_store(settings_get_u8, settings_set_u8);
     haptics_bind_store(settings_get_u8, settings_set_u8);
     system_restart_bind_store(settings_get_blob, settings_set_blob);
+}
+
+// Separate from settings_bind_services() on purpose (#235): the Wi-Fi credentials are the secrets class's first user
+static wifi_store_t const net_store = {
+    .get_str    = settings_get_str,
+    .set_str    = settings_set_str,
+    .erase      = settings_erase,
+    .get_u8     = settings_get_u8,
+    .set_u8     = settings_set_u8,
+    .secret_get = settings_secret_get,
+    .secret_set = settings_secret_set,
+};
+
+void settings_bind_net(void) {
+    wifi_list_bind_store(&net_store);
 }

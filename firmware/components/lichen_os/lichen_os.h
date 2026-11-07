@@ -14,3 +14,7 @@ void settings_bind_services(void);
 // (settings_store.h) so apps cannot read or write raw blobs. get is true only when exactly size bytes are stored.
 bool settings_get_blob(char const *key, void *out, size_t size);
 bool settings_set_blob(char const *key, void const *data, size_t size);
+
+// Hands lichen_net its store (#235): the SSIDs and the wifi_drv_wiped flag as plain settings, the Wi-Fi passwords as
+// secrets (settings_secret.h). Call once after NVS is up, before wifi_service_init().
+void settings_bind_net(void);

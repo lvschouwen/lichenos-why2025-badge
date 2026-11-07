@@ -47,10 +47,6 @@ bool wifi_saved_forget(wifi_saved_t *l, char const *ssid) {
     return true;
 }
 
-bool wifi_saved_migrate(wifi_saved_t *l, char const *old_ssid, char const *old_pass) {
-    return l->n == 0 && wifi_saved_add(l, old_ssid, old_pass);
-}
-
 int wifi_saved_pick(wifi_saved_t const *l, wifi_ap_t const *aps, size_t n, uint32_t skip_mask) {
     int    best      = -1;
     int    best_rssi = -1000;

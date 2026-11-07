@@ -11,6 +11,8 @@
 // an unreadable NVS gives the default. Keys are at most 15 characters (NVS limit).
 // A factory reset (#66) erases every badge_fw key except the badge's own record listed in lichen_boot/factory_plan.c:
 // a new key that is not a person's setting belongs on that list.
+// The Wi-Fi passwords are the secrets class (lichen_os/settings_secret.h, #235): settings_get_str reads one as
+// missing (the default) and settings_set_str refuses one.
 uint8_t settings_get_u8(char const *key, uint8_t def);
 bool    settings_set_u8(char const *key, uint8_t value);
 // Copies the value (or def) into out, always NUL-terminated
