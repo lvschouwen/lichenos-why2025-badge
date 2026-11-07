@@ -1524,3 +1524,12 @@ add_test(NAME elf_archive_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools
 add_test(NAME badge_usage_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_usage_test.sh)
 add_test(NAME badge_log_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_log_test.sh)
 add_test(NAME agent_wt_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/agent_wt_test.sh)
+
+# Battery model (#11): V to percent, warn/off with dwell, MAX17048 decode, ADC divider
+add_executable(battery_model_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/battery_model_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/battery/battery_model.c
+)
+target_include_directories(battery_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/battery)
+target_compile_options(battery_model_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME battery_model_test COMMAND battery_model_test)
