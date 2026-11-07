@@ -20,6 +20,9 @@ esp_err_t nvs_get_str(nvs_handle_t h, char const *key, char *out, size_t *len);
 esp_err_t nvs_set_u8(nvs_handle_t h, char const *key, uint8_t value);
 esp_err_t nvs_get_u8(nvs_handle_t h, char const *key, uint8_t *out);
 esp_err_t nvs_erase_key(nvs_handle_t h, char const *key);
+// Blobs are not stored: get finds nothing, set fails (settings_store.c's blob calls link, no test reads them)
+esp_err_t nvs_get_blob(nvs_handle_t h, char const *key, void *out, size_t *len);
+esp_err_t nvs_set_blob(nvs_handle_t h, char const *key, void const *data, size_t len);
 esp_err_t nvs_commit(nvs_handle_t h);
 void      nvs_close(nvs_handle_t h);
 

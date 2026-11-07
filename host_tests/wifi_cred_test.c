@@ -45,7 +45,12 @@ static bool plain_set_str(char const *key, char const *value) {
            nvs_set_str(nvs, key, value) == ESP_OK;
 }
 
+static int erase_fail_in; // the nth plain erase from now on fails (1 = the next one); 0 switches it off
+
 static bool plain_erase(char const *key) {
+    if (erase_fail_in > 0 && --erase_fail_in == 0) {
+        return false;
+    }
     nvs_handle_t nvs;
     nvs_open("badge_fw", NVS_READWRITE, &nvs);
     esp_err_t err = nvs_erase_key(nvs, key);
@@ -84,6 +89,7 @@ static void unbound(void) {
     CHECK(!wifi_cred_save("net", "password"));
     CHECK(!wifi_cred_clear());
     CHECK(wifi_driver_wiped());
+    CHECK(!wifi_driver_wiped_set(true)); // nothing to mark: the caller then skips the restore
 }
 
 // #235: the passwords are secrets (settings_secret.c), the SSIDs plain settings under their old names, so what an
@@ -157,6 +163,15 @@ static void saved_networks(void) {
     CHECK(!wifi_cred_forget("y-net", &active, &left) && active);
     nvs_stub_fail_set(0);
 
+    // A clear whose erase fails on one slot still erases every slot after it (wifi_ssid, wifi_pass, then wifi_s0 fails)
+    CHECK(wifi_cred_save("x-net", "passwordxxx"));
+    CHECK(wifi_cred_save("z-net", "passwordzzz"));
+    erase_fail_in = 3;
+    CHECK(!wifi_cred_clear());
+    erase_fail_in = 0;
+    char v[64];
+    CHECK(!settings_secret_get("wifi_p0", v, sizeof(v)) && !settings_secret_get("wifi_p1", v, sizeof(v)));
+
     // The factory reset and "fw wifi --clear" remove every saved network, not only the one in use
     CHECK(wifi_cred_clear());
     CHECK(wifi_saved_load(&l) && l.n == 0 && !wifi_cred_load(s, p));
@@ -220,8 +235,10 @@ int main(void) {
     // The once-only wipe of the C6 driver's own copy (#223 moved it from c6link): not done until marked, and a forget
     // (wifi_cred_clear) does not make it run again
     CHECK(!wifi_driver_wiped());
-    wifi_driver_wiped_set();
+    CHECK(wifi_driver_wiped_set(true));
     CHECK(wifi_driver_wiped());
+    CHECK(wifi_driver_wiped_set(false) && !wifi_driver_wiped()); // a failed restore unmarks, so the next boot retries
+    CHECK(wifi_driver_wiped_set(true));
     CHECK(wifi_cred_clear());
     CHECK(wifi_driver_wiped());
 

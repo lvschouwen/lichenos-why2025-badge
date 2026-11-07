@@ -1475,10 +1475,23 @@ add_executable(settings_secret_test ${CMAKE_CURRENT_SOURCE_DIR}/settings_secret_
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/settings_backup.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/factory_plan.c)
 target_include_directories(settings_secret_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net
                            ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
                            ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot)
 target_compile_options(settings_secret_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME settings_secret_test COMMAND settings_secret_test)
+
+# settings_store.c over the NVS stub (#235): the plain calls refuse a secret, settings_bind_net's store keeps them apart
+set(SST_FW ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components)
+add_executable(settings_store_test ${CMAKE_CURRENT_SOURCE_DIR}/settings_store_test.c
+    ${SST_FW}/lichen_os/settings_store.c ${SST_FW}/lichen_os/settings_secret.c ${SST_FW}/lichen_os/settings_secret_keys.c
+    ${SST_FW}/lichen_net/wifi_list.c ${SST_FW}/lichen_net/wifi_saved.c ${CMAKE_CURRENT_SOURCE_DIR}/stubs/nvs_stub.c)
+target_include_directories(settings_store_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs/settings_store
+                           ${CMAKE_CURRENT_SOURCE_DIR}/stubs)
+target_include_directories(settings_store_test PRIVATE ${SST_FW}/lichen_os ${SST_FW}/lichen_api ${SST_FW}/lichen_net ${SST_FW}/fw_console
+                           ${SST_FW}/board ${SST_FW}/sensors ${SST_FW}/lichen_haptics ${SST_FW}/lichen_led ${SST_FW}/lichen_notify)
+target_compile_options(settings_store_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME settings_store_test COMMAND settings_store_test)
 
 add_executable(release_notes_test
     ${CMAKE_CURRENT_SOURCE_DIR}/release_notes_test.c
@@ -1532,6 +1545,7 @@ add_custom_target(run_tests
     ota_autooff_test
     factory_plan_test
     settings_secret_test
+    settings_store_test
     release_notes_test
     qr_payload_test
     notes_model_test

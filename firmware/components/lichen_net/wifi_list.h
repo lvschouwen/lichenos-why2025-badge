@@ -46,9 +46,11 @@ bool     wifi_cred_load(char ssid[33], char pass[64]);
 bool     wifi_cred_clear(void);
 uint32_t wifi_cred_generation(void);
 // badge_fw wifi_drv_wiped (a plain flag): the C6 driver's own flash copy was wiped once (esp_wifi_restore, after the
-// move of the credentials to badge_fw). True when it was, and also when no store is bound (then nothing is wiped).
+// move of the credentials to badge_fw). True when it was, and also when no store is bound. A missing key and an
+// unreadable NVS both read as false, so the caller marks first (set returns false when the flag cannot be written:
+// then no wipe this boot) and unmarks when the wipe fails.
 bool wifi_driver_wiped(void);
-void wifi_driver_wiped_set(void);
+bool wifi_driver_wiped_set(bool wiped);
 
 // The saved networks (#160), keys wifi_s0..wifi_s4 (plain) / wifi_p0..wifi_p4 (secret), most recently joined first. wifi_ssid/wifi_pass
 // above stay the pair in use (the front of the list). All of these are called with wifi_service.c's saved_lock held.

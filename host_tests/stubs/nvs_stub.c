@@ -103,6 +103,22 @@ esp_err_t nvs_erase_key(nvs_handle_t h, char const *key) {
     return ESP_ERR_NVS_NOT_FOUND;
 }
 
+esp_err_t nvs_get_blob(nvs_handle_t h, char const *key, void *out, size_t *len) {
+    (void)h;
+    (void)key;
+    (void)out;
+    (void)len;
+    return ESP_ERR_NVS_NOT_FOUND;
+}
+
+esp_err_t nvs_set_blob(nvs_handle_t h, char const *key, void const *data, size_t len) {
+    (void)h;
+    (void)key;
+    (void)data;
+    (void)len;
+    return ESP_FAIL;
+}
+
 esp_err_t nvs_commit(nvs_handle_t h) {
     (void)h;
     return ESP_OK;

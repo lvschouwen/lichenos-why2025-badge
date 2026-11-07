@@ -157,17 +157,22 @@ static bool saved_store(wifi_saved_t const *l) {
     if (!store) {
         return false;
     }
+    // Every slot whatever the result: a failed write or erase never leaves the slots after it untouched (a clear
+    // that stopped half way would keep old passwords)
     bool ok = true;
-    for (int i = 0; i < WIFI_SAVED_MAX && ok; i++) {
+    for (int i = 0; i < WIFI_SAVED_MAX; i++) {
         char ks[10], kp[10];
         slot_key(ks, 's', i);
         slot_key(kp, 'p', i);
+        bool done;
         if ((size_t)i < l->n) {
-            ok = store->set_str(ks, l->e[i].ssid) && store->secret_set(kp, l->e[i].pass);
+            done = store->set_str(ks, l->e[i].ssid);
+            done = store->secret_set(kp, l->e[i].pass) && done;
         } else {
-            bool s = store->erase(ks);
-            ok     = store->erase(kp) && s;
+            done = store->erase(ks);
+            done = store->erase(kp) && done;
         }
+        ok = ok && done;
     }
     return ok;
 }
@@ -279,8 +284,6 @@ bool wifi_driver_wiped(void) {
     return !store || store->get_u8("wifi_drv_wiped", 0) != 0;
 }
 
-void wifi_driver_wiped_set(void) {
-    if (store) {
-        store->set_u8("wifi_drv_wiped", 1);
-    }
+bool wifi_driver_wiped_set(bool wiped) {
+    return store && store->set_u8("wifi_drv_wiped", wiped ? 1 : 0);
 }

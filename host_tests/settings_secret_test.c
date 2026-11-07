@@ -3,6 +3,7 @@
 #include "factory_plan.h"
 #include "settings_backup.h"
 #include "settings_secret.h"
+#include "wifi_saved.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -23,6 +24,7 @@ static void class_members(void) {
         CHECK(settings_key_secret("badge_fw", passwords[i]));
     }
     CHECK(settings_secret_count() == sizeof(passwords) / sizeof(passwords[0]));
+    CHECK(settings_secret_count() == WIFI_SAVED_MAX + 1); // one per saved network plus the pair in use
     CHECK(settings_secret_at(settings_secret_count()) == NULL);
     // The SSIDs and the driver-wipe flag are plain settings; another namespace's key of the same name is not ours
     CHECK(!settings_key_secret("badge_fw", "wifi_ssid") && !settings_key_secret("badge_fw", "wifi_s0"));
