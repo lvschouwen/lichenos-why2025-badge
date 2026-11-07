@@ -188,12 +188,22 @@ Notifications, LED, haptics (#245):
 - [ ] A toast with feedback -> one buzz per toast, none during an OTA receive. Reboot with unread history -> the LED
   pulses after boot without a new notice.
 
-Bug-fix issues merged after the review (main fills in each list after merging; the wave must not be called passed
-while a placeholder is empty):
-- [ ] #248 (lichen_os UI service): TODO bench steps.
-- [ ] #249 (lichen_net Wi-Fi, wifi_screen.c): TODO bench steps.
-- [ ] #250 (board backlight, c6link flasher; also the two-chip contract's UART1 bullet): TODO bench steps.
-- [ ] #251 (board keyboard, factory combo): TODO bench steps.
+Bug-fix issues merged after the review (#248-#251):
+- [ ] #248, only with the display unplugged or failing (optional): the log shows `no display: UI calls are refused` once,
+  there is no assert and no boot loop, and the boot reaches the OTA server start. With the display: no change.
+- [ ] #249: Settings > Wi-Fi lists the saved networks and Forget removes one. Open the Wi-Fi screen right after a join:
+  `Saved networks are busy` shows rarely and the list fills in by itself.
+- [ ] #249: Forget a network during a join or a failover -> the badge does not stay on it, and goes idle when it was the
+  last saved network.
+- [ ] #250: a C6 flash check (`fw c6 reflash` or a bundle change) -> **Expected:** the log line `Done (ESP_OK)`; the
+  backlight keeps its levels during it and reapplies them afterwards.
+- [ ] #250: `fw c6log 3000` -> C6 console lines in the log. During `fw c6log 10000`, `fw bl 30 0` -> the change is
+  immediate. A dimmed screen plus a running c6log, then a key -> it brightens at once.
+- [ ] #250: `fw bl r16` during a c6log -> **Expected:** `r16: UART1 to the C6 is busy, not now`. A second `fw c6log`
+  while one runs -> **Expected:** `c6log: UART1 to the C6 is busy (another c6log), or the C6 console can't be opened`.
+- [ ] #251: the boot combo Esc+Bksp 3 s -> `Factory reset: settings`; then Esc -> the log shows `boot keys: reset
+  cancelled`, with no stray Esc reaching the screen.
+- [ ] #251: Keyboard test events and hold-exit work; the remote key lock drops keys.
 
 ### 7. Lock-owner check
 
