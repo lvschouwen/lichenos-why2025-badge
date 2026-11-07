@@ -559,6 +559,36 @@ static inline int skipped(void) { return 0; }
     def test_header_functions_and_thread_rules(self):
         self.assertEqual(cl.header_functions(self.HEADER), [("one", "any"), ("two", "not-lvgl")])
 
+    def test_prototype_after_static_inline_body_is_seen(self):
+        # #247: the closing brace of an inline body used to glue itself to the next prototype
+        h = """// Any task.
+static inline int helper(int a)
+{
+    if (a) {
+        return 1;
+    }
+    return 0;
+}
+// LVGL task only.
+int after_multi(void);
+static inline int one_liner(void) { return 0; }
+// Not on the LVGL task.
+int after_one_liner(void);
+"""
+        self.assertEqual(cl.header_functions(h), [("after_multi", "lvgl"), ("after_one_liner", "not-lvgl")])
+
+    def test_attribute_prefix_and_suffix(self):
+        h = """// Any task.
+__attribute__((warn_unused_result)) int first(void);
+// LVGL task only.
+int second(int a) __attribute__((nonnull(1), format(printf, 1, 2)));
+"""
+        self.assertEqual(cl.header_functions(h), [("first", "any"), ("second", "lvgl")])
+
+    def test_two_prototypes_on_one_line(self):
+        h = "// Pure, any task.\nint a(void); int b(int x);\n// LVGL task only.\nvoid c(void);\n"
+        self.assertEqual(cl.header_functions(h), [("a", "any"), ("b", "any"), ("c", "lvgl")])
+
     def test_never_on_the_lvgl_task_is_not_lvgl(self):
         # notify_os.h's lichen_notify_save_now says "Blocks: never on the LVGL task" (#245 review)
         self.assertEqual(cl.thread_rule("// Restart / power off: waits. Blocks: never on the LVGL task."), "not-lvgl")

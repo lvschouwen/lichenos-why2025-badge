@@ -574,33 +574,61 @@ def thread_rule(comment):
     return "unspecified"
 
 
+ATTR_RE = re.compile(r"__attribute__\s*\(\((?:[^()]|\([^()]*\))*\)\)")
+
+
+def statement_function(stmt):
+    """Name of the function a header statement declares, or None (typedefs, static inline, function pointers)."""
+    stmt = " ".join(ATTR_RE.sub(" ", stmt).split())
+    m = PROTO_RE.search("\n" + stmt + ";")
+    if not m or stmt.startswith(SKIP_PROTO) or "(*" in stmt.split("(")[0]:
+        return None
+    return m.group(2)
+
+
+def scan_statements(text):
+    """[(statement, comment block above it)] at brace depth 0. A { } body is skipped as a whole by brace matching, so
+    a static inline function never swallows the declaration after it; several statements on one line are separate and
+    share the comment block above that line."""
+    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+    out, block, cur, depth, body, cont, stale = [], [], "", 0, False, False, False
+    for line in text.splitlines():
+        s, cur = line.strip(), cur.strip()
+        if stale and not cur:
+            block, stale = [], False
+        if cont or (not cur and s.startswith("#")):
+            cont = s.endswith("\\")
+            continue
+        if not cur and (s.startswith('extern "C"') or not s):
+            block = block if s else []
+            continue
+        if not cur and s.startswith("//"):
+            block.append(s)
+            continue
+        for ch in s.split("//")[0] + " ":
+            if ch == "{":
+                depth += 1
+                body = body or depth == 1
+            elif ch == "}":
+                depth = max(depth - 1, 0)
+                if depth == 0 and body and cur.rstrip().endswith(")"):
+                    cur, body, stale = "", False, True  # a function definition ends at its closing brace
+            elif depth == 0 and ch == ";":
+                out.append((cur, block))
+                cur, body, stale = "", False, True
+            elif depth == 0:
+                cur += ch
+    return out
+
+
 def header_functions(text):
     """[(name, thread rule)] of the C function declarations of a header, in order. Each prototype keeps the comment
     block right above it for the thread rule."""
-    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
-    out, block, buf, depth = [], [], [], 0
-    for line in text.splitlines():
-        s = line.strip()
-        if s.startswith("#"):
-            continue
-        if s.startswith('extern "C"'):
-            continue  # the C++ guard is not a block of declarations
-        if s.startswith("//"):
-            if not buf:
-                block.append(s)
-            continue
-        if not s:
-            if not buf:
-                block = []
-            continue
-        buf.append(s.split("//")[0])
-        depth += s.count("{") - s.count("}")
-        joined = " ".join(buf)
-        if ";" in joined or "{" in joined:
-            m = PROTO_RE.search("\n" + joined)
-            if m and depth == 0 and not joined.lstrip().startswith(SKIP_PROTO) and "(*" not in joined.split("(")[0]:
-                out.append((m.group(2), thread_rule("\n".join(block))))
-            buf, block = [], []
+    out = []
+    for stmt, block in scan_statements(text):
+        name = statement_function(stmt)
+        if name:
+            out.append((name, thread_rule("\n".join(block))))
     return out
 
 
