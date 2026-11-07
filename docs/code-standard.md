@@ -23,15 +23,15 @@ JPL "Power of 10" rule 4 (only via a secondary page). Not reachable: Barr Group,
 | Task stack high-water | <25 % free | <15 % or <256 B | J; IDF V "some safety margin" | `fw mem` (`stack_free`) vs `fw tasks` (size) |
 | Min free internal heap | <15 % | <8 % | J; IDF V "some headroom" | `fw mem` (`internal ... min`) |
 | Largest internal block | <50 % of free | <25 % of free | V fragmentation view, J numbers | `fw mem` (`internal ... largest` vs `free`) |
-| PSRAM use | >75 % | >90 % | J | `fw mem` (`psram`), see gaps below |
+| PSRAM use | >75 % | >90 % | J | `fw mem` (`psram` free; no total printed yet, gap) |
 | App image vs OTA slot | >85 % | >92 % | J | `badge_fw.bin` vs `ota_0` in `firmware/partitions.csv` |
 | Per-archive growth per change | +2 KB | +8 KB | J; delta against a baseline V (Memfault) | `esp_idf_size --archives` vs the baseline |
 | CPU idle per core | <30 % | <15 % | V NASA 50-70 % utilisation; numbers J | `fw mem` (`task IDLE0/IDLE1 ... cpu`) |
-| ISR / interrupts off | >50 us | >200 us | J; IWDT 300/800 ms V is the crash line | cycle counter or scope (no read-out) |
-| Task watchdog margin | longest run >25 % of 5 s | >50 % | V TWDT 5 s; J ratios | trace (no read-out) |
+| ISR / interrupts off | >50 us | >200 us | J; IWDT 300/800 ms V is the crash line | cycle counter or scope (no read-out; known gap, not yet tracked) |
+| Task watchdog margin | longest run >25 % of 5 s | >50 % | V TWDT 5 s; J ratios | trace (no read-out; known gap, not yet tracked) |
 | Frame time | >16.7 ms | >33 ms p95 | V LVGL 33 ms default | `fw ui perf` |
-| Input-to-display | >100 ms | >200 ms | J | key timestamp vs flush (no read-out) |
-| Boot to first frame | >3 s | >5 s | J | `fw boot` timestamps, see gaps below |
+| Input-to-display | >100 ms | >200 ms | J | key timestamp vs flush (no read-out; tracked in #205) |
+| Boot to first frame | >3 s | >5 s | J | `fw boot` step times; no first-frame stamp yet (gap) |
 | Draw buffer (partial mode) | | <1/10 screen | V LVGL | `lv_display_set_buffers` call |
 
 The first six rows and the two size rows are gated by the build. The rest are read on the badge by the main session.
@@ -40,8 +40,7 @@ The first six rows and the two size rows are gated by the build. The rest are re
 
 Our code only: tracked files under `firmware/components/`, `firmware/main/`, `c6/main/` and `shared/` with the
 extensions `.c .cpp .h .hpp`, minus `thirdparty/` and `managed_components/`. Vendored trees (`meshcore/`, `esp_hosted/`,
-`third_party/`) and build directories are never measured. A new file or function is measured automatically: the gate asks
-`git ls-files`, so a file must be `git add`ed (or be a tracked path) to count; a new component needs nothing else
+`third_party/`) and build directories are never measured. A new file or function is measured automatically: the gate asks `git ls-files` plus the untracked-not-ignored files, so it counts before it is `git add`ed; a new component needs nothing else
 because `firmware/CMakeLists.txt` turns `-fstack-usage` on for every directory under `components/`.
 
 ## How to measure
@@ -61,25 +60,47 @@ because `firmware/CMakeLists.txt` turns `-fstack-usage` on for every directory u
 
 ## The gate and the ratchet
 
-`firmware/build.sh build` runs `tools/check_standard.sh` after the P4 image is built (about 4 s; it skips with a note if
-lizard is missing). It runs `tools/check_standard.py`:
+`firmware/build.sh build` (also `all` and `app`; not `reconfigure` or `storage`) runs `tools/check_standard.sh` after the
+P4 image is built, about 3 s. It runs `tools/check_standard.py`. Nothing passes silently:
 
-- Past the **fail** line and not in the baseline: the build fails (`NEW`).
-- In the baseline but above its baselined value: the build fails (`WORSE`). An offender may not get worse.
-- Past the **warn** line: printed, never fails; only for files changed since the merge base, so the output stays short.
-- App image above 92 % of the OTA slot fails, above 85 % warns.
-- An archive that grows by more than 8 KB over its baseline size fails (a new archive counts from zero), more than
-  2 KB warns.
-- A baseline entry that is fixed (or gone) is reported as `stale baseline`; it does not fail.
+- **lizard missing fails the build.** The only way past is the explicit `BADGE_SKIP_STANDARD=1`, which prints a loud
+  "SKIPPED" line.
+- **Incomplete measurement fails** (`INCOMPLETE`): lizard exiting non-zero on a chunk, a file without a lizard result, no `.su`
+  files in `firmware/build` or `c6/build` (stack frames not on), a missing image or map, `esp_idf_size` failing or giving no
+  archives. The gate says which. Files are `git ls-files` plus untracked-not-ignored ones, so a new file counts before it is added.
+- Past the **fail** line and not in the baseline: fails (`NEW`). In the baseline but above its value: fails (`WORSE`).
+- Past the **warn** line: printed, never fails; only for files changed since the merge base.
+- **Stale baseline entries fail** (`STALE`): an offender that was fixed, lowered or removed must also be removed or lowered in
+  the baseline (`--shrink`). The gate does not rewrite the file on its own, so the diff stays a deliberate, reviewable edit.
+- **The baseline only shrinks, enforced:** every static entry that is new, or higher than in the merge-base version of
+  `tools/standard-baseline.txt` (HEAD if there is no merge base), fails (`GREW`). The one change that introduces the file
+  is exempt, since there is nothing to compare with.
+- Images: P4 app above 92 % of `ota_0` fails, above 85 % warns; the same for the C6 `network_adapter.bin` against the
+  `ota_0` of `c6/partitions.esp32c6.csv`.
+- **Size growth is per linked archive, from the link map** (`esp_idf_size --archives`), not per component from
+  `idf.py size-components`: the archive list is machine-readable and stable, and `size-components` only prints a table
+  whose columns shift with the memory layout. An archive that grows by more than 8 KB over its baseline fails (a new
+  archive counts from zero), more than 2 KB warns. There is no per-archive baseline for the C6 image (gap).
 
-`tools/standard-baseline.txt` is the baseline. For the static metrics it holds the offenders past the fail line at their
-current value and **may only shrink**: after fixing one run `python3 -I tools/check_standard.py --shrink`, which drops or
-lowers entries and never adds or raises one. Never edit a value up to get a build through; split the function. The size
-entries are the archive sizes at the last deliberate update: when a reviewed change legitimately grows an archive by more
-than 8 KB, run `python3 -I tools/check_standard.py --size-update` with the IDF environment and a fresh build, and say why in the commit.
+### Editing the baseline
+
+- Fixed or lowered an offender: `python3 -I tools/check_standard.py --shrink` (drops and lowers; never adds or raises; refuses
+  when the measurement is incomplete).
+- Moved a file or renamed a function that is a baselined offender: `python3 -I tools/check_standard.py --rename OLD NEW`.
+  OLD/NEW are a path (all its entries move, `file:function` keys follow) or `path:function`. The values are kept and
+  `moved` records tell the shrink-only check the new key is the old entry, so it passes only if the value did not grow.
+  `--shrink` later drops the records once the merge base has the new key.
+- Intended growth of an archive beyond 8 KB: `--size-update` (IDF environment, fresh build). It prints every changed
+  archive, so the diff is reviewable; give the reason in the commit message.
+- `--init` creates the first baseline and refuses when the file exists. Never edit a value up to get a build through; split
+  the function.
+
+Function keys are `path:name`; a second function of the same name in a file (C++ overloads, helpers under `#ifdef`) is
+`path:name#2` in source order, so keys stay stable across unrelated edits and need no line numbers. Stack keys are
+`path:function` as gcc prints it (C++ with its signature); one source built into two objects keeps the larger frame.
 The gate's own logic is tested by `tools/tests/check_standard_test.py` (ctest `check_standard_test`).
 
-## Where we stand (2026-11-07, fw built from this commit)
+## Where we stand (2026-11-07; the numbers below are from before #168 landed, `check_standard.py --report` gives today's)
 
 Measured over 548 files, 4198 functions, 63492 NLOC (lizard), 3052 functions in `.su` files.
 

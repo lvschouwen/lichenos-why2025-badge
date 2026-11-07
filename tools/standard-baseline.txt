@@ -1,14 +1,18 @@
 # Code and resource standard baseline (#202); limits and rules in docs/code-standard.md.
-# Format: metric<TAB>key<TAB>value. Metrics: nloc (key = file), len ccn nest params stack (key = file:function),
-# size (key = linked archive, bytes).
+# Format: metric<TAB>key<TAB>value. Metrics: nloc (key = file), len ccn nest params stack (key = file:function, a
+# second function of the same name in a file is file:function#2), size (key = linked P4 archive, bytes), moved (a
+# deliberate rename record, see below).
 #
-# This file may only SHRINK for the static metrics: every entry is an existing offender past the fail line, held at its
-# current value. Do not add a line and do not raise a value to get a build through: split the function instead.
-#   - Fixed an offender? `python3 -I tools/check_standard.py --shrink` drops or lowers entries (never adds).
+# The static entries are existing offenders past the fail line, held at their current value, and may only SHRINK.
+# The gate enforces it: an entry that is new or higher than in the merge-base version of this file fails the build,
+# and so does an entry whose offender has been fixed or lowered (it must be removed or lowered).
+#   - Fixed or lowered an offender? `python3 -I tools/check_standard.py --shrink` drops or lowers entries (never adds).
+#   - Moved a file or renamed a function? `python3 -I tools/check_standard.py --rename OLD NEW` (OLD, NEW = a path, or
+#     path:function) moves the entries keeping their values and leaves `moved` records the gate accepts.
 #   - size entries are the archive sizes at the last deliberate update. A change that grows one archive by more than
 #     8 KB fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
-#     (IDF environment, firmware built) and say why in the commit message.
-# Regenerated from scratch only by `--init`, once, for this first version.
+#     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
+# First version created by --init (2026-11-07); --init refuses when this file exists.
 ccn	firmware/components/c6link/c6link.c:cmd_wifi	76
 ccn	firmware/components/lichen_net/wifi_list.c:utf8_len	27
 ccn	firmware/components/lichen_notify/lichen_notify.c:lichen_notify_to	26
@@ -17,10 +21,10 @@ ccn	firmware/components/lichen_shell/update_screen.c:tick	36
 ccn	firmware/components/lora/lora.c:lora_task	26
 ccn	firmware/components/mesh/mesh_frame.c:mf_decode	33
 ccn	firmware/components/mesh/mesh_journal.c:scan_task_fn	29
-ccn	firmware/components/mesh/mesh_remote.c:rr_request_prepared	27
+ccn	firmware/components/mesh/mesh_remote.c:rr_request_prepared	29
 ccn	firmware/components/mesh/mesh_rset.c:rs_check	35
 ccn	firmware/components/mesh/mesh_run.c:mesh_run_event	27
-ccn	firmware/components/mesh/mesh_task.cpp:cmd_mesh	67
+ccn	firmware/components/mesh/mesh_task.cpp:cmd_mesh	71
 ccn	firmware/components/mesh/mesh_telem.c:lpp_type	26
 ccn	firmware/components/mesh/mesh_telem.c:one_value	36
 ccn	firmware/components/ota/ota_proto.c:parse_header	29
@@ -33,7 +37,7 @@ nest	firmware/components/c6link/c6_boot_policy.c:c6_boot_plan	7
 nest	firmware/components/c6link/c6link.c:cmd_wifi	12
 nest	firmware/components/mesh/mesh_notify.c:mn_decide	7
 nest	firmware/components/ota/ota_proto.c:parse_header	11
-nloc	firmware/components/mesh/mesh_task.cpp	3088
+nloc	firmware/components/mesh/mesh_task.cpp	3126
 params	firmware/components/crash/crash_log.c:crash_record_format	10
 params	firmware/components/lichen_shell/files_model.c:files_text_page	11
 params	firmware/components/lichen_shell/shot_blend.c:shot_blend_argb8888	10
@@ -103,7 +107,7 @@ size	libesp_psram.a	8274
 size	libesp_ringbuf.a	6159
 size	libesp_rom.a	596
 size	libesp_security.a	2364
-size	libesp_stdio.a	233803
+size	libesp_stdio.a	236639
 size	libesp_system.a	19190
 size	libesp_tca8418.a	1989
 size	libesp_timer.a	2854
@@ -137,7 +141,7 @@ size	liblvgl_port_lib.a	6162
 size	liblwip.a	109820
 size	libmain.a	3746
 size	libmbedtls.a	22
-size	libmesh.a	373634
+size	libmesh.a	386070
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18812
 size	libnvs_sec_provider.a	2

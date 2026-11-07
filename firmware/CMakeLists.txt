@@ -24,14 +24,18 @@ project(badge_fw)
 
 # Stack frame sizes of our own components (#202): -fstack-usage writes a .su file next to each object and does not
 # change the generated code; tools/check_standard.py reads them. Stock IDF components are left alone.
-file(GLOB lichen_component_dirs RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/components
+file(GLOB lichen_component_dirs CONFIGURE_DEPENDS RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}/components
      ${CMAKE_CURRENT_SOURCE_DIR}/components/*)
 foreach(comp main ${lichen_component_dirs})
     if(NOT comp STREQUAL "main" AND NOT IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/components/${comp})
         continue()
     endif()
     idf_component_get_property(comp_lib ${comp} COMPONENT_LIB)
+    unset(comp_type)
     if(comp_lib AND TARGET ${comp_lib})
+        get_target_property(comp_type ${comp_lib} TYPE)
+    endif()
+    if(comp_lib AND TARGET ${comp_lib} AND NOT comp_type STREQUAL "INTERFACE_LIBRARY")
         target_compile_options(${comp_lib} PRIVATE -fstack-usage)
     endif()
 endforeach()
