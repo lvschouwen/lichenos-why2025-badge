@@ -3,13 +3,13 @@
 // (#221: a driver never defines a gate function); main starts the service (lichen_sensors_start) after the keyboard
 // has the bus, and registers `fw sensors`.
 
-#include "sensors_format.h" // lichen_sensors_t
+#include "sensors_format.h" // sensors_snap_t
 
 #include <stdbool.h>
 #include <stdint.h>
 
-// lichen_sensors.h's calls, with the same rules (see there)
-void sensors_get(lichen_sensors_t *out);
+// lichen_sensors.h's calls, with the same rules (see there); sensors_snap_t is lichen_sensors_t field for field
+void sensors_get(sensors_snap_t *out);
 void sensors_start(void);
 void sensors_stop(void);
 bool sensors_running(void);

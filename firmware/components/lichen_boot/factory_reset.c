@@ -19,7 +19,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "fw_console.h"
-#include "lichen_notify.h"
 #include "lichen_nvs.h"
 #include "nvs.h"
 #include "nvs_erase_os.h"
@@ -100,6 +99,7 @@ static bool pending_set(uint8_t v) {
 static bool    notice_nvs_not_flash;  // "everything" fell back to key by key: the old entries are still in flash
 static bool    notice_storage_failed; // the drive's erase failed every try
 static uint8_t carry;                 // the next step, when NVS could not keep it (factory_nvs_after)
+static void  (*notice_error)(char const *title, char const *body); // lichen_os: an error notice (#245)
 
 // ---- NVS, settings: key by key ---------------------------------------------------------------------------------------
 
@@ -577,16 +577,27 @@ void factory_reset_boot_storage(void) {
     }
 }
 
+void factory_reset_bind_notice(void (*error)(char const *title, char const *body)) {
+    notice_error = error;
+}
+
+static void post(char const *title, char const *body) {
+    if (notice_error) {
+        notice_error(title, body);
+    } else {
+        ESP_LOGE(TAG, "%s (no notification service bound)", title); // the log keeps it at least
+    }
+}
+
 void factory_reset_post_notices(void) {
     if (notice_nvs_not_flash) {
-        lichen_notify("lichen", LN_ERROR, "Factory reset could not fully erase settings",
-                      "The settings were deleted one by one: their old values are still in the chip's flash.", 0);
+        post("Factory reset could not fully erase settings",
+             "The settings were deleted one by one: their old values are still in the chip's flash.");
     }
     if (notice_storage_failed) {
-        lichen_notify("lichen", LN_ERROR, "Factory reset could not fully erase storage",
-                      "The files were deleted, but the drive could not be erased: old data, the MeshCore key "
-                      "among it, may still be in the chip's flash. Run the reset again or reflash the badge.",
-                      0);
+        post("Factory reset could not fully erase storage",
+             "The files were deleted, but the drive could not be erased: old data, the MeshCore key "
+             "among it, may still be in the chip's flash. Run the reset again or reflash the badge.");
     }
 }
 

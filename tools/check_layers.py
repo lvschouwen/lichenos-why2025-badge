@@ -548,7 +548,7 @@ HEADER_CAP = {
     "lichen_fs.h": "SD", "lichen_haptics.h": "HAPTICS", "lichen_sensors.h": "SENSORS", "lichen_task.h": "BACKGROUND",
     "lichen_legacy.h": "RAW_KEYS", "lichen_radio.h": "RADIO", "settings_backup.h": "SYSTEM",
     "settings_backup_io.h": "SYSTEM", "lichen_crashlog.h": "SYSTEM", "lichen_badge.h": "SYSTEM", "font_slots.h": "SYSTEM",
-    "lichen_ui_ops.h": "SYSTEM", "lichen_sys_ui.h": "SYSTEM",
+    "lichen_ui_ops.h": "SYSTEM", "lichen_sys_ui.h": "SYSTEM", "notify_os.h": "SYSTEM",
     "lichen_sys_display.h": "SYSTEM", "lichen_sys_power.h": "SYSTEM",
     "lichen_sys_storage.h": "SYSTEM", "lichen_sys_update.h": "SYSTEM", "lichen_sys_crash.h": "SYSTEM",
     "lichen_sys_factory.h": "SYSTEM", "lichen_sys_mem.h": "SYSTEM",

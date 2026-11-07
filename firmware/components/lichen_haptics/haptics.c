@@ -1,6 +1,7 @@
 // The vibration service (#68). One esp_timer ticks every 10 ms while a pattern plays and writes the PWM duty on
-// change; nothing runs otherwise. Notifications reach it through lichen_notify's feedback hook, which the shell
-// calls only for a toast that is allowed to give feedback (not do-not-disturb, not silent, within the source's rate).
+// change; nothing runs otherwise. Notifications reach it through haptics_notice, which lichen_os registers as
+// lichen_notify's vibrate feedback (#245: the driver includes no notify header); the shell fires that only for a toast
+// that is allowed to give feedback (not do-not-disturb, not silent, within the source's rate).
 #include "haptics.h"
 
 #include "driver/gpio.h"
@@ -10,7 +11,6 @@
 #include "fw_console.h"
 #include "haptics_cmd.h"
 #include "haptics_setting.h"
-#include "notify_os.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -126,10 +126,14 @@ bool haptics_playing(void) {
     return atomic_load(&s_playing);
 }
 
-// lichen_notify's hook: one buzz per allowed toast, at most one per HP_NOTIFY_GAP_MS
-static void on_notice(ln_level_t level) {
+// One buzz per allowed toast, at most one per HP_NOTIFY_GAP_MS. Before haptics_start worked nothing happens and the
+// gap is not taken, as when the hook was only registered by a successful start.
+void haptics_notice(uint8_t level) {
+    if (!s_ready) {
+        return;
+    }
     if (hp_gate_take(&s_gate, (uint32_t)(esp_timer_get_time() / 1000), HP_NOTIFY_GAP_MS)) {
-        haptics_play(hp_for_notice((uint8_t)level));
+        haptics_play(hp_for_notice(level));
     }
 }
 
@@ -178,8 +182,6 @@ void haptics_start(void) {
         return;
     }
     s_ready = true;
-    ln_feedback_t const fb = {.vibrate = on_notice}; // sound (#67) and led members are not used yet
-    lichen_notify_set_feedback(&fb);
     haptics_register_console();
 }
 

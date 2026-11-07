@@ -16,9 +16,12 @@ extern "C" {
 // Where the settings are kept (the settings service, #235): haptics opens no NVS. Bound at START_EARLY, before
 // haptics_start; until then the defaults apply and nothing is saved.
 void haptics_bind_store(fw_get_u8_fn get, fw_set_u8_fn set);
-// main.c, right after NVS is up: pin low, settings ("haptics" default on, "haptic_str" default high),
-// hooks the notification feedback ("vibrate": a toast with feedback buzzes), "fw vib".
+// main.c, right after NVS is up: pin low, settings ("haptics" default on, "haptic_str" default high), "fw vib".
 void haptics_start(void);
+// A notification toast with feedback (#62): lichen_os registers this as lichen_notify's vibrate hook (#245), so it runs
+// on the LVGL task. level is lichen_notify.h's ln_level_t (0 info, 1 warning, 2 error; hp_for_notice picks the
+// pattern). Nothing before haptics_start worked; at most one buzz per HP_NOTIFY_GAP_MS.
+void haptics_notice(uint8_t level);
 void haptics_play(hp_pattern_t p);          // honours the setting and updates; replaces a running buzz
 void haptics_force(hp_pattern_t p);         // "fw vib test": ignores the rate limit but not the setting
 void haptics_stop(void);                    // motor off now (power off / restart)

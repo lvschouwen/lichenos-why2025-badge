@@ -11,4 +11,4 @@ idf_component_register(SRCS "sensors.c" "sensors_bus.c" "sensors_imu.c" "sensors
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "${bmi}" "${bme}"
                        REQUIRES esp_driver_i2c
-                       PRIV_REQUIRES board lichen_api fw_console esp_driver_tsens esp_timer esp_rom freertos log)
+                       PRIV_REQUIRES board fw_console esp_driver_tsens esp_timer esp_rom freertos log)

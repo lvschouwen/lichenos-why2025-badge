@@ -4,7 +4,12 @@
 // on a short-lived task: 30 s after the first change of a batch, and never sooner than 30 s after the last save
 // began, so a source raising errors in a loop costs one write per 30 s; a new error saves after 3 s within that gap,
 // a removal or a clear after 3 s regardless. Normally a few writes a day. Plain FAT writes; nothing maps flash.
+// The status LED and the motor sit below notify (L2): the service pushes do-not-disturb and "anything unread" to the
+// hooks lichen_os binds (notify_bind.h), and fires the feedback hooks it was given; neither driver calls in (#245).
 #include "notify_os.h"
+#include "notify_bind.h"
+#include "notify_push.h"
+#include "notify_ring.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -61,6 +66,10 @@ static fw_set_u8_fn      s_set;
 static atomic_uint       s_generation;
 static bool (*s_clock_set)(void);
 static ln_feedback_t     s_feedback;
+// The state pushed to notify_bind.h's hooks. One critical section keeps each value and its push in the order the
+// changes happened: unread is also only pushed under s_lock, where the history changes, dnd from any task.
+static npush_t           s_push;
+static portMUX_TYPE      s_push_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE      s_save_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool              s_saving, s_save_again;
 static uint32_t          s_saves, s_save_errors;
@@ -194,10 +203,26 @@ static void schedule_save_locked(save_when_t when) {
     }
 }
 
-// The history changed: views read it again, the file follows
+// Under s_lock: the LED is told whether anything is unread, in the order the history changed
+static void push_unread_locked(void) {
+    bool any = nr_unread(s_ring, NULL) > 0;
+    portENTER_CRITICAL(&s_push_mux);
+    npush_unread(&s_push, any);
+    portEXIT_CRITICAL(&s_push_mux);
+}
+
+static void push_dnd(bool on) {
+    portENTER_CRITICAL(&s_push_mux);
+    atomic_store(&s_dnd, on);
+    npush_dnd(&s_push, on);
+    portEXIT_CRITICAL(&s_push_mux);
+}
+
+// The history changed: views read it again, the file follows, the LED is told
 static void changed_locked(save_when_t when) {
     atomic_store(&s_generation, s_ring->generation);
     schedule_save_locked(when);
+    push_unread_locked();
 }
 
 // ---- loading --------------------------------------------------------------------------------------------------------
@@ -282,8 +307,11 @@ void lichen_notify_start(bool storage_ok) {
     } else {
         nr_init(s_ring, 1);
     }
-    atomic_store(&s_dnd, nstore_dnd_load(s_get));
+    push_dnd(nstore_dnd_load(s_get));
     atomic_store(&s_generation, s_ring->generation);
+    lock();
+    push_unread_locked(); // the history kept from the last boot
+    unlock();
     atomic_store(&s_started, true);
     notify_cmd_register();
 }
@@ -291,6 +319,12 @@ void lichen_notify_start(bool storage_ok) {
 void lichen_notify_bind_store(fw_get_u8_fn get, fw_set_u8_fn set) {
     s_get = get;
     s_set = set;
+}
+
+void lichen_notify_set_state_hooks(ln_state_hooks_t const *hooks) {
+    portENTER_CRITICAL(&s_push_mux);
+    npush_bind(&s_push, hooks);
+    portEXIT_CRITICAL(&s_push_mux);
 }
 
 // ---- per-source switches --------------------------------------------------------------------------------------------
@@ -554,7 +588,7 @@ bool lichen_notify_dnd(void) {
 }
 
 void lichen_notify_set_dnd(bool on) {
-    atomic_store(&s_dnd, on);
+    push_dnd(on);
     if (!nstore_dnd_save(s_set, on)) {
         ESP_LOGE(TAG, "do-not-disturb not saved");
     }
@@ -569,15 +603,7 @@ void lichen_notify_set_feedback(ln_feedback_t const *fb) {
 }
 
 void lichen_notify_feedback(ln_level_t level, bool on) {
-    if (on && s_feedback.sound) {
-        s_feedback.sound(level);
-    }
-    if (on && s_feedback.vibrate) {
-        s_feedback.vibrate(level);
-    }
-    if (s_feedback.led) {
-        s_feedback.led(level, on);
-    }
+    npush_feedback(&s_feedback, level, on);
 }
 
 void lichen_notify_stats(ln_stats_t *out) {

@@ -1,7 +1,8 @@
 #pragma once
 // The status LED service (#74): blue LED D1 on the M.2 card, P4 GPIO51. The OS owns the pin; apps raise notices
 // (lichen_notify.h) and the LED follows: unread = a short pulse every 4 s, an update being received = fast blink.
-// Do-not-disturb keeps the notice pulse dark. Not part of the app API.
+// Do-not-disturb keeps the notice pulse dark. Not part of the app API. The notification service pushes its state in
+// through led_set_dnd and led_set_unread (lichen_os binds them, #245); the LED includes no notify header.
 
 #include <stdbool.h>
 #include "fw_store.h"
@@ -19,11 +20,15 @@ extern "C" {
 // Where the setting is kept (the settings service, #235): led opens no NVS. Bound at START_EARLY, before led_start;
 // until then the default (on) applies and nothing is saved.
 void led_bind_store(fw_get_u8_fn get, fw_set_u8_fn set);
-// main.c, once after lichen_notify_start: reads the setting ("status_led", default on), configures the
+// main.c, once after lichen_notify_start (which pushes the kept history's unread state before): reads the setting ("status_led", default on), configures the
 // pin and starts the 50 ms esp_timer. "fw led".
 void led_start(void);
 bool led_enabled(void);
 void led_set_enabled(bool on);     // Settings › Notifications › Status LED; saved
+// notify_bind.h's state hooks: safe from any task and inside a critical section (each only stores the value); the next
+// 50 ms tick shows it. Both false until the first push.
+void led_set_dnd(bool on);
+void led_set_unread(bool any);
 void led_set_updating(bool on);    // main.c's OTA hooks
 void led_set_override(led_override_t o);
 led_pattern_t led_current(void);

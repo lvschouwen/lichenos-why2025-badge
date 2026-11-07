@@ -1,18 +1,15 @@
 #pragma once
 // The notification service's OS side (#62): the shell's toast, centre and status bar, main.c and the console. Not for
-// apps (they use lichen_notify.h). Everything is safe from any task unless it says otherwise.
+// apps (they use lichen_notify.h). Everything is safe from any task unless it says otherwise. A gate header for the
+// shell, its privileged client (#245); lichen_notify implements it. What lichen_os wires into the service at boot
+// (the settings store, the LED's state hooks) is lichen_notify's own notify_bind.h, not the gate's.
 
-#include "fw_store.h"
 #include "lichen_notify.h"
-#include "notify_ring.h"
+#include "notify_entry.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Where do-not-disturb and the per-source switches are kept (the settings service, #235): notify opens no NVS. Bound
-// at START_EARLY, before lichen_notify_start; until then the defaults apply and nothing is saved.
-void lichen_notify_bind_store(fw_get_u8_fn get, fw_set_u8_fn set);
 
 // main.c, once, right after storage_mount (whatever it returned): the mutex, the PSRAM history, the saved file (when
 // the drive is up), the do-not-disturb setting, "fw notify". lichen_notify() returns 0 before this.
@@ -48,10 +45,11 @@ typedef struct {
 } ln_toast_t;
 bool lichen_notify_next_toast(ln_toast_t *out); // false when none is waiting
 
-// Sound (#67), vibration (#68), status LED (#74): every member may be NULL; lichen_haptics sets vibrate.
-// lichen_notify_set_feedback replaces the whole struct: one owner registers all members, or a second caller drops
-// the first one's (sound must merge into the haptics registration, not call it again). The shell fires them when it
-// shows a toast that has feedback (led on), and when that toast goes (led off).
+// Sound (#67), vibration (#68), status LED (#74): every member may be NULL; lichen_os sets vibrate onto haptics at boot
+// (os_bind.c, #245: the drivers below notify never call it). lichen_notify_set_feedback replaces the whole struct: one
+// owner registers all members, or a second caller drops the first one's (sound must join os_bind.c's registration,
+// not call it again). The shell fires them on the LVGL task when it shows a toast that has feedback (led on), and when
+// that toast goes (led off).
 typedef struct {
     void (*sound)(ln_level_t level);
     void (*vibrate)(ln_level_t level);

@@ -11,7 +11,6 @@
 #include "c6link.h"
 #include "lichen_mdns.h"
 #include "wifi_service.h"
-#include "lichen_radio.h"
 #include "console_cmd.h" // CONSOLE_WIFI_CMD_MAX
 #include "fw_console.h"
 #include "esp_app_desc.h"
@@ -33,7 +32,7 @@
 #include "ota_rle.h"
 #include "ota_valid.h"
 #include "miniz.h" // the ROM inflater
-#include "settings_store.h"
+#include "ota_os.h"
 #include "sha256.h"
 
 #include <errno.h>
@@ -104,7 +103,7 @@ void ota_server_set_enabled(bool on) {
     }
     auto_closed = false; // on or off by hand supersedes a timer close: the saved setting now says what it says (#125)
     server_on = on;
-    settings_set_u8(OTA_WIFI_KEY, on ? 1 : 0);
+    ota_os_set_u8(OTA_WIFI_KEY, on ? 1 : 0);
     ESP_LOGI(TAG, "update server over Wi-Fi switched %s", on ? "on" : "off");
 }
 
@@ -115,7 +114,7 @@ uint8_t ota_server_auto_off(void) {
 void ota_server_set_auto_off(uint8_t minutes) {
     armed_s  = (uint32_t)now_s(); // a new time counts from now, not from boot
     auto_min = minutes;
-    settings_set_u8(OTA_AUTO_KEY, minutes);
+    ota_os_set_u8(OTA_AUTO_KEY, minutes);
     ESP_LOGI(TAG, "update server auto-off: %u min (0 = never)", (unsigned)minutes);
 }
 
@@ -1398,7 +1397,7 @@ static bool read_token_file(char *out) {
 
 static bool read_token_nvs(char *out) {
     char text[OTA_TOKEN_LEN + 8] = {0};
-    settings_get_str(TOKEN_NVS_KEY, text, sizeof(text), "");
+    ota_os_get_str(TOKEN_NVS_KEY, text, sizeof(text), "");
     if (strlen(text) != OTA_TOKEN_LEN || !token_text_valid(text)) {
         return false;
     }
@@ -1430,7 +1429,7 @@ static bool load_or_create_token(void) {
     bool wrote_nvs  = false;
     char stored[OTA_TOKEN_LEN + 8];
     if (!(from_nvs || (read_token_nvs(stored) && strcmp(stored, token) == 0))) {
-        wrote_nvs = settings_set_str(TOKEN_NVS_KEY, token);
+        wrote_nvs = ota_os_set_str(TOKEN_NVS_KEY, token);
     }
     return ota_token_kept(from_file, from_nvs, wrote_file, wrote_nvs);
 }
@@ -1456,7 +1455,7 @@ static int open_listener(void) {
 
 static void serve(int ls) {
     // Closes with Wi-Fi (the OS switch or airplane mode, #108): the C6 stops answering and the IP is gone
-    while (server_on && lichen_radio_get(RADIO_WIFI)) {
+    while (server_on && ota_os_wifi_on()) {
         autooff_check();
         if (!server_on) {
             break;
@@ -1492,7 +1491,7 @@ static void server_task(void *arg) {
         // Wi-Fi may come up late or not at all (no credentials), and the server may be switched off (#44)
         // The .local name follows Wi-Fi (#156), the _http service the server switch
         for (;;) {
-            bool net = lichen_radio_get(RADIO_WIFI) && wifi_has_ip(NULL, 0);
+            bool net = ota_os_wifi_on() && wifi_has_ip(NULL, 0);
             lichen_mdns_update(net, net && server_on, OTA_PORT);
             if (net && server_on) {
                 break;
@@ -1508,7 +1507,7 @@ static void server_task(void *arg) {
         ESP_LOGI(TAG, "update server on port %d", OTA_PORT);
         serve(ls);
         close(ls);
-        lichen_mdns_update(lichen_radio_get(RADIO_WIFI) && wifi_has_ip(NULL, 0), false, OTA_PORT);
+        lichen_mdns_update(ota_os_wifi_on() && wifi_has_ip(NULL, 0), false, OTA_PORT);
         piece_expire(true); // switched off half-way through an upload
         ESP_LOGI(TAG, "update server closed");
     }
@@ -1549,8 +1548,8 @@ static void cmd_token(char const *args) {
 void ota_server_start(void) {
     console_register("ota", "ota [on|off | auto <off|minutes>] (the update server over Wi-Fi, also Settings)",
                      cmd_ota);
-    server_on = settings_get_u8(OTA_WIFI_KEY, OTA_WIFI_DEFAULT) != 0;
-    uint8_t m = settings_get_u8(OTA_AUTO_KEY, 0);
+    server_on = ota_os_get_u8(OTA_WIFI_KEY, OTA_WIFI_DEFAULT) != 0;
+    uint8_t m = ota_os_get_u8(OTA_AUTO_KEY, 0);
     auto_min  = m <= OTA_AUTOOFF_MAX_MIN ? m : 0;
     armed_s   = (uint32_t)now_s(); // boot
     token_refused = !load_or_create_token();

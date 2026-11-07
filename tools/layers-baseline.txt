@@ -6,11 +6,6 @@
 # STALE, and GREW against the merge-base copy of this file). Fixed one? `tools/check_layers.sh --shrink` drops or lowers
 # entries (never adds). `tools/check_layers.sh --report` lists every violation with its place.
 # First version created by --init (2026-11-07).
-A	lichen_api -> lichen_notify	1
-A	lichen_boot -> lichen_api	1
-A	lichen_clock -> lichen_api	1
-A	lichen_haptics -> lichen_notify	1
-A	lichen_led -> lichen_notify	1
 A	lichen_shell -> board	1
 A	lichen_shell -> crash	1
 A	lichen_shell -> lichen_boot	1
@@ -22,25 +17,12 @@ A	lichen_shell -> lora	1
 A	lichen_shell -> ota	1
 A	lichen_shell -> sdcard	1
 A	lichen_shell -> storage	1
-A	ota -> lichen_api	1
-A	sensors -> lichen_api	1
-B	lichen_boot -> lichen_api	1
-B	lichen_clock -> lichen_api	1
-B	lichen_haptics -> lichen_notify	1
-B	lichen_led -> lichen_notify	2
 B	lichen_shell -> board	6
 B	lichen_shell -> lichen_boot	4
 B	lichen_shell -> lichen_clock	10
 B	lichen_shell -> lichen_led	1
 B	lichen_shell -> lichen_mdns	2
 B	lichen_shell -> lichen_net	7
-B	lichen_shell -> lichen_notify	11
-B	ota -> lichen_api	2
-B	sensors -> lichen_api	3
-C	lichen_haptics:lichen_notify_set_feedback	1
-C	lichen_led:lichen_notify_dnd	1
-C	lichen_led:lichen_notify_generation	1
-C	lichen_led:lichen_notify_unread	1
 C	lichen_shell:boot_overall_pct	1
 C	lichen_shell:boot_progress_label	1
 C	lichen_shell:boot_progress_view	1

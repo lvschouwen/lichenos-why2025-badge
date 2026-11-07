@@ -6,7 +6,7 @@
 #include "haptics.h"
 #include "led.h"
 #include "lichen_os.h"
-#include "notify_os.h"
+#include "notify_bind.h"
 #include "nvs.h"
 #include "sensors.h"
 #include "settings_secret.h"
@@ -147,6 +147,7 @@ void settings_bind_services(void) {
     led_bind_store(settings_get_u8, settings_set_u8);
     haptics_bind_store(settings_get_u8, settings_set_u8);
     system_restart_bind_store(settings_get_blob, settings_set_blob);
+    os_bind_lower();
 }
 
 // Separate from settings_bind_services() on purpose (#235): the Wi-Fi credentials are the secrets class's first user

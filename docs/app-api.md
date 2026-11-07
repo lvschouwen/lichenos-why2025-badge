@@ -14,7 +14,7 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
 
 | Component | For |
 |---|---|
-| `lichen_api` | the app API below (it brings `lvgl` and `lichen_notify` along) |
+| `lichen_api` | the app API below (it brings `lvgl` along; `lichen_notify.h` is one of its headers since #245) |
 | `lichen_clock` | reading the time and proposing one |
 | `lichen_random` | random bytes |
 | `lora` | the LoRa radio, as its one owner |

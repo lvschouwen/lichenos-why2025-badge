@@ -5,7 +5,7 @@
 #include "haptics.h"
 #include "led.h"
 #include "lichen_os.h"
-#include "notify_os.h"
+#include "notify_bind.h"
 #include "nvs.h"
 #include "sensors.h"
 #include "settings_secret.h"
@@ -51,6 +51,8 @@ void haptics_bind_store(fw_get_u8_fn get, fw_set_u8_fn set) {
 void system_restart_bind_store(fw_get_blob_fn get, fw_set_blob_fn set) {
     (void)get;
     (void)set;
+}
+void os_bind_lower(void) { // os_bind.c, tested on its own in os_bind_test.c
 }
 
 static void plain_refuses_secrets(void) {

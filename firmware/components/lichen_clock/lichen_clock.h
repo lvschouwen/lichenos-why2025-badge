@@ -57,6 +57,9 @@ int64_t clock_source_age_s(void);
 // P4, so it is a key in NVS): was is what it held at boot, save(src) writes a new source. Called once at boot by
 // clock_store.c; save is called outside the clock's lock, only when the source changes, from the proposer's task.
 void clock_set_store(clock_src_t was, void (*save)(clock_src_t src));
+// Where clock_store.c keeps that record (badge_fw "clock_src", the settings service, #245): lichen_os binds it in
+// start_nvs, before clock_console_register reads it. Unbound, nothing was kept and nothing is saved.
+void clock_bind_store(uint8_t (*get)(char const *key, uint8_t def), bool (*set)(char const *key, uint8_t value));
 
 // Registers "fw clock" (clock_cmd.c), notes the RTC and esp_timer readings it measures drift against and reads the
 // source record (clock_store.c). Call early, after NVS is up.

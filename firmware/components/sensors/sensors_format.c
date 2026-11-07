@@ -58,7 +58,7 @@ static double age_s(int64_t now_us, int64_t at_us) {
     return now_us > at_us ? (double)(now_us - at_us) / 1e6 : 0.0;
 }
 
-int sensors_fmt_imu(char *buf, size_t cap, lichen_sensors_t const *s, int64_t now_us, char const *why) {
+int sensors_fmt_imu(char *buf, size_t cap, sensors_snap_t const *s, int64_t now_us, char const *why) {
     if (!s->imu_valid) {
         return fitted(snprintf(buf, cap, "imu: %s", why ? why : "no data"), cap);
     }
@@ -79,7 +79,7 @@ int sensors_fmt_imu(char *buf, size_t cap, lichen_sensors_t const *s, int64_t no
     );
 }
 
-int sensors_fmt_env(char *buf, size_t cap, lichen_sensors_t const *s, int64_t now_us, char const *why) {
+int sensors_fmt_env(char *buf, size_t cap, sensors_snap_t const *s, int64_t now_us, char const *why) {
     if (!s->env_valid) {
         return fitted(snprintf(buf, cap, "env: %s", why ? why : "no data"), cap);
     }
@@ -102,7 +102,7 @@ int sensors_fmt_env(char *buf, size_t cap, lichen_sensors_t const *s, int64_t no
     );
 }
 
-int sensors_fmt_die(char *buf, size_t cap, lichen_sensors_t const *s, int64_t now_us, char const *why) {
+int sensors_fmt_die(char *buf, size_t cap, sensors_snap_t const *s, int64_t now_us, char const *why) {
     if (!s->die_valid) {
         return fitted(snprintf(buf, cap, "die: %s", why ? why : "no data"), cap);
     }

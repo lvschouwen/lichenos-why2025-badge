@@ -1399,8 +1399,7 @@ add_executable(sensors_format_test
     ${CMAKE_CURRENT_SOURCE_DIR}/sensors_format_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sensors/sensors_format.c
 )
-target_include_directories(sensors_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sensors
-                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_include_directories(sensors_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sensors)
 target_compile_options(sensors_format_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(sensors_format_test PRIVATE m)
 add_test(NAME sensors_format_test COMMAND sensors_format_test)
@@ -1416,7 +1415,8 @@ target_compile_options(crashlog_fmt_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME crashlog_fmt_test COMMAND crashlog_fmt_test)
 
 add_executable(notify_ring_test ${CMAKE_CURRENT_SOURCE_DIR}/notify_ring_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_notify/notify_ring.c)
-target_include_directories(notify_ring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_notify)
+target_include_directories(notify_ring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_notify
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(notify_ring_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME notify_ring_test COMMAND notify_ring_test)
 
@@ -1486,6 +1486,27 @@ target_include_directories(settings_secret_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
                            ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot)
 target_compile_options(settings_secret_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME settings_secret_test COMMAND settings_secret_test)
+
+# The notification service's state and feedback pushes to the drivers below it (#245)
+set(NPT_FW ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components)
+add_executable(notify_push_test ${CMAKE_CURRENT_SOURCE_DIR}/notify_push_test.c ${NPT_FW}/lichen_notify/notify_push.c)
+target_include_directories(notify_push_test PRIVATE ${NPT_FW}/lichen_notify ${NPT_FW}/lichen_api ${NPT_FW}/fw_console)
+target_compile_options(notify_push_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME notify_push_test COMMAND notify_push_test)
+
+# The update server's bound settings and Wi-Fi switch, with their unbound defaults (#245)
+add_executable(ota_os_test ${CMAKE_CURRENT_SOURCE_DIR}/ota_os_test.c ${NPT_FW}/ota/ota_os.c)
+target_include_directories(ota_os_test PRIVATE ${NPT_FW}/ota)
+target_compile_options(ota_os_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME ota_os_test COMMAND ota_os_test)
+
+# lichen_os's wiring below the gate (#245): the LED's and the motor's notify hooks, the lower services' settings
+add_executable(os_bind_test ${CMAKE_CURRENT_SOURCE_DIR}/os_bind_test.c ${NPT_FW}/lichen_os/os_bind.c ${NPT_FW}/ota/ota_os.c)
+target_include_directories(os_bind_test PRIVATE ${NPT_FW}/lichen_os ${NPT_FW}/lichen_api ${NPT_FW}/lichen_notify
+                           ${NPT_FW}/lichen_boot ${NPT_FW}/lichen_haptics ${NPT_FW}/lichen_led ${NPT_FW}/lichen_clock
+                           ${NPT_FW}/ota ${NPT_FW}/fw_console)
+target_compile_options(os_bind_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME os_bind_test COMMAND os_bind_test)
 
 # settings_store.c over the NVS stub (#235): the plain calls refuse a secret, settings_bind_net's store keeps them apart
 set(SST_FW ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components)
@@ -1566,6 +1587,9 @@ add_custom_target(run_tests
     factory_plan_test
     settings_secret_test
     settings_store_test
+    notify_push_test
+    ota_os_test
+    os_bind_test
     release_notes_test
     qr_payload_test
     notes_model_test

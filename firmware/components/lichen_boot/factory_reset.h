@@ -17,5 +17,8 @@ void factory_reset_boot_nvs(void);
 void factory_reset_boot_storage(void);
 // main.c, right after lichen_notify_start: an error notice when this boot's reset could not erase from flash
 void factory_reset_post_notices(void);
+// How those notices are raised (#245: lichen_boot does not include the gate's lichen_notify.h): lichen_os binds an
+// error notice from source "lichen" in start_nvs. Unbound, the notice only goes to the log.
+void factory_reset_bind_notice(void (*error)(char const *title, char const *body));
 // "fw factory-reset": plan (a dry run, erases nothing) | settings YES | all YES
 void factory_reset_console_register(void);

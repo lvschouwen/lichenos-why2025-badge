@@ -1,8 +1,8 @@
 #include "boot_progress.h"
 
 #include "fw_console.h"
+#include "fw_store.h"
 #include "log_tap.h"
-#include "settings_store.h"
 
 #include "esp_timer.h"
 
@@ -34,12 +34,27 @@ void boot_progress_progress(boot_step_t step, int pct) {
 
 // "boot fail <step>": the next boot marks that step failed, once, so the failure view can be seen on the bench. The
 // flag lives in NVS: main.c calls boot_progress_nvs_up() right after nvs_flash_init, which reads and clears it.
-static int8_t fail_step = -1;
+static int8_t       fail_step = -1;
+static fw_get_u8_fn s_get; // the settings service (#245): lichen_boot opens no settings of its own
+static fw_set_u8_fn s_set;
+
+void boot_progress_bind_store(uint8_t (*get)(char const *key, uint8_t def), bool (*set)(char const *key, uint8_t value)) {
+    s_get = get;
+    s_set = set;
+}
+
+static uint8_t flag_get(void) {
+    return s_get ? s_get("boot_fail", 0) : 0;
+}
+
+static bool flag_set(uint8_t v) {
+    return s_set && s_set("boot_fail", v);
+}
 
 void boot_progress_nvs_up(void) {
-    uint8_t flag = settings_get_u8("boot_fail", 0);
+    uint8_t flag = flag_get();
     if (flag) {
-        settings_set_u8("boot_fail", 0);
+        flag_set(0);
         fail_step = (int8_t)boot_fail_step(flag);
     }
 }
@@ -68,7 +83,7 @@ static void cmd_boot(char const *args) {
     if (strncmp(args, "fail ", 5) == 0) {
         for (int i = 0; i < BOOT_STEP_COUNT; i++) {
             if (boot_step_failable((boot_step_t)i) && strcasecmp(args + 5, boot_step_label((boot_step_t)i)) == 0) {
-                settings_set_u8("boot_fail", (uint8_t)(i + 1));
+                flag_set((uint8_t)(i + 1));
                 console_reply("boot: %s will fail on the next boot (once)", args + 5);
                 return;
             }

@@ -3,7 +3,8 @@
 # crash log, the LVGL port lock or the board live in lichen_os (L3) and resolve at link time (main requires both).
 # lichen_ui.h's navigation and lichen_keys.h are the shell's work: lichen_ui_ops.c forwards them to the table the shell
 # sets at boot (pure, ui_ops_test.c, #221), so the gate links to nothing above it. Apps PRIV_REQUIRE lichen_api, never lichen_os or
-# lichen_shell. REQUIRES lichen_notify publicly: notifications (lichen_notify.h, #62) are part of the app API.
+# lichen_shell. Notifications are gate headers too (#245): lichen_notify.h (apps), notify_os.h (the shell) and
+# notify_entry.h (an entry's type), implemented by the lichen_notify service (L3); the gate depends on no service.
 # Pure and host-tested: list_filter.c, scroll_anchor.c, tz_table.c, app_ns.c, fs_path.c (an app's directory paths),
 # crashlog_fmt.c (the Crash log app's text), badge_table.c (the tile badges home draws, #102), legacy_blob.c,
 # settings_backup.c, qr_payload.c (#153), task_book.c and mem_book.c (#181), tile_order.c (#189), hold_exit.c (#180),
@@ -19,5 +20,5 @@ idf_component_register(SRCS "lichen_app.c" "fonts.c" "menu.c" "menu_filter.c" "l
                             "badge_table.c" "lichen_ui.c" "ui_text.c" "qr_payload.c" "qr_screen.c" "tile_order.c"
                             "task_book.c" "mem_book.c" "hold_exit.c" "os_name.c" "lichen_ui_ops.c"
                        INCLUDE_DIRS "."
-                       REQUIRES lvgl__lvgl lichen_notify
+                       REQUIRES lvgl__lvgl
                        PRIV_REQUIRES freertos fw_console)

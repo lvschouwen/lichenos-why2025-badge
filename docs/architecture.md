@@ -221,6 +221,11 @@ The rule: **core 1 draws, core 0 talks to the world.**
   keeps a history of 48 in `/storage/lichen/notify.bin` (the Notifications tile, the cloud key). The user switches
   sources on or off and sets do-not-disturb in Settings › Notifications. Lichen raises its own notices too (a crash,
   the PSRAM check, the clock, an update, the C6 coming back, the SD card, a sensor, low storage).
+  Its headers are the gate's (`lichen_api/lichen_notify.h` for apps, `notify_os.h` for the shell, `notify_entry.h`),
+  implemented by the `lichen_notify` service (L3) like `lichen_os` implements the rest (#245). The drivers below it
+  never call it: lichen_os (`os_bind.c`) binds the status LED's `led_set_dnd`/`led_set_unread`, which notify calls
+  on every do-not-disturb change and history change, and `haptics_notice` as the vibrate feedback the shell fires on
+  the LVGL task for a toast. L3 services that raise a notice (the factory reset) get a hook bound the same way.
 - Home's tile order (#189) is a display order only: the app's registry index stays its identity (screen ids, the nav
   stack, shortcuts, badges, notifications). Stored as `badge_fw/home_order`, text `"1:settings,about,files,..."`
   (version, then app ids; `lichen_api/tile_order.h`): unknown and duplicate ids are skipped, apps not named follow in

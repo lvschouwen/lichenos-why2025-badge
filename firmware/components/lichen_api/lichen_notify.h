@@ -2,7 +2,8 @@
 // Notifications (#62): any app, and Lichen itself, raises a notice; the OS keeps a history of 48 (kept across
 // reboots in /storage/lichen/notify.bin), shows a toast over the current screen that never takes the focus, puts an
 // unread dot in the status bar, and lists them all
-// in the notification centre (the Notifications tile, the cloud key). Part of the app API: lichen_api REQUIRES it.
+// in the notification centre (the Notifications tile, the cloud key). A gate header (#245, #216 decision 1): the
+// lichen_notify service (L3) implements it, the way lichen_os implements the others.
 //
 // Every call here is safe from any task (never from an ISR); the strings are copied. A source is the app's id
 // ("meshcore") or "lichen" for the OS; target is the app's own place key ("ch:badgetest", "dm:<pubkey prefix>"), which

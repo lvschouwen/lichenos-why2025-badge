@@ -45,7 +45,7 @@ int main(void) {
     CHECK(!sensors_imu_plausible(acc, 4.0f, gyr, 1000.0f));
 
     // Lines
-    lichen_sensors_t s = {0};
+    sensors_snap_t s = {0};
     char             line[160];
     CHECK(sensors_fmt_imu(line, sizeof line, &s, 0, "not found") == 14 && strcmp(line, "imu: not found") == 0);
     sensors_fmt_env(line, sizeof line, &s, 0, NULL);

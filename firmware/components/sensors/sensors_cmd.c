@@ -2,7 +2,6 @@
 // `fw sensors start|stop`; `fw sensors boot on|off` (#115: whether boot starts the service)
 #include "esp_timer.h"
 #include "fw_console.h"
-#include "lichen_sensors.h"
 #include "sensors.h"
 #include "sensors_chips.h"
 #include "sensors_format.h"
@@ -38,7 +37,7 @@ static char const *why(bool running, bool up, int err, uint32_t inits, char *buf
 }
 
 static void print_lines(void) {
-    lichen_sensors_t s;
+    sensors_snap_t s;
     sensors_stats_t  st;
     sensors_get(&s);
     sensors_stats(&st);

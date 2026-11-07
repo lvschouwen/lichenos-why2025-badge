@@ -1,5 +1,6 @@
-// The status LED service (#74): one 50 ms esp_timer evaluates led_pick() and writes the pin on change. Unread is
-// re-read from lichen_notify only when its history changed (the generation counter is lock-free).
+// The status LED service (#74): one 50 ms esp_timer evaluates led_pick() and writes the pin on change. Do-not-disturb
+// and "anything unread" are pushed in by the notification service (led_set_dnd / led_set_unread, bound by lichen_os,
+// #245): the LED never calls up into notify.
 #include "led.h"
 #include "led_cmd.h"
 #include "led_setting.h"
@@ -8,8 +9,6 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "fw_console.h"
-#include "lichen_notify.h"
-#include "notify_os.h"
 
 #include <stdatomic.h>
 
@@ -23,10 +22,10 @@ static atomic_bool  s_enabled = true;
 static atomic_bool  s_updating;
 static atomic_int   s_override = LED_AUTO;
 static atomic_int   s_pattern;
+static atomic_bool  s_dnd;    // pushed by notify from any task, read by the tick
+static atomic_bool  s_unread; // likewise
 static esp_timer_handle_t s_timer;
 static bool         s_started, s_lit;
-static uint32_t     s_generation = UINT32_MAX;
-static bool         s_unread;
 
 static void drive(bool lit) {
     s_lit = lit;
@@ -36,8 +35,8 @@ static void drive(bool lit) {
 static led_pattern_t pick_now(void) {
     led_inputs_t const in = {
         .enabled  = atomic_load(&s_enabled),
-        .dnd      = lichen_notify_dnd(),
-        .unread   = s_unread,
+        .dnd      = atomic_load(&s_dnd),
+        .unread   = atomic_load(&s_unread),
         .updating = atomic_load(&s_updating),
         .override = (led_override_t)atomic_load(&s_override),
     };
@@ -46,11 +45,6 @@ static led_pattern_t pick_now(void) {
 
 static void tick(void *arg) {
     (void)arg;
-    uint32_t gen = lichen_notify_generation();
-    if (gen != s_generation) {
-        s_generation = gen;
-        s_unread     = lichen_notify_unread(NULL) > 0;
-    }
     led_pattern_t p = pick_now();
     atomic_store(&s_pattern, p);
     bool lit = led_level(p, (uint32_t)(esp_timer_get_time() / 1000));
@@ -93,6 +87,14 @@ void led_set_enabled(bool on) {
     if (!led_setting_save(s_set, on)) {
         ESP_LOGE(TAG, "setting not saved");
     }
+}
+
+void led_set_dnd(bool on) {
+    atomic_store(&s_dnd, on);
+}
+
+void led_set_unread(bool any) {
+    atomic_store(&s_unread, any);
 }
 
 void led_set_updating(bool on) {

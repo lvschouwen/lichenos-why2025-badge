@@ -9,7 +9,6 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "lichen_sensors.h"
 #include "sdkconfig.h"
 #include "sensors_chips.h"
 #include "sensors_format.h"
@@ -38,7 +37,7 @@ typedef struct {
 } chip_t;
 
 static portMUX_TYPE     lock = portMUX_INITIALIZER_UNLOCKED;
-static lichen_sensors_t snap;  // under lock
+static sensors_snap_t snap;  // under lock
 static sensors_stats_t  stats; // under lock
 
 static TaskHandle_t                task;
@@ -299,7 +298,7 @@ static void sensors_task(void *arg) {
     }
 }
 
-void sensors_get(lichen_sensors_t *out) {
+void sensors_get(sensors_snap_t *out) {
     taskENTER_CRITICAL(&lock);
     *out = snap;
     taskEXIT_CRITICAL(&lock);
