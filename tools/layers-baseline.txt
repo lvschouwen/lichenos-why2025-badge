@@ -29,16 +29,12 @@ B	lichen_clock -> lichen_api	1
 B	lichen_haptics -> lichen_notify	1
 B	lichen_led -> lichen_notify	2
 B	lichen_shell -> board	6
-B	lichen_shell -> crash	2
-B	lichen_shell -> lichen_boot	6
+B	lichen_shell -> lichen_boot	4
 B	lichen_shell -> lichen_clock	10
 B	lichen_shell -> lichen_led	1
 B	lichen_shell -> lichen_mdns	2
 B	lichen_shell -> lichen_net	7
 B	lichen_shell -> lichen_notify	11
-B	lichen_shell -> ota	2
-B	lichen_shell -> sdcard	9
-B	lichen_shell -> storage	3
 B	ota -> lichen_api	2
 B	sensors -> lichen_api	3
 C	lichen_haptics:lichen_notify_set_feedback	1
@@ -62,13 +58,6 @@ C	lichen_shell:clock_source_age_s	1
 C	lichen_shell:clock_source_text	2
 C	lichen_shell:clock_sync_info	2
 C	lichen_shell:clock_verdict_text	1
-C	lichen_shell:crash_recovered	2
-C	lichen_shell:factory_combo_init	1
-C	lichen_shell:factory_combo_key	1
-C	lichen_shell:factory_combo_swallows	1
-C	lichen_shell:factory_combo_tick	1
-C	lichen_shell:factory_level_name	1
-C	lichen_shell:factory_reset_request	2
 C	lichen_shell:heap_caps_aligned_alloc	2
 C	lichen_shell:heap_caps_calloc	6
 C	lichen_shell:heap_caps_check_integrity	1
@@ -107,27 +96,6 @@ C	lichen_shell:lichen_notify_unread	4
 C	lichen_shell:lichen_notify_unread_top	1
 C	lichen_shell:log_clean	1
 C	lichen_shell:log_tap_last	1
-C	lichen_shell:ota_autooff_next	1
-C	lichen_shell:ota_autooff_text	1
-C	lichen_shell:ota_server_auto_closed	1
-C	lichen_shell:ota_server_auto_off	1
-C	lichen_shell:ota_server_enabled	1
-C	lichen_shell:ota_server_refused	1
-C	lichen_shell:ota_server_set_auto_off	1
-C	lichen_shell:ota_server_set_enabled	1
-C	lichen_shell:sd_begin	1
-C	lichen_shell:sd_end	1
-C	lichen_shell:sd_fmt_size	3
-C	lichen_shell:sd_format	1
-C	lichen_shell:sd_info	5
-C	lichen_shell:sd_io_from_errno	1
-C	lichen_shell:sd_mount	1
-C	lichen_shell:sd_mounted	3
-C	lichen_shell:sd_short_text	2
-C	lichen_shell:sd_status_line	1
-C	lichen_shell:sd_unmount	2
-C	lichen_shell:storage_free_bytes	3
-C	lichen_shell:storage_mounted	1
 C	lichen_shell:wifi_an_lookup	1
 C	lichen_shell:wifi_an_scan_due	1
 C	lichen_shell:wifi_bars	3

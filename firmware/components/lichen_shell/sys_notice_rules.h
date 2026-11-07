@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-// sd_state_t's values (sd_policy.h), repeated so this stays free of the SD headers
+// LICHEN_SD_* values (lichen_sys_storage.h), repeated so this stays free of the SD headers
 enum { SYSN_SDS_OFF, SYSN_SDS_NO_CARD, SYSN_SDS_NOT_FAT, SYSN_SDS_ERROR, SYSN_SDS_MOUNTED, SYSN_SDS_REMOVED };
 enum { SYSN_UPD_NONE, SYSN_UPD_UPDATED, SYSN_UPD_ROLLED_BACK }; // upd_result_t
 

@@ -10,9 +10,8 @@
 #include "lichen_app.h"
 #include "os_name.h"
 #include "logo.h"
-#include "sdcard.h"
+#include "lichen_sys_storage.h"
 #include "shell_parts.h"
-#include "storage.h"
 #include "fonts.h"
 #include "theme.h"
 
@@ -81,16 +80,16 @@ static void refresh(lv_timer_t *timer) {
     set_text(value_label[ROW_LORA], shell_sources.lora_up && shell_sources.lora_up() ? "working" : "not available");
 
     uint64_t free_b, total_b;
-    if (storage_free_bytes(&free_b, &total_b)) {
+    if (lichen_sys_storage_free_bytes(&free_b, &total_b)) {
         snprintf(text, sizeof(text), "%.1f MB free of %.1f MB", (double)free_b / 1048576.0, (double)total_b / 1048576.0);
     } else {
         strlcpy(text, "not available", sizeof(text));
     }
     set_text(value_label[ROW_STORAGE], text);
 
-    sd_info_t sd; // cached: the LVGL task never reads the card (#60)
-    sd_info(&sd);
-    sd_short_text(&sd, text, sizeof(text));
+    lichen_sd_info_t sd; // cached: the LVGL task never reads the card (#60)
+    lichen_sys_sd_info(&sd);
+    lichen_sys_sd_short_text(&sd, text, sizeof(text));
     set_text(value_label[ROW_SD], text);
 
     fmt_uptime(text, sizeof(text));

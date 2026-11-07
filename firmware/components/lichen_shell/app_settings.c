@@ -14,13 +14,12 @@
 #include "lichen_radio.h"
 #include "lock_combo.h"
 #include "menu.h"
-#include "ota_autooff.h"
+#include "lichen_sys_storage.h"
+#include "lichen_sys_update.h"
 #include "mdns_name.h"
 #include "lichen_mdns.h"
-#include "ota_server.h"
 #include "psram_speed.h"
 #include "saver_station.h"
-#include "sdcard.h"
 #include "settings_store.h"
 #include "shell_parts.h"
 #include "theme.h"
@@ -485,9 +484,9 @@ static void open_time(void *arg) {
 
 // SD card's row: "28.1 GB free of 29.7 GB", "no card", ... (cached: never reads the card)
 static void sd_value(char *out, size_t cap) {
-    sd_info_t info;
-    sd_info(&info);
-    sd_short_text(&info, out, cap);
+    lichen_sd_info_t info;
+    lichen_sys_sd_info(&info);
+    lichen_sys_sd_short_text(&info, out, cap);
 }
 
 static void notify_value(char *out, size_t cap) {
@@ -554,10 +553,10 @@ static void open_app_page(void *arg) {
 static lv_obj_t *ota_row, *ota_auto_row;
 
 static char const *ota_value(void) {
-    if (ota_server_refused()) {
+    if (lichen_sys_update_refused()) {
         return "Off (no token)"; // #116: no token in /storage or settings this boot, refused until a reboot
     }
-    return ota_server_enabled() ? "On" : ota_server_auto_closed() ? "Off (timer)" : "Off";
+    return lichen_sys_update_enabled() ? "On" : lichen_sys_update_auto_closed() ? "Off (timer)" : "Off";
 }
 
 static void ota_fill(char *out, size_t cap) {
@@ -565,7 +564,7 @@ static void ota_fill(char *out, size_t cap) {
 }
 
 static void ota_auto_value(char *out, size_t cap) {
-    ota_autooff_text(ota_server_auto_off(), out, cap);
+    lichen_sys_update_auto_off_text(lichen_sys_update_auto_off(), out, cap);
 }
 
 static void ota_row_refresh(void) {
@@ -582,13 +581,13 @@ static void ota_row_refresh(void) {
 // The optional auto-off (#110): Enter steps Never, 10 min, 30 min, 1 h, 2 h; it counts from now
 static void step_ota_auto(void *arg) {
     (void)arg;
-    ota_server_set_auto_off(ota_autooff_next(ota_server_auto_off()));
+    lichen_sys_update_set_auto_off(lichen_sys_update_auto_off_next(lichen_sys_update_auto_off()));
     ota_row_refresh();
 }
 
 static void ota_off_answer(bool confirmed) {
     if (confirmed) {
-        ota_server_set_enabled(false);
+        lichen_sys_update_set_enabled(false);
     }
     ota_row_refresh();
 }
@@ -596,8 +595,8 @@ static void ota_off_answer(bool confirmed) {
 // Off cuts tools/badge.sh and the Wi-Fi console too, and only Settings or the USB console bring it back: confirm first
 static void toggle_ota(void *arg) {
     (void)arg;
-    if (!ota_server_enabled()) {
-        ota_server_set_enabled(true);
+    if (!lichen_sys_update_enabled()) {
+        lichen_sys_update_set_enabled(true);
         ota_row_refresh();
         return;
     }

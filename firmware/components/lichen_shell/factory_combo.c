@@ -10,7 +10,7 @@
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "esp_timer.h"
-#include "factory_reset.h"
+#include "lichen_sys_factory.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "fw_console.h"
@@ -27,7 +27,7 @@ static char const TAG[] = "factory";
 #define TASK_STACK 6144 // builds the question page (the Power goodbye page needs as much)
 
 static portMUX_TYPE     lock = portMUX_INITIALIZER_UNLOCKED;
-static factory_combo_t  combo;
+static lichen_fc_combo_t  combo;
 static int64_t          start_us;
 static TaskHandle_t     task;
 static lv_obj_t        *page; // on the top layer while the question is up
@@ -40,11 +40,11 @@ static uint32_t now_ms(void) {
 static bool on_raw(key_raw_event_t const *ev, void *arg) {
     (void)arg;
     portENTER_CRITICAL(&lock);
-    bool       was = factory_combo_swallows(&combo);
-    fc_event_t e   = factory_combo_key(&combo, ev->code, ev->pressed, now_ms());
-    bool       now = factory_combo_swallows(&combo);
+    bool       was = lichen_sys_factory_combo_swallows(&combo);
+    lichen_fc_event_t e   = lichen_sys_factory_combo_key(&combo, ev->code, ev->pressed, now_ms());
+    bool       now = lichen_sys_factory_combo_swallows(&combo);
     portEXIT_CRITICAL(&lock);
-    if (e != FC_EV_NONE && task) {
+    if (e != LICHEN_FC_EV_NONE && task) {
         xTaskNotify(task, (uint32_t)e, eSetValueWithOverwrite);
     }
     return was || now; // the Enter or Esc that answered the question too
@@ -90,14 +90,14 @@ static void close_question(void) {
     }
 }
 
-static void handle(fc_event_t e) {
+static void handle(lichen_fc_event_t e) {
     switch (e) {
-    case FC_EV_ARM:
+    case LICHEN_FC_EV_ARM:
         if (lichen_screen_locked()) {
             // The pocket lock (#75) is unlocked with the same two keys: never also a reset question. It cannot engage
             // this early (30 s idle at the least), so only "fw lock now" gets here.
             portENTER_CRITICAL(&lock);
-            combo.state = FC_OVER;
+            combo.state = LICHEN_FC_OVER;
             portEXIT_CRITICAL(&lock);
             ESP_LOGI(TAG, "boot keys held while locked: no reset question");
             break;
@@ -105,15 +105,15 @@ static void handle(fc_event_t e) {
         ESP_LOGI(TAG, "boot keys held: asking for a settings reset");
         show_question();
         break;
-    case FC_EV_CONFIRM:
+    case LICHEN_FC_EV_CONFIRM:
         ESP_LOGI(TAG, "boot keys: settings reset confirmed");
-        if (factory_reset_request(FACTORY_SETTINGS)) {
+        if (lichen_sys_factory_request(LICHEN_FACTORY_SETTINGS)) {
             system_restart("factory reset settings (boot keys)");
         }
         ESP_LOGE(TAG, "boot keys: reset not saved, nothing erased");
         close_question();
         break;
-    case FC_EV_CANCEL:
+    case LICHEN_FC_EV_CANCEL:
         ESP_LOGI(TAG, "boot keys: reset cancelled");
         close_question();
         break;
@@ -125,12 +125,12 @@ static void handle(fc_event_t e) {
 static void combo_task(void *arg) {
     (void)arg;
     for (;;) {
-        uint32_t v = FC_EV_NONE;
+        uint32_t v = LICHEN_FC_EV_NONE;
         xTaskNotifyWait(0, UINT32_MAX, &v, pdMS_TO_TICKS(TICK_MS));
-        handle((fc_event_t)v);
+        handle((lichen_fc_event_t)v);
         portENTER_CRITICAL(&lock);
-        fc_event_t e    = factory_combo_tick(&combo, now_ms());
-        bool       over = combo.state == FC_OVER;
+        lichen_fc_event_t e    = lichen_sys_factory_combo_tick(&combo, now_ms());
+        bool       over = combo.state == LICHEN_FC_OVER;
         portEXIT_CRITICAL(&lock);
         handle(e);
         if (over) {
@@ -139,9 +139,9 @@ static void combo_task(void *arg) {
     }
     keyboard_raw_remove(on_raw, NULL);
     // A notification the hook sent between the last wait and the remove: Enter or Esc on an open question
-    uint32_t v = FC_EV_NONE;
+    uint32_t v = LICHEN_FC_EV_NONE;
     if (xTaskNotifyWait(0, UINT32_MAX, &v, 0) == pdTRUE) {
-        handle((fc_event_t)v);
+        handle((lichen_fc_event_t)v);
     }
     close_question();
     task = NULL;
@@ -149,7 +149,7 @@ static void combo_task(void *arg) {
 }
 
 void factory_combo_start(void) {
-    factory_combo_init(&combo);
+    lichen_sys_factory_combo_init(&combo);
     start_us = esp_timer_get_time();
     if (xTaskCreatePinnedToCore(combo_task, "factory_keys", TASK_STACK, NULL, 3, &task, 1) != pdPASS) {
         ESP_LOGE(TAG, "no boot key combo: no task");

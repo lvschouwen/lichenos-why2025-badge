@@ -12,7 +12,7 @@
 #include "lichen_app.h"
 #include "lichen_ui.h"
 #include "menu.h"
-#include "sd_policy.h"
+#include "lichen_sys_storage.h"
 #include "shell_parts.h"
 #include "theme.h"
 
@@ -78,7 +78,7 @@ static void say(char const *text) {
 }
 
 static void size_text(uint64_t bytes, char *out, size_t cap) {
-    sd_fmt_size(bytes, out, cap);
+    lichen_sys_sd_fmt_size(bytes, out, cap);
 }
 
 static void volume_value(int slot, char *out, size_t cap) {

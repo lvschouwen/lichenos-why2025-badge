@@ -3,7 +3,8 @@
 // (pure) decides what is news and this raises it as source "lichen". Nothing here touches the radio or the C6 link
 // beyond reading their status, and nothing touches LVGL: lichen_notify() is safe from any task. The storage drive's
 // free space is read once a minute (FatFs may scan its table).
-#include "crash.h"
+#include "lichen_sys_crash.h"
+#include "lichen_sys_storage.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -11,9 +12,7 @@
 #include "lichen_notify.h"
 #include "lichen_sensors.h"
 #include "psram_boot.h"
-#include "sdcard.h"
 #include "shell_parts.h"
-#include "storage.h"
 #include "sys_notice_rules.h"
 #include "update_screen.h"
 
@@ -29,7 +28,7 @@ static char const TAG[] = "sys_notices";
 #define STACK_LOG_POLL 120 // the stack high-water mark is logged once, two minutes in
 #define BODY_CAP       120
 
-static void body_for(sysn_event_t e, sysn_snapshot_t const *s, sd_info_t const *sd, char *out, size_t cap) {
+static void body_for(sysn_event_t e, sysn_snapshot_t const *s, lichen_sd_info_t const *sd, char *out, size_t cap) {
     char a[24], b[24];
     out[0] = '\0';
     switch (e) {
@@ -54,12 +53,12 @@ static void body_for(sysn_event_t e, sysn_snapshot_t const *s, sd_info_t const *
     case SYSN_SD_UNMOUNTED:
     case SYSN_SD_REMOVED_ERRORS:
     case SYSN_SD_NOT_FAT_CARD:
-    case SYSN_SD_FAILED: sd_status_line(sd, out, cap); break;
+    case SYSN_SD_FAILED: lichen_sys_sd_status_line(sd, out, cap); break;
     case SYSN_IMU_LOST: snprintf(out, cap, "The motion sensor (BMI270) stopped answering."); break;
     case SYSN_ENV_LOST: snprintf(out, cap, "The air sensor (BME690) stopped answering."); break;
     case SYSN_STORAGE_LOW:
-        sd_fmt_size(s->storage_free, a, sizeof(a));
-        sd_fmt_size(s->storage_total, b, sizeof(b));
+        lichen_sys_sd_fmt_size(s->storage_free, a, sizeof(a));
+        lichen_sys_sd_fmt_size(s->storage_total, b, sizeof(b));
         snprintf(out, cap, "%s free of %s on the internal storage.", a, b);
         break;
     case SYSN_STORAGE_UNMOUNTED:
@@ -69,10 +68,10 @@ static void body_for(sysn_event_t e, sysn_snapshot_t const *s, sd_info_t const *
     }
 }
 
-static void read_snapshot(sysn_snapshot_t *s, sd_info_t *sd, unsigned poll) {
+static void read_snapshot(sysn_snapshot_t *s, lichen_sd_info_t *sd, unsigned poll) {
     static lichen_sensors_t sensors; // this task only; too big to keep twice on its stack
-    s->crash_recovered        = crash_recovered();
-    s->storage_unmounted      = !storage_mounted();
+    s->crash_recovered        = lichen_sys_crash_recovered();
+    s->storage_unmounted      = !lichen_sys_storage_mounted();
     s->psram_bad              = psram_boot_bad(NULL, 0);
     clock_sync_info_t clock   = clock_sync_info();
     s->clock_refused          = clock.refused;
@@ -80,14 +79,14 @@ static void read_snapshot(sysn_snapshot_t *s, sd_info_t *sd, unsigned poll) {
     s->update                 = (int)update_screen_boot_result(NULL, 0);
     char reason[4];
     s->c6_restarts = shell_sources.c6_restarts ? shell_sources.c6_restarts(reason, sizeof(reason)) : 0;
-    sd_info(sd);
+    lichen_sys_sd_info(sd);
     s->sd_state        = (int)sd->state;
     s->sensors_running = lichen_sensors_running();
     lichen_sensors_get(&sensors);
     s->imu_valid = sensors.imu_valid;
     s->env_valid = sensors.env_valid;
     if (poll % STORAGE_POLLS == 0) {
-        s->storage_known = storage_free_bytes(&s->storage_free, &s->storage_total);
+        s->storage_known = lichen_sys_storage_free_bytes(&s->storage_free, &s->storage_total);
     }
 }
 
@@ -100,7 +99,7 @@ static void notices_task(void *arg) {
     (void)arg;
     static sysn_state_t    state;
     static sysn_snapshot_t snap;
-    static sd_info_t       sd;
+    static lichen_sd_info_t       sd;
     sysn_event_t           events[SYSN_EVENT_COUNT];
     char                   body[BODY_CAP];
     unsigned               settled = 0;

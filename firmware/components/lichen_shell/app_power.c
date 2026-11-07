@@ -14,7 +14,7 @@
 #include "notify_os.h"
 #include "lichen_task.h"
 #include "menu.h"
-#include "sdcard.h"
+#include "lichen_sys_storage.h"
 #include "shell.h"
 #include "shell_parts.h"
 #include "theme.h"
@@ -53,8 +53,8 @@ static void power_task(void *arg) {
     if (!lichen_notify_save_now(NOTIFY_SAVE_MS)) {
         ESP_LOGW(TAG, "notifications not saved in time");
     }
-    if (sd_mounted()) {
-        sd_unmount();
+    if (lichen_sys_sd_mounted()) {
+        lichen_sys_sd_unmount();
     }
     TickType_t shown = xTaskGetTickCount() - begin;
     if (off && shown < pdMS_TO_TICKS(BYE_MIN_MS)) {

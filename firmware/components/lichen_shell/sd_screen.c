@@ -1,6 +1,6 @@
 // Settings > SD card (#99): the card's state, Mount/Unmount and Format. sd_mount, sd_unmount and sd_format wait for
 // the card's lock and talk to the card, so they run on a short-lived task on core 0 (like the Wi-Fi scan and MeshCore's
-// settings) and the answer comes back through lv_async_call. The page itself only reads sd_info(), the cached state,
+// settings) and the answer comes back through lv_async_call. The page itself only reads lichen_sys_sd_info(), the cached state,
 // once a second (a "fw sd mount" on the console shows up here too). Format asks twice, each time with a careful
 // dialog whose countdown cancels: never an erase without two deliberate Enters.
 #include "esp_log.h"
@@ -11,7 +11,7 @@
 #include "lichen_task.h"
 #include "menu.h"
 #include "sd_settings_model.h"
-#include "sdcard.h"
+#include "lichen_sys_storage.h"
 #include "shell_parts.h"
 #include "theme.h"
 
@@ -50,13 +50,13 @@ static void set_label(lv_obj_t *label, char const *text) {
     }
 }
 
-// Makes the page match sd_info() and the job; cheap when nothing changed
+// Makes the page match lichen_sys_sd_info() and the job; cheap when nothing changed
 static void refresh(void) {
     if (!page.status) {
         return;
     }
-    sd_info_t info;
-    sd_info(&info);
+    lichen_sd_info_t info;
+    lichen_sys_sd_info(&info);
     char status[64];
     sds_status(&info, job, status, sizeof(status));
     set_label(page.status, status);
@@ -74,8 +74,8 @@ static void refresh(void) {
     set_label(page.result, result);
 }
 
-static sds_actions_t actions_now(sd_info_t *info) {
-    sd_info(info);
+static sds_actions_t actions_now(lichen_sd_info_t *info) {
+    lichen_sys_sd_info(info);
     return sds_actions(info->state, job);
 }
 
@@ -87,8 +87,8 @@ static void job_collect(void) {
     if (outcome == JOB_PENDING || job == SDS_IDLE) {
         return;
     }
-    sd_info_t info;
-    sd_info(&info);
+    lichen_sd_info_t info;
+    lichen_sys_sd_info(&info);
     sds_result(job, outcome != 0, &info, result, sizeof(result));
     ESP_LOG_LEVEL(outcome ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s", result);
     job = SDS_IDLE;
@@ -103,12 +103,12 @@ static void job_done(void *arg) {
 static void job_task(void *arg) {
     bool ok;
     switch ((sds_job_t)(intptr_t)arg) {
-    case SDS_FORMATTING: ok = sd_format(); break;
+    case SDS_FORMATTING: ok = lichen_sys_sd_format(); break;
     case SDS_UNMOUNTING:
-        sd_unmount();
-        ok = !sd_mounted(); // it returns nothing: still mounted means the card's lock stayed busy
+        lichen_sys_sd_unmount();
+        ok = !lichen_sys_sd_mounted(); // it returns nothing: still mounted means the card's lock stayed busy
         break;
-    default: ok = sd_mount(); break;
+    default: ok = lichen_sys_sd_mount(); break;
     }
     ESP_LOGI(TAG, "job stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     atomic_store(&job_outcome, ok ? 1 : 0);
@@ -134,7 +134,7 @@ static void job_start(sds_job_t kind) {
 
 static void on_mount(void *arg) {
     (void)arg;
-    sd_info_t info;
+    lichen_sd_info_t info;
     if (actions_now(&info).mount_enabled) {
         job_start(sds_mount_job(info.state));
     }
@@ -163,7 +163,7 @@ static bool ask(shell_dialog_t const *d, shell_dialog_fn done) {
 }
 
 static void format_second_answer(bool yes) {
-    sd_info_t info;
+    lichen_sd_info_t info;
     if (!yes || !actions_now(&info).format_enabled) { // the card may have gone during the question
         format_cancelled();
         return;
@@ -186,7 +186,7 @@ static void format_first_answer(bool yes) {
 
 static void on_format(void *arg) {
     (void)arg;
-    sd_info_t            info;
+    lichen_sd_info_t            info;
     shell_dialog_t const d = {
         .title         = "Erases everything on the card. Format as LICHEN?",
         .seconds       = ASK_SECONDS,
@@ -222,7 +222,7 @@ static lv_obj_t *build_sd(void) {
     page.format = menu_add(menu, "Format", "", on_format, NULL);
     page.result = menu_note(menu, "");
     lv_obj_set_style_text_color(page.result, lv_color_hex(THEME_AMBER), 0);
-    menu_note(menu, "Apps' files: " SD_LICHEN_DIR);
+    menu_note(menu, "Apps' files: " LICHEN_SYS_SD_LICHEN_DIR);
     menu_note(menu, "No card detect: after inserting a card, mount it here.");
     job_collect(); // a job that ended while the page was closed and its lv_async_call failed
     if (job == SDS_IDLE) {

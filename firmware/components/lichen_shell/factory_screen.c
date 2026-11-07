@@ -4,7 +4,7 @@
 // stop first; the next boot erases.
 #include "esp_log.h"
 #include "screen_ids.h"
-#include "factory_reset.h"
+#include "lichen_sys_factory.h"
 #include "menu.h"
 #include "shell_parts.h"
 
@@ -22,9 +22,9 @@ static void failed_dialog(void) {
     shell_dialog_countdown(&d, NULL);
 }
 
-static void go(factory_level_t level) {
-    if (!factory_reset_request(level)) {
-        ESP_LOGE(TAG, "reset (%s) not saved", factory_level_name(level));
+static void go(lichen_factory_level_t level) {
+    if (!lichen_sys_factory_request(level)) {
+        ESP_LOGE(TAG, "reset (%s) not saved", lichen_sys_factory_level_name(level));
         shell_restart_note(NULL); // nothing will be erased: a later plain restart must not warn of a dark minute
         failed_dialog();
         return;
@@ -34,13 +34,13 @@ static void go(factory_level_t level) {
 
 static void ask_settings(void *arg) {
     (void)arg;
-    go(FACTORY_SETTINGS);
+    go(LICHEN_FACTORY_SETTINGS);
 }
 
 static void all_second_answer(bool yes) {
     if (yes) {
         shell_restart_note("The screen stays dark for up to a minute while everything is erased.");
-        go(FACTORY_ALL);
+        go(LICHEN_FACTORY_ALL);
     }
 }
 

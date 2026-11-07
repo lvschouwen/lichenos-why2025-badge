@@ -16,7 +16,7 @@
 #include "lichen_badge.h"
 #include "lichen_crashlog.h"
 #include "lichen_ui.h"
-#include "sdcard.h"
+#include "lichen_sys_storage.h"
 #include "lichen_task.h"
 #include "menu.h"
 #include "nav.h"
@@ -229,7 +229,7 @@ static void on_copy(void *arg) {
     if (s_job != JOB_NONE) {
         return;
     }
-    if (!sd_mounted()) {
+    if (!lichen_sys_sd_mounted()) {
         snprintf(s_result, sizeof(s_result), "No SD card in the badge: nothing copied.");
         lv_async_call(refill, NULL);
         return;

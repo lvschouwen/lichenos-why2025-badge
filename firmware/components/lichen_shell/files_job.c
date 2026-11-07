@@ -6,8 +6,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "sdcard.h"
-#include "storage.h"
+#include "lichen_sys_storage.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -42,13 +41,13 @@ static void volume_space(int slot, bool sd) {
     uint64_t free_bytes = 0, total_bytes = 0;
     bool     ok;
     if (sd) {
-        sd_info_t info;
-        sd_info(&info);
-        ok          = info.state == SD_STATE_MOUNTED;
+        lichen_sd_info_t info;
+        lichen_sys_sd_info(&info);
+        ok          = info.state == LICHEN_SD_MOUNTED;
         free_bytes  = info.free_bytes;
         total_bytes = info.total_bytes;
     } else {
-        ok = storage_free_bytes(&free_bytes, &total_bytes);
+        ok = lichen_sys_storage_free_bytes(&free_bytes, &total_bytes);
     }
     s_result.have[slot]        = ok;
     s_result.free_bytes[slot]  = ok ? free_bytes : 0;
@@ -117,7 +116,7 @@ static void job_task(void *arg) {
     memset(&s_result, 0, sizeof(s_result));
     s_result.kind = s_req.kind;
     bool need_sd  = on_sd(s_req.path) || on_sd(s_req.dst);
-    bool locked   = need_sd && sd_begin(SD_WAIT_MS);
+    bool locked   = need_sd && lichen_sys_sd_begin(SD_WAIT_MS);
     if (need_sd && !locked) {
         s_result.result = FILES_ERR_OPEN; // no card, or the card is busy
     } else {
@@ -126,7 +125,7 @@ static void job_task(void *arg) {
     }
     if (locked) {
         int err = errno;
-        sd_end(s_result.result == FILES_ERR_IO || s_result.result == FILES_ERR_OPEN ? sd_io_from_errno(err) : SD_IO_OK);
+        lichen_sys_sd_end(s_result.result == FILES_ERR_IO || s_result.result == FILES_ERR_OPEN ? lichen_sys_sd_io_from_errno(err) : LICHEN_SD_IO_OK);
     }
     ESP_LOGI(TAG, "job %d -> %d, stack margin %u", (int)s_req.kind, (int)s_result.result,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));

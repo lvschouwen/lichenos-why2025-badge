@@ -6,7 +6,7 @@
 // Reads boot_progress_view() only. Moves on to home by itself 2 s after the last step ends (5 s after a failure).
 #include "boot_progress.h"
 #include "boot_text.h"
-#include "crash.h"
+#include "lichen_sys_crash.h"
 #include "esp_app_desc.h"
 #include "esp_timer.h"
 #include "log_tap.h"
@@ -268,7 +268,7 @@ lv_obj_t *boot_screen_create(void) {
     lv_obj_set_style_radius(calm_bar, 4, LV_PART_INDICATOR);
     lv_bar_set_range(calm_bar, 0, 100);
     calm_text = add_label(calm, "Starting...", THEME_TEXT, NULL);
-    if (crash_recovered()) {
+    if (lichen_sys_crash_recovered()) {
         add_label(calm, "Recovered from a crash", THEME_AMBER, NULL);
     }
     version_label = add_label(screen, esp_app_get_description()->version, THEME_DIM, NULL);
@@ -329,7 +329,7 @@ lv_obj_t *boot_screen_create(void) {
     lv_obj_set_style_margin_top(failures, 16, 0);
     lv_obj_set_hidden(failures, true);
 
-    if (crash_recovered()) {
+    if (lichen_sys_crash_recovered()) {
         lv_obj_t *crash = add_label(details, "Recovered from a crash - see the Crash log app", THEME_AMBER, NULL);
         lv_obj_set_width(crash, LV_PCT(100));
         lv_label_set_long_mode(crash, LV_LABEL_LONG_MODE_WRAP);
