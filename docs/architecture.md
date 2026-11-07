@@ -161,13 +161,15 @@ when one breaks:
   recovery. Until the first `BL` line arrives (`c6/main/backlight_cmd.c`) the C6 backlights run at their boot levels
   (`c6/main/app_main.c`, `backlights_start`), so a P4 that never sends one leaves the panel at the C6 default.
 - **UART1 is shared** by the flasher, `fw c6log` and the backlight commands (`board/backlight.c` `BL_UART`); the
-  backlight owns it and lends it (#250): the flasher (`backlight_uart_lend(true)`, which deletes the backlight's driver,
-  from `esp_loader_init_serial` to `esp_loader_deinit`) and `c6_log_console` (`backlight_uart_lend(false)`, reading
-  through the backlight's driver when installed) borrow it for their whole use and call `backlight_uart_return`. While
-  lent the backlight never installs or writes; the newest levels asked for go out on return (pure state in
-  `board/uart_lend.c`, `host_tests/uart_lend_test.c`). One borrower at a time: c6log refuses during a flash check, the
-  flasher waits up to 61 s for a c6log. The lend is a flag under `uart_lock`, not the lock held, so a UI send never
-  blocks for the seconds a flash takes. `backlight_start` still comes after `c6link_start` and sends the saved levels.
+  backlight owns it and lends it, one borrower at a time (#250; pure state in `board/uart_lend.c`,
+  `host_tests/uart_lend_test.c`). The flasher takes an exclusive lend (`backlight_uart_lend(true)`: the backlight's
+  driver is deleted, from `esp_loader_init_serial` to `esp_loader_deinit`); meanwhile the backlight never installs or
+  writes, and the newest levels asked for go out on `backlight_uart_return` (a restart in that window cannot blank).
+  `c6_log_console` takes a shared lend (`backlight_uart_lend(false)`): it reads through the backlight's driver, which
+  the lend installs if needed, never installs or deletes one, and BL lines keep going out. `c6link_start` registers
+  `c6log` only after the flash check, so the two lends cannot meet. The lend is a flag under `uart_lock`, not the lock
+  held, so a UI send never blocks for the seconds a flash takes. `backlight_start` still comes after `c6link_start`
+  and sends the saved levels.
 - **`esp_hosted_init` failure is sticky** until the next boot (`c6_sup.c:279`); only a failed connect is retried by a
   re-attach.
 

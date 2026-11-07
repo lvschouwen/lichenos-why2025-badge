@@ -354,7 +354,6 @@ void hold_c6_boot(int level) {
 }
 
 bool c6link_start(void) {
-    console_register("c6log", "c6log [ms] (copy the C6's console into the log)", cmd_c6log);
     console_register("c6", "c6 [reflash | verify | reset [rom] | reattach]", cmd_c6);
     c6_sup_start();
 
@@ -373,6 +372,8 @@ bool c6link_start(void) {
     } else {
         ESP_LOGI(TAG, "C6 bundle unchanged, ROM check skipped (SW reset)");
     }
+    // Only after the flash check (#250): c6log borrows UART1 shared, and must never overlap the flasher's exclusive lend
+    console_register("c6log", "c6log [ms] (copy the C6's console into the log)", cmd_c6log);
     // The C6 was reset into its application by the flasher; only now may ESP-Hosted talk to it
     hold_c6_boot(1);
     // esp_hosted_init adds SDMMC slot 1 to the controller the SD card shares (#60): under its lock, not the connect

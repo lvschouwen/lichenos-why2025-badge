@@ -10,7 +10,6 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "fw_console.h"
 #include <stdio.h>
 
@@ -73,26 +72,13 @@ static bool flash_images(esp_loader_t *loader, c6_binaries_t *bin, bool force) {
            flash_if_changed(loader, &bin->app, "Application", app_ok);
 }
 
-// A "fw c6log" typed during boot may hold UART1 for up to C6LOG_MAX_MS: wait for it rather than skip the C6 check
-#define C6LOG_MAX_MS 60000
-#define LEND_POLL_MS 100
-
-static bool lend_uart_for_flash(void) {
-    for (int waited = 0; !backlight_uart_lend(true); waited += LEND_POLL_MS) {
-        if (waited >= C6LOG_MAX_MS + 1000) {
-            return false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(LEND_POLL_MS));
-    }
-    return true;
-}
-
 // esp_loader installs its own UART1 driver: the backlight's goes, and its sends wait until the return (#250). On
 // ESP_OK the caller ends with esp_loader_deinit() and backlight_uart_return().
 static esp_err_t open_serial(esp_loader_t *loader, esp32_port_t *port) {
-    if (!lend_uart_for_flash()) {
-        ESP_LOGE(TAG, "UART1 to the C6 stays busy (fw c6log), leaving the C6 alone");
-        return ESP_ERR_INVALID_STATE;
+    // Nothing else lends UART1 this early: c6link_start registers "c6log" only after the flash check
+    if (!backlight_uart_lend(true)) {
+        ESP_LOGE(TAG, "UART1 to the C6 is lent out, leaving the C6 alone");
+        return ESP_ERR_TIMEOUT;
     }
     if (esp_loader_init_serial(loader, &port->port) != ESP_LOADER_SUCCESS) {
         ESP_LOGE(TAG, "serial initialization failed.");
@@ -168,30 +154,12 @@ esp_err_t flash_c6_if_needed(bool force) {
 }
 
 void c6_log_console(uint32_t duration_ms) {
-    uart_config_t const config = {
-        .baud_rate  = 115200,
-        .data_bits  = UART_DATA_8_BITS,
-        .parity     = UART_PARITY_DISABLE,
-        .stop_bits  = UART_STOP_BITS_1,
-        .flow_ctrl  = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
-    // Borrowed from the backlight for the whole read (#250): it neither installs nor writes meanwhile
+    // A shared lend (#250): read through the backlight's driver, which the lend installs if needed and keeps for the
+    // whole read; whatever the C6 printed since it was opened is still in its receive buffer (#56). BL lines keep going
+    // out meanwhile.
     if (!backlight_uart_lend(false)) {
-        console_reply("c6log: UART1 to the C6 is busy (a C6 flash check or another c6log)");
+        console_reply("c6log: UART1 to the C6 is busy (another c6log), or the C6 console can't be opened");
         return;
-    }
-    // At runtime the backlight code has the UART open for its commands to the C6: read through its driver, and
-    // whatever the C6 printed since is still in the receive buffer (#56)
-    bool open_here = !uart_is_driver_installed(UART_NUM_1);
-    if (open_here) {
-        if (uart_driver_install(UART_NUM_1, 2048, 0, 0, NULL, 0) != ESP_OK) {
-            ESP_LOGE(TAG, "Can't open the C6 console");
-            backlight_uart_return();
-            return;
-        }
-        uart_param_config(UART_NUM_1, &config);
-        uart_set_pin(UART_NUM_1, GPIO_NUM_16, GPIO_NUM_15, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     }
 
     ESP_LOGI(TAG, "C6 console for %" PRIu32 " ms:", duration_ms);
@@ -218,8 +186,5 @@ void c6_log_console(uint32_t duration_ms) {
         line[len] = '\0';
         ESP_LOGI("c6", "%s", line);
     }
-    if (open_here) {
-        uart_driver_delete(UART_NUM_1);
-    }
-    backlight_uart_return(); // after the delete: a held-back level may install the backlight's driver again
+    backlight_uart_return();
 }

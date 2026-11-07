@@ -1,16 +1,16 @@
 #include "uart_lend.h"
 
-bool uart_lend_take(uart_lend_t *s) {
-    if (s->lent) {
+bool uart_lend_take(uart_lend_t *s, uart_lend_mode_t mode) {
+    if (s->mode != UART_LEND_NONE || mode == UART_LEND_NONE) {
         return false;
     }
-    s->lent    = true;
+    s->mode    = mode;
     s->pending = false;
     return true;
 }
 
 bool uart_lend_send(uart_lend_t *s, uint8_t display, uint8_t keyboard) {
-    if (!s->lent) {
+    if (s->mode != UART_LEND_EXCLUSIVE) {
         return true;
     }
     s->pending  = true;
@@ -20,7 +20,7 @@ bool uart_lend_send(uart_lend_t *s, uint8_t display, uint8_t keyboard) {
 }
 
 bool uart_lend_give(uart_lend_t *s, uint8_t *display, uint8_t *keyboard) {
-    if (!s->lent) {
+    if (s->mode == UART_LEND_NONE) {
         return false;
     }
     bool resend = s->pending;
@@ -28,7 +28,7 @@ bool uart_lend_give(uart_lend_t *s, uint8_t *display, uint8_t *keyboard) {
         *display  = s->display;
         *keyboard = s->keyboard;
     }
-    s->lent    = false;
+    s->mode    = UART_LEND_NONE;
     s->pending = false;
     return resend;
 }

@@ -38,9 +38,10 @@ void backlight_bind_store(backlight_get_u8_fn get, backlight_set_u8_fn set) {
 // for one short write (the 20-byte line, a few ms at 115200) or the bounded tx-done wait before the delete, never across
 // anything else. PTHREAD_MUTEX_INITIALIZER needs no create call, so there is no first-use race on the lock itself.
 static pthread_mutex_t uart_lock = PTHREAD_MUTEX_INITIALIZER;
-// Under uart_lock: UART1 lent to the C6 flasher or "fw c6log" (#250). A flag and not the lock held for the lend: the
-// flasher keeps UART1 for seconds and c6log for up to a minute, and the senders are the UI and console tasks (a slider,
-// the screen timeout), which must not stall that long. While lent a send only records its levels.
+// Under uart_lock: UART1 lent to the C6 flasher (exclusive) or "fw c6log" (shared) (#250). A flag and not the lock held
+// for the lend: the flasher keeps UART1 for seconds and c6log for up to a minute, and the senders are the UI and console
+// tasks (a slider, the screen timeout), which must not stall that long. During the flasher's lend a send only records
+// its levels; during c6log's it goes out through the driver the lend keeps installed.
 static uart_lend_t lend;
 
 // Call with uart_lock held
@@ -66,33 +67,43 @@ static bool open_uart(void) {
     return true;
 }
 
+typedef enum { BL_SENT, BL_HELD, BL_FAILED } bl_sent_t; // HELD: kept for after the flasher's lend
+
 // The levels as given, no clamp
-static bool send_raw(unsigned display, unsigned keyboard) {
+static bl_sent_t send_raw(unsigned display, unsigned keyboard) {
     char   cmd[24];
     size_t len = backlight_cmd_format(cmd, sizeof(cmd), display, keyboard);
     if (!len) {
-        return false;
+        return BL_FAILED;
     }
     pthread_mutex_lock(&uart_lock);
-    bool ok = uart_lend_send(&lend, (uint8_t)display, (uint8_t)keyboard) && open_uart() &&
-              uart_write_bytes(BL_UART, cmd, len) == (int)len;
+    bl_sent_t r = BL_HELD;
+    if (uart_lend_send(&lend, (uint8_t)display, (uint8_t)keyboard)) {
+        r = open_uart() && uart_write_bytes(BL_UART, cmd, len) == (int)len ? BL_SENT : BL_FAILED;
+    }
     pthread_mutex_unlock(&uart_lock);
-    return ok;
+    return r;
 }
 
 static bool uart_lent(void) {
     pthread_mutex_lock(&uart_lock);
-    bool lent = lend.lent;
+    bool lent = lend.mode != UART_LEND_NONE;
     pthread_mutex_unlock(&uart_lock);
     return lent;
 }
 
-bool backlight_uart_lend(bool take_driver) {
+bool backlight_uart_lend(bool exclusive) {
     pthread_mutex_lock(&uart_lock);
-    bool ok = uart_lend_take(&lend);
-    if (ok && take_driver && uart_is_driver_installed(BL_UART)) {
+    bool ok = uart_lend_take(&lend, exclusive ? UART_LEND_EXCLUSIVE : UART_LEND_SHARED);
+    if (ok && exclusive && uart_is_driver_installed(BL_UART)) {
         uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50)); // a BL line still going out
         uart_driver_delete(BL_UART);
+    } else if (ok && !exclusive && !open_uart()) {
+        // Shared: the backlight's own driver, installed here under the lock and kept for the lend, so no install or
+        // delete can race a BL write
+        uint8_t d, k;
+        uart_lend_give(&lend, &d, &k);
+        ok = false;
     }
     pthread_mutex_unlock(&uart_lock);
     return ok;
@@ -120,7 +131,7 @@ static portMUX_TYPE applied_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool         applied_known;
 static uint8_t      applied_display, applied_keyboard;
 
-static bool send(uint8_t display, uint8_t keyboard) {
+static bl_sent_t send(uint8_t display, uint8_t keyboard) {
     portENTER_CRITICAL(&applied_lock);
     applied_known    = true;
     applied_display  = display;
@@ -139,7 +150,7 @@ void backlight_reapply(void) {
     if (!known) {
         backlight_get(&display, &keyboard);
     }
-    if (!send_raw(display, keyboard)) {
+    if (send_raw(display, keyboard) == BL_FAILED) { // HELD goes out when the flasher returns UART1
         ESP_LOGW(TAG, "backlight not re-sent to the C6");
     }
 }
@@ -154,7 +165,7 @@ static void save(uint8_t display, uint8_t keyboard) {
 static uint8_t     user_display = BACKLIGHT_DEFAULT_DISPLAY, user_keyboard = BACKLIGHT_DEFAULT_KEYBOARD;
 static atomic_uint user_gen;
 
-static bool send_user(uint8_t display, uint8_t keyboard, bool count) {
+static bl_sent_t send_user(uint8_t display, uint8_t keyboard, bool count) {
     portENTER_CRITICAL(&applied_lock);
     user_display  = display;
     user_keyboard = keyboard;
@@ -311,9 +322,11 @@ static void cmd_bl(char const *args) {
 // Runs inside esp_restart() (before the scheduler stops, newest handler first, so before esp_wifi_stop). The panel
 // has no power switch and the backlight is the C6's: without this, the stopped DSI feed leaves the lit panel showing
 // garbage (yellow in #23, blue since #106) until the next boot resets it. Backlight off first, so nothing shows while
-// the panel switches off. Not run on panic, abort, watchdog or brownout resets: nothing can be done there.
+// the panel switches off. Not run on panic, abort, watchdog or brownout resets: nothing can be done there. During the
+// C6 flasher's exclusive UART1 lend (boot only) the BL 0 0 is held, not sent, so a restart then cannot blank the backlight;
+// during a "fw c6log" it goes out as usual (#250).
 static void blank_for_restart(void) {
-    if (send_raw(0, 0)) {
+    if (send_raw(0, 0) == BL_SENT) {
         pthread_mutex_lock(&uart_lock); // a restore cannot delete the driver under the wait
         if (uart_is_driver_installed(BL_UART)) {
             uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
@@ -337,12 +350,12 @@ void backlight_power_off(void) {
 void backlight_restore(void) {
     uint8_t display, keyboard;
     backlight_get(&display, &keyboard);
-    bool sent = send_user(display, keyboard, false);
+    bool sent = send_user(display, keyboard, false) == BL_SENT;
     // The C6 flasher installs the UART driver itself and fails if it is already there; backlight_start() opens it
     // again after the C6 check. The lock keeps a send from another task out of the driver while it goes away; its
     // next send opens it again, which only happens before the flasher runs if a task sends in that window.
     pthread_mutex_lock(&uart_lock);
-    if (!lend.lent && uart_is_driver_installed(BL_UART)) { // a lent UART1 is the borrower's driver
+    if (lend.mode == UART_LEND_NONE && uart_is_driver_installed(BL_UART)) { // a lent UART1 stays as the borrower has it
         if (sent) {
             uart_wait_tx_done(BL_UART, pdMS_TO_TICKS(50));
         }
