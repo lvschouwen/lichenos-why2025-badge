@@ -19,6 +19,7 @@
 #include "shell.h"
 #include "theme.h"
 
+#include <stdatomic.h>
 #include <stdint.h>
 
 static char const TAG[] = "factory";
@@ -30,7 +31,7 @@ static char const TAG[] = "factory";
 static portMUX_TYPE      lock = portMUX_INITIALIZER_UNLOCKED;
 static lichen_fc_combo_t combo;
 static int64_t           start_us;
-static TaskHandle_t      task;
+static _Atomic(TaskHandle_t) task; // read by the keyboard task, cleared by the combo task
 static lv_obj_t        *page; // on the top layer while the question is up
 
 static uint32_t now_ms(void) {
@@ -45,8 +46,11 @@ static bool on_raw(key_raw_event_t const *ev, void *arg) {
     lichen_fc_event_t e   = lichen_sys_factory_combo_key(&combo, ev->code, ev->pressed, now_ms());
     bool              now = lichen_sys_factory_combo_swallows(&combo);
     portEXIT_CRITICAL(&lock);
-    if (e != LICHEN_FC_EV_NONE && task) {
-        xTaskNotify(task, (uint32_t)e, eSetValueWithOverwrite);
+    // Loaded once: the combo task clears it as it ends, and only returns after the hook remove, which waits for this
+    // call (#251)
+    TaskHandle_t to = atomic_load(&task);
+    if (e != LICHEN_FC_EV_NONE && to) {
+        xTaskNotify(to, (uint32_t)e, eSetValueWithOverwrite);
     }
     return was || now; // the Enter or Esc that answered the question too
 }
@@ -145,17 +149,18 @@ static void combo_task(void *arg) {
         handle((lichen_fc_event_t)v);
     }
     close_question();
-    task = NULL;
+    atomic_store(&task, NULL);
 }
 
 void factory_combo_start(void) {
     lichen_sys_factory_combo_init(&combo);
     start_us = esp_timer_get_time();
-    if (!lichen_task_start(NULL, "factory_keys", combo_task, NULL, TASK_STACK, LICHEN_PRIO_APP_LOOP, &task)) {
+    TaskHandle_t started = NULL;
+    if (!lichen_task_start(NULL, "factory_keys", combo_task, NULL, TASK_STACK, LICHEN_PRIO_APP_LOOP, &started)) {
         ESP_LOGE(TAG, "no boot key combo: no task");
-        task = NULL;
         return;
     }
+    atomic_store(&task, started);
     if (!lichen_sys_keys_hook_add(on_raw, NULL)) {
         ESP_LOGE(TAG, "no boot key combo: no raw key hook free");
     }

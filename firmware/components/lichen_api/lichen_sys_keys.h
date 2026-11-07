@@ -15,7 +15,9 @@
 
 // Adds a raw key hook (false when all are taken). Any task.
 bool lichen_sys_keys_hook_add(key_raw_fn fn, void *arg);
-// Removes a hook added with the same fn and arg. Any task.
+// Removes a hook added with the same fn and arg. Any task. On return no call of the hook is running or will start
+// (#251): it waits for one in flight, so never call it holding something the hook waits for. From inside a hook it
+// removes without waiting.
 void lichen_sys_keys_hook_remove(key_raw_fn fn, void *arg);
 // Called first for every key press: true = the press only woke the screen (nothing else sees it, nor its release).
 // Keyboard task, keep it short; NULL removes it. Any task to set.

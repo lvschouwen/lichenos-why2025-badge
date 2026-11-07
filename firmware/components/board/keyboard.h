@@ -26,7 +26,9 @@ void keyboard_set_wake_hook(bool (*fn)(void));
 void keyboard_set_gate_hook(bool (*fn)(uint8_t key, bool pressed), void (*reset)(void));
 
 // Raw key hooks (#81, #79): up to KEYBOARD_RAW_MAX; false when full. Called from any task. A hook that swallows an
-// event stops the mapped key reaching LVGL (its release too); other hooks still see it.
+// event stops the mapped key reaching LVGL (its release too); other hooks still see it. Once keyboard_raw_remove returns
+// no call of that hook is running or will start (#251): it waits for one in flight, except when called from inside a
+// hook (the keyboard task), where it removes without waiting.
 #define KEYBOARD_RAW_MAX 4
 bool keyboard_raw_add(key_raw_fn fn, void *arg);
 void keyboard_raw_remove(key_raw_fn fn, void *arg);

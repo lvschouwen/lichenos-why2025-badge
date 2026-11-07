@@ -8,6 +8,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "kbd_map.h"
+#include "raw_hooks.h"
 
 #include <assert.h>
 #include <stdatomic.h>
@@ -41,49 +42,27 @@ static bool (*_Atomic gate_hook)(uint8_t key, bool pressed); // the remote key l
 static void (*_Atomic gate_reset_hook)(void);                // ... told when every key was released
 static bool           woke[0x51];              // presses the wake hook swallowed: their releases go nowhere either
 
-static struct {
-    key_raw_fn fn;
-    void      *arg;
-} hooks[KEYBOARD_RAW_MAX];
-static portMUX_TYPE hooks_lock = portMUX_INITIALIZER_UNLOCKED;
+static raw_hooks_t hooks;              // raw_hooks.h: no lock, so this task never waits on a hook's remover (#251)
+static _Atomic(TaskHandle_t) poll_handle; // the keyboard task: a hook that removes a hook runs here and must not wait
+
+static_assert(KEYBOARD_RAW_MAX == RAW_HOOKS_MAX, "keyboard.h promises the table's size");
 
 bool keyboard_raw_add(key_raw_fn fn, void *arg) {
-    bool ok = false;
-    portENTER_CRITICAL(&hooks_lock);
-    for (int i = 0; i < KEYBOARD_RAW_MAX && !ok; i++) {
-        if (!hooks[i].fn) {
-            hooks[i].fn  = fn;
-            hooks[i].arg = arg;
-            ok           = true;
-        }
-    }
-    portEXIT_CRITICAL(&hooks_lock);
-    return ok;
+    return raw_hooks_add(&hooks, fn, arg);
+}
+
+static void wait_a_tick(void) {
+    vTaskDelay(1);
 }
 
 void keyboard_raw_remove(key_raw_fn fn, void *arg) {
-    portENTER_CRITICAL(&hooks_lock);
-    for (int i = 0; i < KEYBOARD_RAW_MAX; i++) {
-        if (hooks[i].fn == fn && hooks[i].arg == arg) {
-            hooks[i].fn = NULL;
-        }
-    }
-    portEXIT_CRITICAL(&hooks_lock);
+    bool in_hook = xTaskGetCurrentTaskHandle() == atomic_load(&poll_handle);
+    raw_hooks_remove(&hooks, fn, arg, in_hook ? NULL : wait_a_tick);
 }
 
-// Offers the event to every hook (a copy of the table, so a hook may remove itself); true = swallowed
+// Offers the event to every hook; true = swallowed
 static bool run_hooks(key_raw_event_t const *ev) {
-    typeof(hooks) copy;
-    portENTER_CRITICAL(&hooks_lock);
-    memcpy(copy, hooks, sizeof(copy));
-    portEXIT_CRITICAL(&hooks_lock);
-    bool swallowed = false;
-    for (int i = 0; i < KEYBOARD_RAW_MAX; i++) {
-        if (copy[i].fn && copy[i].fn(ev, copy[i].arg)) {
-            swallowed = true;
-        }
-    }
-    return swallowed;
+    return raw_hooks_run(&hooks, ev);
 }
 
 void keyboard_reinit(void) {
@@ -173,6 +152,7 @@ static void self_heal(TickType_t *last_check) {
 
 static void poll_task(void *arg) {
     (void)arg;
+    atomic_store(&poll_handle, xTaskGetCurrentTaskHandle());
     TickType_t last_check = xTaskGetTickCount();
     for (;;) {
         self_heal(&last_check);
