@@ -511,6 +511,35 @@ static bool apply_config(char const *s, char const *p) {
 // saved secured name must not hide the real AP, so every BSSID is kept
 EXT_RAM_BSS_ATTR static wifi_ap_t pick_aps[SCAN_RECORDS];
 
+// The UI asks from the LVGL task: a short wait, never the C6 RPC's length (#249)
+#define SAVED_UI_WAIT_MS 50
+#define SAVED_FORGET_WAIT_MS 500
+
+static bool saved_take(uint32_t wait_ms) {
+    return xSemaphoreTake(saved_lock, wait_ms == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(wait_ms)) == pdTRUE;
+}
+static void saved_give(void) {
+    xSemaphoreGive(saved_lock);
+}
+// The list copy's memory comes from the OS (wifi_bind_alloc): lichen_net is L3 and may not call lichen_alloc itself
+static void *(*bound_alloc)(size_t size);
+static void (*bound_release)(void *p);
+static void *saved_alloc(size_t size) {
+    return bound_alloc ? bound_alloc(size) : NULL; // unbound: the screen shows "busy"
+}
+static void saved_release(void *p) {
+    if (bound_release) {
+        bound_release(p);
+    }
+}
+void wifi_bind_alloc(void *(*alloc)(size_t size), void (*release)(void *p)) {
+    bound_alloc   = alloc;
+    bound_release = release;
+}
+
+static wifi_lock_t const saved_ops = {
+    .take = saved_take, .give = saved_give, .alloc = saved_alloc, .release = saved_release};
+
 // Several networks saved (#160): scan, then load the strongest one in range into the driver. tried_mask holds the
 // networks that failed in this round (bit = list index); when all of them did, the round starts over. Scans disturb a
 // link (#146), so one at most every SCAN_GAP_MS. One saved network or no scan: the pair in use stays. Task only.
@@ -522,7 +551,7 @@ static uint8_t  fail_count;
 static uint32_t next_scan_at;
 
 static void choose_network(bool current_failed) {
-    static wifi_saved_t list, fresh;
+    static wifi_saved_t list;
     uint32_t            now = now_ms();
     size_t              n   = 0;
     if (c6link_updating() || (int32_t)(now - next_scan_at) < 0) {
@@ -553,21 +582,22 @@ static void choose_network(bool current_failed) {
         }
     }
     if (pick >= 0) {
-        // The scan took seconds: a Forget may have come in meanwhile. Under the lock Forget also takes, check the
-        // pick against the list as it is now and apply it; Forget then sees it as the driver's network and revokes it.
+        // The scan took seconds: a Forget may have come in meanwhile, so the pick is checked against the list as it is
+        // now. The C6 RPC runs with saved_lock released (#249: the UI must not wait on it) and the list is checked once
+        // more afterwards, since a Forget in that window does not know the driver holds the name yet.
         char name[33];
         copy_text(name, sizeof(name), list.e[pick].ssid);
-        xSemaphoreTake(saved_lock, portMAX_DELAY);
-        wifi_saved_load(&fresh);
-        int now_at = wifi_saved_find(&fresh, name);
-        if (now_at >= 0 && apply_config(fresh.e[now_at].ssid, fresh.e[now_at].pass)) {
+        wifi_apply_t res = wifi_saved_apply_with(&saved_ops, name, apply_config);
+        if (res == WIFI_APPLY_APPLIED || res == WIFI_APPLY_FORGOTTEN) {
             portENTER_CRITICAL(&state_lock);
             copy_text(ssid, sizeof(ssid), name);
             portEXIT_CRITICAL(&state_lock);
-            ESP_LOGI(TAG, "wifi: %d saved networks, joining the strongest in range", (int)fresh.n); // no names
+            ESP_LOGI(TAG, "wifi: %d saved networks, joining the strongest in range", (int)list.n); // no names
         }
-        xSemaphoreGive(saved_lock);
-        wifi_saved_wipe(&fresh);
+        if (res == WIFI_APPLY_FORGOTTEN) {
+            msg_t m = {.type = MSG_RECONNECT, .reason = 1};
+            post(&m);
+        }
     }
     wifi_saved_wipe(&list);
 }
@@ -866,16 +896,8 @@ static void handle_wifi_sync(void) {
     }
 }
 
-static void saved_take(void) {
-    xSemaphoreTake(saved_lock, portMAX_DELAY);
-}
-static void saved_give(void) {
-    xSemaphoreGive(saved_lock);
-}
-
 size_t wifi_saved_names(char (*out)[33], size_t max) {
-    static wifi_lock_t const lock = {.take = saved_take, .give = saved_give};
-    return saved_lock && out ? wifi_saved_names_with(&lock, out, max) : 0;
+    return saved_lock && out ? wifi_saved_names_with(&saved_ops, SAVED_UI_WAIT_MS, out, max) : 0;
 }
 
 bool wifi_forget_network(char const *name) {
@@ -883,9 +905,11 @@ bool wifi_forget_network(char const *name) {
         return false;
     }
     bool was_active = false, left = false;
-    xSemaphoreTake(saved_lock, portMAX_DELAY);
+    if (!saved_take(SAVED_FORGET_WAIT_MS)) { // c6wifi is busy with the list: the screen says "try again"
+        return false;
+    }
     bool ok = wifi_cred_forget(name, &was_active, &left);
-    xSemaphoreGive(saved_lock);
+    saved_give();
     // The driver may hold it without NVS saying so (a saved network joined by choose_network, or a trial under way)
     char cur[33], tried[33];
     portENTER_CRITICAL(&state_lock);

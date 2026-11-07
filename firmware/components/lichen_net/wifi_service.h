@@ -22,6 +22,8 @@ typedef struct {
 
 // Once at boot, before c6link_start: the console commands (clock, net, wifi), the c6wifi task and the hooks c6link calls
 // when the link is up, missing or being re-attached. radio may be NULL (all defaults).
+// Once at boot: where the saved-list copy of wifi_saved_names comes from (PSRAM, #249). Unbound, it reports busy.
+void wifi_bind_alloc(void *(*alloc)(size_t size), void (*release)(void *p));
 void wifi_service_init(wifi_radio_hooks_t const *radio);
 
 // The OS Wi-Fi switch (#108; main.c wires lichen_radio to it): off stops the Wi-Fi driver on the C6 and closes everything
@@ -49,7 +51,8 @@ bool wifi_scan_raw(wifi_ap_t *out, size_t max, size_t *n);
 // without a network). False if it was not saved. The password never leaves NVS. Not on the c6wifi task.
 bool wifi_forget_network(char const *ssid);
 // The saved SSIDs (most recently joined first), read under the list lock; no passwords leave lichen_net (#240).
-// Returns how many were written to out (at most max).
+// Returns how many were written to out (at most max), or SIZE_MAX when the list is busy (the c6wifi task holds it;
+// waits at most 50 ms, #249).
 size_t wifi_saved_names(char (*out)[33], size_t max);
 // Starts a trial join of the pair (empty password for an open network) and returns at once: the pair is applied to the
 // driver but saved to NVS (badge_fw wifi_ssid / wifi_pass) only once it gets an IP. Without one in 20 s, or on an

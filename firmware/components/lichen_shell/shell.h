@@ -25,7 +25,7 @@ typedef struct {
     lichen_sys_wifi_join_t (*wifi_join_state)(char *tried, size_t tried_cap, char *kept, size_t kept_cap);
     bool (*wifi_join)(char const *ssid, char const *pass);
     bool (*wifi_forget)(char const *ssid); // forgets one saved network (#160)
-    size_t (*wifi_saved_names)(char (*out)[33], size_t max); // the saved SSIDs only, read under the list lock (#240)
+    size_t (*wifi_saved_names)(char (*out)[33], size_t max); // the saved SSIDs only, read under the list lock (#240); SIZE_MAX = busy (#249)
     bool (*wifi_scan_raw)(
         lichen_sys_wifi_ap_t *out, size_t max, size_t *n
     );                                  // every AP with its channel, for the analyser (#159)

@@ -58,13 +58,25 @@ struct wifi_saved_s;
 // Loads the list (empty when nothing is saved; v2 migrates no older pair into it, #216); false when no store is bound
 bool wifi_saved_load(struct wifi_saved_s *l);
 // The saved SSIDs only, for the Wi-Fi screen (#240): the passwords stay in this component. take/give wrap the load in
-// wifi_service.c's saved_lock, so a join or Forget cannot rewrite the list under the reader. Returns the count (at most
-// max, most recently joined first); out[i] are NUL-terminated.
+// wifi_service.c's saved_lock, so a join or Forget cannot rewrite the list under the reader. take waits at most
+// wait_ms and returns false on a timeout (#249: the c6wifi task must not freeze the LVGL task). alloc/release give the
+// list copy a heap block (PSRAM, not the caller's stack); the copy is wiped before release. Returns the count (at most
+// max, most recently joined first; out[i] are NUL-terminated), or WIFI_SAVED_BUSY when the lock or the memory was not
+// there in time.
+#define WIFI_SAVED_BUSY ((size_t)-1)
 typedef struct {
-    void (*take)(void);
+    bool (*take)(uint32_t wait_ms);
     void (*give)(void);
+    void *(*alloc)(size_t size);
+    void (*release)(void *p);
 } wifi_lock_t;
-size_t wifi_saved_names_with(wifi_lock_t const *lock, char (*out)[33], size_t max);
+size_t wifi_saved_names_with(wifi_lock_t const *lock, uint32_t wait_ms, char (*out)[33], size_t max);
+// Applies a saved network to the driver (#249): load under the lock, release it, call apply (the C6 RPC, never with the
+// lock held), then check under the lock that the name is still saved. The copies are wiped. NOT_SAVED: no such entry (or
+// no memory), apply not called; APPLY_FAILED: apply said no; FORGOTTEN: applied, but a Forget came in during the RPC
+// (the caller revokes it); APPLIED: applied and still saved.
+typedef enum { WIFI_APPLY_NOT_SAVED, WIFI_APPLY_FAILED, WIFI_APPLY_FORGOTTEN, WIFI_APPLY_APPLIED } wifi_apply_t;
+wifi_apply_t wifi_saved_apply_with(wifi_lock_t const *lock, char const *name, bool (*apply)(char const *ssid, char const *pass));
 // Removes one network. was_active: it was the pair in use; the next entry (if any) takes its place, left = entries remain
 bool wifi_cred_forget(char const *ssid, bool *was_active, bool *left);
 // Makes a saved network the pair in use (front of the list); false if it is not saved. No change if it is already.

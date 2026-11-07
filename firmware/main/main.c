@@ -538,11 +538,20 @@ static bool wifi_radio_set(bool on) {
     return lichen_radio_set(RADIO_WIFI, on);
 }
 
+// The Wi-Fi saved-list copy lives in PSRAM, owner OS (#249)
+static void *wifi_alloc_bulk(size_t size) {
+    return lichen_alloc(NULL, size, LICHEN_MEM_BULK);
+}
+static void wifi_free_bulk(void *p) {
+    lichen_free(NULL, p);
+}
+
 static void start_c6link(boot_ctx_t *ctx) {
     (void)ctx;
     c6link_boot_hooks_t const boot = {.begin = c6_step_begin, .progress = c6_step_progress, .end = c6_step_end};
     c6link_set_boot_hooks(&boot);
     wifi_radio_hooks_t const radio = {.get = wifi_radio_get, .set = wifi_radio_set, .airplane = lichen_airplane_get};
+    wifi_bind_alloc(wifi_alloc_bulk, wifi_free_bulk);
     settings_bind_net(); // the Wi-Fi credentials through the settings, passwords as secrets (#235): before any reader
     // Before c6link_start: it registers the net hooks, and c6link_start ends by bringing Wi-Fi up through them
     wifi_service_init(&radio);

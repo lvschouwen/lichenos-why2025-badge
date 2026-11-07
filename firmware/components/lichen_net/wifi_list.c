@@ -3,6 +3,7 @@
 #include "wifi_saved.h"
 
 
+#include <stdint.h>
 #include <string.h>
 
 int wifi_bars(int8_t rssi) {
@@ -196,21 +197,53 @@ bool wifi_saved_load(wifi_saved_t *l) {
     return true;
 }
 
-size_t wifi_saved_names_with(wifi_lock_t const *lock, char (*out)[33], size_t max) {
-    wifi_saved_t l;
-    if (lock) {
-        lock->take();
+size_t wifi_saved_names_with(wifi_lock_t const *lock, uint32_t wait_ms, char (*out)[33], size_t max) {
+    wifi_saved_t *l = lock->alloc(sizeof(*l)); // 528 B: not on the LVGL task's stack
+    if (!l) {
+        return WIFI_SAVED_BUSY;
     }
-    wifi_saved_load(&l);
-    if (lock) {
-        lock->give();
+    if (!lock->take(wait_ms)) {
+        lock->release(l);
+        return WIFI_SAVED_BUSY;
     }
-    size_t n = l.n < max ? l.n : max;
+    wifi_saved_load(l);
+    lock->give();
+    size_t n = l->n < max ? l->n : max;
     for (size_t i = 0; i < n; i++) {
-        memcpy(out[i], l.e[i].ssid, sizeof(out[i]));
+        memcpy(out[i], l->e[i].ssid, sizeof(out[i]));
     }
-    wifi_saved_wipe(&l); // the copy of the passwords does not outlive the call
+    wifi_saved_wipe(l); // the copy of the passwords does not outlive the call
+    lock->release(l);
     return n;
+}
+
+#define LOCK_FOREVER UINT32_MAX // the c6wifi task may wait for the lock; only the UI paths time out
+
+wifi_apply_t wifi_saved_apply_with(wifi_lock_t const *lock, char const *name, bool (*apply)(char const *, char const *)) {
+    wifi_saved_t *l = lock->alloc(sizeof(*l));
+    if (!l) {
+        return WIFI_APPLY_NOT_SAVED;
+    }
+    wifi_apply_t res = WIFI_APPLY_NOT_SAVED;
+    lock->take(LOCK_FOREVER);
+    wifi_saved_load(l);
+    lock->give();
+    int at = wifi_saved_find(l, name);
+    if (at >= 0) {
+        res = apply(l->e[at].ssid, l->e[at].pass) ? WIFI_APPLY_APPLIED : WIFI_APPLY_FAILED;
+    }
+    wifi_saved_wipe(l);
+    if (res == WIFI_APPLY_APPLIED) {
+        lock->take(LOCK_FOREVER);
+        wifi_saved_load(l);
+        lock->give();
+        if (wifi_saved_find(l, name) < 0) {
+            res = WIFI_APPLY_FORGOTTEN;
+        }
+        wifi_saved_wipe(l);
+    }
+    lock->release(l);
+    return res;
 }
 
 // The pair just joined goes to the front of the list. Best effort: the pair in use is already safe in wifi_ssid.

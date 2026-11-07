@@ -264,6 +264,10 @@ static void build_saved_rows(void *arg) {
     (void)arg;
     char   names[LICHEN_SYS_WIFI_SAVED_MAX][33];
     size_t n = shell_sources.wifi_saved_names ? shell_sources.wifi_saved_names(names, LICHEN_SYS_WIFI_SAVED_MAX) : 0;
+    if (n == SIZE_MAX) { // the Wi-Fi task holds the list (#249); the next rebuild shows it
+        rows[row_count++] = menu_note(menu, "Saved networks are busy");
+        return;
+    }
     rows[row_count++] = menu_note(menu, n ? "Saved networks" : "No saved networks yet: pick one above to join and save it.");
     for (size_t i = 0; i < n; i++) {
         char name[140], question[200];
