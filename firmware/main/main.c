@@ -45,6 +45,7 @@
 #include "nvs_flash.h"
 #include "ota_server.h"
 #include "ota_valid.h"
+#include "lichen_os.h"
 #include "settings_store.h"
 #include "shell.h"
 #include "assets.h"
@@ -420,6 +421,7 @@ static void start_nvs(boot_ctx_t *ctx) {
 
 static void start_early(boot_ctx_t *ctx) {
     (void)ctx;
+    settings_bind_services(); // the backlight levels and sensors flag live in the settings (#224)
     haptics_start();     // the motor pin low and the setting read, before anything slow (#68)
     settings_apply_tz(); // before anything shows the clock
     crash_check_early(); // cheap: only decides crash_recovered(), which the boot screen reads once

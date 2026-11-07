@@ -17,3 +17,25 @@ size_t backlight_cmd_format(char *buf, size_t size, unsigned display, unsigned k
     int len = snprintf(buf, size, "\nBL %u %u\n", display, keyboard);
     return len > 0 && (size_t)len < size ? (size_t)len : 0;
 }
+
+void backlight_levels_load(backlight_get_u8_fn get, uint8_t *display, uint8_t *keyboard) {
+    unsigned d = BACKLIGHT_DEFAULT_DISPLAY, k = BACKLIGHT_DEFAULT_KEYBOARD;
+    if (get) {
+        d = get(BACKLIGHT_KEY_DISPLAY, BACKLIGHT_DEFAULT_DISPLAY);
+        k = get(BACKLIGHT_KEY_KEYBOARD, BACKLIGHT_DEFAULT_KEYBOARD);
+    }
+    if (display) {
+        *display = backlight_display_level(d);
+    }
+    if (keyboard) {
+        *keyboard = backlight_keyboard_level(k);
+    }
+}
+
+bool backlight_levels_save(backlight_set_u8_fn set, uint8_t display, uint8_t keyboard) {
+    if (!set) {
+        return false;
+    }
+    bool ok = set(BACKLIGHT_KEY_DISPLAY, display);
+    return set(BACKLIGHT_KEY_KEYBOARD, keyboard) && ok;
+}

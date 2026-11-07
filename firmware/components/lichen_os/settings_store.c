@@ -1,8 +1,11 @@
 #include "settings_store.h"
 
+#include "backlight.h"
+#include "lichen_os.h"
 #include "esp_log.h"
 #include "fw_console.h"
 #include "nvs.h"
+#include "sensors.h"
 
 #include "tz_table.h"
 
@@ -100,4 +103,9 @@ bool settings_set_tz(char const *posix) {
     setenv("TZ", posix, 1);
     tzset();
     return saved;
+}
+
+void settings_bind_services(void) {
+    backlight_bind_store(settings_get_u8, settings_set_u8);
+    sensors_bind_store(settings_get_u8, settings_set_u8, settings_erase);
 }

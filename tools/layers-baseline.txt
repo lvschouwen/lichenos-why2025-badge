@@ -54,8 +54,7 @@ B	lichen_shell -> sdcard	9
 B	lichen_shell -> storage	3
 B	lora -> lichen_api	1
 B	ota -> lichen_api	2
-B	sensors -> lichen_api	4
-C	board:nvs_open	1
+B	sensors -> lichen_api	3
 C	c6link:boot_progress_begin	1
 C	c6link:boot_progress_begin_background	1
 C	c6link:boot_progress_end	1
@@ -258,6 +257,3 @@ C	mesh:shell_screen_open	2
 C	mesh:shell_scroll_by	1
 C	mesh:shell_scroll_tame	2
 C	mesh:shell_stack_screen	1
-C	sensors:settings_erase	1
-C	sensors:settings_get_u8	1
-C	sensors:settings_set_u8	1

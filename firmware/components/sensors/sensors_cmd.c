@@ -6,11 +6,21 @@
 #include "sensors.h"
 #include "sensors_chips.h"
 #include "sensors_format.h"
-#include "settings_store.h"
 
 #include <stdio.h>
 
 #include <string.h>
+
+static uint8_t (*store_get)(char const *, uint8_t);
+static bool (*store_set)(char const *, uint8_t);
+static bool (*store_erase)(char const *);
+
+void sensors_bind_store(uint8_t (*get)(char const *, uint8_t), bool (*set)(char const *, uint8_t),
+                        bool (*erase)(char const *)) {
+    store_get   = get;
+    store_set   = set;
+    store_erase = erase;
+}
 
 // Why a reading is not valid, for the line that shows it
 static char const *why(bool running, bool up, int err, uint32_t inits, char *buf, size_t cap) {
@@ -129,7 +139,7 @@ static void cmd_sensors(char const *args) {
         console_reply("sensors: start at boot %s", sensors_boot_start() ? "on" : "off");
     } else if (strcmp(args, "boot on") == 0 || strcmp(args, "boot off") == 0) {
         bool on = args[6] == 'n';
-        bool ok = on ? settings_erase(SENSORS_BOOT_KEY) : settings_set_u8(SENSORS_BOOT_KEY, 0); // on is the default
+        bool ok = on ? store_erase && store_erase(SENSORS_BOOT_KEY) : store_set && store_set(SENSORS_BOOT_KEY, 0); // on is the default
         console_reply("sensors: start at boot %s (%s)", on ? "on" : "off", ok ? "saved" : "not saved");
     } else {
         console_reply("sensors [raw|start|stop|boot [on|off]]");
@@ -137,7 +147,7 @@ static void cmd_sensors(char const *args) {
 }
 
 bool sensors_boot_start(void) {
-    return settings_get_u8(SENSORS_BOOT_KEY, 1) != 0;
+    return !store_get || store_get(SENSORS_BOOT_KEY, 1) != 0;
 }
 
 void sensors_register_console(void) {

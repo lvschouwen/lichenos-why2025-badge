@@ -11,7 +11,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "fw_console.h"
-#include "nvs.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -22,10 +21,16 @@
 #define BL_TX_PIN  16
 #define BL_RX_PIN  15
 #define BL_FRAME_MS 20 // one 60 Hz frame is 17 ms
-#define BL_DEFAULT_DISPLAY  30 // what the C6 firmware starts with
-#define BL_DEFAULT_KEYBOARD 10
 
 static char const TAG[] = "backlight";
+
+static backlight_get_u8_fn store_get;
+static backlight_set_u8_fn store_set;
+
+void backlight_bind_store(backlight_get_u8_fn get, backlight_set_u8_fn set) {
+    store_get = get;
+    store_set = set;
+}
 
 static bool open_uart(void) {
     if (uart_is_driver_installed(BL_UART)) {
@@ -87,17 +92,13 @@ void backlight_reapply(void) {
 }
 
 static void save(uint8_t display, uint8_t keyboard) {
-    nvs_handle_t nvs;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, "bl_disp", display);
-        nvs_set_u8(nvs, "bl_kbd", keyboard);
-        nvs_commit(nvs);
-        nvs_close(nvs);
+    if (!backlight_levels_save(store_set, display, keyboard)) {
+        ESP_LOGW(TAG, "backlight levels not saved");
     }
 }
 
 // The person's levels (backlight_set*, the saved ones at start): what backlight_resume() goes back to after a dim (#43)
-static uint8_t     user_display = BL_DEFAULT_DISPLAY, user_keyboard = BL_DEFAULT_KEYBOARD;
+static uint8_t     user_display = BACKLIGHT_DEFAULT_DISPLAY, user_keyboard = BACKLIGHT_DEFAULT_KEYBOARD;
 static atomic_uint user_gen;
 
 static bool send_user(uint8_t display, uint8_t keyboard, bool count) {
@@ -150,20 +151,7 @@ void backlight_set_saved(uint8_t display, uint8_t keyboard) {
 }
 
 void backlight_get(uint8_t *display, uint8_t *keyboard) {
-    uint8_t      d = BL_DEFAULT_DISPLAY, k = BL_DEFAULT_KEYBOARD;
-    nvs_handle_t nvs;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u8(nvs, "bl_disp", &d);
-        nvs_get_u8(nvs, "bl_kbd", &k);
-        nvs_close(nvs);
-    }
-    // an older build could save a screen level of 0: that booted to a black screen
-    if (display) {
-        *display = backlight_display_level(d);
-    }
-    if (keyboard) {
-        *keyboard = backlight_keyboard_level(k);
-    }
+    backlight_levels_load(store_get, display, keyboard);
 }
 
 // ---- R16 (#12) ----
@@ -187,12 +175,7 @@ void backlight_r16_flash(bool on) {
 }
 
 static r16_fit_t r16_stored(void) {
-    uint8_t      v = 0;
-    nvs_handle_t nvs;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u8(nvs, "r16", &v);
-        nvs_close(nvs);
-    }
+    uint8_t v = store_get ? store_get(BACKLIGHT_KEY_R16, 0) : 0;
     return v == R16_FITTED || v == R16_ABSENT ? (r16_fit_t)v : R16_UNKNOWN;
 }
 
@@ -224,11 +207,8 @@ static void r16_detect(void) {
     console_reply("r16: GPIO5 high at display %u/%u/%u %%: %u/%u/%u of %u -> %s", r16_detect_level[0], r16_detect_level[1],
                   r16_detect_level[2], (unsigned)s.high[0], (unsigned)s.high[1], (unsigned)s.high[2], R16_SAMPLES,
                   r16_fit_name(fit));
-    nvs_handle_t nvs;
-    if (fit != R16_UNKNOWN && nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, "r16", (uint8_t)fit);
-        nvs_commit(nvs);
-        nvs_close(nvs);
+    if (fit != R16_UNKNOWN && store_set) {
+        store_set(BACKLIGHT_KEY_R16, (uint8_t)fit);
     }
 }
 

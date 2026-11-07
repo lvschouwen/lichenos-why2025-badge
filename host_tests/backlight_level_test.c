@@ -2,6 +2,7 @@
 // every boot), the keyboard may
 #include "backlight_level.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -15,7 +16,40 @@ static int failures = 0;
         }                                                                                                              \
     } while (0)
 
+// A fake settings store: two keys, "missing" until set
+static int     stored[2] = {-1, -1};
+static uint8_t fake_get(char const *key, uint8_t def) {
+    int i = strcmp(key, BACKLIGHT_KEY_DISPLAY) == 0 ? 0 : strcmp(key, BACKLIGHT_KEY_KEYBOARD) == 0 ? 1 : -1;
+    return i >= 0 && stored[i] >= 0 ? (uint8_t)stored[i] : def;
+}
+static bool fake_set(char const *key, uint8_t value) {
+    int i = strcmp(key, BACKLIGHT_KEY_DISPLAY) == 0 ? 0 : strcmp(key, BACKLIGHT_KEY_KEYBOARD) == 0 ? 1 : -1;
+    if (i < 0) {
+        return false;
+    }
+    stored[i] = value;
+    return true;
+}
+
+static void test_store(void) {
+    uint8_t d = 1, k = 1;
+    backlight_levels_load(NULL, &d, &k); // not bound yet
+    CHECK(d == BACKLIGHT_DEFAULT_DISPLAY && k == BACKLIGHT_DEFAULT_KEYBOARD);
+    backlight_levels_load(fake_get, &d, &k); // storage wiped: the defaults
+    CHECK(d == 30 && k == 10);
+    CHECK(!backlight_levels_save(NULL, 50, 20));
+    CHECK(backlight_levels_save(fake_set, 60, 0)); // a keyboard level of 0 is a real level
+    backlight_levels_load(fake_get, &d, &k);
+    CHECK(d == 60 && k == 0);
+    stored[0] = 0; // an older build saved a screen level of 0
+    stored[1] = 250;
+    backlight_levels_load(fake_get, &d, &k);
+    CHECK(d == BACKLIGHT_DISPLAY_MIN && k == 100);
+    backlight_levels_load(fake_get, NULL, NULL); // either out may be NULL
+}
+
 int main(void) {
+    test_store();
     CHECK(BACKLIGHT_DISPLAY_MIN == 5);
     CHECK(backlight_display_level(0) == BACKLIGHT_DISPLAY_MIN);
     CHECK(backlight_display_level(4) == BACKLIGHT_DISPLAY_MIN);
