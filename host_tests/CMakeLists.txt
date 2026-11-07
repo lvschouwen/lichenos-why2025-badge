@@ -1583,20 +1583,18 @@ target_include_directories(i154_proto_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
 target_compile_options(i154_proto_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME i154_proto_test COMMAND i154_proto_test)
 
-# Two-chip contract (#234): peer-data ids, CONFIG bytes, IDENT compare, boot step order
+# Two-chip contract (#234): peer-data ids, CONFIG bytes, IDENT compare
 add_executable(two_chip_contract_test
     ${CMAKE_CURRENT_SOURCE_DIR}/two_chip_contract_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/lora/lora_proto.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/i154/i154_proto.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link/c6_boot_policy.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link/c6_paths.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/boot_steps.c
 )
 target_include_directories(two_chip_contract_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/lora
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/i154
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot
 )
 target_compile_options(two_chip_contract_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME two_chip_contract_test COMMAND two_chip_contract_test)

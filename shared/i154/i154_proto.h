@@ -6,6 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../lora/lora_proto.h" // the LoRa ids the i154 ids must differ from
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,6 +36,18 @@ extern "C" {
 #define I154_PROTO_VERSION 1
 #define I154_MSG_ID_TO_C6  0x4C03 // next to LORA_MSG_ID_TO_C6 0x4C01 / TO_P4 0x4C02
 #define I154_MSG_ID_TO_P4  0x4C04
+// A shared id would route one service's messages into the other's callback
+#ifdef __cplusplus
+static_assert(I154_MSG_ID_TO_C6 != LORA_MSG_ID_TO_C6 && I154_MSG_ID_TO_C6 != LORA_MSG_ID_TO_P4 &&
+                  I154_MSG_ID_TO_P4 != LORA_MSG_ID_TO_C6 && I154_MSG_ID_TO_P4 != LORA_MSG_ID_TO_P4 &&
+                  I154_MSG_ID_TO_C6 != I154_MSG_ID_TO_P4,
+              "peer-data ids must be unique");
+#else
+_Static_assert(I154_MSG_ID_TO_C6 != LORA_MSG_ID_TO_C6 && I154_MSG_ID_TO_C6 != LORA_MSG_ID_TO_P4 &&
+                   I154_MSG_ID_TO_P4 != LORA_MSG_ID_TO_C6 && I154_MSG_ID_TO_P4 != LORA_MSG_ID_TO_P4 &&
+                   I154_MSG_ID_TO_C6 != I154_MSG_ID_TO_P4,
+               "peer-data ids must be unique");
+#endif
 #define I154_MSG_MAX       64 // largest encoded message (FRAME is 50); CAPS from a newer C6 may be longer
 
 #define I154_CHANNEL_MIN      11

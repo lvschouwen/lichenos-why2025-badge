@@ -1,7 +1,7 @@
 // Host test: the P4 <-> C6 contract of docs/architecture.md "Two-chip contract" (#234). It pins what both images must
-// keep agreeing on: the peer-data message ids, the wire bytes of CONFIG, the IDENT compare and the order of the boot
-// steps. A failure here means one chip would stop understanding the other: change both images and the doc together.
-#include "boot_steps.h"
+// keep agreeing on: the peer-data message ids, the wire bytes of CONFIG and the IDENT compare. The start order is not
+// testable here (it lives in main.c): see the doc; #210 pins it with a boot-step table test. A failure here means one
+// chip would stop understanding the other: change both images and the doc together.
 #include "c6_boot_policy.h"
 #include "c6_paths.h"
 #include "i154_proto.h"
@@ -20,7 +20,7 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
-// Every peer-data message id of a P4 <-> C6 service. A new service adds a row here and a line in the doc; a duplicate
+// Every peer-data message id of a P4 <-> C6 service (the i154 ids are reserved, not wired yet, #172). A new service adds a row here and a line in the doc; a duplicate
 // would route one service's messages into the other's callback.
 typedef struct {
     int         id;
@@ -161,18 +161,6 @@ static void test_c6_files(void) {
     CHECK(!c6_image_path("../firmware.bin", out, sizeof(out)));
 }
 
-// Boot order policy: storage before the C6 (its image files are on /storage), the C6 before Wi-Fi, the clock and LoRa
-// (they need the link), the apps last. main.c starts the keyboard after the C6 step because a C6 reset also resets the
-// TCA8418.
-static void test_boot_order(void) {
-    CHECK(BOOT_STORAGE < BOOT_C6);
-    CHECK(BOOT_C6 < BOOT_WIFI);
-    CHECK(BOOT_C6 < BOOT_CLOCK);
-    CHECK(BOOT_C6 < BOOT_LORA);
-    CHECK(BOOT_LORA < BOOT_APPS);
-    CHECK(BOOT_APPS == BOOT_STEP_COUNT - 1);
-}
-
 int main(void) {
     test_message_ids();
     test_type_tables();
@@ -180,7 +168,6 @@ int main(void) {
     test_config_layout();
     test_ident_compare();
     test_c6_files();
-    test_boot_order();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

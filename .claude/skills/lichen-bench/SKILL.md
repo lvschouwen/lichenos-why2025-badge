@@ -30,12 +30,12 @@ Main runs this after every v2 wave merge, on the freshly flashed image (`ota-c6`
 
 1. Cold boot (power cycle, not `fw restart`) reaches home; `fw boot` shows the C6 step done and `fw c6` shows `IDENT match`.
 2. Wi-Fi joins and `tools/badge.sh ota-info <host>` answers.
-3. MeshCore RX: `fw mesh` shows packets counting up; one TX to `#badgetest` only (see Bench console).
-4. `fw c6 reset`: keyboard (`fw keys` / a physical key), LoRa (RX counts again) and Wi-Fi all come back, `fw c6` reads `up`, restarts 1.
-5. Brightness changes (this path runs through the C6): change it in Settings or `fw bl`, the panel follows.
+3. MeshCore RX: `fw mesh` shows `rx N` counting up between two reads; one TX to `#badgetest` only (see Bench console).
+4. `fw c6` and note `restarts`; `fw keys on`; `fw c6 reset`. After the 75 s wait: one physical key press logs a key (`fw keys send` bypasses the TCA8418, so it proves nothing), LoRa `rx N` counts again, Wi-Fi is back (`ota-info`), and `fw c6` reads `up` with `restarts` one higher than before.
+5. Brightness changes (this path runs through the C6): `fw bl <display> <keyboard>` (e.g. `fw bl 40 40`), the panel follows; restore the previous level.
 6. `fw mem`: DMA free and DMA min not below the pre-MVP baseline (free 99979, min 89611) minus 10 %. Why: that baseline is what today's image measures, so a fixed 150 KB floor would fail the current firmware; the gate catches a regression, not the existing level.
-7. BT off after boot (#197): `airplane` shows `bluetooth off`.
-8. `fw tasks`: no owner-less task. This applies to Lichen tasks only; IDF, esp_hosted and LVGL tasks are exempt.
+7. BT off after boot (#197): `fw airplane` prints `airplane off | wifi on | lora on | bluetooth off`. It reads the P4's saved switch, not the C6 controller.
+8. `fw tasks`: no owner-less Lichen task (IDF, esp_hosted and LVGL tasks are exempt). Informational until #228 books the Lichen tasks: note the result, do not block on it.
 
 Any failure blocks the next wave merge: report it, do not carry on.
 

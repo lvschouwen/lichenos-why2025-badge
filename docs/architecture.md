@@ -43,7 +43,7 @@ Links between the chips:
 What the P4 (Lichen) and the C6 (radio coprocessor) rely on from each other (#234, part of #216). It must hold through
 the whole v2 migration: a wave that touches any line below re-runs the two-chip bench gate (lichen-bench skill) before
 it counts as merged. Line numbers are in `firmware/components/` unless noted and drift; the symbol names are the anchor.
-Pure parts are pinned by `host_tests/two_chip_contract_test.c` (ids, CONFIG bytes, IDENT compare, boot step order) on
+Pure parts are pinned by `host_tests/two_chip_contract_test.c` (ids, CONFIG bytes, IDENT compare) on
 top of `lora_proto_test`, `i154_proto_test`, `c6_boot_policy_test`, `c6_watch_test`, `c6_paths_test` and `r16_hold_test`.
 No data migration: stored keys named here start from their defaults if they change.
 
@@ -67,15 +67,31 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
 - **PSRAM DMA to SDIO (#121):** SDIO transfers use buffers the DMA reads; PSRAM at 120 MHz is only kept after the DMA gate
   (`docs/psram-speed-switch.md`). Internal DMA RAM stays scarce: bench gate `fw mem`.
 
+- **Pairing:** the P4 builds the fork through `override_path` (`firmware/main/idf_component.yml`: v3.0.10 plus the SDIO RX
+  lost-wakeup fix, #60); the C6 uses registry 3.0.10 (`c6/main/idf_component.yml`). So only the P4 has the fix. The
+  transport settings must match on both sides: SDIO stream mode (host `HOST_SDIO_RX_STREAMING_MODE=y`,
+  `firmware/sdkconfig.defaults:91`; C6 `EH_TRANSPORT_CP_SDIO_MODE_STREAM=y`, `c6/sdkconfig.defaults:20`), frame checksum (C6
+  `EH_TRANSPORT_CP_SDIO_CHECKSUM=y`, :50, the host mirrors it at runtime), peer data (host `HOST_FEAT_PEER_DATA=y`, :94; C6
+  `CP_FEAT_PEER_DATA=y`, :53), SDIO slot 1, 4-bit bus and pins (`firmware/sdkconfig.defaults:78-85`) and the 40 MHz clock
+  (:90, C6 `CP_SDIO_HIGH_SPEED=y`, :21). Change one side and the other in the same wave.
+
+### Start order (main.c)
+Text only: no host test can see it, #210 will pin it with a boot-step table test. The rules:
+1. Storage and the SD card (`sd_start`, #60) come before `c6link_start`: the C6 image files are on `/storage`, and
+   `esp_hosted_init` adds SDMMC slot 1 to the controller the card shares.
+2. The IDENT hooks (`c6link_set_ident`, `c6link_set_ident_ready`, `main.c:447-448`) are set before `c6link_start`.
+3. `c6link_start` (`main.c:449`) comes before `backlight_start` (:452), `keyboard_start` (:456) and `lora_start` (:475);
+   `c6_wire_hooks` (:483) only after those. The boot step enum in `lichen_boot/boot_steps.h` is a display order only.
+
 ### 2. Peer-data channel (ESP-Hosted `eh_*_peer_data`)
 | Id | Direction | Service | Registered at |
 |---|---|---|---|
 | `0x4C01` `LORA_MSG_ID_TO_C6` | P4 to C6 | LoRa | `c6/main/lora_service.cpp:463` |
 | `0x4C02` `LORA_MSG_ID_TO_P4` | C6 to P4 | LoRa | `lora/lora.c:464` and `:635`, `lora/lora_ident.c:46` |
-| `0x4C03` `I154_MSG_ID_TO_C6` | P4 to C6 | 802.15.4 scanner | `shared/i154` |
-| `0x4C04` `I154_MSG_ID_TO_P4` | C6 to P4 | 802.15.4 scanner | `shared/i154` |
+| `0x4C03` `I154_MSG_ID_TO_C6` | P4 to C6 | 802.15.4 scanner | reserved, not wired yet (#172) |
+| `0x4C04` `I154_MSG_ID_TO_P4` | C6 to P4 | 802.15.4 scanner | reserved, not wired yet (#172) |
 
-- A new service takes the next free id in the `0x4C0x` block and adds a row to `peer_ids` in the contract test.
+- A new service takes the next free id in the `0x4C0x` block and adds a row to `peer_ids` in the contract test. `i154_proto.h` also `_Static_assert`s that its ids differ from the LoRa ones.
 - **Message framing:** `[version][type]` then little-endian fields. P4 to C6 types count from 1; C6 to P4 types from 0x81.
   Both images build the same headers: `shared/lora/lora_proto.h` (v4) and `shared/i154/i154_proto.h` (v1).
 - **Versions:** the version byte must match exactly. LoRa v4 (RSSI sweep, #161): a v3 C6 drops every v4 message
@@ -86,6 +102,10 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
   preamble u16, tx power i8 dBm. The P4 sends it on every (re)start of the link (`LORA_ACT_SEND_CONFIG`,
   `lora/lora.c:378`); the C6 starts unconfigured after its own reset. Default: 869.618 MHz, 62.5 kHz, SF7, CR 4/5, sync 0x12,
   preamble 16, 22 dBm.
+- **Callback handover (0x4C02):** at boot `lora_ident` (`lora/lora_ident.c:39`, registered at :46) owns the id and takes the
+  IDENT answer; `lora_start` registers `on_peer_data` (`lora/lora.c:635`) and takes it over. From then on `lora_ident`
+  forwards to `lora_ident_live` (answer received by the LoRa task, `lora.c:719`). A second owner of the id would starve one
+  of them.
 - **After a C6 reset:** `lora_c6_lost` / `lora_c6_back` (`lora/lora.c:689`, `:708`) stop and restart the polling and
   re-send CONFIG, then `RX_START`.
 
@@ -97,8 +117,14 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
 - **Plan** (`c6_boot_plan`): a warm software restart with an unchanged bundle key skips the ROM check; everything else,
   a forced reflash (NVS `c6_force`, `c6link.c:268`), a `c6_verify` flag or a trial image, checks fully. NVS keys:
   `c6_ok_key` (bundle key `md5,md5,md5,size,size,size`, stored only after attach and IDENT MATCH), `c6_verify`
-  (`c6link.c:1295`), `c6_rt_restart` (`c6_sup.c:44`), `c6_force`. A skip that loses its bet (no attach, IDENT not
+  (`c6link.c:1296`), `c6_rt_restart` (`c6_sup.c:44`), `c6_force`. A skip that loses its bet (no attach, IDENT not
   proven) restarts once with the verify flag, only if that flag persisted (`c6_restart_after_attach`).
+- **Bundle changes:** a push into `/storage/c6` over Wi-Fi (`[c6]` file) calls `c6link_bundle_changed`
+  (`ota/ota_server.c:405-408`) before touching the file, so the stored key is forgotten and the next boot checks fully.
+  Every writer of that directory must do the same.
+- **P4 OTA validity needs the C6:** a pending image is marked valid only with the UI up and `c6link_up()` after
+  `OTA_VALID_AFTER_S` (`ota/ota_valid.c:3-5`, `main.c:513-521`), and it is rolled back when the link never comes up
+  (`ota_valid.c:7-9`). A broken C6 link rolls back every P4 OTA; this is why `ota-c6` goes first.
 - **IDENT** (#36): after attach the P4 asks the running C6 app for its ELF sha256 (32 bytes, `LORA_MSG_IDENT`) and
   compares with the bundled `firmware.bin` (`c6_ident_check`; wait `C6_IDENT_WAIT_MS` 2000, `c6link.c:1300`). Only MATCH
   proves the C6; NO_ANSWER, MISMATCH, NO_EXPECTED, NOT_ASKED are all "not proven". After a runtime re-attach IDENT is
@@ -110,16 +136,21 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
 - **C6 reset resets the keyboard:** GPIO12 (C6 EN) also resets the TCA8418. The C6 starts before the keyboard
   (`firmware/main/main.c:449` `c6link_start`, then `keyboard_start` :456, then `lora_start` :475; `c6_wire_hooks` :483 only
   after all three). A later C6 reset runs `keyboard_reinit`, `backlight_reapply`, `lora_c6_back` in that order
-  (`main.c:230`). The boot step enum (`lichen_boot/boot_steps.h`) pins storage, C6, Wi-Fi/clock/LoRa, apps.
+  (`main.c:232` `c6_up`).
 - **Backlights go through the C6:** UART1 text command `\nBL <display> <keyboard>\n`
   (`board/backlight_level.c` `backlight_cmd_format`, sent from `board/backlight.c`). With the C6 down brightness does not
   change, and Settings says so.
 - **R16 / GPIO5 hold (#12, #39):** stock badges have no R16 so GPIO5 is not on `DISPLAY_BL`; with the bridge fitted the P4
   holds the backlight while the C6 is in reset or its ROM (`board/r16_hold.c`; flasher order in `c6_flasher.c:106-120`: EN
-  low, GPIO5 back to input, then EN rises). Power off drives backlights off, then `c6link_hold_in_reset` (:473).
-- **C6 bootloader and backlight (#39):** the C6 is flashed with its own `bootloader.bin` from the bundle, and the C6
-  application parses the `BL` command (`c6/main/backlight_cmd.c`). Any change to either needs the cold-boot bench pass and
-  `ota-c6` first.
+  low, GPIO5 back to input, then EN rises). Power off drives backlights off (`main.c:215`), then `c6link_hold_in_reset` (`main.c:216`, defined at `c6link.c:473`). The hold starts once the ROM answered, not before.
+- **C6 bootloader and backlight (#39):** there is no C6 bootloader hook (dropped by decision). The P4 rewrites the C6
+  bootloader at 0x0 when its MD5 differs from the bundle's (`c6_flasher.c:68`); a broken C6 bootloader means USB-only
+  recovery. Until the first `BL` line arrives (`c6/main/backlight_cmd.c`) the C6 backlights run at their boot levels
+  (`c6/main/app_main.c`, `backlights_start`), so a P4 that never sends one leaves the panel at the C6 default.
+- **UART1 is shared** by the flasher, `fw c6log` and the backlight commands (`board/backlight.c:21`); only one may own it
+  at a time. `backlight_start` must come after `c6link_start` (it needs the UART the flasher released).
+- **`esp_hosted_init` failure is sticky** until the next boot (`c6_sup.c:278`); only a failed connect is retried by a
+  re-attach.
 
 ### 5. Watchdog, recovery, Bluetooth
 - **Watchdog:** the C6 LoRa service sends STATUS (uptime, heap, stack) about every 60 s (`c6/main/lora_service.cpp:58`);
@@ -128,7 +159,7 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
   a slow retry every 5 min, one offered restart of the badge (never on a trial image). Down hooks stop users of the
   link; up hooks restore keyboard, backlight, LoRa.
 - **BT VHCI:** the C6 image builds the BLE controller with HCI over VHCI (`c6/sdkconfig.defaults`), but the P4 starts no
-  host stack: Bluetooth is off after boot (#197). Bench gate: `airplane` shows `bluetooth off`.
+  host stack: Bluetooth is off after boot (#197). Bench gate: `fw airplane` shows `bluetooth off`.
 
 ## Kernel and tick
 
