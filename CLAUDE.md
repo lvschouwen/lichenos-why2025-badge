@@ -12,7 +12,6 @@ Lichen OS is the operating system for the WHY2025 badge: the ESP32-P4 runs Liche
 - ccache is on when installed (shared across worktree slots); `build.sh build` writes a gitignored `.clangd` for clangd/LSP.
 - The standard gate `tools/check_standard.sh` runs inside `build` after the P4 image (lizard + `-fstack-usage` + P4/C6 image vs slot and per-archive size; fails when lizard is missing, `BADGE_SKIP_STANDARD=1` skips on purpose against `tools/standard-baseline.txt`; limits and ratchet rule in `docs/code-standard.md`). New files and functions past the fail line fail the build; the baseline only shrinks.
 - Host tests only: `cmake -S host_tests -B host_tests/build && cmake --build host_tests/build -j8 && ctest --test-dir host_tests/build`.
-- Gate on pushing (#252): `tools/install-hooks.sh` links the tracked `tools/git-hooks/pre-push` into the git common dir (only that hook; graphify's stay). Updating main runs the full check unless the last green `build` stamped this tree (`firmware/build/.green-<tree>`); other branches pass; bypass is `--no-verify`, Lucas only.
 - After committing run `./firmware/build.sh reconfigure build` so the image label `fw-<sha>` matches the commit.
 - The build reformats `dependencies.lock`: `git restore dependencies.lock` unless dependencies really changed.
 - `sdkconfig` is gitignored; `sdkconfig.defaults` (firmware/ and c6/) is the truth. Run long builds to a log file with a 600 s timeout.
@@ -31,10 +30,11 @@ Lichen OS is the operating system for the WHY2025 badge: the ESP32-P4 runs Liche
 - Wait 75 s after any reboot before console commands. Bench procedure: the `lichen-bench` skill.
 - No IPs, MACs, host names, SSIDs or tokens in code, commits or issues.
 
-## Agents
-- Subagents are build-only: never flash, ssh, push or touch the badge; stop at a green `build.sh build` + a local commit. Agent file: `.claude/agents/lichen-implementer.md`; reviewer: `lichen-reviewer.md`.
-- Pass `model` on every dispatch: Opus for concurrency, memory, protocol, crypto/auth or hardware-adjacent work, Sonnet otherwise.
-- Worktree pool: agents work in `.claude/worktrees/*`. Never `git checkout`/`switch`/`reset` in the main checkout (a hook asks); main merges one branch at a time, ff-only, then runs the full check. Manage slots with `tools/agent-wt.sh` (`list`, `reset <slot> <branch>`, `new --next`, `rename <old> <new>`, `done`); it keeps `firmware/build` warm. Slots are generic (`wt-1`, `wt-2`, ...): the branch names the issue, never the slot (#203).
+## Agents (the standard is `~/.claude/rules/common/agent-runs.md`; this repo adds)
+- Check: `agent-check` runs `CHECK=` from `.claude/agent-wt.conf` (the full `build.sh build`) and stamps `firmware/build/.green-<tree>`; `agent-check reconfigure` also relabels the image. Pre-push gate: `agent-install-hooks` (shared `agent-pre-push`). Warm pool: `agent-wt` (`tools/agent-wt.sh` wraps it).
+- Opus triggers: the LVGL lock / UI service, task and memory books, raw-hook tables, the P4 <-> C6 contract (#234), DMA/internal RAM, anything that changes what the badge transmits.
+- Guards: `lichen-implementer.md` (build-only, `deny-agent-side-effects.sh`) and `lichen-reviewer.md` (read-only); `.claude/hooks/guard-badge.sh` asks before `--wipe-storage`.
+- Conflict files (sequence or union-merge): `host_tests/CMakeLists.txt`, component `CMakeLists.txt`, `tools/layers.conf`, `tools/layers-baseline.txt`, `tools/standard-baseline.txt`, `tools/cppcheck-baseline.txt`, `tools/gate_manifest.txt`, `sdkconfig.defaults`, `lichen_os` boot order (`boot_order[]`).
 
 ## Issues and memory
 - The issue is the spec: `gh issue view N --json body,comments --jq '.body, .comments[].body'` (plain `--comments` is broken here); the latest decision comment wins.

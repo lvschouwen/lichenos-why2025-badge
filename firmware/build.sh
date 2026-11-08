@@ -91,17 +91,6 @@ if [ "$building" = 1 ]; then
     "$repo/tools/gen_clangd.sh" # .clangd for clangd/LSP over this build's compile_commands.json (#196)
     # Released images ship this file; it must match the dependencies just built (#18)
     BADGE_IDF_PATH="$IDF_DIR" python3 "$repo/tools/third_party_licenses.py" --check
-    # Green stamp for the pre-push hook (#252), only for a full `build` of a clean tree (the build rewrites
-    # dependencies.lock, which does not count). Keyed to the tree so an amended or rebased commit still matches.
-    for arg in "$@"; do
-        case $arg in build)
-            if [ -z "$(git -C "$repo" status --porcelain --untracked-files=no -- . ':!dependencies.lock')" ]; then
-                rm -f "$here"/build/.green-*
-                touch "$here/build/.green-$(git -C "$repo" rev-parse 'HEAD^{tree}')"
-            fi
-            break ;;
-        esac
-    done
 else
     exec idf.py -C "$here" "$@"
 fi
