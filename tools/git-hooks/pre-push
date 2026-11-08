@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Pre-push gate (#252): a push that updates main must carry a green `firmware/build.sh build`. Other branches and
+# deletes pass. A green build stamps firmware/build/.green-<tree sha> (see firmware/build.sh), so a push right after
+# the check skips the rebuild. Bypass: git's own --no-verify, reserved for Lucas.
+# BADGE_PREPUSH_BUILD_CMD replaces the build command (used by tools/tests/pre_push_test.sh).
+set -uo pipefail
+
+repo=$(git rev-parse --show-toplevel)
+cd "$repo" || exit 1
+
+pushing_main=0
+sha=
+while read -r _ local_sha remote_ref _; do
+    [ "$remote_ref" = refs/heads/main ] || continue
+    case $local_sha in *[!0]*) ;; *) continue ;; esac # all zeros = delete
+    pushing_main=1
+    sha=$local_sha
+done
+[ "$pushing_main" = 1 ] || exit 0
+
+tree=$(git rev-parse "$sha^{tree}") || exit 1
+if [ -f "$repo/firmware/build/.green-$tree" ]; then
+    echo "pre-push: tree $tree has a green build stamp, skipping the check"
+    exit 0
+fi
+
+if [ "$(git rev-parse HEAD)" != "$sha" ]; then
+    echo "pre-push: pushing $sha but HEAD is elsewhere, so the check cannot cover it; check out the commit to push" >&2
+    exit 1
+fi
+# dependencies.lock is rewritten by every build, so it does not count as a change
+if [ -n "$(git status --porcelain --untracked-files=no -- . ':!dependencies.lock')" ]; then
+    echo "pre-push: working tree has uncommitted changes, the check would not cover what is pushed" >&2
+    exit 1
+fi
+
+log=${TMPDIR:-/tmp}/badge-pre-push-$$.log
+echo "pre-push: running the full check (log: $log)"
+if [ -n "${BADGE_PREPUSH_BUILD_CMD:-}" ]; then
+    # shellcheck disable=SC2086
+    $BADGE_PREPUSH_BUILD_CMD >"$log" 2>&1
+else
+    BADGE_IDF_PATH=${BADGE_IDF_PATH:-$HOME/esp/esp-idf-v6.1} "$repo/firmware/build.sh" build >"$log" 2>&1
+fi
+rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "pre-push: check FAILED (exit $rc), push refused. Last lines of $log:" >&2
+    tail -n 40 "$log" >&2
+    exit 1
+fi
+rm -f "$log"
+echo "pre-push: check green"

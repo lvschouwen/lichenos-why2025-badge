@@ -12,6 +12,7 @@ Lichen OS is the operating system for the WHY2025 badge: the ESP32-P4 runs Liche
 - ccache is on when installed (shared across worktree slots); `build.sh build` writes a gitignored `.clangd` for clangd/LSP.
 - The standard gate `tools/check_standard.sh` runs inside `build` after the P4 image (lizard + `-fstack-usage` + P4/C6 image vs slot and per-archive size; fails when lizard is missing, `BADGE_SKIP_STANDARD=1` skips on purpose against `tools/standard-baseline.txt`; limits and ratchet rule in `docs/code-standard.md`). New files and functions past the fail line fail the build; the baseline only shrinks.
 - Host tests only: `cmake -S host_tests -B host_tests/build && cmake --build host_tests/build -j8 && ctest --test-dir host_tests/build`.
+- Gate on pushing (#252): `tools/install-hooks.sh` links the tracked `tools/git-hooks/pre-push` into the git common dir (only that hook; graphify's stay). Updating main runs the full check unless the last green `build` stamped this tree (`firmware/build/.green-<tree>`); other branches pass; bypass is `--no-verify`, Lucas only.
 - After committing run `./firmware/build.sh reconfigure build` so the image label `fw-<sha>` matches the commit.
 - The build reformats `dependencies.lock`: `git restore dependencies.lock` unless dependencies really changed.
 - `sdkconfig` is gitignored; `sdkconfig.defaults` (firmware/ and c6/) is the truth. Run long builds to a log file with a 600 s timeout.
