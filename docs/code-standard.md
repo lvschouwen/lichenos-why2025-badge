@@ -56,7 +56,9 @@ because `firmware/CMakeLists.txt` turns `-fstack-usage` on for every directory u
   `ota_0` row of `firmware/partitions.csv`.
 - Runtime: `fw mem` (heaps free/largest/min for internal, dma, psram; per task core, `stack_free`, cpu % over the interval since the
   last `fw mem`; the IDLE0/IDLE1 lines give idle per core; `mem dma_low` lines: when the DMA min fell by 2 KB or more,
-  with the uptime, free then and the largest internal allocation in that 250 ms with its task (`big`, `task`), #256), `fw tasks` (stack size, owner), `fw ui perf [reset|bench]`
+  with the uptime, free then, and `big`/`task`: the largest internal allocation (1 KB or more) in the 250 ms windows
+  where that record's min fell and the task that made it (an ISR's is blamed on the task it interrupted; `?` when the
+  name could not be read consistently), #256), `fw tasks` (stack size, owner), `fw ui perf [reset|bench]`
   (render, flush and wait times per frame), `fw boot` (start-up steps).
 - Report without gating: `python3 -I tools/check_standard.py --report` lists everything past a warn line, worst first.
 

@@ -33,11 +33,12 @@ static void first_and_steps(void) {
     CHECK(!dma_low_feed(&l, 95000, 99000, 12700, 0, "c6sup"));
     CHECK(strcmp(at(&l, 0), "mem dma_low first min 90000 fell 0 at 12.345s free 99000 big 0 task -") == 0);
 
-    // A fall below the step is no record, but the newest one follows it down (its moment stays)
+    // A fall below the step is no record, but the newest one follows it down (its moment stays) and takes the
+    // window's allocation when it is the largest so far
     CHECK(!dma_low_feed(&l, 89000, 98500, 12850, 1200, "c6sup"));
-    CHECK(strcmp(at(&l, 0), "mem dma_low first min 89000 fell 1000 at 12.345s free 99000 big 0 task -") == 0);
+    CHECK(strcmp(at(&l, 0), "mem dma_low first min 89000 fell 1000 at 12.345s free 99000 big 1200 task c6sup") == 0);
 
-    // A step from the newest record starts one; an empty task name reads "-"
+    // A step below where the newest record started (90000) starts one; an empty task name reads "-"
     CHECK(dma_low_feed(&l, 89000 - DMA_LOW_STEP, 98000, 13100, 2048, ""));
     CHECK(strcmp(at(&l, 1), "mem dma_low drop 1/1 min 86952 fell 2048 at 13.100s free 98000 big 2048 task -") == 0);
 
@@ -77,11 +78,28 @@ static void ring_wraps(void) {
     CHECK(!dma_low_feed(&l, 79000, 90000, 6000, 0, "x"));
     CHECK(strstr(at(&l, 4), "drop 5/5 min 79000 fell 4616 at 5.000s") != NULL);
     CHECK(strstr(at(&l, 3), "drop 4/5 min 83616 fell 4096 ") != NULL);
-    // ...and the next step is measured from that true minimum, not from where the record started
-    CHECK(!dma_low_feed(&l, 79000 - DMA_LOW_STEP + 1, 90000, 6250, 0, "x"));
-    CHECK(strstr(at(&l, 4), "drop 5/5 min 76953 fell 6663 at 5.000s") != NULL);
-    CHECK(dma_low_feed(&l, 76953 - DMA_LOW_STEP, 90000, 6500, 3000, "y"));
-    CHECK(strstr(at(&l, 4), "drop 6/6 min 74905 fell 2048 at 6.500s free 90000 big 3000 task y") != NULL);
+    // ...and the next step is measured from where drop 5 started (79520), not from its moving min
+    CHECK(dma_low_feed(&l, 79520 - DMA_LOW_STEP, 90000, 6250, 0, "x"));
+    CHECK(strstr(at(&l, 4), "drop 6/6 min 77472 fell 1528 at 6.250s") != NULL);
+}
+
+// The #256 case: TX frame copies queue up ~1 KB per sample. No single sample falls a step, the sum does
+static void small_falls_add_up(void) {
+    dma_low_t l = {0};
+    dma_low_feed(&l, 100000, 100000, 0, 0, "main");
+    CHECK(!dma_low_feed(&l, 99000, 99000, 250, 1556, "ota"));
+    CHECK(!dma_low_feed(&l, 98000, 98000, 500, 1556, "ota"));
+    CHECK(strstr(at(&l, 0), "first min 98000 fell 2000 at 0.000s free 100000 big 1556 task ota") != NULL);
+    CHECK(dma_low_feed(&l, 97000, 97000, 750, 1556, "ota_shot")); // 3000 below where the record started
+    CHECK(strcmp(at(&l, 1), "mem dma_low drop 1/1 min 97000 fell 1000 at 0.750s free 97000 big 1556 task ota_shot") == 0);
+    // ...and on: 17 KB more in 1 KB falls gives a record every 3 KB (2 KB is not yet a step), the newest at the true
+    // minimum
+    for (uint32_t m = 96000; m >= 80000; m -= 1000) {
+        dma_low_feed(&l, m, m, 1000 + (100000 - m) / 4, 1556, "ota_shot");
+    }
+    CHECK(l.drops == 6);
+    CHECK(strstr(at(&l, DMA_LOW_KEEP), "drop 6/6 min 80000 ") != NULL);
+    CHECK(strstr(at(&l, DMA_LOW_KEEP), " big 1556 task ota_shot") != NULL);
 }
 
 static void long_task_name_and_short_buffer(void) {
@@ -97,6 +115,7 @@ static void long_task_name_and_short_buffer(void) {
 int main(void) {
     first_and_steps();
     ring_wraps();
+    small_falls_add_up();
     long_task_name_and_short_buffer();
     if (failures) {
         printf("%d failure(s)\n", failures);

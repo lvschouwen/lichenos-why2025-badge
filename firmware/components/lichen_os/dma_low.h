@@ -1,10 +1,10 @@
 #pragma once
 
 // When the DMA-capable heap's low-water mark fell, and who took the most then (#256). The heap only keeps the lowest
-// free figure ever seen, not when it was reached: a sampler feeds the mark in now and then, and every drop of at least
-// DMA_LOW_STEP below the newest record starts a new record with its uptime, the free figure then and the largest
-// internal allocation since the sample before (its size and its task). A smaller fall moves the newest record's min
-// along, so the last line always shows the heap's true minimum. Pure (no ESP-IDF), host-tested in
+// free figure ever seen, not when it was reached: a sampler feeds the mark in now and then, and once the mark is
+// DMA_LOW_STEP below where the newest record started, a new record starts with its uptime, the free figure then and
+// the largest internal allocation in that sample's window (its size and its task). A smaller fall moves the newest
+// record's min along (and its big/task when larger), so the last line always shows the heap's true minimum. Pure (no ESP-IDF), host-tested in
 // host_tests/dma_low_test.c.
 
 #include <stdbool.h>
@@ -18,16 +18,17 @@
 typedef struct {
     uint64_t at_ms;    // uptime of the sample that saw the drop (the drop happened since the sample before)
     uint32_t min;      // the heap's minimum free; the newest record follows it down
-    uint32_t fell;     // below the record before it (for the first: below its own first sample)
+    uint32_t fell;     // below the record before it, as it stood (for the first: below its own first sample)
     uint32_t free_now; // free at that sample: near min = still held, back up = a short peak
-    uint32_t big;      // bytes of the largest internal allocation in the sample's window (0: none watched)
-    char     task[DMA_LOW_TASK_CAP]; // the task that made it ("-": none)
+    uint32_t big;      // bytes of the largest internal allocation in the windows where this record's min fell (0: none)
+    char     task[DMA_LOW_TASK_CAP]; // the task that made it ("-": none; an ISR's is the task it interrupted)
 } dma_low_mark_t;
 
 typedef struct {
     dma_low_mark_t first;              // the first sample: everything boot took before the sampler ran
     dma_low_mark_t mark[DMA_LOW_KEEP]; // ring of the last drops after it
     uint32_t       drops;              // drops recorded after the first sample
+    uint32_t       ref;                // min when the newest record started: the next step is measured from here
     bool           started;
 } dma_low_t;
 

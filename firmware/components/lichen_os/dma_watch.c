@@ -1,6 +1,7 @@
 // The DMA low-water watch (#256). heap_caps keeps only the lowest DMA free ever, not when or who. Two halves:
 // - the heap's alloc hook (CONFIG_HEAP_USE_HOOKS) keeps the largest internal allocation since the last sample, with
-//   the name of the task that made it, copied while that task is certainly alive (it is the one running);
+//   the name of the task that made it, copied while that task is certainly alive (it is the one running). An
+//   allocation in an ISR is blamed on the task it interrupted;
 // - an esp_timer sample (no task of its own) reads the DMA min four times a second, takes the hook's slot and feeds
 //   both to dma_low.c, which keeps the drops. A peak shorter than the period still shows (the mark is the heap's),
 //   only its moment is rounded to the period.
@@ -36,9 +37,11 @@ static char const TAG[] = "mem";
 extern StaticTask_t *volatile pxCurrentTCBs[];
 
 // The hook's slot: DRAM (.bss), written by any core, possibly in an ISR or with the cache off. Lock-free: the size is
-// claimed by a compare-and-swap, the name copied after; two cores claiming at the same instant may mix a name.
+// claimed by a compare-and-swap; gen is bumped before the claim and after the name copy, so a reader that sees gen
+// odd or changed knows the name may not belong to the size and says "?" rather than blame the wrong task.
 static struct {
     _Atomic uint32_t size;
+    _Atomic uint32_t gen;
     char             task[DMA_LOW_TASK_CAP];
 } big;
 
@@ -53,14 +56,33 @@ void esp_heap_trace_alloc_hook(void *ptr, size_t size, uint32_t caps) {
     }
     uint32_t want = size > UINT32_MAX ? UINT32_MAX : (uint32_t)size;
     uint32_t cur  = atomic_load_explicit(&big.size, memory_order_relaxed);
-    if (want <= cur ||
-        !atomic_compare_exchange_strong_explicit(&big.size, &cur, want, memory_order_relaxed, memory_order_relaxed)) {
+    if (want <= cur) {
         return;
     }
-    StaticTask_t *tcb = pxCurrentTCBs[esp_cpu_get_core_id()];
-    for (int i = 0; i < DMA_LOW_TASK_CAP; i++) {
-        big.task[i] = tcb ? (char)tcb->ucDummy7[i] : '\0'; // NUL-padded by FreeRTOS; the reader terminates anyway
+    atomic_fetch_add_explicit(&big.gen, 1, memory_order_acq_rel);
+    if (atomic_compare_exchange_strong_explicit(&big.size, &cur, want, memory_order_acq_rel, memory_order_relaxed)) {
+        StaticTask_t *tcb = pxCurrentTCBs[esp_cpu_get_core_id()];
+        for (int i = 0; i < DMA_LOW_TASK_CAP; i++) {
+            big.task[i] = tcb ? (char)tcb->ucDummy7[i] : '\0'; // NUL-padded by FreeRTOS; the reader terminates anyway
+        }
     }
+    atomic_fetch_add_explicit(&big.gen, 1, memory_order_release);
+}
+
+// Closes the hook's window: its largest allocation's size, and the name of who made it ("?" if a hook was writing)
+static uint32_t take_big(char task[DMA_LOW_TASK_CAP]) {
+    uint32_t g1 = atomic_load_explicit(&big.gen, memory_order_acquire);
+    for (int i = 0; i < DMA_LOW_TASK_CAP; i++) {
+        task[i] = big.task[i];
+    }
+    task[DMA_LOW_TASK_CAP - 1] = '\0';
+    uint32_t size              = atomic_exchange_explicit(&big.size, 0, memory_order_acq_rel);
+    uint32_t g2                = atomic_load_explicit(&big.gen, memory_order_acquire);
+    if ((g1 & 1) || g1 != g2) {
+        task[0] = '?';
+        task[1] = '\0';
+    }
+    return size;
 }
 
 static dma_low_t    dma_low; // ~250 B internal .bss under dma_low_mux (internal: a critical section never touches PSRAM)
@@ -70,13 +92,9 @@ static void dma_watch(void *arg) {
     (void)arg;
     static uint32_t seen = UINT32_MAX; // the timer task only
     // The window closes before the mark is read: an allocation in between counts towards the next one
-    char task[DMA_LOW_TASK_CAP];
-    for (int i = 0; i < DMA_LOW_TASK_CAP; i++) {
-        task[i] = big.task[i];
-    }
-    task[DMA_LOW_TASK_CAP - 1] = '\0';
-    uint32_t taken             = atomic_exchange_explicit(&big.size, 0, memory_order_relaxed);
-    uint32_t min               = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA);
+    char     task[DMA_LOW_TASK_CAP];
+    uint32_t taken = take_big(task);
+    uint32_t min   = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA);
     if (min == seen) {
         return; // the usual tick: the mark only ever moves down
     }
