@@ -3,17 +3,13 @@
 // so a critical section never touches PSRAM (whose cache can be off during a flash write).
 #include "lichen_mem.h"
 
-#include "dma_low.h"
-#include "esp_cpu.h"
+#include "dma_watch.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_memory_utils.h"
-#include "esp_timer.h"
 #include "fw_console.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
-#include <stdio.h>
 #include <string.h>
 
 _Static_assert(MEM_BOOK_OWNERS >= LICHEN_MAX_APPS + 1, "a row for every app and the OS");
@@ -97,67 +93,6 @@ void lichen_free(lichen_app_t const *app, void *ptr) {
     heap_caps_free(ptr);
 }
 
-// The DMA low-water watch (#256): heap_caps keeps only the lowest DMA free ever, not when. An esp_timer sample (no
-// task of its own) reads it four times a second and records each real drop with the uptime and the task running on
-// the other core: the timer task itself is all this core could name. A peak shorter than the period still shows
-// (the mark is the heap's), only its moment is rounded to the period.
-#define DMA_WATCH_US (250 * 1000)
-
-static dma_low_t    dma_low; // ~200 B internal .bss under dma_low_mux (internal: a critical section never touches PSRAM)
-static portMUX_TYPE dma_low_mux = portMUX_INITIALIZER_UNLOCKED;
-
-static void other_core_task(char *out, size_t cap) {
-    snprintf(out, cap, "-");
-#if CONFIG_FREERTOS_NUMBER_OF_CORES > 1
-    TaskHandle_t t = xTaskGetCurrentTaskHandleForCore(esp_cpu_get_core_id() == 0 ? 1 : 0);
-    char const  *n = t ? pcTaskGetName(t) : NULL; // a name to go on, read without a lock: the task may be ending
-    if (n) {
-        snprintf(out, cap, "%.*s", (int)(cap - 1), n);
-    }
-#endif
-}
-
-static void dma_watch(void *arg) {
-    (void)arg;
-    static uint32_t seen = UINT32_MAX; // the timer task only
-    uint32_t        min  = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_DMA);
-    if (min == seen) {
-        return; // the usual tick: the mark only ever moves down
-    }
-    seen = min;
-    char task[DMA_LOW_TASK_CAP];
-    other_core_task(task, sizeof(task));
-    uint32_t free_now = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_DMA);
-    uint64_t at_ms    = (uint64_t)esp_timer_get_time() / 1000;
-    portENTER_CRITICAL(&dma_low_mux);
-    bool kept = dma_low_feed(&dma_low, min, free_now, at_ms, task);
-    portEXIT_CRITICAL(&dma_low_mux);
-    if (kept) {
-        ESP_LOGI(TAG, "dma min %u (free %u), task on the other core %s", (unsigned)min, (unsigned)free_now, task);
-    }
-}
-
-static void dma_watch_start(void) {
-    static esp_timer_handle_t timer;
-    esp_timer_create_args_t const args = {.callback = dma_watch, .name = "dma_low"};
-    if (timer || esp_timer_create(&args, &timer) != ESP_OK || esp_timer_start_periodic(timer, DMA_WATCH_US) != ESP_OK) {
-        ESP_LOGW(TAG, "no DMA low-water watch: fw mem shows no dma_low lines");
-        return;
-    }
-    dma_watch(NULL); // the first sample now: what boot took so far
-}
-
-static void dma_low_report(void) {
-    dma_low_t snap; // ~200 B onto the console's stack: no PSRAM inside the critical section
-    portENTER_CRITICAL(&dma_low_mux);
-    snap = dma_low;
-    portEXIT_CRITICAL(&dma_low_mux);
-    char line[128];
-    for (unsigned i = 0; dma_low_line(&snap, i, line, sizeof(line)); i++) {
-        console_reply("%s", line);
-    }
-}
-
 // The lines "fw mem" adds: what each owner holds through lichen_alloc now, its peak, and refusals
 static void mem_report(void) {
     for (int i = 0; i < MEM_BOOK_OWNERS; i++) {
@@ -172,7 +107,7 @@ static void mem_report(void) {
                           (unsigned)r->bulk, (unsigned)r->bulk_peak, (unsigned)r->blocks, (unsigned)r->refused);
         }
     }
-    dma_low_report();
+    dma_watch_report();
 }
 
 void lichen_mem_console_register(void) {

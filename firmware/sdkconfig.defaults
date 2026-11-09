@@ -137,6 +137,8 @@ CONFIG_RTC_CLK_CAL_CYCLES=1024
 
 # #89: light poisoning so a double free or a free of a bad pointer aborts at the culprit (8 B per block)
 CONFIG_HEAP_POISONING_LIGHT=y
+# #256: the alloc hook names who took the most internal RAM when the DMA low-water mark fell (lichen_os/dma_watch.c)
+CONFIG_HEAP_USE_HOOKS=y
 
 # #116: encrypted NVS is built in but off; docs/nvs-encryption.md before turning it on (it never burns a key by itself)
 # CONFIG_LICHEN_NVS_ENCRYPT is not set

@@ -1,40 +1,44 @@
 #include "dma_low.h"
 
 #include <stdio.h>
-#include <string.h>
 
-static void mark_set(dma_low_mark_t *m, uint32_t min, uint32_t fell, uint32_t free_now, uint64_t at_ms, char const *task) {
-    m->at_ms    = at_ms;
-    m->min      = min;
-    m->fell     = fell;
-    m->free_now = free_now;
-    snprintf(m->task, sizeof(m->task), "%s", task && task[0] ? task : "-");
+static dma_low_mark_t mark_of(uint32_t min, uint32_t fell, uint32_t free_now, uint64_t at_ms, uint32_t big,
+                              char const *task) {
+    dma_low_mark_t m = {.at_ms = at_ms, .min = min, .fell = fell, .free_now = free_now, .big = big};
+    snprintf(m.task, sizeof(m.task), "%s", task && task[0] ? task : "-");
+    return m;
 }
 
-static dma_low_mark_t const *newest(dma_low_t const *l) {
+static dma_low_mark_t *newest(dma_low_t *l) {
     return l->drops ? &l->mark[(l->drops - 1) % DMA_LOW_KEEP] : &l->first;
 }
 
-bool dma_low_feed(dma_low_t *l, uint32_t min, uint32_t free_now, uint64_t at_ms, char const *task) {
+bool dma_low_feed(dma_low_t *l, uint32_t min, uint32_t free_now, uint64_t at_ms, uint32_t big, char const *task) {
     if (!l->started) {
-        mark_set(&l->first, min, 0, free_now, at_ms, task);
+        l->first   = mark_of(min, 0, free_now, at_ms, big, task);
         l->started = true;
         return true;
     }
-    // Against the last record, not the last sample: a peak built up in small steps still counts once it adds up
-    uint32_t last = newest(l)->min;
-    if (min >= last || last - min < DMA_LOW_STEP) {
+    dma_low_mark_t *last = newest(l);
+    if (min >= last->min) {
+        return false; // the heap's mark never rises; a higher figure is noise from the caller
+    }
+    if (last->min - min < DMA_LOW_STEP) {
+        // Churn: the newest record keeps its moment and follows the true minimum (the "fw mem dma min" figure)
+        last->fell += last->min - min;
+        last->min = min;
         return false;
     }
-    mark_set(&l->mark[l->drops % DMA_LOW_KEEP], min, last - min, free_now, at_ms, task);
+    uint32_t fell = last->min - min; // read before the ring slot is reused: it may be `last` itself (KEEP 1)
+    l->mark[l->drops % DMA_LOW_KEEP] = mark_of(min, fell, free_now, at_ms, big, task);
     l->drops++;
     return true;
 }
 
 static size_t put(dma_low_mark_t const *m, char *out, size_t cap, char const *what) {
-    int n = snprintf(out, cap, "mem dma_low %s min %u fell %u at %llu.%03us free %u task %s", what, (unsigned)m->min,
-                     (unsigned)m->fell, (unsigned long long)(m->at_ms / 1000), (unsigned)(m->at_ms % 1000),
-                     (unsigned)m->free_now, m->task);
+    int n = snprintf(out, cap, "mem dma_low %s min %u fell %u at %llu.%03us free %u big %u task %s", what,
+                     (unsigned)m->min, (unsigned)m->fell, (unsigned long long)(m->at_ms / 1000),
+                     (unsigned)(m->at_ms % 1000), (unsigned)m->free_now, (unsigned)m->big, m->task);
     return n < 0 ? 0 : (size_t)n;
 }
 
