@@ -87,6 +87,73 @@ void BadgeMesh::onMessageRecv(ContactInfo const &from, mesh::Packet *packet, uin
     MyMesh::onMessageRecv(from, packet, sender_timestamp, text);
 }
 
+bool BadgeMesh::putBlobByKey(uint8_t const key[], int key_len, uint8_t const src_buf[], int len) {
+    if (len > 0 && mesh_blobq_put(&blobs_, key, (size_t)key_len, src_buf, (size_t)len, (uint32_t)millis())) {
+        return true;
+    }
+    return store_.putBlobByKey(key, key_len, src_buf, (uint8_t)len); // full: inside the loop, as MyMesh does
+}
+
+int BadgeMesh::getBlobByKey(uint8_t const key[], int key_len, uint8_t dest_buf[]) {
+    uint8_t n = key_len > 0 ? mesh_blobq_get(&blobs_, key, (size_t)key_len, dest_buf) : 0;
+    return n ? n : store_.getBlobByKey(key, key_len, dest_buf);
+}
+
+// A contact removed (or overwritten by a new node) since: its blob is not written, as MyMesh deleted its file
+bool BadgeMesh::blobWanted(mesh_blobq_entry_t const &e) {
+    return lookupContactByPubKey(e.key, MESH_BLOBQ_KEY) != nullptr;
+}
+
+void BadgeMesh::blobDone() {
+    if (blob_written_) {
+        mesh_blobq_done(&blobs_, &blob_taken_);
+    }
+    blob_written_   = false;
+    blob_taken_.len = 0;
+}
+
+void BadgeMesh::takeBlob(bool quiet) {
+    blobDone();
+    while (mesh_blobq_take(&blobs_, (uint32_t)millis(), quiet, &blob_taken_)) {
+        if (blobWanted(blob_taken_)) {
+            return;
+        }
+        mesh_blobq_done(&blobs_, &blob_taken_);
+    }
+    blob_taken_.len = 0;
+}
+
+void BadgeMesh::writeTakenBlob() {
+    if (blob_taken_.len && !blob_written_) {
+        store_.putBlobByKey(blob_taken_.key, MESH_BLOBQ_KEY, blob_taken_.data, blob_taken_.len);
+        blob_written_ = true;
+    }
+}
+
+void BadgeMesh::flushBlobs() {
+    blobDone();
+    while (mesh_blobq_take(&blobs_, (uint32_t)millis(), true, &blob_taken_)) {
+        if (blobWanted(blob_taken_)) {
+            store_.putBlobByKey(blob_taken_.key, MESH_BLOBQ_KEY, blob_taken_.data, blob_taken_.len);
+        }
+        mesh_blobq_done(&blobs_, &blob_taken_);
+    }
+    blob_taken_.len = 0;
+}
+
+void BadgeMesh::dropBlobs() {
+    mesh_blobq_clear(&blobs_);
+    blob_written_   = false;
+    blob_taken_.len = 0;
+}
+
+void BadgeMesh::saveAll() {
+    store_.savePrefs(*getNodePrefs());
+    store_.saveContacts(this, keepContact);
+    store_.saveChannels(this);
+    flushBlobs();
+}
+
 // A room's post: the contact table names the author by the first 4 bytes of its key (the room sends only those), else
 // the 8 hex digits. The screens see "<author>: <text>" in the room's chat (#51).
 void BadgeMesh::onSignedMessageRecv(ContactInfo const &from, mesh::Packet *packet, uint32_t sender_timestamp,

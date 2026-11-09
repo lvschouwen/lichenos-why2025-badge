@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -577,6 +578,63 @@ static void import_checks(BadgeMesh &mesh) {
     CHECK(free_packets(mesh) == before);
 }
 
+// Files below dir/bl (MeshCore's advert blobs)
+static int blob_files(char const *dir) {
+    char path[300];
+    snprintf(path, sizeof(path), "%s/bl", dir);
+    DIR *d = opendir(path);
+    int  n = 0;
+    for (struct dirent *e; d && (e = readdir(d)) != NULL;) {
+        n += e->d_name[0] != '.';
+    }
+    if (d) {
+        closedir(d);
+    }
+    return n;
+}
+
+// #257: an advert's blob waits in RAM and is written after the loop, as the mesh task does after the unlock; until then
+// "share" reads the queued copy
+static void blob_checks(std::vector<std::vector<uint8_t>> const &packets, char const *old_root) {
+    char root[] = "/tmp/companion_blobs.XXXXXX";
+    CHECK(mkdtemp(root) != NULL);
+    fs_shim_set_root(root);
+    CHECK(SPIFFS.begin(true));
+    static SimpleMeshTables tables;
+    static DataStore        store(SPIFFS, rtc_clock);
+    static ob_t             ob;
+    static mt_t             mt;
+    static rr_t             rr;
+    static BadgeMesh        mesh(radio_driver, rng_for_pipe(), rtc_clock, tables, store, &ob);
+    ob_init(&ob);
+    mt_init(&mt);
+    rr_init(&rr);
+    mesh.attachTrace(&mt);
+    mesh.attachRemote(&rr);
+    store.begin();
+    mesh.begin();
+    mesh.startPipe();
+    settle(mesh, 10);
+    test_radio.pending = packets[0]; // an advert of a new node
+    settle(mesh, 10);
+    CHECK(mesh.getNumContacts() == 1);
+    CHECK(mesh.blobsQueued() == 1);
+    CHECK(blob_files(root) == 0); // nothing written inside the loop
+    ContactInfo c;
+    uint8_t     out[MAX_TRANS_UNIT];
+    ContactsIterator it = mesh.startContactsIterator();
+    CHECK(it.hasNext(&mesh, c) && mesh.exportContact(c, out) > 0); // the queued copy
+    mesh.takeBlob(false);                                               // a packet came in: not yet
+    mesh.writeTakenBlob();
+    CHECK(blob_files(root) == 0);
+    mesh.takeBlob(true); // quiet: written after the "unlock", taken off at the next take
+    mesh.writeTakenBlob();
+    CHECK(blob_files(root) == 1 && mesh.blobsQueued() == 1);
+    mesh.takeBlob(true);
+    CHECK(mesh.blobsQueued() == 0 && mesh.exportContact(c, out) > 0); // now from the file
+    fs_shim_set_root(old_root);
+}
+
 // The companion pipe (#45, #55) on the real MyMesh: start sequence, offline queue drained, sends through the outbox
 static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, SimpleMeshTables &tables) {
     static DataStore store(SPIFFS, rtc_clock);
@@ -876,6 +934,7 @@ int main(int argc, char **argv) {
     }
 
     pipe_checks(packets, tables6);
+    blob_checks(packets, root);
 
     {
         // Settings from the badge (#67): name and radio through the setters' own path, saved as the badge saves them

@@ -8,6 +8,7 @@
 #include "MyMesh.h"
 
 #include "advert_limit.h"
+#include "mesh_blobq.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
 #include "mesh_health.h"
@@ -120,10 +121,27 @@ class BadgeMesh : public MyMesh {
 public:
     BadgeMesh(mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore &store,
               ob_t *ob)
-        : MyMesh(radio, rng, rtc, tables, store), ob_(ob) {
+        : MyMesh(radio, rng, rtc, tables, store), ob_(ob), store_(store) {
         pipe_.attach(this, ob);
         advert_limit_init(&advert_limit_);
+        mesh_blobq_init(&blobs_);
+        blob_taken_.len = 0;
     }
+    // MyMesh's own filter for the contacts file: not the transient entries
+    static bool keepContact(ContactInfo const &c) { return c.type != ADV_TYPE_NONE; }
+    // Advert blobs written after the mesh lock (#257, mesh_blobq.h). takeBlob at the end of the mesh task's locked part
+    // (no packet in this loop: quiet) picks one and first takes the one written last time off the queue;
+    // writeTakenBlob then writes it without the lock, on the mesh task (a no-op when none was picked). The queued copy
+    // stays readable meanwhile, and only the mesh task changes the queue, so the copy being written is its own.
+    void   takeBlob(bool quiet);
+    void   writeTakenBlob();
+    // Under the lock, before a stop or a restart: everything queued goes to flash now
+    void   flushBlobs();
+    // MeshCore's files were erased (factory reset, "erase", "rebuild"): a queued blob must not bring one back
+    void   dropBlobs();
+    size_t blobsQueued() const { return mesh_blobq_count(&blobs_); }
+    // Prefs, contacts, channels and the queued blobs, under the lock: MeshCore's own reboot
+    void   saveAll();
     CompanionPipe &pipe() { return pipe_; }
     void           attachTrace(mt_t *mt) { pipe_.attach_trace(mt); }
     void           attachRemote(rr_t *rr) { pipe_.attach_remote(rr); }
@@ -171,9 +189,18 @@ protected:
     // A direct message from a contact: its signal goes to the signal history (#166), then MyMesh queues the message
     void onMessageRecv(ContactInfo const &from, mesh::Packet *packet, uint32_t sender_timestamp,
                        char const *text) override;
+    // The raw advert of a contact (BaseChatMesh, for "share"): queued instead of written inside the loop (#257)
+    bool putBlobByKey(uint8_t const key[], int key_len, uint8_t const src_buf[], int len) override;
+    int  getBlobByKey(uint8_t const key[], int key_len, uint8_t dest_buf[]) override;
 
 private:
+    bool           blobWanted(mesh_blobq_entry_t const &e);
+    void           blobDone();
     ob_t          *ob_;
+    DataStore     &store_;
+    mesh_blobq_t   blobs_;
+    mesh_blobq_entry_t blob_taken_;   // the one writeTakenBlob writes; len 0: none
+    bool               blob_written_ = false; // blob_taken_ is on flash: off the queue at the next takeBlob
     CompanionPipe  pipe_;
     advert_limit_t advert_limit_;
 };

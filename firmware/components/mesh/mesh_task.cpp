@@ -127,14 +127,6 @@ mesh::LocalIdentity radio_new_identity() {
     return id;
 }
 
-// DataStore::formatFileSystem() (the app's factory reset) erases NVS on ESP32; on the badge that would take the Wi-Fi
-// credentials with it, so DataStore.cpp is built with nvs_flash_erase renamed to this: MeshCore's own files go (the
-// shim's format()), the rest of NVS stays
-extern "C" esp_err_t mesh_nvs_flash_erase(void) {
-    ESP_LOGI(TAG, "factory reset from the app: MeshCore's files erased, NVS (Wi-Fi) kept");
-    return ESP_OK;
-}
-
 static EspRng            rng;
 static SimpleMeshTables *tables;
 static DataStore         store(SPIFFS, rtc_clock);
@@ -142,6 +134,15 @@ static BadgeMesh        *node;
 static ob_t             *outbox;            // PSRAM; shared with the UI under ob_mux (mesh_link.h)
 static volatile int      offline_queue_len; // MyMesh's offline queue, from the Listener (#55: stays ~0 now)
 static portMUX_TYPE      ob_mux = portMUX_INITIALIZER_UNLOCKED;
+
+// DataStore::formatFileSystem() (the app's factory reset) erases NVS on ESP32; on the badge that would take the Wi-Fi
+// credentials with it, so DataStore.cpp is built with nvs_flash_erase renamed to this: MeshCore's own files go (the
+// shim's format()), the rest of NVS stays
+extern "C" esp_err_t mesh_nvs_flash_erase(void) {
+    ESP_LOGI(TAG, "factory reset from the app: MeshCore's files erased, NVS (Wi-Fi) kept");
+    node->dropBlobs(); // only MyMesh formats (in its loop, so node is set): no queued blob comes back (#257)
+    return ESP_OK;
+}
 
 extern "C" void mesh_ob_enter(void) {
     portENTER_CRITICAL(&ob_mux);
@@ -522,9 +523,7 @@ extern "C" size_t mesh_contact_set_path(uint8_t const prefix[6], uint8_t path_le
 }
 
 // MeshCore writes contacts lazily; a firmware update must not lose the last few minutes of them
-static bool keep_contact(ContactInfo const &c) {
-    return c.type != ADV_TYPE_NONE; // as MyMesh's own filter: not the transient entries
-}
+static bool (*const keep_contact)(ContactInfo const &c) = BadgeMesh::keepContact;
 
 // MeshCore's own reboot (an admin's "reboot" CLI command, the companion protocol) runs on the mesh task inside
 // node->loop(), with the mesh lock held. The OS's restart save (system_restart -> stop_for_update, #123) would wait for
@@ -534,9 +533,7 @@ static bool rebooting;
 
 void BadgeBoard::reboot() {
     if (mesh_task_handle && xTaskGetCurrentTaskHandle() == mesh_task_handle) {
-        store.savePrefs(*node->getNodePrefs());
-        store.saveContacts(node, keep_contact);
-        store.saveChannels(node);
+        node->saveAll();
         mesh_journal_stop_locked(true);
         __atomic_store_n(&rebooting, true, __ATOMIC_RELEASE);
     }
@@ -680,6 +677,7 @@ static void mesh_task(void *arg) {
         discover_tick_locked();
         mesh_rhist_tick(); // the status history's poll (#168): only repeaters the person switched on
         mesh_journal_tick_locked(); // a due flush swaps the pending records out; they are written after the unlock
+        node->takeBlob(rx == 0); // an advert's blob (#257): written after the unlock as well, while the radio is quiet
         if (__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
             // The task stops itself, between two loops and with the lock held: nothing is half done, and the stack
             // (16 KB, the saves keep File objects on it) is the one that is big enough
@@ -707,6 +705,7 @@ static void mesh_task(void *arg) {
             store.saveContacts(node, keep_contact);
             int64_t contacts_us = esp_timer_get_time() - contacts_started;
             store.saveChannels(node);
+            node->flushBlobs();
             int64_t save_us = esp_timer_get_time() - save_started;
             mesh_journal_stop_locked(final);
             __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
@@ -729,6 +728,7 @@ static void mesh_task(void *arg) {
         int64_t took_ms = (esp_timer_get_time() - started) / 1000;
         mesh_unlock();
         mesh_journal_flush(); // the card's I/O never under the mesh lock: the screens keep their snapshots meanwhile
+        node->writeTakenBlob();
         contacts_full_post();
         if (mesh_notify_drain()) { // #50: notices posted after the unlock; a mode read or changed moves the badge
             mesh_lock();
@@ -736,7 +736,8 @@ static void mesh_task(void *arg) {
             mesh_unlock();
         }
         if (took_ms >= MESH_SLOW_LOOP_MS) {
-            // Where it went (#67): file time is DataStore's (the lazy /contacts3 rewrite), the rest is MeshCore's own
+            // Where it went (#67): file time is DataStore's (the lazy /contacts3 rewrite; advert blobs are written after
+            // the unlock since #257), the rest is MeshCore's own
             // work on the packets received (Ed25519 checks of adverts, decryption); the screens skip ticks meanwhile
             ESP_LOGW(TAG, "MeshCore loop took %lld ms: files %lu ms (%lu calls), %lu packet(s) in, waited %lld ms for "
                           "the lock",
