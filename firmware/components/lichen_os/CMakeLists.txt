@@ -5,7 +5,8 @@
 # the storage drive (T6) and on the SD card (#60). lichen_crashlog.c is the Crash log app's view of crash.c's log (#72);
 # lichen_legacy.c hands the shell's old blobs to their app. lichen_badge.c: the tile badges home draws (#102).
 # radio_state.c (pure, radio_state_test.c, #197) and lichen_radio.c: the radios' on/off state and LoRa borrowing.
-# lichen_task.c / lichen_mem.c: tasks and internal memory booked per app (#181). fonts.c loads the fonts from the
+# lichen_task.c / lichen_mem.c: tasks and internal memory booked per app (#181); dma_low.c (pure, dma_low_test.c) records
+# when the DMA heap's low-water mark fell, for fw mem (#256). fonts.c loads the fonts from the
 # assets partition at boot into the gate's slots (#16, font_slots.h); lichen_ui_call.c hands work to the LVGL task
 # under the port lock (#84 T8a, #221 owns it next) and is the UI service: the only owner of the LVGL lock and the default
 # group (#225; ui_call_queue.c, ui_lock_owner.c and ui_lock_hits.c are its pure parts, ui_call_queue_test.c;
@@ -28,9 +29,9 @@ idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_bac
                             "lichen_crashlog.c" "lichen_legacy.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
                             "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "os_bind.c" "lichen_sys_pure_view.c" "lichen_sys_view.c"
-                            "ui_call_queue.c" "ui_lock_owner.c" "ui_lock_hits.c" "ui_lock_check.c"
+                            "ui_call_queue.c" "ui_lock_owner.c" "ui_lock_hits.c" "ui_lock_check.c" "dma_low.c"
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES lichen_api freertos esp_hw_support assets fw_console nvs_flash heap storage sdcard
+                       PRIV_REQUIRES lichen_api freertos esp_hw_support esp_timer assets fw_console nvs_flash heap storage sdcard
                                      crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns)
 
 # The debug lock-owner check (#225): LVGL's allocator and lv_inv_area go through ui_lock_check.c
