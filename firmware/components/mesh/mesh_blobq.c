@@ -24,9 +24,10 @@ static mesh_blobq_entry_t *free_slot(mesh_blobq_t *q) {
     return NULL;
 }
 
-bool mesh_blobq_put(mesh_blobq_t *q, uint8_t const *key, size_t key_len, uint8_t const *data, size_t len,
-                    uint32_t now_ms) {
-    if (key_len < MESH_BLOBQ_KEY || len == 0 || len > MESH_BLOBQ_DATA) {
+bool mesh_blobq_put(
+    mesh_blobq_t *q, uint8_t const *key, size_t key_len, uint8_t const *data, size_t len, uint32_t now_ms
+) {
+    if (key_len < MESH_BLOBQ_KEY || len < MESH_BLOBQ_MIN || len > MESH_BLOBQ_DATA) {
         return false;
     }
     mesh_blobq_entry_t *e = find(q, key);

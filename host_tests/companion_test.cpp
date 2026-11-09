@@ -207,7 +207,10 @@ struct CountingListener : MyMesh::Listener {
 };
 
 static void settle(BadgeMesh &mesh, int loops = 60) {
-    run(mesh, loops);
+    for (int i = 0; i < loops; i++) {
+        mesh.loop(); // BadgeMesh's own (#257), as the mesh task calls it
+        fake_millis += 100;
+    }
 }
 
 // The text of a GRP_TXT packet MyMesh put on air, decrypted with the channel's key
@@ -593,6 +596,57 @@ static int blob_files(char const *dir) {
     return n;
 }
 
+// Removes the advert's node through MyMesh's own command (it deletes the blob file), then brings it back as new
+static void remove_node(BadgeMesh &mesh, uint8_t const *key) {
+    CHECK(mesh.contactAction(key, MESH_CO_REMOVE) == BadgeMesh::CONTACT_QUEUED);
+    settle(mesh, 5);
+    CHECK(mesh.getNumContacts() == 0);
+}
+
+static void readd_node(BadgeMesh &mesh, std::vector<uint8_t> const &advert) {
+    CHECK(mesh.importContact(advert.data(), (uint8_t)advert.size()));
+    settle(mesh, 5);
+    CHECK(mesh.getNumContacts() == 1 && mesh.blobsQueued() == 1);
+}
+
+// #257 review: a removed contact's queued blob is never written, also when it was taken just before the removal; a
+// stop writes what is queued
+static void blob_lifecycle_checks(BadgeMesh &mesh, std::vector<uint8_t> const &advert, char const *root) {
+    ContactsIterator it = mesh.startContactsIterator();
+    ContactInfo      c;
+    CHECK(it.hasNext(&mesh, c));
+    remove_node(mesh, c.id.pub_key);
+    CHECK(blob_files(root) == 0); // MyMesh deleted the file
+
+    readd_node(mesh, advert); // queued, then removed before its write
+    remove_node(mesh, c.id.pub_key);
+    mesh.takeBlob(true);
+    mesh.writeTakenBlob();
+    CHECK(blob_files(root) == 0 && mesh.blobsQueued() == 0);
+
+    readd_node(mesh, advert); // taken, then removed by MyMesh's loop before the write after the unlock
+    mesh.takeBlob(true);
+    remove_node(mesh, c.id.pub_key);
+    mesh.writeTakenBlob();
+    CHECK(blob_files(root) == 0);
+    mesh.takeBlob(true);
+    CHECK(mesh.blobsQueued() == 0);
+
+    readd_node(mesh, advert); // a stop: written at once, the queue empty
+    mesh.flushBlobs();
+    CHECK(blob_files(root) == 1 && mesh.blobsQueued() == 0);
+    mesh.takeBlob(true);
+    mesh.writeTakenBlob();
+    CHECK(blob_files(root) == 1);
+
+    remove_node(mesh, c.id.pub_key); // a factory reset: nothing queued comes back
+    readd_node(mesh, advert);
+    mesh.dropBlobs();
+    mesh.takeBlob(true);
+    mesh.writeTakenBlob();
+    CHECK(blob_files(root) == 0 && mesh.blobsQueued() == 0);
+}
+
 // #257: an advert's blob waits in RAM and is written after the loop, as the mesh task does after the unlock; until then
 // "share" reads the queued copy
 static void blob_checks(std::vector<std::vector<uint8_t>> const &packets, char const *old_root) {
@@ -632,6 +686,7 @@ static void blob_checks(std::vector<std::vector<uint8_t>> const &packets, char c
     CHECK(blob_files(root) == 1 && mesh.blobsQueued() == 1);
     mesh.takeBlob(true);
     CHECK(mesh.blobsQueued() == 0 && mesh.exportContact(c, out) > 0); // now from the file
+    blob_lifecycle_checks(mesh, packets[0], root);
     fs_shim_set_root(old_root);
 }
 

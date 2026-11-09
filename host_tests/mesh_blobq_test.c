@@ -49,8 +49,10 @@ static void refused_puts(void) {
     uint8_t key[32], data[MESH_BLOBQ_DATA + 1] = {0};
     mesh_blobq_init(&q);
     key_of(key, 2);
-    CHECK(!mesh_blobq_put(&q, key, MESH_BLOBQ_KEY - 1, data, 10, 0));
+    CHECK(!mesh_blobq_put(&q, key, MESH_BLOBQ_KEY - 1, data, MESH_BLOBQ_MIN, 0));
     CHECK(!mesh_blobq_put(&q, key, 32, data, 0, 0));
+    CHECK(!mesh_blobq_put(&q, key, 32, data, MESH_BLOBQ_MIN - 1, 0)); // not an advert
+    CHECK(mesh_blobq_put(&q, key, 32, data, MESH_BLOBQ_MIN, 0));
     CHECK(!mesh_blobq_put(&q, key, 32, data, MESH_BLOBQ_DATA + 1, 0));
     CHECK(mesh_blobq_put(&q, key, 32, data, MESH_BLOBQ_DATA, 0));
     CHECK(mesh_blobq_get(&q, key, MESH_BLOBQ_KEY - 1, data) == 0);
@@ -58,43 +60,43 @@ static void refused_puts(void) {
     mesh_blobq_init(&q);
     for (uint8_t i = 0; i < MESH_BLOBQ_CAP; i++) {
         key_of(key, i);
-        CHECK(mesh_blobq_put(&q, key, 32, data, 10, i));
+        CHECK(mesh_blobq_put(&q, key, 32, data, MESH_BLOBQ_MIN, i));
     }
     key_of(key, MESH_BLOBQ_CAP);
-    CHECK(!mesh_blobq_put(&q, key, 32, data, 10, 100));
+    CHECK(!mesh_blobq_put(&q, key, 32, data, MESH_BLOBQ_MIN, 100));
     key_of(key, 3);
-    CHECK(mesh_blobq_put(&q, key, 32, data, 11, 100));
+    CHECK(mesh_blobq_put(&q, key, 32, data, MESH_BLOBQ_MIN + 1, 100));
     CHECK(mesh_blobq_count(&q) == MESH_BLOBQ_CAP);
 }
 
 static void take_when_quiet_or_old(void) {
-    uint8_t            k1[32], k2[32], d[20] = {7};
+    uint8_t            k1[32], k2[32], d[MESH_BLOBQ_MIN] = {7};
     mesh_blobq_entry_t e;
     mesh_blobq_init(&q);
     CHECK(!mesh_blobq_take(&q, 0, true, &e));
     key_of(k1, 1);
     key_of(k2, 2);
-    CHECK(mesh_blobq_put(&q, k2, 32, d, 20, 2000));
-    CHECK(mesh_blobq_put(&q, k1, 32, d, 20, 1000));
+    CHECK(mesh_blobq_put(&q, k2, 32, d, MESH_BLOBQ_MIN, 2000));
+    CHECK(mesh_blobq_put(&q, k1, 32, d, MESH_BLOBQ_MIN, 1000));
     // A packet came in: not yet; quiet: at once, the one that waited longest first
     CHECK(!mesh_blobq_take(&q, 2500, false, &e));
     CHECK(mesh_blobq_take(&q, 2500, true, &e) && e.key[0] == 1);
     // Taken is not gone: still readable until it was written
     uint8_t out[MESH_BLOBQ_DATA];
-    CHECK(mesh_blobq_get(&q, k1, 32, out) == 20);
+    CHECK(mesh_blobq_get(&q, k1, 32, out) == MESH_BLOBQ_MIN);
     mesh_blobq_done(&q, &e);
     CHECK(mesh_blobq_get(&q, k1, 32, out) == 0 && mesh_blobq_count(&q) == 1);
     // A busy radio never starves it: written 5 s after its put
     CHECK(mesh_blobq_take(&q, 2000 + MESH_BLOBQ_MAX_AGE_MS, false, &e) && e.key[0] == 2);
     // Across the millisecond counter's wrap
     mesh_blobq_init(&q);
-    CHECK(mesh_blobq_put(&q, k1, 32, d, 20, 0xFFFFFF00u));
+    CHECK(mesh_blobq_put(&q, k1, 32, d, MESH_BLOBQ_MIN, 0xFFFFFF00u));
     CHECK(!mesh_blobq_take(&q, 0x100, false, &e));
     CHECK(mesh_blobq_take(&q, MESH_BLOBQ_MAX_AGE_MS, false, &e));
 }
 
 static void newer_put_survives_the_write(void) {
-    uint8_t            key[32], a[10], b[12], out[MESH_BLOBQ_DATA];
+    uint8_t            key[32], a[MESH_BLOBQ_MIN], b[MESH_BLOBQ_MIN + 2], out[MESH_BLOBQ_DATA];
     mesh_blobq_entry_t e;
     memset(a, 1, sizeof(a));
     memset(b, 2, sizeof(b));

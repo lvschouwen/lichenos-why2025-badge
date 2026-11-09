@@ -24,7 +24,8 @@ static char root[PATH_MAX_LEN]; // empty until the OS sets it (#84 T6)
 static void (*drive_fn)(size_t *total, size_t *used);
 
 // Time spent in the file system (#67: where does a slow MeshCore loop go?). Only the badge measures; the mesh task reads
-// and resets it once per loop, under the mesh lock that every MeshCore file access already runs under.
+// and resets it once per loop. Atomic: since #257 the mesh task also writes advert blobs after its unlock, while another
+// task may be in a file under the mesh lock.
 static uint32_t busy_us, busy_ops;
 static uint32_t raw_writes; // writes and truncates of buffered "w" files (host tests count them)
 static bool     fail_alloc, fail_reads, fat_rename;
@@ -111,12 +112,11 @@ static bool write_full(int fd, uint8_t const *src, size_t n) {
 }
 
 uint32_t fs_shim_take_busy_us(uint32_t *ops) {
-    uint32_t us = busy_us;
+    uint32_t n = __atomic_exchange_n(&busy_ops, 0, __ATOMIC_RELAXED);
     if (ops) {
-        *ops = busy_ops;
+        *ops = n;
     }
-    busy_us = busy_ops = 0;
-    return us;
+    return __atomic_exchange_n(&busy_us, 0, __ATOMIC_RELAXED);
 }
 
 namespace {
@@ -124,8 +124,8 @@ struct Timed {
 #ifdef ESP_PLATFORM
     int64_t start = esp_timer_get_time();
     ~Timed() {
-        busy_us += (uint32_t)(esp_timer_get_time() - start);
-        busy_ops++;
+        __atomic_fetch_add(&busy_us, (uint32_t)(esp_timer_get_time() - start), __ATOMIC_RELAXED);
+        __atomic_fetch_add(&busy_ops, 1, __ATOMIC_RELAXED);
     }
 #endif
 };
@@ -382,6 +382,9 @@ void File::flush() {
 }
 
 void File::close() {
+    if (fd_ < 0 && !f_ && !d_) {
+        return; // nothing open (the destructor after an explicit close): no file system call, not counted
+    }
     [[maybe_unused]] Timed timed;
     if (fd_ >= 0) {
         if (failed_) {

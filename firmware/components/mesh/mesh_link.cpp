@@ -88,10 +88,13 @@ void BadgeMesh::onMessageRecv(ContactInfo const &from, mesh::Packet *packet, uin
 }
 
 bool BadgeMesh::putBlobByKey(uint8_t const key[], int key_len, uint8_t const src_buf[], int len) {
-    if (len > 0 && mesh_blobq_put(&blobs_, key, (size_t)key_len, src_buf, (size_t)len, (uint32_t)millis())) {
+    if (key_len <= 0 || len <= 0 || len > MESH_BLOBQ_DATA) {
+        return false; // DataStore keeps a uint8_t length: nothing longer is cut short
+    }
+    if (mesh_blobq_put(&blobs_, key, (size_t)key_len, src_buf, (size_t)len, (uint32_t)millis())) {
         return true;
     }
-    return store_.putBlobByKey(key, key_len, src_buf, (uint8_t)len); // full: inside the loop, as MyMesh does
+    return store_.putBlobByKey(key, key_len, src_buf, (uint8_t)len); // full or short: inside the loop, as MyMesh does
 }
 
 int BadgeMesh::getBlobByKey(uint8_t const key[], int key_len, uint8_t dest_buf[]) {

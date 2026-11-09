@@ -18,6 +18,7 @@ extern "C" {
 // (host_tests/mesh_blobq_test.c).
 
 #define MESH_BLOBQ_KEY        8   // DataStore names the file after the key's first 8 bytes: that is the identity here
+#define MESH_BLOBQ_MIN        100 // DataStore's advert minimum (key, timestamp, signature): shorter is not queued
 #define MESH_BLOBQ_DATA       255 // DataStore's limit (a whole LoRa packet)
 #define MESH_BLOBQ_CAP        32  // full: the caller writes the blob itself, as before
 #define MESH_BLOBQ_MAX_AGE_MS 5000
@@ -37,18 +38,19 @@ typedef struct {
 
 void mesh_blobq_init(mesh_blobq_t *q);
 // Queues the blob, replacing a queued one with the same key. false (nothing queued): no room, a key shorter than
-// MESH_BLOBQ_KEY, or a length of 0 or above MESH_BLOBQ_DATA; the caller then writes it itself.
-bool mesh_blobq_put(mesh_blobq_t *q, uint8_t const *key, size_t key_len, uint8_t const *data, size_t len,
-                    uint32_t now_ms);
+// MESH_BLOBQ_KEY, or a length below MESH_BLOBQ_MIN or above MESH_BLOBQ_DATA; the caller then writes it itself.
+bool mesh_blobq_put(
+    mesh_blobq_t *q, uint8_t const *key, size_t key_len, uint8_t const *data, size_t len, uint32_t now_ms
+);
 // The queued blob's length, copied to dest (MESH_BLOBQ_DATA bytes of room); 0 when none is queued for this key
 uint8_t mesh_blobq_get(mesh_blobq_t const *q, uint8_t const *key, size_t key_len, uint8_t *dest);
 // The blob to write now, copied to out, the one that waited longest: any when quiet (no packet in this loop), else
 // only one that has waited MESH_BLOBQ_MAX_AGE_MS. It stays queued (and readable) until mesh_blobq_done.
-bool mesh_blobq_take(mesh_blobq_t const *q, uint32_t now_ms, bool quiet, mesh_blobq_entry_t *out);
+bool    mesh_blobq_take(mesh_blobq_t const *q, uint32_t now_ms, bool quiet, mesh_blobq_entry_t *out);
 // out of mesh_blobq_take was written (or is not wanted): off the queue, unless a newer version was put since
-void mesh_blobq_done(mesh_blobq_t *q, mesh_blobq_entry_t const *written);
-void   mesh_blobq_clear(mesh_blobq_t *q);
-size_t mesh_blobq_count(mesh_blobq_t const *q);
+void    mesh_blobq_done(mesh_blobq_t *q, mesh_blobq_entry_t const *written);
+void    mesh_blobq_clear(mesh_blobq_t *q);
+size_t  mesh_blobq_count(mesh_blobq_t const *q);
 
 #ifdef __cplusplus
 }
