@@ -214,6 +214,14 @@ target_include_directories(restart_frame_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_options(restart_frame_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME restart_frame_test COMMAND restart_frame_test)
 
+add_executable(draw_stack_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/draw_stack_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/draw_stack.c
+)
+target_include_directories(draw_stack_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(draw_stack_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME draw_stack_test COMMAND draw_stack_test)
+
 add_executable(backlight_cmd_test
     ${CMAKE_CURRENT_SOURCE_DIR}/backlight_cmd_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../c6/main/backlight_cmd.c

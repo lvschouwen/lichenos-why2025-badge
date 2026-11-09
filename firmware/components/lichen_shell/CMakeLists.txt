@@ -3,7 +3,8 @@
 # in PSRAM for GET /log, #38), nav.c (nav_test.c), home_layout.c (home_layout_test.c), shot_blend.c (shot_blend_test.c), time_fields.c (time_fields_test.c, #64),
 # dialog_countdown.c (dialog_countdown_test.c, #14), ui_perf_stats.c (ui_perf_stats_test.c, #93), bench_calc.c (bench_calc_test.c, #96), sd_settings_model.c (sd_settings_model_test.c, #99),
 # idle_policy.c (idle_policy_test.c, #43; screen_idle.c applies it), restart_frame.c (restart_frame_test.c, #255; where
-# shell.c draws the "Restarting" frame), lock_combo.c (lock_combo_test.c, #75) and
+# shell.c draws the "Restarting" frame), draw_stack.c (draw_stack_test.c, #259; where draw_call.c runs a full-screen
+# draw), lock_combo.c (lock_combo_test.c, #75) and
 # saver_layout.c (saver_layout_test.c, #75; screen_saver.c is the screensaver and pocket lock), station_clock.c
 # (station_clock_test.c, #119, #122; station_view.c draws the station clock, for the saver in saver_station.c and the Clock app in app_clock.c), lora_activity.c (lora_activity_test.c, #29; the
 # status bar's TX/RX chevrons), notify_view.c (notify_view_test.c, #62),
@@ -54,7 +55,7 @@ idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_r
                             "boot_screen.c" "status_bar.c" "lora_activity.c" "link_state.c" "logo.c" "update_status.c" "update_mode.c" "update_screen.c" "shot_blend.c" "screenshot.c" "time_fields.c" "time_set_screen.c"
                             "dialog.c" "dialog_countdown.c" "ui_check.c" "ui_perf.c" "ui_perf_stats.c" "app_bench.c" "bench_calc.c" "app_crashlog.c" "app_power.c" "app_console.c" "console_model.c"
                             "sd_screen.c" "sd_settings_model.c"
-                            "idle_policy.c" "restart_frame.c" "screen_idle.c" "lock_combo.c" "saver_layout.c" "screen_saver.c" "station_clock.c" "saver_station.c"
+                            "idle_policy.c" "restart_frame.c" "draw_stack.c" "draw_call.c" "screen_idle.c" "lock_combo.c" "saver_layout.c" "screen_saver.c" "station_clock.c" "saver_station.c"
                             "notify_view.c" "notify_ui.c" "notify_centre.c" "sys_notices.c" "sys_notice_rules.c"
                             "shortcut.c" "shortcuts.c" "thermal.c" "thermal_rules.c" "app_battery.c"
                             "factory_screen.c" "factory_combo.c"

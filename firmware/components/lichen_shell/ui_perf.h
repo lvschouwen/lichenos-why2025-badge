@@ -10,5 +10,6 @@
 // The counters since the last reset
 void ui_perf_snapshot(ui_perf_t *out);
 
-// Redraws the whole active screen n times (invalidate + lv_refr_now) and returns the time it took, in microseconds
+// Redraws the whole active screen n times (invalidate + lv_refr_now) and returns the time it took, in microseconds.
+// Draws on the calling task: only with DRAW_STACK_NEED free (shell_draw_call, draw_stack.h), never on the console task (#259)
 uint64_t ui_perf_redraw_us(unsigned n);

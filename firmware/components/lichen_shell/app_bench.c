@@ -124,6 +124,24 @@ static void redraw_run(char *out, size_t cap) {
     bench_fmt_redraw(out, cap, us, REDRAWS, p1.flush.sum_us - p0.flush.sum_us, p1.flush.n - p0.flush.n);
 }
 
+typedef struct {
+    char  *out;
+    size_t cap;
+} redraw_job_t;
+
+static void redraw_job(void *arg) {
+    redraw_job_t *job = arg;
+    redraw_run(job->out, job->cap);
+}
+
+// "fw bench" from the 4 KiB console task: the redraws run on the LVGL task, they need ~6 KiB of stack (#259)
+static void redraw_console(char *out, size_t cap) {
+    redraw_job_t job = {.out = out, .cap = cap};
+    if (shell_draw_call(redraw_job, &job) == DRAW_REFUSE) {
+        snprintf(out, cap, "not run (no task with enough stack)");
+    }
+}
+
 static void mem_line(char *out, size_t cap) {
     size_t now, least;
     lichen_sys_mem_internal(&now, &least);
@@ -211,6 +229,15 @@ static lv_obj_t *make_list(lv_obj_t *screen) {
     return list;
 }
 
+// The screen's redraw row, on the LVGL task (the app's timer): it has the stack, unless something called this deep (#259)
+static void redraw_stage(char *out, size_t cap) {
+    if (draw_stack_plan(shell_stack_free_here(), true, true) == DRAW_HERE) {
+        redraw_run(out, cap);
+    } else {
+        snprintf(out, cap, "skipped (stack)");
+    }
+}
+
 static void tick(lv_timer_t *timer) {
     (void)timer;
     int64_t now = esp_timer_get_time();
@@ -241,7 +268,7 @@ static void tick(lv_timer_t *timer) {
         }
         case ST_REDRAW: {
             char text[VALUE_CHARS];
-            redraw_run(text, sizeof(text));
+            redraw_stage(text, sizeof(text));
             set_result(ROW_REDRAW, text);
             set_hint("running: scroll");
             s_b.stage = ST_SCROLL_START;
@@ -408,9 +435,7 @@ static void cmd_bench(char const *args) {
     } else {
         console_reply("bench: no memory for the 1 MB buffers");
     }
-    lichen_sys_ui_lock(0);
-    redraw_run(text, sizeof(text));
-    lichen_sys_ui_unlock();
+    redraw_console(text, sizeof(text));
     console_reply("bench redraw (current screen, %u frames): %s", REDRAWS, text);
     mem_line(text, sizeof(text));
     console_reply("bench memory: %s", text);

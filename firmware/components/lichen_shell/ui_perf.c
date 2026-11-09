@@ -85,16 +85,29 @@ uint64_t ui_perf_redraw_us(unsigned n) {
     return (uint64_t)(esp_timer_get_time() - t0);
 }
 
+typedef struct {
+    unsigned n, renders;
+    uint64_t us;
+} bench_job_t;
+
+// LVGL lock held, on a stack with room for lv_refr_now (shell_draw_call)
+static void bench_job(void *arg) {
+    bench_job_t *job = arg;
+    uint32_t     r0  = s_perf.render.n;
+    job->us          = ui_perf_redraw_us(job->n);
+    job->renders     = s_perf.render.n - r0;
+}
+
+// On the LVGL task, not the 4 KiB console task: one full redraw needs ~6 KiB of stack (#259, the #255 overflow)
 static void bench(unsigned n) {
-    n = n == 0 ? 10 : n > BENCH_MAX ? BENCH_MAX : n;
-    lichen_sys_ui_lock(0);
-    uint32_t renders = s_perf.render.n;
-    uint64_t us      = ui_perf_redraw_us(n);
-    renders          = s_perf.render.n - renders;
-    lichen_sys_ui_unlock();
-    unsigned per10 = (unsigned)((us / n + 50) / 100);
-    console_reply("ui perf bench: %u full-screen redraws in %u ms, %u.%u ms per frame (%u renders counted)", n,
-                  (unsigned)(us / 1000), per10 / 10, per10 % 10, (unsigned)renders);
+    bench_job_t job = {.n = n == 0 ? 10 : n > BENCH_MAX ? BENCH_MAX : n};
+    if (shell_draw_call(bench_job, &job) == DRAW_REFUSE) {
+        console_reply("ui perf bench: not run, no task with enough stack to draw (the shell has not started yet)");
+        return;
+    }
+    unsigned per10 = (unsigned)((job.us / job.n + 50) / 100);
+    console_reply("ui perf bench: %u full-screen redraws in %u ms, %u.%u ms per frame (%u renders counted)", job.n,
+                  (unsigned)(job.us / 1000), per10 / 10, per10 % 10, job.renders);
 }
 
 void ui_perf_cmd(char const *args) {

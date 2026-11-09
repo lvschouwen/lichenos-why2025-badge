@@ -7,10 +7,12 @@
 // a deliberate restart ended as a stack-guard panic and a crash record. A caller with less free stack only builds and
 // loads the screen; the LVGL task (10 KiB, display.c) draws it on its next pass while the caller waits.
 
+#include "draw_stack.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 
-#define RESTART_FRAME_STACK_NEED (6 * 1024)  // free stack lv_refr_now may use on the caller's task
+#define RESTART_FRAME_STACK_NEED DRAW_STACK_NEED // free stack lv_refr_now may use on the caller's task
 #define RESTART_FRAME_HEAP_NEED  (64 * 1024) // largest PSRAM block: an out-of-memory restart must not allocate more
 
 typedef enum {
