@@ -2,6 +2,7 @@
 // back down. nav.c (pure, host-tested) holds which screen is where; this file keeps the LVGL screens in step with it.
 #include "shell.h"
 
+#include "esp_cpu.h"
 #include "esp_log.h"
 #include "fw_console.h"
 #include "lichen_sys_ui.h"
@@ -14,6 +15,7 @@
 #include "nav.h"
 #include "notes_app.h"
 #include "raw_keys.h"
+#include "restart_frame.h"
 #include "scroll_anchor.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -643,15 +645,15 @@ char const *shell_restart_note_get(void) {
     return restart_note;
 }
 
-void shell_show_restarting(void) {
-    if (!lv_display_get_default() || !lichen_sys_ui_lock(300)) {
-        return;
-    }
-    // An out-of-memory restart must not allocate more; LVGL's heap is PSRAM
-    if (lichen_sys_mem_largest(LICHEN_SYS_MEM_PSRAM) < 64 * 1024) {
-        lichen_sys_ui_unlock();
-        return;
-    }
+// Free bytes below the caller's stack pointer: the stack grows down towards xTaskGetStackStart
+static size_t stack_free_here(void) {
+    uintptr_t sp    = (uintptr_t)esp_cpu_get_sp();
+    uintptr_t start = (uintptr_t)xTaskGetStackStart(NULL);
+    return sp > start ? (size_t)(sp - start) : 0;
+}
+
+// The frame's screen, loaded but not drawn. LVGL lock held. False when it could not be built
+static bool restart_frame_load(void) {
     lv_obj_t *screen = lv_obj_create(NULL);
     lv_obj_t *label  = screen ? lv_label_create(screen) : NULL;
     lv_obj_t *note   = label && restart_note[0] ? lv_label_create(screen) : NULL;
@@ -659,8 +661,7 @@ void shell_show_restarting(void) {
         if (screen) {
             lv_obj_delete(screen);
         }
-        lichen_sys_ui_unlock();
-        return;
+        return false;
     }
     shell_style_screen(screen);
     lv_obj_set_scrollable(screen, false);
@@ -679,8 +680,23 @@ void shell_show_restarting(void) {
         lv_obj_center(label);
     }
     lv_screen_load(screen); // the old screens stay: the restart frees everything
-    lv_refr_now(NULL);
-    lichen_sys_ui_unlock();
+    return true;
+}
+
+void shell_show_restarting(void) {
+    if (!lv_display_get_default() || !lichen_sys_ui_lock(300)) {
+        return;
+    }
+    // A small stack (the 4 KiB console task) only loads the screen: drawing it there overflowed the stack (#255)
+    restart_frame_t where = restart_frame_plan(lichen_sys_mem_largest(LICHEN_SYS_MEM_PSRAM), stack_free_here());
+    if (where == RESTART_FRAME_SKIP || !restart_frame_load()) {
+        lichen_sys_ui_unlock();
+        return;
+    }
+    if (where == RESTART_FRAME_HERE) {
+        lv_refr_now(NULL);
+    }
+    lichen_sys_ui_unlock(); // RESTART_FRAME_UI_TASK: the LVGL task draws it on its next pass, well inside the wait below
     // Long enough to judge by eye (#134): at 40 ms nobody saw it, only the dark panel after it. The shutdown handler turns the
     // backlight off next, before the feed stops
     vTaskDelay(pdMS_TO_TICKS(RESTART_FRAME_MS));

@@ -206,6 +206,14 @@ target_include_directories(idle_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(idle_policy_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME idle_policy_test COMMAND idle_policy_test)
 
+add_executable(restart_frame_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/restart_frame_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/restart_frame.c
+)
+target_include_directories(restart_frame_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(restart_frame_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME restart_frame_test COMMAND restart_frame_test)
+
 add_executable(backlight_cmd_test
     ${CMAKE_CURRENT_SOURCE_DIR}/backlight_cmd_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../c6/main/backlight_cmd.c
