@@ -26,6 +26,7 @@
 #include "update_screen.h"
 #include "shell_ui_ops.h"
 
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -645,6 +646,19 @@ char const *shell_restart_note_get(void) {
     return restart_note;
 }
 
+// The LVGL task's handle, noted on its first pass after shell_start (0 until then): the restart frame asks whether it is
+// the restarting task (#255)
+static _Atomic uintptr_t ui_task;
+
+static void note_ui_task(void *unused) {
+    (void)unused;
+    atomic_store_explicit(&ui_task, (uintptr_t)xTaskGetCurrentTaskHandle(), memory_order_relaxed);
+}
+
+static bool on_ui_task(void) {
+    return atomic_load_explicit(&ui_task, memory_order_relaxed) == (uintptr_t)xTaskGetCurrentTaskHandle();
+}
+
 // Free bytes below the caller's stack pointer: the stack grows down towards xTaskGetStackStart
 static size_t stack_free_here(void) {
     uintptr_t sp    = (uintptr_t)esp_cpu_get_sp();
@@ -688,7 +702,7 @@ void shell_show_restarting(void) {
         return;
     }
     // A small stack (the 4 KiB console task) only loads the screen: drawing it there overflowed the stack (#255)
-    restart_frame_t where = restart_frame_plan(lichen_sys_mem_largest(LICHEN_SYS_MEM_PSRAM), stack_free_here());
+    restart_frame_t where = restart_frame_plan(lichen_sys_mem_largest(LICHEN_SYS_MEM_PSRAM), stack_free_here(), on_ui_task());
     if (where == RESTART_FRAME_SKIP || !restart_frame_load()) {
         lichen_sys_ui_unlock();
         return;
@@ -707,6 +721,9 @@ void shell_start(lv_display_t *display) {
     // The boot screen is already up (shell_boot_screen), so the LVGL task renders while this runs: every LVGL call
     // below (display events, timers, objects) needs the lock, or a realloc races the LVGL task's walk (#118)
     lichen_sys_ui_lock(0);
+    if (!lichen_sys_ui_call(note_ui_task, NULL, 0)) {
+        ESP_LOGW(TAG, "LVGL task not noted: a restart from it with little stack waits for a frame nobody draws");
+    }
     home_init();
     setup_init();
     screen_idle_init();
