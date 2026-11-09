@@ -4,6 +4,7 @@
 #include "psram_dma_cmd.h"
 #include "psram_heap.h"
 #include "psram_pattern.h"
+#include "psram_rotation.h"
 #include "psram_speed.h"
 
 #include "esp_cache.h"
@@ -47,6 +48,7 @@ static char const TAG[] = "psram";
 static block_t           blocks[MAX_BLOCKS];
 static SemaphoreHandle_t lock;
 static uint32_t          passes;
+static int               rot_cursor = -1; // the canary checked on the last pass
 static int64_t           last_pass_us;
 static int64_t           max_pass_us;
 static uint32_t          last_hit_block = UINT32_MAX;
@@ -164,14 +166,19 @@ static void report(int id, block_t *b, psram_check_t const *res) {
     last_hit_ms        = ms;
 }
 
-static void verify_all(void) {
-    int64_t start = esp_timer_get_time();
+// One canary per pass (#258): all six took 6 ms every 100 ms (5.6 % of core 0); one is about 1.4 ms for a 64 KB block.
+// Every canary is still checked once per round, so a flip is found within (canaries held) x PERIOD_MS, 600 ms.
+static void verify_one(void) {
     xSemaphoreTake(lock, portMAX_DELAY);
+    int64_t start = esp_timer_get_time(); // after the take: a pass waiting for the lock (update_begin, "fw psram") is not work
+    bool    used[MAX_BLOCKS];
     for (int i = 0; i < MAX_BLOCKS; i++) {
-        block_t *b = &blocks[i];
-        if (!b->mem) {
-            continue;
-        }
+        used[i] = blocks[i].mem != NULL;
+    }
+    int i = psram_rot_next(used, MAX_BLOCKS, rot_cursor);
+    if (i >= 0) {
+        rot_cursor        = i;
+        block_t *b        = &blocks[i];
         psram_check_t res = check_block(b->mem, b->len);
         b->checks++;
         if (res.bad_bytes) {
@@ -193,7 +200,7 @@ static void guard_task(void *arg) {
     psram_boot_policy();
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(PERIOD_MS));
-        verify_all();
+        verify_one();
         psram_speed_tick(); // a live 120 MHz trial passes or fails here (#121)
     }
 }
@@ -270,8 +277,8 @@ static void cmd_psram(char const *args) {
         console_reply("psram canary %d %s %p %u bytes: %u checks, %u hits, %u bad bytes", i, b->kind, (void *)b->mem,
                       (unsigned)b->len, (unsigned)b->checks, (unsigned)b->hits, (unsigned)b->bad_total);
     }
-    console_reply("psram %u passes every %d ms, last %u us, longest %u us, %u hits in the canaries now held", (unsigned)passes,
-                  PERIOD_MS, (unsigned)last_pass_us, (unsigned)max_pass_us, (unsigned)hits);
+    console_reply("psram %u passes every %d ms (one canary each, all of them within %d ms), last %u us, longest %u us, %u hits in the canaries now held",
+                  (unsigned)passes, PERIOD_MS, PERIOD_MS * MAX_BLOCKS, (unsigned)last_pass_us, (unsigned)max_pass_us, (unsigned)hits);
     if (last_hit_block == UINT32_MAX) {
         console_reply("psram no damage seen");
     } else {

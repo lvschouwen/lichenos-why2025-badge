@@ -139,7 +139,6 @@ void haptics_notice(uint8_t level) {
 
 static bool pwm_init(void) {
     gpio_set_level(HAPTICS_GPIO, 0); // level first: the pin never glitches high on its way to LEDC
-    gpio_config_t const pin = {.pin_bit_mask = 1ULL << HAPTICS_GPIO, .mode = GPIO_MODE_OUTPUT};
     ledc_timer_config_t const timer = {.speed_mode      = LEDC_LOW_SPEED_MODE,
                                        .duty_resolution = LEDC_TIMER_8_BIT,
                                        .timer_num       = LEDC_TIMER,
@@ -151,7 +150,8 @@ static bool pwm_init(void) {
                                       .timer_sel  = LEDC_TIMER,
                                       .duty       = 0,
                                       .hpoint     = 0};
-    return gpio_config(&pin) == ESP_OK && ledc_timer_config(&timer) == ESP_OK && ledc_channel_config(&ch) == ESP_OK;
+    // gpio_set_direction, not gpio_config: gpio_config reserves the output path and LEDC then warns "GPIO 8 is not usable" (#258)
+    return gpio_set_direction(HAPTICS_GPIO, GPIO_MODE_OUTPUT) == ESP_OK && ledc_timer_config(&timer) == ESP_OK && ledc_channel_config(&ch) == ESP_OK;
 }
 
 static void load_settings(void) {
