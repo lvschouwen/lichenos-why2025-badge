@@ -137,8 +137,9 @@ static void redraw_job(void *arg) {
 // "fw bench" from the 4 KiB console task: the redraws run on the LVGL task, they need ~6 KiB of stack (#259)
 static void redraw_console(char *out, size_t cap) {
     redraw_job_t job = {.out = out, .cap = cap};
-    if (shell_draw_call(redraw_job, &job) == DRAW_REFUSE) {
-        snprintf(out, cap, "not run (no task with enough stack)");
+    draw_call_t ran = shell_draw_call(redraw_job, &job);
+    if (ran != DRAW_CALL_RAN) {
+        snprintf(out, cap, ran == DRAW_CALL_NO_UI ? "not run (no display)" : "not run (shell not started)");
     }
 }
 
@@ -229,13 +230,12 @@ static lv_obj_t *make_list(lv_obj_t *screen) {
     return list;
 }
 
-// The screen's redraw row, on the LVGL task (the app's timer): it has the stack, unless something called this deep (#259)
+// The screen's redraw row, on the LVGL task (the app's timer), as measured before #259 (no gate). The free stack here is
+// logged so the bench can confirm the headroom against DRAW_STACK_NEED
 static void redraw_stage(char *out, size_t cap) {
-    if (draw_stack_plan(shell_stack_free_here(), true, true) == DRAW_HERE) {
-        redraw_run(out, cap);
-    } else {
-        snprintf(out, cap, "skipped (stack)");
-    }
+    ESP_LOGI(TAG, "redraw on the LVGL task: %u B stack free (need %u)", (unsigned)shell_stack_free_here(),
+             (unsigned)DRAW_STACK_NEED);
+    redraw_run(out, cap);
 }
 
 static void tick(lv_timer_t *timer) {

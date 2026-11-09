@@ -101,8 +101,10 @@ static void bench_job(void *arg) {
 // On the LVGL task, not the 4 KiB console task: one full redraw needs ~6 KiB of stack (#259, the #255 overflow)
 static void bench(unsigned n) {
     bench_job_t job = {.n = n == 0 ? 10 : n > BENCH_MAX ? BENCH_MAX : n};
-    if (shell_draw_call(bench_job, &job) == DRAW_REFUSE) {
-        console_reply("ui perf bench: not run, no task with enough stack to draw (the shell has not started yet)");
+    draw_call_t ran = shell_draw_call(bench_job, &job);
+    if (ran != DRAW_CALL_RAN) {
+        console_reply(ran == DRAW_CALL_NO_UI ? "ui perf bench: not run, no display"
+                                             : "ui perf bench: not run, the shell has not started yet");
         return;
     }
     unsigned per10 = (unsigned)((job.us / job.n + 50) / 100);

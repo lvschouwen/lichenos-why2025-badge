@@ -37,29 +37,54 @@ typedef struct {
     void (*fn)(void *);
     void        *arg;
     TaskHandle_t waiter;
+    atomic_bool  done;
 } draw_job_t;
 
+#define DRAW_WAIT_TICK_MS 10 // only after a give taken before done showed up; a normal wait ends on the job's give
+
+// On the LVGL task. Gives, then sets done: after done the caller may return and the frame is gone, so done is last
 static void draw_job(void *arg) {
-    draw_job_t *job = arg;
+    draw_job_t  *job    = arg;
+    TaskHandle_t waiter = job->waiter;
     job->fn(job->arg);
-    xTaskNotifyGive(job->waiter);
+    xTaskNotifyGive(waiter);
+    atomic_store_explicit(&job->done, true, memory_order_release);
 }
 
-draw_stack_t shell_draw_call(void (*fn)(void *), void *arg) {
+static void wait_tick(void *unused) {
+    (void)unused;
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(DRAW_WAIT_TICK_MS));
+}
+
+static void wait_clear(void *unused) {
+    (void)unused;
+    ulTaskNotifyTake(pdTRUE, 0);
+}
+
+// Handed to the LVGL task. Waits without a timeout, as lichen_sys_ui_lock(0) did before: the job is on this stack
+static draw_call_t draw_on_ui_task(void (*fn)(void *), void *arg) {
+    static draw_wait_ops_t const ops = {.wait = wait_tick, .clear = wait_clear};
+    draw_job_t job = {.fn = fn, .arg = arg, .waiter = xTaskGetCurrentTaskHandle()};
+    atomic_init(&job.done, false);
+    if (!lichen_sys_ui_call(draw_job, &job, 0)) {
+        return DRAW_CALL_NO_UI;
+    }
+    draw_wait_done(&job.done, &ops);
+    return DRAW_CALL_RAN;
+}
+
+draw_call_t shell_draw_call(void (*fn)(void *), void *arg) {
+    if (!lichen_sys_ui_lock(0)) {
+        return DRAW_CALL_NO_UI; // no display: the UI service refuses the lock (#248)
+    }
     bool         known = atomic_load_explicit(&ui_task, memory_order_relaxed) != 0;
     draw_stack_t where = draw_stack_plan(shell_stack_free_here(), shell_on_ui_task(), known);
     if (where == DRAW_HERE) {
-        lichen_sys_ui_lock(0);
         fn(arg);
-        lichen_sys_ui_unlock();
-    } else if (where == DRAW_UI_TASK) {
-        // Waits without a timeout, as lichen_sys_ui_lock(0) did before: the job lives on this stack until it has run
-        draw_job_t job = {.fn = fn, .arg = arg, .waiter = xTaskGetCurrentTaskHandle()};
-        ulTaskNotifyTake(pdTRUE, 0); // a stale notification (ui_probe's settle) must not end the wait early
-        if (!lichen_sys_ui_call(draw_job, &job, 0)) {
-            return DRAW_REFUSE;
-        }
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     }
-    return where;
+    lichen_sys_ui_unlock(); // before a hand-over: the LVGL task needs the lock to run the job
+    if (where == DRAW_UI_TASK) {
+        return draw_on_ui_task(fn, arg);
+    }
+    return where == DRAW_HERE ? DRAW_CALL_RAN : DRAW_CALL_NO_TASK;
 }

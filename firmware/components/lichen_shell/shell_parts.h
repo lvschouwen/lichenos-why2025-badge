@@ -42,8 +42,13 @@ bool   shell_note_ui_task(void); // shell_start: queues the note of the LVGL tas
 bool   shell_on_ui_task(void);
 size_t shell_stack_free_here(void);
 // Runs fn(arg) under the LVGL lock on a stack big enough for lv_refr_now: here, or on the LVGL task while this one
-// waits. Called without the lock. DRAW_REFUSE: fn did not run (the LVGL task short of stack, or not known yet)
-draw_stack_t shell_draw_call(void (*fn)(void *), void *arg);
+// waits. Called without the lock. Anything but DRAW_CALL_RAN: fn did not run
+typedef enum {
+    DRAW_CALL_RAN,
+    DRAW_CALL_NO_UI,   // no display (or no memory to queue the hand-over)
+    DRAW_CALL_NO_TASK, // the LVGL task is not known yet (before shell_start), or is the caller and short of stack
+} draw_call_t;
+draw_call_t shell_draw_call(void (*fn)(void *), void *arg);
 
 // ui_perf.c: frame timing from the display events (#93); "fw ui perf ..." (ui_probe.c dispatches it)
 void ui_perf_early(lv_display_t *disp); // the display events, from the boot screen on, so the first flush is seen (#205)
