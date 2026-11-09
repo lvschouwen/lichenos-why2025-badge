@@ -167,7 +167,7 @@ static void report(int id, block_t *b, psram_check_t const *res) {
 }
 
 // One canary per pass (#258): all six took 6 ms every 100 ms (5.6 % of core 0); one is about 1.4 ms for a 64 KB block.
-// Every canary is still checked once per round, so a flip is found within (canaries held) x PERIOD_MS, 600 ms.
+// Every canary is still checked once per round, so a flip is found within (canaries held) x PERIOD_MS: 600 ms, 700 ms (MAX_BLOCKS) while the update canary exists.
 static void verify_one(void) {
     xSemaphoreTake(lock, portMAX_DELAY);
     int64_t start = esp_timer_get_time(); // after the take: a pass waiting for the lock (update_begin, "fw psram") is not work
@@ -277,8 +277,10 @@ static void cmd_psram(char const *args) {
         console_reply("psram canary %d %s %p %u bytes: %u checks, %u hits, %u bad bytes", i, b->kind, (void *)b->mem,
                       (unsigned)b->len, (unsigned)b->checks, (unsigned)b->hits, (unsigned)b->bad_total);
     }
-    console_reply("psram %u passes every %d ms (one canary each, all of them within %d ms), last %u us, longest %u us, %u hits in the canaries now held",
-                  (unsigned)passes, PERIOD_MS, PERIOD_MS * MAX_BLOCKS, (unsigned)last_pass_us, (unsigned)max_pass_us, (unsigned)hits);
+    console_reply("psram %u passes every %d ms (one canary each, all of them within %d ms), last %u us, longest %u us, "
+                  "%u hits in the canaries now held",
+                  (unsigned)passes, PERIOD_MS, PERIOD_MS * MAX_BLOCKS, (unsigned)last_pass_us, (unsigned)max_pass_us,
+                  (unsigned)hits);
     if (last_hit_block == UINT32_MAX) {
         console_reply("psram no damage seen");
     } else {

@@ -41,6 +41,37 @@ int main(void) {
     gaps[3] = false;
     EXPECT(psram_rot_next(gaps, 7, 2) == 6);
 
+    // cursor out of range (stale after a shrink) or negative other than -1 still lands on a used slot
+    EXPECT(psram_rot_next(gaps, 7, 9) == 6);  // 3 was freed above, so 3..5 are skipped
+    EXPECT(psram_rot_next(gaps, 7, 7) == 2);  // 8%7 = 1 is free
+    EXPECT(psram_rot_next(gaps, 7, -2) == 6); // -1 mod 7 = 6
+    EXPECT(psram_rot_next(gaps, 7, -9) == 6); // -8 mod 7 = 6
+
+    // a slot added below the cursor mid-round is reached within one round, and any used slot within n steps
+    bool grow[6] = {false, false, true, true, true, false};
+    cur          = 4;
+    grow[0]      = true;
+    int steps    = 0;
+    do {
+        cur = psram_rot_next(grow, 6, cur);
+        steps++;
+    } while (cur != 0 && steps <= 6);
+    EXPECT(cur == 0 && steps <= 6);
+    for (int start = -1; start < 6; start++) {
+        for (int target = 0; target < 6; target++) {
+            if (!grow[target]) {
+                continue;
+            }
+            int c = start;
+            int n = 0;
+            do {
+                c = psram_rot_next(grow, 6, c);
+                n++;
+            } while (c != target && n <= 6);
+            EXPECT(c == target && n <= 6);
+        }
+    }
+
     if (fails) {
         return 1;
     }

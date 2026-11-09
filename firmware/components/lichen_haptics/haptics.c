@@ -151,7 +151,9 @@ static bool pwm_init(void) {
                                       .duty       = 0,
                                       .hpoint     = 0};
     // gpio_set_direction, not gpio_config: gpio_config reserves the output path and LEDC then warns "GPIO 8 is not usable" (#258)
-    return gpio_set_direction(HAPTICS_GPIO, GPIO_MODE_OUTPUT) == ESP_OK && ledc_timer_config(&timer) == ESP_OK && ledc_channel_config(&ch) == ESP_OK;
+    // pull-down only: gpio_config used to set that, and the pin must not float high before LEDC takes it over
+    return gpio_set_pull_mode(HAPTICS_GPIO, GPIO_PULLDOWN_ONLY) == ESP_OK &&
+           gpio_set_direction(HAPTICS_GPIO, GPIO_MODE_OUTPUT) == ESP_OK && ledc_timer_config(&timer) == ESP_OK && ledc_channel_config(&ch) == ESP_OK;
 }
 
 static void load_settings(void) {
