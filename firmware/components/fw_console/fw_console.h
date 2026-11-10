@@ -58,6 +58,10 @@ void system_restart_set_save(void (*save)(void));
 // The same saves with the same bound, without the restart: a power off that has no Power app to run them (the thermal
 // shutdown on a badge whose display did not come up, #281). Once per boot: a restart after it saves nothing more.
 void system_save_before_off(void);
+// A power off was asked (#281: the thermal shutdown, `fw poweroff`). From now on every restart, system_restart or a
+// bare esp_restart (fw reboot, an update, a slot switch), calls off after its saves instead of restarting, so a badge
+// that must go off for heat never reboots instead. off must not return. Any task.
+void system_power_off_requested(void (*off)(void));
 // Runs once, on the restarting task, right before the restart (every esp_restart, not panics): the shell draws its
 // "Restarting" frame so the lit panel does not show a stale or torn screen (#39). Must return quickly.
 void system_restart_set_prepare(void (*prepare)(void));

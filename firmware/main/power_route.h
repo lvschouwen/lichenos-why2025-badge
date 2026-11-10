@@ -6,6 +6,8 @@
 //   SHELL     the Power app's path: the goodbye screen, the apps stop, the saves, then the power hook
 //   HEADLESS  main's path without a shell (no display): the bounded saves, the SD card, then off
 //   BUSY      a power off is already under way: nothing to do
+// Before the shell has started (early in the boot) shell_up is false, so a request takes the headless route: the
+// bounded saves, then off (the thermal shutdown also has its 30 s backstop).
 // A thermal shutdown also takes over a Power-app restart that is already under way (the Power app turns it into a
 // power off); a person's `fw poweroff` is told the badge is already going down.
 

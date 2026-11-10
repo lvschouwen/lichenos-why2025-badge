@@ -250,7 +250,9 @@ The rule: **core 1 draws, core 0 talks to the world.**
   need from above comes in as hooks (`lichen_watch_hooks_t`): "home is shown", the shell's warning page, the update
   result and the power off, which is the Power app's goodbye path when the shell runs and main's headless path
   (`system_save_before_off`, the SD card unmounted with a bound, then `lichen_sys_power_off_now`) otherwise
-  (`main/power_route.c` decides, host-tested; `fw poweroff` takes the same route, #292). A thermal shutdown sheds
+  (`main/power_route.c` decides, host-tested; `fw poweroff` takes the same route, #292; before the shell has started
+  a request takes the headless route). Once a power off is asked, every restart (`fw reboot`, an update, a bare
+  `esp_restart`) ends in the power off after its saves (`system_power_off_requested`). A thermal shutdown sheds
   nothing first, turns a Power-app restart under way into a power off, and has a backstop: 30 s after it was decided
   the badge is off, saved or not. Without a display the notices wait until every boot step ran. The shell reads the
   watchdog through the gate

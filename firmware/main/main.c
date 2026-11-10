@@ -260,12 +260,15 @@ static bool power_off_by_route(bool thermal) {
     bool up = shell_up();
     switch (power_route(up, up && power_going_down(), atomic_load(&headless_going_down), thermal)) {
     case POWER_ROUTE_SHELL:
+        system_power_off_requested(lichen_sys_power_off_now); // a restart from anywhere now ends in the power off
         power_request_off(); // during a restart this turns it into a power off
         return true;
     case POWER_ROUTE_HEADLESS:
         if (atomic_exchange(&headless_going_down, true)) {
             return false;
         }
+        // A fw reboot or an update racing this one (its saves wait for ours) powers off too, never restarts
+        system_power_off_requested(lichen_sys_power_off_now);
         power_off_headless();
         return true;
     case POWER_ROUTE_BUSY:

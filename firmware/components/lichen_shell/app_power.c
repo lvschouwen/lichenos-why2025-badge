@@ -128,7 +128,9 @@ static void start(bool off) {
         }
         return;
     }
-    atomic_store(&want_off, off);
+    if (off) {
+        atomic_store(&want_off, true); // only ever set: no restart path may clear a power off asked for meanwhile
+    }
     // The task first: a busy or stuck LVGL lock must not hold up a (thermal) shutdown. The goodbye screen is opened by
     // a short task of its own, which may wait for the lock as long as it needs.
     if (!lichen_task_start(&power_app, "power", power_task, NULL, POWER_STACK, LICHEN_PRIO_URGENT, NULL)) {

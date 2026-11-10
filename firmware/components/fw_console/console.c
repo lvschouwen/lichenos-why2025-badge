@@ -417,7 +417,26 @@ void system_restart_set_prepare(void (*prepare)(void)) {
     restart_prepare = prepare;
 }
 
+// Set once a power off is asked (#281): the restart's last step switches the badge off instead
+static void (*_Atomic s_power_off)(void);
+
+void system_power_off_requested(void (*off)(void)) {
+    atomic_store(&s_power_off, off);
+}
+
+// Every restart's last step, after the saves (system_restart) or at once (a bare esp_restart). Taken out first, so a
+// restart from inside off restarts.
+static void power_off_if_requested(void) {
+    void (*off)(void) = atomic_load(&s_power_off);
+    if (off && atomic_exchange(&s_power_off, NULL) == off) {
+        ESP_LOGW(TAG, "restart (%s) after a power off was asked: powering off instead",
+                 s_restart_why ? s_restart_why : "unknown caller");
+        off(); // does not return
+    }
+}
+
 void __wrap_esp_restart(void) {
+    power_off_if_requested();
     bool deliberate = s_restart_why != NULL;
     if (deliberate) {
         record_restart(s_restart_why, 0);
