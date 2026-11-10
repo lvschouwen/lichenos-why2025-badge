@@ -71,7 +71,7 @@ static void store(char const *text, size_t len) {
 }
 
 void log_store_add(char const *text, size_t len) {
-    if (ready && len > 0) {
+    if (__atomic_load_n(&ready, __ATOMIC_ACQUIRE) && len > 0) {
         store(text, len);
     }
 }
@@ -118,7 +118,7 @@ void log_store_start(void) {
 size_t log_store_read(uint32_t since, char *out, size_t cap, uint32_t *next, uint32_t *missed) {
     *next   = since;
     *missed = 0;
-    if (!ready || cap < LOG_RING_OUT_LINE || __atomic_exchange_n(&reading, 1, __ATOMIC_ACQUIRE)) {
+    if (!__atomic_load_n(&ready, __ATOMIC_ACQUIRE) || cap < LOG_RING_OUT_LINE || __atomic_exchange_n(&reading, 1, __ATOMIC_ACQUIRE)) {
         return 0;
     }
     size_t n = 0;
