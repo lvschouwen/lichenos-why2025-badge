@@ -1220,7 +1220,7 @@ static void cmd_wifi(char const *args) {
         console_reply(have && post(&m) ? "wifi: reconnecting with the saved credentials"
                                        : "wifi: no saved credentials or no C6 link");
     } else if (strcmp(args, "scan") == 0) {
-        static wifi_ap_t aps[20];
+        EXT_RAM_BSS_ATTR static wifi_ap_t aps[20];
         size_t           n = 0;
         if (!wifi_scan(aps, sizeof(aps) / sizeof(aps[0]), &n)) {
             console_reply("wifi: scan failed");

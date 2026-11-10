@@ -6,6 +6,7 @@
 #include "screen_ids.h"
 #include "theme.h"
 
+#include "esp_attr.h"
 #include "esp_log.h"
 
 #include <stdio.h>
@@ -22,7 +23,7 @@ static char const TAG[] = "qr";
 
 // What the open screen shows; set by qr_screen_open, read by the builder, wiped when the screen goes (the payload may
 // hold a password). LVGL context only.
-static struct {
+EXT_RAM_BSS_ATTR static struct {
     char kind[KIND_CAP];
     char name[NAME_CAP];
     char payload[QR_PAYLOAD_MAX + 1];

@@ -1,6 +1,7 @@
 // Settings > Wi-Fi (#66): scan on core 0, pick a network, type the password, join. The scan blocks for seconds over
 // ESP-Hosted, so it never runs on the LVGL task; its result comes back through lv_async_call and is dropped if the
 // screen is gone by then.
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -45,7 +46,7 @@ static lv_obj_t *
     rows[MAX_APS + LICHEN_SYS_WIFI_SAVED_MAX + 4]; // the placeholder or the networks, "Scan again", then the saved ones
 static size_t      row_count;
 static lv_obj_t   *focus_at_scan; // what had the focus when the scan started: compared, never dereferenced
-static lichen_sys_wifi_ap_t shown[MAX_APS];
+EXT_RAM_BSS_ATTR static lichen_sys_wifi_ap_t shown[MAX_APS];
 static size_t      shown_n;
 static char        target[33];
 static void      (*setup_done)(void); // set while this is the first-run Wi-Fi step

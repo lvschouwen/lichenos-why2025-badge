@@ -5,6 +5,7 @@
 
 #include "lichen_mem.h"
 #include "meshcore_run.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_clock.h"
@@ -119,7 +120,7 @@ static void select_apply(chat_t *c, bool scroll);
 static void select_leave(chat_t *c);
 
 // Scratch for shown_items, used within one call only (rebuild, search_enter/leave; all on the LVGL task)
-static scroll_item_t anchor_items[SHOW_MESSAGES];
+EXT_RAM_BSS_ATTR static scroll_item_t anchor_items[SHOW_MESSAGES];
 
 // The message rows on screen as scroll items, keyed by their seq: c->copy may hold the next snapshot already
 static size_t shown_items(chat_t *c, scroll_item_t *items) {

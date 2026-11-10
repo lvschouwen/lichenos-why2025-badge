@@ -7,6 +7,7 @@
 #include "app_icons.h"
 #include "screen_ids.h"
 #include "lichen_mem.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "freertos/FreeRTOS.h"
@@ -65,7 +66,7 @@ typedef enum { JOB_NONE, JOB_DELETE, JOB_CLEAR, JOB_COPY } job_t;
 static job_t            s_job;
 static atomic_int       s_job_outcome = JOB_PENDING; // the task stores 0/1, the LVGL task takes it
 static size_t           s_job_index;
-static crashlog_entry_t s_job_expect;                // the job's copy: the list may be rebuilt meanwhile
+EXT_RAM_BSS_ATTR static crashlog_entry_t s_job_expect;                // the job's copy: the list may be rebuilt meanwhile
 static char             s_copy_path[RESULT_CAP];     // the SD copy's path; the task writes it before it stores the outcome
 static char             s_result[RESULT_CAP];        // the last job's outcome, shown above the list
 
@@ -76,7 +77,7 @@ static struct {
     char     l1[LINE_CAP], l2[LINE_CAP];
 } s_tile;
 
-static lichen_crashlog_status_t s_status; // too big for the LVGL task's stack
+EXT_RAM_BSS_ATTR static lichen_crashlog_status_t s_status; // too big for the LVGL task's stack
 
 // ---- the list -----------------------------------------------------------------------------------------------------
 
@@ -312,7 +313,7 @@ static lv_obj_t *build_entry(void) {
     if (!s_v.screen || s_v.shown >= s_v.count) {
         return NULL;
     }
-    static char             full[FULL_CAP];
+    EXT_RAM_BSS_ATTR static char             full[FULL_CAP];
     crashlog_entry_t const *e      = &s_v.entries[s_v.shown];
     lv_obj_t               *screen = shell_page_create();
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);

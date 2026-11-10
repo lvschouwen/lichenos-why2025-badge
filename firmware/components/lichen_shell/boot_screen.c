@@ -4,6 +4,7 @@
 // The keypad is attached after the C6 comes up (main.c), so the key works from then on, not during the first steps.
 // Shows nothing app-specific (no MeshCore version or node id): the OS speaks only for itself.
 // Reads lichen_sys_boot_view() only. Moves on to home by itself 2 s after the last step ends (5 s after a failure).
+#include "esp_attr.h"
 #include "esp_app_desc.h"
 #include "esp_timer.h"
 #include "fonts.h"
@@ -61,7 +62,7 @@ static bool       generation_shown;
 static uint32_t   apps_ended_at; // lv_tick of the first refresh that saw the apps step over, 0 before
 static bool       leaving;
 static bool       failed;
-static lichen_boot_view_t view; // the LVGL task's copy
+EXT_RAM_BSS_ATTR static lichen_boot_view_t view; // the LVGL task's copy
 
 static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color, lv_font_t const *font) {
     lv_obj_t *label = lv_label_create(parent);

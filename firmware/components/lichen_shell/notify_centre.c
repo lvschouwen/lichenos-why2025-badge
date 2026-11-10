@@ -4,6 +4,7 @@
 // Opening a notice goes to its source: the app's open_notification, or the app itself; Lichen's own notices to the
 // place they are about (the Crash log, Settings › SD card), else their page here.
 #include "app_icons.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_app.h"
@@ -371,7 +372,7 @@ static void fill_list(void) {
     if (!s_c.screen) {
         return;
     }
-    static scroll_item_t items[NR_SLOTS]; // LVGL task only
+    EXT_RAM_BSS_ATTR static scroll_item_t items[NR_SLOTS]; // LVGL task only
     int32_t              scroll_y = 0;
     scroll_anchor_t      anchor   = {0};
     if (s_c.menu) {

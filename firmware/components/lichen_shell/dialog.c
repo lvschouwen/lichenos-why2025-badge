@@ -5,6 +5,7 @@
 // open and a close queued together still end right whatever order the calls run in (UI-service calls are FIFO, raw
 // lv_async_call newest first, and the two do not order against each other: see shell.c).
 #include "dialog_countdown.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "esp_timer.h"
@@ -48,7 +49,7 @@ static lv_obj_t        *message;
 static lv_group_t      *group;
 static lv_timer_t      *timer;
 static dlg_countdown_t  countdown;
-static request_t        shown;
+EXT_RAM_BSS_ATTR static request_t        shown;
 static uint32_t         shown_gen;
 
 static uint32_t now_ms(void) {

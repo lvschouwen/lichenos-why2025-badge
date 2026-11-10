@@ -1,6 +1,7 @@
 #include "lichen_fs.h"
 
 #include "app_ns.h" // the id rules
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -19,7 +20,7 @@ typedef struct {
     char                path[sizeof(STORAGE_BASE) + 1 + 13 + 1]; // "/storage/" + the longest id
 } app_dir_t;
 
-static app_dir_t dirs[LICHEN_MAX_APPS];
+EXT_RAM_BSS_ATTR static app_dir_t dirs[LICHEN_MAX_APPS];
 
 // An app's directory on the SD card, made once per mount: a re-inserted (or another) card gets it again
 typedef struct {
@@ -28,7 +29,7 @@ typedef struct {
     char                path[sizeof(SD_APPS_DIR) + 1 + 13 + 1];
 } sd_dir_t;
 
-static sd_dir_t sd_dirs[LICHEN_MAX_APPS];
+EXT_RAM_BSS_ATTR static sd_dir_t sd_dirs[LICHEN_MAX_APPS];
 
 // Apps call lichen_fs_sd_dir from their own tasks: the table (claiming a slot, rewriting it after a remount) is only
 // touched with this held. Made on first use.

@@ -2,6 +2,7 @@
 // Notifications › MeshCore (the shell calls notify_settings_open) and from Settings › MeshCore › Notifications. The
 // OS's own per-app switch stays in the centre's settings (lichen_notify_source_enabled); these rows are what MeshCore
 // sends once that is on.
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "screen_ids.h"
 #include "lichen_ui.h"
@@ -21,7 +22,7 @@
 
 static lv_obj_t *sw_row[3];
 static lv_obj_t *chan_row[MAX_CHANNELS];
-static char      chan_name[MAX_CHANNELS][MESH_CHANNEL_MAX + 1];
+EXT_RAM_BSS_ATTR static char      chan_name[MAX_CHANNELS][MESH_CHANNEL_MAX + 1];
 static size_t    chan_n;
 
 static char const *on_off(bool on) {
@@ -95,7 +96,7 @@ void meshcore_open_notification(char const *target, uint32_t id) {
     bool            failed;
     if (target && mn_target_parse(target, &key, &failed) && mesh_running()) {
         if (key.kind == MESH_CHAT_CHANNEL) {
-            static char names[MAX_CHANNELS][MESH_CHANNEL_MAX + 1];
+            EXT_RAM_BSS_ATTR static char names[MAX_CHANNELS][MESH_CHANNEL_MAX + 1];
             size_t      n = mesh_channels_snapshot_wait(names, MAX_CHANNELS, SCREEN_WAIT_MS);
             int at = n == MESH_BUSY ? -1 : mn_channel_match(names, n, key.chan);
             if (at >= 0) {

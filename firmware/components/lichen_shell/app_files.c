@@ -6,6 +6,7 @@
 #include "app_icons.h"
 #include "screen_ids.h"
 #include "lichen_mem.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "files_job.h"
@@ -29,7 +30,7 @@ static char const TAG[] = "files";
 #define TEXT_CAP          4096 // one screen of text; a page that would not fit just ends sooner
 
 // The browser; zeroed while closed. LVGL task only.
-static struct {
+EXT_RAM_BSS_ATTR static struct {
     lv_obj_t          *screen, *menu, *note;
     lv_group_t        *group;
     lv_timer_t        *poll;

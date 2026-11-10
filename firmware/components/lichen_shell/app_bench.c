@@ -7,6 +7,7 @@
 #include "psram_speed.h"
 #include "app_icons.h"
 #include "bench_calc.h"
+#include "esp_attr.h"
 #include "esp_cache.h"
 #include "lichen_sys_mem.h"
 #include "esp_log.h"
@@ -64,7 +65,7 @@ typedef struct {
     unsigned    runs;
 } bench_t;
 
-static bench_t          s_b;
+EXT_RAM_BSS_ATTR static bench_t          s_b;
 static char             s_last[40]; // the tile's second line: the last redraw figure
 static volatile uint32_t s_sink;    // keeps the read loop honest
 

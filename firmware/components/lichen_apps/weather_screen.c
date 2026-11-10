@@ -2,6 +2,7 @@
 // quality as a trend), the chosen quantity drawn as a graph of the history below. Left/Right (or Enter) switch the
 // quantity. The rows refresh every second; the graph only when a new minute sample or a new offset arrives.
 #include "fonts.h"
+#include "esp_attr.h"
 #include "lichen_ui.h"
 #include "theme.h"
 #include "weather_app.h"
@@ -27,7 +28,7 @@ typedef struct {
     float              series[WX_RING_CAP], gas[WX_RING_CAP]; // the chosen quantity; the air trend always needs the gas
 } wx_ui_t;
 
-static wx_ui_t s_ui;
+EXT_RAM_BSS_ATTR static wx_ui_t s_ui; // PSRAM (#264): LVGL task only
 
 static void set_text(lv_obj_t *label, char const *text) {
     if (strcmp(lv_label_get_text(label), text) != 0) {

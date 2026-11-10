@@ -4,6 +4,7 @@
 // with #67 and a buzz with #68.
 #include "timer_service.h"
 
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "lichen_badge.h"
@@ -19,7 +20,7 @@ static char const APP_ID[] = "timer";
 #define POLL_MS 250 // the end is noticed within a quarter of a second, whatever screen is up
 
 static tcd_t s_cd;
-static sw_t  s_sw;
+EXT_RAM_BSS_ATTR static sw_t  s_sw;
 static bool  s_inited;
 
 static void ensure_init(void) {

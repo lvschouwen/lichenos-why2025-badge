@@ -3,6 +3,7 @@
 #include "files_job.h"
 
 #include "lichen_mem.h"
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -25,7 +26,7 @@ static atomic_int  s_state;
 static atomic_bool s_cancel;
 static atomic_uint s_done, s_total;
 
-static struct {
+EXT_RAM_BSS_ATTR static struct {
     files_job_kind_t kind;
     char             path[FILES_PATH_MAX], dst[FILES_PATH_MAX];
     uint32_t         offset;
