@@ -42,6 +42,13 @@ expect pass "$b mesh out"
 expect pass "grep -n 'mesh send Public' firmware/components/mesh/mesh_task.cpp"
 expect pass "git commit -m 'guard-badge.sh denies fw mesh send to Public
 lines that reach the badge (badge.sh, ssh) are checked'"
+expect deny "$b mesh dm \\
+  0123456789ab ping"
+expect deny "curl -s -X POST --data-binary 'mesh send Public hi' http://192.0.2.1:8080/console"
+expect ask "echo x >> .claude/onair-allow.local"
+got=$(jq -cn '{tool_name:"Edit",tool_input:{file_path:"/r/.claude/onair-allow.local"}}' | bash "$hook" |
+  jq -r '.hookSpecificOutput.permissionDecision')
+[ "$got" = ask ] || { echo "FAIL: Edit of the allow list: $got, expected ask" >&2; fail=1; }
 # Without an allow file only #badgetest passes
 expect deny "$b mesh dm abcdef123456 hi" "$tmp/missing"
 expect pass "$b mesh send '#badgetest' hi" "$tmp/missing"

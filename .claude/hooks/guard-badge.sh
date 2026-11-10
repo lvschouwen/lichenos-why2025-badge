@@ -9,11 +9,14 @@ set -u
 input=$(cat 2>/dev/null || true)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)
-[ -n "$cmd" ] || exit 0
+file=$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null || true)
 ask() {
   jq -cn --arg r "$1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"ask",permissionDecisionReason:$r}}'
   exit 0
 }
+# The on-air allow list (rule 3) is changed by Lucas only: any Write/Edit of it or Bash mentioning it asks
+case "$file$cmd" in *onair-allow.local*) ask "the on-air allow list (.claude/onair-allow.local) changes only with Lucas's ok (#287)" ;; esac
+[ -n "$cmd" ] || exit 0
 if printf '%s' "$cmd" | grep -qE 'badge\.sh[^|;&]*flash-fw[^|;&]*--wipe-storage'; then
   ask "flash-fw --wipe-storage erases the MeshCore identity, contacts and channels on the badge. First-install only; needs Lucas."
 fi
@@ -26,8 +29,11 @@ deny() {
 #    tty) are looked at, so a source grep or a commit message describing such a command passes. Allowed contact targets (the Heltec's name or key digits) live in
 #    the gitignored .claude/onair-allow.local, one per line, so no device id is committed; without it, only
 #    #badgetest sends pass.
-reach='(^|[^[:alnum:]_-])badge\.sh[[:space:]]+(fw|console)[[:space:]]|(^|[^[:alnum:]_-])ssh[[:space:]]|/dev/tty'
-if printf '%s' "$cmd" | grep -qE "$reach"; then
+#    ONAIR_ALLOW_FILE is for the host test: the hook's environment is Claude Code's, not the command's.
+reach='(^|[^[:alnum:]_-])badge\.sh[[:space:]]+(fw|console)[[:space:]]|(^|[^[:alnum:]_-])ssh[[:space:]]|/dev/tty|curl[^|;&]*/console'
+# Backslash-newline continuations join first, so a target on the next line is still seen
+cmd_joined=$(printf '%s\n' "$cmd" | sed -e ':a' -e '/\\$/N' -e 's/\\\n/ /' -e 'ta')
+if printf '%s' "$cmd_joined" | grep -qE "$reach"; then
   allow_file=${ONAIR_ALLOW_FILE:-${CLAUDE_PROJECT_DIR:-/home/lucas/coding/why2025-badge}/.claude/onair-allow.local}
   allowed() { # $1 = target, matched case-insensitively against the allow file
     [ -r "$allow_file" ] || return 1
@@ -51,7 +57,7 @@ if printf '%s' "$cmd" | grep -qE "$reach"; then
       advert)
         case "$target" in interval | manual) ask "mesh advert $target changes what the badge floods on air: needs Lucas" ;; esac ;;
     esac
-  done < <(printf '%s\n' "$cmd" | grep -E "$reach" | grep -oE 'mesh[[:space:]]+(send|dm|remote|telemetry|trace|discover|advert)([[:space:]]+[^[:space:];&|)]+)?' || true)
+  done < <(printf '%s\n' "$cmd_joined" | grep -E "$reach" | grep -oE 'mesh[[:space:]]+(send|dm|remote|telemetry|trace|discover|advert)([[:space:]]+[^[:space:];&|)]+)?' || true)
 fi
 main_dir=$(git -C "${cwd:-.}" rev-parse --show-toplevel 2>/dev/null || true)
 main_checkout=${CLAUDE_PROJECT_DIR:-/home/lucas/coding/why2025-badge}
