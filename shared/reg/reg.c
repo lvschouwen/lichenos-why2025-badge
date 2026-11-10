@@ -3,9 +3,7 @@
 #include "reg.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 
-#include <errno.h>
 #include <string.h>
 
 reg_entry_t const *reg_find_id(reg_entry_t const *tab, size_t n, uint16_t id) {
@@ -41,22 +39,53 @@ static bool is_signed(uint8_t type) {
     return type == REG_T_I16 || type == REG_T_I32;
 }
 
-// The whole text as one number that fits 32 bits (unsigned types: 0..UINT32_MAX, signed: INT32_MIN..INT32_MAX)
+// 0..15 for a hex digit, 16 for anything else
+static unsigned digit_value(char c) {
+    if (c >= '0' && c <= '9') {
+        return (unsigned)(c - '0');
+    }
+    if ((c | 0x20) >= 'a' && (c | 0x20) <= 'f') {
+        return (unsigned)((c | 0x20) - 'a' + 10);
+    }
+    return 16;
+}
+
+// Digits only, no sign: decimal without leading zeros ("0" itself is fine) or 0x hex. Above 0xFFFFFFFF is refused.
+static bool parse_magnitude(char const *t, uint64_t *out) {
+    unsigned base = 10;
+    if (t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) {
+        base  = 16;
+        t    += 2;
+    } else if (t[0] == '0' && t[1] != '\0') {
+        return false; // "010" would read as octal elsewhere: refuse rather than guess
+    }
+    uint64_t v = 0;
+    for (char const *p = t; *p; p++) {
+        unsigned d = digit_value(*p);
+        if (d >= base || (v = v * base + d) > UINT32_MAX) {
+            return false;
+        }
+    }
+    *out = v;
+    return *t != '\0';
+}
+
+// The whole text as one number that fits 32 bits (unsigned types: 0..UINT32_MAX, signed: INT32_MIN..INT32_MAX). Only
+// signed types take a leading '-'; no '+', no whitespace.
 static bool parse_number(char const *text, bool signed_type, reg_value_t *out) {
-    char *end = NULL;
-    errno     = 0;
-    if (!*text || (!signed_type && strchr(text, '-'))) {
+    bool     neg = signed_type && text[0] == '-';
+    uint64_t mag;
+    if (!parse_magnitude(text + neg, &mag)) {
         return false;
     }
-    long long v = strtoll(text, &end, 0);
-    if (errno || *end || (signed_type ? v < INT32_MIN || v > INT32_MAX : v < 0 || v > (long long)UINT32_MAX)) {
+    if (!signed_type) {
+        out->u = (uint32_t)mag;
+        return true;
+    }
+    if (mag > (neg ? (uint64_t)INT32_MAX + 1 : (uint64_t)INT32_MAX)) {
         return false;
     }
-    if (signed_type) {
-        out->i = (int32_t)v;
-    } else {
-        out->u = (uint32_t)v;
-    }
+    out->i = neg ? (int32_t)(-(int64_t)mag) : (int32_t)mag;
     return true;
 }
 
@@ -109,13 +138,14 @@ static bool fits_type(uint8_t type, reg_value_t const *v) {
         case REG_T_U32:
         case REG_T_I32:
         case REG_T_ENUM: return true;
+        case REG_T_STR: return memchr(v->s, '\0', sizeof(v->s)) != NULL;
         default: return false;
     }
 }
 
 reg_status_t reg_check(reg_entry_t const *e, reg_value_t const *v) {
-    // min == max == 0: no range beyond the type's own
-    bool ranged = e->min != 0 || e->max != 0;
+    // min == max == 0: no range beyond the type's own. Not for ENUM: its range is always min..max (0..0 is one value)
+    bool ranged = e->type == REG_T_ENUM || e->min != 0 || e->max != 0;
     if (e->type == REG_T_STR) {
         char const *nul = memchr(v->s, '\0', sizeof(v->s));
         int64_t     len = nul ? nul - v->s : -1;
@@ -154,8 +184,9 @@ reg_status_t reg_get(reg_entry_t const *e, reg_value_t *out) {
     if (!e->get_applied) {
         return REG_FAILED;
     }
+    // A getter value that does not fit the key's type (a U8 of 300, an unterminated STR) is a driver fault, not a value
     reg_status_t st = e->get_applied(e, out);
-    if (st != REG_OK) {
+    if (st != REG_OK || !fits_type(e->type, out)) {
         memset(out, 0, sizeof(*out));
         return REG_FAILED;
     }
@@ -178,7 +209,8 @@ static reg_status_t try_set(reg_entry_t const *e, reg_value_t const *v) {
 reg_status_t reg_set(reg_entry_t const *e, reg_value_t const *v, reg_value_t *applied) {
     reg_status_t st   = try_set(e, v);
     reg_status_t read = reg_get(e, applied);
-    return st == REG_OK && read != REG_OK ? REG_FAILED : st;
+    // No readable applied value: FAILED whatever the set said, so no answer ever pairs GUARDED or RANGE with a 0
+    return read != REG_OK ? REG_FAILED : st;
 }
 
 reg_status_t reg_serve(reg_entry_t const *tab, size_t n, uint16_t id, uint32_t const *set, reg_reply_t *out) {
@@ -196,4 +228,64 @@ reg_status_t reg_serve(reg_entry_t const *tab, size_t n, uint16_t id, uint32_t c
     reg_status_t st = set ? reg_set(e, &(reg_value_t){.u = *set}, &got) : reg_get(e, &got);
     out->value      = got.u;
     return st;
+}
+
+bool reg_type_known(uint8_t type) {
+    return type >= REG_T_U8 && type <= REG_T_STR;
+}
+
+// Lower case dotted: [a-z0-9_] segments joined by single dots, at least two segments, at most REG_NAME_MAX long
+static bool name_ok(char const *name) {
+    if (!name) {
+        return false;
+    }
+    size_t len  = strlen(name);
+    bool   dot  = false;
+    char   prev = '.';
+    for (char const *p = name; *p; prev = *p++) {
+        bool word = (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '_';
+        if (!word && (*p != '.' || prev == '.')) {
+            return false;
+        }
+        dot |= *p == '.';
+    }
+    return dot && len <= REG_NAME_MAX && prev != '.';
+}
+
+static bool entry_ok(reg_entry_t const *e) {
+    if (!name_ok(e->name) || !reg_type_known(e->type) || !e->get_applied || e->min > e->max) {
+        return false;
+    }
+    if ((e->flags & REG_F_TX) && e->set && !(e->flags & REG_F_RO)) {
+        return false; // a TX key is never set through the registry: a setter would only hide that
+    }
+    if (e->type == REG_T_STR) {
+        return e->max <= REG_STR_MAX;
+    }
+    if (e->type != REG_T_ENUM) {
+        return true;
+    }
+    if (e->min != 0 || !e->enum_names || e->max > UINT8_MAX) {
+        return false;
+    }
+    for (int64_t i = 0; i <= e->max; i++) {
+        if (!e->enum_names[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+size_t reg_table_check(reg_entry_t const *tab, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (!entry_ok(&tab[i])) {
+            return i;
+        }
+        for (size_t j = 0; j < i; j++) {
+            if (tab[j].id == tab[i].id || strcmp(tab[j].name, tab[i].name) == 0) {
+                return i;
+            }
+        }
+    }
+    return n;
 }

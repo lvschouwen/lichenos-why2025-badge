@@ -386,22 +386,39 @@ static void reg_round_trip(void) {
 }
 
 // No version bump for the registry (#308): an older peer keeps understanding every other message and drops a REG one.
-// A v4 C6 without the registry decodes REG_GET / REG_SET as an unknown type, like any type past its table here.
+// The message types a v4 peer from before the registry knows, frozen here: its lora_decode answers BAD_TYPE to any other
+// type, and the REG types must stay outside both sets.
 static void reg_old_peer_drops(void) {
+    static int const v4_to_c6[] = {1, 2, 3, 4, 5, 6, 7};      // CONFIG .. SWEEP_REQ
+    static int const v4_to_p4[] = {0x81, 0x82, 0x83, 0x84, 0x85}; // RX_PACKET .. SWEEP
+    int const        reg[]      = {LORA_MSG_REG_GET, LORA_MSG_REG_SET, LORA_MSG_REG_VAL};
+
+    CHECK(LORA_MSG_REG_GET == 8 && LORA_MSG_REG_SET == 9 && LORA_MSG_REG_VAL == 0x86);
+    for (size_t r = 0; r < 3; r++) {
+        for (size_t i = 0; i < sizeof(v4_to_c6) / sizeof(int); i++) {
+            CHECK(reg[r] != v4_to_c6[i]);
+        }
+        for (size_t i = 0; i < sizeof(v4_to_p4) / sizeof(int); i++) {
+            CHECK(reg[r] != v4_to_p4[i]);
+        }
+    }
+    // Every pre-registry type still decodes as before: the version did not move
+    CHECK(LORA_PROTO_VERSION == 4);
+    CHECK(LORA_MSG_CONFIG == v4_to_c6[0] && LORA_MSG_SWEEP_REQ == v4_to_c6[6]);
+    CHECK(LORA_MSG_RX_PACKET == v4_to_p4[0] && LORA_MSG_SWEEP == v4_to_p4[4]);
+
+    // A v3 C6 drops a REG message on the version, like every v4 message
     uint8_t    buf[LORA_MSG_MAX];
     lora_msg_t out;
     lora_msg_t get = {.type = LORA_MSG_REG_GET, .u.reg_get = {.id = 0x0F00, .seq = 1}};
     size_t     n   = lora_encode(&get, buf, sizeof(buf));
-
-    CHECK(LORA_PROTO_VERSION == 4 && buf[0] == 4);
-    CHECK(LORA_MSG_REG_GET > LORA_MSG_SWEEP_REQ && LORA_MSG_REG_VAL > LORA_MSG_SWEEP); // new numbers, none reused
-    buf[1] = LORA_MSG_REG_SET + 1; // the next type nobody knows yet: what REG_GET is to an older C6
-    CHECK(lora_decode(buf, n, &out) == LORA_DEC_BAD_TYPE);
-    buf[1] = LORA_MSG_REG_VAL + 1;
-    CHECK(lora_decode(buf, n, &out) == LORA_DEC_BAD_TYPE);
-    buf[1] = LORA_MSG_REG_GET;
-    buf[0] = 3; // a v3 C6 drops it on the version, like every v4 message
+    buf[0]         = 3;
     CHECK(lora_decode(buf, n, &out) == LORA_DEC_BAD_VERSION);
+
+    // The protocol carries a REG_VAL type byte it does not know unchanged; the registry (reg_type_known) drops it
+    lora_msg_t val = {.type = LORA_MSG_REG_VAL, .u.reg_val = {.id = 0x0200, .seq = 2, .status = 0, .type = 0x55}};
+    n              = lora_encode(&val, buf, sizeof(buf));
+    CHECK(lora_decode(buf, n, &out) == LORA_DEC_OK && out.u.reg_val.type == 0x55);
 }
 
 int main(void) {

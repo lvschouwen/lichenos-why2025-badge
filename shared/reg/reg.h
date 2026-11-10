@@ -43,7 +43,8 @@ typedef enum {
 #define REG_F_TX     0x02 // changes what the badge transmits: a set answers GUARDED (#307 rule, radio keys)
 #define REG_F_REBOOT 0x04 // a set is saved and applies after a restart; until then applied differs from saved
 
-#define REG_STR_MAX 15
+#define REG_STR_MAX  15
+#define REG_NAME_MAX 23 // longest dotted name, so a console column can be fixed
 
 // One value; which member is valid follows the entry's type: u for U8/U32/BOOL/ENUM, i for I16/I32, s for STR. The
 // wire carries u, the same 32 bits as i, so an I16 travels sign-extended.
@@ -80,21 +81,24 @@ reg_entry_t const *reg_find_name(reg_entry_t const *tab, size_t n, char const *n
 // itself; "lora.f" matches nothing (a prefix ends at a dot)
 bool reg_name_matches(char const *name, char const *query);
 
-// Text to value, syntax and type width only: decimal or 0x hex numbers; BOOL also on/off/true/false; ENUM a name or
+// Text to value, syntax only: decimal (no leading zeros, '-' only for I16/I32, no '+' or spaces) or 0x hex numbers that
+// fit 32 bits; BOOL also on/off/true/false; ENUM a name or
 // its number; STR up to REG_STR_MAX characters. false = not a value of this type. Range is reg_check's job.
 bool reg_parse(reg_entry_t const *e, char const *text, reg_value_t *out);
 
-// REG_OK, or REG_RANGE when v is outside the type or the entry's min..max
+// REG_OK, or REG_RANGE when v is outside the type or the entry's min..max. min == max == 0 means the type's own range,
+// except for ENUM, whose range is always min..max
 reg_status_t reg_check(reg_entry_t const *e, reg_value_t const *v);
 
 // The value as text without unit (ENUM by name, BOOL as on/off); bytes written without the NUL, 0 if cap is too small
 size_t reg_format(reg_entry_t const *e, reg_value_t const *v, char *buf, size_t cap);
 
-// The applied value; REG_FAILED (and *out zeroed) when the entry has no getter or the getter fails
+// The applied value; REG_FAILED (and *out zeroed) when the entry has no getter, the getter fails or its value does not
+// fit the key's type
 reg_status_t reg_get(reg_entry_t const *e, reg_value_t *out);
 
 // The one set path: TX -> GUARDED, RO or no setter -> RO, outside the range -> RANGE, else the setter. Whatever the
-// outcome, *applied is read back afterwards; a set that succeeded but cannot be read back is REG_FAILED.
+// outcome, *applied is read back afterwards; when that read fails the result is REG_FAILED, whatever the set said.
 reg_status_t reg_set(reg_entry_t const *e, reg_value_t const *v, reg_value_t *applied);
 
 // What goes into a REG_VAL besides id, seq and status
@@ -106,6 +110,15 @@ typedef struct {
 // A REG_GET (set == NULL) or REG_SET (*set = the wire value) from the peer: an unknown id is REG_UNKNOWN with *out
 // zeroed; a STR key is not served (REG_FAILED). Every other answer carries the key's type and its applied value.
 reg_status_t reg_serve(reg_entry_t const *tab, size_t n, uint16_t id, uint32_t const *set, reg_reply_t *out);
+
+// A reg_type_t this build knows: a REG_VAL with any other type is dropped, not formatted
+bool reg_type_known(uint8_t type);
+
+// A table's own consistency, for each chip's host test: the index of the first bad entry, or n when all are fine.
+// Bad: a name that is not lower-case dotted ([a-z0-9_] segments, two or more, at most REG_NAME_MAX), an id or name
+// seen before, an unknown type, no getter, min > max, a TX key with a setter but no RO flag, a STR longer than
+// REG_STR_MAX, an ENUM without names for every value 0..max (min must be 0, max at most 255).
+size_t reg_table_check(reg_entry_t const *tab, size_t n);
 
 #ifdef __cplusplus
 }
