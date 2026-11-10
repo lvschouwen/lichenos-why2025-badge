@@ -216,11 +216,14 @@ class HardAndConf(unittest.TestCase):
         conf = cl.parse_conf(cl.read(os.path.join(os.path.dirname(cl.__file__), "layers.conf")))
         self.assertEqual(conf.comp_layer["mesh"], "L6")
         self.assertEqual(conf.closed["L6"], {"freertos", "esp_timer", "heap", "mbedtls", "lvgl", "lvgl__lvgl"})
-        self.assertEqual(conf.peers["mesh"], {"lichen_notify", "lichen_clock", "lichen_random", "lora", "fw_console", "psram_guard"})
+        # lichen_notify left both peer lines (#283): its app header lives in lichen_api since #245
+        self.assertEqual(conf.peers["mesh"], {"lichen_clock", "lichen_random", "lora", "fw_console", "psram_guard"})
+        self.assertEqual(conf.peers["lichen_apps"], {"lichen_clock", "lora", "fw_console"})
         self.assertEqual(conf.allowed_layers("L6"), {"L4", "L6"})
-        for h in ("stdio.h", "sys/*.h", "freertos/*.h", "esp_log.h", "esp_timer.h", "esp_heap_caps.h", "esp_attr.h",
+        for h in ("stdio.h", "sys/*.h", "freertos/*.h", "esp_log.h", "esp_timer.h", "esp_attr.h",
                   "mbedtls/*.h", "psa/*.h", "lvgl.h", "stdatomic.h", "new"):
             self.assertIn(h, conf.headers["L6"])
+        self.assertNotIn("esp_heap_caps.h", conf.headers["L6"])  # apps allocate through lichen_mem.h (#283)
         for f in ("esp_ota_*", "esp_wifi_*", "esp_efuse_*", "gpio_*", "esp_partition_*", "nvs_flash_init*", "nvs_flash_erase*",
                   "ledc_*", "i2c_*", "esp_restart", "lora_start", "lora_ident", "lora_ident_live", "lora_stop", "lora_c6_*",
                   "lora_set_send_hook", "lora_set_enabled", "lora_enabled", "lora_set_switch_owner", "xTaskCreate*"):
@@ -249,6 +252,54 @@ class HardAndConf(unittest.TestCase):
         # the console's LoRa switch saves "off" (#222): lora alone may call it, never a peer app
         self.assertIn(("lora_switch_request", ["lora"]), conf.owner_only)
 
+    def test_real_conf_closes_the_283_gaps(self):
+        """#283: the peers' internal headers and symbols, plain heap calls and flash mmap are closed, the shim is scanned."""
+        conf = cl.parse_conf(cl.read(os.path.join(os.path.dirname(cl.__file__), "layers.conf")))
+        for app in ("mesh", "lichen_apps"):
+            for inc in ("lora_internal.h", "lora_os.h", "lora_link.h", "lora_tx.h", "lora_owner.h", "lora_switch.h",
+                        "console_cmd.h", "fw_store.h", "key_raw.h", "nvs_erase_os.h", "psram_guard.h", "clock_check.h"):
+                for dep in conf.peers[app]:
+                    self.assertFalse(conf.header_ok(app, dep, inc), (app, dep, inc))
+            self.assertTrue(conf.header_ok(app, "lora", "lora_app.h") and conf.header_ok(app, "fw_console", "fw_console.h"))
+        self.assertTrue(conf.header_ok("mesh", "psram_guard", "psram_speed.h"))
+        for sym in ("lora_internal_send", "lora_sweep_answer", "lora_tx_begin", "lora_owner_claim", "lora_c6_link_init",
+                    "psram_speed_choice", "psram_speed_cmd", "psram_speed_gate_result", "psram_speed_no_rearm",
+                    "malloc", "calloc", "realloc", "free", "strdup"):
+            self.assertTrue(any(cl.fnmatch.fnmatchcase(sym, g) for g in conf.forbid["L6"]), sym)
+        for sym in ("lora_sweep", "lora_set_tx_power", "lora_claim", "psram_speed_trial_pending", "psram_speed_on_pass",
+                    "lichen_alloc", "lichen_free"):
+            self.assertFalse(any(cl.fnmatch.fnmatchcase(sym, g) for g in conf.forbid["L6"]), sym)
+        self.assertEqual(conf.forbid_except, [("mesh", "MyMesh.cpp.obj", ["malloc", "free"])])
+        self.assertIn(("esp_partition_mmap", []), conf.owner_only)
+        self.assertIn(("spi_flash_mmap*", []), conf.owner_only)
+        self.assertIn("../shared/arduino_shim", conf.own_dirs["mesh"])
+        self.assertNotIn("../shared/arduino_shim", conf.vendored["mesh"])
+
+    def test_app_api_doc_matches_the_conf(self):
+        """docs/app-api.md's peer table and "Exceptions still open" list say what layers.conf grants apps (#283)."""
+        tools = os.path.dirname(cl.__file__)
+        conf = cl.parse_conf(cl.read(os.path.join(tools, "layers.conf")))
+        doc = cl.read(os.path.join(tools, "..", "docs", "app-api.md"))
+        apps = [c for c, layer in conf.comp_layer.items() if layer in conf.closed]
+        table = doc.split("## What an app may use", 1)[1].split("###", 1)[0]
+        rows = {}
+        for line in table.splitlines():
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            m = cl.re.fullmatch(r"`(\w+)`", cells[0]) if len(cells) == 3 else None
+            if m and m.group(1) in conf.comp_layer and m.group(1) != cl.GATE:
+                rows[m.group(1)] = set(cl.re.findall(r"`([^`]+)`", cells[1]))
+        peers = set().union(*(conf.peers[a] for a in apps))
+        self.assertEqual(set(rows), peers)
+        for dep in peers:
+            granted = set().union(*(set(conf.peer_headers.get((a, dep), [])) for a in apps))
+            self.assertEqual(rows[dep], granted, dep)
+        section = doc.split("## Exceptions still open", 1)[1].split("\n## ", 1)[0]
+        listed = set(cl.re.findall(r"^- `((?:comp-headers|forbid-except) [^`]+)`", section, cl.re.M))
+        want = set("comp-headers %s %s" % (c, " ".join(h)) for c, h in conf.comp_headers.items() if c in apps)
+        want |= set("forbid-except %s %s %s" % (c, o, " ".join(sy)) for c, o, sy in conf.forbid_except if c in apps)
+        self.assertEqual(listed, want)
+        self.assertNotIn("No component or header exception is open", doc)
+
 
     def test_real_gate_requires_no_hardware_layer(self):
         """The gate must not require L1/L2 (#220), nor lichen_notify since its headers moved into the gate (#245)."""
@@ -260,6 +311,74 @@ class HardAndConf(unittest.TestCase):
         cm = cl.read(os.path.join(tools, "..", "firmware", "components", "lichen_api", "CMakeLists.txt"))
         bad = [d for _, d in cl.parse_requires(cm) if conf.comp_layer.get(d) in ("L1", "L2", "L3")]
         self.assertEqual(bad, [])
+
+
+class Gaps283(unittest.TestCase):
+    """The #283 rules on fixtures: each one catches its violation."""
+    PEER = CONF + "peer app drv\npeer-headers app drv drv.h\n"
+
+    def app(self, src, extra=None):
+        return {"app": (BASE_FILES["app"][0], dict({"a.c": src}, **(extra or {})))}
+
+    def test_peer_headers_narrow_a_closed_peer(self):
+        drv = (BASE_FILES["drv"][0], {"d.c": "int drv_fn(void){return 2;}\n", "drv.h": "", "drv_internal.h": ""})
+        # rule B reads the include lines, the fixture's gcc has no -I for drv: hence #if 0
+        ok = "#if 0\n#include \"drv.h\"\n#endif\nint app_fn(void){return 4;}\n"
+        bad = "#if 0\n#include \"drv_internal.h\"\n#endif\nint app_fn(void){return 4;}\n"
+        self.assertEqual(keys(Fixture(self, conf=self.PEER, overrides=dict(self.app(ok), drv=drv))), set())
+        self.assertEqual(keys(Fixture(self, conf=self.PEER, overrides=dict(self.app(bad), drv=drv))),
+                         {("B!", "app -> drv:drv_internal.h")})
+        # without the line the peer edge allows every header: the gap #283 closes
+        conf = self.PEER.replace("peer-headers app drv drv.h\n", "")
+        with self.assertRaises(cl.LayerError):  # a closed layer's peer must name its headers
+            cl.parse_conf(conf)
+
+    def test_peer_headers_need_a_peer_line(self):
+        with self.assertRaises(cl.LayerError):
+            cl.parse_conf(CONF + "peer-headers app drv drv.h\n")
+        with self.assertRaises(cl.LayerError):
+            cl.parse_conf(CONF + "peer app drv\npeer-headers app drv\n")
+
+    def test_own_dir_outside_the_component_is_scanned_unless_vendored(self):
+        conf = CONF + "own-dir app ../shared/shim ../third/lib\n"
+        fx = Fixture(self, conf=conf + "vendored app ../third/lib\n")
+        fx.write("shared/shim/shim.c", "#include <dirent.h>\n#include \"shim.h\"\n")
+        fx.write("shared/shim/shim.h", "")
+        fx.write("third/lib/up.c", "#include <fcntl.h>\n")
+        self.assertEqual(keys(fx), {("B!", "app -> dirent.h")})  # the shim is the app's code, the vendored lib is not
+        fx.write("tools/layers.conf", conf + "vendored app ../third/lib\ncomp-headers app dirent.h\n")
+        self.assertEqual(keys(fx), set())
+        fx.write("tools/layers.conf", conf)  # third/lib not vendored: scanned as well
+        self.assertEqual(keys(fx), {("B!", "app -> dirent.h"), ("B!", "app -> fcntl.h")})
+        with self.assertRaises(cl.LayerError):
+            cl.parse_conf(CONF + "vendored app ../nowhere\n")
+
+    def test_missing_own_dir_root_fails(self):
+        fx = Fixture(self, conf=CONF + "own-dir app ../gone\n")
+        code, out = fx.run("--no-symbols", "--report")
+        self.assertEqual(code, 1)
+        self.assertIn("does not exist", out)
+
+    def test_forbid_plain_heap_and_forbid_except(self):
+        conf = CONF.replace("forbid L3 esp_restart", "forbid L3 esp_restart malloc free")
+        src = "void *malloc(__SIZE_TYPE__);\nvoid free(void *);\nint app_fn(void){free(malloc(4));return 4;}\n"
+        fx = Fixture(self, conf=conf, overrides=self.app(src, {"up.c": src.replace("app_fn", "up_fn")}))
+        self.assertEqual(keys(fx), {("C!", "app:malloc"), ("C!", "app:free")})
+        fx.write("tools/layers.conf", conf + "forbid-except app up.c.obj malloc free\n")
+        conf2 = cl.parse_conf(cl.read(os.path.join(fx.root, "tools/layers.conf")))
+        found = cl.measure(conf2, fx.root, os.path.join(fx.root, "firmware/build"), "nm", True)
+        self.assertEqual(set(found), {("C!", "app:malloc"), ("C!", "app:free")})
+        self.assertTrue(all("a.c.obj" in w for ws in found.values() for w in ws))  # up.c.obj is excepted, a.c.obj not
+        fx.write("firmware/components/app/a.c", "int app_fn(void){return 4;}\n")
+        fx.build()
+        self.assertEqual(keys(fx), set())
+
+    def test_owner_only_without_owner_bans_everyone(self):
+        src = "int esp_partition_mmap(void);\nint %s(void){return esp_partition_mmap();}\n"
+        fx = Fixture(self, conf=CONF + "owner-only esp_partition_mmap\n",
+                     overrides={"base": (BASE_FILES["base"][0], {"b.c": src % "base_fn", "base.h": ""}),
+                                "drv": (BASE_FILES["drv"][0], {"d.c": src % "drv_fn"})})
+        self.assertEqual(keys(fx), {("C", "base:esp_partition_mmap"), ("C", "drv:esp_partition_mmap")})
 
 
 # Gate attribution (#220): lichen_os implements the gate's headers. Layers as the real tree, fewer of them.

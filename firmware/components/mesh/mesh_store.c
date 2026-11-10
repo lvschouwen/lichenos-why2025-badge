@@ -6,8 +6,13 @@
 
 #ifdef ESP_PLATFORM
 #include "esp_attr.h"
+// The badge always sets the hooks (lichen_alloc, #181): no plain heap fallback, so the app uses no malloc (#283)
+#define DEFAULT_CALLOC(n, size) NULL
+#define DEFAULT_FREE(p)         ((void)(p))
 #else
 #define EXT_RAM_BSS_ATTR // host tests
+#define DEFAULT_CALLOC(n, size) calloc((n), (size))
+#define DEFAULT_FREE(p)         free(p)
 #endif
 
 // A table of chats, each with a ring of its messages (oldest overwritten)
@@ -38,7 +43,7 @@ static void release_ring(void *ring) {
     if (ring_free) {
         ring_free(ring);
     } else {
-        free(ring);
+        DEFAULT_FREE(ring);
     }
 }
 
@@ -121,7 +126,7 @@ static conv_t *new_conv(mesh_chat_key_t const *key) {
         drop("chat table full of channels");
         return NULL;
     }
-    mesh_msg_t *ring = ring_alloc ? ring_alloc(ring_cap, sizeof(*ring)) : calloc(ring_cap, sizeof(*ring));
+    mesh_msg_t *ring = ring_alloc ? ring_alloc(ring_cap, sizeof(*ring)) : DEFAULT_CALLOC(ring_cap, sizeof(*ring));
     if (!ring) {
         drop("no memory for a chat ring");
         return NULL;

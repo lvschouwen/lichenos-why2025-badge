@@ -12,4 +12,4 @@ idf_component_register(SRCS "lichen_apps.c" "app_clock.c" "app_timer.c" "timer_s
                             "app_notes.c" "notes_model.c" "notes_store.c" "app_qr.c" "app_keytest.c"
                             "app_lora_spectrum.c" "lora_spectrum.c"
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES lichen_api lichen_notify lichen_clock lora fw_console freertos esp_timer heap)
+                       PRIV_REQUIRES lichen_api lichen_clock lora fw_console freertos esp_timer heap)

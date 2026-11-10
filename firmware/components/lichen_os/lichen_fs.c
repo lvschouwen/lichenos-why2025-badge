@@ -1,6 +1,5 @@
 #include "lichen_fs.h"
 
-#include "app_ns.h" // the id rules
 #include "app_slot.h"
 #include "esp_attr.h"
 #include "esp_log.h"
@@ -48,9 +47,10 @@ static bool take_lock(SemaphoreHandle_t *lock, StaticSemaphore_t *buf) {
 }
 
 static bool usable(lichen_app_t const *app) {
-    char ns[16];
-    if (!app || !app_ns_name(app->id, ns, sizeof(ns))) {
-        ESP_LOGE(TAG, "app %s has no usable id for its directory", app && app->name ? app->name : "?");
+    char path[sizeof(STORAGE_BASE) + 1 + 13 + 1];
+    if (!app || !fs_app_dir_path(STORAGE_BASE, app->id, path, sizeof(path))) { // the id rules and the OS's names
+        ESP_LOGE(TAG, "app %s has no usable id for its directory (or one of the OS's, #283)",
+                 app && app->name ? app->name : "?");
         return false;
     }
     return true;
@@ -70,7 +70,9 @@ static char const *app_dir_locked(lichen_app_t const *app) {
     if (dir_owner[i] == app) {
         return dir_path[i];
     }
-    fs_app_dir_path(STORAGE_BASE, app->id, dir_path[i], sizeof(dir_path[i]));
+    if (!fs_app_dir_path(STORAGE_BASE, app->id, dir_path[i], sizeof(dir_path[i]))) {
+        return NULL; // usable() already refused it; never mkdir a path that was not written
+    }
     if (!made(dir_path[i])) {
         ESP_LOGE(TAG, "%s: mkdir failed (errno %d): no drive?", dir_path[i], errno);
         return NULL; // the slot stays free: the next call tries again

@@ -41,8 +41,13 @@ void fs_shim_test_fat_rename(bool on) {
 
 #ifdef ESP_PLATFORM
 #define SHIM_ERROR(...) ESP_LOGE("fs_shim", __VA_ARGS__)
+// The badge always sets the buffer hooks (lichen_alloc): no plain heap fallback, so the app uses no malloc (#283)
+#define DEFAULT_MALLOC(n) NULL
+#define DEFAULT_FREE(p)   ((void)(p))
 #else
 #define SHIM_ERROR(...) ((void)0)
+#define DEFAULT_MALLOC(n) malloc(n)
+#define DEFAULT_FREE(p)   free(p)
 #endif
 
 uint32_t fs_shim_take_raw_writes(void) {
@@ -53,7 +58,7 @@ uint32_t fs_shim_take_raw_writes(void) {
 
 // A "w" file's buffer comes from the owner's hooks (the badge: lichen_alloc, PSRAM first and internal RAM when PSRAM is
 // full, so a small prefs or identity save still lands; contacts3 alone is 152 bytes a contact, up to 1000 contacts).
-// Without hooks (host tests) it is plain malloc.
+// Without hooks it is plain malloc in the host tests and no buffer on the badge (it sets them before SPIFFS.begin).
 static void *(*buf_alloc_hook)(size_t);
 static void (*buf_free_hook)(void *);
 
@@ -66,7 +71,7 @@ static void buf_free(void *p) {
     if (buf_free_hook) {
         buf_free_hook(p);
     } else {
-        free(p);
+        DEFAULT_FREE(p);
     }
 }
 
@@ -76,7 +81,7 @@ static void *buf_grow(void *p, size_t old, size_t n) {
     if (fail_alloc) {
         return NULL;
     }
-    void *q = buf_alloc_hook ? buf_alloc_hook(n) : malloc(n);
+    void *q = buf_alloc_hook ? buf_alloc_hook(n) : DEFAULT_MALLOC(n);
     if (q && p) {
         memcpy(q, p, old < n ? old : n);
         buf_free(p);
@@ -167,7 +172,7 @@ bool fs_shim_format_allowed(char const *r) {
     }
     char const *last = strrchr(r, '/');
     bool        nested = last != r && last[1] != '\0'; // "/parent/name", not "/name", "/" or "/parent/"
-    return nested && strcmp(r, "/storage/c6") != 0;
+    return nested;
 }
 
 static bool full_path(char const *path, char *out) {

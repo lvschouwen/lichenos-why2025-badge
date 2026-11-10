@@ -9,6 +9,7 @@
 #include "key_matrix.h"
 #include "lichen_app.h"
 #include "lichen_keys.h"
+#include "lichen_mem.h"
 #include "lichen_ui.h"
 #include "lichen_apps.h"
 #include "theme.h"
@@ -77,13 +78,15 @@ static void tick(lv_timer_t *timer) {
     }
 }
 
+static lichen_app_t const keytest_app; // defined at the end: the owner of the screen state (#181, #283)
+
 static void on_delete(lv_event_t *e) {
     keytest_t *t = lv_event_get_user_data(e);
     if (t->listening) {
         lichen_keys_raw_release(on_raw, t);
     }
     lv_timer_delete(t->timer);
-    free(t);
+    lichen_free(&keytest_app, t);
 }
 
 static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color) {
@@ -113,7 +116,7 @@ static void add_cell(keytest_t *t, lv_obj_t *grid, key_layout_t const *k) {
 }
 
 static void open_keytest(lv_obj_t *screen) {
-    keytest_t *t = calloc(1, sizeof(*t));
+    keytest_t *t = lichen_alloc(&keytest_app, sizeof(*t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!t) {
         add_label(screen, "Out of memory", THEME_RED);
         return;

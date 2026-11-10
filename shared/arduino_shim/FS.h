@@ -87,7 +87,8 @@ void fs_shim_set_root(char const *dir);
 // Sizes of the drive the root lives on (totalBytes/usedBytes); the host default measures the root's file system
 void fs_shim_set_drive_bytes(void (*fn)(size_t *total, size_t *used));
 // format() wipes only a directory of its own below a parent ("/storage/meshcore"): never a top-level directory or the
-// drive itself, never the C6 image's /storage/c6, never through "..". Pure, host-tested.
+// drive itself, never through "..". The root is lichen_fs_app_dir's, which never hands out an OS directory such as the
+// C6 image's /storage/c6 (fs_path.h, #283). Pure, host-tested.
 bool fs_shim_format_allowed(char const *root);
 // Microseconds spent in file calls (open, read, write, close, exists, remove) since the last call, and how many calls
 // (ops may be NULL); always 0 off the badge
@@ -99,7 +100,8 @@ uint32_t fs_shim_take_raw_writes(void);
 // The largest "w" file the shim buffers (1 MB): MeshCore's biggest is contacts3, 152 KB at 1000 contacts. A write past
 // it fails, and close() leaves the old file as it was.
 #define FS_SHIM_MAX_FILE ((size_t)1 << 20)
-// Where a "w" file's buffer comes from (the badge hands in lichen_alloc/lichen_free); NULL hooks: malloc and free.
+// Where a "w" file's buffer comes from (the badge hands in lichen_alloc/lichen_free); NULL hooks: malloc and free in
+// the host tests, no buffer on the badge (#283).
 // alloc returns n bytes or NULL; release takes what alloc gave.
 void fs_shim_set_buffer_hooks(void *(*alloc)(size_t bytes), void (*release)(void *ptr));
 // Host tests only: make buffer allocations fail, or make the reads that compare chunks fail

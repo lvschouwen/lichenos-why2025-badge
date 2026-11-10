@@ -33,7 +33,6 @@
 #include <helpers/SimpleMeshTables.h>
 #include <helpers/TxtDataHelpers.h>
 
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "lichen_badge.h"
@@ -51,7 +50,6 @@
 #include "lichen_task.h"
 
 extern "C" {
-#include "console_cmd.h" // CONSOLE_WIFI_CMD_MAX
 #include "fw_console.h"
 #include "lora_app.h"
 }
@@ -2795,8 +2793,7 @@ static void cmd_mesh(char const *args) {
 
 // PSRAM: the parts of a link pasted so far (the USB console takes 95 bytes a line, the Wi-Fi console a whole link)
 static mesh_import_t *import_text;
-static_assert(sizeof("contacts import ") - 1 + MESH_ADVERT_URI_MAX - 1 < CONSOLE_WIFI_CMD_MAX,
-              "a contact link fits one Wi-Fi console line (#110)");
+// A contact link fits one Wi-Fi console line (#110): console_cmd_test pins it (console_cmd.h is the OS's, #283)
 
 // "fw contacts export [<12 hex>]": the contact's (or our own) export link
 static void contacts_export(char const *arg) {

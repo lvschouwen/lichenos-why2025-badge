@@ -12,6 +12,10 @@ Every repo component has a layer in tools/layers.conf (L0 platform ... L6 apps, 
      a lichen_api header declares and lichen_os defines counts as the gate's (#220: the gate is a header API, lichen_os
      implements it), so the caller needs an edge to lichen_api. Only lichen_os gets this; a gate function the shell
      defines stays an upward edge.
+A peer edge of a closed layer names the headers it may include (peer-headers, #283); the others of that component are
+a hard B. An app's sources are its component directory plus every own-dir root that is not `vendored` (shared code
+built into it, e.g. the Arduino shim, #283). `forbid-except` names the one object of a component (upstream code built
+unchanged) that may still use a forbidden symbol.
 Rule D (capabilities) is #229's and not here.
 
 Rule C counts per object file (an object that calls a symbol three times counts once), A per edge, B per include line.
@@ -68,7 +72,10 @@ class Conf:
         self.comp_headers = collections.defaultdict(list)  # component -> extra system header globs
         self.own_dirs = collections.defaultdict(list)  # component -> include roots relative to firmware/
         self.forbid = collections.defaultdict(list)    # layer -> symbol globs
-        self.owner_only = []        # (glob, [owner spec]) first match wins
+        self.owner_only = []        # (glob, [owner spec]) first match wins; no owner: nobody may use it
+        self.peer_headers = {}      # (component, peer) -> header globs it may include of that peer
+        self.vendored = collections.defaultdict(list)  # component -> own-dir roots of third-party code (not scanned)
+        self.forbid_except = []     # (component, object glob, [symbol globs]): upstream code built unchanged
 
     def height(self, layer):
         return self.layers.index(layer)
@@ -81,6 +88,15 @@ class Conf:
         if src == dst or dst in self.peers[src]:
             return True
         return self.comp_layer[dst] in self.allowed_layers(self.comp_layer[src])
+
+    def header_ok(self, src, dst, inc):
+        """May src include this header of dst? Only a peer-headers line narrows it (to the headers it names)."""
+        globs = self.peer_headers.get((src, dst))
+        return globs is None or any(fnmatch.fnmatchcase(os.path.basename(inc), g) for g in globs)
+
+    def forbid_excepted(self, comp, obj, sym):
+        return any(c == comp and fnmatch.fnmatchcase(obj or "", o) and any(fnmatch.fnmatchcase(sym, g) for g in syms)
+                   for c, o, syms in self.forbid_except)
 
 
 def parse_conf(text):
@@ -122,6 +138,16 @@ def apply_directive(conf, key, args):
         conf.forbid[args[0]].extend(args[1:])
     elif key == "owner-only":
         conf.owner_only.append((args[0], args[1:]))
+    elif key == "peer-headers":
+        if not args[2:]:
+            raise ValueError("peer-headers needs a component, a peer and at least one header")
+        conf.peer_headers.setdefault((args[0], args[1]), []).extend(args[2:])
+    elif key == "vendored":
+        conf.vendored[args[0]].extend(args[1:])
+    elif key == "forbid-except":
+        if not args[2:]:
+            raise ValueError("forbid-except needs a component, an object and at least one symbol")
+        conf.forbid_except.append((args[0], args[1], args[2:]))
     else:
         raise ValueError("unknown directive")
 
@@ -141,12 +167,32 @@ def check_conf(conf):
         for o in owners:
             if not o.startswith("<=") and o not in conf.comp_layer:
                 raise LayerError("layers.conf: owner-only %s names unknown owner %s" % (glob, o))
+    check_conf_283(conf)
     for c, layer in conf.comp_layer.items():
         if layer not in conf.layers:
             raise LayerError("layers.conf: component %s is on the undeclared layer %s" % (c, layer))
     for layer in list(conf.may) + list(conf.closed) + list(conf.headers) + list(conf.forbid):
         if layer not in conf.layers:
             raise LayerError("layers.conf: undeclared layer %s" % layer)
+
+
+def check_conf_283(conf):
+    """The #283 directives: peer-headers on a real peer edge (and on every peer edge of a closed layer), vendored roots
+    that are own-dir roots, forbid-except on a known component."""
+    for (c, d) in conf.peer_headers:
+        if c not in conf.comp_layer or d not in conf.peers[c]:
+            raise LayerError("layers.conf: peer-headers %s %s names no peer line" % (c, d))
+    for c, deps in conf.peers.items():
+        if c in conf.comp_layer and conf.comp_layer[c] in conf.closed:
+            for d in sorted(deps - set(d for (s, d) in conf.peer_headers if s == c)):
+                raise LayerError("layers.conf: peer %s %s is on a closed layer and needs a peer-headers line" % (c, d))
+    for c, dirs in conf.vendored.items():
+        for d in dirs:
+            if d not in conf.own_dirs.get(c, []):
+                raise LayerError("layers.conf: vendored %s %s is not an own-dir root of it" % (c, d))
+    for c, _, _ in conf.forbid_except:
+        if c not in conf.comp_layer:
+            raise LayerError("layers.conf: forbid-except names unknown component %s" % c)
 
 
 def owner_matches(conf, spec, comp):
@@ -277,18 +323,34 @@ def own_include(conf, name, fw, path, inc):
     return os.path.exists(os.path.join(os.path.dirname(path), inc))
 
 
+def source_roots(conf, name, comp_dir, fw):
+    """The directories whose sources are the component's: its own directory, and every own-dir root outside it that is
+    not vendored (shared code compiled into it, #283). A missing root fails instead of passing unchecked."""
+    roots = [comp_dir]
+    for o in conf.own_dirs[name]:
+        d = os.path.normpath(os.path.join(fw, o))
+        inside = os.path.commonpath([d, os.path.normpath(comp_dir)]) == os.path.normpath(comp_dir)
+        if inside or o in conf.vendored[name]:
+            continue
+        if not os.path.isdir(d):
+            raise LayerError("own-dir %s %s does not exist (mark third-party code `vendored`)" % (name, o))
+        roots.append(d)
+    return roots
+
+
 def rule_b(conf, comps, found, root, selected):
     fw = os.path.join(root, "firmware")
     owners = header_owners(comps)
     for name in selected:
         layer = conf.comp_layer[name]
-        for path in source_files(comps[name]):
-            if any(p in "/" + os.path.relpath(path, comps[name]).replace(os.sep, "/") for p in SKIP_PARTS):
-                continue
-            for n, inc in includes_of(path):
-                bad, hard = include_violation(conf, name, layer, fw, path, inc, owners)
-                if bad:
-                    add(found, "B", "%s -> %s" % (name, bad), "%s:%d" % (os.path.relpath(path, root), n), hard)
+        for base in source_roots(conf, name, comps[name], fw):
+            for path in source_files(base):
+                if any(p in "/" + os.path.relpath(path, base).replace(os.sep, "/") for p in SKIP_PARTS):
+                    continue
+                for n, inc in includes_of(path):
+                    bad, hard = include_violation(conf, name, layer, fw, path, inc, owners)
+                    if bad:
+                        add(found, "B", "%s -> %s" % (name, bad), "%s:%d" % (os.path.relpath(path, root), n), hard)
 
 
 def include_violation(conf, name, layer, fw, path, inc, owners):
@@ -298,8 +360,11 @@ def include_violation(conf, name, layer, fw, path, inc, owners):
         return None, False
     cands = owners.get(os.path.basename(inc), set())
     if cands:
-        if name in cands or any(conf.edge_ok(name, c) for c in cands):
+        if name in cands or any(conf.edge_ok(name, c) and conf.header_ok(name, c, inc) for c in cands):
             return None, False
+        peers = sorted(c for c in cands if conf.edge_ok(name, c))
+        if peers:  # an allowed edge, but not one of the headers its peer-headers line names (#283)
+            return "%s:%s" % (peers[0], os.path.basename(inc)), layer in conf.closed
         return sorted(cands)[0], False
     if layer in conf.closed and not any(
             fnmatch.fnmatchcase(inc, g) for g in conf.headers[layer] + conf.comp_headers[name]):
@@ -352,11 +417,11 @@ def gate_call_ok(conf, comp, sym, owner, gate_syms):
             and conf.edge_ok(comp, GATE))
 
 
-def sym_violation(conf, comp, layer, sym, defs, gate_syms=frozenset()):
-    """(symbol, hard) when this reference breaks a rule, else (None, False). Forbidden symbols are hard. gate_syms:
-    the functions the lichen_api headers declare."""
+def sym_violation(conf, comp, layer, sym, defs, gate_syms=frozenset(), obj=None):
+    """(symbol, hard) when this reference breaks a rule, else (None, False). Forbidden symbols are hard unless a
+    forbid-except line names this object. gate_syms: the functions the lichen_api headers declare."""
     for g in conf.forbid[layer]:
-        if fnmatch.fnmatchcase(sym, g):
+        if fnmatch.fnmatchcase(sym, g) and not conf.forbid_excepted(comp, obj, sym):
             return sym, True
     for glob, owners in conf.owner_only:
         if fnmatch.fnmatchcase(sym, glob):
@@ -385,7 +450,7 @@ def rule_c(conf, comps, found, build, nm, selected, gate_syms=frozenset()):
         for obj, sym in undefined_symbols(nm, lib):
             if defs.get(sym) == name:
                 continue
-            bad, is_hard = sym_violation(conf, name, layer, sym, defs, gate_syms)
+            bad, is_hard = sym_violation(conf, name, layer, sym, defs, gate_syms, obj)
             if bad:
                 objs[bad].add(obj)
                 if is_hard:

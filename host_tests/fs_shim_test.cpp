@@ -274,7 +274,7 @@ int main(void) {
     CHECK(fs_shim_format_allowed("/storage/meshcore") && fs_shim_format_allowed(root));
     CHECK(!fs_shim_format_allowed("/storage") && !fs_shim_format_allowed("/") && !fs_shim_format_allowed(""));
     CHECK(!fs_shim_format_allowed(NULL) && !fs_shim_format_allowed("/storage/") && !fs_shim_format_allowed("storage/x"));
-    CHECK(!fs_shim_format_allowed("/storage/c6") && !fs_shim_format_allowed("/storage/meshcore/.."));
+    CHECK(!fs_shim_format_allowed("/storage/meshcore/..")); // /storage/c6 is never a root: fs_path_test (#283)
 
     // Missing files: not there, and opening one for reading gives a false File
     CHECK(!SPIFFS.exists("/a/b"));

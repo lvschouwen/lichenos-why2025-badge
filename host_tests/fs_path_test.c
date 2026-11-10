@@ -34,6 +34,12 @@ int main(void) {
     CHECK(!fs_app_dir_path(NULL, "meshcore", p, sizeof(p)));
     CHECK(strcmp(p, "x") == 0);
 
+    // The OS's own directories on the drive are no app's (#283: the C6 image, the notification store)
+    CHECK(!fs_app_dir_path("/storage", "c6", p, sizeof(p)) && strcmp(p, "x") == 0);
+    CHECK(!fs_app_dir_path("/storage", "lichen", p, sizeof(p)) && !fs_app_dir_path("/sd/lichen/apps", "c6", p, sizeof(p)));
+    CHECK(fs_app_dir_path("/storage", "c", p, sizeof(p)) && fs_app_dir_path("/storage", "c6x", p, sizeof(p)) &&
+          fs_app_dir_path("/storage", "lichenx", p, sizeof(p)));
+
     // Exactly big enough, and one byte short
     char exact[sizeof("/sd/lichen/apps/meshcore")];
     CHECK(fs_app_dir_path("/sd/lichen/apps", "meshcore", exact, sizeof(exact)));

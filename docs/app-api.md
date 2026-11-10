@@ -10,18 +10,21 @@ Lichen's calls.**
 
 ## What an app may use
 
-An app component `PRIV_REQUIRES` from this list only (see `firmware/components/mesh/CMakeLists.txt`):
+An app component `PRIV_REQUIRES` from this list only (see `firmware/components/mesh/CMakeLists.txt`), and includes
+only the headers named here of the Lichen components besides `lichen_api` (`peer-headers` in `tools/layers.conf`,
+#283; every other header of those components is the OS's and fails the build; `check_layers_test.py` pins this table
+to `layers.conf`):
 
-| Component | For |
-|---|---|
-| `lichen_api` | the app API below (it brings `lvgl` along; `lichen_notify.h` is one of its headers since #245) |
-| `lichen_clock` | reading the time and proposing one |
-| `lichen_random` | random bytes |
-| `lora` | the LoRa radio, as its one owner |
-| `fw_console` | console commands and a deliberate restart |
-| `psram_guard` | `psram_speed.h`, the PSRAM speed switch some large-buffer code asks about |
-| `freertos`, `esp_timer`, `heap` | queues, semaphores, timers; tasks through `lichen_task.h` and memory through `lichen_mem.h` (below) |
-| plain libraries | e.g. `mbedtls` (PSA Crypto); no driver, no storage, no network component |
+| Component | Headers | For |
+|---|---|---|
+| `lichen_api` | all (below) | the app API below (it brings `lvgl` along; `lichen_notify.h` is one of its headers since #245) |
+| `lichen_clock` | `lichen_clock.h` | reading the time and proposing one |
+| `lichen_random` | `lichen_random.h` | random bytes (MeshCore only) |
+| `lora` | `lora_app.h` | the LoRa radio, as its one owner |
+| `fw_console` | `fw_console.h`, `secure_wipe.h` | console commands and a deliberate restart; `secure_wipe.h` (MeshCore only) wipes a buffer that held a secret |
+| `psram_guard` | `psram_speed.h` | the PSRAM speed switch some large-buffer code asks about (MeshCore only, until #280) |
+| `freertos`, `esp_timer`, `heap` | | queues, semaphores, timers; tasks through `lichen_task.h` and memory through `lichen_mem.h` (below) |
+| plain libraries | | e.g. `mbedtls` (PSA Crypto); no driver, no storage, no network component |
 
 ### `lichen_api` headers, one line each
 
@@ -221,16 +224,29 @@ in `firmware/build/badge_fw.map`) and refuses:
 
 ## Exceptions still open
 
-No component or header exception is open: MeshCore's identity hand-over goes through `lichen_legacy_blob_take`
-(`lichen_legacy.h`: the OS reads the old `badge_fw/identity` blob, the app stores it, and only then is it erased) and the
-message journal's SD batches through `lichen_fs_sd_begin`/`lichen_fs_sd_end` (`lichen_fs.h`). The journal still lives at
-`/sd/lichen/messages` instead of `lichen_fs_sd_dir`: moving the history is a separate decision. MeshCore's `DataStore`
-includes `<nvs_flash.h>`; `shared/arduino_shim/nvs_flash.h` stands in for it.
+The exceptions `tools/layers.conf` grants an app, one per line (`check_layers_test.py` checks that this list and the
+file agree):
 
-Also open from #84: the console prefix per app (T8b) and system apps calling `board/backlight.h` directly (V13).
-`lichen_task_start` (T8a) and the heap caps wrapper `lichen_alloc` (V12) landed in #181; MeshCore's chat rings
-(`store_alloc_ring` in `mesh_task.cpp`, freed with `free()` by the pure `mesh_store.c`) and the Arduino shim's
-`fs_shim.cpp` still call `heap_caps_*` directly.
+- `comp-headers lichen_apps dirent.h`: Notepad (`notes_store.c`) lists a directory with POSIX `opendir`, because
+  `lichen_fs.h` has no listing call yet.
+- `comp-headers mesh dirent.h fcntl.h esp_err.h`: the Arduino shim (`shared/arduino_shim`, compiled into `mesh` and
+  checked as its code since #283) is MeshCore's `fs::FS` over POSIX (`opendir` for `openNextFile` and `format`,
+  `open` for the buffered writes); its `nvs_flash.h` stands in for the one IDF call MeshCore's `DataStore` makes and
+  needs `esp_err_t`.
+- `forbid-except mesh MyMesh.cpp.obj malloc free`: MeshCore's upstream `MyMesh.cpp` (built unchanged) allocates its
+  sign buffer with `malloc`. Every other app object may not call `malloc`, `calloc`, `realloc`, `free`, `strdup` or
+  `strndup` (#283): memory goes through `lichen_alloc` so `fw mem` counts it. MeshCore's upstream C++ `new` (the
+  packet pool, `MyMesh`) is operator new, not one of those symbols, and stays outside the count as well.
+
+Also open: `mesh` keeps `psram_guard` as a peer for `psram_speed.h` until #280 removes it (`meshcore_run.c` asks
+`psram_speed_trial_pending` and `psram_speed_on_pass`; the switch's choice, gate and console calls are forbidden). The
+own include roots of the bundled third-party code (`vendored` lines: MeshCore, its Crypto library, ed25519, base64)
+are not scanned. MeshCore's identity hand-over goes through `lichen_legacy_blob_take` (`lichen_legacy.h`) and the
+message journal's SD batches through `lichen_fs_sd_begin`/`lichen_fs_sd_end` (`lichen_fs.h`); the journal still
+lives at `/sd/lichen/messages` instead of `lichen_fs_sd_dir`, moving the history is a separate decision. From #84: the
+console prefix per app (T8b) and system apps calling `board/backlight.h` directly (V13). MeshCore's chat rings and the
+Arduino shim's file buffers come from `lichen_alloc` through hooks (`mesh_mem.c`); their plain heap fallback is built
+into the host tests only.
 
 ## Boundary check
 
@@ -246,7 +262,10 @@ just that L6 profile.
   component, or a listed libc/plain-library header. `#include "backlight.h"` fails here.
 - Rule C: `nm -u` on the app's built archive may not show `esp_ota_*`, `esp_wifi_*`, `esp_efuse_*`, `gpio_*`,
   `esp_partition_*`, `nvs_flash_init*`/`nvs_flash_erase*`, `ledc_*`, `i2c_*`, `esp_restart` or `xTaskCreate*` (apps use
-  `lichen_task_start`, #181).
+  `lichen_task_start`, #181), lora's and the PSRAM switch's internals (`lora_internal_*`, `lora_sweep_*`, `lora_tx_*`,
+  `lora_owner_*`, `lora_c6_*`, `psram_speed_choice` ...) or a plain heap call (`malloc`, `free` ..., #283). No
+  component at all may call `esp_partition_mmap` or `spi_flash_mmap*` (a mapped page stalls the display on every
+  flash write, #31).
 
 `check_layers.sh` (#218) generalises this check to every layer and absorbs these rules. Rule C also forbids the
 system surface (`lichen_sys_*`), `lichen_ui_ops_set` and the shell's side of notifications to apps.

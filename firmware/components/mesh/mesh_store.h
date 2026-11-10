@@ -65,7 +65,8 @@ typedef struct {
 bool mesh_store_init(size_t chat_keep);
 
 // Hooks (NULL = default): alloc_ring gets (count, size) for a chat's ring and returns zeroed memory (the badge gives
-// PSRAM explicitly, host tests can fail it); free_ring gives a ring back and pairs with alloc_ring (default: free), so
+// PSRAM explicitly, host tests can fail it; the default is calloc in the host tests and none on the badge, which must
+// set them, #283); free_ring gives a ring back and pairs with alloc_ring (default: free), so
 // a ring the OS booked is released through the OS; warn is told when a message is dropped (out of memory, or a table
 // full of channels). Set before mesh_store_init.
 void mesh_store_set_hooks(void *(*alloc_ring)(size_t count, size_t size), void (*free_ring)(void *ptr),

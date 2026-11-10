@@ -376,8 +376,9 @@ line. The app profile (L6) is a closed set of libraries, headers and forbidden s
   mark names `#<issue>` may be added, as moved debt that the named later issue removes (the move cannot be done without
   a gate function that issue adds). It prints a WARNING, never applies to raised counts, and is never set in
   `build.sh` or a hook.
-- Apps (`mesh`, `lichen_apps`) keep named `peer` lines in `layers.conf` (`lichen_notify`, `lichen_clock`,
-  `lichen_random`, `lora`, `fw_console`, `psram_guard`): reasoned exceptions that the app surface may still remove.
+- Apps (`mesh`, `lichen_apps`) keep named `peer` lines in `layers.conf` (`lichen_clock`, `lichen_random`, `lora`,
+  `fw_console`, `psram_guard`), each narrowed to the headers app-api.md names by a `peer-headers` line (#283):
+  reasoned exceptions that the app surface may still remove.
 - **Where things sit:** the shell and the system screens (Settings, About, Files, Power, Update...) are L5; MeshCore and
   the plain apps are L6; the C6 is a second chip behind the c6link driver (L2) and its protocol is the two-chip
   contract, not a layer.

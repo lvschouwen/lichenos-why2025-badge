@@ -785,7 +785,7 @@ static uint8_t *scan_buf(size_t bytes, bool internal) {
 
 static void scan_task_fn(void *arg) {
     scan_job_t job = *(scan_job_t *)arg;
-    free(arg);
+    unalloc(arg);
     struct stat st;
     work_t      w   = {0};
     uint8_t    *ref = NULL, *cur = NULL;
@@ -871,7 +871,7 @@ static void scan_start(char const *args) {
         console_reply("scan: one is running");
         return;
     }
-    scan_job_t *job = malloc(sizeof(*job));
+    scan_job_t *job = psram(sizeof(*job));
     if (job) {
         job->path     = path;
         job->passes   = passes;
@@ -879,7 +879,7 @@ static void scan_start(char const *args) {
         job->skip     = skip;
     }
     if (!job || !lichen_task_start(meshcore_self(), "histscan", scan_task_fn, job, SCAN_STACK, LICHEN_PRIO_SERVICE, NULL)) {
-        free(job);
+        unalloc(job);
         atomic_store(&scan_running, false);
         console_reply("scan: not started (memory)");
         return;
