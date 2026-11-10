@@ -22,7 +22,7 @@
 
 static lv_obj_t *sw_row[3];
 static lv_obj_t *chan_row[MAX_CHANNELS];
-EXT_RAM_BSS_ATTR static char      chan_name[MAX_CHANNELS][MESH_CHANNEL_MAX + 1];
+EXT_RAM_BSS_ATTR static char chan_name[MAX_CHANNELS][MESH_CHANNEL_MAX + 1];
 static size_t    chan_n;
 
 static char const *on_off(bool on) {

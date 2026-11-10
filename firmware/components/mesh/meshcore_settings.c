@@ -1061,7 +1061,7 @@ static lv_obj_t *channel_rows[MAX_CHANNELS + 1]; // the channels, or one placeho
 static size_t    channel_row_count;
 static lv_obj_t *add_tag_row, *channel_note;
 static char      pending_name[MESH_CHANNEL_MAX + 1];
-EXT_RAM_BSS_ATTR static char      row_names[MAX_CHANNELS][MESH_CHANNEL_MAX + 1]; // what Enter on a channel row opens
+EXT_RAM_BSS_ATTR static char row_names[MAX_CHANNELS][MESH_CHANNEL_MAX + 1]; // what Enter on a channel row opens
 static lv_obj_t *channels_screen;                               // the list, while it exists
 static lv_obj_t *channel_screen;                                // a channel's details (#54), while they exist
 static void      remove_ask(void *arg);

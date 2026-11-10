@@ -65,7 +65,7 @@ typedef struct {
     unsigned    runs;
 } bench_t;
 
-EXT_RAM_BSS_ATTR static bench_t          s_b;
+EXT_RAM_BSS_ATTR static bench_t s_b;
 static char             s_last[40]; // the tile's second line: the last redraw figure
 static volatile uint32_t s_sink;    // keeps the read loop honest
 

@@ -49,7 +49,7 @@ static lv_obj_t        *message;
 static lv_group_t      *group;
 static lv_timer_t      *timer;
 static dlg_countdown_t  countdown;
-EXT_RAM_BSS_ATTR static request_t        shown;
+EXT_RAM_BSS_ATTR static request_t shown;
 static uint32_t         shown_gen;
 
 static uint32_t now_ms(void) {
