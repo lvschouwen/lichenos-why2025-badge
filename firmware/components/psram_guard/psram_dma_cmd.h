@@ -15,10 +15,10 @@ void psram_dma_cmd(char const *args);
 // for a few seconds; on its own task, not on the guard task.
 bool psram_dma_quick_gate(void);
 
-// The same round for a caller that must tell a pass from a round that never ran (the Stress app, #278): BUSY = another
+// The same round for a caller that must tell a pass from a round that never ran (the stress run, #278): BUSY = another
 // DMA gate (a console run, the trial's, another round) holds it, NOT_RUN = no memory or no AXI-GDMA. info (may be NULL)
 // gets the judged bad bytes (AXI-GDMA legs and the bounced SD leg), the DMA errors and whether the SD legs were skipped;
-// zeros unless the round ran. psram_dma_quick_gate is this with BUSY counted as a pass.
+// zeros unless the round ran. psram_dma_quick_gate is this, waiting up to 10 s while BUSY.
 typedef enum { PSRAM_DMA_ROUND_PASS, PSRAM_DMA_ROUND_FAIL, PSRAM_DMA_ROUND_BUSY, PSRAM_DMA_ROUND_NOT_RUN } psram_dma_round_t;
 typedef struct {
     uint32_t bad_bytes;

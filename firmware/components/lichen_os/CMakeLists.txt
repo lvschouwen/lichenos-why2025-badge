@@ -19,7 +19,7 @@
 # binds it into lichen_net, which may not open NVS itself.
 # lichen_sys_display.c: lichen_sys_display.h and lichen_sys_power.h (#226) over board's backlight driver.
 # lichen_sys_mem.c: the heap figures and the diagnostic walk for the shell and main (#228), and the C6 link's Wi-Fi
-# frame pool figures for the Stress app (#278, through c6link); lichen_task.c also gives it every task's stack.
+# frame pool figures for the stress run (#278, through c6link); lichen_task.c also gives it every task's stack.
 # lichen_sys_storage.c / lichen_sys_update.c: lichen_sys_storage.h (SD card and storage drive), lichen_sys_update.h,
 # lichen_sys_crash.h and lichen_sys_factory.h's request (#227); lichen_sys_pure.c their ESP-free parts (host-tested).
 # lichen_sys_pure_view.c / lichen_sys_view.c (#244): the shell's clock, Wi-Fi, mDNS, boot progress, keyboard-hook and LED

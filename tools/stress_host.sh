@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The network half of the Stress app (#278): while `fw stress <minutes>` runs on the badge, pull GET /log and
+# The network half of the stress run (#278): while `fw stress <minutes>` runs on the badge, pull GET /log and
 # GET /screenshot over Wi-Fi in a loop, so the C6 link's frame pools (#260), the OTA server task and lwIP carry load
 # at the same time as the badge's own workers. Read-only on the badge: no pushes, no console commands.
 #
@@ -9,7 +9,8 @@
 # Environment, as tools/badge.sh:
 #   BADGE_OTA_TOKEN  the update token ("fw token"; default: ${XDG_CONFIG_HOME:-~/.config}/why2025-badge/ota-token)
 #   BADGE_OTA_PORT   the update server's port (default 8080)
-# Exit: 0 when every request answered 200, 1 on the first that did not (its status is printed), 2 on bad usage.
+# Exit: 0 when every request answered 200, 1 on the first that did not (its status is printed; a 503 busy is retried
+# with backoff first), 2 on bad usage.
 set -euo pipefail
 
 usage() {
@@ -42,19 +43,32 @@ get() {
     echo "${code:-000}"
 }
 
+# A GET, retried with backoff (1, 2, 4, 8 s) while the badge answers 503 (busy: one screenshot at a time, an update);
+# prints the final status
+fetch() {
+    local code delay=1
+    code=$(get "$1")
+    while [ "$code" = 503 ] && [ $delay -le 8 ]; do
+        sleep $delay
+        delay=$((delay * 2))
+        code=$(get "$1")
+    done
+    echo "$code"
+}
+
 since=0
 logs=0
 shots=0
 lines=0
 end=$((SECONDS + minutes * 60))
 while [ $SECONDS -lt $end ]; do
-    code=$(get "log?since=$since")
+    code=$(fetch "log?since=$since")
     [ "$code" = 200 ] || { echo "stress_host: GET /log answered $code after $logs logs, $shots screenshots" >&2; exit 1; }
     logs=$((logs + 1))
     lines=$((lines + $(grep -c 'stress: ' "$work/body" || true)))
     next=$(tr -d '\r' < "$work/hdr" | sed -n 's/^[Xx]-[Nn]ext-[Ss]eq: *\([0-9]*\).*/\1/p')
     [ -n "$next" ] && since=$next
-    code=$(get screenshot)
+    code=$(fetch screenshot)
     [ "$code" = 200 ] || { echo "stress_host: GET /screenshot answered $code after $logs logs, $shots screenshots" >&2; exit 1; }
     shots=$((shots + 1))
 done

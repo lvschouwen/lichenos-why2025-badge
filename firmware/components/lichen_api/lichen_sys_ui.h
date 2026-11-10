@@ -21,6 +21,6 @@ bool lichen_sys_ui_call(void (*fn)(void *), void *arg, uint32_t timeout_ms);
 // `fw ui lockcheck [reset]`: the lock-owner check's mode, whether it is armed, its hit count and the first call sites
 // (CONFIG_LICHEN_UI_LOCK_CHECK_MODE), or resets the counts. Any task (the console's; it replies with console_reply).
 void lichen_sys_ui_lockcheck_cmd(char const *args);
-// The lock-owner check's hits since boot or the last reset (0 when it is not built in): the Stress app (#278) fails a
+// The lock-owner check's hits since boot or the last reset (0 when it is not built in): the stress run (#278) fails a
 // run during which it grew. Any task.
 uint32_t lichen_sys_ui_lockcheck_hits(void);

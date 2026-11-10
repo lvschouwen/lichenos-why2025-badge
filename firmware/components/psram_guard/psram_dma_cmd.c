@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "fw_console.h"
 #include "lichen_random.h"
 
@@ -375,9 +376,17 @@ psram_dma_round_t psram_dma_quick_round(psram_dma_round_info_t *info) {
     return result;
 }
 
-// The 120 MHz trial's gate: busy is a pass here, a console run's result reaches psram_speed_gate_result itself
+// The 120 MHz trial's gate. A busy engine is waited for (a Stress round, #278, ends within seconds and the run stops
+// on the trial), up to QUICK_BUSY_WAIT_MS; still busy after that is a console run, whose result reaches
+// psram_speed_gate_result itself, so it counts as a pass as before
+#define QUICK_BUSY_WAIT_MS 10000
+#define QUICK_BUSY_STEP_MS 100
 bool psram_dma_quick_gate(void) {
     psram_dma_round_t result = psram_dma_quick_round(NULL);
+    for (int ms = 0; result == PSRAM_DMA_ROUND_BUSY && ms < QUICK_BUSY_WAIT_MS; ms += QUICK_BUSY_STEP_MS) {
+        vTaskDelay(pdMS_TO_TICKS(QUICK_BUSY_STEP_MS));
+        result = psram_dma_quick_round(NULL);
+    }
     return result == PSRAM_DMA_ROUND_PASS || result == PSRAM_DMA_ROUND_BUSY;
 }
 

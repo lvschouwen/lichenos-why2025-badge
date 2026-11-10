@@ -42,23 +42,14 @@ stress_cmd_t stress_parse(char const *args, unsigned *minutes) {
     return STRESS_CMD_START;
 }
 
+// Indexed by stress_reason_t; one string each, so the log lines and the screen share them
+static char const *const REASONS[STRESS_REASONS] = {
+    "ok", "mismatch", "dma_bad", "heap", "alloc", "lockcheck", "latency", "dma_floor", "stack", "hung",
+    "esc", "stop", "poweroff", "update", "trial", "hot", "c6",
+};
+
 char const *stress_reason_name(stress_reason_t r) {
-    switch (r) {
-    case STRESS_NONE: return "ok";
-    case STRESS_MISMATCH: return "mismatch";
-    case STRESS_DMA_BAD: return "dma_bad";
-    case STRESS_HEAP: return "heap";
-    case STRESS_ALLOC: return "alloc";
-    case STRESS_LOCKCHECK: return "lockcheck";
-    case STRESS_LATENCY: return "latency";
-    case STRESS_DMA_FLOOR: return "dma_floor";
-    case STRESS_STACK: return "stack";
-    case STRESS_ESC: return "esc";
-    case STRESS_STOP_CMD: return "stop";
-    case STRESS_POWEROFF: return "poweroff";
-    case STRESS_UPDATE: return "update";
-    }
-    return "?";
+    return (unsigned)r < STRESS_REASONS ? REASONS[r] : "?";
 }
 
 bool stress_failed(stress_reason_t r) {
@@ -66,7 +57,28 @@ bool stress_failed(stress_reason_t r) {
 }
 
 bool stress_stack_fell_low(uint32_t free_now, uint32_t free_at_start) {
-    return free_now < STRESS_LIMIT_STACK && free_now < free_at_start;
+    if (free_now >= STRESS_LIMIT_STACK || free_now >= free_at_start) {
+        return false;
+    }
+    return free_at_start >= STRESS_LIMIT_STACK || free_at_start - free_now > STRESS_STACK_MARGIN;
+}
+
+uint32_t stress_since(uint32_t now, uint32_t base) {
+    return now >= base ? now - base : now;
+}
+
+stress_reason_t stress_outside(stress_outside_t const *in) {
+    if (in->asked != STRESS_NONE) {
+        return in->asked;
+    }
+    bool const      hit[] = {in->poweroff, in->update, in->trial, in->hot, in->c6_trouble};
+    stress_reason_t why[] = {STRESS_POWEROFF, STRESS_UPDATE, STRESS_TRIAL, STRESS_HOT, STRESS_C6};
+    for (size_t i = 0; i < sizeof(hit) / sizeof(hit[0]); i++) {
+        if (hit[i]) {
+            return why[i];
+        }
+    }
+    return STRESS_NONE;
 }
 
 stress_reason_t stress_judge(stress_obs_t const *o) {
@@ -88,7 +100,7 @@ stress_reason_t stress_judge(stress_obs_t const *o) {
     if (o->s.lat_ms > STRESS_LIMIT_LAT_MS) {
         return STRESS_LATENCY;
     }
-    if (o->s.dma_free < STRESS_LIMIT_DMA) {
+    if (o->s.dma_free < STRESS_LIMIT_DMA && !o->in_dma_round) {
         return STRESS_DMA_FLOOR;
     }
     if (o->stack_low < STRESS_LIMIT_STACK) {
@@ -211,16 +223,48 @@ size_t stress_fmt_stack(char *out, size_t cap, char const *task, uint32_t free, 
     return len_of(snprintf(out, cap, "stack %.15s %u/%u", task, (unsigned)free, (unsigned)size));
 }
 
-size_t stress_fmt_errors(char *out, size_t cap, stress_counts_t const *c) {
-    return len_of(snprintf(out, cap,
-                           "errors dma_bad=%u dma_busy=%u mismatch=%u alloc=%u heap=%u lock=%u sd_io=%u fs_io=%u",
-                           (unsigned)c->dma_bad, (unsigned)c->dma_busy, (unsigned)c->mismatches,
-                           (unsigned)c->alloc_fails, (unsigned)c->heap_bad, (unsigned)c->lock_hits,
-                           (unsigned)c->sd_io, (unsigned)c->fs_io));
+static char const *const COUNTS[STRESS_C_COUNT] = {
+    "dma_bad", "dma_busy", "mismatch", "alloc", "heap", "lock", "sd_io", "fs_io",
+    "dma", "copies", "sd", "sd_kb", "fs", "frames",
+};
+
+uint32_t stress_errors(stress_counts_t const *c) {
+    uint32_t n = 0;
+    for (int i = 0; i < STRESS_C_WORK; i++) {
+        n += i == STRESS_C_DMA_BUSY ? 0 : c->n[i];
+    }
+    return n;
 }
 
-size_t stress_fmt_work(char *out, size_t cap, stress_counts_t const *c) {
-    return len_of(snprintf(out, cap, "work dma=%u copies=%u sd=%u sd_kb=%u fs=%u frames=%u", (unsigned)c->dma_rounds,
-                           (unsigned)c->copies, (unsigned)c->sd_cycles, (unsigned)c->sd_kb, (unsigned)c->fs_cycles,
-                           (unsigned)c->frames));
+// One "name=value" after the other, from the table; snprintf rules for the whole line
+size_t stress_fmt_counts(char *out, size_t cap, stress_counts_t const *c, bool work) {
+    size_t n = len_of(snprintf(out, cap, work ? "work" : "errors"));
+    for (int i = work ? STRESS_C_WORK : 0; i < (work ? STRESS_C_COUNT : STRESS_C_WORK); i++) {
+        n += len_of(snprintf(n < cap ? out + n : NULL, n < cap ? cap - n : 0, " %s=%u", COUNTS[i], (unsigned)c->n[i]));
+    }
+    return n;
+}
+
+size_t stress_fmt_clock(char *out, size_t cap, uint32_t t_s, uint32_t total_s) {
+    return len_of(snprintf(out, cap, "%02u:%02u / %02u:%02u", (unsigned)(t_s / 60), (unsigned)(t_s % 60),
+                           (unsigned)(total_s / 60), (unsigned)(total_s % 60)));
+}
+
+size_t stress_fmt_workers(char *out, size_t cap, stress_counts_t const *c, unsigned failed, unsigned skipped, uint32_t lat_ms) {
+    static char const *const name[] = {"DMA", "SD", "Storage", "UI", "Latency"};
+    static char const *const unit[] = {"rounds", "files", "files", "frames", "ms"};
+    uint32_t const work[] = {c->n[STRESS_C_DMA], c->n[STRESS_C_SD], c->n[STRESS_C_FS], c->n[STRESS_C_FRAMES], lat_ms};
+    size_t         n      = 0;
+    for (unsigned i = 0; i < 5; i++) {
+        char       *at   = n < cap ? out + n : NULL;
+        size_t      room = n < cap ? cap - n : 0;
+        char const *nl   = i ? "\n" : "";
+        if (skipped & (1u << i)) {
+            n += len_of(snprintf(at, room, "%s%s: skipped, no %s", nl, name[i], i == 1 ? "card" : "drive"));
+        } else {
+            n += len_of(snprintf(at, room, "%s%s: %s, %s%u %s", nl, name[i], failed & (1u << i) ? "FAIL" : "ok",
+                                 i == 4 ? "worst " : "", (unsigned)work[i], unit[i]));
+        }
+    }
+    return n;
 }

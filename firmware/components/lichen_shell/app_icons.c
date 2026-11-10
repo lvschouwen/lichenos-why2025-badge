@@ -39,25 +39,6 @@ void icon_bench(lv_obj_t *parent, int size_px) {
     lv_obj_center(arc);
 }
 
-// Stress (#278): three load bars, the tallest amber
-void icon_stress(lv_obj_t *parent, int size_px) {
-    lv_obj_set_style_radius(parent, size_px / 4, 0);
-    lv_obj_set_style_bg_color(parent, lv_color_hex(THEME_TRACK), 0);
-    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
-    static uint8_t const tenths[3] = {4, 7, 5};
-    int32_t              w = size_px / 8, gap = size_px / 10, x0 = (size_px - 3 * w - 2 * gap) / 2;
-    for (int i = 0; i < 3; i++) {
-        lv_obj_t *bar = lv_obj_create(parent);
-        lv_obj_remove_style_all(bar);
-        int32_t h = size_px * tenths[i] / 10;
-        lv_obj_set_size(bar, w, h);
-        lv_obj_set_pos(bar, x0 + i * (w + gap), (size_px * 17 / 20) - h);
-        lv_obj_set_style_radius(bar, w / 3, 0);
-        lv_obj_set_style_bg_color(bar, lv_color_hex(i == 1 ? THEME_AMBER : THEME_DIM), 0);
-        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
-    }
-}
-
 // Crash log (#72): a red-ringed tile with an amber "!"
 void icon_crashlog(lv_obj_t *parent, int size_px) {
     lv_obj_set_style_radius(parent, size_px / 4, 0);

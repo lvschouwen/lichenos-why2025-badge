@@ -114,6 +114,21 @@ static void kick_timer(void) {
     lichen_sys_ui_unlock();
 }
 
+void ui_remote_hold(bool on) {
+    portENTER_CRITICAL(&lock_mux);
+    if (on) {
+        rlock_on(&lock, RLOCK_MAX_S, now_ms());
+    } else {
+        rlock_off(&lock);
+    }
+    portEXIT_CRITICAL(&lock_mux);
+    kick_timer();
+}
+
+void ui_remote_touch(void) {
+    console_activity();
+}
+
 void ui_remote_lock_cmd(char const *args) {
     uint32_t     seconds;
     rlock_args_t what = rlock_parse(args, &seconds);

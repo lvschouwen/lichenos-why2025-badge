@@ -36,7 +36,7 @@ typedef struct {
     uint16_t in_use, peak; // blocks handed out now; the most there ever were since boot
     uint32_t waits, drops; // TX: the sender waited for a block; drops: TX still empty after the wait, RX dropped
 } lichen_sys_frame_pool_t;
-// One Wi-Fi frame pool of the C6 link (#260), for the Stress app (#278): how deep it got and how often a frame was
+// One Wi-Fi frame pool of the C6 link (#260), for the stress run (#278): how deep it got and how often a frame was
 // dropped. False (zeros) when the pools are off. Any task.
 bool lichen_sys_mem_frame_pool(bool tx, lichen_sys_frame_pool_t *out);
 

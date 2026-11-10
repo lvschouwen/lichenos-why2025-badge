@@ -15,7 +15,7 @@
 # thermal_rules.c (thermal_rules_test.c, #10; thermal.c is the watchdog service, app_battery.c Settings > Battery).
 # notify_ui.c and notify_centre.c are the notifications' toast, tile badges, cloud key, centre and settings page (#62).
 # factory_screen.c is Settings > Factory reset and factory_combo.c the boot key combo (#66; the logic is lichen_boot's factory_plan.c).
-# app_bench.c is the Bench app (#96); app_stress.c the Stress app (#278: stress_workers.c runs the load, stress_calc.c,
+# app_bench.c is the Bench app (#96); app_stress.c is `fw stress` and its screen (#278: stress_workers.c runs the load, stress_calc.c,
 # pure, stress_calc_test.c, judges it and writes its lines), app_crashlog.c the Crash log app (#72, on lichen_crashlog.h), app_power.c the Power app (#65).
 # release_notes.c (release_notes_test.c, #13; notes_app.c is the Release notes app and "This is new", notes_render.c its markdown).
 # app_files.c is the Files app (#71): files_job.c runs its file work off the LVGL task, files_ops.c is plain POSIX
@@ -64,6 +64,10 @@ idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_r
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api
                        PRIV_REQUIRES freertos fw_console heap esp_hw_support esp_app_format esp_timer app_update esp_system psram_guard esp_mm)
+
+# The stress run (#278) is cold code (a sample every 10 s, workers bound by DMA, card and flash): size over speed, so
+# it stays inside the per-change size gate of docs/code-standard.md
+set_source_files_properties("app_stress.c" "stress_workers.c" "stress_calc.c" PROPERTIES COMPILE_OPTIONS "-Os")
 
 set(RN_I 0)
 foreach(f ${RN_FILES})

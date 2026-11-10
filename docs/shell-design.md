@@ -169,3 +169,14 @@ MeshCore won't be the only app, so Lichen's own screens carry nothing app-specif
 "Lichen" with a capital L in all text: sentences, titles ("Welcome to Lichen", "Updating Lichen", "About Lichen"), docs,
 logs, issues and commits. Only the wordmark next to the logo (boot screen, status bar) is lowercase "lichen", as a
 brand style.
+
+## The stress run's screen (#278, Lucas 2026-11-10)
+
+`fw stress` is console only: no home tile. The run opens one page over whatever is open (`SCREEN_STRESS`,
+`app_stress.c`) with the physical keys locked (#190; Esc held 3 s stops the run): "Stress test running", the dim line
+"started from the console • keys are locked", elapsed / total as `mm:ss / mm:ss` with a bar, one line per worker
+("DMA: ok, 12 rounds", "SD: skipped, no card", "Storage: FAIL, 3 files", "UI: ok, 600 frames", "Latency: ok, worst
+4 ms") and "DMA min <n> KB". The page is the run's UI load: it redraws itself every 100 ms while the run is on. At the
+end the keys are free again and it shows "Stress test done" with PASS (teal) or "FAIL: <reason>" (red); any key or
+`fw stress status` goes back to the screen before.
+

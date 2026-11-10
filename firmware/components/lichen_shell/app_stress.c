@@ -1,252 +1,152 @@
-// Stress (#278): next to Bench, which answers "how fast" in ~10 s, this answers "does everything hold under concurrent
-// load for minutes, and how deep do memory and stacks go". The run is stress_workers.c's; this is its screen, its tile
-// and `fw stress [minutes|stop|status]`. One path for the run's lines: ESP_LOG with the tag "stress" (UART and log
-// store, wherever the run was started). The console only acknowledges ("stress started ...", "stress status ...")
-// and never repeats a "stress:" line, so the UART shows each one once.
-#include "app_icons.h"
+// The stress run's console and screen (#278). Console only: `fw stress [1-30|stop|status]` is the one way to start it;
+// the badge has no tile for it. The run (stress_workers.c) locks the physical keys (#190) and opens this screen over
+// whatever was open; the screen is also the UI load (it redraws itself every 100 ms while the run is on). At the end it
+// shows PASS or FAIL and the keys are free again: any key, or `fw stress status`, goes back to the screen before.
+// One path for the run's lines: ESP_LOG with the tag "stress" (UART and log store). The console only acknowledges
+// ("stress started ...", "stress status: ..."), never repeating a "stress:" line, so the UART shows each one once.
 #include "fonts.h"
 #include "fw_console.h"
-#include "lichen_app.h"
+#include "lichen_sys_ui.h"
 #include "lichen_ui.h"
+#include "nav.h"
+#include "screen_ids.h"
 #include "shell_parts.h"
 #include "stress_workers.h"
 #include "theme.h"
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
 #include <stdio.h>
 #include <string.h>
 
-#define REFRESH_MS 500
-#define SCROLL_STEP 96
-#define KB(b)      ((unsigned)((b) / 1024))
-#define STOP_FOR_UPDATE_MS 10000
-
-enum { ROW_TIME, ROW_RESULT, ROW_DMA, ROW_INT, ROW_PSRAM, ROW_POOLS, ROW_LAT, ROW_WORK, ROW_ERRORS, ROWS };
-static char const *const KEYS[ROWS] = {"Time", "Result", "DMA RAM", "Internal", "PSRAM", "Wi-Fi pools", "Latency",
-                                       "Work", "Errors"};
+#define TICK_MS        100 // the UI load: one full redraw of this screen per tick
+#define REFRESH_TICKS  5   // the figures change every 0.5 s
+#define BULLET         " \xE2\x80\xA2 "
 
 typedef struct {
-    lv_obj_t   *screen;
-    lv_obj_t   *value[ROWS];
+    lv_obj_t   *screen, *title, *sub, *clock, *bar, *workers, *dma, *result;
     lv_timer_t *timer;
-    char        refused[64]; // why the last Enter did not start a run, "" when it did
-    bool        was_running;
-} stress_screen_t;
+    unsigned    ticks;
+    bool        done; // the result is shown
+} stress_page_t;
 
-static stress_screen_t s_s; // LVGL task only
+static stress_page_t s_p; // LVGL task only
 
-static uint32_t errors_of(stress_counts_t const *c) {
-    return c->dma_bad + c->mismatches + c->alloc_fails + c->heap_bad + c->lock_hits + c->sd_io + c->fs_io;
+static void refresh(stress_view_t const *v) {
+    char text[200];
+    stress_fmt_clock(text, sizeof(text), v->t_s, v->minutes * 60u);
+    lv_label_set_text(s_p.clock, text);
+    lv_bar_set_value(s_p.bar, v->minutes ? (int32_t)(v->t_s * 100u / (v->minutes * 60u)) : 0, LV_ANIM_OFF);
+    unsigned failed = v->fail | (v->counts.n[STRESS_C_LOCK] ? STRESS_W_UI : 0) |
+                      (v->run.reason == STRESS_LATENCY ? STRESS_W_LAT : 0);
+    unsigned skipped = (v->sd ? 0 : STRESS_W_SD) | (v->fs ? 0 : STRESS_W_FS);
+    stress_fmt_workers(text, sizeof(text), &v->counts, failed, skipped, v->run.lo.lat_ms);
+    lv_label_set_text(s_p.workers, text);
+    if (v->run.have) {
+        lv_label_set_text_fmt(s_p.dma, "DMA min %u KB", (unsigned)(v->run.lo.dma_free / 1024));
+    }
 }
 
-// "45 s", "10 min", "3 min 20 s"
-static void fmt_time(char *out, size_t cap, uint32_t s) {
-    if (s < 60) {
-        snprintf(out, cap, "%u s", (unsigned)s);
-    } else if (s % 60 == 0) {
-        snprintf(out, cap, "%u min", (unsigned)(s / 60));
+static void show_result(stress_view_t const *v) {
+    bool pass = !stress_failed(v->run.reason);
+    lv_label_set_text(s_p.title, "Stress test done");
+    lv_label_set_text(s_p.sub, "started from the console" BULLET "any key: back");
+    if (pass) {
+        lv_label_set_text(s_p.result, "PASS");
     } else {
-        snprintf(out, cap, "%u min %u s", (unsigned)(s / 60), (unsigned)(s % 60));
+        lv_label_set_text_fmt(s_p.result, "FAIL: %s", stress_reason_name(v->run.reason));
     }
+    lv_obj_set_style_text_color(s_p.result, lv_color_hex(pass ? THEME_TEAL : THEME_RED), 0);
+    s_p.done = true;
 }
 
-static void result_text(stress_view_t const *v, char *out, size_t cap) {
-    if (v->running) {
-        snprintf(out, cap, "Running");
-    } else if (s_s.refused[0] || !v->ended) {
-        snprintf(out, cap, "%s", s_s.refused[0] ? s_s.refused : "Not run yet");
-    } else if (stress_failed(v->run.reason)) {
-        snprintf(out, cap, "Failed: %s at %u s", stress_reason_name(v->run.reason), (unsigned)v->run.stop_s);
-    } else if (v->run.reason != STRESS_NONE) {
-        snprintf(out, cap, "Passed until stopped (%s)", stress_reason_name(v->run.reason));
-    } else {
-        snprintf(out, cap, "Passed");
-    }
-}
-
-static void set_row(int row, char const *text) {
-    if (strcmp(lv_label_get_text(s_s.value[row]), text) != 0) {
-        lv_label_set_text(s_s.value[row], text);
-    }
-}
-
-// The figures rows: the newest sample and the run's lowest (or highest) value; "-" before the first sample. One
-// buffer at a time: this runs on the LVGL task
-static void figure_rows(stress_view_t const *v) {
-    char                   t[48];
-    stress_sample_t const *s = &v->last, *lo = &v->run.lo;
-    unsigned               ps10 = (unsigned)(((uint64_t)s->psram_free * 10 + 512 * 1024) / (1024 * 1024));
-    for (int row = ROW_DMA; row <= ROW_LAT; row++) {
-        switch (row) {
-        case ROW_DMA: snprintf(t, sizeof(t), "%u KB free, lowest %u KB", KB(s->dma_free), KB(lo->dma_free)); break;
-        case ROW_INT: snprintf(t, sizeof(t), "%u KB free, lowest %u KB", KB(s->int_free), KB(lo->int_free)); break;
-        case ROW_PSRAM: snprintf(t, sizeof(t), "%u.%u MB free", ps10 / 10, ps10 % 10); break;
-        case ROW_POOLS: snprintf(t, sizeof(t), "peak %u, %u dropped", (unsigned)lo->pool_peak, (unsigned)lo->pool_drop); break;
-        default: snprintf(t, sizeof(t), "worst %u ms", (unsigned)lo->lat_ms); break;
-        }
-        set_row(row, v->run.have ? t : "-");
-    }
-}
-
-static uint32_t result_colour(stress_view_t const *v) {
-    if (v->running) {
-        return THEME_TEXT;
-    }
-    if (s_s.refused[0] || (v->ended && stress_failed(v->run.reason))) {
-        return THEME_RED;
-    }
-    return v->ended ? THEME_TEAL : THEME_DIM;
-}
-
-static void work_row(stress_view_t const *v) {
-    char t[96], sd[16] = "no card", fs[16] = "no drive";
-    if (v->sd) {
-        snprintf(sd, sizeof(sd), "%u", (unsigned)v->counts.sd_cycles);
-    }
-    if (v->fs) {
-        snprintf(fs, sizeof(fs), "%u", (unsigned)v->counts.fs_cycles);
-    }
-    snprintf(t, sizeof(t), "DMA %u, SD %s, files %s", (unsigned)v->counts.dma_rounds, sd, fs);
-    set_row(ROW_WORK, t);
-}
-
-static void refresh(void) {
+static void tick(lv_timer_t *t) {
+    (void)t;
     stress_view_t v;
     stress_view(&v);
-    char t[96], a[24], b[24];
-    fmt_time(a, sizeof(a), v.t_s);
-    fmt_time(b, sizeof(b), v.minutes * 60u);
-    snprintf(t, sizeof(t), "%s of %s", a, b);
-    set_row(ROW_TIME, v.minutes ? t : "-");
-    result_text(&v, t, sizeof(t));
-    set_row(ROW_RESULT, t);
-    lv_obj_set_style_text_color(s_s.value[ROW_RESULT], lv_color_hex(result_colour(&v)), 0);
-    figure_rows(&v);
-    work_row(&v);
-    uint32_t errors = errors_of(&v.counts);
-    snprintf(t, sizeof(t), "%u (the log has each one)", (unsigned)errors);
-    set_row(ROW_ERRORS, errors ? t : "None");
-    if (v.running != s_s.was_running) {
-        shell_page_hint(s_s.screen, v.running ? "Esc" : "Enter", v.running ? "stop" : "start 10 min", NULL);
-        s_s.was_running = v.running;
+    if (v.running) {
+        lv_obj_invalidate(s_p.screen);
+        stress_ui_frame();
+    }
+    if (++s_p.ticks % REFRESH_TICKS == 0 || (v.ended && !s_p.done)) {
+        refresh(&v);
+    }
+    if (v.ended && !v.running && !s_p.done) {
+        show_result(&v);
     }
 }
 
-static void on_timer(lv_timer_t *timer) {
-    (void)timer;
-    refresh();
-}
-
-static void start_from_screen(void) {
-    char const *why = stress_start(STRESS_MIN_DEFAULT);
-    if (why) {
-        snprintf(s_s.refused, sizeof(s_s.refused), "Not started: %s", why);
-    } else {
-        s_s.refused[0] = '\0';
-    }
-    refresh();
-}
-
+// Once the result is up, any key goes back (Esc does so itself)
 static void on_key(lv_event_t *e) {
-    uint32_t key = lv_event_get_key(e);
-    if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
-        shell_scroll_by(lv_event_get_target(e), key == LV_KEY_UP ? SCROLL_STEP : -SCROLL_STEP); // only when it does not fit
-    } else if (key == LV_KEY_ENTER && !stress_running()) {
-        start_from_screen();
+    if (s_p.done && lv_event_get_key(e) != LV_KEY_ESC) {
+        shell_back();
     }
 }
 
-// A running stress is a mode of this screen (R6): Esc stops it first and stays, the next Esc goes back
+// While the run is on the keys are locked; an Esc that gets through (the lock just ended) must not leave the screen
 static bool on_esc(void *arg) {
     (void)arg;
-    if (!stress_running()) {
-        return false;
-    }
-    stress_stop(STRESS_ESC);
-    return true;
+    return !s_p.done;
 }
 
 static void on_delete(lv_event_t *e) {
     (void)e;
-    lv_timer_delete(s_s.timer);
-    s_s = (stress_screen_t){0};
+    lv_timer_delete(s_p.timer);
+    s_p = (stress_page_t){0};
 }
 
-static int32_t key_col_w(lv_obj_t *obj) {
-    lv_font_t const *font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
-    int32_t          w    = 0;
-    for (size_t i = 0; i < ROWS; i++) {
-        lv_point_t size;
-        lv_text_get_size(&size, KEYS[i], font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-        w = size.x > w ? size.x : w;
-    }
-    return w + 24;
+static lv_obj_t *add_label(lv_obj_t *parent, int font, uint32_t colour) {
+    lv_obj_t *l = lichen_label_wrap(parent, LV_PCT(100));
+    lv_obj_set_style_text_font(l, lichen_font(font), 0);
+    lv_obj_set_style_text_color(l, lv_color_hex(colour), 0);
+    lv_label_set_text(l, "");
+    return l;
 }
 
-static lv_obj_t *add_row(lv_obj_t *parent, char const *key, int32_t key_w) {
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_scrollable(row, false);
-    lv_obj_t *k = lv_label_create(row);
-    lv_obj_set_width(k, key_w);
-    lv_obj_set_style_text_color(k, lv_color_hex(THEME_DIM), 0);
-    lv_label_set_text(k, key);
-    lv_obj_t *v = lichen_label_wrap(row, 0);
-    lv_obj_set_flex_grow(v, 1);
-    lv_label_set_text(v, "");
-    return v;
-}
-
-static void open_stress(lv_obj_t *screen) {
-    s_s        = (stress_screen_t){.screen = screen, .was_running = !stress_running()};
+static lv_obj_t *build_stress(void) {
+    lv_obj_t *screen = shell_page_create();
+    s_p              = (stress_page_t){.screen = screen};
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(screen, 12, 0);
-    lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUSED);
-    lv_obj_set_style_outline_width(screen, 0, LV_STATE_FOCUS_KEY);
-    lv_obj_t *title = lv_label_create(screen);
-    lv_obj_set_style_text_font(title, lichen_font(LICHEN_FONT_LARGE), 0);
-    lv_label_set_text(title, "Stress");
-    lv_obj_t *sub = lichen_label_wrap(screen, LV_PCT(100));
-    lv_obj_set_style_text_color(sub, lv_color_hex(THEME_DIM), 0);
-    lv_label_set_text(sub, "DMA, PSRAM, SD card, storage and redraws at once, with a latency probe. Nothing is sent "
-                           "on air.");
-    int32_t key_w = key_col_w(screen);
-    for (int row = 0; row < ROWS; row++) {
-        s_s.value[row] = add_row(screen, KEYS[row], key_w);
-    }
-    s_s.timer = lv_timer_create(on_timer, REFRESH_MS, NULL);
+    lv_obj_set_style_pad_row(screen, 14, 0);
+    s_p.title = add_label(screen, LICHEN_FONT_LARGE, THEME_TEXT);
+    lv_label_set_text(s_p.title, "Stress test running");
+    s_p.sub = add_label(screen, LICHEN_FONT_SMALL, THEME_DIM);
+    lv_label_set_text(s_p.sub, "started from the console" BULLET "keys are locked");
+    s_p.clock = add_label(screen, LICHEN_FONT_MEDIUM, THEME_TEXT);
+    s_p.bar   = lv_bar_create(screen);
+    lv_obj_set_size(s_p.bar, LV_PCT(100), 16);
+    lv_obj_set_style_bg_color(s_p.bar, lv_color_hex(THEME_TRACK), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_p.bar, lv_color_hex(THEME_TEAL), LV_PART_INDICATOR);
+    s_p.workers = add_label(screen, LICHEN_FONT_SMALL, THEME_TEXT);
+    s_p.dma     = add_label(screen, LICHEN_FONT_SMALL, THEME_DIM);
+    lv_label_set_text(s_p.dma, "DMA min -");
+    s_p.result = add_label(screen, LICHEN_FONT_LARGE, THEME_TEXT);
+    s_p.timer  = lv_timer_create(tick, TICK_MS, NULL);
     lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
     shell_on_esc(on_esc, NULL);
-    refresh();
-}
-
-static bool stress_tile(char *l1, size_t c1, char *l2, size_t c2) {
     stress_view_t v;
     stress_view(&v);
-    snprintf(l1, c1, "Stress");
-    if (v.running) {
-        snprintf(l2, c2, "%u of %u min", (unsigned)(v.t_s / 60), v.minutes);
-    } else if (v.ended) {
-        snprintf(l2, c2, "%s", stress_failed(v.run.reason) ? "Failed" : "Passed");
-    } else {
-        snprintf(l2, c2, "Enter: run");
-    }
-    return true;
+    refresh(&v);
+    return screen;
 }
 
-// An update stops everything: the run ends (its files are deleted) before the image arrives
-static bool stress_stop_for_update(void) {
-    stress_stop(STRESS_UPDATE);
-    for (int ms = 0; stress_running() && ms < STOP_FOR_UPDATE_MS; ms += 100) {
-        vTaskDelay(pdMS_TO_TICKS(100));
+void stress_screen_open(void) {
+    shell_open(build_stress, SCREEN_STRESS); // a screen still up from the last run is reused, its state reset below
+    lichen_sys_ui_lock(0);
+    if (s_p.screen && s_p.done) { // the result of the run before: back to "running"
+        lv_label_set_text(s_p.title, "Stress test running");
+        lv_label_set_text(s_p.sub, "started from the console" BULLET "keys are locked");
+        lv_label_set_text(s_p.result, "");
+        s_p.done = false;
     }
-    return !stress_running();
+    lichen_sys_ui_unlock();
+}
+
+// `fw stress status` also takes a finished run's result off the screen
+static void close_result(void *arg) {
+    (void)arg;
+    if (s_p.done && nav_current() == SCREEN_STRESS) {
+        shell_back();
+    }
 }
 
 static void cmd_status(void) {
@@ -256,45 +156,36 @@ static void cmd_status(void) {
         console_reply("stress status: no run since boot");
         return;
     }
-    console_reply("stress status: %s %u s of %u min, DMA lowest %u KB, latency worst %u ms, %u error(s)%s%s",
-                  v.running ? "running" : "ended", (unsigned)v.t_s, v.minutes, KB(v.run.lo.dma_free),
-                  (unsigned)v.run.lo.lat_ms, (unsigned)errors_of(&v.counts), v.run.reason ? ", reason " : "",
-                  v.run.reason ? stress_reason_name(v.run.reason) : "");
+    console_reply("stress status: %s %u s of %u min, DMA lowest %u KB, latency worst %u ms, %u error(s), reason %s",
+                  v.running ? "running" : "ended", (unsigned)v.t_s, v.minutes, (unsigned)(v.run.lo.dma_free / 1024),
+                  (unsigned)v.run.lo.lat_ms, (unsigned)stress_errors(&v.counts), stress_reason_name(v.run.reason));
+    lichen_sys_ui_call(close_result, NULL, 2000);
 }
 
 static void cmd_stress(char const *args) {
-    unsigned minutes;
+    unsigned    minutes;
+    char const *why;
     switch (stress_parse(args, &minutes)) {
-    case STRESS_CMD_START: {
-        char const *why = stress_start(minutes);
+    case STRESS_CMD_START:
+        why = stress_start(minutes);
         if (why) {
             console_reply("stress refused: %s", why);
         } else {
             console_reply("stress started, %u min: the lines follow in the log (tag stress)", minutes);
         }
         break;
-    }
     case STRESS_CMD_STOP:
         console_reply(stress_running() ? "stress stopping: the report follows in the log" : "stress status: no run on");
         stress_stop(STRESS_STOP_CMD);
         break;
     case STRESS_CMD_STATUS: cmd_status(); break;
-    case STRESS_CMD_BAD: console_reply("stress [1-%d minutes, default %d | stop | status]", STRESS_MIN_MAX, STRESS_MIN_DEFAULT); break;
+    case STRESS_CMD_BAD: console_reply("stress [1-30 minutes, default 10 | stop | status]"); break;
     }
 }
 
-static lichen_app_t const stress_app = {
-    .name            = "Stress",
-    .id              = "stress",
-    .draw_icon       = icon_stress,
-    .tile_text       = stress_tile,
-    .open            = open_stress,
-    .stop_for_update = stress_stop_for_update,
-};
-
-void stress_app_register(void) {
-    lichen_register_app(&stress_app);
+void stress_init(void) {
     console_register("stress", "stress [minutes 1-30 | stop | status] (#278: DMA, PSRAM, SD, storage, redraw and latency "
-                               "load at once; a \"stress:\" log line every 10 s, then the report; never transmits)",
+                               "load at once, keys locked; a \"stress:\" log line every 10 s, then the report; never "
+                               "transmits)",
                      cmd_stress);
 }

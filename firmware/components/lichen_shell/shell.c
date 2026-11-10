@@ -18,6 +18,7 @@
 #include "scroll_anchor.h"
 #include "settings_store.h"
 #include "shell_parts.h"
+#include "stress_workers.h"
 #include "ui_remote.h"
 #include "fonts.h"
 #include "text_entry.h"
@@ -719,7 +720,7 @@ void shell_start(lv_display_t *display) {
     about_app_register();
     files_app_register();
     bench_app_register();
-    stress_app_register();
+    stress_init(); // "fw stress" (#278): console only, no tile
     crashlog_app_register();
     power_app_register();
     notify_app_register();
