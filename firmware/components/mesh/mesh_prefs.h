@@ -91,6 +91,17 @@ static inline char const *mesh_prefs_set_loc_share(NodePrefs *prefs, bool on) {
 // NULL when set, else the reason (nothing changed). "" is None: name and key zeroed, which is what MyMesh's
 // sendFloodScoped reads as "no scope" (the same as CMD_SET_DEFAULT_FLOOD_SCOPE with no name). A name's key is SHA-256 of
 // "#name"; a throwaway TransportKeyStore, because its cache is keyed by id and every name here would be id 0.
+// A region's key (a parsed name, not ""): SHA-256 of "#name", as MeshCore's companion makes it (also the console
+// scope's, #290)
+static inline void mesh_prefs_scope_key(char const *name, uint8_t out[16]) {
+    char              hashtag[MESH_SCOPE_MAX + 2];
+    TransportKey      key;
+    TransportKeyStore store;
+    mesh_scope_key_text(name, hashtag, sizeof(hashtag));
+    store.getAutoKeyFor(0, hashtag, key);
+    memcpy(out, key.key, sizeof(key.key));
+}
+
 static inline char const *mesh_prefs_set_scope(NodePrefs *prefs, char const *input) {
     char name[sizeof(prefs->default_scope_name)];
     char const *why = mesh_scope_parse(input, name, sizeof(name));
@@ -100,13 +111,8 @@ static inline char const *mesh_prefs_set_scope(NodePrefs *prefs, char const *inp
     memset(prefs->default_scope_name, 0, sizeof(prefs->default_scope_name));
     memset(prefs->default_scope_key, 0, sizeof(prefs->default_scope_key));
     if (name[0]) {
-        char       hashtag[sizeof(name) + 1];
-        TransportKey key;
-        TransportKeyStore store;
-        mesh_scope_key_text(name, hashtag, sizeof(hashtag));
-        store.getAutoKeyFor(0, hashtag, key);
         memcpy(prefs->default_scope_name, name, strlen(name) + 1);
-        memcpy(prefs->default_scope_key, key.key, sizeof(key.key));
+        mesh_prefs_scope_key(name, prefs->default_scope_key);
     }
     return NULL;
 }

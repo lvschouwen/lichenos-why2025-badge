@@ -12,6 +12,7 @@
 #include "mesh_health.h"
 #include "mesh_outbox.h"
 #include "mesh_remote.h"
+#include "mesh_scope.h"
 #include "mesh_trace.h"
 #include "MyMesh.h"
 
@@ -99,6 +100,15 @@ class CompanionPipe : public BaseSerialInterface {
     bool   can_queue() const {
         return (fifo_n_ < LINK_FIFO && ovf_n_ == 0) || ovf_n_ < LINK_OVF;
     }
+    // The frame handed out last came from a console line (#290). MyMesh handles a frame in the loop that took it, so
+    // this holds while handleCmdFrame floods it; BadgeMesh::loop clears it after MyMesh's loop, so a flood of a later
+    // loop (an ACK, a reply to a packet heard) is never taken for the console's.
+    bool fromConsole() const {
+        return console_;
+    }
+    void endConsole() {
+        console_ = false;
+    }
 
   private:
     enum CurKind : uint8_t { CUR_NONE, CUR_INTERNAL, CUR_OUTBOX, CUR_TRACE, CUR_REMOTE };
@@ -131,6 +141,7 @@ class CompanionPipe : public BaseSerialInterface {
     uint8_t       cur_cmd_    = 0;
     mesh_msg_id_t cur_id_     = 0;
     bool          draining_   = false;
+    bool          console_    = false;
     uint8_t      *wipe_frame_ = nullptr; // the last login/CLI frame handed out, wiped at the next call
     size_t        wipe_len_   = 0;
     ob_arb_t      arb_        = {};
@@ -179,6 +190,7 @@ class BadgeMesh : public MyMesh {
             blob_taken_.len = 0;
         }
         MyMesh::loop();
+        pipe_.endConsole();
     }
     CompanionPipe &pipe() {
         return pipe_;
@@ -211,12 +223,30 @@ class BadgeMesh : public MyMesh {
     // answers (core, radio, packets). Reads only. The C6 reading and the LoRa task's drop counts are filled by the
     // caller.
     void          fillHealth(mesh_health_t *h);
+    // The console scope (#290), under the mesh lock: a region name (mesh_scope_parse's output), "" = not set (console
+    // floods are refused). Kept in MeshCore's own directory (CONSOLE_SCOPE_FILE), so the factory reset that formats it
+    // and clears the default scope clears this one too. NULL when saved and live, else why not (nothing changed).
+    char const *setConsoleScope(char const *name);
+    // At start, after begin(): the saved console scope, or not set when there is none or it does not parse
+    void        loadConsoleScope();
+    char const *consoleScope() const {
+        return console_scope_name_;
+    }
+    // Console floods dropped at the radio's door because the console scope was not set (the console refuses first)
+    uint32_t consoleRefused() const {
+        return console_refused_;
+    }
     void          startPipe() {
         startInterface(pipe_);
         pipe_.start();
     }
 
   protected:
+    // Every flood MyMesh starts for a contact or a channel passes here (#290): the default scope as MyMesh picks it, or
+    // the console scope while a console line's frame is handled. using: MyMesh's TransportKey overload stays visible.
+    using MyMesh::sendFloodScoped;
+    void sendFloodScoped(ContactInfo const &recipient, mesh::Packet *pkt, uint32_t delay_millis = 0) override;
+    void sendFloodScoped(mesh::GroupChannel const &channel, mesh::Packet *pkt, uint32_t delay_millis = 0) override;
     void onContactsFull() override {
         MyMesh::onContactsFull();
         mesh_contacts_full();
@@ -247,6 +277,7 @@ class BadgeMesh : public MyMesh {
     int  getBlobByKey(uint8_t const key[], int key_len, uint8_t dest_buf[]) override;
 
   private:
+    bool               floodForConsole(mesh::Packet *pkt, uint32_t delay_millis);
     bool               blobWanted(mesh_blobq_entry_t const &e);
     void               blobDone();
     ob_t              *ob_;
@@ -256,4 +287,7 @@ class BadgeMesh : public MyMesh {
     bool               blob_written_ = false; // blob_taken_ is on flash: off the queue at the next takeBlob
     CompanionPipe      pipe_;
     advert_limit_t     advert_limit_;
+    char               console_scope_name_[MESH_SCOPE_MAX + 1] = {};
+    TransportKey       console_scope_key_                      = {};
+    uint32_t           console_refused_                        = 0;
 };

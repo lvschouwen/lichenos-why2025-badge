@@ -77,7 +77,7 @@ static void tick(lv_timer_t *t) {
 // The one place a request leaves: called after the person's confirm only
 static void start_request(void) {
     char why[96];
-    seq = mesh_telemetry_start(target, why, sizeof(why));
+    seq = mesh_telemetry_start(target, MESH_FROM_SCREEN, why, sizeof(why));
     if (!seq) {
         char text[128];
         snprintf(text, sizeof(text), "Not sent: %s", why);

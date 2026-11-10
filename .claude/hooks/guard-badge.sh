@@ -46,7 +46,7 @@ if printf '%s' "$cmd_joined" | grep -qE "$reach"; then
       deny\ *) deny "${verdict#deny }" ;;
       ask\ *) deny "${verdict#ask }: Lucas sets it in MeshCore Settings on the badge" ;;
     esac
-  done < <(printf '%s\n' "$cmd_joined" | grep -E "$reach" | grep -oE 'mesh[[:space:]]+(send|dm|remote|telemetry|trace|discover|advert)([[:space:]]+[^[:space:];&|)]+)?' || true)
+  done < <(printf '%s\n' "$cmd_joined" | grep -E "$reach" | grep -oE 'mesh[[:space:]]+(send|dm|remote|telemetry|trace|discover|advert|scope)([[:space:]]+[^[:space:];&|)]+){0,2}' || true)
 fi
 main_dir=$(git -C "${cwd:-.}" rev-parse --show-toplevel 2>/dev/null || true)
 main_checkout=${CLAUDE_PROJECT_DIR:-/home/lucas/coding/why2025-badge}

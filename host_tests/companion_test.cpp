@@ -224,6 +224,83 @@ static std::string group_text(std::vector<uint8_t> const &raw, mesh::GroupChanne
     return n > 5 ? std::string((char *)&plain[5]) : "";
 }
 
+// The GRP_TXT packet on air since `from` whose text is want; false when none
+static bool find_group(size_t from, mesh::GroupChannel const &channel, std::string const &want, mesh::Packet &out) {
+    for (size_t i = from; i < test_radio.sent.size(); i++) {
+        auto const &raw = test_radio.sent[i];
+        if (group_text(raw, channel) == want) {
+            return out.readFrom(raw.data(), (uint8_t)raw.size());
+        }
+    }
+    return false;
+}
+
+// The console scope (#290) on the real MyMesh: a console line's channel message floods under the console region, a
+// screen's under the default (None here: no transport code), and with the console scope unset the console one never
+// goes on air at all. Made-up region name.
+static void console_scope_checks(BadgeMesh &mesh, ob_t &ob, mesh::GroupChannel const &pub) {
+    TransportKey      key;
+    TransportKeyStore ks;
+    ks.getAutoKeyFor(0, "#zz-test", key);
+    CHECK(mesh.consoleScope()[0] == 0); // not set until someone sets it
+    CHECK(mesh.setConsoleScope("ZZ-Test-Longer-Name") == NULL);
+    CHECK(mesh.setConsoleScope(" #zz-test ") == NULL && strcmp(mesh.consoleScope(), "zz-test") == 0);
+    CHECK(mesh.setConsoleScope("zz test") != NULL && strcmp(mesh.consoleScope(), "zz-test") == 0);
+    mesh.loadConsoleScope(); // as at the next start: the saved name, nothing of the longer one before it
+    CHECK(strcmp(mesh.consoleScope(), "zz-test") == 0);
+    std::string  prefix = std::string(mesh.getNodeName()) + ": ";
+    char const  *why    = NULL;
+    size_t       before = test_radio.sent.size();
+    mesh_msg_id_t ui    = ob_add_channel(&ob, "public", "scope ui", 8, (uint32_t)millis(), &why);
+    settle(mesh, 30);
+    mesh_msg_id_t con = ob_add_channel(&ob, "public", "scope console", 13, (uint32_t)millis(), &why);
+    CHECK(ui && con && ob_set_console(&ob, con));
+    settle(mesh, 30);
+    mesh::Packet pkt;
+    CHECK(find_group(before, pub, prefix + "scope ui", pkt) && pkt.getRouteType() == ROUTE_TYPE_FLOOD);
+    CHECK(find_group(before, pub, prefix + "scope console", pkt) && pkt.hasTransportCodes() &&
+          pkt.transport_codes[0] == key.calcTransportCode(&pkt));
+
+    CHECK(mesh.setConsoleScope("") == NULL && mesh.consoleScope()[0] == 0);
+    before            = test_radio.sent.size();
+    uint32_t refused  = mesh.consoleRefused();
+    con               = ob_add_channel(&ob, "public", "scope unset", 11, (uint32_t)millis(), &why);
+    CHECK(con && ob_set_console(&ob, con));
+    settle(mesh, 30);
+    CHECK(!find_group(before, pub, prefix + "scope unset", pkt) && mesh.consoleRefused() == refused + 1);
+    // a screen's message right after still floods (the console mark ends with the loop that handled its frame)
+    ui = ob_add_channel(&ob, "public", "scope ui again", 14, (uint32_t)millis(), &why);
+    settle(mesh, 30);
+    CHECK(find_group(before, pub, prefix + "scope ui again", pkt) && pkt.getRouteType() == ROUTE_TYPE_FLOOD);
+}
+
+// The console scope lives in MeshCore's own directory (#290): the factory reset's format, which takes the default scope
+// with prefs.json, takes it too; a damaged file loads as not set. Its own directory, so the other checks keep theirs.
+static void console_scope_reset_checks(BadgeMesh &mesh, char const *root) {
+    std::string sub = std::string(root) + "/cscope";
+    fs_shim_set_root(sub.c_str());
+    CHECK(SPIFFS.begin(true));
+    CHECK(mesh.setConsoleScope("zz-test") == NULL);
+    mesh.loadConsoleScope();
+    CHECK(strcmp(mesh.consoleScope(), "zz-test") == 0);
+    CHECK(SPIFFS.format());
+    CHECK(SPIFFS.begin(true));
+    mesh.loadConsoleScope();
+    CHECK(mesh.consoleScope()[0] == 0);
+    File f = SPIFFS.open("/console_scope", "w", true);
+    CHECK(f && f.write((uint8_t const *)"zz test", 7) == 7);
+    f.close();
+    mesh.loadConsoleScope();
+    CHECK(mesh.consoleScope()[0] == 0);
+    f = SPIFFS.open("/console_scope", "w", true);
+    CHECK(f && f.write((uint8_t const *)"zz-test\n", 8) == 8); // a line end typed by hand is fine
+    f.close();
+    mesh.loadConsoleScope();
+    CHECK(strcmp(mesh.consoleScope(), "zz-test") == 0);
+    CHECK(mesh.setConsoleScope("") == NULL);
+    fs_shim_set_root(root);
+}
+
 // The details screen's actions (#49) on the real MyMesh: each one goes through MyMesh's own command, so it is saved
 // with MyMesh's lazy contacts write, and a fresh MyMesh on the same files sees it
 static void contact_action_checks(BadgeMesh &mesh) {
@@ -691,7 +768,7 @@ static void blob_checks(std::vector<std::vector<uint8_t>> const &packets, char c
 }
 
 // The companion pipe (#45, #55) on the real MyMesh: start sequence, offline queue drained, sends through the outbox
-static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, SimpleMeshTables &tables) {
+static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, SimpleMeshTables &tables, char const *root) {
     static DataStore store(SPIFFS, rtc_clock);
     static ob_t      ob;
     static BadgeMesh mesh(radio_driver, rng_for_pipe(), rtc_clock, tables, store, &ob);
@@ -787,6 +864,8 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     uint32_t trip = 0;
     CHECK(ob_get(&ob, dm, &state, NULL, NULL, &trip) && state == MESH_OUT_DELIVERED);
     CHECK(st.confirmed == 1);
+    console_scope_checks(mesh, ob, pub.channel);
+    console_scope_reset_checks(mesh, root);
     trace_checks(mesh, mt);
     remote_checks(mesh, rr, listener);
     contact_action_checks(mesh);
@@ -988,7 +1067,7 @@ int main(int argc, char **argv) {
         CHECK(mesh.getNumContacts() == 3);
     }
 
-    pipe_checks(packets, tables6);
+    pipe_checks(packets, tables6, root);
     blob_checks(packets, root);
 
     {

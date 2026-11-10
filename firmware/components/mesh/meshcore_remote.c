@@ -142,7 +142,7 @@ static void login_tick(lv_timer_t *t) {
 
 static void login_start(void) {
     char const *why = NULL;
-    seq             = mesh_remote_start(target, RR_LOGIN, pw_hold, &why);
+    seq             = mesh_remote_start(target, RR_LOGIN, pw_hold, MESH_FROM_SCREEN, &why);
     if (!seq) {
         char text[96];
         snprintf(text, sizeof(text), "Not started: %s", why ? why : "?");
@@ -231,7 +231,7 @@ static void status_start(void *arg) {
         return; // still waiting for this one: a held Enter does not queue more
     }
     char const *why = NULL;
-    seq             = mesh_remote_start(target, RR_STATUS, NULL, &why);
+    seq             = mesh_remote_start(target, RR_STATUS, NULL, MESH_FROM_SCREEN, &why);
     if (!seq) {
         char text[96];
         snprintf(text, sizeof(text), "Not started: %s", why ? why : "?");
@@ -289,7 +289,7 @@ static void cli_tick(lv_timer_t *t) {
 
 static void cli_send(char const *command) {
     char const *why = NULL;
-    if (mesh_remote_start(target, RR_CLI, command, &why)) {
+    if (mesh_remote_start(target, RR_CLI, command, MESH_FROM_SCREEN, &why)) {
         set_text(note, "");
         cli_show();
     } else {

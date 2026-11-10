@@ -219,8 +219,8 @@ static void on_ready(lv_event_t *e) {
         return;
     }
     char const   *why = NULL;
-    mesh_msg_id_t id  = c->target.dm ? mesh_send_dm(c->target.peer, text, &why)
-                                     : mesh_send_channel(c->target.title, text, &why);
+    mesh_msg_id_t id  = c->target.dm ? mesh_send_dm(c->target.peer, text, MESH_FROM_SCREEN, &why)
+                                     : mesh_send_channel(c->target.title, text, MESH_FROM_SCREEN, &why);
     if (!id) {
         set_note(c, why ? why : "not sent", true);
         return;

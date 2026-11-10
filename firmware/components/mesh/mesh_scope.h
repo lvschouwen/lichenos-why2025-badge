@@ -24,6 +24,19 @@ void mesh_scope_ask_text(char const *name, char *out, size_t cap);
 // The text SHA-256 turns into the region key: "#" + name
 void mesh_scope_key_text(char const *name, char *out, size_t cap);
 
+// The console scope (#290): every flood a console line starts (send, dm, remote, telemetry, trace, discover) goes out
+// under a region of its own, so Claude and the agents never flood further than the bench allows; the screens keep the
+// default scope. Unlike the default, an empty console scope is no "None (everywhere)": the console flood is refused.
+#define MESH_SCOPE_CONSOLE_UNSET "console scope not set: fw mesh scope console <region> YES"
+typedef enum { MESH_SCOPE_USE_DEFAULT, MESH_SCOPE_USE_CONSOLE, MESH_SCOPE_USE_REFUSE } mesh_scope_use_t;
+// Which scope a flood takes: a screen's always the default, a console line's the console scope, refused when unset
+mesh_scope_use_t mesh_scope_choose(bool from_console, char const *console_name);
+// "fw mesh scope console <region> YES": the text after "console". NULL when out holds the region (mesh_scope_parse's
+// rules, never empty), else why not (out is "").
+char const *mesh_scope_console_arg(char const *args, char *out, size_t cap);
+// What "fw mesh scope" prints: "default <name|None> | console <name|not set>" (tools/badge.sh reads the console part)
+void mesh_scope_status_text(char const *default_name, char const *console_name, char *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

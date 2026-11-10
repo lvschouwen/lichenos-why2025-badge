@@ -379,7 +379,26 @@ static void sync_fresh_round_robin(void) {
     CHECK(sync_entry(&p, n, ids[0])->fresh && sync_entry(&p, n, ids[1])->fresh);
 }
 
+// A console line's message (#290) carries its origin into every action, retries too; a screen's never does
+static void console_origin(void) {
+    ob_t ob;
+    ob_init(&ob);
+    char const   *why = NULL;
+    mesh_msg_id_t ui  = ob_add_channel(&ob, "#zz-chan", "hi", 2, 0, &why);
+    mesh_msg_id_t con = ob_add_dm(&ob, PEER, "ping", 4, 0, &why);
+    CHECK(ui && con && ob_set_console(&ob, con) && !ob_set_console(&ob, 999));
+    ob_action_t a = take(&ob, 0, OB_ACT_SEND_CHANNEL);
+    CHECK(a.id == ui && !a.console);
+    a = take(&ob, 0, OB_ACT_SEND_DM);
+    CHECK(a.id == con && a.console);
+    ob_fail(&ob, con);
+    CHECK(ob_retry(&ob, con, 10));
+    a = take(&ob, 10, OB_ACT_SEND_DM);
+    CHECK(a.id == con && a.console);
+}
+
 int main(void) {
+    console_origin();
     fail_pending();
     channel_flow();
     channel_failures();

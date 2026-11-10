@@ -2,6 +2,8 @@
 #include "mesh_link.h"
 
 #include "channel_input.h"
+#include "mesh_prefs.h"
+#include "SPIFFS.h"
 #include "mesh_wipe.h"
 
 #include <math.h>
@@ -214,6 +216,71 @@ bool BadgeMesh::advertNow(bool flood) {
     return true;
 }
 
+#define CONSOLE_SCOPE_FILE "/console_scope" // the region name, nothing else
+
+static void console_scope_live(char *name_out, size_t cap, TransportKey &key, char const *name) {
+    snprintf(name_out, cap, "%s", name);
+    memset(key.key, 0, sizeof(key.key));
+    if (name[0]) {
+        mesh_prefs_scope_key(name, key.key);
+    }
+}
+
+char const *BadgeMesh::setConsoleScope(char const *name) {
+    char clean[MESH_SCOPE_MAX + 1];
+    if (char const *why = mesh_scope_parse(name, clean, sizeof(clean))) {
+        return why;
+    }
+    File f = SPIFFS.open(CONSOLE_SCOPE_FILE, "w", true);
+    if (!f || f.write((uint8_t const *)clean, strlen(clean)) != strlen(clean)) {
+        return "not saved: the file could not be written";
+    }
+    f.close();
+    console_scope_live(console_scope_name_, sizeof(console_scope_name_), console_scope_key_, clean);
+    return NULL;
+}
+
+void BadgeMesh::loadConsoleScope() {
+    char text[MESH_SCOPE_MAX + 2] = "";
+    char clean[MESH_SCOPE_MAX + 1] = "";
+    File f                         = SPIFFS.open(CONSOLE_SCOPE_FILE, "r");
+    size_t n                       = f ? f.read((uint8_t *)text, sizeof(text) - 1) : 0;
+    text[n]                        = '\0';
+    text[strcspn(text, "\r\n")]    = '\0';
+    if (mesh_scope_parse(text, clean, sizeof(clean))) {
+        clean[0] = '\0'; // damaged: not set, so console floods are refused rather than sent anywhere
+    }
+    console_scope_live(console_scope_name_, sizeof(console_scope_name_), console_scope_key_, clean);
+}
+
+// true when the flood was a console line's (sent under the console scope, or dropped while that is not set)
+bool BadgeMesh::floodForConsole(mesh::Packet *pkt, uint32_t delay_millis) {
+    if (!pipe_.fromConsole()) {
+        return false;
+    }
+    if (mesh_scope_choose(true, console_scope_name_) == MESH_SCOPE_USE_CONSOLE) {
+        MyMesh::sendFloodScoped(console_scope_key_, pkt, delay_millis);
+    } else {
+        // The console refuses before queueing; this is the net for a scope gone between queue and send. Never
+        // unscoped: that would flood everywhere.
+        console_refused_++;
+        releasePacket(pkt);
+    }
+    return true;
+}
+
+void BadgeMesh::sendFloodScoped(ContactInfo const &recipient, mesh::Packet *pkt, uint32_t delay_millis) {
+    if (!floodForConsole(pkt, delay_millis)) {
+        MyMesh::sendFloodScoped(recipient, pkt, delay_millis);
+    }
+}
+
+void BadgeMesh::sendFloodScoped(mesh::GroupChannel const &channel, mesh::Packet *pkt, uint32_t delay_millis) {
+    if (!floodForConsole(pkt, delay_millis)) {
+        MyMesh::sendFloodScoped(channel, pkt, delay_millis);
+    }
+}
+
 int BadgeMesh::dropOutbound() {
     int n = 0;
     while (_mgr->getOutboundTotal() > 0) {
@@ -420,6 +487,7 @@ size_t CompanionPipe::checkRecvFrame(uint8_t dest[]) {
         mesh_ob_exit();
     }
     refill_from_ovf();
+    console_ = false; // set by the take that hands out a console line's frame (#290)
     if (size_t n = take_trace(dest)) {
         return n; // asked for by hand, one at a time: ahead of the queues
     }
@@ -471,6 +539,7 @@ size_t CompanionPipe::take_outbox(uint8_t dest[]) {
     cur_     = CUR_OUTBOX;
     cur_cmd_ = dest[0];
     cur_id_  = act_.id;
+    console_ = act_.console;
     stats_.cmds_out++;
     ob_arb_took(&arb_, false);
     return n;
@@ -495,7 +564,8 @@ size_t CompanionPipe::take_trace(uint8_t dest[]) {
     uint8_t   prefix[MF_PREFIX];
     uint32_t  tag;
     mesh_ob_enter();
-    bool have = mt_take(mt_, &kind, prefix, &tag, (uint32_t)millis());
+    bool have    = mt_take(mt_, &kind, prefix, &tag, (uint32_t)millis());
+    bool console = mt_->console;
     mesh_ob_exit();
     if (!have) {
         return 0;
@@ -524,6 +594,7 @@ size_t CompanionPipe::take_trace(uint8_t dest[]) {
     }
     cur_     = CUR_TRACE;
     cur_cmd_ = dest[0];
+    console_ = console;
     stats_.cmds_out++;
     return n;
 }
@@ -546,7 +617,8 @@ size_t CompanionPipe::take_remote(uint8_t dest[]) {
     uint8_t  prefix[MF_PREFIX];
     char     arg[RR_ARG_MAX + 1];
     mesh_ob_enter();
-    bool have = rr_take(rr_, &op, prefix, arg, sizeof(arg), (uint32_t)millis());
+    bool have    = rr_take(rr_, &op, prefix, arg, sizeof(arg), (uint32_t)millis());
+    bool console = rr_->console;
     mesh_ob_exit();
     if (!have) {
         return 0;
@@ -577,6 +649,7 @@ size_t CompanionPipe::take_remote(uint8_t dest[]) {
     }
     cur_     = CUR_REMOTE;
     cur_cmd_ = dest[0];
+    console_ = console;
     stats_.cmds_out++;
     return n;
 }

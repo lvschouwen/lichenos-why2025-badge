@@ -58,6 +58,7 @@ typedef struct {
     uint8_t        err;     // MT_FAILED: MyMesh's ERR code, 0 when the pipe gave up (contact gone, no frame)
     char const    *why;     // MT_FAILED: a short reason, static text
     int8_t         target;  // as mt_plan_t (the trace's), -1 for a discovery
+    bool           console; // asked for by a console line (#290): a discovery floods with the console scope
     uint32_t       asked_ms, sent_ms, on_air_ms, done_ms, est_ms;
     mf_trace_t     trace; // MT_DONE, MT_TRACE
     mf_discovery_t disc;  // MT_DONE, MT_DISCOVER

@@ -161,6 +161,18 @@ onair_gate() {
     esac
 }
 
+# Before an on-air line with a target (#290): $1 is the badge's answer to the scope query, read through the same path
+# the line is about to take. Refused unless the badge's console scope is the allow file's scope line (no line, no
+# answer or another scope: refused), so a console flood never travels further than the bench allows.
+onair_scope_gate() {
+    local verdict
+    verdict=$(onair_scope_verdict "$1")
+    case $verdict in
+        pass) ;;
+        *) echo "refusing: ${verdict#deny }" >&2; exit 1 ;;
+    esac
+}
+
 # cmd_flash_fw <port> [--wipe-storage|--no-storage] [build dir]: Lichen from firmware/build.
 # Keeps the storage partition unless --wipe-storage is given (#183); --no-storage is the old name of the default.
 cmd_flash_fw() {
@@ -329,6 +341,14 @@ cmd_console() {
     onair_gate "$line"
     require_espressif_port "$port"
     case $line in *"'"*|*$'\n'*|*$'\r'*) echo "refusing: no quotes or line breaks in a console line" >&2; exit 1;; esac
+    if onair_needs_scope "$line"; then
+        onair_scope_gate "$(console_line "$port" "$(onair_scope_query "$line")" || true)"
+    fi
+    console_line "$port" "$line"
+}
+
+console_line() {
+    local port=$1 line=$2
     port_remote "$VENV/bin/python - '$port' '$line'" <<'PY'
 import sys, time, serial
 port, line = sys.argv[1], sys.argv[2]
@@ -617,17 +637,29 @@ cmd_crashes() {
 
 # POST /console (#38): one fw command; the badge runs it like the UART console and answers with its output
 cmd_fw() {
-    local ip=$1 work
+    local ip=$1
     shift
     local line="$*"
     onair_gate "$line"
+    if onair_needs_scope "$line"; then
+        onair_scope_gate "$(fw_post "$ip" "$(onair_scope_query "$line")" || true)"
+    fi
+    fw_post "$ip" "$line"
+}
+
+# One line to /console, its answer on stdout
+fw_post() {
+    local ip=$1 line=$2 work rc=0
     # In a private file, not on the command line: the line can hold a Wi-Fi password (the token goes in on stdin)
     umask 077
     work=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-fw.XXXXXX")
     # shellcheck disable=SC2064  # expand now: the temp paths are fixed when the trap is set
     trap "rm -f '$work'" EXIT
     printf '%s' "$line" > "$work"
-    ota_curl --max-time 60 -X POST -H 'Content-Type: text/plain' --data-binary "@$work" "http://$ip:$OTA_PORT/console" | printable
+    ota_curl --max-time 60 -X POST -H 'Content-Type: text/plain' --data-binary "@$work" "http://$ip:$OTA_PORT/console" |
+        printable || rc=$?
+    rm -f "$work"
+    return $rc
 }
 
 # The C6 bundle (#56): the P4 flashes the C6 at boot from /storage/c6 and refuses a .bin whose .md5 differs (the C6

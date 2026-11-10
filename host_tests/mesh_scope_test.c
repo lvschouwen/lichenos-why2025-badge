@@ -49,6 +49,32 @@ int main(void) {
     CHECK(strcmp(text, "Adverts and messages will only travel in region nl. Contacts outside it can no longer reach you.") == 0);
     mesh_scope_key_text("nl", text, sizeof(text));
     CHECK(strcmp(text, "#nl") == 0);
+    // The console scope (#290): a screen's flood keeps the default, a console line's takes the console scope, and an
+    // unset console scope refuses it (never "None (everywhere)")
+    CHECK(mesh_scope_choose(false, "") == MESH_SCOPE_USE_DEFAULT);
+    CHECK(mesh_scope_choose(false, "zz-test") == MESH_SCOPE_USE_DEFAULT);
+    CHECK(mesh_scope_choose(true, "zz-test") == MESH_SCOPE_USE_CONSOLE);
+    CHECK(mesh_scope_choose(true, "") == MESH_SCOPE_USE_REFUSE);
+    CHECK(mesh_scope_choose(true, NULL) == MESH_SCOPE_USE_REFUSE);
+    // "fw mesh scope console <region> YES"
+    CHECK(mesh_scope_console_arg("ZZ-Test YES", out, sizeof(out)) == NULL && strcmp(out, "zz-test") == 0);
+    CHECK(mesh_scope_console_arg("#zz-test  YES ", out, sizeof(out)) == NULL && strcmp(out, "zz-test") == 0);
+    CHECK(mesh_scope_console_arg("zz-test", out, sizeof(out)) != NULL && out[0] == 0);
+    CHECK(mesh_scope_console_arg("zz-test yes", out, sizeof(out)) != NULL && out[0] == 0);
+    CHECK(mesh_scope_console_arg("zz-testYES", out, sizeof(out)) != NULL && out[0] == 0);
+    CHECK(mesh_scope_console_arg("YES", out, sizeof(out)) != NULL && out[0] == 0);
+    CHECK(mesh_scope_console_arg("# YES", out, sizeof(out)) != NULL && out[0] == 0);
+    CHECK(mesh_scope_console_arg("zz test YES", out, sizeof(out)) != NULL && out[0] == 0);
+    CHECK(mesh_scope_console_arg("abcdefghijklmnopqrstuvwxyz0123 YES", out, sizeof(out)) == NULL && strlen(out) == 30);
+    CHECK(mesh_scope_console_arg("abcdefghijklmnopqrstuvwxyz01234 YES", out, sizeof(out)) != NULL && out[0] == 0);
+    CHECK(mesh_scope_console_arg("abcdefghijklmnopqrstuvwxyz0123456789 YES", out, sizeof(out)) != NULL);
+    CHECK(mesh_scope_console_arg("", out, sizeof(out)) != NULL && out[0] == 0);
+    mesh_scope_status_text("", "", text, sizeof(text));
+    CHECK(strcmp(text, "default None | console not set") == 0);
+    mesh_scope_status_text("zz-wide", "zz-test", text, sizeof(text));
+    CHECK(strcmp(text, "default zz-wide | console zz-test") == 0);
+    mesh_scope_status_text(NULL, NULL, text, sizeof(text));
+    CHECK(strcmp(text, "default None | console not set") == 0);
     if (failures == 0) {
         printf("mesh_scope_test: ok\n");
     }

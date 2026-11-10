@@ -3,6 +3,10 @@
 # the channel #badgetest and the test node. Allowed contact targets (names or key digits, one per line, # comments)
 # live in the gitignored .claude/onair-allow.local, so no device id is committed (the repo is public); without that
 # file only #badgetest sends pass. The badge-side check that also covers other routes is #289.
+# The same file names the console scope (#290): one "scope <region>" line. Every flood a console line starts goes out
+# under the badge's console scope, so badge.sh checks before each on-air line with a target that the badge's console
+# scope equals that line, and "mesh scope console <x>" passes only for it. Without the line nothing with a target goes
+# on air through badge.sh. A "scope" line is never a contact target.
 # shellcheck shell=bash
 
 # Allow file: the .claude/onair-allow.local next to this file's tools/. Only the guard hook may point elsewhere
@@ -14,22 +18,81 @@ onair_allow_file() {
     printf '%s\n' "${onair_allow_override:-$repo/.claude/onair-allow.local}"
 }
 
-# True when target matches a line of the allow file, ignoring case
+# True when target matches a contact line of the allow file (not a comment, not a "scope" line), ignoring case
 onair_allowed() {
     local file
     file=$(onair_allow_file)
     [ -n "$1" ] && [ -r "$file" ] || return 1
-    grep -v '^[[:space:]]*#' "$file" | sed 's/[[:space:]]*$//' | grep -qixF -- "$1"
+    grep -v '^[[:space:]]*#' "$file" | grep -viE '^[[:space:]]*scope([[:space:]]|$)' | sed 's/[[:space:]]*$//' |
+        grep -qixF -- "$1"
+}
+
+# A region name as the badge keeps it (mesh_scope_parse): lowercase, no leading '#'
+onair_scope_norm() {
+    local name=${1,,}
+    printf '%s' "${name#\#}"
+}
+
+# The console scope the allow file names (its first "scope <region>" line), normalised; empty when there is none
+onair_allowed_scope() {
+    local file line
+    file=$(onair_allow_file)
+    [ -r "$file" ] || return 0
+    line=$(grep -iE '^[[:space:]]*scope[[:space:]]+[^[:space:]]' "$file" | head -n 1 || true)
+    read -r _ line _ <<<"$line"
+    onair_scope_norm "$line"
+}
+
+# The words of a console line as the badge's parser sees them: quotes and backslashes dropped (as the shell would
+# before the line reaches the badge), a leading "fw" gone
+onair_words() {
+    local line w1 rest
+    line=$(printf '%s' "$1" | tr -d "'\"\\\\")
+    read -r w1 rest <<<"$line"
+    if [ "$w1" = fw ]; then line=$rest; fi
+    printf '%s' "$line"
+}
+
+# True when the line can put something on air for a target (#290): badge.sh checks the console scope before those
+onair_needs_scope() {
+    local w1 w2 w3 _rest
+    read -r w1 w2 w3 _rest <<<"$(onair_words "$1")"
+    [ "$w1" = mesh ] && [ -n "$w3" ] || return 1
+    case "$w2" in
+        send | dm | telemetry | trace | discover) return 0 ;;
+        remote) [ "$w3" != settings ] ;;
+        *) return 1 ;;
+    esac
+}
+
+# The console scope query for a line about to be sent, in the line's own form ("fw mesh scope" when it starts with fw)
+onair_scope_query() {
+    case $1 in
+        fw | fw\ *) printf 'fw mesh scope' ;;
+        *) printf 'mesh scope' ;;
+    esac
+}
+
+# Verdict on the badge's answer to the scope query ($1): prints "pass" or "deny <reason>". The badge answers
+# "default <name|None> | console <name|not set>" (mesh_scope_status_text); no answer, or anything else, is a deny.
+onair_scope_verdict() {
+    local want have
+    want=$(onair_allowed_scope)
+    if [ -z "$want" ]; then
+        echo "deny no 'scope <region>' line in .claude/onair-allow.local: no console line with a target goes on air without one (#290)"
+        return
+    fi
+    have=$(printf '%s\n' "$1" | tr -d '\r' | sed -n 's/.*| console \(.*\)$/\1/p' | head -n 1)
+    have=${have%"${have##*[![:space:]]}"}
+    if [ -n "$have" ] && [ "$(onair_scope_norm "$have")" = "$want" ]; then echo pass; else
+        echo "deny the badge's console scope is '${have:-no answer}', not the scope line of .claude/onair-allow.local: fw mesh scope console <region> YES first (#290)"
+    fi
 }
 
 # Verdict for one console line ("[fw ]mesh <sub> [target] ..."): prints "pass", "deny <reason>" or "ask <reason>".
-# Quotes and backslashes are dropped first, as the shell would before the line reaches the badge.
 onair_verdict() {
-    local w1 w2 w3 _rest
-    read -r w1 w2 w3 _rest <<<"$(printf '%s' "$1" | tr -d "'\"\\\\")"
-    if [ "$w1" = fw ]; then
-        read -r w1 w2 w3 _rest <<<"$w2 $w3 $_rest"
-    fi
+    local w1 w2 w3 w4 _rest want
+    read -r w1 w2 w3 w4 _rest <<<"$(onair_words "$1")"
     [ "$w1" = mesh ] || { echo pass; return; }
     case "$w2" in
         send)
@@ -43,6 +106,13 @@ onair_verdict() {
         remote)
             if [ -z "$w3" ] || [ "$w3" = settings ] || onair_allowed "$w3"; then echo pass; else
                 echo "deny on air only the test node: 'mesh remote $w3' targets a node not in .claude/onair-allow.local (#287)"
+            fi ;;
+        scope)
+            want=$(onair_allowed_scope)
+            if [ -z "$w3" ] || { [ "$w3" = console ] && [ -n "$want" ] && [ "$(onair_scope_norm "$w4")" = "$want" ]; }; then
+                echo pass
+            else
+                echo "deny 'mesh scope $w3 ${w4:-?}' is not the scope line of .claude/onair-allow.local: the console scope is Lucas's to choose (#290)"
             fi ;;
         advert)
             case "$w3" in

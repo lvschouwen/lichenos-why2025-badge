@@ -38,6 +38,7 @@ typedef enum { OB_CHANNEL, OB_DM } ob_kind_t;
 
 typedef struct {
     bool             in_store, used, awaiting, awaiting_reset, pending_reset, flood_seen, have_hash;
+    bool             console; // queued by a console line (#290): its floods take the console scope, retries too
     uint8_t          kind, state, attempt, repeats, n_acks;
     mesh_msg_id_t    id;
     uint32_t         seq, ts, not_before_ms, deadline_ms, sent_ms, trip_ms;
@@ -59,6 +60,7 @@ typedef struct {
     ob_act_kind_t kind;
     mesh_msg_id_t id;
     uint8_t       attempt; // the frame's attempt byte (0-based)
+    bool          console; // the entry's (#290)
     uint32_t      ts;
     uint8_t       prefix[MF_PREFIX];
     char          target[OB_TARGET_MAX];
@@ -73,6 +75,8 @@ mesh_msg_id_t ob_add_channel(ob_t *ob, char const *channel, char const *text, si
                              char const **why);
 mesh_msg_id_t ob_add_dm(ob_t *ob, uint8_t const prefix[MF_PREFIX], char const *text, size_t text_len, uint32_t now_ms,
                         char const **why);
+// Marks a message as queued by a console line (#290), in the same outbox section as its ob_add_*; false when gone
+bool ob_set_console(ob_t *ob, mesh_msg_id_t id);
 // The next frame to send, or OB_ACT_NONE. Expires timed-out DMs first. ts_now stamps a message that has no timestamp yet (0: the action comes back with ts 0, then ob_set_ts).
 bool ob_next_action(ob_t *ob, uint32_t now_ms, uint32_t ts_now, ob_action_t *act);
 // MyMesh's answer to the action's frame. A kind other than OK/ERR/SENT counts as an error.

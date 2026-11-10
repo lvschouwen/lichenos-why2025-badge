@@ -19,6 +19,7 @@ typedef struct {
     uint32_t    seq;         // our CLI request in flight, 0 for none
     uint32_t    not_ours_ms; // when a reply that is not ours was first seen: ours may still follow it
     char const *why;         // why the last command got no answer or did not go out (static text), NULL for none
+    mesh_origin_t from;      // MESH_FROM_CONSOLE for the console's read (#290): its floods take the console scope
 } rs_run_t;
 
 void rs_run_init(rs_run_t *x, uint8_t const prefix[6]);

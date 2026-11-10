@@ -280,7 +280,7 @@ static void trace_tick(lv_timer_t *timer) {
 
 static void trace_start(trace_t *tr) {
     char const *why = NULL;
-    tr->seq         = mesh_trace_start(tr->prefix, tr->kind, &why);
+    tr->seq         = mesh_trace_start(tr->prefix, tr->kind, MESH_FROM_SCREEN, &why);
     if (!tr->seq) {
         char text[96];
         snprintf(text, sizeof(text), "Not started: %s", why ? why : "?");

@@ -12,6 +12,7 @@
 #include "mesh_format.h"
 #include "mesh_advert_cfg.h"
 #include "mesh_chat.h"
+#include "mesh_cscope.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
 #include "mesh_hist_crypto.h"
@@ -1024,6 +1025,16 @@ extern "C" char const *mesh_set_scope(char const *name) {
     return why;
 }
 
+extern "C" char const *mesh_set_console_scope(char const *name) {
+    char const *why = settings_lock();
+    if (!why) {
+        why = node->setConsoleScope(name);
+        mesh_cscope_note(node->consoleScope());
+        mesh_unlock();
+    }
+    return why;
+}
+
 extern "C" char const *mesh_set_path_hash(uint8_t size) {
     if (size < 1 || size > 3) {
         return "Path hash size must be 1 to 3 bytes"; // before the lock: a refusal never waits on MeshCore
@@ -1712,7 +1723,11 @@ extern "C" size_t mesh_channel_text_max(void) {
     return mf_channel_text_max(strlen(st.name));
 }
 
-static bool send_ready(char const **why) {
+// from: a console line's send is refused while the console scope is not set (#290), never sent unscoped
+static bool send_ready(char const **why, mesh_origin_t from = MESH_FROM_SCREEN) {
+    if ((*why = mesh_cscope_refusal(from == MESH_FROM_CONSOLE)) != NULL) {
+        return false;
+    }
     if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || !outbox || mesh_is_stopped()) {
         *why = stopped_why();
         return false;
@@ -1728,11 +1743,12 @@ static bool send_ready(char const **why) {
     return true;
 }
 
-extern "C" mesh_msg_id_t mesh_send_channel(char const *channel_name, char const *text, char const **why) {
+extern "C" mesh_msg_id_t mesh_send_channel(char const *channel_name, char const *text, mesh_origin_t from,
+                                           char const **why) {
     char const *local;
     why = why ? why : &local;
     *why = NULL;
-    if (!send_ready(why)) {
+    if (!send_ready(why, from)) {
         return 0;
     }
     size_t len = mf_text_cut(text, mesh_channel_text_max());
@@ -1742,20 +1758,26 @@ extern "C" mesh_msg_id_t mesh_send_channel(char const *channel_name, char const 
     }
     mesh_ob_enter();
     mesh_msg_id_t id = ob_add_channel(outbox, channel_name, text, len, (uint32_t)millis(), why);
+    if (id && from == MESH_FROM_CONSOLE) {
+        ob_set_console(outbox, id); // in the same section as the add: the pipe never takes it unmarked
+    }
     mesh_ob_exit();
     return id;
 }
 
-extern "C" mesh_msg_id_t mesh_send_dm(uint8_t const prefix[6], char const *text, char const **why) {
+extern "C" mesh_msg_id_t mesh_send_dm(uint8_t const prefix[6], char const *text, mesh_origin_t from, char const **why) {
     char const *local;
     why = why ? why : &local;
     *why = NULL;
-    if (!send_ready(why)) {
+    if (!send_ready(why, from)) {
         return 0;
     }
     size_t len = mf_text_cut(text, MF_MAX_TEXT);
     mesh_ob_enter();
     mesh_msg_id_t id = ob_add_dm(outbox, prefix, text, len, (uint32_t)millis(), why);
+    if (id && from == MESH_FROM_CONSOLE) {
+        ob_set_console(outbox, id);
+    }
     mesh_ob_exit();
     return id;
 }
@@ -1843,11 +1865,11 @@ static char const *const OUT_STATE_NAME[] = {"queued", "sent", "on air", "heard 
 
 static mt_t *trace_req; // PSRAM, made with the outbox
 
-extern "C" uint32_t mesh_trace_start(uint8_t const prefix[6], mt_kind_t kind, char const **why) {
+extern "C" uint32_t mesh_trace_start(uint8_t const prefix[6], mt_kind_t kind, mesh_origin_t from, char const **why) {
     char const *local;
     why  = why ? why : &local;
     *why = NULL;
-    if (!send_ready(why)) {
+    if (!send_ready(why, from)) {
         return 0;
     }
     if (!trace_req) {
@@ -1858,6 +1880,7 @@ extern "C" uint32_t mesh_trace_start(uint8_t const prefix[6], mt_kind_t kind, ch
     lichen_random_fill(&tag, sizeof(tag)); // a trace is matched by its tag: random, as MeshCore's apps make it
     mesh_ob_enter();
     uint32_t seq = mt_request(trace_req, kind, prefix, tag, (uint32_t)millis(), why);
+    trace_req->console = seq ? from == MESH_FROM_CONSOLE : trace_req->console; // with the request it belongs to
     mesh_ob_exit();
     return seq;
 }
@@ -1878,11 +1901,12 @@ extern "C" bool mesh_trace_get(mt_t *out) {
 static rr_t *remote_req; // PSRAM, made with the outbox
 static tl_rate_t telem_rate; // when each contact was last asked for telemetry (#162), under mesh_ob_enter/exit
 
-extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char const *arg, char const **why) {
+extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char const *arg, mesh_origin_t from,
+                                      char const **why) {
     char const *local;
     why  = why ? why : &local;
     *why = NULL;
-    if (!send_ready(why)) {
+    if (!send_ready(why, from)) {
         return 0;
     }
     if (!remote_req) {
@@ -1893,6 +1917,7 @@ extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char 
     rr_prepare(op, arg, &prep);
     mesh_ob_enter();
     uint32_t seq = rr_request_prepared(remote_req, op, prefix, arg, &prep, (uint32_t)millis(), why);
+    remote_req->console = seq ? from == MESH_FROM_CONSOLE : remote_req->console;
     mesh_ob_exit();
     return seq;
 }
@@ -1912,11 +1937,12 @@ extern "C" uint32_t mesh_remote_start_background(uint8_t const prefix[6], char c
     }
     mesh_ob_enter();
     uint32_t seq = rr_request_background(remote_req, prefix, (uint32_t)millis(), why);
+    remote_req->console = seq ? false : remote_req->console;
     mesh_ob_exit();
     return seq;
 }
 
-extern "C" uint32_t mesh_telemetry_start(uint8_t const prefix[6], char *why, size_t cap) {
+extern "C" uint32_t mesh_telemetry_start(uint8_t const prefix[6], mesh_origin_t from, char *why, size_t cap) {
     why[0] = 0;
     uint32_t wait = mesh_telemetry_wait_s(prefix);
     if (wait) {
@@ -1924,7 +1950,7 @@ extern "C" uint32_t mesh_telemetry_start(uint8_t const prefix[6], char *why, siz
         return 0;
     }
     char const *reason = NULL;
-    uint32_t    seq    = mesh_remote_start(prefix, RR_TELEMETRY, NULL, &reason);
+    uint32_t    seq    = mesh_remote_start(prefix, RR_TELEMETRY, NULL, from, &reason);
     if (seq) {
         mesh_ob_enter();
         tl_rate_note(&telem_rate, prefix, (uint32_t)millis());
@@ -2024,7 +2050,7 @@ static void cmd_mesh_send(char const *args) {
         console_reply("warning: the clock is not set, other nodes will see a wrong time");
     }
     char const   *why = NULL;
-    mesh_msg_id_t id  = mesh_send_channel(channel, args + used, &why);
+    mesh_msg_id_t id  = mesh_send_channel(channel, args + used, MESH_FROM_CONSOLE, &why);
     if (!id) {
         console_reply("not queued: %s", why ? why : "?");
     } else {
@@ -2052,7 +2078,7 @@ static void cmd_mesh_dm(char const *args) {
         prefix[i] = (uint8_t)b[i];
     }
     char const   *why = NULL;
-    mesh_msg_id_t id  = mesh_send_dm(prefix, args + used, &why);
+    mesh_msg_id_t id  = mesh_send_dm(prefix, args + used, MESH_FROM_CONSOLE, &why);
     if (id) {
         console_reply("queued #%lu", (unsigned long)id);
     } else {
@@ -2174,7 +2200,7 @@ static void cmd_mesh_trace(char const *arg, mt_kind_t kind) {
             return;
         }
         char const *why = NULL;
-        uint32_t    seq = mesh_trace_start(prefix, kind, &why);
+        uint32_t    seq = mesh_trace_start(prefix, kind, MESH_FROM_CONSOLE, &why);
         if (seq) {
             console_reply("%s #%lu queued: fw mesh trace shows the result", kind == MT_TRACE ? "trace" : "discover",
                           (unsigned long)seq);
@@ -2290,13 +2316,15 @@ static void console_remote_show(void) {
                           r->login_prefix[2], r->login_prefix[3], r->login_prefix[4], r->login_prefix[5],
                           r->admin ? " (admin)" : "");
         }
-        if (r->have_status) {
-            rr_line_t lines[RR_LINES_MAX];
-            size_t    n = rr_status_lines(&r->status, lines, RR_LINES_MAX);
-            for (size_t i = 0; i < n; i++) {
-                console_reply("  %s", lines[i].text);
-            }
+        // PSRAM, as the trace's lines: about 1 KB, too much for the console task's stack
+        rr_line_t *lines = r->have_status ? (rr_line_t *)lichen_alloc(meshcore_self(), RR_LINES_MAX * sizeof(rr_line_t),
+                                                                      LICHEN_MEM_BULK)
+                                          : NULL;
+        size_t     n     = lines ? rr_status_lines(&r->status, lines, RR_LINES_MAX) : 0;
+        for (size_t i = 0; i < n; i++) {
+            console_reply("  %s", lines[i].text);
         }
+        lichen_free(meshcore_self(), lines);
         console_remote_cli_show(r);
     }
     if (r) {
@@ -2321,7 +2349,7 @@ static uint32_t console_remote_cli(uint8_t const prefix[6], char const *text, ch
                        "<command> YES";
         return 0;
     }
-    uint32_t seq = mesh_remote_start(prefix, RR_CLI, cmd, why); // erase is refused in there, YES or not
+    uint32_t seq = mesh_remote_start(prefix, RR_CLI, cmd, MESH_FROM_CONSOLE, why); // erase is refused in there, YES or not
     mesh_wipe(cmd, sizeof(cmd)); // may hold a new password
     return seq;
 }
@@ -2373,7 +2401,7 @@ static void cmd_mesh_remote(char const *args) {
             console_reply(*pw ? "the password is at most 15 characters" : "no password remembered: fw mesh remote <who> login <password>");
             return;
         }
-        seq = mesh_remote_start(prefix, RR_LOGIN, pw, &why);
+        seq = mesh_remote_start(prefix, RR_LOGIN, pw, MESH_FROM_CONSOLE, &why);
         if (seq && typed) {
             snprintf(console_pw, sizeof(console_pw), "%s", pw);
             memcpy(console_pw_prefix, prefix, 6);
@@ -2381,7 +2409,7 @@ static void cmd_mesh_remote(char const *args) {
         }
         mesh_wipe(saved, sizeof(saved));
     } else if (strcmp(verb, "status") == 0) {
-        seq = mesh_remote_start(prefix, RR_STATUS, NULL, &why);
+        seq = mesh_remote_start(prefix, RR_STATUS, NULL, MESH_FROM_CONSOLE, &why);
     } else if (strncmp(verb, "cli ", 4) == 0) {
         seq = console_remote_cli(prefix, verb + 4, &why);
     } else {
@@ -2429,7 +2457,7 @@ static void cmd_mesh_telemetry(char const *arg) {
             return;
         }
         char     why[96];
-        uint32_t seq = mesh_telemetry_start(prefix, why, sizeof(why));
+        uint32_t seq = mesh_telemetry_start(prefix, MESH_FROM_CONSOLE, why, sizeof(why));
         if (seq) {
             console_reply("telemetry #%lu queued: fw mesh telemetry shows the answer", (unsigned long)seq);
         } else {
@@ -2648,6 +2676,37 @@ static void cmd_mesh_autoadd(char const *args) {
                   hops, c.autoadd.overwrite ? "on" : "off");
 }
 
+// The subcommands that need MeshCore running, in the order they are tried. SUB_EXACT: the whole line; SUB_PREFIX: the
+// word with its space ("send "), the handler gets what follows; SUB_WORD: the word alone or with a space, the handler
+// gets what follows that space; SUB_WORD_RAW: as SUB_WORD, with the space (handlers that skip it themselves).
+enum sub_match_t : uint8_t { SUB_EXACT, SUB_PREFIX, SUB_WORD, SUB_WORD_RAW };
+struct mesh_sub_t {
+    char const *word;
+    sub_match_t match;
+    void (*run)(char const *rest);
+};
+static mesh_sub_t const MESH_SUBS[] = {
+    {"name ", SUB_PREFIX, cmd_mesh_name},
+    {"radio", SUB_WORD_RAW, cmd_mesh_radio},
+    {"pathhash", SUB_WORD_RAW, cmd_mesh_pathhash},
+    {"path ", SUB_PREFIX, cmd_mesh_path},
+    {"send ", SUB_PREFIX, cmd_mesh_send},
+    {"dm ", SUB_PREFIX, cmd_mesh_dm},
+    {"out", SUB_EXACT, [](char const *) { cmd_mesh_out(); }},
+    {"trace", SUB_WORD, [](char const *rest) { cmd_mesh_trace(rest, MT_TRACE); }},
+    {"discover ", SUB_PREFIX, [](char const *rest) { cmd_mesh_trace(rest, MT_DISCOVER); }},
+    {"telemetry", SUB_WORD, cmd_mesh_telemetry},
+    {"history", SUB_WORD, cmd_mesh_history},
+    {"remote", SUB_WORD, cmd_mesh_remote},
+    {"link", SUB_EXACT, [](char const *) { cmd_mesh_link(); }},
+    {"chats", SUB_EXACT, [](char const *) { cmd_mesh_chats(); }},
+    {"ident simulate", SUB_EXACT, [](char const *) { cmd_mesh_ident_simulate(); }},
+    {"advert", SUB_WORD, cmd_mesh_advert},
+    {"loc", SUB_WORD, cmd_mesh_loc},
+    {"autoadd", SUB_WORD, cmd_mesh_autoadd},
+    {"scope", SUB_WORD, mesh_cscope_console}, // #290: the console scope
+};
+
 static void cmd_mesh(char const *args) {
     if (strcmp(args, "start") == 0 || strcmp(args, "stop") == 0) {
         cmd_mesh_run(strcmp(args, "start") == 0);
@@ -2677,82 +2736,19 @@ static void cmd_mesh(char const *args) {
     if (console_not_running()) {
         return;
     }
-    if (strncmp(args, "name ", 5) == 0) {
-        cmd_mesh_name(args + 5);
-        return;
-    }
-    if (strncmp(args, "radio", 5) == 0 && (args[5] == ' ' || !args[5])) {
-        cmd_mesh_radio(args + 5);
-        return;
-    }
-    if (strncmp(args, "pathhash", 8) == 0 && (args[8] == ' ' || !args[8])) {
-        cmd_mesh_pathhash(args + 8);
-        return;
-    }
-    if (strncmp(args, "path ", 5) == 0) {
-        cmd_mesh_path(args + 5);
-        return;
-    }
-    if (strncmp(args, "send ", 5) == 0) {
-        cmd_mesh_send(args + 5);
-        return;
-    }
-    if (strncmp(args, "dm ", 3) == 0) {
-        cmd_mesh_dm(args + 3);
-        return;
-    }
-    if (strcmp(args, "out") == 0) {
-        cmd_mesh_out();
-        return;
-    }
-    if (strncmp(args, "trace", 5) == 0 && (args[5] == ' ' || !args[5])) {
-        cmd_mesh_trace(args + (args[5] ? 6 : 5), MT_TRACE);
-        return;
-    }
-    if (strncmp(args, "discover ", 9) == 0) {
-        cmd_mesh_trace(args + 9, MT_DISCOVER);
-        return;
-    }
-    if (strncmp(args, "telemetry", 9) == 0 && (args[9] == ' ' || !args[9])) {
-        cmd_mesh_telemetry(args + (args[9] ? 10 : 9));
-        return;
-    }
-    if (strncmp(args, "history", 7) == 0 && (args[7] == ' ' || !args[7])) {
-        cmd_mesh_history(args + (args[7] ? 8 : 7));
-        return;
-    }
-    if (strncmp(args, "remote", 6) == 0 && (args[6] == ' ' || !args[6])) {
-        cmd_mesh_remote(args + (args[6] ? 7 : 6));
-        return;
-    }
-    if (strcmp(args, "link") == 0) {
-        cmd_mesh_link();
-        return;
-    }
-    if (strcmp(args, "chats") == 0) {
-        cmd_mesh_chats();
-        return;
-    }
-    if (strcmp(args, "ident simulate") == 0) {
-        cmd_mesh_ident_simulate();
-        return;
-    }
-    if (strncmp(args, "advert", 6) == 0 && (args[6] == ' ' || !args[6])) {
-        cmd_mesh_advert(args + (args[6] ? 7 : 6));
-        return;
-    }
-    if (strncmp(args, "loc", 3) == 0 && (args[3] == ' ' || !args[3])) {
-        cmd_mesh_loc(args + (args[3] ? 4 : 3));
-        return;
-    }
-    if (strncmp(args, "autoadd", 7) == 0 && (args[7] == ' ' || !args[7])) {
-        cmd_mesh_autoadd(args + (args[7] ? 8 : 7));
-        return;
+    for (mesh_sub_t const &sub : MESH_SUBS) {
+        size_t len = strlen(sub.word);
+        if (sub.match == SUB_EXACT ? strcmp(args, sub.word) == 0
+                                   : strncmp(args, sub.word, len) == 0 &&
+                                         (sub.match == SUB_PREFIX || args[len] == ' ' || !args[len])) {
+            sub.run(args + len + (sub.match == SUB_WORD && args[len] ? 1 : 0));
+            return;
+        }
     }
     if (*args) {
         console_reply("mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
                       "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact|scan [n] [bad|bad1] [int] [from<offset>]] | mesh send <channel> <text> | "
-                      "mesh dm <12 hex> <text> | mesh remote [<name|hex> login [pw]|status|cli <text>|settings|logout] | mesh remote settings | mesh history [<name|hex> [on [min] YES|off|interval <min>]] | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
+                      "mesh dm <12 hex> <text> | mesh scope [console <region> YES] | mesh remote [<name|hex> login [pw]|status|cli <text>|settings|logout] | mesh remote settings | mesh history [<name|hex> [on [min] YES|off|interval <min>]] | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
                       "[<lat> <lon> | share on|off] | mesh autoadd [on|off | types <all|chat,repeater,room,sensor> | hops "
                       "<any|direct|n> | overwrite on|off]");
         return;
@@ -3480,6 +3476,8 @@ static bool start_locked(char const *files_dir) {
     apply_boot_radio(n, first_boot);
     migrate_path_hash(n);
     forget_stale_routes_once(n);
+    n->loadConsoleScope(); // #290: before the task runs, so the first console flood already has it
+    mesh_cscope_note(n->consoleScope());
     // The history from the SD card (#48), encrypted with a key from the identity begin() just loaded (#98), before the
     // mesh task runs: the replayed messages are older than anything MeshCore adds, which it does only in its loop
     uint8_t prv[PRV_KEY_SIZE];

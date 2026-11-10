@@ -63,6 +63,7 @@ typedef struct {
     uint32_t   asked_ms, sent_ms, est_ms, done_ms;
     bool       secret;     // arg is a password (a login, or a password command): wiped once taken
     bool       background; // the status history's poll (#168): a request of the person replaces it
+    bool       console;    // asked for by a console line (#290): its flood takes the console scope (set with seq)
     // the session: whom we are logged in to (one at a time; a new login to someone else ends it)
     bool       logged_in, admin;
     uint8_t    login_prefix[MF_PREFIX];

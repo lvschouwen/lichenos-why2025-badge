@@ -120,6 +120,14 @@ mesh_msg_id_t ob_add_dm(ob_t *ob, uint8_t const prefix[MF_PREFIX], char const *t
     return id;
 }
 
+bool ob_set_console(ob_t *ob, mesh_msg_id_t id) {
+    ob_entry_t *e = find(ob, id);
+    if (e) {
+        e->console = true;
+    }
+    return e != NULL;
+}
+
 // A DM whose ACK has not come by its deadline: another attempt, or failed
 static void expire(ob_entry_t *e, uint32_t now) {
     if (e->kind != OB_DM || e->awaiting || (e->state != MESH_OUT_SENT && e->state != MESH_OUT_ON_AIR) ||
@@ -138,7 +146,8 @@ static void expire(ob_entry_t *e, uint32_t now) {
 
 static void fill_action(ob_entry_t *e, uint32_t ts_now, ob_action_t *act) {
     memset(act, 0, sizeof(*act));
-    act->id = e->id;
+    act->id      = e->id;
+    act->console = e->console;
     memcpy(act->prefix, e->prefix, MF_PREFIX);
     memcpy(act->target, e->target, sizeof(act->target));
     memcpy(act->text, e->text, sizeof(act->text));

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Host test (#287): the guard hook refuses on-air console commands to anything but #badgetest and the allow-listed
-# test node, and leaves source greps and read-only mesh commands alone.
+# test node, and leaves source greps and read-only mesh commands alone. #290: the console scope (the allow list's
+# "scope" line, a made-up region here) gates "mesh scope console" and, in badge.sh, every on-air line with a target.
 set -uo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 hook="$here/../../.claude/hooks/guard-badge.sh"
 tmp=$(mktemp -d) && trap 'rm -rf "$tmp"' EXIT
-printf '# test node\nTESTNODE\nabcdef123456\n' > "$tmp/allow"
+printf '# test node\nTESTNODE\nabcdef123456\nscope #ZZ-Bench\n' > "$tmp/allow"
+printf 'scope\nTESTNODE\n' > "$tmp/allow-bare"
 fail=0
 decision() { # $1 = command, $2 = allow file; prints deny, ask or pass
   local out
@@ -39,6 +41,19 @@ expect pass "$b mesh trace"
 expect pass "$b mesh advert"
 expect deny "$b mesh advert interval 6h"
 expect pass "$b mesh out"
+# The console scope (#290): read freely, set only to the allow list's scope line
+expect pass "$b mesh scope"
+expect pass "$b mesh scope console zz-bench YES"
+expect pass "$b mesh scope console '#ZZ-Bench' YES"
+expect deny "$b mesh scope console zz-other YES"
+expect deny "$b mesh scope console"
+expect deny "$b mesh scope default zz-bench"
+expect deny "$b mesh scope console zz-bench YES" "$tmp/missing"
+expect deny "$b mesh scope console zz-bench YES" "$tmp/allow-bare"
+# A scope line is never a contact target
+expect deny "$b mesh dm scope hi" "$tmp/allow-bare"
+expect deny "$b mesh remote scope status"
+expect pass "$b mesh remote TESTNODE status" "$tmp/allow-bare"
 expect pass "grep -n 'mesh send Public' firmware/components/mesh/mesh_task.cpp"
 expect pass "git commit -m 'guard-badge.sh denies fw mesh send to Public
 lines that reach the badge (badge.sh, ssh) are checked'"
@@ -56,13 +71,30 @@ expect pass "$b mesh send '#badgetest' hi" "$tmp/missing"
 # what would have gone out
 # badge.sh reads only the allow file of its own tree (no override), so it runs from a copy with the test's list
 mkdir -p "$tmp/bin" "$tmp/repo/tools" "$tmp/repo/.claude"
-printf '#!/bin/sh\necho SENT\n' > "$tmp/bin/curl" && chmod +x "$tmp/bin/curl"
+# The fake answers the scope query with FAKE_SCOPE (#290), prints SENT for anything else, and logs every line
+cat > "$tmp/bin/curl" <<'SH'
+#!/bin/sh
+body=
+for a in "$@"; do case $a in @*) body=$(cat "${a#@}") ;; esac; done
+printf '%s\n' "$body" >> "$FAKE_LOG"
+case $body in
+  "mesh scope" | "fw mesh scope") [ -n "${FAKE_SCOPE-}" ] && printf '%s\r\n' "$FAKE_SCOPE" ;;
+  *) echo SENT ;;
+esac
+SH
+chmod +x "$tmp/bin/curl"
 cp "$here/../badge.sh" "$here/../onair_guard.sh" "$here/../elf_archive.sh" "$tmp/repo/tools/"
 cp "$tmp/allow" "$tmp/repo/.claude/onair-allow.local"
+# A tree whose allow list has no scope line
+mkdir -p "$tmp/bare/tools" "$tmp/bare/.claude"
+cp "$here/../badge.sh" "$here/../onair_guard.sh" "$here/../elf_archive.sh" "$tmp/bare/tools/"
+grep -v '^scope' "$tmp/allow" > "$tmp/bare/.claude/onair-allow.local"
+export FAKE_LOG="$tmp/sent.log"
+export FAKE_SCOPE="default None | console zz-bench"
 printf 'EVIL-NODE\n' > "$tmp/evil"
-badge() { # $@ = badge.sh arguments; prints its output, returns its exit code
+badge() { # $@ = badge.sh arguments; prints its output, returns its exit code. BADGE_REPO picks the tree.
   PATH="$tmp/bin:$PATH" BADGE_OTA_TOKEN=0123456789abcdef0123456789abcdef \
-    BADGE_HOST=none bash "$tmp/repo/tools/badge.sh" "$@" 2>&1
+    BADGE_HOST=none bash "${BADGE_REPO:-$tmp/repo}/tools/badge.sh" "$@" 2>&1
 }
 sent() { # $1 = expected (sent|refused), rest = badge.sh arguments
   local want=$1 out rc; shift
@@ -83,6 +115,22 @@ sent refused fw 192.0.2.1 mesh remote OTHER-RPT cli reboot YES
 sent refused fw 192.0.2.1 mesh advert interval 6h
 sent refused console /dev/null "fw mesh send Public hi"
 sent sent fw 192.0.2.1 mesh advert
+# The console scope (#290): an on-air line with a target goes only when the badge's console scope is the scope line
+sent sent fw 192.0.2.1 mesh remote TESTNODE status
+sent sent fw 192.0.2.1 fw mesh send '#badgetest' hi
+FAKE_SCOPE="default zz-wide | console ZZ-Bench" sent sent fw 192.0.2.1 mesh trace abcdef123456
+FAKE_SCOPE="default None | console not set" sent refused fw 192.0.2.1 mesh send '#badgetest' hello
+FAKE_SCOPE="default zz-bench | console zz-other" sent refused fw 192.0.2.1 mesh dm abcdef123456 hi
+FAKE_SCOPE="" sent refused fw 192.0.2.1 mesh telemetry abcdef123456 YES
+BADGE_REPO="$tmp/bare" sent refused fw 192.0.2.1 mesh send '#badgetest' hello
+FAKE_SCOPE="" sent sent fw 192.0.2.1 mesh out
+FAKE_SCOPE="" sent sent fw 192.0.2.1 mesh remote settings
+sent refused fw 192.0.2.1 mesh scope console zz-other YES
+: > "$FAKE_LOG"
+sent sent fw 192.0.2.1 mesh scope console zz-bench YES
+sent sent fw 192.0.2.1 mesh dm abcdef123456 hi
+printf 'mesh scope console zz-bench YES\nmesh scope\nmesh dm abcdef123456 hi\n' | cmp -s - "$FAKE_LOG" ||
+  { echo "FAIL: badge.sh sent $(tr '\n' '|' < "$FAKE_LOG"), expected the set, then the query before the dm" >&2; fail=1; }
 # A caller's environment cannot swap the list
 for var in ONAIR_ALLOW_FILE onair_allow_override; do
   out=$(env "$var=$tmp/evil" PATH="$tmp/bin:$PATH" BADGE_OTA_TOKEN=0123456789abcdef0123456789abcdef BADGE_HOST=none \

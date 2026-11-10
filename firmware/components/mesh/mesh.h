@@ -128,6 +128,9 @@ char const *mesh_set_path_hash(uint8_t size);
 // None (everywhere). Saved in MeshCore's prefs and live at once: adverts and messages flood only inside the region.
 // NULL when set, else why not. Sends nothing itself.
 char const *mesh_set_scope(char const *name);
+// The console scope (#290, mesh_scope.h): a region name, saved in MeshCore's directory (the factory reset clears it).
+// Every flood a console line starts takes it from then on. NULL when set, else why not. Sends nothing itself.
+char const *mesh_set_console_scope(char const *name);
 // A channel on the first free slot, saved. NULL key: a #hashtag channel (key from its lowercased name, as MeshCore's
 // apps do); else a base64 key of 16 or 32 bytes. NULL when added, else the reason.
 char const *mesh_channel_add(char const *name, char const *b64_key_or_null);
@@ -246,11 +249,15 @@ size_t mesh_contact_set_path(uint8_t const prefix[6], uint8_t path_len, uint8_t 
 // All copy-in and non-blocking: they never take the mesh lock (LVGL safe). The mesh task sends from the outbox
 // (mesh_outbox.h) through MyMesh's own command frames and tracks the state of each message.
 
+// Who asked for a send (#290). A console line's floods take the console scope, and the send is refused
+// (MESH_SCOPE_CONSOLE_UNSET, mesh_scope.h) while that is not set; a screen's take the default scope.
+typedef enum { MESH_FROM_SCREEN, MESH_FROM_CONSOLE } mesh_origin_t;
+
 // Queues a channel message: the channel is named (slots can change), the text is cut at mesh_channel_text_max() on a
 // UTF-8 boundary. 0 with *why set ("busy", "empty", "MeshCore is not running"...). Sent as "<node name>: <text>".
-mesh_msg_id_t mesh_send_channel(char const *channel_name, char const *text, char const **why);
+mesh_msg_id_t mesh_send_channel(char const *channel_name, char const *text, mesh_origin_t from, char const **why);
 // A DM to the contact with this 6-byte public key prefix; retried up to 3 times (reset path, then flood), see the outbox
-mesh_msg_id_t mesh_send_dm(uint8_t const prefix[6], char const *text, char const **why);
+mesh_msg_id_t mesh_send_dm(uint8_t const prefix[6], char const *text, mesh_origin_t from, char const **why);
 // A failed message starts over under the same id
 bool mesh_retry(mesh_msg_id_t id);
 // false when the id is unknown (evicted: the table keeps 16). Any pointer may be NULL.
@@ -275,7 +282,7 @@ size_t mesh_out_list(mesh_out_info_t *out, size_t max);
 // Starts a trace along the contact's stored path (MT_TRACE) or a path discovery (MT_DISCOVER), whose answer becomes the
 // stored path. Its number, or 0 with *why set (LoRa off, one still running, MeshCore not running...). A trace that
 // cannot go (no path, a direct companion) fails in the mesh task with the reason: mesh_trace_get shows it.
-uint32_t mesh_trace_start(uint8_t const prefix[6], mt_kind_t kind, char const **why);
+uint32_t mesh_trace_start(uint8_t const prefix[6], mt_kind_t kind, mesh_origin_t from, char const **why);
 // A copy of the current or last request (an answer that is late is timed out here); false before MeshCore is up
 bool     mesh_trace_get(mt_t *out);
 
@@ -283,7 +290,7 @@ bool     mesh_trace_get(mt_t *out);
 // Copy-in and non-blocking like the senders (LVGL safe). One request at a time over the whole badge. Nothing is sent
 // unless one of these is called: the screens call them only on an Enter of the person. arg: the password (RR_LOGIN) or
 // the command (RR_CLI), never logged.
-uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char const *arg, char const **why);
+uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char const *arg, mesh_origin_t from, char const **why);
 // The status history's poll (#168, mesh_rhist_run.c): a status request that any request of the person replaces while
 // it is queued or waiting for the answer. The seq, or 0 with *why set.
 uint32_t mesh_remote_start_background(uint8_t const prefix[6], char const **why);
@@ -296,7 +303,7 @@ bool     mesh_remote_head(rr_head_t *out);
 bool     mesh_remote_logout(uint8_t const prefix[6], uint32_t wait_ms);
 // Telemetry from any contact (#162), at most one per contact per 30 s (mesh_telem.h): the seq, or 0 with the reason in
 // why (cap bytes; "Wait N s" within the 30 s). Any task, the text is the caller's own.
-uint32_t mesh_telemetry_start(uint8_t const prefix[6], char *why, size_t cap);
+uint32_t mesh_telemetry_start(uint8_t const prefix[6], mesh_origin_t from, char *why, size_t cap);
 // The seconds left before the contact may be asked again, 0 = now.
 uint32_t mesh_telemetry_wait_s(uint8_t const prefix[6]);
 

@@ -96,7 +96,7 @@ bool rs_run_step(rs_run_t *x) {
     char cmd[RS_CMD_MAX + 1];
     if (rs_next(&x->rs, cmd, sizeof(cmd))) {
         char const *why = NULL;
-        x->seq          = mesh_remote_start(x->target, RR_CLI, cmd, &why);
+        x->seq          = mesh_remote_start(x->target, RR_CLI, cmd, x->from, &why);
         wipe(cmd, sizeof(cmd)); // may hold a new password
         if (!x->seq) {
             x->why = why;
@@ -134,7 +134,7 @@ static bool con_login(void) {
         return false;
     }
     char const *why = NULL;
-    uint32_t    seq = mesh_remote_start(con->target, RR_LOGIN, pw, &why);
+    uint32_t    seq = mesh_remote_start(con->target, RR_LOGIN, pw, MESH_FROM_CONSOLE, &why);
     wipe(pw, sizeof(pw));
     if (!seq) {
         console_reply("settings: login not started: %s", why ? why : "?");
@@ -209,6 +209,7 @@ void mesh_rset_console_read(uint8_t const prefix[6]) {
         }
     }
     rs_run_init(con, prefix);
+    con->from = MESH_FROM_CONSOLE; // its floods take the console scope (#290)
     __atomic_store_n(&con_running, true, __ATOMIC_RELEASE);
     if (!lichen_task_start(meshcore_self(), "meshrset", con_task, NULL, CON_STACK, LICHEN_PRIO_JOB, NULL)) {
         __atomic_store_n(&con_running, false, __ATOMIC_RELEASE);
