@@ -142,6 +142,12 @@ FAKE_SCOPE="default None | console zz-bench x" sent refused fw 192.0.2.1 mesh se
 FAKE_SCOPE=$'default None | console zz-bench\ndefault None | console zz-bench' sent refused fw 192.0.2.1 mesh send '#badgetest' hi
 FAKE_SCOPE=$'chat: hello\ndefault None | console zz-bench\nI (123) mesh: x' sent sent fw 192.0.2.1 mesh send '#badgetest' hi
 FAKE_SCOPE=$'default None | console zz-bench | console zz-other' sent refused fw 192.0.2.1 mesh send '#badgetest' hi
+# The USB console prefixes every reply line with "fw: " (#301): exactly one such prefix counts, nothing else does
+FAKE_SCOPE="fw: default None | console zz-bench" sent sent fw 192.0.2.1 mesh send '#badgetest' hi
+FAKE_SCOPE="fw: default None | console zz-other" sent refused fw 192.0.2.1 mesh send '#badgetest' hi
+FAKE_SCOPE="fw: fw: default None | console zz-bench" sent refused fw 192.0.2.1 mesh send '#badgetest' hi
+FAKE_SCOPE="fw: chat: default None | console zz-bench" sent refused fw 192.0.2.1 mesh send '#badgetest' hi
+FAKE_SCOPE=$'fw: default None | console zz-bench\ndefault None | console zz-bench' sent refused fw 192.0.2.1 mesh send '#badgetest' hi
 sent refused fw 192.0.2.1 mesh scope console zz-other YES
 sent sent fw 192.0.2.1 mesh history TESTNODE on 60 YES
 FAKE_SCOPE="default None | console not set" sent refused fw 192.0.2.1 mesh history TESTNODE on 60 YES

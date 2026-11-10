@@ -93,7 +93,8 @@ onair_scope_verdict() {
         echo "deny no 'scope <region>' line in .claude/onair-allow.local: no console line with a target goes on air without one (#290)"
         return
     fi
-    lines=$(printf '%s\n' "$1" | tr -d '\r' | grep -E '^default [^ |]+ \| console ([^ |]+|not set)$' || true)
+    # The USB console prints every reply line behind "fw: " (#301): exactly that one prefix, never any other text
+    lines=$(printf '%s\n' "$1" | tr -d '\r' | grep -E '^(fw: )?default [^ |]+ \| console ([^ |]+|not set)$' || true)
     if [ "$(printf '%s' "$lines" | grep -c '^')" != 1 ]; then
         echo "deny no single status line in the badge's answer to the scope query: not sent (#290)"
         return
