@@ -1392,6 +1392,17 @@ target_include_directories(hosted_link_test PRIVATE
 target_compile_options(hosted_link_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME hosted_link_test COMMAND hosted_link_test)
 
+# The fixed Wi-Fi frame pools of the esp_hosted SDIO host (#260)
+add_executable(frame_pool_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/frame_pool_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/host/mcu/eh_host_mcu_transport/src/eh_frame_pool_core.c
+)
+target_include_directories(frame_pool_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/host/mcu/eh_host_mcu_transport/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../esp_hosted/host/compat/include)
+target_compile_options(frame_pool_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME frame_pool_test COMMAND frame_pool_test)
+
 add_executable(sd_policy_test
     ${CMAKE_CURRENT_SOURCE_DIR}/sd_policy_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard/sd_policy.c

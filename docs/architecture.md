@@ -69,6 +69,12 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
   host reset on GPIO12. `TRANSPORT_RESTART_ON_FAILURE=n`: a failed transfer posts `TRANSPORT_FAILURE`, which c6sup
   recovers from instead of aborting the P4.
 - **Lost-wakeup fix:** lives in our `esp_hosted/` fork (submodule). Do not bump or replace the submodule without it.
+- **Frame pools (#260):** Wi-Fi data frames (STA/AP) come from fixed pools in internal DMA RAM, reserved at link-up and
+  freed at link-down (`esp_hosted/.../eh_host_frame_pool.c`); depths are `CONFIG_ESP_HOSTED_HOST_SDIO_TX_Q_SIZE` /
+  `RX_Q_SIZE` (10/10 = 32896 B with the TX stream buffer). Empty TX pool: the sender waits up to
+  `TX_POOL_WAIT_MS` (5), then lwIP gets `ESP_ERR_ESP_NETIF_TX_FAILED`; empty RX pool: the frame is dropped and counted.
+  RPC/HCI frames stay on the heap. The received copy for lwIP goes to PSRAM (no DMA reads it). `fw c6` shows
+  `c6: pool tx|rx depth .. in_use .. peak .. waits .. drops ..`.
 - **TCP window:** `CONFIG_LWIP_TCP_WND_DEFAULT=16384` (16 KiB), `LWIP_TCP_RECVMBOX_SIZE=16`.
 - **`WIFI_PS_NONE`:** `lichen_net/wifi_service.c:152` (`wifi_ps_mode`, #146/#76). The IDF default modem sleep gives RTT spikes of
   seconds; `fw wifi ps` changes it.

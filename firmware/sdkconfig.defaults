@@ -95,6 +95,13 @@ CONFIG_ESP_HOSTED_HOST_FEAT_PEER_DATA=y
 # A failed SDIO transfer posts TRANSPORT_FAILURE; Lichen's C6 supervisor recovers from it (#14) instead of
 # esp_hosted aborting the P4
 CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=n
+# Wi-Fi frames come from fixed pools in internal DMA RAM, reserved at link-up (#260); the queue sizes are the pool
+# depths. Cost: TX depth x 1600 B + RX depth x 1536 B + one 1536 B TX stream buffer (10/10: 32896 B). 10/10 is a
+# start; the bench measures throughput at 20/12/8/6 and picks the smallest within ~10 %.
+CONFIG_ESP_HOSTED_HOST_SDIO_FRAME_POOLS=y
+CONFIG_ESP_HOSTED_HOST_SDIO_TX_POOL_WAIT_MS=5
+CONFIG_ESP_HOSTED_HOST_SDIO_TX_Q_SIZE=10
+CONFIG_ESP_HOSTED_HOST_SDIO_RX_Q_SIZE=10
 CONFIG_WIFI_RMT_STATIC_TX_BUFFER=y
 # CONFIG_WIFI_RMT_SOFTAP_SUPPORT is not set
 # The Wi-Fi side runs on the C6, which has no PSRAM: don't ask it for TX cache buffers

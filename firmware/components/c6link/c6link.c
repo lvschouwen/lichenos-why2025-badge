@@ -9,6 +9,7 @@
 #include "c6_paths.h"
 #include "fw_console.h"
 #include "esp_hosted.h"
+#include "esp_hosted_frame_pool.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -302,6 +303,20 @@ void c6link_check_ident_runtime(void) {
     }
 }
 
+// The Wi-Fi frame pools of the link (#260): how deep they got, and how often a frame waited or was dropped
+__attribute__((noinline)) static void report_frame_pools(void) { // own frame: cmd_c6_status is near the stack warn line
+    esp_hosted_frame_pool_stats_t st;
+    char                          line[160];
+    for (int tx = 1; tx >= 0; tx--) {
+        if (!esp_hosted_frame_pool_stats(tx, &st)) {
+            console_reply("c6: frame pools off (per-frame malloc)");
+            return;
+        }
+        esp_hosted_frame_pool_fmt(line, sizeof(line), tx ? "c6: pool tx" : "c6: pool rx", &st);
+        console_reply("%s", line);
+    }
+}
+
 static void cmd_c6_status(void) {
     char stored[C6_BUNDLE_KEY_MAX];
     bool verify = false;
@@ -315,6 +330,7 @@ static void cmd_c6_status(void) {
     char line[C6W_REASON_MAX + 64];
     c6_sup_watch_line(line, sizeof(line));
     console_reply("%s", line);
+    report_frame_pools();
     console_reply("c6 reflash | verify (full check on the next boot) | reset [rom] (pulse C6 EN now) | reattach (#14)");
 }
 
