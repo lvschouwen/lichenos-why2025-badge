@@ -23,8 +23,7 @@ bool lichen_sys_psram_trial_pending(void);
 // The tuning line ("phase 67.50 (run 4/4), delayline idx 15 ..."); returns the length. Any task.
 size_t lichen_sys_psram_tuning_text(char *out, size_t cap);
 
-// One DMA gate round over PSRAM and the SD card (3 MB of PSRAM and 8 KB of internal DMA RAM for a few seconds): BUSY =
-// another gate holds the engine, NOT_RUN = no memory or no AXI-GDMA. Not on the LVGL task.
+// Result of lichen_sys_psram_round: BUSY = another gate holds the engine, NOT_RUN = no memory or no AXI-GDMA
 typedef enum {
     LICHEN_SYS_PSRAM_ROUND_PASS,
     LICHEN_SYS_PSRAM_ROUND_FAIL,
@@ -36,5 +35,6 @@ typedef struct {
     unsigned errors;
     bool     sd_skipped;
 } lichen_sys_psram_round_info_t;
-// info may be NULL; zeros unless the round ran.
+// One DMA gate round over PSRAM and the SD card (3 MB of PSRAM and 8 KB of internal DMA RAM for a few seconds). Not on
+// the LVGL task. info may be NULL; zeros unless the round ran.
 lichen_sys_psram_round_t lichen_sys_psram_round(lichen_sys_psram_round_info_t *info);

@@ -1,6 +1,6 @@
-// The hardware-touching part of lichen_sys_clock.h, lichen_sys_net.h, lichen_sys_c6.h, lichen_sys_psram.h, lichen_sys_boot.h, lichen_sys_keys.h and
-// lichen_sys_led.h (#244): forwards to the clock, Wi-Fi, mDNS, boot progress, keyboard and LED services, which the
-// shell may not include (tools/layers.conf). The pure helpers are in lichen_sys_pure_view.c. The gate's types repeat
+// The hardware-touching part of lichen_sys_clock.h, lichen_sys_net.h, lichen_sys_c6.h, lichen_sys_psram.h,
+// lichen_sys_boot.h, lichen_sys_keys.h and lichen_sys_led.h (#244, #284): forwards to the clock, Wi-Fi, mDNS, C6 link,
+// PSRAM guard, boot progress, keyboard and LED services, which the shell may not include (tools/layers.conf). The pure helpers are in lichen_sys_pure_view.c. The gate's types repeat
 // the services' and are asserted equal there.
 #include "boot_progress.h"
 #include "c6link.h"
@@ -154,6 +154,18 @@ bool lichen_sys_wifi_ip(char *ip, size_t cap) {
     return wifi_has_ip(ip, cap);
 }
 
+bool lichen_sys_wifi_joining(void) {
+    return wifi_joining();
+}
+
+bool lichen_sys_wifi_has_credentials(void) {
+    return wifi_has_credentials();
+}
+
+bool lichen_sys_wifi_rssi(int8_t *out) {
+    return wifi_rssi(out);
+}
+
 bool lichen_sys_wifi_join(char const *ssid, char const *pass) {
     return wifi_set_credentials(ssid, pass);
 }
@@ -164,18 +176,6 @@ bool lichen_sys_wifi_forget(char const *ssid) {
 
 size_t lichen_sys_wifi_saved_names(char (*out)[33], size_t max) {
     return wifi_saved_names(out, max);
-}
-
-bool lichen_sys_wifi_rssi(int8_t *out) {
-    return wifi_rssi(out);
-}
-
-bool lichen_sys_wifi_joining(void) {
-    return wifi_joining();
-}
-
-bool lichen_sys_wifi_has_credentials(void) {
-    return wifi_has_credentials();
 }
 
 // The C6 link and the LoRa counts (lichen_sys_c6.h)
@@ -231,6 +231,8 @@ size_t lichen_sys_psram_tuning_text(char *out, size_t cap) {
     return psram_boot_tuning_text(out, cap);
 }
 
+_Static_assert(sizeof(lichen_sys_psram_round_info_t) == sizeof(psram_dma_round_info_t),
+               "the gate's round info follows psram's");
 _Static_assert((int)LICHEN_SYS_PSRAM_ROUND_PASS == (int)PSRAM_DMA_ROUND_PASS &&
                    (int)LICHEN_SYS_PSRAM_ROUND_FAIL == (int)PSRAM_DMA_ROUND_FAIL &&
                    (int)LICHEN_SYS_PSRAM_ROUND_BUSY == (int)PSRAM_DMA_ROUND_BUSY &&

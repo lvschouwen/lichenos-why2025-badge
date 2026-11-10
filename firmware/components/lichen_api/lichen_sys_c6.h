@@ -14,7 +14,7 @@ bool lichen_sys_c6_up(void);
 // is up. Any task.
 bool lichen_sys_c6_trouble(char *out, size_t cap);
 // C6 outages the badge came back from (#14); reason gets the last recovery in words. Only the sys_notices task calls it
-// (the status is too big for a stack).
+// (the status is too big for a stack). Not on the LVGL task; one caller at a time (it uses a shared static).
 uint32_t lichen_sys_c6_restarts(char *reason, size_t cap);
 // The LoRa radio runs and the C6 link is up. Any task.
 bool lichen_sys_lora_up(void);
