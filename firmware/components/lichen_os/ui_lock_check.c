@@ -145,9 +145,17 @@ void lichen_sys_ui_lockcheck_cmd(char const *args) {
     }
     report();
 }
+
+uint32_t lichen_sys_ui_lockcheck_hits(void) {
+    return atomic_load(&s_hits.total);
+}
 #else
 void lichen_sys_ui_lockcheck_cmd(char const *args) {
     (void)args;
     console_reply("ui lockcheck: not built in (CONFIG_LICHEN_UI_LOCK_CHECK_MODE is off)");
+}
+
+uint32_t lichen_sys_ui_lockcheck_hits(void) {
+    return 0;
 }
 #endif

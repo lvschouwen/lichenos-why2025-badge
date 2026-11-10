@@ -346,25 +346,39 @@ static void sweep(run_t *r, unsigned burst) {
     psram_speed_gate_result(gate); // after the buffers are freed: a failed gate at 120 MHz restarts the badge
 }
 
-// One automatic round for the 120 MHz trial (#121): every pattern on the three AXI-GDMA legs and the SD legs (skipped
-// without a card, not a failure). Runs on the trial's own task, not the console; refuses to overlap a console run.
-bool psram_dma_quick_gate(void) {
+// One automatic round (#121): every pattern on the three AXI-GDMA legs and the SD legs (skipped without a card, not a
+// failure). Runs on its caller's task, not the console; refuses to overlap a console run or another round (BUSY).
+psram_dma_round_t psram_dma_quick_round(psram_dma_round_info_t *info) {
     static run_t r;
     if (atomic_flag_test_and_set(&s_busy)) {
-        return true; // a console run is on: its result reaches psram_speed_gate_result itself
+        if (info) {
+            *info = (psram_dma_round_info_t){0};
+        }
+        return PSRAM_DMA_ROUND_BUSY;
     }
     memset(&r, 0, sizeof(r));
-    bool ok = setup(&r, 64);
-    if (ok) {
+    psram_dma_round_t result = PSRAM_DMA_ROUND_NOT_RUN;
+    if (setup(&r, 64)) {
         for (int p = 0; p < PSRAM_DMA_PATTERNS && !r.errors; p++) {
             one_pattern(&r, (psram_dma_pattern_t)p);
         }
         legs_sd(&r);
-        ok = !gate_failed(&r);
+        result = gate_failed(&r) ? PSRAM_DMA_ROUND_FAIL : PSRAM_DMA_ROUND_PASS;
+    }
+    if (info) {
+        *info = (psram_dma_round_info_t){.bad_bytes  = (uint32_t)(r.bad_total - r.sd_bad[0]),
+                                         .errors     = r.errors,
+                                         .sd_skipped = r.sd_skipped};
     }
     teardown(&r);
     atomic_flag_clear(&s_busy);
-    return ok;
+    return result;
+}
+
+// The 120 MHz trial's gate: busy is a pass here, a console run's result reaches psram_speed_gate_result itself
+bool psram_dma_quick_gate(void) {
+    psram_dma_round_t result = psram_dma_quick_round(NULL);
+    return result == PSRAM_DMA_ROUND_PASS || result == PSRAM_DMA_ROUND_BUSY;
 }
 
 static void psram_dma_cmd_locked(char const *args);

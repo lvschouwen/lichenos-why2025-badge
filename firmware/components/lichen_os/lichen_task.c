@@ -3,6 +3,7 @@
 // runs right before vTaskDelete and must not block. A stack outside internal RAM (#269) is made WithCaps; such a task
 // never returns (a return parks it, see park()).
 #include "lichen_task.h"
+#include "lichen_sys_mem.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -260,6 +261,35 @@ static void cmd_tasks(char const *args) {
                   (unsigned)task_stack_reserve(TASK_STACK_LP_RAM));
     heap_caps_free(tasks);
     heap_caps_free(snap);
+}
+
+// lichen_sys_mem.h (#278): the size comes from the book, so only booked tasks have one
+static uint32_t booked_size(TaskHandle_t h) {
+    uint32_t size = 0;
+    portENTER_CRITICAL(&book_mux);
+    for (int i = 0; i < TASK_BOOK_SLOTS; i++) {
+        if (book.slot[i].used && book.slot[i].handle == h) {
+            size = book.slot[i].stack;
+        }
+    }
+    portEXIT_CRITICAL(&book_mux);
+    return size;
+}
+
+size_t lichen_sys_mem_stacks(lichen_sys_stack_t *out, size_t cap) {
+    UBaseType_t   n     = uxTaskGetNumberOfTasks() + 4; // room for tasks started meanwhile
+    TaskStatus_t *tasks = heap_caps_malloc(n * sizeof(TaskStatus_t), MALLOC_CAP_SPIRAM);
+    if (!tasks) {
+        return 0;
+    }
+    n = uxTaskGetSystemState(tasks, n, NULL);
+    for (UBaseType_t i = 0; i < n && i < cap; i++) {
+        strlcpy(out[i].name, tasks[i].pcTaskName, sizeof(out[i].name));
+        out[i].free = tasks[i].usStackHighWaterMark;
+        out[i].size = booked_size(tasks[i].xHandle);
+    }
+    heap_caps_free(tasks);
+    return n;
 }
 
 void lichen_task_console_register(void) {

@@ -317,6 +317,16 @@ __attribute__((noinline)) static void report_frame_pools(void) { // own frame: c
     }
 }
 
+bool c6link_frame_pool(bool tx, uint16_t *in_use, uint16_t *peak, uint32_t *waits, uint32_t *drops) {
+    esp_hosted_frame_pool_stats_t st;
+    bool                          on = esp_hosted_frame_pool_stats(tx, &st); // zeros when off
+    *in_use = st.in_use;
+    *peak   = st.peak;
+    *waits  = st.waits;
+    *drops  = st.drops;
+    return on;
+}
+
 static void cmd_c6_status(void) {
     char stored[C6_BUNDLE_KEY_MAX];
     bool verify = false;

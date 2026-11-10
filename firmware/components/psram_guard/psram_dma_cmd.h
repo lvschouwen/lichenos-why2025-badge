@@ -15,6 +15,18 @@ void psram_dma_cmd(char const *args);
 // for a few seconds; on its own task, not on the guard task.
 bool psram_dma_quick_gate(void);
 
+// The same round for a caller that must tell a pass from a round that never ran (the Stress app, #278): BUSY = another
+// DMA gate (a console run, the trial's, another round) holds it, NOT_RUN = no memory or no AXI-GDMA. info (may be NULL)
+// gets the judged bad bytes (AXI-GDMA legs and the bounced SD leg), the DMA errors and whether the SD legs were skipped;
+// zeros unless the round ran. psram_dma_quick_gate is this with BUSY counted as a pass.
+typedef enum { PSRAM_DMA_ROUND_PASS, PSRAM_DMA_ROUND_FAIL, PSRAM_DMA_ROUND_BUSY, PSRAM_DMA_ROUND_NOT_RUN } psram_dma_round_t;
+typedef struct {
+    uint32_t bad_bytes;
+    unsigned errors;
+    bool     sd_skipped;
+} psram_dma_round_info_t;
+psram_dma_round_t psram_dma_quick_round(psram_dma_round_info_t *info);
+
 // The SD leg (#120 flipped on the SDMMC -> PSRAM path; the AXI-GDMA legs alone did not reproduce it at 120 MHz):
 // sdcard.c registers a read-only raw sector reader at start. psram_guard cannot depend on sdcard (board -> psram_guard
 // -> sdcard -> board would be a cycle). begin/end wrap the card's batch mutex; read moves 512-byte sectors by the

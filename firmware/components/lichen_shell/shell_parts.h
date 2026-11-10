@@ -62,6 +62,7 @@ void about_app_register(void);
 void files_app_register(void); // app_files.c (#71): browse /storage and the SD card
 void bench_app_register(void); // app_bench.c (#96); also registers "fw bench"
 bool bench_running(void);      // app_bench.c: a run is measuring (LVGL task)
+void stress_app_register(void); // app_stress.c (#278); also registers "fw stress"
 // attention.c (#164): the keyboard light pulse for a new message and the flashlight (Settings > Display, "fw flashlight")
 void attention_init(void);                           // registers "fw flashlight"; from shell_start
 void attention_on_toast(uint32_t id, uint8_t level); // notify_ui.c, LVGL task: a toast with feedback starts to show

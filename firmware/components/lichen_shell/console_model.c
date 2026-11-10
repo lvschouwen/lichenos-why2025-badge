@@ -36,7 +36,7 @@ static allow_t const allowed[] = {
     {"bench", NULL},  {"boot", NULL},    {"ui", NULL},     {"idle", NULL},     {"thermal", NULL}, {"i2c", NULL},
     {"sensors", NULL}, {"psram", NULL},  {"led", NULL},    {"vib", NULL},      {"screensaver", NULL}, {"bl", NULL},
     {"whatsnew", NULL}, {"home", NULL},  {"airplane", NULL}, {"msgs", NULL},   {"channels", NULL}, {"advert", NULL},
-    {"contacts", "-"}, {"tasks", NULL},
+    {"contacts", "-"}, {"tasks", NULL}, {"stress", NULL},
     {"mesh", "- link out chats hist"},
     {"sd", "- status mount unmount test"},
     {"crash", "- dump"},

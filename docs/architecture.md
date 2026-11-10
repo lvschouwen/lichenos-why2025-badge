@@ -387,6 +387,44 @@ line. The app profile (L6) is a closed set of libraries, headers and forbidden s
 deleted); crash attribution through RTC no-init and a boot-loop breaker (2 crashes attributed to one app in 3 boots
 switch its background off and notify); task-watchdog heartbeats; quotas that refuse rather than exhaust.
 
+## Stress run (#278)
+
+The Stress app (`lichen_shell/app_stress.c`, `fw stress [1-30 | stop | status]`, default 10 min) loads the badge for
+minutes and reports how deep memory and stacks went (the numbers #268 needs). `stress_workers.c` runs it on OS tasks
+(`lichen_task_start_in`, internal stacks): stress-mon (SERVICE, 4 KB), stress-dma and stress-sd (BACKGROUND, 6 KB),
+stress-fs (BACKGROUND, 4 KB), stress-lat (SERVICE, 2 KB), plus an LVGL timer that redraws the screen on top every
+100 ms. Workers: DMA gate rounds (`psram_dma_quick_round`: a busy gate is counted as skipped, never as a pass) and a
+cache-flushed 1 MB PSRAM copy checked against its pattern; 64 KB write/read/compare/delete in `/sd/lichen/stress`
+(paced so a run writes at most 64 MB); a 512 B file on `/storage` every 10 s; a 10 ms latency probe. LoRa is never
+used: nothing is transmitted. Wi-Fi load comes from the host: `tools/stress_host.sh <host> <minutes>` pulls `/log` and
+`/screenshot` in a loop and exits non-zero on the first answer that is not 200.
+
+- **Refused** while a run is on, during an update or power off, during the 120 MHz PSRAM trial (its gate would see a
+  busy engine), with the C6 link not up, at a thermal warning, or under 48 KB free DMA RAM or 8 MB free PSRAM. No card:
+  the SD worker is skipped and the start line says so. The badge cannot read its battery (Settings > Battery), so
+  there is no battery interlock.
+- **Stops** at the first failure (`stress_calc.c`, in this order): a file or copy read back different (`mismatch`), DMA
+  bad bytes or errors (`dma_bad`), a failed heap integrity check (`heap`; internal every sample, PSRAM every minute and
+  at the end), a worker without its buffers (`alloc`), a `fw ui lockcheck` hit during the run (`lockcheck`), the probe
+  over 250 ms late (`latency`), DMA free under 16 KB (`dma_floor`), a stack whose high-water fell under 256 B during the
+  run (`stack`; tasks that were already that low at the start are reported, not failed). Esc on the screen,
+  `fw stress stop`, power off and an update stop it too, without failing it. The test files go on every exit path, and
+  leftovers of a cut run go at the next start.
+- **Lines**: one path, `ESP_LOG` with the tag `stress` (UART and the log store alike, from the tile or the console;
+  the console only acknowledges with `stress started ...`, `stress refused: ...`, `stress status: ...`, which never
+  contain `stress:`). Pinned by `host_tests/stress_calc_test.c`:
+  - I `stress: start <m> min workers dma,sd,fs,ui,lat` (without a card `workers dma,fs,ui,lat sd skipped: no card`);
+    W `stress: skip sd: no card`
+  - I every 10 s `stress: t=<s>s dma free=<B> min=<B> largest=<B> int free=<B> min=<B> largest=<B> psram=<B> pool
+    peak=<n> drop=<n> lat=<ms>ms ok` (the reason instead of `ok` once the run stopped)
+  - E `stress: STOP <reason> at <s>s` for a failure (W for esc, stop, poweroff, update); before a `stack` stop, E
+    `stress: stack low <task> <free>/<size>`; E `stress: dma round failed: ...`, W `stress: skip dma round: another DMA
+    gate is running`
+  - the report: `stress: done <s>s PASS|FAIL` (I, E for FAIL), `stress: min ...` (the lowest free figures, the
+    highest peak, drops and lateness), `stress: stack <task> <free>/<size>` per task (`?` for a task the OS did not
+    book), `stress: errors dma_bad=.. dma_busy=.. mismatch=.. alloc=.. heap=.. lock=.. sd_io=.. fs_io=..`,
+    `stress: work dma=.. copies=.. sd=.. sd_kb=.. fs=.. frames=..`.
+
 ## Lessons from BadgeVMS
 
 Kept:

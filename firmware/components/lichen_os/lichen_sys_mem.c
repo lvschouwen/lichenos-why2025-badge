@@ -1,5 +1,8 @@
-// lichen_sys_mem.h (#228): the shell's and main's heap figures over heap_caps, so that only lichen_os calls it.
+// lichen_sys_mem.h (#228): the shell's and main's heap figures over heap_caps, so that only lichen_os calls it; the
+// C6 link's frame pools through c6link (#278: esp_hosted is reached only through c6link and lora).
 #include "lichen_sys_mem.h"
+
+#include "c6link.h"
 
 #include "esp_heap_caps.h"
 
@@ -26,6 +29,14 @@ size_t lichen_sys_mem_largest(lichen_sys_mem_kind_t kind) {
 
 size_t lichen_sys_mem_total(lichen_sys_mem_kind_t kind) {
     return heap_caps_get_total_size(caps_of(kind));
+}
+
+size_t lichen_sys_mem_min(lichen_sys_mem_kind_t kind) {
+    return heap_caps_get_minimum_free_size(caps_of(kind));
+}
+
+bool lichen_sys_mem_frame_pool(bool tx, lichen_sys_frame_pool_t *out) {
+    return c6link_frame_pool(tx, &out->in_use, &out->peak, &out->waits, &out->drops);
 }
 
 void lichen_sys_mem_internal(size_t *free_now, size_t *free_min) {

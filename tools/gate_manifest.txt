@@ -183,9 +183,12 @@ lichen_sys_log_clean	SYSTEM	any	lichen_sys_boot.h
 lichen_sys_log_tap_last	SYSTEM	any	lichen_sys_boot.h
 lichen_sys_mdns_name	SYSTEM	any	lichen_sys_net.h
 lichen_sys_mem_check	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_frame_pool	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_free	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_internal	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_largest	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_min	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_stacks	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_total	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_walk	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_power_screen_off	SYSTEM	unspecified	lichen_sys_power.h
@@ -205,6 +208,7 @@ lichen_sys_storage_mounted	SYSTEM	any	lichen_sys_storage.h
 lichen_sys_ui_call	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lock	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_cmd	SYSTEM	any	lichen_sys_ui.h
+lichen_sys_ui_lockcheck_hits	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_unlock	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_update_auto_closed	SYSTEM	any	lichen_sys_update.h
 lichen_sys_update_auto_off	SYSTEM	any	lichen_sys_update.h

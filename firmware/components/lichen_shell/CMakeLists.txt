@@ -15,7 +15,8 @@
 # thermal_rules.c (thermal_rules_test.c, #10; thermal.c is the watchdog service, app_battery.c Settings > Battery).
 # notify_ui.c and notify_centre.c are the notifications' toast, tile badges, cloud key, centre and settings page (#62).
 # factory_screen.c is Settings > Factory reset and factory_combo.c the boot key combo (#66; the logic is lichen_boot's factory_plan.c).
-# app_bench.c is the Bench app (#96), app_crashlog.c the Crash log app (#72, on lichen_crashlog.h), app_power.c the Power app (#65).
+# app_bench.c is the Bench app (#96); app_stress.c the Stress app (#278: stress_workers.c runs the load, stress_calc.c,
+# pure, stress_calc_test.c, judges it and writes its lines), app_crashlog.c the Crash log app (#72, on lichen_crashlog.h), app_power.c the Power app (#65).
 # release_notes.c (release_notes_test.c, #13; notes_app.c is the Release notes app and "This is new", notes_render.c its markdown).
 # app_files.c is the Files app (#71): files_job.c runs its file work off the LVGL task, files_ops.c is plain POSIX
 # (files_ops_test.c) and files_model.c the paths, protected list, sort and text paging (files_model_test.c).
@@ -53,7 +54,7 @@ endif()
 idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_render.c" "log_store.c" "log_ring.c" "nav.c" "shell.c" "shell_ui_ops.c" "home.c" "home_layout.c"
                             "app_settings.c" "attention.c" "attention_policy.c" "app_about.c" "station_view.c" "raw_keys.c" "app_icons.c" "wifi_screen.c" "wifi_analyser_screen.c" "setup_state.c" "setup_screens.c" "ui_keys.c" "ui_overflow.c" "ui_probe.c" "remote_ctl.c" "ui_remote.c"
                             "boot_screen.c" "status_bar.c" "lora_activity.c" "link_state.c" "logo.c" "update_status.c" "update_mode.c" "update_screen.c" "shot_blend.c" "screenshot.c" "time_fields.c" "time_set_screen.c"
-                            "dialog.c" "dialog_countdown.c" "ui_check.c" "ui_perf.c" "ui_perf_stats.c" "app_bench.c" "bench_calc.c" "app_crashlog.c" "app_power.c" "app_console.c" "console_model.c"
+                            "dialog.c" "dialog_countdown.c" "ui_check.c" "ui_perf.c" "ui_perf_stats.c" "app_bench.c" "bench_calc.c" "app_stress.c" "stress_workers.c" "stress_calc.c" "app_crashlog.c" "app_power.c" "app_console.c" "console_model.c"
                             "sd_screen.c" "sd_settings_model.c"
                             "idle_policy.c" "restart_frame.c" "draw_stack.c" "draw_call.c" "screen_idle.c" "lock_combo.c" "saver_layout.c" "screen_saver.c" "station_clock.c" "saver_station.c"
                             "notify_view.c" "notify_ui.c" "notify_centre.c" "sys_notices.c" "sys_notice_rules.c"

@@ -18,7 +18,8 @@
 # passwords, never backed up or kept by a reset; settings_secret_keys.c, pure, names the class) and settings_store.c
 # binds it into lichen_net, which may not open NVS itself.
 # lichen_sys_display.c: lichen_sys_display.h and lichen_sys_power.h (#226) over board's backlight driver.
-# lichen_sys_mem.c: the heap figures and the diagnostic walk for the shell and main (#228).
+# lichen_sys_mem.c: the heap figures and the diagnostic walk for the shell and main (#228), and the C6 link's Wi-Fi
+# frame pool figures for the Stress app (#278, through c6link); lichen_task.c also gives it every task's stack.
 # lichen_sys_storage.c / lichen_sys_update.c: lichen_sys_storage.h (SD card and storage drive), lichen_sys_update.h,
 # lichen_sys_crash.h and lichen_sys_factory.h's request (#227); lichen_sys_pure.c their ESP-free parts (host-tested).
 # lichen_sys_pure_view.c / lichen_sys_view.c (#244): the shell's clock, Wi-Fi, mDNS, boot progress, keyboard-hook and LED
@@ -33,7 +34,7 @@ idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_bac
                             "ui_call_queue.c" "ui_lock_owner.c" "ui_lock_hits.c" "ui_lock_check.c" "dma_low.c" "dma_watch.c"
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES lichen_api freertos esp_hw_support esp_timer assets fw_console nvs_flash heap storage sdcard
-                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns)
+                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns c6link)
 
 # The debug lock-owner check (#225): LVGL's allocator and lv_inv_area go through ui_lock_check.c
 if(CONFIG_LICHEN_UI_LOCK_CHECK)

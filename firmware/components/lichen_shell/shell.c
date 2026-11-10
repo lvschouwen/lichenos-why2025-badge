@@ -719,6 +719,7 @@ void shell_start(lv_display_t *display) {
     about_app_register();
     files_app_register();
     bench_app_register();
+    stress_app_register();
     crashlog_app_register();
     power_app_register();
     notify_app_register();

@@ -29,6 +29,8 @@ static void test_public(void) {
     CHECK(console_line_is_public("wifi"));
     CHECK(console_line_is_public("mesh link"));
     CHECK(console_line_is_public("mem blocks internal"));
+    CHECK(console_line_is_public("stress 5")); // #278
+    CHECK(console_line_is_public("fw stress status"));
     CHECK(!console_line_is_public("wifi MyNet hunter2")); // an ssid + password
     CHECK(!console_line_is_public("wifi --clear"));
     CHECK(!console_line_is_public("wifi on hunter2pass")); // cmd_wifi reads this as ssid "on" + a password
