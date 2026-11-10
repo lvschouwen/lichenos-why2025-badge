@@ -74,6 +74,11 @@ typedef struct {
     uint32_t beats;   // since boot
     uint32_t misses;  // since boot
     uint32_t cp_inits; // unexpected C6 boot announcements since boot
+    // The C6 numbers its beats (1, 2, ... from its boot): a jump while beats still arrive means events lost on the way
+    // (a full event loop), not a dead C6; those are counted as dropped instead of misses
+    bool     has_num;
+    uint32_t last_num;
+    uint32_t dropped; // since boot
 } c6w_heartbeat_t;
 
 typedef struct {
@@ -115,12 +120,13 @@ unsigned c6_watch_attached(c6_watch_t *w, bool ok, uint32_t c6_uptime_ms, uint32
 // Starts the next attempt when it is due; counts a missed heartbeat (HB_MISSED) or asks for it again (HB_ARM)
 unsigned c6_watch_tick(c6_watch_t *w, uint32_t now_ms);
 // Heartbeat (#277). A link-up (the boot attach, every re-attach) asks for the heartbeat (HB_ARM) and forgets the old
-// session's beats; the result of that request; a beat; an unexpected C6 boot announcement (CP_INIT logs it, and with
-// hb.act set it starts an outage).
+// session's beats; the result of that request; a beat (num: the C6's own beat number); an unexpected C6 boot
+// announcement raised at raised_ms (CP_INIT logs it, and with hb.act set it starts an outage).
 unsigned c6_watch_hb_link_up(c6_watch_t *w, uint32_t now_ms);
 void     c6_watch_hb_armed(c6_watch_t *w, bool ok, uint32_t now_ms);
-void     c6_watch_hb_beat(c6_watch_t *w, uint32_t now_ms);
-unsigned c6_watch_cp_init(c6_watch_t *w, uint32_t now_ms);
+// Returns the beats that the jump in num shows were dropped (0 normally)
+uint32_t c6_watch_hb_beat(c6_watch_t *w, uint32_t num, uint32_t now_ms);
+unsigned c6_watch_cp_init(c6_watch_t *w, uint32_t raised_ms, uint32_t now_ms);
 // The `fw c6` heartbeat line: "c6: heartbeat every 30 s | beats 12 | misses 0 (log only)"
 size_t   c6_watch_hb_line(c6_watch_t const *w, char *out, size_t cap);
 // The `fw c6` line: "c6: up | restarts 1 | last: <reason>", "c6: recovering 2/3 | ...", "c6: down (no answer) | ...".

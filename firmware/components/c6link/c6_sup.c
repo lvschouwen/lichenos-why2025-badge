@@ -146,6 +146,17 @@ void c6link_set_hooks(c6link_hooks_t const *h) {
     }
 }
 
+// The C6's beat number shows events lost between the chips (#277 review): counted as dropped, not missed
+static void on_beat(void const *data) {
+    uint32_t num = data ? ((eh_host_event_heartbeat_t const *)data)->heartbeat : 0;
+    portENTER_CRITICAL(&watch_lock);
+    uint32_t gap = c6_watch_hb_beat(&watch, num, now_ms());
+    portEXIT_CRITICAL(&watch_lock);
+    if (gap) {
+        ESP_LOGW(TAG, "c6: heartbeat %u: %u beat events dropped on the way, not missed", (unsigned)num, (unsigned)gap);
+    }
+}
+
 // Runs on the event loop task: only notes it. A beat is only counted (no queue message every 30 s); a boot
 // announcement during our own re-attach is that re-attach's.
 static void on_hosted_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
@@ -155,9 +166,7 @@ static void on_hosted_event(void *arg, esp_event_base_t base, int32_t id, void *
         atomic_store(&hosted_quiet, false);
         break;
     case EH_HOST_EVENT_CP_HEARTBEAT:
-        portENTER_CRITICAL(&watch_lock);
-        c6_watch_hb_beat(&watch, now_ms());
-        portEXIT_CRITICAL(&watch_lock);
+        on_beat(data);
         break;
     case EH_HOST_EVENT_TRANSPORT_FAILURE:
     case EH_HOST_EVENT_CP_INIT:
@@ -190,12 +199,12 @@ static unsigned take_hard(int idx, uint32_t raised_ms) {
     portENTER_CRITICAL(&watch_lock);
     bool     stale = c6_watch_stale(&watch, src, raised_ms);
     unsigned act   = stale                       ? 0
-                     : src == C6W_SRC_CP_INIT ? c6_watch_cp_init(&watch, now_ms())
+                     : src == C6W_SRC_CP_INIT ? c6_watch_cp_init(&watch, raised_ms, now_ms())
                                                  : c6_watch_hard(&watch, src, now_ms());
     portEXIT_CRITICAL(&watch_lock);
     if (stale) {
         ESP_LOGW(TAG, "%s from the last outage: ignored", SIG_NAME[idx]);
-    } else if (act) {
+    } else if (act & ~(unsigned)C6W_ACT_CP_INIT) { // a log-only boot announcement gets its own line (log_heartbeat)
         log_source(SIG_LOG[idx], act);
     }
     return act;
@@ -376,8 +385,11 @@ static unsigned go_up(void) {
 }
 
 // An RPC to the C6 (#277): only with the transport up, never in the re-attach's quiet window. Every link-up asks
-// (the re-attach resets the C6); a refusal is asked again C6W_HB_RETRY_MS later by the watch's tick.
+// (the re-attach resets the C6); a refusal is asked again C6W_HB_RETRY_MS later by the watch's tick, logged at W only
+// the first time. The request waits for the answer up to ESP-Hosted's RPC timeout (CONFIG_ESP_HOSTED_HOST_RPC_TIMEOUT_MS,
+// 5 s): esp_hosted_configure_heartbeat takes no timeout of its own. Only c6sup waits, and only with the C6 believed up.
 static void arm_heartbeat(void) {
+    static bool warned;
     portENTER_CRITICAL(&watch_lock);
     bool up = watch.state == C6W_UP;
     portEXIT_CRITICAL(&watch_lock);
@@ -387,11 +399,14 @@ static void arm_heartbeat(void) {
     c6_watch_hb_armed(&watch, err == ESP_OK, now_ms());
     portEXIT_CRITICAL(&watch_lock);
     if (err == ESP_OK) {
+        warned = false;
         ESP_LOGI(TAG, "c6: heartbeat every %d s%s", C6W_HB_PERIOD_S, HB_ACT ? "" : " (log only)");
-    } else {
-        ESP_LOGW(TAG, "c6: heartbeat not set up (%s%s), asking again in %u s", esp_err_to_name(err),
-                 !up ? ", C6 down" : quiet ? ", re-attach running" : "", (unsigned)(C6W_HB_RETRY_MS / 1000));
+        return;
     }
+    ESP_LOG_LEVEL(warned ? ESP_LOG_DEBUG : ESP_LOG_WARN, TAG, "c6: heartbeat not set up (%s%s), asking again in %u s",
+                  esp_err_to_name(err), !up ? ", C6 down" : quiet ? ", re-attach running" : "",
+                  (unsigned)(C6W_HB_RETRY_MS / 1000));
+    warned = true;
 }
 
 static void log_heartbeat(unsigned act) {

@@ -92,9 +92,10 @@ unsigned c6_watch_reattach(c6_watch_t *w, uint32_t now_ms) {
 // ---- heartbeat (#277) ----
 
 unsigned c6_watch_hb_link_up(c6_watch_t *w, uint32_t now_ms) {
-    w->hb.wanted = true;
-    w->hb.armed  = false;
-    w->hb.run    = 0;
+    w->hb.wanted  = true;
+    w->hb.armed   = false;
+    w->hb.run     = 0;
+    w->hb.has_num = false; // the re-attach reset the C6: its numbering starts again
     w->hb.arm_ms = now_ms + C6W_HB_RETRY_MS; // the request is carried out now; this is the retry should it fail
     return C6W_ACT_HB_ARM;
 }
@@ -113,17 +114,37 @@ void c6_watch_hb_armed(c6_watch_t *w, bool ok, uint32_t now_ms) {
     w->hb.run      = 0;
 }
 
-void c6_watch_hb_beat(c6_watch_t *w, uint32_t now_ms) {
+// A jump in the numbering explains misses counted meanwhile: they move to dropped (already logged as missed; with
+// hb.act, C6W_HB_MISS_LIMIT dropped in a row still start an outage, as nothing can tell them apart before the next beat)
+static uint32_t hb_gap(c6_watch_t *w, uint32_t num) {
+    uint32_t gap = 0;
+    if (w->hb.has_num && num > w->hb.last_num + 1) { // a lower number is a fresh numbering: nothing to count
+        gap = num - w->hb.last_num - 1;
+    }
+    w->hb.has_num  = true;
+    w->hb.last_num = num;
+    if (gap && w->hb.armed) {
+        uint32_t explained = gap < w->hb.run ? gap : w->hb.run;
+        w->hb.misses -= explained;
+        w->hb.dropped += gap;
+    }
+    return gap;
+}
+
+uint32_t c6_watch_hb_beat(c6_watch_t *w, uint32_t num, uint32_t now_ms) {
     w->hb.beats++;
+    uint32_t gap = hb_gap(w, num);
     if (w->hb.armed) {
         w->hb.run     = 0;
         w->hb.last_ms = now_ms;
     }
+    return gap;
 }
 
-unsigned c6_watch_cp_init(c6_watch_t *w, uint32_t now_ms) {
-    // Our own attach makes the C6 announce itself too: only one well after the heartbeat was accepted is news
-    if (w->state != C6W_UP || !w->hb.armed || now_ms - w->hb.armed_ms < C6W_CP_INIT_GRACE_MS) {
+unsigned c6_watch_cp_init(c6_watch_t *w, uint32_t raised_ms, uint32_t now_ms) {
+    // Our own attach makes the C6 announce itself too: only one raised well after the heartbeat was accepted is news
+    // (raised, not taken: c6sup may take it late). One raised before the acceptance is due() false as well.
+    if (w->state != C6W_UP || !w->hb.armed || !due(raised_ms, w->hb.armed_ms + C6W_CP_INIT_GRACE_MS)) {
         return 0;
     }
     w->hb.cp_inits++;
@@ -160,7 +181,7 @@ size_t c6_watch_hb_line(c6_watch_t const *w, char *out, size_t cap) {
     if (!out || cap == 0) {
         return 0;
     }
-    char how[24], boots[40] = "", mode[32] = "log only";
+    char how[24], boots[64] = "", mode[32] = "log only";
     if (!w->hb.wanted || w->state != C6W_UP || !w->hb.armed) {
         snprintf(how, sizeof(how), "%s", !w->hb.wanted        ? "off (no link yet)"
                                          : w->state != C6W_UP ? "paused (C6 down)"
@@ -168,8 +189,12 @@ size_t c6_watch_hb_line(c6_watch_t const *w, char *out, size_t cap) {
     } else {
         snprintf(how, sizeof(how), "every %u s", (unsigned)C6W_HB_PERIOD_S);
     }
-    if (w->hb.cp_inits) {
-        snprintf(boots, sizeof(boots), " | unexpected C6 boots %u", (unsigned)w->hb.cp_inits);
+    int b = 0;
+    if (w->hb.dropped) {
+        b = snprintf(boots, sizeof(boots), " | dropped %u", (unsigned)w->hb.dropped);
+    }
+    if (w->hb.cp_inits && b >= 0 && (size_t)b < sizeof(boots)) {
+        snprintf(boots + b, sizeof(boots) - (size_t)b, " | unexpected C6 boots %u", (unsigned)w->hb.cp_inits);
     }
     if (w->hb.act) {
         snprintf(mode, sizeof(mode), "%u in a row = outage", (unsigned)C6W_HB_MISS_LIMIT);

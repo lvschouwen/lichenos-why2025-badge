@@ -321,7 +321,7 @@ static c6_watch_t hb_armed_at(uint32_t t, bool act) {
 static void hb_nothing_before_a_link(void) {
     c6_watch_t w = fresh();
     CHECK(c6_watch_tick(&w, 10u * 60u * 1000u) == 0); // no beats expected before the first link-up
-    CHECK(c6_watch_cp_init(&w, 100000) == 0);
+    CHECK(c6_watch_cp_init(&w, 100000, 100000) == 0);
     char line[200];
     c6_watch_hb_line(&w, line, sizeof(line));
     CHECK(strcmp(line, "c6: heartbeat off (no link yet) | beats 0 | misses 0 (log only)") == 0);
@@ -332,7 +332,7 @@ static void hb_beats_keep_it_quiet(void) {
     uint32_t   t = 1000;
     for (int i = 0; i < 20; i++) {
         t += HB_PERIOD;
-        c6_watch_hb_beat(&w, t);
+        CHECK(c6_watch_hb_beat(&w, (uint32_t)i + 1, t) == 0);
         CHECK(c6_watch_tick(&w, t + HB_PERIOD - 1) == 0);
     }
     CHECK(w.hb.beats == 20 && w.hb.misses == 0);
@@ -350,7 +350,7 @@ static void hb_miss_counting_and_the_reset_on_a_beat(void) {
     CHECK(c6_watch_tick(&w, 1000 + HB_FIRST_MISS + HB_PERIOD) == C6W_ACT_HB_MISSED && w.hb.run == 2);
     // A beat ends the run; the total stays
     uint32_t t = 1000 + HB_FIRST_MISS + HB_PERIOD + 500;
-    c6_watch_hb_beat(&w, t);
+    c6_watch_hb_beat(&w, 1, t); // the first number seen: no gap to tell
     CHECK(w.hb.run == 0 && w.hb.misses == 2 && w.hb.beats == 1);
     CHECK(c6_watch_tick(&w, t + HB_FIRST_MISS - 1) == 0);
     CHECK(c6_watch_tick(&w, t + HB_FIRST_MISS) == C6W_ACT_HB_MISSED && w.hb.run == 1 && w.hb.misses == 3);
@@ -409,21 +409,22 @@ static void hb_other_outage_disarms(void) {
 
 static void hb_unexpected_cp_init(void) {
     c6_watch_t w = hb_armed_at(1000, false);
-    CHECK(c6_watch_cp_init(&w, 1000 + C6W_CP_INIT_GRACE_MS - 1) == 0); // our own attach's announcement
-    CHECK(c6_watch_cp_init(&w, 1000 + C6W_CP_INIT_GRACE_MS) == C6W_ACT_CP_INIT);
+    uint32_t const g = 1000 + C6W_CP_INIT_GRACE_MS;
+    CHECK(c6_watch_cp_init(&w, g - 1, g - 1) == 0); // our own attach's announcement
+    CHECK(c6_watch_cp_init(&w, g, g) == C6W_ACT_CP_INIT);
     CHECK(w.state == C6W_UP && w.hb.cp_inits == 1);
     char line[200];
     c6_watch_hb_line(&w, line, sizeof(line));
     CHECK(strcmp(line, "c6: heartbeat every 30 s | beats 0 | misses 0 | unexpected C6 boots 1 (log only)") == 0);
     // Acting: the C6 rebooted behind our back, recover
     c6_watch_t v = hb_armed_at(1000, true);
-    CHECK(c6_watch_cp_init(&v, 60000) == (C6W_ACT_CP_INIT | C6W_ACT_DOWN_HOOKS | C6W_ACT_REATTACH));
+    CHECK(c6_watch_cp_init(&v, 60000, 60000) == (C6W_ACT_CP_INIT | C6W_ACT_DOWN_HOOKS | C6W_ACT_REATTACH));
     CHECK(v.source == C6W_SRC_CP_INIT);
-    CHECK(c6_watch_cp_init(&v, 61000) == 0); // not while recovering
+    CHECK(c6_watch_cp_init(&v, 61000, 61000) == 0); // not while recovering
     // Not before the heartbeat was accepted
     c6_watch_t u = fresh();
     c6_watch_hb_link_up(&u, 0);
-    CHECK(c6_watch_cp_init(&u, 60000) == 0);
+    CHECK(c6_watch_cp_init(&u, 60000, 60000) == 0);
 }
 
 static void hb_survives_the_wrap(void) {
@@ -431,6 +432,51 @@ static void hb_survives_the_wrap(void) {
     c6_watch_t w = hb_armed_at(t, false);
     CHECK(c6_watch_tick(&w, t + HB_FIRST_MISS - 1) == 0);
     CHECK(c6_watch_tick(&w, t + HB_FIRST_MISS) == C6W_ACT_HB_MISSED);
+}
+
+// c6sup may take the announcement long after it was raised: the raise time decides
+static void hb_cp_init_by_raise_time(void) {
+    c6_watch_t w = hb_armed_at(50000, false);
+    CHECK(c6_watch_cp_init(&w, 49000, 50000 + 3 * C6W_CP_INIT_GRACE_MS) == 0); // raised before the arming
+    CHECK(c6_watch_cp_init(&w, 50500, 50000 + 3 * C6W_CP_INIT_GRACE_MS) == 0); // just after it
+    CHECK(c6_watch_cp_init(&w, 50000 + C6W_CP_INIT_GRACE_MS - 1, 50000 + 5 * C6W_CP_INIT_GRACE_MS) == 0);
+    CHECK(w.hb.cp_inits == 0);
+    CHECK(c6_watch_cp_init(&w, 50000 + C6W_CP_INIT_GRACE_MS, 50000 + 5 * C6W_CP_INIT_GRACE_MS) == C6W_ACT_CP_INIT);
+}
+
+// A jump in the C6's numbering with beats still coming: dropped events, not misses
+static void hb_numbering_gap_is_dropped(void) {
+    c6_watch_t w = hb_armed_at(0, false);
+    c6_watch_hb_beat(&w, 1, HB_PERIOD);
+    c6_watch_hb_beat(&w, 2, 2 * HB_PERIOD);
+    CHECK(c6_watch_tick(&w, 2 * HB_PERIOD + HB_FIRST_MISS) == C6W_ACT_HB_MISSED);
+    CHECK(c6_watch_tick(&w, 2 * HB_PERIOD + HB_FIRST_MISS + HB_PERIOD) == C6W_ACT_HB_MISSED);
+    CHECK(w.hb.misses == 2 && w.hb.run == 2);
+    CHECK(c6_watch_hb_beat(&w, 5, 5 * HB_PERIOD + 100) == 2); // 3 and 4 never arrived
+    CHECK(w.hb.misses == 0 && w.hb.dropped == 2 && w.hb.run == 0);
+    char line[200];
+    c6_watch_hb_line(&w, line, sizeof(line));
+    CHECK(strcmp(line, "c6: heartbeat every 30 s | beats 3 | misses 0 | dropped 2 (log only)") == 0);
+    // A gap larger than the run: only the run is taken back
+    c6_watch_hb_beat(&w, 9, 6 * HB_PERIOD);
+    CHECK(w.hb.misses == 0 && w.hb.dropped == 5);
+    // A lower number is a fresh numbering (the C6 restarted it): no gap
+    CHECK(c6_watch_hb_beat(&w, 1, 7 * HB_PERIOD) == 0 && w.hb.dropped == 5);
+    // A link-up forgets the numbering
+    c6_watch_hb_link_up(&w, 8 * HB_PERIOD);
+    c6_watch_hb_armed(&w, true, 8 * HB_PERIOD);
+    CHECK(c6_watch_hb_beat(&w, 7, 9 * HB_PERIOD) == 0 && w.hb.dropped == 5);
+}
+
+static void hb_beat_while_not_armed_and_armed_while_not_wanted(void) {
+    c6_watch_t w = fresh();
+    c6_watch_hb_armed(&w, true, 1000); // no link-up asked for it: ignored
+    CHECK(!w.hb.armed && !w.hb.wanted);
+    c6_watch_hb_link_up(&w, 2000);
+    w.hb.run     = 2; // as left by an earlier session
+    w.hb.last_ms = 1234;
+    c6_watch_hb_beat(&w, 1, 3000);
+    CHECK(w.hb.beats == 1 && w.hb.run == 2 && w.hb.last_ms == 1234);
 }
 
 int main(void) {
@@ -457,6 +503,9 @@ int main(void) {
     hb_other_outage_disarms();
     hb_unexpected_cp_init();
     hb_survives_the_wrap();
+    hb_cp_init_by_raise_time();
+    hb_numbering_gap_is_dropped();
+    hb_beat_while_not_armed_and_armed_while_not_wanted();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;
