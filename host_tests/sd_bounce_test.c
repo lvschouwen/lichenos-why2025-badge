@@ -101,11 +101,8 @@ static void test_cover(void) {
 }
 
 // The shipped size (#266): psram_dma's 32 KB SD piece (64 sectors) through the bounced leg is four 16-sector card
-// commands, and the mount's halving loop reaches SD_BOUNCE_MIN_BYTES in whole steps
+// commands
 static void test_shipped_size(void) {
-    CHECK(SD_BOUNCE_BYTES == 8 * 1024);
-    CHECK(SD_BOUNCE_BYTES >= SD_BOUNCE_MIN_BYTES && SD_BOUNCE_BYTES % SD_BOUNCE_MIN_BYTES == 0);
-    CHECK(((SD_BOUNCE_BYTES / SD_BOUNCE_MIN_BYTES) & (SD_BOUNCE_BYTES / SD_BOUNCE_MIN_BYTES - 1)) == 0);
     sd_bounce_iter_t  it;
     sd_bounce_chunk_t c;
     CHECK(sd_bounce_start(&it, 2048, 64, 512, SD_BOUNCE_BYTES));
@@ -115,6 +112,20 @@ static void test_shipped_size(void) {
         n++;
     }
     CHECK(n == 4);
+}
+
+// The mount's allocation sizes: SD_BOUNCE_BYTES, then halved, ending at SD_BOUNCE_MIN_BYTES; below that, stop
+// (shipped: 8192, 4096, stop)
+static void test_try_size(void) {
+    CHECK(sd_bounce_try_size(0) == SD_BOUNCE_BYTES);
+    unsigned attempt = 1;
+    while (sd_bounce_try_size(attempt) != 0) {
+        CHECK(sd_bounce_try_size(attempt) == sd_bounce_try_size(attempt - 1) / 2);
+        attempt++;
+    }
+    CHECK(sd_bounce_try_size(attempt - 1) >= SD_BOUNCE_MIN_BYTES);
+    CHECK(sd_bounce_try_size(attempt - 1) / 2 < SD_BOUNCE_MIN_BYTES);
+    CHECK(sd_bounce_try_size(attempt + 1) == 0 && sd_bounce_try_size(1000) == 0);
 }
 
 int main(void) {
@@ -127,6 +138,7 @@ int main(void) {
     test_odd_bounce();
     test_cover();
     test_shipped_size();
+    test_try_size();
     if (failures) {
         printf("sd_bounce_test: %d failure(s)\n", failures);
         return 1;

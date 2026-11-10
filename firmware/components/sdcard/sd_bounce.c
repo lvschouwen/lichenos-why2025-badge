@@ -5,6 +5,14 @@ bool sd_bounce_needed(bool in_psram, bool dma_aligned) {
     return in_psram || !dma_aligned;
 }
 
+size_t sd_bounce_try_size(unsigned attempt) {
+    if (attempt >= sizeof(size_t) * 8) {
+        return 0;
+    }
+    size_t bytes = (size_t)SD_BOUNCE_BYTES >> attempt;
+    return bytes >= SD_BOUNCE_MIN_BYTES ? bytes : 0;
+}
+
 bool sd_bounce_start(sd_bounce_iter_t *it, uint32_t sector, uint32_t count, size_t sector_size, size_t bounce_bytes) {
     if (sector_size == 0 || bounce_bytes < sector_size) {
         return false;

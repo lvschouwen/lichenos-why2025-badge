@@ -173,8 +173,9 @@ static sd_mount_outcome_t power_and_probe(char *reason, size_t cap) {
         set_reason(reason, cap, "LDO", err);
         return SD_MOUNT_ERROR;
     }
-    // Internal DMA RAM (#121: no SDMMC DMA into PSRAM); smaller on a tight heap, one card command per chunk either way
-    for (bounce_bytes = SD_BOUNCE_BYTES; bounce_bytes >= SD_BOUNCE_MIN_BYTES; bounce_bytes /= 2) {
+    // Internal DMA RAM (#121: no SDMMC DMA into PSRAM); smaller on a tight heap, one card command per chunk either way.
+    // When every size fails the loop ends with bounce_bytes 0, so it never names a buffer that is not there.
+    for (unsigned attempt = 0; (bounce_bytes = sd_bounce_try_size(attempt)) != 0; attempt++) {
         uint32_t caps = MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
         bounce        = heap_caps_aligned_calloc(SD_BOUNCE_ALIGN, 1, bounce_bytes, caps);
         if (bounce) {

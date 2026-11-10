@@ -41,6 +41,10 @@ typedef struct {
     size_t   sector_size;
 } sd_bounce_iter_t;
 
+// The bounce buffer size for the mount's allocation attempt `attempt` (0, 1, ...): SD_BOUNCE_BYTES halved per
+// attempt, 0 once below SD_BOUNCE_MIN_BYTES (stop: no bounce buffer, no mount)
+size_t sd_bounce_try_size(unsigned attempt);
+
 // False when the bounce buffer cannot hold one sector (or a size is 0): then nothing may be moved
 bool sd_bounce_start(sd_bounce_iter_t *it, uint32_t sector, uint32_t count, size_t sector_size, size_t bounce_bytes);
 // The next chunk; false when the transfer is done
