@@ -100,6 +100,23 @@ static void test_cover(void) {
     }
 }
 
+// The shipped size (#266): psram_dma's 32 KB SD piece (64 sectors) through the bounced leg is four 16-sector card
+// commands, and the mount's halving loop reaches SD_BOUNCE_MIN_BYTES in whole steps
+static void test_shipped_size(void) {
+    CHECK(SD_BOUNCE_BYTES == 8 * 1024);
+    CHECK(SD_BOUNCE_BYTES >= SD_BOUNCE_MIN_BYTES && SD_BOUNCE_BYTES % SD_BOUNCE_MIN_BYTES == 0);
+    CHECK(((SD_BOUNCE_BYTES / SD_BOUNCE_MIN_BYTES) & (SD_BOUNCE_BYTES / SD_BOUNCE_MIN_BYTES - 1)) == 0);
+    sd_bounce_iter_t  it;
+    sd_bounce_chunk_t c;
+    CHECK(sd_bounce_start(&it, 2048, 64, 512, SD_BOUNCE_BYTES));
+    int n = 0;
+    while (sd_bounce_next(&it, &c)) {
+        CHECK(c.count == 16 && c.bytes == 8192 && c.offset == (size_t)n * 8192 && c.sector == 2048u + 16u * (uint32_t)n);
+        n++;
+    }
+    CHECK(n == 4);
+}
+
 int main(void) {
     test_needed();
     test_refused();
@@ -109,6 +126,7 @@ int main(void) {
     test_partial_last();
     test_odd_bounce();
     test_cover();
+    test_shipped_size();
     if (failures) {
         printf("sd_bounce_test: %d failure(s)\n", failures);
         return 1;

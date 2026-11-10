@@ -12,10 +12,11 @@
 extern "C" {
 #endif
 
-// The internal DMA-capable bounce buffer, allocated at mount and freed at unmount. 16 KB = 32 sectors per card
-// command; on a tight heap the mount halves it down to SD_BOUNCE_MIN_BYTES.
+// The internal DMA-capable bounce buffer, allocated at mount and freed at unmount. 8 KB = 16 sectors per card
+// command (#266: half the internal DMA RAM of 16 KB for a few % of SD throughput); on a tight heap the mount halves it
+// down to SD_BOUNCE_MIN_BYTES.
 #ifndef SD_BOUNCE_BYTES
-#define SD_BOUNCE_BYTES (16 * 1024)
+#define SD_BOUNCE_BYTES (8 * 1024)
 #endif
 #define SD_BOUNCE_MIN_BYTES 4096
 
