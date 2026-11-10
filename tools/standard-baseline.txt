@@ -142,7 +142,7 @@ size	liblvgl_port_lib.a	6162
 size	liblwip.a	109820
 size	libmain.a	5634
 size	libmbedtls.a	22
-size	libmesh.a	386338
+size	libmesh.a	396246
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18812
 size	libnvs_sec_provider.a	2
