@@ -160,7 +160,6 @@ size	libstorage.a	221
 size	libtfpsacrypto.a	80464
 size	libvfs.a	5127
 size	libwear_levelling.a	10050
-stack	firmware/components/lichen_shell/dialog.c:apply	1312
 stack	firmware/components/lora/lora.c:lora_task	1360
 stack	firmware/components/lora/lora_link.c:lora_cfg_parse	1056
 stack	firmware/components/mesh/mesh_notify_run.c:mesh_notify_drain	1872

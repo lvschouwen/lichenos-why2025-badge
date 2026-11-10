@@ -90,7 +90,8 @@ void shell_style_screen(lv_obj_t *screen);
 // count_suffix are otherwise unused now, leave them NULL. The hint below is dim, amber only when careful. Enter confirms,
 // Esc cancels, and when the countdown runs out it confirms by itself (the keyboard may be dead), or cancels when careful.
 // done runs once on the LVGL task with the answer: keep it short (queue the work). One dialog at a time: a second
-// call replaces the first. Any task (never blocks on more than the LVGL lock, 2 s); false when it could not be shown.
+// call replaces the first. Any task (waits at most 2 s for another task's open, then 2 s for the LVGL lock); false
+// when it could not be shown. The strings are copied, from internal RAM or PSRAM alike.
 typedef struct {
     char const *title;
     char const *count_prefix;

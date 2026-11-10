@@ -1,6 +1,6 @@
 // The shell's dialog layer (#14 T-B): one OS warning at a time on lv_layer_top(), over every screen and the status
 // bar, with its own keypad group. Enter confirms, Esc cancels, and a countdown confirms by itself when nobody answers
-// (dialog_countdown.c, host-tested). Other tasks never touch LVGL here: they set the wanted state under a spinlock and
+// (dialog_countdown.c, host-tested). Other tasks never touch LVGL here: they set the wanted state (see want_lock) and
 // queue one async call (lichen_sys_ui_call, or lv_async_call on the LVGL task) that makes the screen match it, so an
 // open and a close queued together still end right whatever order the calls run in (UI-service calls are FIFO, raw
 // lv_async_call newest first, and the two do not order against each other: see shell.c).
@@ -11,6 +11,7 @@
 #include "esp_timer.h"
 #include "fonts.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "shell_parts.h"
 #include "theme.h"
 #include "ui_text.h"
@@ -37,11 +38,16 @@ typedef struct {
     shell_dialog_fn done;
 } request_t;
 
-// Wanted state, written by any task under want_lock; read by apply() on the LVGL task
-static portMUX_TYPE want_lock = portMUX_INITIALIZER_UNLOCKED;
-static bool         want_open;
-static uint32_t     want_gen; // bumped by every open, so a second open replaces the first
-static request_t    want;
+// Wanted state, written by any task; read by apply() on the LVGL task. want_open and want_gen change under want_lock.
+// want is filled from the caller's strings, which may be in PSRAM, and copied into shown (PSRAM), so never under
+// want_lock (no PSRAM in a critical section, #271/#273): it is only touched with open_lock held, a mutex that openers
+// and apply() hold for those copies only (never across a UI call, so the LVGL task never waits on the LVGL lock).
+static portMUX_TYPE      want_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool              want_open;
+static uint32_t          want_gen; // bumped by every open, so a second open replaces the first
+static request_t         want;
+static SemaphoreHandle_t open_lock; // made on first use
+static StaticSemaphore_t open_lock_buf;
 
 // LVGL task only
 static lv_obj_t        *backdrop;
@@ -51,6 +57,15 @@ static lv_timer_t      *timer;
 static dlg_countdown_t  countdown;
 EXT_RAM_BSS_ATTR static request_t shown;
 static uint32_t         shown_gen;
+
+static bool take_open_lock(void) {
+    portENTER_CRITICAL(&want_lock);
+    if (!open_lock) {
+        open_lock = xSemaphoreCreateMutexStatic(&open_lock_buf);
+    }
+    portEXIT_CRITICAL(&want_lock);
+    return xSemaphoreTake(open_lock, pdMS_TO_TICKS(LOCK_WAIT_MS)) == pdTRUE;
+}
 
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
@@ -192,16 +207,24 @@ static void build(void) {
 // Makes the screen match the wanted state
 static void apply(void *arg) {
     (void)arg;
+    if (!take_open_lock()) {
+        ESP_LOGE(TAG, "wanted state busy: screen left as it is");
+        return;
+    }
     portENTER_CRITICAL(&want_lock);
-    bool      open = want_open;
-    uint32_t  gen  = want_gen;
-    request_t req  = want;
+    bool     open = want_open;
+    uint32_t gen  = want_gen;
     portEXIT_CRITICAL(&want_lock);
-    if (backdrop && (!open || gen != shown_gen)) {
+    bool stale   = backdrop && (!open || gen != shown_gen);
+    bool rebuild = open && (!backdrop || stale);
+    if (rebuild) {
+        shown = want; // open_lock keeps the openers out; the old dialog (if any) is torn down before anything reads it
+    }
+    xSemaphoreGive(open_lock); // held for the copy only, not across LVGL work
+    if (stale) {
         teardown();
     }
-    if (open && !backdrop) {
-        shown     = req;
+    if (rebuild) {
         shown_gen = gen;
         build();
     }
@@ -211,15 +234,15 @@ static bool queue_apply(void) {
     return lichen_sys_ui_call(apply, NULL, LOCK_WAIT_MS);
 }
 
-// A bounded copy into one TEXT_MAX field, NULL as "": no snprintf with interrupts off (#5)
+// A bounded copy into one TEXT_MAX field, NULL as ""
 static void copy_text(char *dst, size_t max, char const *src) {
     size_t n = src ? strnlen(src, max - 1) : 0;
     memcpy(dst, src ? src : "", n);
     dst[n] = '\0';
 }
 
-bool shell_dialog_countdown_impl(shell_dialog_t const *d, shell_dialog_fn done) {
-    portENTER_CRITICAL(&want_lock);
+// With open_lock held: apply() does not read want now
+static void fill_want(shell_dialog_t const *d, shell_dialog_fn done) {
     copy_text(want.title, TEXT_MAX, d->title);
     copy_text(want.prefix, TEXT_MAX, d->count_prefix);
     copy_text(want.suffix, TEXT_MAX, d->count_suffix);
@@ -229,13 +252,25 @@ bool shell_dialog_countdown_impl(shell_dialog_t const *d, shell_dialog_fn done) 
     want.seconds = d->seconds;
     want.careful = d->careful;
     want.done    = done;
+}
+
+bool shell_dialog_countdown_impl(shell_dialog_t const *d, shell_dialog_fn done) {
+    if (!take_open_lock()) {
+        ESP_LOGE(TAG, "could not be shown (another dialog is opening)");
+        return false;
+    }
+    fill_want(d, done);
+    portENTER_CRITICAL(&want_lock);
     want_open    = true;
-    want_gen++;
+    uint32_t gen = ++want_gen;
     portEXIT_CRITICAL(&want_lock);
+    xSemaphoreGive(open_lock); // before the UI call: apply() on the LVGL task takes it
     bool ok = queue_apply();
     if (!ok) {
         portENTER_CRITICAL(&want_lock);
-        want_open = false;
+        if (want_gen == gen) {
+            want_open = false; // a newer open that got through stays
+        }
         portEXIT_CRITICAL(&want_lock);
         ESP_LOGE(TAG, "could not be shown (LVGL busy)");
     }
