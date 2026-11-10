@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 // Display and keyboard backlight (0-100), driven by the C6 (its GPIO15/GPIO10 PWM); the P4 sends "BL <d> <k>" on the
-// C6's console UART. Saved by the settings service; backlight_start() applies the saved levels. Call after the C6 flasher is done. Also registers
+// C6's console UART, or REG_SET through the settings registry when the C6 has it (#310). Saved by the settings service; backlight_start() applies the saved levels. Call after the C6 flasher is done. Also registers
 // the restart hook that switches the backlight and panel off before esp_restart() (#23).
 void backlight_start(void);
 // Where the levels and the R16 result are kept (the settings service, #224): board opens no NVS. Call before
@@ -30,6 +30,28 @@ uint32_t backlight_user_generation(void);
 void backlight_set_saved(uint8_t display, uint8_t keyboard);
 // The saved levels, or the C6 firmware's defaults before any were saved
 void backlight_get(uint8_t *display, uint8_t *keyboard);
+// The levels last sent to the C6 (a dim, a pulse or a slider included), the saved ones before any send: the settings
+// registry's "requested" for bl.display / bl.keyboard (#310). backlight_get stays the saved levels: thermal's restore
+// and the Settings slider start from what the person set, never from a dimmed level.
+void backlight_get_requested(uint8_t *display, uint8_t *keyboard);
+// Which call set the levels now (#310, read-only registry keys bl.idle / bl.override): the screen timeout's dim or off,
+// and the temporary overrides (backlight_temporary = the flashlight, backlight_temporary_keyboard = the message pulse).
+// A backlight_set*, resume or restore ends both. Thermal's load shed goes through backlight_set: the registry adds it.
+typedef enum { BACKLIGHT_BRIGHT, BACKLIGHT_DIM, BACKLIGHT_OFF } backlight_idle_t;
+typedef enum { BACKLIGHT_OVR_NONE, BACKLIGHT_OVR_FLASHLIGHT, BACKLIGHT_OVR_PULSE } backlight_override_t;
+void backlight_mode(backlight_idle_t *idle, backlight_override_t *ovr);
+// The settings registry's path to the C6 (#310): when bound, every level change is offered to it first; true = it
+// took them (REG_SET bl.display / bl.keyboard, the C6 has the registry's bl domain), false = the UART1 BL line as
+// before. Called on the sender's task, the LVGL task included: it must not block. The restart blank, the UART lend's
+// return and backlight_reapply always use the UART line.
+// The restart blank (and the power off) first calls close: it must drop the levels still waiting for the C6 and refuse
+// new ones, so no REG_SET can land after the UART BL 0 0 and light the panel again; from then on every level goes
+// over UART1. close may wait briefly (a send in flight), never long.
+typedef bool (*backlight_reg_send_fn)(uint8_t display, uint8_t keyboard);
+typedef void (*backlight_reg_close_fn)(void);
+void backlight_bind_reg_send(backlight_reg_send_fn send, backlight_reg_close_fn close);
+// "fw bl r16" (the registry's fw bl alias calls it): detect R16 and save the result, replies on the console
+void backlight_r16_console(void);
 // Sends the saved levels once and closes the UART again, for the boot screen before the C6 check (the C6 flasher
 // needs the UART driver to itself). A restart leaves the backlight off (see backlight_start()); call this after the
 // first frame is drawn.

@@ -2709,6 +2709,8 @@ static mesh_sub_t const MESH_SUBS[] = {
     {"scope", SUB_WORD, mesh_cscope_console}, // #290: the console scope
 };
 
+extern "C" void mesh_radio_console(void);
+
 static void cmd_mesh(char const *args) {
     if (strcmp(args, "start") == 0 || strcmp(args, "stop") == 0) {
         cmd_mesh_run(strcmp(args, "start") == 0);
@@ -2779,12 +2781,7 @@ static void cmd_mesh(char const *args) {
                   (unsigned long)sent, (unsigned long)send_failed, (unsigned long)timeouts, (unsigned long)refused,
                   contacts, (unsigned)msgs);
     console_reply("identity: %s", mesh_ident_text(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE)));
-    mesh_settings_t st;
-    if (mesh_get_settings(&st)) {
-        int preset = radio_preset_match(st.freq, st.bw, st.sf, st.cr);
-        console_reply("radio %.3f MHz, %g kHz, SF%u, CR%u, %d dBm, path hash %u B (%s)", st.freq, st.bw, st.sf, st.cr,
-                      st.tx_dbm, st.path_hash_size, preset >= 0 ? radio_preset_at((size_t)preset)->title : "custom");
-    }
+    mesh_radio_console(); // mesh_radio_line.c: MeshCore's radio and the C6's applied one (#310)
 }
 
 // ---- "fw contacts export|import" (#54) ------------------------------------------------------------------------------

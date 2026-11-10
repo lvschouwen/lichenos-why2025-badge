@@ -339,6 +339,26 @@ target_compile_options(c6_reg_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(c6_reg_test PRIVATE m)
 add_test(NAME c6_reg_test COMMAND c6_reg_test)
 
+# The P4's registry service (#310): the real P4 table, fw set rules (radio keys ERR guarded, no setter), the C6 keys'
+# proxy cache (seq, late and unknown-type answers, age, stale after a reset), the old-C6 path, the applied-vs-requested
+# match rules and the once-per-key mismatch
+add_executable(reg_service_test ${CMAKE_CURRENT_SOURCE_DIR}/reg_service_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg/reg.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_cmd.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_proxy.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_table.c)
+target_include_directories(reg_service_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board)
+target_compile_options(reg_service_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME reg_service_test COMMAND reg_service_test)
+
+# The LoRa task's registry request queue (#310): order, one entry per id, the newest seq, a full queue
+add_executable(lora_regq_test ${CMAKE_CURRENT_SOURCE_DIR}/lora_regq_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lora/lora_regq.c)
+target_include_directories(lora_regq_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lora)
+target_compile_options(lora_regq_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME lora_regq_test COMMAND lora_regq_test)
+
 add_executable(meshcore_hdr_test
     ${CMAKE_CURRENT_SOURCE_DIR}/meshcore_hdr_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/meshcore_hdr.c
@@ -1744,6 +1764,8 @@ add_custom_target(run_tests
     notes_store_test
     mesh_chat_target_test
     nvs_image_test
+    reg_service_test
+    lora_regq_test
     COMMENT "Running all host tests"
 )
 

@@ -31,13 +31,18 @@
 # watchdog (#10; thermal_rules.c, pure, thermal_rules_test.c; the shell reads it through lichen_sys_thermal.h) and
 # sys_notices.c raises Lichen's own notices (#62; sys_notice_rules.c, pure, sys_notice_rules_test.c). The load shed
 # holds the radios through lichen_sys_radio.h (#282, never saved). lichen_sys_power.c is the power-off's last step.
+# The settings registry service (#307/#310): lichen_reg.c over the pure reg_cmd.c (fw get/set rows and rules),
+# reg_proxy.c (the C6 keys' cache, seq, caps, mismatch) and reg_p4_table.c (the P4 table), host-tested in
+# reg_service_test.c; the core is shared/reg/reg.c (Apache-2.0, also in the C6 image).
 idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "app_slot.c"
                             "lichen_crashlog.c" "lichen_legacy.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
                             "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "os_bind.c" "lichen_sys_pure_view.c" "lichen_sys_view.c"
                             "ui_call_queue.c" "ui_lock_owner.c" "ui_lock_hits.c" "ui_lock_check.c" "dma_low.c" "dma_watch.c"
                             "thermal.c" "thermal_rules.c" "sys_notices.c" "sys_notice_rules.c" "lichen_sys_power.c"
+                            "lichen_reg.c" "reg_cmd.c" "reg_proxy.c" "reg_p4_table.c" "../../../shared/reg/reg.c"
                        INCLUDE_DIRS "."
+                       PRIV_INCLUDE_DIRS "../../../shared/reg"
                        PRIV_REQUIRES lichen_api freertos esp_hw_support esp_timer assets fw_console nvs_flash heap storage sdcard
                                      crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns c6link psram_guard lora)
 

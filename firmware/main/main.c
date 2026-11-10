@@ -713,6 +713,7 @@ static void start_lora(boot_ctx_t *ctx) {
     lora_set_switch_owner(lora_switch_requested); // before lora_start registers the console command
     if (!c6link_up()) {
         boot_progress_end(BOOT_LORA, STEP_FAILED, "no C6 link");
+        lichen_reg_start(); // the P4's own keys; the C6's show "no link to the C6"
         return;
     }
     boot_progress_begin(BOOT_LORA);
@@ -720,6 +721,7 @@ static void start_lora(boot_ctx_t *ctx) {
     if (!lora_ok) {
         ESP_LOGE(TAG, "LoRa not started");
     }
+    lichen_reg_start(); // after lora_start: its first c6.reg_caps ask goes out through the LoRa task (#310)
     boot_progress_end(BOOT_LORA, lora_ok ? STEP_DONE : STEP_FAILED, lora_ok ? NULL : "LoRa not started");
 }
 

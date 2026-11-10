@@ -125,9 +125,14 @@ to `layers.conf`):
   `lora_send_state(owner)`, `lora_set_radio(owner, ...)` / `lora_set_tx_power(owner, ...)` (the owner's radio
   settings, checked by `lora_config_valid`), `lora_set_link_callback(owner, ...)`, `lora_set_rx_formatter(owner, ...)`,
   `lora_sweep(owner, ...)` (an RSSI sweep, receive only, blocking: never from the LVGL task, #161), and the read-only
-  stats (`lora_up`, `lora_get_radio`, `lora_get_freq`, `lora_get_counts`, ...). Every call that takes `owner` is
-  refused, with a rate-limited log line, unless that name holds the claim (#179). `lora_os.h` (start, stop, the radio
-  switch, the C6 hooks) is the OS's: apps never include it.
+  stats (`lora_up`, `lora_get_radio`, `lora_get_freq`, `lora_get_counts`, ...). `lora_get_radio` / `lora_get_freq` are
+  the P4's requested copy (airtime math never waits on the C6); `lora_applied_text` is the C6's applied radio as one
+  console line from the settings registry's cache (never waits, #310; `fw mesh` prints it). Every call that takes
+  `owner` is refused, with a rate-limited log line, unless that name holds the claim (#179). `lora_os.h` (start, stop,
+  the radio switch, the C6 hooks, the registry transport `lora_reg_*` / `lora_set_reg_hooks` / `lora_get_requested`)
+  is the OS's: apps never include it (`tools/layers.conf` forbids those symbols in L6).
+- The settings registry (#307/#310) has no app header yet: no app reads a registry key in wave 1. App access comes with
+  #313; the console's `fw get` / `fw set` are the OS's.
 - `fw_console.h`: `console_register` / `console_reply` for `fw <name>` commands; `console_reply_secret` for a line
   that holds a key or a password (only the one who asked gets it: the USB console, or the Wi-Fi console's reply; never
   the log store or the Console app, #123); `system_restart_asked(why)` when a restart is what the user asked for (it

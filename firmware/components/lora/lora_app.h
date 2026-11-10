@@ -87,6 +87,9 @@ void lora_get_counts(uint32_t *rx, uint32_t *tx);
 // The C6's last channel reading (its status poll, #157), dBm * 10: with no packet being received this is the noise floor.
 // False before the first answer or when it is older than max_age_s.
 bool lora_get_channel_rssi(int16_t *rssi_x10, uint32_t max_age_s);
+// What the C6's SX1262 runs now as one console line ("869.618 MHz 62.5 kHz SF7 ... 3 s ago"), from the settings
+// registry's cache (#310): never waits. 0 and an empty buf when the registry has nothing (not started, an old C6).
+size_t lora_applied_text(char *buf, size_t cap);
 
 #ifdef __cplusplus
 }

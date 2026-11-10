@@ -16,7 +16,8 @@
 //   0x04 bt.*    Bluetooth controller, served by the C6
 //   0x05-0x0E    reserved for further C6-side domains
 //   0x0F c6.*    C6 meta
-//   0x10-0x1F    reserved for P4-side domains (wave 2, #312: PSRAM, display/DSI, sensors, haptics, LED, GPIO holds)
+//   0x10 bl.*    the P4's backlight driver state (bl.idle, bl.override; #310)
+//   0x11-0x1F    reserved for P4-side domains (wave 2, #312: PSRAM, display/DSI, sensors, haptics, LED, GPIO holds)
 typedef enum {
     // 0x01 backlight: the brightness the C6 drives now, in percent (after its 10-80 % clamp; 0 = off)
     REG_ID_BL_DISPLAY  = 0x0100, // bl.display   U8 %
@@ -43,6 +44,10 @@ typedef enum {
 
     // 0x0F C6 meta
     REG_ID_C6_REG_CAPS = 0x0F00, // c6.reg_caps  U32, RO: REG_CAP_* bits of the domains this C6 serves
+
+    // 0x10 P4 backlight state (#310): the P4 driver's mode, served by the P4, never on the wire
+    REG_ID_BL_IDLE     = 0x1000, // bl.idle      ENUM, RO: bright / dim / off (the screen timeout)
+    REG_ID_BL_OVERRIDE = 0x1001, // bl.override  ENUM, RO: none / thermal / flashlight / pulse
 } reg_id_t;
 
 #define REG_ID_DOMAIN(id) ((unsigned)(id) >> 8)

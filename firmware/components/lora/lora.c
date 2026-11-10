@@ -20,6 +20,7 @@
 #include "lora_link.h"
 #include "lora_owner.h"
 #include "lora_proto.h"
+#include "lora_regq.h"
 #include "lora_switch.h"
 #include "lora_tx.h"
 
@@ -77,6 +78,10 @@ static void           (*link_cb)(bool up); // the owner's, #14
 static void           (*send_hook)(bool ok); // the C6 supervisor's soft signal, #14
 static lora_c6_link_t   c6_link;           // under state_lock (#14 T-B)
 static bool             probe_requested;   // lora_c6_probe -> the task, under state_lock
+// Registry requests for the C6 (#310), under state_lock: posted by any task, sent by this one
+static lora_regq_t      regq;
+// The registry service's hooks (lichen_os, #310): a pointer to its static copy, set once after lora_start
+static lora_reg_hooks_t const *reg_hooks;
 // Held around every peer-data send (the LoRa task's and the mesh task's): lora_c6_lost takes it once, so when it returns
 // no send is inside ESP-Hosted any more and the supervisor may deinit it (#14 T-B)
 static SemaphoreHandle_t send_mutex;
@@ -337,6 +342,69 @@ static void on_peer_data(uint32_t msg_id, uint8_t const *data, size_t len, void 
     }
 }
 
+// A zero-length entry in rx_queue: no message, it only ends the task's queue wait so a registry request goes out now
+static lora_rx_msg_t const wake_token;
+
+void lora_set_reg_hooks(lora_reg_hooks_t const *hooks) {
+    __atomic_store_n(&reg_hooks, hooks, __ATOMIC_RELEASE);
+}
+
+static lora_reg_hooks_t const *hooks_now(void) {
+    return __atomic_load_n(&reg_hooks, __ATOMIC_ACQUIRE);
+}
+
+// Never blocks: a spinlock for the queue and a zero-wait queue send, so the LVGL task may post (a backlight slider)
+static bool reg_post(lora_regq_req_t const *req) {
+    if (!lora_up() || __atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
+        return false;
+    }
+    portENTER_CRITICAL(&state_lock);
+    bool ok = !c6_link.lost && lora_regq_post(&regq, req);
+    portEXIT_CRITICAL(&state_lock);
+    if (ok) {
+        xQueueSend(rx_queue, &wake_token, 0); // a full queue wakes the task anyway; else it goes out within a second
+    }
+    return ok;
+}
+
+bool lora_reg_get(uint16_t id, uint8_t seq) {
+    lora_regq_req_t const req = {.id = id, .seq = seq};
+    return reg_post(&req);
+}
+
+bool lora_reg_set(uint16_t id, uint32_t value, uint8_t seq) {
+    lora_regq_req_t const req = {.id = id, .value = value, .seq = seq, .set = true};
+    return reg_post(&req);
+}
+
+void lora_reg_block(uint16_t const *ids, size_t n, uint32_t wait_ms) {
+    portENTER_CRITICAL(&state_lock);
+    for (size_t i = 0; i < n; i++) {
+        lora_regq_block(&regq, ids[i]);
+    }
+    portEXIT_CRITICAL(&state_lock);
+    // A request taken just before is inside send_to_c6 under send_mutex: once we hold it, that send is done
+    if (send_mutex && xSemaphoreTake(send_mutex, pdMS_TO_TICKS(wait_ms)) == pdTRUE) {
+        xSemaphoreGive(send_mutex);
+    }
+}
+
+void lora_get_requested(lora_requested_t *out) {
+    portENTER_CRITICAL(&state_lock);
+    lora_config_t c = config;
+    portEXIT_CRITICAL(&state_lock);
+    *out = (lora_requested_t){.freq_hz = c.freq_hz, .bw_hz = c.bw_hz, .sf = c.sf, .cr = c.cr,
+                              .sync_word = c.sync_word, .preamble = c.preamble, .tx_power_dbm = c.tx_power_dbm};
+}
+
+size_t lora_applied_text(char *buf, size_t cap) {
+    lora_reg_hooks_t const *h = hooks_now();
+    if (cap) {
+        buf[0] = '\0';
+    }
+    return h && h->radio_text && cap ? h->radio_text(buf, cap, false) : 0;
+}
+
 static bool send_to_c6(lora_msg_t const *msg) {
     static bool failing;
     uint8_t     buf[LORA_MSG_MAX];
@@ -390,6 +458,41 @@ static void run_actions(unsigned act) {
     }
 }
 
+// The registry's requests, one send each, oldest first; the queue lock is never held across a send. Not inlined: its
+// message buffer stays off the LoRa task's main frame
+__attribute__((noinline)) static void run_reg_queue(void) {
+    lora_regq_req_t req;
+    for (;;) {
+        portENTER_CRITICAL(&state_lock);
+        bool have = lora_regq_take(&regq, &req);
+        portEXIT_CRITICAL(&state_lock);
+        if (!have) {
+            return;
+        }
+        lora_msg_t msg = {.type = req.set ? LORA_MSG_REG_SET : LORA_MSG_REG_GET};
+        if (req.set) {
+            msg.u.reg_set = (lora_reg_set_t){.id = req.id, .value = req.value, .seq = req.seq};
+        } else {
+            msg.u.reg_get = (lora_reg_get_t){.id = req.id, .seq = req.seq};
+        }
+        send_to_c6(&msg); // no answer is the registry's timeout: it shows the key stale or unanswered
+    }
+}
+
+static void reg_link(bool up) {
+    lora_reg_hooks_t const *h = hooks_now();
+    if (h && h->link) {
+        h->link(up);
+    }
+}
+
+static void reg_answer(lora_reg_val_t const *v) {
+    lora_reg_hooks_t const *h = hooks_now();
+    if (h && h->answer) {
+        h->answer(v->id, v->seq, v->status, v->type, v->value);
+    }
+}
+
 static char const *msg_name(uint8_t type) {
     switch (type) {
         case LORA_MSG_CONFIG: return "config";
@@ -398,6 +501,8 @@ static char const *msg_name(uint8_t type) {
         case LORA_MSG_STATUS_REQ: return "status";
         case LORA_MSG_SEND: return "send";
         case LORA_MSG_SWEEP_REQ: return "sweep";
+        case LORA_MSG_REG_GET: return "reg get";
+        case LORA_MSG_REG_SET: return "reg set";
         default: return "?";
     }
 }
@@ -456,7 +561,11 @@ static bool c6_link_work(lora_sup_t *sup) {
     portEXIT_CRITICAL(&state_lock);
     if (act & LORA_C6_TELL_DOWN) {
         ESP_LOGW(TAG, "C6 lost: LoRa waits for it");
+        portENTER_CRITICAL(&state_lock);
+        lora_regq_clear(&regq); // nobody waits for these answers any more: the registry marks its keys stale
+        portEXIT_CRITICAL(&state_lock);
         tell_owner(false);
+        reg_link(false);
     }
     if (act & LORA_C6_REINIT) {
         // The registry outlives esp_hosted_deinit, so this is a "register update"; it is redone in case it did not
@@ -495,6 +604,30 @@ static void apply_enabled(lora_sup_t *sup) {
     }
 }
 
+// A RESULT from the C6: a send's outcome (with its round trip), or a refused command
+static void on_result(lora_result_t const *res) {
+    if (res->for_type == LORA_MSG_SEND) {
+        portENTER_CRITICAL(&state_lock);
+        lora_tx_result(&tx, res->code);
+        if (res->code == LORA_RESULT_OK) {
+            tx_packets++;
+        }
+        uint32_t took = now_ms() - tx_sent_ms, est = tx_airtime_ms;
+        portEXIT_CRITICAL(&state_lock);
+        // The bridge's round trip against MeshCore's airtime estimate (it gives up at 1.5 x estimate):
+        // only with "fw lora raw on" (the console shows info lines too, and it came with every send)
+        if (log_raw) {
+            ESP_LOGI(TAG, "tx answered after %lu ms (airtime estimate %lu ms)", (unsigned long)took, (unsigned long)est);
+        }
+    }
+    if (res->for_type == LORA_MSG_SWEEP_REQ && !lora_sweep_refused(res->code)) {
+        return; // #161: no sweep request outstanding (its caller gave up): ignored
+    }
+    if (res->code != LORA_RESULT_OK) {
+        ESP_LOGW(TAG, "C6 refused %s: code %u radio %d", msg_name(res->for_type), res->code, res->radio_err);
+    }
+}
+
 static void lora_task(void *arg) {
     lora_sup_t sup;
     lora_sup_init(&sup, now_ms());
@@ -523,10 +656,11 @@ static void lora_task(void *arg) {
             ESP_LOGI(TAG, "new radio settings from MeshCore");
             run_actions(LORA_ACT_SEND_CONFIG | LORA_ACT_RX_START);
         }
+        run_reg_queue(); // also while LoRa is switched off: reading the C6's settings is not radio use
 
         lora_rx_msg_t raw;
-        if (xQueueReceive(rx_queue, &raw, pdMS_TO_TICKS(1000)) != pdTRUE) {
-            continue;
+        if (xQueueReceive(rx_queue, &raw, pdMS_TO_TICKS(1000)) != pdTRUE || raw.len == 0) {
+            continue; // a timeout, or the registry's wake token
         }
         lora_msg_t msg;
         if (lora_decode(raw.buf, raw.len, &msg) != LORA_DEC_OK) {
@@ -549,10 +683,12 @@ static void lora_task(void *arg) {
         if (heard & LORA_C6_TELL_UP) {
             ESP_LOGI(TAG, "C6 answers again: LoRa back");
             tell_owner(true);
+            reg_link(true); // its LoRa service listens again: the registry asks c6.reg_caps anew
         }
         switch (msg.type) {
             case LORA_MSG_RX_PACKET: log_packet(&msg.u.rx); break;
             case LORA_MSG_SWEEP: lora_sweep_answer(&msg.u.sweep); break; // #161
+            case LORA_MSG_REG_VAL: reg_answer(&msg.u.reg_val); break;   // #310
             case LORA_MSG_STATUS:
                 portENTER_CRITICAL(&state_lock);
                 c6_status    = msg.u.status;
@@ -569,39 +705,7 @@ static void lora_task(void *arg) {
                 }
                 run_actions(lora_sup_on_status(&sup, &msg.u.status, now_ms()));
                 break;
-            case LORA_MSG_RESULT:
-                if (msg.u.result.for_type == LORA_MSG_SEND) {
-                    portENTER_CRITICAL(&state_lock);
-                    lora_tx_result(&tx, msg.u.result.code);
-                    if (msg.u.result.code == LORA_RESULT_OK) {
-                        tx_packets++;
-                    }
-                    uint32_t took = now_ms() - tx_sent_ms, est = tx_airtime_ms;
-                    portEXIT_CRITICAL(&state_lock);
-                    // The bridge's round trip against MeshCore's airtime estimate (it gives up at 1.5 x estimate):
-                    // only with "fw lora raw on" (the console shows info lines too, and it came with every send)
-                    if (log_raw) {
-                        ESP_LOGI(
-                            TAG,
-                            "tx answered after %lu ms (airtime estimate %lu ms)",
-                            (unsigned long)took,
-                            (unsigned long)est
-                        );
-                    }
-                }
-                if (msg.u.result.for_type == LORA_MSG_SWEEP_REQ && !lora_sweep_refused(msg.u.result.code)) {
-                    break; // #161: no sweep request outstanding (its caller gave up): ignored
-                }
-                if (msg.u.result.code != LORA_RESULT_OK) {
-                    ESP_LOGW(
-                        TAG,
-                        "C6 refused %s: code %u radio %d",
-                        msg_name(msg.u.result.for_type),
-                        msg.u.result.code,
-                        msg.u.result.radio_err
-                    );
-                }
-                break;
+            case LORA_MSG_RESULT: on_result(&msg.u.result); break;
             case LORA_MSG_IDENT:
                 // The answer to lora_ident_live (runtime IDENT, #36); at boot a late duplicate that nobody waits for
                 portENTER_CRITICAL(&state_lock);
@@ -785,6 +889,19 @@ bool lora_get_channel_rssi(int16_t *rssi_x10, uint32_t max_age_s) {
     return ok;
 }
 
+// What the P4 asks for (its copy, which MeshCore's airtime math uses) next to what the C6's SX1262 runs (#310)
+static void cmd_lora_radio(void) {
+    lora_requested_t r;
+    lora_get_requested(&r);
+    console_reply("lora requested %.3f MHz %g kHz SF%u CR%u sync 0x%02X pre %u %d dBm", r.freq_hz / 1e6, r.bw_hz / 1e3,
+                  r.sf, r.cr, r.sync_word, r.preamble, r.tx_power_dbm);
+    lora_reg_hooks_t const *h = hooks_now();
+    char                    line[160];
+    if (h && h->radio_text && h->radio_text(line, sizeof(line), true)) {
+        console_reply("lora applied   %s", line);
+    }
+}
+
 static void cmd_lora(char const *args) {
     if (strcmp(args, "log on") == 0 || strcmp(args, "log off") == 0) {
         log_rx = args[5] == 'n';
@@ -820,6 +937,7 @@ static void cmd_lora(char const *args) {
     lora_status_format(&config, &st, have, age_s, dropped, bad, line, sizeof(line));
     console_reply("lora %s | tx %lu%s", line, (unsigned long)sent,
                   lora_enabled() ? "" : " | radio switched off (fw lora on)");
+    cmd_lora_radio();
     char const *who = owner_now();
     console_reply("lora owner %s", who ? who : "none (unclaimed)"); // #103: MeshCore stopped gives the radio back
 }

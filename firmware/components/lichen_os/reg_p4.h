@@ -1,0 +1,30 @@
+#pragma once
+
+#include "reg.h"
+
+#include <stdbool.h>
+#include <stddef.h>
+
+// The P4's settings registry table (#307/#310): its own keys (bl.idle, bl.override, served from the backlight driver)
+// and a proxy entry for every C6 key it mirrors (bl.*, lora.*, c6.reg_caps; asked over REG_GET / REG_SET). Pure data,
+// so reg_service_test.c runs reg_table_check and the console set rules on the real table; the getters and the setter
+// are lichen_reg.c's on the badge and the test's stubs on the host.
+//
+// Radio keys are read-only and TX (#307): a set answers GUARDED and never reaches a setter. wifi.* and bt.state come
+// with #311.
+extern reg_entry_t const reg_p4_table[];
+extern size_t const      reg_p4_count;
+
+// A C6 key: the cached REG_VAL, after a short live ask unless the caller may not wait (the LVGL task)
+reg_status_t reg_p4_proxy_get(reg_entry_t const *e, reg_value_t *out);
+// bl.display / bl.keyboard: through the backlight driver as a saved level (as "fw bl" always did); the driver sends it
+reg_status_t reg_p4_bl_set(reg_entry_t const *e, reg_value_t const *v);
+// bl.idle / bl.override from the backlight driver (and the thermal watchdog's load shed)
+reg_status_t reg_p4_bl_mode_get(reg_entry_t const *e, reg_value_t *out);
+
+static inline bool reg_p4_is_proxy(reg_entry_t const *e) {
+    return e->get_applied == reg_p4_proxy_get;
+}
+
+// The ids of the lora.* keys in reg_radio_text's order (reg_cmd.h REG_RADIO_KEYS)
+extern uint16_t const reg_p4_radio_ids[8];

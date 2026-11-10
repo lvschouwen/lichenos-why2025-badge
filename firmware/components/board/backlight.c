@@ -130,14 +130,74 @@ void backlight_uart_return(void) {
 static portMUX_TYPE applied_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool         applied_known;
 static uint8_t      applied_display, applied_keyboard;
+// Which call set those levels (#310, the registry's bl.idle and bl.override), under applied_lock
+static backlight_idle_t     mode_idle = BACKLIGHT_BRIGHT;
+static backlight_override_t mode_override;
 
+// The registry's REG_SET path (#310), bound by lichen_os: true when it took the levels for the C6's registry
+static _Atomic(backlight_reg_send_fn)  reg_send;
+static _Atomic(backlight_reg_close_fn) reg_close;
+
+void backlight_bind_reg_send(backlight_reg_send_fn send, backlight_reg_close_fn close) {
+    atomic_store(&reg_close, close);
+    atomic_store(&reg_send, send);
+}
+
+// Before the restart blank: no REG_SET bl.* may reach the C6 after the UART BL 0 0 (#310)
+static void reg_path_close(void) {
+    atomic_store(&reg_send, NULL);
+    backlight_reg_close_fn close = atomic_exchange(&reg_close, NULL);
+    if (close) {
+        close();
+    }
+}
+
+// The levels path: REG_SET when the C6 has the registry's bl domain, else the UART1 BL line. The restart blank, the
+// UART lend's return and the C6-reset reapply stay on the UART line (send_raw): it needs no running C6 LoRa service,
+// and at a restart nothing would send a queued request any more.
 static bl_sent_t send(uint8_t display, uint8_t keyboard) {
     portENTER_CRITICAL(&applied_lock);
     applied_known    = true;
     applied_display  = display;
     applied_keyboard = keyboard;
     portEXIT_CRITICAL(&applied_lock);
+    backlight_reg_send_fn reg = atomic_load(&reg_send);
+    if (reg && reg(display, keyboard)) {
+        return BL_SENT;
+    }
     return send_raw(display, keyboard);
+}
+
+static void set_mode(backlight_idle_t idle, backlight_override_t ovr) {
+    portENTER_CRITICAL(&applied_lock);
+    mode_idle     = idle;
+    mode_override = ovr;
+    portEXIT_CRITICAL(&applied_lock);
+}
+
+static backlight_idle_t idle_now(void) {
+    portENTER_CRITICAL(&applied_lock);
+    backlight_idle_t idle = mode_idle;
+    portEXIT_CRITICAL(&applied_lock);
+    return idle;
+}
+
+void backlight_mode(backlight_idle_t *idle, backlight_override_t *ovr) {
+    portENTER_CRITICAL(&applied_lock);
+    *idle = mode_idle;
+    *ovr  = mode_override;
+    portEXIT_CRITICAL(&applied_lock);
+}
+
+void backlight_get_requested(uint8_t *display, uint8_t *keyboard) {
+    portENTER_CRITICAL(&applied_lock);
+    bool known = applied_known;
+    *display   = applied_display;
+    *keyboard  = applied_keyboard;
+    portEXIT_CRITICAL(&applied_lock);
+    if (!known) {
+        backlight_get(display, keyboard);
+    }
 }
 
 void backlight_reapply(void) {
@@ -166,6 +226,7 @@ static uint8_t     user_display = BACKLIGHT_DEFAULT_DISPLAY, user_keyboard = BAC
 static atomic_uint user_gen;
 
 static bl_sent_t send_user(uint8_t display, uint8_t keyboard, bool count) {
+    set_mode(BACKLIGHT_BRIGHT, BACKLIGHT_OVR_NONE);
     portENTER_CRITICAL(&applied_lock);
     user_display  = display;
     user_keyboard = keyboard;
@@ -181,6 +242,7 @@ uint32_t backlight_user_generation(void) {
 }
 
 void backlight_idle(uint8_t display, uint8_t keyboard) {
+    set_mode(display ? BACKLIGHT_DIM : BACKLIGHT_OFF, BACKLIGHT_OVR_NONE);
     send(display > 100 ? 100 : display, backlight_keyboard_level(keyboard));
 }
 
@@ -189,14 +251,18 @@ void backlight_resume(void) {
     uint8_t display  = user_display;
     uint8_t keyboard = user_keyboard;
     portEXIT_CRITICAL(&applied_lock);
+    set_mode(BACKLIGHT_BRIGHT, BACKLIGHT_OVR_NONE);
     send(display, keyboard);
 }
 
 void backlight_temporary(uint8_t display, uint8_t keyboard) {
+    set_mode(idle_now(), BACKLIGHT_OVR_FLASHLIGHT); // the flashlight's levels (#164)
     send(backlight_display_level(display), backlight_keyboard_level(keyboard));
 }
 
 void backlight_temporary_keyboard(uint8_t keyboard) {
+    // The new-message pulse (#164); its 0 is the dim stage's own keyboard level, so no override shows then
+    set_mode(idle_now(), keyboard ? BACKLIGHT_OVR_PULSE : BACKLIGHT_OVR_NONE);
     portENTER_CRITICAL(&applied_lock);
     uint8_t display = applied_known ? applied_display : user_display; // whatever the screen timeout set stays
     portEXIT_CRITICAL(&applied_lock);
@@ -253,7 +319,7 @@ static void r16_sample_pin(r16_samples_t *s, int i) {
     s->total[i] = R16_SAMPLES;
 }
 
-static void r16_detect(void) {
+void backlight_r16_console(void) {
     if (atomic_load(&r16_driving) || atomic_load(&r16_flashing)) {
         console_reply("r16: a C6 flash check is running, not now");
         return;
@@ -301,24 +367,6 @@ void backlight_r16_release(void) {
     esp_rom_delay_us(100);    // the pad is high-z long before EN rises (the caller's next step)
 }
 
-static void cmd_bl(char const *args) {
-    if (strcmp(args, "r16") == 0) {
-        r16_detect();
-        return;
-    }
-    char         *end;
-    unsigned long d = strtoul(args, &end, 10);
-    unsigned long k = strtoul(end, &end, 10);
-    if (!*args || *end || d > 100 || k > 100) {
-        console_reply("bl <display %d-100> <keyboard 0-100>", BACKLIGHT_DISPLAY_MIN);
-        return;
-    }
-    backlight_set_saved((uint8_t)d, (uint8_t)k);
-    uint8_t display, keyboard;
-    backlight_get(&display, &keyboard);
-    console_reply("backlight %u %u", display, keyboard);
-}
-
 // Runs inside esp_restart() (before the scheduler stops, newest handler first, so before esp_wifi_stop). The panel
 // has no power switch and the backlight is the C6's: without this, the stopped DSI feed leaves the lit panel showing
 // garbage (yellow in #23, blue since #106) until the next boot resets it. Backlight off first, so nothing shows while
@@ -326,6 +374,7 @@ static void cmd_bl(char const *args) {
 // C6 flasher's exclusive UART1 lend (boot only) the BL 0 0 is held, not sent, so a restart then cannot blank the backlight;
 // during a "fw c6log" it goes out as usual (#250).
 static void blank_for_restart(void) {
+    reg_path_close();
     if (send_raw(0, 0) == BL_SENT) {
         pthread_mutex_lock(&uart_lock); // a restore cannot delete the driver under the wait
         if (uart_is_driver_installed(BL_UART)) {
@@ -365,7 +414,6 @@ void backlight_restore(void) {
 }
 
 void backlight_start(void) {
-    console_register("bl", "bl <display> <keyboard> (backlight 0-100, screen at least 5) | bl r16 (is R16 fitted?)", cmd_bl);
     uint8_t display, keyboard;
     backlight_get(&display, &keyboard);
     send_user(display, keyboard, false);

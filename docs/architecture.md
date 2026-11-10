@@ -136,7 +136,8 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
 - **Registry ids (`shared/reg/reg_ids.h`):** u16, append-only, never renumbered or reused; the high byte is the
   domain, dotted names live only in the tables. 0x01xx `bl.*` (C6), 0x02xx `lora.*` (C6, read-only/TX), 0x03xx
   `wifi.*` (P4 via esp_hosted RPC), 0x04xx `bt.*` (C6), 0x05-0x0E reserved for C6 domains, 0x0Fxx `c6.*` meta
-  (`c6.reg_caps` 0x0F00: bit n = the C6 serves domain 0x0n), 0x10-0x1F reserved for P4 domains (#312).
+  (`c6.reg_caps` 0x0F00: bit n = the C6 serves domain 0x0n), 0x10xx the P4's backlight driver state (`bl.idle`,
+  `bl.override`, #310), 0x11-0x1F reserved for P4 domains (#312).
 - **C6 registry (`c6/main/reg_c6.c`, #309):** served on the LoRa task between commands. `bl.display`/`bl.keyboard`
   (U8 %, the only settable C6 keys; same apply path as the UART `BL d k` line, which stays as the old-P4 and early-boot
   fallback; applied = the LEDC duty register read back, after the 10-80 % clamp), `bl.freq` (LEDC timer Hz) and
@@ -148,6 +149,22 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   (`esp_bt_controller_get_status`), `c6.reg_caps`. One lock in `backlight.c` guards the LEDC for both tasks (the UART
   pair under one hold). SETs log at INFO (tag `reg`), GETs only count (`reg N` in the heartbeat). Pinned by
   `host_tests/c6_reg_test.c`.
+- **P4 registry service (#310, `lichen_os/lichen_reg.c`):** the P4 table (`reg_p4_table.c`) holds its own keys and a
+  proxy entry per C6 key. Proxies ask over REG_GET / REG_SET through `lora_reg_get` / `lora_reg_set`, which never
+  block: a 16-entry queue (`lora/lora_regq.c`, one entry per id, the newest seq wins) that the LoRa task sends, woken
+  by a zero-length token in its receive queue. REG_VAL comes back on the LoRa task through `lora_set_reg_hooks` into
+  a spinlocked cache (`reg_proxy.c`: value, status, age, seq; an older seq's answer and an unknown type are dropped).
+  `c6.reg_caps` is asked first (at start and after every re-attach, then at most 3 background tries): no answer in
+  1 s = a C6 without the registry ("not supported by this C6"), a missing domain bit = that domain is not asked. The
+  console asks live (500 ms bounded wait); the LVGL task never waits (it reads the cache with its age); a 30 s esp_timer
+  poll keeps the cache fresh. Requested vs applied: `reg_applied_matches` (lora.freq within 64 Hz, lora.bw by SX126x
+  bandwidth code, bl.* against the C6's 10..80 % clamp) for `fw get`'s "≈" and one W log line per key after a 3 s
+  settle. Backlight: `backlight_bind_reg_send` makes level changes REG_SET once the C6 has the bl domain, else the
+  UART1 `BL` line; the restart blank, the UART lend's return and the C6-reset reapply stay on UART1. The restart blank
+  first closes the REG path (`lora_reg_block`: the queued bl.* REG_SETs are dropped, later ones refused, a send in
+  flight waited for up to 50 ms), so no REG_SET can light the panel again after the UART `BL 0 0`. `fw bl` is an
+  alias over `fw set` / `fw get bl.*`; `fw lora` and `fw mesh` show the applied radio next to the P4's requested copy.
+  `lora_get_radio` / `lora_get_freq` and `lichen_sys_display_get` stay the requested / saved values.
 - **CONFIG (type 1, 14 bytes of body, 16 in all):** freq u32, bw u32, sf u8, cr u8 (5..8 = 4/5..4/8), sync u8,
   preamble u16, tx power i8 dBm. The P4 sends it on every (re)start of the link (`LORA_ACT_SEND_CONFIG`,
   `lora/lora.c:377`); the C6 starts unconfigured after its own reset. Default: 869.618 MHz, 62.5 kHz, SF7, CR 4/5, sync 0x12,

@@ -36,6 +36,11 @@ void lichen_ui_service_arm(void);
 // lvgl_port_lock, so a badge with no display still boots to Wi-Fi and OTA.
 void lichen_ui_service_port_up(void);
 
+// The settings registry service (#307/#310, lichen_reg.c): the P4 table, the proxies for the C6's keys, `fw get`,
+// `fw set` and `fw bl`, and the backlight's REG_SET path. Once, after lora_start (or after it was skipped: the P4's own
+// keys work without a C6); it asks c6.reg_caps at once.
+void lichen_reg_start(void);
+
 // The OS watch services (#281): the thermal watchdog (thermal.c, #10) and Lichen's own notices (sys_notices.c, #62).
 // Started by main in their own boot step, display or not, so a badge whose screen did not come up still powers off
 // when it gets too hot. What they need from above the OS comes in as hooks; any member may be NULL.

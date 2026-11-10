@@ -3,6 +3,7 @@
 #include "lora_app.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -47,6 +48,36 @@ bool lora_enabled(void);
 // default): the console switches LoRa alone through lora_set_enabled, not saved. Set it before lora_start registers
 // the console command; not safe after.
 void lora_set_switch_owner(void (*request)(bool on));
+
+// The settings registry's transport (#307/#310): lichen_os (L3) asks the C6 for its registry keys through here. The
+// posts never block (any task, the LVGL task included): the request waits in a small queue, one entry per key id (a
+// newer one takes it over, lora_regq.h), and the LoRa task sends it. False when LoRa is not running, stopped for an
+// update, the C6 is being recovered, or the queue is full. The answer comes back through the hooks' answer.
+bool lora_reg_get(uint16_t id, uint8_t seq);
+bool lora_reg_set(uint16_t id, uint32_t value, uint8_t seq);
+typedef struct {
+    // A REG_VAL from the C6, on the LoRa task: copy and return (no waits, no sends)
+    void (*answer)(uint16_t id, uint8_t seq, uint8_t status, uint8_t type, uint32_t value);
+    // On the LoRa task: the C6 went away (false; the queue was dropped) or answers again after a re-attach (true)
+    void (*link)(bool up);
+    // The C6's applied radio settings as one line for "fw lora" (live: on the console task, may wait briefly) and
+    // lora_applied_text (cache only); 0 when it wrote nothing
+    size_t (*radio_text)(char *buf, size_t cap, bool live);
+} lora_reg_hooks_t;
+// At a restart (#310): drops the waiting requests for ids, refuses every later one, and waits up to wait_ms for a send
+// already inside ESP-Hosted, so none of them can reach the C6 after what the caller sends next. For good; any task.
+void lora_reg_block(uint16_t const *ids, size_t n, uint32_t wait_ms);
+// Once, after lora_start; hooks must stay valid (static storage). NULL members are skipped.
+void lora_set_reg_hooks(lora_reg_hooks_t const *hooks);
+// The P4's copy of the radio settings it asks the C6 for (lora.toml or the owner), TX power included: the registry's
+// "requested" for the lora.* keys
+typedef struct {
+    uint32_t freq_hz, bw_hz;
+    uint8_t  sf, cr, sync_word;
+    uint16_t preamble;
+    int8_t   tx_power_dbm;
+} lora_requested_t;
+void lora_get_requested(lora_requested_t *out);
 
 #ifdef __cplusplus
 }
