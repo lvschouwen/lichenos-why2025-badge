@@ -84,14 +84,17 @@ P4 image is built, about 3 s. It runs `tools/check_standard.py`. Nothing passes 
   `ota_0` of `c6/partitions.esp32c6.csv`.
 - **Size growth is per linked archive, from the link map** (`esp_idf_size --archives`), not per component from
   `idf.py size-components`: the archive list is machine-readable and stable, and `size-components` only prints a table
-  whose columns shift with the memory layout. Growth is per change (#297): an archive is compared with the size
-  its **parent commit** recorded in the `size` lines of `tools/standard-baseline.txt` (read with `git show HEAD:`, so
-  rebuilds before the commit do not pay growth in instalments). More than +8 KB fails (a new archive counts from zero),
-  more than +2 KB warns, shrinks are silent. A **green** build rewrites the `size` lines to the measured values (shrinks and
-  growth up to the fail line alike; sorted, stable format; no other line is touched; a red build never writes), so the
-  commit carries its own sizes and the next change starts from them. Commit the rewritten file with the change; two slots
-  that both changed one archive conflict on that line, rebase and rebuild. There is no per-archive baseline for the C6
-  image (gap).
+  whose columns shift with the memory layout. Growth is **per branch / per push** (#297): an archive is compared with the
+  size recorded in the `size` lines of `tools/standard-baseline.txt` at the merge base of `HEAD` and `origin/main`
+  (`git merge-base HEAD refs/remotes/origin/main`, then `git show`). In a slot that gates the whole branch; in main it
+  gates exactly what the next push adds. Rebuilds, amends, rebases and several commits cannot add up unchecked.
+  More than +8 KB fails (a new archive counts from zero), more than +2 KB warns, shrinks are silent. A **green** build
+  rewrites only the numbers of the `size` lines to the measured values (shrinks and growth up to the fail line alike; new
+  archives are inserted sorted; every other line stays byte for byte; a red build never writes), so the commit carries its
+  own sizes. After a rebase, rebuild and commit the rewritten size lines (two branches that changed one archive conflict
+  on that line). The gate fails closed: no git, no `origin/main` or no baseline at the merge base is an error (fetch
+  origin); `--no-ref` skips the reference on purpose (fresh repo) and says so. There is no per-archive baseline for the
+  C6 image (gap).
 - **Merged string pools are their own line, `size <merged-strings>`.** The linker folds every `.rodata.*.str1.*` and
   `.cst*` input section (SHF_MERGE) into one image-wide blob and books all of it on the first contributing object, so
   the pool (~240 KB) used to sit under `libesp_stdio.a` and any change of link order moved it to another archive as a
@@ -111,7 +114,8 @@ P4 image is built, about 3 s. It runs `tools/check_standard.py`. Nothing passes 
   `--shrink` later drops the records once the merge base has the new key.
 - Intended growth of an archive beyond 8 KB: `--size-update` (IDF environment, fresh build). It prints every changed
   archive, so the diff is reviewable; give the reason in the commit message. The gate accepts growth past the fail line
-  only when the file's value was written this way (a green build never records it).
+  when the file's value is at least the measured one, and prints a warning on every run ("accepted by the baseline
+  line: needs Lucas's ok"). That is an honour rule, not a provenance check: a hand-edited value passes the same way.
 - `--init` creates the first baseline and refuses when the file exists. Never edit a value up to get a build through; split
   the function.
 
@@ -133,6 +137,6 @@ Measured over 548 files, 4198 functions, 63492 NLOC (lizard), 3052 functions in 
 | Parameters | 1 | 11 (`mesh_hist_compact`, `files_text_page`) | 40 | 6 |
 | Stack frame | 16 B | 2448 B (`settings_backup_plan`) | 32 | 9 |
 
-App image: 2,554,160 B of the 4 MiB OTA slot = 60.9 % (warn at 85 %). Internal RAM (DIRAM, static): 199,000 of 441,296 B
+App image: 2,554,160 B of the 4 MiB OTA slot = 60.9 % (warn at 75 %). Internal RAM (DIRAM, static): 199,000 of 441,296 B
 (45 %). Largest archives: `liblvgl` 542 KB, `libmesh` 374 KB, `libesp_stdio` 234 KB (this was the merged string pool, now its own line),
 `liblichen_shell` 217 KB. The offenders past the fail line are the baseline file itself; the ranked list is in #202.

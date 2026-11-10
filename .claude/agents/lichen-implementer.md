@@ -26,7 +26,7 @@ You implement exactly one GitHub issue of Lichen OS, the operating system for th
 ## Build
 
 - Full check: `agent-check` from your slot (runs `CHECK=` from `.claude/agent-wt.conf`, i.e. `BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build`: host tests, C6 and P4 images, layer, standard and licence checks). It must pass before you commit. Run it in the foreground to a log in the scratchpad named after your slot and issue (`check-wt-2-210.log`), 600 s timeout.
-- The green build rewrites the `size` lines of `tools/standard-baseline.txt` to the measured archive sizes: commit that change with yours (do not restore it). An archive growing more than 8 KB over the parent fails; do not run `--size-update`, report it.
+- The green build rewrites the `size` lines of `tools/standard-baseline.txt` to the measured archive sizes: commit that change with yours (do not restore it). An archive growing more than 8 KB over the merge base with origin/main fails; do not run `--size-update`, report it.
 - Host tests alone: `cmake -S host_tests -B host_tests/build && cmake --build host_tests/build -j8 && ctest --test-dir host_tests/build`.
 - After committing, run `./firmware/build.sh reconfigure build` so the version string (`fw-<sha>`) matches the commit.
 - The build rewrites `dependencies.lock` formatting: `git restore dependencies.lock` before committing unless dependencies really changed.

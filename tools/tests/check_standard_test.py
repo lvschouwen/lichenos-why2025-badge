@@ -169,14 +169,18 @@ class Sizes(unittest.TestCase):
         parent = {("size", "a.a"): 100000}
         self.assertEqual(cs.compare_sizes({("size", "a.a"): 50000}, parent), ([], []))
 
-    def test_record_sizes_touches_size_lines_only_and_is_deterministic(self):
-        base = {("ccn", "a.c:f"): 30, ("size", "old.a"): 5, ("size", "a.a"): 10}
-        new = cs.record_sizes(base, {("size", "z.a"): 3, ("size", "a.a"): 12})
-        self.assertEqual(new, {("ccn", "a.c:f"): 30, ("size", "a.a"): 12, ("size", "z.a"): 3})
-        t1 = cs.format_baseline("# h", new)
-        t2 = cs.format_baseline("# h", cs.record_sizes(dict(reversed(list(base.items()))), {("size", "a.a"): 12, ("size", "z.a"): 3}))
-        self.assertEqual(t1, t2)
-        self.assertEqual(cs.record_sizes(new, {("size", "z.a"): 3, ("size", "a.a"): 12}), new)
+    def test_rewrite_sizes_keeps_every_other_byte(self):
+        text = "# head\nccn\ta.c:f\t30\n# interior note\n\nsize\tb.a\t5\nsize\td.a\t7\nsize\told.a\t9\n# tail\n"
+        new = cs.rewrite_sizes(text, {("size", "b.a"): 6, ("size", "c.a"): 1, ("size", "d.a"): 7, ("size", "z.a"): 2})
+        self.assertEqual(new, "# head\nccn\ta.c:f\t30\n# interior note\n\nsize\tb.a\t6\nsize\tc.a\t1\nsize\td.a\t7\n"
+                              "size\tz.a\t2\n# tail\n")
+        self.assertEqual(cs.rewrite_sizes(new, {("size", "b.a"): 6, ("size", "c.a"): 1, ("size", "d.a"): 7,
+                                                ("size", "z.a"): 2}), new)
+
+    def test_accepted_growth_warns_every_run(self):
+        f, w = cs.compare_sizes({("size", "a.a"): 20000}, {("size", "a.a"): 1000}, {("size", "a.a"): 20000})
+        self.assertEqual(f, [])
+        self.assertIn("needs Lucas's ok", w[0])
 
     def test_run_check_never_rewrites_and_uses_the_reference(self):
         info = {"p4": (0, 0), "c6": (0, 0)}
@@ -184,6 +188,72 @@ class Sizes(unittest.TestCase):
         fails, _, _ = cs.run_check("", base, base, {}, {("size", "a.a"): 11000}, info, [], set(), {("size", "a.a"): 1000})
         self.assertEqual(len(fails), 1)
         self.assertEqual(base, {("size", "a.a"): 6000})
+
+
+class BranchGate(unittest.TestCase):
+    """main() in a temp git repo with an origin/main ref: the size reference is the merge base, not HEAD."""
+    BASE = "# head\n# interior note\nccn\ta.c:f\t30\n\nsize\ta.a\t1000\nsize\tb.a\t2000\n"
+
+    def git(self, *a):
+        subprocess.run(["git", "-C", self.root, "-c", "user.name=t", "-c", "user.email=t@t"] + list(a),
+                       check=True, capture_output=True)
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        self.path = os.path.join(self.root, "tools", "standard-baseline.txt")
+        os.makedirs(os.path.dirname(self.path))
+        self.write(self.BASE)
+        self.git("init", "-q")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "base")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write(self, text):
+        with open(self.path, "w") as f:
+            f.write(text)
+
+    def read(self):
+        with open(self.path) as f:
+            return f.read()
+
+    def run_gate(self, a, b, new=None, argv=("x",)):
+        sizes = {("size", "a.a"): a, ("size", "b.a"): b}
+        sizes.update(new or {})
+
+        def measure(_root):
+            return {("ccn", "a.c:f"): 30}, sizes, {"p4": (0, 0), "c6": (0, 0)}, []
+        return cs.main(list(argv), self.root, measure)
+
+    def test_red_run_leaves_the_file_untouched(self):
+        self.assertEqual(self.run_gate(1000 + 9000, 2000), 1)
+        self.assertEqual(self.read(), self.BASE)
+
+    def test_green_run_rewrites_only_size_numbers(self):
+        self.assertEqual(self.run_gate(1500, 1900, {("size", "c.a"): 7}), 0)
+        self.assertEqual(self.read(), self.BASE.replace("1000", "1500").replace("2000", "1900") + "size\tc.a\t7\n")
+
+    def test_post_commit_rebuild_and_instalments_are_still_measured_against_the_merge_base(self):
+        self.assertEqual(self.run_gate(1000 + 5000, 2000), 0)
+        self.git("commit", "-q", "-a", "-m", "first")  # the sizes are now committed; HEAD is no longer the reference
+        self.assertEqual(self.run_gate(1000 + 5000, 2000), 0)
+        self.assertEqual(self.run_gate(1000 + 10000, 2000), 1)  # a second +5 KB commit adds up
+        self.git("commit", "-q", "--amend", "--no-edit")
+        self.assertEqual(self.run_gate(1000 + 10000, 2000), 1)
+
+    def test_size_update_is_accepted_and_warns(self):
+        self.assertEqual(self.run_gate(1000 + 20000, 2000, argv=("x", "--size-update")), 0)
+        self.assertEqual(self.run_gate(1000 + 20000, 2000), 0)
+
+    def test_unreadable_reference_fails_closed(self):
+        self.git("update-ref", "-d", "refs/remotes/origin/main")
+        with self.assertRaises(cs.GateError):
+            self.run_gate(1000, 2000)
+        self.assertEqual(self.read(), self.BASE)
+        self.assertEqual(self.run_gate(1000, 2000, argv=("x", "--no-ref")), 0)
 
 
 SH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "check_standard.sh")
