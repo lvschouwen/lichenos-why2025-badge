@@ -50,12 +50,9 @@
 #include "lichen_mem.h"
 #include "lichen_task.h"
 
-extern "C" {
 #include "fw_console.h"
 #include "lora_app.h"
-}
 
-#include <ctype.h>
 #include <strings.h>
 #include <math.h>
 #include <new>
@@ -548,6 +545,11 @@ static bool (*const keep_contact)(ContactInfo const &c) = BadgeMesh::keepContact
 static bool rebooting;
 
 void BadgeBoard::reboot() {
+    // On trial a restart would roll this version back, and the gate's wait would hold the mesh lock for up to two
+    // minutes (#304): refused, the admin can ask again once the image is valid
+    if (system_restart_refused("MeshCore reboot")) {
+        return;
+    }
     if (mesh_task_handle && xTaskGetCurrentTaskHandle() == mesh_task_handle) {
         node->saveAll();
         mesh_journal_stop_locked(true);

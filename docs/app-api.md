@@ -130,8 +130,9 @@ to `layers.conf`):
   switch, the C6 hooks) is the OS's: apps never include it.
 - `fw_console.h`: `console_register` / `console_reply` for `fw <name>` commands; `console_reply_secret` for a line
   that holds a key or a password (only the one who asked gets it: the USB console, or the Wi-Fi console's reply; never
-  the log store or the Console app, #123); `system_restart(why)` when a restart is what the user asked for (it records
-  why). The Wi-Fi console (`POST /console`) is plain HTTP on the LAN, guarded by the update token only: a secret in its
+  the log store or the Console app, #123); `system_restart_asked(why)` when a restart is what the user asked for (it records
+  why; it never waits), `system_restart(why)` for one the app decides on its own (it waits while the image is on trial,
+  #304, so never from the LVGL task). The Wi-Fi console (`POST /console`) is plain HTTP on the LAN, guarded by the update token only: a secret in its
   reply crosses the network unencrypted, as the token itself does.
 
 ## The two surfaces, the gate, capabilities and lifecycle

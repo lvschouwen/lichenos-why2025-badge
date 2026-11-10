@@ -19,6 +19,29 @@ bool ota_image_may_be_on_trial(ota_image_state_t state);
 // refuses too. An unread state is let through: refusing it would lock out Wi-Fi updates on a badge with blank otadata
 bool ota_update_refused_on_trial(bool stops_apps, ota_image_state_t state);
 
+// The restart gate (#304): a restart the badge makes on its own while this image is on trial rolls it back, so it
+// waits (system_restart, polled once a second) until the image is valid, the trial loop has ended any other way (a
+// restart then rolls back whenever it comes), OTA_RESTART_GATE_MAX_S of uptime or a power off is asked (heat never
+// waits). A restart a person asked for, or one meant to roll back, goes ahead at once. 15 s past the trial loop's
+// last second (OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S), so the loop has ended first.
+#define OTA_RESTART_GATE_MAX_S 120
+
+typedef enum {
+    RESTART_GATE_GO,           // not on trial: restart
+    RESTART_GATE_WAIT,         // automatic, on trial: look again in a second
+    RESTART_GATE_GO_ASKED,     // on trial, but a person asked (or the rollback is meant): goes back to the previous one
+    RESTART_GATE_GO_SETTLED,   // on trial, and the trial loop ended without the valid mark: waiting gains nothing
+    RESTART_GATE_GO_BOUND,     // on trial, waited up to OTA_RESTART_GATE_MAX_S of uptime
+    RESTART_GATE_GO_POWER_OFF, // on trial, but a power off was asked: it never waits
+} restart_gate_t;
+
+// image: the running image's state (ota_image_may_be_on_trial: UNKNOWN counts as on trial); trial_settled: main's
+// trial loop has ended (any end); uptime_s: since boot; power_off: system_power_off_requested was called
+restart_gate_t restart_gate_decide(bool asked, ota_image_state_t image, bool trial_settled, uint32_t uptime_s,
+                                   bool power_off);
+// Why a restart on trial goes ahead, for the log ("" for GO and WAIT)
+char const *restart_gate_name(restart_gate_t gate);
+
 // The display as this boot left it (#293). Only a deliberate headless boot (`fw noscreen`) lets the OS alone prove an
 // image: a panel that failed to start may be the new image's fault, so that boot never marks it valid and the next
 // reset rolls it back (with the C6 link up it stays on trial and Wi-Fi can still replace it)

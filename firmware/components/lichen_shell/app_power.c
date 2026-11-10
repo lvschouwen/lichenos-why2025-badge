@@ -64,7 +64,7 @@ static void power_task(void *arg) {
     if (finish_hook) {
         finish_hook(off); // does not return
     }
-    system_restart(off ? "power off (no hook)" : "power menu restart");
+    system_restart_asked(off ? "power off (no hook)" : "power menu restart");
 }
 
 // The notifications first: a short write, so a mesh stop that runs into the restart's bound cannot cut their file
@@ -135,7 +135,7 @@ static void start(bool off) {
     // a short task of its own, which may wait for the lock as long as it needs.
     if (!lichen_task_start(&power_app, "power", power_task, NULL, POWER_STACK, LICHEN_PRIO_URGENT, NULL)) {
         ESP_LOGE(TAG, "no memory for the power task: restarting as is");
-        system_restart("power menu (no task)");
+        system_restart_asked("power menu (no task)");
     }
     if (!lichen_task_start(&power_app, "pwrui", bye_task, NULL, BYE_UI_STACK, LICHEN_PRIO_URGENT, NULL)) {
         ESP_LOGW(TAG, "no memory for the goodbye screen");

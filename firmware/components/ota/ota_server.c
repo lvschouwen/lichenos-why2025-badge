@@ -1355,6 +1355,15 @@ static void respond_info(int fd) {
             hooks.prepare ? " prepare" : "", room);
 }
 
+// A new firmware boots after the reboot; without one, a reboot on trial goes back to the previous version (#304)
+static void respond_reboot(int fd) {
+    if (!firmware_installed && system_restart_on_trial()) {
+        respond(fd, 200, "rebooting: %s", SYSTEM_RESTART_TRIAL_NOTE);
+    } else {
+        respond(fd, 200, "rebooting");
+    }
+}
+
 // Handle one connection. Returns true when the badge should reboot.
 static bool handle_connection(int fd) {
     size_t len      = 0;
@@ -1439,7 +1448,7 @@ static bool handle_connection(int fd) {
             secure_wipe(head_buf + head_len, pre_len); // the body's first bytes were read into the request buffer
             return false;
         case OTA_ROUTE_REBOOT:
-            respond(fd, 200, "rebooting");
+            respond_reboot(fd);
             hook_end(true, firmware_installed); // a plain reboot with no new firmware is not an update
             return true;
         default: return false;
@@ -1559,7 +1568,7 @@ static void serve(int ls) {
         if (reboot) {
             ESP_LOGI(TAG, "reboot requested over Wi-Fi");
             vTaskDelay(pdMS_TO_TICKS(300));
-            system_restart("ota reboot over Wi-Fi");
+            system_restart_asked("ota reboot over Wi-Fi");
         }
     }
 }

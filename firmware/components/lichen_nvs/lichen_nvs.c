@@ -147,7 +147,7 @@ static void cmd_nvs_down(char const *args) {
     s_force_down[0] = FORCE_DOWN_A;
     s_force_down[1] = FORCE_DOWN_B;
     console_reply("nvs-down: restarting; the next boot runs without NVS");
-    system_restart("nvs-down (bench)");
+    system_restart_asked("nvs-down (bench)");
 }
 
 static void register_debug(void) {

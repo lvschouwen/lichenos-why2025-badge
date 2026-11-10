@@ -1,5 +1,10 @@
 #pragma once
 
+// C++ includes it too (MeshCore's mesh_task.cpp)
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "restart_log.h"
 
 // Serial console on UART0 (#61): lines starting with "fw " are commands, everything else is ignored.
@@ -45,11 +50,41 @@ void console_exec(char const *line, char *buf, size_t cap, console_done_fn done,
 // update token). The caller wipes buf after done.
 void console_exec_with_secrets(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx);
 
-// Every deliberate restart goes through here (console, OTA, slot switch, C6 reflash, after an update), not through a
-// bare esp_restart(). The screen is blanked by a shutdown handler (backlight.c), so any esp_restart() gets it.
+// Every deliberate restart goes through here or system_restart_asked (console, OTA, slot switch, C6 reflash, after an
+// update), not through a bare esp_restart(). The screen is blanked by a shutdown handler (backlight.c), so any
+// esp_restart() gets it.
 // why: a short reason, kept with the fw version, uptime and time in NVS (last 5, "fw crash") so an unexplained restart
 // can be traced (#41). A bare esp_restart() is caught too and recorded as "unknown caller" with its return address.
+// system_restart is a restart the badge makes on its own (a failed update, the C6 supervisor, MeshCore's remote
+// reboot): while the running image is on trial it first waits for the trial gate (#304), polled once a second on the
+// calling task, so a new caller is safe by default. Never from the LVGL task or with a lock others need while it may
+// wait: ask system_restart_would_wait() first and try again later.
 void system_restart(char const *why) __attribute__((noreturn));
+// A restart a person asked for (fw reboot, /reboot, the Power menu, a factory reset) or one meant to roll the image back
+// (the trial's own rollback, a good install's reboot): never waits. On trial it goes back to the previous version; the
+// caller says so (system_restart_on_trial).
+void system_restart_asked(char const *why) __attribute__((noreturn));
+
+// What a restart does now while the image may be on trial (#304). main binds the rule (ota_valid.c
+// restart_gate_decide): fw_console knows nothing of OTA. note: set with SYSTEM_RESTART_ON_TRIAL, why it goes ahead.
+typedef enum {
+    SYSTEM_RESTART_GO,       // not on trial
+    SYSTEM_RESTART_WAIT,     // an automatic restart on trial: look again in a second
+    SYSTEM_RESTART_ON_TRIAL, // goes ahead on trial: the bootloader boots the previous version
+} system_restart_gate_t;
+typedef system_restart_gate_t (*system_restart_gate_fn)(bool asked, bool power_off, char const **note);
+// Set once from main.c, early in the boot; NULL (or before it is bound) every restart goes ahead. Any task.
+void system_restart_set_trial_gate(system_restart_gate_fn gate);
+// An automatic restart now would wait for the gate: for callers that must not block (the update screen's LVGL tick,
+// the mesh task). Any task.
+bool system_restart_would_wait(void);
+// For a restart that may not wait (MeshCore's remote reboot on the mesh task, under the mesh lock): true, with a
+// warning naming why, when system_restart would wait; the caller then does not restart. Any task.
+bool system_restart_refused(char const *why);
+// A restart now goes back to the previous version (the image may be on trial): a person's reboot says so. Any task.
+bool system_restart_on_trial(void);
+// The words a person-asked restart on trial adds to its reply
+#define SYSTEM_RESTART_TRIAL_NOTE "this version is still on trial: restarting goes back to the previous one"
 // The OS's saves before every system_restart (not a bare esp_restart, not a panic): the apps stop as for an update, so
 // MeshCore saves its files and flushes its message journal (#123). They run on a task of their own; system_restart
 // waits for them up to SYSTEM_RESTART_SAVE_MS, then restarts anyway (logged). Set once from main.c.
@@ -74,3 +109,7 @@ void system_restart_note(char const *why);
 void system_restart_bind_store(fw_get_blob_fn get, fw_set_blob_fn set);
 // The recorded restarts, newest first; returns how many
 int system_restart_history(restart_log_t *out);
+
+#ifdef __cplusplus
+}
+#endif

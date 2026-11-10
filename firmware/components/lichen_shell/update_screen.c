@@ -44,6 +44,7 @@ typedef struct {
     uint32_t gen; // counts begins
     bool     firmware; // an image (firmware or assets, #22): update mode, ends in a restart
     bool     new_version; // real firmware: remembered for "Updated" / "Update failed" after the restart
+    bool     installed;   // new firmware installed: the restart boots it, so it never waits for the trial (#304)
     char     name[48];
     uint32_t total;
     uint32_t done;
@@ -90,6 +91,7 @@ void update_screen_prepare(void) {
     shared.gen++;
     shared.firmware    = true;
     shared.new_version = false; // the begin that follows says whether this is new firmware or assets
+    shared.installed   = false;
     shared.name[0]     = '\0';
     shared.total    = 0;
     shared.done     = 0;
@@ -130,6 +132,7 @@ void update_screen_begin(bool image, bool firmware, char const *name, uint32_t t
     shared.gen++;
     shared.firmware    = image;
     shared.new_version = firmware;
+    shared.installed   = false;
     snprintf(shared.name, sizeof(shared.name), "%s", name ? name : "");
     shared.total    = total;
     shared.done     = 0;
@@ -162,6 +165,7 @@ void update_screen_end(bool ok, bool rebooting) {
             shared.phase = shared.firmware ? PH_RESTARTING : PH_FILE_DONE;
             shared.done  = shared.total;
             save         = shared.new_version;
+            shared.installed = shared.new_version;
         } else {
             shared.phase = PH_FAILED;
         }
@@ -191,6 +195,7 @@ static lv_obj_t *hint_label;
 static uint32_t  opened_gen; // the transfer the screen was opened (or refreshed) for
 static int64_t   opened_ms;
 static bool      open_failed_warned;
+static bool      restart_held; // the restart is due but waits for this version's valid mark (#304)
 
 static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color, lv_font_t const *font) {
     lv_obj_t *label = lv_label_create(parent);
@@ -285,12 +290,17 @@ static void render(state_t const *s) {
     lv_bar_set_value(bar, s->phase == PH_FAILED ? 0 : (s->phase == PH_IDLE || pct < 0 ? 0 : pct), LV_ANIM_OFF);
     bool busy = s->phase == PH_RECEIVING || s->phase == PH_RESTARTING;
     bool failed = s->phase == PH_FAILED;
-    set_text(hint_label, failed ? "The badge still runs the old version. Start the update again from your computer."
-                                : "Don't turn off the badge");
-    lv_obj_set_hidden(hint_label, !(busy || failed));
+    char const *hint = restart_held ? "Waiting for this version to be confirmed, then the badge restarts"
+                       : failed     ? "The badge still runs the old version. Start the update again from your computer."
+                                    : "Don't turn off the badge";
+    set_text(hint_label, hint);
+    lv_obj_set_hidden(hint_label, !(busy || failed || restart_held));
 }
 
 static void finish_screen(uint32_t gen) {
+    if (restart_held) {
+        return; // the screen stays up with its waiting line until the restart goes (#304)
+    }
     // Back to what was open before; only when this screen is still the one showing
     if (title_label && nav_current() == SCREEN_UPDATE) {
         shell_back();
@@ -300,6 +310,29 @@ static void finish_screen(uint32_t gen) {
         shared.phase = PH_IDLE;
     }
     portEXIT_CRITICAL(&lock);
+}
+
+// On the LVGL task: the gate's wait (system_restart on trial, #304) would freeze the UI for up to two minutes, so a
+// restart that would wait is held and tried again on the next tick. A good install restarts at once: it boots the new
+// version, the trial of this one no longer matters.
+static void restart_after_update(bool due, state_t const *s) {
+    if (!due) {
+        restart_held = false; // not due (any more): a new prepare or begin took the restart back
+        return;
+    }
+    if (s->installed) {
+        ESP_LOGI(TAG, "restarting after the update");
+        system_restart_asked("after update");
+    }
+    if (system_restart_would_wait()) {
+        if (!restart_held) {
+            ESP_LOGW(TAG, "restart after the update held: this version is still on trial");
+            restart_held = true;
+        }
+        return;
+    }
+    ESP_LOGI(TAG, "restarting after the update");
+    system_restart("after update");
 }
 
 static void tick(lv_timer_t *t) {
@@ -349,10 +382,7 @@ static void tick(lv_timer_t *t) {
                  (s.phase == PH_RESTARTING && now - s.stamp_ms >= FAILED_MS)); // installed, and the restart was decided
     bool restart_decided = um.reboot;
     portEXIT_CRITICAL(&lock);
-    if (restart) {
-        ESP_LOGI(TAG, "restarting after the update");
-        system_restart("after update");
-    }
+    restart_after_update(restart, &s);
 
     if (!title_label) {
         if (s.phase == PH_IDLE) {

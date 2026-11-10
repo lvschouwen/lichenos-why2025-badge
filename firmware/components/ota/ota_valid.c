@@ -35,6 +35,38 @@ bool ota_update_refused_on_trial(bool stops_apps, ota_image_state_t state) {
     return stops_apps && state == OTA_IMAGE_ON_TRIAL;
 }
 
+restart_gate_t restart_gate_decide(bool asked, ota_image_state_t image, bool trial_settled, uint32_t uptime_s,
+                                   bool power_off) {
+    if (!ota_image_may_be_on_trial(image)) {
+        return RESTART_GATE_GO;
+    }
+    if (asked) {
+        return RESTART_GATE_GO_ASKED;
+    }
+    if (power_off) {
+        return RESTART_GATE_GO_POWER_OFF;
+    }
+    if (trial_settled) {
+        return RESTART_GATE_GO_SETTLED;
+    }
+    if (uptime_s >= OTA_RESTART_GATE_MAX_S) {
+        return RESTART_GATE_GO_BOUND;
+    }
+    return RESTART_GATE_WAIT;
+}
+
+char const *restart_gate_name(restart_gate_t gate) {
+    switch (gate) {
+    case RESTART_GATE_GO_ASKED: return "asked for";
+    case RESTART_GATE_GO_SETTLED: return "the trial ended without the valid mark";
+    case RESTART_GATE_GO_BOUND: return "waited for the valid mark long enough";
+    case RESTART_GATE_GO_POWER_OFF: return "a power off was asked";
+    case RESTART_GATE_GO:
+    case RESTART_GATE_WAIT:
+    default: return "";
+    }
+}
+
 ota_trial_end_t ota_trial_run(ota_trial_io_t const *io) {
     unsigned read_fails = 0, mark_fails = 0;
     for (;;) {

@@ -113,7 +113,7 @@ static void handle(lichen_fc_event_t e) {
     case LICHEN_FC_EV_CONFIRM:
         ESP_LOGI(TAG, "boot keys: settings reset confirmed");
         if (lichen_sys_factory_request(LICHEN_FACTORY_SETTINGS)) {
-            system_restart("factory reset settings (boot keys)");
+            system_restart_asked("factory reset settings (boot keys)");
         }
         ESP_LOGE(TAG, "boot keys: reset not saved, nothing erased");
         close_question();

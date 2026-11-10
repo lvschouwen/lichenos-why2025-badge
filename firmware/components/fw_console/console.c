@@ -343,7 +343,7 @@ static void cmd_slot(char const *args) {
     console_reply("booting %s (%s)", other->label, desc.version);
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(200));
-    system_restart("slot switch");
+    system_restart_asked("slot switch");
 }
 
 static void capture_finish(void) {
@@ -432,12 +432,49 @@ static void power_off_if_requested(void) {
     }
 }
 
+// The trial rule main binds (#304): fw_console asks, ota_valid.c decides
+static _Atomic system_restart_gate_fn s_trial_gate;
+
+void system_restart_set_trial_gate(system_restart_gate_fn gate) {
+    atomic_store(&s_trial_gate, gate);
+}
+
+static system_restart_gate_t trial_gate(bool asked, char const **note) {
+    system_restart_gate_fn gate = atomic_load(&s_trial_gate);
+    *note                       = "";
+    return gate ? gate(asked, atomic_load(&s_power_off) != NULL, note) : SYSTEM_RESTART_GO;
+}
+
+bool system_restart_would_wait(void) {
+    char const *note;
+    return trial_gate(false, &note) == SYSTEM_RESTART_WAIT;
+}
+
+bool system_restart_refused(char const *why) {
+    if (!system_restart_would_wait()) {
+        return false;
+    }
+    ESP_LOGW(TAG, "restart (%s) refused: this version is still on trial, ask again once it is confirmed",
+             why ? why : "unspecified");
+    return true;
+}
+
+bool system_restart_on_trial(void) {
+    char const *note;
+    return trial_gate(true, &note) == SYSTEM_RESTART_ON_TRIAL;
+}
+
 void __wrap_esp_restart(void) {
     power_off_if_requested();
     bool deliberate = s_restart_why != NULL;
     if (deliberate) {
         record_restart(s_restart_why, 0);
     } else {
+        // Only a word: fault paths and IDF components restart here and must not wait (#304)
+        if (system_restart_on_trial()) {
+            ESP_LOGW(TAG, "restart (unknown caller %p) on trial: %s", __builtin_return_address(0),
+                     SYSTEM_RESTART_TRIAL_NOTE);
+        }
         record_restart("unknown caller", (uint32_t)(uintptr_t)__builtin_return_address(0));
     }
     // After the record: the frame can only be skipped, never cost the history. A bare esp_restart() (no system_restart)
@@ -514,11 +551,37 @@ static void restart_save_run(void) {
     ESP_LOGI(TAG, "restart: the apps saved in %lld ms", (long long)((esp_timer_get_time() - started) / 1000));
 }
 
-void system_restart(char const *why) {
+// Before the restart's reason is recorded, so a person's restart during the wait wins (#304). The wait ends: the gate
+// says when (the valid mark, the trial loop's end, its bound, a power off; ota_valid.c restart_gate_decide).
+static void trial_gate_wait(char const *why, bool asked) {
+    bool said = false;
+    for (;;) {
+        char const *note;
+        switch (trial_gate(asked, &note)) {
+        case SYSTEM_RESTART_GO:
+            if (said) {
+                ESP_LOGI(TAG, "restart (%s): this version is valid now, restarting", why);
+            }
+            return;
+        case SYSTEM_RESTART_ON_TRIAL:
+            ESP_LOGW(TAG, "restart (%s, %s): %s", why, note, SYSTEM_RESTART_TRIAL_NOTE);
+            return;
+        case SYSTEM_RESTART_WAIT:
+        default:
+            if (!said) {
+                ESP_LOGW(TAG, "restart (%s) waits: this version is still on trial", why);
+                said = true;
+            }
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            break;
+        }
+    }
+}
+
+static void __attribute__((noreturn)) restart_now(char const *why) {
     // The first restart's reason stays: a second one only waits for it (restart_save_run)
     char const *none = NULL;
-    __atomic_compare_exchange_n(&s_restart_why, &none, why ? why : "unspecified", false, __ATOMIC_ACQ_REL,
-                                __ATOMIC_ACQUIRE);
+    __atomic_compare_exchange_n(&s_restart_why, &none, why, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
     if (capture.task && capture.task == xTaskGetCurrentTaskHandle()) {
         capture_finish(); // a command from Wi-Fi answers before the badge goes down (#38)
         vTaskDelay(pdMS_TO_TICKS(300)); // the reply leaves the TCP stack
@@ -527,16 +590,32 @@ void system_restart(char const *why) {
     esp_restart();
 }
 
+void system_restart(char const *why) {
+    why = why ? why : "unspecified";
+    trial_gate_wait(why, false);
+    restart_now(why);
+}
+
+void system_restart_asked(char const *why) {
+    why = why ? why : "unspecified";
+    trial_gate_wait(why, true);
+    restart_now(why);
+}
+
 void system_save_before_off(void) {
     restart_save_run();
 }
 
 static void cmd_reboot(char const *args) {
     (void)args;
-    console_reply("rebooting");
+    if (system_restart_on_trial()) {
+        console_reply("rebooting: %s", SYSTEM_RESTART_TRIAL_NOTE);
+    } else {
+        console_reply("rebooting");
+    }
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(200));
-    system_restart("console reboot");
+    system_restart_asked("console reboot");
 }
 
 static void (*_Atomic activity_hook)(void);

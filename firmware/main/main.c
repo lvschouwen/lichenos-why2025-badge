@@ -209,7 +209,7 @@ static void stop_for_update(bool apps_stopped) {
 // IP5306 cuts the 5 V after ~32 s. Restart is the usual one (its shutdown hook blanks the screen).
 static void power_finish(bool power_off) {
     if (!power_off) {
-        system_restart("power menu restart");
+        system_restart_asked("power menu restart");
     }
     lichen_sys_power_off_now();
 }
@@ -800,12 +800,28 @@ static void trial_wait(void *ctx) {
     vTaskDelay(pdMS_TO_TICKS(1000));
 }
 
+// The trial loop has ended, any way (#304): from then on an automatic restart on trial need not wait, it rolls back
+// whenever it comes
+static atomic_bool trial_settled;
+
+// The rule system_restart asks before an automatic restart (#304; ota_valid.c decides, host_tests/restart_gate_test.c)
+static system_restart_gate_t restart_trial_gate(bool asked, bool power_off, char const **note) {
+    restart_gate_t gate = restart_gate_decide(asked, ota_image_trial_state(), atomic_load(&trial_settled),
+                                              uptime_ms() / 1000, power_off);
+    *note = restart_gate_name(gate);
+    return gate == RESTART_GATE_GO ? SYSTEM_RESTART_GO
+           : gate == RESTART_GATE_WAIT ? SYSTEM_RESTART_WAIT
+                                       : SYSTEM_RESTART_ON_TRIAL;
+}
+
 // A freshly installed image runs on trial until it has been up for a while; a reset before that boots the previous one
 // again. ota_valid.c decides and runs the loop (host_tests/ota_valid_test.c): the C6 link and, with a display, the
 // shell; a boot with the display skipped on purpose (fw noscreen) ends its trial without the shell (#293)
 static void ota_trial_wait(ota_display_t display) {
     ota_trial_io_t const io = {.read = trial_read, .mark_valid = trial_mark_valid, .wait = trial_wait, .ctx = &display};
-    switch (ota_trial_run(&io)) {
+    ota_trial_end_t end = ota_trial_run(&io);
+    atomic_store(&trial_settled, true); // before the rollback below, so a waiting restart goes too
+    switch (end) {
     case OTA_TRIAL_END_VALID:
         ESP_LOGI(TAG, "this image is now valid%s",
                  display == OTA_DISPLAY_SKIPPED ? " (display skipped: the OS is up)" : "");
@@ -814,7 +830,7 @@ static void ota_trial_wait(ota_display_t display) {
     case OTA_TRIAL_END_ROLL_BACK:
         // No C6 means no Wi-Fi, so nobody can replace this image: let the bootloader roll back
         ESP_LOGE(TAG, "C6 link never came up on a trial image: restarting to roll back");
-        system_restart("trial image: no C6 link");
+        system_restart_asked("trial image: no C6 link"); // the rollback is the point
         break;
     case OTA_TRIAL_END_STAY:
         ESP_LOGW(TAG, "staying on trial (%s): a reset goes back to the previous image",
@@ -849,6 +865,7 @@ static void check_start_fns(void) {
 void app_main(void) {
     ESP_LOGI(TAG, "app_main starts at %u ms of uptime (esp_timer, counted from reset)", (unsigned)uptime_ms());
     check_start_fns();
+    system_restart_set_trial_gate(restart_trial_gate); // before any boot step can restart (#304)
     boot_ctx_t ctx = {0};
     // boot_order.c is the order (the two-chip contract, host_tests/boot_order_test.c); this only walks it
     for (size_t i = 0; i < boot_order_len; i++) {

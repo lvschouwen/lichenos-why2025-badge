@@ -659,7 +659,7 @@ static void cmd_factory(char const *args) {
         return;
     }
     console_reply("factory reset '%s' at the next boot: restarting", word);
-    system_restart(level == FACTORY_ALL ? "factory reset all (console)" : "factory reset settings (console)");
+    system_restart_asked(level == FACTORY_ALL ? "factory reset all (console)" : "factory reset settings (console)");
 }
 
 void factory_reset_console_register(void) {
