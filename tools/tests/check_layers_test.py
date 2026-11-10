@@ -270,8 +270,8 @@ class HardAndConf(unittest.TestCase):
                     "lichen_alloc", "lichen_free"):
             self.assertFalse(any(cl.fnmatch.fnmatchcase(sym, g) for g in conf.forbid["L6"]), sym)
         self.assertEqual(conf.forbid_except, [("mesh", "MyMesh.cpp.obj", ["malloc", "free"])])
-        self.assertIn(("esp_partition_mmap", []), conf.owner_only)
-        self.assertIn(("spi_flash_mmap*", []), conf.owner_only)
+        for g in ("esp_partition_mmap", "spi_flash_mmap*", "esp_mmu_map*"):
+            self.assertIn((g, []), conf.owner_only)
         self.assertIn("../shared/arduino_shim", conf.own_dirs["mesh"])
         self.assertNotIn("../shared/arduino_shim", conf.vendored["mesh"])
 
@@ -300,6 +300,32 @@ class HardAndConf(unittest.TestCase):
         self.assertEqual(listed, want)
         self.assertNotIn("No component or header exception is open", doc)
 
+    def test_real_conf_symbol_globs_name_real_symbols(self):
+        """Every forbid and owner-only glob matches a symbol that exists (#283): a typo such as lora_intrnal_* would
+        match nothing and guard nothing. Known symbols: the identifiers of the repo's sources plus the IDF functions
+        that no repo source names (they are banned outright), checked against the IDF headers when IDF_PATH is set."""
+        tools = os.path.dirname(cl.__file__)
+        root = os.path.join(tools, "..")
+        conf = cl.parse_conf(cl.read(os.path.join(tools, "layers.conf")))
+        external = {"strndup": "", "esp_partition_mmap": "esp_partition", "spi_flash_mmap": "spi_flash",
+                    "esp_mmu_map": "esp_mm"}
+        known = set(external)
+        for base in ("firmware/components", "firmware/main", "shared"):
+            for path in cl.source_files(os.path.join(root, base)):
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    known |= set(cl.re.findall(r"\b[A-Za-z_]\w*\b", f.read()))
+        globs = [g for gs in conf.forbid.values() for g in gs] + [g for g, _ in conf.owner_only]
+        dead = [g for g in globs if not any(cl.fnmatch.fnmatchcase(k, g) for k in known)]
+        self.assertEqual(dead, [])
+        idf = os.environ.get("IDF_PATH", "")
+        for sym, comp in external.items():
+            if comp and os.path.isdir(os.path.join(idf, "components", comp)):
+                text = ""
+                for f in cl.source_files(os.path.join(idf, "components", comp)):
+                    if f.endswith(".h"):
+                        with open(f, encoding="utf-8", errors="replace") as h:
+                            text += h.read()
+                self.assertRegex(text, r"\b%s\s*\(" % sym)
 
     def test_real_gate_requires_no_hardware_layer(self):
         """The gate must not require L1/L2 (#220), nor lichen_notify since its headers moved into the gate (#245)."""
@@ -372,13 +398,24 @@ class Gaps283(unittest.TestCase):
         fx.write("firmware/components/app/a.c", "int app_fn(void){return 4;}\n")
         fx.build()
         self.assertEqual(keys(fx), set())
+        # keyed to the object's name: renamed upstream (or fixed), the line matches no use and fails instead of passing
+        os.rename(os.path.join(fx.root, "firmware/components/app/up.c"), os.path.join(fx.root, "firmware/components/app/up2.c"))
+        shutil.rmtree(os.path.join(fx.root, "firmware/build/esp-idf/app"))
+        fx.build()
+        self.assertEqual(keys(fx), {("C!", "app:malloc"), ("C!", "app:free"),
+                                    ("C!", "app:forbid-except up.c.obj malloc free (no such use in the archive)")})
 
     def test_owner_only_without_owner_bans_everyone(self):
         src = "int esp_partition_mmap(void);\nint %s(void){return esp_partition_mmap();}\n"
         fx = Fixture(self, conf=CONF + "owner-only esp_partition_mmap\n",
                      overrides={"base": (BASE_FILES["base"][0], {"b.c": src % "base_fn", "base.h": ""}),
                                 "drv": (BASE_FILES["drv"][0], {"d.c": src % "drv_fn"})})
-        self.assertEqual(keys(fx), {("C", "base:esp_partition_mmap"), ("C", "drv:esp_partition_mmap")})
+        # hard, like forbid: a baseline entry cannot absorb it (#283 review)
+        self.assertEqual(keys(fx), {("C!", "base:esp_partition_mmap"), ("C!", "drv:esp_partition_mmap")})
+        fx.write("tools/layers-baseline.txt", "C\tbase:esp_partition_mmap\t1\nC\tdrv:esp_partition_mmap\t1\n")
+        code, out = fx.run()
+        self.assertEqual(code, 1)
+        self.assertIn("HARD  C drv:esp_partition_mmap", out)
 
 
 # Gate attribution (#220): lichen_os implements the gate's headers. Layers as the real tree, fewer of them.

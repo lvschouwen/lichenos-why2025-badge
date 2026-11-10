@@ -87,8 +87,8 @@ void fs_shim_set_root(char const *dir);
 // Sizes of the drive the root lives on (totalBytes/usedBytes); the host default measures the root's file system
 void fs_shim_set_drive_bytes(void (*fn)(size_t *total, size_t *used));
 // format() wipes only a directory of its own below a parent ("/storage/meshcore"): never a top-level directory or the
-// drive itself, never through "..". The root is lichen_fs_app_dir's, which never hands out an OS directory such as the
-// C6 image's /storage/c6 (fs_path.h, #283). Pure, host-tested.
+// drive itself, never the C6 image's /storage/c6, never through "..". The root is lichen_fs_app_dir's, which never
+// hands out an OS directory (fs_path.h, #283): the c6 check here is a second line. Pure, host-tested.
 bool fs_shim_format_allowed(char const *root);
 // Microseconds spent in file calls (open, read, write, close, exists, remove) since the last call, and how many calls
 // (ops may be NULL); always 0 off the badge

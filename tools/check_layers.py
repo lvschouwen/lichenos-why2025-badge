@@ -15,7 +15,9 @@ Every repo component has a layer in tools/layers.conf (L0 platform ... L6 apps, 
 A peer edge of a closed layer names the headers it may include (peer-headers, #283); the others of that component are
 a hard B. An app's sources are its component directory plus every own-dir root that is not `vendored` (shared code
 built into it, e.g. the Arduino shim, #283). `forbid-except` names the one object of a component (upstream code built
-unchanged) that may still use a forbidden symbol.
+unchanged) that may still use a forbidden symbol; it is keyed to the object's file name in the archive
+(MyMesh.cpp.obj), so a line whose object no longer exists or no longer uses the symbol is a hard C (a rename upstream
+cannot drop the exception silently). An owner-only line with no owner bans the symbol for everyone, hard like forbid.
 Rule D (capabilities) is #229's and not here.
 
 Rule C counts per object file (an object that calls a symbol three times counts once), A per edge, B per include line.
@@ -75,7 +77,7 @@ class Conf:
         self.owner_only = []        # (glob, [owner spec]) first match wins; no owner: nobody may use it
         self.peer_headers = {}      # (component, peer) -> header globs it may include of that peer
         self.vendored = collections.defaultdict(list)  # component -> own-dir roots of third-party code (not scanned)
-        self.forbid_except = []     # (component, object glob, [symbol globs]): upstream code built unchanged
+        self.forbid_except = []     # (component, object file name glob, [symbol globs]): upstream code built unchanged
 
     def height(self, layer):
         return self.layers.index(layer)
@@ -427,11 +429,22 @@ def sym_violation(conf, comp, layer, sym, defs, gate_syms=frozenset(), obj=None)
         if fnmatch.fnmatchcase(sym, glob):
             if sym in defs and defs[sym] == comp:
                 return None, False
+            if not owners:
+                return sym, True  # nobody may use it (flash mmap, #283): never baselined
             return (None if any(owner_matches(conf, o, comp) for o in owners) else sym), False
     owner = defs.get(sym)
     if owner and owner != comp and not conf.edge_ok(comp, owner) and not gate_call_ok(conf, comp, sym, owner, gate_syms):
         return sym, False
     return None, False
+
+
+def unused_forbid_excepts(conf, name, lib, undef, found):
+    """A forbid-except line of this component that no object of the archive uses (renamed or fixed upstream) is a hard
+    C: the key is checked against the archive, never trusted."""
+    for c, o, syms in conf.forbid_except:
+        if c == name and not any(fnmatch.fnmatchcase(obj, o) and any(fnmatch.fnmatchcase(s, g) for g in syms)
+                                 for obj, s in undef):
+            add(found, "C", "%s:forbid-except %s %s (no such use in the archive)" % (name, o, " ".join(syms)), lib, True)
 
 
 def rule_c(conf, comps, found, build, nm, selected, gate_syms=frozenset()):
@@ -447,7 +460,9 @@ def rule_c(conf, comps, found, build, nm, selected, gate_syms=frozenset()):
         layer = conf.comp_layer[name]
         objs = collections.defaultdict(set)
         hard = set()
-        for obj, sym in undefined_symbols(nm, lib):
+        undef = undefined_symbols(nm, lib)
+        unused_forbid_excepts(conf, name, lib, undef, found)
+        for obj, sym in undef:
             if defs.get(sym) == name:
                 continue
             bad, is_hard = sym_violation(conf, name, layer, sym, defs, gate_syms, obj)

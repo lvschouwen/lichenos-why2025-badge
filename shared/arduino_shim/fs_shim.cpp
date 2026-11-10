@@ -172,7 +172,7 @@ bool fs_shim_format_allowed(char const *r) {
     }
     char const *last = strrchr(r, '/');
     bool        nested = last != r && last[1] != '\0'; // "/parent/name", not "/name", "/" or "/parent/"
-    return nested;
+    return nested && strcmp(r, "/storage/c6") != 0; // defence in depth: lichen_fs never hands it out (fs_path.c)
 }
 
 static bool full_path(char const *path, char *out) {
