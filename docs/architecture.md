@@ -161,11 +161,12 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
 - **Restarts on trial** (#304): a restart while the image is on trial rolls it back, so `system_restart` (an automatic
   restart) first waits, polled once a second, on the gate main binds (`system_restart_set_trial_gate`; the rule is
   `ota_valid.c` `restart_gate_decide`): until the valid mark, the trial loop's end (any end), `OTA_RESTART_GATE_MAX_S`
-  (120 s) of uptime or a power off. `system_restart_asked` (fw reboot, /reboot, the Power menu, factory resets, the
-  trial's own rollback, a good install's reboot) never waits; fw reboot and /reboot say the restart goes back to the
-  previous version. Callers that must not block ask `system_restart_would_wait`: the update screen holds its restart
-  ("Waiting for this version to be confirmed"), MeshCore's remote reboot is refused. A bare `esp_restart` on trial
-  only logs a warning.
+  (120 s) of uptime or a power off. `system_restart_asked` (fw reboot, /reboot, the Power menu, factory resets,
+  MeshCore's reboot: the phone, a remote admin, its factory reset; the trial's own rollback, a good install's reboot)
+  never waits and logs a warning on trial; fw reboot and /reboot also say the restart goes back to the previous
+  version. The update screen's LVGL tick must not block: it asks `system_restart_would_wait` and holds its restart
+  ("Waiting for this version to be confirmed"). A bare `esp_restart` on trial only logs a warning, from the state
+  already known (no flash read).
 - **IDENT** (#36): after attach the P4 asks the running C6 app for its ELF sha256 (32 bytes, `LORA_MSG_IDENT`) and
   compares with the bundled `firmware.bin` (`c6_ident_check`; wait `C6_IDENT_WAIT_MS` 2000, `c6link.c:133`). Only MATCH
   proves the C6; NO_ANSWER, MISMATCH, NO_EXPECTED, NOT_ASKED are all "not proven". After a runtime re-attach IDENT is

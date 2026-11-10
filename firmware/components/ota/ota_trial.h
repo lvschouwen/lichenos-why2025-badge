@@ -15,6 +15,9 @@
 // it is known: only ota_image_mark_valid changes it while the image runs. UNKNOWN when the read failed (not kept: the
 // next call reads again). Any task.
 ota_image_state_t ota_image_trial_state(void);
+// What ota_image_trial_state already knows, without reading the OTA data: UNKNOWN until a read succeeded. For a
+// restart path that must not touch flash (__wrap_esp_restart's warning, #304). Any task.
+ota_image_state_t ota_image_trial_known(void);
 // ota_image_trial_state() == OTA_IMAGE_ON_TRIAL: a failed read counts as not on trial (as before #285). Any task.
 bool ota_image_trial_pending(void);
 // ota_image_may_be_on_trial(ota_image_trial_state()): ON_TRIAL or UNKNOWN. For callers that may restart (psram_speed,

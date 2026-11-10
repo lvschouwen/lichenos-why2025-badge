@@ -67,20 +67,19 @@ void system_restart_asked(char const *why) __attribute__((noreturn));
 
 // What a restart does now while the image may be on trial (#304). main binds the rule (ota_valid.c
 // restart_gate_decide): fw_console knows nothing of OTA. note: set with SYSTEM_RESTART_ON_TRIAL, why it goes ahead.
+// known_only: answer from what is already known, never read the OTA data (a bare esp_restart may come from a fault path
+// with the flash cache off): a state not read yet is GO.
 typedef enum {
     SYSTEM_RESTART_GO,       // not on trial
     SYSTEM_RESTART_WAIT,     // an automatic restart on trial: look again in a second
     SYSTEM_RESTART_ON_TRIAL, // goes ahead on trial: the bootloader boots the previous version
 } system_restart_gate_t;
-typedef system_restart_gate_t (*system_restart_gate_fn)(bool asked, bool power_off, char const **note);
+typedef system_restart_gate_t (*system_restart_gate_fn)(bool asked, bool power_off, bool known_only, char const **note);
 // Set once from main.c, early in the boot; NULL (or before it is bound) every restart goes ahead. Any task.
 void system_restart_set_trial_gate(system_restart_gate_fn gate);
 // An automatic restart now would wait for the gate: for callers that must not block (the update screen's LVGL tick,
 // the mesh task). Any task.
 bool system_restart_would_wait(void);
-// For a restart that may not wait (MeshCore's remote reboot on the mesh task, under the mesh lock): true, with a
-// warning naming why, when system_restart would wait; the caller then does not restart. Any task.
-bool system_restart_refused(char const *why);
 // A restart now goes back to the previous version (the image may be on trial): a person's reboot says so. Any task.
 bool system_restart_on_trial(void);
 // The words a person-asked restart on trial adds to its reply

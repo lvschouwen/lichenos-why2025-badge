@@ -415,6 +415,8 @@ bool c6link_start(void) {
     if (c6_restart_after_attach(full, attached, ident_ok, persisted)) {
         ESP_LOGW(TAG, "C6 %s after a skipped check: full check on the next boot",
                  attached ? "app not proven by IDENT" : "did not attach");
+        // Gated (#304), but a trial image never gets here (full path), so it does not wait in practice; if it did, the
+        // boot step would wait up to OTA_RESTART_GATE_MAX_S of uptime
         system_restart(attached ? "C6 IDENT failed after skip" : "C6 attach failed after skip");
     }
     if (!attached) {

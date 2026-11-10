@@ -389,5 +389,7 @@ void psram_speed_cmd(char const *args) {
         return;
     }
     console_reply("psram speed %u: saved, restarting now", target);
+    // Gated (#304): refused above on trial, so no wait; if it did wait (up to OTA_RESTART_GATE_MAX_S of uptime), the
+    // console's run_mutex and a Wi-Fi console's reply would be held that long
     system_restart("psram speed");
 }

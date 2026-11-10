@@ -26,6 +26,10 @@ ota_image_state_t ota_image_trial_state(void) {
     return (ota_image_state_t)atomic_load(&trial_known);
 }
 
+ota_image_state_t ota_image_trial_known(void) {
+    return (ota_image_state_t)atomic_load(&trial_known);
+}
+
 bool ota_image_trial_pending(void) {
     return ota_image_trial_state() == OTA_IMAGE_ON_TRIAL;
 }

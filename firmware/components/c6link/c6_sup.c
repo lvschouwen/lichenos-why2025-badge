@@ -453,6 +453,8 @@ static void restart_for_c6(char const *why) {
         nvs_close(nvs);
     }
     c6link_set_verify_flag(); // the next boot checks (and if needed reflashes) the C6 fully
+    // Gated (#304): on trial this may wait up to OTA_RESTART_GATE_MAX_S of uptime on the c6sup task, which then
+    // supervises nothing; the fallback does not offer this restart on a trial image anyway
     system_restart(why);
 }
 

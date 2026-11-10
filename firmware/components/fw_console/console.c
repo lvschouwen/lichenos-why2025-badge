@@ -439,29 +439,20 @@ void system_restart_set_trial_gate(system_restart_gate_fn gate) {
     atomic_store(&s_trial_gate, gate);
 }
 
-static system_restart_gate_t trial_gate(bool asked, char const **note) {
+static system_restart_gate_t trial_gate(bool asked, bool known_only, char const **note) {
     system_restart_gate_fn gate = atomic_load(&s_trial_gate);
     *note                       = "";
-    return gate ? gate(asked, atomic_load(&s_power_off) != NULL, note) : SYSTEM_RESTART_GO;
+    return gate ? gate(asked, atomic_load(&s_power_off) != NULL, known_only, note) : SYSTEM_RESTART_GO;
 }
 
 bool system_restart_would_wait(void) {
     char const *note;
-    return trial_gate(false, &note) == SYSTEM_RESTART_WAIT;
-}
-
-bool system_restart_refused(char const *why) {
-    if (!system_restart_would_wait()) {
-        return false;
-    }
-    ESP_LOGW(TAG, "restart (%s) refused: this version is still on trial, ask again once it is confirmed",
-             why ? why : "unspecified");
-    return true;
+    return trial_gate(false, false, &note) == SYSTEM_RESTART_WAIT;
 }
 
 bool system_restart_on_trial(void) {
     char const *note;
-    return trial_gate(true, &note) == SYSTEM_RESTART_ON_TRIAL;
+    return trial_gate(true, false, &note) == SYSTEM_RESTART_ON_TRIAL;
 }
 
 void __wrap_esp_restart(void) {
@@ -470,8 +461,9 @@ void __wrap_esp_restart(void) {
     if (deliberate) {
         record_restart(s_restart_why, 0);
     } else {
-        // Only a word: fault paths and IDF components restart here and must not wait (#304)
-        if (system_restart_on_trial()) {
+        // Only a word: fault paths and IDF components restart here and must not wait (#304), nor read flash
+        char const *note;
+        if (trial_gate(true, true, &note) == SYSTEM_RESTART_ON_TRIAL) {
             ESP_LOGW(TAG, "restart (unknown caller %p) on trial: %s", __builtin_return_address(0),
                      SYSTEM_RESTART_TRIAL_NOTE);
         }
@@ -557,7 +549,7 @@ static void trial_gate_wait(char const *why, bool asked) {
     bool said = false;
     for (;;) {
         char const *note;
-        switch (trial_gate(asked, &note)) {
+        switch (trial_gate(asked, false, &note)) {
         case SYSTEM_RESTART_GO:
             if (said) {
                 ESP_LOGI(TAG, "restart (%s): this version is valid now, restarting", why);

@@ -545,17 +545,15 @@ static bool (*const keep_contact)(ContactInfo const &c) = BadgeMesh::keepContact
 static bool rebooting;
 
 void BadgeBoard::reboot() {
-    // On trial a restart would roll this version back, and the gate's wait would hold the mesh lock for up to two
-    // minutes (#304): refused, the admin can ask again once the image is valid
-    if (system_restart_refused("MeshCore reboot")) {
-        return;
-    }
     if (mesh_task_handle && xTaskGetCurrentTaskHandle() == mesh_task_handle) {
         node->saveAll();
         mesh_journal_stop_locked(true);
         __atomic_store_n(&rebooting, true, __ATOMIC_RELEASE);
     }
-    system_restart("MeshCore reboot");
+    // Someone always asked (the phone's reboot or factory reset, an authenticated remote admin's CLI): never waits
+    // and never returns, which MeshCore relies on (a factory reset formats first). On trial it goes back to the
+    // previous version, and system_restart_asked logs that (#304)
+    system_restart_asked("MeshCore reboot");
 }
 
 // Our channel messages go into the screens' store as "me: <text>", and their outbox state follows (#46). With the mesh

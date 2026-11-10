@@ -805,9 +805,12 @@ static void trial_wait(void *ctx) {
 static atomic_bool trial_settled;
 
 // The rule system_restart asks before an automatic restart (#304; ota_valid.c decides, host_tests/restart_gate_test.c)
-static system_restart_gate_t restart_trial_gate(bool asked, bool power_off, char const **note) {
-    restart_gate_t gate = restart_gate_decide(asked, ota_image_trial_state(), atomic_load(&trial_settled),
-                                              uptime_ms() / 1000, power_off);
+static system_restart_gate_t restart_trial_gate(bool asked, bool power_off, bool known_only, char const **note) {
+    ota_image_state_t image = known_only ? ota_image_trial_known() : ota_image_trial_state();
+    if (known_only && image == OTA_IMAGE_UNKNOWN) {
+        return SYSTEM_RESTART_GO; // not read yet, and reading it here is what known_only rules out
+    }
+    restart_gate_t gate = restart_gate_decide(asked, image, atomic_load(&trial_settled), uptime_ms() / 1000, power_off);
     *note = restart_gate_name(gate);
     return gate == RESTART_GATE_GO ? SYSTEM_RESTART_GO
            : gate == RESTART_GATE_WAIT ? SYSTEM_RESTART_WAIT
