@@ -12,16 +12,25 @@
 
 #include <string.h>
 
-static log_ring_t     ring;
+#define RAW_BYTES 2048
+
+// Ring header (~4.3 KB with its index), the read copy and the data in one PSRAM block: none of it in internal RAM
+// (#270). PSRAM is safe under take(): it masks interrupts on this core only and never spins, so a flash write's IPC
+// task cannot stall this core (and turn the cache off) until give(); the hook lives in flash, so it never runs with
+// the cache off, and ESP_EARLY_LOG / ESP_DRAM_LOG print through esp_rom_printf without it.
+typedef struct {
+    log_ring_t ring;
+    uint8_t    raw[RAW_BYTES]; // log_store_read's copy of the records, formatted outside the lock
+    uint8_t    data[LOG_STORE_BYTES];
+} store_mem_t;
+
+static store_mem_t   *mem;
 static volatile bool  ready;
 static volatile int   busy; // set while the ring changes; interrupts are off then (same scheme as log_tap.c)
 static volatile uint32_t lost; // dropped and not yet reported in the log
 static volatile uint32_t lost_total;
 static vprintf_like_t previous;
-static uint8_t       *raw; // log_store_read's copy of the records, formatted outside the lock
 static volatile int   reading;
-
-#define RAW_BYTES 2048
 
 // Never blocks: a writer that finds the ring in use drops its line (and counts it). The holder has interrupts off, so
 // it can't be preempted and the other core is quick.
@@ -50,10 +59,10 @@ static void store(char const *text, size_t len) {
     UBaseType_t state;
     if (take(&state)) {
         if (note_len > 0) {
-            log_ring_write(&ring, ms, note, (size_t)note_len);
+            log_ring_write(&mem->ring, ms, note, (size_t)note_len);
             __atomic_fetch_sub(&lost, gone, __ATOMIC_RELAXED);
         }
-        log_ring_write(&ring, ms, text, len);
+        log_ring_write(&mem->ring, ms, text, len);
         give(state);
     } else {
         __atomic_fetch_add(&lost, 1, __ATOMIC_RELAXED);
@@ -93,18 +102,12 @@ void log_store_start(void) {
     if (ready) {
         return;
     }
-    uint8_t *mem = lichen_alloc(NULL, LOG_STORE_BYTES, LICHEN_MEM_BULK);
+    mem = lichen_alloc(NULL, sizeof(*mem), LICHEN_MEM_BULK);
     if (!mem) {
         ESP_LOGW("log_store", "no PSRAM for the log store, GET /log stays empty");
         return;
     }
-    raw = lichen_alloc(NULL, RAW_BYTES, LICHEN_MEM_BULK);
-    if (!raw) {
-        lichen_free(NULL, mem);
-        ESP_LOGW("log_store", "no PSRAM for the log store, GET /log stays empty");
-        return;
-    }
-    log_ring_init(&ring, mem, LOG_STORE_BYTES);
+    log_ring_init(&mem->ring, mem->data, LOG_STORE_BYTES);
     // The hook calls `previous`, so it is stored before the hook can store a line: `ready` flips only afterwards
     previous = esp_log_set_vprintf(hook);
     __atomic_store_n(&ready, true, __ATOMIC_RELEASE);
@@ -122,9 +125,9 @@ size_t log_store_read(uint32_t since, char *out, size_t cap, uint32_t *next, uin
     for (int attempt = 0; attempt < 1000; attempt++) {
         UBaseType_t state;
         if (take(&state)) {
-            n = log_ring_copy(&ring, since, raw, RAW_BYTES, cap, next, missed);
+            n = log_ring_copy(&mem->ring, since, mem->raw, RAW_BYTES, cap, next, missed);
             give(state);
-            n = log_ring_format(raw, n, out, cap);
+            n = log_ring_format(mem->raw, n, out, cap);
             break;
         }
     }
