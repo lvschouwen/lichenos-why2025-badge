@@ -17,6 +17,71 @@ static int failures;
 #define L (1u << RADIO_LORA)
 #define B (1u << RADIO_BT)
 
+// #282: the thermal shed holds Wi-Fi and LoRa off without writing the person's switches (`on`, what NVS keeps)
+static void holds(void) {
+    radio_state_t s;
+    radio_state_init(&s); // Wi-Fi + LoRa on
+    CHECK(radio_state_hold(&s, RADIO_HOLD_THERMAL, W | L) == (W | L));
+    CHECK(!radio_state_get(&s, RADIO_WIFI) && !radio_state_get(&s, RADIO_LORA));
+    CHECK(s.on == (W | L)); // what is saved stays the person's choice
+    CHECK(radio_state_held_by(&s, RADIO_WIFI) == RADIO_HOLD_THERMAL);
+    CHECK(radio_state_held_by(&s, RADIO_BT) == RADIO_HOLD_NONE);
+    CHECK(radio_state_hold(&s, RADIO_HOLD_THERMAL, W | L) == 0); // again: nothing new to tell
+    // a reboot while held: what was saved loads without the hold, so the radios come back as the person set them
+    radio_state_t boot;
+    radio_state_load(&boot, s.on, s.saved, s.airplane ? 1 : 0);
+    CHECK(radio_state_get(&boot, RADIO_WIFI) && radio_state_get(&boot, RADIO_LORA));
+    CHECK(radio_state_held_by(&boot, RADIO_WIFI) == RADIO_HOLD_NONE);
+    // the reason ends: back as before
+    CHECK(radio_state_release(&s, RADIO_HOLD_THERMAL) == (W | L));
+    CHECK(radio_state_effective(&s) == (W | L));
+    CHECK(radio_state_release(&s, RADIO_HOLD_THERMAL) == 0);
+
+    // a radio that was off is held too, but nothing changes for it, and it stays off after the release
+    radio_state_set(&s, RADIO_LORA, false);
+    CHECK(radio_state_hold(&s, RADIO_HOLD_THERMAL, W | L) == W);
+    CHECK(radio_state_release(&s, RADIO_HOLD_THERMAL) == W);
+    CHECK(radio_state_effective(&s) == W);
+
+    // the person switches a held radio off: saved off, and it stays off after the release
+    radio_state_init(&s);
+    radio_state_hold(&s, RADIO_HOLD_THERMAL, W | L);
+    CHECK(radio_state_set(&s, RADIO_WIFI, false) == 0); // already off for the radio
+    CHECK(s.on == L);
+    CHECK(radio_state_release(&s, RADIO_HOLD_THERMAL) == L);
+    CHECK(radio_state_effective(&s) == L);
+
+    // the person switches a held radio on: that overrides the hold for that radio only
+    radio_state_init(&s);
+    radio_state_hold(&s, RADIO_HOLD_THERMAL, W | L);
+    CHECK(radio_state_set(&s, RADIO_WIFI, true) == W);
+    CHECK(radio_state_get(&s, RADIO_WIFI) && !radio_state_get(&s, RADIO_LORA));
+    CHECK(radio_state_held_by(&s, RADIO_WIFI) == RADIO_HOLD_NONE);
+    CHECK(radio_state_release(&s, RADIO_HOLD_THERMAL) == L);
+
+    // airplane while held: airplane keeps the person's switches, not the held view; off again, the hold still rules
+    radio_state_init(&s);
+    radio_state_hold(&s, RADIO_HOLD_THERMAL, W | L);
+    CHECK(radio_state_set_airplane(&s, true) == 0);
+    CHECK(s.saved == (W | L));
+    CHECK(radio_state_set_airplane(&s, false) == 0);
+    CHECK(radio_state_effective(&s) == 0);
+    CHECK(radio_state_release(&s, RADIO_HOLD_THERMAL) == (W | L));
+    // ... and a release during airplane brings nothing on
+    radio_state_hold(&s, RADIO_HOLD_THERMAL, W | L);
+    radio_state_set_airplane(&s, true);
+    CHECK(radio_state_release(&s, RADIO_HOLD_THERMAL) == 0);
+    CHECK(radio_state_effective(&s) == 0);
+
+    // no reason, an unknown reason
+    radio_state_init(&s);
+    CHECK(radio_state_hold(&s, RADIO_HOLD_NONE, W) == 0);
+    CHECK(radio_state_hold(&s, RADIO_HOLD_COUNT, W) == 0);
+    CHECK(radio_state_release(&s, RADIO_HOLD_COUNT) == 0);
+    CHECK(radio_state_effective(&s) == (W | L));
+    CHECK(radio_state_held_by(&s, (radio_id_t)RADIO_COUNT) == RADIO_HOLD_NONE);
+}
+
 int main(void) {
     radio_state_t s;
     radio_state_init(&s);
@@ -104,6 +169,8 @@ int main(void) {
     radio_state_load(&again, r.on, r.saved, 0);
     CHECK(radio_state_migrate(&again, RADIO_STATE_VERSION) == RADIO_STATE_VERSION);
     CHECK(radio_state_get(&again, RADIO_BT) && again.on == RADIO_MASK_ALL);
+
+    holds();
 
     if (failures) {
         printf("%d failure(s)\n", failures);

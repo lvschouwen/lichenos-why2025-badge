@@ -736,6 +736,4 @@ void shell_start(lv_display_t *display) {
     shortcuts_start();
     up = true;
     lichen_sys_ui_unlock();
-    sys_notices_start();
-    thermal_start();
 }

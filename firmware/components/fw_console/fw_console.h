@@ -55,6 +55,9 @@ void system_restart(char const *why) __attribute__((noreturn));
 // waits for them up to SYSTEM_RESTART_SAVE_MS, then restarts anyway (logged). Set once from main.c.
 #define SYSTEM_RESTART_SAVE_MS 8000 // a ceiling: MeshCore 1-2 s + the journal up to 3 s + notifications up to 2 s
 void system_restart_set_save(void (*save)(void));
+// The same saves with the same bound, without the restart: a power off that has no Power app to run them (the thermal
+// shutdown on a badge whose display did not come up, #281). Once per boot: a restart after it saves nothing more.
+void system_save_before_off(void);
 // Runs once, on the restarting task, right before the restart (every esp_restart, not panics): the shell draws its
 // "Restarting" frame so the lit panel does not show a stale or torn screen (#39). Must return quickly.
 void system_restart_set_prepare(void (*prepare)(void));

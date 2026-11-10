@@ -2,20 +2,20 @@
 // (crash, PSRAM boot check, clock, update, C6 recovery, SD card, sensors, storage) into a snapshot; sys_notice_rules.c
 // (pure) decides what is news and this raises it as source "lichen". Nothing here touches the radio or the C6 link
 // beyond reading their status, and nothing touches LVGL: lichen_notify() is safe from any task. The storage drive's
-// free space is read once a minute (FatFs may scan its table).
+// free space is read once a minute (FatFs may scan its table). An OS service since #281 (lichen_watch_start, display or
+// not): the update result, the C6 recovery count and "home is shown" come in as hooks.
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_notify.h"
+#include "lichen_os.h"
 #include "lichen_sensors.h"
 #include "lichen_sys_clock.h"
 #include "lichen_sys_crash.h"
 #include "lichen_sys_storage.h"
 #include "lichen_task.h"
 #include "psram_boot.h"
-#include "shell_parts.h"
 #include "sys_notice_rules.h"
-#include "update_screen.h"
 
 #include <stdio.h>
 
@@ -30,6 +30,8 @@ static char const TAG[] = "sys_notices";
 #define STACK_LOG_POLL 120 // the stack high-water mark is logged once, two minutes in
 #define BODY_CAP       120
 
+static lichen_watch_hooks_t hooks; // set once before the task starts
+
 static void body_for(sysn_event_t e, sysn_snapshot_t const *s, lichen_sd_info_t const *sd, char *out, size_t cap) {
     char a[24], b[24];
     out[0] = '\0';
@@ -41,11 +43,15 @@ static void body_for(sysn_event_t e, sysn_snapshot_t const *s, lichen_sd_info_t 
         break;
     case SYSN_CLOCK_RECOVERED: snprintf(out, cap, "The clock was wrong and has been set again."); break;
     case SYSN_UPDATED:
-    case SYSN_ROLLED_BACK: update_screen_boot_result(out, cap); break;
+    case SYSN_ROLLED_BACK:
+        if (hooks.update_result) {
+            hooks.update_result(out, cap);
+        }
+        break;
     case SYSN_C6_RESTARTED: {
         char reason[96] = "";
-        if (shell_sources.c6_restarts) {
-            shell_sources.c6_restarts(reason, sizeof(reason));
+        if (hooks.c6_restarts) {
+            hooks.c6_restarts(reason, sizeof(reason));
         }
         snprintf(out, cap, "%s (restarts this boot: %u)", reason[0] ? reason : "The radio chip came back",
                  (unsigned)s->c6_restarts);
@@ -78,9 +84,9 @@ static void read_snapshot(sysn_snapshot_t *s, lichen_sd_info_t *sd, unsigned pol
     lichen_clock_sync_t clock = lichen_sys_clock_sync_info();
     s->clock_refused          = clock.refused;
     s->clock_recovered        = clock.last_verdict == LICHEN_CLOCK_RECOVERED;
-    s->update                 = (int)update_screen_boot_result(NULL, 0);
+    s->update                 = hooks.update_result ? hooks.update_result(NULL, 0) : SYSN_UPD_NONE;
     char reason[4];
-    s->c6_restarts = shell_sources.c6_restarts ? shell_sources.c6_restarts(reason, sizeof(reason)) : 0;
+    s->c6_restarts = hooks.c6_restarts ? hooks.c6_restarts(reason, sizeof(reason)) : 0;
     lichen_sys_sd_info(sd);
     s->sd_state        = (int)sd->state;
     s->sensors_running = lichen_sensors_running();
@@ -105,9 +111,9 @@ static void notices_task(void *arg) {
     sysn_event_t            events[SYSN_EVENT_COUNT];
     char                    body[BODY_CAP];
     unsigned                settled = 0;
-    while (settled < SETTLE_POLLS) { // the boot screen first, then a moment for the last boot steps
+    while (settled < SETTLE_POLLS) { // the boot screen first (when there is one), then a moment for the last boot steps
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));
-        settled = shell_home_shown() ? settled + 1 : 0;
+        settled = !hooks.ui_ready || hooks.ui_ready() ? settled + 1 : 0;
     }
     for (unsigned poll = 0;; poll++) {
         read_snapshot(&snap, &sd, poll);
@@ -125,10 +131,18 @@ static void notices_task(void *arg) {
     }
 }
 
-void sys_notices_start(void) {
+void sys_notices_start(lichen_watch_hooks_t const *h) {
+    if (h) {
+        hooks = *h;
+    }
     // LP RAM (#269): once a second, and it reads /storage free space (FatFs), so internal-capable but never DMA
     if (!lichen_task_start_in(NULL, "sys_notices", notices_task, NULL, TASK_STACK, LICHEN_PRIO_BACKGROUND,
                               LICHEN_STACK_LP_RAM, NULL)) {
         ESP_LOGE(TAG, "no memory: Lichen raises no notifications of its own");
     }
+}
+
+void lichen_watch_start(lichen_watch_hooks_t const *h) {
+    thermal_start(h); // the safety half first: it must run even if the notices' task finds no memory
+    sys_notices_start(h);
 }

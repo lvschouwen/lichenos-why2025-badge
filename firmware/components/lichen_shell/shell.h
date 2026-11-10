@@ -78,5 +78,12 @@ void shell_save_for_restart(void);
 void factory_combo_start(void);
 // The boot screen is up (the OTA valid gate: a new image must show it before it counts as working)
 bool shell_up(void);
+// Home is on screen and its fade-in is over (screens may open; the OS watch services' notices wait for it, #281)
+bool shell_home_shown(void);
+// The thermal watchdog's hooks (#281, main hands them to lichen_watch_start). battery_open_alert: Settings > Battery
+// headed by the heat warning; power_request_off: Power > Power off without the question (the goodbye screen, the
+// saves, then the power hook). Both from any task.
+void battery_open_alert(void);
+void power_request_off(void);
 
 // The countdown dialog (shell_dialog_countdown, #14 T-B) is in lichen_ui.h: apps use it too (#49)

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "shell.h"
-#include "thermal_rules.h"
+#include "lichen_sys_thermal.h"
 #include "draw_stack.h"
 
 // Between the shell's own files (#66), not for apps
@@ -133,8 +133,7 @@ void screen_lock_wake(void);           // any task: unlock and light the screen 
 lv_group_t *shell_dialog_group(void);
 void        shell_refocus(void);
 
-// shell.c: home is on screen and its fade-in is over (screens may open)
-bool shell_home_shown(void);
+// shell_home_shown (home is on screen and its fade-in is over) is in shell.h: main hands it to the OS watch services
 
 void update_screen_init(void); // update_screen.c; from shell_start, with the LVGL lock held
 
@@ -159,25 +158,8 @@ void notify_open_entry(uint32_t id);
 void notify_open_centre(void);
 void notify_settings_open(void);
 void     notify_ui_cloud_key(void); // ☁ (#79, shortcuts.c): open the showing toast, else the centre
-// sys_notices.c: Lichen's own notifications (crash, PSRAM, clock, update, C6, SD, sensors, storage); from shell_start
-void sys_notices_start(void);
 
-// The thermal watchdog (#10). thermal.c: the service on core 0 (from shell_start), `fw thermal`; app_battery.c: Settings
-// > Battery and the full-screen warning; app_power.c: power_request_off() is Power > Power off without the question.
-typedef struct {
-    th_level_t level;
-    bool       blind;          // no source has answered for TH_BLIND_S
-    bool       simulated;      // `fw thermal test` is feeding the board source
-    bool       valid[TH_SRC_COUNT];
-    float      c[TH_SRC_COUNT]; // what the rules see (the board value has the heater bias taken off)
-    float      bme_raw_c;
-    uint32_t   implausible[TH_SRC_COUNT];
-    th_src_t   cause;
-    bool       cause_rise;
-    float      cause_c;
-} thermal_info_t;
-void thermal_start(void);
-void thermal_info(thermal_info_t *out);
+// The thermal watchdog (#10) is an OS service since #281 (lichen_os/thermal.c, lichen_sys_thermal.h); app_battery.c is
+// Settings > Battery and the full-screen warning (battery_open_alert, shell.h); app_power.c's power_request_off (shell.h)
+// is Power > Power off without the question.
 void battery_open(void *arg);        // Settings > Battery (menu callback); LVGL context
-void battery_open_alert(void);       // the same page headed by the warning; any task
-void power_request_off(void);        // any task; the goodbye screen, saves, then the #65 power-off path

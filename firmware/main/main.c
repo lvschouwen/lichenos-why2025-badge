@@ -17,9 +17,9 @@
 #include "lichen_sys_mem.h"
 #include "lichen_sys_net.h"
 #include "esp_log.h"
+#include "lichen_sys_storage.h"
 #include "lichen_sys_ui.h"
 #include "esp_ota_ops.h"
-#include "esp_sleep.h"
 #include "esp_timer.h"
 #include "log_store.h"
 #include "psram_boot.h"
@@ -209,21 +209,38 @@ static void stop_for_update(bool apps_stopped) {
     c6link_set_updating();
 }
 
-// Power off / Restart from the Power app (#65), after the apps stopped and the saves are done. Off: the backlights and
-// the panel (the C6 drives the backlights, so first), then the C6 held in reset, then the P4 in deep sleep with nothing
-// to wake it. That leaves the IP5306 under its ~50 mA load, so on battery it cuts the 5 V after ~32 s; the power
-// button starts the badge from cold. Restart is the usual one (its shutdown hook blanks the screen).
+// Power off / Restart from the Power app (#65), after the apps stopped and the saves are done. Off is
+// lichen_sys_power_off_now (lichen_os since #281): backlights, panel, C6 held in reset, P4 in deep sleep; on battery the
+// IP5306 cuts the 5 V after ~32 s. Restart is the usual one (its shutdown hook blanks the screen).
 static void power_finish(bool power_off) {
     if (!power_off) {
         system_restart("power menu restart");
     }
-    system_restart_note("power off");
-    haptics_stop();
-    lichen_sys_power_screen_off();
-    c6link_hold_in_reset();
-    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
-    ESP_LOGI(TAG, "power off: deep sleep, no wake source");
-    esp_deep_sleep_start();
+    lichen_sys_power_off_now();
+}
+
+// The thermal shutdown without the shell (#281: no display): the saves the Power app would run (notifications, the
+// apps stop, bounded as for a restart), the SD card unmounted, then off
+static void power_off_headless(void) {
+    ESP_LOGW(TAG, "power off without the shell: saving, then off");
+    system_save_before_off();
+    if (lichen_sys_sd_mounted()) {
+        lichen_sys_sd_unmount();
+    }
+    lichen_sys_power_off_now();
+}
+
+// The thermal watchdog's power off: the Power app's goodbye path when the shell runs, the headless one otherwise
+static void thermal_power_off(void) {
+    if (shell_up()) {
+        power_request_off();
+    } else {
+        power_off_headless();
+    }
+}
+
+static int boot_update_result(char *line, size_t cap) {
+    return (int)update_screen_boot_result(line, cap);
 }
 
 // ---- A C6 reset at runtime (#14 T-B): what the supervisor (c6sup) stops and restarts, in this order ----
@@ -321,8 +338,16 @@ static uint32_t uptime_ms(void) {
 
 // The first thing on the glass (#39): the boot screen, drawn before storage, notices, assets and the image hash. The
 // fonts are LVGL's built-in ones until lichen_fonts_load. Returns false when there is no display.
+#define NOSCREEN_KEY "t_noscreen" // `fw noscreen`: the next boot acts as if the display did not come up (#281)
+
 static bool show_boot_screen(lv_display_t **display) {
     boot_progress_begin(BOOT_DISPLAY);
+    if (settings_get_u8(NOSCREEN_KEY, 0)) { // one boot only: erased before anything else can go wrong
+        settings_erase(NOSCREEN_KEY);
+        ESP_LOGW(TAG, "display start skipped on purpose (fw noscreen, this boot only)");
+        boot_progress_end(BOOT_DISPLAY, STEP_FAILED, "skipped (fw noscreen)");
+        return false;
+    }
     if (!display_start(display)) {
         ESP_LOGE(TAG, "no display");
         boot_progress_end(BOOT_DISPLAY, STEP_FAILED, "no display");
@@ -437,9 +462,20 @@ static void start_boot_screen(boot_ctx_t *ctx) {
     ctx->screen = show_boot_screen(&ctx->display);
 }
 
+// The bench's way to boot without a display (#281): proves the OS services that must not depend on the shell
+static void cmd_noscreen(char const *args) {
+    (void)args;
+    if (!settings_set_u8(NOSCREEN_KEY, 1)) {
+        console_reply("noscreen: not saved");
+        return;
+    }
+    console_reply("noscreen: the next boot skips the display (that boot only; no screen, no keyboard). fw reboot now.");
+}
+
 static void start_console(boot_ctx_t *ctx) {
     (void)ctx;
     console_start();
+    console_register("noscreen", "noscreen (test: the next boot skips the display start, one boot only)", cmd_noscreen);
 }
 
 static void start_storage(boot_ctx_t *ctx) {
@@ -489,7 +525,21 @@ static void start_shell(boot_ctx_t *ctx) {
                                      .lora_user_pause = lora_user_pause, .lora_user_resume = lora_user_resume};
     shell_set_sources(&sources);
     shell_start(ctx->display);
+    // Before the watchdog starts (#281): a thermal shutdown early in the boot gets the real power off, not a restart
+    shell_set_power_hook(power_finish);
     system_restart_set_prepare(shell_show_restarting); // a readable "Restarting" frame, then dark (#39, #134)
+}
+
+// The thermal watchdog and Lichen's own notices (#281): OS services, started with or without a display. Only the
+// hooks into the shell depend on the screen.
+static void start_watch(boot_ctx_t *ctx) {
+    lichen_watch_hooks_t hooks = {.power_off = thermal_power_off, .c6_restarts = c6_restarts};
+    if (ctx->screen) {
+        hooks.ui_ready      = shell_home_shown;
+        hooks.hot_alert     = battery_open_alert;
+        hooks.update_result = boot_update_result;
+    }
+    lichen_watch_start(&hooks);
 }
 
 // The SD card (#60): before the C6 link, as BadgeVMS, so the SDMMC controller is set up before esp_hosted shares it,
@@ -640,7 +690,6 @@ static void start_ota(boot_ctx_t *ctx) {
         hooks.screenshot = screenshot_take;
         hooks.screenshot_free = screenshot_free;
         update_mode_set_stop_hook(stop_for_update);
-        shell_set_power_hook(power_finish);
         update_screen_boot_check();
     }
     ota_server_set_hooks(&hooks);
@@ -660,6 +709,7 @@ static boot_start_fn_t const start_fns[START_COUNT] = {
     [START_NOTICES]        = start_notices,
     [START_FONTS]          = start_fonts,
     [START_SHELL]          = start_shell,
+    [START_WATCH]          = start_watch,
     [START_SD]             = start_sd,
     [START_RADIO_SWITCHES] = start_radio_switches,
     [START_LORA_IDENT]     = start_lora_ident,

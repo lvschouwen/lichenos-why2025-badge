@@ -1,6 +1,6 @@
 #pragma once
 // The thermal watchdog's decisions (#10). Pure (readings in, events out), host-tested in host_tests/thermal_rules_test.c;
-// thermal.c reads the sensors and acts on the events. The badge cannot see its cells (no data link from the IP5306),
+// thermal.c (an OS service since #281) reads the sensors and acts on the events. The badge cannot see its cells (no data link from the IP5306),
 // so heat near them is the only warning it can give.
 //
 // Sources: BOARD is the BME690 (beside the cells) with its gas-heater bias taken off by the caller, DIE is the P4's
@@ -22,6 +22,8 @@
 //  - by design a sustained die rise of 20 K within 60 s from 60 C up powers the badge off (a heavy load that heats the
 //    chip that fast is also a reason to stop).
 
+#include "lichen_sys_thermal.h" // th_src_t, th_level_t: the shell reads them through the gate
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -29,9 +31,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef enum { TH_SRC_BOARD, TH_SRC_DIE, TH_SRC_COUNT } th_src_t;
-typedef enum { TH_OK, TH_WARN, TH_SHUTDOWN } th_level_t;
 
 #define TH_WINDOW_S   60  // the rise is measured over this long
 #define TH_CONFIRM    2   // polls in a row

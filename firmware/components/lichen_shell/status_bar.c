@@ -243,8 +243,8 @@ static void show_notify(void) {
 
 // Amber "HOT" while the watchdog warns, red once it is switching the badge off (#10)
 static void show_hot(void) {
-    thermal_info_t t;
-    thermal_info(&t);
+    lichen_sys_thermal_info_t t;
+    lichen_sys_thermal_info(&t);
     bool hot = t.level != TH_OK;
     lv_obj_set_hidden(hot_label, !hot);
     if (hot) {

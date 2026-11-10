@@ -1,4 +1,5 @@
 #include "lichen_radio.h"
+#include "lichen_sys_radio.h"
 
 #include "fw_console.h"
 #include "settings_store.h"
@@ -112,7 +113,22 @@ static bool save(radio_state_t const *s) {
     return ok;
 }
 
-// Applies a change under the lock, then saves and tells outside it
+static void tell_diff(uint8_t diff, radio_state_t const *after) {
+    uint8_t eff = radio_state_effective(after);
+    for (int i = 0; i < RADIO_COUNT; i++) {
+        if (diff >> i & 1u) {
+            tell((radio_id_t)i, eff >> i & 1u);
+        }
+    }
+}
+
+// The person's switches (on, saved, airplane): what is written to NVS. A hold is not among them (#282).
+static bool switches_differ(radio_state_t const *a, radio_state_t const *b) {
+    return a->on != b->on || a->saved != b->saved || a->airplane != b->airplane;
+}
+
+// Applies a change under the lock, then saves and tells outside it. Switching a held radio off changes nothing the
+// radio does but is still the person's choice, so it is saved.
 static bool change(radio_id_t id, bool on, int airplane) {
     ensure_loaded();
     xSemaphoreTake(change_lock, portMAX_DELAY);
@@ -121,18 +137,38 @@ static bool change(radio_id_t id, bool on, int airplane) {
     uint8_t       diff   = airplane >= 0 ? radio_state_set_airplane(&state, airplane == 1) : radio_state_set(&state, id, on);
     radio_state_t after  = state;
     portEXIT_CRITICAL(&lock);
-    if (!diff && before.airplane == after.airplane) {
-        xSemaphoreGive(change_lock);
-        return true;
-    }
-    bool ok = save(&after);
-    for (int i = 0; i < RADIO_COUNT; i++) {
-        if (diff >> i & 1u) {
-            tell((radio_id_t)i, after.on >> i & 1u);
-        }
-    }
+    bool ok = !switches_differ(&before, &after) || save(&after);
+    tell_diff(diff, &after);
     xSemaphoreGive(change_lock);
     return ok;
+}
+
+// A hold or its end (#282): the radios are told, nothing is saved, so a reboot meanwhile brings the person's switches
+static void hold_change(radio_hold_t reason, bool hold, uint8_t mask) {
+    ensure_loaded();
+    xSemaphoreTake(change_lock, portMAX_DELAY);
+    portENTER_CRITICAL(&lock);
+    uint8_t       diff  = hold ? radio_state_hold(&state, reason, mask) : radio_state_release(&state, reason);
+    radio_state_t after = state;
+    portEXIT_CRITICAL(&lock);
+    tell_diff(diff, &after);
+    xSemaphoreGive(change_lock);
+}
+
+void lichen_sys_radio_hold(radio_hold_t reason, uint8_t mask) {
+    hold_change(reason, true, mask);
+}
+
+void lichen_sys_radio_release(radio_hold_t reason) {
+    hold_change(reason, false, 0);
+}
+
+radio_hold_t lichen_sys_radio_held_by(radio_id_t id) {
+    ensure_loaded();
+    portENTER_CRITICAL(&lock);
+    radio_hold_t r = radio_state_held_by(&state, id);
+    portEXIT_CRITICAL(&lock);
+    return r;
 }
 
 bool lichen_radio_set(radio_id_t id, bool on) {
@@ -143,6 +179,14 @@ bool lichen_airplane_set(bool on) {
     return change(RADIO_WIFI, false, on ? 1 : 0);
 }
 
+// "on", "off", or "held off (hot)" while the system holds it (#282): the person's switch is then still on
+static char const *state_word(radio_id_t id) {
+    if (lichen_radio_get(id)) {
+        return "on";
+    }
+    return lichen_sys_radio_held_by(id) == RADIO_HOLD_THERMAL ? "held off (hot)" : "off";
+}
+
 static void cmd_airplane(char const *args) {
     if (strcmp(args, "on") == 0 || strcmp(args, "off") == 0) {
         lichen_airplane_set(args[1] == 'n');
@@ -151,8 +195,7 @@ static void cmd_airplane(char const *args) {
         return;
     }
     console_reply("airplane %s | wifi %s | lora %s | bluetooth %s", lichen_airplane_get() ? "on" : "off",
-                  lichen_radio_get(RADIO_WIFI) ? "on" : "off", lichen_radio_get(RADIO_LORA) ? "on" : "off",
-                  lichen_radio_get(RADIO_BT) ? "on" : "off");
+                  state_word(RADIO_WIFI), state_word(RADIO_LORA), state_word(RADIO_BT));
 }
 
 void lichen_radio_console_register(void) {

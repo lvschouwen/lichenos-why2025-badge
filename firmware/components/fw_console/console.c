@@ -511,6 +511,10 @@ void system_restart(char const *why) {
     esp_restart();
 }
 
+void system_save_before_off(void) {
+    restart_save_run();
+}
+
 static void cmd_reboot(char const *args) {
     (void)args;
     console_reply("rebooting");

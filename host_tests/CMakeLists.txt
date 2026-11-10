@@ -1556,13 +1556,14 @@ target_include_directories(notify_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(notify_view_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME notify_view_test COMMAND notify_view_test)
 
-add_executable(sys_notice_rules_test ${CMAKE_CURRENT_SOURCE_DIR}/sys_notice_rules_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/sys_notice_rules.c)
-target_include_directories(sys_notice_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+add_executable(sys_notice_rules_test ${CMAKE_CURRENT_SOURCE_DIR}/sys_notice_rules_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/sys_notice_rules.c)
+target_include_directories(sys_notice_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
 target_compile_options(sys_notice_rules_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME sys_notice_rules_test COMMAND sys_notice_rules_test)
 
-add_executable(thermal_rules_test ${CMAKE_CURRENT_SOURCE_DIR}/thermal_rules_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/thermal_rules.c)
-target_include_directories(thermal_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+add_executable(thermal_rules_test ${CMAKE_CURRENT_SOURCE_DIR}/thermal_rules_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/thermal_rules.c)
+target_include_directories(thermal_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(thermal_rules_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME thermal_rules_test COMMAND thermal_rules_test)
 

@@ -1,6 +1,6 @@
 // Settings > Battery (#10): the honest page. The two 18650 cells are unprotected and sit behind a charger chip that has
 // no data link to the processors, so the badge cannot see their voltage, charge or current; all it can do is watch
-// the temperature (thermal.c). The same page, headed by a red warning, is the full-screen warning when the watchdog
+// the temperature (lichen_os/thermal.c). The same page, headed by a red warning, is the full-screen warning when the watchdog
 // raises its alarm. Up/Down scroll; the live lines refresh once a second.
 #include "esp_log.h"
 #include "screen_ids.h"
@@ -28,8 +28,8 @@ static void on_key(lv_event_t *e) {
 }
 
 static void status_text(char *out, size_t cap) {
-    thermal_info_t i;
-    thermal_info(&i);
+    lichen_sys_thermal_info_t i;
+    lichen_sys_thermal_info(&i);
     char board[24] = "no reading", die[24] = "no reading";
     if (i.valid[TH_SRC_BOARD]) {
         snprintf(board, sizeof(board), "%.0f \xC2\xB0""C", (double)i.c[TH_SRC_BOARD]);

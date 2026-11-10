@@ -418,8 +418,8 @@ static bool c6_trouble(void) {
 }
 
 static bool hot(void) {
-    thermal_info_t th;
-    thermal_info(&th);
+    lichen_sys_thermal_info_t th;
+    lichen_sys_thermal_info(&th);
     return th.level != TH_OK;
 }
 

@@ -67,6 +67,10 @@ static void os_rules(void) {
     before(START_STORAGE, START_SHELL);  // the shell's screens read /storage
     before(START_STORAGE, START_APPS);   // app background parts open their files
     before(START_APPS, START_OTA);       // the update hooks stop apps that already run
+    // #281: the thermal watchdog and the OS notices start in their own step, never inside the shell's (which returns
+    // early without a display); they raise notices, and the shell's hooks exist once it started
+    before(START_NOTICES, START_WATCH);
+    before(START_SHELL, START_WATCH);
 }
 
 int main(void) {

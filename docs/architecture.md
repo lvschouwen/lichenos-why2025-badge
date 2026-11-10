@@ -104,6 +104,9 @@ when one breaks:
 3. `START_C6LINK` (`c6link_start`) comes before `START_BACKLIGHT`, `START_KEYBOARD` and `START_LORA`; `START_C6_HOOKS`
    (`c6_wire_hooks`) only after those three. The boot step enum in `lichen_boot/boot_steps.h` is a display order only.
 
+The OS rules in the same test include `START_WATCH` (the thermal watchdog and the notices, #281) after `START_NOTICES`
+and `START_SHELL`: its own step, so `start_shell` returning early without a display cannot skip it.
+
 ### 2. Peer-data channel (ESP-Hosted `eh_*_peer_data`)
 | Id | Direction | Service | Registered at |
 |---|---|---|---|
@@ -239,7 +242,20 @@ The rule: **core 1 draws, core 0 talks to the world.**
   task. Lichen shows a toast that never takes the focus, the unread count on the app's tile and in the status bar, and
   keeps a history of 48 in `/storage/lichen/notify.bin` (the Notifications tile, the cloud key). The user switches
   sources on or off and sets do-not-disturb in Settings › Notifications. Lichen raises its own notices too (a crash,
-  the PSRAM check, the clock, an update, the C6 coming back, the SD card, a sensor, low storage).
+  the PSRAM check, the clock, an update, the C6 coming back, the SD card, a sensor, low storage): `lichen_os/sys_notices.c`,
+  an OS service like the thermal watchdog below (#281).
+- The thermal watchdog (#10, `lichen_os/thermal.c`, rules in `thermal_rules.c`) and the notices are OS services, not
+  shell parts (#281): main starts both in their own boot step `START_WATCH` (`lichen_watch_start`, `lichen_os.h`)
+  whether or not a display came up, so a badge without a screen still warns and powers off when too hot. What they
+  need from above comes in as hooks (`lichen_watch_hooks_t`): "home is shown", the shell's warning page, the update
+  result and the power off, which is the Power app's goodbye path when the shell runs and main's headless path
+  (`system_save_before_off`, then `lichen_sys_power_off_now`) otherwise. The shell reads the watchdog through the gate
+  (`lichen_sys_thermal.h`). `fw thermal` says whether the watchdog task runs; `fw noscreen` makes the next boot skip
+  the display start (one boot only) to prove it.
+- The load shed holds Wi-Fi and LoRa off through the radio service (#282, `lichen_sys_radio.h`): a hold has a reason
+  (thermal), lives in RAM only and never writes the person's saved switches, so a boot starts without one and the
+  radios come back as the person set them when the reason ends. While held a radio reads off; switching it on
+  overrides the hold for that radio, switching it off is saved as usual. `fw airplane` shows `held off (hot)`.
   Its headers are the gate's (`lichen_api/lichen_notify.h` for apps, `notify_os.h` for the shell, `notify_entry.h`),
   implemented by the `lichen_notify` service (L3) like `lichen_os` implements the rest (#245). The drivers below it
   never call it: lichen_os (`os_bind.c`) binds the status LED's `led_set_dnd`/`led_set_unread`, which notify calls
@@ -269,7 +285,7 @@ any new violation fails the build. The two-chip protocol is a separate contract:
 | L0 platform | IDF-level helpers every layer may use: console, PSRAM guard, random, assets, NVS init and encryption | `fw_console`, `psram_guard`, `lichen_random`, `assets`, `lichen_nvs` |
 | L1 board/HAL | pins, buses, panel, keyboard chip, storage drive; no NVS of its own (#224: settings arrive through a bound getter/setter) | `board`, `esp_lcd_st7703`, `esp_tca8418`, `storage` |
 | L2 drivers | radios (LoRa, the C6 link), SD card, sensors, LED, haptics, battery, audio | `sdcard`, `sensors`, `lora`, `c6link`, `lichen_led`, `lichen_haptics`, `battery`, `lichen_audio` |
-| L3 OS services | the gate's implementations and the services behind it | `lichen_os` (settings, fs, crash log, radio, task and memory books, fonts, the UI service; implements the gate's headers, #220), `lichen_notify` (implements the notification headers, #245), `lichen_clock`, `lichen_net`, `lichen_boot`, `lichen_mdns`, `ota`, `crash` |
+| L3 OS services | the gate's implementations and the services behind it | `lichen_os` (settings, fs, crash log, radio, task and memory books, fonts, the UI service, the thermal watchdog and Lichen's notices (#281); implements the gate's headers, #220), `lichen_notify` (implements the notification headers, #245), `lichen_clock`, `lichen_net`, `lichen_boot`, `lichen_mdns`, `ota`, `crash` |
 | L4 the gate | headers and their pure logic, the gate's widgets, one ops table; no hardware dependencies (may use L0 and itself only) | `lichen_api` |
 | L5 system | the shell and the system screens, a privileged client of the gate | `lichen_shell` |
 | L6 apps | the plain apps and MeshCore, a closed profile | `lichen_apps` (#180), `mesh` |

@@ -19,6 +19,7 @@ typedef enum {
     START_NOTICES,        // notifications, LED, crash_check_late, console commands that need storage
     START_FONTS,          // assets into PSRAM fonts
     START_SHELL,          // MeshCore registered, the restart save, the shell when there is a screen
+    START_WATCH,          // the thermal watchdog and Lichen's notices: OS services, display or not (#281)
     START_SD,             // the SD card (#60)
     START_RADIO_SWITCHES, // the saved OS radio switches (#108)
     START_LORA_IDENT,     // c6link's IDENT hooks from lora_ident (#36)

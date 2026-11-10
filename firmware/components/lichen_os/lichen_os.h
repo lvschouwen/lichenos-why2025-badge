@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 // lichen_os's own entry points for main: not part of the gate, apps never see them.
 
 // Hands the settings to the lower layers that keep a value of their own but may not open NVS (#224): the backlight
@@ -34,3 +35,25 @@ void lichen_ui_service_arm(void);
 // lichen_sys_ui_call, lichen_ui_call and lichen_ui_with_group refuse (false / nothing) instead of asserting in
 // lvgl_port_lock, so a badge with no display still boots to Wi-Fi and OTA.
 void lichen_ui_service_port_up(void);
+
+// The OS watch services (#281): the thermal watchdog (thermal.c, #10) and Lichen's own notices (sys_notices.c, #62).
+// Started by main in their own boot step, display or not, so a badge whose screen did not come up still powers off
+// when it gets too hot. What they need from above the OS comes in as hooks; any member may be NULL.
+typedef struct {
+    // Home is on screen (the first-run and boot notices wait for it). NULL: no UI, the notices go to the history at once
+    bool (*ui_ready)(void);
+    // The full-screen heat warning (the shell's Settings > Battery page); any task. NULL: the notice only
+    void (*hot_alert)(void);
+    // Saves and powers the badge off (the Power app's path, or main's headless one); any task, may return before the
+    // badge is down. NULL: lichen_sys_power_off_now (no saves)
+    void (*power_off)(void);
+    // The update result line of this boot (update_screen_boot_result: 0 none, 1 updated, 2 rolled back)
+    int (*update_result)(char *line, size_t cap);
+    // C6 outages the badge came back from (#14), and the last recovery in words
+    uint32_t (*c6_restarts)(char *reason, size_t cap);
+} lichen_watch_hooks_t;
+
+// Copies the hooks, registers `fw thermal` and starts both tasks. Once, after lichen_notify_start.
+void lichen_watch_start(lichen_watch_hooks_t const *hooks);
+void thermal_start(lichen_watch_hooks_t const *hooks);     // lichen_watch_start's thermal half
+void sys_notices_start(lichen_watch_hooks_t const *hooks); // and its notices half

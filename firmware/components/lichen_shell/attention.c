@@ -35,8 +35,8 @@ bool flashlight_active(void) {
 }
 
 static bool hot(void) {
-    thermal_info_t t;
-    thermal_info(&t);
+    lichen_sys_thermal_info_t t;
+    lichen_sys_thermal_info(&t);
     return t.level != TH_OK;
 }
 

@@ -9,11 +9,17 @@
 // temperature is not on the C6 link, so it is not a source.
 // Also here: the one-time "your cells are unprotected" notice, and `fw thermal` with a simulation (`test`) that feeds a
 // board reading through the same decision path.
+// An OS service since #281: main starts it in its own boot step, display or not (lichen_watch_start), and what it needs
+// from the shell (the warning page, the Power app's goodbye path, "home is shown") comes in as hooks.
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lichen_os.h"
 #include "lichen_sys_display.h"
+#include "lichen_sys_power.h"
+#include "lichen_sys_radio.h"
+#include "lichen_sys_thermal.h"
 #include "fw_console.h"
 #include "lichen_notify.h"
 #include "lichen_task.h"
@@ -21,7 +27,7 @@
 #include "lichen_sensors.h"
 #include "sdkconfig.h"
 #include "settings_store.h"
-#include "shell_parts.h"
+#include "thermal_rules.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -39,7 +45,7 @@ static char const TAG[] = "thermal";
 #define NO_SIM         INT32_MIN
 #define EVENT_LOG      6
 #define SEEN_KEY       "batt_seen"
-#define SHED_KEY       "thermal_shed" // set while the radios are shed: a reboot in between is told at boot
+#define SHED_KEY       "thermal_shed" // written by firmware before #282 while the radios were shed (and saved off)
 
 #if CONFIG_LICHEN_SENSORS_GAS_HEATER
 #define HEATER_ON true
@@ -53,7 +59,7 @@ typedef struct {
 } event_t;
 
 static portMUX_TYPE   lock = portMUX_INITIALIZER_UNLOCKED;
-static thermal_info_t info;       // under lock
+static lichen_sys_thermal_info_t info; // under lock
 static event_t        events[EVENT_LOG];
 static unsigned       event_count; // under lock
 // Simulated board temperature: generation in the high 32 bits, milli-degrees (or NO_SIM) in the low 32. One word, so a
@@ -63,6 +69,10 @@ static _Atomic uint64_t sim_state = (uint32_t)NO_SIM;
 #define SIM_GEN(v) ((uint32_t)((v) >> 32))
 static _Atomic uint32_t sim_since_s;
 static atomic_bool    shutdown_asked;
+static lichen_watch_hooks_t hooks;      // set once before the task starts
+static atomic_bool          running;    // the task is up (`fw thermal` says so, #281)
+static _Atomic uint32_t     polls;      // polls so far
+static _Atomic uint32_t     last_poll_s; // uptime of the last one
 
 static uint32_t up_s(void) {
     return (uint32_t)(esp_timer_get_time() / 1000000);
@@ -77,7 +87,7 @@ static void log_event(char const *text) {
     taskEXIT_CRITICAL(&lock);
 }
 
-void thermal_info(thermal_info_t *out) {
+void lichen_sys_thermal_info(lichen_sys_thermal_info_t *out) {
     taskENTER_CRITICAL(&lock);
     *out = info;
     taskEXIT_CRITICAL(&lock);
@@ -86,35 +96,23 @@ void thermal_info(thermal_info_t *out) {
 // ---- load shedding ---------------------------------------------------------------------------------------------------
 
 // Everything that sheds load while the badge is warm, in one place. Backlight to the minimum (not saved, so the
-// person's levels come back) and Wi-Fi and LoRa off through the OS radio switches (#108). lichen_radio_set saves the
-// switch state, so a reboot while warm leaves the radios off (safe side); on a clear only the radios this function
-// switched off are switched back on, and only if still off (a person who switched one on meanwhile is not overridden).
+// person's levels come back) and Wi-Fi and LoRa held off by the radio service (#282): a hold is never saved, so the
+// person's switches stay as they were, a reboot while warm brings the radios back as set, and on a clear they come back
+// the same way (a radio the person switched off meanwhile stays off, one switched on meanwhile already is).
 static void shed_load(bool on) {
     static uint8_t saved[2];
     static bool    shed;
-    static bool    was_on[2]; // Wi-Fi, LoRa: on before the shed
-    static radio_id_t const ids[2] = {RADIO_WIFI, RADIO_LORA};
     if (on == shed) {
         return;
     }
     shed = on;
     if (on) {
-        settings_set_u8(SHED_KEY, 1);
         lichen_sys_display_get(&saved[0], &saved[1]);
         lichen_sys_display_set(LICHEN_SYS_DISPLAY_MIN, 0);
+        lichen_sys_radio_hold(RADIO_HOLD_THERMAL, (uint8_t)(1u << RADIO_WIFI | 1u << RADIO_LORA));
     } else {
-        settings_erase(SHED_KEY);
         lichen_sys_display_set(saved[0], saved[1]);
-    }
-    for (int k = 0; k < 2; k++) {
-        if (on) {
-            was_on[k] = lichen_radio_get(ids[k]);
-            if (was_on[k]) {
-                lichen_radio_set(ids[k], false);
-            }
-        } else if (was_on[k] && !lichen_radio_get(ids[k]) && !lichen_airplane_get()) {
-            lichen_radio_set(ids[k], true);
-        }
+        lichen_sys_radio_release(RADIO_HOLD_THERMAL);
     }
 }
 
@@ -128,14 +126,24 @@ static void say(ln_level_t level, char const *title, char const *body, uint32_t 
     lichen_notify_to("lichen", level, "battery", title, body, flags);
 }
 
-static void cause_text(thermal_info_t const *i, char *out, size_t cap) {
+static void cause_text(lichen_sys_thermal_info_t const *i, char *out, size_t cap) {
     snprintf(out, cap, "%s %s at %.0f \xC2\xB0""C.", th_src_name(i->cause), i->cause_rise ? "rose fast, now" : "reached",
              (double)i->cause_c);
 }
 
+// The shell's goodbye path when it runs, main's headless one otherwise; with no hook at all the badge still goes down
+static void power_off(void) {
+    if (hooks.power_off) {
+        hooks.power_off();
+    } else {
+        ESP_LOGE(TAG, "no power-off hook: switching off without the saves");
+        lichen_sys_power_off_now();
+    }
+}
+
 static void on_events(unsigned ev) {
-    thermal_info_t now;
-    thermal_info(&now);
+    lichen_sys_thermal_info_t now;
+    lichen_sys_thermal_info(&now);
     char body[120];
     if (ev & TH_EV_WARN) {
         cause_text(&now, body, sizeof(body));
@@ -143,7 +151,9 @@ static void on_events(unsigned ev) {
         snprintf(body + n, sizeof(body) - n, " Screen dimmed, radios off. Unplug the charger and let it cool.");
         say(LN_WARN, "Badge is getting hot", body, LN_COALESCE);
         shed_load(true);
-        battery_open_alert();
+        if (hooks.hot_alert) {
+            hooks.hot_alert();
+        }
     }
     if (ev & TH_EV_CLEARED) {
         say(LN_INFO, "Badge has cooled down", "Back to normal.", LN_COALESCE);
@@ -156,7 +166,7 @@ static void on_events(unsigned ev) {
         say(LN_ERROR, "Too hot: powering off", body, 0);
         shed_load(true);
         if (!atomic_exchange(&shutdown_asked, true)) {
-            power_request_off();
+            power_off();
         }
     }
     if (ev & TH_EV_BLIND) {
@@ -229,7 +239,8 @@ static void publish(th_state_t const *st, th_input_t const *in, float bme_raw) {
 
 // ---- the first-run notice --------------------------------------------------------------------------------------------
 
-// The badge went down (or restarted) while the radios were shed: they stay off (the safe side) and the person is told
+// Firmware before #282 saved the radios off while it shed load: a badge that went down shed under it still has them
+// off, and the person is told once. This firmware never sets the key (a hold is not saved).
 static void shed_boot_notice(void) {
     if (!settings_get_u8(SHED_KEY, 0)) {
         return;
@@ -268,12 +279,14 @@ static void thermal_task(void *arg) {
             last_gen = gen;
         }
         unsigned ev = th_step(&st, &in, up_s());
+        atomic_store(&last_poll_s, up_s());
+        atomic_fetch_add(&polls, 1);
         publish(&st, &in, bme_raw);
         if (ev) {
             on_events(ev);
         }
         if (settled < SETTLE_POLLS) {
-            settled = shell_home_shown() ? settled + 1 : 0;
+            settled = !hooks.ui_ready || hooks.ui_ready() ? settled + 1 : 0;
             if (settled == SETTLE_POLLS) {
                 first_run_notice();
             }
@@ -285,8 +298,14 @@ static void thermal_task(void *arg) {
 // ---- console ---------------------------------------------------------------------------------------------------------
 
 static void print_status(void) {
-    thermal_info_t i;
-    thermal_info(&i);
+    lichen_sys_thermal_info_t i;
+    lichen_sys_thermal_info(&i);
+    if (atomic_load(&running)) {
+        console_reply("watchdog: running, %u polls, the last %u s ago (%s)", (unsigned)atomic_load(&polls),
+                      (unsigned)(up_s() - atomic_load(&last_poll_s)), hooks.ui_ready ? "with the shell" : "no display");
+    } else {
+        console_reply("watchdog: NOT RUNNING (no memory for its task): nothing watches the temperature");
+    }
     console_reply("thermal: %s%s%s (polled every %d s)", th_level_name(i.level), i.blind ? ", BLIND (no sensor)" : "",
                   i.simulated ? ", SIMULATED board reading" : "", POLL_MS / 1000);
     for (int s = 0; s < TH_SRC_COUNT; s++) {
@@ -356,12 +375,17 @@ static void cmd_thermal(char const *args) {
     }
 }
 
-void thermal_start(void) {
+void thermal_start(lichen_watch_hooks_t const *h) {
+    if (h) {
+        hooks = *h;
+    }
     console_register("thermal", "thermal [test warn|clear|shutdown YES] (temperature watchdog, battery safety)",
                      cmd_thermal);
     // LP RAM (#269): a poll every few seconds that writes NVS (its shed and seen flags), so internal-capable, no DMA
     if (!lichen_task_start_in(NULL, "thermal", thermal_task, NULL, STACK_BYTES, LICHEN_PRIO_SERVICE, LICHEN_STACK_LP_RAM,
                               NULL)) {
         ESP_LOGE(TAG, "no memory: nothing watches the temperature");
+        return;
     }
+    atomic_store(&running, true);
 }
