@@ -9,7 +9,8 @@ function) are ratcheted: a value past the fail line fails unless tools/standard-
 more. The baseline may only shrink, and the gate enforces that against the merge-base version of the file.
 Warn-line hits print for the files changed since the merge base.
 Size: the app image against its OTA slot, the C6 image against its slot, and every linked P4 archive against the
-baseline (growth in one change). Merged string/constant pools (SHF_MERGE, `.str1.4`, `.cst8`) are the image-wide
+size its parent commit recorded (growth in one change, #297). A green run rewrites the size lines to the measured
+values (the commit carries them); a red run never writes. `--size-update` records growth past the fail line. Merged string/constant pools (SHF_MERGE, `.str1.4`, `.cst8`) are the image-wide
 pool of the whole link, not one archive's: they are taken out of the archive numbers and gated as the line `<merged-strings>`.
 
 Nothing passes silently: a tool that is missing, fails, or measures less than was asked for fails the gate."""
@@ -34,8 +35,8 @@ LIMITS = {
 }
 MOVED = "moved"  # 'moved<TAB>metric:old=>new<TAB>0': a deliberate rename, see apply_rename
 BASELINE_METRICS = set(LIMITS) | {"size", MOVED}
-IMAGE_PCT = (85.0, 92.0)  # image / OTA slot
-GROWTH = (2048, 8192)  # bytes one archive may grow past its baseline
+IMAGE_PCT = (75.0, 90.0)  # image / OTA slot (measured 62.6 % P4, 48.1 % C6 when set, #297)
+GROWTH = (2048, 8192)  # bytes one archive may grow in one change, against the sizes the parent commit recorded
 OUR_DIRS = ("firmware/components/", "firmware/main/", "c6/main/", "shared/")
 SKIP_PARTS = ("/thirdparty/", "/managed_components/", "/build/")
 SOURCE_EXT = (".c", ".cpp", ".h", ".hpp")
@@ -67,7 +68,7 @@ def parse_baseline(text):
     return out
 
 
-def format_baseline(header, entries):
+def format_baseline(header, entries):  # sorted: two slots recording sizes produce the same text for the same sizes
     lines = [header.rstrip("\n")]
     for (metric, key), value in sorted(entries.items()):
         lines.append("%s\t%s\t%d" % (metric, key, value))
@@ -396,21 +397,31 @@ def compare_image(label, image_bytes, slot_bytes):
     return [], [], msg
 
 
-def compare_sizes(measured, baseline):
-    """Archive growth since the baseline. A new archive counts from zero."""
-    failures, warnings, stale = [], [], []
+def compare_sizes(measured, ref, acked=None):
+    """Archive growth of one change against REF, the sizes its parent commit recorded (#297). A new archive counts
+    from zero. ACKED holds the working-tree sizes: growth past the fail line passes only when `--size-update` wrote
+    it (a green build never records growth past the line, so a value above ref + fail line in the file is deliberate)."""
+    failures, warnings = [], []
     for (metric, key), value in sorted(measured.items()):
         if metric != "size":
             continue
-        base = baseline.get(("size", key), 0)
+        base = ref.get(("size", key), 0)
         delta = value - base
         if delta > GROWTH[1]:
+            if acked is not None and value <= acked.get(("size", key), -1):
+                continue
             failures.append("GREW  %s +%d B (%d -> %d, fail line +%d; --size-update if intended)" % (key, delta, base, value, GROWTH[1]))
         elif delta > GROWTH[0]:
             warnings.append("warn  %s +%d B (%d -> %d, warn line +%d)" % (key, delta, base, value, GROWTH[0]))
-        elif -delta > GROWTH[1]:
-            stale.append("size %s shrank by %d B, update the baseline" % (key, -delta))
-    return failures, warnings, stale
+    return failures, warnings
+
+
+def record_sizes(baseline, sizes):
+    """The baseline with its size lines replaced by the measurement; every other line is untouched. A green build
+    writes this so the commit carries its own sizes and the next change is measured against them (#297)."""
+    out = {k: v for k, v in baseline.items() if k[0] != "size"}
+    out.update(sizes)
+    return out
 
 
 def shrink(measured, baseline, problems=()):
@@ -503,6 +514,14 @@ def base_baseline_text(root):
     return r.stdout if r.returncode == 0 else None
 
 
+def parent_sizes(root, fallback):
+    """The size lines as the parent commit (HEAD) recorded them: the reference of this change. Rebuilds before the
+    commit must not compare against their own earlier rewrite, or growth could be paid in installments. Without a
+    committed baseline the working-tree file is the reference."""
+    r = subprocess.run(["git", "-C", root, "show", "HEAD:" + BASELINE_REL], capture_output=True, text=True)
+    return parse_baseline(r.stdout) if r.returncode == 0 else fallback
+
+
 def measure_all(root):
     """Everything the gate looks at. Returns (measured, sizes, size_info, problems)."""
     measured, problems = measure_lizard(root, tracked_sources(root))
@@ -515,7 +534,7 @@ def measure_all(root):
     return measured, sizes, {"p4": (image, slot), "c6": (c6_image, c6_slot)}, problems
 
 
-def run_check(root, baseline, base_baseline, measured, sizes, size_info, problems, changed):
+def run_check(root, baseline, base_baseline, measured, sizes, size_info, problems, changed, ref=None):
     """The gate proper. Returns (failures, warnings, notes)."""
     fails = ["INCOMPLETE " + p for p in problems]
     warns, notes = [], []
@@ -534,10 +553,9 @@ def run_check(root, baseline, base_baseline, measured, sizes, size_info, problem
             fails += f
             warns += w
             notes.append(msg)
-    f, w, s = compare_sizes(sizes, baseline)
+    f, w = compare_sizes(sizes, baseline if ref is None else ref, baseline)
     fails += f
     warns += w
-    notes += ["note: " + x for x in s]
     return fails, warns, notes
 
 
@@ -597,7 +615,8 @@ def main(argv):
 
     base_text = base_baseline_text(root)
     fails, warns, notes = run_check(root, baseline, parse_baseline(base_text) if base_text is not None else None,
-                                    measured, sizes, size_info, problems, changed_since_base(root))
+                                    measured, sizes, size_info, problems, changed_since_base(root),
+                                    parent_sizes(root, baseline))
     for line in notes:
         print("standard: " + line)
     for line in warns:
@@ -608,6 +627,10 @@ def main(argv):
         print("standard: %d problem(s). Fix the code; a baseline only shrinks, see docs/code-standard.md" % len(fails),
               file=sys.stderr)
         return 1
+    recorded = format_baseline(split_header(text), record_sizes(baseline, sizes))
+    if recorded != text:
+        atomic_write(base_path, recorded)
+        print("standard: recorded the measured sizes in %s (commit it with the change)" % BASELINE_REL)
     print("standard: ok (%d metrics measured, %d warnings in changed files)" % (len(measured), len(warns)))
     return 0
 

@@ -24,8 +24,8 @@ JPL "Power of 10" rule 4 (only via a secondary page). Not reachable: Barr Group,
 | Min free internal heap | <15 % | <8 % | J; IDF V "some headroom" | `fw mem` (`internal ... min_pct`) |
 | Largest internal block | <50 % of free | <25 % of free | V fragmentation view, J numbers | `fw mem` (`internal ... largest` vs `free`) |
 | PSRAM use | >75 % | >90 % | J | `fw mem` (`psram ... used_pct`) |
-| App image vs OTA slot | >85 % | >92 % | J | `badge_fw.bin` vs `ota_0` in `firmware/partitions.csv` |
-| Per-archive growth per change | +2 KB | +8 KB | J; delta against a baseline V (Memfault) | `esp_idf_size --archives` vs the baseline |
+| App image vs OTA slot | >75 % | >90 % | J; measured 62.6 % P4, 48.1 % C6 (#297) | `badge_fw.bin` vs `ota_0` in `firmware/partitions.csv` |
+| Per-archive growth per change | +2 KB | +8 KB | J; delta against a baseline V (Memfault) | `esp_idf_size --archives` vs the sizes the parent commit recorded |
 | CPU idle per core | <30 % | <15 % | V NASA 50-70 % utilisation; numbers J | `fw mem` (`task IDLE0/IDLE1 ... cpu`) |
 | ISR / interrupts off | >50 us | >200 us | J; IWDT 300/800 ms V is the crash line | cycle counter or scope (no read-out; known gap, not yet tracked) |
 | Task watchdog margin | longest run >25 % of 5 s | >50 % | V TWDT 5 s; J ratios | trace (no read-out; known gap, not yet tracked) |
@@ -75,21 +75,28 @@ P4 image is built, about 3 s. It runs `tools/check_standard.py`. Nothing passes 
 - Past the **fail** line and not in the baseline: fails (`NEW`). In the baseline but above its value: fails (`WORSE`).
 - Past the **warn** line: printed, never fails; only for files changed since the merge base.
 - **Stale baseline entries fail** (`STALE`): an offender that was fixed, lowered or removed must also be removed or lowered in
-  the baseline (`--shrink`). The gate does not rewrite the file on its own, so the diff stays a deliberate, reviewable edit.
+  the baseline (`--shrink`). The gate does not rewrite the static (complexity, length, stack) lines on its own, so that diff
+  stays a deliberate, reviewable edit. Only the `size` lines are rewritten automatically, see below.
 - **The baseline only shrinks, enforced:** every static entry that is new, or higher than in the merge-base version of
   `tools/standard-baseline.txt` (HEAD if there is no merge base), fails (`GREW`). The one change that introduces the file
   is exempt, since there is nothing to compare with.
-- Images: P4 app above 92 % of `ota_0` fails, above 85 % warns; the same for the C6 `network_adapter.bin` against the
+- Images: P4 app above 90 % of `ota_0` fails, above 75 % warns (set in #297 from the measured 62.6 % P4 and 48.1 % C6); the same for the C6 `network_adapter.bin` against the
   `ota_0` of `c6/partitions.esp32c6.csv`.
 - **Size growth is per linked archive, from the link map** (`esp_idf_size --archives`), not per component from
   `idf.py size-components`: the archive list is machine-readable and stable, and `size-components` only prints a table
-  whose columns shift with the memory layout. An archive that grows by more than 8 KB over its baseline fails (a new
-  archive counts from zero), more than 2 KB warns. There is no per-archive baseline for the C6 image (gap).
+  whose columns shift with the memory layout. Growth is per change (#297): an archive is compared with the size
+  its **parent commit** recorded in the `size` lines of `tools/standard-baseline.txt` (read with `git show HEAD:`, so
+  rebuilds before the commit do not pay growth in instalments). More than +8 KB fails (a new archive counts from zero),
+  more than +2 KB warns, shrinks are silent. A **green** build rewrites the `size` lines to the measured values (shrinks and
+  growth up to the fail line alike; sorted, stable format; no other line is touched; a red build never writes), so the
+  commit carries its own sizes and the next change starts from them. Commit the rewritten file with the change; two slots
+  that both changed one archive conflict on that line, rebase and rebuild. There is no per-archive baseline for the C6
+  image (gap).
 - **Merged string pools are their own line, `size <merged-strings>`.** The linker folds every `.rodata.*.str1.*` and
   `.cst*` input section (SHF_MERGE) into one image-wide blob and books all of it on the first contributing object, so
   the pool (~240 KB) used to sit under `libesp_stdio.a` and any change of link order moved it to another archive as a
   false GREW and a fake shrink. The gate reads the pool input sections from `badge_fw.map`, subtracts them from their
-  owning archive and sums them into one line, gated with the same +2 KB warn / +8 KB fail rules. Growth of the pool
+  owning archive and sums them into one line, gated with the same per-change +2 KB warn / +8 KB fail rules. Growth of the pool
   means more or longer strings anywhere in the image; look at the diff of the strings, not at one archive.
 
 ### Editing the baseline
@@ -103,7 +110,8 @@ P4 image is built, about 3 s. It runs `tools/check_standard.py`. Nothing passes 
   `moved` records tell the shrink-only check the new key is the old entry, so it passes only if the value did not grow.
   `--shrink` later drops the records once the merge base has the new key.
 - Intended growth of an archive beyond 8 KB: `--size-update` (IDF environment, fresh build). It prints every changed
-  archive, so the diff is reviewable; give the reason in the commit message.
+  archive, so the diff is reviewable; give the reason in the commit message. The gate accepts growth past the fail line
+  only when the file's value was written this way (a green build never records it).
 - `--init` creates the first baseline and refuses when the file exists. Never edit a value up to get a build through; split
   the function.
 

@@ -107,10 +107,11 @@ class Ratchet(unittest.TestCase):
 class Sizes(unittest.TestCase):
     def test_image_lines(self):
         slot = 1000
-        self.assertEqual(cs.compare_image('x', 800, slot)[:2], ([], []))
-        self.assertEqual(len(cs.compare_image('x', 860, slot)[1]), 1)
-        self.assertEqual(len(cs.compare_image('x', 930, slot)[0]), 1)
-        self.assertEqual(cs.compare_image('x', 920, slot)[0], [])  # exactly 92 % is not past the line
+        self.assertEqual(cs.compare_image('x', 750, slot)[:2], ([], []))  # exactly 75 % is not past the warn line
+        self.assertEqual(len(cs.compare_image('x', 760, slot)[1]), 1)
+        self.assertEqual(cs.compare_image('x', 760, slot)[0], [])
+        self.assertEqual(len(cs.compare_image('x', 910, slot)[0]), 1)
+        self.assertEqual(cs.compare_image('x', 900, slot)[0], [])  # exactly 90 % is not past the line
 
     POOL_MAP = (" .rodata.a_fn.str1.4\n                0x00000000        0x0 esp-idf/x/liba.a(a.c.obj)\n"
                 " .rodata.first_fn.str1.4\n                0x48000000     0x1000 esp-idf/x/%s(f.c.obj)\n"
@@ -131,14 +132,13 @@ class Sizes(unittest.TestCase):
         moved = self.pooled("libb.a", 0x1000)
         self.assertEqual(base, moved)
         self.assertEqual(base[("size", cs.POOLS)], 0x1020)
-        f, w, s = cs.compare_sizes(moved, base)
-        self.assertEqual((f, w, s), ([], [], []))
+        self.assertEqual(cs.compare_sizes(moved, base), ([], []))
 
     def test_pool_growth_is_gated_as_its_own_line(self):
         base = self.pooled("liba.a", 0x1000)
         grown = dict(base)
         grown[("size", cs.POOLS)] += 9000
-        f, w, s = cs.compare_sizes(grown, base)
+        f, w = cs.compare_sizes(grown, base)
         self.assertEqual(len(f), 1)
         self.assertIn(cs.POOLS, f[0])
 
@@ -146,10 +146,44 @@ class Sizes(unittest.TestCase):
         base = {("size", "a.a"): 1000, ("size", "b.a"): 1000, ("size", "c.a"): 100000}
         meas = {("size", "a.a"): 1000 + 3000, ("size", "b.a"): 1000 + 9000, ("size", "c.a"): 100000 - 9000,
                 ("size", "new.a"): 9000}
-        f, w, s = cs.compare_sizes(meas, base)
+        f, w = cs.compare_sizes(meas, base)
         self.assertEqual(len(f), 2)  # b.a and the new archive counted from zero
         self.assertEqual(len(w), 1)
-        self.assertEqual(len(s), 1)
+
+    def test_per_change_against_the_parent_not_the_working_tree(self):
+        # Two rebuilds of one change, each +5 KB, the first already rewritten into the file: still +10 KB in total.
+        parent = {("size", "a.a"): 1000}
+        rewritten = {("size", "a.a"): 6000}
+        meas = {("size", "a.a"): 11000}
+        self.assertEqual(len(cs.compare_sizes(meas, parent, rewritten)[0]), 1)
+        # against the rewritten file alone it would have passed: that is the drift this rule removes
+        self.assertEqual(cs.compare_sizes(meas, rewritten)[0], [])
+
+    def test_growth_past_the_line_passes_only_when_size_update_recorded_it(self):
+        parent = {("size", "a.a"): 1000}
+        meas = {("size", "a.a"): 20000}
+        self.assertEqual(cs.compare_sizes(meas, parent, {("size", "a.a"): 20000})[0], [])
+        self.assertEqual(len(cs.compare_sizes(meas, parent, {("size", "a.a"): 9000})[0]), 1)
+
+    def test_shrinks_are_recorded_and_not_noise(self):
+        parent = {("size", "a.a"): 100000}
+        self.assertEqual(cs.compare_sizes({("size", "a.a"): 50000}, parent), ([], []))
+
+    def test_record_sizes_touches_size_lines_only_and_is_deterministic(self):
+        base = {("ccn", "a.c:f"): 30, ("size", "old.a"): 5, ("size", "a.a"): 10}
+        new = cs.record_sizes(base, {("size", "z.a"): 3, ("size", "a.a"): 12})
+        self.assertEqual(new, {("ccn", "a.c:f"): 30, ("size", "a.a"): 12, ("size", "z.a"): 3})
+        t1 = cs.format_baseline("# h", new)
+        t2 = cs.format_baseline("# h", cs.record_sizes(dict(reversed(list(base.items()))), {("size", "a.a"): 12, ("size", "z.a"): 3}))
+        self.assertEqual(t1, t2)
+        self.assertEqual(cs.record_sizes(new, {("size", "z.a"): 3, ("size", "a.a"): 12}), new)
+
+    def test_run_check_never_rewrites_and_uses_the_reference(self):
+        info = {"p4": (0, 0), "c6": (0, 0)}
+        base = {("size", "a.a"): 6000}
+        fails, _, _ = cs.run_check("", base, base, {}, {("size", "a.a"): 11000}, info, [], set(), {("size", "a.a"): 1000})
+        self.assertEqual(len(fails), 1)
+        self.assertEqual(base, {("size", "a.a"): 6000})
 
 
 SH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "check_standard.sh")
