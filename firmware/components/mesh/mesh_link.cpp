@@ -230,22 +230,29 @@ static void console_scope_live(char *name_out, size_t cap, TransportKey &key, ch
     }
 }
 
-// The name into a temp file, read back, then over the real one: a cut write never leaves another valid region. A power
-// cut between FatFs's remove and rename leaves no file: not set, so console floods are refused (fail closed).
-static bool console_scope_write(char const *clean) {
-    size_t len = strlen(clean);
-    File   f   = SPIFFS.open(CONSOLE_SCOPE_TMP, "w", true);
-    bool   ok  = f && f.write((uint8_t const *)clean, len) == len;
+// The text into a temp file, read back (into back, cap bytes), then over the real one: a cut write never leaves another
+// valid scope. A power cut between FatFs's remove and rename leaves no file: for the console scope that is not set, so
+// console floods are refused (fail closed); for the channel scopes (#291) every channel floods under the default.
+static bool scope_file_write(char const *path, char const *tmp, char const *text, size_t len, char *back, size_t cap) {
+    File f  = SPIFFS.open(tmp, "w", true);
+    bool ok = f && f.write((uint8_t const *)text, len) == len;
     f.close();
-    char back[MESH_SCOPE_MAX + 2] = "";
-    File r                        = SPIFFS.open(CONSOLE_SCOPE_TMP, "r");
-    size_t n                      = ok && r ? r.read((uint8_t *)back, sizeof(back) - 1) : 0;
+    File   r = SPIFFS.open(tmp, "r");
+    size_t n = ok && r ? r.read((uint8_t *)back, cap) : 0;
     r.close();
-    ok = ok && n == len && memcmp(back, clean, len) == 0 && SPIFFS.rename(CONSOLE_SCOPE_TMP, CONSOLE_SCOPE_FILE);
+    ok = ok && n == len && memcmp(back, text, len) == 0 && SPIFFS.rename(tmp, path);
     if (!ok) {
-        SPIFFS.remove(CONSOLE_SCOPE_TMP);
+        SPIFFS.remove(tmp);
     }
     return ok;
+}
+
+// The file's text, at most cap - 1 bytes, as a string; "" when there is none
+static void scope_file_read(char const *path, char *out, size_t cap) {
+    File   f = SPIFFS.open(path, "r");
+    size_t n = f ? f.read((uint8_t *)out, cap - 1) : 0;
+    f.close();
+    out[n] = '\0';
 }
 
 char const *BadgeMesh::setConsoleScope(char const *name) {
@@ -253,7 +260,8 @@ char const *BadgeMesh::setConsoleScope(char const *name) {
     if (char const *why = mesh_scope_parse(name, clean, sizeof(clean))) {
         return why;
     }
-    if (!console_scope_write(clean)) {
+    char back[MESH_SCOPE_MAX + 2];
+    if (!scope_file_write(CONSOLE_SCOPE_FILE, CONSOLE_SCOPE_TMP, clean, strlen(clean), back, sizeof(back))) {
         return "not saved: the file could not be written";
     }
     console_scope_live(console_scope_name_, sizeof(console_scope_name_), console_scope_key_, clean);
@@ -261,22 +269,89 @@ char const *BadgeMesh::setConsoleScope(char const *name) {
 }
 
 void BadgeMesh::loadConsoleScope() {
-    char text[MESH_SCOPE_MAX + 2] = "";
+    char text[MESH_SCOPE_MAX + 2];
     char clean[MESH_SCOPE_MAX + 1] = "";
-    File f                         = SPIFFS.open(CONSOLE_SCOPE_FILE, "r");
-    size_t n                       = f ? f.read((uint8_t *)text, sizeof(text) - 1) : 0;
-    text[n]                        = '\0';
-    text[strcspn(text, "\r\n")]    = '\0';
+    scope_file_read(CONSOLE_SCOPE_FILE, text, sizeof(text));
+    text[strcspn(text, "\r\n")] = '\0';
     if (mesh_scope_parse(text, clean, sizeof(clean))) {
         clean[0] = '\0'; // damaged: not set, so console floods are refused rather than sent anywhere
     }
     console_scope_live(console_scope_name_, sizeof(console_scope_name_), console_scope_key_, clean);
 }
 
+#define CHANNEL_SCOPE_FILE "/channel_scopes" // mesh_chscope_write's text
+#define CHANNEL_SCOPE_TMP  "/channel_scopes.new"
+
+static_assert(MESH_CHSCOPE_MAX >= MAX_GROUP_CHANNELS, "a scope of its own for every channel slot");
+
+static void channel_scope_id(uint8_t const secret[PUB_KEY_SIZE], uint8_t id[MESH_CHSCOPE_ID]) {
+    mesh::Utils::sha256(id, MESH_CHSCOPE_ID, secret, PUB_KEY_SIZE);
+}
+
+// The table to its file: through scope_file_write; an empty table removes the file
+bool BadgeMesh::saveChannelScopes() {
+    size_t len = mesh_chscope_write(&chscopes_, chscope_text_, sizeof(chscope_text_));
+    if (!chscopes_.n) {
+        return !SPIFFS.exists(CHANNEL_SCOPE_FILE) || SPIFFS.remove(CHANNEL_SCOPE_FILE);
+    }
+    return len && scope_file_write(CHANNEL_SCOPE_FILE, CHANNEL_SCOPE_TMP, chscope_text_, len, chscope_back_,
+                                   sizeof(chscope_back_));
+}
+
+char const *BadgeMesh::setChannelScope(uint8_t const secret[PUB_KEY_SIZE], char const *name) {
+    char clean[MESH_SCOPE_MAX + 1], before[MESH_SCOPE_MAX + 1];
+    if (char const *why = mesh_scope_parse(name, clean, sizeof(clean))) {
+        return why;
+    }
+    uint8_t id[MESH_CHSCOPE_ID];
+    channel_scope_id(secret, id);
+    snprintf(before, sizeof(before), "%s", mesh_chscope_find(&chscopes_, id));
+    if (strcmp(before, clean) == 0) {
+        return NULL; // nothing changes (a removed channel without a scope of its own writes nothing)
+    }
+    if (!mesh_chscope_put(&chscopes_, id, clean)) {
+        return "No room for another channel scope";
+    }
+    if (!saveChannelScopes()) {
+        mesh_chscope_put(&chscopes_, id, before); // as it was: nothing changed
+        return "not saved: the file could not be written";
+    }
+    return NULL;
+}
+
+char const *BadgeMesh::channelScope(uint8_t const secret[PUB_KEY_SIZE]) const {
+    uint8_t id[MESH_CHSCOPE_ID];
+    channel_scope_id(secret, id);
+    return mesh_chscope_find(&chscopes_, id);
+}
+
+// True when one of the channels has this id
+bool BadgeMesh::channelWithId(uint8_t const id[MESH_CHSCOPE_ID]) {
+    ChannelDetails ch;
+    uint8_t        have[MESH_CHSCOPE_ID];
+    bool           found = false;
+    for (int i = 0; !found && i < MAX_GROUP_CHANNELS && getChannel(i, ch); i++) {
+        channel_scope_id(ch.channel.secret, have);
+        found = ch.name[0] && memcmp(have, id, sizeof(have)) == 0;
+    }
+    memset(&ch, 0, sizeof(ch)); // a channel key: not left on the stack
+    return found;
+}
+
+void BadgeMesh::loadChannelScopes() {
+    scope_file_read(CHANNEL_SCOPE_FILE, chscope_text_, sizeof(chscope_text_));
+    mesh_chscope_read(&chscopes_, chscope_text_);
+    for (size_t i = chscopes_.n; i-- > 0;) {
+        if (!channelWithId(chscopes_.e[i].id)) {
+            mesh_chscope_drop_at(&chscopes_, i); // its channel went without the removal clearing it (a cut write)
+        }
+    }
+}
+
 // A console line's flood: under the console scope, or dropped (false) while that is not set. The console refuses
 // before queueing; this is the net for a scope gone in between. Never unscoped: that would flood everywhere.
 bool BadgeMesh::floodConsoleScope(mesh::Packet *pkt, uint32_t delay_millis) {
-    if (mesh_scope_choose(true, console_scope_name_) == MESH_SCOPE_USE_CONSOLE) {
+    if (mesh_scope_choose(true, console_scope_name_, NULL) == MESH_SCOPE_USE_CONSOLE) {
         MyMesh::sendFloodScoped(console_scope_key_, pkt, delay_millis);
         return true;
     }
@@ -306,9 +381,18 @@ void BadgeMesh::sendFloodScoped(ContactInfo const &recipient, mesh::Packet *pkt,
     }
 }
 
+// A channel message: one choice for all three scopes (mesh_scope_choose: console > the channel's own > default)
 void BadgeMesh::sendFloodScoped(mesh::GroupChannel const &channel, mesh::Packet *pkt, uint32_t delay_millis) {
-    if (!floodForConsole(pkt, delay_millis)) {
-        MyMesh::sendFloodScoped(channel, pkt, delay_millis);
+    char const *own = channelScope(channel.secret);
+    switch (mesh_scope_choose(pipe_.fromConsole(), console_scope_name_, own)) {
+        case MESH_SCOPE_USE_CHANNEL: {
+            TransportKey key;
+            mesh_prefs_scope_key(own, key.key);
+            MyMesh::sendFloodScoped(key, pkt, delay_millis);
+            break;
+        }
+        case MESH_SCOPE_USE_DEFAULT: MyMesh::sendFloodScoped(channel, pkt, delay_millis); break;
+        default: floodConsoleScope(pkt, delay_millis); break; // a console line's: its scope, or dropped
     }
 }
 

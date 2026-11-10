@@ -50,11 +50,11 @@ void mesh_scope_key_text(char const *name, char *out, size_t cap) {
     snprintf(out, cap, "#%s", name);
 }
 
-mesh_scope_use_t mesh_scope_choose(bool from_console, char const *console_name) {
-    if (!from_console) {
-        return MESH_SCOPE_USE_DEFAULT;
+mesh_scope_use_t mesh_scope_choose(bool from_console, char const *console_name, char const *channel_name) {
+    if (from_console) {
+        return console_name && console_name[0] ? MESH_SCOPE_USE_CONSOLE : MESH_SCOPE_USE_REFUSE;
     }
-    return console_name && console_name[0] ? MESH_SCOPE_USE_CONSOLE : MESH_SCOPE_USE_REFUSE;
+    return channel_name && channel_name[0] ? MESH_SCOPE_USE_CHANNEL : MESH_SCOPE_USE_DEFAULT;
 }
 
 char const *mesh_scope_console_arg(char const *args, char *out, size_t cap) {
@@ -87,4 +87,135 @@ char const *mesh_scope_console_arg(char const *args, char *out, size_t cap) {
 void mesh_scope_status_text(char const *default_name, char const *console_name, char *out, size_t cap) {
     snprintf(out, cap, "default %s | console %s", default_name && default_name[0] ? default_name : "None",
              console_name && console_name[0] ? console_name : "not set");
+}
+
+// ---- a channel's own scope (#291) -----------------------------------------------------------------------------------
+
+void mesh_chscope_clear(mesh_chscope_t *t) {
+    memset(t, 0, sizeof(*t));
+}
+
+static int chscope_index(mesh_chscope_t const *t, uint8_t const id[MESH_CHSCOPE_ID]) {
+    for (size_t i = 0; i < t->n; i++) {
+        if (memcmp(t->e[i].id, id, MESH_CHSCOPE_ID) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+char const *mesh_chscope_find(mesh_chscope_t const *t, uint8_t const id[MESH_CHSCOPE_ID]) {
+    int i = chscope_index(t, id);
+    return i < 0 ? "" : t->e[i].name;
+}
+
+void mesh_chscope_drop_at(mesh_chscope_t *t, size_t i) {
+    if (i < t->n) {
+        t->e[i] = t->e[--t->n]; // the order does not matter; what lies past n is never read
+    }
+}
+
+bool mesh_chscope_put(mesh_chscope_t *t, uint8_t const id[MESH_CHSCOPE_ID], char const *name) {
+    int i = chscope_index(t, id);
+    if (!name[0]) {
+        if (i >= 0) {
+            mesh_chscope_drop_at(t, (size_t)i);
+        }
+        return true;
+    }
+    if (i < 0) {
+        if (t->n >= MESH_CHSCOPE_MAX) {
+            return false;
+        }
+        i = (int)t->n++;
+        memcpy(t->e[i].id, id, MESH_CHSCOPE_ID);
+    }
+    snprintf(t->e[i].name, sizeof(t->e[i].name), "%s", name);
+    return true;
+}
+
+size_t mesh_chscope_write(mesh_chscope_t const *t, char *out, size_t cap) {
+    size_t len = 0;
+    if (cap) {
+        out[0] = '\0';
+    }
+    for (size_t i = 0; i < t->n; i++) {
+        char line[2 * MESH_CHSCOPE_ID + MESH_SCOPE_MAX + 3];
+        int  n = 0;
+        for (size_t b = 0; b < MESH_CHSCOPE_ID; b++) {
+            n += snprintf(line + n, sizeof(line) - (size_t)n, "%02x", t->e[i].id[b]);
+        }
+        n += snprintf(line + n, sizeof(line) - (size_t)n, " %s\n", t->e[i].name);
+        if (len + (size_t)n >= cap) {
+            if (cap) {
+                out[0] = '\0';
+            }
+            return 0;
+        }
+        memcpy(out + len, line, (size_t)n + 1);
+        len += (size_t)n;
+    }
+    return len;
+}
+
+static int hex_digit(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    c = (char)(c | 0x20); // lower case
+    return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+}
+
+// One "<16 hex> <region>" line (len bytes, no line end) into the table; false when it does not parse
+static bool chscope_read_line(mesh_chscope_t *t, char const *line, size_t len) {
+    uint8_t id[MESH_CHSCOPE_ID];
+    char    region[MESH_SCOPE_MAX + 2], name[MESH_SCOPE_MAX + 1];
+    if (len < 2 * MESH_CHSCOPE_ID + 2 || line[2 * MESH_CHSCOPE_ID] != ' ') {
+        return false;
+    }
+    for (size_t b = 0; b < MESH_CHSCOPE_ID; b++) {
+        int hi = hex_digit(line[2 * b]), lo = hex_digit(line[2 * b + 1]);
+        if (hi < 0 || lo < 0) {
+            return false;
+        }
+        id[b] = (uint8_t)(hi << 4 | lo);
+    }
+    size_t rlen = len - (2 * MESH_CHSCOPE_ID + 1);
+    if (rlen >= sizeof(region)) {
+        return false;
+    }
+    memcpy(region, line + 2 * MESH_CHSCOPE_ID + 1, rlen);
+    region[rlen] = '\0';
+    if (mesh_scope_parse(region, name, sizeof(name)) || !name[0]) {
+        return false;
+    }
+    return mesh_chscope_put(t, id, name);
+}
+
+void mesh_chscope_read(mesh_chscope_t *t, char const *text) {
+    mesh_chscope_clear(t);
+    while (*text) {
+        size_t len  = strcspn(text, "\n");
+        size_t used = len;
+        if (used > 0 && text[used - 1] == '\r') {
+            used--;
+        }
+        chscope_read_line(t, text, used);
+        text += len + (text[len] == '\n');
+    }
+}
+
+void mesh_scope_channel_text(char const *own, char const *default_name, char *out, size_t cap) {
+    if (own && own[0]) {
+        snprintf(out, cap, "%s", own);
+    } else if (default_name && default_name[0]) {
+        snprintf(out, cap, "Default (%s)", default_name);
+    } else {
+        snprintf(out, cap, "Default (None, everywhere)");
+    }
+}
+
+void mesh_scope_channel_ask_text(char const *channel, char const *name, char *out, size_t cap) {
+    snprintf(out, cap, "Messages you send on %s will only travel in region %s. Members outside it no longer get them.",
+             channel, name);
 }

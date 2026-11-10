@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,14 +29,54 @@ void mesh_scope_key_text(char const *name, char *out, size_t cap);
 // under a region of its own, so Claude and the agents never flood further than the bench allows; the screens keep the
 // default scope. Unlike the default, an empty console scope is no "None (everywhere)": the console flood is refused.
 #define MESH_SCOPE_CONSOLE_UNSET "console scope not set: fw mesh scope console <region> YES"
-typedef enum { MESH_SCOPE_USE_DEFAULT, MESH_SCOPE_USE_CONSOLE, MESH_SCOPE_USE_REFUSE } mesh_scope_use_t;
-// Which scope a flood takes: a screen's always the default, a console line's the console scope, refused when unset
-mesh_scope_use_t mesh_scope_choose(bool from_console, char const *console_name);
+typedef enum {
+    MESH_SCOPE_USE_DEFAULT,
+    MESH_SCOPE_USE_CONSOLE,
+    MESH_SCOPE_USE_REFUSE,
+    MESH_SCOPE_USE_CHANNEL,
+} mesh_scope_use_t;
+// Which scope a flood takes. A console line's: the console scope, refused when unset, whatever the channel (#290 wins).
+// A screen's: the channel's own scope when it has one (#291; channel_name NULL or "" = none, and every flood that is
+// not a channel message), else the default.
+mesh_scope_use_t mesh_scope_choose(bool from_console, char const *console_name, char const *channel_name);
 // "fw mesh scope console <region> YES": the text after "console". NULL when out holds the region (mesh_scope_parse's
 // rules, never empty), else why not (out is "").
 char const *mesh_scope_console_arg(char const *args, char *out, size_t cap);
 // What "fw mesh scope" prints: "default <name|None> | console <name|not set>" (tools/badge.sh reads the console part)
 void mesh_scope_status_text(char const *default_name, char const *console_name, char *out, size_t cap);
+
+// A channel's own flood scope (#291): a channel message from the screens floods in that region instead of the default.
+// Badge-local (MeshCore's share format has no room for it), kept in MeshCore's directory next to the console scope. A
+// channel is known by an id from its key (the first MESH_CHSCOPE_ID bytes of SHA-256 of the 32-byte secret), so a
+// rename keeps the scope and a channel added again with another key does not inherit it.
+#define MESH_CHSCOPE_ID  8
+#define MESH_CHSCOPE_MAX 40 // MAX_GROUP_CHANNELS in the mesh component's build
+// The file: one "<16 hex digits of the id> <region>" line per channel, at most this long in all
+#define MESH_CHSCOPE_TEXT_MAX (MESH_CHSCOPE_MAX * (2 * MESH_CHSCOPE_ID + MESH_SCOPE_MAX + 2) + 1)
+typedef struct {
+    uint8_t id[MESH_CHSCOPE_ID];
+    char    name[MESH_SCOPE_MAX + 1];
+} mesh_chscope_entry_t;
+typedef struct {
+    mesh_chscope_entry_t e[MESH_CHSCOPE_MAX];
+    size_t               n;
+} mesh_chscope_t;
+void        mesh_chscope_clear(mesh_chscope_t *t);
+// The channel's own region, "" when it has none (it floods under the default)
+char const *mesh_chscope_find(mesh_chscope_t const *t, uint8_t const id[MESH_CHSCOPE_ID]);
+// Sets (name, mesh_scope_parse's output) or with "" drops the channel's own scope. false when the table is full.
+bool        mesh_chscope_put(mesh_chscope_t *t, uint8_t const id[MESH_CHSCOPE_ID], char const *name);
+// Drops entry i (the start drops the ones whose channel is gone)
+void        mesh_chscope_drop_at(mesh_chscope_t *t, size_t i);
+// The file text of the table; its length (0 for an empty table, or when cap is too small: out is "" then)
+size_t      mesh_chscope_write(mesh_chscope_t const *t, char *out, size_t cap);
+// The table from a file text: a line that does not parse (bad id, a region mesh_scope_parse refuses) is left out, so
+// that channel floods under the default again
+void        mesh_chscope_read(mesh_chscope_t *t, char const *text);
+// The channel details row: the own region, else "Default (<default name>)" ("Default (None, everywhere)" without one)
+void        mesh_scope_channel_text(char const *own, char const *default_name, char *out, size_t cap);
+// The question before a channel gets its own region (not asked for going back to the default)
+void        mesh_scope_channel_ask_text(char const *channel, char const *name, char *out, size_t cap);
 
 #ifdef __cplusplus
 }

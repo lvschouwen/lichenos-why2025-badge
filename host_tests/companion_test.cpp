@@ -300,6 +300,61 @@ static void console_scope_checks(BadgeMesh &mesh, ob_t &ob, mesh::GroupChannel c
     CHECK(find_group(before, pub, prefix + "scope ui again", pkt) && pkt.getRouteType() == ROUTE_TYPE_FLOOD);
 }
 
+// A channel's own scope (#291) on the real MyMesh: a screen's message on the channel floods under the channel's region,
+// a console line's under the console scope all the same, other floods keep the default (None here); cleared, the
+// channel floods under the default again. Saved through a temp file and kept across a start; a start drops the scope of
+// a channel that is gone, and the factory reset's format takes them all. Made-up region names.
+static void channel_scope_checks(BadgeMesh &mesh, ob_t &ob, mesh::GroupChannel const &pub, char const *root) {
+    TransportKey      local, console;
+    TransportKeyStore ks_local, ks_console; // one each: a store keeps the first key it made for an id
+    ks_local.getAutoKeyFor(0, "#zz-local", local);
+    ks_console.getAutoKeyFor(0, "#zz-test", console);
+    CHECK(memcmp(local.key, console.key, sizeof(local.key)) != 0);
+    CHECK(mesh.channelScope(pub.secret)[0] == 0);
+    CHECK(mesh.setChannelScope(pub.secret, "zz bad") != NULL && mesh.channelScope(pub.secret)[0] == 0);
+    CHECK(mesh.setChannelScope(pub.secret, " #ZZ-Local ") == NULL);
+    CHECK(strcmp(mesh.channelScope(pub.secret), "zz-local") == 0);
+    CHECK(SPIFFS.exists("/channel_scopes") && !SPIFFS.exists("/channel_scopes.new"));
+    mesh.loadChannelScopes(); // as at the next start
+    CHECK(strcmp(mesh.channelScope(pub.secret), "zz-local") == 0);
+    CHECK(mesh.setConsoleScope("zz-test") == NULL);
+    std::string   prefix = std::string(mesh.getNodeName()) + ": ";
+    char const   *why    = NULL;
+    size_t        before = test_radio.sent.size();
+    mesh_msg_id_t ui     = ob_add_channel(&ob, "public", "chscope ui", 10, (uint32_t)millis(), &why);
+    settle(mesh, 30);
+    mesh_msg_id_t con = ob_add_channel(&ob, "public", "chscope console", 15, (uint32_t)millis(), &why);
+    CHECK(ui && con && ob_set_console(&ob, con));
+    settle(mesh, 30);
+    mesh::Packet pkt;
+    CHECK(find_group(before, pub, prefix + "chscope ui", pkt) && pkt.hasTransportCodes() &&
+          pkt.transport_codes[0] == local.calcTransportCode(&pkt));
+    CHECK(find_group(before, pub, prefix + "chscope console", pkt) && pkt.hasTransportCodes() &&
+          pkt.transport_codes[0] == console.calcTransportCode(&pkt));
+    CHECK(console_advert(mesh, false, pkt) && pkt.getRouteType() == ROUTE_TYPE_FLOOD); // not a channel's flood
+    CHECK(mesh.setChannelScope(pub.secret, "") == NULL && mesh.channelScope(pub.secret)[0] == 0);
+    CHECK(!SPIFFS.exists("/channel_scopes")); // the last one gone: no file
+    ui = ob_add_channel(&ob, "public", "chscope default", 15, (uint32_t)millis(), &why);
+    settle(mesh, 30);
+    CHECK(ui && find_group(before, pub, prefix + "chscope default", pkt) && pkt.getRouteType() == ROUTE_TYPE_FLOOD);
+    // A channel that is gone (no channel has this key) loses its scope at the next start
+    uint8_t gone[PUB_KEY_SIZE] = {0x5a, 0xa5};
+    CHECK(mesh.setChannelScope(gone, "zz-local") == NULL && strcmp(mesh.channelScope(gone), "zz-local") == 0);
+    mesh.loadChannelScopes();
+    CHECK(mesh.channelScope(gone)[0] == 0);
+    // The factory reset's format takes them, as the default and console scopes
+    std::string sub = std::string(root) + "/chscope";
+    fs_shim_set_root(sub.c_str());
+    CHECK(SPIFFS.begin(true));
+    CHECK(mesh.setChannelScope(pub.secret, "zz-local") == NULL);
+    CHECK(SPIFFS.format());
+    CHECK(SPIFFS.begin(true));
+    mesh.loadChannelScopes();
+    CHECK(mesh.channelScope(pub.secret)[0] == 0);
+    fs_shim_set_root(root);
+    CHECK(mesh.setConsoleScope("") == NULL);
+}
+
 // The console scope lives in MeshCore's own directory (#290): the factory reset's format, which takes the default scope
 // with prefs.json, takes it too; a damaged file loads as not set. Its own directory, so the other checks keep theirs.
 static void console_scope_reset_checks(BadgeMesh &mesh, char const *root) {
@@ -893,6 +948,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     CHECK(st.confirmed == 1);
     console_scope_checks(mesh, ob, pub.channel);
     console_scope_reset_checks(mesh, root);
+    channel_scope_checks(mesh, ob, pub.channel, root);
     trace_checks(mesh, mt);
     remote_checks(mesh, rr, listener);
     contact_action_checks(mesh);

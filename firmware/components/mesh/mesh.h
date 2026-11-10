@@ -147,6 +147,7 @@ typedef struct {
     uint8_t secret[32];
     uint8_t key_len;
     uint8_t hash;
+    char    scope[31]; // the channel's own flood scope (#291): a region name, "" = the default scope
 } mesh_channel_info_t;
 size_t mesh_channel_info(int index, char const *name, mesh_channel_info_t *out, uint32_t wait_ms);
 // A new name for the channel stored as `name` (exactly, without case), saved; the key and the slot stay. NULL when
@@ -154,6 +155,12 @@ size_t mesh_channel_info(int index, char const *name, mesh_channel_info_t *out, 
 // not this channel's. Same lock rules as the setters. The chat history stays under the old name (it shows again if the
 // channel gets that name back).
 char const *mesh_channel_rename(char const *name, char const *new_name);
+// A channel's own flood scope (#291, mesh_scope.h): the channel stored as `name` (exactly, without case) floods its
+// messages from the screens in region `region` (mesh_scope_parse's rules), "" = under the default scope again. Saved
+// badge-locally in MeshCore's directory; a rename keeps it, a removal or the factory reset clears it. Console lines
+// keep the console scope (#290). NULL when set, else why not (nothing changed). Same lock rules as the setters; sends
+// nothing.
+char const *mesh_channel_set_scope(char const *name, char const *region);
 // Contact export (#54): the contact with this 6-byte key prefix as MeshCore's export link (meshcore://<hex> of its
 // last advert, which MeshCore keeps on flash), or with prefix NULL our own advert, made and signed now without a
 // location and not sent. NULL when uri holds it (cap MESH_ADVERT_URI_MAX), else why not. Nothing goes on air.

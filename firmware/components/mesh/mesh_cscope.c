@@ -4,6 +4,7 @@
 #include "freertos/semphr.h"
 #include "fw_console.h"
 #include "mesh.h"
+#include "mesh_wipe.h"
 #include "mesh_rhist_run.h"
 #include "mesh_scope.h"
 
@@ -38,13 +39,35 @@ static void cscope_get(char *out, size_t cap) {
     }
 }
 
+// "fw mesh scope" also lists the channels with a scope of their own (#291), one line each, slot by slot (the lock per
+// slot, as "fw channels"). The info holds the key: wiped before the next slot and at the end.
+static void cscope_list_channels(void) {
+    mesh_channel_info_t info = {0};
+    size_t              own  = 0;
+    for (int i = 0; i < MESH_CHSCOPE_MAX; i++) {
+        size_t found = mesh_channel_info(i, NULL, &info, MESH_SET_WAIT_MS);
+        mesh_wipe(info.secret, sizeof(info.secret));
+        if (found == MESH_BUSY) {
+            console_reply("channel scopes: MeshCore is busy, try again");
+            return;
+        }
+        if (found == 1 && info.scope[0]) {
+            console_reply("channel %s: scope %s", info.name, info.scope);
+            own++;
+        }
+    }
+    if (!own) {
+        console_reply("channel scopes: none (every channel floods under the default)");
+    }
+}
+
 char const *mesh_cscope_refusal(bool from_console) {
     if (!from_console) {
         return NULL; // a screen's send never reads it
     }
     char name[MESH_SCOPE_MAX + 1];
     cscope_get(name, sizeof(name));
-    return mesh_scope_choose(true, name) == MESH_SCOPE_USE_REFUSE ? MESH_SCOPE_CONSOLE_UNSET : NULL;
+    return mesh_scope_choose(true, name, NULL) == MESH_SCOPE_USE_REFUSE ? MESH_SCOPE_CONSOLE_UNSET : NULL;
 }
 
 void mesh_cscope_console(char const *args) {
@@ -55,7 +78,8 @@ void mesh_cscope_console(char const *args) {
         mesh_get_settings(&s); // zeroed (None) before MeshCore is up; the console only gets here while it runs
         cscope_get(name, sizeof(name));
         mesh_scope_status_text(s.scope, name, line, sizeof(line));
-        console_reply("%s", line);
+        console_reply("%s", line); // the one status line badge.sh reads; the channel lines never match its pattern
+        cscope_list_channels();
         return;
     }
     if (strncmp(args, "console ", 8) != 0) {

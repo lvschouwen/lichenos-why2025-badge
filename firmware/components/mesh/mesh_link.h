@@ -233,6 +233,15 @@ class BadgeMesh : public MyMesh {
     char const *consoleScope() const {
         return console_scope_name_;
     }
+    // A channel's own flood scope (#291), under the mesh lock; the channel by its key (secret, 32 bytes as MeshCore
+    // keeps it). name: mesh_scope_parse's rules, "" = the default again. Kept in MeshCore's directory
+    // (CHANNEL_SCOPE_FILE, through a temp file), so the factory reset clears it with the default scope. NULL when
+    // saved and live, else why not (nothing changed).
+    char const *setChannelScope(uint8_t const secret[PUB_KEY_SIZE], char const *name);
+    // The channel's own region, "" when it floods under the default
+    char const *channelScope(uint8_t const secret[PUB_KEY_SIZE]) const;
+    // At start, after begin() loaded the channels: the saved channel scopes, without those whose channel is gone
+    void        loadChannelScopes();
     // Console floods dropped at the radio's door because the console scope was not set (the console refuses first)
     uint32_t consoleRefused() const {
         return console_refused_;
@@ -244,7 +253,7 @@ class BadgeMesh : public MyMesh {
 
   protected:
     // Every flood MyMesh starts for a contact or a channel passes here (#290): the default scope as MyMesh picks it, or
-    // the console scope while a console line's frame is handled.
+    // the console scope while a console line's frame is handled. A channel's own scope (#291) comes before the default.
     void sendFloodScoped(ContactInfo const &recipient, mesh::Packet *pkt, uint32_t delay_millis = 0) override;
     void sendFloodScoped(mesh::GroupChannel const &channel, mesh::Packet *pkt, uint32_t delay_millis = 0) override;
     // MyMesh's flood with an explicit key, wrapped the same way (#290). Not virtual in MyMesh: the badge's own calls
@@ -283,6 +292,8 @@ class BadgeMesh : public MyMesh {
   private:
     bool               floodForConsole(mesh::Packet *pkt, uint32_t delay_millis);
     bool               floodConsoleScope(mesh::Packet *pkt, uint32_t delay_millis);
+    bool               channelWithId(uint8_t const id[MESH_CHSCOPE_ID]);
+    bool               saveChannelScopes();
     bool               blobWanted(mesh_blobq_entry_t const &e);
     void               blobDone();
     ob_t              *ob_;
@@ -295,4 +306,7 @@ class BadgeMesh : public MyMesh {
     char               console_scope_name_[MESH_SCOPE_MAX + 1] = {};
     TransportKey       console_scope_key_                      = {};
     uint32_t           console_refused_                        = 0;
+    mesh_chscope_t     chscopes_                               = {}; // #291; in PSRAM with the rest of BadgeMesh
+    char               chscope_text_[MESH_CHSCOPE_TEXT_MAX]    = {}; // the file text
+    char               chscope_back_[MESH_CHSCOPE_TEXT_MAX]    = {}; // its read-back
 };

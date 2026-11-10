@@ -685,12 +685,8 @@ static void mesh_task(void *arg) {
                 mesh_notify_mute_failures(true); // the user asked for this stop: no "not delivered" notices
                 sync_outgoing();
                 mesh_notify_mute_failures(false);
-                ESP_LOGI(
-                    TAG,
-                    "stop: %u outgoing message(s) failed, %d queued packet(s) dropped",
-                    (unsigned)failed,
-                    dropped
-                );
+                ESP_LOGI(TAG, "stop: %u outgoing message(s) failed, %d queued packet(s) dropped", (unsigned)failed,
+                         dropped);
             }
             int64_t save_started = esp_timer_get_time();
             store.savePrefs(*node->getNodePrefs());
@@ -997,15 +993,7 @@ extern "C" char const *mesh_set_radio(float freq, float bw, uint8_t sf, uint8_t 
     }
     mesh_unlock();
     if (!why) {
-        ESP_LOGI(
-            TAG,
-            "radio set: %.3f MHz, %.2f kHz, SF%u, CR%u, %d dBm",
-            freq,
-            bw,
-            sf,
-            cr,
-            tx_dbm
-        );
+        ESP_LOGI(TAG, "radio set: %.3f MHz, %.2f kHz, SF%u, CR%u, %d dBm", freq, bw, sf, cr, tx_dbm);
     }
     return why;
 }
@@ -1157,6 +1145,17 @@ static int channel_find_locked(char const *typed) {
     return best;
 }
 
+// The slot of the channel stored as `name` exactly, without case (the screens pass the stored name), -1 for none.
+// With the lock held; slot gets that channel.
+static int channel_named_locked(char const *name, ChannelDetails &slot) {
+    for (int i = 0; i < MAX_GROUP_CHANNELS && node->getChannel(i, slot); i++) {
+        if (slot.name[0] && channel_same_name(slot.name, name)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 // Clears slot `index` as MeshCore's apps do (setChannel with an empty ChannelDetails) and saves. DataStore writes every
 // slot in order, empty ones as zeroes, and loads them back by position: so the later channels keep their indices and
 // an emptied slot reads back empty (the lists skip it, the next add reuses it). Called with the lock held; by_name
@@ -1164,15 +1163,7 @@ static int channel_find_locked(char const *typed) {
 // goes through channel_find_locked first, so a vanished "x" never takes "#x" with it).
 static char const *channel_remove_locked(int index, char const *by_name) {
     ChannelDetails slot;
-    if (by_name) {
-        index = -1;
-        for (int i = 0; i < MAX_GROUP_CHANNELS && node->getChannel(i, slot); i++) {
-            if (slot.name[0] && channel_same_name(slot.name, by_name)) {
-                index = i;
-                break;
-            }
-        }
-    }
+    index = by_name ? channel_named_locked(by_name, slot) : index;
     if (index < 0 || !node->getChannel(index, slot)) {
         return "No such channel";
     }
@@ -1181,11 +1172,12 @@ static char const *channel_remove_locked(int index, char const *by_name) {
         return why;
     }
     ChannelDetails empty = {};
+    char const    *kept  = node->setChannelScope(slot.channel.secret, ""); // #291: its own scope goes with it
     if (!node->setChannel(index, empty)) {
         return "No such channel";
     }
     store.saveChannels(node);
-    ESP_LOGI(TAG, "channel %d removed", index);
+    ESP_LOGI(TAG, "channel %d removed%s", index, kept ? " (its scope stays on file until the next start)" : "");
     return NULL;
 }
 
@@ -1230,10 +1222,25 @@ extern "C" size_t mesh_channel_info(int index, char const *name, mesh_channel_in
         memcpy(out->secret, slot.channel.secret, sizeof(out->secret));
         out->key_len = (uint8_t)mesh_channel_key_len(out->secret);
         out->hash    = slot.channel.hash[0];
+        snprintf(out->scope, sizeof(out->scope), "%s", node->channelScope(slot.channel.secret)); // #291
     }
     mesh_unlock();
     memset(&slot, 0, sizeof(slot)); // a channel key: not left on the stack
     return ok ? 1 : 0;
+}
+
+extern "C" char const *mesh_channel_set_scope(char const *name, char const *region) {
+    char const *why = settings_lock();
+    if (why) {
+        return why;
+    }
+    ChannelDetails slot;
+    int            at = channel_named_locked(name, slot);
+    why               = at >= 0 ? node->setChannelScope(slot.channel.secret, region) : "No such channel";
+    mesh_unlock();
+    memset(&slot, 0, sizeof(slot)); // a channel key: not left on the stack
+    ESP_LOGI(TAG, "channel %d flood scope: %s", at, why ? "not changed" : region[0] ? "own" : "default");
+    return why;
 }
 
 extern "C" char const *mesh_channel_rename(char const *name, char const *new_in) {
@@ -1248,13 +1255,7 @@ extern "C" char const *mesh_channel_rename(char const *name, char const *new_in)
         return why;
     }
     ChannelDetails slot, other;
-    int            at = -1;
-    for (int i = 0; i < MAX_GROUP_CHANNELS && node->getChannel(i, other); i++) {
-        if (other.name[0] && channel_same_name(other.name, name)) {
-            at = i;
-            break;
-        }
-    }
+    int            at = channel_named_locked(name, other);
     if (at < 0 || !node->getChannel(at, slot)) {
         why = "No such channel";
     }
@@ -3485,6 +3486,7 @@ static bool start_locked(char const *files_dir) {
     forget_stale_routes_once(n);
     n->loadConsoleScope(); // #290: before the task runs, so the first console flood already has it
     mesh_cscope_note(n->consoleScope());
+    n->loadChannelScopes(); // #291: after begin() loaded the channels
     // The history from the SD card (#48), encrypted with a key from the identity begin() just loaded (#98), before the
     // mesh task runs: the replayed messages are older than anything MeshCore adds, which it does only in its loop
     uint8_t prv[PRV_KEY_SIZE];

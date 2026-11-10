@@ -431,6 +431,21 @@ history slot) and `BadgeMesh`'s `sendFloodScoped` overrides pick the console key
 - `tools/badge.sh` reads `fw mesh scope` through the same path before each line that can flood and refuses unless the
   one exact status line names the allow file's `scope <region>` line (`tools/onair_guard.sh`).
 
+## Channel flood scope (#291)
+
+A channel can carry a **flood scope of its own**: a message sent on it from the screens floods in that region instead
+of the default scope (#163); other channels and every other flood keep the default. A console line's send keeps the
+console scope regardless (#290 wins). One chooser decides, `mesh_scope_choose` (console > the channel's own > default),
+called in `BadgeMesh`'s `GroupChannel` override of `sendFloodScoped`.
+
+- Badge-local (MeshCore's share format has no room for it): `/channel_scopes` in MeshCore's directory, written through
+  a temp file, one line per channel keyed by the first 8 bytes of SHA-256 of the channel's secret. A rename keeps it;
+  removing the channel clears it; the factory reset's format clears it with the default and console scopes. A start
+  drops the lines whose channel is gone; a damaged line is left out (that channel floods under the default again).
+- Set and shown in the channel details screen (row "Flood scope": the region, or "Default (<name>)"); a region asks
+  first in the careful dialog, going back to the default does not. `fw mesh scope` lists the channels with their own
+  scope after its status line (`channel <name>: scope <region>`, lines `tools/onair_guard.sh` never takes for it).
+
 ## Stress run (#278)
 
 `fw stress [1-30 | stop | status]` (default 10 min; console only, the badge has no tile for it) loads the badge for

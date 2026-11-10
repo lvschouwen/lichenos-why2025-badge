@@ -61,6 +61,7 @@ typedef enum {
     JOB_CHANNEL_INFO,
     JOB_CHANNEL_RENAME,
     JOB_SCOPE,
+    JOB_CHANNEL_SCOPE,
 } job_kind_t;
 
 typedef struct job {
@@ -105,6 +106,7 @@ static void job_task(void *arg) {
         case JOB_CHANNEL_INFO: job->n = mesh_channel_info(-1, job->text, &job->info, MESH_SET_WAIT_MS); break;
         case JOB_CHANNEL_RENAME: job->reason = mesh_channel_rename(job->text, job->title); break;
         case JOB_SCOPE: job->reason = mesh_set_scope(job->text); break;
+        case JOB_CHANNEL_SCOPE: job->reason = mesh_channel_set_scope(job->text, job->title); break;
     }
     // job_finish frees the job and clears job_running. Each try waits up to 2 s for the LVGL lock: after UI_CALL_TRIES
     // the LVGL task is stuck, so the result is dropped here and the page is not left busy for good
@@ -1261,15 +1263,16 @@ static void on_channels_delete(lv_event_t *e) {
     channels_screen   = NULL;
 }
 
-// ---- one channel's details (#54): its key as hex and base64, the app link, Rename, Remove ---------------------------
+// ---- one channel's details (#54): flood scope (#291), key as hex and base64, app link, Rename, Remove ------
 
 typedef struct {
     char name[MESH_CHANNEL_MAX + 1];
     char hex[MESH_KEY_HEX_MAX], b64[MESH_KEY_B64_MAX], uri[MESH_CHANNEL_URI_MAX];
+    char scope[MESH_SCOPE_MAX + 1]; // its own flood scope (#291), "" = the default
 } channel_mem_t;
 
 static channel_mem_t *chan_mem; // PSRAM, while the details exist; holds a key, wiped when they go
-static lv_obj_t      *chan_menu, *chan_loading, *chan_note;
+static lv_obj_t      *chan_menu, *chan_loading, *chan_note, *chan_scope_row;
 static lv_group_t    *chan_group; // the details screen's keys
 
 static lv_obj_t *add_value(lv_obj_t *menu, char const *text) {
@@ -1322,8 +1325,104 @@ static void show_channel_qr(void *arg) {
     }
 }
 
+// ---- a channel's own flood scope (#291) -----------------------------------------------------------------------------
+// As the default's row (#163): the value is the state (R3), a region asks first in a careful dialog (R3: contacts
+// outside it no longer get the messages), back to the default is the safe state and needs none. Sends nothing itself.
+
+static char chan_scope_pending[MESH_SCOPE_MAX + 1]; // the region waiting for the dialog's answer
+
+static void chan_scope_show(void) {
+    mesh_settings_t s;
+    char            text[48];
+    if (chan_scope_row && chan_mem) {
+        mesh_get_settings(&s); // zeroed (None) before MeshCore is up
+        mesh_scope_channel_text(chan_mem->scope, s.scope, text, sizeof(text));
+        menu_set_value(chan_scope_row, text);
+    }
+}
+
+static void chan_scope_done(job_t *job) {
+    if (!chan_scope_row || !chan_mem || strcmp(chan_mem->name, job->text) != 0) {
+        return; // the details are gone, or are another channel's now
+    }
+    if (job->reason) {
+        char line[80];
+        snprintf(line, sizeof(line), "Not saved: %s", job->reason); // R5: what went wrong, the row stays usable
+        menu_set_value(chan_scope_row, line);
+        return;
+    }
+    snprintf(chan_mem->scope, sizeof(chan_mem->scope), "%.30s", job->title); // a region: 30 at most
+    chan_scope_show();
+}
+
+static void chan_scope_apply(char const *region) {
+    job_t *job = chan_mem ? job_new(JOB_CHANNEL_SCOPE, chan_scope_done) : NULL;
+    if (!job) {
+        menu_set_value(chan_scope_row, mc_busy_note());
+        return;
+    }
+    snprintf(job->text, sizeof(job->text), "%s", chan_mem->name);
+    snprintf(job->title, sizeof(job->title), "%s", region);
+    menu_set_value(chan_scope_row, "Saving..."); // R10: at once; R5: the result replaces it
+    if (!job_start(job)) {
+        menu_set_value(chan_scope_row, mc_busy_note());
+    }
+}
+
+static void chan_scope_answer(bool confirmed) {
+    if (confirmed && chan_scope_row) {
+        chan_scope_apply(chan_scope_pending);
+    }
+    memset(chan_scope_pending, 0, sizeof(chan_scope_pending));
+}
+
+static void on_chan_scope(char const *text, void *arg) {
+    (void)arg;
+    char        name[MESH_SCOPE_MAX + 1];
+    char const *why = mesh_scope_parse(text, name, sizeof(name));
+    if (!chan_scope_row || !chan_mem) {
+        return;
+    }
+    if (why) {
+        char line[80];
+        snprintf(line, sizeof(line), "Not saved: %s", why);
+        menu_set_value(chan_scope_row, line);
+        return;
+    }
+    if (strcmp(chan_mem->scope, name) == 0) {
+        chan_scope_show(); // nothing changes
+        return;
+    }
+    if (!name[0]) {
+        chan_scope_apply(name); // back to the default: always, no dialog
+        return;
+    }
+    char                 ask[200];
+    shell_dialog_t const d = {
+        .title         = ask,
+        .seconds       = REMOVE_ASK_S,
+        .careful       = true,
+        .confirm_label = "set region",
+    };
+    snprintf(chan_scope_pending, sizeof(chan_scope_pending), "%s", name);
+    mesh_scope_channel_ask_text(chan_mem->name, name, ask, sizeof(ask));
+    if (!shell_dialog_countdown(&d, chan_scope_answer)) {
+        menu_set_value(chan_scope_row, mc_busy_note());
+    }
+}
+
+static void edit_chan_scope(void *arg) {
+    (void)arg;
+    if (chan_mem) {
+        text_entry_open("Flood scope for this channel: region name, empty = default", chan_mem->scope, false,
+                        MESH_SCOPE_MAX, on_chan_scope, NULL);
+    }
+}
+
 static void channel_actions_build(void *arg) {
     mesh_channel_info_t const *info = arg;
+    chan_scope_row                  = menu_add(chan_menu, "Flood scope", "", edit_chan_scope, NULL); // R9: as Settings
+    chan_scope_show();
     menu_add(chan_menu, "Rename", "", ask_rename, NULL);
     if (chan_mem->uri[0]) { // an app link exists only for 16-byte keys
         menu_set_kind(menu_add(chan_menu, "Show as QR", "", show_channel_qr, NULL), MENU_OPEN);
@@ -1347,6 +1446,7 @@ static void info_done(job_t *job) {
     mesh_hex_text(info->secret, info->key_len, chan_mem->hex, sizeof(chan_mem->hex));
     mesh_base64_text(info->secret, info->key_len, chan_mem->b64, sizeof(chan_mem->b64));
     bool link = mesh_channel_uri(info->name, info->secret, info->key_len, chan_mem->uri, sizeof(chan_mem->uri));
+    snprintf(chan_mem->scope, sizeof(chan_mem->scope), "%s", info->scope);
     lichen_ui_with_group(chan_group, channel_actions_build, (void *)info); // the new rows join the screen's group
     menu_focus_row(chan_menu, 0);
     menu_note(chan_menu, info->key_len == 16 ? "Key (16 bytes, hex):" : "Key (32 bytes, hex):");
@@ -1367,7 +1467,7 @@ static void on_channel_delete(lv_event_t *e) {
         lichen_free(meshcore_self(), chan_mem);
     }
     chan_mem       = NULL;
-    chan_menu      = chan_loading = chan_note = NULL;
+    chan_menu      = chan_loading = chan_note = chan_scope_row = NULL;
     chan_group     = NULL;
     channel_screen = NULL;
 }

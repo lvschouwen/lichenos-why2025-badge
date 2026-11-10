@@ -35,7 +35,7 @@ nest	firmware/components/c6link/c6_boot_policy.c:c6_boot_plan	7
 nest	firmware/components/lichen_net/wifi_service.c:cmd_wifi	12
 nest	firmware/components/mesh/mesh_notify.c:mn_decide	7
 nest	firmware/components/ota/ota_proto.c:parse_header	11
-nloc	firmware/components/mesh/mesh_task.cpp	3103
+nloc	firmware/components/mesh/mesh_task.cpp	3101
 params	firmware/components/crash/crash_log.c:crash_record_format	10
 params	firmware/components/lichen_shell/files_model.c:files_text_page	11
 params	firmware/components/lichen_shell/shot_blend.c:shot_blend_argb8888	10
