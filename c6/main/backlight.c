@@ -54,19 +54,37 @@ void backlight_start(void)
 	}
 }
 
-bool backlight_apply(int which, int percent)
+// Caller holds the lock
+static bool apply_locked(int which, int percent)
 {
 	if (which < 0 || which >= BL_COUNT || percent < 0 || percent > 100) {
 		return false;
 	}
 	ledc_channel_t const channel = backlights[which].channel;
-	xSemaphoreTake(lock, portMAX_DELAY);
-	bool ok = ledc_set_duty(LEDC_LOW_SPEED_MODE, channel, backlight_duty(percent, BL_RESOLUTION)) == ESP_OK &&
-		  ledc_update_duty(LEDC_LOW_SPEED_MODE, channel) == ESP_OK;
+	bool const ok = ledc_set_duty(LEDC_LOW_SPEED_MODE, channel, backlight_duty(percent, BL_RESOLUTION)) == ESP_OK &&
+			ledc_update_duty(LEDC_LOW_SPEED_MODE, channel) == ESP_OK;
 	if (ok) {
 		at_boot = false;
+	}
+	return ok;
+}
+
+bool backlight_apply(int which, int percent)
+{
+	xSemaphoreTake(lock, portMAX_DELAY);
+	bool const ok = apply_locked(which, percent);
+	if (ok) {
 		esp_rom_delay_us(BL_SETTLE_US); // so a read-back right after shows the new duty, not the old one
 	}
+	xSemaphoreGive(lock);
+	return ok;
+}
+
+bool backlight_apply_pair(int display, int keyboard)
+{
+	xSemaphoreTake(lock, portMAX_DELAY);
+	bool const ok = apply_locked(BL_DISPLAY, display) && apply_locked(BL_KEYBOARD, keyboard);
+	esp_rom_delay_us(BL_SETTLE_US);
 	xSemaphoreGive(lock);
 	return ok;
 }

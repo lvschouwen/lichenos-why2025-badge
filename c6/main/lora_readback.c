@@ -3,6 +3,7 @@
 #include "lora_readback.h"
 
 #include <math.h>
+#include <string.h>
 
 // SX126x datasheet, SetModulationParams (LoRa): the BW codes are not in bandwidth order
 static struct {
@@ -40,4 +41,25 @@ uint32_t lora_rb_freq_hz(float mhz) {
 
 uint8_t lora_rb_cr(uint8_t code) {
     return code >= 1 && code <= 4 ? (uint8_t)(code + 4) : 0;
+}
+
+bool lora_rb_decode(lora_rb_raw_t const *raw, lora_config_t *out) {
+    memset(out, 0, sizeof(*out));
+    if (!raw->started || !raw->regs_read) {
+        return false;
+    }
+    lora_config_t const c = {
+        .freq_hz      = lora_rb_freq_hz(raw->freq_mhz),
+        .bw_hz        = lora_rb_bw_hz(raw->bw_code),
+        .sf           = raw->sf,
+        .cr           = lora_rb_cr(raw->cr_code),
+        .sync_word    = lora_rb_sync(raw->sync_msb, raw->sync_lsb),
+        .preamble     = raw->preamble,
+        .tx_power_dbm = raw->power_dbm,
+    };
+    if (!c.freq_hz || !c.bw_hz || !c.cr) {
+        return false;
+    }
+    *out = c;
+    return true;
 }

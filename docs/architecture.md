@@ -137,6 +137,17 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   domain, dotted names live only in the tables. 0x01xx `bl.*` (C6), 0x02xx `lora.*` (C6, read-only/TX), 0x03xx
   `wifi.*` (P4 via esp_hosted RPC), 0x04xx `bt.*` (C6), 0x05-0x0E reserved for C6 domains, 0x0Fxx `c6.*` meta
   (`c6.reg_caps` 0x0F00: bit n = the C6 serves domain 0x0n), 0x10-0x1F reserved for P4 domains (#312).
+- **C6 registry (`c6/main/reg_c6.c`, #309):** served on the LoRa task between commands. `bl.display`/`bl.keyboard`
+  (U8 %, the only settable C6 keys; same apply path as the UART `BL d k` line, which stays as the old-P4 and early-boot
+  fallback; applied = the LEDC duty register read back, after the 10-80 % clamp), `bl.freq` (LEDC timer Hz) and
+  `bl.boot` (on until the first set since the C6 started). `lora.*` RO|TX, the chip's real values: freq on the frf
+  step (within 64 Hz of the request), bw the exact chip bandwidth (62500, 41667, ...), sf, cr, preamble from
+  RadioLib 7.8.1's driver state (private members, read through an explicit-instantiation accessor in
+  `lora_service.cpp`), sync from the SX1262 registers 0x0740/0x0741, power as the dBm of the last accepted start; all
+  FAILED until a start succeeded (decoded by `lora_rb_decode`). `lora.state` (service state), `bt.state`
+  (`esp_bt_controller_get_status`), `c6.reg_caps`. One lock in `backlight.c` guards the LEDC for both tasks (the UART
+  pair under one hold). SETs log at INFO (tag `reg`), GETs only count (`reg N` in the heartbeat). Pinned by
+  `host_tests/c6_reg_test.c`.
 - **CONFIG (type 1, 14 bytes of body, 16 in all):** freq u32, bw u32, sf u8, cr u8 (5..8 = 4/5..4/8), sync u8,
   preamble u16, tx power i8 dBm. The P4 sends it on every (re)start of the link (`LORA_ACT_SEND_CONFIG`,
   `lora/lora.c:377`); the C6 starts unconfigured after its own reset. Default: 869.618 MHz, 62.5 kHz, SF7, CR 4/5, sync 0x12,

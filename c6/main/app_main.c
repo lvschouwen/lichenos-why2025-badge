@@ -39,7 +39,7 @@ static void backlight_command_task(void *arg)
 			line[len] = '\0';
 			int display, keyboard;
 			if (len && backlight_cmd_parse(line, &display, &keyboard)) {
-				bool const ok = backlight_apply(BL_DISPLAY, display) && backlight_apply(BL_KEYBOARD, keyboard);
+				bool const ok = backlight_apply_pair(display, keyboard);
 				ESP_LOGI("backlight", "display %d%%, keyboard %d%%%s", display, keyboard, ok ? "" : ": LEDC refused");
 			}
 			len = 0;

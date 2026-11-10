@@ -19,6 +19,9 @@ void backlight_start(void);
 // Set one backlight to percent (0..100, backlight_duty's 10-80 % clamp applies); false when the LEDC refused it
 bool backlight_apply(int which, int percent);
 
+// Both at once under one lock hold, for the UART "BL d k" line: a concurrent read never sees half the pair
+bool backlight_apply_pair(int display, int keyboard);
+
 // The brightness the channel drives now, from the LEDC duty register; false when the LEDC cannot tell
 bool backlight_applied(int which, uint8_t *percent);
 

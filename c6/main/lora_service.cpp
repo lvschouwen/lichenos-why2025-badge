@@ -36,7 +36,13 @@ static char const *TAG = "lora";
 
 static_assert(LORA_IRQ_FLAG_RX_DONE == RADIOLIB_SX126X_IRQ_RX_DONE, "SX1262 IRQ bit");
 static_assert(LORA_IRQ_FLAG_HEADER_ERR == RADIOLIB_SX126X_IRQ_HEADER_ERR, "SX1262 IRQ bit");
-static_assert(RADIOLIB_SX126X_LORA_BW_62_5 == 0x03 && RADIOLIB_SX126X_LORA_BW_500_0 == 0x06, "lora_rb_bw_hz codes");
+// lora_rb_bw_hz's table (lora_readback.c) against RadioLib's codes
+static_assert(RADIOLIB_SX126X_LORA_BW_7_8 == 0x00 && RADIOLIB_SX126X_LORA_BW_10_4 == 0x08 &&
+                  RADIOLIB_SX126X_LORA_BW_15_6 == 0x01 && RADIOLIB_SX126X_LORA_BW_20_8 == 0x09 &&
+                  RADIOLIB_SX126X_LORA_BW_31_25 == 0x02 && RADIOLIB_SX126X_LORA_BW_41_7 == 0x0A &&
+                  RADIOLIB_SX126X_LORA_BW_62_5 == 0x03 && RADIOLIB_SX126X_LORA_BW_125_0 == 0x04 &&
+                  RADIOLIB_SX126X_LORA_BW_250_0 == 0x05 && RADIOLIB_SX126X_LORA_BW_500_0 == 0x06,
+              "lora_rb_bw_hz codes");
 
 // RA-01SH wiring on the C6 (BUSY and DIO1 are bodge wires, #49); RXEN is not routed
 #define PIN_RESET 1
@@ -85,7 +91,11 @@ static uint32_t              reg_served;        // REG_GET / REG_SET answered, f
 // RadioLib 7.8 keeps the modem settings it gave the chip in private members without getters, and the SX126x has no
 // command that reads them back. These read them without patching the library or opening every class to everyone
 // (RADIOLIB_GODMODE): an explicit instantiation may name private members ([temp.spec.general]/6). A RadioLib update
-// that renames or retypes one fails to compile here.
+// that renames or retypes one fails to compile here. What the members mean (codingRate = cr - 4, bandwidth a chip code,
+// freqMHz before the frf conversion) is only checked by reading 7.8.1's source: a new pin in c6/main/idf_component.yml
+// has to re-read SX126x_config.cpp and then move this assert.
+static_assert(RADIOLIB_VERSION_MAJOR == 7 && RADIOLIB_VERSION_MINOR == 8 && RADIOLIB_VERSION_PATCH == 1,
+              "RADIOLIB_PEEK reads 7.8.1's private members: re-check their meaning before moving the radiolib pin");
 template <typename Tag, typename Tag::type Member> struct radiolib_peek {
     friend typename Tag::type peek(Tag) { return Member; }
 };
@@ -306,20 +316,24 @@ static void handle_sweep(lora_sweep_req_t const *req) {
     send_msg(&reply);
 }
 
+// Fetches only; lora_rb_decode decides what the values mean and whether they are complete
 bool lora_service_readback(lora_config_t *out) {
-    uint8_t sync[2];
-    if (!radio_started ||
-        (radio.*peek(peek_read_reg{}))(RADIOLIB_SX126X_REG_LORA_SYNC_WORD_MSB, sync, sizeof(sync)) != RADIOLIB_ERR_NONE) {
-        return false;
+    lora_rb_raw_t raw = {};
+    raw.started       = radio_started;
+    if (radio_started) { // no SPI to a radio that was never started
+        uint8_t sync[2];
+        raw.regs_read = (radio.*peek(peek_read_reg{}))(RADIOLIB_SX126X_REG_LORA_SYNC_WORD_MSB, sync, sizeof(sync)) ==
+                        RADIOLIB_ERR_NONE;
+        raw.sync_msb  = sync[0];
+        raw.sync_lsb  = sync[1];
+        raw.freq_mhz  = radio.*peek(peek_freq{});
+        raw.bw_code   = radio.*peek(peek_bw{});
+        raw.sf        = radio.*peek(peek_sf{});
+        raw.cr_code   = radio.*peek(peek_cr{});
+        raw.preamble  = radio.*peek(peek_preamble{});
+        raw.power_dbm = applied_power_dbm;
     }
-    out->freq_hz      = lora_rb_freq_hz(radio.*peek(peek_freq{}));
-    out->bw_hz        = lora_rb_bw_hz(radio.*peek(peek_bw{}));
-    out->sf           = radio.*peek(peek_sf{});
-    out->cr           = lora_rb_cr(radio.*peek(peek_cr{}));
-    out->sync_word    = lora_rb_sync(sync[0], sync[1]);
-    out->preamble     = radio.*peek(peek_preamble{});
-    out->tx_power_dbm = applied_power_dbm;
-    return out->freq_hz && out->bw_hz && out->cr;
+    return lora_rb_decode(&raw, out);
 }
 
 uint8_t lora_service_state(void) {
@@ -329,10 +343,11 @@ uint8_t lora_service_state(void) {
 // A REG_GET (set NULL) or REG_SET from the P4: always one REG_VAL back, an unknown id with UNKNOWN (#307)
 static void handle_reg(uint16_t id, uint8_t seq, uint32_t const *set) {
     reg_reply_t  r;
-    reg_status_t st  = reg_serve(reg_c6_table, reg_c6_count, id, set, &r);
-    lora_msg_t reply = {};
-    reply.type       = LORA_MSG_REG_VAL;
-    reply.u.reg_val  = {id, seq, (uint8_t)st, r.type, r.value};
+    reg_status_t st = reg_serve(reg_c6_table, reg_c6_count, id, set, &r);
+    static lora_msg_t reply; // 300 bytes: off the task's stack, as in handle_sweep (LoRa task only)
+    memset(&reply, 0, sizeof(reply));
+    reply.type      = LORA_MSG_REG_VAL;
+    reply.u.reg_val = {id, seq, (uint8_t)st, r.type, r.value};
     send_msg(&reply);
     reg_served++;
     // Sets are rare and worth a line; the P4 may read keys often, those only count in the heartbeat

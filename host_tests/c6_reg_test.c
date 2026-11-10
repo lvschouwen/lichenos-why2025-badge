@@ -206,12 +206,54 @@ static void test_readback_decoders(void) {
     CHECK(lora_rb_freq_hz(-1.0f) == 0);
 }
 
+// lora_service_readback's whole mapping: every RadioLib member lands in its own field, and the gates
+static void test_readback_decode(void) {
+    // Distinct values everywhere, so a swapped field (sf <-> cr, msb <-> lsb) shows
+    lora_rb_raw_t const raw = {
+        .started   = true,
+        .regs_read = true,
+        .freq_mhz  = 869.618f,
+        .bw_code   = 0x03,
+        .sf        = 9,
+        .cr_code   = 2,
+        .preamble  = 16,
+        .sync_msb  = 0x34,
+        .sync_lsb  = 0x44,
+        .power_dbm = -3,
+    };
+    lora_config_t c;
+    CHECK(lora_rb_decode(&raw, &c));
+    CHECK(labs((long)c.freq_hz - 869618000L) <= 64);
+    CHECK(c.bw_hz == 62500);
+    CHECK(c.sf == 9 && c.cr == 6);
+    CHECK(c.sync_word == 0x34);
+    CHECK(c.preamble == 16);
+    CHECK(c.tx_power_dbm == -3);
+
+    lora_rb_raw_t r = raw;
+    r.started       = false; // never started: nothing, even with values present
+    CHECK(!lora_rb_decode(&r, &c) && c.freq_hz == 0 && c.sf == 0);
+    r           = raw;
+    r.regs_read = false; // the sync registers did not come off the chip
+    CHECK(!lora_rb_decode(&r, &c) && c.sync_word == 0);
+    r          = raw;
+    r.freq_mhz = 0.0f; // incomplete: frequency, bandwidth or coding rate do not decode
+    CHECK(!lora_rb_decode(&r, &c));
+    r         = raw;
+    r.bw_code = 0x07;
+    CHECK(!lora_rb_decode(&r, &c));
+    r         = raw;
+    r.cr_code = 0;
+    CHECK(!lora_rb_decode(&r, &c) && c.bw_hz == 0);
+}
+
 int main(void) {
     test_table();
     test_duty_percent();
     test_backlight_keys();
     test_radio_keys();
     test_readback_decoders();
+    test_readback_decode();
     CHECK(readbacks > 0);
     if (failures) {
         printf("%d failure(s)\n", failures);
