@@ -64,9 +64,10 @@ typedef struct {
     // wrote nothing
     size_t (*radio_text)(char *buf, size_t cap);
 } lora_reg_hooks_t;
-// The requests go out at most a few at a time (#314: their answers share the LoRa task's receive queue with received
-// packets): the longest n requests posted together may take beyond the C6's own answer time, when it stays silent
-uint32_t lora_reg_burst_ms(size_t n);
+// The requests go out a few at a time (#314: their answers share the LoRa task's receive queue with received packets):
+// the longest the requests waiting and in flight now (call it after posting yours) may take beyond the C6's own answer
+// time, when it stays silent
+uint32_t lora_reg_burst_ms(void);
 // At a restart (#310): drops the waiting requests for ids, refuses every later one, waits up to wait_ms for a send
 // already inside ESP-Hosted, and then LORA_REGQ_SETTLE_MS more when a REG_SET left in the last 100 ms, so none of them
 // can be applied by the C6 after what the caller sends next. For good; any task.

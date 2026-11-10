@@ -240,13 +240,15 @@ static void status_line_format(void) {
         .heap_min      = 98765,
         .stack_free    = 1500,
     };
-    char   line[256];
-    size_t n = lora_status_format(&defaults, &st, true, 4, 0, 0, line, sizeof(line));
+    lora_p4_stats_t const zero = {0};
+    char                  line[320];
+    size_t n = lora_status_format(&defaults, &st, true, 4, &zero, line, sizeof(line));
     CHECK(
         strcmp(
             line,
             "869.618 MHz 62.5 kHz SF7 CR5 sync 0x12 pre 16 | c6 rx rssi -105.2 | packets 12 crc 1 hdr 0 "
-            "dropped 0 ignored 0 | c6 up 754 s heap 120/96 KiB stack 1500 B | p4 dropped 0 bad 0 | status 4 s ago"
+            "dropped 0 ignored 0 | c6 up 754 s heap 120/96 KiB stack 1500 B | p4 dropped 0 bad 0 reg in flight 0 timeouts 0 | "
+            "status 4 s ago"
         ) == 0
     );
     CHECK(n == strlen(line));
@@ -254,18 +256,20 @@ static void status_line_format(void) {
     // While a packet goes out the C6 reports "tx" (#65)
     lora_status_t sending = st;
     sending.state         = LORA_STATE_TX;
-    lora_status_format(&defaults, &sending, true, 0, 0, 0, line, sizeof(line));
+    lora_status_format(&defaults, &sending, true, 0, &zero, line, sizeof(line));
     CHECK(strstr(line, "| c6 tx "));
 
-    n = lora_status_format(&defaults, &st, false, 0, 3, 2, line, sizeof(line));
+    lora_p4_stats_t const p4 = {.dropped = 3, .bad = 2, .reg_in_flight = 4, .reg_timeouts = 7};
+    n = lora_status_format(&defaults, &st, false, 0, &p4, line, sizeof(line));
     CHECK(strstr(line, "| c6 no status yet |"));
-    CHECK(strstr(line, "p4 dropped 3 bad 2"));
+    CHECK(strstr(line, "p4 dropped 3 bad 2 reg in flight 4 timeouts 7"));
     CHECK(n == strlen(line));
+    lora_status_format(&defaults, &st, true, 0, &p4, line, sizeof(line)); // #314: the registry's pacing
+    CHECK(strstr(line, "| p4 dropped 3 bad 2 reg in flight 4 timeouts 7 | status"));
 
     char small[10];
-    n = lora_status_format(&defaults, &st, true, 4, 0, 0, small, sizeof(small));
-    CHECK(n <= 9);
-    CHECK(small[n] == '\0');
+    n = lora_status_format(&defaults, &st, true, 4, &zero, small, sizeof(small));
+    CHECK(n == strlen(small) && n < sizeof(small)); // cut short and terminated
 }
 
 int main(void) {

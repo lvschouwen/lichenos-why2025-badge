@@ -268,7 +268,7 @@ static void test_link(void) {
 }
 
 // c6.reg_caps is asked once per link (#314): in a live console ask, which does not ask it again, it shows its age and
-// no stale note however old it is; after a re-attach it has nothing to show until answered again
+// no stale note however old it is; after a re-attach it shows stale until answered again
 static void test_caps_age(void) {
     reg_proxy_t p;
     reg_view_t  v;
@@ -278,9 +278,17 @@ static void test_caps_age(void) {
     CHECK(v.has_applied && v.applied.u == 0x8016 && v.has_age && v.age_ms == 75000 && v.note == RV_NONE);
     reg_proxy_view(&p, REG_ID_C6_REG_CAPS, 76000, false, false, &v);
     CHECK(v.has_applied && v.note == RV_NONE);
+    // A C6 that went away (maybe reflashed): the old caps show stale until answered again, and count as unknown
     reg_proxy_link(&p, 80000);
-    reg_proxy_view(&p, REG_ID_C6_REG_CAPS, 80000, true, false, &v);
-    CHECK(!v.has_applied);
+    CHECK(!reg_proxy_caps_known(&p) && reg_proxy_caps_due(&p, 80000));
+    CHECK(reg_proxy_support(&p, REG_ID_LORA_FREQ, 80000) == RP_WAIT_CAPS);
+    reg_proxy_view(&p, REG_ID_C6_REG_CAPS, 80000, true, true, &v);
+    CHECK(v.has_applied && v.applied.u == 0x8016 && v.note == RV_STALE);
+    reg_proxy_view(&p, REG_ID_C6_REG_CAPS, 80000, false, false, &v);
+    CHECK(v.has_applied && v.note == RV_STALE);
+    caps_answer(&p, 0x0016, 81000); // asked anew after the re-attach
+    reg_proxy_view(&p, REG_ID_C6_REG_CAPS, 81000, true, true, &v);
+    CHECK(v.has_applied && v.applied.u == 0x0016 && v.note == RV_NONE && reg_proxy_caps_known(&p));
 }
 
 static void test_matches(void) {

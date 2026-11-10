@@ -123,10 +123,7 @@ void reg_proxy_link(reg_proxy_t *p, uint32_t now_ms) {
         reg_proxy_slot_t *s = &p->slot[i];
         s->stale            = s->have;
         s->pending          = false;
-        s->req_since_ms     = now_ms;
-        if (s->id == REG_ID_C6_REG_CAPS) {
-            s->have = false; // asked anew: the C6 may have been updated meanwhile
-        }
+        s->req_since_ms     = now_ms; // c6.reg_caps too: stale until asked anew, the C6 may have been updated
     }
     p->caps_tries = 0;
     p->link_ms    = now_ms;
@@ -191,8 +188,9 @@ void reg_proxy_view(reg_proxy_t const *p, uint16_t id, uint32_t now_ms, bool liv
     v->applied.u   = s->value;
     v->has_age     = true;
     v->age_ms      = now_ms - s->at_ms;
-    // c6.reg_caps is asked once per link (#314): a re-attach drops it (reg_proxy_link), so while it is held it cannot
-    // be out of date, however old; the console does not ask it again, so no_link and pending say nothing about it
+    // c6.reg_caps is asked once per link (#314): a re-attach marks it stale until answered again (reg_proxy_link), so
+    // otherwise it cannot be out of date, however old; the console does not ask it again, so no_link and pending say
+    // nothing about it
     bool caps   = id == REG_ID_C6_REG_CAPS;
     v->note     = s->stale || (!caps && (no_link || (live && s->pending))) ? RV_STALE : RV_NONE;
 }

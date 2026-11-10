@@ -58,14 +58,20 @@ void     lora_c6_link_back(lora_c6_link_t *l); // nothing unless lost
 unsigned lora_c6_link_take(lora_c6_link_t *l); // LORA_C6_REINIT | LORA_C6_TELL_DOWN
 unsigned lora_c6_link_heard(lora_c6_link_t *l); // a message from the C6: LORA_C6_TELL_UP once after a REINIT
 
+// The P4's side of the link for `fw lora`: receive-queue drops, undecodable messages, and the registry's requests
+// unanswered now and forgotten without an answer (#314)
+typedef struct {
+    uint32_t dropped, bad;
+    uint32_t reg_in_flight, reg_timeouts;
+} lora_p4_stats_t;
+
 // The `fw lora` line; returns the length written (excluding the NUL)
 size_t lora_status_format(
-    lora_config_t const *cfg,
-    lora_status_t const *st,
-    bool                 have_status,
-    uint32_t             status_age_s,
-    uint32_t             p4_dropped,
-    uint32_t             p4_bad,
-    char                *out,
-    size_t               cap
+    lora_config_t const   *cfg,
+    lora_status_t const   *st,
+    bool                   have_status,
+    uint32_t               status_age_s,
+    lora_p4_stats_t const *p4,
+    char                  *out,
+    size_t                 cap
 );

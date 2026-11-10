@@ -130,7 +130,8 @@ static void ask_live(reg_entry_t const *const *es, size_t n, bool *no_link) {
         no_link[i] = !asked[k] && !pending(ids[k]);
         k++;
     }
-    wait_answers(ids, asked, k, LIVE_WAIT_MS + lora_reg_burst_ms(k)); // #314: they go out a few at a time
+    // #314: they go out a few at a time, behind the poll's or another ask's still waiting or in flight
+    wait_answers(ids, asked, k, LIVE_WAIT_MS + lora_reg_burst_ms());
 }
 
 // ---- saved and requested ------------------------------------------------------------------------------------------

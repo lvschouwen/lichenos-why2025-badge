@@ -33,8 +33,10 @@ static char const TAG[] = "lora";
 
 #define LORA_TOML       "/storage/lora.toml"
 #define LORA_TOML_MAX   2048
-#define RX_QUEUE_DEPTH  8 // internal RAM: REG_VALs take at most LORA_REGQ_IN_FLIGHT + the wake token, the rest is RX_PACKET (#314)
-#define STATUS_LINE_MAX 256
+// Internal RAM. REG_VALs and the wake token never take more than leaves LORA_REGQ_RX_ROOM for RX_PACKET (#314)
+#define RX_QUEUE_DEPTH  8
+_Static_assert(RX_QUEUE_DEPTH >= LORA_REGQ_RX_ROOM + 3, "room for one REG_VAL, the wake token and RX_PACKET");
+#define STATUS_LINE_MAX 320
 
 typedef struct {
     uint16_t len;
@@ -463,8 +465,9 @@ static void run_actions(unsigned act) {
     }
 }
 
-// The registry's requests, one send each, oldest first, at most LORA_REGQ_IN_FLIGHT unanswered (#314: their REG_VALs
-// must leave room in rx_queue for RX_PACKET); the rest go out as answers come in. The queue lock is never held across
+// The registry's requests, one send each, oldest first, only while rx_queue keeps room for their answers and
+// LORA_REGQ_RX_ROOM more (#314, lora_regq_take); the rest go out as answers come in. An answer already in rx_queue but
+// not yet handled counts twice, which only holds the next request back a little. The queue lock is never held across
 // a send. Not inlined: its message buffer stays off the LoRa task's main frame
 __attribute__((noinline)) static void run_reg_queue(void) {
     lora_regq_req_t req;
@@ -472,9 +475,10 @@ __attribute__((noinline)) static void run_reg_queue(void) {
     lora_regq_woken(&regq); // before the drain: a post after this sends a new token, so nothing waits a second
     portEXIT_CRITICAL(&state_lock);
     for (;;) {
-        uint32_t t = now_ms();
+        uint32_t t       = now_ms();
+        size_t   waiting = uxQueueMessagesWaiting(rx_queue);
         portENTER_CRITICAL(&state_lock);
-        bool have = lora_regq_take(&regq, t, &req);
+        bool have = lora_regq_take(&regq, t, waiting, RX_QUEUE_DEPTH, &req);
         portEXIT_CRITICAL(&state_lock);
         if (!have) {
             return;
@@ -485,11 +489,15 @@ __attribute__((noinline)) static void run_reg_queue(void) {
         } else {
             msg.u.reg_get = (lora_reg_get_t){.id = req.id, .seq = req.seq};
         }
-        if (!send_to_c6(&msg)) { // no answer coming: free its slot now. No answer to a sent one is the registry's
-            portENTER_CRITICAL(&state_lock); // timeout: it shows the key stale or unanswered
-            lora_regq_answered(&regq, req.id, req.seq);
-            portEXIT_CRITICAL(&state_lock);
+        bool sent = send_to_c6(&msg); // no answer to a sent one is the registry's timeout: stale or unanswered
+        t         = now_ms();
+        portENTER_CRITICAL(&state_lock);
+        if (sent) {
+            lora_regq_sent(&regq, req.id, req.seq, t); // a send may block: its timeout starts when it left
+        } else {
+            lora_regq_answered(&regq, req.id, req.seq); // no answer coming: its place is free now
         }
+        portEXIT_CRITICAL(&state_lock);
         if (req.set) {
             __atomic_store_n(&reg_set_ms, now_ms(), __ATOMIC_RELEASE);
             __atomic_store_n(&reg_set_sent, true, __ATOMIC_RELEASE);
@@ -656,11 +664,16 @@ __attribute__((noinline)) static TickType_t rx_wait_ticks(void) {
     uint32_t ms = lora_regq_wait_ms(&regq, t, 1000);
     portEXIT_CRITICAL(&state_lock);
     TickType_t ticks = pdMS_TO_TICKS(ms);
-    return ms && !ticks ? 1 : ticks; // never a spin on a wait shorter than a tick
+    // Under a tick rounds up to one, so no spin until a request is forgotten; 0 (one due now) means one more pass
+    // without waiting, whose run_reg_queue forgets it
+    return ms && !ticks ? 1 : ticks;
 }
 
-uint32_t lora_reg_burst_ms(size_t n) {
-    return lora_regq_burst_ms(n);
+uint32_t lora_reg_burst_ms(void) {
+    portENTER_CRITICAL(&state_lock);
+    size_t ahead = lora_regq_ahead(&regq);
+    portEXIT_CRITICAL(&state_lock);
+    return lora_regq_burst_ms(ahead);
 }
 
 static void lora_task(void *arg) {
@@ -958,18 +971,19 @@ static void cmd_lora(char const *args) {
     }
     lora_status_t st;
     bool          have;
-    uint32_t      age_s, dropped, bad, sent;
+    uint32_t        age_s, sent;
+    lora_p4_stats_t p4;
     portENTER_CRITICAL(&state_lock);
-    st      = c6_status;
-    have    = have_status;
-    age_s   = (now_ms() - status_at_ms) / 1000;
-    dropped = p4_dropped;
-    bad     = p4_bad;
-    sent    = tx_packets;
+    st    = c6_status;
+    have  = have_status;
+    age_s = (now_ms() - status_at_ms) / 1000;
+    p4    = (lora_p4_stats_t){.dropped = p4_dropped, .bad = p4_bad, .reg_in_flight = regq.n_fly,
+                              .reg_timeouts = regq.timeouts};
+    sent  = tx_packets;
     portEXIT_CRITICAL(&state_lock);
 
     char line[STATUS_LINE_MAX];
-    lora_status_format(&config, &st, have, age_s, dropped, bad, line, sizeof(line));
+    lora_status_format(&config, &st, have, age_s, &p4, line, sizeof(line));
     console_reply("lora %s | tx %lu%s", line, (unsigned long)sent,
                   lora_enabled() ? "" : " | radio switched off (fw lora on)");
     cmd_lora_radio();

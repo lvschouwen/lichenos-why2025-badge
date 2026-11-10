@@ -158,14 +158,13 @@ unsigned lora_sup_on_status(lora_sup_t *s, lora_status_t const *st, uint32_t now
 }
 
 size_t lora_status_format(
-    lora_config_t const *cfg,
-    lora_status_t const *st,
-    bool                 have_status,
-    uint32_t             status_age_s,
-    uint32_t             p4_dropped,
-    uint32_t             p4_bad,
-    char                *out,
-    size_t               cap
+    lora_config_t const   *cfg,
+    lora_status_t const   *st,
+    bool                   have_status,
+    uint32_t               status_age_s,
+    lora_p4_stats_t const *p4,
+    char                  *out,
+    size_t                 cap
 ) {
     static char const *const states[] = {"unconfigured", "idle", "rx", "error", "tx"};
 
@@ -194,7 +193,7 @@ size_t lora_status_format(
             out + used,
             cap - used,
             "c6 %s rssi %.1f | packets %u crc %u hdr %u dropped %u ignored %u | c6 up %u s heap %u/%u KiB stack %u B | "
-                            "p4 dropped %u bad %u | "
+                            "p4 dropped %u bad %u reg in flight %u timeouts %u | "
                             "status %u s ago",
             state,
             st->rssi_x10 / 10.0,
@@ -207,8 +206,10 @@ size_t lora_status_format(
             (unsigned)(st->heap_free / 1024),
             (unsigned)(st->heap_min / 1024),
             (unsigned)st->stack_free,
-            (unsigned)p4_dropped,
-            (unsigned)p4_bad,
+            (unsigned)p4->dropped,
+            (unsigned)p4->bad,
+            (unsigned)p4->reg_in_flight,
+            (unsigned)p4->reg_timeouts,
             (unsigned)status_age_s
         );
         if (n >= 0 && st->last_radio_err && (size_t)n < cap - used) {
@@ -219,9 +220,11 @@ size_t lora_status_format(
         n = snprintf(
             out + used,
             cap - used,
-            "c6 no status yet | p4 dropped %u bad %u",
-            (unsigned)p4_dropped,
-            (unsigned)p4_bad
+            "c6 no status yet | p4 dropped %u bad %u reg in flight %u timeouts %u",
+            (unsigned)p4->dropped,
+            (unsigned)p4->bad,
+            (unsigned)p4->reg_in_flight,
+            (unsigned)p4->reg_timeouts
         );
     }
     used += n < 0 ? 0 : (size_t)n;

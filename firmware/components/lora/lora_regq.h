@@ -27,11 +27,14 @@ typedef struct {
 #define LORA_REGQ_BLOCK_MAX 4
 
 // Requests in flight (#314): the C6 answers every REG_GET / REG_SET with a REG_VAL, back to back, into the LoRa task's
-// 8-deep receive queue, which also carries RX_PACKET. At most LORA_REGQ_IN_FLIGHT unanswered requests, so the answers
-// plus the one wake token leave room for received packets, STATUS and RESULT; the next request goes out when an answer
-// frees a slot, or LORA_REGQ_ANSWER_MS passed without one (a silent or old C6 never wedges the queue).
-#define LORA_REGQ_IN_FLIGHT  4
-#define LORA_REGQ_ANSWER_MS  250
+// 8-deep receive queue, which also carries RX_PACKET. A request goes out only when the messages already waiting there,
+// the answers still to come (one per unanswered request), its own answer and one wake token leave LORA_REGQ_RX_ROOM
+// places free; and never more than LORA_REGQ_IN_FLIGHT unanswered. A request counts until its answer comes, or
+// LORA_REGQ_ANSWER_MS after it went out (the C6 answers within milliseconds, its radio TX does not hold it up; past
+// that a silent or old C6 must not wedge the queue): only an answer later than that can use one of the free places.
+#define LORA_REGQ_IN_FLIGHT 4
+#define LORA_REGQ_ANSWER_MS 1000
+#define LORA_REGQ_RX_ROOM   3
 
 typedef struct {
     uint16_t id;
@@ -47,7 +50,7 @@ typedef struct {
     bool            wake_pending; // a wake token sits in the LoRa task's receive queue
     lora_regq_fly_t fly[LORA_REGQ_IN_FLIGHT];
     uint8_t         n_fly;
-    uint32_t        timeouts; // slots freed without an answer
+    uint32_t        timeouts; // requests forgotten without an answer
 } lora_regq_t;
 
 // Drops every waiting entry and forgets the requests in flight; blocked ids stay blocked
@@ -69,15 +72,20 @@ void lora_regq_woken(lora_regq_t *q);
 #define LORA_REGQ_SETTLE_MS        20
 uint32_t lora_regq_settle_ms(bool set_sent, uint32_t set_sent_ms, uint32_t now_ms);
 
-// The oldest entry, taken out and counted in flight from now_ms; false when the queue is empty or LORA_REGQ_IN_FLIGHT
-// requests are unanswered (slots older than LORA_REGQ_ANSWER_MS are freed first)
-bool lora_regq_take(lora_regq_t *q, uint32_t now_ms, lora_regq_req_t *out);
+// The oldest entry, taken out and counted in flight from now_ms; false when the queue is empty, LORA_REGQ_IN_FLIGHT
+// requests are unanswered, or the receive queue (rx_depth places, rx_waiting taken) has no room for its answer as
+// above. Requests older than LORA_REGQ_ANSWER_MS are forgotten first.
+bool lora_regq_take(lora_regq_t *q, uint32_t now_ms, size_t rx_waiting, size_t rx_depth, lora_regq_req_t *out);
+// The taken request id/seq left for the C6 at now_ms: its timeout runs from here, not from the take before the send
+void lora_regq_sent(lora_regq_t *q, uint16_t id, uint8_t seq, uint32_t now_ms);
 // A REG_VAL for id/seq came (or that request could not be sent): its slot is free. False when none matched (a late
 // answer after its timeout, or one nobody asked for).
 bool lora_regq_answered(lora_regq_t *q, uint16_t id, uint8_t seq);
-// How long the LoRa task may wait for its receive queue: wait_ms, or less when requests wait behind a full window and
-// the oldest slot times out sooner (no answer then wakes the task)
+// How long the LoRa task may wait for its receive queue: wait_ms, or less when requests wait while some are unanswered
+// and the oldest of those is forgotten sooner (no answer then wakes the task)
 uint32_t lora_regq_wait_ms(lora_regq_t const *q, uint32_t now_ms, uint32_t wait_ms);
-// The longest a burst of n requests takes to be answered or timed out, paced as above, on top of the C6's answer time
-// (the console's live wait)
+// Requests waiting or unanswered: the ones a request posted now goes out behind (itself included once posted)
+size_t lora_regq_ahead(lora_regq_t const *q);
+// The longest n requests take to go out when every window of LORA_REGQ_IN_FLIGHT before the last stays unanswered,
+// on top of the C6's own answer time (the console's live wait)
 uint32_t lora_regq_burst_ms(size_t n);

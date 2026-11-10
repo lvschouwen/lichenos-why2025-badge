@@ -22,7 +22,7 @@ static bool post(lora_regq_t *q, uint16_t id, bool set, uint32_t value, uint8_t 
 
 // A take whose answer comes at once: these tests are about order, not the in-flight window
 static bool take(lora_regq_t *q, lora_regq_req_t *r) {
-    bool ok = lora_regq_take(q, 0, r);
+    bool ok = lora_regq_take(q, 0, 0, 8, r);
     if (ok) {
         CHECK(lora_regq_answered(q, r->id, r->seq));
     }
@@ -138,8 +138,8 @@ static void test_settle(void) {
     CHECK(lora_regq_settle_ms(true, UINT32_MAX - 10, 20) == LORA_REGQ_SETTLE_MS); // across the wrap
 }
 
-// The in-flight window (#314): at most LORA_REGQ_IN_FLIGHT unanswered, an answer frees its slot, a timeout frees one
-// without an answer, and the task's queue wait ends when the oldest slot times out
+// The in-flight window (#314): at most LORA_REGQ_IN_FLIGHT unanswered, an answer frees its slot, a request is
+// forgotten LORA_REGQ_ANSWER_MS after it left, and the task's queue wait ends when the oldest one is due
 static void test_window(void) {
     lora_regq_t     q = {0};
     lora_regq_req_t r;
@@ -147,52 +147,90 @@ static void test_window(void) {
         CHECK(post(&q, (uint16_t)(0x0300 + i), false, 0, (uint8_t)(10 + i)));
     }
     for (uint16_t i = 0; i < LORA_REGQ_IN_FLIGHT; i++) {
-        CHECK(lora_regq_take(&q, 100, &r) && r.id == 0x0300 + i);
+        CHECK(lora_regq_take(&q, 100, 0, 8, &r) && r.id == 0x0300 + i);
     }
-    CHECK(!lora_regq_take(&q, 100, &r)); // the window is full
-    CHECK(lora_regq_wait_ms(&q, 150, 1000) == LORA_REGQ_ANSWER_MS - 50);
+    CHECK(!lora_regq_take(&q, 100, 0, 8, &r)); // the window is full
+    CHECK(lora_regq_wait_ms(&q, 150, 5000) == LORA_REGQ_ANSWER_MS - 50);
     CHECK(!lora_regq_answered(&q, 0x0300, 99)); // a late answer to an older seq frees nothing
     CHECK(!lora_regq_answered(&q, 0x0700, 10)); // nor one nobody asked for
     CHECK(lora_regq_answered(&q, 0x0301, 11));
     CHECK(!lora_regq_answered(&q, 0x0301, 11)); // a duplicate
-    CHECK(lora_regq_wait_ms(&q, 150, 1000) == 1000); // a slot is free: posts and answers wake the task
-    CHECK(lora_regq_take(&q, 160, &r) && r.id == 0x0300 + LORA_REGQ_IN_FLIGHT);
-    CHECK(!lora_regq_take(&q, 160, &r));
-    // A silent C6: the slots time out, the queue moves on, never wedged
-    CHECK(!lora_regq_take(&q, 100 + LORA_REGQ_ANSWER_MS - 1, &r));
-    CHECK(lora_regq_wait_ms(&q, 100 + LORA_REGQ_ANSWER_MS, 1000) == 0);
+    CHECK(lora_regq_take(&q, 160, 0, 8, &r) && r.id == 0x0300 + LORA_REGQ_IN_FLIGHT);
+    lora_regq_sent(&q, r.id, r.seq, 200); // the send took 40 ms: its timeout starts when it left
+    CHECK(!lora_regq_take(&q, 200, 0, 8, &r));
+    // A silent C6: the requests are forgotten, the queue moves on, never wedged
+    CHECK(!lora_regq_take(&q, 100 + LORA_REGQ_ANSWER_MS - 1, 0, 8, &r));
+    CHECK(lora_regq_wait_ms(&q, 100 + LORA_REGQ_ANSWER_MS, 5000) == 0);
     uint32_t t = 100 + LORA_REGQ_ANSWER_MS;
-    CHECK(lora_regq_take(&q, t, &r) && r.id == 0x0305);
-    CHECK(lora_regq_take(&q, t, &r) && r.id == 0x0306);
-    CHECK(lora_regq_take(&q, t, &r) && r.id == 0x0307);
-    CHECK(!lora_regq_take(&q, t, &r)); // the one sent at 160 still holds a slot
+    CHECK(lora_regq_take(&q, t, 0, 8, &r) && r.id == 0x0305);
+    CHECK(lora_regq_take(&q, t, 0, 8, &r) && r.id == 0x0306);
+    CHECK(lora_regq_take(&q, t, 0, 8, &r) && r.id == 0x0307);
+    CHECK(!lora_regq_take(&q, t, 0, 8, &r)); // the one that left at 200 still holds a slot
+    CHECK(!lora_regq_take(&q, 200 + LORA_REGQ_ANSWER_MS - 1, 0, 8, &r));
     CHECK(q.timeouts == 3);
     CHECK(!lora_regq_answered(&q, 0x0300, 10)); // its answer after the timeout frees nothing more
     unsigned taken = 8, rounds = 0;
     for (t += LORA_REGQ_ANSWER_MS; taken < 14 && rounds < 10; t += LORA_REGQ_ANSWER_MS, rounds++) {
-        while (lora_regq_take(&q, t, &r)) {
+        while (lora_regq_take(&q, t, 0, 8, &r)) {
             taken++;
         }
     }
     CHECK(taken == 14 && q.count == 0);
-    CHECK(lora_regq_wait_ms(&q, t, 1000) == 1000); // nothing waits
+    CHECK(lora_regq_wait_ms(&q, t, 5000) == 5000); // nothing waits
     lora_regq_clear(&q); // a C6 loss: nothing is in flight any more
     CHECK(q.n_fly == 0);
     // Wrap-around of the clock
-    CHECK(post(&q, 0x0400, false, 0, 1) && lora_regq_take(&q, UINT32_MAX - 10, &r));
+    CHECK(post(&q, 0x0400, false, 0, 1) && lora_regq_take(&q, UINT32_MAX - 10, 0, 8, &r));
     CHECK(lora_regq_answered(&q, 0x0400, 1));
 }
 
-// The console's live wait covers a burst paced through the window when every window but the last times out
+// The receive queue's room (#314 review M1): messages already waiting in it, every answer still to come, the new
+// request's own and one wake token always leave LORA_REGQ_RX_ROOM places for RX_PACKET
+static void test_rx_room(void) {
+    lora_regq_t     q = {0};
+    lora_regq_req_t r;
+    for (uint16_t i = 0; i < 8; i++) {
+        CHECK(post(&q, (uint16_t)(0x0500 + i), false, 0, (uint8_t)i));
+    }
+    for (size_t waiting = 0; waiting <= 8; waiting++) { // whatever sits in the queue, the room holds after each send
+        lora_regq_t w = q;
+        while (lora_regq_take(&w, 0, waiting, 8, &r)) {
+        }
+        CHECK(!w.n_fly || waiting + w.n_fly + 1 + LORA_REGQ_RX_ROOM <= 8);
+        CHECK(w.n_fly == (waiting <= 3 ? 4 - waiting : 0));
+    }
+    // Received packets fill the queue: no request goes out until the task has read them
+    CHECK(!lora_regq_take(&q, 0, 4, 8, &r));
+    CHECK(lora_regq_take(&q, 0, 3, 8, &r));
+    CHECK(!lora_regq_take(&q, 0, 3, 8, &r)); // its own answer now counts
+    CHECK(lora_regq_take(&q, 0, 2, 8, &r));
+    // A deeper queue still caps the window
+    while (lora_regq_take(&q, 0, 0, 32, &r)) {
+    }
+    CHECK(q.n_fly == LORA_REGQ_IN_FLIGHT);
+    // A forgotten request's place is free again
+    CHECK(lora_regq_take(&q, LORA_REGQ_ANSWER_MS, 0, 8, &r) && q.n_fly == 1);
+    CHECK(lora_regq_ahead(&q) == q.count + 1u);
+}
+
+// The console's live wait covers a burst paced through the window when every window but the last stays unanswered
 static void test_burst(void) {
     CHECK(lora_regq_burst_ms(0) == 0);
     CHECK(lora_regq_burst_ms(LORA_REGQ_IN_FLIGHT) == 0);
     CHECK(lora_regq_burst_ms(LORA_REGQ_IN_FLIGHT + 1) == LORA_REGQ_ANSWER_MS);
     CHECK(lora_regq_burst_ms(14) == 3 * LORA_REGQ_ANSWER_MS);
+    lora_regq_t     q = {0};
+    lora_regq_req_t r;
+    for (uint16_t i = 0; i < 6; i++) {
+        CHECK(post(&q, (uint16_t)(0x0600 + i), false, 0, (uint8_t)i));
+    }
+    CHECK(lora_regq_take(&q, 0, 0, 8, &r) && lora_regq_take(&q, 0, 0, 8, &r));
+    CHECK(lora_regq_ahead(&q) == 6); // waiting and in flight: what a new ask goes out behind
 }
 
 int main(void) {
     test_window();
+    test_rx_room();
     test_burst();
     test_wake();
     test_settle();

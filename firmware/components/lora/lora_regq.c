@@ -91,9 +91,16 @@ static void fly_expire(lora_regq_t *q, uint32_t now_ms) {
     }
 }
 
-bool lora_regq_take(lora_regq_t *q, uint32_t now_ms, lora_regq_req_t *out) {
+// After this request goes out: the waiting messages, every answer still to come (its own included) and one wake token
+// must leave LORA_REGQ_RX_ROOM places for RX_PACKET, STATUS and RESULT
+static bool rx_room(lora_regq_t const *q, size_t rx_waiting, size_t rx_depth) {
+    size_t taken = rx_waiting + q->n_fly + 1 + 1;
+    return q->n_fly < LORA_REGQ_IN_FLIGHT && taken <= rx_depth && rx_depth - taken >= LORA_REGQ_RX_ROOM;
+}
+
+bool lora_regq_take(lora_regq_t *q, uint32_t now_ms, size_t rx_waiting, size_t rx_depth, lora_regq_req_t *out) {
     fly_expire(q, now_ms);
-    if (!q->count || q->n_fly == LORA_REGQ_IN_FLIGHT) {
+    if (!q->count || !rx_room(q, rx_waiting, rx_depth)) {
         return false;
     }
     *out    = q->req[q->head];
@@ -101,6 +108,14 @@ bool lora_regq_take(lora_regq_t *q, uint32_t now_ms, lora_regq_req_t *out) {
     q->count--;
     q->fly[q->n_fly++] = (lora_regq_fly_t){.id = out->id, .seq = out->seq, .sent_ms = now_ms};
     return true;
+}
+
+void lora_regq_sent(lora_regq_t *q, uint16_t id, uint8_t seq, uint32_t now_ms) {
+    for (uint8_t i = 0; i < q->n_fly; i++) {
+        if (q->fly[i].id == id && q->fly[i].seq == seq) {
+            q->fly[i].sent_ms = now_ms;
+        }
+    }
 }
 
 bool lora_regq_answered(lora_regq_t *q, uint16_t id, uint8_t seq) {
@@ -114,8 +129,8 @@ bool lora_regq_answered(lora_regq_t *q, uint16_t id, uint8_t seq) {
 }
 
 uint32_t lora_regq_wait_ms(lora_regq_t const *q, uint32_t now_ms, uint32_t wait_ms) {
-    if (!q->count || q->n_fly < LORA_REGQ_IN_FLIGHT) {
-        return wait_ms; // nothing held back: a post or an answer wakes the task
+    if (!q->count || !q->n_fly) {
+        return wait_ms; // nothing held back by a request in flight: a post, an answer or a message wakes the task
     }
     uint32_t soonest = wait_ms;
     for (uint8_t i = 0; i < q->n_fly; i++) {
@@ -124,6 +139,10 @@ uint32_t lora_regq_wait_ms(lora_regq_t const *q, uint32_t now_ms, uint32_t wait_
         soonest       = left < soonest ? left : soonest;
     }
     return soonest;
+}
+
+size_t lora_regq_ahead(lora_regq_t const *q) {
+    return (size_t)q->count + q->n_fly;
 }
 
 uint32_t lora_regq_burst_ms(size_t n) {
