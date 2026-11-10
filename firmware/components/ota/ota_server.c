@@ -507,11 +507,15 @@ static bool install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t h
     return true;
 }
 
+// The valid mark also waits for a live PSRAM trial (60 s), so "45 s" (OTA_VALID_AFTER_S) undersells it (#302)
+#define TRIAL_REFUSAL                                                                                                  \
+    "the running image is still on trial: try again once 'fw slot' shows it valid (about a minute after boot); "        \
+    "nothing was stopped"
+
 // esp_ota_begin refused: say why when the reason is the running image still being on trial (#5)
 static void respond_begin_failed(int fd, esp_err_t err) {
     if (ota_image_trial_pending()) {
-        respond(fd, 503, "the running image is still on trial: try again once it is marked valid (%d s after boot)",
-                OTA_VALID_AFTER_S);
+        respond(fd, 503, "%s", TRIAL_REFUSAL);
     } else {
         respond(fd, 503, "couldn't start an OTA session (%s)", esp_err_to_name(err));
     }
@@ -1330,6 +1334,16 @@ static void start_screenshot(int fd) {
 }
 
 // Handle one connection. Returns true when the badge should reboot.
+// Before anything stops (#302): stopping the apps ends in a restart, and a restart on trial rolls the image back
+static bool refused_on_trial(int fd, ota_request_t const *req, size_t pre_len) {
+    if (!ota_route_stops_apps(req->route) || !ota_image_trial_maybe()) {
+        return false;
+    }
+    drain_body(fd, pre_len, req->expect_continue ? 0 : req->content_length);
+    respond(fd, 503, "%s", TRIAL_REFUSAL);
+    return true;
+}
+
 // "deflate chunks" tells tools/badge.sh this receiver takes compressed bodies and pieces; "storage free N" (#299) lets
 // it check a file push fits before it sends a byte
 static void respond_info(int fd) {
@@ -1381,6 +1395,9 @@ static bool handle_connection(int fd) {
 
     uint8_t const *pre     = (uint8_t const *)head_buf + head_len;
     size_t         pre_len = len - head_len;
+    if (refused_on_trial(fd, &req, pre_len)) {
+        return false;
+    }
     switch (req.route) {
         case OTA_ROUTE_FIRMWARE:
             if (req.has_offset) {

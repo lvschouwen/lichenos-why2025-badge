@@ -221,6 +221,19 @@ static void test_routes_need_token(void) {
     }
 }
 
+// #302: the routes that stop the apps (and end in a restart) are the ones refused while the image is on trial, since
+// that restart rolls the new image back; everything else is served as usual
+static void test_routes_stop_apps(void) {
+    CHECK(ota_route_stops_apps(OTA_ROUTE_PREPARE));
+    CHECK(ota_route_stops_apps(OTA_ROUTE_FIRMWARE));
+    CHECK(ota_route_stops_apps(OTA_ROUTE_ASSETS));
+    ota_route_t const others[] = {OTA_ROUTE_INFO, OTA_ROUTE_FILE, OTA_ROUTE_REBOOT, OTA_ROUTE_DELETE,
+                                  OTA_ROUTE_SCREENSHOT, OTA_ROUTE_LOG, OTA_ROUTE_CONSOLE, OTA_ROUTE_CRASHES};
+    for (size_t i = 0; i < sizeof(others) / sizeof(others[0]); i++) {
+        CHECK(!ota_route_stops_apps(others[i]));
+    }
+}
+
 // #116: no token read or saved anywhere this boot means the server does not listen
 static void test_token_kept(void) {
     CHECK(!ota_token_kept(false, false, false, false));
@@ -258,6 +271,7 @@ int main(void) {
     test_token_kept();
     test_server_listens();
     test_routes_need_token();
+    test_routes_stop_apps();
     test_sha256();
     test_head_length();
     test_parse();
