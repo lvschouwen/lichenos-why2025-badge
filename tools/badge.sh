@@ -144,6 +144,21 @@ cmd_backup() {
 
 # shellcheck source=tools/elf_archive.sh
 . "$REPO/tools/elf_archive.sh"
+# shellcheck source=tools/onair_guard.sh
+. "$REPO/tools/onair_guard.sh"
+
+# Every console line passes here before it is sent (#287): on air only #badgetest and the test node. A line that
+# changes what the badge floods (advert interval/manual) needs BADGE_ONAIR_LUCAS=1, set by Lucas himself.
+onair_gate() {
+    local verdict
+    verdict=$(onair_verdict "$1")
+    case $verdict in
+        deny\ *) echo "refusing: ${verdict#deny }" >&2; exit 1 ;;
+        ask\ *)
+            [ "${BADGE_ONAIR_LUCAS:-}" = 1 ] ||
+                { echo "refusing: ${verdict#ask } (BADGE_ONAIR_LUCAS=1 sends it)" >&2; exit 1; } ;;
+    esac
+}
 
 # cmd_flash_fw <port> [--wipe-storage|--no-storage] [build dir]: Lichen from firmware/build.
 # Keeps the storage partition unless --wipe-storage is given (#183); --no-storage is the old name of the default.
@@ -310,6 +325,7 @@ cmd_monitor() {
 # left alone at open (dsrdtr), RTS is released first and DTR after.
 cmd_console() {
     local port=$1 line=$2
+    onair_gate "$line"
     require_espressif_port "$port"
     case $line in *"'"*|*$'\n'*|*$'\r'*) echo "refusing: no quotes or line breaks in a console line" >&2; exit 1;; esac
     port_remote "$VENV/bin/python - '$port' '$line'" <<'PY'
@@ -603,6 +619,7 @@ cmd_fw() {
     local ip=$1 work
     shift
     local line="$*"
+    onair_gate "$line"
     # In a private file, not on the command line: the line can hold a Wi-Fi password (the token goes in on stdin)
     umask 077
     work=$(mktemp "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/badge-fw.XXXXXX")

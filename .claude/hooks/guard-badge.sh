@@ -14,48 +14,36 @@ ask() {
   jq -cn --arg r "$1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"ask",permissionDecisionReason:$r}}'
   exit 0
 }
-# The on-air allow list (rule 3) is changed by Lucas only: any Write/Edit of it or Bash mentioning it asks
-case "$file$cmd" in *onair-allow.local*) ask "the on-air allow list (.claude/onair-allow.local) changes only with Lucas's ok (#287)" ;; esac
-[ -n "$cmd" ] || exit 0
-if printf '%s' "$cmd" | grep -qE 'badge\.sh[^|;&]*flash-fw[^|;&]*--wipe-storage'; then
-  ask "flash-fw --wipe-storage erases the MeshCore identity, contacts and channels on the badge. First-install only; needs Lucas."
-fi
 deny() {
   jq -cn --arg r "$1" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
   exit 0
 }
-# 3. On air only #badgetest and the Heltec test node (#287): a console command that transmits to a channel or a
-#    contact is refused for any other target. Only lines that reach the badge (badge.sh fw|console, ssh, a
-#    tty) are looked at, so a source grep or a commit message describing such a command passes. Allowed contact targets (the Heltec's name or key digits) live in
-#    the gitignored .claude/onair-allow.local, one per line, so no device id is committed; without it, only
-#    #badgetest sends pass.
+# The on-air allow list (rule 3) and its overrides are Lucas's alone: refused, not asked (an ask can be settled
+# without him in auto mode). He edits the file or runs `! BADGE_ONAIR_LUCAS=1 tools/badge.sh ...` himself.
+case "$file$cmd" in
+  *onair-allow.local* | *ONAIR_ALLOW_FILE* | *BADGE_ONAIR_LUCAS*)
+    deny "the on-air allow list (.claude/onair-allow.local) and its overrides are Lucas's to change or use himself (#287)" ;;
+esac
+[ -n "$cmd" ] || exit 0
+if printf '%s' "$cmd" | grep -qE 'badge\.sh[^|;&]*flash-fw[^|;&]*--wipe-storage'; then
+  ask "flash-fw --wipe-storage erases the MeshCore identity, contacts and channels on the badge. First-install only; needs Lucas."
+fi
+# 3. On air only #badgetest and the test node (#287), rules in tools/onair_guard.sh (badge.sh applies the same ones
+#    to every line it sends). Here only lines that reach the badge (badge.sh fw|console, ssh, a tty, curl .../console)
+#    are looked at, so a source grep or a commit message describing such a command passes.
 #    ONAIR_ALLOW_FILE is for the host test: the hook's environment is Claude Code's, not the command's.
+# shellcheck source=tools/onair_guard.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/tools/onair_guard.sh"
 reach='(^|[^[:alnum:]_-])badge\.sh[[:space:]]+(fw|console)[[:space:]]|(^|[^[:alnum:]_-])ssh[[:space:]]|/dev/tty|curl[^|;&]*/console'
 # Backslash-newline continuations join first, so a target on the next line is still seen
 cmd_joined=$(printf '%s\n' "$cmd" | sed -e ':a' -e '/\\$/N' -e 's/\\\n/ /' -e 'ta')
 if printf '%s' "$cmd_joined" | grep -qE "$reach"; then
-  allow_file=${ONAIR_ALLOW_FILE:-${CLAUDE_PROJECT_DIR:-/home/lucas/coding/why2025-badge}/.claude/onair-allow.local}
-  allowed() { # $1 = target, matched case-insensitively against the allow file
-    [ -r "$allow_file" ] || return 1
-    grep -v '^[[:space:]]*#' "$allow_file" | sed 's/[[:space:]]*$//' | grep -qixF -- "$1"
-  }
   while IFS= read -r hit; do
     [ -n "$hit" ] || continue
-    read -r _ sub target _ <<<"$(printf '%s' "$hit" | tr -d "'\"\\\\")"
-    case "$sub" in
-      send)
-        [ "$target" = "#badgetest" ] ||
-          deny "on air only #badgetest: 'mesh send ${target:-?}' would transmit to another channel (#287, bench rules)" ;;
-      dm | telemetry | trace | discover)
-        [ -z "$target" ] || allowed "$target" ||
-          deny "on air only the Heltec test node: 'mesh $sub $target' targets a contact not in .claude/onair-allow.local (#287)" ;;
-      remote)
-        case "$target" in "" | settings) ;; *)
-          allowed "$target" ||
-            deny "on air only the Heltec test node: 'mesh remote $target' targets a node not in .claude/onair-allow.local (#287)" ;;
-        esac ;;
-      advert)
-        case "$target" in interval | manual) ask "mesh advert $target changes what the badge floods on air: needs Lucas" ;; esac ;;
+    verdict=$(onair_verdict "$hit")
+    case "$verdict" in
+      deny\ *) deny "${verdict#deny }" ;;
+      ask\ *) deny "${verdict#ask }: Lucas runs it himself with BADGE_ONAIR_LUCAS=1" ;;
     esac
   done < <(printf '%s\n' "$cmd_joined" | grep -E "$reach" | grep -oE 'mesh[[:space:]]+(send|dm|remote|telemetry|trace|discover|advert)([[:space:]]+[^[:space:];&|)]+)?' || true)
 fi

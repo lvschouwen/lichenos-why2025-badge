@@ -23,6 +23,7 @@ Subagents never run any of this; they stop at a green build and a local commit. 
 - Never press `enter` on Region & radio, TX power, Custom radio or any other setting that changes what the badge transmits unless Lucas asks: a wrong preset puts the badge on a frequency that may not be legal here. Check `fw mesh` shows the Netherlands preset when done.
 - Keep bench walks short; Lucas watches them. Reuse "before" screenshots instead of re-walking. One pass: one screenshot per page, long lists only downward in batches (`fw keys send down down down`), no back-and-forth.
 - MeshCore on air: never open a DM or compose screen addressed to a real person, and never send to anyone but the agreed test targets (channel `#badgetest`, or a named test DM target). An open compose screen is one stray Enter from a message to a stranger from Lucas's identity.
+  `badge.sh fw|console` and the guard hook enforce it for console lines (`tools/onair_guard.sh`, #287): other channels and contacts not in the gitignored `.claude/onair-allow.local` are refused; `advert interval|manual` needs `BADGE_ONAIR_LUCAS=1` (Lucas only). A refusal is the rule working: never route around it.
 
 ## Two-chip gate (#234)
 

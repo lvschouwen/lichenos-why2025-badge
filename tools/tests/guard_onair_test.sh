@@ -37,7 +37,8 @@ expect deny "$b mesh trace 0123456789ab"
 expect deny "$b mesh discover 0123456789ab"
 expect pass "$b mesh trace"
 expect pass "$b mesh advert"
-expect ask "$b mesh advert interval 6h"
+expect deny "$b mesh advert interval 6h"
+expect deny "BADGE_ONAIR_LUCAS=1 $b mesh advert interval 6h"
 expect pass "$b mesh out"
 expect pass "grep -n 'mesh send Public' firmware/components/mesh/mesh_task.cpp"
 expect pass "git commit -m 'guard-badge.sh denies fw mesh send to Public
@@ -45,12 +46,40 @@ lines that reach the badge (badge.sh, ssh) are checked'"
 expect deny "$b mesh dm \\
   0123456789ab ping"
 expect deny "curl -s -X POST --data-binary 'mesh send Public hi' http://192.0.2.1:8080/console"
-expect ask "echo x >> .claude/onair-allow.local"
+expect deny "echo x >> .claude/onair-allow.local"
 got=$(jq -cn '{tool_name:"Edit",tool_input:{file_path:"/r/.claude/onair-allow.local"}}' | bash "$hook" |
   jq -r '.hookSpecificOutput.permissionDecision')
-[ "$got" = ask ] || { echo "FAIL: Edit of the allow list: $got, expected ask" >&2; fail=1; }
+[ "$got" = deny ] || { echo "FAIL: Edit of the allow list: $got, expected deny" >&2; fail=1; }
 # Without an allow file only #badgetest passes
 expect deny "$b mesh dm abcdef123456 hi" "$tmp/missing"
 expect pass "$b mesh send '#badgetest' hi" "$tmp/missing"
+# badge.sh applies the same rules to every line it sends, whatever the command looked like: a fake curl records
+# what would have gone out
+mkdir -p "$tmp/bin"
+printf '#!/bin/sh\necho SENT\n' > "$tmp/bin/curl" && chmod +x "$tmp/bin/curl"
+badge() { # $@ = badge.sh arguments; prints its output, returns its exit code
+  PATH="$tmp/bin:$PATH" ONAIR_ALLOW_FILE="$tmp/allow" BADGE_OTA_TOKEN=0123456789abcdef0123456789abcdef \
+    BADGE_HOST=none bash "$here/../badge.sh" "$@" 2>&1
+}
+sent() { # $1 = expected (sent|refused), rest = badge.sh arguments
+  local want=$1 out rc; shift
+  out=$(badge "$@"); rc=$?
+  if [ "$want" = sent ]; then
+    if [ "$rc" != 0 ] || ! grep -q SENT <<<"$out"; then echo "FAIL: badge.sh $*: not sent: $out" >&2; fail=1; fi
+  elif [ "$rc" = 0 ] || grep -q SENT <<<"$out" || ! grep -q '^refusing: ' <<<"$out"; then
+    echo "FAIL: badge.sh $*: not refused ($rc): $out" >&2; fail=1
+  fi
+}
+sent sent fw 192.0.2.1 mesh send '#badgetest' hello
+sent sent fw 192.0.2.1 mesh dm abcdef123456 hi
+sent sent fw 192.0.2.1 mesh out
+sent refused fw 192.0.2.1 mesh send Public hello
+sent refused fw 192.0.2.1 "mesh send #other hi"
+sent refused fw 192.0.2.1 mesh dm 0123456789ab hi
+sent refused fw 192.0.2.1 mesh remote OTHER-RPT cli reboot YES
+sent refused fw 192.0.2.1 mesh advert interval 6h
+sent refused console /dev/null "fw mesh send Public hi"
+out=$(BADGE_ONAIR_LUCAS=1 badge fw 192.0.2.1 mesh advert interval 6h)
+grep -q SENT <<<"$out" || { echo "FAIL: BADGE_ONAIR_LUCAS=1 did not send: $out" >&2; fail=1; }
 [ "$fail" = 0 ] && echo "guard_onair_test: ok"
 exit "$fail"
