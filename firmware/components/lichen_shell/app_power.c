@@ -33,7 +33,7 @@
 static lichen_app_t const power_app; // its tasks are booked under it (#181)
 static void (*finish_hook)(bool power_off);
 static atomic_bool running;
-static bool        want_off; // set before the task starts
+static atomic_bool want_off; // set before the task starts; a power off asked meanwhile turns a restart into one (#281)
 
 bool power_going_down(void) {
     return atomic_load(&running);
@@ -45,7 +45,7 @@ void shell_set_power_hook(void (*finish)(bool power_off)) {
 
 static void power_task(void *arg) {
     (void)arg;
-    bool       off   = want_off;
+    bool       off   = atomic_load(&want_off);
     TickType_t begin = xTaskGetTickCount();
     ESP_LOGI(TAG, "%s: stopping the apps", off ? "power off" : "restart");
     bool all_stopped = shell_stop_apps();
@@ -60,6 +60,7 @@ static void power_task(void *arg) {
     if (off && shown < pdMS_TO_TICKS(BYE_MIN_MS)) {
         vTaskDelay(pdMS_TO_TICKS(BYE_MIN_MS) - shown);
     }
+    off = atomic_load(&want_off); // the thermal shutdown may have turned this restart into a power off meanwhile
     if (finish_hook) {
         finish_hook(off); // does not return
     }
@@ -98,7 +99,7 @@ static lv_obj_t *build_bye(void) {
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen, 24, 0);
     shell_on_esc(eat_esc, NULL);
-    if (want_off) {
+    if (atomic_load(&want_off)) {
         add_line(screen, "Powering off...", THEME_TEXT, true);
         add_line(screen, "Saving, then the screen goes dark.", THEME_DIM, false);
         add_line(screen, "On battery the badge switches itself off after half a minute. Press the power button to "
@@ -121,9 +122,13 @@ static void bye_task(void *arg) {
 
 static void start(bool off) {
     if (atomic_exchange(&running, true)) {
+        // Already going down: a power off still wins over a restart (the thermal shutdown must not end in a restart)
+        if (off && !atomic_exchange(&want_off, true)) {
+            ESP_LOGW(TAG, "power off asked during a restart: powering off instead");
+        }
         return;
     }
-    want_off = off;
+    atomic_store(&want_off, off);
     // The task first: a busy or stuck LVGL lock must not hold up a (thermal) shutdown. The goodbye screen is opened by
     // a short task of its own, which may wait for the lock as long as it needs.
     if (!lichen_task_start(&power_app, "power", power_task, NULL, POWER_STACK, LICHEN_PRIO_URGENT, NULL)) {
@@ -161,16 +166,6 @@ static void open_power(lv_obj_t *screen) {
                     "power button starts the badge again; on USB power unplug it first.");
 }
 
-static void cmd_poweroff(char const *args) {
-    (void)args;
-    if (atomic_load(&running)) {
-        console_reply("already going down");
-        return;
-    }
-    console_reply("powering off");
-    start(true); // shell_open takes the LVGL lock itself
-}
-
 static lichen_app_t const power_app = {
     .name      = "Power",
     .id        = "power",
@@ -179,8 +174,7 @@ static lichen_app_t const power_app = {
 };
 
 void power_app_register(void) {
-    lichen_register_app(&power_app);
-    console_register("poweroff", "poweroff (save, then switch the badge off as Power > Power off does)", cmd_poweroff);
+    lichen_register_app(&power_app); // `fw poweroff` is main's (#292): it also works without a display
 }
 
 void power_open_from_settings(void *arg) {

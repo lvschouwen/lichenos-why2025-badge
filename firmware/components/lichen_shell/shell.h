@@ -85,5 +85,7 @@ bool shell_home_shown(void);
 // saves, then the power hook). Both from any task.
 void battery_open_alert(void);
 void power_request_off(void);
+// Restart or Power off is under way (the goodbye screen is up); any task
+bool power_going_down(void);
 
 // The countdown dialog (shell_dialog_countdown, #14 T-B) is in lichen_ui.h: apps use it too (#49)

@@ -7,6 +7,7 @@
 #include "board_i2c.h"
 #include "boot_order.h"
 #include "boot_progress.h"
+#include "power_route.h"
 #include "c6link.h"
 #include "wifi_service.h"
 #include "crash.h"
@@ -34,6 +35,7 @@
 #include "meshcore_run.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "keyboard.h"
 #include "lichen_sensors.h"
 #include "haptics.h"
@@ -60,6 +62,7 @@
 #include "update_mode.h"
 #include "update_screen.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -219,24 +222,82 @@ static void power_finish(bool power_off) {
     lichen_sys_power_off_now();
 }
 
-// The thermal shutdown without the shell (#281: no display): the saves the Power app would run (notifications, the
-// apps stop, bounded as for a restart), the SD card unmounted, then off
+// The SD card's share of a headless power off, bounded like the saves: a stuck card must not keep a hot badge on
+#define SD_UNMOUNT_MS 2000
+static StaticSemaphore_t sd_unmounted_buf;
+static SemaphoreHandle_t sd_unmounted;
+
+static void sd_unmount_task(void *arg) {
+    (void)arg;
+    lichen_sys_sd_unmount();
+    xSemaphoreGive(sd_unmounted);
+}
+
+static void sd_unmount_bounded(void) {
+    if (!lichen_sys_sd_mounted()) {
+        return;
+    }
+    sd_unmounted = xSemaphoreCreateBinaryStatic(&sd_unmounted_buf);
+    if (!lichen_task_start(NULL, "sdoff", sd_unmount_task, NULL, 4096, LICHEN_PRIO_URGENT, NULL) ||
+        xSemaphoreTake(sd_unmounted, pdMS_TO_TICKS(SD_UNMOUNT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "power off: the SD card was not unmounted in time, going off anyway");
+    }
+}
+
+// A power off without the shell (#281, #292: no display): the saves the Power app would run (notifications, the apps
+// stop, bounded as for a restart), the SD card (bounded), then off. Never returns.
+static atomic_bool headless_going_down;
+
 static void power_off_headless(void) {
     ESP_LOGW(TAG, "power off without the shell: saving, then off");
     system_save_before_off();
-    if (lichen_sys_sd_mounted()) {
-        lichen_sys_sd_unmount();
-    }
+    sd_unmount_bounded();
     lichen_sys_power_off_now();
 }
 
-// The thermal watchdog's power off: the Power app's goodbye path when the shell runs, the headless one otherwise
-static void thermal_power_off(void) {
-    if (shell_up()) {
-        power_request_off();
-    } else {
+// power_route.c decides (#292, host_tests/power_route_test.c); false when a power off is already under way
+static bool power_off_by_route(bool thermal) {
+    bool up = shell_up();
+    switch (power_route(up, up && power_going_down(), atomic_load(&headless_going_down), thermal)) {
+    case POWER_ROUTE_SHELL:
+        power_request_off(); // during a restart this turns it into a power off
+        return true;
+    case POWER_ROUTE_HEADLESS:
+        if (atomic_exchange(&headless_going_down, true)) {
+            return false;
+        }
         power_off_headless();
+        return true;
+    case POWER_ROUTE_BUSY:
+    default:
+        return false;
     }
+}
+
+// The thermal watchdog's power off
+static void thermal_power_off(void) {
+    power_off_by_route(true);
+}
+
+// `fw poweroff` (#65, #292): main's, so it powers off without a display too
+static void cmd_poweroff(char const *args) {
+    (void)args;
+    bool headless = !shell_up();
+    if (power_route(!headless, !headless && power_going_down(), atomic_load(&headless_going_down), false) ==
+        POWER_ROUTE_BUSY) {
+        console_reply("already going down");
+        return;
+    }
+    console_reply(headless ? "powering off (no display: saving, then off)" : "powering off");
+    fflush(stdout);
+    power_off_by_route(false);
+}
+
+// The headless watch services settle on this (#281): every boot step has run
+static atomic_bool boot_steps_done;
+
+static bool boot_finished(void) {
+    return atomic_load(&boot_steps_done);
 }
 
 static int boot_update_result(char *line, size_t cap) {
@@ -342,11 +403,16 @@ static uint32_t uptime_ms(void) {
 
 static bool show_boot_screen(lv_display_t **display) {
     boot_progress_begin(BOOT_DISPLAY);
-    if (settings_get_u8(NOSCREEN_KEY, 0)) { // one boot only: erased before anything else can go wrong
-        settings_erase(NOSCREEN_KEY);
-        ESP_LOGW(TAG, "display start skipped on purpose (fw noscreen, this boot only)");
-        boot_progress_end(BOOT_DISPLAY, STEP_FAILED, "skipped (fw noscreen)");
-        return false;
+    // One boot only: erased before anything else can go wrong. A key that cannot be erased would keep every boot
+    // screenless, so it is then ignored and the display starts.
+    if (settings_get_u8(NOSCREEN_KEY, 0)) {
+        if (!settings_erase(NOSCREEN_KEY)) {
+            ESP_LOGW(TAG, "fw noscreen key could not be erased: ignored, the display starts");
+        } else {
+            ESP_LOGW(TAG, "display start skipped on purpose (fw noscreen, this boot only)");
+            boot_progress_end(BOOT_DISPLAY, STEP_FAILED, "skipped (fw noscreen)");
+            return false;
+        }
     }
     if (!display_start(display)) {
         ESP_LOGE(TAG, "no display");
@@ -476,6 +542,8 @@ static void start_console(boot_ctx_t *ctx) {
     (void)ctx;
     console_start();
     console_register("noscreen", "noscreen (test: the next boot skips the display start, one boot only)", cmd_noscreen);
+    console_register("poweroff", "poweroff (save, then switch the badge off as Power > Power off does; works without a display)",
+                     cmd_poweroff);
 }
 
 static void start_storage(boot_ctx_t *ctx) {
@@ -533,7 +601,7 @@ static void start_shell(boot_ctx_t *ctx) {
 // The thermal watchdog and Lichen's own notices (#281): OS services, started with or without a display. Only the
 // hooks into the shell depend on the screen.
 static void start_watch(boot_ctx_t *ctx) {
-    lichen_watch_hooks_t hooks = {.power_off = thermal_power_off, .c6_restarts = c6_restarts};
+    lichen_watch_hooks_t hooks = {.ui_ready = boot_finished, .power_off = thermal_power_off, .c6_restarts = c6_restarts};
     if (ctx->screen) {
         hooks.ui_ready      = shell_home_shown;
         hooks.hot_alert     = battery_open_alert;
@@ -767,6 +835,7 @@ void app_main(void) {
     for (size_t i = 0; i < boot_order_len; i++) {
         start_fns[boot_order[i]](&ctx);
     }
+    atomic_store(&boot_steps_done, true);
     ota_trial_wait();
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(60000));

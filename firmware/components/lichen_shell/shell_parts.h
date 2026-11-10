@@ -144,8 +144,7 @@ void shortcuts_key(uint8_t code, bool pressed, bool test_open);
 void shortcuts_app_opened(size_t index);
 // shell.c: ● runs the top screen's shell_on_search() hook; false when it has none
 bool shell_search(void);
-// app_power.c: Restart or Power off is under way (the goodbye screen is up); any task
-bool power_going_down(void);
+// power_going_down (app_power.c: Restart or Power off is under way) is in shell.h: main's `fw poweroff` reads it
 
 // Notifications (#62). notify_ui.c: the toast, the tile badges, the cloud key; from shell_start, LVGL lock held.
 #define NOTIFY_APP_ID "notify"

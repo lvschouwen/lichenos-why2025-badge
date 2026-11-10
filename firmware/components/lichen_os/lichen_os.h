@@ -40,12 +40,14 @@ void lichen_ui_service_port_up(void);
 // Started by main in their own boot step, display or not, so a badge whose screen did not come up still powers off
 // when it gets too hot. What they need from above the OS comes in as hooks; any member may be NULL.
 typedef struct {
-    // Home is on screen (the first-run and boot notices wait for it). NULL: no UI, the notices go to the history at once
+    // The boot has settled: home is on screen, or without a display main's boot steps are all done (the first-run
+    // and boot notices wait for it, so a screenless boot raises no notices about steps still under way). NULL: at once
     bool (*ui_ready)(void);
     // The full-screen heat warning (the shell's Settings > Battery page); any task. NULL: the notice only
     void (*hot_alert)(void);
     // Saves and powers the badge off (the Power app's path, or main's headless one); any task, may return before the
-    // badge is down. NULL: lichen_sys_power_off_now (no saves)
+    // badge is down. The watchdog switches the badge off itself 30 s later if it is still up. NULL:
+    // lichen_sys_power_off_now (no saves)
     void (*power_off)(void);
     // The update result line of this boot (update_screen_boot_result: 0 none, 1 updated, 2 rolled back)
     int (*update_result)(char *line, size_t cap);

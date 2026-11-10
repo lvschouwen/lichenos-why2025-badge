@@ -1830,6 +1830,15 @@ target_include_directories(boot_order_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
 target_compile_options(boot_order_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME boot_order_test COMMAND boot_order_test)
 
+# Which way a power off goes (#281, #292): the Power app, main's headless path, or nothing twice
+add_executable(power_route_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/power_route_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/power_route.c
+)
+target_include_directories(power_route_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main)
+target_compile_options(power_route_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME power_route_test COMMAND power_route_test)
+
 # The OS name on the boot screen and in About (#236)
 add_executable(os_name_test
     ${CMAKE_CURRENT_SOURCE_DIR}/os_name_test.c

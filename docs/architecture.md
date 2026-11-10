@@ -249,7 +249,11 @@ The rule: **core 1 draws, core 0 talks to the world.**
   whether or not a display came up, so a badge without a screen still warns and powers off when too hot. What they
   need from above comes in as hooks (`lichen_watch_hooks_t`): "home is shown", the shell's warning page, the update
   result and the power off, which is the Power app's goodbye path when the shell runs and main's headless path
-  (`system_save_before_off`, then `lichen_sys_power_off_now`) otherwise. The shell reads the watchdog through the gate
+  (`system_save_before_off`, the SD card unmounted with a bound, then `lichen_sys_power_off_now`) otherwise
+  (`main/power_route.c` decides, host-tested; `fw poweroff` takes the same route, #292). A thermal shutdown sheds
+  nothing first, turns a Power-app restart under way into a power off, and has a backstop: 30 s after it was decided
+  the badge is off, saved or not. Without a display the notices wait until every boot step ran. The shell reads the
+  watchdog through the gate
   (`lichen_sys_thermal.h`). `fw thermal` says whether the watchdog task runs; `fw noscreen` makes the next boot skip
   the display start (one boot only) to prove it.
 - The load shed holds Wi-Fi and LoRa off through the radio service (#282, `lichen_sys_radio.h`): a hold has a reason

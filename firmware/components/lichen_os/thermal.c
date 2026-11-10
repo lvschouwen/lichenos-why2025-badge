@@ -45,6 +45,8 @@ static char const TAG[] = "thermal";
 #define NO_SIM         INT32_MIN
 #define EVENT_LOG      6
 #define SEEN_KEY       "batt_seen"
+#define OFF_BOUND_MS   30000 // the shutdown's backstop: the badge is off by then, saved or not
+#define BACKSTOP_STACK 4096
 #define SHED_KEY       "thermal_shed" // written by firmware before #282 while the radios were shed (and saved off)
 
 #if CONFIG_LICHEN_SENSORS_GAS_HEATER
@@ -141,10 +143,42 @@ static void power_off(void) {
     }
 }
 
+// The backstop (#281): whatever the power-off path waits on (an app that does not stop, a stuck card, the LVGL lock),
+// the badge is off OFF_BOUND_MS after the shutdown was decided. Its own task, so nothing the path holds can stop it.
+static void backstop_task(void *arg) {
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(OFF_BOUND_MS));
+    ESP_LOGE(TAG, "power off did not finish in %d s: switching off now", OFF_BOUND_MS / 1000);
+    lichen_sys_power_off_now();
+}
+
+// The thermal shutdown: the backstop first, then the notice (the power path saves it), then the power off. No load
+// shed before it: holding the radios waits on the radio service's change lock and the listeners (the C6), and the
+// shutdown must not wait behind them while the cells heat.
+static void shut_down(lichen_sys_thermal_info_t const *now) {
+    if (atomic_exchange(&shutdown_asked, true)) {
+        return;
+    }
+    if (!lichen_task_start_in(NULL, "thoff", backstop_task, NULL, BACKSTOP_STACK, LICHEN_PRIO_URGENT,
+                              LICHEN_STACK_LP_RAM, NULL)) { // never returns (deep sleep), so LP RAM is fine (#269)
+        ESP_LOGE(TAG, "no memory for the power-off backstop");
+    }
+    char body[120];
+    cause_text(now, body, sizeof(body));
+    size_t n = strlen(body);
+    snprintf(body + n, sizeof(body) - n, " Powering off to protect the cells.");
+    say(LN_ERROR, "Too hot: powering off", body, 0);
+    power_off();
+}
+
 static void on_events(unsigned ev) {
     lichen_sys_thermal_info_t now;
     lichen_sys_thermal_info(&now);
     char body[120];
+    if (ev & TH_EV_SHUTDOWN) {
+        shut_down(&now); // nothing else first: no load shed, no warning page (either can wait on the C6 or the UI)
+        return;
+    }
     if (ev & TH_EV_WARN) {
         cause_text(&now, body, sizeof(body));
         size_t n = strlen(body);
@@ -158,16 +192,6 @@ static void on_events(unsigned ev) {
     if (ev & TH_EV_CLEARED) {
         say(LN_INFO, "Badge has cooled down", "Back to normal.", LN_COALESCE);
         shed_load(false);
-    }
-    if (ev & TH_EV_SHUTDOWN) {
-        cause_text(&now, body, sizeof(body));
-        size_t n = strlen(body);
-        snprintf(body + n, sizeof(body) - n, " Powering off to protect the cells.");
-        say(LN_ERROR, "Too hot: powering off", body, 0);
-        shed_load(true);
-        if (!atomic_exchange(&shutdown_asked, true)) {
-            power_off();
-        }
     }
     if (ev & TH_EV_BLIND) {
         say(LN_WARN, "Temperature not watched",
