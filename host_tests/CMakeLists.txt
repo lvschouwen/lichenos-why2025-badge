@@ -1820,6 +1820,8 @@ add_test(NAME two_chip_contract_test COMMAND two_chip_contract_test)
 # tools/check_layers.py: the layer checker, rules A/B/C on fixture components and every ratchet state (#218)
 add_test(NAME check_layers_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_layers_test.py)
 add_test(NAME reserved_ids_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/reserved_ids_test.py)
+# tools/check_rules.py: critical-section PSRAM, log level, task stack class, LVGL-in-task checks and their ratchet (#287)
+add_test(NAME check_rules_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_rules_test.py)
 
 # app_main's start order, the two-chip start rules (#210, #234)
 add_executable(boot_order_test

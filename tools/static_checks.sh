@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Fast static checks run by firmware/build.sh build (#196):
 #  - shellcheck (warning level) on every tracked shell script;
+#  - tools/check_rules.py: critical-section PSRAM (#271), ESP_LOGE retry/dropped wording (#113), LP RAM / PSRAM task
+#    functions never return (#269), lv_* in task entry functions (#118); baselines tools/rules-baseline-<check>.txt;
 #  - cppcheck (warning + portability) on the C/C++ files changed since origin/main, committed or not.
 # Existing accepted findings live in tools/cppcheck-baseline.txt (id:file); new code gets no baseline entries,
 # fix the finding or add an inline "// cppcheck-suppress <id>" with the reason.
@@ -15,6 +17,8 @@ if command -v shellcheck >/dev/null; then
 else
     echo "note: shellcheck not installed, skipped" >&2
 fi
+
+python3 -I tools/check_rules.py || { echo "static checks: source rule checks failed (tools/check_rules.py)" >&2; fail=1; }
 
 if command -v cppcheck >/dev/null; then
     base=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null || echo HEAD)

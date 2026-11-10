@@ -130,7 +130,7 @@ static void change_task(void *arg) {
     // task is stuck, so the result is dropped here and the page is not left busy for good
     for (int tries = 0; !lichen_ui_call(change_finish, ch); tries++) {
         if (tries + 1 >= UI_CALL_TRIES) {
-            ESP_LOGE(TAG, "advert change %d: result not handed to the screen, dropped", (int)ch->kind);
+            ESP_LOGW(TAG, "advert change %d: result not handed to the screen, dropped", (int)ch->kind);
             lichen_free(meshcore_self(), ch);
             __atomic_store_n(&busy, false, __ATOMIC_RELEASE);
             break;

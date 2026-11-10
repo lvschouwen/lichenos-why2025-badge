@@ -461,7 +461,7 @@ static bool c6_link_work(lora_sup_t *sup) {
     if (act & LORA_C6_REINIT) {
         // The registry outlives esp_hosted_deinit, so this is a "register update"; it is redone in case it did not
         if (eh_host_peer_data_register(LORA_MSG_ID_TO_P4, on_peer_data, NULL) != ESP_OK) {
-            ESP_LOGE(TAG, "peer data callback not registered again");
+            ESP_LOGE(TAG, "peer data callback: the registration was not redone");
         }
         lora_sup_init(sup, now_ms()); // its first tick re-sends config + RX start with the owner's settings
         ESP_LOGI(TAG, "C6 back: sending the radio config again");

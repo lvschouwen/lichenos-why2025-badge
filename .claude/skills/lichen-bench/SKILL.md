@@ -39,6 +39,8 @@ Main runs this after every v2 wave merge, on the freshly flashed image (`ota-c6`
 7. BT off after boot (#197): `fw airplane` prints `airplane off | wifi on | lora on | bluetooth off`. It reads the P4's saved switch, not the C6 controller.
 8. `fw tasks`: no owner-less Lichen task (IDF, esp_hosted and LVGL tasks are exempt). Informational until #228 books the Lichen tasks: note the result, do not block on it.
 
+9. UI rule 12 (#287): after a UI change run `tools/ui_overflow_sweep.py` (see its header) with max-length names; every screen must report `fw ui overflow` = 0. This is a bench gate: the layout is measured on the badge, a build step cannot decide it.
+
 Any failure blocks the next wave merge: report it, do not carry on.
 
 ## Never

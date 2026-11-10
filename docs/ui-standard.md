@@ -32,6 +32,11 @@ Every screen (OS and apps) is checked against these rules. Panel 720x720, keyboa
     when a node adverts. Send advert: Settings > ...").
 12. **Verified with long data.** `fw ui overflow` = 0 on each screen with max-length names (32-char node, 31-char
     channel, 127-char file); one screenshot per changed screen; `tools/ui_overflow_sweep.py` for the sweep.
+    **Bench gate, not a build gate (#287):** overflow is measured by the LVGL layout on the badge (rendered font metrics,
+    wrap and scroll modes, the data a screen shows), so no static check can decide it and none is faked. The gate is
+    `tools/ui_overflow_sweep.py` run by the main session after a UI change, expected `fw ui overflow` = 0 for every
+    screen (the `lichen-bench` skill lists it as a standing step). The build gates around it: `tools/check_rules.py`
+    (lv_* only on the LVGL task) and the layer check.
 
 **Conventions (R9; #136, OKd by Lucas 2026-11-02 "wording is fine"):** Restart (never Reboot in UI; repeater CLI token
 stays "reboot"), "Restarting...", On/Off, hints "Enter: open • Del: delete" (dim, pinned, no "Esc: back" lines),

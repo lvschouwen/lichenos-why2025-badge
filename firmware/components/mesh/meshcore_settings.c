@@ -112,7 +112,7 @@ static void job_task(void *arg) {
     // the LVGL task is stuck, so the result is dropped here and the page is not left busy for good
     for (int tries = 0; !lichen_ui_call(job_finish, job); tries++) {
         if (tries + 1 >= UI_CALL_TRIES) {
-            ESP_LOGE(TAG, "settings job %d: result not handed to the screen, dropped", (int)job->kind);
+            ESP_LOGW(TAG, "settings job %d: result not handed to the screen, dropped", (int)job->kind);
             memset(job->key, 0, sizeof(job->key));
             memset(&job->info, 0, sizeof(job->info));
             lichen_free(meshcore_self(), job);
