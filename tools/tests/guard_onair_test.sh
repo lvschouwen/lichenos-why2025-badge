@@ -8,6 +8,8 @@ hook="$here/../../.claude/hooks/guard-badge.sh"
 tmp=$(mktemp -d) && trap 'rm -rf "$tmp"' EXIT
 printf '# test node\nTESTNODE\nabcdef123456\nscope #ZZ-Bench\n' > "$tmp/allow"
 printf 'scope\nTESTNODE\n' > "$tmp/allow-bare"
+# #303: several exact scope lines; a wildcard and "*" (unscoped on the badge) never count
+printf 'TESTNODE\nscope zz-one\nscope zz-*\nscope *\nscope #ZZ-Two\n' > "$tmp/allow-multi"
 fail=0
 decision() { # $1 = command, $2 = allow file; prints deny, ask or pass
   local out
@@ -50,6 +52,11 @@ expect deny "$b mesh scope console"
 expect deny "$b mesh scope default zz-bench"
 expect deny "$b mesh scope console zz-bench YES" "$tmp/missing"
 expect deny "$b mesh scope console zz-bench YES" "$tmp/allow-bare"
+expect pass "$b mesh scope console zz-one YES" "$tmp/allow-multi"
+expect pass "$b mesh scope console zz-two YES" "$tmp/allow-multi"
+expect deny "$b mesh scope console zz-three YES" "$tmp/allow-multi"
+expect deny "$b mesh scope console 'zz-*' YES" "$tmp/allow-multi"
+expect deny "$b mesh scope console '*' YES" "$tmp/allow-multi"
 # A scope line is never a contact target
 expect deny "$b mesh dm scope hi" "$tmp/allow-bare"
 expect deny "$b mesh remote scope status"
@@ -150,6 +157,14 @@ FAKE_SCOPE="fw: chat: default None | console zz-bench" sent refused fw 192.0.2.1
 FAKE_SCOPE=$'fw: default None | console zz-bench\ndefault None | console zz-bench' sent refused fw 192.0.2.1 mesh send '#badgetest' hi
 sent refused fw 192.0.2.1 mesh scope console zz-other YES
 sent sent fw 192.0.2.1 mesh history TESTNODE on 60 YES
+# #303: a tree whose allow file has several scope lines: any exact one passes, the wildcard and "*" lines don't
+mkdir -p "$tmp/multi/tools" "$tmp/multi/.claude"
+cp "$here/../badge.sh" "$here/../onair_guard.sh" "$here/../elf_archive.sh" "$tmp/multi/tools/"
+cp "$tmp/allow-multi" "$tmp/multi/.claude/onair-allow.local"
+BADGE_REPO=$tmp/multi FAKE_SCOPE="default None | console zz-two" sent sent fw 192.0.2.1 mesh send '#badgetest' hi
+BADGE_REPO=$tmp/multi FAKE_SCOPE="default None | console zz-one" sent sent fw 192.0.2.1 mesh send '#badgetest' hi
+BADGE_REPO=$tmp/multi FAKE_SCOPE="default None | console zz-x" sent refused fw 192.0.2.1 mesh send '#badgetest' hi
+BADGE_REPO=$tmp/multi FAKE_SCOPE="default None | console *" sent refused fw 192.0.2.1 mesh send '#badgetest' hi
 FAKE_SCOPE="default None | console not set" sent refused fw 192.0.2.1 mesh history TESTNODE on 60 YES
 sent refused fw 192.0.2.1 mesh history OTHER-RPT on 60 YES
 FAKE_SCOPE="" sent sent fw 192.0.2.1 mesh history

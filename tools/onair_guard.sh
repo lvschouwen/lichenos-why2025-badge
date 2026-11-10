@@ -33,14 +33,27 @@ onair_scope_norm() {
     printf '%s' "${name#\#}"
 }
 
-# The console scope the allow file names (its first "scope <region>" line), normalised; empty when there is none
-onair_allowed_scope() {
-    local file line
+# The console scopes the allow file names (#303: every exact "scope <region>" line), normalised, one per line; empty
+# when there is none. Only names of letters, digits and '-' count: a wildcard ("nl-hhw-*") or "*" (unscoped on the
+# badge) is never a scope the console may use
+onair_allowed_scopes() {
+    local file line name
     file=$(onair_allow_file)
     [ -r "$file" ] || return 0
-    line=$(grep -iE '^[[:space:]]*scope[[:space:]]+[^[:space:]]' "$file" | head -n 1 || true)
-    read -r _ line _ <<<"$line"
-    onair_scope_norm "$line"
+    while read -r line; do
+        read -r _ name _ <<<"$line"
+        name=$(onair_scope_norm "$name")
+        if [[ $name =~ ^[a-z0-9][a-z0-9-]*$ ]]; then printf '%s\n' "$name"; fi
+    done < <(grep -iE '^[[:space:]]*scope[[:space:]]+[^[:space:]]' "$file" || true)
+}
+
+# Whether <name> is one of the allow file's scope lines
+onair_scope_allowed() {
+    local want list
+    want=$(onair_scope_norm "$1")
+    # Not "onair_allowed_scopes | grep -q": under pipefail grep's early exit makes a match on any but the last line fail
+    list=$(onair_allowed_scopes)
+    [ -n "$want" ] && grep -qxF -- "$want" <<<"$list"
 }
 
 # The words of a console line as the badge's parser sees them: quotes and backslashes dropped (as the shell would
@@ -88,8 +101,7 @@ onair_scope_query() {
 # speak for the badge. No such line, or two, is a deny.
 onair_scope_verdict() {
     local want have lines
-    want=$(onair_allowed_scope)
-    if [ -z "$want" ]; then
+    if [ -z "$(onair_allowed_scopes)" ]; then
         echo "deny no 'scope <region>' line in .claude/onair-allow.local: no console line with a target goes on air without one (#290)"
         return
     fi
@@ -100,8 +112,8 @@ onair_scope_verdict() {
         return
     fi
     have=${lines##* | console }
-    if [ "$have" != "not set" ] && [ "$(onair_scope_norm "$have")" = "$want" ]; then echo pass; else
-        echo "deny the badge's console scope is '${have:-no answer}', not the scope line of .claude/onair-allow.local: fw mesh scope console <region> YES first (#290)"
+    if [ "$have" != "not set" ] && onair_scope_allowed "$have"; then echo pass; else
+        echo "deny the badge's console scope is '${have:-no answer}', not a scope line of .claude/onair-allow.local: fw mesh scope console <region> YES first (#290)"
     fi
 }
 
@@ -124,11 +136,10 @@ onair_verdict() {
                 echo "deny on air only the test node: 'mesh remote $w3' targets a node not in .claude/onair-allow.local (#287)"
             fi ;;
         scope)
-            want=$(onair_allowed_scope)
-            if [ -z "$w3" ] || { [ "$w3" = console ] && [ -n "$want" ] && [ "$(onair_scope_norm "$w4")" = "$want" ]; }; then
+            if [ -z "$w3" ] || { [ "$w3" = console ] && onair_scope_allowed "$w4"; }; then
                 echo pass
             else
-                echo "deny 'mesh scope $w3 ${w4:-?}' is not the scope line of .claude/onair-allow.local: the console scope is Lucas's to choose (#290)"
+                echo "deny 'mesh scope $w3 ${w4:-?}' is not a scope line of .claude/onair-allow.local: the console scope is Lucas's to choose (#290)"
             fi ;;
         advert)
             case "$w3" in
