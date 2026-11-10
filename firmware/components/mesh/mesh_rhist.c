@@ -148,6 +148,18 @@ void rh_set_console(rh_t *t, uint8_t const prefix[RH_PREFIX], bool console) {
     }
 }
 
+size_t rh_off_console(rh_t *t) {
+    size_t n = 0;
+    for (int i = 0; i < RH_SLOTS; i++) {
+        rh_slot_t *s = &t->slot[i];
+        if (s->used && s->on && s->console) {
+            rh_set(t, s->prefix, false, s->interval_min, 0); // as switching it off: a running ask is not taken in
+            n++;
+        }
+    }
+    return n;
+}
+
 void rh_forget(rh_t *t, uint8_t const prefix[RH_PREFIX]) {
     int idx = rh_find(t, prefix);
     if (idx >= 0) {

@@ -307,6 +307,7 @@ static void console_scope_reset_checks(BadgeMesh &mesh, char const *root) {
     fs_shim_set_root(sub.c_str());
     CHECK(SPIFFS.begin(true));
     CHECK(mesh.setConsoleScope("zz-test") == NULL);
+    CHECK(SPIFFS.exists("/console_scope") && !SPIFFS.exists("/console_scope.new")); // written through a temp file
     mesh.loadConsoleScope();
     CHECK(strcmp(mesh.consoleScope(), "zz-test") == 0);
     CHECK(SPIFFS.format());

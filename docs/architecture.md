@@ -410,6 +410,21 @@ line. The app profile (L6) is a closed set of libraries, headers and forbidden s
 deleted); crash attribution through RTC no-init and a boot-loop breaker (2 crashes attributed to one app in 3 boots
 switch its background off and notify); task-watchdog heartbeats; quotas that refuse rather than exhaust.
 
+## Console flood scope (#290)
+
+Every flood a console line starts (`fw mesh send`, `dm`, `remote <who> login|status|cli|settings`, `telemetry`,
+`discover`, `history <who> on`, `fw advert flood`) goes out under the **console scope**, a region of its own; the
+screens keep the default scope (#163). The origin travels with the request (outbox entry, trace and remote request,
+history slot) and `BadgeMesh`'s `sendFloodScoped` overrides pick the console key while MyMesh handles that frame.
+
+- Kept in MeshCore's directory (`/console_scope`, written through a temp file), so the factory reset that clears the
+  default scope clears it too. `fw mesh scope` shows both; `fw mesh scope console <region> YES` sets it.
+- Not set: the badge refuses console floods (and drops one that still reaches the radio), never sends them unscoped.
+- History polls a console line switched on keep that origin across restarts (a `c` on their setting entry). When the
+  console scope changes, or is gone after a reset, they are switched off and saved: they were meant for the old region.
+- `tools/badge.sh` reads `fw mesh scope` through the same path before each line that can flood and refuses unless the
+  one exact status line names the allow file's `scope <region>` line (`tools/onair_guard.sh`).
+
 ## Stress run (#278)
 
 `fw stress [1-30 | stop | status]` (default 10 min; console only, the badge has no tile for it) loads the badge for

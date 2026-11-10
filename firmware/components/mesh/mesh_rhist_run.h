@@ -44,6 +44,9 @@ typedef enum { RHS_OK, RHS_FULL, RHS_NOT_RUNNING, RHS_NOT_SAVED, RHS_BAD, RHS_BU
 // it is written, so an off is never undone by a restart once a write succeeds.
 // from (#290): who switches it; a console line's asks flood with the console scope from then on (saved with it)
 rhs_result_t mesh_rhist_set(uint8_t const prefix[RH_PREFIX], bool on, uint16_t interval_min, mesh_origin_t from);
+// The console scope was changed (#290): every repeater a console line switched on goes off, saved. How many (0 also
+// before the table is made: then the first tick does it).
+size_t       mesh_rhist_off_console(void);
 // The contact was removed: its slot and its entry in the setting go (a failed write is retried as for mesh_rhist_set)
 void mesh_rhist_forget(uint8_t const prefix[RH_PREFIX]);
 // The text of a result for a screen or the console

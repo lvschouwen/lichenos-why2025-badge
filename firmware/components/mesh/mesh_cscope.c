@@ -4,6 +4,7 @@
 #include "freertos/semphr.h"
 #include "fw_console.h"
 #include "mesh.h"
+#include "mesh_rhist_run.h"
 #include "mesh_scope.h"
 
 #include <stdio.h>
@@ -61,11 +62,19 @@ void mesh_cscope_console(char const *args) {
         console_reply("mesh scope | mesh scope console <region> YES");
         return;
     }
+    char        before[MESH_SCOPE_MAX + 1];
     char const *why = mesh_scope_console_arg(args + 8, name, sizeof(name));
-    why             = why ? why : mesh_set_console_scope(name);
+    cscope_get(before, sizeof(before));
+    why = why ? why : mesh_set_console_scope(name);
     if (why) {
         console_reply("console scope not changed: %s", why);
-    } else {
-        console_reply("console scope %s: every flood from the console travels only in that region", name);
+        return;
+    }
+    console_reply("console scope %s: every flood from the console travels only in that region", name);
+    // The status history polls a console line switched on were meant for the old region: they go off (#290)
+    size_t off = strcmp(before, name) != 0 ? mesh_rhist_off_console() : 0;
+    if (off) {
+        console_reply("%u status history poll(s) from the console switched off (the scope changed): fw mesh history "
+                      "<who> on <min> YES to start them again", (unsigned)off);
     }
 }

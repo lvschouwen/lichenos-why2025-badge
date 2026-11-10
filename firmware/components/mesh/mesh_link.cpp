@@ -220,6 +220,7 @@ bool BadgeMesh::advertNow(bool flood, bool from_console) {
 }
 
 #define CONSOLE_SCOPE_FILE "/console_scope" // the region name, nothing else
+#define CONSOLE_SCOPE_TMP  "/console_scope.new"
 
 static void console_scope_live(char *name_out, size_t cap, TransportKey &key, char const *name) {
     snprintf(name_out, cap, "%s", name);
@@ -229,16 +230,32 @@ static void console_scope_live(char *name_out, size_t cap, TransportKey &key, ch
     }
 }
 
+// The name into a temp file, read back, then over the real one: a cut write never leaves another valid region. A power
+// cut between FatFs's remove and rename leaves no file: not set, so console floods are refused (fail closed).
+static bool console_scope_write(char const *clean) {
+    size_t len = strlen(clean);
+    File   f   = SPIFFS.open(CONSOLE_SCOPE_TMP, "w", true);
+    bool   ok  = f && f.write((uint8_t const *)clean, len) == len;
+    f.close();
+    char back[MESH_SCOPE_MAX + 2] = "";
+    File r                        = SPIFFS.open(CONSOLE_SCOPE_TMP, "r");
+    size_t n                      = ok && r ? r.read((uint8_t *)back, sizeof(back) - 1) : 0;
+    r.close();
+    ok = ok && n == len && memcmp(back, clean, len) == 0 && SPIFFS.rename(CONSOLE_SCOPE_TMP, CONSOLE_SCOPE_FILE);
+    if (!ok) {
+        SPIFFS.remove(CONSOLE_SCOPE_TMP);
+    }
+    return ok;
+}
+
 char const *BadgeMesh::setConsoleScope(char const *name) {
     char clean[MESH_SCOPE_MAX + 1];
     if (char const *why = mesh_scope_parse(name, clean, sizeof(clean))) {
         return why;
     }
-    File f = SPIFFS.open(CONSOLE_SCOPE_FILE, "w", true);
-    if (!f || f.write((uint8_t const *)clean, strlen(clean)) != strlen(clean)) {
+    if (!console_scope_write(clean)) {
         return "not saved: the file could not be written";
     }
-    f.close();
     console_scope_live(console_scope_name_, sizeof(console_scope_name_), console_scope_key_, clean);
     return NULL;
 }

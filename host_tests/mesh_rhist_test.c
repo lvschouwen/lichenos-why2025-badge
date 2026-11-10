@@ -289,6 +289,25 @@ static void texts(void) {
     CHECK_STR(out, "-");
 }
 
+// The console scope changed (#290): the repeaters a console line switched on go off, the screen's stay on
+static void console_off(void) {
+    uint8_t a[RH_PREFIX], b[RH_PREFIX], c[RH_PREFIX];
+    key(a, 1), key(b, 2), key(c, 3);
+    rh_init(&t);
+    rh_set(&t, a, true, 30, 0);
+    rh_set(&t, b, true, 60, 0);
+    rh_set(&t, c, true, 10, 0);
+    rh_set_console(&t, a, true);
+    rh_set_console(&t, c, true);
+    rh_set(&t, c, false, 10, 0); // already off: not counted
+    CHECK(rh_off_console(&t) == 1);
+    CHECK(!t.slot[rh_find(&t, a)].on && t.slot[rh_find(&t, b)].on && rh_on_count(&t) == 1);
+    CHECK(rh_off_console(&t) == 0);
+    char out[RH_CFG_MAX];
+    rh_cfg_encode(&t, out, sizeof(out));
+    CHECK_STR(out, "020202020202:60");
+}
+
 static void setting(void) {
     uint8_t a[RH_PREFIX] = {0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6}, b[RH_PREFIX] = {0, 1, 2, 3, 4, 5}, c[RH_PREFIX];
     key(c, 9);
@@ -433,6 +452,7 @@ int main(void) {
     ring_and_series();
     texts();
     setting();
+    console_off();
     held_by_screen();
     crash_boot_waits_interval();
     confirm_policy();

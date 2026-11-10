@@ -97,6 +97,9 @@ rh_result_t rh_set(rh_t *t, uint8_t const prefix[RH_PREFIX], bool on, uint16_t i
 // Who switched the repeater on or changed it last (#290): a console line's asks take the console scope. No-op without
 // a slot.
 void rh_set_console(rh_t *t, uint8_t const prefix[RH_PREFIX], bool console);
+// The console scope changed or is gone (#290): every switched-on repeater a console line switched on goes off (its
+// polls were meant for the old region; the history stays). Returns how many.
+size_t rh_off_console(rh_t *t);
 // The slot goes with its history (the contact was removed)
 void rh_forget(rh_t *t, uint8_t const prefix[RH_PREFIX]);
 // At a start: the switched-on repeaters from the settings, each asked first at RH_FIRST_S + i * RH_STAGGER_S, or after

@@ -1728,11 +1728,11 @@ extern "C" size_t mesh_channel_text_max(void) {
 
 // from: a console line's send is refused while the console scope is not set (#290), never sent unscoped
 static bool send_ready(char const **why, mesh_origin_t from = MESH_FROM_SCREEN) {
-    if ((*why = mesh_cscope_refusal(from == MESH_FROM_CONSOLE)) != NULL) {
-        return false;
-    }
     if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || !outbox || mesh_is_stopped()) {
         *why = stopped_why();
+        return false;
+    }
+    if ((*why = mesh_cscope_refusal(from == MESH_FROM_CONSOLE)) != NULL) {
         return false;
     }
     if (!ident_tx_allowed()) {

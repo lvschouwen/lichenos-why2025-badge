@@ -53,6 +53,8 @@ expect deny "$b mesh scope console zz-bench YES" "$tmp/allow-bare"
 # A scope line is never a contact target
 expect deny "$b mesh dm scope hi" "$tmp/allow-bare"
 expect deny "$b mesh remote scope status"
+expect deny "$b mesh remote settings login"
+expect pass "$b mesh remote TESTNODE settings"
 expect pass "$b mesh remote TESTNODE status" "$tmp/allow-bare"
 # The status history (#290): its polls are console floods, so its target must be an allowed node
 expect pass "$b mesh history"
@@ -130,6 +132,16 @@ FAKE_SCOPE="" sent refused fw 192.0.2.1 mesh telemetry abcdef123456 YES
 BADGE_REPO="$tmp/bare" sent refused fw 192.0.2.1 mesh send '#badgetest' hello
 FAKE_SCOPE="" sent sent fw 192.0.2.1 mesh out
 FAKE_SCOPE="" sent sent fw 192.0.2.1 mesh remote settings
+# A remote settings read logs in and asks on air: the scope check applies; "settings" with more words is a target
+FAKE_SCOPE="" sent refused fw 192.0.2.1 mesh remote TESTNODE settings
+sent sent fw 192.0.2.1 mesh remote TESTNODE settings
+sent refused fw 192.0.2.1 mesh remote settings login
+# Only one exact status line speaks for the badge: a message logged around the reply cannot spoof it
+FAKE_SCOPE="chat: default None | console zz-bench" sent refused fw 192.0.2.1 mesh send '#badgetest' hi
+FAKE_SCOPE="default None | console zz-bench x" sent refused fw 192.0.2.1 mesh send '#badgetest' hi
+FAKE_SCOPE=$'default None | console zz-bench\ndefault None | console zz-bench' sent refused fw 192.0.2.1 mesh send '#badgetest' hi
+FAKE_SCOPE=$'chat: hello\ndefault None | console zz-bench\nI (123) mesh: x' sent sent fw 192.0.2.1 mesh send '#badgetest' hi
+FAKE_SCOPE=$'default None | console zz-bench | console zz-other' sent refused fw 192.0.2.1 mesh send '#badgetest' hi
 sent refused fw 192.0.2.1 mesh scope console zz-other YES
 sent sent fw 192.0.2.1 mesh history TESTNODE on 60 YES
 FAKE_SCOPE="default None | console not set" sent refused fw 192.0.2.1 mesh history TESTNODE on 60 YES

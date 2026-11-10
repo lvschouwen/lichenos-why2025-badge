@@ -57,15 +57,21 @@ onair_words() {
 # dm, telemetry, trace, discover, remote, and history (switching a repeater's polls on or changing them); without one:
 # "advert" (a flood advert from the console, or the Advertise setting's, which may be flood).
 onair_needs_scope() {
-    local w1 w2 w3 _rest
-    read -r w1 w2 w3 _rest <<<"$(onair_words "$1")"
+    local w1 w2 w3 w4 _rest
+    read -r w1 w2 w3 w4 _rest <<<"$(onair_words "$1")"
     [ "$w1" = advert ] && return 0
     [ "$w1" = mesh ] && [ -n "$w3" ] || return 1
     case "$w2" in
         send | dm | telemetry | trace | discover | history) return 0 ;;
-        remote) [ "$w3" != settings ] ;;
+        remote) ! onair_remote_show "$w3" "$w4" ;; # "<who> settings" logs in and reads: console floods
         *) return 1 ;;
     esac
+}
+
+# "mesh remote settings" alone shows the last read and sends nothing; "settings" with more after it is a target (a
+# node whose name starts with "settings"), so it is checked as one
+onair_remote_show() {
+    [ "$1" = settings ] && [ -z "$2" ]
 }
 
 # The console scope query for a line about to be sent, in the line's own form ("fw mesh scope" when it starts with fw)
@@ -76,18 +82,24 @@ onair_scope_query() {
     esac
 }
 
-# Verdict on the badge's answer to the scope query ($1): prints "pass" or "deny <reason>". The badge answers
-# "default <name|None> | console <name|not set>" (mesh_scope_status_text); no answer, or anything else, is a deny.
+# Verdict on the badge's answer to the scope query ($1): prints "pass" or "deny <reason>". The badge answers with one
+# whole line "default <name|None> | console <name|not set>" (mesh_scope_status_text). Only an exact line counts, and
+# exactly one: a message logged around the reply ("x: default a | console b", or a second status line) can never
+# speak for the badge. No such line, or two, is a deny.
 onair_scope_verdict() {
-    local want have
+    local want have lines
     want=$(onair_allowed_scope)
     if [ -z "$want" ]; then
         echo "deny no 'scope <region>' line in .claude/onair-allow.local: no console line with a target goes on air without one (#290)"
         return
     fi
-    have=$(printf '%s\n' "$1" | tr -d '\r' | sed -n 's/.*| console \(.*\)$/\1/p' | head -n 1)
-    have=${have%"${have##*[![:space:]]}"}
-    if [ -n "$have" ] && [ "$(onair_scope_norm "$have")" = "$want" ]; then echo pass; else
+    lines=$(printf '%s\n' "$1" | tr -d '\r' | grep -E '^default [^ |]+ \| console ([^ |]+|not set)$' || true)
+    if [ "$(printf '%s' "$lines" | grep -c '^')" != 1 ]; then
+        echo "deny no single status line in the badge's answer to the scope query: not sent (#290)"
+        return
+    fi
+    have=${lines##* | console }
+    if [ "$have" != "not set" ] && [ "$(onair_scope_norm "$have")" = "$want" ]; then echo pass; else
         echo "deny the badge's console scope is '${have:-no answer}', not the scope line of .claude/onair-allow.local: fw mesh scope console <region> YES first (#290)"
     fi
 }
@@ -107,7 +119,7 @@ onair_verdict() {
                 echo "deny on air only the test node: 'mesh $w2 $w3' targets a contact not in .claude/onair-allow.local (#287)"
             fi ;;
         remote)
-            if [ -z "$w3" ] || [ "$w3" = settings ] || onair_allowed "$w3"; then echo pass; else
+            if [ -z "$w3" ] || onair_remote_show "$w3" "$w4" || onair_allowed "$w3"; then echo pass; else
                 echo "deny on air only the test node: 'mesh remote $w3' targets a node not in .claude/onair-allow.local (#287)"
             fi ;;
         scope)

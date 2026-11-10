@@ -34,6 +34,8 @@ static bool              table_failed;
 static int               holds; // screens that ask a repeater, open now (atomic)
 // Under rh_lock: the setting does not match the table (a write failed); the tick writes it again until it does
 static bool     dirty;
+static bool     console_off_pending; // #290: the console scope changed before the table was made
+static bool     save_locked(rh_t *t);
 static uint32_t retry_s;
 
 static rh_t *get_table(void) {
@@ -67,6 +69,13 @@ static void make_table(void) {
     rh_load(t, prefix, minutes, n, mesh_uptime_s(), crash);
     for (size_t i = 0; i < n; i++) {
         rh_set_console(t, prefix[i], console[i]); // #290: a console line's polls keep the console scope
+    }
+    // #290: the console scope is gone (a reset) or changed before the table was made: the console's polls go off
+    bool   gone = mesh_cscope_refusal(true) || __atomic_exchange_n(&console_off_pending, false, __ATOMIC_ACQ_REL);
+    size_t off  = gone ? rh_off_console(t) : 0;
+    if (off) {
+        save_locked(t); // rh_lock is not taken yet: nothing else sees the table before it is published below
+        ESP_LOGW(TAG, "status history: %u console poll(s) switched off: the console scope changed", (unsigned)off);
     }
     if (n) {
         ESP_LOGI(TAG, "status history: %u repeater(s) switched on, first ask in %s", (unsigned)n,
@@ -244,6 +253,24 @@ char const *mesh_rhist_result_text(rhs_result_t r) {
     case RHS_BUSY: return "MeshCore is busy: try again";
     default: return "That interval is not offered";
     }
+}
+
+size_t mesh_rhist_off_console(void) {
+    rh_t *t = get_table();
+    if (!t) {
+        __atomic_store_n(&console_off_pending, true, __ATOMIC_RELEASE); // make_table does it
+        return 0;
+    }
+    lock(portMAX_DELAY); // as mesh_rhist_forget: these polls must stop
+    size_t n = rh_off_console(t);
+    if (n) {
+        save_locked(t); // a failure is retried by the tick
+    }
+    unlock();
+    if (n) {
+        ESP_LOGW(TAG, "status history: %u console poll(s) switched off: the console scope changed", (unsigned)n);
+    }
+    return n;
 }
 
 // ---- the console --------------------------------------------------------------------------------------------------------
