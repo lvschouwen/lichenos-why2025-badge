@@ -131,12 +131,20 @@ static void depth_64(void) {
 
 static void fmt_line(void) {
     esp_hosted_frame_pool_stats_t s = {
-        .depth = 10, .block = 1600, .in_use = 2, .peak = 7, .waits = 3, .drops = 1, .bad_frees = 0, .no_pool = 0};
+        .depth = 10, .block = 1600, .in_use = 2, .peak = 7, .waits = 3, .drops = 1, .bad_frees = 0, .no_pool = 0,
+        .mem = ESP_HOSTED_FRAME_POOL_MEM_PSRAM};
     char   line[160];
     size_t n = esp_hosted_frame_pool_fmt(line, sizeof(line), "c6: pool tx", &s);
-    CHECK(strcmp(line, "c6: pool tx depth 10 block 1600 ram 16000 in_use 2 peak 7 waits 3 drops 1 bad_frees 0 no_pool 0") ==
-          0);
+    CHECK(strcmp(line, "c6: pool tx depth 10 block 1600 ram 16000 mem psram in_use 2 peak 7 waits 3 drops 1 bad_frees 0 "
+                       "no_pool 0") == 0);
     CHECK(n == strlen(line));
+    // Which memory the pool got, as the bench reads it; a pool that is off says none
+    s.mem = ESP_HOSTED_FRAME_POOL_MEM_INTERNAL;
+    esp_hosted_frame_pool_fmt(line, sizeof(line), "p", &s);
+    CHECK(strstr(line, " mem internal ") != NULL);
+    s.mem = ESP_HOSTED_FRAME_POOL_MEM_NONE;
+    esp_hosted_frame_pool_fmt(line, sizeof(line), "p", &s);
+    CHECK(strstr(line, " mem none ") != NULL);
     char small[8];
     esp_hosted_frame_pool_fmt(small, sizeof(small), "x", &s);
     CHECK(strlen(small) == 7);
