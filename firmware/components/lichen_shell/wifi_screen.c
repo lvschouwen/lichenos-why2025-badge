@@ -1,10 +1,11 @@
 // Settings > Wi-Fi (#66): scan on core 0, pick a network, type the password, join. The scan blocks for seconds over
-// ESP-Hosted, so it never runs on the LVGL task; its result comes back through lv_async_call and is dropped if the
+// ESP-Hosted, so it never runs on the LVGL task; its result comes back through lichen_sys_ui_call and is dropped if the
 // screen is gone by then.
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lichen_mem.h"
 #include "lichen_radio.h"
 #include "lichen_sys_net.h"
 #include "lichen_sys_ui.h"
@@ -152,7 +153,7 @@ static void on_poll(lv_timer_t *timer) {
             set_status("Connected to %s", a);
         }
         if (setup_done) {
-            lv_async_call(run_done, setup_done); // the screen goes: not from inside its timer
+            lichen_sys_ui_call(run_done, setup_done, 0); // the screen goes: not from inside its timer
             setup_done = NULL;
         }
     } else if (st == LICHEN_SYS_WIFI_JOIN_FAILED_KEPT_OLD) {
@@ -375,7 +376,7 @@ static void rebuild_rows(void) {
 static void on_scan_done(void *data) {
     scan_result_t *res = data;
     if (!screen || res->gen != gen) { // Esc was pressed (or the screen was reopened) while the scan ran
-        free(res);
+        lichen_free(NULL, res);
         return;
     }
     // The user moved while the scan ran (to Skip, say): the result does not take the focus from them (#128)
@@ -403,15 +404,17 @@ static void on_scan_done(void *data) {
             set_status("Choose a network");
         }
     }
-    free(res);
+    lichen_free(NULL, res);
 }
 
 static void scan_task(void *arg) {
-    scan_result_t *res = calloc(1, sizeof(*res));
+    scan_result_t *res = lichen_alloc(NULL, sizeof(*res), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (res) {
         res->gen = (uint32_t)(uintptr_t)arg;
         res->ok  = lichen_sys_wifi_scan(res->aps, MAX_APS, &res->n);
-        lichen_sys_ui_call(on_scan_done, res, 0); // waits for the LVGL lock as long as it takes
+        if (!lichen_sys_ui_call(on_scan_done, res, 0)) { // waits for the LVGL lock as long as it takes
+            lichen_free(NULL, res);                        // not queued: still ours
+        }
     }
 }
 

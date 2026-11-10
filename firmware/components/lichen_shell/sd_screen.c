@@ -1,6 +1,6 @@
 // Settings > SD card (#99): the card's state, Mount/Unmount and Format. sd_mount, sd_unmount and sd_format wait for
 // the card's lock and talk to the card, so they run on a short-lived task on core 0 (like the Wi-Fi scan and MeshCore's
-// settings) and the answer comes back through lv_async_call. The page itself only reads lichen_sys_sd_info(), the cached state,
+// settings) and the answer comes back through the UI service. The page itself only reads lichen_sys_sd_info(), the cached state,
 // once a second (a "fw sd mount" on the console shows up here too). Format asks twice, each time with a careful
 // dialog whose countdown cancels: never an erase without two deliberate Enters.
 #include "esp_log.h"
@@ -27,7 +27,7 @@ static char const TAG[] = "sdpage";
 #define ASK_SECONDS 20
 
 // The job's answer: JOB_PENDING until the task stores ok (0/1). The task also queues job_done; the page's 1 s refresh
-// collects it too, so a failed lv_async_call never leaves the page saying "Formatting..." for good.
+// collects it too, so a failed UI call never leaves the page saying "Formatting..." for good.
 #define JOB_PENDING (-1)
 static atomic_int job_outcome = JOB_PENDING;
 
@@ -224,7 +224,7 @@ static lv_obj_t *build_sd(void) {
     lv_obj_set_style_text_color(page.result, lv_color_hex(THEME_AMBER), 0);
     menu_note(menu, "Apps' files: " LICHEN_SYS_SD_LICHEN_DIR);
     menu_note(menu, "No card detect: after inserting a card, mount it here.");
-    job_collect(); // a job that ended while the page was closed and its lv_async_call failed
+    job_collect(); // a job that ended while the page was closed and its UI call failed
     if (job == SDS_IDLE) {
         result[0] = '\0'; // an old outcome is news no more
     }

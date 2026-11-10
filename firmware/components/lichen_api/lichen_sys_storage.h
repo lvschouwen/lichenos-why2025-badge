@@ -9,7 +9,12 @@
 // forbids lichen_sys_* in L6; an app reaches its own directory through lichen_fs.h. The types repeat sd_policy.h's
 // (the gate cannot include a lower component's header); lichen_os checks that they stay equal.
 
-#define LICHEN_SYS_SD_LICHEN_DIR "/sd/lichen" // Lichen's own directory on the card; equal to sdcard's SD_LICHEN_DIR
+// The mount points (#286): the shell and the gate name a drive by these, never by a literal. Equal to storage's
+// STORAGE_BASE and sdcard's SD_BASE, which the gate cannot include (asserted in lichen_os, pinned by
+// lichen_sys_pure_test). LICHEN_SYS_SD_LICHEN_DIR is Lichen's own directory on the card, sdcard's SD_LICHEN_DIR.
+#define LICHEN_SYS_STORAGE_BASE  "/storage"
+#define LICHEN_SYS_SD_BASE       "/sd"
+#define LICHEN_SYS_SD_LICHEN_DIR LICHEN_SYS_SD_BASE "/lichen"
 
 typedef enum {
     LICHEN_SD_OFF,     // never mounted, or unmounted by hand

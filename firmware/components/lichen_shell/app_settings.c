@@ -15,6 +15,7 @@
 #include "lichen_sys_net.h"
 #include "lichen_sys_psram.h"
 #include "lichen_sys_storage.h"
+#include "lichen_sys_ui.h"
 #include "lichen_sys_update.h"
 #include "lock_combo.h"
 #include "menu.h"
@@ -201,7 +202,8 @@ static void open_arrange(void *arg) {
     uint8_t now      = settings_get_u8("home_layout", HOME_TILES);
     bool    relayout = now != layout_at_open;
     layout_at_open   = now; // on_display_delete's own rebuild would come after and replace the arranging home
-    lv_async_call(arrange_later, relayout ? (void *)1 : NULL); // outside this row's key handling: the page is deleted
+    // Outside this row's key handling: the page is deleted
+    lichen_sys_ui_call(arrange_later, relayout ? (void *)1 : NULL, 0);
 }
 
 static lv_obj_t *order_row;
@@ -253,7 +255,7 @@ static void on_display_delete(lv_event_t *e) {
     style_row  = NULL;
     lock_row   = NULL;
     if (settings_get_u8("home_layout", HOME_TILES) != layout_at_open) {
-        lv_async_call(rebuild_later, NULL); // after the screen being deleted is gone
+        lichen_sys_ui_call(rebuild_later, NULL, 0); // after the screen being deleted is gone
     }
 }
 

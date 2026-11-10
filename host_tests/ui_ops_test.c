@@ -137,7 +137,20 @@ static void f_release(lichen_raw_key_fn fn, void *arg) {
     seen.arg = arg;
 }
 
+static bool f_later(void (*fn)(void *), void *arg) {
+    note("later");
+    seen.fn  = (void const *)fn;
+    seen.arg = arg;
+    return true;
+}
+static void f_later_cancel(void (*fn)(void *), void *arg) {
+    note("later_cancel");
+    seen.fn  = (void const *)fn;
+    seen.arg = arg;
+}
+
 static lichen_ui_ops_t const full = {
+    .later = f_later, .later_cancel = f_later_cancel,
     .home = f_home, .back = f_back, .open_keyed = f_open_keyed, .open_reuse_count = f_reuse_count,
     .open_count_reuse = f_count_reuse, .screen_open = f_screen_open, .on_esc = f_on_esc, .on_search = f_on_search,
     .scroll_by = f_scroll_by, .page_create = f_page_create, .scroll_tame = f_scroll_tame,
@@ -177,6 +190,8 @@ static void not_up(void) {
     CHECK(!lichen_date_text(NULL, 0)); // nothing to write into: still no crash
     CHECK(!lichen_keys_raw_take(raw_fn, &token));
     lichen_keys_raw_release(raw_fn, &token);
+    CHECK(!lichen_ui_ops_later(void_fn, &token)); // #286: not queued, so a menu row's Enter does nothing yet
+    lichen_ui_ops_later_cancel(void_fn, &token);
     CHECK(seen.n == before);
 }
 
@@ -234,6 +249,14 @@ static void forwards_rest(void) {
     seen.arg = NULL;
     lichen_keys_raw_release(raw_fn, &token);
     CHECK(strcmp(seen.call, "release") == 0 && seen.fn == (void const *)raw_fn && seen.arg == &token);
+    seen.fn  = NULL;
+    seen.arg = NULL;
+    CHECK(lichen_ui_ops_later(void_fn, &token) && strcmp(seen.call, "later") == 0 && seen.arg == &token);
+    CHECK(seen.fn == (void const *)void_fn);
+    seen.fn  = NULL;
+    seen.arg = NULL;
+    lichen_ui_ops_later_cancel(void_fn, &token);
+    CHECK(strcmp(seen.call, "later_cancel") == 0 && seen.fn == (void const *)void_fn && seen.arg == &token);
 }
 
 // The key hash is the gate's own (pure): the same before the shell is up as after, never SHELL_KEY_UNIQUE

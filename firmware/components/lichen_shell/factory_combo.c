@@ -156,7 +156,7 @@ void factory_combo_start(void) {
     lichen_sys_factory_combo_init(&combo);
     start_us = esp_timer_get_time();
     TaskHandle_t started = NULL;
-    if (!lichen_task_start(NULL, "factory_keys", combo_task, NULL, TASK_STACK, LICHEN_PRIO_APP_LOOP, &started)) {
+    if (!lichen_task_start(NULL, "factory_keys", combo_task, NULL, TASK_STACK, LICHEN_PRIO_SERVICE, &started)) {
         ESP_LOGE(TAG, "no boot key combo: no task");
         return;
     }

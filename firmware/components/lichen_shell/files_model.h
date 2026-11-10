@@ -2,6 +2,8 @@
 // Files app (#71): the pure rules. Paths, what is protected, how a listing sorts, how a text file is cut into screens.
 // ESP-free, host-tested in host_tests/files_model_test.c; files_ops.c does the file work, app_files.c the screens.
 
+#include "lichen_sys_storage.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -12,8 +14,8 @@ extern "C" {
 
 #define FILES_PATH_MAX 256
 #define FILES_NAME_MAX 128 // longer names are left out of the listing (counted as skipped)
-#define FILES_STORAGE  "/storage"
-#define FILES_SD       "/sd"
+#define FILES_STORAGE  LICHEN_SYS_STORAGE_BASE
+#define FILES_SD       LICHEN_SYS_SD_BASE
 
 typedef struct {
     char     name[FILES_NAME_MAX];

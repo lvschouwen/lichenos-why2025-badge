@@ -363,8 +363,9 @@ guard, not a security boundary: apps are compiled in and share the address space
 - **The UI service owns the LVGL lock** (#225, `lichen_os/lichen_ui_call.c`): the shell and main take it through
   `lichen_sys_ui_lock`/`_unlock` and hand work over with `lichen_sys_ui_call`; apps use `lichen_ui_call`; builders set
   the default group only through `lichen_ui_with_group`. Calls for the LVGL task wait in a 16-entry FIFO that one
-  `lv_async_call` drains per batch (a burst past it falls back to one async call each). Order is FIFO among
-  UI-service calls; a raw `lv_async_call` stays newest first, and the two do not order against each other. `board`
+  `lv_async_call` drains per batch (a burst past it falls back to one async call each). Order is FIFO: since #286
+  nothing outside the UI service calls `lv_async_call` (`tools/layers.conf` owner-only), and `lichen_sys_ui_cancel`
+  takes back a queued call whose argument is going (a menu row's delete). `board`
   keeps the port lock for the port setup at boot (display, keyboard) only: it sits below `lichen_os`.
 - **The lock-owner check** (`CONFIG_LICHEN_UI_LOCK_CHECK_MODE`: off, **count (default)**, assert): the linker wraps
   LVGL's allocator and `lv_inv_area`; once `main.c` arms it after the keyboard is set up, LVGL touched by a task that

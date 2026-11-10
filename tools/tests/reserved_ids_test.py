@@ -1,12 +1,14 @@
-"""Host test (#294): every folder the OS keeps directly under /storage or /sd (`STORAGE_BASE "/x"`, `SD_BASE "/x"` in
-firmware/ and shared/) is a reserved app id in lichen_api/fs_path.c, so no app can be handed an OS folder as its own
-data folder (app folders are <base>/<id>)."""
+"""Host test (#294): every folder the OS keeps directly under /storage or /sd (`STORAGE_BASE "/x"`, `SD_BASE "/x"` and
+the gate's LICHEN_SYS_ copies of #286, in firmware/ and shared/) is a reserved app id in lichen_api/fs_path.c, so no app
+can be handed an OS folder as its own data folder (app folders are <base>/<id>)."""
 import pathlib
 import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-FOLDER = re.compile(r'(?<!define )\b(?:STORAGE_BASE|SD_BASE)\s*"/([A-Za-z0-9_-]+)')  # not the #define itself
+# Not the #define itself; the gate's copies (LICHEN_SYS_STORAGE_BASE, LICHEN_SYS_SD_BASE) count too. A folder is a name
+# followed by "/" or the end of the literal: a file at the root ("/ota_token.txt") is not an app id's folder.
+FOLDER = re.compile(r'(?<!define )\b(?:LICHEN_SYS_)?(?:STORAGE_BASE|SD_BASE)\s*"/([A-Za-z0-9_-]+)(?=[/"])')
 RESERVED = re.compile(r'RESERVED_IDS\[\]\s*=\s*\{([^}]*)\}')
 
 

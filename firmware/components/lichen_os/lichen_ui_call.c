@@ -4,8 +4,9 @@
 //
 // Calls for the LVGL task wait in a small FIFO (ui_call_queue.c) and one LVGL async call drains each batch: the same
 // scheduling as one lv_async_call per call had (the drain runs on the next lv_timer_handler pass, in the same pass when
-// queued from the LVGL task) and one allocation per batch instead of per call. FIFO among UI-service calls; a raw
-// lv_async_call (LVGL-task code still makes them) stays newest first, and the two do not order against each other.
+// queued from the LVGL task) and one allocation per batch instead of per call. FIFO: since #286 no code outside this
+// file calls lv_async_call (tools/layers.conf), so every deferred call in the OS runs in the order it was queued,
+// unless a burst overflows the queue.
 #include "lichen_os.h"
 #include "lichen_sys_ui.h"
 #include "lichen_ui.h"
@@ -96,6 +97,15 @@ bool lichen_sys_ui_call(void (*fn)(void *), void *arg, uint32_t timeout_ms) {
         ESP_LOGE(TAG, "ui call %p not queued: out of memory", (void *)fn);
     }
     return ok;
+}
+
+void lichen_sys_ui_cancel(void (*fn)(void *), void *arg) {
+    if (!fn || !lichen_sys_ui_lock(0)) {
+        return; // no display: nothing was queued
+    }
+    ui_call_queue_cancel(&s_queue, fn, arg);
+    lv_async_call_cancel(fn, arg); // one that a full queue handed to LVGL directly (ui_call_queue_hand_over)
+    lichen_sys_ui_unlock();
 }
 
 bool lichen_ui_call(void (*fn)(void *), void *arg) {

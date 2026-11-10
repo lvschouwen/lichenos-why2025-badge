@@ -78,9 +78,7 @@ static chat_t                   *chats;    // every chat screen that exists, new
 static mesh_chat_target_t const *building; // the target build_chat commits; set only around its shell_open
 
 static void add_line(lv_obj_t *parent, char const *text, uint32_t color) {
-    lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_width(label, LV_PCT(100));
-    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_t *label = lichen_label_wrap(parent, LV_PCT(100));
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
     lv_label_set_text(label, text);
 }

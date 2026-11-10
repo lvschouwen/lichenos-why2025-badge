@@ -224,6 +224,7 @@ lichen_sys_storage_free_bytes	SYSTEM	any	lichen_sys_storage.h
 lichen_sys_storage_mounted	SYSTEM	any	lichen_sys_storage.h
 lichen_sys_thermal_info	SYSTEM	any	lichen_sys_thermal.h
 lichen_sys_ui_call	SYSTEM	any	lichen_sys_ui.h
+lichen_sys_ui_cancel	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lock	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_cmd	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_hits	SYSTEM	any	lichen_sys_ui.h
@@ -267,6 +268,8 @@ lichen_task_leftovers	BACKGROUND	unspecified	lichen_task.h
 lichen_task_start	BACKGROUND	unspecified	lichen_task.h
 lichen_task_start_in	BACKGROUND	unspecified	lichen_task.h
 lichen_ui_call	-	any	lichen_ui.h
+lichen_ui_ops_later	SYSTEM	lvgl	lichen_ui_ops.h
+lichen_ui_ops_later_cancel	SYSTEM	lvgl	lichen_ui_ops.h
 lichen_ui_ops_set	SYSTEM	any	lichen_ui_ops.h
 lichen_ui_with_group	-	lvgl	lichen_ui.h
 list_filter_edit	-	unspecified	list_filter.h

@@ -8,6 +8,8 @@
 #include <string.h>
 
 _Static_assert(sizeof(LICHEN_SYS_SD_LICHEN_DIR) == sizeof(SD_LICHEN_DIR), "the gate's Lichen directory follows sdcard's");
+_Static_assert(sizeof(LICHEN_SYS_SD_BASE) == sizeof(SD_BASE), "the gate's SD mount point follows sdcard's");
+_Static_assert(sizeof(LICHEN_SYS_STORAGE_BASE) == sizeof(STORAGE_BASE), "the gate's drive mount follows storage's");
 
 void lichen_sys_sd_info(lichen_sd_info_t *out) {
     sd_info_t in;

@@ -99,7 +99,7 @@ static void reply_free(reply_t *r) {
         secure_wipe(r->text, r->len);
         lichen_free(NULL, r->text);
     }
-    free(r);
+    lichen_free(NULL, r);
 }
 
 static void on_reply(void *arg) {
@@ -130,7 +130,7 @@ static void on_reply(void *arg) {
 }
 
 static bool post_reply(job_t *j, char const *out, size_t len) {
-    reply_t *r = calloc(1, sizeof(*r));
+    reply_t *r = lichen_alloc(NULL, sizeof(*r), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!r) {
         return false;
     }
@@ -169,13 +169,13 @@ static void worker(void *arg) {
     ESP_LOGI(TAG, "command done, stack never below %u bytes free", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     lichen_free(NULL, j->line);
     lichen_free(NULL, j->exec_buf);
-    free(j);
+    lichen_free(NULL, j);
     s_busy = false; // after the free: the next run may start from the LVGL task at once
 }
 
 // LVGL task: starts the worker for line (already trimmed). False when it could not start (nothing is left allocated).
 static bool start_job(con_t *c, char const *line) {
-    job_t *j = calloc(1, sizeof(*j));
+    job_t *j = lichen_alloc(NULL, sizeof(*j), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!j) {
         return false;
     }
@@ -195,7 +195,7 @@ static bool start_job(con_t *c, char const *line) {
     }
     lichen_free(NULL, j->line);
     lichen_free(NULL, j->exec_buf);
-    free(j);
+    lichen_free(NULL, j);
     return false;
 }
 
@@ -284,7 +284,7 @@ static void on_delete(lv_event_t *e) {
     secure_wipe(c->buf, OUT_CAP);
     lichen_free(NULL, c->buf);
     cur = NULL;
-    free(c);
+    lichen_free(NULL, c);
 }
 
 static void focus_style(lv_obj_t *obj) {
@@ -331,7 +331,7 @@ static void build_entry(con_t *c, lv_obj_t *screen) {
 
 static lv_obj_t *build_console(void) {
     lv_obj_t *screen = shell_page_create();
-    con_t    *c      = calloc(1, sizeof(*c));
+    con_t    *c      = lichen_alloc(NULL, sizeof(*c), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!c) {
         lv_label_set_text(lv_label_create(screen), "Out of memory");
         return screen;
@@ -345,7 +345,7 @@ static lv_obj_t *build_console(void) {
     }
     if (!c->buf || !s_hist) {
         lichen_free(NULL, c->buf);
-        free(c);
+        lichen_free(NULL, c);
         lv_label_set_text(lv_label_create(screen), "Out of memory");
         return screen;
     }

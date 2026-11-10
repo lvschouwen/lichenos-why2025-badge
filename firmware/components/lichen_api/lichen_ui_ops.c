@@ -24,6 +24,18 @@ static lichen_ui_ops_t const *ops(void) {
 // The member of the shell's table, NULL when there is no table yet or the shell left it out
 #define OP(member) (ops()->member)
 
+bool lichen_ui_ops_later(void (*fn)(void *), void *arg) {
+    bool (*later)(void (*)(void *), void *) = OP(later);
+    return later && later(fn, arg);
+}
+
+void lichen_ui_ops_later_cancel(void (*fn)(void *), void *arg) {
+    void (*cancel)(void (*)(void *), void *) = OP(later_cancel);
+    if (cancel) {
+        cancel(fn, arg);
+    }
+}
+
 void shell_home(void) {
     void (*fn)(void) = OP(home);
     if (fn) {

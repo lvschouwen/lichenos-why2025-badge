@@ -458,7 +458,7 @@ add_executable(ota_path_test
 
 target_include_directories(ota_path_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/storage
 )
 
 target_compile_options(ota_path_test PRIVATE
@@ -1452,17 +1452,17 @@ add_test(NAME sd_settings_model_test COMMAND sd_settings_model_test)
 
 # The gate's storage / update / factory calls over the components' pure functions (#227)
 add_executable(lichen_sys_pure_test ${CMAKE_CURRENT_SOURCE_DIR}/lichen_sys_pure_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/lichen_sys_pure.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard/sd_policy.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/factory_plan.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota/ota_autooff.c)
-target_include_directories(lichen_sys_pure_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota)
+target_include_directories(lichen_sys_pure_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/storage)
 target_compile_options(lichen_sys_pure_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME lichen_sys_pure_test COMMAND lichen_sys_pure_test)
 
 add_executable(files_model_test ${CMAKE_CURRENT_SOURCE_DIR}/files_model_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/files_model.c)
-target_include_directories(files_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_include_directories(files_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(files_model_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME files_model_test COMMAND files_model_test)
 
 add_executable(files_ops_test ${CMAKE_CURRENT_SOURCE_DIR}/files_ops_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/files_ops.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/files_model.c)
-target_include_directories(files_ops_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_include_directories(files_ops_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_definitions(files_ops_test PRIVATE FILES_HOST_TEST)
 target_compile_options(files_ops_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME files_ops_test COMMAND files_ops_test)

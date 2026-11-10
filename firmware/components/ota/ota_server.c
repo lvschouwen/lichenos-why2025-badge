@@ -35,6 +35,7 @@
 #include "miniz.h" // the ROM inflater
 #include "ota_os.h"
 #include "sha256.h"
+#include "storage.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -49,7 +50,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define TOKEN_FILE      "/storage/ota_token.txt"
+#define TOKEN_FILE      STORAGE_BASE "/ota_token.txt"
 #define FIRMWARE_MAX    (4 * 1024 * 1024) // one app slot (firmware/partitions.csv)
 #define FILE_MAX        (4 * 1024 * 1024) // received into PSRAM before it touches storage (#40)
 #define ASSETS_MAX      (3 * 1024 * 1024) // the assets partition (firmware/partitions.csv, #22)
@@ -381,7 +382,7 @@ static void mkdir_parents(char const *path) {
     char dir[OTA_PATH_MAX + 16];
     snprintf(dir, sizeof(dir), "%s", path);
     // Start below the mount point: mkdir on /storage itself fails with EINVAL
-    for (char *p = dir + strlen("/storage/"); *p; p++) {
+    for (char *p = dir + strlen(STORAGE_BASE "/"); *p; p++) {
         if (*p == '/') {
             *p = '\0';
             if (mkdir(dir, 0775) != 0 && errno != EEXIST) {

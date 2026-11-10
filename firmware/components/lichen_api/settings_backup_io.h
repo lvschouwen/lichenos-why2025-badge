@@ -3,12 +3,13 @@
 // writes and the file work; the rules are settings_backup.c's. None of these runs on the LVGL task (NVS commits and SD
 // I/O), and the load is two steps so the person sees what changes before anything is written.
 
+#include "lichen_sys_storage.h"
 #include "settings_backup.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 
-#define SETTINGS_BACKUP_PATH "/sd/lichen/settings.txt"
+#define SETTINGS_BACKUP_PATH LICHEN_SYS_SD_LICHEN_DIR "/settings.txt"
 
 typedef enum {
     SBK_OK,

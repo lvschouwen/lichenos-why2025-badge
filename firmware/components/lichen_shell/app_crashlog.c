@@ -3,7 +3,7 @@
 // "fw crash clear". Both ask first with a careful dialog: the countdown cancels and Enter needs a fresh press. The tile
 // counts the entries new since the app was last opened, and after a crash home offers to open it once.
 // A delete or a clear writes flash and NVS: it runs on a short-lived task on core 0 (as sd_screen.c's jobs do) and the
-// outcome comes back through lv_async_call; the list's 1 s timer collects it too, should that call have failed.
+// outcome comes back through lichen_sys_ui_call; the list's 1 s timer collects it too, should that call have failed.
 #include "app_icons.h"
 #include "screen_ids.h"
 #include "lichen_mem.h"
@@ -220,7 +220,7 @@ static void clear_answer(bool yes) {
             menu_set_value(s_v.clear_row, "Clearing...");
         }
     } else {
-        lv_async_call(refill, NULL); // shows why; not from inside the dialog's key handling
+        lichen_sys_ui_call(refill, NULL, 0); // shows why; not from inside the dialog's key handling
     }
 }
 
@@ -232,11 +232,11 @@ static void on_copy(void *arg) {
     }
     if (!lichen_sys_sd_mounted()) {
         snprintf(s_result, sizeof(s_result), "No SD card in the badge: nothing copied.");
-        lv_async_call(refill, NULL);
+        lichen_sys_ui_call(refill, NULL, 0);
         return;
     }
     if (!job_start(JOB_COPY)) {
-        lv_async_call(refill, NULL); // shows why
+        lichen_sys_ui_call(refill, NULL, 0); // shows why
     } else if (s_v.copy_row) {
         menu_set_value(s_v.copy_row, "Copying...");
     }
@@ -418,7 +418,7 @@ static void open_viewer(void *arg) {
 
 static void notice_answer(bool yes) {
     if (yes) {
-        lv_async_call(open_viewer, NULL);
+        lichen_sys_ui_call(open_viewer, NULL, 0);
     }
 }
 

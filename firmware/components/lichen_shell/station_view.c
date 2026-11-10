@@ -15,6 +15,7 @@
 #include "lichen_mem.h"
 #include "lichen_sys_clock.h"
 #include "lichen_sys_mem.h"
+#include "lichen_sys_ui.h"
 #include "lichen_ui.h"
 #include "shell_ui_ops.h"
 #include "theme.h"
@@ -218,7 +219,7 @@ static lv_obj_t *add_line(lv_obj_t *parent, int font, uint32_t color, int32_t y)
 static void free_later(void *arg) {
     station_view_t *v = arg;
     lichen_free(NULL, v->dial_buf);
-    free(v);
+    lichen_free(NULL, v);
 }
 
 // The dial is going (its screen is deleted): the timer first, then the buffer and the view
@@ -226,7 +227,8 @@ static void on_dial_delete(lv_event_t *e) {
     station_view_t *v = lv_event_get_user_data(e);
     lv_timer_delete(v->timer);
     v->timer = NULL;
-    lv_async_call(free_later, v);
+    // Not queued (no memory): the view leaks rather than free a buffer the canvas being deleted still holds
+    lichen_sys_ui_call(free_later, v, 0);
 }
 
 // A screen covering the app's (the saver) stops the sweep; showing it again redraws the whole screen
@@ -251,7 +253,7 @@ station_view_t *station_view_create(lv_obj_t *parent, station_view_cfg_t const *
     if (cfg->layout.dial_d < SC_MIN_DIAL) {
         return NULL;
     }
-    station_view_t *v = calloc(1, sizeof(*v));
+    station_view_t *v = lichen_alloc(NULL, sizeof(*v), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!v) {
         return NULL;
     }
@@ -261,7 +263,7 @@ station_view_t *station_view_create(lv_obj_t *parent, station_view_cfg_t const *
     v->update_line2 = cfg->update_line2;
     if (!dial_create(v, parent, &cfg->layout)) {
         log_no_psram(v->d);
-        free(v);
+        lichen_free(NULL, v);
         return NULL;
     }
     v->date_label = add_line(parent, LICHEN_FONT_LARGE, THEME_DIM, cfg->layout.line1_y);

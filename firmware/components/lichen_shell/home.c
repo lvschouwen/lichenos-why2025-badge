@@ -16,6 +16,7 @@
 #include "lichen_app.h"
 #include "lichen_badge.h"
 #include "lichen_notify.h"
+#include "lichen_sys_ui.h"
 #include "lichen_ui.h"
 #include "settings_store.h"
 #include "shell_parts.h"
@@ -268,7 +269,7 @@ static void on_key(lv_event_t *e) {
     }
     if (key == LV_KEY_ENTER) {
         // Outside the indev's key handling: opening swaps the indev's group
-        lv_async_call(open_selected, (void *)(intptr_t)h->sel);
+        lichen_sys_ui_call(open_selected, (void *)(intptr_t)h->sel, 0);
         return;
     }
     int from = h->slot_of[h->sel];
@@ -286,7 +287,7 @@ static void on_key(lv_event_t *e) {
 static void on_delete(lv_event_t *e) {
     home_t *h = lv_event_get_user_data(e);
     lv_timer_delete(h->timer);
-    free(h);
+    lichen_free(NULL, h);
 }
 
 // Centred on the icon's top-right corner, so it overlaps the icon by half, phone style. Its width follows the text, so
@@ -478,7 +479,7 @@ lv_obj_t *home_create(void) {
     lv_obj_set_style_outline_width(home, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(home, 0, LV_STATE_FOCUS_KEY);
 
-    home_t *h = calloc(1, sizeof(*h));
+    home_t *h = lichen_alloc(NULL, sizeof(*h), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!h) {
         return home;
     }

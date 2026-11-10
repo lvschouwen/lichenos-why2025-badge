@@ -18,6 +18,9 @@ void lichen_sys_ui_unlock(void);
 // as lvgl_port_lock) instead of lichen_ui_call's 2 s. False when the lock was not free in time or there was no memory:
 // fn will not run and arg is still the caller's. Any task, the LVGL task included.
 bool lichen_sys_ui_call(void (*fn)(void *), void *arg, uint32_t timeout_ms);
+// Takes back every fn(arg) queued with lichen_sys_ui_call or lichen_ui_call that has not started yet, as
+// lv_async_call_cancel did: for a widget's delete handler whose memory arg is. Any task (takes the lock).
+void lichen_sys_ui_cancel(void (*fn)(void *), void *arg);
 // `fw ui lockcheck [reset]`: the lock-owner check's mode, whether it is armed, its hit count and the first call sites
 // (CONFIG_LICHEN_UI_LOCK_CHECK_MODE), or resets the counts. Any task (the console's; it replies with console_reply).
 void lichen_sys_ui_lockcheck_cmd(char const *args);

@@ -2,6 +2,7 @@
 #include "menu.h"
 
 #include "lichen_ui.h"
+#include "lichen_ui_ops.h"
 #include "fonts.h"
 #include "scroll_anchor.h"
 #include "theme.h"
@@ -67,7 +68,7 @@ static void fire_danger(void *unused) {
 
 static void danger_drop(row_t *row) {
     if (danger.row == row) {
-        lv_async_call_cancel(fire_danger, NULL);
+        lichen_ui_ops_later_cancel(fire_danger, NULL);
         danger.on_enter = NULL;
         danger.row      = NULL;
     }
@@ -76,7 +77,7 @@ static void danger_drop(row_t *row) {
 // The answer arrives inside a key handler or timer of the dialog: the action runs later, outside it, like on_enter
 static void danger_done(bool confirmed) {
     if (confirmed) {
-        lv_async_call(fire_danger, NULL);
+        lichen_ui_ops_later(fire_danger, NULL);
     } else {
         danger.on_enter = NULL;
         danger.row      = NULL;
@@ -205,7 +206,7 @@ static void on_key(lv_event_t *e) {
         // Opening a screen swaps the indev's group: not from inside its key handling. A row a filter hid (it can
         // still hold the focus when nothing matches) does nothing.
         if (row->on_enter && row->kind != MENU_INFO && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
-            lv_async_call(fire_enter, row);
+            lichen_ui_ops_later(fire_enter, row);
         }
     } else if ((key == LV_KEY_LEFT || key == LV_KEY_RIGHT) && row->slider) {
         int step = (row->max - row->min) / SLIDER_STEPS;
@@ -228,7 +229,7 @@ static void on_key(lv_event_t *e) {
 
 static void on_delete(lv_event_t *e) {
     row_t *row = lv_event_get_user_data(e);
-    lv_async_call_cancel(fire_enter, row);
+    lichen_ui_ops_later_cancel(fire_enter, row);
     danger_drop(row);
     free(row->danger_question);
     free(row->danger_confirm);

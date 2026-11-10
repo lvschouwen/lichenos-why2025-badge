@@ -413,7 +413,7 @@ bool c6link_start(void) {
     // saved (next boot would skip again: a loop without Wi-Fi OTA); the full path never restarts. Never on a trial
     // image either: those always take the full path.
     if (c6_restart_after_attach(full, attached, ident_ok, persisted)) {
-        ESP_LOGE(TAG, "C6 %s after a skipped check: full check on the next boot",
+        ESP_LOGW(TAG, "C6 %s after a skipped check: full check on the next boot",
                  attached ? "app not proven by IDENT" : "did not attach");
         system_restart(attached ? "C6 IDENT failed after skip" : "C6 attach failed after skip");
     }

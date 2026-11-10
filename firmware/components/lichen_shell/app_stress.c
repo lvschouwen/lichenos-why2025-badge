@@ -9,6 +9,7 @@
 #include "lichen_sys_ui.h"
 #include "lichen_ui.h"
 #include "nav.h"
+#include "remote_ctl.h"
 #include "screen_ids.h"
 #include "shell_parts.h"
 #include "stress_workers.h"
@@ -93,6 +94,10 @@ static void on_delete(lv_event_t *e) {
     s_p = (stress_page_t){0};
 }
 
+// How to stop is Esc held RLOCK_ESC_HOLD_MS (3 s): the run holds the key lock and ends when it does (UI rule 6, #286)
+#define STRESS_SUB "keys are locked" BULLET "hold Esc 3 s to stop"
+_Static_assert(RLOCK_ESC_HOLD_MS == 3000, "the stress page's hint names the key lock's Esc hold");
+
 static lv_obj_t *add_label(lv_obj_t *parent, int font, uint32_t colour) {
     lv_obj_t *l = lichen_label_wrap(parent, LV_PCT(100));
     lv_obj_set_style_text_font(l, lichen_font(font), 0);
@@ -109,7 +114,7 @@ static lv_obj_t *build_stress(void) {
     s_p.title = add_label(screen, LICHEN_FONT_LARGE, THEME_TEXT);
     lv_label_set_text(s_p.title, "Stress test running");
     s_p.sub = add_label(screen, LICHEN_FONT_SMALL, THEME_DIM);
-    lv_label_set_text(s_p.sub, "started from the console" BULLET "keys are locked");
+    lv_label_set_text(s_p.sub, STRESS_SUB);
     s_p.clock = add_label(screen, LICHEN_FONT_MEDIUM, THEME_TEXT);
     s_p.bar   = lv_bar_create(screen);
     lv_obj_set_size(s_p.bar, LV_PCT(100), 16);
@@ -134,7 +139,7 @@ void stress_screen_open(void) {
     lichen_sys_ui_lock(0);
     if (s_p.screen && s_p.done) { // the result of the run before: back to "running"
         lv_label_set_text(s_p.title, "Stress test running");
-        lv_label_set_text(s_p.sub, "started from the console" BULLET "keys are locked");
+        lv_label_set_text(s_p.sub, STRESS_SUB);
         lv_label_set_text(s_p.result, "");
         s_p.done = false;
     }

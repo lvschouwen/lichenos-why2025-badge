@@ -8,6 +8,7 @@
 #include "ota_autooff.h"
 #include "sd_policy.h"
 #include "sdcard.h"
+#include "storage.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -35,6 +36,8 @@ static void test_sd_text(void) {
     strcpy(raw.kind, "SDHC");
     strcpy(raw.reason, "none");
     CHECK(strcmp(LICHEN_SYS_SD_LICHEN_DIR, SD_LICHEN_DIR) == 0);
+    CHECK(strcmp(LICHEN_SYS_SD_BASE, SD_BASE) == 0);
+    CHECK(strcmp(LICHEN_SYS_STORAGE_BASE, STORAGE_BASE) == 0); // #286: one mount point, the gate's copy pinned
     char a[96], b[96];
     lichen_sys_sd_short_text(&info, a, sizeof(a));
     sd_short_text(&raw, b, sizeof(b));

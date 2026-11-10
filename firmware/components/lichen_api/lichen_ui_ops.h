@@ -18,6 +18,10 @@
 #include <stdint.h>
 
 typedef struct {
+    // The gate's own widgets (menu.c) defer work to the LVGL task with these: the UI service is lichen_os, which the
+    // gate may not call (#286). The shell binds lichen_sys_ui_call and lichen_sys_ui_cancel.
+    bool (*later)(void (*fn)(void *), void *arg);
+    void (*later_cancel)(void (*fn)(void *), void *arg);
     // lichen_ui.h's navigation; shell_open is open_keyed with key 0, shell_key_hash is the gate's own (pure)
     void (*home)(void);
     void (*back)(void);
@@ -51,3 +55,10 @@ typedef struct {
 // the same table again changes nothing. The shell only: apps may not call it (a forbid line in tools/layers.conf).
 // Any task (an atomic store; a call already forwarded finishes on the old table).
 void lichen_ui_ops_set(lichen_ui_ops_t const *ops);
+
+// For the gate's own code only (menu.c; apps use lichen_ui_call, a forbid line in tools/layers.conf): runs fn(arg) on
+// the LVGL task soon, FIFO with every other UI-service call, never inline. False when it was not queued (no table yet,
+// or the UI service refused): fn will not run. LVGL task (the shell's call takes the lock, which that task holds).
+bool lichen_ui_ops_later(void (*fn)(void *), void *arg);
+// Takes back every fn(arg) lichen_ui_ops_later queued that has not run yet (a row being deleted). LVGL task.
+void lichen_ui_ops_later_cancel(void (*fn)(void *), void *arg);

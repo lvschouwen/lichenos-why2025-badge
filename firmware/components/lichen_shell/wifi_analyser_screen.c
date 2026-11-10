@@ -200,7 +200,7 @@ static void take_scan(scan_res_t const *res) {
 static void on_scan_done(void *data) {
     scan_res_t *res = data;
     if (!an || res->gen != gen) { // closed while the scan ran
-        free(res);
+        lichen_free(NULL, res);
         return;
     }
     an->scanning = false;
@@ -215,15 +215,17 @@ static void on_scan_done(void *data) {
         // Not at the user's expense: the next try waits the same 10 s
         set_status("Can't scan now: Wi-Fi is off or a firmware update is running. Trying again.");
     }
-    free(res);
+    lichen_free(NULL, res);
 }
 
 static void scan_task(void *arg) {
-    scan_res_t *res = calloc(1, sizeof(*res));
+    scan_res_t *res = lichen_alloc(NULL, sizeof(*res), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (res) {
         res->gen = (uint32_t)(uintptr_t)arg;
         res->ok  = lichen_sys_wifi_scan_raw(res->aps, MAX_RAW, &res->n);
-        lichen_sys_ui_call(on_scan_done, res, 0); // waits for the LVGL lock as long as it takes, as before #225
+        if (!lichen_sys_ui_call(on_scan_done, res, 0)) { // waits for the LVGL lock as long as it takes, as before #225
+            lichen_free(NULL, res);                        // not queued: still ours
+        }
     } else {
         lichen_sys_ui_lock(0); // no memory: the screen must not wait for a scan that will never report
         if (an && (uint32_t)(uintptr_t)arg == gen) {

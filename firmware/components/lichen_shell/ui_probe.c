@@ -267,8 +267,8 @@ static void settle_done(void *arg) {
     xTaskNotifyGive((TaskHandle_t)arg);
 }
 
-// Waits until the LVGL task has run what is queued for it (lv_async_call: Enter's screen change, and what that chains
-// into), so the report below is of the keys already sent, not one behind
+// Waits until the LVGL task has run what is queued for it (the UI service's queue: Enter's screen change, and what that
+// chains into), so the report below is of the keys already sent, not one behind
 static void settle(void) {
     for (int round = 0; round < 3; round++) {
         ulTaskNotifyTake(pdTRUE, 0);
@@ -566,7 +566,7 @@ static void print_geom(vgeom_t const *g) {
 
 static void cmd_ui_overflow(bool verbose) {
     settle();
-    ovf_ctx_t ctx = {.hits = malloc(sizeof(hit_t) * MAX_LINES)};
+    ovf_ctx_t ctx = {.hits = lichen_alloc(NULL, sizeof(hit_t) * MAX_LINES, LICHEN_MEM_BULK)};
     if (!ctx.hits) {
         console_reply("ui overflow: no memory");
         return;
@@ -595,7 +595,7 @@ static void cmd_ui_overflow(bool verbose) {
     if (ctx.total > ctx.n) {
         console_reply("  ... %u more not shown", (unsigned)(ctx.total - ctx.n));
     }
-    free(ctx.hits);
+    lichen_free(NULL, ctx.hits);
 }
 
 static void cmd_ui(char const *args) {
@@ -621,7 +621,7 @@ static void cmd_ui(char const *args) {
         return;
     }
     settle();
-    line_t *lines = malloc(sizeof(line_t) * MAX_LINES);
+    line_t *lines = lichen_alloc(NULL, sizeof(line_t) * MAX_LINES, LICHEN_MEM_BULK);
     if (!lines) {
         console_reply("ui: no memory");
         return;
@@ -642,7 +642,7 @@ static void cmd_ui(char const *args) {
     for (size_t i = 0; i < n; i++) {
         console_reply("ui   %s", lines[i].text);
     }
-    free(lines);
+    lichen_free(NULL, lines);
 }
 
 void ui_probe_init(void) {

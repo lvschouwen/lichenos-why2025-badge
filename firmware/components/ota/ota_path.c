@@ -1,13 +1,14 @@
 #include "ota_path.h"
 
 #include "ota_proto.h"
+#include "storage.h"
 
 #include <stdio.h>
 
 #include <string.h>
 
 #define DRIVE  "FLASH0:"
-#define PREFIX "/storage/"
+#define PREFIX STORAGE_BASE "/"
 
 bool ota_path_to_posix(char const *vms, char *out, size_t cap) {
     // ota_path_allowed() checks the syntax: name characters only, no empty directory parts (so no "." or "..")

@@ -2,9 +2,8 @@
 // bar, with its own keypad group. Enter confirms, Esc cancels, and a countdown confirms by itself when nobody answers
 // (dialog_countdown.c, host-tested). Other tasks never touch LVGL here: they set the wanted state (want under open_lock,
 // the flags under want_lock) and
-// queue one async call (lichen_sys_ui_call, or lv_async_call on the LVGL task) that makes the screen match it, so an
-// open and a close queued together still end right whatever order the calls run in (UI-service calls are FIFO, raw
-// lv_async_call newest first, and the two do not order against each other: see shell.c).
+// queue one UI-service call (lichen_sys_ui_call) that makes the screen match it, so an open and a close queued together
+// still end right whatever order the calls run in (FIFO, but a burst past the queue may overtake it: see shell.c).
 #include "dialog_countdown.h"
 #include "esp_attr.h"
 #include "esp_log.h"
@@ -106,7 +105,7 @@ static void decided(bool confirmed) {
         want_open = false;
     }
     portEXIT_CRITICAL(&want_lock);
-    lv_async_call(apply, NULL);
+    lichen_sys_ui_call(apply, NULL, 0);
     ESP_LOGI(TAG, "answered: %s", confirmed ? "confirm" : "cancel");
     if (done) {
         done(confirmed);
@@ -272,7 +271,7 @@ bool shell_dialog_countdown_impl(shell_dialog_t const *d, shell_dialog_fn done) 
             want_open = false; // a newer open that got through stays
         }
         portEXIT_CRITICAL(&want_lock);
-        ESP_LOGE(TAG, "could not be shown (LVGL busy)");
+        ESP_LOGW(TAG, "could not be shown (LVGL busy)");
     }
     return ok;
 }

@@ -6,21 +6,17 @@
 #include "theme.h"
 
 lv_obj_t *mc_list_label(lv_obj_t *parent, char const *text, uint32_t color) {
-    lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_width(label, LV_PCT(100));
-    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_t *label = lichen_label_wrap(parent, LV_PCT(100));
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
     lv_label_set_text(label, text);
     return label;
 }
 
-// One line, cut with "...": a row would grow otherwise
+// One line, cut with "...": a row would grow otherwise. As wide as its text until the caller sets a width.
 lv_obj_t *mc_list_line(lv_obj_t *parent, char const *text, uint32_t color) {
-    lv_obj_t *label = lv_label_create(parent);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lv_obj_t *label = lichen_label_line(parent, LV_SIZE_CONTENT);
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
     lv_label_set_text(label, text);
-    lv_obj_set_height(label, lv_font_get_line_height(lv_obj_get_style_text_font(label, 0)));
     return label;
 }
 

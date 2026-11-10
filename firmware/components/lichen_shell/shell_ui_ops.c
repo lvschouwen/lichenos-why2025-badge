@@ -1,7 +1,16 @@
 // The shell's table for the gate's lichen_ui.h / lichen_keys.h calls (#221): see shell_ui_ops.h and lichen_ui_ops.h
 #include "shell_ui_ops.h"
 
+#include "lichen_sys_ui.h"
+
+// The gate's widgets run on the LVGL task, which holds the lock: no wait (0 is "forever" only off that task)
+static bool later(void (*fn)(void *), void *arg) {
+    return lichen_sys_ui_call(fn, arg, 0);
+}
+
 static lichen_ui_ops_t const ops = {
+    .later            = later,
+    .later_cancel     = lichen_sys_ui_cancel,
     .home             = shell_home_impl,
     .back             = shell_back_impl,
     .open_keyed       = shell_open_keyed_impl,

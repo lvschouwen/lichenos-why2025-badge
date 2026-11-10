@@ -147,7 +147,7 @@ reaching drivers, `board` or NVS. The headers, all in `lichen_api`:
 
 | Header | Purpose |
 |---|---|
-| `lichen_sys_ui.h` | the LVGL lock (`lichen_sys_ui_lock`/`_unlock`) and `lichen_sys_ui_call` for the shell and main; the UI service owns the lock (#225); the lock-check hit count for the stress run (#278) |
+| `lichen_sys_ui.h` | the LVGL lock (`lichen_sys_ui_lock`/`_unlock`), `lichen_sys_ui_call` and `lichen_sys_ui_cancel` for the shell and main; the UI service owns the lock (#225); the lock-check hit count for the stress run (#278) |
 | `lichen_sys_display.h` | screen and keyboard backlight levels, the attention light, timeout and thermal shed; the levels reach the C6 over UART1 (#226) |
 | `lichen_sys_power.h` | the display's share of power-off: both backlights off, then the panel, before the C6 is held in reset (#226) |
 | `lichen_sys_storage.h` | the storage drive and the SD card: sizes, mount state, policy, for About, Files, SD card and notices (#227) |
@@ -272,7 +272,7 @@ just that L6 profile.
   flash write, #31).
 
 `check_layers.sh` (#218) generalises this check to every layer and absorbs these rules. Rule C also forbids the
-system surface (`lichen_sys_*`), `lichen_ui_ops_set` and the shell's side of notifications to apps.
+system surface (`lichen_sys_*`), `lichen_ui_ops_*` and the shell's side of notifications to apps.
 
 The eight plain apps (Timer, Calculator, QR code, Clock, Keyboard test, LoRa spectrum, Weather, Notepad) live in the
 `lichen_apps` component (#180) and are checked as layer L6, like `mesh`. The system apps in `lichen_shell` are not.

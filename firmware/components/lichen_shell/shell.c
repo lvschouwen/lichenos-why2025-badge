@@ -116,10 +116,10 @@ static void drop(frame_t *frame) {
     frame->screen = NULL;
 }
 
-// Runs as an async call (lv_async_call or the UI service's lichen_sys_ui_call), outside the indev's key handling, so
-// deleting the screen that had the key is safe. Note: UI-service calls run FIFO among themselves, but a raw
-// lv_async_call (shell_esc) runs newest first and the two do not order against each other (#225), so a pop and its
-// follow-up stay ONE async step (back_job below), never two calls expected to run in order.
+// Runs as a UI-service call (lichen_sys_ui_call), outside the indev's key handling, so deleting the screen that had the
+// key is safe. Those run FIFO (#286), except a burst that overflows the queue, whose extra calls are LVGL async calls
+// of their own that may overtake it (#225), so a pop and its follow-up stay ONE async step (back_job below), never two
+// calls expected to run in order.
 static bool pop_one(void) {
     int depth = nav_depth();
     if (depth <= 1 || !frames[0].screen || update_screen_blocks_back()) {
@@ -172,11 +172,11 @@ void shell_esc(void) {
     if (top && top->on_esc && top->on_esc(top->on_esc_arg)) {
         return;
     }
-    lv_async_call(go_back, NULL);
+    lichen_sys_ui_call(go_back, NULL, 0);
 }
 
 // shell_back and the app API's shell_back_then / shell_back_to (lichen_ui.h) may be called from a task other than LVGL's,
-// and lv_malloc / lv_async_call are not thread safe: they go through the UI service, which takes the (recursive) LVGL
+// and lv_malloc / LVGL timers are not thread safe: they go through the UI service, which takes the (recursive) LVGL
 // lock (#118, #225)
 void shell_back_impl(void) {
     lichen_sys_ui_call(go_back, NULL, 0);

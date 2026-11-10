@@ -796,7 +796,7 @@ extern "C" bool mesh_stop_pending(void) {
 extern "C" bool mesh_stop(mesh_stop_reason_t why) {
     // The update must not wait forever behind a start: it gives up after 15 s, as a stop that did not end in time
     if (xSemaphoreTake(run_lock_handle(), pdMS_TO_TICKS(15000)) != pdTRUE) {
-        ESP_LOGE(TAG, "MeshCore busy starting or stopping: not stopped");
+        ESP_LOGW(TAG, "MeshCore busy starting or stopping: not stopped");
         return false;
     }
     bool ok = stop_locked(why);
@@ -864,7 +864,7 @@ static bool identity_store(void *, uint8_t const *blob, size_t len) {
         ESP_LOGI(TAG, "MeshCore identity moved from NVS to /storage/meshcore");
         return true;
     }
-    ESP_LOGE(TAG, "MeshCore identity not saved to /storage/meshcore (full?): kept in NVS, tried again next boot");
+    ESP_LOGW(TAG, "MeshCore identity not saved to /storage/meshcore (full?): kept in NVS, tried again next boot");
     return false;
 }
 

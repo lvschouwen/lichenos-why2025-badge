@@ -21,6 +21,7 @@
 #include "fw_console.h"
 #include "notify_mute.h"
 #include "notify_rate.h"
+#include "notify_paths.h"
 #include "notify_store.h"
 #include "storage.h"
 
@@ -34,10 +35,6 @@
 
 static char const TAG[] = "notify";
 
-#define NOTIFY_DIR   STORAGE_BASE "/lichen"
-#define NOTIFY_FILE  NOTIFY_DIR "/notify.bin"
-#define NOTIFY_OLD   NOTIFY_DIR "/notify.old"
-#define NOTIFY_TMP   NOTIFY_DIR "/notify.tmp"
 #define SAVE_SLOW_US (30LL * 1000 * 1000)
 #define SAVE_SOON_US (3LL * 1000 * 1000)
 #define SAVE_GAP_US  (30LL * 1000 * 1000) // the least time between two saves (except a removal or a clear)

@@ -10,6 +10,7 @@
 #include "lichen_app.h"
 #include "lichen_haptics.h"
 #include "lichen_sys_led.h"
+#include "lichen_sys_ui.h"
 #include "lichen_ui.h"
 #include "menu.h"
 #include "nav.h"
@@ -242,7 +243,7 @@ static void clear_all_answer(bool yes) {
         s_c.focus_id     = 0;
         s_c.on_clear_all = false;
         if (s_c.screen) {
-            lv_async_call(refill, NULL);
+            lichen_sys_ui_call(refill, NULL, 0);
         }
     }
 }
@@ -266,7 +267,7 @@ static void on_clear_all(void *arg) {
 
 static void clear_one_answer(bool yes) {
     if (yes && lichen_notify_remove(s_ask_id) && s_c.screen) {
-        lv_async_call(refill, NULL);
+        lichen_sys_ui_call(refill, NULL, 0);
     }
 }
 
@@ -291,7 +292,7 @@ static bool on_text(uint32_t key, void *arg) {
             };
             shell_dialog_countdown(&d, clear_one_answer);
         } else if (lichen_notify_remove(s_c.ids[i])) {
-            lv_async_call(refill, NULL); // not from inside the row's own key handling
+            lichen_sys_ui_call(refill, NULL, 0); // not from inside the row's own key handling
         }
         return true;
     }

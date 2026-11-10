@@ -87,6 +87,40 @@ static void test_reentrant_push(void) {
     CHECK(n == 1 && ui_call_queue_pop(&s_reentrant, &c) && c.arg == (void *)99);
 }
 
+// Cancel (#286, menu.c's row delete): every queued fn(arg) of that pair is dropped, other calls keep their order, and a
+// call of the running batch that cancels a later one of the same batch leaves the batch's count right (the drain runs
+// neither the cancelled call nor one queued after it started)
+static ui_call_queue_t s_cancelq;
+static void            cancel_three(void *arg) {
+    note(arg);
+    CHECK(ui_call_queue_cancel(&s_cancelq, note, (void *)3) == 1);
+}
+
+static void test_cancel(void) {
+    ui_call_queue_t q = {0};
+    ran_n             = 0;
+    ui_call_queue_push(&q, note, (void *)1);
+    ui_call_queue_push(&q, note, (void *)2);
+    ui_call_queue_push(&q, note, (void *)1);
+    ui_call_queue_push(&q, note, (void *)3);
+    CHECK(ui_call_queue_cancel(&q, note, (void *)1) == 2);
+    CHECK(ui_call_queue_cancel(&q, note, (void *)9) == 0);
+    CHECK(ui_call_queue_cancel(&q, requeue, (void *)2) == 0); // the pair must match, not the arg alone
+    CHECK(ui_call_queue_cancel(&q, NULL, (void *)2) == 0);
+    ui_call_queue_drain(&q);
+    CHECK(ran_n == 2 && ran[0] == 2 && ran[1] == 3);
+    CHECK(!ui_call_queue_pop(&q, &(ui_call_t){0}));
+
+    memset(&s_cancelq, 0, sizeof(s_cancelq));
+    ran_n = 0;
+    ui_call_queue_push(&s_cancelq, cancel_three, (void *)1);
+    ui_call_queue_push(&s_cancelq, note, (void *)3);
+    ui_call_queue_push(&s_cancelq, note, (void *)4);
+    ui_call_queue_drain(&s_cancelq);
+    CHECK(ran_n == 2 && ran[0] == 1 && ran[1] == 4);
+    CHECK(s_cancelq.count == 0);
+}
+
 // ---- threads: producers, one LVGL thread, the recursive lock, the production hand-over ----
 
 #define PRODUCERS 6
@@ -351,6 +385,7 @@ int main(void) {
     test_fifo_and_schedule();
     test_full_and_unpush();
     test_reentrant_push();
+    test_cancel();
     test_owner();
     test_port_gate();
     test_threads();

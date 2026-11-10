@@ -1,6 +1,6 @@
 // Settings > Backup (#169): save the settings to /sd/lichen/settings.txt and load them back, e.g. after a factory reset or
 // onto another badge. The NVS and SD work runs on a short-lived task on core 0 (as sd_screen.c's jobs do) and the answer
-// comes back through lv_async_call. A load is two steps: the file is read and checked first and a careful dialog says
+// comes back through the UI service. A load is two steps: the file is read and checked first and a careful dialog says
 // how many settings will change; only a yes writes them. The rules and the list of settings are
 // lichen_api/settings_backup.c; secrets are not in it, so they are neither saved nor loaded.
 #include "esp_log.h"

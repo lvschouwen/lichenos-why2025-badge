@@ -36,6 +36,18 @@ bool ui_call_queue_pop(ui_call_queue_t *q, ui_call_t *out) {
     return true;
 }
 
+size_t ui_call_queue_cancel(ui_call_queue_t *q, ui_call_fn_t fn, void *arg) {
+    size_t cancelled = 0;
+    for (uint8_t i = 0; i < q->count; i++) {
+        ui_call_t *c = &q->slot[(q->head + i) % UI_CALL_QUEUE_CAP];
+        if (fn && c->fn == fn && c->arg == arg) {
+            c->fn = NULL; // left in place: a drain that is running counted it in its batch
+            cancelled++;
+        }
+    }
+    return cancelled;
+}
+
 bool ui_call_queue_hand_over(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t schedule,
                              ui_call_async_t fallback) {
     switch (ui_call_queue_push(q, fn, arg)) {
@@ -58,6 +70,8 @@ void ui_call_queue_drain(void *queue) {
     size_t           n = ui_call_queue_begin_drain(q);
     ui_call_t        call;
     while (n-- > 0 && ui_call_queue_pop(q, &call)) {
-        call.fn(call.arg);
+        if (call.fn) {
+            call.fn(call.arg);
+        }
     }
 }

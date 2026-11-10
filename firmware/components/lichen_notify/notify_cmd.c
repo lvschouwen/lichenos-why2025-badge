@@ -3,6 +3,7 @@
 #include "esp_timer.h"
 #include "fw_console.h"
 #include "notify_os.h"
+#include "notify_paths.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -22,7 +23,7 @@ static void list(void) {
     }
     console_reply("notify: %u entries, %u unread, dropped %u, muted %u, dnd %s, boot %u, %s, saves %u (errors %u), last %s",
                   (unsigned)st.entries, (unsigned)st.unread, (unsigned)st.dropped, (unsigned)st.muted, st.dnd ? "on" : "off",
-                  (unsigned)st.boot, st.storage ? "kept in " "/storage/lichen/notify.bin" : "RAM only (no drive)",
+                  (unsigned)st.boot, st.storage ? "kept in " NOTIFY_FILE : "RAM only (no drive)",
                   (unsigned)st.saves, (unsigned)st.save_errors, save);
     uint32_t ids[NR_SLOTS];
     size_t   n      = lichen_notify_ids(ids, NR_SLOTS);

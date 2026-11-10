@@ -5,6 +5,7 @@
 #include "screen_ids.h"
 #include "lichen_app.h"
 #include "fw_console.h"
+#include "lichen_sys_ui.h"
 #include "logo.h"
 #include "settings_store.h"
 #include "setup_state.h"
@@ -51,7 +52,7 @@ static void advance(void *arg) {
 
 static void on_key(lv_event_t *e) {
     if (lv_event_get_key(e) == LV_KEY_ENTER) {
-        lv_async_call(advance, NULL);
+        lichen_sys_ui_call(advance, NULL, 0);
     }
 }
 
