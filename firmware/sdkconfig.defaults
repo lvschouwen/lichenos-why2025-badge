@@ -40,6 +40,12 @@ CONFIG_SPIRAM_SPEED_80M=y
 # Kconfig and the build is a plain 80 MHz one (Settings > PSRAM speed is then hidden). Default stays 80 MHz.
 CONFIG_SPIRAM_SPEED_RUNTIME_SELECT=y
 CONFIG_SPIRAM_USE_MALLOC=y
+# A plain malloc of up to 4 KB is internal first, a bigger one PSRAM first (IDF default 16 KB, #261): internal RAM is
+# nearly all DMA-capable, and every ordinary 4-16 KB block took it from esp_hosted's Wi-Fi frames. Safe because nothing
+# that DMAs, runs in an ISR or runs with the cache off uses a plain malloc (#261 audit): those ask for caps
+# (MALLOC_CAP_DMA / MALLOC_CAP_INTERNAL, lichen_alloc INTERNAL; FreeRTOS objects and stacks, mbedTLS are internal by
+# their own caps). A new such buffer must ask for its caps too. 1024 is a bench trial (fw mem, fw ui perf bench).
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # Big statics that need no DMA or cache-off access live in PSRAM via EXT_RAM_BSS_ATTR (#107)
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
