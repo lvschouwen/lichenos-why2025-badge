@@ -193,9 +193,9 @@ lichen_sys_mem_total	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_walk	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_power_off_now	SYSTEM	any	lichen_sys_power.h
 lichen_sys_power_screen_off	SYSTEM	unspecified	lichen_sys_power.h
-lichen_sys_radio_held_by	-	any	lichen_sys_radio.h
-lichen_sys_radio_hold	-	any	lichen_sys_radio.h
-lichen_sys_radio_release	-	any	lichen_sys_radio.h
+lichen_sys_radio_held_by	SYSTEM	any	lichen_sys_radio.h
+lichen_sys_radio_hold	SYSTEM	any	lichen_sys_radio.h
+lichen_sys_radio_release	SYSTEM	any	lichen_sys_radio.h
 lichen_sys_sd_begin	SYSTEM	not-lvgl	lichen_sys_storage.h
 lichen_sys_sd_end	SYSTEM	not-lvgl	lichen_sys_storage.h
 lichen_sys_sd_fmt_size	SYSTEM	any	lichen_sys_storage.h
@@ -209,7 +209,7 @@ lichen_sys_sd_status_line	SYSTEM	any	lichen_sys_storage.h
 lichen_sys_sd_unmount	SYSTEM	not-lvgl	lichen_sys_storage.h
 lichen_sys_storage_free_bytes	SYSTEM	any	lichen_sys_storage.h
 lichen_sys_storage_mounted	SYSTEM	any	lichen_sys_storage.h
-lichen_sys_thermal_info	-	any	lichen_sys_thermal.h
+lichen_sys_thermal_info	SYSTEM	any	lichen_sys_thermal.h
 lichen_sys_ui_call	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lock	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_cmd	SYSTEM	any	lichen_sys_ui.h

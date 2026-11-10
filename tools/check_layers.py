@@ -635,7 +635,7 @@ HEADER_CAP = {
     "lichen_sys_storage.h": "SYSTEM", "lichen_sys_update.h": "SYSTEM", "lichen_sys_crash.h": "SYSTEM",
     "lichen_sys_factory.h": "SYSTEM", "lichen_sys_mem.h": "SYSTEM", "lichen_sys_clock.h": "SYSTEM",
     "lichen_sys_net.h": "SYSTEM", "lichen_sys_boot.h": "SYSTEM", "lichen_sys_keys.h": "SYSTEM",
-    "lichen_sys_led.h": "SYSTEM",
+    "lichen_sys_led.h": "SYSTEM", "lichen_sys_thermal.h": "SYSTEM", "lichen_sys_radio.h": "SYSTEM",
 }
 PROTO_RE = re.compile(r"(?:^|\n)([A-Za-z_][\w \t\*]*?[\s\*](\w+)\s*\([^;{}]*\))\s*;", re.S)
 SKIP_PROTO = ("typedef", "static", "extern \"C\"", "return", "define")

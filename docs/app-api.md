@@ -160,6 +160,8 @@ reaching drivers, `board` or NVS. The headers, all in `lichen_api`:
 | `lichen_sys_boot.h` | boot progress steps and the console log tap for the boot screen and the log store (#244) |
 | `lichen_sys_keys.h` | raw key hooks, the screen-wake hook and the remote key gate (an app's raw keys are `lichen_keys.h`) (#244) |
 | `lichen_sys_led.h` | the status LED setting for Settings > Notifications > Status LED (#244) |
+| `lichen_sys_thermal.h` | the thermal watchdog's state (HOT, Settings > Battery, the attention light, the stress run); the watchdog is an OS service started by main, display or not (#281) |
+| `lichen_sys_radio.h` | the radio service's system holds: radios held off for a reason (the thermal shed), never saved, the person's switches untouched (#282) |
 
 `notify_os.h` (history of every app, do-not-disturb, toast queue, feedback hooks) is also the shell's side, forbidden
 to apps by name in `layers.conf`; apps have `lichen_notify.h` only (#245). Types that live in a lower component are
