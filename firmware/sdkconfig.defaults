@@ -116,14 +116,16 @@ CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT=y
 # A failed SDIO transfer posts TRANSPORT_FAILURE; Lichen's C6 supervisor recovers from it (#14) instead of
 # esp_hosted aborting the P4
 CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=n
-# Wi-Fi frames come from fixed pools reserved at link-up (#260); the queue sizes are the pool depths. The blocks go to
-# PSRAM (RX STREAMING mode copies every frame, no DMA touches a block; internal DMA only if PSRAM is full): TX depth x
-# 1600 B + RX depth x 1536 B (10/10: 31360 B PSRAM). Internal DMA keeps one 1536 B TX write buffer plus the RX staging
-# buffers as before. 10/10 is a start; the bench measures throughput at 20/12/8/6 and picks the smallest within ~10 %.
+# Wi-Fi frames come from fixed pools reserved at link-up (#260); the queue sizes are the pool depths (at most 64). The
+# blocks go to PSRAM (RX STREAMING mode copies every frame, no DMA touches a block; internal DMA only if PSRAM is full):
+# TX depth x 1600 B + RX depth x 1536 B (TX 10 = 16000 B, RX 24 = 36864 B: 52864 B PSRAM). Internal DMA keeps one
+# 1536 B TX write buffer plus the RX staging buffers as before; each queue slot is a 24 B handle in internal RAM (3
+# priority queues per direction). RX 24 (#277): a re-attach of a C6 that kept running delivers its backlog in one burst
+# (peak 10, 20 drops at RX 10). TX stays 10 until the throughput run (20/12/8/6) says otherwise.
 CONFIG_ESP_HOSTED_HOST_SDIO_FRAME_POOLS=y
 CONFIG_ESP_HOSTED_HOST_SDIO_TX_POOL_WAIT_MS=5
 CONFIG_ESP_HOSTED_HOST_SDIO_TX_Q_SIZE=10
-CONFIG_ESP_HOSTED_HOST_SDIO_RX_Q_SIZE=10
+CONFIG_ESP_HOSTED_HOST_SDIO_RX_Q_SIZE=24
 CONFIG_WIFI_RMT_STATIC_TX_BUFFER=y
 # CONFIG_WIFI_RMT_SOFTAP_SUPPORT is not set
 # The Wi-Fi side runs on the C6, which has no PSRAM: don't ask it for TX cache buffers
