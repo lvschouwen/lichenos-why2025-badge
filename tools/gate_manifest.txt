@@ -233,6 +233,7 @@ lichen_sys_wifi_ssid_sanitize	SYSTEM	any	lichen_sys_net.h
 lichen_task_console_register	BACKGROUND	unspecified	lichen_task.h
 lichen_task_leftovers	BACKGROUND	unspecified	lichen_task.h
 lichen_task_start	BACKGROUND	unspecified	lichen_task.h
+lichen_task_start_in	BACKGROUND	unspecified	lichen_task.h
 lichen_ui_call	-	any	lichen_ui.h
 lichen_ui_ops_set	SYSTEM	any	lichen_ui_ops.h
 lichen_ui_with_group	-	lvgl	lichen_ui.h
@@ -330,6 +331,9 @@ task_book_remove	-	unspecified	task_book.h
 task_class_core	-	unspecified	task_book.h
 task_class_priority	-	unspecified	task_book.h
 task_name_fit	-	unspecified	task_book.h
+task_stack_name	-	unspecified	task_book.h
+task_stack_place	-	unspecified	task_book.h
+task_stack_reserve	-	unspecified	task_book.h
 text_entry_open	-	unspecified	text_entry.h
 tile_cell_size	-	unspecified	tile_order.h
 tile_order_encode	-	unspecified	tile_order.h

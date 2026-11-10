@@ -1,5 +1,6 @@
 // Host test: lichen_task_start's bookkeeping (#181): priority classes keep today's numbers and cores, names are cut to
-// what FreeRTOS keeps (#123: names over 16 characters), slots are owned per app and counted for the stop check.
+// what FreeRTOS keeps (#123: names over 16 characters), slots are owned per app and counted for the stop check, and
+// a stack goes to the memory asked for only while that region keeps its reserve (#269).
 #include "task_book.h"
 
 #include <stdio.h>
@@ -37,16 +38,46 @@ static void test_names(void) {
     CHECK(!task_name_fit(out, NULL) && out[0] == 0);
 }
 
+// The stack memory table (#269): names "fw tasks" prints and the reserves each region keeps
+static void test_stack_classes(void) {
+    CHECK(strcmp(task_stack_name(TASK_STACK_INTERNAL), "internal") == 0);
+    CHECK(task_stack_reserve(TASK_STACK_INTERNAL) == 0);
+    CHECK(strcmp(task_stack_name(TASK_STACK_LP_RAM), "lpram") == 0 && task_stack_reserve(TASK_STACK_LP_RAM) == 4096);
+    CHECK(strcmp(task_stack_name(TASK_STACK_PSRAM), "psram") == 0 && task_stack_reserve(TASK_STACK_PSRAM) == 16384);
+    CHECK(strcmp(task_stack_name(TASK_STACK_COUNT), "?") == 0 && task_stack_reserve(TASK_STACK_COUNT) == 0);
+}
+
+static void test_stack_place(void) {
+    // Internal stays internal whatever the size
+    CHECK(task_stack_place(TASK_STACK_INTERNAL, 4096, 0) == TASK_STACK_INTERNAL);
+    // LP RAM while the stack plus the 4 KB reserve fits in the largest free block, internal from one byte short
+    CHECK(task_stack_place(TASK_STACK_LP_RAM, 4096, 8192) == TASK_STACK_LP_RAM);
+    CHECK(task_stack_place(TASK_STACK_LP_RAM, 4096, 8191) == TASK_STACK_INTERNAL);
+    CHECK(task_stack_place(TASK_STACK_LP_RAM, 4096, 0) == TASK_STACK_INTERNAL);
+    CHECK(task_stack_place(TASK_STACK_PSRAM, 8192, 24576) == TASK_STACK_PSRAM);
+    CHECK(task_stack_place(TASK_STACK_PSRAM, 8192, 24575) == TASK_STACK_INTERNAL);
+    // No wrap-round for a huge stack, and an unknown memory is internal
+    CHECK(task_stack_place(TASK_STACK_LP_RAM, UINT32_MAX, 32768) == TASK_STACK_INTERNAL);
+    CHECK(task_stack_place(TASK_STACK_COUNT, 1024, 1u << 20) == TASK_STACK_INTERNAL);
+    CHECK(task_stack_place((task_stack_t)-1, 1024, 1u << 20) == TASK_STACK_INTERNAL);
+}
+
 static void test_book(void) {
     static task_book_t b;
     memset(&b, 0, sizeof(b));
-    int a = task_book_add(&b, "meshcore", "mesh", 12288, TASK_CLASS_APP_LOOP, fn, &b);
-    int j = task_book_add(&b, "meshcore", "meshrun", 8192, TASK_CLASS_JOB, fn, NULL);
-    int o = task_book_add(&b, NULL, "battalert", 6144, TASK_CLASS_SERVICE, fn, NULL);
+    int a = task_book_add(&b, "meshcore", "mesh", 12288, TASK_CLASS_APP_LOOP, TASK_STACK_INTERNAL, fn, &b);
+    int j = task_book_add(&b, "meshcore", "meshrun", 8192, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL);
+    int o = task_book_add(&b, NULL, "battalert", 6144, TASK_CLASS_SERVICE, TASK_STACK_INTERNAL, fn, NULL);
     CHECK(a >= 0 && j >= 0 && o >= 0 && a != j && j != o);
     CHECK(strcmp(b.slot[o].owner, TASK_BOOK_OS) == 0);
     CHECK(b.slot[a].fn == fn && b.slot[a].arg == &b && b.slot[a].stack == 12288 && b.slot[a].cls == TASK_CLASS_APP_LOOP);
-    CHECK(task_book_add(&b, "meshcore", "x", 1024, TASK_CLASS_COUNT, fn, NULL) == -1);
+    CHECK(task_book_add(&b, "meshcore", "x", 1024, TASK_CLASS_COUNT, TASK_STACK_INTERNAL, fn, NULL) == -1);
+    CHECK(task_book_add(&b, "meshcore", "x", 1024, TASK_CLASS_JOB, TASK_STACK_COUNT, fn, NULL) == -1);
+    CHECK(b.slot[a].mem == TASK_STACK_INTERNAL);
+    int lp = task_book_add(&b, NULL, "thermal", 4096, TASK_CLASS_SERVICE, TASK_STACK_LP_RAM, fn, NULL);
+    CHECK(lp >= 0 && b.slot[lp].mem == TASK_STACK_LP_RAM && task_book_count(&b, NULL, NULL) == 2);
+    task_book_remove(&b, lp);
+    CHECK(b.slot[lp].mem == TASK_STACK_INTERNAL && !b.slot[lp].used);
     CHECK(task_book_count(&b, "meshcore", NULL) == 2);
     CHECK(task_book_count(&b, NULL, NULL) == 1);
     CHECK(task_book_count(&b, "weather", NULL) == 0);
@@ -61,21 +92,23 @@ static void test_book(void) {
     task_book_remove(&b, TASK_BOOK_SLOTS);
     CHECK(task_book_count(&b, "meshcore", NULL) == 1);
     // An owner past 13 characters is cut like an id would be
-    int l = task_book_add(&b, "an_overlong_owner_id", "t", 1024, TASK_CLASS_JOB, fn, NULL);
+    int l = task_book_add(&b, "an_overlong_owner_id", "t", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL);
     CHECK(l >= 0 && strlen(b.slot[l].owner) == TASK_BOOK_OWNER_CAP - 1);
     // Full: -1, and a freed slot is used again
     memset(&b, 0, sizeof(b));
     for (int i = 0; i < TASK_BOOK_SLOTS; i++) {
-        CHECK(task_book_add(&b, "notes", "job", 1024, TASK_CLASS_JOB, fn, NULL) == i);
+        CHECK(task_book_add(&b, "notes", "job", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL) == i);
     }
-    CHECK(task_book_add(&b, "notes", "job", 1024, TASK_CLASS_JOB, fn, NULL) == -1);
+    CHECK(task_book_add(&b, "notes", "job", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL) == -1);
     task_book_remove(&b, 7);
-    CHECK(task_book_add(&b, "notes", "job", 1024, TASK_CLASS_JOB, fn, NULL) == 7);
+    CHECK(task_book_add(&b, "notes", "job", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL) == 7);
 }
 
 int main(void) {
     test_classes();
     test_names();
+    test_stack_classes();
+    test_stack_place();
     test_book();
     if (failures) {
         printf("task_book_test: %d failure(s)\n", failures);

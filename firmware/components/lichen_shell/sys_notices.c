@@ -126,7 +126,9 @@ static void notices_task(void *arg) {
 }
 
 void sys_notices_start(void) {
-    if (!lichen_task_start(NULL, "sys_notices", notices_task, NULL, TASK_STACK, LICHEN_PRIO_BACKGROUND, NULL)) {
+    // LP RAM (#269): once a second, and it reads /storage free space (FatFs), so internal-capable but never DMA
+    if (!lichen_task_start_in(NULL, "sys_notices", notices_task, NULL, TASK_STACK, LICHEN_PRIO_BACKGROUND,
+                              LICHEN_STACK_LP_RAM, NULL)) {
         ESP_LOGE(TAG, "no memory: Lichen raises no notifications of its own");
     }
 }

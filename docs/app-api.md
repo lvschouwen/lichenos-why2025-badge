@@ -97,6 +97,10 @@ An app component `PRIV_REQUIRES` from this list only (see `firmware/components/m
   characters (logged). `fn` ends by returning, never with `vTaskDelete(NULL)`: the OS takes it out of its book first.
   `fw tasks` lists every task with its owner app; after a stop `lichen_task_leftovers(app, wait_ms)` names what of
   the app still runs (MeshCore logs "MeshCore stopped: N task(s) left over").
+  `lichen_task_start_in(..., prio, mem, &handle)` also picks the stack's memory (#269): `LICHEN_STACK_INTERNAL` (the
+  default, right for nearly every task), `_LP_RAM` (the P4's 32 KB LP RAM: internal, so flash/NVS/`/storage` writes are
+  fine, but not DMA-capable, slower and no PIE/SIMD: low-rate tasks only) and `_PSRAM` (only a task that never touches
+  flash, NVS or `/storage`). A region that is short gives internal RAM instead; `fw tasks` shows each stack's memory.
 - `lichen_mem.h` (#181): `lichen_alloc(app, size, LICHEN_MEM_BULK | LICHEN_MEM_INTERNAL [| LICHEN_MEM_ZERO])` and
   `lichen_free(app, ptr)`. BULK is PSRAM, for anything big; INTERNAL counts against the app's internal-RAM quota of
   64 KB (`MEM_BOOK_INTERNAL_QUOTA`) and is refused past it. `fw mem` lists what every app holds ("mem app <id> ...").

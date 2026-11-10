@@ -13,6 +13,33 @@ static struct {
     [TASK_CLASS_APP_LOOP]   = {3, 1},
 };
 
+// The LP RAM reserve keeps the region's last few KB for the heap's own use of it (it is the internal heap's last
+// resort); PSRAM has megabytes, its reserve only keeps a stack from taking the very last block
+static struct {
+    char const *name;
+    uint32_t    reserve;
+} const stacks[TASK_STACK_COUNT] = {
+    [TASK_STACK_INTERNAL] = {"internal", 0},
+    [TASK_STACK_LP_RAM]   = {"lpram", 4096},
+    [TASK_STACK_PSRAM]    = {"psram", 16384},
+};
+
+char const *task_stack_name(task_stack_t mem) {
+    return (unsigned)mem < TASK_STACK_COUNT ? stacks[mem].name : "?";
+}
+
+uint32_t task_stack_reserve(task_stack_t mem) {
+    return (unsigned)mem < TASK_STACK_COUNT ? stacks[mem].reserve : 0;
+}
+
+task_stack_t task_stack_place(task_stack_t mem, uint32_t stack, size_t largest) {
+    if ((unsigned)mem >= TASK_STACK_COUNT || mem == TASK_STACK_INTERNAL) {
+        return TASK_STACK_INTERNAL;
+    }
+    // In 64 bits: a stack near UINT32_MAX must not wrap round and look as if it fits
+    return (uint64_t)stack + stacks[mem].reserve <= (uint64_t)largest ? mem : TASK_STACK_INTERNAL;
+}
+
 int task_class_priority(task_class_t cls) {
     return (unsigned)cls < TASK_CLASS_COUNT ? classes[cls].prio : -1;
 }
@@ -48,8 +75,8 @@ static void owner_fit(char out[TASK_BOOK_OWNER_CAP], char const *owner) {
 }
 
 int task_book_add(task_book_t *b, char const *owner, char const *name, uint32_t stack, task_class_t cls,
-                  void (*fn)(void *), void *arg) {
-    if ((unsigned)cls >= TASK_CLASS_COUNT) {
+                  task_stack_t mem, void (*fn)(void *), void *arg) {
+    if ((unsigned)cls >= TASK_CLASS_COUNT || (unsigned)mem >= TASK_STACK_COUNT) {
         return -1;
     }
     for (int i = 0; i < TASK_BOOK_SLOTS; i++) {
@@ -63,6 +90,7 @@ int task_book_add(task_book_t *b, char const *owner, char const *name, uint32_t 
         task_name_fit(s->name, name);
         s->stack = stack;
         s->cls   = (uint8_t)cls;
+        s->mem   = (uint8_t)mem;
         s->fn    = fn;
         s->arg   = arg;
         return i;

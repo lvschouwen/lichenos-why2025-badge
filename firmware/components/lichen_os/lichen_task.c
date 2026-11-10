@@ -1,10 +1,13 @@
 // lichen_task_start (#181): every app task starts through a trampoline that books it under its owner and takes it out
 // of the book when its function returns. The book (task_book.c) is guarded by a spinlock: the trampoline's last step
-// runs right before vTaskDelete and must not block.
+// runs right before vTaskDelete and must not block. A stack outside internal RAM (#269) is made WithCaps and deleted
+// the same way.
 #include "lichen_task.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_memory_utils.h"
+#include "freertos/idf_additions.h"
 #include "fw_console.h"
 
 #include <stdint.h>
@@ -27,16 +30,58 @@ static void trampoline(void *arg) {
     book.slot[slot].handle = xTaskGetCurrentTaskHandle();
     void (*fn)(void *)     = book.slot[slot].fn;
     void *fn_arg           = book.slot[slot].arg;
+    bool  with_caps        = book.slot[slot].mem != TASK_STACK_INTERNAL;
     portEXIT_CRITICAL(&book_mux);
     fn(fn_arg);
     portENTER_CRITICAL(&book_mux);
     task_book_remove(&book, slot);
     portEXIT_CRITICAL(&book_mux);
-    vTaskDelete(NULL);
+    if (with_caps) {
+        // A WithCaps task cannot free its own stack: IDF starts a small internal clean-up task that deletes this one
+        vTaskDeleteWithCaps(NULL);
+    } else {
+        vTaskDelete(NULL);
+    }
+}
+
+static uint32_t stack_caps(task_stack_t mem) {
+    return (mem == TASK_STACK_LP_RAM ? MALLOC_CAP_RTCRAM : MALLOC_CAP_SPIRAM) | MALLOC_CAP_8BIT;
+}
+
+// Where the stack goes: the memory asked for while its region keeps its reserve (task_book.c), else internal RAM
+static task_stack_t place_stack(task_stack_t mem, uint32_t stack_bytes) {
+    if ((unsigned)mem >= TASK_STACK_COUNT || mem == TASK_STACK_INTERNAL) {
+        return TASK_STACK_INTERNAL;
+    }
+    return task_stack_place(mem, stack_bytes, heap_caps_get_largest_free_block(stack_caps(mem)));
+}
+
+// Makes the booked task. A region that cannot give the stack after all (a race with another allocation) leaves the
+// task in internal RAM; the slot learns that before the task can run, so the trampoline deletes it the plain way.
+static bool create_task(int slot, char const *name, uint32_t stack_bytes, int priority, int core, TaskHandle_t *out) {
+    void        *arg = (void *)(intptr_t)slot;
+    task_stack_t mem = (task_stack_t)book.slot[slot].mem; // set by task_book_add, nothing else writes it yet
+    if (mem != TASK_STACK_INTERNAL) {
+        if (xTaskCreatePinnedToCoreWithCaps(trampoline, name, stack_bytes, arg, (UBaseType_t)priority, out, core,
+                                            stack_caps(mem)) == pdPASS) {
+            return true;
+        }
+        ESP_LOGW(TAG, "task %s: no %u B of %s for its stack, internal RAM instead", name, (unsigned)stack_bytes,
+                 task_stack_name(mem));
+        portENTER_CRITICAL(&book_mux);
+        book.slot[slot].mem = TASK_STACK_INTERNAL;
+        portEXIT_CRITICAL(&book_mux);
+    }
+    return xTaskCreatePinnedToCore(trampoline, name, stack_bytes, arg, (UBaseType_t)priority, out, core) == pdPASS;
 }
 
 bool lichen_task_start(lichen_app_t const *app, char const *name, void (*fn)(void *arg), void *arg,
                        uint32_t stack_bytes, lichen_prio_t prio, TaskHandle_t *handle) {
+    return lichen_task_start_in(app, name, fn, arg, stack_bytes, prio, LICHEN_STACK_INTERNAL, handle);
+}
+
+bool lichen_task_start_in(lichen_app_t const *app, char const *name, void (*fn)(void *arg), void *arg,
+                          uint32_t stack_bytes, lichen_prio_t prio, lichen_stack_t mem, TaskHandle_t *handle) {
     char const *owner = app ? app->id : TASK_BOOK_OS;
     int         priority = task_class_priority((task_class_t)prio);
     if (!fn || priority < 0) {
@@ -47,18 +92,22 @@ bool lichen_task_start(lichen_app_t const *app, char const *name, void (*fn)(voi
     if (task_name_fit(fitted, name)) {
         ESP_LOGW(TAG, "%s: task name \"%s\" cut to \"%s\"", owner, name, fitted);
     }
+    task_stack_t placed = place_stack((task_stack_t)mem, stack_bytes); // the heap query stays outside the spinlock
+    if (placed != (task_stack_t)mem) {
+        ESP_LOGW(TAG, "%s: task %s: %s is short, its %u B stack goes to internal RAM", owner, fitted,
+                 task_stack_name((task_stack_t)mem), (unsigned)stack_bytes);
+    }
     portENTER_CRITICAL(&book_mux);
-    int slot = task_book_add(&book, owner, fitted, stack_bytes, (task_class_t)prio, fn, arg);
+    int slot = task_book_add(&book, owner, fitted, stack_bytes, (task_class_t)prio, placed, fn, arg);
     portEXIT_CRITICAL(&book_mux);
     if (slot < 0) {
         ESP_LOGE(TAG, "%s: task %s not started: all %d task slots are taken", owner, fitted, TASK_BOOK_SLOTS);
         return false;
     }
     // Straight into the caller's variable: FreeRTOS writes it before the task can run (mesh_task_handle relies on it)
-    TaskHandle_t  own = NULL;
-    TaskHandle_t *out = handle ? handle : &own;
-    if (xTaskCreatePinnedToCore(trampoline, fitted, stack_bytes, (void *)(intptr_t)slot, (UBaseType_t)priority, out,
-                                task_class_core((task_class_t)prio)) != pdPASS) {
+    TaskHandle_t own  = NULL;
+    int          core = task_class_core((task_class_t)prio);
+    if (!create_task(slot, fitted, stack_bytes, priority, core, handle ? handle : &own)) {
         portENTER_CRITICAL(&book_mux);
         task_book_remove(&book, slot);
         portEXIT_CRITICAL(&book_mux);
@@ -116,6 +165,17 @@ static bool alive(TaskStatus_t const *tasks, UBaseType_t n, void const *h) {
     return false;
 }
 
+// From the stack's address, so it holds for every task, booked or not, and shows a fallback to internal RAM
+static char const *stack_mem_name(void const *stack_base) {
+    if (esp_ptr_external_ram(stack_base)) {
+        return task_stack_name(TASK_STACK_PSRAM);
+    }
+    if (esp_ptr_in_rtc_dram_fast(stack_base)) {
+        return task_stack_name(TASK_STACK_LP_RAM);
+    }
+    return task_stack_name(TASK_STACK_INTERNAL);
+}
+
 static void print_tasks(task_book_t const *snap, TaskStatus_t const *tasks, UBaseType_t n) {
     for (UBaseType_t i = 0; i < n; i++) {
         task_slot_t const *s = slot_of(snap, tasks[i].xHandle);
@@ -129,9 +189,9 @@ static void print_tasks(task_book_t const *snap, TaskStatus_t const *tasks, UBas
         if (s) {
             snprintf(stack, sizeof(stack), "%u", (unsigned)s->stack);
         }
-        console_reply("task %s owner %s prio %u core %s stack %s free %u", tasks[i].pcTaskName,
+        console_reply("task %s owner %s prio %u core %s stack %s free %u mem %s", tasks[i].pcTaskName,
                       s ? s->owner : "-", (unsigned)tasks[i].uxCurrentPriority, core, stack,
-                      (unsigned)tasks[i].usStackHighWaterMark);
+                      (unsigned)tasks[i].usStackHighWaterMark, stack_mem_name(tasks[i].pxStackBase));
     }
     for (int i = 0; i < TASK_BOOK_SLOTS; i++) {
         task_slot_t const *s = &snap->slot[i];
@@ -170,11 +230,17 @@ static void cmd_tasks(char const *args) {
         booked += snap->slot[i].used;
     }
     console_reply("tasks: %u running, %u of %d task slots taken", (unsigned)n, (unsigned)booked, TASK_BOOK_SLOTS);
+    console_reply("tasks: LP RAM %u of %u B free, largest block %u B (stacks there keep %u B free)",
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_RTCRAM),
+                  (unsigned)heap_caps_get_total_size(MALLOC_CAP_RTCRAM),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_RTCRAM),
+                  (unsigned)task_stack_reserve(TASK_STACK_LP_RAM));
     heap_caps_free(tasks);
     heap_caps_free(snap);
 }
 
 void lichen_task_console_register(void) {
-    console_register("tasks", "tasks (every task with its owner app, priority, core, stack size and bytes never used)",
+    console_register("tasks", "tasks (every task with its owner app, priority, core, stack size, bytes never used and "
+                              "the memory its stack is in; LP RAM free)",
                      cmd_tasks);
 }

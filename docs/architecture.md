@@ -348,7 +348,9 @@ guard, not a security boundary: apps are compiled in and share the address space
 - **The task book and the memory book** (#181, `lichen_task.h`, `lichen_mem.h`; pure parts `task_book.c`, `mem_book.c`):
   every task started through `lichen_task_start` is booked under its app (32 slots; a priority class maps to a core and
   a priority, the app loop sits on core 1 next to LVGL), every `lichen_alloc` is counted per app (25 owners; a 64 KB
-  internal-RAM quota, bulk goes to PSRAM). `xTaskCreate*` and `heap_caps_*` are owner-only symbols, so apps and the
+  internal-RAM quota, bulk goes to PSRAM). A task's stack is internal by default; `lichen_task_start_in` puts it in LP RAM
+  (low-rate tasks that must stay internal-capable but never need DMA: sys_notices and thermal, #269) or PSRAM, falling
+  back to internal RAM when the region is short. `xTaskCreate*` and `heap_caps_*` are owner-only symbols, so apps and the
   shell cannot bypass the books. Read them with `fw tasks` and `fw mem`.
 - **Notifications reach the LED and the haptics by a push from above** (#245): the drivers (L2) never call the
   notification service. `lichen_os` (`os_bind.c`) binds the status LED's `led_set_dnd`/`led_set_unread`, which

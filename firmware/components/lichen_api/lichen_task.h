@@ -25,6 +25,16 @@ typedef enum {
     LICHEN_PRIO_APP_LOOP   = TASK_CLASS_APP_LOOP,   // 3, core 1 with LVGL: an app's main loop (MeshCore's mesh task)
 } lichen_prio_t;
 
+// Where the task's stack lives (#269, task_book.h has the rules). INTERNAL is the default and right for nearly every
+// task. LP_RAM: a low-rate task that must stay internal-capable (it writes NVS or /storage) but never puts a DMA buffer
+// or PIE/SIMD data on its stack; it frees DMA-capable RAM. PSRAM: a task that never touches flash, NVS or /storage.
+// When the region is short the stack goes to internal RAM ("fw tasks" shows where each stack is).
+typedef enum {
+    LICHEN_STACK_INTERNAL = TASK_STACK_INTERNAL,
+    LICHEN_STACK_LP_RAM   = TASK_STACK_LP_RAM,
+    LICHEN_STACK_PSRAM    = TASK_STACK_PSRAM,
+} lichen_stack_t;
+
 // Starts fn(arg) on a task of its own named name (cut to 15 characters, logged when cut), stack_bytes of stack. app
 // NULL is the OS. handle (may be NULL) is set before the task first runs, as xTaskCreate does.
 //
@@ -34,11 +44,15 @@ typedef enum {
 bool lichen_task_start(lichen_app_t const *app, char const *name, void (*fn)(void *arg), void *arg,
                        uint32_t stack_bytes, lichen_prio_t prio, TaskHandle_t *handle);
 
+// lichen_task_start with the stack in mem (lichen_task_start is this with LICHEN_STACK_INTERNAL)
+bool lichen_task_start_in(lichen_app_t const *app, char const *name, void (*fn)(void *arg), void *arg,
+                          uint32_t stack_bytes, lichen_prio_t prio, lichen_stack_t mem, TaskHandle_t *handle);
+
 // After an app stopped: its tasks still running, other than the caller's own. Waits up to wait_ms for them to end
 // (a stopped task returns a moment after it said so), then logs each one left. Returns how many are left.
 size_t lichen_task_leftovers(lichen_app_t const *app, uint32_t wait_ms);
 
-// main.c, once: "fw tasks" (every task with its owner, priority, core and stack)
+// main.c, once: "fw tasks" (every task with its owner, priority, core, stack and the memory the stack is in)
 void lichen_task_console_register(void);
 
 #ifdef __cplusplus

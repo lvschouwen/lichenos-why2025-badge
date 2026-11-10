@@ -359,7 +359,9 @@ static void cmd_thermal(char const *args) {
 void thermal_start(void) {
     console_register("thermal", "thermal [test warn|clear|shutdown YES] (temperature watchdog, battery safety)",
                      cmd_thermal);
-    if (!lichen_task_start(NULL, "thermal", thermal_task, NULL, STACK_BYTES, LICHEN_PRIO_SERVICE, NULL)) {
+    // LP RAM (#269): a poll every few seconds that writes NVS (its shed and seen flags), so internal-capable, no DMA
+    if (!lichen_task_start_in(NULL, "thermal", thermal_task, NULL, STACK_BYTES, LICHEN_PRIO_SERVICE, LICHEN_STACK_LP_RAM,
+                              NULL)) {
         ESP_LOGE(TAG, "no memory: nothing watches the temperature");
     }
 }
