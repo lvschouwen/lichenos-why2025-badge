@@ -18,19 +18,23 @@
 #include <string.h>
 
 #define BIG_BYTES     (1024u * 1024)   // each PSRAM buffer: 1 MB covers every 1 KB spot many times (#120: 859 mod 1024)
-#define CHUNK_BYTES   (32u * 1024)     // the internal buffer: internal DMA RAM is scarce, 32 KB and freed afterwards
+#define CHUNK_BYTES   (8u * 1024)      // the internal buffer: internal DMA RAM is scarce (#256: 32 KB here, taken on every 120 MHz
+                                       // boot by the trial's gate, pulled the DMA low-water mark ~37 KB down). 8 KB still spans
+                                       // more than one AXI-GDMA descriptor (4 KB each)
 #define PIECE_BYTES   (256u * 1024)    // PSRAM -> PSRAM is moved in pieces: the driver builds a descriptor list per call
 #define ALIGN         128              // the L2 cache line: DMA buffers never share a line with anything else
 #define MAX_ROUNDS    1000
 #define DMA_WAIT_MS   2000
 #define FLAGS_FLUSH   (ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE)
 #define SD_SECTOR     512
-#define SD_PIECE      CHUNK_BYTES      // one card transfer of 32 KB (64 sectors): FatFs reads a whole cluster at once when the
+#define SD_PIECE      (32u * 1024)     // one card transfer of 32 KB (64 sectors): FatFs reads a whole cluster at once when the
                                        // destination is sector-aligned, so the SDMMC IDMAC runs several 4 KB descriptors in one
                                        // go; every #120 flip sat beyond the first 4 KB of the file, none inside the first descriptor
 #define SD_WAIT_MS    2000
 #define SWEEP_RESERVE (8u * 1024 * 1024) // free PSRAM the sweep leaves to the rest of the badge for its ~40 s
 #define SWEEP_MIN_WINDOWS 4u
+
+_Static_assert(SD_PIECE % CHUNK_BYTES == 0, "the SD reference is read into the internal buffer in whole chunks");
 
 typedef struct {
     async_memcpy_handle_t mcp;
@@ -187,15 +191,21 @@ static void leg_sd(run_t *r, bool bounced) {
     int64_t t0     = esp_timer_get_time();
     for (size_t off = 0; off < BIG_BYTES && !failed; off += SD_PIECE) {
         uint32_t sector = r->sd_sector + (uint32_t)(off / SD_SECTOR);
-        sync_mem(r, r->in, SD_PIECE, FLAGS_FLUSH);
         sync_mem(r, r->dst + off, SD_PIECE, FLAGS_FLUSH);
-        failed = !s_sd.read(r->in, sector, SD_PIECE / SD_SECTOR) || !read(r->dst + off, sector, SD_PIECE / SD_SECTOR);
+        failed = !read(r->dst + off, sector, SD_PIECE / SD_SECTOR); // the path under test: one 32 KB card transfer
         if (!failed) {
-            sync_mem(r, r->in, SD_PIECE, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
             // DMA wrote the RAM behind the cache: drop the lines. The CPU copy sits in dirty lines: write them back
             // (an invalidate would throw the data away) and drop them, so the compare reads what reached the PSRAM
             sync_mem(r, r->dst + off, SD_PIECE, bounced ? FLAGS_FLUSH : ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-            psram_dma_compare_buf(r->dst + off, r->in, SD_PIECE, off, &rep);
+        }
+        // The reference: the same sectors into internal RAM, a chunk at a time (the internal buffer is smaller, #256)
+        for (size_t part = 0; part < SD_PIECE && !failed; part += CHUNK_BYTES) {
+            sync_mem(r, r->in, CHUNK_BYTES, FLAGS_FLUSH);
+            failed = !s_sd.read(r->in, sector + (uint32_t)(part / SD_SECTOR), CHUNK_BYTES / SD_SECTOR);
+            if (!failed) {
+                sync_mem(r, r->in, CHUNK_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+                psram_dma_compare_buf(r->dst + off + part, r->in, CHUNK_BYTES, off + part, &rep);
+            }
         }
     }
     r->us[leg] += esp_timer_get_time() - t0;
@@ -248,7 +258,7 @@ static bool setup(run_t *r, unsigned burst) {
     r->dst2                   = heap_caps_aligned_alloc(ALIGN, BIG_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     r->in                     = heap_caps_aligned_alloc(ALIGN, CHUNK_BYTES, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!r->done || !r->src || !r->dst || !r->dst2 || !r->in) {
-        console_reply("psram dma: out of memory (3 x 1 MB PSRAM, 32 KB internal DMA RAM)");
+        console_reply("psram dma: out of memory (3 x 1 MB PSRAM, %u KB internal DMA RAM)", (unsigned)(CHUNK_BYTES >> 10));
         return false;
     }
     esp_err_t err = esp_async_memcpy_install_gdma_axi(&cfg, &r->mcp);
