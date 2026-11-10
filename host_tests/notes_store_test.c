@@ -81,7 +81,7 @@ static void test_write(void) {
         }
     }
     CHECK(found);
-    CHECK(!has("buy-milk.new"));
+    CHECK(!has("buy-milk.txt.new"));
     // A note that was deleted meanwhile does not come back
     CHECK(notes_store_write(dir, "nothing.txt", "x") == NOTES_ERR_GONE && !has("nothing.txt"));
     CHECK(notes_store_write(dir, "../x.txt", "x") == NOTES_ERR_ARG);
