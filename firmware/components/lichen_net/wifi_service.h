@@ -6,6 +6,7 @@
 
 #include "wifi_join.h"
 #include "wifi_list.h"
+#include "wifi_regdom.h"
 
 // Lichen's Wi-Fi service (#61, #66, #108): the c6wifi task owns the esp_wifi driver that ESP-Hosted carries over the C6
 // link, joins and keeps the connection, sets the clock over SNTP and answers `fw wifi` / `fw net`. Moved out of c6link
@@ -63,3 +64,12 @@ bool wifi_set_credentials(char const *ssid, char const *pass);
 // TRYING / JOINED / FAILED_KEPT_OLD (NONE before the first trial). tried gets the SSID of the last trial; kept the SSID
 // that is back after a failure ("" if no network was saved).
 wifi_join_state_t wifi_join_state(char *tried, size_t tried_cap, char *kept, size_t kept_cap);
+
+// The driver's applied country, protocol, bandwidth, TX power and power save for the settings registry (#311), with
+// what the P4 asked for. live: read them now over the RPCs (waits for the C6, so never on the LVGL task) when the link
+// and the driver are up; otherwise (and when that read got nothing) *out is the cache, read after each Wi-Fi start and
+// association. Returns true when *out was read just now.
+bool wifi_readback(wifi_readback_t *out, bool live);
+// Power save none (false) or min (true), not saved (#146): applied now when Wi-Fi runs, else at the next start. False
+// when the driver refused it.
+bool wifi_set_ps(bool min);

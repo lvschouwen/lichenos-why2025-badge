@@ -69,6 +69,10 @@ reg_cmd_result_t reg_cmd_set(reg_entry_t const *tab, size_t n, char const *args,
 size_t reg_cmd_set_reply(reg_cmd_result_t r, reg_entry_t const *e, reg_value_t const *applied, bool have_applied,
                          char const *args, char *buf, size_t cap);
 
+// One key's cached view for a status line that never waits (`fw airplane`'s bt.state, #311): "idle (12.3 s ago)",
+// "idle (stale, 40 s ago)", "? (not supported by this C6)"
+size_t reg_cached_text(reg_entry_t const *e, reg_view_t const *v, char *buf, size_t cap);
+
 // The lora.* views in id order (freq, bw, sf, cr, sync, preamble, power, state) as one line for `fw lora`:
 // "869.618 MHz 62.5 kHz SF7 CR5 sync 0x12 pre 16 22 dBm rx | 1.2 s ago" or "? (not supported by this C6)"
 #define REG_RADIO_KEYS 8

@@ -48,6 +48,28 @@ reg_status_t reg_p4_bl_mode_get(reg_entry_t const *e, reg_value_t *out) {
     return REG_OK;
 }
 
+// wifi.* (#311): the stub driver reads back NL / 13 dBm; wifi.ps sets are counted
+static int      wifi_ps_sets;
+static uint32_t wifi_ps_value;
+
+reg_status_t reg_p4_wifi_get(reg_entry_t const *e, reg_value_t *out) {
+    switch (e->id) {
+        case REG_ID_WIFI_COUNTRY: memcpy(out->s, "NL", 3); break;
+        case REG_ID_WIFI_TXPWR: out->i = 52; break;
+        case REG_ID_WIFI_BW: out->u = 20; break;
+        case REG_ID_WIFI_PS: out->u = wifi_ps_value; break;
+        default: out->u = 0x47; break;
+    }
+    return REG_OK;
+}
+
+reg_status_t reg_p4_wifi_ps_set(reg_entry_t const *e, reg_value_t const *v) {
+    (void)e;
+    wifi_ps_value = v->u;
+    wifi_ps_sets++;
+    return REG_OK;
+}
+
 static bool c6_confirms = true; // the stub C6 has the registry and the bl domain
 
 static bool confirmable(reg_entry_t const *e) {
@@ -73,8 +95,9 @@ static void test_table(void) {
         if (REG_ID_DOMAIN(e->id) == REG_ID_DOMAIN(REG_ID_LORA_FREQ)) {
             CHECK((e->flags & REG_F_RO) && !e->set); // radio keys: read-only in the registry (#307)
         }
-        // A C6 key's proxy, a P4 key not: the domain says which chip serves it (0x10+ is the P4's)
-        CHECK(reg_p4_is_proxy(e) == (REG_ID_DOMAIN(e->id) < 0x10));
+        // A C6 key's proxy, a P4 key not: the domain says which chip serves it (0x10+ and wifi.* 0x03 are the P4's)
+        unsigned d = REG_ID_DOMAIN(e->id);
+        CHECK(reg_p4_is_proxy(e) == (d < 0x10 && d != REG_ID_DOMAIN(REG_ID_WIFI_COUNTRY)));
     }
     CHECK(proxies <= REG_PROXY_MAX);
     CHECK(reg_find_id(reg_p4_table, reg_p4_count, REG_ID_C6_REG_CAPS) != NULL);
@@ -127,6 +150,46 @@ static void test_set_rules(void) {
     CHECK(bl_sets == 1);
     c6_confirms = true;
     proxy_fails = false;
+}
+
+// #311: the country, TX power and bandwidth are guarded (their own commands), the protocol read-only, power save set
+static void test_wifi_keys(void) {
+    char reply[160];
+    CHECK(reg_find_name(reg_p4_table, reg_p4_count, "bt.state") != NULL);
+    CHECK(reg_find_id(reg_p4_table, reg_p4_count, REG_ID_BT_STATE)->type == REG_T_ENUM);
+    wifi_ps_sets = 0;
+    CHECK(set("wifi.country DE", reply, sizeof(reply)) == RC_GUARDED);
+    CHECK(strstr(reply, "applied NL") != NULL);
+    CHECK(set("wifi.txpwr 80", reply, sizeof(reply)) == RC_GUARDED);
+    CHECK(strstr(reply, "applied 52 qdBm") != NULL);
+    CHECK(set("wifi.bw 40", reply, sizeof(reply)) == RC_GUARDED);
+    CHECK(set("wifi.protocol 7", reply, sizeof(reply)) == RC_RO);
+    CHECK(set("wifi.ps max", reply, sizeof(reply)) == RC_BAD_VALUE); // only none | min, as fw wifi ps
+    CHECK(set("wifi.ps 2", reply, sizeof(reply)) == RC_RANGE);
+    CHECK(wifi_ps_sets == 0);
+    CHECK(set("wifi.ps min", reply, sizeof(reply)) == RC_OK);
+    CHECK(strcmp(reply, "wifi.ps = min") == 0);
+    CHECK(wifi_ps_sets == 1 && wifi_ps_value == 1);
+    CHECK(set("wifi.ps none", reply, sizeof(reply)) == RC_OK);
+    CHECK(strcmp(reply, "wifi.ps = none") == 0);
+}
+
+// fw airplane's bt.state part (#311): the cache with its age, or why there is none
+static void test_cached_text(void) {
+    reg_entry_t const *bt = reg_find_id(reg_p4_table, reg_p4_count, REG_ID_BT_STATE);
+    char               line[64];
+    reg_view_t         v = {.has_applied = true, .has_age = true, .applied = {.u = 0}, .age_ms = 12345};
+    reg_cached_text(bt, &v, line, sizeof(line));
+    CHECK(strcmp(line, "idle (12.3 s ago)") == 0);
+    v.note = RV_STALE;
+    reg_cached_text(bt, &v, line, sizeof(line));
+    CHECK(strcmp(line, "idle (stale, 12.3 s ago)") == 0);
+    v = (reg_view_t){.note = RV_OLD_C6};
+    reg_cached_text(bt, &v, line, sizeof(line));
+    CHECK(strcmp(line, "? (not supported by this C6)") == 0);
+    v = (reg_view_t){0};
+    reg_cached_text(bt, &v, line, sizeof(line));
+    CHECK(strcmp(line, "? (not read yet)") == 0);
 }
 
 static uint16_t const ids[]   = {REG_ID_BL_DISPLAY, REG_ID_LORA_FREQ, REG_ID_LORA_POWER, REG_ID_C6_REG_CAPS};
@@ -387,6 +450,8 @@ int main(void) {
     test_table();
     test_set_guarded();
     test_set_rules();
+    test_wifi_keys();
+    test_cached_text();
     test_old_c6();
     test_caps_and_domains();
     test_caps_age();

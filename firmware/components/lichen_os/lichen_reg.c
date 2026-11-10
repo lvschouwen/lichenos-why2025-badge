@@ -20,7 +20,9 @@
 #include "reg_cmd.h"
 #include "reg_p4.h"
 #include "reg_proxy.h"
+#include "reg_wifi.h"
 #include "ui_service.h"
+#include "wifi_service.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -172,7 +174,18 @@ static bool requested_of(uint16_t id, reg_value_t *v) {
     return lora_requested(id, v);
 }
 
+// wifi.* (#311): the Wi-Fi service's read-back, asked now when live (its RPCs wait for the C6), else its cache
+static void wifi_view(reg_entry_t const *e, bool live, reg_view_t *v) {
+    wifi_readback_t r;
+    bool            fresh = wifi_readback(&r, live);
+    reg_wifi_view(e, &r, fresh, live, now_ms(), v);
+}
+
 static void build_view(reg_entry_t const *e, bool live, bool no_link, reg_view_t *v) {
+    if (reg_wifi_is_key(e)) {
+        wifi_view(e, live, v);
+        return;
+    }
     memset(v, 0, sizeof(*v));
     v->has_saved     = saved_of(e, &v->saved);
     v->has_requested = requested_of(e->id, &v->requested);
@@ -201,6 +214,21 @@ reg_status_t reg_p4_proxy_get(reg_entry_t const *e, reg_value_t *out) {
     }
     *out = v.applied;
     return REG_OK;
+}
+
+reg_status_t reg_p4_wifi_get(reg_entry_t const *e, reg_value_t *out) {
+    reg_view_t v;
+    wifi_view(e, may_wait(), &v);
+    if (!v.has_applied || v.note == RV_STALE) {
+        return REG_FAILED;
+    }
+    *out = v.applied;
+    return REG_OK;
+}
+
+reg_status_t reg_p4_wifi_ps_set(reg_entry_t const *e, reg_value_t const *v) {
+    (void)e;
+    return wifi_set_ps(v->u == 1) ? REG_OK : REG_FAILED;
 }
 
 reg_status_t reg_p4_bl_set(reg_entry_t const *e, reg_value_t const *v) {
@@ -324,7 +352,7 @@ static void poll(void *arg) {
 // ---- console --------------------------------------------------------------------------------------------------------
 
 static void print_rows(char const *query) {
-    reg_entry_t const *es[REG_PROXY_MAX + 8];
+    reg_entry_t const *es[REG_PROXY_MAX + 16]; // every key of the table (`fw get` without a query)
     bool               no_link[sizeof(es) / sizeof(es[0])];
     size_t             n = 0;
     for (size_t i = 0; i < reg_p4_count && n < sizeof(es) / sizeof(es[0]); i++) {
@@ -402,6 +430,15 @@ static void cmd_bl(char const *args) {
     if (atomic_load(&started)) {
         print_rows("bl");
     }
+}
+
+size_t lichen_reg_cached_text(char const *name, char *buf, size_t cap) {
+    reg_entry_t const *e = reg_find_name(reg_p4_table, reg_p4_count, name);
+    reg_view_t         v = {.note = RV_FAILED};
+    if (e && atomic_load(&started)) {
+        build_view(e, false, false, &v); // the cache only: a status line never waits for the C6
+    }
+    return e ? reg_cached_text(e, &v, buf, cap) : 0;
 }
 
 static lora_reg_hooks_t const hooks = {.answer = on_answer, .link = on_link, .radio_text = radio_text};

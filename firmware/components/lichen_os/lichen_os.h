@@ -40,6 +40,9 @@ void lichen_ui_service_port_up(void);
 // `fw set` and `fw bl`, and the backlight's REG_SET path. Once, after lora_start (or after it was skipped: the P4's own
 // keys work without a C6); it asks c6.reg_caps at once.
 void lichen_reg_start(void);
+// One key's cached applied value as a status line part, never waiting for the C6 (`fw airplane`'s bt.state, #311):
+// "idle (12.3 s ago)" or "? (<why>)"; 0 bytes for a name the table does not have
+size_t lichen_reg_cached_text(char const *name, char *buf, size_t cap);
 
 // The OS watch services (#281): the thermal watchdog (thermal.c, #10) and Lichen's own notices (sys_notices.c, #62).
 // Started by main in their own boot step, display or not, so a badge whose screen did not come up still powers off

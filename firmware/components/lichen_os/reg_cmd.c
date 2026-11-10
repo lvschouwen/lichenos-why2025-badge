@@ -209,6 +209,22 @@ size_t reg_cmd_set_reply(reg_cmd_result_t r, reg_entry_t const *e, reg_value_t c
     return done(snprintf(buf, cap, "ERR failed: %s set, applied not read back", e->name), cap);
 }
 
+size_t reg_cached_text(reg_entry_t const *e, reg_view_t const *v, char *buf, size_t cap) {
+    char val[REG_STR_MAX + 1], age[16];
+    if (!cap) {
+        return 0;
+    }
+    if (!v->has_applied || !reg_format(e, &v->applied, val, sizeof(val))) {
+        rv_note_t note = (rv_note_t)v->note;
+        return done(snprintf(buf, cap, "? (%s)", note == RV_NONE ? "not read yet" : reg_note_text(note)), cap);
+    }
+    if (!v->has_age) {
+        return done(snprintf(buf, cap, "%s", val), cap);
+    }
+    age_text(v, age, sizeof(age));
+    return done(snprintf(buf, cap, "%s (%s%s ago)", val, v->note == RV_STALE ? "stale, " : "", age), cap);
+}
+
 static uint32_t max_age(reg_view_t const v[REG_RADIO_KEYS]) {
     uint32_t age = 0;
     for (int i = 0; i < REG_RADIO_KEYS; i++) {

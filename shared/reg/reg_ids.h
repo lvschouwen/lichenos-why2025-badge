@@ -38,6 +38,9 @@ typedef enum {
     // 0x03 Wi-Fi
     REG_ID_WIFI_COUNTRY  = 0x0300, // wifi.country   STR, ISO 3166 alpha-2 (P4-local, never on the wire)
     REG_ID_WIFI_PROTOCOL = 0x0301, // wifi.protocol  U8 bitmask of WIFI_PROTOCOL_11B/G/N/AX
+    REG_ID_WIFI_TXPWR    = 0x0302, // wifi.txpwr     I16 0.25 dBm (esp_wifi_get_max_tx_power), RO + TX: fw wifi tx (#311)
+    REG_ID_WIFI_BW       = 0x0303, // wifi.bw        U8 MHz (esp_wifi_get_bandwidth), RO + TX: fw wifi bw
+    REG_ID_WIFI_PS       = 0x0304, // wifi.ps        ENUM none / min (wifi_ps_type_t), settable, not saved
 
     // 0x04 Bluetooth
     REG_ID_BT_STATE = 0x0400, // bt.state  ENUM esp_bt_controller_status_t (idle / inited / enabled)

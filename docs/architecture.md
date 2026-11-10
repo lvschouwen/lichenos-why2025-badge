@@ -168,6 +168,17 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   LoRa task's 8-deep receive queue keeps room for RX_PACKET and REG_VAL); the restart close also pauses 20 ms when a
   REG_SET left in the last 100 ms.
   `lora_get_radio` / `lora_get_freq` and `lichen_sys_display_get` stay the requested / saved values.
+- **Wi-Fi keys (#311, P4 domain 0x03):** the regulatory country is fixed in firmware: `esp_wifi_set_country_code("NL",
+  false)` (esp_hosted RPC `Req_WifiSetCountryCode`; 802.11d off = policy manual, so an AP's country IE never changes
+  it) before every `esp_wifi_start` (`lichen_net/wifi_service.c` `set_country`, in `wifi_driver_up` and the switch's
+  start), logged as `wifi: regulatory NL, channels 1-13, max N dBm, policy manual` (W when the driver reports anything
+  else; a failed set leaves the driver's narrower "01" default, 1-11). `wifi.country` (STR, RO + TX), `wifi.protocol`
+  (RO), `wifi.txpwr` (0.25 dBm, RO + TX: `fw wifi tx`), `wifi.bw` (MHz, RO + TX: `fw wifi bw`) and `wifi.ps`
+  (none/min, settable, not saved) come from `wifi_readback` (`esp_wifi_get_country` / `_protocol` / `_bandwidth` /
+  `_max_tx_power` / `_ps` over the RPCs): read after every Wi-Fi start and association into a spinlocked cache, live on
+  the console (reads within 250 ms are reused), the cache with its age on the LVGL task. `fw wifi tx|bw|ps` keep their
+  guards and echo the applied read-back. `bt.state` is a C6 proxy key; `fw airplane` shows its cache next to the saved
+  Bluetooth switch. Pure parts: `wifi_regdom.c`, `lichen_os/reg_wifi.c` (`host_tests/wifi_reg_test.c`).
 - **CONFIG (type 1, 14 bytes of body, 16 in all):** freq u32, bw u32, sf u8, cr u8 (5..8 = 4/5..4/8), sync u8,
   preamble u16, tx power i8 dBm. The P4 sends it on every (re)start of the link (`LORA_ACT_SEND_CONFIG`,
   `lora/lora.c:377`); the C6 starts unconfigured after its own reset. Default: 869.618 MHz, 62.5 kHz, SF7, CR 4/5, sync 0x12,

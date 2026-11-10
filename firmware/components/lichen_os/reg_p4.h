@@ -10,8 +10,9 @@
 // so reg_service_test.c runs reg_table_check and the console set rules on the real table; the getters and the setter
 // are lichen_reg.c's on the badge and the test's stubs on the host.
 //
-// Radio keys are read-only and TX (#307): a set answers GUARDED and never reaches a setter. wifi.* and bt.state come
-// with #311.
+// Radio keys are read-only and TX (#307): a set answers GUARDED and never reaches a setter. wifi.* (#311) is the P4's
+// own domain 0x03 (the Wi-Fi driver is reached over the esp_hosted RPCs, not REG_GET): wifi.country (fixed NL),
+// wifi.txpwr and wifi.bw are TX and change only through `fw wifi tx|bw`; wifi.ps is settable. bt.state is a C6 key.
 extern reg_entry_t const reg_p4_table[];
 extern size_t const      reg_p4_count;
 
@@ -19,6 +20,10 @@ extern size_t const      reg_p4_count;
 reg_status_t reg_p4_proxy_get(reg_entry_t const *e, reg_value_t *out);
 // bl.display / bl.keyboard: through the backlight driver as a saved level (as "fw bl" always did); the driver sends it
 reg_status_t reg_p4_bl_set(reg_entry_t const *e, reg_value_t const *v);
+// wifi.*: the Wi-Fi service's read-back, live on the console, its cache on the LVGL task
+reg_status_t reg_p4_wifi_get(reg_entry_t const *e, reg_value_t *out);
+// wifi.ps: none / min through the Wi-Fi service (not saved, as `fw wifi ps`)
+reg_status_t reg_p4_wifi_ps_set(reg_entry_t const *e, reg_value_t const *v);
 // bl.idle / bl.override from the backlight driver (and the thermal watchdog's load shed)
 reg_status_t reg_p4_bl_mode_get(reg_entry_t const *e, reg_value_t *out);
 

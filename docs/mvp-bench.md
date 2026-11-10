@@ -76,7 +76,7 @@ Contract: `docs/architecture.md` "Two-chip contract". Any failure stops the pass
 
 - [ ] Cold boot reaches home; `fw boot` shows the C6 step done with `N ms`, then Wi-Fi and clock. `fw c6` -> **Expected:**
   `c6: this boot ..., IDENT match (N ms)`.
-- [ ] `fw wifi` -> `wifi: "<ssid>" connected, ip ...`, then `fw wifi ps` -> **Expected:** `wifi: power save off`.
+- [ ] `fw wifi` -> `wifi: "<ssid>" connected, ip ...`, then `fw wifi ps` -> **Expected:** `wifi: power save none applied (fw wifi ps none | min, not saved)`.
   `tools/badge.sh ota-info <host>` answers with the firmware version.
 - [ ] `fw mesh` shows `rx N` rising between two reads; one TX to `#badgetest`.
 - [ ] `fw c6` -> note `restarts`; `fw keys on`; `fw c6 reset`; wait 75 s. **Expected** in the log: `wifi: down for the C6
@@ -87,7 +87,7 @@ Contract: `docs/architecture.md` "Two-chip contract". Any failure stops the pass
   the noted levels.
 - [ ] `fw mem` -> **Expected:** `mem dma free N ... min M` with **N >= 89981 and M >= 80650** (the pre-MVP 99979 / 89611
   minus 10 %). Also `mem internal ... free_pct .. min_pct ..` is noted (the #205 totals).
-- [ ] `fw airplane` -> **Expected:** `airplane off | wifi on | lora on | bluetooth off`.
+- [ ] `fw airplane` -> **Expected:** `airplane off | wifi on | lora on | bluetooth off, controller idle (N s ago)`.
 - [ ] `fw tasks` -> no task without an owner except the IDF, esp_hosted and LVGL tasks.
 
 ### 6. Per-issue items (grouped by area, in walk order)

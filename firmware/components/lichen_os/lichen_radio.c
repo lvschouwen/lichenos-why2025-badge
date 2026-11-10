@@ -1,3 +1,4 @@
+#include "lichen_os.h"
 #include "lichen_radio.h"
 #include "lichen_sys_radio.h"
 
@@ -7,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #define KEY_ON    "radio_on"
@@ -194,8 +196,13 @@ static void cmd_airplane(char const *args) {
         console_reply("usage: airplane [on|off]");
         return;
     }
-    console_reply("airplane %s | wifi %s | lora %s | bluetooth %s", lichen_airplane_get() ? "on" : "off",
-                  state_word(RADIO_WIFI), state_word(RADIO_LORA), state_word(RADIO_BT));
+    // Next to the saved switch, what the C6's controller is in (bt.state, #311): the registry's cache, no wait
+    char bt[48];
+    if (!lichen_reg_cached_text("bt.state", bt, sizeof(bt))) {
+        snprintf(bt, sizeof(bt), "?");
+    }
+    console_reply("airplane %s | wifi %s | lora %s | bluetooth %s, controller %s", lichen_airplane_get() ? "on" : "off",
+                  state_word(RADIO_WIFI), state_word(RADIO_LORA), state_word(RADIO_BT), bt);
 }
 
 void lichen_radio_console_register(void) {

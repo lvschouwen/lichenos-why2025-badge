@@ -8,6 +8,7 @@
 #include "fw_console.h"
 #include "lichen_clock.h"
 #include "lichen_mdns.h"
+#include "wifi_regdom.h"
 #include "wifi_saved.h"
 #include "esp_attr.h"
 #include "esp_event.h"
@@ -156,7 +157,12 @@ static _Atomic int wifi_ps_mode = WIFI_PS_NONE;
 static _Atomic int wifi_tx_raw;
 static _Atomic int wifi_bw_mhz;
 
-#define WIFI_TX_DEFAULT_RAW 80 // 20 dBm, CONFIG_ESP_PHY_MAX_WIFI_TX_POWER on the C6
+#define WIFI_TX_DEFAULT_RAW WIFI_RB_TX_DEFAULT
+
+// wifi_regdom.h names the driver's numbers without its headers
+_Static_assert(WIFI_RB_POLICY_MANUAL == WIFI_COUNTRY_POLICY_MANUAL, "country policy");
+_Static_assert(WIFI_RB_PS_NONE == WIFI_PS_NONE && WIFI_RB_PS_MIN == WIFI_PS_MIN_MODEM, "power save");
+_Static_assert(WIFI_BW20 == 1 && WIFI_BW40 == 2 && WIFI_BW80 == 3 && WIFI_BW160 == 4 && WIFI_BW80_BW80 == 5, "bandwidth");
 
 static void set_wifi_tx(int raw) {
     esp_err_t err = esp_wifi_set_max_tx_power((int8_t)raw);
@@ -197,6 +203,35 @@ static void apply_wifi_ps(void) {
     }
     apply_wifi_bw(); // before esp_wifi_connect: the bandwidth is agreed when associating
     apply_wifi_tx();
+}
+
+static void country_into(wifi_readback_t *r, wifi_country_t const *c) {
+    memcpy(r->cc, c->cc, sizeof(r->cc));
+    r->schan           = c->schan;
+    r->nchan           = c->nchan;
+    r->policy          = (uint8_t)c->policy;
+    r->country_max_dbm = c->max_tx_power;
+}
+
+// The regulatory domain (#311, Lucas 2026-11-10): NL with 802.11d off (policy manual: an AP's country IE never changes
+// it), set before every esp_wifi_start. The driver's own default is "01" (world safe, channels 1-11, 802.11d on). Logged
+// with what the driver reports back. A failed set leaves the driver on its default, which is narrower, so the start
+// goes ahead.
+static void set_country(void) {
+    esp_err_t       err = esp_wifi_set_country_code(WIFI_COUNTRY, false);
+    wifi_country_t  c   = {0};
+    wifi_readback_t r   = {0};
+    r.country_ok        = err == ESP_OK && esp_wifi_get_country(&c) == ESP_OK;
+    if (r.country_ok) {
+        country_into(&r, &c);
+    }
+    char text[64];
+    wifi_regdom_text(&r, text, sizeof(text));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "wifi: country %s not set: %s (the driver keeps its default)", WIFI_COUNTRY, esp_err_to_name(err));
+    } else {
+        ESP_LOG_LEVEL(wifi_regdom_expected(&r) ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "wifi: regulatory %s", text);
+    }
 }
 
 static char const *wifi_ps_name(wifi_ps_type_t ps) {
@@ -375,6 +410,7 @@ static drv_result_t wifi_driver_up(char const **why) {
     if ((err = esp_wifi_set_storage(WIFI_STORAGE_RAM)) != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi storage: %s", esp_err_to_name(err));
     }
+    set_country(); // before either esp_wifi_start below, and before handle_wifi_sync's
     wifi_config_t cfg = {0};
     bool          have = load_credentials(&cfg);
     portENTER_CRITICAL(&state_lock);
@@ -485,6 +521,76 @@ static uint32_t retry_at;
 
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+// ---- the driver's applied values for the registry (#311) --------------------------------------------------------
+
+static portMUX_TYPE    rb_lock = portMUX_INITIALIZER_UNLOCKED;
+static wifi_readback_t readback; // under rb_lock: the last read that got anything
+
+static void requested_into(wifi_readback_t *r) {
+    int proto     = atomic_load(&wifi_proto);
+    r->req_tx_raw = (int8_t)atomic_load(&wifi_tx_raw);
+    r->req_bw_mhz = (uint8_t)atomic_load(&wifi_bw_mhz);
+    r->req_proto  = proto ? (uint8_t)(WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N |
+                                     (proto == 'n' ? 0 : WIFI_PROTOCOL_11AX))
+                          : 0;
+    r->req_ps     = (uint8_t)atomic_load(&wifi_ps_mode);
+}
+
+// One read of everything over the RPCs (each waits for the C6: never on the LVGL task). False when nothing could be
+// read; the cache then keeps the read before.
+static bool read_back(void) {
+    wifi_readback_t  r     = {0};
+    wifi_country_t   c     = {0};
+    uint8_t          proto = 0;
+    wifi_bandwidth_t bw    = 0;
+    int8_t           tx    = 0;
+    wifi_ps_type_t   ps    = WIFI_PS_NONE;
+    if ((r.country_ok = esp_wifi_get_country(&c) == ESP_OK)) {
+        country_into(&r, &c);
+    }
+    r.proto_ok = esp_wifi_get_protocol(WIFI_IF_STA, &proto) == ESP_OK;
+    r.bw_ok    = esp_wifi_get_bandwidth(WIFI_IF_STA, &bw) == ESP_OK;
+    r.tx_ok    = esp_wifi_get_max_tx_power(&tx) == ESP_OK;
+    r.ps_ok    = esp_wifi_get_ps(&ps) == ESP_OK;
+    if (!(r.country_ok || r.proto_ok || r.bw_ok || r.tx_ok || r.ps_ok)) {
+        return false;
+    }
+    r.proto  = proto;
+    r.bw_mhz = wifi_bw_to_mhz((int)bw);
+    r.tx_raw = tx;
+    r.ps     = (uint8_t)ps;
+    r.have   = true;
+    r.at_ms  = now_ms();
+    portENTER_CRITICAL(&rb_lock);
+    readback = r;
+    portEXIT_CRITICAL(&rb_lock);
+    return true;
+}
+
+// A live ask within this long of the last read takes that read: `fw get wifi.` asks once per key
+#define READBACK_REUSE_MS 250
+
+bool wifi_readback(wifi_readback_t *out, bool live) {
+    uint32_t t = now_ms();
+    portENTER_CRITICAL(&rb_lock);
+    bool recent = readback.have && t - readback.at_ms < READBACK_REUSE_MS;
+    portEXIT_CRITICAL(&rb_lock);
+    bool fresh = live && (recent || (c6link_up() && !c6link_updating() && atomic_load(&driver_ready) && read_back()));
+    portENTER_CRITICAL(&rb_lock);
+    *out = readback;
+    portEXIT_CRITICAL(&rb_lock);
+    requested_into(out);
+    return fresh;
+}
+
+bool wifi_set_ps(bool min) {
+    atomic_store(&wifi_ps_mode, min ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+    if (!atomic_load(&wifi_started)) {
+        return true; // applied at the next start (STA_START)
+    }
+    return esp_wifi_set_ps(min ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE) == ESP_OK;
 }
 
 // Log-safe copy of an SSID (they come from the air)
@@ -769,6 +875,7 @@ static void handle_got_ip(void) {
 
 static void handle_connected(msg_t const *m) {
     wifi_link_connected(&link_ap, m->ssid, strlen(m->ssid));
+    read_back(); // the bandwidth and protocol are agreed at association: the registry's cache follows (#311)
 }
 
 static void handle_disconnected(int reason, uint32_t now) {
@@ -900,6 +1007,7 @@ static void handle_wifi_sync(void) {
         first_connect_settled = false;
         portEXIT_CRITICAL(&state_lock);
         atomic_store(&driver_up, true); // before the start, as in wifi_driver_up
+        set_country();
         esp_err_t err = esp_wifi_start();
         atomic_store(&wifi_started, err == ESP_OK);
         atomic_store(&driver_up, err == ESP_OK);
@@ -1003,6 +1111,7 @@ static void wifi_task(void *arg) {
                     portEXIT_CRITICAL(&state_lock);
                     if (atomic_load(&driver_up)) {
                         apply_wifi_ps(); // STA_START: the driver is up, also without credentials (scan only)
+                        read_back();     // the registry's cache after each Wi-Fi start (#311)
                     }
                     if (have && atomic_load(&driver_up)) {
                         portENTER_CRITICAL(&state_lock);
@@ -1105,6 +1214,22 @@ static void cmd_wifi_switch(bool on) {
     console_reply("wifi: radio %s", (radio.get ? radio.get() : wifi_enabled()) ? "on" : "off");
 }
 
+// `fw wifi tx|bw|ps` (#311): thin aliases over the registry's wifi.txpwr / wifi.bw / wifi.ps, so each echoes the value
+// the driver applies (read back now, the same read `fw get wifi.` shows), never the request alone
+static void cmd_wifi_echo(char kind, unsigned asked_mhz, bool reconnecting) {
+    wifi_readback_t r;
+    char            line[120];
+    wifi_readback(&r, true);
+    if (kind == 't') {
+        wifi_tx_reply(&r, line, sizeof(line));
+    } else if (kind == 'b') {
+        wifi_bw_reply(&r, asked_mhz, reconnecting, line, sizeof(line));
+    } else {
+        wifi_ps_reply(&r, line, sizeof(line));
+    }
+    console_reply("%s", line);
+}
+
 static void cmd_wifi(char const *args) {
     char a[140], b[140];
     if (!*args) {
@@ -1149,18 +1274,10 @@ static void cmd_wifi(char const *args) {
             console_reply("wifi ps [none | min]"); // a typo must not fall through to joining an SSID called "ps"
             return;
         }
-        if (args[2]) {
-            atomic_store(&wifi_ps_mode, args[3] == 'n' ? WIFI_PS_NONE : WIFI_PS_MIN_MODEM);
-            if (atomic_load(&wifi_started)) {
-                apply_wifi_ps();
-            }
+        if (args[2] && !wifi_set_ps(args[3] == 'm')) {
+            console_reply("wifi: power save not set (no C6 link?)");
         }
-        wifi_ps_type_t ps = (wifi_ps_type_t)atomic_load(&wifi_ps_mode);
-        if (atomic_load(&wifi_started) && esp_wifi_get_ps(&ps) != ESP_OK) {
-            console_reply("wifi: power save not readable (no C6 link?)");
-            return;
-        }
-        console_reply("wifi: power save %s (fw wifi ps none | min, not saved)", wifi_ps_name(ps));
+        cmd_wifi_echo('p', 0, false);
     } else if (strcmp(args, "stats") == 0) {
         wifi_ap_record_t ap;
         if (!atomic_load(&wifi_started) || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
@@ -1182,15 +1299,17 @@ static void cmd_wifi(char const *args) {
                       wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode)));
     } else if (strncmp(args, "tx ", 3) == 0 || strcmp(args, "tx") == 0) {
         int raw = args[2] ? atoi(args + 3) : -1;
-        if (raw != 0 && (raw < 8 || raw > 80)) {
+        if (raw != -1 && raw != 0 && (raw < 8 || raw > 80)) { // bare "tx" (-1) reads back only
             console_reply("wifi tx <8-80> (0.25 dBm units: 34 = 8.5, 52 = 13, 80 = 20 dBm) | wifi tx 0 (default)");
             return;
         }
-        atomic_store(&wifi_tx_raw, raw);
-        if (atomic_load(&wifi_started)) {
-            set_wifi_tx(raw ? raw : WIFI_TX_DEFAULT_RAW);
+        if (raw >= 0) {
+            atomic_store(&wifi_tx_raw, raw);
+            if (atomic_load(&wifi_started)) {
+                set_wifi_tx(raw ? raw : WIFI_TX_DEFAULT_RAW);
+            }
         }
-        console_reply("wifi: max TX power %s (not saved; fw wifi stats reads it back)", raw ? "set" : "back to 20 dBm");
+        cmd_wifi_echo('t', 0, false);
     } else if (strcmp(args, "proto n") == 0 || strcmp(args, "proto ax") == 0 || strcmp(args, "proto") == 0) {
         if (!args[5]) {
             console_reply("wifi proto n | ax (n: b/g/n only, no Wi-Fi 6; reconnects to apply, not saved)");
@@ -1201,14 +1320,14 @@ static void cmd_wifi(char const *args) {
         console_reply(post(&m) ? "wifi: protocol %s, reconnecting (a few seconds)" : "wifi: busy, try again",
                       args[6] == 'n' ? "b/g/n" : "b/g/n/ax");
     } else if (strcmp(args, "bw 20") == 0 || strcmp(args, "bw 40") == 0 || strcmp(args, "bw") == 0) {
-        if (!args[2]) {
-            console_reply("wifi bw 20 | 40 (reconnects to apply, not saved)");
-            return;
+        unsigned mhz = !args[2] ? 0 : args[3] == '2' ? 20 : 40;
+        bool     reconnecting = false;
+        if (mhz) {
+            atomic_store(&wifi_bw_mhz, (int)mhz);
+            msg_t m = {.type = MSG_RECONNECT}; // the bandwidth is agreed at association; STA_START/connect apply it
+            reconnecting = post(&m);
         }
-        atomic_store(&wifi_bw_mhz, args[3] == '2' ? 20 : 40);
-        msg_t m = {.type = MSG_RECONNECT}; // the bandwidth is agreed at association; STA_START/connect apply it
-        console_reply(post(&m) ? "wifi: bandwidth %s MHz, reconnecting (a few seconds)" : "wifi: busy, try again",
-                      args + 3);
+        cmd_wifi_echo('b', mhz, reconnecting);
     } else if (strcmp(args, "--clear") == 0) {
         msg_t m = {.type = MSG_FORGET};
         console_reply(post(&m) ? "wifi: credentials removed" : "wifi: busy, try again");

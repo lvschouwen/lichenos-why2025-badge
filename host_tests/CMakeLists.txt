@@ -352,6 +352,18 @@ target_include_directories(reg_service_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(reg_service_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME reg_service_test COMMAND reg_service_test)
 
+# The Wi-Fi registry keys (#311): the fixed country NL as the driver reports it, the regulatory log text, bandwidth
+# mapping, the fw wifi tx|bw|ps alias replies and the wifi.* views
+add_executable(wifi_reg_test ${CMAKE_CURRENT_SOURCE_DIR}/wifi_reg_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg/reg.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_cmd.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_wifi.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_regdom.c)
+target_include_directories(wifi_reg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net)
+target_compile_options(wifi_reg_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME wifi_reg_test COMMAND wifi_reg_test)
+
 # The LoRa task's registry request queue (#310): order, one entry per id, the newest seq, a full queue
 add_executable(lora_regq_test ${CMAKE_CURRENT_SOURCE_DIR}/lora_regq_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lora/lora_regq.c)
