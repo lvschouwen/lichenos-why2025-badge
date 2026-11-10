@@ -50,8 +50,9 @@ Usage: $(basename "$0") <command> [args]
                             write a backup image back at offset 0 (checks the .sha256 and that the chip
                             matches the backup's name; --yes confirms overwriting the whole flash)
   monitor <port>            open a serial console (exit with Ctrl-])
-  logger <install|start|stop|status>
-                            the serial logger on $HOST (tools/serial_log.py, writes /tmp/badge-serial.log); the port
+  logger <install|start|stop|restart|status>
+                            the serial logger on $HOST (tools/serial_log.py, writes ~/badge-logs/badge-serial.log there); install =
+                            copy it + udev rule + service that start it when the badge connects (#276); the port
                             commands above pause it while they use the port
   console <port> <line>     send one line to the badge's console without resetting it and show the reply;
                             commands start with "fw " (try "fw help")
@@ -92,9 +93,9 @@ remote() {
     ssh "$HOST" "$@"
 }
 # Run a command on the badge host with the serial logger (tools/serial_log.py, #61) paused: it closes the port while
-# /tmp/badge-serial.log.pause exists and confirms with .paused. The pause is removed when the remote shell exits
+# ~/badge-logs/badge-serial.log.pause exists and confirms with .paused. The pause is removed when the remote shell exits
 # (also on errors); if ssh dies, the logger ignores a pause older than 10 minutes.
-PORT_PAUSE='P=/tmp/badge-serial.log; if pgrep -f "[s]erial_log.py" >/dev/null; then : > "$P.pause"; trap '"'"'rm -f "$P.pause"'"'"' EXIT; i=0; while [ ! -e "$P.paused" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; [ -e "$P.paused" ] || echo "warning: the serial logger did not release the port" >&2; fi;'
+PORT_PAUSE='P=$HOME/badge-logs/badge-serial.log; if pgrep -f "[s]erial_log.py" >/dev/null; then : > "$P.pause"; trap '"'"'rm -f "$P.pause"'"'"' EXIT; i=0; while [ ! -e "$P.paused" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; [ -e "$P.paused" ] || echo "warning: the serial logger did not release the port" >&2; fi;'
 port_remote() { remote "$PORT_PAUSE $*"; }
 esptool() { port_remote "$VENV/bin/esptool $*"; }
 
@@ -269,21 +270,30 @@ cmd_restore() {
     esptool --port "$port" --baud "$BAUD" write-flash 0 "$REMOTE_DIR/images/restore.bin"
 }
 
-# The serial logger on the badge host (tools/serial_log.py -> ~/badge/serial_log.py, log in /tmp/badge-serial.log).
-# Every port user in this script pauses it (PORT_PAUSE), so it can run all the time.
+# The serial logger on the badge host (tools/serial_log.py -> ~/badge/serial_log.py, log in ~/badge-logs/badge-serial.log).
+# A udev rule (tools/flash-host/99-why2025-badge.rules) starts badge-serial-log.service when the badge's CH340 appears,
+# also at boot (#276). Every port user in this script pauses it (PORT_PAUSE), so it can run all the time.
+LOGGER_UNIT=badge-serial-log.service
 cmd_logger() {
     case $1 in
-        install) scp "$REPO/tools/serial_log.py" "$HOST:$REMOTE_DIR/serial_log.py" && echo "installed; restart it to use the new version" ;;
-        start)
-            # the script name is built from two parts so pgrep doesn't match this ssh shell's own command line
-            remote "pgrep -f '[s]erial_log.py' >/dev/null && { echo 'already running'; exit 0; }; n=serial_log;
-                    nohup $VENV/bin/python $REMOTE_DIR/\$n.py >/dev/null 2>&1 < /dev/null & sleep 1;
-                    pgrep -af '[s]erial_log.py' || { echo 'did not start' >&2; exit 1; }" ;;
-        stop) remote "pkill -f '[s]erial_log.py' && echo stopped || echo 'not running'" ;;
+        install)
+            scp "$REPO/tools/serial_log.py" "$HOST:$REMOTE_DIR/serial_log.py" &&
+                scp "$REPO/tools/flash-host/99-why2025-badge.rules" "$REPO/tools/flash-host/$LOGGER_UNIT.in" "$HOST:/tmp/" &&
+                remote "set -e; sed -e \"s|@USER@|\$USER|g\" -e \"s|@HOME@|\$HOME|g\" /tmp/$LOGGER_UNIT.in > /tmp/$LOGGER_UNIT;
+                        sudo install -m 644 /tmp/99-why2025-badge.rules /etc/udev/rules.d/99-why2025-badge.rules;
+                        sudo install -m 644 /tmp/$LOGGER_UNIT /etc/systemd/system/$LOGGER_UNIT;
+                        rm -f /tmp/99-why2025-badge.rules /tmp/$LOGGER_UNIT.in /tmp/$LOGGER_UNIT;
+                        sudo systemctl daemon-reload; sudo udevadm control --reload;
+                        for n in /sys/bus/usb-serial/drivers/ch341-uart/ttyUSB*; do
+                            [ -e \"\$n\" ] && sudo udevadm trigger --action=add --name-match=\"\${n##*/}\"; done;
+                        sudo udevadm settle; sudo systemctl start $LOGGER_UNIT;
+                        sleep 2; systemctl is-active $LOGGER_UNIT; ls -l /dev/badge-console" &&
+                echo "installed; a running logger picks up a new serial_log.py after: badge.sh logger restart" ;;
+        start | stop | restart) remote "sudo systemctl $1 $LOGGER_UNIT && systemctl is-active $LOGGER_UNIT || true" ;;
         status)
-            remote "pgrep -af '[s]erial_log.py' || echo 'not running';
-                    [ -e /tmp/badge-serial.log.pause ] && echo 'pause requested'; [ -e /tmp/badge-serial.log.paused ] && echo 'paused';
-                    tail -n 3 /tmp/badge-serial.log 2>/dev/null" ;;
+            remote "systemctl --no-pager status $LOGGER_UNIT 2>&1 | head -n 4; P=\$HOME/badge-logs/badge-serial.log;
+                    [ -e \$P.pause ] && echo 'pause requested'; [ -e \$P.paused ] && echo 'paused';
+                    tail -n 3 \$P 2>/dev/null" ;;
         *) usage ;;
     esac
 }

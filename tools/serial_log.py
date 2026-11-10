@@ -1,5 +1,5 @@
-# Badge console logger for the flash host. Runs there, not on the PC: tools/badge.sh logger-install copies it to
-# ~/badge/serial_log.py. It does NOT reset the badge (CH340: EN on RTS, BOOT on DTR; same open order as
+# Badge console logger for the flash host. Runs there, not on the PC: tools/badge.sh logger install copies it to
+# ~/badge/serial_log.py and installs the udev rule + service that start it when the badge connects (#276). It does NOT reset the badge (CH340: EN on RTS, BOOT on DTR; same open order as
 # tools/badge.sh console), appends every line with a wall-clock timestamp to a file (tail -f it), reopens the
 # port when the cable is moved and keeps the file under ~50 MB (moves it to .1).
 #
@@ -11,7 +11,7 @@
 # opens the ttyUSB node whose driver is ch341-uart instead (never another adapter on the host), and writes one line
 # when the port is lost and one when it is back (with the node it opened), so gaps in the log are visible.
 #
-# Usage: serial_log.py [port] [/tmp/badge-serial.log]
+# Usage: serial_log.py [port] [~/badge-logs/badge-serial.log]
 import glob
 import os
 import sys
@@ -63,7 +63,8 @@ def main() -> None:
     import serial  # only on the flash host; the tests import this file without pyserial
 
     port = sys.argv[1] if len(sys.argv) > 1 else BY_ID
-    path = sys.argv[2] if len(sys.argv) > 2 else "/tmp/badge-serial.log"
+    path = sys.argv[2] if len(sys.argv) > 2 else os.path.expanduser("~/badge-logs/badge-serial.log")
+    os.makedirs(os.path.dirname(path), exist_ok=True)  # outside tmpfs: survives a reboot of the host (#276)
     pause_path, paused_path = path + ".pause", path + ".paused"
 
     def open_port(dev):

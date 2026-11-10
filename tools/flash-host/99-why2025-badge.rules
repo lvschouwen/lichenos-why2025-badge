@@ -1,0 +1,3 @@
+# WHY2025 badge console (#276): the badge's CH340 (1a86:7522) only; the flash host's other adapters are not touched.
+# Gives it a stable name and starts the serial logger when it appears (also at boot, through udev's coldplug).
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7522", SYMLINK+="badge-console", TAG+="systemd", ENV{SYSTEMD_WANTS}+="badge-serial-log.service"

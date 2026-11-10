@@ -1,0 +1,12 @@
+# WHY2025 badge serial logger (#276), installed by `tools/badge.sh logger install`. Started by the udev rule when the
+# badge connects. No BindsTo on the device: a badge reset or power-off drops the USB for a while, and serial_log.py
+# rides that out itself (it retries and writes one line per gap). @USER@ and @HOME@ are filled in at install.
+[Unit]
+Description=WHY2025 badge serial console logger
+
+[Service]
+User=@USER@
+ExecStartPre=/usr/bin/mkdir -p @HOME@/badge-logs
+ExecStart=@HOME@/badge-venv/bin/python @HOME@/badge/serial_log.py /dev/badge-console @HOME@/badge-logs/badge-serial.log
+Restart=always
+RestartSec=5
