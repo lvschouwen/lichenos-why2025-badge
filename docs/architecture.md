@@ -550,7 +550,8 @@ OS v2 (#216) on the same lessons:
   clusters, #300). Never formatted on a failed mount (#110); only the factory reset formats it.
 - **On-disk config** (the same in the firmware and in `tools/pack_storage.py`, checked by `pack_storage.sh check-config`
   in every build): block 4096 B x 1216 blocks, read 128, prog 128, cache 512, lookahead 128, block cycles 512, name max
-  255 (`LFS_NAME_MAX`), disk version 2.1. `storage.bin` (build output) is `tools/pack_storage.sh pack` of
+  255 (`LFS_NAME_MAX`), disk version 2.1, inline_max 512 (littlefs's default from cache/attr/block: files up to
+  512 B, such as MeshCore's advert blobs in `meshcore/bl/`, live in the folder's metadata instead of a block each). `storage.bin` (build output) is `tools/pack_storage.sh pack` of
   `firmware/storage_staging`, verified file by file (`verify`, SHA-256) after the build.
 - **Not FAT any more:** names are case-sensitive and have no 8.3 alias; `rename` replaces an existing target in one
   atomic step; a file another task has open cannot be renamed or removed (EBUSY, where FatFs's lock gave EACCES), but

@@ -49,6 +49,13 @@ SDKCONFIG = {  # CONFIG key -> sdkconfig.json name
 }
 LFS_TYPE_DIR = 2  # lfs.h, as LFSStat.type reports a folder
 MTIME_ATTR = "t"  # esp_littlefs's ESP_LITTLEFS_ATTR_MTIME: a little-endian 64-bit time_t
+# Files up to inline_max bytes live inside their folder's metadata pair instead of taking a 4 KB block of their own.
+# Neither esp_littlefs nor littlefs-python sets cfg.inline_max, so littlefs 2.11 (lfs_init) derives it the same way on
+# both sides: min(cache_size, attr_max (1022, LFS_ATTR_MAX), block_size / 8) = 512. MeshCore's advert blobs in
+# /storage/meshcore/bl/ (up to 255 B each, hundreds of them, rewritten on every advert) need it at 255 or more.
+LFS_ATTR_MAX = 1022
+INLINE_MAX = min(CONFIG["cache_size"], CONFIG["attr_max"] or LFS_ATTR_MAX, CONFIG["block_size"] // 8)
+INLINE_NEEDED = 255
 
 
 def mount(context=None, block_count=PARTITION_SIZE // CONFIG["block_size"], fresh=False):
@@ -189,6 +196,11 @@ def check_config(sdkconfig_json, component_dir):
         bad.append("LITTLEFS_MULTIVERSION is on: the disk version is no longer littlefs's own")
     if cfg.get("LITTLEFS_MMAP_PARTITION"):
         bad.append("LITTLEFS_MMAP_PARTITION is on: no flash mapping at runtime (#31)")
+    if INLINE_MAX < INLINE_NEEDED:
+        bad.append(f"inline_max {INLINE_MAX} < {INLINE_NEEDED}: every advert blob would take a whole block")
+    with open(os.path.join(component_dir, "src", "esp_littlefs.c")) as f:
+        if "inline_max" in f.read():
+            bad.append("esp_littlefs.c sets inline_max itself now: pack_storage.py's INLINE_MAX may no longer match")
     lfs_h = os.path.join(component_dir, "src", "littlefs", "lfs.h")
     with open(lfs_h) as f:
         m = re.search(r"#define LFS_DISK_VERSION (0x[0-9a-fA-F]+)", f.read())
@@ -199,7 +211,23 @@ def check_config(sdkconfig_json, component_dir):
         print(f"pack_storage check-config: {line}", file=sys.stderr)
     if bad:
         sys.exit(1)
-    print("pack_storage check-config: the firmware's LittleFS config matches storage.bin's")
+    print(f"pack_storage check-config: the firmware's LittleFS config matches storage.bin's (inline_max {INLINE_MAX})")
+
+
+def blobs_selftest(tmp):
+    """500 advert-blob-sized files (140-255 B) in one folder: inline, so far fewer blocks than files"""
+    src = os.path.join(tmp, "blobs")
+    bl = os.path.join(src, "meshcore", "bl")
+    os.makedirs(bl)
+    for i in range(500):
+        with open(os.path.join(bl, f"{i:016x}"), "wb") as f:
+            f.write(os.urandom(140 + i % 116))
+    image = os.path.join(tmp, "blobs.bin")
+    pack(src, image)
+    verify(image, src)
+    used = open_image(image).used_block_count
+    print(f"pack_storage selftest: 500 blobs of 140-255 B take {used} blocks ({used * CONFIG['block_size']} B)")
+    assert used < 250, f"{used} blocks for 500 small files: they are not inline"
 
 
 def selftest():
@@ -229,6 +257,7 @@ def selftest():
             CONFIG["block_size"], PARTITION_SIZE // CONFIG["block_size"], CONFIG["name_max"], CONFIG["disk_version"]
         ), stat
         assert len(fs.getattr("lora.toml", MTIME_ATTR)) == 8
+        blobs_selftest(tmp)
         back = os.path.join(tmp, "back")
         extract(image, back)
         assert host_entries(back) == host_entries(src)
