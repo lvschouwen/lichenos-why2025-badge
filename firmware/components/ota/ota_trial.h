@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_partition.h"
+#include "ota_valid.h"
 
 #include <stdbool.h>
 
@@ -9,10 +10,12 @@
 // tools/layers.conf makes esp_ota_get_state_partition, esp_ota_get_last_invalid_partition and
 // esp_ota_mark_app_valid_cancel_rollback ota's only.
 
-// The running image is on trial (PENDING_VERIFY): a reset before it is marked valid makes the bootloader boot the
-// previous image again. Each read of the OTA data maps a flash page, so the answer is kept once it is known: only
-// ota_image_mark_valid changes it while the image runs. A failed read counts as not on trial (as before #285) and is
-// tried again next time. Any task.
+// The running image's trial state: ON_TRIAL (PENDING_VERIFY) means a reset before it is marked valid makes the
+// bootloader boot the previous image again. Each read of the OTA data maps a flash page, so the answer is kept once
+// it is known: only ota_image_mark_valid changes it while the image runs. UNKNOWN when the read failed (not kept: the
+// next call reads again). Any task.
+ota_image_state_t ota_image_trial_state(void);
+// ota_image_trial_state() == OTA_IMAGE_ON_TRIAL: a failed read counts as not on trial (as before #285). Any task.
 bool ota_image_trial_pending(void);
 // Cancels the rollback: the image on trial is the one the bootloader keeps. False when it could not be saved (the image
 // then stays on trial). Called by main's trial (ota_valid.h decides when). Not from an interrupt.

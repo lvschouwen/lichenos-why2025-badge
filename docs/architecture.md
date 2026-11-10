@@ -150,12 +150,14 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
 - **Bundle changes:** a push into `/storage/c6` over Wi-Fi (`[c6]` file) calls `c6link_bundle_changed`
   (`ota/ota_server.c:405-408`) before touching the file, so the stored key is forgotten and the next boot checks fully.
   Every writer of that directory must do the same.
-- **P4 OTA validity needs the C6:** a pending image is marked valid only once the OS is up (every boot step ran,
-  `c6link_up()`, no live PSRAM trial) and, on a boot with a display, the shell too, after `OTA_VALID_AFTER_S`
-  (`ota/ota_valid.c` `ota_trial_step`, `main.c` `ota_trial_wait`; #293: a headless boot ends its trial as well), and it
-  is rolled back when the link never comes up (`ota_should_roll_back_now`). A broken C6 link rolls back every P4 OTA;
-  this is why `ota-c6` goes first. The trial state has one owner, `ota/ota_trial.c` (#285): everyone else asks
-  `ota_image_trial_pending` (the shell `lichen_sys_update_on_trial`, the layers below ota through a hook main binds).
+- **P4 OTA validity needs the C6:** a pending image is marked valid only once, after `OTA_VALID_AFTER_S`, the C6 link
+  is up, no PSRAM trial is live and, on a boot with a display, the shell is up (`ota/ota_valid.c` `ota_trial_step` and
+  `ota_trial_run`, the loop `main.c` `ota_trial_wait` drives). Only a deliberately headless boot (`fw noscreen`) is
+  proven without the shell (#293); a display that failed to start never proves the image, so the next reset rolls it
+  back. While the C6 link is down the trial keeps watching and rolls back at `OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S`
+  (#36, #295). A broken C6 link rolls back every P4 OTA; this is why `ota-c6` goes first. The trial state has one owner,
+  `ota/ota_trial.c` (#285): everyone else asks `ota_image_trial_pending` (the shell `lichen_sys_update_on_trial`, the
+  layers below ota through a hook main binds).
 - **IDENT** (#36): after attach the P4 asks the running C6 app for its ELF sha256 (32 bytes, `LORA_MSG_IDENT`) and
   compares with the bundled `firmware.bin` (`c6_ident_check`; wait `C6_IDENT_WAIT_MS` 2000, `c6link.c:133`). Only MATCH
   proves the C6; NO_ANSWER, MISMATCH, NO_EXPECTED, NOT_ASKED are all "not proven". After a runtime re-attach IDENT is

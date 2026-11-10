@@ -8,24 +8,26 @@
 
 static char const TAG[] = "ota";
 
-typedef enum { TRIAL_UNKNOWN, TRIAL_PENDING, TRIAL_NOT } trial_known_t;
+static _Atomic int trial_known = OTA_IMAGE_UNKNOWN; // an ota_image_state_t
 
-static _Atomic int trial_known = TRIAL_UNKNOWN;
-
-bool ota_image_trial_pending(void) {
+ota_image_state_t ota_image_trial_state(void) {
     int known = atomic_load(&trial_known);
-    if (known != TRIAL_UNKNOWN) {
-        return known == TRIAL_PENDING;
+    if (known != OTA_IMAGE_UNKNOWN) {
+        return (ota_image_state_t)known;
     }
     esp_ota_img_states_t state;
     if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) != ESP_OK) {
-        return false; // not kept: the next call reads again
+        return OTA_IMAGE_UNKNOWN; // not kept, not logged (the PSRAM tick asks every second): the next call reads again
     }
-    bool pending = state == ESP_OTA_IMG_PENDING_VERIFY;
-    // Only from UNKNOWN: a mark that landed in between (TRIAL_NOT) is never undone by this older read
-    int expected = TRIAL_UNKNOWN;
-    atomic_compare_exchange_strong(&trial_known, &expected, pending ? TRIAL_PENDING : TRIAL_NOT);
-    return atomic_load(&trial_known) == TRIAL_PENDING;
+    // Only from UNKNOWN: a mark that landed in between (NOT_ON_TRIAL) is never undone by this older read
+    int expected = OTA_IMAGE_UNKNOWN;
+    atomic_compare_exchange_strong(&trial_known, &expected,
+                                   state == ESP_OTA_IMG_PENDING_VERIFY ? OTA_IMAGE_ON_TRIAL : OTA_IMAGE_NOT_ON_TRIAL);
+    return (ota_image_state_t)atomic_load(&trial_known);
+}
+
+bool ota_image_trial_pending(void) {
+    return ota_image_trial_state() == OTA_IMAGE_ON_TRIAL;
 }
 
 bool ota_image_mark_valid(void) {
@@ -34,7 +36,7 @@ bool ota_image_mark_valid(void) {
         ESP_LOGE(TAG, "marking this image valid failed: %s", esp_err_to_name(err));
         return false;
     }
-    atomic_store(&trial_known, TRIAL_NOT);
+    atomic_store(&trial_known, OTA_IMAGE_NOT_ON_TRIAL);
     return true;
 }
 

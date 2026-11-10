@@ -386,10 +386,10 @@ static uint32_t uptime_ms(void) {
 }
 
 // The first thing on the glass (#39): the boot screen, drawn before storage, notices, assets and the image hash. The
-// fonts are LVGL's built-in ones until lichen_fonts_load. Returns false when there is no display.
+// fonts are LVGL's built-in ones until lichen_fonts_load. Returns whether the display is up, skipped or failed.
 #define NOSCREEN_KEY "t_noscreen" // `fw noscreen`: the next boot acts as if the display did not come up (#281)
 
-static bool show_boot_screen(lv_display_t **display) {
+static ota_display_t show_boot_screen(lv_display_t **display) {
     boot_progress_begin(BOOT_DISPLAY);
     // One boot only: erased before anything else can go wrong. A key that cannot be erased would keep every boot
     // screenless, so it is then ignored and the display starts.
@@ -399,13 +399,13 @@ static bool show_boot_screen(lv_display_t **display) {
         } else {
             ESP_LOGW(TAG, "display start skipped on purpose (fw noscreen, this boot only)");
             boot_progress_end(BOOT_DISPLAY, STEP_FAILED, "skipped (fw noscreen)");
-            return false;
+            return OTA_DISPLAY_SKIPPED;
         }
     }
     if (!display_start(display)) {
         ESP_LOGE(TAG, "no display");
         boot_progress_end(BOOT_DISPLAY, STEP_FAILED, "no display");
-        return false;
+        return OTA_DISPLAY_FAILED;
     }
     lichen_ui_service_port_up();
     shell_boot_screen(*display);
@@ -419,7 +419,7 @@ static bool show_boot_screen(lv_display_t **display) {
     // saved level. The same call closes the UART the C6 flasher needs for itself.
     backlight_restore();
     ESP_LOGI(TAG, "backlight on at %u ms", (unsigned)uptime_ms());
-    return true;
+    return OTA_DISPLAY_UP;
 }
 
 // Fonts from the assets partition into PSRAM, then the assets copy goes (#22). After the screen exists: LVGL is running,
@@ -462,6 +462,7 @@ static void nvs_boot(void) {
 typedef struct {
     lv_display_t *display;
     bool          screen;     // a display came up
+    ota_display_t display_is; // up, skipped on purpose (fw noscreen) or failed: the OTA trial tells them apart (#293)
     bool          storage_ok; // /storage is mounted
 } boot_ctx_t;
 
@@ -515,7 +516,8 @@ static void start_early(boot_ctx_t *ctx) {
 }
 
 static void start_boot_screen(boot_ctx_t *ctx) {
-    ctx->screen = show_boot_screen(&ctx->display);
+    ctx->display_is = show_boot_screen(&ctx->display);
+    ctx->screen     = ctx->display_is == OTA_DISPLAY_UP;
 }
 
 // The bench's way to boot without a display (#281): proves the OS services that must not depend on the shell
@@ -778,39 +780,58 @@ static boot_start_fn_t const start_fns[START_COUNT] = {
     [START_OTA]            = start_ota,
 };
 
+// The trial loop's inputs and actions (ota_trial_io_t): ota_valid.c runs the loop, this is its glue
+static void trial_read(void *ctx, ota_trial_in_t *in) {
+    in->display     = *(ota_display_t const *)ctx;
+    in->image       = ota_image_trial_state();
+    in->shell_up    = in->display == OTA_DISPLAY_UP && shell_up();
+    in->c6_up       = c6link_up();
+    in->psram_trial = psram_speed_trial_pending();
+    in->uptime_s    = uptime_ms() / 1000;
+}
+
+static bool trial_mark_valid(void *ctx) {
+    (void)ctx;
+    return ota_image_mark_valid(); // logs its own failure; the loop tries again a second later
+}
+
+static void trial_wait(void *ctx) {
+    (void)ctx;
+    vTaskDelay(pdMS_TO_TICKS(1000));
+}
+
 // A freshly installed image runs on trial until it has been up for a while; a reset before that boots the previous one
-// again. ota_valid.c decides (host_tests/ota_valid_test.c): the OS being up, plus the shell when this boot has a
-// display (#293: a headless boot ends its trial too)
-static void ota_trial_wait(bool display) {
-    ota_trial_in_t in = {.boot_done = atomic_load(&boot_steps_done), .display = display};
-    for (;;) {
-        in.pending     = ota_image_trial_pending();
-        in.shell_up    = display && shell_up();
-        in.c6_up       = c6link_up();
-        in.psram_trial = psram_speed_trial_pending();
-        in.uptime_s    = uptime_ms() / 1000;
-        switch (ota_trial_step(&in)) {
-        case OTA_TRIAL_DONE:
-            return;
-        case OTA_TRIAL_MARK_VALID:
-            if (ota_image_mark_valid()) {
-                ESP_LOGI(TAG, "this image is now valid%s", display ? "" : " (no display: the OS is up)");
-                update_screen_image_valid();
-            }
-            return;
-        case OTA_TRIAL_ROLL_BACK:
-            // No C6 means no Wi-Fi, so nobody can replace this image: let the bootloader roll back
-            ESP_LOGE(TAG, "C6 link never came up on a trial image: restarting to roll back");
-            system_restart("trial image: no C6 link");
-            return;
-        case OTA_TRIAL_STAY:
-            ESP_LOGW(TAG, "staying on trial (UI or C6 link down): a reset goes back to the previous image");
-            return;
-        case OTA_TRIAL_WAIT:
-        default:
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
+// again. ota_valid.c decides and runs the loop (host_tests/ota_valid_test.c): the C6 link and, with a display, the
+// shell; a boot with the display skipped on purpose (fw noscreen) ends its trial without the shell (#293)
+static void ota_trial_wait(ota_display_t display) {
+    ota_trial_io_t const io = {.read = trial_read, .mark_valid = trial_mark_valid, .wait = trial_wait, .ctx = &display};
+    switch (ota_trial_run(&io)) {
+    case OTA_TRIAL_END_VALID:
+        ESP_LOGI(TAG, "this image is now valid%s",
+                 display == OTA_DISPLAY_SKIPPED ? " (display skipped: the OS is up)" : "");
+        update_screen_image_valid();
+        break;
+    case OTA_TRIAL_END_ROLL_BACK:
+        // No C6 means no Wi-Fi, so nobody can replace this image: let the bootloader roll back
+        ESP_LOGE(TAG, "C6 link never came up on a trial image: restarting to roll back");
+        system_restart("trial image: no C6 link");
+        break;
+    case OTA_TRIAL_END_STAY:
+        ESP_LOGW(TAG, "staying on trial (%s): a reset goes back to the previous image",
+                 display == OTA_DISPLAY_FAILED ? "the display did not start" : "UI down or a PSRAM trial");
+        break;
+    case OTA_TRIAL_END_MARK_FAILED:
+        ESP_LOGE(TAG, "staying on trial: marking this image valid failed %d times, a reset goes back to the previous "
+                      "image",
+                 OTA_TRIAL_TRIES);
+        break;
+    case OTA_TRIAL_END_NO_STATE:
+        ESP_LOGE(TAG, "the OTA state could not be read %d times: if this image is on trial, a reset rolls it back",
+                 OTA_TRIAL_TRIES);
+        break;
+    case OTA_TRIAL_END_NOT_ON_TRIAL:
+    default:
+        break;
     }
 }
 
@@ -834,7 +855,7 @@ void app_main(void) {
         start_fns[boot_order[i]](&ctx);
     }
     atomic_store(&boot_steps_done, true);
-    ota_trial_wait(ctx.screen);
+    ota_trial_wait(ctx.display_is);
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(60000));
     }
