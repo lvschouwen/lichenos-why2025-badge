@@ -1,0 +1,5 @@
+# lvgl-task baseline (#287), shrink-only. Format: file:entry:finding<TAB>count (see tools/check_rules.py).
+# stress_workers.c start_worker() is a wrapper: it passes its caller's worker function on to lichen_task_start_in, so
+# the entry is a parameter the check cannot resolve. stress_workers.c itself has no lv_* call (checked by grep);
+# the worker functions it is handed are in other files and are not seen.
+firmware/components/lichen_shell/stress_workers.c:fn:entry-not-in-file	1

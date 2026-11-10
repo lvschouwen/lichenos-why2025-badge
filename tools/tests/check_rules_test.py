@@ -196,5 +196,93 @@ class Ratchet(unittest.TestCase):
         self.assertEqual(Tree(self, {"a.c": LOG_OK}, base).run("log-level"), 0)
 
 
+SELF_DEL = """\
+static void del_task(void *a) { for (;;) { if (a) { vTaskDelete(NULL); } } }
+static void end_task(void *a) { vTaskDelay(1); vTaskDelete(NULL); }
+void start(void) {
+    lichen_task_start_in(NULL, "a", del_task, NULL, 1, P, LICHEN_STACK_LP_RAM, NULL);
+    lichen_task_start_in(NULL, "b", end_task, NULL, 1, P, LICHEN_STACK_PSRAM, NULL);
+}
+"""
+
+
+class TaskClassSelfDelete(unittest.TestCase):
+    def test_vtaskdelete_is_a_finding_and_not_a_noreturn(self):
+        p = "firmware/components/x/a.c:"
+        self.assertEqual(Tree(self, {"a.c": SELF_DEL}).keys("task-class"),
+                         [p + "del_task:self-delete", p + "end_task:falls-off-the-end", p + "end_task:self-delete"])
+
+
+LV2 = """\
+static void helper(void) { lv_obj_clean(o); }
+static void locked_helper(void) { lv_obj_clean(o); }
+static void calls_task(void *a) { helper(); if (lichen_sys_ui_lock(0)) { locked_helper(); lichen_sys_ui_unlock(); } }
+static void cast_task(void *a) { lv_timer_handler(); }
+static void amp_task(void *a) { lv_timer_handler(); }
+void wrapper(void (*fn)(void *)) { lichen_task_start(NULL, "w", fn, NULL, 1, P, NULL); }
+void start(void) {
+    lichen_task_start(NULL, "a", calls_task, NULL, 1, P, NULL);
+    xTaskCreate((TaskFunction_t)cast_task, "c", 1, NULL, 1, NULL);
+    xTaskCreate(&amp_task, "d", 1, NULL, 1, NULL);
+    xTaskCreate(elsewhere_task, "e", 1, NULL, 1, NULL);
+}
+"""
+
+
+class LvglTaskMore(unittest.TestCase):
+    def test_casts_callees_and_unresolved_entries(self):
+        p = "firmware/components/x/a.c:"
+        self.assertEqual(Tree(self, {"a.c": LV2}).keys("lvgl-task"),
+                         [p + "amp_task:lv_timer_handler", p + "calls_task:lv_obj_clean",
+                          p + "cast_task:lv_timer_handler", p + "elsewhere_task:entry-not-in-file",
+                          p + "fn:entry-not-in-file"])
+
+
+CS_EARLY = """\
+void f(int x) {
+    portENTER_CRITICAL(&mux);
+    if (x) {
+        portEXIT_CRITICAL(&mux);
+        return;
+    }
+    char *p = malloc(4);
+    portEXIT_CRITICAL(&mux);
+}
+"""
+
+
+class CsEarlyExit(unittest.TestCase):
+    def test_early_exit_in_a_branch_does_not_end_the_section(self):
+        self.assertEqual(Tree(self, {"a.c": CS_EARLY}).keys("cs-psram"), ["firmware/components/x/a.c:f:malloc"])
+
+
+LOG_MORE = """\
+void f(void) {
+    ESP_EARLY_LOGE(TAG, "will retry");
+    ESP_DRAM_LOGE(DRAM_STR(TAG), DRAM_STR("dropped"));
+    ESP_LOG_LEVEL(ESP_LOG_ERROR, TAG, "skipped %d", n);
+    ESP_LOG_LEVEL(ESP_LOG_WARN, TAG, "skipped %d", n);
+    ESP_LOGE(TAG, fmt_var, 1);
+}
+"""
+
+
+class LogLevelMore(unittest.TestCase):
+    def test_variants_and_nonliteral(self):
+        cr.NONLITERAL.clear()
+        keys = Tree(self, {"a.c": LOG_MORE}).keys("log-level")
+        self.assertEqual(keys, ["firmware/components/x/a.c:f:dropped", "firmware/components/x/a.c:f:retry",
+                                "firmware/components/x/a.c:f:skipped"])
+        self.assertEqual(len(cr.NONLITERAL), 1)
+
+
+class Counts(unittest.TestCase):
+    def test_function_counts(self):
+        t = Tree(self, {"a.c": LV_SRC, "b.h": "int x;\n"})
+        c = cr.function_counts(list(cr.tree_files(t.root)))
+        self.assertEqual(c[".c"][0], 1)
+        self.assertGreater(c[".c"][1], 5)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -25,7 +25,7 @@ SKIP_PARTS = ("managed_components", "thirdparty", "/build/")
 EXTS = (".c", ".cpp", ".h")
 KEYWORDS = {"if", "for", "while", "switch", "catch", "return", "sizeof", "do", "else"}
 ENDLESS_RE = re.compile(r"^(for\s*\([^;()]*;\s*;[^;()]*\)|while\s*\(\s*(1|true)\s*\))\s*$")
-NORETURN = {"esp_deep_sleep_start", "esp_restart", "abort", "vTaskDelete", "esp_system_abort",
+NORETURN = {"esp_deep_sleep_start", "esp_restart", "abort", "esp_system_abort",
            "lichen_sys_power_off_now"}  # the last one is declared noreturn in lichen_sys_power.h
 
 
@@ -171,7 +171,9 @@ def load(path):
 # assigns it (also as a `->field`) from lichen_alloc(.. LICHEN_MEM_BULK ..), heap_caps_*(.. SPIRAM ..) or lv_malloc;
 # a section that reaches PSRAM through a pointer from another file, a function call or an array of structs is missed
 # (false negative). A section is also flagged for any allocator or LVGL call (they take locks and may be PSRAM), a
-# conservative call that can be a false positive; fix the code or baseline it after review.
+# conservative call that can be a false positive; fix the code or baseline it after review. Only portENTER/EXIT_CRITICAL*
+# and taskENTER/EXIT_CRITICAL* sections are seen: portSET_INTERRUPT_MASK_FROM_ISR, portDISABLE_INTERRUPTS and
+# vPortEnterCritical are not (none is used in our code).
 
 CS_OPEN = re.compile(r"\b(?:port|task)ENTER_CRITICAL\w*\s*\(")
 CS_CLOSE = re.compile(r"\b(?:port|task)EXIT_CRITICAL\w*\s*\(")
@@ -201,6 +203,23 @@ def psram_names(code, funcs):
     return names, local
 
 
+def section_end(code, start):
+    """Index of the EXIT that closes the section opened just before start: the first EXIT at the same brace depth, so an
+    early `EXIT; return;` inside a branch does not end it; a "}" that closes the enclosing block ends it too."""
+    depth = 0
+    for i in range(start, len(code)):
+        ch = code[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth < 0:
+                return i
+        elif depth == 0 and code.startswith(("portEXIT_CRITICAL", "taskEXIT_CRITICAL"), i):
+            return i
+    return len(code)
+
+
 def check_cs_psram(files):
     found = {}
     for path in files:
@@ -214,8 +233,7 @@ def check_cs_psram(files):
             m = CS_OPEN.search(code, pos)
             if not m:
                 break
-            e = CS_CLOSE.search(code, m.end())
-            end = e.start() if e else len(code)
+            end = section_end(code, m.end())
             pos = end
             if "#define" in code[code.rfind("\n", 0, m.start()):m.start() + 20]:
                 continue
@@ -231,22 +249,29 @@ def check_cs_psram(files):
 
 # ---- log-level --------------------------------------------------------------------------------------------------
 # Limits: the message is read from the format string literal(s) only, so a word that arrives through a %s argument is
-# not seen; a message that merely mentions the word of something that failed for good is a false positive: reword it
+# not seen (--report lists those lines); a message that merely mentions the word of something that failed for good is a false positive: reword it
 # or put it on tools/log-level-allow.txt with the reason.
 
 LOG_WORDS = re.compile(r"\b(retry|retries|retrying|retried|again|ignored|ignoring|dropped|dropping|skipped|skipping)\b",
                        re.I)
 
 
+LOGE_CALL = re.compile(r"\bESP_(?:EARLY_|DRAM_)?LOGE\s*\(|\b(ESP_LOG_LEVEL)\s*\(\s*ESP_LOG_ERROR\s*,")
+NONLITERAL = []  # "file:line" of an error log whose format is not a literal: its words are not read (see --report)
+
+
 def check_log_level(files, allow):
     found = {}
     for path in files:
         src, code, text = load(path)
-        for m in re.finditer(r"\bESP_LOGE\s*\(", code):
-            args, end = split_args(text, m.end() - 1)
-            if end < 0:
+        for m in LOGE_CALL.finditer(code):
+            args, end = split_args(text, text.index("(", m.start()))
+            fmt_i = 2 if m.group(1) else 1  # ESP_LOG_LEVEL(level, tag, fmt, ...) / ESP_LOGE(tag, fmt, ...)
+            if end < 0 or len(args) <= fmt_i:
                 continue
-            lits = " ".join(re.findall(r'"((?:[^"\\]|\\.)*)"', ",".join(args[1:2] or args)))
+            lits = " ".join(re.findall(r'"((?:[^"\\]|\\.)*)"', args[fmt_i]))
+            if not lits:
+                NONLITERAL.append("%s:%d" % (os.path.relpath(path), line_of(src, m.start())))
             w = LOG_WORDS.search(lits)
             if w and not any(path.endswith(a[0]) and a[1] in lits for a in allow):
                 found.setdefault((path, func_at(find_functions(code), m.start()), w.group(1).lower()), []).append(
@@ -377,6 +402,9 @@ def check_task_class(files):
                 found.setdefault((path, fn_name, "breaks-out-of-loop"), []).append(line_of(code, f.start))
             elif not (endless or noret):
                 found.setdefault((path, fn_name, "falls-off-the-end"), []).append(line_of(code, f.start))
+            if re.search(r"\bvTaskDelete\s*\(", code[f.start:f.end]):
+                # lichen_task.h: fn ends by returning; a self-delete leaves the book entry and, on these stacks, aborts
+                found.setdefault((path, fn_name, "self-delete"), []).append(line_of(code, f.start))
             if "PSRAM" in mem:
                 for g in callee_closure(code, funcs, f):
                     for c in FLASH_CALLS.finditer(code[g.start:g.end]):
@@ -385,10 +413,13 @@ def check_task_class(files):
 
 
 # ---- lvgl-task --------------------------------------------------------------------------------------------------
-# Limits: only the entry function's own body is read; an lv_* call in a helper it calls is not seen (the helper may be
-# a lichen_ui_call callback, which is right). Entry functions are found by name in the same file. The lock span is a
-# straight text order between lichen_sys_ui_lock / lvgl_port_lock and the next unlock, so an early unlock inside a
-# branch ends it for the rest of the body (false positive, rare).
+# Limits: an entry function is found by name in the same file, after stripping casts and a leading "&"; one that is
+# not an identifier, or not defined in the file (a wrapper's parameter, a function from another file), is a finding of
+# its own (entry-not-in-file) rather than a silent skip, so a wrapper like stress_workers.c's is baselined with a
+# reason. The entry's same-file callees are followed by name (a call made inside a lock span is not followed); calls
+# through function pointers, other files and C++ virtuals are not. A lichen_ui_call callback is not an entry, so its
+# lv_* are right. The lock span is a straight text order between lichen_sys_ui_lock / lvgl_port_lock and the next
+# unlock, so an early unlock inside a branch ends it for the rest of the body (false positive, rare).
 
 TASK_CREATE = re.compile(r"\b(xTaskCreate\w*|lichen_task_start\w*)\s*\(")
 LV_CALL = re.compile(r"\b(lv_[a-z0-9_]+)\s*\(")
@@ -402,9 +433,37 @@ def entry_names(code, funcs):
             continue
         args, _end = split_args(code, m.end() - 1)
         idx = 0 if m.group(1).startswith("xTaskCreate") else 2
-        if len(args) > idx and re.match(r"^[A-Za-z_]\w*$", args[idx]):
-            out.append(args[idx])
+        if len(args) > idx and not re.search(r"\(\s*\*", args[idx]):  # not the starter's own declaration
+            out.append(re.sub(r"^(?:\([^()]*\)\s*)*&?\s*", "", args[idx]).strip())
     return out
+
+
+def lv_in_task(code, funcs, entry):
+    """lv_* calls reachable from entry outside a lock span: [(function, call, position)]."""
+    byname = {f.name: f for f in funcs}
+    hits, seen, todo = [], set(), [entry]
+    while todo:
+        name = todo.pop()
+        if name in seen or name not in byname:
+            continue
+        seen.add(name)
+        f = byname[name]
+        body = code[f.start:f.end]
+        locked = 0
+        events = [(m.start(), "lock" if m.group(1) else "unlock") for m in LOCK_RE.finditer(body)]
+        events += [(m.start(), "lv:" + m.group(1)) for m in LV_CALL.finditer(body)]
+        events += [(m.start(), "call:" + m.group(1)) for m in CALL_RE.finditer(body)
+                   if m.group(1) in byname and m.group(1) != name]
+        for p, ev in sorted(events):
+            if ev == "lock":
+                locked += 1
+            elif ev == "unlock":
+                locked = max(0, locked - 1)
+            elif not locked and ev.startswith("lv:"):
+                hits.append((entry, ev[3:], f.start + p))
+            elif not locked and ev.startswith("call:"):
+                todo.append(ev[5:])
+    return hits
 
 
 def check_lvgl_task(files):
@@ -415,22 +474,28 @@ def check_lvgl_task(files):
             continue
         funcs = find_functions(code)
         for name in sorted(set(entry_names(code, funcs))):
-            for f in (x for x in funcs if x.name == name):
-                body = code[f.start:f.end]
-                locked = 0
-                events = sorted([(m.start(), "lock" if m.group(1) else "unlock") for m in LOCK_RE.finditer(body)] +
-                                [(m.start(), "lv:" + m.group(1)) for m in LV_CALL.finditer(body)])
-                for p, ev in events:
-                    if ev == "lock":
-                        locked += 1
-                    elif ev == "unlock":
-                        locked = max(0, locked - 1)
-                    elif not locked:
-                        found.setdefault((path, name, ev[3:]), []).append(line_of(code, f.start + p))
+            if not any(f.name == name for f in funcs):
+                found.setdefault((path, name, "entry-not-in-file"), []).append(1)
+                continue
+            for entry, call, pos in lv_in_task(code, funcs, name):
+                found.setdefault((path, entry, call), []).append(line_of(code, pos))
     return found
 
 
 # ---- baseline and driver ----------------------------------------------------------------------------------------
+
+def function_counts(files):
+    """{extension: (files, functions found, files with a body but no function found)}: a parse that loses functions
+    shows up as a count that drops or as files in the last column (--report)."""
+    out = {}
+    for path in files:
+        _src, code, _text = load(path)
+        n = len(find_functions(code))
+        ext = os.path.splitext(path)[1]
+        f, fn, empty = out.get(ext, (0, 0, 0))
+        out[ext] = (f + 1, fn + n, empty + (1 if n == 0 and "{" in code else 0))
+    return out
+
 
 def key_str(root, k):
     return ":".join([os.path.relpath(k[0], root)] + list(k[1:]))
@@ -506,6 +571,10 @@ def main(argv):
         for name in a.checks:
             for k, v in sorted(fns[name](files).items()):
                 print("%s\t%s\t%d\t%s" % (name, key_str(a.root, k), len(v), ",".join(map(str, v[:5]))))
+        for ext, (nf, nfn, empty) in sorted(function_counts(files).items()):
+            print("parsed %s: %d files, %d functions, %d files with braces but no function" % (ext, nf, nfn, empty))
+        for loc in NONLITERAL:
+            print("log-level: error log with a non-literal format (words not read): %s" % loc)
         return 0
     bad = run(a.root, a.baseline_dir, a.checks)
     if bad:

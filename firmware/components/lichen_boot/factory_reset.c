@@ -339,8 +339,10 @@ static bool stage_one(char const *rel, staged_t *s) {
         return false;
     }
     if ((size_t)st.st_size > STAGED_MAX) {
-        ESP_LOGE(TAG, "%s is %ld bytes, over the %u staging limit: not kept, push it with the ota-c6 command", rel,
-                 (long)st.st_size, (unsigned)STAGED_MAX);
+        // ota-c6 only brings the C6 bundle back; lora.toml has to be copied to /storage again
+        ESP_LOGE(TAG, "%s is %ld bytes, over the %u staging limit: not kept, %s", rel, (long)st.st_size,
+                 (unsigned)STAGED_MAX,
+                 strcmp(rel, "lora.toml") == 0 ? "copy it back" : "re-push: tools/badge.sh ota-c6");
         return false;
     }
     FILE *f = fopen(path, "rb");

@@ -36,7 +36,7 @@ Every screen (OS and apps) is checked against these rules. Panel 720x720, keyboa
     wrap and scroll modes, the data a screen shows), so no static check can decide it and none is faked. The gate is
     `tools/ui_overflow_sweep.py` run by the main session after a UI change, expected `fw ui overflow` = 0 for every
     screen (the `lichen-bench` skill lists it as a standing step). The build gates around it: `tools/check_rules.py`
-    (lv_* only on the LVGL task) and the layer check.
+    (no lv_* in task functions outside the UI lock, same-file callees followed; lichen_ui_call callbacks are not read) and the layer check.
 
 **Conventions (R9; #136, OKd by Lucas 2026-11-02 "wording is fine"):** Restart (never Reboot in UI; repeater CLI token
 stays "reboot"), "Restarting...", On/Off, hints "Enter: open • Del: delete" (dim, pinned, no "Esc: back" lines),
