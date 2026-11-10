@@ -90,7 +90,7 @@ static void cscope_list_channels(void) {
     mesh_channel_info_t info = {0};
     size_t              own  = 0;
     if (chscope_why(NULL)) {
-        console_reply("channel scopes: %s; every screen channel send is refused until then", MESH_CHSCOPE_UNREADABLE);
+        console_reply("channel scopes: %s", MESH_CHSCOPE_UNREADABLE); // the text says what to do
         return;
     }
     for (int i = 0; i < MESH_CHSCOPE_MAX; i++) {
@@ -108,7 +108,7 @@ static void cscope_list_channels(void) {
         }
     }
     if (!own) {
-        console_reply("channel scopes: none (every channel floods under the default)");
+        console_reply("channel scopes: none (all use the default)");
     }
 }
 

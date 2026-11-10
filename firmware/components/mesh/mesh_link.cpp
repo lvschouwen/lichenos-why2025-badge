@@ -232,7 +232,7 @@ static void console_scope_live(char *name_out, size_t cap, TransportKey &key, ch
 
 // The text into a temp file, read back (into back, cap bytes), then over the real one: a cut write never leaves another
 // valid scope. A power cut between FatFs's remove and rename leaves no file: for the console scope that is not set, so
-// console floods are refused (fail closed); for the channel scopes (#291) every channel floods under the default.
+// console floods are refused (fail closed); for the channel scopes (#291) the start promotes the temp file.
 static bool scope_file_write(char const *path, char const *tmp, char const *text, size_t len, char *back, size_t cap) {
     File f  = SPIFFS.open(tmp, "w", true);
     bool ok = f && f.write((uint8_t const *)text, len) == len;

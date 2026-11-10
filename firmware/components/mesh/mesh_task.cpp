@@ -1174,7 +1174,7 @@ static char const *channel_remove_locked(int index, char const *by_name) {
     // #291: its own scope after the channel is gone and saved (a cut in between leaves a line the next start drops;
     // the other order would leave the channel flooding under the default)
     char const *kept = node->setChannelScope(slot.channel.secret, "");
-    ESP_LOGI(TAG, "channel %d removed%s", index, kept ? " (its scope stays on file until the next start)" : "");
+    ESP_LOGI(TAG, "channel %d removed%s", index, kept ? " (scope line kept until restart)" : "");
     return NULL;
 }
 
