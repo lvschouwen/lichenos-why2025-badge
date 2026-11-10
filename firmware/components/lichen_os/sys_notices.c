@@ -2,7 +2,7 @@
 // (crash, PSRAM boot check, clock, update, C6 recovery, SD card, sensors, storage) into a snapshot; sys_notice_rules.c
 // (pure) decides what is news and this raises it as source "lichen". Nothing here touches the radio or the C6 link
 // beyond reading their status, and nothing touches LVGL: lichen_notify() is safe from any task. The storage drive's
-// free space is read once a minute (FatFs may scan its table). An OS service since #281 (lichen_watch_start, display or
+// free space is read once a minute (LittleFS walks its blocks, #300). An OS service since #281 (lichen_watch_start, display or
 // not): the update result and "home is shown" come in as hooks.
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -134,7 +134,7 @@ void sys_notices_start(lichen_watch_hooks_t const *h) {
     if (h) {
         hooks = *h;
     }
-    // LP RAM (#269): once a second, and it reads /storage free space (FatFs), so internal-capable but never DMA
+    // LP RAM (#269): once a second, and it reads /storage free space (LittleFS), so internal-capable but never DMA
     if (!lichen_task_start_in(NULL, "sys_notices", notices_task, NULL, TASK_STACK, LICHEN_PRIO_BACKGROUND,
                               LICHEN_STACK_LP_RAM, NULL)) {
         ESP_LOGE(TAG, "no memory: Lichen raises no notifications of its own");

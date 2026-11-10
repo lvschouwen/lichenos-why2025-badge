@@ -10,7 +10,7 @@ see docs/psram-speed-switch.md; at 200 MHz this board flips bits in PSRAM words,
 with canaries), 16 MB flash.
 - Runs Lichen, the apps (MeshCore included, #33 option 1) and all UI.
 - Owns the display (ST7703, MIPI DSI, 720×720, shown rotated 90°), the keyboard (TCA8418, I2C), the sensors (BMI270,
-  BME690, same I2C bus), the SD card and the flash (two 4 MiB app slots with rollback, FAT `/storage`).
+  BME690, same I2C bus), the SD card and the flash (two 4 MiB app slots with rollback, LittleFS `/storage`).
 
 **C6 (radio coprocessor):** single-core RISC-V at 160 MHz.
 - Runs ESP-Hosted (Wi-Fi, the BLE controller over VHCI) and our LoRa service (SX1262 on RA-01SH: receive, transmit,
@@ -542,3 +542,21 @@ OS v2 (#216) on the same lessons:
   `BADGE_EXTRA_PORTS=/dev/ttyUSB1 tools/badge.sh flash-fw /dev/ttyUSB1` (keeps `/storage` by default; `--wipe-storage` is the first-install form).
 - The C6 image is a file in `/storage/c6`. A full USB flash replaces `/storage` and loses the identity, so C6 updates
   go as two files over Wi-Fi (`firmware.bin`, then its `.md5`) before the P4 flash.
+
+### Flash drive (`/storage`, #300)
+
+- **LittleFS** (esp_littlefs 1.23.1, `components/storage`), partition subtype `littlefs`, label `storage`. Copy-on-write
+  and power-loss safe: a cut write leaves the old file and no lost space (the FAT drive before it lost ~40 % to orphaned
+  clusters, #300). Never formatted on a failed mount (#110); only the factory reset formats it.
+- **On-disk config** (the same in the firmware and in `tools/pack_storage.py`, checked by `pack_storage.sh check-config`
+  in every build): block 4096 B x 1216 blocks, read 128, prog 128, cache 512, lookahead 128, block cycles 512, name max
+  255 (`LFS_NAME_MAX`), disk version 2.1. `storage.bin` (build output) is `tools/pack_storage.sh pack` of
+  `firmware/storage_staging`, verified file by file (`verify`, SHA-256) after the build.
+- **Not FAT any more:** names are case-sensitive and have no 8.3 alias; `rename` replaces an existing target in one
+  atomic step; a file another task has open cannot be renamed or removed (EBUSY, where FatFs's lock gave EACCES), but
+  it can be opened a second time, also for writing (no lock: each handle commits on close, the last close wins, the
+  drive stays consistent). Free space is `lfs_fs_size`, a walk over the drive's blocks.
+- **A badge still on FAT** (firmware before #300) does not mount the drive and keeps it as it is. The way over is USB
+  only, once: back up the flash, take the files out of the FAT slice on the host, `tools/pack_storage.sh pack <files>
+  <storage.bin>` and `verify`, write that image to 0xB40000 with the new firmware, then check the files on the badge
+  (`fw storage` lists their sizes). No in-firmware migration.

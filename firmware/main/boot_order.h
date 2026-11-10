@@ -15,7 +15,7 @@ typedef enum {
     START_EARLY,          // haptics, time zone, crash_check_early: cheap, before the first frame
     START_BOOT_SCREEN,    // display, the boot screen's first frame, backlight_restore (#39)
     START_CONSOLE,        // the serial console
-    START_STORAGE,        // a factory reset's /storage part, then the FAT mount
+    START_STORAGE,        // a factory reset's /storage part, then the LittleFS mount
     START_NOTICES,        // notifications, LED, crash_check_late, console commands that need storage
     START_FONTS,          // assets into PSRAM fonts
     START_SHELL,          // MeshCore registered, the restart save, the shell when there is a screen

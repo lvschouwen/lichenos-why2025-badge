@@ -15,7 +15,6 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_partition.h"
-#include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "fw_console.h"
@@ -40,7 +39,7 @@ static char const TAG[] = "factory";
 #define MAX_STAGED   16 // OS files carried over the drive's erase
 #define STAGED_MAX   (2u * 1024 * 1024) // one file; the C6 app is ~1.5 MB
 #define ERASE_CHUNK  (64u * 1024)
-#define STORAGE_PART "storage"
+#define STORAGE_PART STORAGE_LABEL
 #define PATH_BUF     256
 
 typedef struct {
@@ -329,8 +328,6 @@ typedef struct {
     size_t   len;
 } staged_t;
 
-static esp_vfs_fat_mount_config_t const MOUNT_CFG = {.max_files = 4, .allocation_unit_size = 4096};
-
 static bool stage_one(char const *rel, staged_t *s) {
     char        path[96];
     struct stat st;
@@ -364,9 +361,8 @@ static bool stage_one(char const *rel, staged_t *s) {
 
 // The drive's own files, into PSRAM. A drive that does not mount has nothing readable to keep.
 static size_t stage_os_files(staged_t *out) {
-    wl_handle_t wl = WL_INVALID_HANDLE;
-    size_t      n  = 0;
-    if (esp_vfs_fat_spiflash_mount_rw_wl(STORAGE_BASE, STORAGE_PART, &MOUNT_CFG, &wl) != ESP_OK) {
+    size_t n = 0;
+    if (!storage_attach()) {
         ESP_LOGE(TAG, "%s does not mount: nothing to keep from it", STORAGE_BASE);
         return 0;
     }
@@ -384,13 +380,13 @@ static size_t stage_os_files(staged_t *out) {
         }
         closedir(d);
     }
-    esp_vfs_fat_spiflash_unmount_rw_wl(STORAGE_BASE, wl);
+    storage_detach();
     return n;
 }
 
 static bool erase_partition(void) {
     esp_partition_t const *p =
-        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_FAT, STORAGE_PART);
+        esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, STORAGE_PART);
     if (!p) {
         return false;
     }
@@ -422,8 +418,7 @@ static bool write_one(staged_t const *s) {
 // Images first, the bundle's .md5 files last and only when every image made it: a bundle with a missing or short
 // image then has no .md5 and the C6 flasher leaves the C6 alone instead of flashing half an image
 static void write_back(staged_t const *s, size_t n) {
-    wl_handle_t wl = WL_INVALID_HANDLE;
-    if (esp_vfs_fat_spiflash_mount_rw_wl(STORAGE_BASE, STORAGE_PART, &MOUNT_CFG, &wl) != ESP_OK) {
+    if (!storage_attach()) {
         ESP_LOGE(TAG, "fresh drive does not mount: the C6 bundle and lora.toml are lost");
         return;
     }
@@ -442,7 +437,7 @@ static void write_back(staged_t const *s, size_t n) {
             }
         }
     }
-    esp_vfs_fat_spiflash_unmount_rw_wl(STORAGE_BASE, wl);
+    storage_detach();
     ESP_LOG_LEVEL(
         images_ok ? ESP_LOG_INFO : ESP_LOG_WARN,
         TAG,
@@ -509,24 +504,21 @@ static void rm_tree(char *path, size_t len, int depth, bool top, unsigned *faile
 // The partition erase failed: nothing may stay readable through the filesystem. Every file goes (MeshCore's _main.id
 // and _main.id.new among them) except the OS's; a drive that does not mount is formatted and gets the PSRAM copy.
 static void fallback_wipe(staged_t const *staged, size_t n) {
-    wl_handle_t wl = WL_INVALID_HANDLE;
-    if (esp_vfs_fat_spiflash_mount_rw_wl(STORAGE_BASE, STORAGE_PART, &MOUNT_CFG, &wl) == ESP_OK) {
+    if (storage_attach()) {
         char     path[PATH_BUF];
         unsigned failed = 0;
         strlcpy(path, STORAGE_BASE, sizeof(path));
         rm_tree(path, strlen(path), 0, true, &failed);
-        esp_vfs_fat_spiflash_unmount_rw_wl(STORAGE_BASE, wl);
+        storage_detach();
         ESP_LOGE(TAG, "fallback: files deleted (%u would not go), NOT erased from flash", failed);
         if (n) {
             write_back(staged, n); // a half-done erase may have hit the OS files: the PSRAM copy goes over them
         }
         return;
     }
-    esp_vfs_fat_mount_config_t cfg = MOUNT_CFG;
-    cfg.format_if_mount_failed     = true;
-    esp_err_t err                  = esp_vfs_fat_spiflash_format_cfg_rw_wl(STORAGE_BASE, STORAGE_PART, &cfg);
-    ESP_LOGE(TAG, "fallback: drive formatted (%s), NOT erased from flash", esp_err_to_name(err));
-    if (err == ESP_OK) {
+    bool formatted = storage_format();
+    ESP_LOGE(TAG, "fallback: drive %s, NOT erased from flash", formatted ? "formatted" : "not formatted either");
+    if (formatted) {
         write_back(staged, n);
     }
 }
@@ -550,12 +542,7 @@ void factory_reset_boot_storage(void) {
     ESP_LOGI(TAG, "factory reset (all): erasing the %s partition (%u files kept in PSRAM)", STORAGE_PART, (unsigned)n);
     bool erased = erase_partition();
     if (erased) {
-        esp_vfs_fat_mount_config_t cfg = MOUNT_CFG;
-        cfg.format_if_mount_failed     = true; // the erased drive fails to mount: this formats it
-        esp_err_t err = esp_vfs_fat_spiflash_format_cfg_rw_wl(STORAGE_BASE, STORAGE_PART, &cfg);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "format failed: %s", esp_err_to_name(err));
-        }
+        storage_format(); // logs its own failure; write_back then says the drive does not mount
         write_back(staged, n);
     }
     factory_storage_next_t next = factory_storage_after(erased, state_get(FACTORY_TRIES_KEY));

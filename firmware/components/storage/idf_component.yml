@@ -1,0 +1,5 @@
+dependencies:
+  idf: '>=6.1'
+  # esp_littlefs (MIT; bundles littlefs, BSD-3-Clause) for /storage (#300). An exact version: tools/pack_storage.py
+  # builds storage.bin with the on-disk config this release and sdkconfig.defaults give the badge.
+  joltwallet/littlefs: '==1.23.1'

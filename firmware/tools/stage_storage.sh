@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Stages Lichen's FAT drive: the C6 image that the P4 flashes to the C6 at boot (each file with an .md5 holding just
-# the hex digest, which the flasher compares), and lora.toml. firmware/build.sh builds the C6 image (c6/) first.
+# Stages Lichen's LittleFS drive (#300; tools/pack_storage.sh packs it into storage.bin): the C6 image that the P4
+# flashes to the C6 at boot (each file with an .md5 holding just the hex digest, which the flasher compares), and
+# lora.toml. firmware/build.sh builds the C6 image (c6/) first.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)

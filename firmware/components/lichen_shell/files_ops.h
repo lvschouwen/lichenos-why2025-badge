@@ -21,7 +21,7 @@ typedef enum {
     FILES_ERR_OPEN,
     FILES_ERR_IO,
     FILES_ERR_NO_MEM,
-    FILES_ERR_BUSY, // EACCES: FatFs's file lock (another task has the file open, #274), or a read-only entry
+    FILES_ERR_BUSY, // EACCES/EBUSY: another task has the file open (FatFs's lock #274, LittleFS #300), or read-only
 } files_result_t;
 
 char const *files_result_text(files_result_t r); // a sentence for the screen

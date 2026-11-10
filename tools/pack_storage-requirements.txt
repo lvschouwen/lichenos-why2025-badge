@@ -1,0 +1,2 @@
+# tools/pack_storage.py (#300): littlefs-python bundles littlefs 2.11 (disk version 2.1, as esp_littlefs 1.23.1)
+littlefs-python==0.15.0

@@ -42,8 +42,9 @@ char const *files_result_text(files_result_t r) {
     return "Failed.";
 }
 
-// FatFs's file lock (CONFIG_FATFS_FS_LOCK, #274) refuses to delete, rename or write-open a file another task has open,
-// and to open one another task is writing: FR_LOCKED, which the VFS reports as EACCES. A full lock table or fd table
+// FatFs's file lock on the SD card (CONFIG_FATFS_FS_LOCK, #274) refuses to delete, rename or write-open a file another
+// task has open, and to open one another task is writing: FR_LOCKED, which the VFS reports as EACCES. esp_littlefs on
+// /storage (#300) refuses only the delete and the rename of an open file, with EBUSY. A full lock table or fd table
 // is ENFILE/EMFILE. Both are "try again later", not a card fault, so files_job does not count them against the card.
 static files_result_t errno_result(int err, files_result_t otherwise) {
     return err == EACCES || err == EBUSY || err == ENFILE || err == EMFILE ? FILES_ERR_BUSY : otherwise;

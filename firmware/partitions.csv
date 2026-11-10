@@ -1,6 +1,6 @@
 # Lichen: the whole 16 MB flash (#22 layout, 2026-10-31).
 # Two equal 4 MB app slots for Wi-Fi updates with rollback, a 128 KB core dump (#74), 3 MB of read-only assets
-# (fonts, memory-mapped; tools/pack_assets.py) and the rest a FAT drive mounted at /storage.
+# (fonts, memory-mapped; tools/pack_assets.py) and the rest a LittleFS drive mounted at /storage (#300).
 # Name,    Type, SubType,  Offset,   Size
 nvs,       data, nvs,      0x9000,   0x6000
 otadata,   data, ota,      0xF000,   0x2000
@@ -9,4 +9,4 @@ ota_0,     app,  ota_0,    0x20000,  0x400000
 ota_1,     app,  ota_1,    0x420000, 0x400000
 coredump,  data, coredump, 0x820000, 0x20000
 assets,    data, 0x40,     0x840000, 0x300000
-storage,   data, fat,      0xB40000, 0x4C0000
+storage,   data, littlefs, 0xB40000, 0x4C0000

@@ -10,7 +10,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define MAX_DEPTH 4 // each level is a stat() through vfs_fat (an FF name buffer on the stack): keep it shallow
+#define MAX_DEPTH 4 // each level is an opendir on the console task's small stack: keep it shallow
 
 static char s_path[256];
 
@@ -67,7 +67,7 @@ static void cmd_storage(char const *args) {
         return;
     }
     snprintf(s_path, sizeof(s_path), "%s%s%s", STORAGE_BASE, args[0] ? "/" : "", args);
-    console_reply("storage: %llu bytes free of %llu (%llu%%) | listing %s (file bytes; FAT takes whole 4 KB clusters)", (unsigned long long)free_b,
+    console_reply("storage: %llu bytes free of %llu (%llu%%) | listing %s (file bytes; LittleFS takes whole 4 KB blocks)", (unsigned long long)free_b,
                   (unsigned long long)total_b, total_b ? (unsigned long long)(free_b * 100 / total_b) : 0ULL, s_path);
     DIR *dir = opendir(s_path);
     if (!dir) {

@@ -80,6 +80,15 @@ if [ "$building" = 1 ]; then
         case $arg in build|all|app|flash|app-flash) syms= ;; esac
     done
     "$repo/tools/check_layers.sh" $syms
+    # /storage is LittleFS (#300): the image tool round-trips a test tree, its config matches the one this build gave
+    # the badge, and storage.bin holds exactly the staged files (list + SHA-256)
+    "$repo/tools/pack_storage.sh" selftest
+    "$repo/tools/pack_storage.sh" check-config "$here/build/config/sdkconfig.json" "$here/managed_components/joltwallet__littlefs"
+    for arg in "$@"; do
+        case $arg in
+            build|all|storage) "$repo/tools/pack_storage.sh" verify "$here/build/storage.bin" "$here/storage_staging"; break ;;
+        esac
+    done
     # The console table must keep headroom (#243); reads the sdkconfig this build just wrote
     python3 -I "$repo/tools/check_console_slots.py" --selftest
     python3 -I "$repo/tools/check_console_slots.py"

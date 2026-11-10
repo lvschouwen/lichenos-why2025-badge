@@ -7,4 +7,4 @@
 # in start_nvs (boot_progress_bind_store, factory_reset_bind_notice, #245): no gate header here.
 idf_component_register(SRCS "boot_steps.c" "boot_text.c" "boot_progress.c" "log_tap.c" "log_clean.c" "factory_plan.c" "factory_reset.c"
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES fw_console freertos heap nvs_flash fatfs storage vfs esp_partition wear_levelling lichen_nvs psram_guard)
+                       PRIV_REQUIRES fw_console freertos heap nvs_flash storage vfs esp_partition lichen_nvs psram_guard)
