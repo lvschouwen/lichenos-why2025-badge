@@ -177,7 +177,7 @@ void psram_speed_boot(bool (*image_on_trial)(void)) {
     }
     if (before.trial && !s_rec.trial && s_rec.failed) {
         ESP_LOGE(TAG, "a 120 MHz boot did not get through (crash, watchdog or restart before it passed): back at 80 MHz, "
-                      "no new trial until chosen in Settings or with fw psram speed 120");
+                      "no new 120 MHz trial until chosen in Settings or with fw psram speed 120");
     }
     if (esp_register_shutdown_handler(shutdown_hook) != ESP_OK) {
         ESP_LOGE(TAG, "speed: no shutdown hook, a clean restart at 120 MHz comes back at 80 MHz");
@@ -217,7 +217,7 @@ static void fail_and_restart(char const *why) {
                  why);
         return;
     }
-    ESP_LOGE(TAG, "120 MHz failed (%s): restarting at 80 MHz, no new trial until chosen", why);
+    ESP_LOGE(TAG, "120 MHz failed (%s): restarting at 80 MHz, no new 120 MHz trial until chosen", why);
     system_restart_note("psram 120 failed");
     esp_restart(); // not system_restart: no app save hooks with a PSRAM that is suspect
 }
