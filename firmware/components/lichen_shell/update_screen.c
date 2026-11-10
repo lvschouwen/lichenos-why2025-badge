@@ -5,7 +5,7 @@
 #include "screen_ids.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
-#include "esp_ota_ops.h"
+#include "lichen_sys_update.h"
 #include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -485,12 +485,9 @@ static upd_result_t boot_check(void) {
         return UPD_NONE;
     }
     // The bootloader marks an image that failed its trial; if that is not the one running, it went back
-    esp_partition_t const *invalid = esp_ota_get_last_invalid_partition();
-    esp_partition_t const *running = esp_ota_get_running_partition();
-    bool                   rolled  = invalid && invalid != running;
-    esp_ota_img_states_t   state;
-    bool valid = esp_ota_get_state_partition(running, &state) != ESP_OK || state != ESP_OTA_IMG_PENDING_VERIFY;
-    char const *run   = esp_app_get_description()->version;
+    bool        rolled = lichen_sys_update_rolled_back();
+    bool        valid  = !lichen_sys_update_on_trial();
+    char const *run    = esp_app_get_description()->version;
     upd_boot_t  after = update_after_boot(prev, run, rolled, valid);
     ESP_LOG_LEVEL(
         rolled ? ESP_LOG_WARN : ESP_LOG_INFO,

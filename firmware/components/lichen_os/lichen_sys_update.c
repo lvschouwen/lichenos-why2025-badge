@@ -7,6 +7,7 @@
 #include "crash.h"
 #include "factory_reset.h"
 #include "ota_server.h"
+#include "ota_trial.h"
 
 bool lichen_sys_update_enabled(void) {
     return ota_server_enabled();
@@ -30,6 +31,14 @@ void lichen_sys_update_set_auto_off(uint8_t minutes) {
 
 bool lichen_sys_update_auto_closed(void) {
     return ota_server_auto_closed();
+}
+
+bool lichen_sys_update_on_trial(void) {
+    return ota_image_trial_pending();
+}
+
+bool lichen_sys_update_rolled_back(void) {
+    return ota_rolled_back();
 }
 
 bool lichen_sys_crash_recovered(void) {

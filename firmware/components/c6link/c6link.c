@@ -11,7 +11,6 @@
 #include "esp_hosted.h"
 #include "esp_hosted_frame_pool.h"
 #include "esp_log.h"
-#include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -346,13 +345,6 @@ static void cmd_c6_status(void) {
     console_reply("c6 reflash | verify (full check on the next boot) | reset [rom] (pulse C6 EN now) | reattach (#14)");
 }
 
-// The first boot of a fresh OTA image: until it is marked valid, one reset makes the bootloader roll it back
-bool c6link_image_is_trial(void) {
-    esp_ota_img_states_t state;
-    return esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
-           state == ESP_OTA_IMG_PENDING_VERIFY;
-}
-
 // What to do about the flasher this boot. Returns true to run it.
 static bool plan_full_check(bool force, char *key, size_t key_cap) {
     char stored[C6_BUNDLE_KEY_MAX];
@@ -362,7 +354,7 @@ static bool plan_full_check(bool force, char *key, size_t key_cap) {
         key[0] = '\0';
     }
     c6_reset_kind_t kind = esp_reset_reason() == ESP_RST_SW ? C6_RST_SOFTWARE : C6_RST_OTHER;
-    c6_plan_t       plan = c6_boot_plan(kind, force, verify, c6link_image_is_trial(), stored, key, &boot_info.why);
+    c6_plan_t       plan = c6_boot_plan(kind, force, verify, c6_hooks_image_on_trial(), stored, key, &boot_info.why);
     boot_info.plan       = plan == C6_PLAN_SKIP ? "skip" : "full";
     return plan == C6_PLAN_FULL_CHECK;
 }

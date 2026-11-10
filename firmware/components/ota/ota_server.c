@@ -30,6 +30,7 @@
 #include "ota_pieces.h"
 #include "ota_proto.h"
 #include "ota_rle.h"
+#include "ota_trial.h"
 #include "ota_valid.h"
 #include "miniz.h" // the ROM inflater
 #include "ota_os.h"
@@ -467,9 +468,7 @@ static bool install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t h
 
 // esp_ota_begin refused: say why when the reason is the running image still being on trial (#5)
 static void respond_begin_failed(int fd, esp_err_t err) {
-    esp_ota_img_states_t state;
-    if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
-        state == ESP_OTA_IMG_PENDING_VERIFY) {
+    if (ota_image_trial_pending()) {
         respond(fd, 503, "the running image is still on trial: try again once it is marked valid (%d s after boot)",
                 OTA_VALID_AFTER_S);
     } else {

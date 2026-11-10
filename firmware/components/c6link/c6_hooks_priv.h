@@ -7,6 +7,7 @@
 void     c6_hooks_step_begin(void);
 void     c6_hooks_step_progress(int percent);
 void     c6_hooks_step_end(bool ok, char const *note);
+bool     c6_hooks_image_on_trial(void); // true when unset: the cautious answer
 bool     c6_hooks_attached(void); // false when nobody took the link (no net service)
 void     c6_hooks_no_link(void);
 bool     c6_hooks_driver_down(uint32_t wait_ms);

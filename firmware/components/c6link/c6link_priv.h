@@ -8,7 +8,6 @@
 
 // c6link.c
 void c6link_set_link(bool up);
-bool c6link_image_is_trial(void);
 // GPIO13 (the C6 GPIO9 boot strap): 1 boots the application at the next EN reset, 0 the ROM download mode
 void hold_c6_boot(int level);
 // The next boot checks the C6 fully (NVS c6_verify), the stored bundle key stays

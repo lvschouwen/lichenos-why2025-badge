@@ -233,7 +233,9 @@ lichen_sys_update_auto_off	SYSTEM	any	lichen_sys_update.h
 lichen_sys_update_auto_off_next	SYSTEM	any	lichen_sys_update.h
 lichen_sys_update_auto_off_text	SYSTEM	any	lichen_sys_update.h
 lichen_sys_update_enabled	SYSTEM	any	lichen_sys_update.h
+lichen_sys_update_on_trial	SYSTEM	any	lichen_sys_update.h
 lichen_sys_update_refused	SYSTEM	any	lichen_sys_update.h
+lichen_sys_update_rolled_back	SYSTEM	any	lichen_sys_update.h
 lichen_sys_update_set_auto_off	SYSTEM	any	lichen_sys_update.h
 lichen_sys_update_set_enabled	SYSTEM	any	lichen_sys_update.h
 lichen_sys_wifi_an_lookup	SYSTEM	any	lichen_sys_net.h

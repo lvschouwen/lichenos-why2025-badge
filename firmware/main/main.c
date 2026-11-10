@@ -14,13 +14,13 @@
 #include "display.h"
 #include "factory_reset.h"
 #include "fw_console.h"
+#include "fw_slot.h"
 #include "esp_app_desc.h"
 #include "lichen_sys_mem.h"
 #include "lichen_sys_net.h"
 #include "esp_log.h"
 #include "lichen_sys_storage.h"
 #include "lichen_sys_ui.h"
-#include "esp_ota_ops.h"
 #include "esp_timer.h"
 #include "log_store.h"
 #include "psram_boot.h"
@@ -49,6 +49,7 @@
 #include "nvs_erase_os.h"
 #include "nvs_flash.h"
 #include "ota_server.h"
+#include "ota_trial.h"
 #include "ota_valid.h"
 #include "lichen_os.h"
 #include "settings_store.h"
@@ -499,7 +500,9 @@ static void start_nvs(boot_ctx_t *ctx) {
     // restarts below) is written through this binding. It only stores function pointers (#235).
     settings_bind_services();
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
-    psram_speed_boot(); // #121: the 80/120 MHz record: a failed 120 MHz trial falls back, a wanted 120 arms and restarts once
+    // #121: the 80/120 MHz record: a failed 120 MHz trial falls back, a wanted 120 arms and restarts once (not while
+    // the image is on trial, #285: ota answers that)
+    psram_speed_boot(ota_image_trial_pending);
     psram_boot_oneshot_apply(); // #121: a one-shot delayline for the PSRAM bench, before storage and MeshCore load anything
     boot_progress_nvs_up();
 }
@@ -528,6 +531,7 @@ static void cmd_noscreen(char const *args) {
 static void start_console(boot_ctx_t *ctx) {
     (void)ctx;
     console_start();
+    console_bind_slot_state(ota_slot_state_name); // "fw slot": ota owns the slot states (#285)
     console_register("noscreen", "noscreen (test: the next boot skips the display start, one boot only)", cmd_noscreen);
     console_register("poweroff", "poweroff (save, then switch the badge off as Power > Power off does; works without a display)",
                      cmd_poweroff);
@@ -646,7 +650,10 @@ static void wifi_free_bulk(void *p) {
 
 static void start_c6link(boot_ctx_t *ctx) {
     (void)ctx;
-    c6link_boot_hooks_t const boot = {.begin = c6_step_begin, .progress = c6_step_progress, .end = c6_step_end};
+    c6link_boot_hooks_t const boot = {.begin          = c6_step_begin,
+                                      .progress       = c6_step_progress,
+                                      .end            = c6_step_end,
+                                      .image_on_trial = ota_image_trial_pending};
     c6link_set_boot_hooks(&boot);
     wifi_radio_hooks_t const radio = {.get = wifi_radio_get, .set = wifi_radio_set, .airplane = lichen_airplane_get};
     wifi_bind_alloc(wifi_alloc_bulk, wifi_free_bulk);
@@ -772,24 +779,35 @@ static boot_start_fn_t const start_fns[START_COUNT] = {
 };
 
 // A freshly installed image runs on trial until it has been up for a while; a reset before that boots the previous one
-// again
-static void ota_trial_wait(void) {
-    esp_ota_img_states_t state;
-    bool                 pending = esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
-                   state == ESP_OTA_IMG_PENDING_VERIFY;
-    while (pending) {
-        uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
-        if (ota_should_mark_valid(pending, shell_up(), c6link_up(), uptime_s)) {
-            esp_ota_mark_app_valid_cancel_rollback();
-            ESP_LOGI(TAG, "this image is now valid");
-            update_screen_image_valid();
-            pending = false;
-        } else if (ota_should_roll_back_now(pending, c6link_up(), uptime_s)) {
+// again. ota_valid.c decides (host_tests/ota_valid_test.c): the OS being up, plus the shell when this boot has a
+// display (#293: a headless boot ends its trial too)
+static void ota_trial_wait(bool display) {
+    ota_trial_in_t in = {.boot_done = atomic_load(&boot_steps_done), .display = display};
+    for (;;) {
+        in.pending     = ota_image_trial_pending();
+        in.shell_up    = display && shell_up();
+        in.c6_up       = c6link_up();
+        in.psram_trial = psram_speed_trial_pending();
+        in.uptime_s    = uptime_ms() / 1000;
+        switch (ota_trial_step(&in)) {
+        case OTA_TRIAL_DONE:
+            return;
+        case OTA_TRIAL_MARK_VALID:
+            if (ota_image_mark_valid()) {
+                ESP_LOGI(TAG, "this image is now valid%s", display ? "" : " (no display: the OS is up)");
+                update_screen_image_valid();
+            }
+            return;
+        case OTA_TRIAL_ROLL_BACK:
             // No C6 means no Wi-Fi, so nobody can replace this image: let the bootloader roll back
             ESP_LOGE(TAG, "C6 link never came up on a trial image: restarting to roll back");
             system_restart("trial image: no C6 link");
-        } else if (uptime_s >= OTA_VALID_AFTER_S) {
+            return;
+        case OTA_TRIAL_STAY:
             ESP_LOGW(TAG, "staying on trial (UI or C6 link down): a reset goes back to the previous image");
+            return;
+        case OTA_TRIAL_WAIT:
+        default:
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -816,7 +834,7 @@ void app_main(void) {
         start_fns[boot_order[i]](&ctx);
     }
     atomic_store(&boot_steps_done, true);
-    ota_trial_wait();
+    ota_trial_wait(ctx.screen);
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(60000));
     }

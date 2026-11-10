@@ -10,10 +10,32 @@
 // this time still rolls back on the next reset
 #define OTA_VALID_AFTER_S 45
 
-// A new image runs on trial (pending_verify) until it proves itself: the UI and the C6 link are up and it has run for
-// OTA_VALID_AFTER_S. Wi-Fi is not required, so a badge without (working) Wi-Fi credentials doesn't roll back for ever
-// (#61).
-bool ota_should_mark_valid(bool pending_verify, bool ui_up, bool c6_up, uint32_t uptime_s);
+// What the trial of a new image (pending_verify) sees once a second, after every boot step has run (main.c)
+typedef struct {
+    bool     pending;     // the running image is on trial (ota_image_trial_pending)
+    bool     boot_done;   // every boot step has run: the OS services, the apps and the update server are started
+    bool     display;     // this boot has a display: only then is the shell one of the trial's inputs (#293)
+    bool     shell_up;    // the shell is up (read only when display is true)
+    bool     c6_up;       // the C6 link is up: Wi-Fi works, so the image can be replaced over the air
+    bool     psram_trial; // a 120 MHz PSRAM trial is still live (psram_speed_trial_pending): it ends within a minute
+    uint32_t uptime_s;
+} ota_trial_in_t;
+
+typedef enum {
+    OTA_TRIAL_DONE,       // not on trial: nothing to do
+    OTA_TRIAL_WAIT,       // look again in a second
+    OTA_TRIAL_MARK_VALID, // the image proved itself: cancel the rollback
+    OTA_TRIAL_ROLL_BACK,  // restart now so the bootloader boots the previous image
+    OTA_TRIAL_STAY,       // stop looking: the image stays on trial, a reset goes back to the previous one
+} ota_trial_act_t;
+
+// A new image runs on trial until it proves itself: the OS is up (every boot step ran, the C6 link is up, no PSRAM
+// trial is live) and it has run for OTA_VALID_AFTER_S. With a display the shell must be up too; without one (a failed
+// panel, `fw noscreen`) the OS alone decides, so a headless boot no longer rolls a good image back on the next reset
+// (#293). Wi-Fi is not required, so a badge without (working) Wi-Fi credentials doesn't roll back for ever (#61).
+// Past OTA_VALID_AFTER_S without that the trial stops looking (STAY), unless the C6 link has been down past the grace
+// time (ROLL_BACK) or a PSRAM trial is still live (WAIT: it ends, passed or failed, within PSRAM_SPEED_TRIAL_SECONDS).
+ota_trial_act_t ota_trial_step(ota_trial_in_t const *in);
 
 // How long past OTA_VALID_AFTER_S a trial image may stay without its C6 link before it gives up
 #define OTA_ROLLBACK_GRACE_S 60

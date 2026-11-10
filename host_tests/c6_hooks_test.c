@@ -59,6 +59,10 @@ static bool on_up(uint32_t wait_ms) {
 static unsigned on_stack(void) {
     return 1234;
 }
+static bool trial_answer;
+static bool on_trial(void) {
+    return trial_answer;
+}
 
 // Nothing registered: every call is safe and gives its default
 static void test_unset_defaults(void) {
@@ -73,6 +77,7 @@ static void test_unset_defaults(void) {
     CHECK(c6_hooks_driver_down(20000)); // no driver to wait for: the re-attach goes on at once
     CHECK(c6_hooks_driver_up(20000));
     CHECK(c6_hooks_stack_free() == 0);
+    CHECK(c6_hooks_image_on_trial()); // #285: nobody said the image is valid, so a reset could roll it back
     CHECK(begins == 0 && ends == 0 && attaches == 0 && no_links == 0 && downs == 0 && ups == 0);
 }
 
@@ -93,11 +98,13 @@ static void test_partial_tables(void) {
     CHECK(no_links == 0);
     CHECK(c6_hooks_driver_down(5) && c6_hooks_driver_up(5) && downs == 0 && ups == 0);
     CHECK(c6_hooks_stack_free() == 0);
+    CHECK(c6_hooks_image_on_trial());
 }
 
 static void test_full_tables(void) {
     reset_counts();
-    c6link_boot_hooks_t const boot = {.begin = on_begin, .progress = on_progress, .end = on_end};
+    c6link_boot_hooks_t const boot = {
+        .begin = on_begin, .progress = on_progress, .end = on_end, .image_on_trial = on_trial};
     c6link_net_hooks_t const  net  = {
         .attached = on_attached, .no_link = on_no_link, .driver_down = on_down, .driver_up = on_up, .stack_free = on_stack};
     c6link_set_boot_hooks(&boot);
@@ -114,6 +121,11 @@ static void test_full_tables(void) {
     CHECK(!c6_hooks_driver_down(20000) && downs == 1 && down_wait == 20000);
     CHECK(c6_hooks_driver_up(15000) && ups == 1 && up_wait == 15000);
     CHECK(c6_hooks_stack_free() == 1234);
+    // ota's answer comes through either way (#285)
+    trial_answer = false;
+    CHECK(!c6_hooks_image_on_trial());
+    trial_answer = true;
+    CHECK(c6_hooks_image_on_trial());
 }
 
 // The table is copied: the caller's struct may go out of scope (main.c builds it on the stack), and NULL clears it

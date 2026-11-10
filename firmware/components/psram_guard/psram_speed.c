@@ -6,7 +6,6 @@
 #include "psram_tuning.h"
 
 #include "esp_log.h"
-#include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -36,6 +35,7 @@ static bool              s_gate_failed;
 static bool              s_done;       // psram_speed_boot ran
 static bool              s_job;        // the trial's job task is running or done
 static void            (*s_pass_cb)(void);
+static bool            (*s_on_trial)(void); // ota_image_trial_pending, from psram_speed_boot
 static SemaphoreHandle_t s_mu;         // s_rec, s_trial_live, s_keep120 (never held across NVS or a restart)
 static StaticSemaphore_t s_mu_buf;
 
@@ -75,10 +75,12 @@ uint32_t psram_speed_carrier_raw(void) {
 #endif
 }
 
-// The running image is on trial (PENDING_VERIFY): any restart now makes the bootloader roll it back
+// The running image is on trial (PENDING_VERIFY): any restart now makes the bootloader roll it back. ota owns that state
+// (#285) and sits above this guard, so psram_speed_boot is handed its reader. Not handed (yet): on trial, so nothing
+// restarts for the speed.
 static bool image_pending(void) {
-    esp_ota_img_states_t st;
-    return esp_ota_get_state_partition(esp_ota_get_running_partition(), &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY;
+    bool (*on_trial)(void) = s_on_trial;
+    return on_trial ? on_trial() : true;
 }
 
 static void rec_load(void) {
@@ -159,9 +161,10 @@ static void arm_and_restart(void) {
     esp_restart(); // not system_restart: nothing to save, and a PSRAM trial must not start app save hooks
 }
 
-void psram_speed_boot(void) {
-    s_done = true;
-    s_mu   = xSemaphoreCreateMutexStatic(&s_mu_buf);
+void psram_speed_boot(bool (*image_on_trial)(void)) {
+    s_on_trial = image_on_trial; // before s_done: the guard task's tick reads it only once s_done is set
+    s_done     = true;
+    s_mu       = xSemaphoreCreateMutexStatic(&s_mu_buf);
     rec_load();
     uint32_t raw = psram_speed_carrier_raw();
     ESP_LOGI(TAG, "speed: carrier found at PSRAM init %08x, running %u MHz%s", (unsigned)raw, psram_speed_running(),

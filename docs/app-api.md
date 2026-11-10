@@ -151,7 +151,7 @@ reaching drivers, `board` or NVS. The headers, all in `lichen_api`:
 | `lichen_sys_display.h` | screen and keyboard backlight levels, the attention light, timeout and thermal shed; the levels reach the C6 over UART1 (#226) |
 | `lichen_sys_power.h` | the display's share of power-off: both backlights off, then the panel, before the C6 is held in reset (#226) |
 | `lichen_sys_storage.h` | the storage drive and the SD card: sizes, mount state, policy, for About, Files, SD card and notices (#227) |
-| `lichen_sys_update.h` | the Wi-Fi update server's on/off setting and token state for Settings > Updates (#227) |
+| `lichen_sys_update.h` | the Wi-Fi update server's on/off setting and token state for Settings > Updates (#227); whether the running image is on trial or this boot rolled back (#285) |
 | `lichen_sys_crash.h` | whether this boot follows a crash (#227) |
 | `lichen_sys_factory.h` | ask for a factory reset (settings or all): saved as pending, done by the next boot (#227) |
 | `lichen_sys_mem.h` | heap figures (free, least free, largest block) for About, Benchmark and the boot log, and the diagnostic walk (#228); the Wi-Fi frame pools and every task's stack for the stress run (#278) |

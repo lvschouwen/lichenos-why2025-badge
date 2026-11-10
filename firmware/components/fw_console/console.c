@@ -1,5 +1,6 @@
 #include "secure_wipe.h"
 #include "fw_console.h"
+#include "fw_slot.h"
 #include "mem_fmt.h"
 
 #include "assets.h"
@@ -294,19 +295,15 @@ static void cmd_mem(char const *args) {
     free(tasks);
 }
 
-static char const *ota_state_name(esp_partition_t const *p) {
-    esp_ota_img_states_t state;
-    if (!p || esp_ota_get_state_partition(p, &state) != ESP_OK) {
-        return "unknown";
-    }
-    switch (state) {
-        case ESP_OTA_IMG_NEW: return "new";
-        case ESP_OTA_IMG_PENDING_VERIFY: return "pending-verify";
-        case ESP_OTA_IMG_VALID: return "valid";
-        case ESP_OTA_IMG_INVALID: return "invalid";
-        case ESP_OTA_IMG_ABORTED: return "aborted";
-        default: return "undefined";
-    }
+static fw_slot_state_fn _Atomic s_slot_state; // ota_slot_state_name, bound by main (#285)
+
+void console_bind_slot_state(fw_slot_state_fn state) {
+    atomic_store(&s_slot_state, state);
+}
+
+static char const *slot_state_name(esp_partition_t const *p) {
+    fw_slot_state_fn state = atomic_load(&s_slot_state);
+    return state ? state(p) : "unknown";
 }
 
 static void cmd_assets(char const *args) {
@@ -320,11 +317,11 @@ static void cmd_slot(char const *args) {
     if (!*args) {
         esp_app_desc_t desc;
         bool           has_app = other && esp_ota_get_partition_description(other, &desc) == ESP_OK;
-        console_reply("slot running %s (%s)", running->label, ota_state_name(running));
+        console_reply("slot running %s (%s)", running->label, slot_state_name(running));
         console_reply(
             "slot other %s (%s) %s",
             other ? other->label : "none",
-            ota_state_name(other),
+            slot_state_name(other),
             has_app ? desc.version : "no app"
         );
         return;

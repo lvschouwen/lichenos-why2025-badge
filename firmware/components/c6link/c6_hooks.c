@@ -33,6 +33,10 @@ void c6_hooks_step_end(bool ok, char const *note) {
     }
 }
 
+bool c6_hooks_image_on_trial(void) {
+    return boot.image_on_trial ? boot.image_on_trial() : true;
+}
+
 bool c6_hooks_attached(void) {
     if (!net.attached) {
         return false;

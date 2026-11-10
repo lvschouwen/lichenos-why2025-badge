@@ -9,11 +9,14 @@
 // table: an unset hook does the default named at its member, so a hook that fires before it is registered (or one
 // that never is) is defined. Pure and host-tested (host_tests/c6_hooks_test.c).
 
-// The boot screen's "C6" step (lichen_boot). Default: the step is not shown.
+// The boot screen's "C6" step (lichen_boot). Default: the step is not shown. And ota's trial state.
 typedef struct {
     void (*begin)(void);
     void (*progress)(int percent); // the flasher, 0-100 per image
     void (*end)(bool ok, char const *note);
+    // The running image is still on trial (ota_image_trial_pending, #285): a reset now rolls the update back, so the
+    // boot runs the full C6 check and the supervisor never offers the fallback restart. Default: true (on trial)
+    bool (*image_on_trial)(void);
 } c6link_boot_hooks_t;
 
 // The Wi-Fi service (lichen_net), which rides on the link.

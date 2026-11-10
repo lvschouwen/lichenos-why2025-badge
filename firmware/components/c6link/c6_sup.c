@@ -563,7 +563,7 @@ static void trial_tick(void) {
         return; // trial_image is written only here, on this task: reading it without the lock is fine
     }
     next = now_ms() + 10000;
-    if (!c6link_image_is_trial()) {
+    if (!c6_hooks_image_on_trial()) {
         portENTER_CRITICAL(&watch_lock);
         watch.trial_image = false;
         portEXIT_CRITICAL(&watch_lock);
@@ -722,7 +722,7 @@ static bool read_rt_flag(void) {
 
 void c6_sup_start(void) {
     rt_flag = read_rt_flag();
-    c6_watch_init(&watch, c6link_image_is_trial(), rt_flag);
+    c6_watch_init(&watch, c6_hooks_image_on_trial(), rt_flag);
     watch.hb.act = HB_ACT;
     esp_timer_create_args_t const args = {.callback = reset_pulse, .name = "c6reset"};
     if (esp_timer_create(&args, &reset_timer) != ESP_OK) {

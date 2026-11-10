@@ -25,3 +25,9 @@ bool lichen_sys_update_auto_closed(void);
 uint8_t lichen_sys_update_auto_off_next(uint8_t minutes);
 // "Never", "10 min", "2 h". Any task.
 void lichen_sys_update_auto_off_text(uint8_t minutes, char *out, size_t cap);
+// The running image is still on trial (#285: ota's answer, ota_image_trial_pending): a reset before it is marked valid
+// boots the previous image again. Any task.
+bool lichen_sys_update_on_trial(void);
+// This boot went back to the previous image: the bootloader marked a trial image invalid and it is not the one
+// running (#285, ota_rolled_back). Any task.
+bool lichen_sys_update_rolled_back(void);
