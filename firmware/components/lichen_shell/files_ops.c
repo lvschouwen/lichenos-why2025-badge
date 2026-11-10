@@ -37,8 +37,16 @@ char const *files_result_text(files_result_t r) {
     case FILES_ERR_OPEN:      return "Could not open it (is the card still in?).";
     case FILES_ERR_IO:        return "A read or write failed.";
     case FILES_ERR_NO_MEM:    return "Not enough memory.";
+    case FILES_ERR_BUSY:      return "In use by another app (or read-only): left as it was.";
     }
     return "Failed.";
+}
+
+// FatFs's file lock (CONFIG_FATFS_FS_LOCK, #274) refuses to delete, rename or write-open a file another task has open,
+// and to open one another task is writing: FR_LOCKED, which the VFS reports as EACCES. That is "try again later", not a
+// card fault, so files_job does not count it against the card.
+static files_result_t errno_result(int err, files_result_t otherwise) {
+    return err == EACCES || err == EBUSY ? FILES_ERR_BUSY : otherwise;
 }
 
 int files_list(char const *dir, files_entry_t *out, size_t max, size_t *count, size_t *skipped) {
@@ -96,9 +104,9 @@ files_result_t files_delete(char const *path) {
         if (rmdir(rp) == 0) {
             return FILES_OK;
         }
-        return errno == ENOTEMPTY || errno == EEXIST ? FILES_ERR_NOT_EMPTY : FILES_ERR_IO;
+        return errno == ENOTEMPTY || errno == EEXIST ? FILES_ERR_NOT_EMPTY : errno_result(errno, FILES_ERR_IO);
     }
-    return unlink(rp) == 0 ? FILES_OK : FILES_ERR_IO;
+    return unlink(rp) == 0 ? FILES_OK : errno_result(errno, FILES_ERR_IO);
 }
 
 files_result_t files_read_at(char const *path, uint32_t offset, uint8_t *buf, size_t cap, size_t *got, uint32_t *total) {
@@ -113,7 +121,7 @@ files_result_t files_read_at(char const *path, uint32_t offset, uint8_t *buf, si
     char  rb[FILES_PATH_MAX + 64];
     FILE *f = fopen(real_path(path, rb, sizeof(rb)), "rb");
     if (!f) {
-        return FILES_ERR_OPEN;
+        return errno_result(errno, FILES_ERR_OPEN);
     }
     files_result_t r = FILES_OK;
     if (fseek(f, 0, SEEK_END) != 0) {
@@ -190,15 +198,16 @@ files_result_t files_copy(char const *src, char const *dst, uint8_t *buf, size_t
     real_path(part, rpart, sizeof(rpart));
     struct stat st;
     if (stat(rpart, &st) == 0 && unlink(rpart) != 0) { // our own leftover of a copy that lost power
-        return FILES_ERR_IO;
+        return errno_result(errno, FILES_ERR_IO);
     }
     FILE *in  = fopen(real_path(src, rsrc, sizeof(rsrc)), "rb");
     FILE *out = in ? fopen(rpart, "wb") : NULL;
     if (!out) {
+        r = errno_result(errno, FILES_ERR_OPEN);
         if (in) {
             fclose(in);
         }
-        return FILES_ERR_OPEN;
+        return r;
     }
     errno = 0;
     r = copy_data(in, out, buf, buf_cap, total, progress, ctx);
@@ -207,7 +216,7 @@ files_result_t files_copy(char const *src, char const *dst, uint8_t *buf, size_t
         r = errno == ENOSPC ? FILES_ERR_SPACE : FILES_ERR_IO;
     }
     if (r == FILES_OK && rename(rpart, real_path(dst, rdst, sizeof(rdst))) != 0) {
-        r = FILES_ERR_IO;
+        r = errno_result(errno, FILES_ERR_IO);
     }
     if (r != FILES_OK) {
         unlink(rpart);

@@ -428,13 +428,16 @@ static bool finish_file(int fd, char const *vms, uint8_t const *data, size_t len
     char backup[sizeof(temp) + 4];
     snprintf(backup, sizeof(backup), "%s.old", temp);
     unlink(backup);
+    // A target another task has open stays put (FatFs's file lock, #274: EACCES), so the swap below fails with EEXIST
     bool had_old = rename(path, backup) == 0;
+    int  aside   = had_old ? 0 : errno;
     if (rename(temp, path) != 0) {
+        int err = aside && aside != ENOENT ? aside : errno;
         if (had_old) {
             rename(backup, path);
         }
         unlink(temp);
-        respond(fd, 500, "couldn't move the upload into place, file left as it was");
+        respond(fd, 500, "couldn't move the upload into place (%s), file left as it was", strerror(err));
         return false;
     }
     if (had_old) {
@@ -999,8 +1002,9 @@ static void handle_delete(int fd, ota_request_t const *req) {
         return;
     }
     forget_c6_bundle_if_c6_file(path);
-    if (unlink(path) != 0) {
-        respond(fd, 404, "couldn't delete %s", req->path);
+    if (unlink(path) != 0) { // EACCES: open in another task (FatFs's file lock, #274)
+        int err = errno;
+        respond(fd, err == ENOENT ? 404 : 409, "couldn't delete %s: %s", req->path, strerror(err));
         return;
     }
     respond(fd, 200, "deleted %s", req->path);

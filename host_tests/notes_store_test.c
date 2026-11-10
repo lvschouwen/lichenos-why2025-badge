@@ -24,6 +24,10 @@ static void put(char const *name, char const *content) {
     char path[400];
     snprintf(path, sizeof(path), "%s/%s", dir, name);
     FILE *f = fopen(path, "w");
+    CHECK(f != NULL);
+    if (!f) {
+        return;
+    }
     fputs(content, f);
     fclose(f);
 }
@@ -88,6 +92,17 @@ static void test_delete(void) {
     CHECK(notes_store_delete(dir, "buy-milk.txt") == NOTES_ERR_GONE);
     CHECK(notes_store_delete(dir, "../etc.txt") == NOTES_ERR_ARG);
     CHECK(notes_store_delete(dir, "readme") == NOTES_ERR_ARG);
+    // EACCES (FatFs's file lock, #274: the note is open elsewhere; a read-only directory on the host): the note stays,
+    // and the app says why instead of blaming the card (NOTES_ERR_IO)
+    if (geteuid() != 0) {
+        put("held.txt", "held\n");
+        chmod(dir, 0500);
+        CHECK(notes_store_delete(dir, "held.txt") == NOTES_ERR_BUSY && has("held.txt"));
+        CHECK(notes_store_write(dir, "held.txt", "changed") != NOTES_OK && has("held.txt"));
+        chmod(dir, 0700);
+        CHECK(strstr(notes_result_text(NOTES_ERR_BUSY), "open elsewhere") != NULL);
+        CHECK(notes_store_delete(dir, "held.txt") == NOTES_OK);
+    }
 }
 
 static void test_list_edges(void) {

@@ -61,6 +61,11 @@ CONFIG_FATFS_USE_DYN_BUFFERS=y
 # #121), and esp_flash copies a PSRAM buffer itself for /storage. Internal DMA RAM only if PSRAM is full.
 CONFIG_FATFS_ALLOC_PREFER_EXTRAM=y
 CONFIG_FATFS_ALLOC_PREFER_ALIGNED_WORK_BUFFERS=y
+# FatFs's file lock (#274): a delete, rename or write-open of a file another task has open fails with EACCES
+# (FR_LOCKED) instead of corrupting the volume. One table for all volumes (ff.c: static FILESEM Files[FF_FS_LOCK],
+# 16 B an entry, internal .bss), counting open files and open directories: 12 files (SD max_files 4 + /storage 8) and
+# 8 directories (a listing, MeshCore's openNextFile, the shim's recursive remove). Past it an open fails with ENFILE.
+CONFIG_FATFS_FS_LOCK=20
 # "fw sd format" names the card LICHEN (f_setlabel, #60)
 CONFIG_FATFS_USE_LABEL=y
 

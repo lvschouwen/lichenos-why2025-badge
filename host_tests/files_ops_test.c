@@ -28,6 +28,10 @@ static void write_file(char const *p, size_t n, char fill) {
     char rp[512];
     fpath(p, rp);
     FILE *f = fopen(rp, "wb");
+    CHECK(f != NULL);
+    if (!f) {
+        return;
+    }
     for (size_t i = 0; i < n; i++) {
         fputc(fill, f);
     }
@@ -131,6 +135,35 @@ static void test_copy(void) {
     CHECK(files_copy("/storage/big.bin", "/sd/z", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_OK && !exists("/sd/z.lichen-part"));
 }
 
+// FatFs's file lock (#274) answers EACCES for a file another task has open. A read-only directory gives the host the
+// same errno: the Files app says "in use", leaves the file as it was and does not blame the card (FILES_ERR_IO).
+static void test_busy(void) {
+    static uint8_t buf[64];
+    char           rp[512];
+    if (geteuid() == 0) {
+        printf("files_ops_test: running as root, the EACCES cases are skipped\n");
+        return;
+    }
+    mkdirp("/sd");
+    mkdirp("/sd/held");
+    write_file("/sd/held/f", 5, 'h');
+    write_file("/sd/held/r", 5, 'h');
+    fpath("/sd/held/r", rp);
+    chmod(rp, 0000);
+    fpath("/sd/held", rp);
+    chmod(rp, 0500);
+    CHECK(files_delete("/sd/held/f") == FILES_ERR_BUSY && exists("/sd/held/f"));
+    CHECK(files_copy("/sd/held/f", "/sd/held/g", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_BUSY);
+    CHECK(!exists("/sd/held/g") && !exists("/sd/held/g.lichen-part"));
+    size_t   got;
+    uint32_t total;
+    CHECK(files_read_at("/sd/held/r", 0, buf, 4, &got, &total) == FILES_ERR_BUSY);
+    CHECK(strstr(files_result_text(FILES_ERR_BUSY), "In use") != NULL);
+    chmod(rp, 0700);
+    fpath("/sd/held/r", rp);
+    chmod(rp, 0600);
+}
+
 int main(void) {
     char tmpl[] = "/tmp/files_ops_XXXXXX";
     if (!mkdtemp(tmpl)) {
@@ -142,6 +175,7 @@ int main(void) {
     test_delete();
     test_read();
     test_copy();
+    test_busy();
     char cmd[300];
     snprintf(cmd, sizeof(cmd), "rm -r %s", tmpl); // test data only, in our own mkdtemp directory
     if (system(cmd) != 0) {

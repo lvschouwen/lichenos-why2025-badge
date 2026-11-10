@@ -17,7 +17,11 @@ static bool path_join(char const *dir, char const *name, char const *suffix, cha
     return n > 0 && (size_t)n < cap;
 }
 
+// EACCES is FatFs's file lock (#274: the Files app or a job has the note open), not a card fault
 static notes_result_t result_from_errno(int err) {
+    if (err == EACCES || err == EBUSY) {
+        return NOTES_ERR_BUSY;
+    }
     return err == ENOSPC || err == EFBIG ? NOTES_ERR_SPACE : NOTES_ERR_IO;
 }
 
@@ -110,8 +114,13 @@ static notes_result_t write_file(char const *tmp, char const *path, char const *
         remove(tmp);
         return result_from_errno(err);
     }
-    // FAT's rename does not replace: the finished temp file is there, so removing the old note first loses nothing
-    remove(path);
+    // FAT's rename does not replace: the finished temp file is there, so removing the old note first loses nothing.
+    // An old note that cannot go (open elsewhere) stays as it was; the edit is dropped with its reason.
+    if (remove(path) != 0 && errno != ENOENT) {
+        err = errno;
+        remove(tmp);
+        return result_from_errno(err);
+    }
     if (rename(tmp, path) != 0) {
         err = errno;
         remove(tmp);
@@ -164,7 +173,7 @@ notes_result_t notes_store_delete(char const *dir, char const *name) {
         return NOTES_ERR_ARG;
     }
     if (remove(path) != 0) {
-        return errno == ENOENT ? NOTES_ERR_GONE : NOTES_ERR_IO;
+        return errno == ENOENT ? NOTES_ERR_GONE : result_from_errno(errno);
     }
     return NOTES_OK;
 }
@@ -177,6 +186,7 @@ char const *notes_result_text(notes_result_t r) {
     case NOTES_ERR_SPACE: return "The SD card is full.";
     case NOTES_ERR_IO:    return "The SD card could not be written.";
     case NOTES_ERR_GONE:  return "That note is gone.";
+    case NOTES_ERR_BUSY:  return "That note is open elsewhere (or read-only): left as it was.";
     }
     return "Failed.";
 }
