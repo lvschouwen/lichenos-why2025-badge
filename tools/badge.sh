@@ -452,6 +452,8 @@ ota_piece_retry() {
 }
 
 OTA_PIECE=${BADGE_OTA_PIECE:-131072} # bytes per piece; a damaged piece is resent alone
+# At most 256 KiB: the badge drains a refused piece up to that size, so its reply isn't lost to a reset (#299)
+[ "$OTA_PIECE" -le 262144 ] || OTA_PIECE=262144
 OTA_PIECE_TRIES=${BADGE_OTA_PIECE_TRIES:-6}
 
 # ota_put_pieces <ip> <route> <local file> [badge path]: upload in checked pieces, the whole file checked at the end

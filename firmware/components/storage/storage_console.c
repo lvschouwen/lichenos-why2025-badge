@@ -10,7 +10,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define MAX_DEPTH 6
+#define MAX_DEPTH 4 // each level is a stat() through vfs_fat (an FF name buffer on the stack): keep it shallow
 
 static char s_path[256];
 
@@ -43,7 +43,7 @@ static uint64_t tree_bytes(int depth) {
     return total;
 }
 
-static bool dir_arg_ok(char const *dir) {
+static bool dir_arg_ok(char const *dir) { // under /storage only: no absolute path, no way up
     return dir[0] != '/' && strstr(dir, "..") == NULL && strlen(dir) < 128;
 }
 
@@ -53,15 +53,21 @@ static void cmd_storage(char const *args) {
         console_reply("storage: not mounted");
         return;
     }
+    char arg[128];
     while (*args == ' ') {
         args++;
     }
+    snprintf(arg, sizeof(arg), "%s", args);
+    for (size_t n = strlen(arg); n > 0 && arg[n - 1] == ' ';) {
+        arg[--n] = 0;
+    }
+    args = arg;
     if (!dir_arg_ok(args)) {
         console_reply("storage [dir] (a folder under " STORAGE_BASE ", e.g. \"c6\")");
         return;
     }
     snprintf(s_path, sizeof(s_path), "%s%s%s", STORAGE_BASE, args[0] ? "/" : "", args);
-    console_reply("storage: %llu bytes free of %llu (%llu%%) | listing %s", (unsigned long long)free_b,
+    console_reply("storage: %llu bytes free of %llu (%llu%%) | listing %s (file bytes; FAT takes whole 4 KB clusters)", (unsigned long long)free_b,
                   (unsigned long long)total_b, total_b ? (unsigned long long)(free_b * 100 / total_b) : 0ULL, s_path);
     DIR *dir = opendir(s_path);
     if (!dir) {
