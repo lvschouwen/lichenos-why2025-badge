@@ -54,11 +54,15 @@ expect deny "$b mesh dm abcdef123456 hi" "$tmp/missing"
 expect pass "$b mesh send '#badgetest' hi" "$tmp/missing"
 # badge.sh applies the same rules to every line it sends, whatever the command looked like: a fake curl records
 # what would have gone out
-mkdir -p "$tmp/bin"
+# badge.sh reads only the allow file of its own tree (no override), so it runs from a copy with the test's list
+mkdir -p "$tmp/bin" "$tmp/repo/tools" "$tmp/repo/.claude"
 printf '#!/bin/sh\necho SENT\n' > "$tmp/bin/curl" && chmod +x "$tmp/bin/curl"
+cp "$here/../badge.sh" "$here/../onair_guard.sh" "$here/../elf_archive.sh" "$tmp/repo/tools/"
+cp "$tmp/allow" "$tmp/repo/.claude/onair-allow.local"
+printf 'EVIL-NODE\n' > "$tmp/evil"
 badge() { # $@ = badge.sh arguments; prints its output, returns its exit code
-  PATH="$tmp/bin:$PATH" ONAIR_ALLOW_FILE="$tmp/allow" BADGE_OTA_TOKEN=0123456789abcdef0123456789abcdef \
-    BADGE_HOST=none bash "$here/../badge.sh" "$@" 2>&1
+  PATH="$tmp/bin:$PATH" BADGE_OTA_TOKEN=0123456789abcdef0123456789abcdef \
+    BADGE_HOST=none bash "$tmp/repo/tools/badge.sh" "$@" 2>&1
 }
 sent() { # $1 = expected (sent|refused), rest = badge.sh arguments
   local want=$1 out rc; shift
@@ -79,5 +83,11 @@ sent refused fw 192.0.2.1 mesh remote OTHER-RPT cli reboot YES
 sent refused fw 192.0.2.1 mesh advert interval 6h
 sent refused console /dev/null "fw mesh send Public hi"
 sent sent fw 192.0.2.1 mesh advert
+# A caller's environment cannot swap the list
+for var in ONAIR_ALLOW_FILE onair_allow_override; do
+  out=$(env "$var=$tmp/evil" PATH="$tmp/bin:$PATH" BADGE_OTA_TOKEN=0123456789abcdef0123456789abcdef BADGE_HOST=none \
+    bash "$tmp/repo/tools/badge.sh" fw 192.0.2.1 mesh dm EVIL-NODE hi 2>&1)
+  grep -q '^refusing: ' <<<"$out" || { echo "FAIL: $var swapped the allow list: $out" >&2; fail=1; }
+done
 [ "$fail" = 0 ] && echo "guard_onair_test: ok"
 exit "$fail"

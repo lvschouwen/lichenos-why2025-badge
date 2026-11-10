@@ -144,6 +144,8 @@ cmd_backup() {
 
 # shellcheck source=tools/elf_archive.sh
 . "$REPO/tools/elf_archive.sh"
+# The allow list is always the repo's own file: no override from the caller's environment (#287)
+unset onair_allow_override ONAIR_ALLOW_FILE
 # shellcheck source=tools/onair_guard.sh
 . "$REPO/tools/onair_guard.sh"
 

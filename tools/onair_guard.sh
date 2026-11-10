@@ -5,11 +5,13 @@
 # file only #badgetest sends pass. The badge-side check that also covers other routes is #289.
 # shellcheck shell=bash
 
-# Allow file: ONAIR_ALLOW_FILE (the tests) or the repo's .claude/onair-allow.local
+# Allow file: the .claude/onair-allow.local next to this file's tools/. Only the guard hook may point elsewhere
+# (onair_allow_override, from ONAIR_ALLOW_FILE in Claude Code's own environment, for its test); badge.sh clears the
+# override before sourcing this, so a caller's environment never changes the list badge.sh checks.
 onair_allow_file() {
     local repo
     repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-    printf '%s\n' "${ONAIR_ALLOW_FILE:-$repo/.claude/onair-allow.local}"
+    printf '%s\n' "${onair_allow_override:-$repo/.claude/onair-allow.local}"
 }
 
 # True when target matches a line of the allow file, ignoring case

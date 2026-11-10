@@ -32,6 +32,7 @@ fi
 #    to every line it sends). Here only lines that reach the badge (badge.sh fw|console, ssh, a tty, curl .../console)
 #    are looked at, so a source grep or a commit message describing such a command passes.
 #    ONAIR_ALLOW_FILE is for the host test: the hook's environment is Claude Code's, not the command's.
+onair_allow_override=${ONAIR_ALLOW_FILE:-}
 # shellcheck source=tools/onair_guard.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/tools/onair_guard.sh"
 reach='(^|[^[:alnum:]_-])badge\.sh[[:space:]]+(fw|console)[[:space:]]|(^|[^[:alnum:]_-])ssh[[:space:]]|/dev/tty|curl[^|;&]*/console'
