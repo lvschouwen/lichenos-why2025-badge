@@ -445,8 +445,13 @@ called in `BadgeMesh`'s `GroupChannel` override of `sendFloodScoped`.
 - Damage fails narrow: a line whose id reads but whose region does not (or a last line a cut write left without its
   line end) is a tombstone, and that channel's screen sends are refused ("flood scope damaged: set it again") until
   the scope is set again; the details row and `fw mesh scope` show it. Only the temp file there (a cut between the
-  remove and the rename) promotes it. A file with nothing readable is flagged in `fw mesh scope` and logged. A start
-  drops the lines whose channel is gone (never while no channel loaded) and writes nothing.
+  remove and the rename) promotes it. A file that is there but does not read whole (will not open, 0 bytes, a line
+  without a readable id, a last line without its line end) is unreadable: every channel's screen sends are refused
+  ("flood scopes unreadable: set them again") until the next successful save. No file at all is the first start (no
+  scopes). A start drops the lines whose channel is gone (never while no channel loaded) and writes nothing.
+- The senders check without the mesh lock against a copy in `mesh_cscope.c`: FNV-1a hashes of the damaged channels'
+  names (a collision can only refuse a healthy channel) and the unreadable flag, renewed after every set, add, remove,
+  rename and load; the outbox and the radio-side override refuse again under the lock.
 - Set and shown in the channel details screen (row "Flood scope": the region, or "Default (<name>)"); a region asks
   first in the careful dialog, going back to the default does not. `fw mesh scope` lists the channels with their own
   scope after its status line (`channel <name>: scope <region>`, lines `tools/onair_guard.sh` never takes for it).

@@ -194,19 +194,35 @@ static bool chscope_read_line(mesh_chscope_t *t, char const *line, size_t len, b
     return mesh_chscope_put(t, id, ok ? name : MESH_CHSCOPE_DAMAGED);
 }
 
-size_t mesh_chscope_read(mesh_chscope_t *t, char const *text) {
-    size_t lines = 0;
+size_t mesh_chscope_read(mesh_chscope_t *t, char const *text, bool *whole) {
+    size_t lines = 0, filled = 0;
     mesh_chscope_clear(t);
+    *whole = text[0] != '\0';
     while (*text) {
         size_t len  = strcspn(text, "\n");
         size_t used = len;
+        bool   end  = text[len] == '\n';
         if (used > 0 && text[used - 1] == '\r') {
             used--;
         }
-        lines += chscope_read_line(t, text, used, text[len] == '\n');
-        text += len + (text[len] == '\n');
+        if (used) {
+            filled++;
+            lines += chscope_read_line(t, text, used, end);
+        }
+        *whole = *whole && end;
+        text += len + end;
     }
+    *whole = *whole && lines == filled;
     return lines;
+}
+
+uint32_t mesh_chscope_name_hash(char const *name) {
+    uint32_t h = 2166136261u;
+    for (; *name; name++) {
+        unsigned char c = (unsigned char)*name;
+        h               = (h ^ (c >= 'A' && c <= 'Z' ? c + 32u : c)) * 16777619u;
+    }
+    return h;
 }
 
 mesh_chscope_file_t mesh_chscope_file_pick(bool have_file, bool have_tmp) {

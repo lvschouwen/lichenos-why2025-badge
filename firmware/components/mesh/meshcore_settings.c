@@ -1343,9 +1343,12 @@ static void chan_scope_show(void) {
 
 #define CHAN_SCOPE_NOTE_MS 3000 // a "Not saved" stays this long, then the row shows the state again (R3)
 
+static lv_timer_t *chan_scope_timer; // the pending one-shot back to the state, NULL when none
+
 static void chan_scope_show_due(lv_timer_t *timer) {
     (void)timer;
-    chan_scope_show(); // one-shot: LVGL deletes the timer after this call; a no-op when the details are gone
+    chan_scope_timer = NULL; // one-shot: LVGL deletes it after this call
+    chan_scope_show();       // a no-op when the details are gone
 }
 
 // R5 and R3: why it was not saved, then the real state again (the value never stays a stale message)
@@ -1353,9 +1356,12 @@ static void chan_scope_not_saved(char const *why) {
     char line[80];
     snprintf(line, sizeof(line), "Not saved: %s", why);
     menu_set_value(chan_scope_row, line);
-    lv_timer_t *timer = lv_timer_create(chan_scope_show_due, CHAN_SCOPE_NOTE_MS, NULL);
-    if (timer) {
-        lv_timer_set_repeat_count(timer, 1);
+    if (chan_scope_timer) {
+        lv_timer_delete(chan_scope_timer); // a newer note: its own full time
+    }
+    chan_scope_timer = lv_timer_create(chan_scope_show_due, CHAN_SCOPE_NOTE_MS, NULL);
+    if (chan_scope_timer) {
+        lv_timer_set_repeat_count(chan_scope_timer, 1);
     }
 }
 

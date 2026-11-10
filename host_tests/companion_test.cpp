@@ -111,13 +111,10 @@ extern "C" void mesh_contacts_full(void) {}
 extern "C" void mesh_airlog_note(uint8_t, uint8_t, uint8_t const *, uint8_t, float, float) {}
 extern "C" void mesh_signal_note(uint8_t const *, bool, uint8_t, uint8_t const *, float, float) {}
 // What BadgeMesh told the senders' copy last (#291)
-static std::string noted_damaged; // the names, comma separated
-static bool        noted_unreadable;
-extern "C" void    mesh_chscope_noted(char const (*damaged)[32], size_t n, bool unreadable) {
-    noted_damaged.clear();
-    for (size_t i = 0; i < n; i++) {
-        noted_damaged += std::string(i ? "," : "") + damaged[i];
-    }
+static std::vector<uint32_t> noted_damaged; // name hashes
+static bool                  noted_unreadable;
+extern "C" void              mesh_chscope_noted(uint32_t const *damaged, size_t n, bool unreadable) {
+    noted_damaged.assign(damaged, damaged + n);
     noted_unreadable = unreadable;
 }
 
@@ -382,15 +379,35 @@ static std::string channel_scope_line(mesh::GroupChannel const &ch) {
     return std::string(hex) + " ";
 }
 
+// While the file is unreadable a screen's channel message fails in the outbox (nothing on air); a console line's still
+// takes the console scope
+static void channel_scope_refused_checks(BadgeMesh &mesh, ob_t &ob, mesh::GroupChannel const &pub) {
+    std::string   prefix = std::string(mesh.getNodeName()) + ": ";
+    char const   *why    = NULL;
+    size_t        before = test_radio.sent.size();
+    CHECK(mesh.setConsoleScope("zz-test") == NULL);
+    mesh_msg_id_t ui = ob_add_channel(&ob, "public", "chscope unreadable", 18, (uint32_t)millis(), &why);
+    settle(mesh, 30);
+    mesh_msg_id_t con = ob_add_channel(&ob, "public", "chscope unreadable console", 26, (uint32_t)millis(), &why);
+    CHECK(ui && con && ob_set_console(&ob, con));
+    settle(mesh, 30);
+    mesh::Packet     pkt;
+    mesh_out_state_t state;
+    CHECK(!find_group(before, pub, prefix + "chscope unreadable", pkt));
+    CHECK(ob_get(&ob, ui, &state, NULL, NULL, NULL) && state == MESH_OUT_FAILED);
+    CHECK(find_group(before, pub, prefix + "chscope unreadable console", pkt) && pkt.hasTransportCodes());
+    CHECK(mesh.setConsoleScope("") == NULL);
+}
+
 // Damage fails narrow (#291 review): a damaged line refuses the channel's screen messages (the outbox fails them,
 // nothing goes on air) while a console line's still takes the console scope; a cut between the write's remove and
 // rename promotes the read-back temp file; a file with nothing readable is flagged, and the start writes nothing.
-static void channel_scope_damage_checks(BadgeMesh &mesh, ob_t &ob, mesh::GroupChannel const &pub) {
+static void channel_scope_damage_checks(BadgeMesh &mesh, ob_t &ob, mesh::GroupChannel const &pub, char const *root) {
     std::string line = channel_scope_line(pub);
     write_file("/channel_scopes", line + "zz bad\n");
     mesh.loadChannelScopes();
     CHECK(strcmp(mesh.channelScope(pub.secret), MESH_CHSCOPE_DAMAGED) == 0);
-    CHECK(noted_damaged == "Public" && !noted_unreadable);
+    CHECK(noted_damaged.size() == 1 && noted_damaged[0] == mesh_chscope_name_hash("public") && !noted_unreadable);
     CHECK(mesh.setConsoleScope("zz-test") == NULL);
     std::string      prefix = std::string(mesh.getNodeName()) + ": ";
     char const      *why    = NULL;
@@ -413,15 +430,34 @@ static void channel_scope_damage_checks(BadgeMesh &mesh, ob_t &ob, mesh::GroupCh
     mesh.loadChannelScopes();
     CHECK(strcmp(mesh.channelScope(pub.secret), "zz-local") == 0);
     CHECK(SPIFFS.exists("/channel_scopes") && !SPIFFS.exists("/channel_scopes.new"));
-    // Nothing readable in the file: flagged; the start does not write the file
+    // An existing file that does not read whole is unreadable: every channel reads as damaged (screen sends refused);
+    // the start does not write the file. Cases: nothing readable, 0 bytes, an id-less line among good ones, a short
+    // last line without its line end.
+    std::string const bad[] = {"garbage\n", "", line + "zz-local\nzz\n", line + "zz-local\n0123"};
+    for (auto const &text : bad) {
+        write_file("/channel_scopes", text);
+        mesh.loadChannelScopes();
+        CHECK(strcmp(mesh.channelScope(pub.secret), MESH_CHSCOPE_DAMAGED) == 0 && noted_unreadable);
+        File f = SPIFFS.open("/channel_scopes", "r");
+        CHECK(f && f.size() == text.size());
+        f.close();
+    }
+    channel_scope_refused_checks(mesh, ob, pub);
+    // A file that is there but will not open as one (a directory in its place) is unreadable too, not a first start
+    CHECK(SPIFFS.remove("/channel_scopes"));
+    std::string dir = std::string(root) + "/channel_scopes";
+    CHECK(mkdir(dir.c_str(), 0700) == 0 && SPIFFS.exists("/channel_scopes"));
+    mesh.loadChannelScopes();
+    CHECK(noted_unreadable && strcmp(mesh.channelScope(pub.secret), MESH_CHSCOPE_DAMAGED) == 0);
+    CHECK(rmdir(dir.c_str()) == 0);
+    // No file at all: the first start, no scopes, nothing refused
+    mesh.loadChannelScopes();
+    CHECK(!noted_unreadable && mesh.channelScope(pub.secret)[0] == 0 && noted_damaged.empty());
+    // A successful save clears the flag (here: unreadable, then the default saved for the channel)
     write_file("/channel_scopes", "garbage\n");
     mesh.loadChannelScopes();
-    CHECK(mesh.channelScope(pub.secret)[0] == 0 && noted_unreadable);
-    File f = SPIFFS.open("/channel_scopes", "r");
-    CHECK(f && f.size() == 8);
-    f.close();
-    CHECK(mesh.setChannelScope(pub.secret, "") == NULL && !noted_unreadable);
-    CHECK(!SPIFFS.exists("/channel_scopes"));
+    CHECK(noted_unreadable && mesh.setChannelScope(pub.secret, "") == NULL && !noted_unreadable);
+    CHECK(!SPIFFS.exists("/channel_scopes") && mesh.channelScope(pub.secret)[0] == 0);
 }
 
 // The console scope lives in MeshCore's own directory (#290): the factory reset's format, which takes the default scope
@@ -1018,7 +1054,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     console_scope_checks(mesh, ob, pub.channel);
     console_scope_reset_checks(mesh, root);
     channel_scope_checks(mesh, ob, pub.channel, root);
-    channel_scope_damage_checks(mesh, ob, pub.channel);
+    channel_scope_damage_checks(mesh, ob, pub.channel, root);
     trace_checks(mesh, mt);
     remote_checks(mesh, rr, listener);
     contact_action_checks(mesh);

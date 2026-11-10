@@ -692,10 +692,10 @@ static void mesh_task(void *arg) {
             store.savePrefs(*node->getNodePrefs());
             int64_t contacts_started = esp_timer_get_time();
             store.saveContacts(node, keep_contact);
-            int64_t contacts_us = esp_timer_get_time() - contacts_started;
+            long long contacts_ms = (esp_timer_get_time() - contacts_started) / 1000;
             store.saveChannels(node);
             node->flushBlobs();
-            int64_t save_us = esp_timer_get_time() - save_started;
+            long long save_ms = (esp_timer_get_time() - save_started) / 1000;
             mesh_journal_stop_locked(final);
             __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
             mesh_unlock();
@@ -704,8 +704,7 @@ static void mesh_task(void *arg) {
             lichen_badge_set("meshcore", 0);
             // The contact rewrite is the same one MyMesh does lazily in its loop: its time here says what it costs there
             ESP_LOGI(TAG, "MeshCore stopped%s: prefs, %d contacts, channels saved in %lld ms (contacts %lld ms)",
-                     final ? " for the update" : "", node->getNumContacts(), (long long)(save_us / 1000),
-                     (long long)(contacts_us / 1000));
+                     final ? " for the update" : "", node->getNumContacts(), save_ms, contacts_ms);
             __atomic_store_n(&task_exited, true, __ATOMIC_RELEASE);
             return; // lichen_task_start's trampoline takes the task out of the OS's book and deletes it (#181)
         }
@@ -1118,6 +1117,7 @@ extern "C" char const *mesh_channel_add(char const *name_in, char const *b64_key
     bool ok = !exists && free_slot >= 0 && node->setChannel(free_slot, details);
     if (ok) {
         store.saveChannels(node);
+        node->noteChannelScopes(); // #291: the senders' copy of the damaged channels
     }
     mesh_unlock();
     if (exists) {

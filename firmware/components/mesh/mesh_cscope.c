@@ -1,7 +1,5 @@
 #include "mesh_cscope.h"
 
-#include "channel_input.h"
-#include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -18,11 +16,11 @@
 // inside a critical section
 static char cscope_name[MESH_SCOPE_MAX + 1];
 
-// The channels whose scope is damaged (#291), by name, and whether the file did not read: same lock. PSRAM (the mutex
-// never spins), filled by mesh_chscope_noted on the mesh task.
-EXT_RAM_BSS_ATTR static char chscope_damaged[MESH_CHSCOPE_MAX][32];
-static size_t                chscope_damaged_n;
-static bool                  chscope_unreadable;
+// The channels whose scope is damaged (#291), as name hashes (mesh_chscope_name_hash: a collision only refuses a
+// healthy channel), and whether the file is unreadable: same lock, filled by mesh_chscope_noted on the mesh task
+static uint32_t chscope_damaged[MESH_CHSCOPE_MAX];
+static size_t   chscope_damaged_n;
+static bool     chscope_unreadable;
 
 static StaticSemaphore_t cscope_buf;
 static SemaphoreHandle_t cscope_lock; // made by the first note (MeshCore's start); NULL until then: "not set"
@@ -37,33 +35,36 @@ static SemaphoreHandle_t cscope_lock_made(void) {
     return lock;
 }
 
-void mesh_chscope_noted(char const (*damaged)[32], size_t n, bool unreadable) {
+void mesh_chscope_noted(uint32_t const *damaged, size_t n, bool unreadable) {
     SemaphoreHandle_t lock = cscope_lock_made();
     xSemaphoreTake(lock, portMAX_DELAY);
     chscope_damaged_n  = n < MESH_CHSCOPE_MAX ? n : MESH_CHSCOPE_MAX;
     chscope_unreadable = unreadable;
-    for (size_t i = 0; i < chscope_damaged_n; i++) {
-        snprintf(chscope_damaged[i], sizeof(chscope_damaged[i]), "%s", damaged[i]);
-    }
+    memcpy(chscope_damaged, damaged, chscope_damaged_n * sizeof(chscope_damaged[0]));
     xSemaphoreGive(lock);
     if (n || unreadable) {
-        ESP_LOGW("mesh", "channel scopes: %u damaged (their screen sends are refused)%s", (unsigned)n,
-                 unreadable ? ", the saved file did not read: every channel floods under the default" : "");
+        ESP_LOGW("mesh", "channel scopes: %s", unreadable ? MESH_CHSCOPE_UNREADABLE : MESH_CHSCOPE_REFUSED);
     }
 }
 
-char const *mesh_cscope_channel_refusal(bool from_console, char const *channel) {
+// NULL, MESH_CHSCOPE_REFUSED or MESH_CHSCOPE_UNREADABLE (for every channel)
+static char const *chscope_why(char const *channel) {
     SemaphoreHandle_t lock = __atomic_load_n(&cscope_lock, __ATOMIC_ACQUIRE);
-    bool              hit  = false;
-    if (from_console || !lock) {
-        return NULL; // a console line keeps the console scope (#290 wins)
+    char const       *why  = NULL;
+    uint32_t          h    = channel ? mesh_chscope_name_hash(channel) : 0;
+    if (lock) {
+        xSemaphoreTake(lock, portMAX_DELAY);
+        why = chscope_unreadable ? MESH_CHSCOPE_UNREADABLE : NULL;
+        for (size_t i = 0; !why && channel && i < chscope_damaged_n; i++) {
+            why = chscope_damaged[i] == h ? MESH_CHSCOPE_REFUSED : NULL;
+        }
+        xSemaphoreGive(lock);
     }
-    xSemaphoreTake(lock, portMAX_DELAY);
-    for (size_t i = 0; !hit && i < chscope_damaged_n; i++) {
-        hit = channel_same_name(chscope_damaged[i], channel);
-    }
-    xSemaphoreGive(lock);
-    return hit ? MESH_CHSCOPE_REFUSED : NULL;
+    return why;
+}
+
+char const *mesh_cscope_channel_refusal(bool from_console, char const *channel) {
+    return from_console ? NULL : chscope_why(channel); // a console line keeps the console scope (#290 wins)
 }
 
 void mesh_cscope_note(char const *name) {
@@ -88,6 +89,10 @@ static void cscope_get(char *out, size_t cap) {
 static void cscope_list_channels(void) {
     mesh_channel_info_t info = {0};
     size_t              own  = 0;
+    if (chscope_why(NULL)) {
+        console_reply("channel scopes: %s; every screen channel send is refused until then", MESH_CHSCOPE_UNREADABLE);
+        return;
+    }
     for (int i = 0; i < MESH_CHSCOPE_MAX; i++) {
         size_t found = mesh_channel_info(i, NULL, &info, MESH_SET_WAIT_MS);
         mesh_wipe(info.secret, sizeof(info.secret));
@@ -97,22 +102,12 @@ static void cscope_list_channels(void) {
         }
         if (found == 1 && info.scope[0]) {
             bool damaged = strcmp(info.scope, MESH_CHSCOPE_DAMAGED) == 0;
-            console_reply("channel %s: scope %s", info.name,
-                          damaged ? "damaged (its screen sends are refused: set it again)" : info.scope);
+            console_reply("channel %s: %s%s", info.name, damaged ? "" : "scope ",
+                          damaged ? MESH_CHSCOPE_REFUSED : info.scope);
             own++;
         }
     }
-    SemaphoreHandle_t lock = __atomic_load_n(&cscope_lock, __ATOMIC_ACQUIRE);
-    bool              bad  = false;
-    if (lock) {
-        xSemaphoreTake(lock, portMAX_DELAY);
-        bad = chscope_unreadable;
-        xSemaphoreGive(lock);
-    }
-    if (bad) {
-        console_reply("channel scopes: the saved file did not read, every channel floods under the default: set them "
-                      "again");
-    } else if (!own) {
+    if (!own) {
         console_reply("channel scopes: none (every channel floods under the default)");
     }
 }

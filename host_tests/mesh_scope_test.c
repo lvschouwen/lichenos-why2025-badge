@@ -22,6 +22,11 @@ static char const *parse(char const *in, char *out) {
 static void chscope_checks(void) {
     static mesh_chscope_t t, back;
     static char           text[MESH_CHSCOPE_TEXT_MAX], line[200];
+    bool                  whole;
+    // The senders' name hash: as channel_same_name compares (ASCII case), FNV-1a
+    CHECK(mesh_chscope_name_hash("#ZZ-Chan") == mesh_chscope_name_hash("#zz-chan"));
+    CHECK(mesh_chscope_name_hash("#zz-chan") != mesh_chscope_name_hash("#zz-chan2"));
+    CHECK(mesh_chscope_name_hash("") == 2166136261u && mesh_chscope_name_hash("a") == 0xe40c292cu);
     uint8_t               a[MESH_CHSCOPE_ID] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef};
     uint8_t               b[MESH_CHSCOPE_ID] = {0xff, 0, 0, 0, 0, 0, 0, 0x10};
     mesh_chscope_clear(&t);
@@ -33,7 +38,7 @@ static void chscope_checks(void) {
     CHECK(mesh_chscope_write(&t, text, sizeof(text)) == strlen(text));
     CHECK(strcmp(text, "0123456789abcdef zz-other\nff00000000000010 zz-test\n") == 0);
     CHECK(mesh_chscope_write(&t, line, 20) == 0 && line[0] == 0); // too small: nothing half written
-    CHECK(mesh_chscope_read(&back, text) == 2);
+    CHECK(mesh_chscope_read(&back, text, &whole) == 2 && whole);
     CHECK(back.n == 2 && strcmp(mesh_chscope_find(&back, a), "zz-other") == 0);
     CHECK(strcmp(mesh_chscope_find(&back, b), "zz-test") == 0);
     // "" drops it; dropping one that is not there is fine
@@ -42,20 +47,28 @@ static void chscope_checks(void) {
     // A line without a readable id names no channel and is left out; CRLF and upper-case hex are fine. An id with a
     // region that does not read is a tombstone (that channel's screen sends are refused), whatever the region's damage
     CHECK(mesh_chscope_read(&back, "0123456789ABCDEF zz-local\r\nnot a line\n0123456789abcdeg zz-bad\n"
-                                   "ff00000000000010 zz bad\n0011 zz-short\n") == 2);
+                                   "ff00000000000010 zz bad\n0011 zz-short\n", &whole) == 2 && !whole);
     CHECK(back.n == 2 && strcmp(mesh_chscope_find(&back, a), "zz-local") == 0);
     CHECK(strcmp(mesh_chscope_find(&back, b), MESH_CHSCOPE_DAMAGED) == 0);
     char const *tombs[] = {"ff00000000000010\n", "ff00000000000010 \n", "ff00000000000010_zz-test\n",
                            "ff00000000000010 abcdefghijklmnopqrstuvwxyz01234\n", "ff00000000000010 $zz\n"};
     for (size_t i = 0; i < sizeof(tombs) / sizeof(tombs[0]); i++) {
-        CHECK(mesh_chscope_read(&back, tombs[i]) == 1 && strcmp(mesh_chscope_find(&back, b), MESH_CHSCOPE_DAMAGED) == 0);
+        CHECK(mesh_chscope_read(&back, tombs[i], &whole) == 1 && whole); // read whole: the tombstone holds it
+        CHECK(strcmp(mesh_chscope_find(&back, b), MESH_CHSCOPE_DAMAGED) == 0);
     }
     // A cut write: the last line without its line end may be shorter than written, so never read as a region
-    CHECK(mesh_chscope_read(&back, "0123456789abcdef zz-local\nff00000000000010 zz-te") == 2);
+    CHECK(mesh_chscope_read(&back, "0123456789abcdef zz-local\nff00000000000010 zz-te", &whole) == 2 && !whole);
     CHECK(strcmp(mesh_chscope_find(&back, a), "zz-local") == 0);
     CHECK(strcmp(mesh_chscope_find(&back, b), MESH_CHSCOPE_DAMAGED) == 0);
-    CHECK(mesh_chscope_read(&back, "") == 0 && back.n == 0);
-    CHECK(mesh_chscope_read(&back, "garbage\n\n") == 0 && back.n == 0); // a file that holds nothing readable
+    // Unreadable as a whole (#291 review): empty (a 0-byte file), nothing readable, an id-less line among good ones,
+    // a short or id-less last line without its line end
+    CHECK(mesh_chscope_read(&back, "", &whole) == 0 && back.n == 0 && !whole);
+    CHECK(mesh_chscope_read(&back, "garbage\n\n", &whole) == 0 && back.n == 0 && !whole);
+    CHECK(mesh_chscope_read(&back, "0123456789abcdef zz-local\nzz\n", &whole) == 1 && !whole);
+    CHECK(mesh_chscope_read(&back, "0123456789abcdef zz-local\n0123", &whole) == 1 && !whole);
+    CHECK(mesh_chscope_read(&back, "0123456789abcdef zz-local\nff00000000000010 zz-test", &whole) == 2 && !whole);
+    // Read whole: blank lines and CRLF are fine
+    CHECK(mesh_chscope_read(&back, "\n0123456789abcdef zz-local\r\n\n", &whole) == 1 && whole);
     // Which file a start reads: the file when it is there (a temp file next to it is a cut before the rename), the
     // temp file promoted when only it is (cut between the remove and the rename), none at the first start
     CHECK(mesh_chscope_file_pick(true, false) == MESH_CHSCOPE_FILE_READ);
@@ -73,8 +86,12 @@ static void chscope_checks(void) {
     CHECK(!mesh_chscope_put(&t, extra, "zz-test") && mesh_chscope_put(&t, first, "zz-test"));
     CHECK(mesh_chscope_put(&t, first, "abcdefghijklmnopqrstuvwxyz0123"));
     CHECK(mesh_chscope_write(&t, text, sizeof(text)) == sizeof(text) - 1); // the longest table fits exactly
-    mesh_chscope_read(&back, text);
+    CHECK(mesh_chscope_read(&back, text, &whole) == MESH_CHSCOPE_MAX && whole);
     CHECK(back.n == MESH_CHSCOPE_MAX);
+    // One line more than the table holds: not whole (a line left out)
+    static char more[MESH_CHSCOPE_TEXT_MAX + 64];
+    snprintf(more, sizeof(more), "%seeeeeeeeeeeeeee zz-test\n", text);
+    CHECK(mesh_chscope_read(&back, more, &whole) == MESH_CHSCOPE_MAX && !whole);
     mesh_chscope_drop_at(&t, 0);
     CHECK(t.n == MESH_CHSCOPE_MAX - 1 && mesh_chscope_find(&t, first)[0] == 0);
     // The details row and the question

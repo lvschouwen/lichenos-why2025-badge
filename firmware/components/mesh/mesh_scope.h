@@ -59,7 +59,10 @@ void mesh_scope_status_text(char const *default_name, char const *console_name, 
 // end). Never a region (mesh_scope_parse refuses '!'): that channel's screen sends are refused until it is set again,
 // so a damaged scope never floods wider than the region it was meant to be.
 #define MESH_CHSCOPE_DAMAGED  "!"
-#define MESH_CHSCOPE_REFUSED  "flood scope damaged: set it again (channel details, Flood scope)"
+#define MESH_CHSCOPE_REFUSED    "flood scope damaged: set it again (channel details, Flood scope)"
+// The whole file did not read (it is there but would not open, is empty, or a line of it did not read): every
+// channel's screen sends are refused until a scope is saved again, since the badge cannot tell which were meant narrow
+#define MESH_CHSCOPE_UNREADABLE "flood scopes unreadable: set them again (channel details, Flood scope)"
 typedef struct {
     uint8_t id[MESH_CHSCOPE_ID];
     char    name[MESH_SCOPE_MAX + 1];
@@ -79,8 +82,12 @@ void        mesh_chscope_drop_at(mesh_chscope_t *t, size_t i);
 size_t      mesh_chscope_write(mesh_chscope_t const *t, char *out, size_t cap);
 // The table from a file text; the number of lines read (tombstones included). A line whose id reads but whose region
 // does not, or the last line without its line end, becomes a tombstone (MESH_CHSCOPE_DAMAGED); a line without a
-// readable id names no channel and is left out.
-size_t      mesh_chscope_read(mesh_chscope_t *t, char const *text);
+// readable id names no channel and is left out. *whole: the text was not empty, ended with its line end, and every
+// non-empty line of it went into the table (false means the file as a whole is unreadable).
+size_t      mesh_chscope_read(mesh_chscope_t *t, char const *text, bool *whole);
+// A channel name's FNV-1a hash, ASCII lower-cased as channel_same_name compares: what the senders' copy of the
+// damaged channels holds (a collision only refuses a healthy channel, never lets a damaged one through)
+uint32_t    mesh_chscope_name_hash(char const *name);
 // Which file a start reads (a cut between the write's remove and rename leaves only the read-back temp file)
 typedef enum { MESH_CHSCOPE_FILE_NONE, MESH_CHSCOPE_FILE_READ, MESH_CHSCOPE_FILE_PROMOTE } mesh_chscope_file_t;
 mesh_chscope_file_t mesh_chscope_file_pick(bool have_file, bool have_tmp);

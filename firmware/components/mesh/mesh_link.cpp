@@ -247,12 +247,14 @@ static bool scope_file_write(char const *path, char const *tmp, char const *text
     return ok;
 }
 
-// The file's text, at most cap - 1 bytes, as a string; "" when there is none
-static void scope_file_read(char const *path, char *out, size_t cap) {
+// The file's text, at most cap - 1 bytes, as a string ("" when there is none); false when it would not open
+static bool scope_file_read(char const *path, char *out, size_t cap) {
     File   f = SPIFFS.open(path, "r");
     size_t n = f ? f.read((uint8_t *)out, cap - 1) : 0;
+    bool   ok = (bool)f;
     f.close();
     out[n] = '\0';
+    return ok;
 }
 
 char const *BadgeMesh::setConsoleScope(char const *name) {
@@ -307,7 +309,8 @@ char const *BadgeMesh::setChannelScope(uint8_t const secret[PUB_KEY_SIZE], char 
     channel_scope_id(secret, id);
     snprintf(before, sizeof(before), "%s", mesh_chscope_find(&chscopes_, id));
     if (strcmp(before, clean) == 0 && !chscope_unreadable_) {
-        return NULL; // nothing changes (a removed channel without a scope of its own writes nothing)
+        noteChannelScopes(); // nothing to write (a removed channel without a scope of its own), the senders' copy anew
+        return NULL;
     }
     if (!mesh_chscope_put(&chscopes_, id, clean)) {
         return "No room for another channel scope";
@@ -321,22 +324,28 @@ char const *BadgeMesh::setChannelScope(uint8_t const secret[PUB_KEY_SIZE], char 
     return NULL;
 }
 
+// While the file is unreadable every channel reads as damaged: its screen sends are refused, none floods wider
 char const *BadgeMesh::channelScope(uint8_t const secret[PUB_KEY_SIZE]) const {
     uint8_t id[MESH_CHSCOPE_ID];
     channel_scope_id(secret, id);
-    return mesh_chscope_find(&chscopes_, id);
+    return chscope_unreadable_ ? MESH_CHSCOPE_DAMAGED : mesh_chscope_find(&chscopes_, id);
 }
 
-// True when one of the channels has this id
-// 1 when one of the channels has this id, 0 when none, -1 when no channel is loaded at all (nothing to compare with)
-int BadgeMesh::channelWithId(uint8_t const id[MESH_CHSCOPE_ID]) {
+// The one walk over the channels: 1 when one has the id want (NULL: none asked), 0 when none, -1 when no channel is
+// loaded at all (nothing to compare with). With damaged, also the name hashes of the channels whose scope is damaged.
+int BadgeMesh::scanChannels(uint8_t const *want, uint32_t *damaged, size_t *n_damaged) {
     ChannelDetails ch;
     uint8_t        have[MESH_CHSCOPE_ID];
     int            found = -1;
-    for (int i = 0; found < 1 && i < MAX_GROUP_CHANNELS && getChannel(i, ch); i++) {
-        if (ch.name[0]) {
-            channel_scope_id(ch.channel.secret, have);
-            found = memcmp(have, id, sizeof(have)) == 0 ? 1 : 0;
+    for (int i = 0; i < MAX_GROUP_CHANNELS && getChannel(i, ch); i++) {
+        if (!ch.name[0]) {
+            continue;
+        }
+        channel_scope_id(ch.channel.secret, have);
+        found = found == 1 || (want && memcmp(have, want, sizeof(have)) == 0) ? 1 : 0;
+        if (damaged && *n_damaged < MESH_CHSCOPE_MAX &&
+            strcmp(channelScope(ch.channel.secret), MESH_CHSCOPE_DAMAGED) == 0) {
+            damaged[(*n_damaged)++] = mesh_chscope_name_hash(ch.name);
         }
     }
     memset(&ch, 0, sizeof(ch)); // a channel key: not left on the stack
@@ -351,30 +360,32 @@ bool BadgeMesh::channelScopeDamaged(int slot) {
 }
 
 void BadgeMesh::noteChannelScopes() {
-    ChannelDetails ch;
-    size_t         n = 0;
-    for (int i = 0; i < MAX_GROUP_CHANNELS && getChannel(i, ch); i++) {
-        if (ch.name[0] && strcmp(channelScope(ch.channel.secret), MESH_CHSCOPE_DAMAGED) == 0) {
-            snprintf(chscope_damaged_[n++], sizeof(chscope_damaged_[0]), "%s", ch.name);
-        }
-    }
-    memset(&ch, 0, sizeof(ch));
-    mesh_chscope_noted(chscope_damaged_, n, chscope_unreadable_);
+    uint32_t hashes[MESH_CHSCOPE_MAX];
+    size_t   n = 0;
+    scanChannels(nullptr, hashes, &n);
+    mesh_chscope_noted(hashes, n, chscope_unreadable_);
 }
 
+// An existing file must read whole (#291 review): one that will not open, is empty, or has a line that did not read is
+// unreadable, and every channel's screen sends are refused until a scope is saved. No file at all is the first start.
 void BadgeMesh::loadChannelScopes() {
+    bool existed = true, opened = false;
     switch (mesh_chscope_file_pick(SPIFFS.exists(CHANNEL_SCOPE_FILE), SPIFFS.exists(CHANNEL_SCOPE_TMP))) {
         case MESH_CHSCOPE_FILE_PROMOTE: // cut between the remove and the rename: the temp file was read back first
-            scope_file_read(SPIFFS.rename(CHANNEL_SCOPE_TMP, CHANNEL_SCOPE_FILE) ? CHANNEL_SCOPE_FILE : CHANNEL_SCOPE_TMP,
-                            chscope_text_, sizeof(chscope_text_));
+            opened = scope_file_read(SPIFFS.rename(CHANNEL_SCOPE_TMP, CHANNEL_SCOPE_FILE) ? CHANNEL_SCOPE_FILE
+                                                                                           : CHANNEL_SCOPE_TMP,
+                                     chscope_text_, sizeof(chscope_text_));
             break;
-        case MESH_CHSCOPE_FILE_READ: scope_file_read(CHANNEL_SCOPE_FILE, chscope_text_, sizeof(chscope_text_)); break;
-        default: chscope_text_[0] = '\0'; break; // first boot: no scopes
+        case MESH_CHSCOPE_FILE_READ:
+            opened = scope_file_read(CHANNEL_SCOPE_FILE, chscope_text_, sizeof(chscope_text_));
+            break;
+        default: existed = false, chscope_text_[0] = '\0'; break;
     }
-    size_t lines        = mesh_chscope_read(&chscopes_, chscope_text_);
-    chscope_unreadable_ = chscope_text_[0] && lines == 0;
+    bool whole;
+    mesh_chscope_read(&chscopes_, chscope_text_, &whole);
+    chscope_unreadable_ = existed && (!opened || !whole);
     for (size_t i = chscopes_.n; i-- > 0;) {
-        if (channelWithId(chscopes_.e[i].id) == 0) {
+        if (scanChannels(chscopes_.e[i].id, nullptr, nullptr) == 0) {
             mesh_chscope_drop_at(&chscopes_, i); // its channel went without the removal clearing it (a cut write)
         }
     }
