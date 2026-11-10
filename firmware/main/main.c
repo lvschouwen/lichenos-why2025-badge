@@ -69,15 +69,6 @@
 
 static char const TAG[] = "badge_fw";
 
-// What the status bar and About show, polled from the LVGL task: none of these waits on a lock
-static bool wifi_up(void) {
-    return wifi_has_ip(NULL, 0);
-}
-
-static bool lora_link_up(void) {
-    return lora_up() && c6link_up();
-}
-
 // MeshCore's run state in the status bar's terms (#103, #105)
 static lora_use_t lora_use(void) {
     if (!lichen_radio_get(RADIO_LORA)) {
@@ -323,13 +314,6 @@ static void c6_up(void) {
     }
     backlight_reapply();
     lora_c6_back();
-}
-
-static uint32_t c6_restarts(char *reason, size_t cap) {
-    static c6_status_t st; // the reason is long; only the sys_notices task calls this
-    c6link_status(&st);
-    snprintf(reason, cap, "%s", st.reason);
-    return st.restarts;
 }
 
 static void c6_restart_answer(bool confirmed) {
@@ -583,17 +567,10 @@ static void start_shell(boot_ctx_t *ctx) {
     if (!ctx->screen) {
         return;
     }
-    shell_sources_t const sources = {.wifi_up = wifi_up, .lora_up = lora_link_up, .c6_up = c6link_up,
-                                     .lora_use = lora_use,
-                                     .wifi_scan = lichen_sys_wifi_scan, .wifi_join = wifi_set_credentials, .wifi_forget = wifi_forget_network,
-                                     .wifi_saved_names = wifi_saved_names,
-                                     .wifi_scan_raw = lichen_sys_wifi_scan_raw, .wifi_ip = wifi_has_ip,
-                                     .wifi_join_state = lichen_sys_wifi_join_state,
-                                     .wifi_has_credentials = wifi_has_credentials,
-                                     .wifi_rssi = wifi_rssi, .wifi_joining = wifi_joining,
-                                     .c6_trouble = c6link_trouble, .lora_counts = lora_get_counts,
-                                     .c6_restarts = c6_restarts,
-                                     .lora_user_pause = lora_user_pause, .lora_user_resume = lora_user_resume};
+    // The radio's borrowers (#161, lichen_radio.h) and what MeshCore does with it (the status bar's LoRa colour) are
+    // MeshCore's (L6): everything else the shell shows comes through lichen_sys_*.
+    lichen_radio_set_lora_user(lora_user_pause, lora_user_resume);
+    shell_sources_t const sources = {.lora_use = lora_use};
     shell_set_sources(&sources);
     shell_start(ctx->display);
     // Before the watchdog starts (#281): a thermal shutdown early in the boot gets the real power off, not a restart
@@ -604,7 +581,7 @@ static void start_shell(boot_ctx_t *ctx) {
 // The thermal watchdog and Lichen's own notices (#281): OS services, started with or without a display. Only the
 // hooks into the shell depend on the screen.
 static void start_watch(boot_ctx_t *ctx) {
-    lichen_watch_hooks_t hooks = {.ui_ready = boot_finished, .power_off = thermal_power_off, .c6_restarts = c6_restarts};
+    lichen_watch_hooks_t hooks = {.ui_ready = boot_finished, .power_off = thermal_power_off};
     if (ctx->screen) {
         hooks.ui_ready      = shell_home_shown;
         hooks.hot_alert     = battery_open_alert;

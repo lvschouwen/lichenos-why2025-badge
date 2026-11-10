@@ -1,9 +1,11 @@
 // The status bar over every screen after boot (#66, home.html), three columns (#104): logo and wordmark (and the C6
 // trouble label) left, the clock centred (marked when unverified, #64), the unread notifications (#62), Wi-Fi and
 // LoRa right. The unread count, Wi-Fi fan (#58) and LoRa label are polled once a second from the LVGL task (the
-// latter two through shell_sources); the LoRa TX/RX chevrons from the packet counters every 100 ms (#29).
+// latter two through lichen_sys_*); the LoRa TX/RX chevrons from the packet counters every 100 ms (#29).
 #include "fonts.h"
 #include "lichen_radio.h"
+#include "lichen_sys_c6.h"
+#include "lichen_sys_net.h"
 #include "lichen_sys_clock.h"
 #include "link_state.h"
 #include "logo.h"
@@ -154,7 +156,7 @@ static void step_chevron(lora_chevron_t *c, uint32_t count, uint32_t now_ms) {
 static void poll_lora_activity(lv_timer_t *timer) {
     (void)timer;
     uint32_t rx = 0, tx = 0;
-    shell_sources.lora_counts(&rx, &tx);
+    lichen_sys_lora_counts(&rx, &tx);
     uint32_t now = lv_tick_get();
     step_chevron(&tx_chevron, tx, now);
     step_chevron(&rx_chevron, rx, now);
@@ -206,7 +208,7 @@ static int32_t fix_clock_width(void) {
 // "C6: recovering 2/3" in amber, "C6: down (no answer)" in red, hidden while the C6 is up (#14 T-B)
 static void show_c6(void) {
     char state[40], text[48];
-    bool trouble = shell_sources.c6_trouble && shell_sources.c6_trouble(state, sizeof(state));
+    bool trouble = lichen_sys_c6_trouble(state, sizeof(state));
     if (!trouble) {
         lv_obj_set_hidden(c6_label, true);
         return;
@@ -259,11 +261,11 @@ static void refresh(lv_timer_t *timer) {
     show_clock();
     show_c6();
     int8_t rssi  = 0;
-    bool   known = shell_sources.wifi_rssi && shell_sources.wifi_rssi(&rssi);
-    show_wifi(wifi_look(lichen_radio_get(RADIO_WIFI), shell_sources.wifi_has_credentials && shell_sources.wifi_has_credentials(),
-                        shell_sources.wifi_joining && shell_sources.wifi_joining(),
-                        shell_sources.wifi_up && shell_sources.wifi_up(), known, rssi));
-    show_lora(lora_look(shell_sources.lora_up && shell_sources.lora_up(),
+    bool   known = lichen_sys_wifi_rssi(&rssi);
+    show_wifi(wifi_look(lichen_radio_get(RADIO_WIFI), lichen_sys_wifi_has_credentials(),
+                        lichen_sys_wifi_joining(),
+                        lichen_sys_wifi_up(), known, rssi));
+    show_lora(lora_look(lichen_sys_lora_up(),
                         shell_sources.lora_use ? shell_sources.lora_use() : LORA_USE_RUNNING));
 }
 
@@ -378,13 +380,11 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     wifi_fan_create(wifi);
     lv_obj_t *lora = add_row(right, 6);
     lora_label     = add_text(lora, "LoRa", THEME_DIM);
-    if (shell_sources.lora_counts) {
-        lv_obj_t *arrows = add_row(lora, 2); // the TX/RX chevrons (#29)
-        add_chevron(arrows, &tx_chevron, LV_SYMBOL_UP);
-        add_chevron(arrows, &rx_chevron, LV_SYMBOL_DOWN);
-        poll_lora_activity(NULL); // primes both: the packets heard before the bar existed do not flash
-        lv_timer_create(poll_lora_activity, 100, NULL);
-    }
+    lv_obj_t *arrows = add_row(lora, 2); // the TX/RX chevrons (#29)
+    add_chevron(arrows, &tx_chevron, LV_SYMBOL_UP);
+    add_chevron(arrows, &rx_chevron, LV_SYMBOL_DOWN);
+    poll_lora_activity(NULL); // primes both: the packets heard before the bar existed do not flash
+    lv_timer_create(poll_lora_activity, 100, NULL);
 
     refresh(NULL);
     lv_timer_create(refresh, 1000, NULL);

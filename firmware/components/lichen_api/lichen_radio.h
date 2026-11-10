@@ -36,7 +36,7 @@ void lichen_radio_apply_all(void);
 // *was_running false. resume waits for a stop still under way, then starts the user again and logs the outcome.
 bool lichen_radio_lora_pause(bool *was_running, bool (*keep_going)(void));
 void lichen_radio_lora_resume(void);
-// The OS (the shell, from its sources) says who the radio's user is, once at boot before any app runs
+// The OS (main, at start_shell) says who the radio's user is, once at boot before any app runs
 void lichen_radio_set_lora_user(bool (*pause)(bool *was_running, bool (*keep_going)(void)), void (*resume)(void));
 
 // "fw wifi on|off", "fw lora on|off", "fw airplane on|off" and the status line; registers the airplane command

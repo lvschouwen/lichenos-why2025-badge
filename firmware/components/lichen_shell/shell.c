@@ -52,8 +52,6 @@ static lv_obj_t            *cover; // the screensaver or the lock screen (#75): 
 
 void shell_set_sources(shell_sources_t const *sources) {
     shell_sources = *sources;
-    // Apps borrow the radio through lichen_radio.h (#180), not through the shell's sources
-    lichen_radio_set_lora_user(sources->lora_user_pause, sources->lora_user_resume);
 }
 
 lv_obj_t *shell_status_bar(void) {

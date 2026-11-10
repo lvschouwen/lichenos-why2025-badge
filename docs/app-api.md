@@ -156,12 +156,14 @@ reaching drivers, `board` or NVS. The headers, all in `lichen_api`:
 | `lichen_sys_factory.h` | ask for a factory reset (settings or all): saved as pending, done by the next boot (#227) |
 | `lichen_sys_mem.h` | heap figures (free, least free, largest block) for About, Benchmark and the boot log, and the diagnostic walk (#228); the Wi-Fi frame pools and every task's stack for the stress run (#278) |
 | `lichen_sys_clock.h` | the clock service's view for Time settings, the status bar, About and notices (#244) |
-| `lichen_sys_net.h` | Wi-Fi and mDNS: saved networks, scan, connect state, the analyser's pure helpers (#244) |
+| `lichen_sys_net.h` | Wi-Fi and mDNS: saved networks, credentials, forget, scan, connect state, IP, RSSI, the analyser's pure helpers (#244, #284) |
 | `lichen_sys_boot.h` | boot progress steps and the console log tap for the boot screen and the log store (#244) |
 | `lichen_sys_keys.h` | raw key hooks, the screen-wake hook and the remote key gate (an app's raw keys are `lichen_keys.h`) (#244) |
 | `lichen_sys_led.h` | the status LED setting for Settings > Notifications > Status LED (#244) |
 | `lichen_sys_thermal.h` | the thermal watchdog's state (HOT, Settings > Battery, the attention light, the stress run); the watchdog is an OS service started by main, display or not (#281) |
 | `lichen_sys_radio.h` | the radio service's system holds: radios held off for a reason (the thermal shed), never saved, the person's switches untouched (#282) |
+| `lichen_sys_c6.h` | the C6 link (up, trouble in words, outage count) and the LoRa radio's up state and packet counts for the status bar, About, Settings and the stress run (#284) |
+| `lichen_sys_psram.h` | the PSRAM guard's speed, speed switch, tuning line, trial state and DMA gate round for Bench, Settings and the stress run (#284) |
 
 `notify_os.h` (history of every app, do-not-disturb, toast queue, feedback hooks) is also the shell's side, forbidden
 to apps by name in `layers.conf`; apps have `lichen_notify.h` only (#245). Types that live in a lower component are

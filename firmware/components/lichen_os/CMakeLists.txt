@@ -39,7 +39,7 @@ idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_bac
                             "thermal.c" "thermal_rules.c" "sys_notices.c" "sys_notice_rules.c" "lichen_sys_power.c"
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES lichen_api freertos esp_hw_support esp_timer assets fw_console nvs_flash heap storage sdcard
-                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns c6link psram_guard)
+                                     crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns c6link psram_guard lora)
 
 # The debug lock-owner check (#225): LVGL's allocator and lv_inv_area go through ui_lock_check.c
 if(CONFIG_LICHEN_UI_LOCK_CHECK)

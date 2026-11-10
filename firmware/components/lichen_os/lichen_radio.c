@@ -203,7 +203,7 @@ void lichen_radio_console_register(void) {
                      cmd_airplane);
 }
 
-// Set once at boot (shell_set_sources) before any app runs, read later from the borrowing app's task
+// Set once at boot (main's start_shell) before any app runs, read later from the borrowing app's task
 static bool (*lora_user_pause)(bool *was_running, bool (*keep_going)(void));
 static void (*lora_user_resume)(void);
 

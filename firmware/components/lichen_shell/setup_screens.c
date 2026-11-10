@@ -40,7 +40,7 @@ static void wifi_done(void) {
 
 static void advance(void *arg) {
     (void)arg;
-    bool         have = shell_sources.wifi_has_credentials && shell_sources.wifi_has_credentials();
+    bool         have = lichen_sys_wifi_has_credentials();
     setup_step_t next = setup_next(SETUP_WELCOME, have);
     if (next == SETUP_WIFI) {
         wifi_screen_open_setup(wifi_done);

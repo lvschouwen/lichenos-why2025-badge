@@ -62,7 +62,7 @@ idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_r
                             "app_files.c" "files_job.c" "files_ops.c" "files_model.c" "backup_screen.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api
-                       PRIV_REQUIRES freertos fw_console heap esp_hw_support esp_app_format esp_timer app_update esp_system psram_guard esp_mm)
+                       PRIV_REQUIRES freertos fw_console heap esp_hw_support esp_app_format esp_timer app_update esp_system esp_mm)
 
 # The stress run (#278) is cold code (a sample every 10 s, workers bound by DMA, card and flash): size over speed, so
 # it stays inside the per-change size gate of docs/code-standard.md

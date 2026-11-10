@@ -18,13 +18,13 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lichen_mem.h"
+#include "lichen_sys_c6.h"
 #include "lichen_sys_mem.h"
+#include "lichen_sys_psram.h"
 #include "lichen_sys_storage.h"
 #include "lichen_sys_ui.h"
 #include "ui_remote.h"
 #include "lichen_task.h"
-#include "psram_dma_cmd.h"
-#include "psram_speed.h"
 #include "shell_parts.h"
 #include "update_screen.h"
 
@@ -179,22 +179,22 @@ static bool buffers(uint8_t **a, uint8_t **b, size_t n, char const *what) {
 }
 
 static void dma_round(void) {
-    psram_dma_round_info_t info;
+    lichen_sys_psram_round_info_t info;
     atomic_fetch_add(&s_w.round_seq, 1);
-    psram_dma_round_t r = psram_dma_quick_round(&info);
+    lichen_sys_psram_round_t r = lichen_sys_psram_round(&info);
     atomic_fetch_add(&s_w.round_seq, 1);
     uint32_t bad = info.bad_bytes + info.errors;
-    if (r == PSRAM_DMA_ROUND_BUSY) { // never a pass: another gate holds the engine (#278)
+    if (r == LICHEN_SYS_PSRAM_ROUND_BUSY) { // never a pass: another gate holds the engine (#278)
         add(STRESS_C_DMA_BUSY, 1);
         ESP_LOGW(TAG, "dma: skipped, gate busy");
         nap(1000);
-    } else if (r == PSRAM_DMA_ROUND_NOT_RUN) {
+    } else if (r == LICHEN_SYS_PSRAM_ROUND_NOT_RUN) {
         add(STRESS_C_ALLOC, 1);
         ESP_LOGE(TAG, "dma: no memory");
     } else {
         add(STRESS_C_DMA, 1);
-        add(STRESS_C_DMA_BAD, r == PSRAM_DMA_ROUND_FAIL ? (bad ? bad : 1) : 0);
-        if (r == PSRAM_DMA_ROUND_FAIL) {
+        add(STRESS_C_DMA_BAD, r == LICHEN_SYS_PSRAM_ROUND_FAIL ? (bad ? bad : 1) : 0);
+        if (r == LICHEN_SYS_PSRAM_ROUND_FAIL) {
             atomic_fetch_or(&s_w.fail_mask, STRESS_W_DMA);
             ESP_LOGE(TAG, "dma: %u bad bytes, %u errors", (unsigned)info.bad_bytes, info.errors);
         }
@@ -414,7 +414,7 @@ static void sample_and_judge(uint32_t t_s, stress_reason_t outside) {
 
 static bool c6_trouble(void) {
     char state[48];
-    return shell_sources.c6_trouble && shell_sources.c6_trouble(state, sizeof(state));
+    return lichen_sys_c6_trouble(state, sizeof(state));
 }
 
 static bool hot(void) {
@@ -432,7 +432,7 @@ static stress_reason_t outside_stop(void) {
     stress_outside_t in = {.asked      = (stress_reason_t)atomic_load(&s_stop_req),
                            .poweroff   = power_going_down(),
                            .update     = update_screen_busy(),
-                           .trial      = psram_speed_trial_pending(),
+                           .trial      = lichen_sys_psram_trial_pending(),
                            .hot        = hot(),
                            .c6_trouble = c6_trouble()};
     return stress_outside(&in);
@@ -557,7 +557,7 @@ char const *stress_start(unsigned minutes) {
                            .poweroff    = power_going_down(),
                            .c6_trouble  = c6_trouble(),
                            .hot         = hot(),
-                           .psram_trial = psram_speed_trial_pending(),
+                           .psram_trial = lichen_sys_psram_trial_pending(),
                            .dma_free    = (uint32_t)lichen_sys_mem_free(LICHEN_SYS_MEM_DMA),
                            .psram_free  = (uint32_t)lichen_sys_mem_free(LICHEN_SYS_MEM_PSRAM)};
     char const *why = minutes < 1 || minutes > STRESS_MIN_MAX ? "1 to 30 minutes" : stress_refusal(&in);

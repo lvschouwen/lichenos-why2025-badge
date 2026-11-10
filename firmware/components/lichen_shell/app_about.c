@@ -6,8 +6,10 @@
 #include "esp_timer.h"
 #include "fonts.h"
 #include "lichen_app.h"
+#include "lichen_sys_c6.h"
 #include "lichen_sys_clock.h"
 #include "lichen_sys_mem.h"
+#include "lichen_sys_net.h"
 #include "lichen_sys_storage.h"
 #include "lichen_ui.h"
 #include "logo.h"
@@ -65,20 +67,20 @@ static void refresh(lv_timer_t *timer) {
     set_text(value_label[ROW_MEMORY], text);
 
     // While the C6 is being recovered, how far it has got (#14 T-B)
-    if (!(shell_sources.c6_trouble && shell_sources.c6_trouble(text, sizeof(text)))) {
-        strlcpy(text, shell_sources.c6_up && shell_sources.c6_up() ? "working" : "not answering", sizeof(text));
+    if (!lichen_sys_c6_trouble(text, sizeof(text))) {
+        strlcpy(text, lichen_sys_c6_up() ? "working" : "not answering", sizeof(text));
     }
     set_text(value_label[ROW_C6], text);
 
     char ip[16];
-    if (shell_sources.wifi_ip && shell_sources.wifi_ip(ip, sizeof(ip))) {
+    if (lichen_sys_wifi_ip(ip, sizeof(ip))) {
         snprintf(text, sizeof(text), "connected, %s", ip);
     } else {
         strlcpy(text, "not connected", sizeof(text));
     }
     set_text(value_label[ROW_WIFI], text);
 
-    set_text(value_label[ROW_LORA], shell_sources.lora_up && shell_sources.lora_up() ? "working" : "not available");
+    set_text(value_label[ROW_LORA], lichen_sys_lora_up() ? "working" : "not available");
 
     uint64_t free_b, total_b;
     if (lichen_sys_storage_free_bytes(&free_b, &total_b)) {

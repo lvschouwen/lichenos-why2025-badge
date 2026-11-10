@@ -3,13 +3,14 @@
 // (pure) decides what is news and this raises it as source "lichen". Nothing here touches the radio or the C6 link
 // beyond reading their status, and nothing touches LVGL: lichen_notify() is safe from any task. The storage drive's
 // free space is read once a minute (FatFs may scan its table). An OS service since #281 (lichen_watch_start, display or
-// not): the update result, the C6 recovery count and "home is shown" come in as hooks.
+// not): the update result and "home is shown" come in as hooks.
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_notify.h"
 #include "lichen_os.h"
 #include "lichen_sensors.h"
+#include "lichen_sys_c6.h"
 #include "lichen_sys_clock.h"
 #include "lichen_sys_crash.h"
 #include "lichen_sys_storage.h"
@@ -50,9 +51,7 @@ static void body_for(sysn_event_t e, sysn_snapshot_t const *s, lichen_sd_info_t 
         break;
     case SYSN_C6_RESTARTED: {
         char reason[96] = "";
-        if (hooks.c6_restarts) {
-            hooks.c6_restarts(reason, sizeof(reason));
-        }
+        lichen_sys_c6_restarts(reason, sizeof(reason));
         snprintf(out, cap, "%s (restarts this boot: %u)", reason[0] ? reason : "The radio chip came back",
                  (unsigned)s->c6_restarts);
         break;
@@ -86,7 +85,7 @@ static void read_snapshot(sysn_snapshot_t *s, lichen_sd_info_t *sd, unsigned pol
     s->clock_recovered        = clock.last_verdict == LICHEN_CLOCK_RECOVERED;
     s->update                 = hooks.update_result ? hooks.update_result(NULL, 0) : SYSN_UPD_NONE;
     char reason[4];
-    s->c6_restarts = hooks.c6_restarts ? hooks.c6_restarts(reason, sizeof(reason)) : 0;
+    s->c6_restarts = lichen_sys_c6_restarts(reason, sizeof(reason));
     lichen_sys_sd_info(sd);
     s->sd_state        = (int)sd->state;
     s->sensors_running = lichen_sensors_running();

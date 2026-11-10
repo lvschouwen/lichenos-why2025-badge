@@ -1,22 +1,29 @@
-// The hardware-touching part of lichen_sys_clock.h, lichen_sys_net.h, lichen_sys_boot.h, lichen_sys_keys.h and
+// The hardware-touching part of lichen_sys_clock.h, lichen_sys_net.h, lichen_sys_c6.h, lichen_sys_psram.h, lichen_sys_boot.h, lichen_sys_keys.h and
 // lichen_sys_led.h (#244): forwards to the clock, Wi-Fi, mDNS, boot progress, keyboard and LED services, which the
 // shell may not include (tools/layers.conf). The pure helpers are in lichen_sys_pure_view.c. The gate's types repeat
 // the services' and are asserted equal there.
 #include "boot_progress.h"
+#include "c6link.h"
 #include "keyboard.h"
 #include "led.h"
 #include "lichen_clock.h"
 #include "lichen_mdns.h"
 #include "lichen_sys_boot.h"
+#include "lichen_sys_c6.h"
 #include "lichen_sys_clock.h"
 #include "lichen_sys_keys.h"
 #include "lichen_sys_led.h"
 #include "lichen_sys_net.h"
+#include "lichen_sys_psram.h"
 #include "log_tap.h"
+#include "lora_app.h"
+#include "psram_boot.h"
+#include "psram_dma_cmd.h"
+#include "psram_speed.h"
 #include "wifi_service.h"
 
 #include <stddef.h>
-
+#include <stdio.h>
 #include <string.h>
 
 #define MIRROR_ENUM_FIELD(mine, theirs, field)                                                                         \
@@ -136,4 +143,110 @@ bool lichen_sys_led_enabled(void) {
 
 void lichen_sys_led_set_enabled(bool on) {
     led_set_enabled(on);
+}
+
+// Wi-Fi, the rest of lichen_sys_net.h: one-for-one forwards, no state of their own
+bool lichen_sys_wifi_up(void) {
+    return wifi_has_ip(NULL, 0);
+}
+
+bool lichen_sys_wifi_ip(char *ip, size_t cap) {
+    return wifi_has_ip(ip, cap);
+}
+
+bool lichen_sys_wifi_join(char const *ssid, char const *pass) {
+    return wifi_set_credentials(ssid, pass);
+}
+
+bool lichen_sys_wifi_forget(char const *ssid) {
+    return wifi_forget_network(ssid);
+}
+
+size_t lichen_sys_wifi_saved_names(char (*out)[33], size_t max) {
+    return wifi_saved_names(out, max);
+}
+
+bool lichen_sys_wifi_rssi(int8_t *out) {
+    return wifi_rssi(out);
+}
+
+bool lichen_sys_wifi_joining(void) {
+    return wifi_joining();
+}
+
+bool lichen_sys_wifi_has_credentials(void) {
+    return wifi_has_credentials();
+}
+
+// The C6 link and the LoRa counts (lichen_sys_c6.h)
+bool lichen_sys_c6_up(void) {
+    return c6link_up();
+}
+
+bool lichen_sys_c6_trouble(char *out, size_t cap) {
+    return c6link_trouble(out, cap);
+}
+
+uint32_t lichen_sys_c6_restarts(char *reason, size_t cap) {
+    static c6_status_t st; // the reason is long; only the sys_notices task calls this
+    c6link_status(&st);
+    snprintf(reason, cap, "%s", st.reason);
+    return st.restarts;
+}
+
+bool lichen_sys_lora_up(void) {
+    return lora_up() && c6link_up();
+}
+
+void lichen_sys_lora_counts(uint32_t *rx, uint32_t *tx) {
+    lora_get_counts(rx, tx);
+}
+
+// The PSRAM guard (lichen_sys_psram.h)
+unsigned lichen_sys_psram_mhz(void) {
+    return psram_speed_running();
+}
+
+bool lichen_sys_psram_speed_supported(void) {
+    return psram_speed_supported();
+}
+
+bool lichen_sys_psram_speed_choice(unsigned target_mhz) {
+    return psram_speed_choice(target_mhz);
+}
+
+size_t lichen_sys_psram_speed_value(char *out, size_t cap) {
+    return psram_speed_value(out, cap);
+}
+
+unsigned lichen_sys_psram_speed_other(void) {
+    return psram_speed_other();
+}
+
+bool lichen_sys_psram_trial_pending(void) {
+    return psram_speed_trial_pending();
+}
+
+size_t lichen_sys_psram_tuning_text(char *out, size_t cap) {
+    return psram_boot_tuning_text(out, cap);
+}
+
+_Static_assert((int)LICHEN_SYS_PSRAM_ROUND_PASS == (int)PSRAM_DMA_ROUND_PASS &&
+                   (int)LICHEN_SYS_PSRAM_ROUND_FAIL == (int)PSRAM_DMA_ROUND_FAIL &&
+                   (int)LICHEN_SYS_PSRAM_ROUND_BUSY == (int)PSRAM_DMA_ROUND_BUSY &&
+                   (int)LICHEN_SYS_PSRAM_ROUND_NOT_RUN == (int)PSRAM_DMA_ROUND_NOT_RUN,
+               "the gate's round result follows psram_dma_round_t");
+MIRROR_FIELD(lichen_sys_psram_round_info_t, psram_dma_round_info_t, bad_bytes);
+MIRROR_FIELD(lichen_sys_psram_round_info_t, psram_dma_round_info_t, errors);
+MIRROR_FIELD(lichen_sys_psram_round_info_t, psram_dma_round_info_t, sd_skipped);
+
+lichen_sys_psram_round_t lichen_sys_psram_round(lichen_sys_psram_round_info_t *info) {
+    psram_dma_round_info_t raw;
+    psram_dma_round_t      r = psram_dma_quick_round(info ? &raw : NULL);
+    if (info) {
+        info->bad_bytes  = raw.bad_bytes;
+        info->errors     = raw.errors;
+        info->sd_skipped = raw.sd_skipped;
+    }
+    return (lichen_sys_psram_round_t)r;
 }

@@ -45,7 +45,24 @@ typedef struct {
     uint8_t head;
 } lichen_sys_wifi_meter_t;
 
-// The shell's source hooks (shell_sources_t), in the gate's types; main hands them to shell_set_sources.
+// The Wi-Fi service's state and credentials, for the status bar, About, Settings and the Wi-Fi screens (#284): quick,
+// never waiting on a lock that may be held for long, except where said.
+// The link has an IP. Any task.
+bool                   lichen_sys_wifi_up(void);
+// As lichen_sys_wifi_up; ip (may be NULL with cap 0) gets the address. Any task.
+bool                   lichen_sys_wifi_ip(char *ip, size_t cap);
+// A join is under way (status bar amber). Any task.
+bool                   lichen_sys_wifi_joining(void);
+// The badge has a network saved (first-run setup skips the Wi-Fi step, the status bar tells off from down). Any task.
+bool                   lichen_sys_wifi_has_credentials(void);
+// Signal of the connected AP, false while unknown. Any task.
+bool                   lichen_sys_wifi_rssi(int8_t *out);
+// Saves a network and applies it (Settings > Wi-Fi). Any task.
+bool                   lichen_sys_wifi_join(char const *ssid, char const *pass);
+// Forgets one saved network (#160). Any task.
+bool                   lichen_sys_wifi_forget(char const *ssid);
+// The saved SSIDs only, read under the list lock (#240); SIZE_MAX = busy (#249). Any task.
+size_t                 lichen_sys_wifi_saved_names(char (*out)[33], size_t max);
 // Scans and returns the cleaned list (strongest per SSID). Blocks for seconds. Not on the LVGL task.
 bool                   lichen_sys_wifi_scan(lichen_sys_wifi_ap_t *out, size_t max, size_t *n);
 // Scans and returns every AP with its channel, for the analyser. Blocks for seconds. Not on the LVGL task.
@@ -53,7 +70,7 @@ bool                   lichen_sys_wifi_scan_raw(lichen_sys_wifi_ap_t *out, size_
 // The outcome of the last join; tried and kept get the SSIDs. Any task.
 lichen_sys_wifi_join_t lichen_sys_wifi_join_state(char *tried, size_t tried_cap, char *kept, size_t kept_cap);
 
-// A join state of lichen_net as the gate's value (the shell's source hook hands the service's state through here).
+// A join state of lichen_net as the gate's value (lichen_sys_wifi_join_state hands the service's state through here).
 // Pure, any task.
 lichen_sys_wifi_join_t lichen_sys_wifi_join_of(int state);
 // Drops empty SSIDs, keeps the strongest entry per SSID, sorts strongest first; returns the new count. Pure, any task.

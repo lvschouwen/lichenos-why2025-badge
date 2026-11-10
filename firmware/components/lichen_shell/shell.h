@@ -12,41 +12,10 @@
 // The Lichen shell (#66): boot screen, home, a screen stack with Esc back to home, the status bar. All functions take
 // the LVGL port lock themselves and may be called from any task. The calls apps use are in lichen_ui.h (#84).
 
-// What the shell shows about the rest of the badge, read from the LVGL task once a second: each must be quick and
-// never wait on a lock that may be held for long. Any member may be NULL.
+// What the shell shows that only a layer above it knows (#284): everything else it reads through lichen_sys_*.h. May be
+// NULL members; polled from the LVGL task, so quick and never waiting on a lock that may be held for long.
 typedef struct {
-    bool (*wifi_up)(void);
-    bool (*lora_up)(void);                  // the LoRa radio runs (and the C6 link is up)
-    lora_use_t (*lora_use)(void);           // what the radio's user does (#103, #105); NULL = always running
-    bool (*c6_up)(void);                    // the C6 link: brightness and the radio need it
-    // Settings > Wi-Fi: wifi_scan blocks for seconds and only runs off the LVGL task; wifi_join saves and applies
-    bool (*wifi_scan)(lichen_sys_wifi_ap_t *out, size_t max, size_t *n);
-    bool (*wifi_ip)(char *ip, size_t cap); // false while there is no IP
-    lichen_sys_wifi_join_t (*wifi_join_state)(char *tried, size_t tried_cap, char *kept, size_t kept_cap);
-    bool (*wifi_join)(char const *ssid, char const *pass);
-    bool (*wifi_forget)(char const *ssid); // forgets one saved network (#160)
-    size_t (*wifi_saved_names)(char (*out)[33], size_t max); // the saved SSIDs only, read under the list lock (#240); SIZE_MAX = busy (#249)
-    bool (*wifi_scan_raw)(
-        lichen_sys_wifi_ap_t *out, size_t max, size_t *n
-    );                                  // every AP with its channel, for the analyser (#159)
-    bool (*wifi_rssi)(int8_t *out);     // signal of the connected AP, false while unknown (status bar bars)
-    bool (*wifi_joining)(void);         // a join is under way (status bar amber)
-    bool (*wifi_has_credentials)(void); // first-run setup skips the Wi-Fi step when the badge has a network saved
-    // The C6 is being recovered or is gone (#14): the state in words ("recovering 2/3", "down (no answer)"), false
-    // while it is up
-    bool (*c6_trouble)(char *out, size_t cap);
-    // LoRa packets received and sent so far, both only going up: the status bar's TX/RX chevrons, polled every 100 ms
-    // (#29)
-    void (*lora_counts)(uint32_t *rx, uint32_t *tx);
-    // C6 outages the badge came back from (#14) and the last recovery in words, for the notification (#62)
-    uint32_t (*c6_restarts)(char *reason, size_t cap);
-    // The LoRa spectrum (#161) borrows the radio from its user (off the LVGL task, both block). pause stops MeshCore and
-    // waits until its stop finished: true when the radio is free; *was_running when a stop was asked for, so resume must
-    // follow even when pause failed. The wait ends early (false) once keep_going() says false. resume waits for a stop
-    // still under way, then starts MeshCore (one retry) and logs the outcome; it returns at once during an update.
-    // Apps call them through lichen_radio_lora_pause / _resume (lichen_radio.h; shell_set_sources hands them over).
-    bool (*lora_user_pause)(bool *was_running, bool (*keep_going)(void));
-    void (*lora_user_resume)(void);
+    lora_use_t (*lora_use)(void); // what the radio's user (MeshCore) does (#103, #105); NULL = always running
 } shell_sources_t;
 
 void shell_set_sources(shell_sources_t const *sources); // before shell_start; copied

@@ -9,14 +9,15 @@
 #include "lichen_app.h"
 #include "lichen_notify.h"
 #include "lichen_radio.h"
+#include "lichen_sys_c6.h"
 #include "lichen_sys_clock.h"
 #include "lichen_sys_display.h"
 #include "lichen_sys_net.h"
+#include "lichen_sys_psram.h"
 #include "lichen_sys_storage.h"
 #include "lichen_sys_update.h"
 #include "lock_combo.h"
 #include "menu.h"
-#include "psram_speed.h"
 #include "saver_station.h"
 #include "screen_ids.h"
 #include "settings_store.h"
@@ -40,7 +41,7 @@ static void wifi_line(char *out, size_t cap, bool with_prefix) {
     static char ssid[33];
     static bool     have, was_up;
     static uint32_t generation;
-    bool            up = shell_sources.wifi_up && shell_sources.wifi_up() && lichen_radio_get(RADIO_WIFI);
+    bool            up = lichen_sys_wifi_up() && lichen_radio_get(RADIO_WIFI);
     // The NVS read only when something changed: the link flipped or the credentials were saved (screen or console)
     if (!have || up != was_up || generation != lichen_sys_wifi_cred_generation()) {
         settings_get_str("wifi_ssid", ssid, sizeof(ssid), "");
@@ -262,7 +263,7 @@ static lv_obj_t *build_display(void) {
     lichen_sys_display_get(&level[0], &level[1]);
     menu_add_slider(menu, "Screen", LICHEN_SYS_DISPLAY_MIN, 100, level[0], on_level, (void *)(intptr_t)0);
     menu_add_slider(menu, "Keyboard", 0, 100, level[1], on_level, (void *)(intptr_t)1);
-    if (shell_sources.c6_up && !shell_sources.c6_up()) {
+    if (!lichen_sys_c6_up()) {
         menu_note(menu, "Brightness can't change right now: the radio chip is not answering. Restart the badge if it "
                         "stays like this.");
     }
@@ -658,7 +659,7 @@ static void forget_psram_speed_row(lv_event_t *e) {
 
 static void psram_speed_enter(void *arg) {
     unsigned target = (unsigned)(uintptr_t)arg;
-    if (psram_speed_choice(target)) {
+    if (lichen_sys_psram_speed_choice(target)) {
         power_request_restart(); // saves the apps, shows "Restarting...", lands in the new speed
     } else if (psram_speed_row) {
         menu_set_value(psram_speed_row, "Not saved"); // NVS refused, or this image is still on trial and a restart would undo it
@@ -666,12 +667,12 @@ static void psram_speed_enter(void *arg) {
 }
 
 static void add_psram_speed_row(lv_obj_t *menu) {
-    if (!psram_speed_supported()) {
+    if (!lichen_sys_psram_speed_supported()) {
         return;
     }
     char value[40];
-    psram_speed_value(value, sizeof(value));
-    unsigned other = psram_speed_other();
+    lichen_sys_psram_speed_value(value, sizeof(value));
+    unsigned other = lichen_sys_psram_speed_other();
     lv_obj_t *row  = menu_add(menu, "PSRAM speed", value, psram_speed_enter, (void *)(uintptr_t)other);
     psram_speed_row = row;
     lv_obj_add_event_cb(row, forget_psram_speed_row, LV_EVENT_DELETE, NULL);

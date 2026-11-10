@@ -4,12 +4,12 @@
 // synthetic 100-row list scrolled for three seconds, then memory. Enter runs it again; every result is also one
 // "bench" log line and the run ends with a one-line summary, so `badge.sh log` keeps the baseline. "fw bench" runs the
 // same minus the scroll stage from the console.
-#include "psram_speed.h"
 #include "app_icons.h"
 #include "bench_calc.h"
 #include "esp_attr.h"
 #include "esp_cache.h"
 #include "lichen_sys_mem.h"
+#include "lichen_sys_psram.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "esp_timer.h"
@@ -18,7 +18,6 @@
 #include "lichen_app.h"
 #include "lichen_mem.h"
 #include "lichen_ui.h"
-#include "psram_boot.h"
 #include "sdkconfig.h"
 #include "shell_parts.h"
 #include "theme.h"
@@ -151,9 +150,9 @@ static void mem_line(char *out, size_t cap) {
 }
 
 static void psram_line(char *out, size_t cap) {
-    int n = snprintf(out, cap, "%u MHz, ", psram_speed_running());
+    int n = snprintf(out, cap, "%u MHz, ", lichen_sys_psram_mhz());
     if (n > 0 && (size_t)n < cap) {
-        psram_boot_tuning_text(out + n, cap - (size_t)n);
+        lichen_sys_psram_tuning_text(out + n, cap - (size_t)n);
     }
 }
 
@@ -412,7 +411,7 @@ static void open_bench(lv_obj_t *screen) {
 }
 
 static bool bench_tile(char *l1, size_t c1, char *l2, size_t c2) {
-    snprintf(l1, c1, "PSRAM %u MHz", psram_speed_running());
+    snprintf(l1, c1, "PSRAM %u MHz", lichen_sys_psram_mhz());
     snprintf(l2, c2, "%s", s_last[0] ? s_last : "Enter: run");
     return true;
 }

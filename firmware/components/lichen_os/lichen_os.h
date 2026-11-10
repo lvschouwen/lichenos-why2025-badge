@@ -51,8 +51,6 @@ typedef struct {
     void (*power_off)(void);
     // The update result line of this boot (update_screen_boot_result: 0 none, 1 updated, 2 rolled back)
     int (*update_result)(char *line, size_t cap);
-    // C6 outages the badge came back from (#14), and the last recovery in words
-    uint32_t (*c6_restarts)(char *reason, size_t cap);
 } lichen_watch_hooks_t;
 
 // Copies the hooks, registers `fw thermal` and starts both tasks. Once, after lichen_notify_start.

@@ -222,7 +222,7 @@ static void scan_task(void *arg) {
     scan_res_t *res = calloc(1, sizeof(*res));
     if (res) {
         res->gen = (uint32_t)(uintptr_t)arg;
-        res->ok  = shell_sources.wifi_scan_raw && shell_sources.wifi_scan_raw(res->aps, MAX_RAW, &res->n);
+        res->ok  = lichen_sys_wifi_scan_raw(res->aps, MAX_RAW, &res->n);
         lichen_sys_ui_call(on_scan_done, res, 0); // waits for the LVGL lock as long as it takes, as before #225
     } else {
         lichen_sys_ui_lock(0); // no memory: the screen must not wait for a scan that will never report
