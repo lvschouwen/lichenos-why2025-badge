@@ -1,6 +1,7 @@
 #include "lichen_fs.h"
 
 #include "app_ns.h" // the id rules
+#include "app_slot.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -15,12 +16,10 @@
 
 static char const TAG[] = "files";
 
-typedef struct {
-    lichen_app_t const *app;
-    char                path[sizeof(STORAGE_BASE) + 1 + 13 + 1]; // "/storage/" + the longest id
-} app_dir_t;
-
-EXT_RAM_BSS_ATTR static app_dir_t dirs[LICHEN_MAX_APPS];
+// An app's directory on the storage drive: its owner and its path side by side, so app_slot_pick (pure) reads the
+// owners. Apps call lichen_fs_app_dir from their own tasks: the lookup, mkdir and claim run with dirs_lock held (#272).
+EXT_RAM_BSS_ATTR static void const *dir_owner[LICHEN_MAX_APPS];
+EXT_RAM_BSS_ATTR static char        dir_path[LICHEN_MAX_APPS][sizeof(STORAGE_BASE) + 1 + 13 + 1]; // + the longest id
 
 // An app's directory on the SD card, made once per mount: a re-inserted (or another) card gets it again
 typedef struct {
@@ -32,18 +31,20 @@ typedef struct {
 EXT_RAM_BSS_ATTR static sd_dir_t sd_dirs[LICHEN_MAX_APPS];
 
 // Apps call lichen_fs_sd_dir from their own tasks: the table (claiming a slot, rewriting it after a remount) is only
-// touched with this held. Made on first use.
-static SemaphoreHandle_t sd_dirs_lock;
-static StaticSemaphore_t sd_dirs_lock_buf;
-static portMUX_TYPE      sd_dirs_make = portMUX_INITIALIZER_UNLOCKED;
+// touched with this held. Both tables' locks are mutexes, never a portMUX: mkdir runs under them, and the tables are in
+// PSRAM (no PSRAM in a critical section, #271). Separate, so a storage directory never waits on the SD card. Made on
+// first use.
+static SemaphoreHandle_t sd_dirs_lock, dirs_lock;
+static StaticSemaphore_t sd_dirs_lock_buf, dirs_lock_buf;
+static portMUX_TYPE      locks_make = portMUX_INITIALIZER_UNLOCKED;
 
-static bool take_sd_dirs(void) {
-    portENTER_CRITICAL(&sd_dirs_make);
-    if (!sd_dirs_lock) {
-        sd_dirs_lock = xSemaphoreCreateMutexStatic(&sd_dirs_lock_buf);
+static bool take_lock(SemaphoreHandle_t *lock, StaticSemaphore_t *buf) {
+    portENTER_CRITICAL(&locks_make);
+    if (!*lock) {
+        *lock = xSemaphoreCreateMutexStatic(buf);
     }
-    portEXIT_CRITICAL(&sd_dirs_make);
-    return xSemaphoreTake(sd_dirs_lock, pdMS_TO_TICKS(2000)) == pdTRUE;
+    portEXIT_CRITICAL(&locks_make);
+    return xSemaphoreTake(*lock, pdMS_TO_TICKS(2000)) == pdTRUE;
 }
 
 static bool usable(lichen_app_t const *app) {
@@ -59,30 +60,36 @@ static bool made(char const *path) {
     return mkdir(path, 0755) == 0 || errno == EEXIST;
 }
 
+// With dirs_lock held
+static char const *app_dir_locked(lichen_app_t const *app) {
+    size_t i = app_slot_pick(dir_owner, LICHEN_MAX_APPS, app);
+    if (i == LICHEN_MAX_APPS) {
+        ESP_LOGE(TAG, "no room for %s's directory", app->id);
+        return NULL;
+    }
+    if (dir_owner[i] == app) {
+        return dir_path[i];
+    }
+    fs_app_dir_path(STORAGE_BASE, app->id, dir_path[i], sizeof(dir_path[i]));
+    if (!made(dir_path[i])) {
+        ESP_LOGE(TAG, "%s: mkdir failed (errno %d): no drive?", dir_path[i], errno);
+        return NULL; // the slot stays free: the next call tries again
+    }
+    dir_owner[i] = app;
+    return dir_path[i];
+}
+
 char const *lichen_fs_app_dir(lichen_app_t const *app) {
     if (!usable(app)) {
         return NULL;
     }
-    app_dir_t *slot = NULL;
-    for (size_t i = 0; i < LICHEN_MAX_APPS; i++) {
-        if (dirs[i].app == app) {
-            return dirs[i].path;
-        }
-        if (!slot && !dirs[i].app) {
-            slot = &dirs[i];
-        }
-    }
-    if (!slot) {
-        ESP_LOGE(TAG, "no room for %s's directory", app->id);
+    if (!take_lock(&dirs_lock, &dirs_lock_buf)) {
+        ESP_LOGW(TAG, "%s: directory table busy", app->id);
         return NULL;
     }
-    fs_app_dir_path(STORAGE_BASE, app->id, slot->path, sizeof(slot->path));
-    if (!made(slot->path)) {
-        ESP_LOGE(TAG, "%s: mkdir failed (errno %d): no drive?", slot->path, errno);
-        return NULL;
-    }
-    slot->app = app;
-    return slot->path;
+    char const *path = app_dir_locked(app);
+    xSemaphoreGive(dirs_lock);
+    return path;
 }
 
 bool lichen_fs_drive_bytes(size_t *total, size_t *used) {
@@ -140,7 +147,7 @@ char const *lichen_fs_sd_dir(lichen_app_t const *app) {
     if (info.state != SD_STATE_MOUNTED) {
         return NULL; // no card is normal: the app asks again later
     }
-    if (!take_sd_dirs()) {
+    if (!take_lock(&sd_dirs_lock, &sd_dirs_lock_buf)) {
         ESP_LOGW(TAG, "%s: SD directory table busy", app->id);
         return NULL;
     }
