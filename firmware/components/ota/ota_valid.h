@@ -12,6 +12,9 @@
 
 // What ota knows about the running image (ota_image_trial_state): UNKNOWN when the OTA data could not be read yet
 typedef enum { OTA_IMAGE_UNKNOWN, OTA_IMAGE_ON_TRIAL, OTA_IMAGE_NOT_ON_TRIAL } ota_image_state_t;
+// For a caller that may restart (the PSRAM speed switch, the C6 supervisor): an unread state might be a trial, and a
+// restart then rolls the image back, so only NOT_ON_TRIAL is "not on trial"
+bool ota_image_may_be_on_trial(ota_image_state_t state);
 
 // The display as this boot left it (#293). Only a deliberate headless boot (`fw noscreen`) lets the OS alone prove an
 // image: a panel that failed to start may be the new image's fault, so that boot never marks it valid and the next
@@ -44,8 +47,8 @@ typedef enum {
 // and, with a display, the shell is up (with the display skipped on purpose the OS alone decides, #293; a failed one
 // never proves it). Wi-Fi is not required, so a badge without (working) Wi-Fi credentials doesn't roll back for ever
 // (#61). While the C6 link is down the trial keeps watching and rolls back at OTA_VALID_AFTER_S +
-// OTA_ROLLBACK_GRACE_S (#36, #295); a live PSRAM trial is waited for too; otherwise, past OTA_VALID_AFTER_S and not
-// proven, it stops looking (STAY).
+// OTA_ROLLBACK_GRACE_S (#36, #295); a live PSRAM trial is waited for up to that limit too; otherwise, past
+// OTA_VALID_AFTER_S and not proven, it stops looking (STAY).
 ota_trial_act_t ota_trial_step(ota_trial_in_t const *in);
 
 // The trial loop main runs (#295: its stop rule is host-tested with it): read, decide, act, one second, again. read

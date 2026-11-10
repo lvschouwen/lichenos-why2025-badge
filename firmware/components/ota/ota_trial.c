@@ -30,6 +30,10 @@ bool ota_image_trial_pending(void) {
     return ota_image_trial_state() == OTA_IMAGE_ON_TRIAL;
 }
 
+bool ota_image_trial_maybe(void) {
+    return ota_image_may_be_on_trial(ota_image_trial_state());
+}
+
 bool ota_image_mark_valid(void) {
     esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
     if (err != ESP_OK) {

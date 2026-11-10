@@ -17,8 +17,8 @@ uint32_t psram_speed_carrier_raw(void);
 
 // app_main, once NVS is up: reads the record, applies the rules (a trial that never finished = failed, back at 80; an
 // armed 120 wanted at 80 = arm and restart once), registers the shutdown hook that keeps a clean restart at 120 MHz.
-// image_on_trial answers whether the running image is still on trial (ota_image_trial_pending, #285): no restart for the
-// speed while it is, as that would roll the image back. NULL counts as on trial.
+// image_on_trial answers whether the running image may still be on trial (ota_image_trial_maybe, #285): no restart
+// for the speed while it may be, as that would roll the image back. NULL counts as on trial.
 void psram_speed_boot(bool (*image_on_trial)(void));
 
 // Guard task, every ~100 ms: supervises a live 120 MHz trial (after PSRAM_SPEED_TRIAL_SECONDS with a clean boot check a

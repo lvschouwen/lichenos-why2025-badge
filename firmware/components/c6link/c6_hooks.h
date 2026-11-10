@@ -14,7 +14,7 @@ typedef struct {
     void (*begin)(void);
     void (*progress)(int percent); // the flasher, 0-100 per image
     void (*end)(bool ok, char const *note);
-    // The running image is still on trial (ota_image_trial_pending, #285): a reset now rolls the update back, so the
+    // The running image is still on trial (ota_image_trial_maybe, #285): a reset now rolls the update back, so the
     // boot runs the full C6 check and the supervisor never offers the fallback restart. Default: true (on trial)
     bool (*image_on_trial)(void);
 } c6link_boot_hooks_t;

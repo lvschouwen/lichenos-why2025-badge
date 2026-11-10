@@ -503,7 +503,7 @@ static void start_nvs(boot_ctx_t *ctx) {
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
     // #121: the 80/120 MHz record: a failed 120 MHz trial falls back, a wanted 120 arms and restarts once (not while
     // the image is on trial, #285: ota answers that)
-    psram_speed_boot(ota_image_trial_pending);
+    psram_speed_boot(ota_image_trial_maybe); // an unread state counts as on trial
     psram_boot_oneshot_apply(); // #121: a one-shot delayline for the PSRAM bench, before storage and MeshCore load anything
     boot_progress_nvs_up();
 }
@@ -655,7 +655,7 @@ static void start_c6link(boot_ctx_t *ctx) {
     c6link_boot_hooks_t const boot = {.begin          = c6_step_begin,
                                       .progress       = c6_step_progress,
                                       .end            = c6_step_end,
-                                      .image_on_trial = ota_image_trial_pending};
+                                      .image_on_trial = ota_image_trial_maybe}; // an unread state: on trial
     c6link_set_boot_hooks(&boot);
     wifi_radio_hooks_t const radio = {.get = wifi_radio_get, .set = wifi_radio_set, .airplane = lichen_airplane_get};
     wifi_bind_alloc(wifi_alloc_bulk, wifi_free_bulk);

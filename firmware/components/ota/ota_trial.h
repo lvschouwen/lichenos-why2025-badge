@@ -17,6 +17,9 @@
 ota_image_state_t ota_image_trial_state(void);
 // ota_image_trial_state() == OTA_IMAGE_ON_TRIAL: a failed read counts as not on trial (as before #285). Any task.
 bool ota_image_trial_pending(void);
+// ota_image_may_be_on_trial(ota_image_trial_state()): ON_TRIAL or UNKNOWN. For callers that may restart (psram_speed,
+// c6link): a restart on a state that could not be read might roll the image back. Any task.
+bool ota_image_trial_maybe(void);
 // Cancels the rollback: the image on trial is the one the bootloader keeps. False when it could not be saved (the image
 // then stays on trial). Called by main's trial (ota_valid.h decides when). Not from an interrupt.
 bool ota_image_mark_valid(void);

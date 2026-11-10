@@ -18,10 +18,17 @@ ota_trial_act_t ota_trial_step(ota_trial_in_t const *in) {
     if (ota_should_roll_back_now(true, in->c6_up, in->uptime_s)) {
         return OTA_TRIAL_ROLL_BACK;
     }
-    if (!in->c6_up || in->psram_trial || in->uptime_s < OTA_VALID_AFTER_S) {
-        return OTA_TRIAL_WAIT; // the C6 link down is watched up to the rollback (#295)
+    // The C6 link down is watched up to the rollback (#295); a PSRAM trial is waited for up to the same limit, so one
+    // that never ends cannot keep the loop going
+    bool psram_wait = in->psram_trial && in->uptime_s < OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S;
+    if (!in->c6_up || psram_wait || in->uptime_s < OTA_VALID_AFTER_S) {
+        return OTA_TRIAL_WAIT;
     }
     return OTA_TRIAL_STAY;
+}
+
+bool ota_image_may_be_on_trial(ota_image_state_t state) {
+    return state != OTA_IMAGE_NOT_ON_TRIAL;
 }
 
 ota_trial_end_t ota_trial_run(ota_trial_io_t const *io) {

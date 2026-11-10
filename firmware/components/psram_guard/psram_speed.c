@@ -35,7 +35,7 @@ static bool              s_gate_failed;
 static bool              s_done;       // psram_speed_boot ran
 static bool              s_job;        // the trial's job task is running or done
 static void            (*s_pass_cb)(void);
-static bool            (*s_on_trial)(void); // ota_image_trial_pending, from psram_speed_boot
+static bool            (*s_on_trial)(void); // ota_image_trial_maybe, from psram_speed_boot
 static SemaphoreHandle_t s_mu;         // s_rec, s_trial_live, s_keep120 (never held across NVS or a restart)
 static StaticSemaphore_t s_mu_buf;
 
