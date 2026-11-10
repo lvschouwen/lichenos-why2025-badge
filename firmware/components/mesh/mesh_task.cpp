@@ -703,14 +703,9 @@ static void mesh_task(void *arg) {
             lora_radio.end();
             lichen_badge_set("meshcore", 0);
             // The contact rewrite is the same one MyMesh does lazily in its loop: its time here says what it costs there
-            ESP_LOGI(
-                TAG,
-                "MeshCore stopped%s: prefs, %d contacts, channels saved in %lld ms (contacts %lld ms)",
-                final ? " for the update" : "",
-                node->getNumContacts(),
-                (long long)(save_us / 1000),
-                (long long)(contacts_us / 1000)
-            );
+            ESP_LOGI(TAG, "MeshCore stopped%s: prefs, %d contacts, channels saved in %lld ms (contacts %lld ms)",
+                     final ? " for the update" : "", node->getNumContacts(), (long long)(save_us / 1000),
+                     (long long)(contacts_us / 1000));
             __atomic_store_n(&task_exited, true, __ATOMIC_RELEASE);
             return; // lichen_task_start's trampoline takes the task out of the OS's book and deletes it (#181)
         }
@@ -1172,11 +1167,13 @@ static char const *channel_remove_locked(int index, char const *by_name) {
         return why;
     }
     ChannelDetails empty = {};
-    char const    *kept  = node->setChannelScope(slot.channel.secret, ""); // #291: its own scope goes with it
     if (!node->setChannel(index, empty)) {
         return "No such channel";
     }
     store.saveChannels(node);
+    // #291: its own scope after the channel is gone and saved (a cut in between leaves a line the next start drops;
+    // the other order would leave the channel flooding under the default)
+    char const *kept = node->setChannelScope(slot.channel.secret, "");
     ESP_LOGI(TAG, "channel %d removed%s", index, kept ? " (its scope stays on file until the next start)" : "");
     return NULL;
 }
@@ -1278,6 +1275,7 @@ extern "C" char const *mesh_channel_rename(char const *name, char const *new_in)
     }
     if (!why) {
         store.saveChannels(node);
+        node->noteChannelScopes(); // #291: the damaged names the senders check
         ESP_LOGI(TAG, "channel %d renamed", at);
     }
     mesh_unlock();
@@ -1752,8 +1750,8 @@ extern "C" mesh_msg_id_t mesh_send_channel(char const *channel_name, char const 
     char const *local;
     why = why ? why : &local;
     *why = NULL;
-    if (!send_ready(why, from)) {
-        return 0;
+    if (!send_ready(why, from) || (*why = mesh_cscope_channel_refusal(from == MESH_FROM_CONSOLE, channel_name))) {
+        return 0; // #291: a damaged channel scope refuses the screens' sends
     }
     size_t len = mf_text_cut(text, mesh_channel_text_max());
     if (len == 0 && text[0]) {
@@ -3522,12 +3520,7 @@ static bool start_locked(char const *files_dir) {
         lora_radio.end();
         return false;
     }
-    ESP_LOGI(
-        TAG,
-        "MeshCore companion up: %d contacts, BadgeMesh %u bytes in PSRAM, identity %s",
-        n->getNumContacts(),
-        (unsigned)sizeof(BadgeMesh),
-        mesh_ident_text(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE))
-    );
+    ESP_LOGI(TAG, "MeshCore companion up: %d contacts, BadgeMesh %u bytes in PSRAM, identity %s", n->getNumContacts(),
+             (unsigned)sizeof(BadgeMesh), mesh_ident_text(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE)));
     return true;
 }

@@ -54,7 +54,10 @@ mesh_scope_use_t mesh_scope_choose(bool from_console, char const *console_name, 
     if (from_console) {
         return console_name && console_name[0] ? MESH_SCOPE_USE_CONSOLE : MESH_SCOPE_USE_REFUSE;
     }
-    return channel_name && channel_name[0] ? MESH_SCOPE_USE_CHANNEL : MESH_SCOPE_USE_DEFAULT;
+    if (!channel_name || !channel_name[0]) {
+        return MESH_SCOPE_USE_DEFAULT;
+    }
+    return strcmp(channel_name, MESH_CHSCOPE_DAMAGED) == 0 ? MESH_SCOPE_USE_DAMAGED : MESH_SCOPE_USE_CHANNEL;
 }
 
 char const *mesh_scope_console_arg(char const *args, char *out, size_t cap) {
@@ -166,11 +169,12 @@ static int hex_digit(char c) {
     return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
 }
 
-// One "<16 hex> <region>" line (len bytes, no line end) into the table; false when it does not parse
-static bool chscope_read_line(mesh_chscope_t *t, char const *line, size_t len) {
+// One "<16 hex> <region>" line (len bytes, no line end) into the table; false when its id does not read. ended: the
+// line had its line end (a cut write leaves the last one without, maybe shorter: a tombstone, never a shorter region).
+static bool chscope_read_line(mesh_chscope_t *t, char const *line, size_t len, bool ended) {
     uint8_t id[MESH_CHSCOPE_ID];
     char    region[MESH_SCOPE_MAX + 2], name[MESH_SCOPE_MAX + 1];
-    if (len < 2 * MESH_CHSCOPE_ID + 2 || line[2 * MESH_CHSCOPE_ID] != ' ') {
+    if (len < 2 * MESH_CHSCOPE_ID) {
         return false;
     }
     for (size_t b = 0; b < MESH_CHSCOPE_ID; b++) {
@@ -180,19 +184,18 @@ static bool chscope_read_line(mesh_chscope_t *t, char const *line, size_t len) {
         }
         id[b] = (uint8_t)(hi << 4 | lo);
     }
-    size_t rlen = len - (2 * MESH_CHSCOPE_ID + 1);
-    if (rlen >= sizeof(region)) {
-        return false;
+    size_t rlen = len > 2 * MESH_CHSCOPE_ID ? len - (2 * MESH_CHSCOPE_ID + 1) : 0;
+    bool   ok   = ended && len > 2 * MESH_CHSCOPE_ID + 1 && line[2 * MESH_CHSCOPE_ID] == ' ' && rlen < sizeof(region);
+    if (ok) {
+        memcpy(region, line + 2 * MESH_CHSCOPE_ID + 1, rlen);
+        region[rlen] = '\0';
+        ok           = !mesh_scope_parse(region, name, sizeof(name)) && name[0];
     }
-    memcpy(region, line + 2 * MESH_CHSCOPE_ID + 1, rlen);
-    region[rlen] = '\0';
-    if (mesh_scope_parse(region, name, sizeof(name)) || !name[0]) {
-        return false;
-    }
-    return mesh_chscope_put(t, id, name);
+    return mesh_chscope_put(t, id, ok ? name : MESH_CHSCOPE_DAMAGED);
 }
 
-void mesh_chscope_read(mesh_chscope_t *t, char const *text) {
+size_t mesh_chscope_read(mesh_chscope_t *t, char const *text) {
+    size_t lines = 0;
     mesh_chscope_clear(t);
     while (*text) {
         size_t len  = strcspn(text, "\n");
@@ -200,13 +203,23 @@ void mesh_chscope_read(mesh_chscope_t *t, char const *text) {
         if (used > 0 && text[used - 1] == '\r') {
             used--;
         }
-        chscope_read_line(t, text, used);
+        lines += chscope_read_line(t, text, used, text[len] == '\n');
         text += len + (text[len] == '\n');
     }
+    return lines;
+}
+
+mesh_chscope_file_t mesh_chscope_file_pick(bool have_file, bool have_tmp) {
+    if (have_file) {
+        return MESH_CHSCOPE_FILE_READ; // a temp file next to it is a write cut before its rename: the old one holds
+    }
+    return have_tmp ? MESH_CHSCOPE_FILE_PROMOTE : MESH_CHSCOPE_FILE_NONE;
 }
 
 void mesh_scope_channel_text(char const *own, char const *default_name, char *out, size_t cap) {
-    if (own && own[0]) {
+    if (own && strcmp(own, MESH_CHSCOPE_DAMAGED) == 0) {
+        snprintf(out, cap, "Damaged: set it again");
+    } else if (own && own[0]) {
         snprintf(out, cap, "%s", own);
     } else if (default_name && default_name[0]) {
         snprintf(out, cap, "Default (%s)", default_name);
@@ -216,6 +229,8 @@ void mesh_scope_channel_text(char const *own, char const *default_name, char *ou
 }
 
 void mesh_scope_channel_ask_text(char const *channel, char const *name, char *out, size_t cap) {
-    snprintf(out, cap, "Messages you send on %s will only travel in region %s. Members outside it no longer get them.",
+    snprintf(out, cap,
+             "Messages you send on %s are sent to region %s. Repeaters outside it do not pass them on, so members who "
+             "only reach you through them stop receiving them.",
              channel, name);
 }

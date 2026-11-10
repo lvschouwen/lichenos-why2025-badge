@@ -1341,14 +1341,30 @@ static void chan_scope_show(void) {
     }
 }
 
+#define CHAN_SCOPE_NOTE_MS 3000 // a "Not saved" stays this long, then the row shows the state again (R3)
+
+static void chan_scope_show_due(lv_timer_t *timer) {
+    (void)timer;
+    chan_scope_show(); // one-shot: LVGL deletes the timer after this call; a no-op when the details are gone
+}
+
+// R5 and R3: why it was not saved, then the real state again (the value never stays a stale message)
+static void chan_scope_not_saved(char const *why) {
+    char line[80];
+    snprintf(line, sizeof(line), "Not saved: %s", why);
+    menu_set_value(chan_scope_row, line);
+    lv_timer_t *timer = lv_timer_create(chan_scope_show_due, CHAN_SCOPE_NOTE_MS, NULL);
+    if (timer) {
+        lv_timer_set_repeat_count(timer, 1);
+    }
+}
+
 static void chan_scope_done(job_t *job) {
     if (!chan_scope_row || !chan_mem || strcmp(chan_mem->name, job->text) != 0) {
         return; // the details are gone, or are another channel's now
     }
     if (job->reason) {
-        char line[80];
-        snprintf(line, sizeof(line), "Not saved: %s", job->reason); // R5: what went wrong, the row stays usable
-        menu_set_value(chan_scope_row, line);
+        chan_scope_not_saved(job->reason);
         return;
     }
     snprintf(chan_mem->scope, sizeof(chan_mem->scope), "%.30s", job->title); // a region: 30 at most
@@ -1384,9 +1400,7 @@ static void on_chan_scope(char const *text, void *arg) {
         return;
     }
     if (why) {
-        char line[80];
-        snprintf(line, sizeof(line), "Not saved: %s", why);
-        menu_set_value(chan_scope_row, line);
+        chan_scope_not_saved(why);
         return;
     }
     if (strcmp(chan_mem->scope, name) == 0) {
@@ -1414,8 +1428,9 @@ static void on_chan_scope(char const *text, void *arg) {
 static void edit_chan_scope(void *arg) {
     (void)arg;
     if (chan_mem) {
-        text_entry_open("Flood scope for this channel: region name, empty = default", chan_mem->scope, false,
-                        MESH_SCOPE_MAX, on_chan_scope, NULL);
+        bool damaged = strcmp(chan_mem->scope, MESH_CHSCOPE_DAMAGED) == 0; // starts empty then, never with "!"
+        text_entry_open("Flood scope for this channel: region name, empty = default", damaged ? "" : chan_mem->scope,
+                        false, MESH_SCOPE_MAX, on_chan_scope, NULL);
     }
 }
 

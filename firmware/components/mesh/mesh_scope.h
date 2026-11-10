@@ -34,10 +34,11 @@ typedef enum {
     MESH_SCOPE_USE_CONSOLE,
     MESH_SCOPE_USE_REFUSE,
     MESH_SCOPE_USE_CHANNEL,
+    MESH_SCOPE_USE_DAMAGED, // a screen's message on a channel whose saved scope is damaged: refused, never wider
 } mesh_scope_use_t;
 // Which scope a flood takes. A console line's: the console scope, refused when unset, whatever the channel (#290 wins).
 // A screen's: the channel's own scope when it has one (#291; channel_name NULL or "" = none, and every flood that is
-// not a channel message), else the default.
+// not a channel message), refused for MESH_CHSCOPE_DAMAGED, else the default.
 mesh_scope_use_t mesh_scope_choose(bool from_console, char const *console_name, char const *channel_name);
 // "fw mesh scope console <region> YES": the text after "console". NULL when out holds the region (mesh_scope_parse's
 // rules, never empty), else why not (out is "").
@@ -48,11 +49,17 @@ void mesh_scope_status_text(char const *default_name, char const *console_name, 
 // A channel's own flood scope (#291): a channel message from the screens floods in that region instead of the default.
 // Badge-local (MeshCore's share format has no room for it), kept in MeshCore's directory next to the console scope. A
 // channel is known by an id from its key (the first MESH_CHSCOPE_ID bytes of SHA-256 of the 32-byte secret), so a
-// rename keeps the scope and a channel added again with another key does not inherit it.
+// rename keeps the scope and a channel added again with another key does not inherit it. Two channels with the same
+// secret (the same channel under two names) share one scope.
 #define MESH_CHSCOPE_ID  8
 #define MESH_CHSCOPE_MAX 40 // MAX_GROUP_CHANNELS in the mesh component's build
 // The file: one "<16 hex digits of the id> <region>" line per channel, at most this long in all
 #define MESH_CHSCOPE_TEXT_MAX (MESH_CHSCOPE_MAX * (2 * MESH_CHSCOPE_ID + MESH_SCOPE_MAX + 2) + 1)
+// The name of a tombstone: a line whose id reads but whose region does not (or that a cut write left without its line
+// end). Never a region (mesh_scope_parse refuses '!'): that channel's screen sends are refused until it is set again,
+// so a damaged scope never floods wider than the region it was meant to be.
+#define MESH_CHSCOPE_DAMAGED  "!"
+#define MESH_CHSCOPE_REFUSED  "flood scope damaged: set it again (channel details, Flood scope)"
 typedef struct {
     uint8_t id[MESH_CHSCOPE_ID];
     char    name[MESH_SCOPE_MAX + 1];
@@ -70,10 +77,15 @@ bool        mesh_chscope_put(mesh_chscope_t *t, uint8_t const id[MESH_CHSCOPE_ID
 void        mesh_chscope_drop_at(mesh_chscope_t *t, size_t i);
 // The file text of the table; its length (0 for an empty table, or when cap is too small: out is "" then)
 size_t      mesh_chscope_write(mesh_chscope_t const *t, char *out, size_t cap);
-// The table from a file text: a line that does not parse (bad id, a region mesh_scope_parse refuses) is left out, so
-// that channel floods under the default again
-void        mesh_chscope_read(mesh_chscope_t *t, char const *text);
-// The channel details row: the own region, else "Default (<default name>)" ("Default (None, everywhere)" without one)
+// The table from a file text; the number of lines read (tombstones included). A line whose id reads but whose region
+// does not, or the last line without its line end, becomes a tombstone (MESH_CHSCOPE_DAMAGED); a line without a
+// readable id names no channel and is left out.
+size_t      mesh_chscope_read(mesh_chscope_t *t, char const *text);
+// Which file a start reads (a cut between the write's remove and rename leaves only the read-back temp file)
+typedef enum { MESH_CHSCOPE_FILE_NONE, MESH_CHSCOPE_FILE_READ, MESH_CHSCOPE_FILE_PROMOTE } mesh_chscope_file_t;
+mesh_chscope_file_t mesh_chscope_file_pick(bool have_file, bool have_tmp);
+// The channel details row: the own region, "Damaged: set it again" for a tombstone, else "Default (<default name>)"
+// ("Default (None, everywhere)" without one)
 void        mesh_scope_channel_text(char const *own, char const *default_name, char *out, size_t cap);
 // The question before a channel gets its own region (not asked for going back to the default)
 void        mesh_scope_channel_ask_text(char const *channel, char const *name, char *out, size_t cap);

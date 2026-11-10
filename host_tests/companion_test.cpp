@@ -110,6 +110,16 @@ extern "C" void mesh_advert_limited(uint32_t refused) {
 extern "C" void mesh_contacts_full(void) {}
 extern "C" void mesh_airlog_note(uint8_t, uint8_t, uint8_t const *, uint8_t, float, float) {}
 extern "C" void mesh_signal_note(uint8_t const *, bool, uint8_t, uint8_t const *, float, float) {}
+// What BadgeMesh told the senders' copy last (#291)
+static std::string noted_damaged; // the names, comma separated
+static bool        noted_unreadable;
+extern "C" void    mesh_chscope_noted(char const (*damaged)[32], size_t n, bool unreadable) {
+    noted_damaged.clear();
+    for (size_t i = 0; i < n; i++) {
+        noted_damaged += std::string(i ? "," : "") + damaged[i];
+    }
+    noted_unreadable = unreadable;
+}
 
 // The app's end of the companion protocol: frames to deliver, frames received
 class FakeApp : public BaseSerialInterface {
@@ -353,6 +363,65 @@ static void channel_scope_checks(BadgeMesh &mesh, ob_t &ob, mesh::GroupChannel c
     CHECK(mesh.channelScope(pub.secret)[0] == 0);
     fs_shim_set_root(root);
     CHECK(mesh.setConsoleScope("") == NULL);
+}
+
+static void write_file(char const *path, std::string const &text) {
+    File f = SPIFFS.open(path, "w", true);
+    CHECK(f && f.write((uint8_t const *)text.data(), text.size()) == text.size());
+    f.close();
+}
+
+// The "<16 hex> " start of the channel's line in /channel_scopes (#291)
+static std::string channel_scope_line(mesh::GroupChannel const &ch) {
+    uint8_t id[MESH_CHSCOPE_ID];
+    char    hex[2 * MESH_CHSCOPE_ID + 2];
+    mesh::Utils::sha256(id, sizeof(id), ch.secret, PUB_KEY_SIZE);
+    for (size_t i = 0; i < sizeof(id); i++) {
+        snprintf(hex + 2 * i, 3, "%02x", id[i]);
+    }
+    return std::string(hex) + " ";
+}
+
+// Damage fails narrow (#291 review): a damaged line refuses the channel's screen messages (the outbox fails them,
+// nothing goes on air) while a console line's still takes the console scope; a cut between the write's remove and
+// rename promotes the read-back temp file; a file with nothing readable is flagged, and the start writes nothing.
+static void channel_scope_damage_checks(BadgeMesh &mesh, ob_t &ob, mesh::GroupChannel const &pub) {
+    std::string line = channel_scope_line(pub);
+    write_file("/channel_scopes", line + "zz bad\n");
+    mesh.loadChannelScopes();
+    CHECK(strcmp(mesh.channelScope(pub.secret), MESH_CHSCOPE_DAMAGED) == 0);
+    CHECK(noted_damaged == "Public" && !noted_unreadable);
+    CHECK(mesh.setConsoleScope("zz-test") == NULL);
+    std::string      prefix = std::string(mesh.getNodeName()) + ": ";
+    char const      *why    = NULL;
+    size_t           before = test_radio.sent.size();
+    mesh_msg_id_t    ui     = ob_add_channel(&ob, "public", "chscope damaged", 15, (uint32_t)millis(), &why);
+    settle(mesh, 30);
+    mesh_msg_id_t    con = ob_add_channel(&ob, "public", "chscope damaged console", 23, (uint32_t)millis(), &why);
+    CHECK(ui && con && ob_set_console(&ob, con));
+    settle(mesh, 30);
+    mesh::Packet     pkt;
+    mesh_out_state_t state;
+    CHECK(!find_group(before, pub, prefix + "chscope damaged", pkt));
+    CHECK(ob_get(&ob, ui, &state, NULL, NULL, NULL) && state == MESH_OUT_FAILED);
+    CHECK(find_group(before, pub, prefix + "chscope damaged console", pkt) && pkt.hasTransportCodes());
+    CHECK(mesh.setConsoleScope("") == NULL);
+    // Set again: the tombstone goes, the senders' copy with it
+    CHECK(mesh.setChannelScope(pub.secret, "zz-local") == NULL && noted_damaged.empty());
+    // The cut between remove and rename: only the temp file, read back before the remove, is there
+    CHECK(SPIFFS.rename("/channel_scopes", "/channel_scopes.new") && !SPIFFS.exists("/channel_scopes"));
+    mesh.loadChannelScopes();
+    CHECK(strcmp(mesh.channelScope(pub.secret), "zz-local") == 0);
+    CHECK(SPIFFS.exists("/channel_scopes") && !SPIFFS.exists("/channel_scopes.new"));
+    // Nothing readable in the file: flagged; the start does not write the file
+    write_file("/channel_scopes", "garbage\n");
+    mesh.loadChannelScopes();
+    CHECK(mesh.channelScope(pub.secret)[0] == 0 && noted_unreadable);
+    File f = SPIFFS.open("/channel_scopes", "r");
+    CHECK(f && f.size() == 8);
+    f.close();
+    CHECK(mesh.setChannelScope(pub.secret, "") == NULL && !noted_unreadable);
+    CHECK(!SPIFFS.exists("/channel_scopes"));
 }
 
 // The console scope lives in MeshCore's own directory (#290): the factory reset's format, which takes the default scope
@@ -949,6 +1018,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     console_scope_checks(mesh, ob, pub.channel);
     console_scope_reset_checks(mesh, root);
     channel_scope_checks(mesh, ob, pub.channel, root);
+    channel_scope_damage_checks(mesh, ob, pub.channel);
     trace_checks(mesh, mt);
     remote_checks(mesh, rr, listener);
     contact_action_checks(mesh);

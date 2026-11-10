@@ -33,6 +33,10 @@ void mesh_airlog_note(uint8_t header, uint8_t path_len, uint8_t const *path, uin
 void mesh_signal_note(
     uint8_t const *pub_key, bool is_advert, uint8_t path_len, uint8_t const *path, float rssi, float snr
 );
+// The channel scopes changed (#291), under the mesh lock: the names of the channels whose scope is damaged (their
+// screen sends are refused) and whether the saved file did not read at all. mesh_cscope.c keeps a copy the senders read
+// without the mesh lock.
+void mesh_chscope_noted(char const (*damaged)[32], size_t n, bool unreadable);
 }
 
 #define LINK_PUSH_KINDS 0x11 // push codes 0x80..0x90
@@ -241,8 +245,14 @@ class BadgeMesh : public MyMesh {
     // The channel's own region, "" when it floods under the default
     char const *channelScope(uint8_t const secret[PUB_KEY_SIZE]) const;
     // At start, after begin() loaded the channels: the saved channel scopes, without those whose channel is gone
+    // (none dropped while no channel loaded at all). Only reads: the file is written when the table changes.
     void        loadChannelScopes();
-    // Console floods dropped at the radio's door because the console scope was not set (the console refuses first)
+    // Tells mesh_chscope_noted the damaged channels by name: after every change, and after a rename
+    void        noteChannelScopes();
+    // The channel in this slot has a damaged scope (its screen sends are refused, #291)
+    bool        channelScopeDamaged(int slot);
+    // Floods dropped at the radio's door: a console line's while the console scope was not set (the console refuses
+    // first), a screen's channel message while its channel scope is damaged (#291; the outbox refuses first)
     uint32_t consoleRefused() const {
         return console_refused_;
     }
@@ -292,7 +302,7 @@ class BadgeMesh : public MyMesh {
   private:
     bool               floodForConsole(mesh::Packet *pkt, uint32_t delay_millis);
     bool               floodConsoleScope(mesh::Packet *pkt, uint32_t delay_millis);
-    bool               channelWithId(uint8_t const id[MESH_CHSCOPE_ID]);
+    int                channelWithId(uint8_t const id[MESH_CHSCOPE_ID]);
     bool               saveChannelScopes();
     bool               blobWanted(mesh_blobq_entry_t const &e);
     void               blobDone();
@@ -309,4 +319,6 @@ class BadgeMesh : public MyMesh {
     mesh_chscope_t     chscopes_                               = {}; // #291; in PSRAM with the rest of BadgeMesh
     char               chscope_text_[MESH_CHSCOPE_TEXT_MAX]    = {}; // the file text
     char               chscope_back_[MESH_CHSCOPE_TEXT_MAX]    = {}; // its read-back
+    char               chscope_damaged_[MESH_CHSCOPE_MAX][32]  = {}; // names for noteChannelScopes
+    bool               chscope_unreadable_                     = false;
 };

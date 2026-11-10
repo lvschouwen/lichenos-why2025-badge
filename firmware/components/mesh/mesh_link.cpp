@@ -306,7 +306,7 @@ char const *BadgeMesh::setChannelScope(uint8_t const secret[PUB_KEY_SIZE], char 
     uint8_t id[MESH_CHSCOPE_ID];
     channel_scope_id(secret, id);
     snprintf(before, sizeof(before), "%s", mesh_chscope_find(&chscopes_, id));
-    if (strcmp(before, clean) == 0) {
+    if (strcmp(before, clean) == 0 && !chscope_unreadable_) {
         return NULL; // nothing changes (a removed channel without a scope of its own writes nothing)
     }
     if (!mesh_chscope_put(&chscopes_, id, clean)) {
@@ -316,6 +316,8 @@ char const *BadgeMesh::setChannelScope(uint8_t const secret[PUB_KEY_SIZE], char 
         mesh_chscope_put(&chscopes_, id, before); // as it was: nothing changed
         return "not saved: the file could not be written";
     }
+    chscope_unreadable_ = false; // the file holds the table now
+    noteChannelScopes();
     return NULL;
 }
 
@@ -326,26 +328,57 @@ char const *BadgeMesh::channelScope(uint8_t const secret[PUB_KEY_SIZE]) const {
 }
 
 // True when one of the channels has this id
-bool BadgeMesh::channelWithId(uint8_t const id[MESH_CHSCOPE_ID]) {
+// 1 when one of the channels has this id, 0 when none, -1 when no channel is loaded at all (nothing to compare with)
+int BadgeMesh::channelWithId(uint8_t const id[MESH_CHSCOPE_ID]) {
     ChannelDetails ch;
     uint8_t        have[MESH_CHSCOPE_ID];
-    bool           found = false;
-    for (int i = 0; !found && i < MAX_GROUP_CHANNELS && getChannel(i, ch); i++) {
-        channel_scope_id(ch.channel.secret, have);
-        found = ch.name[0] && memcmp(have, id, sizeof(have)) == 0;
+    int            found = -1;
+    for (int i = 0; found < 1 && i < MAX_GROUP_CHANNELS && getChannel(i, ch); i++) {
+        if (ch.name[0]) {
+            channel_scope_id(ch.channel.secret, have);
+            found = memcmp(have, id, sizeof(have)) == 0 ? 1 : 0;
+        }
     }
     memset(&ch, 0, sizeof(ch)); // a channel key: not left on the stack
     return found;
 }
 
+bool BadgeMesh::channelScopeDamaged(int slot) {
+    ChannelDetails ch;
+    bool damaged = getChannel(slot, ch) && strcmp(channelScope(ch.channel.secret), MESH_CHSCOPE_DAMAGED) == 0;
+    memset(&ch, 0, sizeof(ch));
+    return damaged;
+}
+
+void BadgeMesh::noteChannelScopes() {
+    ChannelDetails ch;
+    size_t         n = 0;
+    for (int i = 0; i < MAX_GROUP_CHANNELS && getChannel(i, ch); i++) {
+        if (ch.name[0] && strcmp(channelScope(ch.channel.secret), MESH_CHSCOPE_DAMAGED) == 0) {
+            snprintf(chscope_damaged_[n++], sizeof(chscope_damaged_[0]), "%s", ch.name);
+        }
+    }
+    memset(&ch, 0, sizeof(ch));
+    mesh_chscope_noted(chscope_damaged_, n, chscope_unreadable_);
+}
+
 void BadgeMesh::loadChannelScopes() {
-    scope_file_read(CHANNEL_SCOPE_FILE, chscope_text_, sizeof(chscope_text_));
-    mesh_chscope_read(&chscopes_, chscope_text_);
+    switch (mesh_chscope_file_pick(SPIFFS.exists(CHANNEL_SCOPE_FILE), SPIFFS.exists(CHANNEL_SCOPE_TMP))) {
+        case MESH_CHSCOPE_FILE_PROMOTE: // cut between the remove and the rename: the temp file was read back first
+            scope_file_read(SPIFFS.rename(CHANNEL_SCOPE_TMP, CHANNEL_SCOPE_FILE) ? CHANNEL_SCOPE_FILE : CHANNEL_SCOPE_TMP,
+                            chscope_text_, sizeof(chscope_text_));
+            break;
+        case MESH_CHSCOPE_FILE_READ: scope_file_read(CHANNEL_SCOPE_FILE, chscope_text_, sizeof(chscope_text_)); break;
+        default: chscope_text_[0] = '\0'; break; // first boot: no scopes
+    }
+    size_t lines        = mesh_chscope_read(&chscopes_, chscope_text_);
+    chscope_unreadable_ = chscope_text_[0] && lines == 0;
     for (size_t i = chscopes_.n; i-- > 0;) {
-        if (!channelWithId(chscopes_.e[i].id)) {
+        if (channelWithId(chscopes_.e[i].id) == 0) {
             mesh_chscope_drop_at(&chscopes_, i); // its channel went without the removal clearing it (a cut write)
         }
     }
+    noteChannelScopes();
 }
 
 // A console line's flood: under the console scope, or dropped (false) while that is not set. The console refuses
@@ -392,6 +425,10 @@ void BadgeMesh::sendFloodScoped(mesh::GroupChannel const &channel, mesh::Packet 
             break;
         }
         case MESH_SCOPE_USE_DEFAULT: MyMesh::sendFloodScoped(channel, pkt, delay_millis); break;
+        case MESH_SCOPE_USE_DAMAGED: // the outbox refuses these first; this is the net: never wider than meant
+            console_refused_++;
+            releasePacket(pkt);
+            break;
         default: floodConsoleScope(pkt, delay_millis); break; // a console line's: its scope, or dropped
     }
 }
@@ -554,8 +591,8 @@ size_t CompanionPipe::build_outbox_frame(ob_action_t const &act, uint8_t *dest) 
     size_t text_len = strlen(act.text);
     if (act.kind == OB_ACT_SEND_CHANNEL) {
         int slot = channel_slot(mesh_, act.target);
-        if (slot < 0) {
-            return 0;
+        if (slot < 0 || (!act.console && static_cast<BadgeMesh *>(mesh_)->channelScopeDamaged(slot))) {
+            return 0; // #291: a screen's message on a channel with a damaged scope fails, never floods wider
         }
         size_t room = mf_channel_text_max(strlen(mesh_->getNodeName()));
         text_len    = mf_text_cut(act.text, room);

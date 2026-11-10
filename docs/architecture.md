@@ -439,9 +439,14 @@ console scope regardless (#290 wins). One chooser decides, `mesh_scope_choose` (
 called in `BadgeMesh`'s `GroupChannel` override of `sendFloodScoped`.
 
 - Badge-local (MeshCore's share format has no room for it): `/channel_scopes` in MeshCore's directory, written through
-  a temp file, one line per channel keyed by the first 8 bytes of SHA-256 of the channel's secret. A rename keeps it;
-  removing the channel clears it; the factory reset's format clears it with the default and console scopes. A start
-  drops the lines whose channel is gone; a damaged line is left out (that channel floods under the default again).
+  a temp file, one line per channel keyed by the first 8 bytes of SHA-256 of the channel's secret (two channels with
+  the same secret share one scope). A rename keeps it; removing the channel clears it, after the channel is removed
+  and saved; the factory reset's format clears it with the default and console scopes.
+- Damage fails narrow: a line whose id reads but whose region does not (or a last line a cut write left without its
+  line end) is a tombstone, and that channel's screen sends are refused ("flood scope damaged: set it again") until
+  the scope is set again; the details row and `fw mesh scope` show it. Only the temp file there (a cut between the
+  remove and the rename) promotes it. A file with nothing readable is flagged in `fw mesh scope` and logged. A start
+  drops the lines whose channel is gone (never while no channel loaded) and writes nothing.
 - Set and shown in the channel details screen (row "Flood scope": the region, or "Default (<name>)"); a region asks
   first in the careful dialog, going back to the default does not. `fw mesh scope` lists the channels with their own
   scope after its status line (`channel <name>: scope <region>`, lines `tools/onair_guard.sh` never takes for it).

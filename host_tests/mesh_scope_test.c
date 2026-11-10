@@ -33,18 +33,35 @@ static void chscope_checks(void) {
     CHECK(mesh_chscope_write(&t, text, sizeof(text)) == strlen(text));
     CHECK(strcmp(text, "0123456789abcdef zz-other\nff00000000000010 zz-test\n") == 0);
     CHECK(mesh_chscope_write(&t, line, 20) == 0 && line[0] == 0); // too small: nothing half written
-    mesh_chscope_read(&back, text);
+    CHECK(mesh_chscope_read(&back, text) == 2);
     CHECK(back.n == 2 && strcmp(mesh_chscope_find(&back, a), "zz-other") == 0);
     CHECK(strcmp(mesh_chscope_find(&back, b), "zz-test") == 0);
     // "" drops it; dropping one that is not there is fine
     CHECK(mesh_chscope_put(&t, a, "") && t.n == 1 && mesh_chscope_find(&t, a)[0] == 0);
     CHECK(mesh_chscope_put(&t, a, "") && t.n == 1 && strcmp(mesh_chscope_find(&t, b), "zz-test") == 0);
-    // Damaged lines are left out (that channel floods under the default again); CRLF and upper-case hex are fine
-    mesh_chscope_read(&back, "0123456789ABCDEF zz-local\r\nnot a line\n0123456789abcdeg zz-bad\n"
-                             "ff00000000000010 zz bad\nff00000000000010\nff00000000000010 \n0011 zz-short\n");
-    CHECK(back.n == 1 && strcmp(mesh_chscope_find(&back, a), "zz-local") == 0);
-    mesh_chscope_read(&back, "");
-    CHECK(back.n == 0);
+    // A line without a readable id names no channel and is left out; CRLF and upper-case hex are fine. An id with a
+    // region that does not read is a tombstone (that channel's screen sends are refused), whatever the region's damage
+    CHECK(mesh_chscope_read(&back, "0123456789ABCDEF zz-local\r\nnot a line\n0123456789abcdeg zz-bad\n"
+                                   "ff00000000000010 zz bad\n0011 zz-short\n") == 2);
+    CHECK(back.n == 2 && strcmp(mesh_chscope_find(&back, a), "zz-local") == 0);
+    CHECK(strcmp(mesh_chscope_find(&back, b), MESH_CHSCOPE_DAMAGED) == 0);
+    char const *tombs[] = {"ff00000000000010\n", "ff00000000000010 \n", "ff00000000000010_zz-test\n",
+                           "ff00000000000010 abcdefghijklmnopqrstuvwxyz01234\n", "ff00000000000010 $zz\n"};
+    for (size_t i = 0; i < sizeof(tombs) / sizeof(tombs[0]); i++) {
+        CHECK(mesh_chscope_read(&back, tombs[i]) == 1 && strcmp(mesh_chscope_find(&back, b), MESH_CHSCOPE_DAMAGED) == 0);
+    }
+    // A cut write: the last line without its line end may be shorter than written, so never read as a region
+    CHECK(mesh_chscope_read(&back, "0123456789abcdef zz-local\nff00000000000010 zz-te") == 2);
+    CHECK(strcmp(mesh_chscope_find(&back, a), "zz-local") == 0);
+    CHECK(strcmp(mesh_chscope_find(&back, b), MESH_CHSCOPE_DAMAGED) == 0);
+    CHECK(mesh_chscope_read(&back, "") == 0 && back.n == 0);
+    CHECK(mesh_chscope_read(&back, "garbage\n\n") == 0 && back.n == 0); // a file that holds nothing readable
+    // Which file a start reads: the file when it is there (a temp file next to it is a cut before the rename), the
+    // temp file promoted when only it is (cut between the remove and the rename), none at the first start
+    CHECK(mesh_chscope_file_pick(true, false) == MESH_CHSCOPE_FILE_READ);
+    CHECK(mesh_chscope_file_pick(true, true) == MESH_CHSCOPE_FILE_READ);
+    CHECK(mesh_chscope_file_pick(false, true) == MESH_CHSCOPE_FILE_PROMOTE);
+    CHECK(mesh_chscope_file_pick(false, false) == MESH_CHSCOPE_FILE_NONE);
     // Full: the 41st channel is refused, an existing one can still change
     mesh_chscope_clear(&t);
     for (int i = 0; i < MESH_CHSCOPE_MAX; i++) {
@@ -67,9 +84,11 @@ static void chscope_checks(void) {
     CHECK(strcmp(line, "Default (zz-wide)") == 0);
     mesh_scope_channel_text(NULL, "", line, sizeof(line));
     CHECK(strcmp(line, "Default (None, everywhere)") == 0);
+    mesh_scope_channel_text(MESH_CHSCOPE_DAMAGED, "zz-wide", line, sizeof(line));
+    CHECK(strcmp(line, "Damaged: set it again") == 0);
     mesh_scope_channel_ask_text("#zz-chan", "zz-local", line, sizeof(line));
-    CHECK(strcmp(line, "Messages you send on #zz-chan will only travel in region zz-local. Members outside it no longer "
-                       "get them.") == 0);
+    CHECK(strcmp(line, "Messages you send on #zz-chan are sent to region zz-local. Repeaters outside it do not pass "
+                       "them on, so members who only reach you through them stop receiving them.") == 0);
 }
 
 int main(void) {
@@ -118,6 +137,13 @@ int main(void) {
     CHECK(mesh_scope_choose(true, "zz-test", "zz-local") == MESH_SCOPE_USE_CONSOLE);
     CHECK(mesh_scope_choose(true, "", "zz-local") == MESH_SCOPE_USE_REFUSE);
     CHECK(mesh_scope_choose(true, NULL, "zz-local") == MESH_SCOPE_USE_REFUSE);
+    // A damaged channel scope refuses the screens' messages (never the default: wider than meant); the console's
+    // keep the console scope
+    CHECK(mesh_scope_choose(false, "", MESH_CHSCOPE_DAMAGED) == MESH_SCOPE_USE_DAMAGED);
+    CHECK(mesh_scope_choose(false, "zz-test", MESH_CHSCOPE_DAMAGED) == MESH_SCOPE_USE_DAMAGED);
+    CHECK(mesh_scope_choose(true, "zz-test", MESH_CHSCOPE_DAMAGED) == MESH_SCOPE_USE_CONSOLE);
+    CHECK(mesh_scope_choose(true, "", MESH_CHSCOPE_DAMAGED) == MESH_SCOPE_USE_REFUSE);
+    CHECK(mesh_scope_parse(MESH_CHSCOPE_DAMAGED, text, sizeof(text)) != NULL); // never a region anyone can set
     // "fw mesh scope console <region> YES"
     CHECK(mesh_scope_console_arg("ZZ-Test YES", out, sizeof(out)) == NULL && strcmp(out, "zz-test") == 0);
     CHECK(mesh_scope_console_arg("#zz-test  YES ", out, sizeof(out)) == NULL && strcmp(out, "zz-test") == 0);
