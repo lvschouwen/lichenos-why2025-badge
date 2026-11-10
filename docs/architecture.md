@@ -77,7 +77,9 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
   copied into one; PACKET mode keeps frames internal at compile time. Empty TX pool: the sender waits up to
   `TX_POOL_WAIT_MS` (5), then lwIP gets `ESP_ERR_ESP_NETIF_TX_FAILED`; empty RX pool: the frame is dropped and counted.
   RPC/HCI frames stay on the per-frame heap, PSRAM first; the received copy for lwIP goes to PSRAM. `fw c6` shows
-  `c6: pool tx|rx depth .. mem psram|internal in_use .. peak .. waits .. drops ..`.
+  `c6: pool tx|rx depth .. mem psram|internal in_use .. peak .. waits .. drops .. lost ..`. At link-down the free
+  blocks are freed; one still out returns through the next link session, and if it has not by the following link-down
+  it is left allocated and counted in `lost` (freeing it could hand a block still being written to the next pool).
 - **TCP window:** `CONFIG_LWIP_TCP_WND_DEFAULT=16384` (16 KiB), `LWIP_TCP_RECVMBOX_SIZE=16`.
 - **`WIFI_PS_NONE`:** `lichen_net/wifi_service.c:152` (`wifi_ps_mode`, #146/#76). The IDF default modem sleep gives RTT spikes of
   seconds; `fw wifi ps` changes it.
