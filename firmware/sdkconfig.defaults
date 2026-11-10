@@ -131,6 +131,11 @@ CONFIG_LV_USE_SNAPSHOT=y
 # Run code and read-only data from PSRAM: flash writes (settings, file pushes, updates) then no longer suspend the
 # caches, which disturbed the panel's scan-out from its PSRAM framebuffer as yellow flashes (#61)
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+# IRAM back for code that needs it (#265): the ring buffer's ISR functions (3.4 KB; used only by the UART and USB-serial-
+# JTAG drivers, whose interrupts are not IRAM: flags 0, UART_ISR_IN_IRAM off) and the I2C master ISR (0.9 KB; its
+# interrupt is not IRAM either, I2C_ISR_IRAM_SAFE off) run from flash/PSRAM like the rest of those drivers
+CONFIG_RINGBUF_PLACE_ISR_FUNCTIONS_INTO_FLASH=y
+# CONFIG_I2C_MASTER_ISR_HANDLER_IN_IRAM is not set
 # CONFIG_LVGL_PORT_ENABLE_PPA is not set
 # #95 (measured at 120 MHz PSRAM, PSRAM is at 80 MHz again since #120): the CPU rotates a 720x80 strip faster than the blocking PPA pass through its second PSRAM buffer (flush 2.3 vs 3.7 ms/strip, scroll 13.9 vs 12.5 fps)
 
