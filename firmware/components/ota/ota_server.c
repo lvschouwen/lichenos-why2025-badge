@@ -214,6 +214,7 @@ static void respond(int fd, int status, char const *fmt, ...) {
         case 413: reason = "Content Too Large"; break;
         case 422: reason = "Unprocessable Content"; break;
         case 503: reason = "Service Unavailable"; break;
+        case 507: reason = "Insufficient Storage"; break;
         default: reason = "Internal Server Error"; break;
     }
     char head[192];
@@ -411,12 +412,51 @@ static void forget_c6_bundle_if_c6_file(char const *posix_path) {
     }
 }
 
+// Room for an upload of size bytes on /storage (#299), else a 507 now instead of a failed write after the transfer.
+// A drive whose free space can't be read is let through: the write reports that.
+// body: bytes of a request body not read yet (0: none, or the client waits for 100 Continue), dropped before the reply.
+static void drain_body(int fd, size_t pre_len, long long content_length);
+static bool storage_room(int fd, uint64_t size, size_t pre_len, long long body) {
+    uint64_t free_b, total_b;
+    if (!storage_free_bytes(&free_b, &total_b) || ota_file_fits(free_b, size, STORAGE_CLUSTER)) {
+        return true;
+    }
+    drain_body(fd, pre_len, body);
+    respond(fd, 507, "not enough space on the internal storage: need %llu bytes, %llu free, nothing written",
+            (unsigned long long)size, (unsigned long long)free_b);
+    return false;
+}
+
+// Read and drop a refused body (at most REFUSE_DRAIN_MAX bytes, within REFUSE_DRAIN_S) so the reply isn't lost to the
+// reset a close with unread data causes; a larger body is left: badge.sh checks the space before it sends (#299)
+#define REFUSE_DRAIN_MAX (256 * 1024)
+#define REFUSE_DRAIN_S   5
+static void drain_body(int fd, size_t pre_len, long long content_length) {
+    if (content_length <= 0 || content_length > REFUSE_DRAIN_MAX || (long long)pre_len >= content_length) {
+        return;
+    }
+    long long left = content_length - (long long)pre_len;
+    long      stop = now_s() + REFUSE_DRAIN_S;
+    uint8_t   scratch[256];
+    set_read_timeout(fd, 1, 0);
+    while (left > 0 && now_s() < stop) {
+        ssize_t n = read(fd, scratch, left < (long long)sizeof(scratch) ? (size_t)left : sizeof(scratch));
+        if (n <= 0) {
+            break;
+        }
+        left -= n;
+    }
+}
+
 // Put a checked file in place: write it next to the target, then swap it in. vms is the path as badge.sh names it.
 static bool finish_file(int fd, char const *vms, uint8_t const *data, size_t len, long long sent) {
     char path[OTA_PATH_MAX + 16];
     char temp[sizeof(path) + sizeof(OTA_TEMP_NAME)];
     if (!ota_path_to_posix(vms, path, sizeof(path)) || !ota_temp_to_posix(vms, temp, sizeof(temp))) {
         respond(fd, 400, "bad path");
+        return false;
+    }
+    if (!storage_room(fd, len, 0, 0)) { // before the bundle is marked changed: the old file stays
         return false;
     }
     forget_c6_bundle_if_c6_file(path);
@@ -604,6 +644,10 @@ static void handle_file(int fd, ota_request_t const *req, uint8_t const *pre, si
     }
     if (is_directory(path)) {
         respond(fd, 409, "%s is a directory, nothing written", req->path);
+        return;
+    }
+    // A compressed body's size is known once it is in: finish_file checks that one
+    if (!req->deflate && !storage_room(fd, (uint64_t)req->content_length, pre_len, req->expect_continue ? 0 : req->content_length)) {
         return;
     }
     // A plain body has its exact size; a compressed one starts from a guess and grows (up to FILE_MAX)
@@ -825,6 +869,10 @@ static bool piece_start(int fd, ota_request_t const *req, char const *path, uint
                         bool *continued) {
     bool stream = req->route == OTA_ROUTE_FIRMWARE;
     staged_reset();
+    if (req->route == OTA_ROUTE_FILE &&
+        !storage_room(fd, (uint64_t)req->total_size, *pre_len, req->expect_continue ? 0 : req->content_length)) {
+        return false;
+    }
     if (!stream) {
         staged.data = heap_caps_aligned_alloc(STAGE_ALIGN, ota_round_up((size_t)req->total_size, STAGE_ALIGN),
                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -1282,6 +1330,18 @@ static void start_screenshot(int fd) {
 }
 
 // Handle one connection. Returns true when the badge should reboot.
+// "deflate chunks" tells tools/badge.sh this receiver takes compressed bodies and pieces; "storage free N" (#299) lets
+// it check a file push fits before it sends a byte
+static void respond_info(int fd) {
+    uint64_t free_b, total_b;
+    char     room[40] = "";
+    if (storage_free_bytes(&free_b, &total_b)) {
+        snprintf(room, sizeof(room), "; storage free %llu", (unsigned long long)free_b);
+    }
+    respond(fd, 200, "badge_fw %s; receiver: deflate chunks%s%s", esp_app_get_description()->version,
+            hooks.prepare ? " prepare" : "", room);
+}
+
 static bool handle_connection(int fd) {
     size_t len      = 0;
     size_t head_len = 0;
@@ -1315,9 +1375,7 @@ static bool handle_connection(int fd) {
     }
 
     if (req.route == OTA_ROUTE_INFO) {
-        // "deflate chunks" tells tools/badge.sh this receiver takes compressed bodies and pieces
-        respond(fd, 200, "badge_fw %s; receiver: deflate chunks%s", esp_app_get_description()->version,
-                hooks.prepare ? " prepare" : "");
+        respond_info(fd);
         return false;
     }
 

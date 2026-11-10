@@ -424,6 +424,33 @@ ota_chunks() {
     [ "$OTA_CHUNKS" = yes ]
 }
 
+# ota_room <ip> <bytes> [what]: stop with a plain message when the badge says (in /info, #299) that /storage can't take a
+# file of <bytes>; an upload is written next to the old file before the swap, so it needs its own room plus a cluster.
+# A receiver that doesn't say is let through: it answers 507 itself, or fails the write as before.
+ota_room() {
+    local ip=$1 bytes=$2 what=${3:-the file} line free need
+    line=$(ota_info_line "$ip")
+    [[ $line =~ storage\ free\ ([0-9]+) ]] || return 0
+    free=${BASH_REMATCH[1]}
+    need=$(( (bytes + 4095) / 4096 * 4096 + 4096 ))
+    if [ "$free" -lt "$need" ]; then
+        echo "not enough space on the badge's internal storage for $what: needs $need bytes, $free free." >&2
+        echo "Nothing was sent. See what takes the room with 'fw $ip storage' and free some first." >&2
+        return 1
+    fi
+}
+
+# Whether a refused piece is worth sending again: the badge says "send it again" for damage in transit or in memory;
+# anything else it answered (no room, wrong offset, bad path, ...) comes back the same, so it's reported at once (#299)
+ota_piece_retry() {
+    case $1 in
+        *"send it again"*) return 0 ;;
+        *"curl: (22)"*) return 1 ;; # an HTTP error the badge answered (--fail-with-body)
+        *"curl: ("*) return 0 ;;    # no answer from the badge: the link, try again
+        *) return 1 ;;
+    esac
+}
+
 OTA_PIECE=${BADGE_OTA_PIECE:-131072} # bytes per piece; a damaged piece is resent alone
 OTA_PIECE_TRIES=${BADGE_OTA_PIECE_TRIES:-6}
 
@@ -450,6 +477,11 @@ ota_put_pieces() {
             pad=$(printf '%*s' $((RANDOM % 16)) '' | tr ' ' x)
             if reply=$(ota_curl "${args[@]}" -H "X-Pad: x$pad" "http://$ip:$OTA_PORT/$route" 2>&1); then
                 break
+            fi
+            if ! ota_piece_retry "$reply"; then
+                rm -f -- "$piece" "$snapshot"
+                echo "the badge refused the piece at $offset: $reply" >&2
+                return 1
             fi
             if [ "$try" -ge "$OTA_PIECE_TRIES" ]; then
                 rm -f -- "$piece" "$snapshot"
@@ -518,7 +550,11 @@ cmd_ota_firmware() {
     [ "$reboot" = --no-reboot ] || cmd_ota_reboot "$ip"
 }
 
-cmd_ota_file() { ota_put "$1" file "$2" "$3"; }
+cmd_ota_file() {
+    [ -f "$2" ] || { echo "no such file: $2" >&2; exit 1; }
+    ota_room "$1" "$(stat -c %s "$2")" "$2" || exit 1
+    ota_put "$1" file "$2" "$3"
+}
 
 # The assets partition (#22): always sent in checked pieces (the receiver takes nothing else there), after /prepare
 # and followed by a reboot, because the running firmware reads the partition in place
@@ -687,6 +723,11 @@ c6_check_local() {
 cmd_ota_c6() {
     local ip=$1 dir=${2:-$REPO/firmware/storage_staging/c6} name f i
     c6_check_local "$dir" || exit 1
+    # Checked before the first file, so a full drive can't leave a mixed bundle behind (#299): the files are swapped
+    # in one at a time, so the largest one has to fit
+    local largest
+    largest=$(stat -c %s "$dir"/*.bin | sort -n | tail -1)
+    ota_room "$ip" "$largest" "the C6 bundle (largest file $largest bytes)" || exit 1
     # No /prepare here: after it the receiver refuses file pushes (409) until the next boot
     for name in "${C6_BUNDLE_FILES[@]}"; do
         for f in "$name.bin" "$name.bin.md5"; do

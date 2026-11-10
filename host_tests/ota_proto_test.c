@@ -239,7 +239,22 @@ static void test_server_listens(void) {
     CHECK(!ota_server_listens(true, ota_token_kept(false, false, false, false))); // nothing read, nothing saved
 }
 
+// #299: a 1.5 MB C6 firmware.bin was refused only after 18 s of writing, with 1 MB free; the receiver now checks first.
+// The upload is written next to the old file before the swap, so it needs its own clusters plus one of slack.
+static void test_file_fits(void) {
+    CHECK(!ota_file_fits(1048576, 1513520, 4096)); // the #299 case
+    CHECK(ota_file_fits(2621440, 1513520, 4096));
+    CHECK(ota_file_fits(8192, 4096, 4096));  // one cluster + one of slack
+    CHECK(!ota_file_fits(8191, 4096, 4096));
+    CHECK(!ota_file_fits(8192, 4097, 4096)); // a partial cluster takes a whole one
+    CHECK(ota_file_fits(4096, 0, 4096));     // an empty file still needs its directory slack
+    CHECK(!ota_file_fits(0, 0, 4096));
+    CHECK(ota_file_fits(2, 1, 0));           // no cluster size: count bytes
+    CHECK(!ota_file_fits(UINT64_MAX, UINT64_MAX, 4096)); // no overflow
+}
+
 int main(void) {
+    test_file_fits();
     test_token_kept();
     test_server_listens();
     test_routes_need_token();
