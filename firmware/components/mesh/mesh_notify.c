@@ -230,6 +230,11 @@ static bool same_chat(mn_note_t const *n, mn_kind_t kind, mesh_chat_key_t const 
            (key->kind == MESH_CHAT_DM ? memcmp(n->key.id, key->id, 6) == 0 : strcmp(n->key.chan, key->chan) == 0);
 }
 
+void mn_text_prepare(mn_text_t *out, char const *title, char const *body) {
+    mesh_sanitize(title, strlen(title), out->title, sizeof(out->title));
+    mesh_sanitize(body, strlen(body), out->body, sizeof(out->body));
+}
+
 bool mn_queue_push(mn_queue_t *q, mn_kind_t kind, mesh_chat_key_t const *key, char const *title, char const *body,
                    bool mention) {
     mn_note_t *n = NULL;

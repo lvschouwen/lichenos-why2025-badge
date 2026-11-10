@@ -1,7 +1,7 @@
 #pragma once
 // What the badge sent and where it stands (#45, for #46 channel sends and #47 DMs): a fixed table of outgoing messages
 // with their delivery state machine. ESP-free and without a clock of its own (now_ms is passed in, 32-bit wrap safe).
-// Not locked: the caller wraps each call in one short critical section. The mesh task takes actions out with
+// Not locked: the caller wraps each call in one short section under its outbox lock (a mutex, as the table is in PSRAM). The mesh task takes actions out with
 // ob_next_action and reports MyMesh's replies back; the UI adds messages and reads states.
 #include "mesh_frame.h"
 
@@ -98,6 +98,24 @@ typedef struct {
 // true: try the outbox before the FIFO
 bool ob_arb_outbox_first(ob_arb_t const *arb, bool fifo_has);
 void ob_arb_took(ob_arb_t *arb, bool internal);
+
+// What the mesh task's sync needs of every message on each pass (#46), without its target and text: the copy made
+// under the outbox lock stays small (#271). A fresh message (not in the screens' store yet) has its target and text
+// fetched on its own with ob_copy_text.
+typedef struct {
+    mesh_msg_id_t id;
+    uint32_t      trip_ms;
+    uint8_t       kind, state, attempt, repeats;
+    bool          fresh;
+    uint8_t       prefix[MF_PREFIX];
+} ob_sync_t;
+
+// The used entries into out (at most max), in table order; returns how many
+size_t ob_sync_states(ob_t const *ob, ob_sync_t *out, size_t max);
+// The target and text of one message (NUL-terminated, empty when false); false when it is no longer in the table
+bool ob_copy_text(ob_t const *ob, mesh_msg_id_t id, char target[OB_TARGET_MAX], char text[OB_TEXT_MAX]);
+// The screens' store has taken the message: it is no longer fresh
+void ob_mark_in_store(ob_t *ob, mesh_msg_id_t id);
 
 // ob_get false for an id means finished and evicted (the table keeps the newest OB_CAP) or never queued
 bool ob_get(ob_t const *ob, mesh_msg_id_t id, mesh_out_state_t *st, uint8_t *attempt, uint8_t *repeats,

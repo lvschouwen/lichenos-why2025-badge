@@ -3,8 +3,8 @@
 // no phone, so this in-RAM pipe is that interface. It is connected (so MyMesh produces send confirmations, login and
 // status replies, path updates), drains MyMesh's offline queue (the screens get messages from the Listener instead),
 // and turns the outbox (mesh_outbox.h) into CMD frames. Everything here runs on the mesh task inside MyMesh::loop(),
-// under the mesh lock; only the outbox is shared, through mesh_ob_enter/exit (a critical section, defined by the
-// platform: mesh_task.cpp on the badge, a no-op in the host test).
+// under the mesh lock; only the outbox is shared, through mesh_ob_enter/exit (a mutex, as the outbox is in PSRAM, #271;
+// defined by the platform: mesh_task.cpp on the badge, a no-op in the host test).
 #include "advert_limit.h"
 #include "mesh_blobq.h"
 #include "mesh_contact_fmt.h"

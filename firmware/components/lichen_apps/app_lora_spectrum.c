@@ -5,6 +5,7 @@
 // never on the LVGL task; the screen only draws what that task hands over.
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lichen_app.h"
 #include "lichen_mem.h"
@@ -43,7 +44,7 @@ typedef enum {
     ST_NO_MEMORY,
 } spec_state_t;
 
-// Between the worker and the LVGL task, under mux; in PSRAM, made at the first open and kept
+// Between the worker and the LVGL task, under lock(); in PSRAM, made at the first open and kept
 typedef struct {
     bool                want;        // the screen is open
     bool                alive;       // the worker task exists
@@ -59,8 +60,19 @@ typedef struct {
 } shared_t;
 
 static lichen_app_t const spectrum_app; // defined at the end: the owner of the task and the buffers (#181)
-static portMUX_TYPE        mux = portMUX_INITIALIZER_UNLOCKED;
 static shared_t    *sh;
+
+// A mutex, not a spinlock: sh and ui are in PSRAM, and a critical section must never touch PSRAM (lichen_task.c,
+// #271). Made with sh, on the LVGL task before the first worker: everything that locks has seen sh set.
+static StaticSemaphore_t sh_lock_buf;
+static SemaphoreHandle_t sh_lock;
+
+static void lock(void) {
+    xSemaphoreTake(sh_lock, portMAX_DELAY);
+}
+static void unlock(void) {
+    xSemaphoreGive(sh_lock);
+}
 
 // The screen's own, LVGL task only, in PSRAM while it is open
 typedef struct {
@@ -82,28 +94,28 @@ static void on_update(void *arg);
 
 // One queued update at a time: the LVGL task reads the newest state when it runs
 static void post(void) {
-    portENTER_CRITICAL(&mux);
+    lock();
     bool need  = !sh->posted;
     sh->posted = true;
-    portEXIT_CRITICAL(&mux);
+    unlock();
     if (need && !lichen_ui_call(on_update, NULL)) {
-        portENTER_CRITICAL(&mux);
+        lock();
         sh->posted = false; // the next state change tries again
-        portEXIT_CRITICAL(&mux);
+        unlock();
     }
 }
 
 static void set_state(spec_state_t st) {
-    portENTER_CRITICAL(&mux);
+    lock();
     sh->state = st;
-    portEXIT_CRITICAL(&mux);
+    unlock();
     post();
 }
 
 static bool wanted(void) {
-    portENTER_CRITICAL(&mux);
+    lock();
     bool w = sh->want;
-    portEXIT_CRITICAL(&mux);
+    unlock();
     return w;
 }
 
@@ -125,9 +137,9 @@ static spec_state_t state_of(lora_sweep_err_t err) {
 
 // One sweep of the band the screen asks for, handed to the screen
 static void sweep_once(lora_sweep_result_t *res) {
-    portENTER_CRITICAL(&mux);
+    lock();
     uint8_t band = sh->band;
-    portEXIT_CRITICAL(&mux);
+    unlock();
     uint8_t     sf, cr;
     uint16_t    preamble;
     uint32_t    bw;
@@ -151,14 +163,14 @@ static void sweep_once(lora_sweep_result_t *res) {
         wait_while_wanted(RETRY_MS);
         return;
     }
-    portENTER_CRITICAL(&mux);
+    lock();
     sh->result = *res;
     sh->plan   = plan;
     sh->result_band = band;
     sh->fresh  = true;
     sh->state  = ST_LIVE;
     sh->sweeps++;
-    portEXIT_CRITICAL(&mux);
+    unlock();
     post();
     wait_while_wanted(SWEEP_GAP_MS);
 }
@@ -178,9 +190,9 @@ static void borrow_and_sweep(lora_sweep_result_t *res) {
     // screen closes (or an update asks this app to stop).
     bool paused  = lichen_radio_lora_pause(&was_running, wanted);
     bool claimed = paused && wanted() && lora_claim(OWNER, NULL);
-    portENTER_CRITICAL(&mux);
+    lock();
     sh->paused_mesh = was_running;
-    portEXIT_CRITICAL(&mux);
+    unlock();
     if (!claimed) {
         ESP_LOGW(TAG, "LoRa radio not free (MeshCore %s)", paused ? "paused" : "did not stop");
         set_state(ST_NOT_FREE);
@@ -219,10 +231,10 @@ static void worker(void *arg) {
             borrow_and_sweep(res);
         }
         // Opened again while giving back: start over instead of leaving the new screen without a worker
-        portENTER_CRITICAL(&mux);
+        lock();
         bool again = sh->want && res;
         sh->alive  = again;
-        portEXIT_CRITICAL(&mux);
+        unlock();
         if (!again) {
             break;
         }
@@ -232,19 +244,19 @@ static void worker(void *arg) {
 
 // LVGL task, from open: the worker starts, or the one still giving back carries on
 static void worker_want(void) {
-    portENTER_CRITICAL(&mux);
+    lock();
     sh->want    = true;
     sh->fresh   = false;
     sh->state   = ST_STARTING;
     bool create = !sh->alive;
     sh->alive   = true;
-    portEXIT_CRITICAL(&mux);
+    unlock();
     if (create &&
         !lichen_task_start(&spectrum_app, "spectrum", worker, NULL, WORKER_STACK, LICHEN_PRIO_BACKGROUND, NULL)) {
-        portENTER_CRITICAL(&mux);
+        lock();
         sh->alive = false;
         sh->state = ST_NO_MEMORY;
-        portEXIT_CRITICAL(&mux);
+        unlock();
         ESP_LOGW(TAG, "worker task not started");
     }
 }
@@ -369,7 +381,7 @@ static void draw_status(spec_state_t st, uint32_t sweeps, bool paused_mesh) {
 // LVGL task: the worker's newest state and sweep
 static void on_update(void *arg) {
     (void)arg;
-    portENTER_CRITICAL(&mux);
+    lock();
     sh->posted          = false;
     // A sweep of the band before an Enter is dropped: the next one is of the new band
     bool         fresh  = sh->fresh && ui && sh->result_band == ui->band;
@@ -381,7 +393,7 @@ static void on_update(void *arg) {
         ui->shown = sh->result;
         sh->fresh = false;
     }
-    portEXIT_CRITICAL(&mux);
+    unlock();
     if (!ui) {
         return; // closed meanwhile
     }
@@ -405,10 +417,10 @@ static void on_key(lv_event_t *e) {
     if (key == LV_KEY_ENTER) {
         // Another band: the bars go flat at once, the worker takes it from its next sweep
         ui->band = (uint8_t)((ui->band + 1) % SPEC_BANDS);
-        portENTER_CRITICAL(&mux);
+        lock();
         sh->band  = ui->band;
         sh->fresh = false;
-        portEXIT_CRITICAL(&mux);
+        unlock();
         spec_plan_t none = {0}; // count 0: no bars until the new band's first sweep
         lay_out(&none);
         char text[64];
@@ -428,9 +440,9 @@ static void on_key(lv_event_t *e) {
 
 static void on_delete(lv_event_t *e) {
     (void)e;
-    portENTER_CRITICAL(&mux);
+    lock();
     sh->want = false; // the worker gives the radio back and MeshCore starts again
-    portEXIT_CRITICAL(&mux);
+    unlock();
     lichen_free(&spectrum_app, ui);
     ui = NULL;
 }
@@ -473,6 +485,9 @@ static int32_t two_lines(lv_obj_t *label) {
 
 static void open_spectrum(lv_obj_t *screen) {
     if (!sh) {
+        if (!sh_lock) {
+            sh_lock = xSemaphoreCreateMutexStatic(&sh_lock_buf); // static: cannot fail
+        }
         sh = lichen_alloc(&spectrum_app, sizeof(*sh), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // kept for good
     }
     ui = sh ? lichen_alloc(&spectrum_app, sizeof(*ui), LICHEN_MEM_BULK | LICHEN_MEM_ZERO) : NULL;
@@ -498,17 +513,17 @@ static void open_spectrum(lv_obj_t *screen) {
     shell_page_hint(screen, "Enter", "other band", "Backspace", "clear highest", NULL);
     lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    portENTER_CRITICAL(&mux);
+    lock();
     ui->band = sh->band; // the band chosen last time
-    portEXIT_CRITICAL(&mux);
+    unlock();
     char text[64];
     snprintf(text, sizeof(text), "Scanning %s...", spec_bands[ui->band].name);
     lv_label_set_text(ui->caption, text);
     draw_waiting();
     worker_want();
-    portENTER_CRITICAL(&mux);
+    lock();
     spec_state_t st = sh->state;
-    portEXIT_CRITICAL(&mux);
+    unlock();
     draw_status(st, 0, false);
 }
 
@@ -518,13 +533,13 @@ static bool spectrum_stop_for_update(void) {
     if (!sh) {
         return true;
     }
-    portENTER_CRITICAL(&mux);
+    lock();
     sh->want = false;
-    portEXIT_CRITICAL(&mux);
+    unlock();
     for (uint32_t t = 0; t < STOP_WAIT_MS; t += 50) {
-        portENTER_CRITICAL(&mux);
+        lock();
         bool alive = sh->alive;
-        portEXIT_CRITICAL(&mux);
+        unlock();
         if (!alive) {
             return true;
         }

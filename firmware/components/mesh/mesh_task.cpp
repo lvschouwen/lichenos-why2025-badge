@@ -131,9 +131,25 @@ static EspRng            rng;
 static SimpleMeshTables *tables;
 static DataStore         store(SPIFFS, rtc_clock);
 static BadgeMesh        *node;
-static ob_t             *outbox;            // PSRAM; shared with the UI under ob_mux (mesh_link.h)
+static ob_t             *outbox;            // PSRAM; shared with the UI under the outbox lock (mesh_link.h)
 static volatile int      offline_queue_len; // MyMesh's offline queue, from the Listener (#55: stays ~0 now)
-static portMUX_TYPE      ob_mux = portMUX_INITIALIZER_UNLOCKED;
+
+// The locks of data that lives in PSRAM (the outbox, trace and remote requests, air log, signal history) or is copied
+// from or into it (the discovery table): FreeRTOS mutexes, not spinlocks, as a critical section must never touch PSRAM,
+// whose cache can be off during a flash write (lichen_task.c, #271). No ISR takes them and nothing blocks while one is
+// held. Made on first use (thread-safe statics), so a screen may ask before MeshCore starts.
+enum section_t { SECTION_OUTBOX, SECTION_AIRLOG, SECTION_DISCOVER, SECTION_SIGNAL };
+template <section_t S> static SemaphoreHandle_t section_mutex(void) {
+    static StaticSemaphore_t buf;
+    static SemaphoreHandle_t handle = xSemaphoreCreateMutexStatic(&buf);
+    return handle;
+}
+template <section_t S> static void section_enter(void) {
+    xSemaphoreTake(section_mutex<S>(), portMAX_DELAY);
+}
+template <section_t S> static void section_exit(void) {
+    xSemaphoreGive(section_mutex<S>());
+}
 
 // DataStore::formatFileSystem() (the app's factory reset) erases NVS on ESP32; on the badge that would take the Wi-Fi
 // credentials with it, so DataStore.cpp is built with nvs_flash_erase renamed to this: MeshCore's own files go (the
@@ -145,10 +161,10 @@ extern "C" esp_err_t mesh_nvs_flash_erase(void) {
 }
 
 extern "C" void mesh_ob_enter(void) {
-    portENTER_CRITICAL(&ob_mux);
+    section_enter<SECTION_OUTBOX>();
 }
 extern "C" void mesh_ob_exit(void) {
-    portEXIT_CRITICAL(&ob_mux);
+    section_exit<SECTION_OUTBOX>();
 }
 extern "C" void mesh_advert_limited(uint32_t refused) {
     ESP_LOGW(TAG, "adverts from new nodes rate-limited (%lu dropped since boot): an advert flood?",
@@ -541,41 +557,27 @@ void BadgeBoard::reboot() {
 }
 
 // Our channel messages go into the screens' store as "me: <text>", and their outbox state follows (#46). With the mesh
-// lock held (the store is under it); the outbox is read in short spinlock sections, the copies are made outside them.
-struct OutSync {
-    mesh_msg_id_t id;
-    uint8_t       state, repeats, attempt, kind, prefix[MF_PREFIX];
-    uint32_t      trip_ms;
-    bool          fresh;
-    char          target[OB_TARGET_MAX];
-    char          text[OB_TEXT_MAX];
-};
-static OutSync out_sync[OB_CAP];
+// lock held (the store is under it). The outbox is read in short sections under its lock: each pass copies only the
+// small states (ob_sync_states), and a fresh message's target and text one at a time (#271); the work is done outside.
+static ob_sync_t out_sync[OB_CAP]; // mesh task only
 
-// An own message has just ended FAILED (#50): its target and text are read again from the outbox, as only fresh
-// entries are copied above
-static void notify_failed(OutSync const &o) {
-    char       target[OB_TARGET_MAX] = "";
-    char       text[OB_TEXT_MAX]     = "";
-    uint8_t    kind                  = OB_CHANNEL;
-    uint8_t    prefix[MF_PREFIX]     = {0};
+// An own message has just ended FAILED (#50): its target and text are read again from the outbox
+static void notify_failed(ob_sync_t const &o) {
+    char target[OB_TARGET_MAX];
+    char text[OB_TEXT_MAX];
     mesh_ob_enter();
-    for (int i = 0; i < OB_CAP && outbox; i++) {
-        ob_entry_t const *e = &outbox->e[i];
-        if (e->used && e->id == o.id) {
-            memcpy(target, e->target, sizeof(target));
-            memcpy(text, e->text, sizeof(text));
-            memcpy(prefix, e->prefix, sizeof(prefix));
-            kind = e->kind;
-        }
+    if (outbox) {
+        ob_copy_text(outbox, o.id, target, text);
+    } else {
+        target[0] = text[0] = '\0';
     }
     mesh_ob_exit();
     mesh_chat_key_t key;
     char            title[MESH_CHANNEL_MAX + 2];
-    if (kind == OB_DM) {
-        ContactInfo *c = node ? node->lookupContactByPubKey(prefix, MF_PREFIX) : nullptr;
+    if (o.kind == OB_DM) {
+        ContactInfo *c = node ? node->lookupContactByPubKey(o.prefix, MF_PREFIX) : nullptr;
         snprintf(title, sizeof(title), "@%s", c ? c->name : "?");
-        mesh_chat_key_dm(&key, prefix);
+        mesh_chat_key_dm(&key, o.prefix);
     } else {
         snprintf(title, sizeof(title), "%s", target);
         mesh_chat_key_channel(&key, target);
@@ -583,61 +585,52 @@ static void notify_failed(OutSync const &o) {
     mesh_notify_failed(&key, title, text);
 }
 
+// A fresh message into the screens' store; true when the store took it (it is marked in_store then). One that left the
+// table since the states were copied is skipped: it has nothing left to show.
+static bool sync_add_fresh(ob_sync_t const &o) {
+    char target[OB_TARGET_MAX];
+    char text[OB_TEXT_MAX];
+    mesh_ob_enter();
+    bool have = outbox && ob_copy_text(outbox, o.id, target, text);
+    mesh_ob_exit();
+    if (!have) {
+        return false;
+    }
+    char line[MESH_TEXT_MAX + 1];
+    snprintf(line, sizeof(line), "me: %.*s", (int)(sizeof(line) - 5), text); // cut where the plain %s cut it (#46)
+    bool            ok;
+    mesh_chat_key_t key;
+    if (o.kind == OB_DM) {
+        ContactInfo *c = node ? node->lookupContactByPubKey(o.prefix, MF_PREFIX) : nullptr;
+        snprintf(target, sizeof(target), "@%s", c ? c->name : "?");
+        ok = mesh_store_add_outgoing_dm(target, line, o.id, mesh_uptime_s(), o.prefix);
+        mesh_chat_key_dm(&key, o.prefix);
+    } else {
+        ok = mesh_store_add_outgoing(target, line, o.id, mesh_uptime_s());
+        mesh_chat_key_channel(&key, target);
+    }
+    if (ok) {
+        mesh_journal_outgoing_locked(&key); // held until its state is final
+        mesh_ob_enter();
+        ob_mark_in_store(outbox, o.id);
+        mesh_ob_exit();
+    }
+    return ok;
+}
+
 // true when a message was added to the store (which may have evicted a chat, so the unread total can have changed)
 static bool sync_outgoing(void) {
-    size_t n = 0;
     mesh_ob_enter();
-    for (int i = 0; i < OB_CAP && outbox; i++) {
-        ob_entry_t *e = &outbox->e[i];
-        if (!e->used) {
-            continue;
-        }
-        OutSync &o = out_sync[n++];
-        o.id       = e->id;
-        o.state    = e->state;
-        o.repeats  = e->repeats;
-        o.attempt  = e->attempt;
-        o.kind     = e->kind;
-        o.trip_ms  = e->trip_ms;
-        memcpy(o.prefix, e->prefix, MF_PREFIX);
-        o.fresh    = !e->in_store;
-        if (o.fresh) {
-            memcpy(o.target, e->target, sizeof(o.target));
-            memcpy(o.text, e->text, sizeof(o.text));
-        }
-    }
+    size_t n = outbox ? ob_sync_states(outbox, out_sync, OB_CAP) : 0;
     mesh_ob_exit();
     bool added = false;
     for (size_t i = 0; i < n; i++) {
-        OutSync &o = out_sync[i];
+        ob_sync_t const &o = out_sync[i];
         if (o.fresh) {
-            char line[MESH_TEXT_MAX + 1];
-            snprintf(line, sizeof(line), "me: %s", o.text);
-            bool            ok;
-            mesh_chat_key_t key;
-            if (o.kind == OB_DM) {
-                ContactInfo *c = node ? node->lookupContactByPubKey(o.prefix, MF_PREFIX) : nullptr;
-                snprintf(o.target, sizeof(o.target), "@%s", c ? c->name : "?");
-                ok = mesh_store_add_outgoing_dm(o.target, line, o.id, mesh_uptime_s(), o.prefix);
-                mesh_chat_key_dm(&key, o.prefix);
-            } else {
-                ok = mesh_store_add_outgoing(o.target, line, o.id, mesh_uptime_s());
-                mesh_chat_key_channel(&key, o.target);
-            }
-            if (ok) {
-                mesh_journal_outgoing_locked(&key); // held until its state is final
-            }
             // in_store only after the store took it: a dropped one is tried again on the next pass (logged once)
             static mesh_msg_id_t failed_logged;
-            if (ok) {
+            if (sync_add_fresh(o)) {
                 added = true;
-                mesh_ob_enter();
-                for (int k = 0; k < OB_CAP && outbox; k++) {
-                    if (outbox->e[k].used && outbox->e[k].id == o.id) {
-                        outbox->e[k].in_store = true;
-                    }
-                }
-                mesh_ob_exit();
             } else if (failed_logged != o.id) {
                 failed_logged = o.id;
                 ESP_LOGW(TAG, "outgoing message %lu not in the store, will retry", (unsigned long)o.id);
@@ -929,12 +922,15 @@ static void settings_from_node(MyMesh *n) {
     s.tx_dbm         = prefs->tx_power_dbm;
     snprintf(s.scope, sizeof(s.scope), "%s", prefs->default_scope_name);
     radio_from_prefs(prefs, &radio_cache);
+    bool             share = prefs->advert_loc_policy != ADVERT_LOC_NONE; // read before the spinlock: prefs are in PSRAM
+    advcfg_autoadd_t autoadd;
+    mesh_prefs_get_autoadd(prefs, &autoadd);
     portENTER_CRITICAL(&settings_mux);
     settings_cache = s;
-    acfg_cache.lat   = sensors.node_lat; // what an advert carries, and what savePrefs stores
-    acfg_cache.lon   = sensors.node_lon;
-    acfg_cache.share = prefs->advert_loc_policy != ADVERT_LOC_NONE;
-    mesh_prefs_get_autoadd(prefs, &acfg_cache.autoadd);
+    acfg_cache.lat     = sensors.node_lat; // what an advert carries, and what savePrefs stores
+    acfg_cache.lon     = sensors.node_lon;
+    acfg_cache.share   = share;
+    acfg_cache.autoadd = autoadd;
     settings_known = true;
     portEXIT_CRITICAL(&settings_mux);
 }
@@ -1785,7 +1781,7 @@ extern "C" bool mesh_out_state(mesh_msg_id_t id, mesh_out_state_t *st, uint8_t *
     return ok;
 }
 
-// Copies what the list needs under the lock; the formatting happens after it (snprintf inside a portMUX stalls both cores)
+// Copies what the list needs under the outbox lock; the formatting happens after it, so the lock is held only briefly
 struct OutSnap {
     mesh_out_info_t info;
     uint8_t         prefix[MF_PREFIX];
@@ -1843,7 +1839,7 @@ extern "C" size_t mesh_out_list(mesh_out_info_t *out, size_t max) {
 static char const *const OUT_STATE_NAME[] = {"queued", "sent", "on air", "heard repeated", "delivered", "FAILED"};
 
 // ---- trace path and path discovery (#53) ---------------------------------------------------------------------------
-// One request at a time, shared with the pipe under ob_mux like the outbox: copy-in, never the mesh lock (LVGL safe)
+// One request at a time, shared with the pipe under the outbox lock: copy-in, never the mesh lock (LVGL safe)
 
 static mt_t *trace_req; // PSRAM, made with the outbox
 
@@ -1871,13 +1867,13 @@ extern "C" bool mesh_trace_get(mt_t *out) {
         return false;
     }
     mesh_ob_enter();
-    mt_poll(trace_req, (uint32_t)millis(), out); // a plain copy: the lines are made after the critical section
+    mt_poll(trace_req, (uint32_t)millis(), out); // a plain copy: the lines are made after the lock
     mesh_ob_exit();
     return true;
 }
 
 // ---- log in, status and CLI for a repeater or room (#51) -------------------------------------------------------------
-// One request at a time, shared with the pipe under ob_mux like the trace: copy-in, never the mesh lock (LVGL safe)
+// One request at a time, shared with the pipe under the outbox lock like the trace: copy-in, never the mesh lock (LVGL safe)
 
 static rr_t *remote_req; // PSRAM, made with the outbox
 static tl_rate_t telem_rate; // when each contact was last asked for telemetry (#162), under mesh_ob_enter/exit
@@ -1950,7 +1946,7 @@ extern "C" bool mesh_remote_head(rr_head_t *out) {
     if (!remote_req) {
         return false;
     }
-    rr_head_t h; // internal RAM: the critical section copies only this, never into PSRAM
+    rr_head_t h; // the lock is held for this small copy only
     mesh_ob_enter();
     rr_poll_head(remote_req, (uint32_t)millis(), &h);
     mesh_ob_exit();
@@ -3131,10 +3127,9 @@ extern "C" bool mesh_radio_params(mesh_radio_t *out, uint32_t wait_ms) {
 }
 
 // ---- the air log (#165) ----------------------------------------------------------------------------------------
-// The ring is written on the mesh task (inside MyMesh::loop(), mesh lock held) and read by the screen. Its own
-// spinlock covers only the push and the copy, never held together with the mesh lock's work or LVGL's lock.
+// The ring is written on the mesh task (inside MyMesh::loop(), mesh lock held) and read by the screen. Its own lock
+// (a mutex: the ring and the screen's copy are in PSRAM, #271) covers only the push and the copy.
 
-static portMUX_TYPE   airlog_mux = portMUX_INITIALIZER_UNLOCKED;
 static airlog_t       airlog_ring;
 static bool           airlog_failed;
 
@@ -3150,31 +3145,31 @@ extern "C" void mesh_airlog_note(uint8_t header, uint8_t path_len, uint8_t const
             ESP_LOGW(TAG, "air log: no memory, packets are not listed");
             return;
         }
-        portENTER_CRITICAL(&airlog_mux);
+        section_enter<SECTION_AIRLOG>();
         airlog_init(&airlog_ring, mem, AIRLOG_CAP);
-        portEXIT_CRITICAL(&airlog_mux);
+        section_exit<SECTION_AIRLOG>();
     }
     int16_t rssi_x10 = (int16_t)lroundf(rssi * 10.0f);
     int16_t snr_x10  = (int16_t)lroundf(snr * 10.0f);
     uint32_t at_s    = mesh_uptime_s();
-    portENTER_CRITICAL(&airlog_mux);
+    section_enter<SECTION_AIRLOG>();
     airlog_push(&airlog_ring, header, path_len, path, raw_len, rssi_x10, snr_x10, at_s);
-    portEXIT_CRITICAL(&airlog_mux);
+    section_exit<SECTION_AIRLOG>();
 }
 
 extern "C" size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq) {
-    portENTER_CRITICAL(&airlog_mux);
+    section_enter<SECTION_AIRLOG>();
     size_t n = airlog_ring.e ? airlog_copy(&airlog_ring, out, max) : 0;
     *seq     = airlog_ring.seq;
-    portEXIT_CRITICAL(&airlog_mux);
+    section_exit<SECTION_AIRLOG>();
     return n;
 }
 
 // ---- Discover nearby (#167) ----------------------------------------------------------------------------------------
 // The screen asks (any task, no mesh lock): the request is only marked pending; the mesh loop puts it on air under the
-// lock and its listener feeds the answers into the table. The table has its own spinlock, as the air log.
+// lock and its listener feeds the answers into the table. The table has its own lock, as the air log: a mutex, as the
+// answers' names come from the contacts and the screen's copy goes into its memory, both in PSRAM (#271).
 
-static portMUX_TYPE disc_mux = portMUX_INITIALIZER_UNLOCKED;
 static disc_t       disc_table; // zero = DISC_IDLE
 
 extern "C" bool mesh_discover_start(char const **why) {
@@ -3186,25 +3181,25 @@ extern "C" bool mesh_discover_start(char const **why) {
     }
     uint32_t tag;
     lichen_random_fill(&tag, sizeof(tag));
-    portENTER_CRITICAL(&disc_mux);
+    section_enter<SECTION_DISCOVER>();
     bool ok = disc_start(&disc_table, tag, mesh_uptime_s(), why);
-    portEXIT_CRITICAL(&disc_mux);
+    section_exit<SECTION_DISCOVER>();
     return ok;
 }
 
 extern "C" void mesh_discover_get(disc_t *out) {
-    portENTER_CRITICAL(&disc_mux);
+    section_enter<SECTION_DISCOVER>();
     disc_poll(&disc_table, mesh_uptime_s());
     *out = disc_table;
-    portEXIT_CRITICAL(&disc_mux);
+    section_exit<SECTION_DISCOVER>();
 }
 
 // From the mesh loop, under the lock: sends a pending request
 static void discover_tick_locked(void) {
-    portENTER_CRITICAL(&disc_mux);
+    section_enter<SECTION_DISCOVER>();
     bool     pending = disc_table.state == DISC_PENDING;
     uint32_t tag     = disc_table.tag;
-    portEXIT_CRITICAL(&disc_mux);
+    section_exit<SECTION_DISCOVER>();
     if (!pending) {
         return;
     }
@@ -3223,13 +3218,13 @@ static void discover_tick_locked(void) {
             why = "no free packet";
         }
     }
-    portENTER_CRITICAL(&disc_mux);
+    section_enter<SECTION_DISCOVER>();
     if (why) {
         disc_failed(&disc_table, why);
     } else {
         disc_sent(&disc_table, mesh_uptime_s());
     }
-    portEXIT_CRITICAL(&disc_mux);
+    section_exit<SECTION_DISCOVER>();
     ESP_LOGI(TAG, "discover nearby: %s", why ? why : "request sent (zero hop)");
 }
 
@@ -3243,16 +3238,15 @@ static void discover_note_locked(mesh::Packet const *pkt) {
         name = c->name;
     }
     int16_t snr_x10 = (int16_t)lroundf(pkt->getSNR() * 10.0f);
-    portENTER_CRITICAL(&disc_mux);
+    section_enter<SECTION_DISCOVER>();
     disc_on_payload(&disc_table, pkt->payload, pkt->payload_len, snr_x10, name, mesh_uptime_s());
-    portEXIT_CRITICAL(&disc_mux);
+    section_exit<SECTION_DISCOVER>();
 }
 
 // ---- the signal history (#166) ---------------------------------------------------------------------------------------
 // Written on the mesh task (mesh lock held) from the advert and message hooks, read by the contact's Signal page. As
-// the air log: its own spinlock covers only the note and the copy, never held with the mesh lock's work or LVGL's lock.
+// the air log: its own lock (a mutex, the table is in PSRAM, #271) covers only the note and the copy.
 
-static portMUX_TYPE  signal_mux = portMUX_INITIALIZER_UNLOCKED;
 static sig_table_t  *signal_table;
 static bool          signal_failed;
 
@@ -3274,9 +3268,9 @@ extern "C" void mesh_signal_note(uint8_t const *pub_key, bool is_advert, uint8_t
     int16_t  rssi_x10 = (int16_t)lroundf(rssi * 10.0f);
     int16_t  snr_x10  = (int16_t)lroundf(snr * 10.0f);
     uint32_t at_s     = mesh_uptime_s();
-    portENTER_CRITICAL(&signal_mux);
+    section_enter<SECTION_SIGNAL>();
     sig_note(signal_table, pub_key, is_advert ? SIG_ADVERT : SIG_MESSAGE, rssi_x10, snr_x10, path_len, path, at_s);
-    portEXIT_CRITICAL(&signal_mux);
+    section_exit<SECTION_SIGNAL>();
 }
 
 extern "C" bool mesh_signal_get(uint8_t const prefix[6], sig_contact_t *out) {
@@ -3284,9 +3278,9 @@ extern "C" bool mesh_signal_get(uint8_t const prefix[6], sig_contact_t *out) {
     if (!t) {
         return false;
     }
-    portENTER_CRITICAL(&signal_mux);
+    section_enter<SECTION_SIGNAL>();
     bool found = sig_get(t, prefix, out);
-    portEXIT_CRITICAL(&signal_mux);
+    section_exit<SECTION_SIGNAL>();
     return found;
 }
 

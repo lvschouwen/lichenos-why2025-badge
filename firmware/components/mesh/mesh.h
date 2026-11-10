@@ -74,14 +74,14 @@ void mesh_identity_no_files(void);
 // call it any time. false before MeshCore is up.
 bool mesh_node_id(char *hex, size_t cap);
 
-// The home tile (#67): a copy of what the mesh task keeps up to date (a spinlock, never the mesh lock), safe any time
+// The home tile (#67): a copy of what the mesh task keeps up to date (its own spinlock, never the mesh lock), safe any time
 void mesh_tile_snapshot(mesh_tile_t *out);
 
 // The radio health page (#157): MeshCore's counters, the C6's channel reading and the LoRa task's drop counts, taken
 // under the mesh lock (up to wait_ms). false when MeshCore isn't running or the lock was busy. Reads only.
 bool mesh_health_snapshot(mesh_health_t *out, uint32_t wait_ms);
 
-// The air log (#165): up to max received packets, newest first, copied from the ring in a short spinlock section (not
+// The air log (#165): up to max received packets, newest first, copied from the ring under its own short lock (not
 // the mesh lock, never waits on MeshCore). *seq is the newest entry's sequence number (0: none yet), which changes
 // whenever a packet was added. The ring lives from the first packet on and survives MeshCore stopping and starting.
 size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq);
@@ -92,8 +92,8 @@ size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq);
 bool mesh_discover_start(char const **why);
 void mesh_discover_get(disc_t *out);
 
-// A contact's signal history (#166): the samples of its adverts and direct messages heard since start, copied in a short
-// spinlock section (not the mesh lock, never waits on MeshCore). false when nothing was heard from it. Receive only.
+// A contact's signal history (#166): the samples of its adverts and direct messages heard since start, copied under its own
+// short lock (not the mesh lock, never waits on MeshCore). false when nothing was heard from it. Receive only.
 bool mesh_signal_get(uint8_t const prefix[6], sig_contact_t *out);
 
 // The radio as MeshCore's prefs have it; the prefs are read under the mesh lock (up to wait_ms), else the copy taken at

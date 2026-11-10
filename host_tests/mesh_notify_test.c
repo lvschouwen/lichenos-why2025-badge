@@ -224,6 +224,32 @@ static void channel_match(void) {
     CHECK(mn_channel_match(cut, 3, key) == -1); // two share the cut: ambiguous, the list opens
 }
 
+// Prepared outside the spinlock (#271): the same note as the raw strings, also for control bytes, broken UTF-8, a
+// two-byte control character and texts longer than the note
+static void prepared_text(void) {
+    static char const *const titles[] = {"#a", "@Tester\x01", "\xff\xfe broken", "a\xc2\x85" "b",
+                                         "a channel name far longer than the forty bytes a note keeps"};
+    char long_body[300];
+    memset(long_body, 'x', sizeof(long_body) - 1);
+    long_body[sizeof(long_body) - 1] = '\0';
+    long_body[117]                   = '\xc3'; // a two-byte character across the cut
+    long_body[118]                   = '\xa9';
+    char const *const bodies[] = {"x: one", "tab\there\nnew line", "\xe2\x82", "a\xc2\x85\xc2\x85" "b", long_body};
+    for (size_t i = 0; i < sizeof(titles) / sizeof(titles[0]); i++) {
+        mn_queue_t      raw, pre;
+        mesh_chat_key_t k;
+        memset(&raw, 0, sizeof(raw));
+        memset(&pre, 0, sizeof(pre));
+        mesh_chat_key_channel(&k, "#a");
+        mn_text_t t;
+        mn_text_prepare(&t, titles[i], bodies[i]);
+        CHECK(mn_queue_push(&raw, MN_CHANNEL, &k, titles[i], bodies[i], false));
+        CHECK(mn_queue_push(&pre, MN_CHANNEL, &k, t.title, t.body, false));
+        CHECK(strcmp(raw.note[0].title, pre.note[0].title) == 0 && strcmp(raw.note[0].body, pre.note[0].body) == 0);
+        CHECK(strcmp(t.title, raw.note[0].title) == 0 && strcmp(t.body, raw.note[0].body) == 0);
+    }
+}
+
 int main(void) {
     channel_match();
     decide_matrix();
@@ -233,6 +259,7 @@ int main(void) {
     cache();
     queue();
     failtrack();
+    prepared_text();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

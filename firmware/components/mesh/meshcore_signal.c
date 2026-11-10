@@ -1,6 +1,6 @@
 // A contact's Signal page (#166): RSSI and SNR of the adverts and direct messages heard from it since start as two small
 // graphs, the last hop count, the last advert path and how often it was heard. The samples are the RAM history of
-// mesh_task.cpp (mesh_signal_get: a spinlock copy, never the mesh lock). Receive only: nothing here transmits.
+// mesh_task.cpp (mesh_signal_get: a short locked copy, never the mesh lock). Receive only: nothing here transmits.
 #include "lichen_mem.h"
 #include "meshcore_run.h"
 #include "lichen_ui.h"

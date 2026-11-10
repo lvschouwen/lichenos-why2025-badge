@@ -104,6 +104,14 @@ typedef struct {
 // body wins unless it would replace a mention with a plain line). false when it was dropped (full of other chats).
 bool mn_queue_push(mn_queue_t *q, mn_kind_t kind, mesh_chat_key_t const *key, char const *title, char const *body,
                    bool mention);
+// A title and body as mn_queue_push keeps them (sanitised, cut on a character boundary), made before the caller takes
+// its spinlock (#271: the title can be a channel name in MeshCore's PSRAM tables). Pushing them gives the same note as
+// pushing the originals: the push's own pass leaves them as they are.
+typedef struct {
+    char title[sizeof(((mn_note_t *)0)->title)];
+    char body[sizeof(((mn_note_t *)0)->body)];
+} mn_text_t;
+void mn_text_prepare(mn_text_t *out, char const *title, char const *body);
 // Moves everything out (oldest first), returns how many
 size_t mn_queue_take(mn_queue_t *q, mn_note_t *out, size_t max);
 

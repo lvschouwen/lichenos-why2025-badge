@@ -10,7 +10,7 @@ extern "C" {
 
 // "Discover nearby" (#167): one zero-hop control request (upstream CMD_SEND_CONTROL_DATA, a NODE_DISCOVER_REQ) that nearby
 // repeaters answer, shown live with SNR. Zero hop: it is heard by nodes in direct range and not passed on. Pure logic,
-// no ESP headers: built into the host tests. The table is not locked; mesh_task.cpp serialises (a spinlock).
+// no ESP headers: built into the host tests. The table is not locked; mesh_task.cpp serialises (a mutex, #271).
 
 #define DISC_PREFIX     8    // bytes of the answerer's public key kept (the request asks for the 8-byte prefix form)
 #define DISC_NAME_MAX   32

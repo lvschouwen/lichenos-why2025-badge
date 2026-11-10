@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 // Once a second from the mesh loop (mesh lock held; it takes the table's mutex for at most 20 ms and the remote
-// request's spinlock): the first call makes the table and reads the setting; then it ends our request, starts the next
+// request's lock): the first call makes the table and reads the setting; then it ends our request, starts the next
 // due one through mesh_remote_start_background, and writes the setting again while an earlier write failed
 void mesh_rhist_tick(void);
 // A screen that asks a repeater (Log in, Status, Command, Settings) opened (true) or went (false): no poll starts

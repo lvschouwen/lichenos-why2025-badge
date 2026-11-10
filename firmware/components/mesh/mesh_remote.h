@@ -85,8 +85,8 @@ typedef struct {
     uint8_t notag_prefix[MF_PREFIX];
 } rr_t;
 
-// What rr_request keeps of a command, worked out before the caller enters its lock (mesh_ob_enter is a critical
-// section): the command's class (mesh_rset.h) and the text the CLI history shows (a password hidden)
+// What rr_request keeps of a command, worked out before the caller enters its lock (mesh_ob_enter, held only
+// briefly): the command's class (mesh_rset.h) and the text the CLI history shows (a password hidden)
 typedef struct {
     uint8_t cls; // rs_cmd_class_t
     char    shown[RR_CMD_MAX + 1];

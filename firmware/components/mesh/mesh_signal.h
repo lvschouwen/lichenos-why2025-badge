@@ -10,7 +10,7 @@ extern "C" {
 
 // Signal history per contact (#166): the last samples of RSSI, SNR and hops from the adverts and direct messages of a
 // contact, in RAM only (lost at restart). Receive only: nothing here transmits. Pure logic, no ESP headers: built into
-// the host tests. The table is not locked; the caller serialises (mesh_task.cpp: a spinlock around note and copy).
+// the host tests. The table is not locked; the caller serialises (mesh_task.cpp: a mutex around note and copy, #271).
 
 #define SIG_CONTACTS 32 // contacts kept; the one heard longest ago makes room for a new one
 #define SIG_SAMPLES  24 // samples per contact

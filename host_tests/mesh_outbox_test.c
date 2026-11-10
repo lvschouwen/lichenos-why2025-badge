@@ -286,6 +286,35 @@ static void fail_pending(void) {
     CHECK(ob_retry(&ob, dm, 20)); // still retryable by hand
 }
 
+// The sync's small copy (#271): every used entry's state without its text, fresh until the store took it
+static void sync_states(void) {
+    ob_t ob;
+    ob_init(&ob);
+    char const   *why  = NULL;
+    mesh_msg_id_t chan = ob_add_channel(&ob, "#badgetest", "hello", 5, 0, &why);
+    mesh_msg_id_t dm   = ob_add_dm(&ob, PEER, "hi there", 8, 0, &why);
+    CHECK(chan && dm);
+    ob_sync_t out[OB_CAP];
+    memset(out, 0xa5, sizeof(out));
+    CHECK(ob_sync_states(&ob, out, OB_CAP) == 2);
+    CHECK(out[0].id == chan && out[0].kind == OB_CHANNEL && out[0].state == MESH_OUT_QUEUED && out[0].fresh);
+    CHECK(out[1].id == dm && out[1].kind == OB_DM && out[1].fresh && memcmp(out[1].prefix, PEER, MF_PREFIX) == 0);
+    CHECK(ob_sync_states(&ob, out, 1) == 1 && out[0].id == chan); // never more than max
+    ob_mark_in_store(&ob, chan);
+    ob_mark_in_store(&ob, 12345); // unknown: nothing changes
+    CHECK(ob_sync_states(&ob, out, OB_CAP) == 2);
+    CHECK(!out[0].fresh && out[1].fresh);
+
+    char target[OB_TARGET_MAX], text[OB_TEXT_MAX];
+    CHECK(ob_copy_text(&ob, chan, target, text));
+    CHECK(strcmp(target, "#badgetest") == 0 && strcmp(text, "hello") == 0);
+    CHECK(ob_copy_text(&ob, dm, target, text) && target[0] == '\0' && strcmp(text, "hi there") == 0);
+    memset(target, 'x', sizeof(target));
+    memset(text, 'x', sizeof(text));
+    CHECK(!ob_copy_text(&ob, 0, target, text) && target[0] == '\0' && text[0] == '\0');
+    CHECK(!ob_copy_text(&ob, 12345, target, text) && target[0] == '\0' && text[0] == '\0');
+}
+
 int main(void) {
     fail_pending();
     channel_flow();
@@ -297,6 +326,7 @@ int main(void) {
     ack_slots();
     arbitration();
     wrap();
+    sync_states();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

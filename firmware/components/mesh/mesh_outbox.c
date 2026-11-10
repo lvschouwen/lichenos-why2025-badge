@@ -366,3 +366,42 @@ bool ob_arb_outbox_first(ob_arb_t const *arb, bool fifo_has) {
 void ob_arb_took(ob_arb_t *arb, bool internal) {
     arb->last_internal = internal;
 }
+
+size_t ob_sync_states(ob_t const *ob, ob_sync_t *out, size_t max) {
+    size_t n = 0;
+    for (int i = 0; i < OB_CAP && n < max; i++) {
+        ob_entry_t const *e = &ob->e[i];
+        if (!e->used) {
+            continue;
+        }
+        ob_sync_t *o = &out[n++];
+        o->id        = e->id;
+        o->trip_ms   = e->trip_ms;
+        o->kind      = e->kind;
+        o->state     = e->state;
+        o->attempt   = e->attempt;
+        o->repeats   = e->repeats;
+        o->fresh     = !e->in_store;
+        memcpy(o->prefix, e->prefix, MF_PREFIX);
+    }
+    return n;
+}
+
+bool ob_copy_text(ob_t const *ob, mesh_msg_id_t id, char target[OB_TARGET_MAX], char text[OB_TEXT_MAX]) {
+    ob_entry_t const *e = find((ob_t *)ob, id);
+    target[0] = text[0] = '\0';
+    if (!e) {
+        return false;
+    }
+    memcpy(target, e->target, OB_TARGET_MAX);
+    memcpy(text, e->text, OB_TEXT_MAX);
+    target[OB_TARGET_MAX - 1] = text[OB_TEXT_MAX - 1] = '\0';
+    return true;
+}
+
+void ob_mark_in_store(ob_t *ob, mesh_msg_id_t id) {
+    ob_entry_t *e = find(ob, id);
+    if (e) {
+        e->in_store = true;
+    }
+}

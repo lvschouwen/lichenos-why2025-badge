@@ -98,9 +98,10 @@ bool mesh_notify_set_switch(mn_switch_t which, bool on) {
 
 // The mode, from the cache or (once per chat) from storage. *read is set when storage was asked.
 static mn_mode_t mode_for(mesh_chat_key_t const *key, bool *read) {
-    mn_mode_t mode;
+    mn_mode_t       mode;
+    mesh_chat_key_t chat = *key; // the spinlock sees only internal RAM (#271)
     portENTER_CRITICAL(&mux);
-    bool hit = mn_cache_lookup(&cache, key, &mode);
+    bool hit = mn_cache_lookup(&cache, &chat, &mode);
     portEXIT_CRITICAL(&mux);
     if (hit) {
         return mode;
@@ -117,7 +118,7 @@ static mn_mode_t mode_for(mesh_chat_key_t const *key, bool *read) {
         }
     }
     portENTER_CRITICAL(&mux);
-    mn_cache_store(&cache, key, mode);
+    mn_cache_store(&cache, &chat, mode);
     portEXIT_CRITICAL(&mux);
     return mode;
 }
@@ -144,9 +145,10 @@ bool mesh_notify_set_chan_mode(char const *channel_name, mn_mode_t mode) {
 
 bool mesh_notify_counts_unread(mesh_chat_key_t const *key, void *ctx) {
     (void)ctx;
-    mn_mode_t mode;
+    mn_mode_t       mode;
+    mesh_chat_key_t chat = *key; // the store's keys are in PSRAM (mesh_store.c); the spinlock sees only the copy (#271)
     portENTER_CRITICAL(&mux);
-    bool hit = mn_cache_lookup(&cache, key, &mode);
+    bool hit = mn_cache_lookup(&cache, &chat, &mode);
     portEXIT_CRITICAL(&mux);
     return mn_counts_unread(key, hit ? mode : mn_default_mode(key));
 }
@@ -163,8 +165,11 @@ static bool my_name(char *out, size_t cap) {
 }
 
 static void push(mn_kind_t kind, mesh_chat_key_t const *key, char const *title, char const *body, bool mention) {
+    mn_text_t text; // copied before the spinlock: a channel's name is in MeshCore's tables, in PSRAM (#271)
+    mesh_chat_key_t chat = *key;
+    mn_text_prepare(&text, title, body);
     portENTER_CRITICAL(&mux);
-    mn_queue_push(&queue, kind, key, title, body, mention);
+    mn_queue_push(&queue, kind, &chat, text.title, text.body, mention);
     portEXIT_CRITICAL(&mux);
 }
 
@@ -207,8 +212,9 @@ static void mark_chat_read(mesh_chat_key_t const *key) {
 }
 
 void mesh_notify_set_open_chat(mesh_chat_key_t const *key) {
+    mesh_chat_key_t chat = *key; // the chat screen's key is in its PSRAM state (#271)
     portENTER_CRITICAL(&mux);
-    open_key = *key;
+    open_key = chat;
     open_set = true;
     portEXIT_CRITICAL(&mux);
     mark_chat_read(key);
@@ -219,16 +225,18 @@ static bool same_key(mesh_chat_key_t const *a, mesh_chat_key_t const *b) {
 }
 
 void mesh_notify_clear_open_chat(mesh_chat_key_t const *key) {
+    mesh_chat_key_t chat = *key; // as in mesh_notify_set_open_chat
     portENTER_CRITICAL(&mux);
-    if (open_set && same_key(&open_key, key)) {
+    if (open_set && same_key(&open_key, &chat)) {
         open_set = false;
     }
     portEXIT_CRITICAL(&mux);
 }
 
 static bool chat_is_open(mesh_chat_key_t const *key) {
+    mesh_chat_key_t chat = *key;
     portENTER_CRITICAL(&mux);
-    bool open = open_set && same_key(&open_key, key);
+    bool open = open_set && same_key(&open_key, &chat);
     portEXIT_CRITICAL(&mux);
     return open;
 }
