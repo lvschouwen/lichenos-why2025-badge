@@ -56,9 +56,10 @@ CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
 # FAT drive
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_USE_DYN_BUFFERS=y
-# FatFs's window, file and LFN buffers in internal DMA RAM, cache-line aligned (#121 E4, as BadgeVMS): the SD driver
-# then DMAs them directly; anything in PSRAM goes through sdcard.c's internal bounce buffer, never SDMMC DMA to PSRAM
-# CONFIG_FATFS_ALLOC_PREFER_EXTRAM is not set
+# FatFs's heap buffers (window, file and LFN buffers, vfs context, mkdir's cluster clear) in PSRAM, cache-line aligned
+# (#263): every SD transfer from or to PSRAM goes through sdcard.c's internal bounce buffer (never SDMMC DMA to PSRAM,
+# #121), and esp_flash copies a PSRAM buffer itself for /storage. Internal DMA RAM only if PSRAM is full.
+CONFIG_FATFS_ALLOC_PREFER_EXTRAM=y
 CONFIG_FATFS_ALLOC_PREFER_ALIGNED_WORK_BUFFERS=y
 # "fw sd format" names the card LICHEN (f_setlabel, #60)
 CONFIG_FATFS_USE_LABEL=y

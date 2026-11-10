@@ -251,7 +251,8 @@ static sd_mount_outcome_t power_and_probe(char *reason, size_t cap) {
 // Instead of IDF's ff_diskio_register_sdmmc: the same card calls, but a buffer in PSRAM (FatFs hands the caller's
 // buffer through for whole-sector reads and writes: the journal's 32 KB reads, the Files app, f_mkfs) or one the SDMMC
 // DMA cannot use goes through the internal bounce buffer, so the SDMMC controller never DMAs to or from PSRAM. FatFs's
-// own window and file buffers are internal (CONFIG_FATFS_ALLOC_PREFER_EXTRAM=n) and take the direct path.
+// own window and file buffers are in PSRAM too (CONFIG_FATFS_ALLOC_PREFER_EXTRAM, #263) and bounce the same way; only
+// when PSRAM is full does ff_memalloc fall back to internal DMA RAM, which then takes the direct path.
 
 static esp_err_t bounced(uint8_t *buf, uint32_t sector, uint32_t count, bool write) {
     sd_bounce_iter_t  it;
