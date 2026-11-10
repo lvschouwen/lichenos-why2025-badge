@@ -53,6 +53,9 @@ typedef bool (*ui_call_async_t)(ui_call_fn_t fn, void *arg);
 // will run; false leaves arg with the caller.
 bool ui_call_queue_hand_over(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t schedule,
                              ui_call_async_t fallback);
+// lichen_sys_ui_cancel, lock held: cancels fn(arg) in the queue and, through cancel_fallback (lv_async_call_cancel in
+// lichen_ui_call.c, a fake in the host test), every one a full queue handed to the fallback.
+void ui_call_queue_cancel_all(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t cancel_fallback);
 // The drain hand_over schedules (arg is the queue), on the LVGL task with the lock held: runs the batch queued before it
 // started, oldest first, skipping the cancelled ones.
 void ui_call_queue_drain(void *queue);

@@ -76,12 +76,11 @@ static void danger_drop(row_t *row) {
 
 // The answer arrives inside a key handler or timer of the dialog: the action runs later, outside it, like on_enter
 static void danger_done(bool confirmed) {
-    if (confirmed) {
-        lichen_ui_ops_later(fire_danger, NULL);
-    } else {
-        danger.on_enter = NULL;
-        danger.row      = NULL;
+    if (confirmed && lichen_ui_ops_later(fire_danger, NULL)) {
+        return;
     }
+    danger.on_enter = NULL; // a no, or a yes the UI service could not queue: nothing will run
+    danger.row      = NULL;
 }
 
 static void ask_danger(row_t *row) {

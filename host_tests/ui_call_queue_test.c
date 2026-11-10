@@ -121,6 +121,59 @@ static void test_cancel(void) {
     CHECK(s_cancelq.count == 0);
 }
 
+// lichen_sys_ui_cancel's two steps (#286 review): a burst past the queue went to the fallback (LVGL's own async calls,
+// faked here as a list), and the cancel takes the pair back from both, so neither the queued nor the handed-over one
+// runs; every other call still does
+#define FAKE_RAW_CAP 8
+static ui_call_t s_raw[FAKE_RAW_CAP];
+static size_t    s_raw_n;
+static bool      fake_raw_call(ui_call_fn_t fn, void *arg) {
+    if (s_raw_n >= FAKE_RAW_CAP) {
+        return false;
+    }
+    s_raw[s_raw_n++] = (ui_call_t){fn, arg};
+    return true;
+}
+static bool fake_raw_cancel(ui_call_fn_t fn, void *arg) {
+    size_t kept = 0;
+    for (size_t i = 0; i < s_raw_n; i++) {
+        if (s_raw[i].fn != fn || s_raw[i].arg != arg) {
+            s_raw[kept++] = s_raw[i];
+        }
+    }
+    bool any = kept != s_raw_n;
+    s_raw_n  = kept;
+    return any;
+}
+
+static void test_cancel_overflow(void) {
+    ui_call_queue_t q = {0};
+    ran_n             = 0;
+    s_raw_n           = 0;
+    CHECK(ui_call_queue_hand_over(&q, note, (void *)7, fake_raw_call, fake_raw_call)); // queued, drain scheduled
+    for (int i = 1; i < UI_CALL_QUEUE_CAP; i++) {
+        CHECK(ui_call_queue_hand_over(&q, note, (void *)1, fake_raw_call, fake_raw_call));
+    }
+    CHECK(q.count == UI_CALL_QUEUE_CAP && s_raw_n == 1 && s_raw[0].fn == ui_call_queue_drain);
+    CHECK(ui_call_queue_hand_over(&q, note, (void *)7, fake_raw_call, fake_raw_call)); // full: handed to the fallback
+    CHECK(ui_call_queue_hand_over(&q, note, (void *)2, fake_raw_call, fake_raw_call));
+    CHECK(s_raw_n == 3);
+    ui_call_queue_cancel_all(&q, note, (void *)7, fake_raw_cancel);
+    CHECK(s_raw_n == 2); // the drain and note(2) are left
+    ui_call_queue_cancel_all(&q, NULL, (void *)2, fake_raw_cancel); // no fn: nothing taken back
+    CHECK(s_raw_n == 2);
+    for (size_t i = 0; i < s_raw_n; i++) { // the LVGL pass: the drain and the handed-over call
+        s_raw[i].fn(s_raw[i].arg);
+    }
+    int ones = 0, twos = 0, sevens = 0;
+    for (int i = 0; i < ran_n; i++) {
+        ones += ran[i] == 1;
+        twos += ran[i] == 2;
+        sevens += ran[i] == 7;
+    }
+    CHECK(sevens == 0 && ones == UI_CALL_QUEUE_CAP - 1 && twos == 1);
+}
+
 // ---- threads: producers, one LVGL thread, the recursive lock, the production hand-over ----
 
 #define PRODUCERS 6
@@ -386,6 +439,7 @@ int main(void) {
     test_full_and_unpush();
     test_reentrant_push();
     test_cancel();
+    test_cancel_overflow();
     test_owner();
     test_port_gate();
     test_threads();

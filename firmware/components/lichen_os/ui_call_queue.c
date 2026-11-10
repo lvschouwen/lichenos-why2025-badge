@@ -48,6 +48,14 @@ size_t ui_call_queue_cancel(ui_call_queue_t *q, ui_call_fn_t fn, void *arg) {
     return cancelled;
 }
 
+void ui_call_queue_cancel_all(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t cancel_fallback) {
+    if (!fn) {
+        return;
+    }
+    ui_call_queue_cancel(q, fn, arg);
+    cancel_fallback(fn, arg); // a burst past the queue went to the fallback: it may hold this pair too
+}
+
 bool ui_call_queue_hand_over(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t schedule,
                              ui_call_async_t fallback) {
     switch (ui_call_queue_push(q, fn, arg)) {

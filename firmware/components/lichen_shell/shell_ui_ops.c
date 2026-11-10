@@ -3,9 +3,12 @@
 
 #include "lichen_sys_ui.h"
 
-// The gate's widgets run on the LVGL task, which holds the lock: no wait (0 is "forever" only off that task)
+// The gate's widgets run on the LVGL task, which holds the lock and never waits; a call from another task by mistake
+// waits at most as long as lichen_ui_call does, never forever
+#define LATER_LOCK_MS 2000
+
 static bool later(void (*fn)(void *), void *arg) {
-    return lichen_sys_ui_call(fn, arg, 0);
+    return lichen_sys_ui_call(fn, arg, LATER_LOCK_MS);
 }
 
 static lichen_ui_ops_t const ops = {

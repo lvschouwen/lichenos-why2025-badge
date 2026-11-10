@@ -83,6 +83,11 @@ static bool async_call(ui_call_fn_t fn, void *arg) {
     return lv_async_call(fn, arg) == LV_RESULT_OK;
 }
 
+// The fallback's counterpart: one that a full queue handed to LVGL directly (ui_call_queue_hand_over)
+static bool async_cancel(ui_call_fn_t fn, void *arg) {
+    return lv_async_call_cancel(fn, arg) == LV_RESULT_OK;
+}
+
 bool lichen_sys_ui_call(void (*fn)(void *), void *arg, uint32_t timeout_ms) {
     if (!fn) {
         return false;
@@ -103,8 +108,7 @@ void lichen_sys_ui_cancel(void (*fn)(void *), void *arg) {
     if (!fn || !lichen_sys_ui_lock(0)) {
         return; // no display: nothing was queued
     }
-    ui_call_queue_cancel(&s_queue, fn, arg);
-    lv_async_call_cancel(fn, arg); // one that a full queue handed to LVGL directly (ui_call_queue_hand_over)
+    ui_call_queue_cancel_all(&s_queue, fn, arg, async_cancel);
     lichen_sys_ui_unlock();
 }
 
