@@ -31,12 +31,12 @@ static char const TAG[] = "mem";
 #define DMA_WATCH_US    (250 * 1000)
 #define DMA_BIG_MIN     1024 // an esp_hosted Wi-Fi TX frame copy is ~1.55 KB; 20 of them queue up (#256)
 
-// FreeRTOS's own current-task table (tasks.c; global for the port's context switch). Read directly: the hook runs
-// where flash may be off, and xTaskGetCurrentTaskHandle lives in flash. A task name sits where StaticTask_t's
+// FreeRTOS's own current-task table (tasks.c; global for the port's context switch). Read directly: no call, so the
+// hook stays as cheap as the heap around it and safe wherever the heap is. A task name sits where StaticTask_t's
 // ucDummy7 does: FreeRTOS asserts that StaticTask_t mirrors its TCB.
 extern StaticTask_t *volatile pxCurrentTCBs[];
 
-// The hook's slot: DRAM (.bss), written by any core, possibly in an ISR or with the cache off. Lock-free: the size is
+// The hook's slot: DRAM (.bss), written by any core, possibly in an ISR. Lock-free: the size is
 // claimed by a compare-and-swap; gen is bumped before the claim and after the name copy, so a reader that sees gen
 // odd or changed knows the name may not belong to the size and says "?" rather than blame the wrong task.
 static struct {
@@ -46,8 +46,9 @@ static struct {
 } big;
 
 // Every successful heap allocation passes here: two compares for nearly all of them (size, address); a new largest
-// internal one adds a load, a CAS and a 16-byte copy. No calls, no locks, no flash, no heap. In IRAM through
-// esp_heap_caps.h's declaration (HEAP_IRAM_ATTR; a second section attribute here would conflict with it).
+// internal one adds a load, a CAS and a 16-byte copy. No calls, no locks, no heap. Placed with the heap through
+// esp_heap_caps.h's declaration (HEAP_IRAM_ATTR: PSRAM-XIP since #267, CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH; a second
+// section attribute here would conflict with it).
 void esp_heap_trace_alloc_hook(void *ptr, size_t size, uint32_t caps) {
     (void)caps;
     intptr_t a = (intptr_t)ptr;

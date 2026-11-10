@@ -170,6 +170,12 @@ CONFIG_RTC_CLK_CAL_CYCLES=1024
 CONFIG_HEAP_POISONING_LIGHT=y
 # #256: the alloc hook names who took the most internal RAM when the DMA low-water mark fell (lichen_os/dma_watch.c)
 CONFIG_HEAP_USE_HOOKS=y
+# #267: heap code (multi_heap, tlsf, heap_caps, the hook above) runs from PSRAM like the rest of the image: ~9 KB of
+# IRAM back for the DMA heap. Safe only while no heap call runs with the cache off: with XIP from PSRAM a flash write
+# keeps the cache on unless a permanent flash mmap is open (spi_flash_os_func_app.c spi1_start; we never keep one,
+# #31), and no IRAM ISR or cache-off window of ours allocates or frees. A new ESP_INTR_FLAG_IRAM handler or IRAM_ATTR
+# function must not call malloc/free/heap_caps_* (or turn this back off).
+CONFIG_HEAP_PLACE_FUNCTION_INTO_FLASH=y
 
 # #116: encrypted NVS is built in but off; docs/nvs-encryption.md before turning it on (it never burns a key by itself)
 # CONFIG_LICHEN_NVS_ENCRYPT is not set
