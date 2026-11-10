@@ -21,6 +21,8 @@ typedef enum {
     C6W_SRC_KEYBOARD,  // the TCA8418 lost its configuration: C6 EN went low (hard)
     C6W_SRC_LORA,      // LoRa sends kept failing and a probe got no answer (soft)
     C6W_SRC_REATTACH,  // fw c6 reattach
+    C6W_SRC_HEARTBEAT, // C6W_HB_MISS_LIMIT heartbeats in a row did not come (#277)
+    C6W_SRC_CP_INIT,   // the C6 announced a fresh boot while the link was up (#277)
 } c6w_source_t;
 
 enum {
@@ -31,6 +33,9 @@ enum {
     C6W_ACT_GIVE_UP          = 1u << 4, // show that the C6 is gone; the slow retry goes on
     C6W_ACT_FALLBACK_RESTART = 1u << 5, // offer one restart of the badge (Lucas: a warning dialog with a countdown)
     C6W_ACT_PROBE            = 1u << 6, // ask the C6 something cheap, report it with c6_watch_probe()
+    C6W_ACT_HB_ARM           = 1u << 7, // ask the C6 for a heartbeat, report it with c6_watch_hb_armed()
+    C6W_ACT_HB_MISSED        = 1u << 8, // log "heartbeat missed <hb_run>"
+    C6W_ACT_CP_INIT          = 1u << 9, // log the unexpected C6 boot (cp_inits counts it)
 };
 
 #define C6W_ATTEMPTS         3
@@ -47,6 +52,29 @@ enum {
 #define C6W_KEYBOARD_GRACE_MS 3000u
 // The NVS flag "the badge restarted for a lost C6" (c6_rt_restart) is cleared after this long with the C6 up
 #define C6W_RT_FLAG_CLEAR_MS (10u * 60u * 1000u)
+
+// Heartbeat (#277): the C6 sends one every C6W_HB_PERIOD_S once asked after a link-up. A beat counts as missed when
+// the period plus C6W_HB_MARGIN_MS pass without one, then once per period; C6W_HB_MISS_LIMIT in a row (about 100 s) are
+// an outage, but only with hb_act set: a new runtime guard counts and logs for one soak before it may act.
+#define C6W_HB_PERIOD_S      30
+#define C6W_HB_MARGIN_MS     10000u
+#define C6W_HB_MISS_LIMIT    3
+#define C6W_HB_RETRY_MS      60000u // a heartbeat request that failed is asked again this much later
+// The C6's boot announcement of our own attach can arrive after the heartbeat request: only one later is unexpected
+#define C6W_CP_INIT_GRACE_MS 10000u
+
+typedef struct {
+    bool     wanted;  // a link-up asked for the heartbeat (none before the first attach)
+    bool     armed;   // the C6 accepted the request: beats are expected
+    bool     act;     // C6W_HB_MISS_LIMIT misses start an outage; false = count and log only
+    uint8_t  run;     // misses in a row
+    uint32_t armed_ms;
+    uint32_t last_ms; // the last beat, or the request, or the last miss counted
+    uint32_t arm_ms;  // !armed: when to ask (again)
+    uint32_t beats;   // since boot
+    uint32_t misses;  // since boot
+    uint32_t cp_inits; // unexpected C6 boot announcements since boot
+} c6w_heartbeat_t;
 
 typedef struct {
     c6w_state_t  state;
@@ -66,6 +94,7 @@ typedef struct {
     uint32_t     last_recovery_ms;
     uint32_t     up_ms;       // when the last outage ended (valid once restarts > 0)
     char         reason[C6W_REASON_MAX]; // the last recovery, as the note and fw c6 show it ("" before the first)
+    c6w_heartbeat_t hb;
 } c6_watch_t;
 
 // fallback_used: the badge already restarted for a lost C6 recently (an NVS flag the caller keeps)
@@ -83,8 +112,17 @@ void     c6_watch_manual_reset(c6_watch_t *w, uint32_t now_ms);
 unsigned c6_watch_reattach(c6_watch_t *w, uint32_t now_ms);
 // The result of a REATTACH; c6_uptime_ms is the C6's own uptime (C6W_UPTIME_UNKNOWN when it could not be read)
 unsigned c6_watch_attached(c6_watch_t *w, bool ok, uint32_t c6_uptime_ms, uint32_t now_ms);
-// Starts the next attempt when it is due
+// Starts the next attempt when it is due; counts a missed heartbeat (HB_MISSED) or asks for it again (HB_ARM)
 unsigned c6_watch_tick(c6_watch_t *w, uint32_t now_ms);
+// Heartbeat (#277). A link-up (the boot attach, every re-attach) asks for the heartbeat (HB_ARM) and forgets the old
+// session's beats; the result of that request; a beat; an unexpected C6 boot announcement (CP_INIT logs it, and with
+// hb.act set it starts an outage).
+unsigned c6_watch_hb_link_up(c6_watch_t *w, uint32_t now_ms);
+void     c6_watch_hb_armed(c6_watch_t *w, bool ok, uint32_t now_ms);
+void     c6_watch_hb_beat(c6_watch_t *w, uint32_t now_ms);
+unsigned c6_watch_cp_init(c6_watch_t *w, uint32_t now_ms);
+// The `fw c6` heartbeat line: "c6: heartbeat every 30 s | beats 12 | misses 0 (log only)"
+size_t   c6_watch_hb_line(c6_watch_t const *w, char *out, size_t cap);
 // The `fw c6` line: "c6: up | restarts 1 | last: <reason>", "c6: recovering 2/3 | ...", "c6: down (no answer) | ...".
 // Returns the length written (excluding the NUL).
 size_t   c6_watch_line(c6_watch_t const *w, uint32_t now_ms, char *out, size_t cap);

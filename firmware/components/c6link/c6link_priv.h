@@ -24,3 +24,4 @@ void c6_sup_attached(void);
 // "fw c6 reset", "reset rom", "reattach"; false for any other argument
 bool c6_sup_command(char const *args);
 void c6_sup_watch_line(char *out, size_t cap); // the `fw c6` line
+void c6_sup_hb_line(char *out, size_t cap);    // the `fw c6` heartbeat line (#277)

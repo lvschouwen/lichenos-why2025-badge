@@ -31,6 +31,7 @@ static unsigned begin_outage(c6_watch_t *w, c6w_source_t src, uint32_t now_ms) {
         w->manual_lead_ms = now_ms - w->manual_ms;
     }
     w->manual_pending = false;
+    w->hb.armed       = false; // no beats from a C6 that is down; the next link-up asks again
     return C6W_ACT_DOWN_HOOKS | C6W_ACT_REATTACH;
 }
 
@@ -88,11 +89,105 @@ unsigned c6_watch_reattach(c6_watch_t *w, uint32_t now_ms) {
     }
 }
 
+// ---- heartbeat (#277) ----
+
+unsigned c6_watch_hb_link_up(c6_watch_t *w, uint32_t now_ms) {
+    w->hb.wanted = true;
+    w->hb.armed  = false;
+    w->hb.run    = 0;
+    w->hb.arm_ms = now_ms + C6W_HB_RETRY_MS; // the request is carried out now; this is the retry should it fail
+    return C6W_ACT_HB_ARM;
+}
+
+void c6_watch_hb_armed(c6_watch_t *w, bool ok, uint32_t now_ms) {
+    if (!w->hb.wanted) {
+        return;
+    }
+    if (!ok) {
+        w->hb.arm_ms = now_ms + C6W_HB_RETRY_MS;
+        return;
+    }
+    w->hb.armed    = true;
+    w->hb.armed_ms = now_ms;
+    w->hb.last_ms  = now_ms; // the first beat is due one period after the request
+    w->hb.run      = 0;
+}
+
+void c6_watch_hb_beat(c6_watch_t *w, uint32_t now_ms) {
+    w->hb.beats++;
+    if (w->hb.armed) {
+        w->hb.run     = 0;
+        w->hb.last_ms = now_ms;
+    }
+}
+
+unsigned c6_watch_cp_init(c6_watch_t *w, uint32_t now_ms) {
+    // Our own attach makes the C6 announce itself too: only one well after the heartbeat was accepted is news
+    if (w->state != C6W_UP || !w->hb.armed || now_ms - w->hb.armed_ms < C6W_CP_INIT_GRACE_MS) {
+        return 0;
+    }
+    w->hb.cp_inits++;
+    return C6W_ACT_CP_INIT | (w->hb.act ? begin_outage(w, C6W_SRC_CP_INIT, now_ms) : 0);
+}
+
+static unsigned hb_tick(c6_watch_t *w, uint32_t now_ms) {
+    if (w->state != C6W_UP || !w->hb.wanted) {
+        return 0;
+    }
+    if (!w->hb.armed) {
+        if (!due(now_ms, w->hb.arm_ms)) {
+            return 0;
+        }
+        w->hb.arm_ms = now_ms + C6W_HB_RETRY_MS;
+        return C6W_ACT_HB_ARM;
+    }
+    if (!due(now_ms, w->hb.last_ms + C6W_HB_PERIOD_S * 1000u + C6W_HB_MARGIN_MS)) {
+        return 0;
+    }
+    w->hb.last_ms += C6W_HB_PERIOD_S * 1000u; // the next miss is one period later
+    w->hb.misses++;
+    if (w->hb.run < UINT8_MAX) {
+        w->hb.run++;
+    }
+    unsigned act = C6W_ACT_HB_MISSED;
+    if (w->hb.act && w->hb.run >= C6W_HB_MISS_LIMIT) {
+        act |= begin_outage(w, C6W_SRC_HEARTBEAT, now_ms);
+    }
+    return act;
+}
+
+size_t c6_watch_hb_line(c6_watch_t const *w, char *out, size_t cap) {
+    if (!out || cap == 0) {
+        return 0;
+    }
+    char how[24], boots[40] = "", mode[32] = "log only";
+    if (!w->hb.wanted || w->state != C6W_UP || !w->hb.armed) {
+        snprintf(how, sizeof(how), "%s", !w->hb.wanted        ? "off (no link yet)"
+                                         : w->state != C6W_UP ? "paused (C6 down)"
+                                                              : "not accepted yet");
+    } else {
+        snprintf(how, sizeof(how), "every %u s", (unsigned)C6W_HB_PERIOD_S);
+    }
+    if (w->hb.cp_inits) {
+        snprintf(boots, sizeof(boots), " | unexpected C6 boots %u", (unsigned)w->hb.cp_inits);
+    }
+    if (w->hb.act) {
+        snprintf(mode, sizeof(mode), "%u in a row = outage", (unsigned)C6W_HB_MISS_LIMIT);
+    }
+    int n = snprintf(out, cap, "c6: heartbeat %s | beats %u | misses %u%s (%s)", how, (unsigned)w->hb.beats,
+                     (unsigned)w->hb.misses, boots, mode);
+    if (n < 0) {
+        out[0] = '\0';
+        return 0;
+    }
+    return (size_t)n < cap ? (size_t)n : cap - 1;
+}
+
 unsigned c6_watch_tick(c6_watch_t *w, uint32_t now_ms) {
     if ((w->state == C6W_DOWN || w->state == C6W_GAVE_UP) && due(now_ms, w->next_ms)) {
         return start_attempt(w);
     }
-    return 0;
+    return hb_tick(w, now_ms);
 }
 
 // "1.2 s": tenths, rounded down
@@ -110,6 +205,10 @@ static char const *source_text(c6w_source_t src) {
         return "LoRa sends failing";
     case C6W_SRC_REATTACH:
         return "fw c6 reattach";
+    case C6W_SRC_HEARTBEAT:
+        return "heartbeat missed";
+    case C6W_SRC_CP_INIT:
+        return "C6 announced a boot";
     default:
         return "unknown";
     }

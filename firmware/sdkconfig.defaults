@@ -110,6 +110,9 @@ CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE=y
 # The C6 flasher must release the C6 before esp_hosted starts (auto-init races it into a boot loop)
 CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
 CONFIG_ESP_HOSTED_HOST_FEAT_PEER_DATA=y
+# Liveness between the chips (#277): c6sup asks the C6 (its side is compiled in already) for one heartbeat event every
+# 30 s after each link-up and counts the ones that do not come (c6_watch)
+CONFIG_ESP_HOSTED_HOST_FEAT_HEARTBEAT=y
 # A failed SDIO transfer posts TRANSPORT_FAILURE; Lichen's C6 supervisor recovers from it (#14) instead of
 # esp_hosted aborting the P4
 CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE=n

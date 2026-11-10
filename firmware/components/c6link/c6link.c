@@ -330,6 +330,8 @@ static void cmd_c6_status(void) {
     char line[C6W_REASON_MAX + 64];
     c6_sup_watch_line(line, sizeof(line));
     console_reply("%s", line);
+    c6_sup_hb_line(line, sizeof(line));
+    console_reply("%s", line);
     report_frame_pools();
     console_reply("c6 reflash | verify (full check on the next boot) | reset [rom] (pulse C6 EN now) | reattach (#14)");
 }

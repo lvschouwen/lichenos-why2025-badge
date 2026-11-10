@@ -304,6 +304,135 @@ static void fallback_plan_and_rt_flag(void) {
     CHECK(!c6_watch_rt_flag_clear_due(true, C6W_GAVE_UP, 2 * C6W_RT_FLAG_CLEAR_MS));
 }
 
+// ---- heartbeat (#277) ----
+
+#define HB_FIRST_MISS (C6W_HB_PERIOD_S * 1000u + C6W_HB_MARGIN_MS)
+#define HB_PERIOD     (C6W_HB_PERIOD_S * 1000u)
+
+// Up and armed at t
+static c6_watch_t hb_armed_at(uint32_t t, bool act) {
+    c6_watch_t w = fresh();
+    w.hb.act     = act;
+    CHECK(c6_watch_hb_link_up(&w, t) == C6W_ACT_HB_ARM);
+    c6_watch_hb_armed(&w, true, t);
+    return w;
+}
+
+static void hb_nothing_before_a_link(void) {
+    c6_watch_t w = fresh();
+    CHECK(c6_watch_tick(&w, 10u * 60u * 1000u) == 0); // no beats expected before the first link-up
+    CHECK(c6_watch_cp_init(&w, 100000) == 0);
+    char line[200];
+    c6_watch_hb_line(&w, line, sizeof(line));
+    CHECK(strcmp(line, "c6: heartbeat off (no link yet) | beats 0 | misses 0 (log only)") == 0);
+}
+
+static void hb_beats_keep_it_quiet(void) {
+    c6_watch_t w = hb_armed_at(1000, false);
+    uint32_t   t = 1000;
+    for (int i = 0; i < 20; i++) {
+        t += HB_PERIOD;
+        c6_watch_hb_beat(&w, t);
+        CHECK(c6_watch_tick(&w, t + HB_PERIOD - 1) == 0);
+    }
+    CHECK(w.hb.beats == 20 && w.hb.misses == 0);
+    char line[200];
+    c6_watch_hb_line(&w, line, sizeof(line));
+    CHECK(strcmp(line, "c6: heartbeat every 30 s | beats 20 | misses 0 (log only)") == 0);
+}
+
+static void hb_miss_counting_and_the_reset_on_a_beat(void) {
+    c6_watch_t w = hb_armed_at(1000, false);
+    CHECK(c6_watch_tick(&w, 1000 + HB_FIRST_MISS - 1) == 0); // within the margin
+    CHECK(c6_watch_tick(&w, 1000 + HB_FIRST_MISS) == C6W_ACT_HB_MISSED);
+    CHECK(w.hb.run == 1 && w.hb.misses == 1);
+    CHECK(c6_watch_tick(&w, 1000 + HB_FIRST_MISS + 1) == 0); // once per period, not per tick
+    CHECK(c6_watch_tick(&w, 1000 + HB_FIRST_MISS + HB_PERIOD) == C6W_ACT_HB_MISSED && w.hb.run == 2);
+    // A beat ends the run; the total stays
+    uint32_t t = 1000 + HB_FIRST_MISS + HB_PERIOD + 500;
+    c6_watch_hb_beat(&w, t);
+    CHECK(w.hb.run == 0 && w.hb.misses == 2 && w.hb.beats == 1);
+    CHECK(c6_watch_tick(&w, t + HB_FIRST_MISS - 1) == 0);
+    CHECK(c6_watch_tick(&w, t + HB_FIRST_MISS) == C6W_ACT_HB_MISSED && w.hb.run == 1 && w.hb.misses == 3);
+}
+
+static void hb_log_only_never_acts(void) {
+    c6_watch_t w = hb_armed_at(0, false);
+    uint32_t   t = HB_FIRST_MISS;
+    for (int i = 0; i < 10; i++, t += HB_PERIOD) {
+        CHECK(c6_watch_tick(&w, t) == C6W_ACT_HB_MISSED);
+    }
+    CHECK(w.state == C6W_UP && w.hb.run == 10 && w.hb.misses == 10 && w.restarts == 0);
+    char line[200];
+    c6_watch_hb_line(&w, line, sizeof(line));
+    CHECK(strcmp(line, "c6: heartbeat every 30 s | beats 0 | misses 10 (log only)") == 0);
+}
+
+static void hb_threshold_starts_an_outage_when_acting(void) {
+    c6_watch_t w = hb_armed_at(0, true);
+    uint32_t   t = HB_FIRST_MISS;
+    CHECK(c6_watch_tick(&w, t) == C6W_ACT_HB_MISSED);
+    CHECK(c6_watch_tick(&w, t + HB_PERIOD) == C6W_ACT_HB_MISSED);
+    CHECK(c6_watch_tick(&w, t + 2 * HB_PERIOD) == (C6W_ACT_HB_MISSED | C6W_ACT_DOWN_HOOKS | C6W_ACT_REATTACH));
+    CHECK(w.state == C6W_ATTACHING && w.source == C6W_SRC_HEARTBEAT && w.hb.run == C6W_HB_MISS_LIMIT);
+    CHECK(c6_watch_tick(&w, t + 10 * HB_PERIOD) == 0); // no misses counted while down
+    char line[200];
+    c6_watch_hb_line(&w, line, sizeof(line));
+    CHECK(strcmp(line, "c6: heartbeat paused (C6 down) | beats 0 | misses 3 (3 in a row = outage)") == 0);
+    // Back: the re-attach's link-up asks again and starts a fresh run
+    c6_watch_attached(&w, true, 1000, t + 11 * HB_PERIOD);
+    CHECK(CONTAINS(w.reason, "heartbeat missed"));
+    CHECK(c6_watch_hb_link_up(&w, t + 11 * HB_PERIOD) == C6W_ACT_HB_ARM && w.hb.run == 0 && !w.hb.armed);
+}
+
+static void hb_failed_request_is_asked_again(void) {
+    c6_watch_t w = fresh();
+    c6_watch_hb_link_up(&w, 1000);
+    c6_watch_hb_armed(&w, false, 1200);
+    CHECK(c6_watch_tick(&w, 1200 + C6W_HB_RETRY_MS - 1) == 0); // no misses while not armed
+    CHECK(c6_watch_tick(&w, 1200 + C6W_HB_RETRY_MS) == C6W_ACT_HB_ARM);
+    CHECK(c6_watch_tick(&w, 1300 + C6W_HB_RETRY_MS) == 0); // not again while that request runs
+    char line[200];
+    c6_watch_hb_line(&w, line, sizeof(line));
+    CHECK(strcmp(line, "c6: heartbeat not accepted yet | beats 0 | misses 0 (log only)") == 0);
+    c6_watch_hb_armed(&w, true, 1400 + C6W_HB_RETRY_MS);
+    CHECK(w.hb.armed && c6_watch_tick(&w, 1400 + C6W_HB_RETRY_MS + HB_FIRST_MISS) == C6W_ACT_HB_MISSED);
+}
+
+static void hb_other_outage_disarms(void) {
+    c6_watch_t w = hb_armed_at(0, false);
+    c6_watch_hard(&w, C6W_SRC_TRANSPORT, 5000);
+    CHECK(!w.hb.armed);
+    CHECK(c6_watch_tick(&w, 5000 + 10 * HB_PERIOD) == 0); // the attempt runs; no beats are expected meanwhile
+    CHECK(w.hb.misses == 0);
+}
+
+static void hb_unexpected_cp_init(void) {
+    c6_watch_t w = hb_armed_at(1000, false);
+    CHECK(c6_watch_cp_init(&w, 1000 + C6W_CP_INIT_GRACE_MS - 1) == 0); // our own attach's announcement
+    CHECK(c6_watch_cp_init(&w, 1000 + C6W_CP_INIT_GRACE_MS) == C6W_ACT_CP_INIT);
+    CHECK(w.state == C6W_UP && w.hb.cp_inits == 1);
+    char line[200];
+    c6_watch_hb_line(&w, line, sizeof(line));
+    CHECK(strcmp(line, "c6: heartbeat every 30 s | beats 0 | misses 0 | unexpected C6 boots 1 (log only)") == 0);
+    // Acting: the C6 rebooted behind our back, recover
+    c6_watch_t v = hb_armed_at(1000, true);
+    CHECK(c6_watch_cp_init(&v, 60000) == (C6W_ACT_CP_INIT | C6W_ACT_DOWN_HOOKS | C6W_ACT_REATTACH));
+    CHECK(v.source == C6W_SRC_CP_INIT);
+    CHECK(c6_watch_cp_init(&v, 61000) == 0); // not while recovering
+    // Not before the heartbeat was accepted
+    c6_watch_t u = fresh();
+    c6_watch_hb_link_up(&u, 0);
+    CHECK(c6_watch_cp_init(&u, 60000) == 0);
+}
+
+static void hb_survives_the_wrap(void) {
+    uint32_t   t = UINT32_MAX - 5000;
+    c6_watch_t w = hb_armed_at(t, false);
+    CHECK(c6_watch_tick(&w, t + HB_FIRST_MISS - 1) == 0);
+    CHECK(c6_watch_tick(&w, t + HB_FIRST_MISS) == C6W_ACT_HB_MISSED);
+}
+
 int main(void) {
     starts_up_and_quiet();
     hard_signal_reattaches_at_once();
@@ -319,6 +448,15 @@ int main(void) {
     state_text_for_the_screen();
     stale_signals_are_dropped();
     fallback_plan_and_rt_flag();
+    hb_nothing_before_a_link();
+    hb_beats_keep_it_quiet();
+    hb_miss_counting_and_the_reset_on_a_beat();
+    hb_log_only_never_acts();
+    hb_threshold_starts_an_outage_when_acting();
+    hb_failed_request_is_asked_again();
+    hb_other_outage_disarms();
+    hb_unexpected_cp_init();
+    hb_survives_the_wrap();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

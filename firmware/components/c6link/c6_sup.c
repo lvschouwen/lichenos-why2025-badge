@@ -43,8 +43,10 @@ ESP_EVENT_DEFINE_BASE(C6LINK_EVENT);
 #define SUP_STACK      6144 // the re-attach (esp_hosted deinit/init, logging) wasn't measured: kept (#107 review)
 #define ASK_TRIES      5 // the dialog could not be shown (LVGL busy): ask again once a second, then restart
 #define KEY_RT_RESTART "c6_rt_restart" // the badge restarted for a lost C6 (cleared after 10 min up)
+// The heartbeat (#277) only counts and logs for now: a new runtime guard runs one soak before it may recover
+#define HB_ACT         false
 
-typedef enum { SUP_SIGNAL, SUP_REATTACH, SUP_ANSWER } sup_type_t;
+typedef enum { SUP_SIGNAL, SUP_REATTACH, SUP_ANSWER, SUP_LINK_UP } sup_type_t;
 
 typedef struct {
     uint8_t  type;
@@ -60,8 +62,9 @@ static esp_timer_handle_t reset_timer;
 // Raised signals, coalesced until c6sup takes them (a flood of TRANSPORT_FAILURE posts must not fill the queue and
 // push out a console command or the dialog's answer). The time is when the first one was raised, for c6_watch_stale.
 static portMUX_TYPE sig_lock = portMUX_INITIALIZER_UNLOCKED;
-static bool         sig_hard[2];  // [0] transport, [1] keyboard
-static uint32_t     sig_hard_ms[2];
+#define SIG_HARD 3
+static bool         sig_hard[SIG_HARD]; // [0] transport, [1] keyboard, [2] the C6 announced a boot (#277)
+static uint32_t     sig_hard_ms[SIG_HARD];
 static unsigned     sig_soft_fails;
 static uint32_t     sig_soft_ms;
 static bool         sig_soft_ok;
@@ -143,13 +146,27 @@ void c6link_set_hooks(c6link_hooks_t const *h) {
     }
 }
 
-// Runs on the event loop task: only notes it
+// Runs on the event loop task: only notes it. A beat is only counted (no queue message every 30 s); a boot
+// announcement during our own re-attach is that re-attach's.
 static void on_hosted_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     (void)arg, (void)base, (void)data;
-    if (id == EH_HOST_EVENT_TRANSPORT_UP) {
+    switch (id) {
+    case EH_HOST_EVENT_TRANSPORT_UP:
         atomic_store(&hosted_quiet, false);
-    } else if (id == EH_HOST_EVENT_TRANSPORT_FAILURE && !atomic_load(&hosted_quiet)) {
-        raise_signal(0, false, false);
+        break;
+    case EH_HOST_EVENT_CP_HEARTBEAT:
+        portENTER_CRITICAL(&watch_lock);
+        c6_watch_hb_beat(&watch, now_ms());
+        portEXIT_CRITICAL(&watch_lock);
+        break;
+    case EH_HOST_EVENT_TRANSPORT_FAILURE:
+    case EH_HOST_EVENT_CP_INIT:
+        if (!atomic_load(&hosted_quiet)) {
+            raise_signal(id == EH_HOST_EVENT_CP_INIT ? 2 : 0, false, false);
+        }
+        break;
+    default:
+        break;
     }
 }
 
@@ -161,34 +178,44 @@ static void log_source(char const *what, unsigned act) {
     ESP_LOGW(TAG, "%s: actions 0x%02x, %s", what, act, line);
 }
 
-// One hard signal (idx 0 transport, 1 keyboard) that may belong to an outage that is already over
+static c6w_source_t const SIG_SRC[SIG_HARD] = {C6W_SRC_TRANSPORT, C6W_SRC_KEYBOARD, C6W_SRC_CP_INIT};
+static char const *const  SIG_NAME[SIG_HARD] = {"transport failure", "keyboard reset", "C6 boot announcement"};
+static char const *const  SIG_LOG[SIG_HARD]  = {
+    "ESP-Hosted transport failure", "keyboard chip was reset", "the C6 announced a boot while up"};
+
+// One hard signal (an index of SIG_SRC) that may belong to an outage that is already over. The C6's boot announcement
+// goes to its own input: only one long after our own attach counts.
 static unsigned take_hard(int idx, uint32_t raised_ms) {
-    c6w_source_t src = idx == 0 ? C6W_SRC_TRANSPORT : C6W_SRC_KEYBOARD;
+    c6w_source_t src = SIG_SRC[idx];
     portENTER_CRITICAL(&watch_lock);
     bool     stale = c6_watch_stale(&watch, src, raised_ms);
-    unsigned act   = stale ? 0 : c6_watch_hard(&watch, src, now_ms());
+    unsigned act   = stale                       ? 0
+                     : src == C6W_SRC_CP_INIT ? c6_watch_cp_init(&watch, now_ms())
+                                                 : c6_watch_hard(&watch, src, now_ms());
     portEXIT_CRITICAL(&watch_lock);
     if (stale) {
-        ESP_LOGW(TAG, "%s from the last outage: ignored", idx == 0 ? "transport failure" : "keyboard reset");
+        ESP_LOGW(TAG, "%s from the last outage: ignored", SIG_NAME[idx]);
     } else if (act) {
-        log_source(idx == 0 ? "ESP-Hosted transport failure" : "keyboard chip was reset", act);
+        log_source(SIG_LOG[idx], act);
     }
     return act;
 }
 
 static unsigned take_signals(void) {
     portENTER_CRITICAL(&sig_lock);
-    bool     hard[2] = {sig_hard[0], sig_hard[1]};
-    uint32_t hard_ms[2] = {sig_hard_ms[0], sig_hard_ms[1]};
+    bool     hard[SIG_HARD];
+    uint32_t hard_ms[SIG_HARD];
+    memcpy(hard, sig_hard, sizeof(hard));
+    memcpy(hard_ms, sig_hard_ms, sizeof(hard_ms));
     unsigned fails = sig_soft_fails;
     uint32_t soft_ms = sig_soft_ms;
     bool     ok = sig_soft_ok;
-    sig_hard[0] = sig_hard[1] = false;
+    memset(sig_hard, 0, sizeof(sig_hard));
     sig_soft_fails = 0;
     sig_soft_ok = sig_queued = false;
     portEXIT_CRITICAL(&sig_lock);
     unsigned act = 0;
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < SIG_HARD; i++) {
         act |= hard[i] ? take_hard(i, hard_ms[i]) : 0;
     }
     portENTER_CRITICAL(&watch_lock);
@@ -315,7 +342,15 @@ static unsigned do_reattach(void) {
     return act;
 }
 
-static void go_up(void) {
+static unsigned link_up(void) {
+    portENTER_CRITICAL(&watch_lock);
+    unsigned act = c6_watch_hb_link_up(&watch, now_ms());
+    portEXIT_CRITICAL(&watch_lock);
+    return act;
+}
+
+// Returns the heartbeat request of the fresh link
+static unsigned go_up(void) {
     if (!c6_hooks_driver_up(WIFI_WAIT_MS)) {
         ESP_LOGE(TAG, "the Wi-Fi task did not bring the driver up in %d s", WIFI_WAIT_MS / 1000);
     }
@@ -336,6 +371,39 @@ static void go_up(void) {
             hooks.ask_cancel();
         }
         ESP_LOGI(TAG, "the C6 is back: restart question withdrawn");
+    }
+    return link_up(); // the reset C6 forgot the heartbeat: ask again, outside the quiet window cleared above
+}
+
+// An RPC to the C6 (#277): only with the transport up, never in the re-attach's quiet window. Every link-up asks
+// (the re-attach resets the C6); a refusal is asked again C6W_HB_RETRY_MS later by the watch's tick.
+static void arm_heartbeat(void) {
+    portENTER_CRITICAL(&watch_lock);
+    bool up = watch.state == C6W_UP;
+    portEXIT_CRITICAL(&watch_lock);
+    bool      quiet = atomic_load(&hosted_quiet);
+    esp_err_t err   = up && !quiet ? esp_hosted_configure_heartbeat(true, C6W_HB_PERIOD_S) : ESP_ERR_INVALID_STATE;
+    portENTER_CRITICAL(&watch_lock);
+    c6_watch_hb_armed(&watch, err == ESP_OK, now_ms());
+    portEXIT_CRITICAL(&watch_lock);
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "c6: heartbeat every %d s%s", C6W_HB_PERIOD_S, HB_ACT ? "" : " (log only)");
+    } else {
+        ESP_LOGW(TAG, "c6: heartbeat not set up (%s%s), asking again in %u s", esp_err_to_name(err),
+                 !up ? ", C6 down" : quiet ? ", re-attach running" : "", (unsigned)(C6W_HB_RETRY_MS / 1000));
+    }
+}
+
+static void log_heartbeat(unsigned act) {
+    portENTER_CRITICAL(&watch_lock);
+    unsigned run = watch.hb.run, boots = watch.hb.cp_inits;
+    portEXIT_CRITICAL(&watch_lock);
+    if (act & C6W_ACT_HB_MISSED) {
+        ESP_LOGW(TAG, "c6: heartbeat missed %u%s", run, HB_ACT ? "" : " (log only)");
+    }
+    if (act & C6W_ACT_CP_INIT) {
+        ESP_LOGW(TAG, "c6: the C6 announced a boot while the link was up (%u so far)%s", boots,
+                 HB_ACT ? "" : " (log only)");
     }
 }
 
@@ -433,7 +501,7 @@ static void run(unsigned act) {
             next |= do_reattach();
         }
         if (act & C6W_ACT_UP_HOOKS) {
-            go_up();
+            next |= go_up();
         }
         if (act & C6W_ACT_NOTE) {
             note();
@@ -443,6 +511,12 @@ static void run(unsigned act) {
         }
         if (act & C6W_ACT_FALLBACK_RESTART) {
             fallback();
+        }
+        if (act & (C6W_ACT_HB_MISSED | C6W_ACT_CP_INIT)) {
+            log_heartbeat(act);
+        }
+        if (act & C6W_ACT_HB_ARM) {
+            arm_heartbeat();
         }
         act = next;
     }
@@ -481,22 +555,33 @@ static void trial_tick(void) {
     }
 }
 
+// One queued message: the actions it asks for
+static unsigned take_msg(sup_msg_t const *m) {
+    unsigned act = 0;
+    switch (m->type) {
+    case SUP_SIGNAL:
+        return take_signals();
+    case SUP_REATTACH:
+        portENTER_CRITICAL(&watch_lock);
+        act = c6_watch_reattach(&watch, now_ms());
+        portEXIT_CRITICAL(&watch_lock);
+        log_source("fw c6 reattach", act);
+        return act;
+    case SUP_LINK_UP:
+        return link_up();
+    default:
+        answer(m->restart);
+        return 0;
+    }
+}
+
 static void sup_task(void *arg) {
     (void)arg;
     for (;;) {
         sup_msg_t m;
         unsigned  act = 0;
         if (xQueueReceive(sup_queue, &m, pdMS_TO_TICKS(1000)) == pdTRUE) {
-            if (m.type == SUP_SIGNAL) {
-                act = take_signals();
-            } else if (m.type == SUP_REATTACH) {
-                portENTER_CRITICAL(&watch_lock);
-                act = c6_watch_reattach(&watch, now_ms());
-                portEXIT_CRITICAL(&watch_lock);
-                log_source("fw c6 reattach", act);
-            } else {
-                answer(m.restart);
-            }
+            act = take_msg(&m);
         }
         portENTER_CRITICAL(&watch_lock);
         act |= c6_watch_tick(&watch, now_ms());
@@ -515,6 +600,13 @@ void c6_sup_watch_line(char *out, size_t cap) {
     c6_watch_t copy = watch;
     portEXIT_CRITICAL(&watch_lock);
     c6_watch_line(&copy, now_ms(), out, cap);
+}
+
+void c6_sup_hb_line(char *out, size_t cap) {
+    portENTER_CRITICAL(&watch_lock);
+    c6_watch_t copy = watch;
+    portEXIT_CRITICAL(&watch_lock);
+    c6_watch_hb_line(&copy, out, cap);
 }
 
 void c6link_status(c6_status_t *out) {
@@ -616,6 +708,7 @@ static bool read_rt_flag(void) {
 void c6_sup_start(void) {
     rt_flag = read_rt_flag();
     c6_watch_init(&watch, c6link_image_is_trial(), rt_flag);
+    watch.hb.act = HB_ACT;
     esp_timer_create_args_t const args = {.callback = reset_pulse, .name = "c6reset"};
     if (esp_timer_create(&args, &reset_timer) != ESP_OK) {
         reset_timer = NULL;
@@ -629,12 +722,16 @@ void c6_sup_start(void) {
 void c6_sup_attached(void) {
     boot_ok = true; // recovery itself waits for c6link_set_hooks
     // esp_hosted_init created the default event loop. Registered once: the handlers outlive esp_hosted_deinit.
-    esp_err_t err = esp_event_handler_instance_register(EH_HOST_EVENT, EH_HOST_EVENT_TRANSPORT_FAILURE, on_hosted_event,
-                                                        NULL, NULL);
-    if (err == ESP_OK) {
-        err = esp_event_handler_instance_register(EH_HOST_EVENT, EH_HOST_EVENT_TRANSPORT_UP, on_hosted_event, NULL, NULL);
+    int32_t const ids[] = {EH_HOST_EVENT_TRANSPORT_FAILURE, EH_HOST_EVENT_TRANSPORT_UP, EH_HOST_EVENT_CP_HEARTBEAT,
+                           EH_HOST_EVENT_CP_INIT};
+    esp_err_t err = ESP_OK;
+    for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]) && err == ESP_OK; i++) {
+        err = esp_event_handler_instance_register(EH_HOST_EVENT, ids[i], on_hosted_event, NULL, NULL);
     }
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "no ESP-Hosted event handler: %s", esp_err_to_name(err));
     }
+    // The heartbeat request is an RPC: c6sup sends it, so the boot path does not wait for it (#277)
+    sup_msg_t m = {.type = SUP_LINK_UP};
+    post(&m);
 }
