@@ -52,7 +52,7 @@ void lora_set_switch_owner(void (*request)(bool on));
 // The settings registry's transport (#307/#310): lichen_os (L3) asks the C6 for its registry keys through here. The
 // posts never block (any task, the LVGL task included): the request waits in a small queue, one entry per key id (a
 // newer one takes it over, lora_regq.h), and the LoRa task sends it. False when LoRa is not running, stopped for an
-// update, the C6 is being recovered, or the queue is full. The answer comes back through the hooks' answer.
+// update, the C6 is being recovered, the queue is full, or the id is blocked (lora_reg_block). The answer comes back through the hooks' answer.
 bool lora_reg_get(uint16_t id, uint8_t seq);
 bool lora_reg_set(uint16_t id, uint32_t value, uint8_t seq);
 typedef struct {
@@ -60,12 +60,13 @@ typedef struct {
     void (*answer)(uint16_t id, uint8_t seq, uint8_t status, uint8_t type, uint32_t value);
     // On the LoRa task: the C6 went away (false; the queue was dropped) or answers again after a re-attach (true)
     void (*link)(bool up);
-    // The C6's applied radio settings as one line for "fw lora" (live: on the console task, may wait briefly) and
-    // lora_applied_text (cache only); 0 when it wrote nothing
-    size_t (*radio_text)(char *buf, size_t cap, bool live);
+    // The C6's applied radio settings as one line for "fw lora" (on the console task, may wait briefly); 0 when it
+    // wrote nothing
+    size_t (*radio_text)(char *buf, size_t cap);
 } lora_reg_hooks_t;
-// At a restart (#310): drops the waiting requests for ids, refuses every later one, and waits up to wait_ms for a send
-// already inside ESP-Hosted, so none of them can reach the C6 after what the caller sends next. For good; any task.
+// At a restart (#310): drops the waiting requests for ids, refuses every later one, waits up to wait_ms for a send
+// already inside ESP-Hosted, and then LORA_REGQ_SETTLE_MS more when a REG_SET left in the last 100 ms, so none of them
+// can be applied by the C6 after what the caller sends next. For good; any task.
 void lora_reg_block(uint16_t const *ids, size_t n, uint32_t wait_ms);
 // Once, after lora_start; hooks must stay valid (static storage). NULL members are skipped.
 void lora_set_reg_hooks(lora_reg_hooks_t const *hooks);

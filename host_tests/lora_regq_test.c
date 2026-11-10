@@ -103,7 +103,34 @@ static void test_block(void) {
     CHECK(!lora_regq_block(&f, 0x0F00));
 }
 
+// One wake token at most in the LoRa task's receive queue (#310 review M2)
+static void test_wake(void) {
+    lora_regq_t     q = {0};
+    lora_regq_req_t r;
+    CHECK(post(&q, 0x0100, true, 40, 1) && lora_regq_want_wake(&q));
+    for (uint16_t i = 0; i < 20; i++) { // a poll burst: no more tokens
+        CHECK(!post(&q, (uint16_t)(0x0200 + i), false, 0, 2) || !lora_regq_want_wake(&q));
+    }
+    lora_regq_woken(&q); // the task drains
+    while (lora_regq_take(&q, &r)) {
+    }
+    CHECK(post(&q, 0x0101, true, 10, 3) && lora_regq_want_wake(&q));
+    lora_regq_clear(&q); // a C6 loss resets the receive queue and the token with it
+    CHECK(lora_regq_want_wake(&q));
+}
+
+// The restart blank's pause after a recent REG_SET (#310 review M3)
+static void test_settle(void) {
+    CHECK(lora_regq_settle_ms(false, 0, 50) == 0);
+    CHECK(lora_regq_settle_ms(true, 1000, 1000) == LORA_REGQ_SETTLE_MS);
+    CHECK(lora_regq_settle_ms(true, 1000, 1000 + LORA_REGQ_SETTLE_RECENT_MS - 1) == LORA_REGQ_SETTLE_MS);
+    CHECK(lora_regq_settle_ms(true, 1000, 1000 + LORA_REGQ_SETTLE_RECENT_MS) == 0);
+    CHECK(lora_regq_settle_ms(true, UINT32_MAX - 10, 20) == LORA_REGQ_SETTLE_MS); // across the wrap
+}
+
 int main(void) {
+    test_wake();
+    test_settle();
     test_order_and_coalesce();
     test_full();
     test_block();

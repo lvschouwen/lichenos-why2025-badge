@@ -30,6 +30,7 @@ typedef struct {
     uint8_t         head, count;
     uint16_t        blocked[LORA_REGQ_BLOCK_MAX];
     uint8_t         n_blocked;
+    bool            wake_pending; // a wake token sits in the LoRa task's receive queue
 } lora_regq_t;
 
 // Drops every waiting entry; blocked ids stay blocked
@@ -39,5 +40,17 @@ void lora_regq_clear(lora_regq_t *q);
 bool lora_regq_block(lora_regq_t *q, uint16_t id);
 // False when the queue is full and no entry for this id waits, or the id is blocked
 bool lora_regq_post(lora_regq_t *q, lora_regq_req_t const *req);
+// Wake tokens (#310 review): at most one in the LoRa task's 8-deep receive queue, so a burst of posts never crowds out
+// RX_PACKET or REG_VAL. want_wake: true = send a token now (and it counts as outstanding); woken: the task is about to
+// drain the queue, so the next post needs a token again (also when sending the token failed).
+bool lora_regq_want_wake(lora_regq_t *q);
+void lora_regq_woken(lora_regq_t *q);
+
+// The restart blank's pause (#310 review): a REG_SET that left within LORA_REGQ_SETTLE_RECENT_MS may still be applied
+// by the C6 after the caller's next UART line, so the caller waits LORA_REGQ_SETTLE_MS first; 0 otherwise
+#define LORA_REGQ_SETTLE_RECENT_MS 100
+#define LORA_REGQ_SETTLE_MS        20
+uint32_t lora_regq_settle_ms(bool set_sent, uint32_t set_sent_ms, uint32_t now_ms);
+
 // The oldest entry, taken out; false when the queue is empty
 bool lora_regq_take(lora_regq_t *q, lora_regq_req_t *out);

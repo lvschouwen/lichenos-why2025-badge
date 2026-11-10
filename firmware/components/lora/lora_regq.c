@@ -4,8 +4,25 @@
 
 void lora_regq_clear(lora_regq_t *q) {
     memset(q->req, 0, sizeof(q->req));
-    q->head  = 0;
-    q->count = 0;
+    q->head         = 0;
+    q->count        = 0;
+    q->wake_pending = false; // the receive queue is reset with it
+}
+
+bool lora_regq_want_wake(lora_regq_t *q) {
+    if (q->wake_pending) {
+        return false;
+    }
+    q->wake_pending = true;
+    return true;
+}
+
+void lora_regq_woken(lora_regq_t *q) {
+    q->wake_pending = false;
+}
+
+uint32_t lora_regq_settle_ms(bool set_sent, uint32_t set_sent_ms, uint32_t now_ms) {
+    return set_sent && now_ms - set_sent_ms < LORA_REGQ_SETTLE_RECENT_MS ? LORA_REGQ_SETTLE_MS : 0;
 }
 
 static bool blocked(lora_regq_t const *q, uint16_t id) {

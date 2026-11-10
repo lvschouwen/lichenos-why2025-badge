@@ -133,8 +133,8 @@ static reg_cmd_result_t refusal(reg_entry_t const *e, reg_value_t const *v) {
     return reg_check(e, v) == REG_OK ? RC_OK : RC_RANGE;
 }
 
-reg_cmd_result_t reg_cmd_set(reg_entry_t const *tab, size_t n, char const *args, reg_entry_t const **e,
-                             reg_value_t *applied, bool *have_applied) {
+reg_cmd_result_t reg_cmd_set(reg_entry_t const *tab, size_t n, char const *args, reg_confirmable_fn confirmable,
+                             reg_entry_t const **e, reg_value_t *applied, bool *have_applied) {
     char        key[REG_NAME_MAX + 1];
     char const *text;
     *e            = NULL;
@@ -157,6 +157,11 @@ reg_cmd_result_t reg_cmd_set(reg_entry_t const *tab, size_t n, char const *args,
     }
     reg_status_t st = reg_set(*e, &v, applied);
     *have_applied   = st == REG_OK;
+    if (st != REG_OK && confirmable && !confirmable(*e)) {
+        *applied      = v; // the level asked for, said as such in the reply
+        *have_applied = true;
+        return RC_UNCONFIRMED;
+    }
     return st == REG_OK ? RC_OK : RC_FAILED;
 }
 
@@ -186,6 +191,10 @@ size_t reg_cmd_set_reply(reg_cmd_result_t r, reg_entry_t const *e, reg_value_t c
     applied_suffix(e, applied, have_applied, tail, sizeof(tail));
     switch (r) {
         case RC_OK: return done(snprintf(buf, cap, "%s = %s", e->name, tail + strlen("applied ")), cap);
+        case RC_UNCONFIRMED:
+            return done(snprintf(buf, cap, "%s = %s (sent over UART, not confirmed by this C6)", e->name,
+                                 tail + strlen("applied ")),
+                        cap);
         case RC_GUARDED:
             return done(snprintf(buf, cap, "ERR guarded: %s changes what the badge transmits, use its own command (%s)",
                                  e->name, tail),

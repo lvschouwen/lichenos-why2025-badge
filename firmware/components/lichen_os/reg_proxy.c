@@ -63,9 +63,12 @@ bool reg_proxy_begin(reg_proxy_t *p, uint16_t id, uint32_t now_ms, uint8_t *seq)
     if (!s) {
         return false;
     }
-    s->seq     = ++p->next_seq;
-    s->pending = true;
-    s->sent_ms = now_ms;
+    s->prev_seq     = s->seq;
+    s->prev_pending = s->pending;
+    s->prev_sent_ms = s->sent_ms;
+    s->seq          = ++p->next_seq;
+    s->pending      = true;
+    s->sent_ms      = now_ms;
     if (id == REG_ID_C6_REG_CAPS && p->caps_tries < 255) {
         p->caps_tries++;
     }
@@ -75,8 +78,14 @@ bool reg_proxy_begin(reg_proxy_t *p, uint16_t id, uint32_t now_ms, uint8_t *seq)
 
 void reg_proxy_cancel(reg_proxy_t *p, uint16_t id, uint8_t seq) {
     reg_proxy_slot_t *s = find(p, id);
-    if (s && s->seq == seq) {
-        s->pending = false;
+    if (!s || s->seq != seq) {
+        return;
+    }
+    s->seq     = s->prev_seq;
+    s->pending = s->prev_pending;
+    s->sent_ms = s->prev_sent_ms;
+    if (id == REG_ID_C6_REG_CAPS && p->caps_tries) {
+        p->caps_tries--;
     }
 }
 

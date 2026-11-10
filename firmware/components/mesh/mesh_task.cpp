@@ -27,6 +27,7 @@
 #include "mesh_prefs.h"
 #include "mesh_share.h"
 #include "radio_presets.h"
+#include "mesh_radio_line.h"
 
 #include "SPIFFS.h"
 
@@ -2709,8 +2710,6 @@ static mesh_sub_t const MESH_SUBS[] = {
     {"scope", SUB_WORD, mesh_cscope_console}, // #290: the console scope
 };
 
-extern "C" void mesh_radio_console(void);
-
 static void cmd_mesh(char const *args) {
     if (strcmp(args, "start") == 0 || strcmp(args, "stop") == 0) {
         cmd_mesh_run(strcmp(args, "start") == 0);
@@ -2781,7 +2780,7 @@ static void cmd_mesh(char const *args) {
                   (unsigned long)sent, (unsigned long)send_failed, (unsigned long)timeouts, (unsigned long)refused,
                   contacts, (unsigned)msgs);
     console_reply("identity: %s", mesh_ident_text(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE)));
-    mesh_radio_console(); // mesh_radio_line.c: MeshCore's radio and the C6's applied one (#310)
+    mesh_radio_console(); // mesh_radio_line.c
 }
 
 // ---- "fw contacts export|import" (#54) ------------------------------------------------------------------------------

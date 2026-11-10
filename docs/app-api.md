@@ -126,8 +126,8 @@ to `layers.conf`):
   settings, checked by `lora_config_valid`), `lora_set_link_callback(owner, ...)`, `lora_set_rx_formatter(owner, ...)`,
   `lora_sweep(owner, ...)` (an RSSI sweep, receive only, blocking: never from the LVGL task, #161), and the read-only
   stats (`lora_up`, `lora_get_radio`, `lora_get_freq`, `lora_get_counts`, ...). `lora_get_radio` / `lora_get_freq` are
-  the P4's requested copy (airtime math never waits on the C6); `lora_applied_text` is the C6's applied radio as one
-  console line from the settings registry's cache (never waits, #310; `fw mesh` prints it). Every call that takes
+  the P4's requested copy (airtime math never waits on the C6; the C6's applied values are the registry's, `fw lora`
+  and `fw get lora.`, #310). Every call that takes
   `owner` is refused, with a rate-limited log line, unless that name holds the claim (#179). `lora_os.h` (start, stop,
   the radio switch, the C6 hooks, the registry transport `lora_reg_*` / `lora_set_reg_hooks` / `lora_get_requested`)
   is the OS's: apps never include it (`tools/layers.conf` forbids those symbols in L6).

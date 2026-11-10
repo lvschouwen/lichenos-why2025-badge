@@ -48,11 +48,18 @@ reg_status_t reg_p4_bl_mode_get(reg_entry_t const *e, reg_value_t *out) {
     return REG_OK;
 }
 
+static bool c6_confirms = true; // the stub C6 has the registry and the bl domain
+
+static bool confirmable(reg_entry_t const *e) {
+    (void)e;
+    return c6_confirms;
+}
+
 static reg_cmd_result_t set(char const *args, char *reply, size_t cap) {
     reg_entry_t const *e;
     reg_value_t        applied;
     bool               have;
-    reg_cmd_result_t   r = reg_cmd_set(reg_p4_table, reg_p4_count, args, &e, &applied, &have);
+    reg_cmd_result_t   r = reg_cmd_set(reg_p4_table, reg_p4_count, args, confirmable, &e, &applied, &have);
     reg_cmd_set_reply(r, e, &applied, have, args, reply, cap);
     return r;
 }
@@ -110,6 +117,15 @@ static void test_set_rules(void) {
     proxy_fails = true; // set, but the C6 does not answer: said so, not called applied
     CHECK(set("bl.keyboard 20", reply, sizeof(reply)) == RC_FAILED);
     CHECK(strncmp(reply, "ERR failed", 10) == 0);
+    // An old C6 (or one without the bl domain): the level went over UART1, said so, not an error (#310 review M4)
+    c6_confirms = false;
+    bl_sets     = 0;
+    CHECK(set("bl.keyboard 20", reply, sizeof(reply)) == RC_UNCONFIRMED);
+    CHECK(strcmp(reply, "bl.keyboard = 20 % (sent over UART, not confirmed by this C6)") == 0);
+    CHECK(bl_sets == 1);
+    CHECK(set("lora.freq 869000000", reply, sizeof(reply)) == RC_GUARDED); // still guarded, never sent
+    CHECK(bl_sets == 1);
+    c6_confirms = true;
     proxy_fails = false;
 }
 
@@ -145,6 +161,34 @@ static void test_old_c6(void) {
     CHECK(reg_proxy_begin(&p, REG_ID_C6_REG_CAPS, late, &seq));
     CHECK(reg_proxy_begin(&p, REG_ID_C6_REG_CAPS, late + 5000, &seq));
     CHECK(!reg_proxy_caps_due(&p, late + 10000));
+}
+
+// A post that could not go out (#310 review L5): no c6.reg_caps try is used up, and a request still in flight keeps its
+// seq, so its answer is taken
+static void test_cancel(void) {
+    reg_proxy_t p;
+    uint8_t     s1, s2;
+    CHECK(reg_proxy_init(&p, ids, types, 4, 0));
+    for (int i = 0; i < 2 * REG_PROXY_CAPS_TRIES; i++) {
+        CHECK(reg_proxy_caps_due(&p, 0));
+        CHECK(reg_proxy_begin(&p, REG_ID_C6_REG_CAPS, 0, &s1));
+        reg_proxy_cancel(&p, REG_ID_C6_REG_CAPS, s1); // no link: nothing sent
+    }
+    CHECK(p.caps_tries == 0 && reg_proxy_caps_due(&p, 0));
+    caps_answer(&p, 0x8016, 0);
+    CHECK(reg_proxy_begin(&p, REG_ID_LORA_FREQ, 100, &s1)); // in flight
+    CHECK(reg_proxy_begin(&p, REG_ID_LORA_FREQ, 200, &s2)); // the console's, could not be posted
+    reg_proxy_cancel(&p, REG_ID_LORA_FREQ, s2);
+    CHECK(reg_proxy_pending(&p, REG_ID_LORA_FREQ));
+    CHECK(reg_proxy_answer(&p, REG_ID_LORA_FREQ, s1, REG_OK, REG_T_U32, 869618000, 300) == RP_ACCEPTED);
+    // Cancelling with nothing in flight before leaves the key not waiting
+    CHECK(reg_proxy_begin(&p, REG_ID_LORA_POWER, 400, &s1));
+    reg_proxy_cancel(&p, REG_ID_LORA_POWER, s1);
+    CHECK(!reg_proxy_pending(&p, REG_ID_LORA_POWER));
+    // A stale seq does not cancel the newest request
+    CHECK(reg_proxy_begin(&p, REG_ID_LORA_POWER, 500, &s2));
+    reg_proxy_cancel(&p, REG_ID_LORA_POWER, s1);
+    CHECK(reg_proxy_pending(&p, REG_ID_LORA_POWER));
 }
 
 static void test_caps_and_domains(void) {
@@ -321,6 +365,7 @@ int main(void) {
     test_set_rules();
     test_old_c6();
     test_caps_and_domains();
+    test_cancel();
     test_seq_and_cache();
     test_link();
     test_matches();

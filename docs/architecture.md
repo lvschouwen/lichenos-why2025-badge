@@ -163,7 +163,10 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   UART1 `BL` line; the restart blank, the UART lend's return and the C6-reset reapply stay on UART1. The restart blank
   first closes the REG path (`lora_reg_block`: the queued bl.* REG_SETs are dropped, later ones refused, a send in
   flight waited for up to 50 ms), so no REG_SET can light the panel again after the UART `BL 0 0`. `fw bl` is an
-  alias over `fw set` / `fw get bl.*`; `fw lora` and `fw mesh` show the applied radio next to the P4's requested copy.
+  alias over `fw set` / `fw get bl.*` (on a C6 without the bl domain a set goes over UART1 and says it is not
+  confirmed); `fw lora` shows the applied radio next to the P4's requested copy. The wake token is one at most (the
+  LoRa task's 8-deep receive queue keeps room for RX_PACKET and REG_VAL); the restart close also pauses 20 ms when a
+  REG_SET left in the last 100 ms.
   `lora_get_radio` / `lora_get_freq` and `lichen_sys_display_get` stay the requested / saved values.
 - **CONFIG (type 1, 14 bytes of body, 16 in all):** freq u32, bw u32, sf u8, cr u8 (5..8 = 4/5..4/8), sync u8,
   preamble u16, tx power i8 dBm. The P4 sends it on every (re)start of the link (`LORA_ACT_SEND_CONFIG`,

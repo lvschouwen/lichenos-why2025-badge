@@ -113,7 +113,13 @@ static void ask_live(reg_entry_t const *const *es, size_t n, bool *no_link) {
     uint16_t ids[REG_PROXY_MAX] = {0};
     bool     asked[REG_PROXY_MAX] = {false};
     size_t   k = 0;
-    ensure_caps();
+    bool     any_proxy = false;
+    for (size_t i = 0; i < n; i++) {
+        any_proxy = any_proxy || reg_p4_is_proxy(es[i]);
+    }
+    if (any_proxy) { // a query of P4 keys only (bl.idle) never waits for the C6
+        ensure_caps();
+    }
     for (size_t i = 0; i < n; i++) {
         no_link[i] = false;
         if (!reg_p4_is_proxy(es[i]) || k == REG_PROXY_MAX || support(es[i]->id) != RP_OK) {
@@ -278,14 +284,14 @@ static void on_link(bool up) {
     }
 }
 
-static size_t radio_text(char *buf, size_t cap, bool live) {
+static size_t radio_text(char *buf, size_t cap) {
     reg_entry_t const *es[REG_RADIO_KEYS];
     bool               no_link[REG_RADIO_KEYS] = {false};
     reg_view_t         v[REG_RADIO_KEYS];
     for (size_t i = 0; i < REG_RADIO_KEYS; i++) {
         es[i] = reg_find_id(reg_p4_table, reg_p4_count, reg_p4_radio_ids[i]);
     }
-    live = live && may_wait();
+    bool live = may_wait();
     if (live) {
         ask_live(es, REG_RADIO_KEYS, no_link);
     }
@@ -345,12 +351,18 @@ static void cmd_get(char const *args) {
     print_rows(args);
 }
 
-static reg_cmd_result_t set_and_reply(char const *args, bool quiet_failed) {
+// A C6 key this C6 can read back: false on an old C6 or one without the domain, whose bl.* levels go over UART1
+static bool confirmable(reg_entry_t const *e) {
+    rp_support_t s = support(e->id);
+    return !reg_p4_is_proxy(e) || (s != RP_OLD_C6 && s != RP_NO_DOMAIN);
+}
+
+static reg_cmd_result_t set_and_reply(char const *args, bool quiet) {
     reg_entry_t const *e;
     reg_value_t        applied;
     bool               have;
-    reg_cmd_result_t   r = reg_cmd_set(reg_p4_table, reg_p4_count, args, &e, &applied, &have);
-    if (!(quiet_failed && (r == RC_OK || r == RC_FAILED))) {
+    reg_cmd_result_t   r = reg_cmd_set(reg_p4_table, reg_p4_count, args, confirmable, &e, &applied, &have);
+    if (!(quiet && (r == RC_OK || r == RC_FAILED || r == RC_UNCONFIRMED))) { // the alias prints the rows instead
         char line[REG_LINE_MAX];
         reg_cmd_set_reply(r, e, &applied, have, args, line, sizeof(line));
         console_reply("%s", line);
@@ -374,7 +386,9 @@ static void cmd_bl(char const *args) {
         console_reply("bl [<display %d-100> <keyboard 0-100>] | bl r16", BACKLIGHT_DISPLAY_MIN);
         return;
     }
-    if (*args) {
+    if (*args && !atomic_load(&started)) {
+        backlight_set_saved((uint8_t)d, (uint8_t)k); // no registry (its table failed the check): the driver as before
+    } else if (*args) {
         char set[40];
         snprintf(set, sizeof(set), "bl.display %u", d < BACKLIGHT_DISPLAY_MIN ? BACKLIGHT_DISPLAY_MIN : d);
         set_and_reply(set, true);
@@ -384,7 +398,9 @@ static void cmd_bl(char const *args) {
     uint8_t sd, sk;
     backlight_get(&sd, &sk);
     console_reply("backlight %u %u", sd, sk);
-    print_rows("bl");
+    if (atomic_load(&started)) {
+        print_rows("bl");
+    }
 }
 
 static lora_reg_hooks_t const hooks = {.answer = on_answer, .link = on_link, .radio_text = radio_text};
@@ -407,6 +423,10 @@ void lichen_reg_start(void) {
             types[n++] = reg_p4_table[i].type;
         }
     }
+    // "fw bl" (and "bl r16") whether or not the registry starts: it replaced the driver's own command
+    console_register("bl", "bl [<display> <keyboard>] (backlight 0-100, screen at least 5; = fw set/get bl.*) | bl r16 "
+                           "(is R16 fitted?)",
+                     cmd_bl);
     size_t bad = reg_table_check(reg_p4_table, reg_p4_count);
     if (bad != reg_p4_count || !reg_proxy_init(&px, ids, types, n, now_ms())) {
         ESP_LOGE(TAG, "registry table bad at entry %u: not started", (unsigned)bad);
@@ -418,9 +438,6 @@ void lichen_reg_start(void) {
     console_register("get", "get [key|prefix] (settings registry: saved / requested / applied / unit / age; fw get bl.)",
                      cmd_get);
     console_register("set", "set <key> <value> (a registry key; radio keys are guarded: fw mesh radio)", cmd_set);
-    console_register("bl", "bl [<display> <keyboard>] (backlight 0-100, screen at least 5; = fw set/get bl.*) | bl r16 "
-                           "(is R16 fitted?)",
-                     cmd_bl);
     start_poll();
     post(REG_ID_C6_REG_CAPS, false, 0); // its answer switches the backlight to REG_SET
 }

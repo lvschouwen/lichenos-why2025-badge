@@ -55,13 +55,17 @@ typedef enum {
     RC_RO,
     RC_RANGE,
     RC_FAILED,    // set, but no applied value could be read back (or the setter failed)
+    RC_UNCONFIRMED, // set, and this C6 cannot read it back (no registry or no domain): sent over UART1 (bl.*)
 } reg_cmd_result_t;
 
 // "<key> <value>": find, parse, reg_set (TX -> GUARDED before any setter). *e is the key when one was found, *applied
-// the value read back (valid unless RC_USAGE / RC_UNKNOWN / RC_BAD_VALUE, or a getter that failed)
-reg_cmd_result_t reg_cmd_set(reg_entry_t const *tab, size_t n, char const *args, reg_entry_t const **e,
-                             reg_value_t *applied, bool *have_applied);
-// The reply line for a reg_cmd_set result: "bl.display = 50 %", "ERR guarded: ...", "ERR unknown key ..."
+// the value read back (valid when *have_applied). confirmable(e): the peer can read this key back now; a set whose read
+// back failed on a key that is not is RC_UNCONFIRMED with *applied = the value asked for. NULL: always confirmable.
+typedef bool (*reg_confirmable_fn)(reg_entry_t const *e);
+reg_cmd_result_t reg_cmd_set(reg_entry_t const *tab, size_t n, char const *args, reg_confirmable_fn confirmable,
+                             reg_entry_t const **e, reg_value_t *applied, bool *have_applied);
+// The reply line for a reg_cmd_set result: "bl.display = 50 %", "bl.display = 50 % (sent over UART, not confirmed by
+// this C6)", "ERR guarded: ...", "ERR unknown key ..."
 size_t reg_cmd_set_reply(reg_cmd_result_t r, reg_entry_t const *e, reg_value_t const *applied, bool have_applied,
                          char const *args, char *buf, size_t cap);
 

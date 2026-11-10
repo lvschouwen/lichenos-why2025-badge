@@ -29,6 +29,10 @@ typedef struct {
     uint8_t  seq;    // of the newest request
     bool     have, pending, stale, warned, req_known;
     uint32_t value, at_ms, sent_ms;
+    // The request before the newest, so a cancelled post gives the one still in flight its seq back
+    uint8_t  prev_seq;
+    bool     prev_pending;
+    uint32_t prev_sent_ms;
     uint32_t req_value, req_since_ms;
 } reg_proxy_slot_t;
 
@@ -57,7 +61,8 @@ bool reg_proxy_caps_due(reg_proxy_t const *p, uint32_t now_ms);
 
 // A request for id goes out: *seq to send with it. False for an id that is not proxied.
 bool reg_proxy_begin(reg_proxy_t *p, uint16_t id, uint32_t now_ms, uint8_t *seq);
-// The request could not be posted (no link): the key does not wait for it
+// The request could not be posted (no link): the key goes back to the request before it (a GET still in flight keeps
+// its seq and stays answerable) and a c6.reg_caps try is not counted
 void reg_proxy_cancel(reg_proxy_t *p, uint16_t id, uint8_t seq);
 bool reg_proxy_pending(reg_proxy_t const *p, uint16_t id);
 rp_answer_t reg_proxy_answer(reg_proxy_t *p, uint16_t id, uint8_t seq, uint8_t status, uint8_t type, uint32_t value,

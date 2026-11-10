@@ -342,6 +342,10 @@ static void on_peer_data(uint32_t msg_id, uint8_t const *data, size_t len, void 
     }
 }
 
+// When the LoRa task last sent a REG_SET (lora_reg_block's pause before the restart blank)
+static uint32_t reg_set_ms;
+static bool     reg_set_sent;
+
 // A zero-length entry in rx_queue: no message, it only ends the task's queue wait so a registry request goes out now
 static lora_rx_msg_t const wake_token;
 
@@ -359,10 +363,13 @@ static bool reg_post(lora_regq_req_t const *req) {
         return false;
     }
     portENTER_CRITICAL(&state_lock);
-    bool ok = !c6_link.lost && lora_regq_post(&regq, req);
+    bool ok   = !c6_link.lost && lora_regq_post(&regq, req);
+    bool wake = ok && lora_regq_want_wake(&regq); // one token at most: RX_PACKET and REG_VAL keep their room
     portEXIT_CRITICAL(&state_lock);
-    if (ok) {
-        xQueueSend(rx_queue, &wake_token, 0); // a full queue wakes the task anyway; else it goes out within a second
+    if (wake && xQueueSend(rx_queue, &wake_token, 0) != pdTRUE) {
+        portENTER_CRITICAL(&state_lock); // a full queue wakes the task anyway; the next post may try again
+        lora_regq_woken(&regq);
+        portEXIT_CRITICAL(&state_lock);
     }
     return ok;
 }
@@ -387,6 +394,12 @@ void lora_reg_block(uint16_t const *ids, size_t n, uint32_t wait_ms) {
     if (send_mutex && xSemaphoreTake(send_mutex, pdMS_TO_TICKS(wait_ms)) == pdTRUE) {
         xSemaphoreGive(send_mutex);
     }
+    // Delivered is not applied yet: a REG_SET that just left gets a moment on the C6 before the caller's UART line
+    uint32_t pause = lora_regq_settle_ms(__atomic_load_n(&reg_set_sent, __ATOMIC_ACQUIRE),
+                                         __atomic_load_n(&reg_set_ms, __ATOMIC_ACQUIRE), now_ms());
+    if (pause) {
+        vTaskDelay(pdMS_TO_TICKS(pause));
+    }
 }
 
 void lora_get_requested(lora_requested_t *out) {
@@ -395,14 +408,6 @@ void lora_get_requested(lora_requested_t *out) {
     portEXIT_CRITICAL(&state_lock);
     *out = (lora_requested_t){.freq_hz = c.freq_hz, .bw_hz = c.bw_hz, .sf = c.sf, .cr = c.cr,
                               .sync_word = c.sync_word, .preamble = c.preamble, .tx_power_dbm = c.tx_power_dbm};
-}
-
-size_t lora_applied_text(char *buf, size_t cap) {
-    lora_reg_hooks_t const *h = hooks_now();
-    if (cap) {
-        buf[0] = '\0';
-    }
-    return h && h->radio_text && cap ? h->radio_text(buf, cap, false) : 0;
 }
 
 static bool send_to_c6(lora_msg_t const *msg) {
@@ -462,6 +467,9 @@ static void run_actions(unsigned act) {
 // message buffer stays off the LoRa task's main frame
 __attribute__((noinline)) static void run_reg_queue(void) {
     lora_regq_req_t req;
+    portENTER_CRITICAL(&state_lock);
+    lora_regq_woken(&regq); // before the drain: a post after this sends a new token, so nothing waits a second
+    portEXIT_CRITICAL(&state_lock);
     for (;;) {
         portENTER_CRITICAL(&state_lock);
         bool have = lora_regq_take(&regq, &req);
@@ -476,6 +484,10 @@ __attribute__((noinline)) static void run_reg_queue(void) {
             msg.u.reg_get = (lora_reg_get_t){.id = req.id, .seq = req.seq};
         }
         send_to_c6(&msg); // no answer is the registry's timeout: it shows the key stale or unanswered
+        if (req.set) {
+            __atomic_store_n(&reg_set_ms, now_ms(), __ATOMIC_RELEASE);
+            __atomic_store_n(&reg_set_sent, true, __ATOMIC_RELEASE);
+        }
     }
 }
 
@@ -897,7 +909,7 @@ static void cmd_lora_radio(void) {
                   r.sf, r.cr, r.sync_word, r.preamble, r.tx_power_dbm);
     lora_reg_hooks_t const *h = hooks_now();
     char                    line[160];
-    if (h && h->radio_text && h->radio_text(line, sizeof(line), true)) {
+    if (h && h->radio_text && h->radio_text(line, sizeof(line))) {
         console_reply("lora applied   %s", line);
     }
 }
