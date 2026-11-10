@@ -398,7 +398,7 @@ static ota_display_t show_boot_screen(lv_display_t **display) {
             ESP_LOGW(TAG, "fw noscreen key could not be erased: ignored, the display starts");
         } else {
             ESP_LOGW(TAG, "display start skipped on purpose (fw noscreen, this boot only)");
-            boot_progress_end(BOOT_DISPLAY, STEP_FAILED, "skipped (fw noscreen)");
+            boot_progress_end(BOOT_DISPLAY, STEP_SKIPPED, "fw noscreen");
             return OTA_DISPLAY_SKIPPED;
         }
     }

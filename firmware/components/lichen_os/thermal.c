@@ -325,8 +325,9 @@ static void print_status(void) {
     lichen_sys_thermal_info_t i;
     lichen_sys_thermal_info(&i);
     if (atomic_load(&running)) {
+        // hot_alert is the shell's own hook, bound only with a screen (ui_ready is bound either way, #305)
         console_reply("watchdog: running, %u polls, the last %u s ago (%s)", (unsigned)atomic_load(&polls),
-                      (unsigned)(up_s() - atomic_load(&last_poll_s)), hooks.ui_ready ? "with the shell" : "no display");
+                      (unsigned)(up_s() - atomic_load(&last_poll_s)), hooks.hot_alert ? "with the shell" : "no display");
     } else {
         console_reply("watchdog: NOT RUNNING (no memory for its task): nothing watches the temperature");
     }
