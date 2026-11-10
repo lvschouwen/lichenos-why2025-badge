@@ -33,7 +33,7 @@ static char const TAG[] = "lora";
 
 #define LORA_TOML       "/storage/lora.toml"
 #define LORA_TOML_MAX   2048
-#define RX_QUEUE_DEPTH  8
+#define RX_QUEUE_DEPTH  8 // internal RAM: REG_VALs take at most LORA_REGQ_IN_FLIGHT + the wake token, the rest is RX_PACKET (#314)
 #define STATUS_LINE_MAX 256
 
 typedef struct {
@@ -463,16 +463,18 @@ static void run_actions(unsigned act) {
     }
 }
 
-// The registry's requests, one send each, oldest first; the queue lock is never held across a send. Not inlined: its
-// message buffer stays off the LoRa task's main frame
+// The registry's requests, one send each, oldest first, at most LORA_REGQ_IN_FLIGHT unanswered (#314: their REG_VALs
+// must leave room in rx_queue for RX_PACKET); the rest go out as answers come in. The queue lock is never held across
+// a send. Not inlined: its message buffer stays off the LoRa task's main frame
 __attribute__((noinline)) static void run_reg_queue(void) {
     lora_regq_req_t req;
     portENTER_CRITICAL(&state_lock);
     lora_regq_woken(&regq); // before the drain: a post after this sends a new token, so nothing waits a second
     portEXIT_CRITICAL(&state_lock);
     for (;;) {
+        uint32_t t = now_ms();
         portENTER_CRITICAL(&state_lock);
-        bool have = lora_regq_take(&regq, &req);
+        bool have = lora_regq_take(&regq, t, &req);
         portEXIT_CRITICAL(&state_lock);
         if (!have) {
             return;
@@ -483,7 +485,11 @@ __attribute__((noinline)) static void run_reg_queue(void) {
         } else {
             msg.u.reg_get = (lora_reg_get_t){.id = req.id, .seq = req.seq};
         }
-        send_to_c6(&msg); // no answer is the registry's timeout: it shows the key stale or unanswered
+        if (!send_to_c6(&msg)) { // no answer coming: free its slot now. No answer to a sent one is the registry's
+            portENTER_CRITICAL(&state_lock); // timeout: it shows the key stale or unanswered
+            lora_regq_answered(&regq, req.id, req.seq);
+            portEXIT_CRITICAL(&state_lock);
+        }
         if (req.set) {
             __atomic_store_n(&reg_set_ms, now_ms(), __ATOMIC_RELEASE);
             __atomic_store_n(&reg_set_sent, true, __ATOMIC_RELEASE);
@@ -499,6 +505,9 @@ static void reg_link(bool up) {
 }
 
 static void reg_answer(lora_reg_val_t const *v) {
+    portENTER_CRITICAL(&state_lock);
+    lora_regq_answered(&regq, v->id, v->seq); // the next request may go out (run_reg_queue, top of the task's loop)
+    portEXIT_CRITICAL(&state_lock);
     lora_reg_hooks_t const *h = hooks_now();
     if (h && h->answer) {
         h->answer(v->id, v->seq, v->status, v->type, v->value);
@@ -640,6 +649,20 @@ static void on_result(lora_result_t const *res) {
     }
 }
 
+// A second, or less when registry requests wait for a slot that times out sooner (no answer would wake the task)
+__attribute__((noinline)) static TickType_t rx_wait_ticks(void) {
+    uint32_t t = now_ms();
+    portENTER_CRITICAL(&state_lock);
+    uint32_t ms = lora_regq_wait_ms(&regq, t, 1000);
+    portEXIT_CRITICAL(&state_lock);
+    TickType_t ticks = pdMS_TO_TICKS(ms);
+    return ms && !ticks ? 1 : ticks; // never a spin on a wait shorter than a tick
+}
+
+uint32_t lora_reg_burst_ms(size_t n) {
+    return lora_regq_burst_ms(n);
+}
+
 static void lora_task(void *arg) {
     lora_sup_t sup;
     lora_sup_init(&sup, now_ms());
@@ -671,7 +694,7 @@ static void lora_task(void *arg) {
         run_reg_queue(); // also while LoRa is switched off: reading the C6's settings is not radio use
 
         lora_rx_msg_t raw;
-        if (xQueueReceive(rx_queue, &raw, pdMS_TO_TICKS(1000)) != pdTRUE || raw.len == 0) {
+        if (xQueueReceive(rx_queue, &raw, rx_wait_ticks()) != pdTRUE || raw.len == 0) {
             continue; // a timeout, or the registry's wake token
         }
         lora_msg_t msg;

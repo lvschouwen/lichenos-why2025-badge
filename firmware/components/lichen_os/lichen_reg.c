@@ -28,7 +28,7 @@
 
 static char const TAG[] = "reg";
 
-#define LIVE_WAIT_MS 500             // the console's wait for the C6's answers to one `fw get`
+#define LIVE_WAIT_MS 500             // the console's wait for the C6's answers to one `fw get` (plus its pacing)
 #define POLL_US      (30 * 1000000)  // background refresh of the cache (screens read it) and the mismatch check
 #define REG_LINE_MAX     160
 
@@ -130,7 +130,7 @@ static void ask_live(reg_entry_t const *const *es, size_t n, bool *no_link) {
         no_link[i] = !asked[k] && !pending(ids[k]);
         k++;
     }
-    wait_answers(ids, asked, k, LIVE_WAIT_MS);
+    wait_answers(ids, asked, k, LIVE_WAIT_MS + lora_reg_burst_ms(k)); // #314: they go out a few at a time
 }
 
 // ---- saved and requested ------------------------------------------------------------------------------------------

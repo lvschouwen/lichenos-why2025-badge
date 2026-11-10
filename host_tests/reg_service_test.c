@@ -267,6 +267,22 @@ static void test_link(void) {
     CHECK(!v.has_applied && v.note == RV_NO_LINK);
 }
 
+// c6.reg_caps is asked once per link (#314): in a live console ask, which does not ask it again, it shows its age and
+// no stale note however old it is; after a re-attach it has nothing to show until answered again
+static void test_caps_age(void) {
+    reg_proxy_t p;
+    reg_view_t  v;
+    CHECK(reg_proxy_init(&p, ids, types, 4, 0));
+    caps_answer(&p, 0x8016, 1000);
+    reg_proxy_view(&p, REG_ID_C6_REG_CAPS, 76000, true, true, &v);
+    CHECK(v.has_applied && v.applied.u == 0x8016 && v.has_age && v.age_ms == 75000 && v.note == RV_NONE);
+    reg_proxy_view(&p, REG_ID_C6_REG_CAPS, 76000, false, false, &v);
+    CHECK(v.has_applied && v.note == RV_NONE);
+    reg_proxy_link(&p, 80000);
+    reg_proxy_view(&p, REG_ID_C6_REG_CAPS, 80000, true, false, &v);
+    CHECK(!v.has_applied);
+}
+
 static void test_matches(void) {
     reg_value_t r = {.u = 869618000}, a = {.u = 869617990};
     CHECK(reg_applied_matches(REG_ID_LORA_FREQ, &r, &r) == RM_EQUAL);
@@ -365,6 +381,7 @@ int main(void) {
     test_set_rules();
     test_old_c6();
     test_caps_and_domains();
+    test_caps_age();
     test_cancel();
     test_seq_and_cache();
     test_link();

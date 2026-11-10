@@ -7,6 +7,7 @@ void lora_regq_clear(lora_regq_t *q) {
     q->head         = 0;
     q->count        = 0;
     q->wake_pending = false; // the receive queue is reset with it
+    q->n_fly        = 0;     // nobody waits for those answers any more
 }
 
 bool lora_regq_want_wake(lora_regq_t *q) {
@@ -77,12 +78,56 @@ bool lora_regq_post(lora_regq_t *q, lora_regq_req_t const *req) {
     return true;
 }
 
-bool lora_regq_take(lora_regq_t *q, lora_regq_req_t *out) {
-    if (!q->count) {
+static void fly_drop(lora_regq_t *q, uint8_t i) {
+    q->fly[i] = q->fly[--q->n_fly];
+}
+
+static void fly_expire(lora_regq_t *q, uint32_t now_ms) {
+    for (uint8_t i = q->n_fly; i-- > 0;) {
+        if (now_ms - q->fly[i].sent_ms >= LORA_REGQ_ANSWER_MS) {
+            fly_drop(q, i);
+            q->timeouts++;
+        }
+    }
+}
+
+bool lora_regq_take(lora_regq_t *q, uint32_t now_ms, lora_regq_req_t *out) {
+    fly_expire(q, now_ms);
+    if (!q->count || q->n_fly == LORA_REGQ_IN_FLIGHT) {
         return false;
     }
     *out    = q->req[q->head];
     q->head = (uint8_t)((q->head + 1) % LORA_REGQ_MAX);
     q->count--;
+    q->fly[q->n_fly++] = (lora_regq_fly_t){.id = out->id, .seq = out->seq, .sent_ms = now_ms};
     return true;
+}
+
+bool lora_regq_answered(lora_regq_t *q, uint16_t id, uint8_t seq) {
+    for (uint8_t i = 0; i < q->n_fly; i++) {
+        if (q->fly[i].id == id && q->fly[i].seq == seq) {
+            fly_drop(q, i);
+            return true;
+        }
+    }
+    return false;
+}
+
+uint32_t lora_regq_wait_ms(lora_regq_t const *q, uint32_t now_ms, uint32_t wait_ms) {
+    if (!q->count || q->n_fly < LORA_REGQ_IN_FLIGHT) {
+        return wait_ms; // nothing held back: a post or an answer wakes the task
+    }
+    uint32_t soonest = wait_ms;
+    for (uint8_t i = 0; i < q->n_fly; i++) {
+        uint32_t age  = now_ms - q->fly[i].sent_ms;
+        uint32_t left = age >= LORA_REGQ_ANSWER_MS ? 0 : LORA_REGQ_ANSWER_MS - age;
+        soonest       = left < soonest ? left : soonest;
+    }
+    return soonest;
+}
+
+uint32_t lora_regq_burst_ms(size_t n) {
+    // Every full window before the last may time out once; the last one's answers are the caller's own wait
+    size_t windows = n ? (n - 1) / LORA_REGQ_IN_FLIGHT : 0;
+    return (uint32_t)(windows * LORA_REGQ_ANSWER_MS);
 }

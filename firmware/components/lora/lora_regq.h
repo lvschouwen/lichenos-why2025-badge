@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // The registry requests waiting for the LoRa task (#310): REG_GET / REG_SET to the C6, posted from any task without
@@ -25,15 +26,31 @@ typedef struct {
 // blank (#310), so their waiting entries are dropped and new posts refused
 #define LORA_REGQ_BLOCK_MAX 4
 
+// Requests in flight (#314): the C6 answers every REG_GET / REG_SET with a REG_VAL, back to back, into the LoRa task's
+// 8-deep receive queue, which also carries RX_PACKET. At most LORA_REGQ_IN_FLIGHT unanswered requests, so the answers
+// plus the one wake token leave room for received packets, STATUS and RESULT; the next request goes out when an answer
+// frees a slot, or LORA_REGQ_ANSWER_MS passed without one (a silent or old C6 never wedges the queue).
+#define LORA_REGQ_IN_FLIGHT  4
+#define LORA_REGQ_ANSWER_MS  250
+
+typedef struct {
+    uint16_t id;
+    uint8_t  seq;
+    uint32_t sent_ms;
+} lora_regq_fly_t;
+
 typedef struct {
     lora_regq_req_t req[LORA_REGQ_MAX];
     uint8_t         head, count;
     uint16_t        blocked[LORA_REGQ_BLOCK_MAX];
     uint8_t         n_blocked;
     bool            wake_pending; // a wake token sits in the LoRa task's receive queue
+    lora_regq_fly_t fly[LORA_REGQ_IN_FLIGHT];
+    uint8_t         n_fly;
+    uint32_t        timeouts; // slots freed without an answer
 } lora_regq_t;
 
-// Drops every waiting entry; blocked ids stay blocked
+// Drops every waiting entry and forgets the requests in flight; blocked ids stay blocked
 void lora_regq_clear(lora_regq_t *q);
 // Drops id's waiting entry (the others keep their order) and refuses every later post for it. False when the block
 // list is full (the entry is dropped all the same).
@@ -52,5 +69,15 @@ void lora_regq_woken(lora_regq_t *q);
 #define LORA_REGQ_SETTLE_MS        20
 uint32_t lora_regq_settle_ms(bool set_sent, uint32_t set_sent_ms, uint32_t now_ms);
 
-// The oldest entry, taken out; false when the queue is empty
-bool lora_regq_take(lora_regq_t *q, lora_regq_req_t *out);
+// The oldest entry, taken out and counted in flight from now_ms; false when the queue is empty or LORA_REGQ_IN_FLIGHT
+// requests are unanswered (slots older than LORA_REGQ_ANSWER_MS are freed first)
+bool lora_regq_take(lora_regq_t *q, uint32_t now_ms, lora_regq_req_t *out);
+// A REG_VAL for id/seq came (or that request could not be sent): its slot is free. False when none matched (a late
+// answer after its timeout, or one nobody asked for).
+bool lora_regq_answered(lora_regq_t *q, uint16_t id, uint8_t seq);
+// How long the LoRa task may wait for its receive queue: wait_ms, or less when requests wait behind a full window and
+// the oldest slot times out sooner (no answer then wakes the task)
+uint32_t lora_regq_wait_ms(lora_regq_t const *q, uint32_t now_ms, uint32_t wait_ms);
+// The longest a burst of n requests takes to be answered or timed out, paced as above, on top of the C6's answer time
+// (the console's live wait)
+uint32_t lora_regq_burst_ms(size_t n);

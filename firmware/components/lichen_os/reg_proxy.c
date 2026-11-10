@@ -191,5 +191,8 @@ void reg_proxy_view(reg_proxy_t const *p, uint16_t id, uint32_t now_ms, bool liv
     v->applied.u   = s->value;
     v->has_age     = true;
     v->age_ms      = now_ms - s->at_ms;
-    v->note        = s->stale || no_link || (live && s->pending) ? RV_STALE : RV_NONE;
+    // c6.reg_caps is asked once per link (#314): a re-attach drops it (reg_proxy_link), so while it is held it cannot
+    // be out of date, however old; the console does not ask it again, so no_link and pending say nothing about it
+    bool caps   = id == REG_ID_C6_REG_CAPS;
+    v->note     = s->stale || (!caps && (no_link || (live && s->pending))) ? RV_STALE : RV_NONE;
 }

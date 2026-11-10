@@ -134,11 +134,11 @@ size	liblichen_mdns.a	598
 size	liblichen_net.a	21765
 size	liblichen_notify.a	13246
 size	liblichen_nvs.a	1153
-size	liblichen_os.a	51057
+size	liblichen_os.a	51075
 size	liblichen_random.a	63
 size	liblichen_shell.a	165598
 size	liblog.a	2726
-size	liblora.a	34737
+size	liblora.a	35389
 size	liblvgl__lvgl.a	543691
 size	liblvgl_port_lib.a	6122
 size	liblwip.a	109820
@@ -153,7 +153,7 @@ size	libpsram_guard.a	19842
 size	libpthread.a	1229
 size	libriscv.a	1684
 size	libsdcard.a	7890
-size	libsdmmc.a	24351
+size	libsdmmc.a	24355
 size	libsensors.a	27817
 size	libsoc.a	793
 size	libspi_flash.a	16014
