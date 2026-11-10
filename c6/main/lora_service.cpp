@@ -7,7 +7,8 @@
  * SWEEP_REQ. One task owns the SX1262 through RadioLib; the peer-data callback only queues the command and the DIO1
  * interrupt only wakes the task. A SEND interrupts receiving for one packet, is answered by a RESULT once it left the
  * radio (or failed), and receiving starts again. A SWEEP_REQ (#161) interrupts receiving for one pass over the band,
- * receive only, and receiving starts again on the channel.
+ * receive only, and receiving starts again on the channel. REG_GET / REG_SET (#309) are served from the C6's settings
+ * registry (reg_c6.c) on this task as well, so its LoRa getters see the radio between commands, never halfway through.
  */
 
 #include "lora_service.h"
@@ -24,6 +25,8 @@
 #include "freertos/task.h"
 #include "lora_irq.h"
 #include "lora_proto.h"
+#include "lora_readback.h"
+#include "reg_c6.h"
 
 #include <atomic>
 #include <RadioLib.h>
@@ -33,6 +36,7 @@ static char const *TAG = "lora";
 
 static_assert(LORA_IRQ_FLAG_RX_DONE == RADIOLIB_SX126X_IRQ_RX_DONE, "SX1262 IRQ bit");
 static_assert(LORA_IRQ_FLAG_HEADER_ERR == RADIOLIB_SX126X_IRQ_HEADER_ERR, "SX1262 IRQ bit");
+static_assert(RADIOLIB_SX126X_LORA_BW_62_5 == 0x03 && RADIOLIB_SX126X_LORA_BW_500_0 == 0x06, "lora_rb_bw_hz codes");
 
 // RA-01SH wiring on the C6 (BUSY and DIO1 are bodge wires, #49); RXEN is not routed
 #define PIN_RESET 1
@@ -74,6 +78,29 @@ static bool                  have_config;
 static lora_status_t         status;           // only touched by the LoRa task, apart from the callback's dropped count
 static std::atomic<uint32_t> callback_dropped; // written by the peer-data callback
 static int64_t               tx_deadline_us;   // while LORA_STATE_TX
+static bool                  radio_started;    // the last start (begin and the board settings) succeeded
+static int8_t                applied_power_dbm; // the power of that start
+static uint32_t              reg_served;        // REG_GET / REG_SET answered, for the heartbeat
+
+// RadioLib 7.8 keeps the modem settings it gave the chip in private members without getters, and the SX126x has no
+// command that reads them back. These read them without patching the library or opening every class to everyone
+// (RADIOLIB_GODMODE): an explicit instantiation may name private members ([temp.spec.general]/6). A RadioLib update
+// that renames or retypes one fails to compile here.
+template <typename Tag, typename Tag::type Member> struct radiolib_peek {
+    friend typename Tag::type peek(Tag) { return Member; }
+};
+#define RADIOLIB_PEEK(tag, member_type, member)                                                                        \
+    struct tag {                                                                                                       \
+        using type = member_type;                                                                                      \
+        friend type peek(tag);                                                                                         \
+    };                                                                                                                 \
+    template struct radiolib_peek<tag, &SX126x::member>
+RADIOLIB_PEEK(peek_freq, float SX126x::*, freqMHz);
+RADIOLIB_PEEK(peek_bw, uint8_t SX126x::*, bandwidth);
+RADIOLIB_PEEK(peek_sf, uint8_t SX126x::*, spreadingFactor);
+RADIOLIB_PEEK(peek_cr, uint8_t SX126x::*, codingRate);
+RADIOLIB_PEEK(peek_preamble, uint16_t SX126x::*, preambleLengthLoRa);
+RADIOLIB_PEEK(peek_read_reg, int16_t (SX126x::*)(uint16_t, uint8_t *, uint8_t), readRegister);
 
 static IRAM_ATTR void on_dio1(void) {
     BaseType_t woken = pdFALSE;
@@ -153,6 +180,8 @@ static int16_t start_rx(void) {
     }
     status.last_radio_err = err;
     status.state          = err == RADIOLIB_ERR_NONE ? LORA_STATE_RX : LORA_STATE_ERROR;
+    radio_started         = err == RADIOLIB_ERR_NONE;
+    applied_power_dbm     = radio_started ? config.tx_power_dbm : 0;
     if (err != RADIOLIB_ERR_NONE) {
         ESP_LOGE(TAG, "radio start failed: %d", err);
     } else {
@@ -277,6 +306,44 @@ static void handle_sweep(lora_sweep_req_t const *req) {
     send_msg(&reply);
 }
 
+bool lora_service_readback(lora_config_t *out) {
+    uint8_t sync[2];
+    if (!radio_started ||
+        (radio.*peek(peek_read_reg{}))(RADIOLIB_SX126X_REG_LORA_SYNC_WORD_MSB, sync, sizeof(sync)) != RADIOLIB_ERR_NONE) {
+        return false;
+    }
+    out->freq_hz      = lora_rb_freq_hz(radio.*peek(peek_freq{}));
+    out->bw_hz        = lora_rb_bw_hz(radio.*peek(peek_bw{}));
+    out->sf           = radio.*peek(peek_sf{});
+    out->cr           = lora_rb_cr(radio.*peek(peek_cr{}));
+    out->sync_word    = lora_rb_sync(sync[0], sync[1]);
+    out->preamble     = radio.*peek(peek_preamble{});
+    out->tx_power_dbm = applied_power_dbm;
+    return out->freq_hz && out->bw_hz && out->cr;
+}
+
+uint8_t lora_service_state(void) {
+    return status.state;
+}
+
+// A REG_GET (set NULL) or REG_SET from the P4: always one REG_VAL back, an unknown id with UNKNOWN (#307)
+static void handle_reg(uint16_t id, uint8_t seq, uint32_t const *set) {
+    reg_reply_t  r;
+    reg_status_t st  = reg_serve(reg_c6_table, reg_c6_count, id, set, &r);
+    lora_msg_t reply = {};
+    reply.type       = LORA_MSG_REG_VAL;
+    reply.u.reg_val  = {id, seq, (uint8_t)st, r.type, r.value};
+    send_msg(&reply);
+    reg_served++;
+    // Sets are rare and worth a line; the P4 may read keys often, those only count in the heartbeat
+    if (set) {
+        ESP_LOGI("reg", "set 0x%04x = %lu: status %u, applied %lu", (unsigned)id, (unsigned long)*set, (unsigned)st,
+                 (unsigned long)r.value);
+    } else {
+        ESP_LOGD("reg", "get 0x%04x: status %u, value %lu", (unsigned)id, (unsigned)st, (unsigned long)r.value);
+    }
+}
+
 static void handle_command(lora_cmd_t const *cmd) {
     lora_msg_t msg;
     if (lora_decode(cmd->buf, cmd->len, &msg) != LORA_DEC_OK) {
@@ -362,6 +429,8 @@ static void handle_command(lora_cmd_t const *cmd) {
             return;
         }
         case LORA_MSG_SWEEP_REQ: handle_sweep(&msg.u.sweep_req); return;
+        case LORA_MSG_REG_GET: handle_reg(msg.u.reg_get.id, msg.u.reg_get.seq, NULL); return;
+        case LORA_MSG_REG_SET: handle_reg(msg.u.reg_set.id, msg.u.reg_set.seq, &msg.u.reg_set.value); return;
         default: status.ignored++; return; // a C6 -> P4 type sent our way
     }
 }
@@ -414,14 +483,15 @@ static void log_heartbeat(void) {
     fill_health(&h);
     ESP_LOGI(
         TAG,
-        "alive up %u s heap %u/%u stack %u state %u packets %u dropped %u",
+        "alive up %u s heap %u/%u stack %u state %u packets %u dropped %u reg %u",
         (unsigned)h.uptime_s,
         (unsigned)h.heap_free,
         (unsigned)h.heap_min,
         (unsigned)h.stack_free,
         (unsigned)status.state,
         (unsigned)status.packets,
-        (unsigned)(status.dropped + callback_dropped.load())
+        (unsigned)(status.dropped + callback_dropped.load()),
+        (unsigned)reg_served
     );
 }
 

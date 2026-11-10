@@ -21,6 +21,8 @@ typedef enum {
     // 0x01 backlight: the brightness the C6 drives now, in percent (after its 10-80 % clamp; 0 = off)
     REG_ID_BL_DISPLAY  = 0x0100, // bl.display   U8 %
     REG_ID_BL_KEYBOARD = 0x0101, // bl.keyboard  U8 %
+    REG_ID_BL_FREQ     = 0x0102, // bl.freq      U32 Hz, RO: the PWM frequency the LEDC timer runs (#309)
+    REG_ID_BL_BOOT     = 0x0103, // bl.boot      BOOL, RO: on = still the C6's own boot level, no command since its start
 
     // 0x02 LoRa: what the SX1262 runs now (#306: the C6's driver state, not the P4's request)
     REG_ID_LORA_FREQ     = 0x0200, // lora.freq      U32 Hz

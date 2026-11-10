@@ -12,3 +12,7 @@ bool backlight_cmd_parse(char const *line, int *display, int *keyboard);
 // PWM duty for a brightness in percent at the given timer resolution. 0 is off; anything else is held to 10-80%:
 // below 10% the screen's boost driver flickers, above 80% only draws more current for little extra light.
 uint32_t backlight_duty(int percent, unsigned resolution_bits);
+
+// The brightness in percent a PWM duty stands for, rounded: the inverse of backlight_duty for every value it returns,
+// so the registry can report what the LEDC really drives (#309). A duty above the full scale reads as 100.
+int backlight_percent(uint32_t duty, unsigned resolution_bits);

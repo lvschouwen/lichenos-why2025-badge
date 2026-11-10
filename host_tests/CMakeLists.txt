@@ -322,6 +322,23 @@ target_include_directories(reg_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../share
 target_compile_options(reg_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME reg_test COMMAND reg_test)
 
+# The C6's settings registry (#309): its table against reg_ids.h, backlight duty <-> %, the SX1262 read-back decoders
+add_executable(c6_reg_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/c6_reg_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../c6/main/reg_c6.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../c6/main/lora_readback.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../c6/main/backlight_cmd.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg/reg.c
+)
+target_include_directories(c6_reg_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../c6/main
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/lora
+)
+target_compile_options(c6_reg_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(c6_reg_test PRIVATE m)
+add_test(NAME c6_reg_test COMMAND c6_reg_test)
+
 add_executable(meshcore_hdr_test
     ${CMAKE_CURRENT_SOURCE_DIR}/meshcore_hdr_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/meshcore_hdr.c

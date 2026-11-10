@@ -26,3 +26,13 @@ uint32_t backlight_duty(int percent, unsigned resolution_bits) {
     int const held = percent < 10 ? 10 : percent > 80 ? 80 : percent;
     return ((uint32_t)1 << resolution_bits) * (uint32_t)held / 100u;
 }
+
+int backlight_percent(uint32_t duty, unsigned resolution_bits) {
+    uint64_t const full = (uint64_t)1 << resolution_bits;
+    if (duty >= full) {
+        return 100;
+    }
+    // backlight_duty rounds down, so the duty sits at most one step below percent * full / 100: rounding to nearest
+    // gets the percentage back as long as a step is under half a percent (8 bits and up)
+    return (int)(((uint64_t)duty * 100u + full / 2) / full);
+}
