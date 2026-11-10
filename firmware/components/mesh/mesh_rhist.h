@@ -57,6 +57,7 @@ typedef struct {
 
 typedef struct {
     bool        used, on;
+    bool        console;    // switched on or changed by a console line (#290): its asks flood with the console scope
     uint8_t     prefix[RH_PREFIX];
     uint16_t    interval_min;
     uint8_t     misses;     // asks in a row without an answer
@@ -93,6 +94,9 @@ size_t rh_on_count(rh_t const *t);
 // on. On takes a free slot, or the off slot answered longest ago (its history goes); RH_FULL when RH_SLOTS are on.
 // Off keeps the history until the slot is taken.
 rh_result_t rh_set(rh_t *t, uint8_t const prefix[RH_PREFIX], bool on, uint16_t interval_min, uint32_t now_s);
+// Who switched the repeater on or changed it last (#290): a console line's asks take the console scope. No-op without
+// a slot.
+void rh_set_console(rh_t *t, uint8_t const prefix[RH_PREFIX], bool console);
 // The slot goes with its history (the contact was removed)
 void rh_forget(rh_t *t, uint8_t const prefix[RH_PREFIX]);
 // At a start: the switched-on repeaters from the settings, each asked first at RH_FIRST_S + i * RH_STAGGER_S, or after
@@ -141,11 +145,13 @@ void rh_next_text(rh_slot_t const *s, bool asking, uint32_t now_s, char *out, si
 // A value with its unit for a graph's note: "4.12 V", "-114 dBm", "120/h", "17 h"
 void rh_value_text(rh_field_t f, int32_t v, char *out, size_t cap);
 
-// ---- the setting: the switched-on repeaters as "a1b2c3d4e5f6:30,0a0b0c0d0e0f:10" ---------------------------------------
-#define RH_CFG_MAX (RH_SLOTS * (2 * RH_PREFIX + 6) + 1)
+// ---- the setting: the switched-on repeaters as "a1b2c3d4e5f6:30,0a0b0c0d0e0f:10c" --------------------------------------
+// A trailing 'c' marks one a console line switched on (#290), so its asks keep the console scope after a restart.
+#define RH_CFG_MAX (RH_SLOTS * (2 * RH_PREFIX + 7) + 1)
 void   rh_cfg_encode(rh_t const *t, char *out, size_t cap);
-// Up to max entries; a bad entry (not 12 hex digits, an interval not offered) is skipped. Returns how many.
-size_t rh_cfg_decode(char const *text, uint8_t prefix[][RH_PREFIX], uint16_t *interval_min, size_t max);
+// Up to max entries; a bad entry (not 12 hex digits, an interval not offered) is skipped. Returns how many. console
+// (may be NULL): each entry's 'c' mark.
+size_t rh_cfg_decode(char const *text, uint8_t prefix[][RH_PREFIX], uint16_t *interval_min, bool *console, size_t max);
 
 #ifdef __cplusplus
 }

@@ -9,6 +9,7 @@
 #include "lichen_mem.h"
 #include "lichen_settings.h"
 #include "mesh.h"
+#include "mesh_cscope.h"
 #include "mesh_format.h"
 #include "meshcore_run.h"
 
@@ -59,10 +60,14 @@ static void make_table(void) {
     char     text[RH_CFG_MAX];
     uint8_t  prefix[RH_SLOTS][RH_PREFIX];
     uint16_t minutes[RH_SLOTS];
+    bool     console[RH_SLOTS];
     app_settings_get_str(meshcore_self(), CFG_KEY, text, sizeof(text), "");
-    size_t n     = rh_cfg_decode(text, prefix, minutes, RH_SLOTS);
+    size_t n     = rh_cfg_decode(text, prefix, minutes, console, RH_SLOTS);
     bool   crash = lichen_crashlog_after_crash(); // panic, watchdog, brownout: a restart loop must not ask more often
     rh_load(t, prefix, minutes, n, mesh_uptime_s(), crash);
+    for (size_t i = 0; i < n; i++) {
+        rh_set_console(t, prefix[i], console[i]); // #290: a console line's polls keep the console scope
+    }
     if (n) {
         ESP_LOGI(TAG, "status history: %u repeater(s) switched on, first ask in %s", (unsigned)n,
                  crash ? "an interval (after a crash)" : "180 s");
@@ -88,12 +93,14 @@ static bool save_locked(rh_t *t) {
 }
 
 // Ours ended or a person's answer came, and the next due one, all under the lock; *idx the slot to ask, -1 for none
-static void step_locked(rr_head_t const *h, bool have, uint32_t now_s, int *idx, uint8_t prefix[RH_PREFIX]) {
+static void step_locked(rr_head_t const *h, bool have, uint32_t now_s, int *idx, uint8_t prefix[RH_PREFIX],
+                        bool *console) {
     rh_observe(table, have ? h : NULL, now_s);
     bool held = __atomic_load_n(&holds, __ATOMIC_ACQUIRE) > 0;
     *idx      = rh_due(table, now_s, !have || rr_head_busy(h), rh_other_age_s(table, have ? h : NULL), held);
     if (*idx >= 0) {
         memcpy(prefix, table->slot[*idx].prefix, RH_PREFIX);
+        *console = table->slot[*idx].console;
     }
     if (dirty && now_s >= retry_s) {
         save_locked(table);
@@ -117,16 +124,18 @@ void mesh_rhist_tick(void) {
     bool      have = mesh_remote_head(&h);
     int       idx  = -1;
     uint8_t   prefix[RH_PREFIX];
+    bool      console = false;
     if (!lock(TICK_WAIT_MS)) {
         return;
     }
-    step_locked(&h, have, now_s, &idx, prefix);
+    step_locked(&h, have, now_s, &idx, prefix, &console);
     unlock();
     if (idx < 0) {
         return;
     }
     char const *why = NULL;
-    uint32_t    seq = mesh_remote_start_background(prefix, &why); // the #51 request; the person's replaces it
+    uint32_t    seq = mesh_remote_start_background(prefix, console ? MESH_FROM_CONSOLE : MESH_FROM_SCREEN,
+                                                   &why); // the #51 request; the person's replaces it
     lock(portMAX_DELAY);
     if (rh_find(table, prefix) == idx && table->slot[idx].on) { // not switched off meanwhile
         if (seq) {
@@ -191,7 +200,7 @@ bool mesh_rhist_needs_confirm(uint8_t const prefix[RH_PREFIX], bool on, uint16_t
     return ask;
 }
 
-rhs_result_t mesh_rhist_set(uint8_t const prefix[RH_PREFIX], bool on, uint16_t interval_min) {
+rhs_result_t mesh_rhist_set(uint8_t const prefix[RH_PREFIX], bool on, uint16_t interval_min, mesh_origin_t from) {
     rh_t *t = get_table();
     if (!t || !mesh_running()) {
         return RHS_NOT_RUNNING;
@@ -199,8 +208,11 @@ rhs_result_t mesh_rhist_set(uint8_t const prefix[RH_PREFIX], bool on, uint16_t i
     if (!lock(USER_WAIT_MS)) {
         return RHS_BUSY;
     }
-    rh_result_t r     = rh_set(t, prefix, on, interval_min, mesh_uptime_s());
-    bool        saved = r == RH_OK && save_locked(t);
+    rh_result_t r = rh_set(t, prefix, on, interval_min, mesh_uptime_s());
+    if (r == RH_OK && on) {
+        rh_set_console(t, prefix, from == MESH_FROM_CONSOLE); // the last to switch it on or change it decides
+    }
+    bool saved = r == RH_OK && save_locked(t);
     unlock();
     if (r != RH_OK) {
         return r == RH_FULL ? RHS_FULL : RHS_BAD;
@@ -368,7 +380,12 @@ static void console_change(uint8_t const *prefix, char const *verb) {
                       have ? "more often" : "at the interval");
         return;
     }
-    rhs_result_t r = mesh_rhist_set(prefix, on, (uint16_t)minutes);
+    char const *why = on ? mesh_cscope_refusal(true) : NULL; // #290: its asks would be console floods
+    if (why) {
+        console_reply("not switched on: %s", why);
+        return;
+    }
+    rhs_result_t r = mesh_rhist_set(prefix, on, (uint16_t)minutes, MESH_FROM_CONSOLE);
     console_reply("%s", r == RHS_OK ? "done" : mesh_rhist_result_text(r));
 }
 

@@ -205,8 +205,9 @@ class BadgeMesh : public MyMesh {
     // air. False when the contact is gone or the command queue is full.
     bool remoteLogout(uint8_t const prefix[MF_PREFIX]);
     // Our own advert, under the mesh lock (#52): zero-hop (heard by nodes in direct range) or flooded with the default
-    // scope as MyMesh's CMD_SEND_SELF_ADVERT does. With the location when the prefs share it. false when no packet.
-    bool advertNow(bool flood);
+    // scope as MyMesh's CMD_SEND_SELF_ADVERT does; a console line's flood (#290) with the console scope, none when that
+    // is not set. With the location when the prefs share it. false when no packet went out.
+    bool advertNow(bool flood, bool from_console = false);
     // A contact change from the details screen (#49), under the mesh lock. It goes to MyMesh as its own command
     // (RESET_PATH, ADD_UPDATE_CONTACT, REMOVE_CONTACT), so MyMesh saves the contacts itself (its lazy 5 s write) and
     // Remove also drops the stored advert. Reset path and the favourite flag are set at once too, so a copy taken right
@@ -243,10 +244,13 @@ class BadgeMesh : public MyMesh {
 
   protected:
     // Every flood MyMesh starts for a contact or a channel passes here (#290): the default scope as MyMesh picks it, or
-    // the console scope while a console line's frame is handled. using: MyMesh's TransportKey overload stays visible.
-    using MyMesh::sendFloodScoped;
+    // the console scope while a console line's frame is handled.
     void sendFloodScoped(ContactInfo const &recipient, mesh::Packet *pkt, uint32_t delay_millis = 0) override;
     void sendFloodScoped(mesh::GroupChannel const &channel, mesh::Packet *pkt, uint32_t delay_millis = 0) override;
+    // MyMesh's flood with an explicit key, wrapped the same way (#290). Not virtual in MyMesh: the badge's own calls
+    // (advertNow) come here; MyMesh's one direct use, CMD_SEND_SELF_ADVERT, is a frame the pipe never hands out for
+    // a console line, and the badge's adverts do not use that frame.
+    void sendFloodScoped(TransportKey const &scope, mesh::Packet *pkt, uint32_t delay_millis);
     void onContactsFull() override {
         MyMesh::onContactsFull();
         mesh_contacts_full();
@@ -278,6 +282,7 @@ class BadgeMesh : public MyMesh {
 
   private:
     bool               floodForConsole(mesh::Packet *pkt, uint32_t delay_millis);
+    bool               floodConsoleScope(mesh::Packet *pkt, uint32_t delay_millis);
     bool               blobWanted(mesh_blobq_entry_t const &e);
     void               blobDone();
     ob_t              *ob_;

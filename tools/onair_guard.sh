@@ -53,13 +53,16 @@ onair_words() {
     printf '%s' "$line"
 }
 
-# True when the line can put something on air for a target (#290): badge.sh checks the console scope before those
+# True when the line can start a flood (#290): badge.sh checks the console scope before those. With a target: send,
+# dm, telemetry, trace, discover, remote, and history (switching a repeater's polls on or changing them); without one:
+# "advert" (a flood advert from the console, or the Advertise setting's, which may be flood).
 onair_needs_scope() {
     local w1 w2 w3 _rest
     read -r w1 w2 w3 _rest <<<"$(onair_words "$1")"
+    [ "$w1" = advert ] && return 0
     [ "$w1" = mesh ] && [ -n "$w3" ] || return 1
     case "$w2" in
-        send | dm | telemetry | trace | discover) return 0 ;;
+        send | dm | telemetry | trace | discover | history) return 0 ;;
         remote) [ "$w3" != settings ] ;;
         *) return 1 ;;
     esac
@@ -99,7 +102,7 @@ onair_verdict() {
             if [ "$w3" = "#badgetest" ]; then echo pass; else
                 echo "deny on air only #badgetest: 'mesh send ${w3:-?}' would transmit to another channel (#287, bench rules)"
             fi ;;
-        dm | telemetry | trace | discover)
+        dm | telemetry | trace | discover | history)
             if [ -z "$w3" ] || onair_allowed "$w3"; then echo pass; else
                 echo "deny on air only the test node: 'mesh $w2 $w3' targets a contact not in .claude/onair-allow.local (#287)"
             fi ;;

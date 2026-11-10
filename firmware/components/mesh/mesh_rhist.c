@@ -141,6 +141,13 @@ rh_result_t rh_set(rh_t *t, uint8_t const prefix[RH_PREFIX], bool on, uint16_t i
     return RH_OK;
 }
 
+void rh_set_console(rh_t *t, uint8_t const prefix[RH_PREFIX], bool console) {
+    int idx = rh_find(t, prefix);
+    if (idx >= 0) {
+        t->slot[idx].console = console;
+    }
+}
+
 void rh_forget(rh_t *t, uint8_t const prefix[RH_PREFIX]) {
     int idx = rh_find(t, prefix);
     if (idx >= 0) {
@@ -406,8 +413,8 @@ void rh_cfg_encode(rh_t const *t, char *out, size_t cap) {
             continue;
         }
         uint8_t const *p = s->prefix;
-        int w = snprintf(out + at, cap - at, "%s%02x%02x%02x%02x%02x%02x:%u", at ? "," : "", p[0], p[1], p[2], p[3],
-                         p[4], p[5], (unsigned)s->interval_min);
+        int w = snprintf(out + at, cap - at, "%s%02x%02x%02x%02x%02x%02x:%u%s", at ? "," : "", p[0], p[1], p[2], p[3],
+                         p[4], p[5], (unsigned)s->interval_min, s->console ? "c" : "");
         if (w < 0 || (size_t)w >= cap - at) {
             out[at] = 0; // an entry that does not fit is left out whole
             return;
@@ -420,8 +427,10 @@ static int hexval(char c) {
     return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
 }
 
-// One "a1b2c3d4e5f6:30" of len bytes; false when it is not one
-static bool parse_entry(char const *e, size_t len, uint8_t prefix[RH_PREFIX], uint16_t *minutes) {
+// One "a1b2c3d4e5f6:30" (or "...:30c", console) of len bytes; false when it is not one
+static bool parse_entry(char const *e, size_t len, uint8_t prefix[RH_PREFIX], uint16_t *minutes, bool *console) {
+    *console = len > 0 && e[len - 1] == 'c';
+    len -= *console ? 1 : 0;
     if (len < 2 * RH_PREFIX + 2 || len > 2 * RH_PREFIX + 4 || e[2 * RH_PREFIX] != ':') {
         return false;
     }
@@ -443,12 +452,16 @@ static bool parse_entry(char const *e, size_t len, uint8_t prefix[RH_PREFIX], ui
     return rh_interval_ok(*minutes);
 }
 
-size_t rh_cfg_decode(char const *text, uint8_t prefix[][RH_PREFIX], uint16_t *interval_min, size_t max) {
+size_t rh_cfg_decode(char const *text, uint8_t prefix[][RH_PREFIX], uint16_t *interval_min, bool *console, size_t max) {
     size_t n = 0;
     while (text && *text && n < max) {
         char const *end = strchr(text, ',');
         size_t      len = end ? (size_t)(end - text) : strlen(text);
-        if (parse_entry(text, len, prefix[n], &interval_min[n])) {
+        bool        con = false;
+        if (parse_entry(text, len, prefix[n], &interval_min[n], &con)) {
+            if (console) {
+                console[n] = con;
+            }
             bool dup = false;
             for (size_t k = 0; k < n; k++) {
                 dup = dup || memcmp(prefix[k], prefix[n], RH_PREFIX) == 0;

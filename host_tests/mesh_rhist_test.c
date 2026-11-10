@@ -300,20 +300,45 @@ static void setting(void) {
     rh_set(&t, b, true, 180, 0);
     rh_set(&t, c, true, 10, 0);
     rh_set(&t, c, false, 10, 0); // off is not saved
+    uint8_t k_none[RH_PREFIX];
+    key(k_none, 0x77);
     rh_cfg_encode(&t, out, sizeof(out));
     CHECK_STR(out, "a1b2c3d4e5f6:30,000102030405:180");
     uint8_t  p[RH_SLOTS][RH_PREFIX];
     uint16_t m[RH_SLOTS];
-    CHECK(rh_cfg_decode(out, p, m, RH_SLOTS) == 2);
+    CHECK(rh_cfg_decode(out, p, m, NULL, RH_SLOTS) == 2);
     CHECK(memcmp(p[0], a, RH_PREFIX) == 0 && m[0] == 30 && memcmp(p[1], b, RH_PREFIX) == 0 && m[1] == 180);
     // bad entries are skipped: not hex, a short key, an interval not offered (5 min), a duplicate, junk
-    CHECK(rh_cfg_decode("zz0102030405:30,0102:30,010203040506:5,A1B2C3D4E5F6:10,a1b2c3d4e5f6:30,x", p, m, RH_SLOTS) == 1);
+    CHECK(rh_cfg_decode("zz0102030405:30,0102:30,010203040506:5,A1B2C3D4E5F6:10,a1b2c3d4e5f6:30,x", p, m, NULL, RH_SLOTS) == 1);
     CHECK(memcmp(p[0], a, RH_PREFIX) == 0 && m[0] == 10);
-    CHECK(rh_cfg_decode("", p, m, RH_SLOTS) == 0 && rh_cfg_decode(NULL, p, m, RH_SLOTS) == 0);
-    CHECK(rh_cfg_decode("010101010101:10,020202020202:10,030303030303:10,040404040404:10", p, m, RH_SLOTS) == RH_SLOTS);
+    CHECK(rh_cfg_decode("", p, m, NULL, RH_SLOTS) == 0 && rh_cfg_decode(NULL, p, m, NULL, RH_SLOTS) == 0);
+    CHECK(rh_cfg_decode("010101010101:10,020202020202:10,030303030303:10,040404040404:10", p, m, NULL, RH_SLOTS) == RH_SLOTS);
     char small[20];
     rh_cfg_encode(&t, small, sizeof(small)); // the second entry does not fit: left out whole
     CHECK_STR(small, "a1b2c3d4e5f6:30");
+    // #290: a console line's switch-on is saved with a 'c' and read back with it; old entries have none
+    bool con[RH_SLOTS];
+    memset(con, 1, sizeof(con));
+    rh_set_console(&t, b, true);
+    rh_set_console(&t, k_none, true); // no slot: nothing changes
+    rh_cfg_encode(&t, out, sizeof(out));
+    CHECK_STR(out, "a1b2c3d4e5f6:30,000102030405:180c");
+    CHECK(rh_cfg_decode(out, p, m, con, RH_SLOTS) == 2 && !con[0] && con[1] && m[1] == 180);
+    CHECK(rh_cfg_decode("010101010101:10c,020202020202:cc,030303030303:c,040404040404:30", p, m, con, RH_SLOTS) == 2);
+    CHECK(con[0] && m[0] == 10 && !con[1] && m[1] == 30);
+    rh_set_console(&t, b, false);
+    rh_cfg_encode(&t, out, sizeof(out));
+    CHECK_STR(out, "a1b2c3d4e5f6:30,000102030405:180");
+    // the longest setting still fits: every slot console, 180 min
+    rh_init(&t);
+    for (int i = 0; i < RH_SLOTS; i++) {
+        uint8_t k[RH_PREFIX];
+        key(k, 0x40 + i);
+        rh_set(&t, k, true, 180, 0);
+        rh_set_console(&t, k, true);
+    }
+    rh_cfg_encode(&t, out, sizeof(out));
+    CHECK(rh_cfg_decode(out, p, m, con, RH_SLOTS) == RH_SLOTS && con[RH_SLOTS - 1]);
 }
 
 // A screen that asks a repeater holds the poll back (review #168): nothing is due while it is open

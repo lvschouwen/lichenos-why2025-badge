@@ -163,12 +163,16 @@ char const *mesh_contact_export(uint8_t const *prefix_or_null, char *uri, size_t
 // own key, a contact already there (never overwritten), and a full table (MeshCore would replace the oldest). Waits up
 // to a few seconds for MyMesh to take it. NULL when the contact is now there (its name in name_out), else why not.
 char const *mesh_contact_import(uint8_t const *pkt, size_t len, char *name_out, size_t name_cap);
+// Who asked for a send (#290). A console line's floods take the console scope, and the send is refused
+// (MESH_SCOPE_CONSOLE_UNSET, mesh_scope.h) while that is not set; a screen's take the default scope.
+typedef enum { MESH_FROM_SCREEN, MESH_FROM_CONSOLE } mesh_origin_t;
+
 // An advert now, as the Advertise setting has it (zero-hop: nodes in direct range hear it; flood: the whole mesh):
 // true when queued (the home tile snapshot then has advert_sent and its age). Refused when the clock is not set, within
 // ADVCFG_MIN_GAP_S of the last advert, or with a damaged identity. This and the periodic advert are the only senders.
 bool mesh_send_advert(void);
-// The same with the mode given (the console: "fw advert flood")
-bool mesh_send_advert_mode(bool flood);
+// The same with the mode given (the console: "fw advert flood"; a console flood takes the console scope, #290)
+bool mesh_send_advert_mode(bool flood, mesh_origin_t from);
 
 // Advert, location and auto-add settings (#52; the rules are mesh_advert_cfg.h's). Persisted: the interval, the
 // manual mode and the time of the last advert in NVS (the schedule survives a restart), location and auto-add in
@@ -249,10 +253,6 @@ size_t mesh_contact_set_path(uint8_t const prefix[6], uint8_t path_len, uint8_t 
 // All copy-in and non-blocking: they never take the mesh lock (LVGL safe). The mesh task sends from the outbox
 // (mesh_outbox.h) through MyMesh's own command frames and tracks the state of each message.
 
-// Who asked for a send (#290). A console line's floods take the console scope, and the send is refused
-// (MESH_SCOPE_CONSOLE_UNSET, mesh_scope.h) while that is not set; a screen's take the default scope.
-typedef enum { MESH_FROM_SCREEN, MESH_FROM_CONSOLE } mesh_origin_t;
-
 // Queues a channel message: the channel is named (slots can change), the text is cut at mesh_channel_text_max() on a
 // UTF-8 boundary. 0 with *why set ("busy", "empty", "MeshCore is not running"...). Sent as "<node name>: <text>".
 mesh_msg_id_t mesh_send_channel(char const *channel_name, char const *text, mesh_origin_t from, char const **why);
@@ -293,7 +293,7 @@ bool     mesh_trace_get(mt_t *out);
 uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char const *arg, mesh_origin_t from, char const **why);
 // The status history's poll (#168, mesh_rhist_run.c): a status request that any request of the person replaces while
 // it is queued or waiting for the answer. The seq, or 0 with *why set.
-uint32_t mesh_remote_start_background(uint8_t const prefix[6], char const **why);
+uint32_t mesh_remote_start_background(uint8_t const prefix[6], mesh_origin_t from, char const **why);
 // A copy of the current or last request without its argument (an answer that is late is timed out here); false before
 // MeshCore is up
 bool     mesh_remote_get(rr_t *out);

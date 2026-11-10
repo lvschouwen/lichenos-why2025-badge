@@ -2,6 +2,7 @@
 // Repeater status history (#168) on the badge: mesh_rhist.h's table in PSRAM under its own mutex, the poll that runs
 // from the mesh loop, the setting in the app's settings (a.meshcore "rh_poll", like the advert interval: what is
 // switched on stays on after a restart, and at a start the asks are staggered) and the console's read-out.
+#include "mesh.h"
 #include "mesh_rhist.h"
 
 #include <stdbool.h>
@@ -41,7 +42,8 @@ typedef enum { RHS_OK, RHS_FULL, RHS_NOT_RUNNING, RHS_NOT_SAVED, RHS_BAD, RHS_BU
 // On (with an interval from RH_INTERVAL_CHOICES), off, or a new interval; saved at once. Any task but the mesh task
 // (it waits for the table's lock). NOT_SAVED: the change holds; the mesh task writes the setting again every 30 s until
 // it is written, so an off is never undone by a restart once a write succeeds.
-rhs_result_t mesh_rhist_set(uint8_t const prefix[RH_PREFIX], bool on, uint16_t interval_min);
+// from (#290): who switches it; a console line's asks flood with the console scope from then on (saved with it)
+rhs_result_t mesh_rhist_set(uint8_t const prefix[RH_PREFIX], bool on, uint16_t interval_min, mesh_origin_t from);
 // The contact was removed: its slot and its entry in the setting go (a failed write is retried as for mesh_rhist_set)
 void mesh_rhist_forget(uint8_t const prefix[RH_PREFIX]);
 // The text of a result for a screen or the console

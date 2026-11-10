@@ -1395,7 +1395,10 @@ static void adv_load(void) {
 
 // THE place where an advert of ours goes to the air, with the mesh lock held (the manual ones and the periodic one).
 // NULL when queued, else why not. Radio-off switches (#108) gate here.
-static char const *advert_tx_locked(bool flood) {
+static char const *advert_tx_locked(bool flood, mesh_origin_t from = MESH_FROM_SCREEN) {
+    if (char const *why = flood ? mesh_cscope_refusal(from == MESH_FROM_CONSOLE) : NULL) {
+        return why; // #290: a console line's flood advert needs the console scope
+    }
     if (!ident_tx_allowed()) {
         return "identity damaged: TX blocked"; // a damaged identity transmits nothing (#80)
     }
@@ -1412,7 +1415,7 @@ static char const *advert_tx_locked(bool flood) {
     if (!advcfg_gap_ok(last_s, now_s)) {
         return "an advert went out a moment ago";
     }
-    if (!node->advertNow(flood)) {
+    if (!node->advertNow(flood, from == MESH_FROM_CONSOLE)) {
         return "no free packet";
     }
     uint32_t epoch = mesh_epoch_now();
@@ -1470,10 +1473,10 @@ static void advert_tick_locked(void) {
     }
 }
 
-static bool send_advert_mode(bool flood) {
+static bool send_advert_mode(bool flood, mesh_origin_t from = MESH_FROM_SCREEN) {
     char const *why = settings_lock();
     if (!why) {
-        why = advert_tx_locked(flood);
+        why = advert_tx_locked(flood, from);
         mesh_unlock();
     }
     if (why) {
@@ -1482,8 +1485,8 @@ static bool send_advert_mode(bool flood) {
     return why == NULL;
 }
 
-extern "C" bool mesh_send_advert_mode(bool flood) {
-    return send_advert_mode(flood);
+extern "C" bool mesh_send_advert_mode(bool flood, mesh_origin_t from) {
+    return send_advert_mode(flood, from);
 }
 
 extern "C" bool mesh_send_advert(void) {
@@ -1924,11 +1927,11 @@ extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char 
 
 // The status history's poll (#168): as mesh_remote_start for a status request, but marked as background, so a request
 // of the person replaces it (rr_request_background)
-extern "C" uint32_t mesh_remote_start_background(uint8_t const prefix[6], char const **why) {
+extern "C" uint32_t mesh_remote_start_background(uint8_t const prefix[6], mesh_origin_t from, char const **why) {
     char const *local;
     why  = why ? why : &local;
     *why = NULL;
-    if (!send_ready(why)) {
+    if (!send_ready(why, from)) {
         return 0;
     }
     if (!remote_req) {
@@ -1937,7 +1940,7 @@ extern "C" uint32_t mesh_remote_start_background(uint8_t const prefix[6], char c
     }
     mesh_ob_enter();
     uint32_t seq = rr_request_background(remote_req, prefix, (uint32_t)millis(), why);
-    remote_req->console = seq ? false : remote_req->console;
+    remote_req->console = seq ? from == MESH_FROM_CONSOLE : remote_req->console;
     mesh_ob_exit();
     return seq;
 }
@@ -3090,7 +3093,11 @@ static void cmd_advert(char const *args) {
         console_reply("advert not sent: %s (other nodes would drop it)", why);
         return;
     }
-    if (!mesh_send_advert_mode(flood)) {
+    if (char const *why = flood ? mesh_cscope_refusal(true) : NULL) {
+        console_reply("advert not sent: %s", why); // #290: a flood from the console takes the console scope
+        return;
+    }
+    if (!mesh_send_advert_mode(flood, MESH_FROM_CONSOLE)) {
         console_reply("advert not sent");
     } else if (char const *note = mesh_advert_note(clock_is_approximate())) {
         console_reply("advert queued (%s: %s)", note, clock_src_text(CLOCK_SRC_APP)); // allowed, but said (#83)

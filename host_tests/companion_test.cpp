@@ -235,6 +235,22 @@ static bool find_group(size_t from, mesh::GroupChannel const &channel, std::stri
     return false;
 }
 
+// A flood advert (from the console or not) and the packet that went on air for it; false when none did
+static bool console_advert(BadgeMesh &mesh, bool from_console, mesh::Packet &out) {
+    size_t before = test_radio.sent.size();
+    if (!mesh.advertNow(true, from_console)) {
+        return false;
+    }
+    settle(mesh, 10);
+    for (size_t i = before; i < test_radio.sent.size(); i++) {
+        auto const &raw = test_radio.sent[i];
+        if (out.readFrom(raw.data(), (uint8_t)raw.size()) && out.getPayloadType() == PAYLOAD_TYPE_ADVERT) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // The console scope (#290) on the real MyMesh: a console line's channel message floods under the console region, a
 // screen's under the default (None here: no transport code), and with the console scope unset the console one never
 // goes on air at all. Made-up region name.
@@ -261,7 +277,17 @@ static void console_scope_checks(BadgeMesh &mesh, ob_t &ob, mesh::GroupChannel c
     CHECK(find_group(before, pub, prefix + "scope console", pkt) && pkt.hasTransportCodes() &&
           pkt.transport_codes[0] == key.calcTransportCode(&pkt));
 
+    // A console line's flood advert (fw advert flood) takes the console scope; the screen's keeps the default
+    CHECK(console_advert(mesh, true, pkt) && pkt.hasTransportCodes() &&
+          pkt.transport_codes[0] == key.calcTransportCode(&pkt));
+    CHECK(console_advert(mesh, false, pkt) && pkt.getRouteType() == ROUTE_TYPE_FLOOD);
+
     CHECK(mesh.setConsoleScope("") == NULL && mesh.consoleScope()[0] == 0);
+    size_t   sent_before = test_radio.sent.size();
+    uint32_t dropped     = mesh.consoleRefused();
+    CHECK(!mesh.advertNow(true, true)); // unset: no console flood advert, not even unscoped
+    settle(mesh, 10);
+    CHECK(test_radio.sent.size() == sent_before && mesh.consoleRefused() == dropped + 1);
     before            = test_radio.sent.size();
     uint32_t refused  = mesh.consoleRefused();
     con               = ob_add_channel(&ob, "public", "scope unset", 11, (uint32_t)millis(), &why);

@@ -200,7 +200,7 @@ static void say(rhv_t *v, char const *text) {
 
 // v: the page to show the outcome on (NULL: none is open any more, the change still holds)
 static void apply(rhv_t *v, uint8_t const prefix[RH_PREFIX], bool on, uint16_t minutes) {
-    rhs_result_t r = mesh_rhist_set(prefix, on, minutes);
+    rhs_result_t r = mesh_rhist_set(prefix, on, minutes, MESH_FROM_SCREEN);
     if (v) {
         update(v);
         say(v, r == RHS_OK ? "" : mesh_rhist_result_text(r));

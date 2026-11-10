@@ -199,7 +199,7 @@ static void contact_to_frame(ContactInfo const &c, mf_contact_t *out) {
     out->gps_lon               = c.gps_lon;
 }
 
-bool BadgeMesh::advertNow(bool flood) {
+bool BadgeMesh::advertNow(bool flood, bool from_console) {
     if (!flood) {
         return advert(); // MyMesh's zero-hop advert
     }
@@ -209,6 +209,9 @@ bool BadgeMesh::advertNow(bool flood) {
                                  : createSelfAdvert(prefs->node_name, sensors.node_lat, sensors.node_lon);
     if (!pkt) {
         return false;
+    }
+    if (from_console) {
+        return floodConsoleScope(pkt, 0);
     }
     TransportKey scope; // the default scope, as CMD_SEND_SELF_ADVERT sends it (all zero = unscoped)
     memcpy(&scope.key, prefs->default_scope_key, sizeof(scope.key));
@@ -253,20 +256,31 @@ void BadgeMesh::loadConsoleScope() {
     console_scope_live(console_scope_name_, sizeof(console_scope_name_), console_scope_key_, clean);
 }
 
-// true when the flood was a console line's (sent under the console scope, or dropped while that is not set)
+// A console line's flood: under the console scope, or dropped (false) while that is not set. The console refuses
+// before queueing; this is the net for a scope gone in between. Never unscoped: that would flood everywhere.
+bool BadgeMesh::floodConsoleScope(mesh::Packet *pkt, uint32_t delay_millis) {
+    if (mesh_scope_choose(true, console_scope_name_) == MESH_SCOPE_USE_CONSOLE) {
+        MyMesh::sendFloodScoped(console_scope_key_, pkt, delay_millis);
+        return true;
+    }
+    console_refused_++;
+    releasePacket(pkt);
+    return false;
+}
+
+// true when the flood was a console line's frame (sent under the console scope, or dropped)
 bool BadgeMesh::floodForConsole(mesh::Packet *pkt, uint32_t delay_millis) {
     if (!pipe_.fromConsole()) {
         return false;
     }
-    if (mesh_scope_choose(true, console_scope_name_) == MESH_SCOPE_USE_CONSOLE) {
-        MyMesh::sendFloodScoped(console_scope_key_, pkt, delay_millis);
-    } else {
-        // The console refuses before queueing; this is the net for a scope gone between queue and send. Never
-        // unscoped: that would flood everywhere.
-        console_refused_++;
-        releasePacket(pkt);
-    }
+    floodConsoleScope(pkt, delay_millis);
     return true;
+}
+
+void BadgeMesh::sendFloodScoped(TransportKey const &scope, mesh::Packet *pkt, uint32_t delay_millis) {
+    if (!floodForConsole(pkt, delay_millis)) {
+        MyMesh::sendFloodScoped(scope, pkt, delay_millis);
+    }
 }
 
 void BadgeMesh::sendFloodScoped(ContactInfo const &recipient, mesh::Packet *pkt, uint32_t delay_millis) {

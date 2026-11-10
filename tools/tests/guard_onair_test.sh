@@ -54,6 +54,11 @@ expect deny "$b mesh scope console zz-bench YES" "$tmp/allow-bare"
 expect deny "$b mesh dm scope hi" "$tmp/allow-bare"
 expect deny "$b mesh remote scope status"
 expect pass "$b mesh remote TESTNODE status" "$tmp/allow-bare"
+# The status history (#290): its polls are console floods, so its target must be an allowed node
+expect pass "$b mesh history"
+expect pass "$b mesh history TESTNODE on 60 YES"
+expect deny "$b mesh history OTHER-RPT on 60 YES"
+expect deny "$b mesh history 0123456789ab interval 10"
 expect pass "grep -n 'mesh send Public' firmware/components/mesh/mesh_task.cpp"
 expect pass "git commit -m 'guard-badge.sh denies fw mesh send to Public
 lines that reach the badge (badge.sh, ssh) are checked'"
@@ -126,6 +131,13 @@ BADGE_REPO="$tmp/bare" sent refused fw 192.0.2.1 mesh send '#badgetest' hello
 FAKE_SCOPE="" sent sent fw 192.0.2.1 mesh out
 FAKE_SCOPE="" sent sent fw 192.0.2.1 mesh remote settings
 sent refused fw 192.0.2.1 mesh scope console zz-other YES
+sent sent fw 192.0.2.1 mesh history TESTNODE on 60 YES
+FAKE_SCOPE="default None | console not set" sent refused fw 192.0.2.1 mesh history TESTNODE on 60 YES
+sent refused fw 192.0.2.1 mesh history OTHER-RPT on 60 YES
+FAKE_SCOPE="" sent sent fw 192.0.2.1 mesh history
+sent sent fw 192.0.2.1 advert flood
+FAKE_SCOPE="default None | console not set" sent refused fw 192.0.2.1 advert flood
+FAKE_SCOPE="default None | console not set" sent refused fw 192.0.2.1 fw advert
 : > "$FAKE_LOG"
 sent sent fw 192.0.2.1 mesh scope console zz-bench YES
 sent sent fw 192.0.2.1 mesh dm abcdef123456 hi
