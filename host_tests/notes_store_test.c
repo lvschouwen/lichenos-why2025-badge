@@ -2,6 +2,7 @@
 #include "notes_store.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,11 +99,67 @@ static void test_delete(void) {
         put("held.txt", "held\n");
         chmod(dir, 0500);
         CHECK(notes_store_delete(dir, "held.txt") == NOTES_ERR_BUSY && has("held.txt"));
-        CHECK(notes_store_write(dir, "held.txt", "changed") != NOTES_OK && has("held.txt"));
+        // the .new cannot be created either: EACCES on fopen is BUSY too
+        CHECK(notes_store_write(dir, "held.txt", "changed") == NOTES_ERR_BUSY && has("held.txt"));
         chmod(dir, 0700);
         CHECK(strstr(notes_result_text(NOTES_ERR_BUSY), "open elsewhere") != NULL);
         CHECK(notes_store_delete(dir, "held.txt") == NOTES_OK);
     }
+}
+
+extern int (*notes_test_remove)(char const *path);
+extern int (*notes_test_rename)(char const *from, char const *to);
+
+static bool ends_new(char const *path) {
+    size_t n = strlen(path);
+    return n > 4 && strcmp(path + n - 4, ".new") == 0;
+}
+
+static int remove_held(char const *path) { // the old note is open elsewhere (FatFs's file lock): EACCES
+    if (!ends_new(path)) {
+        errno = EACCES;
+        return -1;
+    }
+    return remove(path);
+}
+
+static int rename_fails(char const *from, char const *to) {
+    (void)from, (void)to;
+    errno = EIO;
+    return -1;
+}
+
+static bool line_is(char const *name, char const *want) {
+    char  path[400], got[64] = {0};
+    snprintf(path, sizeof(path), "%s/%s", dir, name);
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        return false;
+    }
+    size_t n = fread(got, 1, sizeof(got) - 1, f);
+    fclose(f);
+    return n > 0 && strncmp(got, want, strlen(want)) == 0;
+}
+
+// An edit with the old note open elsewhere: the old note stays, the .new goes, and the app hears BUSY (#274). An edit
+// whose rename fails after the old note went: the .new is the only copy and is kept; the next listing takes it back.
+static void test_edit_locked(void) {
+    clean_dir();
+    put("held.txt", "old\n");
+    notes_test_remove = remove_held;
+    CHECK(notes_store_write(dir, "held.txt", "new") == NOTES_ERR_BUSY);
+    notes_test_remove = remove;
+    CHECK(line_is("held.txt", "old") && !has("held.txt.new"));
+
+    notes_test_rename = rename_fails;
+    CHECK(notes_store_write(dir, "held.txt", "new") == NOTES_ERR_IO);
+    notes_test_rename = rename;
+    CHECK(!has("held.txt") && line_is("held.txt.new", "new"));
+    notes_item_t items[4];
+    size_t       count, skipped;
+    CHECK(notes_store_list(dir, items, 4, &count, &skipped) == NOTES_OK && count == 1);
+    CHECK(line_is("held.txt", "new") && !has("held.txt.new"));
+    clean_dir();
 }
 
 static void test_list_edges(void) {
@@ -168,6 +225,7 @@ int main(void) {
     test_write();
     test_delete();
     test_list_edges();
+    test_edit_locked();
     test_recover_orphan();
     clean_dir();
     rmdir(dir);

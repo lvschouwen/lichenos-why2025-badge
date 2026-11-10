@@ -1479,6 +1479,7 @@ add_test(NAME notes_model_test COMMAND notes_model_test)
 
 add_executable(notes_store_test ${CMAKE_CURRENT_SOURCE_DIR}/notes_store_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps/notes_store.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps/notes_model.c)
 target_include_directories(notes_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_apps)
+target_compile_definitions(notes_store_test PRIVATE NOTES_HOST_TEST)
 target_compile_options(notes_store_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME notes_store_test COMMAND notes_store_test)
 

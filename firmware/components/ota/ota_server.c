@@ -1001,12 +1001,12 @@ static void handle_delete(int fd, ota_request_t const *req) {
         respond(fd, 403, "path not allowed: use FLASH0: with a plain file name");
         return;
     }
-    forget_c6_bundle_if_c6_file(path);
-    if (unlink(path) != 0) { // EACCES: open in another task (FatFs's file lock, #274)
+    if (unlink(path) != 0) { // EACCES: open in another task (FatFs's file lock, #274); the file and its bundle stay
         int err = errno;
         respond(fd, err == ENOENT ? 404 : 409, "couldn't delete %s: %s", req->path, strerror(err));
         return;
     }
+    forget_c6_bundle_if_c6_file(path);
     respond(fd, 200, "deleted %s", req->path);
 }
 

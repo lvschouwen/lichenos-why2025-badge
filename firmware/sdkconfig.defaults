@@ -71,6 +71,12 @@ CONFIG_FATFS_ALLOC_PREFER_ALIGNED_WORK_BUFFERS=y
 # (FR_LOCKED) instead of corrupting the volume. One table for all volumes (ff.c: static FILESEM Files[FF_FS_LOCK],
 # 16 B an entry, internal .bss), counting open files and open directories: 12 files (SD max_files 4 + /storage 8) and
 # 8 directories (a listing, MeshCore's openNextFile, the shim's recursive remove). Past it an open fails with ENFILE.
+# Concurrency (R0.16, ff.c): open, opendir, unlink and rename take the system mutex (mount_volume -> lock_volume(fs, 1))
+# around chk_share/inc_share, so those are serialised across volumes; close's dec_share runs under the volume mutex
+# only (the note at dec_share). A close on one volume racing an open on the other can at worst drop the new entry's
+# lock (the protection we had before), never corrupt the FAT. No spurious FR_INT_ERR on open: inc_share runs right
+# after chk_share under the same system mutex, so the free entry it found is still free. An EIO stays a card fault;
+# ENFILE/EMFILE (table full) and EACCES (locked) do not count against the card (files_job, #274).
 CONFIG_FATFS_FS_LOCK=20
 # "fw sd format" names the card LICHEN (f_setlabel, #60)
 CONFIG_FATFS_USE_LABEL=y

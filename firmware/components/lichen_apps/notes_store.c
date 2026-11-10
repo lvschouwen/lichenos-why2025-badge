@@ -8,6 +8,21 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#define NOTES_WARN(...) ESP_LOGW("notes", __VA_ARGS__)
+#else
+#define NOTES_WARN(...) ((void)0)
+#endif
+
+// Host tests swap remove and rename for ones that fail on cue (FatFs's file lock cannot be made on a host file system)
+#ifdef NOTES_HOST_TEST
+int (*notes_test_remove)(char const *path)                  = remove;
+int (*notes_test_rename)(char const *from, char const *to) = rename;
+#define remove(p)    notes_test_remove(p)
+#define rename(a, b) notes_test_rename(a, b)
+#endif
+
 #define PATH_CAP   160
 #define READ_CAP   (NOTES_LINE_MAX + 64) // a line plus what notes_clean_line drops
 #define NAME_TRIES 100
@@ -104,7 +119,8 @@ notes_result_t notes_store_list(char const *dir, notes_item_t *out, size_t max, 
 static notes_result_t write_file(char const *tmp, char const *path, char const *line) {
     FILE *f = fopen(tmp, "w");
     if (!f) {
-        return result_from_errno(errno) == NOTES_ERR_SPACE ? NOTES_ERR_SPACE : NOTES_ERR_OPEN;
+        notes_result_t r = result_from_errno(errno);
+        return r == NOTES_ERR_IO ? NOTES_ERR_OPEN : r; // SPACE, or BUSY: a .new another task has open
     }
     bool ok  = fputs(line, f) >= 0 && fputc('\n', f) != EOF;
     int  err = errno;
@@ -121,9 +137,10 @@ static notes_result_t write_file(char const *tmp, char const *path, char const *
         remove(tmp);
         return result_from_errno(err);
     }
+    // The old note is gone: tmp is the only copy now, so it stays; the next listing renames it back (recover_orphans)
     if (rename(tmp, path) != 0) {
         err = errno;
-        remove(tmp);
+        NOTES_WARN("%s not renamed to %s (errno %d): the note is kept as %s", tmp, path, err, tmp);
         return result_from_errno(err);
     }
     return NOTES_OK;

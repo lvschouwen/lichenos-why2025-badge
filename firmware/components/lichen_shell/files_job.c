@@ -127,7 +127,9 @@ static void job_task(void *arg) {
     }
     if (locked) {
         int err = errno;
-        bool card_error = s_result.result == FILES_ERR_IO || s_result.result == FILES_ERR_OPEN;
+        // A full open-file table (a listing's opendir) is the OS's limit, not the card's (#274)
+        bool card_error = (s_result.result == FILES_ERR_IO || s_result.result == FILES_ERR_OPEN) && err != ENFILE &&
+                          err != EMFILE;
         lichen_sys_sd_end(card_error ? lichen_sys_sd_io_from_errno(err) : LICHEN_SD_IO_OK);
     }
     ESP_LOGI(TAG, "job %d -> %d, stack margin %u", (int)s_req.kind, (int)s_result.result,

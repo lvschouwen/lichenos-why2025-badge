@@ -43,10 +43,10 @@ char const *files_result_text(files_result_t r) {
 }
 
 // FatFs's file lock (CONFIG_FATFS_FS_LOCK, #274) refuses to delete, rename or write-open a file another task has open,
-// and to open one another task is writing: FR_LOCKED, which the VFS reports as EACCES. That is "try again later", not a
-// card fault, so files_job does not count it against the card.
+// and to open one another task is writing: FR_LOCKED, which the VFS reports as EACCES. A full lock table or fd table
+// is ENFILE/EMFILE. Both are "try again later", not a card fault, so files_job does not count them against the card.
 static files_result_t errno_result(int err, files_result_t otherwise) {
-    return err == EACCES || err == EBUSY ? FILES_ERR_BUSY : otherwise;
+    return err == EACCES || err == EBUSY || err == ENFILE || err == EMFILE ? FILES_ERR_BUSY : otherwise;
 }
 
 int files_list(char const *dir, files_entry_t *out, size_t max, size_t *count, size_t *skipped) {
