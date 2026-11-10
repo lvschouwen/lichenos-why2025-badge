@@ -31,6 +31,10 @@ bool ota_image_may_be_on_trial(ota_image_state_t state) {
     return state != OTA_IMAGE_NOT_ON_TRIAL;
 }
 
+bool ota_update_refused_on_trial(bool stops_apps, ota_image_state_t state) {
+    return stops_apps && state == OTA_IMAGE_ON_TRIAL;
+}
+
 ota_trial_end_t ota_trial_run(ota_trial_io_t const *io) {
     unsigned read_fails = 0, mark_fails = 0;
     for (;;) {

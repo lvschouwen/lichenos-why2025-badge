@@ -15,6 +15,9 @@ typedef enum { OTA_IMAGE_UNKNOWN, OTA_IMAGE_ON_TRIAL, OTA_IMAGE_NOT_ON_TRIAL } o
 // For a caller that may restart (the PSRAM speed switch, the C6 supervisor): an unread state might be a trial, and a
 // restart then rolls the image back, so only NOT_ON_TRIAL is "not on trial"
 bool ota_image_may_be_on_trial(ota_image_state_t state);
+// Whether the receiver refuses a request that stops the apps (#302): only on a definite trial, the state esp_ota_begin
+// refuses too. An unread state is let through: refusing it would lock out Wi-Fi updates on a badge with blank otadata
+bool ota_update_refused_on_trial(bool stops_apps, ota_image_state_t state);
 
 // The display as this boot left it (#293). Only a deliberate headless boot (`fw noscreen`) lets the OS alone prove an
 // image: a panel that failed to start may be the new image's fault, so that boot never marks it valid and the next

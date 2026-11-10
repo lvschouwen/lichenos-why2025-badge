@@ -103,6 +103,15 @@ static void test_may_be_on_trial(void) {
     CHECK(!ota_image_may_be_on_trial(OTA_IMAGE_NOT_ON_TRIAL));
 }
 
+// #302 review: an update that stops the apps is refused only on a definite trial, as esp_ota_begin does. An unreadable
+// state (blank otadata after a USB first install) must not lock Wi-Fi updates out for good
+static void test_update_refused(void) {
+    CHECK(ota_update_refused_on_trial(true, OTA_IMAGE_ON_TRIAL));
+    CHECK(!ota_update_refused_on_trial(true, OTA_IMAGE_UNKNOWN));
+    CHECK(!ota_update_refused_on_trial(true, OTA_IMAGE_NOT_ON_TRIAL));
+    CHECK(!ota_update_refused_on_trial(false, OTA_IMAGE_ON_TRIAL));
+}
+
 static void test_image_state(void) {
     ota_trial_in_t in = up_at(OTA_VALID_AFTER_S);
     in.image          = OTA_IMAGE_NOT_ON_TRIAL;
@@ -229,6 +238,7 @@ int main(void) {
     test_psram_trial();
     test_image_state();
     test_may_be_on_trial();
+    test_update_refused();
     test_loop_timeline();
     test_loop_retries();
 

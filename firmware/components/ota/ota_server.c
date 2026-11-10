@@ -1333,10 +1333,9 @@ static void start_screenshot(int fd) {
     fd_detached = true;
 }
 
-// Handle one connection. Returns true when the badge should reboot.
 // Before anything stops (#302): stopping the apps ends in a restart, and a restart on trial rolls the image back
 static bool refused_on_trial(int fd, ota_request_t const *req, size_t pre_len) {
-    if (!ota_route_stops_apps(req->route) || !ota_image_trial_maybe()) {
+    if (!ota_update_refused_on_trial(ota_route_stops_apps(req->route), ota_image_trial_state())) {
         return false;
     }
     drain_body(fd, pre_len, req->expect_continue ? 0 : req->content_length);
@@ -1356,6 +1355,7 @@ static void respond_info(int fd) {
             hooks.prepare ? " prepare" : "", room);
 }
 
+// Handle one connection. Returns true when the badge should reboot.
 static bool handle_connection(int fd) {
     size_t len      = 0;
     size_t head_len = 0;
