@@ -6,6 +6,7 @@
 #include "c6_paths.h"
 #include "i154_proto.h"
 #include "lora_proto.h"
+#include "reg.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -54,8 +55,10 @@ static void test_message_ids(void) {
 // P4 -> C6 types count up from 1, C6 -> P4 types from 0x81, in the order the doc lists
 static void test_type_tables(void) {
     int const lora_to_c6[] = {LORA_MSG_CONFIG,   LORA_MSG_RX_START, LORA_MSG_RX_STOP, LORA_MSG_STATUS_REQ,
-                              LORA_MSG_SEND,     LORA_MSG_IDENT_REQ, LORA_MSG_SWEEP_REQ};
-    int const lora_to_p4[] = {LORA_MSG_RX_PACKET, LORA_MSG_STATUS, LORA_MSG_RESULT, LORA_MSG_IDENT, LORA_MSG_SWEEP};
+                              LORA_MSG_SEND,     LORA_MSG_IDENT_REQ, LORA_MSG_SWEEP_REQ, LORA_MSG_REG_GET,
+                              LORA_MSG_REG_SET};
+    int const lora_to_p4[] = {LORA_MSG_RX_PACKET, LORA_MSG_STATUS, LORA_MSG_RESULT,
+                              LORA_MSG_IDENT,     LORA_MSG_SWEEP,  LORA_MSG_REG_VAL};
     int const i154_to_c6[] = {I154_MSG_CAPS_REQ, I154_MSG_SCAN_START, I154_MSG_SCAN_STOP};
     int const i154_to_p4[] = {I154_MSG_CAPS, I154_MSG_ED, I154_MSG_FRAME, I154_MSG_DONE, I154_MSG_ACK};
     for (int i = 0; i < (int)(sizeof(lora_to_c6) / sizeof(int)); i++) {
@@ -161,6 +164,19 @@ static void test_c6_files(void) {
     CHECK(!c6_image_path("../firmware.bin", out, sizeof(out)));
 }
 
+// The registry (#308): ids, types and statuses are wire values both tables and both images share. Ids are append-only:
+// a change here means one chip would read another key than the other serves.
+static void test_reg_ids(void) {
+    CHECK(REG_ID_BL_DISPLAY == 0x0100 && REG_ID_BL_KEYBOARD == 0x0101);
+    CHECK(REG_ID_LORA_FREQ == 0x0200 && REG_ID_LORA_BW == 0x0201 && REG_ID_LORA_SF == 0x0202 &&
+          REG_ID_LORA_CR == 0x0203 && REG_ID_LORA_SYNC == 0x0204 && REG_ID_LORA_PREAMBLE == 0x0205 &&
+          REG_ID_LORA_POWER == 0x0206 && REG_ID_LORA_STATE == 0x0207);
+    CHECK(REG_ID_WIFI_COUNTRY == 0x0300 && REG_ID_WIFI_PROTOCOL == 0x0301);
+    CHECK(REG_ID_BT_STATE == 0x0400 && REG_ID_C6_REG_CAPS == 0x0F00);
+    CHECK(REG_CAP_BL == 1u << 1 && REG_CAP_LORA == 1u << 2 && REG_CAP_BT == 1u << 4 && REG_CAP_C6 == 1u << 15);
+    CHECK(REG_T_U8 == 1 && REG_T_STR == 7 && REG_OK == 0 && REG_UNKNOWN == 1 && REG_FAILED == 5);
+}
+
 int main(void) {
     test_message_ids();
     test_type_tables();
@@ -168,6 +184,7 @@ int main(void) {
     test_config_layout();
     test_ident_compare();
     test_c6_files();
+    test_reg_ids();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -14,6 +14,9 @@
 #define SWEEP_REQ_LEN   (HDR_LEN + 11)
 #define SWEEP_FIXED_LEN (HDR_LEN + 12) // up to and including the count byte; 2 bytes per step follow
 #define BODYLESS_LEN    HDR_LEN
+#define REG_GET_LEN     (HDR_LEN + 3)
+#define REG_SET_LEN     (HDR_LEN + 7)
+#define REG_VAL_LEN     (HDR_LEN + 9)
 
 static uint8_t *put_u16(uint8_t *p, uint16_t v) {
     p[0] = (uint8_t)v;
@@ -37,6 +40,67 @@ static uint32_t get_u32(uint8_t const **p) {
     return lo | (uint32_t)get_u16(p) << 16;
 }
 
+// The registry messages (#308) sit in helpers so lora_encode / lora_decode keep their complexity
+static size_t reg_encoded_len(uint8_t type) {
+    switch (type) {
+        case LORA_MSG_REG_GET: return REG_GET_LEN;
+        case LORA_MSG_REG_SET: return REG_SET_LEN;
+        case LORA_MSG_REG_VAL: return REG_VAL_LEN;
+        default: return 0;
+    }
+}
+
+static void encode_reg(lora_msg_t const *msg, uint8_t *p) {
+    switch (msg->type) {
+        case LORA_MSG_REG_GET:
+            p  = put_u16(p, msg->u.reg_get.id);
+            *p = msg->u.reg_get.seq;
+            break;
+        case LORA_MSG_REG_SET:
+            p  = put_u16(p, msg->u.reg_set.id);
+            p  = put_u32(p, msg->u.reg_set.value);
+            *p = msg->u.reg_set.seq;
+            break;
+        case LORA_MSG_REG_VAL: {
+            lora_reg_val_t const *v = &msg->u.reg_val;
+            p                       = put_u16(p, v->id);
+            *p++                    = v->seq;
+            *p++                    = v->status;
+            *p++                    = v->type;
+            put_u32(p, v->value);
+            break;
+        }
+        default: break; // bodyless
+    }
+}
+
+static lora_dec_t decode_reg(uint8_t const *buf, size_t len, lora_msg_t *out) {
+    size_t want = reg_encoded_len(out->type);
+    if (!want) {
+        return LORA_DEC_BAD_TYPE;
+    }
+    if (len != want) {
+        return LORA_DEC_BAD_LEN;
+    }
+    uint8_t const *p = buf + HDR_LEN;
+    if (out->type == LORA_MSG_REG_GET) {
+        out->u.reg_get.id  = get_u16(&p);
+        out->u.reg_get.seq = *p;
+    } else if (out->type == LORA_MSG_REG_SET) {
+        out->u.reg_set.id    = get_u16(&p);
+        out->u.reg_set.value = get_u32(&p);
+        out->u.reg_set.seq   = *p;
+    } else {
+        lora_reg_val_t *v = &out->u.reg_val;
+        v->id             = get_u16(&p);
+        v->seq            = *p++;
+        v->status         = *p++;
+        v->type           = *p++;
+        v->value          = get_u32(&p);
+    }
+    return LORA_DEC_OK;
+}
+
 static size_t encoded_len(lora_msg_t const *msg) {
     switch (msg->type) {
         case LORA_MSG_CONFIG: return CONFIG_LEN;
@@ -54,7 +118,7 @@ static size_t encoded_len(lora_msg_t const *msg) {
             uint8_t count = msg->u.sweep.count;
             return count && count <= LORA_SWEEP_MAX_BINS ? SWEEP_FIXED_LEN + 2u * count : 0;
         }
-        default: return 0;
+        default: return reg_encoded_len(msg->type);
     }
 }
 
@@ -138,7 +202,7 @@ size_t lora_encode(lora_msg_t const *msg, uint8_t *buf, size_t cap) {
             }
             break;
         }
-        default: break; // bodyless
+        default: encode_reg(msg, p); break; // the registry messages, or bodyless
     }
     return len;
 }
@@ -263,7 +327,7 @@ lora_dec_t lora_decode(uint8_t const *buf, size_t len, lora_msg_t *out) {
             return LORA_DEC_OK;
         }
         case LORA_MSG_SWEEP: return decode_sweep(buf, len, &out->u.sweep);
-        default: return LORA_DEC_BAD_TYPE;
+        default: return decode_reg(buf, len, out); // BAD_TYPE for anything else
     }
 }
 

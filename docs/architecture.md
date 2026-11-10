@@ -43,7 +43,7 @@ Links between the chips:
 What the P4 (Lichen) and the C6 (radio coprocessor) rely on from each other (#234, part of #216). It must hold through
 the whole v2 migration: a wave that touches any line below re-runs the two-chip bench gate (lichen-bench skill) before
 it counts as merged. Line numbers are in `firmware/components/` unless noted and drift; the symbol names are the anchor.
-Pure parts are pinned by `host_tests/two_chip_contract_test.c` (ids, CONFIG bytes, IDENT compare) on
+Pure parts are pinned by `host_tests/two_chip_contract_test.c` (ids, CONFIG bytes, IDENT compare, registry ids) on
 top of `lora_proto_test`, `i154_proto_test`, `c6_boot_policy_test`, `c6_watch_test`, `c6_paths_test` and `r16_hold_test`.
 No data migration: stored keys named here start from their defaults if they change.
 
@@ -122,6 +122,21 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   (`BAD_VERSION`), IDENT_REQ included, so IDENT never comes and the P4 reflashes the bundled C6 image. IDENT itself was
   new types only (no bump); an old peer answers nothing, which counts as "not proven". i154 CAPS may carry newer
   trailing fields; every other length is exact.
+- **Registry (REG, #307/#308):** new types only, no bump (same precedent as IDENT). P4 to C6 `REG_GET` (type 8,
+  id u16, seq u8; 5 bytes in all) and `REG_SET` (type 9, id u16, value u32, seq u8; 9 bytes); C6 to P4 `REG_VAL`
+  (type 0x86, id u16, seq u8, status u8, type u8, value u32; 11 bytes). The C6 answers every REG_GET / REG_SET with a
+  REG_VAL that echoes seq and carries the value it applies now, also when the set was refused or failed; an unknown id
+  is status `UNKNOWN` with type and value 0. Statuses (`reg_status_t`): 0 OK, 1 UNKNOWN, 2 RANGE, 3 GUARDED (a `TX`
+  key: radio keys are read-only here, changes stay on the guarded paths), 4 RO, 5 FAILED. Types (`reg_type_t`): 1 U8,
+  2 I16, 3 U32, 4 I32, 5 BOOL, 6 ENUM, 7 STR (STR is local to one chip and never sent). The value is the 32-bit
+  pattern (signed types sign-extended). A v4 C6 without the registry decodes REG_* as `BAD_TYPE`, counts it in
+  `STATUS.ignored` and answers nothing: the P4 times out on `c6.reg_caps` and shows "not supported by this C6" while
+  every other message keeps working. Core and rules: `shared/reg/reg.h` (Apache-2.0, pure C), pinned by
+  `host_tests/reg_test.c`, `lora_proto_test` and the contract test.
+- **Registry ids (`shared/reg/reg_ids.h`):** u16, append-only, never renumbered or reused; the high byte is the
+  domain, dotted names live only in the tables. 0x01xx `bl.*` (C6), 0x02xx `lora.*` (C6, read-only/TX), 0x03xx
+  `wifi.*` (P4 via esp_hosted RPC), 0x04xx `bt.*` (C6), 0x05-0x0E reserved for C6 domains, 0x0Fxx `c6.*` meta
+  (`c6.reg_caps` 0x0F00: bit n = the C6 serves domain 0x0n), 0x10-0x1F reserved for P4 domains (#312).
 - **CONFIG (type 1, 14 bytes of body, 16 in all):** freq u32, bw u32, sf u8, cr u8 (5..8 = 4/5..4/8), sync u8,
   preamble u16, tx power i8 dBm. The P4 sends it on every (re)start of the link (`LORA_ACT_SEND_CONFIG`,
   `lora/lora.c:377`); the C6 starts unconfigured after its own reset. Default: 869.618 MHz, 62.5 kHz, SF7, CR 4/5, sync 0x12,

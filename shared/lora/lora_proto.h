@@ -18,7 +18,11 @@ extern "C" {
 // 2: STATUS carries the C6 uptime, heap and stack (#56); 3: transmit (#65). IDENT (#36) is new message types only, no
 // layout change, so no bump: an older peer answers nothing to IDENT_REQ (BAD_TYPE), which the P4 treats as "not proven"
 // 4: the RSSI sweep (#161, SWEEP_REQ / SWEEP). A v3 C6 drops every v4 message (BAD_VERSION), IDENT_REQ included, so its
-// IDENT never comes: the P4 counts it as not proven and takes the existing path that reflashes the bundled C6 image
+// IDENT never comes: the P4 counts it as not proven and takes the existing path that reflashes the bundled C6 image.
+// REG_GET / REG_SET / REG_VAL (the settings registry, #307/#308) are new message types only, like IDENT: no bump. A v4
+// C6 without them decodes BAD_TYPE, counts the message in STATUS.ignored and answers nothing; the P4 times out and
+// shows "not supported by this C6" while every other message keeps working. A bump would instead make that C6 drop
+// CONFIG and IDENT too and force a reflash for a read-back feature.
 #define LORA_PROTO_VERSION 4
 #define LORA_MSG_ID_TO_C6  0x4C01
 #define LORA_MSG_ID_TO_P4  0x4C02
@@ -33,12 +37,15 @@ typedef enum {
     LORA_MSG_SEND, // a packet to transmit; answered by a RESULT once it left the radio (or failed)
     LORA_MSG_IDENT_REQ, // which app does the C6 run? Answered by IDENT (#36)
     LORA_MSG_SWEEP_REQ, // RSSI per frequency step (#161), receive only; answered by SWEEP, or a RESULT when refused
+    LORA_MSG_REG_GET,   // read one registry key (#308); always answered by REG_VAL
+    LORA_MSG_REG_SET,   // write one registry key; always answered by REG_VAL with the value applied afterwards
     // C6 -> P4
     LORA_MSG_RX_PACKET = 0x81,
     LORA_MSG_STATUS,
     LORA_MSG_RESULT,
     LORA_MSG_IDENT,
     LORA_MSG_SWEEP,
+    LORA_MSG_REG_VAL,
 } lora_msg_type_t;
 
 typedef struct {
@@ -135,6 +142,30 @@ typedef struct {
     int16_t  rssi_x10[LORA_SWEEP_MAX_BINS]; // dBm * 10
 } lora_sweep_t;
 
+// The settings registry on the wire (#308; tables, types and statuses in shared/reg/reg.h, ids in reg_ids.h). The
+// value is the 32-bit pattern of the key's type (reg_value_t.u: U8/U32/BOOL/ENUM unsigned, I16/I32 sign-extended);
+// STR keys are local to one chip and never sent. seq is echoed in REG_VAL, so a late answer is not taken for the next
+// request's. The C6 answers every REG_GET and REG_SET, an unknown id with status UNKNOWN, and always with the value
+// it applies now (also after a refused or failed set).
+typedef struct {
+    uint16_t id; // reg_id_t
+    uint8_t  seq;
+} lora_reg_get_t;
+
+typedef struct {
+    uint16_t id;
+    uint32_t value;
+    uint8_t  seq;
+} lora_reg_set_t;
+
+typedef struct {
+    uint16_t id;
+    uint8_t  seq;
+    uint8_t  status; // reg_status_t
+    uint8_t  type;   // reg_type_t of the key, 0 when status is UNKNOWN
+    uint32_t value;  // applied value, 0 when status is UNKNOWN
+} lora_reg_val_t;
+
 typedef struct {
     uint8_t type; // lora_msg_type_t
     union {
@@ -146,6 +177,9 @@ typedef struct {
         lora_ident_t     ident;
         lora_sweep_req_t sweep_req;
         lora_sweep_t     sweep;
+        lora_reg_get_t   reg_get;
+        lora_reg_set_t   reg_set;
+        lora_reg_val_t   reg_val;
     } u;
 } lora_msg_t;
 

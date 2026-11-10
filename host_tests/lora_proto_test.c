@@ -346,6 +346,64 @@ static void sweep_valid_ranges(void) {
     CHECK(!lora_sweep_req_valid(&r));
 }
 
+// The registry messages (#308): round trip, exact bytes, exact length
+static void reg_round_trip(void) {
+    size_t     n;
+    uint8_t    buf[LORA_MSG_MAX];
+    lora_msg_t out;
+
+    lora_msg_t get = {.type = LORA_MSG_REG_GET, .u.reg_get = {.id = 0x0207, .seq = 9}};
+    lora_msg_t got = round_trip(&get, &n);
+    CHECK(n == 5 && got.u.reg_get.id == 0x0207 && got.u.reg_get.seq == 9);
+
+    lora_msg_t set = {.type = LORA_MSG_REG_SET, .u.reg_set = {.id = 0x0100, .value = 0xFFFFFFF7u, .seq = 200}};
+    got            = round_trip(&set, &n);
+    CHECK(n == 9 && got.u.reg_set.id == 0x0100 && got.u.reg_set.value == 0xFFFFFFF7u && got.u.reg_set.seq == 200);
+
+    lora_msg_t val = {.type      = LORA_MSG_REG_VAL,
+                      .u.reg_val = {.id = 0x0200, .seq = 7, .status = 3, .type = 3, .value = 869618000}};
+    got            = round_trip(&val, &n);
+    CHECK(n == 11 && got.u.reg_val.id == 0x0200 && got.u.reg_val.seq == 7 && got.u.reg_val.status == 3 &&
+          got.u.reg_val.type == 3 && got.u.reg_val.value == 869618000);
+
+    // Little-endian in struct order: [ver][type] id seq status type value
+    uint8_t const expect[] = {0x04, 0x86, 0x00, 0x02, 0x07, 0x03, 0x03, 0x50, 0x51, 0xD5, 0x33};
+    CHECK(lora_encode(&val, buf, sizeof(buf)) == sizeof(expect) && memcmp(buf, expect, sizeof(expect)) == 0);
+    uint8_t const expect_set[] = {0x04, 0x09, 0x00, 0x01, 0xF7, 0xFF, 0xFF, 0xFF, 0xC8};
+    CHECK(lora_encode(&set, buf, sizeof(buf)) == sizeof(expect_set) &&
+          memcmp(buf, expect_set, sizeof(expect_set)) == 0);
+
+    // Exact length: one byte short or long is BAD_LEN, a short buffer encodes nothing
+    lora_msg_t const *each[] = {&get, &set, &val};
+    for (size_t i = 0; i < 3; i++) {
+        n = lora_encode(each[i], buf, sizeof(buf));
+        CHECK(lora_decode(buf, n - 1, &out) == LORA_DEC_BAD_LEN);
+        buf[n] = 0;
+        CHECK(lora_decode(buf, n + 1, &out) == LORA_DEC_BAD_LEN);
+        CHECK(lora_decode(buf, 2, &out) == LORA_DEC_BAD_LEN);
+        CHECK(lora_encode(each[i], buf, n - 1) == 0);
+    }
+}
+
+// No version bump for the registry (#308): an older peer keeps understanding every other message and drops a REG one.
+// A v4 C6 without the registry decodes REG_GET / REG_SET as an unknown type, like any type past its table here.
+static void reg_old_peer_drops(void) {
+    uint8_t    buf[LORA_MSG_MAX];
+    lora_msg_t out;
+    lora_msg_t get = {.type = LORA_MSG_REG_GET, .u.reg_get = {.id = 0x0F00, .seq = 1}};
+    size_t     n   = lora_encode(&get, buf, sizeof(buf));
+
+    CHECK(LORA_PROTO_VERSION == 4 && buf[0] == 4);
+    CHECK(LORA_MSG_REG_GET > LORA_MSG_SWEEP_REQ && LORA_MSG_REG_VAL > LORA_MSG_SWEEP); // new numbers, none reused
+    buf[1] = LORA_MSG_REG_SET + 1; // the next type nobody knows yet: what REG_GET is to an older C6
+    CHECK(lora_decode(buf, n, &out) == LORA_DEC_BAD_TYPE);
+    buf[1] = LORA_MSG_REG_VAL + 1;
+    CHECK(lora_decode(buf, n, &out) == LORA_DEC_BAD_TYPE);
+    buf[1] = LORA_MSG_REG_GET;
+    buf[0] = 3; // a v3 C6 drops it on the version, like every v4 message
+    CHECK(lora_decode(buf, n, &out) == LORA_DEC_BAD_VERSION);
+}
+
 int main(void) {
     round_trip_each_type();
     encode_layout_pinned();
@@ -355,6 +413,8 @@ int main(void) {
     ident_round_trip();
     sweep_round_trip();
     sweep_valid_ranges();
+    reg_round_trip();
+    reg_old_peer_drops();
 
     if (failures) {
         printf("%d failure(s)\n", failures);
