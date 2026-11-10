@@ -32,9 +32,10 @@ int task_class_core(task_class_t cls);     // -1 for an unknown class
 // Where a task's stack lives (#269). Internal is the default and safe for anything. LP RAM (the P4's 32 KB, in the
 // heap as MALLOC_CAP_RTCRAM) is internal too, so a task there may write flash (NVS, /storage, OTA) with the cache off,
 // but it is not DMA-capable, slower (LP bus) and cannot take 128-bit (PIE/SIMD) accesses: low-rate tasks only, no
-// DMA buffers on their stack. PSRAM is only for a task that never touches flash, NVS or /storage (a hard assert with
-// the cache off) and keeps no critical-section data on its stack. A stack that does not fit leaves the region its
-// reserve and goes to internal RAM instead.
+// DMA buffers and no large flash or SD I/O buffers on their stack. PSRAM is only for a task that never touches flash,
+// NVS or /storage (a hard assert with the cache off) and keeps no critical-section data on its stack. Both are for
+// tasks that never return (lichen_task.h). A stack that does not fit leaves the region its reserve and goes to
+// internal RAM instead.
 typedef enum {
     TASK_STACK_INTERNAL,
     TASK_STACK_LP_RAM,

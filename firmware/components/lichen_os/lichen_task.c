@@ -1,7 +1,7 @@
 // lichen_task_start (#181): every app task starts through a trampoline that books it under its owner and takes it out
 // of the book when its function returns. The book (task_book.c) is guarded by a spinlock: the trampoline's last step
-// runs right before vTaskDelete and must not block. A stack outside internal RAM (#269) is made WithCaps and deleted
-// the same way.
+// runs right before vTaskDelete and must not block. A stack outside internal RAM (#269) is made WithCaps; such a task
+// never returns (a return parks it, see park()).
 #include "lichen_task.h"
 
 #include "esp_heap_caps.h"
@@ -24,6 +24,17 @@ static char const TAG[] = "task";
 static task_book_t  book;
 static portMUX_TYPE book_mux = portMUX_INITIALIZER_UNLOCKED;
 
+// A task with its stack outside internal RAM returned, which lichen_task.h forbids: vTaskDeleteWithCaps(NULL) would
+// need a clean-up task in internal RAM and aborts when there is none, so the task stays, suspended, in the book
+// ("fw tasks" shows it, the app's stop check counts it) and its stack stays taken
+static void park(int slot) {
+    ESP_LOGE(TAG, "task %s returned but its stack is in %s: parked for good (such a task must never return)",
+             book.slot[slot].name, task_stack_name((task_stack_t)book.slot[slot].mem));
+    for (;;) {
+        vTaskSuspend(NULL);
+    }
+}
+
 static void trampoline(void *arg) {
     int slot = (int)(intptr_t)arg;
     portENTER_CRITICAL(&book_mux);
@@ -33,15 +44,13 @@ static void trampoline(void *arg) {
     bool  with_caps        = book.slot[slot].mem != TASK_STACK_INTERNAL;
     portEXIT_CRITICAL(&book_mux);
     fn(fn_arg);
+    if (with_caps) {
+        park(slot);
+    }
     portENTER_CRITICAL(&book_mux);
     task_book_remove(&book, slot);
     portEXIT_CRITICAL(&book_mux);
-    if (with_caps) {
-        // A WithCaps task cannot free its own stack: IDF starts a small internal clean-up task that deletes this one
-        vTaskDeleteWithCaps(NULL);
-    } else {
-        vTaskDelete(NULL);
-    }
+    vTaskDelete(NULL);
 }
 
 static uint32_t stack_caps(task_stack_t mem) {
@@ -56,9 +65,11 @@ static task_stack_t place_stack(task_stack_t mem, uint32_t stack_bytes) {
     return task_stack_place(mem, stack_bytes, heap_caps_get_largest_free_block(stack_caps(mem)));
 }
 
-// Makes the booked task. A region that cannot give the stack after all (a race with another allocation) leaves the
-// task in internal RAM; the slot learns that before the task can run, so the trampoline deletes it the plain way.
-static bool create_task(int slot, char const *name, uint32_t stack_bytes, int priority, int core, TaskHandle_t *out) {
+// Makes the booked task. A region that is short (place_stack) or cannot give the stack after all (a race with another
+// allocation) leaves the task in internal RAM, logged once here; the slot learns that before the task can run, so the
+// trampoline deletes it the plain way.
+static bool create_task(int slot, task_stack_t asked, char const *name, uint32_t stack_bytes, int priority, int core,
+                        TaskHandle_t *out) {
     void        *arg = (void *)(intptr_t)slot;
     task_stack_t mem = (task_stack_t)book.slot[slot].mem; // set by task_book_add, nothing else writes it yet
     if (mem != TASK_STACK_INTERNAL) {
@@ -66,13 +77,25 @@ static bool create_task(int slot, char const *name, uint32_t stack_bytes, int pr
                                             stack_caps(mem)) == pdPASS) {
             return true;
         }
-        ESP_LOGW(TAG, "task %s: no %u B of %s for its stack, internal RAM instead", name, (unsigned)stack_bytes,
-                 task_stack_name(mem));
         portENTER_CRITICAL(&book_mux);
         book.slot[slot].mem = TASK_STACK_INTERNAL;
         portEXIT_CRITICAL(&book_mux);
     }
+    if (asked != TASK_STACK_INTERNAL) {
+        ESP_LOGW(TAG, "task %s: %s is short, its %u B stack goes to internal RAM", name, task_stack_name(asked),
+                 (unsigned)stack_bytes);
+    }
     return xTaskCreatePinnedToCore(trampoline, name, stack_bytes, arg, (UBaseType_t)priority, out, core) == pdPASS;
+}
+
+// The first PSRAM stack names audit D's rule in the log, so a task that breaks it is easy to find after the assert
+static void warn_psram_once(char const *owner, char const *name) {
+    static bool warned;
+    if (!warned) {
+        warned = true;
+        ESP_LOGW(TAG, "%s: task %s has its stack in PSRAM: no NVS, /storage, flash or OTA from it (assert with the "
+                      "cache off)", owner, name);
+    }
 }
 
 bool lichen_task_start(lichen_app_t const *app, char const *name, void (*fn)(void *arg), void *arg,
@@ -92,11 +115,11 @@ bool lichen_task_start_in(lichen_app_t const *app, char const *name, void (*fn)(
     if (task_name_fit(fitted, name)) {
         ESP_LOGW(TAG, "%s: task name \"%s\" cut to \"%s\"", owner, name, fitted);
     }
-    task_stack_t placed = place_stack((task_stack_t)mem, stack_bytes); // the heap query stays outside the spinlock
-    if (placed != (task_stack_t)mem) {
-        ESP_LOGW(TAG, "%s: task %s: %s is short, its %u B stack goes to internal RAM", owner, fitted,
-                 task_stack_name((task_stack_t)mem), (unsigned)stack_bytes);
+    task_stack_t asked = (unsigned)mem < TASK_STACK_COUNT ? (task_stack_t)mem : TASK_STACK_INTERNAL;
+    if (asked == TASK_STACK_PSRAM) {
+        warn_psram_once(owner, fitted);
     }
+    task_stack_t placed = place_stack(asked, stack_bytes); // the heap query stays outside the spinlock
     portENTER_CRITICAL(&book_mux);
     int slot = task_book_add(&book, owner, fitted, stack_bytes, (task_class_t)prio, placed, fn, arg);
     portEXIT_CRITICAL(&book_mux);
@@ -107,7 +130,7 @@ bool lichen_task_start_in(lichen_app_t const *app, char const *name, void (*fn)(
     // Straight into the caller's variable: FreeRTOS writes it before the task can run (mesh_task_handle relies on it)
     TaskHandle_t own  = NULL;
     int          core = task_class_core((task_class_t)prio);
-    if (!create_task(slot, fitted, stack_bytes, priority, core, handle ? handle : &own)) {
+    if (!create_task(slot, asked, fitted, stack_bytes, priority, core, handle ? handle : &own)) {
         portENTER_CRITICAL(&book_mux);
         task_book_remove(&book, slot);
         portEXIT_CRITICAL(&book_mux);

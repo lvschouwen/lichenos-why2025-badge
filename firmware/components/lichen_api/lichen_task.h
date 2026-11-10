@@ -26,8 +26,13 @@ typedef enum {
 } lichen_prio_t;
 
 // Where the task's stack lives (#269, task_book.h has the rules). INTERNAL is the default and right for nearly every
-// task. LP_RAM: a low-rate task that must stay internal-capable (it writes NVS or /storage) but never puts a DMA buffer
-// or PIE/SIMD data on its stack; it frees DMA-capable RAM. PSRAM: a task that never touches flash, NVS or /storage.
+// task. LP_RAM: a low-rate task that must stay internal-capable (it writes NVS or /storage) but never puts a DMA
+// buffer, PIE/SIMD data or a large flash/SD I/O buffer on its stack (esp_flash takes an LP RAM buffer as not-DRAM:
+// reads go through a DMA bounce buffer that can fail with ESP_ERR_NO_MEM, writes go in 32 B pieces); it frees
+// DMA-capable RAM.
+// PSRAM: a task that never touches flash, NVS, /storage or OTA (the first one logs that rule as a warning).
+// LP_RAM and PSRAM are for tasks that never return: deleting such a task itself needs a helper task in internal RAM
+// and aborts when there is none, so a return is logged as an error and parks the task, suspended, for good.
 // When the region is short the stack goes to internal RAM ("fw tasks" shows where each stack is).
 typedef enum {
     LICHEN_STACK_INTERNAL = TASK_STACK_INTERNAL,
