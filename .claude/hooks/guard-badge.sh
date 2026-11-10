@@ -19,9 +19,9 @@ deny() {
   exit 0
 }
 # The on-air allow list (rule 3) and its overrides are Lucas's alone: refused, not asked (an ask can be settled
-# without him in auto mode). He edits the file or runs `! BADGE_ONAIR_LUCAS=1 tools/badge.sh ...` himself.
+# without him in auto mode). He edits the file himself.
 case "$file$cmd" in
-  *onair-allow.local* | *ONAIR_ALLOW_FILE* | *BADGE_ONAIR_LUCAS*)
+  *onair-allow.local* | *ONAIR_ALLOW_FILE*)
     deny "the on-air allow list (.claude/onair-allow.local) and its overrides are Lucas's to change or use himself (#287)" ;;
 esac
 [ -n "$cmd" ] || exit 0
@@ -43,7 +43,7 @@ if printf '%s' "$cmd_joined" | grep -qE "$reach"; then
     verdict=$(onair_verdict "$hit")
     case "$verdict" in
       deny\ *) deny "${verdict#deny }" ;;
-      ask\ *) deny "${verdict#ask }: Lucas runs it himself with BADGE_ONAIR_LUCAS=1" ;;
+      ask\ *) deny "${verdict#ask }: Lucas sets it in MeshCore Settings on the badge" ;;
     esac
   done < <(printf '%s\n' "$cmd_joined" | grep -E "$reach" | grep -oE 'mesh[[:space:]]+(send|dm|remote|telemetry|trace|discover|advert)([[:space:]]+[^[:space:];&|)]+)?' || true)
 fi

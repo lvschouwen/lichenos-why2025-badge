@@ -148,15 +148,14 @@ cmd_backup() {
 . "$REPO/tools/onair_guard.sh"
 
 # Every console line passes here before it is sent (#287): on air only #badgetest and the test node. A line that
-# changes what the badge floods (advert interval/manual) needs BADGE_ONAIR_LUCAS=1, set by Lucas himself.
+# changes what the badge floods (advert interval/manual) is refused too, with no override (an agent could set one):
+# Lucas changes those in MeshCore Settings on the badge.
 onair_gate() {
     local verdict
     verdict=$(onair_verdict "$1")
     case $verdict in
         deny\ *) echo "refusing: ${verdict#deny }" >&2; exit 1 ;;
-        ask\ *)
-            [ "${BADGE_ONAIR_LUCAS:-}" = 1 ] ||
-                { echo "refusing: ${verdict#ask } (BADGE_ONAIR_LUCAS=1 sends it)" >&2; exit 1; } ;;
+        ask\ *) echo "refusing: ${verdict#ask } (MeshCore Settings on the badge)" >&2; exit 1 ;;
     esac
 }
 

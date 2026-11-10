@@ -38,7 +38,6 @@ expect deny "$b mesh discover 0123456789ab"
 expect pass "$b mesh trace"
 expect pass "$b mesh advert"
 expect deny "$b mesh advert interval 6h"
-expect deny "BADGE_ONAIR_LUCAS=1 $b mesh advert interval 6h"
 expect pass "$b mesh out"
 expect pass "grep -n 'mesh send Public' firmware/components/mesh/mesh_task.cpp"
 expect pass "git commit -m 'guard-badge.sh denies fw mesh send to Public
@@ -79,7 +78,6 @@ sent refused fw 192.0.2.1 mesh dm 0123456789ab hi
 sent refused fw 192.0.2.1 mesh remote OTHER-RPT cli reboot YES
 sent refused fw 192.0.2.1 mesh advert interval 6h
 sent refused console /dev/null "fw mesh send Public hi"
-out=$(BADGE_ONAIR_LUCAS=1 badge fw 192.0.2.1 mesh advert interval 6h)
-grep -q SENT <<<"$out" || { echo "FAIL: BADGE_ONAIR_LUCAS=1 did not send: $out" >&2; fail=1; }
+sent sent fw 192.0.2.1 mesh advert
 [ "$fail" = 0 ] && echo "guard_onair_test: ok"
 exit "$fail"
