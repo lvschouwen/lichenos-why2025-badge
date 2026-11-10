@@ -17,7 +17,7 @@
 //   asked at all.
 // - A C6 that went away or came back (reg_proxy_link): caps are asked anew, every value is stale until answered again.
 // - requested vs applied: one W line per key and boot when they differ after both held still for REG_PROXY_SETTLE_MS.
-#define REG_PROXY_MAX             16
+#define REG_PROXY_MAX             16 // 14 used with #311 (bl 4, lora 8, bt.state, c6.reg_caps); reg_service_test checks
 #define REG_PROXY_CAPS_TIMEOUT_MS 1000
 #define REG_PROXY_CAPS_TRIES      3 // background re-asks of c6.reg_caps after a boot or a re-attach; the console always asks
 #define REG_PROXY_SETTLE_MS       3000

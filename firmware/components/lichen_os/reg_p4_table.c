@@ -52,6 +52,7 @@ reg_entry_t const reg_p4_table[] = {
 };
 
 size_t const reg_p4_count = sizeof(reg_p4_table) / sizeof(reg_p4_table[0]);
+_Static_assert(sizeof(reg_p4_table) / sizeof(reg_p4_table[0]) <= REG_P4_KEYS_MAX, "raise REG_P4_KEYS_MAX");
 
 uint16_t const reg_p4_radio_ids[8] = {REG_ID_LORA_FREQ, REG_ID_LORA_BW,       REG_ID_LORA_SF,    REG_ID_LORA_CR,
                                       REG_ID_LORA_SYNC, REG_ID_LORA_PREAMBLE, REG_ID_LORA_POWER, REG_ID_LORA_STATE};

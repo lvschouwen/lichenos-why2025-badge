@@ -352,7 +352,7 @@ static void poll(void *arg) {
 // ---- console --------------------------------------------------------------------------------------------------------
 
 static void print_rows(char const *query) {
-    reg_entry_t const *es[REG_PROXY_MAX + 16]; // every key of the table (`fw get` without a query)
+    reg_entry_t const *es[REG_P4_KEYS_MAX]; // every key of the table fits (`fw get` without a query)
     bool               no_link[sizeof(es) / sizeof(es[0])];
     size_t             n = 0;
     for (size_t i = 0; i < reg_p4_count && n < sizeof(es) / sizeof(es[0]); i++) {

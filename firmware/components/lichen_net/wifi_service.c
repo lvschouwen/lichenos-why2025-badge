@@ -147,6 +147,18 @@ static bool post(msg_t const *m) {
     return ok;
 }
 
+// The driver's applied values for the registry (#311), under rb_lock: the last read that got anything, and a counter
+// every setter bumps, so a read from before a set is never reused for that set's echo (wifi_readback_reusable)
+static portMUX_TYPE    rb_lock = portMUX_INITIALIZER_UNLOCKED;
+static wifi_readback_t readback;
+static uint32_t        set_gen;
+
+static void readback_invalidate(void) {
+    portENTER_CRITICAL(&rb_lock);
+    set_gen++;
+    portEXIT_CRITICAL(&rb_lock);
+}
+
 // Wi-Fi power save (#146). The IDF default WIFI_PS_MIN_MODEM wakes the C6 only at DTIM beacons: RTT spikes of a few
 // hundred ms and truncated screenshots on a busy channel, without a disconnect. Off by default; `fw wifi ps` switches
 // it for a comparison (not saved). Applied on every STA_START, i.e. after each esp_wifi_start. Battery policy: #76.
@@ -166,6 +178,7 @@ _Static_assert(WIFI_BW20 == 1 && WIFI_BW40 == 2 && WIFI_BW80 == 3 && WIFI_BW160 
 
 static void set_wifi_tx(int raw) {
     esp_err_t err = esp_wifi_set_max_tx_power((int8_t)raw);
+    readback_invalidate();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "wifi: TX power not set: %s", esp_err_to_name(err));
     }
@@ -185,6 +198,7 @@ static void apply_wifi_bw(void) {
     int       bw = atomic_load(&wifi_bw_mhz);
     int       proto = atomic_load(&wifi_proto);
     esp_err_t err;
+    readback_invalidate();
     if (proto) {
         uint8_t mask = WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N | (proto == 'n' ? 0 : WIFI_PROTOCOL_11AX);
         if ((err = esp_wifi_set_protocol(WIFI_IF_STA, mask)) != ESP_OK) {
@@ -198,6 +212,7 @@ static void apply_wifi_bw(void) {
 
 static void apply_wifi_ps(void) {
     esp_err_t err = esp_wifi_set_ps((wifi_ps_type_t)atomic_load(&wifi_ps_mode));
+    readback_invalidate();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "wifi: power save not set: %s", esp_err_to_name(err));
     }
@@ -213,22 +228,42 @@ static void country_into(wifi_readback_t *r, wifi_country_t const *c) {
     r->country_max_dbm = c->max_tx_power;
 }
 
-// The regulatory domain (#311, Lucas 2026-11-10): NL with 802.11d off (policy manual: an AP's country IE never changes
-// it), set before every esp_wifi_start. The driver's own default is "01" (world safe, channels 1-11, 802.11d on). Logged
-// with what the driver reports back. A failed set leaves the driver on its default, which is narrower, so the start
-// goes ahead.
-static void set_country(void) {
-    esp_err_t       err = esp_wifi_set_country_code(WIFI_COUNTRY, false);
-    wifi_country_t  c   = {0};
-    wifi_readback_t r   = {0};
-    r.country_ok        = err == ESP_OK && esp_wifi_get_country(&c) == ESP_OK;
-    if (r.country_ok) {
-        country_into(&r, &c);
+static bool country_read(wifi_readback_t *r) {
+    wifi_country_t c = {0};
+    *r               = (wifi_readback_t){0};
+    if ((r->country_ok = esp_wifi_get_country(&c) == ESP_OK)) {
+        country_into(r, &c);
     }
+    return r->country_ok;
+}
+
+// The last set failed: the next STA_START tries once more (boot task or c6wifi task)
+static atomic_bool country_retry;
+
+// The regulatory domain (#311, Lucas 2026-11-10): NL with 802.11d off (policy manual: an AP's country IE never changes
+// it), before every esp_wifi_start and after a driver restore. The driver's own default is "01" (world safe, channels
+// 1-11, 802.11d on). It stores the country in the C6's flash, so it is set only when the driver does not hold NL as set
+// already (wifi_country_needs_set). The regulatory line is logged every time. A failed set leaves the driver on its
+// default, which is narrower, so the start goes ahead.
+static void set_country(void) {
+    wifi_readback_t r;
+    esp_err_t       err = ESP_OK;
+    country_read(&r);
+    if (wifi_country_needs_set(&r)) {
+        char was[64];
+        wifi_regdom_text(&r, was, sizeof(was));
+        err = esp_wifi_set_country_code(WIFI_COUNTRY, false);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "wifi: country set to %s (the driver had %s)", WIFI_COUNTRY, was);
+        }
+        country_read(&r);
+    }
+    atomic_store(&country_retry, err != ESP_OK);
+    readback_invalidate();
     char text[64];
     wifi_regdom_text(&r, text, sizeof(text));
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "wifi: country %s not set: %s (the driver keeps its default)", WIFI_COUNTRY, esp_err_to_name(err));
+        ESP_LOGE(TAG, "wifi: country %s not set: %s (the driver keeps %s)", WIFI_COUNTRY, esp_err_to_name(err), text);
     } else {
         ESP_LOG_LEVEL(wifi_regdom_expected(&r) ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "wifi: regulatory %s", text);
     }
@@ -525,8 +560,6 @@ static uint32_t now_ms(void) {
 
 // ---- the driver's applied values for the registry (#311) --------------------------------------------------------
 
-static portMUX_TYPE    rb_lock = portMUX_INITIALIZER_UNLOCKED;
-static wifi_readback_t readback; // under rb_lock: the last read that got anything
 
 static void requested_into(wifi_readback_t *r) {
     int proto     = atomic_load(&wifi_proto);
@@ -547,37 +580,44 @@ static bool read_back(void) {
     wifi_bandwidth_t bw    = 0;
     int8_t           tx    = 0;
     wifi_ps_type_t   ps    = WIFI_PS_NONE;
-    if ((r.country_ok = esp_wifi_get_country(&c) == ESP_OK)) {
-        country_into(&r, &c);
+    portENTER_CRITICAL(&rb_lock);
+    uint32_t gen = set_gen;
+    portEXIT_CRITICAL(&rb_lock);
+    // The country is readable whenever the driver is initialised: when it fails the C6 is not answering, and the other
+    // four would only wait out their timeouts too
+    if (!(r.country_ok = esp_wifi_get_country(&c) == ESP_OK)) {
+        return false;
     }
+    country_into(&r, &c);
     r.proto_ok = esp_wifi_get_protocol(WIFI_IF_STA, &proto) == ESP_OK;
     r.bw_ok    = esp_wifi_get_bandwidth(WIFI_IF_STA, &bw) == ESP_OK;
     r.tx_ok    = esp_wifi_get_max_tx_power(&tx) == ESP_OK;
     r.ps_ok    = esp_wifi_get_ps(&ps) == ESP_OK;
-    if (!(r.country_ok || r.proto_ok || r.bw_ok || r.tx_ok || r.ps_ok)) {
-        return false;
-    }
     r.proto  = proto;
     r.bw_mhz = wifi_bw_to_mhz((int)bw);
     r.tx_raw = tx;
     r.ps     = (uint8_t)ps;
-    r.have   = true;
-    r.at_ms  = now_ms();
+    r.have    = true;
+    r.at_ms   = now_ms();
+    r.set_gen = gen;
     portENTER_CRITICAL(&rb_lock);
     readback = r;
     portEXIT_CRITICAL(&rb_lock);
     return true;
 }
 
-// A live ask within this long of the last read takes that read: `fw get wifi.` asks once per key
-#define READBACK_REUSE_MS 250
+// Only while the link and the driver are up: the c6wifi task and the console never wait out RPC timeouts on a C6
+// that is gone or being updated
+static bool read_back_if_up(void) {
+    return c6link_up() && !c6link_updating() && atomic_load(&driver_ready) && read_back();
+}
 
 bool wifi_readback(wifi_readback_t *out, bool live) {
     uint32_t t = now_ms();
     portENTER_CRITICAL(&rb_lock);
-    bool recent = readback.have && t - readback.at_ms < READBACK_REUSE_MS;
+    bool recent = wifi_readback_reusable(&readback, set_gen, t); // `fw get wifi.` asks once for its five keys
     portEXIT_CRITICAL(&rb_lock);
-    bool fresh = live && (recent || (c6link_up() && !c6link_updating() && atomic_load(&driver_ready) && read_back()));
+    bool fresh = live && (recent || read_back_if_up());
     portENTER_CRITICAL(&rb_lock);
     *out = readback;
     portEXIT_CRITICAL(&rb_lock);
@@ -587,10 +627,13 @@ bool wifi_readback(wifi_readback_t *out, bool live) {
 
 bool wifi_set_ps(bool min) {
     atomic_store(&wifi_ps_mode, min ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+    readback_invalidate();
     if (!atomic_load(&wifi_started)) {
         return true; // applied at the next start (STA_START)
     }
-    return esp_wifi_set_ps(min ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE) == ESP_OK;
+    bool ok = esp_wifi_set_ps(min ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE) == ESP_OK;
+    readback_invalidate(); // a read that ran during the RPC predates it
+    return ok;
 }
 
 // Log-safe copy of an SSID (they come from the air)
@@ -833,6 +876,7 @@ static void handle_forget(void) {
     // The restore put the driver's defaults back: flash storage and its own mode
     esp_wifi_set_storage(WIFI_STORAGE_RAM);
     esp_wifi_set_mode(WIFI_MODE_STA);
+    set_country(); // and its country "01": NL again (#311)
 }
 
 static void handle_got_ip(void) {
@@ -875,7 +919,7 @@ static void handle_got_ip(void) {
 
 static void handle_connected(msg_t const *m) {
     wifi_link_connected(&link_ap, m->ssid, strlen(m->ssid));
-    read_back(); // the bandwidth and protocol are agreed at association: the registry's cache follows (#311)
+    read_back_if_up(); // the bandwidth and protocol are agreed at association: the registry's cache follows (#311)
 }
 
 static void handle_disconnected(int reason, uint32_t now) {
@@ -1097,6 +1141,16 @@ static unsigned wifi_stack_free(void) {
     return wifi_task_handle ? (unsigned)uxTaskGetStackHighWaterMark(wifi_task_handle) : 0;
 }
 
+// STA_START, on the c6wifi task: the country once more if its set before this start failed (#311), the power save,
+// bandwidth and TX power choices, then the registry's cache
+static void on_sta_start(void) {
+    if (atomic_load(&country_retry)) {
+        set_country();
+    }
+    apply_wifi_ps();
+    read_back_if_up();
+}
+
 static void wifi_task(void *arg) {
     (void)arg;
     msg_t m;
@@ -1110,8 +1164,7 @@ static void wifi_task(void *arg) {
                     bool have = have_credentials;
                     portEXIT_CRITICAL(&state_lock);
                     if (atomic_load(&driver_up)) {
-                        apply_wifi_ps(); // STA_START: the driver is up, also without credentials (scan only)
-                        read_back();     // the registry's cache after each Wi-Fi start (#311)
+                        on_sta_start(); // the driver is up, also without credentials (scan only)
                     }
                     if (have && atomic_load(&driver_up)) {
                         portENTER_CRITICAL(&state_lock);
@@ -1324,6 +1377,7 @@ static void cmd_wifi(char const *args) {
         bool     reconnecting = false;
         if (mhz) {
             atomic_store(&wifi_bw_mhz, (int)mhz);
+            readback_invalidate();
             msg_t m = {.type = MSG_RECONNECT}; // the bandwidth is agreed at association; STA_START/connect apply it
             reconnecting = post(&m);
         }

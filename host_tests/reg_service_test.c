@@ -100,6 +100,7 @@ static void test_table(void) {
         CHECK(reg_p4_is_proxy(e) == (d < 0x10 && d != REG_ID_DOMAIN(REG_ID_WIFI_COUNTRY)));
     }
     CHECK(proxies <= REG_PROXY_MAX);
+    CHECK(reg_p4_count <= REG_P4_KEYS_MAX); // fw get's array (also a _Static_assert in reg_p4_table.c)
     CHECK(reg_find_id(reg_p4_table, reg_p4_count, REG_ID_C6_REG_CAPS) != NULL);
     for (size_t i = 0; i < REG_RADIO_KEYS; i++) {
         CHECK(reg_find_id(reg_p4_table, reg_p4_count, reg_p4_radio_ids[i]) != NULL);

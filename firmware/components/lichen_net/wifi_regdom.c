@@ -47,6 +47,14 @@ size_t wifi_regdom_text(wifi_readback_t const *r, char *buf, size_t cap) {
                 cap);
 }
 
+bool wifi_readback_reusable(wifi_readback_t const *r, uint32_t set_gen, uint32_t now_ms) {
+    return r->have && r->set_gen == set_gen && now_ms - r->at_ms < WIFI_RB_REUSE_MS;
+}
+
+bool wifi_country_needs_set(wifi_readback_t const *now) {
+    return !wifi_regdom_expected(now);
+}
+
 uint8_t wifi_bw_to_mhz(int bw) {
     switch (bw) {
         case 1: return 20;  // WIFI_BW20

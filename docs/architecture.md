@@ -171,12 +171,16 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
 - **Wi-Fi keys (#311, P4 domain 0x03):** the regulatory country is fixed in firmware: `esp_wifi_set_country_code("NL",
   false)` (esp_hosted RPC `Req_WifiSetCountryCode`; 802.11d off = policy manual, so an AP's country IE never changes
   it) before every `esp_wifi_start` (`lichen_net/wifi_service.c` `set_country`, in `wifi_driver_up` and the switch's
-  start), logged as `wifi: regulatory NL, channels 1-13, max N dBm, policy manual` (W when the driver reports anything
-  else; a failed set leaves the driver's narrower "01" default, 1-11). `wifi.country` (STR, RO + TX), `wifi.protocol`
+  start, and after the forget path's `esp_wifi_restore`), logged as `wifi: regulatory NL, channels 1-13, max N dBm,
+  policy manual` (W when the driver reports anything else). The driver stores the country in the C6's flash, so it is
+  only set when `esp_wifi_get_country` does not already report NL as set (an I line `wifi: country set to NL (the driver
+  had ...)` when it was); a failed set leaves the driver's narrower "01" default (1-11) and is retried once at STA_START. `wifi.country` (STR, RO + TX), `wifi.protocol`
   (RO), `wifi.txpwr` (0.25 dBm, RO + TX: `fw wifi tx`), `wifi.bw` (MHz, RO + TX: `fw wifi bw`) and `wifi.ps`
   (none/min, settable, not saved) come from `wifi_readback` (`esp_wifi_get_country` / `_protocol` / `_bandwidth` /
   `_max_tx_power` / `_ps` over the RPCs): read after every Wi-Fi start and association into a spinlocked cache, live on
-  the console (reads within 250 ms are reused), the cache with its age on the LVGL task. `fw wifi tx|bw|ps` keep their
+  the console (a read under 250 ms old is reused unless a setter ran since: `wifi_readback_reusable`), the cache with its
+  age on the LVGL task; the c6wifi task reads only while the link and the driver are up, and stops after a failed first
+  RPC. `fw wifi tx|bw|ps` keep their
   guards and echo the applied read-back. `bt.state` is a C6 proxy key; `fw airplane` shows its cache next to the saved
   Bluetooth switch. Pure parts: `wifi_regdom.c`, `lichen_os/reg_wifi.c` (`host_tests/wifi_reg_test.c`).
 - **CONFIG (type 1, 14 bytes of body, 16 in all):** freq u32, bw u32, sf u8, cr u8 (5..8 = 4/5..4/8), sync u8,

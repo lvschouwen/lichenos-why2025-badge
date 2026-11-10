@@ -55,6 +55,26 @@ static void test_country(void) {
     CHECK(strcmp(line, "not read") == 0);
 }
 
+// #311 review M1/M4: a set since a read makes it unusable; NL as set is never written again
+static void test_reuse_and_set(void) {
+    wifi_readback_t r = nl(); // read at 1000 ms, set_gen 0
+    CHECK(wifi_readback_reusable(&r, 0, 1000));
+    CHECK(wifi_readback_reusable(&r, 0, 1000 + WIFI_RB_REUSE_MS - 1));
+    CHECK(!wifi_readback_reusable(&r, 0, 1000 + WIFI_RB_REUSE_MS)); // too old
+    CHECK(!wifi_readback_reusable(&r, 1, 1100));                     // a setter ran since the read began
+    r.have = false;
+    CHECK(!wifi_readback_reusable(&r, 0, 1000));
+
+    r = nl();
+    CHECK(!wifi_country_needs_set(&r)); // the driver already holds NL, 1-13, manual: no flash write
+    r.policy = 0;                       // NL but 802.11d on
+    CHECK(wifi_country_needs_set(&r));
+    r = (wifi_readback_t){.country_ok = true, .cc = {'0', '1', ' '}, .schan = 1, .nchan = 11, .policy = 0};
+    CHECK(wifi_country_needs_set(&r)); // the driver's default (also after esp_wifi_restore)
+    r = (wifi_readback_t){0};          // could not read: set
+    CHECK(wifi_country_needs_set(&r));
+}
+
 static void test_bw(void) {
     CHECK(wifi_bw_to_mhz(1) == 20);
     CHECK(wifi_bw_to_mhz(2) == 40);
@@ -142,6 +162,7 @@ static void test_views(void) {
 
 int main(void) {
     test_country();
+    test_reuse_and_set();
     test_bw();
     test_alias_replies();
     test_views();

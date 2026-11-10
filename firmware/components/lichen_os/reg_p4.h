@@ -13,6 +13,9 @@
 // Radio keys are read-only and TX (#307): a set answers GUARDED and never reaches a setter. wifi.* (#311) is the P4's
 // own domain 0x03 (the Wi-Fi driver is reached over the esp_hosted RPCs, not REG_GET): wifi.country (fixed NL),
 // wifi.txpwr and wifi.bw are TX and change only through `fw wifi tx|bw`; wifi.ps is settable. bt.state is a C6 key.
+// At most this many keys (21 with #311): `fw get` collects the matching ones in an array of this size; reg_p4_table.c
+// asserts it at compile time
+#define REG_P4_KEYS_MAX 32
 extern reg_entry_t const reg_p4_table[];
 extern size_t const      reg_p4_count;
 

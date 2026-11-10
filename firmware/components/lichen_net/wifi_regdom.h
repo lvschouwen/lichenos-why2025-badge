@@ -26,6 +26,7 @@
 typedef struct {
     bool     have; // read at least once since boot
     uint32_t at_ms;
+    uint32_t set_gen; // the service's set counter when this read began: a set since makes it unusable for reuse
     bool     country_ok, proto_ok, bw_ok, tx_ok, ps_ok;
     char     cc[3]; // esp_wifi_get_country: two letters and a third octet (' ', 'O', 'I', 'X' or NUL), no NUL
     uint8_t  schan, nchan, policy;
@@ -39,6 +40,15 @@ typedef struct {
     uint8_t  req_bw_mhz, req_proto;
     uint8_t  req_ps;
 } wifi_readback_t;
+
+// A live ask may take the cached read instead of asking the C6 again only when it is under WIFI_RB_REUSE_MS old and no
+// setter ran since it began (set_gen is the service's counter now), so a set's echo always reads afresh
+#define WIFI_RB_REUSE_MS 250
+bool wifi_readback_reusable(wifi_readback_t const *r, uint32_t set_gen, uint32_t now_ms);
+
+// set_country's decision (#311): set only when the driver does not already hold NL as set (wifi_regdom_expected), so
+// the C6's driver, which stores the country in its flash, is not written at every start
+bool wifi_country_needs_set(wifi_readback_t const *now);
 
 // The driver's three-octet country to text: "NL" (the third octet dropped, anything but a letter or digit as '?');
 // bytes written without the NUL, 0 when cap < 3
