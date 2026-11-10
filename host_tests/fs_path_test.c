@@ -37,6 +37,7 @@ int main(void) {
     // The OS's own directories on the drive are no app's (#283: the C6 image, the notification store)
     CHECK(!fs_app_dir_path("/storage", "c6", p, sizeof(p)) && strcmp(p, "x") == 0);
     CHECK(!fs_app_dir_path("/storage", "lichen", p, sizeof(p)) && !fs_app_dir_path("/sd/lichen/apps", "c6", p, sizeof(p)));
+    CHECK(!fs_app_dir_path("/storage", "crash", p, sizeof(p))); // the crash log (#294)
     CHECK(fs_app_dir_path("/storage", "c", p, sizeof(p)) && fs_app_dir_path("/storage", "c6x", p, sizeof(p)) &&
           fs_app_dir_path("/storage", "lichenx", p, sizeof(p)));
 
