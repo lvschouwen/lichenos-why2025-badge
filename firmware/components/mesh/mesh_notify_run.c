@@ -165,7 +165,7 @@ static bool my_name(char *out, size_t cap) {
 }
 
 static void push(mn_kind_t kind, mesh_chat_key_t const *key, char const *title, char const *body, bool mention) {
-    mn_text_t text; // copied before the spinlock: a channel's name is in MeshCore's tables, in PSRAM (#271)
+    mn_text_t       text; // copied before the spinlock: a channel's name is in MeshCore's tables, in PSRAM (#271)
     mesh_chat_key_t chat = *key;
     mn_text_prepare(&text, title, body);
     portENTER_CRITICAL(&mux);

@@ -10,13 +10,17 @@ void ob_init(ob_t *ob) {
     memset(ob, 0, sizeof(*ob));
 }
 
-static ob_entry_t *find(ob_t *ob, mesh_msg_id_t id) {
+static ob_entry_t const *find_const(ob_t const *ob, mesh_msg_id_t id) {
     for (int i = 0; id && i < OB_CAP; i++) {
         if (ob->e[i].used && ob->e[i].id == id) {
             return &ob->e[i];
         }
     }
     return NULL;
+}
+
+static ob_entry_t *find(ob_t *ob, mesh_msg_id_t id) {
+    return (ob_entry_t *)find_const(ob, id); // ob itself is writable here
 }
 
 void ob_set_ts(ob_t *ob, mesh_msg_id_t id, uint32_t ts) {
@@ -367,8 +371,17 @@ void ob_arb_took(ob_arb_t *arb, bool internal) {
     arb->last_internal = internal;
 }
 
-size_t ob_sync_states(ob_t const *ob, ob_sync_t *out, size_t max) {
-    size_t n = 0;
+static void copy_text(ob_entry_t const *e, char target[OB_TARGET_MAX], char text[OB_TEXT_MAX]) {
+    memcpy(target, e->target, OB_TARGET_MAX);
+    memcpy(text, e->text, OB_TEXT_MAX);
+    target[OB_TARGET_MAX - 1] = text[OB_TEXT_MAX - 1] = '\0';
+}
+
+size_t ob_sync_states(ob_t const *ob, ob_sync_t *out, size_t max, ob_text_t *texts, size_t text_max) {
+    size_t n = 0, slots = 0;
+    if (text_max > OB_FRESH_MAX) {
+        text_max = OB_FRESH_MAX;
+    }
     for (int i = 0; i < OB_CAP && n < max; i++) {
         ob_entry_t const *e = &ob->e[i];
         if (!e->used) {
@@ -382,20 +395,23 @@ size_t ob_sync_states(ob_t const *ob, ob_sync_t *out, size_t max) {
         o->attempt   = e->attempt;
         o->repeats   = e->repeats;
         o->fresh     = !e->in_store;
+        o->text_slot = -1;
         memcpy(o->prefix, e->prefix, MF_PREFIX);
+        if (o->fresh && slots < text_max) {
+            copy_text(e, texts[slots].target, texts[slots].text);
+            o->text_slot = (int8_t)slots++;
+        }
     }
     return n;
 }
 
 bool ob_copy_text(ob_t const *ob, mesh_msg_id_t id, char target[OB_TARGET_MAX], char text[OB_TEXT_MAX]) {
-    ob_entry_t const *e = find((ob_t *)ob, id);
+    ob_entry_t const *e = find_const(ob, id);
     target[0] = text[0] = '\0';
     if (!e) {
         return false;
     }
-    memcpy(target, e->target, OB_TARGET_MAX);
-    memcpy(text, e->text, OB_TEXT_MAX);
-    target[OB_TARGET_MAX - 1] = text[OB_TEXT_MAX - 1] = '\0';
+    copy_text(e, target, text);
     return true;
 }
 

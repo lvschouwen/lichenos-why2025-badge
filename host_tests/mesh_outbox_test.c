@@ -286,7 +286,8 @@ static void fail_pending(void) {
     CHECK(ob_retry(&ob, dm, 20)); // still retryable by hand
 }
 
-// The sync's small copy (#271): every used entry's state without its text, fresh until the store took it
+// The sync's copy (#271): every used entry's state, and the first fresh ones' texts with it, fresh until the store
+// took it
 static void sync_states(void) {
     ob_t ob;
     ob_init(&ob);
@@ -295,24 +296,60 @@ static void sync_states(void) {
     mesh_msg_id_t dm   = ob_add_dm(&ob, PEER, "hi there", 8, 0, &why);
     CHECK(chan && dm);
     ob_sync_t out[OB_CAP];
+    ob_text_t texts[OB_FRESH_MAX];
     memset(out, 0xa5, sizeof(out));
-    CHECK(ob_sync_states(&ob, out, OB_CAP) == 2);
+    CHECK(ob_sync_states(&ob, out, OB_CAP, texts, OB_FRESH_MAX) == 2);
     CHECK(out[0].id == chan && out[0].kind == OB_CHANNEL && out[0].state == MESH_OUT_QUEUED && out[0].fresh);
     CHECK(out[1].id == dm && out[1].kind == OB_DM && out[1].fresh && memcmp(out[1].prefix, PEER, MF_PREFIX) == 0);
-    CHECK(ob_sync_states(&ob, out, 1) == 1 && out[0].id == chan); // never more than max
+    CHECK(out[0].text_slot == 0 && strcmp(texts[0].target, "#badgetest") == 0 && strcmp(texts[0].text, "hello") == 0);
+    CHECK(out[1].text_slot == 1 && texts[1].target[0] == '\0' && strcmp(texts[1].text, "hi there") == 0);
+    CHECK(ob_sync_states(&ob, out, 1, texts, OB_FRESH_MAX) == 1 && out[0].id == chan); // never more than max
     ob_mark_in_store(&ob, chan);
     ob_mark_in_store(&ob, 12345); // unknown: nothing changes
-    CHECK(ob_sync_states(&ob, out, OB_CAP) == 2);
-    CHECK(!out[0].fresh && out[1].fresh);
+    CHECK(ob_sync_states(&ob, out, OB_CAP, texts, OB_FRESH_MAX) == 2);
+    CHECK(!out[0].fresh && out[0].text_slot == -1 && out[1].fresh && out[1].text_slot == 0);
 
     char target[OB_TARGET_MAX], text[OB_TEXT_MAX];
     CHECK(ob_copy_text(&ob, chan, target, text));
     CHECK(strcmp(target, "#badgetest") == 0 && strcmp(text, "hello") == 0);
-    CHECK(ob_copy_text(&ob, dm, target, text) && target[0] == '\0' && strcmp(text, "hi there") == 0);
     memset(target, 'x', sizeof(target));
     memset(text, 'x', sizeof(text));
     CHECK(!ob_copy_text(&ob, 0, target, text) && target[0] == '\0' && text[0] == '\0');
     CHECK(!ob_copy_text(&ob, 12345, target, text) && target[0] == '\0' && text[0] == '\0');
+}
+
+// More fresh ones than text slots: the rest stay fresh for a later pass; and a fresh one evicted right after the copy
+// still has its text in the copy (the store gets it, the failure notice has its text)
+static void sync_fresh_overflow_and_eviction(void) {
+    ob_t ob;
+    ob_init(&ob);
+    char const   *why = NULL;
+    mesh_msg_id_t ids[OB_FRESH_MAX + 1];
+    for (int i = 0; i < OB_FRESH_MAX + 1; i++) {
+        char text[8];
+        snprintf(text, sizeof(text), "m%d", i);
+        ids[i] = ob_add_channel(&ob, "#badgetest", text, strlen(text), 0, &why);
+    }
+    ob_sync_t out[OB_CAP];
+    ob_text_t texts[OB_FRESH_MAX];
+    CHECK(ob_sync_states(&ob, out, OB_CAP, texts, OB_FRESH_MAX) == OB_FRESH_MAX + 1);
+    CHECK(out[OB_FRESH_MAX].fresh && out[OB_FRESH_MAX].text_slot == -1);
+    for (int i = 0; i < OB_FRESH_MAX; i++) {
+        ob_mark_in_store(&ob, ids[i]); // what the sync does once the store took them
+    }
+    CHECK(ob_sync_states(&ob, out, OB_CAP, texts, OB_FRESH_MAX) == OB_FRESH_MAX + 1);
+    CHECK(out[OB_FRESH_MAX].text_slot == 0 && strcmp(texts[0].text, "m2") == 0);
+
+    ob_init(&ob);
+    mesh_msg_id_t gone = ob_add_channel(&ob, "#badgetest", "bye", 3, 0, &why);
+    ob_fail(&ob, gone); // failed before the store took it: evictable while still fresh
+    CHECK(ob_sync_states(&ob, out, OB_CAP, texts, OB_FRESH_MAX) == 1 && out[0].fresh && out[0].text_slot == 0);
+    for (int i = 0; i < OB_CAP; i++) {
+        CHECK(ob_add_channel(&ob, "#other", "x", 1, 0, &why)); // the UI fills the table between two passes
+    }
+    char target[OB_TARGET_MAX], text[OB_TEXT_MAX];
+    CHECK(!ob_copy_text(&ob, gone, target, text)); // evicted
+    CHECK(strcmp(texts[0].target, "#badgetest") == 0 && strcmp(texts[0].text, "bye") == 0); // the copy kept it
 }
 
 int main(void) {
@@ -327,6 +364,7 @@ int main(void) {
     arbitration();
     wrap();
     sync_states();
+    sync_fresh_overflow_and_eviction();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

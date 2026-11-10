@@ -136,8 +136,9 @@ static volatile int      offline_queue_len; // MyMesh's offline queue, from the 
 
 // The locks of data that lives in PSRAM (the outbox, trace and remote requests, air log, signal history) or is copied
 // from or into it (the discovery table): FreeRTOS mutexes, not spinlocks, as a critical section must never touch PSRAM,
-// whose cache can be off during a flash write (lichen_task.c, #271). No ISR takes them and nothing blocks while one is
-// held. Made on first use (thread-safe statics), so a screen may ask before MeshCore starts.
+// whose cache can be off during a flash write (lichen_task.c, #271). Never take one from an ISR or inside a critical
+// section, and never block (no other lock, no wait, no I/O) while holding one: the sections stay short copies. Made on
+// first use (thread-safe statics), so a screen may ask before MeshCore starts.
 enum section_t { SECTION_OUTBOX, SECTION_AIRLOG, SECTION_DISCOVER, SECTION_SIGNAL };
 template <section_t S> static SemaphoreHandle_t section_mutex(void) {
     static StaticSemaphore_t buf;
@@ -557,21 +558,29 @@ void BadgeBoard::reboot() {
 }
 
 // Our channel messages go into the screens' store as "me: <text>", and their outbox state follows (#46). With the mesh
-// lock held (the store is under it). The outbox is read in short sections under its lock: each pass copies only the
-// small states (ob_sync_states), and a fresh message's target and text one at a time (#271); the work is done outside.
-static ob_sync_t out_sync[OB_CAP]; // mesh task only
+// lock held (the store is under it). Each pass copies the small states and the first fresh messages' texts in one
+// short section under the outbox lock (ob_sync_states, #271); the work is done outside it. A fresh message without a
+// text slot stays fresh and is added on a later pass.
+static ob_sync_t out_sync[OB_CAP];       // mesh task only
+static ob_text_t out_text[OB_FRESH_MAX]; // the fresh ones' texts, taken with out_sync
 
-// An own message has just ended FAILED (#50): its target and text are read again from the outbox
+// An own message has just ended FAILED (#50): its target and text from this pass's copy, else read again from the
+// outbox. One that left the table meanwhile gets no notice: an empty "Not delivered" would say nothing.
 static void notify_failed(ob_sync_t const &o) {
-    char target[OB_TARGET_MAX];
-    char text[OB_TEXT_MAX];
-    mesh_ob_enter();
-    if (outbox) {
-        ob_copy_text(outbox, o.id, target, text);
+    ob_text_t t = {};
+    if (o.text_slot >= 0) {
+        t = out_text[o.text_slot];
     } else {
-        target[0] = text[0] = '\0';
+        mesh_ob_enter();
+        if (outbox) {
+            ob_copy_text(outbox, o.id, t.target, t.text);
+        }
+        mesh_ob_exit();
     }
-    mesh_ob_exit();
+    if (!t.text[0]) {
+        ESP_LOGW(TAG, "outgoing message %lu failed and left the outbox: no notice", (unsigned long)o.id);
+        return;
+    }
     mesh_chat_key_t key;
     char            title[MESH_CHANNEL_MAX + 2];
     if (o.kind == OB_DM) {
@@ -579,40 +588,33 @@ static void notify_failed(ob_sync_t const &o) {
         snprintf(title, sizeof(title), "@%s", c ? c->name : "?");
         mesh_chat_key_dm(&key, o.prefix);
     } else {
-        snprintf(title, sizeof(title), "%s", target);
-        mesh_chat_key_channel(&key, target);
+        snprintf(title, sizeof(title), "%s", t.target);
+        mesh_chat_key_channel(&key, t.target);
     }
-    mesh_notify_failed(&key, title, text);
+    mesh_notify_failed(&key, title, t.text);
 }
 
-// A fresh message into the screens' store; true when the store took it (it is marked in_store then). One that left the
-// table since the states were copied is skipped: it has nothing left to show.
+// A fresh message with its text copied into the screens' store; true when the store took it (it is marked in_store)
 static bool sync_add_fresh(ob_sync_t const &o) {
-    char target[OB_TARGET_MAX];
-    char text[OB_TEXT_MAX];
-    mesh_ob_enter();
-    bool have = outbox && ob_copy_text(outbox, o.id, target, text);
-    mesh_ob_exit();
-    if (!have) {
-        return false;
-    }
-    char line[MESH_TEXT_MAX + 1];
-    snprintf(line, sizeof(line), "me: %.*s", (int)(sizeof(line) - 5), text); // cut where the plain %s cut it (#46)
+    ob_text_t const &t = out_text[o.text_slot];
+    char             line[MESH_TEXT_MAX + 1];
+    snprintf(line, sizeof(line), "me: %.*s", (int)(sizeof(line) - 5), t.text); // cut where the plain %s cut it (#46)
     bool            ok;
     mesh_chat_key_t key;
     if (o.kind == OB_DM) {
+        char         title[OB_TARGET_MAX];
         ContactInfo *c = node ? node->lookupContactByPubKey(o.prefix, MF_PREFIX) : nullptr;
-        snprintf(target, sizeof(target), "@%s", c ? c->name : "?");
-        ok = mesh_store_add_outgoing_dm(target, line, o.id, mesh_uptime_s(), o.prefix);
+        snprintf(title, sizeof(title), "@%s", c ? c->name : "?");
+        ok = mesh_store_add_outgoing_dm(title, line, o.id, mesh_uptime_s(), o.prefix);
         mesh_chat_key_dm(&key, o.prefix);
     } else {
-        ok = mesh_store_add_outgoing(target, line, o.id, mesh_uptime_s());
-        mesh_chat_key_channel(&key, target);
+        ok = mesh_store_add_outgoing(t.target, line, o.id, mesh_uptime_s());
+        mesh_chat_key_channel(&key, t.target);
     }
     if (ok) {
         mesh_journal_outgoing_locked(&key); // held until its state is final
         mesh_ob_enter();
-        ob_mark_in_store(outbox, o.id);
+        ob_mark_in_store(outbox, o.id); // a no-op when it left the table meanwhile
         mesh_ob_exit();
     }
     return ok;
@@ -621,12 +623,12 @@ static bool sync_add_fresh(ob_sync_t const &o) {
 // true when a message was added to the store (which may have evicted a chat, so the unread total can have changed)
 static bool sync_outgoing(void) {
     mesh_ob_enter();
-    size_t n = outbox ? ob_sync_states(outbox, out_sync, OB_CAP) : 0;
+    size_t n = outbox ? ob_sync_states(outbox, out_sync, OB_CAP, out_text, OB_FRESH_MAX) : 0;
     mesh_ob_exit();
     bool added = false;
     for (size_t i = 0; i < n; i++) {
         ob_sync_t const &o = out_sync[i];
-        if (o.fresh) {
+        if (o.fresh && o.text_slot >= 0) {
             // in_store only after the store took it: a dropped one is tried again on the next pass (logged once)
             static mesh_msg_id_t failed_logged;
             if (sync_add_fresh(o)) {
@@ -922,7 +924,8 @@ static void settings_from_node(MyMesh *n) {
     s.tx_dbm         = prefs->tx_power_dbm;
     snprintf(s.scope, sizeof(s.scope), "%s", prefs->default_scope_name);
     radio_from_prefs(prefs, &radio_cache);
-    bool             share = prefs->advert_loc_policy != ADVERT_LOC_NONE; // read before the spinlock: prefs are in PSRAM
+    // Read before the spinlock: the prefs are in PSRAM
+    bool             share = prefs->advert_loc_policy != ADVERT_LOC_NONE;
     advcfg_autoadd_t autoadd;
     mesh_prefs_get_autoadd(prefs, &autoadd);
     portENTER_CRITICAL(&settings_mux);
@@ -1873,7 +1876,7 @@ extern "C" bool mesh_trace_get(mt_t *out) {
 }
 
 // ---- log in, status and CLI for a repeater or room (#51) -------------------------------------------------------------
-// One request at a time, shared with the pipe under the outbox lock like the trace: copy-in, never the mesh lock (LVGL safe)
+// One request at a time, shared with the pipe under the outbox lock as the trace: copy-in, never the mesh lock
 
 static rr_t *remote_req; // PSRAM, made with the outbox
 static tl_rate_t telem_rate; // when each contact was last asked for telemetry (#162), under mesh_ob_enter/exit

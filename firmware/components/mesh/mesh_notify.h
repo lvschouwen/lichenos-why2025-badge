@@ -111,7 +111,7 @@ typedef struct {
     char title[sizeof(((mn_note_t *)0)->title)];
     char body[sizeof(((mn_note_t *)0)->body)];
 } mn_text_t;
-void mn_text_prepare(mn_text_t *out, char const *title, char const *body);
+void   mn_text_prepare(mn_text_t *out, char const *title, char const *body);
 // Moves everything out (oldest first), returns how many
 size_t mn_queue_take(mn_queue_t *q, mn_note_t *out, size_t max);
 
