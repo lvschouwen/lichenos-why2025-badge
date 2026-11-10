@@ -83,8 +83,9 @@ char const *lichen_fs_app_dir(lichen_app_t const *app) {
     if (!usable(app)) {
         return NULL;
     }
-    if (!take_lock(&dirs_lock, &dirs_lock_buf)) {
-        ESP_LOGW(TAG, "%s: directory table busy", app->id);
+    // Once more on a timeout: a NULL here reads to the app like "no drive", so give a slow holder a second chance
+    if (!take_lock(&dirs_lock, &dirs_lock_buf) && !take_lock(&dirs_lock, &dirs_lock_buf)) {
+        ESP_LOGW(TAG, "%s: directory table busy (lock timeout twice), not a missing drive", app->id);
         return NULL;
     }
     char const *path = app_dir_locked(app);

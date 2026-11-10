@@ -1,6 +1,7 @@
 // The shell's dialog layer (#14 T-B): one OS warning at a time on lv_layer_top(), over every screen and the status
 // bar, with its own keypad group. Enter confirms, Esc cancels, and a countdown confirms by itself when nobody answers
-// (dialog_countdown.c, host-tested). Other tasks never touch LVGL here: they set the wanted state (see want_lock) and
+// (dialog_countdown.c, host-tested). Other tasks never touch LVGL here: they set the wanted state (want under open_lock,
+// the flags under want_lock) and
 // queue one async call (lichen_sys_ui_call, or lv_async_call on the LVGL task) that makes the screen match it, so an
 // open and a close queued together still end right whatever order the calls run in (UI-service calls are FIFO, raw
 // lv_async_call newest first, and the two do not order against each other: see shell.c).
@@ -58,13 +59,13 @@ static dlg_countdown_t  countdown;
 EXT_RAM_BSS_ATTR static request_t shown;
 static uint32_t         shown_gen;
 
-static bool take_open_lock(void) {
+static bool take_open_lock(TickType_t wait) {
     portENTER_CRITICAL(&want_lock);
     if (!open_lock) {
         open_lock = xSemaphoreCreateMutexStatic(&open_lock_buf);
     }
     portEXIT_CRITICAL(&want_lock);
-    return xSemaphoreTake(open_lock, pdMS_TO_TICKS(LOCK_WAIT_MS)) == pdTRUE;
+    return xSemaphoreTake(open_lock, wait) == pdTRUE;
 }
 
 static uint32_t now_ms(void) {
@@ -207,10 +208,9 @@ static void build(void) {
 // Makes the screen match the wanted state
 static void apply(void *arg) {
     (void)arg;
-    if (!take_open_lock()) {
-        ESP_LOGE(TAG, "wanted state busy: screen left as it is");
-        return;
-    }
+    // Unbounded on purpose: every holder only copies a request and never blocks, so the wait is that copy. A timeout
+    // here would lose the open for good (nothing queues another apply), and re-queueing would spin the LVGL task.
+    take_open_lock(portMAX_DELAY);
     portENTER_CRITICAL(&want_lock);
     bool     open = want_open;
     uint32_t gen  = want_gen;
@@ -255,7 +255,7 @@ static void fill_want(shell_dialog_t const *d, shell_dialog_fn done) {
 }
 
 bool shell_dialog_countdown_impl(shell_dialog_t const *d, shell_dialog_fn done) {
-    if (!take_open_lock()) {
+    if (!take_open_lock(pdMS_TO_TICKS(LOCK_WAIT_MS))) {
         ESP_LOGE(TAG, "could not be shown (another dialog is opening)");
         return false;
     }
