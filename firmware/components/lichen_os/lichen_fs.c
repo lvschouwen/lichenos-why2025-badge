@@ -97,7 +97,7 @@ char const *lichen_fs_app_dir(lichen_app_t const *app) {
 
 bool lichen_fs_drive_bytes(size_t *total, size_t *used) {
     uint64_t free_bytes, total_bytes;
-    if (!storage_free_bytes(&free_bytes, &total_bytes)) {
+    if (!storage_free_bytes_cached(&free_bytes, &total_bytes)) { // MeshCore asks often: no walk of the drive (#300)
         *total = *used = 0;
         return false;
     }

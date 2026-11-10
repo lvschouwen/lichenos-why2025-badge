@@ -257,12 +257,17 @@ static void test_server_listens(void) {
 static void test_file_fits(void) {
     CHECK(!ota_file_fits(1048576, 1513520, 4096)); // the #299 case
     CHECK(ota_file_fits(2621440, 1513520, 4096));
-    CHECK(ota_file_fits(8192, 4096, 4096));  // one cluster + one of slack
-    CHECK(!ota_file_fits(8191, 4096, 4096));
-    CHECK(!ota_file_fits(8192, 4097, 4096)); // a partial cluster takes a whole one
-    CHECK(ota_file_fits(4096, 0, 4096));     // an empty file still needs its directory slack
+    // LittleFS (#300): 4088 B of a 4096 B block hold data (the rest is CTZ list pointers), plus 4 blocks of metadata
+    CHECK(ota_file_fits(1536000, 1513520, 4096)); // 371 data blocks + 4
+    CHECK(!ota_file_fits(1535999, 1513520, 4096));
+    CHECK(ota_file_fits(20480, 4088, 4096)); // one full block + 4
+    CHECK(!ota_file_fits(20479, 4088, 4096));
+    CHECK(!ota_file_fits(20480, 4089, 4096)); // a partial block takes a whole one
+    CHECK(!ota_file_fits(20480, 4096, 4096)); // a block's worth of data needs two
+    CHECK(ota_file_fits(16384, 0, 4096));     // an empty file still needs the metadata margin
+    CHECK(!ota_file_fits(16383, 0, 4096));
     CHECK(!ota_file_fits(0, 0, 4096));
-    CHECK(ota_file_fits(2, 1, 0));           // no cluster size: count bytes
+    CHECK(ota_file_fits(2, 1, 0));            // no block size: count bytes
     CHECK(!ota_file_fits(UINT64_MAX, UINT64_MAX, 4096)); // no overflow
 }
 

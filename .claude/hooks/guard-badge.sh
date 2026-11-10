@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse (Bash) guard for Lichen OS work (#183).
 # Irreversible, workflow-breaking or off-limits on-air commands get a prompt or a refusal instead of running silently:
-#  1. `badge.sh flash-fw ... --wipe-storage` (erases the MeshCore identity, contacts and channels).
+#  1. `badge.sh flash-fw ... --wipe-storage` or `--storage-image <bin>` (#300): both replace the MeshCore identity,
+#     contacts and channels.
 #  2. `git checkout -b/-B`, `git switch`, `git reset` issued from the MAIN checkout (a resumed agent once
 #     did this and turned the ff-merge into a silent no-op). Agents work in .claude/worktrees/*.
 # "ask" prompts the user in the main session and stops a subagent, which must then report. Fails open.
@@ -27,6 +28,10 @@ esac
 [ -n "$cmd" ] || exit 0
 if printf '%s' "$cmd" | grep -qE 'badge\.sh[^|;&]*flash-fw[^|;&]*--wipe-storage'; then
   ask "flash-fw --wipe-storage erases the MeshCore identity, contacts and channels on the badge. First-install only; needs Lucas."
+fi
+# 1b. `badge.sh flash-fw ... --storage-image <bin>` (#300) replaces the whole flash drive with <bin> the same way.
+if printf '%s' "$cmd" | grep -qE 'badge\.sh[^|;&]*flash-fw[^|;&]*--storage-image'; then
+  ask "flash-fw --storage-image replaces everything on the badge's flash drive (MeshCore identity, contacts, channels) with the given image. The one-time LittleFS move (#300); needs Lucas."
 fi
 # 3. On air only #badgetest and the test node (#287), rules in tools/onair_guard.sh (badge.sh applies the same ones
 #    to every line it sends). Here only lines that reach the badge (badge.sh fw|console, ssh, a tty, curl .../console)

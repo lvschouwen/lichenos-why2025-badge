@@ -49,10 +49,11 @@ static bool dir_arg_ok(char const *dir) { // under /storage only: no absolute pa
 
 static void cmd_storage(char const *args) {
     uint64_t free_b, total_b;
-    if (!storage_mounted() || !storage_free_bytes(&free_b, &total_b)) {
+    if (!storage_mounted()) {
         console_reply("storage: not mounted");
         return;
     }
+    bool known = storage_free_bytes(&free_b, &total_b); // unknown: a failed count, or nothing free; still list
     char arg[128];
     while (*args == ' ') {
         args++;
@@ -67,8 +68,13 @@ static void cmd_storage(char const *args) {
         return;
     }
     snprintf(s_path, sizeof(s_path), "%s%s%s", STORAGE_BASE, args[0] ? "/" : "", args);
-    console_reply("storage: %llu bytes free of %llu (%llu%%) | listing %s (file bytes; LittleFS takes whole 4 KB blocks)", (unsigned long long)free_b,
-                  (unsigned long long)total_b, total_b ? (unsigned long long)(free_b * 100 / total_b) : 0ULL, s_path);
+    if (known) {
+        console_reply("storage: %llu bytes free of %llu (%llu%%) | listing %s (file bytes; LittleFS takes whole 4 KB "
+                      "blocks)", (unsigned long long)free_b, (unsigned long long)total_b,
+                      total_b ? (unsigned long long)(free_b * 100 / total_b) : 0ULL, s_path);
+    } else {
+        console_reply("storage: free space unknown (the count failed, or nothing is free) | listing %s", s_path);
+    }
     DIR *dir = opendir(s_path);
     if (!dir) {
         console_reply("storage: %s is not a folder", s_path);

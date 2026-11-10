@@ -342,8 +342,9 @@ size_t File::size() {
     return fstat(fileno(f_), &st) == 0 ? (size_t)st.st_size : 0;
 }
 
-// Rewrites in place only the chunks that differ from what is on the file system, then cuts off what is left over. An
-// unchanged chunk costs a read, not a flash erase; nothing is freed and reallocated in the FAT unless the size changes.
+// Rewrites only the chunks that differ from what is on the file system, then cuts off what is left over. An unchanged
+// chunk costs a read, not a flash erase. On the badge's LittleFS (#300) the rewrite is copy-on-write and becomes the
+// file only when it is synced or closed: a cut before that leaves the old file whole.
 bool File::commit() {
     struct stat st;
     if (fstat(fd_, &st) != 0) {
@@ -401,7 +402,7 @@ void File::close() {
         } else {
             commit();
         }
-        // FatFs syncs the file (data, FAT, directory entry) here: on flash when close() returns
+        // LittleFS commits the file here (data, then its metadata in one step): on flash when close() returns
         if (::close(fd_) != 0) {
             SHIM_ERROR("closing %s failed: errno %d", path_, errno);
         }
@@ -479,7 +480,7 @@ bool FS::rename(char const *from, char const *to) {
     if (errno != EEXIST || stat(a, &st) != 0) { // never remove the target for a source that is not there
         return false;
     }
-    return unlink(b) == 0 && rename_raw(a, b) == 0; // FatFs: no rename over an existing file
+    return unlink(b) == 0 && rename_raw(a, b) == 0; // FatFs: no rename over an existing file (LittleFS replaces)
 }
 
 bool FS::mkdir(char const *path) {

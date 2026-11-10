@@ -15,10 +15,11 @@ namespace fs {
 // A Stream, as Arduino's File: MeshCore reads and writes identities through Stream&
 //
 // A file opened "w" is held in a buffer (PSRAM on the badge) until flush() or close() (#97): DataStore writes contacts
-// field by field, and every sector the file system rewrites costs a flash erase. Committing compares the buffer with
-// the file in 4 KB chunks (the FatFs sector) and rewrites in place only the chunks that differ, then truncates, so
-// unchanged contacts cost no flash write and the FAT is not freed and reallocated on every save. The data is on flash
-// when close() returns.
+// field by field, and every block the file system rewrites costs a flash erase. Committing compares the buffer with
+// the file in 4 KB chunks (one flash block) and rewrites only the chunks that differ, then truncates, so an unchanged
+// file costs no flash write. On the badge's LittleFS (#300) a rewritten chunk is copy-on-write (it and the blocks after
+// it are written anew) and the whole commit lands at once: the data is on flash when close() returns, and a cut before
+// that leaves the old file.
 class File : public Stream {
 public:
     File() = default;
@@ -64,8 +65,9 @@ public:
     bool exists(char const *path);
     bool remove(char const *path);
     bool mkdir(char const *path);
-    // Replaces to with from (#110). POSIX does that in one step; FatFs refuses an existing target, so there the target
-    // is removed first: a power cut in between leaves only from, which IdentityStore's load takes back.
+    // Replaces to with from (#110). POSIX and the badge's LittleFS (#300) do that in one atomic step; FatFs refuses an
+    // existing target, so there the target is removed first: a power cut in between leaves only from, which
+    // IdentityStore's load takes back.
     bool rename(char const *from, char const *to);
 };
 
@@ -95,7 +97,7 @@ bool fs_shim_format_allowed(char const *root);
 uint32_t fs_shim_take_busy_us(uint32_t *ops);
 // Writes (and truncates) that reached the file system for buffered "w" files since the last call: host tests count them
 uint32_t fs_shim_take_raw_writes(void);
-// The chunk a "w" file is compared and rewritten in: the FatFs sector on the badge, one flash erase each
+// The chunk a "w" file is compared and rewritten in: the LittleFS block on the badge, one flash erase each
 #define FS_SHIM_CHUNK 4096
 // The largest "w" file the shim buffers (1 MB): MeshCore's biggest is contacts3, 152 KB at 1000 contacts. A write past
 // it fails, and close() leaves the old file as it was.
@@ -106,5 +108,5 @@ uint32_t fs_shim_take_raw_writes(void);
 void fs_shim_set_buffer_hooks(void *(*alloc)(size_t bytes), void (*release)(void *ptr));
 // Host tests only: make buffer allocations fail, or make the reads that compare chunks fail
 void fs_shim_test_faults(bool fail_alloc, bool fail_reads);
-// Host tests only: rename refuses an existing target as FatFs does (EEXIST), so the badge's remove-first path is run
+// Host tests only: rename refuses an existing target as FatFs does (EEXIST), so the remove-first path is run
 void fs_shim_test_fat_rename(bool on);

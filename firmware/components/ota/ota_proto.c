@@ -286,13 +286,16 @@ bool ota_server_listens(bool setting_on, bool token_kept) {
     return setting_on && token_kept;
 }
 
-bool ota_file_fits(uint64_t free_bytes, uint64_t size, uint32_t cluster) {
-    uint64_t unit = cluster ? cluster : 1;
-    if (size > UINT64_MAX - 2 * unit) {
-        return false;
+#define LFS_CTZ_BYTES      8 // a LittleFS data block's list pointers, on average (#300)
+#define LFS_MARGIN_BLOCKS  4 // metadata pairs the write and the swap may need (a directory commit, a compaction)
+
+bool ota_file_fits(uint64_t free_bytes, uint64_t size, uint32_t block) {
+    if (block <= LFS_CTZ_BYTES) {
+        return block == 0 && size < UINT64_MAX && free_bytes >= size + 1;
     }
-    uint64_t need = (size + unit - 1) / unit * unit + (cluster ? unit : 1);
-    return free_bytes >= need;
+    uint64_t payload = block - LFS_CTZ_BYTES;
+    uint64_t blocks  = size / payload + (size % payload != 0) + LFS_MARGIN_BLOCKS;
+    return blocks <= UINT64_MAX / block && free_bytes >= blocks * block;
 }
 
 void ota_hex(uint8_t const *bytes, size_t len, char *out) {

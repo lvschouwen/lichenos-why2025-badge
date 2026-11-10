@@ -16,9 +16,13 @@
 bool storage_mount(void);
 // The boot mount worked
 bool storage_mounted(void);
-// Free and total bytes on the drive; false when it is not mounted. Free is counted by walking every file's blocks
-// (lfs_fs_size): cheap on a drive this size, but not for a tight loop.
+// Free and total bytes on the drive, measured now; false when it is not mounted or the count failed (unknown, not
+// 0 free). It walks every block in use (lfs_fs_size) holding the drive's lock, so every other file call waits: for
+// the OTA receiver's room check and "fw storage" only. Each call also refreshes storage_free_bytes_cached.
 bool storage_free_bytes(uint64_t *free_bytes, uint64_t *total_bytes);
+// The last measurement (boot mount, sys_notices once a minute, the OTA receiver, "fw storage"); false when unknown.
+// Never touches the drive: any task, the LVGL task included.
+bool storage_free_bytes_cached(uint64_t *free_bytes, uint64_t *total_bytes);
 // "fw storage [path]" (#299): free space and the size of each entry under path; registered by storage_mount
 void storage_console_register(void);
 

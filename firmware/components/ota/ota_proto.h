@@ -93,9 +93,10 @@ bool ota_token_kept(bool from_file, bool from_nvs, bool wrote_file, bool wrote_n
 // alone decided, and a badge without a kept token listened behind a token no tool knew.
 bool ota_server_listens(bool setting_on, bool token_kept);
 
-// Whether a file of size bytes fits on a drive with free_bytes free and clusters of cluster bytes (#299): an upload is
-// written next to the old file before the swap, so it needs all its own clusters, plus one for a new directory block
-bool ota_file_fits(uint64_t free_bytes, uint64_t size, uint32_t cluster);
+// Whether a file of size bytes fits on the LittleFS drive (blocks of block bytes) with free_bytes free (#299, #300):
+// an upload is written next to the old file before the swap, so it needs all its own blocks (block - 8 bytes of data
+// each, the rest is the CTZ list's pointers) plus 4 blocks of metadata. block 0: plain bytes plus one.
+bool ota_file_fits(uint64_t free_bytes, uint64_t size, uint32_t block);
 
 // Lowercase hex of bytes; out holds 2 * len + 1 characters
 void ota_hex(uint8_t const *bytes, size_t len, char *out);

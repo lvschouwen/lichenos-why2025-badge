@@ -72,6 +72,9 @@ CONFIG_LITTLEFS_BLOCK_CYCLES=512
 # CONFIG_LITTLEFS_MULTIVERSION is not set
 # CONFIG_LITTLEFS_MMAP_PARTITION is not set
 CONFIG_LITTLEFS_MALLOC_STRATEGY_SPIRAM_PREFER=y
+# No littlefs asserts: a damaged drive must fail the mount and stay unmounted (#110), not abort() at every boot
+# (a boot loop). littlefs reports damage it finds on disk as LFS_ERR_CORRUPT; check-config pins this off.
+# CONFIG_LITTLEFS_ASSERTS is not set
 
 # FatFs: the SD card only since #300 (/storage is LittleFS)
 CONFIG_FATFS_LFN_HEAP=y

@@ -9,9 +9,9 @@ extern "C" {
 #endif
 
 // Advert blobs on their way to /storage (#257). For every advert it accepts MeshCore saves the raw packet (the copy
-// "share contact" sends on) as its own file, /bl/<first 8 key bytes>: open, write, close, two or three 4 KB
-// wear-levelled flash sector rewrites (data, directory entry; the FAT too for a new node), 200-340 ms, all of it inside
-// MeshCore's loop with the mesh lock held. Here the blob waits in RAM instead, and the mesh task writes it after the
+// "share contact" sends on) as its own file, /bl/<first 8 key bytes>: open, write, close, a metadata commit on flash
+// (inline in its folder on LittleFS since #300; on the FAT drive before it two or three 4 KB wear-levelled sector
+// rewrites, 200-340 ms), all of it inside MeshCore's loop with the mesh lock held. Here the blob waits in RAM instead, and the mesh task writes it after the
 // unlock, one per loop: when no packet came in that loop, or once it has waited MESH_BLOBQ_MAX_AGE_MS. Reads see the
 // queued copy first, so nothing can tell it is not on flash yet; a power cut loses at most the blobs of the adverts of
 // the last MESH_BLOBQ_MAX_AGE_MS (the next advert of that node brings it back). Pure logic, host-tested

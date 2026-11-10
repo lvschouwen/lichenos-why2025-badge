@@ -39,11 +39,13 @@ Usage: $(basename "$0") <command> [args]
 
   ports                     list Espressif ports on $HOST and the chip behind each
   backup <port>             read the whole flash of the chip on <port> into $BACKUPS
-  flash-fw <port> [--wipe-storage]
+  flash-fw <port> [--wipe-storage | --storage-image <bin>]
                             write firmware/build (Lichen: bootloader, partitions, app, assets) to the P4 and keep
                             the storage partition (MeshCore identity, contacts, settings); --wipe-storage also
                             writes storage.bin, which replaces everything on the badge's flash drive (first
-                            install only). --no-storage is accepted as the old name of the default.
+                            install only); --storage-image writes <bin> there instead (exactly the partition's
+                            size, a LittleFS image from tools/pack_storage.sh: the one-time USB move of a FAT
+                            badge, #300). --no-storage is accepted as the old name of the default.
   crash <port> [elf]        fetch the core dump over the console ("fw crash dump"), check it and decode it with
                             the ELF kept by flash-fw/ota-firmware in $ELFS (or [elf])
   restore <port> <file> --yes
@@ -173,17 +175,42 @@ onair_scope_gate() {
     esac
 }
 
-# cmd_flash_fw <port> [--wipe-storage|--no-storage] [build dir]: Lichen from firmware/build.
+# The storage partition's size from firmware/partitions.csv, in bytes
+storage_partition_size() {
+    awk -F, '{ for (i = 1; i <= NF; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i) } $1 == "storage" { print $5 }' \
+        "$REPO/firmware/partitions.csv" | head -1
+}
+
+# --storage-image <bin> (#300): <bin> must be exactly the partition's size and mount as the badge's LittleFS (the
+# pack_storage list reads every file), so a FAT slice, a whole-flash backup or a cut copy is refused before the port
+storage_image_ok() {
+    local image=$1 want size
+    [ -f "$image" ] || { echo "flash-fw: no storage image $image" >&2; return 1; }
+    want=$(( $(storage_partition_size) ))
+    size=$(stat -c %s "$image")
+    [ "$size" = "$want" ] || { echo "flash-fw: $image is $size bytes, the storage partition is $want" >&2; return 1; }
+    "$REPO/tools/pack_storage.sh" list "$image" >/dev/null ||
+        { echo "flash-fw: $image is not a LittleFS image with the badge's config (tools/pack_storage.sh)" >&2; return 1; }
+}
+
+# cmd_flash_fw <port> [--wipe-storage|--storage-image <bin>|--no-storage] [build dir]: Lichen from firmware/build.
 # Keeps the storage partition unless --wipe-storage is given (#183); --no-storage is the old name of the default.
+# --storage-image <bin> writes <bin> into the storage partition instead of the built storage.bin: the one-time USB
+# move of a FAT badge to LittleFS (#300), with the files packed by tools/pack_storage.sh.
 cmd_flash_fw() {
-    local port=$1 mode=${2:-} build=${3:-$REPO/firmware/build}
+    local port=$1 mode=${2:-} build=${3:-$REPO/firmware/build} image=""
+    if [ "$mode" = --storage-image ]; then
+        image=${3:-}
+        build=${4:-$REPO/firmware/build}
+        storage_image_ok "$image" || exit 1
+    fi
     require_espressif_port "$port"
     local args="$build/flash_args"
     [ -f "$args" ] || { echo "no $args, build first" >&2; exit 1; }
     local wipe_storage=0
     case "$mode" in
         --wipe-storage) wipe_storage=1 ;;
-        ''|--no-storage) ;;
+        ''|--no-storage|--storage-image) ;;
         *) echo "flash-fw: unknown option $mode (use --wipe-storage to overwrite /storage)" >&2; exit 1 ;;
     esac
     # flash_args lists offset/file pairs relative to build/; mirror exactly those files.
@@ -197,6 +224,14 @@ cmd_flash_fw() {
         files=$(grep -v 'storage.bin' <<<"$files" || true)
         grep -v 'storage.bin' "$args" > "$args.nostorage" || true
         flash_args=@flash_args.nostorage
+        if [ -n "$image" ]; then
+            # The given image at the storage partition's offset, the one flash_args gives storage.bin
+            local offset
+            offset=$(awk '$2 == "storage.bin" { print $1 }' "$args")
+            [ -n "$offset" ] || { rm -f "$args.nostorage"; echo "flash-fw: no storage.bin offset in $args" >&2; exit 1; }
+            echo "$offset storage-image.bin" >> "$args.nostorage"
+            echo "warning: --storage-image replaces everything on the badge's flash drive with $image" >&2
+        fi
     fi
     remote "rm -rf $REMOTE_DIR/images/p4 && mkdir -p $REMOTE_DIR/images/p4"
     # shellcheck disable=SC2086  # one word per file is intended
@@ -205,6 +240,7 @@ cmd_flash_fw() {
         scp "$args.nostorage" "$HOST:$REMOTE_DIR/images/p4/flash_args.nostorage"
         rm -f "$args.nostorage"
     fi
+    [ -z "$image" ] || scp "$image" "$HOST:$REMOTE_DIR/images/p4/storage-image.bin"
     port_remote "cd $REMOTE_DIR/images/p4 && $VENV/bin/esptool --chip esp32p4 --port '$port' --baud $BAUD write-flash $flash_args"
     [ ! -f "$build/badge_fw.elf" ] || archive_elf "$build"
 }
@@ -761,7 +797,14 @@ cmd_ota_rm() { ota_curl -X DELETE -H "X-Path: $2" "http://$1:$OTA_PORT/file"; }
 case "${1:-}" in
     ports)    cmd_ports ;;
     backup)   [ $# -eq 2 ] || usage; cmd_backup "$2" ;;
-    flash-fw) [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_flash_fw "$2" "${3:-}" ;;
+    flash-fw)
+        if [ "${3:-}" = --storage-image ]; then
+            [ $# -eq 4 ] || usage
+            cmd_flash_fw "$2" "$3" "$4"
+        else
+            [ $# -ge 2 ] && [ $# -le 3 ] || usage
+            cmd_flash_fw "$2" "${3:-}"
+        fi ;;
     crash)    [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_crash "$2" "${3:-}" ;;
     restore)  [ $# -eq 4 ] || usage; cmd_restore "$2" "$3" "$4" ;;
     monitor)  [ $# -eq 2 ] || usage; cmd_monitor "$2" ;;

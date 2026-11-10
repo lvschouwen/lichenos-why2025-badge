@@ -5,6 +5,14 @@
   list <image>                 one line per entry: sha256, size and path (folders: "-" and a trailing "/")
   verify <image> <src dir>     the image holds exactly src dir (same entries, same SHA-256); exit 1 if not
   extract <image> <dst dir>    the image's files into dst dir (which must not exist yet)
+  extract-fat <fat-wl.bin> <dst dir>
+                               the files of the OLD drive (before #300: FAT behind wear levelling, the 0x4C0000 B
+                               storage slice of a flash backup) into dst dir, through ESP-IDF's fatfsparse.py in the
+                               IDF Python environment (IDF_PYTHON_ENV_PATH, else ~/.espressif/python_env/idf6.1_*;
+                               ESP-IDF from BADGE_IDF_PATH, else ~/esp/esp-idf-v6.1). NAMES COME BACK IN THE WRONG
+                               CASE: fatfsparse ignores FAT's lower-case flags, so every name that fits 8.3 is upper
+                               case ("LORA.TOML", "C6/FIRMWARE.BIN"), and LittleFS is case-sensitive. Rename them to
+                               the badge's own names (its "fw storage" listings) before "pack".
   check-config <sdkconfig.json> <esp_littlefs dir>
                                the built firmware's LittleFS config and littlefs disk version match CONFIG below
   selftest                     a tree with nested and empty folders and long names packs, lists and extracts back
@@ -14,17 +22,21 @@ The build makes storage.bin with "pack" (firmware/main/CMakeLists.txt) and check
 same command: tools/pack_storage.sh runs this script in its pinned littlefs-python environment.
 """
 import argparse
+import glob
 import hashlib
 import json
 import os
 import re
+import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 
 from littlefs import LittleFS, LittleFSError, UserContext
 
-PARTITION_SIZE = 0x4C0000  # firmware/partitions.csv, storage
+PARTITION_SIZE = 0x4C0000  # firmware/partitions.csv, storage (check-config holds the two together)
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The badge's lfs_config, from esp_littlefs 1.23.1 (components/storage/idf_component.yml) and the CONFIG_LITTLEFS_*
 # values in firmware/sdkconfig.defaults. name_max: esp_littlefs leaves cfg.name_max 0, so littlefs uses LFS_NAME_MAX
 # (255) and a drive the badge formats records 255; file_max and attr_max are littlefs's defaults the same way.
@@ -75,7 +87,10 @@ def open_image(path):
         sys.exit(f"{path}: {len(data)} bytes is not a whole number of {CONFIG['block_size']} byte blocks")
     context = UserContext(len(data))
     context.buffer[:] = data
-    return mount(context, len(data) // CONFIG["block_size"])
+    try:
+        return mount(context, len(data) // CONFIG["block_size"])
+    except LittleFSError as e:
+        sys.exit(f"{path}: does not mount as LittleFS with the badge's config ({e})")
 
 
 def host_entries(src):
@@ -138,7 +153,9 @@ def pack(src, out):
                 f.write(data)
             fs.setattr(rel, MTIME_ATTR, struct.pack("<q", int(os.stat(full).st_mtime)))
     except LittleFSError as e:
-        sys.exit(f"{src}: does not fit in a {PARTITION_SIZE} byte drive ({e})")
+        if e.code == LittleFSError.Error.LFS_ERR_NOSPC:
+            sys.exit(f"{src}: does not fit in a {PARTITION_SIZE} byte drive ({e})")
+        sys.exit(f"{src}: packing failed at {rel} ({e})")
     used = fs.used_block_count
     fs.unmount()
     tmp = out + ".tmp"
@@ -187,6 +204,53 @@ def extract(image, dst):
     print(f"{dst}: {len(entries)} entries")
 
 
+def partition_size(csv):
+    """The size of the storage partition in a partitions.csv, None when it has none (or not as littlefs)"""
+    with open(csv) as f:
+        for line in f:
+            cols = [c.strip() for c in line.split("#", 1)[0].split(",")]
+            if len(cols) >= 5 and cols[0] == "storage" and cols[2] == "littlefs":
+                return int(cols[4], 0)
+    return None
+
+
+def idf_python():
+    env = os.environ.get("IDF_PYTHON_ENV_PATH")
+    found = [os.path.join(env, "bin", "python")] if env else []
+    found += sorted(glob.glob(os.path.expanduser("~/.espressif/python_env/idf6.1_*/bin/python")))
+    return next((p for p in found if os.access(p, os.X_OK)), None)
+
+
+def extract_fat(image, dst):
+    """The old FAT drive's files via fatfsparse.py, run in an empty folder of its own (it writes into its cwd)"""
+    if os.path.getsize(image) != PARTITION_SIZE:
+        sys.exit(f"{image}: {os.path.getsize(image)} bytes, the storage slice is {PARTITION_SIZE} (take it from a "
+                 f"whole-flash backup with: dd if=<backup> of=<slice> bs=4096 skip={0xB40000 // 4096} "
+                 f"count={PARTITION_SIZE // 4096})")
+    if os.path.exists(dst):
+        sys.exit(f"{dst}: exists already")
+    py = idf_python()
+    idf = os.path.expanduser(os.environ.get("BADGE_IDF_PATH", "~/esp/esp-idf-v6.1"))
+    parser = os.path.join(idf, "components", "fatfs", "fatfsparse.py")
+    if not py or not os.path.isfile(parser):
+        sys.exit(f"extract-fat needs ESP-IDF's Python environment and {parser}")
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP")}
+    with tempfile.TemporaryDirectory() as work:
+        subprocess.run([py, parser, "--wl-layer", "enabled", "--long-name-support", os.path.abspath(image)],
+                       cwd=work, env=env, check=True)
+        out = os.listdir(work)
+        if len(out) != 1 or not os.path.isdir(os.path.join(work, out[0])):
+            sys.exit(f"fatfsparse.py left {out} instead of one volume folder")
+        shutil.move(os.path.join(work, out[0]), dst)
+    entries = host_entries(dst)
+    upper = [p for p in entries if re.fullmatch(r"[A-Z0-9_~$!#%&'()@^`{}-]{1,8}(\.[A-Z0-9_~$!#%&'()@^`{}-]{1,3})?",
+                                               p.rsplit("/", 1)[-1])]
+    print(f"{dst}: {len(entries)} entries from {image}")
+    if upper:
+        print(f"{dst}: {len(upper)} names are upper case 8.3 and probably not the badge's own (LittleFS is "
+              f"case-sensitive): rename them before pack, e.g. {', '.join(upper[:4])}")
+
+
 def check_config(sdkconfig_json, component_dir):
     with open(sdkconfig_json) as f:
         cfg = json.load(f)
@@ -194,6 +258,12 @@ def check_config(sdkconfig_json, component_dir):
            if cfg.get(name) != CONFIG[key]]
     if cfg.get("LITTLEFS_MULTIVERSION"):
         bad.append("LITTLEFS_MULTIVERSION is on: the disk version is no longer littlefs's own")
+    if cfg.get("LITTLEFS_ASSERTS"):
+        bad.append("LITTLEFS_ASSERTS is on: a damaged drive would panic the badge at every boot instead of failing "
+                   "the mount (#110)")
+    size = partition_size(os.path.join(REPO, "firmware", "partitions.csv"))
+    if size != PARTITION_SIZE:
+        bad.append(f"partitions.csv gives storage {size}, pack_storage.py has {PARTITION_SIZE}")
     if cfg.get("LITTLEFS_MMAP_PARTITION"):
         bad.append("LITTLEFS_MMAP_PARTITION is on: no flash mapping at runtime (#31)")
     if INLINE_MAX < INLINE_NEEDED:
@@ -230,6 +300,29 @@ def blobs_selftest(tmp):
     assert used < 250, f"{used} blocks for 500 small files: they are not inline"
 
 
+def fat_selftest(tmp):
+    """extract-fat on an image made by ESP-IDF's wl_fatfsgen.py: same files, names equal but for case"""
+    py = idf_python()
+    gen = os.path.join(os.path.expanduser(os.environ.get("BADGE_IDF_PATH", "~/esp/esp-idf-v6.1")), "components",
+                       "fatfs", "wl_fatfsgen.py")
+    if not py or not os.path.isfile(gen):
+        print("pack_storage selftest: extract-fat skipped (no ESP-IDF Python environment)")
+        return
+    src = os.path.join(tmp, "fatsrc")
+    for rel, data in {"lora.toml": b"[lora]\n", "c6/firmware.bin": os.urandom(9000),
+                      "meshcore/_main.id": os.urandom(64), "meshcore/a long contact name.dat": b"x"}.items():
+        os.makedirs(os.path.dirname(os.path.join(src, rel)), exist_ok=True)
+        with open(os.path.join(src, rel), "wb") as f:
+            f.write(data)
+    image = os.path.join(tmp, "fat.bin")
+    subprocess.run([py, gen, src, "--output_file", image, "--partition_size", str(PARTITION_SIZE), "--sector_size",
+                    "4096", "--long_name_support"], check=True, stdout=subprocess.DEVNULL)
+    back = os.path.join(tmp, "fatback")
+    extract_fat(image, back)
+    fold = lambda e: {p.lower(): v for p, v in e.items()}  # noqa: E731
+    assert fold(host_entries(back)) == fold(host_entries(src)), "extract-fat lost or changed a file"
+
+
 def selftest():
     with tempfile.TemporaryDirectory() as tmp:
         src = os.path.join(tmp, "src")
@@ -258,6 +351,7 @@ def selftest():
         ), stat
         assert len(fs.getattr("lora.toml", MTIME_ATTR)) == 8
         blobs_selftest(tmp)
+        fat_selftest(tmp)
         back = os.path.join(tmp, "back")
         extract(image, back)
         assert host_entries(back) == host_entries(src)
@@ -273,7 +367,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, args in (("pack", ("src", "out")), ("list", ("image",)), ("verify", ("image", "src")),
-                       ("extract", ("image", "dst")), ("check-config", ("sdkconfig_json", "component_dir")),
+                       ("extract", ("image", "dst")), ("extract-fat", ("image", "dst")),
+                       ("check-config", ("sdkconfig_json", "component_dir")),
                        ("selftest", ())):
         p = sub.add_parser(name)
         for a in args:
@@ -288,6 +383,8 @@ def main():
         verify(a.image, a.src)
     elif a.cmd == "extract":
         extract(a.image, a.dst)
+    elif a.cmd == "extract-fat":
+        extract_fat(a.image, a.dst)
     elif a.cmd == "check-config":
         check_config(a.sdkconfig_json, a.component_dir)
     else:

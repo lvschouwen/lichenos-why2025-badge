@@ -47,5 +47,5 @@ bool lichen_sys_storage_mounted(void) {
 }
 
 bool lichen_sys_storage_free_bytes(uint64_t *free_bytes, uint64_t *total_bytes) {
-    return storage_free_bytes(free_bytes, total_bytes);
+    return storage_free_bytes_cached(free_bytes, total_bytes); // a fresh count walks the drive under its lock (#300)
 }

@@ -16,6 +16,7 @@
 #include "lichen_sys_storage.h"
 #include "lichen_task.h"
 #include "psram_boot.h"
+#include "storage.h"
 #include "sys_notice_rules.h"
 
 #include <stdio.h>
@@ -93,7 +94,8 @@ static void read_snapshot(sysn_snapshot_t *s, lichen_sd_info_t *sd, unsigned pol
     s->imu_valid = sensors.imu_valid;
     s->env_valid = sensors.env_valid;
     if (poll % STORAGE_POLLS == 0) {
-        s->storage_known = lichen_sys_storage_free_bytes(&s->storage_free, &s->storage_total);
+        // The OS's one regular count of /storage (#300): it also refreshes the value About, Files and MeshCore read
+        s->storage_known = storage_free_bytes(&s->storage_free, &s->storage_total);
     }
 }
 

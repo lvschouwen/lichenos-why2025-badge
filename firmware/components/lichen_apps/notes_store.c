@@ -32,8 +32,7 @@ static bool path_join(char const *dir, char const *name, char const *suffix, cha
     return n > 0 && (size_t)n < cap;
 }
 
-// EACCES (FatFs's file lock, #274) and EBUSY (LittleFS on /storage, #300): the Files app or a job has the note open,
-// not a card fault
+// EACCES is FatFs's file lock (#274: the Files app or a job has the note open), not a card fault
 static notes_result_t result_from_errno(int err) {
     if (err == EACCES || err == EBUSY) {
         return NOTES_ERR_BUSY;
@@ -57,9 +56,9 @@ static int by_name(void const *a, void const *b) {
     return notes_name_compare(((notes_item_t const *)a)->name, ((notes_item_t const *)b)->name);
 }
 
-// write_file removes the old note before renaming <name>.new over it (FAT's rename does not replace; LittleFS's
-// would). Cut off in between, only the finished <name>.new is left: rename it back. A .new beside its note is an
-// unfinished write and is left alone. Collected first, renamed after: no renames while the directory is being read.
+// write_file removes the old note before renaming <name>.new over it (FAT's rename does not replace). Cut off in
+// between, only the finished <name>.new is left: rename it back. A .new beside its note is an unfinished write and is
+// left alone. Collected first, renamed after: no renames while the directory is being read.
 #define ORPHANS_MAX 8
 static void recover_orphans(char const *dir) {
     char  names[ORPHANS_MAX][NOTES_NAME_MAX];

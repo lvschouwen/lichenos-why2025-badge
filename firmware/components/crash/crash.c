@@ -29,7 +29,7 @@
 #define CRASH_DIR    STORAGE_BASE "/crash"
 #define CRASH_LOG    CRASH_DIR "/log.txt"
 #define CRASH_TMP    CRASH_DIR "/log.tmp"
-#define CRASH_OLD    CRASH_DIR "/log.old" // the previous log while a new one is swapped in
+#define CRASH_OLD    CRASH_DIR "/log.old" // the FAT swap's step-aside copy (before #300): read if log.txt is gone
 #define KEEP_RECORDS 20
 #define LOG_MAX      (KEEP_RECORDS * 256 + 256)
 #define B64_LINE     76
@@ -170,21 +170,11 @@ static bool write_file(char const *path, char const *text, size_t len) {
     return (fclose(f) == 0) && ok;
 }
 
-// rename does not replace on FAT: the old log steps aside until the new one is in place, as ota_server.c does. A
-// log.old is only dropped while log.txt exists: after an earlier cut it may be the only copy left.
+// LittleFS's rename replaces log.txt in one atomic step (#300): after a cut it is the old log or the new one. A
+// log.old, the step-aside copy of the FAT drive's swap, is dropped only once log.txt is in place: after a cut on FAT
+// it may have been the only copy left.
 static bool swap_in(void) {
-    struct stat st;
-    bool        had_log = stat(CRASH_LOG, &st) == 0;
-    if (had_log) {
-        unlink(CRASH_OLD);
-        if (rename(CRASH_LOG, CRASH_OLD) != 0) {
-            return false;
-        }
-    }
     if (rename(CRASH_TMP, CRASH_LOG) != 0) {
-        if (had_log) {
-            rename(CRASH_OLD, CRASH_LOG);
-        }
         return false;
     }
     unlink(CRASH_OLD);

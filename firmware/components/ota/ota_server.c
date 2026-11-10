@@ -466,24 +466,13 @@ static bool finish_file(int fd, char const *vms, uint8_t const *data, size_t len
         respond(fd, 500, "couldn't write %s, file left as it was", temp);
         return false;
     }
-    // rename doesn't replace on FAT: move the old file aside first and put it back if the swap fails
-    char backup[sizeof(temp) + 4];
-    snprintf(backup, sizeof(backup), "%s.old", temp);
-    unlink(backup);
-    // A target another task has open stays put (FatFs's file lock, #274: EACCES), so the swap below fails with EEXIST
-    bool had_old = rename(path, backup) == 0;
-    int  aside   = had_old ? 0 : errno;
+    // FLASH0: is /storage, LittleFS since #300: one rename replaces the old file atomically (a cut leaves the old file
+    // or the new one). A target another task has open stays put: esp_littlefs refuses the rename with EBUSY.
     if (rename(temp, path) != 0) {
-        int err = aside && aside != ENOENT ? aside : errno;
-        if (had_old) {
-            rename(backup, path);
-        }
+        int err = errno;
         unlink(temp);
         respond(fd, 500, "couldn't move the upload into place (%s), file left as it was", strerror(err));
         return false;
-    }
-    if (had_old) {
-        unlink(backup);
     }
     ESP_LOGI(TAG, "wrote %s (%zu bytes)", path, len);
     respond(fd, 200, "wrote %zu bytes (%lld sent) to %s", len, sent, vms);
@@ -1053,7 +1042,7 @@ static void handle_delete(int fd, ota_request_t const *req) {
         respond(fd, 403, "path not allowed: use FLASH0: with a plain file name");
         return;
     }
-    if (unlink(path) != 0) { // EACCES: open in another task (FatFs's file lock, #274); the file and its bundle stay
+    if (unlink(path) != 0) { // EBUSY: open in another task (esp_littlefs, #300); the file and its bundle stay
         int err = errno;
         respond(fd, err == ENOENT ? 404 : 409, "couldn't delete %s: %s", req->path, strerror(err));
         return;

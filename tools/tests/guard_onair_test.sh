@@ -176,6 +176,12 @@ sent sent fw 192.0.2.1 mesh scope console zz-bench YES
 sent sent fw 192.0.2.1 mesh dm abcdef123456 hi
 printf 'mesh scope console zz-bench YES\nmesh scope\nmesh dm abcdef123456 hi\n' | cmp -s - "$FAKE_LOG" ||
   { echo "FAIL: badge.sh sent $(tr '\n' '|' < "$FAKE_LOG"), expected the set, then the query before the dm" >&2; fail=1; }
+# Both ways of replacing the flash drive ask (#183, #300: Lucas's call); a plain flash-fw keeps the drive and passes
+f="tools/badge.sh flash-fw /dev/ttyUSB1"
+expect ask "$f --wipe-storage"
+expect ask "$f --storage-image /tmp/storage.bin"
+expect ask "BADGE_EXTRA_PORTS=/dev/ttyUSB1 $f --storage-image ./restore.bin /tmp/build"
+expect pass "$f"
 # A caller's environment cannot swap the list
 for var in ONAIR_ALLOW_FILE onair_allow_override; do
   out=$(env "$var=$tmp/evil" PATH="$tmp/bin:$PATH" BADGE_OTA_TOKEN=0123456789abcdef0123456789abcdef BADGE_HOST=none \

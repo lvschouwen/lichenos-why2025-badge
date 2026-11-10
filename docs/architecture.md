@@ -547,17 +547,40 @@ OS v2 (#216) on the same lessons:
 
 - **LittleFS** (esp_littlefs 1.23.1, `components/storage`), partition subtype `littlefs`, label `storage`. Copy-on-write
   and power-loss safe: a cut write leaves the old file and no lost space (the FAT drive before it lost ~40 % to orphaned
-  clusters, #300). Never formatted on a failed mount (#110); only the factory reset formats it.
+  clusters, #300). Never formatted on a failed mount (#110); only the factory reset formats it. littlefs's asserts are
+  off (`CONFIG_LITTLEFS_ASSERTS`): a damaged drive fails the mount and stays unmounted instead of a panic at every boot.
 - **On-disk config** (the same in the firmware and in `tools/pack_storage.py`, checked by `pack_storage.sh check-config`
-  in every build): block 4096 B x 1216 blocks, read 128, prog 128, cache 512, lookahead 128, block cycles 512, name max
-  255 (`LFS_NAME_MAX`), disk version 2.1, inline_max 512 (littlefs's default from cache/attr/block: files up to
-  512 B, such as MeshCore's advert blobs in `meshcore/bl/`, live in the folder's metadata instead of a block each). `storage.bin` (build output) is `tools/pack_storage.sh pack` of
+  in every build, the partition size against `partitions.csv` included): block 4096 B x 1216 blocks, read 128, prog
+  128, cache 512, lookahead 128, block cycles 512, name max 255 (`LFS_NAME_MAX`), disk version 2.1, inline_max 512
+  (littlefs's default from cache/attr/block: files up to 512 B, such as MeshCore's advert blobs in `meshcore/bl/`, live
+  in their folder's metadata instead of a block each). `storage.bin` (build output) is `tools/pack_storage.sh pack` of
   `firmware/storage_staging`, verified file by file (`verify`, SHA-256) after the build.
+- **The image tool's Python:** `tools/pack_storage.sh` makes `firmware/build/littlefs_venv` on first use with
+  littlefs-python from `tools/pack_storage-requirements.txt` (wheels only, every one pinned by SHA-256). That first
+  build (and the first one after a `fullclean` or a changed requirements file) needs PyPI.
 - **Not FAT any more:** names are case-sensitive and have no 8.3 alias; `rename` replaces an existing target in one
-  atomic step; a file another task has open cannot be renamed or removed (EBUSY, where FatFs's lock gave EACCES), but
-  it can be opened a second time, also for writing (no lock: each handle commits on close, the last close wins, the
-  drive stays consistent). Free space is `lfs_fs_size`, a walk over the drive's blocks.
-- **A badge still on FAT** (firmware before #300) does not mount the drive and keeps it as it is. The way over is USB
-  only, once: back up the flash, take the files out of the FAT slice on the host, `tools/pack_storage.sh pack <files>
-  <storage.bin>` and `verify`, write that image to 0xB40000 with the new firmware, then check the files on the badge
-  (`fw storage` lists their sizes). No in-firmware migration.
+  atomic step, so the OS's own files on `/storage` (OTA uploads, the crash log, the notification history) are swapped
+  in with one rename (the step-aside swap stays for the SD card); a file another task has open cannot be renamed or
+  removed (EBUSY, where FatFs's lock gave EACCES), but it can be opened a second time, also for writing (no lock: each
+  handle commits on close, the last close wins, the drive stays consistent).
+- **Free space** is `lfs_fs_size`, a walk over every block in use under the drive's lock. Only the OTA receiver's room
+  check and `fw storage` count on the spot; sys_notices counts once a minute, and About, Files and MeshCore read that
+  value (`storage_free_bytes_cached`). A failed count is "unknown", never 0 B free. An upload needs its size in blocks of
+  4088 B (8 B of each 4096 B block are the file's list pointers) plus 4 blocks for metadata (`ota_file_fits`).
+- **A badge still on FAT** (firmware before #300) never mounts or formats the old drive: with the new partition table
+  the mount fails and the drive stays as it is; with the old one (an update over Wi-Fi brings a new app, never a new
+  table) the log says "the flash drive is still FAT: migrate it by USB". The way over is USB only, once, by main:
+  1. `tools/badge.sh backup <port>`; take the storage slice out of the backup (`dd ... bs=4096 skip=2880 count=1216`).
+  2. `tools/pack_storage.sh extract-fat <slice> <dir>` (ESP-IDF's `fatfsparse.py` with the wear-levelling layer, in
+     the IDF Python environment).
+  3. **Fix the names' case.** fatfsparse ignores FAT's lower-case flags, so every name that fits 8.3 comes back in
+     upper case (`LORA.TOML`, `C6/FIRMWARE.BIN`, `MESHCORE/_MAIN.ID`), and LittleFS is case-sensitive: packed as they
+     are, the firmware would not find its files (MeshCore would see no identity and make a new one). Rename each to
+     the name the badge listed for it (`fw storage`, `fw storage <dir>` before the move); extract-fat names the
+     suspects. Long names come back as they were.
+  4. `tools/pack_storage.sh pack <dir> <img>`, then `verify <img> <dir>`.
+  5. `tools/badge.sh flash-fw <port> --storage-image <img>` (in a Claude session the guard hook asks first, as for
+     `--wipe-storage`): the new firmware and partition table, and `<img>` in the storage partition. It refuses an image that is not exactly the
+     partition's size or does not mount with the badge's config.
+  6. On the badge, check every file against the list (`fw storage`), and that MeshCore kept its identity.
+  No in-firmware migration.

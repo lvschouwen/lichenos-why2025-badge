@@ -23,7 +23,7 @@ typedef enum {
     NOTES_ERR_SPACE, // the card is full
     NOTES_ERR_IO,
     NOTES_ERR_GONE,  // the note is not there (any more)
-    NOTES_ERR_BUSY,  // EACCES/EBUSY: another task has the file open (FatFs's lock #274, LittleFS #300), or read-only
+    NOTES_ERR_BUSY,  // EACCES: another task has the file open (FatFs's file lock, #274), or it is read-only
 } notes_result_t;
 
 // Lists dir's notes sorted by name into out (at most max); *count = stored, *skipped = notes left out (no room, empty

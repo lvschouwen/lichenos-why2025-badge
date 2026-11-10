@@ -93,20 +93,10 @@ static bool write_file(char const *path, uint8_t const *data, size_t len) {
     return (fclose(f) == 0) && ok;
 }
 
-// rename does not replace on FAT: the old file steps aside until the new one is in place (crash.c's swap)
+// One atomic rename on LittleFS (#300), as crash.c's swap: notify.bin is the old file or the new one after a cut. A
+// notify.old left by the FAT drive's step-aside swap goes once notify.bin is in place.
 static bool swap_in(void) {
-    struct stat st;
-    bool        had = stat(NOTIFY_FILE, &st) == 0;
-    if (had) {
-        unlink(NOTIFY_OLD);
-        if (rename(NOTIFY_FILE, NOTIFY_OLD) != 0) {
-            return false;
-        }
-    }
     if (rename(NOTIFY_TMP, NOTIFY_FILE) != 0) {
-        if (had) {
-            rename(NOTIFY_OLD, NOTIFY_FILE);
-        }
         return false;
     }
     unlink(NOTIFY_OLD);

@@ -292,9 +292,9 @@ typedef enum {
     MESH_HIST_FILES_DROP_TMP, // log.tmp removed
     MESH_HIST_FILES_BAD_BACK, // the newest log.bad becomes log.bin again, log.tmp removed
 } mesh_hist_files_t;
-// What a cut compaction left. tmp_clean: log.tmp scans with a HEAD, no damage and no auth failures. FatFs renames by
-// adding the new entry before removing the old one, so log.bin and log.tmp side by side can be either a rename cut
-// halfway (log.tmp whole) or a log.tmp cut while being written.
+// What a cut compaction left. tmp_clean: log.tmp scans with a HEAD, no damage and no auth failures. log.bin and
+// log.tmp side by side are a log.tmp cut while being written, or (on the FAT drive before #300, whose rename added the
+// new entry before removing the old one; LittleFS renames atomically) a rename cut halfway with log.tmp whole.
 mesh_hist_files_t mesh_hist_files_plan(bool have_bin, bool have_tmp, bool tmp_clean, bool have_bad);
 
 typedef enum {

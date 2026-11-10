@@ -74,6 +74,8 @@ tools/badge.sh flash-fw <port>                # later USB updates: keeps /storag
 
 Pass `--wipe-storage` only on the first install: it rewrites `/storage`, and with it MeshCore's identity, contacts
 and channels. Without it `flash-fw` leaves `/storage` alone (`--no-storage` is still accepted as the old name).
+A badge whose `/storage` is still FAT (firmware before #300) moves to LittleFS once by USB with
+`flash-fw <port> --storage-image <img>`: see "Flash drive" in `docs/architecture.md`.
 
 After that, update over Wi-Fi (the update server runs whenever Wi-Fi is up and Settings › Updates over Wi-Fi is on,
 `fw ota on|off`; Settings › Close updates after, or `fw ota auto <minutes|off>`, closes it that long after boot or after
