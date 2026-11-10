@@ -101,25 +101,32 @@ bool ob_arb_outbox_first(ob_arb_t const *arb, bool fifo_has);
 void ob_arb_took(ob_arb_t *arb, bool internal);
 
 // What the mesh task's sync needs of every message on each pass (#46): the small states of all, and the target and
-// text of the first OB_FRESH_MAX fresh ones (not in the screens' store yet), all copied in one short section under the
-// outbox lock (#271). A fresh message without a text slot keeps its fresh flag and gets one on a later pass.
+// text of up to OB_FRESH_MAX fresh ones (not in the screens' store yet), all copied in one short section under the
+// outbox lock (#271). The text slots go round robin, from the entry after the last one served: with k fresh messages
+// each gets a slot within ceil(k / OB_FRESH_MAX) passes, whatever the store does with the others. One without a slot
+// keeps its fresh flag for a later pass.
 #define OB_FRESH_MAX 2
 typedef struct {
     mesh_msg_id_t id;
     uint32_t      trip_ms;
     uint8_t       kind, state, attempt, repeats;
     bool          fresh;
-    int8_t        text_slot; // index into the texts copied with it, -1 for none
+    int8_t        text_slot; // index into the pass's text, -1 for none
     uint8_t       prefix[MF_PREFIX];
 } ob_sync_t;
 typedef struct {
     char target[OB_TARGET_MAX];
     char text[OB_TEXT_MAX];
 } ob_text_t;
+typedef struct {
+    ob_sync_t e[OB_CAP]; // the used entries, in table order
+    ob_text_t text[OB_FRESH_MAX];
+    uint8_t   next; // the table index the next pass starts giving text slots from
+} ob_sync_pass_t;
 
-// The used entries into out (at most max), in table order, and the fresh ones' texts into texts (at most text_max, up
-// to OB_FRESH_MAX); returns how many entries
-size_t ob_sync_states(ob_t const *ob, ob_sync_t *out, size_t max, ob_text_t *texts, size_t text_max);
+// One pass: the used entries into p->e and the served fresh ones' texts into p->text; returns how many entries.
+// Keep p from pass to pass (zeroed at first): it carries the round robin.
+size_t ob_sync_states(ob_t const *ob, ob_sync_pass_t *p);
 // The target and text of one message (NUL-terminated, empty when false); false when it is no longer in the table
 bool   ob_copy_text(ob_t const *ob, mesh_msg_id_t id, char target[OB_TARGET_MAX], char text[OB_TEXT_MAX]);
 // The screens' store has taken the message: it is no longer fresh

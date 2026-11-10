@@ -377,17 +377,32 @@ static void copy_text(ob_entry_t const *e, char target[OB_TARGET_MAX], char text
     target[OB_TARGET_MAX - 1] = text[OB_TEXT_MAX - 1] = '\0';
 }
 
-size_t ob_sync_states(ob_t const *ob, ob_sync_t *out, size_t max, ob_text_t *texts, size_t text_max) {
-    size_t n = 0, slots = 0;
-    if (text_max > OB_FRESH_MAX) {
-        text_max = OB_FRESH_MAX;
+// The text slots, round robin from p->next over the table (pos: an entry's place in p->e, -1 for unused)
+static void sync_give_slots(ob_t const *ob, ob_sync_pass_t *p, int8_t const pos[OB_CAP]) {
+    size_t slots = 0;
+    for (int k = 0; k < OB_CAP && slots < OB_FRESH_MAX; k++) {
+        int i = (p->next + k) % OB_CAP;
+        if (pos[i] < 0 || !p->e[pos[i]].fresh) {
+            continue;
+        }
+        copy_text(&ob->e[i], p->text[slots].target, p->text[slots].text);
+        p->e[pos[i]].text_slot = (int8_t)slots++;
+        if (slots == OB_FRESH_MAX) {
+            p->next = (uint8_t)((i + 1) % OB_CAP); // the next pass starts after the last one served
+        }
     }
-    for (int i = 0; i < OB_CAP && n < max; i++) {
+}
+
+size_t ob_sync_states(ob_t const *ob, ob_sync_pass_t *p) {
+    int8_t pos[OB_CAP];
+    size_t n = 0;
+    for (int i = 0; i < OB_CAP; i++) {
         ob_entry_t const *e = &ob->e[i];
+        pos[i]              = e->used ? (int8_t)n : -1;
         if (!e->used) {
             continue;
         }
-        ob_sync_t *o = &out[n++];
+        ob_sync_t *o = &p->e[n++];
         o->id        = e->id;
         o->trip_ms   = e->trip_ms;
         o->kind      = e->kind;
@@ -397,11 +412,8 @@ size_t ob_sync_states(ob_t const *ob, ob_sync_t *out, size_t max, ob_text_t *tex
         o->fresh     = !e->in_store;
         o->text_slot = -1;
         memcpy(o->prefix, e->prefix, MF_PREFIX);
-        if (o->fresh && slots < text_max) {
-            copy_text(e, texts[slots].target, texts[slots].text);
-            o->text_slot = (int8_t)slots++;
-        }
     }
+    sync_give_slots(ob, p, pos);
     return n;
 }
 

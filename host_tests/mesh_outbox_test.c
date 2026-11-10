@@ -286,8 +286,16 @@ static void fail_pending(void) {
     CHECK(ob_retry(&ob, dm, 20)); // still retryable by hand
 }
 
-// The sync's copy (#271): every used entry's state, and the first fresh ones' texts with it, fresh until the store
-// took it
+static ob_sync_t const *sync_entry(ob_sync_pass_t const *p, size_t n, mesh_msg_id_t id) {
+    for (size_t i = 0; i < n; i++) {
+        if (p->e[i].id == id) {
+            return &p->e[i];
+        }
+    }
+    return NULL;
+}
+
+// The sync's copy (#271): every used entry's state, and fresh ones' texts with it, fresh until the store took it
 static void sync_states(void) {
     ob_t ob;
     ob_init(&ob);
@@ -295,19 +303,17 @@ static void sync_states(void) {
     mesh_msg_id_t chan = ob_add_channel(&ob, "#badgetest", "hello", 5, 0, &why);
     mesh_msg_id_t dm   = ob_add_dm(&ob, PEER, "hi there", 8, 0, &why);
     CHECK(chan && dm);
-    ob_sync_t out[OB_CAP];
-    ob_text_t texts[OB_FRESH_MAX];
-    memset(out, 0xa5, sizeof(out));
-    CHECK(ob_sync_states(&ob, out, OB_CAP, texts, OB_FRESH_MAX) == 2);
-    CHECK(out[0].id == chan && out[0].kind == OB_CHANNEL && out[0].state == MESH_OUT_QUEUED && out[0].fresh);
-    CHECK(out[1].id == dm && out[1].kind == OB_DM && out[1].fresh && memcmp(out[1].prefix, PEER, MF_PREFIX) == 0);
-    CHECK(out[0].text_slot == 0 && strcmp(texts[0].target, "#badgetest") == 0 && strcmp(texts[0].text, "hello") == 0);
-    CHECK(out[1].text_slot == 1 && texts[1].target[0] == '\0' && strcmp(texts[1].text, "hi there") == 0);
-    CHECK(ob_sync_states(&ob, out, 1, texts, OB_FRESH_MAX) == 1 && out[0].id == chan); // never more than max
+    ob_sync_pass_t p;
+    memset(&p, 0, sizeof(p));
+    CHECK(ob_sync_states(&ob, &p) == 2);
+    CHECK(p.e[0].id == chan && p.e[0].kind == OB_CHANNEL && p.e[0].state == MESH_OUT_QUEUED && p.e[0].fresh);
+    CHECK(p.e[1].id == dm && p.e[1].kind == OB_DM && p.e[1].fresh && memcmp(p.e[1].prefix, PEER, MF_PREFIX) == 0);
+    CHECK(p.e[0].text_slot == 0 && strcmp(p.text[0].target, "#badgetest") == 0 && strcmp(p.text[0].text, "hello") == 0);
+    CHECK(p.e[1].text_slot == 1 && p.text[1].target[0] == '\0' && strcmp(p.text[1].text, "hi there") == 0);
     ob_mark_in_store(&ob, chan);
     ob_mark_in_store(&ob, 12345); // unknown: nothing changes
-    CHECK(ob_sync_states(&ob, out, OB_CAP, texts, OB_FRESH_MAX) == 2);
-    CHECK(!out[0].fresh && out[0].text_slot == -1 && out[1].fresh && out[1].text_slot == 0);
+    CHECK(ob_sync_states(&ob, &p) == 2);
+    CHECK(!p.e[0].fresh && p.e[0].text_slot == -1 && p.e[1].fresh && p.e[1].text_slot == 0);
 
     char target[OB_TARGET_MAX], text[OB_TEXT_MAX];
     CHECK(ob_copy_text(&ob, chan, target, text));
@@ -318,38 +324,59 @@ static void sync_states(void) {
     CHECK(!ob_copy_text(&ob, 12345, target, text) && target[0] == '\0' && text[0] == '\0');
 }
 
-// More fresh ones than text slots: the rest stay fresh for a later pass; and a fresh one evicted right after the copy
-// still has its text in the copy (the store gets it, the failure notice has its text)
-static void sync_fresh_overflow_and_eviction(void) {
-    ob_t ob;
+// A fresh one evicted right after the copy still has its text in the copy (the store gets it, the notice its text)
+static void sync_fresh_eviction(void) {
+    ob_t           ob;
+    ob_sync_pass_t p;
     ob_init(&ob);
-    char const   *why = NULL;
-    mesh_msg_id_t ids[OB_FRESH_MAX + 1];
-    for (int i = 0; i < OB_FRESH_MAX + 1; i++) {
-        char text[8];
-        snprintf(text, sizeof(text), "m%d", i);
-        ids[i] = ob_add_channel(&ob, "#badgetest", text, strlen(text), 0, &why);
-    }
-    ob_sync_t out[OB_CAP];
-    ob_text_t texts[OB_FRESH_MAX];
-    CHECK(ob_sync_states(&ob, out, OB_CAP, texts, OB_FRESH_MAX) == OB_FRESH_MAX + 1);
-    CHECK(out[OB_FRESH_MAX].fresh && out[OB_FRESH_MAX].text_slot == -1);
-    for (int i = 0; i < OB_FRESH_MAX; i++) {
-        ob_mark_in_store(&ob, ids[i]); // what the sync does once the store took them
-    }
-    CHECK(ob_sync_states(&ob, out, OB_CAP, texts, OB_FRESH_MAX) == OB_FRESH_MAX + 1);
-    CHECK(out[OB_FRESH_MAX].text_slot == 0 && strcmp(texts[0].text, "m2") == 0);
-
-    ob_init(&ob);
+    memset(&p, 0, sizeof(p));
+    char const   *why  = NULL;
     mesh_msg_id_t gone = ob_add_channel(&ob, "#badgetest", "bye", 3, 0, &why);
     ob_fail(&ob, gone); // failed before the store took it: evictable while still fresh
-    CHECK(ob_sync_states(&ob, out, OB_CAP, texts, OB_FRESH_MAX) == 1 && out[0].fresh && out[0].text_slot == 0);
+    CHECK(ob_sync_states(&ob, &p) == 1 && p.e[0].fresh && p.e[0].text_slot == 0);
     for (int i = 0; i < OB_CAP; i++) {
         CHECK(ob_add_channel(&ob, "#other", "x", 1, 0, &why)); // the UI fills the table between two passes
     }
     char target[OB_TARGET_MAX], text[OB_TEXT_MAX];
     CHECK(!ob_copy_text(&ob, gone, target, text)); // evicted
-    CHECK(strcmp(texts[0].target, "#badgetest") == 0 && strcmp(texts[0].text, "bye") == 0); // the copy kept it
+    CHECK(strcmp(p.text[0].target, "#badgetest") == 0 && strcmp(p.text[0].text, "bye") == 0); // the copy kept it
+}
+
+// No starvation: two fresh messages the store always refuses (never marked in_store), added first, and three later
+// ones; every fresh one gets a text slot within ceil(k / OB_FRESH_MAX) passes and the later ones reach the store
+static void sync_fresh_round_robin(void) {
+    ob_t           ob;
+    ob_sync_pass_t p;
+    ob_init(&ob);
+    memset(&p, 0, sizeof(p));
+    char const   *why = NULL;
+    mesh_msg_id_t ids[5]; // 0 and 1 refused, 2..4 taken by the store
+    for (int i = 0; i < 5; i++) {
+        ids[i] = ob_add_channel(&ob, "#badgetest", i < 2 ? "refused" : "later", i < 2 ? 7 : 5, 0, &why);
+    }
+    int const bound     = (5 + OB_FRESH_MAX - 1) / OB_FRESH_MAX;
+    int       served[5] = {0}, stored = 0;
+    for (int pass = 0; pass < bound; pass++) {
+        size_t n = ob_sync_states(&ob, &p);
+        for (int i = 0; i < 5; i++) {
+            ob_sync_t const *o = sync_entry(&p, n, ids[i]);
+            CHECK(o != NULL);
+            if (o && o->fresh && o->text_slot >= 0) {
+                CHECK(strcmp(p.text[o->text_slot].text, i < 2 ? "refused" : "later") == 0);
+                served[i]++;
+                if (i >= 2) {
+                    ob_mark_in_store(&ob, ids[i]); // the store took it; the refused ones stay fresh
+                    stored++;
+                }
+            }
+        }
+    }
+    for (int i = 0; i < 5; i++) {
+        CHECK(served[i] >= 1); // each one had a slot within the bound
+    }
+    CHECK(stored == 3);
+    size_t n = ob_sync_states(&ob, &p); // and the refused ones keep being retried
+    CHECK(sync_entry(&p, n, ids[0])->fresh && sync_entry(&p, n, ids[1])->fresh);
 }
 
 int main(void) {
@@ -364,7 +391,8 @@ int main(void) {
     arbitration();
     wrap();
     sync_states();
-    sync_fresh_overflow_and_eviction();
+    sync_fresh_eviction();
+    sync_fresh_round_robin();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -560,16 +560,15 @@ void BadgeBoard::reboot() {
 // Our channel messages go into the screens' store as "me: <text>", and their outbox state follows (#46). With the mesh
 // lock held (the store is under it). Each pass copies the small states and the first fresh messages' texts in one
 // short section under the outbox lock (ob_sync_states, #271); the work is done outside it. A fresh message without a
-// text slot stays fresh and is added on a later pass.
-static ob_sync_t out_sync[OB_CAP];       // mesh task only
-static ob_text_t out_text[OB_FRESH_MAX]; // the fresh ones' texts, taken with out_sync
+// text slot stays fresh and gets one within a few passes (round robin), whatever the store does with the others.
+static ob_sync_pass_t out_pass; // mesh task only; kept from pass to pass for the round robin of the text slots
 
 // An own message has just ended FAILED (#50): its target and text from this pass's copy, else read again from the
 // outbox. One that left the table meanwhile gets no notice: an empty "Not delivered" would say nothing.
 static void notify_failed(ob_sync_t const &o) {
     ob_text_t t = {};
     if (o.text_slot >= 0) {
-        t = out_text[o.text_slot];
+        t = out_pass.text[o.text_slot];
     } else {
         mesh_ob_enter();
         if (outbox) {
@@ -596,7 +595,7 @@ static void notify_failed(ob_sync_t const &o) {
 
 // A fresh message with its text copied into the screens' store; true when the store took it (it is marked in_store)
 static bool sync_add_fresh(ob_sync_t const &o) {
-    ob_text_t const &t = out_text[o.text_slot];
+    ob_text_t const &t = out_pass.text[o.text_slot];
     char             line[MESH_TEXT_MAX + 1];
     snprintf(line, sizeof(line), "me: %.*s", (int)(sizeof(line) - 5), t.text); // cut where the plain %s cut it (#46)
     bool            ok;
@@ -623,11 +622,11 @@ static bool sync_add_fresh(ob_sync_t const &o) {
 // true when a message was added to the store (which may have evicted a chat, so the unread total can have changed)
 static bool sync_outgoing(void) {
     mesh_ob_enter();
-    size_t n = outbox ? ob_sync_states(outbox, out_sync, OB_CAP, out_text, OB_FRESH_MAX) : 0;
+    size_t n = outbox ? ob_sync_states(outbox, &out_pass) : 0;
     mesh_ob_exit();
     bool added = false;
     for (size_t i = 0; i < n; i++) {
-        ob_sync_t const &o = out_sync[i];
+        ob_sync_t const &o = out_pass.e[i];
         if (o.fresh && o.text_slot >= 0) {
             // in_store only after the store took it: a dropped one is tried again on the next pass (logged once)
             static mesh_msg_id_t failed_logged;
@@ -646,7 +645,7 @@ static bool sync_outgoing(void) {
     }
     uint32_t ids[OB_CAP];
     for (size_t i = 0; i < n; i++) {
-        ids[i] = out_sync[i].id;
+        ids[i] = out_pass.e[i].id;
     }
     mesh_journal_out_sweep_locked(ids, n);
     return added;
