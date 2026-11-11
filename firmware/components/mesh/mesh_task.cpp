@@ -872,9 +872,6 @@ static struct {
 } acfg_cache;
 static portMUX_TYPE    settings_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static void radio_from_prefs(NodePrefs const *prefs, mesh_radio_t *out);
-static mesh_radio_t radio_cache; // taken at start, refreshed by mesh_radio_params and the setters
-
 // Under the mesh lock: the copies the screens read
 static void settings_from_node(MyMesh *n) {
     NodePrefs const *prefs = n->getNodePrefs();
@@ -887,7 +884,6 @@ static void settings_from_node(MyMesh *n) {
     s.path_hash_size = (uint8_t)(prefs->path_hash_mode + 1);
     s.tx_dbm         = prefs->tx_power_dbm;
     snprintf(s.scope, sizeof(s.scope), "%s", prefs->default_scope_name);
-    radio_from_prefs(prefs, &radio_cache);
     // Read before the spinlock: the prefs are in PSRAM
     bool             share = prefs->advert_loc_policy != ADVERT_LOC_NONE;
     advcfg_autoadd_t autoadd;
@@ -3044,28 +3040,6 @@ static void cmd_advert(char const *args) {
     }
 }
 
-static bool         radio_known;
-
-static void radio_from_prefs(NodePrefs const *prefs, mesh_radio_t *out) {
-    out->freq_hz = (uint32_t)lround(prefs->freq * 1000.0) * 1000; // as LoraRadio::setParams rounds it
-    out->bw_hz   = (uint32_t)lround(prefs->bw * 1000.0);
-    out->sf      = prefs->sf;
-    out->cr      = prefs->cr;
-    out->tx_dbm  = prefs->tx_power_dbm;
-}
-
-extern "C" bool mesh_radio_params(mesh_radio_t *out, uint32_t wait_ms) {
-    if (!__atomic_load_n(&radio_known, __ATOMIC_ACQUIRE) || mesh_is_stopped()) {
-        return false;
-    }
-    if (mesh_lock_within(wait_ms)) {
-        radio_from_prefs(node->getNodePrefs(), &radio_cache);
-        mesh_unlock();
-    }
-    *out = radio_cache; // only written under the lock, by this function and mesh_start; a torn read is cosmetic
-    return true;
-}
-
 // ---- the air log (#165) ----------------------------------------------------------------------------------------
 // The ring is written on the mesh task (inside MyMesh::loop(), mesh lock held) and read by the screen. Its own lock
 // (a mutex: the ring and the screen's copy are in PSRAM, #271) covers only the push and the copy.
@@ -3447,7 +3421,6 @@ static bool start_locked(char const *files_dir) {
     tile_seed_latest(); // the history's newest line; tile_heard_s stays 0, so no "just now" for an old message
     __atomic_store_n(&node, n, __ATOMIC_RELEASE);
     mesh_unlock();
-    __atomic_store_n(&radio_known, true, __ATOMIC_RELEASE);
     __atomic_store_n(&node_id_known, true, __ATOMIC_RELEASE);
 
     if (!task_create()) {

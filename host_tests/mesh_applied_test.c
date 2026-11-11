@@ -86,7 +86,46 @@ static void test_unread(void) {
     CHECK(mesh_applied_radio(&a, out, 0) == 0);
 }
 
+// MeshCore's float MHz and kHz never land on whole Hz: within 500 Hz and 50 Hz is the same radio
+static void test_tolerance(void) {
+    char const    *cached[MESH_APPLIED_KEYS] = {"869618400 (1.0 s ago)", "62540 (1.0 s ago)", "7", "5", "22"};
+    mesh_applied_t a;
+    mesh_applied_parse(cached, &a);
+    CHECK(a.read && a.freq_hz == 869618400u && a.bw_hz == 62540u);
+    CHECK(!mesh_applied_differs(&a, 869.618f, 62.5f, 7, 5, 22));
+    cached[0] = "869618600 (1.0 s ago)"; // 600 Hz off
+    mesh_applied_parse(cached, &a);
+    CHECK(mesh_applied_differs(&a, 869.618f, 62.5f, 7, 5, 22));
+    cached[0] = "869618000";
+    cached[1] = "62560"; // 60 Hz off
+    mesh_applied_parse(cached, &a);
+    CHECK(mesh_applied_differs(&a, 869.618f, 62.5f, 7, 5, 22));
+    cached[0] = "4000000000 (1.0 s ago)"; // a U32 past INT32_MAX still parses
+    cached[1] = "62500";
+    mesh_applied_parse(cached, &a);
+    CHECK(a.read && a.freq_hz == 4000000000u);
+}
+
+// Anything that is not "<number>" or "<number> (<note>)" counts as unread, never as a value
+static void test_malformed(void) {
+    char const *bad[] = {"abc", "12 (", "", "12x", "12 (1.0 s ago", "(1.0 s ago)"};
+    char        out[96];
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        char const    *cached[MESH_APPLIED_KEYS] = {"869618000", "62500", "7", "5", bad[i]};
+        mesh_applied_t a;
+        mesh_applied_parse(cached, &a);
+        if (a.read) {
+            printf("FAIL: \"%s\" read as a value\n", bad[i]);
+            failures++;
+        }
+        mesh_applied_power(&a, out, sizeof(out));
+        CHECK(out[0] == '?');
+    }
+}
+
 int main(void) {
+    test_tolerance();
+    test_malformed();
     test_fresh();
     test_stale();
     test_unread();

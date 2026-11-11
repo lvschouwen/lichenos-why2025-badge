@@ -22,9 +22,26 @@ static void set_if_changed(lv_obj_t *label, char const *text) {
     }
 }
 
+// The menu's focused row below the notes, NULL when it is above them (a change in the notes cannot move it) or none is
+static lv_obj_t *focused_below(lv_obj_t *menu, lv_obj_t *box) {
+    uint32_t n = lv_obj_get_child_count(menu);
+    for (uint32_t i = lv_obj_get_index(box) + 1; i < n; i++) {
+        lv_obj_t *child = lv_obj_get_child(menu, (int32_t)i);
+        if (lv_obj_has_state(child, LV_STATE_FOCUSED)) {
+            return child;
+        }
+    }
+    return NULL;
+}
+
+// The notes' new texts; the note that appears or a line more or less would push every row under it (R7), so the menu
+// scrolls by as much and the focused row stays where it was (as far as the menu can scroll)
 static void applied_fill(lv_obj_t *box) {
     lv_obj_t      *now     = lv_obj_get_child(box, 0);
     lv_obj_t      *differs = lv_obj_get_child(box, 1);
+    lv_obj_t      *menu    = lv_obj_get_parent(box);
+    lv_obj_t      *focused = focused_below(menu, box);
+    int32_t        was_y   = focused ? lv_obj_get_y(focused) : 0;
     mesh_applied_t a;
     mesh_settings_t s;
     char           line[96], text[160];
@@ -39,6 +56,13 @@ static void applied_fill(lv_obj_t *box) {
         set_if_changed(differs, text);
     }
     lv_obj_set_hidden(differs, !differ);
+    if (focused) {
+        lv_obj_update_layout(menu);
+        int32_t moved = lv_obj_get_y(focused) - was_y;
+        if (moved) {
+            lv_obj_scroll_to_y(menu, lv_obj_get_scroll_y(menu) + moved, LV_ANIM_OFF);
+        }
+    }
 }
 
 static void applied_tick(lv_timer_t *timer) {

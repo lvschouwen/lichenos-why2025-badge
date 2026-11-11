@@ -96,14 +96,6 @@ void mesh_discover_get(disc_t *out);
 // short lock (not the mesh lock, never waits on MeshCore). false when nothing was heard from it. Receive only.
 bool mesh_signal_get(uint8_t const prefix[6], sig_contact_t *out);
 
-// The radio as MeshCore's prefs have it; the prefs are read under the mesh lock (up to wait_ms), else the copy taken at
-// start is given. false before MeshCore is up.
-typedef struct {
-    uint32_t freq_hz, bw_hz;
-    uint8_t  sf, cr;
-    int8_t   tx_dbm;
-} mesh_radio_t;
-bool mesh_radio_params(mesh_radio_t *out, uint32_t wait_ms);
 // MeshCore's settings (#67). The setters take the mesh lock (waiting at most MESH_SET_WAIT_MS: MeshCore may be saving
 // contacts), change MyMesh's prefs as its own app commands do, and save them. They can block for a few hundred ms, so
 // the screens call them off the LVGL task. mesh_get_settings never waits: a copy kept by the setters.

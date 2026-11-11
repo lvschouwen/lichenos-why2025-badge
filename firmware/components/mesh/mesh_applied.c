@@ -10,26 +10,28 @@
 
 char const *const mesh_applied_names[MESH_APPLIED_KEYS] = {"lora.freq", "lora.bw", "lora.sf", "lora.cr", "lora.power"};
 
-// One cached text: its number into *value and its bracket ("1.2 s ago", "not read yet") into note; false when it has
-// no number (an unread "? (<why>)", an unknown key)
-static bool parse_one(char const *cached, long *value, char *note, size_t cap) {
+// One cached text: its number into *value and its bracket ("1.2 s ago", "not read yet") into note. false when it is not
+// "<number>" or "<number> (<note>)" (an unread "? (<why>)", an unknown key, anything malformed); note still gets the
+// bracket, so an unread key's reason is kept
+static bool parse_one(char const *cached, long long *value, char *note, size_t cap) {
     note[0] = '\0';
     if (!cached || !*cached) {
         return false;
     }
     char const *open = strstr(cached, " (");
     size_t      len  = strlen(cached);
-    if (open && cached[len - 1] == ')') {
+    bool        bracket = open && len >= 3 && cached[len - 1] == ')' && open + 2 <= cached + len - 1;
+    if (bracket) {
         size_t n = len - 1 - (size_t)(open + 2 - cached);
         snprintf(note, cap, "%.*s", (int)n, open + 2);
     }
     char *end = NULL;
-    *value    = strtol(cached, &end, 10);
-    return end != cached && (*end == '\0' || *end == ' ');
+    *value    = strtoll(cached, &end, 10); // the Hz keys are U32 and long is 32-bit on the P4; dBm can be < 0
+    return end != cached && (*end == '\0' || (bracket && end == open));
 }
 
 void mesh_applied_parse(char const *const cached[MESH_APPLIED_KEYS], mesh_applied_t *out) {
-    long v[MESH_APPLIED_KEYS] = {0};
+    long long v[MESH_APPLIED_KEYS] = {0};
     char note[32];
     memset(out, 0, sizeof(*out));
     out->read = true;

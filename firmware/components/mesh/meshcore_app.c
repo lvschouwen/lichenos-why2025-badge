@@ -314,8 +314,10 @@ static void on_about_delete(lv_event_t *e) {
     if (timer) {
         lv_timer_delete(timer);
     }
-    about_radio = NULL;
-    about_power = NULL;
+    if (lv_event_get_target(e) == about_radio) { // a later About page owns them by now: keep its rows
+        about_radio = NULL;
+        about_power = NULL;
+    }
 }
 
 static void about(lv_obj_t *page) {
