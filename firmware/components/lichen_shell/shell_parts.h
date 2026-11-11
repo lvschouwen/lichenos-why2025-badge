@@ -159,6 +159,10 @@ void notify_settings_open(void);
 // app_settings.c: one registry key's row text from the cache (#332, #333): "<label>: <applied> (<age>)", "(stale N s)",
 // "(saved X)" when it is not the saved one, "?" when unread; never waits for the C6. LVGL context not needed.
 void shell_reg_text(char const *label, char const *key, char const *saved, char const *unit, char *out, size_t cap);
+// The multi-key lines from the cache (#333): LoRa's settings, the Wi-Fi radio's, the PSRAM clock against psram.want
+void shell_lora_line(char *out, size_t cap);
+void shell_wifi_line(char *out, size_t cap);
+void shell_psram_line(char *out, size_t cap);
 void     notify_ui_cloud_key(void); // ☁ (#79, shortcuts.c): open the showing toast, else the centre
 
 // The thermal watchdog (#10) is an OS service since #281 (lichen_os/thermal.c, lichen_sys_thermal.h); app_battery.c is

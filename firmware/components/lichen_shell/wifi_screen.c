@@ -42,6 +42,9 @@ static lv_obj_t   *menu;
 static lv_obj_t   *status;
 static lv_group_t *group;
 static lv_timer_t *poll;
+static lv_obj_t   *radio_note;  // the radio's applied settings from the registry cache (#333)
+static lv_timer_t *radio_timer; // refreshes it once a second
+static char        radio_shown[96];
 static uint32_t    gen;
 static lv_obj_t *
     rows[MAX_APS + LICHEN_SYS_WIFI_SAVED_MAX + 4]; // the placeholder or the networks, "Scan again", then the saved ones
@@ -436,9 +439,24 @@ static void start_scan(void) {
 
 // ---- the screen --------------------------------------------------------------------------------------------------
 
+static void radio_note_refresh(lv_timer_t *t) {
+    (void)t;
+    char text[sizeof(radio_shown)];
+    shell_wifi_line(text, sizeof(text));
+    if (radio_note && strcmp(text, radio_shown) != 0) {
+        strlcpy(radio_shown, text, sizeof(radio_shown));
+        lv_label_set_text(radio_note, text);
+    }
+}
+
 static void on_delete(lv_event_t *e) {
     (void)e;
     stop_poll();
+    if (radio_timer) {
+        lv_timer_delete(radio_timer);
+        radio_timer = NULL;
+    }
+    radio_note = NULL;
     if (start_timer) {
         lv_timer_delete(start_timer);
         start_timer = NULL;
@@ -474,6 +492,10 @@ static lv_obj_t *build(void) {
     menu_set_kind(radio_row, MENU_TOGGLE);
     menu_set_on(radio_row, lichen_radio_get(RADIO_WIFI));
     status    = menu_note(menu, "");
+    radio_note = menu_note(menu, "");
+    radio_shown[0] = '\0';
+    radio_note_refresh(NULL);
+    radio_timer = lv_timer_create(radio_note_refresh, 1000, NULL);
     lv_obj_add_event_cb(scr, on_delete, LV_EVENT_DELETE, NULL);
     if (lichen_radio_get(RADIO_WIFI)) {
         start_scan();

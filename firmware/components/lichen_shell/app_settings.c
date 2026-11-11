@@ -96,7 +96,7 @@ typedef struct {
     lv_obj_t *obj;
     bool      note; // a menu_note label, not a menu_add row
     void (*fill)(char *out, size_t cap);
-    char shown[48];
+    char shown[80];
 } live_row_t;
 
 static void live_update(live_row_t *r) {
@@ -134,6 +134,46 @@ void shell_reg_text(char const *label, char const *key, char const *saved, char 
         cached[0] = '\0'; // a name the table does not have: shown as "?"
     }
     reg_row_text(label, cached, saved, unit, out, cap);
+}
+
+// Reads several keys' cached text into one set of buffers for the line builders
+#define KEYS_MAX 5
+typedef struct {
+    char        text[KEYS_MAX][64];
+    char const *ptr[KEYS_MAX];
+} key_texts_t;
+
+static void read_keys(char const *const names[], size_t n, key_texts_t *k) {
+    for (size_t i = 0; i < n && i < KEYS_MAX; i++) {
+        k->ptr[i] = lichen_reg_get(names[i], k->text[i], sizeof(k->text[i])) ? k->text[i] : NULL;
+    }
+}
+
+void shell_lora_line(char *out, size_t cap) {
+    static char const *const names[RR_LORA_KEYS] = {"lora.freq", "lora.bw", "lora.sf", "lora.cr", "lora.power"};
+    key_texts_t              k;
+    read_keys(names, RR_LORA_KEYS, &k);
+    reg_lora_line("LoRa now", k.ptr, out, cap);
+}
+
+void shell_wifi_line(char *out, size_t cap) {
+    static char const *const names[RR_WIFI_KEYS] = {"wifi.country", "wifi.txpwr", "wifi.bw", "wifi.protocol", "wifi.ps"};
+    key_texts_t              k;
+    read_keys(names, RR_WIFI_KEYS, &k);
+    reg_wifi_line("Radio now", k.ptr, out, cap);
+}
+
+void shell_psram_line(char *out, size_t cap) {
+    char clk[64], want[64] = "", want_mhz[16];
+    if (!lichen_reg_get("psram.clk", clk, sizeof(clk))) {
+        clk[0] = '\0';
+    }
+    if (lichen_reg_get("psram.want", want, sizeof(want))) {
+        reg_row_value(want, want_mhz, sizeof(want_mhz));
+    } else {
+        want_mhz[0] = '\0';
+    }
+    reg_mhz_text("PSRAM now", clk, want_mhz, out, cap);
 }
 
 // Display: brightness is applied on every step and saved once it has settled
@@ -497,6 +537,8 @@ static live_row_t settings_time_row; // Settings' own page: Time
 static live_row_t settings_sd_row;   // and SD card (a mount or unmount on its page or the console shows on return)
 static live_row_t settings_wifi_row;   // Wi-Fi (the radio switch is on its page)
 static live_row_t settings_notify_row; // and Notifications (do-not-disturb, #62)
+static live_row_t radio_notes[3];      // LoRa's settings, LoRa's state and the Bluetooth controller (#333)
+static live_row_t settings_psram_row;  // the PSRAM clock against the speed asked for (#333)
 static live_row_t settings_ota_row;    // and Updates over Wi-Fi (the auto-off timer closes it by itself, #112)
 
 // The zone row reads NVS: only refreshed when a zone is picked, not every second
@@ -517,6 +559,10 @@ static void refresh_settings_time(lv_timer_t *t) {
     live_update(&settings_notify_row);
     live_update(&settings_wifi_row);
     live_update(&settings_ota_row);
+    for (size_t i = 0; i < sizeof(radio_notes) / sizeof(radio_notes[0]); i++) {
+        live_update(&radio_notes[i]);
+    }
+    live_update(&settings_psram_row);
 }
 
 // Each page's timer dies with it, and the rows it filled are forgotten
@@ -532,6 +578,8 @@ static void forget_settings_time(lv_event_t *e) {
     memset(&settings_notify_row, 0, sizeof(settings_notify_row));
     memset(&settings_wifi_row, 0, sizeof(settings_wifi_row));
     memset(&settings_ota_row, 0, sizeof(settings_ota_row));
+    memset(radio_notes, 0, sizeof(radio_notes));
+    memset(&settings_psram_row, 0, sizeof(settings_psram_row));
 }
 
 static void source_note(char *out, size_t cap) {
@@ -722,6 +770,22 @@ static void forget_ota_row(lv_event_t *e) {
     ota_row = ota_auto_row = lora_row = air_row = NULL;
 }
 
+static void lora_state_fill(char *out, size_t cap) {
+    shell_reg_text("LoRa state", "lora.state", NULL, NULL, out, cap);
+}
+
+static void bt_state_fill(char *out, size_t cap) {
+    shell_reg_text("Bluetooth controller", "bt.state", NULL, NULL, out, cap); // the C6's, next to the airplane switch
+}
+
+// What the radios are actually set to (#333): applied values from the cache, read-only (changes stay on the guarded paths)
+static void add_radio_notes(lv_obj_t *menu) {
+    static void (*const fills[])(char *, size_t) = {shell_lora_line, lora_state_fill, bt_state_fill};
+    for (size_t i = 0; i < sizeof(radio_notes) / sizeof(radio_notes[0]); i++) {
+        radio_notes[i] = live_row(menu_note(menu, ""), true, fills[i]);
+    }
+}
+
 // A row that opens a page (R3): the dim "›" after the value
 static lv_obj_t *open_row(lv_obj_t *menu, char const *label, void (*open)(void *)) {
     lv_obj_t *row = menu_add(menu, label, "", open, NULL);
@@ -785,6 +849,7 @@ static void open_settings(lv_obj_t *screen) {
     menu_set_kind(air_row, MENU_TOGGLE);
     menu_set_on(lora_row, lichen_radio_get(RADIO_LORA));
     menu_set_on(air_row, lichen_airplane_get());
+    add_radio_notes(menu);
     lv_obj_add_event_cb(screen, forget_ota_row, LV_EVENT_DELETE, NULL);
     open_row(menu, "Display", open_display);
     lv_obj_t *time_open = open_row(menu, "Time", open_time);
@@ -803,6 +868,7 @@ static void open_settings(lv_obj_t *screen) {
     menu_note(menu, "For developers");
     menu_set_value(open_row(menu, "Console", console_open_from_settings), "Run fw commands");
     add_psram_speed_row(menu);
+    settings_psram_row = live_row(menu_note(menu, ""), true, shell_psram_line);
     bool heading = false;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);

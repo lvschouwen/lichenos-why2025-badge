@@ -1,6 +1,7 @@
 #include "reg_row_text.h"
 
 #include <stdbool.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -84,6 +85,150 @@ size_t reg_row_text(char const *label, char const *cached, char const *saved, ch
     } else {
         tail_text(&p, saved, unit, tail, sizeof(tail));
         snprintf(out, cap, "%s%s%s%s", head, p.value, unit ? unit : "", tail);
+    }
+    return strlen(out);
+}
+
+// ---- the multi-key lines (#333) -------------------------------------------------------------------------------------
+
+typedef struct {
+    char value[RR_LORA_KEYS][40]; // both lines have five keys
+    char note[28];                // the first key's age, or the first unread key's reason
+    bool stale;
+    bool unread;
+} fields_t;
+
+static void gather(char const *const cached[], fields_t *f) {
+    memset(f, 0, sizeof(*f));
+    for (int i = 0; i < RR_LORA_KEYS; i++) {
+        parts_t p;
+        if (!split(cached[i], &p) || p.unread) {
+            if (!f->unread) {
+                snprintf(f->note, sizeof(f->note), "%s", cached[i] ? p.note : "");
+            }
+            f->unread = true;
+            continue;
+        }
+        f->stale = f->stale || p.stale;
+        memcpy(f->value[i], p.value, sizeof(p.value));
+        if (i == 0 && !f->unread) {
+            snprintf(f->note, sizeof(f->note), "%s", p.note);
+        }
+    }
+}
+
+static size_t line_out(char const *label, fields_t const *f, char const *line, char *out, size_t cap) {
+    char head[24] = "";
+    if (label && *label) {
+        snprintf(head, sizeof(head), "%s: ", label);
+    }
+    if (f->unread) {
+        snprintf(out, cap, "%s?%s%s%s", head, *f->note ? " (" : "", f->note, *f->note ? ")" : "");
+    } else if (f->stale) {
+        snprintf(out, cap, "%s%s (stale)", head, line);
+    } else {
+        snprintf(out, cap, "%s%s%s%s%s", head, line, *f->note ? " (" : "", f->note, *f->note ? ")" : "");
+    }
+    return strlen(out);
+}
+
+// 62500 Hz -> "62.5 kHz", 125000 -> "125 kHz"
+static void khz_text(unsigned long hz, char *out, size_t cap) {
+    if (hz % 1000) {
+        snprintf(out, cap, "%lu.%lu kHz", hz / 1000, hz % 1000 / 100);
+    } else {
+        snprintf(out, cap, "%lu kHz", hz / 1000);
+    }
+}
+
+size_t reg_lora_line(char const *label, char const *const cached[RR_LORA_KEYS], char *out, size_t cap) {
+    fields_t f;
+    char     line[200], bw[16];
+    if (!cap) {
+        return 0;
+    }
+    gather(cached, &f);
+    unsigned long hz = strtoul(f.value[0], NULL, 10);
+    khz_text(strtoul(f.value[1], NULL, 10), bw, sizeof(bw));
+    snprintf(line, sizeof(line), "%lu.%03lu MHz %s SF%s CR%s %s dBm", hz / 1000000, hz % 1000000 / 1000, bw, f.value[2],
+             f.value[3], f.value[4]);
+    return line_out(label, &f, line, out, cap);
+}
+
+// WIFI_PROTOCOL_11B/G/N/AX bits as letters ("bgn"); 0 or none of them: "-"
+static void proto_text(unsigned long bits, char *out, size_t cap) {
+    size_t n = 0;
+    for (int i = 0; i < 4 && n + 3 < cap; i++) {
+        static char const letter[4] = {'b', 'g', 'n', 0};
+        static unsigned const mask[4] = {1, 2, 4, 0x40};
+        if (bits & mask[i]) {
+            n += (size_t)snprintf(out + n, cap - n, i == 3 ? "ax" : "%c", letter[i]);
+        }
+    }
+    if (!n) {
+        snprintf(out, cap, "-");
+    }
+}
+
+// 80 quarter-dBm -> "20 dBm", 74 -> "18.5 dBm"
+static void qdbm_text(long q, char *out, size_t cap) {
+    long a = q < 0 ? -q : q;
+    char const *sign = q < 0 ? "-" : "";
+    if (a % 4) {
+        snprintf(out, cap, "%s%ld.%02ld dBm", sign, a / 4, a % 4 * 25);
+    } else {
+        snprintf(out, cap, "%s%ld dBm", sign, a / 4);
+    }
+}
+
+size_t reg_wifi_line(char const *label, char const *const cached[RR_WIFI_KEYS], char *out, size_t cap) {
+    fields_t f;
+    char     line[200], tx[24], proto[8];
+    if (!cap) {
+        return 0;
+    }
+    gather(cached, &f);
+    qdbm_text(strtol(f.value[1], NULL, 10), tx, sizeof(tx));
+    proto_text(strtoul(f.value[3], NULL, 10), proto, sizeof(proto));
+    snprintf(line, sizeof(line), "%s, %s, %s MHz, %s, ps %s", f.value[0], tx, f.value[2], proto, f.value[4]);
+    return line_out(label, &f, line, out, cap);
+}
+
+size_t reg_mhz_text(char const *label, char const *cached_hz, char const *want_mhz, char *out, size_t cap) {
+    parts_t p;
+    if (!cap) {
+        return 0;
+    }
+    if (!split(cached_hz, &p) || p.unread) {
+        return reg_row_text(label, cached_hz, NULL, NULL, out, cap);
+    }
+    unsigned long hz = strtoul(p.value, NULL, 10);
+    char          mhz[24], tail[40];
+    if (hz % 1000000) {
+        snprintf(mhz, sizeof(mhz), "%lu.%03lu", hz / 1000000, hz % 1000000 / 1000);
+    } else {
+        snprintf(mhz, sizeof(mhz), "%lu", hz / 1000000);
+    }
+    tail_text(&p, NULL, NULL, tail, sizeof(tail));
+    if (!p.stale && want_mhz && *want_mhz && strcmp(want_mhz, mhz) != 0) { // "wants", not "saved": a trial is pending
+        snprintf(tail, sizeof(tail), " (wants %s MHz)", want_mhz);
+    }
+    char head[24] = "";
+    if (label && *label) {
+        snprintf(head, sizeof(head), "%s: ", label);
+    }
+    snprintf(out, cap, "%s%s MHz%s", head, mhz, tail);
+    return strlen(out);
+}
+
+size_t reg_row_value(char const *cached, char *out, size_t cap) {
+    parts_t p;
+    if (!cap) {
+        return 0;
+    }
+    out[0] = '\0';
+    if (split(cached, &p) && !p.unread) {
+        snprintf(out, cap, "%s", p.value);
     }
     return strlen(out);
 }
