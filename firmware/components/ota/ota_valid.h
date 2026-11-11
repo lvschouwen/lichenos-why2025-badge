@@ -56,7 +56,6 @@ typedef struct {
     ota_display_t     display;
     bool              shell_up;    // the shell is up (read only with OTA_DISPLAY_UP)
     bool              c6_up;       // the C6 link is up: Wi-Fi works, so the image can be replaced over the air
-    bool              psram_trial; // a 120 MHz PSRAM trial is live (psram_speed_trial_pending): it ends within a minute
     uint32_t          uptime_s;
 } ota_trial_in_t;
 

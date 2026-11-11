@@ -96,9 +96,9 @@ static void test_rules_alone(void) {
     o = clean(), o.stack_low = 10, o.mismatches = 1;
     CHECK(stress_judge(&o) == STRESS_MISMATCH);
     CHECK(stress_failed(STRESS_STACK) && stress_failed(STRESS_MISMATCH) && stress_failed(STRESS_HUNG));
-    CHECK(!stress_failed(STRESS_TRIAL) && !stress_failed(STRESS_HOT) && !stress_failed(STRESS_C6));
+    CHECK(!stress_failed(STRESS_UPDATE) && !stress_failed(STRESS_HOT) && !stress_failed(STRESS_C6));
     CHECK(strcmp(stress_reason_name(STRESS_HUNG), "hung") == 0 && strcmp(stress_reason_name(STRESS_C6), "c6") == 0);
-    CHECK(strcmp(stress_reason_name(STRESS_TRIAL), "trial") == 0 && strcmp(stress_reason_name(STRESS_HOT), "hot") == 0);
+    CHECK(strcmp(stress_reason_name(STRESS_UPDATE), "update") == 0 && strcmp(stress_reason_name(STRESS_HOT), "hot") == 0);
     CHECK(strcmp(stress_reason_name(STRESS_REASONS), "?") == 0);
     CHECK(!stress_failed(STRESS_NONE) && !stress_failed(STRESS_ESC) && !stress_failed(STRESS_STOP_CMD));
     CHECK(!stress_failed(STRESS_POWEROFF) && !stress_failed(STRESS_UPDATE));
@@ -139,8 +139,6 @@ static void test_outside(void) {
     CHECK(stress_outside(&in) == STRESS_C6);
     in.hot = true;
     CHECK(stress_outside(&in) == STRESS_HOT);
-    in.trial = true;
-    CHECK(stress_outside(&in) == STRESS_TRIAL);
     in.update = true;
     CHECK(stress_outside(&in) == STRESS_UPDATE);
     in.poweroff = true;
@@ -156,8 +154,6 @@ static void test_refusal(void) {
     CHECK(strcmp(stress_refusal(&in), "a stress run is already on") == 0);
     in = (stress_gate_in_t){.dma_free = STRESS_START_DMA, .psram_free = STRESS_START_PSRAM, .update = true};
     CHECK(strcmp(stress_refusal(&in), "an update or power off is under way") == 0);
-    in = (stress_gate_in_t){.dma_free = STRESS_START_DMA, .psram_free = STRESS_START_PSRAM, .psram_trial = true};
-    CHECK(strcmp(stress_refusal(&in), "the 120 MHz PSRAM trial is running") == 0);
     in = (stress_gate_in_t){.dma_free = STRESS_START_DMA, .psram_free = STRESS_START_PSRAM, .c6_trouble = true};
     CHECK(strcmp(stress_refusal(&in), "the C6 link is not up") == 0);
     in = (stress_gate_in_t){.dma_free = STRESS_START_DMA, .psram_free = STRESS_START_PSRAM, .hot = true};

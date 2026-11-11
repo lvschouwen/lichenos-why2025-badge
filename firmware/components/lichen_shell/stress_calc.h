@@ -44,7 +44,6 @@ typedef enum {
     STRESS_STOP_CMD,  // fw stress stop
     STRESS_POWEROFF,
     STRESS_UPDATE,    // an update started
-    STRESS_TRIAL,     // the 120 MHz PSRAM trial started: its DMA gate must have the engine to itself
     STRESS_HOT,       // a thermal warning
     STRESS_C6,        // the C6 link is not up
     STRESS_REASONS,
@@ -82,7 +81,7 @@ uint32_t stress_since(uint32_t now, uint32_t base);
 // What may end a run from outside the rules, checked every second; the first that holds, in this order
 typedef struct {
     stress_reason_t asked; // stress_stop's reason, STRESS_NONE when none
-    bool            poweroff, update, trial, hot, c6_trouble;
+    bool            poweroff, update, hot, c6_trouble;
 } stress_outside_t;
 stress_reason_t stress_outside(stress_outside_t const *in);
 
@@ -102,7 +101,7 @@ bool stress_latch(stress_run_t *run, stress_reason_t r, uint32_t t_s);
 
 // What the refusal check sees at start
 typedef struct {
-    bool     running, update, poweroff, c6_trouble, hot, psram_trial;
+    bool     running, update, poweroff, c6_trouble, hot;
     uint32_t dma_free, psram_free;
 } stress_gate_in_t;
 

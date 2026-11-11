@@ -1,7 +1,10 @@
-# PSRAM speed switch: 80 / 120 MHz in one image (#121)
+# PSRAM speed switch: 80 / 120 MHz in one image (#121, #353)
 
-The badge ships at 80 MHz PSRAM. 120 MHz can be tried from Settings > For developers > PSRAM speed or with
-`fw psram speed 120 yes`; it falls back to 80 by itself when it does not hold.
+The badge runs its PSRAM at 120 MHz by default (#353). It falls back to 80 MHz only on PSRAM evidence seen at 120 and
+stays there until the person picks a speed again in Settings > For developers > PSRAM speed or with
+`fw psram speed 120 yes` (or `80 yes`). There is no trial: until #353 every 120 MHz boot ran a 60 s trial, and every
+fall to 80 it caused was our own doing (#255 a panic on the way into the trial, a `fw reboot` inside it). The one real
+120 MHz problem (#120/#121, SDMMC DMA flipping bit 3) is handled by the SD bounce buffer (E4).
 
 ## How it works
 
@@ -13,78 +16,81 @@ The badge ships at 80 MHz PSRAM. 120 MHz can be tried from Settings > For develo
   DQS tuning tables are the same for 80 and 120 MHz, so only the MPLL frequency and the clock divider are runtime.
 - **Register carrier** (spike, bench-verified on fw-3e9e56b6): STORE15 survives `esp_restart`, `ota-reboot` and an int-WDT
   reset. ROM claims STORE0..11, IDF uses none of 12..15.
-- **REACHED marker** (#329): as soon as PSRAM init runs at 120 MHz (the tuning wrappers in `psram_boot.c`, again in
-  `psram_speed_boot`) the boot writes `0xC4A2 << 16 | 120` to STORE15. PSRAM init takes any word but the ARM word as
-  80 MHz and keeps the raw word (`psram_speed_carrier_raw`), so the next boot runs at 80 and knows the boot before it did
-  run at 120 and ended without a pass, a fail or a clean re-arm. Cleared on pass and fail; the shutdown hook's re-arm
-  overwrites it. No flash write on the success path at 120 MHz before the pass; the failure paths (a failed trial,
-  120 against the record) save their judgement.
-- **NVS record** `psram_spd` = {want 80/120, trial (0 / armed), failed, aborts, powers, last failure}; the rules are
-  `psram_speed_logic.c` (host-tested). Written straight to NVS, not through the settings service (it runs before the
-  services; #325). Blob v3 (36 bytes, #329): want, trial, failed, aborts, version 3, kind, reset reason, ran-at-120,
-  wall time (LE32, 0 = clock not set), uptime (LE32), image version (16 bytes, NUL-padded, cut at 15), powers, 3 zero bytes. Any other size or
-  version, the 4-byte record of images before #329 included (no migration: images are not released), is the default
-  record (80, nothing pending, last failure none).
+- **NVS record** `psram_spd` = {want 80/120, failed, arms, last fall}; the rules are `psram_speed_logic.c`
+  (host-tested in `host_tests/psram_speed_test.c`). Written straight to NVS, not through the settings service (it runs
+  before the services; #325). Blob v4 (32 bytes): want, failed, arms, 0, version 4, kind, reset reason, ran-at-120,
+  wall time (LE32, 0 = clock not set), uptime (LE32), image version (16 bytes, NUL-padded, cut at 15). Any other size or
+  version, the trial's 36-byte v3 record of #329 included (no migration: images are not released, and its falls were
+  no evidence), is the default record: 120, nothing failed, last fall none.
+
+## What counts as evidence
+
+Only what shows the PSRAM itself returning wrong data, and only while running 120 MHz:
+
+| Kind (`psram.fail_why`) | Where it is seen |
+|---|---|
+| `boot_check` | the dense 4 MB boot check (`psram_boot.c`) found bad bytes (single-bit words included), judged in `psram_speed_boot` |
+| `canary` | a canary block flipped (`psram_guard.c` `verify_one`, every canary within ~0.7 s) |
+| `heap` | the PSRAM heap failed `heap_caps_check_integrity` (CORRUPT HEAP), checked once a minute by the guard task at 120 MHz |
+| `dma_gate` | a DMA gate round failed: `fw psram dma`, `fw psram dma sweep`, the Bench's round, the stress run's rounds |
+
+Not evidence: any reset reason (a restart, an OTA reboot, a panic, a watchdog, a brownout, a power cycle), and a
+fallen-back or short tuning window without bad bytes (it still marks the boot bad and raises "PSRAM check failed at
+boot"). A CORRUPT HEAP that the heap itself finds first (in a `free`) aborts before anything can be recorded: that
+panic comes back at 80 for one session (below) without a fall.
+
+Evidence seen on any task is only reported (`psram_speed_report`, an atomic, the first one of a boot wins); the guard
+task's tick judges it once a second and the `psram_speed` job task saves the record and restarts. At 80 MHz evidence
+changes nothing (there is nothing to fall to); it is logged where it was found, as before.
 
 ## Boot sequence
 
 1. PSRAM init reads and clears STORE15, runs at 80 or 120 MHz, boot tuning + dense boot check as always.
 2. `app_main`, right after NVS is up (`psram_speed_boot`, before the one-shot delayline, storage and MeshCore):
-   - running 80 with a trial pending (record armed, or REACHED found with 120 wanted and not failed):
-     - REACHED found: that 120 MHz boot did not get through: `want = 80`, `failed = 1`, `trial = 0`, last failure
-       "crash or watchdog" (reset reason panic / int_wdt / task_wdt / wdt / cpu_lockup) or "restart before it passed"
-       (anything else), ran at 120. Never re-armed by itself.
-     - no marker, a panic / watchdog reset: failed too, "crash or watchdog while armed (no 120 MHz marker)". Fail-safe:
-       until #330 shows STORE15 survives every crash reset, a missing marker after a crash proves nothing.
-     - no marker, power-on / ext / brownout: still armed, no abort and no note (a power cycle is no evidence), but
-       counted in `powers`: a hang at 120 that only EN or a power cycle clears looks the same, so the fifth in a row
-       gives up: failed, "power resets while armed". A pass or a choice in Settings / `fw psram speed` resets it.
-     - no marker, any other reset: the switch never took effect (#329: the restart path once panicked at 80 and that
-       counted as "120 MHz failed"). Last failure "aborted (ran at 80)", `aborts + 1`, the trial stays armed and the
-       shutdown hook arms STORE15 on the next clean restart (no restart of its own). The third abort in a row gives up:
-       failed, "aborted 3 times, given up".
-   - want 120, running 80, not failed: `trial = 1`, arm STORE15, `esp_restart` once (log: "restarting once to boot at 120 MHz").
-   - running 120 with the record agreeing: this boot is a trial (in RAM; the record is not written, the marker is the
-     evidence). Running 120 against the record (want 80 or failed): last failure "ran at 120 against the record", back
-     to 80.
-3. A live trial (`psram_speed_tick`) passes after 60 s (record saved with `trial = 0`, `aborts = 0`, then the marker
-   cleared; a pass that cannot be saved keeps the marker) with a clean boot check AND one automatic DMA gate round (all
-   patterns, the SD legs only with a card; on the 6 KB `psram_trial` task). It fails at once on a fallback tuning, a bad boot
-   check, or a failed gate. A fail: `want = 80`, `failed = 1`, last failure "boot check" or "DMA gate", `esp_restart` at
-   80 (no app save hooks).
-   While the running image is still PENDING_VERIFY (OTA not yet marked valid) nothing restarts for the speed: the arm waits
-   until the image is valid, a fail only records itself and the tick leaves 120 once valid, so a good OTA is never rolled back.
-   A record that cannot be saved arms nothing.
-4. While a trial is live MeshCore does not start (its journal is not read or written over a bus on trial). It starts
-   by itself when the trial passes (if start at boot is on), or by hand (`fw mesh start`).
-5. After a PASSED trial a clean restart at 120 (`esp_restart`: update, Power > Restart, `fw reboot`) keeps 120 MHz through a
-   shutdown hook that re-arms STORE15 (RAM flag only, set after the pass or with an aborted trial still armed: a restart mid-trial comes back at 80 and
-   counts as a failed trial; a factory reset clears it). A panic, WDT or brownout runs no hook, so it comes back at 80. A cold power-on is 80
-   first, then one restart into 120.
+   - running 120, the record agrees (want 120, not failed), no bad bytes: nothing written. The shutdown hook keeps 120
+     through every clean restart.
+   - running 120 with bad bytes in the boot check: the fall (below).
+   - running 120 against the record (want 80 or failed): back to 80, no note.
+   - running 80 with 120 wanted and not failed:
+     - after a panic or watchdog: this session stays at 80, the next clean restart arms 120 (the shutdown hook). No
+       fall, and no arm restart either, so a crash at 120 cannot loop through one.
+     - otherwise (a power-on, the first boot, a restart that ran no hook): `arms + 1` saved, STORE15 armed, `esp_restart`
+       once ("restarting once to boot at 120 MHz"). The third arm in a row whose 120 MHz boot never settled
+       (`PSRAM_SPEED_SETTLE_SECONDS`, 60 s of uptime, clears `arms` with one NVS write) keeps this session at 80 and
+       starts the count over: it bounds a loop (a brownout at 120, a restart before the hook is in), it is no failure.
+3. **The fall:** `want = 80`, `failed = 1`, the last fall recorded, STORE15 cleared, `esp_restart` (no app save hooks with
+   a PSRAM that is suspect). Logged at E (#113: a feature lost until someone acts) on the boot that falls and again on
+   every boot after it, and raised once per boot as the notice "PSRAM back at 80 MHz" (error level). Never re-armed by
+   itself.
+4. While the running image is still PENDING_VERIFY (OTA not yet marked valid) nothing restarts for the speed: the arm,
+   the leave and the fall's restart wait until the image is valid (the record is already saved), so a good OTA is
+   never rolled back. A record that cannot be saved arms nothing.
+5. A clean restart at 120 (`esp_restart` and everything on it: update, Power > Restart, `fw reboot`) keeps 120 MHz through a
+   shutdown hook that re-arms STORE15. A panic, WDT or brownout runs no hook, so it comes back at 80 (step 2). A cold
+   power-on is 80 first, then one restart into 120. A factory reset clears the register and the record: 80, then the
+   default record arms 120.
 
-A failed `fw psram dma` / `fw psram dma sweep` at 120 MHz counts as a failed trial (any bad byte on the AXI-GDMA legs or the
-bounced SD leg, or a DMA error; the direct SD leg is reported, not judged). It restarts the badge at 80.
+MeshCore starts at boot as at any speed (the trial's hold is gone), and the OTA validity mark no longer waits for a
+trial.
 
-## Last failure (#329)
+## Last fall (#329)
 
-Every judgement (failed or aborted) records: the kind, `esp_reset_reason()` of the boot that judged it, whether the
-failed boot ran at 120 MHz, the UTC wall time if the clock was set (else the judging boot's uptime), and the image
-version. The judging `ESP_LOGE` line carries the same text, `fw psram` shows it:
+Every fall records: the kind, `esp_reset_reason()` of the boot that fell, ran at 120 (always), the UTC wall time if
+the clock was set (else that boot's uptime), and the image version. The E line carries the same text, `fw psram`
+shows it:
 
-    psram speed: last failure: crash or watchdog, reset task_wdt, ran at 120, 2026-11-11 14:03:05 UTC, fw-605935b1
-    psram speed: last failure: none
+    psram speed: running 80 MHz; 120 MHz failed, back at 80; want 80, failed yes, arms 0 of 3; IDF runtime-selectable; ...
+    psram speed: last fall to 80: canary flip, reset sw, ran at 120, 2026-11-11 14:03:05 UTC, fw-605935b1
 
-(with `; aborted trials in a row N of 3` while aborts are counted). RO registry keys: `psram.fail_why` (ENUM none /
-boot_check / dma_gate / crash / restart / aborted / gave_up / crash_armed / against_rec), `psram.fail_rst` (STR), `psram.fail_at120` (BOOL),
-`psram.fail_fw` (STR), `psram.aborts` (U8). The record stays until the next failure; choosing a speed clears `failed`
-and `aborts`, not the last failure. For a crash or restart the uptime is the judging boot's (seconds), not how long
-the failed 120 MHz boot ran.
+RO registry keys: `psram.fail_why` (ENUM none / boot_check / dma_gate / canary / heap; 3..9 are the trial's retired
+kinds, kept so the numbers do not move), `psram.fail_rst` (STR), `psram.fail_at120` (BOOL), `psram.fail_fw` (STR),
+`psram.aborts` (U8, the arm count since #353), `psram.want` and `psram.clk` (what runs). Choosing a speed clears
+`failed` and `arms`, not the last fall.
 
 ## Journal safety
 
-MeshCore waits during a trial (above). E4 (#121) bounces every SD transfer with a PSRAM buffer through internal RAM. Not
-audited here: any other DMA path that moves journal data into or out of PSRAM (none known: the display reads PSRAM, SDIO
-to the C6 uses internal buffers).
+E4 (#121) bounces every SD transfer with a PSRAM buffer through internal RAM. Not audited here: any other DMA path that
+moves journal data into or out of PSRAM (none known: the display reads PSRAM, SDIO to the C6 uses internal buffers).
 
 ## Build
 
@@ -93,17 +99,16 @@ The badge's IDF carries `tools/idf-patches/0001` and `0003` (`git -C ~/esp/esp-i
 (`BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build`) is the switchable image. An IDF without 0003 still builds:
 the symbol is unknown to Kconfig, the app reports 80 MHz and "not supported", and the Settings row is hidden.
 
-## Bench plan (one OTA, MeshCore does not start during the trial)
+## Bench plan
 
-1. OTA the image. Boot at 80: `fw psram` shows `psram speed: running 80 MHz; 80 MHz; want 80 ... IDF runtime-selectable`,
-   carrier found `00000000`. Behaviour identical to before.
-2. `fw psram speed 120` (prints what it does), then `fw psram speed 120 yes`: the badge restarts once (it arms and restarts), the boot log shows `PSRAM Speed: 120MHz`. `fw psram`: running 120, trial running; MeshCore
-   not started. After 60 s: log "120 MHz trial passed", MeshCore starts.
-3. Gate at 120: `fw psram dma sweep 16384` x3, `fw psram dma 15` x7, `fw mesh hist scan 100`. A failed DMA gate restarts the
-   badge at 80 with "120 MHz failed, back at 80" in Settings.
-4. Forced failure test: with 120 running and the trial live (first 60 s), `fw crash test wdt` (or any crash): the next boot is
-   at 80 and `fw psram` shows `failed yes` and `last failure: crash or watchdog, reset task_wdt, ran at 120, ...`; it does
-   not try 120 again. `fw psram speed 120 yes` clears the failed flag.
-5. Settings > For developers > PSRAM speed: value text, careful dialog "Restarts the badge. If 120 MHz fails, it comes back
-   at 80.", choosing 80 restarts at 80.
-6. Back to 80 any time: `fw psram speed 80 yes`, or flash/OTA a build without the patch (80 MHz, record ignored).
+1. OTA the image. If the badge was at 80 by an old record (v3), the first boot reads the default and restarts once into
+   120: `fw psram speed` shows `running 120 MHz; 120 MHz; want 120, failed no, arms 1 of 3` and, after 60 s,
+   `arms 0 of 3`. `fw get psram.clk` is 120 MHz.
+2. `fw reboot` within 20 s of a boot: back at 120, `failed no`, no "120 MHz failed" line in the log.
+3. `fw crash test wdt` (or any crash): the next boot is at 80 with "this boot stays at 80 MHz (after a crash, no evidence
+   against 120)"; `fw reboot`: back at 120, `failed no`.
+4. Gate at 120: `fw psram dma sweep 16384` x3, `fw psram dma 15` x7, `fw mesh hist scan 100`. A failed gate restarts the
+   badge at 80 with "120 MHz failed, back at 80" in Settings, the notice "PSRAM back at 80 MHz", and `last fall to 80:
+   DMA gate, ...`.
+5. `fw psram speed 120 yes` after a fall: one restart, straight to 120, `failed no`.
+6. Settings > For developers > PSRAM speed: value text, dialog, choosing 80 restarts at 80 and stays there (no arm).

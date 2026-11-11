@@ -814,7 +814,6 @@ static void trial_read(void *ctx, ota_trial_in_t *in) {
     in->image       = ota_image_trial_state();
     in->shell_up    = in->display == OTA_DISPLAY_UP && shell_up();
     in->c6_up       = c6link_up();
-    in->psram_trial = psram_speed_trial_pending();
     in->uptime_s    = uptime_ms() / 1000;
 }
 

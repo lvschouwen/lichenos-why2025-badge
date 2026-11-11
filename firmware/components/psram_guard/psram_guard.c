@@ -184,6 +184,7 @@ static void verify_one(void) {
         if (res.bad_bytes) {
             report(i, b, &res);
             fill_block(b->mem, b->len);
+            psram_speed_report(PSRAM_FAIL_CANARY); // at 120 MHz: back at 80 (#353); no NVS here, under the lock
         }
     }
     passes++;
@@ -201,7 +202,7 @@ static void guard_task(void *arg) {
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(PERIOD_MS));
         verify_one();
-        psram_speed_tick(); // a live 120 MHz trial passes or fails here (#121)
+        psram_speed_tick(); // evidence judged, the PSRAM heap check, deferred speed restarts (#121, #353)
     }
 }
 

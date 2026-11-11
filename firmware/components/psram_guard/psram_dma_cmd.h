@@ -10,15 +10,11 @@
 // Runs on the console task; needs 3 x 1 MB of PSRAM and 8 KB of internal DMA RAM, all freed afterwards.
 // "fw psram dma sweep [sector]" runs the write/read legs and both SD legs over every 1 MB of the largest free PSRAM block.
 void psram_dma_cmd(char const *args);
-// One quick round (all patterns, the SD legs when a card is mounted) for the 120 MHz trial (#121): true = clean. A bad byte
-// on the AXI-GDMA legs or the bounced SD leg, or a DMA error, is false. Needs 3 MB of PSRAM and 8 KB of internal DMA RAM
-// for a few seconds; on its own task, not on the guard task.
-bool psram_dma_quick_gate(void);
-
-// The same round for a caller that must tell a pass from a round that never ran (the stress run, #278): BUSY = another
-// DMA gate (a console run, the trial's, another round) holds it, NOT_RUN = no memory or no AXI-GDMA. info (may be NULL)
+// One quick round (all patterns, the SD legs when a card is mounted) for a caller that must tell a pass from a round
+// that never ran (the Bench, the stress run, #278); a failed round at 120 MHz is PSRAM evidence (#353). BUSY = another
+// DMA gate (a console run, another round) holds it, NOT_RUN = no memory or no AXI-GDMA. info (may be NULL)
 // gets the judged bad bytes (AXI-GDMA legs and the bounced SD leg), the DMA errors and whether the SD legs were skipped;
-// zeros unless the round ran. psram_dma_quick_gate is this, waiting up to 10 s while BUSY.
+// zeros unless the round ran.
 typedef enum { PSRAM_DMA_ROUND_PASS, PSRAM_DMA_ROUND_FAIL, PSRAM_DMA_ROUND_BUSY, PSRAM_DMA_ROUND_NOT_RUN } psram_dma_round_t;
 typedef struct {
     uint32_t bad_bytes;

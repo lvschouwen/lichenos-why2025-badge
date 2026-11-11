@@ -286,8 +286,8 @@ file agree):
   `strndup` (#283): memory goes through `lichen_alloc` so `fw mem` counts it. MeshCore's upstream C++ `new` (the
   packet pool, `MyMesh`) is operator new, not one of those symbols, and stays outside the count as well.
 
-Also open: `mesh` keeps `psram_guard` as a peer for `psram_speed.h` until #280 removes it (`meshcore_run.c` asks
-`psram_speed_trial_pending` and `psram_speed_on_pass`; the switch's choice, gate and console calls are forbidden). The
+Also open: `mesh` still has `psram_guard` as a peer for `psram_speed.h` in `tools/layers.conf`, unused since #353 removed
+the trial's hold from `meshcore_run.c`; the peer lines go with #280. The
 own include roots of the bundled third-party code (`vendored` lines: MeshCore, its Crypto library, ed25519, base64)
 are not scanned. The message journal's SD batches through `lichen_fs_sd_begin`/`lichen_fs_sd_end` (`lichen_fs.h`); the journal still
 lives at `/sd/lichen/messages` instead of `lichen_fs_sd_dir`, moving the history is a separate decision. From #84: the

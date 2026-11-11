@@ -239,7 +239,6 @@ lichen_sys_psram_speed_choice	SYSTEM	any	lichen_sys_psram.h
 lichen_sys_psram_speed_other	SYSTEM	any	lichen_sys_psram.h
 lichen_sys_psram_speed_supported	SYSTEM	any	lichen_sys_psram.h
 lichen_sys_psram_speed_value	SYSTEM	any	lichen_sys_psram.h
-lichen_sys_psram_trial_pending	SYSTEM	any	lichen_sys_psram.h
 lichen_sys_psram_tuning_text	SYSTEM	any	lichen_sys_psram.h
 lichen_sys_radio_held_by	SYSTEM	any	lichen_sys_radio.h
 lichen_sys_radio_hold	SYSTEM	any	lichen_sys_radio.h

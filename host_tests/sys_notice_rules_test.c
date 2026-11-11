@@ -57,6 +57,17 @@ static void test_boot_once(void) {
     CHECK(step(&st2, &s) == 0); // a quiet boot says nothing
 }
 
+// #353: a badge back at 80 MHz on PSRAM evidence says so once per boot, as an error (lost until chosen again, #113)
+static void test_psram_80(void) {
+    sysn_state_t    st = {0};
+    sysn_snapshot_t s  = quiet();
+    s.psram_fell       = true;
+    CHECK(step(&st, &s) == 1 && ev[0] == SYSN_PSRAM_80);
+    CHECK(step(&st, &s) == 0);
+    sysn_info_t info = sysn_info(SYSN_PSRAM_80);
+    CHECK(info.level == 2 && strcmp(info.title, "PSRAM back at 80 MHz") == 0);
+}
+
 // #110: a drive that did not mount is told once, as an error; it is never formatted, so this is the user's only hint
 static void test_storage_unmounted(void) {
     sysn_state_t    st = {0};
@@ -186,6 +197,7 @@ static void test_info(void) {
 
 int main(void) {
     test_boot_once();
+    test_psram_80();
     test_storage_unmounted();
     test_counters();
     test_sd();

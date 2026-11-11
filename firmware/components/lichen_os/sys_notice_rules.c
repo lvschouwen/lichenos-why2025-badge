@@ -69,6 +69,9 @@ size_t sysn_step(sysn_state_t *st, sysn_snapshot_t const *s, sysn_event_t *out, 
         if (s->psram_bad) {
             ev[n++] = SYSN_PSRAM;
         }
+        if (s->psram_fell) {
+            ev[n++] = SYSN_PSRAM_80;
+        }
         if (s->storage_unmounted) {
             ev[n++] = SYSN_STORAGE_UNMOUNTED;
         }
@@ -128,6 +131,7 @@ sysn_info_t sysn_info(sysn_event_t event) {
         [SYSN_ENV_LOST]          = {1, F_ONCE_BOOT, "sensors_env", "Air sensor stopped"},
         [SYSN_STORAGE_LOW]       = {1, F_COALESCE, "storage", "Storage almost full"},
         [SYSN_STORAGE_UNMOUNTED] = {2, F_ONCE_BOOT, "storage", "Internal storage not mounted"},
+        [SYSN_PSRAM_80]          = {2, F_ONCE_BOOT, "psram", "PSRAM back at 80 MHz"}, // lost until chosen again (#113)
     };
     (void)F_SILENT;
     return event < SYSN_EVENT_COUNT ? table[event] : table[SYSN_CRASH];

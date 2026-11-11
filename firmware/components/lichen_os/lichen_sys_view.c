@@ -223,10 +223,6 @@ unsigned lichen_sys_psram_speed_other(void) {
     return psram_speed_other();
 }
 
-bool lichen_sys_psram_trial_pending(void) {
-    return psram_speed_trial_pending();
-}
-
 size_t lichen_sys_psram_tuning_text(char *out, size_t cap) {
     return psram_boot_tuning_text(out, cap);
 }

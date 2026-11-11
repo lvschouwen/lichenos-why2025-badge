@@ -18,8 +18,6 @@ bool lichen_sys_psram_speed_choice(unsigned target_mhz);
 size_t lichen_sys_psram_speed_value(char *out, size_t cap);
 // The speed the Settings row would switch to, MHz. Any task.
 unsigned lichen_sys_psram_speed_other(void);
-// A 120 MHz trial is running (MeshCore does not start meanwhile). Any task.
-bool lichen_sys_psram_trial_pending(void);
 // The tuning line ("phase 67.50 (run 4/4), delayline idx 15 ..."); returns the length. Any task.
 size_t lichen_sys_psram_tuning_text(char *out, size_t cap);
 

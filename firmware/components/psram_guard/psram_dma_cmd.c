@@ -56,7 +56,7 @@ typedef struct {
 
 static char const *const legs[5] = {"psram>int", "int>psram", "psram>psram", "sd>psram", "sd>bounce>psram"};
 static psram_dma_sd_t    s_sd;
-static atomic_flag       s_busy = ATOMIC_FLAG_INIT; // one DMA gate at a time: the console command or the trial's
+static atomic_flag       s_busy = ATOMIC_FLAG_INIT; // one DMA gate at a time: the console command or a quick round
 
 void psram_dma_set_sd(psram_dma_sd_t const *sd) {
     s_sd = *sd;
@@ -344,7 +344,7 @@ static void sweep(run_t *r, unsigned burst) {
     r->src = r->dst = r->dst2 = NULL;
     teardown(r);
     heap_caps_free(block);
-    psram_speed_gate_result(gate); // after the buffers are freed: a failed gate at 120 MHz restarts the badge
+    psram_speed_gate_result(gate, true); // after the buffers are freed: a failed gate at 120 MHz restarts the badge
 }
 
 // One automatic round (#121): every pattern on the three AXI-GDMA legs and the SD legs (skipped without a card, not a
@@ -373,28 +373,15 @@ psram_dma_round_t psram_dma_quick_round(psram_dma_round_info_t *info) {
     }
     teardown(&r);
     atomic_flag_clear(&s_busy);
+    psram_speed_gate_result(result == PSRAM_DMA_ROUND_FAIL, false); // the Bench's or the stress run's round: evidence too
     return result;
-}
-
-// The 120 MHz trial's gate. A busy engine is waited for (a Stress round, #278, ends within seconds and the run stops
-// on the trial), up to QUICK_BUSY_WAIT_MS; still busy after that is a console run, whose result reaches
-// psram_speed_gate_result itself, so it counts as a pass as before
-#define QUICK_BUSY_WAIT_MS 10000
-#define QUICK_BUSY_STEP_MS 100
-bool psram_dma_quick_gate(void) {
-    psram_dma_round_t result = psram_dma_quick_round(NULL);
-    for (int ms = 0; result == PSRAM_DMA_ROUND_BUSY && ms < QUICK_BUSY_WAIT_MS; ms += QUICK_BUSY_STEP_MS) {
-        vTaskDelay(pdMS_TO_TICKS(QUICK_BUSY_STEP_MS));
-        result = psram_dma_quick_round(NULL);
-    }
-    return result == PSRAM_DMA_ROUND_PASS || result == PSRAM_DMA_ROUND_BUSY;
 }
 
 static void psram_dma_cmd_locked(char const *args);
 
 void psram_dma_cmd(char const *args) {
     if (atomic_flag_test_and_set(&s_busy)) {
-        console_reply("psram dma: another DMA gate is running (the 120 MHz trial's), try again in a few seconds");
+        console_reply("psram dma: another DMA gate is running (the Bench's or the stress run's), try again in a few seconds");
         return;
     }
     psram_dma_cmd_locked(args);
@@ -442,5 +429,5 @@ static void psram_dma_cmd_locked(char const *args) {
                   sd_text(&r, sd, sizeof(sd)), (unsigned)((esp_timer_get_time() - t0) / 1000),
                   r.errors ? " (stopped: DMA refused, timed out, a cache sync or a card read failed)" : "");
     teardown(&r);
-    psram_speed_gate_result(gate_failed(&r));
+    psram_speed_gate_result(gate_failed(&r), true);
 }

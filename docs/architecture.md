@@ -5,7 +5,7 @@ the WHY2025 badge (lean firmware, #61); MeshCore is its first app (#67).
 
 ## Two chips
 
-**P4 (Lichen):** dual-core RISC-V at 360 MHz (rev v1.0 silicon), 32 MB PSRAM at 80 MHz by default, 120 MHz through the runtime switch in Settings (a patched IDF option, #94, #121;
+**P4 (Lichen):** dual-core RISC-V at 360 MHz (rev v1.0 silicon), 32 MB PSRAM at 120 MHz by default, back to 80 only on PSRAM evidence (a patched IDF option, #94, #121, #353;
 see docs/psram-speed-switch.md; at 200 MHz this board flips bits in PSRAM words, #89/#93, 80 MHz is the known-clean fallback; `fw psram` watches it
 with canaries), 16 MB flash.
 - Runs Lichen, the apps (MeshCore included, #33 option 1) and all UI.
@@ -83,8 +83,8 @@ is not refactored by v2. A C6-side change in a v2 wave needs `ota-c6` before the
 - **TCP window:** `CONFIG_LWIP_TCP_WND_DEFAULT=16384` (16 KiB), `LWIP_TCP_RECVMBOX_SIZE=16`.
 - **`WIFI_PS_NONE`:** `lichen_net/wifi_service.c:152` (`wifi_ps_mode`, #146/#76). The IDF default modem sleep gives RTT spikes of
   seconds; `fw wifi ps` changes it.
-- **PSRAM DMA to SDIO (#121):** SDIO transfers use buffers the DMA reads; PSRAM at 120 MHz is only kept after the DMA gate
-  (`docs/psram-speed-switch.md`). Internal DMA RAM stays scarce: bench gate `fw mem`.
+- **PSRAM DMA to SDIO (#121):** SDIO transfers use buffers the DMA reads; a failed DMA gate round at 120 MHz puts the
+  PSRAM back at 80 (`docs/psram-speed-switch.md`, #353). Internal DMA RAM stays scarce: bench gate `fw mem`.
 
 - **Pairing:** the P4 builds the fork through `override_path` (`firmware/main/idf_component.yml`: v3.0.10 plus the SDIO RX
   lost-wakeup fix, #60); the C6 uses registry 3.0.10 (`c6/main/idf_component.yml`). So only the P4 has the fix. The
@@ -212,7 +212,7 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   (`ota/ota_server.c:405-408`) before touching the file, so the stored key is forgotten and the next boot checks fully.
   Every writer of that directory must do the same.
 - **P4 OTA validity needs the C6:** a pending image is marked valid only once, after `OTA_VALID_AFTER_S`, the C6 link
-  is up, no PSRAM trial is live and, on a boot with a display, the shell is up (`ota/ota_valid.c` `ota_trial_step` and
+  is up and, on a boot with a display, the shell is up (`ota/ota_valid.c` `ota_trial_step` and
   `ota_trial_run`, the loop `main.c` `ota_trial_wait` drives). Only a deliberately headless boot (`fw noscreen`) is
   proven without the shell (#293); a display that failed to start never proves the image, so the next reset rolls it
   back. While the C6 link is down the trial keeps watching and rolls back at `OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S`
@@ -542,7 +542,7 @@ retries a 503 with backoff and exits non-zero on the first other answer that is 
 - **Keys**: the physical keys are locked for the run with the #190 lock (`ui_remote_hold`; the monitor counts as
   console activity, so the lock's timeout never ends it). Esc held 3 s takes them back and stops the run (`esc`).
   They are free again at the end, on every exit path.
-- **Refused** while a run is on, during an update or power off, during the 120 MHz PSRAM trial, with the C6 link not
+- **Refused** while a run is on, during an update or power off, with the C6 link not
   up, at a thermal warning, or under 48 KB free DMA RAM or 8 MB free PSRAM. No card: the SD worker is skipped and the
   start line says so. The badge cannot read its battery (Settings > Battery), so there is no battery interlock.
 - **Stops** at the first failure (`stress_calc.c`, in this order): a file or copy read back different (`mismatch`), DMA
@@ -552,8 +552,7 @@ retries a 503 with backoff and exits non-zero on the first other answer that is 
   DMA gate round overlapped (`dma_floor`), a stack whose high-water fell under 256 B during the run (`stack`; a task
   already under it at the start fails only after falling 32 B more), workers still running 60 s after the stop
   (`hung`; the next run waits until they returned). Without failing: Esc held, `fw stress stop`, power off, an update,
-  the 120 MHz trial starting (`trial`: its gate waits up to 10 s for a busy engine, the run gives it up within a
-  second), a thermal warning (`hot`), the C6 link not up (`c6`). The test files go on every exit path, leftovers of a
+  a thermal warning (`hot`), the C6 link not up (`c6`). The test files go on every exit path, leftovers of a
   cut run at the next start.
 - **Lifetimes**: workers and `stress_stop` reach the monitor only through two semaphores that live for good, never its
   task handle; the monitor clears the run flag only after every worker returned, so a new run never resets state a
@@ -566,7 +565,7 @@ retries a 503 with backoff and exits non-zero on the first other answer that is 
     `stress: dma: skipped, gate busy`
   - I every 10 s `stress: t=<s>s dma free=<B> min=<B> largest=<B> int free=<B> min=<B> largest=<B> psram=<B> pool
     peak=<n> drop=<n> lat=<ms>ms ok` (the reason instead of `ok` once the run stopped)
-  - E `stress: STOP <reason> at <s>s` for a failure, W for esc, stop, poweroff, update, trial, hot, c6; E
+  - E `stress: STOP <reason> at <s>s` for a failure, W for esc, stop, poweroff, update, hot, c6; E
     `stress: stack low <task> <free>/<size>`, `stress: dma: <n> bad bytes, <n> errors`, `stress: <worker>: read back
     different`, `stress: <n> worker(s) hung`; W `stress: sd|fs: file error <errno>`
   - the report: `stress: done <s>s PASS|FAIL` (I, E for FAIL), `stress: min ...` (the lowest free figures, the

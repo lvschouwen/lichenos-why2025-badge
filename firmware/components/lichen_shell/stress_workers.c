@@ -381,7 +381,7 @@ static bool heap_sound(bool with_psram) {
     return ok;
 }
 
-// A failure at E; Esc, stop, power off, an update, the trial, heat or the C6 at W (the run ended early, nothing failed)
+// A failure at E; Esc, stop, power off, an update, heat or the C6 at W (the run ended early, nothing failed)
 static void latch(stress_reason_t r, uint32_t t_s) {
     if (stress_latch(&s_m.run, r, t_s)) {
         char line[32];
@@ -433,7 +433,6 @@ static stress_reason_t outside_stop(void) {
     stress_outside_t in = {.asked      = (stress_reason_t)atomic_load(&s_stop_req),
                            .poweroff   = power_going_down(),
                            .update     = update_screen_busy(),
-                           .trial      = lichen_sys_psram_trial_pending(),
                            .hot        = hot(),
                            .c6_trouble = c6_trouble()};
     return stress_outside(&in);
@@ -558,7 +557,6 @@ char const *stress_start(unsigned minutes) {
                            .poweroff    = power_going_down(),
                            .c6_trouble  = c6_trouble(),
                            .hot         = hot(),
-                           .psram_trial = lichen_sys_psram_trial_pending(),
                            .dma_free    = (uint32_t)lichen_sys_mem_free(LICHEN_SYS_MEM_DMA),
                            .psram_free  = (uint32_t)lichen_sys_mem_free(LICHEN_SYS_MEM_PSRAM)};
     char const *why = minutes < 1 || minutes > STRESS_MIN_MAX ? "1 to 30 minutes" : stress_refusal(&in);

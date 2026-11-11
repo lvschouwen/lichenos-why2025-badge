@@ -18,6 +18,7 @@
 #include "lichen_sys_app.h"
 #include "lichen_sys_notify.h"
 #include "psram_boot.h"
+#include "psram_speed.h"
 #include "storage.h"
 #include "sys_notice_rules.h"
 
@@ -42,6 +43,7 @@ static void body_for(sysn_event_t e, sysn_snapshot_t const *s, lichen_sd_info_t 
     switch (e) {
     case SYSN_CRASH: snprintf(out, cap, "Lichen restarted after a crash. Open this for the Crash log."); break;
     case SYSN_PSRAM: psram_boot_bad(out, cap); break;
+    case SYSN_PSRAM_80: psram_speed_fell(out, cap); break;
     case SYSN_CLOCK_IGNORED:
         snprintf(out, cap, "A time answer far from the clock was refused (%u since boot).", (unsigned)s->clock_refused);
         break;
@@ -83,6 +85,7 @@ static void read_snapshot(sysn_snapshot_t *s, lichen_sd_info_t *sd, unsigned pol
     s->crash_recovered        = lichen_sys_crash_recovered();
     s->storage_unmounted      = !lichen_sys_storage_mounted();
     s->psram_bad              = psram_boot_bad(NULL, 0);
+    s->psram_fell             = psram_speed_fell(NULL, 0);
     lichen_clock_sync_t clock = lichen_sys_clock_sync_info();
     s->clock_refused          = clock.refused;
     s->clock_recovered        = clock.last_verdict == LICHEN_CLOCK_RECOVERED;

@@ -13,5 +13,5 @@ void psram_reg_boot(void);
 // so any task may ask, the LVGL task included. Never writes a register.
 reg_status_t psram_reg_get(reg_entry_t const *e, reg_value_t *out);
 
-// psram.fail_* and psram.aborts (#329): the speed switch's record in RAM (a copy under its mutex), never NVS or a register
+// psram.fail_* and psram.aborts (#329; aborts = the arm count since #353): the speed switch's record in RAM (a copy under its mutex), never NVS or a register
 reg_status_t psram_reg_fail_get(reg_entry_t const *e, reg_value_t *out);

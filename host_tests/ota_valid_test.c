@@ -83,19 +83,6 @@ static void test_display_failed(void) {
     CHECK(step(zero) == OTA_TRIAL_STAY); // a zeroed display field is the failed one
 }
 
-// A live 120 MHz PSRAM trial defers the mark until it ends; the rollback for a dead C6 link still wins
-static void test_psram_trial(void) {
-    ota_trial_in_t in = up_at(OTA_VALID_AFTER_S + 10);
-    in.psram_trial    = true;
-    CHECK(step(in) == OTA_TRIAL_WAIT);
-    in.psram_trial = false;
-    CHECK(step(in) == OTA_TRIAL_MARK_VALID);
-    in             = up_at(OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S);
-    in.psram_trial = true;
-    in.c6_up       = false;
-    CHECK(step(in) == OTA_TRIAL_ROLL_BACK);
-}
-
 // For callers that may restart, a state nobody could read counts as a trial (#285 review)
 static void test_may_be_on_trial(void) {
     CHECK(ota_image_may_be_on_trial(OTA_IMAGE_ON_TRIAL));
@@ -129,7 +116,6 @@ typedef struct {
     uint32_t      uptime_s;      // now; the boot steps took this long
     uint32_t      c6_from_s;     // the C6 link is up from here (UINT32_MAX: never)
     uint32_t      shell_from_s;  // the shell is up from here
-    uint32_t      psram_until_s; // a PSRAM trial is live before this
     ota_display_t display;
     int           unknown_reads; // the first reads fail
     int           mark_fails;    // the first marks fail
@@ -142,7 +128,6 @@ static void fake_read(void *ctx, ota_trial_in_t *in) {
     in->display     = f->display;
     in->shell_up    = f->display == OTA_DISPLAY_UP && f->uptime_s >= f->shell_from_s;
     in->c6_up       = f->uptime_s >= f->c6_from_s;
-    in->psram_trial = f->uptime_s < f->psram_until_s;
     in->uptime_s    = f->uptime_s;
 }
 
@@ -198,18 +183,6 @@ static void test_loop_timeline(void) {
     f.c6_from_s = UINT32_MAX;
     CHECK(run(&f) == OTA_TRIAL_END_ROLL_BACK && f.uptime_s == give_up && f.marks == 0);
 
-    f               = badge(); // a PSRAM trial live until 60 s: valid once it ends
-    f.psram_until_s = 60;
-    CHECK(run(&f) == OTA_TRIAL_END_VALID && f.uptime_s == 60);
-
-    f               = badge(); // a PSRAM trial that never ends: stays on trial at the rollback limit, the loop stops
-    f.psram_until_s = UINT32_MAX;
-    CHECK(run(&f) == OTA_TRIAL_END_STAY && f.uptime_s == give_up && f.marks == 0);
-
-    f               = badge(); // a PSRAM trial live and the C6 link down: the rollback at 105 s still comes
-    f.psram_until_s = UINT32_MAX;
-    f.c6_from_s     = UINT32_MAX;
-    CHECK(run(&f) == OTA_TRIAL_END_ROLL_BACK && f.uptime_s == give_up);
 }
 
 static void test_loop_retries(void) {
@@ -235,7 +208,6 @@ int main(void) {
     test_display_up();
     test_display_skipped();
     test_display_failed();
-    test_psram_trial();
     test_image_state();
     test_may_be_on_trial();
     test_update_refused();

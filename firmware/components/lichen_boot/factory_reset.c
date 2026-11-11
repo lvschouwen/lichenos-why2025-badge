@@ -49,7 +49,7 @@ typedef struct {
 } nvs_name_t;
 
 bool factory_reset_request(factory_level_t level) {
-    psram_speed_no_rearm(); // the restart that follows comes back at 80 MHz whatever the old record said (#121)
+    psram_speed_no_rearm(); // the restart that follows comes back at 80 MHz, then arms 120 from the erased record (#121, #353)
     nvs_handle_t nvs;
     if (level == FACTORY_NONE || nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
         return false;

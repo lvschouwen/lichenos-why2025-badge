@@ -45,7 +45,7 @@ stress_cmd_t stress_parse(char const *args, unsigned *minutes) {
 // Indexed by stress_reason_t; one string each, so the log lines and the screen share them
 static char const *const REASONS[STRESS_REASONS] = {
     "ok", "mismatch", "dma_bad", "heap", "alloc", "lockcheck", "latency", "dma_floor", "stack", "hung",
-    "esc", "stop", "poweroff", "update", "trial", "hot", "c6",
+    "esc", "stop", "poweroff", "update", "hot", "c6",
 };
 
 char const *stress_reason_name(stress_reason_t r) {
@@ -71,8 +71,8 @@ stress_reason_t stress_outside(stress_outside_t const *in) {
     if (in->asked != STRESS_NONE) {
         return in->asked;
     }
-    bool const      hit[] = {in->poweroff, in->update, in->trial, in->hot, in->c6_trouble};
-    stress_reason_t why[] = {STRESS_POWEROFF, STRESS_UPDATE, STRESS_TRIAL, STRESS_HOT, STRESS_C6};
+    bool const      hit[] = {in->poweroff, in->update, in->hot, in->c6_trouble};
+    stress_reason_t why[] = {STRESS_POWEROFF, STRESS_UPDATE, STRESS_HOT, STRESS_C6};
     for (size_t i = 0; i < sizeof(hit) / sizeof(hit[0]); i++) {
         if (hit[i]) {
             return why[i];
@@ -155,9 +155,6 @@ char const *stress_refusal(stress_gate_in_t const *in) {
     }
     if (in->update || in->poweroff) {
         return "an update or power off is under way";
-    }
-    if (in->psram_trial) {
-        return "the 120 MHz PSRAM trial is running";
     }
     if (in->c6_trouble) {
         return "the C6 link is not up";

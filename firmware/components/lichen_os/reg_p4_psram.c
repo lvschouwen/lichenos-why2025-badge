@@ -12,10 +12,10 @@
 // psram_clk_src_sel, the order of psram_ctrlr_ll_select_clk_source
 static char const *const clk_src_names[] = {"xtal", "mpll", "spll", "cpll"};
 
-// psram_fail_kind_t, in its order (#329)
+// psram_fail_kind_t, in its order (#329); 3..9 are the per-boot trial's, never recorded since #353, kept so the
+// numbers stay what they were
 static char const *const fail_names[] = {"none", "boot_check", "dma_gate", "crash", "restart", "aborted", "gave_up",
-                                         "crash_armed", "against_rec",
-                                         "power_resets"};
+                                         "crash_armed", "against_rec", "power_resets", "canary", "heap"};
 _Static_assert(sizeof(fail_names) / sizeof(fail_names[0]) == PSRAM_FAIL_KINDS, "psram.fail_why names out of step");
 
 #define PSRAM_FAIL_RO(id_, type_, name_, max_)                                                                         \
@@ -43,7 +43,7 @@ static reg_entry_t const rows[] = {
     PSRAM_FAIL_RO(REG_ID_PSRAM_FAIL_RST, REG_T_STR, "psram.fail_rst", REG_STR_MAX),
     PSRAM_FAIL_RO(REG_ID_PSRAM_FAIL_AT120, REG_T_BOOL, "psram.fail_at120", 0),
     PSRAM_FAIL_RO(REG_ID_PSRAM_FAIL_FW, REG_T_STR, "psram.fail_fw", REG_STR_MAX),
-    PSRAM_FAIL_RO(REG_ID_PSRAM_ABORTS, REG_T_U8, "psram.aborts", PSRAM_SPEED_MAX_ABORTS),
+    PSRAM_FAIL_RO(REG_ID_PSRAM_ABORTS, REG_T_U8, "psram.aborts", PSRAM_SPEED_MAX_ARMS),
 };
 
 reg_p4_dom_t const reg_p4_psram = {.rows = rows, .count = sizeof(rows) / sizeof(rows[0])};

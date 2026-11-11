@@ -17,6 +17,7 @@ enum { SYSN_UPD_NONE, SYSN_UPD_UPDATED, SYSN_UPD_ROLLED_BACK }; // upd_result_t
 typedef struct {
     bool     crash_recovered; // this boot follows a crash (#72)
     bool     psram_bad;       // the PSRAM tuning or boot check failed (#40)
+    bool     psram_fell;      // PSRAM evidence at 120 MHz put the badge back at 80 until a speed is chosen (#353)
     uint32_t clock_refused;   // time answers refused since boot (#8)
     bool     clock_recovered; // the last answer was taken as a recovery from a wrong clock
     int      update;          // SYSN_UPD_*: the boot after an update (#76)
@@ -48,6 +49,7 @@ typedef enum {
     SYSN_ENV_LOST,
     SYSN_STORAGE_LOW,
     SYSN_STORAGE_UNMOUNTED,
+    SYSN_PSRAM_80,
     SYSN_EVENT_COUNT
 } sysn_event_t;
 

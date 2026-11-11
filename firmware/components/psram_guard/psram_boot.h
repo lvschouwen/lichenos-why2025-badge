@@ -24,6 +24,10 @@ void psram_boot_policy(void);
 // read-only afterwards: any task (#62's notice)
 bool psram_boot_bad(char *why, size_t cap);
 
+// Bad bytes the dense boot check found (both passes, and the same block checked again): PSRAM evidence for the speed
+// switch (#353), unlike a fallen-back or short tuning window, which only marks the boot bad. Read-only after the check
+size_t psram_boot_bad_bytes(void);
+
 // "fw psram": tuning, registers, boot check, LDO lines
 void psram_boot_print(void);
 

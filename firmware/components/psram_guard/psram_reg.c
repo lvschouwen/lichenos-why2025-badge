@@ -59,7 +59,7 @@ reg_status_t psram_reg_fail_get(reg_entry_t const *e, reg_value_t *out) {
         return REG_OK;
     case REG_ID_PSRAM_FAIL_AT120: out->u = r.last.at120; return REG_OK;
     case REG_ID_PSRAM_FAIL_FW: snprintf(out->s, sizeof(out->s), "%s", none ? "none" : r.last.fw); return REG_OK;
-    case REG_ID_PSRAM_ABORTS: out->u = r.aborts; return REG_OK;
+    case REG_ID_PSRAM_ABORTS: out->u = r.arms; return REG_OK;
     default: return REG_FAILED;
     }
 }

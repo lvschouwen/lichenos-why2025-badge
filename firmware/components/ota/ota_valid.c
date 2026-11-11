@@ -2,7 +2,7 @@
 
 static bool proven(ota_trial_in_t const *in) {
     bool ui_ok = in->display == OTA_DISPLAY_SKIPPED || (in->display == OTA_DISPLAY_UP && in->shell_up);
-    return in->uptime_s >= OTA_VALID_AFTER_S && in->c6_up && !in->psram_trial && ui_ok;
+    return in->uptime_s >= OTA_VALID_AFTER_S && in->c6_up && ui_ok;
 }
 
 ota_trial_act_t ota_trial_step(ota_trial_in_t const *in) {
@@ -18,10 +18,8 @@ ota_trial_act_t ota_trial_step(ota_trial_in_t const *in) {
     if (ota_should_roll_back_now(true, in->c6_up, in->uptime_s)) {
         return OTA_TRIAL_ROLL_BACK;
     }
-    // The C6 link down is watched up to the rollback (#295); a PSRAM trial is waited for up to the same limit, so one
-    // that never ends cannot keep the loop going
-    bool psram_wait = in->psram_trial && in->uptime_s < OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S;
-    if (!in->c6_up || psram_wait || in->uptime_s < OTA_VALID_AFTER_S) {
+    // The C6 link down is watched up to the rollback (#295)
+    if (!in->c6_up || in->uptime_s < OTA_VALID_AFTER_S) {
         return OTA_TRIAL_WAIT;
     }
     return OTA_TRIAL_STAY;
