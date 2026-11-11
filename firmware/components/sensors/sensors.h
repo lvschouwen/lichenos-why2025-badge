@@ -21,7 +21,8 @@ void sensors_register_console(void);
 
 // The chips' configuration as they report it (#318): the value of key (sensors_cfg_key_t) from the cached read-back the
 // sampling task takes after each chip init. live = also ask the task for a fresh read-back and wait for it (up to
-// about 300 ms; only when the service runs): a console ask. Screens pass false and never touch the bus. False when the
+// about 300 ms; only when the service runs): a console ask. A live ask the task does not answer in time is a failure.
+// A stopped service has no configuration to give (stop clears it, start reads it back again). Screens pass false and never touch the bus. False when the
 // chip is not up or its read-back failed: a clear failure, never zeros. *out is the register code, or the decoded
 // heater temperature (C) / duration (ms) / on flag.
 bool sensors_cfg_get(unsigned key, bool live, uint32_t *out);

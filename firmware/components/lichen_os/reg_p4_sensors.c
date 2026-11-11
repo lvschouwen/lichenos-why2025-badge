@@ -1,5 +1,5 @@
 #include "reg_p4.h"
-#include "ui_lock_owner.h"
+#include "ui_service.h"
 
 // The P4's registry keys of domain 0x13: sens.* (#318, row file split #315): the BMI270 and BME690 configuration read
 // back from the chips by the sensors task (sensors_cfg_get). All RO. An ENUM's value is the chip's own register code,
@@ -7,8 +7,7 @@
 // Keep ESP calls out of this file (the getter lives in the sensors component, declared extern here, stubbed in
 // host_tests/reg_stubs_sensors.c) so the host test can link it.
 extern bool sensors_cfg_get(unsigned key, bool live, uint32_t *out);
-// The console may wait for a live read-back, the LVGL task never does (as lichen_reg.c's may_wait)
-extern ui_lock_verdict_t ui_service_lock_check(void);
+// (a header would put the sensors dir on reg_service_test's include path: CMake outside this domain's block)
 
 static char const *const odr_acc[]     = {"reserved", "0.78Hz", "1.56Hz", "3.12Hz", "6.25Hz", "12.5Hz", "25Hz",
                                           "50Hz",     "100Hz",  "200Hz",  "400Hz",  "800Hz",  "1600Hz"};

@@ -253,6 +253,7 @@ static void set_power(bool on) {
     taskENTER_CRITICAL(&lock);
     if (!on) {
         snap.imu_valid = snap.env_valid = snap.gas_valid = false;
+        cfg.imu_ok = cfg.env_ok = false; // a stopped service answers no configuration (#318 review)
     }
     if (!die_on) {
         snap.die_valid = false;
@@ -260,6 +261,9 @@ static void set_power(bool on) {
     stats.die_up = die_on;
     taskEXIT_CRITICAL(&lock);
     die_enabled = die_on;
+    if (on) {
+        refresh_cfg(&imu, &env); // the chips kept their configuration through the stop: read it back again
+    }
 }
 
 static int64_t earliest(int64_t a, int64_t b) {
@@ -383,18 +387,20 @@ void sensors_stats(sensors_stats_t *out) {
 }
 
 // A live ask posts a request and waits for the task to answer it, so the bus is never touched from the caller
-static void cfg_ask(void) {
+static bool cfg_ask(void) {
     unsigned want = atomic_fetch_add(&cfg_req, 1) + 1;
     poke();
     TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(CFG_WAIT_MS);
     while ((int)(atomic_load(&cfg_done) - want) < 0 && (int32_t)(until - xTaskGetTickCount()) > 0) {
         vTaskDelay(1);
     }
+    return (int)(atomic_load(&cfg_done) - want) >= 0;
 }
 
 bool sensors_cfg_get(unsigned key, bool live, uint32_t *out) {
-    if (live && sensors_running()) {
-        cfg_ask();
+    // No answer in time (config upload, stuck bus, stopped meanwhile): a failure, not the cache as if it were fresh
+    if (live && sensors_running() && !cfg_ask()) {
+        return false;
     }
     sensors_cfg_t c;
     taskENTER_CRITICAL(&lock);

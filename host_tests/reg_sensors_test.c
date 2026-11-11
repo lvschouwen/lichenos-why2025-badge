@@ -3,7 +3,7 @@
 #include "reg.h"
 #include "reg_p4.h"
 #include "sensors_cfg.h"
-#include "ui_lock_owner.h"
+#include "ui_service.h"
 
 #include <math.h>
 #include <stdio.h>
