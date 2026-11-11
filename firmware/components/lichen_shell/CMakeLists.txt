@@ -54,7 +54,7 @@ idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_r
                             "app_settings.c" "attention.c" "attention_policy.c" "app_about.c" "station_view.c" "raw_keys.c" "app_icons.c" "wifi_screen.c" "wifi_analyser_screen.c" "setup_state.c" "setup_screens.c" "ui_keys.c" "ui_overflow.c" "ui_probe.c" "remote_ctl.c" "ui_remote.c"
                             "boot_screen.c" "status_bar.c" "lora_activity.c" "link_state.c" "logo.c" "update_status.c" "update_mode.c" "update_screen.c" "shot_blend.c" "screenshot.c" "time_fields.c" "time_set_screen.c"
                             "dialog.c" "dialog_countdown.c" "ui_check.c" "ui_perf.c" "ui_perf_stats.c" "app_bench.c" "bench_calc.c" "app_stress.c" "stress_workers.c" "stress_calc.c" "app_crashlog.c" "app_power.c" "app_console.c" "console_model.c"
-                            "sd_screen.c" "sd_settings_model.c"
+                            "sd_screen.c" "sd_settings_model.c" "about_dev.c"
                             "idle_policy.c" "restart_frame.c" "draw_stack.c" "draw_call.c" "screen_idle.c" "lock_combo.c" "saver_layout.c" "screen_saver.c" "station_clock.c" "saver_station.c"
                             "notify_view.c" "notify_ui.c" "notify_centre.c"
                             "shortcut.c" "shortcuts.c" "app_battery.c"

@@ -1,11 +1,13 @@
 // About Lichen (#66, lichen.html bottom): logo, what a lichen is, then the OS and the hardware only (the OS speaks only for
 // itself; an app's own details are on its Settings page): version, free memory, the C6 link, Wi-Fi, the LoRa radio,
 // storage, the SD card, uptime and the local clock. Up/Down scroll when it doesn't fit; the detail lines refresh once a second.
+#include "about_dev.h"
 #include "app_icons.h"
 #include "esp_app_desc.h"
 #include "esp_timer.h"
 #include "fonts.h"
 #include "lichen_app.h"
+#include "lichen_reg.h"
 #include "lichen_sys_c6.h"
 #include "lichen_sys_clock.h"
 #include "lichen_sys_mem.h"
@@ -25,9 +27,21 @@
 
 #define SCROLL_STEP      96
 
-enum { ROW_WIFI, ROW_LORA, ROW_STORAGE, ROW_SD, ROW_UP, ROW_CLOCK, ROW_MEMORY, ROW_C6, ROWS }; // the last two: for developers
+enum { ROW_WIFI, ROW_LORA, ROW_STORAGE, ROW_SD, ROW_UP, ROW_CLOCK, ROW_MEMORY, ROW_C6, ROW_DEV, ROWS }; // ROW_MEMORY on: for developers
 
-static lv_obj_t *value_label[ROWS];
+// The registry keys under "For developers" (#334): the same cached getters as GET /info (ota_hw.c), through the gate's lichen_reg_get (#331); ROW_DEV + i is key i
+static struct {
+    char const *label;
+    char const *key;
+} const DEV[] = {
+    {"PSRAM clock", "psram.clk"},          {"Display refresh", "disp.refresh"},
+    {"Wi-Fi country", "wifi.country"},     {"LoRa power (dBm)", "lora.power"},
+    {"Bluetooth", "bt.state"},             {"Write failures", "settings.write_fail"},
+    {"Last write error", "settings.last_err"}, {"C6 registry caps", "c6.reg_caps"},
+};
+#define DEV_N (sizeof(DEV) / sizeof(DEV[0]))
+
+static lv_obj_t *value_label[ROW_DEV + DEV_N];
 
 static void fmt_uptime(char *out, size_t cap) {
     uint64_t s = (uint64_t)(esp_timer_get_time() / 1000000);
@@ -109,6 +123,13 @@ static void refresh(lv_timer_t *timer) {
         strlcpy(text, "not set", sizeof(text));
     }
     set_text(value_label[ROW_CLOCK], text);
+
+    for (size_t i = 0; i < DEV_N; i++) { // the cache only: never waits for the C6 or a bus (#307)
+        char raw[96] = "";
+        lichen_reg_get(DEV[i].key, raw, sizeof(raw));
+        about_dev_text(DEV[i].key, raw, text, sizeof(text));
+        set_text(value_label[ROW_DEV + i], text);
+    }
 }
 
 static void on_key(lv_event_t *e) {
@@ -144,7 +165,9 @@ static int32_t key_col_w(lv_obj_t *obj, char const *const *keys, size_t n) {
 }
 
 static lv_obj_t *add_row(lv_obj_t *parent, char const *key, char const *fixed) {
-    static char const *const KEYS[] = {"Version", "Memory", "Radio chip", "Wi-Fi", "LoRa", "Internal storage", "SD card", "Uptime", "Clock"};
+    static char const *const KEYS[] = {"Version", "Memory", "Radio chip", "Wi-Fi", "LoRa", "Internal storage", "SD card", "Uptime", "Clock",
+                                           "PSRAM clock", "Display refresh", "Wi-Fi country", "LoRa power (dBm)", "Bluetooth",
+                                           "Write failures", "Last write error", "C6 registry caps"};
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
     lv_obj_set_size(row, LV_PCT(100), LV_SIZE_CONTENT);
@@ -216,8 +239,11 @@ static void open_about(lv_obj_t *screen) {
     add_text(screen, "For developers", THEME_DIM);
     value_label[ROW_MEMORY]  = add_row(screen, "Memory", NULL);
     value_label[ROW_C6]      = add_row(screen, "Radio chip", NULL);
+    for (size_t i = 0; i < DEV_N; i++) {
+        value_label[ROW_DEV + i] = add_row(screen, DEV[i].label, NULL);
+    }
     // The last row ended flush on the pinned hint at the scroll end (#149): its own bottom pad is room that scrolls
-    lv_obj_set_style_pad_bottom(lv_obj_get_parent(value_label[ROW_C6]), 12, 0);
+    lv_obj_set_style_pad_bottom(lv_obj_get_parent(value_label[ROW_DEV + DEV_N - 1]), 12, 0);
 
     lv_timer_t *timer = lv_timer_create(refresh, 1000, NULL);
     refresh(timer);
