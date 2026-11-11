@@ -15,6 +15,7 @@
 #include "freertos/task.h"
 #include "fw_console.h"
 #include "lichen_os.h"
+#include "lichen_reg.h"
 #include "lichen_sys_thermal.h"
 #include "lora_os.h"
 #include "reg_cmd.h"
@@ -440,6 +441,12 @@ size_t lichen_reg_cached_text(char const *name, char *buf, size_t cap) {
         build_view(e, false, false, &v); // the cache only: a status line never waits for the C6
     }
     return e ? reg_cached_text(e, &v, buf, cap) : 0;
+}
+
+// The apps' read (lichen_reg.h, #313): the same cache-only text, under the gate's name so an app never links an OS
+// symbol, and with no set beside it
+size_t lichen_reg_get(char const *name, char *buf, size_t cap) {
+    return lichen_reg_cached_text(name, buf, cap);
 }
 
 static lora_reg_hooks_t const hooks = {.answer = on_answer, .link = on_link, .radio_text = radio_text};

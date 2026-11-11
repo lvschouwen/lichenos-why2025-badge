@@ -275,6 +275,19 @@ class HardAndConf(unittest.TestCase):
         self.assertIn("../shared/arduino_shim", conf.own_dirs["mesh"])
         self.assertNotIn("../shared/arduino_shim", conf.vendored["mesh"])
 
+    def test_real_conf_lets_apps_read_the_registry_and_set_nothing(self):
+        """#313: lichen_reg.h's lichen_reg_get is the apps' one way to a registry key, and it is a read. The gate
+        declares no registry setter, and L6 may call none of the OS's: the service, the setters, the transport."""
+        tools = os.path.dirname(cl.__file__)
+        conf = cl.parse_conf(cl.read(os.path.join(tools, "layers.conf")))
+        gate = {f: h for f, h, _ in cl.gate_functions(os.path.join(tools, ".."))}
+        self.assertEqual(gate.get("lichen_reg_get"), "lichen_reg.h")
+        self.assertEqual([f for f, h in gate.items() if h == "lichen_reg.h"], ["lichen_reg_get"])
+        self.assertFalse(any(cl.fnmatch.fnmatchcase("lichen_reg_get", g) for g in conf.forbid["L6"]))
+        for sym in ("lichen_reg_cached_text", "lichen_reg_start", "reg_set", "reg_cmd_set", "reg_p4_bl_set",
+                    "reg_p4_wifi_ps_set", "reg_p4_find_name", "reg_proxy_answer", "lora_reg_set", "lora_reg_get"):
+            self.assertTrue(any(cl.fnmatch.fnmatchcase(sym, g) for g in conf.forbid["L6"]), sym)
+
     def test_app_api_doc_matches_the_conf(self):
         """docs/app-api.md's peer table and "Exceptions still open" list say what layers.conf grants apps (#283)."""
         tools = os.path.dirname(cl.__file__)
@@ -526,6 +539,33 @@ class GateAttribution(unittest.TestCase):
         code, out = fx.run()
         self.assertEqual(code, 1)
         self.assertIn("new_fn is declared in a lichen_api header but not in tools/gate_manifest.txt", out)
+
+    def test_app_reads_a_registry_key_through_the_gate_and_sets_none(self):
+        """#313 with the real lichen_reg.h and the real L6 forbid lines: an app's lichen_reg_get (lichen_os defines it)
+        passes; lichen_os's own cached-text call and any setter are hard failures."""
+        tools = os.path.dirname(cl.__file__)
+        header = cl.read(os.path.join(tools, "..", "firmware", "components", "lichen_api", "lichen_reg.h"))
+        real = cl.parse_conf(cl.read(os.path.join(tools, "layers.conf")))
+        # the fixture's apps are L5
+        forbid = "".join("forbid L5 %s\n" % g for g in real.forbid["L6"] if "reg" in g or g == "lora_get_requested")
+        os_src = ("int lichen_reg_cached_text(void){return 1;}\nint lichen_reg_get(void){return 1;}\n"
+                  "int reg_set(void){return 2;}\nint reg_cmd_set(void){return 3;}\n")
+        files = {
+            "lichen_os": ("idf_component_register(SRCS \"o.c\" PRIV_REQUIRES lichen_api drv)", {"o.c": os_src}),
+            "lichen_notify": ("idf_component_register(SRCS \"n.c\" REQUIRES lichen_api)", {"n.c": ""}),
+            "lichen_api": ("idf_component_register(SRCS \"x.c\" INCLUDE_DIRS \".\" REQUIRES base)",
+                           {"x.c": "int api_fn(void){return 5;}\n", "lichen_reg.h": header}),
+            "shell": ("idf_component_register(SRCS \"s.c\" REQUIRES lichen_api)", {"s.c": ""}),
+            "app": ("idf_component_register(SRCS \"a.c\" REQUIRES lichen_api)",
+                    {"a.c": "int lichen_reg_get(void);\nint app_fn(void){return lichen_reg_get();}\n"}),
+        }
+        fx = Fixture(self, conf=GATE_CONF + forbid, overrides=files)
+        self.assertEqual(fx.run("--gen-manifest")[0], 0)
+        self.assertEqual(keys(fx), set())
+        for sym in ("lichen_reg_cached_text", "reg_set", "reg_cmd_set"):
+            fx.write("firmware/components/app/a.c", "int %s(void);\nint app_fn(void){return %s();}\n" % (sym, sym))
+            fx.build()
+            self.assertEqual(keys(fx), {("C!", "app:" + sym)})
 
     def test_gate_must_not_require_l1_or_l2(self):
         fx = self.fixture([])

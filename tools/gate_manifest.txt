@@ -132,6 +132,7 @@ lichen_radio_lora_resume	RADIO	unspecified	lichen_radio.h
 lichen_radio_name	RADIO	unspecified	lichen_radio.h
 lichen_radio_set	RADIO	unspecified	lichen_radio.h
 lichen_radio_set_lora_user	RADIO	unspecified	lichen_radio.h
+lichen_reg_get	-	any	lichen_reg.h
 lichen_register_app	-	unspecified	lichen_app.h
 lichen_screen_locked	-	any	lichen_ui.h
 lichen_sensors_get	SENSORS	unspecified	lichen_sensors.h

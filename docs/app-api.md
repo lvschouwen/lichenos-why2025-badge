@@ -131,8 +131,11 @@ to `layers.conf`):
   `owner` is refused, with a rate-limited log line, unless that name holds the claim (#179). `lora_os.h` (start, stop,
   the radio switch, the C6 hooks, the registry transport `lora_reg_*` / `lora_set_reg_hooks` / `lora_get_requested`)
   is the OS's: apps never include it (`tools/layers.conf` forbids those symbols in L6).
-- The settings registry (#307/#310) has no app header yet: no app reads a registry key in wave 1. App access comes with
-  #313; the console's `fw get` / `fw set` are the OS's.
+- `lichen_reg.h` (#313): `lichen_reg_get(name, buf, cap)` reads one settings registry key (#307/#310, the `fw get`
+  names) from the OS's cache: "<value> (3.2 s ago)", "<value> (stale, 4 s ago)" or "? (<why>)", 0 for a name the
+  registry does not have. It never waits for the C6, from any task. Read-only: there is no app setter, and
+  `tools/layers.conf` forbids the registry's setters, its service calls and its transport in L6. The console's
+  `fw get` / `fw set` are the OS's.
 - `fw_console.h`: `console_register` / `console_reply` for `fw <name>` commands; `console_reply_secret` for a line
   that holds a key or a password (only the one who asked gets it: the USB console, or the Wi-Fi console's reply; never
   the log store or the Console app, #123); `system_restart_asked(why)` when a restart is what the user asked for (it
