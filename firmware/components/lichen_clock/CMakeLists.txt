@@ -15,11 +15,17 @@ if(NOT build_epoch_result EQUAL 0 OR build_epoch STREQUAL "")
     message(FATAL_ERROR "git log -1 --format=%ct failed: the clock check needs the build epoch")
 endif()
 
-idf_component_register(SRCS "clock_check.c" "clock_local.c" "lichen_clock.c" "clock_cmd.c" "clock_store.c" "clock_reg.c"
-                            "clock_keep.c" "clock_save.c"
+# reset_probe.c (#330 spike, CONFIG_LICHEN_RESET_PROBE): which store survives which reset; reset_probe_logic.c is pure
+# and host-tested (reset_probe_test.c). Remove both and the Kconfig once #326 has moved its record.
+set(srcs "clock_check.c" "clock_local.c" "lichen_clock.c" "clock_cmd.c" "clock_store.c" "clock_reg.c" "clock_keep.c"
+         "clock_save.c")
+if(CONFIG_LICHEN_RESET_PROBE)
+    list(APPEND srcs "reset_probe.c" "reset_probe_logic.c")
+endif()
+idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "../../../shared/reg"
-                       PRIV_REQUIRES fw_console esp_hw_support esp_timer log pthread lwip freertos)
+                       PRIV_REQUIRES fw_console esp_hw_support esp_timer esp_mm esp_system log pthread lwip freertos)
 # lichen_clock is the only settimeofday() caller (#83): every other call lands in __wrap_settimeofday (lichen_clock.c),
 # which refuses anything but a re-sync to the time the clock already shows (#84 T9, clock_resync_only)
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=settimeofday")

@@ -17,6 +17,10 @@
 
 #include <time.h>
 
+#if CONFIG_LICHEN_RESET_PROBE
+#include "reset_probe.h"
+#endif
+
 static RTC_NOINIT_ATTR volatile clock_rec_t s_rec;
 static portMUX_TYPE                         s_rec_mux = portMUX_INITIALIZER_UNLOCKED; // timer task vs proposers
 static clock_boot_info_t                    s_boot;
@@ -79,6 +83,9 @@ void clock_boot_init(void) {
         return;
     }
     done = true;
+#if CONFIG_LICHEN_RESET_PROBE
+    reset_probe_boot(); // #330: reads its markers before anything rewrites them
+#endif
     choose_at_boot();
     s_armed = true;
     clock_set_saver(save_now);

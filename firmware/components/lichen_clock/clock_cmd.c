@@ -14,6 +14,10 @@
 #include <string.h>
 #include <time.h>
 
+#if CONFIG_LICHEN_RESET_PROBE
+#include "reset_probe.h"
+#endif
+
 static int64_t rtc0_us, timer0_us;
 static int64_t rtc_boot_us;    // esp_clk_rtc_time() then
 
@@ -180,4 +184,7 @@ void clock_console_register(void) {
     clock_boot_init(); // normally done in start_early already; before the source record reads what the boot chose
     clock_store_init();
     console_register("clock", "clock [set [--force] <ISO8601> | sync] (source, drift, SNTP; set by hand)", cmd_clock);
+#if CONFIG_LICHEN_RESET_PROBE
+    reset_probe_console_register(); // #330 spike
+#endif
 }
