@@ -372,6 +372,8 @@ target_include_directories(psram_regs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/.
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg)
 target_compile_options(psram_regs_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME psram_regs_test COMMAND psram_regs_test)
+# reg_p4_psram.c and its stub take psram_reg_get's prototype from psram_reg.h, so a signature change fails the build
+target_include_directories(reg_service_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/psram_guard)
 # ---- end of the psram block ------------------------------------------------------------------------------
 
 # ---- registry domain 0x12 disp.* (#317): this domain's agent adds its own test below and touches no other block -------

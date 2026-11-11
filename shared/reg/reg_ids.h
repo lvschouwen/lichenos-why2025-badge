@@ -62,7 +62,8 @@ typedef enum {
     // (`fw psram dl` stays the only mutator). Clock = source / core divider / bus divider.
     REG_ID_PSRAM_CLK      = 0x1100, // psram.clk       U32 Hz, the PSRAM bus clock the dividers give (80 or 120 MHz)
     REG_ID_PSRAM_CLK_SRC  = 0x1101, // psram.clk_src   ENUM xtal / mpll / spll / cpll (HP_SYS_CLKRST psram_clk_src_sel)
-    REG_ID_PSRAM_SRC_CLK  = 0x1102, // psram.src_clk   U32 Hz, that source (its PLL registers, read at boot)
+    REG_ID_PSRAM_SRC_CLK  = 0x1102, // psram.src_clk   U32 Hz, that source: a boot snapshot of its PLL registers (PSRAM
+                                    // init acquires the MPLL, so it cannot change later); psram.clk divides it
     REG_ID_PSRAM_CORE_DIV = 0x1103, // psram.core_div  U32, the core clock divider (div_num + 1)
     REG_ID_PSRAM_BUS_DIV  = 0x1104, // psram.bus_div   U32, the SPI_MEM_S_SRAM_CLK divider (1 = equal to the core clock)
     REG_ID_PSRAM_WANT     = 0x1105, // psram.want      U32 MHz, what the speed switch asks for (80 / 120, #121)

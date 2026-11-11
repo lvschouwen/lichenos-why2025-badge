@@ -1,10 +1,12 @@
+#include "psram_reg.h"
 #include "reg_p4.h"
 
 // The P4's registry keys of domain 0x11: psram.* (#316, row file split #315). All read-only: what the MSPI controller
 // runs now, read from its registers by psram_guard (psram_reg.c), never the software speed global or the chip's mode
-// registers. `fw psram dl` stays the only mutator of the delayline. Keep ESP calls out of this file (the getter is
-// psram_guard's, declared here, stubbed in host_tests/reg_stubs_psram.c) so the host test can link it.
-reg_status_t psram_reg_get(reg_entry_t const *e, reg_value_t *out);
+// registers. `fw psram dl` stays the only mutator of the delayline. psram.src_clk, and so psram.clk's source term, is
+// a boot snapshot of the PLL frequency: PSRAM init acquires the MPLL, so it cannot change later. Keep ESP calls out of
+// this file (the getter is psram_guard's, from psram_reg.h, stubbed in host_tests/reg_stubs_psram.c) so the host test
+// can link it.
 
 // psram_clk_src_sel, the order of psram_ctrlr_ll_select_clk_source
 static char const *const clk_src_names[] = {"xtal", "mpll", "spll", "cpll"};
