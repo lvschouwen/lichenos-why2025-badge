@@ -1,6 +1,13 @@
-# tools/serial_log.py port choice (#115): by-id while it exists, else the single CH340 node, never another adapter.
+# tools/serial_log.py: port choice (#115): by-id while it exists, else the single CH340 node, never another adapter;
+# the console socket (#324): redaction, framing and fan-out, a stalled client dropped, refusal while paused, and the
+# client's choice between the socket and the pause path.
 import importlib.util
+import os
 import pathlib
+import socket
+import stat
+import tempfile
+import time
 
 _SPEC = importlib.util.spec_from_file_location(
     "serial_log", pathlib.Path(__file__).resolve().parent.parent / "tools" / "serial_log.py"
@@ -36,6 +43,191 @@ def test_two_ch340_nodes_are_not_guessed() -> None:
 def test_outage_line_names_the_gap_and_node() -> None:
     line = serial_log.outage_text(100.0, 163.4, "/dev/ttyUSB2", "fallback")
     assert line == "--- port back after 63 s: /dev/ttyUSB2 (fallback)"
+
+
+# --- console socket (#324) ---
+
+SECRET_LINES = [
+    ("fw wifi MyNet hunter22", "fw wifi ***"),
+    ("wifi MyNet hunter22", "wifi ***"),
+    ("fw mesh remote rpt1 login hunter22", "fw mesh remote rpt1 login ***"),
+    ("fw mesh remote a1b2c3 cli password hunter22", "fw mesh remote a1b2c3 cli ***"),
+    ("fw mesh remote a1b2c3 cli set guest.password x", "fw mesh remote a1b2c3 cli ***"),
+    ("fw channel add Team 8b3387e9c5cdea6ac9e5edbaa115cd72", "fw channel add Team ***"),
+    ("fw keys send down text:hunter22 enter", "fw keys send down text:*** enter"),
+    ("fw set some.password hunter22", "fw set ***"),
+    ("fw qr my secret", "fw qr ***"),
+]
+
+KEPT_LINES = [
+    "fw get bl.",
+    "fw wifi scan",
+    "fw wifi tx 40",
+    "fw wifi --clear",
+    "fw wifi",
+    "fw channel add #badgetest",
+    "fw mesh remote rpt1 login",
+    "fw mesh remote rpt1 status",
+    "fw keys send down enter",
+    "fw token",
+]
+
+
+def test_each_secret_command_is_masked() -> None:
+    for line, shown in SECRET_LINES:
+        assert serial_log.redact(line) == shown, line
+
+
+def test_normal_commands_are_kept() -> None:
+    for line in KEPT_LINES:
+        assert serial_log.redact(line) == line, line
+
+
+def test_replies_that_print_a_secret() -> None:
+    for line in ["fw token", "token", "fw channel show 1", "fw mesh remote rpt1 cli get prv.key", "fw crash dump"]:
+        assert serial_log.reply_is_secret(line), line
+    for line in ["fw get bl.", "fw crash", "fw channels", "fw mesh"]:
+        assert not serial_log.reply_is_secret(line), line
+
+
+def test_socket_used_only_when_the_logger_has_the_port_open() -> None:
+    use = serial_log.socket_usable
+    assert use(True, "--- connected open /dev/ttyUSB1\n", "/dev/ttyUSB1") == (True, "logger socket")
+    assert not use(False, "", "/dev/ttyUSB1")[0]  # no logger (or an old one without the socket)
+    assert not use(True, "", "/dev/ttyUSB1")[0]  # the socket is there but nobody answers
+    assert not use(True, "--- connected paused -\n", "/dev/ttyUSB1")[0]  # flashing
+    assert not use(True, "--- connected lost -\n", "/dev/ttyUSB1")[0]
+    assert "not /dev/ttyACM0" in use(True, "--- connected open /dev/ttyUSB1\n", "/dev/ttyACM0")[1]
+
+
+class FakeLogger:
+    def __init__(self, state="open"):
+        self.lines, self.uart = [], []
+        self.hub = serial_log.Hub(self.lines.append, self.uart.append)
+        self.hub.set_state(state, "/dev/ttyUSB1")
+
+    def client(self):
+        ours, theirs = socket.socketpair()
+        theirs.settimeout(1)
+        return self.hub.add(ours), theirs
+
+
+def received(peer: socket.socket) -> list[str]:
+    peer.settimeout(0.2)
+    data = b""
+    try:
+        while True:
+            chunk = peer.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+    except (socket.timeout, BlockingIOError):
+        pass
+    return data.decode().splitlines()
+
+
+def test_lines_are_framed_and_fanned_out_to_every_client() -> None:
+    lg = FakeLogger()
+    a, peer_a = lg.client()
+    _, peer_b = lg.client()
+    assert received(peer_a) == ["--- connected open /dev/ttyUSB1"]
+    received(peer_b)
+    peer_a.sendall(b"fw get b")
+    lg.hub.readable(a, 0.0)
+    assert lg.uart == []  # half a line waits for its newline
+    peer_a.sendall(b"l.\r\nfw mem\n")
+    lg.hub.readable(a, 0.0)
+    assert lg.uart == [b"fw get bl.\n", b"fw mem\n"]
+    lg.hub.uart_line("fw: bl.display 40", 0.0)
+    assert lg.lines[-3:] == [">> fw get bl.", ">> fw mem", "fw: bl.display 40"]
+    assert received(peer_a) == ["fw: bl.display 40"]  # the sender does not get its own line back
+    assert received(peer_b) == [">> fw get bl.", ">> fw mem", "fw: bl.display 40"]
+
+
+def test_a_secret_is_masked_in_the_log_and_for_other_clients() -> None:
+    lg = FakeLogger()
+    a, peer_a = lg.client()
+    _, peer_b = lg.client()
+    peer_a.sendall(b"fw wifi MyNet hunter22\n")
+    lg.hub.readable(a, 0.0)
+    assert lg.uart == [b"fw wifi MyNet hunter22\n"]  # the badge gets the real line
+    assert ">> fw wifi ***" in lg.lines and not any("hunter22" in l for l in lg.lines)
+    assert not any("hunter22" in l for l in received(peer_b))
+
+
+def test_a_secret_reply_reaches_the_clients_but_not_the_log() -> None:
+    lg = FakeLogger()
+    a, peer_a = lg.client()
+    peer_a.sendall(b"fw token\n")
+    lg.hub.readable(a, 100.0)
+    lg.hub.uart_line("fw: token 0123456789abcdef0123456789abcdef", 100.5)
+    assert "fw: token 0123456789abcdef0123456789abcdef" in received(peer_a)
+    lg.hub.tick(100.0 + serial_log.SECRET_QUIET_S + 1)
+    lg.hub.uart_line("I (1) later", 110.0)
+    assert not any("0123456789abcdef" in l for l in lg.lines)
+    assert "--- 1 reply lines kept out of the log (secret)" in lg.lines
+    assert lg.lines[-1] == "I (1) later"
+
+
+def test_a_stalled_client_is_dropped_without_blocking() -> None:
+    lg = FakeLogger()
+    lg.hub.max_buf = 64 * 1024
+    stalled, _peer_stalled = lg.client()  # never reads
+    _, peer_ok = lg.client()
+    received(peer_ok)
+    start = time.time()
+    line = "x" * 1000
+    for _ in range(2000):  # 2 MB: far more than socket buffers plus max_buf
+        lg.hub.uart_line(line, 0.0)
+        received_nowait(peer_ok)  # the other client keeps up
+    assert time.time() - start < 5
+    assert stalled not in lg.hub.clients and len(lg.hub.clients) == 1
+    assert any("dropped: it stopped reading" in l for l in lg.lines)
+
+
+def received_nowait(peer: socket.socket) -> bytes:
+    peer.setblocking(False)
+    data = b""
+    try:
+        while True:
+            chunk = peer.recv(1 << 20)
+            if not chunk:
+                break
+            data += chunk
+    except BlockingIOError:
+        pass
+    return data
+
+
+def test_while_paused_a_line_is_refused_not_queued() -> None:
+    lg = FakeLogger("paused")
+    a, peer = lg.client()
+    assert received(peer) == ["--- connected paused /dev/ttyUSB1"]
+    peer.sendall(b"fw get bl.\n")
+    lg.hub.readable(a, 0.0)
+    assert lg.uart == []
+    assert received(peer) == ["--- refused: the port is paused, line not sent"]
+    lg.hub.set_state("open", "/dev/ttyUSB1")
+    lg.hub.readable(a, 0.0)  # nothing queued comes out later
+    assert lg.uart == []
+
+
+def test_socket_is_private_and_a_stale_one_is_replaced() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, serial_log.SOCK_NAME)
+        open(path, "w").close()  # left over from a killed logger
+        lsock = serial_log.listen(path)
+        try:
+            mode = os.stat(path).st_mode
+            assert stat.S_ISSOCK(mode) and stat.S_IMODE(mode) == 0o600
+        finally:
+            lsock.close()
+
+
+def test_client_without_a_logger_asks_for_the_pause_path() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        missing = os.path.join(d, serial_log.SOCK_NAME)
+        assert serial_log.client_send("/dev/null", "fw mem", 0.1, None, missing) == serial_log.UNUSABLE
 
 
 if __name__ == "__main__":  # ctest runs this with the build's python, which may lack pytest

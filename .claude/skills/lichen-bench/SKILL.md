@@ -16,7 +16,9 @@ Subagents never run any of this; they stop at a green build and a local commit. 
 ## Bench console
 
 - `badge.sh` runs on the flash host over ssh (host name from `~/.config/why2025-badge/host`). Wait at least 75 s after any reboot before sending console commands; earlier ones are lost while the C6 is flashed.
-- Scripted console: `~/badge/console_session.py <port> <wait_s> <read_s> "cmd@delay" ...` on the flash host, run with `~/badge-venv/bin/python`. It opens the port without resetting the badge.
+- Read-only status (`fw get`, `mem`, `boot`, `net`, the log) goes over Wi-Fi while the badge is on it: `tools/badge.sh fw <ip> "<cmd>"`, `log <ip>`; they do not touch USB. The USB console is for the rest: Wi-Fi down, early boot, thermal shed (#324).
+- The serial logger keeps the USB port (#324): `badge.sh console|monitor|crash` go through its socket `~/badge-logs/badge-console.sock` on the flash host, so the log shows each sent line as `>> <line>` (secrets masked) and its answer, without a gap; they fall back to pausing it only when it does not run. esptool commands (flash-fw, backup, restore) still pause it.
+- Scripted console: `~/badge/console_session.py <port> <wait_s> <read_s> "cmd@delay" ...` on the flash host, run with `~/badge-venv/bin/python`. It opens the port itself, so it only works with the logger paused (`badge.sh console` is the socket-aware way); `~/badge-venv/bin/python ~/badge/serial_log.py --session <port> "<cmd>" <quiet_s> <max_s>` is the same through the socket.
 - Commands start with `fw ` (`fw help`). `fw ui` shows the nav stack and focus; `fw keys send <up|down|left|right|enter|esc|tab|bksp|text:...>` drives the real UI. Always run `fw ui` before an `enter`. Lucas may be holding the badge: only press keys when he allows it.
 - The P4 logs at INFO: `ESP_LOGI` lines show. Pick the level by #113: E when a feature is lost until someone acts, W for unexpected but handled, I for normal status.
 - See the screen with `tools/badge.sh screenshot <ip> <out.png>` (save outside the repo) and look at it. Lucas still checks what a screenshot can't show (flicker, colours on the panel).

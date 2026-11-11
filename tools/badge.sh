@@ -51,13 +51,19 @@ Usage: $(basename "$0") <command> [args]
   restore <port> <file> --yes
                             write a backup image back at offset 0 (checks the .sha256 and that the chip
                             matches the backup's name; --yes confirms overwriting the whole flash)
-  monitor <port>            open a serial console (exit with Ctrl-])
+  monitor <port>            open a serial console: through the logger's socket while it runs (line by line, leave with
+                            Ctrl-D), else miniterm with the logger paused (exit with Ctrl-])
   logger <install|start|stop|restart|status>
                             the serial logger on $HOST (tools/serial_log.py, writes ~/badge-logs/badge-serial.log there); install =
-                            copy it + udev rule + service that start it when the badge connects (#276); the port
-                            commands above pause it while they use the port
+                            copy it + udev rule + service that start it when the badge connects (#276); it keeps the
+                            port and serves ~/badge-logs/badge-console.sock: console, monitor and crash go through it
+                            (sent lines logged as ">> ...", secrets masked) and pause it only when it does not run;
+                            esptool commands (flash-fw, backup, restore, ports) always pause it (#324)
   console <port> <line>     send one line to the badge's console without resetting it and show the reply;
                             commands start with "fw " (try "fw help")
+
+Read-only status (fw get, mem, boot, net, the log) goes over Wi-Fi while the badge is on Wi-Fi ("fw <ip>", "log <ip>"
+below): it does not touch USB. Use the USB console for the rest: Wi-Fi down, early boot, thermal shed.
 
 Over Wi-Fi, while the badge is on Wi-Fi. <host> is an address or the badge's name, lichen-xxxx.local (shown in
 Settings and by "fw wifi"; needs mDNS on this machine, e.g. avahi/nss-mdns):
@@ -99,6 +105,17 @@ remote() {
 # (also on errors); if ssh dies, the logger ignores a pause older than 10 minutes.
 PORT_PAUSE='P=$HOME/badge-logs/badge-serial.log; if pgrep -f "[s]erial_log.py" >/dev/null; then : > "$P.pause"; trap '"'"'rm -f "$P.pause"'"'"' EXIT; i=0; while [ ! -e "$P.paused" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; [ -e "$P.paused" ] || echo "warning: the serial logger did not release the port" >&2; fi;'
 port_remote() { remote "$PORT_PAUSE $*"; }
+# The console through the logger's socket (#324): run serial_log.py <client args> on the badge host while the socket
+# exists; when the client says the socket cannot serve this port (exit 3: no logger, an old one, paused for a flash,
+# lost, or another port), run the fallback with the logger paused instead, as before.
+CONSOLE_SOCK='$HOME/badge-logs/badge-console.sock'
+SOCKET_FIRST='if [ -S "'"$CONSOLE_SOCK"'" ]; then '"$VENV/bin/python $REMOTE_DIR"'/serial_log.py'
+SOCKET_ELSE='; rc=$?; [ $rc -eq 3 ] || exit $rc; fi;'
+socket_or_pause() {
+    local client=$1
+    shift
+    remote "$SOCKET_FIRST $client$SOCKET_ELSE $PORT_PAUSE $*"
+}
 esptool() { port_remote "$VENV/bin/esptool $*"; }
 
 # The chip behind <port> as one lowercase word, e.g. esp32p4 (empty if it doesn't answer)
@@ -256,7 +273,8 @@ cmd_crash() {
     trap "rm -rf '$tmp'" RETURN
     local try
     for try in 1 2 3; do
-        port_remote "$VENV/bin/python $REMOTE_DIR/console_session.py '$port' 1 60 'fw crash dump@2'" | sed 's/^ *[0-9.]* //' | tr -d '\r' > "$tmp/session.txt"
+        socket_or_pause "--session '$port' 'fw crash dump' 5 60" \
+            "$VENV/bin/python $REMOTE_DIR/console_session.py '$port' 1 60 'fw crash dump@2'" | sed 's/^ *[0-9.]* //' | tr -d '\r' > "$tmp/session.txt"
         python3 -I - "$tmp/session.txt" "$tmp/core.bin" "$tmp/version" "$tmp/elfsha" <<'PY' && break
 import base64, re, sys, zlib
 lines = open(sys.argv[1]).read().split("\n")
@@ -336,7 +354,8 @@ cmd_restore() {
 
 # The serial logger on the badge host (tools/serial_log.py -> ~/badge/serial_log.py, log in ~/badge-logs/badge-serial.log).
 # A udev rule (tools/flash-host/99-why2025-badge.rules) starts badge-serial-log.service when the badge's CH340 appears,
-# also at boot (#276). Every port user in this script pauses it (PORT_PAUSE), so it can run all the time.
+# also at boot (#276). esptool users pause it (PORT_PAUSE); console users go through its socket (#324), so it can run
+# all the time.
 LOGGER_UNIT=badge-serial-log.service
 cmd_logger() {
     case $1 in
@@ -357,6 +376,8 @@ cmd_logger() {
         status)
             remote "systemctl --no-pager status $LOGGER_UNIT 2>&1 | head -n 4; P=\$HOME/badge-logs/badge-serial.log;
                     [ -e \$P.pause ] && echo 'pause requested'; [ -e \$P.paused ] && echo 'paused';
+                    S=$CONSOLE_SOCK; if [ -S \"\$S\" ]; then echo \"console socket \$S:\";
+                    cat \$HOME/badge-logs/badge-console.status 2>/dev/null; else echo 'no console socket'; fi;
                     tail -n 3 \$P 2>/dev/null" ;;
         *) usage ;;
     esac
@@ -365,7 +386,7 @@ cmd_logger() {
 cmd_monitor() {
     local port=$1
     require_espressif_port "$port"
-    ssh -t "$HOST" "$PORT_PAUSE $VENV/bin/python -m serial.tools.miniterm --raw '$port' 115200"
+    ssh -t "$HOST" "$SOCKET_FIRST --monitor '$port'$SOCKET_ELSE $PORT_PAUSE $VENV/bin/python -m serial.tools.miniterm --raw '$port' 115200"
 }
 
 # Writes one line to the console UART without resetting the badge and prints what comes back within two seconds.
@@ -383,9 +404,11 @@ cmd_console() {
     console_line "$port" "$line"
 }
 
+# Through the logger's socket when it runs (the same two-second window), the pause path below otherwise: the client
+# does not read stdin, so the script stays there for the fallback.
 console_line() {
     local port=$1 line=$2
-    port_remote "$VENV/bin/python - '$port' '$line'" <<'PY'
+    socket_or_pause "--send '$port' '$line' 2" "$VENV/bin/python - '$port' '$line'" <<'PY'
 import sys, time, serial
 port, line = sys.argv[1], sys.argv[2]
 s = serial.Serial()
