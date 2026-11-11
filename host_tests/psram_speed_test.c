@@ -195,13 +195,27 @@ static void test_aborts(void) {
     CHECK(psram_speed_boot_decide(&r, 80, true, false, &brown, &live) == PSRAM_SPEED_ACT_REARM);
     CHECK(psram_speed_boot_decide(&r, 80, true, false, &ext, &live) == PSRAM_SPEED_ACT_REARM);
     CHECK(r.aborts == 1 && !r.failed && r.trial == PSRAM_SPEED_TRIAL_ARMED && r.last.reset == 3);
+    CHECK(r.powers == 4); // counted apart (delta review M2): a hang at 120 that only EN clears looks the same
 
     // The clean restart does reach 120: the record is not written at 120 (review M3), the pass resets the count
     psram_speed_rec_t before = r;
     CHECK(psram_speed_boot_decide(&r, 120, true, false, &ctx, &live) == PSRAM_SPEED_ACT_NONE && live);
     CHECK(memcmp(&before, &r, sizeof(r)) == 0);
     psram_speed_pass(&r);
-    CHECK(!r.trial && !r.failed && r.want == 120 && r.aborts == 0 && r.last.kind == PSRAM_FAIL_ABORTED); // history kept
+    CHECK(!r.trial && !r.failed && r.want == 120 && r.aborts == 0 && r.powers == 0 && r.last.kind == PSRAM_FAIL_ABORTED);
+
+    // Five power resets in a row while armed, no marker: given up, failed (no endless re-arm of a hanging 120 MHz)
+    psram_speed_choose(&r, 120);
+    for (int i = 1; i < PSRAM_SPEED_MAX_POWERS; i++) {
+        CHECK(psram_speed_boot_decide(&r, 80, true, false, &on, &live) == PSRAM_SPEED_ACT_REARM && r.powers == i);
+    }
+    CHECK(!r.failed && r.aborts == 0 && r.last.kind == PSRAM_FAIL_ABORTED); // no note until it gives up
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &brown, &live) == PSRAM_SPEED_ACT_NONE);
+    CHECK(r.failed && r.want == 80 && !r.trial && r.last.kind == PSRAM_FAIL_POWERS && r.last.reset == 9 && !r.last.at120);
+    psram_speed_fail_text(&r.last, t, sizeof(t));
+    CHECK(strcmp(t, "power resets while armed, reset brownout, ran at 80, up 3 s, fw-605935b1") == 0);
+    psram_speed_choose(&r, 120); // the user's choice starts over
+    CHECK(r.powers == 0 && !r.failed && r.trial == PSRAM_SPEED_TRIAL_ARMED);
 
     // Three aborts in a row: given up, failed, recorded as such
     psram_speed_choose(&r, 120);
@@ -286,7 +300,7 @@ static void test_fail_kinds(void) {
 // The NVS blob: round trip, and nothing that is not a v2 record (the old 4-byte one included) read as facts
 static void test_record(void) {
     uint8_t           b[PSRAM_SPEED_REC_SIZE];
-    psram_speed_rec_t r = {.want = 120, .trial = PSRAM_SPEED_TRIAL_ARMED, .aborts = 2}, back;
+    psram_speed_rec_t r = {.want = 120, .trial = PSRAM_SPEED_TRIAL_ARMED, .aborts = 2, .powers = 4}, back;
     psram_fail_ctx_t  c = {.reset = 5, .wall_s = 1762869785u, .uptime_s = 77, .fw = "fw-605935b1"};
     psram_speed_fail_note(&r, PSRAM_FAIL_ABORTED, &c, false);
     psram_speed_rec_encode(&r, b);
@@ -304,13 +318,16 @@ static void test_record(void) {
     CHECK(back.want == 80 && !back.trial && !back.failed);
 
     // Another size or version: the default, not garbage
-    b[4] = 3;
+    b[4] = PSRAM_SPEED_REC_VERSION + 1; // and the 32-byte version 2 of the first #329 commits: no migration
     psram_speed_rec_decode(b, sizeof(b), &back);
     CHECK(back.want == 80 && !back.trial && back.last.kind == PSRAM_FAIL_NONE);
     psram_speed_rec_decode(b, 7, &back);
     CHECK(back.want == 80 && back.last.kind == PSRAM_FAIL_NONE);
+    b[4] = 2;
+    psram_speed_rec_decode(b, 32, &back);
+    CHECK(back.want == 80 && back.last.kind == PSRAM_FAIL_NONE);
 
-    // A v2 blob with a bad failure kind keeps its speed state, the failure reads as none with every fact cleared
+    // A current blob with a bad failure kind keeps its speed state, the failure reads as none with every fact cleared
     psram_speed_rec_encode(&r, b);
     b[5] = PSRAM_FAIL_KINDS;
     psram_speed_rec_decode(b, sizeof(b), &back);
@@ -320,6 +337,11 @@ static void test_record(void) {
     b[17] = 0x01;
     psram_speed_rec_decode(b, sizeof(b), &back);
     CHECK(strcmp(back.last.fw, "f?-605935b1") == 0);
+    CHECK(back.powers == 4 && b[32] == 4);
+    b[32] = PSRAM_SPEED_MAX_POWERS + 1;
+    psram_speed_rec_decode(b, sizeof(b), &back);
+    CHECK(back.want == 80 && back.powers == 0 && back.last.kind == PSRAM_FAIL_NONE);
+    psram_speed_rec_encode(&r, b);
     b[3] = PSRAM_SPEED_MAX_ABORTS + 1;
     psram_speed_rec_decode(b, sizeof(b), &back);
     CHECK(back.want == 80 && back.aborts == 0 && back.last.kind == PSRAM_FAIL_NONE);

@@ -17,11 +17,12 @@ The badge ships at 80 MHz PSRAM. 120 MHz can be tried from Settings > For develo
   `psram_speed_boot`) the boot writes `0xC4A2 << 16 | 120` to STORE15. PSRAM init takes any word but the ARM word as
   80 MHz and keeps the raw word (`psram_speed_carrier_raw`), so the next boot runs at 80 and knows the boot before it did
   run at 120 and ended without a pass, a fail or a clean re-arm. Cleared on pass and fail; the shutdown hook's re-arm
-  overwrites it. Nothing is written to flash at 120 MHz before the trial passes.
-- **NVS record** `psram_spd` = {want 80/120, trial (0 / armed), failed, aborts, last failure}; the rules are
+  overwrites it. No flash write on the success path at 120 MHz before the pass; the failure paths (a failed trial,
+  120 against the record) save their judgement.
+- **NVS record** `psram_spd` = {want 80/120, trial (0 / armed), failed, aborts, powers, last failure}; the rules are
   `psram_speed_logic.c` (host-tested). Written straight to NVS, not through the settings service (it runs before the
-  services; #325). Blob v2 (32 bytes, #329): want, trial, failed, aborts, version 2, kind, reset reason, ran-at-120,
-  wall time (LE32, 0 = clock not set), uptime (LE32), image version (16 bytes, NUL-padded, cut at 15). Any other size or
+  services; #325). Blob v3 (36 bytes, #329): want, trial, failed, aborts, version 3, kind, reset reason, ran-at-120,
+  wall time (LE32, 0 = clock not set), uptime (LE32), image version (16 bytes, NUL-padded, cut at 15), powers, 3 zero bytes. Any other size or
   version, the 4-byte record of images before #329 included (no migration: images are not released), is the default
   record (80, nothing pending, last failure none).
 
@@ -35,7 +36,9 @@ The badge ships at 80 MHz PSRAM. 120 MHz can be tried from Settings > For develo
        (anything else), ran at 120. Never re-armed by itself.
      - no marker, a panic / watchdog reset: failed too, "crash or watchdog while armed (no 120 MHz marker)". Fail-safe:
        until #330 shows STORE15 survives every crash reset, a missing marker after a crash proves nothing.
-     - no marker, power-on / ext / brownout: still armed, not counted, no note (a power cycle is no evidence).
+     - no marker, power-on / ext / brownout: still armed, no abort and no note (a power cycle is no evidence), but
+       counted in `powers`: a hang at 120 that only EN or a power cycle clears looks the same, so the fifth in a row
+       gives up: failed, "power resets while armed". A pass or a choice in Settings / `fw psram speed` resets it.
      - no marker, any other reset: the switch never took effect (#329: the restart path once panicked at 80 and that
        counted as "120 MHz failed"). Last failure "aborted (ran at 80)", `aborts + 1`, the trial stays armed and the
        shutdown hook arms STORE15 on the next clean restart (no restart of its own). The third abort in a row gives up:
@@ -85,18 +88,10 @@ to the C6 uses internal buffers).
 
 ## Build
 
-The patched IDF is a copy: `~/esp/esp-idf-v6.1-p0003` (main's IDF with 0001, plus 0003). To adopt 0003 in the main IDF:
-`git -C ~/esp/esp-idf-v6.1 apply tools/idf-patches/0003-esp32p4-psram-runtime-80-120.patch` (0001 must already be applied).
-
-Main's normal build (`BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build`) still compiles without 0003: the symbol
-is unknown to Kconfig there, the app reports 80 MHz, "not supported", and the Settings row is hidden. Patched build,
-own build directory and sdkconfig, run after `build.sh` has built the C6 image and staged the storage:
-
-    . ~/esp/esp-idf-v6.1/export.sh   # tools; the p0003 copy's own export.sh finds no tools
-    export IDF_PATH=$HOME/esp/esp-idf-v6.1-p0003
-    python $IDF_PATH/tools/idf.py -C firmware -B firmware/build-p0003 -DSDKCONFIG=$PWD/firmware/build-p0003/sdkconfig build
-
-Image: `firmware/build-p0003/badge_fw.bin`.
+The badge's IDF carries `tools/idf-patches/0001` and `0003` (`git -C ~/esp/esp-idf-v6.1 apply` each, 0001 first), and
+`firmware/sdkconfig.defaults` sets `CONFIG_SPIRAM_SPEED_RUNTIME_SELECT=y`, so the normal build
+(`BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build`) is the switchable image. An IDF without 0003 still builds:
+the symbol is unknown to Kconfig, the app reports 80 MHz and "not supported", and the Settings row is hidden.
 
 ## Bench plan (one OTA, MeshCore does not start during the trial)
 

@@ -20,7 +20,7 @@ static void last_sane(psram_fail_t *f) {
 
 void psram_speed_rec_sane(psram_speed_rec_t *r) {
     if ((r->want != 80 && r->want != 120) || r->trial > PSRAM_SPEED_TRIAL_ARMED || r->failed > 1 ||
-        r->aborts > PSRAM_SPEED_MAX_ABORTS) {
+        r->aborts > PSRAM_SPEED_MAX_ABORTS || r->powers > PSRAM_SPEED_MAX_POWERS) {
         *r = (psram_speed_rec_t){.want = 80};
     }
     last_sane(&r->last);
@@ -49,6 +49,7 @@ void psram_speed_rec_encode(psram_speed_rec_t const *r, uint8_t out[PSRAM_SPEED_
     put32(out + 8, r->last.wall_s);
     put32(out + 12, r->last.uptime_s);
     memcpy(out + 16, r->last.fw, strnlen(r->last.fw, PSRAM_FAIL_FW_MAX)); // out[31] stays 0
+    out[32] = r->powers;
 }
 
 void psram_speed_rec_decode(uint8_t const *in, size_t size, psram_speed_rec_t *r) {
@@ -61,6 +62,7 @@ void psram_speed_rec_decode(uint8_t const *in, size_t size, psram_speed_rec_t *r
         r->last.wall_s   = get32(in + 8);
         r->last.uptime_s = get32(in + 12);
         memcpy(r->last.fw, in + 16, PSRAM_FAIL_FW_MAX); // [15] stays 0
+        r->powers = in[32];
     }
     psram_speed_rec_sane(r);
 }
@@ -98,8 +100,12 @@ static psram_speed_act_t judge_at_80(psram_speed_rec_t *r, psram_fail_ctx_t cons
         psram_speed_fail_at(r, PSRAM_FAIL_CRASH_ARMED, ctx, false);
         return PSRAM_SPEED_ACT_NONE;
     }
-    if (psram_speed_reset_is_power(ctx->reset)) {
-        return PSRAM_SPEED_ACT_REARM; // a power cycle burns no abort and overwrites no failure
+    if (psram_speed_reset_is_power(ctx->reset)) { // burns no abort, overwrites no failure; only many of them fail
+        if (++r->powers >= PSRAM_SPEED_MAX_POWERS) {
+            psram_speed_fail_at(r, PSRAM_FAIL_POWERS, ctx, false);
+            return PSRAM_SPEED_ACT_NONE;
+        }
+        return PSRAM_SPEED_ACT_REARM;
     }
     if (++r->aborts >= PSRAM_SPEED_MAX_ABORTS) { // never loop: an arm that keeps dying is given up like a failure
         psram_speed_fail_at(r, PSRAM_FAIL_ABORTS, ctx, false);
@@ -189,6 +195,7 @@ void psram_speed_fail_at(psram_speed_rec_t *r, psram_fail_kind_t kind, psram_fai
 void psram_speed_pass(psram_speed_rec_t *r) {
     r->trial  = 0;
     r->aborts = 0;
+    r->powers = 0;
 }
 
 void psram_speed_choose(psram_speed_rec_t *r, unsigned target) { // the last failure stays: it is history
@@ -196,6 +203,7 @@ void psram_speed_choose(psram_speed_rec_t *r, unsigned target) { // the last fai
     r->trial  = r->want == 120 ? PSRAM_SPEED_TRIAL_ARMED : 0;
     r->failed = 0;
     r->aborts = 0;
+    r->powers = 0;
 }
 
 size_t psram_speed_value_text(psram_speed_rec_t const *r, unsigned running_mhz, char *out, size_t cap) {
@@ -228,7 +236,8 @@ char const *psram_speed_fail_kind_text(uint8_t kind) {
                                                         "restart before it passed",
                                                         "aborted (ran at 80)", "aborted 3 times, given up",
                                                         "crash or watchdog while armed (no 120 MHz marker)",
-                                                        "ran at 120 against the record"};
+                                                        "ran at 120 against the record",
+                                                        "power resets while armed"};
     return kind < PSRAM_FAIL_KINDS ? texts[kind] : "?";
 }
 

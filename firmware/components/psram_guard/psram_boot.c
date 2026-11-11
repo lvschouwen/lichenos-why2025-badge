@@ -29,6 +29,10 @@
 #include <string.h>
 #include <time.h>
 
+#if CONFIG_SPIRAM_SPEED_RUNTIME_SELECT
+#include "esp_private/mspi_timing_tuning.h" // g_mspi_psram_speed_mhz (tools/idf-patches/0003)
+#endif
+
 #define CHECK_BYTES   (4u * 1024 * 1024)
 #define LINE          128
 #define RETRY_KEY     "psram_rty"
@@ -45,7 +49,6 @@ static struct {
 } s_raw;
 
 #if CONFIG_SPIRAM_SPEED_RUNTIME_SELECT
-#include "esp_private/mspi_timing_tuning.h"
 // #329: the first app code that runs at the chosen speed. At 120 MHz leave REACHED in STORE15 (PSRAM init has read
 // and cleared the ARM word by then; the speed global is 80 until it has), so a crash anywhere later in this boot, the
 // tuning and the heap init included, is judged a failed 120 MHz boot, not an abort. Only the LP store register.

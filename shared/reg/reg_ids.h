@@ -74,7 +74,7 @@ typedef enum {
     REG_ID_PSRAM_BOOT_IDX = 0x110A, // psram.boot_idx  U8, the delayline idx the boot tuning chose (#40)
     // The speed switch's last failure (#329), from its NVS record (psram_speed_logic.h), not from a register
     REG_ID_PSRAM_FAIL_WHY   = 0x110B, // psram.fail_why    ENUM none / boot_check / dma_gate / crash / restart / aborted /
-                                      // gave_up / crash_armed / against_rec
+                                      // gave_up / crash_armed / against_rec / power_resets
     REG_ID_PSRAM_FAIL_RST   = 0x110C, // psram.fail_rst    STR, the reset reason of the boot that judged it ("panic", "none")
     REG_ID_PSRAM_FAIL_AT120 = 0x110D, // psram.fail_at120  BOOL, the failed boot did run at 120 MHz (REACHED marker found or this boot)
     REG_ID_PSRAM_FAIL_FW    = 0x110E, // psram.fail_fw     STR, the image that judged it (fw-<sha>, cut at 15; "none")
