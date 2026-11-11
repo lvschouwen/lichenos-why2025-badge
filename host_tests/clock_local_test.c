@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 static int failures;
@@ -116,7 +117,24 @@ static void hints(void) {
     CHECK(clock_back_hint(0, 1793000000LL) == NULL); // a cold clock at 1970
 }
 
+static void tz_label(void) {
+    char b[16];
+    clock_tz_label("CET-1CEST,M3.5.0,M10.5.0/3", b, sizeof(b));
+    CHECK(strcmp(b, "CET-1CEST") == 0);
+    clock_tz_label("UTC0", b, sizeof(b));
+    CHECK(strcmp(b, "UTC0") == 0);
+    clock_tz_label(NULL, b, sizeof(b));
+    CHECK(strcmp(b, "unset") == 0);
+    clock_tz_label("", b, sizeof(b));
+    CHECK(strcmp(b, "unset") == 0);
+    clock_tz_label("<+0330>-3:30<+0430>,J79/24,J263/24", b, sizeof(b)); // cut to the buffer, still terminated
+    CHECK(strlen(b) == 15 && strncmp(b, "<+0330>-3:30<+0", 15) == 0);
+    clock_tz_label("CET-1", b, 1);
+    CHECK(b[0] == '\0');
+}
+
 int main(void) {
+    tz_label();
     hints();
     amsterdam();
     other_zones();

@@ -17,6 +17,8 @@
 #include "esp_timer.h"
 #include "nvs.h"
 #include "driver/gpio.h"
+#include "hal/rtc_io_ll.h"
+#include "reg.h"
 #include <sys/stat.h>
 
 #include <stdatomic.h>
@@ -68,6 +70,21 @@ void c6link_hold_in_reset(void) {
     if (gpio_hold_en(GPIO_NUM_12) != ESP_OK) {
         ESP_LOGW(TAG, "C6 EN: no pad hold, the C6 may start again in deep sleep");
     }
+}
+
+// registry hold.gpio12 / hold.gpio13 (#319): the pad-hold latch of the two LP pads that steer the C6 (EN, boot strap),
+// read from the same register gpio_hold_en sets (IDF has no getter). Which register depends on the chip revision the
+// image is built for, exactly as in gpio_ll_hold_en: rev >= 3 LP_SYS.pad_rtc_hold_ctrl0, below that LP_IOMUX.lp_pad_hold.
+// Live register read, no bus traffic. On this build (rev 1+) a hold is lost across deep sleep, so after a wake it reads off.
+reg_status_t c6link_reg_hold(reg_entry_t const *e, reg_value_t *out) {
+    int      pad  = e->id == REG_ID_HOLD_GPIO12 ? 12 : 13;
+#if CONFIG_ESP_REV_MIN_FULL >= 300 // what HAL_CONFIG(CHIP_SUPPORT_MIN_REV) is
+    uint32_t mask = LP_SYS.pad_rtc_hold_ctrl0.pad_rtc_hold_ctrl0;
+#else
+    uint32_t mask = HAL_FORCE_READ_U32_REG_FIELD(LP_IOMUX.lp_pad_hold, reg_lp_gpio_hold);
+#endif
+    out->u = (mask >> pad) & 1u;
+    return REG_OK;
 }
 
 bool c6link_updating(void) {

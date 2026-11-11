@@ -4,6 +4,7 @@
 # through the hooks of c6_hooks.h, which they register at boot.
 idf_component_register(SRCS "c6link.c" "c6_paths.c" "c6_flasher.c" "c6_firmware.c" "c6_image.c" "c6_boot_policy.c" "c6_watch.c" "c6_sup.c" "c6_hooks.c"
                        INCLUDE_DIRS "."
+                       PRIV_INCLUDE_DIRS "../../../shared/reg"
                        REQUIRES esp_hosted esp_event
                        PRIV_REQUIRES board fw_console nvs_flash app_update esp_driver_uart esp_driver_gpio esp_timer
                                      espressif__esp-serial-flasher)

@@ -79,6 +79,13 @@ typedef enum {
     REG_ID_DISP_LANES     = 0x1202, // disp.cfg_lanes     U8, DSI data lanes: configured, no IDF read-back
     REG_ID_DISP_LANE_RATE = 0x1203, // disp.cfg_lane_rate U32 Mbps per lane: configured, no IDF read-back
     REG_ID_DISP_PHY_MV    = 0x1204, // disp.cfg_phy_mv    U32 mV, DSI PHY LDO: configured, no IDF read-back
+
+    // 0x14 haptics, status LED, time zone, C6 pad holds (#319): all read from the hardware or libc, RO
+    REG_ID_HAPTICS_DUTY = 0x1400, // haptics.duty  U8 %, RO: the LEDC duty the motor pin is driven with
+    REG_ID_LED_PAD      = 0x1401, // led.pad       STR, RO: the output pad level and what it means ("high/on")
+    REG_ID_TZ           = 0x1402, // tz.zone       STR, RO: getenv("TZ") without the DST rules, "CET-1CEST"
+    REG_ID_HOLD_GPIO12  = 0x1403, // hold.gpio12   BOOL, RO: pad hold latched on the C6 EN line
+    REG_ID_HOLD_GPIO13  = 0x1404, // hold.gpio13   BOOL, RO: pad hold latched on the C6 boot strap
 } reg_id_t;
 
 #define REG_ID_DOMAIN(id) ((unsigned)(id) >> 8)

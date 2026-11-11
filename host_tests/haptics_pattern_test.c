@@ -61,6 +61,10 @@ int main(void) {
     CHECK(!hp_gate_take(&w, 100, HP_NOTIFY_GAP_MS));
     CHECK(hp_gate_take(&w, 3000, HP_NOTIFY_GAP_MS));
 
+    // haptics.duty: the 8-bit duty as a rounded percent (#319)
+    CHECK(hp_duty_pct(0) == 0 && hp_duty_pct(255) == 100 && hp_duty_pct(128) == 50 && hp_duty_pct(1) == 0);
+    CHECK(hp_duty_pct(2) == 1 && hp_duty_pct(254) == 100 && hp_duty_pct(1000) == 100);
+
     if (failures) {
         return 1;
     }

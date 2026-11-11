@@ -2,6 +2,7 @@
 #include "led_pattern.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int failures;
 
@@ -53,6 +54,11 @@ int main(void) {
     CHECK(led_level(LED_PULSE, LED_PULSE_PERIOD_MS * 3));
     CHECK(led_level(LED_SLOW, 499) && !led_level(LED_SLOW, 500) && led_level(LED_SLOW, 1000));
     CHECK(led_level(LED_FAST, 124) && !led_level(LED_FAST, 125) && led_level(LED_FAST, 250));
+
+    // led.pad: the output level and the board's polarity (#319)
+    CHECK(strcmp(led_pad_text(1, true), "high/on") == 0 && strcmp(led_pad_text(0, true), "low/off") == 0);
+    CHECK(strcmp(led_pad_text(1, false), "high/off") == 0 && strcmp(led_pad_text(0, false), "low/on") == 0);
+    CHECK(strcmp(led_pad_text(2, true), "high/on") == 0); // any non-zero is high
 
     if (failures) {
         printf("%d failure(s)\n", failures);

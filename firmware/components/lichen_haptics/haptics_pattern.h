@@ -57,6 +57,9 @@ typedef struct {
 // True when now_ms is at least min_gap_ms after the last accepted one (wrap-safe); an accepted one is recorded
 bool hp_gate_take(hp_gate_t *g, uint32_t now_ms, uint32_t min_gap_ms);
 
+// The 8-bit PWM duty the driver reads back (ledc_get_duty) as a rounded percent, 0..100 (#319 haptics.duty)
+uint8_t hp_duty_pct(uint32_t duty8);
+
 #ifdef __cplusplus
 }
 #endif

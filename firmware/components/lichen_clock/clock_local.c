@@ -1,5 +1,6 @@
 #include "clock_local.h"
 
+#include <string.h>
 #include <time.h>
 
 #define DAY_S 86400LL
@@ -164,4 +165,19 @@ bool clock_parse_iso(char const *s, int64_t *utc, clock_local_t *how) {
         *how = kind;
     }
     return true;
+}
+
+void clock_tz_label(char const *posix, char *out, size_t cap) {
+    if (cap == 0) {
+        return;
+    }
+    if (posix == NULL || posix[0] == '\0') {
+        posix = "unset";
+    }
+    size_t n = strcspn(posix, ",");
+    if (n > cap - 1) {
+        n = cap - 1;
+    }
+    memcpy(out, posix, n);
+    out[n] = '\0';
 }

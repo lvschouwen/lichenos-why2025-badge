@@ -38,3 +38,9 @@ bool led_level(led_pattern_t p, uint32_t t_ms) {
         return false;
     }
 }
+
+char const *led_pad_text(int level, bool active_high) {
+    bool high = level != 0;
+    bool lit  = high == active_high;
+    return high ? (lit ? "high/on" : "high/off") : (lit ? "low/on" : "low/off");
+}

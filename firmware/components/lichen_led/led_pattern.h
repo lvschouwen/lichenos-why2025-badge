@@ -33,6 +33,9 @@ typedef struct {
 led_pattern_t led_pick(led_inputs_t const *in);
 // Whether the LED is lit at t_ms (uptime) for the pattern
 bool          led_level(led_pattern_t p, uint32_t t_ms);
+// The pad level read back from the output register and what it means given the board's polarity (#319 led.pad):
+// "high/on", "low/off", "high/off", "low/on". At most 9 characters with the NUL (it fits a registry STR).
+char const   *led_pad_text(int level, bool active_high);
 
 #ifdef __cplusplus
 }

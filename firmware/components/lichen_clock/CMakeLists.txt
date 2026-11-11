@@ -14,8 +14,9 @@ if(NOT build_epoch_result EQUAL 0 OR build_epoch STREQUAL "")
     message(FATAL_ERROR "git log -1 --format=%ct failed: the clock check needs the build epoch")
 endif()
 
-idf_component_register(SRCS "clock_check.c" "clock_local.c" "lichen_clock.c" "clock_cmd.c" "clock_store.c"
+idf_component_register(SRCS "clock_check.c" "clock_local.c" "lichen_clock.c" "clock_cmd.c" "clock_store.c" "clock_reg.c"
                        INCLUDE_DIRS "."
+                       PRIV_INCLUDE_DIRS "../../../shared/reg"
                        PRIV_REQUIRES fw_console esp_hw_support esp_timer log pthread lwip freertos)
 # lichen_clock is the only settimeofday() caller (#83): every other call lands in __wrap_settimeofday (lichen_clock.c),
 # which refuses anything but a re-sync to the time the clock already shows (#84 T9, clock_resync_only)

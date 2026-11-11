@@ -3,6 +3,7 @@
 // (settings_apply_tz() on the badge, setenv + tzset in host tests) through localtime_r only. Host-tested.
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -28,6 +29,10 @@ bool clock_parse_iso(char const *s, int64_t *utc, clock_local_t *how);
 // they saw from us, so ours are ignored until the clock is past that time again.
 char const *clock_local_hint(clock_local_t how);
 char const *clock_back_hint(int64_t now, int64_t set_to);
+
+// The zone part of a POSIX TZ ("CET-1CEST,M3.5.0,M10.5.0/3" -> "CET-1CEST", the rules after the first comma dropped) for
+// the registry's `tz` key (#319), whose strings hold 15 characters. NULL or "" -> "unset"; longer than cap-1 is cut.
+void clock_tz_label(char const *posix, char *out, size_t cap);
 
 #ifdef __cplusplus
 }

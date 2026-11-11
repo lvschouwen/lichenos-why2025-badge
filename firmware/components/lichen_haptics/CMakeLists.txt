@@ -6,4 +6,5 @@
 # requires this component.
 idf_component_register(SRCS "haptics.c" "haptics_pattern.c" "haptics_cmd.c" "haptics_setting.c"
                        INCLUDE_DIRS "."
+                       PRIV_INCLUDE_DIRS "../../../shared/reg"
                        PRIV_REQUIRES fw_console esp_driver_gpio esp_driver_ledc esp_timer log)

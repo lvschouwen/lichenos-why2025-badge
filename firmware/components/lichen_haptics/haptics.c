@@ -11,6 +11,7 @@
 #include "fw_console.h"
 #include "haptics_cmd.h"
 #include "haptics_setting.h"
+#include "reg.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -213,4 +214,19 @@ void haptics_set_strength(hp_strength_t s) {
     if (!haptics_setting_save_strength(s_set, s)) {
         ESP_LOGE(TAG, "setting not saved");
     }
+}
+
+// registry haptics.duty (#319): what the LEDC channel is driving now, read from the hardware (ledc_get_duty), not the
+// s_duty the last motor() call stored. A register read, no lock and no bus traffic.
+reg_status_t haptics_reg_duty(reg_entry_t const *e, reg_value_t *out) {
+    (void)e;
+    if (!s_ready) {
+        return REG_FAILED;
+    }
+    uint32_t duty = ledc_get_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL);
+    if (duty == LEDC_ERR_DUTY) {
+        return REG_FAILED;
+    }
+    out->u = hp_duty_pct(duty);
+    return REG_OK;
 }

@@ -83,3 +83,10 @@ bool hp_gate_take(hp_gate_t *g, uint32_t now_ms, uint32_t min_gap_ms) {
     g->last_ms = now_ms;
     return true;
 }
+
+uint8_t hp_duty_pct(uint32_t duty8) {
+    if (duty8 > 255) {
+        duty8 = 255;
+    }
+    return (uint8_t)((duty8 * 100 + 127) / 255);
+}

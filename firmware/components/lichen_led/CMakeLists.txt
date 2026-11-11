@@ -4,4 +4,5 @@
 # lichen_notify through hooks lichen_os binds (#245), so this driver (L2) does not depend on notify (L3).
 idf_component_register(SRCS "led.c" "led_pattern.c" "led_cmd.c" "led_setting.c"
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES fw_console esp_driver_gpio esp_timer log)
+                       PRIV_INCLUDE_DIRS "../../../shared/reg"
+                       PRIV_REQUIRES fw_console esp_driver_gpio soc esp_timer log)

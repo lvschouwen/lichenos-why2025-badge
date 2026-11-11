@@ -4,6 +4,8 @@
 #include "led.h"
 #include "led_cmd.h"
 #include "led_setting.h"
+#include "reg.h"
+#include "soc/gpio_struct.h"
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -11,6 +13,7 @@
 #include "fw_console.h"
 
 #include <stdatomic.h>
+#include <stdio.h>
 
 #define TICK_US     50000
 
@@ -110,4 +113,18 @@ void led_set_override(led_override_t o) {
 
 led_pattern_t led_current(void) {
     return (led_pattern_t)atomic_load(&s_pattern);
+}
+
+// registry led.pad (#319): the level the pad is told to drive, from the GPIO output register. gpio_get_level reads the
+// input path, which led_start's gpio_config(OUTPUT) leaves off (it would always say 0), so the output register it is.
+// Polarity (LED_ACTIVE_HIGH) turns the level into on/off in the text.
+reg_status_t led_reg_pad(reg_entry_t const *e, reg_value_t *out) {
+    (void)e;
+    if (!s_started) {
+        return REG_FAILED;
+    }
+    uint32_t reg   = LED_GPIO < 32 ? GPIO.out.val : GPIO.out1.val;
+    int      level = (int)((reg >> (LED_GPIO & 31)) & 1u);
+    snprintf(out->s, sizeof(out->s), "%s", led_pad_text(level, LED_ACTIVE_HIGH != 0));
+    return REG_OK;
 }
