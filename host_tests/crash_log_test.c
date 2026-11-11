@@ -96,6 +96,8 @@ int main(void) {
     CHECK(crash_is_crash(CRASH_RST_WDT, true));
     CHECK(!crash_is_crash(CRASH_RST_OTHER, false));
     CHECK(!crash_is_crash(CRASH_RST_OTHER, true)); // power-on or restart with an old dump on flash
+    // #353: a CPU lockup is a fault reset the core takes by itself (no software path, maybe no dump): a crash
+    CHECK(crash_is_crash(CRASH_RST_LOCKUP, false) && crash_is_crash(CRASH_RST_LOCKUP, true));
 
     if (failures) {
         printf("%d failures\n", failures);

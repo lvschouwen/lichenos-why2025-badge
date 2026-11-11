@@ -394,6 +394,12 @@ void hold_c6_boot(int level) {
     gpio_set_level(GPIO_NUM_13, level);
 }
 
+static atomic_bool s_flashing;
+
+bool c6link_flashing(void) {
+    return atomic_load(&s_flashing);
+}
+
 bool c6link_start(void) {
     console_register("c6", "c6 [reflash | verify | reset [rom] | reattach]", cmd_c6);
     c6_sup_start();
@@ -406,7 +412,9 @@ bool c6link_start(void) {
     esp_err_t err  = ESP_OK;
     if (full) {
         ESP_LOGI(TAG, "C6 flasher check runs (%s)", boot_info.why);
+        atomic_store(&s_flashing, true);
         err = flash_c6_if_needed(force);
+        atomic_store(&s_flashing, false);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "C6 image check: %s (going on with what the C6 has)", esp_err_to_name(err));
         }

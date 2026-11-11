@@ -32,6 +32,8 @@ typedef struct {
     // this boot's crash is in the crash log and its notice raised, so a restart (whose saves keep the notices) loses
     // neither: the re-arm of 120 after a settled session's crash waits for it. NULL: never, the session stays at 80
     bool (*crash_told)(void);
+    // an update is under way (a P4 OTA write, a file push, the C6 flasher): the speed's restarts wait. NULL: never
+    bool (*update_busy)(void);
 } psram_speed_hooks_t;
 void psram_speed_boot(psram_speed_hooks_t const *hooks);
 

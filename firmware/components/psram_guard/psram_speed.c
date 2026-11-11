@@ -433,6 +433,29 @@ static bool crash_told(void) {
     return s_hooks.crash_told && s_hooks.crash_told();
 }
 
+static bool update_busy(void) {
+    return s_hooks.update_busy && s_hooks.update_busy();
+}
+
+// The arm, re-arm, leave or settle that is due now (psram_speed_restart_job: never during an update or on trial)
+static void run_due_job(psram_speed_rec_t const *r, bool pending, unsigned up) {
+    psram_speed_tick_in_t in = {.running_mhz   = psram_speed_running(),
+                                .uptime_s      = up,
+                                .image_pending = pending,
+                                .update_busy   = update_busy(),
+                                .arm_deferred  = s_arm_deferred,
+                                .rearm_wait    = s_rearm_wait,
+                                .crash_told    = crash_told()};
+    switch (psram_speed_restart_job(r, &in)) {
+    case PSRAM_SPEED_JOB_ARM: s_arm_deferred = !start_job(JOB_ARM); return;
+    case PSRAM_SPEED_JOB_REARM: s_rearm_wait = !start_job(JOB_REARM); return;
+    case PSRAM_SPEED_JOB_LEAVE: start_job(JOB_LEAVE); return;
+    case PSRAM_SPEED_JOB_SETTLE: start_job(JOB_SETTLE); return;
+    case PSRAM_SPEED_JOB_NONE:
+    default: return;
+    }
+}
+
 void psram_speed_tick(void) {
     static unsigned n;
     if (!s_done || (++n % 10) != 0) { // once a second is enough
@@ -450,17 +473,9 @@ void psram_speed_tick(void) {
         if (start_job(evidence)) {
             atomic_store(&s_evidence, PSRAM_FAIL_NONE);
         }
-    } else if (pending) {
-        return; // a restart now would roll the image back: the arm and the leave wait for the valid mark
-    } else if (s_arm_deferred) {
-        s_arm_deferred = !start_job(JOB_ARM);
-    } else if (psram_speed_rearm_now(s_rearm_wait, crash_told(), pending)) {
-        s_rearm_wait = !start_job(JOB_REARM);
-    } else if (psram_speed_leave_120_wanted(&r, psram_speed_running())) {
-        start_job(JOB_LEAVE);
-    } else if (psram_speed_settle_wanted(&r, psram_speed_running(), up)) {
-        start_job(JOB_SETTLE);
+        return;
     }
+    run_due_job(&r, pending, up);
 }
 
 void psram_speed_gate_result(bool bad_bytes, bool console) {

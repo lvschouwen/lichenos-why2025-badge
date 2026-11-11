@@ -50,6 +50,7 @@ static void test_default(void);
 static void test_crash_class(void);
 static void test_carried_fall(void);
 static void test_crash_rearm(void);
+static void test_restart_job(void);
 static void test_no_evidence(void);
 static void test_evidence(void);
 static void test_switch_back(void);
@@ -62,6 +63,7 @@ int main(void) {
     test_crash_class();
     test_carried_fall();
     test_crash_rearm();
+    test_restart_job();
     test_no_evidence();
     test_evidence();
     test_switch_back();
@@ -374,4 +376,41 @@ static void test_crash_rearm(void) {
     // a crash at 80 on a record that fell: nothing
     r = (psram_speed_rec_t){.want = 80, .failed = 1};
     CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &p) == PSRAM_SPEED_ACT_NONE);
+}
+
+// #353 review: the tick's speed jobs. The restarts (deferred arm, re-arm after a crash, leave) never cut an update: a
+// P4 OTA write, an ota-c6 push, the C6 flasher; nor restart an image on trial. The settle is no restart.
+static void test_restart_job(void) {
+    psram_speed_rec_t   r  = psram_speed_rec_default();
+    psram_speed_tick_in_t in = {.running_mhz = 80, .uptime_s = 10, .arm_deferred = true};
+    CHECK(psram_speed_restart_job(&r, &in) == PSRAM_SPEED_JOB_ARM);
+    in.update_busy = true;
+    CHECK(psram_speed_restart_job(&r, &in) == PSRAM_SPEED_JOB_NONE); // postponed, not dropped: asked again next tick
+    in.update_busy   = false;
+    in.image_pending = true;
+    CHECK(psram_speed_restart_job(&r, &in) == PSRAM_SPEED_JOB_NONE);
+    // the re-arm after a crash: only once the crash is told, never during an update
+    in = (psram_speed_tick_in_t){.running_mhz = 80, .uptime_s = 10, .rearm_wait = true};
+    CHECK(psram_speed_restart_job(&r, &in) == PSRAM_SPEED_JOB_NONE);
+    in.crash_told = true;
+    CHECK(psram_speed_restart_job(&r, &in) == PSRAM_SPEED_JOB_REARM);
+    in.update_busy = true;
+    CHECK(psram_speed_restart_job(&r, &in) == PSRAM_SPEED_JOB_NONE);
+    // leaving 120 against the record waits for the update too
+    r  = (psram_speed_rec_t){.want = 80};
+    in = (psram_speed_tick_in_t){.running_mhz = 120, .uptime_s = 10};
+    CHECK(psram_speed_restart_job(&r, &in) == PSRAM_SPEED_JOB_LEAVE);
+    in.update_busy = true;
+    CHECK(psram_speed_restart_job(&r, &in) == PSRAM_SPEED_JOB_NONE);
+    // the settle is an NVS write, no restart: it goes on during an update, not on an image on trial
+    r  = psram_speed_rec_default();
+    r.arms = 1;
+    in = (psram_speed_tick_in_t){.running_mhz = 120, .uptime_s = PSRAM_SPEED_SETTLE_SECONDS, .update_busy = true};
+    CHECK(psram_speed_restart_job(&r, &in) == PSRAM_SPEED_JOB_SETTLE);
+    in.image_pending = true;
+    CHECK(psram_speed_restart_job(&r, &in) == PSRAM_SPEED_JOB_NONE);
+    // nothing due
+    r  = psram_speed_rec_default();
+    in = (psram_speed_tick_in_t){.running_mhz = 120, .uptime_s = 500};
+    CHECK(psram_speed_restart_job(&r, &in) == PSRAM_SPEED_JOB_NONE);
 }

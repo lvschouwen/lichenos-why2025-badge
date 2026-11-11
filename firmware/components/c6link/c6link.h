@@ -72,6 +72,8 @@ void c6link_bundle_changed(void);
 void c6link_set_updating(void);
 // True once c6link_set_updating or c6link_hold_in_reset ran: no scans, no RSSI polls, no C6 recovery
 bool c6link_updating(void);
+// The C6 flasher is writing or checking the C6 (the boot's image check, #353: no speed restart meanwhile). Any task
+bool c6link_flashing(void);
 // One Wi-Fi frame pool of the link (#260), for the stress run's samples (#278, reached through lichen_sys_mem.h):
 // blocks in use now and the most since boot, TX waits and drops. False (zeros) when the pools are off. Any task.
 bool c6link_frame_pool(bool tx, uint16_t *in_use, uint16_t *peak, uint32_t *waits, uint32_t *drops);

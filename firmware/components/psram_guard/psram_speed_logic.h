@@ -130,6 +130,20 @@ bool psram_speed_settle_wanted(psram_speed_rec_t const *r, unsigned running_mhz,
 // The re-arm after a crash is due: one is waiting, the crash is recorded (crash log) and its notice raised (the restart's
 // saves keep it), and the image is valid
 bool psram_speed_rearm_now(bool waiting, bool crash_told, bool image_pending);
+// The tick's speed jobs (psram_speed.c runs them on a job task). The restarts wait for a valid image and for no update
+// (a P4 OTA write, a file push, the C6 flasher: update_busy); the settle is an NVS write and only waits for the image.
+typedef enum { PSRAM_SPEED_JOB_NONE, PSRAM_SPEED_JOB_ARM, PSRAM_SPEED_JOB_REARM, PSRAM_SPEED_JOB_LEAVE,
+               PSRAM_SPEED_JOB_SETTLE } psram_speed_job_t;
+typedef struct {
+    unsigned running_mhz;
+    unsigned uptime_s;
+    bool     image_pending;
+    bool     update_busy;
+    bool     arm_deferred; // an arm waits for the valid mark
+    bool     rearm_wait;   // a re-arm after a settled session's crash waits
+    bool     crash_told;   // that crash went to the crash log and its notice is raised
+} psram_speed_tick_in_t;
+psram_speed_job_t psram_speed_restart_job(psram_speed_rec_t const *r, psram_speed_tick_in_t const *in);
 // Running 120 against the record (want 80 or failed): a restart is due once the image is valid
 bool psram_speed_leave_120_wanted(psram_speed_rec_t const *r, unsigned running_mhz);
 

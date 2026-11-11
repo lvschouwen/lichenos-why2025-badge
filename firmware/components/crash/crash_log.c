@@ -127,7 +127,8 @@ bool crash_is_crash(crash_reset_t reason, bool fresh_dump) {
         case CRASH_RST_PANIC:
         case CRASH_RST_INT_WDT:
         case CRASH_RST_TASK_WDT:
-        case CRASH_RST_BROWNOUT: return true;
+        case CRASH_RST_BROWNOUT:
+        case CRASH_RST_LOCKUP: return true; // a fault reset by the hardware itself, with or without a dump
         case CRASH_RST_WDT: return fresh_dump;
         default: return false;
     }

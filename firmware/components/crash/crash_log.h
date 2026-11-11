@@ -11,7 +11,15 @@ extern "C" {
 // Text for the crash log and the core dump transfer (#74). Pure logic, no ESP headers.
 
 // The reset reasons that matter here (mirrors ESP-IDF's esp_reset_reason_t without its headers)
-typedef enum { CRASH_RST_OTHER, CRASH_RST_PANIC, CRASH_RST_INT_WDT, CRASH_RST_TASK_WDT, CRASH_RST_WDT, CRASH_RST_BROWNOUT } crash_reset_t;
+typedef enum {
+    CRASH_RST_OTHER,
+    CRASH_RST_PANIC,
+    CRASH_RST_INT_WDT,
+    CRASH_RST_TASK_WDT,
+    CRASH_RST_WDT,
+    CRASH_RST_BROWNOUT,
+    CRASH_RST_LOCKUP, // ESP_RST_CPU_LOCKUP (#353): the core faulted while handling a fault; no panic handler ran
+} crash_reset_t;
 
 // Whether a reset is a crash worth recording. A bare RTC watchdog is also what a USB/RTS reset looks like, so it only
 // counts when a core dump written by this very reset exists (fresh_dump)

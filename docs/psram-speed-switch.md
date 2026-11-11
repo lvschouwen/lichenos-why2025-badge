@@ -43,7 +43,8 @@ fallen-back or short tuning window without bad bytes (it still marks the boot ba
 boot"). A CORRUPT HEAP that the heap itself finds first (in a `free`) aborts before anything can be recorded: that
 panic is a crash (below) without a fall.
 
-A crash is judged as `crash.c` does: a panic, an int or task watchdog or a lockup always; reason 7 (`ESP_RST_WDT`) only
+A crash is judged as `crash.c` does: a panic, an int or task watchdog or a CPU lockup always (`crash.c` records a
+lockup as `cpu_lockup` since #353: the core faulted while handling a fault, a crash with or without a dump); reason 7 (`ESP_RST_WDT`) only
 with a core dump new since the last recorded crash (`crash_dump_fresh`, read once right after NVS), because every
 power-on and CH340 reset on this board reports reason 7 as well.
 
@@ -62,7 +63,8 @@ changes nothing (there is nothing to fall to); it is logged where it was found, 
    - running 80 with 120 wanted and not failed:
      - after a crash of a session that had settled (`arms` 0: it ran 60 s at 120, or came by a clean restart from
        one): 120 again (Lucas, #353), but only once the crash is recorded: the crash log has it (`crash_recorded`)
-       and the boot's notices are raised (`lichen_watch_boot_told`), then the job task arms and restarts through
+       (or its write failed, logged at W: the notice is then its trace) and the boot's notices are raised
+       (`lichen_watch_boot_told`), then the job task arms and restarts through
        `system_restart("psram 120 re-arm after crash")`, whose saves write the notices, so "Lichen restarted after a
        crash" and the crash log survive it. The re-arm is an arm (`arms + 1`).
      - after a crash with `arms` > 0 (the 120 MHz boot crashed before it settled, a re-arm included): this session
@@ -78,7 +80,10 @@ changes nothing (there is nothing to fall to); it is logged where it was found, 
    records it with its own reset reason, clock and uptime (the falling boot's are gone) and arms nothing. Logged at E (#113: a feature lost until someone acts) on the boot that falls and again on
    every boot after it, and raised once per boot as the notice "PSRAM back at 80 MHz" (error level). Never re-armed by
    itself.
-4. While the running image is still PENDING_VERIFY (OTA not yet marked valid) nothing restarts for the speed: the arm,
+4. The speed's late restarts (the deferred arm, the re-arm after a crash, the leave) also wait while an update is
+   under way: a P4 OTA write, a file push (ota-c6 sends the C6 image as one) or the C6 flasher (`main.c` `update_busy`;
+   the decision is `psram_speed_restart_job`, host-tested). A fall does not wait: the PSRAM is suspect.
+   While the running image is still PENDING_VERIFY (OTA not yet marked valid) nothing restarts for the speed: the arm,
    the leave and the fall's restart wait until the image is valid (the record is already saved), so a good OTA is
    never rolled back. A record that cannot be saved arms nothing.
 5. A clean restart at 120 (`esp_restart` and everything on it: update, Power > Restart, `fw reboot`) keeps 120 MHz through a

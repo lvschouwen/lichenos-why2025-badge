@@ -15,8 +15,10 @@ void crash_check_late(void);
 // The core dump on flash is new since the last recorded crash (what tells a real watchdog reset, ESP_RST_WDT, from the
 // USB-serial reset that reports the same reason on this board). Needs NVS up; read once per boot, writes nothing (#353)
 bool crash_dump_fresh(void);
-// This boot's crash is in the crash log (crash_check_late ran and wrote it); false on a boot that is no crash. Any task
-bool crash_recorded(void);
+// What became of this boot's crash record: PENDING until crash_check_late ran on a crash (and on a boot that is no
+// crash), then WRITTEN, or FAILED when /storage refused it (logged at W). Any task
+typedef enum { CRASH_RECORD_PENDING, CRASH_RECORD_WRITTEN, CRASH_RECORD_FAILED } crash_record_t;
+crash_record_t crash_record_state(void);
 // This boot follows a crash (for the boot screen)
 bool crash_recovered(void);
 

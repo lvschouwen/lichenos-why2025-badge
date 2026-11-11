@@ -63,6 +63,7 @@ static crash_reset_t crash_reset_of(esp_reset_reason_t r) {
         case ESP_RST_TASK_WDT: return CRASH_RST_TASK_WDT;
         case ESP_RST_WDT: return CRASH_RST_WDT;
         case ESP_RST_BROWNOUT: return CRASH_RST_BROWNOUT;
+        case ESP_RST_CPU_LOCKUP: return CRASH_RST_LOCKUP;
         default: return CRASH_RST_OTHER;
     }
 }
@@ -74,6 +75,7 @@ static char const *reason_name(crash_reset_t r) {
         case CRASH_RST_TASK_WDT: return "task_wdt";
         case CRASH_RST_WDT: return "wdt";
         case CRASH_RST_BROWNOUT: return "brownout";
+        case CRASH_RST_LOCKUP: return "cpu_lockup";
         default: return "other";
     }
 }
@@ -197,10 +199,11 @@ uint32_t crash_log_generation(void) {
     return atomic_load(&s_generation);
 }
 
-static void append_record(char const *record) {
+// False when the record did not reach /storage (no memory, or the store failed)
+static bool append_record(char const *record) {
     char *buf = psram_alloc(LOG_MAX);
     if (!buf) {
-        return;
+        return false;
     }
     crash_log_lock();
     size_t len = read_log(buf, LOG_MAX - 256);
@@ -208,10 +211,11 @@ static void append_record(char const *record) {
         buf[len++] = '\n';
     }
     len += (size_t)snprintf(buf + len, LOG_MAX - len, "%s\n", record);
-    len = crash_log_trim(buf, len, KEEP_RECORDS);
-    crash_log_store(buf, len);
+    len     = crash_log_trim(buf, len, KEEP_RECORDS);
+    bool ok = crash_log_store(buf, len);
     crash_log_unlock();
     free(buf);
+    return ok;
 }
 
 static uint32_t bump_count(void) {
@@ -400,7 +404,7 @@ static void crash_command(char const *args) {
 
 // Split for the early boot screen (#39): the first part decides, cheaply, whether this boot follows a crash (the boot
 // screen reads crash_recovered() once when it is built); the second needs /storage and reads the whole running image
-static atomic_bool s_recorded; // this boot's crash is in the log (crash_check_late)
+static atomic_int s_record; // crash_record_t of this boot's crash (crash_check_late)
 
 static struct {
     crash_reset_t reason;
@@ -485,13 +489,16 @@ void crash_check_late(void) {
     // No backtrace here: the decoder (tools/badge.sh crash) gives it
     crash_record_format(record, sizeof(record), when, esp_app_get_description()->version, elf, reason_name(reason), task, pc,
                         NULL, 0);
-    append_record(record);
+    bool written = append_record(record);
     ESP_LOGW(TAG, "last reset was a crash: %s", record);
-    atomic_store(&s_recorded, true);
+    if (!written) {
+        ESP_LOGW(TAG, "crash record not written to the crash log: the crash notice is its only trace this boot");
+    }
+    atomic_store(&s_record, written ? CRASH_RECORD_WRITTEN : CRASH_RECORD_FAILED);
 }
 
-bool crash_recorded(void) {
-    return atomic_load(&s_recorded);
+crash_record_t crash_record_state(void) {
+    return (crash_record_t)atomic_load(&s_record);
 }
 
 bool crash_recovered(void) {

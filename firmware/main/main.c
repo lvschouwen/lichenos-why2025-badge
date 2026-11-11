@@ -516,9 +516,16 @@ static void declare_keep_keys(void) {
     }
 }
 
-// #353: the crash of a settled 120 MHz session is in the crash log and its notice raised: the re-arm may restart now
+// #353: the crash of a settled 120 MHz session went to the crash log (a failed write is logged at W there: the notice,
+// which the restart saves, is then its trace) and its notice is raised: the re-arm may restart now
 static bool crash_told(void) {
-    return crash_recorded() && lichen_watch_boot_told();
+    return crash_record_state() != CRASH_RECORD_PENDING && lichen_watch_boot_told();
+}
+
+// #353 review: a speed restart must not cut a P4 OTA write, a file push (ota-c6 sends the C6 image as one) or the C6
+// flasher
+static bool update_busy(void) {
+    return update_screen_busy() || c6link_updating() || c6link_flashing();
 }
 
 static void start_nvs(boot_ctx_t *ctx) {
@@ -535,7 +542,8 @@ static void start_nvs(boot_ctx_t *ctx) {
     // dump tells from this board's reason-7 power-on)
     static psram_speed_hooks_t const speed_hooks = {.image_on_trial = ota_image_trial_maybe, // unread = on trial
                                                     .dump_fresh     = crash_dump_fresh,
-                                                    .crash_told     = crash_told};
+                                                    .crash_told     = crash_told,
+                                                    .update_busy    = update_busy};
     psram_speed_boot(&speed_hooks);
     psram_boot_oneshot_apply(); // #121: a one-shot delayline for the PSRAM bench, before storage and MeshCore load anything
     boot_progress_nvs_up();

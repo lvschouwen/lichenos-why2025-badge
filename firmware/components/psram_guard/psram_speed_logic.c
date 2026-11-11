@@ -94,6 +94,24 @@ bool psram_speed_rearm_now(bool waiting, bool crash_told, bool image_pending) {
     return waiting && crash_told && !image_pending;
 }
 
+psram_speed_job_t psram_speed_restart_job(psram_speed_rec_t const *r, psram_speed_tick_in_t const *in) {
+    if (in->image_pending) {
+        return PSRAM_SPEED_JOB_NONE; // a restart now would roll the image back; the settle waits with them
+    }
+    if (!in->update_busy) {
+        if (in->arm_deferred) {
+            return PSRAM_SPEED_JOB_ARM;
+        }
+        if (psram_speed_rearm_now(in->rearm_wait, in->crash_told, false)) {
+            return PSRAM_SPEED_JOB_REARM;
+        }
+        if (psram_speed_leave_120_wanted(r, in->running_mhz)) {
+            return PSRAM_SPEED_JOB_LEAVE;
+        }
+    }
+    return psram_speed_settle_wanted(r, in->running_mhz, in->uptime_s) ? PSRAM_SPEED_JOB_SETTLE : PSRAM_SPEED_JOB_NONE;
+}
+
 bool psram_speed_arm_commit(psram_speed_rec_t *r, bool (*save)(psram_speed_rec_t const *)) {
     r->arms++; // before arming: a 120 MHz boot that never settles counts, so an arm loop ends at the cap
     if (save(r)) {
