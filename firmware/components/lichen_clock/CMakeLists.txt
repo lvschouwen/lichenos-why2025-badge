@@ -3,7 +3,8 @@
 # reproducible (unlike __DATE__). clock_local.c (local time to UTC, "fw clock set" parsing, #64) is pure and host-tested
 # too (clock_local_test.c); clock_store.c keeps the source across a warm reset in Lichen's NVS (the store lichen_os binds,
 # #245), and
-# "fw clock sync" restarts lwIP's SNTP client (lwip).
+# "fw clock sync" restarts lwIP's SNTP client (lwip). clock_keep.c (slew vs step, the boot's carried-vs-saved choice, #326)
+# is pure and host-tested (clock_keep_test.c); clock_save.c keeps that record in LP RAM and saves it every minute.
 execute_process(
     COMMAND git log -1 --format=%ct
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -15,6 +16,7 @@ if(NOT build_epoch_result EQUAL 0 OR build_epoch STREQUAL "")
 endif()
 
 idf_component_register(SRCS "clock_check.c" "clock_local.c" "lichen_clock.c" "clock_cmd.c" "clock_store.c" "clock_reg.c"
+                            "clock_keep.c" "clock_save.c"
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "../../../shared/reg"
                        PRIV_REQUIRES fw_console esp_hw_support esp_timer log pthread lwip freertos)

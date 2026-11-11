@@ -29,6 +29,7 @@ static char const *src_name(soc_rtc_slow_clk_src_t s) {
 }
 
 void clock_store_init(void); // clock_store.c
+void clock_save_init(void);  // clock_save.c
 
 // The local time and the zone's abbreviation: "2026-10-31 12:00 CET"
 static void local_now(char *out, size_t cap) {
@@ -93,6 +94,46 @@ static void cmd_sync(void) {
 
 static void cmd_status(void);
 
+// #326: what the boot chose between the carried and the saved clock, and the record kept since
+static void status_boot(void) {
+    clock_boot_info_t b = clock_boot_info();
+    char              saved[48];
+    if (!b.rec_valid) {
+        snprintf(saved, sizeof(saved), "none");
+    } else if (b.save_age_s >= 0) {
+        snprintf(saved, sizeof(saved), "%lld (saved %lld s before boot)", (long long)b.saved_s,
+                 (long long)b.save_age_s);
+    } else {
+        snprintf(saved, sizeof(saved), "%lld (RTC counter restarted)", (long long)b.saved_s);
+    }
+    console_reply("boot: carried %lld%s, saved %s; used: %s", (long long)b.carried_s,
+                  clock_in_window(b.carried_s, clock_build_epoch()) ? "" : " (not set)", saved,
+                  clock_boot_text(b.pick));
+    int64_t age = clock_save_age_s();
+    if (age >= 0) {
+        console_reply("clock record: saved %lld s ago (every %d s while set)", (long long)age, CLOCK_SAVE_EVERY_S);
+    } else {
+        console_reply("clock record: not saved this boot (clock not set)");
+    }
+}
+
+// #326: how the last SNTP answer was applied; the ppm counts drift only, not a slew still pending when it came
+static void status_sntp(clock_sync_info_t const *i) {
+    clock_fix_info_t f = clock_fix_info();
+    double           ppm;
+    char             ppm_txt[24] = "";
+    if (clock_step_ppm(clock_drift_ms(i->step_ms, f.pending_ms), i->step_span_ms, &ppm)) {
+        snprintf(ppm_txt, sizeof(ppm_txt), " (%+.0f ppm)", ppm);
+    }
+    console_reply("now %lld; SNTP answer %lld at %lld ms uptime, clock before it %lld", (long long)time(NULL),
+                  (long long)i->last_good_s, (long long)i->step_mono_ms, (long long)(i->last_good_s - i->step_ms / 1000));
+    console_reply("SNTP: synced %lld s ago; last correction %+lld ms %s at %lld s uptime%s",
+                  (long long)(time(NULL) - i->last_good_s), (long long)i->step_ms, clock_fix_text(f.fix),
+                  (long long)(i->step_mono_ms / 1000), ppm_txt);
+    console_reply("SNTP: %u slewed, %u stepped since boot; slew pending at the last answer %+lld ms", (unsigned)f.slewed,
+                  (unsigned)f.stepped, (long long)f.pending_ms);
+}
+
 static void cmd_clock(char const *args) {
     if (strncmp(args, "set", 3) == 0 && (args[3] == ' ' || args[3] == '\0')) {
         cmd_set(args[3] ? args + 4 : args + 3);
@@ -133,17 +174,9 @@ static void cmd_status(void) {
     } else {
         console_reply("source: %s", from);
     }
+    status_boot();
     if (i.synced) {
-        double ppm;
-        char   ppm_txt[24] = "";
-        if (clock_step_ppm(i.step_ms, i.step_span_ms, &ppm)) {
-            snprintf(ppm_txt, sizeof(ppm_txt), " (%+.0f ppm)", ppm);
-        }
-        console_reply("now %lld; SNTP answer %lld at %lld ms uptime, clock before it %lld", (long long)time(NULL),
-                      (long long)i.last_good_s, (long long)i.step_mono_ms, (long long)(i.last_good_s - i.step_ms / 1000));
-        console_reply("SNTP: synced %lld s ago; last step %+lld ms at %lld s uptime%s",
-                      (long long)(time(NULL) - i.last_good_s), (long long)i.step_ms, (long long)(i.step_mono_ms / 1000),
-                      ppm_txt);
+        status_sntp(&i);
     } else {
         console_reply("SNTP: not synced since boot");
     }
@@ -158,6 +191,7 @@ void clock_console_register(void) {
     carried_s     = (int64_t)time(NULL);
     carried_up_ms = timer0_us / 1000;
     rtc_boot_us   = rtc0_us;
+    clock_save_init(); // after the carried snapshot above, before the source record reads what the boot chose
     clock_store_init();
     console_register("clock", "clock [set [--force] <ISO8601> | sync] (source, drift, SNTP; set by hand)", cmd_clock);
 }

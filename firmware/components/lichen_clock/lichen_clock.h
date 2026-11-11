@@ -8,6 +8,7 @@
 #include <sys/time.h>
 
 #include "clock_check.h"
+#include "clock_keep.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -60,6 +61,36 @@ void clock_set_store(clock_src_t was, void (*save)(clock_src_t src));
 // Where clock_store.c keeps that record (badge_fw "clock_src", the settings service, #245): lichen_os binds it in
 // start_nvs, before clock_console_register reads it. Unbound, nothing was kept and nothing is saved.
 void clock_bind_store(uint8_t (*get)(char const *key, uint8_t def), bool (*set)(char const *key, uint8_t value));
+
+// How the SNTP answers were applied (#326): kept beside clock_sync_info_t, whose layout the app gate mirrors
+typedef struct {
+    clock_fix_t fix;        // the last accepted answer: SLEW (adjtime) or STEP; NONE before the first
+    int64_t     pending_ms; // the earlier slew still pending when it came (clock_drift_ms())
+    uint32_t    slewed;     // answers slewed since boot
+    uint32_t    stepped;    // answers stepped since boot
+} clock_fix_info_t;
+
+clock_fix_info_t clock_fix_info(void);
+
+// The boot's carried-vs-saved choice (clock_save.c): sets the saved estimate t, only while no source has set the clock
+// this boot and only forward. The clock then counts as carried over the restart (CLOCK_SRC_RTC). false: not applied.
+bool clock_restore_saved(int64_t t);
+// save_now() writes the clock record; lichen_clock calls it after every accepted set (outside its lock), so a clock
+// set backwards by hand is not undone by an older save at the next boot. NULL until clock_save.c binds it.
+void clock_set_saver(void (*save_now)(void));
+
+// What the boot chose (clock_save.c, for "fw clock")
+typedef struct {
+    clock_boot_t pick;
+    int64_t      carried_s; // time(NULL) before the choice
+    bool         rec_valid; // a record survived the reset
+    int64_t      saved_s;   // its estimate (save + RTC time since), 0 without one
+    int64_t      save_age_s; // RTC seconds between that save and the boot, -1 when the counter restarted
+} clock_boot_info_t;
+
+clock_boot_info_t clock_boot_info(void);
+// The age of the newest record this boot (seconds), -1 before the first save
+int64_t clock_save_age_s(void);
 
 // Registers "fw clock" (clock_cmd.c), notes the RTC and esp_timer readings it measures drift against and reads the
 // source record (clock_store.c). Call early, after NVS is up.

@@ -339,9 +339,11 @@ void sntp_sync_time(struct timeval *tv) {
     if (v == CLOCK_RECOVERED) {
         ESP_LOGW(TAG, "SNTP: %s, clock moved", clock_verdict_text(v));
     }
+    // #326: an offset under a second is slewed (adjtime), so the hourly corrections log "slewed", not a step
     ESP_LOGI(
         TAG,
-        "SNTP step %+lld ms after %lld s uptime",
+        "SNTP %s %+lld ms after %lld s uptime",
+        clock_fix_info().fix == CLOCK_FIX_SLEW ? "slewed" : "step",
         (long long)info.step_ms,
         (long long)(info.step_mono_ms / 1000)
     );
