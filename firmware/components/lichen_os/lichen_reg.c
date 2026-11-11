@@ -191,7 +191,7 @@ static void build_view(reg_entry_t const *e, bool live, bool no_link, reg_view_t
     v->has_saved     = saved_of(e, &v->saved);
     v->has_requested = requested_of(e->id, &v->requested);
     if (!reg_p4_is_proxy(e)) {
-        v->has_applied = reg_get(e, &v->applied) == REG_OK;
+        v->has_applied = reg_p4_get(e, live, &v->applied) == REG_OK; // cached: the getter never asks its driver (#341)
         v->note        = v->has_applied ? RV_NONE : RV_FAILED;
         return;
     }
@@ -438,7 +438,7 @@ size_t lichen_reg_cached_text(char const *name, char *buf, size_t cap) {
     reg_entry_t const *e = reg_p4_find_name(name);
     reg_view_t         v = {.note = RV_FAILED};
     if (e && atomic_load(&started)) {
-        build_view(e, false, false, &v); // the cache only: a status line never waits for the C6
+        build_view(e, false, false, &v); // the cache only: never waits for the C6 or a driver (#341)
     }
     return e ? reg_cached_text(e, &v, buf, cap) : 0;
 }

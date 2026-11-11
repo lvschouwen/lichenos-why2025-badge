@@ -80,6 +80,17 @@ reg_entry_t const *reg_p4_nth(size_t i) {
     return NULL;
 }
 
+reg_status_t reg_p4_get(reg_entry_t const *e, bool live, reg_value_t *out) {
+    reg_get_fn get = e->get_applied;
+    for (size_t d = 0; !live && d < REG_P4_DOMS; d++) {
+        reg_p4_dom_t const *dom = reg_p4_doms[d];
+        if (dom->get_cached && e >= dom->rows && e < dom->rows + dom->count) {
+            get = dom->get_cached;
+        }
+    }
+    return reg_get_with(e, get, out);
+}
+
 reg_entry_t const *reg_p4_find_id(uint16_t id) {
     for (size_t d = 0; d < REG_P4_DOMS; d++) {
         reg_entry_t const *e = reg_find_id(reg_p4_doms[d]->rows, reg_p4_doms[d]->count, id);

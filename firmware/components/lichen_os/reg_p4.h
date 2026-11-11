@@ -26,6 +26,9 @@ extern size_t const      reg_p4_count;
 typedef struct {
     reg_entry_t const *rows;
     size_t             count;
+    // A domain whose rows' getters may wait (ask a driver's task, a bus) gives the getter for a cached read here: the
+    // driver's last value, never waiting (#341). NULL = its getters never wait.
+    reg_get_fn get_cached;
 } reg_p4_dom_t;
 extern reg_p4_dom_t const reg_p4_psram;    // 0x11 psram.*    reg_p4_psram.c
 extern reg_p4_dom_t const reg_p4_display;  // 0x12 disp.*     reg_p4_display.c
@@ -44,6 +47,11 @@ reg_entry_t const *reg_p4_find_name(char const *name);
 // reg_table_check over the whole table: the index (reg_p4_nth) of the first bad key, or reg_p4_total() when all are fine
 // (ids and names unique across the domains, at most REG_P4_KEYS_MAX keys)
 size_t reg_p4_check(void);
+
+// A P4 key's applied value, reg_get's checks included, with the caller's choice (#341): live = the getter may ask its
+// driver and wait (the console's `fw get`), false = the driver's last value through the domain's get_cached, never
+// waiting (lichen_reg_cached_text, so lichen_reg_get and /info). Not for proxies or wifi.* (lichen_reg.c's views).
+reg_status_t reg_p4_get(reg_entry_t const *e, bool live, reg_value_t *out);
 
 // A C6 key: the cached REG_VAL, after a short live ask unless the caller may not wait (the LVGL task)
 reg_status_t reg_p4_proxy_get(reg_entry_t const *e, reg_value_t *out);

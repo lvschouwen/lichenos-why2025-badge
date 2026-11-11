@@ -470,6 +470,33 @@ static void test_rows(void) {
     CHECK(strcmp(line, "? (not supported by this C6)") == 0);
 }
 
+// #341: the cached path (lichen_reg_cached_text, so lichen_reg_get and /info) never asks a driver live, the console's
+// `fw get` still does. This overrides reg_stubs_sensors.c's weak stub, whose UI lock stub says "not the LVGL task":
+// the case where sens_get used to ask the sensors task and wait.
+static unsigned sens_live_asks, sens_reads;
+
+bool sensors_cfg_get(unsigned key, bool live, uint32_t *out) {
+    (void)key;
+    (void)out;
+    sens_reads++;
+    sens_live_asks += live;
+    return false;
+}
+
+static void test_cached_read_never_asks_live(void) {
+    reg_value_t v;
+    sens_live_asks = sens_reads = 0;
+    for (size_t i = 0; i < reg_p4_total(); i++) {
+        reg_p4_get(reg_p4_nth(i), false, &v);
+    }
+    CHECK(sens_reads == reg_p4_sensors.count); // every sens.* key reached its driver's cache
+    CHECK(sens_live_asks == 0);
+    CHECK(reg_p4_get(reg_p4_find_name("sens.acc_odr"), true, &v) == REG_FAILED); // the stub has no chip
+    CHECK(sens_live_asks == 1);                                                   // the console asks the chip
+    reg_entry_t const *bl = reg_p4_find_name("bl.idle"); // a domain without get_cached: its own getter either way
+    CHECK(reg_p4_get(bl, false, &v) == reg_get(bl, &v));
+}
+
 int main(void) {
     test_table();
     test_domain_split();
@@ -486,6 +513,7 @@ int main(void) {
     test_matches();
     test_mismatch();
     test_rows();
+    test_cached_read_never_asks_live();
     if (failures) {
         printf("reg_service_test: %d failure(s)\n", failures);
         return 1;

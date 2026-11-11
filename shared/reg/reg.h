@@ -96,6 +96,9 @@ size_t reg_format(reg_entry_t const *e, reg_value_t const *v, char *buf, size_t 
 // The applied value; REG_FAILED (and *out zeroed) when the entry has no getter, the getter fails or its value does not
 // fit the key's type
 reg_status_t reg_get(reg_entry_t const *e, reg_value_t *out);
+// reg_get through another getter of the same key, with the same checks: the P4's cached read (#341) passes the
+// domain's no-wait getter. NULL get is REG_FAILED.
+reg_status_t reg_get_with(reg_entry_t const *e, reg_get_fn get, reg_value_t *out);
 
 // The one set path: TX -> GUARDED, RO or no setter -> RO, outside the range -> RANGE, else the setter. Whatever the
 // outcome, *applied is read back afterwards; when that read fails the result is REG_FAILED, whatever the set said.

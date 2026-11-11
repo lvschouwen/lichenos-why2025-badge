@@ -23,10 +23,10 @@ static char const *const perf[]        = {"power", "perf"};
 static char const *const oversample[]  = {"off", "1x", "2x", "4x", "8x", "16x"};
 static char const *const filter_size[] = {"off", "1", "3", "7", "15", "31", "63", "127"};
 
-static reg_status_t sens_get(reg_entry_t const *e, reg_value_t *out) {
+// The domain's low byte is the sensors_cfg_key_t. live asks the sensors task and waits for it (up to its CFG_WAIT_MS)
+static reg_status_t sens_read(reg_entry_t const *e, bool live, reg_value_t *out) {
     uint32_t v = 0;
-    // The domain's low byte is the sensors_cfg_key_t; live only off the LVGL task
-    if (!sensors_cfg_get(e->id & 0xFFu, ui_service_lock_check() != UI_LOCK_OK, &v)) {
+    if (!sensors_cfg_get(e->id & 0xFFu, live, &v)) {
         return REG_FAILED;
     }
     if (e->type == REG_T_ENUM && v > (uint32_t)e->max) {
@@ -34,6 +34,17 @@ static reg_status_t sens_get(reg_entry_t const *e, reg_value_t *out) {
     }
     out->u = v;
     return REG_OK;
+}
+
+// The rows' getter, reg_get's (the console's `fw get` and a set's read-back): live, except on the LVGL task, which
+// never waits whoever calls
+static reg_status_t sens_get(reg_entry_t const *e, reg_value_t *out) {
+    return sens_read(e, ui_service_lock_check() != UI_LOCK_OK, out);
+}
+
+// The cached read (reg_p4_get with live false, #341): the configuration the sensors task last read, never waiting
+static reg_status_t sens_get_cached(reg_entry_t const *e, reg_value_t *out) {
+    return sens_read(e, false, out);
 }
 
 #define ENUM_ROW(id_, name_, names_)                                                                                   \
@@ -60,4 +71,5 @@ static reg_entry_t const rows[] = {
      .get_applied = sens_get},
 };
 
-reg_p4_dom_t const reg_p4_sensors = {.rows = rows, .count = sizeof(rows) / sizeof(rows[0])};
+reg_p4_dom_t const reg_p4_sensors = {
+    .rows = rows, .count = sizeof(rows) / sizeof(rows[0]), .get_cached = sens_get_cached};

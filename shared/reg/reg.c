@@ -180,12 +180,16 @@ size_t reg_format(reg_entry_t const *e, reg_value_t const *v, char *buf, size_t 
 }
 
 reg_status_t reg_get(reg_entry_t const *e, reg_value_t *out) {
+    return reg_get_with(e, e->get_applied, out);
+}
+
+reg_status_t reg_get_with(reg_entry_t const *e, reg_get_fn get, reg_value_t *out) {
     memset(out, 0, sizeof(*out));
-    if (!e->get_applied) {
+    if (!get) {
         return REG_FAILED;
     }
     // A getter value that does not fit the key's type (a U8 of 300, an unterminated STR) is a driver fault, not a value
-    reg_status_t st = e->get_applied(e, out);
+    reg_status_t st = get(e, out);
     // An ENUM code past its name table is the same fault: no consumer may index the names with it
     if (st != REG_OK || !fits_type(e->type, out) || (e->type == REG_T_ENUM && reg_check(e, out) != REG_OK)) {
         memset(out, 0, sizeof(*out));
