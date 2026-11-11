@@ -244,6 +244,8 @@ UNREACHABLE = {
     "SCREEN_CLI": "needs a repeater login (transmits)",
     "SCREEN_RSET": "needs a repeater login (transmits)",
     "SCREEN_TELEMETRY": "building the page sends a telemetry request",
+    "SCREEN_RHIST": "a repeater's Status history: its switch starts on-air status polls (#168)",
+    "SCREEN_STRESS": "opens only from a console stress run, under its own key lock (#278)",
     "SCREEN_NOTES_ENTRY": "needs a release note row that is not the 'This is new' page; list only",
     "SCREEN_NOTES_NEW": "the 'This is new' page after an update; shows once",
     "SCREEN_NOTE_ITEM": "needs a saved note on the SD card",
