@@ -280,14 +280,6 @@ target_include_directories(backlight_level_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_options(backlight_level_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME backlight_level_test COMMAND backlight_level_test)
 
-add_executable(slider_map_test
-    ${CMAKE_CURRENT_SOURCE_DIR}/slider_map_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/slider_map.c
-)
-target_include_directories(slider_map_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
-target_compile_options(slider_map_test PRIVATE -Wall -Wextra -Werror)
-add_test(NAME slider_map_test COMMAND slider_map_test)
-
 add_executable(reg_row_text_test
     ${CMAKE_CURRENT_SOURCE_DIR}/reg_row_text_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/reg_row_text.c

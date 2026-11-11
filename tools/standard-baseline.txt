@@ -124,7 +124,7 @@ size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
 size	libjoltwallet__littlefs.a	34376
-size	liblichen_api.a	24082
+size	liblichen_api.a	23966
 size	liblichen_apps.a	50526
 size	liblichen_boot.a	11608
 size	liblichen_clock.a	12587

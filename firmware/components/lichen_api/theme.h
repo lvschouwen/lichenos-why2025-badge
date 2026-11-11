@@ -13,6 +13,7 @@
 #define THEME_TRACK  0x1F2B36 // empty bar segments, selected tiles
 #define THEME_RULE   0x1C2733 // the line under the status bar
 #define THEME_FAINT  0x2F3D4B // skipped boot steps
+#define THEME_SLIDER_TRACK 0x56687A // a slider's empty track: 3.1:1 on THEME_BG (THEME_FAINT is 1.6:1, invisible at the minimum, #344)
 
 #define THEME_PAD          36 // screen edge on the 720x720 panel (the mockups' 18 px at half size)
 #define THEME_STATUS_BAR_H 56 // screens opened with shell_open() keep this much free at the top

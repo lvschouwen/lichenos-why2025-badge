@@ -70,7 +70,7 @@ size_t reg_cmd_header(char *buf, size_t cap) {
 }
 
 static void value_text(reg_entry_t const *e, bool has, reg_value_t const *v, char const *none, char *out, size_t cap) {
-    if (!has || !reg_format_ok(e, v, out, cap)) {
+    if (!has || !reg_format(e, v, out, cap)) {
         snprintf(out, cap, "%s", none);
     }
 }

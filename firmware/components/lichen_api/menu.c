@@ -5,7 +5,6 @@
 #include "lichen_ui_ops.h"
 #include "fonts.h"
 #include "scroll_anchor.h"
-#include "slider_map.h"
 #include "theme.h"
 #include "ui_text.h"
 
@@ -209,11 +208,11 @@ static void on_key(lv_event_t *e) {
             lichen_ui_ops_later(fire_enter, row);
         }
     } else if ((key == LV_KEY_LEFT || key == LV_KEY_RIGHT) && row->slider) {
-        int step = slider_map_step(row->min, row->max, SLIDER_STEPS);
-        int cur  = slider_map_value(row->min, row->max, lv_slider_get_value(row->slider));
-        int v    = slider_map_value(row->min, row->max, slider_map_pos(row->min, row->max, cur + (key == LV_KEY_RIGHT ? step : -step)));
-        if (v != cur) {
-            lv_slider_set_value(row->slider, slider_map_pos(row->min, row->max, v), LV_ANIM_OFF);
+        int step = (row->max - row->min) / SLIDER_STEPS;
+        int v    = lv_slider_get_value(row->slider) + (key == LV_KEY_RIGHT ? step : -step);
+        v        = v < row->min ? row->min : v > row->max ? row->max : v;
+        if (v != lv_slider_get_value(row->slider)) {
+            lv_slider_set_value(row->slider, v, LV_ANIM_OFF);
             char text[8];
             snprintf(text, sizeof(text), "%d", v);
             lv_label_set_text(row->value, text);
@@ -443,9 +442,9 @@ lv_obj_t *menu_add_slider(lv_obj_t *menu, char const *label, int min, int max, i
     // A slider joins the default group by itself and would take Up/Down as value steps: only the row is selectable
     lv_group_remove_obj(row->slider);
     lv_obj_set_clickable(row->slider, false);
-    lv_slider_set_range(row->slider, 0, max - min); // from 0: a minimum other than 0 drew no track (#344)
-    lv_slider_set_value(row->slider, slider_map_pos(min, max, value), LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(row->slider, lv_color_hex(THEME_FAINT), LV_PART_MAIN);
+    lv_slider_set_range(row->slider, min, max);
+    lv_slider_set_value(row->slider, value, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(row->slider, lv_color_hex(THEME_SLIDER_TRACK), LV_PART_MAIN);
     lv_obj_set_style_bg_color(row->slider, lv_color_hex(THEME_AMBER), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(row->slider, lv_color_hex(THEME_AMBER), LV_PART_KNOB);
     lv_obj_set_style_outline_width(row->slider, 0, LV_STATE_ANY);
