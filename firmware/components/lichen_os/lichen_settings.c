@@ -11,7 +11,7 @@
 static char const TAG[] = "settings";
 
 // Says once per ctx that an app (or the OS) asked for settings it cannot have: a few are remembered, so one busy app
-// does not hide another's mistake and none of them fills the log
+// does not hide another's mistake; past those, silence
 static void note_no_namespace(lichen_ctx_t ctx, char const *name) {
     static lichen_ctx_t told[4];
     static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
@@ -23,6 +23,8 @@ static void note_no_namespace(lichen_ctx_t ctx, char const *name) {
         } else if (told[i] == 0) {
             told[i] = ctx;
             break;
+        } else if (i + 1 == sizeof(told) / sizeof(told[0])) {
+            first = false; // table full and no match: stay quiet rather than log on every call
         }
     }
     portEXIT_CRITICAL(&mux);
