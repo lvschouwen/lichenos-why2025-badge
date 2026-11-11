@@ -8,10 +8,12 @@
 #   - on connect the logger sends "--- connected <open|paused|lost> <node>" (node: the ttyUSB it has open, or "-");
 #   - a client line goes to the UART and into the log as ">> <line>", redacted when it can carry a secret (redact());
 #     the other clients see that ">> " line too; while the port is not open the line is refused ("--- refused: ..."),
-#     never queued;
-#   - every line read from the UART and every "--- " note goes to the log and to every client; the "fw: " reply to a
-#     command that prints a secret (SECRET_REPLIES) and a core dump's body go to the clients only, the log gets a
-#     count; a failed UART write is refused and never reopens the port (a reopen risks a reset);
+#     never queued; a line with a control character (tab excepted, one CR before its "\n" is a line end) is refused,
+#     not cleaned: badge.sh's on-air gate read the line as typed, so the badge must get exactly that or nothing;
+#   - every line read from the UART and every "--- " note goes to the log and to every client; while a secret window
+#     is open (a command that prints a secret was sent, SECRET_REPLIES, until its reply is over: secret_over()) every
+#     "fw: " line, whoever's command it answers, and a core dump's body go to the clients only, the log gets a count;
+#     a failed UART write is refused and never reopens the port (a reopen risks a reset);
 #   - a client that does not read is dropped once CLIENT_MAX_BUF bytes wait for it, so it never blocks the logger.
 # The logger also writes badge-console.status (clients and port state) for "badge.sh logger status". The same file
 # is the client: serial_log.py --send/--session/--monitor <port> ..., exit 3 = the socket is not usable for <port>,
@@ -51,7 +53,11 @@ CLIENT_MAX_BUF = 256 * 1024  # about 20 s of UART output at 115200 baud
 CLIENT_MAX_LINE = 1024
 MAX_CLIENTS = 8
 UART_MAX_LINE = 64 * 1024  # bytes without a newline that are logged as one line anyway
-SECRET_MAX_S = 120.0  # a withheld reply ends at the next sent line, or this long after its command
+SECRET_MAX_S = 120.0  # a secret window ends this long after its newest secret command at the latest
+# ... or this long after the last "fw: " line once the newest secret command's reply has begun. The UART console runs one
+# command at a time and prints its reply in one go; a queued command waits at most 2 s for the console (RUN_WAIT_MS in
+# fw_console/console.c) before it runs or says busy, so a reply never pauses this long in the middle.
+SECRET_QUIET_S = 5.0
 UNUSABLE = 3  # client exit code: fall back to the pause path
 MASK = "***"
 
@@ -108,8 +114,10 @@ SECRET_ARGS = (
 # word is masked. Whole parts, so bl.keyboard or "keys" are not a key.
 SECRET_WORDS = {"password", "passwd", "pass", "pw", "secret", "key", "psk", "token"}
 # Commands whose reply prints a secret on the UART (console_reply_secret goes to the asker in full, and the UART asker
-# is everyone on the socket): their "fw: " reply lines are kept out of the log until the next sent line. mesh remote
-# replies come over LoRa, seconds later, so no quiet timer ends it. A core dump's body is always kept out (RAM).
+# is everyone on the socket): they open a secret window (Hub.open_secret). Another client's line never closes it: the
+# badge may still be printing the secret when that line is sent. The firmware prints a remote's answer (it comes over
+# LoRa seconds later) only when "mesh remote" is run again, synchronously, but "mesh remote <who> login|cli" open a
+# window too in case that changes. A core dump's body is always kept out (RAM).
 SECRET_REPLIES = (("token",), ("channel", "show"), ("channel", "add"), ("mesh", "remote"))
 
 
@@ -150,9 +158,18 @@ def reply_is_secret(line: str) -> bool:
     return len(words) > 1 and words[0].lower() in ("get", "set") and _secret_word(words[1])
 
 
-def clean_line(line: str) -> str:
-    """A client line without C0 control characters (tab kept) or DEL: nothing a client sends can steer the console."""
-    return "".join(ch for ch in line if ch == "\t" or (" " <= ch and ch != "\x7f"))
+REFUSED_CONTROL = "--- refused: control characters (only tab is allowed), line not sent"
+REFUSED_LONG = "--- refused: line longer than %d bytes, not sent" % CLIENT_MAX_LINE
+# Refusals of the line itself: the pause path would refuse it too, so the client does not fall back to it
+LINE_REFUSALS = (REFUSED_CONTROL, REFUSED_LONG)
+
+
+def has_control(line: str) -> bool:
+    """Whether a client line holds a C0 control character other than tab, or DEL.
+
+    Refused, never stripped (#324): "se\x01nd" passes badge.sh's on-air gate as a word that is not "send" and would
+    reach the badge as "send" if the logger cleaned it."""
+    return any(ch != "\t" and (ch < " " or ch == "\x7f") for ch in line)
 
 
 def socket_usable(sock_exists: bool, greeting: str, want_node: str) -> tuple[bool, str]:
@@ -190,7 +207,10 @@ class Hub:
         self.max_buf = max_buf
         self.clients: list[Client] = []
         self.state, self.node = "lost", "-"
-        self.withhold_until = 0.0  # "fw: " lines stay out of the log until then, or until the next sent line
+        # The secret window (#324): open from a secret command until secret_over(); the windows of several secret
+        # commands are one, which ends only when the newest one's reply is over (fail closed)
+        self.secret_until = 0.0  # its hard end, SECRET_MAX_S after the newest secret command; 0 = no window open
+        self.secret_reply_at = 0.0  # the last "fw: " line since the newest secret command was sent; 0 = none yet
         self.withheld = 0
         self.dump_lines = -1  # lines of the core dump body kept out of the log; -1 outside a dump
 
@@ -276,8 +296,10 @@ class Hub:
             self.log("--- %d core dump lines kept out of the log (RAM)" % self.dump_lines)
             self.dump_lines = -1
             return False
-        if self.withhold_until and now < self.withhold_until and text.startswith("fw: "):
+        self.tick(now)
+        if self.secret_until and text.startswith("fw: "):
             self.withheld += 1
+            self.secret_reply_at = now
             return True
         return False
 
@@ -286,14 +308,25 @@ class Hub:
             self.log(text)
         self.send_all(text)
 
+    def open_secret(self, now: float) -> None:
+        """A command whose reply can print a secret was sent: its window opens, or the open one waits for it too."""
+        self.secret_until = max(self.secret_until, now + SECRET_MAX_S)
+        self.secret_reply_at = 0.0  # the reply of an older command never ends this one's window
+
+    def secret_over(self, now: float) -> bool:
+        """Whether the open window may close: its hard end, or the newest secret command's reply has been quiet."""
+        if not self.secret_until:
+            return False
+        quiet = self.secret_reply_at and now - self.secret_reply_at >= SECRET_QUIET_S
+        return now >= self.secret_until or bool(quiet)
+
     def end_withhold(self) -> None:
-        if self.withhold_until:
-            self.log("--- %d reply lines kept out of the log (secret)" % self.withheld)
-        self.withhold_until = 0.0
+        self.log("--- %d reply lines kept out of the log (secret)" % self.withheld)
+        self.secret_until = self.secret_reply_at = 0.0
         self.withheld = 0
 
     def tick(self, now: float) -> None:
-        if self.withhold_until and now >= self.withhold_until:
+        if self.secret_over(now):
             self.end_withhold()
 
     def readable(self, c: Client, now: float) -> None:
@@ -310,9 +343,15 @@ class Hub:
         while b"\n" in c.inbuf and c in self.clients:
             raw, c.inbuf = c.inbuf.split(b"\n", 1)
             if len(raw) > CLIENT_MAX_LINE:
-                self.queue(c, "--- refused: line longer than %d bytes, not sent" % CLIENT_MAX_LINE)
+                self.queue(c, REFUSED_LONG)
                 continue
-            self.command(c, clean_line(raw.decode("utf-8", "replace")), now)
+            line = raw.decode("utf-8", "replace")
+            line = line[:-1] if line.endswith("\r") else line  # a CRLF client: the CR ends the line, as on the badge
+            if has_control(line):
+                self.log("--- console client line refused: control characters")  # not the line: it may be a secret
+                self.queue(c, REFUSED_CONTROL)
+                continue
+            self.command(c, line, now)
         if len(c.inbuf) > CLIENT_MAX_LINE:
             self.drop(c, "dropped: line too long")
 
@@ -330,12 +369,11 @@ class Hub:
             self.log("--- write to the port failed (%s), line not sent" % e)
             self.queue(c, "--- refused: write failed (%s)" % e)
             return
-        self.end_withhold()  # a new command: what follows answers it
-        shown = ">> " + redact(line)
+        shown = ">> " + redact(line)  # an open secret window stays open: the badge may still print its reply
         self.log(shown)
         self.send_all(shown, skip=c)
         if reply_is_secret(line):
-            self.withhold_until = now + SECRET_MAX_S
+            self.open_secret(now)
 
 
 def listen(path: str) -> socket.socket:
@@ -602,47 +640,53 @@ def is_note(line: bytes) -> bool:
     return line.startswith(b"--- ") or line.startswith(b">> ")
 
 
-def read_lines(s: socket.socket, end: float, quiet: float | None, out, until: bytes = b"") -> bool:
+def read_lines(s: socket.socket, end: float, quiet: float | None, out, until: bytes = b"") -> str:
     """Copy lines from s to out until end, quiet seconds without data, or a line starting with until.
 
-    False when the logger refused the line: a refusal can follow other notes, so every note before the badge's first
-    line is checked."""
+    The logger's refusal of the line ("--- refused: ...") or "" when it was not refused: a refusal can follow other
+    notes, so every note before the badge's first line is checked."""
     buf, last, answered = b"", time.time(), False
     while True:
         now = time.time()
         limit = end if quiet is None else min(end, last + quiet)
         if now >= limit:
-            return True
+            return ""
         ready, _, _ = select.select([s], [], [], limit - now)
         if not ready:
             continue
         data = s.recv(4096)
         if not data:
-            return True
+            return ""
         last, buf = time.time(), buf + data
         while b"\n" in buf:
             line, buf = buf.split(b"\n", 1)
             if not answered and line.startswith(b"--- refused"):
                 out.flush()
-                return False
+                return line.decode("utf-8", "replace")
             answered = answered or not is_note(line)
             out.write(line.decode("utf-8", "replace") + "\n")
             if until and line.startswith(until):
                 out.flush()
-                return True
+                return ""
         out.flush()
 
 
 def client_send(
     port: str, line: str, seconds: float, quiet: float | None, sock_path: str, until: str = ""
 ) -> int:
+    if has_control(line):  # before anything is sent; the pause path would refuse it too (badge.sh)
+        sys.stderr.write("console: %s\n" % REFUSED_CONTROL[4:])
+        return 1
     s = connect(port, sock_path)
     if s is None:
         return UNUSABLE
     with s:
         s.sendall((line + "\n").encode("utf-8"))
-        ok = read_lines(s, time.time() + seconds, quiet, sys.stdout, until.encode())
-    return 0 if ok else UNUSABLE
+        refused = read_lines(s, time.time() + seconds, quiet, sys.stdout, until.encode())
+    if refused.startswith(LINE_REFUSALS):  # the line itself: the pause path must not send it either
+        sys.stderr.write("console: %s\n" % refused[4:])
+        return 1
+    return UNUSABLE if refused else 0
 
 
 def client_monitor(port: str, sock_path: str) -> int:

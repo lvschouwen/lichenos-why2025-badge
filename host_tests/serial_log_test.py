@@ -166,12 +166,49 @@ def test_a_secret_reply_reaches_the_clients_but_not_the_log() -> None:
     lg.hub.uart_line("fw: token 0123456789abcdef0123456789abcdef", 100.5)
     lg.hub.uart_line("I (1) a log line is kept", 101.0)
     assert "fw: token 0123456789abcdef0123456789abcdef" in received(peer_a)
-    peer_a.sendall(b"fw mem\n")  # the next sent line ends the window
-    lg.hub.readable(a, 102.0)
-    lg.hub.uart_line("fw: heap", 102.5)
+    lg.hub.tick(100.5 + serial_log.SECRET_QUIET_S)  # the reply's own end: quiet after it
+    peer_a.sendall(b"fw mem\n")
+    lg.hub.readable(a, 106.0)
+    lg.hub.uart_line("fw: heap", 106.5)
     assert not any("0123456789abcdef" in l for l in lg.lines)
     assert lg.lines[-4:] == ["I (1) a log line is kept", "--- 1 reply lines kept out of the log (secret)",
                              ">> fw mem", "fw: heap"]
+
+
+def test_another_clients_command_never_ends_a_secret_window() -> None:
+    lg = FakeLogger()
+    a, peer_a = lg.client()
+    b, peer_b = lg.client()
+    peer_a.sendall(b"fw mesh remote\n")  # shows the remote's last answer, which may hold its guest password
+    lg.hub.readable(a, 100.0)
+    peer_b.sendall(b"fw mem\n")  # sent before the badge printed the answer
+    lg.hub.readable(b, 100.2)
+    lg.hub.uart_line("fw: cli #3 to aabbccddeeff: done", 101.0)
+    lg.hub.uart_line("fw:   guest.password hunter22", 101.1)
+    lg.hub.tick(101.1 + serial_log.SECRET_QUIET_S - 0.1)
+    lg.hub.uart_line("fw: heap", 104.0)  # the answer to b, still inside the window: kept out too (fail closed)
+    assert not any("hunter22" in l or "heap" in l for l in lg.lines)
+    assert "fw:   guest.password hunter22" in received(peer_a)
+    lg.hub.tick(104.0 + serial_log.SECRET_QUIET_S)
+    lg.hub.uart_line("fw: later", 110.0)
+    assert lg.lines[-2:] == ["--- 3 reply lines kept out of the log (secret)", "fw: later"]
+
+
+def test_a_window_waits_for_the_reply_of_its_own_command() -> None:
+    lg = FakeLogger()
+    a, peer_a = lg.client()
+    peer_a.sendall(b"fw mesh remote\n")
+    lg.hub.readable(a, 100.0)  # no reply yet: no quiet timer runs, only the hard end
+    lg.hub.tick(100.0 + serial_log.SECRET_QUIET_S * 4)
+    assert lg.hub.secret_until
+    lg.hub.uart_line("fw: first answer", 130.0)
+    peer_a.sendall(b"fw token\n")  # a newer secret command: the older reply's quiet does not end its window
+    lg.hub.readable(a, 131.0)
+    lg.hub.tick(130.0 + serial_log.SECRET_QUIET_S + 1)
+    lg.hub.uart_line("fw: token 0123456789abcdef0123456789abcdef", 137.0)
+    assert not any("0123456789abcdef" in l for l in lg.lines)
+    lg.hub.tick(137.0 + serial_log.SECRET_QUIET_S)
+    assert not lg.hub.secret_until and lg.lines[-1] == "--- 2 reply lines kept out of the log (secret)"
 
 
 def test_a_remote_reply_over_lora_seconds_later_is_still_kept_out() -> None:
@@ -229,16 +266,43 @@ def test_a_failed_write_is_refused_and_keeps_the_port() -> None:
     assert lg.hub.state == "open" and a in lg.hub.clients
 
 
-def test_control_characters_are_stripped_and_long_lines_refused() -> None:
+def test_control_characters_and_long_lines_are_refused_not_cleaned() -> None:
     lg = FakeLogger()
     a, peer = lg.client()
     received(peer)
-    peer.sendall(b"fw\x1b[2J m\x03em\tx\x7f\n" + b"x" * 1500 + b"\nfw boot\n")
+    # stripped, "se\x01nd" would reach the badge as "send", a word badge.sh's on-air gate never saw (#324)
+    peer.sendall(b"fw mesh se\x01nd #other hi\nfw\x1b[2J mem\nfw mem\x7f\n" + b"x" * 1500 + b"\nfw get\tbl.\r\n")
     lg.hub.readable(a, 0.0)
     lg.hub.readable(a, 0.0)
-    assert lg.uart == [b"fw[2J mem\tx\n", b"fw boot\n"]
-    assert "--- refused: line longer than 1024 bytes, not sent" in received(peer)
+    assert lg.uart == [b"fw get\tbl.\n"]  # tab kept, a CR before the newline is a line end
+    got = received(peer)
+    assert got.count(serial_log.REFUSED_CONTROL) == 3
+    assert "--- refused: line longer than 1024 bytes, not sent" in got
+    assert lg.lines.count("--- console client line refused: control characters") == 3
+    assert not any("#other" in l for l in lg.lines)
     assert a in lg.hub.clients
+
+
+def test_has_control_matches_badge_sh() -> None:
+    assert serial_log.has_control("fw mesh se\x01nd #x") and serial_log.has_control("a\x7f")
+    assert serial_log.has_control("a\nb") and serial_log.has_control("a\rb") and serial_log.has_control("\x1b[A")
+    assert not serial_log.has_control("fw get\tbl. \u00e9 \u20ac")
+
+
+def test_a_control_line_is_refused_before_the_socket_and_never_falls_back() -> None:
+    with tempfile.TemporaryDirectory() as d:
+        missing = os.path.join(d, serial_log.SOCK_NAME)  # no logger: a plain refusal would still say "fall back"
+        assert serial_log.client_send("/dev/null", "fw mesh se\x01nd #x hi", 0.1, None, missing) == 1
+        arg = base64.b64encode(b"fw mesh se\x01nd #x hi").decode()
+        saved = os.environ.get("BADGE_CONSOLE_SOCK")
+        os.environ["BADGE_CONSOLE_SOCK"] = missing
+        try:
+            assert serial_log.client_main(["--b64", "--send", "/dev/null", arg, "0.1"]) == 1
+        finally:
+            if saved is None:
+                del os.environ["BADGE_CONSOLE_SOCK"]
+            else:
+                os.environ["BADGE_CONSOLE_SOCK"] = saved
 
 
 def test_a_client_that_disconnects_mid_line_sends_nothing() -> None:
@@ -266,10 +330,10 @@ def test_a_note_before_the_refusal_still_means_refused() -> None:
     ours, theirs = socket.socketpair()
     theirs.sendall(b"--- port lost (gone), retrying\n--- refused: the port is lost, line not sent\n")
     out = io.StringIO()
-    assert serial_log.read_lines(ours, time.time() + 1, None, out) is False
+    assert serial_log.read_lines(ours, time.time() + 1, None, out) == "--- refused: the port is lost, line not sent"
     ours, theirs = socket.socketpair()
     theirs.sendall(b"fw: answer\n--- refused: someone else\n")  # after the badge answered: not about our line
-    assert serial_log.read_lines(ours, time.time() + 0.3, None, io.StringIO()) is True
+    assert serial_log.read_lines(ours, time.time() + 0.3, None, io.StringIO()) == ""
 
 
 def test_a_session_ends_at_its_marker() -> None:
@@ -277,7 +341,7 @@ def test_a_session_ends_at_its_marker() -> None:
     theirs.sendall(b"fw: crash: elf ab\n--- coredump begin 3 ---\nAAAA\n--- coredump end 01 ---\n")
     out = io.StringIO()
     start = time.time()
-    assert serial_log.read_lines(ours, start + 30, 10, out, b"--- coredump end ") is True
+    assert serial_log.read_lines(ours, start + 30, 10, out, b"--- coredump end ") == ""
     assert time.time() - start < 2
     assert out.getvalue().endswith("--- coredump end 01 ---\n")
 

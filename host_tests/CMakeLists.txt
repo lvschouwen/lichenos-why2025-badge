@@ -1894,6 +1894,7 @@ add_test(NAME elf_archive_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools
 add_test(NAME badge_usage_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_usage_test.sh)
 add_test(NAME badge_log_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_log_test.sh)
 add_test(NAME guard_onair_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/guard_onair_test.sh)
+add_test(NAME badge_console_ctrl_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_console_ctrl_test.sh)
 
 # Battery model (#11): V to percent, warn/off with dwell, MAX17048 decode, ADC divider
 add_executable(battery_model_test

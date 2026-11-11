@@ -168,6 +168,17 @@ unset onair_allow_override ONAIR_ALLOW_FILE
 # shellcheck source=tools/onair_guard.sh
 . "$REPO/tools/onair_guard.sh"
 
+# Refuses a console line with a C0 control character other than tab, or DEL (#324). First, before onair_gate: the gate
+# reads the line as typed, so "se<^A>nd" is not "send" to it, and nothing on the way may turn it into one. Line breaks
+# are refused here too.
+refuse_control_chars() {
+    # counted, not captured: $(...) would drop a trailing newline
+    if [ "$(printf '%s' "$1" | LC_ALL=C tr -d '\t' | LC_ALL=C tr -dc '\000-\037\177' | wc -c)" -ne 0 ]; then
+        echo "refusing: control characters in a console line (only tab is allowed)" >&2
+        exit 1
+    fi
+}
+
 # Every console line passes here before it is sent (#287): on air only #badgetest and the test node. A line that
 # changes what the badge floods (advert interval/manual) is refused too, with no override (an agent could set one):
 # Lucas changes those in MeshCore Settings on the badge.
@@ -398,9 +409,10 @@ cmd_monitor() {
 # left alone at open (dsrdtr), RTS is released first and DTR after.
 cmd_console() {
     local port=$1 line=$2
+    case $line in *$'\n'*|*$'\r'*) echo "refusing: no line breaks in a console line" >&2; exit 1;; esac
+    refuse_control_chars "$line"
     onair_gate "$line"
     require_espressif_port "$port"
-    case $line in *$'\n'*|*$'\r'*) echo "refusing: no line breaks in a console line" >&2; exit 1;; esac
     if onair_needs_scope "$line"; then
         onair_scope_gate "$(console_line "$port" "$(onair_scope_query "$line")" || true)"
     fi
@@ -409,13 +421,16 @@ cmd_console() {
 
 # Through the logger's socket when it runs (the same two-second window), the pause path below otherwise: the client
 # does not read stdin, so the script stays there for the fallback. The line travels base64-encoded through the remote
-# shell, so quotes and $ in it arrive as typed.
+# shell, so quotes and $ in it arrive as typed. Both ends check the decoded line for control characters again.
 console_line() {
     local port=$1 line=$2 line64
+    refuse_control_chars "$line"
     line64=$(printf '%s' "$line" | base64 | tr -d '\n')
     socket_or_pause "--b64 --send '$port' '$line64' 2" "$VENV/bin/python - '$port' '$line64'" <<'PY'
 import base64, sys, time, serial
 port, line = sys.argv[1], base64.b64decode(sys.argv[2]).decode("utf-8")
+if any(ch != "\t" and (ch < " " or ch == "\x7f") for ch in line):  # as serial_log.has_control (#324)
+    sys.exit("refusing: control characters in a console line (only tab is allowed)")
 s = serial.Serial()
 s.port, s.baudrate, s.timeout = port, 115200, 0.2
 s.dsrdtr = True
@@ -742,6 +757,7 @@ cmd_fw() {
     local ip=$1
     shift
     local line="$*"
+    refuse_control_chars "$line"
     onair_gate "$line"
     if onair_needs_scope "$line"; then
         onair_scope_gate "$(fw_post "$ip" "$(onair_scope_query "$line")" || true)"
