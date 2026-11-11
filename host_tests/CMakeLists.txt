@@ -351,7 +351,12 @@ add_executable(reg_service_test ${CMAKE_CURRENT_SOURCE_DIR}/reg_service_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_sensors.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_misc.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_settings.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_settings.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_psram.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_display.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_sensors.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_misc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/reg_stubs_settings.c)
 target_include_directories(reg_service_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board)
 target_compile_options(reg_service_test PRIVATE -Wall -Wextra -Werror)
