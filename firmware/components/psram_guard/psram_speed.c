@@ -96,7 +96,7 @@ static bool image_pending(void) {
 }
 
 // The record goes straight to NVS, not through the settings service (it runs before the services; #325 tracks such
-// writers). One blob, the layout of psram_speed_rec_encode: a v1 blob of an older image reads with no failure recorded.
+// writers). One blob, the layout of psram_speed_rec_encode; anything else reads as the default record.
 static void rec_load(void) {
     nvs_handle_t nvs;
     uint8_t      blob[PSRAM_SPEED_REC_SIZE];

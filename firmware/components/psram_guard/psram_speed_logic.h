@@ -71,10 +71,9 @@ typedef struct {
     char const *fw;       // esp_app_get_description()->version
 } psram_fail_ctx_t;
 
-// NVS blob "psram_spd". v1 (4 bytes): want, trial, failed, pad. v2 (32 bytes): want, trial, failed, aborts, version 2,
-// kind, reset, at120, wall_s (LE32), uptime_s (LE32), fw[16] (NUL-padded). A v1 blob reads with no failure recorded;
-// any other size or version is not ours (the default record).
-#define PSRAM_SPEED_REC_V1_SIZE 4
+// NVS blob "psram_spd", version 2 (32 bytes): want, trial, failed, aborts, version 2, kind, reset, at120, wall_s (LE32),
+// uptime_s (LE32), fw[16] (NUL-padded). Any other size or version (the 4-byte record before #329 included: images are
+// not released, so there is no migration) is not ours: the default record.
 #define PSRAM_SPEED_REC_VERSION 2
 #define PSRAM_SPEED_REC_SIZE    32
 void psram_speed_rec_encode(psram_speed_rec_t const *r, uint8_t out[PSRAM_SPEED_REC_SIZE]);

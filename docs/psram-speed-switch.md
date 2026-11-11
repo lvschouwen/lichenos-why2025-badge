@@ -21,11 +21,9 @@ The badge ships at 80 MHz PSRAM. 120 MHz can be tried from Settings > For develo
 - **NVS record** `psram_spd` = {want 80/120, trial (0 / armed), failed, aborts, last failure}; the rules are
   `psram_speed_logic.c` (host-tested). Written straight to NVS, not through the settings service (it runs before the
   services; #325). Blob v2 (32 bytes, #329): want, trial, failed, aborts, version 2, kind, reset reason, ran-at-120,
-  wall time (LE32, 0 = clock not set), uptime (LE32), image version (16 bytes, NUL-padded, cut at 15). The v1 blob of
-  older images (4 bytes) reads with no failure recorded; any other size or version is the default record (80). An older
-  image reading a v2 blob takes the default too (80, nothing pending): a downgrade lands at 80. A v1 record that an
-  older image left in the middle of a trial (trial 1 while it ran at 120, then an update) is judged by the rules below
-  with no marker from that image: failed after a crash reset, otherwise aborted and armed again.
+  wall time (LE32, 0 = clock not set), uptime (LE32), image version (16 bytes, NUL-padded, cut at 15). Any other size or
+  version, the 4-byte record of images before #329 included (no migration: images are not released), is the default
+  record (80, nothing pending, last failure none).
 
 ## Boot sequence
 

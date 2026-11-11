@@ -283,7 +283,7 @@ static void test_fail_kinds(void) {
     CHECK(strcmp(t, "none") == 0);
 }
 
-// The NVS blob: round trip, the v1 record of older images, and nothing foreign read as facts
+// The NVS blob: round trip, and nothing that is not a v2 record (the old 4-byte one included) read as facts
 static void test_record(void) {
     uint8_t           b[PSRAM_SPEED_REC_SIZE];
     psram_speed_rec_t r = {.want = 120, .trial = PSRAM_SPEED_TRIAL_ARMED, .aborts = 2}, back;
@@ -294,14 +294,14 @@ static void test_record(void) {
     psram_speed_rec_decode(b, sizeof(b), &back);
     CHECK(memcmp(&r, &back, sizeof(r)) == 0);
 
-    // v1 (4 bytes, before #329): the speed state, no failure recorded, a stray pad byte is not an abort count
+    // The 4-byte record before #329 is not read (no migration): the default, nothing pending, no failure
     uint8_t v1[4] = {80, 0, 1, 7};
     psram_speed_rec_decode(v1, sizeof(v1), &back);
-    CHECK(back.want == 80 && back.failed && !back.trial && back.aborts == 0 && back.last.kind == PSRAM_FAIL_NONE);
+    CHECK(back.want == 80 && !back.failed && !back.trial && back.aborts == 0 && back.last.kind == PSRAM_FAIL_NONE);
     CHECK(back.last.fw[0] == 0 && back.last.wall_s == 0 && back.last.uptime_s == 0 && back.last.reset == 0);
     uint8_t v1b[4] = {120, 1, 0, 0};
     psram_speed_rec_decode(v1b, sizeof(v1b), &back);
-    CHECK(back.want == 120 && back.trial == PSRAM_SPEED_TRIAL_ARMED && !back.failed);
+    CHECK(back.want == 80 && !back.trial && !back.failed);
 
     // Another size or version: the default, not garbage
     b[4] = 3;

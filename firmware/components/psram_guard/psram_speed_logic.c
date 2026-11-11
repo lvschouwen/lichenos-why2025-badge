@@ -53,9 +53,7 @@ void psram_speed_rec_encode(psram_speed_rec_t const *r, uint8_t out[PSRAM_SPEED_
 
 void psram_speed_rec_decode(uint8_t const *in, size_t size, psram_speed_rec_t *r) {
     *r = (psram_speed_rec_t){.want = 80};
-    if (size == PSRAM_SPEED_REC_V1_SIZE) { // before #329: the speed bytes only, the pad byte is not an abort count
-        *r = (psram_speed_rec_t){.want = in[0], .trial = in[1], .failed = in[2]};
-    } else if (size == PSRAM_SPEED_REC_SIZE && in[4] == PSRAM_SPEED_REC_VERSION) {
+    if (size == PSRAM_SPEED_REC_SIZE && in[4] == PSRAM_SPEED_REC_VERSION) {
         *r = (psram_speed_rec_t){.want = in[0], .trial = in[1], .failed = in[2], .aborts = in[3]};
         r->last.kind     = in[5];
         r->last.reset    = in[6];
