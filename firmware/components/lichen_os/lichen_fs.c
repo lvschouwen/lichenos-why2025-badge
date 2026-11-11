@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "fs_path.h"
+#include "lichen_sys_app.h"
 #include "sdcard.h"
 #include "storage.h"
 
@@ -17,14 +18,14 @@ static char const TAG[] = "files";
 
 // An app's directory on the storage drive: its owner and its path side by side, so app_slot_pick (pure) reads the
 // owners. Apps call lichen_fs_app_dir from their own tasks: the lookup, mkdir and claim run with dirs_lock held (#272).
-EXT_RAM_BSS_ATTR static void const *dir_owner[LICHEN_MAX_APPS];
+EXT_RAM_BSS_ATTR static void const *dir_owner[LICHEN_MAX_APPS]; // the app's id string
 EXT_RAM_BSS_ATTR static char        dir_path[LICHEN_MAX_APPS][sizeof(STORAGE_BASE) + 1 + 13 + 1]; // + the longest id
 
 // An app's directory on the SD card, made once per mount: a re-inserted (or another) card gets it again
 typedef struct {
-    lichen_app_t const *app;
-    uint32_t            generation; // sd_info's generation it was made in; 0 = not yet
-    char                path[sizeof(SD_APPS_DIR) + 1 + 13 + 1];
+    char const *id;
+    uint32_t    generation; // sd_info's generation it was made in; 0 = not yet
+    char        path[sizeof(SD_APPS_DIR) + 1 + 13 + 1];
 } sd_dir_t;
 
 EXT_RAM_BSS_ATTR static sd_dir_t sd_dirs[LICHEN_MAX_APPS];
@@ -46,14 +47,22 @@ static bool take_lock(SemaphoreHandle_t *lock, StaticSemaphore_t *buf) {
     return xSemaphoreTake(*lock, pdMS_TO_TICKS(2000)) == pdTRUE;
 }
 
-static bool usable(lichen_app_t const *app) {
-    char path[sizeof(STORAGE_BASE) + 1 + 13 + 1];
-    if (!app || !fs_app_dir_path(STORAGE_BASE, app->id, path, sizeof(path))) { // the id rules and the OS's names
-        ESP_LOGE(TAG, "app %s has no usable id for its directory (or one of the OS's, #283)",
-                 app && app->name ? app->name : "?");
-        return false;
+// The id of ctx's app for a directory call; NULL when the ctx is refused (the context table logged it), the OS's, or
+// the id is unusable (or one of the OS's, #283). The id string lives as long as the app does: the tables key on it.
+static char const *usable_id(lichen_ctx_t ctx, char const *what) {
+    char const     *id   = NULL;
+    char const     *name = NULL;
+    gate_app_kind_t kind = lichen_sys_ctx_app(ctx, what, &id, &name);
+    if (kind == GATE_APP_REFUSED) {
+        return NULL;
     }
-    return true;
+    char path[sizeof(STORAGE_BASE) + 1 + 13 + 1];
+    if (kind != GATE_APP_ID || !fs_app_dir_path(STORAGE_BASE, id, path, sizeof(path))) { // the id rules, the OS's names
+        ESP_LOGE(TAG, "%s has no usable id for its directory (or one of the OS's, #283)",
+                 kind == GATE_APP_OS ? "the OS" : name ? name : "?");
+        return NULL;
+    }
+    return id;
 }
 
 static bool made(char const *path) {
@@ -61,36 +70,37 @@ static bool made(char const *path) {
 }
 
 // With dirs_lock held
-static char const *app_dir_locked(lichen_app_t const *app) {
-    size_t i = app_slot_pick(dir_owner, LICHEN_MAX_APPS, app);
+static char const *app_dir_locked(char const *id) {
+    size_t i = app_slot_pick(dir_owner, LICHEN_MAX_APPS, id);
     if (i == LICHEN_MAX_APPS) {
-        ESP_LOGE(TAG, "no room for %s's directory", app->id);
+        ESP_LOGE(TAG, "no room for %s's directory", id);
         return NULL;
     }
-    if (dir_owner[i] == app) {
+    if (dir_owner[i] == id) {
         return dir_path[i];
     }
-    if (!fs_app_dir_path(STORAGE_BASE, app->id, dir_path[i], sizeof(dir_path[i]))) {
-        return NULL; // usable() already refused it; never mkdir a path that was not written
+    if (!fs_app_dir_path(STORAGE_BASE, id, dir_path[i], sizeof(dir_path[i]))) {
+        return NULL; // usable_id already refused it; never mkdir a path that was not written
     }
     if (!made(dir_path[i])) {
         ESP_LOGE(TAG, "%s: mkdir failed (errno %d): no drive?", dir_path[i], errno);
         return NULL; // the slot stays free: the next call tries again
     }
-    dir_owner[i] = app;
+    dir_owner[i] = id;
     return dir_path[i];
 }
 
-char const *lichen_fs_app_dir(lichen_app_t const *app) {
-    if (!usable(app)) {
+char const *lichen_fs_app_dir(lichen_ctx_t ctx) {
+    char const *id = usable_id(ctx, "lichen_fs_app_dir");
+    if (!id) {
         return NULL;
     }
     // Once more on a timeout: a NULL here reads to the app like "no drive", so give a slow holder a second chance
     if (!take_lock(&dirs_lock, &dirs_lock_buf) && !take_lock(&dirs_lock, &dirs_lock_buf)) {
-        ESP_LOGW(TAG, "%s: directory table busy (lock timeout twice), not a missing drive", app->id);
+        ESP_LOGW(TAG, "%s: directory table busy (lock timeout twice), not a missing drive", id);
         return NULL;
     }
-    char const *path = app_dir_locked(app);
+    char const *path = app_dir_locked(id);
     xSemaphoreGive(dirs_lock);
     return path;
 }
@@ -107,26 +117,26 @@ bool lichen_fs_drive_bytes(size_t *total, size_t *used) {
 }
 
 // With sd_dirs_lock held
-static char const *sd_dir_locked(lichen_app_t const *app, uint32_t generation) {
+static char const *sd_dir_locked(char const *id, uint32_t generation) {
     sd_dir_t *slot = NULL;
     for (size_t i = 0; i < LICHEN_MAX_APPS; i++) {
-        if (sd_dirs[i].app == app) {
+        if (sd_dirs[i].id == id) {
             slot = &sd_dirs[i];
             break;
         }
-        if (!slot && !sd_dirs[i].app) {
+        if (!slot && !sd_dirs[i].id) {
             slot = &sd_dirs[i];
         }
     }
     if (!slot) {
-        ESP_LOGE(TAG, "no room for %s's SD directory", app->id);
+        ESP_LOGE(TAG, "no room for %s's SD directory", id);
         return NULL;
     }
-    if (slot->app == app && slot->generation == generation) {
+    if (slot->id == id && slot->generation == generation) {
         return slot->path;
     }
-    fs_app_dir_path(SD_APPS_DIR, app->id, slot->path, sizeof(slot->path));
-    slot->app = app;
+    fs_app_dir_path(SD_APPS_DIR, id, slot->path, sizeof(slot->path));
+    slot->id = id;
     if (!sd_begin(1000)) {
         return NULL;
     }
@@ -141,8 +151,9 @@ static char const *sd_dir_locked(lichen_app_t const *app, uint32_t generation) {
     return slot->path;
 }
 
-char const *lichen_fs_sd_dir(lichen_app_t const *app) {
-    if (!usable(app)) {
+char const *lichen_fs_sd_dir(lichen_ctx_t ctx) {
+    char const *id = usable_id(ctx, "lichen_fs_sd_dir");
+    if (!id) {
         return NULL;
     }
     sd_info_t info;
@@ -151,10 +162,10 @@ char const *lichen_fs_sd_dir(lichen_app_t const *app) {
         return NULL; // no card is normal: the app asks again later
     }
     if (!take_lock(&sd_dirs_lock, &sd_dirs_lock_buf)) {
-        ESP_LOGW(TAG, "%s: SD directory table busy", app->id);
+        ESP_LOGW(TAG, "%s: SD directory table busy", id);
         return NULL;
     }
-    char const *path = sd_dir_locked(app, info.generation);
+    char const *path = sd_dir_locked(id, info.generation);
     xSemaphoreGive(sd_dirs_lock);
     return path;
 }
@@ -174,23 +185,37 @@ bool lichen_fs_sd_bytes(uint64_t *total, uint64_t *used) {
 // Who holds the batch lock, for the log line of whoever waits in vain. A hint only: written under the lock, read racily.
 static char const *volatile sd_holder;
 
-bool lichen_fs_sd_begin(lichen_app_t const *app, uint32_t wait_ms) {
-    if (!app || !app->id) {
+// The label the batch lock is held under: the app's id, NULL for the OS (read as "the OS"). False when ctx is refused
+// (logged by the context table) or an app has no id.
+static bool batch_holder(lichen_ctx_t ctx, char const *what, char const **holder) {
+    char const     *id   = NULL;
+    char const     *name = NULL;
+    gate_app_kind_t kind = lichen_sys_ctx_app(ctx, what, &id, &name);
+    *holder              = kind == GATE_APP_ID ? id : NULL;
+    return kind == GATE_APP_ID || kind == GATE_APP_OS;
+}
+
+bool lichen_fs_sd_begin(lichen_ctx_t ctx, uint32_t wait_ms) {
+    char const *who;
+    if (!batch_holder(ctx, "lichen_fs_sd_begin", &who)) {
         return false;
     }
     if (!sd_begin(wait_ms)) {
         char const *holder = sd_holder;
         if (sd_mounted()) {
-            ESP_LOGW(TAG, "%s: SD card busy (held by %s)", app->id, holder ? holder : "the OS");
+            ESP_LOGW(TAG, "%s: SD card busy (held by %s)", who ? who : "the OS", holder ? holder : "the OS");
         }
         return false;
     }
-    sd_holder = app->id;
+    sd_holder = who;
     return true;
 }
 
-void lichen_fs_sd_end(lichen_app_t const *app, int err) {
-    (void)app;
+void lichen_fs_sd_end(lichen_ctx_t ctx, int err) {
+    char const *who;
+    if (!batch_holder(ctx, "lichen_fs_sd_end", &who)) {
+        return; // a made-up ctx cannot end a batch somebody else holds
+    }
     sd_holder = NULL;
     sd_end(sd_io_from_errno(err));
 }

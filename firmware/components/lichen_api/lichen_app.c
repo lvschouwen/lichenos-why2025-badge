@@ -203,6 +203,31 @@ bool lichen_sys_ctx_resolve(lichen_ctx_t ctx, lichen_app_t const **app, char con
     return true;
 }
 
+// The settings, file, badge and notice calls (#230 E1c): gate_app.c's decisions over the real table
+static bool env_resolve(uint32_t ctx, char const **id, char const **name, char const *what) {
+    lichen_app_t const *app = NULL;
+    if (!lichen_sys_ctx_resolve(ctx, &app, what)) {
+        return false;
+    }
+    *id   = app ? app->id : NULL;
+    *name = app ? app->name : NULL;
+    return true;
+}
+
+static gate_app_env_t const s_app_env = {.resolve = env_resolve, .os = lichen_sys_ctx_os};
+
+gate_app_kind_t lichen_sys_ctx_app(lichen_ctx_t ctx, char const *what, char const **id, char const **name) {
+    return gate_app_id(&s_app_env, ctx, what, id, name);
+}
+
+char const *lichen_sys_ctx_source(lichen_ctx_t ctx, char const *what) {
+    return gate_app_source(&s_app_env, ctx, what);
+}
+
+bool lichen_sys_ctx_settings_ns(lichen_ctx_t ctx, char const *what, char *ns, size_t cap) {
+    return gate_app_settings_ns(&s_app_env, ctx, what, ns, cap);
+}
+
 // ---- fw app ctx ----------------------------------------------------------------------------------------------------
 
 static void cmd_app(char const *args) {

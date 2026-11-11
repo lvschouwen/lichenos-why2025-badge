@@ -245,7 +245,7 @@ static void tile_publish_unread(void) {
     tile.unread_total = total;
     portEXIT_CRITICAL(&tile_mux);
     // home's count on the icon (#102); its own lock, not inside ours. 0 while stopped (#103): nothing arrives then
-    lichen_badge_set("meshcore", mesh_is_stopped() ? 0 : total);
+    lichen_badge_set(meshcore_ctx(), mesh_is_stopped() ? 0 : total);
 }
 
 static uint32_t tile_unread(void) {
@@ -264,7 +264,7 @@ static void tile_on_message(char const *channel, char const *text) {
     tile.unread_total = total;
     tile_heard_s      = mesh_uptime_s();
     portEXIT_CRITICAL(&tile_mux);
-    lichen_badge_set("meshcore", total);
+    lichen_badge_set(meshcore_ctx(), total);
 }
 
 // Boot (under the mesh lock): the newest message from the history journal as the tile's latest line
@@ -700,7 +700,7 @@ static void mesh_task(void *arg) {
             mesh_unlock();
             // Here, not in mesh_stop: a stop that outlasts mesh_stop's wait still gives the radio back (#103)
             lora_radio.end();
-            lichen_badge_set("meshcore", 0);
+            lichen_badge_set(meshcore_ctx(), 0);
             // The contact rewrite is the same one MyMesh does lazily in its loop: its time here says what it costs there
             ESP_LOGI(TAG, "MeshCore stopped%s: prefs, %d contacts, channels saved in %lld ms (contacts %lld ms)",
                      final ? " for the update" : "", node->getNumContacts(), save_ms, contacts_ms);
@@ -808,7 +808,7 @@ static void ident_apply(mesh_ident_t state, bool simulated) {
                         : "identity MISMATCH: the stored public key is not the private key's",
              simulated ? " (simulated)" : "");
     // an error notice: toasted, kept in the history across restarts until read
-    lichen_notify("meshcore", LN_ERROR,
+    lichen_notify(meshcore_ctx(), LN_ERROR,
                   simulated    ? "MeshCore identity (test)"
                   : unreadable ? "MeshCore identity unreadable"
                                : "MeshCore identity damaged",
@@ -1311,16 +1311,16 @@ extern "C" char const *mesh_contact_import(uint8_t const *pkt, size_t len, char 
 // ---- our adverts (#52) ---------------------------------------------------------------------------------------------
 
 // The advert keys live in the app's settings (a.meshcore)
-static lichen_app_t const *adv_app(void) {
-    return lichen_app_by_id(MESHCORE_APP_ID);
+static lichen_ctx_t adv_app(void) {
+    return meshcore_ctx();
 }
 
 // At start, before the task runs
 static void adv_load(void) {
-    lichen_app_t const *app      = adv_app();
-    uint32_t            interval = app_settings_get_u32(app, ADV_KEY_INTERVAL, ADVCFG_INTERVAL_DEFAULT);
-    uint32_t            last     = app_settings_get_u32(app, ADV_KEY_LAST, 0);
-    uint8_t             flood    = app_settings_get_u8(app, ADV_KEY_FLOOD, 0);
+    lichen_ctx_t app      = adv_app();
+    uint32_t     interval = app_settings_get_u32(app, ADV_KEY_INTERVAL, ADVCFG_INTERVAL_DEFAULT);
+    uint32_t     last     = app_settings_get_u32(app, ADV_KEY_LAST, 0);
+    uint8_t      flood    = app_settings_get_u8(app, ADV_KEY_FLOOD, 0);
     if (!advcfg_interval_ok(interval)) {
         interval = ADVCFG_INTERVAL_DEFAULT;
     }
@@ -1534,7 +1534,7 @@ extern "C" void mesh_contacts_full(void) {
 // The mesh task, after the unlock (the notify service takes its own mutex and may read NVS)
 static void contacts_full_post(void) {
     if (__atomic_exchange_n(&contacts_full_pending, false, __ATOMIC_ACQ_REL)) {
-        lichen_notify_to("meshcore", LN_WARN, "contacts-full", "Contacts full",
+        lichen_notify_to(meshcore_ctx(), LN_WARN, "contacts-full", "Contacts full",
                          "New nodes are not added. Remove contacts, or turn on Overwrite oldest in Auto-add.",
                          LN_COALESCE);
     }
@@ -3417,7 +3417,7 @@ static bool start_locked(char const *files_dir) {
     tile.unread_total = 0; // nothing unread at boot
     tile.contacts     = (size_t)n->getNumContacts();
     portEXIT_CRITICAL(&tile_mux);
-    lichen_badge_set("meshcore", 0);
+    lichen_badge_set(meshcore_ctx(), 0);
     tile_seed_latest(); // the history's newest line; tile_heard_s stays 0, so no "just now" for an old message
     __atomic_store_n(&node, n, __ATOMIC_RELEASE);
     mesh_unlock();

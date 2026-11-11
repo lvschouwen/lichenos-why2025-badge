@@ -63,7 +63,7 @@ static void make_table(void) {
     uint8_t  prefix[RH_SLOTS][RH_PREFIX];
     uint16_t minutes[RH_SLOTS];
     bool     console[RH_SLOTS];
-    app_settings_get_str(meshcore_self(), CFG_KEY, text, sizeof(text), "");
+    app_settings_get_str(meshcore_ctx(), CFG_KEY, text, sizeof(text), "");
     size_t n     = rh_cfg_decode(text, prefix, minutes, console, RH_SLOTS);
     bool   crash = lichen_crashlog_after_crash(); // panic, watchdog, brownout: a restart loop must not ask more often
     rh_load(t, prefix, minutes, n, mesh_uptime_s(), crash);
@@ -89,8 +89,8 @@ static void make_table(void) {
 static bool save_locked(rh_t *t) {
     char text[RH_CFG_MAX];
     rh_cfg_encode(t, text, sizeof(text));
-    bool ok = text[0] ? app_settings_set_str(meshcore_self(), CFG_KEY, text)
-                      : app_settings_erase(meshcore_self(), CFG_KEY);
+    bool ok = text[0] ? app_settings_set_str(meshcore_ctx(), CFG_KEY, text)
+                      : app_settings_erase(meshcore_ctx(), CFG_KEY);
     if (!ok && !dirty) {
         ESP_LOGW(TAG, "status history: the setting could not be written, retrying every %d s", SAVE_RETRY_S);
     } else if (ok && dirty) {

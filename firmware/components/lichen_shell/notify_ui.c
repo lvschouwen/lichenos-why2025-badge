@@ -6,7 +6,7 @@
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_app.h"
-#include "lichen_badge.h"
+#include "lichen_sys_badge.h"
 #include "lichen_sys_clock.h"
 #include "notify_os.h"
 #include "notify_view.h"
@@ -90,11 +90,11 @@ static void update_badges(void) {
         }
         size_t n = lichen_notify_unread(app->id);
         if (n || s_badged[i]) {
-            lichen_badge_set(app->id, (unsigned)n);
+            lichen_sys_badge_set(app->id, (unsigned)n);
             s_badged[i] = n > 0;
         }
     }
-    lichen_badge_set(NOTIFY_APP_ID, (unsigned)lichen_notify_unread(NULL));
+    lichen_sys_badge_set(NOTIFY_APP_ID, (unsigned)lichen_notify_unread(NULL));
 }
 
 static void drain(lv_timer_t *timer) {

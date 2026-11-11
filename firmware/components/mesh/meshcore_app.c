@@ -191,7 +191,7 @@ static void first_step(void *arg) {
             break;
         case MC_FIRST_HOME: first_home(); break;
         case MC_FIRST_FINISH: {
-            bool saved = app_settings_set_u8(self(), "mc_name_set", 1);
+            bool saved = app_settings_set_u8(meshcore_ctx(), "mc_name_set", 1);
             ESP_LOGI(TAG, "first-open questions answered (%s)", saved ? "saved" : "not saved");
             lv_obj_t   *screen = first_screen;
             lv_group_t *group  = lv_obj_get_group(screen);
@@ -227,7 +227,7 @@ static void open(lv_obj_t *screen) {
         ESP_LOGI(TAG, "opened while stopped: start %s", why ? why : "asked");
     }
     bool starting = meshcore_run_get().state == MESH_RUN_STARTING;
-    if ((mesh_running() || starting) && app_settings_get_u8(self(), "mc_name_set", 0) == 0) {
+    if ((mesh_running() || starting) && app_settings_get_u8(meshcore_ctx(), "mc_name_set", 0) == 0) {
         ESP_LOGI(TAG, "first open: asking name and region%s", starting ? " once MeshCore runs" : "");
         first        = (mc_first_t){0};
         first_screen = screen;
@@ -359,12 +359,12 @@ static bool start_background(void) {
 }
 
 bool meshcore_setup_done(void) {
-    return app_settings_get_u8(self(), "mc_name_set", 0) != 0;
+    return app_settings_get_u8(meshcore_ctx(), "mc_name_set", 0) != 0;
 }
 
 // "fw setup reset meshcore" / "done meshcore": only the questions' flag; the name and the radio stay
 static void first_run_set(bool done) {
-    bool ok = app_settings_set_u8(self(), "mc_name_set", done ? 1 : 0);
+    bool ok = app_settings_set_u8(meshcore_ctx(), "mc_name_set", done ? 1 : 0);
     ESP_LOGI(
         TAG,
         "first-open questions marked %s (%s)",
@@ -416,5 +416,5 @@ static lichen_app_t const *self(void) {
 }
 
 void meshcore_app_register(void) {
-    meshcore_run_init(&meshcore_app, lichen_register_app(&meshcore_app));
+    meshcore_run_init(lichen_register_app(&meshcore_app));
 }

@@ -101,13 +101,13 @@ typedef enum { LOG_OK, LOG_SKIP, LOG_FAIL } log_result_t;
 // One CSV line, in one SD batch (the card cannot be unmounted under the open file). A card that is busy for a moment
 // skips this minute; a missing card or a failed write is a failure.
 static log_result_t log_append(int64_t unix_s, wx_sample_t const *s) {
-    char const *dir = lichen_fs_sd_dir(&weather_app);
+    char const *dir = lichen_fs_sd_dir(self_ctx);
     if (!dir) {
         return LOG_FAIL;
     }
     char path[96];
     snprintf(path, sizeof(path), "%s/" LOG_FILE, dir);
-    if (!lichen_fs_sd_begin(&weather_app, SD_WAIT_MS)) {
+    if (!lichen_fs_sd_begin(self_ctx, SD_WAIT_MS)) {
         return lichen_fs_sd_mounted() ? LOG_SKIP : LOG_FAIL;
     }
     char   line[128], header[96];
@@ -126,7 +126,7 @@ static log_result_t log_append(int64_t unix_s, wx_sample_t const *s) {
         ok = false;
     }
     int err = ok ? 0 : (errno ? errno : EIO);
-    lichen_fs_sd_end(&weather_app, err);
+    lichen_fs_sd_end(self_ctx, err);
     if (!ok) {
         ESP_LOGW(TAG, "log write failed (errno %d)", err);
     }
@@ -135,9 +135,9 @@ static log_result_t log_append(int64_t unix_s, wx_sample_t const *s) {
 
 static void log_stop_with_notice(void) {
     atomic_store(&s_log_on, false);
-    app_settings_set_u8(&weather_app, KEY_LOG, 0);
+    app_settings_set_u8(self_ctx, KEY_LOG, 0);
     ESP_LOGW(TAG, "SD log switched off");
-    lichen_notify("weather", LN_WARN, "Weather log stopped",
+    lichen_notify(self_ctx, LN_WARN, "Weather log stopped",
                   "The SD card is missing or not writable. Put it back, then turn the log on again in Settings > Weather.", 0);
 }
 
@@ -199,8 +199,8 @@ static bool start_background(void) {
         return false;
     }
     wx_ring_init(&s_ring, store, WX_RING_CAP);
-    atomic_store(&s_offset_half, wx_offset_half_from_byte(app_settings_get_u8(&weather_app, KEY_OFFSET, wx_offset_byte(0))));
-    atomic_store(&s_log_on, app_settings_get_u8(&weather_app, KEY_LOG, 0) != 0);
+    atomic_store(&s_offset_half, wx_offset_half_from_byte(app_settings_get_u8(self_ctx, KEY_OFFSET, wx_offset_byte(0))));
+    atomic_store(&s_log_on, app_settings_get_u8(self_ctx, KEY_LOG, 0) != 0);
     if (!lichen_task_start(self_ctx, "weather", sampler_task, NULL, TASK_STACK, LICHEN_PRIO_BACKGROUND, NULL)) {
         ESP_LOGE(TAG, "no memory for the sampler task");
         return false;
@@ -231,7 +231,7 @@ static void offset_show(void) {
 static void offset_set(int half) {
     half = half > 0 ? -WX_OFFSET_MAX_HALF : half < -WX_OFFSET_MAX_HALF ? 0 : half; // Enter wraps round
     atomic_store(&s_offset_half, half);
-    if (!app_settings_set_u8(&weather_app, KEY_OFFSET, wx_offset_byte(half))) {
+    if (!app_settings_set_u8(self_ctx, KEY_OFFSET, wx_offset_byte(half))) {
         ESP_LOGW(TAG, "offset not saved");
     }
     atomic_fetch_add(&s_version, 1); // the graph redraws with it
@@ -260,11 +260,11 @@ static void log_toggle(void *arg) {
     (void)arg;
     bool on = !atomic_load(&s_log_on);
     if (on && !lichen_fs_sd_mounted()) {
-        lichen_notify("weather", LN_WARN, "No SD card", "Put an SD card in the badge to log the weather.", 0);
+        lichen_notify(self_ctx, LN_WARN, "No SD card", "Put an SD card in the badge to log the weather.", 0);
         return;
     }
     atomic_store(&s_log_on, on);
-    app_settings_set_u8(&weather_app, KEY_LOG, on ? 1 : 0);
+    app_settings_set_u8(self_ctx, KEY_LOG, on ? 1 : 0);
     menu_set_on(s_log_row, on);
 }
 

@@ -4,6 +4,7 @@
 // feedback down into the status LED and the motor. Only stores pointers. ESP-free, host-tested in
 // host_tests/os_bind_test.c.
 #include "lichen_os.h"
+#include "lichen_sys_app.h"
 
 #include "boot_progress.h"
 #include "factory_reset.h"
@@ -30,7 +31,7 @@ static void vibrate(ln_level_t level) {
 }
 
 static void factory_notice(char const *title, char const *body) {
-    lichen_notify("lichen", LN_ERROR, title, body, 0);
+    lichen_notify(lichen_sys_ctx_os(), LN_ERROR, title, body, 0);
 }
 
 static ota_os_t const ota_os = {

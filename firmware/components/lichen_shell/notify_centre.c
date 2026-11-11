@@ -506,9 +506,9 @@ static struct {
 
 static void toggle_source(void *arg) {
     size_t i = (size_t)(uintptr_t)arg;
-    bool   on = !lichen_notify_source_enabled(s_s.source[i]);
+    bool   on = !lichen_notify_source_is_on(s_s.source[i]);
     lichen_notify_set_source_enabled(s_s.source[i], on);
-    menu_set_on(s_s.source_row[i], lichen_notify_source_enabled(s_s.source[i]));
+    menu_set_on(s_s.source_row[i], lichen_notify_source_is_on(s_s.source[i]));
 }
 
 static void open_app_notify_settings(void *arg) {
@@ -582,13 +582,13 @@ static lv_obj_t *build_settings(void) {
         s_s.source[n]     = app->id;
         s_s.source_row[n] = menu_add(menu, app->name, "", toggle_source, (void *)(uintptr_t)n);
         menu_set_kind(s_s.source_row[n], MENU_TOGGLE);
-        menu_set_on(s_s.source_row[n], lichen_notify_source_enabled(app->id));
+        menu_set_on(s_s.source_row[n], lichen_notify_source_is_on(app->id));
         n++;
     }
     s_s.source[n]     = "lichen";
     s_s.source_row[n] = menu_add(menu, "Lichen (system)", "", toggle_source, (void *)(uintptr_t)n);
     menu_set_kind(s_s.source_row[n], MENU_TOGGLE);
-    menu_set_on(s_s.source_row[n], lichen_notify_source_enabled("lichen"));
+    menu_set_on(s_s.source_row[n], lichen_notify_source_is_on("lichen"));
     for (size_t i = 0; i < lichen_app_count(); i++) { // what an app sends, if it can be set (#50)
         lichen_app_t const *app = lichen_app_at(i);
         if (app->notify_settings_open) {

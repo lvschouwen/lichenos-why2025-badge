@@ -76,14 +76,16 @@ to `layers.conf`):
     `confirm_label` ("restart") and the hint "Enter: restart • Esc: cancel" is generated; the hint is dim unless `careful`.
   - The text and choices are pure (`ui_text.h`, `host_tests/ui_text_test.c`).
 - `theme.h`, `fonts.h`: Lichen's colours, sizes and fonts. Use them instead of literals.
-- `lichen_settings.h`: the app's own NVS namespace `a.<id>` (u8, u32, u64, strings, erase, erase all). Never open NVS.
+- `lichen_settings.h`: the app's own NVS namespace `a.<id>`, from the ctx every call takes (u8, u32, u64, strings, erase, erase all). Never open NVS.
 - `lichen_fs.h`: the app's directory `/storage/<id>` and, with a card in, `/sd/lichen/apps/<id>`; drive sizes. Never
-  name a path outside them. Every file call on the card is inside one batch: `lichen_fs_sd_begin(app, wait_ms)` (false:
-  no card, or busy past `wait_ms`; then no file work and no end), the work, `lichen_fs_sd_end(app, errno_or_0)` (only
+  name a path outside them. Every file call on the card is inside one batch: `lichen_fs_sd_begin(ctx, wait_ms)` (false:
+  no card, or busy past `wait_ms`; then no file work and no end), the work, `lichen_fs_sd_end(ctx, errno_or_0)` (only
   EIO/ENODEV/ETIMEDOUT count toward the auto-unmount). `lichen_fs_sd_mounted()` is a lock-free check. Never from the
   LVGL task; get `lichen_fs_sd_dir` before the batch (it takes the card's lock itself). Never include `sdcard.h`.
-- `lichen_notify.h`: raise a notification (toast, history, unread dot); from any task.
-- `lichen_badge.h`: the count on the app's tile; set it whenever it changes.
+- `lichen_notify.h`: raise a notification (toast, history, unread dot); from any task. The source is the calling ctx's
+  app id, not a parameter: `lichen_notify(ctx, level, title, body, flags)`.
+- `lichen_badge.h`: the count on the app's own tile (`lichen_badge_set(ctx, n)`); set it whenever it changes. The OS sets
+  and reads any tile by id through `lichen_sys_badge.h`.
 - `lichen_haptics.h`: a short buzz of the vibration motor for feedback of your own; non-blocking, silent when the person switched it off. Notifications buzz by themselves, do not call it for them. Never drive GPIO8.
 - `lichen_radio.h`: read the Wi-Fi/LoRa/Bluetooth switches and airplane mode, listen for changes. Apps never switch
   radios. An app that needs the LoRa radio for itself (the LoRa spectrum, #161) borrows it from MeshCore:
@@ -91,7 +93,8 @@ to `layers.conf`):
   `keep_going()` turned false), then `lora_claim`; afterwards `lora_release` and, when `was_running`, always
   `lichen_radio_lora_resume()`. Both block: never from the LVGL task.
 - `lichen_sensors.h`: read the latest IMU / environment / die temperature snapshot. Never talk to the chips or I2C.
-- `lichen_crashlog.h`: the crash log, for the Crash log app; not from the LVGL task for writes.
+- `lichen_crashlog.h`: the crash log, for the Crash log app; not from the LVGL task for writes. The calls that keep the
+  app's seen marker take its ctx.
 - `lichen_task.h` (#181): `lichen_task_start(ctx, name, fn, arg, stack_bytes, prio, &handle)` with a priority class
   instead of a core and a number: `LICHEN_PRIO_BACKGROUND` (2, core 0), `_SERVICE` (3, core 0), `_JOB` (4, core 0),
   `_URGENT` (5, core 0, power off only) and `_APP_LOOP` (3, core 1 with LVGL, an app's main loop). Names are cut to 15
@@ -211,8 +214,14 @@ or to `lichen_ctx_enter` is refused (the OS's context is used instead), logged a
 calls take the context: an app keeps what `lichen_register_app` returned and passes it (MeshCore through
 `meshcore_ctx()`), OS code passes `lichen_sys_ctx_os()` for memory; both books (`fw mem`, `fw tasks`) are keyed by the
 context, the app id is only the printed label. A refused `lichen_alloc` or `lichen_task_start` fails (NULL, false), a
-refused `lichen_free` frees nothing. The other gate calls still take `lichen_app_t const *` until E1c (the compat shim
-maps it to the context).
+refused `lichen_free` frees nothing. Since E1c the settings (`app_settings_*`), file (`lichen_fs_app_dir`/`_sd_dir`/`_sd_begin`/`_sd_end`), crash log
+(`delete`, `clear`, `status`, `mark_seen`), badge and notification calls take it too, and act for that context only: the
+namespace, directory and tile are the ctx's app's, a notice's source is its id (the OS's context raises as "lichen"),
+and `lichen_badge_set/get` reach no other app's tile (the shell uses `lichen_sys_badge_*`). The OS's context has no
+settings namespace or directory (those calls refuse it), but may hold the SD batch lock and clear the crash log. A
+refused context does nothing before it looks at the caller's data: reads give the default or 0, writes false, a
+notice is dropped, a refused `lichen_fs_sd_end` leaves the lock alone. The pure decision is `gate_app.c`
+(`host_tests/gate_app_test.c`). Still on the compat shim until E1e: `lichen_app_at`/`lichen_app_by_id`.
 
 Not yet covered: an LVGL event or timer callback an app registers runs as the OS when it fires outside a hook (a key
 press, a timer tick), and so does a `lichen_ui_call` queued from one, until those registrations are wrapped (a follow-up

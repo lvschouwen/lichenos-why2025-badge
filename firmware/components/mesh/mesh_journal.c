@@ -27,8 +27,8 @@
 // every badge in the field, so it stays until a migration is planned
 #define SD_MESSAGES_DIR "/sd/lichen/messages"
 
-static lichen_app_t const *journal_app(void) {
-    return lichen_app_by_id(MESHCORE_APP_ID);
+static lichen_ctx_t journal_app(void) {
+    return meshcore_ctx();
 }
 
 #define LOG_PATH      SD_MESSAGES_DIR "/log.bin"

@@ -36,6 +36,9 @@ void   lichen_notify_set_dnd(bool on); // NVS badge_fw "notify_dnd"
 // Settings › Notifications: a source switched off has its notices dropped (no history, no toast, no badge; counted as
 // muted). Kept in NVS badge_fw "n.<source>" (only while off); default on. Entries it already has stay.
 void   lichen_notify_set_source_enabled(char const *source, bool on);
+// Whether source's notices are let through (the same switch, by its id: the centre lists every app's). An app asks
+// for its own with lichen_notify_source_enabled(ctx).
+bool   lichen_notify_source_is_on(char const *source);
 
 // A notice to toast, queued by lichen_notify() for the shell's LVGL timer (the any-task → LVGL hand-off)
 typedef struct {

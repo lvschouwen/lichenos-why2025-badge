@@ -7,6 +7,8 @@
 // The status LED and the motor sit below notify (L2): the service pushes do-not-disturb and "anything unread" to the
 // hooks lichen_os binds (notify_bind.h), and fires the feedback hooks it was given; neither driver calls in (#245).
 #include "notify_os.h"
+#include "lichen_sys_app.h"
+#include "notify_post.h"
 #include "notify_bind.h"
 #include "notify_push.h"
 #include "notify_ring.h"
@@ -335,11 +337,16 @@ static bool source_on(char const *source) {
     return state != NMUTE_OFF;
 }
 
-bool lichen_notify_source_enabled(char const *source) {
+bool lichen_notify_source_is_on(char const *source) {
     if (!atomic_load(&s_started) || !source || !source[0]) {
         return true;
     }
     return source_on(source);
+}
+
+bool lichen_notify_source_enabled(lichen_ctx_t ctx) {
+    char const *source = lichen_sys_ctx_source(ctx, "lichen_notify_source_enabled");
+    return source && lichen_notify_source_is_on(source);
 }
 
 void lichen_notify_set_source_enabled(char const *source, bool on) {
@@ -388,21 +395,29 @@ static void remember_this_boot_locked(uint32_t h) {
     }
 }
 
-uint32_t lichen_notify_to(char const *source, ln_level_t level, char const *target, char const *title,
-                          char const *body, uint32_t flags) {
+// False (and a log line) for a notice that cannot be raised: no service, no source, a source longer than an app id
+static bool source_usable(char const *source, char const *title) {
     if (!atomic_load(&s_started) || !source || !source[0]) {
         ESP_LOGW(TAG, "dropped \"%s\": %s", title ? title : "", source && source[0] ? "service not started" : "no source");
-        return 0;
-    }
-    if (level > LN_ERROR) {
-        level = LN_ERROR;
+        return false;
     }
     if (strlen(source) > NR_SOURCE_CAP - 1) { // cut, it would never match itself again (coalescing, badges)
         lock();
         s_ring->dropped++;
         unlock();
         ESP_LOGW(TAG, "dropped \"%s\": source \"%s\" is longer than an app id", title ? title : "", source);
+        return false;
+    }
+    return true;
+}
+
+uint32_t lichen_notify_post(char const *source, ln_level_t level, char const *target, char const *title,
+                            char const *body, uint32_t flags) {
+    if (!source_usable(source, title)) {
         return 0;
+    }
+    if (level > LN_ERROR) {
+        level = LN_ERROR;
     }
     int64_t  now_us = esp_timer_get_time();
     uint32_t now_ms = (uint32_t)(now_us / 1000); // the rate limiter only compares nearby times
@@ -455,8 +470,14 @@ uint32_t lichen_notify_to(char const *source, ln_level_t level, char const *targ
     return id;
 }
 
-uint32_t lichen_notify(char const *source, ln_level_t level, char const *title, char const *body, uint32_t flags) {
-    return lichen_notify_to(source, level, NULL, title, body, flags);
+uint32_t lichen_notify_to(lichen_ctx_t ctx, ln_level_t level, char const *target, char const *title, char const *body,
+                          uint32_t flags) {
+    // The source is the ctx's app, never the caller's word; NULL (refused ctx, no id) is dropped by lichen_notify_post
+    return lichen_notify_post(lichen_sys_ctx_source(ctx, "lichen_notify"), level, target, title, body, flags);
+}
+
+uint32_t lichen_notify(lichen_ctx_t ctx, ln_level_t level, char const *title, char const *body, uint32_t flags) {
+    return lichen_notify_to(ctx, level, NULL, title, body, flags);
 }
 
 // ---- reading and changing -------------------------------------------------------------------------------------------
@@ -496,7 +517,8 @@ static void mark(char const *source, char const *target, uint32_t id, int upto) 
     unlock();
 }
 
-void lichen_notify_mark_read(char const *source, char const *target) {
+void lichen_notify_mark_read(lichen_ctx_t ctx, char const *target) {
+    char const *source = lichen_sys_ctx_source(ctx, "lichen_notify_mark_read");
     if (source) {
         mark(source, target, 0, -1);
     }

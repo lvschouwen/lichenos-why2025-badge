@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "esp_app_desc.h"
 #include "lichen_settings.h"
+#include "lichen_sys_app.h"
 #include "sdcard.h"
 
 #include <errno.h>
@@ -72,19 +73,29 @@ static uint64_t marker(uint32_t count, uint32_t hash) {
     return ((uint64_t)count << 32) | hash;
 }
 
-static void store_seen(lichen_app_t const *app, uint32_t count, uint32_t hash) {
+// False (nothing may be done) when ctx is refused: the context table has logged and counted it. The OS's ctx passes;
+// it has no marker of its own (the settings refuse it), the log itself is the OS's to read and clear.
+static bool ctx_ok(lichen_ctx_t ctx, char const *what) {
+    char const *id, *name;
+    return lichen_sys_ctx_app(ctx, what, &id, &name) != GATE_APP_REFUSED;
+}
+
+static void store_seen(lichen_ctx_t ctx, uint32_t count, uint32_t hash) {
     uint64_t const want = marker(count, hash);
-    if (app_settings_get_u64(app, KEY_SEEN, UINT64_MAX) != want) { // opening the app writes nothing when nothing changed
-        app_settings_set_u64(app, KEY_SEEN, want);
+    if (app_settings_get_u64(ctx, KEY_SEEN, UINT64_MAX) != want) { // opening the app writes nothing when nothing changed
+        app_settings_set_u64(ctx, KEY_SEEN, want);
     }
 }
 
-bool lichen_crashlog_mark_seen(lichen_app_t const *app) {
+bool lichen_crashlog_mark_seen(lichen_ctx_t ctx) {
     static bool logged;
     size_t      len, entries;
+    if (!ctx_ok(ctx, "lichen_crashlog_mark_seen")) {
+        return false;
+    }
     char       *buf = load(&len);
     if (buf) {
-        store_seen(app, crash_count_since_clear(), newest_hash(buf, len, &entries));
+        store_seen(ctx, crash_count_since_clear(), newest_hash(buf, len, &entries));
     } else if (!logged) {
         ESP_LOGW(TAG, "mark seen: log not read, the tile may count old entries as new");
         logged = true;
@@ -99,7 +110,10 @@ static bool still_there(char const *buf, crashlog_span_t const *spans, size_t n,
            memcmp(buf + spans[index].start, expect->line, spans[index].len) == 0;
 }
 
-bool lichen_crashlog_delete(lichen_app_t const *app, size_t index, crashlog_entry_t const *expect) {
+bool lichen_crashlog_delete(lichen_ctx_t ctx, size_t index, crashlog_entry_t const *expect) {
+    if (!ctx_ok(ctx, "lichen_crashlog_delete")) {
+        return false; // before the lock and before expect or the log are looked at
+    }
     crash_log_lock(); // "fw crash clear" waits until the rewrite is done
     size_t          len;
     char           *buf = load(&len);
@@ -109,7 +123,7 @@ bool lichen_crashlog_delete(lichen_app_t const *app, size_t index, crashlog_entr
               crash_log_store(buf, len);
     if (ok) {
         size_t entries;
-        store_seen(app, crash_count_since_clear(), newest_hash(buf, len, &entries));
+        store_seen(ctx, crash_count_since_clear(), newest_hash(buf, len, &entries));
     }
     crash_log_unlock();
     ESP_LOG_LEVEL(
@@ -123,15 +137,21 @@ bool lichen_crashlog_delete(lichen_app_t const *app, size_t index, crashlog_entr
     return ok;
 }
 
-bool lichen_crashlog_clear(lichen_app_t const *app) {
+bool lichen_crashlog_clear(lichen_ctx_t ctx) {
+    if (!ctx_ok(ctx, "lichen_crashlog_clear")) {
+        return false; // nothing is cleared for a ctx the OS does not know
+    }
     bool ok = crash_clear_all();
-    store_seen(app, 0, 0);
+    store_seen(ctx, 0, 0);
     ESP_LOG_LEVEL(ok ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "clear all: %s", ok ? "done" : "the core dump was not erased");
     return ok;
 }
 
-bool lichen_crashlog_status(lichen_app_t const *app, lichen_crashlog_status_t *out) {
+bool lichen_crashlog_status(lichen_ctx_t ctx, lichen_crashlog_status_t *out) {
     memset(out, 0, sizeof(*out));
+    if (!ctx_ok(ctx, "lichen_crashlog_status")) {
+        return false; // out->ok is false: the viewer reads it as "could not read", not as "no crashes"
+    }
     size_t          len;
     char           *buf = load(&len);
     crashlog_span_t spans[CRASHLOG_MAX];
@@ -139,7 +159,7 @@ bool lichen_crashlog_status(lichen_app_t const *app, lichen_crashlog_status_t *o
     if (n) {
         crashlog_parse(buf + spans[0].start, spans[0].len, &out->newest);
         uint32_t hash = crashlog_hash(buf + spans[0].start, spans[0].len);
-        uint64_t seen = app_settings_get_u64(app, KEY_SEEN, 0);
+        uint64_t seen = app_settings_get_u64(ctx, KEY_SEEN, 0);
         out->unseen   = crashlog_unseen(crash_count_since_clear(), (uint32_t)(seen >> 32), hash, (uint32_t)seen, n);
     }
     out->entries = n;

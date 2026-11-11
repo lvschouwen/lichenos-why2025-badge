@@ -435,6 +435,5 @@ static lichen_app_t const timer_app = {
 };
 
 void timer_app_register(void) {
-    timer_svc_start();
-    lichen_register_app(&timer_app);
+    timer_svc_start(lichen_register_app(&timer_app));
 }

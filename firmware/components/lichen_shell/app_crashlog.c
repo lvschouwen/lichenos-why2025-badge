@@ -183,8 +183,8 @@ static void job_done(void *arg) {
 static void job_task(void *arg) {
     job_t kind = (job_t)(intptr_t)arg;
     bool  ok   = kind == JOB_COPY    ? lichen_crashlog_export_sd(s_copy_path, sizeof(s_copy_path))
-                 : kind == JOB_CLEAR ? lichen_crashlog_clear(&crashlog_app)
-                                     : lichen_crashlog_delete(&crashlog_app, s_job_index, &s_job_expect);
+                 : kind == JOB_CLEAR ? lichen_crashlog_clear(self_ctx)
+                                     : lichen_crashlog_delete(self_ctx, s_job_index, &s_job_expect);
     ESP_LOGI(TAG, "job stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
     atomic_store(&s_job_outcome, ok ? 1 : 0);
     lichen_sys_ui_call(job_done, NULL, 0); // waits for the LVGL lock as long as it takes
@@ -355,8 +355,8 @@ static void open_crashlog(lv_obj_t *screen) {
     s_v.screen  = screen;
     s_v.group   = lv_group_get_default(); // shell_open's group for this screen while it is built
     s_v.entries = lichen_alloc(lichen_sys_ctx_os(), CRASHLOG_MAX * sizeof(crashlog_entry_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
-    lichen_crashlog_mark_seen(&crashlog_app); // logs once when it cannot
-    lichen_badge_set(crashlog_app.id, 0);     // seen now; badge_tick reads the log again within a second
+    lichen_crashlog_mark_seen(self_ctx); // logs once when it cannot
+    lichen_badge_set(self_ctx, 0);           // seen now; badge_tick reads the log again within a second
     s_tile.valid = false;
     if (s_job == JOB_NONE) {
         s_result[0] = '\0'; // an old outcome is news no more
@@ -372,14 +372,14 @@ static void open_crashlog(lv_obj_t *screen) {
 static bool tile_fresh(void) {
     uint32_t generation = lichen_crashlog_generation();
     if (!s_tile.valid || generation != s_tile.generation) {
-        if (!lichen_crashlog_status(&crashlog_app, &s_status)) {
+        if (!lichen_crashlog_status(self_ctx, &s_status)) {
             return false;
         }
         crashlog_tile(s_status.entries, s_status.unseen, &s_status.newest, s_tile.l1, sizeof(s_tile.l1), s_tile.l2,
                       sizeof(s_tile.l2));
         s_tile.generation = generation;
         s_tile.valid      = true;
-        lichen_badge_set(crashlog_app.id, (unsigned)s_status.unseen);
+        lichen_badge_set(self_ctx, (unsigned)s_status.unseen);
     }
     return true;
 }

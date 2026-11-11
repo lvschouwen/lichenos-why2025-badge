@@ -50,6 +50,9 @@ crashlog_tile	-	unspecified	crashlog_fmt.h
 crashlog_unseen	-	unspecified	crashlog_fmt.h
 crashlog_when_text	-	unspecified	crashlog_fmt.h
 fs_app_dir_path	-	unspecified	fs_path.h
+gate_app_id	-	unspecified	gate_app.h
+gate_app_settings_ns	-	unspecified	gate_app.h
+gate_app_source	-	unspecified	gate_app.h
 hold_exit_event	-	unspecified	hold_exit.h
 hold_exit_percent	-	unspecified	hold_exit.h
 hold_exit_tick	-	unspecified	hold_exit.h
@@ -131,6 +134,7 @@ lichen_notify_set_dnd	SYSTEM	unspecified	notify_os.h
 lichen_notify_set_feedback	SYSTEM	unspecified	notify_os.h
 lichen_notify_set_source_enabled	SYSTEM	unspecified	notify_os.h
 lichen_notify_source_enabled	-	unspecified	lichen_notify.h
+lichen_notify_source_is_on	SYSTEM	unspecified	notify_os.h
 lichen_notify_start	SYSTEM	unspecified	notify_os.h
 lichen_notify_stats	SYSTEM	unspecified	notify_os.h
 lichen_notify_to	-	unspecified	lichen_notify.h
@@ -159,6 +163,8 @@ lichen_sensors_stop	SENSORS	unspecified	lichen_sensors.h
 lichen_station_clock	-	lvgl	lichen_ui.h
 lichen_sys_app_console_register	SYSTEM	not-lvgl	lichen_sys_app.h
 lichen_sys_app_ctx	SYSTEM	any	lichen_sys_app.h
+lichen_sys_badge_get	-	unspecified	lichen_sys_badge.h
+lichen_sys_badge_set	-	unspecified	lichen_sys_badge.h
 lichen_sys_boot_label	SYSTEM	any	lichen_sys_boot.h
 lichen_sys_boot_overall_pct	SYSTEM	any	lichen_sys_boot.h
 lichen_sys_boot_sentence	SYSTEM	any	lichen_sys_boot.h
@@ -181,8 +187,11 @@ lichen_sys_clock_source_text	SYSTEM	any	lichen_sys_clock.h
 lichen_sys_clock_sync_info	SYSTEM	any	lichen_sys_clock.h
 lichen_sys_clock_verdict_text	SYSTEM	any	lichen_sys_clock.h
 lichen_sys_crash_recovered	SYSTEM	any	lichen_sys_crash.h
+lichen_sys_ctx_app	SYSTEM	any	lichen_sys_app.h
 lichen_sys_ctx_os	SYSTEM	any	lichen_sys_app.h
 lichen_sys_ctx_resolve	SYSTEM	any	lichen_sys_app.h
+lichen_sys_ctx_settings_ns	SYSTEM	unspecified	lichen_sys_app.h
+lichen_sys_ctx_source	SYSTEM	unspecified	lichen_sys_app.h
 lichen_sys_display_get	SYSTEM	any	lichen_sys_display.h
 lichen_sys_display_idle	SYSTEM	any	lichen_sys_display.h
 lichen_sys_display_resume	SYSTEM	any	lichen_sys_display.h

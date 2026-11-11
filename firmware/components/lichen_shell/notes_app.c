@@ -42,6 +42,8 @@ static uint32_t  s_seen;   // the marker; LVGL task and console (rare), a word e
 static size_t    s_shown;  // the note on the entry page
 static uint32_t  s_seen_at_open; // the marker when the list opened: rows above it say "new"
 
+static lichen_ctx_t self_ctx; // lichen_register_app's answer: the tile badge is its own (#230 E1c)
+
 static void load(void) {
     if (s_loaded) {
         return;
@@ -65,7 +67,7 @@ static uint32_t newest(void) {
 }
 
 static void update_badge(void) {
-    lichen_badge_set(notes_app.id, (unsigned)rn_count_new(s_notes, s_count, s_seen_known, s_seen));
+    lichen_badge_set(self_ctx, (unsigned)rn_count_new(s_notes, s_count, s_seen_known, s_seen));
 }
 
 // Everything up to the newest note counts as seen
@@ -284,6 +286,6 @@ static void cmd_whatsnew(char const *args) {
 
 void notes_app_register(void) {
     load(); // before any other task asks (shell_start)
-    lichen_register_app(&notes_app);
+    self_ctx = lichen_register_app(&notes_app);
     console_register("whatsnew", "whatsnew [show|reset] (release notes marker, #13)", cmd_whatsnew);
 }

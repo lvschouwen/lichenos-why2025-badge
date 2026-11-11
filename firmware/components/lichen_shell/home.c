@@ -16,6 +16,7 @@
 #include "lichen_app.h"
 #include "lichen_sys_app.h"
 #include "lichen_badge.h"
+#include "lichen_sys_badge.h"
 #include "lichen_notify.h"
 #include "lichen_sys_ui.h"
 #include "lichen_ui.h"
@@ -210,7 +211,7 @@ static void hold(home_t *h, lv_obj_t *home, bool on) {
     // A real move: only now does anything reach NVS. A failed save must not look saved: the tile goes back
     if (moved && !save_order(h->order, h->count)) {
         cancel_hold(h, home);
-        lichen_notify("lichen", LN_WARN, "Home order not saved",
+        lichen_notify(lichen_sys_ctx_os(), LN_WARN, "Home order not saved",
                       "The tile went back to its place. Try again; if it keeps failing, restart the badge.", 0);
         return;
     }
@@ -319,7 +320,7 @@ static void refresh_badges(home_t *h) {
     }
     for (int i = 0; i < h->count; i++) {
         if (h->badge[i]) {
-            refresh_badge(h->badge[i], h->icon[i], lichen_badge_get(lichen_app_at(i)->id));
+            refresh_badge(h->badge[i], h->icon[i], lichen_sys_badge_get(lichen_app_at(i)->id));
         }
     }
     h->badge_gen    = generation;

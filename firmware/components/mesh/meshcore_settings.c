@@ -524,7 +524,7 @@ static void reset_order_answer(bool yes) {
     if (yes) {
         if (!mesh_order_reset()) {
             ESP_LOGE(TAG, "tile order not reset");
-            lichen_notify("meshcore", LN_WARN, "Tile order not reset",
+            lichen_notify(meshcore_ctx(), LN_WARN, "Tile order not reset",
                           "The tiles kept their places. Try again; if it keeps failing, restart the badge.", 0);
             return;
         }

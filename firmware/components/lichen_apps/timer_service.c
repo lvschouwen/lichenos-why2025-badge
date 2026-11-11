@@ -15,13 +15,13 @@
 #include <stdio.h>
 
 static char const TAG[]    = "timer";
-static char const APP_ID[] = "timer";
 
 #define POLL_MS 250 // the end is noticed within a quarter of a second, whatever screen is up
 
 static tcd_t s_cd;
 EXT_RAM_BSS_ATTR static sw_t s_sw;
 static bool  s_inited;
+static lichen_ctx_t s_ctx; // the Timer app's: its tile and its notices (#230 E1c)
 
 static void ensure_init(void) {
     if (!s_inited) {
@@ -47,8 +47,8 @@ int64_t timer_svc_now(void) {
 }
 
 void timer_svc_ack(void) {
-    lichen_badge_set(APP_ID, 0);
-    lichen_notify_mark_read(APP_ID, NULL);
+    lichen_badge_set(s_ctx, 0);
+    lichen_notify_mark_read(s_ctx, NULL);
 }
 
 static void poll(lv_timer_t *timer) {
@@ -59,8 +59,8 @@ static void poll(lv_timer_t *timer) {
         tfmt_words(words, sizeof(words), s_cd.set_ms);
         snprintf(body, sizeof(body), "The %s timer is up", words);
         ESP_LOGI(TAG, "countdown of %s finished", words);
-        lichen_notify(APP_ID, LN_WARN, "Timer finished", body, 0);
-        lichen_badge_set(APP_ID, 1);
+        lichen_notify(s_ctx, LN_WARN, "Timer finished", body, 0);
+        lichen_badge_set(s_ctx, 1);
     }
 }
 
@@ -72,7 +72,8 @@ static void start_poll(void *arg) {
 }
 
 // timer_app_register runs on the main task (start_apps), outside the LVGL task: the poll timer is made there (#242)
-void timer_svc_start(void) {
+void timer_svc_start(lichen_ctx_t ctx) {
+    s_ctx = ctx;
     ensure_init();
     if (!lichen_ui_call(start_poll, NULL)) {
         ESP_LOGE(TAG, "poll timer not queued: a finished countdown will not be noticed");

@@ -7,11 +7,11 @@
 #include "lichen_notify.h"
 #include "lichen_settings.h"
 #include "mesh.h"
+#include "meshcore_run.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#define SOURCE     "meshcore"
 #define DECISIONS  5
 #define MAX_POSTS  10 // merged events posted one by one, so the centre's count follows
 
@@ -34,8 +34,9 @@ static struct {
 static char decisions[DECISIONS][88];
 static uint8_t decision_next;
 
-static lichen_app_t const *app(void) {
-    return lichen_app_by_id(SOURCE);
+// MeshCore's context; LICHEN_CTX_NONE before it registered (the settings then keep their defaults, asked again later)
+static lichen_ctx_t app(void) {
+    return meshcore_ctx();
 }
 
 char const *mn_mode_name(mn_mode_t mode) {
@@ -51,8 +52,8 @@ static void load_switches(void) {
     if (__atomic_load_n(&sw_loaded, __ATOMIC_ACQUIRE)) {
         return;
     }
-    lichen_app_t const *a = app();
-    if (!a) {
+    lichen_ctx_t a = app();
+    if (a == LICHEN_CTX_NONE) {
         return; // not registered yet: the defaults, and ask again
     }
     mn_switches_t s = {
@@ -81,8 +82,8 @@ bool mesh_notify_get_switch(mn_switch_t which) {
 
 bool mesh_notify_set_switch(mn_switch_t which, bool on) {
     load_switches();
-    lichen_app_t const *a = app();
-    bool                ok = a && app_settings_set_u8(a, SW_KEY[which], on ? 1 : 0);
+    lichen_ctx_t a  = app();
+    bool         ok = a != LICHEN_CTX_NONE && app_settings_set_u8(a, SW_KEY[which], on ? 1 : 0);
     portENTER_CRITICAL(&mux);
     if (which == MN_SW_DM) {
         sw.dm = on;
@@ -106,9 +107,9 @@ static mn_mode_t mode_for(mesh_chat_key_t const *key, bool *read) {
     if (hit) {
         return mode;
     }
-    mode                  = mn_default_mode(key);
-    lichen_app_t const *a = app();
-    if (a) {
+    mode           = mn_default_mode(key);
+    lichen_ctx_t a = app();
+    if (a != LICHEN_CTX_NONE) {
         char nvs[10];
         mn_nvs_key(key, nvs);
         uint8_t v = app_settings_get_u8(a, nvs, (uint8_t)mode);
@@ -132,10 +133,11 @@ mn_mode_t mesh_notify_chan_mode(char const *channel_name) {
 bool mesh_notify_set_chan_mode(char const *channel_name, mn_mode_t mode) {
     mesh_chat_key_t key;
     mesh_chat_key_channel(&key, channel_name);
-    lichen_app_t const *a = app();
-    char                nvs[10];
+    lichen_ctx_t a = app();
+    char         nvs[10];
     mn_nvs_key(&key, nvs);
-    bool ok = a && (mode == mn_default_mode(&key) ? app_settings_erase(a, nvs) : app_settings_set_u8(a, nvs, (uint8_t)mode));
+    bool ok = a != LICHEN_CTX_NONE &&
+              (mode == mn_default_mode(&key) ? app_settings_erase(a, nvs) : app_settings_set_u8(a, nvs, (uint8_t)mode));
     portENTER_CRITICAL(&mux);
     mn_cache_store(&cache, &key, mode);
     dirty = true;
@@ -206,9 +208,9 @@ bool mesh_notify_out_state(uint32_t id, bool failed) {
 static void mark_chat_read(mesh_chat_key_t const *key) {
     char target[MN_TARGET_MAX];
     mn_target(MN_CHANNEL, key, target, sizeof(target));
-    lichen_notify_mark_read(SOURCE, target);
+    lichen_notify_mark_read(meshcore_ctx(), target);
     mn_target(MN_FAILED, key, target, sizeof(target));
-    lichen_notify_mark_read(SOURCE, target);
+    lichen_notify_mark_read(meshcore_ctx(), target);
 }
 
 void mesh_notify_set_open_chat(mesh_chat_key_t const *key) {
@@ -269,7 +271,7 @@ static void handle(mn_note_t const *n, mn_switches_t const *s, bool *read) {
     mn_target(n->kind, &n->key, target, sizeof(target));
     mn_mode_t mode = n->kind == MN_CHANNEL ? mode_for(&n->key, read) : MN_MODE_ALL;
     mn_out_t  out  = mn_decide(n->kind, mode, s, chat_is_open(&n->key), n->mention, lichen_notify_dnd());
-    if (out.verdict != MN_SKIP && !lichen_notify_source_enabled(SOURCE)) {
+    if (out.verdict != MN_SKIP && !lichen_notify_source_enabled(meshcore_ctx())) {
         out = (mn_out_t){MN_SKIP, MN_R_SOURCE_OFF}; // the centre's own switch for the app, not duplicated here
     }
     remember(n, target, out);
@@ -279,7 +281,7 @@ static void handle(mn_note_t const *n, mn_switches_t const *s, bool *read) {
     uint32_t flags = LN_COALESCE | (out.verdict == MN_SILENT ? LN_SILENT : 0);
     ln_level_t level = n->kind == MN_FAILED ? LN_WARN : LN_INFO;
     for (unsigned i = 0; i < n->count && i < MAX_POSTS; i++) {
-        if (!lichen_notify_to(SOURCE, level, target, n->title, n->body, flags)) {
+        if (!lichen_notify_to(meshcore_ctx(), level, target, n->title, n->body, flags)) {
             portENTER_CRITICAL(&mux);
             stats.post_refused++;
             portEXIT_CRITICAL(&mux);
@@ -320,7 +322,7 @@ static void console_status(void) {
         mn_target(MN_CHANNEL, &key, opened, sizeof(opened));
     }
     console_reply("notify: DMs %s, delivery failed %s, mentions %s | OS switch %s | open chat %s", s.dm ? "on" : "off",
-                  s.fail ? "on" : "off", s.mentions ? "on" : "off", lichen_notify_source_enabled(SOURCE) ? "on" : "off",
+                  s.fail ? "on" : "off", s.mentions ? "on" : "off", lichen_notify_source_enabled(meshcore_ctx()) ? "on" : "off",
                   opened);
     console_reply("notify: posted %lu, silent %lu, refused by the service %lu, merged %lu, queue overflow %lu",
                   (unsigned long)st.posted, (unsigned long)st.silent, (unsigned long)st.post_refused,

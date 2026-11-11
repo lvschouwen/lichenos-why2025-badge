@@ -89,8 +89,8 @@ static void run_op(char const *dir) {
 static void job_task(void *arg) {
     (void)arg;
     memset(&s_res, 0, sizeof(s_res));
-    char const *dir = lichen_fs_sd_dir(&notes_list_app); // before the batch: it takes the card's lock itself
-    if (!dir || !lichen_fs_sd_begin(&notes_list_app, SD_WAIT_MS)) {
+    char const *dir = lichen_fs_sd_dir(self_ctx); // before the batch: it takes the card's lock itself
+    if (!dir || !lichen_fs_sd_begin(self_ctx, SD_WAIT_MS)) {
         s_res.no_card = true;
         s_res.result  = NOTES_ERR_OPEN;
     } else {
@@ -100,7 +100,7 @@ static void job_task(void *arg) {
         errno      = 0;
         s_res.listed = notes_store_list(dir, s_v.items, MAX_NOTES, &s_res.count, &s_res.skipped) == NOTES_OK;
         int err      = op_err ? op_err : s_res.listed ? 0 : errno;
-        lichen_fs_sd_end(&notes_list_app, err);
+        lichen_fs_sd_end(self_ctx, err);
     }
     ESP_LOGI(TAG, "job %d -> %d, %u notes, stack margin %u", (int)s_req.kind, (int)s_res.result, (unsigned)s_res.count,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));

@@ -24,7 +24,6 @@ static char const TAG[] = "meshcore";
 #define LATE_STOP_MS 60000 // a stop that outlasted mesh_stop's 10 s: the state stays STOPPING this much longer
 #define AUTOSTART    "autostart"
 
-static lichen_app_t const *app;
 static lichen_ctx_t        app_ctx; // lichen_register_app's answer: every gate call takes it (#230 E1b)
 static mesh_run_t          run = MESH_RUN_INIT;
 static portMUX_TYPE        run_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -36,19 +35,8 @@ static bool apply(mesh_run_ev_t ev) {
     return changed;
 }
 
-void meshcore_run_init(lichen_app_t const *the_app, lichen_ctx_t ctx) {
-    app     = the_app;
+void meshcore_run_init(lichen_ctx_t ctx) {
     app_ctx = ctx;
-}
-
-lichen_app_t const *meshcore_self(void) {
-    static bool told;
-    if (!app && !told) {
-        // Before meshcore_app_register: the settings would be the OS's
-        told = true;
-        ESP_LOGE(TAG, "meshcore_self() before meshcore_run_init");
-    }
-    return app;
 }
 
 lichen_ctx_t meshcore_ctx(void) {
@@ -64,28 +52,28 @@ lichen_ctx_t meshcore_ctx(void) {
 bool meshcore_pw_get(uint8_t const prefix[6], char *out, size_t cap) {
     char key[RR_PW_KEY_MAX];
     rr_pw_key(prefix, key, sizeof(key));
-    app_settings_get_str(app, key, out, cap, "");
+    app_settings_get_str(app_ctx, key, out, cap, "");
     return out[0] != 0;
 }
 
 bool meshcore_pw_set(uint8_t const prefix[6], char const *password) {
     char key[RR_PW_KEY_MAX];
     rr_pw_key(prefix, key, sizeof(key));
-    return password[0] ? app_settings_set_str(app, key, password) : app_settings_erase(app, key);
+    return password[0] ? app_settings_set_str(app_ctx, key, password) : app_settings_erase(app_ctx, key);
 }
 
 bool meshcore_pw_forget(uint8_t const prefix[6]) {
     char key[RR_PW_KEY_MAX];
     rr_pw_key(prefix, key, sizeof(key));
-    return app_settings_erase(app, key);
+    return app_settings_erase(app_ctx, key);
 }
 
 bool meshcore_autostart(void) {
-    return app_settings_get_u8(app, AUTOSTART, 1) != 0;
+    return app_settings_get_u8(app_ctx, AUTOSTART, 1) != 0;
 }
 
 bool meshcore_autostart_set(bool on) {
-    bool ok = app_settings_set_u8(app, AUTOSTART, on ? 1 : 0);
+    bool ok = app_settings_set_u8(app_ctx, AUTOSTART, on ? 1 : 0);
     ESP_LOGI(TAG, "start at boot %s (%s)", on ? "on" : "off", ok ? "saved" : "not saved");
     return ok;
 }
@@ -96,7 +84,7 @@ static bool start_now(void) {
         ESP_LOGE(TAG, "no LoRa radio: MeshCore not started");
         return false;
     }
-    char const *dir = lichen_fs_app_dir(app); // /storage/meshcore, as before #84 T6
+    char const *dir = lichen_fs_app_dir(app_ctx); // /storage/meshcore, as before #84 T6
     if (!dir) {
         mesh_identity_no_files(); // #110: no drive is "unreadable", never "no identity yet"
         return false;

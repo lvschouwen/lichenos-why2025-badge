@@ -20,23 +20,23 @@ bool mesh_order_load(int *order) {
     char const *ids[MESH_GRID_TILES];
     char        text[ORDER_CAP];
     mesh_grid_ids(ids);
-    app_settings_get_str(meshcore_self(), KEY_ORDER, text, sizeof(text), "");
+    app_settings_get_str(meshcore_ctx(), KEY_ORDER, text, sizeof(text), "");
     return tile_order_merge(text, ids, MESH_GRID_TILES, order);
 }
 
 bool mesh_order_save(int const *order) {
     if (tile_order_is_default(order, MESH_GRID_TILES)) {
-        return app_settings_erase(meshcore_self(), KEY_ORDER);
+        return app_settings_erase(meshcore_ctx(), KEY_ORDER);
     }
     char const *ids[MESH_GRID_TILES];
     char        text[ORDER_CAP];
     mesh_grid_ids(ids);
     return tile_order_encode(ids, order, MESH_GRID_TILES, text, sizeof(text)) > 0 &&
-           app_settings_set_str(meshcore_self(), KEY_ORDER, text);
+           app_settings_set_str(meshcore_ctx(), KEY_ORDER, text);
 }
 
 bool mesh_order_reset(void) {
-    return app_settings_erase(meshcore_self(), KEY_ORDER);
+    return app_settings_erase(meshcore_ctx(), KEY_ORDER);
 }
 
 bool mesh_order_arranged(void) {

@@ -309,7 +309,7 @@ static void drop(void) {
     // Only a real move reaches the store; a failed save must not look saved: the tile goes back
     if (moved && !mesh_order_save(g.order)) {
         cancel_hold();
-        lichen_notify("meshcore", LN_WARN, "Tile order not saved",
+        lichen_notify(meshcore_ctx(), LN_WARN, "Tile order not saved",
                       "The tile went back to its place. Try again; if it keeps failing, restart the badge.", 0);
         return;
     }
