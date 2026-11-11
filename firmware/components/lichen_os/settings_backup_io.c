@@ -4,6 +4,7 @@
 #include "lichen_mem.h"
 #include "esp_log.h"
 #include "nvs.h"
+#include "settings_fail.h"
 #include "sdcard.h"
 
 #include <errno.h>
@@ -213,6 +214,7 @@ static bool store(sb_value_t const *v) {
     }
     nvs_close(nvs);
     if (err != ESP_OK) {
+        settings_fail_note(v->key->key, err);
         ESP_LOGE(TAG, "storing %s.%s failed: %s", v->key->ns, v->key->key, esp_err_to_name(err));
     }
     return err == ESP_OK;

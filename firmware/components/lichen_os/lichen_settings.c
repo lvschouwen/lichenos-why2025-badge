@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "fw_console.h" // FW_NVS_NAMESPACE: where adopted keys used to live
 #include "nvs.h"
+#include "settings_fail.h"
 
 #include <string.h>
 
@@ -30,6 +31,7 @@ static bool commit_close(lichen_app_t const *app, char const *key, nvs_handle_t 
     }
     nvs_close(nvs);
     if (err != ESP_OK) {
+        settings_fail_note(key, err);
         ESP_LOGE(TAG, "%s: saving %s failed: %s", app->id, key, esp_err_to_name(err));
     }
     return err == ESP_OK;

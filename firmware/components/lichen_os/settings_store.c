@@ -9,6 +9,7 @@
 #include "notify_bind.h"
 #include "nvs.h"
 #include "sensors.h"
+#include "settings_fail.h"
 #include "settings_secret.h"
 #include "wifi_list.h"
 
@@ -44,6 +45,7 @@ bool settings_set_u8(char const *key, uint8_t value) {
         nvs_close(nvs);
     }
     if (err != ESP_OK) {
+        settings_fail_note(key, err);
         ESP_LOGE(TAG, "saving %s failed: %s", key, esp_err_to_name(err));
     }
     return err == ESP_OK;
@@ -81,6 +83,7 @@ bool settings_set_str(char const *key, char const *value) {
         nvs_close(nvs);
     }
     if (err != ESP_OK) {
+        settings_fail_note(key, err);
         ESP_LOGE(TAG, "saving %s failed: %s", key, esp_err_to_name(err));
     }
     return err == ESP_OK;
@@ -108,6 +111,9 @@ bool settings_set_blob(char const *key, void const *data, size_t size) {
         }
         nvs_close(nvs);
     }
+    if (err != ESP_OK) {
+        settings_fail_note(key, err);
+    }
     return err == ESP_OK;
 }
 
@@ -122,6 +128,9 @@ bool settings_erase(char const *key) {
             err = nvs_commit(nvs);
         }
         nvs_close(nvs);
+    }
+    if (err != ESP_OK) {
+        settings_fail_note(key, err);
     }
     return err == ESP_OK;
 }

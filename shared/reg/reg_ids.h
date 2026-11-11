@@ -87,6 +87,10 @@ typedef enum {
     REG_ID_HOLD_GPIO12  = 0x1403, // hold.gpio12   BOOL, RO: pad hold latched on the C6 EN line
     REG_ID_HOLD_GPIO13  = 0x1404, // hold.gpio13   BOOL, RO: pad hold latched on the C6 boot strap
 
+    // 0x15 settings: the settings service's write failures (#320), RO
+    REG_ID_SETTINGS_WRITE_FAIL = 0x1500, // settings.write_fail  U32, RO: failed NVS writes since boot, saturating
+    REG_ID_SETTINGS_LAST_ERR   = 0x1501, // settings.last_err    STR, RO: last failure "<key> 0x<esp_err>", key cut to fit 15 chars
+
     // 0x13 sens: what the BMI270 and BME690 are configured to, read back from the chips (#318). All RO; the value of an
     // ENUM is the chip's own register code (names in reg_p4_sensors.c); the low byte is sensors_cfg_key_t
     REG_ID_SENS_ACC_ODR    = 0x1300, // sens.acc_odr     ENUM, RO: accel output data rate

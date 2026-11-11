@@ -411,6 +411,14 @@ target_include_directories(reg_service_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 
 # ---- registry domain 0x15 settings.* (#320): this domain's agent adds its own test below and touches no other block -------
 # (the rows are reg_p4_settings.c; reg_service_test above already links every row file and pins the split)
+add_executable(settings_fail_test ${CMAKE_CURRENT_SOURCE_DIR}/settings_fail_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/settings_fail.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/settings_reg.c)
+target_include_directories(settings_fail_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
+target_compile_options(settings_fail_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME settings_fail_test COMMAND settings_fail_test)
+# reg_p4_settings.c and its stub take the getters' prototypes from settings_reg.h
 # ---- end of the settings block ------------------------------------------------------------------------------
 
 # The Wi-Fi registry keys (#311): the fixed country NL as the driver reports it, the regulatory log text, bandwidth
@@ -1413,6 +1421,7 @@ add_executable(wifi_cred_test
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_list.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_net/wifi_saved.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/settings_secret.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/settings_fail.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/settings_secret_keys.c
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs/nvs_stub.c
 )
@@ -1739,7 +1748,7 @@ add_test(NAME os_bind_test COMMAND os_bind_test)
 # settings_store.c over the NVS stub (#235): the plain calls refuse a secret, settings_bind_net's store keeps them apart
 set(SST_FW ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components)
 add_executable(settings_store_test ${CMAKE_CURRENT_SOURCE_DIR}/settings_store_test.c
-    ${SST_FW}/lichen_os/settings_store.c ${SST_FW}/lichen_os/settings_secret.c ${SST_FW}/lichen_os/settings_secret_keys.c
+    ${SST_FW}/lichen_os/settings_store.c ${SST_FW}/lichen_os/settings_secret.c ${SST_FW}/lichen_os/settings_fail.c ${SST_FW}/lichen_os/settings_secret_keys.c
     ${SST_FW}/lichen_net/wifi_list.c ${SST_FW}/lichen_net/wifi_saved.c ${CMAKE_CURRENT_SOURCE_DIR}/stubs/nvs_stub.c)
 target_include_directories(settings_store_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs/settings_store
                            ${CMAKE_CURRENT_SOURCE_DIR}/stubs)

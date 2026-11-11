@@ -2,6 +2,7 @@
 
 #include "fw_console.h"
 #include "nvs.h"
+#include "settings_fail.h"
 
 #include <string.h>
 
@@ -41,6 +42,9 @@ bool settings_secret_set(char const *key, char const *value) {
             err = nvs_commit(nvs);
         }
         nvs_close(nvs);
+    }
+    if (err != ESP_OK) {
+        settings_fail_note(key, err); // the key's name only, never the value
     }
     return err == ESP_OK;
 }

@@ -8,6 +8,7 @@
 #include "notify_bind.h"
 #include "nvs.h"
 #include "sensors.h"
+#include "settings_fail.h"
 #include "settings_secret.h"
 #include "settings_store.h"
 #include "wifi_list.h"
@@ -86,7 +87,24 @@ static void bound_net_store(void) {
     CHECK(wifi_cred_clear() && !wifi_cred_load(s, p));
 }
 
+// A failed write through the store lands in the counter and the last-error text (#320); a good one does not
+static void failed_write_counted(void) {
+    char t[16];
+    settings_fail_reset();
+    CHECK(settings_set_str("tzname", "CET-1CEST"));
+    CHECK(settings_fail_count() == 0);
+    nvs_stub_fail_set(1);
+    CHECK(!settings_set_str("tzname", "x"));
+    nvs_stub_fail_set(0);
+    CHECK(settings_fail_count() == 1);
+    settings_fail_last_text(t, sizeof(t));
+    CHECK(strstr(t, " 0xffffffff") != NULL && t[0] == 't'); // ESP_FAIL (-1), the key cut to fit
+    CHECK(!settings_set_blob("blobkey", "ab", 2)); // the stub's blob set always fails
+    CHECK(settings_fail_count() == 2);
+}
+
 int main(void) {
+    failed_write_counted();
     plain_refuses_secrets();
     bound_net_store();
     if (failures) {
