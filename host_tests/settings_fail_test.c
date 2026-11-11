@@ -42,7 +42,7 @@ static void test_truncates_key(void) {
     settings_fail_record("k", -1, 2); // ESP_FAIL
     settings_fail_last_text(t, sizeof(t));
     CHECK(strlen(t) <= 15);
-    CHECK(strcmp(t, "k 0xffffffff") == 0);
+    CHECK(strcmp(t, "k -1") == 0);
 }
 
 static void test_saturates(void) {

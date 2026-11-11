@@ -98,9 +98,21 @@ static void failed_write_counted(void) {
     nvs_stub_fail_set(0);
     CHECK(settings_fail_count() == 1);
     settings_fail_last_text(t, sizeof(t));
-    CHECK(strstr(t, " 0xffffffff") != NULL && t[0] == 't'); // ESP_FAIL (-1), the key cut to fit
+    CHECK(strcmp(t, "tzname -1") == 0); // ESP_FAIL
     CHECK(!settings_set_blob("blobkey", "ab", 2)); // the stub's blob set always fails
     CHECK(settings_fail_count() == 2);
+    settings_fail_reset();
+    nvs_stub_fail_set(1);
+    CHECK(!settings_set_tz("UTC0")); // goes through settings_set_str: one failure, not two
+    nvs_stub_fail_set(0);
+    CHECK(settings_fail_count() == 1);
+    settings_fail_reset();
+    nvs_stub_fail_set(1);
+    CHECK(!settings_secret_set("wifi_pass", "hunter2hunter2"));
+    nvs_stub_fail_set(0);
+    CHECK(settings_fail_count() == 1);
+    settings_fail_last_text(t, sizeof(t));
+    CHECK(strcmp(t, "wifi_pass -1") == 0); // the key's name, never the value
 }
 
 int main(void) {

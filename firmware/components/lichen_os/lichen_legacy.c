@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "fw_console.h" // FW_NVS_NAMESPACE
 #include "nvs.h"
+#include "settings_fail.h"
 
 static char const TAG[] = "legacy";
 
@@ -41,6 +42,7 @@ static bool blob_erase(void *ctx) {
         nvs_close(nvs);
     }
     if (err != ESP_OK) {
+        settings_fail_note(c->key, err);
         ESP_LOGW(TAG, "old %s/%s not erased: %s", FW_NVS_NAMESPACE, c->key, esp_err_to_name(err));
     }
     return err == ESP_OK;

@@ -1,36 +1,42 @@
 #include "settings_fail.h"
 
-#include <stdatomic.h>
 #include <stdio.h>
 #include <string.h>
 
 #ifdef ESP_PLATFORM
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #endif
 
 typedef struct {
+    uint32_t count;
     char     key[SETTINGS_FAIL_KEY_MAX + 1];
     int      err;
     uint32_t uptime_s;
-} last_t;
+} state_t;
 
-static _Atomic uint32_t count;
-static _Atomic uint32_t seq; // odd while a writer is in the slot
-static last_t           last;
+// One lock over the whole state so the count and the text are always one failure apart at most: ~28 bytes in internal
+// .bss, copied inside the critical section and nothing else (no log, no clock, no PSRAM). The host test is
+// single-threaded, so the shim is empty there.
+#ifdef ESP_PLATFORM
+static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
+#define LOCK()   portENTER_CRITICAL(&lock)
+#define UNLOCK() portEXIT_CRITICAL(&lock)
+#else
+#define LOCK()
+#define UNLOCK()
+#endif
+
+static state_t st;
 
 void settings_fail_record(char const *key, int err, uint32_t uptime_s) {
-    uint32_t c = atomic_load(&count);
-    while (c != UINT32_MAX && !atomic_compare_exchange_weak(&count, &c, c + 1)) {
-    }
-    uint32_t s = atomic_load(&seq);
-    if ((s & 1) || !atomic_compare_exchange_strong(&seq, &s, s + 1)) {
-        return; // another task is writing the slot: it is the latest enough
-    }
-    last_t n = {.err = err, .uptime_s = uptime_s};
+    state_t n = {.err = err, .uptime_s = uptime_s};
     strncpy(n.key, key ? key : "", SETTINGS_FAIL_KEY_MAX);
-    atomic_thread_fence(memory_order_release);
-    last = n;
-    atomic_store_explicit(&seq, s + 2, memory_order_release);
+    LOCK();
+    n.count = st.count == UINT32_MAX ? UINT32_MAX : st.count + 1;
+    st      = n;
+    UNLOCK();
 }
 
 void settings_fail_note(char const *key, int err) {
@@ -41,38 +47,29 @@ void settings_fail_note(char const *key, int err) {
 #endif
 }
 
-uint32_t settings_fail_count(void) {
-    return atomic_load(&count);
+static state_t snapshot(void) {
+    LOCK();
+    state_t out = st;
+    UNLOCK();
+    return out;
 }
 
-// A few tries is enough: a write of the slot is a 24-byte copy
-static last_t snapshot(void) {
-    last_t out = {0};
-    for (int i = 0; i < 8; i++) {
-        uint32_t s1 = atomic_load_explicit(&seq, memory_order_acquire);
-        if (s1 & 1) {
-            continue;
-        }
-        out = last;
-        atomic_thread_fence(memory_order_acquire);
-        if (atomic_load_explicit(&seq, memory_order_relaxed) == s1) {
-            break;
-        }
-    }
-    return out;
+uint32_t settings_fail_count(void) {
+    return snapshot().count;
 }
 
 void settings_fail_last_text(char *out, size_t cap) {
     if (cap == 0) {
         return;
     }
-    last_t l = snapshot();
-    if (l.key[0] == '\0' && l.err == 0) {
+    state_t l = snapshot();
+    if (l.count == 0) {
         out[0] = '\0';
         return;
     }
     char code[16];
-    int  n = snprintf(code, sizeof(code), "0x%x", (unsigned)l.err);
+    // ESP_FAIL is -1: shown as "-1", not 0xffffffff, which would eat the key's room
+    int n = l.err < 0 ? snprintf(code, sizeof(code), "%d", l.err) : snprintf(code, sizeof(code), "0x%x", (unsigned)l.err);
     // The code stays whole; the key gives way
     size_t room = cap - 1 > (size_t)n + 1 ? cap - 1 - ((size_t)n + 1) : 0;
     size_t kl   = strlen(l.key);
@@ -91,11 +88,13 @@ int settings_fail_last_err(void) {
 }
 
 void settings_fail_reset(void) {
-    atomic_store(&count, 0);
-    atomic_store(&seq, 0);
-    memset(&last, 0, sizeof(last));
+    LOCK();
+    memset(&st, 0, sizeof(st));
+    UNLOCK();
 }
 
 void settings_fail_preset_count(uint32_t n) {
-    atomic_store(&count, n);
+    LOCK();
+    st.count = n;
+    UNLOCK();
 }

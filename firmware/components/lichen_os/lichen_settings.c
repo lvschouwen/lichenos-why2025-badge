@@ -22,6 +22,9 @@ static bool open_app(lichen_app_t const *app, nvs_open_mode_t mode, nvs_handle_t
     if (err != ESP_OK && !(mode == NVS_READONLY && err == ESP_ERR_NVS_NOT_FOUND)) {
         ESP_LOGW(TAG, "%s: %s", ns, esp_err_to_name(err));
     }
+    if (err != ESP_OK && mode == NVS_READWRITE) {
+        settings_fail_note("(open)", err); // no key yet: the write that wanted this namespace never started
+    }
     return err == ESP_OK;
 }
 
@@ -208,6 +211,9 @@ static bool adopt_erase_legacy(void *ctx) {
             err = nvs_commit(nvs);
         }
         nvs_close(nvs);
+    }
+    if (err != ESP_OK) {
+        settings_fail_note(c->key, err);
     }
     ESP_LOG_LEVEL(err == ESP_OK ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s: old %s/%s erased (%s)", c->app->id,
                   FW_NVS_NAMESPACE, c->key, esp_err_to_name(err));
