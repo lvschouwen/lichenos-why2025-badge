@@ -602,29 +602,36 @@ static void cmd_ui_overflow(bool verbose) {
     lichen_free(lichen_sys_ctx_os(), ctx.hits);
 }
 
+// The text after subcommand `name` (a whole word at the start of args), or NULL when args is another command
+static char const *sub_args(char const *args, char const *name) {
+    size_t n = strlen(name);
+    return strncmp(args, name, n) == 0 && (args[n] == 0 || args[n] == ' ') ? args + n : NULL;
+}
+
 static void cmd_ui(char const *args) {
-    if (strncmp(args, "perf", 4) == 0) {
-        ui_perf_cmd(args + 4);
+    char const *rest;
+    if ((rest = sub_args(args, "perf"))) {
+        ui_perf_cmd(rest);
         return;
     }
-    if (strncmp(args, "overflow", 8) == 0) {
-        cmd_ui_overflow(strstr(args + 8, "-v") != NULL);
+    if ((rest = sub_args(args, "overflow"))) {
+        cmd_ui_overflow(strstr(rest, "-v") != NULL);
         return;
     }
-    if (strncmp(args, "card", 4) == 0 && (args[4] == 0 || args[4] == ' ')) {
-        card_overlay_cmd(args + 4); // the bench test card (#352)
+    if ((rest = sub_args(args, "card"))) {
+        card_overlay_cmd(rest); // the bench test card (#352)
         return;
     }
-    if (strncmp(args, "lockcheck", 9) == 0 && (args[9] == 0 || args[9] == ' ')) {
-        lichen_sys_ui_lockcheck_cmd(args + 9); // the debug lock-owner check's hits (#225)
+    if ((rest = sub_args(args, "lockcheck"))) {
+        lichen_sys_ui_lockcheck_cmd(rest); // the debug lock-owner check's hits (#225)
         return;
     }
-    if (strncmp(args, "lock", 4) == 0 && (args[4] == 0 || args[4] == ' ')) {
-        ui_remote_lock_cmd(args + 4);
+    if ((rest = sub_args(args, "lock"))) {
+        ui_remote_lock_cmd(rest);
         return;
     }
-    if (strncmp(args, "open", 4) == 0 && (args[4] == 0 || args[4] == ' ')) {
-        ui_remote_open_cmd(args + 4);
+    if ((rest = sub_args(args, "open"))) {
+        ui_remote_open_cmd(rest);
         settle();
         return;
     }

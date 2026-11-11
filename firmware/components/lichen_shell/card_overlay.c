@@ -22,12 +22,25 @@ static lv_timer_t *auto_off;
 
 static void on_raw(key_raw_event_t const *ev, void *arg);
 
-// LVGL context
-static void close_card(void) {
+static bool listening;   // the raw key listener is registered
+static bool eat_release; // Esc closed the card: its release is swallowed too, or it would reach the screen below
+
+static void unlisten(void) {
+    if (listening) {
+        raw_keys_unlisten(on_raw, NULL);
+        listening = false;
+    }
+}
+
+// LVGL context. keep_keys: stay registered until Esc is released (the physical Esc press closed it)
+static void close_card(bool keep_keys) {
     if (!card) {
         return;
     }
-    raw_keys_unlisten(on_raw, NULL);
+    eat_release = keep_keys && listening;
+    if (!eat_release) {
+        unlisten();
+    }
     if (auto_off) {
         lv_timer_delete(auto_off);
         auto_off = NULL;
@@ -41,14 +54,20 @@ static void on_auto_off(lv_timer_t *t) {
     (void)t;
     auto_off = NULL; // a one-shot timer deletes itself
     ESP_LOGI(TAG, "auto off");
-    close_card();
+    close_card(false);
 }
 
 // While the card is up the physical keys do nothing else (swallowed); Esc closes it
 static void on_raw(key_raw_event_t const *ev, void *arg) {
     (void)arg;
-    if (ev->pressed && ev->code == KEY_MATRIX_ESC_CODE) {
-        close_card();
+    if (ev->code != KEY_MATRIX_ESC_CODE) {
+        return;
+    }
+    if (ev->pressed) {
+        close_card(true);
+    } else if (eat_release) {
+        eat_release = false;
+        unlisten();
     }
 }
 
@@ -57,7 +76,7 @@ bool card_overlay_key(uint32_t key) {
         return false;
     }
     if (key == LV_KEY_ESC) {
-        close_card();
+        close_card(false);
     }
     return true; // an open card takes every key, as the physical ones
 }
@@ -66,14 +85,16 @@ bool card_overlay_key(uint32_t key) {
 static void apply(void *arg) {
     tcard_mode_t mode = (tcard_mode_t)(intptr_t)arg;
     if (mode == TCARD_OFF) {
-        close_card();
+        close_card(false);
         return;
     }
     if (card) {
         test_card_set_mode(card, mode);
     } else {
         card = test_card_create(lv_layer_sys(), mode);
-        if (!card || !raw_keys_listen(on_raw, NULL, true)) {
+        eat_release = false;
+        listening   = listening || raw_keys_listen(on_raw, NULL, true);
+        if (!card || !listening) {
             ESP_LOGE(TAG, "no card (memory or key listener)");
             if (card) {
                 lv_obj_delete(card);

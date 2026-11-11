@@ -69,7 +69,7 @@ size	libesp_app_format.a	742
 size	libesp_common.a	1816
 size	libesp_driver_dma.a	16665
 size	libesp_driver_gpio.a	10656
-size	libesp_driver_i2c.a	15903
+size	libesp_driver_i2c.a	15907
 size	libesp_driver_ledc.a	6320
 size	libesp_driver_sd_intf.a	866
 size	libesp_driver_sdmmc.a	18051
@@ -134,7 +134,7 @@ size	liblichen_notify.a	13254
 size	liblichen_nvs.a	1153
 size	liblichen_os.a	55924
 size	liblichen_random.a	63
-size	liblichen_shell.a	175198
+size	liblichen_shell.a	175334
 size	liblog.a	2726
 size	liblora.a	35669
 size	liblvgl__lvgl.a	543803

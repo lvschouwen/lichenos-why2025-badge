@@ -9,7 +9,6 @@
 
 #include <stdio.h>
 
-static lichen_ctx_t self_ctx; // lichen_register_app's answer
 static lv_obj_t    *card;
 static tcard_mode_t mode;
 
@@ -81,5 +80,5 @@ static lichen_app_t const testcard_app = {
 };
 
 void testcard_app_register(void) {
-    self_ctx = lichen_register_app(&testcard_app);
+    lichen_register_app(&testcard_app);
 }
