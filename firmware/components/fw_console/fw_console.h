@@ -102,6 +102,10 @@ void system_restart_set_prepare(void (*prepare)(void));
 
 // Adds a line to the same history without restarting: something worth knowing about this boot (#40: a bad PSRAM tuning)
 void system_restart_note(char const *why);
+// Names the next bare esp_restart() in the restart history instead of "unknown caller" (the caller address stays). why
+// must be a string literal (kept by pointer). For an early-boot restart that is deliberate but cannot go through
+// system_restart (no save hooks yet).
+void system_restart_name_next(char const *why);
 
 // Where the restart history is kept (the settings service, #235): fw_console opens no NVS. Bound in start_nvs right after
 // nvs_boot(); a restart before that is not recorded.

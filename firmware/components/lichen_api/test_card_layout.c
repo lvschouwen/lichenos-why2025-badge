@@ -209,7 +209,7 @@ void tcard_info_text(tcard_info_t const *in, char *line1, size_t cap1, char *lin
     refresh_text(in->refresh_raw, hz, sizeof(hz));
     reg_value(in->bl_disp_raw, d, sizeof(d));
     reg_value(in->bl_kbd_raw, k, sizeof(k));
-    snprintf(line1, cap1, "%s   panel %s   psram %s", in->fw && in->fw[0] ? in->fw : "fw ?", hz, ps);
+    snprintf(line1, cap1, "%s  panel %s  psram %s", in->fw && in->fw[0] ? in->fw : "fw ?", hz, ps);
     if (in->req_disp < 0) { // the caller cannot say what was requested
         snprintf(line2, cap2, "bl applied %s/%s", d, k);
         return;

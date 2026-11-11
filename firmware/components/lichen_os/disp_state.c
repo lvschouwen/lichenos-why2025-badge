@@ -8,9 +8,13 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "fw_console.h"
 #include "lichen_os.h"
+#include "lichen_sys_app.h"
 #include "lichen_sys_display.h"
+#include "lichen_task.h"
 #include "psram_speed.h"
 
 #include <stdio.h>
@@ -37,7 +41,8 @@ static void gather(ds_info_t *in, char bufs[][KEY_LEN]) {
     in->psram_want_mhz = (int)psram_speed_want();
     in->failed         = rec.failed ? 1 : 0;
     in->arms           = rec.arms;
-    in->heap_max_us    = psram_speed_heap_max_us() ? (int64_t)psram_speed_heap_max_us() : -1;
+    uint32_t heap_us   = psram_speed_heap_max_us();
+    in->heap_max_us    = heap_us ? (int64_t)heap_us : -1;
     uint8_t d = 0, k = 0;
     lichen_sys_display_get(&d, &k);
     in->bl_req  = d;
@@ -58,11 +63,32 @@ static size_t line(char *out, size_t cap) {
     return ds_format(&in, out, cap);
 }
 
+// The line is about 230 bytes; a longer one is cut and says so
+#define LINE_CAP 384
+
+static void mark_cut(char *text, size_t n) {
+    static char const cut[] = " (cut)";
+    if (n + 1 >= LINE_CAP) {
+        memcpy(text + LINE_CAP - sizeof(cut), cut, sizeof(cut));
+    }
+}
+
+// On a short task of its own: the esp_timer task has a small stack that every timer shares
+static void log_task(void *arg) {
+    (void)arg;
+    char   text[LINE_CAP];
+    size_t n = line(text, sizeof(text));
+    mark_cut(text, n);
+    ESP_LOGI(TAG, "%s", text);
+    vTaskDelete(NULL);
+}
+
+// The timer only hands off
 static void log_once(void *arg) {
     (void)arg;
-    char text[320];
-    line(text, sizeof(text));
-    ESP_LOGI(TAG, "%s", text);
+    if (!lichen_task_start(lichen_sys_ctx_os(), "disp_state", log_task, NULL, 3072, LICHEN_PRIO_BACKGROUND, NULL)) {
+        ESP_LOGW(TAG, "no memory for the fingerprint line: `fw disp state` prints it");
+    }
 }
 
 static void cmd_disp(char const *args) {
@@ -70,8 +96,9 @@ static void cmd_disp(char const *args) {
         console_reply("disp: usage: disp state (the display fingerprint line, #354)");
         return;
     }
-    char text[320];
-    line(text, sizeof(text));
+    char   text[LINE_CAP];
+    size_t n = line(text, sizeof(text));
+    mark_cut(text, n);
     console_reply("%s", text);
 }
 

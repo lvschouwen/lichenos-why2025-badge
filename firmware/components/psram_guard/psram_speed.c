@@ -206,7 +206,7 @@ static void arm_and_restart(char const *late_why) {
     if (late_why) {
         system_restart(late_why); // the shutdown hook arms again (s_keep120): the saves cannot undo it
     } else {
-        system_restart_note("psram 120 arm (boot)"); // else the history shows an unknown caller
+        system_restart_name_next("psram 120 arm (boot)"); // the history line of the bare restart below, not "unknown caller"
         esp_restart();
     }
 }

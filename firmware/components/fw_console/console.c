@@ -403,6 +403,12 @@ static void record_restart(char const *why, uint32_t caller) {
     push_restart_line(why, caller);
 }
 
+static char const *_Atomic s_next_name; // names the next bare esp_restart in the history (#354)
+
+void system_restart_name_next(char const *why) {
+    atomic_store(&s_next_name, why);
+}
+
 void system_restart_note(char const *why) {
     push_restart_line(why, 0); // not the restart guard: the real restart of this boot is still recorded
 }
@@ -471,7 +477,8 @@ void __wrap_esp_restart(void) {
             ESP_LOGW(TAG, "restart (unknown caller %p) on trial: %s", __builtin_return_address(0),
                      SYSTEM_RESTART_TRIAL_NOTE);
         }
-        record_restart("unknown caller", (uint32_t)(uintptr_t)__builtin_return_address(0));
+        char const *name = atomic_load(&s_next_name);
+        record_restart(name ? name : "unknown caller", (uint32_t)(uintptr_t)__builtin_return_address(0));
     }
     // After the record: the frame can only be skipped, never cost the history. A bare esp_restart() (no system_restart)
     // is how IDF components and fault handlers restart, so it gets no frame: the UI may be the problem (#39)

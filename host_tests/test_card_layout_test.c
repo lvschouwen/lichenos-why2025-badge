@@ -150,15 +150,20 @@ static void test_info(void) {
     char l1[80], l2[64];
     info((tcard_info_t){"fw-abc1234", "468 (3.0 s ago)", "40 (1.0 s ago)", "40 (1.0 s ago)", 40, 40, "120000000 (1.0 s ago)"}, l1, sizeof(l1), l2,
          sizeof(l2));
-    CHECK(strcmp(l1, "fw-abc1234   panel 46.8 Hz   psram 120 MHz") == 0);
+    CHECK(strcmp(l1, "fw-abc1234  panel 46.8 Hz  psram 120 MHz") == 0);
     CHECK(strcmp(l2, "bl requested 40/40   applied 40/40") == 0);
     info((tcard_info_t){NULL, "? (not read yet)", NULL, "", 10, 0, "? (not read yet)"}, l1, sizeof(l1), l2, sizeof(l2));
-    CHECK(strcmp(l1, "fw ?   panel ? Hz   psram ? MHz") == 0);
+    CHECK(strcmp(l1, "fw ?  panel ? Hz  psram ? MHz") == 0);
     CHECK(strcmp(l2, "bl requested 10/0   applied ?/?") == 0);
     info((tcard_info_t){"fw-abc1234", "468", "40", "0", -1, 0, "80000000"}, l1, sizeof(l1), l2, sizeof(l2)); // requested unknown
     CHECK(strcmp(l2, "bl applied 40/0") == 0);
     info((tcard_info_t){"fw-x", "500", "stale", "80", 80, 80, NULL}, l1, 8, l2, 8); // small buffers: cut, terminated
     CHECK(strlen(l1) == 7 && strlen(l2) == 7);
+    // The longest line 1 (an 11-character version, 3-digit psram MHz) fits the strip at the info font (Montserrat 24:
+    // no glyph of the line is wider than 15 px)
+    info((tcard_info_t){"fw-605935b1", "468", "40", "40", 40, 40, "120000000"}, l1, sizeof(l1), l2, sizeof(l2));
+    CHECK(strlen(l1) * 15 <= (size_t)tcard_info_rect().w);
+    CHECK(strlen(l2) * 15 <= (size_t)tcard_info_rect().w);
 }
 
 int main(void) {
