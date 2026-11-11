@@ -216,7 +216,8 @@ void psram_boot_oneshot_arm(char const *args) {
 // was armed.
 static bool oneshot_take(psram_oneshot_t *rec) {
     nvs_handle_t nvs;
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+    // Runs after nvs_boot (main.c start_nvs): a read-write open only fails when NVS is down, a real failure (#325)
+    if (psram_nvs_open(ONESHOT_KEY, &nvs) != ESP_OK) {
         return false;
     }
     size_t size = sizeof(*rec);
