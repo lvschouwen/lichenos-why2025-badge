@@ -1233,13 +1233,13 @@ extern "C" char const *mesh_contact_export(uint8_t const *prefix, char *uri, siz
     if (!prefix && mesh_advert_refusal(clock_is_set())) {
         return "the clock is not set: our advert would carry a wrong time"; // as adverts (#8)
     }
-    uint8_t *pkt = (uint8_t *)lichen_alloc(meshcore_self(), MAX_TRANS_UNIT, LICHEN_MEM_BULK);
+    uint8_t *pkt = (uint8_t *)lichen_alloc(meshcore_ctx(), MAX_TRANS_UNIT, LICHEN_MEM_BULK);
     if (!pkt) {
         return "no memory";
     }
     char const *why = settings_lock();
     if (why) {
-        lichen_free(meshcore_self(), pkt);
+        lichen_free(meshcore_ctx(), pkt);
         return why;
     }
     int len = 0;
@@ -1260,7 +1260,7 @@ extern "C" char const *mesh_contact_export(uint8_t const *prefix, char *uri, siz
     if (!why && !mesh_advert_uri(pkt, (size_t)len, uri, cap)) {
         why = "not an advert MeshCore can read";
     }
-    lichen_free(meshcore_self(), pkt);
+    lichen_free(meshcore_ctx(), pkt);
     return why;
 }
 
@@ -2151,8 +2151,8 @@ static void cmd_mesh_trace(char const *arg, mt_kind_t kind) {
         }
         return;
     }
-    mt_t      *t     = (mt_t *)lichen_alloc(meshcore_self(), sizeof(mt_t), LICHEN_MEM_BULK);
-    mt_line_t *lines = (mt_line_t *)lichen_alloc(meshcore_self(), MT_LINES_MAX * sizeof(mt_line_t), LICHEN_MEM_BULK);
+    mt_t      *t     = (mt_t *)lichen_alloc(meshcore_ctx(), sizeof(mt_t), LICHEN_MEM_BULK);
+    mt_line_t *lines = (mt_line_t *)lichen_alloc(meshcore_ctx(), MT_LINES_MAX * sizeof(mt_line_t), LICHEN_MEM_BULK);
     if (t && lines && mesh_trace_get(t)) {
         console_reply("%s #%lu to %02x%02x%02x%02x%02x%02x: %s", t->kind == MT_TRACE ? "trace" : "discover",
                       (unsigned long)t->seq, t->prefix[0], t->prefix[1], t->prefix[2], t->prefix[3], t->prefix[4],
@@ -2162,8 +2162,8 @@ static void cmd_mesh_trace(char const *arg, mt_kind_t kind) {
             console_reply("  %s", lines[i].text);
         }
     }
-    lichen_free(meshcore_self(), t);
-    lichen_free(meshcore_self(), lines);
+    lichen_free(meshcore_ctx(), t);
+    lichen_free(meshcore_ctx(), lines);
 }
 
 // ---- "fw mesh remote": log in, status and CLI for a repeater or room (#51) -------------------------------------------
@@ -2205,14 +2205,14 @@ static void console_pw_settle(void) {
     if (!console_pw_seq) {
         return;
     }
-    rr_t *r = (rr_t *)lichen_alloc(meshcore_self(), sizeof(rr_t), LICHEN_MEM_BULK);
+    rr_t *r = (rr_t *)lichen_alloc(meshcore_ctx(), sizeof(rr_t), LICHEN_MEM_BULK);
     if (!r || !mesh_remote_get(r)) {
-        lichen_free(meshcore_self(), r);
+        lichen_free(meshcore_ctx(), r);
         return;
     }
     bool mine = r->seq == console_pw_seq;
     if (mine && rr_busy(r)) {
-        lichen_free(meshcore_self(), r);
+        lichen_free(meshcore_ctx(), r);
         return; // still waiting for the answer
     }
     if (mine && r->state == RR_DONE) {
@@ -2220,7 +2220,7 @@ static void console_pw_settle(void) {
     }
     mesh_wipe(console_pw, sizeof(console_pw)); // done, refused, timed out or replaced: not kept
     console_pw_seq = 0;
-    lichen_free(meshcore_self(), r);
+    lichen_free(meshcore_ctx(), r);
 }
 
 // The CLI exchanges, newest first, as rr_cli_format orders them. Every reply line goes out with console_reply_secret
@@ -2245,7 +2245,7 @@ static void console_remote_cli_show(rr_t *r) {
 
 static void console_remote_show(void) {
     console_pw_settle();
-    rr_t *r = (rr_t *)lichen_alloc(meshcore_self(), sizeof(rr_t), LICHEN_MEM_BULK);
+    rr_t *r = (rr_t *)lichen_alloc(meshcore_ctx(), sizeof(rr_t), LICHEN_MEM_BULK);
     if (r && mesh_remote_get(r)) {
         char text[96];
         rr_state_text(r, text, sizeof(text));
@@ -2259,20 +2259,20 @@ static void console_remote_show(void) {
                           r->admin ? " (admin)" : "");
         }
         // PSRAM, as the trace's lines: about 1 KB, too much for the console task's stack
-        rr_line_t *lines = r->have_status ? (rr_line_t *)lichen_alloc(meshcore_self(), RR_LINES_MAX * sizeof(rr_line_t),
+        rr_line_t *lines = r->have_status ? (rr_line_t *)lichen_alloc(meshcore_ctx(), RR_LINES_MAX * sizeof(rr_line_t),
                                                                       LICHEN_MEM_BULK)
                                           : NULL;
         size_t     n     = lines ? rr_status_lines(&r->status, lines, RR_LINES_MAX) : 0;
         for (size_t i = 0; i < n; i++) {
             console_reply("  %s", lines[i].text);
         }
-        lichen_free(meshcore_self(), lines);
+        lichen_free(meshcore_ctx(), lines);
         console_remote_cli_show(r);
     }
     if (r) {
         mesh_wipe(r, sizeof(*r)); // a CLI reply may hold the guest password or the private key
     }
-    lichen_free(meshcore_self(), r);
+    lichen_free(meshcore_ctx(), r);
 }
 
 // A CLI command from the console. A reboot or a radio change needs the word YES after it, as the screen asks with a
@@ -2407,21 +2407,21 @@ static void cmd_mesh_telemetry(char const *arg) {
         }
         return;
     }
-    rr_t *r = (rr_t *)lichen_alloc(meshcore_self(), sizeof(rr_t), LICHEN_MEM_BULK);
+    rr_t *r = (rr_t *)lichen_alloc(meshcore_ctx(), sizeof(rr_t), LICHEN_MEM_BULK);
     if (r && mesh_remote_get(r) && r->op == RR_TELEMETRY && r->seq) {
         char text[128];
         rr_state_text(r, text, sizeof(text));
         console_reply("telemetry #%lu: %s", (unsigned long)r->seq, text);
-        tl_line_t *lines = (tl_line_t *)lichen_alloc(meshcore_self(), TL_LINES_MAX * sizeof(tl_line_t), LICHEN_MEM_BULK);
+        tl_line_t *lines = (tl_line_t *)lichen_alloc(meshcore_ctx(), TL_LINES_MAX * sizeof(tl_line_t), LICHEN_MEM_BULK);
         size_t     n     = lines && r->have_telem ? tl_lpp_lines(r->telem, r->telem_len, lines, TL_LINES_MAX) : 0;
         for (size_t i = 0; i < n; i++) {
             console_reply("  %s", lines[i].text);
         }
-        lichen_free(meshcore_self(), lines);
+        lichen_free(meshcore_ctx(), lines);
     } else {
         console_reply("no telemetry asked yet: fw mesh telemetry <key digits> YES");
     }
-    lichen_free(meshcore_self(), r);
+    lichen_free(meshcore_ctx(), r);
 }
 
 static void cmd_mesh_out(void) {
@@ -2463,7 +2463,7 @@ static void cmd_mesh_link(void) {
 
 // "fw mesh chats": every chat with its unread count and how full its ring is
 static void cmd_mesh_chats(void) {
-    mesh_conv_t *list = (mesh_conv_t *)lichen_alloc(meshcore_self(), MESH_CONV_MAX * sizeof(mesh_conv_t), LICHEN_MEM_BULK);
+    mesh_conv_t *list = (mesh_conv_t *)lichen_alloc(meshcore_ctx(), MESH_CONV_MAX * sizeof(mesh_conv_t), LICHEN_MEM_BULK);
     if (!list) {
         console_reply("no memory");
         return;
@@ -2480,7 +2480,7 @@ static void cmd_mesh_chats(void) {
         console_reply("chat %-15s %-32s unread %u, %u/%u kept", what, list[i].title, (unsigned)list[i].unread,
                       (unsigned)list[i].count, (unsigned)STORE_MESSAGES);
     }
-    lichen_free(meshcore_self(), list);
+    lichen_free(meshcore_ctx(), list);
     console_reply("%u chat(s), %u unread", (unsigned)n, (unsigned)tile_unread());
 }
 
@@ -2741,7 +2741,7 @@ static void contacts_export(char const *arg) {
     for (int i = 0; i < MF_PREFIX; i++) {
         prefix[i] = (uint8_t)b[i];
     }
-    char *uri = (char *)lichen_alloc(meshcore_self(), MESH_ADVERT_URI_MAX, LICHEN_MEM_BULK);
+    char *uri = (char *)lichen_alloc(meshcore_ctx(), MESH_ADVERT_URI_MAX, LICHEN_MEM_BULK);
     if (!uri) {
         console_reply("no memory");
         return;
@@ -2754,13 +2754,13 @@ static void contacts_export(char const *arg) {
         console_reply("(%u characters; to import on a badge: \"fw contacts import <link>\" (over USB in parts of up to "
                       "79 characters), then \"fw contacts import end\")", (unsigned)strlen(uri));
     }
-    lichen_free(meshcore_self(), uri);
+    lichen_free(meshcore_ctx(), uri);
 }
 
 // "fw contacts import <part>" ... "fw contacts import end" (or "cancel")
 static void contacts_import(char const *arg) {
     if (!import_text) {
-        import_text = (mesh_import_t *)lichen_alloc(meshcore_self(), sizeof(*import_text), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+        import_text = (mesh_import_t *)lichen_alloc(meshcore_ctx(), sizeof(*import_text), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
         if (!import_text) {
             console_reply("no memory");
             return;
@@ -2781,7 +2781,7 @@ static void contacts_import(char const *arg) {
         }
         return;
     }
-    uint8_t    *pkt = (uint8_t *)lichen_alloc(meshcore_self(), MESH_ADVERT_MAX, LICHEN_MEM_BULK);
+    uint8_t    *pkt = (uint8_t *)lichen_alloc(meshcore_ctx(), MESH_ADVERT_MAX, LICHEN_MEM_BULK);
     char const *why = NULL;
     size_t      len = 0;
     if (!pkt) {
@@ -2804,7 +2804,7 @@ static void contacts_import(char const *arg) {
         console_reply("contact %02x%02x%02x%02x%02x%02x \"%s\" added", pkt[2], pkt[3], pkt[4], pkt[5], pkt[6], pkt[7],
                       name);
     }
-    lichen_free(meshcore_self(), pkt);
+    lichen_free(meshcore_ctx(), pkt);
 }
 
 static void cmd_contacts(char const *args) {
@@ -2824,7 +2824,7 @@ static void cmd_contacts(char const *args) {
         return;
     }
     size_t          total;
-    mesh_contact_t *list = (mesh_contact_t *)lichen_alloc(meshcore_self(), MAX_CONTACTS * sizeof(mesh_contact_t), LICHEN_MEM_BULK);
+    mesh_contact_t *list = (mesh_contact_t *)lichen_alloc(meshcore_ctx(), MAX_CONTACTS * sizeof(mesh_contact_t), LICHEN_MEM_BULK);
     if (!list) {
         console_reply("no memory");
         return;
@@ -2838,7 +2838,7 @@ static void cmd_contacts(char const *args) {
                       list[i].pubkey[3], list[i].pubkey[4], list[i].pubkey[5], list[i].name,
                       mesh_type_name(list[i].type), hops, age);
     }
-    lichen_free(meshcore_self(), list);
+    lichen_free(meshcore_ctx(), list);
     console_reply("%u contact(s)", (unsigned)total);
 }
 
@@ -2849,7 +2849,7 @@ static void cmd_msgs(char const *args) {
     long want = *args ? strtol(args, NULL, 10) : 10;
     want      = want < 1 || want > STORE_MESSAGES ? 10 : want;
     uint32_t    generation;
-    mesh_msg_t *list = (mesh_msg_t *)lichen_alloc(meshcore_self(), (size_t)want * sizeof(mesh_msg_t), LICHEN_MEM_BULK);
+    mesh_msg_t *list = (mesh_msg_t *)lichen_alloc(meshcore_ctx(), (size_t)want * sizeof(mesh_msg_t), LICHEN_MEM_BULK);
     if (!list) {
         console_reply("no memory");
         return;
@@ -2861,7 +2861,7 @@ static void cmd_msgs(char const *args) {
         mesh_format_msg_age(list[i].loaded, list[i].heard_s, list[i].epoch, now, epoch, age, sizeof(age));
         console_reply("[%s] %s (%s, rssi %d)", list[i].channel, list[i].text, age, list[i].rssi_x10 / 10);
     }
-    lichen_free(meshcore_self(), list);
+    lichen_free(meshcore_ctx(), list);
     console_reply("%u message(s)", (unsigned)n);
 }
 
@@ -2919,7 +2919,7 @@ static void channel_show(char const *arg) {
         mesh_channel_info_t info;
         char                hex[MESH_KEY_HEX_MAX], b64[MESH_KEY_B64_MAX], uri[MESH_CHANNEL_URI_MAX];
     };
-    ShowMem *m = (ShowMem *)lichen_alloc(meshcore_self(), sizeof(ShowMem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // off the console's 4 KB stack
+    ShowMem *m = (ShowMem *)lichen_alloc(meshcore_ctx(), sizeof(ShowMem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // off the console's 4 KB stack
     if (!m) {
         console_reply("no memory");
         return;
@@ -2939,7 +2939,7 @@ static void channel_show(char const *arg) {
         }
     }
     mesh_wipe(m, sizeof(*m)); // a channel key: not left in the heap (volatile: a memset before a free may be dropped)
-    lichen_free(meshcore_self(), m);
+    lichen_free(meshcore_ctx(), m);
 }
 
 // "fw channel rename <index|name> <new name>" (#54): the name only, the key stays
@@ -3053,7 +3053,7 @@ extern "C" void mesh_airlog_note(uint8_t header, uint8_t path_len, uint8_t const
         if (airlog_failed) {
             return;
         }
-        auto *mem = (airlog_entry_t *)lichen_alloc(meshcore_self(), (size_t)(AIRLOG_CAP) * sizeof(airlog_entry_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+        auto *mem = (airlog_entry_t *)lichen_alloc(meshcore_ctx(), (size_t)(AIRLOG_CAP) * sizeof(airlog_entry_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
         if (!mem) {
             airlog_failed = true;
             ESP_LOGW(TAG, "air log: no memory, packets are not listed");
@@ -3170,7 +3170,7 @@ extern "C" void mesh_signal_note(uint8_t const *pub_key, bool is_advert, uint8_t
         if (signal_failed) {
             return;
         }
-        auto *mem = (sig_table_t *)lichen_alloc(meshcore_self(), sizeof(sig_table_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+        auto *mem = (sig_table_t *)lichen_alloc(meshcore_ctx(), sizeof(sig_table_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
         if (!mem) {
             signal_failed = true;
             ESP_LOGW(TAG, "signal history: no memory, contact signal graphs stay empty");
@@ -3273,7 +3273,7 @@ static bool task_create(void) {
     __atomic_store_n(&task_exited, false, __ATOMIC_RELEASE);
     __atomic_store_n(&stopped, false, __ATOMIC_RELEASE);
     __atomic_store_n(&task_running, true, __ATOMIC_RELEASE);
-    if (!lichen_task_start(meshcore_self(), "mesh", mesh_task, NULL, MESH_STACK, LICHEN_PRIO_APP_LOOP,
+    if (!lichen_task_start(meshcore_ctx(), "mesh", mesh_task, NULL, MESH_STACK, LICHEN_PRIO_APP_LOOP,
                            &mesh_task_handle)) {
         __atomic_store_n(&task_running, was_running, __ATOMIC_RELEASE);
         __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
@@ -3353,22 +3353,22 @@ static bool start_locked(char const *files_dir) {
     mesh_store_set_clock(mesh_epoch_now);
     bool ok = mesh_store_init(STORE_MESSAGES);
     mesh_unlock();
-    void *tables_mem = lichen_alloc(meshcore_self(), sizeof(SimpleMeshTables), LICHEN_MEM_BULK);
-    void *mesh_mem   = lichen_alloc(meshcore_self(), sizeof(BadgeMesh), LICHEN_MEM_BULK);
-    void *ob_mem     = lichen_alloc(meshcore_self(), sizeof(ob_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
-    void *mt_mem     = lichen_alloc(meshcore_self(), sizeof(mt_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
-    void *rr_mem     = lichen_alloc(meshcore_self(), sizeof(rr_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    void *tables_mem = lichen_alloc(meshcore_ctx(), sizeof(SimpleMeshTables), LICHEN_MEM_BULK);
+    void *mesh_mem   = lichen_alloc(meshcore_ctx(), sizeof(BadgeMesh), LICHEN_MEM_BULK);
+    void *ob_mem     = lichen_alloc(meshcore_ctx(), sizeof(ob_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    void *mt_mem     = lichen_alloc(meshcore_ctx(), sizeof(mt_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    void *rr_mem     = lichen_alloc(meshcore_ctx(), sizeof(rr_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     bool  files      = SPIFFS.begin(true);
     if (!files) {
         mesh_identity_no_files();
     }
     if (!ok || !tables_mem || !mesh_mem || !ob_mem || !mt_mem || !rr_mem || !files) {
         ESP_LOGE(TAG, "no memory or no /storage");
-        lichen_free(meshcore_self(), tables_mem);
-        lichen_free(meshcore_self(), mesh_mem);
-        lichen_free(meshcore_self(), ob_mem);
-        lichen_free(meshcore_self(), mt_mem);
-        lichen_free(meshcore_self(), rr_mem);
+        lichen_free(meshcore_ctx(), tables_mem);
+        lichen_free(meshcore_ctx(), mesh_mem);
+        lichen_free(meshcore_ctx(), ob_mem);
+        lichen_free(meshcore_ctx(), mt_mem);
+        lichen_free(meshcore_ctx(), rr_mem);
         return false;
     }
     tables    = new (tables_mem) SimpleMeshTables();

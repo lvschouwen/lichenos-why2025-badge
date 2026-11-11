@@ -41,6 +41,7 @@ static char const TAG[] = "weather";
 #define LOG_FILE        "weather.csv"
 
 static lichen_app_t const weather_app;
+static lichen_ctx_t self_ctx; // lichen_register_app's answer, for the gate calls (#230 E1b)
 
 static wx_ring_t         s_ring;
 static SemaphoreHandle_t s_lock;
@@ -186,11 +187,11 @@ static void sampler_task(void *arg) {
 }
 
 static bool start_background(void) {
-    wx_sample_t *store = lichen_alloc(&weather_app, WX_RING_CAP * sizeof(wx_sample_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    wx_sample_t *store = lichen_alloc(self_ctx, WX_RING_CAP * sizeof(wx_sample_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     s_lock             = xSemaphoreCreateMutex();
     if (!store || !s_lock) {
         ESP_LOGE(TAG, "no memory for the history");
-        lichen_free(&weather_app, store);
+        lichen_free(self_ctx, store);
         if (s_lock) {
             vSemaphoreDelete(s_lock);
             s_lock = NULL;
@@ -200,7 +201,7 @@ static bool start_background(void) {
     wx_ring_init(&s_ring, store, WX_RING_CAP);
     atomic_store(&s_offset_half, wx_offset_half_from_byte(app_settings_get_u8(&weather_app, KEY_OFFSET, wx_offset_byte(0))));
     atomic_store(&s_log_on, app_settings_get_u8(&weather_app, KEY_LOG, 0) != 0);
-    if (!lichen_task_start(&weather_app, "weather", sampler_task, NULL, TASK_STACK, LICHEN_PRIO_BACKGROUND, NULL)) {
+    if (!lichen_task_start(self_ctx, "weather", sampler_task, NULL, TASK_STACK, LICHEN_PRIO_BACKGROUND, NULL)) {
         ESP_LOGE(TAG, "no memory for the sampler task");
         return false;
     }
@@ -309,5 +310,5 @@ static lichen_app_t const weather_app = {
 };
 
 void weather_app_register(void) {
-    lichen_register_app(&weather_app);
+    self_ctx = lichen_register_app(&weather_app);
 }

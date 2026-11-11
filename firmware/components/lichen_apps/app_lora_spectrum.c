@@ -60,6 +60,7 @@ typedef struct {
 } shared_t;
 
 static lichen_app_t const spectrum_app; // defined at the end: the owner of the task and the buffers (#181)
+static lichen_ctx_t self_ctx; // lichen_register_app's answer, for the gate calls (#230 E1b)
 static shared_t    *sh;
 
 // A mutex, not a spinlock: sh and ui are in PSRAM, and a critical section must never touch PSRAM (lichen_task.c,
@@ -222,7 +223,7 @@ static void borrow_and_sweep(lora_sweep_result_t *res) {
 // Ends by returning: lichen_task_start takes it out of the book (#181)
 static void worker(void *arg) {
     (void)arg;
-    lora_sweep_result_t *res = lichen_alloc(&spectrum_app, sizeof(*res), LICHEN_MEM_BULK);
+    lora_sweep_result_t *res = lichen_alloc(self_ctx, sizeof(*res), LICHEN_MEM_BULK);
     if (!res) {
         set_state(ST_NO_MEMORY);
     }
@@ -239,7 +240,7 @@ static void worker(void *arg) {
             break;
         }
     }
-    lichen_free(&spectrum_app, res);
+    lichen_free(self_ctx, res);
 }
 
 // LVGL task, from open: the worker starts, or the one still giving back carries on
@@ -252,7 +253,7 @@ static void worker_want(void) {
     sh->alive   = true;
     unlock();
     if (create &&
-        !lichen_task_start(&spectrum_app, "spectrum", worker, NULL, WORKER_STACK, LICHEN_PRIO_BACKGROUND, NULL)) {
+        !lichen_task_start(self_ctx, "spectrum", worker, NULL, WORKER_STACK, LICHEN_PRIO_BACKGROUND, NULL)) {
         lock();
         sh->alive = false;
         sh->state = ST_NO_MEMORY;
@@ -443,7 +444,7 @@ static void on_delete(lv_event_t *e) {
     lock();
     sh->want = false; // the worker gives the radio back and MeshCore starts again
     unlock();
-    lichen_free(&spectrum_app, ui);
+    lichen_free(self_ctx, ui);
     ui = NULL;
 }
 
@@ -488,9 +489,9 @@ static void open_spectrum(lv_obj_t *screen) {
         if (!sh_lock) {
             sh_lock = xSemaphoreCreateMutexStatic(&sh_lock_buf); // static: cannot fail
         }
-        sh = lichen_alloc(&spectrum_app, sizeof(*sh), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // kept for good
+        sh = lichen_alloc(self_ctx, sizeof(*sh), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // kept for good
     }
-    ui = sh ? lichen_alloc(&spectrum_app, sizeof(*ui), LICHEN_MEM_BULK | LICHEN_MEM_ZERO) : NULL;
+    ui = sh ? lichen_alloc(self_ctx, sizeof(*ui), LICHEN_MEM_BULK | LICHEN_MEM_ZERO) : NULL;
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen, 8, 0);
     lichen_heading(screen, NULL, "LoRa spectrum");
@@ -576,5 +577,5 @@ static lichen_app_t const spectrum_app = {
 };
 
 void lora_spectrum_app_register(void) {
-    lichen_register_app(&spectrum_app);
+    self_ctx = lichen_register_app(&spectrum_app);
 }

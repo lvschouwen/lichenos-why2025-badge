@@ -306,7 +306,7 @@ static void on_trace_delete(lv_event_t *e) {
     if (tr->timer) {
         lv_timer_delete(tr->timer);
     }
-    lichen_free(meshcore_self(), tr);
+    lichen_free(meshcore_ctx(), tr);
 }
 
 static lv_obj_t *build_trace(void) {
@@ -315,7 +315,7 @@ static lv_obj_t *build_trace(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu = menu_create_named(screen, kind == MT_TRACE ? "Trace path" : "Discover path",
                                        ct->title[0] ? ct->title : "(no name)");
-    trace_t *tr = lichen_alloc(meshcore_self(), sizeof(*tr), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    trace_t *tr = lichen_alloc(meshcore_ctx(), sizeof(*tr), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!tr) {
         menu_note(menu, "Not enough memory.");
         return screen;
@@ -425,7 +425,7 @@ static void on_delete(lv_event_t *e) {
     if (ct->timer) {
         lv_timer_delete(ct->timer);
     }
-    lichen_free(meshcore_self(), ct);
+    lichen_free(meshcore_ctx(), ct);
 }
 
 static void add_remote_rows(lv_obj_t *menu, contact_t *ct) {
@@ -451,7 +451,7 @@ static lv_obj_t *build_detail(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create_named(screen, want_contact.type == ADV_TYPE_CHAT ? "Contact" : mesh_contact_type_name(want_contact.type),
                                        want_contact.name[0] ? want_contact.name : "(no name)");
-    contact_t *ct = lichen_alloc(meshcore_self(), sizeof(*ct), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    contact_t *ct = lichen_alloc(meshcore_ctx(), sizeof(*ct), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!ct) {
         menu_note(menu, "Not enough memory to show the contact.");
         return screen;

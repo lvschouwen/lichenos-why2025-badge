@@ -232,7 +232,7 @@ static void sd_unmount_bounded(void) {
         return;
     }
     sd_unmounted = xSemaphoreCreateBinaryStatic(&sd_unmounted_buf);
-    if (!lichen_task_start(NULL, "sdoff", sd_unmount_task, NULL, 4096, LICHEN_PRIO_URGENT, NULL) ||
+    if (!lichen_task_start(lichen_ctx_self(), "sdoff", sd_unmount_task, NULL, 4096, LICHEN_PRIO_URGENT, NULL) ||
         xSemaphoreTake(sd_unmounted, pdMS_TO_TICKS(SD_UNMOUNT_MS)) != pdTRUE) {
         ESP_LOGW(TAG, "power off: the SD card was not unmounted in time, going off anyway");
     }
@@ -654,10 +654,10 @@ static bool wifi_radio_set(bool on) {
 
 // The Wi-Fi saved-list copy lives in PSRAM, owner OS (#249)
 static void *wifi_alloc_bulk(size_t size) {
-    return lichen_alloc(NULL, size, LICHEN_MEM_BULK);
+    return lichen_alloc(lichen_sys_ctx_os(), size, LICHEN_MEM_BULK);
 }
 static void wifi_free_bulk(void *p) {
-    lichen_free(NULL, p);
+    lichen_free(lichen_sys_ctx_os(), p);
 }
 
 static void start_c6link(boot_ctx_t *ctx) {

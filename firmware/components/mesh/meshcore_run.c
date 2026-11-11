@@ -25,6 +25,7 @@ static char const TAG[] = "meshcore";
 #define AUTOSTART    "autostart"
 
 static lichen_app_t const *app;
+static lichen_ctx_t        app_ctx; // lichen_register_app's answer: every gate call takes it (#230 E1b)
 static mesh_run_t          run = MESH_RUN_INIT;
 static portMUX_TYPE        run_mux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -35,18 +36,29 @@ static bool apply(mesh_run_ev_t ev) {
     return changed;
 }
 
-void meshcore_run_init(lichen_app_t const *the_app) {
-    app = the_app;
+void meshcore_run_init(lichen_app_t const *the_app, lichen_ctx_t ctx) {
+    app     = the_app;
+    app_ctx = ctx;
 }
 
 lichen_app_t const *meshcore_self(void) {
     static bool told;
     if (!app && !told) {
-        // Before meshcore_app_register: the task or memory would be booked as the OS's, and freed as MeshCore's later
+        // Before meshcore_app_register: the settings would be the OS's
         told = true;
-        ESP_LOGE(TAG, "meshcore_self() before meshcore_run_init: booked as the OS's");
+        ESP_LOGE(TAG, "meshcore_self() before meshcore_run_init");
     }
     return app;
+}
+
+lichen_ctx_t meshcore_ctx(void) {
+    static bool told;
+    if (app_ctx == LICHEN_CTX_NONE && !told) {
+        // Before meshcore_app_register (or the app table was full): every gate call is refused, so say why once
+        told = true;
+        ESP_LOGE(TAG, "meshcore_ctx() before meshcore_run_init: no context, the OS refuses the call");
+    }
+    return app_ctx;
 }
 
 bool meshcore_pw_get(uint8_t const prefix[6], char *out, size_t cap) {
@@ -150,7 +162,7 @@ static void job_task(void *arg) {
     );
     if (!start && ok) {
         // A stopped MeshCore runs nothing: a job still running (a scan, a settings save) is named by the OS (#181)
-        size_t left = lichen_task_leftovers(app, LEFTOVER_MS);
+        size_t left = lichen_task_leftovers(meshcore_ctx(), LEFTOVER_MS);
         ESP_LOGI(TAG, "MeshCore stopped: %u task(s) left over", (unsigned)left);
     }
 }
@@ -182,7 +194,7 @@ char const *meshcore_run_request(bool start) {
     if (!apply(start ? MESH_EV_START : MESH_EV_STOP)) {
         return mc_busy_note(); // another request got in between
     }
-    if (!lichen_task_start(app, "meshrun", job_task, start ? (void *)1 : NULL, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
+    if (!lichen_task_start(meshcore_ctx(), "meshrun", job_task, start ? (void *)1 : NULL, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         // Nothing ran: the start leaves it stopped, the stop running, as they were
         apply(MESH_EV_DONE_FAIL);
         return "no memory for the job";

@@ -79,6 +79,7 @@ static void tick(lv_timer_t *timer) {
 }
 
 static lichen_app_t const keytest_app; // defined at the end: the owner of the screen state (#181, #283)
+static lichen_ctx_t self_ctx; // lichen_register_app's answer, for the gate calls (#230 E1b)
 
 static void on_delete(lv_event_t *e) {
     keytest_t *t = lv_event_get_user_data(e);
@@ -86,7 +87,7 @@ static void on_delete(lv_event_t *e) {
         lichen_keys_raw_release(on_raw, t);
     }
     lv_timer_delete(t->timer);
-    lichen_free(&keytest_app, t);
+    lichen_free(self_ctx, t);
 }
 
 static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color) {
@@ -116,7 +117,7 @@ static void add_cell(keytest_t *t, lv_obj_t *grid, key_layout_t const *k) {
 }
 
 static void open_keytest(lv_obj_t *screen) {
-    keytest_t *t = lichen_alloc(&keytest_app, sizeof(*t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    keytest_t *t = lichen_alloc(self_ctx, sizeof(*t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!t) {
         add_label(screen, "Out of memory", THEME_RED);
         return;
@@ -189,5 +190,5 @@ static lichen_app_t const keytest_app = {
 };
 
 void keytest_app_register(void) {
-    lichen_register_app(&keytest_app);
+    self_ctx = lichen_register_app(&keytest_app);
 }

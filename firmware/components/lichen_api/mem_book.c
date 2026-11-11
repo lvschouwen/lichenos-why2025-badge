@@ -15,21 +15,25 @@ static void owner_fit(char out[MEM_BOOK_OWNER_CAP], char const *owner) {
     out[n] = 0;
 }
 
-static mem_use_t *row_of(mem_book_t *b, char const *owner, bool make) {
-    char want[MEM_BOOK_OWNER_CAP];
-    owner_fit(want, owner);
+// make: a new row labelled label when ctx has none
+static mem_use_t *row_of(mem_book_t *b, uint32_t ctx, bool make, char const *label) {
+    if (!ctx) {
+        return NULL; // 0 marks a free row and is never a valid context
+    }
     mem_use_t *free_row = NULL;
     for (int i = 0; i < MEM_BOOK_OWNERS; i++) {
         mem_use_t *r = &b->row[i];
-        if (!r->owner[0]) {
+        if (!r->ctx) {
             free_row = free_row ? free_row : r;
-        } else if (strcmp(r->owner, want) == 0) {
+        } else if (r->ctx == ctx) {
             return r;
         }
     }
     if (make && free_row) {
         memset(free_row, 0, sizeof(*free_row));
-        memcpy(free_row->owner, want, sizeof(want));
+        free_row->ctx = ctx;
+        free_row->os  = !label;
+        owner_fit(free_row->owner, label);
         return free_row;
     }
     return NULL;
@@ -45,13 +49,12 @@ static void add(mem_use_t *r, bool internal, uint32_t bytes) {
     }
 }
 
-mem_charge_t mem_book_charge(mem_book_t *b, char const *owner, bool internal, uint32_t bytes) {
-    mem_use_t *r = row_of(b, owner, true);
+mem_charge_t mem_book_charge(mem_book_t *b, uint32_t ctx, char const *label, bool internal, uint32_t bytes) {
+    mem_use_t *r = row_of(b, ctx, true, label);
     if (!r) {
         return MEM_CHARGE_NO_ROW;
     }
-    bool limited = strcmp(r->owner, MEM_BOOK_OS) != 0;
-    if (internal && limited && (bytes > MEM_BOOK_INTERNAL_QUOTA || r->internal > MEM_BOOK_INTERNAL_QUOTA - bytes)) {
+    if (internal && !r->os && (bytes > MEM_BOOK_INTERNAL_QUOTA || r->internal > MEM_BOOK_INTERNAL_QUOTA - bytes)) {
         r->refused++;
         return MEM_CHARGE_QUOTA;
     }
@@ -60,15 +63,15 @@ mem_charge_t mem_book_charge(mem_book_t *b, char const *owner, bool internal, ui
     return MEM_CHARGE_OK;
 }
 
-void mem_book_adjust(mem_book_t *b, char const *owner, bool internal, uint32_t extra) {
-    mem_use_t *r = row_of(b, owner, false);
+void mem_book_adjust(mem_book_t *b, uint32_t ctx, bool internal, uint32_t extra) {
+    mem_use_t *r = row_of(b, ctx, false, NULL);
     if (r) {
         add(r, internal, extra);
     }
 }
 
-mem_release_t mem_book_release(mem_book_t *b, char const *owner, bool internal, uint32_t bytes) {
-    mem_use_t *r = row_of(b, owner, false);
+mem_release_t mem_book_release(mem_book_t *b, uint32_t ctx, bool internal, uint32_t bytes) {
+    mem_use_t *r = row_of(b, ctx, false, NULL);
     if (!r) {
         return MEM_RELEASE_NO_ROW;
     }
@@ -81,6 +84,6 @@ mem_release_t mem_book_release(mem_book_t *b, char const *owner, bool internal, 
     return over ? MEM_RELEASE_OVER : MEM_RELEASE_OK;
 }
 
-mem_use_t const *mem_book_find(mem_book_t const *b, char const *owner) {
-    return row_of((mem_book_t *)b, owner, false);
+mem_use_t const *mem_book_find(mem_book_t const *b, uint32_t ctx) {
+    return row_of((mem_book_t *)b, ctx, false, NULL);
 }

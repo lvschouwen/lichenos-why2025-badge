@@ -46,7 +46,7 @@ static void on_delete(lv_event_t *e) {
         lv_timer_delete(timer);
         timer = NULL;
     }
-    lichen_free(meshcore_self(), mem);
+    lichen_free(meshcore_ctx(), mem);
     mem    = NULL;
     result = again = note = NULL;
 }
@@ -99,8 +99,8 @@ static lv_obj_t *build_page(void) {
         lv_timer_delete(timer);
         timer = NULL;
     }
-    lichen_free(meshcore_self(), mem);
-    mem        = lichen_alloc(meshcore_self(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    lichen_free(meshcore_ctx(), mem);
+    mem        = lichen_alloc(meshcore_ctx(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     seq        = 0;
     shown_busy = false;
     if (!mem) {

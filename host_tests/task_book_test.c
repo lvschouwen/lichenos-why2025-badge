@@ -62,49 +62,73 @@ static void test_stack_place(void) {
     CHECK(task_stack_place((task_stack_t)-1, 1024, 1u << 20) == TASK_STACK_INTERNAL);
 }
 
+// Stand-in contexts (lichen_ctx_t: slot + generation); the book only compares them
+static task_owner_t const MESH = {0x12345601u, "meshcore"};
+static task_owner_t const OS   = {0x00777700u, NULL};
+static task_owner_t const NOTES = {0x00444403u, "notes"};
+
 static void test_book(void) {
     static task_book_t b;
     memset(&b, 0, sizeof(b));
-    int a = task_book_add(&b, "meshcore", "mesh", 12288, TASK_CLASS_APP_LOOP, TASK_STACK_INTERNAL, fn, &b);
-    int j = task_book_add(&b, "meshcore", "meshrun", 8192, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL);
-    int o = task_book_add(&b, NULL, "battalert", 6144, TASK_CLASS_SERVICE, TASK_STACK_INTERNAL, fn, NULL);
+    int a = task_book_add(&b, MESH, "mesh", 12288, TASK_CLASS_APP_LOOP, TASK_STACK_INTERNAL, fn, &b);
+    int j = task_book_add(&b, MESH, "meshrun", 8192, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL);
+    int o = task_book_add(&b, OS, "battalert", 6144, TASK_CLASS_SERVICE, TASK_STACK_INTERNAL, fn, NULL);
     CHECK(a >= 0 && j >= 0 && o >= 0 && a != j && j != o);
-    CHECK(strcmp(b.slot[o].owner, TASK_BOOK_OS) == 0);
+    CHECK(strcmp(b.slot[o].owner, TASK_BOOK_OS) == 0 && b.slot[o].ctx == OS.ctx);
+    CHECK(strcmp(b.slot[a].owner, "meshcore") == 0 && b.slot[a].ctx == MESH.ctx);
     CHECK(b.slot[a].fn == fn && b.slot[a].arg == &b && b.slot[a].stack == 12288 && b.slot[a].cls == TASK_CLASS_APP_LOOP);
-    CHECK(task_book_add(&b, "meshcore", "x", 1024, TASK_CLASS_COUNT, TASK_STACK_INTERNAL, fn, NULL) == -1);
-    CHECK(task_book_add(&b, "meshcore", "x", 1024, TASK_CLASS_JOB, TASK_STACK_COUNT, fn, NULL) == -1);
+    CHECK(task_book_add(&b, MESH, "x", 1024, TASK_CLASS_COUNT, TASK_STACK_INTERNAL, fn, NULL) == -1);
+    CHECK(task_book_add(&b, MESH, "x", 1024, TASK_CLASS_JOB, TASK_STACK_COUNT, fn, NULL) == -1);
     CHECK(b.slot[a].mem == TASK_STACK_INTERNAL);
-    int lp = task_book_add(&b, NULL, "thermal", 4096, TASK_CLASS_SERVICE, TASK_STACK_LP_RAM, fn, NULL);
-    CHECK(lp >= 0 && b.slot[lp].mem == TASK_STACK_LP_RAM && task_book_count(&b, NULL, NULL) == 2);
+    int lp = task_book_add(&b, OS, "thermal", 4096, TASK_CLASS_SERVICE, TASK_STACK_LP_RAM, fn, NULL);
+    CHECK(lp >= 0 && b.slot[lp].mem == TASK_STACK_LP_RAM && task_book_count(&b, OS.ctx, NULL) == 2);
     task_book_remove(&b, lp);
     CHECK(b.slot[lp].mem == TASK_STACK_INTERNAL && !b.slot[lp].used);
-    CHECK(task_book_count(&b, "meshcore", NULL) == 2);
-    CHECK(task_book_count(&b, NULL, NULL) == 1);
-    CHECK(task_book_count(&b, "weather", NULL) == 0);
+    CHECK(task_book_count(&b, MESH.ctx, NULL) == 2);
+    CHECK(task_book_count(&b, OS.ctx, NULL) == 1);
+    CHECK(task_book_count(&b, 0x00555502u, NULL) == 0);
     // The stopping job does not count itself
     int handle_j       = 1;
     b.slot[j].handle   = &handle_j;
-    CHECK(task_book_count(&b, "meshcore", &handle_j) == 1);
+    CHECK(task_book_count(&b, MESH.ctx, &handle_j) == 1);
     task_book_remove(&b, a);
-    CHECK(task_book_count(&b, "meshcore", &handle_j) == 0);
+    CHECK(task_book_count(&b, MESH.ctx, &handle_j) == 0);
     task_book_remove(&b, a);  // twice: nothing
     task_book_remove(&b, -1); // out of range: nothing
     task_book_remove(&b, TASK_BOOK_SLOTS);
-    CHECK(task_book_count(&b, "meshcore", NULL) == 1);
+    CHECK(task_book_count(&b, MESH.ctx, NULL) == 1);
     // An owner past 13 characters is cut like an id would be
-    int l = task_book_add(&b, "an_overlong_owner_id", "t", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL);
+    int l = task_book_add(&b, (task_owner_t){0x9909u, "an_overlong_owner_id"}, "t", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL);
     CHECK(l >= 0 && strlen(b.slot[l].owner) == TASK_BOOK_OWNER_CAP - 1);
     // Full: -1, and a freed slot is used again
     memset(&b, 0, sizeof(b));
     for (int i = 0; i < TASK_BOOK_SLOTS; i++) {
-        CHECK(task_book_add(&b, "notes", "job", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL) == i);
+        CHECK(task_book_add(&b, NOTES, "job", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL) == i);
     }
-    CHECK(task_book_add(&b, "notes", "job", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL) == -1);
+    CHECK(task_book_add(&b, NOTES, "job", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL) == -1);
     task_book_remove(&b, 7);
-    CHECK(task_book_add(&b, "notes", "job", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL) == 7);
+    CHECK(task_book_add(&b, NOTES, "job", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL) == 7);
+}
+
+// #230 E1b: tasks are counted by context, not label. Another context with the same label (a stale generation, or an
+// app's id the OS also printed) is someone else; ctx 0 is never booked.
+static void test_book_by_ctx(void) {
+    static task_book_t b;
+    memset(&b, 0, sizeof(b));
+    task_owner_t const stale = {MESH.ctx ^ 0x100u, "meshcore"};
+    int m = task_book_add(&b, MESH, "mesh", 4096, TASK_CLASS_APP_LOOP, TASK_STACK_INTERNAL, fn, NULL);
+    int s = task_book_add(&b, stale, "mesh", 4096, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL);
+    CHECK(m >= 0 && s >= 0);
+    CHECK(task_book_count(&b, MESH.ctx, NULL) == 1 && task_book_count(&b, stale.ctx, NULL) == 1);
+    task_book_remove(&b, s);
+    CHECK(task_book_count(&b, MESH.ctx, NULL) == 1 && task_book_count(&b, stale.ctx, NULL) == 0);
+    CHECK(task_book_add(&b, (task_owner_t){0, "meshcore"}, "x", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL) ==
+          -1);
+    CHECK(task_book_count(&b, 0, NULL) == 0);
 }
 
 int main(void) {
+    test_book_by_ctx();
     test_classes();
     test_names();
     test_stack_classes();

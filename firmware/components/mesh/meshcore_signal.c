@@ -159,13 +159,13 @@ static void on_delete(lv_event_t *e) {
     if (s->timer) {
         lv_timer_delete(s->timer);
     }
-    lichen_free(meshcore_self(), s);
+    lichen_free(meshcore_ctx(), s);
 }
 
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create_named(screen, "Signal", want.name[0] ? want.name : "(no name)");
-    signal_t *s      = lichen_alloc(meshcore_self(), sizeof(*s), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    signal_t *s      = lichen_alloc(meshcore_ctx(), sizeof(*s), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!s) {
         menu_note(menu, "Not enough memory to show the signal.");
         return screen;

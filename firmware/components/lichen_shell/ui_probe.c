@@ -2,6 +2,7 @@
 // is on it, so a screen can be driven and read without anyone at the badge. Tokens: see ui_keys.h.
 #include "console_cmd.h"
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "fw_console.h"
@@ -145,7 +146,7 @@ static void sequence_report(sequence_t const *seq) {
 // "fw keys send <seq>" (shell.c's keys command hands it over)
 void ui_probe_send(char const *seq_text) {
     size_t      pos;
-    sequence_t *seq = lichen_alloc(NULL, sizeof(*seq), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    sequence_t *seq = lichen_alloc(lichen_sys_ctx_os(), sizeof(*seq), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!seq) {
         console_reply("keys send: no memory");
         return;
@@ -154,7 +155,7 @@ void ui_probe_send(char const *seq_text) {
     seq->n = ui_keys_parse(seq->text, seq->keys, MAX_KEYS, &pos);
     if (seq->n == UI_KEYS_ERR) {
         console_reply("keys send: not understood at offset %u", (unsigned)pos);
-        lichen_free(NULL, seq);
+        lichen_free(lichen_sys_ctx_os(), seq);
         return;
     }
     seq->locked = ui_remote_locked();
@@ -165,7 +166,7 @@ void ui_probe_send(char const *seq_text) {
     lichen_sys_ui_unlock();
     if (!timer) {
         console_reply("keys send: no timer");
-        lichen_free(NULL, seq);
+        lichen_free(lichen_sys_ctx_os(), seq);
         return;
     }
     uint32_t total_ms = (uint32_t)(seq->n + 2) * (KEY_GAP_MS + WAIT_MS);
@@ -175,7 +176,7 @@ void ui_probe_send(char const *seq_text) {
         return;
     }
     sequence_report(seq);
-    lichen_free(NULL, seq);
+    lichen_free(lichen_sys_ctx_os(), seq);
 }
 
 static bool visible(lv_obj_t *obj) {
@@ -566,7 +567,7 @@ static void print_geom(vgeom_t const *g) {
 
 static void cmd_ui_overflow(bool verbose) {
     settle();
-    ovf_ctx_t ctx = {.hits = lichen_alloc(NULL, sizeof(hit_t) * MAX_LINES, LICHEN_MEM_BULK)};
+    ovf_ctx_t ctx = {.hits = lichen_alloc(lichen_sys_ctx_os(), sizeof(hit_t) * MAX_LINES, LICHEN_MEM_BULK)};
     if (!ctx.hits) {
         console_reply("ui overflow: no memory");
         return;
@@ -595,7 +596,7 @@ static void cmd_ui_overflow(bool verbose) {
     if (ctx.total > ctx.n) {
         console_reply("  ... %u more not shown", (unsigned)(ctx.total - ctx.n));
     }
-    lichen_free(NULL, ctx.hits);
+    lichen_free(lichen_sys_ctx_os(), ctx.hits);
 }
 
 static void cmd_ui(char const *args) {
@@ -621,7 +622,7 @@ static void cmd_ui(char const *args) {
         return;
     }
     settle();
-    line_t *lines = lichen_alloc(NULL, sizeof(line_t) * MAX_LINES, LICHEN_MEM_BULK);
+    line_t *lines = lichen_alloc(lichen_sys_ctx_os(), sizeof(line_t) * MAX_LINES, LICHEN_MEM_BULK);
     if (!lines) {
         console_reply("ui: no memory");
         return;
@@ -642,7 +643,7 @@ static void cmd_ui(char const *args) {
     for (size_t i = 0; i < n; i++) {
         console_reply("ui   %s", lines[i].text);
     }
-    lichen_free(NULL, lines);
+    lichen_free(lichen_sys_ctx_os(), lines);
 }
 
 void ui_probe_init(void) {

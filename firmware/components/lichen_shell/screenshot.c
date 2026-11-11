@@ -3,6 +3,7 @@
 #include "shot_blend.h"
 
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 #include "lichen_sys_ui.h"
 #include "lvgl.h"
 
@@ -56,7 +57,7 @@ static int render(lv_obj_t *scr) {
     if (w == 0 || h == 0) {
         return 404;
     }
-    shot_mem = lichen_alloc(NULL, size, LICHEN_MEM_BULK);
+    shot_mem = lichen_alloc(lichen_sys_ctx_os(), size, LICHEN_MEM_BULK);
     if (!shot_mem) {
         return 500;
     }
@@ -90,6 +91,6 @@ int screenshot_take(uint8_t const **pixels, uint32_t *width, uint32_t *height, u
 }
 
 void screenshot_free(void) {
-    lichen_free(NULL, shot_mem);
+    lichen_free(lichen_sys_ctx_os(), shot_mem);
     shot_mem = NULL;
 }

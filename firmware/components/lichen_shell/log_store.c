@@ -4,6 +4,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 #include "lichen_sys_boot.h"
 #include "log_ring.h"
 
@@ -102,7 +103,7 @@ void log_store_start(void) {
     if (ready) {
         return;
     }
-    mem = lichen_alloc(NULL, sizeof(*mem), LICHEN_MEM_BULK);
+    mem = lichen_alloc(lichen_sys_ctx_os(), sizeof(*mem), LICHEN_MEM_BULK);
     if (!mem) {
         ESP_LOGW("log_store", "no PSRAM for the log store, GET /log stays empty");
         return;

@@ -3,6 +3,7 @@
 #include "files_job.h"
 
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -64,7 +65,7 @@ static bool copy_progress(uint32_t done, uint32_t total, void *ctx) {
 }
 
 static files_result_t run_copy(void) {
-    uint8_t *buf = lichen_alloc(NULL, COPY_CHUNK, LICHEN_MEM_BULK);
+    uint8_t *buf = lichen_alloc(lichen_sys_ctx_os(), COPY_CHUNK, LICHEN_MEM_BULK);
     if (!buf) {
         return FILES_ERR_NO_MEM;
     }
@@ -75,13 +76,13 @@ static files_result_t run_copy(void) {
         free_bytes = s_result.free_bytes[slot];
     }
     files_result_t r = files_copy(s_req.path, s_req.dst, buf, COPY_CHUNK, free_bytes, copy_progress, NULL);
-    lichen_free(NULL, buf);
+    lichen_free(lichen_sys_ctx_os(), buf);
     return r;
 }
 
 static files_result_t run_list(void) {
     if (!s_entries) {
-        s_entries = lichen_alloc(NULL, FILES_MAX_ENTRIES * sizeof(*s_entries), LICHEN_MEM_BULK);
+        s_entries = lichen_alloc(lichen_sys_ctx_os(), FILES_MAX_ENTRIES * sizeof(*s_entries), LICHEN_MEM_BULK);
     }
     if (!s_entries) {
         return FILES_ERR_NO_MEM;
@@ -93,7 +94,7 @@ static files_result_t run_list(void) {
 
 static files_result_t run_read(void) {
     if (!s_data) {
-        s_data = lichen_alloc(NULL, FILES_READ_CHUNK, LICHEN_MEM_BULK);
+        s_data = lichen_alloc(lichen_sys_ctx_os(), FILES_READ_CHUNK, LICHEN_MEM_BULK);
     }
     return s_data ? files_read_at(s_req.path, s_req.offset, s_data, FILES_READ_CHUNK, &s_result.got, &s_result.file_size)
                   : FILES_ERR_NO_MEM;
@@ -149,7 +150,7 @@ bool files_job_start(files_job_kind_t kind, char const *path, char const *dst, u
     atomic_store(&s_cancel, false);
     atomic_store(&s_done, 0);
     atomic_store(&s_total, 0);
-    if (!lichen_task_start(NULL, "filesjob", job_task, NULL, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
+    if (!lichen_task_start(lichen_ctx_self(), "filesjob", job_task, NULL, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         ESP_LOGW(TAG, "no memory for a file job");
         atomic_store(&s_state, IDLE);
         return false;

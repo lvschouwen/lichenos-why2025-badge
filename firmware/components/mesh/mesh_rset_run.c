@@ -202,7 +202,7 @@ void mesh_rset_console_read(uint8_t const prefix[6]) {
         return;
     }
     if (!con) {
-        con = lichen_alloc(meshcore_self(), sizeof(*con), LICHEN_MEM_BULK);
+        con = lichen_alloc(meshcore_ctx(), sizeof(*con), LICHEN_MEM_BULK);
         if (!con) {
             console_reply("settings: not enough memory");
             return;
@@ -211,7 +211,7 @@ void mesh_rset_console_read(uint8_t const prefix[6]) {
     rs_run_init(con, prefix);
     con->from = MESH_FROM_CONSOLE; // its floods take the console scope (#290)
     __atomic_store_n(&con_running, true, __ATOMIC_RELEASE);
-    if (!lichen_task_start(meshcore_self(), "meshrset", con_task, NULL, CON_STACK, LICHEN_PRIO_JOB, NULL)) {
+    if (!lichen_task_start(meshcore_ctx(), "meshrset", con_task, NULL, CON_STACK, LICHEN_PRIO_JOB, NULL)) {
         __atomic_store_n(&con_running, false, __ATOMIC_RELEASE);
         console_reply("settings: no memory for the job");
         return;

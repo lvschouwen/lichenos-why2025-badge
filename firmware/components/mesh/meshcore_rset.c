@@ -402,7 +402,7 @@ static void on_delete(lv_event_t *e) {
     }
     wipe_secrets(); // an answer that comes after this is not waited for: the password is then not remembered
     pending[0] = 0;
-    lichen_free(meshcore_self(), mem);
+    lichen_free(meshcore_ctx(), mem);
     mem       = NULL;
     reading   = false;
     menu_obj  = NULL;
@@ -442,11 +442,11 @@ static lv_obj_t *build(void) {
         lv_timer_delete(timer);
         timer = NULL;
     }
-    lichen_free(meshcore_self(), mem);
+    lichen_free(meshcore_ctx(), mem);
     memset(rows, 0, sizeof(rows));
     note = again_row = NULL; // an older screen's, gone: never touched after a failed calloc below
     wipe_secrets();
-    mem = lichen_alloc(meshcore_self(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    mem = lichen_alloc(meshcore_ctx(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!mem) {
         menu_note(menu, "Not enough memory.");
         return screen;

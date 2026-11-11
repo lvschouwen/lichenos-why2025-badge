@@ -114,7 +114,7 @@ static void change_finish(void *data) {
         set_note("Saved", false);
     }
     rows_refresh(NULL);
-    lichen_free(meshcore_self(), ch);
+    lichen_free(meshcore_ctx(), ch);
 }
 
 static void change_task(void *arg) {
@@ -131,7 +131,7 @@ static void change_task(void *arg) {
     for (int tries = 0; !lichen_ui_call(change_finish, ch); tries++) {
         if (tries + 1 >= UI_CALL_TRIES) {
             ESP_LOGW(TAG, "advert change %d: result not handed to the screen, dropped", (int)ch->kind);
-            lichen_free(meshcore_self(), ch);
+            lichen_free(meshcore_ctx(), ch);
             __atomic_store_n(&busy, false, __ATOMIC_RELEASE);
             break;
         }
@@ -144,15 +144,15 @@ static void change_start(change_t const *what) {
         set_note(mc_busy_note(), true);
         return;
     }
-    change_t *ch = lichen_alloc(meshcore_self(), sizeof(*ch), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    change_t *ch = lichen_alloc(meshcore_ctx(), sizeof(*ch), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!ch) {
         set_note("Out of memory", true);
         return;
     }
     *ch = *what;
-    if (!lichen_task_start(meshcore_self(), "meshadv", change_task, ch, TASK_STACK, LICHEN_PRIO_JOB, NULL)) {
+    if (!lichen_task_start(meshcore_ctx(), "meshadv", change_task, ch, TASK_STACK, LICHEN_PRIO_JOB, NULL)) {
         ESP_LOGW(TAG, "advert settings task did not start");
-        lichen_free(meshcore_self(), ch);
+        lichen_free(meshcore_ctx(), ch);
         set_note(mc_busy_note(), true);
         return;
     }

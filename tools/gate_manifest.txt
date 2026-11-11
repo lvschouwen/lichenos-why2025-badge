@@ -63,8 +63,8 @@ key_matrix_pos	-	unspecified	key_matrix.h
 key_matrix_shape	-	unspecified	key_matrix.h
 lichen_airplane_get	RADIO	unspecified	lichen_radio.h
 lichen_airplane_set	RADIO	unspecified	lichen_radio.h
-lichen_alloc	-	unspecified	lichen_mem.h
-lichen_alloc_aligned	-	unspecified	lichen_mem.h
+lichen_alloc	-	any	lichen_mem.h
+lichen_alloc_aligned	-	any	lichen_mem.h
 lichen_app_at	-	unspecified	lichen_app.h
 lichen_app_by_id	-	unspecified	lichen_app.h
 lichen_app_count	-	unspecified	lichen_app.h
@@ -88,7 +88,7 @@ lichen_date_text	-	any	lichen_ui.h
 lichen_font	-	unspecified	fonts.h
 lichen_font_set	SYSTEM	unspecified	font_slots.h
 lichen_fonts_load	-	unspecified	fonts.h
-lichen_free	-	unspecified	lichen_mem.h
+lichen_free	-	any	lichen_mem.h
 lichen_fs_app_dir	SD	unspecified	lichen_fs.h
 lichen_fs_drive_bytes	SD	unspecified	lichen_fs.h
 lichen_fs_sd_begin	SD	not-lvgl	lichen_fs.h
@@ -283,9 +283,9 @@ lichen_sys_wifi_scan_raw	SYSTEM	not-lvgl	lichen_sys_net.h
 lichen_sys_wifi_ssid_sanitize	SYSTEM	any	lichen_sys_net.h
 lichen_sys_wifi_up	SYSTEM	any	lichen_sys_net.h
 lichen_task_console_register	BACKGROUND	unspecified	lichen_task.h
-lichen_task_leftovers	BACKGROUND	unspecified	lichen_task.h
-lichen_task_start	BACKGROUND	unspecified	lichen_task.h
-lichen_task_start_in	BACKGROUND	unspecified	lichen_task.h
+lichen_task_leftovers	BACKGROUND	not-lvgl	lichen_task.h
+lichen_task_start	BACKGROUND	any	lichen_task.h
+lichen_task_start_in	BACKGROUND	any	lichen_task.h
 lichen_ui_call	-	any	lichen_ui.h
 lichen_ui_ops_later	SYSTEM	lvgl	lichen_ui_ops.h
 lichen_ui_ops_later_cancel	SYSTEM	lvgl	lichen_ui_ops.h

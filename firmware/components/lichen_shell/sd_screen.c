@@ -122,7 +122,7 @@ static void job_start(sds_job_t kind) {
     job       = kind;
     result[0] = '\0';
     atomic_store(&job_outcome, JOB_PENDING);
-    if (!lichen_task_start(NULL, "sdjob", job_task, (void *)(intptr_t)kind, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
+    if (!lichen_task_start(lichen_ctx_self(), "sdjob", job_task, (void *)(intptr_t)kind, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         job = SDS_IDLE;
         snprintf(result, sizeof(result), "Not started: out of memory");
         ESP_LOGW(TAG, "%s", result);

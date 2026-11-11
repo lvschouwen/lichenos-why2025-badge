@@ -18,6 +18,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 #include "lichen_sys_c6.h"
 #include "lichen_sys_mem.h"
 #include "lichen_sys_psram.h"
@@ -168,8 +169,8 @@ static void worker_end(void) {
 
 // Two PSRAM buffers for a worker; false (counted, logged) without them
 static bool buffers(uint8_t **a, uint8_t **b, size_t n, char const *what) {
-    *a = lichen_alloc_aligned(NULL, CACHE_LINE, n, LICHEN_MEM_BULK);
-    *b = lichen_alloc_aligned(NULL, CACHE_LINE, n, LICHEN_MEM_BULK);
+    *a = lichen_alloc_aligned(lichen_sys_ctx_os(), CACHE_LINE, n, LICHEN_MEM_BULK);
+    *b = lichen_alloc_aligned(lichen_sys_ctx_os(), CACHE_LINE, n, LICHEN_MEM_BULK);
     if (*a && *b) {
         return true;
     }
@@ -221,8 +222,8 @@ static void dma_worker(void *arg) {
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
-    lichen_free(NULL, a);
-    lichen_free(NULL, b);
+    lichen_free(lichen_sys_ctx_os(), a);
+    lichen_free(lichen_sys_ctx_os(), b);
     worker_end();
 }
 
@@ -256,15 +257,15 @@ static void sd_worker(void *arg) {
         }
     }
     cleanup_files();
-    lichen_free(NULL, a);
-    lichen_free(NULL, b);
+    lichen_free(lichen_sys_ctx_os(), a);
+    lichen_free(lichen_sys_ctx_os(), b);
     worker_end();
 }
 
 // A small file on the storage drive every 10 s: flash writes with the cache off, under the load of the others
 static void fs_worker(void *arg) {
     (void)arg;
-    uint8_t *a = lichen_alloc(NULL, 2 * FS_BYTES, LICHEN_MEM_INTERNAL); // internal, for the run only
+    uint8_t *a = lichen_alloc(lichen_sys_ctx_os(), 2 * FS_BYTES, LICHEN_MEM_INTERNAL); // internal, for the run only
     if (!a) {
         add(STRESS_C_ALLOC, 1);
         ESP_LOGE(TAG, "fs: no memory");
@@ -275,7 +276,7 @@ static void fs_worker(void *arg) {
         nap(FS_PERIOD_MS);
     }
     unlink(FS_FILE);
-    lichen_free(NULL, a);
+    lichen_free(lichen_sys_ctx_os(), a);
     worker_end();
 }
 
@@ -440,7 +441,7 @@ static stress_reason_t outside_stop(void) {
 
 static void start_worker(char const *name, void (*fn)(void *), uint32_t stack, lichen_prio_t prio) {
     atomic_fetch_add(&s_w.workers, 1);
-    if (!lichen_task_start_in(NULL, name, fn, NULL, stack, prio, LICHEN_STACK_INTERNAL, NULL)) {
+    if (!lichen_task_start_in(lichen_ctx_self(), name, fn, NULL, stack, prio, LICHEN_STACK_INTERNAL, NULL)) {
         atomic_fetch_sub(&s_w.workers, 1);
         add(STRESS_C_ALLOC, 1);
         ESP_LOGE(TAG, "%s: no memory", name);
@@ -450,7 +451,7 @@ static void start_worker(char const *name, void (*fn)(void *), uint32_t stack, l
 // Before the workers: leftovers of an earlier run go, the baseline stacks and lockcheck count are taken, the start line
 static void run_begin(void) {
     cleanup_files();
-    s_st = lichen_alloc(NULL, sizeof(*s_st), LICHEN_MEM_BULK);
+    s_st = lichen_alloc(lichen_sys_ctx_os(), sizeof(*s_st), LICHEN_MEM_BULK);
     if (!s_st) {
         ESP_LOGW(TAG, "stack: skipped, no memory");
     } else {
@@ -543,7 +544,7 @@ static void mon_task(void *arg) {
     cleanup_files();
     log_report(t_s, hung);
     workers_ended(UINT32_MAX); // a hung worker still owns s_w: no new run before it returns
-    lichen_free(NULL, s_st);
+    lichen_free(lichen_sys_ctx_os(), s_st);
     s_st = NULL;
     publish(t_s, NULL, false);
     atomic_store(&s_on, false);
@@ -576,7 +577,7 @@ char const *stress_start(unsigned minutes) {
     portENTER_CRITICAL(&s_view_mux);
     s_view = (stress_view_t){.running = true, .minutes = minutes};
     portEXIT_CRITICAL(&s_view_mux);
-    if (!lichen_task_start_in(NULL, "stress-mon", mon_task, NULL, 4096, LICHEN_PRIO_SERVICE, LICHEN_STACK_INTERNAL,
+    if (!lichen_task_start_in(lichen_ctx_self(), "stress-mon", mon_task, NULL, 4096, LICHEN_PRIO_SERVICE, LICHEN_STACK_INTERNAL,
                               NULL)) {
         portENTER_CRITICAL(&s_view_mux);
         s_view.running = false;

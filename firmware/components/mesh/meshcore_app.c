@@ -409,6 +409,5 @@ static lichen_app_t const *self(void) {
 }
 
 void meshcore_app_register(void) {
-    meshcore_run_init(&meshcore_app);
-    lichen_register_app(&meshcore_app);
+    meshcore_run_init(&meshcore_app, lichen_register_app(&meshcore_app));
 }

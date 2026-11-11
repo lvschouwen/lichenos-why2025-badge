@@ -135,7 +135,7 @@ static bool job_start(job_t kind) {
         return false;
     }
     s_job = kind;
-    if (!lichen_task_start(NULL, "backupjob", job_task, (void *)(intptr_t)kind, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
+    if (!lichen_task_start(lichen_ctx_self(), "backupjob", job_task, (void *)(intptr_t)kind, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         s_job = JOB_NONE;
         tell("Not started: out of memory.");
         return false;

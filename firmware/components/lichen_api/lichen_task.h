@@ -40,22 +40,27 @@ typedef enum {
     LICHEN_STACK_PSRAM    = TASK_STACK_PSRAM,
 } lichen_stack_t;
 
-// Starts fn(arg) on a task of its own named name (cut to 15 characters, logged when cut), stack_bytes of stack. app
-// NULL is the OS. handle (may be NULL) is set before the task first runs, as xTaskCreate does.
+// Starts fn(arg) on a task of its own named name (cut to 15 characters, logged when cut), stack_bytes of stack. ctx
+// (#230 E1b) is who the task runs for: the task is booked under it and lichen_ctx_self() returns it on the task. An app
+// passes the one lichen_register_app gave it; code that runs for whoever called it (the OS, a shell helper) passes
+// lichen_ctx_self(), so a task an app's task or hook starts stays the app's. A stale or made-up ctx is refused (false,
+// logged at most once per 10 s, counted in "fw app ctx"), never an abort. handle (may be NULL) is set before the task
+// first runs, as xTaskCreate does. Any task, not an ISR.
 //
 // fn ends by returning, never with vTaskDelete(NULL): the OS takes the task out of its book and deletes it after fn
 // returns. A task that deletes itself stays in the book ("fw tasks" shows it as gone without returning).
 // False when the book (TASK_BOOK_SLOTS) is full or the task could not be made (memory); nothing runs then.
-bool lichen_task_start(lichen_app_t const *app, char const *name, void (*fn)(void *arg), void *arg,
+bool lichen_task_start(lichen_ctx_t ctx, char const *name, void (*fn)(void *arg), void *arg,
                        uint32_t stack_bytes, lichen_prio_t prio, TaskHandle_t *handle);
 
-// lichen_task_start with the stack in mem (lichen_task_start is this with LICHEN_STACK_INTERNAL)
-bool lichen_task_start_in(lichen_app_t const *app, char const *name, void (*fn)(void *arg), void *arg,
+// lichen_task_start with the stack in mem (lichen_task_start is this with LICHEN_STACK_INTERNAL). Any task, not an ISR.
+bool lichen_task_start_in(lichen_ctx_t ctx, char const *name, void (*fn)(void *arg), void *arg,
                           uint32_t stack_bytes, lichen_prio_t prio, lichen_stack_t mem, TaskHandle_t *handle);
 
-// After an app stopped: its tasks still running, other than the caller's own. Waits up to wait_ms for them to end
-// (a stopped task returns a moment after it said so), then logs each one left. Returns how many are left.
-size_t lichen_task_leftovers(lichen_app_t const *app, uint32_t wait_ms);
+// After an app stopped: ctx's tasks still running, other than the caller's own. Waits up to wait_ms for them to end
+// (a stopped task returns a moment after it said so), then logs each one left. Returns how many are left (0 for a
+// refused ctx). Blocks: not from the LVGL task, not an ISR.
+size_t lichen_task_leftovers(lichen_ctx_t ctx, uint32_t wait_ms);
 
 // main.c, once: "fw tasks" (every task with its owner, priority, core, stack and the memory the stack is in)
 void lichen_task_console_register(void);

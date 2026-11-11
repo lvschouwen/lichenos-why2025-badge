@@ -89,11 +89,11 @@ static bool file_write(void *ctx, uint8_t const *buf, size_t len) {
 
 // Every buffer of the journal is MeshCore's in the OS's count (#181): freed with unalloc, never free()
 static void *psram(size_t bytes) {
-    return lichen_alloc(meshcore_self(), bytes, LICHEN_MEM_BULK);
+    return lichen_alloc(meshcore_ctx(), bytes, LICHEN_MEM_BULK);
 }
 
 static void unalloc(void *p) {
-    lichen_free(meshcore_self(), p);
+    lichen_free(meshcore_ctx(), p);
 }
 
 typedef struct {
@@ -441,7 +441,7 @@ static char const *journal_load(work_t *w, int *err) {
 }
 
 static bool boot_buffers(void) {
-    hist       = lichen_alloc(meshcore_self(), sizeof(*hist), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    hist       = lichen_alloc(meshcore_ctx(), sizeof(*hist), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     uint8_t *a = psram(MESH_HIST_PENDING);
     spare      = psram(MESH_HIST_PENDING);
     if (!hist || !a || !spare) {
@@ -780,7 +780,7 @@ static uint8_t *scan_buf(size_t bytes, bool internal) {
     if (internal && bytes > SCAN_INT_BYTES) {
         return NULL; // internal RAM is scarce: the check is for small journals
     }
-    return internal ? lichen_alloc(meshcore_self(), bytes, LICHEN_MEM_INTERNAL) : psram(bytes);
+    return internal ? lichen_alloc(meshcore_ctx(), bytes, LICHEN_MEM_INTERNAL) : psram(bytes);
 }
 
 static void scan_task_fn(void *arg) {
@@ -878,7 +878,7 @@ static void scan_start(char const *args) {
         job->internal = internal;
         job->skip     = skip;
     }
-    if (!job || !lichen_task_start(meshcore_self(), "histscan", scan_task_fn, job, SCAN_STACK, LICHEN_PRIO_SERVICE, NULL)) {
+    if (!job || !lichen_task_start(meshcore_ctx(), "histscan", scan_task_fn, job, SCAN_STACK, LICHEN_PRIO_SERVICE, NULL)) {
         unalloc(job);
         atomic_store(&scan_running, false);
         console_reply("scan: not started (memory)");

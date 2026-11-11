@@ -12,6 +12,7 @@
 #include "app_icons.h"
 #include "console_model.h"
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 #include "esp_log.h"
 #include "fonts.h"
 #include "freertos/FreeRTOS.h"
@@ -70,7 +71,7 @@ typedef struct {
 } reply_t;
 
 static char *psram_alloc(size_t n) {
-    return lichen_alloc(NULL, n, LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    return lichen_alloc(lichen_sys_ctx_os(), n, LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
 }
 
 static void set_status(con_t *c, char const *text, bool amber) {
@@ -97,9 +98,9 @@ static void out_add(con_t *c, char const *text, size_t n) {
 static void reply_free(reply_t *r) {
     if (r->text) {
         secure_wipe(r->text, r->len);
-        lichen_free(NULL, r->text);
+        lichen_free(lichen_sys_ctx_os(), r->text);
     }
-    lichen_free(NULL, r);
+    lichen_free(lichen_sys_ctx_os(), r);
 }
 
 static void on_reply(void *arg) {
@@ -130,7 +131,7 @@ static void on_reply(void *arg) {
 }
 
 static bool post_reply(job_t *j, char const *out, size_t len) {
-    reply_t *r = lichen_alloc(NULL, sizeof(*r), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    reply_t *r = lichen_alloc(lichen_sys_ctx_os(), sizeof(*r), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!r) {
         return false;
     }
@@ -167,15 +168,15 @@ static void worker(void *arg) {
     secure_wipe(j->line, CONSOLE_LINE_MAX + 1);
     secure_wipe(j->exec_buf, EXEC_CAP);
     ESP_LOGI(TAG, "command done, stack never below %u bytes free", (unsigned)uxTaskGetStackHighWaterMark(NULL));
-    lichen_free(NULL, j->line);
-    lichen_free(NULL, j->exec_buf);
-    lichen_free(NULL, j);
+    lichen_free(lichen_sys_ctx_os(), j->line);
+    lichen_free(lichen_sys_ctx_os(), j->exec_buf);
+    lichen_free(lichen_sys_ctx_os(), j);
     s_busy = false; // after the free: the next run may start from the LVGL task at once
 }
 
 // LVGL task: starts the worker for line (already trimmed). False when it could not start (nothing is left allocated).
 static bool start_job(con_t *c, char const *line) {
-    job_t *j = lichen_alloc(NULL, sizeof(*j), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    job_t *j = lichen_alloc(lichen_sys_ctx_os(), sizeof(*j), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!j) {
         return false;
     }
@@ -185,7 +186,7 @@ static bool start_job(con_t *c, char const *line) {
     if (j->line && j->exec_buf) {
         strlcpy(j->line, line, CONSOLE_LINE_MAX + 1);
         s_busy = true;
-        if (lichen_task_start(NULL, "console_app", worker, j, WORKER_STACK, LICHEN_PRIO_JOB, NULL)) {
+        if (lichen_task_start(lichen_ctx_self(), "console_app", worker, j, WORKER_STACK, LICHEN_PRIO_JOB, NULL)) {
             return true;
         }
         s_busy = false;
@@ -193,9 +194,9 @@ static bool start_job(con_t *c, char const *line) {
     if (j->line) {
         secure_wipe(j->line, CONSOLE_LINE_MAX + 1);
     }
-    lichen_free(NULL, j->line);
-    lichen_free(NULL, j->exec_buf);
-    lichen_free(NULL, j);
+    lichen_free(lichen_sys_ctx_os(), j->line);
+    lichen_free(lichen_sys_ctx_os(), j->exec_buf);
+    lichen_free(lichen_sys_ctx_os(), j);
     return false;
 }
 
@@ -282,9 +283,9 @@ static void on_delete(lv_event_t *e) {
     con_t *c = lv_event_get_user_data(e);
     lv_label_set_text_static(c->label, ""); // the label must not point into the buffer freed next
     secure_wipe(c->buf, OUT_CAP);
-    lichen_free(NULL, c->buf);
+    lichen_free(lichen_sys_ctx_os(), c->buf);
     cur = NULL;
-    lichen_free(NULL, c);
+    lichen_free(lichen_sys_ctx_os(), c);
 }
 
 static void focus_style(lv_obj_t *obj) {
@@ -331,7 +332,7 @@ static void build_entry(con_t *c, lv_obj_t *screen) {
 
 static lv_obj_t *build_console(void) {
     lv_obj_t *screen = shell_page_create();
-    con_t    *c      = lichen_alloc(NULL, sizeof(*c), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    con_t    *c      = lichen_alloc(lichen_sys_ctx_os(), sizeof(*c), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!c) {
         lv_label_set_text(lv_label_create(screen), "Out of memory");
         return screen;
@@ -344,8 +345,8 @@ static lv_obj_t *build_console(void) {
         }
     }
     if (!c->buf || !s_hist) {
-        lichen_free(NULL, c->buf);
-        lichen_free(NULL, c);
+        lichen_free(lichen_sys_ctx_os(), c->buf);
+        lichen_free(lichen_sys_ctx_os(), c);
         lv_label_set_text(lv_label_create(screen), "Out of memory");
         return screen;
     }

@@ -13,6 +13,7 @@
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 #include "lichen_sys_clock.h"
 #include "lichen_sys_mem.h"
 #include "lichen_sys_ui.h"
@@ -83,7 +84,7 @@ static void draw_disc(lv_layer_t *layer, sc_point_t c, int32_t r, uint32_t color
 // The white face and its 60 bars, once, into the canvas (canvas coordinates)
 static bool dial_create(station_view_t *v, lv_obj_t *parent, sc_layout_t const *lay) {
     uint32_t stride = lv_draw_buf_width_to_stride(v->d, LV_COLOR_FORMAT_RGB565);
-    v->dial_buf     = lichen_alloc_aligned(NULL, LV_DRAW_BUF_ALIGN, (size_t)stride * v->d, LICHEN_MEM_BULK);
+    v->dial_buf     = lichen_alloc_aligned(lichen_sys_ctx_os(), LV_DRAW_BUF_ALIGN, (size_t)stride * v->d, LICHEN_MEM_BULK);
     if (!v->dial_buf) {
         return false;
     }
@@ -218,8 +219,8 @@ static lv_obj_t *add_line(lv_obj_t *parent, int font, uint32_t color, int32_t y)
 // cache entry for it)
 static void free_later(void *arg) {
     station_view_t *v = arg;
-    lichen_free(NULL, v->dial_buf);
-    lichen_free(NULL, v);
+    lichen_free(lichen_sys_ctx_os(), v->dial_buf);
+    lichen_free(lichen_sys_ctx_os(), v);
 }
 
 // The dial is going (its screen is deleted): the timer first, then the buffer and the view
@@ -253,7 +254,7 @@ station_view_t *station_view_create(lv_obj_t *parent, station_view_cfg_t const *
     if (cfg->layout.dial_d < SC_MIN_DIAL) {
         return NULL;
     }
-    station_view_t *v = lichen_alloc(NULL, sizeof(*v), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    station_view_t *v = lichen_alloc(lichen_sys_ctx_os(), sizeof(*v), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!v) {
         return NULL;
     }
@@ -263,7 +264,7 @@ station_view_t *station_view_create(lv_obj_t *parent, station_view_cfg_t const *
     v->update_line2 = cfg->update_line2;
     if (!dial_create(v, parent, &cfg->layout)) {
         log_no_psram(v->d);
-        lichen_free(NULL, v);
+        lichen_free(lichen_sys_ctx_os(), v);
         return NULL;
     }
     v->date_label = add_line(parent, LICHEN_FONT_LARGE, THEME_DIM, cfg->layout.line1_y);

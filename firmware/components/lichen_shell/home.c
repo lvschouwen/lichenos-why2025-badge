@@ -114,12 +114,12 @@ static void app_ids(char const **ids, int n) {
 static bool load_order(int *order, int n) {
     char const *ids[LICHEN_MAX_APPS];
     app_ids(ids, n);
-    char *text = lichen_alloc(NULL, ORDER_CAP, LICHEN_MEM_BULK); // the console task's stack is small too
+    char *text = lichen_alloc(lichen_sys_ctx_os(), ORDER_CAP, LICHEN_MEM_BULK); // the console task's stack is small too
     if (text) {
         settings_get_str(HOME_ORDER_KEY, text, ORDER_CAP, "");
     }
     bool used = tile_order_merge(text, ids, n, order);
-    lichen_free(NULL, text);
+    lichen_free(lichen_sys_ctx_os(), text);
     return used;
 }
 
@@ -130,9 +130,9 @@ static bool save_order(int const *order, int n) {
     }
     char const *ids[LICHEN_MAX_APPS];
     app_ids(ids, n);
-    char *text = lichen_alloc(NULL, ORDER_CAP, LICHEN_MEM_BULK);
+    char *text = lichen_alloc(lichen_sys_ctx_os(), ORDER_CAP, LICHEN_MEM_BULK);
     bool  ok   = text && tile_order_encode(ids, order, n, text, ORDER_CAP) > 0 && settings_set_str(HOME_ORDER_KEY, text);
-    lichen_free(NULL, text);
+    lichen_free(lichen_sys_ctx_os(), text);
     if (!ok) {
         ESP_LOGE(TAG, "home order not saved");
     }
@@ -288,7 +288,7 @@ static void on_key(lv_event_t *e) {
 static void on_delete(lv_event_t *e) {
     home_t *h = lv_event_get_user_data(e);
     lv_timer_delete(h->timer);
-    lichen_free(NULL, h);
+    lichen_free(lichen_sys_ctx_os(), h);
 }
 
 // Centred on the icon's top-right corner, so it overlaps the icon by half, phone style. Its width follows the text, so
@@ -485,7 +485,7 @@ lv_obj_t *home_create(void) {
     lv_obj_set_style_outline_width(home, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_outline_width(home, 0, LV_STATE_FOCUS_KEY);
 
-    home_t *h = lichen_alloc(NULL, sizeof(*h), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    home_t *h = lichen_alloc(lichen_sys_ctx_os(), sizeof(*h), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!h) {
         return home;
     }

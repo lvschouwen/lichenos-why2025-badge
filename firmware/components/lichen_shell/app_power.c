@@ -11,6 +11,7 @@
 #include "freertos/task.h"
 #include "fw_console.h"
 #include "lichen_app.h"
+#include "lichen_sys_app.h"
 #include "notify_os.h"
 #include "lichen_task.h"
 #include "menu.h"
@@ -31,6 +32,7 @@
 #define BYE_UI_STACK     6144 // builds the goodbye screen
 
 static lichen_app_t const power_app; // its tasks are booked under it (#181)
+static lichen_ctx_t self_ctx; // lichen_register_app's answer, for the gate calls (#230 E1b)
 static void (*finish_hook)(bool power_off);
 static atomic_bool running;
 static atomic_bool want_off; // set before the task starts; a power off asked meanwhile turns a restart into one (#281)
@@ -120,6 +122,12 @@ static void bye_task(void *arg) {
     shell_open(build_bye, SCREEN_POWER_BYE);
 }
 
+// A power off must never be refused for want of a context: before the app registered (or with the table full) the
+// tasks are the OS's, as they were before #230
+static lichen_ctx_t power_ctx(void) {
+    return self_ctx != LICHEN_CTX_NONE ? self_ctx : lichen_sys_ctx_os();
+}
+
 static void start(bool off) {
     if (atomic_exchange(&running, true)) {
         // Already going down: a power off still wins over a restart (the thermal shutdown must not end in a restart)
@@ -133,11 +141,11 @@ static void start(bool off) {
     }
     // The task first: a busy or stuck LVGL lock must not hold up a (thermal) shutdown. The goodbye screen is opened by
     // a short task of its own, which may wait for the lock as long as it needs.
-    if (!lichen_task_start(&power_app, "power", power_task, NULL, POWER_STACK, LICHEN_PRIO_URGENT, NULL)) {
+    if (!lichen_task_start(power_ctx(), "power", power_task, NULL, POWER_STACK, LICHEN_PRIO_URGENT, NULL)) {
         ESP_LOGE(TAG, "no memory for the power task: restarting as is");
         system_restart_asked("power menu (no task)");
     }
-    if (!lichen_task_start(&power_app, "pwrui", bye_task, NULL, BYE_UI_STACK, LICHEN_PRIO_URGENT, NULL)) {
+    if (!lichen_task_start(power_ctx(), "pwrui", bye_task, NULL, BYE_UI_STACK, LICHEN_PRIO_URGENT, NULL)) {
         ESP_LOGW(TAG, "no memory for the goodbye screen");
     }
 }
@@ -176,7 +184,7 @@ static lichen_app_t const power_app = {
 };
 
 void power_app_register(void) {
-    lichen_register_app(&power_app); // `fw poweroff` is main's (#292): it also works without a display
+    self_ctx = lichen_register_app(&power_app); // `fw poweroff` is main's (#292): it also works without a display
 }
 
 void power_open_from_settings(void *arg) {

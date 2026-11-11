@@ -35,6 +35,7 @@ static char const TAG[] = "notes";
 #define FIRST_NOTE_ROW 2 // "New note..." and "New to do..." come first
 
 static lichen_app_t const notes_list_app;
+static lichen_ctx_t self_ctx; // lichen_register_app's answer, for the gate calls (#230 E1b)
 
 typedef enum { JOB_LOAD, JOB_ADD, JOB_WRITE, JOB_DELETE } job_kind_t;
 typedef enum { ST_IDLE, ST_RUNNING, ST_DONE } job_state_t;
@@ -111,7 +112,7 @@ static bool job_start(void) {
     if (!s_v.items || !atomic_compare_exchange_strong(&s_state, &expected, ST_RUNNING)) {
         return false;
     }
-    if (!lichen_task_start(&notes_list_app, "notesjob", job_task, NULL, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
+    if (!lichen_task_start(self_ctx, "notesjob", job_task, NULL, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         ESP_LOGW(TAG, "no memory for a notes job");
         atomic_store(&s_state, ST_IDLE);
         return false;
@@ -287,7 +288,7 @@ static void on_screen_delete(lv_event_t *e) {
 static void open_notes(lv_obj_t *screen) {
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
     if (!s_v.items) {
-        s_v.items = lichen_alloc(&notes_list_app, MAX_NOTES * sizeof(notes_item_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // kept for good
+        s_v.items = lichen_alloc(self_ctx, MAX_NOTES * sizeof(notes_item_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // kept for good
     }
     s_v.screen = screen;
     s_v.menu   = NULL;
@@ -473,5 +474,5 @@ static lichen_app_t const notes_list_app = {
 };
 
 void notepad_app_register(void) {
-    lichen_register_app(&notes_list_app);
+    self_ctx = lichen_register_app(&notes_list_app);
 }

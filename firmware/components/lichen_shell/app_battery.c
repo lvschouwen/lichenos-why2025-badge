@@ -110,7 +110,7 @@ static void alert_task(void *arg) {
 }
 
 void battery_open_alert(void) {
-    if (!lichen_task_start(NULL, "battalert", alert_task, NULL, ALERT_STACK, LICHEN_PRIO_SERVICE, NULL)) {
+    if (!lichen_task_start(lichen_ctx_self(), "battalert", alert_task, NULL, ALERT_STACK, LICHEN_PRIO_SERVICE, NULL)) {
         ESP_LOGW("battery", "no memory for the warning screen");
     }
 }

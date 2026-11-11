@@ -176,7 +176,7 @@ static void on_delete(lv_event_t *e) {
         lv_timer_delete(timer);
         timer = NULL;
     }
-    lichen_free(meshcore_self(), mem);
+    lichen_free(meshcore_ctx(), mem);
     mem          = NULL;
     screen_obj   = NULL;
     status_label = NULL;
@@ -187,7 +187,7 @@ static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     screen_obj       = screen;
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, NULL);
-    mem = lichen_alloc(meshcore_self(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    mem = lichen_alloc(meshcore_ctx(), sizeof(*mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!mem) {
         ESP_LOGE(TAG, "no memory for discover nearby");
         mc_list_label(screen, "Not enough memory for this page.", THEME_DIM);

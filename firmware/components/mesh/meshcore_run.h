@@ -17,10 +17,13 @@ extern "C" {
 // The app's id (lichen_app_t.id): its settings namespace a.meshcore and its directory /storage/meshcore
 #define MESHCORE_APP_ID "meshcore"
 
-// meshcore_app_register: the app, for its settings and its directory
-void meshcore_run_init(lichen_app_t const *app);
-// The app itself, for the OS calls that take it (lichen_task_start, lichen_alloc, #181); set before any task runs
+// meshcore_app_register: the app, for its settings and its directory, and the context lichen_register_app gave it
+void meshcore_run_init(lichen_app_t const *app, lichen_ctx_t ctx);
+// The app itself, for the OS calls that still take it (settings, until #230 E1c); set before any task runs
 lichen_app_t const *meshcore_self(void);
+// The app's context (#230 E1b), for every OS call that takes one (lichen_alloc, lichen_free, lichen_task_start, ...):
+// the one accessor the C and C++ code share. LICHEN_CTX_NONE before meshcore_run_init (logged once; the OS refuses it).
+lichen_ctx_t meshcore_ctx(void);
 // The app's start_background: registers the console commands, then starts MeshCore when start at boot is on (on this
 // task, as before). True when it started or was not meant to.
 bool meshcore_run_boot(void);

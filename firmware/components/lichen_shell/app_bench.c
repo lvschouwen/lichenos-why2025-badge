@@ -36,6 +36,7 @@
 #define SCROLL_STEP_UI 96
 
 static lichen_app_t const bench_app;
+static lichen_ctx_t self_ctx; // lichen_register_app's answer, for the gate calls (#230 E1b)
 #define VALUE_CHARS 96
 
 static char const TAG[] = "bench";
@@ -77,13 +78,13 @@ static void drop_cache(void *p, size_t n) {
 // Four passes over 1 MB of PSRAM: stores pushed out to the RAM, loads that miss the (256 KB) cache, a PSRAM-to-PSRAM
 // memcpy and a copy from a 32 KB internal chunk. false = no memory for the buffers.
 static bool bandwidth_run(bw_t *out) {
-    uint8_t *a  = lichen_alloc_aligned(&bench_app, 128, BYTES, LICHEN_MEM_BULK);
-    uint8_t *b  = lichen_alloc_aligned(&bench_app, 128, BYTES, LICHEN_MEM_BULK);
-    uint8_t *in = lichen_alloc(&bench_app, INT_CHUNK, LICHEN_MEM_INTERNAL); // counted against the quota (#181)
+    uint8_t *a  = lichen_alloc_aligned(self_ctx, 128, BYTES, LICHEN_MEM_BULK);
+    uint8_t *b  = lichen_alloc_aligned(self_ctx, 128, BYTES, LICHEN_MEM_BULK);
+    uint8_t *in = lichen_alloc(self_ctx, INT_CHUNK, LICHEN_MEM_INTERNAL); // counted against the quota (#181)
     if (!a || !b || !in) {
-        lichen_free(&bench_app, a);
-        lichen_free(&bench_app, b);
-        lichen_free(&bench_app, in);
+        lichen_free(self_ctx, a);
+        lichen_free(self_ctx, b);
+        lichen_free(self_ctx, in);
         return false;
     }
     memset(in, 0x5A, INT_CHUNK);
@@ -108,9 +109,9 @@ static bool bandwidth_run(bw_t *out) {
     }
     drop_cache(b, BYTES);
     int64_t t4 = esp_timer_get_time();
-    lichen_free(&bench_app, a);
-    lichen_free(&bench_app, b);
-    lichen_free(&bench_app, in);
+    lichen_free(self_ctx, a);
+    lichen_free(self_ctx, b);
+    lichen_free(self_ctx, in);
     *out = (bw_t){.write_us = (uint64_t)(t1 - t0), .read_us = (uint64_t)(t2 - t1), .copy_us = (uint64_t)(t3 - t2), .int_us = (uint64_t)(t4 - t3)};
     return true;
 }
@@ -450,6 +451,6 @@ static lichen_app_t const bench_app = {
 };
 
 void bench_app_register(void) {
-    lichen_register_app(&bench_app);
+    self_ctx = lichen_register_app(&bench_app);
     console_register("bench", "bench (PSRAM bandwidth, full redraws of the current screen, memory; the Bench app adds the scroll test)", cmd_bench);
 }

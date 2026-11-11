@@ -194,9 +194,81 @@ static void test_task_inherit(void) {
     CHECK(app_ctx_for_task(&t, &tls, &app_b, NULL) == b);
     s_slot = a; // an app's task (or hook) starts one
     CHECK(app_ctx_for_task(&t, &tls, NULL, NULL) == a);   // NULL inherits the app
-    CHECK(app_ctx_for_task(&t, &tls, &app_b, NULL) == b); // a named owner wins (the compat shim, until E1b)
+    CHECK(app_ctx_for_task(&t, &tls, &app_b, NULL) == b); // a named owner wins (the compat shim, until E1e)
     CHECK(app_ctx_for_task(&t, &tls, &app_c, &unregistered) == os && unregistered); // never registered: the OS
     s_slot = 0;
+}
+
+// ---- #230 E1b: the paths that have no thread-local slot of their own, and lichen_task_start's trampoline ----
+
+// Two FreeRTOS tasks over the fake slot: switching saves one task's slot and loads the other's
+static uint32_t s_saved;
+static void switch_task(void) {
+    uint32_t other = s_saved;
+    s_saved        = s_slot;
+    s_slot         = other;
+}
+
+// What lichen_task.c does: lichen_task_start(ctx, ...) is given the caller's ctx (an OS caller passes
+// lichen_ctx_self()), books it, and the new task's trampoline enters it before fn runs. A new task's slot starts at 0.
+static uint32_t start_and_enter(app_ctx_table_t *t, uint32_t given) {
+    if (!app_ctx_resolve(t, given, NULL)) {
+        return APP_CTX_NONE; // refused: lichen_task_start returns false, nothing runs
+    }
+    switch_task();
+    s_slot = 0;
+    (void)app_ctx_enter(t, &tls, given, NULL); // the trampoline, for good
+    return app_ctx_self(t, &tls);
+}
+
+static void test_no_tls_paths_are_the_os(void) {
+    app_ctx_table_t t;
+    app_ctx_init(&t, 0x808080u);
+    uint32_t a  = app_ctx_add(&t, &app_a, 0x7777u);
+    uint32_t os = app_ctx_os(&t);
+    s_isr       = false;
+    s_slot      = 0;
+    s_saved     = 0;
+    uint32_t prev = app_ctx_enter(&t, &tls, a, NULL); // a's hook runs on the LVGL task
+    // ... and arms an esp_timer: its callback runs on the esp_timer task, which never entered anything
+    switch_task();
+    CHECK(app_ctx_self(&t, &tls) == os);
+    switch_task();
+    CHECK(app_ctx_self(&t, &tls) == a); // the hook's task is still a
+    // An interrupt inside the hook: no slot of its own, so the OS, whatever the interrupted task entered
+    s_isr = true;
+    CHECK(app_ctx_self(&t, &tls) == os);
+    CHECK(app_ctx_enter(&t, &tls, a, NULL) == 0 && s_slot == a); // and it cannot switch the task's slot
+    s_isr = false;
+    app_ctx_leave(&tls, prev);
+    CHECK(app_ctx_self(&t, &tls) == os && t.refused == 0);
+}
+
+static void test_trampoline_sets_and_nests(void) {
+    app_ctx_table_t t;
+    app_ctx_init(&t, 0x909090u);
+    uint32_t a  = app_ctx_add(&t, &app_a, 0x8888u);
+    uint32_t b  = app_ctx_add(&t, &app_b, 0x9999u);
+    uint32_t os = app_ctx_os(&t);
+    s_isr       = false;
+    s_slot      = 0;
+    s_saved     = 0;
+    // Boot: main starts an OS service task with its own (the OS's) ctx
+    CHECK(start_and_enter(&t, app_ctx_self(&t, &tls)) == os);
+    // a's start_background hook starts a's loop task with lichen_ctx_self(): the task runs as a
+    s_slot = 0;
+    (void)app_ctx_enter(&t, &tls, a, NULL);
+    CHECK(start_and_enter(&t, app_ctx_self(&t, &tls)) == a);
+    // a's loop task starts a job the same way: nested tasks inherit a
+    CHECK(start_and_enter(&t, app_ctx_self(&t, &tls)) == a);
+    // An app task naming another app's ctx (the shell starting b's task from a's hook) runs as b
+    CHECK(start_and_enter(&t, b) == b);
+    // A stale or made-up ctx starts nothing and is counted
+    uint32_t refused_before = t.refused;
+    CHECK(start_and_enter(&t, a ^ 0x100u) == APP_CTX_NONE && t.refused == refused_before + 1);
+    CHECK(start_and_enter(&t, APP_CTX_NONE) == APP_CTX_NONE && t.refused == refused_before + 2);
+    s_slot  = 0;
+    s_saved = 0;
 }
 
 int main(void) {
@@ -211,6 +283,8 @@ int main(void) {
     test_enter_refused_falls_back_to_os();
     test_isr();
     test_task_inherit();
+    test_no_tls_paths_are_the_os();
+    test_trampoline_sets_and_nests();
     if (failures) {
         printf("app_ctx_test: %d failure(s)\n", failures);
         return 1;

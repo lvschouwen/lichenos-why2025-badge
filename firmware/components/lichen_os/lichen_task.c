@@ -102,14 +102,29 @@ static void warn_psram_once(char const *owner, char const *name) {
     }
 }
 
-bool lichen_task_start(lichen_app_t const *app, char const *name, void (*fn)(void *arg), void *arg,
+bool lichen_task_start(lichen_ctx_t ctx, char const *name, void (*fn)(void *arg), void *arg,
                        uint32_t stack_bytes, lichen_prio_t prio, TaskHandle_t *handle) {
-    return lichen_task_start_in(app, name, fn, arg, stack_bytes, prio, LICHEN_STACK_INTERNAL, handle);
+    return lichen_task_start_in(ctx, name, fn, arg, stack_bytes, prio, LICHEN_STACK_INTERNAL, handle);
 }
 
-bool lichen_task_start_in(lichen_app_t const *app, char const *name, void (*fn)(void *arg), void *arg,
+// Who the task is booked under (#230 E1b): ctx with its app's id as the label. False for a stale or made-up ctx
+// (lichen_sys_ctx_resolve has logged, rate-limited, and counted it under what).
+static bool owner_of(lichen_ctx_t ctx, char const *what, task_owner_t *out) {
+    lichen_app_t const *app = NULL;
+    if (!lichen_sys_ctx_resolve(ctx, &app, what)) {
+        return false;
+    }
+    *out = (task_owner_t){.ctx = ctx, .label = app ? app->id : NULL};
+    return true;
+}
+
+bool lichen_task_start_in(lichen_ctx_t ctx, char const *name, void (*fn)(void *arg), void *arg,
                           uint32_t stack_bytes, lichen_prio_t prio, lichen_stack_t mem, TaskHandle_t *handle) {
-    char const *owner = app ? app->id : TASK_BOOK_OS;
+    task_owner_t who;
+    if (!owner_of(ctx, "lichen_task_start", &who)) {
+        return false;
+    }
+    char const *owner    = who.label ? who.label : TASK_BOOK_OS;
     int         priority = task_class_priority((task_class_t)prio);
     if (!fn || priority < 0) {
         ESP_LOGE(TAG, "%s: task %s not started: no function or an unknown class %d", owner, name ? name : "?", (int)prio);
@@ -124,14 +139,8 @@ bool lichen_task_start_in(lichen_app_t const *app, char const *name, void (*fn)(
         warn_psram_once(owner, fitted);
     }
     task_stack_t placed = place_stack(asked, stack_bytes); // the heap query stays outside the spinlock
-    // The context the task runs for (#230): the app's; for app NULL the caller's own, so a task an app's task or hook
-    // starts stays the app's (until E1b these calls still name the owner by pointer)
-    lichen_ctx_t ctx = lichen_sys_task_ctx(app);
     portENTER_CRITICAL(&book_mux);
-    int slot = task_book_add(&book, owner, fitted, stack_bytes, (task_class_t)prio, placed, fn, arg);
-    if (slot >= 0) {
-        book.slot[slot].ctx = ctx;
-    }
+    int slot = task_book_add(&book, who, fitted, stack_bytes, (task_class_t)prio, placed, fn, arg);
     portEXIT_CRITICAL(&book_mux);
     if (slot < 0) {
         ESP_LOGE(TAG, "%s: task %s not started: all %d task slots are taken", owner, fitted, TASK_BOOK_SLOTS);
@@ -150,13 +159,17 @@ bool lichen_task_start_in(lichen_app_t const *app, char const *name, void (*fn)(
     return true;
 }
 
-size_t lichen_task_leftovers(lichen_app_t const *app, uint32_t wait_ms) {
-    char const  *owner = app ? app->id : TASK_BOOK_OS;
+size_t lichen_task_leftovers(lichen_ctx_t ctx, uint32_t wait_ms) {
+    task_owner_t who;
+    if (!owner_of(ctx, "lichen_task_leftovers", &who)) {
+        return 0;
+    }
+    char const  *owner = who.label ? who.label : TASK_BOOK_OS;
     TaskHandle_t self  = xTaskGetCurrentTaskHandle();
     size_t       left  = 0;
     for (uint32_t waited = 0;; waited += LEFTOVER_POLL_MS) {
         portENTER_CRITICAL(&book_mux);
-        left = task_book_count(&book, owner, self);
+        left = task_book_count(&book, ctx, self);
         portEXIT_CRITICAL(&book_mux);
         if (!left || waited >= wait_ms) {
             break;
@@ -167,7 +180,7 @@ size_t lichen_task_leftovers(lichen_app_t const *app, uint32_t wait_ms) {
         char name[TASK_BOOK_NAME_CAP] = "";
         portENTER_CRITICAL(&book_mux);
         task_slot_t const *s = &book.slot[i];
-        if (s->used && strcmp(s->owner, owner) == 0 && s->handle != self) {
+        if (s->used && s->ctx == ctx && s->handle != self) {
             memcpy(name, s->name, sizeof(name));
         }
         portEXIT_CRITICAL(&book_mux);

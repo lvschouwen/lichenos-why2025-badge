@@ -7,6 +7,7 @@
 #include "app_icons.h"
 #include "screen_ids.h"
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
@@ -45,6 +46,7 @@ static char const TAG[] = "crashlog";
 #define JOB_PENDING        (-1)
 
 static lichen_app_t const crashlog_app;
+static lichen_ctx_t self_ctx; // lichen_register_app's answer, for the gate calls (#230 E1b)
 
 // The open viewer; all NULL/0 while it is closed. LVGL task only.
 static struct {
@@ -195,7 +197,7 @@ static bool job_start(job_t kind) {
     s_job       = kind;
     s_result[0] = '\0';
     atomic_store(&s_job_outcome, JOB_PENDING);
-    if (!lichen_task_start(&crashlog_app, "crashjob", job_task, (void *)(intptr_t)kind, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
+    if (!lichen_task_start(self_ctx, "crashjob", job_task, (void *)(intptr_t)kind, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         s_job = JOB_NONE;
         snprintf(s_result, sizeof(s_result), "Not started: out of memory.");
         ESP_LOGW(TAG, "%s", s_result);
@@ -344,7 +346,7 @@ static void on_entry(void *arg) {
 static void on_screen_delete(lv_event_t *e) {
     (void)e;
     lv_timer_delete(s_v.poll);
-    lichen_free(NULL, s_v.entries);
+    lichen_free(lichen_sys_ctx_os(), s_v.entries);
     memset(&s_v, 0, sizeof(s_v));
 }
 
@@ -352,7 +354,7 @@ static void open_crashlog(lv_obj_t *screen) {
     memset(&s_v, 0, sizeof(s_v));
     s_v.screen  = screen;
     s_v.group   = lv_group_get_default(); // shell_open's group for this screen while it is built
-    s_v.entries = lichen_alloc(NULL, CRASHLOG_MAX * sizeof(crashlog_entry_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    s_v.entries = lichen_alloc(lichen_sys_ctx_os(), CRASHLOG_MAX * sizeof(crashlog_entry_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     lichen_crashlog_mark_seen(&crashlog_app); // logs once when it cannot
     lichen_badge_set(crashlog_app.id, 0);     // seen now; badge_tick reads the log again within a second
     s_tile.valid = false;
@@ -441,7 +443,7 @@ static void notice_tick(lv_timer_t *timer) {
 }
 
 void crashlog_app_register(void) {
-    lichen_register_app(&crashlog_app);
+    self_ctx = lichen_register_app(&crashlog_app);
     lichen_sys_ui_lock(0);
     lv_timer_create(badge_tick, BADGE_TICK_MS, NULL);
     if (lichen_crashlog_after_crash()) {

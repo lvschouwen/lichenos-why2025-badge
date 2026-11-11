@@ -92,11 +92,11 @@ to `layers.conf`):
   `lichen_radio_lora_resume()`. Both block: never from the LVGL task.
 - `lichen_sensors.h`: read the latest IMU / environment / die temperature snapshot. Never talk to the chips or I2C.
 - `lichen_crashlog.h`: the crash log, for the Crash log app; not from the LVGL task for writes.
-- `lichen_task.h` (#181): `lichen_task_start(app, name, fn, arg, stack_bytes, prio, &handle)` with a priority class
+- `lichen_task.h` (#181): `lichen_task_start(ctx, name, fn, arg, stack_bytes, prio, &handle)` with a priority class
   instead of a core and a number: `LICHEN_PRIO_BACKGROUND` (2, core 0), `_SERVICE` (3, core 0), `_JOB` (4, core 0),
   `_URGENT` (5, core 0, power off only) and `_APP_LOOP` (3, core 1 with LVGL, an app's main loop). Names are cut to 15
   characters (logged). `fn` ends by returning, never with `vTaskDelete(NULL)`: the OS takes it out of its book first.
-  `fw tasks` lists every task with its owner app; after a stop `lichen_task_leftovers(app, wait_ms)` names what of
+  `fw tasks` lists every task with its owner app; after a stop `lichen_task_leftovers(ctx, wait_ms)` names what of
   the app still runs (MeshCore logs "MeshCore stopped: N task(s) left over").
   `lichen_task_start_in(..., prio, mem, &handle)` also picks the stack's memory (#269): `LICHEN_STACK_INTERNAL` (the
   default, right for nearly every task), `_LP_RAM` (the P4's 32 KB LP RAM: internal, so flash/NVS/`/storage` writes are
@@ -106,8 +106,8 @@ to `layers.conf`):
   OTA; the first one logs that rule). Both are for tasks that **never return**: a return is logged as an error and
   parks the task for good (deleting it would need an internal-RAM helper task and aborts without one). A region that
   is short gives internal RAM instead; `fw tasks` shows each stack's memory.
-- `lichen_mem.h` (#181): `lichen_alloc(app, size, LICHEN_MEM_BULK | LICHEN_MEM_INTERNAL [| LICHEN_MEM_ZERO])` and
-  `lichen_free(app, ptr)`. BULK is PSRAM, for anything big; INTERNAL counts against the app's internal-RAM quota of
+- `lichen_mem.h` (#181): `lichen_alloc(ctx, size, LICHEN_MEM_BULK | LICHEN_MEM_INTERNAL [| LICHEN_MEM_ZERO])` and
+  `lichen_free(ctx, ptr)`. BULK is PSRAM, for anything big; INTERNAL counts against the app's internal-RAM quota of
   64 KB (`MEM_BOOK_INTERNAL_QUOTA`) and is refused past it. `fw mem` lists what every app holds ("mem app <id> ...").
   Free with `lichen_free`, never `free()`, or the app's count stays up.
 - `radio_state.h`, `tz_table.h`: types and the time zone table used by the headers above.
@@ -201,17 +201,22 @@ slot 1 (slot 0 is IDF's pthread storage). `lichen_ctx_self()` (`lichen_app.h`) r
   each in `lichen_ctx_enter`/`lichen_ctx_leave` (`lichen_sys_app.h`; TLS only, no lock, nests);
 - in a `lichen_ui_call` (or `lichen_sys_ui_call`): each queued call keeps the context of the code that queued it and
   runs inside it (a burst past the queue's 16 entries goes to LVGL directly and runs for the OS);
-- on a task from `lichen_task_start`: the named app's context, or for `app` NULL the starting task's own, so a task an
-  app's task starts inherits it.
+- on a task from `lichen_task_start`: the context it was given. An app passes its own; code that runs for whoever
+  called it (the OS, shell helpers) passes `lichen_ctx_self()`, so a task an app's task or hook starts inherits the app.
 
 Everywhere else it is the OS's context: an ISR, an esp_timer callback (the esp_timer task), an LVGL event or timer
 callback outside a hook, a task not made through `lichen_task_start`. A stale or made-up context given to a gate call
 or to `lichen_ctx_enter` is refused (the OS's context is used instead), logged at most once per 10 s and counted:
-`fw app ctx` lists every app's context and the refusals since boot. Never an abort. Until E1e the gate calls still take
-`lichen_app_t const *` (the compat shim maps it to the context); E1b-E1d move them to the context.
+`fw app ctx` lists every app's context and the refusals since boot. Never an abort. Since E1b the memory and task
+calls take the context: an app keeps what `lichen_register_app` returned and passes it (MeshCore through
+`meshcore_ctx()`), OS code passes `lichen_sys_ctx_os()` for memory; both books (`fw mem`, `fw tasks`) are keyed by the
+context, the app id is only the printed label. A refused `lichen_alloc` or `lichen_task_start` fails (NULL, false), a
+refused `lichen_free` frees nothing. The other gate calls still take `lichen_app_t const *` until E1c (the compat shim
+maps it to the context).
 
 Not yet covered: an LVGL event or timer callback an app registers runs as the OS when it fires outside a hook (a key
-press, a timer tick), and so does a `lichen_ui_call` queued from one, until E1b/E1c wrap those registrations.
+press, a timer tick), and so does a `lichen_ui_call` queued from one, until those registrations are wrapped (a follow-up
+of #230).
 
 **Lifecycle (#231, after the MVP):** an app is registered, started, running, suspended (screen off or another app in
 front), stopping (cooperative, with a deadline; the OS never deletes an app's tasks) and stopped. On stop the OS frees

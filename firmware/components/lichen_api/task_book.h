@@ -1,6 +1,7 @@
 #pragma once
 // The bookkeeping behind lichen_task_start (#181): which app owns which task, under which name, stack, priority
-// class and stack memory (#269). Pure, host-tested in host_tests/task_book_test.c; lichen_task.c is the FreeRTOS glue
+// class and stack memory (#269). The owner is its context (lichen_ctx_t, #230 E1b), which lichen_task.c has checked;
+// the label (the app id, or TASK_BOOK_OS) is only what "fw tasks" prints. Pure, host-tested in host_tests/task_book_test.c; lichen_task.c is the FreeRTOS glue
 // (and the lock: these calls are not thread-safe by themselves).
 
 #include <stdbool.h>
@@ -14,7 +15,7 @@ extern "C" {
 #define TASK_BOOK_SLOTS    32 // tasks started through lichen_task_start that run at the same time
 #define TASK_BOOK_NAME_CAP 16 // FreeRTOS's configMAX_TASK_NAME_LEN with the NUL; lichen_task.c asserts they match
 #define TASK_BOOK_OWNER_CAP 14 // an app id is at most 13 characters (app_ns.h)
-#define TASK_BOOK_OS       "lichen" // the owner of the OS's own tasks (app NULL)
+#define TASK_BOOK_OS       "lichen" // the label of the OS's own tasks (label NULL)
 
 // The priority classes of lichen_task.h, mapped to FreeRTOS priorities and cores here so the host test pins them
 typedef enum {
@@ -54,7 +55,7 @@ bool task_name_fit(char out[TASK_BOOK_NAME_CAP], char const *name);
 
 typedef struct {
     bool     used;
-    char     owner[TASK_BOOK_OWNER_CAP];
+    char     owner[TASK_BOOK_OWNER_CAP]; // the owner's label
     char     name[TASK_BOOK_NAME_CAP];
     uint32_t stack;
     uint8_t  cls;
@@ -62,20 +63,26 @@ typedef struct {
     void    *handle; // the task's handle once known (NULL in between)
     void (*fn)(void *arg);
     void    *arg;
-    uint32_t ctx; // the app context the task runs for (lichen_ctx_t, #230); task_book_add leaves it 0, the caller sets it
+    uint32_t ctx; // the context the task runs for and is counted under (lichen_ctx_t, #230)
 } task_slot_t;
 
 typedef struct {
     task_slot_t slot[TASK_BOOK_SLOTS];
 } task_book_t;
 
-// A slot for a new task; -1 when the book is full or the class or memory is unknown. owner NULL is the OS. The name
-// is cut as task_name_fit does.
-int  task_book_add(task_book_t *b, char const *owner, char const *name, uint32_t stack, task_class_t cls,
+// Who a task is booked under: its context (0 is never valid) and the label printed for it (NULL: TASK_BOOK_OS)
+typedef struct {
+    uint32_t    ctx;
+    char const *label;
+} task_owner_t;
+
+// A slot for a new task; -1 when the book is full, the class or memory is unknown or owner.ctx is 0. The label and
+// the name are cut as task_name_fit does.
+int  task_book_add(task_book_t *b, task_owner_t owner, char const *name, uint32_t stack, task_class_t cls,
                    task_stack_t mem, void (*fn)(void *), void *arg);
 void task_book_remove(task_book_t *b, int slot); // out of range or already free: nothing happens
-// The owner's tasks still in the book, except the one with handle skip (NULL skips none)
-size_t task_book_count(task_book_t const *b, char const *owner, void const *skip);
+// ctx's tasks still in the book, except the one with handle skip (NULL skips none)
+size_t task_book_count(task_book_t const *b, uint32_t ctx, void const *skip);
 
 #ifdef __cplusplus
 }

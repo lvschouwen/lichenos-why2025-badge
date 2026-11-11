@@ -88,7 +88,7 @@ static void job_finish(void *data) {
     job->done(job);
     memset(job->key, 0, sizeof(job->key)); // a channel key: not left in the heap
     memset(&job->info, 0, sizeof(job->info));
-    lichen_free(meshcore_self(), job);
+    lichen_free(meshcore_ctx(), job);
 }
 
 static void job_task(void *arg) {
@@ -115,7 +115,7 @@ static void job_task(void *arg) {
             ESP_LOGW(TAG, "settings job %d: result not handed to the screen, dropped", (int)job->kind);
             memset(job->key, 0, sizeof(job->key));
             memset(&job->info, 0, sizeof(job->info));
-            lichen_free(meshcore_self(), job);
+            lichen_free(meshcore_ctx(), job);
             __atomic_store_n(&job_running, false, __ATOMIC_RELEASE);
             break;
         }
@@ -127,7 +127,7 @@ static job_t *job_new(job_kind_t kind, void (*done)(job_t *)) {
     if (job_running) {
         return NULL;
     }
-    job_t *job = lichen_alloc(meshcore_self(), sizeof(*job), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    job_t *job = lichen_alloc(meshcore_ctx(), sizeof(*job), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (job) {
         job->kind = kind;
         job->done = done;
@@ -137,9 +137,9 @@ static job_t *job_new(job_kind_t kind, void (*done)(job_t *)) {
 
 // false (job freed) when it could not start
 static bool job_start(job_t *job) {
-    if (!lichen_task_start(meshcore_self(), "meshset", job_task, job, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
+    if (!lichen_task_start(meshcore_ctx(), "meshset", job_task, job, JOB_STACK, LICHEN_PRIO_JOB, NULL)) {
         ESP_LOGW(TAG, "settings task did not start");
-        lichen_free(meshcore_self(), job);
+        lichen_free(meshcore_ctx(), job);
         return false;
     }
     job_running = true;
@@ -1487,7 +1487,7 @@ static void on_channel_delete(lv_event_t *e) {
     (void)e;
     if (chan_mem) {
         memset(chan_mem, 0, sizeof(*chan_mem));
-        lichen_free(meshcore_self(), chan_mem);
+        lichen_free(meshcore_ctx(), chan_mem);
     }
     chan_mem       = NULL;
     chan_menu      = chan_loading = chan_note = chan_scope_row = NULL;
@@ -1515,7 +1515,7 @@ static lv_obj_t *build_channel(void) {
     channel_screen   = screen;
     chan_group       = lv_group_get_default();
     lv_obj_add_event_cb(screen, on_channel_delete, LV_EVENT_DELETE, NULL);
-    chan_mem  = lichen_alloc(meshcore_self(), sizeof(*chan_mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    chan_mem  = lichen_alloc(meshcore_ctx(), sizeof(*chan_mem), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     chan_menu = menu_create_named(screen, "Channel", pending_channel);
     if (!chan_mem) {
         menu_note(chan_menu, "Not enough memory to show the channel.");

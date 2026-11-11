@@ -74,9 +74,9 @@ static void owner_fit(char out[TASK_BOOK_OWNER_CAP], char const *owner) {
     out[n] = 0;
 }
 
-int task_book_add(task_book_t *b, char const *owner, char const *name, uint32_t stack, task_class_t cls,
+int task_book_add(task_book_t *b, task_owner_t owner, char const *name, uint32_t stack, task_class_t cls,
                   task_stack_t mem, void (*fn)(void *), void *arg) {
-    if ((unsigned)cls >= TASK_CLASS_COUNT || (unsigned)mem >= TASK_STACK_COUNT) {
+    if ((unsigned)cls >= TASK_CLASS_COUNT || (unsigned)mem >= TASK_STACK_COUNT || !owner.ctx) {
         return -1;
     }
     for (int i = 0; i < TASK_BOOK_SLOTS; i++) {
@@ -86,7 +86,8 @@ int task_book_add(task_book_t *b, char const *owner, char const *name, uint32_t 
         }
         memset(s, 0, sizeof(*s));
         s->used = true;
-        owner_fit(s->owner, owner);
+        s->ctx  = owner.ctx;
+        owner_fit(s->owner, owner.label);
         task_name_fit(s->name, name);
         s->stack = stack;
         s->cls   = (uint8_t)cls;
@@ -104,13 +105,11 @@ void task_book_remove(task_book_t *b, int slot) {
     }
 }
 
-size_t task_book_count(task_book_t const *b, char const *owner, void const *skip) {
-    char want[TASK_BOOK_OWNER_CAP];
-    owner_fit(want, owner);
+size_t task_book_count(task_book_t const *b, uint32_t ctx, void const *skip) {
     size_t n = 0;
     for (int i = 0; i < TASK_BOOK_SLOTS; i++) {
         task_slot_t const *s = &b->slot[i];
-        n += s->used && strcmp(s->owner, want) == 0 && (!skip || s->handle != skip);
+        n += s->used && s->ctx == ctx && (!skip || s->handle != skip);
     }
     return n;
 }

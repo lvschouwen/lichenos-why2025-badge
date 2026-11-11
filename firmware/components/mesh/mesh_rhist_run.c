@@ -51,7 +51,7 @@ static void unlock(void) {
 }
 
 static void make_table(void) {
-    rh_t *t = lichen_alloc(meshcore_self(), sizeof(rh_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    rh_t *t = lichen_alloc(meshcore_ctx(), sizeof(rh_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!t) {
         table_failed = true;
         ESP_LOGW(TAG, "status history: no memory, no repeater is asked");
@@ -276,7 +276,7 @@ size_t mesh_rhist_off_console(void) {
 // ---- the console --------------------------------------------------------------------------------------------------------
 
 static void console_samples(rh_view_t const *v) {
-    rh_sample_t *smp = lichen_alloc(meshcore_self(), RH_SAMPLES * sizeof(rh_sample_t), LICHEN_MEM_BULK); // 3 KB
+    rh_sample_t *smp = lichen_alloc(meshcore_ctx(), RH_SAMPLES * sizeof(rh_sample_t), LICHEN_MEM_BULK); // 3 KB
     if (!smp) {
         console_reply("  no memory for the samples");
         return;
@@ -293,7 +293,7 @@ static void console_samples(rh_view_t const *v) {
         console_reply("  %s: battery %s, noise floor %s, up %s, received %lu, sent %lu", age, batt, noise, up,
                       (unsigned long)smp[k].n_recv, (unsigned long)smp[k].n_sent);
     }
-    lichen_free(meshcore_self(), smp);
+    lichen_free(meshcore_ctx(), smp);
 }
 
 static void console_slot(rh_view_t const *v, int i, bool samples) {
@@ -325,7 +325,7 @@ static void console_list(void) {
         console_reply("status history: MeshCore has not made its table yet");
         return;
     }
-    rh_view_t *v = lichen_alloc(meshcore_self(), sizeof(*v), LICHEN_MEM_BULK);
+    rh_view_t *v = lichen_alloc(meshcore_ctx(), sizeof(*v), LICHEN_MEM_BULK);
     if (!v) {
         console_reply("no memory");
         return;
@@ -351,7 +351,7 @@ static void console_list(void) {
     console_reply("%d of %d slots used, %u on%s; fw mesh history <who> [on [10|30|60|180] YES | off | interval <min> "
                   "[YES]]",
                   shown, RH_SLOTS, (unsigned)on, unsaved ? ", NOT SAVED yet (retrying)" : "");
-    lichen_free(meshcore_self(), v);
+    lichen_free(meshcore_ctx(), v);
 }
 
 // "on [min] YES", "interval <min> [YES]": the minutes and whether YES was given; false when the minutes are not a
@@ -373,7 +373,7 @@ static bool parse_change(char const *rest, unsigned *minutes, bool *yes) {
 static void console_change(uint8_t const *prefix, char const *verb) {
     unsigned   minutes = RH_INTERVAL_DEF;
     bool       yes     = false;
-    rh_view_t *v       = lichen_alloc(meshcore_self(), sizeof(*v), LICHEN_MEM_BULK);
+    rh_view_t *v       = lichen_alloc(meshcore_ctx(), sizeof(*v), LICHEN_MEM_BULK);
     if (!v) {
         console_reply("no memory");
         return;
@@ -382,7 +382,7 @@ static void console_change(uint8_t const *prefix, char const *verb) {
     if (have) {
         minutes = v->slot.interval_min;
     }
-    lichen_free(meshcore_self(), v);
+    lichen_free(meshcore_ctx(), v);
     bool on;
     if (strcmp(verb, "off") == 0) {
         on = false;
@@ -425,7 +425,7 @@ void mesh_rhist_console(uint8_t const *prefix, char const *verb) {
         console_change(prefix, verb);
         return;
     }
-    rh_view_t *v = lichen_alloc(meshcore_self(), sizeof(*v), LICHEN_MEM_BULK);
+    rh_view_t *v = lichen_alloc(meshcore_ctx(), sizeof(*v), LICHEN_MEM_BULK);
     if (!v) {
         console_reply("no memory");
     } else if (!mesh_rhist_view(prefix, v)) {
@@ -435,5 +435,5 @@ void mesh_rhist_console(uint8_t const *prefix, char const *verb) {
     } else {
         console_slot(v, 0, true);
     }
-    lichen_free(meshcore_self(), v);
+    lichen_free(meshcore_ctx(), v);
 }

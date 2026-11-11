@@ -1,7 +1,9 @@
 // lichen_alloc (#181): heap_caps with the placement rule and the per-app count (mem_book.c) on top. The count is under
 // a spinlock: an allocation can come from any task, and the book's work is a few compares. The book is in internal RAM
-// so a critical section never touches PSRAM (whose cache can be off during a flash write).
+// so a critical section never touches PSRAM (whose cache can be off during a flash write). The owner is the caller's
+// context (#230 E1b), checked before anything is booked: lock-free, no LVGL lock.
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 
 #include "dma_watch.h"
 #include "esp_heap_caps.h"
@@ -20,9 +22,24 @@ static mem_book_t   book; // ~1 KB internal .bss
 static portMUX_TYPE book_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool         went_unbooked; // the owner table was full once: frees without a row are expected from then on
 
+// The label ctx's row gets (NULL for the OS: no quota). False for a stale or made-up ctx: lichen_sys_ctx_resolve has
+// logged (rate-limited) and counted it under what.
+static bool label_of(lichen_ctx_t ctx, char const *what, char const **label) {
+    lichen_app_t const *app = NULL;
+    if (!lichen_sys_ctx_resolve(ctx, &app, what)) {
+        return false;
+    }
+    *label = app ? app->id : NULL;
+    return true;
+}
+
 // align 0: the heap's default
-static void *alloc_aligned(lichen_app_t const *app, size_t align, size_t size, uint32_t flags) {
-    char const *owner    = app ? app->id : MEM_BOOK_OS;
+static void *alloc_aligned(lichen_ctx_t ctx, size_t align, size_t size, uint32_t flags) {
+    char const *label;
+    if (!label_of(ctx, "lichen_alloc", &label)) {
+        return NULL;
+    }
+    char const *owner    = label ? label : MEM_BOOK_OS;
     bool        internal = (flags & LICHEN_MEM_INTERNAL) != 0;
     if (internal == ((flags & LICHEN_MEM_BULK) != 0) || size == 0 || size > UINT32_MAX) {
         ESP_LOGE(TAG, "%s: lichen_alloc of %u B with flags 0x%x refused: BULK or INTERNAL, one of them", owner,
@@ -30,7 +47,7 @@ static void *alloc_aligned(lichen_app_t const *app, size_t align, size_t size, u
         return NULL;
     }
     portENTER_CRITICAL(&book_mux);
-    mem_charge_t charge = mem_book_charge(&book, owner, internal, (uint32_t)size);
+    mem_charge_t charge = mem_book_charge(&book, ctx, label, internal, (uint32_t)size);
     bool         first  = charge == MEM_CHARGE_NO_ROW && !went_unbooked;
     went_unbooked       = went_unbooked || charge == MEM_CHARGE_NO_ROW;
     portEXIT_CRITICAL(&book_mux);
@@ -57,32 +74,33 @@ static void *alloc_aligned(lichen_app_t const *app, size_t align, size_t size, u
     if (charge == MEM_CHARGE_OK) {
         portENTER_CRITICAL(&book_mux);
         if (!p) {
-            mem_book_release(&book, owner, internal, (uint32_t)size);
+            mem_book_release(&book, ctx, internal, (uint32_t)size);
         } else if (got > size) {
-            mem_book_adjust(&book, owner, internal, (uint32_t)(got - size)); // the free gives back what the heap says
+            mem_book_adjust(&book, ctx, internal, (uint32_t)(got - size)); // the free gives back what the heap says
         }
         portEXIT_CRITICAL(&book_mux);
     }
     return p;
 }
 
-void *lichen_alloc(lichen_app_t const *app, size_t size, uint32_t flags) {
-    return alloc_aligned(app, 0, size, flags);
+void *lichen_alloc(lichen_ctx_t ctx, size_t size, uint32_t flags) {
+    return alloc_aligned(ctx, 0, size, flags);
 }
 
-void *lichen_alloc_aligned(lichen_app_t const *app, size_t align, size_t size, uint32_t flags) {
-    return align ? alloc_aligned(app, align, size, flags) : NULL; // 0 is not an alignment: lichen_alloc is the plain one
+void *lichen_alloc_aligned(lichen_ctx_t ctx, size_t align, size_t size, uint32_t flags) {
+    return align ? alloc_aligned(ctx, align, size, flags) : NULL; // 0 is not an alignment: lichen_alloc is the plain one
 }
 
-void lichen_free(lichen_app_t const *app, void *ptr) {
-    if (!ptr) {
-        return;
+void lichen_free(lichen_ctx_t ctx, void *ptr) {
+    char const *label;
+    if (!ptr || !label_of(ctx, "lichen_free", &label)) {
+        return; // refused: the block stays allocated rather than be freed by a context that does not own it
     }
-    bool     internal = !esp_ptr_external_ram(ptr);
-    uint32_t bytes    = (uint32_t)heap_caps_get_allocated_size(ptr);
-    char const *owner = app ? app->id : MEM_BOOK_OS;
+    bool        internal = !esp_ptr_external_ram(ptr);
+    uint32_t    bytes    = (uint32_t)heap_caps_get_allocated_size(ptr);
+    char const *owner    = label ? label : MEM_BOOK_OS;
     portENTER_CRITICAL(&book_mux);
-    mem_release_t rel      = mem_book_release(&book, owner, internal, bytes);
+    mem_release_t rel      = mem_book_release(&book, ctx, internal, bytes);
     bool          unbooked = went_unbooked;
     portEXIT_CRITICAL(&book_mux);
     if (rel == MEM_RELEASE_OVER || (rel == MEM_RELEASE_NO_ROW && !unbooked)) {

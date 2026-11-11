@@ -204,12 +204,12 @@ static void on_delete(lv_event_t *e) {
     if (st->timer) {
         lv_timer_delete(st->timer);
     }
-    lichen_free(meshcore_self(), st);
+    lichen_free(meshcore_ctx(), st);
 }
 
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
-    chats_t  *st     = lichen_alloc(meshcore_self(), sizeof(*st), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    chats_t  *st     = lichen_alloc(meshcore_ctx(), sizeof(*st), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!st) {
         ESP_LOGE(TAG, "no memory for the chats");
         mc_list_label(screen, "Not enough memory to show the chats.", THEME_DIM);

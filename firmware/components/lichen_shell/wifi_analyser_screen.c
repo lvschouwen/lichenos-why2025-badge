@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 #include "lichen_sys_net.h"
 #include "lichen_sys_ui.h"
 #include "lichen_task.h"
@@ -200,7 +201,7 @@ static void take_scan(scan_res_t const *res) {
 static void on_scan_done(void *data) {
     scan_res_t *res = data;
     if (!an || res->gen != gen) { // closed while the scan ran
-        lichen_free(NULL, res);
+        lichen_free(lichen_sys_ctx_os(), res);
         return;
     }
     an->scanning = false;
@@ -215,16 +216,16 @@ static void on_scan_done(void *data) {
         // Not at the user's expense: the next try waits the same 10 s
         set_status("Can't scan now: Wi-Fi is off or a firmware update is running. Trying again.");
     }
-    lichen_free(NULL, res);
+    lichen_free(lichen_sys_ctx_os(), res);
 }
 
 static void scan_task(void *arg) {
-    scan_res_t *res = lichen_alloc(NULL, sizeof(*res), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    scan_res_t *res = lichen_alloc(lichen_sys_ctx_os(), sizeof(*res), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (res) {
         res->gen = (uint32_t)(uintptr_t)arg;
         res->ok  = lichen_sys_wifi_scan_raw(res->aps, MAX_RAW, &res->n);
         if (!lichen_sys_ui_call(on_scan_done, res, 0)) { // waits for the LVGL lock as long as it takes, as before #225
-            lichen_free(NULL, res);                        // not queued: still ours
+            lichen_free(lichen_sys_ctx_os(), res);                        // not queued: still ours
         }
     } else {
         lichen_sys_ui_lock(0); // no memory: the screen must not wait for a scan that will never report
@@ -241,7 +242,7 @@ static void start_scan(void) {
     an->ever     = true;
     an->last_ms  = now_ms();
     set_status("Scanning...");
-    if (!lichen_task_start(NULL, "wifian", scan_task, (void *)(uintptr_t)gen, 4096, LICHEN_PRIO_JOB, NULL)) {
+    if (!lichen_task_start(lichen_ctx_self(), "wifian", scan_task, (void *)(uintptr_t)gen, 4096, LICHEN_PRIO_JOB, NULL)) {
         an->scanning = false;
         ESP_LOGW(TAG, "scan task did not start");
         set_status("Could not start the scan. Trying again.");
@@ -307,14 +308,14 @@ static void on_delete(lv_event_t *e) {
         if (an->timer) {
             lv_timer_delete(an->timer);
         }
-        lichen_free(NULL, an);
+        lichen_free(lichen_sys_ctx_os(), an);
         an = NULL;
     }
 }
 
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
-    an               = lichen_alloc(NULL, sizeof(*an), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // history and scans: PSRAM
+    an               = lichen_alloc(lichen_sys_ctx_os(), sizeof(*an), LICHEN_MEM_BULK | LICHEN_MEM_ZERO); // history and scans: PSRAM
     if (!an) {
         return screen;
     }

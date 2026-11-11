@@ -5,6 +5,7 @@
 #include "app_icons.h"
 #include "screen_ids.h"
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "fonts.h"
@@ -46,7 +47,7 @@ static void load(void) {
         return;
     }
     // s_loaded last: until then another caller would read a half-built index (#118)
-    s_notes = lichen_alloc(NULL, RN_MAX_NOTES * sizeof(rn_note_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    s_notes = lichen_alloc(lichen_sys_ctx_os(), RN_MAX_NOTES * sizeof(rn_note_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!s_notes) {
         ESP_LOGW(TAG, "no memory for the release notes index");
         s_loaded = true;
@@ -163,7 +164,7 @@ typedef struct {
 } row_text_t;
 
 static void on_list_delete(lv_event_t *e) {
-    lichen_free(NULL, lv_event_get_user_data(e));
+    lichen_free(lichen_sys_ctx_os(), lv_event_get_user_data(e));
 }
 
 static void open_notes(lv_obj_t *screen) {
@@ -176,7 +177,7 @@ static void open_notes(lv_obj_t *screen) {
         return;
     }
     // Row texts in PSRAM for as long as the list is open
-    row_text_t *rows = lichen_alloc(NULL, s_count * sizeof(row_text_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    row_text_t *rows = lichen_alloc(lichen_sys_ctx_os(), s_count * sizeof(row_text_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!rows) {
         menu_note(menu, "Not enough memory to list the notes.");
         return;

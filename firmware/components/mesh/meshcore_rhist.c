@@ -300,7 +300,7 @@ static void on_delete(lv_event_t *e) {
     if (v->timer) {
         lv_timer_delete(v->timer);
     }
-    lichen_free(meshcore_self(), v);
+    lichen_free(meshcore_ctx(), v);
 }
 
 static lv_obj_t *add_info(lv_obj_t *menu, char const *label) {
@@ -312,7 +312,7 @@ static lv_obj_t *add_info(lv_obj_t *menu, char const *label) {
 static lv_obj_t *build(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create_named(screen, "Status history", want.name[0] ? want.name : "(no name)");
-    rhv_t    *v      = lichen_alloc(meshcore_self(), sizeof(*v), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    rhv_t    *v      = lichen_alloc(meshcore_ctx(), sizeof(*v), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!v) {
         menu_note(menu, "Not enough memory to show the history.");
         return screen;

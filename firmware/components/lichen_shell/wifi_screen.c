@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_mem.h"
+#include "lichen_sys_app.h"
 #include "lichen_radio.h"
 #include "lichen_sys_net.h"
 #include "lichen_sys_ui.h"
@@ -379,7 +380,7 @@ static void rebuild_rows(void) {
 static void on_scan_done(void *data) {
     scan_result_t *res = data;
     if (!screen || res->gen != gen) { // Esc was pressed (or the screen was reopened) while the scan ran
-        lichen_free(NULL, res);
+        lichen_free(lichen_sys_ctx_os(), res);
         return;
     }
     // The user moved while the scan ran (to Skip, say): the result does not take the focus from them (#128)
@@ -407,16 +408,16 @@ static void on_scan_done(void *data) {
             set_status("Choose a network");
         }
     }
-    lichen_free(NULL, res);
+    lichen_free(lichen_sys_ctx_os(), res);
 }
 
 static void scan_task(void *arg) {
-    scan_result_t *res = lichen_alloc(NULL, sizeof(*res), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    scan_result_t *res = lichen_alloc(lichen_sys_ctx_os(), sizeof(*res), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (res) {
         res->gen = (uint32_t)(uintptr_t)arg;
         res->ok  = lichen_sys_wifi_scan(res->aps, MAX_APS, &res->n);
         if (!lichen_sys_ui_call(on_scan_done, res, 0)) { // waits for the LVGL lock as long as it takes
-            lichen_free(NULL, res);                        // not queued: still ours
+            lichen_free(lichen_sys_ctx_os(), res);                        // not queued: still ours
         }
     }
 }
@@ -431,7 +432,7 @@ static void start_scan(void) {
     lichen_ui_with_group(group, add_scanning_row, NULL); // keeps the group's focus on the list
     focus_at_scan = group ? lv_group_get_focused(group) : NULL;
     set_status("Scanning for networks...");
-    if (!lichen_task_start(NULL, "wifiscan", scan_task, (void *)(uintptr_t)gen, 4096, LICHEN_PRIO_JOB, NULL)) {
+    if (!lichen_task_start(lichen_ctx_self(), "wifiscan", scan_task, (void *)(uintptr_t)gen, 4096, LICHEN_PRIO_JOB, NULL)) {
         ESP_LOGW(TAG, "scan task did not start");
         set_status("Could not start the scan");
     }
