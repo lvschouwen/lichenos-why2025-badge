@@ -126,12 +126,7 @@ bool lichen_task_start_in(lichen_app_t const *app, char const *name, void (*fn)(
     task_stack_t placed = place_stack(asked, stack_bytes); // the heap query stays outside the spinlock
     // The context the task runs for (#230): the app's; for app NULL the caller's own, so a task an app's task or hook
     // starts stays the app's (until E1b these calls still name the owner by pointer)
-    lichen_ctx_t ctx = app ? lichen_sys_app_ctx(app) : lichen_ctx_self();
-    if (ctx == LICHEN_CTX_NONE) {
-        // A struct that has not registered (yet): an ordering slip in the OS, not a made-up context
-        ESP_LOGW(TAG, "%s: task %s: the app is not registered, the task runs for the OS", owner, fitted);
-        ctx = lichen_sys_ctx_os();
-    }
+    lichen_ctx_t ctx = lichen_sys_task_ctx(app);
     portENTER_CRITICAL(&book_mux);
     int slot = task_book_add(&book, owner, fitted, stack_bytes, (task_class_t)prio, placed, fn, arg);
     if (slot >= 0) {

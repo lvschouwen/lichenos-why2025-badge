@@ -210,6 +210,9 @@ or to `lichen_ctx_enter` is refused (the OS's context is used instead), logged a
 `fw app ctx` lists every app's context and the refusals since boot. Never an abort. Until E1e the gate calls still take
 `lichen_app_t const *` (the compat shim maps it to the context); E1b-E1d move them to the context.
 
+Not yet covered: an LVGL event or timer callback an app registers runs as the OS when it fires outside a hook (a key
+press, a timer tick), and so does a `lichen_ui_call` queued from one, until E1b/E1c wrap those registrations.
+
 **Lifecycle (#231, after the MVP):** an app is registered, started, running, suspended (screen off or another app in
 front), stopping (cooperative, with a deadline; the OS never deletes an app's tasks) and stopped. On stop the OS frees
 the app's grants whole (memory, PSRAM quota, booked timers). Two crashes attributed to one app in three boots turn its

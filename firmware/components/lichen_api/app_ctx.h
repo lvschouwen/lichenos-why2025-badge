@@ -54,3 +54,25 @@ void app_ctx_count_refusal(app_ctx_table_t *t, uint32_t ctx);
 // After a refusal: true when it may be logged at now_ms (the first one, then once per APP_CTX_LOG_GAP_MS); *skipped
 // gets how many were not logged since the last logged one. False counts this one as not logged.
 bool app_ctx_log_due(app_ctx_table_t *t, uint32_t now_ms, uint32_t *skipped);
+
+// The current context (#230): where the calling task keeps it (a FreeRTOS thread-local slot in lichen_app.c, a variable
+// in the host test). get returns what set stored last, 0 when nothing was; in_isr says the caller is an interrupt,
+// which has no slot of its own.
+typedef struct {
+    uint32_t (*get)(void);
+    void (*set)(uint32_t ctx);
+    bool (*in_isr)(void);
+} app_ctx_tls_t;
+
+// The context the caller runs for: what was entered, else (nothing entered, or an ISR) the OS's
+uint32_t app_ctx_self(app_ctx_table_t const *t, app_ctx_tls_t const *tls);
+// Makes ctx current and returns the previous value for app_ctx_leave. A ctx that is not valid is counted, *refused set
+// (may be NULL) and the OS's entered instead. In an ISR nothing changes (returns 0).
+uint32_t app_ctx_enter(app_ctx_table_t *t, app_ctx_tls_t const *tls, uint32_t ctx, bool *refused);
+void     app_ctx_leave(app_ctx_tls_t const *tls, uint32_t previous);
+// The context a new task runs for: owner's when owner is not NULL, else the caller's own (a task an app's task starts
+// inherits the app). An owner that never registered gives the OS's, with *unregistered set (may be NULL).
+uint32_t app_ctx_for_task(app_ctx_table_t const *t, app_ctx_tls_t const *tls, void const *owner, bool *unregistered);
+// The owner of ctx's slot whatever its generation (what a refused ctx claims to be): NULL for the OS slot, a free slot
+// or one past the table
+void const *app_ctx_slot_owner(app_ctx_table_t const *t, uint32_t ctx);

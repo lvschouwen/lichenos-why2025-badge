@@ -113,6 +113,92 @@ static void test_log_rate(void) {
     CHECK(app_ctx_log_due(&w, APP_CTX_LOG_GAP_MS, &skipped) && skipped == 1);
 }
 
+
+// ---- the current context, over a fake thread-local slot ----
+
+static uint32_t s_slot;  // the task's slot
+static bool     s_isr;   // "in an interrupt"
+static uint32_t fake_get(void) {
+    return s_slot;
+}
+static void fake_set(uint32_t ctx) {
+    s_slot = ctx;
+}
+static bool fake_isr(void) {
+    return s_isr;
+}
+static app_ctx_tls_t const tls = {.get = fake_get, .set = fake_set, .in_isr = fake_isr};
+
+static void test_enter_leave_nest(void) {
+    app_ctx_table_t t;
+    app_ctx_init(&t, 0x404040u);
+    uint32_t a = app_ctx_add(&t, &app_a, 0x1111u);
+    uint32_t b = app_ctx_add(&t, &app_b, 0x2222u);
+    uint32_t os = app_ctx_os(&t);
+    s_slot = 0;
+    s_isr  = false;
+    CHECK(app_ctx_self(&t, &tls) == os); // nothing entered: the OS
+    bool     refused = true;
+    uint32_t outer   = app_ctx_enter(&t, &tls, a, &refused);
+    CHECK(!refused && outer == 0 && app_ctx_self(&t, &tls) == a);
+    uint32_t inner = app_ctx_enter(&t, &tls, b, NULL); // a's hook opens b's page
+    CHECK(inner == a && app_ctx_self(&t, &tls) == b);
+    app_ctx_leave(&tls, inner);
+    CHECK(app_ctx_self(&t, &tls) == a); // back to a, not to the OS
+    app_ctx_leave(&tls, outer);
+    CHECK(app_ctx_self(&t, &tls) == os && s_slot == 0);
+    CHECK(t.refused == 0);
+}
+
+static void test_enter_refused_falls_back_to_os(void) {
+    app_ctx_table_t t;
+    app_ctx_init(&t, 0x505050u);
+    uint32_t a  = app_ctx_add(&t, &app_a, 0x3333u);
+    uint32_t os = app_ctx_os(&t);
+    s_slot      = 0;
+    s_isr       = false;
+    uint32_t outer = app_ctx_enter(&t, &tls, a, NULL);
+    bool     refused = false;
+    uint32_t prev    = app_ctx_enter(&t, &tls, a ^ 0x100u, &refused); // a made-up generation
+    CHECK(refused && prev == a && app_ctx_self(&t, &tls) == os && t.refused == 1);
+    app_ctx_leave(&tls, prev);
+    CHECK(app_ctx_self(&t, &tls) == a);
+    app_ctx_leave(&tls, outer);
+    CHECK(app_ctx_slot_owner(&t, a ^ 0x100u) == &app_a); // what it claimed to be, for the log
+    CHECK(app_ctx_slot_owner(&t, os) == NULL && app_ctx_slot_owner(&t, (5u << 8) | 9u) == NULL);
+}
+
+static void test_isr(void) {
+    app_ctx_table_t t;
+    app_ctx_init(&t, 0x606060u);
+    uint32_t a = app_ctx_add(&t, &app_a, 0x4444u);
+    s_slot     = a; // the interrupted task runs for a
+    s_isr      = true;
+    CHECK(app_ctx_self(&t, &tls) == app_ctx_os(&t)); // an ISR has no slot: the OS
+    bool refused = true;
+    CHECK(app_ctx_enter(&t, &tls, app_ctx_os(&t), &refused) == 0 && !refused && s_slot == a); // nothing changes
+    app_ctx_leave(&tls, 0);
+    CHECK(s_slot == a);
+    s_isr = false;
+}
+
+static void test_task_inherit(void) {
+    app_ctx_table_t t;
+    app_ctx_init(&t, 0x707070u);
+    uint32_t a  = app_ctx_add(&t, &app_a, 0x5555u);
+    uint32_t b  = app_ctx_add(&t, &app_b, 0x6666u);
+    uint32_t os = app_ctx_os(&t);
+    s_slot      = 0;
+    bool unregistered = true;
+    CHECK(app_ctx_for_task(&t, &tls, NULL, &unregistered) == os && !unregistered); // the OS starts an OS task
+    CHECK(app_ctx_for_task(&t, &tls, &app_b, NULL) == b);
+    s_slot = a; // an app's task (or hook) starts one
+    CHECK(app_ctx_for_task(&t, &tls, NULL, NULL) == a);   // NULL inherits the app
+    CHECK(app_ctx_for_task(&t, &tls, &app_b, NULL) == b); // a named owner wins (the compat shim, until E1b)
+    CHECK(app_ctx_for_task(&t, &tls, &app_c, &unregistered) == os && unregistered); // never registered: the OS
+    s_slot = 0;
+}
+
 int main(void) {
     test_register();
     test_zero_draw_never_gives_ctx_zero();
@@ -121,6 +207,10 @@ int main(void) {
     test_refused();
     test_other_boot();
     test_log_rate();
+    test_enter_leave_nest();
+    test_enter_refused_falls_back_to_os();
+    test_isr();
+    test_task_inherit();
     if (failures) {
         printf("app_ctx_test: %d failure(s)\n", failures);
         return 1;

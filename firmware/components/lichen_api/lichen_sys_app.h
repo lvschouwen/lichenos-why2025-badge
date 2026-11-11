@@ -25,8 +25,11 @@ lichen_ctx_t lichen_ctx_enter(lichen_ctx_t ctx);
 void lichen_ctx_leave(lichen_ctx_t previous);
 
 // The compat shim until #230 E1e: the context of a registered app's struct, the OS's for NULL, LICHEN_CTX_NONE for
-// a struct that never registered. Any task.
+// a struct that never registered (logged once per struct). Any task.
 lichen_ctx_t lichen_sys_app_ctx(lichen_app_t const *app);
+// The context a task lichen_task_start makes runs for: app's, or for app NULL the calling task's own (inherited); the
+// OS's for a struct that never registered. Any task.
+lichen_ctx_t lichen_sys_task_ctx(lichen_app_t const *app);
 // The OS's own context (drawn at boot like the apps'). Any task.
 lichen_ctx_t lichen_sys_ctx_os(void);
 // The owner of ctx: true and *app (NULL for the OS) when ctx is valid; false when it is stale or made up, which is

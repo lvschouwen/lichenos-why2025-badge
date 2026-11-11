@@ -98,3 +98,45 @@ bool app_ctx_log_due(app_ctx_table_t *t, uint32_t now_ms, uint32_t *skipped) {
     }
     return true;
 }
+
+uint32_t app_ctx_self(app_ctx_table_t const *t, app_ctx_tls_t const *tls) {
+    uint32_t ctx = tls->in_isr() ? APP_CTX_NONE : tls->get();
+    return ctx != APP_CTX_NONE ? ctx : app_ctx_os(t);
+}
+
+uint32_t app_ctx_enter(app_ctx_table_t *t, app_ctx_tls_t const *tls, uint32_t ctx, bool *refused) {
+    if (refused) {
+        *refused = false;
+    }
+    if (tls->in_isr()) {
+        return APP_CTX_NONE;
+    }
+    uint32_t previous = tls->get();
+    if (!app_ctx_resolve(t, ctx, NULL)) {
+        if (refused) {
+            *refused = true;
+        }
+        ctx = app_ctx_os(t);
+    }
+    tls->set(ctx);
+    return previous;
+}
+
+void app_ctx_leave(app_ctx_tls_t const *tls, uint32_t previous) {
+    if (!tls->in_isr()) {
+        tls->set(previous);
+    }
+}
+
+uint32_t app_ctx_for_task(app_ctx_table_t const *t, app_ctx_tls_t const *tls, void const *owner, bool *unregistered) {
+    uint32_t ctx = owner ? app_ctx_of(t, owner) : app_ctx_self(t, tls);
+    if (unregistered) {
+        *unregistered = ctx == APP_CTX_NONE;
+    }
+    return ctx != APP_CTX_NONE ? ctx : app_ctx_os(t);
+}
+
+void const *app_ctx_slot_owner(app_ctx_table_t const *t, uint32_t ctx) {
+    uint32_t slot = ctx & ((1u << APP_CTX_SLOT_BITS) - 1u);
+    return slot >= 1u && slot <= t->apps ? t->owner[slot] : NULL;
+}

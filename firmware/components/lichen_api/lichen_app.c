@@ -68,45 +68,93 @@ lichen_app_t const *lichen_app_by_id(char const *id) {
 
 // ---- the current app -----------------------------------------------------------------------------------------------
 
-static lichen_ctx_t tls_get(void) {
-    return (lichen_ctx_t)(uintptr_t)pvTaskGetThreadLocalStoragePointer(NULL, CTX_TLS_INDEX);
+static uint32_t tls_get(void) {
+    return (uint32_t)(uintptr_t)pvTaskGetThreadLocalStoragePointer(NULL, CTX_TLS_INDEX);
 }
+
+static void tls_set(uint32_t ctx) {
+    vTaskSetThreadLocalStoragePointer(NULL, CTX_TLS_INDEX, (void *)(uintptr_t)ctx);
+}
+
+static bool in_isr(void) {
+    return xPortInIsrContext();
+}
+
+static app_ctx_tls_t const s_tls = {.get = tls_get, .set = tls_set, .in_isr = in_isr};
 
 lichen_ctx_t lichen_ctx_self(void) {
-    lichen_ctx_t ctx = xPortInIsrContext() ? LICHEN_CTX_NONE : tls_get();
-    return ctx != LICHEN_CTX_NONE ? ctx : app_ctx_os(table()); // a task nobody entered runs for the OS
+    return app_ctx_self(table(), &s_tls);
 }
 
-// A refusal the table has counted: logged when the rate limit lets it (never from an ISR)
-static void log_refusal(lichen_ctx_t ctx, char const *what) {
+static char const *app_name(void const *owner) {
+    lichen_app_t const *app = owner;
+    return app ? (app->id ? app->id : app->name) : "the OS";
+}
+
+// A refusal the table has counted: logged when the rate limit lets it (never from an ISR), with the app the ctx
+// claims to be (its slot's) and the one the caller runs for
+static void log_refusal(lichen_ctx_t ctx, char const *what, lichen_ctx_t caller_ctx) {
     uint32_t skipped = 0;
-    if (!xPortInIsrContext() && app_ctx_log_due(&s_table, (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount()), &skipped)) {
-        ESP_LOGW(TAG, "%s: context 0x%08lx refused (stale or made up; %lu more not logged since the last)",
-                 what ? what : "?", (unsigned long)ctx, (unsigned long)skipped);
+    if (in_isr() || !app_ctx_log_due(&s_table, (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount()), &skipped)) {
+        return;
     }
+    void const *claimed = app_ctx_slot_owner(&s_table, ctx);
+    void const *caller  = app_ctx_slot_owner(&s_table, caller_ctx);
+    ESP_LOGW(TAG, "%s: context 0x%08lx refused (claims %s, called for %s; stale or made up; %lu more not logged "
+                  "since the last)", what ? what : "?", (unsigned long)ctx, claimed || (ctx & 0xffu) == 0 ? app_name(claimed) : "no app",
+             app_name(caller), (unsigned long)skipped);
 }
 
 lichen_ctx_t lichen_ctx_enter(lichen_ctx_t ctx) {
-    if (xPortInIsrContext()) {
-        return LICHEN_CTX_NONE;
+    bool         refused  = false;
+    lichen_ctx_t previous = app_ctx_enter(table(), &s_tls, ctx, &refused);
+    if (refused) {
+        log_refusal(ctx, "enter", previous); // the caller's, not the OS's entered instead
     }
-    lichen_ctx_t previous = tls_get();
-    if (!app_ctx_resolve(table(), ctx, NULL)) {
-        log_refusal(ctx, "enter");
-        ctx = app_ctx_os(&s_table);
-    }
-    vTaskSetThreadLocalStoragePointer(NULL, CTX_TLS_INDEX, (void *)(uintptr_t)ctx);
     return previous;
 }
 
 void lichen_ctx_leave(lichen_ctx_t previous) {
-    if (!xPortInIsrContext()) {
-        vTaskSetThreadLocalStoragePointer(NULL, CTX_TLS_INDEX, (void *)(uintptr_t)previous);
+    app_ctx_leave(&s_tls, previous);
+}
+
+// An app struct that never registered is an ordering slip in the OS: said once per struct (a few remembered)
+#define UNREGISTERED_SEEN 4
+static void const  *s_unregistered[UNREGISTERED_SEEN];
+static portMUX_TYPE s_seen_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void warn_unregistered(lichen_app_t const *app) {
+    bool first = true;
+    portENTER_CRITICAL_SAFE(&s_seen_mux);
+    for (size_t i = 0; i < UNREGISTERED_SEEN && first; i++) {
+        if (s_unregistered[i] == app) {
+            first = false;
+        } else if (!s_unregistered[i]) {
+            s_unregistered[i] = app;
+            break;
+        }
+    }
+    portEXIT_CRITICAL_SAFE(&s_seen_mux);
+    if (first && !in_isr()) {
+        ESP_LOGW(TAG, "app %s is not registered: it runs for the OS", app_name(app));
     }
 }
 
 lichen_ctx_t lichen_sys_app_ctx(lichen_app_t const *app) {
-    return app_ctx_of(table(), app);
+    lichen_ctx_t ctx = app_ctx_of(table(), app);
+    if (ctx == LICHEN_CTX_NONE) {
+        warn_unregistered(app);
+    }
+    return ctx;
+}
+
+lichen_ctx_t lichen_sys_task_ctx(lichen_app_t const *app) {
+    bool         unregistered = false;
+    lichen_ctx_t ctx          = app_ctx_for_task(table(), &s_tls, app, &unregistered);
+    if (unregistered) {
+        warn_unregistered(app);
+    }
+    return ctx;
 }
 
 lichen_ctx_t lichen_sys_ctx_os(void) {
@@ -116,7 +164,7 @@ lichen_ctx_t lichen_sys_ctx_os(void) {
 bool lichen_sys_ctx_resolve(lichen_ctx_t ctx, lichen_app_t const **app, char const *what) {
     void const *owner = NULL;
     if (!app_ctx_resolve(table(), ctx, &owner)) {
-        log_refusal(ctx, what);
+        log_refusal(ctx, what, lichen_ctx_self());
         return false;
     }
     if (app) {
