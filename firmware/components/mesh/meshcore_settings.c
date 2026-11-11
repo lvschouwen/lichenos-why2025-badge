@@ -864,6 +864,7 @@ static lv_obj_t *build_radio(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Region & radio");
     menu_filter_t *filter = menu_filter_create(screen, menu, radio_row_matches, NULL); // #32
+    meshcore_applied_notes(menu); // what the C6 runs, and whether it is what MeshCore asks for (#335)
     menu_note(menu, "Presets");
     for (size_t i = 0; i < radio_preset_count() && i < MAX_PRESETS; i++) {
         preset_rows[i] = menu_add(menu, radio_preset_at(i)->title, "", pick_preset, (void *)(uintptr_t)i);
@@ -1038,6 +1039,7 @@ static lv_obj_t *build_custom(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Custom radio");
     menu_note(menu, "Enter changes a value. Nothing is used until Apply.");
+    meshcore_applied_notes(menu); // #335
     freq_row    = menu_add(menu, "Frequency", "", edit_freq, NULL);
     bw_row      = menu_add(menu, "Bandwidth", "", next_bw, NULL);
     sf_row      = menu_add(menu, "Spreading factor", "", next_sf, NULL);

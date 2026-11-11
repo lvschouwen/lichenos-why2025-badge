@@ -46,3 +46,6 @@ void meshcore_radar_open(void *arg);
 // Air log (#165): the received packets, headers only, newest first (meshcore_airlog.c). Opened from the app's Settings
 // page; a menu row callback.
 void meshcore_airlog_open(void *arg);
+// The applied radio (#335, meshcore_applied.c): "LoRa radio now: ..." from the registry cache and, while it differs
+// from MeshCore's settings, an amber "Differs: MeshCore asks for ..." note; both refresh each second while the menu is up
+void meshcore_applied_notes(lv_obj_t *menu);

@@ -11,6 +11,7 @@
 #include "menu.h"
 #include "mesh.h"
 #include "mesh_format.h"
+#include "mesh_radio_line.h"
 #include "meshcore_run.h"
 #include "meshcore_screens.h"
 #include "meshcore_settings.h"
@@ -26,8 +27,6 @@
 static char const TAG[] = "meshcore";
 
 static lichen_app_t const *self(void); // the app table entry, defined with the rest of the table at the end
-
-#define SCREEN_WAIT_MS  20  // for the mesh lock; LVGL (and with it the keys) must not wait on MeshCore's file saves
 
 // ---- the icon (home.html <g id="mc">: two arcs over a dot, in a 60x60 view) ---------------------------------------
 
@@ -280,27 +279,41 @@ static lv_obj_t *add_row(lv_obj_t *page, char const *key, char const *value) {
     return v;
 }
 
+// What the radio runs now (#335): the C6's applied lora.* from the registry cache, not MeshCore's NodePrefs (those are
+// what it asks for; its radio pages show both). Never waits: safe on the LVGL task.
 static void radio_texts(char *text, size_t cap, char *power, size_t power_cap) {
-    mesh_radio_t radio;
-    if (mesh_radio_params(&radio, SCREEN_WAIT_MS)) {
-        mesh_format_radio(text, cap, (double)radio.freq_hz / 1e6, (double)radio.bw_hz / 1e3, radio.sf, radio.cr);
-        snprintf(power, power_cap, "%d dBm", radio.tx_dbm);
-    } else {
-        strlcpy(text, "-", cap);
+    mesh_applied_t applied;
+    mesh_applied_read(&applied);
+    mesh_applied_radio(&applied, text, cap);
+    mesh_applied_power(&applied, power, power_cap);
+}
+
+static void set_if_changed(lv_obj_t *label, char const *text) {
+    if (strcmp(lv_label_get_text(label), text) != 0) { // the rows wrap: an unchanged rewrite would relayout the page
+        lv_label_set_text(label, text);
     }
 }
 
 void meshcore_about_refresh(void) {
     if (about_radio && about_power) {
-        char text[96], power[16] = "-";
+        char text[96], power[48];
         radio_texts(text, sizeof(text), power, sizeof(power));
-        lv_label_set_text(about_radio, text);
-        lv_label_set_text(about_power, power);
+        set_if_changed(about_radio, text);
+        set_if_changed(about_power, power);
     }
 }
 
+// The registry polls the C6 about once a second: the rows follow it while the page is up
+static void about_tick(lv_timer_t *timer) {
+    (void)timer;
+    meshcore_about_refresh();
+}
+
 static void on_about_delete(lv_event_t *e) {
-    (void)e;
+    lv_timer_t *timer = lv_event_get_user_data(e);
+    if (timer) {
+        lv_timer_delete(timer);
+    }
     about_radio = NULL;
     about_power = NULL;
 }
@@ -313,11 +326,11 @@ static void about(lv_obj_t *page) {
     }
     add_row(page, "Node ID", text);
 
-    char power[16] = "-";
+    char power[48];
     radio_texts(text, sizeof(text), power, sizeof(power));
     about_radio = add_row(page, "Radio", text);
     about_power = add_row(page, "TX power", power);
-    lv_obj_add_event_cb(about_radio, on_about_delete, LV_EVENT_DELETE, NULL);
+    lv_obj_add_event_cb(about_radio, on_about_delete, LV_EVENT_DELETE, lv_timer_create(about_tick, 1000, NULL));
     snprintf(text, sizeof(text), "MeshCore %s", mesh_firmware_version());
     add_row(page, "Version", text);
 }

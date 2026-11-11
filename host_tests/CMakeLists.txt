@@ -774,6 +774,16 @@ target_include_directories(mesh_format_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(mesh_format_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_format_test COMMAND mesh_format_test)
 
+add_executable(mesh_applied_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/mesh_applied_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_applied.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_format.c
+)
+target_include_directories(mesh_applied_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_applied_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(mesh_applied_test PRIVATE m)
+add_test(NAME mesh_applied_test COMMAND mesh_applied_test)
+
 add_executable(mesh_contact_fmt_test
     ${CMAKE_CURRENT_SOURCE_DIR}/mesh_contact_fmt_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_contact_fmt.c
