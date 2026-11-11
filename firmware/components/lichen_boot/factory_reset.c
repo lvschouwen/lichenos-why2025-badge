@@ -54,7 +54,8 @@ bool factory_reset_request(factory_level_t level) {
     if (level == FACTORY_NONE || nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
         return false;
     }
-    bool ok = fw_nvs_ok(TAG, FACTORY_PENDING_KEY, nvs_set_u8(nvs, FACTORY_PENDING_KEY, (uint8_t)level)) &&
+    bool ok = fw_nvs_ok(TAG, FACTORY_WIFI_WIPE_KEY, nvs_set_u8(nvs, FACTORY_WIFI_WIPE_KEY, 1)) && // first: pending implies it
+              fw_nvs_ok(TAG, FACTORY_PENDING_KEY, nvs_set_u8(nvs, FACTORY_PENDING_KEY, (uint8_t)level)) &&
               fw_nvs_ok(TAG, FACTORY_PENDING_KEY, nvs_commit(nvs));
     nvs_close(nvs);
     ESP_LOG_LEVEL(

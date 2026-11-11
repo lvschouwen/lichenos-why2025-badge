@@ -36,6 +36,11 @@ typedef struct {
     factory_level_t level;
 } factory_boot_t;
 
+// Set by factory_reset_request at both levels and kept through the erase: the Wi-Fi driver (on the C6) holds its own copy
+// of the credentials, and esp_wifi_restore needs the driver up, which it is not at the early-boot erase. wifi_service
+// does the restore once the driver is initialised and then erases the key; a failed restore leaves it for the next boot.
+#define FACTORY_WIFI_WIPE_KEY "wifi_drv_wipe"
+
 // The drive's erase is tried this many boots before the reset gives up with an error notice
 #define FACTORY_TRIES_KEY     "fr_tries"
 #define FACTORY_STORAGE_TRIES 3

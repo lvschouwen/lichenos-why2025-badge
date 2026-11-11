@@ -343,6 +343,14 @@ bool wifi_cred_save(char const *ssid, char const *pass) {
     return ok;
 }
 
+bool wifi_driver_wipe_pending(void) {
+    return store && store->get_u8("wifi_drv_wipe", 0) != 0; // factory_plan.h FACTORY_WIFI_WIPE_KEY (lichen_net cannot include lichen_boot)
+}
+
+bool wifi_driver_wipe_done(void) {
+    return store && store->erase("wifi_drv_wipe");
+}
+
 bool wifi_cred_clear(void) {
     wifi_saved_t none   = {0};
     bool         active = set_active(NULL, ""); // both run: a failed erase of one never keeps the others

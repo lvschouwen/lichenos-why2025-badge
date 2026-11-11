@@ -1,6 +1,7 @@
 #include "factory_plan.h"
 
 #include <stdio.h>
+#include <string.h>
 
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
@@ -53,8 +54,15 @@ static void badge_state_stays(void) {
     CHECK(!factory_nvs_erases("a.meshcore", "mc_advlast", A));
 }
 
+// A reset orders the Wi-Fi driver store's clearing (#342): the order survives the erase, so wifi_service can act on it
+static void wifi_wipe_order_survives(void) {
+    CHECK(strcmp(FACTORY_WIFI_WIPE_KEY, "wifi_drv_wipe") == 0); // wifi_list.c reads the same literal
+    CHECK(!factory_nvs_erases("badge_fw", FACTORY_WIFI_WIPE_KEY, S));
+    CHECK(!factory_nvs_erases("badge_fw", FACTORY_WIFI_WIPE_KEY, A));
+}
+
 static void identity_only_at_all(void) {
-    CHECK(!factory_nvs_erases("badge_fw", "identity", S));
+    CHECK(factory_nvs_erases("badge_fw", "identity", S)); // a stale private-key copy goes at every level
     CHECK(factory_nvs_erases("badge_fw", "identity", A));
 }
 
@@ -211,6 +219,7 @@ int main(void) {
     settings_go_at_both_levels();
     badge_state_stays();
     identity_only_at_all();
+    wifi_wipe_order_survives();
     other_namespaces_stay();
     badgevms_leftovers_go();
     storage_keeps_os_files();

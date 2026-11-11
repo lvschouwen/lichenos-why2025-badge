@@ -91,6 +91,9 @@ bool settings_set_str(char const *key, char const *value) {
 
 bool settings_get_blob(char const *key, void *out, size_t size) {
     nvs_handle_t nvs;
+    if (settings_key_secret(FW_NVS_NAMESPACE, key)) { // a secret is never handed out through the plain API
+        return false;
+    }
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
         return false;
     }

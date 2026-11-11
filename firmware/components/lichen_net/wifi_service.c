@@ -374,6 +374,22 @@ static bool wifi_failed(char const *reason) {
     return false;
 }
 
+// After a factory reset (#342): the C6 driver keeps its own copy of the credentials; clear it so old ones never survive.
+// The restore also resets the driver's storage mode, so it comes before set_storage(RAM). Retried next boot on failure.
+static void wipe_driver_store_if_ordered(void) {
+    if (!wifi_driver_wipe_pending()) {
+        return;
+    }
+    esp_err_t err = esp_wifi_restore();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Wi-Fi driver restore: %s", esp_err_to_name(err));
+        return;
+    }
+    if (!wifi_driver_wipe_done()) {
+        ESP_LOGW(TAG, "Wi-Fi driver restore done but its order is not cleared: it runs again next boot");
+    }
+}
+
 typedef enum { DRV_STARTED, DRV_NO_CREDENTIALS, DRV_FAILED, DRV_OFF } drv_result_t;
 static drv_result_t wifi_driver_up(char const **why);
 
@@ -426,6 +442,7 @@ static drv_result_t wifi_driver_up(char const **why) {
         ESP_LOGE(TAG, "Wi-Fi init: %s", esp_err_to_name(err));
         return DRV_FAILED;
     }
+    wipe_driver_store_if_ordered();
     if ((err = esp_wifi_set_mode(WIFI_MODE_STA)) != ESP_OK) {
         ESP_LOGE(TAG, "Wi-Fi init: %s", esp_err_to_name(err));
         return DRV_FAILED;
@@ -858,8 +875,8 @@ static void handle_forget(void) {
     wifi_link_down(&link_ap);
     esp_wifi_disconnect();
     apply_config("", ""); // the driver's RAM copy goes too
-    // Whatever the C6's driver persisted in its own flash earlier (BadgeVMS days, older firmware) goes as well. This
-    // resets the driver's other settings to defaults, which is why it only runs here and once after an update.
+    // Whatever the C6's driver persisted in its own flash goes as well. This resets the driver's other settings to
+    // defaults, which is why it only runs here and after a factory reset (wipe_driver_store_if_ordered).
     esp_err_t err = esp_wifi_restore();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Wi-Fi driver restore: %s", esp_err_to_name(err));

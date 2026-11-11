@@ -132,6 +132,7 @@ static void unbound(void) {
     CHECK(!wifi_saved_load(&l) && l.n == 0);
     CHECK(!wifi_cred_save("net", "password"));
     CHECK(!wifi_cred_clear());
+    CHECK(!wifi_driver_wipe_pending() && !wifi_driver_wipe_done());
 }
 
 // #235: the passwords are secrets (settings_secret.c), the SSIDs plain settings under their old names, so what an
@@ -357,6 +358,12 @@ int main(void) {
 
     CHECK(wifi_cred_clear());
     CHECK(!wifi_cred_load(ssid_back, pass_back));
+
+    // A factory reset's order to clear the driver store (#342): pending until done, and a forget does not clear it
+    CHECK(!wifi_driver_wipe_pending());
+    CHECK(plain_set_u8("wifi_drv_wipe", 1) && wifi_driver_wipe_pending());
+    CHECK(wifi_cred_clear() && wifi_driver_wipe_pending());
+    CHECK(wifi_driver_wipe_done() && !wifi_driver_wipe_pending());
 
     secrets_and_defaults();
     saved_networks();

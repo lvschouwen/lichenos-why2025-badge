@@ -19,12 +19,12 @@ static int failures;
     } while (0)
 
 static void class_members(void) {
-    char const *const passwords[] = {"wifi_pass", "wifi_p0", "wifi_p1", "wifi_p2", "wifi_p3", "wifi_p4", "ota_token"};
+    char const *const passwords[] = {"wifi_pass", "wifi_p0", "wifi_p1", "wifi_p2", "wifi_p3", "wifi_p4", "ota_token", "identity"};
     for (size_t i = 0; i < sizeof(passwords) / sizeof(passwords[0]); i++) {
         CHECK(settings_key_secret("badge_fw", passwords[i]));
     }
     CHECK(settings_secret_count() == sizeof(passwords) / sizeof(passwords[0]));
-    CHECK(settings_secret_count() == WIFI_SAVED_MAX + 2); // one per saved network, the pair in use, the OTA token
+    CHECK(settings_secret_count() == WIFI_SAVED_MAX + 3); // one per saved network, the pair in use, the OTA token, the old identity
     CHECK(settings_secret_at(settings_secret_count()) == NULL);
     // The SSIDs are plain settings; another namespace's key of the same name is not ours
     CHECK(!settings_key_secret("badge_fw", "wifi_ssid") && !settings_key_secret("badge_fw", "wifi_s0"));

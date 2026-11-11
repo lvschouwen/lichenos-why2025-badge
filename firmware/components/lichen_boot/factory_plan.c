@@ -15,6 +15,7 @@ static char const *const keep_keys[] = {
     "batt_seen",                                       // battery safety (#10)
     "clock_src",                                       // where the running clock's time came from (#64)
     "r16",                                             // R16 fitted: a hardware record (backlight_r16_hold)
+    FACTORY_WIFI_WIPE_KEY,                             // the reset's order to clear the Wi-Fi driver store, until done
 };
 
 // App keys that describe the badge's airtime rather than a choice: kept like keep_keys, the rest of the app's
@@ -77,9 +78,6 @@ bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level) 
     }
     if (strcmp(key, FACTORY_PENDING_KEY) == 0 || strcmp(key, FACTORY_TRIES_KEY) == 0) {
         return false; // factory_reset.c's own state
-    }
-    if (strcmp(key, "identity") == 0) {
-        return level == FACTORY_ALL;
     }
     return !listed(keep_keys, sizeof(keep_keys) / sizeof(keep_keys[0]), key);
 }

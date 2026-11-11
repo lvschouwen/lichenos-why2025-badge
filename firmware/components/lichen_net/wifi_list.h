@@ -44,6 +44,10 @@ void wifi_list_bind_store(wifi_store_t const *store);
 bool     wifi_cred_save(char const *ssid, char const *pass);
 bool     wifi_cred_load(char ssid[33], char pass[64]);
 bool     wifi_cred_clear(void);
+// A factory reset orders the driver's own copy of the credentials cleared (badge_fw wifi_drv_wipe, see factory_plan.h).
+// Pending reads false with no store bound. done erases the order; the caller does that only after esp_wifi_restore worked.
+bool wifi_driver_wipe_pending(void);
+bool wifi_driver_wipe_done(void);
 uint32_t wifi_cred_generation(void);
 
 // The saved networks (#160), keys wifi_s0..wifi_s4 (plain) / wifi_p0..wifi_p4 (secret), most recently joined first. wifi_ssid/wifi_pass
