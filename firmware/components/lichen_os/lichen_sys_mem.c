@@ -3,6 +3,7 @@
 #include "lichen_sys_mem.h"
 
 #include "c6link.h"
+#include "psram_speed.h"
 
 #include "esp_heap_caps.h"
 
@@ -63,5 +64,9 @@ void lichen_sys_mem_walk(lichen_sys_mem_kind_t kind, lichen_sys_mem_walk_fn fn, 
 }
 
 bool lichen_sys_mem_check(lichen_sys_mem_kind_t kind) {
-    return heap_caps_check_integrity(caps_of(kind), true);
+    bool ok = heap_caps_check_integrity(caps_of(kind), true);
+    if (!ok && kind == LICHEN_SYS_MEM_PSRAM) {
+        psram_speed_report(PSRAM_FAIL_HEAP); // a corrupt PSRAM heap (the stress run's check, #353): at 120 MHz back at 80
+    }
+    return ok;
 }

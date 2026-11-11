@@ -23,8 +23,9 @@ uint32_t psram_speed_carrier_raw(void);
 // psram_speed_logic.h (bad bytes in this boot's check at 120 = back at 80; 120 wanted at a boot at 80 = arm and restart
 // once, or after a crash at the next clean restart), registers the shutdown hook that keeps a clean restart at 120 MHz.
 // image_on_trial answers whether the running image may still be on trial (ota_image_trial_maybe, #285): no restart
-// for the speed while it may be, as that would roll the image back. NULL counts as on trial.
-void psram_speed_boot(bool (*image_on_trial)(void));
+// for the speed while it may be, as that would roll the image back. NULL counts as on trial. dump_fresh answers whether
+// the core dump is new (crash_dump_fresh): a reason-7 reset is a crash only then. NULL: never.
+void psram_speed_boot(bool (*image_on_trial)(void), bool (*dump_fresh)(void));
 
 // Guard task, every ~100 ms (works once a second): judges reported evidence, runs the PSRAM heap check once a minute at
 // 120 MHz, starts the arm / leave that had to wait for the image to be valid, clears the arm count of a settled boot.
@@ -34,8 +35,9 @@ void psram_speed_tick(void);
 // PSRAM evidence seen on any task (a canary flip, a failed DMA gate round): at 120 MHz the tick records the fall and
 // restarts at 80. The first report of a boot is the one recorded. Any task, no lock, no NVS.
 void psram_speed_report(psram_fail_kind_t kind);
-// A DMA gate round's result: a failed one at 120 MHz is evidence (console: say so on the console first)
-void psram_speed_gate_result(bool failed, bool console);
+// A DMA gate round's PSRAM verdict (psram_dma_evidence: bad PSRAM bytes, not card or DMA errors): evidence at 120 MHz
+// (console: say so on the console first)
+void psram_speed_gate_result(bool bad_bytes, bool console);
 // The badge fell back to 80 MHz on evidence and stays there until a speed is chosen; why gets the notice text
 bool psram_speed_fell(char *why, size_t cap);
 

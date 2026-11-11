@@ -58,8 +58,14 @@ void psram_speed_rec_encode(psram_speed_rec_t const *r, uint8_t out[PSRAM_SPEED_
     memcpy(out + 16, r->last.fw, strnlen(r->last.fw, PSRAM_FAIL_FW_MAX)); // out[31] stays 0
 }
 
+#define V3_SIZE 36
+
 void psram_speed_rec_decode(uint8_t const *in, size_t size, psram_speed_rec_t *r) {
     *r = psram_speed_rec_default();
+    if (size == V3_SIZE && in[4] == 3) { // the trial's record: only a choice of 80 without a fall survives
+        r->want = in[0] == 80 && in[2] == 0 ? 80 : 120;
+        return;
+    }
     if (size == PSRAM_SPEED_REC_SIZE && in[4] == PSRAM_SPEED_REC_VERSION) {
         *r = (psram_speed_rec_t){.want = in[0], .failed = in[1], .arms = in[2]};
         r->last.kind     = in[5];
@@ -106,9 +112,10 @@ psram_speed_act_t psram_speed_evidence(psram_speed_rec_t *r, unsigned running_mh
     return PSRAM_SPEED_ACT_FALL80;
 }
 
-// 120 wanted at a boot at 80: an arm restart, unless this session is better left at 80 until a clean restart
+// 120 wanted at a boot at 80: an arm restart, unless this session is better left at 80 until a clean restart. The crash
+// is classified here, before the arm decision, so a re-arm after a recorded crash (Lucas, pending) is a branch below.
 static psram_speed_act_t arm_at_80(psram_speed_rec_t *r, psram_fail_ctx_t const *ctx) {
-    if (psram_speed_reset_is_crash(ctx->reset)) {
+    if (psram_speed_reset_crashed(ctx->reset, ctx->fresh_dump)) {
         return PSRAM_SPEED_ACT_KEEP120; // no evidence against 120, but no crash loop through an arm restart either
     }
     if (r->arms >= PSRAM_SPEED_MAX_ARMS) {
@@ -129,7 +136,24 @@ psram_speed_act_t psram_speed_boot_decide(psram_speed_rec_t *r, unsigned running
         }
         return evidence != PSRAM_FAIL_NONE ? psram_speed_evidence(r, running_mhz, evidence, ctx) : PSRAM_SPEED_ACT_NONE;
     }
-    return wants_120(r) ? arm_at_80(r, ctx) : PSRAM_SPEED_ACT_NONE;
+    if (!wants_120(r)) {
+        return PSRAM_SPEED_ACT_NONE;
+    }
+    if (kind_known(ctx->carried)) { // the last boot fell at 120 but could not save it: record it, never arm into it
+        psram_speed_evidence(r, 120, (psram_fail_kind_t)ctx->carried, ctx);
+        return PSRAM_SPEED_ACT_NONE;
+    }
+    return arm_at_80(r, ctx);
+}
+
+uint32_t psram_speed_fall_word(psram_fail_kind_t kind) {
+    return (PSRAM_SPEED_FALL_TAG << 16) | (uint32_t)kind;
+}
+
+psram_fail_kind_t psram_speed_carried_fall(uint32_t carrier) {
+    uint8_t kind = (uint8_t)(carrier & 0xffu);
+    return (carrier >> 16) == PSRAM_SPEED_FALL_TAG && (carrier & 0xff00u) == 0 && kind_known(kind) ? (psram_fail_kind_t)kind
+                                                                                                    : PSRAM_FAIL_NONE;
 }
 
 psram_speed_cmd_t psram_speed_parse(char const *args, unsigned *target) {
@@ -192,8 +216,11 @@ char const *psram_speed_reset_name(uint8_t reset) {
     return reset < sizeof(names) / sizeof(names[0]) ? names[reset] : "?";
 }
 
-bool psram_speed_reset_is_crash(uint8_t reset) {
-    return reset == 4 || reset == 5 || reset == 6 || reset == 7 || reset == 15; // panic, int/task/other wdt, cpu lockup
+bool psram_speed_reset_crashed(uint8_t reset, bool fresh_dump) {
+    if (reset == 7) { // ESP_RST_WDT: also the board's power-on and CH340 reset (crash.c crash_is_crash)
+        return fresh_dump;
+    }
+    return reset == 4 || reset == 5 || reset == 6 || reset == 15; // panic, int / task wdt, cpu lockup
 }
 
 char const *psram_speed_fail_kind_text(uint8_t kind) {

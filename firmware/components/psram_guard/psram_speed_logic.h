@@ -27,6 +27,7 @@
 // LP_STORE15 word that selects 120 MHz at the next PSRAM init (patch 0003; the init reads and clears the register and
 // keeps the raw word, psram_speed_carrier_raw). Any other word selects 80.
 #define PSRAM_SPEED_ARM_WORD ((0xC4A1u << 16) | 120u)
+#define PSRAM_SPEED_FALL_TAG 0xC4A3u // high half of a carried fall: (tag << 16) | kind, see psram_speed_fall_word
 #define PSRAM_FAIL_FW_MAX    15          // image version kept (REG_STR_MAX): "fw-605935b1", a longer one is cut
 #define PSRAM_FAIL_WALL_MIN  1735689600u // 2025-01-01 UTC: a clock before it is not set, the record keeps 0
 
@@ -66,15 +67,18 @@ typedef struct {
 
 // The facts of a judgement, filled by the glue (psram_speed.c)
 typedef struct {
-    uint8_t     reset;    // esp_reset_reason() of this boot
+    uint8_t     reset;      // esp_reset_reason() of this boot
+    bool        fresh_dump; // the core dump is new since the last recorded crash (crash_dump_fresh)
+    uint8_t     carried;    // psram_fail_kind_t of a fall the last boot could not save (STORE15), NONE when none
     uint32_t    wall_s;   // time(NULL), any value (below PSRAM_FAIL_WALL_MIN counts as not set)
     uint32_t    uptime_s;
     char const *fw;       // esp_app_get_description()->version
 } psram_fail_ctx_t;
 
 // NVS blob "psram_spd", version 4 (32 bytes, #353): want, failed, arms, 0, version 4, kind, reset, at120, wall_s (LE32),
-// uptime_s (LE32), fw[16] (NUL-padded). Any other size or version (the trial's v3 record of #329 included: images are
-// not released, so there is no migration) is not ours: the default record (120, nothing failed).
+// uptime_s (LE32), fw[16] (NUL-padded). The trial's 36-byte v3 record of #329 (want, trial, failed, aborts, version 3,
+// ...) keeps only a choice of 80 without a fall; its falls were no PSRAM evidence, so anything else in it reads as 120.
+// Any other size or version is not ours: the default record (120, nothing failed).
 #define PSRAM_SPEED_REC_VERSION 4
 #define PSRAM_SPEED_REC_SIZE    32
 void psram_speed_rec_encode(psram_speed_rec_t const *r, uint8_t out[PSRAM_SPEED_REC_SIZE]);
@@ -103,8 +107,10 @@ psram_speed_rec_t psram_speed_rec_default(void);
 //   running 120, record agrees, no evidence -> NONE (the shutdown hook keeps 120 through clean restarts)
 //   running 120, evidence                   -> FALL80, failed recorded with the kind
 //   running 120, want 80 or failed          -> LEAVE120 (no note: the record already says 80)
-//   running 80, want 120, not failed        -> ARM_RESTART; KEEP120 after a panic / watchdog (no crash loop through
-//                                              an arm) or at the PSRAM_SPEED_MAX_ARMS-th unsettled arm (arms back to 0)
+//   running 80, a fall carried in STORE15   -> NONE, the fall recorded now (its boot could not save it)
+//   running 80, want 120, not failed        -> ARM_RESTART; KEEP120 after a crash (psram_speed_reset_crashed: no crash
+//                                              loop through an arm) or at the PSRAM_SPEED_MAX_ARMS-th unsettled arm
+//                                              (arms back to 0)
 //   anything else                           -> NONE
 psram_speed_act_t psram_speed_boot_decide(psram_speed_rec_t *r, unsigned running_mhz, bool patched,
                                           psram_fail_kind_t evidence, psram_fail_ctx_t const *ctx);
@@ -132,8 +138,12 @@ size_t psram_speed_value_text(psram_speed_rec_t const *r, unsigned running_mhz, 
 
 // esp_reset_reason_t by number (esp_system.h order, pinned in psram_speed.c): "panic", "int_wdt", "sw"...; "?" past it
 char const *psram_speed_reset_name(uint8_t reset);
-// A panic or watchdog reset (panic, int_wdt, task_wdt, wdt, cpu_lockup)
-bool psram_speed_reset_is_crash(uint8_t reset);
+// A crash, judged as crash.c does: panic, int_wdt, task_wdt and cpu_lockup always; wdt (7) only with a fresh core dump,
+// because every power-on and USB-serial reset on this board reports reason 7 too
+bool psram_speed_reset_crashed(uint8_t reset, bool fresh_dump);
+// The STORE15 word that carries an unsaved fall to the next boot (selects 80 there: it is not the ARM word), and back
+uint32_t          psram_speed_fall_word(psram_fail_kind_t kind);
+psram_fail_kind_t psram_speed_carried_fall(uint32_t carrier);
 // "boot check", "DMA gate", "canary flip", "corrupt PSRAM heap"; "?" for none of these
 char const *psram_speed_fail_kind_text(uint8_t kind);
 // "none", or "<kind>, reset <reason>, ran at <80|120>, <YYYY-MM-DD HH:MM:SS UTC|up N s>, <fw>"

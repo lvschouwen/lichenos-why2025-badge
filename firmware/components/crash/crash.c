@@ -403,19 +403,35 @@ static void crash_command(char const *args) {
 static struct {
     crash_reset_t reason;
     bool          fresh;
+    bool          decided;
     uint32_t      sum;
 } s_pending;
+
+// Once per boot, from whichever asks first (the PSRAM speed switch right after NVS, #353, or crash_check_early): the
+// core dump partition and the NVS sum are only read, nothing is written
+static void pending_decide(void) {
+    if (s_pending.decided) {
+        return;
+    }
+    s_pending.decided = true;
+    s_pending.reason  = crash_reset_of(esp_reset_reason());
+    s_pending.sum     = 0;
+    s_pending.fresh   = dump_sum(&s_pending.sum) && s_pending.sum != stored_dump_sum();
+}
+
+bool crash_dump_fresh(void) {
+    pending_decide();
+    return s_pending.fresh;
+}
 
 void crash_check_early(void) {
     crash_log_lock(); // creates the lock before any other task can want it
     crash_log_unlock();
     console_register("crash", "crash [dump | clear | test panic|wdt] (crash log and core dump)", crash_command);
     esp_reset_reason_t const why = esp_reset_reason();
-    s_pending.reason             = crash_reset_of(why);
     s_reset_reason               = (int)why;
+    pending_decide();
     ESP_LOGI(TAG, "reset reason %d (%s)", (int)why, reason_name(s_pending.reason));
-    s_pending.sum   = 0;
-    s_pending.fresh = dump_sum(&s_pending.sum) && s_pending.sum != stored_dump_sum();
     if (!crash_is_crash(s_pending.reason, s_pending.fresh)) {
         if (s_pending.reason == CRASH_RST_WDT) {
             ESP_LOGI(TAG, "watchdog reset without a new core dump: a USB reset, not recorded");

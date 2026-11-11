@@ -22,7 +22,6 @@ to `layers.conf`):
 | `lichen_random` | `lichen_random.h` | random bytes (MeshCore only) |
 | `lora` | `lora_app.h` | the LoRa radio, as its one owner |
 | `fw_console` | `fw_console.h`, `secure_wipe.h` | console commands and a deliberate restart; `secure_wipe.h` (MeshCore only) wipes a buffer that held a secret |
-| `psram_guard` | `psram_speed.h` | the PSRAM speed switch some large-buffer code asks about (MeshCore only, until #280) |
 | `freertos`, `esp_timer`, `heap` | | queues, semaphores, timers; tasks through `lichen_task.h` and memory through `lichen_mem.h` (below) |
 | plain libraries | | e.g. `mbedtls` (PSA Crypto); no driver, no storage, no network component |
 
@@ -286,8 +285,8 @@ file agree):
   `strndup` (#283): memory goes through `lichen_alloc` so `fw mem` counts it. MeshCore's upstream C++ `new` (the
   packet pool, `MyMesh`) is operator new, not one of those symbols, and stays outside the count as well.
 
-Also open: `mesh` still has `psram_guard` as a peer for `psram_speed.h` in `tools/layers.conf`, unused since #353 removed
-the trial's hold from `meshcore_run.c`; the peer lines go with #280. The
+`mesh` no longer has `psram_guard` as a peer: its only use, the 120 MHz trial's hold in `meshcore_run.c`, went with
+#353. The
 own include roots of the bundled third-party code (`vendored` lines: MeshCore, its Crypto library, ed25519, base64)
 are not scanned. The message journal's SD batches through `lichen_fs_sd_begin`/`lichen_fs_sd_end` (`lichen_fs.h`); the journal still
 lives at `/sd/lichen/messages` instead of `lichen_fs_sd_dir`, moving the history is a separate decision. From #84: the

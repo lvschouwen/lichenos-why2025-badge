@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -62,3 +63,7 @@ size_t psram_dma_flip_text(psram_dma_flip_t const *f, char *out, size_t cap);
 size_t psram_dma_sweep_windows(size_t largest, size_t free_total, size_t reserve, size_t win, size_t min_windows);
 
 size_t psram_dma_hist_text(psram_dma_report_t const *r, char *out, size_t cap);
+
+// PSRAM evidence for the speed switch (#353): bad bytes on the AXI-GDMA legs or the bounced SD leg (bad_total minus the
+// direct SD leg's). A failed card read, a DMA timeout or a refused transfer fails the gate but proves nothing about PSRAM
+bool psram_dma_evidence(size_t bad_total, size_t sd_bad_direct);

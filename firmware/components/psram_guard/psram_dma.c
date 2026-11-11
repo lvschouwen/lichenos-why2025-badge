@@ -161,3 +161,7 @@ size_t psram_dma_hist_text(psram_dma_report_t const *r, char *out, size_t cap) {
     }
     return n < cap ? n : cap - 1;
 }
+
+bool psram_dma_evidence(size_t bad_total, size_t sd_bad_direct) {
+    return bad_total > sd_bad_direct;
+}

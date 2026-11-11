@@ -24,13 +24,31 @@ static bool save_fail(psram_speed_rec_t const *r) {
 }
 
 // esp_reset_reason_t numbers (pinned in psram_speed.c)
-enum { RST_POWERON = 1, RST_EXT = 2, RST_SW = 3, RST_PANIC = 4, RST_INT_WDT = 5, RST_TASK_WDT = 6, RST_BROWNOUT = 9 };
+enum {
+    RST_POWERON  = 1,
+    RST_EXT      = 2,
+    RST_SW       = 3,
+    RST_PANIC    = 4,
+    RST_INT_WDT  = 5,
+    RST_TASK_WDT = 6,
+    RST_WDT      = 7, // also every power-on and CH340 reset on this board (HP_SYS_HP_WDT_RESET); a crash only with a new dump
+    RST_BROWNOUT = 9,
+    RST_LOCKUP   = 15,
+};
 
 static psram_fail_ctx_t at(uint8_t reset) {
     return (psram_fail_ctx_t){.reset = reset, .uptime_s = 3, .fw = "fw-605935b1"};
 }
 
+static psram_fail_ctx_t crashed_wdt(void) { // a real watchdog: reason 7 with a core dump new since the last crash
+    psram_fail_ctx_t c = at(RST_WDT);
+    c.fresh_dump       = true;
+    return c;
+}
+
 static void test_default(void);
+static void test_crash_class(void);
+static void test_carried_fall(void);
 static void test_no_evidence(void);
 static void test_evidence(void);
 static void test_switch_back(void);
@@ -40,6 +58,8 @@ static void test_record(void);
 
 int main(void) {
     test_default();
+    test_crash_class();
+    test_carried_fall();
     test_no_evidence();
     test_evidence();
     test_switch_back();
@@ -76,7 +96,7 @@ static void test_default(void) {
     psram_speed_rec_t r;
     psram_speed_rec_decode(NULL, 0, &r); // no record in NVS
     CHECK(r.want == 120 && !r.failed && r.arms == 0 && r.last.kind == PSRAM_FAIL_NONE);
-    psram_fail_ctx_t on = at(RST_POWERON);
+    psram_fail_ctx_t on = at(RST_WDT); // a cold boot on this board: reason 7, no new core dump
     CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &on) == PSRAM_SPEED_ACT_ARM_RESTART);
     CHECK(psram_speed_arm_commit(&r, save_ok) && saved.arms == 1 && saved.want == 120);
     CHECK(psram_speed_boot_decide(&r, 120, true, PSRAM_FAIL_NONE, &on) == PSRAM_SPEED_ACT_NONE && r.want == 120);
@@ -91,7 +111,7 @@ static void test_default(void) {
 
 // #353: a restart, an OTA reboot, a panic or a watchdog at 120 proves nothing about the PSRAM: 120 stays
 static void test_no_evidence(void) {
-    uint8_t const resets[] = {RST_SW, RST_PANIC, RST_INT_WDT, RST_TASK_WDT, RST_POWERON, RST_EXT, RST_BROWNOUT};
+    uint8_t const resets[] = {RST_SW, RST_PANIC, RST_INT_WDT, RST_TASK_WDT, RST_WDT, RST_EXT, RST_BROWNOUT};
     for (size_t i = 0; i < sizeof(resets); i++) {
         psram_speed_rec_t r   = psram_speed_rec_default();
         psram_fail_ctx_t  c   = at(resets[i]);
@@ -101,15 +121,15 @@ static void test_no_evidence(void) {
     }
     // A panic or watchdog runs no shutdown hook, so it comes back at 80: no failure, no arm restart (no crash loop), the
     // next clean restart goes back to 120
-    uint8_t const crashes[] = {RST_PANIC, RST_INT_WDT, RST_TASK_WDT};
+    uint8_t const crashes[] = {RST_PANIC, RST_INT_WDT, RST_TASK_WDT, RST_LOCKUP, RST_WDT};
     for (size_t i = 0; i < sizeof(crashes); i++) {
         psram_speed_rec_t r = psram_speed_rec_default();
-        psram_fail_ctx_t  c = at(crashes[i]);
+        psram_fail_ctx_t  c = crashes[i] == RST_WDT ? crashed_wdt() : at(crashes[i]);
         CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &c) == PSRAM_SPEED_ACT_KEEP120);
         CHECK(r.want == 120 && !r.failed && r.arms == 0 && r.last.kind == PSRAM_FAIL_NONE);
     }
     // A power cycle, a brownout or a restart that ran no hook: arm and restart once
-    uint8_t const others[] = {RST_POWERON, RST_EXT, RST_BROWNOUT, RST_SW};
+    uint8_t const others[] = {RST_WDT, RST_POWERON, RST_EXT, RST_BROWNOUT, RST_SW};
     for (size_t i = 0; i < sizeof(others); i++) {
         psram_speed_rec_t r = psram_speed_rec_default();
         psram_fail_ctx_t  c = at(others[i]);
@@ -150,7 +170,7 @@ static void test_evidence(void) {
     // After the fall it stays at 80: no arm, a 120 MHz boot against the record leaves it again
     r = psram_speed_rec_default();
     psram_speed_evidence(&r, 120, PSRAM_FAIL_CANARY, &c);
-    psram_fail_ctx_t on = at(RST_POWERON);
+    psram_fail_ctx_t on = at(RST_WDT);
     CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &on) == PSRAM_SPEED_ACT_NONE && r.failed);
     CHECK(psram_speed_boot_decide(&r, 120, true, PSRAM_FAIL_NONE, &on) == PSRAM_SPEED_ACT_LEAVE120);
     CHECK(r.last.kind == PSRAM_FAIL_CANARY); // no note of its own
@@ -192,6 +212,21 @@ static void test_arms(void) {
     CHECK(!psram_speed_settle_wanted(&r, 80, PSRAM_SPEED_SETTLE_SECONDS));
     r.arms = 0;
     CHECK(!psram_speed_settle_wanted(&r, 120, 1000));
+    // L8: a crash with arms counted keeps the session at 80 and leaves the count for the next 120 MHz boot to settle
+    r                  = psram_speed_rec_default();
+    r.arms             = 2;
+    psram_fail_ctx_t p = at(RST_PANIC);
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &p) == PSRAM_SPEED_ACT_KEEP120 && r.arms == 2 && !r.failed);
+    // L8: power lost between the arms + 1 save and the restart (or before the 120 boot settled): the next cold boot
+    // (reason 7, no dump) arms again, counted, and the cap still ends it
+    r                   = psram_speed_rec_default();
+    psram_fail_ctx_t on = at(RST_WDT);
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &on) == PSRAM_SPEED_ACT_ARM_RESTART);
+    CHECK(psram_speed_arm_commit(&r, save_ok) && saved.arms == 1);
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &on) == PSRAM_SPEED_ACT_ARM_RESTART && r.arms == 1);
+    CHECK(psram_speed_arm_commit(&r, save_ok) && saved.arms == 2);
+    CHECK(psram_speed_arm_commit(&r, save_ok) && saved.arms == 3);
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &on) == PSRAM_SPEED_ACT_KEEP120 && r.arms == 0);
     // A refused save arms nothing and wants 80 this session
     r = psram_speed_rec_default();
     CHECK(!psram_speed_arm_commit(&r, save_fail) && r.want == 80 && r.arms == 0);
@@ -214,8 +249,6 @@ static void test_texts(void) {
     psram_speed_fail_text(&r.last, t, sizeof(t));
     CHECK(strcmp(t, "none") == 0);
     CHECK(strcmp(psram_speed_reset_name(15), "cpu_lockup") == 0 && strcmp(psram_speed_reset_name(16), "?") == 0);
-    CHECK(psram_speed_reset_is_crash(4) && psram_speed_reset_is_crash(5) && psram_speed_reset_is_crash(7));
-    CHECK(psram_speed_reset_is_crash(15) && !psram_speed_reset_is_crash(3) && !psram_speed_reset_is_crash(9));
     CHECK(strcmp(psram_speed_fail_kind_text(PSRAM_FAIL_RETIRED_3), "?") == 0);
     // A long image version is cut at 15
     psram_fail_ctx_t c = at(RST_SW);
@@ -235,11 +268,21 @@ static void test_record(void) {
     psram_speed_rec_decode(b, sizeof(b), &back);
     CHECK(memcmp(&r, &back, sizeof(r)) == 0);
 
-    // The trial's 36-byte v3 record (#329): the default, 120 and nothing failed (its fall to 80 was no PSRAM evidence)
+    // The trial's 36-byte v3 record (#329: want, trial, failed, aborts, version 3, ...). A trial-era fall (want 80,
+    // failed) was no PSRAM evidence: 120. want 80 without a fall was the person's choice and stays (review L4)
     uint8_t v3[36] = {80, 0, 1, 0, 3, 4, 3, 1};
     psram_speed_rec_decode(v3, sizeof(v3), &back);
     CHECK(back.want == 120 && !back.failed && back.arms == 0 && back.last.kind == PSRAM_FAIL_NONE);
     CHECK(back.last.fw[0] == 0 && back.last.wall_s == 0 && back.last.uptime_s == 0 && back.last.reset == 0);
+    uint8_t chose80[36] = {80, 0, 0, 0, 3};
+    psram_speed_rec_decode(chose80, sizeof(chose80), &back);
+    CHECK(back.want == 80 && !back.failed && back.arms == 0 && back.last.kind == PSRAM_FAIL_NONE);
+    uint8_t chose120[36] = {120, 1, 0, 2, 3};
+    psram_speed_rec_decode(chose120, sizeof(chose120), &back);
+    CHECK(back.want == 120 && !back.failed && back.arms == 0);
+    chose80[4] = 2; // not v3: the default
+    psram_speed_rec_decode(chose80, sizeof(chose80), &back);
+    CHECK(back.want == 120);
     // Another size or version: the default, not garbage
     psram_speed_rec_encode(&r, b);
     b[4] = PSRAM_SPEED_REC_VERSION + 1;
@@ -270,4 +313,40 @@ static void test_record(void) {
     b[1] = 2;
     psram_speed_rec_decode(b, sizeof(b), &back);
     CHECK(back.want == 120 && !back.failed);
+}
+
+// #353 review H1: on this board reason 7 (ESP_RST_WDT) is also every power-on and CH340 reset; it is a crash only with a
+// core dump new since the last recorded crash, as crash.c judges it. Panic, int / task watchdog and lockup always are.
+static void test_crash_class(void) {
+    CHECK(!psram_speed_reset_crashed(RST_WDT, false) && psram_speed_reset_crashed(RST_WDT, true));
+    CHECK(psram_speed_reset_crashed(RST_PANIC, false) && psram_speed_reset_crashed(RST_INT_WDT, false));
+    CHECK(psram_speed_reset_crashed(RST_TASK_WDT, false) && psram_speed_reset_crashed(RST_LOCKUP, false));
+    CHECK(!psram_speed_reset_crashed(RST_SW, true) && !psram_speed_reset_crashed(RST_POWERON, true));
+    CHECK(!psram_speed_reset_crashed(RST_BROWNOUT, true) && !psram_speed_reset_crashed(RST_EXT, false));
+    psram_speed_rec_t r  = psram_speed_rec_default();
+    psram_fail_ctx_t  c7 = at(RST_WDT); // a cold boot: arm and restart to 120
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &c7) == PSRAM_SPEED_ACT_ARM_RESTART);
+    r                      = psram_speed_rec_default();
+    psram_fail_ctx_t wdt   = crashed_wdt(); // a real watchdog: the crash path, this session at 80
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &wdt) == PSRAM_SPEED_ACT_KEEP120 && !r.failed);
+}
+
+// #353 review L2: a fall whose record could not be saved travels in STORE15 to the next boot, which runs at 80 (any
+// word but the ARM word), records it there and does not arm into the suspect PSRAM
+static void test_carried_fall(void) {
+    CHECK(psram_speed_fall_word(PSRAM_FAIL_CANARY) != PSRAM_SPEED_ARM_WORD);
+    CHECK(psram_speed_carried_fall(psram_speed_fall_word(PSRAM_FAIL_CANARY)) == PSRAM_FAIL_CANARY);
+    CHECK(psram_speed_carried_fall(psram_speed_fall_word(PSRAM_FAIL_HEAP)) == PSRAM_FAIL_HEAP);
+    CHECK(psram_speed_carried_fall(PSRAM_SPEED_ARM_WORD) == PSRAM_FAIL_NONE);
+    CHECK(psram_speed_carried_fall(0) == PSRAM_FAIL_NONE);
+    CHECK(psram_speed_carried_fall(psram_speed_fall_word(PSRAM_FAIL_RETIRED_5)) == PSRAM_FAIL_NONE);
+    psram_speed_rec_t r = psram_speed_rec_default(); // the flash still says 120: the save failed
+    psram_fail_ctx_t  c = at(RST_SW);
+    c.carried           = PSRAM_FAIL_CANARY;
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &c) == PSRAM_SPEED_ACT_NONE);
+    CHECK(r.want == 80 && r.failed && r.last.kind == PSRAM_FAIL_CANARY && r.last.at120);
+    // a carried fall on a record that already says 80 changes nothing
+    psram_speed_rec_t before = r;
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &c) == PSRAM_SPEED_ACT_NONE);
+    CHECK(memcmp(&before, &r, sizeof(r)) == 0);
 }

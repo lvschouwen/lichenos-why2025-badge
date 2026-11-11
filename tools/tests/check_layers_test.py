@@ -217,7 +217,7 @@ class HardAndConf(unittest.TestCase):
         self.assertEqual(conf.comp_layer["mesh"], "L6")
         self.assertEqual(conf.closed["L6"], {"freertos", "esp_timer", "heap", "mbedtls", "lvgl", "lvgl__lvgl"})
         # lichen_notify left both peer lines (#283): its app header lives in lichen_api since #245
-        self.assertEqual(conf.peers["mesh"], {"lichen_clock", "lichen_random", "lora", "fw_console", "psram_guard"})
+        self.assertEqual(conf.peers["mesh"], {"lichen_clock", "lichen_random", "lora", "fw_console"})  # #353: no psram_guard
         self.assertEqual(conf.peers["lichen_apps"], {"lichen_clock", "lora", "fw_console"})
         self.assertEqual(conf.allowed_layers("L6"), {"L4", "L6"})
         for h in ("stdio.h", "sys/*.h", "freertos/*.h", "esp_log.h", "esp_timer.h", "esp_attr.h",
@@ -261,13 +261,12 @@ class HardAndConf(unittest.TestCase):
                 for dep in conf.peers[app]:
                     self.assertFalse(conf.header_ok(app, dep, inc), (app, dep, inc))
             self.assertTrue(conf.header_ok(app, "lora", "lora_app.h") and conf.header_ok(app, "fw_console", "fw_console.h"))
-        self.assertTrue(conf.header_ok("mesh", "psram_guard", "psram_speed.h"))
+        self.assertNotIn("psram_guard", conf.peers["mesh"])  # #353: the trial's hold was its only use
         for sym in ("lora_internal_send", "lora_sweep_answer", "lora_tx_begin", "lora_owner_claim", "lora_c6_link_init",
                     "psram_speed_choice", "psram_speed_cmd", "psram_speed_gate_result", "psram_speed_no_rearm",
                     "malloc", "calloc", "realloc", "free", "strdup"):
             self.assertTrue(any(cl.fnmatch.fnmatchcase(sym, g) for g in conf.forbid["L6"]), sym)
-        for sym in ("lora_sweep", "lora_set_tx_power", "lora_claim", "psram_speed_trial_pending", "psram_speed_on_pass",
-                    "lichen_alloc", "lichen_free"):
+        for sym in ("lora_sweep", "lora_set_tx_power", "lora_claim", "lichen_alloc", "lichen_free"):
             self.assertFalse(any(cl.fnmatch.fnmatchcase(sym, g) for g in conf.forbid["L6"]), sym)
         self.assertEqual(conf.forbid_except, [("mesh", "MyMesh.cpp.obj", ["malloc", "free"])])
         for g in ("esp_partition_mmap", "spi_flash_mmap*", "esp_mmu_map*"):

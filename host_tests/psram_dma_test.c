@@ -126,6 +126,16 @@ static void test_compare_buf(void) {
 }
 
 // The sweep leaves a fixed reserve of the free PSRAM and refuses when too few windows fit
+// #353 review M1: only PSRAM bytes that came back wrong are evidence against 120 MHz: the AXI-GDMA legs and the bounced
+// SD leg. The direct SD leg (SDMMC into PSRAM, #120, judged elsewhere), a card read error, a DMA timeout or refusal are not
+static void test_evidence(void) {
+    CHECK(!psram_dma_evidence(0, 0));
+    CHECK(psram_dma_evidence(3, 0));  // AXI-GDMA or bounced-leg bytes
+    CHECK(!psram_dma_evidence(5, 5)); // all of them on the direct SD leg
+    CHECK(psram_dma_evidence(6, 5));
+    CHECK(!psram_dma_evidence(2, 7)); // never more direct bytes than all: no underflow into evidence
+}
+
 static void test_sweep_windows(void) {
     size_t const mb = 1024u * 1024;
     CHECK(psram_dma_sweep_windows(20 * mb, 24 * mb, 8 * mb, mb, 4) == 16);       // the reserve, not the block, limits
@@ -140,6 +150,7 @@ static void test_sweep_windows(void) {
 int main(void) {
     test_patterns();
     test_sweep_windows();
+    test_evidence();
     test_report();
     test_compare_buf();
     if (failures) {

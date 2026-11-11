@@ -339,12 +339,12 @@ static void sweep(run_t *r, unsigned burst) {
         char sd[64];
         console_reply("psram dma sweep: %u bad bytes over %u MB, %u errors, SD legs %s, %u ms", (unsigned)r->bad_total,
                       (unsigned)windows, r->errors, sd_text(r, sd, sizeof(sd)), (unsigned)((esp_timer_get_time() - t0) / 1000));
-        gate = gate_failed(r);
+        gate = psram_dma_evidence(r->bad_total, r->sd_bad[0]); // PSRAM bytes only: errors fail the sweep, not 120
     }
     r->src = r->dst = r->dst2 = NULL;
     teardown(r);
     heap_caps_free(block);
-    psram_speed_gate_result(gate, true); // after the buffers are freed: a failed gate at 120 MHz restarts the badge
+    psram_speed_gate_result(gate, true); // after the buffers are freed: bad PSRAM bytes at 120 MHz restart the badge
 }
 
 // One automatic round (#121): every pattern on the three AXI-GDMA legs and the SD legs (skipped without a card, not a
@@ -358,13 +358,15 @@ psram_dma_round_t psram_dma_quick_round(psram_dma_round_info_t *info) {
         return PSRAM_DMA_ROUND_BUSY;
     }
     memset(&r, 0, sizeof(r));
-    psram_dma_round_t result = PSRAM_DMA_ROUND_NOT_RUN;
+    psram_dma_round_t result   = PSRAM_DMA_ROUND_NOT_RUN;
+    bool              evidence = false;
     if (setup(&r, 64)) {
         for (int p = 0; p < PSRAM_DMA_PATTERNS && !r.errors; p++) {
             one_pattern(&r, (psram_dma_pattern_t)p);
         }
         legs_sd(&r);
-        result = gate_failed(&r) ? PSRAM_DMA_ROUND_FAIL : PSRAM_DMA_ROUND_PASS;
+        result   = gate_failed(&r) ? PSRAM_DMA_ROUND_FAIL : PSRAM_DMA_ROUND_PASS;
+        evidence = psram_dma_evidence(r.bad_total, r.sd_bad[0]); // not a card error or a DMA timeout (#353 review M1)
     }
     if (info) {
         *info = (psram_dma_round_info_t){.bad_bytes  = (uint32_t)(r.bad_total - r.sd_bad[0]),
@@ -373,7 +375,7 @@ psram_dma_round_t psram_dma_quick_round(psram_dma_round_info_t *info) {
     }
     teardown(&r);
     atomic_flag_clear(&s_busy);
-    psram_speed_gate_result(result == PSRAM_DMA_ROUND_FAIL, false); // the Bench's or the stress run's round: evidence too
+    psram_speed_gate_result(evidence, false); // the Bench's or the stress run's round: evidence too
     return result;
 }
 
@@ -429,5 +431,5 @@ static void psram_dma_cmd_locked(char const *args) {
                   sd_text(&r, sd, sizeof(sd)), (unsigned)((esp_timer_get_time() - t0) / 1000),
                   r.errors ? " (stopped: DMA refused, timed out, a cache sync or a card read failed)" : "");
     teardown(&r);
-    psram_speed_gate_result(gate_failed(&r), true);
+    psram_speed_gate_result(psram_dma_evidence(r.bad_total, r.sd_bad[0]), true); // PSRAM bytes only, not the errors
 }
