@@ -232,7 +232,7 @@ static void sd_unmount_bounded(void) {
         return;
     }
     sd_unmounted = xSemaphoreCreateBinaryStatic(&sd_unmounted_buf);
-    if (!lichen_task_start(lichen_ctx_self(), "sdoff", sd_unmount_task, NULL, 4096, LICHEN_PRIO_URGENT, NULL) ||
+    if (!lichen_task_start(lichen_sys_ctx_os(), "sdoff", sd_unmount_task, NULL, 4096, LICHEN_PRIO_URGENT, NULL) ||
         xSemaphoreTake(sd_unmounted, pdMS_TO_TICKS(SD_UNMOUNT_MS)) != pdTRUE) {
         ESP_LOGW(TAG, "power off: the SD card was not unmounted in time, going off anyway");
     }

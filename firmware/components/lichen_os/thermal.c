@@ -23,6 +23,7 @@
 #include "fw_console.h"
 #include "lichen_notify.h"
 #include "lichen_task.h"
+#include "lichen_sys_app.h"
 #include "lichen_radio.h"
 #include "lichen_sensors.h"
 #include "sdkconfig.h"
@@ -158,7 +159,7 @@ static void shut_down(lichen_sys_thermal_info_t const *now) {
     if (atomic_exchange(&shutdown_asked, true)) {
         return;
     }
-    if (!lichen_task_start_in(lichen_ctx_self(), "thoff", backstop_task, NULL, BACKSTOP_STACK, LICHEN_PRIO_URGENT,
+    if (!lichen_task_start_in(lichen_sys_ctx_os(), "thoff", backstop_task, NULL, BACKSTOP_STACK, LICHEN_PRIO_URGENT,
                               LICHEN_STACK_LP_RAM, NULL)) { // never returns (deep sleep), so LP RAM is fine (#269)
         ESP_LOGE(TAG, "no memory for the power-off backstop");
     }
@@ -392,8 +393,8 @@ void thermal_start(lichen_watch_hooks_t const *h) {
     console_register("thermal", "thermal [test warn|clear|shutdown YES] (temperature watchdog, battery safety)",
                      cmd_thermal);
     // LP RAM (#269): a poll every few seconds that writes NVS (its shed and seen flags), so internal-capable, no DMA
-    if (!lichen_task_start_in(lichen_ctx_self(), "thermal", thermal_task, NULL, STACK_BYTES, LICHEN_PRIO_SERVICE, LICHEN_STACK_LP_RAM,
-                              NULL)) {
+    if (!lichen_task_start_in(lichen_sys_ctx_os(), "thermal", thermal_task, NULL, STACK_BYTES, LICHEN_PRIO_SERVICE,
+                              LICHEN_STACK_LP_RAM, NULL)) {
         ESP_LOGE(TAG, "no memory: nothing watches the temperature");
         return;
     }

@@ -5,7 +5,8 @@
 # the storage drive (T6) and on the SD card (#60); app_slot.c (pure, app_slot_test.c, #272) its table's slot lookup. lichen_crashlog.c is the Crash log app's view of crash.c's log (#72);
 # lichen_badge.c: the tile badges home draws (#102).
 # radio_state.c (pure, radio_state_test.c, #197) and lichen_radio.c: the radios' on/off state and LoRa borrowing.
-# lichen_task.c / lichen_mem.c: tasks and internal memory booked per app (#181); dma_low.c (pure, dma_low_test.c) records
+# lichen_task.c / lichen_mem.c: tasks and internal memory booked per app (#181), by context through gate_book.c (pure,
+# gate_book_test.c, #230 E1b); dma_low.c (pure, dma_low_test.c) records
 # when the DMA heap's low-water mark fell and who took the most then; dma_watch.c feeds it (heap alloc hook + esp_timer
 # sample) for fw mem (#256). fonts.c loads the fonts from the
 # assets partition at boot into the gate's slots (#16, font_slots.h); lichen_ui_call.c hands work to the LVGL task
@@ -37,7 +38,7 @@
 # wifi_reg_test.c, #311) maps lichen_net's Wi-Fi read-back to the wifi.* keys.
 idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "app_slot.c"
                             "lichen_crashlog.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
-                            "lichen_task.c" "lichen_mem.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
+                            "lichen_task.c" "lichen_mem.c" "gate_book.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
                             "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "os_bind.c" "lichen_sys_pure_view.c" "lichen_sys_view.c"
                             "ui_call_queue.c" "ui_lock_owner.c" "ui_lock_hits.c" "ui_lock_check.c" "dma_low.c" "dma_watch.c"
                             "thermal.c" "thermal_rules.c" "sys_notices.c" "sys_notice_rules.c" "lichen_sys_power.c"

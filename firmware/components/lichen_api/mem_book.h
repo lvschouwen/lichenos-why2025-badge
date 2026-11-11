@@ -39,9 +39,9 @@ typedef enum {
                        // the caller allocates anyway, unbooked
 } mem_charge_t;
 
-// Before an allocation of bytes for ctx. label names a new row (cut to MEM_BOOK_OWNER_CAP - 1); NULL is the OS's
-// (MEM_BOOK_OS, no quota). Give a charge back with mem_book_release when the allocation fails.
-mem_charge_t mem_book_charge(mem_book_t *b, uint32_t ctx, char const *label, bool internal, uint32_t bytes);
+// Before an allocation of bytes for ctx. label names a new row (cut to MEM_BOOK_OWNER_CAP - 1; NULL: MEM_BOOK_OS); os
+// marks the OS's row, which has no quota. Give a charge back with mem_book_release when the allocation fails.
+mem_charge_t mem_book_charge(mem_book_t *b, uint32_t ctx, char const *label, bool os, bool internal, uint32_t bytes);
 // After the allocation: the heap may hand out a little more than asked (alignment). Added without the quota check, so
 // the free, which only knows the block's real size, gives back exactly what was charged.
 void mem_book_adjust(mem_book_t *b, uint32_t ctx, bool internal, uint32_t extra);

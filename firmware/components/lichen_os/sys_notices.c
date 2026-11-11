@@ -15,6 +15,7 @@
 #include "lichen_sys_crash.h"
 #include "lichen_sys_storage.h"
 #include "lichen_task.h"
+#include "lichen_sys_app.h"
 #include "psram_boot.h"
 #include "storage.h"
 #include "sys_notice_rules.h"
@@ -137,8 +138,8 @@ void sys_notices_start(lichen_watch_hooks_t const *h) {
         hooks = *h;
     }
     // LP RAM (#269): once a second, and it reads /storage free space (LittleFS), so internal-capable but never DMA
-    if (!lichen_task_start_in(lichen_ctx_self(), "sys_notices", notices_task, NULL, TASK_STACK, LICHEN_PRIO_BACKGROUND,
-                              LICHEN_STACK_LP_RAM, NULL)) {
+    if (!lichen_task_start_in(lichen_sys_ctx_os(), "sys_notices", notices_task, NULL, TASK_STACK,
+                              LICHEN_PRIO_BACKGROUND, LICHEN_STACK_LP_RAM, NULL)) {
         ESP_LOGE(TAG, "no memory: Lichen raises no notifications of its own");
     }
 }

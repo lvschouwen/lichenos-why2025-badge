@@ -577,8 +577,8 @@ char const *stress_start(unsigned minutes) {
     portENTER_CRITICAL(&s_view_mux);
     s_view = (stress_view_t){.running = true, .minutes = minutes};
     portEXIT_CRITICAL(&s_view_mux);
-    if (!lichen_task_start_in(lichen_ctx_self(), "stress-mon", mon_task, NULL, 4096, LICHEN_PRIO_SERVICE, LICHEN_STACK_INTERNAL,
-                              NULL)) {
+    if (!lichen_task_start_in(lichen_ctx_self(), "stress-mon", mon_task, NULL, 4096, LICHEN_PRIO_SERVICE,
+                              LICHEN_STACK_INTERNAL, NULL)) {
         portENTER_CRITICAL(&s_view_mux);
         s_view.running = false;
         portEXIT_CRITICAL(&s_view_mux);

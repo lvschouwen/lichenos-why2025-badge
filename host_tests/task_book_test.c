@@ -98,7 +98,8 @@ static void test_book(void) {
     task_book_remove(&b, TASK_BOOK_SLOTS);
     CHECK(task_book_count(&b, MESH.ctx, NULL) == 1);
     // An owner past 13 characters is cut like an id would be
-    int l = task_book_add(&b, (task_owner_t){0x9909u, "an_overlong_owner_id"}, "t", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL);
+    task_owner_t const long_id = {0x9909u, "an_overlong_owner_id"};
+    int l = task_book_add(&b, long_id, "t", 1024, TASK_CLASS_JOB, TASK_STACK_INTERNAL, fn, NULL);
     CHECK(l >= 0 && strlen(b.slot[l].owner) == TASK_BOOK_OWNER_CAP - 1);
     // Full: -1, and a freed slot is used again
     memset(&b, 0, sizeof(b));

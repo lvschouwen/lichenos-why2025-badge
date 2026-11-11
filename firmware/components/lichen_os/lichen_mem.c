@@ -4,6 +4,7 @@
 // context (#230 E1b), checked before anything is booked: lock-free, no LVGL lock.
 #include "lichen_mem.h"
 #include "lichen_sys_app.h"
+#include "gate_book.h"
 
 #include "dma_watch.h"
 #include "esp_heap_caps.h"
@@ -22,41 +23,55 @@ static mem_book_t   book; // ~1 KB internal .bss
 static portMUX_TYPE book_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool         went_unbooked; // the owner table was full once: frees without a row are expected from then on
 
-// The label ctx's row gets (NULL for the OS: no quota). False for a stale or made-up ctx: lichen_sys_ctx_resolve has
-// logged (rate-limited) and counted it under what.
-static bool label_of(lichen_ctx_t ctx, char const *what, char const **label) {
+static void book_take(void) {
+    portENTER_CRITICAL(&book_mux);
+}
+static void book_give(void) {
+    portEXIT_CRITICAL(&book_mux);
+}
+static gate_lock_t const book_lock = {.take = book_take, .give = book_give};
+
+// gate_os_ctx (gate_book.h): the context table behind both books
+static bool resolve(uint32_t ctx, char const **id, char const **name, char const *what) {
     lichen_app_t const *app = NULL;
     if (!lichen_sys_ctx_resolve(ctx, &app, what)) {
         return false;
     }
-    *label = app ? app->id : NULL;
+    *id   = app ? app->id : NULL;
+    *name = app ? app->name : NULL;
     return true;
+}
+gate_ctx_t const gate_os_ctx = {.resolve = resolve, .os = lichen_sys_ctx_os, .enter = lichen_ctx_enter};
+
+// The first allocation the book had no row for (logged once); later ones are expected
+static bool first_unbooked(void) {
+    portENTER_CRITICAL(&book_mux);
+    bool first    = !went_unbooked;
+    went_unbooked = true;
+    portEXIT_CRITICAL(&book_mux);
+    return first;
 }
 
 // align 0: the heap's default
 static void *alloc_aligned(lichen_ctx_t ctx, size_t align, size_t size, uint32_t flags) {
-    char const *label;
-    if (!label_of(ctx, "lichen_alloc", &label)) {
-        return NULL;
-    }
-    char const *owner    = label ? label : MEM_BOOK_OS;
-    bool        internal = (flags & LICHEN_MEM_INTERNAL) != 0;
+    bool internal = (flags & LICHEN_MEM_INTERNAL) != 0;
     if (internal == ((flags & LICHEN_MEM_BULK) != 0) || size == 0 || size > UINT32_MAX) {
-        ESP_LOGE(TAG, "%s: lichen_alloc of %u B with flags 0x%x refused: BULK or INTERNAL, one of them", owner,
-                 (unsigned)size, (unsigned)flags);
+        ESP_LOGE(TAG, "ctx 0x%08lx: lichen_alloc of %u B with flags 0x%x refused: BULK or INTERNAL, one of them",
+                 (unsigned long)ctx, (unsigned)size, (unsigned)flags);
         return NULL;
     }
-    portENTER_CRITICAL(&book_mux);
-    mem_charge_t charge = mem_book_charge(&book, ctx, label, internal, (uint32_t)size);
-    bool         first  = charge == MEM_CHARGE_NO_ROW && !went_unbooked;
-    went_unbooked       = went_unbooked || charge == MEM_CHARGE_NO_ROW;
-    portEXIT_CRITICAL(&book_mux);
+    gate_owner_t who;
+    mem_charge_t charge = gate_mem_charge(&gate_os_ctx, &book_lock, &book, ctx, internal, (uint32_t)size, &who);
+    if (charge == MEM_GATE_REFUSED) {
+        return NULL; // logged and counted by the context table
+    }
+    char const *owner = who.label ? who.label : MEM_BOOK_OS;
     if (charge == MEM_CHARGE_QUOTA) {
         ESP_LOGW(TAG, "%s: %u B of internal RAM refused: over the app's %u B", owner, (unsigned)size,
                  MEM_BOOK_INTERNAL_QUOTA);
         return NULL;
     }
-    if (first) {
+    if (charge == MEM_CHARGE_NO_ROW && first_unbooked()) {
         // Bookkeeping never fails an allocation: this owner's memory is not counted (logged once)
         ESP_LOGW(TAG, "%s: no row left in the memory book (%d): allocated, but not counted", owner, MEM_BOOK_OWNERS);
     }
@@ -92,16 +107,20 @@ void *lichen_alloc_aligned(lichen_ctx_t ctx, size_t align, size_t size, uint32_t
 }
 
 void lichen_free(lichen_ctx_t ctx, void *ptr) {
-    char const *label;
-    if (!ptr || !label_of(ctx, "lichen_free", &label)) {
-        return; // refused: the block stays allocated rather than be freed by a context that does not own it
+    if (!ptr) {
+        return;
     }
-    bool        internal = !esp_ptr_external_ram(ptr);
-    uint32_t    bytes    = (uint32_t)heap_caps_get_allocated_size(ptr);
-    char const *owner    = label ? label : MEM_BOOK_OS;
+    bool          internal = !esp_ptr_external_ram(ptr);
+    uint32_t      bytes    = (uint32_t)heap_caps_get_allocated_size(ptr);
+    char const   *label    = NULL;
+    mem_release_t rel      = gate_mem_release(&gate_os_ctx, &book_lock, &book, ctx, internal, bytes, &label);
+    if (rel == MEM_GATE_RELEASE_REFUSED) {
+        return; // refused (logged, counted): the block stays allocated rather than be freed by a context that does not
+                // own it
+    }
+    char const *owner = label ? label : MEM_BOOK_OS;
     portENTER_CRITICAL(&book_mux);
-    mem_release_t rel      = mem_book_release(&book, ctx, internal, bytes);
-    bool          unbooked = went_unbooked;
+    bool unbooked = went_unbooked;
     portEXIT_CRITICAL(&book_mux);
     if (rel == MEM_RELEASE_OVER || (rel == MEM_RELEASE_NO_ROW && !unbooked)) {
         // Freed under another owner than it was allocated with, or never from lichen_alloc: some count is now wrong

@@ -15,8 +15,8 @@ static void owner_fit(char out[MEM_BOOK_OWNER_CAP], char const *owner) {
     out[n] = 0;
 }
 
-// make: a new row labelled label when ctx has none
-static mem_use_t *row_of(mem_book_t *b, uint32_t ctx, bool make, char const *label) {
+// make: a new row labelled label (os: the OS's) when ctx has none
+static mem_use_t *row_of(mem_book_t *b, uint32_t ctx, bool make, char const *label, bool os) {
     if (!ctx) {
         return NULL; // 0 marks a free row and is never a valid context
     }
@@ -32,7 +32,7 @@ static mem_use_t *row_of(mem_book_t *b, uint32_t ctx, bool make, char const *lab
     if (make && free_row) {
         memset(free_row, 0, sizeof(*free_row));
         free_row->ctx = ctx;
-        free_row->os  = !label;
+        free_row->os  = os;
         owner_fit(free_row->owner, label);
         return free_row;
     }
@@ -49,8 +49,8 @@ static void add(mem_use_t *r, bool internal, uint32_t bytes) {
     }
 }
 
-mem_charge_t mem_book_charge(mem_book_t *b, uint32_t ctx, char const *label, bool internal, uint32_t bytes) {
-    mem_use_t *r = row_of(b, ctx, true, label);
+mem_charge_t mem_book_charge(mem_book_t *b, uint32_t ctx, char const *label, bool os, bool internal, uint32_t bytes) {
+    mem_use_t *r = row_of(b, ctx, true, label, os);
     if (!r) {
         return MEM_CHARGE_NO_ROW;
     }
@@ -64,14 +64,14 @@ mem_charge_t mem_book_charge(mem_book_t *b, uint32_t ctx, char const *label, boo
 }
 
 void mem_book_adjust(mem_book_t *b, uint32_t ctx, bool internal, uint32_t extra) {
-    mem_use_t *r = row_of(b, ctx, false, NULL);
+    mem_use_t *r = row_of(b, ctx, false, NULL, false);
     if (r) {
         add(r, internal, extra);
     }
 }
 
 mem_release_t mem_book_release(mem_book_t *b, uint32_t ctx, bool internal, uint32_t bytes) {
-    mem_use_t *r = row_of(b, ctx, false, NULL);
+    mem_use_t *r = row_of(b, ctx, false, NULL, false);
     if (!r) {
         return MEM_RELEASE_NO_ROW;
     }
@@ -85,5 +85,5 @@ mem_release_t mem_book_release(mem_book_t *b, uint32_t ctx, bool internal, uint3
 }
 
 mem_use_t const *mem_book_find(mem_book_t const *b, uint32_t ctx) {
-    return row_of((mem_book_t *)b, ctx, false, NULL);
+    return row_of((mem_book_t *)b, ctx, false, NULL, false);
 }

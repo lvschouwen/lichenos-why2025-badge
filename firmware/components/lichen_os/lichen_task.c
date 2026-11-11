@@ -5,6 +5,7 @@
 #include "lichen_task.h"
 #include "lichen_sys_app.h"
 #include "lichen_sys_mem.h"
+#include "gate_book.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -37,6 +38,14 @@ static void park(int slot) {
     }
 }
 
+static void book_take(void) {
+    portENTER_CRITICAL(&book_mux);
+}
+static void book_give(void) {
+    portEXIT_CRITICAL(&book_mux);
+}
+static gate_lock_t const book_lock = {.take = book_take, .give = book_give};
+
 static void trampoline(void *arg) {
     int slot = (int)(intptr_t)arg;
     portENTER_CRITICAL(&book_mux);
@@ -46,8 +55,7 @@ static void trampoline(void *arg) {
     bool  with_caps        = book.slot[slot].mem != TASK_STACK_INTERNAL;
     lichen_ctx_t ctx       = book.slot[slot].ctx;
     portEXIT_CRITICAL(&book_mux);
-    (void)lichen_ctx_enter(ctx); // for good: the task ends with fn, so there is nothing to leave to
-    fn(fn_arg);
+    gate_task_run(&gate_os_ctx, ctx, fn, fn_arg); // runs as the context it was booked under (#230)
     if (with_caps) {
         park(slot);
     }
@@ -107,41 +115,31 @@ bool lichen_task_start(lichen_ctx_t ctx, char const *name, void (*fn)(void *arg)
     return lichen_task_start_in(ctx, name, fn, arg, stack_bytes, prio, LICHEN_STACK_INTERNAL, handle);
 }
 
-// Who the task is booked under (#230 E1b): ctx with its app's id as the label. False for a stale or made-up ctx
-// (lichen_sys_ctx_resolve has logged, rate-limited, and counted it under what).
-static bool owner_of(lichen_ctx_t ctx, char const *what, task_owner_t *out) {
-    lichen_app_t const *app = NULL;
-    if (!lichen_sys_ctx_resolve(ctx, &app, what)) {
-        return false;
-    }
-    *out = (task_owner_t){.ctx = ctx, .label = app ? app->id : NULL};
-    return true;
-}
-
 bool lichen_task_start_in(lichen_ctx_t ctx, char const *name, void (*fn)(void *arg), void *arg,
                           uint32_t stack_bytes, lichen_prio_t prio, lichen_stack_t mem, TaskHandle_t *handle) {
-    task_owner_t who;
-    if (!owner_of(ctx, "lichen_task_start", &who)) {
-        return false;
-    }
-    char const *owner    = who.label ? who.label : TASK_BOOK_OS;
-    int         priority = task_class_priority((task_class_t)prio);
+    int priority = task_class_priority((task_class_t)prio);
     if (!fn || priority < 0) {
-        ESP_LOGE(TAG, "%s: task %s not started: no function or an unknown class %d", owner, name ? name : "?", (int)prio);
+        ESP_LOGE(TAG, "task %s not started: no function or an unknown class %d", name ? name : "?", (int)prio);
         return false;
     }
-    char fitted[TASK_BOOK_NAME_CAP];
-    if (task_name_fit(fitted, name)) {
+    char         fitted[TASK_BOOK_NAME_CAP];
+    bool         cut    = task_name_fit(fitted, name);
+    task_stack_t asked  = (unsigned)mem < TASK_STACK_COUNT ? (task_stack_t)mem : TASK_STACK_INTERNAL;
+    task_stack_t placed = place_stack(asked, stack_bytes); // the heap query stays outside the spinlock
+    task_spec_t  spec   = {.name = fitted, .stack = stack_bytes, .cls = (task_class_t)prio, .mem = placed, .fn = fn,
+                           .arg = arg};
+    gate_owner_t who;
+    int          slot = gate_task_add(&gate_os_ctx, &book_lock, &book, ctx, &spec, &who);
+    if (slot == TASK_GATE_REFUSED) {
+        return false; // logged and counted by the context table
+    }
+    char const *owner = who.label ? who.label : TASK_BOOK_OS;
+    if (cut) {
         ESP_LOGW(TAG, "%s: task name \"%s\" cut to \"%s\"", owner, name, fitted);
     }
-    task_stack_t asked = (unsigned)mem < TASK_STACK_COUNT ? (task_stack_t)mem : TASK_STACK_INTERNAL;
     if (asked == TASK_STACK_PSRAM) {
         warn_psram_once(owner, fitted);
     }
-    task_stack_t placed = place_stack(asked, stack_bytes); // the heap query stays outside the spinlock
-    portENTER_CRITICAL(&book_mux);
-    int slot = task_book_add(&book, who, fitted, stack_bytes, (task_class_t)prio, placed, fn, arg);
-    portEXIT_CRITICAL(&book_mux);
     if (slot < 0) {
         ESP_LOGE(TAG, "%s: task %s not started: all %d task slots are taken", owner, fitted, TASK_BOOK_SLOTS);
         return false;
@@ -160,8 +158,8 @@ bool lichen_task_start_in(lichen_ctx_t ctx, char const *name, void (*fn)(void *a
 }
 
 size_t lichen_task_leftovers(lichen_ctx_t ctx, uint32_t wait_ms) {
-    task_owner_t who;
-    if (!owner_of(ctx, "lichen_task_leftovers", &who)) {
+    gate_owner_t who;
+    if (!gate_owner(&gate_os_ctx, ctx, "lichen_task_leftovers", &who)) {
         return 0;
     }
     char const  *owner = who.label ? who.label : TASK_BOOK_OS;

@@ -1,8 +1,9 @@
 #pragma once
 // The bookkeeping behind lichen_task_start (#181): which app owns which task, under which name, stack, priority
 // class and stack memory (#269). The owner is its context (lichen_ctx_t, #230 E1b), which lichen_task.c has checked;
-// the label (the app id, or TASK_BOOK_OS) is only what "fw tasks" prints. Pure, host-tested in host_tests/task_book_test.c; lichen_task.c is the FreeRTOS glue
-// (and the lock: these calls are not thread-safe by themselves).
+// the label (the app id, or TASK_BOOK_OS) is only what "fw tasks" prints. Pure, host-tested in
+// host_tests/task_book_test.c; lichen_task.c is the FreeRTOS glue (and the lock: these calls are not thread-safe by
+// themselves).
 
 #include <stdbool.h>
 #include <stddef.h>

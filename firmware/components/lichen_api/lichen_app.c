@@ -100,9 +100,10 @@ static void log_refusal(lichen_ctx_t ctx, char const *what, lichen_ctx_t caller_
     }
     void const *claimed = app_ctx_slot_owner(&s_table, ctx);
     void const *caller  = app_ctx_slot_owner(&s_table, caller_ctx);
+    char const *claims = claimed || (ctx & 0xffu) == 0 ? app_name(claimed) : "no app";
     ESP_LOGW(TAG, "%s: context 0x%08lx refused (claims %s, called for %s; stale or made up; %lu more not logged "
-                  "since the last)", what ? what : "?", (unsigned long)ctx, claimed || (ctx & 0xffu) == 0 ? app_name(claimed) : "no app",
-             app_name(caller), (unsigned long)skipped);
+                  "since the last)", what ? what : "?", (unsigned long)ctx, claims, app_name(caller),
+             (unsigned long)skipped);
 }
 
 lichen_ctx_t lichen_ctx_enter(lichen_ctx_t ctx) {
