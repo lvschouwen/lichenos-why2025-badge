@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // Per-boot PSRAM tuning report and dense check (#40). The IDF picks the MSPI phase and delayline on every boot and only
 // logs a failure to the ROM console; here the choice is captured (linker wrap of the two select functions), read back
@@ -47,3 +48,9 @@ void psram_boot_carrier(char const *args);
 
 // The tuning line ("phase 67.50 (run 4/4), delayline idx 15 ..."), for the Bench app (#96); returns the length
 size_t psram_boot_tuning_text(char *out, size_t cap);
+
+// The MSPI controller's live tuning registers: DQS0 phase id, DQS0 delay (90 degree tap), pin D's data delay. Plain
+// register reads, any task (psram.*, #316)
+void psram_boot_tuning_regs(uint8_t *phase_id, uint8_t *dqs, uint8_t *data);
+// The delayline idx the boot tuning chose (the IDF's, before any one-shot or `fw psram dl`); false when not captured
+bool psram_boot_dl_choice(uint8_t *idx);

@@ -364,6 +364,14 @@ add_test(NAME reg_service_test COMMAND reg_service_test)
 
 # ---- registry domain 0x11 psram.* (#316): this domain's agent adds its own test below and touches no other block -------
 # (the rows are reg_p4_psram.c; reg_service_test above already links every row file and pins the split)
+add_executable(psram_regs_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/psram_regs_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/psram_guard/psram_regs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/psram_guard/psram_tuning.c)
+target_include_directories(psram_regs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/psram_guard
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg)
+target_compile_options(psram_regs_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME psram_regs_test COMMAND psram_regs_test)
 # ---- end of the psram block ------------------------------------------------------------------------------
 
 # ---- registry domain 0x12 disp.* (#317): this domain's agent adds its own test below and touches no other block -------

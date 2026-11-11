@@ -12,6 +12,8 @@
 bool psram_speed_supported(void);
 // The speed PSRAM init chose this boot, MHz
 unsigned psram_speed_running(void);
+// The speed the record asks for (80 or 120; 80 again after a failed trial), MHz. One byte read: any task, no lock
+unsigned psram_speed_want(void);
 // What LP_STORE15 held when PSRAM init read (and cleared) it, for the boot log and "fw psram carrier"
 uint32_t psram_speed_carrier_raw(void);
 

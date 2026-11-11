@@ -67,6 +67,10 @@ unsigned psram_speed_running(void) {
 #endif
 }
 
+unsigned psram_speed_want(void) {
+    return s_rec.want;
+}
+
 uint32_t psram_speed_carrier_raw(void) {
 #if CONFIG_SPIRAM_SPEED_RUNTIME_SELECT
     return g_mspi_psram_carrier_found; // PSRAM init cleared the register after reading it

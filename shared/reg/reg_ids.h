@@ -58,6 +58,20 @@ typedef enum {
     REG_ID_BL_IDLE     = 0x1000, // bl.idle      ENUM, RO: bright / dim / off (the screen timeout)
     REG_ID_BL_OVERRIDE = 0x1001, // bl.override  ENUM, RO: none / thermal / flashlight / pulse
 
+    // 0x11 psram (#316): the MSPI controller's registers as they are now, served by the P4, never on the wire; all RO
+    // (`fw psram dl` stays the only mutator). Clock = source / core divider / bus divider.
+    REG_ID_PSRAM_CLK      = 0x1100, // psram.clk       U32 Hz, the PSRAM bus clock the dividers give (80 or 120 MHz)
+    REG_ID_PSRAM_CLK_SRC  = 0x1101, // psram.clk_src   ENUM xtal / mpll / spll / cpll (HP_SYS_CLKRST psram_clk_src_sel)
+    REG_ID_PSRAM_SRC_CLK  = 0x1102, // psram.src_clk   U32 Hz, that source (its PLL registers, read at boot)
+    REG_ID_PSRAM_CORE_DIV = 0x1103, // psram.core_div  U32, the core clock divider (div_num + 1)
+    REG_ID_PSRAM_BUS_DIV  = 0x1104, // psram.bus_div   U32, the SPI_MEM_S_SRAM_CLK divider (1 = equal to the core clock)
+    REG_ID_PSRAM_WANT     = 0x1105, // psram.want      U32 MHz, what the speed switch asks for (80 / 120, #121)
+    REG_ID_PSRAM_DL_IDX   = 0x1106, // psram.dl_idx    U8, the delayline idx 0..30 the data / DQS delays below make
+    REG_ID_PSRAM_DL_DATA  = 0x1107, // psram.dl_data   U8, the data pins' delay (pin D)
+    REG_ID_PSRAM_DL_DQS   = 0x1108, // psram.dl_dqs    U8, the DQS0 delay (90 degree tap)
+    REG_ID_PSRAM_PHASE    = 0x1109, // psram.phase     U8, the DQS0 phase id 0..3
+    REG_ID_PSRAM_BOOT_IDX = 0x110A, // psram.boot_idx  U8, the delayline idx the boot tuning chose (#40)
+
     // 0x12 disp: the DSI/DPI link as the display driver runs it (#317), all RO, served by the P4
     REG_ID_DISP_PCLK      = 0x1200, // disp.pclk       U32 Hz, the DPI pixel clock read from the clock tree and divider
     REG_ID_DISP_REFRESH   = 0x1201, // disp.refresh    U32 0.1 Hz, pclk / (htotal * vtotal) of the panel timings

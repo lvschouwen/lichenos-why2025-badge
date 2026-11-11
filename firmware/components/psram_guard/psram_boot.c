@@ -2,6 +2,7 @@
 
 #include "psram_dma_cmd.h"
 #include "psram_pattern.h"
+#include "psram_reg.h"
 #include "psram_speed.h"
 #include "psram_tuning.h"
 
@@ -85,7 +86,7 @@ static char           s_why[64];
 static bool           s_policy_done;
 static char           s_policy_line[96];
 
-static void tuning_regs(uint8_t *phase_id, uint8_t *dqs, uint8_t *data) {
+void psram_boot_tuning_regs(uint8_t *phase_id, uint8_t *dqs, uint8_t *data) {
     *phase_id = (uint8_t)REG_GET_FIELD(IOMUX_MSPI_PIN_PSRAM_DQS_0_PIN0_REG, IOMUX_MSPI_PIN_REG_PSRAM_DQS_0_PHASE);
     *dqs      = (uint8_t)MSPI_IOMUX.psram_pin_group.dqs0.reg_psram_dqs_delay_90;
     *data     = (uint8_t)MSPI_IOMUX.psram_pin_group.pin_group0[0].reg_psram_pin_dlc;
@@ -105,7 +106,7 @@ static void NOINLINE_ATTR IRAM_ATTR set_delaylines(uint8_t data, uint8_t dqs) {
 static void apply_delayline(unsigned idx, uint8_t *data, uint8_t *dqs, uint8_t *data_was, uint8_t *dqs_was) {
     uint8_t ph;
     psram_tuning_delays((uint8_t)idx, data, dqs);
-    tuning_regs(&ph, dqs_was, data_was);
+    psram_boot_tuning_regs(&ph, dqs_was, data_was);
     static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
     int                 other = xPortGetCoreID() == 0 ? 1 : 0;
     portENTER_CRITICAL(&mux);
@@ -113,7 +114,7 @@ static void apply_delayline(unsigned idx, uint8_t *data, uint8_t *dqs, uint8_t *
     set_delaylines(*data, *dqs);
     esp_cpu_unstall(other);
     portEXIT_CRITICAL(&mux);
-    tuning_regs(&ph, dqs, data);
+    psram_boot_tuning_regs(&ph, dqs, data);
 }
 
 void psram_boot_set_delayline(char const *idx_text) {
@@ -324,6 +325,7 @@ void psram_boot_carrier(char const *args) {
 }
 
 void psram_boot_check(void) {
+    psram_reg_boot();
     carrier_log_boot();
     if (s_raw.phase_seen) {
         psram_tuning_note_phase(&s_tuning, s_raw.phase_len, s_raw.phase_end);
@@ -334,7 +336,7 @@ void psram_boot_check(void) {
     char text[128];
     psram_tuning_format(text, sizeof(text), &s_tuning);
     uint8_t ph, dqs, data;
-    tuning_regs(&ph, &dqs, &data);
+    psram_boot_tuning_regs(&ph, &dqs, &data);
     ESP_LOGI(TAG, "tuning: %s", text);
     ESP_LOGI(TAG, "tuning regs: phase id %u, dqs delay %u, data delay %u", ph, dqs, data);
     dense_check();
@@ -420,7 +422,7 @@ void psram_boot_print(void) {
     psram_tuning_format(text, sizeof(text), &s_tuning);
     console_reply("psram tuning: %s", text);
     uint8_t ph, dqs, data, edata, edqs;
-    tuning_regs(&ph, &dqs, &data);
+    psram_boot_tuning_regs(&ph, &dqs, &data);
     psram_tuning_delays(s_os_applied ? (uint8_t)s_os_idx : s_tuning.dl_idx, &edata, &edqs);
     bool match = ph == s_tuning.phase_id && dqs == edqs && data == edata;
     console_reply("psram tuning regs: phase id %u, dqs delay %u, data delay %u (%s)", ph, dqs, data,
@@ -432,6 +434,11 @@ void psram_boot_print(void) {
     console_reply("psram one-shot delayline (this boot): %s", s_os_line);
     console_reply("psram boot policy: %s", s_policy_done ? s_policy_line : "not evaluated yet");
     print_ldo();
+}
+
+bool psram_boot_dl_choice(uint8_t *idx) {
+    *idx = s_tuning.dl_idx;
+    return s_tuning.dl_seen;
 }
 
 bool psram_boot_bad(char *why, size_t cap) {
