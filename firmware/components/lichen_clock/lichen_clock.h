@@ -30,8 +30,16 @@ clock_verdict_t clock_propose(clock_src_t src, struct timeval const *tv);
 // had not set the clock this boot; the next SNTP answer is then taken in full.
 clock_verdict_t clock_set_manual(struct timeval const *tv, bool force);
 
-// SNTP offers a time: clock_propose(CLOCK_SRC_SNTP), and records the step.
-clock_verdict_t clock_offer_sntp(struct timeval const *tv);
+// What one SNTP answer did (#326), for the caller's log: how is NONE when it was refused or the clock did not take it
+typedef struct {
+    clock_fix_t how;        // SLEW (adjtime) or STEP
+    int64_t     step_ms;    // the measured offset: the answer minus the clock just before it
+    int64_t     pending_ms; // the earlier slew still pending when it came (clock_drift_ms())
+    int64_t     mono_ms;    // uptime then
+} clock_answer_t;
+
+// SNTP offers a time: clock_propose(CLOCK_SRC_SNTP), and records the step. ans (may be NULL): what this answer did.
+clock_verdict_t clock_offer_sntp(struct timeval const *tv, clock_answer_t *ans);
 
 typedef struct {
     bool            synced;       // SNTP set the time since this boot
@@ -70,7 +78,9 @@ typedef struct {
     uint32_t    stepped;    // answers stepped since boot
 } clock_fix_info_t;
 
-clock_fix_info_t clock_fix_info(void);
+// clock_sync_info() and clock_fix_info_t from one look, so "fw clock" never pairs one answer's offset with another's
+// slew or step
+void clock_sync_snapshot(clock_sync_info_t *i, clock_fix_info_t *f);
 
 // The boot's carried-vs-saved choice (clock_save.c): sets the saved estimate t, only while no source has set the clock
 // this boot and only forward. The clock then counts as carried over the restart (CLOCK_SRC_RTC). false: not applied.

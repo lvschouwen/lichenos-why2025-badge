@@ -330,22 +330,27 @@ static void on_time_sync(struct timeval *tv) {
 // lwIP's own sntp_sync_time() is weak and calls settimeofday() before the sync callback, so a filter in the callback
 // would be too late (#8). This one checks the answer first: an implausible or far-off time is logged and ignored.
 void sntp_sync_time(struct timeval *tv) {
-    clock_verdict_t v = clock_offer_sntp(tv);
+    clock_answer_t  a;
+    clock_verdict_t v = clock_offer_sntp(tv, &a);
     if (!clock_accepted(v)) {
         ESP_LOGW(TAG, "SNTP time %lld ignored: %s", (long long)tv->tv_sec, clock_verdict_text(v));
         return;
     }
-    clock_sync_info_t info = clock_sync_info();
+    if (a.how == CLOCK_FIX_NONE) {
+        ESP_LOGW(TAG, "SNTP time %lld accepted but not set", (long long)tv->tv_sec);
+        return;
+    }
     if (v == CLOCK_RECOVERED) {
         ESP_LOGW(TAG, "SNTP: %s, clock moved", clock_verdict_text(v));
     }
-    // #326: an offset under a second is slewed (adjtime), so the hourly corrections log "slewed", not a step
+    // #326: an offset under a second is slewed (adjtime), so the hourly corrections log "slewed", not a step. From
+    // this answer's own result: a second answer in between cannot relabel it.
     ESP_LOGI(
         TAG,
         "SNTP %s %+lld ms after %lld s uptime",
-        clock_fix_info().fix == CLOCK_FIX_SLEW ? "slewed" : "step",
-        (long long)info.step_ms,
-        (long long)(info.step_mono_ms / 1000)
+        a.how == CLOCK_FIX_SLEW ? "slewed" : "step",
+        (long long)a.step_ms,
+        (long long)(a.mono_ms / 1000)
     );
     sntp_set_sync_status(SNTP_SYNC_STATUS_COMPLETED);
     on_time_sync(tv);

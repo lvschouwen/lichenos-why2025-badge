@@ -94,44 +94,32 @@ static void cmd_sync(void) {
 
 static void cmd_status(void);
 
-// #326: what the boot chose between the carried and the saved clock, and the record kept since
+// #326: what the boot chose between the carried and the saved clock (saved -1: no record; age -1: the RTC counter
+// restarted), and the record kept since (age -1: not saved yet, the clock was never set)
 static void status_boot(void) {
     clock_boot_info_t b = clock_boot_info();
-    char              saved[48];
-    if (!b.rec_valid) {
-        snprintf(saved, sizeof(saved), "none");
-    } else if (b.save_age_s >= 0) {
-        snprintf(saved, sizeof(saved), "%lld (saved %lld s before boot)", (long long)b.saved_s,
-                 (long long)b.save_age_s);
-    } else {
-        snprintf(saved, sizeof(saved), "%lld (RTC counter restarted)", (long long)b.saved_s);
-    }
-    console_reply("boot: carried %lld%s, saved %s; used: %s", (long long)b.carried_s,
-                  clock_in_window(b.carried_s, clock_build_epoch()) ? "" : " (not set)", saved,
-                  clock_boot_text(b.pick));
-    int64_t age = clock_save_age_s();
-    if (age >= 0) {
-        console_reply("clock record: saved %lld s ago (every %d s while set)", (long long)age, CLOCK_SAVE_EVERY_S);
-    } else {
-        console_reply("clock record: not saved this boot (clock not set)");
-    }
+    console_reply("boot: carried %lld%s, saved %lld (%lld s before boot); used: %s", (long long)b.carried_s,
+                  clock_in_window(b.carried_s, clock_build_epoch()) ? "" : " (not set)",
+                  (long long)(b.rec_valid ? b.saved_s : -1), (long long)b.save_age_s, clock_boot_text(b.pick));
+    console_reply("clock record: saved %lld s ago, every %d s while the clock is set", (long long)clock_save_age_s(),
+                  CLOCK_SAVE_EVERY_S);
 }
 
 // #326: how the last SNTP answer was applied; the ppm counts drift only, not a slew still pending when it came
-static void status_sntp(clock_sync_info_t const *i) {
-    clock_fix_info_t f = clock_fix_info();
-    double           ppm;
-    char             ppm_txt[24] = "";
-    if (clock_step_ppm(clock_drift_ms(i->step_ms, f.pending_ms), i->step_span_ms, &ppm)) {
+static void status_sntp(clock_sync_info_t const *i, clock_fix_info_t const *f) {
+    double ppm;
+    char   ppm_txt[24] = "";
+    if (clock_step_ppm(clock_drift_ms(i->step_ms, f->pending_ms), i->step_span_ms, &ppm)) {
         snprintf(ppm_txt, sizeof(ppm_txt), " (%+.0f ppm)", ppm);
     }
     console_reply("now %lld; SNTP answer %lld at %lld ms uptime, clock before it %lld", (long long)time(NULL),
-                  (long long)i->last_good_s, (long long)i->step_mono_ms, (long long)(i->last_good_s - i->step_ms / 1000));
-    console_reply("SNTP: synced %lld s ago; last correction %+lld ms %s at %lld s uptime%s",
-                  (long long)(time(NULL) - i->last_good_s), (long long)i->step_ms, clock_fix_text(f.fix),
-                  (long long)(i->step_mono_ms / 1000), ppm_txt);
-    console_reply("SNTP: %u slewed, %u stepped since boot; slew pending at the last answer %+lld ms", (unsigned)f.slewed,
-                  (unsigned)f.stepped, (long long)f.pending_ms);
+                  (long long)i->last_good_s, (long long)i->step_mono_ms,
+                  (long long)(i->last_good_s - i->step_ms / 1000));
+    console_reply("SNTP: synced %lld s ago; last %s %+lld ms (%+lld ms slew pending) at %lld s uptime%s; %u slewed, "
+                  "%u stepped",
+                  (long long)(time(NULL) - i->last_good_s), clock_fix_text(f->fix), (long long)i->step_ms,
+                  (long long)f->pending_ms, (long long)(i->step_mono_ms / 1000), ppm_txt, (unsigned)f->slewed,
+                  (unsigned)f->stepped);
 }
 
 static void cmd_clock(char const *args) {
@@ -163,7 +151,9 @@ static void cmd_status(void) {
         console_reply("RTC vs esp_timer since boot: too soon (%lld s)", (long long)(dtim / 1000000));
     }
 
-    clock_sync_info_t i = clock_sync_info();
+    clock_sync_info_t i;
+    clock_fix_info_t  f;
+    clock_sync_snapshot(&i, &f);
     console_reply("carried at boot: %lld s (clock after %lld ms uptime), RTC counter %.1f s", (long long)carried_s,
                   (long long)carried_up_ms, (double)rtc_boot_us / 1e6);
     console_reply("clock: %s, build epoch %lld", clock_is_set() ? "set" : "not set", (long long)clock_build_epoch());
@@ -176,7 +166,7 @@ static void cmd_status(void) {
     }
     status_boot();
     if (i.synced) {
-        status_sntp(&i);
+        status_sntp(&i, &f);
     } else {
         console_reply("SNTP: not synced since boot");
     }

@@ -80,20 +80,33 @@ int __wrap_settimeofday(struct timeval const *tv, struct timezone const *tz) {
     return -1;
 }
 #else
-// Host tests: never touch the host's clock (as root it would succeed)
-static int set_clock(struct timeval const *tv) {
+// Host tests: never touch the host's clock (as root it would succeed). A test defines the clock_host_* hooks to watch
+// what lichen_clock applies (clock_apply_test.c); these weak defaults apply nothing.
+__attribute__((weak)) int clock_host_set(struct timeval const *tv) {
     (void)tv;
     return -1;
 }
 
-static int slew_clock(int64_t offset_us, int64_t *pending_us) {
+__attribute__((weak)) int clock_host_slew(int64_t offset_us, int64_t *pending_us) {
     (void)offset_us;
     *pending_us = 0;
     return -1;
 }
 
-static int64_t slew_pending_us(void) {
+__attribute__((weak)) int64_t clock_host_pending_us(void) {
     return 0;
+}
+
+static int set_clock(struct timeval const *tv) {
+    return clock_host_set(tv);
+}
+
+static int slew_clock(int64_t offset_us, int64_t *pending_us) {
+    return clock_host_slew(offset_us, pending_us);
+}
+
+static int64_t slew_pending_us(void) {
+    return clock_host_pending_us();
 }
 #endif
 
@@ -146,7 +159,24 @@ void clock_set_store(clock_src_t was, void (*save)(clock_src_t src)) {
     }
 }
 
-static clock_verdict_t propose(clock_src_t src, struct timeval const *tv, bool force) {
+// Under the lock: the bookkeeping of an SNTP answer that set the clock, step_ms being the measured offset
+static void note_sntp_locked(struct timeval const *tv, struct timeval const *cur, int64_t now_ms, clock_answer_t *a) {
+    info.step_ms           = ((int64_t)tv->tv_sec - (int64_t)cur->tv_sec) * 1000 +
+                             ((int64_t)tv->tv_usec - cur->tv_usec) / 1000;
+    info.step_span_ms      = info.synced ? now_ms - info.last_good_mono_ms : 0;
+    info.step_mono_ms      = now_ms;
+    info.synced            = true;
+    info.last_good_s       = (int64_t)tv->tv_sec;
+    info.last_good_mono_ms = now_ms;
+    fix.fix                = a->how;
+    fix.pending_ms         = a->pending_ms;
+    fix.slewed += a->how == CLOCK_FIX_SLEW;
+    fix.stepped += a->how == CLOCK_FIX_STEP;
+    a->step_ms = info.step_ms;
+    a->mono_ms = now_ms;
+}
+
+static clock_verdict_t propose(clock_src_t src, struct timeval const *tv, bool force, clock_answer_t *ans) {
     pthread_mutex_lock(&lock);
     note_boot_locked();
     struct timeval cur;
@@ -161,26 +191,23 @@ static clock_verdict_t propose(clock_src_t src, struct timeval const *tv, bool f
             info.refused++;
         }
     }
-    int64_t     pending_us = 0;
-    clock_fix_t how        = CLOCK_FIX_NONE;
-    bool        set        = clock_accepted(v) && apply_locked(src, tv, &cur, &pending_us, &how) == 0;
+    int64_t        pending_us = 0;
+    clock_answer_t a          = {.how = CLOCK_FIX_NONE};
+    bool           set        = clock_accepted(v) && apply_locked(src, tv, &cur, &pending_us, &a.how) == 0;
     if (set) {
         info.source         = src;
         info.was            = CLOCK_SRC_NONE; // only a carried clock has a "was"
         info.source_mono_ms = now_ms;
         if (src == CLOCK_SRC_SNTP) {
-            info.step_ms = ((int64_t)tv->tv_sec - (int64_t)cur.tv_sec) * 1000 +
-                           ((int64_t)tv->tv_usec - cur.tv_usec) / 1000;
-            info.step_span_ms      = info.synced ? now_ms - info.last_good_mono_ms : 0;
-            info.step_mono_ms      = now_ms;
-            info.synced            = true;
-            info.last_good_s       = (int64_t)tv->tv_sec;
-            info.last_good_mono_ms = now_ms;
-            fix.fix                = how;
-            fix.pending_ms         = pending_us / 1000;
-            fix.slewed += how == CLOCK_FIX_SLEW;
-            fix.stepped += how == CLOCK_FIX_STEP;
+            a.pending_ms = pending_us / 1000;
+            note_sntp_locked(tv, &cur, now_ms, &a);
         }
+    }
+    if (!set) {
+        a.how = CLOCK_FIX_NONE; // a refused answer, or one the clock did not take, is neither slewed nor stepped
+    }
+    if (ans) {
+        *ans = a;
     }
     bool        due   = record_due_locked();
     clock_src_t saved = info.source;
@@ -196,15 +223,15 @@ static clock_verdict_t propose(clock_src_t src, struct timeval const *tv, bool f
 }
 
 clock_verdict_t clock_propose(clock_src_t src, struct timeval const *tv) {
-    return propose(src, tv, false);
+    return propose(src, tv, false, NULL);
 }
 
 clock_verdict_t clock_set_manual(struct timeval const *tv, bool force) {
-    return propose(CLOCK_SRC_MANUAL, tv, force);
+    return propose(CLOCK_SRC_MANUAL, tv, force, NULL);
 }
 
-clock_verdict_t clock_offer_sntp(struct timeval const *tv) {
-    return clock_propose(CLOCK_SRC_SNTP, tv);
+clock_verdict_t clock_offer_sntp(struct timeval const *tv, clock_answer_t *ans) {
+    return propose(CLOCK_SRC_SNTP, tv, false, ans);
 }
 
 bool clock_is_approximate(void) {
@@ -221,11 +248,12 @@ void clock_source_text(char *out, size_t cap) {
     clock_src_line(i.source, i.was, (mono_ms() - i.source_mono_ms) / 1000, out, cap);
 }
 
-clock_fix_info_t clock_fix_info(void) {
+void clock_sync_snapshot(clock_sync_info_t *i, clock_fix_info_t *f) {
     pthread_mutex_lock(&lock);
-    clock_fix_info_t f = fix;
+    note_boot_locked();
+    *i = info;
+    *f = fix;
     pthread_mutex_unlock(&lock);
-    return f;
 }
 
 void clock_set_saver(void (*save_now)(void)) {

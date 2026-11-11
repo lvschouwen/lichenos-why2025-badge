@@ -4,7 +4,8 @@
 // (no ISR) and after every accepted set. It survives what keeps the LP RAM powered (core resets: esp_restart, panic,
 // the watchdogs; whether a chip reset by EN keeps it is the bench's to show) and never a power-off (no VBAT): a save
 // can then not pass a stale time off as carried. #4 doubted RTC no-init memory over a software restart (BadgeVMS's
-// layout; a later panic reset showed it kept); IDF itself keeps its RTC timer state there (esp_clk.c) for the same resets. The decision is clock_boot_pick() (clock_keep.c, host-tested).
+// layout; a later panic reset showed it kept); IDF itself keeps its RTC timer state there (esp_clk.c) for the same
+// resets. The decision is clock_boot_pick() (clock_keep.c, host-tested).
 #include "clock_keep.h"
 #include "lichen_clock.h"
 
@@ -76,8 +77,10 @@ void clock_save_init(void) {
     s_armed = true;
     clock_set_saver(save_now);
     save_now();
-    esp_timer_create_args_t const args = {
-        .callback = on_save_timer, .dispatch_method = ESP_TIMER_TASK, .name = "clock_save", .skip_unhandled_events = true};
+    esp_timer_create_args_t const args = {.callback              = on_save_timer,
+                                          .dispatch_method       = ESP_TIMER_TASK,
+                                          .name                  = "clock_save",
+                                          .skip_unhandled_events = true};
     esp_timer_handle_t timer = NULL;
     if (esp_timer_create(&args, &timer) != ESP_OK ||
         esp_timer_start_periodic(timer, (uint64_t)CLOCK_SAVE_EVERY_S * 1000000) != ESP_OK) {

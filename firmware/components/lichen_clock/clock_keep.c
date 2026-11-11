@@ -12,9 +12,8 @@ char const *clock_fix_text(clock_fix_t f) {
     switch (f) {
         case CLOCK_FIX_SLEW: return "slewed";
         case CLOCK_FIX_STEP: return "stepped";
-        case CLOCK_FIX_NONE: return "none";
+        default: return "none";
     }
-    return "?";
 }
 
 int64_t clock_drift_ms(int64_t step_ms, int64_t pending_ms) {
@@ -61,7 +60,6 @@ char const *clock_boot_text(clock_boot_t b) {
     switch (b) {
         case CLOCK_BOOT_SAVED: return "saved";
         case CLOCK_BOOT_CARRIED: return "carried";
-        case CLOCK_BOOT_NONE: return "neither";
+        default: return "neither";
     }
-    return "?";
 }
