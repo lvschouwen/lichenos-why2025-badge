@@ -1,6 +1,7 @@
 // Host test: one console_exec run's output (#38) and its secret lines (#123)
 #include "console_capture.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -81,7 +82,41 @@ static void route(void) {
     CHECK(pub.uart && pub.tap && !pub.capture);
 }
 
+static size_t fmt_line(char *out, size_t cap, size_t *tl, char const *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    size_t n = console_line_fmt(out, cap, fmt, ap, tl);
+    va_end(ap);
+    return n;
+}
+
+// #327: prefix, text and newline are one buffer, so one write; a cut line keeps its newline
+static void one_line(void) {
+    char   out[64];
+    size_t tl = 99;
+    size_t n  = fmt_line(out, sizeof(out), &tl, "key %s %d", "abc", 7);
+    CHECK(n == strlen("fw: key abc 7\n") && tl == strlen("key abc 7"));
+    CHECK(strcmp(out, "fw: key abc 7\n") == 0);
+
+    char small[16]; // 16 - 6 = 10 text bytes fit
+    n = fmt_line(small, sizeof(small), &tl, "%s", "0123456789ABCDEFGHIJ");
+    CHECK(tl == 10 && n == 15 && strcmp(small, "fw: 0123456789\n") == 0);
+    n = fmt_line(small, sizeof(small), &tl, "%s", "0123456789"); // exactly fits
+    CHECK(tl == 10 && strcmp(small, "fw: 0123456789\n") == 0);
+
+    char big[389]; // the console's buffer: 4 + 383 + newline + NUL
+    char longtxt[1000];
+    memset(longtxt, 'x', sizeof(longtxt) - 1);
+    longtxt[sizeof(longtxt) - 1] = 0;
+    n = fmt_line(big, sizeof(big), &tl, "%s", longtxt);
+    CHECK(tl == 383 && n == 388 && big[387] == '\n' && big[388] == 0 && strncmp(big, "fw: xxx", 7) == 0);
+
+    n = fmt_line(out, sizeof(out), &tl, "%s", ""); // empty text
+    CHECK(tl == 0 && n == 5 && strcmp(out, "fw: \n") == 0);
+}
+
 int main(void) {
+    one_line();
     route();
     screen_hides_secrets();
     wifi_keeps_secrets();

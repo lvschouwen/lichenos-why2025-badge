@@ -1,6 +1,7 @@
 // One console_exec run's output (#38, #123): see console_capture.h
 #include "console_capture.h"
 
+#include <stdio.h>
 #include <string.h>
 
 static void add(console_capture_t *c, char const *text, size_t n) {
@@ -34,4 +35,17 @@ console_route_t console_route(bool secret, bool capturing) {
         .tap     = !secret,
         .capture = capturing,
     };
+}
+
+size_t console_line_fmt(char *out, size_t cap, char const *fmt, va_list ap, size_t *text_len) {
+    memcpy(out, CONSOLE_LINE_PREFIX, CONSOLE_LINE_PREFIX_LEN);
+    size_t room = cap - CONSOLE_LINE_PREFIX_LEN - 2; // the newline and the NUL
+    int    n    = vsnprintf(out + CONSOLE_LINE_PREFIX_LEN, room + 1, fmt, ap);
+    size_t len  = n < 0 ? 0 : ((size_t)n < room ? (size_t)n : room);
+    out[CONSOLE_LINE_PREFIX_LEN + len]     = '\n';
+    out[CONSOLE_LINE_PREFIX_LEN + len + 1] = '\0';
+    if (text_len) {
+        *text_len = len;
+    }
+    return CONSOLE_LINE_PREFIX_LEN + len + 1;
 }

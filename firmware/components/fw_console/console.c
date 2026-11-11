@@ -63,45 +63,49 @@ static struct {
 // One command runs at a time, from the UART or from Wi-Fi: commands share state (the capture, the commands' statics)
 static SemaphoreHandle_t run_mutex;
 #define RUN_WAIT_MS 2000
-// reply_v's formatting buffer is static (384 B off the 4 KB console and c6link task stacks), guarded by its own mutex
+// reply_v formats the whole "fw: text\n" line into one static buffer (off the 4 KB console and c6link task stacks),
+// guarded by its own mutex, and writes it with one fwrite (#327). The text is cut at REPLY_MAX - 1 everywhere.
 static SemaphoreHandle_t reply_mutex;
-static char              reply_text[REPLY_MAX];
+static char              reply_line[CONSOLE_LINE_PREFIX_LEN + REPLY_MAX + 1];
 
-// Where a line goes is console_route's decision (console_capture.c, host-tested): a secret line (#123) reaches only the
-// one who asked, never the tap (the log store is read over Wi-Fi and on the screen later). Its formatted copy is wiped.
-static void reply_v(bool secret, char const *fmt, va_list ap) {
-    va_list copy;
-    va_copy(copy, ap);
-    console_route_t to = console_route(secret, capture.task && capture.task == xTaskGetCurrentTaskHandle());
+static void reply_emit(bool secret, console_route_t to, char *line, size_t cap, char const *fmt, va_list ap) {
+    size_t text_len;
+    size_t n = console_line_fmt(line, cap, fmt, ap, &text_len);
     if (to.uart) {
-        printf("fw: ");
-        vprintf(fmt, ap);
-        printf("\n");
+        fwrite(line, 1, n, stdout);
     } else {
-        printf("fw: " CONSOLE_SECRET_UART "\n");
+        fputs("fw: " CONSOLE_SECRET_UART "\n", stdout);
     }
     if (secret) {
         fflush(stdout); // out of stdio's buffer now rather than whenever the next line comes
     }
-    if ((to.tap || to.capture) && reply_mutex && xSemaphoreTake(reply_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) == pdTRUE) {
-        char *text = reply_text;
-        int   n    = vsnprintf(text, REPLY_MAX, fmt, copy);
-        if (n > 0) {
-            size_t len = (size_t)n < REPLY_MAX ? (size_t)n : REPLY_MAX - 1;
-            if (tap && to.tap) {
-                text[len] = '\n';
-                tap(text, len + 1);
-            }
-            if (to.capture) {
-                console_capture_add(&capture.out, text, len, secret);
-            }
+    char *text = line + CONSOLE_LINE_PREFIX_LEN;
+    if (text_len > 0) {
+        if (tap && to.tap) {
+            tap(text, text_len + 1); // the newline follows the text in the same buffer
         }
-        if (secret) {
-            secure_wipe(reply_text, sizeof(reply_text));
+        if (to.capture) {
+            console_capture_add(&capture.out, text, text_len, secret);
         }
-        xSemaphoreGive(reply_mutex);
     }
-    va_end(copy);
+    if (secret) {
+        secure_wipe(line, cap);
+    }
+}
+
+// Where a line goes is console_route's decision (console_capture.c, host-tested): a secret line (#123) reaches only the
+// one who asked, never the tap (the log store is read over Wi-Fi and on the screen later). Its formatted copy is wiped.
+static void reply_v(bool secret, char const *fmt, va_list ap) {
+    console_route_t to = console_route(secret, capture.task && capture.task == xTaskGetCurrentTaskHandle());
+    if (reply_mutex && xSemaphoreTake(reply_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) == pdTRUE) {
+        reply_emit(secret, to, reply_line, sizeof(reply_line), fmt, ap);
+        xSemaphoreGive(reply_mutex);
+    } else {
+        // Before the mutex exists or when it is held too long: a short line on the stack still leaves in one write
+        char line[96];
+        to.tap = to.capture = false;
+        reply_emit(secret, to, line, sizeof(line), fmt, ap);
+    }
 }
 
 void console_reply(char const *fmt, ...) {

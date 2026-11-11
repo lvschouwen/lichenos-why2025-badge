@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -36,3 +37,11 @@ console_route_t console_route(bool secret, bool capturing);
 // Appends text (n bytes, no newline) and a '\n'. Output past cap is dropped with CONSOLE_CUT_NOTE (room for it is
 // always kept). A secret line is collected only when keep_secret; otherwise the note stands in for it.
 void console_capture_add(console_capture_t *c, char const *text, size_t n, bool secret);
+
+// One UART line, "fw: " + text + "\n" + NUL, formatted into out (cap >= 7) so it leaves in ONE write (#327): three
+// separate prints let another task's log line land between the prefix and a secret, and the serial logger then logs the
+// secret in clear. Text past cap - 6 is cut; the newline is always kept. *text_len is the text's length (it starts at
+// out + CONSOLE_LINE_PREFIX_LEN and is followed by the newline). Returns the bytes to write (without the NUL).
+#define CONSOLE_LINE_PREFIX     "fw: "
+#define CONSOLE_LINE_PREFIX_LEN 4
+size_t console_line_fmt(char *out, size_t cap, char const *fmt, va_list ap, size_t *text_len);
