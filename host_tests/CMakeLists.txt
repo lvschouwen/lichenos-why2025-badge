@@ -2070,12 +2070,3 @@ target_include_directories(ui_ops_test PRIVATE
 )
 target_compile_options(ui_ops_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME ui_ops_test COMMAND ui_ops_test)
-
-# The reset-survival probe's marker and boot line (#330 spike)
-add_executable(reset_probe_test
-    ${CMAKE_CURRENT_SOURCE_DIR}/reset_probe_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_clock/reset_probe_logic.c
-)
-target_include_directories(reset_probe_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_clock)
-target_compile_options(reset_probe_test PRIVATE -Wall -Wextra -Werror)
-add_test(NAME reset_probe_test COMMAND reset_probe_test)

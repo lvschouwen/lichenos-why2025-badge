@@ -1,12 +1,10 @@
 menu "Lichen clock"
-    config LICHEN_RESET_PROBE
-        bool "Reset-survival probe (#330 spike)"
+    config LICHEN_CLOCK_PSRAM_RECORD
+        bool
         default y
         depends on SPIRAM
         select SPIRAM_ALLOW_NOINIT_SEG_EXTERNAL_MEMORY
         help
-            A marker in LP RAM (RTC no-init), in LP_SYSTEM_REG_LP_STORE12..14 and in PSRAM (no-init), read and logged
-            at every boot with the reset reason ("resetprobe: ..."), then rewritten; "fw resetprobe arm|show".
-            Shows which store can carry the clock record across which reset without a flash write. No flash writes,
-            nothing on air. Remove once #326 has picked its store.
+            The minute clock record (clock_save.c, #343) lives in PSRAM's no-init segment, the only store #330
+            found to survive the CH340 EN (system) reset without a flash write.
 endmenu

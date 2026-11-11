@@ -4,7 +4,7 @@
 # too (clock_local_test.c); clock_store.c keeps the source across a warm reset in Lichen's NVS (the store lichen_os binds,
 # #245), and
 # "fw clock sync" restarts lwIP's SNTP client (lwip). clock_keep.c (slew vs step, the boot's carried-vs-saved choice, #326)
-# is pure and host-tested (clock_keep_test.c); clock_save.c keeps that record in LP RAM and saves it every minute.
+# is pure and host-tested (clock_keep_test.c); clock_save.c keeps that record in PSRAM no-init (#343) and saves it every minute.
 execute_process(
     COMMAND git log -1 --format=%ct
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -15,13 +15,8 @@ if(NOT build_epoch_result EQUAL 0 OR build_epoch STREQUAL "")
     message(FATAL_ERROR "git log -1 --format=%ct failed: the clock check needs the build epoch")
 endif()
 
-# reset_probe.c (#330 spike, CONFIG_LICHEN_RESET_PROBE): which store survives which reset; reset_probe_logic.c is pure
-# and host-tested (reset_probe_test.c). Remove both and the Kconfig once #326 has moved its record.
 set(srcs "clock_check.c" "clock_local.c" "lichen_clock.c" "clock_cmd.c" "clock_store.c" "clock_reg.c" "clock_keep.c"
          "clock_save.c")
-if(CONFIG_LICHEN_RESET_PROBE)
-    list(APPEND srcs "reset_probe.c" "reset_probe_logic.c")
-endif()
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "../../../shared/reg"

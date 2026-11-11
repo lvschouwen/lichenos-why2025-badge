@@ -1,15 +1,17 @@
 // The clock saved every minute (#326). A reset that skips IDF's time write-back, or one that loses the clock while the
-// power stays on, otherwise brings back a clock stale by however long the badge ran. The record is 12 bytes of LP RAM
-// (RTC_NOINIT_ATTR): no flash wear and no flash write stalling the display (#31), written from the esp_timer task
-// (no ISR) and after every accepted set. It survives what keeps the LP RAM powered (core resets: esp_restart, panic,
-// the watchdogs; whether a chip reset by EN keeps it is the bench's to show) and never a power-off (no VBAT): a save
-// can then not pass a stale time off as carried. #4 doubted RTC no-init memory over a software restart (BadgeVMS's
-// layout; a later panic reset showed it kept); IDF itself keeps its RTC timer state there (esp_clk.c) for the same
-// resets. The decision is clock_boot_pick() (clock_keep.c, host-tested).
+// power stays on, otherwise brings back a clock stale by however long the badge ran. The record is 12 bytes in PSRAM's
+// no-init segment (EXT_RAM_NOINIT_ATTR, #343): no flash wear and no flash write stalling the display (#31), written from
+// the esp_timer task (no ISR) and after every accepted set. #330 measured which store survives which reset: PSRAM
+// no-init keeps it over esp_restart, panic, the interrupt watchdog and the CH340 EN (system) reset; LP RAM
+// (RTC_NOINIT) and the LP_STORE registers lose it at the EN reset. Nothing keeps it over a power-off (no VBAT), so a
+// save can never pass a stale time off as carried. The record owns a whole cache line and is written back after each
+// save (esp_cache_msync): a reset drops the cache, and with it a write that never reached the chip. The decision is
+// clock_boot_pick() (clock_keep.c, host-tested).
 #include "clock_keep.h"
 #include "lichen_clock.h"
 
 #include "esp_attr.h"
+#include "esp_cache.h"
 #include "esp_log.h"
 #include "esp_private/esp_clk.h"
 #include "esp_timer.h"
@@ -17,11 +19,19 @@
 
 #include <time.h>
 
-#if CONFIG_LICHEN_RESET_PROBE
-#include "reset_probe.h"
+#if !CONFIG_SPIRAM_ALLOW_NOINIT_SEG_EXTERNAL_MEMORY
+#error "the clock record needs PSRAM's no-init segment (lichen_clock/Kconfig selects it)"
 #endif
 
-static RTC_NOINIT_ATTR volatile clock_rec_t s_rec;
+#define REC_LINE 128 // >= the P4's L1 and L2 data cache line: the record owns its line, so a write-back never mixes
+
+typedef struct {
+    volatile clock_rec_t rec;
+    uint8_t              pad[REC_LINE - sizeof(clock_rec_t)];
+} rec_line_t;
+
+static EXT_RAM_NOINIT_ATTR rec_line_t s_line __attribute__((aligned(REC_LINE)));
+#define s_rec (s_line.rec)
 static portMUX_TYPE                         s_rec_mux = portMUX_INITIALIZER_UNLOCKED; // timer task vs proposers
 static clock_boot_info_t                    s_boot;
 static int64_t                              s_saved_at_s = -1; // RTC seconds of the newest save (under s_rec_mux)
@@ -52,6 +62,10 @@ static void save_now(void) {
     s_rec.check  = r.check;
     s_saved_at_s = rtc;
     taskEXIT_CRITICAL(&s_rec_mux);
+    // Outside the critical section: a race with another save writes back the newer line either way
+    if (esp_cache_msync(&s_line, sizeof(s_line), ESP_CACHE_MSYNC_FLAG_DIR_C2M) != ESP_OK) {
+        ESP_LOGW("clock", "clock record not written back to PSRAM");
+    }
 }
 
 static void on_save_timer(void *arg) {
@@ -83,9 +97,6 @@ void clock_boot_init(void) {
         return;
     }
     done = true;
-#if CONFIG_LICHEN_RESET_PROBE
-    reset_probe_boot(); // #330: reads its markers before anything rewrites them
-#endif
     choose_at_boot();
     s_armed = true;
     clock_set_saver(save_now);
