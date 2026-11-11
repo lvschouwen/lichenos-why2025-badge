@@ -51,3 +51,7 @@ CONFIG_EH_TRANSPORT_CP_SDIO_CHECKSUM=y
 
 # LoRa bridge to the P4 (#51)
 CONFIG_ESP_HOSTED_CP_FEAT_PEER_DATA=y
+
+# Reproducible image (#279): no build date in the app descriptor; PROJECT_VER is a content hash (c6/CMakeLists.txt)
+CONFIG_APP_COMPILE_TIME_DATE=n
+CONFIG_APP_PROJECT_VER_FROM_CONFIG=n
