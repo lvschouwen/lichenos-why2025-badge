@@ -21,6 +21,7 @@
 #include "lichen_nvs.h"
 #include "nvs.h"
 #include "nvs_erase_os.h"
+#include "nvs_fail.h"
 #include "nvs_flash.h"
 #include "storage.h"
 
@@ -53,7 +54,8 @@ bool factory_reset_request(factory_level_t level) {
     if (level == FACTORY_NONE || nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
         return false;
     }
-    bool ok = nvs_set_u8(nvs, FACTORY_PENDING_KEY, (uint8_t)level) == ESP_OK && nvs_commit(nvs) == ESP_OK;
+    bool ok = fw_nvs_ok(TAG, FACTORY_PENDING_KEY, nvs_set_u8(nvs, FACTORY_PENDING_KEY, (uint8_t)level)) &&
+              fw_nvs_ok(TAG, FACTORY_PENDING_KEY, nvs_commit(nvs));
     nvs_close(nvs);
     ESP_LOG_LEVEL(
         ok ? ESP_LOG_INFO : ESP_LOG_ERROR,
@@ -81,7 +83,7 @@ static bool state_set(char const *key, uint8_t v) {
         return false;
     }
     esp_err_t err = v ? nvs_set_u8(nvs, key, v) : nvs_erase_key(nvs, key);
-    bool      ok  = (err == ESP_OK || (!v && err == ESP_ERR_NVS_NOT_FOUND)) && nvs_commit(nvs) == ESP_OK;
+    bool      ok  = (v ? fw_nvs_ok(TAG, key, err) : fw_nvs_erased(TAG, key, err)) && fw_nvs_ok(TAG, key, nvs_commit(nvs));
     nvs_close(nvs);
     return ok;
 }
@@ -146,7 +148,7 @@ static void nvs_wipe_keys(factory_level_t level) {
                 }
                 nvs_close(nvs);
             }
-            if (err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND) {
+            if (fw_nvs_erased(TAG, batch[i].key, err)) {
                 erased++;
             } else {
                 failed++; // the same keys would come back every pass
@@ -290,7 +292,7 @@ static void nvs_wipe_full(uint8_t after) {
     for (size_t i = 0; i < n; i++) {
         nvs_handle_t h;
         if (erased && nvs_open(kept[i].ns, NVS_READWRITE, &h) == ESP_OK) {
-            if (kept_write(h, &kept[i]) == ESP_OK && nvs_commit(h) == ESP_OK) {
+            if (fw_nvs_ok(TAG, kept[i].key, kept_write(h, &kept[i])) && fw_nvs_ok(TAG, kept[i].key, nvs_commit(h))) {
                 back++;
             }
             nvs_close(h);

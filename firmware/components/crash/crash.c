@@ -14,6 +14,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "fw_console.h"
+#include "nvs_fail.h"
 #include "nvs.h"
 #include "storage.h"
 
@@ -129,8 +130,8 @@ static uint32_t stored_dump_sum(void) {
 static void store_dump_sum(uint32_t v) {
     nvs_handle_t nvs;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u32(nvs, "dump_sum", v);
-        nvs_commit(nvs);
+        fw_nvs_ok(TAG, "dump_sum", nvs_set_u32(nvs, "dump_sum", v));
+        fw_nvs_ok(TAG, "dump_sum", nvs_commit(nvs));
         nvs_close(nvs);
     }
 }
@@ -232,8 +233,9 @@ static uint32_t bump_count(void) {
     }
     nvs_get_u32(nvs, "crash_count", &count);
     count++;
-    nvs_set_u32(nvs, "crash_count", count);
-    nvs_commit(nvs);
+    if (fw_nvs_ok(TAG, "crash_count", nvs_set_u32(nvs, "crash_count", count))) {
+        fw_nvs_ok(TAG, "crash_count", nvs_commit(nvs));
+    }
     nvs_close(nvs);
     return count;
 }
@@ -381,9 +383,9 @@ bool crash_clear_all(void) {
     crash_log_store("", 0);
     nvs_handle_t nvs;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_erase_key(nvs, "crash_count");
-        nvs_erase_key(nvs, "dump_sum");
-        nvs_commit(nvs);
+        fw_nvs_erased(TAG, "crash_count", nvs_erase_key(nvs, "crash_count"));
+        fw_nvs_erased(TAG, "dump_sum", nvs_erase_key(nvs, "dump_sum"));
+        fw_nvs_ok(TAG, "crash_count", nvs_commit(nvs));
         nvs_close(nvs);
     }
     atomic_fetch_add(&s_generation, 1); // the counter changed too

@@ -12,7 +12,9 @@
 #include "lichen_radio.h"
 #include "notify_bind.h"
 #include "notify_os.h"
+#include "nvs_fail.h"
 #include "ota_os.h"
+#include "settings_fail.h"
 #include "settings_store.h"
 
 #include <stdio.h>
@@ -102,6 +104,13 @@ bool settings_secret_set(char const *key, char const *value) {
     return true;
 }
 
+static int  s_fail_err;
+static char s_fail_key[16];
+void settings_fail_note(char const *key, int err) {
+    s_fail_err = err;
+    snprintf(s_fail_key, sizeof(s_fail_key), "%s", key);
+}
+
 // ---- tests ----------------------------------------------------------------------------------------------------------
 
 static void led_gets_notify_state(void) {
@@ -134,6 +143,11 @@ static void lower_services_get_settings(void) {
     CHECK(!ota_os_wifi_on());
 }
 
+static void nvs_failures_reach_the_settings_counter(void) {
+    CHECK(fw_nvs_ok("t", "crash_count", 0) && s_fail_err == 0);
+    CHECK(!fw_nvs_ok("t", "crash_count", 0x1105) && s_fail_err == 0x1105 && strcmp(s_fail_key, "crash_count") == 0);
+}
+
 static void factory_notice_is_an_os_error(void) {
     if (!s_factory) {
         CHECK(s_factory != NULL); // factory_reset_bind_notice was not called
@@ -151,6 +165,7 @@ int main(void) {
     haptics_is_the_vibrate_feedback();
     lower_services_get_settings();
     factory_notice_is_an_os_error();
+    nvs_failures_reach_the_settings_counter();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

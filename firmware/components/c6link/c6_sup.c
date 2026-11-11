@@ -22,6 +22,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "fw_console.h"
+#include "nvs_fail.h"
 #include "nvs.h"
 
 #include <stdatomic.h>
@@ -448,8 +449,9 @@ static void restart_for_c6(char const *why) __attribute__((noreturn));
 static void restart_for_c6(char const *why) {
     nvs_handle_t nvs;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_set_u8(nvs, KEY_RT_RESTART, 1);
-        nvs_commit(nvs);
+        if (fw_nvs_ok(TAG, KEY_RT_RESTART, nvs_set_u8(nvs, KEY_RT_RESTART, 1))) {
+            fw_nvs_ok(TAG, KEY_RT_RESTART, nvs_commit(nvs));
+        }
         nvs_close(nvs);
     }
     c6link_set_verify_flag(); // the next boot checks (and if needed reflashes) the C6 fully
@@ -551,8 +553,9 @@ static void rt_flag_tick(void) {
     rt_flag = false;
     nvs_handle_t nvs;
     if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
-        nvs_erase_key(nvs, KEY_RT_RESTART);
-        nvs_commit(nvs);
+        if (fw_nvs_erased(TAG, KEY_RT_RESTART, nvs_erase_key(nvs, KEY_RT_RESTART))) {
+            fw_nvs_ok(TAG, KEY_RT_RESTART, nvs_commit(nvs));
+        }
         nvs_close(nvs);
     }
     ESP_LOGI(TAG, "C6 up for %u min: %s cleared", (unsigned)(C6W_RT_FLAG_CLEAR_MS / 60000), KEY_RT_RESTART);

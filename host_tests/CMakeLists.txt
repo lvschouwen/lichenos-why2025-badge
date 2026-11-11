@@ -1761,12 +1761,19 @@ target_compile_options(ota_os_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME ota_os_test COMMAND ota_os_test)
 
 # lichen_os's wiring below the gate (#245): the LED's and the motor's notify hooks, the lower services' settings
-add_executable(os_bind_test ${CMAKE_CURRENT_SOURCE_DIR}/os_bind_test.c ${NPT_FW}/lichen_os/os_bind.c ${NPT_FW}/ota/ota_os.c)
+add_executable(os_bind_test ${CMAKE_CURRENT_SOURCE_DIR}/os_bind_test.c ${NPT_FW}/lichen_os/os_bind.c ${NPT_FW}/ota/ota_os.c
+    ${NPT_FW}/fw_console/nvs_fail.c)
 target_include_directories(os_bind_test PRIVATE ${NPT_FW}/lichen_os ${NPT_FW}/lichen_api ${NPT_FW}/lichen_notify
                            ${NPT_FW}/lichen_boot ${NPT_FW}/lichen_haptics ${NPT_FW}/lichen_led ${NPT_FW}/lichen_clock
                            ${NPT_FW}/ota ${NPT_FW}/fw_console)
 target_compile_options(os_bind_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME os_bind_test COMMAND os_bind_test)
+
+# fw_console/nvs_fail.c (#325): the early-boot NVS writers' failure report, kept until lichen_os binds its sink
+add_executable(nvs_fail_test ${CMAKE_CURRENT_SOURCE_DIR}/nvs_fail_test.c ${NPT_FW}/fw_console/nvs_fail.c)
+target_include_directories(nvs_fail_test PRIVATE ${NPT_FW}/fw_console)
+target_compile_options(nvs_fail_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME nvs_fail_test COMMAND nvs_fail_test)
 
 # settings_store.c over the NVS stub (#235): the plain calls refuse a secret, settings_bind_net's store keeps them apart
 set(SST_FW ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components)
@@ -1864,6 +1871,7 @@ add_custom_target(run_tests
     ota_os_test
     ota_hw_test
     os_bind_test
+    nvs_fail_test
     release_notes_test
     qr_payload_test
     notes_model_test

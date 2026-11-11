@@ -8,6 +8,7 @@
 #include "c6_image.h"
 #include "c6_paths.h"
 #include "fw_console.h"
+#include "nvs_fail.h"
 #include "esp_hosted.h"
 #include "esp_hosted_frame_pool.h"
 #include "esp_log.h"
@@ -49,8 +50,9 @@ static bool take_force_flag(void) {
         return false;
     }
     if (nvs_get_u8(nvs, "c6_force", &force) == ESP_OK) {
-        nvs_erase_key(nvs, "c6_force");
-        nvs_commit(nvs);
+        if (fw_nvs_erased(TAG, "c6_force", nvs_erase_key(nvs, "c6_force"))) {
+            fw_nvs_ok(TAG, "c6_force", nvs_commit(nvs));
+        }
     }
     nvs_close(nvs);
     return force != 0;
@@ -127,7 +129,8 @@ static void cmd_c6(char const *args) {
         console_reply("c6: can't save the reflash flag");
         return;
     }
-    bool saved = nvs_set_u8(nvs, "c6_force", 1) == ESP_OK && nvs_commit(nvs) == ESP_OK;
+    bool saved = fw_nvs_ok(TAG, "c6_force", nvs_set_u8(nvs, "c6_force", 1)) &&
+                 fw_nvs_ok(TAG, "c6_force", nvs_commit(nvs));
     nvs_close(nvs); // on the error path too (#125)
     if (!saved) {
         console_reply("c6: can't save the reflash flag");
@@ -275,18 +278,18 @@ static bool nvs_write_boot_state(char const *key, bool verify) {
     size_t len                    = sizeof(cur);
     bool   have                   = nvs_get_str(nvs, KEY_OK, cur, &len) == ESP_OK;
     if (key && (!have || strcmp(cur, key) != 0)) {
-        ok = nvs_set_str(nvs, KEY_OK, key) == ESP_OK && ok;
+        ok = fw_nvs_ok(TAG, KEY_OK, nvs_set_str(nvs, KEY_OK, key)) && ok;
     } else if (!key && have) {
-        ok = nvs_erase_key(nvs, KEY_OK) == ESP_OK && ok;
+        ok = fw_nvs_erased(TAG, KEY_OK, nvs_erase_key(nvs, KEY_OK)) && ok;
     }
     uint8_t v     = 0;
     bool    vhave = nvs_get_u8(nvs, KEY_VERIFY, &v) == ESP_OK;
     if (verify && (!vhave || !v)) {
-        ok = nvs_set_u8(nvs, KEY_VERIFY, 1) == ESP_OK && ok;
+        ok = fw_nvs_ok(TAG, KEY_VERIFY, nvs_set_u8(nvs, KEY_VERIFY, 1)) && ok;
     } else if (!verify && vhave) {
-        ok = nvs_erase_key(nvs, KEY_VERIFY) == ESP_OK && ok;
+        ok = fw_nvs_erased(TAG, KEY_VERIFY, nvs_erase_key(nvs, KEY_VERIFY)) && ok;
     }
-    ok = nvs_commit(nvs) == ESP_OK && ok;
+    ok = fw_nvs_ok(TAG, KEY_OK, nvs_commit(nvs)) && ok;
     nvs_close(nvs);
     return ok;
 }

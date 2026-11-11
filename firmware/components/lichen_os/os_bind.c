@@ -13,8 +13,10 @@
 #include "lichen_notify.h"
 #include "lichen_radio.h"
 #include "notify_bind.h"
+#include "nvs_fail.h"
 #include "notify_os.h"
 #include "ota_os.h"
+#include "settings_fail.h"
 #include "settings_secret.h"
 #include "settings_store.h"
 
@@ -43,6 +45,7 @@ void os_bind_lower(void) {
     boot_progress_bind_store(settings_get_u8, settings_set_u8);
     clock_bind_store(settings_get_u8, settings_set_u8);
     ota_os_bind(&ota_os);
+    fw_nvs_fail_bind(settings_fail_note); // the early-boot NVS writers count in settings.write_fail (#325)
     factory_reset_bind_notice(factory_notice);
     ln_state_hooks_t const led_hooks = {.dnd = led_set_dnd, .unread = led_set_unread};
     lichen_notify_set_state_hooks(&led_hooks);

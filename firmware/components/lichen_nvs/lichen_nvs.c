@@ -8,6 +8,7 @@
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "fw_console.h"
+#include "nvs_fail.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "nvs_mark.h"
@@ -362,7 +363,7 @@ static size_t snap_write_back(nvs_snap_t const *s) {
         nvs_handle_t h;
         bool         ok = nvs_open(s->e[i].ns, NVS_READWRITE, &h) == ESP_OK;
         if (ok) {
-            ok = write_entry(h, &s->e[i]) == ESP_OK && nvs_commit(h) == ESP_OK;
+            ok = fw_nvs_ok(TAG, s->e[i].key, write_entry(h, &s->e[i])) && fw_nvs_ok(TAG, s->e[i].key, nvs_commit(h));
             nvs_close(h);
         }
         nvs_snap_t back = {0};
