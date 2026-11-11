@@ -357,6 +357,9 @@ shell_scroll_by	-	lvgl	lichen_ui.h
 shell_scroll_tame	-	lvgl	lichen_ui.h
 shell_stack_screen	-	any	lichen_ui.h
 shell_style_screen	-	lvgl	lichen_ui.h
+slider_map_pos	-	unspecified	slider_map.h
+slider_map_step	-	unspecified	slider_map.h
+slider_map_value	-	unspecified	slider_map.h
 task_book_add	-	unspecified	task_book.h
 task_book_count	-	unspecified	task_book.h
 task_book_remove	-	unspecified	task_book.h

@@ -70,7 +70,7 @@ size_t reg_cmd_header(char *buf, size_t cap) {
 }
 
 static void value_text(reg_entry_t const *e, bool has, reg_value_t const *v, char const *none, char *out, size_t cap) {
-    if (!has || !reg_format(e, v, out, cap)) {
+    if (!has || !reg_format_ok(e, v, out, cap)) {
         snprintf(out, cap, "%s", none);
     }
 }
@@ -167,7 +167,7 @@ reg_cmd_result_t reg_cmd_set(reg_find_name_fn find, char const *args, reg_confir
 
 static size_t applied_suffix(reg_entry_t const *e, reg_value_t const *applied, bool have, char *buf, size_t cap) {
     char v[REG_STR_MAX + 8];
-    if (!have || !reg_format(e, applied, v, sizeof(v))) {
+    if (!have || !reg_format_ok(e, applied, v, sizeof(v))) {
         return done(snprintf(buf, cap, "applied ?"), cap);
     }
     return done(snprintf(buf, cap, "applied %s%s%s", v, e->unit ? " " : "", e->unit ? e->unit : ""), cap);
@@ -214,7 +214,7 @@ size_t reg_cached_text(reg_entry_t const *e, reg_view_t const *v, char *buf, siz
     if (!cap) {
         return 0;
     }
-    if (!v->has_applied || !reg_format(e, &v->applied, val, sizeof(val))) {
+    if (!v->has_applied || !reg_format_ok(e, &v->applied, val, sizeof(val))) {
         rv_note_t note = (rv_note_t)v->note;
         return done(snprintf(buf, cap, "? (%s)", note == RV_NONE ? "not read yet" : reg_note_text(note)), cap);
     }

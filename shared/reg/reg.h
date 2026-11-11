@@ -93,6 +93,9 @@ reg_status_t reg_check(reg_entry_t const *e, reg_value_t const *v);
 // The value as text without unit (ENUM by name, BOOL as on/off); bytes written without the NUL, 0 if cap is too small
 size_t reg_format(reg_entry_t const *e, reg_value_t const *v, char *buf, size_t cap);
 
+// reg_format as pass/fail: an empty STR is a value (0 bytes written), only a buffer too small is a failure (#344)
+bool reg_format_ok(reg_entry_t const *e, reg_value_t const *v, char *buf, size_t cap);
+
 // The applied value; REG_FAILED (and *out zeroed) when the entry has no getter, the getter fails or its value does not
 // fit the key's type
 reg_status_t reg_get(reg_entry_t const *e, reg_value_t *out);

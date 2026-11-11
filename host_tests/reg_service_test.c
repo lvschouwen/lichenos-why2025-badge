@@ -214,6 +214,10 @@ static void test_cached_text(void) {
     v = (reg_view_t){0};
     reg_cached_text(bt, &v, line, sizeof(line));
     CHECK(strcmp(line, "? (not read yet)") == 0);
+    // #344: a STR key holding "" is a value (no failure yet), not "not read yet"
+    reg_entry_t const *le = reg_p4_find_id(REG_ID_SETTINGS_LAST_ERR);
+    v = (reg_view_t){.has_applied = true};
+    CHECK(reg_cached_text(le, &v, line, sizeof(line)) == 0 && line[0] == '\0');
 }
 
 static uint16_t const ids[]   = {REG_ID_BL_DISPLAY, REG_ID_LORA_FREQ, REG_ID_LORA_POWER, REG_ID_C6_REG_CAPS};

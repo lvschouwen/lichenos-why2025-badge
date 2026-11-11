@@ -45,6 +45,8 @@ static void show_value(char const *key, char const *v, size_t n, char *out, size
         snprintf(out, cap, "none");
     } else if (strcmp(key, "disp.refresh") == 0 && parse_u(v, n, &num)) {
         snprintf(out, cap, "%" PRIu32 ".%" PRIu32 " Hz", num / 10, num % 10);
+    } else if (strcmp(key, "c6.reg_caps") == 0 && parse_u(v, n, &num)) { // a bit set: hex reads, 32790 does not (#344)
+        snprintf(out, cap, "0x%" PRIx32, num);
     } else if (strcmp(key, "psram.clk") == 0 && parse_u(v, n, &num)) {
         snprintf(out, cap, "%" PRIu32 " MHz", (num + 500000) / 1000000);
     } else {
@@ -55,6 +57,9 @@ static void show_value(char const *key, char const *v, size_t n, char *out, size
 size_t about_dev_text(char const *key, char const *raw, char *out, size_t cap) {
     if (!cap) {
         return 0;
+    }
+    if (raw && !*raw && strcmp(key, "settings.last_err") == 0) {
+        return (size_t)snprintf(out, cap, "none"); // no failure: the registry's value is an empty string (#344)
     }
     if (!raw || !*raw) {
         return (size_t)snprintf(out, cap, "not available");

@@ -179,6 +179,13 @@ size_t reg_format(reg_entry_t const *e, reg_value_t const *v, char *buf, size_t 
     return len >= 0 && (size_t)len < cap ? (size_t)len : 0;
 }
 
+bool reg_format_ok(reg_entry_t const *e, reg_value_t const *v, char *buf, size_t cap) {
+    if (reg_format(e, v, buf, cap) > 0) {
+        return true;
+    }
+    return e->type == REG_T_STR && cap > 0 && v->s[0] == '\0'; // "" fits any buffer; numbers never format to 0 bytes
+}
+
 reg_status_t reg_get(reg_entry_t const *e, reg_value_t *out) {
     return reg_get_with(e, e->get_applied, out);
 }

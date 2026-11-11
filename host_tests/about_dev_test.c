@@ -32,7 +32,10 @@ int main(void) {
     CHECK(is("bt.state", "idle (stale, 12 s ago)", "idle (stale, 12 s ago)"));
     CHECK(is("lora.power", "14 (0.5 s ago)", "14 (0.5 s ago)"));
     CHECK(is("settings.last_err", " (3 s ago)", "none (3 s ago)"));
+    CHECK(is("settings.last_err", "", "none")); // no failure yet: an empty value, not "not available"
     CHECK(is("settings.write_fail", "0", "0"));
+    CHECK(is("c6.reg_caps", "32790 (4 s ago)", "0x8016 (4 s ago)"));
+    CHECK(is("c6.reg_caps", "32790", "0x8016"));
     // not readable: the registry's reason is shown whole, never the unit conversion
     CHECK(is("psram.clk", "? (not read yet)", "? (not read yet)"));
     CHECK(is("c6.reg_caps", "? (stale, 31 s ago)", "? (stale, 31 s ago)"));
