@@ -29,10 +29,8 @@ static void book_take(void) {
 static void book_give(void) {
     portEXIT_CRITICAL(&book_mux);
 }
-static gate_lock_t const book_lock = {.take = book_take, .give = book_give};
 
-// gate_os_ctx (gate_book.h): the context table behind both books
-static bool resolve(uint32_t ctx, char const **id, char const **name, char const *what) {
+bool gate_os_resolve(uint32_t ctx, char const **id, char const **name, char const *what) {
     lichen_app_t const *app = NULL;
     if (!lichen_sys_ctx_resolve(ctx, &app, what)) {
         return false;
@@ -41,7 +39,14 @@ static bool resolve(uint32_t ctx, char const **id, char const **name, char const
     *name = app ? app->name : NULL;
     return true;
 }
-gate_ctx_t const gate_os_ctx = {.resolve = resolve, .os = lichen_sys_ctx_os, .enter = lichen_ctx_enter};
+
+static void block_of(void const *ptr, bool *internal, uint32_t *bytes) {
+    *internal = !esp_ptr_external_ram(ptr);
+    *bytes    = (uint32_t)heap_caps_get_allocated_size((void *)ptr);
+}
+
+static gate_env_t const env = {.resolve = gate_os_resolve, .os = lichen_sys_ctx_os, .enter = lichen_ctx_enter,
+                               .take = book_take, .give = book_give, .block = block_of};
 
 // The first allocation the book had no row for (logged once); later ones are expected
 static bool first_unbooked(void) {
@@ -61,7 +66,7 @@ static void *alloc_aligned(lichen_ctx_t ctx, size_t align, size_t size, uint32_t
         return NULL;
     }
     gate_owner_t who;
-    mem_charge_t charge = gate_mem_charge(&gate_os_ctx, &book_lock, &book, ctx, internal, (uint32_t)size, &who);
+    mem_charge_t charge = gate_mem_charge(&env, &book, ctx, internal, (uint32_t)size, &who);
     if (charge == MEM_GATE_REFUSED) {
         return NULL; // logged and counted by the context table
     }
@@ -110,13 +115,11 @@ void lichen_free(lichen_ctx_t ctx, void *ptr) {
     if (!ptr) {
         return;
     }
-    bool          internal = !esp_ptr_external_ram(ptr);
-    uint32_t      bytes    = (uint32_t)heap_caps_get_allocated_size(ptr);
-    char const   *label    = NULL;
-    mem_release_t rel      = gate_mem_release(&gate_os_ctx, &book_lock, &book, ctx, internal, bytes, &label);
+    char const   *label = NULL;
+    uint32_t      bytes = 0;
+    mem_release_t rel   = gate_mem_release(&env, &book, ctx, ptr, &label, &bytes);
     if (rel == MEM_GATE_RELEASE_REFUSED) {
-        return; // refused (logged, counted): the block stays allocated rather than be freed by a context that does not
-                // own it
+        return; // refused (logged, counted) before ptr was looked at: the block, if it is one, stays allocated
     }
     char const *owner = label ? label : MEM_BOOK_OS;
     portENTER_CRITICAL(&book_mux);

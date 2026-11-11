@@ -44,7 +44,8 @@ static void book_take(void) {
 static void book_give(void) {
     portEXIT_CRITICAL(&book_mux);
 }
-static gate_lock_t const book_lock = {.take = book_take, .give = book_give};
+static gate_env_t const env = {.resolve = gate_os_resolve, .os = lichen_sys_ctx_os, .enter = lichen_ctx_enter,
+                               .take = book_take, .give = book_give};
 
 static void trampoline(void *arg) {
     int slot = (int)(intptr_t)arg;
@@ -55,7 +56,7 @@ static void trampoline(void *arg) {
     bool  with_caps        = book.slot[slot].mem != TASK_STACK_INTERNAL;
     lichen_ctx_t ctx       = book.slot[slot].ctx;
     portEXIT_CRITICAL(&book_mux);
-    gate_task_run(&gate_os_ctx, ctx, fn, fn_arg); // runs as the context it was booked under (#230)
+    gate_task_run(&env, ctx, fn, fn_arg); // runs as the context it was booked under (#230)
     if (with_caps) {
         park(slot);
     }
@@ -129,7 +130,7 @@ bool lichen_task_start_in(lichen_ctx_t ctx, char const *name, void (*fn)(void *a
     task_spec_t  spec   = {.name = fitted, .stack = stack_bytes, .cls = (task_class_t)prio, .mem = placed, .fn = fn,
                            .arg = arg};
     gate_owner_t who;
-    int          slot = gate_task_add(&gate_os_ctx, &book_lock, &book, ctx, &spec, &who);
+    int          slot = gate_task_add(&env, &book, ctx, &spec, &who);
     if (slot == TASK_GATE_REFUSED) {
         return false; // logged and counted by the context table
     }
@@ -159,7 +160,7 @@ bool lichen_task_start_in(lichen_ctx_t ctx, char const *name, void (*fn)(void *a
 
 size_t lichen_task_leftovers(lichen_ctx_t ctx, uint32_t wait_ms) {
     gate_owner_t who;
-    if (!gate_owner(&gate_os_ctx, ctx, "lichen_task_leftovers", &who)) {
+    if (!gate_owner(&env, ctx, "lichen_task_leftovers", &who)) {
         return 0;
     }
     char const  *owner = who.label ? who.label : TASK_BOOK_OS;

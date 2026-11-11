@@ -4,6 +4,7 @@
 // a task as the context it was booked under.
 #include "gate_book.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -22,7 +23,7 @@ static int failures;
 #define NOID_CTX  0x00c0c002u
 #define STALE_CTX (MESH_CTX ^ 0x100u)
 
-static unsigned refused, locks, unlocks, enters;
+static unsigned refused, locks, unlocks, enters, blocks;
 static uint32_t current; // the calling task's current context
 
 static bool fake_resolve(uint32_t ctx, char const **id, char const **name, char const *what) {
@@ -56,11 +57,18 @@ static void take(void) {
 static void give(void) {
     unlocks++;
 }
-static gate_ctx_t const  g = {.resolve = fake_resolve, .os = fake_os, .enter = fake_enter};
-static gate_lock_t const l = {.take = take, .give = give};
+// The heap's view of a block: counts the questions and never reads ptr, so a test sees the question itself
+static void fake_block(void const *ptr, bool *internal, uint32_t *bytes) {
+    (void)ptr;
+    blocks++;
+    *internal = false; // PSRAM
+    *bytes    = 4096;
+}
+static gate_env_t const g = {.resolve = fake_resolve, .os = fake_os, .enter = fake_enter, .take = take, .give = give,
+                             .block = fake_block};
 
 static void reset(void) {
-    refused = locks = unlocks = enters = 0;
+    refused = locks = unlocks = enters = blocks = 0;
     current                            = 0;
 }
 
@@ -79,24 +87,29 @@ static void test_mem(void) {
     reset();
     gate_owner_t who;
     // Refused: nothing booked, no lock taken (the caller then allocates nothing)
-    CHECK(gate_mem_charge(&g, &l, &b, STALE_CTX, false, 100, &who) == MEM_GATE_REFUSED);
-    CHECK(gate_mem_charge(&g, &l, &b, 0, false, 100, &who) == MEM_GATE_REFUSED);
+    CHECK(gate_mem_charge(&g, &b, STALE_CTX, false, 100, &who) == MEM_GATE_REFUSED);
+    CHECK(gate_mem_charge(&g, &b, 0, false, 100, &who) == MEM_GATE_REFUSED);
     static mem_book_t const empty;
     CHECK(memcmp(&b, &empty, sizeof(b)) == 0 && locks == 0 && refused == 2);
     // Valid: charged under the ctx, with the lock
-    CHECK(gate_mem_charge(&g, &l, &b, MESH_CTX, false, 4096, &who) == MEM_CHARGE_OK && who.ctx == MESH_CTX);
+    CHECK(gate_mem_charge(&g, &b, MESH_CTX, false, 4096, &who) == MEM_CHARGE_OK && who.ctx == MESH_CTX);
     CHECK(locks == 1 && unlocks == 1 && mem_book_find(&b, MESH_CTX)->bulk == 4096);
     // A refused free releases nothing: MeshCore's count stays (and the caller does not free the block)
+    // ... and never asks the heap about the pointer, which a made-up ctx may have made up as well
     char const *label = "x";
-    CHECK(gate_mem_release(&g, &l, &b, STALE_CTX, false, 4096, &label) == MEM_GATE_RELEASE_REFUSED);
+    uint32_t    bytes = 0;
+    uint32_t    block = 0; // stands in for a heap block
+    CHECK(gate_mem_release(&g, &b, STALE_CTX, &block, &label, &bytes) == MEM_GATE_RELEASE_REFUSED);
+    CHECK(gate_mem_release(&g, &b, 0, (void const *)(uintptr_t)0xdead, &label, &bytes) == MEM_GATE_RELEASE_REFUSED);
+    CHECK(blocks == 0 && bytes == 0 && strcmp(label, "x") == 0);
     CHECK(mem_book_find(&b, MESH_CTX)->bulk == 4096 && mem_book_find(&b, MESH_CTX)->blocks == 1);
     CHECK(mem_book_find(&b, STALE_CTX) == NULL && locks == 1);
-    CHECK(gate_mem_release(&g, &l, &b, MESH_CTX, false, 4096, &label) == MEM_RELEASE_OK);
-    CHECK(strcmp(label, "meshcore") == 0 && mem_book_find(&b, MESH_CTX)->bulk == 0);
+    CHECK(gate_mem_release(&g, &b, MESH_CTX, &block, &label, &bytes) == MEM_RELEASE_OK);
+    CHECK(blocks == 1 && bytes == 4096 && strcmp(label, "meshcore") == 0 && mem_book_find(&b, MESH_CTX)->bulk == 0);
     // The OS has no quota; an app without an id has one, under its own row and name
-    CHECK(gate_mem_charge(&g, &l, &b, OS_CTX, true, 2 * MEM_BOOK_INTERNAL_QUOTA, &who) == MEM_CHARGE_OK);
+    CHECK(gate_mem_charge(&g, &b, OS_CTX, true, 2 * MEM_BOOK_INTERNAL_QUOTA, &who) == MEM_CHARGE_OK);
     CHECK(strcmp(mem_book_find(&b, OS_CTX)->owner, MEM_BOOK_OS) == 0);
-    CHECK(gate_mem_charge(&g, &l, &b, NOID_CTX, true, MEM_BOOK_INTERNAL_QUOTA + 1, &who) == MEM_CHARGE_QUOTA);
+    CHECK(gate_mem_charge(&g, &b, NOID_CTX, true, MEM_BOOK_INTERNAL_QUOTA + 1, &who) == MEM_CHARGE_QUOTA);
     CHECK(mem_book_find(&b, NOID_CTX) && strcmp(mem_book_find(&b, NOID_CTX)->owner, "Clock") == 0);
     CHECK(!mem_book_find(&b, NOID_CTX)->os && mem_book_find(&b, NOID_CTX)->refused == 1);
 }
@@ -117,27 +130,27 @@ static void test_task(void) {
                           .fn = task_fn, .arg = &token};
     gate_owner_t who;
     // Refused: the book is untouched, no lock taken
-    CHECK(gate_task_add(&g, &l, &b, STALE_CTX, &spec, &who) == TASK_GATE_REFUSED);
-    CHECK(gate_task_add(&g, &l, &b, 0, &spec, &who) == TASK_GATE_REFUSED);
+    CHECK(gate_task_add(&g, &b, STALE_CTX, &spec, &who) == TASK_GATE_REFUSED);
+    CHECK(gate_task_add(&g, &b, 0, &spec, &who) == TASK_GATE_REFUSED);
     static task_book_t const empty;
     CHECK(memcmp(&b, &empty, sizeof(b)) == 0 && locks == 0);
     // Booked under the start ctx, with its label
-    int s = gate_task_add(&g, &l, &b, MESH_CTX, &spec, &who);
+    int s = gate_task_add(&g, &b, MESH_CTX, &spec, &who);
     CHECK(s >= 0 && locks == 1 && unlocks == 1);
     CHECK(b.slot[s].ctx == MESH_CTX && strcmp(b.slot[s].owner, "meshcore") == 0);
     CHECK(task_book_count(&b, MESH_CTX, NULL) == 1);
-    int o = gate_task_add(&g, &l, &b, OS_CTX, &spec, &who);
+    int o = gate_task_add(&g, &b, OS_CTX, &spec, &who);
     CHECK(o >= 0 && strcmp(b.slot[o].owner, TASK_BOOK_OS) == 0 && who.os);
     // An invalid spec: -1 (not a refusal)
     spec.cls = TASK_CLASS_COUNT;
-    CHECK(gate_task_add(&g, &l, &b, MESH_CTX, &spec, &who) == -1);
+    CHECK(gate_task_add(&g, &b, MESH_CTX, &spec, &who) == -1);
     // The trampoline: the new task (nothing entered) runs fn as the ctx it was booked under
     current = 0;
     gate_task_run(&g, b.slot[s].ctx, b.slot[s].fn, b.slot[s].arg);
     CHECK(enters == 1 && ran_as == MESH_CTX && ran == 7 && current == MESH_CTX);
     // ... and a task it starts with its own (lichen_ctx_self) is booked as MeshCore's too
     spec.cls  = TASK_CLASS_JOB;
-    int n     = gate_task_add(&g, &l, &b, current, &spec, &who);
+    int n     = gate_task_add(&g, &b, current, &spec, &who);
     CHECK(n >= 0 && task_book_count(&b, MESH_CTX, NULL) == 2);
     if (n < 0) {
         return;
