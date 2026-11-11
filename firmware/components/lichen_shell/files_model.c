@@ -130,9 +130,51 @@ static bool same_comp(char const *a, size_t an, char const *b) {
 // Names at the /storage root that are the OS's (lora.toml: the radio, ota_token.txt: the update token, the four
 // directories it creates; every directory there is protected anyway, see files_protected_entry).
 // Anything else at the root is the user's, e.g. what the Files app copies there.
-static char const *const STORAGE_ROOT_FILES[] = {"lora.toml", "ota_token.txt", "meshcore", "c6", "crash", "lichen"};
-// Secret material: never shown, not even read-only (the MeshCore identity and keys, the update token)
-static char const *const SECRET_ROOT[] = {"meshcore", "ota_token.txt"};
+static char const *const STORAGE_ROOT_FILES[] = {"lora.toml", "ota_token.txt", "c6", "crash", "lichen"};
+// Secret material: never shown, not even read-only (the update token)
+static char const *const SECRET_ROOT[] = {"ota_token.txt"};
+
+// The apps' roots (lichen_app_t.storage_root, #230 E1d), added when Files opens: protected like the OS's, and secret
+// when the app says so (MeshCore's identity and keys). Only ever added to, so a job reading while the screen opens is safe.
+#define APP_ROOT_MAX 16
+#define APP_ROOT_CAP 32
+static struct {
+    char name[APP_ROOT_CAP];
+    bool secret;
+} s_app_root[APP_ROOT_MAX];
+static size_t s_app_roots;
+
+bool files_add_app_root(char const *name, bool secret) {
+    if (!name || !*name || strlen(name) >= APP_ROOT_CAP) {
+        return false;
+    }
+    for (size_t i = 0; i < s_app_roots; i++) {
+        if (!strcmp(s_app_root[i].name, name)) {
+            s_app_root[i].secret = s_app_root[i].secret || secret;
+            return true;
+        }
+    }
+    if (s_app_roots >= APP_ROOT_MAX) {
+        return false;
+    }
+    strcpy(s_app_root[s_app_roots].name, name);
+    s_app_root[s_app_roots].secret = secret;
+    s_app_roots++;
+    return true;
+}
+
+void files_app_roots_clear(void) {
+    s_app_roots = 0;
+}
+
+static bool app_root(char const *name, size_t len, bool secret_only) {
+    for (size_t i = 0; i < s_app_roots; i++) {
+        if ((!secret_only || s_app_root[i].secret) && same_comp(name, len, s_app_root[i].name)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 static bool in_list(char const *const *list, size_t n, char const *name, size_t len) {
     for (size_t i = 0; i < n; i++) {
@@ -185,7 +227,7 @@ bool files_protected(char const *path) {
         return true;
     }
     return in_list(STORAGE_ROOT_FILES, sizeof(STORAGE_ROOT_FILES) / sizeof(STORAGE_ROOT_FILES[0]), first, first_len) ||
-           !strncmp(first, "ota_", 4) || !strncmp(first, "lora", 4);
+           app_root(first, first_len, false) || !strncmp(first, "ota_", 4) || !strncmp(first, "lora", 4);
 }
 
 bool files_protected_entry(char const *path, bool is_dir) {
@@ -208,7 +250,8 @@ bool files_secret(char const *path) {
         return has_alias(first, first_len) || (same_comp(first, first_len, "lichen") && n >= 2); // the journal and app data on the card: not for the screen
     }
     return has_alias(first, first_len) ||
-           in_list(SECRET_ROOT, sizeof(SECRET_ROOT) / sizeof(SECRET_ROOT[0]), first, first_len);
+           in_list(SECRET_ROOT, sizeof(SECRET_ROOT) / sizeof(SECRET_ROOT[0]), first, first_len) ||
+           app_root(first, first_len, true);
 }
 
 // ---- sorting ------------------------------------------------------------------------------------------------------

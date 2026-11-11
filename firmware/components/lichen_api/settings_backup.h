@@ -11,7 +11,7 @@
 // counters, hardware records).
 // Not yet in the table: badge_fw.home_order (#189, the arranged home tiles), whose text (up to ~400 characters) is
 // longer than SB_STR_MAX; it needs a larger value cap first, which costs internal RAM in settings_backup_io.c.
-// Likewise a.meshcore.mesh_order (#189, the arranged MeshCore tiles) is not in the backup yet.
+// Likewise the MeshCore app's mesh_order (#189, the arranged MeshCore tiles) is not in the backup yet.
 //
 // File: lines "namespace.key = value"; blank lines and lines starting with '#' are comments. Numbers are decimal,
 // text is the rest of the line.
@@ -44,6 +44,10 @@ typedef struct {
 size_t          sb_key_count(void);
 sb_key_t const *sb_key_at(size_t index);
 sb_key_t const *sb_find(char const *ns, char const *key); // NULL: not in the allow-list
+// An app's keys join the table (lichen_register_app, #230 E1d): the array must stay valid (a static const). False when
+// they do not fit SB_KEYS_MAX or the group list is full. sb_app_keys_clear drops them again (tests).
+bool sb_add_app_keys(sb_key_t const *app_keys, size_t n);
+void sb_app_keys_clear(void);
 
 typedef struct {
     sb_key_t const *key;

@@ -19,11 +19,26 @@ static char const *const keep_keys[] = {
 };
 
 // App keys that describe the badge's airtime rather than a choice: kept like keep_keys, the rest of the app's
-// namespace goes. MeshCore's last advert, so the advert interval (#52) holds across a reset and a reset loop never
-// floods; it lives in a.meshcore since #123.
-static char const *const keep_app_keys[][2] = {
-    {"a.meshcore", "mc_advlast"},
-};
+// namespace goes. Declared by the apps (lichen_app_t.keep_keys, #230 E1d) through factory_keep_app_key before the
+// reset runs; MeshCore's last advert is one, so the advert interval (#52) holds and a reset loop never floods.
+#define KEEP_APP_MAX 8
+#define KEEP_NAME_CAP 16 // an NVS namespace or key: 15 characters and the NUL
+static char s_keep_app[KEEP_APP_MAX][2][KEEP_NAME_CAP];
+static size_t s_keep_app_n;
+
+bool factory_keep_app_key(char const *ns, char const *key) {
+    if (!ns || !key || strlen(ns) >= KEEP_NAME_CAP || strlen(key) >= KEEP_NAME_CAP || s_keep_app_n >= KEEP_APP_MAX) {
+        return false;
+    }
+    strcpy(s_keep_app[s_keep_app_n][0], ns);
+    strcpy(s_keep_app[s_keep_app_n][1], key);
+    s_keep_app_n++;
+    return true;
+}
+
+void factory_keep_app_keys_clear(void) {
+    s_keep_app_n = 0;
+}
 
 static char const *const keep_files[] = {"c6", "lora.toml"};
 
@@ -63,8 +78,8 @@ bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level) 
         return false;
     }
     if (strncmp(ns, "a.", 2) == 0 && ns[2]) {
-        for (size_t i = 0; i < sizeof(keep_app_keys) / sizeof(keep_app_keys[0]); i++) {
-            if (strcmp(ns, keep_app_keys[i][0]) == 0 && strcmp(key, keep_app_keys[i][1]) == 0) {
+        for (size_t i = 0; i < s_keep_app_n; i++) {
+            if (strcmp(ns, s_keep_app[i][0]) == 0 && strcmp(key, s_keep_app[i][1]) == 0) {
                 return false;
             }
         }

@@ -154,7 +154,24 @@ static void test_summary(void) {
     CHECK(strlen(tiny) < sizeof(tiny));
 }
 
+// An app's keys join the table when it registers (#230 E1d): any namespace, none known to the OS
+static void test_app_keys(void) {
+    static sb_key_t const pager[] = {
+        {"a.pager", "n_dm", "Notify", SB_U8, 0, 1, 1, NULL},
+        {"a.pager", "name", "Name", SB_STR, 1, 20, 0, "x"},
+    };
+    size_t base = sb_key_count();
+    CHECK(sb_find("a.pager", "n_dm") == NULL && sb_find("a.meshcore", "n_dm") == NULL); // no app, no key
+    CHECK(sb_add_app_keys(pager, 2) && sb_key_count() == base + 2);
+    CHECK(sb_find("a.pager", "n_dm") == &pager[0] && sb_key_at(base + 1) == &pager[1] && sb_key_at(base + 2) == NULL);
+    CHECK(sb_find("a.meshcore", "n_dm") == NULL && sb_find("a.pager", "pass") == NULL);
+    CHECK(!sb_add_app_keys(NULL, 1) && !sb_add_app_keys(pager, 0) && !sb_add_app_keys(pager, SB_KEYS_MAX));
+    sb_app_keys_clear();
+    CHECK(sb_key_count() == base && sb_find("a.pager", "n_dm") == NULL);
+}
+
 int main(void) {
+    test_app_keys();
     test_table();
     test_roundtrip();
     test_bad_values();

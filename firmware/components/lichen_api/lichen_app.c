@@ -44,6 +44,8 @@ lichen_ctx_t lichen_register_app(lichen_app_t const *app) {
     if (ctx == LICHEN_CTX_NONE) {
         ESP_LOGE(TAG, "no room for app %s: LICHEN_MAX_APPS (%d) apps are registered already", app ? app->name : "?",
                  LICHEN_MAX_APPS);
+    } else if (app->backup_keys && !sb_add_app_keys(app->backup_keys, app->backup_key_count)) {
+        ESP_LOGE(TAG, "app %s: its backup keys do not fit the allow-list (SB_KEYS_MAX)", app->name);
     }
     return ctx;
 }
@@ -64,6 +66,17 @@ lichen_app_t const *lichen_app_by_id(char const *id) {
         }
     }
     return NULL;
+}
+
+lichen_app_t const *lichen_app_by_name(char const *name) {
+    lichen_app_t const *app = lichen_app_by_id(name);
+    for (size_t i = 0; !app && name && i < app_ctx_apps(&s_table); i++) {
+        lichen_app_t const *a = app_ctx_app_at(&s_table, i);
+        if (a->alias && strcmp(a->alias, name) == 0) {
+            app = a;
+        }
+    }
+    return app;
 }
 
 // ---- the current app -----------------------------------------------------------------------------------------------

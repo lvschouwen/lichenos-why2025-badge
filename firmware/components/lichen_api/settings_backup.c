@@ -6,11 +6,10 @@
 #include <string.h>
 
 #define NS_FW   "badge_fw"
-#define NS_MESH "a.meshcore"
 #define NS_WX   "a.weather"
 
 // Ranges follow the code that reads each key: idle_policy.h, saver_station.h, backlight_level.h, haptics_pattern.h,
-// weather_series.h, mesh_notify_run.c. Defaults are what that code uses for a missing key.
+// weather_series.h; the apps' own keys come with their registration (lichen_app_t.backup_keys). Defaults are what that code uses for a missing key.
 static sb_key_t const keys[] = {
     {NS_FW, "home_layout", "Home layout", SB_U8, 0, 1, 0, NULL},
     {NS_FW, "tz", "Time zone", SB_STR, 1, 63, 0, "CET-1CEST,M3.5.0,M10.5.0/3"},
@@ -26,26 +25,60 @@ static sb_key_t const keys[] = {
     {NS_FW, "haptic_str", "Vibration strength", SB_U8, 0, 2, 2, NULL},
     {NS_FW, "status_led", "Status LED", SB_U8, 0, 1, 1, NULL},
     {NS_FW, "notify_dnd", "Do not disturb", SB_U8, 0, 1, 0, NULL},
-    {NS_MESH, "n_dm", "Notify for direct messages", SB_U8, 0, 1, 1, NULL},
-    {NS_MESH, "n_fail", "Notify for failed sends", SB_U8, 0, 1, 1, NULL},
-    {NS_MESH, "n_ment", "Notify for mentions", SB_U8, 0, 1, 1, NULL},
     {NS_WX, "toff", "Temperature offset", SB_U8, 0, 20, 20, NULL},
     {NS_WX, "csv", "Weather log", SB_U8, 0, 1, 0, NULL},
 };
 _Static_assert(sizeof(keys) / sizeof(keys[0]) <= SB_KEYS_MAX, "the key table outgrew SB_KEYS_MAX");
 
+#define OWN_COUNT (sizeof(keys) / sizeof(keys[0]))
+#define APP_GROUPS 8
+
+// The apps' groups (lichen_register_app, boot, core 1 or main: before anything exports); read-only afterwards
+static struct {
+    sb_key_t const *keys;
+    size_t          n;
+} s_groups[APP_GROUPS];
+static size_t s_group_count, s_app_keys;
+
+bool sb_add_app_keys(sb_key_t const *app_keys, size_t n) {
+    if (!app_keys || n == 0 || s_group_count >= APP_GROUPS || OWN_COUNT + s_app_keys + n > SB_KEYS_MAX) {
+        return false;
+    }
+    s_groups[s_group_count].keys = app_keys;
+    s_groups[s_group_count].n    = n;
+    s_group_count++;
+    s_app_keys += n;
+    return true;
+}
+
+void sb_app_keys_clear(void) {
+    s_group_count = 0;
+    s_app_keys    = 0;
+}
+
 size_t sb_key_count(void) {
-    return sizeof(keys) / sizeof(keys[0]);
+    return OWN_COUNT + s_app_keys;
 }
 
 sb_key_t const *sb_key_at(size_t index) {
-    return index < sb_key_count() ? &keys[index] : NULL;
+    if (index < OWN_COUNT) {
+        return &keys[index];
+    }
+    index -= OWN_COUNT;
+    for (size_t g = 0; g < s_group_count; g++) {
+        if (index < s_groups[g].n) {
+            return &s_groups[g].keys[index];
+        }
+        index -= s_groups[g].n;
+    }
+    return NULL;
 }
 
 sb_key_t const *sb_find(char const *ns, char const *key) {
     for (size_t i = 0; i < sb_key_count(); i++) {
-        if (strcmp(keys[i].ns, ns) == 0 && strcmp(keys[i].key, key) == 0) {
-            return &keys[i];
+        sb_key_t const *k = sb_key_at(i);
+        if (strcmp(k->ns, ns) == 0 && strcmp(k->key, key) == 0) {
+            return k;
         }
     }
     return NULL;

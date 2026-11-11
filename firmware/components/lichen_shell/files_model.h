@@ -47,8 +47,13 @@ bool files_protected(char const *path);
 // files_protected plus: a directory directly under /storage is protected whatever its name (the path alone can't say
 // whether a root entry is a file or a directory)
 bool files_protected_entry(char const *path, bool is_dir);
-// Not even shown read-only: the MeshCore identity and keys, the update token, the card's /lichen data
+// Not even shown read-only: the update token, the card's /lichen data and the apps' secret roots (the MeshCore identity
+// and keys)
 bool files_secret(char const *path);
+// An app's directory under /storage (lichen_app_t.storage_root): protected, and secret when asked. Repeats are fine.
+// False: bad name or the list (16) is full. files_app_roots_clear is for tests.
+bool files_add_app_root(char const *name, bool secret);
+void files_app_roots_clear(void);
 
 // Directories first, then names without regard to case, then exactly
 void files_sort(files_entry_t *entries, size_t count);

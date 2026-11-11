@@ -97,14 +97,11 @@ static void cmd_setup(char const *args) {
         console_reply(ok ? "setup_done cleared: the welcome shows after the next reboot" : "could not clear setup_done");
         ESP_LOG_LEVEL(ok ? ESP_LOG_INFO : ESP_LOG_ERROR, TAG, "setup reset (%s)", ok ? "ok" : "failed");
     } else if (strncmp(args, "reset ", 6) == 0 || strncmp(args, "done ", 5) == 0) {
-        // An app's first-run questions (#84 T5): the app keeps the flag itself; "mesh" stays as the short form. "done"
+        // An app's first-run questions (#84 T5): the app keeps the flag itself; an app's alias is the short form. "done"
         // is a diagnostic
         bool        done = args[0] == 'd';
         char const *id   = args + (done ? 5 : 6);
-        if (strcmp(id, "mesh") == 0) {
-            id = "meshcore";
-        }
-        lichen_app_t const *app = lichen_app_by_id(id);
+        lichen_app_t const *app = lichen_app_by_name(id);
         if (!app || !app->first_run_set) {
             console_reply("no app '%s' with first-run questions", id);
             return;
@@ -119,7 +116,7 @@ static void cmd_setup(char const *args) {
         }
         ESP_LOGI(TAG, "setup %s", args);
     } else {
-        console_reply("setup reset [<app id>] | setup done <app id> (the first-run welcome, or an app's first-run questions; mesh = meshcore)");
+        console_reply("setup reset [<app id>] | setup done <app id> (the first-run welcome, or an app's first-run questions; an app's short alias works too)");
     }
 }
 

@@ -7,7 +7,7 @@
 // does the erasing at the next boot, before anything else reads NVS or the storage drive.
 //
 // Settings: NVS only. In Lichen's namespace (badge_fw) every key goes except FACTORY_KEEP_KEYS, the badge's own
-// hardware and health record; every app namespace ("a.<id>") goes, except MeshCore's last advert (the airtime limit);
+// hardware and health record; every app namespace ("a.<id>") goes, except the keys apps declare as kept (MeshCore's last advert, the airtime limit);
 // any other namespace (a library's) is not ours and stays. Not NVS at all and never touched: otadata (which app slot
 // boots), the app slots, phy_init, coredump, assets.
 // Everything: erased from flash, not just unlinked (the badge has no flash encryption, and a badge handed on must not
@@ -66,6 +66,10 @@ factory_nvs_next_t factory_nvs_after(bool erased, bool flag_saved);
 
 // What this boot does for the saved pending value (unknown values: nothing, and the key is cleared)
 factory_boot_t factory_boot_plan(uint8_t pending);
+// An app's key the reset keeps (lichen_app_t.keep_keys): ns is the app's namespace ("a.<id>"). Before the reset runs.
+// False when it does not fit (names over 15 characters, the list of 8 is full). factory_keep_app_keys_clear is for tests.
+bool factory_keep_app_key(char const *ns, char const *key);
+void factory_keep_app_keys_clear(void);
 // True when this NVS entry goes at this level
 bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level);
 // True when a top-level name on /storage survives "everything"

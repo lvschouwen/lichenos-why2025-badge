@@ -41,6 +41,8 @@
 #include "haptics.h"
 #include "led.h"
 #include "lichen_app.h"
+#include "app_ns.h"
+#include "factory_plan.h"
 #include "lichen_sys_app.h"
 #include "lichen_mem.h"
 #include "lichen_task.h"
@@ -502,12 +504,31 @@ static void start_psram(boot_ctx_t *ctx) {
     }
 }
 
+// The keys apps want kept over a factory reset (lichen_app_t.keep_keys, #230 E1d): the reset runs at NVS start, so the
+// apps that have them are registered before it
+static void declare_keep_keys(void) {
+    for (size_t i = 0; i < lichen_app_count(); i++) {
+        lichen_app_t const *app = lichen_app_at(i);
+        char                ns[16];
+        if (!app->keep_keys || !app_ns_name(app->id, ns, sizeof(ns))) {
+            continue;
+        }
+        for (char const *const *k = app->keep_keys; *k; k++) {
+            if (!factory_keep_app_key(ns, *k)) {
+                ESP_LOGE(TAG, "%s: cannot keep %s over a factory reset", app->name, *k);
+            }
+        }
+    }
+}
+
 static void start_nvs(boot_ctx_t *ctx) {
     (void)ctx;
     nvs_boot(); // #116: plain or encrypted, and never an erase with a key burned
     // Right after NVS is up and before anything can restart: the restart history (the "factory reset: ..." note, the PSRAM
     // restarts below) is written through this binding. It only stores function pointers (#235).
     settings_bind_services();
+    meshcore_app_register(); // first in home's order; its keep list is needed by the reset
+    declare_keep_keys();
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
     // #121: the 80/120 MHz record: a failed 120 MHz trial falls back, a wanted 120 arms and restarts once (not while
     // the image is on trial, #285: ota answers that)
@@ -578,7 +599,6 @@ static void start_fonts(boot_ctx_t *ctx) {
 // The apps, in home's order: MeshCore first; shell_start adds Settings and About after it. Registered without a screen
 // too, so their background parts still start.
 static void start_shell(boot_ctx_t *ctx) {
-    meshcore_app_register();
     system_restart_set_save(shell_save_for_restart); // a soft restart saves first, as an update does (#123)
     if (!ctx->screen) {
         return;

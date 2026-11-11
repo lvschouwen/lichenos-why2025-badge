@@ -214,8 +214,23 @@ static void test_text(void) {
     CHECK(at == total && pages > 5 && pages < 100);
 }
 
+// The apps' directories come from their records (#230 E1d), not from literals in the OS
+static void test_app_roots(void) {
+    files_app_roots_clear();
+    CHECK(!files_secret("/storage/meshcore/id")); // nobody declared it
+    CHECK(files_add_app_root("pager", true) && files_add_app_root("pager", false)); // repeats keep it secret
+    CHECK(files_add_app_root("logs", false));
+    CHECK(files_secret("/storage/pager/key") && files_secret("/storage/PAGER/key") && files_protected("/storage/pager/key"));
+    CHECK(files_protected("/storage/logs/a") && !files_secret("/storage/logs/a"));
+    CHECK(!files_add_app_root("", true) && !files_add_app_root(NULL, true));
+    files_app_roots_clear();
+    CHECK(!files_secret("/storage/pager/key"));
+    files_add_app_root("meshcore", true); // what MeshCore's record declares; test_protected's table relies on it
+}
+
 int main(void) {
     test_paths();
+    test_app_roots();
     test_protected();
     test_sort();
     test_text();

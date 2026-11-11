@@ -170,6 +170,7 @@ int main(void) {
         return 2;
     }
     snprintf(files_test_root, sizeof(files_test_root), "%s", tmpl);
+    files_add_app_root("meshcore", true); // MeshCore's record (#230 E1d)
     mkdirp("/storage");
     test_list();
     test_delete();

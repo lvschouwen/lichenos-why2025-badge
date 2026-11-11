@@ -67,6 +67,7 @@ lichen_alloc	-	any	lichen_mem.h
 lichen_alloc_aligned	-	any	lichen_mem.h
 lichen_app_at	-	unspecified	lichen_app.h
 lichen_app_by_id	-	unspecified	lichen_app.h
+lichen_app_by_name	-	unspecified	lichen_app.h
 lichen_app_count	-	unspecified	lichen_app.h
 lichen_badge_generation	SYSTEM	unspecified	lichen_badge.h
 lichen_badge_get	SYSTEM	unspecified	lichen_badge.h
@@ -335,6 +336,8 @@ radio_state_load	-	unspecified	radio_state.h
 radio_state_release	-	unspecified	radio_state.h
 radio_state_set	-	unspecified	radio_state.h
 radio_state_set_airplane	-	unspecified	radio_state.h
+sb_add_app_keys	SYSTEM	unspecified	settings_backup.h
+sb_app_keys_clear	SYSTEM	unspecified	settings_backup.h
 sb_error_text	SYSTEM	unspecified	settings_backup.h
 sb_find	SYSTEM	unspecified	settings_backup.h
 sb_format	SYSTEM	unspecified	settings_backup.h

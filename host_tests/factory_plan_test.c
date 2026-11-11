@@ -27,6 +27,24 @@ static void boot_plan_per_pending_value(void) {
     CHECK(!p.nvs && !p.storage);
 }
 
+// The keep list comes from the apps (#230 E1d): nothing is kept until one is declared, and what an app declares is
+// kept in its own namespace only
+static void app_declared_keys_are_kept(void) {
+    factory_keep_app_keys_clear();
+    CHECK(factory_nvs_erases("a.meshcore", "mc_advlast", A)); // no literal in the OS any more
+    CHECK(factory_keep_app_key("a.pager", "last_tx"));
+    CHECK(!factory_nvs_erases("a.pager", "last_tx", S) && !factory_nvs_erases("a.pager", "last_tx", A));
+    CHECK(factory_nvs_erases("a.pager", "other", A) && factory_nvs_erases("a.meshcore", "last_tx", A));
+    CHECK(!factory_keep_app_key("a.pager", "0123456789abcdef")); // over the 15 an NVS key may have
+    CHECK(!factory_keep_app_key(NULL, "k"));
+    for (int i = 0; i < 7; i++) { // 8 fit in all
+        CHECK(factory_keep_app_key("a.x", "k"));
+    }
+    CHECK(!factory_keep_app_key("a.x", "k"));
+    factory_keep_app_keys_clear();
+    factory_keep_app_key("a.meshcore", "mc_advlast"); // what MeshCore's record declares
+}
+
 static void settings_go_at_both_levels(void) {
     char const *settings[] = {"wifi_ssid", "wifi_pass", "wifi_s0", "wifi_p0", "wifi_s4", "wifi_p4", "tz", "setup_done", "home_layout", "idle_dim", "idle_off",
                               "bl_disp", "bl_kbd", "status_led", "haptics", "haptic_str", "notify_dnd", "n.mesh", "radio_on", "radio_saved",
@@ -215,6 +233,7 @@ static void window_closes(void) {
 }
 
 int main(void) {
+    app_declared_keys_are_kept();
     boot_plan_per_pending_value();
     settings_go_at_both_levels();
     badge_state_stays();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lvgl.h"
+#include "settings_backup.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -46,6 +47,19 @@ typedef struct lichen_app {
     // What the app sends to the notification service is configurable (#50): the page for it (shell_open, LVGL context).
     // Settings > Notifications lists a row for each app that has one, below the per-app On/Off switches.
     void (*notify_settings_open)(void);
+    // What the OS knows of the app by name (#230 E1d); all optional, so the OS carries no app's literals.
+    // alias: a short console form besides id ("mesh" for "meshcore": "fw setup done mesh").
+    char const *alias;
+    // Keys of the app's namespace (a.<id>) that a factory reset keeps, NULL-terminated: state about the badge's airtime
+    // rather than a choice (MeshCore's last advert, so the advert interval holds and a reset loop never floods).
+    char const *const *keep_keys;
+    // The directory name under /storage the app keeps its files in: protected in Files; storage_secret hides it
+    // completely (identity and keys). NULL: none.
+    char const *storage_root;
+    bool        storage_secret;
+    // The app's settings that may go in the SD backup (#169), each with its own namespace; allow-list as in settings_backup.h
+    sb_key_t const *backup_keys;
+    size_t          backup_key_count;
 } lichen_app_t;
 
 // Size of the app table. Home scrolls to the selection, so this only bounds the arrays; lichen_register_app logs an error
@@ -70,6 +84,8 @@ lichen_ctx_t lichen_ctx_self(void);
 size_t lichen_app_count(void);
 lichen_app_t const *lichen_app_at(size_t index);
 lichen_app_t const *lichen_app_by_id(char const *id); // NULL when no registered app has that id
+// The same, and an app's alias ("mesh") matches too: for what a person types
+lichen_app_t const *lichen_app_by_name(char const *name);
 
 #ifdef __cplusplus
 }
