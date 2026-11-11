@@ -14,6 +14,14 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
+static int saves;
+
+static bool save_stub(void *ctx, psram_retry_t const *st) {
+    (void)st;
+    saves++;
+    return *(bool const *)ctx;
+}
+
 int main(void) {
     uint8_t data, dqs;
     psram_tuning_delays(0, &data, &dqs);
@@ -93,6 +101,23 @@ int main(void) {
     CHECK(!psram_retry_decide(&nc, true, 0));
     CHECK(!psram_retry_decide(&nc, true, 5000));
     CHECK(!psram_retry_decide(&nc, false, 0) && psram_retry_decide(&nc, true, 0));
+
+    // #345: a retry state that cannot be read or saved counts as the cap reached, never as a first retry
+    psram_retry_t rs = {0};
+    bool          ok = true, fail = false;
+    CHECK(psram_retry_run(&rs, PSRAM_RETRY_READ_NONE, true, 1000, save_stub, &ok)); // first bad boot: reboot once
+    CHECK(rs.retries == 1 && saves == 1);
+    rs = (psram_retry_t){0};
+    CHECK(!psram_retry_run(&rs, PSRAM_RETRY_READ_FAIL, true, 1000, save_stub, &ok)); // read failed: no reboot
+    CHECK(rs.retries == 1 && saves == 2); // still saved, so a later readable boot sees the cap
+    rs = (psram_retry_t){0};
+    CHECK(!psram_retry_run(&rs, PSRAM_RETRY_READ_NONE, true, 1000, save_stub, &fail)); // save failed: no reboot
+    rs = (psram_retry_t){0};
+    CHECK(!psram_retry_run(&rs, PSRAM_RETRY_READ_FAIL, true, 1000, NULL, NULL)); // no NVS at all
+    rs = (psram_retry_t){.retries = 3, .last_s = 900};
+    CHECK(!psram_retry_run(&rs, PSRAM_RETRY_READ_OK, false, 1000, save_stub, &ok) && rs.retries == 0); // good boot clears
+    rs = (psram_retry_t){.retries = 1, .last_s = 900};
+    CHECK(!psram_retry_run(&rs, PSRAM_RETRY_READ_OK, true, 1000, save_stub, &ok)); // the cap itself still holds
 
     // One-shot delayline override (#121): window 9..25 here; only a well-formed idx inside it is applied
     psram_tuning_note_delayline(&t, 17, 25);

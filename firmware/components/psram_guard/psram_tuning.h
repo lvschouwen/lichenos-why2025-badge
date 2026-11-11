@@ -89,3 +89,13 @@ typedef struct {
 // Updates the state; returns true when this bad boot should be answered with a reboot: bad, no retry yet, or the last one
 // is 10 minutes ago or more (with the clock unknown a second retry is never allowed). A good boot clears the state.
 bool psram_retry_decide(psram_retry_t *st, bool bad, uint32_t now_s);
+
+// How the stored state came back: read, not there yet (first boot, or cleared), or unreadable (no NVS, read error,
+// wrong size)
+typedef enum { PSRAM_RETRY_READ_OK, PSRAM_RETRY_READ_NONE, PSRAM_RETRY_READ_FAIL } psram_retry_read_t;
+
+// Stores the state through save; returns true only when it may reboot: psram_retry_decide says so, the state was read
+// (or absent) and the save worked. Unknown state counts as the cap reached, so a broken store can never loop the
+// badge on reboots (#345). save may be NULL (no store: never reboots).
+bool psram_retry_run(psram_retry_t *st, psram_retry_read_t read, bool bad, uint32_t now_s,
+                     bool (*save)(void *ctx, psram_retry_t const *st), void *ctx);

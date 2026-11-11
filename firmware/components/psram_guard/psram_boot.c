@@ -388,29 +388,44 @@ static uint32_t wall_s(void) {
     return now > 1735689600 ? (uint32_t)now : 0; // before this the clock is not set (#63)
 }
 
-static void policy_line(psram_retry_t const *st, bool reboot) {
+static void policy_line(psram_retry_t const *st, bool reboot, bool unknown) {
     snprintf(s_policy_line, sizeof(s_policy_line), "%s, retries %u since the last good boot, %s", s_bad ? "bad boot" : "good boot",
              (unsigned)st->retries,
-             !s_bad ? "nothing to do" : reboot ? (PSRAM_GUARD_REBOOT_ON_BAD ? "rebooting once" : "would reboot once (log only)")
-                                               : "no reboot (retry used, keep booting)");
+             !s_bad    ? "nothing to do"
+             : reboot  ? (PSRAM_GUARD_REBOOT_ON_BAD ? "rebooting once" : "would reboot once (log only)")
+             : unknown ? "no reboot (retry state not stored, keep booting)"
+                       : "no reboot (retry used, keep booting)");
+}
+
+typedef struct {
+    nvs_handle_t nvs;
+    bool         failed;
+} retry_store_t;
+
+static bool save_retry(void *ctx, psram_retry_t const *st) {
+    retry_store_t *rs = ctx;
+    rs->failed        = psram_nvs_put(rs->nvs, RETRY_KEY, st, sizeof(*st)) != ESP_OK; // a failure is logged (W) there
+    return !rs->failed;
 }
 
 void psram_boot_policy(void) {
-    psram_retry_t st = {0};
-    nvs_handle_t  nvs;
-    bool          have_nvs = psram_nvs_open(RETRY_KEY, &nvs) == ESP_OK;
+    psram_retry_t      st   = {0};
+    psram_retry_read_t read = PSRAM_RETRY_READ_FAIL;
+    retry_store_t      rs   = {0};
+    bool               have_nvs = psram_nvs_open(RETRY_KEY, &rs.nvs) == ESP_OK;
     if (have_nvs) {
-        size_t size = sizeof(st);
-        if (nvs_get_blob(nvs, RETRY_KEY, &st, &size) != ESP_OK || size != sizeof(st)) {
-            st = (psram_retry_t){0};
-        }
+        size_t    size = sizeof(st);
+        esp_err_t err  = nvs_get_blob(rs.nvs, RETRY_KEY, &st, &size);
+        read           = err == ESP_ERR_NVS_NOT_FOUND           ? PSRAM_RETRY_READ_NONE
+                         : err == ESP_OK && size == sizeof(st) ? PSRAM_RETRY_READ_OK
+                                                                : PSRAM_RETRY_READ_FAIL;
     }
-    bool reboot = psram_retry_decide(&st, s_bad, wall_s());
+    // #345: an unreadable state or a failed save counts as the cap reached, never as a first retry
+    bool reboot = psram_retry_run(&st, read, s_bad, wall_s(), have_nvs ? save_retry : NULL, &rs);
     if (have_nvs) {
-        psram_nvs_put(nvs, RETRY_KEY, &st, sizeof(st)); // a failure is logged (W) and counted there (#325)
-        nvs_close(nvs);
+        nvs_close(rs.nvs);
     }
-    policy_line(&st, reboot);
+    policy_line(&st, reboot, read == PSRAM_RETRY_READ_FAIL || rs.failed);
     s_policy_done = true;
     if (!s_bad) {
         return;

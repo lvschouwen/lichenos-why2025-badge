@@ -140,3 +140,13 @@ bool psram_retry_decide(psram_retry_t *st, bool bad, uint32_t now_s) {
     st->last_s = now_s;
     return true;
 }
+
+bool psram_retry_run(psram_retry_t *st, psram_retry_read_t read, bool bad, uint32_t now_s,
+                     bool (*save)(void *ctx, psram_retry_t const *st), void *ctx) {
+    if (read == PSRAM_RETRY_READ_FAIL) {
+        *st = (psram_retry_t){0}; // whatever came back is not the state; the save below records this boot
+    }
+    bool wanted = psram_retry_decide(st, bad, now_s);
+    bool saved  = save && save(ctx, st);
+    return wanted && saved && read != PSRAM_RETRY_READ_FAIL;
+}
