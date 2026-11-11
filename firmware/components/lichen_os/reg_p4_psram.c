@@ -1,4 +1,5 @@
 #include "psram_reg.h"
+#include "psram_speed_logic.h"
 #include "reg_p4.h"
 
 // The P4's registry keys of domain 0x11: psram.* (#316, row file split #315). All read-only: what the MSPI controller
@@ -10,6 +11,13 @@
 
 // psram_clk_src_sel, the order of psram_ctrlr_ll_select_clk_source
 static char const *const clk_src_names[] = {"xtal", "mpll", "spll", "cpll"};
+
+// psram_fail_kind_t, in its order (#329)
+static char const *const fail_names[] = {"none", "boot_check", "dma_gate", "crash", "restart", "aborted", "gave_up"};
+_Static_assert(sizeof(fail_names) / sizeof(fail_names[0]) == PSRAM_FAIL_KINDS, "psram.fail_why names out of step");
+
+#define PSRAM_FAIL_RO(id_, type_, name_, max_)                                                                         \
+    {.id = (id_), .type = (type_), .flags = REG_F_RO, .name = (name_), .max = (max_), .get_applied = psram_reg_fail_get}
 
 #define PSRAM_RO(id_, type_, name_, unit_, max_)                                                                       \
     {.id = (id_), .type = (type_), .flags = REG_F_RO, .name = (name_), .unit = (unit_), .max = (max_),                \
@@ -28,6 +36,12 @@ static reg_entry_t const rows[] = {
     PSRAM_RO(REG_ID_PSRAM_DL_DQS, REG_T_U8, "psram.dl_dqs", NULL, 0),
     PSRAM_RO(REG_ID_PSRAM_PHASE, REG_T_U8, "psram.phase", NULL, 3),
     PSRAM_RO(REG_ID_PSRAM_BOOT_IDX, REG_T_U8, "psram.boot_idx", NULL, 30),
+    {.id = REG_ID_PSRAM_FAIL_WHY, .type = REG_T_ENUM, .flags = REG_F_RO, .name = "psram.fail_why", .min = 0,
+     .max = PSRAM_FAIL_KINDS - 1, .enum_names = fail_names, .get_applied = psram_reg_fail_get},
+    PSRAM_FAIL_RO(REG_ID_PSRAM_FAIL_RST, REG_T_STR, "psram.fail_rst", REG_STR_MAX),
+    PSRAM_FAIL_RO(REG_ID_PSRAM_FAIL_AT120, REG_T_BOOL, "psram.fail_at120", 0),
+    PSRAM_FAIL_RO(REG_ID_PSRAM_FAIL_FW, REG_T_STR, "psram.fail_fw", REG_STR_MAX),
+    PSRAM_FAIL_RO(REG_ID_PSRAM_ABORTS, REG_T_U8, "psram.aborts", PSRAM_SPEED_MAX_ABORTS),
 };
 
 reg_p4_dom_t const reg_p4_psram = {.rows = rows, .count = sizeof(rows) / sizeof(rows[0])};

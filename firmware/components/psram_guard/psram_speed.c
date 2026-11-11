@@ -5,6 +5,7 @@
 #include "psram_speed_logic.h"
 #include "psram_tuning.h"
 
+#include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -18,6 +19,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #if CONFIG_SPIRAM_SPEED_RUNTIME_SELECT
 #include "esp_private/mspi_timing_tuning.h"
@@ -28,9 +30,15 @@
 
 static char const TAG[] = "psram";
 
+// psram_speed_logic.c names and classifies reset reasons by their esp_reset_reason_t number
+_Static_assert(ESP_RST_SW == 3 && ESP_RST_PANIC == 4 && ESP_RST_INT_WDT == 5 && ESP_RST_TASK_WDT == 6 && ESP_RST_WDT == 7 &&
+                   ESP_RST_BROWNOUT == 9 && ESP_RST_CPU_LOCKUP == 15,
+               "esp_reset_reason_t order changed: update psram_speed_reset_name / psram_speed_reset_is_crash");
+
 static psram_speed_rec_t s_rec = {.want = 80};
 static bool              s_trial_live;
-static bool              s_keep120;    // a clean restart re-arms 120 MHz: only after a passed trial (RAM only: a crash comes back at 80)
+static bool              s_keep120;    // a clean restart arms 120 MHz: after a passed trial, or with an aborted trial still
+                                       // armed (#329). RAM only: a crash comes back at 80
 static bool              s_gate_failed;
 static bool              s_done;       // psram_speed_boot ran
 static bool              s_job;        // the trial's job task is running or done
@@ -87,25 +95,29 @@ static bool image_pending(void) {
     return on_trial ? on_trial() : true;
 }
 
+// The record goes straight to NVS, not through the settings service (it runs before the services; #325 tracks such
+// writers). One blob, the layout of psram_speed_rec_encode: a v1 blob of an older image reads with no failure recorded.
 static void rec_load(void) {
     nvs_handle_t nvs;
-    s_rec = (psram_speed_rec_t){.want = 80};
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
-        return;
+    uint8_t      blob[PSRAM_SPEED_REC_SIZE];
+    size_t       size = 0; // nothing read = the default record
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        size = sizeof(blob);
+        if (nvs_get_blob(nvs, REC_KEY, blob, &size) != ESP_OK) { // a longer blob is not ours either
+            size = 0;
+        }
+        nvs_close(nvs);
     }
-    size_t size = sizeof(s_rec);
-    if (nvs_get_blob(nvs, REC_KEY, &s_rec, &size) != ESP_OK || size != sizeof(s_rec)) {
-        s_rec = (psram_speed_rec_t){.want = 80};
-    }
-    nvs_close(nvs);
-    psram_speed_rec_sane(&s_rec);
+    psram_speed_rec_decode(blob, size, &s_rec);
 }
 
 static bool rec_save(psram_speed_rec_t const *r) {
     nvs_handle_t nvs;
-    bool         ok = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK;
+    uint8_t      blob[PSRAM_SPEED_REC_SIZE];
+    psram_speed_rec_encode(r, blob);
+    bool ok = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK;
     if (ok) {
-        ok = nvs_set_blob(nvs, REC_KEY, r, sizeof(*r)) == ESP_OK && nvs_commit(nvs) == ESP_OK;
+        ok = nvs_set_blob(nvs, REC_KEY, blob, sizeof(blob)) == ESP_OK && nvs_commit(nvs) == ESP_OK;
         nvs_close(nvs);
     }
     if (!ok) {
@@ -140,6 +152,15 @@ void psram_speed_no_rearm(void) {
     arm_register(false);
 }
 
+// The facts of a judgement made now, on this boot
+static psram_fail_ctx_t fail_ctx(void) {
+    time_t now = time(NULL);
+    return (psram_fail_ctx_t){.reset    = (uint8_t)esp_reset_reason(),
+                              .wall_s   = now > 0 && now <= (time_t)UINT32_MAX ? (uint32_t)now : 0,
+                              .uptime_s = (uint32_t)(esp_timer_get_time() / 1000000),
+                              .fw       = esp_app_get_description()->version};
+}
+
 static void log_rec(char const *what) {
     char text[40];
     psram_speed_value_text(&s_rec, psram_speed_running(), text, sizeof(text));
@@ -165,6 +186,21 @@ static void arm_and_restart(void) {
     esp_restart(); // not system_restart: nothing to save, and a PSRAM trial must not start app save hooks
 }
 
+// The judgement of a trial that was pending at this boot, with the facts that fw psram shows as "last failure"
+static void log_judgement(psram_speed_rec_t const *before, psram_speed_act_t act) {
+    char text[112];
+    psram_speed_fail_text(&s_rec.last, text, sizeof(text));
+    if (act == PSRAM_SPEED_ACT_REARM) {
+        ESP_LOGE(TAG, "a 120 MHz trial was armed but this boot runs at 80 (%s): not counted against 120 MHz, still armed "
+                      "(abort %u of %u), the next clean restart tries 120 MHz",
+                 text, s_rec.aborts, PSRAM_SPEED_MAX_ABORTS);
+    } else if (before->trial && !s_rec.trial && s_rec.failed) {
+        ESP_LOGE(TAG, "120 MHz failed (%s): back at 80 MHz, no new 120 MHz trial until chosen in Settings or with fw psram "
+                      "speed 120",
+                 text);
+    }
+}
+
 void psram_speed_boot(bool (*image_on_trial)(void)) {
     s_on_trial = image_on_trial; // before s_done: the guard task's tick reads it only once s_done is set
     s_done     = true;
@@ -175,19 +211,20 @@ void psram_speed_boot(bool (*image_on_trial)(void)) {
              psram_speed_supported() ? "" : " (IDF without the runtime speed patch)");
     psram_speed_rec_t before  = s_rec;
     bool              pending = image_pending();
-    psram_speed_act_t act     = psram_speed_boot_decide(&s_rec, psram_speed_running(), psram_speed_supported(), pending, &s_trial_live);
+    psram_fail_ctx_t  ctx     = fail_ctx();
+    psram_speed_act_t act     = psram_speed_boot_decide(&s_rec, psram_speed_running(), psram_speed_supported(), pending,
+                                                        &ctx, &s_trial_live);
     if (memcmp(&before, &s_rec, sizeof(s_rec)) != 0) {
-        rec_save(&s_rec);
+        rec_save(&s_rec); // also the RAN mark of a 120 MHz boot: a crash from here on is a failed trial, not an abort
     }
-    if (before.trial && !s_rec.trial && s_rec.failed) {
-        ESP_LOGE(TAG, "a 120 MHz boot did not get through (crash, watchdog or restart before it passed): back at 80 MHz, "
-                      "no new 120 MHz trial until chosen in Settings or with fw psram speed 120");
-    }
+    log_judgement(&before, act);
     if (esp_register_shutdown_handler(shutdown_hook) != ESP_OK) {
         ESP_LOGE(TAG, "speed: no shutdown hook, a clean restart at 120 MHz comes back at 80 MHz");
     }
     log_rec(pending ? "record (image on trial: no restart for the speed until it is valid)" : "record");
-    if (act == PSRAM_SPEED_ACT_ARM_RESTART) {
+    if (act == PSRAM_SPEED_ACT_REARM) {
+        s_keep120 = true; // the shutdown hook arms the register on the next clean restart (not a panic or WDT)
+    } else if (act == PSRAM_SPEED_ACT_ARM_RESTART) {
         arm_and_restart();
     } else if (act == PSRAM_SPEED_ACT_RESTART) {
         ESP_LOGW(TAG, "speed: running 120 MHz against the record, restarting at 80 MHz");
@@ -207,11 +244,14 @@ void psram_speed_on_pass(void (*cb)(void)) {
 // A failed 120 MHz: the record says 80 and failed, nothing re-arms, the restart lands at 80. While the image is still on
 // trial no restart (it would roll the image back): the record and the register say 80 and the normal validation decides;
 // the tick restarts once the image is valid.
-static void fail_and_restart(char const *why) {
+static void fail_and_restart(psram_fail_kind_t kind) {
+    psram_fail_ctx_t ctx = fail_ctx();
+    char             why[112];
     lock();
     s_keep120    = false;
     s_trial_live = false;
-    psram_speed_fail(&s_rec);
+    psram_speed_fail_at(&s_rec, kind, &ctx, psram_speed_running() == 120);
+    psram_speed_fail_text(&s_rec.last, why, sizeof(why));
     unlock();
     save_current();
     arm_register(false);
@@ -230,8 +270,11 @@ static void fail_and_restart(char const *why) {
 static char const JOB_ARM[]   = "@arm";   // sentinels, compared by address
 static char const JOB_LEAVE[] = "@leave";
 
+static char const JOB_BOOT_CHECK[] = "@boot";
+static char const JOB_GATE[]       = "@gate";
+
 static void trial_job(void *arg) {
-    char const *fail_why = arg;
+    psram_fail_kind_t fail = arg == JOB_BOOT_CHECK ? PSRAM_FAIL_BOOT_CHECK : arg == JOB_GATE ? PSRAM_FAIL_DMA_GATE : PSRAM_FAIL_NONE;
     if (arg == JOB_ARM) {
         arm_and_restart(); // returns only when nothing was armed
         s_job = false;
@@ -242,11 +285,11 @@ static void trial_job(void *arg) {
         arm_register(false);
         esp_restart();
     }
-    if (!fail_why && !psram_dma_quick_gate()) {
-        fail_why = "the DMA gate failed";
+    if (fail == PSRAM_FAIL_NONE && !psram_dma_quick_gate()) {
+        fail = PSRAM_FAIL_DMA_GATE;
     }
-    if (fail_why) {
-        fail_and_restart(fail_why);
+    if (fail != PSRAM_FAIL_NONE) {
+        fail_and_restart(fail);
     } else {
         lock();
         s_trial_live = false;
@@ -262,12 +305,12 @@ static void trial_job(void *arg) {
     vTaskDelete(NULL);
 }
 
-static void start_job(char const *fail_why) {
+static void start_job(char const *job) {
     if (s_job) {
         return;
     }
     s_job = true;
-    if (xTaskCreate(trial_job, "psram_trial", 6144, (void *)fail_why, 3, NULL) != pdPASS) {
+    if (xTaskCreate(trial_job, "psram_trial", 6144, (void *)job, 3, NULL) != pdPASS) {
         s_job = false; // retried by the next tick
         ESP_LOGW(TAG, "speed: no task for the 120 MHz trial result, retrying");
     }
@@ -280,7 +323,7 @@ void psram_speed_tick(void) {
         bool bad = psram_boot_bad(why, sizeof(why));
         switch (psram_speed_trial_step((unsigned)(esp_timer_get_time() / 1000000), bad, s_gate_failed)) {
             case PSRAM_SPEED_TRIAL_RUNNING: return;
-            case PSRAM_SPEED_TRIAL_FAIL: start_job(bad ? "the boot check failed" : "the DMA gate failed"); return;
+            case PSRAM_SPEED_TRIAL_FAIL: start_job(bad ? JOB_BOOT_CHECK : JOB_GATE); return;
             case PSRAM_SPEED_TRIAL_PASS: start_job(NULL); return;
         }
         return;
@@ -309,7 +352,7 @@ void psram_speed_gate_result(bool failed) {
     s_gate_failed = true;
     if (psram_speed_running() == 120 && s_done) {
         console_reply("psram: the DMA gate failed at 120 MHz: back at 80 MHz");
-        fail_and_restart("the DMA gate failed");
+        fail_and_restart(PSRAM_FAIL_DMA_GATE);
     }
 }
 
@@ -353,9 +396,27 @@ void psram_speed_print(void) {
     unlock();
     psram_speed_value_text(&r, psram_speed_running(), text, sizeof(text));
     console_reply("psram speed: running %u MHz; %s; want %u, trial %s, failed %s; IDF %s; carrier found at PSRAM init %08x%s",
-                  psram_speed_running(), text, r.want, live ? "running" : r.trial ? "armed" : "none", r.failed ? "yes" : "no",
+                  psram_speed_running(), text, r.want,
+                  live                                 ? "running"
+                  : r.trial == PSRAM_SPEED_TRIAL_ARMED ? "armed"
+                  : r.trial                            ? "ran, not passed"
+                                                       : "none",
+                  r.failed ? "yes" : "no",
                   psram_speed_supported() ? "runtime-selectable" : "NOT patched (0003)", (unsigned)psram_speed_carrier_raw(),
                   s_gate_failed ? "; DMA gate failed this boot" : "");
+    char last[112];
+    psram_speed_fail_text(&r.last, last, sizeof(last));
+    if (r.aborts) {
+        console_reply("psram speed: last failure: %s; aborted trials in a row %u of %u", last, r.aborts, PSRAM_SPEED_MAX_ABORTS);
+    } else {
+        console_reply("psram speed: last failure: %s", last);
+    }
+}
+
+void psram_speed_record(psram_speed_rec_t *out) {
+    lock();
+    *out = s_rec;
+    unlock();
 }
 
 // "fw psram speed [80|120] [yes]": no argument = status; a speed without yes = what would happen

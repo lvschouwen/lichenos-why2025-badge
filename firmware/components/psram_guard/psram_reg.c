@@ -3,11 +3,14 @@
 #include "psram_boot.h"
 #include "psram_regs.h"
 #include "psram_speed.h"
+#include "reg_ids.h"
 
 #include "esp_clk_tree.h"
 #include "soc/hp_sys_clkrst_struct.h"
 #include "soc/soc.h"
 #include "soc/spi_mem_s_reg.h"
+
+#include <stdio.h>
 
 // Indexed by psram_clk_src_sel, the order of psram_ctrlr_ll_select_clk_source
 static soc_module_clk_t const SRC_CLK[PSRAM_CLK_SRCS] = {SOC_MOD_CLK_XTAL, SOC_MOD_CLK_MPLL, SOC_MOD_CLK_SPLL,
@@ -43,4 +46,20 @@ reg_status_t psram_reg_get(reg_entry_t const *e, reg_value_t *out) {
     }
     out->u = v;
     return REG_OK;
+}
+
+reg_status_t psram_reg_fail_get(reg_entry_t const *e, reg_value_t *out) {
+    psram_speed_rec_t r;
+    psram_speed_record(&r);
+    bool none = r.last.kind == PSRAM_FAIL_NONE;
+    switch (e->id) {
+    case REG_ID_PSRAM_FAIL_WHY: out->u = r.last.kind; return REG_OK;
+    case REG_ID_PSRAM_FAIL_RST:
+        snprintf(out->s, sizeof(out->s), "%s", none ? "none" : psram_speed_reset_name(r.last.reset));
+        return REG_OK;
+    case REG_ID_PSRAM_FAIL_AT120: out->u = r.last.at120; return REG_OK;
+    case REG_ID_PSRAM_FAIL_FW: snprintf(out->s, sizeof(out->s), "%s", none ? "none" : r.last.fw); return REG_OK;
+    case REG_ID_PSRAM_ABORTS: out->u = r.aborts; return REG_OK;
+    default: return REG_FAILED;
+    }
 }

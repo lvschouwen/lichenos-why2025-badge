@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "psram_speed_logic.h"
+
 // The PSRAM speed switch (#121), the part that touches NVS, the LP register and the restart; the rules are in
 // psram_speed_logic.c. Needs the patched IDF (tools/idf-patches/0003, CONFIG_SPIRAM_SPEED_RUNTIME_SELECT): without it
 // everything here reports 80 MHz, not supported, and never restarts.
@@ -17,8 +19,9 @@ unsigned psram_speed_want(void);
 // What LP_STORE15 held when PSRAM init read (and cleared) it, for the boot log and "fw psram carrier"
 uint32_t psram_speed_carrier_raw(void);
 
-// app_main, once NVS is up: reads the record, applies the rules (a trial that never finished = failed, back at 80; an
-// armed 120 wanted at 80 = arm and restart once), registers the shutdown hook that keeps a clean restart at 120 MHz.
+// app_main, once NVS is up: reads the record, applies the rules (a 120 MHz boot that never passed = failed, back at 80;
+// an armed trial that never reached 120 = aborted, still armed for the next clean restart, the third in a row = failed;
+// an armed 120 wanted at 80 = arm and restart once), registers the shutdown hook that keeps a clean restart at 120 MHz.
 // image_on_trial answers whether the running image may still be on trial (ota_image_trial_maybe, #285): no restart
 // for the speed while it may be, as that would roll the image back. NULL counts as on trial.
 void psram_speed_boot(bool (*image_on_trial)(void));
@@ -43,4 +46,6 @@ unsigned psram_speed_other(void);                  // the speed the row would sw
 void   psram_speed_cmd(char const *args);          // fw psram speed [80|120] [yes]
 // A factory reset is under way: the restart that follows must come back at 80 MHz (STORE15 cleared, no re-arm)
 void   psram_speed_no_rearm(void);
-void   psram_speed_print(void);                    // the status lines of fw psram
+void   psram_speed_print(void);                    // the status lines of fw psram (speed, last failure)
+// A copy of the record (want, trial, failed, aborts, the last failure), for the psram.fail_* registry keys; any task
+void   psram_speed_record(psram_speed_rec_t *out);
