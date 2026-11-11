@@ -1,0 +1,6 @@
+# Issues: labels, scoring, bench checks (moved from CLAUDE.md)
+
+- State lives in issues (labels `gain:N`/`ease:N`/`score:N`, `needs-lucas` for bench checks waiting on Lucas). Memory holds standing knowledge only.
+- Every open issue carries `gain:1-5`, `ease:1-5`, `score:N` (score = gain + ease, max 10); ease scale S=4, S-M=3, M=2, L=1, minus 1 if a solder bodge must come first. Label new issues the same way and re-score when scope changes. Exception: RAM budget work goes first when it blocks adding services.
+- `needs-lucas` = code on main, waits for Lucas's hands-on check: add a comment "## Bench check (fw-<build>)" with What changed / Setup / checkbox steps "action -> **Expected:** exact on-screen text" (strings quoted from code, on-air only #badgetest/Heltec, destructive steps bold) / Pass -> close. Verify claims in code, don't copy the implementer's comment. Remove the label on close. `needs-proofing` = Claude can proof it remotely.
+- Plain `gh issue view N --comments` is broken here; use `--json body,comments --jq '.body, .comments[].body'`.
