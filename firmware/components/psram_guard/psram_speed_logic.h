@@ -69,7 +69,8 @@ typedef struct {
 typedef struct {
     uint8_t     reset;      // esp_reset_reason() of this boot
     bool        fresh_dump; // the core dump is new since the last recorded crash (crash_dump_fresh)
-    uint8_t     carried;    // psram_fail_kind_t of a fall the last boot could not save (STORE15), NONE when none
+    uint8_t     carried;    // psram_fail_kind_t of a fall the last boot could not save (STORE15), NONE when none. It
+                            // is recorded with this boot's reset reason, clock and uptime: the falling boot's are gone
     uint32_t    wall_s;   // time(NULL), any value (below PSRAM_FAIL_WALL_MIN counts as not set)
     uint32_t    uptime_s;
     char const *fw;       // esp_app_get_description()->version
@@ -87,8 +88,10 @@ void psram_speed_rec_decode(uint8_t const *in, size_t size, psram_speed_rec_t *r
 typedef enum {
     PSRAM_SPEED_ACT_NONE,
     PSRAM_SPEED_ACT_ARM_RESTART, // 120 wanted at a boot at 80: count the arm, save, arm the register, restart once
-    PSRAM_SPEED_ACT_KEEP120,     // 120 wanted, but this session stays at 80 (after a crash, or the arm cap): the next
-                                 // clean restart arms the register (shutdown hook), nothing now
+    PSRAM_SPEED_ACT_KEEP120,     // 120 wanted, but this session stays at 80 (a crash before the session settled, or the
+                                 // arm cap): the next clean restart arms the register (shutdown hook), nothing now
+    PSRAM_SPEED_ACT_REARM_AFTER_CRASH, // a crash of a settled session: arm and restart (through system_restart) once
+                                       // the crash is recorded and told (psram_speed_rearm_now)
     PSRAM_SPEED_ACT_LEAVE120,    // running 120 against the record (want 80 or failed): restart, the register clear
     PSRAM_SPEED_ACT_FALL80,      // PSRAM evidence at 120: failed is recorded, restart at 80
 } psram_speed_act_t;
@@ -108,9 +111,10 @@ psram_speed_rec_t psram_speed_rec_default(void);
 //   running 120, evidence                   -> FALL80, failed recorded with the kind
 //   running 120, want 80 or failed          -> LEAVE120 (no note: the record already says 80)
 //   running 80, a fall carried in STORE15   -> NONE, the fall recorded now (its boot could not save it)
-//   running 80, want 120, not failed        -> ARM_RESTART; KEEP120 after a crash (psram_speed_reset_crashed: no crash
-//                                              loop through an arm) or at the PSRAM_SPEED_MAX_ARMS-th unsettled arm
-//                                              (arms back to 0)
+//   running 80, want 120, not failed        -> ARM_RESTART; after a crash (psram_speed_reset_crashed) REARM_AFTER_CRASH
+//                                              when arms is 0 (the crashed session settled, Lucas #353), else KEEP120
+//                                              (a crash early in every 120 boot stays bounded: the re-arm is an arm);
+//                                              KEEP120 at the PSRAM_SPEED_MAX_ARMS-th unsettled arm (arms back to 0)
 //   anything else                           -> NONE
 psram_speed_act_t psram_speed_boot_decide(psram_speed_rec_t *r, unsigned running_mhz, bool patched,
                                           psram_fail_kind_t evidence, psram_fail_ctx_t const *ctx);
@@ -123,6 +127,9 @@ psram_speed_act_t psram_speed_evidence(psram_speed_rec_t *r, unsigned running_mh
 bool psram_speed_arm_commit(psram_speed_rec_t *r, bool (*save)(psram_speed_rec_t const *));
 // A 120 MHz boot up PSRAM_SPEED_SETTLE_SECONDS with arms counted: clear them (the caller saves)
 bool psram_speed_settle_wanted(psram_speed_rec_t const *r, unsigned running_mhz, unsigned uptime_s);
+// The re-arm after a crash is due: one is waiting, the crash is recorded (crash log) and its notice raised (the restart's
+// saves keep it), and the image is valid
+bool psram_speed_rearm_now(bool waiting, bool crash_told, bool image_pending);
 // Running 120 against the record (want 80 or failed): a restart is due once the image is valid
 bool psram_speed_leave_120_wanted(psram_speed_rec_t const *r, unsigned running_mhz);
 

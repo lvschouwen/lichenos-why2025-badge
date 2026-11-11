@@ -63,5 +63,8 @@ typedef struct {
 
 // Copies the hooks, registers `fw thermal` and starts both tasks. Once, after lichen_notify_start.
 void lichen_watch_start(lichen_watch_hooks_t const *hooks);
+// The boot's own notices (a crash, a PSRAM check, an update, ...) have been raised: a restart from now on keeps them, as
+// its saves write the notifications (#353: the re-arm of 120 MHz after a crash waits for this). Any task.
+bool lichen_watch_boot_told(void);
 void thermal_start(lichen_watch_hooks_t const *hooks);     // lichen_watch_start's thermal half
 void sys_notices_start(lichen_watch_hooks_t const *hooks); // and its notices half

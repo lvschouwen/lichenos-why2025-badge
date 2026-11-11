@@ -400,6 +400,8 @@ static void crash_command(char const *args) {
 
 // Split for the early boot screen (#39): the first part decides, cheaply, whether this boot follows a crash (the boot
 // screen reads crash_recovered() once when it is built); the second needs /storage and reads the whole running image
+static atomic_bool s_recorded; // this boot's crash is in the log (crash_check_late)
+
 static struct {
     crash_reset_t reason;
     bool          fresh;
@@ -485,6 +487,11 @@ void crash_check_late(void) {
                         NULL, 0);
     append_record(record);
     ESP_LOGW(TAG, "last reset was a crash: %s", record);
+    atomic_store(&s_recorded, true);
+}
+
+bool crash_recorded(void) {
+    return atomic_load(&s_recorded);
 }
 
 bool crash_recovered(void) {

@@ -22,6 +22,7 @@
 #include "storage.h"
 #include "sys_notice_rules.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 
 #include <string.h>
@@ -36,6 +37,11 @@ static char const TAG[] = "sys_notices";
 #define BODY_CAP       120
 
 static lichen_watch_hooks_t hooks; // set once before the task starts
+static atomic_bool          s_boot_told;
+
+bool lichen_watch_boot_told(void) {
+    return atomic_load(&s_boot_told);
+}
 
 static void body_for(sysn_event_t e, sysn_snapshot_t const *s, lichen_sd_info_t const *sd, char *out, size_t cap) {
     char a[24], b[24];
@@ -130,6 +136,7 @@ static void notices_task(void *arg) {
             ESP_LOG_LEVEL(log_level((ln_level_t)info.level), TAG, "%s: %s", info.title, body);
             lichen_sys_notify_to((ln_level_t)info.level, info.target, info.title, body, info.flags);
         }
+        atomic_store(&s_boot_told, true); // the first step raised the boot's facts
         if (poll == STACK_LOG_POLL) {
             ESP_LOGI(TAG, "stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
         }

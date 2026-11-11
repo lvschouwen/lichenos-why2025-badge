@@ -22,10 +22,18 @@ uint32_t psram_speed_carrier_raw(void);
 // app_main, once NVS is up: reads the record (120 MHz when nothing is saved, #353), applies the rules of
 // psram_speed_logic.h (bad bytes in this boot's check at 120 = back at 80; 120 wanted at a boot at 80 = arm and restart
 // once, or after a crash at the next clean restart), registers the shutdown hook that keeps a clean restart at 120 MHz.
-// image_on_trial answers whether the running image may still be on trial (ota_image_trial_maybe, #285): no restart
-// for the speed while it may be, as that would roll the image back. NULL counts as on trial. dump_fresh answers whether
-// the core dump is new (crash_dump_fresh): a reason-7 reset is a crash only then. NULL: never.
-void psram_speed_boot(bool (*image_on_trial)(void), bool (*dump_fresh)(void));
+// What the OS above the guard answers for it (any member may be NULL):
+typedef struct {
+    // the running image may still be on trial (ota_image_trial_maybe, #285): no restart for the speed while it may be,
+    // as that would roll the image back. NULL counts as on trial
+    bool (*image_on_trial)(void);
+    // the core dump is new (crash_dump_fresh): a reason-7 reset is a crash only then. NULL: never
+    bool (*dump_fresh)(void);
+    // this boot's crash is in the crash log and its notice raised, so a restart (whose saves keep the notices) loses
+    // neither: the re-arm of 120 after a settled session's crash waits for it. NULL: never, the session stays at 80
+    bool (*crash_told)(void);
+} psram_speed_hooks_t;
+void psram_speed_boot(psram_speed_hooks_t const *hooks);
 
 // Guard task, every ~100 ms (works once a second): judges reported evidence, runs the PSRAM heap check once a minute at
 // 120 MHz, starts the arm / leave that had to wait for the image to be valid, clears the arm count of a settled boot.

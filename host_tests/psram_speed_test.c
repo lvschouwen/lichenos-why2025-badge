@@ -49,6 +49,7 @@ static psram_fail_ctx_t crashed_wdt(void) { // a real watchdog: reason 7 with a 
 static void test_default(void);
 static void test_crash_class(void);
 static void test_carried_fall(void);
+static void test_crash_rearm(void);
 static void test_no_evidence(void);
 static void test_evidence(void);
 static void test_switch_back(void);
@@ -60,6 +61,7 @@ int main(void) {
     test_default();
     test_crash_class();
     test_carried_fall();
+    test_crash_rearm();
     test_no_evidence();
     test_evidence();
     test_switch_back();
@@ -119,13 +121,13 @@ static void test_no_evidence(void) {
         CHECK(psram_speed_boot_decide(&r, 120, true, PSRAM_FAIL_NONE, &c) == PSRAM_SPEED_ACT_NONE);
         CHECK(r.want == 120 && !r.failed && r.last.kind == PSRAM_FAIL_NONE);
     }
-    // A panic or watchdog runs no shutdown hook, so it comes back at 80: no failure, no arm restart (no crash loop), the
-    // next clean restart goes back to 120
+    // A panic or watchdog runs no shutdown hook, so it comes back at 80: no failure. A session that had settled (arms 0)
+    // re-arms 120 once the crash is recorded (Lucas, #353 M3); one that had not stays at 80 (below, test_crash_rearm)
     uint8_t const crashes[] = {RST_PANIC, RST_INT_WDT, RST_TASK_WDT, RST_LOCKUP, RST_WDT};
     for (size_t i = 0; i < sizeof(crashes); i++) {
         psram_speed_rec_t r = psram_speed_rec_default();
         psram_fail_ctx_t  c = crashes[i] == RST_WDT ? crashed_wdt() : at(crashes[i]);
-        CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &c) == PSRAM_SPEED_ACT_KEEP120);
+        CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &c) == PSRAM_SPEED_ACT_REARM_AFTER_CRASH);
         CHECK(r.want == 120 && !r.failed && r.arms == 0 && r.last.kind == PSRAM_FAIL_NONE);
     }
     // A power cycle, a brownout or a restart that ran no hook: arm and restart once
@@ -327,8 +329,8 @@ static void test_crash_class(void) {
     psram_fail_ctx_t  c7 = at(RST_WDT); // a cold boot: arm and restart to 120
     CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &c7) == PSRAM_SPEED_ACT_ARM_RESTART);
     r                      = psram_speed_rec_default();
-    psram_fail_ctx_t wdt   = crashed_wdt(); // a real watchdog: the crash path, this session at 80
-    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &wdt) == PSRAM_SPEED_ACT_KEEP120 && !r.failed);
+    psram_fail_ctx_t wdt   = crashed_wdt(); // a real watchdog: the crash path (settled: the re-arm once recorded)
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &wdt) == PSRAM_SPEED_ACT_REARM_AFTER_CRASH && !r.failed);
 }
 
 // #353 review L2: a fall whose record could not be saved travels in STORE15 to the next boot, which runs at 80 (any
@@ -349,4 +351,27 @@ static void test_carried_fall(void) {
     psram_speed_rec_t before = r;
     CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &c) == PSRAM_SPEED_ACT_NONE);
     CHECK(memcmp(&before, &r, sizeof(r)) == 0);
+}
+
+// #353 M3 (Lucas): after a real crash, 120 comes back only for a session that had settled (arms 0: it ran 60 s at 120),
+// and only once the crash is recorded (crash log + its notice, which the restart's saves keep); arms > 0 at the crash
+// keeps one session at 80, so a crash early in every 120 MHz boot stays bounded
+static void test_crash_rearm(void) {
+    psram_fail_ctx_t  p = at(RST_PANIC);
+    psram_speed_rec_t r = psram_speed_rec_default();
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &p) == PSRAM_SPEED_ACT_REARM_AFTER_CRASH);
+    // the re-arm waits for the record and the notice, and for an image that is valid
+    CHECK(!psram_speed_rearm_now(true, false, false));
+    CHECK(!psram_speed_rearm_now(true, true, true));
+    CHECK(psram_speed_rearm_now(true, true, false));
+    CHECK(!psram_speed_rearm_now(false, true, false)); // nothing waiting
+    // the re-arm is an arm: counted, so the 120 boot after it must settle before another crash re-arms
+    CHECK(psram_speed_arm_commit(&r, save_ok) && r.arms == 1);
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &p) == PSRAM_SPEED_ACT_KEEP120 && r.arms == 1);
+    // settled, then a crash again: re-armed again
+    r.arms = 0;
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &p) == PSRAM_SPEED_ACT_REARM_AFTER_CRASH);
+    // a crash at 80 on a record that fell: nothing
+    r = (psram_speed_rec_t){.want = 80, .failed = 1};
+    CHECK(psram_speed_boot_decide(&r, 80, true, PSRAM_FAIL_NONE, &p) == PSRAM_SPEED_ACT_NONE);
 }

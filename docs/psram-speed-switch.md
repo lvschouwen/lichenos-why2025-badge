@@ -19,9 +19,10 @@ fall to 80 it caused was our own doing (#255 a panic on the way into the trial, 
 - **NVS record** `psram_spd` = {want 80/120, failed, arms, last fall}; the rules are `psram_speed_logic.c`
   (host-tested in `host_tests/psram_speed_test.c`). Written straight to NVS, not through the settings service (it runs
   before the services; #325). Blob v4 (32 bytes): want, failed, arms, 0, version 4, kind, reset reason, ran-at-120,
-  wall time (LE32, 0 = clock not set), uptime (LE32), image version (16 bytes, NUL-padded, cut at 15). Any other size or
-  version, the trial's 36-byte v3 record of #329 included (no migration: images are not released, and its falls were
-  no evidence), is the default record: 120, nothing failed, last fall none.
+  wall time (LE32, 0 = clock not set), uptime (LE32), image version (16 bytes, NUL-padded, cut at 15). The trial's
+  36-byte v3 record of #329 keeps only a choice of 80 made without a fall (want 80, failed 0); its falls were no
+  evidence, so anything else in it reads as 120. Any other size or version is the default record: 120, nothing failed,
+  last fall none.
 
 ## What counts as evidence
 
@@ -31,13 +32,20 @@ Only what shows the PSRAM itself returning wrong data, and only while running 12
 |---|---|
 | `boot_check` | the dense 4 MB boot check (`psram_boot.c`) found bad bytes (single-bit words included), judged in `psram_speed_boot` |
 | `canary` | a canary block flipped (`psram_guard.c` `verify_one`, every canary within ~0.7 s) |
-| `heap` | the PSRAM heap failed `heap_caps_check_integrity` (CORRUPT HEAP), checked once a minute by the guard task at 120 MHz |
-| `dma_gate` | a DMA gate round failed: `fw psram dma`, `fw psram dma sweep`, the Bench's round, the stress run's rounds |
+| `heap` | the PSRAM heap failed `heap_caps_check_integrity` (CORRUPT HEAP): every `PSRAM_SPEED_HEAP_CHECK_S` (60 s) on the guard task at 120 MHz, and the stress run's check (`lichen_sys_mem_check`) |
+| `dma_gate` | a DMA gate round found bad PSRAM bytes on the AXI-GDMA legs or the bounced SD leg (`psram_dma_evidence`): `fw psram dma`, `fw psram dma sweep`, the Bench's round, the stress run's rounds. A card read error, a DMA timeout or refusal fails the round but is no evidence |
+
+`fw psram speed` shows the heap check's count, last and longest time and the guard task's stack margin (an I line
+logs each new longest), to judge its cost on the bench.
 
 Not evidence: any reset reason (a restart, an OTA reboot, a panic, a watchdog, a brownout, a power cycle), and a
 fallen-back or short tuning window without bad bytes (it still marks the boot bad and raises "PSRAM check failed at
 boot"). A CORRUPT HEAP that the heap itself finds first (in a `free`) aborts before anything can be recorded: that
-panic comes back at 80 for one session (below) without a fall.
+panic is a crash (below) without a fall.
+
+A crash is judged as `crash.c` does: a panic, an int or task watchdog or a lockup always; reason 7 (`ESP_RST_WDT`) only
+with a core dump new since the last recorded crash (`crash_dump_fresh`, read once right after NVS), because every
+power-on and CH340 reset on this board reports reason 7 as well.
 
 Evidence seen on any task is only reported (`psram_speed_report`, an atomic, the first one of a boot wins); the guard
 task's tick judges it once a second and the `psram_speed` job task saves the record and restarts. At 80 MHz evidence
@@ -52,14 +60,22 @@ changes nothing (there is nothing to fall to); it is logged where it was found, 
    - running 120 with bad bytes in the boot check: the fall (below).
    - running 120 against the record (want 80 or failed): back to 80, no note.
    - running 80 with 120 wanted and not failed:
-     - after a panic or watchdog: this session stays at 80, the next clean restart arms 120 (the shutdown hook). No
-       fall, and no arm restart either, so a crash at 120 cannot loop through one.
+     - after a crash of a session that had settled (`arms` 0: it ran 60 s at 120, or came by a clean restart from
+       one): 120 again (Lucas, #353), but only once the crash is recorded: the crash log has it (`crash_recorded`)
+       and the boot's notices are raised (`lichen_watch_boot_told`), then the job task arms and restarts through
+       `system_restart("psram 120 re-arm after crash")`, whose saves write the notices, so "Lichen restarted after a
+       crash" and the crash log survive it. The re-arm is an arm (`arms + 1`).
+     - after a crash with `arms` > 0 (the 120 MHz boot crashed before it settled, a re-arm included): this session
+       stays at 80, the next clean restart arms 120 (the shutdown hook). So a crash early in every 120 MHz boot costs
+       one re-arm, then a session at 80 per crash, never a loop.
      - otherwise (a power-on, the first boot, a restart that ran no hook): `arms + 1` saved, STORE15 armed, `esp_restart`
        once ("restarting once to boot at 120 MHz"). The third arm in a row whose 120 MHz boot never settled
        (`PSRAM_SPEED_SETTLE_SECONDS`, 60 s of uptime, clears `arms` with one NVS write) keeps this session at 80 and
        starts the count over: it bounds a loop (a brownout at 120, a restart before the hook is in), it is no failure.
-3. **The fall:** `want = 80`, `failed = 1`, the last fall recorded, STORE15 cleared, `esp_restart` (no app save hooks with
-   a PSRAM that is suspect). Logged at E (#113: a feature lost until someone acts) on the boot that falls and again on
+3. **The fall:** `want = 80`, `failed = 1`, the last fall recorded (saved, tried twice), STORE15 cleared, `esp_restart`
+   (no app save hooks with a PSRAM that is suspect; a restart note "psram 120 failed"). A fall that could not be saved
+   goes in STORE15 as `0xC4A3 << 16 | kind` instead (it selects 80 like any word but the ARM word): the next boot
+   records it with its own reset reason, clock and uptime (the falling boot's are gone) and arms nothing. Logged at E (#113: a feature lost until someone acts) on the boot that falls and again on
    every boot after it, and raised once per boot as the notice "PSRAM back at 80 MHz" (error level). Never re-armed by
    itself.
 4. While the running image is still PENDING_VERIFY (OTA not yet marked valid) nothing restarts for the speed: the arm,
@@ -105,10 +121,15 @@ the symbol is unknown to Kconfig, the app reports 80 MHz and "not supported", an
    120: `fw psram speed` shows `running 120 MHz; 120 MHz; want 120, failed no, arms 1 of 3` and, after 60 s,
    `arms 0 of 3`. `fw get psram.clk` is 120 MHz.
 2. `fw reboot` within 20 s of a boot: back at 120, `failed no`, no "120 MHz failed" line in the log.
-3. `fw crash test wdt` (or any crash): the next boot is at 80 with "this boot stays at 80 MHz (after a crash, no evidence
-   against 120)"; `fw reboot`: back at 120, `failed no`.
-4. Gate at 120: `fw psram dma sweep 16384` x3, `fw psram dma 15` x7, `fw mesh hist scan 100`. A failed gate restarts the
+3. More than 60 s after a boot at 120, `fw crash test wdt`: the next boot is at 80 with "this boot is at 80 MHz after a
+   crash (no evidence against 120): 120 MHz again once the crash is recorded"; a few seconds after the crash notice it
+   restarts once (restart history "psram 120 re-arm after crash") into 120, `failed no`, `arms 1` then 0 after 60 s;
+   the crash log and the notice "Restarted after a crash" are still there.
+4. Within 60 s of that 120 boot, `fw crash test wdt` again: this session stays at 80 ("stays at 80 MHz after a crash");
+   `fw reboot`: back at 120.
+5. A cold power-on or CH340 reset (reason 7, no new dump): one arm restart into 120, no "after a crash" line.
+6. Gate at 120: `fw psram dma sweep 16384` x3, `fw psram dma 15` x7, `fw mesh hist scan 100`. A failed gate restarts the
    badge at 80 with "120 MHz failed, back at 80" in Settings, the notice "PSRAM back at 80 MHz", and `last fall to 80:
    DMA gate, ...`.
-5. `fw psram speed 120 yes` after a fall: one restart, straight to 120, `failed no`.
-6. Settings > For developers > PSRAM speed: value text, dialog, choosing 80 restarts at 80 and stays there (no arm).
+7. `fw psram speed 120 yes` after a fall: one restart, straight to 120, `failed no`.
+8. Settings > For developers > PSRAM speed: value text, dialog, choosing 80 restarts at 80 and stays there (no arm).

@@ -516,6 +516,11 @@ static void declare_keep_keys(void) {
     }
 }
 
+// #353: the crash of a settled 120 MHz session is in the crash log and its notice raised: the re-arm may restart now
+static bool crash_told(void) {
+    return crash_recorded() && lichen_watch_boot_told();
+}
+
 static void start_nvs(boot_ctx_t *ctx) {
     (void)ctx;
     nvs_boot(); // #116: plain or encrypted, and never an erase with a key burned
@@ -528,7 +533,10 @@ static void start_nvs(boot_ctx_t *ctx) {
     // #121, #353: the 80/120 MHz record: bad bytes in the boot check at 120 fall back to 80, a wanted 120 arms and
     // restarts once (not while the image is on trial, #285: ota answers that; not after a crash, which crash.c's core
     // dump tells from this board's reason-7 power-on)
-    psram_speed_boot(ota_image_trial_maybe, crash_dump_fresh); // an unread state counts as on trial
+    static psram_speed_hooks_t const speed_hooks = {.image_on_trial = ota_image_trial_maybe, // unread = on trial
+                                                    .dump_fresh     = crash_dump_fresh,
+                                                    .crash_told     = crash_told};
+    psram_speed_boot(&speed_hooks);
     psram_boot_oneshot_apply(); // #121: a one-shot delayline for the PSRAM bench, before storage and MeshCore load anything
     boot_progress_nvs_up();
 }

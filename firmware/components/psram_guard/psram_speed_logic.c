@@ -90,6 +90,10 @@ bool psram_speed_settle_wanted(psram_speed_rec_t const *r, unsigned running_mhz,
     return running_mhz == 120 && r->arms && uptime_s >= PSRAM_SPEED_SETTLE_SECONDS;
 }
 
+bool psram_speed_rearm_now(bool waiting, bool crash_told, bool image_pending) {
+    return waiting && crash_told && !image_pending;
+}
+
 bool psram_speed_arm_commit(psram_speed_rec_t *r, bool (*save)(psram_speed_rec_t const *)) {
     r->arms++; // before arming: a 120 MHz boot that never settles counts, so an arm loop ends at the cap
     if (save(r)) {
@@ -112,11 +116,12 @@ psram_speed_act_t psram_speed_evidence(psram_speed_rec_t *r, unsigned running_mh
     return PSRAM_SPEED_ACT_FALL80;
 }
 
-// 120 wanted at a boot at 80: an arm restart, unless this session is better left at 80 until a clean restart. The crash
-// is classified here, before the arm decision, so a re-arm after a recorded crash (Lucas, pending) is a branch below.
+// 120 wanted at a boot at 80: an arm restart, unless this session is better left at 80 until a clean restart. After a
+// crash (Lucas, #353): a settled session (arms 0) re-arms once the crash is recorded; the re-arm is counted as an arm,
+// so a crash before the next one settles keeps that session at 80
 static psram_speed_act_t arm_at_80(psram_speed_rec_t *r, psram_fail_ctx_t const *ctx) {
-    if (psram_speed_reset_crashed(ctx->reset, ctx->fresh_dump)) {
-        return PSRAM_SPEED_ACT_KEEP120; // no evidence against 120, but no crash loop through an arm restart either
+    if (psram_speed_reset_crashed(ctx->reset, ctx->fresh_dump)) { // no evidence against 120 either way
+        return r->arms == 0 ? PSRAM_SPEED_ACT_REARM_AFTER_CRASH : PSRAM_SPEED_ACT_KEEP120;
     }
     if (r->arms >= PSRAM_SPEED_MAX_ARMS) {
         r->arms = 0; // the next restart tries again; this one stays at 80

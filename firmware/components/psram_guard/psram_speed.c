@@ -45,11 +45,16 @@ static bool              s_arm_deferred; // an arm restart waits for the image t
 static _Atomic uint8_t   s_evidence;     // psram_fail_kind_t seen this boot and not yet judged (the tick judges it)
 static bool              s_done;         // psram_speed_boot ran
 static bool              s_job;          // the speed job task is running
-static bool            (*s_on_trial)(void); // ota_image_trial_maybe, from psram_speed_boot
+static psram_speed_hooks_t s_hooks;     // from psram_speed_boot: the image's trial state, the crash's record
+static bool              s_rearm_wait;   // a settled session crashed: re-arm 120 once the crash is recorded and told
 static uint32_t          s_idle_word;    // what STORE15 holds when not armed: 0, or a fall that could not be saved
-static uint32_t          s_heap_us, s_heap_max_us; // the last and the longest PSRAM heap check, us
-static unsigned          s_heap_checks;
-static UBaseType_t       s_guard_free;   // the guard task's stack high-water after a heap check, bytes
+typedef struct {
+    uint32_t last_us, max_us; // the last and the longest PSRAM heap check
+    unsigned checks;
+    unsigned guard_free;      // the guard task's stack high-water after a heap check, bytes
+} heap_stats_t;
+static heap_stats_t s_heap; // written by the guard task, read by fw psram speed: under s_heap_mux, copied whole
+static portMUX_TYPE s_heap_mux = portMUX_INITIALIZER_UNLOCKED;
 static SemaphoreHandle_t s_mu;           // s_rec, s_keep120 (never held across NVS or a restart)
 static StaticSemaphore_t s_mu_buf;
 
@@ -97,7 +102,7 @@ uint32_t psram_speed_carrier_raw(void) {
 // (#285) and sits above this guard, so psram_speed_boot is handed its reader. Not handed (yet): on trial, so nothing
 // restarts for the speed.
 static bool image_pending(void) {
-    bool (*on_trial)(void) = s_on_trial;
+    bool (*on_trial)(void) = s_hooks.image_on_trial;
     return on_trial ? on_trial() : true;
 }
 
@@ -157,6 +162,7 @@ static void shutdown_hook(void) {
 // A factory reset restarts through the same paths and must come back at 80 (the record is erased with the settings)
 void psram_speed_no_rearm(void) {
     s_keep120      = false;
+    s_rearm_wait   = false;
     s_arm_deferred = false;
     s_idle_word    = 0;
     arm_register(false);
@@ -180,8 +186,9 @@ static void log_rec(char const *what) {
 }
 
 // The arm counted and saved first (H2: a record that did not save arms nothing), then the register, then one restart.
-// late: from the job task once the image is valid, with the apps running: through system_restart and their saves
-static void arm_and_restart(bool late) {
+// late_why: from the job task once the image is valid, with the apps running: through system_restart and their saves
+// (the notices among them); NULL early in the boot: nothing to save yet, and no trial gate to wait for
+static void arm_and_restart(char const *late_why) {
     lock();
     psram_speed_rec_t copy = s_rec;
     unlock();
@@ -196,10 +203,11 @@ static void arm_and_restart(bool late) {
     }
     ESP_LOGI(TAG, "speed: 120 MHz wanted, restarting once to boot at 120 MHz");
     arm_register(true);
-    if (late) {
-        system_restart("psram 120 arm"); // the shutdown hook arms again (s_keep120): the saves cannot undo it
+    if (late_why) {
+        system_restart(late_why); // the shutdown hook arms again (s_keep120): the saves cannot undo it
+    } else {
+        esp_restart();
     }
-    esp_restart(); // early in the boot: nothing to save yet, and no trial gate to wait for
 }
 
 // Leaving 120 against the record: the register clear, a bare restart (as the fall: PSRAM may be suspect), noted
@@ -248,7 +256,7 @@ static void boot_act(psram_speed_act_t act, bool pending, bool crashed, bool sav
         if (pending) {
             s_arm_deferred = true;
         } else {
-            arm_and_restart(false);
+            arm_and_restart(NULL);
         }
         return;
     case PSRAM_SPEED_ACT_KEEP120:
@@ -261,6 +269,12 @@ static void boot_act(psram_speed_act_t act, bool pending, bool crashed, bool sav
                           "restart goes to 120 MHz",
                      PSRAM_SPEED_MAX_ARMS);
         }
+        return;
+    case PSRAM_SPEED_ACT_REARM_AFTER_CRASH:
+        s_keep120    = true;
+        s_rearm_wait = true; // the tick re-arms once the crash log has it and its notice is raised (Lucas, #353)
+        ESP_LOGW(TAG, "speed: 120 MHz wanted, this boot is at 80 MHz after a crash (no evidence against 120): 120 MHz "
+                      "again once the crash is recorded");
         return;
     case PSRAM_SPEED_ACT_LEAVE120:
         if (!pending) {
@@ -279,8 +293,8 @@ static void boot_act(psram_speed_act_t act, bool pending, bool crashed, bool sav
     }
 }
 
-void psram_speed_boot(bool (*image_on_trial)(void), bool (*dump_fresh)(void)) {
-    s_on_trial = image_on_trial;
+void psram_speed_boot(psram_speed_hooks_t const *hooks) {
+    s_hooks    = hooks ? *hooks : (psram_speed_hooks_t){0};
     s_mu       = xSemaphoreCreateMutexStatic(&s_mu_buf);
     rec_load();
     ESP_LOGI(TAG, "speed: carrier found at PSRAM init %08x, running %u MHz%s", (unsigned)psram_speed_carrier_raw(),
@@ -288,7 +302,7 @@ void psram_speed_boot(bool (*image_on_trial)(void), bool (*dump_fresh)(void)) {
     psram_speed_rec_t before  = s_rec;
     bool              pending = image_pending();
     psram_fail_ctx_t  ctx     = fail_ctx();
-    ctx.fresh_dump            = dump_fresh && dump_fresh(); // reason 7 is a crash only with a new core dump (crash.c)
+    ctx.fresh_dump = s_hooks.dump_fresh && s_hooks.dump_fresh(); // reason 7 is a crash only with a new dump (crash.c)
     bool              crashed = psram_speed_reset_crashed(ctx.reset, ctx.fresh_dump);
     psram_speed_act_t act = psram_speed_boot_decide(&s_rec, psram_speed_running(), psram_speed_supported(), boot_evidence(), &ctx);
     bool saved = true;
@@ -335,12 +349,14 @@ static void fall_now(psram_fail_kind_t kind) {
 }
 
 // The speed's own task (NVS and a restart: not on the 3 KB guard task): a fall, the deferred arm or leave, the settle
-enum { JOB_ARM = 0x100, JOB_LEAVE, JOB_SETTLE }; // anything below is a psram_fail_kind_t
+enum { JOB_ARM = 0x100, JOB_REARM, JOB_LEAVE, JOB_SETTLE }; // anything below is a psram_fail_kind_t
 
 static void speed_job(void *arg) {
     int job = (int)(intptr_t)arg;
     if (job == JOB_ARM) {
-        arm_and_restart(true); // returns only when nothing was armed
+        arm_and_restart("psram 120 arm"); // returns only when nothing was armed
+    } else if (job == JOB_REARM) {
+        arm_and_restart("psram 120 re-arm after crash");
     } else if (job == JOB_LEAVE) {
         ESP_LOGW(TAG, "speed: the image is valid now, leaving 120 MHz");
         leave_restart();
@@ -390,20 +406,31 @@ static void heap_check(psram_speed_rec_t const *r) {
     if (period == 0 || psram_speed_running() != 120 || r->want != 120 || r->failed || ++n % period != 0) {
         return;
     }
-    int64_t t0 = esp_timer_get_time();
-    bool    ok = heap_caps_check_integrity(MALLOC_CAP_SPIRAM, true);
-    s_heap_us  = (uint32_t)(esp_timer_get_time() - t0);
-    s_heap_checks++;
+    int64_t  t0 = esp_timer_get_time();
+    bool     ok = heap_caps_check_integrity(MALLOC_CAP_SPIRAM, true);
+    uint32_t us = (uint32_t)(esp_timer_get_time() - t0);
     if (!ok) {
         ESP_LOGE(TAG, "the PSRAM heap failed its integrity check at 120 MHz");
         psram_speed_report(PSRAM_FAIL_HEAP);
     }
-    s_guard_free = uxTaskGetStackHighWaterMark(NULL); // after the failure line too: its stack is the guard task's
-    if (s_heap_us > s_heap_max_us) {
-        s_heap_max_us = s_heap_us;
-        ESP_LOGI(TAG, "speed: PSRAM heap check took %u us (longest so far), guard stack %u B never used",
-                 (unsigned)s_heap_us, (unsigned)s_guard_free);
+    unsigned free_b = (unsigned)uxTaskGetStackHighWaterMark(NULL); // after the failure line too: the guard task's stack
+    portENTER_CRITICAL(&s_heap_mux);
+    bool longest     = us > s_heap.max_us;
+    s_heap.last_us   = us;
+    s_heap.max_us    = longest ? us : s_heap.max_us;
+    s_heap.guard_free = free_b;
+    s_heap.checks++;
+    portEXIT_CRITICAL(&s_heap_mux);
+    if (longest) {
+        ESP_LOGI(TAG, "speed: PSRAM heap check took %u us (longest so far), guard stack %u B never used", (unsigned)us,
+                 free_b);
     }
+}
+
+// The re-arm after a settled session's crash: once the crash log has the record and its notice is raised (the restart
+// saves the notices), never on an image on trial
+static bool crash_told(void) {
+    return s_hooks.crash_told && s_hooks.crash_told();
 }
 
 void psram_speed_tick(void) {
@@ -427,6 +454,8 @@ void psram_speed_tick(void) {
         return; // a restart now would roll the image back: the arm and the leave wait for the valid mark
     } else if (s_arm_deferred) {
         s_arm_deferred = !start_job(JOB_ARM);
+    } else if (psram_speed_rearm_now(s_rearm_wait, crash_told(), pending)) {
+        s_rearm_wait = !start_job(JOB_REARM);
     } else if (psram_speed_leave_120_wanted(&r, psram_speed_running())) {
         start_job(JOB_LEAVE);
     } else if (psram_speed_settle_wanted(&r, psram_speed_running(), up)) {
@@ -459,6 +488,7 @@ bool psram_speed_choice(unsigned target) {
     s_rec          = copy;
     s_keep120      = false; // the restart that follows is a 120 MHz one only through the register armed below
     s_arm_deferred = false;
+    s_rearm_wait   = false;
     s_idle_word    = 0;     // a carried fall is history once a speed is chosen
     unlock();
     arm_register(target == 120);
@@ -489,10 +519,13 @@ void psram_speed_print(void) {
     char last[112];
     psram_speed_fail_text(&r.last, last, sizeof(last));
     console_reply("psram speed: last fall to 80: %s", last);
+    portENTER_CRITICAL(&s_heap_mux);
+    heap_stats_t h = s_heap;
+    portEXIT_CRITICAL(&s_heap_mux);
     console_reply("psram speed: heap check every %d s at 120 MHz: %u done, last %u us, longest %u us; guard stack %u B "
-                  "never used",
-                  PSRAM_SPEED_HEAP_CHECK_S, s_heap_checks, (unsigned)s_heap_us, (unsigned)s_heap_max_us,
-                  (unsigned)s_guard_free);
+                  "never used%s",
+                  PSRAM_SPEED_HEAP_CHECK_S, h.checks, (unsigned)h.last_us, (unsigned)h.max_us, h.guard_free,
+                  s_rearm_wait ? "; 120 MHz re-arm waits for the crash record" : "");
 }
 
 bool psram_speed_fell(char *why, size_t cap) {
