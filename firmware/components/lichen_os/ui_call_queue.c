@@ -1,10 +1,10 @@
 #include "ui_call_queue.h"
 
-ui_call_push_t ui_call_queue_push(ui_call_queue_t *q, ui_call_fn_t fn, void *arg) {
+ui_call_push_t ui_call_queue_push(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, uint32_t owner) {
     if (q->count >= UI_CALL_QUEUE_CAP) {
         return UI_CALL_FULL;
     }
-    q->slot[(q->head + q->count) % UI_CALL_QUEUE_CAP] = (ui_call_t){fn, arg};
+    q->slot[(q->head + q->count) % UI_CALL_QUEUE_CAP] = (ui_call_t){fn, arg, owner};
     q->count++;
     if (q->scheduled) {
         return UI_CALL_QUEUED;
@@ -56,9 +56,9 @@ void ui_call_queue_cancel_all(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui
     cancel_fallback(fn, arg); // a burst past the queue went to the fallback: it may hold this pair too
 }
 
-bool ui_call_queue_hand_over(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t schedule,
+bool ui_call_queue_hand_over(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, uint32_t owner, ui_call_async_t schedule,
                              ui_call_async_t fallback) {
-    switch (ui_call_queue_push(q, fn, arg)) {
+    switch (ui_call_queue_push(q, fn, arg, owner)) {
     case UI_CALL_QUEUED:
         return true;
     case UI_CALL_QUEUED_SCHEDULE:
@@ -78,7 +78,9 @@ void ui_call_queue_drain(void *queue) {
     size_t           n = ui_call_queue_begin_drain(q);
     ui_call_t        call;
     while (n-- > 0 && ui_call_queue_pop(q, &call)) {
-        if (call.fn) {
+        if (call.fn && q->run) {
+            q->run(call.fn, call.arg, call.owner);
+        } else if (call.fn) {
             call.fn(call.arg);
         }
     }

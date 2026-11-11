@@ -14,6 +14,7 @@
 #include "fonts.h"
 #include "home_layout.h"
 #include "lichen_app.h"
+#include "lichen_sys_app.h"
 #include "lichen_badge.h"
 #include "lichen_notify.h"
 #include "lichen_sys_ui.h"
@@ -335,7 +336,10 @@ static void refresh(lv_timer_t *timer) {
             continue;
         }
         t1[0] = t2[0] = '\0';
-        if (!app->tile_text(t1, sizeof(t1), t2, sizeof(t2))) {
+        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230: the hook runs for its app
+        bool         fresh    = app->tile_text(t1, sizeof(t1), t2, sizeof(t2));
+        lichen_ctx_leave(previous);
+        if (!fresh) {
             continue; // nothing new: keep what is shown
         }
         if (strcmp(lv_label_get_text(h->line1[i]), t1) != 0) {
@@ -377,7 +381,9 @@ static lv_obj_t *add_icon(lv_obj_t *parent, lichen_app_t const *app, int px) {
     lv_obj_set_scrollable(box, false);
     lv_obj_set_clickable(box, false);
     if (app->draw_icon) {
+        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app));
         app->draw_icon(box, px);
+        lichen_ctx_leave(previous);
     } else {
         // An app without an icon gets its initial in a rounded square
         lv_obj_set_style_radius(box, px / 4, 0);

@@ -4,6 +4,18 @@
 # capability column is a seed (per header, '-' = none) and #229 (capabilities) owns making it right.
 # thread: any, lvgl (LVGL task only), not-lvgl, unspecified (the header comment does not say; fix the comment,
 # then the entry).
+app_ctx_add	-	unspecified	app_ctx.h
+app_ctx_app_at	-	unspecified	app_ctx.h
+app_ctx_apps	-	unspecified	app_ctx.h
+app_ctx_at	-	unspecified	app_ctx.h
+app_ctx_count_refusal	-	unspecified	app_ctx.h
+app_ctx_init	-	unspecified	app_ctx.h
+app_ctx_log_due	-	unspecified	app_ctx.h
+app_ctx_of	-	unspecified	app_ctx.h
+app_ctx_os	-	unspecified	app_ctx.h
+app_ctx_ready	-	unspecified	app_ctx.h
+app_ctx_resolve	-	unspecified	app_ctx.h
+app_ctx_valid	-	unspecified	app_ctx.h
 app_ns_name	-	unspecified	app_ns.h
 app_settings_erase	-	unspecified	lichen_settings.h
 app_settings_erase_all	-	unspecified	lichen_settings.h
@@ -64,6 +76,9 @@ lichen_crashlog_list	SYSTEM	unspecified	lichen_crashlog.h
 lichen_crashlog_mark_seen	SYSTEM	unspecified	lichen_crashlog.h
 lichen_crashlog_read	SYSTEM	unspecified	lichen_crashlog.h
 lichen_crashlog_status	SYSTEM	unspecified	lichen_crashlog.h
+lichen_ctx_enter	SYSTEM	any	lichen_sys_app.h
+lichen_ctx_leave	SYSTEM	any	lichen_sys_app.h
+lichen_ctx_self	-	any	lichen_app.h
 lichen_date_text	-	any	lichen_ui.h
 lichen_font	-	unspecified	fonts.h
 lichen_font_set	SYSTEM	unspecified	font_slots.h
@@ -134,6 +149,8 @@ lichen_sensors_set_periods	SENSORS	unspecified	lichen_sensors.h
 lichen_sensors_start	SENSORS	unspecified	lichen_sensors.h
 lichen_sensors_stop	SENSORS	unspecified	lichen_sensors.h
 lichen_station_clock	-	lvgl	lichen_ui.h
+lichen_sys_app_console_register	SYSTEM	not-lvgl	lichen_sys_app.h
+lichen_sys_app_ctx	SYSTEM	any	lichen_sys_app.h
 lichen_sys_boot_label	SYSTEM	any	lichen_sys_boot.h
 lichen_sys_boot_overall_pct	SYSTEM	any	lichen_sys_boot.h
 lichen_sys_boot_sentence	SYSTEM	any	lichen_sys_boot.h
@@ -156,6 +173,8 @@ lichen_sys_clock_source_text	SYSTEM	any	lichen_sys_clock.h
 lichen_sys_clock_sync_info	SYSTEM	any	lichen_sys_clock.h
 lichen_sys_clock_verdict_text	SYSTEM	any	lichen_sys_clock.h
 lichen_sys_crash_recovered	SYSTEM	any	lichen_sys_crash.h
+lichen_sys_ctx_os	SYSTEM	any	lichen_sys_app.h
+lichen_sys_ctx_resolve	SYSTEM	any	lichen_sys_app.h
 lichen_sys_display_get	SYSTEM	any	lichen_sys_display.h
 lichen_sys_display_idle	SYSTEM	any	lichen_sys_display.h
 lichen_sys_display_resume	SYSTEM	any	lichen_sys_display.h

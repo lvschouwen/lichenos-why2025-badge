@@ -58,6 +58,9 @@ CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 CONFIG_FREERTOS_RUN_TIME_COUNTER_TYPE_U64=y
 CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
+# The current app's context (#230): thread-local slot 1; slot 0 is IDF's pthread storage. 8 B more per task (16 with
+# the deletion callbacks on)
+CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS=2
 
 # /storage on LittleFS (#300; esp_littlefs, components/storage/idf_component.yml). tools/pack_storage.py builds
 # storage.bin with exactly this on-disk config and checks it against the built sdkconfig (check-config): block 4096 (the

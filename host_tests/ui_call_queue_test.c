@@ -31,9 +31,9 @@ static void note(void *arg) {
 static void test_fifo_and_schedule(void) {
     ui_call_queue_t q = {0};
     ran_n             = 0;
-    CHECK(ui_call_queue_push(&q, note, (void *)1) == UI_CALL_QUEUED_SCHEDULE); // the first schedules the drain
-    CHECK(ui_call_queue_push(&q, note, (void *)2) == UI_CALL_QUEUED);          // the rest ride along
-    CHECK(ui_call_queue_push(&q, note, (void *)3) == UI_CALL_QUEUED);
+    CHECK(ui_call_queue_push(&q, note, (void *)1, 0) == UI_CALL_QUEUED_SCHEDULE); // the first schedules the drain
+    CHECK(ui_call_queue_push(&q, note, (void *)2, 0) == UI_CALL_QUEUED);          // the rest ride along
+    CHECK(ui_call_queue_push(&q, note, (void *)3, 0) == UI_CALL_QUEUED);
     size_t    n = ui_call_queue_begin_drain(&q);
     ui_call_t c;
     CHECK(n == 3);
@@ -42,21 +42,21 @@ static void test_fifo_and_schedule(void) {
     }
     CHECK(ran_n == 3 && ran[0] == 1 && ran[1] == 2 && ran[2] == 3); // in the order they came (lv_async_call: newest first)
     CHECK(!ui_call_queue_pop(&q, &c));
-    CHECK(ui_call_queue_push(&q, note, (void *)4) == UI_CALL_QUEUED_SCHEDULE); // drained: the next one schedules again
+    CHECK(ui_call_queue_push(&q, note, (void *)4, 0) == UI_CALL_QUEUED_SCHEDULE); // drained: the next one schedules again
 }
 
 static void test_full_and_unpush(void) {
     ui_call_queue_t q = {0};
     for (int i = 0; i < UI_CALL_QUEUE_CAP; i++) {
-        CHECK(ui_call_queue_push(&q, note, (void *)(intptr_t)i) != UI_CALL_FULL);
+        CHECK(ui_call_queue_push(&q, note, (void *)(intptr_t)i, 0) != UI_CALL_FULL);
     }
-    CHECK(ui_call_queue_push(&q, note, NULL) == UI_CALL_FULL); // the caller falls back to an async call of its own
+    CHECK(ui_call_queue_push(&q, note, NULL, 0) == UI_CALL_FULL); // the caller falls back to an async call of its own
     ui_call_queue_t r = {0};
-    CHECK(ui_call_queue_push(&r, note, (void *)7) == UI_CALL_QUEUED_SCHEDULE);
+    CHECK(ui_call_queue_push(&r, note, (void *)7, 0) == UI_CALL_QUEUED_SCHEDULE);
     ui_call_queue_unpush(&r); // scheduling the drain failed: as if never pushed
     ui_call_t c;
     CHECK(!ui_call_queue_pop(&r, &c));
-    CHECK(ui_call_queue_push(&r, note, (void *)8) == UI_CALL_QUEUED_SCHEDULE); // and the next push schedules again
+    CHECK(ui_call_queue_push(&r, note, (void *)8, 0) == UI_CALL_QUEUED_SCHEDULE); // and the next push schedules again
 }
 
 // A call that queues another while the drain runs: the new one goes to the next drain, never inline, and it is
@@ -65,7 +65,7 @@ static ui_call_queue_t s_reentrant;
 static int             s_child_scheduled;
 static void            requeue(void *arg) {
     note(arg);
-    if (ui_call_queue_push(&s_reentrant, note, (void *)99) == UI_CALL_QUEUED_SCHEDULE) {
+    if (ui_call_queue_push(&s_reentrant, note, (void *)99, 0) == UI_CALL_QUEUED_SCHEDULE) {
         s_child_scheduled++;
     }
 }
@@ -74,8 +74,8 @@ static void test_reentrant_push(void) {
     memset(&s_reentrant, 0, sizeof(s_reentrant));
     ran_n             = 0;
     s_child_scheduled = 0;
-    ui_call_queue_push(&s_reentrant, requeue, (void *)1);
-    ui_call_queue_push(&s_reentrant, note, (void *)2); // still queued when requeue runs
+    ui_call_queue_push(&s_reentrant, requeue, (void *)1, 0);
+    ui_call_queue_push(&s_reentrant, note, (void *)2, 0); // still queued when requeue runs
     size_t    n = ui_call_queue_begin_drain(&s_reentrant);
     ui_call_t c;
     while (n-- > 0 && ui_call_queue_pop(&s_reentrant, &c)) {
@@ -99,10 +99,10 @@ static void            cancel_three(void *arg) {
 static void test_cancel(void) {
     ui_call_queue_t q = {0};
     ran_n             = 0;
-    ui_call_queue_push(&q, note, (void *)1);
-    ui_call_queue_push(&q, note, (void *)2);
-    ui_call_queue_push(&q, note, (void *)1);
-    ui_call_queue_push(&q, note, (void *)3);
+    ui_call_queue_push(&q, note, (void *)1, 0);
+    ui_call_queue_push(&q, note, (void *)2, 0);
+    ui_call_queue_push(&q, note, (void *)1, 0);
+    ui_call_queue_push(&q, note, (void *)3, 0);
     CHECK(ui_call_queue_cancel(&q, note, (void *)1) == 2);
     CHECK(ui_call_queue_cancel(&q, note, (void *)9) == 0);
     CHECK(ui_call_queue_cancel(&q, requeue, (void *)2) == 0); // the pair must match, not the arg alone
@@ -113,9 +113,9 @@ static void test_cancel(void) {
 
     memset(&s_cancelq, 0, sizeof(s_cancelq));
     ran_n = 0;
-    ui_call_queue_push(&s_cancelq, cancel_three, (void *)1);
-    ui_call_queue_push(&s_cancelq, note, (void *)3);
-    ui_call_queue_push(&s_cancelq, note, (void *)4);
+    ui_call_queue_push(&s_cancelq, cancel_three, (void *)1, 0);
+    ui_call_queue_push(&s_cancelq, note, (void *)3, 0);
+    ui_call_queue_push(&s_cancelq, note, (void *)4, 0);
     ui_call_queue_drain(&s_cancelq);
     CHECK(ran_n == 2 && ran[0] == 1 && ran[1] == 4);
     CHECK(s_cancelq.count == 0);
@@ -131,7 +131,7 @@ static bool      fake_raw_call(ui_call_fn_t fn, void *arg) {
     if (s_raw_n >= FAKE_RAW_CAP) {
         return false;
     }
-    s_raw[s_raw_n++] = (ui_call_t){fn, arg};
+    s_raw[s_raw_n++] = (ui_call_t){fn, arg, 0};
     return true;
 }
 static bool fake_raw_cancel(ui_call_fn_t fn, void *arg) {
@@ -150,13 +150,13 @@ static void test_cancel_overflow(void) {
     ui_call_queue_t q = {0};
     ran_n             = 0;
     s_raw_n           = 0;
-    CHECK(ui_call_queue_hand_over(&q, note, (void *)7, fake_raw_call, fake_raw_call)); // queued, drain scheduled
+    CHECK(ui_call_queue_hand_over(&q, note, (void *)7, 0, fake_raw_call, fake_raw_call)); // queued, drain scheduled
     for (int i = 1; i < UI_CALL_QUEUE_CAP; i++) {
-        CHECK(ui_call_queue_hand_over(&q, note, (void *)1, fake_raw_call, fake_raw_call));
+        CHECK(ui_call_queue_hand_over(&q, note, (void *)1, 0, fake_raw_call, fake_raw_call));
     }
     CHECK(q.count == UI_CALL_QUEUE_CAP && s_raw_n == 1 && s_raw[0].fn == ui_call_queue_drain);
-    CHECK(ui_call_queue_hand_over(&q, note, (void *)7, fake_raw_call, fake_raw_call)); // full: handed to the fallback
-    CHECK(ui_call_queue_hand_over(&q, note, (void *)2, fake_raw_call, fake_raw_call));
+    CHECK(ui_call_queue_hand_over(&q, note, (void *)7, 0, fake_raw_call, fake_raw_call)); // full: handed to the fallback
+    CHECK(ui_call_queue_hand_over(&q, note, (void *)2, 0, fake_raw_call, fake_raw_call));
     CHECK(s_raw_n == 3);
     ui_call_queue_cancel_all(&q, note, (void *)7, fake_raw_cancel);
     CHECK(s_raw_n == 2); // the drain and note(2) are left
@@ -223,7 +223,7 @@ static bool add_timer(ui_call_fn_t fn, void *arg) {
     if (!t) {
         return false;
     }
-    *t            = (timer_t_){{fn, arg}, NULL};
+    *t            = (timer_t_){{fn, arg, 0}, NULL};
     *s_timer_tail = t;
     s_timer_tail  = &t->next;
     pthread_cond_signal(&timer_cond);
@@ -247,7 +247,7 @@ static bool fake_fallback(ui_call_fn_t fn, void *arg) {
 static bool sys_ui_call(ui_call_fn_t fn, void *arg, uintptr_t self) {
     lock_take(self);
     touch_lvgl(self);
-    bool ok = ui_call_queue_hand_over(&s_q, fn, arg, fake_schedule, fake_fallback);
+    bool ok = ui_call_queue_hand_over(&s_q, fn, arg, 0, fake_schedule, fake_fallback);
     lock_give(self);
     return ok;
 }
@@ -434,12 +434,45 @@ static void test_owner(void) {
     CHECK(!ui_lock_owner_given(&o, 5)); // one unlock too many
 }
 
+// #230: each call carries the context of the code that queued it, and the drain hands it to q->run, so a batch of
+// calls from different apps runs each one for its own app (a nested run sees its own owner, then the outer one back)
+static uint32_t s_current, s_seen[8];
+static int      s_seen_n;
+static void     note_owner(void *arg) {
+    (void)arg;
+    s_seen[s_seen_n++] = s_current;
+}
+static void run_for(ui_call_fn_t fn, void *arg, uint32_t owner) {
+    uint32_t previous = s_current;
+    s_current         = owner;
+    fn(arg);
+    s_current = previous;
+}
+
+static void test_call_owner(void) {
+    ui_call_queue_t q = {.run = run_for};
+    s_current         = 7; // the LVGL task's own (the OS)
+    s_seen_n          = 0;
+    s_raw_n           = 0;
+    CHECK(ui_call_queue_hand_over(&q, note_owner, NULL, 0x101, fake_raw_call, fake_raw_call));
+    CHECK(ui_call_queue_hand_over(&q, note_owner, NULL, 0x202, fake_raw_call, fake_raw_call));
+    CHECK(ui_call_queue_hand_over(&q, note_owner, NULL, 0x101, fake_raw_call, fake_raw_call));
+    ui_call_queue_drain(&q);
+    CHECK(s_seen_n == 3 && s_seen[0] == 0x101 && s_seen[1] == 0x202 && s_seen[2] == 0x101);
+    CHECK(s_current == 7); // left as it was
+    ui_call_queue_t plain = {0}; // no run hook: as before #230
+    ui_call_queue_push(&plain, note_owner, NULL, 0x303);
+    ui_call_queue_drain(&plain);
+    CHECK(s_seen_n == 4 && s_seen[3] == 7);
+}
+
 int main(void) {
     test_fifo_and_schedule();
     test_full_and_unpush();
     test_reentrant_push();
     test_cancel();
     test_cancel_overflow();
+    test_call_owner();
     test_owner();
     test_port_gate();
     test_threads();

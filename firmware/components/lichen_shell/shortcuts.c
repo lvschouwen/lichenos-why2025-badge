@@ -3,6 +3,7 @@
 // key events (raw_keys.c, LVGL context) before any focus and acts here. shortcut.c decides, this file does.
 #include "esp_log.h"
 #include "lichen_app.h"
+#include "lichen_sys_app.h"
 #include "nav.h"
 #include "raw_keys.h"
 #include "shell_parts.h"
@@ -52,7 +53,9 @@ static void open_messages(void) {
         lichen_app_t const *app = lichen_app_at(i);
         if (app->open_messages) {
             if (open_from_home((int)i)) {
+                lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230
                 app->open_messages();
+                lichen_ctx_leave(previous);
             }
             return;
         }

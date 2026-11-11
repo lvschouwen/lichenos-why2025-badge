@@ -61,7 +61,8 @@ typedef struct {
     uint8_t  mem;    // task_stack_t the stack was made in (task_stack_place's answer, or internal after a fallback)
     void    *handle; // the task's handle once known (NULL in between)
     void (*fn)(void *arg);
-    void *arg;
+    void    *arg;
+    uint32_t ctx; // the app context the task runs for (lichen_ctx_t, #230); task_book_add leaves it 0, the caller sets it
 } task_slot_t;
 
 typedef struct {

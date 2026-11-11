@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 #include "key_matrix.h"
 #include "lichen_app.h"
+#include "lichen_sys_app.h"
 #include "lichen_radio.h"
 #include "nav.h"
 #include "notes_app.h"
@@ -419,7 +420,9 @@ static lv_obj_t *build_app(void) {
     lv_obj_set_style_pad_hor(screen, THEME_PAD, 0);
     shell_scroll_tame(screen);
     shell_no_arrow_scroll(screen);
+    lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(opening)); // the app's own code from here (#230)
     opening->open(screen);
+    lichen_ctx_leave(previous);
     return screen;
 }
 

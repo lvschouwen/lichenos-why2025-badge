@@ -41,6 +41,7 @@
 #include "haptics.h"
 #include "led.h"
 #include "lichen_app.h"
+#include "lichen_sys_app.h"
 #include "lichen_mem.h"
 #include "lichen_task.h"
 #include "lichen_random.h"
@@ -357,7 +358,13 @@ static void start_apps(void) {
     size_t used       = 0;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
-        if (!app->start_background || app->start_background()) {
+        if (!app->start_background) {
+            continue;
+        }
+        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230: its tasks inherit the app
+        bool         started  = app->start_background();
+        lichen_ctx_leave(previous);
+        if (started) {
             continue;
         }
         ESP_LOGE(TAG, "%s not started", app->name);
@@ -560,6 +567,7 @@ static void start_notices(boot_ctx_t *ctx) {
     crash_check_late();                   // the crash record (/storage) and the full-image hash, after the first frame
     factory_reset_console_register();
     lichen_task_console_register(); // fw tasks (#181)
+    lichen_sys_app_console_register(); // fw app ctx (#230)
     lichen_mem_console_register();  // the per-app lines of fw mem (#181)
 }
 

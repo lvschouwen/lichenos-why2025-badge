@@ -172,6 +172,7 @@ reaching drivers, `board` or NVS. The headers, all in `lichen_api`:
 | `lichen_sys_radio.h` | the radio service's system holds: radios held off for a reason (the thermal shed), never saved, the person's switches untouched (#282) |
 | `lichen_sys_c6.h` | the C6 link (up, trouble in words, outage count) and the LoRa radio's up state and packet counts for the status bar, About, Settings and the stress run (#284) |
 | `lichen_sys_psram.h` | the PSRAM guard's speed, speed switch, tuning line, trial state and DMA gate round for Bench, Settings and the stress run (#284) |
+| `lichen_sys_app.h` | the app context (#230): `lichen_ctx_enter`/`_leave` around every hook call, the compat shim `lichen_sys_app_ctx(app)`, `lichen_sys_ctx_resolve` for the gate calls, `fw app ctx` |
 
 `notify_os.h` (history of every app, do-not-disturb, toast queue, feedback hooks) is also the shell's side, forbidden
 to apps by name in `layers.conf`; apps have `lichen_notify.h` only (#245). Types that live in a lower component are
@@ -191,6 +192,23 @@ with its capability and thread rule, and the build checks that it matches the he
   without the capability is refused and logs a line).
 - **An accident and audit guard, not a security boundary:** apps are compiled in and share the address space.
 - Identity: an opaque `lichen_ctx_t` handed out at registration, plus the calling task's TLS (#230).
+
+**The app context (#230, E1a in force):** `lichen_register_app` returns the app's `lichen_ctx_t`: 8 bits of slot and 24
+bits of generation drawn at random per boot, not a pointer, 0 never valid. The current app is in FreeRTOS thread-local
+slot 1 (slot 0 is IDF's pthread storage). `lichen_ctx_self()` (`lichen_app.h`) returns it:
+- in every hook the shell calls (`open`, `tile_text`, `draw_icon`, `settings`, `about`, `start_background`,
+  `stop_for_update`, `first_run_set`, `open_notification`, `open_messages`, `notify_settings_open`): the shell wraps
+  each in `lichen_ctx_enter`/`lichen_ctx_leave` (`lichen_sys_app.h`; TLS only, no lock, nests);
+- in a `lichen_ui_call` (or `lichen_sys_ui_call`): each queued call keeps the context of the code that queued it and
+  runs inside it (a burst past the queue's 16 entries goes to LVGL directly and runs for the OS);
+- on a task from `lichen_task_start`: the named app's context, or for `app` NULL the starting task's own, so a task an
+  app's task starts inherits it.
+
+Everywhere else it is the OS's context: an ISR, an esp_timer callback (the esp_timer task), an LVGL event or timer
+callback outside a hook, a task not made through `lichen_task_start`. A stale or made-up context given to a gate call
+or to `lichen_ctx_enter` is refused (the OS's context is used instead), logged at most once per 10 s and counted:
+`fw app ctx` lists every app's context and the refusals since boot. Never an abort. Until E1e the gate calls still take
+`lichen_app_t const *` (the compat shim maps it to the context); E1b-E1d move them to the context.
 
 **Lifecycle (#231, after the MVP):** an app is registered, started, running, suspended (screen off or another app in
 front), stopping (cooperative, with a deadline; the OS never deletes an app's tasks) and stopped. On stop the OS frees

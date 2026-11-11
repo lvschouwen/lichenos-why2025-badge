@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_app.h"
+#include "lichen_sys_app.h"
 #include "lichen_haptics.h"
 #include "lichen_sys_led.h"
 #include "lichen_sys_ui.h"
@@ -189,7 +190,9 @@ static void open_where(uint32_t id) {
     } else if (app->open_notification) {
         char target[NR_TARGET_CAP];
         snprintf(target, sizeof(target), "%s", s_entry.target);
+        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230
         app->open_notification(target, id);
+        lichen_ctx_leave(previous);
     } else {
         shell_open_app((size_t)i);
     }
@@ -509,8 +512,10 @@ static void toggle_source(void *arg) {
 }
 
 static void open_app_notify_settings(void *arg) {
-    lichen_app_t const *app = arg;
+    lichen_app_t const *app      = arg;
+    lichen_ctx_t        previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230
     app->notify_settings_open();
+    lichen_ctx_leave(previous);
 }
 
 static void toggle_dnd(void *arg) {

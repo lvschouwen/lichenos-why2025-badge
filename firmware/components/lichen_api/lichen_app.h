@@ -52,8 +52,21 @@ typedef struct lichen_app {
 // when it is full.
 #define LICHEN_MAX_APPS 24 // #173: 16 was full with the 2026-11-03 apps; ~110 B internal .bss per slot; ids allow 32 (SCREEN_APP_MAX)
 
-// Before shell_home(). The app struct must stay valid for as long as the badge runs (a static const).
-void lichen_register_app(lichen_app_t const *app);
+// An app's context (#230): 8 bits of slot and 24 bits of generation, not a pointer. lichen_register_app hands it out;
+// the gate calls take it (#230 E1b-E1e) and refuse one that is stale or made up (logged, counted in "fw app ctx").
+// 0 is never valid.
+typedef uint32_t lichen_ctx_t;
+#define LICHEN_CTX_NONE ((lichen_ctx_t)0)
+
+// Before shell_home(). The app struct must stay valid for as long as the badge runs (a static const). Returns the
+// app's context, LICHEN_CTX_NONE when the table is full.
+lichen_ctx_t lichen_register_app(lichen_app_t const *app);
+// The context of the app the calling code runs for: inside its hooks (the shell enters it around every hook call and
+// every lichen_ui_call it queued) and on its tasks (lichen_task_start; a task started from an app's task inherits it).
+// The OS's context everywhere else: in an ISR, an esp_timer callback, an LVGL event or timer callback the app
+// registered, a task the app did not start through lichen_task_start (docs/app-api.md "The app context"). Any task
+// or ISR; never blocks.
+lichen_ctx_t lichen_ctx_self(void);
 size_t lichen_app_count(void);
 lichen_app_t const *lichen_app_at(size_t index);
 lichen_app_t const *lichen_app_by_id(char const *id); // NULL when no registered app has that id

@@ -8,6 +8,7 @@
 // file calls lv_async_call (tools/layers.conf), so every deferred call in the OS runs in the order it was queued,
 // unless a burst overflows the queue.
 #include "lichen_os.h"
+#include "lichen_sys_app.h"
 #include "lichen_sys_ui.h"
 #include "lichen_ui.h"
 #include "ui_call_queue.h"
@@ -23,7 +24,8 @@ static char const TAG[] = "ui";
 
 #define UI_CALL_LOCK_MS 2000 // as the dialog: a render takes milliseconds, a lock held this long is a stuck LVGL task
 
-static ui_call_queue_t s_queue;     // LVGL lock held
+static void run_as_owner(ui_call_fn_t fn, void *arg, uint32_t owner);
+static ui_call_queue_t s_queue = {.run = run_as_owner}; // LVGL lock held
 static ui_lock_owner_t s_owner;     // also read by the lock-owner check (ui_lock_check.c)
 
 static uintptr_t self_task(void) {
@@ -88,15 +90,24 @@ static bool async_cancel(ui_call_fn_t fn, void *arg) {
     return lv_async_call_cancel(fn, arg) == LV_RESULT_OK;
 }
 
+// A queued call runs for the app that queued it (#230): its hooks see lichen_ctx_self() as they did when they queued
+// it. TLS only, no lock: the drain already holds the LVGL lock and this takes nothing more.
+static void run_as_owner(ui_call_fn_t fn, void *arg, uint32_t owner) {
+    lichen_ctx_t previous = lichen_ctx_enter(owner);
+    fn(arg);
+    lichen_ctx_leave(previous);
+}
+
 bool lichen_sys_ui_call(void (*fn)(void *), void *arg, uint32_t timeout_ms) {
     if (!fn) {
         return false;
     }
+    lichen_ctx_t owner = lichen_ctx_self();
     if (!lichen_sys_ui_lock(timeout_ms)) {
         ESP_LOGW(TAG, "ui call %p not queued: the LVGL lock was not free in %u ms", (void *)fn, (unsigned)timeout_ms);
         return false;
     }
-    bool ok = ui_call_queue_hand_over(&s_queue, fn, arg, async_call, async_call);
+    bool ok = ui_call_queue_hand_over(&s_queue, fn, arg, owner, async_call, async_call);
     lichen_sys_ui_unlock();
     if (!ok) {
         ESP_LOGE(TAG, "ui call %p not queued: out of memory", (void *)fn);

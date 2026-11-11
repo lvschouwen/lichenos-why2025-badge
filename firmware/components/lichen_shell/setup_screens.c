@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "screen_ids.h"
 #include "lichen_app.h"
+#include "lichen_sys_app.h"
 #include "fw_console.h"
 #include "lichen_sys_ui.h"
 #include "logo.h"
@@ -108,7 +109,9 @@ static void cmd_setup(char const *args) {
             console_reply("no app '%s' with first-run questions", id);
             return;
         }
+        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230
         app->first_run_set(done);
+        lichen_ctx_leave(previous);
         if (done) {
             console_reply("%s: first-run questions marked answered", app->name);
         } else {

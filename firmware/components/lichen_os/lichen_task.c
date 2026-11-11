@@ -3,6 +3,7 @@
 // runs right before vTaskDelete and must not block. A stack outside internal RAM (#269) is made WithCaps; such a task
 // never returns (a return parks it, see park()).
 #include "lichen_task.h"
+#include "lichen_sys_app.h"
 #include "lichen_sys_mem.h"
 
 #include "esp_heap_caps.h"
@@ -43,7 +44,9 @@ static void trampoline(void *arg) {
     void (*fn)(void *)     = book.slot[slot].fn;
     void *fn_arg           = book.slot[slot].arg;
     bool  with_caps        = book.slot[slot].mem != TASK_STACK_INTERNAL;
+    lichen_ctx_t ctx       = book.slot[slot].ctx;
     portEXIT_CRITICAL(&book_mux);
+    (void)lichen_ctx_enter(ctx); // for good: the task ends with fn, so there is nothing to leave to
     fn(fn_arg);
     if (with_caps) {
         park(slot);
@@ -121,8 +124,19 @@ bool lichen_task_start_in(lichen_app_t const *app, char const *name, void (*fn)(
         warn_psram_once(owner, fitted);
     }
     task_stack_t placed = place_stack(asked, stack_bytes); // the heap query stays outside the spinlock
+    // The context the task runs for (#230): the app's; for app NULL the caller's own, so a task an app's task or hook
+    // starts stays the app's (until E1b these calls still name the owner by pointer)
+    lichen_ctx_t ctx = app ? lichen_sys_app_ctx(app) : lichen_ctx_self();
+    if (ctx == LICHEN_CTX_NONE) {
+        // A struct that has not registered (yet): an ordering slip in the OS, not a made-up context
+        ESP_LOGW(TAG, "%s: task %s: the app is not registered, the task runs for the OS", owner, fitted);
+        ctx = lichen_sys_ctx_os();
+    }
     portENTER_CRITICAL(&book_mux);
     int slot = task_book_add(&book, owner, fitted, stack_bytes, (task_class_t)prio, placed, fn, arg);
+    if (slot >= 0) {
+        book.slot[slot].ctx = ctx;
+    }
     portEXIT_CRITICAL(&book_mux);
     if (slot < 0) {
         ESP_LOGE(TAG, "%s: task %s not started: all %d task slots are taken", owner, fitted, TASK_BOOK_SLOTS);

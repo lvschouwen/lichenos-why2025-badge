@@ -19,6 +19,7 @@
 #include "esp_system.h"
 #include "fw_console.h"
 #include "lichen_app.h"
+#include "lichen_sys_app.h"
 #include "shell.h"
 #include "update_mode.h"
 #include "update_screen.h"
@@ -66,7 +67,13 @@ bool shell_stop_apps(void) {
     bool all_stopped = true;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
-        if (app && app->stop_for_update && !app->stop_for_update()) {
+        if (!app || !app->stop_for_update) {
+            continue;
+        }
+        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230: on the OTA task, for the app
+        bool         stopped  = app->stop_for_update();
+        lichen_ctx_leave(previous);
+        if (!stopped) {
             ESP_LOGE(TAG, "%s is still running", app->name);
             all_stopped = false;
         }

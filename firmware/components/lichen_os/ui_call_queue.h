@@ -15,9 +15,14 @@ typedef void (*ui_call_fn_t)(void *);
 typedef struct {
     ui_call_fn_t fn;
     void        *arg;
+    uint32_t     owner; // the app context of the code that queued it (lichen_ctx_t, #230), opaque here
 } ui_call_t;
 
+// Runs one call for its owner: lichen_ui_call.c enters the owner's context around fn(arg); NULL runs fn(arg) as is
+typedef void (*ui_call_run_t)(ui_call_fn_t fn, void *arg, uint32_t owner);
+
 typedef struct {
+    ui_call_run_t run; // set once before the first push
     ui_call_t slot[UI_CALL_QUEUE_CAP];
     uint8_t   head;      // oldest call
     uint8_t   count;     // calls waiting
@@ -30,7 +35,7 @@ typedef enum {
     UI_CALL_FULL,           // not queued: the caller hands fn to the LVGL task another way
 } ui_call_push_t;
 
-ui_call_push_t ui_call_queue_push(ui_call_queue_t *q, ui_call_fn_t fn, void *arg);
+ui_call_push_t ui_call_queue_push(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, uint32_t owner);
 // Takes back the call the last push queued, when scheduling its drain failed; the queue is as before that push.
 void ui_call_queue_unpush(ui_call_queue_t *q);
 // The drain starts: from here a push schedules a new drain. Returns how many calls this drain runs (those queued before
@@ -49,13 +54,14 @@ typedef bool (*ui_call_async_t)(ui_call_fn_t fn, void *arg);
 
 // The hand-over lichen_sys_ui_call makes, lock held: queues fn(arg) and, for the first call since the last drain
 // started, schedules the drain as schedule(ui_call_queue_drain, q); when that fails the call is taken back. A full
-// queue hands fn(arg) to fallback instead (one async call of its own, which may overtake the queue). True when fn
-// will run; false leaves arg with the caller.
-bool ui_call_queue_hand_over(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t schedule,
+// queue hands fn(arg) to fallback instead (one async call of its own, which may overtake the queue, and which loses
+// owner: it runs for whoever the LVGL task runs for then, the OS). True when fn will run; false leaves arg with the
+// caller.
+bool ui_call_queue_hand_over(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, uint32_t owner, ui_call_async_t schedule,
                              ui_call_async_t fallback);
 // lichen_sys_ui_cancel, lock held: cancels fn(arg) in the queue and, through cancel_fallback (lv_async_call_cancel in
 // lichen_ui_call.c, a fake in the host test), every one a full queue handed to the fallback.
 void ui_call_queue_cancel_all(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t cancel_fallback);
 // The drain hand_over schedules (arg is the queue), on the LVGL task with the lock held: runs the batch queued before it
-// started, oldest first, skipping the cancelled ones.
+// started, oldest first, skipping the cancelled ones, each through q->run with its owner.
 void ui_call_queue_drain(void *queue);

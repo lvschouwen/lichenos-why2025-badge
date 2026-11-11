@@ -7,6 +7,7 @@
 #include "home_layout.h"
 #include "idle_policy.h"
 #include "lichen_app.h"
+#include "lichen_sys_app.h"
 #include "lichen_reg.h"
 #include "lichen_notify.h"
 #include "lichen_radio.h"
@@ -662,12 +663,14 @@ static void on_page_key(lv_event_t *e) {
 static lv_obj_t *build_app_page(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create_named(screen, "App settings", page_app->name);
+    lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(page_app)); // #230: both hooks run for their app
     if (page_app->settings) {
         page_app->settings(menu);
     }
     if (page_app->about) {
         page_app->about(menu);
     }
+    lichen_ctx_leave(previous);
     lv_obj_add_event_cb(screen, on_page_key, LV_EVENT_KEY, menu);
     return screen;
 }
