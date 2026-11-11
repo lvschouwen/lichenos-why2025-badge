@@ -51,5 +51,8 @@ typedef struct {
     // exactly once, before the command restarts the badge if it does. NULL = the Wi-Fi console is off (404).
     void (*console_run)(char const *line, char *buf, size_t cap, void (*done)(void *ctx, char const *out, size_t len),
                         void *ctx);
+    // GET /info (#321): one registry key's cached status text (lichen_reg_cached_text), never waiting on the C6 or I2C;
+    // the hw object of the reply. NULL = every value in it is null. The OS binds it (ota sits beside lichen_os).
+    size_t (*hw_text)(char const *name, char *buf, size_t cap);
 } ota_hooks_t;
 void ota_server_set_hooks(ota_hooks_t const *hooks); // copied; before ota_server_start

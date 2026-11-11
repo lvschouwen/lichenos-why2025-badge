@@ -1732,6 +1732,12 @@ target_compile_options(notify_push_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME notify_push_test COMMAND notify_push_test)
 
 # The update server's bound settings and Wi-Fi switch, with their unbound defaults (#245)
+# /info's hw object (#321): the JSON builder over the registry's cached status texts
+add_executable(ota_hw_test ${CMAKE_CURRENT_SOURCE_DIR}/ota_hw_test.c ${NPT_FW}/ota/ota_hw.c)
+target_include_directories(ota_hw_test PRIVATE ${NPT_FW}/ota)
+target_compile_options(ota_hw_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME ota_hw_test COMMAND ota_hw_test)
+
 add_executable(ota_os_test ${CMAKE_CURRENT_SOURCE_DIR}/ota_os_test.c ${NPT_FW}/ota/ota_os.c)
 target_include_directories(ota_os_test PRIVATE ${NPT_FW}/ota)
 target_compile_options(ota_os_test PRIVATE -Wall -Wextra -Werror)
@@ -1839,6 +1845,7 @@ add_custom_target(run_tests
     settings_store_test
     notify_push_test
     ota_os_test
+    ota_hw_test
     os_bind_test
     release_notes_test
     qr_payload_test

@@ -26,6 +26,7 @@
 #include "freertos/task.h"
 #include "ota_autooff.h"
 #include "ota_bmp.h"
+#include "ota_hw.h"
 #include "ota_path.h"
 #include "ota_pieces.h"
 #include "ota_proto.h"
@@ -193,14 +194,8 @@ static bool send_all(int fd, void const *data, size_t len) {
 
 static void respond(int fd, int status, char const *fmt, ...) __attribute__((format(printf, 3, 4)));
 
-static void respond(int fd, int status, char const *fmt, ...) {
-    char    body[512];
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(body, sizeof(body) - 1, fmt, ap);
-    va_end(ap);
-    strcat(body, "\n");
-
+// The reply head and a body (NUL terminated, ends in a newline), sent as is
+static void send_reply(int fd, int status, char const *body) {
     char const *reason;
     switch (status) {
         case 200: reason = "OK"; break;
@@ -229,6 +224,16 @@ static void respond(int fd, int status, char const *fmt, ...) {
     if (send_all(fd, head, (size_t)n)) {
         send_all(fd, body, strlen(body));
     }
+}
+
+static void respond(int fd, int status, char const *fmt, ...) {
+    char    body[512];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(body, sizeof(body) - 1, fmt, ap);
+    va_end(ap);
+    strcat(body, "\n");
+    send_reply(fd, status, body);
 }
 
 static void set_read_timeout(int fd, int seconds, int usec) {
@@ -1340,8 +1345,14 @@ static void respond_info(int fd) {
     if (storage_free_bytes(&free_b, &total_b)) {
         snprintf(room, sizeof(room), "; storage free %llu", (unsigned long long)free_b);
     }
-    respond(fd, 200, "badge_fw %s; receiver: deflate chunks%s%s", esp_app_get_description()->version,
-            hooks.prepare ? " prepare" : "", room);
+    // The hw object makes the line longer than respond's stack buffer: built in the PSRAM body buffer, which no other
+    // request uses while this one is answered (#321)
+    char *line = (char *)body_buf;
+    int   n    = snprintf(line, 256, "badge_fw %s; receiver: deflate chunks%s%s; hw ", esp_app_get_description()->version,
+                          hooks.prepare ? " prepare" : "", room);
+    n         += (int)ota_hw_json(hooks.hw_text, line + n, 1024);
+    strcpy(line + n, "\n");
+    send_reply(fd, 200, line);
 }
 
 // A new firmware boots after the reboot; without one, a reboot on trial goes back to the previous version (#304)

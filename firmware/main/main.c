@@ -736,7 +736,8 @@ static void start_apps_step(boot_ctx_t *ctx) {
 
 static void start_ota(boot_ctx_t *ctx) {
     // Wi-Fi console and log (#38) work without a screen; the update screen hooks need one
-    ota_hooks_t hooks = {.log_read = log_store_read, .crashes_read = lichen_crashlog_export};
+    ota_hooks_t hooks = {
+        .log_read = log_store_read, .crashes_read = lichen_crashlog_export, .hw_text = lichen_reg_cached_text};
 #if CONFIG_OTA_WIFI_CONSOLE
     hooks.console_run = console_exec_with_secrets; // the reply goes only to the one who asked (#123)
 #endif
