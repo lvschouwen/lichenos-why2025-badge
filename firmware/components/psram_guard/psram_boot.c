@@ -1,6 +1,7 @@
 #include "psram_boot.h"
 
 #include "psram_dma_cmd.h"
+#include "psram_nvs.h"
 #include "psram_pattern.h"
 #include "psram_reg.h"
 #include "psram_speed.h"
@@ -184,14 +185,13 @@ void psram_boot_oneshot_arm(char const *args) {
                       PSRAM_DELAYLINES - 1, s_os_line);
         return;
     }
-    if (nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+    if (psram_nvs_open(ONESHOT_KEY, &nvs) != ESP_OK) {
         console_reply("psram dlboot: NVS not available");
         return;
     }
     esp_err_t err;
     if (clear) {
-        err = nvs_erase_key(nvs, ONESHOT_KEY);
-        err = err == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : err;
+        err = psram_nvs_drop(nvs, ONESHOT_KEY);
     } else if (idx >= PSRAM_DELAYLINES || !psram_tuning_dl_in_window(&s_tuning, idx)) {
         nvs_close(nvs);
         console_reply("psram dlboot: idx %u refused, outside this boot's tuning window %u..%u (the window moves between boots, "
@@ -200,9 +200,8 @@ void psram_boot_oneshot_arm(char const *args) {
         return;
     } else {
         psram_oneshot_t rec = {PSRAM_ONESHOT_MAGIC, idx};
-        err                 = nvs_set_blob(nvs, ONESHOT_KEY, &rec, sizeof(rec));
+        err                 = psram_nvs_put(nvs, ONESHOT_KEY, &rec, sizeof(rec));
     }
-    err = err == ESP_OK ? nvs_commit(nvs) : err;
     nvs_close(nvs);
     if (err != ESP_OK) {
         console_reply("psram dlboot: NVS write failed (%s)", esp_err_to_name(err));
@@ -222,7 +221,7 @@ static bool oneshot_take(psram_oneshot_t *rec) {
     }
     size_t size = sizeof(*rec);
     bool   have = nvs_get_blob(nvs, ONESHOT_KEY, rec, &size) == ESP_OK && size == sizeof(*rec);
-    if (have && (nvs_erase_key(nvs, ONESHOT_KEY) != ESP_OK || nvs_commit(nvs) != ESP_OK)) {
+    if (have && psram_nvs_drop(nvs, ONESHOT_KEY) != ESP_OK) {
         have = false; // cannot prove it is gone: do not apply it
         snprintf(s_os_line, sizeof(s_os_line), "ignored: could not consume the record");
         ESP_LOGE(TAG, "one-shot delayline: %s", s_os_line);
@@ -398,7 +397,7 @@ static void policy_line(psram_retry_t const *st, bool reboot) {
 void psram_boot_policy(void) {
     psram_retry_t st = {0};
     nvs_handle_t  nvs;
-    bool          have_nvs = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK;
+    bool          have_nvs = psram_nvs_open(RETRY_KEY, &nvs) == ESP_OK;
     if (have_nvs) {
         size_t size = sizeof(st);
         if (nvs_get_blob(nvs, RETRY_KEY, &st, &size) != ESP_OK || size != sizeof(st)) {
@@ -407,8 +406,7 @@ void psram_boot_policy(void) {
     }
     bool reboot = psram_retry_decide(&st, s_bad, wall_s());
     if (have_nvs) {
-        nvs_set_blob(nvs, RETRY_KEY, &st, sizeof(st));
-        nvs_commit(nvs);
+        psram_nvs_put(nvs, RETRY_KEY, &st, sizeof(st)); // a failure is logged (W) and counted there (#325)
         nvs_close(nvs);
     }
     policy_line(&st, reboot);

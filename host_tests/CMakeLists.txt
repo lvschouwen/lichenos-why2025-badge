@@ -164,6 +164,16 @@ target_include_directories(psram_dma_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..
 target_compile_options(psram_dma_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME psram_dma_test COMMAND psram_dma_test)
 
+# psram_guard/psram_nvs.c (#325): the guard's NVS writes check every call and report a failure through nvs_fail
+add_executable(psram_nvs_test ${CMAKE_CURRENT_SOURCE_DIR}/psram_nvs_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/psram_guard/psram_nvs.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console/nvs_fail.c)
+target_include_directories(psram_nvs_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs)
+target_include_directories(psram_nvs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/psram_guard
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
+target_compile_options(psram_nvs_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME psram_nvs_test COMMAND psram_nvs_test)
+
 add_executable(ui_perf_stats_test
     ${CMAKE_CURRENT_SOURCE_DIR}/ui_perf_stats_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/ui_perf_stats.c
@@ -1875,6 +1885,7 @@ add_custom_target(run_tests
     ota_hw_test
     os_bind_test
     nvs_fail_test
+    psram_nvs_test
     release_notes_test
     qr_payload_test
     notes_model_test

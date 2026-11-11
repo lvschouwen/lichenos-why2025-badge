@@ -2,6 +2,7 @@
 
 #include "psram_boot.h"
 #include "psram_dma_cmd.h"
+#include "psram_nvs.h"
 #include "psram_speed_logic.h"
 #include "psram_tuning.h"
 
@@ -95,8 +96,8 @@ static bool image_pending(void) {
     return on_trial ? on_trial() : true;
 }
 
-// The record goes straight to NVS, not through the settings service (it runs before the services; #325 tracks such
-// writers). One blob, the layout of psram_speed_rec_encode; anything else reads as the default record.
+// The record goes straight to NVS, not through the settings service (it runs before the services); psram_nvs.c
+// reports a failed write (#325). One blob, the layout of psram_speed_rec_encode; anything else reads as the default record.
 static void rec_load(void) {
     nvs_handle_t nvs;
     uint8_t      blob[PSRAM_SPEED_REC_SIZE];
@@ -115,9 +116,9 @@ static bool rec_save(psram_speed_rec_t const *r) {
     nvs_handle_t nvs;
     uint8_t      blob[PSRAM_SPEED_REC_SIZE];
     psram_speed_rec_encode(r, blob);
-    bool ok = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK;
+    bool ok = psram_nvs_open(REC_KEY, &nvs) == ESP_OK; // a failure is logged and counted there (#325)
     if (ok) {
-        ok = nvs_set_blob(nvs, REC_KEY, blob, sizeof(blob)) == ESP_OK && nvs_commit(nvs) == ESP_OK;
+        ok = psram_nvs_put(nvs, REC_KEY, blob, sizeof(blob)) == ESP_OK;
         nvs_close(nvs);
     }
     if (!ok) {

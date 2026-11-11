@@ -1,7 +1,7 @@
 # PSRAM watchdog (#40, #93): canary blocks verified every ~100 ms; psram_boot.c = tuning report + boot check. Pure and
 # host-tested: psram_regs.c (the psram.* registry keys, #316; psram_reg.c reads the registers),
 # psram_pattern.c, psram_rotation.c, psram_tuning.c, psram_heap.c, psram_dma.c (psram_dma_cmd.c = the AXI-DMA copy test of #121).
-idf_component_register(SRCS "psram_guard.c" "psram_pattern.c" "psram_rotation.c" "psram_tuning.c" "psram_boot.c" "psram_heap.c" "psram_dma.c" "psram_dma_cmd.c" "psram_speed_logic.c" "psram_speed.c" "psram_regs.c" "psram_reg.c"
+idf_component_register(SRCS "psram_guard.c" "psram_pattern.c" "psram_rotation.c" "psram_tuning.c" "psram_boot.c" "psram_heap.c" "psram_dma.c" "psram_dma_cmd.c" "psram_speed_logic.c" "psram_speed.c" "psram_nvs.c" "psram_regs.c" "psram_reg.c"
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "../../../shared/reg"
                        PRIV_REQUIRES heap esp_mm esp_hw_support esp_timer freertos fw_console lvgl__lvgl nvs_flash soc hal esp_hal_pmu esp_hal_mspi esp_rom esp_driver_dma lichen_random app_update)
