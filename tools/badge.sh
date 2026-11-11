@@ -273,8 +273,11 @@ cmd_crash() {
     trap "rm -rf '$tmp'" RETURN
     local try
     for try in 1 2 3; do
-        socket_or_pause "--session '$port' 'fw crash dump' 5 60" \
-            "$VENV/bin/python $REMOTE_DIR/console_session.py '$port' 1 60 'fw crash dump@2'" | sed 's/^ *[0-9.]* //' | tr -d '\r' > "$tmp/session.txt"
+        # Socket: until the dump's end line (or 5 s quiet when there is none); console_session.py prefixes each line
+        # with its time, which only its branch strips
+        socket_or_pause "--session '$port' 'fw crash dump' 5 60 '--- coredump end '" \
+            "$VENV/bin/python $REMOTE_DIR/console_session.py '$port' 1 60 'fw crash dump@2' | sed 's/^ *[0-9.]* //'" |
+            tr -d '\r' > "$tmp/session.txt"
         python3 -I - "$tmp/session.txt" "$tmp/core.bin" "$tmp/version" "$tmp/elfsha" <<'PY' && break
 import base64, re, sys, zlib
 lines = open(sys.argv[1]).read().split("\n")
@@ -397,7 +400,7 @@ cmd_console() {
     local port=$1 line=$2
     onair_gate "$line"
     require_espressif_port "$port"
-    case $line in *"'"*|*$'\n'*|*$'\r'*) echo "refusing: no quotes or line breaks in a console line" >&2; exit 1;; esac
+    case $line in *$'\n'*|*$'\r'*) echo "refusing: no line breaks in a console line" >&2; exit 1;; esac
     if onair_needs_scope "$line"; then
         onair_scope_gate "$(console_line "$port" "$(onair_scope_query "$line")" || true)"
     fi
@@ -405,12 +408,14 @@ cmd_console() {
 }
 
 # Through the logger's socket when it runs (the same two-second window), the pause path below otherwise: the client
-# does not read stdin, so the script stays there for the fallback.
+# does not read stdin, so the script stays there for the fallback. The line travels base64-encoded through the remote
+# shell, so quotes and $ in it arrive as typed.
 console_line() {
-    local port=$1 line=$2
-    socket_or_pause "--send '$port' '$line' 2" "$VENV/bin/python - '$port' '$line'" <<'PY'
-import sys, time, serial
-port, line = sys.argv[1], sys.argv[2]
+    local port=$1 line=$2 line64
+    line64=$(printf '%s' "$line" | base64 | tr -d '\n')
+    socket_or_pause "--b64 --send '$port' '$line64' 2" "$VENV/bin/python - '$port' '$line64'" <<'PY'
+import base64, sys, time, serial
+port, line = sys.argv[1], base64.b64decode(sys.argv[2]).decode("utf-8")
 s = serial.Serial()
 s.port, s.baudrate, s.timeout = port, 115200, 0.2
 s.dsrdtr = True

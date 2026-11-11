@@ -9,8 +9,9 @@
 #   - a client line goes to the UART and into the log as ">> <line>", redacted when it can carry a secret (redact());
 #     the other clients see that ">> " line too; while the port is not open the line is refused ("--- refused: ..."),
 #     never queued;
-#   - every line read from the UART and every "--- " note goes to the log and to every client; the reply to a
-#     command that prints a secret (SECRET_REPLIES) goes to the clients only, the log gets a count;
+#   - every line read from the UART and every "--- " note goes to the log and to every client; the "fw: " reply to a
+#     command that prints a secret (SECRET_REPLIES) and a core dump's body go to the clients only, the log gets a
+#     count; a failed UART write is refused and never reopens the port (a reopen risks a reset);
 #   - a client that does not read is dropped once CLIENT_MAX_BUF bytes wait for it, so it never blocks the logger.
 # The logger also writes badge-console.status (clients and port state) for "badge.sh logger status". The same file
 # is the client: serial_log.py --send/--session/--monitor <port> ..., exit 3 = the socket is not usable for <port>,
@@ -26,9 +27,12 @@
 # when the port is lost and one when it is back (with the node it opened), so gaps in the log are visible.
 #
 # Usage: serial_log.py [port] [~/badge-logs/badge-serial.log]
-#        serial_log.py --send <port> <line> [seconds] | --session <port> <line> <quiet_s> <max_s> | --monitor <port>
+#        serial_log.py [--b64] --send <port> <line> [seconds] | --session <port> <line> <quiet_s> <max_s> [until]
+#                      | --monitor <port>
+import base64
 import glob
 import os
+import re
 import select
 import signal
 import socket
@@ -45,8 +49,9 @@ STATUS_NAME = "badge-console.status"
 DEFAULT_LOG = "~/badge-logs/badge-serial.log"
 CLIENT_MAX_BUF = 256 * 1024  # about 20 s of UART output at 115200 baud
 CLIENT_MAX_LINE = 1024
-SECRET_QUIET_S = 3.0  # a withheld reply ends after this long without a UART line ...
-SECRET_MAX_S = 120.0  # ... or this long after the command (a core dump takes about a minute)
+MAX_CLIENTS = 8
+UART_MAX_LINE = 64 * 1024  # bytes without a newline that are logged as one line anyway
+SECRET_MAX_S = 120.0  # a withheld reply ends at the next sent line, or this long after its command
 UNUSABLE = 3  # client exit code: fall back to the pause path
 MASK = "***"
 
@@ -86,31 +91,41 @@ def stamp() -> str:
     return time.strftime("%H:%M:%S ")
 
 
-# Console commands whose arguments can carry a secret (from the console_register calls in firmware/components): a sent
-# line that starts with these words keeps them and has the rest masked. "*" matches any one word (a name).
+# Redaction is a denylist built from the console_register calls in firmware/components (a sent line not listed here is
+# logged as typed): review it when a console command that takes or prints a secret is added. An allowlist like the
+# console history's (lichen_shell/console_model.c) would fail closed; that is a later decision (#324).
+#
+# Commands whose arguments can carry a secret: a sent line that starts with these words (any case) keeps them and has
+# the rest masked. "*" matches any one word (a name).
 WIFI_SUBS = {"on", "off", "scan", "reconnect", "stats", "ps", "tx", "bw", "proto", "--clear"}
 SECRET_ARGS = (
-    (("wifi",), lambda rest: rest[0] not in WIFI_SUBS),  # wifi <ssid> <password> (the SSID is private too)
+    (("wifi",), lambda rest: rest[0].lower() not in WIFI_SUBS),  # wifi <ssid> <password> (the SSID is private too)
     (("mesh", "remote", "*", "login"), None),  # mesh remote <who> login <password>
     (("mesh", "remote", "*", "cli"), None),  # cli <text>: "password x", "set guest.password x", "set prv.key x"
     (("channel", "add", "*"), None),  # channel add <name> <base64 key>; "channel add #name" has no key
 )
-# Words that make any other line secret: everything after its command word is masked
-SECRET_WORDS = ("password", "passwd", "secret", "prv.key", "psk")
+# Name parts (split at anything but letters and digits) that make any other line secret: everything after its command
+# word is masked. Whole parts, so bl.keyboard or "keys" are not a key.
+SECRET_WORDS = {"password", "passwd", "pass", "pw", "secret", "key", "psk", "token"}
 # Commands whose reply prints a secret on the UART (console_reply_secret goes to the asker in full, and the UART asker
-# is everyone on the socket): the reply is kept out of the log. crash dump: the core dump holds RAM.
-SECRET_REPLIES = (("token",), ("channel", "show"), ("channel", "add"), ("mesh", "remote"), ("crash", "dump"))
+# is everyone on the socket): their "fw: " reply lines are kept out of the log until the next sent line. mesh remote
+# replies come over LoRa, seconds later, so no quiet timer ends it. A core dump's body is always kept out (RAM).
+SECRET_REPLIES = (("token",), ("channel", "show"), ("channel", "add"), ("mesh", "remote"))
 
 
 def _split_fw(line: str) -> tuple[str, list[str]]:
     words = line.split()
-    if words and words[0] == "fw":
-        return "fw ", words[1:]
+    if words and words[0].lower() == "fw":
+        return words[0] + " ", words[1:]
     return "", words
 
 
 def _starts_with(words: list[str], pattern: tuple[str, ...]) -> bool:
-    return len(words) >= len(pattern) and all(p in ("*", w) for p, w in zip(pattern, words))
+    return len(words) >= len(pattern) and all(p in ("*", w.lower()) for p, w in zip(pattern, words))
+
+
+def _secret_word(word: str) -> bool:
+    return any(part in SECRET_WORDS for part in re.split(r"[^a-z0-9]+", word.lower()))
 
 
 def redact(line: str) -> str:
@@ -120,16 +135,24 @@ def redact(line: str) -> str:
         rest = words[len(pattern) :]
         if _starts_with(words, pattern) and rest and (applies is None or applies(rest)):
             return fw + " ".join(words[: len(pattern)] + [MASK])
-    if words[:2] == ["keys", "send"]:  # text: types into the focused field, which may be a password field
-        return fw + " ".join("text:" + MASK if w.startswith("text:") else w for w in words)
-    if any(s in w.lower() for w in words[1:] for s in SECRET_WORDS):
+    if _starts_with(words, ("keys", "send")):  # text: types into the focused field, which may be a password field
+        return fw + " ".join("text:" + MASK if w.lower().startswith("text:") else w for w in words)
+    if len(words) > 1 and any(_secret_word(w) for w in words):
         return fw + " ".join(words[:1] + [MASK])
     return line
 
 
 def reply_is_secret(line: str) -> bool:
+    """Whether the reply to this sent line can print a secret: listed commands, and get/set of a secret-named key."""
     _, words = _split_fw(line)
-    return any(_starts_with(words, pattern) for pattern in SECRET_REPLIES)
+    if any(_starts_with(words, pattern) for pattern in SECRET_REPLIES):
+        return True
+    return len(words) > 1 and words[0].lower() in ("get", "set") and _secret_word(words[1])
+
+
+def clean_line(line: str) -> str:
+    """A client line without C0 control characters (tab kept) or DEL: nothing a client sends can steer the console."""
+    return "".join(ch for ch in line if ch == "\t" or (" " <= ch and ch != "\x7f"))
 
 
 def socket_usable(sock_exists: bool, greeting: str, want_node: str) -> tuple[bool, str]:
@@ -167,8 +190,9 @@ class Hub:
         self.max_buf = max_buf
         self.clients: list[Client] = []
         self.state, self.node = "lost", "-"
-        self.withhold_quiet = self.withhold_end = 0.0
+        self.withhold_until = 0.0  # "fw: " lines stay out of the log until then, or until the next sent line
         self.withheld = 0
+        self.dump_lines = -1  # lines of the core dump body kept out of the log; -1 outside a dump
 
     def write_status(self) -> None:
         if self.status:
@@ -178,7 +202,16 @@ class Hub:
         self.state, self.node = state, node
         self.write_status()
 
-    def add(self, sock: socket.socket) -> Client:
+    def add(self, sock: socket.socket) -> Client | None:
+        if len(self.clients) >= MAX_CLIENTS:
+            try:
+                sock.setblocking(False)
+                sock.send(b"--- refused: too many console clients\n")
+            except OSError:
+                pass
+            sock.close()
+            self.log("--- console client refused: %d connected already" % len(self.clients))
+            return None
         c = Client(sock)
         self.clients.append(c)
         self.log("--- console client connected (%d)" % len(self.clients))
@@ -231,24 +264,36 @@ class Hub:
         self.log(text)
         self.send_all(text)
 
+    def keep_out_of_log(self, text: str, now: float) -> bool:
+        """Whether a UART line goes to the clients only: a core dump's body, or a reply that can print a secret."""
+        if text.startswith("--- coredump begin "):
+            self.dump_lines = 0
+            return False
+        if self.dump_lines >= 0:
+            if not text.startswith("--- coredump end "):
+                self.dump_lines += 1
+                return True
+            self.log("--- %d core dump lines kept out of the log (RAM)" % self.dump_lines)
+            self.dump_lines = -1
+            return False
+        if self.withhold_until and now < self.withhold_until and text.startswith("fw: "):
+            self.withheld += 1
+            return True
+        return False
+
     def uart_line(self, text: str, now: float) -> None:
-        if self.withhold_end:
-            if now < self.withhold_quiet and now < self.withhold_end:
-                self.withheld += 1
-                self.withhold_quiet = now + SECRET_QUIET_S
-                self.send_all(text)
-                return
-            self.end_withhold()
-        self.log(text)
+        if not self.keep_out_of_log(text, now):
+            self.log(text)
         self.send_all(text)
 
     def end_withhold(self) -> None:
-        self.log("--- %d reply lines kept out of the log (secret)" % self.withheld)
-        self.withhold_quiet = self.withhold_end = 0.0
+        if self.withhold_until:
+            self.log("--- %d reply lines kept out of the log (secret)" % self.withheld)
+        self.withhold_until = 0.0
         self.withheld = 0
 
     def tick(self, now: float) -> None:
-        if self.withhold_end and (now >= self.withhold_quiet or now >= self.withhold_end):
+        if self.withhold_until and now >= self.withhold_until:
             self.end_withhold()
 
     def readable(self, c: Client, now: float) -> None:
@@ -259,34 +304,54 @@ class Hub:
         except OSError:
             data = b""
         if not data:
-            self.drop(c, "disconnected")
+            self.drop(c, "disconnected")  # half a line it left is not sent
             return
         c.inbuf += data
         while b"\n" in c.inbuf and c in self.clients:
             raw, c.inbuf = c.inbuf.split(b"\n", 1)
-            self.command(c, raw.rstrip(b"\r").decode("utf-8", "replace"), now)
+            if len(raw) > CLIENT_MAX_LINE:
+                self.queue(c, "--- refused: line longer than %d bytes, not sent" % CLIENT_MAX_LINE)
+                continue
+            self.command(c, clean_line(raw.decode("utf-8", "replace")), now)
         if len(c.inbuf) > CLIENT_MAX_LINE:
             self.drop(c, "dropped: line too long")
 
     def command(self, c: Client, line: str, now: float) -> None:
-        """One client line: to the UART while the port is open, refused otherwise (never queued for later)."""
+        """One client line: to the UART while the port is open, refused otherwise (never queued for later).
+
+        A failed write is refused too and leaves the port open: only a failed read means it is gone, and every reopen
+        of the CH340 risks a reset."""
         if self.state != "open":
             self.queue(c, "--- refused: the port is %s, line not sent" % self.state)
             return
-        self.write_uart((line + "\n").encode("utf-8"))
+        try:
+            self.write_uart((line + "\n").encode("utf-8"))
+        except Exception as e:  # noqa: BLE001 - pyserial raises its own timeout and I/O types
+            self.log("--- write to the port failed (%s), line not sent" % e)
+            self.queue(c, "--- refused: write failed (%s)" % e)
+            return
+        self.end_withhold()  # a new command: what follows answers it
         shown = ">> " + redact(line)
         self.log(shown)
         self.send_all(shown, skip=c)
         if reply_is_secret(line):
-            self.withhold_quiet, self.withhold_end = now + SECRET_QUIET_S, now + SECRET_MAX_S
+            self.withhold_until = now + SECRET_MAX_S
 
 
 def listen(path: str) -> socket.socket:
-    """The console socket, mode 0600; a stale one from a killed logger is replaced."""
-    try:
+    """The console socket, mode 0600. A stale one (from a killed logger) is replaced; a live one is not taken over."""
+    if os.path.lexists(path):
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.connect(path)
+            live = True
+        except OSError:
+            live = False
+        finally:
+            probe.close()
+        if live:
+            raise RuntimeError("another logger serves %s" % path)
         os.remove(path)
-    except FileNotFoundError:
-        pass
     lsock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     old = os.umask(0o177)
     try:
@@ -307,9 +372,10 @@ class Logger:
         self.pause_path, self.paused_path = path + ".pause", path + ".paused"
         self.sock_path = os.path.join(os.path.dirname(path), SOCK_NAME)
         self.status_path = os.path.join(os.path.dirname(path), STATUS_NAME)
+        self.lsock = listen(self.sock_path)  # first: a second logger stops here, before it touches anything
         self.out = open(path, "a", buffering=1)
         self.port = None
-        self.lsock = listen(self.sock_path)
+        self.lost_at = None  # wall time of the first failure of the current outage
         self.hub = Hub(self.log, self.write_uart, self.write_status)
         self.hub.write_status()
 
@@ -317,6 +383,8 @@ class Logger:
         self.out.write(stamp() + text + "\n")
 
     def write_uart(self, data: bytes) -> None:
+        if self.port is None:
+            raise OSError("port not open")
         self.port.write(data)
 
     def write_status(self, text: str) -> None:
@@ -324,6 +392,14 @@ class Logger:
         with open(tmp, "w") as f:
             f.write(text)
         os.replace(tmp, self.status_path)
+
+    def rotate(self) -> None:
+        """Past MAX: the file moves to .1 and a new one is open before the old one closes, so no line is lost."""
+        if self.out.tell() <= MAX:
+            return
+        os.replace(self.path, self.path + ".1")
+        old, self.out = self.out, open(self.path, "a", buffering=1)
+        old.close()
 
     def pause_requested(self) -> bool:
         try:
@@ -335,12 +411,12 @@ class Logger:
         if self.port is not None:
             try:
                 self.port.close()
-            except OSError:
+            except Exception:  # noqa: BLE001 - closing a port that is gone
                 pass
             self.port = None
 
     def serve(self, timeout: float) -> bytes:
-        """One wait on the socket, the clients and the port; returns what the port gave."""
+        """One wait on the socket, the clients and the port; returns what the port gave (a port error raises)."""
         got = b""
         if self.hub.pending():
             timeout = min(timeout, 0.05)
@@ -349,20 +425,25 @@ class Logger:
         ready, _, _ = select.select(waits, [], [], timeout)
         now = time.time()
         for r in ready:
-            if r is self.lsock:
-                self.accept()
-            elif r is self.port:
+            if r is self.port:
                 got += self.port.read(self.port.in_waiting or 1)
             else:
-                self.hub.readable(clients[r], now)
-        self.hub.flush_all()
+                self.guarded(self.accept if r is self.lsock else lambda: self.hub.readable(clients[r], now))
+        self.guarded(self.hub.flush_all)
         self.hub.tick(now)
         return got
+
+    def guarded(self, fn) -> None:
+        """Client handling never stops the logger and never counts as a lost port: log it and go on."""
+        try:
+            fn()
+        except Exception as e:  # noqa: BLE001 - the logger must outlive any client
+            self.log("--- console client handling failed (%r), going on" % e)
 
     def accept(self) -> None:
         try:
             conn, _ = self.lsock.accept()
-        except BlockingIOError:
+        except OSError:  # BlockingIOError, or out of file descriptors: the client retries or falls back
             return
         self.hub.add(conn)
 
@@ -384,6 +465,24 @@ class Logger:
         self.hub.set_state("lost")
         self.hub.note("--- resumed")
 
+    def port_open(self, s, port: str, dev: str, how: str) -> None:
+        self.port = s
+        node = os.path.realpath(dev)
+        self.hub.set_state("open", node)
+        if self.lost_at is None:
+            self.hub.note("--- port open %s: %s (%s)" % (port, node, how))
+        else:
+            self.hub.note(outage_text(self.lost_at, time.time(), node, how))
+            self.lost_at = None
+
+    def port_lost(self, e: Exception) -> None:
+        """The port failed to open or to read: clients stay connected and are told; their lines are refused."""
+        self.detach()
+        self.hub.set_state("lost")
+        if self.lost_at is None:  # one line per outage, not one per retry
+            self.lost_at = time.time()
+            self.hub.note("--- port lost (%s), retrying" % e)
+
     def close(self) -> None:
         for path in (self.sock_path, self.status_path, self.paused_path):
             try:
@@ -404,19 +503,27 @@ def open_port(dev):
     return s
 
 
-def run_port(lg: Logger, s) -> None:
+def split_uart(buf: bytes) -> tuple[list[str], bytes]:
+    """Complete lines out of the UART buffer; a run of UART_MAX_LINE bytes without a newline counts as a line."""
+    lines = []
+    while b"\n" in buf or len(buf) >= UART_MAX_LINE:
+        if b"\n" in buf and buf.index(b"\n") < UART_MAX_LINE:
+            line, buf = buf.split(b"\n", 1)
+        else:
+            line, buf = buf[:UART_MAX_LINE], buf[UART_MAX_LINE:]
+        lines.append(line.rstrip(b"\r").decode("utf-8", "replace"))
+    return lines, buf
+
+
+def run_port(lg: Logger) -> None:
     """Read the open port until a pause is asked for; a lost port raises."""
     buf = b""
     try:
         while not lg.pause_requested():
-            buf += lg.serve(0.2)
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                lg.hub.uart_line(line.rstrip(b"\r").decode("utf-8", "replace"), time.time())
-            if lg.out.tell() > MAX:
-                lg.out.close()
-                os.replace(lg.path, lg.path + ".1")
-                lg.out = open(lg.path, "a", buffering=1)
+            lines, buf = split_uart(buf + lg.serve(0.2))
+            for line in lines:
+                lg.hub.uart_line(line, time.time())
+            lg.rotate()
     finally:
         if buf:
             lg.hub.uart_line(buf.rstrip(b"\r").decode("utf-8", "replace"), time.time())
@@ -432,7 +539,6 @@ def logger_main(port: str, path: str) -> None:
         os.remove(lg.paused_path)  # stale marker from a previous run
     except OSError:
         pass
-    lost_at = None  # wall time of the first failure of the current outage
     try:
         while True:
             if lg.pause_requested():
@@ -441,22 +547,11 @@ def logger_main(port: str, path: str) -> None:
             try:
                 if dev is None:
                     raise OSError(how)
-                lg.port = open_port(dev)
-                node = os.path.realpath(dev)
-                lg.hub.set_state("open", node)
-                if lost_at is None:
-                    lg.hub.note("--- port open %s: %s (%s)" % (port, node, how))
-                else:
-                    lg.hub.note(outage_text(lost_at, time.time(), node, how))
-                    lost_at = None
-                run_port(lg, lg.port)
+                lg.port_open(open_port(dev), port, dev, how)
+                run_port(lg)
                 lg.detach()
             except (serial.SerialException, OSError) as e:
-                lg.detach()
-                lg.hub.set_state("lost")
-                if lost_at is None:  # one line per outage, not one per retry
-                    lost_at = time.time()
-                    lg.hub.note("--- port lost (%s), retrying" % e)
+                lg.port_lost(e)
                 lg.wait(RETRY_S)
     finally:
         lg.close()
@@ -502,9 +597,17 @@ def connect(port: str, sock_path: str) -> socket.socket | None:
     return s
 
 
-def read_lines(s: socket.socket, end: float, quiet: float | None, out) -> bool:
-    """Copy lines from s to out until end, or quiet seconds without data; False when the line was refused."""
-    buf, last, first = b"", time.time(), True
+def is_note(line: bytes) -> bool:
+    """A line from the logger itself (a "--- " note or another client's ">> " line), not from the badge."""
+    return line.startswith(b"--- ") or line.startswith(b">> ")
+
+
+def read_lines(s: socket.socket, end: float, quiet: float | None, out, until: bytes = b"") -> bool:
+    """Copy lines from s to out until end, quiet seconds without data, or a line starting with until.
+
+    False when the logger refused the line: a refusal can follow other notes, so every note before the badge's first
+    line is checked."""
+    buf, last, answered = b"", time.time(), False
     while True:
         now = time.time()
         limit = end if quiet is None else min(end, last + quiet)
@@ -519,20 +622,26 @@ def read_lines(s: socket.socket, end: float, quiet: float | None, out) -> bool:
         last, buf = time.time(), buf + data
         while b"\n" in buf:
             line, buf = buf.split(b"\n", 1)
-            if first and line.startswith(b"--- refused"):
+            if not answered and line.startswith(b"--- refused"):
+                out.flush()
                 return False
-            first = False
+            answered = answered or not is_note(line)
             out.write(line.decode("utf-8", "replace") + "\n")
+            if until and line.startswith(until):
+                out.flush()
+                return True
         out.flush()
 
 
-def client_send(port: str, line: str, seconds: float, quiet: float | None, sock_path: str) -> int:
+def client_send(
+    port: str, line: str, seconds: float, quiet: float | None, sock_path: str, until: str = ""
+) -> int:
     s = connect(port, sock_path)
     if s is None:
         return UNUSABLE
     with s:
         s.sendall((line + "\n").encode("utf-8"))
-        ok = read_lines(s, time.time() + seconds, quiet, sys.stdout)
+        ok = read_lines(s, time.time() + seconds, quiet, sys.stdout, until.encode())
     return 0 if ok else UNUSABLE
 
 
@@ -562,15 +671,23 @@ def client_monitor(port: str, sock_path: str) -> int:
 
 
 def client_main(argv: list[str]) -> int:
+    """--send <port> <line> [s] | --session <port> <line> <quiet_s> <max_s> [until] | --monitor <port>.
+
+    A leading --b64 means <line> is base64 (badge.sh passes it so through the remote shell: any quote works)."""
     sock_path = os.environ.get("BADGE_CONSOLE_SOCK") or sock_path_for()
-    mode, args = argv[0], argv[1:]
+    b64 = argv[:1] == ["--b64"]
+    argv = argv[1:] if b64 else argv
+    mode, args = (argv[0], argv[1:]) if argv else ("", [])
+    if b64 and len(args) >= 2:
+        args[1] = base64.b64decode(args[1]).decode("utf-8")
     if mode == "--send" and len(args) in (2, 3):
         return client_send(args[0], args[1], float(args[2]) if len(args) == 3 else 2.0, None, sock_path)
-    if mode == "--session" and len(args) == 4:
-        return client_send(args[0], args[1], float(args[3]), float(args[2]), sock_path)
+    if mode == "--session" and len(args) in (4, 5):
+        until = args[4] if len(args) == 5 else ""
+        return client_send(args[0], args[1], float(args[3]), float(args[2]), sock_path, until)
     if mode == "--monitor" and len(args) == 1:
         return client_monitor(args[0], sock_path)
-    sys.stderr.write(__doc__ or "usage: see the head of serial_log.py\n")
+    sys.stderr.write("usage: serial_log.py [--b64] --send|--session|--monitor ... (see the head of the file)\n")
     return 2
 
 
