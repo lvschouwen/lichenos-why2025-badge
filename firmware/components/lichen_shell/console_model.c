@@ -93,8 +93,9 @@ static bool has_word(char const *line, char const *word) {
     return false;
 }
 
-// cmd_wifi (c6link.c) matches its subcommands as whole strings and reads ANY other line as "<ssid> <password>":
-// `wifi on hunter2` joins a network called "on". So only these exact argument strings count as public.
+// cmd_wifi (wifi_service.c, parsed by wifi_cmd.c) matches its subcommands as whole strings and reads ANY other line as
+// "<ssid> <password>": `wifi on hunter2` joins a network called "on". So only these exact argument strings count as
+// public.
 static bool wifi_public(char const *rest) {
     static char const *const exact[] = {"",      "on",      "off",    "scan",  "reconnect", "stats", "ps",
                                         "ps none", "ps min", "bw",    "bw 20", "bw 40",     "proto", "proto n",

@@ -5,11 +5,6 @@
 
 #include "boot_progress.h"
 #include "c6link.h"
-#include "fw_console.h"
-#include "lichen_clock.h"
-#include "lichen_mdns.h"
-#include "wifi_regdom.h"
-#include "wifi_saved.h"
 #include "esp_attr.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -22,10 +17,17 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "fw_console.h"
+#include "lichen_clock.h"
+#include "lichen_mdns.h"
+#include "wifi_cmd.h"
+#include "wifi_regdom.h"
+#include "wifi_saved.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <string.h>
 
 static char const TAG[] = "c6link";
@@ -1291,150 +1293,236 @@ static void cmd_wifi_echo(char kind, unsigned asked_mhz, bool reconnecting) {
     console_reply("%s", line);
 }
 
-static void cmd_wifi(char const *args) {
-    char a[140], b[140];
-    if (!*args) {
-        char ip[16], cur[33];
-        portENTER_CRITICAL(&state_lock);
-        bool have = have_credentials;
-        copy_text(cur, sizeof(cur), ssid);
-        portEXIT_CRITICAL(&state_lock);
-        clean(cur, a, sizeof(a));
-        if (!wifi_enabled()) {
-            console_reply("wifi: radio switched off%s (fw wifi on)", airplane_on() ? ", airplane mode" : "");
-        } else if (!have) {
-            console_reply("wifi: no credentials (fw wifi scan | <ssid> <password> | reconnect | --clear)");
-        } else if (wifi_has_ip(ip, sizeof(ip))) {
-            int8_t rssi;
-            if (wifi_rssi(&rssi)) {
-                console_reply("wifi: \"%s\" connected, ip %s (%s.local), rssi %d dBm, %d/4 bars", a, ip, lichen_mdns_name(),
-                              rssi, wifi_bars(rssi));
-            } else {
-                console_reply("wifi: \"%s\" connected, ip %s (%s.local), rssi not read yet", a, ip, lichen_mdns_name());
-            }
+// The connection line(s) of `fw wifi`: radio, credentials, link
+static void wifi_status_link(void) {
+    char a[140], ip[16], cur[33];
+    portENTER_CRITICAL(&state_lock);
+    bool have = have_credentials;
+    copy_text(cur, sizeof(cur), ssid);
+    portEXIT_CRITICAL(&state_lock);
+    clean(cur, a, sizeof(a));
+    if (!wifi_enabled()) {
+        console_reply("wifi: radio switched off%s (fw wifi on)", airplane_on() ? ", airplane mode" : "");
+    } else if (!have) {
+        console_reply("wifi: no credentials (fw wifi scan | <ssid> <password> | reconnect | --clear)");
+    } else if (wifi_has_ip(ip, sizeof(ip))) {
+        int8_t rssi;
+        if (wifi_rssi(&rssi)) {
+            console_reply(
+                "wifi: \"%s\" connected, ip %s (%s.local), rssi %d dBm, %d/4 bars",
+                a,
+                ip,
+                lichen_mdns_name(),
+                rssi,
+                wifi_bars(rssi)
+            );
         } else {
-            console_reply("wifi: \"%s\" not connected", a);
-        }
-        // The chosen mode, not a read-back: the status line must not wait on a C6 RPC (`fw wifi ps` reads back)
-        console_reply("wifi: power save %s", wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode)));
-        char tried[33], kept[33];
-        wifi_join_state_t st = wifi_join_state(tried, sizeof(tried), kept, sizeof(kept));
-        clean(tried, a, sizeof(a));
-        clean(kept, b, sizeof(b));
-        if (st == WIFI_JOIN_TRYING || st == WIFI_JOIN_PENDING) {
-            console_reply("wifi: trying \"%s\" (saved only once it gets an IP, gives up after %d s)", a,
-                          WIFI_JOIN_TRIAL_MS / 1000);
-        } else if (st == WIFI_JOIN_FAILED_KEPT_OLD) {
-            console_reply(kept[0] ? "wifi: couldn't join \"%s\": kept \"%s\"" : "wifi: couldn't join \"%s\": no network saved", a,
-                          b);
-        }
-    } else if (strcmp(args, "on") == 0 || strcmp(args, "off") == 0) {
-        cmd_wifi_switch(args[1] == 'n');
-    } else if (strcmp(args, "ps") == 0 || strncmp(args, "ps ", 3) == 0) {
-        if (args[2] && strcmp(args + 3, "none") != 0 && strcmp(args + 3, "min") != 0) {
-            console_reply("wifi ps [none | min]"); // a typo must not fall through to joining an SSID called "ps"
-            return;
-        }
-        if (args[2] && !wifi_set_ps(args[3] == 'm')) {
-            console_reply("wifi: power save not set (no C6 link?)");
-        }
-        cmd_wifi_echo('p', 0, false);
-    } else if (strcmp(args, "stats") == 0) {
-        wifi_ap_record_t ap;
-        if (!atomic_load(&wifi_started) || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
-            console_reply("wifi: not connected");
-            return;
-        }
-        wifi_bandwidth_t bw  = 0;
-        int8_t           pwr = 0;
-        bool             bw_ok  = esp_wifi_get_bandwidth(WIFI_IF_STA, &bw) == ESP_OK;
-        bool             pwr_ok = esp_wifi_get_max_tx_power(&pwr) == ESP_OK;
-        console_reply("wifi: rssi %d dBm, channel %u%s, phy%s%s%s%s", ap.rssi, ap.primary,
-                      ap.second == WIFI_SECOND_CHAN_ABOVE   ? "+above"
-                      : ap.second == WIFI_SECOND_CHAN_BELOW ? "+below"
-                                                            : "", ap.phy_11b ? " b" : "", ap.phy_11g ? " g" : "",
-                      ap.phy_11n ? " n" : "", ap.phy_11ax ? " ax" : "");
-        console_reply("wifi: bandwidth %s, max TX power %s%d.%02d dBm (%s), power save %s",
-                      !bw_ok ? "?" : bw == WIFI_BW20 ? "HT20" : bw == WIFI_BW40 ? "HT40" : "other",
-                      pwr_ok ? "" : "? ", pwr / 4, (pwr % 4) * 25, atomic_load(&wifi_tx_raw) ? "set" : "default",
-                      wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode)));
-    } else if (strncmp(args, "tx ", 3) == 0 || strcmp(args, "tx") == 0) {
-        int raw = args[2] ? atoi(args + 3) : -1;
-        if (raw != -1 && raw != 0 && (raw < 8 || raw > 80)) { // bare "tx" (-1) reads back only
-            console_reply("wifi tx <8-80> (0.25 dBm units: 34 = 8.5, 52 = 13, 80 = 20 dBm) | wifi tx 0 (default)");
-            return;
-        }
-        if (raw >= 0) {
-            atomic_store(&wifi_tx_raw, raw);
-            if (atomic_load(&wifi_started)) {
-                set_wifi_tx(raw ? raw : WIFI_TX_DEFAULT_RAW);
-            }
-        }
-        cmd_wifi_echo('t', 0, false);
-    } else if (strcmp(args, "proto n") == 0 || strcmp(args, "proto ax") == 0 || strcmp(args, "proto") == 0) {
-        if (!args[5]) {
-            console_reply("wifi proto n | ax (n: b/g/n only, no Wi-Fi 6; reconnects to apply, not saved)");
-            return;
-        }
-        atomic_store(&wifi_proto, args[6] == 'n' ? 'n' : 'x');
-        msg_t m = {.type = MSG_RECONNECT}; // the protocol is agreed at association
-        console_reply(post(&m) ? "wifi: protocol %s, reconnecting (a few seconds)" : "wifi: busy, try again",
-                      args[6] == 'n' ? "b/g/n" : "b/g/n/ax");
-    } else if (strcmp(args, "bw 20") == 0 || strcmp(args, "bw 40") == 0 || strcmp(args, "bw") == 0) {
-        unsigned mhz = !args[2] ? 0 : args[3] == '2' ? 20 : 40;
-        bool     reconnecting = false;
-        if (mhz) {
-            atomic_store(&wifi_bw_mhz, (int)mhz);
-            readback_invalidate();
-            msg_t m = {.type = MSG_RECONNECT}; // the bandwidth is agreed at association; STA_START/connect apply it
-            reconnecting = post(&m);
-        }
-        cmd_wifi_echo('b', mhz, reconnecting);
-    } else if (strcmp(args, "--clear") == 0) {
-        msg_t m = {.type = MSG_FORGET};
-        console_reply(post(&m) ? "wifi: credentials removed" : "wifi: busy, try again");
-    } else if (strcmp(args, "reconnect") == 0) {
-        char s[33], p[64];
-        bool have = c6link_up() && wifi_cred_load(s, p);
-        memset(p, 0, sizeof(p));
-        msg_t m = {.type = MSG_RECONNECT};
-        console_reply(have && post(&m) ? "wifi: reconnecting with the saved credentials"
-                                       : "wifi: no saved credentials or no C6 link");
-    } else if (strcmp(args, "scan") == 0) {
-        EXT_RAM_BSS_ATTR static wifi_ap_t aps[20];
-        size_t           n = 0;
-        if (!wifi_scan(aps, sizeof(aps) / sizeof(aps[0]), &n)) {
-            console_reply("wifi: scan failed");
-            return;
-        }
-        console_reply("wifi: %u networks", (unsigned)n);
-        for (size_t i = 0; i < n; i++) {
-            clean(aps[i].ssid, a, sizeof(a)); // air-sourced: control bytes are escaped as \xNN
-            console_reply("  %4d dBm  bars %d  %s  %s", aps[i].rssi, wifi_bars(aps[i].rssi),
-                          aps[i].open ? "open  " : "locked", a);
+            console_reply("wifi: \"%s\" connected, ip %s (%s.local), rssi not read yet", a, ip, lichen_mdns_name());
         }
     } else {
-        // The SSID is the first word; the password is the rest of the line (it may contain spaces)
-        char const *space = strchr(args, ' ');
-        size_t      len   = space ? (size_t)(space - args) : strlen(args);
-        char        new_ssid[33];
-        if (len == 0 || len > 32) {
-            console_reply("wifi <ssid> <password> (SSID without spaces, at most 32 characters)");
-            return;
-        }
-        memcpy(new_ssid, args, len);
-        new_ssid[len] = '\0';
-        char const *pass = space ? space + 1 : "";
-        clean(new_ssid, a, sizeof(a));
-        if (!wifi_cred_valid(new_ssid, pass)) {
-            console_reply("wifi: the password is empty (open network) or 8-63 characters");
-        } else if (!wifi_set_credentials(new_ssid, pass)) {
-            console_reply("wifi: could not start (no C6 link or busy)");
-        } else {
-            console_reply("wifi: trying \"%s\", saved only if it gets an IP within %d s; fw wifi shows the result", a,
-                          WIFI_JOIN_TRIAL_MS / 1000);
+        console_reply("wifi: \"%s\" not connected", a);
+    }
+}
+
+static void cmd_wifi_status(wifi_cmd_t const *c) {
+    (void)c;
+    char a[140], b[140];
+    wifi_status_link();
+    // The chosen mode, not a read-back: the status line must not wait on a C6 RPC (`fw wifi ps` reads back)
+    console_reply("wifi: power save %s", wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode)));
+    char              tried[33], kept[33];
+    wifi_join_state_t st = wifi_join_state(tried, sizeof(tried), kept, sizeof(kept));
+    clean(tried, a, sizeof(a));
+    clean(kept, b, sizeof(b));
+    if (st == WIFI_JOIN_TRYING || st == WIFI_JOIN_PENDING) {
+        console_reply(
+            "wifi: trying \"%s\" (saved only once it gets an IP, gives up after %d s)",
+            a,
+            WIFI_JOIN_TRIAL_MS / 1000
+        );
+    } else if (st == WIFI_JOIN_FAILED_KEPT_OLD) {
+        console_reply(
+            kept[0] ? "wifi: couldn't join \"%s\": kept \"%s\"" : "wifi: couldn't join \"%s\": no network saved",
+            a,
+            b
+        );
+    }
+}
+
+static void cmd_wifi_on_off(wifi_cmd_t const *c) {
+    cmd_wifi_switch(c->on);
+}
+
+static void cmd_wifi_ps_usage(wifi_cmd_t const *c) {
+    (void)c;
+    console_reply("wifi ps [none | min]"); // a typo must not fall through to joining an SSID called "ps"
+}
+
+static void cmd_wifi_ps(wifi_cmd_t const *c) {
+    if (c->set && !wifi_set_ps(c->ps_min)) {
+        console_reply("wifi: power save not set (no C6 link?)");
+    }
+    cmd_wifi_echo('p', 0, false);
+}
+
+static void cmd_wifi_stats(wifi_cmd_t const *c) {
+    (void)c;
+    wifi_ap_record_t ap;
+    if (!atomic_load(&wifi_started) || esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+        console_reply("wifi: not connected");
+        return;
+    }
+    wifi_bandwidth_t bw     = 0;
+    int8_t           pwr    = 0;
+    bool             bw_ok  = esp_wifi_get_bandwidth(WIFI_IF_STA, &bw) == ESP_OK;
+    bool             pwr_ok = esp_wifi_get_max_tx_power(&pwr) == ESP_OK;
+    console_reply(
+        "wifi: rssi %d dBm, channel %u%s, phy%s%s%s%s",
+        ap.rssi,
+        ap.primary,
+        ap.second == WIFI_SECOND_CHAN_ABOVE   ? "+above"
+        : ap.second == WIFI_SECOND_CHAN_BELOW ? "+below"
+                                              : "",
+        ap.phy_11b ? " b" : "",
+        ap.phy_11g ? " g" : "",
+        ap.phy_11n ? " n" : "",
+        ap.phy_11ax ? " ax" : ""
+    );
+    console_reply(
+        "wifi: bandwidth %s, max TX power %s%d.%02d dBm (%s), power save %s",
+        !bw_ok            ? "?"
+        : bw == WIFI_BW20 ? "HT20"
+        : bw == WIFI_BW40 ? "HT40"
+                          : "other",
+        pwr_ok ? "" : "? ",
+        pwr / 4,
+        (pwr % 4) * 25,
+        atomic_load(&wifi_tx_raw) ? "set" : "default",
+        wifi_ps_name((wifi_ps_type_t)atomic_load(&wifi_ps_mode))
+    );
+}
+
+static void cmd_wifi_tx_usage(wifi_cmd_t const *c) {
+    (void)c;
+    console_reply("wifi tx <8-80> (0.25 dBm units: 34 = 8.5, 52 = 13, 80 = 20 dBm) | wifi tx 0 (default)");
+}
+
+static void cmd_wifi_tx(wifi_cmd_t const *c) {
+    if (c->tx_raw >= 0) { // bare "tx" (-1) reads back only
+        atomic_store(&wifi_tx_raw, c->tx_raw);
+        if (atomic_load(&wifi_started)) {
+            set_wifi_tx(c->tx_raw ? c->tx_raw : WIFI_TX_DEFAULT_RAW);
         }
     }
+    cmd_wifi_echo('t', 0, false);
+}
+
+static void cmd_wifi_proto_usage(wifi_cmd_t const *c) {
+    (void)c;
+    console_reply("wifi proto n | ax (n: b/g/n only, no Wi-Fi 6; reconnects to apply, not saved)");
+}
+
+static void cmd_wifi_proto(wifi_cmd_t const *c) {
+    atomic_store(&wifi_proto, c->proto_n ? 'n' : 'x');
+    msg_t m = {.type = MSG_RECONNECT}; // the protocol is agreed at association
+    console_reply(
+        post(&m) ? "wifi: protocol %s, reconnecting (a few seconds)" : "wifi: busy, try again",
+        c->proto_n ? "b/g/n" : "b/g/n/ax"
+    );
+}
+
+static void cmd_wifi_bw(wifi_cmd_t const *c) {
+    bool reconnecting = false;
+    if (c->bw_mhz) {
+        atomic_store(&wifi_bw_mhz, (int)c->bw_mhz);
+        readback_invalidate();
+        msg_t m      = {.type = MSG_RECONNECT}; // the bandwidth is agreed at association; STA_START/connect apply it
+        reconnecting = post(&m);
+    }
+    cmd_wifi_echo('b', c->bw_mhz, reconnecting);
+}
+
+static void cmd_wifi_clear(wifi_cmd_t const *c) {
+    (void)c;
+    msg_t m = {.type = MSG_FORGET};
+    console_reply(post(&m) ? "wifi: credentials removed" : "wifi: busy, try again");
+}
+
+static void cmd_wifi_reconnect(wifi_cmd_t const *c) {
+    (void)c;
+    char s[33], p[64];
+    bool have = c6link_up() && wifi_cred_load(s, p);
+    memset(p, 0, sizeof(p));
+    msg_t m = {.type = MSG_RECONNECT};
+    console_reply(
+        have && post(&m) ? "wifi: reconnecting with the saved credentials" : "wifi: no saved credentials or no C6 link"
+    );
+}
+
+static void cmd_wifi_scan(wifi_cmd_t const *c) {
+    (void)c;
+    EXT_RAM_BSS_ATTR static wifi_ap_t aps[20];
+    char                              a[140];
+    size_t                            n = 0;
+    if (!wifi_scan(aps, sizeof(aps) / sizeof(aps[0]), &n)) {
+        console_reply("wifi: scan failed");
+        return;
+    }
+    console_reply("wifi: %u networks", (unsigned)n);
+    for (size_t i = 0; i < n; i++) {
+        clean(aps[i].ssid, a, sizeof(a)); // air-sourced: control bytes are escaped as \xNN
+        console_reply(
+            "  %4d dBm  bars %d  %s  %s",
+            aps[i].rssi,
+            wifi_bars(aps[i].rssi),
+            aps[i].open ? "open  " : "locked",
+            a
+        );
+    }
+}
+
+static void cmd_wifi_join_usage(wifi_cmd_t const *c) {
+    (void)c;
+    console_reply("wifi <ssid> <password> (SSID without spaces, at most 32 characters)");
+}
+
+static void cmd_wifi_join(wifi_cmd_t const *c) {
+    char a[140];
+    clean(c->ssid, a, sizeof(a));
+    if (!wifi_cred_valid(c->ssid, c->pass)) {
+        console_reply("wifi: the password is empty (open network) or 8-63 characters");
+    } else if (!wifi_set_credentials(c->ssid, c->pass)) {
+        console_reply("wifi: could not start (no C6 link or busy)");
+    } else {
+        console_reply(
+            "wifi: trying \"%s\", saved only if it gets an IP within %d s; fw wifi shows the result",
+            a,
+            WIFI_JOIN_TRIAL_MS / 1000
+        );
+    }
+}
+
+static void cmd_wifi(char const *args) {
+    static void (*const handler[WIFI_CMD_COUNT])(wifi_cmd_t const *) = {
+        [WIFI_CMD_STATUS]      = cmd_wifi_status,
+        [WIFI_CMD_SWITCH]      = cmd_wifi_on_off,
+        [WIFI_CMD_PS]          = cmd_wifi_ps,
+        [WIFI_CMD_PS_USAGE]    = cmd_wifi_ps_usage,
+        [WIFI_CMD_STATS]       = cmd_wifi_stats,
+        [WIFI_CMD_TX]          = cmd_wifi_tx,
+        [WIFI_CMD_TX_USAGE]    = cmd_wifi_tx_usage,
+        [WIFI_CMD_PROTO]       = cmd_wifi_proto,
+        [WIFI_CMD_PROTO_USAGE] = cmd_wifi_proto_usage,
+        [WIFI_CMD_BW]          = cmd_wifi_bw,
+        [WIFI_CMD_CLEAR]       = cmd_wifi_clear,
+        [WIFI_CMD_RECONNECT]   = cmd_wifi_reconnect,
+        [WIFI_CMD_SCAN]        = cmd_wifi_scan,
+        [WIFI_CMD_JOIN]        = cmd_wifi_join,
+        [WIFI_CMD_JOIN_USAGE]  = cmd_wifi_join_usage,
+    };
+    wifi_cmd_t c;
+    wifi_cmd_parse(args, &c);
+    handler[c.kind](&c);
 }
 
 static void cmd_net(char const *args) {
