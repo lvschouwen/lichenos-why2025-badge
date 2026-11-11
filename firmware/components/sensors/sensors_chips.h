@@ -5,6 +5,7 @@
 // keyboard in between, and waits (heater, soft reset) happen with the bus free.
 
 #include "driver/i2c_master.h"
+#include "sensors_cfg.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -29,6 +30,8 @@ bool                    sensors_imu_init(i2c_master_bus_handle_t bus, int *err);
 sensors_read_t          sensors_imu_read(float accel_g[3], float gyro_dps[3], int16_t raw[6]);
 bool                    sensors_imu_power(bool on); // accel and gyro on, or both off (suspend)
 i2c_master_dev_handle_t sensors_imu_dev(void);
+// Reads accel and gyro configuration back from the chip into c (acc_*, gyr_*); the sampling task only (#318)
+bool                    sensors_imu_read_cfg(sensors_cfg_t *c);
 
 // BME690: soft reset, calibration, forced mode with the gas heater at 300 C for CONFIG_LICHEN_SENSORS_HEATER_MS (or
 // off, CONFIG_LICHEN_SENSORS_GAS_HEATER)
@@ -38,3 +41,5 @@ bool                    sensors_env_init(i2c_master_bus_handle_t bus, int *err);
 uint32_t                sensors_env_trigger(void);
 sensors_read_t          sensors_env_read(float *temp_c, float *rh_pct, float *hpa, float *kohm, bool *gas_ok);
 i2c_master_dev_handle_t sensors_env_dev(void);
+// Reads oversampling, filter and heater registers back from the chip into c (env_*, heat_*); the sampling task only
+bool                    sensors_env_read_cfg(sensors_cfg_t *c);

@@ -90,3 +90,27 @@ sensors_read_t sensors_env_read(float *temp_c, float *rh_pct, float *hpa, float 
 i2c_master_dev_handle_t sensors_env_dev(void) {
     return dev;
 }
+
+// Straight from the registers: the Bosch bme69x_get_heatr_conf only hands back the raw bytes
+bool sensors_env_read_cfg(sensors_cfg_t *c) {
+    struct bme69x_conf rc = {0};
+    uint8_t            ctrl[2] = {0}, res_heat = 0, gas_wait = 0;
+    if (bme69x_get_conf(&rc, &bme) != BME69X_OK || bme69x_get_regs(BME69X_REG_CTRL_GAS_0, ctrl, 2, &bme) != BME69X_OK ||
+        bme69x_get_regs(BME69X_REG_RES_HEAT0, &res_heat, 1, &bme) != BME69X_OK ||
+        bme69x_get_regs(BME69X_REG_GAS_WAIT0, &gas_wait, 1, &bme) != BME69X_OK) {
+        return false;
+    }
+    c->env_os_t   = rc.os_temp;
+    c->env_os_p   = rc.os_pres;
+    c->env_os_h   = rc.os_hum;
+    c->env_filter = rc.filter;
+    c->heat_on    = sensors_heat_on(ctrl[0], ctrl[1]);
+    c->heat_ms    = (uint16_t)sensors_heat_ms(gas_wait);
+    sensors_heat_cal_t cal = {.par_g1         = bme.calib.par_g1,
+                              .par_g2         = bme.calib.par_g2,
+                              .par_g3         = bme.calib.par_g3,
+                              .res_heat_range = bme.calib.res_heat_range,
+                              .res_heat_val   = bme.calib.res_heat_val};
+    c->heat_c = (uint16_t)sensors_heat_temp_c(res_heat, &cal, bme.amb_temp);
+    return true;
+}

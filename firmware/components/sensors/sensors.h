@@ -3,6 +3,7 @@
 // (#221: a driver never defines a gate function); main starts the service (lichen_sensors_start) after the keyboard
 // has the bus, and registers `fw sensors`.
 
+#include "sensors_cfg.h"
 #include "sensors_format.h" // sensors_snap_t
 
 #include <stdbool.h>
@@ -17,6 +18,13 @@ bool sensors_running(void);
 void sensors_set_periods(uint32_t imu_ms, uint32_t env_ms);
 
 void sensors_register_console(void);
+
+// The chips' configuration as they report it (#318): the value of key (sensors_cfg_key_t) from the cached read-back the
+// sampling task takes after each chip init. live = also ask the task for a fresh read-back and wait for it (up to
+// about 300 ms; only when the service runs): a console ask. Screens pass false and never touch the bus. False when the
+// chip is not up or its read-back failed: a clear failure, never zeros. *out is the register code, or the decoded
+// heater temperature (C) / duration (ms) / on flag.
+bool sensors_cfg_get(unsigned key, bool live, uint32_t *out);
 
 // badge_fw u8, 0 = boot leaves the service stopped (`fw sensors boot off`, a #115 diagnosis); missing = start
 #define SENSORS_BOOT_KEY "sens_boot"

@@ -389,6 +389,15 @@ add_test(NAME display_timing_test COMMAND display_timing_test)
 
 # ---- registry domain 0x13 sens.* (#318): this domain's agent adds its own test below and touches no other block -------
 # (the rows are reg_p4_sensors.c; reg_service_test above already links every row file and pins the split)
+add_executable(reg_sensors_test ${CMAKE_CURRENT_SOURCE_DIR}/reg_sensors_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg/reg.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_sensors.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sensors/sensors_cfg.c)
+target_include_directories(reg_sensors_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sensors)
+target_compile_options(reg_sensors_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(reg_sensors_test PRIVATE m)
+add_test(NAME reg_sensors_test COMMAND reg_sensors_test)
 # ---- end of the sensors block ------------------------------------------------------------------------------
 
 # ---- registry domain 0x14 haptics.*, led.*, tz, hold.* (#319): this domain's agent adds its own test below and touches no other block -------

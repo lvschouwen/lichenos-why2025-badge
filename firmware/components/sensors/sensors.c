@@ -26,6 +26,7 @@ static char const TAG[] = "sensors";
 #define IMU_STALE_US  1000000LL // no new IMU data for this long counts as a failed read (chip reset, stuck)
 #define ENV_MARGIN_US 5000      // after the measurement time the BME690 reports, before the first read
 #define ENV_RETRY_US  5000      // a measurement not done yet: read again this much later ...
+#define CFG_WAIT_MS   300       // a live configuration ask waits this long for the task (an init in progress is slower)
 #define ENV_RETRIES   4         // ... this often (about 20 ms) before it counts as a failure
 
 typedef struct {
@@ -38,6 +39,9 @@ typedef struct {
 } chip_t;
 
 static portMUX_TYPE     lock = portMUX_INITIALIZER_UNLOCKED;
+static sensors_cfg_t    cfg;      // under lock: the chips' configuration as last read back (#318)
+static atomic_uint      cfg_req;  // read-back asks (sensors_cfg_get live), counted up
+static atomic_uint      cfg_done; // the last ask the task has answered
 static sensors_snap_t snap;  // under lock
 static sensors_stats_t  stats; // under lock
 
@@ -54,6 +58,33 @@ static int64_t                     imu_last_us; // the last new IMU data (or the
 static int                         env_tries;   // reads of the running measurement that found no new data
 static bool                        stack_logged;
 
+// Takes the configuration back from the chips that are up (a chip not up, or a failed read, is not ok); the task only,
+// so it never overlaps the sampling transfers. Not a sampling change: a few register reads, between samples.
+static void refresh_cfg(chip_t const *i, chip_t const *e) {
+    sensors_cfg_t n;
+    taskENTER_CRITICAL(&lock);
+    n = cfg;
+    taskEXIT_CRITICAL(&lock);
+    if (i) {
+        n.imu_ok = i->up && sensors_imu_read_cfg(&n);
+    }
+    if (e) {
+        n.env_ok = e->up && sensors_env_read_cfg(&n);
+    }
+    taskENTER_CRITICAL(&lock);
+    cfg = n;
+    taskEXIT_CRITICAL(&lock);
+}
+
+// A live console ask for the configuration (sensors_cfg_get): answered between samples
+static void serve_cfg_ask(void) {
+    unsigned asked = atomic_load(&cfg_req);
+    if (asked != atomic_load(&cfg_done)) {
+        refresh_cfg(&imu, &env);
+        atomic_store(&cfg_done, asked);
+    }
+}
+
 static void chip_init(chip_t *c, i2c_master_bus_handle_t bus, int64_t now) {
     int  err = 0;
     bool ok  = c == &imu ? sensors_imu_init(bus, &err) : sensors_env_init(bus, &err);
@@ -66,6 +97,7 @@ static void chip_init(chip_t *c, i2c_master_bus_handle_t bus, int64_t now) {
     taskEXIT_CRITICAL(&lock);
     c->fails = 0;
     c->up    = ok;
+    refresh_cfg(c == &imu ? &imu : NULL, c == &env ? &env : NULL);
     if (c == &imu) {
         imu_last_us = esp_timer_get_time();
     }
@@ -102,9 +134,9 @@ static void chip_failed(chip_t *c, int limit, int64_t now) {
     bool down = ++c->fails >= limit;
     if (down) {
         if (c == &imu) {
-            snap.imu_valid = false, stats.imu_up = false;
+            snap.imu_valid = false, stats.imu_up = false, cfg.imu_ok = false;
         } else {
-            snap.env_valid = snap.gas_valid = false, stats.env_up = false;
+            snap.env_valid = snap.gas_valid = false, stats.env_up = false, cfg.env_ok = false;
         }
     }
     taskEXIT_CRITICAL(&lock);
@@ -261,6 +293,7 @@ static void sensors_task(void *arg) {
                 chip_init(&env, bus, now);
                 env_read_at = 0;
             }
+            serve_cfg_ask();
             now = esp_timer_get_time(); // an init takes a while (the BMI270's config upload)
             if (imu.up && now >= imu_next) {
                 sample_imu(now);
@@ -347,4 +380,25 @@ void sensors_stats(sensors_stats_t *out) {
     taskEXIT_CRITICAL(&lock);
     out->imu_ms = atomic_load(&imu_ms);
     out->env_ms = atomic_load(&env_ms);
+}
+
+// A live ask posts a request and waits for the task to answer it, so the bus is never touched from the caller
+static void cfg_ask(void) {
+    unsigned want = atomic_fetch_add(&cfg_req, 1) + 1;
+    poke();
+    TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(CFG_WAIT_MS);
+    while ((int)(atomic_load(&cfg_done) - want) < 0 && (int32_t)(until - xTaskGetTickCount()) > 0) {
+        vTaskDelay(1);
+    }
+}
+
+bool sensors_cfg_get(unsigned key, bool live, uint32_t *out) {
+    if (live && sensors_running()) {
+        cfg_ask();
+    }
+    sensors_cfg_t c;
+    taskENTER_CRITICAL(&lock);
+    c = cfg;
+    taskEXIT_CRITICAL(&lock);
+    return sensors_cfg_value(&c, key, out);
 }

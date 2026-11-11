@@ -90,3 +90,19 @@ sensors_read_t sensors_imu_read(float accel_g[3], float gyro_dps[3], int16_t raw
 i2c_master_dev_handle_t sensors_imu_dev(void) {
     return dev;
 }
+
+bool sensors_imu_read_cfg(sensors_cfg_t *c) {
+    struct bmi2_sens_config cfg[2] = {{.type = BMI2_ACCEL}, {.type = BMI2_GYRO}};
+    if (bmi2_get_sensor_config(cfg, 2, &bmi) != BMI2_OK) {
+        return false;
+    }
+    c->acc_odr   = cfg[0].cfg.acc.odr;
+    c->acc_range = cfg[0].cfg.acc.range;
+    c->acc_bwp   = cfg[0].cfg.acc.bwp;
+    c->acc_perf  = cfg[0].cfg.acc.filter_perf;
+    c->gyr_odr   = cfg[1].cfg.gyr.odr;
+    c->gyr_range = cfg[1].cfg.gyr.range;
+    c->gyr_bwp   = cfg[1].cfg.gyr.bwp;
+    c->gyr_perf  = cfg[1].cfg.gyr.filter_perf;
+    return true;
+}

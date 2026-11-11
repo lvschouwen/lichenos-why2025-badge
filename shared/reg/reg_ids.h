@@ -86,6 +86,24 @@ typedef enum {
     REG_ID_TZ           = 0x1402, // tz.zone       STR, RO: the TZ environment value as set (tzset gives no accept/reject), zone part only: "CET-1CEST"
     REG_ID_HOLD_GPIO12  = 0x1403, // hold.gpio12   BOOL, RO: pad hold latched on the C6 EN line
     REG_ID_HOLD_GPIO13  = 0x1404, // hold.gpio13   BOOL, RO: pad hold latched on the C6 boot strap
+
+    // 0x13 sens: what the BMI270 and BME690 are configured to, read back from the chips (#318). All RO; the value of an
+    // ENUM is the chip's own register code (names in reg_p4_sensors.c); the low byte is sensors_cfg_key_t
+    REG_ID_SENS_ACC_ODR    = 0x1300, // sens.acc_odr     ENUM, RO: accel output data rate
+    REG_ID_SENS_ACC_RANGE  = 0x1301, // sens.acc_range   ENUM, RO: accel full scale
+    REG_ID_SENS_ACC_BWP    = 0x1302, // sens.acc_bwp     ENUM, RO: accel filter bandwidth / averaging
+    REG_ID_SENS_ACC_PERF   = 0x1303, // sens.acc_perf    ENUM, RO: accel filter power / performance mode
+    REG_ID_SENS_GYR_ODR    = 0x1304, // sens.gyr_odr     ENUM, RO: gyro output data rate
+    REG_ID_SENS_GYR_RANGE  = 0x1305, // sens.gyr_range   ENUM, RO: gyro full scale
+    REG_ID_SENS_GYR_BWP    = 0x1306, // sens.gyr_bwp     ENUM, RO: gyro filter bandwidth
+    REG_ID_SENS_GYR_PERF   = 0x1307, // sens.gyr_perf    ENUM, RO: gyro filter power / performance mode
+    REG_ID_SENS_ENV_OS_T   = 0x1308, // sens.env_os_t    ENUM, RO: BME690 temperature oversampling
+    REG_ID_SENS_ENV_OS_P   = 0x1309, // sens.env_os_p    ENUM, RO: pressure oversampling
+    REG_ID_SENS_ENV_OS_H   = 0x130A, // sens.env_os_h    ENUM, RO: humidity oversampling
+    REG_ID_SENS_ENV_FILTER = 0x130B, // sens.env_filter  ENUM, RO: IIR filter coefficient
+    REG_ID_SENS_HEAT_ON    = 0x130C, // sens.heat_on     BOOL, RO: gas heater enabled
+    REG_ID_SENS_HEAT_TEMP  = 0x130D, // sens.heat_temp   U32 C, RO: heater target, from the chip's resistance register
+    REG_ID_SENS_HEAT_MS    = 0x130E, // sens.heat_ms     U32 ms, RO: heater duration
 } reg_id_t;
 
 #define REG_ID_DOMAIN(id) ((unsigned)(id) >> 8)
