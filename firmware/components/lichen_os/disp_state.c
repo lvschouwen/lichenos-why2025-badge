@@ -1,5 +1,5 @@
-// The display fingerprint (#354): the line of disp_state_fmt.c logged once per boot, after the 60 s PSRAM trial is
-// decided, and on demand with `fw disp state`. Only reads existing getters (registry cache, PSRAM speed record, C6
+// The display fingerprint (#354): the line of disp_state_fmt.c logged once per boot, after the 120 MHz boot has settled
+// (60 s), and on demand with `fw disp state`. Only reads existing getters (registry cache, PSRAM speed record, C6
 // watch, saved backlight levels); no state of its own and no NVS write.
 
 #include "c6link.h"
@@ -18,28 +18,16 @@
 
 static char const TAG[] = "disp";
 
-// After PSRAM_SPEED_TRIAL_SECONDS (60) plus the guard's gate round and a margin, so the trial is decided
+// After PSRAM_SPEED_SETTLE_SECONDS (60) plus a margin, so arms is cleared and a first heap check is in
 #define LOG_AT_US (65LL * 1000000)
 
 #define KEY_LEN 48
 
-static ds_trial_t trial_of(void) {
-    psram_speed_rec_t rec;
-    psram_speed_record(&rec);
-    if (psram_speed_trial_pending()) {
-        return DS_TRIAL_RUNNING;
-    }
-    if (rec.trial == PSRAM_SPEED_TRIAL_ARMED) {
-        return DS_TRIAL_ARMED;
-    }
-    return rec.want == 120 && psram_speed_running() == 120 ? DS_TRIAL_PASSED : DS_TRIAL_NONE;
-}
-
 static void gather(ds_info_t *in, char bufs[][KEY_LEN]) {
     static char const *const keys[] = {"psram.clk", "disp.pclk", "disp.refresh", "bl.display", "bl.keyboard",
-                                       "bl.boot", "bl.idle", "bl.override", "bl.freq"};
+                                       "bl.boot", "bl.idle", "bl.override", "bl.freq", "psram.fail_why"};
     char const **raw[] = {&in->psram_clk_raw, &in->pclk_raw, &in->refresh_raw, &in->bl_raw, &in->kbd_raw,
-                          &in->bl_boot_raw, &in->bl_idle_raw, &in->bl_override_raw, &in->bl_freq_raw};
+                          &in->bl_boot_raw, &in->bl_idle_raw, &in->bl_override_raw, &in->bl_freq_raw, &in->fall_raw};
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         bufs[i][0] = '\0';
         *raw[i]    = lichen_reg_cached_text(keys[i], bufs[i], KEY_LEN) ? bufs[i] : NULL;
@@ -48,7 +36,8 @@ static void gather(ds_info_t *in, char bufs[][KEY_LEN]) {
     psram_speed_record(&rec);
     in->psram_want_mhz = (int)psram_speed_want();
     in->failed         = rec.failed ? 1 : 0;
-    in->trial          = trial_of();
+    in->arms           = rec.arms;
+    in->heap_max_us    = psram_speed_heap_max_us() ? (int64_t)psram_speed_heap_max_us() : -1;
     uint8_t d = 0, k = 0;
     lichen_sys_display_get(&d, &k);
     in->bl_req  = d;
@@ -61,7 +50,7 @@ static void gather(ds_info_t *in, char bufs[][KEY_LEN]) {
 }
 
 static size_t line(char *out, size_t cap) {
-    char      bufs[9][KEY_LEN];
+    char      bufs[10][KEY_LEN];
     ds_info_t in = {0};
     gather(&in, bufs);
     in.reset = psram_speed_reset_name((uint8_t)esp_reset_reason());

@@ -15,29 +15,29 @@ static int failures;
     } while (0)
 
 static void test_all(void) {
-    ds_info_t in = {"sw", "fw-abc1234", "120000000 (1.0 s ago)", 120, DS_TRIAL_PASSED, 0, "36000000", "468 (3.0 s ago)",
+    ds_info_t in = {"sw", "fw-abc1234", "120000000 (1.0 s ago)", 120, 0, 0, "none", 7200, "36000000", "468 (3.0 s ago)",
                     40, 0, "40 (1.0 s ago)", "0", "on", "bright", "none", "1000 (2.0 s ago)", 1, 2, 65};
     char      out[256];
     size_t    n = ds_format(&in, out, sizeof(out));
-    CHECK(strcmp(out, "disp state: boot sw fw-abc1234 | psram 120 want 120 trial passed failed no | pclk 36000000 "
+    CHECK(strcmp(out, "disp state: boot sw fw-abc1234 | psram 120 want 120 failed no arms 0 fall none heapmax 7200us | pclk 36000000 "
                       "refresh 468 | bl 40/40 kbd 0/0 boot on idle bright override none freq 1000 | c6 up restarts 2 "
                       "| uptime 65") == 0);
     CHECK(n == strlen(out));
-    in.failed = 1; in.trial = DS_TRIAL_ARMED; in.c6_up = 0; in.psram_clk_raw = "80000000";
+    in.failed = 1; in.arms = 2; in.fall_raw = "boot_check (1.0 s ago)"; in.c6_up = 0; in.psram_clk_raw = "80000000";
     ds_format(&in, out, sizeof(out));
-    CHECK(strstr(out, "psram 80 want 120 trial armed failed yes") && strstr(out, "c6 down"));
+    CHECK(strstr(out, "psram 80 want 120 failed yes arms 2 fall boot_check") && strstr(out, "c6 down"));
 }
 
 static void test_missing(void) {
-    ds_info_t in = {NULL, NULL, "? (not read yet)", -1, -1, -1, NULL, "", -1, -1, "stale?", "?", NULL, NULL, NULL, NULL, -1, -1, -1};
+    ds_info_t in = {NULL, NULL, "? (not read yet)", -1, -1, -1, NULL, -1, NULL, "", -1, -1, "stale?", "?", NULL, NULL, NULL, NULL, -1, -1, -1};
     char      out[256];
     ds_format(&in, out, sizeof(out));
-    CHECK(strcmp(out, "disp state: boot ? fw-? | psram ? want ? trial ? failed ? | pclk ? refresh ? | bl ?/stale? "
+    CHECK(strcmp(out, "disp state: boot ? fw-? | psram ? want ? failed ? arms ? fall ? heapmax ?us | pclk ? refresh ? | bl ?/stale? "
                       "kbd ?/? boot ? idle ? override ? freq ? | c6 ? restarts ? | uptime ?") == 0);
     in.psram_clk_raw = "abc";
-    in.trial = 9;
+    in.psram_want_mhz = 80;
     ds_format(&in, out, sizeof(out));
-    CHECK(strstr(out, "psram ? want ? trial ?"));
+    CHECK(strstr(out, "psram ? want 80 failed ?"));
 }
 
 static void test_cut(void) {

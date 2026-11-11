@@ -41,17 +41,12 @@ static char const *yes_no(int v, char const *yes, char const *no) {
     return v < 0 ? "?" : v ? yes : no;
 }
 
-static char const *trial_name(int t) {
-    static char const *const names[] = {"none", "armed", "running", "passed"};
-    return t >= DS_TRIAL_NONE && t <= DS_TRIAL_PASSED ? names[t] : "?";
-}
-
 size_t ds_format(ds_info_t const *in, char *out, size_t cap) {
     if (cap == 0) {
         return 0;
     }
     char clk[16], want[24], pclk[16], refresh[16], bl[16], kbd[16], boot[16], idle[16], over[16], freq[16];
-    char rq[24], kq[24], rs[24], up[24];
+    char rq[24], kq[24], rs[24], up[24], arms[24], fall[24], hm[24];
     mhz(in->psram_clk_raw, clk, sizeof(clk));
     num(in->psram_want_mhz, want, sizeof(want));
     token(in->pclk_raw, pclk, sizeof(pclk));
@@ -66,11 +61,14 @@ size_t ds_format(ds_info_t const *in, char *out, size_t cap) {
     num(in->kbd_req, kq, sizeof(kq));
     num(in->c6_restarts, rs, sizeof(rs));
     num(in->uptime_s, up, sizeof(up));
+    num(in->arms, arms, sizeof(arms));
+    token(in->fall_raw, fall, sizeof(fall));
+    num(in->heap_max_us, hm, sizeof(hm));
     int n = snprintf(out, cap,
-                     "disp state: boot %s %s | psram %s want %s trial %s failed %s | pclk %s refresh %s | "
+                     "disp state: boot %s %s | psram %s want %s failed %s arms %s fall %s heapmax %sus | pclk %s refresh %s | "
                      "bl %s/%s kbd %s/%s boot %s idle %s override %s freq %s | c6 %s restarts %s | uptime %s",
                      in->reset && in->reset[0] ? in->reset : "?", in->fw && in->fw[0] ? in->fw : "fw-?", clk, want,
-                     trial_name(in->trial), yes_no(in->failed, "yes", "no"), pclk, refresh, rq, bl, kq, kbd, boot,
+                     yes_no(in->failed, "yes", "no"), arms, fall, hm, pclk, refresh, rq, bl, kq, kbd, boot,
                      idle, over, freq, yes_no(in->c6_up, "up", "down"), rs, up);
     if (n < 0) {
         out[0] = '\0';

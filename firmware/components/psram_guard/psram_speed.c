@@ -206,6 +206,7 @@ static void arm_and_restart(char const *late_why) {
     if (late_why) {
         system_restart(late_why); // the shutdown hook arms again (s_keep120): the saves cannot undo it
     } else {
+        system_restart_note("psram 120 arm (boot)"); // else the history shows an unknown caller
         esp_restart();
     }
 }
@@ -399,6 +400,13 @@ void psram_speed_report(psram_fail_kind_t kind) {
 #ifndef PSRAM_SPEED_HEAP_CHECK_S
 #define PSRAM_SPEED_HEAP_CHECK_S 60 // seconds between checks; 0 = off
 #endif
+
+uint32_t psram_speed_heap_max_us(void) {
+    portENTER_CRITICAL(&s_heap_mux);
+    uint32_t us = s_heap.max_us;
+    portEXIT_CRITICAL(&s_heap_mux);
+    return us;
+}
 
 static void heap_check(psram_speed_rec_t const *r) {
     static unsigned n;

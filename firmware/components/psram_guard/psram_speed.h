@@ -51,6 +51,9 @@ void psram_speed_gate_result(bool bad_bytes, bool console);
 // The badge fell back to 80 MHz on evidence and stays there until a speed is chosen; why gets the notice text
 bool psram_speed_fell(char *why, size_t cap);
 
+// The longest PSRAM heap check so far, us; 0 before the first (one a minute at 120 MHz). Any task (#354)
+uint32_t psram_speed_heap_max_us(void);
+
 // Settings row and console
 bool   psram_speed_choice(unsigned target_mhz); // record + register for the next boot; the caller restarts. False: unsupported
 size_t psram_speed_value(char *out, size_t cap);   // "120 MHz failed, back at 80"
