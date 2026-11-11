@@ -1789,6 +1789,13 @@ target_include_directories(factory_plan_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_options(factory_plan_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME factory_plan_test COMMAND factory_plan_test)
 
+# MeshCore's app record, pinned against the literals the OS used to carry (#230 E1d)
+add_executable(meshcore_app_record_test ${CMAKE_CURRENT_SOURCE_DIR}/meshcore_app_record_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/meshcore_app_record.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/factory_plan.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/files_model.c)
+target_include_directories(meshcore_app_record_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(meshcore_app_record_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME meshcore_app_record_test COMMAND meshcore_app_record_test)
+
 # The settings' secrets class (#235): out of the backup table and the factory reset's keep list
 add_executable(settings_secret_test ${CMAKE_CURRENT_SOURCE_DIR}/settings_secret_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/settings_secret_keys.c
@@ -1925,6 +1932,7 @@ add_custom_target(run_tests
     mesh_ident_test
     ota_autooff_test
     factory_plan_test
+    meshcore_app_record_test
     settings_secret_test
     settings_store_test
     notify_push_test

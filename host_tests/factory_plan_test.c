@@ -37,10 +37,14 @@ static void app_declared_keys_are_kept(void) {
     CHECK(factory_nvs_erases("a.pager", "other", A) && factory_nvs_erases("a.meshcore", "last_tx", A));
     CHECK(!factory_keep_app_key("a.pager", "0123456789abcdef")); // over the 15 an NVS key may have
     CHECK(!factory_keep_app_key(NULL, "k"));
-    for (int i = 0; i < 7; i++) { // 8 fit in all
-        CHECK(factory_keep_app_key("a.x", "k"));
+    CHECK(factory_keep_app_key("a.pager", "last_tx")); // declared twice: one entry, so it uses no second slot
+    for (int i = 0; i < 7; i++) { // 8 fit in all: pager/last_tx above and 7 more
+        char key[8];
+        snprintf(key, sizeof(key), "k%d", i);
+        CHECK(factory_keep_app_key("a.x", key));
     }
-    CHECK(!factory_keep_app_key("a.x", "k"));
+    CHECK(factory_keep_app_key("a.x", "k0"));  // known: still fine when full
+    CHECK(!factory_keep_app_key("a.x", "k9")); // a new one: full
     factory_keep_app_keys_clear();
     factory_keep_app_key("a.meshcore", "mc_advlast"); // what MeshCore's record declares
 }

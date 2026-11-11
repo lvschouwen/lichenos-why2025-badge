@@ -4,6 +4,7 @@
 #include "lichen_sys_app.h"
 
 #include "app_ctx.h"
+#include "app_ns.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -38,14 +39,29 @@ static app_ctx_table_t *table(void) {
     return &s_table;
 }
 
+// An app's backup keys join the SD backup as one group, and only when every key is in the app's own namespace (a group
+// naming badge_fw or another app's would let an app export or overwrite what is not its). Feature lost: logged at E (#113).
+static void register_backup_keys(lichen_app_t const *app) {
+    for (size_t i = 0; i < app->backup_key_count; i++) {
+        if (!app_ns_owns(app->id, app->backup_keys[i].ns)) {
+            ESP_LOGE(TAG, "app %s: backup key %s is not in its namespace: no backup for the app", app->name,
+                     app->backup_keys[i].key);
+            return;
+        }
+    }
+    if (!sb_add_app_keys(app->backup_keys, app->backup_key_count)) {
+        ESP_LOGE(TAG, "app %s: its backup keys do not fit the allow-list (SB_KEYS_MAX): no backup for the app", app->name);
+    }
+}
+
 lichen_ctx_t lichen_register_app(lichen_app_t const *app) {
     app_ctx_table_t *t   = table();
     lichen_ctx_t     ctx = app ? app_ctx_add(t, app, lichen_random_u32()) : LICHEN_CTX_NONE;
     if (ctx == LICHEN_CTX_NONE) {
         ESP_LOGE(TAG, "no room for app %s: LICHEN_MAX_APPS (%d) apps are registered already", app ? app->name : "?",
                  LICHEN_MAX_APPS);
-    } else if (app->backup_keys && !sb_add_app_keys(app->backup_keys, app->backup_key_count)) {
-        ESP_LOGE(TAG, "app %s: its backup keys do not fit the allow-list (SB_KEYS_MAX)", app->name);
+    } else if (app->backup_keys) {
+        register_backup_keys(app);
     }
     return ctx;
 }

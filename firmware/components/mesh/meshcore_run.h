@@ -14,8 +14,7 @@ extern "C" {
 // MeshCore running or not (#103): start at boot (the app's setting "autostart", u8, default 1) and starts and stops on
 // demand, each on a short-lived job task so the asker (LVGL, console) never waits on MeshCore. One at a time.
 
-// The app's id (lichen_app_t.id): its settings namespace a.meshcore and its directory /storage/meshcore
-#define MESHCORE_APP_ID "meshcore"
+#include "meshcore_app_record.h" // MESHCORE_APP_ID
 
 // meshcore_app_register: the app, for its settings and its directory, and the context lichen_register_app gave it
 void meshcore_run_init(lichen_app_t const *app, lichen_ctx_t ctx);

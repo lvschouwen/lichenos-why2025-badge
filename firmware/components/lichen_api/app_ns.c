@@ -23,3 +23,20 @@ bool app_ns_name(char const *id, char *out, size_t cap) {
     snprintf(out, cap, "a.%s", id);
     return true;
 }
+
+bool app_ns_owns(char const *id, char const *ns) {
+    char want[APP_ID_MAX + 3];
+    return ns && app_ns_name(id, want, sizeof(want)) && strcmp(want, ns) == 0;
+}
+
+size_t app_ns_declare_keep(char const *id, char const *const *keys, bool (*add)(char const *ns, char const *key)) {
+    size_t failed = 0;
+    char   ns[APP_ID_MAX + 3];
+    bool   ns_ok = app_ns_name(id, ns, sizeof(ns));
+    for (; keys && *keys; keys++) {
+        if (!ns_ok || !add(ns, *keys)) {
+            failed++;
+        }
+    }
+    return failed;
+}

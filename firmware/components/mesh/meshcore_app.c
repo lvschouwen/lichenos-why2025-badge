@@ -12,6 +12,7 @@
 #include "mesh.h"
 #include "mesh_format.h"
 #include "mesh_radio_line.h"
+#include "meshcore_app_record.h"
 #include "meshcore_run.h"
 #include "meshcore_screens.h"
 #include "meshcore_settings.h"
@@ -388,15 +389,6 @@ static void open_messages(void) {
     }
 }
 
-// Kept over a factory reset: the last advert, so the advert interval (#52) holds and a reset loop never floods
-static char const *const keep_keys[] = {ADV_KEY_LAST, NULL};
-// The notification switches may go in the SD backup (#169); what the badge transmits stays out of it
-static sb_key_t const backup_keys[] = {
-    {"a." MESHCORE_APP_ID, "n_dm", "Notify for direct messages", SB_U8, 0, 1, 1, NULL},
-    {"a." MESHCORE_APP_ID, "n_fail", "Notify for failed sends", SB_U8, 0, 1, 1, NULL},
-    {"a." MESHCORE_APP_ID, "n_ment", "Notify for mentions", SB_U8, 0, 1, 1, NULL},
-};
-
 static lichen_app_t const meshcore_app = {
     .name             = "MeshCore",
     .id               = MESHCORE_APP_ID,
@@ -411,12 +403,12 @@ static lichen_app_t const meshcore_app = {
     .open_messages    = open_messages,
     .open_notification    = meshcore_open_notification,
     .notify_settings_open = meshcore_notify_settings_open,
-    .alias            = "mesh",
-    .keep_keys        = keep_keys,
-    .storage_root     = MESHCORE_APP_ID, // /storage/meshcore: the identity and keys
-    .storage_secret   = true,
-    .backup_keys      = backup_keys,
-    .backup_key_count = sizeof(backup_keys) / sizeof(backup_keys[0]),
+    .alias            = MESHCORE_ALIAS,
+    .keep_keys        = meshcore_keep_keys,
+    .storage_root     = MESHCORE_STORAGE_ROOT,
+    .storage_secret   = MESHCORE_STORAGE_SECRET,
+    .backup_keys      = meshcore_backup_keys,
+    .backup_key_count = MESHCORE_BACKUP_KEYS,
 };
 
 static lichen_app_t const *self(void) {

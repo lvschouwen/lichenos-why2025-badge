@@ -580,18 +580,27 @@ static void on_screen_delete(lv_event_t *e) {
     memset(&s_v, 0, sizeof(s_v));
 }
 
-// The apps' directories under /storage are protected like the OS's (#230 E1d); registered by now, so read each visit
-static void add_app_roots(void) {
+// The apps' directories under /storage are protected like the OS's (#230 E1d); registered by now, so read each visit.
+// False when a secret root could not be added: Files must not list what it cannot hide, so it does not open.
+static bool add_app_roots(void) {
+    bool ok = true;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
         if (app->storage_root && !files_add_app_root(app->storage_root, app->storage_secret)) {
             ESP_LOGE(TAG, "storage root of %s not added", app->name);
+            ok = ok && !app->storage_secret;
         }
     }
+    return ok;
 }
 
 static void open_files(lv_obj_t *screen) {
-    add_app_roots();
+    if (!add_app_roots()) {
+        lv_obj_t *menu = menu_create(screen, "Files");
+        menu_note(menu, "Files is unavailable: too many app folders to protect");
+        shell_on_esc(on_esc, NULL);
+        return;
+    }
     memset(&s_v, 0, sizeof(s_v));
     s_v.screen = screen;
     s_v.group  = lv_group_get_default(); // shell_open's group for this screen while it is built

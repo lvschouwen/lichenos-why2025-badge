@@ -508,15 +508,10 @@ static void start_psram(boot_ctx_t *ctx) {
 // apps that have them are registered before it
 static void declare_keep_keys(void) {
     for (size_t i = 0; i < lichen_app_count(); i++) {
-        lichen_app_t const *app = lichen_app_at(i);
-        char                ns[16];
-        if (!app->keep_keys || !app_ns_name(app->id, ns, sizeof(ns))) {
-            continue;
-        }
-        for (char const *const *k = app->keep_keys; *k; k++) {
-            if (!factory_keep_app_key(ns, *k)) {
-                ESP_LOGE(TAG, "%s: cannot keep %s over a factory reset", app->name, *k);
-            }
+        lichen_app_t const *app    = lichen_app_at(i);
+        size_t              failed = app_ns_declare_keep(app->id, app->keep_keys, factory_keep_app_key);
+        if (failed) {
+            ESP_LOGE(TAG, "%s: %u key(s) not kept over a factory reset", app->name, (unsigned)failed);
         }
     }
 }

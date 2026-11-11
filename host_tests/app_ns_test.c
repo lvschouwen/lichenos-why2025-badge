@@ -26,6 +26,8 @@ int main(void) {
     CHECK(!app_ns_name("Mesh", ns, sizeof(ns)));  // no capitals
     CHECK(!app_ns_name("a-b", ns, sizeof(ns)));   // no dashes
     CHECK(!app_ns_name("a.b", ns, sizeof(ns)));   // no dots
+    CHECK(app_ns_owns("meshcore", "a.meshcore") && !app_ns_owns("meshcore", "a.other") && !app_ns_owns("meshcore", "badge_fw"));
+    CHECK(!app_ns_owns("Bad", "a.Bad") && !app_ns_owns("meshcore", NULL) && !app_ns_owns(NULL, "a.x"));
     CHECK(!app_ns_name("meshcore", ns, 15));      // a buffer that cannot hold the longest name
 
     printf("%s: %d failure(s)\n", __FILE__, failures);

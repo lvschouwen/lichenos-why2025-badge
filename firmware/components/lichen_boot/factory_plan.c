@@ -27,7 +27,15 @@ static char s_keep_app[KEEP_APP_MAX][2][KEEP_NAME_CAP];
 static size_t s_keep_app_n;
 
 bool factory_keep_app_key(char const *ns, char const *key) {
-    if (!ns || !key || strlen(ns) >= KEEP_NAME_CAP || strlen(key) >= KEEP_NAME_CAP || s_keep_app_n >= KEEP_APP_MAX) {
+    if (!ns || !key || strlen(ns) >= KEEP_NAME_CAP || strlen(key) >= KEEP_NAME_CAP) {
+        return false;
+    }
+    for (size_t i = 0; i < s_keep_app_n; i++) {
+        if (!strcmp(s_keep_app[i][0], ns) && !strcmp(s_keep_app[i][1], key)) {
+            return true; // declared already
+        }
+    }
+    if (s_keep_app_n >= KEEP_APP_MAX) {
         return false;
     }
     strcpy(s_keep_app[s_keep_app_n][0], ns);
