@@ -57,5 +57,6 @@ bool tcard_grating_line(tcard_grating_t const *g, int i, tcard_rect_t *out);
 typedef struct {
     char const *fw, *refresh_raw, *bl_disp_raw, *bl_kbd_raw;
     int         req_disp, req_kbd;
+    char const *psram_raw; // psram.clk in Hz (#354); NULL, "" or "?..." reads "?"
 } tcard_info_t;
 void tcard_info_text(tcard_info_t const *in, char *line1, size_t cap1, char *line2, size_t cap2);

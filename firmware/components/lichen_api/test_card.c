@@ -69,17 +69,18 @@ static lv_obj_t *add_info_line(lv_obj_t *card, tcard_rect_t strip, int row) {
 
 static void update_info(lv_timer_t *timer) {
     tcard_t *t = lv_timer_get_user_data(timer);
-    char     hz[40] = "", d[40] = "", k[40] = "", l1[64], l2[64];
+    char     hz[40] = "", d[40] = "", k[40] = "", ps[40] = "", l1[72], l2[64];
     uint8_t  rd = 0, rk = 0;
     if (hooks.reg_get) {
         hooks.reg_get("disp.refresh", hz, sizeof(hz));
         hooks.reg_get("bl.display", d, sizeof(d));
         hooks.reg_get("bl.keyboard", k, sizeof(k));
+        hooks.reg_get("psram.clk", ps, sizeof(ps)); // #354: the speed the panel was shown at
     }
     if (hooks.display_get) {
         hooks.display_get(&rd, &rk); // the saved levels: what `fw bl` and the sliders asked for
     }
-    tcard_info_t in = {hooks.fw_label, hz, d, k, hooks.display_get ? rd : -1, rk};
+    tcard_info_t in = {hooks.fw_label, hz, d, k, hooks.display_get ? rd : -1, rk, ps};
     tcard_info_text(&in, l1, sizeof(l1), l2, sizeof(l2));
     lv_label_set_text(t->line1, l1);
     lv_label_set_text(t->line2, l2);

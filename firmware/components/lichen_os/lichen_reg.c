@@ -475,6 +475,7 @@ void lichen_reg_start(void) {
     console_register("bl", "bl [<display> <keyboard>] (backlight 0-80, screen 10-80, keyboard 0 or 10-80: the C6's limit; = fw set/get bl.*) | bl r16 "
                            "(is R16 fitted?)",
                      cmd_bl);
+    disp_state_start(); // `fw disp state` and the one boot line, whether or not the registry starts (#354)
     size_t bad = reg_p4_check();
     if (bad != reg_p4_total() || !reg_proxy_init(&px, ids, types, n, now_ms())) {
         ESP_LOGE(TAG, "registry table bad at entry %u: not started", (unsigned)bad);

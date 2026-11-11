@@ -191,12 +191,25 @@ static void refresh_text(char const *raw, char *out, size_t cap) {
     snprintf(out, cap, "%u.%u Hz", dhz / 10, dhz % 10);
 }
 
+// psram.clk, Hz, as "120 MHz"; "? MHz" when unread
+static void psram_text(char const *raw, char *out, size_t cap) {
+    char v[16];
+    reg_value(raw, v, sizeof(v));
+    unsigned long hz = 0;
+    if (v[0] == '?' || sscanf(v, "%lu", &hz) != 1) {
+        snprintf(out, cap, "? MHz");
+    } else {
+        snprintf(out, cap, "%lu MHz", (hz + 500000) / 1000000);
+    }
+}
+
 void tcard_info_text(tcard_info_t const *in, char *line1, size_t cap1, char *line2, size_t cap2) {
-    char hz[16], d[16], k[16];
+    char hz[16], d[16], k[16], ps[40];
+    psram_text(in->psram_raw, ps, sizeof(ps));
     refresh_text(in->refresh_raw, hz, sizeof(hz));
     reg_value(in->bl_disp_raw, d, sizeof(d));
     reg_value(in->bl_kbd_raw, k, sizeof(k));
-    snprintf(line1, cap1, "%s   panel %s", in->fw && in->fw[0] ? in->fw : "fw ?", hz);
+    snprintf(line1, cap1, "%s   panel %s   psram %s", in->fw && in->fw[0] ? in->fw : "fw ?", hz, ps);
     if (in->req_disp < 0) { // the caller cannot say what was requested
         snprintf(line2, cap2, "bl applied %s/%s", d, k);
         return;
