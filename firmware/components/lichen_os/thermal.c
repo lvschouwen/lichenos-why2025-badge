@@ -24,6 +24,7 @@
 #include "lichen_notify.h"
 #include "lichen_task.h"
 #include "lichen_sys_app.h"
+#include "lichen_sys_notify.h"
 #include "lichen_radio.h"
 #include "lichen_sensors.h"
 #include "sdkconfig.h"
@@ -125,7 +126,7 @@ static void say(ln_level_t level, char const *title, char const *body, uint32_t 
     esp_log_level_t log = level == LN_ERROR ? ESP_LOG_ERROR : level == LN_WARN ? ESP_LOG_WARN : ESP_LOG_INFO;
     ESP_LOG_LEVEL(log, TAG, "%s: %s", title, body);
     log_event(title);
-    lichen_notify_to(lichen_sys_ctx_os(), level, "battery", title, body, flags);
+    lichen_sys_notify_to(level, "battery", title, body, flags);
 }
 
 static void cause_text(lichen_sys_thermal_info_t const *i, char *out, size_t cap) {
@@ -267,7 +268,7 @@ static void first_run_notice(void) {
     if (settings_get_u8(SEEN_KEY, 0)) {
         return;
     }
-    if (lichen_notify_to(lichen_sys_ctx_os(), LN_WARN, "battery", "About the batteries",
+    if (lichen_sys_notify_to(LN_WARN, "battery", "About the batteries",
                          "The cells are unprotected and the badge cannot see them. Use USB or a power bank, never "
                          "charge unattended. Open this for details.", 0)) {
         settings_set_u8(SEEN_KEY, 1);

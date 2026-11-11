@@ -182,41 +182,44 @@ bool lichen_fs_sd_bytes(uint64_t *total, uint64_t *used) {
     return true;
 }
 
-// Who holds the batch lock, for the log line of whoever waits in vain. A hint only: written under the lock, read racily.
 static char const *volatile sd_holder;
 
-// The label the batch lock is held under: the app's id, NULL for the OS (read as "the OS"). False when ctx is refused
-// (logged by the context table) or an app has no id.
-static bool batch_holder(lichen_ctx_t ctx, char const *what, char const **holder) {
-    char const     *id   = NULL;
-    char const     *name = NULL;
-    gate_app_kind_t kind = lichen_sys_ctx_app(ctx, what, &id, &name);
-    *holder              = kind == GATE_APP_ID ? id : NULL;
-    return kind == GATE_APP_ID || kind == GATE_APP_OS;
-}
+// Who holds the batch lock: the ctx (0 = nobody) so only it may end the batch, and its app id for the log line of
+// whoever waits in vain. Written under the lock, read racily: a hint, not a decision, except for the ctx compare in
+// lichen_fs_sd_end, which only the holder can pass.
+static volatile uint32_t sd_holder_ctx;
 
 bool lichen_fs_sd_begin(lichen_ctx_t ctx, uint32_t wait_ms) {
-    char const *who;
-    if (!batch_holder(ctx, "lichen_fs_sd_begin", &who)) {
-        return false;
+    char const     *id   = NULL;
+    char const     *name = NULL;
+    gate_app_kind_t kind = lichen_sys_ctx_caller(ctx, "lichen_fs_sd_begin", &id, &name);
+    if (kind != GATE_APP_ID) {
+        return false; // refused (logged), the OS's own, or an app without an id
     }
     if (!sd_begin(wait_ms)) {
         char const *holder = sd_holder;
         if (sd_mounted()) {
-            ESP_LOGW(TAG, "%s: SD card busy (held by %s)", who ? who : "the OS", holder ? holder : "the OS");
+            ESP_LOGW(TAG, "%s: SD card busy (held by %s)", id, holder ? holder : "the OS");
         }
         return false;
     }
-    sd_holder = who;
+    sd_holder     = id;
+    sd_holder_ctx = ctx;
     return true;
 }
 
 void lichen_fs_sd_end(lichen_ctx_t ctx, int err) {
-    char const *who;
-    if (!batch_holder(ctx, "lichen_fs_sd_end", &who)) {
+    char const *id, *name;
+    if (lichen_sys_ctx_caller(ctx, "lichen_fs_sd_end", &id, &name) == GATE_APP_REFUSED) {
         return; // a made-up ctx cannot end a batch somebody else holds
     }
-    sd_holder = NULL;
+    if (!gate_batch_may_end(sd_holder_ctx, ctx)) {
+        ESP_LOGW(TAG, "%s: lichen_fs_sd_end without its own batch (held by %s): ignored", id ? id : "?",
+                 sd_holder ? sd_holder : "nobody");
+        return;
+    }
+    sd_holder     = NULL;
+    sd_holder_ctx = 0;
     sd_end(sd_io_from_errno(err));
 }
 

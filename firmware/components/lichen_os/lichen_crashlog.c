@@ -73,11 +73,12 @@ static uint64_t marker(uint32_t count, uint32_t hash) {
     return ((uint64_t)count << 32) | hash;
 }
 
-// False (nothing may be done) when ctx is refused: the context table has logged and counted it. The OS's ctx passes;
-// it has no marker of its own (the settings refuse it), the log itself is the OS's to read and clear.
+// False (nothing may be done) when ctx is refused: the context table has logged and counted it. The OS's own ctx is
+// refused too (an app reaches it through lichen_ctx_self() outside its hooks); the OS clears the log with
+// "fw crash clear".
 static bool ctx_ok(lichen_ctx_t ctx, char const *what) {
     char const *id, *name;
-    return lichen_sys_ctx_app(ctx, what, &id, &name) != GATE_APP_REFUSED;
+    return lichen_sys_ctx_caller(ctx, what, &id, &name) != GATE_APP_REFUSED;
 }
 
 static void store_seen(lichen_ctx_t ctx, uint32_t count, uint32_t hash) {

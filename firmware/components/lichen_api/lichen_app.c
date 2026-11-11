@@ -214,18 +214,29 @@ static bool env_resolve(uint32_t ctx, char const **id, char const **name, char c
     return true;
 }
 
-static gate_app_env_t const s_app_env = {.resolve = env_resolve, .os = lichen_sys_ctx_os};
+// A valid ctx an app-facing call may not use (the OS's): counted and logged like any refusal
+static void env_refuse(uint32_t ctx, char const *what) {
+    app_ctx_count_refusal(&s_table, ctx);
+    log_refusal(ctx, what, lichen_ctx_self());
+}
+
+static gate_app_env_t const s_app_env = {.resolve = env_resolve, .os = lichen_sys_ctx_os, .refuse = env_refuse};
 
 gate_app_kind_t lichen_sys_ctx_app(lichen_ctx_t ctx, char const *what, char const **id, char const **name) {
     return gate_app_id(&s_app_env, ctx, what, id, name);
+}
+
+gate_app_kind_t lichen_sys_ctx_caller(lichen_ctx_t ctx, char const *what, char const **id, char const **name) {
+    return gate_app_caller(&s_app_env, ctx, what, id, name);
 }
 
 char const *lichen_sys_ctx_source(lichen_ctx_t ctx, char const *what) {
     return gate_app_source(&s_app_env, ctx, what);
 }
 
-bool lichen_sys_ctx_settings_ns(lichen_ctx_t ctx, char const *what, char *ns, size_t cap) {
-    return gate_app_settings_ns(&s_app_env, ctx, what, ns, cap);
+gate_app_kind_t lichen_sys_ctx_settings_ns(lichen_ctx_t ctx, char const *what, char *ns, size_t cap,
+                                           char const **name) {
+    return gate_app_settings_ns(&s_app_env, ctx, what, ns, cap, name);
 }
 
 // ---- fw app ctx ----------------------------------------------------------------------------------------------------

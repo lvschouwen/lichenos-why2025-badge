@@ -1667,6 +1667,7 @@ add_executable(gate_app_test
     ${CMAKE_CURRENT_SOURCE_DIR}/gate_app_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/gate_app.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/fs_path.c
 )
 target_include_directories(gate_app_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(gate_app_test PRIVATE -Wall -Wextra -Werror)

@@ -16,6 +16,7 @@
 #include "lichen_sys_storage.h"
 #include "lichen_task.h"
 #include "lichen_sys_app.h"
+#include "lichen_sys_notify.h"
 #include "psram_boot.h"
 #include "storage.h"
 #include "sys_notice_rules.h"
@@ -124,7 +125,7 @@ static void notices_task(void *arg) {
             sysn_info_t const info = sysn_info(events[i]);
             body_for(events[i], &snap, &sd, body, sizeof(body));
             ESP_LOG_LEVEL(log_level((ln_level_t)info.level), TAG, "%s: %s", info.title, body);
-            lichen_notify_to(lichen_sys_ctx_os(), (ln_level_t)info.level, info.target, info.title, body, info.flags);
+            lichen_sys_notify_to((ln_level_t)info.level, info.target, info.title, body, info.flags);
         }
         if (poll == STACK_LOG_POLL) {
             ESP_LOGI(TAG, "stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));

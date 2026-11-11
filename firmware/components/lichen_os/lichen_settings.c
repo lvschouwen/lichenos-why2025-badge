@@ -2,6 +2,7 @@
 
 #include "lichen_sys_app.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 #include "nvs.h"
 #include "settings_fail.h"
 
@@ -9,17 +10,37 @@
 
 static char const TAG[] = "settings";
 
+// Says once per ctx that an app (or the OS) asked for settings it cannot have: a few are remembered, so one busy app
+// does not hide another's mistake and none of them fills the log
+static void note_no_namespace(lichen_ctx_t ctx, char const *name) {
+    static lichen_ctx_t told[4];
+    static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+    bool                first = true;
+    portENTER_CRITICAL(&mux);
+    for (size_t i = 0; i < sizeof(told) / sizeof(told[0]) && first; i++) {
+        if (told[i] == ctx) {
+            first = false;
+        } else if (told[i] == 0) {
+            told[i] = ctx;
+            break;
+        }
+    }
+    portEXIT_CRITICAL(&mux);
+    if (first) {
+        ESP_LOGE(TAG, "%s has no settings namespace (the OS's, or no usable id)", name ? name : "the OS");
+    }
+}
+
 // False for a ctx that is refused (logged by the context table), the OS's or an app without a usable id (said once
 // here), or when NVS refuses; a namespace that was never written to does not exist yet, which is the quiet "no settings"
 // answer for reads
 static bool open_app(lichen_ctx_t ctx, nvs_open_mode_t mode, nvs_handle_t *out) {
-    char ns[16];
-    if (!lichen_sys_ctx_settings_ns(ctx, "app_settings", ns, sizeof(ns))) {
-        static bool told;
-        if (!told) {
-            told = true;
-            ESP_LOGE(TAG, "ctx 0x%08lx has no settings namespace (refused, the OS's, or no usable id)",
-                     (unsigned long)ctx);
+    char            ns[16];
+    char const     *name = NULL;
+    gate_app_kind_t kind = lichen_sys_ctx_settings_ns(ctx, "app_settings", ns, sizeof(ns), &name);
+    if (kind != GATE_APP_ID) {
+        if (kind != GATE_APP_REFUSED) { // a refused ctx is logged by the context table
+            note_no_namespace(ctx, name);
         }
         return false;
     }

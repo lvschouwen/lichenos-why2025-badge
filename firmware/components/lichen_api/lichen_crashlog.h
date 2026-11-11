@@ -7,8 +7,8 @@
 //
 // The calls that keep a seen marker (delete, clear, status, mark_seen) take the caller's own ctx (#230 E1c): the marker
 // is that app's setting. A stale or made-up ctx is refused (logged at most once per 10 s, counted in "fw app ctx",
-// never an abort): nothing is read, deleted or cleared and the call returns false. The OS's ctx (the console, boot)
-// is allowed, it just has no marker.
+// never an abort): nothing is read, deleted or cleared and the call returns false. So is the OS's own ctx, which an
+// app can reach through lichen_ctx_self() outside its hooks: the OS clears the log from the console ("fw crash clear").
 
 #include "crashlog_fmt.h"
 #include "lichen_app.h"

@@ -20,6 +20,9 @@ static int failures;
 #define MESH_CTX  0x00b0b001u
 #define NOID_CTX  0x00c0c002u
 #define BADID_CTX 0x00d0d003u // an id NVS cannot take as a namespace
+#define LICHEN_ID_CTX 0x00e0e004u // an app that registered with the OS's notification source as its id
+#define TEST_ID_CTX   0x00f0f005u
+#define C6_ID_CTX     0x0010f006u
 #define STALE_CTX (MESH_CTX ^ 0x100u)
 
 static unsigned refused;
@@ -34,6 +37,9 @@ static bool fake_resolve(uint32_t ctx, char const **id, char const **name, char 
     } else if (ctx == NOID_CTX) {
         *id   = NULL;
         *name = "Clock";
+    } else if (ctx == LICHEN_ID_CTX || ctx == TEST_ID_CTX || ctx == C6_ID_CTX) {
+        *id   = ctx == LICHEN_ID_CTX ? "lichen" : ctx == TEST_ID_CTX ? "test" : "c6";
+        *name = "Impostor";
     } else if (ctx == BADID_CTX) {
         *id   = "Not Valid!";
         *name = "Odd";
@@ -46,7 +52,13 @@ static bool fake_resolve(uint32_t ctx, char const **id, char const **name, char 
 static uint32_t fake_os(void) {
     return OS_CTX;
 }
-static gate_app_env_t const g = {.resolve = fake_resolve, .os = fake_os};
+static unsigned os_refused;
+static void fake_refuse(uint32_t ctx, char const *what) {
+    (void)what;
+    (void)ctx;
+    os_refused++;
+}
+static gate_app_env_t const g = {.resolve = fake_resolve, .os = fake_os, .refuse = fake_refuse};
 
 static void test_kind(void) {
     char const *id = "untouched", *name = "untouched";
@@ -63,26 +75,56 @@ static void test_kind(void) {
 
 static void test_source(void) {
     CHECK(strcmp(gate_app_source(&g, MESH_CTX, "n"), "meshcore") == 0);
-    CHECK(strcmp(gate_app_source(&g, OS_CTX, "n"), "lichen") == 0);
-    CHECK(gate_app_source(&g, NOID_CTX, "n") == NULL); // no id to post under: dropped, not posted as the OS
+    CHECK(gate_app_source(&g, NOID_CTX, "n") == NULL); // no id to post under
     CHECK(gate_app_source(&g, STALE_CTX, "n") == NULL); // an app cannot post as another by guessing its ctx
 }
 
+static void test_os_ctx_refused(void) {
+    char const *id = NULL, *name = NULL;
+    os_refused = 0;
+    CHECK(gate_app_source(&g, OS_CTX, "n") == NULL && os_refused == 1); // an app-facing call refuses the OS's ctx
+    CHECK(gate_app_caller(&g, OS_CTX, "x", &id, &name) == GATE_APP_REFUSED && os_refused == 2);
+    CHECK(gate_app_caller(&g, MESH_CTX, "x", &id, &name) == GATE_APP_ID && os_refused == 2); // an app is not counted
+    CHECK(gate_app_id(&g, OS_CTX, "x", &id, &name) == GATE_APP_OS && os_refused == 2); // the OS-side lookup still says OS
+}
+
+static void test_reserved_ids(void) {
+    char const *id = NULL, *name = NULL;
+    char        ns[16];
+    CHECK(gate_app_id(&g, LICHEN_ID_CTX, "t", &id, &name) == GATE_APP_NO_ID && id == NULL); // not the OS's source
+    CHECK(gate_app_source(&g, LICHEN_ID_CTX, "n") == NULL);
+    CHECK(gate_app_id(&g, TEST_ID_CTX, "t", &id, &name) == GATE_APP_NO_ID);
+    CHECK(gate_app_id(&g, C6_ID_CTX, "t", &id, &name) == GATE_APP_NO_ID); // the C6 image's drive folder
+    CHECK(gate_app_settings_ns(&g, LICHEN_ID_CTX, "s", ns, sizeof(ns), &name) == GATE_APP_NO_ID);
+}
+
 static void test_settings_ns(void) {
-    char ns[16] = "";
-    CHECK(gate_app_settings_ns(&g, MESH_CTX, "s", ns, sizeof(ns)) && strcmp(ns, "a.meshcore") == 0);
+    char        ns[16] = "";
+    char const *name   = NULL;
+    CHECK(gate_app_settings_ns(&g, MESH_CTX, "s", ns, sizeof(ns), &name) == GATE_APP_ID && strcmp(ns, "a.meshcore") == 0);
     strcpy(ns, "keep");
-    CHECK(!gate_app_settings_ns(&g, OS_CTX, "s", ns, sizeof(ns))); // the OS has no app namespace
-    CHECK(!gate_app_settings_ns(&g, NOID_CTX, "s", ns, sizeof(ns)));
-    CHECK(!gate_app_settings_ns(&g, BADID_CTX, "s", ns, sizeof(ns)));
-    CHECK(!gate_app_settings_ns(&g, STALE_CTX, "s", ns, sizeof(ns)));
+    CHECK(gate_app_settings_ns(&g, OS_CTX, "s", ns, sizeof(ns), &name) == GATE_APP_OS); // the OS has no app namespace
+    CHECK(gate_app_settings_ns(&g, NOID_CTX, "s", ns, sizeof(ns), &name) == GATE_APP_NO_ID && strcmp(name, "Clock") == 0);
+    CHECK(gate_app_settings_ns(&g, BADID_CTX, "s", ns, sizeof(ns), &name) == GATE_APP_NO_ID);
+    name = NULL;
+    CHECK(gate_app_settings_ns(&g, STALE_CTX, "s", ns, sizeof(ns), &name) == GATE_APP_REFUSED && name == NULL);
     CHECK(strcmp(ns, "keep") == 0);
+}
+
+static void test_batch(void) {
+    CHECK(gate_batch_may_end(MESH_CTX, MESH_CTX));
+    CHECK(!gate_batch_may_end(MESH_CTX, NOID_CTX)); // another ctx cannot end somebody's batch
+    CHECK(!gate_batch_may_end(0, MESH_CTX));        // nobody holds one
+    CHECK(!gate_batch_may_end(0, 0));
 }
 
 int main(void) {
     test_kind();
     test_source();
+    test_os_ctx_refused();
+    test_reserved_ids();
     test_settings_ns();
+    test_batch();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -8,6 +8,7 @@
 // hooks lichen_os binds (notify_bind.h), and fires the feedback hooks it was given; neither driver calls in (#245).
 #include "notify_os.h"
 #include "lichen_sys_app.h"
+#include "lichen_sys_notify.h"
 #include "notify_post.h"
 #include "notify_bind.h"
 #include "notify_push.h"
@@ -472,8 +473,18 @@ uint32_t lichen_notify_post(char const *source, ln_level_t level, char const *ta
 
 uint32_t lichen_notify_to(lichen_ctx_t ctx, ln_level_t level, char const *target, char const *title, char const *body,
                           uint32_t flags) {
-    // The source is the ctx's app, never the caller's word; NULL (refused ctx, no id) is dropped by lichen_notify_post
+    // The source is the ctx's app, never the caller's word; NULL (refused ctx, the OS's, no id) is dropped by
+    // lichen_notify_post
     return lichen_notify_post(lichen_sys_ctx_source(ctx, "lichen_notify"), level, target, title, body, flags);
+}
+
+uint32_t lichen_sys_notify_to(ln_level_t level, char const *target, char const *title, char const *body,
+                              uint32_t flags) {
+    return lichen_notify_post(GATE_OS_SOURCE, level, target, title, body, flags);
+}
+
+uint32_t lichen_sys_notify(ln_level_t level, char const *title, char const *body, uint32_t flags) {
+    return lichen_sys_notify_to(level, NULL, title, body, flags);
 }
 
 uint32_t lichen_notify(lichen_ctx_t ctx, ln_level_t level, char const *title, char const *body, uint32_t flags) {

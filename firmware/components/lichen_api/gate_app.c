@@ -2,6 +2,16 @@
 #include "gate_app.h"
 
 #include "app_ns.h"
+#include "fs_path.h"
+
+#include <string.h>
+
+// An id an app may have: the app id rules, none of the drive folders the OS keeps (fs_path.h), and not the console's
+// notification source
+static bool id_usable(char const *id) {
+    char path[16];
+    return id && id[0] && strcmp(id, "test") != 0 && fs_app_dir_path("/", id, path, sizeof(path));
+}
 
 gate_app_kind_t gate_app_id(gate_app_env_t const *g, uint32_t ctx, char const *what, char const **id,
                             char const **name) {
@@ -14,22 +24,39 @@ gate_app_kind_t gate_app_id(gate_app_env_t const *g, uint32_t ctx, char const *w
         return GATE_APP_OS;
     }
     *name = app_name;
-    if (!app_id || !app_id[0]) {
+    if (!id_usable(app_id)) {
         return GATE_APP_NO_ID;
     }
     *id = app_id;
     return GATE_APP_ID;
 }
 
-char const *gate_app_source(gate_app_env_t const *g, uint32_t ctx, char const *what) {
-    char const     *id   = NULL;
-    char const     *name = NULL;
-    gate_app_kind_t kind = gate_app_id(g, ctx, what, &id, &name);
-    return kind == GATE_APP_OS ? GATE_OS_SOURCE : kind == GATE_APP_ID ? id : NULL;
+gate_app_kind_t gate_app_caller(gate_app_env_t const *g, uint32_t ctx, char const *what, char const **id,
+                                char const **name) {
+    gate_app_kind_t kind = gate_app_id(g, ctx, what, id, name);
+    if (kind == GATE_APP_OS) {
+        g->refuse(ctx, what);
+        return GATE_APP_REFUSED;
+    }
+    return kind;
 }
 
-bool gate_app_settings_ns(gate_app_env_t const *g, uint32_t ctx, char const *what, char *ns, size_t cap) {
+char const *gate_app_source(gate_app_env_t const *g, uint32_t ctx, char const *what) {
     char const *id   = NULL;
     char const *name = NULL;
-    return gate_app_id(g, ctx, what, &id, &name) == GATE_APP_ID && app_ns_name(id, ns, cap);
+    return gate_app_caller(g, ctx, what, &id, &name) == GATE_APP_ID ? id : NULL;
+}
+
+gate_app_kind_t gate_app_settings_ns(gate_app_env_t const *g, uint32_t ctx, char const *what, char *ns, size_t cap,
+                                     char const **name) {
+    char const     *id   = NULL;
+    gate_app_kind_t kind = gate_app_id(g, ctx, what, &id, name);
+    if (kind == GATE_APP_ID && !app_ns_name(id, ns, cap)) {
+        return GATE_APP_NO_ID;
+    }
+    return kind;
+}
+
+bool gate_batch_may_end(uint32_t held, uint32_t ctx) {
+    return held != 0 && held == ctx;
 }

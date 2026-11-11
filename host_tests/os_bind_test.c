@@ -2,7 +2,7 @@
 // binds (the LED's dnd/unread setters, haptics_notice as the vibrate feedback, called with the toast's level), and the
 // lower services get the settings, the Wi-Fi switch and the factory reset's notice. Everything around it is stubbed.
 #include "lichen_os.h"
-#include "lichen_sys_app.h"
+#include "lichen_sys_notify.h"
 
 #include "boot_progress.h"
 #include "factory_reset.h"
@@ -42,9 +42,8 @@ static uint8_t (*s_clock_get)(char const *, uint8_t);
 static bool (*s_clock_set)(char const *, uint8_t);
 static void (*s_factory)(char const *, char const *);
 static int  s_led_dnd = -1, s_led_unread = -1, s_notice = -1, s_notifies;
-static lichen_ctx_t s_ctx;
+static int s_os; // notices raised through the OS-only call (source "lichen")
 static char         s_title[64];
-#define OS_CTX 0x00a0a000u // what the stub lichen_sys_ctx_os gives: the notice must be raised as the OS
 static int  s_level = -1;
 static bool s_wifi;
 
@@ -76,13 +75,10 @@ void clock_bind_store(uint8_t (*get)(char const *key, uint8_t def), bool (*set)(
 void factory_reset_bind_notice(void (*error)(char const *title, char const *body)) {
     s_factory = error;
 }
-lichen_ctx_t lichen_sys_ctx_os(void) {
-    return OS_CTX;
-}
-uint32_t lichen_notify(lichen_ctx_t ctx, ln_level_t level, char const *title, char const *body, uint32_t flags) {
+uint32_t lichen_sys_notify(ln_level_t level, char const *title, char const *body, uint32_t flags) {
     (void)body;
     (void)flags;
-    s_ctx = ctx;
+    s_os++;
     snprintf(s_title, sizeof(s_title), "%s", title);
     s_level = (int)level;
     s_notifies++;
@@ -161,7 +157,7 @@ static void factory_notice_is_an_os_error(void) {
     }
     s_factory("Factory reset could not fully erase settings", "body");
     CHECK(s_notifies == 1);
-    CHECK(s_ctx == OS_CTX && s_level == LN_ERROR);
+    CHECK(s_os == 1 && s_level == LN_ERROR);
     CHECK(strcmp(s_title, "Factory reset could not fully erase settings") == 0);
 }
 

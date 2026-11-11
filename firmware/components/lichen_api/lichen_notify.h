@@ -16,9 +16,9 @@
 //
 // This service does not set tile badges: an app sets its own with lichen_badge_set (lichen_badge.h).
 //
-// The source is not a parameter (#230 E1c): it is the id of the app ctx stands for ("lichen" for the OS's own ctx), so
+// The source is not a parameter (#230 E1c): it is the id of the app ctx stands for, so
 // an app cannot post as another. ctx is the caller's own context, the one lichen_register_app gave the app. A stale or
-// made-up ctx, or an app without an id, drops the notice (returns 0; a refused ctx is logged at most once per 10 s and
+// made-up ctx, the OS's own ctx (the OS uses lichen_sys_notify.h) or an app without an id drops the notice (returns 0; a refused ctx is logged at most once per 10 s and
 // counted in "fw app ctx", never an abort).
 
 #include "lichen_app.h"

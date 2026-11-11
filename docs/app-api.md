@@ -216,9 +216,10 @@ calls take the context: an app keeps what `lichen_register_app` returned and pas
 context, the app id is only the printed label. A refused `lichen_alloc` or `lichen_task_start` fails (NULL, false), a
 refused `lichen_free` frees nothing. Since E1c the settings (`app_settings_*`), file (`lichen_fs_app_dir`/`_sd_dir`/`_sd_begin`/`_sd_end`), crash log
 (`delete`, `clear`, `status`, `mark_seen`), badge and notification calls take it too, and act for that context only: the
-namespace, directory and tile are the ctx's app's, a notice's source is its id (the OS's context raises as "lichen"),
-and `lichen_badge_set/get` reach no other app's tile (the shell uses `lichen_sys_badge_*`). The OS's context has no
-settings namespace or directory (those calls refuse it), but may hold the SD batch lock and clear the crash log. A
+namespace, directory and tile are the ctx's app's, a notice's source is its id (the OS raises as "lichen" through `lichen_sys_notify.h`; an id of "lichen", "test", "c6" or "crash" is no id),
+and `lichen_badge_set/get` reach no other app's tile (the shell uses `lichen_sys_badge_*`). The OS's own context is refused by every one of these app-facing calls
+(counted like a bad one): an app can reach it through `lichen_ctx_self()` outside its hooks, so it must not carry the
+OS's powers. An SD batch is ended by the ctx that began it. A
 refused context does nothing before it looks at the caller's data: reads give the default or 0, writes false, a
 notice is dropped, a refused `lichen_fs_sd_end` leaves the lock alone. The pure decision is `gate_app.c`
 (`host_tests/gate_app_test.c`). Still on the compat shim until E1e: `lichen_app_at`/`lichen_app_by_id`.

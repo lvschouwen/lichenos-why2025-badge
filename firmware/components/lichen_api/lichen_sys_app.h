@@ -42,11 +42,16 @@ bool lichen_sys_ctx_resolve(lichen_ctx_t ctx, lichen_app_t const **app, char con
 // gate_app.c's rules (#230 E1c): the kind and, for an app, its id and name; a refused ctx is logged (rate-limited)
 // and counted under what, never an abort. Any task or ISR.
 gate_app_kind_t lichen_sys_ctx_app(lichen_ctx_t ctx, char const *what, char const **id, char const **name);
-// The notification source ctx raises under: its app's id, "lichen" for the OS, NULL (dropped) for a refused ctx or an
-// app without an id
+// As lichen_sys_ctx_app for the app-facing calls with powers (notices, crash log rewrites, the SD batch): the OS's own
+// ctx is refused too (counted), since an app can reach it through lichen_ctx_self() outside its hooks
+gate_app_kind_t lichen_sys_ctx_caller(lichen_ctx_t ctx, char const *what, char const **id, char const **name);
+// The notification source an app-facing call raises under: its app's id; NULL (dropped) for a refused ctx, the OS's or
+// an app without an id
 char const *lichen_sys_ctx_source(lichen_ctx_t ctx, char const *what);
-// The settings namespace "a.<id>" of ctx's app in ns (at least 16); false for a refused ctx, the OS's or a bad id
-bool lichen_sys_ctx_settings_ns(lichen_ctx_t ctx, char const *what, char *ns, size_t cap);
+// The settings namespace "a.<id>" of ctx's app in ns (at least 16): GATE_APP_ID when made, else why not (*name is set
+// for a ctx that was not refused)
+gate_app_kind_t lichen_sys_ctx_settings_ns(lichen_ctx_t ctx, char const *what, char *ns, size_t cap,
+                                           char const **name);
 
 // main.c, once (the main task, not on the LVGL task): "fw app ctx" (every app's context, the refusals since boot
 // and the last refused value)

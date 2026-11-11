@@ -19,6 +19,9 @@ typedef struct {
     // the implementation logs (rate-limited) and counts it under what. Never blocks, takes no lock.
     bool (*resolve)(uint32_t ctx, char const **id, char const **name, char const *what);
     uint32_t (*os)(void); // the OS's context
+    // Counts and logs (rate-limited) a refusal of a ctx that is valid but not allowed for the call: the OS's on an
+    // app-facing call. Never blocks.
+    void (*refuse)(uint32_t ctx, char const *what);
 } gate_app_env_t;
 
 typedef enum {
@@ -28,19 +31,31 @@ typedef enum {
     GATE_APP_ID,      // an app with an id: *id is it
 } gate_app_kind_t;
 
-// What ctx stands for. *id and *name are set for GATE_APP_ID and GATE_APP_NO_ID (name), untouched otherwise.
+// What ctx stands for. *id and *name are set for GATE_APP_ID and GATE_APP_NO_ID (name), untouched otherwise. An id the
+// OS keeps for itself is no id: "lichen" (the OS's notification source), "test" (the console's) and the drive folders
+// of fs_path.h (c6, crash, lichen) give GATE_APP_NO_ID, so an app cannot post or file under the OS's names.
 gate_app_kind_t gate_app_id(gate_app_env_t const *g, uint32_t ctx, char const *what, char const **id,
                             char const **name);
 
-#define GATE_OS_SOURCE "lichen" // the notification source of the OS's own notices
+// For the app-facing calls with powers (notices, the crash log's rewrites, the SD batch): as gate_app_id, and the
+// OS's own ctx is refused too (counted like a bad one, g->refuse), because an app reaches it through lichen_ctx_self()
+// outside its hooks (an esp_timer or LVGL callback). The OS does these through lichen_sys_* calls instead.
+gate_app_kind_t gate_app_caller(gate_app_env_t const *g, uint32_t ctx, char const *what, char const **id,
+                                char const **name);
 
-// The notification source ctx raises under: its app's id, "lichen" for the OS. NULL for a refused ctx or an app
-// without an id: the notice is dropped, the source is never taken from the caller.
+#define GATE_OS_SOURCE "lichen" // the notification source of the OS's own notices (lichen_sys_notify.h)
+
+// The notification source an app-facing call raises under: its app's id (gate_app_caller). NULL for a refused ctx, the
+// OS's or an app without an id: the notice is dropped, the source is never taken from the caller.
 char const *gate_app_source(gate_app_env_t const *g, uint32_t ctx, char const *what);
 
-// The settings namespace "a.<id>" (app_ns_name) behind ctx, in ns (cap at least 16). False when ctx is refused, is
-// the OS's, has no usable id: ns is then untouched.
-bool gate_app_settings_ns(gate_app_env_t const *g, uint32_t ctx, char const *what, char *ns, size_t cap);
+// The settings namespace "a.<id>" (app_ns_name) behind ctx, in ns (cap at least 16). GATE_APP_ID when it was made;
+// otherwise the reason (ns untouched), with *name set for any ctx that was not refused, for the caller's log.
+gate_app_kind_t gate_app_settings_ns(gate_app_env_t const *g, uint32_t ctx, char const *what, char *ns, size_t cap,
+                                     char const **name);
+
+// An SD batch is ended by the ctx that began it: held is the ctx recorded at begin (0 = no batch), ctx the caller's
+bool gate_batch_may_end(uint32_t held, uint32_t ctx);
 
 #ifdef __cplusplus
 }

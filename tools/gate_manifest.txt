@@ -50,9 +50,11 @@ crashlog_tile	-	unspecified	crashlog_fmt.h
 crashlog_unseen	-	unspecified	crashlog_fmt.h
 crashlog_when_text	-	unspecified	crashlog_fmt.h
 fs_app_dir_path	-	unspecified	fs_path.h
+gate_app_caller	-	unspecified	gate_app.h
 gate_app_id	-	unspecified	gate_app.h
 gate_app_settings_ns	-	unspecified	gate_app.h
 gate_app_source	-	unspecified	gate_app.h
+gate_batch_may_end	-	unspecified	gate_app.h
 hold_exit_event	-	unspecified	hold_exit.h
 hold_exit_percent	-	unspecified	hold_exit.h
 hold_exit_tick	-	unspecified	hold_exit.h
@@ -163,8 +165,8 @@ lichen_sensors_stop	SENSORS	unspecified	lichen_sensors.h
 lichen_station_clock	-	lvgl	lichen_ui.h
 lichen_sys_app_console_register	SYSTEM	not-lvgl	lichen_sys_app.h
 lichen_sys_app_ctx	SYSTEM	any	lichen_sys_app.h
-lichen_sys_badge_get	-	unspecified	lichen_sys_badge.h
-lichen_sys_badge_set	-	unspecified	lichen_sys_badge.h
+lichen_sys_badge_get	SYSTEM	unspecified	lichen_sys_badge.h
+lichen_sys_badge_set	SYSTEM	unspecified	lichen_sys_badge.h
 lichen_sys_boot_label	SYSTEM	any	lichen_sys_boot.h
 lichen_sys_boot_overall_pct	SYSTEM	any	lichen_sys_boot.h
 lichen_sys_boot_sentence	SYSTEM	any	lichen_sys_boot.h
@@ -188,6 +190,7 @@ lichen_sys_clock_sync_info	SYSTEM	any	lichen_sys_clock.h
 lichen_sys_clock_verdict_text	SYSTEM	any	lichen_sys_clock.h
 lichen_sys_crash_recovered	SYSTEM	any	lichen_sys_crash.h
 lichen_sys_ctx_app	SYSTEM	any	lichen_sys_app.h
+lichen_sys_ctx_caller	SYSTEM	unspecified	lichen_sys_app.h
 lichen_sys_ctx_os	SYSTEM	any	lichen_sys_app.h
 lichen_sys_ctx_resolve	SYSTEM	any	lichen_sys_app.h
 lichen_sys_ctx_settings_ns	SYSTEM	unspecified	lichen_sys_app.h
@@ -226,6 +229,8 @@ lichen_sys_mem_min	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_stacks	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_total	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_walk	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_notify	SYSTEM	unspecified	lichen_sys_notify.h
+lichen_sys_notify_to	SYSTEM	unspecified	lichen_sys_notify.h
 lichen_sys_power_off_now	SYSTEM	any	lichen_sys_power.h
 lichen_sys_power_screen_off	SYSTEM	unspecified	lichen_sys_power.h
 lichen_sys_psram_mhz	SYSTEM	any	lichen_sys_psram.h

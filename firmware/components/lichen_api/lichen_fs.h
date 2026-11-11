@@ -6,8 +6,9 @@
 //
 // ctx is the caller's own context (#230 E1c): an app passes the one lichen_register_app gave it, and gets its own
 // directory only. A stale or made-up ctx is refused (logged at most once per 10 s, counted in "fw app ctx", never an
-// abort): NULL or false, nothing made on the drive. The OS's ctx has no directory (NULL), but may hold the SD batch
-// lock (lichen_fs_sd_begin).
+// abort): NULL or false, nothing made on the drive. The OS's own ctx is refused too (it has no directory, and an app
+// can reach it through lichen_ctx_self() outside its hooks), so it cannot hold the SD batch lock either. A batch is
+// ended by the ctx that began it.
 
 #include "lichen_app.h"
 
