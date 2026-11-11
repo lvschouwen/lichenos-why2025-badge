@@ -42,7 +42,7 @@ params	firmware/components/lichen_shell/shot_blend.c:shot_blend_argb8888	10
 params	firmware/components/mesh/mesh_chat.c:mesh_conv_row	9
 params	firmware/components/mesh/mesh_hist.c:mesh_hist_compact	11
 params	firmware/components/mesh/radio_confirm.c:radio_confirm_needed	10
-size	<merged-strings>	265785
+size	<merged-strings>	266397
 size	libapp_update.a	4602
 size	libassets.a	2351
 size	libboard.a	11315
@@ -103,7 +103,7 @@ size	libesp_libc.a	7910
 size	libesp_mm.a	6067
 size	libesp_netif.a	9130
 size	libesp_partition.a	3466
-size	libesp_psram.a	8274
+size	libesp_psram.a	8414
 size	libesp_ringbuf.a	6409
 size	libesp_rom.a	596
 size	libesp_security.a	2364
@@ -113,7 +113,7 @@ size	libesp_tca8418.a	1977
 size	libesp_timer.a	2854
 size	libesp_wifi.a	2263
 size	libesp_wifi_remote_glue.a	617
-size	libespcoredump.a	13188
+size	libespcoredump.a	13200
 size	libespressif__esp-serial-flasher.a	123667
 size	libespressif__i2c_bus.a	3196
 size	libespressif__mdns.a	39609
@@ -127,12 +127,12 @@ size	libjoltwallet__littlefs.a	34376
 size	liblichen_api.a	24328
 size	liblichen_apps.a	50526
 size	liblichen_boot.a	11564
-size	liblichen_clock.a	10936
+size	liblichen_clock.a	12587
 size	liblichen_haptics.a	2769
 size	liblichen_led.a	1428
 size	liblichen_mdns.a	598
 size	liblichen_net.a	24848
-size	liblichen_notify.a	13250
+size	liblichen_notify.a	13254
 size	liblichen_nvs.a	1153
 size	liblichen_os.a	56277
 size	liblichen_random.a	63
@@ -144,7 +144,7 @@ size	liblvgl_port_lib.a	6122
 size	liblwip.a	109820
 size	libmain.a	5717
 size	libmbedtls.a	22
-size	libmesh.a	396752
+size	libmesh.a	396768
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18676
 size	libnvs_sec_provider.a	2
