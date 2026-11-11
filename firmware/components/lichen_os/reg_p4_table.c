@@ -21,8 +21,9 @@ static char const *const lora_state_names[] = {"unconfigured", "idle", "rx", "er
 
 reg_entry_t const reg_p4_table[] = {
     {.id = REG_ID_BL_DISPLAY, .type = REG_T_U8, .name = "bl.display", .unit = "%", .min = BACKLIGHT_DISPLAY_MIN,
-     .max = 100, .get_applied = reg_p4_proxy_get, .set = reg_p4_bl_set, .saved_key = BACKLIGHT_KEY_DISPLAY},
-    {.id = REG_ID_BL_KEYBOARD, .type = REG_T_U8, .name = "bl.keyboard", .unit = "%", .min = 0, .max = 100,
+     .max = BACKLIGHT_DISPLAY_MAX, .get_applied = reg_p4_proxy_get, .set = reg_p4_bl_set,
+     .saved_key = BACKLIGHT_KEY_DISPLAY},
+    {.id = REG_ID_BL_KEYBOARD, .type = REG_T_U8, .name = "bl.keyboard", .unit = "%", .min = 0, .max = BACKLIGHT_KEYBOARD_MAX,
      .get_applied = reg_p4_proxy_get, .set = reg_p4_bl_set, .saved_key = BACKLIGHT_KEY_KEYBOARD},
     PROXY_RO(REG_ID_BL_FREQ, REG_T_U32, "bl.freq", "Hz", 0),
     PROXY_RO(REG_ID_BL_BOOT, REG_T_BOOL, "bl.boot", NULL, 0),

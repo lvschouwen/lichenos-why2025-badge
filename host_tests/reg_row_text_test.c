@@ -74,6 +74,11 @@ int main(void) {
     expect(NULL, NULL, NULL, NULL, "?");
     // a value with brackets of its own keeps them (the last " (" is the note's)
     expect(NULL, "a (b) (1.0 s ago)", NULL, NULL, "a (b) (1.0 s)");
+    // brackets in the value and no age: the value is whole, nothing is taken for a note
+    expect(NULL, "a (b)", NULL, NULL, "a (b)");
+    expect(NULL, "NL (EU) (2.0 s ago)", NULL, NULL, "NL (EU) (2.0 s)");
+    expect(NULL, "x (stale, y s ago)", NULL, NULL, "x (stale, y s ago)"); // not an age form
+    expect(NULL, "x (1.2.3 s ago)", NULL, NULL, "x (1.2.3 s ago)");
     // a small output buffer truncates, never overruns
     char tiny[8];
     size_t n = reg_row_text("Label", "123456 (3.2 s ago)", NULL, NULL, tiny, sizeof(tiny));

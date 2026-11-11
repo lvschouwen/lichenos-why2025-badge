@@ -6,9 +6,15 @@
 
 // The screen never goes fully dark: a saved 0 would boot to a black screen with no way to see the slider again
 #define BACKLIGHT_DISPLAY_MIN 10 // since #332 the C6's floor (a lower request is applied as 10): saved = applied
+// The C6 holds every nonzero backlight level to 10..80 (backlight_duty in c6/main/backlight_cmd.c: the C6 image shares no
+// header with the P4, so these are copies; keep them equal). The screen slider and the saved levels stay inside, so what
+// is saved is what is applied; a saved value outside (an older image) is clamped on read, never rewritten.
+#define BACKLIGHT_DISPLAY_MAX 80
+#define BACKLIGHT_KEYBOARD_MIN 10 // 0 is off
+#define BACKLIGHT_KEYBOARD_MAX 80
 
-uint8_t backlight_display_level(unsigned value);  // BACKLIGHT_DISPLAY_MIN..100
-uint8_t backlight_keyboard_level(unsigned value); // 0..100
+uint8_t backlight_display_level(unsigned value);  // BACKLIGHT_DISPLAY_MIN..BACKLIGHT_DISPLAY_MAX
+uint8_t backlight_keyboard_level(unsigned value); // 0, else BACKLIGHT_KEYBOARD_MIN..BACKLIGHT_KEYBOARD_MAX
 
 // The C6's console line "\nBL <display> <keyboard>\n" (the leading newline ends a partial line). No clamping: the
 // shutdown handler sends 0 0 through this, which backlight_display_level() would raise to the minimum. Returns the length, or

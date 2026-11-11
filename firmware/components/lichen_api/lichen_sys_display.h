@@ -5,13 +5,15 @@
 // The display and keyboard backlight's system surface (#226, #216 decision 1): the shell's attention light, screen
 // timeout, thermal load shed and Settings > Display go through here, never to board's backlight driver. System
 // surface: tools/layers.conf forbids lichen_sys_* in L6, so an app never dims or lights the badge (it raises a notice
-// and the OS decides, #164). Levels are 0-100. The levels reach the C6, which drives the lights, over UART1 (the
+// and the OS decides, #164). Levels are 0-80 (the C6's limit; the screen 10-80). The levels reach the C6, which drives the lights, over UART1 (the
 // two-chip contract in docs/architecture.md); nothing here changes that. Every call below may be made from any task
 // except an interrupt: the applied levels sit under a critical section in the driver, the saved ones go to NVS.
 
 // The screen never goes fully dark (a saved 0 would leave no way to see the slider again): the lowest screen level
 // lichen_sys_display_set / _temporary accept. Equal to board's BACKLIGHT_DISPLAY_MIN (checked in lichen_os).
 #define LICHEN_SYS_DISPLAY_MIN 10
+// The C6's ceiling (a request above is applied as this); the keyboard's 1..9 are applied as 10, 0 is off
+#define LICHEN_SYS_DISPLAY_MAX 80
 
 // Applies the person's levels now and saves nothing (a slider being dragged); the screen level is raised to
 // LICHEN_SYS_DISPLAY_MIN. Counts as activity for the screen timeout. Any task.

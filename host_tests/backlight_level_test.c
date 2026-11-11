@@ -45,6 +45,21 @@ static void test_read_clamp(void) {
     stored[0] = 10;
     backlight_levels_load(fake_get, &d, &k);
     CHECK(d == 10);
+    // the C6 holds the backlight to 10..80: a saved 100 reads as 80 (so "saved" matches what is applied), store untouched
+    stored[0] = 100;
+    stored[1] = 100;
+    backlight_levels_load(fake_get, &d, &k);
+    CHECK(d == BACKLIGHT_DISPLAY_MAX && k == BACKLIGHT_KEYBOARD_MAX && stored[0] == 100 && stored[1] == 100);
+    stored[0] = 81;
+    stored[1] = 5; // the keyboard is off or 10..80
+    backlight_levels_load(fake_get, &d, &k);
+    CHECK(d == 80 && k == BACKLIGHT_KEYBOARD_MIN);
+    stored[1] = 0;
+    backlight_levels_load(fake_get, &d, &k);
+    CHECK(k == 0);
+    CHECK(BACKLIGHT_DISPLAY_MAX == 80 && backlight_display_level(80) == 80 && backlight_display_level(81) == 80);
+    CHECK(backlight_keyboard_level(9) == 10 && backlight_keyboard_level(10) == 10 && backlight_keyboard_level(80) == 80 &&
+          backlight_keyboard_level(81) == 80);
 }
 
 static void test_store(void) {
@@ -64,7 +79,7 @@ static void test_store(void) {
     stored[0] = 0; // an older build saved a screen level of 0
     stored[1] = 250;
     backlight_levels_load(fake_get, &d, &k);
-    CHECK(d == BACKLIGHT_DISPLAY_MIN && k == 100);
+    CHECK(d == BACKLIGHT_DISPLAY_MIN && k == BACKLIGHT_KEYBOARD_MAX);
     backlight_levels_load(fake_get, NULL, NULL); // either out may be NULL
 }
 
@@ -77,14 +92,14 @@ int main(void) {
     CHECK(backlight_display_level(9) == BACKLIGHT_DISPLAY_MIN);
     CHECK(backlight_display_level(10) == 10);
     CHECK(backlight_display_level(30) == 30);
-    CHECK(backlight_display_level(100) == 100);
-    CHECK(backlight_display_level(101) == 100);
-    CHECK(backlight_display_level(255) == 100);
+    CHECK(backlight_display_level(100) == BACKLIGHT_DISPLAY_MAX);
+    CHECK(backlight_display_level(101) == BACKLIGHT_DISPLAY_MAX);
+    CHECK(backlight_display_level(255) == BACKLIGHT_DISPLAY_MAX);
 
     CHECK(backlight_keyboard_level(0) == 0);
     CHECK(backlight_keyboard_level(10) == 10);
-    CHECK(backlight_keyboard_level(100) == 100);
-    CHECK(backlight_keyboard_level(200) == 100);
+    CHECK(backlight_keyboard_level(100) == BACKLIGHT_KEYBOARD_MAX);
+    CHECK(backlight_keyboard_level(200) == BACKLIGHT_KEYBOARD_MAX);
 
     char   cmd[24];
     size_t len = backlight_cmd_format(cmd, sizeof(cmd), 0, 0); // not clamped to the screen minimum

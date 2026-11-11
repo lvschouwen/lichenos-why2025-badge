@@ -413,17 +413,18 @@ static void cmd_bl(char const *args) {
         backlight_r16_console();
         return;
     }
-    if (*args && (sscanf(args, "%u %u %c", &d, &k, &extra) != 2 || d > 100 || k > 100)) {
-        console_reply("bl [<display %d-100> <keyboard 0-100>] | bl r16", BACKLIGHT_DISPLAY_MIN);
+    if (*args && (sscanf(args, "%u %u %c", &d, &k, &extra) != 2)) {
+        console_reply("bl [<display %d-%d> <keyboard 0, %d-%d>] | bl r16", BACKLIGHT_DISPLAY_MIN, BACKLIGHT_DISPLAY_MAX,
+                      BACKLIGHT_KEYBOARD_MIN, BACKLIGHT_KEYBOARD_MAX);
         return;
     }
     if (*args && !atomic_load(&started)) {
         backlight_set_saved((uint8_t)d, (uint8_t)k); // no registry (its table failed the check): the driver as before
     } else if (*args) {
         char set[40];
-        snprintf(set, sizeof(set), "bl.display %u", d < BACKLIGHT_DISPLAY_MIN ? BACKLIGHT_DISPLAY_MIN : d);
+        snprintf(set, sizeof(set), "bl.display %u", backlight_display_level(d)); // what the C6 can apply
         set_and_reply(set, true);
-        snprintf(set, sizeof(set), "bl.keyboard %u", k);
+        snprintf(set, sizeof(set), "bl.keyboard %u", backlight_keyboard_level(k));
         set_and_reply(set, true);
     }
     uint8_t sd, sk;
@@ -471,7 +472,7 @@ void lichen_reg_start(void) {
         }
     }
     // "fw bl" (and "bl r16") whether or not the registry starts: it replaced the driver's own command
-    console_register("bl", "bl [<display> <keyboard>] (backlight 0-100, screen at least 10; = fw set/get bl.*) | bl r16 "
+    console_register("bl", "bl [<display> <keyboard>] (backlight 0-80, screen 10-80, keyboard 0 or 10-80: the C6's limit; = fw set/get bl.*) | bl r16 "
                            "(is R16 fitted?)",
                      cmd_bl);
     size_t bad = reg_p4_check();

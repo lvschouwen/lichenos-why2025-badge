@@ -49,7 +49,7 @@ int main(void) {
     CHECK(attn_keyboard_at(ATTN_PULSE_MS) == -1 && attn_keyboard_at(100000) == -1);
 
     attn_levels_t l = attn_flash_levels(false);
-    CHECK(l.display == 100 && l.keyboard == 100);
+    CHECK(l.display == LICHEN_SYS_DISPLAY_MAX && l.keyboard == LICHEN_SYS_DISPLAY_MAX);
     l = attn_flash_levels(true);
     CHECK(l.display == BACKLIGHT_DISPLAY_MIN && l.keyboard == 0);
 

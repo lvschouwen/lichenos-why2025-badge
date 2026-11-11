@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// Display and keyboard backlight (0-100), driven by the C6 (its GPIO15/GPIO10 PWM); the P4 sends "BL <d> <k>" on the
+// Display and keyboard backlight (0-80, screen 10-80: the C6's limit, backlight_level.h), driven by the C6 (its GPIO15/GPIO10 PWM); the P4 sends "BL <d> <k>" on the
 // C6's console UART, or REG_SET through the settings registry when the C6 has it (#310). Saved by the settings service; backlight_start() applies the saved levels. Call after the C6 flasher is done. Also registers
 // the restart hook that switches the backlight and panel off before esp_restart() (#23).
 void backlight_start(void);

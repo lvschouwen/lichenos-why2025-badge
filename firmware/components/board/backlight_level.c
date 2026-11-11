@@ -6,11 +6,17 @@ uint8_t backlight_display_level(unsigned value) {
     if (value < BACKLIGHT_DISPLAY_MIN) {
         return BACKLIGHT_DISPLAY_MIN;
     }
-    return value > 100 ? 100 : (uint8_t)value;
+    return value > BACKLIGHT_DISPLAY_MAX ? BACKLIGHT_DISPLAY_MAX : (uint8_t)value;
 }
 
 uint8_t backlight_keyboard_level(unsigned value) {
-    return value > 100 ? 100 : (uint8_t)value;
+    if (value == 0) {
+        return 0;
+    }
+    if (value < BACKLIGHT_KEYBOARD_MIN) {
+        return BACKLIGHT_KEYBOARD_MIN;
+    }
+    return value > BACKLIGHT_KEYBOARD_MAX ? BACKLIGHT_KEYBOARD_MAX : (uint8_t)value;
 }
 
 size_t backlight_cmd_format(char *buf, size_t size, unsigned display, unsigned keyboard) {

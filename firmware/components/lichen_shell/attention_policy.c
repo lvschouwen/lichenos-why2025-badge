@@ -35,6 +35,6 @@ int attn_keyboard_at(uint32_t elapsed_ms) {
 }
 
 attn_levels_t attn_flash_levels(bool hot) {
-    attn_levels_t l = hot ? (attn_levels_t){LICHEN_SYS_DISPLAY_MIN, 0} : (attn_levels_t){100, 100};
+    attn_levels_t l = hot ? (attn_levels_t){LICHEN_SYS_DISPLAY_MIN, 0} : (attn_levels_t){LICHEN_SYS_DISPLAY_MAX, LICHEN_SYS_DISPLAY_MAX};
     return l;
 }

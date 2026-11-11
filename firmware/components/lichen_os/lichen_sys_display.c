@@ -7,6 +7,7 @@
 #include "backlight.h"
 
 _Static_assert(LICHEN_SYS_DISPLAY_MIN == BACKLIGHT_DISPLAY_MIN, "the gate's screen minimum follows board's");
+_Static_assert(LICHEN_SYS_DISPLAY_MAX == BACKLIGHT_DISPLAY_MAX, "the gate's screen maximum follows board's");
 
 void lichen_sys_display_set(uint8_t display, uint8_t keyboard) {
     backlight_set(display, keyboard);

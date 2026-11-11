@@ -143,22 +143,23 @@ typedef struct {
     char const *ptr[KEYS_MAX];
 } key_texts_t;
 
-static void read_keys(char const *const names[], size_t n, key_texts_t *k) {
+// One scratch for both lines, not a 320 B stack frame in the timer: only the LVGL task (its timers) calls them
+static key_texts_t k;
+
+static void read_keys(char const *const names[], size_t n, key_texts_t *dst) {
     for (size_t i = 0; i < n && i < KEYS_MAX; i++) {
-        k->ptr[i] = lichen_reg_get(names[i], k->text[i], sizeof(k->text[i])) ? k->text[i] : NULL;
+        dst->ptr[i] = lichen_reg_get(names[i], dst->text[i], sizeof(dst->text[i])) ? dst->text[i] : NULL;
     }
 }
 
 void shell_lora_line(char *out, size_t cap) {
     static char const *const names[RR_LORA_KEYS] = {"lora.freq", "lora.bw", "lora.sf", "lora.cr", "lora.power"};
-    key_texts_t              k;
     read_keys(names, RR_LORA_KEYS, &k);
     reg_lora_line("LoRa now", k.ptr, out, cap);
 }
 
 void shell_wifi_line(char *out, size_t cap) {
     static char const *const names[RR_WIFI_KEYS] = {"wifi.country", "wifi.txpwr", "wifi.bw", "wifi.protocol", "wifi.ps"};
-    key_texts_t              k;
     read_keys(names, RR_WIFI_KEYS, &k);
     reg_wifi_line("Radio now", k.ptr, out, cap);
 }
@@ -354,12 +355,15 @@ static void bl_override_fill(char *out, size_t cap) {
     shell_reg_text("Override", "bl.override", NULL, NULL, out, cap);
 }
 
-// Only while the boot light is still on; the note is then hidden (empty text)
+// Only while the boot light is still on: empty (the note is hidden) when it is off or was not read
 static void bl_boot_fill(char *out, size_t cap) {
-    shell_reg_text("Boot light", "bl.boot", NULL, NULL, out, cap);
-    if (strncmp(out, "Boot light: off", 15) == 0) {
+    char cached[64], value[16];
+    if (!lichen_reg_get("bl.boot", cached, sizeof(cached)) || !reg_row_value(cached, value, sizeof(value)) ||
+        strcmp(value, "on") != 0) {
         out[0] = '\0';
+        return;
     }
+    shell_reg_text("Boot light", "bl.boot", NULL, NULL, out, cap);
 }
 
 static void bl_refresh(lv_timer_t *t) {
@@ -415,8 +419,8 @@ static lv_obj_t *build_display(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create(screen, "Display");
     lichen_sys_display_get(&level[0], &level[1]);
-    menu_add_slider(menu, "Screen", LICHEN_SYS_DISPLAY_MIN, 100, level[0], on_level, (void *)(intptr_t)0);
-    menu_add_slider(menu, "Keyboard", 0, 100, level[1], on_level, (void *)(intptr_t)1);
+    menu_add_slider(menu, "Screen", LICHEN_SYS_DISPLAY_MIN, LICHEN_SYS_DISPLAY_MAX, level[0], on_level, (void *)(intptr_t)0);
+    menu_add_slider(menu, "Keyboard", 0, LICHEN_SYS_DISPLAY_MAX, level[1], on_level, (void *)(intptr_t)1);
     bl_rows_build(menu);
     if (!lichen_sys_c6_up()) {
         menu_note(menu, "Brightness can't change right now: the radio chip is not answering. Restart the badge if it "

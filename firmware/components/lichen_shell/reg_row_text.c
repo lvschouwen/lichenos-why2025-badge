@@ -18,7 +18,28 @@ static void copy_n(char *dst, size_t cap, char const *src, size_t n) {
     dst[n] = '\0';
 }
 
-// The last " (" of a cached text that ends in ")": where its note starts
+// "[stale, ]<n>[.<n>] s ago": the only age forms lichen_reg_cached_text prints (the note of a read key)
+static bool is_age(char const *note, size_t n) {
+    if (n >= 7 && strncmp(note, "stale, ", 7) == 0) {
+        note += 7;
+        n -= 7;
+    }
+    if (n < 6 || strncmp(note + n - 6, " s ago", 6) != 0) {
+        return false;
+    }
+    size_t digits = 0, dots = 0;
+    for (size_t i = 0; i + 6 < n; i++) {
+        dots += note[i] == '.';
+        digits += note[i] >= '0' && note[i] <= '9';
+        if (!((note[i] >= '0' && note[i] <= '9') || (note[i] == '.' && i > 0))) {
+            return false;
+        }
+    }
+    return digits > 0 && dots <= 1;
+}
+
+// The last " (" of a cached text that ends in ")" and whose bracket is the cache's note (an age, or the reason after an
+// unread "?"): where its note starts. A value with brackets of its own and no note has none.
 static char const *note_start(char const *cached, size_t len) {
     char const *cut = NULL;
     if (cached[len - 1] != ')') {
@@ -27,7 +48,11 @@ static char const *note_start(char const *cached, size_t len) {
     for (char const *s = cached; (s = strstr(s, " (")) != NULL; s += 2) {
         cut = s;
     }
-    return cut;
+    if (!cut) {
+        return NULL;
+    }
+    bool unread = cut == cached + 1 && cached[0] == '?';
+    return unread || is_age(cut + 2, len - 1 - (size_t)(cut + 2 - cached)) ? cut : NULL;
 }
 
 // "<v> (3.2 s ago)", "<v> (stale, 4 s ago)", "<v>" or "? (<why>)" into its parts
@@ -92,7 +117,7 @@ size_t reg_row_text(char const *label, char const *cached, char const *saved, ch
 // ---- the multi-key lines (#333) -------------------------------------------------------------------------------------
 
 typedef struct {
-    char value[RR_LORA_KEYS][40]; // both lines have five keys
+    char value[RR_LORA_KEYS][24]; // both lines have five keys; a value longer than this is cut
     char note[28];                // the first key's age, or the first unread key's reason
     bool stale;
     bool unread;
@@ -110,24 +135,33 @@ static void gather(char const *const cached[], fields_t *f) {
             continue;
         }
         f->stale = f->stale || p.stale;
-        memcpy(f->value[i], p.value, sizeof(p.value));
+        snprintf(f->value[i], sizeof(f->value[i]), "%.23s", p.value);
         if (i == 0 && !f->unread) {
             snprintf(f->note, sizeof(f->note), "%s", p.note);
         }
     }
 }
 
-static size_t line_out(char const *label, fields_t const *f, char const *line, char *out, size_t cap) {
-    char head[24] = "";
-    if (label && *label) {
-        snprintf(head, sizeof(head), "%s: ", label);
+// The head ("<label>: ") into out; returns its length
+static size_t head_out(char const *label, char *out, size_t cap) {
+    if (!label || !*label) {
+        out[0] = '\0';
+        return 0;
     }
+    size_t n = (size_t)snprintf(out, cap, "%s: ", label);
+    return n < cap ? n : cap - 1;
+}
+
+// out holds "<head><line>" (n bytes): add the age or "(stale)", or replace it all when a key is unread. The line is
+// built straight into out so the LVGL task's timers do not carry a second buffer for it
+static size_t line_end(char const *label, fields_t const *f, char *out, size_t cap, size_t n) {
     if (f->unread) {
-        snprintf(out, cap, "%s?%s%s%s", head, *f->note ? " (" : "", f->note, *f->note ? ")" : "");
+        n = head_out(label, out, cap);
+        snprintf(out + n, cap - n, "?%s%s%s", *f->note ? " (" : "", f->note, *f->note ? ")" : "");
     } else if (f->stale) {
-        snprintf(out, cap, "%s%s (stale)", head, line);
-    } else {
-        snprintf(out, cap, "%s%s%s%s%s", head, line, *f->note ? " (" : "", f->note, *f->note ? ")" : "");
+        snprintf(out + n, cap - n, " (stale)");
+    } else if (*f->note) {
+        snprintf(out + n, cap - n, " (%s)", f->note);
     }
     return strlen(out);
 }
@@ -143,16 +177,17 @@ static void khz_text(unsigned long hz, char *out, size_t cap) {
 
 size_t reg_lora_line(char const *label, char const *const cached[RR_LORA_KEYS], char *out, size_t cap) {
     fields_t f;
-    char     line[200], bw[16];
+    char     bw[16];
     if (!cap) {
         return 0;
     }
     gather(cached, &f);
     unsigned long hz = strtoul(f.value[0], NULL, 10);
     khz_text(strtoul(f.value[1], NULL, 10), bw, sizeof(bw));
-    snprintf(line, sizeof(line), "%lu.%03lu MHz %s SF%s CR%s %s dBm", hz / 1000000, hz % 1000000 / 1000, bw, f.value[2],
-             f.value[3], f.value[4]);
-    return line_out(label, &f, line, out, cap);
+    size_t n = head_out(label, out, cap);
+    n += (size_t)snprintf(out + n, cap - n, "%lu.%03lu MHz %s SF%s CR%s %s dBm", hz / 1000000, hz % 1000000 / 1000, bw,
+                          f.value[2], f.value[3], f.value[4]);
+    return line_end(label, &f, out, cap, n < cap ? n : cap - 1);
 }
 
 // WIFI_PROTOCOL_11B/G/N/AX bits as letters ("bgn"); 0 or none of them: "-"
@@ -183,15 +218,16 @@ static void qdbm_text(long q, char *out, size_t cap) {
 
 size_t reg_wifi_line(char const *label, char const *const cached[RR_WIFI_KEYS], char *out, size_t cap) {
     fields_t f;
-    char     line[200], tx[24], proto[8];
+    char     tx[24], proto[8];
     if (!cap) {
         return 0;
     }
     gather(cached, &f);
     qdbm_text(strtol(f.value[1], NULL, 10), tx, sizeof(tx));
     proto_text(strtoul(f.value[3], NULL, 10), proto, sizeof(proto));
-    snprintf(line, sizeof(line), "%s, %s, %s MHz, %s, ps %s", f.value[0], tx, f.value[2], proto, f.value[4]);
-    return line_out(label, &f, line, out, cap);
+    size_t n = head_out(label, out, cap);
+    n += (size_t)snprintf(out + n, cap - n, "%s, %s, %s MHz, %s, ps %s", f.value[0], tx, f.value[2], proto, f.value[4]);
+    return line_end(label, &f, out, cap, n < cap ? n : cap - 1);
 }
 
 size_t reg_mhz_text(char const *label, char const *cached_hz, char const *want_mhz, char *out, size_t cap) {
