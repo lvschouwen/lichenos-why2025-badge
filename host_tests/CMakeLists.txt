@@ -346,11 +346,36 @@ add_executable(reg_service_test ${CMAKE_CURRENT_SOURCE_DIR}/reg_service_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg/reg.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_cmd.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_proxy.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_table.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_table.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_psram.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_display.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_sensors.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_misc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/reg_p4_settings.c)
 target_include_directories(reg_service_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/reg
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board)
 target_compile_options(reg_service_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME reg_service_test COMMAND reg_service_test)
+
+# ---- registry domain 0x11 psram.* (#316): this domain's agent adds its own test below and touches no other block -------
+# (the rows are reg_p4_psram.c; reg_service_test above already links every row file and pins the split)
+# ---- end of the psram block ------------------------------------------------------------------------------
+
+# ---- registry domain 0x12 disp.* (#317): this domain's agent adds its own test below and touches no other block -------
+# (the rows are reg_p4_display.c; reg_service_test above already links every row file and pins the split)
+# ---- end of the display block ------------------------------------------------------------------------------
+
+# ---- registry domain 0x13 sens.* (#318): this domain's agent adds its own test below and touches no other block -------
+# (the rows are reg_p4_sensors.c; reg_service_test above already links every row file and pins the split)
+# ---- end of the sensors block ------------------------------------------------------------------------------
+
+# ---- registry domain 0x14 haptics.*, led.*, tz, hold.* (#319): this domain's agent adds its own test below and touches no other block -------
+# (the rows are reg_p4_misc.c; reg_service_test above already links every row file and pins the split)
+# ---- end of the misc block ------------------------------------------------------------------------------
+
+# ---- registry domain 0x15 settings.* (#320): this domain's agent adds its own test below and touches no other block -------
+# (the rows are reg_p4_settings.c; reg_service_test above already links every row file and pins the split)
+# ---- end of the settings block ------------------------------------------------------------------------------
 
 # The Wi-Fi registry keys (#311): the fixed country NL as the driver reports it, the regulatory log text, bandwidth
 # mapping, the fw wifi tx|bw|ps alias replies and the wifi.* views

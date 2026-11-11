@@ -17,7 +17,13 @@
 //   0x05-0x0E    reserved for further C6-side domains
 //   0x0F c6.*    C6 meta
 //   0x10 bl.*    the P4's backlight driver state (bl.idle, bl.override; #310)
-//   0x11-0x1F    reserved for P4-side domains (wave 2, #312: PSRAM, display/DSI, sensors, haptics, LED, GPIO holds)
+//   0x11 psram.*     PSRAM clock/tuning/heap figures (#316), served by the P4; row file reg_p4_psram.c
+//   0x12 disp.*      display/DSI (#317); reg_p4_display.c
+//   0x13 sens.*      sensors (#318); reg_p4_sensors.c
+//   0x14 (misc)      haptics.*, led.*, tz, hold.* (GPIO holds) (#319); reg_p4_misc.c
+//   0x15 settings.*  write status of the settings store (#320); reg_p4_settings.c
+//   0x16-0x1F    reserved for further P4-side domains
+// Each P4-side domain has its own row file under firmware/components/lichen_os/ and appends its ids here in its block.
 typedef enum {
     // 0x01 backlight: the brightness the C6 drives now, in percent (after its 10-80 % clamp; 0 = off)
     REG_ID_BL_DISPLAY  = 0x0100, // bl.display   U8 %

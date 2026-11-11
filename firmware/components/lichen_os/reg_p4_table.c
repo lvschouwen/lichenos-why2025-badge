@@ -52,7 +52,70 @@ reg_entry_t const reg_p4_table[] = {
 };
 
 size_t const reg_p4_count = sizeof(reg_p4_table) / sizeof(reg_p4_table[0]);
-_Static_assert(sizeof(reg_p4_table) / sizeof(reg_p4_table[0]) <= REG_P4_KEYS_MAX, "raise REG_P4_KEYS_MAX");
 
 uint16_t const reg_p4_radio_ids[8] = {REG_ID_LORA_FREQ, REG_ID_LORA_BW,       REG_ID_LORA_SF,    REG_ID_LORA_CR,
                                       REG_ID_LORA_SYNC, REG_ID_LORA_PREAMBLE, REG_ID_LORA_POWER, REG_ID_LORA_STATE};
+
+// The core table first, then the row files; reg_p4_psram.c and its siblings define the rest
+static reg_p4_dom_t const core = {.rows = reg_p4_table, .count = sizeof(reg_p4_table) / sizeof(reg_p4_table[0])};
+
+reg_p4_dom_t const *const reg_p4_doms[REG_P4_DOMS] = {&core,        &reg_p4_psram, &reg_p4_display,
+                                                      &reg_p4_sensors, &reg_p4_misc, &reg_p4_settings};
+
+size_t reg_p4_total(void) {
+    size_t n = 0;
+    for (size_t d = 0; d < REG_P4_DOMS; d++) {
+        n += reg_p4_doms[d]->count;
+    }
+    return n;
+}
+
+reg_entry_t const *reg_p4_nth(size_t i) {
+    for (size_t d = 0; d < REG_P4_DOMS; d++) {
+        if (i < reg_p4_doms[d]->count) {
+            return &reg_p4_doms[d]->rows[i];
+        }
+        i -= reg_p4_doms[d]->count;
+    }
+    return NULL;
+}
+
+reg_entry_t const *reg_p4_find_id(uint16_t id) {
+    for (size_t d = 0; d < REG_P4_DOMS; d++) {
+        reg_entry_t const *e = reg_find_id(reg_p4_doms[d]->rows, reg_p4_doms[d]->count, id);
+        if (e) {
+            return e;
+        }
+    }
+    return NULL;
+}
+
+reg_entry_t const *reg_p4_find_name(char const *name) {
+    for (size_t d = 0; d < REG_P4_DOMS; d++) {
+        reg_entry_t const *e = reg_find_name(reg_p4_doms[d]->rows, reg_p4_doms[d]->count, name);
+        if (e) {
+            return e;
+        }
+    }
+    return NULL;
+}
+
+size_t reg_p4_check(void) {
+    size_t total = reg_p4_total();
+    if (total > REG_P4_KEYS_MAX) {
+        return REG_P4_KEYS_MAX;
+    }
+    for (size_t d = 0; d < REG_P4_DOMS; d++) {
+        size_t bad = reg_table_check(reg_p4_doms[d]->rows, reg_p4_doms[d]->count);
+        if (bad != reg_p4_doms[d]->count) {
+            return bad; // index inside the domain; only the "all fine" answer must be exact
+        }
+    }
+    for (size_t i = 0; i < total; i++) { // the first match of an id or name is the key itself: unique across domains
+        reg_entry_t const *e = reg_p4_nth(i);
+        if (reg_p4_find_id(e->id) != e || reg_p4_find_name(e->name) != e) {
+            return i;
+        }
+    }
+    return total;
+}

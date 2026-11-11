@@ -134,7 +134,7 @@ size	liblichen_mdns.a	598
 size	liblichen_net.a	24758
 size	liblichen_notify.a	13246
 size	liblichen_nvs.a	1153
-size	liblichen_os.a	52465
+size	liblichen_os.a	53101
 size	liblichen_random.a	63
 size	liblichen_shell.a	165598
 size	liblog.a	2726
@@ -144,7 +144,7 @@ size	liblvgl_port_lib.a	6122
 size	liblwip.a	109820
 size	libmain.a	5703
 size	libmbedtls.a	22
-size	libmesh.a	396640
+size	libmesh.a	396672
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18676
 size	libnvs_sec_provider.a	2

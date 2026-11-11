@@ -275,7 +275,7 @@ static void bl_reg_close(void) {
 // ---- lora's hooks (LoRa task) ---------------------------------------------------------------------------------------
 
 static void warn_mismatch(uint16_t id, reg_value_t const *req, uint32_t t) {
-    reg_entry_t const *e = reg_find_id(reg_p4_table, reg_p4_count, id);
+    reg_entry_t const *e = reg_p4_find_id(id);
     portENTER_CRITICAL(&lock);
     bool                    warn = reg_proxy_mismatch(&px, id, req, t);
     reg_proxy_slot_t const *s    = reg_proxy_slot(&px, id);
@@ -318,7 +318,7 @@ static size_t radio_text(char *buf, size_t cap) {
     bool               no_link[REG_RADIO_KEYS] = {false};
     reg_view_t         v[REG_RADIO_KEYS];
     for (size_t i = 0; i < REG_RADIO_KEYS; i++) {
-        es[i] = reg_find_id(reg_p4_table, reg_p4_count, reg_p4_radio_ids[i]);
+        es[i] = reg_p4_find_id(reg_p4_radio_ids[i]);
     }
     bool live = may_wait();
     if (live) {
@@ -341,8 +341,8 @@ static void poll(void *arg) {
     if (due) {
         post(REG_ID_C6_REG_CAPS, false, 0);
     }
-    for (size_t i = 0; known && i < reg_p4_count; i++) {
-        reg_entry_t const *e = &reg_p4_table[i];
+    for (size_t i = 0; known && i < reg_p4_total(); i++) {
+        reg_entry_t const *e = reg_p4_nth(i);
         if (reg_p4_is_proxy(e) && e->id != REG_ID_C6_REG_CAPS && support(e->id) == RP_OK) {
             post(e->id, false, 0);
         }
@@ -355,9 +355,10 @@ static void print_rows(char const *query) {
     reg_entry_t const *es[REG_P4_KEYS_MAX]; // every key of the table fits (`fw get` without a query)
     bool               no_link[sizeof(es) / sizeof(es[0])];
     size_t             n = 0;
-    for (size_t i = 0; i < reg_p4_count && n < sizeof(es) / sizeof(es[0]); i++) {
-        if (reg_name_matches(reg_p4_table[i].name, query)) {
-            es[n++] = &reg_p4_table[i];
+    for (size_t i = 0; i < reg_p4_total() && n < sizeof(es) / sizeof(es[0]); i++) {
+        reg_entry_t const *e = reg_p4_nth(i);
+        if (reg_name_matches(e->name, query)) {
+            es[n++] = e;
         }
     }
     if (!n) {
@@ -390,7 +391,7 @@ static reg_cmd_result_t set_and_reply(char const *args, bool quiet) {
     reg_entry_t const *e;
     reg_value_t        applied;
     bool               have;
-    reg_cmd_result_t   r = reg_cmd_set(reg_p4_table, reg_p4_count, args, confirmable, &e, &applied, &have);
+    reg_cmd_result_t   r = reg_cmd_set(reg_p4_find_name, args, confirmable, &e, &applied, &have);
     if (!(quiet && (r == RC_OK || r == RC_FAILED || r == RC_UNCONFIRMED))) { // the alias prints the rows instead
         char line[REG_LINE_MAX];
         reg_cmd_set_reply(r, e, &applied, have, args, line, sizeof(line));
@@ -433,7 +434,7 @@ static void cmd_bl(char const *args) {
 }
 
 size_t lichen_reg_cached_text(char const *name, char *buf, size_t cap) {
-    reg_entry_t const *e = reg_find_name(reg_p4_table, reg_p4_count, name);
+    reg_entry_t const *e = reg_p4_find_name(name);
     reg_view_t         v = {.note = RV_FAILED};
     if (e && atomic_load(&started)) {
         build_view(e, false, false, &v); // the cache only: a status line never waits for the C6
@@ -455,18 +456,19 @@ void lichen_reg_start(void) {
     uint16_t ids[REG_PROXY_MAX] = {0};
     uint8_t  types[REG_PROXY_MAX] = {0};
     size_t   n = 0;
-    for (size_t i = 0; i < reg_p4_count; i++) {
-        if (reg_p4_is_proxy(&reg_p4_table[i]) && n < REG_PROXY_MAX) {
-            ids[n]     = reg_p4_table[i].id;
-            types[n++] = reg_p4_table[i].type;
+    for (size_t i = 0; i < reg_p4_total(); i++) {
+        reg_entry_t const *e = reg_p4_nth(i);
+        if (reg_p4_is_proxy(e) && n < REG_PROXY_MAX) {
+            ids[n]     = e->id;
+            types[n++] = e->type;
         }
     }
     // "fw bl" (and "bl r16") whether or not the registry starts: it replaced the driver's own command
     console_register("bl", "bl [<display> <keyboard>] (backlight 0-100, screen at least 5; = fw set/get bl.*) | bl r16 "
                            "(is R16 fitted?)",
                      cmd_bl);
-    size_t bad = reg_table_check(reg_p4_table, reg_p4_count);
-    if (bad != reg_p4_count || !reg_proxy_init(&px, ids, types, n, now_ms())) {
+    size_t bad = reg_p4_check();
+    if (bad != reg_p4_total() || !reg_proxy_init(&px, ids, types, n, now_ms())) {
         ESP_LOGE(TAG, "registry table bad at entry %u: not started", (unsigned)bad);
         return;
     }

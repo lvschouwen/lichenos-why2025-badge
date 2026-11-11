@@ -133,7 +133,7 @@ static reg_cmd_result_t refusal(reg_entry_t const *e, reg_value_t const *v) {
     return reg_check(e, v) == REG_OK ? RC_OK : RC_RANGE;
 }
 
-reg_cmd_result_t reg_cmd_set(reg_entry_t const *tab, size_t n, char const *args, reg_confirmable_fn confirmable,
+reg_cmd_result_t reg_cmd_set(reg_find_name_fn find, char const *args, reg_confirmable_fn confirmable,
                              reg_entry_t const **e, reg_value_t *applied, bool *have_applied) {
     char        key[REG_NAME_MAX + 1];
     char const *text;
@@ -142,7 +142,7 @@ reg_cmd_result_t reg_cmd_set(reg_entry_t const *tab, size_t n, char const *args,
     if (!split_args(args, key, sizeof(key), &text)) {
         return RC_USAGE;
     }
-    *e = reg_find_name(tab, n, key);
+    *e = find(key);
     if (!*e) {
         return RC_UNKNOWN;
     }

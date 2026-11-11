@@ -62,7 +62,9 @@ typedef enum {
 // the value read back (valid when *have_applied). confirmable(e): the peer can read this key back now; a set whose read
 // back failed on a key that is not is RC_UNCONFIRMED with *applied = the value asked for. NULL: always confirmable.
 typedef bool (*reg_confirmable_fn)(reg_entry_t const *e);
-reg_cmd_result_t reg_cmd_set(reg_entry_t const *tab, size_t n, char const *args, reg_confirmable_fn confirmable,
+// The table lookup by dotted name (reg_p4_find_name: the table is split over domain files, #315)
+typedef reg_entry_t const *(*reg_find_name_fn)(char const *name);
+reg_cmd_result_t reg_cmd_set(reg_find_name_fn find, char const *args, reg_confirmable_fn confirmable,
                              reg_entry_t const **e, reg_value_t *applied, bool *have_applied);
 // The reply line for a reg_cmd_set result: "bl.display = 50 %", "bl.display = 50 % (sent over UART, not confirmed by
 // this C6)", "ERR guarded: ...", "ERR unknown key ..."

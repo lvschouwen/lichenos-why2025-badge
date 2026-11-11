@@ -81,16 +81,16 @@ static reg_cmd_result_t set(char const *args, char *reply, size_t cap) {
     reg_entry_t const *e;
     reg_value_t        applied;
     bool               have;
-    reg_cmd_result_t   r = reg_cmd_set(reg_p4_table, reg_p4_count, args, confirmable, &e, &applied, &have);
+    reg_cmd_result_t   r = reg_cmd_set(reg_p4_find_name, args, confirmable, &e, &applied, &have);
     reg_cmd_set_reply(r, e, &applied, have, args, reply, cap);
     return r;
 }
 
 static void test_table(void) {
-    CHECK(reg_table_check(reg_p4_table, reg_p4_count) == reg_p4_count);
+    CHECK(reg_p4_check() == reg_p4_total());
     size_t proxies = 0;
-    for (size_t i = 0; i < reg_p4_count; i++) {
-        reg_entry_t const *e = &reg_p4_table[i];
+    for (size_t i = 0; i < reg_p4_total(); i++) {
+        reg_entry_t const *e = reg_p4_nth(i);
         proxies += reg_p4_is_proxy(e);
         if (REG_ID_DOMAIN(e->id) == REG_ID_DOMAIN(REG_ID_LORA_FREQ)) {
             CHECK((e->flags & REG_F_RO) && !e->set); // radio keys: read-only in the registry (#307)
@@ -100,11 +100,34 @@ static void test_table(void) {
         CHECK(reg_p4_is_proxy(e) == (d < 0x10 && d != REG_ID_DOMAIN(REG_ID_WIFI_COUNTRY)));
     }
     CHECK(proxies <= REG_PROXY_MAX);
-    CHECK(reg_p4_count <= REG_P4_KEYS_MAX); // fw get's array (also a _Static_assert in reg_p4_table.c)
-    CHECK(reg_find_id(reg_p4_table, reg_p4_count, REG_ID_C6_REG_CAPS) != NULL);
+    CHECK(reg_p4_total() <= REG_P4_KEYS_MAX); // fw get's array (also in reg_p4_check)
+    CHECK(reg_p4_find_id(REG_ID_C6_REG_CAPS) != NULL);
     for (size_t i = 0; i < REG_RADIO_KEYS; i++) {
-        CHECK(reg_find_id(reg_p4_table, reg_p4_count, reg_p4_radio_ids[i]) != NULL);
+        CHECK(reg_p4_find_id(reg_p4_radio_ids[i]) != NULL);
     }
+}
+
+// The table is split over row files (#315): names and ids unique across them, each row's id in its file's domain, and
+// lookups reach every row from every domain
+static void test_domain_split(void) {
+    CHECK(reg_p4_total() >= reg_p4_count);
+    CHECK(reg_p4_nth(reg_p4_total()) == NULL);
+    size_t seen = 0;
+    for (size_t d = 0; d < REG_P4_DOMS; d++) {
+        reg_p4_dom_t const *dom = reg_p4_doms[d];
+        CHECK(dom->count == 0 || dom->rows != NULL);
+        for (size_t i = 0; i < dom->count; i++, seen++) {
+            reg_entry_t const *e = &dom->rows[i];
+            // [0] is the core table (domains below 0x11), [d] the P4-side domain 0x10 + d
+            CHECK(d == 0 ? REG_ID_DOMAIN(e->id) <= 0x10 : REG_ID_DOMAIN(e->id) == 0x10 + d);
+            CHECK(reg_p4_find_id(e->id) == e);
+            CHECK(reg_p4_find_name(e->name) == e);
+            CHECK(reg_p4_nth(seen) == e);
+        }
+    }
+    CHECK(seen == reg_p4_total());
+    CHECK(reg_p4_find_name("no.such.key") == NULL && reg_p4_find_name(NULL) == NULL);
+    CHECK(reg_p4_find_id(0xFFFF) == NULL);
 }
 
 static void test_set_guarded(void) {
@@ -156,8 +179,8 @@ static void test_set_rules(void) {
 // #311: the country, TX power and bandwidth are guarded (their own commands), the protocol read-only, power save set
 static void test_wifi_keys(void) {
     char reply[160];
-    CHECK(reg_find_name(reg_p4_table, reg_p4_count, "bt.state") != NULL);
-    CHECK(reg_find_id(reg_p4_table, reg_p4_count, REG_ID_BT_STATE)->type == REG_T_ENUM);
+    CHECK(reg_p4_find_name("bt.state") != NULL);
+    CHECK(reg_p4_find_id(REG_ID_BT_STATE)->type == REG_T_ENUM);
     wifi_ps_sets = 0;
     CHECK(set("wifi.country DE", reply, sizeof(reply)) == RC_GUARDED);
     CHECK(strstr(reply, "applied NL") != NULL);
@@ -177,7 +200,7 @@ static void test_wifi_keys(void) {
 
 // fw airplane's bt.state part (#311): the cache with its age, or why there is none
 static void test_cached_text(void) {
-    reg_entry_t const *bt = reg_find_id(reg_p4_table, reg_p4_count, REG_ID_BT_STATE);
+    reg_entry_t const *bt = reg_p4_find_id(REG_ID_BT_STATE);
     char               line[64];
     reg_view_t         v = {.has_applied = true, .has_age = true, .applied = {.u = 0}, .age_ms = 12345};
     reg_cached_text(bt, &v, line, sizeof(line));
@@ -420,7 +443,7 @@ static void test_mismatch(void) {
 
 static void test_rows(void) {
     char               line[160];
-    reg_entry_t const *bl = reg_find_name(reg_p4_table, reg_p4_count, "bl.display");
+    reg_entry_t const *bl = reg_p4_find_name("bl.display");
     reg_view_t         v  = {.has_saved = true, .has_requested = true, .has_applied = true, .has_age = true,
                              .saved = {.u = 50}, .requested = {.u = 50}, .applied = {.u = 50}, .age_ms = 1234};
     reg_cmd_header(line, sizeof(line));
@@ -439,7 +462,7 @@ static void test_rows(void) {
     for (int i = 0; i < REG_RADIO_KEYS; i++) {
         r[i] = (reg_view_t){.has_applied = true, .has_age = true, .applied = {.u = vals[i]}, .age_ms = 300};
     }
-    reg_entry_t const *st = reg_find_id(reg_p4_table, reg_p4_count, REG_ID_LORA_STATE);
+    reg_entry_t const *st = reg_p4_find_id(REG_ID_LORA_STATE);
     reg_radio_text(r, st, line, sizeof(line));
     CHECK(strcmp(line, "869.618 MHz 62.5 kHz SF7 CR5 sync 0x12 pre 16 22 dBm rx | 0.3 s ago") == 0);
     r[6] = (reg_view_t){.note = RV_OLD_C6};
@@ -449,6 +472,7 @@ static void test_rows(void) {
 
 int main(void) {
     test_table();
+    test_domain_split();
     test_set_guarded();
     test_set_rules();
     test_wifi_keys();
