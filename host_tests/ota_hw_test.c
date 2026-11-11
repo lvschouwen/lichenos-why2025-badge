@@ -35,11 +35,21 @@ static size_t fake(char const *name, char *buf, size_t cap) {
 static void test_value(void) {
     char v[32];
     CHECK(ota_hw_value("120 (3.2 s ago)", v, sizeof(v)) && !strcmp(v, "120"));
-    CHECK(ota_hw_value("a (b) (stale, 1.0 s ago)", v, sizeof(v)) && !strcmp(v, "a (b)"));
+    CHECK(ota_hw_value("a (b) (stale, 1.0 s ago)", v, sizeof(v)) && !strcmp(v, "a (b) (stale)"));
+    CHECK(ota_hw_value("120 (stale, 3.2 s ago)", v, sizeof(v)) && !strcmp(v, "120 (stale)"));
+    CHECK(ota_hw_value("a (b)", v, sizeof(v)) && !strcmp(v, "a (b)")); // a paren that is not an age
+    CHECK(!ota_hw_value("0123456 (stale, 1 s ago)", v, 10)); // value plus mark does not fit
     CHECK(ota_hw_value("idle", v, sizeof(v)) && !strcmp(v, "idle"));
     CHECK(!ota_hw_value("? (no answer)", v, sizeof(v)));
     CHECK(!ota_hw_value("", v, sizeof(v)));
     CHECK(!ota_hw_value("0123456789 (1 s ago)", v, 5)); // does not fit
+}
+
+static size_t long_text(char const *name, char *buf, size_t cap) {
+    (void)name;
+    memset(buf, 'x', cap - 1); // a text longer than the caller's buffer, cut at cap - 1
+    buf[cap - 1] = 0;
+    return cap - 1;
 }
 
 static void test_json(void) {
@@ -50,9 +60,12 @@ static void test_json(void) {
     CHECK(strstr(b, "\"disp.pclk\":null"));
     CHECK(strstr(b, "\"sens.acc_odr\":null"));
     CHECK(strstr(b, "\"bt.state\":\"idle\""));
-    CHECK(strstr(b, "\"tz.zone\":\"Europe/\\\"Ams\\\"\\\\\\u000a\""));
+    
     CHECK(b[0] == '{' && b[n - 1] == '}');
     CHECK(strstr(b, "\"settings.write_fail\":null"));
+    CHECK(strstr(b, "\"tz.zone\":\"Europe/\\\"Ams\\\"\\\\\\u000a (stale)\""));
+    n = ota_hw_json(long_text, b, sizeof(b));
+    CHECK(strstr(b, "\"psram.clk\":null") && !strstr(b, "xxx"));
     CHECK(ota_hw_json(NULL, b, sizeof(b)) > 0 && strstr(b, "\"psram.clk\":null"));
 }
 

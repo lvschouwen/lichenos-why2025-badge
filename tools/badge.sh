@@ -473,10 +473,13 @@ ota_curl() {
     return $rc
 }
 
-# The receiver's /info line (with the token), empty when it doesn't answer; no pipe into grep, so pipefail can't turn
-# an early-closing grep into "feature missing"
+# The receiver's /info line (with the token) up to its "; hw {...}" object (#321: hw values are data, not features, so
+# no feature match may hit them), empty when it doesn't answer; no pipe into grep, so pipefail can't turn an
+# early-closing grep into "feature missing"
 ota_info_line() {
-    ota_curl "http://$1:$OTA_PORT/info" || true
+    local line
+    line=$(ota_curl "http://$1:$OTA_PORT/info" || true)
+    printf '%s\n' "${line%%; hw *}"
 }
 
 # Whether the receiver at <ip> takes compressed bodies (it says "deflate" in /info); asked once per run

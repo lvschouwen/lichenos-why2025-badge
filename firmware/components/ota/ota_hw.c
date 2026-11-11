@@ -26,20 +26,23 @@ bool ota_hw_value(char const *text, char *out, size_t cap) {
     if (!len || text[0] == '?' || !cap) {
         return false;
     }
-    // The age suffix is the last " (" of a text that ends in " ago)"
+    // The age suffix is the last " (" of a text that ends in " ago)"; a stale value keeps a mark, so it never looks fresh
+    bool stale = false;
     if (len >= 6 && strcmp(text + len - 5, " ago)") == 0) {
         for (size_t i = len - 5; i-- > 0;) {
             if (text[i] == ' ' && text[i + 1] == '(') {
-                len = i;
+                stale = strncmp(text + i + 2, "stale, ", 7) == 0;
+                len   = i;
                 break;
             }
         }
     }
-    if (!len || len >= cap) {
+    size_t mark = stale ? strlen(" (stale)") : 0;
+    if (!len || len + mark >= cap) {
         return false;
     }
     memcpy(out, text, len);
-    out[len] = 0;
+    strcpy(out + len, stale ? " (stale)" : "");
     return true;
 }
 
@@ -111,7 +114,8 @@ size_t ota_hw_json(ota_hw_text_fn text, char *buf, size_t cap) {
     for (size_t i = 0; i < ota_hw_key_count(); i++) {
         char raw[VALUE_MAX + 24] = "";
         char val[VALUE_MAX];
-        if (text && text(keys[i], raw, sizeof(raw)) >= sizeof(raw)) {
+        // A return that fills raw was cut short: a cut value would be wrong, so it is null
+        if (text && text(keys[i], raw, sizeof(raw)) + 1 >= sizeof(raw)) {
             raw[0] = 0;
         }
         bool ok = ota_hw_value(raw, val, sizeof(val));
