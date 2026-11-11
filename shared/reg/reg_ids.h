@@ -57,6 +57,13 @@ typedef enum {
     // 0x10 P4 backlight state (#310): the P4 driver's mode, served by the P4, never on the wire
     REG_ID_BL_IDLE     = 0x1000, // bl.idle      ENUM, RO: bright / dim / off (the screen timeout)
     REG_ID_BL_OVERRIDE = 0x1001, // bl.override  ENUM, RO: none / thermal / flashlight / pulse
+
+    // 0x12 disp: the DSI/DPI link as the display driver runs it (#317), all RO, served by the P4
+    REG_ID_DISP_PCLK      = 0x1200, // disp.pclk       U32 Hz, the DPI pixel clock read from the clock tree and divider
+    REG_ID_DISP_REFRESH   = 0x1201, // disp.refresh    U32 0.1 Hz, pclk / (htotal * vtotal) of the panel timings
+    REG_ID_DISP_LANES     = 0x1202, // disp.lanes      U8, DSI data lanes (configured value: the IDF has no read-back)
+    REG_ID_DISP_LANE_RATE = 0x1203, // disp.lane_rate  U32 Mbps per lane (configured value: no PHY PLL read-back)
+    REG_ID_DISP_PHY_MV    = 0x1204, // disp.phy_mv     U32 mV, DSI PHY LDO (configured value: the LDO driver has no read-back)
 } reg_id_t;
 
 #define REG_ID_DOMAIN(id) ((unsigned)(id) >> 8)

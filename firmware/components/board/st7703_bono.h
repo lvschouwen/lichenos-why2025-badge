@@ -12,22 +12,36 @@
  * 720+4+20+20 = 764
  *
  */
+// The one source of the panel timings: the DPI config below and the registry's disp.refresh (display_timing.c) both use
+// these, so a clock or porch change (#322) cannot leave the reported refresh behind.
+#define ST7703_H_SIZE            720
+#define ST7703_V_SIZE            720
+#define ST7703_HSYNC_BACK_PORCH  120
+#define ST7703_HSYNC_PULSE_WIDTH 60
+#define ST7703_HSYNC_FRONT_PORCH 106
+#define ST7703_VSYNC_BACK_PORCH  20
+#define ST7703_VSYNC_PULSE_WIDTH 4
+#define ST7703_VSYNC_FRONT_PORCH 20
+#define ST7703_HTOTAL (ST7703_H_SIZE + ST7703_HSYNC_PULSE_WIDTH + ST7703_HSYNC_BACK_PORCH + ST7703_HSYNC_FRONT_PORCH)
+#define ST7703_VTOTAL (ST7703_V_SIZE + ST7703_VSYNC_PULSE_WIDTH + ST7703_VSYNC_BACK_PORCH + ST7703_VSYNC_FRONT_PORCH)
+#define ST7703_DPI_CLOCK_MHZ 36 // ~47 Hz; #95: 47 MHz (61 Hz) cost 8-12 % PSRAM bandwidth to scan-out for no visible gain, Lucas prefers the 36 MHz picture
+
 #define ST7703_720_720_PANEL_60HZ_DPI_CONFIG()                                                                         \
     {.dpi_clk_src        = MIPI_DSI_DPI_CLK_SRC_DEFAULT,                                                               \
-     .dpi_clock_freq_mhz = 36, /* ~47 Hz; #95: 47 MHz (61 Hz) cost 8-12 % PSRAM bandwidth to scan-out for no visible gain, Lucas prefers the 36 MHz picture */                                                                                         \
+     .dpi_clock_freq_mhz = ST7703_DPI_CLOCK_MHZ,                                                          \
      .virtual_channel    = 0,                                                                                          \
      .in_color_format    = LCD_COLOR_FMT_RGB565,                       \
      .num_fbs            = 1,                                                                       \
      .video_timing =                                                                                                   \
          {                                                                                                             \
-             .h_size            = 720,                                                                                 \
-             .v_size            = 720,                                                                                 \
-             .hsync_back_porch  = 120,                                                                                 \
-             .hsync_pulse_width = 60,                                                                                  \
-             .hsync_front_porch = 106,                                                                                 \
-             .vsync_back_porch  = 20,                                                                                  \
-             .vsync_pulse_width = 4,                                                                                   \
-             .vsync_front_porch = 20,                                                                                  \
+             .h_size            = ST7703_H_SIZE,                                                                                 \
+             .v_size            = ST7703_V_SIZE,                                                                                 \
+             .hsync_back_porch  = ST7703_HSYNC_BACK_PORCH,                                                                                 \
+             .hsync_pulse_width = ST7703_HSYNC_PULSE_WIDTH,                                                                                  \
+             .hsync_front_porch = ST7703_HSYNC_FRONT_PORCH,                                                                                 \
+             .vsync_back_porch  = ST7703_VSYNC_BACK_PORCH,                                                                                  \
+             .vsync_pulse_width = ST7703_VSYNC_PULSE_WIDTH,                                                                                   \
+             .vsync_front_porch = ST7703_VSYNC_FRONT_PORCH,                                                                                  \
          },                                                                                                            \
      .flags.disable_lp = false}
 

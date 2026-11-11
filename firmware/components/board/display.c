@@ -1,12 +1,15 @@
 #include "display.h"
+#include "display_timing.h"
 
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_st7703.h"
 #include "esp_ldo_regulator.h"
+#include "esp_clk_tree.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "soc/hp_sys_clkrst_struct.h"
 #include "st7703_bono.h"
 
 #if CONFIG_LICHEN_DISPLAY_DIRECT_FLUSH
@@ -251,4 +254,52 @@ void display_blank(void) {
     if (lcd_panel) {
         esp_lcd_panel_disp_on_off(lcd_panel, false);
     }
+}
+
+// Registry reads (#317, domain 0x12). The pixel clock is read back from the divider and source select the DPI driver
+// programmed, over the clock tree's source frequency, not taken from the 36 in the panel config (the divider rounds).
+// No bus traffic, no lock; false before display_start() succeeded.
+bool display_dpi_hz(uint32_t *hz) {
+    if (!lcd_panel) {
+        return false;
+    }
+    soc_module_clk_t src;
+    switch (HP_SYS_CLKRST.peri_clk_ctrl03.reg_mipi_dsi_dpiclk_src_sel) {
+    case 0:  src = SOC_MOD_CLK_XTAL; break;
+    case 1:  src = SOC_MOD_CLK_PLL_F240M; break;
+    case 2:  src = SOC_MOD_CLK_PLL_F160M; break;
+    default: return false; // APLL: not a source this firmware uses, and its rate is not fixed
+    }
+    uint32_t src_hz = 0;
+    if (esp_clk_tree_src_get_freq_hz(src, ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &src_hz) != ESP_OK) {
+        return false;
+    }
+    *hz = disp_pclk_hz(src_hz, HP_SYS_CLKRST.peri_clk_ctrl03.reg_mipi_dsi_dpiclk_div_num);
+    return true;
+}
+
+// Refresh in 0.1 Hz from the applied pixel clock and the totals handed to the panel (st7703_bono.h)
+bool display_refresh_dhz(uint32_t *dhz) {
+    uint32_t hz;
+    if (!display_dpi_hz(&hz)) {
+        return false;
+    }
+    *dhz = disp_refresh_dhz(hz, ST7703_HTOTAL, ST7703_VTOTAL);
+    return true;
+}
+
+// The IDF has no read-back for these three (no lane-count or PHY PLL getter, no LDO voltage getter): configured values
+bool display_dsi_lanes(uint32_t *n) {
+    *n = DSI_LANES;
+    return lcd_panel != NULL;
+}
+
+bool display_dsi_lane_mbps(uint32_t *mbps) {
+    *mbps = DSI_LANE_MBPS;
+    return lcd_panel != NULL;
+}
+
+bool display_phy_ldo_mv(uint32_t *mv) {
+    *mv = DSI_PHY_LDO_MV;
+    return lcd_panel != NULL;
 }

@@ -368,6 +368,13 @@ add_test(NAME reg_service_test COMMAND reg_service_test)
 
 # ---- registry domain 0x12 disp.* (#317): this domain's agent adds its own test below and touches no other block -------
 # (the rows are reg_p4_display.c; reg_service_test above already links every row file and pins the split)
+add_executable(display_timing_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/display_timing_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/display_timing.c
+)
+target_include_directories(display_timing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board)
+target_compile_options(display_timing_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME display_timing_test COMMAND display_timing_test)
 # ---- end of the display block ------------------------------------------------------------------------------
 
 # ---- registry domain 0x13 sens.* (#318): this domain's agent adds its own test below and touches no other block -------
