@@ -11,6 +11,7 @@
 #include "fw_console.h"
 #include "haptics_cmd.h"
 #include "haptics_setting.h"
+#include "haptics_reg.h"
 #include "reg.h"
 
 #include "freertos/FreeRTOS.h"

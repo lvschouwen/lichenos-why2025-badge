@@ -83,7 +83,7 @@ typedef enum {
     // 0x14 haptics, status LED, time zone, C6 pad holds (#319): all read from the hardware or libc, RO
     REG_ID_HAPTICS_DUTY = 0x1400, // haptics.duty  U8 %, RO: the LEDC duty the motor pin is driven with
     REG_ID_LED_PAD      = 0x1401, // led.pad       STR, RO: the output pad level and what it means ("high/on")
-    REG_ID_TZ           = 0x1402, // tz.zone       STR, RO: getenv("TZ") without the DST rules, "CET-1CEST"
+    REG_ID_TZ           = 0x1402, // tz.zone       STR, RO: the TZ environment value as set (tzset gives no accept/reject), zone part only: "CET-1CEST"
     REG_ID_HOLD_GPIO12  = 0x1403, // hold.gpio12   BOOL, RO: pad hold latched on the C6 EN line
     REG_ID_HOLD_GPIO13  = 0x1404, // hold.gpio13   BOOL, RO: pad hold latched on the C6 boot strap
 } reg_id_t;

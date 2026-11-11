@@ -393,6 +393,9 @@ add_test(NAME display_timing_test COMMAND display_timing_test)
 
 # ---- registry domain 0x14 haptics.*, led.*, tz, hold.* (#319): this domain's agent adds its own test below and touches no other block -------
 # (the rows are reg_p4_misc.c; reg_service_test above already links every row file and pins the split)
+target_include_directories(reg_service_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_haptics
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_led ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/c6link
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_clock)
 # The pure helpers of #319 (hp_duty_pct, led_pad_text, clock_tz_label) are tested in haptics_pattern_test, led_pattern_test
 # and clock_local_test; the getters are ESP calls, checked on the bench
 # ---- end of the misc block ------------------------------------------------------------------------------

@@ -18,6 +18,7 @@
 #include "nvs.h"
 #include "driver/gpio.h"
 #include "hal/rtc_io_ll.h"
+#include "c6_reg.h"
 #include "reg.h"
 #include <sys/stat.h>
 

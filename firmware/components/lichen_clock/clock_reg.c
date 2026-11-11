@@ -1,6 +1,7 @@
 // The registry's tz key (#319): the zone the C library applies now, read back from the environment the settings
 // service sets (settings_apply_tz / settings_set_tz do setenv("TZ") + tzset, so TZ is what localtime uses).
 #include "clock_local.h"
+#include "clock_reg.h"
 #include "reg.h"
 
 #include <stdlib.h>

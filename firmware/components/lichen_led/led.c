@@ -4,6 +4,7 @@
 #include "led.h"
 #include "led_cmd.h"
 #include "led_setting.h"
+#include "led_reg.h"
 #include "reg.h"
 #include "soc/gpio_struct.h"
 

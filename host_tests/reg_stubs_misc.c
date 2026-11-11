@@ -1,6 +1,11 @@
 // Host-test stubs for the getters/setters that reg_p4_misc.c points at (#312). Only the misc agent edits this file.
 #include "reg_p4.h"
 
+#include "c6_reg.h"
+#include "clock_reg.h"
+#include "haptics_reg.h"
+#include "led_reg.h"
+
 #include <string.h>
 
 // The values the host test pins through `fw get`-style reads: motor at rest, LED pad low on an active-high LED, the
