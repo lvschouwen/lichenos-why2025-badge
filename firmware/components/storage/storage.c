@@ -14,19 +14,13 @@ static portMUX_TYPE s_free_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool         s_free_known;
 static uint64_t     s_free, s_total;
 
-// An OTA update brings a new app, never a new partition table: a badge updated over Wi-Fi from before #300 still has
-// its FAT drive under a "fat" partition. Nothing touches that drive (no mount, no format); USB moves it.
 static bool partition_is_littlefs(void) {
     esp_partition_t const *p =
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, STORAGE_LABEL);
     if (p && p->subtype == ESP_PARTITION_SUBTYPE_DATA_LITTLEFS) {
         return true;
     }
-    if (p && p->subtype == ESP_PARTITION_SUBTYPE_DATA_FAT) {
-        ESP_LOGE(TAG, "the flash drive is still FAT: migrate it by USB (docs/architecture.md, #300)");
-    } else {
-        ESP_LOGE(TAG, "no LittleFS partition \"%s\" in the partition table", STORAGE_LABEL);
-    }
+    ESP_LOGE(TAG, "no LittleFS partition \"%s\" in the partition table", STORAGE_LABEL);
     return false;
 }
 
@@ -39,13 +33,12 @@ bool storage_attach(void) {
         .partition_label = STORAGE_LABEL,
         // Never formatted on its own (#110): a drive that does not mount may still hold the only copy of the MeshCore
         // identity, and a fresh drive would let MeshCore make a new one. It stays unmounted; formatting is the user's
-        // explicit choice. A badge still on the FAT drive of before #300 lands here too: the USB route moves it.
+        // explicit choice.
         .format_if_mount_failed = false,
     };
     esp_err_t err = esp_vfs_littlefs_register(&conf);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "mounting %s failed: %s; left unmounted and NOT formatted (a drive still FAT from before #300 "
-                      "is moved by USB, docs/architecture.md)", STORAGE_BASE, esp_err_to_name(err));
+        ESP_LOGE(TAG, "mounting %s failed: %s; left unmounted and NOT formatted", STORAGE_BASE, esp_err_to_name(err));
         return false;
     }
     return true;

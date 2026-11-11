@@ -339,12 +339,6 @@ void meshcore_app_settings_open(void) {
 // ---- the background part -----------------------------------------------------------------------------------------
 
 static bool start_background(void) {
-    // Kept in Lichen's namespace by earlier firmware (mc_name_set before #84 T5, the advert schedule before #123): copied
-    // once with the same value, erased there on a later boot
-    app_settings_adopt_u8(self(), "mc_name_set");
-    app_settings_adopt_u32(self(), ADV_KEY_INTERVAL);
-    app_settings_adopt_u32(self(), ADV_KEY_LAST);
-    app_settings_adopt_u8(self(), ADV_KEY_FLOOD);
     return meshcore_run_boot(); // start at boot on: started here, as before; off: only the console commands (#103)
 }
 

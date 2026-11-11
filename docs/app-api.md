@@ -76,9 +76,7 @@ to `layers.conf`):
     `confirm_label` ("restart") and the hint "Enter: restart • Esc: cancel" is generated; the hint is dim unless `careful`.
   - The text and choices are pure (`ui_text.h`, `host_tests/ui_text_test.c`).
 - `theme.h`, `fonts.h`: Lichen's colours, sizes and fonts. Use them instead of literals.
-- `lichen_settings.h`: the app's own NVS namespace `a.<id>` (u8, u32, u64, strings, erase, erase all), and adopting a
-  key an earlier firmware kept in `badge_fw` (`app_settings_adopt_u8/_u32`: copied once and read back, the old key
-  erased on a later boot). Never open NVS.
+- `lichen_settings.h`: the app's own NVS namespace `a.<id>` (u8, u32, u64, strings, erase, erase all). Never open NVS.
 - `lichen_fs.h`: the app's directory `/storage/<id>` and, with a card in, `/sd/lichen/apps/<id>`; drive sizes. Never
   name a path outside them. Every file call on the card is inside one batch: `lichen_fs_sd_begin(app, wait_ms)` (false:
   no card, or busy past `wait_ms`; then no file work and no end), the work, `lichen_fs_sd_end(app, errno_or_0)` (only
@@ -255,8 +253,7 @@ file agree):
 Also open: `mesh` keeps `psram_guard` as a peer for `psram_speed.h` until #280 removes it (`meshcore_run.c` asks
 `psram_speed_trial_pending` and `psram_speed_on_pass`; the switch's choice, gate and console calls are forbidden). The
 own include roots of the bundled third-party code (`vendored` lines: MeshCore, its Crypto library, ed25519, base64)
-are not scanned. MeshCore's identity hand-over goes through `lichen_legacy_blob_take` (`lichen_legacy.h`) and the
-message journal's SD batches through `lichen_fs_sd_begin`/`lichen_fs_sd_end` (`lichen_fs.h`); the journal still
+are not scanned. The message journal's SD batches through `lichen_fs_sd_begin`/`lichen_fs_sd_end` (`lichen_fs.h`); the journal still
 lives at `/sd/lichen/messages` instead of `lichen_fs_sd_dir`, moving the history is a separate decision. From #84: the
 console prefix per app (T8b) and system apps calling `board/backlight.h` directly (V13). MeshCore's chat rings and the
 Arduino shim's file buffers come from `lichen_alloc` through hooks (`mesh_mem.c`); their plain heap fallback is built

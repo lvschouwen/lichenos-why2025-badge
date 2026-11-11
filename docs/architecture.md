@@ -628,20 +628,3 @@ OS v2 (#216) on the same lessons:
   check and `fw storage` count on the spot; sys_notices counts once a minute, and About, Files and MeshCore read that
   value (`storage_free_bytes_cached`). A failed count is "unknown", never 0 B free. An upload needs its size in blocks of
   4088 B (8 B of each 4096 B block are the file's list pointers) plus 4 blocks for metadata (`ota_file_fits`).
-- **A badge still on FAT** (firmware before #300) never mounts or formats the old drive: with the new partition table
-  the mount fails and the drive stays as it is; with the old one (an update over Wi-Fi brings a new app, never a new
-  table) the log says "the flash drive is still FAT: migrate it by USB". The way over is USB only, once, by main:
-  1. `tools/badge.sh backup <port>`; take the storage slice out of the backup (`dd ... bs=4096 skip=2880 count=1216`).
-  2. `tools/pack_storage.sh extract-fat <slice> <dir>` (ESP-IDF's `fatfsparse.py` with the wear-levelling layer, in
-     the IDF Python environment).
-  3. **Fix the names' case.** fatfsparse ignores FAT's lower-case flags, so every name that fits 8.3 comes back in
-     upper case (`LORA.TOML`, `C6/FIRMWARE.BIN`, `MESHCORE/_MAIN.ID`), and LittleFS is case-sensitive: packed as they
-     are, the firmware would not find its files (MeshCore would see no identity and make a new one). Rename each to
-     the name the badge listed for it (`fw storage`, `fw storage <dir>` before the move); extract-fat names the
-     suspects. Long names come back as they were.
-  4. `tools/pack_storage.sh pack <dir> <img>`, then `verify <img> <dir>`.
-  5. `tools/badge.sh flash-fw <port> --storage-image <img>` (in a Claude session the guard hook asks first, as for
-     `--wipe-storage`): the new firmware and partition table, and `<img>` in the storage partition. It refuses an image that is not exactly the
-     partition's size or does not mount with the badge's config.
-  6. On the badge, check every file against the list (`fw storage`), and that MeshCore kept its identity.
-  No in-firmware migration.

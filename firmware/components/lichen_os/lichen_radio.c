@@ -14,7 +14,6 @@
 #define KEY_ON    "radio_on"
 #define KEY_SAVED "radio_saved"
 #define KEY_AIR   "radio_air"
-#define KEY_VER   "radio_ver" // stored-state version, see radio_state_migrate
 
 static portMUX_TYPE      lock = portMUX_INITIALIZER_UNLOCKED;
 static radio_state_t     state;
@@ -40,24 +39,13 @@ static void ensure_loaded(void) {
     radio_state_t s;
     radio_state_load(&s, settings_get_u8(KEY_ON, RADIO_MASK_DEFAULT), settings_get_u8(KEY_SAVED, RADIO_MASK_DEFAULT),
                      settings_get_u8(KEY_AIR, 0));
-    uint8_t ver = settings_get_u8(KEY_VER, 0);
-    bool    mig = ver != RADIO_STATE_VERSION;
-    if (mig) {
-        ver = radio_state_migrate(&s, ver);
-    }
     portENTER_CRITICAL(&lock);
     if (!loaded) {
         state       = s;
         change_lock = xSemaphoreCreateMutexStatic(&change_buf);
         loaded      = true;
-    } else {
-        mig = false;
     }
     portEXIT_CRITICAL(&lock);
-    if (mig) { // persist the dropped BT bit and the version together, so the migration runs once
-        save(&s);
-        settings_set_u8(KEY_VER, ver);
-    }
 }
 
 bool lichen_radio_get(radio_id_t id) {

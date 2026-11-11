@@ -2,7 +2,6 @@
 // captured packets (#65): contacts land in MeshCore's table, channel messages reach the app, and everything that
 // should survive a reboot does.
 #include "MyMesh.h"
-#include "identity_move.h"
 #include "mesh_prefs.h"
 #include "mesh_ident.h"
 #include "mesh_link.h"
@@ -1061,40 +1060,6 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     import_checks(mesh);
 }
 
-// Moving the milestone-2 key into DataStore (#65 review): only a saved copy that reads back identical counts, because
-// MeshCore's save reports success once the file opened, even when the write itself failed (disk full, bad FAT)
-struct FakeIdStore {
-    bool                saved_ok = true;
-    bool                corrupt  = false;
-    mesh::LocalIdentity kept;
-    bool saveMainIdentity(mesh::LocalIdentity const &id) {
-        kept = id;
-        if (corrupt) {
-            uint8_t raw[PRV_KEY_SIZE + PUB_KEY_SIZE];
-            size_t  n = kept.writeTo(raw, sizeof(raw));
-            raw[0] ^= 0xFF;
-            kept.readFrom(raw, n);
-        }
-        return saved_ok;
-    }
-    bool loadMainIdentity(mesh::LocalIdentity &id) {
-        id = kept;
-        return true;
-    }
-};
-
-static void identity_move_checks_the_saved_copy(mesh::RNG &rng) {
-    mesh::LocalIdentity id(&rng);
-    FakeIdStore         good;
-    CHECK(identity_move(good, id));
-    FakeIdStore refused;
-    refused.saved_ok = false;
-    CHECK(!identity_move(refused, id));
-    FakeIdStore short_write; // "saved", but what is on disk differs
-    short_write.corrupt = true;
-    CHECK(!identity_move(short_write, id));
-}
-
 static std::vector<uint8_t> file_bytes(std::string const &path) {
     std::vector<uint8_t> out;
     FILE                *f = fopen(path.c_str(), "rb");
@@ -1205,7 +1170,6 @@ int main(int argc, char **argv) {
 
     static Rng              rng;
     static SimpleMeshTables tables1, tables2, tables3, tables4, tables5, tables6, tables7;
-    identity_move_checks_the_saved_copy(rng);
     identity_store_checks(root, rng);
     static FakeApp          app;
     uint8_t                 first_key[PUB_KEY_SIZE];

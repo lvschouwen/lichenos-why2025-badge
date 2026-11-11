@@ -2,7 +2,6 @@
 
 #include "app_ns.h"
 #include "esp_log.h"
-#include "fw_console.h" // FW_NVS_NAMESPACE: where adopted keys used to live
 #include "nvs.h"
 #include "settings_fail.h"
 
@@ -144,111 +143,4 @@ bool app_settings_erase_all(lichen_app_t const *app) {
         return false;
     }
     return commit_close(app, "(all)", nvs, nvs_erase_all(nvs));
-}
-
-// ---- adopting keys an earlier firmware kept in badge_fw (app_adopt_run) -------------------------------------------
-
-typedef struct {
-    lichen_app_t const *app;
-    char const         *key;
-    bool                wide; // u32, else u8
-} adopt_ctx_t;
-
-static app_key_read_t key_read(esp_err_t err) {
-    return err == ESP_OK ? APP_KEY_FOUND : err == ESP_ERR_NVS_NOT_FOUND ? APP_KEY_MISSING : APP_KEY_ERROR;
-}
-
-// A namespace that was never written to does not exist yet (ESP_ERR_NVS_NOT_FOUND): the key is missing, not an error
-static app_key_read_t read_typed(char const *ns, adopt_ctx_t const *c, uint32_t *value) {
-    nvs_handle_t nvs;
-    esp_err_t    err = nvs_open(ns, NVS_READONLY, &nvs);
-    if (err == ESP_OK) {
-        if (c->wide) {
-            err = nvs_get_u32(nvs, c->key, value);
-        } else {
-            uint8_t v8 = 0;
-            err        = nvs_get_u8(nvs, c->key, &v8);
-            *value     = v8;
-        }
-        nvs_close(nvs);
-    }
-    if (key_read(err) == APP_KEY_ERROR) {
-        ESP_LOGW(TAG, "%s/%s unreadable: %s", ns, c->key, esp_err_to_name(err));
-    }
-    return key_read(err);
-}
-
-static app_key_read_t adopt_get_app(void *ctx, uint32_t *value) {
-    adopt_ctx_t const *c = ctx;
-    char               ns[16];
-    if (!app_ns_name(c->app->id, ns, sizeof(ns))) {
-        return APP_KEY_ERROR;
-    }
-    return read_typed(ns, c, value);
-}
-
-static app_key_read_t adopt_get_legacy(void *ctx, uint32_t *value) {
-    return read_typed(FW_NVS_NAMESPACE, ctx, value);
-}
-
-static bool adopt_set_app(void *ctx, uint32_t value) {
-    adopt_ctx_t const *c = ctx;
-    return c->wide ? app_settings_set_u32(c->app, c->key, value) : app_settings_set_u8(c->app, c->key, (uint8_t)value);
-}
-
-static bool adopt_erase_app(void *ctx) {
-    adopt_ctx_t const *c = ctx;
-    return app_settings_erase(c->app, c->key);
-}
-
-static bool adopt_erase_legacy(void *ctx) {
-    adopt_ctx_t const *c   = ctx;
-    nvs_handle_t       nvs;
-    esp_err_t          err = nvs_open(FW_NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err == ESP_OK) {
-        err = nvs_erase_key(nvs, c->key);
-        if (err == ESP_OK) {
-            err = nvs_commit(nvs);
-        }
-        nvs_close(nvs);
-    }
-    if (err != ESP_OK) {
-        settings_fail_note(c->key, err);
-    }
-    ESP_LOG_LEVEL(err == ESP_OK ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s: old %s/%s erased (%s)", c->app->id,
-                  FW_NVS_NAMESPACE, c->key, esp_err_to_name(err));
-    return err == ESP_OK;
-}
-
-static bool adopt(lichen_app_t const *app, char const *key, bool wide) {
-    if (!app || !app->id) {
-        return false;
-    }
-    adopt_ctx_t    ctx = {.app = app, .key = key, .wide = wide};
-    app_adopt_io_t io  = {
-         .ctx          = &ctx,
-         .get_app      = adopt_get_app,
-         .get_legacy   = adopt_get_legacy,
-         .set_app      = adopt_set_app,
-         .erase_app    = adopt_erase_app,
-         .erase_legacy = adopt_erase_legacy,
-    };
-    uint32_t      legacy = 0;
-    app_adopted_t done   = app_adopt_run(&io, &legacy);
-    if (done == APP_ADOPTED_COPIED || done == APP_ADOPTED_COPY_FAILED) {
-        bool ok = done == APP_ADOPTED_COPIED;
-        ESP_LOG_LEVEL(ok ? ESP_LOG_INFO : ESP_LOG_WARN, TAG, "%s: %s=%lu adopted from %s (%s)", app->id, key,
-                      (unsigned long)legacy, FW_NVS_NAMESPACE, ok ? "saved" : "failed, tried again next boot");
-    } else if (done == APP_ADOPTED_SKIPPED) {
-        ESP_LOGW(TAG, "%s: %s not adopted this boot (NVS read error), tried again next boot", app->id, key);
-    }
-    return done == APP_ADOPTED_COPIED;
-}
-
-bool app_settings_adopt_u8(lichen_app_t const *app, char const *key) {
-    return adopt(app, key, false);
-}
-
-bool app_settings_adopt_u32(lichen_app_t const *app, char const *key) {
-    return adopt(app, key, true);
 }

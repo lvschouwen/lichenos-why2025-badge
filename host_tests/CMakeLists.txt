@@ -818,11 +818,6 @@ target_compile_options(mesh_rset_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(mesh_rset_test PRIVATE m)
 add_test(NAME mesh_rset_test COMMAND mesh_rset_test)
 
-add_executable(mesh_pathhash_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_pathhash_test.c)
-target_include_directories(mesh_pathhash_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
-target_compile_options(mesh_pathhash_test PRIVATE -Wall -Wextra -Werror)
-add_test(NAME mesh_pathhash_test COMMAND mesh_pathhash_test)
-
 add_executable(radio_presets_test
     ${CMAKE_CURRENT_SOURCE_DIR}/radio_presets_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/radio_presets.c
@@ -1188,14 +1183,6 @@ add_executable(app_ns_test
 target_include_directories(app_ns_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(app_ns_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME app_ns_test COMMAND app_ns_test)
-
-add_executable(legacy_blob_test
-    ${CMAKE_CURRENT_SOURCE_DIR}/legacy_blob_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/legacy_blob.c
-)
-target_include_directories(legacy_blob_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
-target_compile_options(legacy_blob_test PRIVATE -Wall -Wextra -Werror)
-add_test(NAME legacy_blob_test COMMAND legacy_blob_test)
 
 # lichen_task_start's bookkeeping and lichen_alloc's per-app accounting (#181)
 foreach(book task_book mem_book)
@@ -1840,7 +1827,7 @@ add_test(NAME raw_hooks_test COMMAND raw_hooks_test)
 
 add_custom_target(run_tests
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose
-    DEPENDS attention_policy_test mesh_hist_test assets_fmt_test font_cover_test c6_image_test ota_proto_test ota_pieces_test backlight_cmd_test backlight_level_test uart_lend_test console_cmd_test lora_proto_test reg_test meshcore_hdr_test lora_link_test lora_irq_test console_cmd_fw_test c6_paths_test ota_path_test ota_valid_test restart_gate_test kbd_map_test tca8418_mask_test meshcore_decode_test mesh_store_test lora_airtime_test mesh_format_test mesh_frame_test mesh_outbox_test mesh_trace_test mesh_remote_test mesh_rset_test radio_presets_test mesh_pathhash_test list_filter_test radio_filter_test radio_confirm_test channel_input_test mesh_chat_test mesh_tile_test mesh_notify_test crash_log_test restart_log_test boot_steps_test r16_hold_test log_clean_test fs_shim_test cayenne_lpp_test companion_test lora_tx_test lora_owner_test nav_test screen_ids_test home_layout_test badge_table_test hold_exit_test remote_ctl_test key_matrix_test tz_table_test clock_check_test clock_keep_test clock_apply_test clock_local_test time_fields_test wifi_list_test wifi_cred_test wifi_saved_test wifi_analyser_test wifi_join_test setup_state_test mc_first_test ui_keys_test ui_overflow_test boot_text_test update_status_test update_mode_test link_state_test scroll_anchor_test ui_text_test shot_blend_test ota_bmp_test ota_rle_test log_ring_test console_model_test psram_pattern_test psram_rotation_test psram_tuning_test psram_speed_test psram_heap_test ui_perf_stats_test mem_fmt_test dma_low_test bench_calc_test stress_calc_test idle_policy_test lock_combo_test saver_layout_test station_clock_test c6_watch_test dialog_countdown_test hosted_link_test sd_policy_test fs_path_test app_slot_test display_rot_test shortcut_test psram_dma_test sd_bounce_test calc_eval_test calc_units_test timer_calc_test
+    DEPENDS attention_policy_test mesh_hist_test assets_fmt_test font_cover_test c6_image_test ota_proto_test ota_pieces_test backlight_cmd_test backlight_level_test uart_lend_test console_cmd_test lora_proto_test reg_test meshcore_hdr_test lora_link_test lora_irq_test console_cmd_fw_test c6_paths_test ota_path_test ota_valid_test restart_gate_test kbd_map_test tca8418_mask_test meshcore_decode_test mesh_store_test lora_airtime_test mesh_format_test mesh_frame_test mesh_outbox_test mesh_trace_test mesh_remote_test mesh_rset_test radio_presets_test list_filter_test radio_filter_test radio_confirm_test channel_input_test mesh_chat_test mesh_tile_test mesh_notify_test crash_log_test restart_log_test boot_steps_test r16_hold_test log_clean_test fs_shim_test cayenne_lpp_test companion_test lora_tx_test lora_owner_test nav_test screen_ids_test home_layout_test badge_table_test hold_exit_test remote_ctl_test key_matrix_test tz_table_test clock_check_test clock_keep_test clock_apply_test clock_local_test time_fields_test wifi_list_test wifi_cred_test wifi_saved_test wifi_analyser_test wifi_join_test setup_state_test mc_first_test ui_keys_test ui_overflow_test boot_text_test update_status_test update_mode_test link_state_test scroll_anchor_test ui_text_test shot_blend_test ota_bmp_test ota_rle_test log_ring_test console_model_test psram_pattern_test psram_rotation_test psram_tuning_test psram_speed_test psram_heap_test ui_perf_stats_test mem_fmt_test dma_low_test bench_calc_test stress_calc_test idle_policy_test lock_combo_test saver_layout_test station_clock_test c6_watch_test dialog_countdown_test hosted_link_test sd_policy_test fs_path_test app_slot_test display_rot_test shortcut_test psram_dma_test sd_bounce_test calc_eval_test calc_units_test timer_calc_test
     sd_settings_model_test about_dev_test
     lichen_sys_pure_test
     lichen_sys_pure_view_test

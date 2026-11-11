@@ -26,9 +26,9 @@ static void class_members(void) {
     CHECK(settings_secret_count() == sizeof(passwords) / sizeof(passwords[0]));
     CHECK(settings_secret_count() == WIFI_SAVED_MAX + 2); // one per saved network, the pair in use, the OTA token
     CHECK(settings_secret_at(settings_secret_count()) == NULL);
-    // The SSIDs and the driver-wipe flag are plain settings; another namespace's key of the same name is not ours
+    // The SSIDs are plain settings; another namespace's key of the same name is not ours
     CHECK(!settings_key_secret("badge_fw", "wifi_ssid") && !settings_key_secret("badge_fw", "wifi_s0"));
-    CHECK(!settings_key_secret("badge_fw", "wifi_drv_wiped") && !settings_key_secret("badge_fw", "tz"));
+    CHECK(!settings_key_secret("badge_fw", "tz"));
     CHECK(!settings_key_secret("a.meshcore", "wifi_pass"));
     CHECK(!settings_key_secret(NULL, "wifi_pass") && !settings_key_secret("badge_fw", NULL));
 }

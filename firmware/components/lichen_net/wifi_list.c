@@ -350,11 +350,3 @@ bool wifi_cred_clear(void) {
     generation++;
     return active && list;
 }
-
-bool wifi_driver_wiped(void) {
-    return !store || store->get_u8("wifi_drv_wiped", 0) != 0;
-}
-
-bool wifi_driver_wiped_set(bool wiped) {
-    return store && store->set_u8("wifi_drv_wiped", wiped ? 1 : 0);
-}

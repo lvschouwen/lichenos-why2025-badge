@@ -152,24 +152,6 @@ int main(void) {
     radio_state_set_airplane(&s, false);
     CHECK(!radio_state_get(&s, RADIO_BT));
 
-    // a pre-#197 mask (0x07, saved 0x07, mid-airplane) loses BT once; Wi-Fi and LoRa are untouched
-    radio_state_load(&r, RADIO_MASK_ALL, RADIO_MASK_ALL, 1);
-    CHECK(radio_state_migrate(&r, 0) == RADIO_STATE_VERSION);
-    CHECK(r.on == (W | L) && r.saved == (W | L) && r.airplane);
-    CHECK(!radio_state_get(&r, RADIO_BT));
-    radio_state_load(&r, W, RADIO_MASK_ALL, 0); // user had BT off in a saved mask
-    radio_state_migrate(&r, 0);
-    CHECK(r.on == W && r.saved == (W | L));
-
-    // after the migration the user turns BT on: a reload at the stored version keeps it
-    radio_state_load(&r, RADIO_MASK_ALL, RADIO_MASK_ALL, 0);
-    radio_state_migrate(&r, 0);
-    radio_state_set(&r, RADIO_BT, true);
-    radio_state_t again;
-    radio_state_load(&again, r.on, r.saved, 0);
-    CHECK(radio_state_migrate(&again, RADIO_STATE_VERSION) == RADIO_STATE_VERSION);
-    CHECK(radio_state_get(&again, RADIO_BT) && again.on == RADIO_MASK_ALL);
-
     holds();
 
     if (failures) {

@@ -47,7 +47,6 @@ static char const TAG[] = "thermal";
 #define SEEN_KEY       "batt_seen"
 #define OFF_BOUND_MS   30000 // the shutdown's backstop: the badge is off by then, saved or not
 #define BACKSTOP_STACK 4096
-#define SHED_KEY       "thermal_shed" // written by firmware before #282 while the radios were shed (and saved off)
 
 #if CONFIG_LICHEN_SENSORS_GAS_HEATER
 #define HEATER_ON true
@@ -263,21 +262,7 @@ static void publish(th_state_t const *st, th_input_t const *in, float bme_raw) {
 
 // ---- the first-run notice --------------------------------------------------------------------------------------------
 
-// Firmware before #282 saved the radios off while it shed load: a badge that went down shed under it still has them
-// off, and the person is told once. This firmware never sets the key (a hold is not saved).
-static void shed_boot_notice(void) {
-    if (!settings_get_u8(SHED_KEY, 0)) {
-        return;
-    }
-    if (lichen_notify_to("lichen", LN_WARN, "battery", "Radios were switched off",
-                         "Wi-Fi and LoRa were switched off because the badge was too hot. Switch them on again in "
-                         "Settings when it has cooled.", 0)) {
-        settings_erase(SHED_KEY);
-    }
-}
-
 static void first_run_notice(void) {
-    shed_boot_notice();
     if (settings_get_u8(SEEN_KEY, 0)) {
         return;
     }

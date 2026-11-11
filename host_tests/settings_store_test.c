@@ -89,7 +89,6 @@ static void bound_net_store(void) {
     CHECK(strcmp(v, "-") == 0);
     settings_get_str("wifi_ssid", v, sizeof(v), ""); // the shell's Wi-Fi line still reads the name
     CHECK(strcmp(v, "homenet") == 0);
-    CHECK(!wifi_driver_wiped() && wifi_driver_wiped_set(true) && wifi_driver_wiped());
     CHECK(wifi_cred_clear() && !wifi_cred_load(s, p));
 }
 

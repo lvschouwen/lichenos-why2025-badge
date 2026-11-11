@@ -68,22 +68,6 @@ bool meshcore_pw_forget(uint8_t const prefix[6]) {
     return app_settings_erase(app, key);
 }
 
-bool meshcore_pathhash_migrated(void) {
-    return app_settings_get_u8(app, "phs_migrated", 0) != 0;
-}
-
-bool meshcore_pathhash_migrated_set(void) {
-    return app_settings_set_u8(app, "phs_migrated", 1);
-}
-
-bool meshcore_routes_forgotten(void) {
-    return app_settings_get_u8(app, "phs_routes", 0) != 0;
-}
-
-bool meshcore_routes_forgotten_set(void) {
-    return app_settings_set_u8(app, "phs_routes", 1);
-}
-
 bool meshcore_autostart(void) {
     return app_settings_get_u8(app, AUTOSTART, 1) != 0;
 }

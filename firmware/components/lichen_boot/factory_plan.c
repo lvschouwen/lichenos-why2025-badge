@@ -10,12 +10,11 @@
 static char const *const keep_keys[] = {
     "boot_fail", "crash_count", "dump_sum", "rst_log", // diagnostics: crashes and restarts stay traceable
     "psram_rty",                                       // PSRAM tuning retries (#40, #86)
-    "c6_force", "c6_ok_key", "c6_verify", "c6_rt_restart", "wifi_drv_wiped", // the C6's image and recovery state
+    "c6_force", "c6_ok_key", "c6_verify", "c6_rt_restart",                  // the C6's image and recovery state
     "upd_from",                                        // the "updated from" note after an update
-    "batt_seen", "thermal_shed",                       // battery and thermal safety (#10)
+    "batt_seen",                                       // battery safety (#10)
     "clock_src",                                       // where the running clock's time came from (#64)
     "r16",                                             // R16 fitted: a hardware record (backlight_r16_hold)
-    "mc_advlast",                                      // MeshCore's last advert before #123 (adopted into a.meshcore)
 };
 
 // App keys that describe the badge's airtime rather than a choice: kept like keep_keys, the rest of the app's

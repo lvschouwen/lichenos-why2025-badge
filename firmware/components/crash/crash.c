@@ -30,7 +30,6 @@
 #define CRASH_DIR    STORAGE_BASE "/crash"
 #define CRASH_LOG    CRASH_DIR "/log.txt"
 #define CRASH_TMP    CRASH_DIR "/log.tmp"
-#define CRASH_OLD    CRASH_DIR "/log.old" // the FAT swap's step-aside copy (before #300): read if log.txt is gone
 #define KEEP_RECORDS 20
 #define LOG_MAX      (KEEP_RECORDS * 256 + 256)
 #define B64_LINE     76
@@ -149,12 +148,9 @@ static size_t read_file(char const *path, char *buf, size_t cap) {
     return n;
 }
 
-// A swap cut short by a reset leaves the log as log.old (moved aside) or log.tmp (not renamed yet) only: it still counts
+// A swap cut short by a reset leaves the log as log.tmp (not renamed yet) only: it still counts
 static size_t read_log(char *buf, size_t cap) {
     size_t n = read_file(CRASH_LOG, buf, cap);
-    if (n == 0) {
-        n = read_file(CRASH_OLD, buf, cap);
-    }
     return n ? n : read_file(CRASH_TMP, buf, cap);
 }
 
@@ -171,15 +167,9 @@ static bool write_file(char const *path, char const *text, size_t len) {
     return (fclose(f) == 0) && ok;
 }
 
-// LittleFS's rename replaces log.txt in one atomic step (#300): after a cut it is the old log or the new one. A
-// log.old, the step-aside copy of the FAT drive's swap, is dropped only once log.txt is in place: after a cut on FAT
-// it may have been the only copy left.
+// LittleFS's rename replaces log.txt in one atomic step (#300): after a cut it is the old log or the new one.
 static bool swap_in(void) {
-    if (rename(CRASH_TMP, CRASH_LOG) != 0) {
-        return false;
-    }
-    unlink(CRASH_OLD);
-    return true;
+    return rename(CRASH_TMP, CRASH_LOG) == 0;
 }
 
 bool crash_log_store(char const *text, size_t len) {
@@ -187,7 +177,6 @@ bool crash_log_store(char const *text, size_t len) {
     crash_log_lock();
     if (len == 0) {
         ok = unlink(CRASH_LOG) == 0 || errno == ENOENT;
-        unlink(CRASH_OLD);
         unlink(CRASH_TMP);
     } else {
         mkdir(CRASH_DIR, 0777); // exists after the first crash

@@ -25,7 +25,7 @@ int    wifi_bars(int8_t rssi);
 bool wifi_cred_valid(char const *ssid, char const *pass);
 
 // Where the credentials live (#235): lichen_net opens no NVS, the settings service binds its calls at boot (lichen_os
-// settings_bind_net). The SSIDs and wifi_drv_wiped are plain settings, the passwords the secrets class. Unbound, every
+// settings_bind_net). The SSIDs are plain settings, the passwords the secrets class. Unbound, every
 // read finds nothing and every write fails.
 typedef struct {
     void    (*get_str)(char const *key, char *out, size_t cap, char const *def);
@@ -45,17 +45,11 @@ bool     wifi_cred_save(char const *ssid, char const *pass);
 bool     wifi_cred_load(char ssid[33], char pass[64]);
 bool     wifi_cred_clear(void);
 uint32_t wifi_cred_generation(void);
-// badge_fw wifi_drv_wiped (a plain flag): the C6 driver's own flash copy was wiped once (esp_wifi_restore, after the
-// move of the credentials to badge_fw). True when it was, and also when no store is bound. A missing key and an
-// unreadable NVS both read as false, so the caller marks first (set returns false when the flag cannot be written:
-// then no wipe this boot) and unmarks when the wipe fails.
-bool wifi_driver_wiped(void);
-bool wifi_driver_wiped_set(bool wiped);
 
 // The saved networks (#160), keys wifi_s0..wifi_s4 (plain) / wifi_p0..wifi_p4 (secret), most recently joined first. wifi_ssid/wifi_pass
 // above stay the pair in use (the front of the list). All of these are called with wifi_service.c's saved_lock held.
 struct wifi_saved_s;
-// Loads the list (empty when nothing is saved; v2 migrates no older pair into it, #216); false when no store is bound
+// Loads the list (empty when nothing is saved); false when no store is bound
 bool wifi_saved_load(struct wifi_saved_s *l);
 // The saved SSIDs only, for the Wi-Fi screen (#240): the passwords stay in this component. take/give wrap the load in
 // wifi_service.c's saved_lock, so a join or Forget cannot rewrite the list under the reader. take waits at most

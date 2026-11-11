@@ -18,14 +18,6 @@ void radio_state_load(radio_state_t *s, uint8_t on, uint8_t saved, uint8_t airpl
     s->airplane = airplane == 1;
 }
 
-uint8_t radio_state_migrate(radio_state_t *s, uint8_t version) {
-    if (version < 1) {
-        s->on    = (uint8_t)(s->on & ~(1u << RADIO_BT));
-        s->saved = (uint8_t)(s->saved & ~(1u << RADIO_BT));
-    }
-    return RADIO_STATE_VERSION;
-}
-
 static uint8_t held_mask(radio_state_t const *s) {
     uint8_t m = 0;
     for (int r = 0; r < RADIO_HOLD_COUNT; r++) {

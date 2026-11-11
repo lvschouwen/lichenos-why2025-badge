@@ -18,8 +18,7 @@ extern "C" {
 #define ADVCFG_INTERVAL_MAX     10080
 #define ADVCFG_INTERVAL_DEFAULT 720 // 12 h
 // The schedule's keys in the app's settings (a.meshcore, lichen_settings.h): interval (u32 minutes), last advert (u32
-// Unix seconds) and the manual advert's flood flag (u8). Same names and types as in badge_fw before #123, where
-// meshcore_app.c adopts them from.
+// Unix seconds) and the manual advert's flood flag (u8).
 #define ADV_KEY_INTERVAL "mc_advint"
 #define ADV_KEY_LAST     "mc_advlast"
 #define ADV_KEY_FLOOD    "mc_advfl"

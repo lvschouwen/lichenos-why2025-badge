@@ -7,7 +7,6 @@
 #include "mesh_link.h"
 
 #include "lora_radio.h"
-#include "identity_move.h"
 #include "mesh.h"
 #include "mesh_format.h"
 #include "mesh_advert_cfg.h"
@@ -47,7 +46,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "lichen_legacy.h"
 #include "lichen_mem.h"
 #include "lichen_task.h"
 
@@ -845,30 +843,6 @@ static void ident_verify(BadgeMesh *n) {
     ident_apply(state, false);
 }
 
-// Milestone 2 kept the key pair in NVS; MeshCore's DataStore keeps it in /storage/meshcore. Moved once, so the
-// contacts that already know the badge keep knowing it.
-// The OS hands the old blob over (lichen_legacy_blob_take) and erases it only once this says the identity is saved
-static bool identity_store(void *, uint8_t const *blob, size_t len) {
-    mesh::LocalIdentity id;
-    id.readFrom(blob, len);
-    if (identity_move(store, id)) {
-        ESP_LOGI(TAG, "MeshCore identity moved from NVS to /storage/meshcore");
-        return true;
-    }
-    ESP_LOGW(TAG, "MeshCore identity not saved to /storage/meshcore (full?): kept in NVS, tried again next boot");
-    return false;
-}
-
-static void migrate_identity(void) {
-    // A file that is there but unreadable (#109) is kept too: never written over, not even with the NVS copy
-    if (store.hasMainIdentity()) {
-        return;
-    }
-    uint8_t blob[128];
-    lichen_legacy_blob_take(lichen_app_by_id(MESHCORE_APP_ID), "identity", blob, sizeof(blob), PRV_KEY_SIZE + PUB_KEY_SIZE, identity_store, nullptr);
-    mh_wipe(blob, sizeof(blob));
-}
-
 // First boot of MyMesh (no prefs file yet): the radio settings come from lora.toml instead of MeshCore's defaults
 static void apply_boot_radio(MyMesh *n, bool first_boot) {
     NodePrefs *prefs = n->getNodePrefs();
@@ -880,6 +854,7 @@ static void apply_boot_radio(MyMesh *n, bool first_boot) {
         prefs->bw   = bw_hz / 1e3f;
         prefs->sf   = sf;
         prefs->cr   = cr;
+        mesh_prefs_set_path_hash(prefs, MESH_PATH_HASH_DEFAULT); // MeshCore's own default is 1 B (#129)
         n->savePrefs();
     }
     radio_driver.setParams(prefs->freq, prefs->bw, prefs->sf, prefs->cr);
@@ -1041,37 +1016,6 @@ extern "C" char const *mesh_set_path_hash(uint8_t size) {
         ESP_LOGI(TAG, "path hash size set: %u B (forgot %d stored routes of another size)", size, forgot);
     }
     return why;
-}
-
-// The first boot of the build that made the size a setting (#129): see mesh_pathhash_migrate. Before the mesh task runs.
-static void migrate_path_hash(MyMesh *n) {
-    NodePrefs *prefs = n->getNodePrefs();
-    bool       mark;
-    uint8_t    to = mesh_pathhash_migrate(meshcore_pathhash_migrated(), (uint8_t)(prefs->path_hash_mode + 1), &mark);
-    if (to) {
-        mesh_prefs_set_path_hash(prefs, to);
-        n->savePrefs();
-        ESP_LOGI(TAG, "path hash size moved from 1 B to %u B (one-time default change)", to);
-    }
-    if (mark && !meshcore_pathhash_migrated_set()) {
-        ESP_LOGW(TAG, "path hash migration flag not saved: it runs again next boot");
-    }
-}
-
-// Once (#130): the routes learned with 1 B hashes before the 2 B default (#129) are forgotten, so the next DM floods and
-// learns a route of the current size. Before the pipe and the task run: nothing can transmit meanwhile.
-static void forget_stale_routes_once(BadgeMesh *n) {
-    if (meshcore_routes_forgotten()) {
-        return;
-    }
-    int forgot = n->forgetStaleRoutes((uint8_t)(n->getNodePrefs()->path_hash_mode + 1));
-    if (forgot) {
-        store.saveContacts(n, keep_contact);
-    }
-    ESP_LOGI(TAG, "forgot %d stored routes with other hash sizes", forgot);
-    if (!meshcore_routes_forgotten_set()) {
-        ESP_LOGW(TAG, "route cleanup flag not saved: it runs again next boot");
-    }
 }
 
 // MeshCore's hashtag channels: the key is the first 16 bytes of SHA-256 of the name, '#' included, lowercase
@@ -1370,8 +1314,7 @@ extern "C" char const *mesh_contact_import(uint8_t const *pkt, size_t len, char 
 
 // ---- our adverts (#52) ---------------------------------------------------------------------------------------------
 
-// The advert keys live in the app's settings (a.meshcore) since #123; meshcore_app.c's start_background adopts them
-// from badge_fw before the first start
+// The advert keys live in the app's settings (a.meshcore)
 static lichen_app_t const *adv_app(void) {
     return lichen_app_by_id(MESHCORE_APP_ID);
 }
@@ -3470,14 +3413,11 @@ static bool start_locked(char const *files_dir) {
     // must not walk the contact table while begin() fills it (#65 review)
     adv_load();
     store.begin();
-    migrate_identity();
     bool first_boot = !SPIFFS.exists("/prefs.json") && !SPIFFS.exists("/node_prefs");
     radio_driver.begin();
     n->begin();
     ident_verify(n); // before anything can transmit: the task does not exist yet
     apply_boot_radio(n, first_boot);
-    migrate_path_hash(n);
-    forget_stale_routes_once(n);
     n->loadConsoleScope(); // #290: before the task runs, so the first console flood already has it
     mesh_cscope_note(n->consoleScope());
     n->loadChannelScopes(); // #291: after begin() loaded the channels

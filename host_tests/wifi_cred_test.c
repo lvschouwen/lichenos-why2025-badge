@@ -124,7 +124,7 @@ static wifi_store_t const test_store = {
     .secret_set = settings_secret_set,
 };
 
-// #235: before the settings service binds its store nothing is read or written (and no driver wipe runs)
+// #235: before the settings service binds its store nothing is read or written
 static void unbound(void) {
     char         s[33], p[64];
     wifi_saved_t l;
@@ -132,8 +132,6 @@ static void unbound(void) {
     CHECK(!wifi_saved_load(&l) && l.n == 0);
     CHECK(!wifi_cred_save("net", "password"));
     CHECK(!wifi_cred_clear());
-    CHECK(wifi_driver_wiped());
-    CHECK(!wifi_driver_wiped_set(true)); // nothing to mark: the caller then skips the restore
 }
 
 // #235: the passwords are secrets (settings_secret.c), the SSIDs plain settings under their old names, so what an
@@ -359,16 +357,6 @@ int main(void) {
 
     CHECK(wifi_cred_clear());
     CHECK(!wifi_cred_load(ssid_back, pass_back));
-
-    // The once-only wipe of the C6 driver's own copy (#223 moved it from c6link): not done until marked, and a forget
-    // (wifi_cred_clear) does not make it run again
-    CHECK(!wifi_driver_wiped());
-    CHECK(wifi_driver_wiped_set(true));
-    CHECK(wifi_driver_wiped());
-    CHECK(wifi_driver_wiped_set(false) && !wifi_driver_wiped()); // a failed restore unmarks, so the next boot retries
-    CHECK(wifi_driver_wiped_set(true));
-    CHECK(wifi_cred_clear());
-    CHECK(wifi_driver_wiped());
 
     secrets_and_defaults();
     saved_networks();
