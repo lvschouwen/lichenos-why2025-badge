@@ -134,7 +134,7 @@ size	liblichen_mdns.a	598
 size	liblichen_net.a	24758
 size	liblichen_notify.a	13246
 size	liblichen_nvs.a	1153
-size	liblichen_os.a	55323
+size	liblichen_os.a	55337
 size	liblichen_random.a	63
 size	liblichen_shell.a	165598
 size	liblog.a	2726

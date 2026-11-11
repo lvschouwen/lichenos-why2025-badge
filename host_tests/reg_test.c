@@ -214,6 +214,10 @@ static void check_ranges(void) {
     reg_entry_t const        one = {0x0FF0, REG_T_ENUM, REG_F_RO, "test.one", NULL, 0, 0, only, get_flag, NULL, NULL};
     CHECK(reg_check(&one, &(reg_value_t){.u = 0}) == REG_OK);
     CHECK(reg_check(&one, &(reg_value_t){.u = 1}) == REG_RANGE);
+    // A getter code past the name table (get_flag returns 1, max is 0) is a driver fault, not a value
+    reg_value_t enum_got = {.u = 99};
+    CHECK(reg_get(&one, &enum_got) == REG_FAILED && enum_got.u == 0);
+    CHECK(reg_get(st, &enum_got) == REG_OK && enum_got.u == 2); // in range: unchanged
     CHECK(reg_check(flag, &(reg_value_t){.u = 1}) == REG_OK); // BOOL with no min..max: the type's 0..1
     CHECK(reg_check(flag, &(reg_value_t){.u = 2}) == REG_RANGE);
     CHECK(reg_check(caps, &(reg_value_t){.u = UINT32_MAX}) == REG_OK);
