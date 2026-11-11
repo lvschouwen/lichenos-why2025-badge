@@ -11,6 +11,7 @@
 # ui_overflow.c (ui_overflow_test.c, #133; ui_probe.c's "fw ui overflow"),
 # remote_ctl.c (remote_ctl_test.c, #190; ui_remote.c is "fw ui lock" and "fw ui open"),
 # shortcut.c (shortcut_test.c, #79; shortcuts.c runs the shape-key shortcuts it decides).
+# reg_row_text.c (reg_row_text_test.c, #332): the settings rows' applied / age / differs-from-saved text.
 # app_battery.c is Settings > Battery (#10; the thermal watchdog and Lichen's own notices are lichen_os services, #281).
 # notify_ui.c and notify_centre.c are the notifications' toast, tile badges, cloud key, centre and settings page (#62).
 # factory_screen.c is Settings > Factory reset and factory_combo.c the boot key combo (#66; the logic is lichen_boot's factory_plan.c).
@@ -51,7 +52,7 @@ if(NOT "${RN_OLD}" STREQUAL "${RN_C}")
 endif()
 
 idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_render.c" "log_store.c" "log_ring.c" "nav.c" "shell.c" "shell_ui_ops.c" "home.c" "home_layout.c"
-                            "app_settings.c" "attention.c" "attention_policy.c" "app_about.c" "station_view.c" "raw_keys.c" "app_icons.c" "wifi_screen.c" "wifi_analyser_screen.c" "setup_state.c" "setup_screens.c" "ui_keys.c" "ui_overflow.c" "ui_probe.c" "remote_ctl.c" "ui_remote.c"
+                            "app_settings.c" "reg_row_text.c" "attention.c" "attention_policy.c" "app_about.c" "station_view.c" "raw_keys.c" "app_icons.c" "wifi_screen.c" "wifi_analyser_screen.c" "setup_state.c" "setup_screens.c" "ui_keys.c" "ui_overflow.c" "ui_probe.c" "remote_ctl.c" "ui_remote.c"
                             "boot_screen.c" "status_bar.c" "lora_activity.c" "link_state.c" "logo.c" "update_status.c" "update_mode.c" "update_screen.c" "shot_blend.c" "screenshot.c" "time_fields.c" "time_set_screen.c"
                             "dialog.c" "dialog_countdown.c" "ui_check.c" "ui_perf.c" "ui_perf_stats.c" "app_bench.c" "bench_calc.c" "app_stress.c" "stress_workers.c" "stress_calc.c" "app_crashlog.c" "app_power.c" "app_console.c" "console_model.c"
                             "sd_screen.c" "sd_settings_model.c" "about_dev.c"

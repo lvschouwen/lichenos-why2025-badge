@@ -7,6 +7,7 @@
 #include "home_layout.h"
 #include "idle_policy.h"
 #include "lichen_app.h"
+#include "lichen_reg.h"
 #include "lichen_notify.h"
 #include "lichen_radio.h"
 #include "lichen_sys_c6.h"
@@ -19,6 +20,7 @@
 #include "lichen_sys_update.h"
 #include "lock_combo.h"
 #include "menu.h"
+#include "reg_row_text.h"
 #include "saver_station.h"
 #include "screen_ids.h"
 #include "settings_store.h"
@@ -87,6 +89,51 @@ lv_obj_t *shell_page_create_impl(void) {
 static void open_wifi(void *arg) {
     (void)arg;
     wifi_screen_open();
+}
+
+// The rows that show the time are refreshed once a second, and only redrawn when their text changed
+typedef struct {
+    lv_obj_t *obj;
+    bool      note; // a menu_note label, not a menu_add row
+    void (*fill)(char *out, size_t cap);
+    char shown[48];
+} live_row_t;
+
+static void live_update(live_row_t *r) {
+    if (!r->obj) {
+        return; // its page is gone
+    }
+    char v[sizeof(r->shown)];
+    r->fill(v, sizeof(v));
+    if (strcmp(v, r->shown) != 0) {
+        strlcpy(r->shown, v, sizeof(r->shown));
+        if (r->note) {
+            lv_label_set_text(r->obj, v);
+        } else {
+            menu_set_value(r->obj, v);
+        }
+    }
+}
+
+static live_row_t live_row(lv_obj_t *obj, bool note, void (*fill)(char *, size_t)) {
+    live_row_t r = {.obj = obj, .note = note, .fill = fill};
+    fill(r.shown, sizeof(r.shown));
+    if (note) {
+        lv_label_set_text(obj, r.shown);
+    } else {
+        menu_set_value(obj, r.shown);
+    }
+    return r;
+}
+
+// The registry rows (#332, #333): the applied value of a key from the cache (never waits for the C6), its age, and
+// "saved ..." when it is not the saved one. reg_row_text builds the text; `saved` is NULL for a key with no saved twin
+void shell_reg_text(char const *label, char const *key, char const *saved, char const *unit, char *out, size_t cap) {
+    char cached[64];
+    if (!lichen_reg_get(key, cached, sizeof(cached))) {
+        cached[0] = '\0'; // a name the table does not have: shown as "?"
+    }
+    reg_row_text(label, cached, saved, unit, out, cap);
 }
 
 // Display: brightness is applied on every step and saved once it has settled
@@ -239,6 +286,66 @@ static void rebuild_later(void *arg) {
     shell_rebuild_home_below(); // Settings stays on top
 }
 
+// What the badge shows now (#332): the backlight as the C6 applied it, next to the sliders (which hold the saved levels)
+static lv_timer_t *bl_timer;
+static live_row_t  bl_rows[5]; // screen, keyboard, light mode, override, boot light
+
+static void bl_saved_fill(char const *label, char const *key, int which, char *out, size_t cap) {
+    uint8_t lv[2];
+    char    saved[8];
+    lichen_sys_display_get(&lv[0], &lv[1]);
+    snprintf(saved, sizeof(saved), "%u", lv[which]);
+    shell_reg_text(label, key, saved, "%", out, cap);
+}
+
+static void bl_screen_fill(char *out, size_t cap) {
+    bl_saved_fill("Screen now", "bl.display", 0, out, cap);
+}
+
+static void bl_keyboard_fill(char *out, size_t cap) {
+    bl_saved_fill("Keyboard now", "bl.keyboard", 1, out, cap);
+}
+
+static void bl_idle_fill(char *out, size_t cap) {
+    shell_reg_text("Timeout", "bl.idle", NULL, NULL, out, cap);
+}
+
+static void bl_override_fill(char *out, size_t cap) {
+    shell_reg_text("Override", "bl.override", NULL, NULL, out, cap);
+}
+
+// Only while the boot light is still on; the note is then hidden (empty text)
+static void bl_boot_fill(char *out, size_t cap) {
+    shell_reg_text("Boot light", "bl.boot", NULL, NULL, out, cap);
+    if (strncmp(out, "Boot light: off", 15) == 0) {
+        out[0] = '\0';
+    }
+}
+
+static void bl_refresh(lv_timer_t *t) {
+    (void)t;
+    for (size_t i = 0; i < sizeof(bl_rows) / sizeof(bl_rows[0]); i++) {
+        live_update(&bl_rows[i]);
+    }
+    if (bl_rows[4].obj) {
+        if (bl_rows[4].shown[0]) {
+            lv_obj_remove_flag(bl_rows[4].obj, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(bl_rows[4].obj, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+static void bl_rows_build(lv_obj_t *menu) {
+    static void (*const fills[])(char *, size_t) = {bl_screen_fill, bl_keyboard_fill, bl_idle_fill, bl_override_fill,
+                                                    bl_boot_fill};
+    for (size_t i = 0; i < sizeof(bl_rows) / sizeof(bl_rows[0]); i++) {
+        bl_rows[i] = live_row(menu_note(menu, ""), true, fills[i]);
+    }
+    bl_refresh(NULL);
+    bl_timer = lv_timer_create(bl_refresh, 1000, NULL);
+}
+
 static void on_display_delete(lv_event_t *e) {
     (void)e;
     if (save_timer) {
@@ -246,6 +353,11 @@ static void on_display_delete(lv_event_t *e) {
         save_timer = NULL;
         save_levels();
     }
+    if (bl_timer) {
+        lv_timer_delete(bl_timer);
+        bl_timer = NULL;
+    }
+    memset(bl_rows, 0, sizeof(bl_rows));
     layout_row = NULL;
     order_row  = NULL;
     pulse_row  = NULL;
@@ -265,6 +377,7 @@ static lv_obj_t *build_display(void) {
     lichen_sys_display_get(&level[0], &level[1]);
     menu_add_slider(menu, "Screen", LICHEN_SYS_DISPLAY_MIN, 100, level[0], on_level, (void *)(intptr_t)0);
     menu_add_slider(menu, "Keyboard", 0, 100, level[1], on_level, (void *)(intptr_t)1);
+    bl_rows_build(menu);
     if (!lichen_sys_c6_up()) {
         menu_note(menu, "Brightness can't change right now: the radio chip is not answering. Restart the badge if it "
                         "stays like this.");
@@ -379,30 +492,6 @@ static void tz_value(char *out, size_t cap) {
     snprintf(out, cap, "%s", i >= 0 ? tz_at((size_t)i)->name : "");
 }
 
-// The rows that show the time are refreshed once a second, and only redrawn when their text changed
-typedef struct {
-    lv_obj_t *obj;
-    bool      note; // a menu_note label, not a menu_add row
-    void (*fill)(char *out, size_t cap);
-    char shown[48];
-} live_row_t;
-
-static void live_update(live_row_t *r) {
-    if (!r->obj) {
-        return; // its page is gone
-    }
-    char v[sizeof(r->shown)];
-    r->fill(v, sizeof(v));
-    if (strcmp(v, r->shown) != 0) {
-        strlcpy(r->shown, v, sizeof(r->shown));
-        if (r->note) {
-            lv_label_set_text(r->obj, v);
-        } else {
-            menu_set_value(r->obj, v);
-        }
-    }
-}
-
 static live_row_t time_rows[3]; // Time's page: Set date & time, Time zone, the source note
 static live_row_t settings_time_row; // Settings' own page: Time
 static live_row_t settings_sd_row;   // and SD card (a mount or unmount on its page or the console shows on return)
@@ -452,17 +541,6 @@ static void source_note(char *out, size_t cap) {
 static void open_time_set(void *arg) {
     (void)arg;
     shell_open(time_set_build, SCREEN_TIME_SET);
-}
-
-static live_row_t live_row(lv_obj_t *obj, bool note, void (*fill)(char *, size_t)) {
-    live_row_t r = {.obj = obj, .note = note, .fill = fill};
-    fill(r.shown, sizeof(r.shown));
-    if (note) {
-        lv_label_set_text(obj, r.shown);
-    } else {
-        menu_set_value(obj, r.shown);
-    }
-    return r;
 }
 
 static lv_obj_t *build_time(void) {

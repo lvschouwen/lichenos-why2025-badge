@@ -471,7 +471,7 @@ void lichen_reg_start(void) {
         }
     }
     // "fw bl" (and "bl r16") whether or not the registry starts: it replaced the driver's own command
-    console_register("bl", "bl [<display> <keyboard>] (backlight 0-100, screen at least 5; = fw set/get bl.*) | bl r16 "
+    console_register("bl", "bl [<display> <keyboard>] (backlight 0-100, screen at least 10; = fw set/get bl.*) | bl r16 "
                            "(is R16 fitted?)",
                      cmd_bl);
     size_t bad = reg_p4_check();

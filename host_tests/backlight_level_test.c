@@ -31,6 +31,22 @@ static bool fake_set(char const *key, uint8_t value) {
     return true;
 }
 
+static void test_read_clamp(void) {
+    // #332: an image from before the minimum went 5 -> 10 may have saved 5. No migration: the read clamps, the store is
+    // left as it is, and the next slider move saves a valid value
+    stored[0] = 5;
+    uint8_t d = 0, k = 0;
+    backlight_levels_load(fake_get, &d, &k);
+    CHECK(d == BACKLIGHT_DISPLAY_MIN);
+    CHECK(stored[0] == 5);
+    stored[0] = 0;
+    backlight_levels_load(fake_get, &d, &k);
+    CHECK(d == BACKLIGHT_DISPLAY_MIN && stored[0] == 0);
+    stored[0] = 10;
+    backlight_levels_load(fake_get, &d, &k);
+    CHECK(d == 10);
+}
+
 static void test_store(void) {
     // the keys are the badge_fw ones from before #224: renaming one would silently reset the saved levels
     CHECK(strcmp(BACKLIGHT_KEY_DISPLAY, "bl_disp") == 0);
@@ -54,10 +70,12 @@ static void test_store(void) {
 
 int main(void) {
     test_store();
-    CHECK(BACKLIGHT_DISPLAY_MIN == 5);
+    test_read_clamp();
+    CHECK(BACKLIGHT_DISPLAY_MIN == 10);
     CHECK(backlight_display_level(0) == BACKLIGHT_DISPLAY_MIN);
-    CHECK(backlight_display_level(4) == BACKLIGHT_DISPLAY_MIN);
-    CHECK(backlight_display_level(5) == 5);
+    CHECK(backlight_display_level(5) == BACKLIGHT_DISPLAY_MIN);
+    CHECK(backlight_display_level(9) == BACKLIGHT_DISPLAY_MIN);
+    CHECK(backlight_display_level(10) == 10);
     CHECK(backlight_display_level(30) == 30);
     CHECK(backlight_display_level(100) == 100);
     CHECK(backlight_display_level(101) == 100);

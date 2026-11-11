@@ -11,7 +11,7 @@
 
 // The screen never goes fully dark (a saved 0 would leave no way to see the slider again): the lowest screen level
 // lichen_sys_display_set / _temporary accept. Equal to board's BACKLIGHT_DISPLAY_MIN (checked in lichen_os).
-#define LICHEN_SYS_DISPLAY_MIN 5
+#define LICHEN_SYS_DISPLAY_MIN 10
 
 // Applies the person's levels now and saves nothing (a slider being dragged); the screen level is raised to
 // LICHEN_SYS_DISPLAY_MIN. Counts as activity for the screen timeout. Any task.

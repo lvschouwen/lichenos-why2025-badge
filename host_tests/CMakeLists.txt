@@ -270,6 +270,14 @@ target_include_directories(backlight_level_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_options(backlight_level_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME backlight_level_test COMMAND backlight_level_test)
 
+add_executable(reg_row_text_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/reg_row_text_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/reg_row_text.c
+)
+target_include_directories(reg_row_text_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(reg_row_text_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME reg_row_text_test COMMAND reg_row_text_test)
+
 add_executable(r16_hold_test
     ${CMAKE_CURRENT_SOURCE_DIR}/r16_hold_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/r16_hold.c
