@@ -182,10 +182,12 @@ size_t reg_lora_line(char const *label, char const *const cached[RR_LORA_KEYS], 
         return 0;
     }
     gather(cached, &f);
-    unsigned long hz = strtoul(f.value[0], NULL, 10);
+    // Round to the nearest kHz like MeshCore's "%.3f" (#346): the SX1262 applies 869.618 MHz as 869617981 Hz
+    unsigned long khz = (strtoul(f.value[0], NULL, 10) + 500) / 1000;
     khz_text(strtoul(f.value[1], NULL, 10), bw, sizeof(bw));
     size_t n = head_out(label, out, cap);
-    n += (size_t)snprintf(out + n, cap - n, "%lu.%03lu MHz %s SF%s CR%s %s dBm", hz / 1000000, hz % 1000000 / 1000, bw,
+    // The comma wording of mesh_format_radio, so Settings and MeshCore say it the same way (UI rules 4/9)
+    n += (size_t)snprintf(out + n, cap - n, "%lu.%03lu MHz, %s, SF%s, CR%s, %s dBm", khz / 1000, khz % 1000, bw,
                           f.value[2], f.value[3], f.value[4]);
     return line_end(label, &f, out, cap, n < cap ? n : cap - 1);
 }

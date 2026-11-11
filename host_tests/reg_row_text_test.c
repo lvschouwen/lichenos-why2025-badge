@@ -19,10 +19,16 @@ static void test_lines(void) {
     char out[96];
     char const *lora[RR_LORA_KEYS] = {"869618000 (1.2 s ago)", "62500 (1.2 s ago)", "8 (1.2 s ago)", "5 (1.2 s ago)", "22 (1.2 s ago)"};
     reg_lora_line("LoRa", lora, out, sizeof(out));
-    CHECK(strcmp(out, "LoRa: 869.618 MHz 62.5 kHz SF8 CR5 22 dBm (1.2 s)") == 0);
+    CHECK(strcmp(out, "LoRa: 869.618 MHz, 62.5 kHz, SF8, CR5, 22 dBm (1.2 s)") == 0);
+    lora[0] = "869617981 (1.2 s ago)"; // MeshCore's 869.618 as the SX1262 applies it: round, never cut (#346)
+    reg_lora_line(NULL, lora, out, sizeof(out));
+    CHECK(strcmp(out, "869.618 MHz, 62.5 kHz, SF8, CR5, 22 dBm (1.2 s)") == 0);
+    lora[0] = "869999600 (1.2 s ago)"; // the carry reaches the MHz
+    reg_lora_line(NULL, lora, out, sizeof(out));
+    CHECK(strcmp(out, "870.000 MHz, 62.5 kHz, SF8, CR5, 22 dBm (1.2 s)") == 0);
     lora[1] = "125000 (stale, 9 s ago)";
     reg_lora_line(NULL, lora, out, sizeof(out));
-    CHECK(strcmp(out, "869.618 MHz 125 kHz SF8 CR5 22 dBm (stale)") == 0);
+    CHECK(strcmp(out, "870.000 MHz, 125 kHz, SF8, CR5, 22 dBm (stale)") == 0);
     lora[2] = "? (no answer from the C6)";
     reg_lora_line("LoRa", lora, out, sizeof(out));
     CHECK(strcmp(out, "LoRa: ? (no answer from the C6)") == 0);
