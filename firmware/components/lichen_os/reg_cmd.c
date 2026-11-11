@@ -92,7 +92,10 @@ size_t reg_cmd_row(reg_entry_t const *e, reg_view_t const *v, char *buf, size_t 
     }
     value_text(e, v->has_saved, &v->saved, "-", saved, sizeof(saved));
     value_text(e, v->has_requested, &v->requested, "-", req, sizeof(req));
-    value_text(e, v->has_applied, &v->applied, "?", raw, sizeof(raw));
+    // #344: an applied "" is a value (settings.last_err with no failure); saved/requested "" stay "-"
+    if (!v->has_applied || !reg_format_ok(e, &v->applied, raw, sizeof(raw))) {
+        snprintf(raw, sizeof(raw), "?");
+    }
     bool near = v->has_applied && v->has_requested &&
                 reg_applied_matches(e->id, &v->requested, &v->applied) == RM_TOLERATED;
     // "≈": the chip's own step or clamp, not a mismatch

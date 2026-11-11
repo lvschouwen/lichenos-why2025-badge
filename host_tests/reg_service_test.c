@@ -460,6 +460,11 @@ static void test_rows(void) {
     v = (reg_view_t){.note = RV_OLD_C6};
     reg_cmd_row(bl, &v, line, sizeof(line));
     CHECK(strstr(line, "?") != NULL && strstr(line, "not supported by this C6") != NULL);
+    // #344: an applied STR holding "" (no write failed yet) is an empty value in fw get, not "?"
+    reg_entry_t const *le = reg_p4_find_id(REG_ID_SETTINGS_LAST_ERR);
+    v                     = (reg_view_t){.has_applied = true};
+    reg_cmd_row(le, &v, line, sizeof(line));
+    CHECK(strchr(line, '?') == NULL);
     // The radio line for fw lora
     reg_view_t r[REG_RADIO_KEYS];
     uint32_t   vals[REG_RADIO_KEYS] = {869618000, 62500, 7, 5, 0x12, 16, (uint32_t)22, 2};
