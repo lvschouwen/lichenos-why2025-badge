@@ -9,4 +9,5 @@ void lichen_apps_register(void) {
     notepad_app_register();
     qr_app_register();
     lora_spectrum_app_register();
+    testcard_app_register();
 }

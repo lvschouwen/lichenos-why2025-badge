@@ -13,12 +13,14 @@
 # Widgets: lichen_app.c (the app registry, its contexts and the current app in thread-local slot 1, #230), menu.c (the menu widget: it uses the shell's screen calls, so it stays a
 # gate widget rather than a lichen_os service, #220), text_entry.c, qr_screen.c (LVGL's QR widget, needs
 # CONFIG_LV_USE_QRCODE) and lichen_ui.c's plain LVGL helpers (heading, labels, icon box, page hint).
+# test_card.c (the bench test card of #352, drawn from test_card_layout.c: pure, test_card_layout_test.c) is shared by the
+# shell's `fw ui card` overlay and the Test card app.
 # fonts.c holds the font slots lichen_font() reads; lichen_os loads the asset fonts into them (font_slots.h).
 idf_component_register(SRCS "lichen_app.c" "fonts.c" "menu.c" "menu_filter.c" "list_filter.c" "scroll_anchor.c"
                             "text_entry.c"
                             "tz_table.c" "app_ns.c" "fs_path.c" "crashlog_fmt.c" "settings_backup.c"
                             "badge_table.c" "lichen_ui.c" "ui_text.c" "qr_payload.c" "qr_screen.c" "tile_order.c"
-                            "task_book.c" "mem_book.c" "hold_exit.c" "os_name.c" "lichen_ui_ops.c" "app_ctx.c"
+                            "task_book.c" "mem_book.c" "hold_exit.c" "os_name.c" "lichen_ui_ops.c" "app_ctx.c" "test_card_layout.c" "test_card.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl
                        PRIV_REQUIRES freertos fw_console lichen_random)

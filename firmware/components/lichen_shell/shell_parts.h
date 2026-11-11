@@ -37,6 +37,10 @@ void shell_arrange_home(bool rebuild); // Settings > Display > Arrange home: bac
 void ui_probe_init(void);           // registers "fw ui"
 void ui_probe_send(char const *seq); // "fw keys send <seq>"
 void ui_check_start(void);           // #89: 1 s LVGL object-tree check, registers "fw uicheck"
+// card_overlay.c (#352): "fw ui card [test|white|grey|black|off]", the bench test card over the current screen
+void card_overlay_init(void);            // sets the fw label the card shows
+void card_overlay_cmd(char const *args); // console task: args after "card"
+bool card_overlay_key(uint32_t key);     // LVGL context: true while a card is up (it takes every key; Esc closes it)
 // draw_call.c (#255, #259): full-screen draws (lv_refr_now) only on a stack with DRAW_STACK_NEED free (draw_stack.h)
 bool   shell_note_ui_task(void); // shell_start: queues the note of the LVGL task's handle; false when not queued
 bool   shell_on_ui_task(void);
