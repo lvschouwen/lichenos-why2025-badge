@@ -4,6 +4,7 @@
 #include "psram_pattern.h"
 #include "psram_reg.h"
 #include "psram_speed.h"
+#include "psram_speed_logic.h"
 #include "psram_tuning.h"
 
 #include "esp_attr.h"
@@ -21,6 +22,7 @@
 #include "soc/iomux_mspi_pin_reg.h"
 #include "soc/iomux_mspi_pin_struct.h"
 #include "soc/pmu_struct.h"
+#include "soc/lp_system_reg.h"
 #include "soc/soc.h"
 
 #include <stdio.h>
@@ -42,6 +44,21 @@ static struct {
     uint32_t phase_len, phase_end, dl_len, dl_end;
 } s_raw;
 
+#if CONFIG_SPIRAM_SPEED_RUNTIME_SELECT
+#include "esp_private/mspi_timing_tuning.h"
+// #329: the first app code that runs at the chosen speed. At 120 MHz leave REACHED in STORE15 (PSRAM init has read
+// and cleared the ARM word by then; the speed global is 80 until it has), so a crash anywhere later in this boot, the
+// tuning and the heap init included, is judged a failed 120 MHz boot, not an abort. Only the LP store register.
+#define MARK_REACHED()                                                                                                 \
+    do {                                                                                                               \
+        if (g_mspi_psram_speed_mhz == 120) {                                                                           \
+            REG_WRITE(LP_SYSTEM_REG_LP_STORE15_REG, PSRAM_SPEED_REACHED_WORD);                                         \
+        }                                                                                                              \
+    } while (0)
+#else
+#define MARK_REACHED() ((void)0)
+#endif
+
 extern uint32_t __real_mspi_timing_psram_select_best_tuning_phase(const void *configs, uint32_t consecutive_length,
                                                                   uint32_t end, const uint8_t *reference_data, bool is_ddr);
 extern uint32_t __real_mspi_timing_psram_select_best_tuning_delayline(const void *configs, uint32_t consecutive_length,
@@ -52,6 +69,7 @@ IRAM_ATTR uint32_t __wrap_mspi_timing_psram_select_best_tuning_phase(const void 
     s_raw.phase_len  = consecutive_length;
     s_raw.phase_end  = end;
     s_raw.phase_seen = true;
+    MARK_REACHED();
     return __real_mspi_timing_psram_select_best_tuning_phase(configs, consecutive_length, end, reference_data, is_ddr);
 }
 
@@ -61,6 +79,7 @@ IRAM_ATTR uint32_t __wrap_mspi_timing_psram_select_best_tuning_delayline(const v
     s_raw.dl_len  = consecutive_length;
     s_raw.dl_end  = end;
     s_raw.dl_seen = true;
+    MARK_REACHED();
     return __real_mspi_timing_psram_select_best_tuning_delayline(configs, consecutive_length, end, reference_data, is_ddr);
 }
 

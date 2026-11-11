@@ -13,7 +13,8 @@
 static char const *const clk_src_names[] = {"xtal", "mpll", "spll", "cpll"};
 
 // psram_fail_kind_t, in its order (#329)
-static char const *const fail_names[] = {"none", "boot_check", "dma_gate", "crash", "restart", "aborted", "gave_up"};
+static char const *const fail_names[] = {"none", "boot_check", "dma_gate", "crash", "restart", "aborted", "gave_up",
+                                         "crash_armed", "against_rec"};
 _Static_assert(sizeof(fail_names) / sizeof(fail_names[0]) == PSRAM_FAIL_KINDS, "psram.fail_why names out of step");
 
 #define PSRAM_FAIL_RO(id_, type_, name_, max_)                                                                         \

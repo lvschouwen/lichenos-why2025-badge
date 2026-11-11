@@ -10,9 +10,8 @@
 // restart.
 //
 // The NVS record is the truth about what the user asked (want) and how the last 120 MHz boot went:
-//   trial  = 0 none; ARMED = a 120 MHz boot was armed and has not started yet; RAN = a boot did run at 120 MHz and has
-//            not passed yet (saved at that boot, so the boot after it can tell a failed 120 MHz boot from a crash on the
-//            way into it, #329)
+//   trial  = 0 none; ARMED = a 120 MHz trial was armed and has not passed yet. Nothing is written to flash at 120 MHz
+//            before the trial passes: whether a boot reached 120 MHz is the REACHED marker in STORE15 (below), #329
 //   failed = the last 120 MHz trial failed, the badge fell back to 80 (cleared when the user chooses a speed again)
 //   aborts = armed trials in a row that came back at 80 without having run at 120 (a crash or power loss before the
 //            switch took effect): not evidence against 120, so the trial stays armed, up to PSRAM_SPEED_MAX_ABORTS
@@ -20,7 +19,13 @@
 
 #define PSRAM_SPEED_TRIAL_SECONDS 60 // a 120 MHz boot must run this long, with a clean boot check, to count as good
 #define PSRAM_SPEED_TRIAL_ARMED   1
-#define PSRAM_SPEED_TRIAL_RAN     2
+
+// LP_STORE15 words. ARM selects 120 MHz at the next PSRAM init (patch 0003; the init reads and clears the register and
+// keeps the raw word, psram_speed_carrier_raw). REACHED is written by this boot as soon as PSRAM init runs at 120 MHz
+// (the tuning wrappers, psram_boot.c): any other word selects 80, so the next boot runs at 80 and finds REACHED = the
+// boot before it did run at 120 and ended without a pass, fail or clean re-arm. Cleared on pass and fail.
+#define PSRAM_SPEED_ARM_WORD     ((0xC4A1u << 16) | 120u)
+#define PSRAM_SPEED_REACHED_WORD ((0xC4A2u << 16) | 120u)
 #define PSRAM_SPEED_MAX_ABORTS    3          // the third abort in a row gives up: failed, back at 80 for good
 #define PSRAM_FAIL_FW_MAX         15         // image version kept (REG_STR_MAX): "fw-605935b1", a longer one is cut
 #define PSRAM_FAIL_WALL_MIN       1735689600u // 2025-01-01 UTC: a clock before it is not set, the record keeps 0
@@ -33,6 +38,9 @@ typedef enum {
     PSRAM_FAIL_RESTART,    // the 120 MHz boot ended otherwise (restart, power, brownout) before it passed
     PSRAM_FAIL_ABORTED,    // armed, but the boot after it ran at 80: the switch never took effect; still armed
     PSRAM_FAIL_ABORTS,     // the PSRAM_SPEED_MAX_ABORTS-th abort in a row: given up, failed
+    PSRAM_FAIL_CRASH_ARMED, // armed, no REACHED marker, but a panic / watchdog reset: failed, fail-safe, as the marker
+                            // may not survive every reset (#330)
+    PSRAM_FAIL_AGAINST,    // a boot ran at 120 MHz although the record says 80 or failed: back to 80
     PSRAM_FAIL_KINDS
 } psram_fail_kind_t;
 
@@ -56,6 +64,7 @@ typedef struct {
 
 // The facts of a judgement, filled by the glue (psram_speed.c)
 typedef struct {
+    uint32_t    carrier;  // psram_speed_carrier_raw(): the STORE15 word PSRAM init found this boot
     uint8_t     reset;    // esp_reset_reason() of this boot
     uint32_t    wall_s;   // time(NULL), any value (below PSRAM_FAIL_WALL_MIN counts as not set)
     uint32_t    uptime_s;
@@ -92,8 +101,12 @@ bool psram_speed_leave_120_wanted(psram_speed_rec_t const *r, unsigned running_m
 bool psram_speed_arm_commit(psram_speed_rec_t *r, bool (*save)(psram_speed_rec_t const *));
 
 // At boot, once NVS is up. patched = the IDF can run 120 MHz. trial_live is set when this boot is a 120 MHz trial.
-// A trial pending at a boot at 80 is judged here and recorded in r->last: RAN = failed (crash or restart by the reset
-// reason), ARMED = aborted (REARM; the third in a row = failed).
+// A trial pending at a boot at 80 is judged here and recorded in r->last (ctx->carrier is the evidence):
+//   REACHED found         -> failed (crash or restart by the reset reason), ran at 120
+//   ARMED, panic/watchdog -> failed (fail-safe: no marker, but STORE15 may not survive that reset, #330)
+//   ARMED, power-on / ext / brownout -> still armed (REARM), not counted: a power cycle is no evidence at all
+//   ARMED, any other reset -> aborted, still armed (REARM); the PSRAM_SPEED_MAX_ABORTS-th in a row = failed
+// At 120 the record is not changed (no flash write at an unproven speed) unless it runs against the record.
 psram_speed_act_t psram_speed_boot_decide(psram_speed_rec_t *r, unsigned running_mhz, bool patched, bool image_pending,
                                           psram_fail_ctx_t const *ctx, bool *trial_live);
 
@@ -120,7 +133,9 @@ size_t psram_speed_value_text(psram_speed_rec_t const *r, unsigned running_mhz, 
 char const *psram_speed_reset_name(uint8_t reset);
 // A panic or watchdog reset (panic, int_wdt, task_wdt, wdt, cpu_lockup)
 bool psram_speed_reset_is_crash(uint8_t reset);
-// "boot check", "DMA gate", "crash or watchdog", "restart before it passed", "aborted (ran at 80)", "aborted 3 times"
+// A power-on, external pin or brownout reset: the power went, nothing ran
+bool psram_speed_reset_is_power(uint8_t reset);
+// "boot check", "DMA gate", "crash or watchdog", "restart before it passed", "aborted (ran at 80)", "aborted 3 times"...
 char const *psram_speed_fail_kind_text(uint8_t kind);
 // "none", or "<kind>, reset <reason>, ran at <80|120>, <YYYY-MM-DD HH:MM:SS UTC|up N s>, <fw>"
 size_t psram_speed_fail_text(psram_fail_t const *f, char *out, size_t cap);

@@ -13,28 +13,41 @@ The badge ships at 80 MHz PSRAM. 120 MHz can be tried from Settings > For develo
   DQS tuning tables are the same for 80 and 120 MHz, so only the MPLL frequency and the clock divider are runtime.
 - **Register carrier** (spike, bench-verified on fw-3e9e56b6): STORE15 survives `esp_restart`, `ota-reboot` and an int-WDT
   reset. ROM claims STORE0..11, IDF uses none of 12..15.
-- **NVS record** `psram_spd` = {want 80/120, trial (0 / armed / ran), failed, aborts, last failure}; the rules are
+- **REACHED marker** (#329): as soon as PSRAM init runs at 120 MHz (the tuning wrappers in `psram_boot.c`, again in
+  `psram_speed_boot`) the boot writes `0xC4A2 << 16 | 120` to STORE15. PSRAM init takes any word but the ARM word as
+  80 MHz and keeps the raw word (`psram_speed_carrier_raw`), so the next boot runs at 80 and knows the boot before it did
+  run at 120 and ended without a pass, a fail or a clean re-arm. Cleared on pass and fail; the shutdown hook's re-arm
+  overwrites it. Nothing is written to flash at 120 MHz before the trial passes.
+- **NVS record** `psram_spd` = {want 80/120, trial (0 / armed), failed, aborts, last failure}; the rules are
   `psram_speed_logic.c` (host-tested). Written straight to NVS, not through the settings service (it runs before the
   services; #325). Blob v2 (32 bytes, #329): want, trial, failed, aborts, version 2, kind, reset reason, ran-at-120,
   wall time (LE32, 0 = clock not set), uptime (LE32), image version (16 bytes, NUL-padded, cut at 15). The v1 blob of
   older images (4 bytes) reads with no failure recorded; any other size or version is the default record (80). An older
-  image reading a v2 blob takes the default too (80, nothing pending): a downgrade lands at 80.
+  image reading a v2 blob takes the default too (80, nothing pending): a downgrade lands at 80. A v1 record that an
+  older image left in the middle of a trial (trial 1 while it ran at 120, then an update) is judged by the rules below
+  with no marker from that image: failed after a crash reset, otherwise aborted and armed again.
 
 ## Boot sequence
 
 1. PSRAM init reads and clears STORE15, runs at 80 or 120 MHz, boot tuning + dense boot check as always.
 2. `app_main`, right after NVS is up (`psram_speed_boot`, before the one-shot delayline, storage and MeshCore):
-   - record `trial = ran` but running 80: the 120 MHz boot never got through: `want = 80`, `failed = 1`, `trial = 0`,
-     last failure "crash or watchdog" (reset reason panic / int_wdt / task_wdt / wdt / cpu_lockup) or "restart before it
-     passed" (anything else). Never re-armed by itself.
-   - record `trial = armed` but running 80: the switch never took effect (a crash or power loss on the way into the
-     trial, #329: the restart path once panicked at 80 and that counted as "120 MHz failed"). Not evidence against 120:
-     last failure "aborted (ran at 80)", `aborts + 1`, the trial stays armed and the shutdown hook arms STORE15 on the next
-     clean restart (no restart of its own). The third abort in a row gives up: failed, "aborted 3 times, given up".
+   - running 80 with a trial pending (record armed, or REACHED found with 120 wanted and not failed):
+     - REACHED found: that 120 MHz boot did not get through: `want = 80`, `failed = 1`, `trial = 0`, last failure
+       "crash or watchdog" (reset reason panic / int_wdt / task_wdt / wdt / cpu_lockup) or "restart before it passed"
+       (anything else), ran at 120. Never re-armed by itself.
+     - no marker, a panic / watchdog reset: failed too, "crash or watchdog while armed (no 120 MHz marker)". Fail-safe:
+       until #330 shows STORE15 survives every crash reset, a missing marker after a crash proves nothing.
+     - no marker, power-on / ext / brownout: still armed, not counted, no note (a power cycle is no evidence).
+     - no marker, any other reset: the switch never took effect (#329: the restart path once panicked at 80 and that
+       counted as "120 MHz failed"). Last failure "aborted (ran at 80)", `aborts + 1`, the trial stays armed and the
+       shutdown hook arms STORE15 on the next clean restart (no restart of its own). The third abort in a row gives up:
+       failed, "aborted 3 times, given up".
    - want 120, running 80, not failed: `trial = 1`, arm STORE15, `esp_restart` once (log: "restarting once to boot at 120 MHz").
-   - running 120 with the record agreeing: this boot is a trial (`trial = ran`, saved at once, `aborts = 0`): from here
-     on a boot at 80 is a failed trial, not an abort. A crash at 120 before this save counts as an abort.
-3. A live trial (`psram_speed_tick`) passes after 60 s with a clean boot check AND one automatic DMA gate round (all
+   - running 120 with the record agreeing: this boot is a trial (in RAM; the record is not written, the marker is the
+     evidence). Running 120 against the record (want 80 or failed): last failure "ran at 120 against the record", back
+     to 80.
+3. A live trial (`psram_speed_tick`) passes after 60 s (record saved with `trial = 0`, `aborts = 0`, then the marker
+   cleared; a pass that cannot be saved keeps the marker) with a clean boot check AND one automatic DMA gate round (all
    patterns, the SD legs only with a card; on the 6 KB `psram_trial` task). It fails at once on a fallback tuning, a bad boot
    check, or a failed gate. A fail: `want = 80`, `failed = 1`, last failure "boot check" or "DMA gate", `esp_restart` at
    80 (no app save hooks).
@@ -61,7 +74,7 @@ version. The judging `ESP_LOGE` line carries the same text, `fw psram` shows it:
     psram speed: last failure: none
 
 (with `; aborted trials in a row N of 3` while aborts are counted). RO registry keys: `psram.fail_why` (ENUM none /
-boot_check / dma_gate / crash / restart / aborted / gave_up), `psram.fail_rst` (STR), `psram.fail_at120` (BOOL),
+boot_check / dma_gate / crash / restart / aborted / gave_up / crash_armed / against_rec), `psram.fail_rst` (STR), `psram.fail_at120` (BOOL),
 `psram.fail_fw` (STR), `psram.aborts` (U8). The record stays until the next failure; choosing a speed clears `failed`
 and `aborts`, not the last failure. For a crash or restart the uptime is the judging boot's (seconds), not how long
 the failed 120 MHz boot ran.

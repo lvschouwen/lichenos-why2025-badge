@@ -135,7 +135,7 @@ static bool save_current(void) {
 }
 
 static void arm_register(bool on) {
-    REG_WRITE(CARRIER, on ? ((0xC4A1u << 16) | 120u) : 0u);
+    REG_WRITE(CARRIER, on ? PSRAM_SPEED_ARM_WORD : 0u);
 }
 
 // esp_restart() and everything built on it (system_restart, update, power menu) run this; a panic, WDT or brownout does
@@ -155,7 +155,8 @@ void psram_speed_no_rearm(void) {
 // The facts of a judgement made now, on this boot
 static psram_fail_ctx_t fail_ctx(void) {
     time_t now = time(NULL);
-    return (psram_fail_ctx_t){.reset    = (uint8_t)esp_reset_reason(),
+    return (psram_fail_ctx_t){.carrier  = psram_speed_carrier_raw(),
+                              .reset    = (uint8_t)esp_reset_reason(),
                               .wall_s   = now > 0 && now <= (time_t)UINT32_MAX ? (uint32_t)now : 0,
                               .uptime_s = (uint32_t)(esp_timer_get_time() / 1000000),
                               .fw       = esp_app_get_description()->version};
@@ -209,13 +210,16 @@ void psram_speed_boot(bool (*image_on_trial)(void)) {
     uint32_t raw = psram_speed_carrier_raw();
     ESP_LOGI(TAG, "speed: carrier found at PSRAM init %08x, running %u MHz%s", (unsigned)raw, psram_speed_running(),
              psram_speed_supported() ? "" : " (IDF without the runtime speed patch)");
+    if (psram_speed_supported() && psram_speed_running() == 120) {
+        REG_WRITE(CARRIER, PSRAM_SPEED_REACHED_WORD); // again, in case the tuning wrappers did not run (psram_boot.c)
+    }
     psram_speed_rec_t before  = s_rec;
     bool              pending = image_pending();
     psram_fail_ctx_t  ctx     = fail_ctx();
     psram_speed_act_t act     = psram_speed_boot_decide(&s_rec, psram_speed_running(), psram_speed_supported(), pending,
                                                         &ctx, &s_trial_live);
     if (memcmp(&before, &s_rec, sizeof(s_rec)) != 0) {
-        rec_save(&s_rec); // also the RAN mark of a 120 MHz boot: a crash from here on is a failed trial, not an abort
+        rec_save(&s_rec); // a judgement at 80, or a 120 MHz boot against the record; never a trial that just began
     }
     log_judgement(&before, act);
     if (esp_register_shutdown_handler(shutdown_hook) != ESP_OK) {
@@ -296,7 +300,12 @@ static void trial_job(void *arg) {
         s_keep120    = true; // only a passed trial keeps 120 MHz through clean restarts
         psram_speed_pass(&s_rec);
         unlock();
-        save_current();
+        if (save_current()) {
+            arm_register(false); // the REACHED marker: this boot is proven now, a later crash is no failed trial
+        } else {
+            ESP_LOGE(TAG, "120 MHz trial passed but the record was not saved: a crash before the next save counts as "
+                          "a failed trial");
+        }
         ESP_LOGI(TAG, "120 MHz trial passed (%d s, clean boot check, DMA gate round): 120 MHz stays", PSRAM_SPEED_TRIAL_SECONDS);
         if (s_pass_cb) {
             s_pass_cb();
@@ -380,6 +389,9 @@ bool psram_speed_choice(unsigned target) {
 size_t psram_speed_value(char *out, size_t cap) {
     lock();
     psram_speed_rec_t r = s_rec;
+    if (s_trial_live) {
+        r.trial = PSRAM_SPEED_TRIAL_ARMED; // "120 MHz, testing" also for a re-trial after a pass (record trial 0)
+    }
     unlock();
     return psram_speed_value_text(&r, psram_speed_running(), out, cap);
 }
@@ -394,12 +406,15 @@ void psram_speed_print(void) {
     psram_speed_rec_t r = s_rec;
     bool              live = s_trial_live;
     unlock();
-    psram_speed_value_text(&r, psram_speed_running(), text, sizeof(text));
+    psram_speed_rec_t shown = r;
+    if (live) {
+        shown.trial = PSRAM_SPEED_TRIAL_ARMED; // "120 MHz, testing" also for a re-trial after a pass
+    }
+    psram_speed_value_text(&shown, psram_speed_running(), text, sizeof(text));
     console_reply("psram speed: running %u MHz; %s; want %u, trial %s, failed %s; IDF %s; carrier found at PSRAM init %08x%s",
                   psram_speed_running(), text, r.want,
                   live                                 ? "running"
-                  : r.trial == PSRAM_SPEED_TRIAL_ARMED ? "armed"
-                  : r.trial                            ? "ran, not passed"
+                  : r.trial                            ? "armed"
                                                        : "none",
                   r.failed ? "yes" : "no",
                   psram_speed_supported() ? "runtime-selectable" : "NOT patched (0003)", (unsigned)psram_speed_carrier_raw(),

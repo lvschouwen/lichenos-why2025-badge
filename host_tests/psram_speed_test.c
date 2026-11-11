@@ -25,6 +25,8 @@ static bool save_fail(psram_speed_rec_t const *r) {
 
 // The judging boot's facts: a panic reset, clock not set
 static psram_fail_ctx_t ctx = {.reset = 4, .wall_s = 0, .uptime_s = 3, .fw = "fw-605935b1"};
+// The same after a 120 MHz boot that ended without a pass: STORE15 held the REACHED marker
+static psram_fail_ctx_t reached = {.carrier = PSRAM_SPEED_REACHED_WORD, .reset = 3, .uptime_s = 3, .fw = "fw-605935b1"};
 
 static void test_fail_kinds(void);
 static void test_record(void);
@@ -68,9 +70,9 @@ int main(void) {
     psram_speed_choose(&r, 80);
     CHECK(r.want == 80 && !r.trial && !r.failed);
 
-    // A clean restart at 120 (register kept armed): the record has trial 0 -> a new live trial
+    // A clean restart at 120 (register kept armed): the record has trial 0 -> a new live trial, the record untouched
     r = (psram_speed_rec_t){.want = 120};
-    CHECK(psram_speed_boot_decide(&r, 120, true, false, &ctx, &live) == PSRAM_SPEED_ACT_NONE && live && r.trial);
+    CHECK(psram_speed_boot_decide(&r, 120, true, false, &ctx, &live) == PSRAM_SPEED_ACT_NONE && live && !r.trial);
 
     // A bad boot check, a failed gate or a fallback tuning fails the trial at once
     CHECK(psram_speed_trial_step(5, true, false) == PSRAM_SPEED_TRIAL_FAIL);
@@ -126,10 +128,12 @@ int main(void) {
     CHECK(!psram_speed_arm_commit(&r, save_fail) && r.want == 80 && !r.trial);
 
     // M1: restarts during a trial: the trial is still pending on the next boot, which is then at 80 = failed
+    // (a re-trial after a pass: record trial 0, only the marker says it ran at 120)
     r = (psram_speed_rec_t){.want = 120};
-    CHECK(psram_speed_boot_decide(&r, 120, true, false, &ctx, &live) == PSRAM_SPEED_ACT_NONE && live && r.trial); // trial begins
-    CHECK(psram_speed_boot_decide(&r, 80, true, false, &ctx, &live) == PSRAM_SPEED_ACT_NONE && r.failed && r.want == 80); // restart mid-trial
-    CHECK(psram_speed_boot_decide(&r, 80, true, false, &ctx, &live) == PSRAM_SPEED_ACT_NONE && !r.trial); // and no second attempt
+    CHECK(psram_speed_boot_decide(&r, 120, true, false, &ctx, &live) == PSRAM_SPEED_ACT_NONE && live && !r.trial); // trial begins
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &reached, &live) == PSRAM_SPEED_ACT_NONE && r.failed && r.want == 80); // restart mid-trial
+    CHECK(r.last.kind == PSRAM_FAIL_RESTART && r.last.at120);
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &reached, &live) == PSRAM_SPEED_ACT_NONE && !r.trial); // and no second attempt
     // after a pass a clean restart (register re-armed by the hook) starts a new trial, not a failure
     r = (psram_speed_rec_t){.want = 120, .trial = 0};
     CHECK(psram_speed_boot_decide(&r, 120, true, false, &ctx, &live) == PSRAM_SPEED_ACT_NONE && live);
@@ -161,72 +165,119 @@ int main(void) {
 }
 
 // #329: every way a trial ends maps to its record; a crash before the switch took effect is an abort, not a failure
-static void test_fail_kinds(void) {
+static psram_fail_ctx_t at(uint32_t carrier, uint8_t reset) {
+    return (psram_fail_ctx_t){.carrier = carrier, .reset = reset, .uptime_s = 3, .fw = "fw-605935b1"};
+}
+
+static void test_aborts(void) {
     bool              live;
     psram_speed_rec_t r;
     char              t[96];
+    psram_fail_ctx_t  sw = at(0, 3), on = at(0, 1), brown = at(0, 9), ext = at(0, 2);
 
-    // The #329 case: chosen at 80 (ARMED), a panic on the way into the trial, the next boot is still at 80
+    // Armed at 80, a restart that is no crash, the next boot is still at 80 with no marker: aborted, still armed
     r = (psram_speed_rec_t){.want = 80};
     psram_speed_choose(&r, 120);
     CHECK(r.trial == PSRAM_SPEED_TRIAL_ARMED);
-    CHECK(psram_speed_boot_decide(&r, 80, true, false, &ctx, &live) == PSRAM_SPEED_ACT_REARM && !live);
-    CHECK(!r.failed && r.want == 120 && r.trial == PSRAM_SPEED_TRIAL_ARMED && r.aborts == 1); // still armed
-    CHECK(r.last.kind == PSRAM_FAIL_ABORTED && r.last.reset == 4 && !r.last.at120 && r.last.uptime_s == 3);
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &sw, &live) == PSRAM_SPEED_ACT_REARM && !live);
+    CHECK(!r.failed && r.want == 120 && r.trial == PSRAM_SPEED_TRIAL_ARMED && r.aborts == 1);
+    CHECK(r.last.kind == PSRAM_FAIL_ABORTED && r.last.reset == 3 && !r.last.at120 && r.last.uptime_s == 3);
     CHECK(strcmp(r.last.fw, "fw-605935b1") == 0 && r.last.wall_s == 0);
     psram_speed_fail_text(&r.last, t, sizeof(t));
-    CHECK(strcmp(t, "aborted (ran at 80), reset panic, ran at 80, up 3 s, fw-605935b1") == 0);
+    CHECK(strcmp(t, "aborted (ran at 80), reset sw, ran at 80, up 3 s, fw-605935b1") == 0);
     psram_speed_value_text(&r, 80, t, sizeof(t));
     CHECK(strcmp(t, "80 MHz, switching to 120") == 0);
     CHECK(!psram_speed_arm_wanted(&r, 80, true, false)); // no restart of its own: the next clean restart tries 120
 
-    // The clean restart does reach 120: the trial now RAN (saved), the abort count starts over, and it passes
+    // Power cycles burn no abort and leave the last note alone (review M2)
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &on, &live) == PSRAM_SPEED_ACT_REARM);
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &on, &live) == PSRAM_SPEED_ACT_REARM);
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &brown, &live) == PSRAM_SPEED_ACT_REARM);
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &ext, &live) == PSRAM_SPEED_ACT_REARM);
+    CHECK(r.aborts == 1 && !r.failed && r.trial == PSRAM_SPEED_TRIAL_ARMED && r.last.reset == 3);
+
+    // The clean restart does reach 120: the record is not written at 120 (review M3), the pass resets the count
+    psram_speed_rec_t before = r;
     CHECK(psram_speed_boot_decide(&r, 120, true, false, &ctx, &live) == PSRAM_SPEED_ACT_NONE && live);
-    CHECK(r.trial == PSRAM_SPEED_TRIAL_RAN && r.aborts == 0);
+    CHECK(memcmp(&before, &r, sizeof(r)) == 0);
     psram_speed_pass(&r);
-    CHECK(!r.trial && !r.failed && r.want == 120 && r.last.kind == PSRAM_FAIL_ABORTED); // history kept
+    CHECK(!r.trial && !r.failed && r.want == 120 && r.aborts == 0 && r.last.kind == PSRAM_FAIL_ABORTED); // history kept
 
     // Three aborts in a row: given up, failed, recorded as such
     psram_speed_choose(&r, 120);
-    CHECK(psram_speed_boot_decide(&r, 80, true, false, &ctx, &live) == PSRAM_SPEED_ACT_REARM && r.aborts == 1);
-    CHECK(psram_speed_boot_decide(&r, 80, true, false, &ctx, &live) == PSRAM_SPEED_ACT_REARM && r.aborts == 2);
-    CHECK(psram_speed_boot_decide(&r, 80, true, false, &ctx, &live) == PSRAM_SPEED_ACT_NONE);
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &sw, &live) == PSRAM_SPEED_ACT_REARM && r.aborts == 1);
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &sw, &live) == PSRAM_SPEED_ACT_REARM && r.aborts == 2);
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &sw, &live) == PSRAM_SPEED_ACT_NONE);
     CHECK(r.failed && r.want == 80 && !r.trial && r.last.kind == PSRAM_FAIL_ABORTS && !r.last.at120);
-    CHECK(psram_speed_boot_decide(&r, 80, true, false, &ctx, &live) == PSRAM_SPEED_ACT_NONE && r.failed); // stays
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &sw, &live) == PSRAM_SPEED_ACT_NONE && r.failed); // stays
     psram_speed_choose(&r, 120);
     CHECK(r.aborts == 0 && !r.failed);
+}
 
-    // A crash while running 120 (trial RAN): failed as before, crash by the reset reason, ran at 120
-    r = (psram_speed_rec_t){.want = 120, .trial = PSRAM_SPEED_TRIAL_RAN};
-    psram_fail_ctx_t wdt = {.reset = 6, .wall_s = 1762869785u, .uptime_s = 2, .fw = "fw-abcdef12"}; // task_wdt
+static void test_fail_kinds(void) {
+    bool              live;
+    psram_speed_rec_t r;
+    char              t[112];
+    test_aborts();
+
+    // Review H1: a crash early in a 120 MHz boot (tuning, heap init: before any flash write) leaves REACHED: failed
+    r = (psram_speed_rec_t){.want = 120, .trial = PSRAM_SPEED_TRIAL_ARMED};
+    psram_fail_ctx_t wdt = at(PSRAM_SPEED_REACHED_WORD, 6); // task_wdt
+    wdt.wall_s           = 1762869785u;
+    wdt.fw               = "fw-abcdef12";
     CHECK(psram_speed_boot_decide(&r, 80, true, false, &wdt, &live) == PSRAM_SPEED_ACT_NONE);
     CHECK(r.failed && r.want == 80 && !r.trial && r.last.kind == PSRAM_FAIL_CRASH && r.last.at120 && r.last.reset == 6);
     psram_speed_fail_text(&r.last, t, sizeof(t));
     CHECK(strcmp(t, "crash or watchdog, reset task_wdt, ran at 120, 2025-11-11 14:03:05 UTC, fw-abcdef12") == 0);
     CHECK(psram_speed_boot_decide(&r, 80, true, false, &wdt, &live) == PSRAM_SPEED_ACT_NONE && !r.trial); // never again
+    // ...and the same after a pass, when the record says trial 0
+    r = (psram_speed_rec_t){.want = 120};
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &wdt, &live) == PSRAM_SPEED_ACT_NONE && r.failed && r.last.at120);
+    // a marker with nothing wanted is no trial (a fail recorded on an image on trial, then a crash)
+    r = (psram_speed_rec_t){.want = 80, .failed = 1};
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &wdt, &live) == PSRAM_SPEED_ACT_NONE && r.last.kind == 0);
+
+    // Fail-safe: armed, no marker, but a panic / watchdog reset (STORE15 may not survive it, #330): failed, not aborted
+    r                    = (psram_speed_rec_t){.want = 120, .trial = PSRAM_SPEED_TRIAL_ARMED};
+    psram_fail_ctx_t pan = at(0, 4);
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &pan, &live) == PSRAM_SPEED_ACT_NONE);
+    CHECK(r.failed && r.want == 80 && r.last.kind == PSRAM_FAIL_CRASH_ARMED && !r.last.at120 && r.aborts == 0);
+    psram_speed_fail_text(&r.last, t, sizeof(t));
+    CHECK(strcmp(t, "crash or watchdog while armed (no 120 MHz marker), reset panic, ran at 80, up 3 s, fw-605935b1") == 0);
+    // no marker and trial 0 (a crash at 120 after the pass cleared it): no judgement, armed once more as before
+    r = (psram_speed_rec_t){.want = 120};
+    CHECK(psram_speed_boot_decide(&r, 80, true, false, &pan, &live) == PSRAM_SPEED_ACT_ARM_RESTART && !r.failed);
 
     // A plain restart or power loss during a 120 MHz trial: failed, "restart before it passed"
-    r                       = (psram_speed_rec_t){.want = 120, .trial = PSRAM_SPEED_TRIAL_RAN};
-    psram_fail_ctx_t sw     = {.reset = 3, .wall_s = 1000, .uptime_s = 4, .fw = "fw-0123456789abcdef-dirty"};
+    r                   = (psram_speed_rec_t){.want = 120, .trial = PSRAM_SPEED_TRIAL_ARMED};
+    psram_fail_ctx_t sw = at(PSRAM_SPEED_REACHED_WORD, 1); // power-on, but the marker survived: it did run at 120
+    sw.wall_s           = 1000;
+    sw.fw               = "fw-0123456789abcdef-dirty";
     CHECK(psram_speed_boot_decide(&r, 80, true, false, &sw, &live) == PSRAM_SPEED_ACT_NONE && r.failed);
     CHECK(r.last.kind == PSRAM_FAIL_RESTART && r.last.wall_s == 0); // a clock before 2025 is not set
     CHECK(strlen(r.last.fw) == PSRAM_FAIL_FW_MAX && strncmp(r.last.fw, "fw-0123456789ab", 15) == 0);
     psram_speed_fail_text(&r.last, t, sizeof(t));
-    CHECK(strcmp(t, "restart before it passed, reset sw, ran at 120, up 4 s, fw-0123456789ab") == 0);
+    CHECK(strcmp(t, "restart before it passed, reset poweron, ran at 120, up 3 s, fw-0123456789ab") == 0);
 
     // The live trial's own checks (glue: fail_and_restart at 120)
-    r = (psram_speed_rec_t){.want = 120, .trial = PSRAM_SPEED_TRIAL_RAN};
+    r = (psram_speed_rec_t){.want = 120, .trial = PSRAM_SPEED_TRIAL_ARMED};
     psram_speed_fail_at(&r, PSRAM_FAIL_BOOT_CHECK, &sw, true);
     CHECK(r.failed && r.want == 80 && r.last.kind == PSRAM_FAIL_BOOT_CHECK && r.last.at120);
     psram_speed_fail_at(&r, PSRAM_FAIL_DMA_GATE, &sw, true);
     CHECK(r.last.kind == PSRAM_FAIL_DMA_GATE);
     psram_speed_fail_text(&r.last, t, sizeof(t));
-    CHECK(strncmp(t, "DMA gate, reset sw, ran at 120, ", 32) == 0);
+    CHECK(strncmp(t, "DMA gate, reset poweron, ran at 120, ", 37) == 0);
+
+    // Review L5: 120 MHz against the record leaves a note too
+    r = (psram_speed_rec_t){.want = 80};
+    CHECK(psram_speed_boot_decide(&r, 120, true, false, &ctx, &live) == PSRAM_SPEED_ACT_RESTART);
+    CHECK(r.last.kind == PSRAM_FAIL_AGAINST && r.last.at120);
 
     // Names
     CHECK(strcmp(psram_speed_reset_name(15), "cpu_lockup") == 0 && strcmp(psram_speed_reset_name(16), "?") == 0);
     CHECK(psram_speed_reset_is_crash(4) && psram_speed_reset_is_crash(5) && psram_speed_reset_is_crash(7));
     CHECK(psram_speed_reset_is_crash(15) && !psram_speed_reset_is_crash(3) && !psram_speed_reset_is_crash(9));
+    CHECK(psram_speed_reset_is_power(1) && psram_speed_reset_is_power(9) && !psram_speed_reset_is_power(3));
     r = (psram_speed_rec_t){.want = 80};
     psram_speed_fail_text(&r.last, t, sizeof(t));
     CHECK(strcmp(t, "none") == 0);
@@ -273,7 +324,7 @@ static void test_record(void) {
     psram_speed_rec_decode(b, sizeof(b), &back);
     CHECK(back.want == 80 && back.aborts == 0 && back.last.kind == PSRAM_FAIL_NONE);
     psram_speed_rec_encode(&r, b);
-    b[1] = 3;
+    b[1] = 2; // no trial state 2 any more (#329 review: nothing is saved at 120 before the pass)
     psram_speed_rec_decode(b, sizeof(b), &back);
     CHECK(back.want == 80 && !back.trial);
 }

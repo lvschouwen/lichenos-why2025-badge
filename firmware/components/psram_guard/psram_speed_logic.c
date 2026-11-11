@@ -19,7 +19,7 @@ static void last_sane(psram_fail_t *f) {
 }
 
 void psram_speed_rec_sane(psram_speed_rec_t *r) {
-    if ((r->want != 80 && r->want != 120) || r->trial > PSRAM_SPEED_TRIAL_RAN || r->failed > 1 ||
+    if ((r->want != 80 && r->want != 120) || r->trial > PSRAM_SPEED_TRIAL_ARMED || r->failed > 1 ||
         r->aborts > PSRAM_SPEED_MAX_ABORTS) {
         *r = (psram_speed_rec_t){.want = 80};
     }
@@ -76,7 +76,7 @@ bool psram_speed_leave_120_wanted(psram_speed_rec_t const *r, unsigned running_m
 }
 
 bool psram_speed_arm_commit(psram_speed_rec_t *r, bool (*save)(psram_speed_rec_t const *)) {
-    r->trial = PSRAM_SPEED_TRIAL_ARMED; // before arming: a crash in between comes back at 80 still ARMED = an abort
+    r->trial = PSRAM_SPEED_TRIAL_ARMED; // before arming: a crash in between comes back at 80 still ARMED, no marker
     if (save(r)) {
         return true;
     }
@@ -85,12 +85,23 @@ bool psram_speed_arm_commit(psram_speed_rec_t *r, bool (*save)(psram_speed_rec_t
     return false;
 }
 
-// A trial pending at a boot at 80. RAN: that 120 MHz boot did not get through, a failed trial as before. ARMED: it never
-// ran at 120 (#329: a panic on the way into the trial counted as "120 MHz failed"), so not evidence against 120.
+// A boot at 80 with a trial pending: armed in the record, or the boot before ran at 120 (REACHED) without passing.
+// #329: a panic on the way into the trial, still at 80, counted as "120 MHz failed"; the marker tells the two apart.
+static bool trial_pending_at_80(psram_speed_rec_t const *r, bool reached) {
+    return r->trial == PSRAM_SPEED_TRIAL_ARMED || (reached && r->want == 120 && !r->failed);
+}
+
 static psram_speed_act_t judge_at_80(psram_speed_rec_t *r, psram_fail_ctx_t const *ctx) {
-    if (r->trial == PSRAM_SPEED_TRIAL_RAN) {
+    if (ctx->carrier == PSRAM_SPEED_REACHED_WORD) { // it did run at 120 and died before it passed
         psram_speed_fail_at(r, psram_speed_reset_is_crash(ctx->reset) ? PSRAM_FAIL_CRASH : PSRAM_FAIL_RESTART, ctx, true);
         return PSRAM_SPEED_ACT_NONE;
+    }
+    if (psram_speed_reset_is_crash(ctx->reset)) { // fail-safe until #330 shows STORE15 survives every crash reset
+        psram_speed_fail_at(r, PSRAM_FAIL_CRASH_ARMED, ctx, false);
+        return PSRAM_SPEED_ACT_NONE;
+    }
+    if (psram_speed_reset_is_power(ctx->reset)) {
+        return PSRAM_SPEED_ACT_REARM; // a power cycle burns no abort and overwrites no failure
     }
     if (++r->aborts >= PSRAM_SPEED_MAX_ABORTS) { // never loop: an arm that keeps dying is given up like a failure
         psram_speed_fail_at(r, PSRAM_FAIL_ABORTS, ctx, false);
@@ -106,17 +117,15 @@ psram_speed_act_t psram_speed_boot_decide(psram_speed_rec_t *r, unsigned running
     if (!patched) {
         return PSRAM_SPEED_ACT_NONE; // nothing can run 120 MHz: the record keeps what the user asked
     }
-    if (r->trial && running_mhz != 120) {
+    if (running_mhz != 120 && trial_pending_at_80(r, ctx->carrier == PSRAM_SPEED_REACHED_WORD)) {
         return judge_at_80(r, ctx);
     }
     if (running_mhz == 120) {
         if (r->want != 120 || r->failed) { // 120 MHz against the record: get back to 80 (the register is clear)
-            psram_speed_fail(r);
+            psram_speed_fail_at(r, PSRAM_FAIL_AGAINST, ctx, true);
             return image_pending ? PSRAM_SPEED_ACT_NONE : PSRAM_SPEED_ACT_RESTART;
         }
-        r->trial    = PSRAM_SPEED_TRIAL_RAN; // saved now: from here on a boot at 80 is a failed trial, not an abort
-        r->aborts   = 0;
-        *trial_live = true;
+        *trial_live = true; // the record stays as it is: the REACHED marker says this boot runs at 120
         return PSRAM_SPEED_ACT_NONE;
     }
     // The arm itself (trial set, saved, register, restart) is the glue's, here or from the tick once the image is valid
@@ -211,11 +220,17 @@ bool psram_speed_reset_is_crash(uint8_t reset) {
     return reset == 4 || reset == 5 || reset == 6 || reset == 7 || reset == 15; // panic, int/task/other wdt, cpu lockup
 }
 
+bool psram_speed_reset_is_power(uint8_t reset) {
+    return reset == 1 || reset == 2 || reset == 9; // poweron, ext, brownout
+}
+
 char const *psram_speed_fail_kind_text(uint8_t kind) {
     static char const *const texts[PSRAM_FAIL_KINDS] = {"none",         "boot check",
                                                         "DMA gate",     "crash or watchdog",
                                                         "restart before it passed",
-                                                        "aborted (ran at 80)", "aborted 3 times, given up"};
+                                                        "aborted (ran at 80)", "aborted 3 times, given up",
+                                                        "crash or watchdog while armed (no 120 MHz marker)",
+                                                        "ran at 120 against the record"};
     return kind < PSRAM_FAIL_KINDS ? texts[kind] : "?";
 }
 
