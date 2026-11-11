@@ -15,6 +15,7 @@
 #include "notify_bind.h"
 #include "notify_os.h"
 #include "ota_os.h"
+#include "settings_secret.h"
 #include "settings_store.h"
 
 static bool wifi_on(void) {
@@ -33,8 +34,8 @@ static void factory_notice(char const *title, char const *body) {
 static ota_os_t const ota_os = {
     .get_u8  = settings_get_u8,
     .set_u8  = settings_set_u8,
-    .get_str = settings_get_str,
-    .set_str = settings_set_str,
+    .secret_get = settings_secret_get,
+    .secret_set = settings_secret_set,
     .wifi_on = wifi_on,
 };
 

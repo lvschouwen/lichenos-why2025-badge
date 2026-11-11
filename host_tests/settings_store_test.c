@@ -65,6 +65,12 @@ static void plain_refuses_secrets(void) {
     CHECK(!settings_secret_get("wifi_p0", v, sizeof(v))); // and nothing was written
     CHECK(settings_secret_get("wifi_pass", v, sizeof(v)) && strcmp(v, "hunter2hunter2") == 0);
     CHECK(settings_erase("wifi_pass") && !settings_secret_get("wifi_pass", v, sizeof(v)));
+    // The OTA token's NVS copy (#241): stored through the secret side, invisible to the plain calls
+    CHECK(settings_secret_set("ota_token", "0123456789abcdef"));
+    settings_get_str("ota_token", v, sizeof(v), "none");
+    CHECK(strcmp(v, "none") == 0);
+    CHECK(!settings_set_str("ota_token", "feedfeedfeedfeed"));
+    CHECK(settings_secret_get("ota_token", v, sizeof(v)) && strcmp(v, "0123456789abcdef") == 0);
     // Plain keys work as before
     CHECK(settings_set_str("wifi_ssid", "homenet"));
     settings_get_str("wifi_ssid", v, sizeof(v), "");

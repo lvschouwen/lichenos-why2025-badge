@@ -91,11 +91,12 @@ bool settings_set_u8(char const *key, uint8_t value) {
     (void)value;
     return true;
 }
-void settings_get_str(char const *key, char *out, size_t cap, char const *def) {
+bool settings_secret_get(char const *key, char *out, size_t cap) {
     (void)key;
-    snprintf(out, cap, "%s", def);
+    snprintf(out, cap, "%s", "");
+    return false;
 }
-bool settings_set_str(char const *key, char const *value) {
+bool settings_secret_set(char const *key, char const *value) {
     (void)key;
     (void)value;
     return true;

@@ -4,7 +4,8 @@
 #include <stddef.h>
 
 // The secrets key class of Lichen's settings (#235): values that must never leave the badge in readable form. Today the
-// Wi-Fi passwords (badge_fw wifi_pass, the pair in use, and wifi_p0..wifi_p4, the saved networks of #160); the SSIDs
+// Wi-Fi passwords (badge_fw wifi_pass, the pair in use, and wifi_p0..wifi_p4, the saved networks of #160) and the OTA
+// token's NVS copy (ota_token, #241; /storage/ota_token.txt stays as before); the SSIDs
 // are names the screens show and stay plain settings. A secret lives in badge_fw like any setting (so #116's NVS
 // encryption covers it and a factory reset erases it), but:
 //  - only settings_secret_get/set read and write it: settings_get_str/set_str refuse a secret key;

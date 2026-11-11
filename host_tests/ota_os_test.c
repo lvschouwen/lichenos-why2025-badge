@@ -29,12 +29,12 @@ static bool set_u8(char const *key, uint8_t value) {
     last_u8 = value;
     return true;
 }
-static void get_str(char const *key, char *out, size_t cap, char const *def) {
-    (void)def;
+static bool secret_get(char const *key, char *out, size_t cap) {
     snprintf(last_key, sizeof(last_key), "%s", key);
     snprintf(out, cap, "stored");
+    return true;
 }
-static bool set_str(char const *key, char const *value) {
+static bool secret_set(char const *key, char const *value) {
     snprintf(last_key, sizeof(last_key), "%s", key);
     snprintf(last_str, sizeof(last_str), "%s", value);
     return true;
@@ -48,29 +48,25 @@ static void unbound_defaults(void) {
     ota_os_bind(NULL);
     CHECK(ota_os_get_u8("ota_wifi", 3) == 3);
     CHECK(!ota_os_set_u8("ota_wifi", 1));
-    ota_os_get_str("ota_token", out, sizeof(out), "abc");
-    CHECK(strcmp(out, "abc") == 0);
-    ota_os_get_str("ota_token", out, 4, "abcdef"); // cut, always NUL-terminated
-    CHECK(strcmp(out, "abc") == 0);
-    ota_os_get_str("ota_token", out, sizeof(out), NULL);
+    strcpy(out, "junk");
+    CHECK(!ota_os_secret_get("ota_token", out, sizeof(out))); // nothing bound: not found, out emptied
     CHECK(strcmp(out, "") == 0);
     out[0] = 'x';
-    ota_os_get_str("ota_token", out, 0, "abc"); // no room: untouched
+    CHECK(!ota_os_secret_get("ota_token", out, 0)); // no room: untouched
     CHECK(out[0] == 'x');
-    CHECK(!ota_os_set_str("ota_token", "t"));
+    CHECK(!ota_os_secret_set("ota_token", "t"));
     CHECK(!ota_os_wifi_on()); // no switch bound: the server does not serve
 }
 
 static void bound_calls_pass_through(void) {
     ota_os_t const os = {
-        .get_u8 = get_u8, .set_u8 = set_u8, .get_str = get_str, .set_str = set_str, .wifi_on = wifi_on};
+        .get_u8 = get_u8, .set_u8 = set_u8, .secret_get = secret_get, .secret_set = secret_set, .wifi_on = wifi_on};
     char out[16];
     ota_os_bind(&os);
     CHECK(ota_os_get_u8("ota_auto", 1) == 8 && strcmp(last_key, "ota_auto") == 0);
     CHECK(ota_os_set_u8("ota_wifi", 0) && last_u8 == 0 && strcmp(last_key, "ota_wifi") == 0);
-    ota_os_get_str("ota_token", out, sizeof(out), "");
-    CHECK(strcmp(out, "stored") == 0);
-    CHECK(ota_os_set_str("ota_token", "abcd") && strcmp(last_str, "abcd") == 0);
+    CHECK(ota_os_secret_get("ota_token", out, sizeof(out)) && strcmp(out, "stored") == 0);
+    CHECK(ota_os_secret_set("ota_token", "abcd") && strcmp(last_str, "abcd") == 0);
     wifi = true;
     CHECK(ota_os_wifi_on());
     wifi = false;

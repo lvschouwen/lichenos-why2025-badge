@@ -1486,7 +1486,9 @@ static bool read_token_file(char *out) {
 
 static bool read_token_nvs(char *out) {
     char text[OTA_TOKEN_LEN + 8] = {0};
-    ota_os_get_str(TOKEN_NVS_KEY, text, sizeof(text), "");
+    if (!ota_os_secret_get(TOKEN_NVS_KEY, text, sizeof(text))) {
+        return false;
+    }
     if (strlen(text) != OTA_TOKEN_LEN || !token_text_valid(text)) {
         return false;
     }
@@ -1518,7 +1520,7 @@ static bool load_or_create_token(void) {
     bool wrote_nvs  = false;
     char stored[OTA_TOKEN_LEN + 8];
     if (!(from_nvs || (read_token_nvs(stored) && strcmp(stored, token) == 0))) {
-        wrote_nvs = ota_os_set_str(TOKEN_NVS_KEY, token);
+        wrote_nvs = ota_os_secret_set(TOKEN_NVS_KEY, token);
     }
     return ota_token_kept(from_file, from_nvs, wrote_file, wrote_nvs);
 }

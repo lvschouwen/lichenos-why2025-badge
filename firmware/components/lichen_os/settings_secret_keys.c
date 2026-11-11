@@ -10,9 +10,10 @@
 static char const *const secret_keys[] = {
     "wifi_pass",                                         // the Wi-Fi pair in use (#66)
     "wifi_p0", "wifi_p1", "wifi_p2", "wifi_p3", "wifi_p4", // the saved networks (#160, WIFI_SAVED_MAX)
+    "ota_token",                                         // the update server's NVS copy of its token (#112, #241)
 };
-_Static_assert(sizeof(secret_keys) / sizeof(secret_keys[0]) == WIFI_SAVED_MAX + 1,
-               "one secret per saved network plus the pair in use: a new WIFI_SAVED_MAX needs its wifi_pN here");
+_Static_assert(sizeof(secret_keys) / sizeof(secret_keys[0]) == WIFI_SAVED_MAX + 2,
+               "one secret per saved network, the pair in use and the OTA token: a new WIFI_SAVED_MAX needs its wifi_pN here");
 
 size_t settings_secret_count(void) {
     return sizeof(secret_keys) / sizeof(secret_keys[0]);
