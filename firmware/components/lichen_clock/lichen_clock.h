@@ -93,12 +93,18 @@ void clock_set_saver(void (*save_now)(void));
 typedef struct {
     clock_boot_t pick;
     int64_t      carried_s; // time(NULL) before the choice
+    int64_t      at_ms;     // uptime then
     bool         rec_valid; // a record survived the reset
     int64_t      saved_s;   // its estimate (save + RTC time since), 0 without one
     int64_t      save_age_s; // RTC seconds between that save and the boot, -1 when the counter restarted
 } clock_boot_info_t;
 
 clock_boot_info_t clock_boot_info(void);
+// The boot's carried-vs-saved choice, then saving every minute (clock_save.c). lichen_os calls it in start_early,
+// before anything stamps a time (crash records, notices) and long before MeshCore's clock bootstrap; saving starts
+// only after the choice, so a stale carried clock never overwrites a good record. Once per boot: a second call (and
+// clock_console_register's, for a boot that skipped it) does nothing.
+void clock_boot_init(void);
 // The age of the newest record this boot (seconds), -1 before the first save
 int64_t clock_save_age_s(void);
 

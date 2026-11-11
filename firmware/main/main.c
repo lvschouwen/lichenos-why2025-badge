@@ -44,6 +44,7 @@
 #include "lichen_mem.h"
 #include "lichen_task.h"
 #include "lichen_random.h"
+#include "lichen_clock.h"
 #include "notify_os.h"
 #include "lichen_nvs.h"
 #include "nvs_erase_os.h"
@@ -512,6 +513,7 @@ static void start_early(boot_ctx_t *ctx) {
     (void)ctx;
     haptics_start();     // the motor pin low and the setting read, before anything slow (#68)
     settings_apply_tz(); // before anything shows the clock
+    clock_boot_init();   // the carried or the saved clock (#326), before anything stamps a time
     crash_check_early(); // cheap: only decides crash_recovered(), which the boot screen reads once
 }
 

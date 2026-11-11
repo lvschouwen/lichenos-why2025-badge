@@ -60,6 +60,7 @@ static void choose_at_boot(void) {
     int64_t     rtc = rtc_now_s();
     int64_t     t   = 0;
     s_boot.carried_s  = (int64_t)time(NULL);
+    s_boot.at_ms      = esp_timer_get_time() / 1000;
     s_boot.rec_valid  = clock_rec_valid(&r);
     s_boot.saved_s    = s_boot.rec_valid ? clock_rec_estimate(&r, rtc) : 0;
     s_boot.save_age_s = s_boot.rec_valid && rtc >= (int64_t)r.rtc_s ? rtc - (int64_t)r.rtc_s : -1;
@@ -72,7 +73,12 @@ static void choose_at_boot(void) {
              (long long)s_boot.saved_s, clock_boot_text(s_boot.pick));
 }
 
-void clock_save_init(void) {
+void clock_boot_init(void) {
+    static bool done; // the boot task calls this, early in app_main and again from clock_console_register
+    if (done) {
+        return;
+    }
+    done = true;
     choose_at_boot();
     s_armed = true;
     clock_set_saver(save_now);

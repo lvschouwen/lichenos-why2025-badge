@@ -15,8 +15,6 @@
 #include <time.h>
 
 static int64_t rtc0_us, timer0_us;
-static int64_t carried_s;      // time(NULL) when "fw clock" was registered (early boot): what the reset carried over
-static int64_t carried_up_ms;  // uptime then
 static int64_t rtc_boot_us;    // esp_clk_rtc_time() then
 
 static char const *src_name(soc_rtc_slow_clk_src_t s) {
@@ -29,7 +27,6 @@ static char const *src_name(soc_rtc_slow_clk_src_t s) {
 }
 
 void clock_store_init(void); // clock_store.c
-void clock_save_init(void);  // clock_save.c
 
 // The local time and the zone's abbreviation: "2026-10-31 12:00 CET"
 static void local_now(char *out, size_t cap) {
@@ -154,8 +151,9 @@ static void cmd_status(void) {
     clock_sync_info_t i;
     clock_fix_info_t  f;
     clock_sync_snapshot(&i, &f);
-    console_reply("carried at boot: %lld s (clock after %lld ms uptime), RTC counter %.1f s", (long long)carried_s,
-                  (long long)carried_up_ms, (double)rtc_boot_us / 1e6);
+    clock_boot_info_t b = clock_boot_info(); // what the reset carried over, before the boot's choice (#326)
+    console_reply("carried at boot: %lld s (clock after %lld ms uptime), RTC counter %.1f s", (long long)b.carried_s,
+                  (long long)b.at_ms, (double)rtc_boot_us / 1e6);
     console_reply("clock: %s, build epoch %lld", clock_is_set() ? "set" : "not set", (long long)clock_build_epoch());
     char from[64];
     clock_source_text(from, sizeof(from)); // "carried over the restart, was SNTP" after a warm reset (#64)
@@ -178,10 +176,8 @@ static void cmd_status(void) {
 void clock_console_register(void) {
     rtc0_us   = (int64_t)esp_clk_rtc_time();
     timer0_us = esp_timer_get_time();
-    carried_s     = (int64_t)time(NULL);
-    carried_up_ms = timer0_us / 1000;
     rtc_boot_us   = rtc0_us;
-    clock_save_init(); // after the carried snapshot above, before the source record reads what the boot chose
+    clock_boot_init(); // normally done in start_early already; before the source record reads what the boot chose
     clock_store_init();
     console_register("clock", "clock [set [--force] <ISO8601> | sync] (source, drift, SNTP; set by hand)", cmd_clock);
 }
