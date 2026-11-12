@@ -25,11 +25,13 @@ typedef struct {
 #define IDLE_SAVER_STYLE_KEY "saver_style"
 
 // What keeps the screen lit regardless of the idle clock. busy (an update running, the Bench app measuring): bright, and
-// the clock starts again, so the timeout counts in full from when it ends. setup (the first-run screens): bright for at
-// most IDLE_SETUP_HOLD_S since the last key, so an abandoned welcome does not drain the battery.
+// the clock starts again, so the timeout counts in full from when it ends. card (a test card is up, #355: `fw ui card` or
+// the Test card app): the same, because a dim or dark panel defeats a panel and backlight test, and opening it on a dark
+// screen lights it at once; the wake key then reaches the card, as the screen is bright. setup (the first-run screens):
+// bright for at most IDLE_SETUP_HOLD_S since the last key, so an abandoned welcome does not drain the battery.
 #define IDLE_SETUP_HOLD_S 600
 typedef enum { IDLE_HOLD_NONE, IDLE_HOLD_BRIGHT, IDLE_HOLD_RESTART } idle_hold_t;
-idle_hold_t idle_hold(bool busy, bool setup, uint32_t idle_s);
+idle_hold_t idle_hold(bool busy, bool card, bool setup, uint32_t idle_s);
 
 // What the backlight should be after idle_s seconds without a key. inhibit (any hold) keeps it bright. Off wins over dim when both are due (also when off_s <= dim_s).
 idle_level_t idle_level(uint32_t idle_s, idle_times_t t, bool inhibit);

@@ -55,15 +55,31 @@ int main(void) {
     }
 
     // Holds: busy restarts the clock whatever it says; setup holds for 10 min since the last key, then lets go
-    CHECK(idle_hold(false, false, 0) == IDLE_HOLD_NONE);
-    CHECK(idle_hold(true, false, 0) == IDLE_HOLD_RESTART);
-    CHECK(idle_hold(true, true, 100000) == IDLE_HOLD_RESTART);
-    CHECK(idle_hold(false, true, 0) == IDLE_HOLD_BRIGHT);
-    CHECK(idle_hold(false, true, IDLE_SETUP_HOLD_S - 1) == IDLE_HOLD_BRIGHT);
-    CHECK(idle_hold(false, true, IDLE_SETUP_HOLD_S) == IDLE_HOLD_NONE);
+    CHECK(idle_hold(false, false, false, 0) == IDLE_HOLD_NONE);
+    CHECK(idle_hold(true, false, false, 0) == IDLE_HOLD_RESTART);
+    CHECK(idle_hold(true, false, true, 100000) == IDLE_HOLD_RESTART);
+    CHECK(idle_hold(false, false, true, 0) == IDLE_HOLD_BRIGHT);
+    CHECK(idle_hold(false, false, true, IDLE_SETUP_HOLD_S - 1) == IDLE_HOLD_BRIGHT);
+    CHECK(idle_hold(false, false, true, IDLE_SETUP_HOLD_S) == IDLE_HOLD_NONE);
     // an abandoned setup goes straight to off with the default times
     CHECK(idle_level(IDLE_SETUP_HOLD_S, (idle_times_t){60, 300},
-                     idle_hold(false, true, IDLE_SETUP_HOLD_S) != IDLE_HOLD_NONE) == IDLE_OFF);
+                     idle_hold(false, false, true, IDLE_SETUP_HOLD_S) != IDLE_HOLD_NONE) == IDLE_OFF);
+
+    // An open test card (#355) holds bright like busy: a card opened on a dark or dimmed screen lights it, it never
+    // dims or blanks while up, and the clock restarts, so the full timeout counts from when it closes
+    CHECK(idle_hold(false, true, false, 0) == IDLE_HOLD_RESTART);
+    CHECK(idle_hold(false, true, false, 100000) == IDLE_HOLD_RESTART);
+    CHECK(idle_hold(false, true, true, IDLE_SETUP_HOLD_S) == IDLE_HOLD_RESTART);
+    CHECK(idle_level(100000, (idle_times_t){60, 300}, idle_hold(false, true, false, 100000) != IDLE_HOLD_NONE) ==
+          IDLE_BRIGHT);
+    CHECK(idle_level(60, (idle_times_t){60, 300}, idle_hold(false, true, false, 60) != IDLE_HOLD_NONE) == IDLE_BRIGHT);
+    // the key that finds the card up is not only a wake key: the held screen is bright, so it reaches the card
+    CHECK(!idle_key_swallowed(idle_stage(idle_level(100000, (idle_times_t){60, 300},
+                                                    idle_hold(false, true, false, 100000) != IDLE_HOLD_NONE),
+                                         true, true, false)));
+    // closed again: the normal timer, counted from the restart
+    CHECK(idle_hold(false, false, false, 0) == IDLE_HOLD_NONE);
+    CHECK(idle_level(60, (idle_times_t){60, 300}, idle_hold(false, false, false, 60) != IDLE_HOLD_NONE) == IDLE_DIM);
 
     // Only a key that finds the screen off (or under the screensaver, #75) is swallowed; a dimmed screen's key acts
     CHECK(!idle_key_swallowed(idle_stage(IDLE_BRIGHT, false, false, false)));

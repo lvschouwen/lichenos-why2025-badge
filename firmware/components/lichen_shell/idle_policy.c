@@ -5,8 +5,8 @@
 static uint8_t const DIM_CHOICES[] = {0, 3, 6, 12, 30};   // off, 30 s, 1, 2, 5 min
 static uint8_t const OFF_CHOICES[] = {0, 12, 30, 60, 180}; // off, 2, 5, 10, 30 min
 
-idle_hold_t idle_hold(bool busy, bool setup, uint32_t idle_s) {
-    if (busy) {
+idle_hold_t idle_hold(bool busy, bool card, bool setup, uint32_t idle_s) {
+    if (busy || card) {
         return IDLE_HOLD_RESTART;
     }
     return setup && idle_s < IDLE_SETUP_HOLD_S ? IDLE_HOLD_BRIGHT : IDLE_HOLD_NONE;

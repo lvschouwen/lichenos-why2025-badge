@@ -22,6 +22,16 @@ static lv_timer_t *auto_off;
 
 static void on_raw(key_raw_event_t const *ev, void *arg);
 
+static unsigned open_cards; // LVGL task: every test card up, this overlay's and the Test card app's (#355)
+
+static void on_card_opened(int delta) {
+    open_cards = delta < 0 && !open_cards ? 0 : open_cards + (unsigned)delta;
+}
+
+bool test_cards_open(void) {
+    return open_cards > 0;
+}
+
 static bool listening;   // the raw key listener is registered
 static bool eat_release; // Esc closed the card: its release is swallowed too, or it would reach the screen below
 
@@ -130,5 +140,9 @@ void card_overlay_cmd(char const *args) {
 
 void card_overlay_init(void) {
     test_card_set_hooks(&(test_card_hooks_t){
-        .fw_label = esp_app_get_description()->version, .reg_get = lichen_reg_get, .display_get = lichen_sys_display_get});
+        .fw_label    = esp_app_get_description()->version,
+        .reg_get     = lichen_reg_get,
+        .display_get = lichen_sys_display_get,
+        .opened      = on_card_opened,
+    });
 }

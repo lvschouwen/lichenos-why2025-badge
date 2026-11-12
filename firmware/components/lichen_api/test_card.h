@@ -15,11 +15,14 @@ extern "C" {
 
 // What the info strip reads. The gate never calls the OS itself (tools/layers.conf), so the shell sets these once at boot:
 // fw_label "fw-<sha>" (must outlive the card), reg_get is lichen_reg_get, display_get the requested backlight levels
-// (lichen_sys_display_get; NULL = leave "requested" out). Without them the strip reads "?".
+// (lichen_sys_display_get; NULL = leave "requested" out). Without them the strip reads "?". opened (may be NULL) is
+// told +1 when a card is created and -1 when it is deleted, on the LVGL task, so the screen timeout can hold the panel
+// bright while any card is up (#355), the Test card app's included.
 typedef struct {
     char const *fw_label;
     size_t (*reg_get)(char const *name, char *buf, size_t cap);
     void (*display_get)(uint8_t *display, uint8_t *keyboard);
+    void (*opened)(int delta);
 } test_card_hooks_t;
 void test_card_set_hooks(test_card_hooks_t const *hooks);
 

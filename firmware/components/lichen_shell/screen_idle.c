@@ -1,8 +1,9 @@
 // Screen timeout (#43): after a while without a key the backlight dims (screen to its minimum, keyboard off), later
 // both go off. Any key lights them again; a key that finds the screen off only wakes it. The keyboard is the activity
 // source (its wake hook, ahead of the raw key hooks), plus "fw keys send" so the bench can wake the badge, plus a
-// backlight change (fw bl, a slider). The remote key lock holds it bright like an update. idle_policy.c decides; an
-// LVGL timer applies the level, so the inhibits (update, first-run setup, Bench) are read on the task that owns them.
+// backlight change (fw bl, a slider). The remote key lock and an open test card (#355) hold it bright like an update.
+// idle_policy.c decides; an LVGL timer applies the level, so the inhibits (update, first-run setup, Bench, the card)
+// are read on the task that owns them.
 // The clock screensaver takes the dim stage and the pocket lock engages with it or the dark screen (#75,
 // screen_saver.c); a key that finds the saver up is swallowed like one that finds the screen off.
 #include "esp_log.h"
@@ -107,6 +108,7 @@ static void tick(lv_timer_t *timer) {
     bool     must_show = update_screen_busy() || power_going_down(); // nothing may cover these (#75)
     // the remote key lock (#190, #192): a script drives the UI, so no key of it may only wake the screen
     bool     busy      = must_show || bench_running() || flashlight_active() || ui_remote_locked();
+    bool     card      = test_cards_open(); // LVGL task, as the cards themselves
     bool     setup     = setup_running();
     bool     home      = shell_home_shown(); // no cover over the boot screen or home's fade-in
     uint32_t gen   = lichen_sys_display_user_generation();
@@ -118,7 +120,7 @@ static void tick(lv_timer_t *timer) {
         last_key_us = now;
     }
     uint32_t    idle_s = (uint32_t)((now - last_key_us) / 1000000);
-    idle_hold_t hold   = idle_hold(busy, setup, idle_s);
+    idle_hold_t hold   = idle_hold(busy, card, setup, idle_s);
     if (hold == IDLE_HOLD_RESTART) {
         last_key_us = now; // the full timeout once the update or the Bench run is over
         idle_s      = 0;
@@ -186,7 +188,7 @@ static void cmd_idle(char const *args) {
         return;
     }
     console_reply("idle: %s, %lu s since the last key, %s%s", screen_idle_stage_name(), (unsigned long)idle_s, what,
-                  inhibit ? " (held bright: update, setup, Bench or key lock)" : "");
+                  inhibit ? " (held bright: update, setup, Bench, key lock or test card)" : "");
 }
 
 void screen_idle_init(void) {

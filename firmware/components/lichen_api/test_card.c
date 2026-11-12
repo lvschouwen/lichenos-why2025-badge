@@ -156,6 +156,9 @@ void test_card_set_mode(lv_obj_t *card, tcard_mode_t mode) {
 
 static void on_card_delete(lv_event_t *e) {
     tcard_t *t = lv_event_get_user_data(e);
+    if (hooks.opened) {
+        hooks.opened(-1);
+    }
     if (t->info_timer) {
         lv_timer_delete(t->info_timer);
     }
@@ -182,6 +185,9 @@ lv_obj_t *test_card_create(lv_obj_t *parent, tcard_mode_t mode) {
     lv_obj_set_scrollable(card, false);
     lv_obj_set_user_data(card, t);
     lv_obj_add_event_cb(card, on_card_delete, LV_EVENT_DELETE, t);
+    if (hooks.opened) {
+        hooks.opened(1);
+    }
     lv_display_add_event_cb(t->disp, on_display, LV_EVENT_FLUSH_FINISH, t);
     lv_display_add_event_cb(t->disp, on_display, LV_EVENT_REFR_READY, t);
     test_card_set_mode(card, mode >= TCARD_OFF ? TCARD_TEST : mode);
