@@ -84,8 +84,10 @@ sysn_info_t sysn_info(sysn_event_t event);
 // ---- The poll's own cost (#357) ----
 // The free-space count is LittleFS's lfs_fs_size, a walk over every block in use. Its caches are in PSRAM, so each
 // flash read of the walk goes through a temporary internal buffer that spi_flash sizes with
-// heap_caps_get_largest_free_block: a walk of every internal heap block inside a critical section, per read. At 5 h of
-// uptime one count took over 5 s of core 0 (the IDLE0 watchdog). Once every 10 min; boot (poll 0) counts at once.
+// heap_caps_get_largest_free_block: a walk of every internal heap block inside a critical section, per read. The IDLE0
+// watchdog every ~66 s at 5 h of uptime suggests one count then took over 5 s of core 0 (inferred from the watchdog's
+// samples, not yet timed on the bench). Once every 10 min; boot (poll 0) counts at once. Between counts the snapshot
+// takes the last count anyone made (storage_free_bytes_cached: OTA, "fw storage").
 #define SYSN_STORAGE_POLLS 600u
 bool sysn_storage_due(unsigned poll);
 

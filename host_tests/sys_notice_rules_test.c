@@ -228,6 +228,22 @@ static void test_slow_steps(void) {
     CHECK(strcmp(sysn_step_name(SYSN_STEP_COUNT), "?") == 0);
 }
 
+// Between its own counts sys_notices reads the cached count (#357): one that turns unknown and back (a failed fresh
+// count by OTA or "fw storage") neither clears the low state nor tells it twice
+static void test_storage_cached_unknown(void) {
+    sysn_state_t    st = {0};
+    sysn_snapshot_t s  = quiet();
+    step(&st, &s);
+    s.storage_free = 100u * 1024;
+    CHECK(has(step(&st, &s), SYSN_STORAGE_LOW));
+    s.storage_known = false;
+    s.storage_free  = 0;
+    CHECK(!has(step(&st, &s), SYSN_STORAGE_LOW));
+    s.storage_known = true;
+    s.storage_free  = 100u * 1024;
+    CHECK(!has(step(&st, &s), SYSN_STORAGE_LOW));
+}
+
 int main(void) {
     test_boot_once();
     test_psram_80();
@@ -239,6 +255,7 @@ int main(void) {
     test_info();
     test_storage_cadence();
     test_slow_steps();
+    test_storage_cached_unknown();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

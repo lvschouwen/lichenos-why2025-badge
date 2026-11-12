@@ -102,13 +102,18 @@ static int64_t step_done(sysn_step_id_t step, int64_t since_us) {
 
 // The OS's one regular count of /storage (#300): it also refreshes the value About, Files and MeshCore read. The walk
 // takes seconds on a full drive (#357) and this task's priority is above IDLE0's, so it runs at idle priority: IDLE0
-// shares core 0 by time slice and feeds the task watchdog. The drive's lock is a mutex, so a task waiting on it lends
-// this one its priority for the rest of the walk.
+// shares core 0 by time slice and feeds the task watchdog. The drive's lock is a mutex: a task that waits on it
+// (MeshCore, priority 3) lends this one its priority for the rest of the walk, and IDLE0 starves again until the walk
+// ends. #362 (LittleFS's caches in internal RAM) removes the per-read heap walk that makes the count slow.
 static bool count_storage(uint64_t *free_bytes, uint64_t *total_bytes) {
     UBaseType_t prio = uxTaskPriorityGet(NULL);
     vTaskPrioritySet(NULL, tskIDLE_PRIORITY);
-    bool ok = storage_free_bytes(free_bytes, total_bytes);
+    int64_t t  = esp_timer_get_time();
+    bool    ok = storage_free_bytes(free_bytes, total_bytes);
     vTaskPrioritySet(NULL, prio);
+    // Every count (every 10 min): the soak shows how the walk grows with the drive
+    ESP_LOGI(TAG, "storage count: %u ms wall time at idle priority (%s)", (unsigned)((esp_timer_get_time() - t) / 1000),
+             ok ? "known" : "unknown");
     return ok;
 }
 
@@ -137,6 +142,8 @@ static void read_snapshot(sysn_snapshot_t *s, lichen_sd_info_t *sd, unsigned pol
     if (sysn_storage_due(poll)) {
         s->storage_known = count_storage(&s->storage_free, &s->storage_total);
         step_done(SYSN_STEP_STORAGE, t);
+    } else { // a fresher count by OTA or "fw storage" reaches the notices at once; never touches the drive
+        s->storage_known = storage_free_bytes_cached(&s->storage_free, &s->storage_total);
     }
 }
 
