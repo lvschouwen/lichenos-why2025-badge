@@ -54,7 +54,7 @@ size_t log_ring_format(uint8_t const *raw, size_t raw_len, char *out, size_t cap
 
 // The log hook formats one esp_log call into a stack buffer before the ring sees it (the ring splits long lines itself).
 // LOG_RING_HOOK_MAX is the longest formatted line kept; a longer one is cut and ends in LOG_RING_CUT_MARK.
-#define LOG_RING_HOOK_MAX 480
+#define LOG_RING_HOOK_MAX 400
 #define LOG_RING_CUT_MARK "\xe2\x80\xa6" // U+2026, 3 bytes
 #define LOG_RING_HOOK_TAIL 4              // room after the text for the mark and the '\n'
 

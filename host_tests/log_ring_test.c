@@ -73,16 +73,16 @@ static void test_long_line_split(void) {
 
 static void test_hook_fit(void) {
     bool cut;
-    CHECK(log_ring_fit(0, 480, &cut) == 0 && !cut);
-    CHECK(log_ring_fit(260, 480, &cut) == 260 && !cut); // the #356 line: whole, the ring splits it
-    CHECK(log_ring_fit(479, 480, &cut) == 479 && !cut);
-    CHECK(log_ring_fit(480, 480, &cut) == 479 && cut);
-    CHECK(log_ring_fit(5000, 480, &cut) == 479 && cut);
+    CHECK(log_ring_fit(0, 400, &cut) == 0 && !cut);
+    CHECK(log_ring_fit(260, 400, &cut) == 260 && !cut); // the #356 line: whole, the ring splits it
+    CHECK(log_ring_fit(399, 400, &cut) == 399 && !cut);
+    CHECK(log_ring_fit(400, 400, &cut) == 399 && cut);
+    CHECK(log_ring_fit(5000, 400, &cut) == 399 && cut);
 
     char text[LOG_RING_HOOK_MAX + LOG_RING_HOOK_TAIL];
-    memset(text, 'y', 479);
-    size_t len = log_ring_end(text, 479, true, true);
-    CHECK(len == 479 + 3 + 1 && memcmp(text + 479, "\xe2\x80\xa6\n", 4) == 0);
+    memset(text, 'y', 399);
+    size_t len = log_ring_end(text, 399, true, true);
+    CHECK(len == 399 + 3 + 1 && memcmp(text + 399, "\xe2\x80\xa6\n", 4) == 0);
     memcpy(text, "ab", 2);
     CHECK(log_ring_end(text, 2, false, false) == 2 && log_ring_end(text, 2, false, true) == 3);
 

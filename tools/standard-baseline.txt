@@ -133,7 +133,7 @@ size	liblichen_notify.a	13482
 size	liblichen_nvs.a	1153
 size	liblichen_os.a	59402
 size	liblichen_random.a	63
-size	liblichen_shell.a	176634
+size	liblichen_shell.a	176628
 size	liblog.a	2726
 size	liblora.a	35669
 size	liblvgl__lvgl.a	543811
