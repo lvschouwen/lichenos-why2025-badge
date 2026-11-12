@@ -489,11 +489,25 @@ def check_lvgl_task(files):
 # that deletes itself never comes back, so its book slot stays taken until reboot (#358: one of 32 slots per boot).
 # Limits: entries are found as in lvgl-task (same file, by name, casts and "&" stripped); one not defined in the file
 # (a wrapper's parameter) is skipped here, lvgl-task already reports it as entry-not-in-file. Same-file callees are
-# followed by name; function pointers and other files are not. Only a self-delete counts: vTaskDelete(NULL / 0 /
-# nullptr / xTaskGetCurrentTaskHandle()); deleting another task by its handle is fine. Raw xTaskCreate* tasks are not
-# looked at: they have no trampoline and must delete themselves.
+# followed by name. A self-delete is vTaskDelete or vTaskDeleteWithCaps of NULL / 0 / nullptr /
+# xTaskGetCurrentTaskHandle() (a (TaskHandle_t) cast allowed), or of a local the same function set from
+# xTaskGetCurrentTaskHandle(); deleting another task by its handle is fine. Raw xTaskCreate* tasks are not looked at:
+# they have no trampoline and must delete themselves. Not seen (false negatives): a self-delete behind a macro, a
+# handle passed in or stored in a global / struct, entries or callees reached through function pointers or tables,
+# and entries or callees defined in another file.
 
-SELF_DELETE = re.compile(r"\bvTaskDelete\s*\(\s*(?:NULL|0|nullptr|xTaskGetCurrentTaskHandle\s*\(\s*\))\s*\)")
+CAST = r"(?:\(\s*TaskHandle_t\s*\)\s*)?"
+DELETE = r"\bvTaskDelete(?:WithCaps)?\s*\(\s*" + CAST
+SELF_DELETE = re.compile(DELETE + r"(?:NULL|0|nullptr|xTaskGetCurrentTaskHandle\s*\(\s*\))\s*\)")
+SELF_HANDLE = re.compile(r"\b([A-Za-z_]\w*)\s*=\s*" + CAST + r"xTaskGetCurrentTaskHandle\s*\(\s*\)")
+
+
+def self_deletes(body):
+    """Positions in body of a self-delete: a literal one, or of a local set from xTaskGetCurrentTaskHandle()."""
+    hits = [m.start() for m in SELF_DELETE.finditer(body)]
+    for name in set(SELF_HANDLE.findall(body)):
+        hits += [m.start() for m in re.finditer(DELETE + re.escape(name) + r"\s*\)", body)]
+    return sorted(hits)
 LICHEN_START = re.compile(r"\blichen_task_start(?:_in)?\s*\(")
 
 
@@ -520,8 +534,8 @@ def check_task_delete(files):
             if not fns:
                 continue
             for g in callee_closure(code, funcs, fns[0]):
-                for c in SELF_DELETE.finditer(code[g.start:g.end]):
-                    found.setdefault((path, name, "self-delete-in-" + g.name), []).append(line_of(code, g.start + c.start()))
+                for pos in self_deletes(code[g.start:g.end]):
+                    found.setdefault((path, name, "self-delete-in-" + g.name), []).append(line_of(code, g.start + pos))
     return found
 
 

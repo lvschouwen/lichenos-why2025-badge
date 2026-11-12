@@ -248,6 +248,44 @@ class TaskDelete(unittest.TestCase):
         self.assertEqual(Tree(self, {"a.c": TASK_DEL}).run("task-delete"), 4)
 
 
+TASK_DEL2 = """\
+static void caps_task(void *a) { vTaskDeleteWithCaps(NULL); }
+static void cast_task(void *a) { vTaskDelete((TaskHandle_t)NULL); }
+static void multi_task(void *a) {
+    vTaskDelete(
+        NULL
+    );
+}
+static void local_task(void *a) {
+    TaskHandle_t me = xTaskGetCurrentTaskHandle();
+    vTaskDeleteWithCaps(me);
+}
+static void quiet_task(void *a) {
+    // vTaskDelete(NULL);
+    /* vTaskDeleteWithCaps(NULL); */
+    log("vTaskDelete(NULL)");
+    TaskHandle_t me = xTaskGetCurrentTaskHandle();
+    vTaskDelete(other);
+    use(me);
+}
+void start(void) {
+    lichen_task_start(NULL, "a", caps_task, NULL, 1, P, NULL);
+    lichen_task_start(NULL, "b", cast_task, NULL, 1, P, NULL);
+    lichen_task_start(NULL, "c", multi_task, NULL, 1, P, NULL);
+    lichen_task_start_in(NULL, "d", local_task, NULL, 1, P, LICHEN_STACK_PSRAM, NULL);
+    lichen_task_start(NULL, "e", quiet_task, NULL, 1, P, NULL);
+}
+"""
+
+
+class TaskDeleteForms(unittest.TestCase):
+    def test_caps_cast_multiline_local_and_not_comments_or_strings(self):
+        p = "firmware/components/x/a.c:"
+        self.assertEqual(Tree(self, {"a.c": TASK_DEL2}).keys("task-delete"),
+                         [p + "caps_task:self-delete-in-caps_task", p + "cast_task:self-delete-in-cast_task",
+                          p + "local_task:self-delete-in-local_task", p + "multi_task:self-delete-in-multi_task"])
+
+
 LV2 = """\
 static void helper(void) { lv_obj_clean(o); }
 static void locked_helper(void) { lv_obj_clean(o); }
