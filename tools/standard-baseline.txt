@@ -39,7 +39,7 @@ params	firmware/components/lichen_shell/shot_blend.c:shot_blend_argb8888	10
 params	firmware/components/mesh/mesh_chat.c:mesh_conv_row	9
 params	firmware/components/mesh/mesh_hist.c:mesh_hist_compact	11
 params	firmware/components/mesh/radio_confirm.c:radio_confirm_needed	10
-size	<merged-strings>	268853
+size	<merged-strings>	268861
 size	libapp_update.a	4602
 size	libassets.a	2351
 size	libboard.a	11341
@@ -121,7 +121,7 @@ size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
 size	libjoltwallet__littlefs.a	34424
-size	liblichen_api.a	30850
+size	liblichen_api.a	30886
 size	liblichen_apps.a	51656
 size	liblichen_boot.a	12192
 size	liblichen_clock.a	11134
@@ -133,7 +133,7 @@ size	liblichen_notify.a	13482
 size	liblichen_nvs.a	1153
 size	liblichen_os.a	59402
 size	liblichen_random.a	63
-size	liblichen_shell.a	177329
+size	liblichen_shell.a	177639
 size	liblog.a	2726
 size	liblora.a	35669
 size	liblvgl__lvgl.a	543811
@@ -141,7 +141,7 @@ size	liblvgl_port_lib.a	6122
 size	liblwip.a	109820
 size	libmain.a	5957
 size	libmbedtls.a	22
-size	libmesh.a	397697
+size	libmesh.a	397717
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18676
 size	libnvs_sec_provider.a	2
