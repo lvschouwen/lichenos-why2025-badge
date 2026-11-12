@@ -33,3 +33,8 @@ link_look_t lora_look(bool up, lora_use_t use);
 // (1 = the dot alone, 4 = the dot and all three arcs), the rest faint; 0 bars leaves the whole fan faint.
 #define WIFI_FAN_PARTS 4
 bool wifi_fan_part_lit(int bars, int part);
+
+// The Wi-Fi page's scan on the radio coming on by itself (#361: a thermal hold ending, `fw wifi on`): true once when
+// the radio went from off to on since the last call and no scan is already on its way (the page's own toggle starts
+// one). *was_on is the page's memory, set when it opens, and always ends up as now_on.
+bool wifi_radio_came_on(bool *was_on, bool now_on, bool scan_pending);

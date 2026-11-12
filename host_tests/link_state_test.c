@@ -86,6 +86,15 @@ int main(void) {
     }
     CHECK(!wifi_fan_part_lit(4, -1) && !wifi_fan_part_lit(9, WIFI_FAN_PARTS));
 
+    // #361: the Wi-Fi page scans once when the radio comes on by itself, not while it stays on or off
+    bool was = false;
+    CHECK(!wifi_radio_came_on(&was, false, false) && !was);
+    CHECK(wifi_radio_came_on(&was, true, false) && was);
+    CHECK(!wifi_radio_came_on(&was, true, false)); // still on: one scan only
+    CHECK(!wifi_radio_came_on(&was, false, false) && !was);
+    CHECK(!wifi_radio_came_on(&was, true, true) && was); // the page's toggle already started one
+    CHECK(!wifi_radio_came_on(&was, true, false));
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -12,6 +12,7 @@
 #include "lichen_sys_radio.h"
 #include "lichen_sys_ui.h"
 #include "lichen_task.h"
+#include "link_state.h"
 #include "lichen_ui.h"
 #include "menu.h"
 #include "screen_ids.h"
@@ -121,25 +122,39 @@ static void scan_after_start(lv_timer_t *timer) {
     }
 }
 
-static void toggle_radio(void *arg) {
-    (void)arg;
-    // The switch only (#348): during a thermal hold this never brings the radio on, so start a scan only when it is
-    lichen_radio_switch_set(RADIO_WIFI, !lichen_radio_switch_get(RADIO_WIFI));
-    bool on = lichen_radio_get(RADIO_WIFI);
-    radio_row_refresh();
-    gen++; // a scan under way is dropped when it reports
+static bool radio_was_on; // what the radio did at the last look: the page scans when it comes on by itself (#361)
+
+// A scan under way is dropped when it reports, a pending one is cancelled, and the list goes
+static void drop_scan(void) {
+    gen++;
     if (start_timer) {
         lv_timer_delete(start_timer);
         start_timer = NULL;
     }
     clear_rows();
+}
+
+// The radio came on: one scan once the driver has had a moment to start
+static void scan_after_radio_on(void) {
+    drop_scan();
+    set_status("Starting Wi-Fi...");
+    start_timer = lv_timer_create(scan_after_start, RADIO_START_MS, NULL);
+}
+
+static void toggle_radio(void *arg) {
+    (void)arg;
+    // The switch only (#348): during a thermal hold this never brings the radio on, so start a scan only when it is
+    lichen_radio_switch_set(RADIO_WIFI, !lichen_radio_switch_get(RADIO_WIFI));
+    bool on      = lichen_radio_get(RADIO_WIFI);
+    radio_was_on = on;
+    radio_row_refresh();
     if (on) {
-        set_status("Starting Wi-Fi...");
-        start_timer = lv_timer_create(scan_after_start, RADIO_START_MS, NULL);
-    } else {
-        add_saved_rows();
-        set_status(off_status());
+        scan_after_radio_on();
+        return;
     }
+    drop_scan();
+    add_saved_rows();
+    set_status(off_status());
 }
 
 // ---- joining -----------------------------------------------------------------------------------------------------
@@ -459,6 +474,10 @@ static void start_scan(void) {
 static void radio_note_refresh(lv_timer_t *t) {
     (void)t;
     radio_row_refresh();
+    // A hold ending or `fw wifi on` while the page is open (#361): the list fills without reopening it
+    if (wifi_radio_came_on(&radio_was_on, lichen_radio_get(RADIO_WIFI), start_timer != NULL)) {
+        scan_after_radio_on();
+    }
     char text[sizeof(radio_shown)];
     shell_wifi_line(text, sizeof(text));
     if (radio_note && strcmp(text, radio_shown) != 0) {
@@ -513,6 +532,7 @@ static lv_obj_t *build(void) {
     status    = menu_note(menu, "");
     radio_note = menu_note(menu, "");
     radio_shown[0] = '\0';
+    radio_was_on   = lichen_radio_get(RADIO_WIFI); // the scan below covers a radio that is on now
     radio_note_refresh(NULL);
     radio_timer = lv_timer_create(radio_note_refresh, 1000, NULL);
     lv_obj_add_event_cb(scr, on_delete, LV_EVENT_DELETE, NULL);

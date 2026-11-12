@@ -36,3 +36,9 @@ link_look_t lora_look(bool up, lora_use_t use) {
     }
     return (link_look_t){LINK_UP, 0, THEME_TEAL};
 }
+
+bool wifi_radio_came_on(bool *was_on, bool now_on, bool scan_pending) {
+    bool rose = now_on && !*was_on;
+    *was_on   = now_on;
+    return rose && !scan_pending;
+}
