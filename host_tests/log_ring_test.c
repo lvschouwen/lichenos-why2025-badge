@@ -75,20 +75,20 @@ static void test_hook_fit(void) {
     bool cut;
     char ascii[500];
     memset(ascii, 'a', sizeof(ascii));
-    CHECK(log_ring_fit(ascii, 0, 400, &cut) == 0 && !cut);
-    CHECK(log_ring_fit(ascii, 260, 400, &cut) == 260 && !cut); // the #356 line: whole, the ring splits it
-    CHECK(log_ring_fit(ascii, 399, 400, &cut) == 399 && !cut);
-    CHECK(log_ring_fit(ascii, 400, 400, &cut) == 399 && cut);
-    CHECK(log_ring_fit(ascii, 5000, 400, &cut) == 399 && cut);
+    CHECK(log_ring_fit(ascii, 0, 398, &cut) == 0 && !cut);
+    CHECK(log_ring_fit(ascii, 260, 398, &cut) == 260 && !cut); // the #356 line: whole, the ring splits it
+    CHECK(log_ring_fit(ascii, 397, 398, &cut) == 397 && !cut);
+    CHECK(log_ring_fit(ascii, 398, 398, &cut) == 397 && cut);
+    CHECK(log_ring_fit(ascii, 5000, 398, &cut) == 397 && cut);
     // a cut inside a character backs up to before it
     memset(ascii, 'a', sizeof(ascii));
-    memcpy(ascii + 397, "\xe2\x80\xa6", 3); // lead at 397, 398 and 399 would complete it; buffer holds 399 chars
-    CHECK(log_ring_fit(ascii, 400, 400, &cut) == 397 && cut);
+    memcpy(ascii + 396, "\xe2\x80\xa6", 3); // the lead is the last of the 397 kept characters
+    CHECK(log_ring_fit(ascii, 398, 398, &cut) == 396 && cut);
 
     char text[LOG_RING_HOOK_MAX + LOG_RING_HOOK_TAIL];
-    memset(text, 'y', 399);
-    size_t len = log_ring_end(text, 399, true, true);
-    CHECK(len == 399 + 3 + 1 && memcmp(text + 399, "\xe2\x80\xa6\n", 4) == 0);
+    memset(text, 'y', 397);
+    size_t len = log_ring_end(text, 397, true, true);
+    CHECK(len == 397 + 3 + 1 && memcmp(text + 397, "\xe2\x80\xa6\n", 4) == 0);
     memcpy(text, "ab", 2);
     CHECK(log_ring_end(text, 2, false, false) == 2 && log_ring_end(text, 2, false, true) == 3);
 
@@ -110,14 +110,15 @@ static void test_utf8_split(void) {
     // 1: the cut mark of an over-long hook line survives the whole path
     memset(line, 'q', 450);
     bool   cut;
-    size_t len = log_ring_fit(line, 450, 400, &cut);
+    size_t len = log_ring_fit(line, 450, 398, &cut);
     len        = log_ring_end(line, len, cut, true);
     log_ring_init(&ring, store, sizeof(store));
     log_ring_write(&ring, 1, line, len);
     read_since(0, &next, &missed);
     CHECK(strstr(out, "\xe2\x80\xa6") != NULL);
     CHECK(strchr(out, '?') == NULL);
-    CHECK(next == 4); // 200, 199, and the mark whole: three records, no stray "??"
+    CHECK(next == 3); // 200, then 197 + the mark in one record: no record of its own for the mark
+    CHECK(strstr(out, "qqq\xe2\x80\xa6\n") != NULL);
 
     // 2: a character straddling byte 200 moves whole into the next record
     memset(line, 'w', 199);

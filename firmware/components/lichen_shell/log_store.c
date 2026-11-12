@@ -108,7 +108,7 @@ static int hook(char const *fmt, va_list args) {
             atomic_flag_clear_explicit(&long_busy, memory_order_release); // not held across previous()
         } else {
             char text[LOG_RING_LINE_MAX + LOG_RING_HOOK_TAIL];
-            hook_store(text, LOG_RING_LINE_MAX, fmt, args);
+            hook_store(text, LOG_RING_LINE_MAX - 2, fmt, args); // 197 characters + the mark = one ring line
         }
     }
     return previous ? previous(fmt, args) : vprintf(fmt, args);
