@@ -65,8 +65,12 @@ CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS=2
 # /storage on LittleFS (#300; esp_littlefs, components/storage/idf_component.yml). tools/pack_storage.py builds
 # storage.bin with exactly this on-disk config and checks it against the built sdkconfig (check-config): block 4096 (the
 # flash sector), read and prog 128, cache 512, lookahead 128, name max 255 (LFS_NAME_MAX), disk version 2.1. Change a
-# value here and in pack_storage.py together. Its caches and file buffers in PSRAM, as FatFs's were (#263): esp_flash
-# copies a PSRAM buffer itself. No flash mapping (#31): CONFIG_LITTLEFS_MMAP_PARTITION stays off.
+# value here and in pack_storage.py together. No flash mapping (#31): CONFIG_LITTLEFS_MMAP_PARTITION stays off.
+# Its caches and file buffers in internal RAM (#362): SPI1 flash cannot read into PSRAM, so with PSRAM caches every
+# esp_flash_read took a bounce buffer (get_buffer_malloc: a whole internal heap walk in a critical section, then a
+# malloc and free), and every prog went out in 32-byte flash operations. Cost: ~1.4 KB while mounted (read and prog
+# cache 512 each, lookahead 128, lfs_t, the mount) plus ~0.7 KB per open file or ~0.3 KB per open folder. Reads of
+# 512 B or more straight into a caller's PSRAM buffer still bounce (once per call, not per 128 B).
 CONFIG_LITTLEFS_READ_SIZE=128
 CONFIG_LITTLEFS_WRITE_SIZE=128
 CONFIG_LITTLEFS_CACHE_SIZE=512
@@ -74,7 +78,7 @@ CONFIG_LITTLEFS_LOOKAHEAD_SIZE=128
 CONFIG_LITTLEFS_BLOCK_CYCLES=512
 # CONFIG_LITTLEFS_MULTIVERSION is not set
 # CONFIG_LITTLEFS_MMAP_PARTITION is not set
-CONFIG_LITTLEFS_MALLOC_STRATEGY_SPIRAM_PREFER=y
+CONFIG_LITTLEFS_MALLOC_STRATEGY_INTERNAL=y
 # No littlefs asserts: a damaged drive must fail the mount and stay unmounted (#110), not abort() at every boot
 # (a boot loop). littlefs reports damage it finds on disk as LFS_ERR_CORRUPT; check-config pins this off.
 # CONFIG_LITTLEFS_ASSERTS is not set
