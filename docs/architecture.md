@@ -624,6 +624,8 @@ OS v2 (#216) on the same lessons:
   removed (EBUSY, where FatFs's lock gave EACCES), but it can be opened a second time, also for writing (no lock: each
   handle commits on close, the last close wins, the drive stays consistent).
 - **Free space** is `lfs_fs_size`, a walk over every block in use under the drive's lock. Only the OTA receiver's room
-  check and `fw storage` count on the spot; sys_notices counts once a minute, and About, Files and MeshCore read that
+  check and `fw storage` count on the spot; sys_notices counts every 10 min at idle priority (#357: LittleFS's caches
+  are in PSRAM, so each flash read of the walk sizes spi_flash's internal bounce buffer with a walk of the whole
+  internal heap), and About, Files and MeshCore read that
   value (`storage_free_bytes_cached`). A failed count is "unknown", never 0 B free. An upload needs its size in blocks of
   4088 B (8 B of each 4096 B block are the file's list pointers) plus 4 blocks for metadata (`ota_file_fits`).

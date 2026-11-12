@@ -81,6 +81,37 @@ typedef struct {
 } sysn_info_t;
 sysn_info_t sysn_info(sysn_event_t event);
 
+// ---- The poll's own cost (#357) ----
+// The free-space count is LittleFS's lfs_fs_size, a walk over every block in use. Its caches are in PSRAM, so each
+// flash read of the walk goes through a temporary internal buffer that spi_flash sizes with
+// heap_caps_get_largest_free_block: a walk of every internal heap block inside a critical section, per read. At 5 h of
+// uptime one count took over 5 s of core 0 (the IDLE0 watchdog). Once every 10 min; boot (poll 0) counts at once.
+#define SYSN_STORAGE_POLLS 600u
+bool sysn_storage_due(unsigned poll);
+
+typedef enum { SYSN_STEP_GETTERS, SYSN_STEP_SD, SYSN_STEP_SENSORS, SYSN_STEP_STORAGE, SYSN_STEP_COUNT } sysn_step_id_t;
+
+#define SYSN_SLOW_MS     500u                // a step this long is a warning
+#define SYSN_SLOW_GAP_MS (30u * 60u * 1000u) // per step: one warning, then the next after this long at the least
+
+typedef struct {
+    uint32_t max_ms[SYSN_STEP_COUNT]; // the longest since boot
+    uint32_t untold[SYSN_STEP_COUNT]; // slow ones since the last warning (that one included)
+    uint32_t untold_max[SYSN_STEP_COUNT];
+    uint64_t told_at_ms[SYSN_STEP_COUNT];
+    bool     told[SYSN_STEP_COUNT];
+} sysn_timing_t;
+
+typedef struct {
+    uint32_t count;  // slow ones this warning covers (the one now included)
+    uint32_t max_ms; // the longest of them
+} sysn_slow_t;
+
+// Records one step's time; true when it is to be logged as a warning now (*out: what the warning covers). The state
+// starts zeroed.
+bool        sysn_time_step(sysn_timing_t *t, sysn_step_id_t step, uint32_t took_ms, uint64_t now_ms, sysn_slow_t *out);
+char const *sysn_step_name(sysn_step_id_t step);
+
 #ifdef __cplusplus
 }
 #endif

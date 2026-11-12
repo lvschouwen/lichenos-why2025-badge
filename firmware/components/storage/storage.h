@@ -20,7 +20,7 @@ bool storage_mounted(void);
 // 0 free). It walks every block in use (lfs_fs_size) holding the drive's lock, so every other file call waits: for
 // the OTA receiver's room check and "fw storage" only. Each call also refreshes storage_free_bytes_cached.
 bool storage_free_bytes(uint64_t *free_bytes, uint64_t *total_bytes);
-// The last measurement (boot mount, sys_notices once a minute, the OTA receiver, "fw storage"); false when unknown.
+// The last measurement (boot mount, sys_notices every 10 min, the OTA receiver, "fw storage"); false when unknown.
 // Never touches the drive: any task, the LVGL task included.
 bool storage_free_bytes_cached(uint64_t *free_bytes, uint64_t *total_bytes);
 // "fw storage [path]" (#299): free space and the size of each entry under path; registered by storage_mount

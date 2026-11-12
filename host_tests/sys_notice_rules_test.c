@@ -195,6 +195,39 @@ static void test_info(void) {
     CHECK(sysn_step(&st, &s, ev, 1) == 1 && ev[0] == SYSN_CRASH);
 }
 
+// #357: one count of /storage took more than 5 s at 5 h uptime; once a minute starved IDLE0 every 66 s
+static void test_storage_cadence(void) {
+    CHECK(sysn_storage_due(0));   // the boot's count at once
+    CHECK(!sysn_storage_due(60)); // no longer once a minute
+    CHECK(!sysn_storage_due(299));
+    CHECK(sysn_storage_due(600));
+    unsigned counts = 0;
+    for (unsigned poll = 0; poll < 3600; poll++) { // an hour of 1 s polls
+        counts += sysn_storage_due(poll);
+    }
+    CHECK(counts == 6);
+}
+
+static void test_slow_steps(void) {
+    sysn_timing_t t;
+    memset(&t, 0, sizeof(t));
+    sysn_slow_t s = {0};
+    CHECK(!sysn_time_step(&t, SYSN_STEP_STORAGE, 500, 1000, &s)); // 500 ms is not slow yet
+    CHECK(t.max_ms[SYSN_STEP_STORAGE] == 500);
+    CHECK(sysn_time_step(&t, SYSN_STEP_STORAGE, 5200, 2000, &s)); // the first slow one is told at once
+    CHECK(s.count == 1 && s.max_ms == 5200);
+    CHECK(!sysn_time_step(&t, SYSN_STEP_STORAGE, 6100, 2000 + 600000, &s)); // inside the gap: counted, not told
+    CHECK(!sysn_time_step(&t, SYSN_STEP_STORAGE, 5900, 2000 + 1200000, &s));
+    CHECK(sysn_time_step(&t, SYSN_STEP_SD, 900, 2000 + 1200000, &s)); // each step has its own gap
+    CHECK(s.count == 1 && s.max_ms == 900);
+    CHECK(sysn_time_step(&t, SYSN_STEP_STORAGE, 5000, 2000 + SYSN_SLOW_GAP_MS, &s)); // the gap is over
+    CHECK(s.count == 3 && s.max_ms == 6100);
+    CHECK(t.max_ms[SYSN_STEP_STORAGE] == 6100);
+    CHECK(!sysn_time_step(&t, SYSN_STEP_COUNT, 9000, 0, &s)); // an unknown step is ignored
+    CHECK(strcmp(sysn_step_name(SYSN_STEP_STORAGE), "storage count") == 0);
+    CHECK(strcmp(sysn_step_name(SYSN_STEP_COUNT), "?") == 0);
+}
+
 int main(void) {
     test_boot_once();
     test_psram_80();
@@ -204,6 +237,8 @@ int main(void) {
     test_sensors();
     test_storage();
     test_info();
+    test_storage_cadence();
+    test_slow_steps();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

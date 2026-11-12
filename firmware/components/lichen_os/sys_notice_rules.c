@@ -136,3 +136,43 @@ sysn_info_t sysn_info(sysn_event_t event) {
     (void)F_SILENT;
     return event < SYSN_EVENT_COUNT ? table[event] : table[SYSN_CRASH];
 }
+
+bool sysn_storage_due(unsigned poll) {
+    return poll % SYSN_STORAGE_POLLS == 0;
+}
+
+bool sysn_time_step(sysn_timing_t *t, sysn_step_id_t step, uint32_t took_ms, uint64_t now_ms, sysn_slow_t *out) {
+    if ((unsigned)step >= SYSN_STEP_COUNT) {
+        return false;
+    }
+    if (took_ms > t->max_ms[step]) {
+        t->max_ms[step] = took_ms;
+    }
+    if (took_ms <= SYSN_SLOW_MS) {
+        return false;
+    }
+    t->untold[step]++;
+    if (took_ms > t->untold_max[step]) {
+        t->untold_max[step] = took_ms;
+    }
+    if (t->told[step] && now_ms - t->told_at_ms[step] < SYSN_SLOW_GAP_MS) {
+        return false; // still counted: the next warning says how many and how long
+    }
+    out->count          = t->untold[step];
+    out->max_ms         = t->untold_max[step];
+    t->untold[step]     = 0;
+    t->untold_max[step] = 0;
+    t->told[step]       = true;
+    t->told_at_ms[step] = now_ms;
+    return true;
+}
+
+char const *sysn_step_name(sysn_step_id_t step) {
+    static char const *const names[SYSN_STEP_COUNT] = {
+        [SYSN_STEP_GETTERS] = "getters",
+        [SYSN_STEP_SD]      = "SD info",
+        [SYSN_STEP_SENSORS] = "sensors",
+        [SYSN_STEP_STORAGE] = "storage count",
+    };
+    return (unsigned)step < SYSN_STEP_COUNT ? names[step] : "?";
+}

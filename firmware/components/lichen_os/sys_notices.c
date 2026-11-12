@@ -2,9 +2,11 @@
 // (crash, PSRAM boot check, clock, update, C6 recovery, SD card, sensors, storage) into a snapshot; sys_notice_rules.c
 // (pure) decides what is news and this raises it as source "lichen". Nothing here touches the radio or the C6 link
 // beyond reading their status, and nothing touches LVGL: lichen_notify() is safe from any task. The storage drive's
-// free space is read once a minute (LittleFS walks its blocks, #300). An OS service since #281 (lichen_watch_start, display or
-// not): the update result and "home is shown" come in as hooks.
+// free space is read every 10 min, at idle priority (LittleFS walks its blocks, #300, #357: sys_notice_rules.h). Each
+// step is timed; a slow one is a warning. An OS service since #281 (lichen_watch_start, display or not): the update
+// result and "home is shown" come in as hooks.
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_notify.h"
@@ -31,7 +33,6 @@ static char const TAG[] = "sys_notices";
 
 #define POLL_MS        1000
 #define SETTLE_POLLS   3  // after home shows: the boot steps have all reported by then
-#define STORAGE_POLLS  60 // free space once a minute
 #define TASK_STACK     4096 // peak 1.2 KB measured (#107)
 #define STACK_LOG_POLL 120 // the stack high-water mark is logged once, two minutes in
 #define BODY_CAP       120
@@ -86,8 +87,34 @@ static void body_for(sysn_event_t e, sysn_snapshot_t const *s, lichen_sd_info_t 
     }
 }
 
+static sysn_timing_t timing; // this task only
+
+static int64_t step_done(sysn_step_id_t step, int64_t since_us) {
+    int64_t     now_us = esp_timer_get_time();
+    uint32_t    ms     = (uint32_t)((now_us - since_us) / 1000);
+    sysn_slow_t slow;
+    if (sysn_time_step(&timing, step, ms, (uint64_t)now_us / 1000, &slow)) {
+        ESP_LOGW(TAG, "%s took %u ms (%u slow since the last warning, longest %u ms; over %u ms is slow)",
+                 sysn_step_name(step), (unsigned)ms, (unsigned)slow.count, (unsigned)slow.max_ms, SYSN_SLOW_MS);
+    }
+    return now_us;
+}
+
+// The OS's one regular count of /storage (#300): it also refreshes the value About, Files and MeshCore read. The walk
+// takes seconds on a full drive (#357) and this task's priority is above IDLE0's, so it runs at idle priority: IDLE0
+// shares core 0 by time slice and feeds the task watchdog. The drive's lock is a mutex, so a task waiting on it lends
+// this one its priority for the rest of the walk.
+static bool count_storage(uint64_t *free_bytes, uint64_t *total_bytes) {
+    UBaseType_t prio = uxTaskPriorityGet(NULL);
+    vTaskPrioritySet(NULL, tskIDLE_PRIORITY);
+    bool ok = storage_free_bytes(free_bytes, total_bytes);
+    vTaskPrioritySet(NULL, prio);
+    return ok;
+}
+
 static void read_snapshot(sysn_snapshot_t *s, lichen_sd_info_t *sd, unsigned poll) {
     static lichen_sensors_t sensors; // this task only; too big to keep twice on its stack
+    int64_t t                 = esp_timer_get_time();
     s->crash_recovered        = lichen_sys_crash_recovered();
     s->storage_unmounted      = !lichen_sys_storage_mounted();
     s->psram_bad              = psram_boot_bad(NULL, 0);
@@ -98,15 +125,18 @@ static void read_snapshot(sysn_snapshot_t *s, lichen_sd_info_t *sd, unsigned pol
     s->update                 = hooks.update_result ? hooks.update_result(NULL, 0) : SYSN_UPD_NONE;
     char reason[4];
     s->c6_restarts = lichen_sys_c6_restarts(reason, sizeof(reason));
+    t              = step_done(SYSN_STEP_GETTERS, t);
     lichen_sys_sd_info(sd);
-    s->sd_state        = (int)sd->state;
+    s->sd_state = (int)sd->state;
+    t           = step_done(SYSN_STEP_SD, t);
     s->sensors_running = lichen_sensors_running();
     lichen_sensors_get(&sensors);
     s->imu_valid = sensors.imu_valid;
     s->env_valid = sensors.env_valid;
-    if (poll % STORAGE_POLLS == 0) {
-        // The OS's one regular count of /storage (#300): it also refreshes the value About, Files and MeshCore read
-        s->storage_known = storage_free_bytes(&s->storage_free, &s->storage_total);
+    t            = step_done(SYSN_STEP_SENSORS, t);
+    if (sysn_storage_due(poll)) {
+        s->storage_known = count_storage(&s->storage_free, &s->storage_total);
+        step_done(SYSN_STEP_STORAGE, t);
     }
 }
 
@@ -138,7 +168,11 @@ static void notices_task(void *arg) {
         }
         atomic_store(&s_boot_told, true); // the first step raised the boot's facts
         if (poll == STACK_LOG_POLL) {
-            ESP_LOGI(TAG, "stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+            ESP_LOGI(TAG, "stack: %u bytes never used; longest getters %u ms, SD info %u ms, sensors %u ms, "
+                          "storage count %u ms",
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL), (unsigned)timing.max_ms[SYSN_STEP_GETTERS],
+                     (unsigned)timing.max_ms[SYSN_STEP_SD], (unsigned)timing.max_ms[SYSN_STEP_SENSORS],
+                     (unsigned)timing.max_ms[SYSN_STEP_STORAGE]);
         }
         vTaskDelay(pdMS_TO_TICKS(POLL_MS));
     }

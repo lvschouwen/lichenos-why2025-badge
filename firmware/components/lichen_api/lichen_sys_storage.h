@@ -69,7 +69,7 @@ void lichen_sys_sd_status_line(lichen_sd_info_t const *info, char *out, size_t c
 
 // The boot mount of the storage drive worked. Any task, the LVGL task included.
 bool lichen_sys_storage_mounted(void);
-// Free and total bytes on the drive as last counted (at most about a minute old: the OS counts once a minute, and
+// Free and total bytes on the drive as last counted (at most about 10 min old: the OS counts every 10 min, #357, and
 // again whenever the OTA receiver or "fw storage" needs a fresh figure); false when it is not mounted or the count is
 // unknown. Never touches the drive: any task, the LVGL task included.
 bool lichen_sys_storage_free_bytes(uint64_t *free_bytes, uint64_t *total_bytes);
