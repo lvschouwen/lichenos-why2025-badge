@@ -86,14 +86,16 @@ int main(void) {
     }
     CHECK(!wifi_fan_part_lit(4, -1) && !wifi_fan_part_lit(9, WIFI_FAN_PARTS));
 
-    // #361: the Wi-Fi page scans once when the radio comes on by itself, not while it stays on or off
+    // #361: the Wi-Fi page scans once when the radio comes on by itself, and drops the list once when it goes off
     bool was = false;
-    CHECK(!wifi_radio_came_on(&was, false, false) && !was);
-    CHECK(wifi_radio_came_on(&was, true, false) && was);
-    CHECK(!wifi_radio_came_on(&was, true, false)); // still on: one scan only
-    CHECK(!wifi_radio_came_on(&was, false, false) && !was);
-    CHECK(!wifi_radio_came_on(&was, true, true) && was); // the page's toggle already started one
-    CHECK(!wifi_radio_came_on(&was, true, false));
+    CHECK(wifi_radio_step(&was, false, false) == WIFI_RADIO_SAME && !was);
+    CHECK(wifi_radio_step(&was, true, false) == WIFI_RADIO_CAME_ON && was);
+    CHECK(wifi_radio_step(&was, true, false) == WIFI_RADIO_SAME); // still on: one scan only
+    CHECK(wifi_radio_step(&was, false, false) == WIFI_RADIO_WENT_OFF && !was);
+    CHECK(wifi_radio_step(&was, false, false) == WIFI_RADIO_SAME); // still off: dropped once
+    CHECK(wifi_radio_step(&was, true, true) == WIFI_RADIO_SAME && was); // the page's toggle already started one
+    CHECK(wifi_radio_step(&was, true, false) == WIFI_RADIO_SAME);
+    CHECK(wifi_radio_step(&was, false, true) == WIFI_RADIO_WENT_OFF); // a pending scan is dropped too
 
     if (failures) {
         printf("%d failure(s)\n", failures);

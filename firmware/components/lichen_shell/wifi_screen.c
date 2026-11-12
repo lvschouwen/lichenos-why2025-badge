@@ -122,7 +122,7 @@ static void scan_after_start(lv_timer_t *timer) {
     }
 }
 
-static bool radio_was_on; // what the radio did at the last look: the page scans when it comes on by itself (#361)
+static bool radio_was_on; // what the radio did at the last look: the page follows it going on or off by itself (#361)
 
 // A scan under way is dropped when it reports, a pending one is cancelled, and the list goes
 static void drop_scan(void) {
@@ -141,6 +141,13 @@ static void scan_after_radio_on(void) {
     start_timer = lv_timer_create(scan_after_start, RADIO_START_MS, NULL);
 }
 
+// The radio went off: as the page opens with it off, the saved networks and why it is off
+static void show_radio_off(void) {
+    drop_scan();
+    add_saved_rows();
+    set_status(off_status());
+}
+
 static void toggle_radio(void *arg) {
     (void)arg;
     // The switch only (#348): during a thermal hold this never brings the radio on, so start a scan only when it is
@@ -152,9 +159,7 @@ static void toggle_radio(void *arg) {
         scan_after_radio_on();
         return;
     }
-    drop_scan();
-    add_saved_rows();
-    set_status(off_status());
+    show_radio_off();
 }
 
 // ---- joining -----------------------------------------------------------------------------------------------------
@@ -474,9 +479,12 @@ static void start_scan(void) {
 static void radio_note_refresh(lv_timer_t *t) {
     (void)t;
     radio_row_refresh();
-    // A hold ending or `fw wifi on` while the page is open (#361): the list fills without reopening it
-    if (wifi_radio_came_on(&radio_was_on, lichen_radio_get(RADIO_WIFI), start_timer != NULL)) {
+    // A hold starting or ending, `fw wifi on|off` while the page is open (#361): the list follows without reopening it
+    wifi_radio_step_t step = wifi_radio_step(&radio_was_on, lichen_radio_get(RADIO_WIFI), start_timer != NULL);
+    if (step == WIFI_RADIO_CAME_ON) {
         scan_after_radio_on();
+    } else if (step == WIFI_RADIO_WENT_OFF) {
+        show_radio_off();
     }
     char text[sizeof(radio_shown)];
     shell_wifi_line(text, sizeof(text));

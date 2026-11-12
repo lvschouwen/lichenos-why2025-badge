@@ -34,7 +34,9 @@ link_look_t lora_look(bool up, lora_use_t use);
 #define WIFI_FAN_PARTS 4
 bool wifi_fan_part_lit(int bars, int part);
 
-// The Wi-Fi page's scan on the radio coming on by itself (#361: a thermal hold ending, `fw wifi on`): true once when
-// the radio went from off to on since the last call and no scan is already on its way (the page's own toggle starts
-// one). *was_on is the page's memory, set when it opens, and always ends up as now_on.
-bool wifi_radio_came_on(bool *was_on, bool now_on, bool scan_pending);
+// The Wi-Fi page following the radio by itself (#361: a thermal hold starting or ending, `fw wifi on|off`): what to do
+// since the last call. CAME_ON once when it went from off to on and no scan is already on its way (the page's own
+// toggle starts one): scan. WENT_OFF once when it went from on to off: drop the scan and show the page as it opens with
+// the radio off. *was_on is the page's memory, set when it opens, and always ends up as now_on.
+typedef enum { WIFI_RADIO_SAME, WIFI_RADIO_CAME_ON, WIFI_RADIO_WENT_OFF } wifi_radio_step_t;
+wifi_radio_step_t wifi_radio_step(bool *was_on, bool now_on, bool scan_pending);
