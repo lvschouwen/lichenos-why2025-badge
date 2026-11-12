@@ -73,11 +73,17 @@ static void test_long_line_split(void) {
 
 static void test_hook_fit(void) {
     bool cut;
-    CHECK(log_ring_fit(0, 400, &cut) == 0 && !cut);
-    CHECK(log_ring_fit(260, 400, &cut) == 260 && !cut); // the #356 line: whole, the ring splits it
-    CHECK(log_ring_fit(399, 400, &cut) == 399 && !cut);
-    CHECK(log_ring_fit(400, 400, &cut) == 399 && cut);
-    CHECK(log_ring_fit(5000, 400, &cut) == 399 && cut);
+    char ascii[500];
+    memset(ascii, 'a', sizeof(ascii));
+    CHECK(log_ring_fit(ascii, 0, 400, &cut) == 0 && !cut);
+    CHECK(log_ring_fit(ascii, 260, 400, &cut) == 260 && !cut); // the #356 line: whole, the ring splits it
+    CHECK(log_ring_fit(ascii, 399, 400, &cut) == 399 && !cut);
+    CHECK(log_ring_fit(ascii, 400, 400, &cut) == 399 && cut);
+    CHECK(log_ring_fit(ascii, 5000, 400, &cut) == 399 && cut);
+    // a cut inside a character backs up to before it
+    memset(ascii, 'a', sizeof(ascii));
+    memcpy(ascii + 397, "\xe2\x80\xa6", 3); // lead at 397, 398 and 399 would complete it; buffer holds 399 chars
+    CHECK(log_ring_fit(ascii, 400, 400, &cut) == 397 && cut);
 
     char text[LOG_RING_HOOK_MAX + LOG_RING_HOOK_TAIL];
     memset(text, 'y', 399);
@@ -96,6 +102,36 @@ static void test_hook_fit(void) {
     log_ring_write(&ring, 1, line, len);
     size_t got = read_since(0, &next, &missed);
     CHECK(next == 3 && got > 260);
+}
+
+static void test_utf8_split(void) {
+    uint32_t next, missed;
+    char     line[600];
+    // 1: the cut mark of an over-long hook line survives the whole path
+    memset(line, 'q', 450);
+    bool   cut;
+    size_t len = log_ring_fit(line, 450, 400, &cut);
+    len        = log_ring_end(line, len, cut, true);
+    log_ring_init(&ring, store, sizeof(store));
+    log_ring_write(&ring, 1, line, len);
+    read_since(0, &next, &missed);
+    CHECK(strstr(out, "\xe2\x80\xa6") != NULL);
+    CHECK(strchr(out, '?') == NULL);
+    CHECK(next == 4); // 200, 199, and the mark whole: three records, no stray "??"
+
+    // 2: a character straddling byte 200 moves whole into the next record
+    memset(line, 'w', 199);
+    memcpy(line + 199, "\xe2\x80\xa6", 3);
+    memset(line + 202, 'v', 10);
+    log_ring_init(&ring, store, sizeof(store));
+    log_ring_write(&ring, 1, line, 212);
+    log_ring_write(&ring, 1, "\n", 1);
+    read_since(0, &next, &missed);
+    CHECK(strchr(out, '?') == NULL);
+    CHECK(next == 3);
+    char want[32];
+    snprintf(want, sizeof(want), "\n2 0.001 \xe2\x80\xa6vvvvvvvvvv\n");
+    CHECK(strstr(out, want) != NULL);
 }
 
 static void test_wrap_and_overflow(void) {
@@ -209,6 +245,7 @@ int main(void) {
     test_partial();
     test_long_line_split();
     test_hook_fit();
+    test_utf8_split();
     test_wrap_and_overflow();
     test_small_output();
     test_seek();

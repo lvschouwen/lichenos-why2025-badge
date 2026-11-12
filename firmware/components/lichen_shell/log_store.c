@@ -9,6 +9,7 @@
 #include "log_ring.h"
 
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 
 #include <string.h>
@@ -77,23 +78,37 @@ void log_store_add(char const *text, size_t len) {
     }
 }
 
+// The long line buffer is shared, so it sits in internal RAM (store() copies under an interrupt mask, #271) and is
+// taken with a flag. Whoever finds it taken (other core, preempted task, ISR) formats into its own short stack buffer.
+static char        long_text[LOG_RING_HOOK_MAX + LOG_RING_HOOK_TAIL];
+static atomic_flag long_busy = ATOMIC_FLAG_INIT;
+
+static void hook_store(char *text, size_t cap, char const *fmt, va_list args) {
+    va_list copy;
+    va_copy(copy, args);
+    int n = vsnprintf(text, cap, fmt, copy);
+    va_end(copy);
+    if (n > 0) {
+        bool   cut;
+        size_t len     = log_ring_fit(text, n, cap, &cut);
+        bool   newline = cut || text[len - 1] == '\n'; // a cut-off line ends too
+        // lichen_sys_log_clean drops colour codes and line ends; esp_log sends one line per call, so a line end
+        // goes back
+        len = lichen_sys_log_clean(text, len, text);
+        len = log_ring_end(text, len, cut, newline);
+        store(text, len);
+    }
+}
+
 static int hook(char const *fmt, va_list args) {
     if (__atomic_load_n(&ready, __ATOMIC_ACQUIRE)) {
-        // On the caller's stack (no allocation, no shared buffer). Longer than one ring line is fine: the ring splits it.
-        char    text[LOG_RING_HOOK_MAX + LOG_RING_HOOK_TAIL];
-        va_list copy;
-        va_copy(copy, args);
-        int n = vsnprintf(text, LOG_RING_HOOK_MAX, fmt, copy);
-        va_end(copy);
-        if (n > 0) {
-            bool   cut;
-            size_t len     = log_ring_fit(n, LOG_RING_HOOK_MAX, &cut);
-            bool   newline = cut || text[len - 1] == '\n'; // a cut-off line ends too
-            // lichen_sys_log_clean drops colour codes and line ends; esp_log sends one line per call, so a line end
-            // goes back
-            len = lichen_sys_log_clean(text, len, text);
-            len = log_ring_end(text, len, cut, newline);
-            store(text, len);
+        // A line longer than one ring line is fine: the ring splits it.
+        if (!atomic_flag_test_and_set_explicit(&long_busy, memory_order_acquire)) {
+            hook_store(long_text, LOG_RING_HOOK_MAX, fmt, args);
+            atomic_flag_clear_explicit(&long_busy, memory_order_release); // not held across previous()
+        } else {
+            char text[LOG_RING_LINE_MAX + LOG_RING_HOOK_TAIL];
+            hook_store(text, LOG_RING_LINE_MAX, fmt, args);
         }
     }
     return previous ? previous(fmt, args) : vprintf(fmt, args);

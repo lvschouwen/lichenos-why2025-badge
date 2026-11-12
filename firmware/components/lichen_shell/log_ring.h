@@ -59,8 +59,8 @@ size_t log_ring_format(uint8_t const *raw, size_t raw_len, char *out, size_t cap
 #define LOG_RING_HOOK_TAIL 4              // room after the text for the mark and the '\n'
 
 // How many characters of a vsnprintf result n (into a buffer of cap bytes, the NUL included) were stored; *cut tells
-// whether the line was longer than that.
-size_t log_ring_fit(int n, size_t cap, bool *cut);
+// whether the line was longer than that. A cut backs up over an unfinished UTF-8 sequence.
+size_t log_ring_fit(char const *text, int n, size_t cap, bool *cut);
 
 // Appends the cut mark (if cut) and a '\n' (if nl) to text[0..len); the buffer needs LOG_RING_HOOK_TAIL spare bytes.
 // Returns the new length.

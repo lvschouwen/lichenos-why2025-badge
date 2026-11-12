@@ -106,6 +106,22 @@ static void commit(log_ring_t *r) {
     r->pend_len = 0;
 }
 
+// Bytes at the end of p[0..len) that start a UTF-8 sequence which is not complete yet (0 to 3). A record must not end
+// inside a sequence, or both halves would be sanitised to '?'.
+static size_t partial_tail(char const *p, size_t len) {
+    for (size_t k = 1; k <= 3 && k <= len; k++) {
+        unsigned char c = (unsigned char)p[len - k];
+        if (c < 0x80) {
+            return 0;
+        }
+        if (c >= 0xc0) {
+            size_t need = c >= 0xf0 ? 4 : c >= 0xe0 ? 3 : 2;
+            return k < need ? k : 0;
+        }
+    }
+    return 0;
+}
+
 void log_ring_write(log_ring_t *r, uint32_t ms, char const *text, size_t len) {
     for (size_t i = 0; i < len; i++) {
         char c = text[i];
@@ -113,7 +129,13 @@ void log_ring_write(log_ring_t *r, uint32_t ms, char const *text, size_t len) {
             commit(r);
         } else if (c != '\r') {
             if (r->pend_len == LOG_RING_LINE_MAX) {
+                size_t keep = partial_tail(r->pend, r->pend_len);
+                char   tail[3];
+                memcpy(tail, r->pend + r->pend_len - keep, keep);
+                r->pend_len -= keep;
                 commit(r);
+                memcpy(r->pend, tail, keep); // the unfinished character starts the next record
+                r->pend_len = keep;
             }
             if (r->pend_len == 0) {
                 r->pend_ms = ms;
@@ -193,12 +215,15 @@ size_t log_ring_format(uint8_t const *raw, size_t raw_len, char *out, size_t cap
     return written;
 }
 
-size_t log_ring_fit(int n, size_t cap, bool *cut) {
+size_t log_ring_fit(char const *text, int n, size_t cap, bool *cut) {
     *cut = n > 0 && (size_t)n >= cap;
     if (n <= 0) {
         return 0;
     }
-    return *cut ? cap - 1 : (size_t)n;
+    if (!*cut) {
+        return (size_t)n;
+    }
+    return cap - 1 - partial_tail(text, cap - 1); // back up over a half character: the mark follows a whole one
 }
 
 size_t log_ring_end(char *text, size_t len, bool cut, bool nl) {
