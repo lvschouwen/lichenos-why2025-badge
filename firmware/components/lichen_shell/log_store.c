@@ -79,20 +79,20 @@ void log_store_add(char const *text, size_t len) {
 
 static int hook(char const *fmt, va_list args) {
     if (__atomic_load_n(&ready, __ATOMIC_ACQUIRE)) {
-        char    text[LOG_RING_LINE_MAX + 2]; // on the caller's stack: no allocation, no shared buffer
+        // On the caller's stack (no allocation, no shared buffer). Longer than one ring line is fine: the ring splits it.
+        char    text[LOG_RING_HOOK_MAX + LOG_RING_HOOK_TAIL];
         va_list copy;
         va_copy(copy, args);
-        int n = vsnprintf(text, sizeof(text) - 1, fmt, copy);
+        int n = vsnprintf(text, LOG_RING_HOOK_MAX, fmt, copy);
         va_end(copy);
         if (n > 0) {
-            size_t len      = (size_t)n < sizeof(text) - 1 ? (size_t)n : sizeof(text) - 2;
-            bool   newline  = (size_t)n >= sizeof(text) - 1 || text[len - 1] == '\n'; // a cut-off line ends too
+            bool   cut;
+            size_t len     = log_ring_fit(n, LOG_RING_HOOK_MAX, &cut);
+            bool   newline = cut || text[len - 1] == '\n'; // a cut-off line ends too
             // lichen_sys_log_clean drops colour codes and line ends; esp_log sends one line per call, so a line end
             // goes back
-            len             = lichen_sys_log_clean(text, len, text);
-            if (newline) {
-                text[len++] = '\n';
-            }
+            len = lichen_sys_log_clean(text, len, text);
+            len = log_ring_end(text, len, cut, newline);
             store(text, len);
         }
     }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -50,3 +51,17 @@ size_t log_ring_copy(log_ring_t const *r, uint32_t since, uint8_t *raw, size_t r
 // Step 2, outside the lock: renders copied records as "<seq> <sec>.<ms> <text>\n" into out (cap >= the out_budget given
 // to log_ring_copy). Returns the bytes written.
 size_t log_ring_format(uint8_t const *raw, size_t raw_len, char *out, size_t cap);
+
+// The log hook formats one esp_log call into a stack buffer before the ring sees it (the ring splits long lines itself).
+// LOG_RING_HOOK_MAX is the longest formatted line kept; a longer one is cut and ends in LOG_RING_CUT_MARK.
+#define LOG_RING_HOOK_MAX 480
+#define LOG_RING_CUT_MARK "\xe2\x80\xa6" // U+2026, 3 bytes
+#define LOG_RING_HOOK_TAIL 4              // room after the text for the mark and the '\n'
+
+// How many characters of a vsnprintf result n (into a buffer of cap bytes, the NUL included) were stored; *cut tells
+// whether the line was longer than that.
+size_t log_ring_fit(int n, size_t cap, bool *cut);
+
+// Appends the cut mark (if cut) and a '\n' (if nl) to text[0..len); the buffer needs LOG_RING_HOOK_TAIL spare bytes.
+// Returns the new length.
+size_t log_ring_end(char *text, size_t len, bool cut, bool nl);

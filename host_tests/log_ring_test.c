@@ -71,6 +71,33 @@ static void test_long_line_split(void) {
     CHECK(next == 3); // two lines: 200 and 50 characters
 }
 
+static void test_hook_fit(void) {
+    bool cut;
+    CHECK(log_ring_fit(0, 480, &cut) == 0 && !cut);
+    CHECK(log_ring_fit(260, 480, &cut) == 260 && !cut); // the #356 line: whole, the ring splits it
+    CHECK(log_ring_fit(479, 480, &cut) == 479 && !cut);
+    CHECK(log_ring_fit(480, 480, &cut) == 479 && cut);
+    CHECK(log_ring_fit(5000, 480, &cut) == 479 && cut);
+
+    char text[LOG_RING_HOOK_MAX + LOG_RING_HOOK_TAIL];
+    memset(text, 'y', 479);
+    size_t len = log_ring_end(text, 479, true, true);
+    CHECK(len == 479 + 3 + 1 && memcmp(text + 479, "\xe2\x80\xa6\n", 4) == 0);
+    memcpy(text, "ab", 2);
+    CHECK(log_ring_end(text, 2, false, false) == 2 && log_ring_end(text, 2, false, true) == 3);
+
+    // a 260-character line reaches the ring complete: 200 + 60
+    uint32_t next, missed;
+    char     line[261];
+    memset(line, 'z', 260);
+    line[260] = 0;
+    log_ring_init(&ring, store, sizeof(store));
+    len = log_ring_end(line, 260, false, true);
+    log_ring_write(&ring, 1, line, len);
+    size_t got = read_since(0, &next, &missed);
+    CHECK(next == 3 && got > 260);
+}
+
 static void test_wrap_and_overflow(void) {
     uint32_t next, missed;
     char     line[32];
@@ -140,7 +167,8 @@ static void test_seek(void) {
         snprintf(want, sizeof(want), "%u %u.%03u L%05u\n", (unsigned)s, (unsigned)(s / 1000), (unsigned)(s % 1000),
                  (unsigned)s);
         if (strncmp(out, want, strlen(want)) != 0 || missed != 0) {
-            CHECK(!"seek landed on the wrong record");
+            printf("seek landed on the wrong record\n");
+            failures++;
             break;
         }
     }
@@ -180,6 +208,7 @@ int main(void) {
     test_basic();
     test_partial();
     test_long_line_split();
+    test_hook_fit();
     test_wrap_and_overflow();
     test_small_output();
     test_seek();

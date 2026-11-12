@@ -192,3 +192,22 @@ size_t log_ring_format(uint8_t const *raw, size_t raw_len, char *out, size_t cap
     }
     return written;
 }
+
+size_t log_ring_fit(int n, size_t cap, bool *cut) {
+    *cut = n > 0 && (size_t)n >= cap;
+    if (n <= 0) {
+        return 0;
+    }
+    return *cut ? cap - 1 : (size_t)n;
+}
+
+size_t log_ring_end(char *text, size_t len, bool cut, bool nl) {
+    if (cut) {
+        memcpy(text + len, LOG_RING_CUT_MARK, sizeof(LOG_RING_CUT_MARK) - 1);
+        len += sizeof(LOG_RING_CUT_MARK) - 1;
+    }
+    if (nl) {
+        text[len++] = '\n';
+    }
+    return len;
+}
