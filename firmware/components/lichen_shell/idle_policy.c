@@ -34,13 +34,21 @@ idle_stage_t idle_stage(idle_level_t level, bool saver_on, bool lock_on, bool fo
     return (idle_stage_t){.level = level, .saver = saver, .lock = lock_on && (saver || level == IDLE_OFF)};
 }
 
-bool idle_lock_lifted(bool must_show, bool card, uint32_t idle_s) {
-    return must_show || (card && idle_s < IDLE_CARD_HOLD_S);
+uint32_t idle_after_hold(bool card, uint32_t idle_s, idle_times_t t) {
+    if (!card || idle_s < IDLE_CARD_HOLD_S) {
+        return idle_s;
+    }
+    uint32_t shifted = idle_s - IDLE_CARD_HOLD_S + t.dim_s;
+    return shifted < idle_s ? shifted : idle_s;
+}
+
+bool idle_lock_lifted(bool must_show, bool card, uint32_t card_s) {
+    return must_show || (card && card_s < IDLE_CARD_HOLD_S);
 }
 
 unsigned idle_card_count(unsigned count, int delta) {
     if (delta < 0) {
-        unsigned down = (unsigned)-delta;
+        unsigned down = 0u - (unsigned)delta;
         return down > count ? 0 : count - down;
     }
     return count + (unsigned)delta;

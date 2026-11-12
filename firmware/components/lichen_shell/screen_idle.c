@@ -31,6 +31,7 @@ static char const TAG[] = "idle";
 // Under lock: the keyboard task, the console and the LVGL task all touch these
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 static int64_t      last_key_us;
+static int64_t      card_touch_us; // a test card's last open or close (#355): what lifts the pocket lock, not a key
 static idle_stage_t shown = {.level = IDLE_BRIGHT}; // what the swallow rule sees; a key sets it bright at once
 static idle_times_t times;
 static bool         saver_on = true; // Settings > Display (#75)
@@ -92,7 +93,9 @@ static void apply(idle_level_t level) {
 
 void screen_idle_touch(void) {
     portENTER_CRITICAL(&lock);
-    last_key_us = now_us();
+    last_key_us   = now_us();
+    card_touch_us = last_key_us;
+    forced        = false; // the card covers the screensaver test, as a key ends it
     portEXIT_CRITICAL(&lock);
 }
 
@@ -132,7 +135,8 @@ static void tick(lv_timer_t *timer) {
         idle_s      = 0;
         forced      = false;
     }
-    idle_level_t level = idle_level(idle_s, times, hold != IDLE_HOLD_NONE);
+    uint32_t     card_s = (uint32_t)((now - card_touch_us) / 1000000);
+    idle_level_t level  = idle_level(idle_after_hold(card, idle_s, times), times, hold != IDLE_HOLD_NONE);
     idle_stage_t st    = idle_stage(level, saver_on, lock_on, forced && hold == IDLE_HOLD_NONE);
     if (!home) {
         st.saver = st.lock = false;
@@ -141,7 +145,7 @@ static void tick(lv_timer_t *timer) {
     shown     = st;
     inhibited = hold != IDLE_HOLD_NONE;
     portEXIT_CRITICAL(&lock);
-    if (idle_lock_lifted(must_show, card, idle_s)) {
+    if (idle_lock_lifted(must_show, card, card_s)) {
         screen_lock_release(); // also drops the lock's key listener, so the card alone gets Esc
     } else if (st.lock) {
         screen_lock_engage();

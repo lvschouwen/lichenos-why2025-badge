@@ -49,10 +49,16 @@ typedef struct {
 } idle_stage_t;
 idle_stage_t idle_stage(idle_level_t level, bool saver_on, bool lock_on, bool forced);
 
-// Whether an engaged pocket lock is lifted now: must_show (the update screen, a power-down: nothing may cover them) or
-// a test card that holds the screen (card, idle_s within IDLE_CARD_HOLD_S, #355: it takes Esc itself, and the lock's raw
-// key listener must not see that key too). Past the cap the card no longer lifts it, so the lock can engage as usual.
-bool idle_lock_lifted(bool must_show, bool card, uint32_t idle_s);
+// The idle clock idle_level should see. When a card's hold has run out (card, idle_s at or past IDLE_CARD_HOLD_S) the
+// screen goes through the normal dim stage first instead of straight to off: the clock restarts at dim_s when the hold
+// ends (at 0 with dimming off, so the full off time follows). Any other case: idle_s as it is.
+uint32_t idle_after_hold(bool card, uint32_t idle_s, idle_times_t t);
+
+// Whether an engaged pocket lock is lifted now: must_show (the update screen, a power-down: nothing may cover them) or a
+// test card opened or closed less than IDLE_CARD_HOLD_S ago (card_s: the seconds since then, not since the last key,
+// #355). The card takes Esc itself, and the lock's raw key listener must not see that key too. A key never lifts it:
+// once the lock engaged past the cap, a pocket key must not unlock the carded badge for another 10 min.
+bool idle_lock_lifted(bool must_show, bool card, uint32_t card_s);
 
 // The open card count after a card was created (+1) or deleted (-1); never below 0, so a stray delete cannot wrap it
 unsigned idle_card_count(unsigned count, int delta);

@@ -75,10 +75,22 @@ int main(void) {
     // past the cap a badge left on the Test card app goes dark like any other screen (a key restarts the hold)
     CHECK(idle_hold(false, true, false, IDLE_CARD_HOLD_S) == IDLE_HOLD_NONE);
     CHECK(idle_hold(false, true, false, 100000) == IDLE_HOLD_NONE);
-    CHECK(idle_level(IDLE_CARD_HOLD_S, def, idle_hold(false, true, false, IDLE_CARD_HOLD_S) != IDLE_HOLD_NONE) ==
-          IDLE_OFF);
-    CHECK(idle_level(IDLE_CARD_HOLD_S, (idle_times_t){60, 0},
+    // ... through the normal dim stage first, not bright straight to off: the clock restarts at dim_s when the hold ends
+    CHECK(idle_after_hold(true, IDLE_CARD_HOLD_S, def) == 60);
+    CHECK(idle_level(idle_after_hold(true, IDLE_CARD_HOLD_S, def), def,
                      idle_hold(false, true, false, IDLE_CARD_HOLD_S) != IDLE_HOLD_NONE) == IDLE_DIM);
+    CHECK(idle_level(idle_after_hold(true, IDLE_CARD_HOLD_S + 239, def), def, false) == IDLE_DIM);
+    CHECK(idle_level(idle_after_hold(true, IDLE_CARD_HOLD_S + 240, def), def, false) == IDLE_OFF);
+    // dimming off: the full off time after the hold; off off: dims and stays dim
+    CHECK(idle_level(idle_after_hold(true, IDLE_CARD_HOLD_S + 299, (idle_times_t){0, 300}), (idle_times_t){0, 300},
+                     false) == IDLE_BRIGHT);
+    CHECK(idle_level(idle_after_hold(true, IDLE_CARD_HOLD_S + 300, (idle_times_t){0, 300}), (idle_times_t){0, 300},
+                     false) == IDLE_OFF);
+    CHECK(idle_level(idle_after_hold(true, IDLE_CARD_HOLD_S, (idle_times_t){60, 0}), (idle_times_t){60, 0}, false) ==
+          IDLE_DIM);
+    // no card, or still within the hold: the clock as it is
+    CHECK(idle_after_hold(false, 100000, def) == 100000);
+    CHECK(idle_after_hold(true, IDLE_CARD_HOLD_S - 1, def) == IDLE_CARD_HOLD_S - 1);
     // busy still wins (restarts the clock) with a card up
     CHECK(idle_hold(true, true, false, 100000) == IDLE_HOLD_RESTART);
     // the key that finds the card up is not only a wake key: the held screen is bright, so it reaches the card
@@ -96,7 +108,11 @@ int main(void) {
     CHECK(!carded.lock && !carded.saver && !idle_key_swallowed(carded));
     // past the cap the card no longer lifts the lock, and the dark stage engages it as usual
     CHECK(!idle_lock_lifted(false, true, IDLE_CARD_HOLD_S));
-    CHECK(idle_stage(idle_level(IDLE_CARD_HOLD_S, def, false), true, true, false).lock);
+    CHECK(idle_stage(idle_level(idle_after_hold(true, IDLE_CARD_HOLD_S + 240, def), def, false), true, true, false).lock);
+    // locked at the cap, then a pocket key: the key clock is 0 again (the card holds bright), but the lock goes by the
+    // card's own open, now IDLE_CARD_HOLD_S + 1 s ago, so it stays locked
+    CHECK(idle_hold(false, true, false, 0) == IDLE_HOLD_BRIGHT);
+    CHECK(!idle_lock_lifted(false, true, IDLE_CARD_HOLD_S + 1));
     // closed again (closing counts as a key): the normal timer
     CHECK(idle_level(60, def, idle_hold(false, false, false, 60) != IDLE_HOLD_NONE) == IDLE_DIM);
 
