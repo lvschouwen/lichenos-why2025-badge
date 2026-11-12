@@ -74,6 +74,7 @@ static void start_scan(void);
 static void clear_rows(void);
 static void add_saved_rows(void);
 static void rebuild_rows(void);
+static void stop_poll(void);
 
 // "Saved networks are busy" (#249) retries once after SAVED_RETRY_MS; a second busy shows the line until the next rebuild
 #define SAVED_RETRY_MS 300
@@ -124,28 +125,45 @@ static void scan_after_start(lv_timer_t *timer) {
 
 static bool radio_was_on; // what the radio did at the last look: the page follows it going on or off by itself (#361)
 
-// A scan under way is dropped when it reports, a pending one is cancelled, and the list goes
+// A scan under way is dropped when it reports and a pending one is cancelled
 static void drop_scan(void) {
     gen++;
     if (start_timer) {
         lv_timer_delete(start_timer);
         start_timer = NULL;
     }
-    clear_rows();
 }
 
-// The radio came on: one scan once the driver has had a moment to start
+// The radio came on: one scan once the driver has had a moment to start. The rows stay until the scan replaces them,
+// so the focus does not leave the list (R6) when the radio comes on by itself.
 static void scan_after_radio_on(void) {
     drop_scan();
     set_status("Starting Wi-Fi...");
     start_timer = lv_timer_create(scan_after_start, RADIO_START_MS, NULL);
 }
 
-// The radio went off: as the page opens with it off, the saved networks and why it is off
+static bool focus_in_rows(void) {
+    lv_obj_t *now = group ? lv_group_get_focused(group) : NULL;
+    for (size_t i = 0; now && i < row_count; i++) {
+        if (rows[i] == now) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The radio went off: as the page opens with it off, the saved networks and why it is off. A join being watched
+// stops (its "Connecting to..." would cover why), and focus in the list stays in it (R6), never on the switch or Skip.
 static void show_radio_off(void) {
+    bool in_rows = focus_in_rows();
     drop_scan();
+    stop_poll();
+    clear_rows();
     add_saved_rows();
     set_status(off_status());
+    if (in_rows && row_count > 0) {
+        lv_group_focus_obj(rows[0]);
+    }
 }
 
 static void toggle_radio(void *arg) {

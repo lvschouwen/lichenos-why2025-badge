@@ -134,8 +134,10 @@ static uint8_t apply(change_op_t op, radio_id_t id, bool on) {
         return radio_state_set(&state, id, on);
     case CHANGE_SWITCH:
         return radio_state_set_switch(&state, id, on);
-    default:
+    case CHANGE_AIRPLANE:
         return radio_state_set_airplane(&state, on);
+    default:
+        return 0; // an unknown op changes nothing
     }
 }
 

@@ -295,12 +295,28 @@ class HardAndConf(unittest.TestCase):
         gate = {f: h for f, h, _ in cl.gate_functions(os.path.join(tools, ".."))}
         def forbidden(sym):
             return any(cl.fnmatch.fnmatchcase(sym, g) for g in conf.forbid["L6"])
-        for sym in ("lichen_radio_set", "lichen_radio_switch_set", "lichen_airplane_set"):
+        for sym in ("lichen_radio_set", "lichen_radio_switch_set", "lichen_airplane_set", "lichen_radio_set_lora_user"):
             self.assertEqual(gate.get(sym), "lichen_radio.h", sym)
             self.assertTrue(forbidden(sym), sym)
         for sym in ("lichen_radio_get", "lichen_radio_switch_get", "lichen_airplane_get", "lichen_radio_listen",
                     "lichen_radio_name", "lichen_radio_lora_pause", "lichen_radio_lora_resume"):
             self.assertFalse(forbidden(sym), sym)
+
+    def test_only_the_console_paths_override_a_thermal_hold(self):
+        """#348: lichen_radio_set on lifts a thermal hold. Only the console's paths may call it (`fw lora on|off` and
+        `fw wifi on|off` in main.c, the Wi-Fi service through main's hook); the shell's rows flip the person's switch
+        with lichen_radio_switch_set, so a hot badge never transmits on a row press."""
+        root = os.path.join(os.path.dirname(cl.__file__), "..")
+        allowed = {"firmware/main/main.c", "firmware/components/lichen_os/lichen_radio.c"}
+        callers = set()
+        for base in ("firmware/components", "firmware/main"):
+            for path in cl.source_files(os.path.join(root, base)):
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    code = cl.re.sub(r"//[^\n]*|/\*.*?\*/", "", f.read(), flags=cl.re.S)
+                if cl.re.search(r"\blichen_radio_set\s*\(", code):
+                    callers.add(os.path.relpath(path, root).replace(os.sep, "/"))
+        self.assertTrue(callers, "the scan found no caller at all: it is broken")
+        self.assertEqual(callers - allowed - {"firmware/components/lichen_api/lichen_radio.h"}, set())
 
     def test_app_api_doc_matches_the_conf(self):
         """docs/app-api.md's peer table and "Exceptions still open" list say what layers.conf grants apps (#283)."""
