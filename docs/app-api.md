@@ -87,7 +87,8 @@ to `layers.conf`):
   and reads any tile by id through `lichen_sys_badge.h`.
 - `lichen_haptics.h`: a short buzz of the vibration motor for feedback of your own; non-blocking, silent when the person switched it off. Notifications buzz by themselves, do not call it for them. Never drive GPIO8.
 - `lichen_radio.h`: read the Wi-Fi/LoRa/Bluetooth switches and airplane mode, listen for changes. Apps never switch
-  radios. An app that needs the LoRa radio for itself (the LoRa spectrum, #161) borrows it from MeshCore:
+  radios (the layer check forbids the setters in L6, #360). An app that needs the LoRa radio for itself (the LoRa
+  spectrum, #161) borrows it from MeshCore:
   `lichen_radio_lora_pause(&was_running, keep_going)` (blocks until MeshCore stopped; false when it did not or
   `keep_going()` turned false), then `lora_claim`; afterwards `lora_release` and, when `was_running`, always
   `lichen_radio_lora_resume()`. Both block: never from the LVGL task.

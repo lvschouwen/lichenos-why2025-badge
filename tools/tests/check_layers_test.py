@@ -287,6 +287,21 @@ class HardAndConf(unittest.TestCase):
                     "reg_p4_wifi_ps_set", "reg_p4_find_name", "reg_proxy_answer", "lora_reg_set", "lora_reg_get"):
             self.assertTrue(any(cl.fnmatch.fnmatchcase(sym, g) for g in conf.forbid["L6"]), sym)
 
+    def test_real_conf_lets_apps_read_the_radios_and_switch_none(self):
+        """#360: apps read the radio state and listen; the setters are the OS's (lichen_radio_set lifts a thermal hold).
+        The setters are gate functions, so without the forbid an L6 call would pass the layer rule."""
+        tools = os.path.dirname(cl.__file__)
+        conf = cl.parse_conf(cl.read(os.path.join(tools, "layers.conf")))
+        gate = {f: h for f, h, _ in cl.gate_functions(os.path.join(tools, ".."))}
+        def forbidden(sym):
+            return any(cl.fnmatch.fnmatchcase(sym, g) for g in conf.forbid["L6"])
+        for sym in ("lichen_radio_set", "lichen_radio_switch_set", "lichen_airplane_set"):
+            self.assertEqual(gate.get(sym), "lichen_radio.h", sym)
+            self.assertTrue(forbidden(sym), sym)
+        for sym in ("lichen_radio_get", "lichen_radio_switch_get", "lichen_airplane_get", "lichen_radio_listen",
+                    "lichen_radio_name", "lichen_radio_lora_pause", "lichen_radio_lora_resume"):
+            self.assertFalse(forbidden(sym), sym)
+
     def test_app_api_doc_matches_the_conf(self):
         """docs/app-api.md's peer table and "Exceptions still open" list say what layers.conf grants apps (#283)."""
         tools = os.path.dirname(cl.__file__)
