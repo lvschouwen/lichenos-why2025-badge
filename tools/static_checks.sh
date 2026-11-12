@@ -2,7 +2,8 @@
 # Fast static checks run by firmware/build.sh build (#196):
 #  - shellcheck (warning level) on every tracked shell script;
 #  - tools/check_rules.py: critical-section PSRAM (#271), ESP_LOGE retry/dropped wording (#113), LP RAM / PSRAM task
-#    functions never return (#269), lv_* in task entry functions (#118); baselines tools/rules-baseline-<check>.txt;
+#    functions never return (#269), lv_* in task entry functions (#118), no self-delete in lichen_task_start* tasks
+#    (#358); baselines tools/rules-baseline-<check>.txt;
 #  - cppcheck (warning + portability) on the C/C++ files changed since origin/main, committed or not.
 # Existing accepted findings live in tools/cppcheck-baseline.txt (id:file); new code gets no baseline entries,
 # fix the finding or add an inline "// cppcheck-suppress <id>" with the reason.

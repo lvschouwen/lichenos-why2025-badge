@@ -9,6 +9,8 @@ Checks (python3 -I tools/check_rules.py [--root DIR] [--baseline-dir DIR] [check
                    not call NVS / flash / file APIs, directly or through a function of the same file.
   lvgl-task  #118  an lv_* call in a task entry function (the function given to xTaskCreate* / lichen_task_start*)
                    outside a lichen_sys_ui_lock ... lichen_sys_ui_unlock (or lvgl_port_lock ... unlock) span.
+  task-delete #358 a function given to lichen_task_start / lichen_task_start_in (any stack), or a same-file function it
+                   calls, deletes its own task (vTaskDelete(NULL) or of xTaskGetCurrentTaskHandle()): it must return.
 
 It is a lexer plus brace matching, not a compiler, so each check states its limits next to its code. Findings are
 ratcheted by tools/rules-baseline-<check>.txt (lines "key<TAB>count"): a finding not in the file, or above its count,
@@ -482,6 +484,47 @@ def check_lvgl_task(files):
     return found
 
 
+# ---- task-delete ------------------------------------------------------------------------------------------------
+# Why: lichen_task.c's trampoline runs the function, then takes the task out of the book and deletes it (#181). A task
+# that deletes itself never comes back, so its book slot stays taken until reboot (#358: one of 32 slots per boot).
+# Limits: entries are found as in lvgl-task (same file, by name, casts and "&" stripped); one not defined in the file
+# (a wrapper's parameter) is skipped here, lvgl-task already reports it as entry-not-in-file. Same-file callees are
+# followed by name; function pointers and other files are not. Only a self-delete counts: vTaskDelete(NULL / 0 /
+# nullptr / xTaskGetCurrentTaskHandle()); deleting another task by its handle is fine. Raw xTaskCreate* tasks are not
+# looked at: they have no trampoline and must delete themselves.
+
+SELF_DELETE = re.compile(r"\bvTaskDelete\s*\(\s*(?:NULL|0|nullptr|xTaskGetCurrentTaskHandle\s*\(\s*\))\s*\)")
+LICHEN_START = re.compile(r"\blichen_task_start(?:_in)?\s*\(")
+
+
+def lichen_entries(code, funcs):
+    out = []
+    for m in LICHEN_START.finditer(code):
+        if func_at(funcs, m.start()) in ("lichen_task_start", "lichen_task_start_in"):
+            continue  # the definition's own forwarding
+        args, _end = split_args(code, m.end() - 1)
+        if len(args) > 2 and not re.search(r"\(\s*\*", args[2]):  # not the starter's own declaration
+            out.append(re.sub(r"^(?:\([^()]*\)\s*)*&?\s*", "", args[2]).strip())
+    return out
+
+
+def check_task_delete(files):
+    found = {}
+    for path in files:
+        _src, code, _text = load(path)
+        if not LICHEN_START.search(code):
+            continue
+        funcs = find_functions(code)
+        for name in sorted(set(lichen_entries(code, funcs))):
+            fns = task_functions(code, funcs, name)
+            if not fns:
+                continue
+            for g in callee_closure(code, funcs, fns[0]):
+                for c in SELF_DELETE.finditer(code[g.start:g.end]):
+                    found.setdefault((path, name, "self-delete-in-" + g.name), []).append(line_of(code, g.start + c.start()))
+    return found
+
+
 # ---- baseline and driver ----------------------------------------------------------------------------------------
 
 def function_counts(files):
@@ -526,6 +569,7 @@ HELP = {
     "log-level": "ESP_LOGW for a retry / drop / skip (policy #113); reword it or add a reviewed line to tools/log-level-allow.txt",
     "task-class": "a task on an LP RAM / PSRAM stack never returns and (PSRAM) never touches flash (#269)",
     "lvgl-task": "no lv_* in a task: lichen_ui_call (apps) or lichen_sys_ui_lock ... unlock (OS), #118",
+    "task-delete": "a lichen_task_start* task returns; its trampoline deletes it and frees the book slot (#181, #358)",
 }
 
 
@@ -537,6 +581,7 @@ def run(root, base_dir, checks, quiet=False):
         "log-level": lambda: check_log_level(files, allow),
         "task-class": lambda: check_task_class(files),
         "lvgl-task": lambda: check_lvgl_task(files),
+        "task-delete": lambda: check_task_delete(files),
     }
     bad = 0
     for name in checks:
@@ -567,7 +612,7 @@ def main(argv):
     if a.report:
         files = list(tree_files(a.root))
         fns = {"cs-psram": check_cs_psram, "task-class": check_task_class, "lvgl-task": check_lvgl_task,
-               "log-level": lambda f: check_log_level(f, [])}
+               "task-delete": check_task_delete, "log-level": lambda f: check_log_level(f, [])}
         for name in a.checks:
             for k, v in sorted(fns[name](files).items()):
                 print("%s\t%s\t%d\t%s" % (name, key_str(a.root, k), len(v), ",".join(map(str, v[:5]))))

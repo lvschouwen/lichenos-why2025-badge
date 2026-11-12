@@ -73,14 +73,14 @@ static void mark_cut(char *text, size_t n) {
     }
 }
 
-// On a short task of its own: the esp_timer task has a small stack that every timer shares
+// On a short task of its own: the esp_timer task has a small stack that every timer shares. It returns: the
+// lichen_task trampoline frees its book slot and deletes it (a vTaskDelete here leaked the slot, #358)
 static void log_task(void *arg) {
     (void)arg;
     char   text[LINE_CAP];
     size_t n = line(text, sizeof(text));
     mark_cut(text, n);
     ESP_LOGI(TAG, "%s", text);
-    vTaskDelete(NULL);
 }
 
 // The timer only hands off

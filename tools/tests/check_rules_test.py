@@ -29,7 +29,7 @@ class Tree:
     def keys(self, check, allow=()):
         files = list(cr.tree_files(self.root))
         fn = {"cs-psram": cr.check_cs_psram, "task-class": cr.check_task_class, "lvgl-task": cr.check_lvgl_task,
-              "log-level": lambda f: cr.check_log_level(f, list(allow))}[check]
+              "task-delete": cr.check_task_delete, "log-level": lambda f: cr.check_log_level(f, list(allow))}[check]
         return sorted(cr.key_str(self.root, k) for k in fn(files))
 
     def run(self, check):
@@ -211,6 +211,41 @@ class TaskClassSelfDelete(unittest.TestCase):
         p = "firmware/components/x/a.c:"
         self.assertEqual(Tree(self, {"a.c": SELF_DEL}).keys("task-class"),
                          [p + "del_task:self-delete", p + "end_task:falls-off-the-end", p + "end_task:self-delete"])
+
+
+TASK_DEL = """\
+static void finish(void) { vTaskDelete( NULL ); }
+static void del_task(void *a) { log(); vTaskDelete(NULL); }
+static void cur_task(void *a) { vTaskDelete(xTaskGetCurrentTaskHandle()); }
+static void via_task(void *a) { finish(); }
+static void in_task(void *a) { vTaskDelete(0); }
+static void ok_task(void *a) { vTaskDelete(other); return; }
+static void raw_task(void *a) { vTaskDelete(NULL); }
+void start(void) {
+    lichen_task_start(NULL, "a", del_task, NULL, 1, P, NULL);
+    lichen_task_start(NULL, "b", (TaskFunction_t)cur_task, NULL, 1, P, NULL);
+    lichen_task_start(NULL, "c", &via_task, NULL, 1, P, NULL);
+    lichen_task_start_in(NULL, "d", in_task, NULL, 1, P, LICHEN_STACK_INTERNAL, NULL);
+    lichen_task_start(NULL, "e", ok_task, NULL, 1, P, NULL);
+    lichen_task_start(NULL, "f", elsewhere_task, NULL, 1, P, NULL);
+    xTaskCreate(raw_task, "g", 1, NULL, 1, NULL);
+}
+"""
+
+
+class TaskDelete(unittest.TestCase):
+    """#358: a lichen_task_start* task that deletes itself leaks its book slot; raw xTaskCreate tasks must delete."""
+
+    def test_self_delete_in_entry_or_callee(self):
+        p = "firmware/components/x/a.c:"
+        self.assertEqual(Tree(self, {"a.c": TASK_DEL}).keys("task-delete"),
+                         [p + "cur_task:self-delete-in-cur_task", p + "del_task:self-delete-in-del_task",
+                          p + "in_task:self-delete-in-in_task", p + "via_task:self-delete-in-finish"])
+
+    def test_returning_task_and_ratchet(self):
+        ok = "static void t(void *a) { log(); }\nvoid s(void) { lichen_task_start(NULL, \"t\", t, NULL, 1, P, NULL); }\n"
+        self.assertEqual(Tree(self, {"a.c": ok}).run("task-delete"), 0)
+        self.assertEqual(Tree(self, {"a.c": TASK_DEL}).run("task-delete"), 4)
 
 
 LV2 = """\
