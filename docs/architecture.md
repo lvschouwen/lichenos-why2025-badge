@@ -617,10 +617,12 @@ OS v2 (#216) on the same lessons:
   `firmware/storage_staging`, verified file by file (`verify`, SHA-256) after the build.
 - **Caches in internal RAM** (`CONFIG_LITTLEFS_MALLOC_STRATEGY_INTERNAL`, #362): the SPI1 flash host cannot read into
   PSRAM, so a PSRAM cache made every flash read take a bounce buffer (`get_buffer_malloc`: an internal heap walk in a
-  critical section plus a malloc and free; the #357 watchdog) and split every prog into 32-byte flash operations.
-  Internal cost: ~1.4 KB while mounted plus ~0.7 KB per open file (the file's 512 B cache is in its handle) and ~0.3 KB
-  per open folder. A read of 512 B or more at a 128-aligned offset still goes straight into the caller's buffer and
-  bounces once per call when that buffer is in PSRAM (the fs shim's 4 KB compare chunks, file copies, OTA reads).
+  critical section plus a malloc and free; likely behind the #357 watchdog) and split every prog into 32-byte flash
+  operations. Internal cost: ~1.4 KB while mounted plus ~0.7 KB per open file (the file's 512 B cache is in its handle)
+  and ~0.3 KB per open folder; worst case ~7 KB (about 6 files and 4 folders at once). `pack_storage.py check-config`
+  requires the strategy. A read of 512 B or more at a 128-aligned offset still goes straight into the caller's buffer
+  and bounces once per block read (up to 4 KB) when that buffer is in PSRAM (the fs shim's 4 KB compare chunks, file
+  copies, OTA reads).
 - **The image tool's Python:** `tools/pack_storage.sh` makes `firmware/build/littlefs_venv` on first use with
   littlefs-python from `tools/pack_storage-requirements.txt` (wheels only, every one pinned by SHA-256). That first
   build (and the first one after a `fullclean` or a changed requirements file) needs PyPI.

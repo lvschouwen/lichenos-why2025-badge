@@ -221,6 +221,9 @@ def check_config(sdkconfig_json, component_dir):
         bad.append(f"partitions.csv gives storage {size}, pack_storage.py has {PARTITION_SIZE}")
     if cfg.get("LITTLEFS_MMAP_PARTITION"):
         bad.append("LITTLEFS_MMAP_PARTITION is on: no flash mapping at runtime (#31)")
+    if not cfg.get("LITTLEFS_MALLOC_STRATEGY_INTERNAL"):
+        bad.append("LITTLEFS_MALLOC_STRATEGY_INTERNAL is off: SPI1 flash cannot read into PSRAM, so caches there make "
+                   "every flash read walk the internal heap in a critical section (#362)")
     if INLINE_MAX < INLINE_NEEDED:
         bad.append(f"inline_max {INLINE_MAX} < {INLINE_NEEDED}: every advert blob would take a whole block")
     with open(os.path.join(component_dir, "src", "esp_littlefs.c")) as f:

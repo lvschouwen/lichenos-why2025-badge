@@ -69,8 +69,12 @@ CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS=2
 # Its caches and file buffers in internal RAM (#362): SPI1 flash cannot read into PSRAM, so with PSRAM caches every
 # esp_flash_read took a bounce buffer (get_buffer_malloc: a whole internal heap walk in a critical section, then a
 # malloc and free), and every prog went out in 32-byte flash operations. Cost: ~1.4 KB while mounted (read and prog
-# cache 512 each, lookahead 128, lfs_t, the mount) plus ~0.7 KB per open file or ~0.3 KB per open folder. Reads of
-# 512 B or more straight into a caller's PSRAM buffer still bounce (once per call, not per 128 B).
+# cache 512 each, lookahead 128, lfs_t, the mount) plus ~0.7 KB per open file or ~0.3 KB per open folder. Worst case
+# about 6 files and 4 folders at once, ~7 KB peak (MeshCore folder + file or journal in + out, a shell copy in + out,
+# OTA, the C6 image, the fw storage walk up to 4 folders deep, short writers). Explicit-internal allocations may draw
+# on CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL; near out-of-memory they can land in SPM or LP RAM, where reads bounce
+# again. Reads of 512 B or more straight into a caller's PSRAM buffer still bounce (once per block read, up to 4 KB).
+# tools/pack_storage.py check-config requires this strategy.
 CONFIG_LITTLEFS_READ_SIZE=128
 CONFIG_LITTLEFS_WRITE_SIZE=128
 CONFIG_LITTLEFS_CACHE_SIZE=512
