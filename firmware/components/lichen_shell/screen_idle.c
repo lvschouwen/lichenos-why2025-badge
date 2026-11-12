@@ -90,6 +90,12 @@ static void apply(idle_level_t level) {
     applied = level;
 }
 
+void screen_idle_touch(void) {
+    portENTER_CRITICAL(&lock);
+    last_key_us = now_us();
+    portEXIT_CRITICAL(&lock);
+}
+
 void screen_idle_force_saver(void) {
     portENTER_CRITICAL(&lock);
     forced = true;
@@ -135,7 +141,7 @@ static void tick(lv_timer_t *timer) {
     shown     = st;
     inhibited = hold != IDLE_HOLD_NONE;
     portEXIT_CRITICAL(&lock);
-    if (idle_lock_lifted(must_show, card)) {
+    if (idle_lock_lifted(must_show, card, idle_s)) {
         screen_lock_release(); // also drops the lock's key listener, so the card alone gets Esc
     } else if (st.lock) {
         screen_lock_engage();

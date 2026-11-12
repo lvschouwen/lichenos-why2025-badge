@@ -26,10 +26,13 @@ typedef struct {
 
 // What keeps the screen lit regardless of the idle clock. busy (an update running, the Bench app measuring): bright, and
 // the clock starts again, so the timeout counts in full from when it ends. card (a test card is up, #355: `fw ui card` or
-// the Test card app): the same, because a dim or dark panel defeats a panel and backlight test, and opening it on a dark
-// screen lights it at once; the wake key then reaches the card, as the screen is bright. setup (the first-run screens):
-// bright for at most IDLE_SETUP_HOLD_S since the last key, so an abandoned welcome does not drain the battery.
+// the Test card app): bright for at most IDLE_CARD_HOLD_S since the last key, because a dim or dark panel defeats a
+// panel and backlight test, but a badge left on the Test card app must not drain the battery; opening or closing a card
+// counts as a key (screen_idle.c), so one opened on a dark screen lights at once and the wake key then reaches the card.
+// setup (the first-run screens): bright for at most IDLE_SETUP_HOLD_S since the last key, so an abandoned welcome does
+// not drain the battery.
 #define IDLE_SETUP_HOLD_S 600
+#define IDLE_CARD_HOLD_S  600
 typedef enum { IDLE_HOLD_NONE, IDLE_HOLD_BRIGHT, IDLE_HOLD_RESTART } idle_hold_t;
 idle_hold_t idle_hold(bool busy, bool card, bool setup, uint32_t idle_s);
 
@@ -47,8 +50,12 @@ typedef struct {
 idle_stage_t idle_stage(idle_level_t level, bool saver_on, bool lock_on, bool forced);
 
 // Whether an engaged pocket lock is lifted now: must_show (the update screen, a power-down: nothing may cover them) or
-// card (a test card is up, #355: it takes Esc itself, and the lock's raw key listener must not see that key too)
-bool idle_lock_lifted(bool must_show, bool card);
+// a test card that holds the screen (card, idle_s within IDLE_CARD_HOLD_S, #355: it takes Esc itself, and the lock's raw
+// key listener must not see that key too). Past the cap the card no longer lifts it, so the lock can engage as usual.
+bool idle_lock_lifted(bool must_show, bool card, uint32_t idle_s);
+
+// The open card count after a card was created (+1) or deleted (-1); never below 0, so a stray delete cannot wrap it
+unsigned idle_card_count(unsigned count, int delta);
 
 // A key was pressed while the screen showed `shown`: true when that key only wakes the screen and must not reach the
 // UI: the screen was off, so the person could not see what it would do, or the screensaver hid the screen (#75). A

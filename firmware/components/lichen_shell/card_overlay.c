@@ -5,6 +5,7 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "fw_console.h"
+#include "idle_policy.h"
 #include "key_matrix.h"
 #include "lichen_reg.h"
 #include "lichen_sys_display.h"
@@ -24,8 +25,10 @@ static void on_raw(key_raw_event_t const *ev, void *arg);
 
 static unsigned open_cards; // LVGL task: every test card up, this overlay's and the Test card app's (#355)
 
+// Opening or closing a card is activity: one opened on a dark screen lights it, and the idle clock counts from the close
 static void on_card_opened(int delta) {
-    open_cards = delta < 0 && !open_cards ? 0 : open_cards + (unsigned)delta;
+    open_cards = idle_card_count(open_cards, delta);
+    screen_idle_touch();
 }
 
 bool test_cards_open(void) {

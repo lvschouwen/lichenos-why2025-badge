@@ -17,7 +17,9 @@ extern "C" {
 // fw_label "fw-<sha>" (must outlive the card), reg_get is lichen_reg_get, display_get the requested backlight levels
 // (lichen_sys_display_get; NULL = leave "requested" out). Without them the strip reads "?". opened (may be NULL) is
 // told +1 when a card is created and -1 when it is deleted, on the LVGL task, so the screen timeout can hold the panel
-// bright while any card is up (#355), the Test card app's included.
+// bright while any card is up (#355), the Test card app's included. Set opened before the first card and never drop it
+// in a later call: a card created with it and deleted without it strands the count (the panel then stays held bright up
+// to the screen timeout's card cap).
 typedef struct {
     char const *fw_label;
     size_t (*reg_get)(char const *name, char *buf, size_t cap);

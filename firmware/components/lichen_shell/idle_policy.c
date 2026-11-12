@@ -6,10 +6,11 @@ static uint8_t const DIM_CHOICES[] = {0, 3, 6, 12, 30};   // off, 30 s, 1, 2, 5 
 static uint8_t const OFF_CHOICES[] = {0, 12, 30, 60, 180}; // off, 2, 5, 10, 30 min
 
 idle_hold_t idle_hold(bool busy, bool card, bool setup, uint32_t idle_s) {
-    if (busy || card) {
+    if (busy) {
         return IDLE_HOLD_RESTART;
     }
-    return setup && idle_s < IDLE_SETUP_HOLD_S ? IDLE_HOLD_BRIGHT : IDLE_HOLD_NONE;
+    bool held = (card && idle_s < IDLE_CARD_HOLD_S) || (setup && idle_s < IDLE_SETUP_HOLD_S);
+    return held ? IDLE_HOLD_BRIGHT : IDLE_HOLD_NONE;
 }
 
 idle_level_t idle_level(uint32_t idle_s, idle_times_t t, bool inhibit) {
@@ -33,8 +34,16 @@ idle_stage_t idle_stage(idle_level_t level, bool saver_on, bool lock_on, bool fo
     return (idle_stage_t){.level = level, .saver = saver, .lock = lock_on && (saver || level == IDLE_OFF)};
 }
 
-bool idle_lock_lifted(bool must_show, bool card) {
-    return must_show || card;
+bool idle_lock_lifted(bool must_show, bool card, uint32_t idle_s) {
+    return must_show || (card && idle_s < IDLE_CARD_HOLD_S);
+}
+
+unsigned idle_card_count(unsigned count, int delta) {
+    if (delta < 0) {
+        unsigned down = (unsigned)-delta;
+        return down > count ? 0 : count - down;
+    }
+    return count + (unsigned)delta;
 }
 
 bool idle_key_swallowed(idle_stage_t shown) {

@@ -113,6 +113,8 @@ bool screen_idle_key(void);
 void screen_idle_reload(void);
 // "fw screensaver test" (#75): the saver now, as if the dim time had come, until the next key
 void screen_idle_force_saver(void);
+// Activity without a key (a test card opened or closed, #355): the idle clock starts again. Any task.
+void screen_idle_touch(void);
 // Fully bright and no screensaver (the keyboard light pulse only runs then, #164)
 bool screen_idle_lit(void);
 // Shown with the stage the screen is in: "bright", "dim", "screensaver", "off"
