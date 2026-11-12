@@ -19,6 +19,12 @@ bool lichen_airplane_get(void);
 bool lichen_radio_set(radio_id_t id, bool on);
 // Airplane on: every radio off, the states kept; off: they come back as before
 bool lichen_airplane_set(bool on);
+// The person's switch, whatever the system holds (#348): what Settings shows and flips. lichen_radio_get is what the
+// radio does; while lichen_sys_radio_held_by says a hold, the two differ.
+bool lichen_radio_switch_get(radio_id_t id);
+// Flips only the person's switch (#348): a hold stays, so this never brings a held radio on (Settings, a hot badge must
+// not start transmitting on a row press). lichen_radio_set on is the console's override of a hold. True when saved.
+bool lichen_radio_switch_set(radio_id_t id, bool on);
 char const *lichen_radio_name(radio_id_t id);
 
 // Told about every radio whose state changed, from the task that changed it (keep it short, don't block). At most

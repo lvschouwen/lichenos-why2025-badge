@@ -2,6 +2,7 @@
 
 #include "shell.h"
 #include "lichen_sys_thermal.h"
+#include "radio_state.h"
 #include "draw_stack.h"
 
 // Between the shell's own files (#66), not for apps
@@ -171,6 +172,9 @@ void shell_reg_text(char const *label, char const *key, char const *saved, char 
 void shell_lora_line(char *out, size_t cap);
 void shell_wifi_line(char *out, size_t cap);
 void shell_psram_line(char *out, size_t cap);
+// A radio switch row's value (#348): the person's switch, "On" or "Off", plus ", held off (hot)" while the thermal
+// load shed holds the radio; Enter on the row flips only that switch (lichen_radio_switch_set). Any context.
+void shell_radio_value(radio_id_t id, char *out, size_t cap);
 void     notify_ui_cloud_key(void); // ☁ (#79, shortcuts.c): open the showing toast, else the centre
 
 // The thermal watchdog (#10) is an OS service since #281 (lichen_os/thermal.c, lichen_sys_thermal.h); app_battery.c is

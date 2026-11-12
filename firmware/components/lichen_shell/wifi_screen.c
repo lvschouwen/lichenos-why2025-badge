@@ -9,6 +9,7 @@
 #include "lichen_sys_app.h"
 #include "lichen_radio.h"
 #include "lichen_sys_net.h"
+#include "lichen_sys_radio.h"
 #include "lichen_sys_ui.h"
 #include "lichen_task.h"
 #include "lichen_ui.h"
@@ -92,10 +93,24 @@ static lv_obj_t   *radio_row;
 static lv_timer_t *start_timer;
 #define RADIO_START_MS 2000
 
+// The row shows the person's switch with a note while held (#348); refreshed each second, so it follows the hold
+static char radio_row_shown[32];
+
 static void radio_row_refresh(void) {
-    if (radio_row) {
-        menu_set_on(radio_row, lichen_radio_get(RADIO_WIFI));
+    char v[sizeof(radio_row_shown)];
+    shell_radio_value(RADIO_WIFI, v, sizeof(v));
+    if (radio_row && strcmp(v, radio_row_shown) != 0) {
+        strlcpy(radio_row_shown, v, sizeof(radio_row_shown));
+        menu_set_value(radio_row, v);
     }
+}
+
+// Why the radio is off: the thermal hold (the switch is on, it comes back on cooling), airplane mode or the switch
+static char const *off_status(void) {
+    if (lichen_sys_radio_held_by(RADIO_WIFI) == RADIO_HOLD_THERMAL && lichen_radio_switch_get(RADIO_WIFI)) {
+        return "Wi-Fi is held off (hot): it comes back when the badge cools";
+    }
+    return lichen_airplane_get() ? "Wi-Fi is off (airplane mode)" : "Wi-Fi is off";
 }
 
 static void scan_after_start(lv_timer_t *timer) {
@@ -108,8 +123,9 @@ static void scan_after_start(lv_timer_t *timer) {
 
 static void toggle_radio(void *arg) {
     (void)arg;
-    bool on = !lichen_radio_get(RADIO_WIFI);
-    lichen_radio_set(RADIO_WIFI, on);
+    // The switch only (#348): during a thermal hold this never brings the radio on, so start a scan only when it is
+    lichen_radio_switch_set(RADIO_WIFI, !lichen_radio_switch_get(RADIO_WIFI));
+    bool on = lichen_radio_get(RADIO_WIFI);
     radio_row_refresh();
     gen++; // a scan under way is dropped when it reports
     if (start_timer) {
@@ -122,7 +138,7 @@ static void toggle_radio(void *arg) {
         start_timer = lv_timer_create(scan_after_start, RADIO_START_MS, NULL);
     } else {
         add_saved_rows();
-        set_status("Wi-Fi is off");
+        set_status(off_status());
     }
 }
 
@@ -442,6 +458,7 @@ static void start_scan(void) {
 
 static void radio_note_refresh(lv_timer_t *t) {
     (void)t;
+    radio_row_refresh();
     char text[sizeof(radio_shown)];
     shell_wifi_line(text, sizeof(text));
     if (radio_note && strcmp(text, radio_shown) != 0) {
@@ -491,7 +508,8 @@ static lv_obj_t *build(void) {
     }
     radio_row = menu_add(menu, "Wi-Fi radio", "", toggle_radio, NULL);
     menu_set_kind(radio_row, MENU_TOGGLE);
-    menu_set_on(radio_row, lichen_radio_get(RADIO_WIFI));
+    radio_row_shown[0] = '\0';
+    radio_row_refresh();
     status    = menu_note(menu, "");
     radio_note = menu_note(menu, "");
     radio_shown[0] = '\0';
@@ -502,7 +520,7 @@ static lv_obj_t *build(void) {
         start_scan();
     } else {
         add_saved_rows();
-        set_status(lichen_airplane_get() ? "Wi-Fi is off (airplane mode)" : "Wi-Fi is off");
+        set_status(off_status());
     }
     lichen_sys_wifi_join_t now = lichen_sys_wifi_join_state(target, sizeof(target), NULL, 0);
     if (now == LICHEN_SYS_WIFI_JOIN_TRYING || now == LICHEN_SYS_WIFI_JOIN_PENDING) {

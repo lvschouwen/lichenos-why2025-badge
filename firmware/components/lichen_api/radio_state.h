@@ -16,7 +16,9 @@ extern "C" {
 // Holds (#282): the system may hold radios off for a reason (the thermal load shed) without touching the person's
 // switches. `on` is the person's choice and the only part that is saved; a held radio reads off (radio_state_get) and
 // comes back as `on` says when its reason ends. Holds live in RAM only, so a boot (radio_state_load) starts with none.
-// Switching a held radio on is the person overriding the hold for that radio; switching it off is saved as usual.
+// radio_state_set on a held radio is the person overriding the hold (the console's `fw wifi|lora on`); switching it off
+// is saved as usual. Settings flips only the switch (radio_state_set_switch, #348): a hot badge never starts
+// transmitting because of a row press, and the radio comes back as the switch says when the hold ends.
 
 typedef enum { RADIO_WIFI, RADIO_LORA, RADIO_BT, RADIO_COUNT } radio_id_t;
 typedef enum { RADIO_HOLD_NONE, RADIO_HOLD_THERMAL, RADIO_HOLD_COUNT } radio_hold_t;
@@ -42,6 +44,8 @@ uint8_t radio_state_effective(radio_state_t const *s);
 // The calls below return the bits whose effective state (radio_state_get) changed, 0 = nothing to tell the radios.
 // An unknown id changes nothing; switching a radio on ends every hold of it.
 uint8_t radio_state_set(radio_state_t *s, radio_id_t id, bool on);
+// The person's switch only (#348): every hold stays, so switching a held radio on changes nothing it does until then
+uint8_t radio_state_set_switch(radio_state_t *s, radio_id_t id, bool on);
 uint8_t radio_state_set_airplane(radio_state_t *s, bool airplane);
 // Holds the radios in mask off for reason (added to what it already holds); RADIO_HOLD_NONE or an unknown reason
 // changes nothing
@@ -50,6 +54,8 @@ uint8_t radio_state_hold(radio_state_t *s, radio_hold_t reason, uint8_t mask);
 uint8_t radio_state_release(radio_state_t *s, radio_hold_t reason);
 // The first reason holding id off, RADIO_HOLD_NONE when none does
 radio_hold_t radio_state_held_by(radio_state_t const *s, radio_id_t id);
+// The person's switch for id, held or not (#348): what Settings shows and flips; false for an unknown id
+bool radio_state_switch(radio_state_t const *s, radio_id_t id);
 
 #ifdef __cplusplus
 }

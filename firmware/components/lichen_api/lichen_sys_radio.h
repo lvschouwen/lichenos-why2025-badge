@@ -11,7 +11,8 @@ extern "C" {
 // The radio service's system holds (#282): the OS holds radios off for a reason (the thermal load shed) without
 // touching the person's switches. Nothing here is saved: a boot starts with no hold, and when the reason ends the radios
 // come back as the person set them (lichen_radio.h's switches, still saved as before). While held, lichen_radio_get
-// reads off; the person switching a held radio on overrides the hold for it. System surface: tools/layers.conf forbids
+// reads off; lichen_radio_set on overrides the hold for that radio (the console), lichen_radio_switch_set (Settings,
+// #348) never does. System surface: tools/layers.conf forbids
 // lichen_sys_* in L6. Any task but an interrupt; the listeners hear the change from the calling task.
 
 // Holds the radios in mask (bits per radio_id_t) off for reason, on top of what it already holds. Any task.

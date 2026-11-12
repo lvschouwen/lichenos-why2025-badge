@@ -82,6 +82,40 @@ static void holds(void) {
     CHECK(radio_state_held_by(&s, (radio_id_t)RADIO_COUNT) == RADIO_HOLD_NONE);
 }
 
+// #348: Settings flips only the person's switch during a hold, so a press never lifts the hold (nothing transmits)
+static void switch_only(void) {
+    radio_state_t s;
+    radio_state_init(&s);
+    radio_state_hold(&s, RADIO_HOLD_THERMAL, W | L);
+    CHECK(radio_state_switch(&s, RADIO_LORA) && !radio_state_get(&s, RADIO_LORA)); // reads on, does off
+    // off during the hold: saved off, still held, and it stays off once the badge cools
+    CHECK(radio_state_set_switch(&s, RADIO_LORA, false) == 0);
+    CHECK(!radio_state_switch(&s, RADIO_LORA) && s.on == W);
+    CHECK(radio_state_held_by(&s, RADIO_LORA) == RADIO_HOLD_THERMAL);
+    // on again during the hold: the switch is on, the radio stays off and held
+    CHECK(radio_state_set_switch(&s, RADIO_LORA, true) == 0);
+    CHECK(radio_state_switch(&s, RADIO_LORA) && !radio_state_get(&s, RADIO_LORA));
+    CHECK(radio_state_held_by(&s, RADIO_LORA) == RADIO_HOLD_THERMAL);
+    CHECK(radio_state_effective(&s) == 0);
+    // the hold ends: the radios come back as the switches say
+    CHECK(radio_state_release(&s, RADIO_HOLD_THERMAL) == (W | L));
+    radio_state_hold(&s, RADIO_HOLD_THERMAL, W | L);
+    radio_state_set_switch(&s, RADIO_WIFI, false);
+    CHECK(radio_state_release(&s, RADIO_HOLD_THERMAL) == L);
+    CHECK(radio_state_effective(&s) == L);
+
+    // without a hold it is a plain switch, telling what changed
+    radio_state_init(&s);
+    CHECK(radio_state_set_switch(&s, RADIO_LORA, false) == L);
+    CHECK(radio_state_set_switch(&s, RADIO_LORA, true) == L);
+    CHECK(radio_state_set_switch(&s, (radio_id_t)RADIO_COUNT, true) == 0);
+    CHECK(!radio_state_switch(&s, (radio_id_t)RADIO_COUNT));
+    // phone style in airplane mode, as radio_state_set
+    radio_state_set_airplane(&s, true);
+    CHECK(!radio_state_switch(&s, RADIO_LORA));
+    CHECK(radio_state_set_switch(&s, RADIO_LORA, true) == L);
+}
+
 int main(void) {
     radio_state_t s;
     radio_state_init(&s);
@@ -153,6 +187,7 @@ int main(void) {
     CHECK(!radio_state_get(&s, RADIO_BT));
 
     holds();
+    switch_only();
 
     if (failures) {
         printf("%d failure(s)\n", failures);

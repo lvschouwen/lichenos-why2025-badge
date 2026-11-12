@@ -154,6 +154,8 @@ lichen_radio_lora_resume	RADIO	unspecified	lichen_radio.h
 lichen_radio_name	RADIO	unspecified	lichen_radio.h
 lichen_radio_set	RADIO	unspecified	lichen_radio.h
 lichen_radio_set_lora_user	RADIO	unspecified	lichen_radio.h
+lichen_radio_switch_get	RADIO	unspecified	lichen_radio.h
+lichen_radio_switch_set	RADIO	unspecified	lichen_radio.h
 lichen_reg_get	-	any	lichen_reg.h
 lichen_register_app	-	unspecified	lichen_app.h
 lichen_screen_locked	-	any	lichen_ui.h
@@ -351,6 +353,8 @@ radio_state_load	-	unspecified	radio_state.h
 radio_state_release	-	unspecified	radio_state.h
 radio_state_set	-	unspecified	radio_state.h
 radio_state_set_airplane	-	unspecified	radio_state.h
+radio_state_set_switch	-	unspecified	radio_state.h
+radio_state_switch	-	unspecified	radio_state.h
 sb_add_app_keys	SYSTEM	unspecified	settings_backup.h
 sb_app_keys_clear	SYSTEM	unspecified	settings_backup.h
 sb_error_text	SYSTEM	unspecified	settings_backup.h

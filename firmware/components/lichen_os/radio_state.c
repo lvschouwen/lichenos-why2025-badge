@@ -34,7 +34,7 @@ bool radio_state_get(radio_state_t const *s, radio_id_t id) {
     return (unsigned)id < RADIO_COUNT && (radio_state_effective(s) >> id & 1u);
 }
 
-uint8_t radio_state_set(radio_state_t *s, radio_id_t id, bool on) {
+static uint8_t set_switch(radio_state_t *s, radio_id_t id, bool on, bool override_hold) {
     if ((unsigned)id >= RADIO_COUNT) {
         return 0;
     }
@@ -42,13 +42,25 @@ uint8_t radio_state_set(radio_state_t *s, radio_id_t id, bool on) {
     uint8_t bit    = (uint8_t)(1u << id);
     if (on) {
         s->on |= bit;
-        for (int r = 0; r < RADIO_HOLD_COUNT; r++) { // the person switched it on: that overrides a hold
+        for (int r = 0; override_hold && r < RADIO_HOLD_COUNT; r++) {
             s->held[r] &= (uint8_t)~bit;
         }
     } else {
         s->on &= (uint8_t)~bit;
     }
     return before ^ radio_state_effective(s);
+}
+
+uint8_t radio_state_set(radio_state_t *s, radio_id_t id, bool on) {
+    return set_switch(s, id, on, true); // the person switched it on: that overrides a hold
+}
+
+uint8_t radio_state_set_switch(radio_state_t *s, radio_id_t id, bool on) {
+    return set_switch(s, id, on, false);
+}
+
+bool radio_state_switch(radio_state_t const *s, radio_id_t id) {
+    return (unsigned)id < RADIO_COUNT && (s->on >> id & 1u);
 }
 
 uint8_t radio_state_set_airplane(radio_state_t *s, bool airplane) {

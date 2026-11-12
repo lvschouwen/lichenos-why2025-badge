@@ -56,6 +56,14 @@ bool lichen_radio_get(radio_id_t id) {
     return on;
 }
 
+bool lichen_radio_switch_get(radio_id_t id) {
+    ensure_loaded();
+    portENTER_CRITICAL(&lock);
+    bool on = radio_state_switch(&state, id);
+    portEXIT_CRITICAL(&lock);
+    return on;
+}
+
 bool lichen_airplane_get(void) {
     ensure_loaded();
     portENTER_CRITICAL(&lock);
@@ -117,14 +125,28 @@ static bool switches_differ(radio_state_t const *a, radio_state_t const *b) {
     return a->on != b->on || a->saved != b->saved || a->airplane != b->airplane;
 }
 
+// What change() does: one radio's switch (overriding a hold, or the switch only, #348) or airplane mode
+typedef enum { CHANGE_SET, CHANGE_SWITCH, CHANGE_AIRPLANE } change_op_t;
+
+static uint8_t apply(change_op_t op, radio_id_t id, bool on) {
+    switch (op) {
+    case CHANGE_SET:
+        return radio_state_set(&state, id, on);
+    case CHANGE_SWITCH:
+        return radio_state_set_switch(&state, id, on);
+    default:
+        return radio_state_set_airplane(&state, on);
+    }
+}
+
 // Applies a change under the lock, then saves and tells outside it. Switching a held radio off changes nothing the
 // radio does but is still the person's choice, so it is saved.
-static bool change(radio_id_t id, bool on, int airplane) {
+static bool change(change_op_t op, radio_id_t id, bool on) {
     ensure_loaded();
     xSemaphoreTake(change_lock, portMAX_DELAY);
     portENTER_CRITICAL(&lock);
     radio_state_t before = state;
-    uint8_t       diff   = airplane >= 0 ? radio_state_set_airplane(&state, airplane == 1) : radio_state_set(&state, id, on);
+    uint8_t       diff   = apply(op, id, on);
     radio_state_t after  = state;
     portEXIT_CRITICAL(&lock);
     bool ok = !switches_differ(&before, &after) || save(&after);
@@ -162,19 +184,27 @@ radio_hold_t lichen_sys_radio_held_by(radio_id_t id) {
 }
 
 bool lichen_radio_set(radio_id_t id, bool on) {
-    return change(id, on, -1);
+    return change(CHANGE_SET, id, on);
+}
+
+bool lichen_radio_switch_set(radio_id_t id, bool on) {
+    return change(CHANGE_SWITCH, id, on);
 }
 
 bool lichen_airplane_set(bool on) {
-    return change(RADIO_WIFI, false, on ? 1 : 0);
+    return change(CHANGE_AIRPLANE, RADIO_WIFI, on);
 }
 
-// "on", "off", or "held off (hot)" while the system holds it (#282): the person's switch is then still on
+// "on", "off", or while the system holds it (#282) "held off (hot)" with the person's switch on and "off, held off
+// (hot)" with it off (#348: Settings may switch it off during a hold, and it then stays off once the badge cools)
 static char const *state_word(radio_id_t id) {
     if (lichen_radio_get(id)) {
         return "on";
     }
-    return lichen_sys_radio_held_by(id) == RADIO_HOLD_THERMAL ? "held off (hot)" : "off";
+    if (lichen_sys_radio_held_by(id) != RADIO_HOLD_THERMAL) {
+        return "off";
+    }
+    return lichen_radio_switch_get(id) ? "held off (hot)" : "off, held off (hot)";
 }
 
 static void cmd_airplane(char const *args) {

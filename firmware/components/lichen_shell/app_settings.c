@@ -16,6 +16,7 @@
 #include "lichen_sys_display.h"
 #include "lichen_sys_net.h"
 #include "lichen_sys_psram.h"
+#include "lichen_sys_radio.h"
 #include "lichen_sys_storage.h"
 #include "lichen_sys_ui.h"
 #include "lichen_sys_update.h"
@@ -53,7 +54,10 @@ static void wifi_line(char *out, size_t cap, bool with_prefix) {
         was_up     = up;
         generation = lichen_sys_wifi_cred_generation();
     }
-    if (!lichen_radio_get(RADIO_WIFI)) { // the OS switch or airplane mode (#108)
+    bool held = lichen_sys_radio_held_by(RADIO_WIFI) == RADIO_HOLD_THERMAL;
+    if (!lichen_radio_get(RADIO_WIFI) && held && lichen_radio_switch_get(RADIO_WIFI)) { // comes back on cooling (#348)
+        snprintf(out, cap, with_prefix ? "Wi-Fi: held off (hot)" : "held off (hot)");
+    } else if (!lichen_radio_get(RADIO_WIFI)) { // the OS switch or airplane mode (#108)
         snprintf(out, cap, with_prefix ? "Wi-Fi: off" : "off");
     } else if (up && ssid[0]) {
         char name[140]; // the name came over the air: no control bytes on a label
@@ -541,6 +545,7 @@ static live_row_t time_rows[3]; // Time's page: Set date & time, Time zone, the 
 static live_row_t settings_time_row; // Settings' own page: Time
 static live_row_t settings_sd_row;   // and SD card (a mount or unmount on its page or the console shows on return)
 static live_row_t settings_wifi_row;   // Wi-Fi (the radio switch is on its page)
+static live_row_t settings_lora_row;   // LoRa radio: the person's switch, held or not (#348)
 static live_row_t settings_notify_row; // and Notifications (do-not-disturb, #62)
 static live_row_t radio_notes[3];      // LoRa's settings, LoRa's state and the Bluetooth controller (#333)
 static live_row_t settings_psram_row;  // the PSRAM clock against the speed asked for (#333)
@@ -564,6 +569,7 @@ static void refresh_settings_time(lv_timer_t *t) {
     live_update(&settings_notify_row);
     live_update(&settings_wifi_row);
     live_update(&settings_ota_row);
+    live_update(&settings_lora_row);
     for (size_t i = 0; i < sizeof(radio_notes) / sizeof(radio_notes[0]); i++) {
         live_update(&radio_notes[i]);
     }
@@ -583,6 +589,7 @@ static void forget_settings_time(lv_event_t *e) {
     memset(&settings_notify_row, 0, sizeof(settings_notify_row));
     memset(&settings_wifi_row, 0, sizeof(settings_wifi_row));
     memset(&settings_ota_row, 0, sizeof(settings_ota_row));
+    memset(&settings_lora_row, 0, sizeof(settings_lora_row));
     memset(radio_notes, 0, sizeof(radio_notes));
     memset(&settings_psram_row, 0, sizeof(settings_psram_row));
 }
@@ -748,13 +755,22 @@ static void toggle_ota(void *arg) {
 // row is refreshed after a toggle. Both act at once without a question (#138): one Enter undoes them, the row shows
 // the state, and turning a radio off or on starts no transmission by itself; a confirm here would only teach people
 // to click through the careful dialogs that guard erasing.
+// During a thermal hold the LoRa row shows and flips the person's switch only (#348): a press never lifts the hold, so
+// a hot badge does not start transmitting; the row is a live one, so it follows the hold starting and ending.
 static lv_obj_t *lora_row, *air_row;
+
+void shell_radio_value(radio_id_t id, char *out, size_t cap) {
+    snprintf(out, cap, "%s%s", lichen_radio_switch_get(id) ? "On" : "Off",
+             lichen_sys_radio_held_by(id) == RADIO_HOLD_THERMAL ? ", held off (hot)" : "");
+}
+
+static void lora_value(char *out, size_t cap) {
+    shell_radio_value(RADIO_LORA, out, cap);
+}
 
 static void radio_rows_refresh(void) {
     live_update(&settings_wifi_row);
-    if (lora_row) {
-        menu_set_on(lora_row, lichen_radio_get(RADIO_LORA));
-    }
+    live_update(&settings_lora_row);
     if (air_row) {
         menu_set_on(air_row, lichen_airplane_get());
     }
@@ -762,7 +778,7 @@ static void radio_rows_refresh(void) {
 
 static void toggle_lora(void *arg) {
     (void)arg;
-    lichen_radio_set(RADIO_LORA, !lichen_radio_get(RADIO_LORA));
+    lichen_radio_switch_set(RADIO_LORA, !lichen_radio_switch_get(RADIO_LORA));
     radio_rows_refresh();
 }
 
@@ -854,7 +870,7 @@ static void open_settings(lv_obj_t *screen) {
     air_row  = menu_add(menu, "Airplane mode", "", toggle_airplane, NULL);
     menu_set_kind(lora_row, MENU_TOGGLE);
     menu_set_kind(air_row, MENU_TOGGLE);
-    menu_set_on(lora_row, lichen_radio_get(RADIO_LORA));
+    settings_lora_row = live_row(lora_row, false, lora_value);
     menu_set_on(air_row, lichen_airplane_get());
     add_radio_notes(menu);
     lv_obj_add_event_cb(screen, forget_ota_row, LV_EVENT_DELETE, NULL);
