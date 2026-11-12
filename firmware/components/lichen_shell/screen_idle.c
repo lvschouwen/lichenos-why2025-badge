@@ -135,8 +135,8 @@ static void tick(lv_timer_t *timer) {
     shown     = st;
     inhibited = hold != IDLE_HOLD_NONE;
     portEXIT_CRITICAL(&lock);
-    if (must_show) {
-        screen_lock_release();
+    if (idle_lock_lifted(must_show, card)) {
+        screen_lock_release(); // also drops the lock's key listener, so the card alone gets Esc
     } else if (st.lock) {
         screen_lock_engage();
     }

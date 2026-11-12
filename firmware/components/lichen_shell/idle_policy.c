@@ -33,6 +33,10 @@ idle_stage_t idle_stage(idle_level_t level, bool saver_on, bool lock_on, bool fo
     return (idle_stage_t){.level = level, .saver = saver, .lock = lock_on && (saver || level == IDLE_OFF)};
 }
 
+bool idle_lock_lifted(bool must_show, bool card) {
+    return must_show || card;
+}
+
 bool idle_key_swallowed(idle_stage_t shown) {
     return shown.level == IDLE_OFF || shown.saver;
 }

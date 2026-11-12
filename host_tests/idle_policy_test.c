@@ -77,6 +77,16 @@ int main(void) {
     CHECK(!idle_key_swallowed(idle_stage(idle_level(100000, (idle_times_t){60, 300},
                                                     idle_hold(false, true, false, 100000) != IDLE_HOLD_NONE),
                                          true, true, false)));
+    // The pocket lock (lock on) engaged on the dark screen; a card opened over it lifts it, as the update screen does,
+    // and the held bright stage does not engage it again, so the first Esc reaches the card, not the lock (#355)
+    CHECK(idle_stage(IDLE_OFF, true, true, false).lock);
+    CHECK(idle_lock_lifted(false, true));
+    CHECK(idle_lock_lifted(true, false));
+    CHECK(!idle_lock_lifted(false, false));
+    idle_stage_t carded = idle_stage(idle_level(100000, (idle_times_t){60, 300},
+                                                idle_hold(false, true, false, 100000) != IDLE_HOLD_NONE),
+                                     true, true, false);
+    CHECK(!carded.lock && !carded.saver && !idle_key_swallowed(carded));
     // closed again: the normal timer, counted from the restart
     CHECK(idle_hold(false, false, false, 0) == IDLE_HOLD_NONE);
     CHECK(idle_level(60, (idle_times_t){60, 300}, idle_hold(false, false, false, 60) != IDLE_HOLD_NONE) == IDLE_DIM);

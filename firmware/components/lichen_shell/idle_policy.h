@@ -46,6 +46,10 @@ typedef struct {
 } idle_stage_t;
 idle_stage_t idle_stage(idle_level_t level, bool saver_on, bool lock_on, bool forced);
 
+// Whether an engaged pocket lock is lifted now: must_show (the update screen, a power-down: nothing may cover them) or
+// card (a test card is up, #355: it takes Esc itself, and the lock's raw key listener must not see that key too)
+bool idle_lock_lifted(bool must_show, bool card);
+
 // A key was pressed while the screen showed `shown`: true when that key only wakes the screen and must not reach the
 // UI: the screen was off, so the person could not see what it would do, or the screensaver hid the screen (#75). A
 // plain dimmed screen is still readable: its key is delivered.
