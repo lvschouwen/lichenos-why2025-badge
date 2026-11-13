@@ -583,6 +583,9 @@ void mesh_journal_tick_locked(void) {
 // would fail with ENOENT. A new log.bin starts with a HEAD under the keys already in use (the pending records are
 // encrypted with them), inside the caller's card batch. Opened "ab", never "wb": whatever is in the file stays.
 // Nothing stays open between writes, so no handle can go stale.
+// The batches already encoded (the one written next and the live one) keep their MSG records without CHAT records:
+// replay files them under their key with the fallback title (the channel name, or "@?" for a DM) until the chat's next
+// CHAT record, which the forget below makes the next message write.
 static char const *journal_reopen(int *err) {
     uint8_t head[MESH_HIST_REC_MAX];
     if (mkdir(SD_MESSAGES_DIR, 0755) != 0 && errno != EEXIST) {
