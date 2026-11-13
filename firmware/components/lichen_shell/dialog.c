@@ -25,6 +25,7 @@ static char const TAG[] = "dialog";
 #define TEXT_MAX     192 // a command echoed back in the CLI confirm is up to ~145 characters (#132)
 #define TICK_MS      250
 #define LOCK_WAIT_MS 2000
+#define INFO_WAIT_MS 100 // shell_dialog_info: the holders only copy a request, so this is long
 
 typedef struct {
     char     title[TEXT_MAX]; // shown as "<title> <lead>(cancels in N s)", see ui_countdown_text
@@ -48,6 +49,13 @@ static uint32_t          want_gen; // bumped by every open, so a second open rep
 static request_t         want;
 static SemaphoreHandle_t open_lock; // made on first use
 static StaticSemaphore_t open_lock_buf;
+// Which open is on screen and when its countdown started, for shell_dialog_info; written by build() under want_lock
+static uint32_t built_gen;
+static uint32_t built_start_ms;
+static uint32_t built_total_ms;
+
+_Static_assert(TEXT_MAX == SHELL_DIALOG_TITLE_MAX && TEXT_MAX / 4 == SHELL_DIALOG_LABEL_MAX,
+               "shell_dialog_info_t holds the dialog's own copies whole");
 
 // LVGL task only
 static lv_obj_t        *backdrop;
@@ -197,6 +205,11 @@ static void build(void) {
     } else {
         dlg_countdown_start(&countdown, now_ms(), shown.seconds);
     }
+    portENTER_CRITICAL(&want_lock);
+    built_gen      = shown_gen;
+    built_start_ms = countdown.start_ms;
+    built_total_ms = countdown.total_ms;
+    portEXIT_CRITICAL(&want_lock);
     set_message();
     shell_refocus();
     // shell_refocus made the keypad wait for a release: LVGL drops every press until the keys are up, so the first
@@ -284,6 +297,40 @@ void shell_dialog_close_impl(void) {
     if (was) {
         queue_apply();
     }
+}
+
+// Any task: open_lock keeps the openers from rewriting want while it is copied (as apply() does), and want_lock gives
+// the open flag and what build() published. No LVGL here, so the console can ask while the LVGL task is busy.
+bool shell_dialog_info(shell_dialog_info_t *info) {
+    memset(info, 0, sizeof(*info));
+    if (!take_open_lock(pdMS_TO_TICKS(INFO_WAIT_MS))) {
+        return false;
+    }
+    copy_text(info->title, sizeof(info->title), want.title);
+    copy_text(info->confirm_label, sizeof(info->confirm_label), want.confirm_label);
+    info->careful    = want.careful;
+    uint32_t seconds = want.seconds;
+    portENTER_CRITICAL(&want_lock);
+    bool     open  = want_open;
+    bool     built = built_gen == want_gen;
+    uint32_t start = built_start_ms;
+    uint32_t total = built_total_ms;
+    portEXIT_CRITICAL(&want_lock);
+    xSemaphoreGive(open_lock);
+    if (!open) {
+        memset(info, 0, sizeof(*info)); // want keeps the last dialog's words: they are not open
+        return true;
+    }
+    info->open = true;
+    if (!built) {
+        info->left_s = seconds; // queued, not on screen yet
+        return true;
+    }
+    dlg_countdown_t const shown_cd = {.start_ms = start, .total_ms = total};
+    uint32_t              now      = now_ms();
+    info->ms_open                  = now - start;
+    info->left_s                   = dlg_countdown_left_s(&shown_cd, now);
+    return true;
 }
 
 lv_group_t *shell_dialog_group(void) {

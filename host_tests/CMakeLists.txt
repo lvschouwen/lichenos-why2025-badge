@@ -2181,3 +2181,12 @@ target_include_directories(gate_mem_test PRIVATE
 )
 target_compile_options(gate_mem_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME gate_mem_test COMMAND gate_mem_test)
+
+# Which dialogs a remote key may answer (#376, #182): every call site's label and title, unknown and NULL refused
+add_executable(dialog_remote_policy_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/dialog_remote_policy_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/dialog_remote_policy.c
+)
+target_include_directories(dialog_remote_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_compile_options(dialog_remote_policy_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME dialog_remote_policy_test COMMAND dialog_remote_policy_test)
