@@ -33,6 +33,7 @@
 #define OTA_PATH_MAX     192
 #define OTA_SHA256_HEX   64
 #define OTA_TEMP_NAME    "ota_upload.tmp"
+#define OTA_FIRMWARE_MAX (4 * 1024 * 1024) // one app slot (firmware/partitions.csv)
 
 typedef enum {
     OTA_ROUTE_INFO,
@@ -80,6 +81,9 @@ size_t ota_head_length(char const *buf, size_t len);
 
 // Parse a complete request head. Returns 0, or the HTTP status to answer with (400, 404, 405, 415).
 int ota_parse_request(char const *head, size_t len, ota_request_t *req);
+
+// The reason phrase of a reply status line; an unlisted status reads "Internal Server Error"
+char const *ota_status_reason(int status);
 
 // Whether a VMS-style path may be written: FLASH0: or SD0:, an optional [dir.sub] and a plain file name
 bool ota_path_allowed(char const *path);

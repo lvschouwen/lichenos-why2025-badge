@@ -527,6 +527,22 @@ static void test_file_fits(void) {
     CHECK(!ota_file_fits(UINT64_MAX, UINT64_MAX, 4096)); // no overflow
 }
 
+// #403: the reply reason phrases moved out of ota_server.c unchanged; what a client reads on the status line
+static void test_status_reason(void) {
+    static struct {
+        int         status;
+        char const *reason;
+    } const want[] = {
+        {200, "OK"},          {400, "Bad Request"},         {401, "Unauthorized"},       {403, "Forbidden"},
+        {404, "Not Found"},   {405, "Method Not Allowed"},  {409, "Conflict"},           {411, "Length Required"},
+        {413, "Content Too Large"}, {422, "Unprocessable Content"}, {503, "Service Unavailable"},
+        {507, "Insufficient Storage"}, {500, "Internal Server Error"}, {0, "Internal Server Error"},
+    };
+    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+        CHECK(strcmp(ota_status_reason(want[i].status), want[i].reason) == 0);
+    }
+}
+
 int main(void) {
     test_file_fits();
     test_token_kept();
@@ -546,6 +562,7 @@ int main(void) {
     test_embedded_nul();
     test_mutate_helpers();
     test_mutations();
+    test_status_reason();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

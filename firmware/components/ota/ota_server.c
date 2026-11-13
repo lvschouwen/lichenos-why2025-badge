@@ -54,7 +54,7 @@
 #include <unistd.h>
 
 #define TOKEN_FILE      STORAGE_BASE "/ota_token.txt"
-#define FIRMWARE_MAX    (4 * 1024 * 1024) // one app slot (firmware/partitions.csv)
+#define FIRMWARE_MAX    OTA_FIRMWARE_MAX
 #define FILE_MAX        (4 * 1024 * 1024) // received into PSRAM before it touches storage (#40)
 #define ASSETS_MAX      (3 * 1024 * 1024) // the assets partition (firmware/partitions.csv, #22)
 #define READ_TIMEOUT_S  10
@@ -200,29 +200,13 @@ static void respond(int fd, int status, char const *fmt, ...) __attribute__((for
 
 // The reply head and a body (NUL terminated, ends in a newline), sent as is
 static void send_reply(int fd, int status, char const *body) {
-    char const *reason;
-    switch (status) {
-        case 200: reason = "OK"; break;
-        case 400: reason = "Bad Request"; break;
-        case 401: reason = "Unauthorized"; break;
-        case 403: reason = "Forbidden"; break;
-        case 404: reason = "Not Found"; break;
-        case 405: reason = "Method Not Allowed"; break;
-        case 409: reason = "Conflict"; break;
-        case 411: reason = "Length Required"; break;
-        case 413: reason = "Content Too Large"; break;
-        case 422: reason = "Unprocessable Content"; break;
-        case 503: reason = "Service Unavailable"; break;
-        case 507: reason = "Insufficient Storage"; break;
-        default: reason = "Internal Server Error"; break;
-    }
     char head[192];
     int  n = snprintf(
         head,
         sizeof(head),
         "HTTP/1.1 %d %s\r\nContent-Type: text/plain\r\nContent-Length: %u\r\nConnection: close\r\n\r\n",
         status,
-        reason,
+        ota_status_reason(status),
         (unsigned)strlen(body)
     );
     if (send_all(fd, head, (size_t)n)) {

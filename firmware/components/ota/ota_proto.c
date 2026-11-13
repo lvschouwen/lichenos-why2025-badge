@@ -297,6 +297,24 @@ int ota_parse_request(char const *head, size_t len, ota_request_t *req) {
     return 400;
 }
 
+char const *ota_status_reason(int status) {
+    switch (status) {
+        case 200: return "OK";
+        case 400: return "Bad Request";
+        case 401: return "Unauthorized";
+        case 403: return "Forbidden";
+        case 404: return "Not Found";
+        case 405: return "Method Not Allowed";
+        case 409: return "Conflict";
+        case 411: return "Length Required";
+        case 413: return "Content Too Large";
+        case 422: return "Unprocessable Content";
+        case 503: return "Service Unavailable";
+        case 507: return "Insufficient Storage";
+        default: return "Internal Server Error";
+    }
+}
+
 static bool name_char(char c, bool dot_ok) {
     return isalnum((unsigned char)c) || c == '_' || c == '-' || (dot_ok && c == '.');
 }
