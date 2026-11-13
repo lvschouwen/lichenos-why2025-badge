@@ -7,8 +7,15 @@ Plan, implement, test, review, bench and deliver seven epics through dependency-
 #216 platform and architecture, #262 memory and performance, #381 bench tooling, #392 MeshCore, #393 UI and apps, #394 hardware and power, #395 security.
 
 ## Phase
-- **Current (2026-11-13, evening):** Round 1 COMPLETED as code (merged, checked, pushed; bench open). Round 2 code RUNNING. Bench: OTA-1 done, tooling proofs done, the rest of sweep S1 is next.
-- Planning (phases A and B) finished 2026-11-13. Plans: `orchestration/plans/` (`consolidated.md` is the program plan: order, dependency graph, wave queue, bench schedule, decisions).
+- **Current (2026-11-13, late evening):** wave A CLOSED. Wave B merged, pushed, flashed (fw-f537a44a), its bench RUNNING. Wave C code RUNNING.
+- Planning finished 2026-11-13. Plans: `orchestration/plans/` (`consolidated.md` is the program plan).
+
+## Process (owner, 2026-11-13)
+- A wave = a batch of reviewed merges. Per wave: merge one branch at a time (rebase, ff-only, full check), push, relabel build, ONE flash, then a brief on-badge bench that an agent runs from a script main writes. A wave cannot close until that bench is done.
+- No soak per wave. One soak when all waves are done: plan, review and decisions in #407.
+- The flash itself is done by main. Ask the owner for a go when the permission check refuses it.
+- Bench scripts live in the session scratchpad (`bench-wave-<X>.md`); they are remote only, list every allowed command, and allow on-air sends only to the test channel (an advert is also allowed by the owner).
+- Rebase conflicts in `tools/standard-baseline.txt`: record the branch's non-size changes first, take main's file, re-apply those changes, let the check rewrite the size lines. `host_tests/CMakeLists.txt` and component source lists: union-merge.
 
 ## Epic order
 - Original: #216, #262, #381, #392, #393, #394, #395.
@@ -41,39 +48,26 @@ OTA-1 -> remote sweep S1 -> #208 + #211 merged -> OTA-2 + hands sitting H1 -> so
 
 Environment: default subagent model Sonnet, at most 6 concurrent, spawn depth 1.
 
-## Round 1 (code) COMPLETED 2026-11-13
-All merged on main one branch at a time (rebase, ff-only, full check, push), each with an independent review and a delta re-review of its fix commit. main = 4df31405.
-
-| Issue | Epic | Review | State |
+## Waves
+| Wave | Issues | Image | State |
 |---|---|---|---|
-| #389 delivery-state labels | #392 | Sonnet | merged; heard time is a follow-up (needs the outbox to record it, after #208); bench open |
-| #368 journal after SD format | #392 | Opus, 1 high fixed (truncation on a failed stat) | merged; `needs-proofing` |
-| #397 Settings Display split | #393 | Sonnet | merged; `needs-proofing` |
-| #211 OTA parsers + `host_tests/mutate.h` | #395 | Opus | merged; `needs-proofing`; follow-ups in #403 |
-| #208 split mesh_task.cpp | #216 | Opus | merged; NOT on the badge yet (goes with OTA-2) |
+| A | #389 (sent label), #368, #397, #211, #208, #11 (wave 1), #212 (5 functions), #298 | fw-0746e922 | CLOSED. Bench passed (29 steps, 10 reboots). #208, #397, #376, #378 closed. Open ends: #368 (the SD format step is destructive, not run), #11 (hands, breakout), #398 (hands), an unexplained transmit after a MeshCore start (existing behaviour, tool to identify it: #408) |
+| B | #404, #389 (heard time), #400 | fw-f537a44a | Flashed (first compressed update: 1.74 MB on the wire for a 2.75 MB image, 24 s). Bench RUNNING (agent bench-wave-B, script `bench-wave-B.md`) |
+| C | #406 (wt-1, Sonnet), #408 (wt-2, Opus), #410 (wt-4, Opus); then #409 `fw soak`, #405 per-row remote keys, #403, the mesh hygiene part of #209/#212/#213 | - | Code RUNNING |
 
-## Round 2 (code, started 2026-11-13)
-Merge order: #212 -> #11 -> #298 (badge.sh last). Then, as slots free: mesh hygiene (E216-W1-B), misc #212/#213 (W1-E), #398, #400, the #389 heard time.
-
-| Issue | Epic | Slot | Branch | Agent / model | State |
-|---|---|---|---|---|---|
-| #212 LoRa, C6-link and mesh frames (not `lora_decode`) | #216 | wt-2 | `refactor/212-lora-c6link-frames` | impl-212c / Opus | RUNNING |
-| #298 deflate through pieces, short restart delay | #216 | wt-4 | `perf/298-ota-deflate-pieces` | impl-298 / Opus | RUNNING |
-| #11 I2C2, MAX17048 driver, battery service (gauge absent path) | #394 | wt-5 | `feat/11-battery-gauge-driver` | impl-11 / Opus | RUNNING |
+Every merge so far had an independent review and a re-review of its fix commit. Reviews caught, before merge: a journal wipe on a card read error (#368), a fail-open race and a regression in the hand-only start (#400), an uncapped decompression size (#298), surviving mutants in the config limits test (#212).
 
 ## Slots
-- Free: wt-1, wt-6. wt-3: #322 `feat/322-refresh-50hz`, held until the #254 verdict.
+- Free: wt-5. wt-3: #322 `feat/322-refresh-50hz`, held until the #254 verdict. wt-6: #398 `fix/398-latitude-error-visible`, parked until the owner's hands check says whether the bug still exists.
 
-## Bench log (main only)
-| Step | What | State |
-|---|---|---|
-| OTA-1 | fw-4bda782a (P4 only; C6 bundle unchanged) | DONE 2026-11-13: clean boot, C6 IDENT match, DMA free 156 KB / min 146.5 KB |
-| S1 tooling | #374 #376 #377 #378 #379 #391 remote steps | DONE: #378 and #376 closed; #374, #391 remote part passed, hands part `needs-lucas`; #377 partly; #379 waits for the retarget ok |
-| S1 rest | measurements, UI sweep, MeshCore chat block, mvp-bench remote sections (order in `consolidated.md` section 5) | NEXT |
-| OTA-2 + H1 | image with #208 and Round 2; re-proof; one hands sitting | PLANNED; H1 date NEEDS_LUCAS |
-| Soak | Lucas, 2026-11-13: no 36 h soak | CANCELLED; #256 #260 #261 #269 #121 and the #268 merge gate need a new proof (proposal: shorter passive run with an hourly DMA gate) |
+## Bench facts
+- The badge ran fw-664dea27 before this program. Developer mode is on (switch it back on over the USB console after any `fw dev off`). The home order is arranged: never confirm Settings > Display > Reset order.
+- A remote Enter on the Advert & contacts page is refused by the firmware by design (#405 proposes a per-row rule). The page shows the owner's saved position: never copy it anywhere.
+- The helper `fw.sh` in the scratchpad sends console lines and redacts addresses; badge.sh needs the address from the scratchpad file, never printed.
+- DMA memory on the current images: free about 156 KB, minimum about 146-148 KB (gate: 89981 / 80650).
 
-Bench facts: the badge ran fw-664dea27 before OTA-1. Developer mode is on (switch it back on over the USB console after any `fw dev off`). The home order is arranged: never confirm Settings > Display > Reset order.
+## Soak (after the last wave)
+#407: 36 h with the verdict at 24 h, PSRAM at 120 MHz, a supervisor script on the bench host owns the run and wakes a headless Claude run only for a blocker, updates through one guarded wrapper, a diff guard on loop fixes, restorable destructive steps allowed with a verified backup and a passed restore drill. Prerequisites to build: #409 `fw soak`, #410 `fw mem window`, #408 transmit log, a Wi-Fi disconnect counter, the Wi-Fi rollback rule (owner decision), and the tools listed on #407.
 
 ## Epic dashboard
 | Epic | Open issues | Waves | Done | Active | Blocked on |
