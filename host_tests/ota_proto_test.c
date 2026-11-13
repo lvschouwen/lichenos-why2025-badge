@@ -1,8 +1,10 @@
 // Host tests for the OTA receiver's request parsing, path rules, token check and SHA-256
+#include "mutate.h"
 #include "ota_proto.h"
 #include "sha256.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int failures = 0;
@@ -168,6 +170,221 @@ static void test_parse(void) {
     CHECK(parse(long_path, &req) == 400);
 }
 
+// Everything a parse decided, as one line: a recorded request must give the same line as before the #211 refactor
+static void describe(int status, ota_request_t const *r, char *out, size_t cap) {
+    snprintf(out, cap,
+             "st=%d route=%d cl=%lld exp=%d defl=%d tok=%d:%s sha=%d:%s path=%d:%s off=%d:%lld total=%lld since=%lld "
+             "fsha=%d:%s",
+             status, (int)r->route, r->content_length, r->expect_continue, r->deflate, r->has_token, r->token,
+             r->has_sha256, r->sha256, r->has_path, r->path, r->has_offset, r->offset, r->total_size, r->since,
+             r->has_file_sha256, r->file_sha256);
+}
+
+#define CURL_HEAD(method, target) method " " target " HTTP/1.1\r\nHost: badge:8080\r\nUser-Agent: curl/8.5.0\r\n"   \
+                                  "Accept: */*\r\nAuthorization: Bearer " TOKEN "\r\n"
+#define UPPER_SHA "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"
+
+// Request heads as tools/badge.sh (curl) sends them, each with what the parser made of it before #211
+static struct {
+    char const *head;
+    char const *parsed;
+} const recorded[] = {
+    {CURL_HEAD("GET", "/info") "\r\n",
+     "st=0 route=0 cl=-1 exp=0 defl=0 tok=1:" TOKEN " sha=0: path=0: off=0:0 total=-1 since=0 fsha=0:"},
+    {CURL_HEAD("PUT", "/firmware") "X-Content-SHA256: " SHA "\r\nContent-Encoding: deflate\r\nContent-Length: 912345\r\n\r\n",
+     "st=0 route=1 cl=912345 exp=0 defl=1 tok=1:" TOKEN " sha=1:" SHA " path=0: off=0:0 total=-1 since=0 fsha=0:"},
+    {CURL_HEAD("PUT", "/firmware") "X-Content-SHA256: " SHA "\r\nX-Offset: 131072\r\nX-Total-Size: 1784656\r\n"
+     "X-File-SHA256: " UPPER_SHA "\r\nX-Pad: xxxxx\r\nContent-Length: 131072\r\n\r\n",
+     "st=0 route=1 cl=131072 exp=0 defl=0 tok=1:" TOKEN " sha=1:" SHA " path=0: off=1:131072 total=1784656 since=0 fsha=1:" SHA},
+    {CURL_HEAD("PUT", "/file") "X-Content-SHA256: " SHA "\r\nX-Offset: 0\r\nX-Total-Size: 1513520\r\nX-File-SHA256: " SHA
+     "\r\nX-Path: SD0:[BADGEVMS.APPS.why2025_firmware_ota_c6]firmware.bin\r\nX-Pad: x\r\nContent-Length: 131072\r\n\r\n",
+     "st=0 route=2 cl=131072 exp=0 defl=0 tok=1:" TOKEN " sha=1:" SHA
+     " path=1:SD0:[BADGEVMS.APPS.why2025_firmware_ota_c6]firmware.bin off=1:0 total=1513520 since=0 fsha=1:" SHA},
+    {CURL_HEAD("PUT", "/assets") "X-Content-SHA256: " SHA "\r\nX-Offset: 262144\r\nX-Total-Size: 300000\r\nX-File-SHA256: "
+     SHA "\r\nX-Pad: xxxxxxxxxxxxxxxx\r\nContent-Length: 37856\r\n\r\n",
+     "st=0 route=6 cl=37856 exp=0 defl=0 tok=1:" TOKEN " sha=1:" SHA " path=0: off=1:262144 total=300000 since=0 fsha=1:" SHA},
+    {CURL_HEAD("PUT", "/file") "X-Content-SHA256: " SHA "\r\nContent-Encoding: deflate\r\nX-Path: FLASH0:[BADGEVMS.APPS]x.json"
+     "\r\nContent-Length: 77\r\n\r\n",
+     "st=0 route=2 cl=77 exp=0 defl=1 tok=1:" TOKEN " sha=1:" SHA " path=1:FLASH0:[BADGEVMS.APPS]x.json off=0:0 total=-1 "
+     "since=0 fsha=0:"},
+    {CURL_HEAD("DELETE", "/file") "X-Path: FLASH0:[BADGEVMS.APPS]old.json\r\n\r\n",
+     "st=0 route=4 cl=-1 exp=0 defl=0 tok=1:" TOKEN " sha=0: path=1:FLASH0:[BADGEVMS.APPS]old.json off=0:0 total=-1 since=0 "
+     "fsha=0:"},
+    {CURL_HEAD("POST", "/reboot") "\r\n",
+     "st=0 route=3 cl=-1 exp=0 defl=0 tok=1:" TOKEN " sha=0: path=0: off=0:0 total=-1 since=0 fsha=0:"},
+    {CURL_HEAD("POST", "/prepare") "\r\n",
+     "st=0 route=5 cl=-1 exp=0 defl=0 tok=1:" TOKEN " sha=0: path=0: off=0:0 total=-1 since=0 fsha=0:"},
+    {CURL_HEAD("GET", "/screenshot") "\r\n",
+     "st=0 route=7 cl=-1 exp=0 defl=0 tok=1:" TOKEN " sha=0: path=0: off=0:0 total=-1 since=0 fsha=0:"},
+    {CURL_HEAD("GET", "/log?since=4711") "\r\n",
+     "st=0 route=8 cl=-1 exp=0 defl=0 tok=1:" TOKEN " sha=0: path=0: off=0:0 total=-1 since=4711 fsha=0:"},
+    {CURL_HEAD("GET", "/crashes") "\r\n",
+     "st=0 route=10 cl=-1 exp=0 defl=0 tok=1:" TOKEN " sha=0: path=0: off=0:0 total=-1 since=0 fsha=0:"},
+    {CURL_HEAD("POST", "/console") "Content-Type: text/plain\r\nContent-Length: 8\r\n\r\n",
+     "st=0 route=9 cl=8 exp=0 defl=0 tok=1:" TOKEN " sha=0: path=0: off=0:0 total=-1 since=0 fsha=0:"},
+    // An older client that lets curl send Expect, with a value padded by blanks
+    {CURL_HEAD("PUT", "/firmware") "X-Content-SHA256:  " UPPER_SHA " \t\r\nContent-Length: 1781936\r\nExpect: 100-continue\r\n\r\n",
+     "st=0 route=1 cl=1781936 exp=1 defl=0 tok=1:" TOKEN " sha=1:" SHA " path=0: off=0:0 total=-1 since=0 fsha=0:"},
+    // Refusals a valid client meets: wrong token format, wrong route, wrong method, unsupported encoding
+    {CURL_HEAD("GET", "/nope") "\r\n", NULL},
+    {CURL_HEAD("PUT", "/info") "\r\n", NULL},
+    {CURL_HEAD("PUT", "/firmware") "Content-Encoding: gzip\r\n\r\n", NULL},
+};
+
+// #211: the refactored parser gives valid clients exactly what the old one did, field by field
+static void test_recorded_valid(void) {
+    for (size_t i = 0; i < sizeof(recorded) / sizeof(recorded[0]); i++) {
+        ota_request_t req;
+        char          got[1024];
+        int           st = parse(recorded[i].head, &req);
+        describe(st, &req, got, sizeof(got));
+        if (recorded[i].parsed) {
+            if (strcmp(got, recorded[i].parsed) != 0) {
+                printf("recorded %zu:\n  got  %s\n  want %s\n", i, got, recorded[i].parsed);
+            }
+            CHECK(strcmp(got, recorded[i].parsed) == 0);
+        }
+    }
+    CHECK(parse(recorded[14].head, &(ota_request_t){0}) == 404);
+    CHECK(parse(recorded[15].head, &(ota_request_t){0}) == 405);
+    CHECK(parse(recorded[16].head, &(ota_request_t){0}) == 415);
+}
+
+// #211: a header that counts, sent twice, is refused rather than the last copy silently winning
+static void test_repeated_headers(void) {
+    static char const *const once[] = {
+        "Content-Length: 5",       "X-Offset: 0",           "X-Total-Size: 5",   "X-File-SHA256: " SHA,
+        "Authorization: Bearer " TOKEN, "X-Content-SHA256: " SHA, "X-Path: SD0:a.txt", "Content-Encoding: identity",
+        "Expect: 100-continue",
+    };
+    for (size_t i = 0; i < sizeof(once) / sizeof(once[0]); i++) {
+        char          head[512];
+        ota_request_t req;
+        snprintf(head, sizeof(head), "PUT /file HTTP/1.1\r\n%s\r\n\r\n", once[i]);
+        CHECK(parse(head, &req) == 0);
+        snprintf(head, sizeof(head), "PUT /file HTTP/1.1\r\n%s\r\n%s\r\n\r\n", once[i], once[i]);
+        if (parse(head, &req) != 400) {
+            printf("repeated header accepted: %s\n", once[i]);
+        }
+        CHECK(parse(head, &req) == 400);
+    }
+    // Different case, different value: still the same header
+    CHECK(parse("PUT /file HTTP/1.1\r\nContent-Length: 5\r\ncontent-length: 6\r\n\r\n", &(ota_request_t){0}) == 400);
+    // Headers the receiver does not read may repeat (proxies and curl add some)
+    CHECK(parse("GET /info HTTP/1.1\r\nAccept: */*\r\nAccept: text/plain\r\n\r\n", &(ota_request_t){0}) == 0);
+}
+
+// #211: a NUL inside a line used to cut the value short (X-Path: a.txt\0junk read as a.txt); it is refused now
+static void test_embedded_nul(void) {
+    static char const head[] = "PUT /file HTTP/1.1\r\nX-Path: SD0:a.txt\0junk\r\n\r\n";
+    ota_request_t     req;
+    CHECK(ota_parse_request(head, sizeof(head) - 1, &req) == 400);
+    static char const in_line[] = "GET /info\0 HTTP/1.1\r\n\r\n";
+    CHECK(ota_parse_request(in_line, sizeof(in_line) - 1, &req) == 400);
+    static char const in_name[] = "GET /info HTTP/1.1\r\nAc\0cept: x\r\n\r\n";
+    CHECK(ota_parse_request(in_name, sizeof(in_name) - 1, &req) == 400);
+}
+
+static bool lower_hex(char const *s, size_t want) {
+    if (strlen(s) != want) {
+        return false;
+    }
+    for (; *s; s++) {
+        if (!((*s >= '0' && *s <= '9') || (*s >= 'a' && *s <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// What any accepted request must look like, however it was mangled
+static void check_invariants(int st, ota_request_t const *r) {
+    CHECK(st == 0 || st == 400 || st == 404 || st == 405 || st == 415);
+    if (st != 0) {
+        return;
+    }
+    CHECK(r->content_length >= -1 && r->total_size >= -1 && r->offset >= 0 && r->since >= 0);
+    CHECK(r->content_length < 1000000000000LL && r->total_size < 1000000000000LL && r->offset < 1000000000000LL);
+    CHECK(!r->has_token || lower_hex(r->token, OTA_TOKEN_LEN));
+    CHECK(!r->has_sha256 || lower_hex(r->sha256, OTA_SHA256_HEX));
+    CHECK(!r->has_file_sha256 || lower_hex(r->file_sha256, OTA_SHA256_HEX));
+    CHECK(memchr(r->path, '\0', sizeof(r->path)) != NULL);
+    CHECK(!r->has_path || (strlen(r->path) > 0 && strlen(r->path) <= OTA_PATH_MAX));
+}
+
+static void parse_mutated(uint8_t const *buf, size_t len) {
+    uint8_t      *exact = mut_exact(buf, len); // exactly len bytes: ASan sees any read past them
+    ota_request_t req;
+    int           st = ota_parse_request((char const *)exact, len, &req);
+    check_invariants(st, &req);
+    free(exact);
+}
+
+// #211: seeded mutations of the recorded requests (truncated, bit-flipped, NUL/CR/LF inserted, lines repeated, length
+// fields lying) under ASan+UBSan; never a crash, an overread or an accepted request that breaks the invariants
+static void test_mutations(void) {
+    enum { ROUNDS = 400, STACK = 4 };
+    static uint8_t a[1024], b[1024];
+    mut_rng_t      rng;
+    mut_seed(&rng, 211);
+    for (size_t i = 0; i < sizeof(recorded) / sizeof(recorded[0]); i++) {
+        size_t len = strlen(recorded[i].head);
+        for (size_t cut = 0; cut <= len; cut++) {
+            parse_mutated((uint8_t const *)recorded[i].head, cut);
+        }
+        static char const *const lies[][2] = {
+            {"Content-Length: ", "Content-Length: 999999999999"}, {"Content-Length: ", "Content-Length: 9999999999999"},
+            {"X-Offset: ", "X-Offset: -"}, {"X-Total-Size: ", "X-Total-Size: 0x"}, {"Content-Length: ", "Content-Length: +"},
+            {"X-Path: ", "X-Path: "}, {"/log?since=", "/log?since=99999999999999999999"},
+        };
+        for (size_t l = 0; l < sizeof(lies) / sizeof(lies[0]); l++) {
+            size_t n = mut_replace((uint8_t const *)recorded[i].head, len, lies[l][0], lies[l][1], a, sizeof(a));
+            if (n) {
+                parse_mutated(a, n);
+            }
+        }
+        for (int round = 0; round < ROUNDS; round++) {
+            size_t n = mut_truncate((uint8_t const *)recorded[i].head, len, len, a, sizeof(a));
+            int    k = 1 + (int)mut_below(&rng, STACK);
+            for (int s = 0; s < k; s++) {
+                n = mut_random(&rng, a, n, b, sizeof(b));
+                memcpy(a, b, n);
+            }
+            parse_mutated(a, n);
+        }
+    }
+    // A head of nothing but one long line, and one past the line limit by one
+    memset(a, 'A', sizeof(a));
+    parse_mutated(a, sizeof(a));
+    memcpy(a + 255, "\r\n\r\n", 4);
+    parse_mutated(a, 259);
+    memcpy(a + 256, "\r\n\r\n", 4);
+    parse_mutated(a, 260);
+}
+
+// The helpers themselves (mutate.h is shared with the radio decoder tests)
+static void test_mutate_helpers(void) {
+    uint8_t     out[32];
+    char const *src = "abc:def";
+    CHECK(mut_truncate((uint8_t const *)src, 7, 3, out, sizeof(out)) == 3 && memcmp(out, "abc", 3) == 0);
+    CHECK(mut_repeat((uint8_t const *)src, 7, 0, 4, out, sizeof(out)) == 11 && memcmp(out, "abc:abc:def", 11) == 0);
+    CHECK(mut_repeat((uint8_t const *)src, 7, 0, 4, out, 10) == 0);
+    CHECK(mut_insert((uint8_t const *)src, 7, 3, "\0", 1, out, sizeof(out)) == 8 && memcmp(out, "abc\0:def", 8) == 0);
+    CHECK(mut_delete((uint8_t const *)src, 7, 3, 1, out, sizeof(out)) == 6 && memcmp(out, "abcdef", 6) == 0);
+    CHECK(mut_delete((uint8_t const *)src, 7, 6, 2, out, sizeof(out)) == 0);
+    CHECK(mut_replace((uint8_t const *)src, 7, "def", "12345", out, sizeof(out)) == 9 && memcmp(out, "abc:12345", 9) == 0);
+    CHECK(mut_replace((uint8_t const *)src, 7, "xyz", "1", out, sizeof(out)) == 0);
+    memcpy(out, "abcd", 4);
+    mut_flip_bit(out, 4, 8 * 3 + 1);
+    CHECK(out[3] == ('d' ^ 2));
+    mut_lie_le(out, 4, 2, 4, 0x11223344); // clipped at the end of the buffer
+    CHECK(out[2] == 0x44 && out[3] == 0x33);
+    mut_rng_t r1, r2;
+    mut_seed(&r1, 7);
+    mut_seed(&r2, 7);
+    CHECK(mut_next(&r1) == mut_next(&r2));
+}
+
 static void test_paths(void) {
     CHECK(ota_path_allowed("FLASH0:[BADGEVMS.APPS.splitflap]splitflap.elf"));
     CHECK(ota_path_allowed("FLASH0:[BADGEVMS.APPS]splitflap.json"));
@@ -283,6 +500,11 @@ int main(void) {
     test_paths();
     test_temp_path();
     test_token();
+    test_recorded_valid();
+    test_repeated_headers();
+    test_embedded_nul();
+    test_mutate_helpers();
+    test_mutations();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

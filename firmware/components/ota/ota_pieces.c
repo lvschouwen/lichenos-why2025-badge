@@ -6,11 +6,14 @@
 #include <string.h>
 
 size_t ota_round_up(size_t n, size_t align) {
+    if (align == 0 || (align & (align - 1)) != 0 || n > SIZE_MAX - (align - 1)) {
+        return 0;
+    }
     return (n + align - 1) & ~(align - 1);
 }
 
 int ota_pieces_add(ota_pieces_t *p, size_t offset, size_t len, uint8_t const sha[32]) {
-    if (p->n >= OTA_PIECES_MAX) {
+    if (p->n >= OTA_PIECES_MAX || offset > UINT32_MAX || len > UINT32_MAX - offset) {
         return 0;
     }
     if (p->n == p->cap) {
@@ -34,15 +37,22 @@ void ota_pieces_clear(ota_pieces_t *p) {
     memset(p, 0, sizeof(*p));
 }
 
-size_t ota_pieces_check(ota_pieces_t const *p, uint8_t const *data, size_t *bad, size_t max) {
+static bool piece_same(ota_piece_t const *pc, uint8_t const *data, size_t data_len) {
+    if (pc->offset > data_len || pc->len > data_len - pc->offset) {
+        return false;
+    }
+    sha256_ctx_t ctx;
+    uint8_t      digest[SHA256_DIGEST_LEN];
+    sha256_init(&ctx);
+    sha256_update(&ctx, data + pc->offset, pc->len);
+    sha256_final(&ctx, digest);
+    return memcmp(digest, pc->sha, 32) == 0;
+}
+
+size_t ota_pieces_check(ota_pieces_t const *p, uint8_t const *data, size_t data_len, size_t *bad, size_t max) {
     size_t differ = 0;
     for (size_t i = 0; i < p->n; i++) {
-        sha256_ctx_t ctx;
-        uint8_t      digest[SHA256_DIGEST_LEN];
-        sha256_init(&ctx);
-        sha256_update(&ctx, data + p->v[i].offset, p->v[i].len);
-        sha256_final(&ctx, digest);
-        if (memcmp(digest, p->v[i].sha, 32) != 0) {
+        if (!piece_same(&p->v[i], data, data_len)) {
             if (differ < max) {
                 bad[differ] = i;
             }
@@ -53,7 +63,48 @@ size_t ota_pieces_check(ota_pieces_t const *p, uint8_t const *data, size_t *bad,
 }
 
 int ota_piece_flash_ok(size_t offset, size_t len, size_t total, size_t sector) {
-    return len > 0 && offset % sector == 0 && (len % sector == 0 || offset + len == total);
+    if (sector == 0 || len == 0 || offset > total || len > total - offset) {
+        return 0;
+    }
+    return offset % sector == 0 && (len % sector == 0 || len == total - offset);
+}
+
+// ota_piece_flash_ok's rule on the numbers as sent. Before #211 they were cast to a 32-bit size_t first, so an offset
+// past 4 GB wrapped; such a piece is refused either way. A piece past the end is ota_piece_bounds's to answer, as
+// before: only the ragged last piece's end is compared here, without a sum that could overflow.
+static bool sector_rule(ota_request_t const *req, size_t sector) {
+    long long s = (long long)sector;
+    return s > 0 && req->offset % s == 0 &&
+           (req->content_length % s == 0 || req->content_length == req->total_size - req->offset);
+}
+
+ota_piece_verdict_t ota_piece_headers(ota_request_t const *req, long long max, size_t sector) {
+    if (!req->has_offset || !req->has_sha256 || req->content_length <= 0 || req->total_size <= 0 ||
+        !req->has_file_sha256 || req->deflate) {
+        return OTA_PIECE_MISSING;
+    }
+    if (req->total_size > max) {
+        return OTA_PIECE_TOO_LARGE;
+    }
+    if (req->route == OTA_ROUTE_FIRMWARE && !sector_rule(req, sector)) {
+        return OTA_PIECE_UNALIGNED;
+    }
+    return OTA_PIECE_OK;
+}
+
+ota_piece_verdict_t ota_piece_bounds(ota_request_t const *req) {
+    if (req->offset < 0 || req->content_length <= 0 || req->total_size <= 0 ||
+        req->content_length > req->total_size || req->offset > req->total_size - req->content_length) {
+        return OTA_PIECE_PAST_END;
+    }
+    return OTA_PIECE_OK;
+}
+
+bool ota_piece_is_next(ota_piece_expect_t const *e, ota_request_t const *req, char const *path) {
+    return e->active && e->route == req->route && req->total_size > 0 &&
+           (unsigned long long)req->total_size == e->total && req->offset >= 0 &&
+           (unsigned long long)req->offset == e->got && strcmp(e->path, path) == 0 &&
+           strcmp(e->file_sha256, req->file_sha256) == 0;
 }
 
 int ota_hash_range(ota_read_fn read, void *ctx, size_t off, size_t len, uint8_t *scratch, size_t scratch_len,

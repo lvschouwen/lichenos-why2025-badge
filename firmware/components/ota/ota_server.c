@@ -859,7 +859,7 @@ __attribute__((noinline)) static bool finish_streamed(int fd, char sha_hex[OTA_S
 // The whole file didn't match: say which verified pieces no longer match what was stored for them
 static void report_damaged_pieces(void) {
     size_t bad[8];
-    size_t n = ota_pieces_check(&staged.pieces, staged.data, bad, 8);
+    size_t n = ota_pieces_check(&staged.pieces, staged.data, staged.total, bad, 8);
     ESP_LOGW(TAG, "whole-file mismatch: staging buffer %p, %zu of %zu pieces changed in PSRAM since they were checked",
              (void *)staged.data, n, staged.pieces.n);
     for (size_t i = 0; i < n && i < 8; i++) {
@@ -892,8 +892,8 @@ static bool piece_start(int fd, ota_request_t const *req, char const *path, uint
         return false;
     }
     if (!stream) {
-        staged.data = heap_caps_aligned_alloc(STAGE_ALIGN, ota_round_up((size_t)req->total_size, STAGE_ALIGN),
-                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        size_t cap  = ota_round_up((size_t)req->total_size, STAGE_ALIGN); // 0 only on overflow: never allocated
+        staged.data = cap ? heap_caps_aligned_alloc(STAGE_ALIGN, cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
         if (!staged.data) {
             respond(fd, 503, "not enough memory for %lld bytes", req->total_size);
             return false;
@@ -1001,48 +1001,64 @@ static bool piece_receive(int fd, ota_request_t const *req, uint8_t const *pre, 
     return true;
 }
 
-static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
+// Answer a refused piece with the text it always had; false (nothing sent) for OTA_PIECE_OK
+static bool piece_verdict_sent(int fd, ota_piece_verdict_t verdict, long long max) {
+    switch (verdict) {
+        case OTA_PIECE_MISSING:
+            respond(fd, 400, "a piece needs Content-Length, X-Content-SHA256, X-Total-Size, X-File-SHA256, no compression");
+            return true;
+        case OTA_PIECE_TOO_LARGE: respond(fd, 413, "larger than %lld bytes", max); return true;
+        case OTA_PIECE_UNALIGNED:
+            respond(fd, 400, "firmware pieces start on a 4096-byte boundary and are whole multiples of it, except the last");
+            return true;
+        case OTA_PIECE_PAST_END: respond(fd, 400, "piece runs past X-Total-Size"); return true;
+        default: return false;
+    }
+}
+
+// Every check a piece passes before anything is touched, answered in the order they always were; true = refused.
+// The bounds come last but before piece_start() shows the update screen (#125).
+static bool piece_refused(int fd, ota_request_t const *req, char *posix, size_t posix_cap) {
     long long max = req->route == OTA_ROUTE_FIRMWARE ? FIRMWARE_MAX : req->route == OTA_ROUTE_ASSETS ? ASSETS_MAX : FILE_MAX;
-    char      posix[OTA_PATH_MAX + 16];
-    if (req->route == OTA_ROUTE_FILE && !file_allowed()) { // firmware and assets come after /prepare
+    bool      file = req->route == OTA_ROUTE_FILE;
+    if (file && !file_allowed()) { // firmware and assets come after /prepare
         respond(fd, 409, "updating");
-        return;
+        return true;
     }
-    if (!req->has_sha256 || req->content_length <= 0 || req->total_size <= 0 || !req->has_file_sha256 ||
-        req->deflate) {
-        respond(fd, 400, "a piece needs Content-Length, X-Content-SHA256, X-Total-Size, X-File-SHA256, no compression");
-        return;
+    if (piece_verdict_sent(fd, ota_piece_headers(req, max, 4096), max)) {
+        return true;
     }
-    if (req->total_size > max) {
-        respond(fd, 413, "larger than %lld bytes", max);
-        return;
-    }
-    if (req->route == OTA_ROUTE_FILE && (!req->has_path || !ota_path_to_posix(req->path, posix, sizeof(posix)))) {
+    if (file && (!req->has_path || !ota_path_to_posix(req->path, posix, posix_cap))) {
         respond(fd, 403, "path not allowed: use FLASH0: with a plain file name");
-        return;
+        return true;
     }
-    if (req->route == OTA_ROUTE_FIRMWARE &&
-        !ota_piece_flash_ok((size_t)req->offset, (size_t)req->content_length, (size_t)req->total_size, 4096)) {
-        respond(fd, 400, "firmware pieces start on a 4096-byte boundary and are whole multiples of it, except the last");
-        return;
-    }
-    if (req->route == OTA_ROUTE_FILE && is_directory(posix)) {
+    if (file && is_directory(posix)) {
         respond(fd, 409, "%s is a directory, nothing written", req->path);
+        return true;
+    }
+    return piece_verdict_sent(fd, ota_piece_bounds(req), max);
+}
+
+static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
+    char posix[OTA_PATH_MAX + 16];
+    if (piece_refused(fd, req, posix, sizeof(posix))) {
         return;
     }
-    if (req->offset + req->content_length > req->total_size) { // before piece_start() shows the update screen (#125)
-        respond(fd, 400, "piece runs past X-Total-Size");
-        return;
-    }
-    char const *path      = req->route == OTA_ROUTE_FILE ? req->path : "";
-    bool        continued = false;
+    char const              *path      = req->route == OTA_ROUTE_FILE ? req->path : "";
+    bool                     continued = false;
+    ota_piece_expect_t const expect    = {
+           .active      = staged.active,
+           .route       = staged.route,
+           .total       = staged.total,
+           .got         = staged.got,
+           .path        = staged.path,
+           .file_sha256 = staged.file_sha256,
+    };
     if (req->offset == 0) {
         if (!piece_start(fd, req, path, &pre, &pre_len, &continued)) {
             return;
         }
-    } else if (!staged.active || staged.route != req->route || staged.total != (size_t)req->total_size ||
-               strcmp(staged.path, path) != 0 || strcmp(staged.file_sha256, req->file_sha256) != 0 ||
-               (size_t)req->offset != staged.got) {
+    } else if (!ota_piece_is_next(&expect, req, path)) {
         respond(fd, 409, "expected the piece at offset %zu", staged.active ? staged.got : (size_t)0);
         return;
     }

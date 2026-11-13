@@ -35,17 +35,17 @@ size_t ota_head_length(char const *buf, size_t len) {
     return 0;
 }
 
-// A decimal size of at most CONTENT_LENGTH_MAX digits; anything else (signs, junk) is refused
+// A decimal size of at most CONTENT_LENGTH_MAX digits (so it cannot overflow); anything else (signs, junk) is refused
 static bool parse_size(char const *value, size_t vlen, long long *out) {
     if (vlen == 0 || vlen > CONTENT_LENGTH_MAX) {
         return false;
     }
     long long n = 0;
-    for (char const *p = value; *p; p++) {
-        if (!isdigit((unsigned char)*p)) {
+    for (size_t i = 0; i < vlen; i++) {
+        if (!isdigit((unsigned char)value[i])) {
             return false;
         }
-        n = n * 10 + (*p - '0');
+        n = n * 10 + (value[i] - '0');
     }
     *out = n;
     return true;
@@ -97,74 +97,164 @@ static int parse_request_line(char *line, ota_request_t *req) {
     return known_target ? 405 : 404;
 }
 
-static int parse_header(char *line, ota_request_t *req) {
-    char *colon = strchr(line, ':');
-    if (!colon || colon == line) {
+// One header's value, already trimmed: each handler checks it and stores it, or returns the status to refuse with
+typedef int (*header_fn)(char *value, size_t vlen, ota_request_t *req);
+
+static int size_into(char const *value, size_t vlen, long long *out) {
+    return parse_size(value, vlen, out) ? 0 : 400;
+}
+
+static int hex_into(char const *value, char *out) {
+    if (!is_hex_string(value, OTA_SHA256_HEX)) {
         return 400;
     }
-    *colon      = '\0';
-    char *name  = line;
-    char *value = colon + 1;
-    while (*value == ' ' || *value == '\t') {
-        value++;
-    }
-    size_t vlen = strlen(value);
-    while (vlen > 0 && (value[vlen - 1] == ' ' || value[vlen - 1] == '\t')) {
-        value[--vlen] = '\0';
-    }
+    memcpy(out, value, OTA_SHA256_HEX + 1); // is_hex_string checked the length, NUL included
+    to_lower(out);
+    return 0;
+}
 
-    if (strcasecmp(name, "Content-Length") == 0) {
-        if (!parse_size(value, vlen, &req->content_length)) {
-            return 400;
+static int h_content_length(char *value, size_t vlen, ota_request_t *req) {
+    return size_into(value, vlen, &req->content_length);
+}
+
+static int h_offset(char *value, size_t vlen, ota_request_t *req) {
+    int status      = size_into(value, vlen, &req->offset);
+    req->has_offset = status == 0;
+    return status;
+}
+
+static int h_total_size(char *value, size_t vlen, ota_request_t *req) {
+    return size_into(value, vlen, &req->total_size);
+}
+
+static int h_file_sha256(char *value, size_t vlen, ota_request_t *req) {
+    (void)vlen;
+    int status           = hex_into(value, req->file_sha256);
+    req->has_file_sha256 = status == 0;
+    return status;
+}
+
+static int h_sha256(char *value, size_t vlen, ota_request_t *req) {
+    (void)vlen;
+    int status      = hex_into(value, req->sha256);
+    req->has_sha256 = status == 0;
+    return status;
+}
+
+static int h_authorization(char *value, size_t vlen, ota_request_t *req) {
+    (void)vlen;
+    if (strncasecmp(value, "Bearer ", 7) != 0 || !is_hex_string(value + 7, OTA_TOKEN_LEN)) {
+        return 400;
+    }
+    memcpy(req->token, value + 7, OTA_TOKEN_LEN + 1);
+    to_lower(req->token);
+    req->has_token = true;
+    return 0;
+}
+
+static int h_path(char *value, size_t vlen, ota_request_t *req) {
+    if (vlen == 0 || vlen > OTA_PATH_MAX) {
+        return 400;
+    }
+    memcpy(req->path, value, vlen + 1);
+    req->has_path = true;
+    return 0;
+}
+
+static int h_transfer_encoding(char *value, size_t vlen, ota_request_t *req) {
+    (void)value, (void)vlen, (void)req;
+    return 400; // only Content-Length bodies
+}
+
+static int h_content_encoding(char *value, size_t vlen, ota_request_t *req) {
+    (void)vlen;
+    if (strcasecmp(value, "deflate") == 0) {
+        req->deflate = true;
+        return 0;
+    }
+    return strcasecmp(value, "identity") == 0 ? 0 : 415;
+}
+
+static int h_expect(char *value, size_t vlen, ota_request_t *req) {
+    (void)vlen;
+    req->expect_continue = strcasecmp(value, "100-continue") == 0;
+    return 0;
+}
+
+// The headers the receiver reads; any other is ignored. Each may come once (#211): a second copy is refused rather
+// than silently winning, so a request can't say two things about its own length, place or token.
+static struct {
+    char const *name;
+    header_fn   fn;
+} const headers[] = {
+    {"Content-Length", h_content_length},
+    {"X-Offset", h_offset},
+    {"X-Total-Size", h_total_size},
+    {"X-File-SHA256", h_file_sha256},
+    {"Authorization", h_authorization},
+    {"X-Content-SHA256", h_sha256},
+    {"X-Path", h_path},
+    {"Transfer-Encoding", h_transfer_encoding},
+    {"Content-Encoding", h_content_encoding},
+    {"Expect", h_expect},
+};
+_Static_assert(sizeof(headers) / sizeof(headers[0]) <= 32, "one bit of the seen mask per header");
+
+// Split "Name: value" in place into the name and the value without its surrounding blanks; false without a name
+static bool split_header(char *line, char **name, char **value, size_t *vlen) {
+    char *colon = strchr(line, ':');
+    if (!colon || colon == line) {
+        return false;
+    }
+    *colon  = '\0';
+    *name   = line;
+    char *v = colon + 1;
+    while (*v == ' ' || *v == '\t') {
+        v++;
+    }
+    size_t n = strlen(v);
+    while (n > 0 && (v[n - 1] == ' ' || v[n - 1] == '\t')) {
+        v[--n] = '\0';
+    }
+    *value = v;
+    *vlen  = n;
+    return true;
+}
+
+static int parse_header(char *line, ota_request_t *req, uint32_t *seen) {
+    char  *name;
+    char  *value;
+    size_t vlen;
+    if (!split_header(line, &name, &value, &vlen)) {
+        return 400;
+    }
+    for (size_t i = 0; i < sizeof(headers) / sizeof(headers[0]); i++) {
+        if (strcasecmp(name, headers[i].name) == 0) {
+            if (*seen & (1u << i)) {
+                return 400;
+            }
+            *seen |= 1u << i;
+            return headers[i].fn(value, vlen, req);
         }
-    } else if (strcasecmp(name, "X-Offset") == 0) {
-        if (!parse_size(value, vlen, &req->offset)) {
-            return 400;
-        }
-        req->has_offset = true;
-    } else if (strcasecmp(name, "X-Total-Size") == 0) {
-        if (!parse_size(value, vlen, &req->total_size)) {
-            return 400;
-        }
-    } else if (strcasecmp(name, "X-File-SHA256") == 0) {
-        if (!is_hex_string(value, OTA_SHA256_HEX)) {
-            return 400;
-        }
-        strcpy(req->file_sha256, value);
-        to_lower(req->file_sha256);
-        req->has_file_sha256 = true;
-    } else if (strcasecmp(name, "Authorization") == 0) {
-        if (strncasecmp(value, "Bearer ", 7) != 0 || !is_hex_string(value + 7, OTA_TOKEN_LEN)) {
-            return 400;
-        }
-        strcpy(req->token, value + 7);
-        to_lower(req->token);
-        req->has_token = true;
-    } else if (strcasecmp(name, "X-Content-SHA256") == 0) {
-        if (!is_hex_string(value, OTA_SHA256_HEX)) {
-            return 400;
-        }
-        strcpy(req->sha256, value);
-        to_lower(req->sha256);
-        req->has_sha256 = true;
-    } else if (strcasecmp(name, "X-Path") == 0) {
-        if (vlen == 0 || vlen > OTA_PATH_MAX) {
-            return 400;
-        }
-        strcpy(req->path, value);
-        req->has_path = true;
-    } else if (strcasecmp(name, "Transfer-Encoding") == 0) {
-        return 400; // only Content-Length bodies
-    } else if (strcasecmp(name, "Content-Encoding") == 0) {
-        if (strcasecmp(value, "deflate") == 0) {
-            req->deflate = true;
-        } else if (strcasecmp(value, "identity") != 0) {
-            return 415;
-        }
-    } else if (strcasecmp(name, "Expect") == 0) {
-        req->expect_continue = strcasecmp(value, "100-continue") == 0;
     }
     return 0;
+}
+
+// The next CRLF-terminated line of head from pos into line (NUL-terminated). Returns its length, or -1 when there is
+// no CRLF, the line is too long or it holds a NUL (#211: a NUL used to cut a value short without anyone noticing).
+static long next_line(char const *head, size_t len, size_t pos, char line[LINE_MAX_LEN + 1]) {
+    for (size_t i = pos; i + 1 < len; i++) {
+        if (head[i] == '\r' && head[i + 1] == '\n') {
+            size_t line_len = i - pos;
+            if (line_len > LINE_MAX_LEN || memchr(head + pos, '\0', line_len)) {
+                return -1;
+            }
+            memcpy(line, head + pos, line_len);
+            line[line_len] = '\0';
+            return (long)line_len;
+        }
+    }
+    return -1;
 }
 
 int ota_parse_request(char const *head, size_t len, ota_request_t *req) {
@@ -172,36 +262,21 @@ int ota_parse_request(char const *head, size_t len, ota_request_t *req) {
     req->content_length = -1;
     req->total_size     = -1;
 
-    char   line[LINE_MAX_LEN + 1];
-    bool   first = true;
-    size_t pos   = 0;
-    while (pos < len) {
-        char const *end = NULL;
-        for (size_t i = pos; i + 1 < len; i++) {
-            if (head[i] == '\r' && head[i + 1] == '\n') {
-                end = head + i;
-                break;
-            }
-        }
-        if (!end) {
+    char     line[LINE_MAX_LEN + 1];
+    uint32_t seen = 0;
+    for (size_t pos = 0; pos < len;) {
+        long line_len = next_line(head, len, pos, line);
+        if (line_len < 0) {
             return 400;
         }
-        size_t line_len = (size_t)(end - (head + pos));
         if (line_len == 0) {
-            return first ? 400 : 0; // the blank line ends the head
+            return pos == 0 ? 400 : 0; // the blank line ends the head
         }
-        if (line_len > LINE_MAX_LEN) {
-            return 400;
-        }
-        memcpy(line, head + pos, line_len);
-        line[line_len] = '\0';
-        pos            += line_len + 2;
-
-        int status = first ? parse_request_line(line, req) : parse_header(line, req);
+        int status = pos == 0 ? parse_request_line(line, req) : parse_header(line, req, &seen);
         if (status) {
             return status;
         }
-        first = false;
+        pos += (size_t)line_len + 2;
     }
     return 400;
 }
