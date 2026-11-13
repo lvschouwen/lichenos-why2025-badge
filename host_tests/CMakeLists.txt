@@ -792,8 +792,16 @@ add_executable(mesh_hist_test
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_hist_crypto.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_hist_selftest.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_store.c
+    # the heard time end to end (#389): the outbox, the sync, the store and the label
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_outbox.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_chat.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_frame.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/channel_input.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_format.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/list_filter.c
 )
-target_include_directories(mesh_hist_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_include_directories(mesh_hist_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 # The journal's encryption (#98) uses rweather's Crypto (SHA-256, AES-128) as MeshCore builds it
 target_link_libraries(mesh_hist_test PRIVATE meshcore_host)
 target_compile_options(mesh_hist_test PRIVATE -Wall -Wextra -Werror)

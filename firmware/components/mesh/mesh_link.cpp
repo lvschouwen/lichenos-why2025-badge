@@ -30,7 +30,7 @@ void BadgeMesh::logRx(mesh::Packet *packet, int len, float score) {
     uint8_t hash[MAX_HASH_SIZE];
     fill_hash(packet, hash);
     mesh_ob_enter();
-    ob_on_rx(ob_, hash); // a repeat of our own channel message, before Mesh drops it as a duplicate
+    ob_on_rx(ob_, hash, (uint32_t)millis()); // a repeat of our own channel message, before Mesh drops it as a duplicate
     mesh_ob_exit();
 }
 

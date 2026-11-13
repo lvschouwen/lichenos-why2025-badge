@@ -1,5 +1,6 @@
 // Host test: the message history journal on the SD card (#48): codec, scan, replay, writer, policies, compaction, and
 // its encryption (#98)
+#include "mesh_chat.h"
 #include "mesh_hist.h"
 #include "mesh_hist_crypto.h"
 #include "mesh_outbox.h"
@@ -676,6 +677,94 @@ static void forget_checks(void) {
 // #368: a journal started again after a card format. Records queued before the reopen come without the CHAT records the
 // lost file held; they replay with a fallback title, and once the chats are forgotten the next message writes its CHAT
 // record again, so the new file is whole from there on
+// One sync pass of the mesh task (mesh_task.cpp sync_outgoing): fresh messages into the store and the journal's hold,
+// then every state into the store and the journal
+static void sync_pass(ob_t *ob, ob_sync_pass_t *p, mesh_hist_t *h, uint32_t now_s) {
+    size_t n = ob_sync_states(ob, p);
+    for (size_t i = 0; i < n; i++) {
+        ob_sync_t const *o = &p->e[i];
+        if (o->fresh && o->text_slot >= 0) {
+            char line[MESH_TEXT_MAX + 1];
+            snprintf(line, sizeof(line), "me: %.*s", (int)(sizeof(line) - 5), p->text[o->text_slot].text);
+            CHECK(mesh_store_add_outgoing(p->text[o->text_slot].target, line, o->id, now_s));
+            mesh_chat_key_t key = chan_key(p->text[o->text_slot].target);
+            mesh_msg_t      m;
+            CHECK(mesh_store_chat(&key, &m, 1, false) == 1);
+            mesh_hist_out_new(h, &key, &m, now_s);
+            ob_mark_in_store(ob, o->id);
+        }
+        mesh_store_update_out(o->id, o->state, o->repeats, o->attempt, o->trip_ms);
+        mesh_hist_out_state(h, o->id, o->state, o->repeats, o->attempt, o->trip_ms, now_s);
+    }
+}
+
+static void newest_status(mesh_chat_key_t const *key, char out[MESH_STATUS_CAP]) {
+    mesh_msg_t m;
+    out[0] = '\0';
+    CHECK(mesh_store_chat(key, &m, 1, false) == 1);
+    mesh_msg_status(&m, out, MESH_STATUS_CAP);
+}
+
+// The heard time end to end (#389): a channel message sent, its first repeat heard 1.8 s later and a second one after
+// that, through the outbox, the mesh task's sync, the store and the label; then the journal's bytes replayed into a
+// fresh store after a "reboot" show the same label
+static void heard_time_checks(void) {
+    static mesh_hist_t    h, h2;
+    static uint8_t        pend[MESH_HIST_PENDING], spare[MESH_HIST_PENDING], pend2[MESH_HIST_PENDING];
+    static ob_t           ob;
+    static ob_sync_pass_t pass;
+    mesh_store_set_hooks(NULL, NULL, NULL);
+    CHECK(mesh_store_init(3));
+    mesh_hist_init(&h, pend, sizeof(pend), &kc);
+    ob_init(&ob);
+    memset(&pass, 0, sizeof(pass));
+    mesh_chat_key_t ck  = chan_key("#badgetest");
+    char const     *why = NULL;
+    mesh_msg_id_t   id  = ob_add_channel(&ob, "#badgetest", "ping", 4, 1000, &why);
+    ob_action_t     act;
+    CHECK(id && ob_next_action(&ob, 1000, 1700000000u, &act) && act.kind == OB_ACT_SEND_CHANNEL);
+    sync_pass(&ob, &pass, &h, 1);
+    mf_msg_t ok;
+    memset(&ok, 0, sizeof(ok));
+    ok.kind = MF_OK;
+    ob_on_reply(&ob, id, &ok, 1000); // MyMesh took it at t = 1000 ms
+    uint8_t hash[OB_HASH_LEN] = {0xC0, 0xFF, 0xEE, 1, 2, 3, 4, 5};
+    ob_on_tx(&ob, false, hash);
+    sync_pass(&ob, &pass, &h, 1);
+    char s[MESH_STATUS_CAP];
+    newest_status(&ck, s);
+    CHECK(strcmp(s, "on air") == 0);
+    ob_on_rx(&ob, hash, 2800); // the first repeat, 1.8 s after the send
+    sync_pass(&ob, &pass, &h, 3);
+    newest_status(&ck, s);
+    CHECK(strcmp(s, "heard repeated, 1.8 s") == 0);
+    ob_on_rx(&ob, hash, 4400); // a second repeat: counted, the time stays the first one's
+    sync_pass(&ob, &pass, &h, 5);
+    newest_status(&ck, s);
+    CHECK(strcmp(s, "heard repeated x2, 1.8 s") == 0);
+
+    // The reboot: the journal's bytes behind a HEAD, scanned and replayed into an empty store
+    size_t   len  = 0;
+    uint32_t recs = 0;
+    uint8_t *old  = mesh_hist_swap(&h, spare, &len, &recs);
+    CHECK(recs > 0 && len > 0);
+    start_file();
+    memcpy(file + file_len, old, len);
+    file_len += len;
+    mesh_store_set_hooks(NULL, NULL, NULL);
+    CHECK(mesh_store_init(3));
+    mesh_hist_scan_t sc = scan_bytes(file, file_len, 7);
+    CHECK(!sc.torn && got_n > 0);
+    mesh_hist_init(&h2, pend2, sizeof(pend2), &kc);
+    for (size_t i = 0; i < got_n; i++) {
+        CHECK(mesh_hist_replay(&h2, &got[i]));
+    }
+    mesh_msg_t m;
+    CHECK(mesh_store_chat(&ck, &m, 1, false) == 1 && m.loaded && m.outgoing && m.trip_ms == 1800 && m.repeats == 2);
+    newest_status(&ck, s);
+    CHECK(strcmp(s, "heard repeated x2, 1.8 s") == 0);
+}
+
 static void reopen_checks(void) {
     static mesh_hist_t h;
     static uint8_t     pend[1024], spare[1024];
@@ -1205,6 +1294,7 @@ int main(void) {
     compact_dup_checks();
     forget_checks();
     reopen_checks();
+    heard_time_checks();
     damage_checks();
     boot_load_checks();
     if (failures) {

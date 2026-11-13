@@ -295,11 +295,22 @@ void ob_on_tx_fail(ob_t *ob, bool payload_is_dm, uint32_t now_ms) {
     }
 }
 
-void ob_on_rx(ob_t *ob, uint8_t const hash[OB_HASH_LEN]) {
+// The time from MyMesh taking a channel message (sent_ms, the clock the DM trip uses) to its first heard repeat (#389).
+// 0, "no time", when the clock reads at or before sent_ms (wrapped or out of order) or the gap passes
+// OB_HEARD_TRIP_MAX_MS: such a value would be wrong, and the label has room for no more.
+static uint32_t heard_trip(ob_entry_t const *e, uint32_t now_ms) {
+    uint32_t gap = now_ms - e->sent_ms;
+    return (int32_t)gap > 0 && gap <= OB_HEARD_TRIP_MAX_MS ? gap : 0;
+}
+
+void ob_on_rx(ob_t *ob, uint8_t const hash[OB_HASH_LEN], uint32_t now_ms) {
     for (int i = 0; i < OB_CAP; i++) {
         ob_entry_t *e = &ob->e[i];
         if (e->used && e->kind == OB_CHANNEL && e->have_hash && (e->state == MESH_OUT_ON_AIR || e->state == MESH_OUT_HEARD) &&
             memcmp(e->hash, hash, OB_HASH_LEN) == 0) {
+            if (e->repeats == 0) {
+                e->trip_ms = heard_trip(e, now_ms); // the first repeat only: later ones do not move it
+            }
             if (e->repeats < 255) {
                 e->repeats++;
             }
@@ -345,6 +356,7 @@ bool ob_retry(ob_t *ob, mesh_msg_id_t id, uint32_t now_ms) {
     e->pending_reset = false;
     e->have_hash     = false;
     e->repeats       = 0;
+    e->trip_ms       = 0;
     e->not_before_ms = now_ms;
     return true;
 }

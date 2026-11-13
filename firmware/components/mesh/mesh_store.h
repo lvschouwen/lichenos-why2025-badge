@@ -26,7 +26,8 @@ typedef struct {
     uint32_t id;
     uint8_t  outgoing, state, repeats;
     // DMs (#47): dm is set for a direct message either way, peer is the other side's public key prefix; channel then
-    // holds "@<name>". attempt is the DM try in progress (1-3), trip_ms the time to the ACK once delivered.
+    // holds "@<name>". attempt is the DM try in progress (1-3), trip_ms the time to the ACK once delivered
+    // (a channel message: to its first heard repeat, #389; 0 = none).
     uint8_t  dm, attempt, peer[6];
     uint32_t trip_ms;
     uint32_t seq;   // store-wide counter, grows with every message: the order across chats (also the journal's, #48)

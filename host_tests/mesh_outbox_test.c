@@ -55,13 +55,107 @@ static void channel_flow(void) {
     uint8_t h[OB_HASH_LEN] = {1, 2, 3, 4, 5, 6, 7, 8};
     ob_on_tx(&ob, false, h);
     CHECK(state_of(&ob, id) == MESH_OUT_ON_AIR);
-    ob_on_rx(&ob, h);
-    ob_on_rx(&ob, h);
+    ob_on_rx(&ob, h, 1810);
+    ob_on_rx(&ob, h, 2500);
     uint8_t other[OB_HASH_LEN] = {9};
-    ob_on_rx(&ob, other);
+    ob_on_rx(&ob, other, 2600);
     uint8_t reps = 0;
     mesh_out_state_t st;
     CHECK(ob_get(&ob, id, &st, NULL, &reps, NULL) && st == MESH_OUT_HEARD && reps == 2);
+}
+
+// The heard time (#389): from MyMesh taking the message to the first repeat; later repeats and other packets do not
+// move it, a clock at or before the send or a gap past OB_HEARD_TRIP_MAX_MS keeps none, a retry clears it
+static mesh_msg_id_t on_air_channel(ob_t *ob, uint32_t sent_ms, uint8_t const h[OB_HASH_LEN]) {
+    char const   *why = NULL;
+    mesh_msg_id_t id  = ob_add_channel(ob, "#test", "hi", 2, sent_ms, &why);
+    take(ob, sent_ms, OB_ACT_SEND_CHANNEL);
+    mf_msg_t ok = reply(MF_OK);
+    ob_on_reply(ob, id, &ok, sent_ms);
+    ob_on_tx(ob, false, h);
+    return id;
+}
+
+static uint32_t trip_of(ob_t *ob, mesh_msg_id_t id) {
+    uint32_t trip = 77;
+    CHECK(ob_get(ob, id, NULL, NULL, NULL, &trip));
+    return trip;
+}
+
+static void heard_time(void) {
+    ob_t ob;
+    ob_init(&ob);
+    uint8_t       h[OB_HASH_LEN] = {1, 2, 3, 4, 5, 6, 7, 8}, other[OB_HASH_LEN] = {9};
+    mesh_msg_id_t id             = on_air_channel(&ob, 10, h);
+    CHECK(trip_of(&ob, id) == 0); // on air, nothing heard yet
+    ob_on_rx(&ob, other, 500);
+    CHECK(trip_of(&ob, id) == 0); // somebody else's packet
+    ob_on_rx(&ob, h, 1810);
+    CHECK(trip_of(&ob, id) == 1800 && state_of(&ob, id) == MESH_OUT_HEARD);
+    ob_on_rx(&ob, h, 4000);
+    ob_on_rx(&ob, h, 9000);
+    uint8_t reps = 0;
+    CHECK(ob_get(&ob, id, NULL, NULL, &reps, NULL) && reps == 3 && trip_of(&ob, id) == 1800); // first repeat only
+
+    // Across the 32-bit wrap of the millisecond clock: still the gap
+    ob_init(&ob);
+    id = on_air_channel(&ob, 0xFFFFFF00u, h);
+    ob_on_rx(&ob, h, 0x00000100u);
+    CHECK(trip_of(&ob, id) == 0x200);
+
+    // A clock at the send, or before it (out of order): no time, and a later repeat does not invent one
+    ob_init(&ob);
+    id = on_air_channel(&ob, 5000, h);
+    ob_on_rx(&ob, h, 5000);
+    CHECK(trip_of(&ob, id) == 0 && state_of(&ob, id) == MESH_OUT_HEARD);
+    ob_on_rx(&ob, h, 6000);
+    CHECK(trip_of(&ob, id) == 0);
+    ob_init(&ob);
+    id = on_air_channel(&ob, 5000, h);
+    ob_on_rx(&ob, h, 4000);
+    CHECK(trip_of(&ob, id) == 0);
+
+    // The longest kept, and one past it
+    ob_init(&ob);
+    id = on_air_channel(&ob, 100, h);
+    ob_on_rx(&ob, h, 100 + OB_HEARD_TRIP_MAX_MS);
+    CHECK(trip_of(&ob, id) == OB_HEARD_TRIP_MAX_MS);
+    ob_init(&ob);
+    id = on_air_channel(&ob, 100, h);
+    ob_on_rx(&ob, h, 100 + OB_HEARD_TRIP_MAX_MS + 1);
+    CHECK(trip_of(&ob, id) == 0);
+
+    // A failed message's retry starts without a time (and a fresh heard time comes with its own first repeat)
+    ob_init(&ob);
+    char const   *why = NULL;
+    mesh_msg_id_t f   = ob_add_channel(&ob, "#test", "hi", 2, 0, &why);
+    take(&ob, 0, OB_ACT_SEND_CHANNEL);
+    mf_msg_t ok = reply(MF_OK);
+    ob_on_reply(&ob, f, &ok, 0);
+    ob.e[0].trip_ms = 1234; // as left by an earlier cycle
+    ob_fail(&ob, f);
+    CHECK(ob_retry(&ob, f, 10) && trip_of(&ob, f) == 0);
+}
+
+// The DM path is unchanged (#389): a repeat-shaped packet with a DM's hash neither counts nor sets a time; the ACK does
+static void dm_trip_unchanged(void) {
+    ob_t ob;
+    ob_init(&ob);
+    char const   *why = NULL;
+    mesh_msg_id_t id  = ob_add_dm(&ob, PEER, "hi", 2, 0, &why);
+    take(&ob, 0, OB_ACT_SEND_DM);
+    mf_msg_t s = sent(0xAB, 3000, 0);
+    ob_on_reply(&ob, id, &s, 100);
+    uint8_t h[OB_HASH_LEN] = {4, 4};
+    ob_on_tx(&ob, true, h);
+    ob_on_rx(&ob, h, 900);
+    uint8_t reps = 9;
+    CHECK(ob_get(&ob, id, NULL, NULL, &reps, NULL) && reps == 0 && trip_of(&ob, id) == 0 &&
+          state_of(&ob, id) == MESH_OUT_ON_AIR);
+    ob_on_confirm(&ob, 0xAB, 1800);
+    CHECK(trip_of(&ob, id) == 1800 && state_of(&ob, id) == MESH_OUT_DELIVERED);
+    ob_on_rx(&ob, h, 5000);
+    CHECK(trip_of(&ob, id) == 1800);
 }
 
 static void channel_failures(void) {
@@ -401,6 +495,8 @@ int main(void) {
     console_origin();
     fail_pending();
     channel_flow();
+    heard_time();
+    dm_trip_unchanged();
     channel_failures();
     dm_delivered();
     dm_retries();

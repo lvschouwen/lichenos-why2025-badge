@@ -17,8 +17,10 @@ typedef enum { MESH_STATUS_NONE, MESH_STATUS_PENDING, MESH_STATUS_OK, MESH_STATU
 // "1.8 s" / "420 ms" for a trip time
 void mesh_format_trip(uint32_t ms, char *out, size_t cap);
 
-// The words under one of our messages: "queued", "on air", "heard repeated" (x2...), "delivered", "not sent". Empty for
-// an incoming message. Returns how the screen should colour it.
+// The words under one of our messages: "queued", "sent", "on air", "heard repeated" (" x2" and ", 1.8 s" when known),
+// "delivered", "not sent". Empty for an incoming message. Returns how the screen should colour it. The longest
+// ("heard repeated x255, 999.9 s", or a DM's "waiting for ACK, try 3/3") fits MESH_STATUS_CAP (mesh_chat_test).
+#define MESH_STATUS_CAP 32
 mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap);
 
 // A DM's words (#47): "queued", "waiting for ACK" ("..., try 2/3" from the second attempt), "delivered, 1.8 s",

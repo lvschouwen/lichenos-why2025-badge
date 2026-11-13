@@ -85,7 +85,7 @@ static void add_line(lv_obj_t *parent, char const *text, uint32_t color) {
 }
 
 static void add_message(chat_t *c, mesh_msg_t const *m, uint32_t now, uint32_t now_epoch) {
-    char age[24], status[32], meta[96];
+    char age[24], status[MESH_STATUS_CAP], meta[96];
     mesh_format_msg_age(m->loaded, m->heard_s, m->epoch, now, now_epoch, age, sizeof(age));
     mesh_status_kind_t kind = mesh_msg_status(m, status, sizeof(status));
     uint32_t color = kind == MESH_STATUS_FAILED ? THEME_RED : kind == MESH_STATUS_OK ? THEME_TEAL : THEME_DIM;

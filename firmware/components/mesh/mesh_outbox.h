@@ -33,6 +33,7 @@ typedef enum {
 #define OB_HASH_LEN         8
 #define OB_RETRY_BACKOFF_MS 2000
 #define OB_TIMEOUT_FLOOR_MS 2000
+#define OB_HEARD_TRIP_MAX_MS 999999u // the longest heard time kept ("999.9 s"); a later first repeat keeps none
 
 typedef enum { OB_CHANNEL, OB_DM } ob_kind_t;
 
@@ -90,8 +91,9 @@ size_t ob_fail_pending(ob_t *ob);
 // A packet of ours left the radio (payload_is_dm: TXT_MSG, else GRP_TXT) or the radio refused it
 void ob_on_tx(ob_t *ob, bool payload_is_dm, uint8_t const hash[OB_HASH_LEN]);
 void ob_on_tx_fail(ob_t *ob, bool payload_is_dm, uint32_t now_ms);
-// A packet was received whose hash may be a repeat of one of ours
-void ob_on_rx(ob_t *ob, uint8_t const hash[OB_HASH_LEN]);
+// A packet was received whose hash may be a repeat of one of ours. The first repeat of a channel message sets its
+// trip_ms to the time since MyMesh took it (#389), on the same millisecond clock as now_ms elsewhere.
+void ob_on_rx(ob_t *ob, uint8_t const hash[OB_HASH_LEN], uint32_t now_ms);
 void ob_on_confirm(ob_t *ob, uint32_t ack, uint32_t trip_ms);
 // A failed message starts a new cycle under the same id (a new timestamp). false when it is not failed or busy.
 bool ob_retry(ob_t *ob, mesh_msg_id_t id, uint32_t now_ms);

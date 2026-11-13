@@ -141,8 +141,49 @@ static void select_checks(void) {
     CHECK(mesh_chat_mention_fits(NULL, "@[bob] ", 100));
 }
 
+// The heard time on a channel message (#389), in the DM's "delivered, 1.8 s" style, and the worst case against the
+// screen's buffer: every repeat count with the longest times, and the DM's longest labels
+static void heard_time_checks(void) {
+    mesh_msg_t m;
+    memset(&m, 0, sizeof(m));
+    m.outgoing = 1, m.state = MESH_OUT_HEARD, m.repeats = 1, m.trip_ms = 1800;
+    char s[MESH_STATUS_CAP];
+    CHECK(mesh_msg_status(&m, s, sizeof(s)) == MESH_STATUS_OK && strcmp(s, "heard repeated, 1.8 s") == 0);
+    m.repeats = 2;
+    CHECK(strcmp((mesh_msg_status(&m, s, sizeof(s)), s), "heard repeated x2, 1.8 s") == 0);
+    m.trip_ms = 420;
+    CHECK(strcmp((mesh_msg_status(&m, s, sizeof(s)), s), "heard repeated x2, 420 ms") == 0);
+    m.trip_ms = 0; // no time recorded
+    CHECK(strcmp((mesh_msg_status(&m, s, sizeof(s)), s), "heard repeated x2") == 0);
+    m.trip_ms = OB_HEARD_TRIP_MAX_MS + 1; // only a damaged record holds one: left out
+    CHECK(strcmp((mesh_msg_status(&m, s, sizeof(s)), s), "heard repeated x2") == 0);
+    m.repeats = 255, m.trip_ms = OB_HEARD_TRIP_MAX_MS;
+    CHECK(strcmp((mesh_msg_status(&m, s, sizeof(s)), s), "heard repeated x255, 999.9 s") == 0);
+
+    uint32_t const trips[] = {0, 1, 999, 1000, 9999, 99999, 100000, OB_HEARD_TRIP_MAX_MS, OB_HEARD_TRIP_MAX_MS + 1,
+                              UINT32_MAX};
+    size_t         longest = 0;
+    for (unsigned r = 0; r <= 255; r++) {
+        for (size_t t = 0; t < sizeof(trips) / sizeof(trips[0]); t++) {
+            char big[128];
+            m.repeats = (uint8_t)r, m.trip_ms = trips[t];
+            mesh_msg_status(&m, big, sizeof(big));
+            size_t n = strlen(big);
+            longest  = n > longest ? n : longest;
+        }
+    }
+    CHECK(longest == strlen("heard repeated x255, 999.9 s") && longest < MESH_STATUS_CAP);
+    mesh_msg_t d;
+    memset(&d, 0, sizeof(d));
+    d.outgoing = 1, d.dm = 1, d.state = MESH_OUT_DELIVERED, d.trip_ms = UINT32_MAX;
+    char big[128];
+    CHECK(strlen((mesh_msg_status(&d, big, sizeof(big)), big)) < MESH_STATUS_CAP);
+    d.state = MESH_OUT_ON_AIR, d.attempt = 3;
+    CHECK(strlen((mesh_msg_status(&d, big, sizeof(big)), big)) < MESH_STATUS_CAP);
+}
+
 int main(void) {
-    char s[32];
+    char s[MESH_STATUS_CAP];
     CHECK(status(0, MESH_OUT_FAILED, 0, s) == MESH_STATUS_NONE && s[0] == '\0'); // incoming: no state
     CHECK(status(1, MESH_OUT_QUEUED, 0, s) == MESH_STATUS_PENDING && strcmp(s, "queued") == 0);
     CHECK(status(1, MESH_OUT_SENT, 0, s) == MESH_STATUS_PENDING && strcmp(s, "sent") == 0);
@@ -164,6 +205,7 @@ int main(void) {
         CHECK(mesh_msg_status(&h, small, 0) == MESH_STATUS_OK && small[0] == 'q'); // cap 0: untouched
     }
     CHECK(status(1, MESH_OUT_FAILED, 0, s) == MESH_STATUS_FAILED && strcmp(s, "not sent") == 0);
+    heard_time_checks();
 
     // The counter and the cut: 10 bytes of room
     char c[64];

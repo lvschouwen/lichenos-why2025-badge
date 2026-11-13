@@ -44,6 +44,21 @@ static mesh_status_kind_t dm_status(mesh_msg_t const *m, char *out, size_t cap) 
     }
 }
 
+// "heard repeated", " x3" from the second repeat, ", 1.8 s" when the first repeat's time is known (#389). A time past
+// OB_HEARD_TRIP_MAX_MS (only a damaged journal record holds one) is left out, so the label always fits MESH_STATUS_CAP.
+static void heard_status(mesh_msg_t const *m, char *out, size_t cap) {
+    char count[8] = "", trip[16] = "";
+    if (m->repeats > 1) {
+        snprintf(count, sizeof(count), " x%u", (unsigned)m->repeats);
+    }
+    if (m->trip_ms && m->trip_ms <= OB_HEARD_TRIP_MAX_MS) {
+        trip[0] = ',';
+        trip[1] = ' ';
+        mesh_format_trip(m->trip_ms, trip + 2, sizeof(trip) - 2);
+    }
+    snprintf(out, cap, "heard repeated%s%s", count, trip);
+}
+
 bool mesh_msg_in_dm(mesh_msg_t const *m, uint8_t const peer[6]) {
     return m->dm && memcmp(m->peer, peer, 6) == 0;
 }
@@ -69,11 +84,7 @@ mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap) {
         snprintf(out, cap, "on air");
         return MESH_STATUS_PENDING;
     case MESH_OUT_HEARD:
-        if (m->repeats > 1) {
-            snprintf(out, cap, "heard repeated x%u", (unsigned)m->repeats);
-        } else {
-            snprintf(out, cap, "heard repeated");
-        }
+        heard_status(m, out, cap);
         return MESH_STATUS_OK;
     case MESH_OUT_DELIVERED:
         snprintf(out, cap, "delivered");
