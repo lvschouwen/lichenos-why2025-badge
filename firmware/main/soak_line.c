@@ -185,3 +185,22 @@ size_t soak_line(soak_t const *s, unsigned n, char *out, size_t cap) {
     }
     return b.len;
 }
+
+// psram_speed.c's speed_job text: a host test checks that it still says this
+#define REARM_WHY "psram 120 re-arm after crash"
+
+int soak_reset_crash(bool crash_now, bool reset_is_sw, char const *newest_restart) {
+    if (crash_now) {
+        return 1;
+    }
+    if (!reset_is_sw || !newest_restart) {
+        return 0; // a power cycle or EN reset after the re-arm boot cannot be that restart
+    }
+    // The line is "<when> <version> up=<s>s <why>[ caller=0x...]": the why is the whole tail, bar the caller
+    char const *at = strstr(newest_restart, " " REARM_WHY);
+    if (!at) {
+        return 0;
+    }
+    char const *end = at + 1 + strlen(REARM_WHY);
+    return (*end == '\0' || strncmp(end, " caller=", 8) == 0) ? 1 : 0;
+}

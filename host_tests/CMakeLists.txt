@@ -2260,6 +2260,8 @@ add_executable(soak_line_test
 )
 target_include_directories(soak_line_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main)
 target_compile_options(soak_line_test PRIVATE -Wall -Wextra -Werror)
+target_compile_definitions(soak_line_test PRIVATE
+    PSRAM_SPEED_SRC="${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/psram_guard/psram_speed.c")
 add_test(NAME soak_line_test COMMAND soak_line_test)
 
 # The OS name on the boot screen and in About (#236)

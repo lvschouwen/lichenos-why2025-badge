@@ -21,6 +21,12 @@
 // - Crashes: rst=wdt rstcrash=0 is what a power cycle, an EN reset through the USB adapter and a watchdog reset
 //   without a core dump all print on this board. Count crashes from rstcrash and boot (with crash), never from rst
 //   alone.
+//   rstcrash=1 is sticky across the PSRAM re-arm: after a crash at 120 MHz the badge restarts by software about 20 s
+//   later ("psram 120 re-arm after crash"), so a sampler would only ever see that second boot. That boot (rst=sw)
+//   reports rstcrash=1 too, meaning "the previous boot crashed". It follows from the recorded restart history, not the
+//   crash log, so fw crash clear does not hide it; the boot after it reads 0 again. One crash can therefore show as
+//   two boots (+2 boot, one rstcrash=1 sample at most): count a crash once per rstcrash=1 sample, and compare crash
+//   (which fw crash clear resets) only as a cross-check. The meaning widened and no key moved, so SOAK_FORMAT stays 1.
 // Pure (no ESP-IDF headers): the glue that reads the values is soak_cmd.c.
 
 #include <stdbool.h>
@@ -79,6 +85,11 @@ typedef struct {
     int64_t bl_req, bl_app;   // display backlight: last level sent to the C6, the level the C6 reports applied
     int64_t kbl_req, kbl_app; // keyboard backlight: the same
 } soak_t;
+
+// 1 when this boot follows a crash: crash.c judged so itself (crash_now), or it is the software restart of the PSRAM
+// re-arm after a crash (reset_is_sw, and newest_restart, the newest line of the restart history, names that restart).
+// NULL newest_restart: no history. Pure, so the sticky rule is pinned by a host test.
+int soak_reset_crash(bool crash_now, bool reset_is_sw, char const *newest_restart);
 
 // Every field SOAK_NA
 void soak_init(soak_t *s);

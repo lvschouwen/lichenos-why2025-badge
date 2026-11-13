@@ -53,6 +53,17 @@ _Static_assert(BAT_GAUGE_UNPROBED == 0 && BAT_GAUGE_ABSENT == 1 && BAT_GAUGE_LIN
 EXT_RAM_NOINIT_ATTR static soak_t s_snap;
 EXT_RAM_NOINIT_ATTR static char   s_line[SOAK_LINE_MAX];
 
+// Whether this boot follows a crash, sticky across the re-arm restart (soak_line.h). Decided once from the restart
+// history, in soak_cmd_register: that runs early in the boot, before any note is added to the history, so its newest line
+// is still the one that restarted the badge..
+static int s_reset_crash = SOAK_NA;
+
+static void latch_reset_crash(void) {
+    EXT_RAM_NOINIT_ATTR static restart_log_t log; // ~570 B: PSRAM, not the boot stack; system_restart_history fills it
+    int const                               n = system_restart_history(&log);
+    s_reset_crash = soak_reset_crash(crash_recovered(), esp_reset_reason() == ESP_RST_SW, n > 0 ? log.line[0] : NULL);
+}
+
 static void read_boot(soak_t *s) {
     uint32_t n;
     if (boot_count(&n)) {
@@ -60,7 +71,7 @@ static void read_boot(soak_t *s) {
     }
     s->up_ms       = esp_timer_get_time() / 1000;
     s->reset       = esp_reset_reason();
-    s->reset_crash = crash_recovered() ? 1 : 0;
+    s->reset_crash = s_reset_crash;
     if (crash_count_cached(&n)) {
         s->crashes = n;
     }
@@ -231,6 +242,7 @@ static void cmd_soak(char const *args) {
 }
 
 void soak_cmd_register(void) {
+    latch_reset_crash();
     console_register_dev("soak", "soak (the badge's state in key=value lines for an unattended sampler, #409; no names "
                                  "or addresses; meant for a sample every few minutes)",
                          cmd_soak);

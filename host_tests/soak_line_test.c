@@ -220,6 +220,33 @@ static void split_rule(void) {
     CHECK(soak_line(&s, 1, small, 0) == 0);
 }
 
+// #416: rstcrash is sticky across the PSRAM re-arm restart that follows a crash at 120 MHz
+#define LINE_REARM "2026-11-13T10:00:19Z fw-abc up=19s psram 120 re-arm after crash"
+#define LINE_REBOOT "2026-11-13T10:30:00Z fw-abc up=1800s fw reboot"
+
+static void sticky_crash_flag(void) {
+    CHECK(soak_reset_crash(true, false, NULL) == 1);              // the panic boot itself, as crash.c judged
+    CHECK(soak_reset_crash(false, true, LINE_REARM) == 1);        // the re-arm boot after the panic
+    CHECK(soak_reset_crash(false, true, LINE_REARM " caller=0x4ff00012") == 1);
+    CHECK(soak_reset_crash(false, true, LINE_REBOOT) == 0);       // a plain software restart
+    CHECK(soak_reset_crash(false, true, LINE_REBOOT) == 0);       // the second ordinary reboot: its own line is newest
+    CHECK(soak_reset_crash(false, false, LINE_REARM) == 0);       // a power cycle or EN reset after the re-arm boot
+    CHECK(soak_reset_crash(false, true, NULL) == 0);              // no history
+    CHECK(soak_reset_crash(false, true, "t? fw up=1s psram 120 re-arm after crashes") == 0);
+    // fw crash clear empties the crash log and count, never the restart history, and the rule takes neither
+    CHECK(soak_reset_crash(false, true, LINE_REARM) == 1);
+    // the text speed_job gives the restart must stay the one the rule looks for
+    FILE *f = fopen(PSRAM_SPEED_SRC, "r");
+    CHECK(f != NULL);
+    if (f) {
+        char buf[1 << 16];
+        size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+        buf[n] = '\0';
+        fclose(f);
+        CHECK(strstr(buf, "arm_and_restart(\"psram 120 re-arm after crash\")") != NULL);
+    }
+}
+
 int main(void) {
     exact_lines();
     keys_in_order();
@@ -227,6 +254,7 @@ int main(void) {
     enum_words();
     extremes_fit();
     split_rule();
+    sticky_crash_flag();
     if (failures) {
         printf("soak_line_test: %d failure(s)\n", failures);
         return 1;
