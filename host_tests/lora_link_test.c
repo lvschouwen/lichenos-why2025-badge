@@ -1,5 +1,6 @@
 // Host tests for the P4 LoRa link logic: config file, supervisor, status line
 #include "lora_link.h"
+#include "mutate.h"
 
 #include <stdio.h>
 
@@ -272,11 +273,108 @@ static void status_line_format(void) {
     CHECK(n == strlen(small) && n < sizeof(small)); // cut short and terminated
 }
 
+static uint32_t fnv(uint32_t h, void const *p, size_t n) {
+    uint8_t const *b = p;
+    while (n--) {
+        h = (h ^ *b++) * 16777619u;
+    }
+    return h;
+}
+
+static uint32_t fnv_cfg(uint32_t h, lora_config_t const *c) {
+    h = fnv(h, &c->freq_hz, sizeof(c->freq_hz));
+    h = fnv(h, &c->bw_hz, sizeof(c->bw_hz));
+    h = fnv(h, &c->sf, 1);
+    h = fnv(h, &c->cr, 1);
+    h = fnv(h, &c->sync_word, 1);
+    h = fnv(h, &c->preamble, sizeof(c->preamble));
+    return fnv(h, &c->tx_power_dbm, 1);
+}
+
+// Each key once with its reason (#212): pins which check refuses first and the text it gives
+static void cfg_reasons(void) {
+    struct {
+        char const *text, *why;
+    } const cases[] = {
+        {"frequency_mhz = \"x\"\n", "frequency_mhz must be 862-928 MHz"},
+        {"frequency_mhz = 928.5\nbandwidth_khz = true\n", "frequency_mhz must be 862-928 MHz"},
+        {"bandwidth_khz = 0\n", "bandwidth_khz must be a LoRa bandwidth up to 500 kHz"},
+        {"bandwidth_khz = [1]\nspreading_factor = 1.0\n", "bandwidth_khz must be a LoRa bandwidth up to 500 kHz"},
+        {"spreading_factor = 256\n", "spreading_factor must be an integer"},
+        {"coding_rate = \"8\"\nsync_word = -1\n", "coding_rate must be an integer (5 = 4/5 ... 8 = 4/8)"},
+        {"sync_word = 1.5\n", "sync_word must be an integer 0-255"},
+        {"preamble = 65536\n", "preamble must be an integer 0-65535"},
+        {"spreading_factor = 4\n", "values out of range (862-928 MHz, LoRa bandwidth, SF 5-12, CR 5-8, preamble >= 6)"},
+        {"preamble = 5\n", "values out of range (862-928 MHz, LoRa bandwidth, SF 5-12, CR 5-8, preamble >= 6)"},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        lora_config_t c;
+        char          err[128] = "x";
+        if (parse(cases[i].text, &c, err) || !same(&c, &defaults) || strcmp(err, cases[i].why) != 0) {
+            printf("FAIL reason %zu: got \"%s\"\n", i, err);
+            failures++;
+        }
+    }
+    lora_config_t c;
+    char          small[8] = "x";
+    CHECK(!lora_cfg_parse("preamble = 5\n", 13, &c, small, sizeof(small)) && strcmp(small, "values ") == 0);
+    CHECK(!lora_cfg_parse("not toml [\n", 11, &c, small, sizeof(small)) && strlen(small) == 7 && same(&c, &defaults));
+    CHECK(lora_cfg_parse("sf = 1\n", 7, &c, NULL, 0) && same(&c, &defaults)); // unknown keys are ignored
+    CHECK(!lora_cfg_parse("preamble = 5\n", 13, &c, NULL, 0) && same(&c, &defaults));
+}
+
+// Malformed config text (#212): every mutation of a full file either parses to a valid config with an empty reason,
+// or falls back to the defaults with a terminated reason. The digest pins every result (taken before the #212 split);
+// a deliberate change to the parser changes it: print the new value and say why in the commit. Inline tables are left
+// out because tomlc17 leaks one that fails to parse (third-party; LeakSanitizer would fail this test).
+static void cfg_malformed(void) {
+    static char const full[] = "# lora.toml\nfrequency_mhz = 869.618\nbandwidth_khz = 62.5\nspreading_factor = 8\n"
+                               "coding_rate = 5\nsync_word = 0x12\npreamble = 16\n[extra]\nkey = \"v\"\n";
+    mut_rng_t r;
+    mut_seed(&r, 0x212);
+    uint32_t h   = 2166136261u;
+    size_t   bad = 0;
+    for (int k = 0; k < 20000; k++) {
+        uint8_t buf[sizeof(full) + 64];
+        size_t  len = k == 0 ? sizeof(full) - 1 : mut_random(&r, (uint8_t const *)full, sizeof(full) - 1, buf, sizeof(buf) - 1);
+        if (k == 0) {
+            memcpy(buf, full, len);
+        }
+        buf[len] = 0; // the documented contract: NUL-terminated text, len without the NUL
+        if (memchr(buf, '{', len)) {
+            continue; // tomlc17 leaks the table of a malformed inline table (reported with #212): not this parser's
+        }
+        uint8_t *text = mut_exact(buf, len + 1);
+        lora_config_t c;
+        char          err[64];
+        memset(err, 'z', sizeof(err));
+        bool ok   = lora_cfg_parse((char const *)text, len, &c, err, sizeof(err));
+        bool sane = memchr(err, 0, sizeof(err)) &&
+                    (ok ? err[0] == 0 && lora_config_valid(&c) && c.tx_power_dbm == defaults.tx_power_dbm
+                        : err[0] != 0 && same(&c, &defaults) && c.tx_power_dbm == defaults.tx_power_dbm);
+        if (!sane && bad++ < 5) {
+            printf("FAIL config mutation %d (ok %d): %s\n", k, ok, (char const *)text);
+        }
+        h = fnv(h, &ok, sizeof(ok));
+        h = fnv_cfg(h, &c);
+        h = fnv(h, err, strnlen(err, sizeof(err)));
+        free(text);
+    }
+    failures += bad ? 1 : 0;
+    uint32_t const pinned = 0x1359c853u;
+    if (h != pinned) {
+        printf("FAIL lora_cfg_parse digest 0x%08x, pinned 0x%08x\n", (unsigned)h, (unsigned)pinned);
+        failures++;
+    }
+}
+
 int main(void) {
     cfg_defaults_when_empty();
     cfg_skel_file_matches_defaults();
     cfg_overrides();
     cfg_bad_values_fall_back();
+    cfg_reasons();
+    cfg_malformed();
     supervisor_starts_with_config();
     supervisor_reconfigures_after_c6_restart();
     supervisor_reconfigures_after_silence();

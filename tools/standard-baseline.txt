@@ -152,6 +152,5 @@ size	libstorage.a	1828
 size	libtfpsacrypto.a	80464
 size	libvfs.a	4945
 stack	firmware/components/lora/lora.c:lora_task	1360
-stack	firmware/components/lora/lora_link.c:lora_cfg_parse	1056
 stack	firmware/components/mesh/mesh_notify_run.c:mesh_notify_drain	1872
 stack	firmware/components/mesh/mesh_telem.c:tl_view_text	1728

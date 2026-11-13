@@ -41,6 +41,57 @@ static bool fail(lora_config_t *out, char *err, size_t errlen, char const *why) 
     return false;
 }
 
+// frequency_mhz and bandwidth_khz, integers or floats: the reason the first bad one is refused, NULL when both are fine
+static char const *read_floats(toml_datum_t tab, lora_config_t *c) {
+    double num;
+    bool   present;
+    if (!get_number(tab, "frequency_mhz", &num, &present) || (present && !(num >= 862 && num <= 928))) {
+        return "frequency_mhz must be 862-928 MHz";
+    }
+    if (present) {
+        c->freq_hz = (uint32_t)lround(num * 1e6);
+    }
+    if (!get_number(tab, "bandwidth_khz", &num, &present) || (present && !(num > 0 && num <= 500))) {
+        return "bandwidth_khz must be a LoRa bandwidth up to 500 kHz";
+    }
+    if (present) {
+        c->bw_hz = (uint32_t)lround(num * 1e3);
+    }
+    return NULL;
+}
+
+// The integer keys, in the file's order of checks; ranges here are only what the field holds, lora_config_valid has
+// the radio's
+static char const *read_ints(toml_datum_t tab, lora_config_t *c) {
+    int64_t v = c->sf;
+    if (!get_int(tab, "spreading_factor", 0, 255, &v)) {
+        return "spreading_factor must be an integer";
+    }
+    c->sf = (uint8_t)v;
+    v     = c->cr;
+    if (!get_int(tab, "coding_rate", 0, 255, &v)) {
+        return "coding_rate must be an integer (5 = 4/5 ... 8 = 4/8)";
+    }
+    c->cr = (uint8_t)v;
+    v     = c->sync_word;
+    if (!get_int(tab, "sync_word", 0, 255, &v)) {
+        return "sync_word must be an integer 0-255";
+    }
+    c->sync_word = (uint8_t)v;
+    v            = c->preamble;
+    if (!get_int(tab, "preamble", 0, 65535, &v)) {
+        return "preamble must be an integer 0-65535";
+    }
+    c->preamble = (uint16_t)v;
+    return NULL;
+}
+
+// Not inlined, so the keys' lookups do not add to the frame that already holds the parse result (#212)
+__attribute__((noinline)) static char const *read_keys(toml_datum_t tab, lora_config_t *c) {
+    char const *bad = read_floats(tab, c);
+    return bad ? bad : read_ints(tab, c);
+}
+
 bool lora_cfg_parse(char const *text, size_t len, lora_config_t *out, char *err, size_t errlen) {
     lora_config_t const defaults = LORA_CONFIG_DEFAULT;
     *out                         = defaults;
@@ -49,53 +100,17 @@ bool lora_cfg_parse(char const *text, size_t len, lora_config_t *out, char *err,
     }
 
     toml_result_t result = toml_parse(text, (int)len);
-    if (!result.ok) {
-        char why[sizeof(result.errmsg)];
-        snprintf(why, sizeof(why), "%s", result.errmsg);
-        toml_free(result);
-        return fail(out, err, errlen, why);
+    lora_config_t c      = defaults;
+    char const   *bad    = result.ok ? read_keys(result.toptab, &c) : NULL;
+    bool const    parsed = result.ok;
+    if (!parsed) {
+        fail(out, err, errlen, result.errmsg); // copied out before the free below
     }
-
-    lora_config_t c   = defaults;
-    char const   *bad = NULL;
-    double        num;
-    bool          present;
-    int64_t       v;
-
-    if (!get_number(result.toptab, "frequency_mhz", &num, &present) || (present && !(num >= 862 && num <= 928))) {
-        bad = "frequency_mhz must be 862-928 MHz";
-    } else if (present) {
-        c.freq_hz = (uint32_t)lround(num * 1e6);
-    }
-    if (!bad &&
-        (!get_number(result.toptab, "bandwidth_khz", &num, &present) || (present && !(num > 0 && num <= 500)))) {
-        bad = "bandwidth_khz must be a LoRa bandwidth up to 500 kHz";
-    } else if (!bad && present) {
-        c.bw_hz = (uint32_t)lround(num * 1e3);
-    }
-
-    v = c.sf;
-    if (!bad && !get_int(result.toptab, "spreading_factor", 0, 255, &v)) {
-        bad = "spreading_factor must be an integer";
-    }
-    c.sf = (uint8_t)v;
-    v    = c.cr;
-    if (!bad && !get_int(result.toptab, "coding_rate", 0, 255, &v)) {
-        bad = "coding_rate must be an integer (5 = 4/5 ... 8 = 4/8)";
-    }
-    c.cr = (uint8_t)v;
-    v    = c.sync_word;
-    if (!bad && !get_int(result.toptab, "sync_word", 0, 255, &v)) {
-        bad = "sync_word must be an integer 0-255";
-    }
-    c.sync_word = (uint8_t)v;
-    v           = c.preamble;
-    if (!bad && !get_int(result.toptab, "preamble", 0, 65535, &v)) {
-        bad = "preamble must be an integer 0-65535";
-    }
-    c.preamble = (uint16_t)v;
     toml_free(result);
 
+    if (!parsed) {
+        return false;
+    }
     if (bad) {
         return fail(out, err, errlen, bad);
     }
