@@ -270,11 +270,6 @@ static void test_send_pages(void) {
         v.focus = "Advert & contacts"; // opens the page; its own rule below
         CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
     }
-    // Advert & contacts: interval, flood and location make the badge send on its own later
-    v = page(SCREEN_ADVERT, true);
-    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS);
-    CHECK(remote_key_check(RKEY_SIDE, &v) == RANS_SENDS);
-    CHECK(remote_key_check(RKEY_OTHER, &v) == RANS_OK);
     // An Enter that starts a stopped MeshCore (a due periodic advert goes out)
     v              = page(1, true); // an app's first screen (1 + its index: MeshCore's grid)
     v.enter_starts = true;
@@ -282,6 +277,72 @@ static void test_send_pages(void) {
     CHECK(remote_key_check(RKEY_SIDE, &v) == RANS_OK);
     v.enter_starts = false;
     CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
+}
+
+// #405: Advert & contacts, every row of meshcore_advert_settings.c's build() (its labels pinned here: a renamed row
+// fails this test) x every key kind x the bench scope. Typing goes as RKEY_OTHER; Esc is RKEY_OTHER too.
+typedef struct {
+    char const *row;
+    rans_t      enter_off, enter_on; // Enter without and with the bench scope
+} advert_case_t;
+
+static void test_advert_page(void) {
+    advert_case_t const rows[] = {
+        {"Advert every", RANS_ADVERT_HAND, RANS_ADVERT_HAND}, // the interval
+        {"Next advert", RANS_ADVERT_HAND, RANS_ADVERT_HAND},  // an info row: not listed, so fail closed
+        {"Advert button sends", RANS_ADVERT_HAND, RANS_ADVERT_HAND}, // the flood mode
+        {"Latitude", RANS_OK, RANS_OK},                       // opens the text field
+        {"Longitude", RANS_OK, RANS_OK},
+        {"Share location in advert", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"* Share location in advert", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"Auto-add", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"Chat", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"Repeaters", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"Rooms", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"Sensors", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"Max hops", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"Overwrite oldest when full", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"Send advert", RANS_NEEDS_SCOPE, RANS_OK}, // a one-off send, as on the radio pages
+        // Unknown, grown, partial or missing labels fail closed
+        {"Latitude source", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"Lat", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"latitude", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"Send advert now", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"Some new row", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {"", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+        {NULL, RANS_ADVERT_HAND, RANS_ADVERT_HAND},
+    };
+    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+        for (int scope = 0; scope < 2; scope++) {
+            remote_view_t v = page(SCREEN_ADVERT, scope);
+            v.focus         = rows[i].row;
+            rans_t want     = scope ? rows[i].enter_on : rows[i].enter_off;
+            if (remote_key_check(RKEY_ENTER, &v) != want) {
+                printf("  advert row '%s' scope %d: Enter\n", rows[i].row ? rows[i].row : "(null)", scope);
+            }
+            CHECK(remote_key_check(RKEY_ENTER, &v) == want);
+            CHECK(remote_key_check(RKEY_SIDE, &v) == RANS_ADVERT_HAND); // Left, Right: hand-only on every row
+            CHECK(remote_key_check(RKEY_TAB, &v) == RANS_OK);
+            CHECK(remote_key_check(RKEY_OTHER, &v) == RANS_OK);         // Esc, Up, Down, typing
+            v.dialog  = RDLG_OPEN; // a dialog over the page takes the Enter: its verdict, not the row
+            v.verdict = DLG_REMOTE_REFUSE;
+            v.label   = "x";
+            CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_HAND_ONLY);
+            CHECK(remote_key_check(RKEY_SIDE, &v) == RANS_ADVERT_HAND);
+        }
+    }
+    CHECK(remote_advert_row("Latitude") == RADV_OPENS_FIELD && remote_advert_row("Longitude") == RADV_OPENS_FIELD);
+    CHECK(remote_advert_row("Send advert") == RADV_SENDS_ONCE && remote_advert_row(NULL) == RADV_CHANGES_SENDING);
+    // The rule is this page's only: elsewhere the rows are as before
+    remote_view_t v = page(SCREEN_SETTINGS, true);
+    v.focus         = "Send advert"; // MeshCore's settings: still refused outright
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS);
+    v.focus = "Latitude";
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK && remote_key_check(RKEY_SIDE, &v) == RANS_OK);
+    v = page(SCREEN_ADVERT, true);
+    v.enter_starts = true; // no start path on this page, but a start is refused whatever the row
+    v.focus        = "Latitude";
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS);
 }
 
 static void test_wait(void) {
@@ -303,6 +364,7 @@ int main(void) {
     test_parse_yes();
     test_chat();
     test_send_pages();
+    test_advert_page();
     if (failures) {
         printf("remote_answer_test: %d failure(s)\n", failures);
         return 1;

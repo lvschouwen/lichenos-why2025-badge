@@ -57,6 +57,12 @@ bool advcfg_gap_ok(uint32_t last_s, uint32_t now_s);
 // ---- location ----------------------------------------------------------------------------------------------------
 // NULL when text is a decimal number within range (lat +-90, lon +-180) stored in *out, else the reason
 char const *advcfg_parse_coord(char const *text, bool is_lat, double *out);
+// A coordinate submitted on Advert & contacts (#405): NULL when it is to be saved (in *out), else why not, nothing
+// saved. An invalid value is refused for its own reason whoever typed it (harmless, so a remote key may try one); a
+// valid one is saved only when hand_ok (key_cause_hand_only_ok: a hand or no key), else ADVCFG_COORD_HAND_ONLY: the
+// position goes out in later adverts, so a remote key never changes it.
+#define ADVCFG_COORD_HAND_ONLY "saving a position takes a hand (remote keys may not)"
+char const *advcfg_coord_submit(char const *text, bool is_lat, bool hand_ok, double *out);
 // Both coordinates, "52.370200 4.895200"
 void advcfg_coord_text(double lat, double lon, char *out, size_t cap);
 // Sharing the location needs one: (0, 0) is "not set" (a node at the null island would be a default, not a place)

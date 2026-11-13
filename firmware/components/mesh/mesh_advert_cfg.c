@@ -160,6 +160,19 @@ char const *advcfg_parse_coord(char const *text, bool is_lat, double *out) {
     return NULL;
 }
 
+char const *advcfg_coord_submit(char const *text, bool is_lat, bool hand_ok, double *out) {
+    double      v;
+    char const *why = advcfg_parse_coord(text, is_lat, &v);
+    if (why) {
+        return why;
+    }
+    if (!hand_ok) {
+        return ADVCFG_COORD_HAND_ONLY;
+    }
+    *out = v;
+    return NULL;
+}
+
 void advcfg_coord_text(double lat, double lon, char *out, size_t cap) {
     snprintf(out, cap, "%.6f %.6f", lat, lon);
 }

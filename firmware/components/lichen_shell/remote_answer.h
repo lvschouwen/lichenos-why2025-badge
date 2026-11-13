@@ -20,8 +20,12 @@
 //   - The other screens where Enter goes on air with no dialog are refused outright: Trace and Discover path, Status
 //     and Telemetry (their Again rows), the repeater login, command and settings pages, the contact page's rows that
 //     open them or send (remote_contact_send_row), a "Send advert" or "Start MeshCore" row anywhere (MeshCore's
-//     settings), and an Enter that starts a stopped MeshCore on its grid or home tile (a due periodic advert goes out). Advert & contacts (SCREEN_ADVERT) changes what
-//     the badge sends on its own later (interval, flood, location): Enter, Left and Right are refused there.
+//     settings), and an Enter that starts a stopped MeshCore on its grid or home tile (a due periodic advert goes out).
+//   - Advert & contacts (SCREEN_ADVERT, #405, Lucas 2026-11-13) changes what the badge sends on its own later: Left and
+//     Right on any row, and Enter on every row but these, are hand-only (RANS_ADVERT_HAND). Enter on Latitude or
+//     Longitude opens its text field (typing, Esc and an invalid value are harmless; saving a valid one is refused
+//     for an injected key by the page itself, which asks the key's cause: the Enter that saves lands on the text
+//     entry, not here). A one-off "Send advert" row there needs the bench console scope (remote_advert_row).
 //   - Esc and every other key always go: they only move or go back.
 //   - Enter, Left and Right are never held (hold:): LVGL clicks on the release, so a dialog that opened during the hold
 //     would take a key checked before it. (The stepper looks again right before a tap's release; that only notices a
@@ -45,7 +49,15 @@ typedef enum {
     RANS_OTHER_DIALOG, // answer: the open dialog has another confirm label, or is another open (gen)
     RANS_CHAT_TEST,    // a chat send outside #badgetest
     RANS_SENDS,        // an Enter that goes on air with no dialog, outside a chat
+    RANS_ADVERT_HAND,  // Advert & contacts: a row that changes what the badge sends later (interval, flood, location)
 } rans_t;
+
+// What a remote Enter on an Advert & contacts row does (by the row's exact label, "* " of a checked row ignored)
+typedef enum {
+    RADV_CHANGES_SENDING, // hand-only: every row not listed below, and no row read
+    RADV_OPENS_FIELD,     // Latitude, Longitude: opens a text field
+    RADV_SENDS_ONCE,      // Send advert: one advert now, under the bench console scope
+} remote_advert_row_t;
 
 typedef struct {
     rdlg_t               dialog;
@@ -74,6 +86,8 @@ bool     remote_holds_ok(uint32_t const *keys, size_t n, uint8_t (*code_of)(uint
 rans_t   remote_key_check(rkey_t key, remote_view_t const *v);
 // Is focus (the row label "fw ui" reports) a contact page row whose Enter goes on air with no dialog?
 bool     remote_contact_send_row(char const *focus);
+// The Advert & contacts row rule for focus (what "fw ui" reports; NULL or "" is no row: hand-only)
+remote_advert_row_t remote_advert_row(char const *focus);
 // Is screen_id one of the badge's own radio pages (no dialog: Enter, Left and Right there need the bench scope)?
 bool     remote_radio_page(int screen_id);
 // "yes <label> [#<gen>]" (the text after "yes"): the label (spaces inside kept, the ends trimmed) and the open number when

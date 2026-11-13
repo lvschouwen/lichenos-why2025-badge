@@ -7,6 +7,7 @@
 #include "meshcore_run.h"
 #include "screen_ids.h"
 #include "esp_log.h"
+#include "key_cause.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_ui.h"
@@ -178,12 +179,18 @@ static void toggle_manual(void *arg) {
     }
 }
 
+// The text entry's Enter reaches here through shell_back_then, a deferred UI call that runs under the cause of the key
+// that queued it (#400): so this asks whose Enter it was, whichever way the entry was opened or submitted (#405)
 static void on_coord(char const *text, void *arg) {
     bool              is_lat = arg != NULL;
     mesh_advert_cfg_t c;
     double            v;
-    char const       *why = advcfg_parse_coord(text, is_lat, &v);
+    key_cause_t       cause = key_cause_now();
+    char const       *why   = advcfg_coord_submit(text, is_lat, key_cause_hand_only_ok(cause), &v);
     if (why) {
+        if (strcmp(why, ADVCFG_COORD_HAND_ONLY) == 0) {
+            ESP_LOGW(TAG, "%s: %s; position unchanged", key_cause_name(cause), why); // the console's reply
+        }
         set_loc_note(why);
         return;
     }

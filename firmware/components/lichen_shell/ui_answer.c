@@ -40,7 +40,10 @@ static void why_text(rans_t r, remote_view_t const *v, bool page, char *why, siz
     switch (r) {
         case RANS_HAND_ONLY: snprintf(why, cap, "dialog '%s' is hand-only", v->label); break;
         case RANS_NEEDS_SCOPE:
-            if (page) {
+            if (page && !remote_radio_page(v->top_screen)) {
+                snprintf(why, cap, "this row (screen %d) sends an advert now: only under the bench console scope (" SCOPE_HOW
+                         ")", v->top_screen);
+            } else if (page) {
                 snprintf(why, cap, "the badge's radio page (screen %d) only under the bench console scope (" SCOPE_HOW ")",
                          v->top_screen);
             } else {
@@ -61,6 +64,12 @@ static void why_text(rans_t r, remote_view_t const *v, bool page, char *why, siz
             snprintf(why, cap,
                      "this key (screen %d) makes the badge go on air with no dialog: hand-only remotely (remote send "
                      "only in " REMOTE_TEST_CHANNEL ")",
+                     v->top_screen);
+            break;
+        case RANS_ADVERT_HAND:
+            snprintf(why, cap,
+                     "this row (screen %d) changes what the badge sends on its own later: hand-only remotely (Enter on "
+                     "Latitude or Longitude opens its field; saving a position takes a hand)",
                      v->top_screen);
             break;
         default: snprintf(why, cap, "refused"); break;

@@ -112,6 +112,30 @@ static advcfg_autoadd_t aa(bool on, uint8_t types, bool ow, uint8_t hops) {
     return (advcfg_autoadd_t){.on = on, .types = types, .overwrite = ow, .max_hops = hops};
 }
 
+// #405: the save gate of a submitted coordinate. An invalid value is refused for its own reason whoever typed it (a
+// remote key may try one); a valid one is saved only for a hand (or no key), never for an injected key
+static void test_coord_submit(void) {
+    double v = 7;
+    CHECK(advcfg_coord_submit("52.3702", true, true, &v) == NULL && v > 52.37 && v < 52.371);
+    CHECK(advcfg_coord_submit("4.8952", false, true, &v) == NULL && v > 4.89 && v < 4.9);
+    v = 7;
+    char const *why = advcfg_coord_submit("52.3702", true, false, &v);
+    CHECK(why && strcmp(why, ADVCFG_COORD_HAND_ONLY) == 0 && v == 7); // remote: refused, nothing stored
+    why = advcfg_coord_submit("4.8952", false, false, &v);
+    CHECK(why && strcmp(why, ADVCFG_COORD_HAND_ONLY) == 0 && v == 7);
+    char const *bad[] = {"95", "-91", "abc", "", "52.3N", "nan"};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        for (int hand = 0; hand < 2; hand++) {
+            why = advcfg_coord_submit(bad[i], true, hand, &v);
+            CHECK(why && strcmp(why, ADVCFG_COORD_HAND_ONLY) != 0 && v == 7); // its own reason, for both
+        }
+    }
+    why = advcfg_coord_submit("200", false, false, &v);
+    CHECK(why && strcmp(why, "longitude is -180 to 180") == 0 && v == 7);
+    why = advcfg_coord_submit("95", true, false, &v);
+    CHECK(why && strcmp(why, "latitude is -90 to 90") == 0);
+}
+
 static void test_autoadd_codec(void) {
     advcfg_autoadd_t a;
     advcfg_autoadd_decode(0, 0, 0, &a); // MeshCore's default: add everything
@@ -224,6 +248,7 @@ int main(void) {
     test_interval();
     test_schedule();
     test_coords();
+    test_coord_submit();
     test_autoadd_codec();
     test_autoadd_decide();
     test_texts();
