@@ -36,7 +36,7 @@ static void noise_is_not_trusted(void) {
     // Noise that claims a panic of an app is reset first: the crash is the boot's own verdict, blamed on nobody
     memset(&r, 0x61, sizeof(r)); // "aaaa...": would read as an id if the record were trusted
     b = safe_mode_boot(&r, true);
-    CHECK(b.crash && b.app[0] == '\0' && !b.background_off);
+    CHECK(b.crash && b.app[0] == '\0' && !b.limit_reached);
 }
 
 static void checksum_guards_the_window(void) {
@@ -46,7 +46,7 @@ static void checksum_guards_the_window(void) {
     r.window[1] ^= 0x10; // one bit lost in LP RAM
     CHECK(!safe_mode_valid(&r));
     b = panic_boot(&r, "timer"); // the window is forgotten: this is the first crash again, nobody is penalised
-    CHECK(strcmp(b.app, "timer") == 0 && b.app_crashes == 1 && !b.background_off);
+    CHECK(strcmp(b.app, "timer") == 0 && b.app_crashes == 1 && !b.limit_reached);
     r.check ^= 1u;
     CHECK(!safe_mode_valid(&r));
 }
@@ -54,12 +54,12 @@ static void checksum_guards_the_window(void) {
 static void two_in_three_switch_off(void) {
     safe_mode_rec_t  r = fresh();
     safe_mode_boot_t b = panic_boot(&r, "timer");
-    CHECK(b.counted && b.crash && strcmp(b.app, "timer") == 0 && b.app_crashes == 1 && !b.background_off);
+    CHECK(b.counted && b.crash && strcmp(b.app, "timer") == 0 && b.app_crashes == 1 && !b.limit_reached);
     CHECK(b.degraded);
     b = safe_mode_boot(&r, false); // a clean boot in between
     CHECK(b.counted && !b.crash && b.degraded);
     b = panic_boot(&r, "timer");
-    CHECK(b.app_crashes == 2 && b.background_off);
+    CHECK(b.app_crashes == 2 && b.limit_reached);
 }
 
 static void spread_out_crashes_do_not(void) {
@@ -68,9 +68,9 @@ static void spread_out_crashes_do_not(void) {
     safe_mode_boot(&r, false);
     safe_mode_boot(&r, false);
     safe_mode_boot_t b = panic_boot(&r, "weather"); // the first one left the window
-    CHECK(b.app_crashes == 1 && !b.background_off);
+    CHECK(b.app_crashes == 1 && !b.limit_reached);
     b = panic_boot(&r, "timer"); // another app's crash is not this one's
-    CHECK(b.app_crashes == 1 && !b.background_off);
+    CHECK(b.app_crashes == 1 && !b.limit_reached);
 }
 
 // The bench sequence (fw-869e608d, PSRAM at 120 MHz): a panic, then ~20 s later the software restart "psram 120 re-arm
@@ -79,12 +79,12 @@ static void spread_out_crashes_do_not(void) {
 static void rearm_pair_is_one_crash(void) {
     safe_mode_rec_t  r = fresh();
     safe_mode_boot_t b = panic_boot(&r, "timer"); // boot B: after the panic, at 80 MHz
-    CHECK(b.counted && b.app_crashes == 1 && !b.background_off);
+    CHECK(b.counted && b.app_crashes == 1 && !b.limit_reached);
     uint32_t before[SAFE_MODE_WINDOW];
     memcpy(before, r.window, sizeof(before));
     safe_mode_note_rearm(&r, true); // B ends in the re-arm restart
     b = safe_mode_boot(&r, false);  // boot C: a software reset, not a crash
-    CHECK(!b.counted && !b.crash && b.app[0] == '\0' && !b.background_off);
+    CHECK(!b.counted && !b.crash && b.app[0] == '\0' && !b.limit_reached);
     CHECK(memcmp(before, r.window, sizeof(before)) == 0); // C left the window as it was
     CHECK(b.degraded);                                    // still the crash's tail
     b = safe_mode_boot(&r, false);                        // the mark was one shot: the next boot is a real clean one
@@ -100,7 +100,7 @@ static void rearm_pair_is_one_crash(void) {
     safe_mode_note_rearm(&r, true);
     safe_mode_boot(&r, false);
     b = panic_boot(&r, "timer");
-    CHECK(b.app_crashes == 2 && b.background_off);
+    CHECK(b.app_crashes == 2 && b.limit_reached);
 }
 
 static void rearm_edge_cases(void) {
@@ -115,7 +115,7 @@ static void rearm_edge_cases(void) {
     panic_boot(&r, "timer");
     safe_mode_note_rearm(&r, true);
     b = panic_boot(&r, "timer"); // it crashed again before the re-arm restart came
-    CHECK(b.counted && b.app_crashes == 2 && b.background_off);
+    CHECK(b.counted && b.app_crashes == 2 && b.limit_reached);
 
     safe_mode_rec_t noise;
     memset(&noise, 0x5A, sizeof(noise));
@@ -126,9 +126,9 @@ static void rearm_edge_cases(void) {
 static void nobody_is_blamed(void) {
     safe_mode_rec_t  r = fresh();
     safe_mode_boot_t b = panic_boot(&r, NULL); // the console's task ("fw crash test panic"), an IDF task, an ISR
-    CHECK(b.crash && b.app[0] == '\0' && b.app_crashes == 0 && !b.background_off && b.degraded);
+    CHECK(b.crash && b.app[0] == '\0' && b.app_crashes == 0 && !b.limit_reached && b.degraded);
     b = panic_boot(&r, "");
-    CHECK(b.crash && b.app[0] == '\0' && !b.background_off);
+    CHECK(b.crash && b.app[0] == '\0' && !b.limit_reached);
     b = safe_mode_boot(&r, true); // a crash without a panic (brownout, lockup, a watchdog reset): nobody
     CHECK(b.crash && b.app[0] == '\0' && r.window[0] == SAFE_MODE_NOBODY);
     // Ids the OS would never register are nobody too
@@ -154,11 +154,11 @@ static void forget_resets(void) {
     safe_mode_rec_t r = fresh();
     panic_boot(&r, "timer");
     safe_mode_boot_t b = panic_boot(&r, "timer");
-    CHECK(b.background_off);
+    CHECK(b.limit_reached);
     safe_mode_forget(&r, "timer");
     CHECK(safe_mode_valid(&r) && !safe_mode_degraded(&r));
     b = panic_boot(&r, "timer"); // switched on again: one crash is not two
-    CHECK(b.app_crashes == 1 && !b.background_off);
+    CHECK(b.app_crashes == 1 && !b.limit_reached);
     safe_mode_forget(&r, "weather"); // another app's: nothing changes
     CHECK(safe_mode_degraded(&r));
 }
@@ -170,6 +170,21 @@ static void degraded_lasts_the_window(void) {
     CHECK(safe_mode_boot(&r, false).degraded);
     CHECK(!safe_mode_boot(&r, false).degraded); // three clean boots since
     CHECK(!safe_mode_degraded(&r));
+}
+
+// Review of #232: only an app with a background part is switched off; Timer (none) crashing twice is only counted
+static void switch_off_needs_a_background(void) {
+    safe_mode_rec_t r = fresh();
+    panic_boot(&r, "timer");
+    safe_mode_boot_t b = panic_boot(&r, "timer");
+    CHECK(b.limit_reached);
+    CHECK(!safe_mode_switch_off(&b, "timer", false)); // nothing to switch off
+    CHECK(safe_mode_switch_off(&b, "timer", true));
+    CHECK(!safe_mode_switch_off(&b, "weather", true)); // not the app this boot blames
+    b = panic_boot(&r, "weather");
+    CHECK(!b.limit_reached && !safe_mode_switch_off(&b, "weather", true)); // one crash is not two
+    b = panic_boot(&r, NULL);
+    CHECK(!safe_mode_switch_off(&b, "", true)); // nobody is never switched off
 }
 
 static void hash_and_size(void) {
@@ -224,6 +239,7 @@ int main(void) {
     panic_mark_alone_is_a_crash();
     forget_resets();
     degraded_lasts_the_window();
+    switch_off_needs_a_background();
     hash_and_size();
     list_rules();
     if (fails) {

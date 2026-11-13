@@ -1,27 +1,11 @@
-// Crash attribution and safe mode (#232): the pure rules (safe_mode_policy.h). The record functions may run in the
-// panic handler: plain loops only, no libc calls, no allocation.
+// Crash attribution and safe mode (#232): the pure rules (safe_mode_policy.h) that run at boot and on the console.
+// What the panic handler runs is in safe_mode_rec.c.
 #include "safe_mode_policy.h"
 
 #include <string.h>
 
 #define FNV_BASIS 2166136261u
 #define FNV_PRIME 16777619u
-#define SUM_SALT  0x5AFE232u // a zeroed record must not sum to 0
-
-static bool id_char(char c) {
-    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
-}
-
-bool safe_mode_id_ok(char const *id) {
-    if (!id) {
-        return false;
-    }
-    size_t n = 0;
-    while (n < SAFE_MODE_ID_CAP && id[n] && id_char(id[n])) {
-        n++;
-    }
-    return n > 0 && n < SAFE_MODE_ID_CAP && id[n] == '\0';
-}
 
 uint32_t safe_mode_hash(char const *id) {
     uint32_t h = FNV_BASIS;
@@ -31,55 +15,10 @@ uint32_t safe_mode_hash(char const *id) {
     return h <= SAFE_MODE_NOBODY ? h + 2u : h; // never CLEAN or NOBODY
 }
 
-uint32_t safe_mode_sum(safe_mode_rec_t const *r) {
-    uint8_t const *p = (uint8_t const *)r;
-    uint32_t       h = FNV_BASIS ^ SUM_SALT;
-    for (size_t i = 0; i < offsetof(safe_mode_rec_t, check); i++) {
-        h = (h ^ p[i]) * FNV_PRIME;
-    }
-    return h;
-}
-
-static void seal(safe_mode_rec_t *r) {
-    r->magic = SAFE_MODE_MAGIC;
-    r->check = safe_mode_sum(r);
-}
-
-bool safe_mode_valid(safe_mode_rec_t const *r) {
-    return r->magic == SAFE_MODE_MAGIC && r->check == safe_mode_sum(r) && r->crashed[SAFE_MODE_ID_CAP - 1] == '\0';
-}
-
-void safe_mode_reset(safe_mode_rec_t *r) {
-    uint8_t *p = (uint8_t *)r;
-    for (size_t i = 0; i < sizeof(*r); i++) {
-        p[i] = 0;
-    }
-    seal(r);
-}
-
-static void ensure(safe_mode_rec_t *r) {
-    if (!safe_mode_valid(r)) {
-        safe_mode_reset(r);
-    }
-}
-
-void safe_mode_note_panic(safe_mode_rec_t *r, char const *id) {
-    ensure(r);
-    bool ok = safe_mode_id_ok(id);
-    for (size_t i = 0; i < SAFE_MODE_ID_CAP; i++) {
-        r->crashed[i] = ok && i < SAFE_MODE_ID_CAP - 1 ? id[i] : '\0';
-        if (ok && id[i] == '\0') {
-            ok = false; // the rest stays zero
-        }
-    }
-    r->flags |= SAFE_MODE_F_PANIC;
-    seal(r);
-}
-
 void safe_mode_note_rearm(safe_mode_rec_t *r, bool restarting) {
-    ensure(r);
+    safe_mode_ensure(r);
     r->flags = restarting ? r->flags | SAFE_MODE_F_REARM : r->flags & ~SAFE_MODE_F_REARM;
-    seal(r);
+    safe_mode_seal(r);
 }
 
 static bool any_crash(safe_mode_rec_t const *r) {
@@ -115,7 +54,7 @@ static unsigned count_of(safe_mode_rec_t const *r, uint32_t entry) {
 // no place in the window (it is neither a crash nor a clean boot that would dilute the count).
 safe_mode_boot_t safe_mode_boot(safe_mode_rec_t *r, bool crashed) {
     safe_mode_boot_t out = {0};
-    ensure(r);
+    safe_mode_ensure(r);
     bool panic = (r->flags & SAFE_MODE_F_PANIC) != 0;
     bool rearm = (r->flags & SAFE_MODE_F_REARM) != 0;
     out.crash  = crashed || panic;
@@ -129,24 +68,28 @@ safe_mode_boot_t safe_mode_boot(safe_mode_rec_t *r, bool crashed) {
         uint32_t entry = !out.crash ? SAFE_MODE_CLEAN : out.app[0] ? safe_mode_hash(out.app) : SAFE_MODE_NOBODY;
         push(r, entry);
         if (out.app[0]) {
-            out.app_crashes    = count_of(r, entry);
-            out.background_off = out.app_crashes >= SAFE_MODE_LIMIT;
+            out.app_crashes   = count_of(r, entry);
+            out.limit_reached = out.app_crashes >= SAFE_MODE_LIMIT;
         }
     }
     out.degraded = any_crash(r);
-    seal(r);
+    safe_mode_seal(r);
     return out;
 }
 
+bool safe_mode_switch_off(safe_mode_boot_t const *b, char const *id, bool has_background) {
+    return b->limit_reached && has_background && safe_mode_id_ok(id) && strcmp(b->app, id) == 0;
+}
+
 void safe_mode_forget(safe_mode_rec_t *r, char const *id) {
-    ensure(r);
+    safe_mode_ensure(r);
     uint32_t h = safe_mode_hash(id);
     for (size_t i = 0; i < SAFE_MODE_WINDOW; i++) {
         if (r->window[i] == h) {
             r->window[i] = SAFE_MODE_CLEAN;
         }
     }
-    seal(r);
+    safe_mode_seal(r);
 }
 
 // ---- the list ------------------------------------------------------------------------------------------------------

@@ -6,6 +6,9 @@
 #include "app_ctx.h"
 #include "app_ns.h"
 #include "app_secret.h"
+#include "esp_attr.h"
+#include "esp_cpu.h"
+#include "esp_memory_utils.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -65,6 +68,8 @@ static void app_names(void const *owner, char const **id, char const **alias) {
     *alias                  = app->alias;
 }
 
+static void panic_id_keep(lichen_ctx_t ctx, char const *id); // the panic handler's copy of the id (below)
+
 lichen_ctx_t lichen_register_app(lichen_app_t const *app) {
     app_ctx_table_t *t = table();
     if (!app) {
@@ -87,8 +92,11 @@ lichen_ctx_t lichen_register_app(lichen_app_t const *app) {
     } else if (ctx == LICHEN_CTX_NONE) {
         ESP_LOGE(TAG, "no room for app %s: LICHEN_MAX_APPS (%d) apps are registered already", app->name,
                  LICHEN_MAX_APPS);
-    } else if (app->backup_keys) {
-        register_backup_keys(app);
+    } else {
+        panic_id_keep(ctx, app->id);
+        if (app->backup_keys) {
+            register_backup_keys(app);
+        }
     }
     return ctx;
 }
@@ -153,18 +161,65 @@ lichen_ctx_t lichen_ctx_self(void) {
     return app_ctx_self(table(), &s_tls);
 }
 
-// Reads only internal .bss (the table) and the app's const struct; the panic handler runs it with the other core
-// stalled, so nothing here may wait or log
-char const *lichen_sys_panic_app_id(void) {
-    if (xPortInterruptedFromISRContext() || !app_ctx_ready(&s_table)) {
+// ---- the panic handler's view (#232) ---------------------------------------------------------------------------
+// The panic hook runs with XIP from PSRAM: a flash function or rodata is fetched through the PSRAM cache, which may
+// be what faulted. So lichen_sys_panic_app_id is IRAM_ATTR and reads internal RAM only: the table (internal .bss), a
+// copy of each app's id made at registration, and the current task's TCB through FreeRTOS's public layout mirror
+// (StaticTask_t, whose pvDummy15 is the TCB's thread-local slots). lichen_sys_panic_probe checks that mirror against
+// the real call once at boot; until it said yes the hook blames nobody.
+extern void *volatile pxCurrentTCBs[]; // FreeRTOS's current task per core (internal .bss)
+
+#define PANIC_PROBE 0x5AFE2320u
+
+static char s_panic_ids[APP_CTX_SLOTS][LICHEN_PANIC_ID_CAP]; // internal .bss, written at registration
+static bool s_panic_mirror_ok;
+
+static void panic_id_keep(lichen_ctx_t ctx, char const *id) {
+    uint32_t slot = ctx & ((1u << APP_CTX_SLOT_BITS) - 1u);
+    if (slot == 0 || slot >= APP_CTX_SLOTS || !id) {
+        return;
+    }
+    strlcpy(s_panic_ids[slot], id, sizeof(s_panic_ids[slot])); // a longer id never registers (app_ns.h)
+}
+
+static void *IRAM_ATTR tcb_slot(void const *tcb) {
+    return ((StaticTask_t const *)tcb)->pvDummy15[CTX_TLS_INDEX];
+}
+
+bool lichen_sys_panic_probe(void) {
+    portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+    void        *saved = pvTaskGetThreadLocalStoragePointer(NULL, CTX_TLS_INDEX);
+    portENTER_CRITICAL(&mux); // no switch, no migration between the reads
+    vTaskSetThreadLocalStoragePointer(NULL, CTX_TLS_INDEX, (void *)(uintptr_t)PANIC_PROBE);
+    void const *tcb = pxCurrentTCBs[esp_cpu_get_core_id()];
+    bool        ok  = tcb == (void const *)xTaskGetCurrentTaskHandle() && esp_ptr_in_dram(tcb) &&
+             (uintptr_t)tcb_slot(tcb) == PANIC_PROBE;
+    vTaskSetThreadLocalStoragePointer(NULL, CTX_TLS_INDEX, saved);
+    portEXIT_CRITICAL(&mux);
+    s_panic_mirror_ok = ok;
+    if (!ok) {
+        ESP_LOGE(TAG, "crash attribution off: the task layout is not the one this build expects (#232)");
+    }
+    return ok;
+}
+
+// The table's rules inline (app_ctx_valid lives in flash): slot 1..apps, generation not 0 and the slot's own
+char const *IRAM_ATTR lichen_sys_panic_app_id(void) {
+    int core = esp_cpu_get_core_id();
+    if (!s_panic_mirror_ok || core < 0 || core >= portNUM_PROCESSORS || xPortInterruptedFromISRContext()) {
         return NULL; // an ISR's fault is not the interrupted task's app's
     }
-    uint32_t ctx = tls_get();
-    if (!app_ctx_valid(&s_table, ctx)) {
+    void const *tcb = pxCurrentTCBs[core];
+    if (!esp_ptr_in_dram(tcb) || ((uintptr_t)tcb & 3u)) {
+        return NULL; // a TCB in PSRAM (ALLOW_EXT_MEM) or a wild pointer is never read here
+    }
+    uint32_t ctx  = (uint32_t)(uintptr_t)tcb_slot(tcb);
+    uint32_t slot = ctx & ((1u << APP_CTX_SLOT_BITS) - 1u);
+    uint32_t gen  = ctx >> APP_CTX_SLOT_BITS;
+    if (slot == 0 || slot >= APP_CTX_SLOTS || slot > s_table.apps || gen == 0 || s_table.gen[slot] != gen) {
         return NULL;
     }
-    lichen_app_t const *app = app_ctx_slot_owner(&s_table, ctx);
-    return app ? app->id : NULL;
+    return s_panic_ids[slot][0] ? s_panic_ids[slot] : NULL;
 }
 
 static char const *app_name(void const *owner) {

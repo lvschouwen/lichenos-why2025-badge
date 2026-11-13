@@ -47,9 +47,10 @@ bool lichen_watch_boot_told(void) {
 
 // Names the app the crash is attributed to (#232), by its name when it is still registered
 static void crash_body(char *out, size_t cap) {
-    char id[SAFE_MODE_APP_ID_CAP];
-    bool off = false;
-    if (!safe_mode_crashed_app(id, sizeof(id), &off)) {
+    char     id[SAFE_MODE_APP_ID_CAP];
+    unsigned crashes = 0;
+    bool     off     = false;
+    if (!safe_mode_crashed_app(id, sizeof(id), &crashes, &off)) {
         snprintf(out, cap, "Lichen restarted after a crash. Open this for the Crash log.");
         return;
     }
@@ -58,6 +59,9 @@ static void crash_body(char *out, size_t cap) {
     if (off) {
         snprintf(out, cap, "%s crashed again: its background part is off until switched on (fw app background %s on).",
                  name, id);
+    } else if (crashes > 1) {
+        snprintf(out, cap, "%s crashed %u times in the last %d boots. Open this for the Crash log.", name, crashes,
+                 SAFE_MODE_WINDOW_BOOTS);
     } else {
         snprintf(out, cap, "%s crashed and Lichen restarted. Open this for the Crash log.", name);
     }

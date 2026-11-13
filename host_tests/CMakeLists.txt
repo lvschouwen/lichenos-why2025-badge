@@ -2404,6 +2404,7 @@ add_test(NAME mesh_journal_gen_test COMMAND mesh_journal_gen_test)
 add_executable(safe_mode_policy_test
     ${CMAKE_CURRENT_SOURCE_DIR}/safe_mode_policy_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/safe_mode_policy.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/safe_mode_rec.c
 )
 target_include_directories(safe_mode_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
 target_compile_options(safe_mode_policy_test PRIVATE -Wall -Wextra -Werror)

@@ -71,10 +71,15 @@ void lichen_sys_app_console_register(void);
 // not "ctx" goes to more, and usage (kept by pointer) is the command's help. NULL: only "ctx". Main task, at boot.
 void lichen_sys_app_console_more(void (*more)(char const *args), char const *usage);
 
-// For the panic handler (#232): the id of the app the calling task runs for (its entered context, as lichen_ctx_self
-// would answer), NULL for the OS, an ISR, a context that is not valid or an app without an id. No lock, no log, no
-// count: it only reads the task's thread-local slot and the table. Any task, the panic handler included.
+// For the panic handler (#232): the id of the app the task running on this core runs for (its entered context, as
+// lichen_ctx_self would answer), NULL for the OS, an ISR, a context that is not valid, an app without an id, or before
+// lichen_sys_panic_probe said yes. In internal RAM and reading internal RAM only (copies of the ids, the table, the
+// TCB when it is in internal RAM): no lock, no log, no flash. The panic handler.
+#define LICHEN_PANIC_ID_CAP 14 // an app id with its NUL
 char const *lichen_sys_panic_app_id(void);
+// Once at boot, from a task (main, safe_mode_boot_step): checks that the panic handler's view of the current task's
+// context slot is the real one; false (logged) leaves attribution off. Not from an ISR.
+bool lichen_sys_panic_probe(void);
 
 #ifdef __cplusplus
 }

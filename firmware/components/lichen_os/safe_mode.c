@@ -4,6 +4,8 @@
 #include "safe_mode_policy.h"
 
 #include "esp_attr.h"
+#include "esp_cpu.h"
+#include "esp_private/panic_internal.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -18,7 +20,9 @@
 
 static char const TAG[] = "safe_mode";
 
-_Static_assert(SAFE_MODE_APP_ID_CAP == SAFE_MODE_ID_CAP, "safe_mode.h's id buffer is the record's");
+_Static_assert(SAFE_MODE_APP_ID_CAP == SAFE_MODE_ID_CAP && SAFE_MODE_APP_ID_CAP == LICHEN_PANIC_ID_CAP,
+               "safe_mode.h's id buffer is the record's and the panic view's");
+_Static_assert(SAFE_MODE_WINDOW_BOOTS == SAFE_MODE_WINDOW, "safe_mode.h's window is the policy's");
 
 #define LIST_KEY "bg_off" // badge_fw: the apps whose background part is off; a factory reset clears it
 
@@ -31,40 +35,56 @@ static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static safe_mode_boot_t s_boot;      // this boot's verdict, written once by safe_mode_boot_step
 static atomic_bool      s_boot_done; // s_boot is set
+static atomic_bool      s_switched;  // start_apps switched the crashed app's background off this boot
 static char             s_off[SAFE_MODE_LIST_MAX]; // the saved list as read at boot and changed since, under s_mux
 
 // ---- the panic hook ------------------------------------------------------------------------------------------------
 
 // Every panic (exceptions, abort, assert, the interrupt watchdog) reaches esp_panic_handler from the port's handler;
-// the linker sends that call here first. No allocation, no lock, no log: only reads (the task's context slot, the app
-// table, the app's const id) and LP RAM writes. The guard keeps a fault in here from looping: the IDF then restarts.
-void __real_esp_panic_handler(void *info);
-void __wrap_esp_panic_handler(void *info);
-void __wrap_esp_panic_handler(void *info) {
+// the linker sends that call here first. No allocation, no lock, no log, and nothing behind the PSRAM cache (XIP from
+// PSRAM): this is IRAM_ATTR, safe_mode_rec.c is noflash (linker.lf), lichen_sys_panic_app_id is IRAM_ATTR and reads
+// internal RAM only, the record is LP RAM. The guard keeps a fault in here from looping: the IDF then restarts.
+// Only the core the panic is about blames its task: a cache error whose CPU the hardware cannot tell (info->core -1,
+// handled by core 0) or a fault the IDF reports for the other core blames nobody.
+void __real_esp_panic_handler(panic_info_t *info);
+void __wrap_esp_panic_handler(panic_info_t *info);
+void IRAM_ATTR __wrap_esp_panic_handler(panic_info_t *info) {
     static bool entered;
     if (!entered) {
-        entered = true;
-        safe_mode_note_panic(&s_rec, lichen_sys_panic_app_id());
+        entered          = true;
+        bool        mine = info && info->core == esp_cpu_get_core_id();
+        char const *id   = mine ? lichen_sys_panic_app_id() : NULL;
+        safe_mode_note_panic(&s_rec, id);
     }
     __real_esp_panic_handler(info);
 }
 
 // ---- queries -------------------------------------------------------------------------------------------------------
 
-bool safe_mode_background_off(char const *id) {
+static void switch_off(char const *id);
+
+bool safe_mode_background_off(char const *id, bool has_background) {
     portENTER_CRITICAL(&s_mux);
     bool off = safe_mode_list_has(s_off, id);
     portEXIT_CRITICAL(&s_mux);
+    if (!off && atomic_load(&s_boot_done) && safe_mode_switch_off(&s_boot, id, has_background)) {
+        switch_off(id); // a list that did not save still keeps it off this boot
+        atomic_store(&s_switched, true);
+        off = true;
+    }
     return off;
 }
 
-bool safe_mode_crashed_app(char *id, size_t cap, bool *switched_off) {
+bool safe_mode_crashed_app(char *id, size_t cap, unsigned *crashes, bool *switched_off) {
     if (!atomic_load(&s_boot_done) || !s_boot.app[0] || cap < sizeof(s_boot.app)) {
         return false;
     }
     memcpy(id, s_boot.app, sizeof(s_boot.app));
+    if (crashes) {
+        *crashes = s_boot.app_crashes;
+    }
     if (switched_off) {
-        *switched_off = s_boot.background_off;
+        *switched_off = atomic_load(&s_switched);
     }
     return true;
 }
@@ -95,8 +115,11 @@ static bool save_list(char const *list) {
     return ok;
 }
 
+// Only for an app not on the list yet (safe_mode_background_off asks first), so a boot that changes nothing writes nothing
 static void switch_off(char const *id) {
     char list[SAFE_MODE_LIST_MAX];
+    ESP_LOGW(TAG, "%s crashed %d times in %d boots: its background part is off until fw app background %s on", id,
+             SAFE_MODE_LIMIT, SAFE_MODE_WINDOW, id);
     portENTER_CRITICAL(&s_mux);
     bool added = safe_mode_list_add(s_off, sizeof(s_off), id);
     memcpy(list, s_off, sizeof(list));
@@ -210,8 +233,8 @@ static void log_verdict(void) {
     if (!s_boot.counted) {
         ESP_LOGI(TAG, "this boot is the PSRAM re-arm restart after a crash: not counted again");
     } else if (s_boot.app[0]) {
-        ESP_LOGW(TAG, "the crash is attributed to %s: %u of %d in the last %d boots%s", s_boot.app, s_boot.app_crashes,
-                 SAFE_MODE_LIMIT, SAFE_MODE_WINDOW, s_boot.background_off ? ", its background part is switched off" : "");
+        ESP_LOGW(TAG, "the crash is attributed to %s: %u of %d in the last %d boots", s_boot.app, s_boot.app_crashes,
+                 SAFE_MODE_LIMIT, SAFE_MODE_WINDOW);
     } else if (s_boot.crash) {
         ESP_LOGI(TAG, "the crash is attributed to no app (an OS task, an ISR, a reset without a panic)");
     }
@@ -219,16 +242,14 @@ static void log_verdict(void) {
 
 void safe_mode_boot_step(bool crashed) {
     char list[SAFE_MODE_LIST_MAX];
+    lichen_sys_panic_probe(); // the panic hook blames nobody until its view of the task checked out
     settings_get_str(LIST_KEY, list, sizeof(list), "");
     portENTER_CRITICAL(&s_mux);
     memcpy(s_off, list, sizeof(s_off));
     s_boot = safe_mode_boot(&s_rec, crashed);
     portEXIT_CRITICAL(&s_mux);
     atomic_store(&s_boot_done, true);
-    log_verdict();
-    if (s_boot.background_off) {
-        switch_off(s_boot.app);
-    }
+    log_verdict(); // the switch-off itself waits for start_apps: only then is it known whether the app has a background
     if (list[0]) {
         ESP_LOGW(TAG, "background part off (safe mode) for %s: fw app background <id> on", list);
     }

@@ -1,0 +1,6 @@
+# Crash attribution (#232): what the panic hook runs lives in internal RAM, never behind the PSRAM cache (XIP from
+# PSRAM). safe_mode.c's wrapper and lichen_api's lichen_sys_panic_app_id are IRAM_ATTR; this is the record's object.
+[mapping:lichen_os_safe_mode]
+archive: liblichen_os.a
+entries:
+    safe_mode_rec (noflash)

@@ -8,7 +8,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define SAFE_MODE_APP_ID_CAP 14 // safe_mode_crashed_app's id buffer (an app id with the NUL)
+#define SAFE_MODE_APP_ID_CAP   14 // safe_mode_crashed_app's id buffer (an app id with the NUL)
+#define SAFE_MODE_WINDOW_BOOTS 3  // the boots the crashes are counted in (safe_mode_policy.h's window)
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,11 +20,15 @@ extern "C" {
 // and "crash" subcommands (bound before lichen_sys_app_console_register). Before the display starts, so the one
 // possible flash write stalls nothing on the glass (#31).
 void safe_mode_boot_step(bool crashed);
-// The app's background part stays off this boot (start_apps skips its start_background). Any task.
-bool safe_mode_background_off(char const *id);
-// This boot follows a crash attributed to an app: its id into id (cap >= 14) and whether this crash switched its
-// background off. False for no crash or nobody to blame. Any task.
-bool safe_mode_crashed_app(char *id, size_t cap, bool *switched_off);
+// start_apps, for every registered app: its background part stays off this boot (start_apps skips start_background).
+// The app this boot's crash is blamed on is switched off here (and saved) when it reached the limit and has a
+// background part (has_background); one without has nothing to switch off. The settings are written only when the
+// list changes. Main task, at boot.
+bool safe_mode_background_off(char const *id, bool has_background);
+// This boot follows a crash attributed to an app: its id into id (cap >= 14), its crashes in the window (crashes,
+// may be NULL) and whether start_apps switched its background off (switched_off, may be NULL). False for no crash or
+// nobody to blame. Any task.
+bool safe_mode_crashed_app(char *id, size_t cap, unsigned *crashes, bool *switched_off);
 // A crash is among the last boots in the window, or this boot follows one (lichen_boot_degraded, #280). False before
 // safe_mode_boot_step. Any task.
 bool safe_mode_degraded_boot(void);

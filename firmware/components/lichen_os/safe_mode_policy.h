@@ -10,8 +10,9 @@
 // window: nobody is penalised (fail open). It is noise after a power-on, so nothing in it is used before
 // safe_mode_valid said yes.
 //
-// Every function here may run in the panic handler (safe_mode_note_panic certainly does): no allocation, no lock, no
-// logging, no libc beyond what the compiler inlines.
+// The record functions (safe_mode_rec.c: id_ok, sum, seal, valid, reset, ensure, note_panic) run in the panic handler:
+// they sit in internal RAM (linker.lf), allocate, lock and log nothing and call no libc. The rest (safe_mode_policy.c)
+// runs at boot and on the console.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -51,6 +52,9 @@ uint32_t safe_mode_sum(safe_mode_rec_t const *r);
 bool     safe_mode_valid(safe_mode_rec_t const *r);
 // The record emptied (an empty window) and sealed
 void     safe_mode_reset(safe_mode_rec_t *r);
+// The magic and checksum set after a change; a record that is not valid reset first
+void     safe_mode_seal(safe_mode_rec_t *r);
+void     safe_mode_ensure(safe_mode_rec_t *r);
 
 // The panic handler: the faulting task ran for app id (NULL or "" for nobody). A record that is not valid is reset
 // first. Only a well-formed id (a-z 0-9 _, 1..13) is kept; anything else counts as nobody.
@@ -63,13 +67,16 @@ typedef struct {
     bool     crash;                    // the boot before ended in a crash
     char     app[SAFE_MODE_ID_CAP];    // the app it is attributed to; "" for nobody (or no crash)
     unsigned app_crashes;              // that app's crashes in the window, this one included
-    bool     background_off;           // app reached SAFE_MODE_LIMIT: switch its background part off
+    bool     limit_reached;            // app_crashes reached SAFE_MODE_LIMIT (safe_mode_switch_off decides)
     bool     degraded;                 // a crash is in the window: keep background work cautious (#280)
 } safe_mode_boot_t;
 
 // Once per boot, early: crashed is this boot's crash verdict (crash.c's crash_recovered). Consumes the panic and
 // re-arm marks, moves the window and seals the record.
 safe_mode_boot_t safe_mode_boot(safe_mode_rec_t *r, bool crashed);
+// Whether the boot switches id's background part off now: id is the app b blames, it reached the limit and it has a
+// background part (an app without one has nothing to switch off: its notice names the crashes only)
+bool safe_mode_switch_off(safe_mode_boot_t const *b, char const *id, bool has_background);
 // Re-enabling an app forgets its crashes, so one more crash does not switch it off again at once
 void safe_mode_forget(safe_mode_rec_t *r, char const *id);
 // A crash in the window (what safe_mode_boot said about degraded; false for a record that is not valid)
