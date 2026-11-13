@@ -210,14 +210,17 @@ void ui_remote_open_cmd(char const *args) {
         list_ids();
         return;
     }
-    lichen_sys_ui_lock(0);
+    if (!lichen_sys_ui_lock(0)) { // no display (#248): nothing to open, and no lock for the cause mark below
+        console_reply("ui open: not now (no display)");
+        return;
+    }
     char const *why = open_refused();
     bool        ok  = false;
     if (!why) {
         shell_home();
         if (!to_home) {
             // An operator's command, not a key (#400): opening a stopped MeshCore here starts it, as from the tile
-            key_cause_t previous = key_cause_enter(KEY_CAUSE_CONSOLE);
+            key_cause_t previous = key_cause_enter(KEY_CAUSE_SYSTEM);
             shell_open_app((size_t)index);
             key_cause_leave(previous);
         }

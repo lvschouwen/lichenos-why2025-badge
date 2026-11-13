@@ -366,10 +366,12 @@ The rule: **core 1 draws, core 0 talks to the world.**
   A new DANGER confirm or mode switch meant for hands joins that list.
 - **Starting MeshCore is hand-only on every path (#400).** `meshcore_run_request` (the UI's start: home tile, grid,
   shape-key shortcuts, notifications, the Settings row) asks `key_cause_now()` (lichen_api/key_cause.c): the shell
-  marks each raw key's listeners with that event's origin (raw_keys.c) and `fw ui open` as the console's; unmarked
-  work takes the last LVGL key's origin, so a tile's Enter the UI service runs a moment later counts too. An injected
-  cause is refused and logged once ("injected key ignored: starting MeshCore takes a hand"); `fw mesh start` and
-  `fw ui open` are operator commands and still start it. Opening a MeshCore that already runs is free.
+  marks each raw key's listeners with that event's origin (raw_keys.c) and `fw ui open` as a system cause; a queued
+  UI call records the cause when it is queued and runs under it (ui_call_queue.c), so a tile's deferred open is judged
+  by its own Enter; other unmarked work counts as the key LVGL is reading, and as injected outside a read (timers,
+  async calls, before the first key). An injected cause is refused after the pause, busy and radio reasons and logged
+  once ("injected key ignored: starting MeshCore takes a hand"). `meshcore_run_request_system` (`fw mesh start|stop`,
+  the LoRa spectrum's pause and resume) is never refused as hand-only. Opening a MeshCore that already runs is free.
 - Remote keys (#375, #377): `fw keys send` and `fw ui` are developer-mode commands (`fw dev on` from USB first, #373;
   not in a release build). The stepper checks every remote Enter, Tab, Left and Right right before it goes down
   (`remote_answer.c`, host-tested; a second look before a tap's release only detects a change and stops the sequence). A

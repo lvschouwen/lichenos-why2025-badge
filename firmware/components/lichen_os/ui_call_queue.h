@@ -4,6 +4,8 @@
 // call) runs a batch of them. Pure (host test: ui_call_queue_test.c). Not thread safe by itself: every function is
 // called with the LVGL lock held, which is what orders the producers (any task) against the drain (the LVGL task).
 
+#include "key_cause.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -16,6 +18,7 @@ typedef struct {
     ui_call_fn_t fn;
     void        *arg;
     uint32_t     owner; // the app context of the code that queued it (lichen_ctx_t, #230), opaque here
+    key_cause_t  cause; // key_cause_now() as it was queued (#400): the call runs under that mark, not the key read last
 } ui_call_t;
 
 // Runs one call for its owner: lichen_ui_call.c enters the owner's context around fn(arg); NULL runs fn(arg) as is
@@ -35,6 +38,8 @@ typedef enum {
     UI_CALL_FULL,           // not queued: the caller hands fn to the LVGL task another way
 } ui_call_push_t;
 
+// Records key_cause_now() with the call (#400; valid here: the lock is held), so a deferred hand-only action is judged
+// by the key that queued it
 ui_call_push_t ui_call_queue_push(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, uint32_t owner);
 // Takes back the call the last push queued, when scheduling its drain failed; the queue is as before that push.
 void ui_call_queue_unpush(ui_call_queue_t *q);
@@ -63,5 +68,6 @@ bool ui_call_queue_hand_over(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, uin
 // lichen_ui_call.c, a fake in the host test), every one a full queue handed to the fallback.
 void ui_call_queue_cancel_all(ui_call_queue_t *q, ui_call_fn_t fn, void *arg, ui_call_async_t cancel_fallback);
 // The drain hand_over schedules (arg is the queue), on the LVGL task with the lock held: runs the batch queued before it
-// started, oldest first, skipping the cancelled ones, each through q->run with its owner.
+// started, oldest first, skipping the cancelled ones, each through q->run with its owner and under its recorded
+// key_cause mark. A call the full queue handed to the fallback carries no mark: key_cause_now() fails closed for it.
 void ui_call_queue_drain(void *queue);

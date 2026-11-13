@@ -124,7 +124,7 @@ static bool lora_user_pause(bool *was_running, bool (*keep_going)(void)) {
         return true;
     }
     meshcore_run_set_paused(true); // the screens say "Paused", not "Not running"; a start is refused with the reason
-    char const *why = meshcore_run_request(false);
+    char const *why = meshcore_run_request_system(false); // the OS, not a key (#400)
     if (why) {
         meshcore_run_set_paused(false);
         ESP_LOGW(TAG, "MeshCore not paused for the LoRa spectrum: %s", why);
@@ -154,7 +154,7 @@ static void lora_user_resume_start(void) {
             ESP_LOGI(TAG, "MeshCore stopped for an update: not started again after the LoRa spectrum");
             return;
         }
-        char const *why = meshcore_run_request(true);
+        char const *why = meshcore_run_request_system(true); // puts back what ran (#400)
         if (!why) {
             ESP_LOGI(TAG, "MeshCore starting again after the LoRa spectrum");
             return;

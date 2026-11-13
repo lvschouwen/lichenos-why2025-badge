@@ -1029,8 +1029,10 @@ add_executable(mesh_grid_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_grid_test.c ${CMA
 target_include_directories(mesh_grid_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(mesh_grid_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_grid_test COMMAND mesh_grid_test)
-add_executable(mesh_run_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_run_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_run.c)
-target_include_directories(mesh_run_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+add_executable(mesh_run_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_run_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_run.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/key_cause.c)
+target_include_directories(mesh_run_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(mesh_run_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_run_test COMMAND mesh_run_test)
 add_executable(mesh_health_test ${CMAKE_CURRENT_SOURCE_DIR}/mesh_health_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_health.c)
@@ -1979,8 +1981,10 @@ find_package(Threads REQUIRED)
 add_executable(ui_call_queue_test ${CMAKE_CURRENT_SOURCE_DIR}/ui_call_queue_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ui_call_queue.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ui_lock_owner.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ui_lock_hits.c)
-target_include_directories(ui_call_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ui_lock_hits.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/key_cause.c)
+target_include_directories(ui_call_queue_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 set_target_properties(ui_call_queue_test PROPERTIES C_STANDARD 11)
 target_compile_options(ui_call_queue_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(ui_call_queue_test PRIVATE Threads::Threads)
@@ -2316,14 +2320,15 @@ target_include_directories(bench_scope_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(bench_scope_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME bench_scope_test COMMAND bench_scope_test)
 
-# Starting MeshCore is hand-only on every key path (#400): the cause of the work running now x MeshCore's state
+# Starting MeshCore is hand-only on every key path (#400): path x origin x MeshCore's state, deferred calls included
 add_executable(key_cause_test
     ${CMAKE_CURRENT_SOURCE_DIR}/key_cause_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/key_cause.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_run.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/ui_call_queue.c
 )
 target_include_directories(key_cause_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
 target_compile_options(key_cause_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME key_cause_test COMMAND key_cause_test)
 

@@ -26,15 +26,19 @@ key_cause_t key_cause_now(void) {
     return fn && !fn() ? KEY_CAUSE_HAND : KEY_CAUSE_INJECTED; // unbound: no key is known to be a hand
 }
 
+bool key_cause_last_key_injected(bool indev_active, bool last_injected) {
+    return !indev_active || last_injected; // outside a read, the key read last is not what set this work off
+}
+
 bool key_cause_hand_only_ok(key_cause_t cause) {
-    return cause == KEY_CAUSE_HAND || cause == KEY_CAUSE_CONSOLE;
+    return cause == KEY_CAUSE_HAND || cause == KEY_CAUSE_SYSTEM;
 }
 
 char const *key_cause_name(key_cause_t cause) {
     switch (cause) {
         case KEY_CAUSE_HAND: return "hand";
         case KEY_CAUSE_INJECTED: return "injected key";
-        case KEY_CAUSE_CONSOLE: return "console";
+        case KEY_CAUSE_SYSTEM: return "system";
         default: return "none";
     }
 }

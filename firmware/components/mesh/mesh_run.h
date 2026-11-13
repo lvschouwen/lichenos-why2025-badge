@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "key_cause.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -68,9 +70,11 @@ char const *mesh_run_action_label(mesh_run_t r);
 // opens or starts it (its grid, or its home tile focused) while it is stopped, not for an update. Paused counts too
 // (the start is refused then, but the remote check fails safe).
 bool        mesh_run_enter_starts(mesh_run_t r, bool on_top);
-// #400: a start is refused as hand-only: it would start MeshCore and its cause may not (key_cause_hand_only_ok false:
-// an injected key). False while it would not start anyway (running, busy, stopped for an update).
-bool        mesh_run_start_hand_only(mesh_run_t r, bool cause_ok);
+// Why a start asked for now is refused, NULL when it may go ahead; r is not busy (meshcore_run.c says "busy" and the
+// pause first). In order: already running, stopped for an update, no LoRa radio (lora_ok false), then hand-only
+// (#400): cause (key_cause_now, or KEY_CAUSE_SYSTEM for a command or the OS) may not start it:
+// MESH_RUN_HAND_ONLY_REFUSAL.
+char const *mesh_run_start_refusal(mesh_run_t r, bool lora_ok, key_cause_t cause);
 char const *mesh_run_action_value(mesh_run_t r);
 
 // The Settings "Start at boot" row's value

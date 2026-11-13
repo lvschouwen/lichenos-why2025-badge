@@ -37,7 +37,7 @@ bool    lichen_sys_keys_inject(uint8_t code, bool pressed, bool as_physical);
 // injected keys, "phys" ones included. A raw hook reads ev->injected; a shell key handler asks this: true when the key
 // event LVGL last read came from lichen_sys_keys_inject (a release is as injected as its press). Valid only when
 // called synchronously in the LV_EVENT_KEY handler of the key being handled: not after lv_async_call, a UI call or a
-// focus change, by when another key may have been read. Consumers check it on the press. False before any key. Any
+// focus change, by when another key may have been read. Consumers check it on the press. True before any key. Any
 // task (an atomic read), but only meaningful there.
 bool    lichen_sys_keys_last_injected(void);
 // The code that types key (an LVGL key or a character), 0 when no key types it. *shift_code is the Shift key's code

@@ -6,6 +6,7 @@
 #include "lichen_app.h"
 #include "lichen_sys_app.h"
 #include "lichen_sys_keys.h"
+#include "lvgl.h"
 #include "nav.h"
 #include "raw_keys.h"
 #include "shell_parts.h"
@@ -110,9 +111,14 @@ static void on_raw_key(key_raw_event_t const *ev, void *arg) {
     shortcuts_key(ev->code, ev->pressed, ev->test_open);
 }
 
+// key_cause's getter (#400): a tile's or a row's Enter is a hand's only while LVGL is handling that key; a timer or
+// an async call outside a read fails closed
+static bool last_key_injected(void) {
+    return key_cause_last_key_injected(lv_indev_active() != NULL, lichen_sys_keys_last_injected());
+}
+
 void shortcuts_start(void) {
-    // #400: what an LVGL key set off (a tile's Enter, a notification's) is a hand's only when that key was
-    key_cause_bind_last_key(lichen_sys_keys_last_injected);
+    key_cause_bind_last_key(last_key_injected);
     if (!raw_keys_listen(on_raw_key, NULL, false)) {
         ESP_LOGE(TAG, "shape keys not wired: no raw key listener free");
     }

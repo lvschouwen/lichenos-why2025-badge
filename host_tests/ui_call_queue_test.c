@@ -131,7 +131,7 @@ static bool      fake_raw_call(ui_call_fn_t fn, void *arg) {
     if (s_raw_n >= FAKE_RAW_CAP) {
         return false;
     }
-    s_raw[s_raw_n++] = (ui_call_t){fn, arg, 0};
+    s_raw[s_raw_n++] = (ui_call_t){fn, arg, 0, KEY_CAUSE_NONE};
     return true;
 }
 static bool fake_raw_cancel(ui_call_fn_t fn, void *arg) {
@@ -223,7 +223,7 @@ static bool add_timer(ui_call_fn_t fn, void *arg) {
     if (!t) {
         return false;
     }
-    *t            = (timer_t_){{fn, arg, 0}, NULL};
+    *t            = (timer_t_){{fn, arg, 0, KEY_CAUSE_NONE}, NULL};
     *s_timer_tail = t;
     s_timer_tail  = &t->next;
     pthread_cond_signal(&timer_cond);

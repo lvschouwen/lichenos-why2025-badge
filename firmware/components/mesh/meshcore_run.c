@@ -16,6 +16,7 @@
 #include "mesh_remote.h"
 
 #include <stdint.h>
+#include <string.h>
 
 static char const TAG[] = "meshcore";
 
@@ -145,7 +146,8 @@ void meshcore_run_set_paused(bool paused) {
     apply(paused ? MESH_EV_PAUSE : MESH_EV_UNPAUSE);
 }
 
-static char const *request(bool start) {
+// cause: what asked for a start (#400; key_cause.h), judged after the radio's own reasons so they are the ones shown
+static char const *request(bool start, key_cause_t cause) {
     mesh_run_t r = meshcore_run_get();
     if (start && r.paused) {
         return MESH_RUN_PAUSED_REFUSAL; // before "busy": the reason is the radio's owner, not a job
@@ -153,17 +155,14 @@ static char const *request(bool start) {
     if (mesh_run_busy(r)) {
         return mc_busy_note();
     }
-    if (start && r.state == MESH_RUN_RUNNING) {
-        return "already running";
-    }
-    if (!start && r.state == MESH_RUN_STOPPED) {
-        return "not running";
-    }
-    if (start && r.why == MESH_WHY_UPDATE) {
-        return "stopped for update";
-    }
-    if (start && !lora_up()) {
-        return "no LoRa radio";
+    char const *no = start ? mesh_run_start_refusal(r, lora_up(), cause)
+                           : (r.state == MESH_RUN_STOPPED ? "not running" : NULL);
+    if (no) {
+        if (strcmp(no, MESH_RUN_HAND_ONLY_REFUSAL) == 0) {
+            // A start may send a due periodic advert: an injected key never starts it, whichever path it took
+            ESP_LOGI(TAG, "%s ignored: starting MeshCore takes a hand (or fw mesh start)", key_cause_name(cause));
+        }
+        return no;
     }
     if (!apply(start ? MESH_EV_START : MESH_EV_STOP)) {
         return mc_busy_note(); // another request got in between
@@ -178,17 +177,11 @@ static char const *request(bool start) {
 
 // The UI's: its cause is the key (or console command) behind the screen work running now (key_cause.h)
 char const *meshcore_run_request(bool start) {
-    key_cause_t cause = start ? key_cause_now() : KEY_CAUSE_NONE;
-    if (start && mesh_run_start_hand_only(meshcore_run_get(), key_cause_hand_only_ok(cause))) {
-        // #400: a start may send a due periodic advert, so an injected key never starts it, whichever path it took
-        ESP_LOGI(TAG, "%s ignored: starting MeshCore takes a hand (or fw mesh start)", key_cause_name(cause));
-        return MESH_RUN_HAND_ONLY_REFUSAL;
-    }
-    return request(start);
+    return request(start, start ? key_cause_now() : KEY_CAUSE_NONE);
 }
 
-char const *meshcore_run_request_console(bool start) {
-    return request(start);
+char const *meshcore_run_request_system(bool start) {
+    return request(start, KEY_CAUSE_SYSTEM);
 }
 
 bool meshcore_run_stop_for_update(void) {

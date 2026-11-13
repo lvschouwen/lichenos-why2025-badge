@@ -75,6 +75,7 @@ hold_exit_tick_after	-	unspecified	hold_exit.h
 key_cause_bind_last_key	-	any	key_cause.h
 key_cause_enter	-	lvgl	key_cause.h
 key_cause_hand_only_ok	-	any	key_cause.h
+key_cause_last_key_injected	-	any	key_cause.h
 key_cause_leave	-	lvgl	key_cause.h
 key_cause_name	-	any	key_cause.h
 key_cause_now	-	lvgl	key_cause.h

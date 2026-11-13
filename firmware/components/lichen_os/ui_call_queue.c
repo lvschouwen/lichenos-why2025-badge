@@ -4,7 +4,7 @@ ui_call_push_t ui_call_queue_push(ui_call_queue_t *q, ui_call_fn_t fn, void *arg
     if (q->count >= UI_CALL_QUEUE_CAP) {
         return UI_CALL_FULL;
     }
-    q->slot[(q->head + q->count) % UI_CALL_QUEUE_CAP] = (ui_call_t){fn, arg, owner};
+    q->slot[(q->head + q->count) % UI_CALL_QUEUE_CAP] = (ui_call_t){fn, arg, owner, key_cause_now()};
     q->count++;
     if (q->scheduled) {
         return UI_CALL_QUEUED;
@@ -78,10 +78,15 @@ void ui_call_queue_drain(void *queue) {
     size_t           n = ui_call_queue_begin_drain(q);
     ui_call_t        call;
     while (n-- > 0 && ui_call_queue_pop(q, &call)) {
-        if (call.fn && q->run) {
+        if (!call.fn) {
+            continue;
+        }
+        key_cause_t previous = key_cause_enter(call.cause);
+        if (q->run) {
             q->run(call.fn, call.arg, call.owner);
-        } else if (call.fn) {
+        } else {
             call.fn(call.arg);
         }
+        key_cause_leave(previous);
     }
 }

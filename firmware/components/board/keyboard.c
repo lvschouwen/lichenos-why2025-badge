@@ -53,7 +53,7 @@ static bool (*_Atomic wake_hook)(void);        // the screen timeout (#43)
 static bool (*_Atomic gate_hook)(uint8_t key, bool pressed); // the remote key lock (#190)
 static void (*_Atomic gate_reset_hook)(void);                // ... told when every key was released
 static bool           woke[0x51];              // presses the wake hook swallowed: their releases go nowhere either
-static atomic_bool    last_injected;           // the event read_cb last gave LVGL was injected (#391)
+static atomic_bool    last_injected = true;    // read_cb's last event was injected (#391); true: no hand yet (#400)
 
 static raw_hooks_t hooks;              // raw_hooks.h: no lock, so this task never waits on a hook's remover (#251)
 static _Atomic(TaskHandle_t) poll_handle; // the keyboard task: a hook that adds or removes a hook runs here
