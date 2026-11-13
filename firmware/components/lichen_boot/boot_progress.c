@@ -130,5 +130,9 @@ void boot_progress_start(void) {
     portENTER_CRITICAL(&lock);
     boot_steps_reset();
     portEXIT_CRITICAL(&lock);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     console_register("boot", "boot [fail <step> | keys <down|esc+bksp|none>] (start-up steps and the last log lines; fail marks a step failed on the next boot; keys holds a combo at the next software restart, once, developer mode)", cmd_boot);
+#else // a release names no debug subcommand (build.sh release_checks)
+    console_register("boot", "boot [fail <step>] (start-up steps and the last log lines; fail marks a step failed on the next boot)", cmd_boot);
+#endif
 }
