@@ -139,17 +139,19 @@ void screen_lock_wake(void);           // any task: unlock and light the screen 
 lv_group_t *shell_dialog_group(void);
 void        shell_refocus(void);
 
-// The open dialog as any task sees it (#376; "fw keys send" asks it before a remote Enter, #182). Never takes the LVGL
-// lock: it copies the wanted state under dialog.c's own locks, and false (info all zero) when it could not get them in
-// time. ms_open and left_s count from when the dialog was built on screen: 0 and the full countdown until then.
+// The dialog on screen as any task sees it (#376; "fw keys send" asks it before a remote Enter, #182). Never takes the
+// LVGL lock: it copies dialog.c's state under its own locks, and returns false (info all zero) when it could not get
+// them in time. open only when the newest dialog asked for is the one built on screen, so the words are those a key
+// would answer; settling when one is asked for (or replaces another) but not built yet: then nothing else is set.
 #define SHELL_DIALOG_TITLE_MAX 192
 #define SHELL_DIALOG_LABEL_MAX 48
 typedef struct {
     bool     open;
+    bool     settling;
     bool     careful;
     char     title[SHELL_DIALOG_TITLE_MAX];         // as the dialog layer keeps it (truncated to fit)
     char     confirm_label[SHELL_DIALOG_LABEL_MAX];
-    uint32_t ms_open;                              // since it was shown
+    uint32_t ms_open;                              // since it was built on screen
     uint32_t left_s;                               // of the countdown, rounded up
 } shell_dialog_info_t;
 bool shell_dialog_info(shell_dialog_info_t *info);

@@ -54,3 +54,7 @@ uint32_t dlg_countdown_left_s(dlg_countdown_t const *d, uint32_t now_ms) {
     }
     return (d->total_ms - gone + 999u) / 1000u;
 }
+
+bool dlg_shown_is_current(bool want_open, uint32_t want_gen, uint32_t built_gen, uint32_t text_gen) {
+    return want_open && built_gen == want_gen && text_gen == want_gen;
+}

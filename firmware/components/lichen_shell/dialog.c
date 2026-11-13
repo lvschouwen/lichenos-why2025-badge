@@ -53,6 +53,14 @@ static StaticSemaphore_t open_lock_buf;
 static uint32_t built_gen;
 static uint32_t built_start_ms;
 static uint32_t built_total_ms;
+// The words of the dialog apply() last took for the screen, for shell_dialog_info: want may already hold the next
+// one. Internal RAM, copied from want (internal too) under open_lock, never under want_lock (#271).
+static struct {
+    uint32_t gen;
+    bool     careful;
+    char     title[TEXT_MAX];
+    char     confirm_label[TEXT_MAX / 4];
+} onscreen;
 
 _Static_assert(TEXT_MAX == SHELL_DIALOG_TITLE_MAX && TEXT_MAX / 4 == SHELL_DIALOG_LABEL_MAX,
                "shell_dialog_info_t holds the dialog's own copies whole");
@@ -231,6 +239,10 @@ static void apply(void *arg) {
     bool rebuild = open && (!backdrop || stale);
     if (rebuild) {
         shown = want; // open_lock keeps the openers out; the old dialog (if any) is torn down before anything reads it
+        onscreen.gen     = gen;
+        onscreen.careful = want.careful;
+        memcpy(onscreen.title, want.title, sizeof(onscreen.title));
+        memcpy(onscreen.confirm_label, want.confirm_label, sizeof(onscreen.confirm_label));
     }
     xSemaphoreGive(open_lock); // held for the copy only, not across LVGL work
     if (stale) {
@@ -299,33 +311,35 @@ void shell_dialog_close_impl(void) {
     }
 }
 
-// Any task: open_lock keeps the openers from rewriting want while it is copied (as apply() does), and want_lock gives
-// the open flag and what build() published. No LVGL here, so the console can ask while the LVGL task is busy.
+// Any task: open_lock keeps apply() from rewriting onscreen while it is copied, and want_lock gives the open flag and
+// what build() published. It reports the dialog on screen, never one only asked for: with A shown and B queued, a key
+// still goes to A, so "B is open" would let a remote Enter answer A under B's verdict. No LVGL here.
 bool shell_dialog_info(shell_dialog_info_t *info) {
     memset(info, 0, sizeof(*info));
     if (!take_open_lock(pdMS_TO_TICKS(INFO_WAIT_MS))) {
         return false;
     }
-    copy_text(info->title, sizeof(info->title), want.title);
-    copy_text(info->confirm_label, sizeof(info->confirm_label), want.confirm_label);
-    info->careful    = want.careful;
-    uint32_t seconds = want.seconds;
+    char     title[TEXT_MAX], label[TEXT_MAX / 4];
+    bool     careful  = onscreen.careful;
+    uint32_t text_gen = onscreen.gen;
+    memcpy(title, onscreen.title, sizeof(title));
+    memcpy(label, onscreen.confirm_label, sizeof(label));
     portENTER_CRITICAL(&want_lock);
-    bool     open  = want_open;
-    bool     built = built_gen == want_gen;
-    uint32_t start = built_start_ms;
-    uint32_t total = built_total_ms;
+    bool     want_on = want_open;
+    uint32_t gen     = want_gen;
+    uint32_t built   = built_gen;
+    uint32_t start   = built_start_ms;
+    uint32_t total   = built_total_ms;
     portEXIT_CRITICAL(&want_lock);
     xSemaphoreGive(open_lock);
-    if (!open) {
-        memset(info, 0, sizeof(*info)); // want keeps the last dialog's words: they are not open
+    if (!dlg_shown_is_current(want_on, gen, built, text_gen)) {
+        info->settling = want_on; // asked for (or replaced) but not on screen yet: ask again shortly
         return true;
     }
-    info->open = true;
-    if (!built) {
-        info->left_s = seconds; // queued, not on screen yet
-        return true;
-    }
+    info->open    = true;
+    info->careful = careful;
+    copy_text(info->title, sizeof(info->title), title);
+    copy_text(info->confirm_label, sizeof(info->confirm_label), label);
     dlg_countdown_t const shown_cd = {.start_ms = start, .total_ms = total};
     uint32_t              now      = now_ms();
     info->ms_open                  = now - start;

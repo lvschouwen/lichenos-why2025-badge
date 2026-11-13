@@ -96,12 +96,25 @@ static void careful_needs_a_fresh_press(void) {
     CHECK(dlg_countdown_key(&d, DLG_KEY_ENTER, 5100) == DLG_CONFIRM);
 }
 
+// shell_dialog_info's rule (#376): DANGER A on screen, B asked for over it. Until B is built, the words of neither are
+// reported, because a key still lands on A
+static void shown_is_current(void) {
+    CHECK(!dlg_shown_is_current(false, 0, 0, 0));  // nothing ever opened
+    CHECK(dlg_shown_is_current(true, 1, 1, 1));    // A (gen 1) on screen
+    CHECK(!dlg_shown_is_current(true, 2, 1, 1));   // B asked for: want has B, the screen still A
+    CHECK(!dlg_shown_is_current(true, 2, 1, 2));   // B's words taken, A still drawn
+    CHECK(dlg_shown_is_current(true, 2, 2, 2));    // B built
+    CHECK(!dlg_shown_is_current(false, 2, 2, 2));  // B answered or closed
+    CHECK(!dlg_shown_is_current(true, 3, 2, 2));   // C asked for over B
+}
+
 int main(void) {
     runs_out_into_confirm();
     keys_decide_once();
     time_wraps();
     careful_runs_out_into_cancel();
     careful_needs_a_fresh_press();
+    shown_is_current();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

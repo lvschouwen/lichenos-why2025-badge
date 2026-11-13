@@ -37,3 +37,8 @@ dlg_result_t dlg_countdown_key(dlg_countdown_t *d, dlg_key_t key, uint32_t now_m
 dlg_result_t dlg_countdown_tick(dlg_countdown_t *d, uint32_t now_ms);
 // Whole seconds left, rounded up ("restarting in 30 s" at the start, 1 in the last second, 0 when over)
 uint32_t     dlg_countdown_left_s(dlg_countdown_t const *d, uint32_t now_ms);
+
+// shell_dialog_info (#376): is the dialog on screen the newest one asked for? want_gen is bumped by every open,
+// built_gen is the open build() last put on screen, text_gen the open whose words were last taken for the screen. Only
+// when all three agree (and it is still wanted) do those words belong to the dialog a key would answer.
+bool         dlg_shown_is_current(bool want_open, uint32_t want_gen, uint32_t built_gen, uint32_t text_gen);

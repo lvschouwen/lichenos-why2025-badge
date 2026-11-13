@@ -12,6 +12,7 @@
 #include "screen_ids.h"
 #include "settings_backup_io.h"
 #include "shell_parts.h"
+#include "dialog_remote_policy.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -76,7 +77,10 @@ static void show_outcome(void) {
         case JOB_PLAN:
             if (s_status == SBK_OK) {
                 static char title[220];
-                snprintf(title, sizeof(title), "%s Load them?", s_plan.summary);
+                // The dialog keeps SHELL_DIALOG_TITLE_MAX - 1 bytes: a long summary is cut so " Load them?" stays,
+                // which the remote policy matches this question by (#376)
+                _Static_assert(sizeof(title) >= SHELL_DIALOG_TITLE_MAX, "room for the whole kept title");
+                dlg_title_with_tail(title, SHELL_DIALOG_TITLE_MAX, s_plan.summary, " Load them?");
                 shell_dialog_t const d = {
                     .title = title, .seconds = ASK_SECONDS, .careful = true, .confirm_label = "load"};
                 shell_dialog_countdown(&d, apply_answer);
