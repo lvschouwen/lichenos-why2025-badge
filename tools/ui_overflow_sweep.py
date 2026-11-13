@@ -12,6 +12,12 @@ its fixed label), clipped (an object that no scroll position shows: off the scre
 object that runs under the pinned key hint or the status bar). This script only counts the lines; a hit is a bug in the
 screen, not in the script.
 
+Developer mode first: "fw ui" and "fw keys" are developer-mode commands (#373, #377). Run "fw dev on" once from the
+USB console (it is saved); with it off the sweep stops at the first command with that hint. The badge's remote key
+policy (#377) refuses some keys itself (a hand-only dialog, the radio pages without the bench scope, a chat send
+outside #badgetest, an Enter that sends with no dialog, a held Enter/Tab/Left/Right): the sweep reads those replies
+and stops the route (or the run, when a dialog is in the way).
+
 What it sends: "fw ui lock on" at the start and "fw ui lock off" at the end (#190: the badge ignores its own keyboard
 meanwhile and shows "Keys locked: hold Esc 3 s"), "fw ui open <app>" (the app as from its home tile, or home),
 "fw keys send needlock| <seq>" (one per route, more only past the 511-byte line limit), "fw ui" (read only) and, for the QR screen, "fw qr <text>" (shows a code, sends
@@ -231,9 +237,9 @@ UNREACHABLE = {
     "SCREEN_WIFI_ANALYSER": "its row sits after the scanned networks, so its position is not fixed",
     "SCREEN_CRASH_ENTRY": "needs a crash entry; Enter on the crash list's first row is Clear all when it is empty",
     "SCREEN_NOTIFY_DETAIL": "needs a notice in the centre, and the list may start with Clear all",
-    "SCREEN_RADIO": "behind Region & radio: Enter there is forbidden",
-    "SCREEN_CUSTOM": "behind Region & radio: Enter there is forbidden",
-    "SCREEN_SWITCH": "the radio-switch confirm, opened from Region & radio",
+    "SCREEN_RADIO": "behind Region & radio: Enter there is forbidden (the badge refuses it without the bench scope, #377)",
+    "SCREEN_CUSTOM": "behind Region & radio: Enter there is forbidden (the badge refuses it without the bench scope, #377)",
+    "SCREEN_SWITCH": "the radio-switch confirm, opened from Region & radio (needs the bench scope, #377)",
     "SCREEN_DM_PICK": "starts a message to a chosen contact",
     "SCREEN_DM": "a message to a contact; only #badgetest or the Heltec node may be written to, by hand",
     "SCREEN_UPDATE": "Update now flashes the badge",
@@ -272,6 +278,29 @@ FwFn = Callable[[str], List[str]]
 
 class InUse(Exception):
     """The badge changed under the script (a person is using it): stop everything, send no key."""
+
+
+class DevModeOff(InUse):
+    """`fw ui` and `fw keys` are developer-mode commands (#373, #377): nothing works until it is on."""
+
+
+# fw_console's reply to a debug command while developer mode is off (dev_mode.h DEV_MODE_OFF_NOTE)
+DEV_OFF = "developer mode is off"
+DEV_OFF_HINT = "developer mode is off: run 'fw dev on' from the USB console once (it stays on), then run the sweep again"
+# The badge's remote key policy (#377, ui_answer.c): a refused key stops the "keys send" before it goes down. A dialog
+# that is hand-only or still opening means the screen is not what the walk expected (someone else, or a notice);
+# the rest (bench scope, #badgetest, an Enter that sends, a hold) is a route that must not be walked.
+POLICY_IN_USE = ("is hand-only", "a dialog is opening")
+POLICY_REFUSED = ("bench console scope", "remote send only in #badgetest", "goes on air with no dialog", "is refused")
+
+
+def policy_refusal(reply: Sequence[str]) -> None:
+    """Raises when the badge's remote key policy stopped the keys (nothing after the refused key was sent)."""
+    text = " / ".join(l.strip() for l in reply)
+    if any(m in text for m in POLICY_IN_USE):
+        raise InUse(f"a dialog is in the way: {text}")
+    if any(m in text for m in POLICY_REFUSED):
+        raise RouteError(f"the badge's remote key policy refused a key (#377): {text}; nothing pressed after it")
 
 
 class RouteError(RuntimeError):
@@ -426,9 +455,15 @@ class Badge:
     """Drives the badge through `fw`, and never sends a key into a state it did not expect."""
 
     def __init__(self, fw: FwFn) -> None:
-        self.fw = fw
+        self.raw_fw = fw
         self.last: Optional[Snap] = None
         self.locked: Optional[bool] = None  # what the last "fw ui" said about the key lock
+
+    def fw(self, line: str) -> List[str]:
+        reply = self.raw_fw(line)
+        if any(DEV_OFF in l for l in reply):
+            raise DevModeOff(DEV_OFF_HINT)
+        return reply
 
     def snap(self) -> Snap:
         lines = self.fw("ui")
@@ -479,6 +514,7 @@ class Badge:
         now = self._check(False)
         reply = self.fw("keys send " + " ".join(keys))
         if not any(l.strip().startswith("keys sent") for l in reply):
+            policy_refusal(reply)
             raise RouteError(f"keys send said: {' / '.join(reply)}")
         after = self.snap()
         self.last = after
@@ -547,6 +583,7 @@ class Badge:
                 raise InUse("the key lock is off (Esc held on the badge, or its timeout); no key sent after that")
             failed = next((m for m in (GUARD_FAILED.match(l) for l in reply) if m), None)
             if not failed:
+                policy_refusal(reply)
                 raise RouteError(f"keys send said: {' / '.join(reply)}")
             at = [i for i in range(start, end) if isinstance(tokens[i], Guard)][int(failed.group(1)) - 1]
             g = tokens[at]
@@ -734,6 +771,21 @@ def selftest_remote(expect: Callable[..., None], failures: List[str]) -> None:
          ui("0 > 2", "Display")], keys=["keys send: guard 1 failed: focus 'Time'; 7 of 10 sent", "keys sent: 1",
                                         "keys send: guard 1 failed: focus 'Time'; 0 of 3 sent"]),
         lambda b: b.walk("display", settings_page("Display")), 3)
+    expect("developer mode off", DevModeOff, FakeFw([["ui: " + DEV_OFF + " (About: tap Version 7 times, or USB: fw dev on)"]]),
+           lambda b: b.lock(), 0)
+    try:
+        Badge(lambda line: ["keys: " + DEV_OFF + " (...)"]).fw("keys send down")
+        failures.append("developer mode off: not raised")
+    except DevModeOff as e:
+        if "fw dev on" not in str(e):
+            failures.append(f"developer mode off: the hint is {e}")
+    expect("hand-only dialog in a sequence", InUse, FakeFw([ui("0", "S")], keys=[
+        "keys send: dialog 'continue' is hand-only; 3 of 10 sent"]), lambda b: b.walk("display", settings_page("Display")), 1)
+    expect("radio page refused", RouteError, FakeFw([ui("0", "S")], keys=[
+        "keys send: the badge's radio page (screen 130) only under the bench console scope (fw mesh scope console "
+        "<region> YES); 3 of 10 sent"]), lambda b: b.walk("display", settings_page("Display")), 1)
+    expect("chat send refused", RouteError, FakeFw([ui("0 > 3 > 142", "x"), ui("0 > 3 > 142", "x")], keys=[
+        "keys send: remote send only in #badgetest; use fw mesh send/dm; 0 of 1 sent"]), lambda b: b.send(["enter"]), 1)
     expect("lock off in a sequence", InUse, FakeFw([ui("0", "S")], keys=[
         "keys send: stopped, the key lock is off; 3 of 10 sent"]), lambda b: b.walk("display", settings_page("Display")), 1)
     fake = FakeFw([ui("0", "S"), ui("0", "S"), ui("0 > 2 > 3 > 4", "Message")])
@@ -916,7 +968,7 @@ def release(badge: Badge) -> None:
         if badge.unlock():
             return
         why = "the badge did not answer 'ui lock: off'"
-    except RouteError as e:
+    except (InUse, RouteError) as e:
         why = str(e)
     print(f"WARNING the key lock was not released ({why}); it ends by itself 60 s after the last command")
 

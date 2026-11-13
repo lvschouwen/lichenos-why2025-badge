@@ -2,9 +2,90 @@
 #include "remote_answer.h"
 
 #include "screen_ids.h"
+#include "ui_keys.h"
 
 #include <stddef.h>
 #include <string.h>
+
+// LVGL's key codes (ui_answer.c static_asserts them)
+#define KEY_TAB   9u
+#define KEY_ENTER 10u
+#define KEY_RIGHT 19u
+#define KEY_LEFT  20u
+
+rkey_t remote_key_kind(uint8_t code, remote_code_for_fn code_for) {
+    uint8_t shift;
+    if (!code) {
+        return RKEY_OTHER;
+    }
+    if (code == code_for(KEY_ENTER, &shift)) {
+        return RKEY_ENTER;
+    }
+    if (code == code_for(KEY_TAB, &shift)) {
+        return RKEY_TAB;
+    }
+    return code == code_for(KEY_LEFT, &shift) || code == code_for(KEY_RIGHT, &shift) ? RKEY_SIDE : RKEY_OTHER;
+}
+
+bool remote_holds_ok(uint32_t const *keys, size_t n, uint8_t (*code_of)(uint32_t key), remote_code_for_fn code_for,
+                     size_t *at) {
+    for (size_t i = 1; i < n; i++) { // ui_keys_parse puts a hold right after its key
+        if (UI_KEY_IS_HOLD(keys[i]) && ui_keys_is_key(keys[i - 1]) &&
+            remote_key_kind(code_of(keys[i - 1]), code_for) != RKEY_OTHER) {
+            *at = i;
+            return false;
+        }
+    }
+    return true;
+}
+
+// The contact page's rows that open a page which sends as it is built, or asks for a password or command to send. A
+// prefix match, so a row whose label grows ("Status history") is refused too rather than let through.
+static char const *const CONTACT_SEND_ROWS[] = {"Trace path", "Discover path", "Status", "Log in", "Command"};
+
+bool remote_contact_send_row(char const *focus) {
+    if (!focus || !*focus) {
+        return true; // no row read: fail closed
+    }
+    while (*focus == '*' || *focus == ' ') {
+        focus++; // a checked row's "* "
+    }
+    for (size_t i = 0; i < sizeof(CONTACT_SEND_ROWS) / sizeof(CONTACT_SEND_ROWS[0]); i++) {
+        if (strncmp(focus, CONTACT_SEND_ROWS[i], strlen(CONTACT_SEND_ROWS[i])) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool chat_screen(int id) {
+    return id == SCREEN_CHAT || id == SCREEN_DM;
+}
+
+// Pages whose Enter (Again, Ask again, Log in, Command...) goes on air with no dialog of its own
+static bool send_page(int id) {
+    return id == SCREEN_TRACE || id == SCREEN_STATUS || id == SCREEN_TELEMETRY || id == SCREEN_LOGIN ||
+           id == SCREEN_CLI;
+}
+
+static rans_t chat_rule(remote_view_t const *v) {
+    bool test = v->chat_known && !v->chat_dm && v->chat_name && strcmp(v->chat_name, REMOTE_TEST_CHANNEL) == 0;
+    return test ? RANS_OK : RANS_CHAT_TEST;
+}
+
+// Enter with no dialog: the screen on top decides
+static rans_t page_enter(remote_view_t const *v) {
+    if (remote_radio_page(v->top_screen)) {
+        return v->scope_set ? RANS_OK : RANS_NEEDS_SCOPE;
+    }
+    if (chat_screen(v->top_screen)) {
+        return chat_rule(v);
+    }
+    if (send_page(v->top_screen) || (v->top_screen == SCREEN_CONTACT && remote_contact_send_row(v->focus))) {
+        return RANS_SENDS;
+    }
+    return RANS_OK;
+}
 
 bool remote_radio_page(int screen_id) {
     return screen_id == SCREEN_RADIO || screen_id == SCREEN_CUSTOM || screen_id == SCREEN_SWITCH;
@@ -28,11 +109,64 @@ rans_t remote_key_check(rkey_t key, remote_view_t const *v) {
         // The Enter goes to the dialog (or to one about to be built), not to the page below it
         return v->dialog == RDLG_OPEN ? by_verdict(v->verdict, v->scope_set) : RANS_UNSURE;
     }
-    // Left and Right reach the page even under a dialog's state being unsure: its rule holds either way
+    if (key == RKEY_ENTER) {
+        return page_enter(v);
+    }
+    // Tab, Left and Right reach the page even under a dialog's state being unsure: its rule holds either way
+    if (key == RKEY_TAB) {
+        return chat_screen(v->top_screen) ? chat_rule(v) : RANS_OK; // Tab-retry sends again
+    }
     return remote_radio_page(v->top_screen) && !v->scope_set ? RANS_NEEDS_SCOPE : RANS_OK;
 }
 
-rans_t remote_answer_check(remote_view_t const *v, char const *want_label) {
+// "#<digits>" that fits in 32 bits
+static bool parse_gen(char const *p, size_t len, uint32_t *gen) {
+    uint64_t v = 0;
+    if (len < 2 || len > 11 || p[0] != '#') {
+        return false;
+    }
+    for (size_t i = 1; i < len; i++) {
+        if (p[i] < '0' || p[i] > '9') {
+            return false;
+        }
+        v = v * 10 + (uint64_t)(p[i] - '0');
+    }
+    *gen = (uint32_t)v;
+    return v <= UINT32_MAX;
+}
+
+bool remote_answer_parse_yes(char const *arg, char *label, size_t cap, bool *has_gen, uint32_t *gen) {
+    *has_gen = false;
+    while (*arg == ' ') {
+        arg++;
+    }
+    size_t len = strlen(arg);
+    while (len && arg[len - 1] == ' ') {
+        len--;
+    }
+    size_t word = len; // where the last word starts
+    while (word && arg[word - 1] != ' ') {
+        word--;
+    }
+    if (word < len && arg[word] == '#') {
+        if (!parse_gen(arg + word, len - word, gen)) {
+            return false;
+        }
+        *has_gen = true;
+        len      = word;
+        while (len && arg[len - 1] == ' ') {
+            len--;
+        }
+    }
+    if (!len || len >= cap) {
+        return false;
+    }
+    memcpy(label, arg, len);
+    label[len] = '\0';
+    return true;
+}
+
+rans_t remote_answer_check(remote_view_t const *v, char const *want_label, uint32_t const *want_gen) {
     if (v->dialog == RDLG_NONE) {
         return RANS_NO_DIALOG;
     }
@@ -42,14 +176,14 @@ rans_t remote_answer_check(remote_view_t const *v, char const *want_label) {
     if (!want_label || !*want_label || !v->label || strcmp(v->label, want_label) != 0) {
         return RANS_OTHER_DIALOG; // a stale or different dialog is never confirmed
     }
+    if (want_gen && v->gen != *want_gen) {
+        return RANS_OTHER_DIALOG; // the same words, but another open of them
+    }
     return by_verdict(v->verdict, v->scope_set);
 }
 
 rans_t remote_answer_still(remote_view_t const *v, char const *want_label, uint32_t want_gen) {
-    rans_t r = remote_answer_check(v, want_label);
-    if (r == RANS_OK && v->gen != want_gen) {
-        return RANS_OTHER_DIALOG; // the same words, but opened again since: not the dialog that was asked about
-    }
+    rans_t r = remote_answer_check(v, want_label, &want_gen);
     return r == RANS_NO_DIALOG ? RANS_OTHER_DIALOG : r; // it closed meanwhile: also not the one asked about
 }
 

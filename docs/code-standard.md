@@ -29,9 +29,9 @@ JPL "Power of 10" rule 4 (only via a secondary page). Not reachable: Barr Group,
 | CPU idle per core | <30 % | <15 % | V NASA 50-70 % utilisation; numbers J | `fw mem` (`task IDLE0/IDLE1 ... cpu`) |
 | ISR / interrupts off | >50 us | >200 us | J; IWDT 300/800 ms V is the crash line | cycle counter or scope (no read-out; known gap, not yet tracked) |
 | Task watchdog margin | longest run >25 % of 5 s | >50 % | V TWDT 5 s; J ratios | trace (no read-out; known gap, not yet tracked) |
-| Frame time | >16.7 ms | >33 ms p95 | V LVGL 33 ms default | `fw ui perf` |
-| Input-to-display | >100 ms | >200 ms | J | `fw ui perf` (`key-to-flush ... p95`, physical keys only) |
-| Boot to first frame | >3 s | >5 s | J | `fw ui perf` (`first frame at <ms> ms`) |
+| Frame time | >16.7 ms | >33 ms p95 | V LVGL 33 ms default | `fw ui perf` (developer mode) |
+| Input-to-display | >100 ms | >200 ms | J | `fw ui perf` (developer mode; `key-to-flush ... p95`, physical keys only) |
+| Boot to first frame | >3 s | >5 s | J | `fw ui perf` (developer mode; `first frame at <ms> ms`) |
 | Draw buffer (partial mode) | | <1/10 screen | V LVGL | `lv_display_set_buffers` call |
 
 The first six rows and the two size rows are gated by the build. The rest are read on the badge by the main session.
@@ -59,7 +59,8 @@ because `firmware/CMakeLists.txt` turns `-fstack-usage` on for every directory u
   with the uptime, free then, and `big`/`task`: the largest internal allocation (1 KB or more) in the 250 ms windows
   where that record's min fell and the task that made it (an ISR's is blamed on the task it interrupted; `?` when the
   name could not be read consistently), #256), `fw tasks` (stack size, owner), `fw ui perf [reset|bench]`
-  (render, flush and wait times per frame), `fw boot` (start-up steps).
+  (render, flush and wait times per frame; `fw ui` and `fw keys` are developer-mode commands since #377: `fw dev on`
+  from USB first), `fw boot` (start-up steps).
 - Report without gating: `python3 -I tools/check_standard.py --report` lists everything past a warn line, worst first.
 
 ## The gate and the ratchet

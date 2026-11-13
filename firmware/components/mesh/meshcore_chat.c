@@ -2,6 +2,7 @@
 // MeshCore is read through mesh.h copies and written through mesh_send_channel (neither blocks on the mesh task).
 #include "meshcore_chat.h"
 #include "screen_ids.h"
+#include "bench_scope.h"
 
 #include "lichen_mem.h"
 #include "meshcore_run.h"
@@ -716,6 +717,17 @@ typedef struct {
 
 static void open_target(mesh_chat_target_t const *want);
 
+// bench_chat_on_top (#377): the shell lets a remote Enter send only in #badgetest, and reads the chat on top here
+static bool remote_chat_on_top(char *name, size_t cap, bool *dm) {
+    chat_t const *c = chat_on_top();
+    if (!c) {
+        return false;
+    }
+    snprintf(name, cap, "%s", c->target.title);
+    *dm = c->target.dm;
+    return true;
+}
+
 // shell_back_to's follow-up: when the screen below the old chat is on top now, open (a queued Esc may have popped the
 // chat already: back_to then pops nothing). Anything else (the pop refused by the update screen, more popped by
 // further Escs): open nothing.
@@ -750,6 +762,7 @@ static void open_target(mesh_chat_target_t const *want) {
             return;
         }
         case MESH_CHAT_OPEN_PUSH:
+            bench_chat_bind(remote_chat_on_top); // before the first chat is on top; again is harmless
             building = want;
             shell_open_keyed(build_chat, want->dm ? SCREEN_DM : SCREEN_CHAT, shell_key_hash(&want->key, sizeof(want->key)));
             building = NULL;

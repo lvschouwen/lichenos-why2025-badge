@@ -2237,13 +2237,18 @@ target_compile_options(boot_keys_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME boot_keys_test COMMAND boot_keys_test)
 
 # What a key sent over the console may answer (#377): dialog verdicts, the bench scope, the radio pages, label and gen
+# What a key sent over the console may answer (#377): dialog verdicts, the bench scope, the radio pages, the chat and
+# no-dialog sends, label and gen, holds, and the key kinds against the real kbd_map
 add_executable(remote_answer_test
     ${CMAKE_CURRENT_SOURCE_DIR}/remote_answer_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/remote_answer.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/ui_keys.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/kbd_map.c
 )
 target_include_directories(remote_answer_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board
 )
 target_compile_options(remote_answer_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME remote_answer_test COMMAND remote_answer_test)

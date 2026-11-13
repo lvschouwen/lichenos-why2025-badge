@@ -364,6 +364,18 @@ The rule: **core 1 draws, core 0 talks to the world.**
   (not after `lv_async_call`, a UI call or a focus change), checked on the press. Paths that must take a hand on the keyboard refuse injected keys: the #66
   factory question (neither arms nor confirms; an injected Esc may still cancel) and About's developer taps (#374).
   A new DANGER confirm or mode switch meant for hands joins that list.
+- Remote keys (#375, #377): `fw keys send` and `fw ui` are developer-mode commands (`fw dev on` from USB first, #373;
+  not in a release build). The stepper checks every remote Enter, Tab, Left and Right right before it goes down and
+  again before it comes up (`remote_answer.c`, host-tested): a dialog answers by its `dlg_remote_verdict` (#376;
+  REFUSE is hand-only, ALLOW_ONAIR_SCOPED needs the bench console scope of #290, `fw mesh scope console <region>
+  YES`), the badge's radio pages (Region & radio with TX power, Custom radio, Switch radio) need that scope too, a chat
+  sends (Enter, Tab-retry) only in `#badgetest` and a DM never, and the other Enters that go on air with no dialog
+  (Trace and Discover path, Status, Telemetry, the repeater login and command pages, and the contact rows that open
+  them) are refused. Enter, Tab, Left and Right are never held (`hold:`): LVGL acts on the release. `fw ui answer`
+  shows the open dialog with its open number `#n`; `fw ui answer yes <confirm_label> #<n>` confirms only that open,
+  once 1.1 s old; `fw ui answer no` is Esc. MeshCore binds the scope and the chat on top through `bench_scope.h`
+  (owner-only: mesh). Left: about 40 ms between the last check and LVGL reading the key, in which a new non-careful
+  dialog would take it.
 
 ## Layers
 

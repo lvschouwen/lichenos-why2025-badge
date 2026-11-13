@@ -41,10 +41,13 @@ void ui_probe_send(char const *seq); // "fw keys send|press <seq>": through the 
 // answer_label (NULL for none) makes every Enter go down only while the dialog that has that confirm label and open
 // number answer_gen is still on screen (#377). Returns the sequence entries sent, -1 when it stopped (said why)
 int  ui_probe_run(char const *who, char const *seq, char const *answer_label, uint32_t answer_gen);
-// ui_answer.c (#377): "fw ui answer [yes <confirm_label> | no]" (console task), and the stepper's check before a remote
-// Enter, Left or Right (LVGL task): true when the key with TCA8418 code may go down; else why not is written to why
+// ui_answer.c (#377): "fw ui answer [yes <confirm_label> [#<n>] | no]" (console task), and the stepper's check before a
+// remote Enter, Tab, Left or Right goes down or comes up (LVGL task): true when the key with TCA8418 code may; else
+// why not is written to why. focus is what "fw ui" reports. policy_key: whether the check looks at the key at all.
 void ui_answer_cmd(char const *args);
-bool ui_answer_key_ok(uint8_t code, char const *answer_label, uint32_t answer_gen, char *why, size_t cap);
+bool ui_answer_policy_key(uint8_t code);
+bool ui_answer_key_ok(uint8_t code, char const *focus, char const *answer_label, uint32_t answer_gen, char *why,
+                      size_t cap);
 void ui_check_start(void);           // #89: 1 s LVGL object-tree check, registers "fw uicheck"
 // card_overlay.c (#352): "fw ui card [test|white|grey|black|off]", the bench test card over the current screen
 void card_overlay_init(void);            // sets the fw label the card shows

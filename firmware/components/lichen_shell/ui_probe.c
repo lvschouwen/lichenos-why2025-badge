@@ -14,6 +14,7 @@
 #include "shell_parts.h"
 #include "ui_keys.h"
 #include "ui_overflow.h"
+#include "remote_answer.h"
 #include "ui_remote.h"
 
 #include <assert.h>
@@ -105,7 +106,27 @@ static void inject(sequence_t *seq, uint8_t code, bool pressed) {
     seq->dropped++;
 }
 
+// Whether the remote policy (#377) lets the key with code go down or come up now; records why not, the first time
+static bool policy_ok(sequence_t *seq, uint8_t code) {
+    char focus[LINE_CHARS] = "";
+    if (!ui_answer_policy_key(code)) {
+        return true;
+    }
+    current_focus(focus, sizeof(focus));
+    char why[sizeof(seq->refused)];
+    if (ui_answer_key_ok(code, focus, seq->answer ? seq->answer_label : NULL, seq->answer_gen, why, sizeof(why))) {
+        return true;
+    }
+    if (!seq->refused[0]) {
+        memcpy(seq->refused, why, sizeof(why));
+    }
+    return false;
+}
+
 static void key_up(sequence_t *seq, held_key_t const *k) {
+    // LVGL clicks on the release: a second look right before it. It still comes up (a lost release leaves the key
+    // down for every later key); the sequence stops after it.
+    policy_ok(seq, k->code);
     inject(seq, k->code, false);
     if (k->shift_code) {
         inject(seq, k->shift_code, false);
@@ -187,8 +208,7 @@ static bool key_step(sequence_t *seq) {
     }
     uint32_t key = seq->keys[seq->next];
     uint8_t  shift_code;
-    if (key != UI_KEY_WAIT && !ui_answer_key_ok(code_of(key, &shift_code), seq->answer ? seq->answer_label : NULL,
-                                                seq->answer_gen, seq->refused, sizeof(seq->refused))) {
+    if (key != UI_KEY_WAIT && !policy_ok(seq, code_of(key, &shift_code))) {
         return false; // the remote policy (#377): this key and the rest stay up
     }
     seq->next++;
@@ -202,7 +222,7 @@ static bool key_step(sequence_t *seq) {
     }
     key_down(seq, key, hold);
     seq->next_at = lv_tick_get() + KEY_GAP_MS;
-    return true;
+    return !seq->refused[0]; // refused on its release: nothing after it
 }
 
 // ms to the next thing to do: a key going down or a held one coming up (ui_keys_wait_ms)
@@ -252,8 +272,19 @@ static bool sequence_report(sequence_t const *seq) {
     return false;
 }
 
+static uint8_t seq_code(uint32_t key) {
+    uint8_t shift_code;
+    return code_of(key, &shift_code);
+}
+
 // Reads phys and checks that a key types every key of the sequence; adds up the holds. False (and says so) when not.
 static bool sequence_check(sequence_t *seq, uint32_t *hold_total) {
+    size_t at;
+    if (!remote_holds_ok(seq->keys, seq->n, seq_code, lichen_sys_keys_code_for, &at)) {
+        console_reply("%s: hold: on Enter, Tab, Left or Right is refused (entry %u): LVGL acts on the release, #377",
+                      seq->who, (unsigned)at + 1);
+        return false;
+    }
     *hold_total = 0;
     for (size_t i = 0; i < seq->n; i++) {
         uint32_t k = seq->keys[i];
@@ -809,5 +840,5 @@ static void cmd_ui(char const *args) {
 
 void ui_probe_init(void) {
     card_overlay_init();
-    console_register_dev("ui", "ui [perf [reset | bench [n]] | overflow [-v] | answer [yes <confirm_label> | no] | lock [on [s] | off] | card [test|white|grey|black|off] | open <app> | lockcheck [reset]] (answer: the open dialog and whether a remote Enter may answer it; yes confirms it when its confirm label matches, once 1.1 s old; no sends Esc; #377. lockcheck: LVGL calls made without the LVGL lock, #225; lock: physical keys off until off, s seconds (default 60, max 600) after the last command, or Esc held 3 s; open: an app as from its home tile, or home; #190. overflow: text cut off, off the screen or under the hint/status bar, #133; -v: the scroll geometry of each hit; screen ids on the stack, the focused row, every visible label; card: the bench test card over the screen, off after 60 s, #352; perf: frame timing, #93)", cmd_ui);
+    console_register_dev("ui", "ui [perf [reset | bench [n]] | overflow [-v] | answer [yes <confirm_label> [#<n>] | no] | lock [on [s] | off] | card [test|white|grey|black|off] | open <app> | lockcheck [reset]] (answer: the open dialog, its open number #n and whether a remote Enter may answer it; yes confirms it when its confirm label (and #n, when given) match, once 1.1 s old; no sends Esc; #377. lockcheck: LVGL calls made without the LVGL lock, #225; lock: physical keys off until off, s seconds (default 60, max 600) after the last command, or Esc held 3 s; open: an app as from its home tile, or home; #190. overflow: text cut off, off the screen or under the hint/status bar, #133; -v: the scroll geometry of each hit; screen ids on the stack, the focused row, every visible label; card: the bench test card over the screen, off after 60 s, #352; perf: frame timing, #93)", cmd_ui);
 }

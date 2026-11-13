@@ -11,11 +11,16 @@
 #include "remote_answer.h"
 #include "shell_parts.h"
 
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
+static_assert(LV_KEY_NEXT == 9 && LV_KEY_ENTER == 10 && LV_KEY_RIGHT == 19 && LV_KEY_LEFT == 20,
+              "remote_answer.c's key codes must match LVGL's");
+
 #define WHO       "ui answer"
 #define SCOPE_HOW "fw mesh scope console <region> YES"
+#define CHAT_NAME_MAX 40 // a channel name with its '#', or "@" and a contact name (MESH_CHAT_TITLE_MAX is the app's)
 
 // Any task: the dialog part of the view, with its strings in info
 static void read_dialog(remote_view_t *v, shell_dialog_info_t *info) {
@@ -45,36 +50,42 @@ static void why_text(rans_t r, remote_view_t const *v, bool page, char *why, siz
         case RANS_UNSURE: snprintf(why, cap, "a dialog is opening (or could not be read); try again"); break;
         case RANS_NO_DIALOG: snprintf(why, cap, "no dialog open"); break;
         case RANS_OTHER_DIALOG:
-            snprintf(why, cap, "the open dialog is '%s'", v->dialog == RDLG_OPEN ? v->label : "(none)");
+            if (v->dialog == RDLG_OPEN) {
+                snprintf(why, cap, "the open dialog is '%s' #%u", v->label, (unsigned)v->gen);
+            } else {
+                snprintf(why, cap, "the open dialog is (none)");
+            }
+            break;
+        case RANS_CHAT_TEST: snprintf(why, cap, "remote send only in " REMOTE_TEST_CHANNEL "; use fw mesh send/dm"); break;
+        case RANS_SENDS:
+            snprintf(why, cap, "Enter here (screen %d) goes on air with no dialog: remote send only in " REMOTE_TEST_CHANNEL,
+                     v->top_screen);
             break;
         default: snprintf(why, cap, "refused"); break;
     }
 }
 
-static rkey_t kind_of(uint8_t code) {
-    uint8_t shift;
-    if (!code) {
-        return RKEY_OTHER;
-    }
-    if (code == lichen_sys_keys_code_for(LV_KEY_ENTER, &shift)) {
-        return RKEY_ENTER;
-    }
-    bool side = code == lichen_sys_keys_code_for(LV_KEY_LEFT, &shift) ||
-                code == lichen_sys_keys_code_for(LV_KEY_RIGHT, &shift);
-    return side ? RKEY_SIDE : RKEY_OTHER;
+bool ui_answer_policy_key(uint8_t code) {
+    return remote_key_kind(code, lichen_sys_keys_code_for) != RKEY_OTHER;
 }
 
-// LVGL task, right before the key goes down: this is the last look before the keyboard path takes it (a dialog
-// replacing this one in the few ms until LVGL reads the key is not caught; a careful one ignores it, being too new)
-bool ui_answer_key_ok(uint8_t code, char const *answer_label, uint32_t answer_gen, char *why, size_t cap) {
-    rkey_t key = kind_of(code);
+// LVGL task, right before the key goes down (and again before it comes up): the last look before the keyboard path
+// takes it. A dialog replacing this one in the ~40 ms until LVGL reads the key is not caught; a careful one ignores
+// it, being too new.
+bool ui_answer_key_ok(uint8_t code, char const *focus, char const *answer_label, uint32_t answer_gen, char *why,
+                      size_t cap) {
+    rkey_t key = remote_key_kind(code, lichen_sys_keys_code_for);
     if (key == RKEY_OTHER) {
         return true;
     }
     shell_dialog_info_t info;
     remote_view_t       v;
+    char                chat[CHAT_NAME_MAX];
     read_dialog(&v, &info);
     v.top_screen = nav_current();
+    v.focus      = focus;
+    v.chat_known = bench_chat_on_top(chat, sizeof(chat), &v.chat_dm);
+    v.chat_name  = chat;
     rans_t r     = answer_label && key == RKEY_ENTER ? remote_answer_still(&v, answer_label, answer_gen)
                                                      : remote_key_check(key, &v);
     if (r == RANS_OK) {
@@ -95,32 +106,25 @@ static void answer_show(void) {
         return;
     }
     bool scoped = v.verdict == DLG_REMOTE_ALLOW_ONAIR_SCOPED;
-    console_reply(WHO ": %s%s, confirm '%s'%s, open %u ms, %u s left: %s", dlg_remote_verdict_name(v.verdict),
+    console_reply(WHO ": %s%s, confirm '%s' #%u%s, open %u ms, %u s left: %s", dlg_remote_verdict_name(v.verdict),
                   scoped ? (v.scope_set ? " (bench scope set)" : " (bench scope not set: " SCOPE_HOW ")") : "",
-                  info.confirm_label, info.careful ? ", careful" : "", (unsigned)info.ms_open, (unsigned)info.left_s,
-                  info.title);
+                  info.confirm_label, (unsigned)info.gen, info.careful ? ", careful" : "", (unsigned)info.ms_open,
+                  (unsigned)info.left_s, info.title);
 }
 
-// "yes <label>": the label is the rest of the line (labels have spaces: "clear all"), trailing spaces cut
+// "yes <label> [#<gen>]": the label is the rest of the line (labels have spaces: "clear all"); #<gen> pins the open
 static void answer_yes(char const *arg) {
-    char want[SHELL_DIALOG_LABEL_MAX];
-    while (*arg == ' ') {
-        arg++;
-    }
-    size_t len = strlen(arg);
-    while (len && arg[len - 1] == ' ') {
-        len--;
-    }
-    if (!len || len >= sizeof(want)) {
-        console_reply(WHO ": yes <confirm_label> (as \"fw " WHO "\" shows it)");
+    char     want[SHELL_DIALOG_LABEL_MAX];
+    bool     has_gen;
+    uint32_t want_gen;
+    if (!remote_answer_parse_yes(arg, want, sizeof(want), &has_gen, &want_gen)) {
+        console_reply(WHO ": yes <confirm_label> [#<n>] (both as \"fw " WHO "\" shows them)");
         return;
     }
-    memcpy(want, arg, len);
-    want[len] = '\0';
     shell_dialog_info_t info;
     remote_view_t       v;
     read_dialog(&v, &info);
-    rans_t r = remote_answer_check(&v, want);
+    rans_t r = remote_answer_check(&v, want, has_gen ? &want_gen : NULL);
     if (r != RANS_OK) {
         char why[192];
         why_text(r, &v, false, why, sizeof(why));
@@ -144,18 +148,25 @@ static void answer_yes(char const *arg) {
 }
 
 void ui_answer_cmd(char const *args) {
+    char   word[8];
+    size_t len;
     while (*args == ' ') {
         args++;
     }
-    if (!*args) {
+    len = strlen(args);
+    while (len && args[len - 1] == ' ') {
+        len--; // "no " is no
+    }
+    snprintf(word, sizeof(word), "%.*s", (int)(len < sizeof(word) - 1 ? len : sizeof(word) - 1), args);
+    if (!len) {
         answer_show();
-    } else if (strcmp(args, "no") == 0) {
+    } else if (len == 2 && strcmp(word, "no") == 0) {
         if (ui_probe_run(WHO, "esc", NULL, 0) >= 0) { // Esc is always allowed
             console_reply(WHO ": Esc sent");
         }
-    } else if (strncmp(args, "yes ", 4) == 0 || strcmp(args, "yes") == 0) {
+    } else if (strncmp(args, "yes ", 4) == 0 || (len == 3 && strcmp(word, "yes") == 0)) {
         answer_yes(args + 3);
     } else {
-        console_reply(WHO " [yes <confirm_label> | no]");
+        console_reply(WHO " [yes <confirm_label> [#<n>] | no]");
     }
 }
