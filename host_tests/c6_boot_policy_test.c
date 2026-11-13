@@ -214,9 +214,40 @@ static void test_no_loop_glue(void) {
     CHECK(r.restarts == 0 && r.skips == 9);
 }
 
+// Every input combination against the rule written out once more (#212): the first reason that applies, in this order,
+// is the one given, and only the last ("unchanged") skips. Pins the plan and the exact reason the log shows.
+static void test_plan_exhaustive(void) {
+    char const *const keys[] = {NULL, "", "k", "j"};
+    for (int i = 0; i < 2 * 2 * 2 * 2 * 4 * 4; i++) {
+        c6_reset_kind_t kind    = i & 1 ? C6_RST_OTHER : C6_RST_SOFTWARE;
+        bool            force   = i & 2, verify = i & 4, trial = i & 8;
+        char const     *stored  = keys[(i >> 4) & 3];
+        char const     *current = keys[(i >> 6) & 3];
+        char const     *want    = kind != C6_RST_SOFTWARE        ? "not a software reset"
+                                  : force                         ? "forced reflash"
+                                  : verify                        ? "verify flag (last attach failed)"
+                                  : trial                         ? "trial image (a restart would roll it back)"
+                                  : !current || !current[0]       ? "no readable bundle"
+                                  : !stored || !stored[0]         ? "no verified bundle stored"
+                                  : strcmp(stored, current) != 0 ? "bundle changed"
+                                                                  : "bundle unchanged since the last verify";
+        char const     *why     = NULL;
+        c6_plan_t       got     = c6_boot_plan(kind, force, verify, trial, stored, current, &why);
+        c6_plan_t       plan    = strcmp(want, "bundle unchanged since the last verify") == 0 ? C6_PLAN_SKIP
+                                                                                                : C6_PLAN_FULL_CHECK;
+        if (got != plan || !why || strcmp(why, want) != 0) {
+            printf("FAIL c6_boot_plan case %d: plan %d why %s, want %d %s\n", i, (int)got, why ? why : "NULL",
+                   (int)plan, want);
+            failures++;
+        }
+        CHECK(c6_boot_plan(kind, force, verify, trial, stored, current, NULL) == plan); // why may be NULL
+    }
+}
+
 int main(void) {
     test_key();
     test_plan_table();
+    test_plan_exhaustive();
     test_why();
     test_no_loop();
     test_after_attach();

@@ -37,30 +37,37 @@ bool c6_bundle_key(char const *boot_md5, char const *part_md5, char const *app_m
     return true;
 }
 
+// The first reason this boot must check the C6 fully, NULL when nothing stands in the way of a skip. The order is the
+// log's: the first that applies is the one reported.
+static char const *full_check_reason(c6_reset_kind_t kind, bool force, bool verify_flag, bool trial_image,
+                                     char const *stored_key, char const *current_key) {
+    if (kind != C6_RST_SOFTWARE) {
+        return "not a software reset";
+    }
+    if (force) {
+        return "forced reflash";
+    }
+    if (verify_flag) {
+        return "verify flag (last attach failed)";
+    }
+    if (trial_image) {
+        return "trial image (a restart would roll it back)";
+    }
+    if (!current_key || !current_key[0]) {
+        return "no readable bundle";
+    }
+    if (!stored_key || !stored_key[0]) {
+        return "no verified bundle stored";
+    }
+    return strcmp(stored_key, current_key) != 0 ? "bundle changed" : NULL;
+}
+
 c6_plan_t c6_boot_plan(c6_reset_kind_t kind, bool force, bool verify_flag, bool trial_image, char const *stored_key,
                        char const *current_key, char const **why) {
-    char const *reason;
-    c6_plan_t   plan = C6_PLAN_FULL_CHECK;
-    if (kind != C6_RST_SOFTWARE) {
-        reason = "not a software reset";
-    } else if (force) {
-        reason = "forced reflash";
-    } else if (verify_flag) {
-        reason = "verify flag (last attach failed)";
-    } else if (trial_image) {
-        reason = "trial image (a restart would roll it back)";
-    } else if (!current_key || !current_key[0]) {
-        reason = "no readable bundle";
-    } else if (!stored_key || !stored_key[0]) {
-        reason = "no verified bundle stored";
-    } else if (strcmp(stored_key, current_key) != 0) {
-        reason = "bundle changed";
-    } else {
-        reason = "bundle unchanged since the last verify";
-        plan   = C6_PLAN_SKIP;
-    }
+    char const *reason = full_check_reason(kind, force, verify_flag, trial_image, stored_key, current_key);
+    c6_plan_t   plan   = reason ? C6_PLAN_FULL_CHECK : C6_PLAN_SKIP;
     if (why) {
-        *why = reason;
+        *why = reason ? reason : "bundle unchanged since the last verify";
     }
     return plan;
 }
