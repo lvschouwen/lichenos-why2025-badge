@@ -153,8 +153,6 @@ static bool focus_in_rows(void) {
     return false;
 }
 
-// The radio went off: as the page opens with it off, the saved networks and why it is off. A join being watched
-// stops (its "Connecting to..." would cover why), and focus in the list stays in it (R6), never on the switch or Skip.
 // Focus the first row that is in the group: a note (the "Saved networks" heading) is a row slot but never focusable,
 // and lv_group_focus_obj on it leaves focus on a neighbour of the deleted row, the radio switch (#361)
 static void focus_first_row(void) {
@@ -168,6 +166,8 @@ static void focus_first_row(void) {
     }
 }
 
+// The radio went off: as the page opens with it off, the saved networks and why it is off. A join being watched
+// stops (its "Connecting to..." would cover why), and focus in the list stays in it (R6), never on the switch or Skip.
 static void show_radio_off(void) {
     bool in_rows = focus_in_rows();
     drop_scan();
