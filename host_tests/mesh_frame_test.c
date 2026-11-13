@@ -1,5 +1,6 @@
 // Host test: MeshCore companion frame codec (#45)
 #include "mesh_frame.h"
+#include "mutate.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -211,6 +212,140 @@ static void decoders(void) {
     CHECK(m.kind == MF_UNKNOWN && m.code == 0x8A);
 }
 
+// One valid frame of every code mf_decode reads (#212): the corpus the pin and the malformed run start from
+typedef struct {
+    uint8_t buf[MF_MAX_FRAME];
+    size_t  len;
+} frame_t;
+
+static size_t corpus(frame_t *c) {
+    size_t n = 0;
+    // OK, ERR, SENT, NO_MORE, DEVICE_INFO, MSG_WAITING, PATH_UPDATED, SEND_CONFIRMED, LOGIN_FAIL, unknown
+    static uint8_t const fixed[][10] = {
+        {0}, {1, 3}, {6, 1, 0x11, 0x22, 0x33, 0x44, 0xE8, 3, 0, 0}, {10}, {13, 14}, {0x83}, {0x81},
+        {0x82, 1, 2, 3, 4, 5, 6, 7, 8}, {0x86, 0, 6, 5, 4, 3, 2, 1}, {0x8A, 1, 2, 3},
+    };
+    static uint8_t const fixed_len[] = {1, 2, 10, 1, 2, 1, 1, 9, 8, 4};
+    for (size_t i = 0; i < sizeof(fixed_len); i++, n++) {
+        memcpy(c[n].buf, fixed[i], fixed_len[i]);
+        c[n].len = fixed_len[i];
+    }
+    memset(c[n].buf, 0, sizeof(c[n].buf)); // SELF_INFO: [5, ..., pub at 4, name at 58]
+    c[n].buf[0] = 5;
+    memset(c[n].buf + 4, 7, MF_PUB_LEN);
+    memcpy(c[n].buf + 58, "Alice", 5);
+    c[n++].len = 63;
+    uint8_t const msgs[][16] = {
+        {7, 1, 2, 3, 4, 5, 6, 0xFF, 1, 9, 9, 9, 9, 'o', 'k', '!'},
+        {16, 20, 0, 0, 1, 2, 3, 4, 5, 6, 0xFF, 2, 9, 9, 9, 9},
+        {8, 0, 0xFF, 0, 1, 2, 3, 4, 'c', 'h', 'a', 'n'},
+        {17, 0, 0, 0, 0, 0xFF, 0, 1, 2, 3, 4, 'v', '3'},
+    };
+    for (size_t i = 0; i < 4; i++, n++) {
+        memcpy(c[n].buf, msgs[i], 16);
+        memcpy(c[n].buf + 16, "AUTHtext of a message", 21);
+        c[n].len = 37;
+    }
+    uint8_t const ok[14] = {0x85, 1, 1, 2, 3, 4, 5, 6, 0, 0, 0, 0, 3, 8};
+    memcpy(c[n].buf, ok, sizeof(ok));
+    c[n++].len = sizeof(ok);
+    c[n].buf[0] = 0x87; // STATUS with all 56 bytes of RepeaterStats
+    for (size_t i = 1; i < 64; i++) {
+        c[n].buf[i] = (uint8_t)(i * 7);
+    }
+    c[n++].len = 64;
+    uint8_t const telem[] = {0x8B, 0, 1, 2, 3, 4, 5, 6, 1, 116, 0x01, 0x9C};
+    memcpy(c[n].buf, telem, sizeof(telem));
+    c[n++].len = sizeof(telem);
+    uint8_t const trace[] = {0x89, 0, 3, 0, 0x44, 0x33, 0x22, 0x11, 0, 0, 0, 0, 0xa1, 0x2a, 0xa1, 28, (uint8_t)-10, 4, 38};
+    memcpy(c[n].buf, trace, sizeof(trace));
+    c[n++].len = sizeof(trace);
+    uint8_t const disc[] = {0x8D, 0, 0x2a, 0xe9, 0x6c, 0x65, 0x7d, 0x03, 0x41, 0xa1, 0xb2, 0x02, 0xc3, 0xd4};
+    memcpy(c[n].buf, disc, sizeof(disc));
+    c[n++].len = sizeof(disc);
+    return n;
+}
+
+#define CORPUS_MAX 32
+
+static size_t min_sz(size_t a, size_t b) {
+    return a < b ? a : b;
+}
+
+// What any decoded frame must satisfy, valid or not: terminated strings, lengths that agree with the input, and a
+// copied payload that is the input's bytes (ASan has the rest: the input is a heap block of exactly len bytes)
+static bool decoded_sane(uint8_t const *f, size_t len, mf_msg_t const *m) {
+    if (len == 0) {
+        return m->kind == MF_BAD && m->code == 0;
+    }
+    bool ok = m->code == f[0] && m->kind <= MF_DISCOVERY;
+    ok      = ok && memchr(m->name, 0, sizeof(m->name)) && memchr(m->text, 0, sizeof(m->text));
+    ok      = ok && (!m->msg_ok || (m->kind == MF_MSG_RECV && !m->is_channel && strlen(m->text) <= len));
+    ok      = ok && m->telem_len <= MF_TELEM_MAX && m->status.bytes <= MF_STATUS_BYTES;
+    switch (m->kind) {
+        case MF_SENT: return ok && len >= 10;
+        case MF_SEND_CONFIRMED: return ok && len >= 9;
+        case MF_SELF_INFO: {
+            size_t nl = len >= 58 ? min_sz(len - 58, MF_NAME_MAX - 1) : 0;
+            return ok && len >= 58 && memcmp(m->name, f + 58, nl) == 0 && m->name[nl] == 0;
+        }
+        case MF_LOGIN_SUCCESS:
+        case MF_LOGIN_FAIL: return ok && len >= 8 && memcmp(m->rprefix, f + 2, MF_PREFIX) == 0;
+        case MF_STATUS: return ok && len >= 8 && m->status.bytes == min_sz(len - 8, MF_STATUS_BYTES);
+        case MF_TELEMETRY:
+            return ok && len >= 8 && m->telem_len == min_sz(len - 8, MF_TELEM_MAX) &&
+                   memcmp(m->telem, f + 8, m->telem_len) == 0;
+        case MF_TRACE:
+            return ok && m->trace.hash_len <= MF_TRACE_HASH_MAX && m->trace.hops <= MF_PATH_MAX &&
+                   len == 13u + m->trace.hash_len + m->trace.hops && memcmp(m->trace.hashes, f + 12, m->trace.hash_len) == 0;
+        case MF_DISCOVERY: return ok && len >= 10 && m->disc.out_len == f[8];
+        default: return ok;
+    }
+}
+
+static uint32_t fnv(uint32_t h, void const *p, size_t n) {
+    uint8_t const *b = p;
+    while (n--) {
+        h = (h ^ *b++) * 16777619u;
+    }
+    return h;
+}
+
+// Malformed input (#212): every mutation of every corpus frame decodes to a sane result. The digest over all results
+// pins the decoder's output byte for byte (mf_decode zeroes the struct first, so padding is 0); it was taken before the
+// #212 split. A deliberate change to what mf_decode returns changes it: print the new value and say why in the commit.
+static void decode_malformed(void) {
+    frame_t  c[CORPUS_MAX];
+    size_t   n      = corpus(c);
+    uint32_t digest = 2166136261u;
+    size_t   bad    = 0;
+    for (size_t i = 0; i < n; i++) {
+        mut_rng_t r;
+        mut_seed(&r, (uint32_t)(i + 1) * 2654435761u);
+        for (int k = 0; k < 3000; k++) {
+            uint8_t buf[MF_MAX_FRAME + 64];
+            size_t  len = k == 0 ? mut_truncate(c[i].buf, c[i].len, c[i].len, buf, sizeof(buf))
+                                 : mut_random(&r, c[i].buf, c[i].len, buf, sizeof(buf));
+            uint8_t *f  = mut_exact(buf, len);
+            mf_msg_t m;
+            mf_decode(f, len, &m);
+            if (!decoded_sane(f, len, &m)) {
+                if (bad++ < 5) {
+                    printf("FAIL insane decode: corpus %zu mutation %d len %zu kind %d\n", i, k, len, (int)m.kind);
+                }
+            }
+            digest = fnv(digest, &m, sizeof(m));
+            free(f);
+        }
+    }
+    failures += bad ? 1 : 0;
+    uint32_t const pinned = 0x94a9306cu;
+    if (digest != pinned) {
+        printf("FAIL mf_decode output digest 0x%08x, pinned 0x%08x\n", (unsigned)digest, (unsigned)pinned);
+        failures++;
+    }
+}
+
 int main(void) {
     encoders();
     remote_encoders();
@@ -218,6 +353,7 @@ int main(void) {
     limits();
     text_cut();
     decoders();
+    decode_malformed();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

@@ -309,6 +309,82 @@ static void decode_contact_msg(uint8_t const *f, size_t len, mf_msg_t *out) {
     out->msg_ok  = true;
 }
 
+static void decode_err(uint8_t const *f, size_t len, mf_msg_t *out) {
+    out->kind = too_short(len, 2) ? MF_BAD : MF_ERR;
+    out->err  = len >= 2 ? f[1] : 0;
+}
+
+static void decode_sent(uint8_t const *f, size_t len, mf_msg_t *out) {
+    if (too_short(len, 10)) {
+        out->kind = MF_BAD;
+        return;
+    }
+    out->kind        = MF_SENT;
+    out->flood       = f[1];
+    out->ack         = get32(f + 2);
+    out->est_timeout = get32(f + 6);
+}
+
+static void decode_device_info(uint8_t const *f, size_t len, mf_msg_t *out) {
+    out->kind   = too_short(len, 2) ? MF_BAD : MF_DEVICE_INFO;
+    out->fw_ver = len >= 2 ? f[1] : 0;
+}
+
+// The four message codes: a channel message is only flagged (the mesh task reads it from MyMesh), a contact's is read
+static void decode_msg_recv(uint8_t const *f, size_t len, mf_msg_t *out) {
+    out->kind       = too_short(len, 7) ? MF_BAD : MF_MSG_RECV;
+    out->is_channel = f[0] == MF_RESP_CHANNEL_MSG_RECV || f[0] == MF_RESP_CHANNEL_MSG_RECV_V3;
+    if (out->kind == MF_MSG_RECV && !out->is_channel) {
+        decode_contact_msg(f, len, out);
+    }
+}
+
+static void decode_send_confirmed(uint8_t const *f, size_t len, mf_msg_t *out) {
+    if (too_short(len, 9)) {
+        out->kind = MF_BAD;
+        return;
+    }
+    out->kind    = MF_SEND_CONFIRMED;
+    out->ack     = get32(f + 1);
+    out->trip_ms = get32(f + 5);
+}
+
+static void decode_login_fail(uint8_t const *f, size_t len, mf_msg_t *out) {
+    out->kind = too_short(len, 8) ? MF_BAD : MF_LOGIN_FAIL;
+    if (out->kind == MF_LOGIN_FAIL) {
+        memcpy(out->rprefix, f + 2, MF_PREFIX);
+    }
+}
+
+// Each code we read: a decoder that checks the frame's length itself, or (fn NULL) a kind with no payload. A code not
+// listed is MF_UNKNOWN. A table rather than a switch keeps mf_decode one lookup (#212).
+typedef void (*mf_decoder_t)(uint8_t const *f, size_t len, mf_msg_t *out);
+static struct {
+    uint8_t      code;
+    uint8_t      kind; // mf_kind_t, when fn is NULL
+    mf_decoder_t fn;
+} const decoders[] = {
+    {MF_RESP_OK, MF_OK, NULL},
+    {MF_RESP_ERR, 0, decode_err},
+    {MF_RESP_SELF_INFO, 0, decode_self_info},
+    {MF_RESP_SENT, 0, decode_sent},
+    {MF_RESP_NO_MORE_MESSAGES, MF_NO_MORE, NULL},
+    {MF_RESP_DEVICE_INFO, 0, decode_device_info},
+    {MF_RESP_CONTACT_MSG_RECV, 0, decode_msg_recv},
+    {MF_RESP_CHANNEL_MSG_RECV, 0, decode_msg_recv},
+    {MF_RESP_CONTACT_MSG_RECV_V3, 0, decode_msg_recv},
+    {MF_RESP_CHANNEL_MSG_RECV_V3, 0, decode_msg_recv},
+    {MF_PUSH_SEND_CONFIRMED, 0, decode_send_confirmed},
+    {MF_PUSH_MSG_WAITING, MF_MSG_WAITING, NULL},
+    {MF_PUSH_PATH_UPDATED, MF_PATH_UPDATED, NULL},
+    {MF_PUSH_LOGIN_SUCCESS, 0, decode_login_ok},
+    {MF_PUSH_LOGIN_FAIL, 0, decode_login_fail},
+    {MF_PUSH_STATUS_RESPONSE, 0, decode_status},
+    {MF_PUSH_TELEMETRY_RESPONSE, 0, decode_telemetry},
+    {MF_PUSH_TRACE_DATA, 0, decode_trace},
+    {MF_PUSH_PATH_DISCOVERY, 0, decode_discovery},
+};
+
 void mf_decode(uint8_t const *f, size_t len, mf_msg_t *out) {
     memset(out, 0, sizeof(*out));
     if (len == 0) {
@@ -317,82 +393,16 @@ void mf_decode(uint8_t const *f, size_t len, mf_msg_t *out) {
     }
     out->code = f[0];
     out->kind = MF_UNKNOWN;
-    switch (f[0]) {
-    case MF_RESP_OK:
-        out->kind = MF_OK;
-        break;
-    case MF_RESP_ERR:
-        out->kind = too_short(len, 2) ? MF_BAD : MF_ERR;
-        out->err  = len >= 2 ? f[1] : 0;
-        break;
-    case MF_RESP_SELF_INFO:
-        decode_self_info(f, len, out);
-        break;
-    case MF_RESP_SENT:
-        if (too_short(len, 10)) {
-            out->kind = MF_BAD;
-            break;
+    for (size_t i = 0; i < sizeof(decoders) / sizeof(decoders[0]); i++) {
+        if (decoders[i].code != f[0]) {
+            continue;
         }
-        out->kind        = MF_SENT;
-        out->flood       = f[1];
-        out->ack         = get32(f + 2);
-        out->est_timeout = get32(f + 6);
-        break;
-    case MF_RESP_NO_MORE_MESSAGES:
-        out->kind = MF_NO_MORE;
-        break;
-    case MF_RESP_DEVICE_INFO:
-        out->kind   = too_short(len, 2) ? MF_BAD : MF_DEVICE_INFO;
-        out->fw_ver = len >= 2 ? f[1] : 0;
-        break;
-    case MF_RESP_CONTACT_MSG_RECV:
-    case MF_RESP_CHANNEL_MSG_RECV:
-    case MF_RESP_CONTACT_MSG_RECV_V3:
-    case MF_RESP_CHANNEL_MSG_RECV_V3:
-        out->kind       = too_short(len, 7) ? MF_BAD : MF_MSG_RECV;
-        out->is_channel = f[0] == MF_RESP_CHANNEL_MSG_RECV || f[0] == MF_RESP_CHANNEL_MSG_RECV_V3;
-        if (out->kind == MF_MSG_RECV && !out->is_channel) {
-            decode_contact_msg(f, len, out);
+        if (decoders[i].fn) {
+            decoders[i].fn(f, len, out);
+        } else {
+            out->kind = (mf_kind_t)decoders[i].kind;
         }
-        break;
-    case MF_PUSH_SEND_CONFIRMED:
-        if (too_short(len, 9)) {
-            out->kind = MF_BAD;
-            break;
-        }
-        out->kind    = MF_SEND_CONFIRMED;
-        out->ack     = get32(f + 1);
-        out->trip_ms = get32(f + 5);
-        break;
-    case MF_PUSH_MSG_WAITING:
-        out->kind = MF_MSG_WAITING;
-        break;
-    case MF_PUSH_PATH_UPDATED:
-        out->kind = MF_PATH_UPDATED;
-        break;
-    case MF_PUSH_LOGIN_SUCCESS:
-        decode_login_ok(f, len, out);
-        break;
-    case MF_PUSH_LOGIN_FAIL:
-        out->kind = too_short(len, 8) ? MF_BAD : MF_LOGIN_FAIL;
-        if (out->kind == MF_LOGIN_FAIL) {
-            memcpy(out->rprefix, f + 2, MF_PREFIX);
-        }
-        break;
-    case MF_PUSH_STATUS_RESPONSE:
-        decode_status(f, len, out);
-        break;
-    case MF_PUSH_TELEMETRY_RESPONSE:
-        decode_telemetry(f, len, out);
-        break;
-    case MF_PUSH_TRACE_DATA:
-        decode_trace(f, len, out);
-        break;
-    case MF_PUSH_PATH_DISCOVERY:
-        decode_discovery(f, len, out);
-        break;
-    default:
-        break;
+        return;
     }
 }
 
