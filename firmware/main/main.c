@@ -723,6 +723,7 @@ static void start_keyboard(boot_ctx_t *ctx) {
     // on every boot, and a boot without a screen or keyboard uses up the shot too
     boot_keys_t armed = boot_keys_take_armed();
     if (!ctx->screen) {
+        boot_keys_skipped(armed, "no screen");
         return;
     }
     lv_indev_t *keys = NULL; // the keypad is an LVGL input device: LVGL first
@@ -731,6 +732,7 @@ static void start_keyboard(boot_ctx_t *ctx) {
     lichen_ui_service_arm();
     if (!up) {
         ESP_LOGE(TAG, "no keyboard");
+        boot_keys_skipped(armed, "no keyboard");
         return;
     }
     shell_attach_keys(keys);
