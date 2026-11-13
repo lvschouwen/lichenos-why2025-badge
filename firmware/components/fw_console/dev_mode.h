@@ -15,10 +15,17 @@ extern "C" {
 
 // Where the command line being run came from
 typedef enum {
-    CONSOLE_ORIGIN_UART,  // typed on the USB serial console: a person at the cable
-    CONSOLE_ORIGIN_WIFI,  // POST /console, authenticated by the OTA token
-    CONSOLE_ORIGIN_LOCAL, // the Console app on the badge's own screen (console_exec)
+    CONSOLE_ORIGIN_UART,    // typed on the USB serial console: a person at the cable
+    CONSOLE_ORIGIN_WIFI,    // POST /console, authenticated by the OTA token
+    CONSOLE_ORIGIN_LOCAL,   // the Console app on the badge's own screen (console_exec)
+    CONSOLE_ORIGIN_UNKNOWN, // not a console command's task: refused wherever an origin matters
 } console_origin_t;
+
+// The origin a console_exec run records: keep_secret is console_exec_with_secrets, POST /console's (#123)
+console_origin_t dev_mode_exec_origin(bool keep_secret);
+// The origin of the calling task: captured is true when it runs the console_exec whose origin is exec; uart_task when
+// it is the console task that reads the UART. Anything else is UNKNOWN, so a new caller fails closed.
+console_origin_t dev_mode_origin(bool captured, console_origin_t exec, bool uart_task);
 
 #define DEV_MODE_KEY      "dev.mode" // u8 in badge_fw through the settings service; a factory reset erases it
 #define DEV_MODE_OFF_NOTE "developer mode is off (About: tap Version 7 times, or USB: fw dev on)"

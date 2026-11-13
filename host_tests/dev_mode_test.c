@@ -4,6 +4,7 @@
 #include "factory_plan.h"
 
 #include <stdio.h>
+
 #include <string.h>
 
 static int failures;
@@ -35,7 +36,7 @@ static void gate_off_and_on(void) {
     CHECK(dev_mode_find(table, N, "reboot", false, &i) == DEV_FIND_RUN && i == 2); // a plain command always runs
     CHECK(dev_mode_find(table, N, "reboot", true, &i) == DEV_FIND_RUN);
     CHECK(dev_mode_find(table, N, "nope", true, &i) == DEV_FIND_NONE);
-    CHECK(dev_mode_find(table, N, "u", true, &i) == DEV_FIND_NONE); // whole names only
+    CHECK(dev_mode_find(table, N, "u", true, &i) == DEV_FIND_NONE);  // whole names only
     CHECK(dev_mode_find(table, 1, "ui", true, &i) == DEV_FIND_NONE); // only the published count is searched
 }
 
@@ -60,7 +61,7 @@ static void help_hides_debug_commands(void) {
 
 static void on_only_from_usb(void) {
     CHECK(dev_mode_request("on", CONSOLE_ORIGIN_UART) == DEV_REQ_ON);
-    CHECK(dev_mode_request("on", CONSOLE_ORIGIN_WIFI) == DEV_REQ_REFUSED); // the OTA token is not enough
+    CHECK(dev_mode_request("on", CONSOLE_ORIGIN_WIFI) == DEV_REQ_REFUSED);  // the OTA token is not enough
     CHECK(dev_mode_request("on", CONSOLE_ORIGIN_LOCAL) == DEV_REQ_REFUSED); // the Console app: About's taps instead
     CHECK(dev_mode_request("off", CONSOLE_ORIGIN_UART) == DEV_REQ_OFF);
     CHECK(dev_mode_request("off", CONSOLE_ORIGIN_WIFI) == DEV_REQ_OFF); // off works from anywhere
@@ -69,6 +70,20 @@ static void on_only_from_usb(void) {
     CHECK(dev_mode_request("status", CONSOLE_ORIGIN_WIFI) == DEV_REQ_STATUS);
     CHECK(dev_mode_request("onn", CONSOLE_ORIGIN_UART) == DEV_REQ_USAGE);
     CHECK(dev_mode_request("on ", CONSOLE_ORIGIN_UART) == DEV_REQ_USAGE);
+}
+
+// console.c records an exec run's origin and asks it back per task: swapping WIFI and LOCAL, or letting a task that is
+// not the console's own count as the UART, would let `fw dev on` in over Wi-Fi
+static void origin_plumbing(void) {
+    CHECK(dev_mode_exec_origin(true) == CONSOLE_ORIGIN_WIFI);   // console_exec_with_secrets: POST /console
+    CHECK(dev_mode_exec_origin(false) == CONSOLE_ORIGIN_LOCAL); // console_exec: the Console app
+    CHECK(dev_mode_origin(true, CONSOLE_ORIGIN_WIFI, false) == CONSOLE_ORIGIN_WIFI);
+    CHECK(dev_mode_origin(true, CONSOLE_ORIGIN_LOCAL, false) == CONSOLE_ORIGIN_LOCAL);
+    CHECK(dev_mode_origin(false, CONSOLE_ORIGIN_WIFI, true) == CONSOLE_ORIGIN_UART);     // the console task's own line
+    CHECK(dev_mode_origin(false, CONSOLE_ORIGIN_WIFI, false) == CONSOLE_ORIGIN_UNKNOWN); // some other task: closed
+    CHECK(dev_mode_request("on", dev_mode_origin(true, dev_mode_exec_origin(true), false)) == DEV_REQ_REFUSED);
+    CHECK(dev_mode_request("on", dev_mode_origin(false, CONSOLE_ORIGIN_LOCAL, false)) == DEV_REQ_REFUSED);
+    CHECK(dev_mode_request("on", dev_mode_origin(false, CONSOLE_ORIGIN_LOCAL, true)) == DEV_REQ_ON);
 }
 
 static void factory_reset_clears_it(void) {
@@ -81,6 +96,7 @@ int main(void) {
     gate_off_and_on();
     help_hides_debug_commands();
     on_only_from_usb();
+    origin_plumbing();
     factory_reset_clears_it();
     if (failures) {
         printf("%d failure(s)\n", failures);

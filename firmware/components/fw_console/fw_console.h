@@ -40,15 +40,17 @@ static inline void console_register_dev(char const *name, char const *usage, con
 #endif
 // For a command where only some subcommands are debug ones: true while developer mode is on; otherwise it replies
 // "<what>: " DEV_MODE_OFF_NOTE and is false. what names the subcommand, e.g. "ui lockcheck".
-bool console_dev_gate(char const *what);
+bool             console_dev_gate(char const *what);
 // Developer mode now (always false in a release build). Any task.
-bool console_dev_mode(void);
+bool             console_dev_mode(void);
 // Turns developer mode on or off and saves it (dev.mode). For the owner's own path, About's taps (#374); `fw dev on`
 // adds the USB-only rule. No effect in a release build. False when it could not be saved (it still holds this boot).
-bool console_dev_set(bool on);
-// The saved state through the settings service (#235); read once here. Bound in settings_bind_services().
-void console_bind_dev_store(fw_get_u8_fn get, fw_set_u8_fn set);
-// Where the command running on the calling task came from (UART when it is not a console_exec run)
+bool             console_dev_set(bool on);
+// The saved state through the settings service (#235); read once here. Bound in settings_bind_dev_mode(), after the
+// factory reset step.
+void             console_bind_dev_store(fw_get_u8_fn get, fw_set_u8_fn set);
+// Where the command running on the calling task came from: the console_exec run's origin, UART on the console task,
+// UNKNOWN on any other task
 console_origin_t console_origin(void);
 void console_reply(char const *fmt, ...) __attribute__((format(printf, 1, 2)));
 // Like console_reply for a line that holds a secret (a channel key, the update token, a repeater's guest password; #123):
@@ -74,7 +76,8 @@ void console_set_activity(void (*activity)(void));
 // caller wipes buf after done.
 typedef void (*console_done_fn)(void *ctx, char const *out, size_t len);
 // True when the calling task runs a line typed on the UART, false inside console_exec (Wi-Fi POST /console, the Console
-// app). For commands only a person at the cable may run (#116); console_origin() tells the other two apart.
+// app) and on any other task. For commands only a person at the cable may run (#116); console_origin() tells the other
+// two apart.
 bool console_from_uart(void);
 void console_exec(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx);
 // The same, but secret lines are collected too: for POST /console, whose reply goes only to the one who asked (with the

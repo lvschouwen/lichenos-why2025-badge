@@ -55,6 +55,8 @@ static struct {
     console_origin_t  origin; // WIFI or LOCAL: a UART line is never captured
 } capture;
 
+static TaskHandle_t _Atomic s_uart_task; // the console task: its commands are typed on the UART (#373)
+
 // One command runs at a time, from the UART or from Wi-Fi: commands share state (the capture, the commands' statics)
 static SemaphoreHandle_t run_mutex;
 #define RUN_WAIT_MS 2000
@@ -203,11 +205,15 @@ static void cmd_help(char const *args) {
     (void)args;
     int n      = commands_count();
     int listed = dev_mode_help(commands, n, console_dev_mode(), help_line, NULL);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     if (listed < n) {
         console_reply("%d of %d commands registered (%d debug ones hidden: fw dev)", n, MAX_COMMANDS, n - listed);
-    } else {
-        console_reply("%d of %d commands registered", n, MAX_COMMANDS);
+        return;
     }
+#else
+    (void)listed; // a release build registers no debug commands: all are listed
+#endif
+    console_reply("%d of %d commands registered", n, MAX_COMMANDS);
 }
 
 static void print_heap(char const *name, uint32_t caps) {
@@ -711,14 +717,9 @@ static void run_command(char *line) {
     }
     int i = 0;
     switch (dev_mode_find(commands, commands_count(), line, console_dev_mode(), &i)) {
-    case DEV_FIND_RUN:
-        commands[i].fn(args);
-        return;
-    case DEV_FIND_DEV_OFF:
-        console_reply("%s: " DEV_OFF_REPLY, commands[i].name);
-        return;
-    case DEV_FIND_NONE:
-        break;
+        case DEV_FIND_RUN: commands[i].fn(args); return;
+        case DEV_FIND_DEV_OFF: console_reply("%s: " DEV_OFF_REPLY, commands[i].name); return;
+        case DEV_FIND_NONE: break;
     }
     // Not echoed: a mistyped line may be a password, and the reply goes to the log store (#123); the asker sees what
     // they typed on their own side
@@ -726,7 +727,8 @@ static void run_command(char *line) {
 }
 
 console_origin_t console_origin(void) {
-    return capture.task == xTaskGetCurrentTaskHandle() ? capture.origin : CONSOLE_ORIGIN_UART;
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    return dev_mode_origin(capture.task == self, capture.origin, atomic_load(&s_uart_task) == self);
 }
 
 bool console_from_uart(void) {
@@ -751,7 +753,8 @@ static void exec(char const *line, char *buf, size_t cap, bool keep_secret, cons
     }
     memcpy(cmd, line, len); // run() splits it in place
     cmd[len] = '\0';
-    if (run_mutex && xSemaphoreTake(run_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) != pdTRUE) {
+    // No mutex yet: console_start has not run, and without it the run would not be serialised against the UART
+    if (!run_mutex || xSemaphoreTake(run_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) != pdTRUE) {
         static char const busy[] = "busy, try again\n";
         secure_wipe(cmd, len + 1); // every free path: the line may hold a password (#123)
         free(cmd);
@@ -759,11 +762,11 @@ static void exec(char const *line, char *buf, size_t cap, bool keep_secret, cons
         return;
     }
     capture = (typeof(capture)){
-        .task = xTaskGetCurrentTaskHandle(),
-        .out  = {.buf = buf, .cap = cap, .keep_secret = keep_secret},
+        .task   = xTaskGetCurrentTaskHandle(),
+        .out    = {.buf = buf, .cap = cap, .keep_secret = keep_secret},
         .done   = done,
         .ctx    = ctx,
-        .origin = keep_secret ? CONSOLE_ORIGIN_WIFI : CONSOLE_ORIGIN_LOCAL,
+        .origin = dev_mode_exec_origin(keep_secret),
     };
     if (cmd[0]) {
         run(cmd);
@@ -772,9 +775,7 @@ static void exec(char const *line, char *buf, size_t cap, bool keep_secret, cons
     free(cmd);
     capture_finish();
     capture.task = NULL;
-    if (run_mutex) {
-        xSemaphoreGive(run_mutex);
-    }
+    xSemaphoreGive(run_mutex);
 }
 
 void console_exec(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx) {
@@ -789,29 +790,24 @@ void console_exec_with_secrets(char const *line, char *buf, size_t cap, console_
 // "fw dev [on|off|status]" (#373): on only from the USB console, never over Wi-Fi (the OTA token is not enough)
 static void cmd_dev(char const *args) {
     switch (dev_mode_request(args, console_origin())) {
-    case DEV_REQ_STATUS:
-        console_reply("developer mode %s", console_dev_mode() ? "on" : "off");
-        break;
-    case DEV_REQ_ON:
-    case DEV_REQ_OFF: {
-        bool on = strcmp(args, "on") == 0;
-        bool saved = console_dev_set(on);
-        console_reply("developer mode %s%s", on ? "on" : "off", saved ? "" : " (not saved: this boot only)");
-        break;
-    }
-    case DEV_REQ_REFUSED:
-        console_reply("dev on: only from the USB console (or About: tap Version 7 times)");
-        break;
-    case DEV_REQ_USAGE:
-    default:
-        console_reply("dev [on|off|status]");
-        break;
+        case DEV_REQ_STATUS: console_reply("developer mode %s", console_dev_mode() ? "on" : "off"); break;
+        case DEV_REQ_ON:
+        case DEV_REQ_OFF: {
+            bool on    = strcmp(args, "on") == 0;
+            bool saved = console_dev_set(on);
+            console_reply("developer mode %s%s", on ? "on" : "off", saved ? "" : " (not saved: this boot only)");
+            break;
+        }
+        case DEV_REQ_REFUSED: console_reply("dev on: only from the USB console (or About: tap Version 7 times)"); break;
+        case DEV_REQ_USAGE:
+        default: console_reply("dev [on|off|status]"); break;
     }
 }
 #endif
 
 static void console_task(void *arg) {
     (void)arg;
+    atomic_store(&s_uart_task, xTaskGetCurrentTaskHandle());
     console_cmd_t state;
     console_cmd_init(&state);
     for (;;) {

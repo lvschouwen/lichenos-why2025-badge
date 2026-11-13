@@ -537,6 +537,7 @@ static void start_nvs(boot_ctx_t *ctx) {
     meshcore_app_register(); // first in home's order; its keep list is needed by the reset
     declare_keep_keys();
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
+    settings_bind_dev_mode(); // reads dev.mode (#373): after the reset, which erases it
     // #121, #353: the 80/120 MHz record: bad bytes in the boot check at 120 fall back to 80, a wanted 120 arms and
     // restarts once (not while the image is on trial, #285: ota answers that; not after a crash, which crash.c's core
     // dump tells from this board's reason-7 power-on)

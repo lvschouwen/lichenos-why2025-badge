@@ -24,6 +24,17 @@ int dev_mode_help(console_entry_t const *table, int n, bool on, void (*line)(cha
     return listed;
 }
 
+console_origin_t dev_mode_exec_origin(bool keep_secret) {
+    return keep_secret ? CONSOLE_ORIGIN_WIFI : CONSOLE_ORIGIN_LOCAL;
+}
+
+console_origin_t dev_mode_origin(bool captured, console_origin_t exec, bool uart_task) {
+    if (captured) {
+        return exec;
+    }
+    return uart_task ? CONSOLE_ORIGIN_UART : CONSOLE_ORIGIN_UNKNOWN;
+}
+
 dev_req_t dev_mode_request(char const *args, console_origin_t origin) {
     if (args[0] == '\0' || strcmp(args, "status") == 0) {
         return DEV_REQ_STATUS;

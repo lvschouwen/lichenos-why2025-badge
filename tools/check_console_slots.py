@@ -131,7 +131,10 @@ def main():
         return 0
     path = FW / "sdkconfig"
     if "--sdkconfig" in sys.argv:
-        path = Path(sys.argv[sys.argv.index("--sdkconfig") + 1])
+        at = sys.argv.index("--sdkconfig") + 1
+        if at >= len(sys.argv):
+            sys.exit("check_console_slots: --sdkconfig needs a path")
+        path = Path(sys.argv[at])
     cfg = load_config(path)
     total = sum(count_calls(p.read_text(errors="replace"), cfg) for p in sources())
     limit = max_commands()

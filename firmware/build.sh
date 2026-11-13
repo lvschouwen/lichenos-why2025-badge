@@ -100,7 +100,7 @@ release_checks() {
     "$repo/tools/pack_storage.sh" check-config "$bdir/config/sdkconfig.json" "$here/managed_components/joltwallet__littlefs"
     # No debug command may reach the image: `fw dev`'s usage and the off note are the markers console.c builds with them
     local marker
-    for marker in "dev [on|off|status]" "fw dev on" "developer mode"; do
+    for marker in "dev [on|off|status]" "fw dev on" "developer mode" "debug ones hidden"; do
         if grep -aqF "$marker" "$bdir/badge_fw.bin"; then
             echo "release image $bdir/badge_fw.bin holds \"$marker\": LICHEN_DEV_COMMANDS is not off" >&2
             exit 1

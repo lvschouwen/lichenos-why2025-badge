@@ -21,6 +21,10 @@ void os_bind_lower(void);
 bool settings_get_blob(char const *key, void *out, size_t size);
 bool settings_set_blob(char const *key, void const *data, size_t size);
 
+// Hands the console developer mode's saved state (dev.mode, #373), which it reads once here. Call right after
+// factory_reset_boot_nvs(), so a factory reset pending at this boot is already done (main.c start_nvs).
+void settings_bind_dev_mode(void);
+
 // Hands lichen_net its store (#235): the SSIDs as plain settings, the Wi-Fi passwords as
 // secrets (settings_secret.h). Call once after NVS is up, before wifi_service_init().
 void settings_bind_net(void);
