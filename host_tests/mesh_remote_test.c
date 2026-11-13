@@ -1,5 +1,6 @@
 // Host test: log in, status and CLI state machine for a repeater or room (#51)
 #include "mesh_remote.h"
+#include "mutate.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -441,6 +442,81 @@ static void background_gives_way(void) {
     CHECK(rr_request(&r, RR_CLI, A, "ver", 20006, &why) == 0); // the person's own request is never replaced
 }
 
+static uint32_t fnv(uint32_t h, void const *p, size_t n) {
+    uint8_t const *b = p;
+    while (n--) {
+        h = (h ^ *b++) * 16777619u;
+    }
+    return h;
+}
+
+// One scripted step: a request (every op, refused and accepted arguments, either target), or a take, a reply, a
+// failure, a timeout, a background poll or a forced state, so rr_request_prepared meets every branch it has
+static uint32_t request_step(rr_t *r, mut_rng_t *g, uint32_t now, uint32_t h) {
+    static char const *const args[] = {
+        NULL, "", "ver", "  get name", "a1|ver", "x", "erase", "a2|erase", "password s3cret", "set prv.key 00",
+        "123456789012345", "1234567890123456", "secret",
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789",
+        "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789X",
+    };
+    uint8_t const *prefix = mut_below(g, 2) ? A : B;
+    char const    *why    = NULL;
+    uint32_t       seq    = 0;
+    switch (mut_below(g, 10)) {
+        case 0: {
+            rr_op_t op;
+            uint8_t to[MF_PREFIX];
+            char    arg[RR_ARG_MAX + 1];
+            seq = rr_take(r, &op, to, arg, sizeof(arg), now);
+            h   = seq ? fnv(h, arg, strlen(arg)) : h;
+            break;
+        }
+        case 1: {
+            mf_msg_t sent = sent_reply(1000);
+            rr_on_reply(r, &sent, now);
+            break;
+        }
+        case 2: rr_fail(r, "pipe"); break;
+        case 3: rr_poll(r, now, NULL); break;
+        case 4: seq = rr_request_background(r, prefix, now, &why); break;
+        case 5:
+            r->notag = mut_below(g, 2);
+            memcpy(r->notag_prefix, prefix, MF_PREFIX);
+            r->logged_in = mut_below(g, 2);
+            memcpy(r->login_prefix, mut_below(g, 2) ? A : B, MF_PREFIX);
+            r->seq = mut_below(g, 4) ? r->seq : 0xFFFFFFFFu; // the number wraps past 0
+            break;
+        default:
+            seq = rr_request(r, (rr_op_t)mut_below(g, 4), prefix, args[mut_below(g, sizeof(args) / sizeof(args[0]))],
+                             now, &why);
+            break;
+    }
+    h = fnv(h, &seq, sizeof(seq));
+    h = why ? fnv(h, why, strlen(why)) : fnv(h, "-", 1);
+    rr_t copy = *r;
+    copy.why  = NULL; // static text: its address differs between builds, its words are in the digest below
+    h         = fnv(h, &copy, sizeof(copy));
+    return r->why ? fnv(h, r->why, strlen(r->why)) : h;
+}
+
+// Pins rr_request_prepared's results and every field it writes over a long seeded script (#212); taken before the
+// split. A deliberate change to the request state machine changes it: print the new value and say why in the commit.
+static void request_pin(void) {
+    rr_t      r;
+    mut_rng_t g;
+    rr_init(&r);
+    mut_seed(&g, 212);
+    uint32_t h = 2166136261u;
+    for (uint32_t i = 0; i < 20000; i++) {
+        h = request_step(&r, &g, i * 500u, h);
+    }
+    uint32_t const pinned = 0xdbf61b7eu;
+    if (h != pinned) {
+        printf("FAIL rr_request digest 0x%08x, pinned 0x%08x\n", (unsigned)h, (unsigned)pinned);
+        failures++;
+    }
+}
+
 int main(void) {
     background_gives_way();
     login();
@@ -453,6 +529,7 @@ int main(void) {
     cli_tags();
     cli_no_tags();
     cli_tag_secret();
+    request_pin();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

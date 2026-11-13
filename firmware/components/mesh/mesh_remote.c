@@ -61,23 +61,57 @@ uint32_t rr_request_background(rr_t *r, uint8_t const prefix[MF_PREFIX], uint32_
     return seq;
 }
 
-uint32_t rr_request_prepared(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg,
-                             rr_prep_t const *p, uint32_t now_ms, char const **why) {
+// Why a request cannot be queued now, NULL when it can; *n gets the argument's length (none for a status request)
+static char const *refusal(rr_t const *r, rr_op_t op, char const *arg, rr_prep_t const *p, size_t *n) {
     if (rr_busy(r) && !(r->background && r->state != RR_TAKEN)) {
-        *why = "another request to a contact is still running";
-        return 0;
+        return "another request to a contact is still running";
     }
-    size_t n = arg && op != RR_STATUS ? strlen(arg) : 0;
-    if (op == RR_LOGIN && n > MF_PASSWORD_MAX) {
-        *why = "the password is at most 15 characters";
-        return 0;
+    *n = arg && op != RR_STATUS ? strlen(arg) : 0;
+    if (op == RR_LOGIN && *n > MF_PASSWORD_MAX) {
+        return "the password is at most 15 characters";
     }
-    if (op == RR_CLI && (n == 0 || n > RR_CMD_MAX)) {
-        *why = n ? "the command is too long" : "no command";
-        return 0;
+    if (op == RR_CLI && (*n == 0 || *n > RR_CMD_MAX)) {
+        return *n ? "the command is too long" : "no command";
     }
     if (op == RR_CLI && p->cls == RS_CMD_FORBIDDEN) {
-        *why = "erase is never sent from the badge (#117)"; // it wipes the repeater's file system
+        return "erase is never sent from the badge (#117)"; // it wipes the repeater's file system
+    }
+    return NULL;
+}
+
+// The CLI history's new entry for an accepted command, with the two letters of its tag
+static void cli_record(rr_t *r, uint8_t const prefix[MF_PREFIX], char const *arg, rr_prep_t const *p, uint32_t seq) {
+    if (r->cli_n == 0 || memcmp(r->cli_prefix, prefix, MF_PREFIX) != 0) {
+        r->cli_n = 0; // the exchanges are of one target
+        memcpy(r->cli_prefix, prefix, MF_PREFIX);
+    }
+    r->cli_head = (uint8_t)((r->cli_head + 1) % RR_CLI_KEEP);
+    if (r->cli_n < RR_CLI_KEEP) {
+        r->cli_n++;
+    }
+    rr_exchange_t *x = &r->cli[r->cli_head];
+    wipe(x, sizeof(*x));
+    x->state      = RR_CLI_WAITING;
+    x->secret     = p->cls == RS_CMD_SECRET;
+    char const *c = arg;
+    while (*c == ' ') {
+        c++;
+    }
+    // two letters from the request number; a command with a tag of its own (the settings page) is left alone, and
+    // one under two characters would not be read as tagged ("xx|" needs more than 4 characters in all)
+    if (strlen(c) >= 2 && !has_tag(c) && !(r->notag && memcmp(r->notag_prefix, prefix, MF_PREFIX) == 0)) {
+        x->tag[0] = (char)('A' + seq / 26 % 26);
+        x->tag[1] = (char)('A' + seq % 26);
+    }
+    memcpy(x->cmd, p->shown, strnlen(p->shown, RR_CMD_MAX)); // made by rr_prepare, outside the lock
+}
+
+uint32_t rr_request_prepared(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX], char const *arg,
+                             rr_prep_t const *p, uint32_t now_ms, char const **why) {
+    size_t      n      = 0;
+    char const *refuse = refusal(r, op, arg, p, &n);
+    if (refuse) {
+        *why = refuse;
         return 0;
     }
     uint32_t seq = r->seq + 1 ? r->seq + 1 : 1;
@@ -98,29 +132,7 @@ uint32_t rr_request_prepared(rr_t *r, rr_op_t op, uint8_t const prefix[MF_PREFIX
         r->logged_in = false; // a new login to someone else ends the session; to the same one it keeps until refused
     }
     if (op == RR_CLI) {
-        if (r->cli_n == 0 || memcmp(r->cli_prefix, prefix, MF_PREFIX) != 0) {
-            r->cli_n = 0; // the exchanges are of one target
-            memcpy(r->cli_prefix, prefix, MF_PREFIX);
-        }
-        r->cli_head = (uint8_t)((r->cli_head + 1) % RR_CLI_KEEP);
-        if (r->cli_n < RR_CLI_KEEP) {
-            r->cli_n++;
-        }
-        rr_exchange_t *x = &r->cli[r->cli_head];
-        wipe(x, sizeof(*x));
-        x->state  = RR_CLI_WAITING;
-        x->secret = p->cls == RS_CMD_SECRET;
-        char const *c = arg;
-        while (*c == ' ') {
-            c++;
-        }
-        // two letters from the request number; a command with a tag of its own (the settings page) is left alone, and
-        // one under two characters would not be read as tagged ("xx|" needs more than 4 characters in all)
-        if (strlen(c) >= 2 && !has_tag(c) && !(r->notag && memcmp(r->notag_prefix, prefix, MF_PREFIX) == 0)) {
-            x->tag[0] = (char)('A' + seq / 26 % 26);
-            x->tag[1] = (char)('A' + seq % 26);
-        }
-        memcpy(x->cmd, p->shown, strnlen(p->shown, RR_CMD_MAX)); // made by rr_prepare, outside the lock
+        cli_record(r, prefix, arg, p, seq);
     }
     return seq;
 }
