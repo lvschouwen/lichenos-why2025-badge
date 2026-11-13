@@ -19,6 +19,7 @@
 #include "assets.h"
 #include "assets_fmt.h"
 #include "esp_ota_ops.h"
+#include "flash_chunk.h"
 #include "esp_partition.h"
 #include "lichen_random.h"
 #include "esp_system.h"
@@ -126,7 +127,9 @@ bool ota_server_auto_closed(void) {
 }
 
 // One request at a time
-EXT_RAM_BSS_ATTR static char    head_buf[2048]; // PSRAM (#107): sockets and flash reads copy, no DMA
+// PSRAM (#107): sockets copy, no DMA. Flash is never read into body_buf: esp_flash_read would malloc an internal temp
+// buffer as big as the read for it; slot and partition reads go through a FLASH_CHUNK_BOUNCE stack buffer (#364).
+EXT_RAM_BSS_ATTR static char    head_buf[2048];
 EXT_RAM_BSS_ATTR static uint8_t body_buf[4096];
 
 static ota_hooks_t hooks;
@@ -536,11 +539,17 @@ static bool finish_firmware(int fd, uint8_t const *data, size_t len, long long s
     return install_slot(fd, slot, handle, len, sent);
 }
 
+// A partition read for ota_hash_range and flash_chunk_same; buf is always an internal bounce buffer (#364)
+static int slot_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
+    return esp_partition_read(ctx, off, buf, n) == ESP_OK ? 0 : -1;
+}
+
 // Write a checked assets image (#22) over the assets partition. The image is fully checked (header, table, CRC)
 // before anything is erased, and read back afterwards. The partition is memory-mapped, not copied: while it is
 // rewritten, anything reading it sees erased or half-written bytes. So tools/badge.sh asks for /prepare first (the
-// apps and screens stop) and reboots afterwards; consumers copy what they keep (assets.h).
-static bool finish_assets(int fd, uint8_t const *data, size_t len, long long sent) {
+// apps and screens stop) and reboots afterwards; consumers copy what they keep (assets.h). noinline: its read-back
+// bounce buffer stays out of handle_piece's frame (#364).
+__attribute__((noinline)) static bool finish_assets(int fd, uint8_t const *data, size_t len, long long sent) {
     assets_view_t view;
     assets_err_t  res = assets_open(data, len, true, &view);
     if (res != ASSETS_OK) {
@@ -558,12 +567,10 @@ static bool finish_assets(int fd, uint8_t const *data, size_t len, long long sen
     if (err == ESP_OK) {
         err = esp_partition_write(part, 0, data, len);
     }
-    for (size_t at = 0; err == ESP_OK && at < len; at += sizeof(body_buf)) {
-        size_t n = len - at < sizeof(body_buf) ? len - at : sizeof(body_buf);
-        err      = esp_partition_read(part, at, body_buf, n);
-        if (err == ESP_OK && memcmp(body_buf, data + at, n) != 0) {
-            err = ESP_ERR_INVALID_CRC;
-        }
+    if (err == ESP_OK) {
+        uint8_t bounce[FLASH_CHUNK_BOUNCE];
+        int     same = flash_chunk_same(slot_read, (void *)part, 0, data, len, bounce, sizeof(bounce));
+        err          = same == 1 ? ESP_OK : same == 0 ? ESP_ERR_INVALID_CRC : ESP_FAIL;
     }
     if (err != ESP_OK) {
         respond(fd, 500, "writing the assets failed (%s); the built-in fonts are used until it succeeds",
@@ -769,10 +776,6 @@ static bool flash_sink(void *ctx, uint8_t const *data, size_t len) {
     return true;
 }
 
-static int slot_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
-    return esp_partition_read(ctx, off, buf, n) == ESP_OK ? 0 : -1;
-}
-
 // Open the inactive slot for a streamed image. esp_ota_begin erases only what the first piece covers; every later
 // piece (and a resent one) is erased by stream_erase before it arrives, so no single call blocks for long.
 static esp_err_t stream_open(size_t first_len) {
@@ -812,18 +815,21 @@ static bool stream_erase(size_t offset, size_t len) {
     return esp_partition_erase_range(staged.slot, offset, end - offset) == ESP_OK;
 }
 
-// The streamed image is complete: hash what the slot holds (not what was received), and install it if it is the file
-static bool finish_streamed(int fd, char sha_hex[OTA_SHA256_HEX + 1]) {
+// The streamed image is complete: hash what the slot holds (not what was received), and install it if it is the file.
+// noinline, like rehash_piece and finish_assets: each has a bounce buffer, which would cross the 1 KB frame line when
+// folded into handle_piece
+__attribute__((noinline)) static bool finish_streamed(int fd, char sha_hex[OTA_SHA256_HEX + 1]) {
     uint8_t digest[SHA256_DIGEST_LEN];
-    if (ota_hash_range(slot_read, (void *)staged.slot, 0, staged.total, body_buf, sizeof(body_buf), digest) != 0) {
+    uint8_t bounce[FLASH_CHUNK_BOUNCE]; // internal, on the server's stack: not body_buf (#364)
+    if (ota_hash_range(slot_read, (void *)staged.slot, 0, staged.total, bounce, sizeof(bounce), digest) != 0) {
         respond(fd, 500, "couldn't read the slot back, nothing installed");
         return false;
     }
     ota_hex(digest, sizeof(digest), sha_hex);
     if (strcmp(sha_hex, staged.file_sha256) != 0) {
         size_t bad[8];
-        size_t n = ota_pieces_check_read(&staged.pieces, slot_read, (void *)staged.slot, body_buf, sizeof(body_buf),
-                                         bad, 8);
+        size_t n = ota_pieces_check_read(&staged.pieces, slot_read, (void *)staged.slot, bounce, sizeof(bounce), bad,
+                                         8);
         ESP_LOGW(TAG, "whole-file mismatch in the slot: %zu of %zu pieces differ from what was received", n,
                  staged.pieces.n);
         for (size_t i = 0; i < n && i < 8; i++) {
@@ -850,13 +856,14 @@ static void report_damaged_pieces(void) {
 }
 
 // Hash a received piece again where it ended up: in the PSRAM staging buffer, or read back from the OTA slot (#37)
-static void rehash_piece(size_t offset, size_t len, uint8_t digest[SHA256_DIGEST_LEN]) {
+__attribute__((noinline)) static void rehash_piece(size_t offset, size_t len, uint8_t digest[SHA256_DIGEST_LEN]) {
+    uint8_t bounce[FLASH_CHUNK_BOUNCE]; // internal, on the server's stack: not body_buf (#364)
     if (staged.data) {
         sha256_ctx_t again;
         sha256_init(&again);
         sha256_update(&again, staged.data + offset, len);
         sha256_final(&again, digest);
-    } else if (ota_hash_range(slot_read, (void *)staged.slot, offset, len, body_buf, sizeof(body_buf), digest) != 0) {
+    } else if (ota_hash_range(slot_read, (void *)staged.slot, offset, len, bounce, sizeof(bounce), digest) != 0) {
         memset(digest, 0, SHA256_DIGEST_LEN); // unreadable: never equals the sender's hash
     }
 }

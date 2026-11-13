@@ -2,6 +2,7 @@
 
 #include "assets_fmt.h"
 #include "esp_heap_caps.h"
+#include "flash_chunk.h"
 #include "esp_log.h"
 #include "esp_partition.h"
 
@@ -14,8 +15,13 @@ static assets_view_t view;
 static uint8_t      *copy; // the image in PSRAM while mounted
 static char          status[48] = "not mounted";
 
+static int part_read(void *part, size_t off, uint8_t *buf, size_t n) {
+    return esp_partition_read(part, off, buf, n) == ESP_OK ? 0 : -1;
+}
+
 // Read, not mmap: while any flash stays mapped, a flash write turns the cache and non-IRAM interrupts off and the
-// display drops frames (#31); unmapping at runtime hung the badge.
+// display drops frames (#31); unmapping at runtime hung the badge. The image goes to PSRAM through a stack buffer: one
+// read straight into PSRAM took a 16 KB internal temp buffer at boot (#364).
 bool assets_mount(void) {
     esp_partition_t const *part =
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, ASSETS_PARTITION);
@@ -32,8 +38,11 @@ bool assets_mount(void) {
         memcpy(&total, header + 12, sizeof(total)); // total_len, little endian like the P4
         // A blank or foreign partition: let assets_open() name the error from the header alone
         len = total > ASSETS_HEADER_LEN && total <= part->size ? total : ASSETS_HEADER_LEN;
+        uint8_t bounce[FLASH_CHUNK_BOUNCE];
         copy = heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
-        err  = copy ? esp_partition_read(part, 0, copy, len) : ESP_ERR_NO_MEM;
+        err  = !copy ? ESP_ERR_NO_MEM
+               : flash_chunk_copy(part_read, (void *)part, 0, copy, len, bounce, sizeof(bounce)) != 0 ? ESP_FAIL
+                                                                                                    : ESP_OK;
     }
     if (err != ESP_OK) {
         assets_unmount();

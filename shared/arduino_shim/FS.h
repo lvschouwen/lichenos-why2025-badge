@@ -97,8 +97,13 @@ bool fs_shim_format_allowed(char const *root);
 uint32_t fs_shim_take_busy_us(uint32_t *ops);
 // Writes (and truncates) that reached the file system for buffered "w" files since the last call: host tests count them
 uint32_t fs_shim_take_raw_writes(void);
+// The largest single read the shim asked the file system for since the last call: host tests check the compare reads
+size_t fs_shim_take_largest_read(void);
 // The chunk a "w" file is compared and rewritten in: the LittleFS block on the badge, one flash erase each
 #define FS_SHIM_CHUNK 4096
+// The largest read a chunk compare makes: on the badge it lands in a stack buffer, internal RAM, so the flash read needs
+// no temp buffer of its own (#364). Two LittleFS read sizes (128 bytes).
+#define FS_SHIM_COMPARE_READ 256
 // The largest "w" file the shim buffers (1 MB): MeshCore's biggest is contacts3, 152 KB at 1000 contacts. A write past
 // it fails, and close() leaves the old file as it was.
 #define FS_SHIM_MAX_FILE ((size_t)1 << 20)

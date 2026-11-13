@@ -29,6 +29,7 @@ static void (*drive_fn)(size_t *total, size_t *used);
 static uint32_t busy_us, busy_ops;
 static uint32_t raw_writes; // writes and truncates of buffered "w" files (host tests count them)
 static bool     fail_alloc, fail_reads, fat_rename;
+static size_t   largest_read; // the largest single read() the shim asked for (host tests check the compare reads)
 
 void fs_shim_test_faults(bool alloc, bool reads) {
     fail_alloc = alloc;
@@ -49,6 +50,12 @@ void fs_shim_test_fat_rename(bool on) {
 #define DEFAULT_MALLOC(n) malloc(n)
 #define DEFAULT_FREE(p)   free(p)
 #endif
+
+size_t fs_shim_take_largest_read(void) {
+    size_t n     = largest_read;
+    largest_read = 0;
+    return n;
+}
 
 uint32_t fs_shim_take_raw_writes(void) {
     uint32_t n = raw_writes;
@@ -92,6 +99,9 @@ static void *buf_grow(void *p, size_t old, size_t n) {
 static bool read_full(int fd, uint8_t *dst, size_t n) {
     if (fail_reads) {
         return false;
+    }
+    if (n > largest_read) {
+        largest_read = n;
     }
     while (n > 0) {
         ssize_t r = ::read(fd, dst, n);
@@ -342,6 +352,20 @@ size_t File::size() {
     return fstat(fileno(f_), &st) == 0 ? (size_t)st.st_size : 0;
 }
 
+// Whether the n bytes at the file's position equal expect, read FS_SHIM_COMPARE_READ bytes at a time into a stack
+// buffer. LittleFS reads a large aligned request straight into the caller's buffer: with a PSRAM buffer that made
+// esp_flash_read malloc a 4 KB internal temp buffer per chunk (#364). A stack buffer is internal and per caller.
+static bool same_bytes(int fd, uint8_t const *expect, size_t n) {
+    uint8_t got[FS_SHIM_COMPARE_READ];
+    for (size_t at = 0; at < n; at += sizeof(got)) {
+        size_t k = n - at < sizeof(got) ? n - at : sizeof(got);
+        if (!read_full(fd, got, k) || memcmp(got, expect + at, k) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Rewrites only the chunks that differ from what is on the file system, then cuts off what is left over. An unchanged
 // chunk costs a read, not a flash erase. On the badge's LittleFS (#300) the rewrite is copy-on-write and becomes the
 // file only when it is synced or closed: a cut before that leaves the old file whole.
@@ -350,13 +374,11 @@ bool File::commit() {
     if (fstat(fd_, &st) != 0) {
         return false;
     }
-    size_t   old     = (size_t)st.st_size;
-    uint8_t *scratch = old ? (uint8_t *)buf_grow(NULL, 0, FS_SHIM_CHUNK) : NULL; // none: all are rewritten
-    bool     ok      = true;
+    size_t old = (size_t)st.st_size;
+    bool   ok  = true;
     for (size_t off = 0; ok && off < len_; off += FS_SHIM_CHUNK) {
         size_t n    = len_ - off < FS_SHIM_CHUNK ? len_ - off : FS_SHIM_CHUNK;
-        bool   same = scratch && off + n <= old && lseek(fd_, (off_t)off, SEEK_SET) == (off_t)off &&
-                    read_full(fd_, scratch, n) && memcmp(scratch, buf_ + off, n) == 0;
+        bool   same = off + n <= old && lseek(fd_, (off_t)off, SEEK_SET) == (off_t)off && same_bytes(fd_, buf_ + off, n);
         if (!same) {
             ok = lseek(fd_, (off_t)off, SEEK_SET) == (off_t)off && write_full(fd_, buf_ + off, n);
             raw_writes++;
@@ -369,7 +391,6 @@ bool File::commit() {
     if (!ok) {
         SHIM_ERROR("writing %s failed: errno %d", path_, errno);
     }
-    buf_free(scratch);
     return ok;
 }
 

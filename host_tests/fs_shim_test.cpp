@@ -110,6 +110,16 @@ static void buffered_writes(void) {
     CHECK(fs_shim_take_raw_writes() == 1);
     CHECK(SPIFFS.exists("/contacts3") && disk_read("/contacts3", disk, sizeof(disk)) == 0);
 
+    // The compare reads stay small (#364): on the badge they land in a stack buffer, so a PSRAM file buffer never makes
+    // the flash read malloc an internal temp buffer of a whole chunk
+    save_contacts(expect, 140, 999, 0);
+    fs_shim_take_raw_writes();
+    fs_shim_take_largest_read();
+    save_contacts(expect, 140, 999, 0); // all six chunks compared, none rewritten
+    CHECK(fs_shim_take_raw_writes() == 0);
+    size_t largest = fs_shim_take_largest_read();
+    CHECK(largest > 0 && largest <= FS_SHIM_COMPARE_READ);
+
     // A chunk that cannot be read back for comparing is rewritten, not skipped
     save_contacts(expect, 30, 999, 0);
     fs_shim_take_raw_writes();
