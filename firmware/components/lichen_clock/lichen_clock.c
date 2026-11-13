@@ -18,12 +18,16 @@ static void (*store_save)(clock_src_t src); // writes the record; NULL until clo
 static clock_fix_info_t  fix;               // how SNTP answers were applied (#326)
 static void (*saver)(void);                 // saves the clock record (clock_save.c); NULL until clock_set_saver()
 
+// volatile so the compiler loads it instead of inlining the immediate: the epoch changes with every commit and a
+// RISC-V constant takes 2..6 instructions depending on its value, which made liblichen_clock.a flip between sizes (#363)
+static const volatile int64_t build_epoch = LICHEN_BUILD_EPOCH;
+
 int64_t clock_build_epoch(void) {
-    return LICHEN_BUILD_EPOCH;
+    return build_epoch;
 }
 
 bool clock_is_set(void) {
-    return clock_in_window((int64_t)time(NULL), LICHEN_BUILD_EPOCH);
+    return clock_in_window((int64_t)time(NULL), clock_build_epoch());
 }
 
 static int64_t mono_ms(void) {
@@ -184,7 +188,7 @@ static clock_verdict_t propose(clock_src_t src, struct timeval const *tv, bool f
     int64_t         now_ms = mono_ms();
     clock_src_t     rank   = force ? clock_force_rank(info.source) : info.source;
     clock_verdict_t v      = clock_decide(rank, src, &guard, (int64_t)tv->tv_sec, (int64_t)cur.tv_sec,
-                                          LICHEN_BUILD_EPOCH, now_ms / 1000);
+                                          clock_build_epoch(), now_ms / 1000);
     if (src == CLOCK_SRC_SNTP) {
         info.last_verdict = v;
         if (!clock_accepted(v)) {

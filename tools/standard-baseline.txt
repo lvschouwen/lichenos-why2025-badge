@@ -124,7 +124,7 @@ size	libjoltwallet__littlefs.a	34382
 size	liblichen_api.a	30886
 size	liblichen_apps.a	51656
 size	liblichen_boot.a	12192
-size	liblichen_clock.a	11134
+size	liblichen_clock.a	11144
 size	liblichen_haptics.a	2769
 size	liblichen_led.a	1428
 size	liblichen_mdns.a	598
