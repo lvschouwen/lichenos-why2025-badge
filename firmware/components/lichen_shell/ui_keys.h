@@ -39,6 +39,10 @@
 #define UI_KEY_PHYS           0x08000000u
 // Whether k is a key to press, not a pause, a guard, needlock, phys or a hold
 bool ui_keys_is_key(uint32_t k);
+// ms (at least 1) from now to the stepper's next job: the next key at next_at while keys_left, else the end of the
+// last gap or the first of the n_held holds' until times (ms ticks, wrap-safe) to run out. Once the keys are all down
+// a gap already over no longer counts, so a hold after the last key waits for its own end instead of spinning.
+uint32_t ui_keys_wait_ms(uint32_t now, uint32_t next_at, bool keys_left, uint32_t const *until, size_t n_held);
 
 // Fills out with LVGL key codes (characters as themselves); returns how many, or UI_KEYS_ERR with *err_pos set to the
 // offset of the first thing not understood (or of the token that did not fit in max).

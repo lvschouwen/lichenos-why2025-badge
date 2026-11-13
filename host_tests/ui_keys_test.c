@@ -94,6 +94,18 @@ int main(void) {
     CHECK(!UI_KEY_IS_HOLD(k[0]) && !UI_KEY_IS_HOLD('z') && !UI_KEY_IS_HOLD(27));
     CHECK(ui_keys_is_key(27) && ui_keys_is_key('z') && ui_keys_is_key(UI_KEY_SHAPE(7)));
     CHECK(!ui_keys_is_key(UI_KEY_WAIT) && !ui_keys_is_key(UI_KEY_NEEDLOCK));
+    // The stepper's wait (#375 review): a hold after the last key waits for its end, not for a gap long over
+    uint32_t until[2] = {5000, 3000};
+    CHECK(ui_keys_wait_ms(1000, 1250, true, NULL, 0) == 250);          // the next key
+    CHECK(ui_keys_wait_ms(1000, 1250, true, until, 2) == 250);         // ... before either hold ends
+    CHECK(ui_keys_wait_ms(2900, 1250, true, until, 2) == 1);           // a key overdue: at once
+    CHECK(ui_keys_wait_ms(2000, 1250, false, until, 2) == 1000);       // no key left: the first hold to end
+    CHECK(ui_keys_wait_ms(2000, 1250, false, until, 1) == 3000);
+    CHECK(ui_keys_wait_ms(1100, 1250, false, until, 2) == 150);        // the last gap still counts while it runs
+    CHECK(ui_keys_wait_ms(1300, 1250, false, NULL, 0) == 1);           // nothing held, gap over: the end
+    CHECK(ui_keys_wait_ms(4000, 3500, false, until + 1, 1) == 1);      // a hold overdue: at once
+    uint32_t wrap[1] = {100};
+    CHECK(ui_keys_wait_ms(UINT32_MAX - 99, UINT32_MAX - 200, false, wrap, 1) == 200); // wrap-safe
     // Old "keys send" strings parse as they did (#375 keeps the grammar)
     char const *old = "needlock square wait row:Messages|enter text:Hi there|enter down notfocus:Erase|esc cloud";
     CHECK(ui_keys_parse(old, k, 32, &pos) == 18);

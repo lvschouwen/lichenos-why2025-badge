@@ -1,5 +1,6 @@
 #include "ui_keys.h"
 
+#include <stdint.h>
 #include <string.h>
 
 // LVGL's key codes (ui_probe.c static_asserts them); the shape keys as their TCA8418 codes (tca8418_keymap.h)
@@ -111,6 +112,16 @@ static bool named_key(char const *p, size_t len, uint32_t *key) {
 
 bool ui_keys_is_key(uint32_t k) {
     return k != UI_KEY_WAIT && k != UI_KEY_NEEDLOCK && k != UI_KEY_PHYS && !UI_KEY_IS_GUARD(k) && !UI_KEY_IS_HOLD(k);
+}
+
+uint32_t ui_keys_wait_ms(uint32_t now, uint32_t next_at, bool keys_left, uint32_t const *until, size_t n_held) {
+    int32_t gap  = (int32_t)(next_at - now);
+    int32_t wait = keys_left || gap > 0 || !n_held ? gap : INT32_MAX;
+    for (size_t i = 0; i < n_held; i++) {
+        int32_t d = (int32_t)(until[i] - now);
+        wait      = d < wait ? d : wait;
+    }
+    return wait < 1 ? 1 : (uint32_t)wait;
 }
 
 // "hold:<ms>" at p: false unless ms is digits up to the next ' ' or '|'. *end is past them; more than the cap is capped.

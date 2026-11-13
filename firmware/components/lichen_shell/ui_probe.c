@@ -86,10 +86,18 @@ static uint8_t code_of(uint32_t key, uint8_t *shift_code) {
     return lichen_sys_keys_code_for(key, shift_code);
 }
 
+#define RELEASE_TRIES 5 // a release the full queue refused is tried again a tick later: a lost one leaves a key down
+
 static void inject(sequence_t *seq, uint8_t code, bool pressed) {
-    if (!lichen_sys_keys_inject(code, pressed, seq->physical)) {
-        seq->dropped++;
+    for (int tries = pressed ? 1 : RELEASE_TRIES; tries > 0; tries--) {
+        if (lichen_sys_keys_inject(code, pressed, seq->physical)) {
+            return;
+        }
+        if (tries > 1) {
+            vTaskDelay(1); // the keyboard task (higher priority) empties the queue meanwhile; at most a few ms here
+        }
     }
+    seq->dropped++;
 }
 
 static void key_up(sequence_t *seq, held_key_t const *k) {
@@ -114,7 +122,9 @@ static void release(sequence_t *seq, bool all, uint8_t code) {
     seq->n_held = kept;
 }
 
-// Presses key; a tap comes up at once, a hold at hold_ms from now
+// Presses key; a tap comes up at once, a hold at hold_ms from now. The keyboard task keeps one Shift state for all
+// keys, so of two overlapping holds of uppercase characters the first to come up lifts Shift for the other too (a
+// corner case no bench script needs; a physical keyboard does the same with one Shift key).
 static void key_down(sequence_t *seq, uint32_t key, uint32_t hold_ms) {
     held_key_t k = {.until = lv_tick_get() + hold_ms};
     k.code       = code_of(key, &k.shift_code);
@@ -184,15 +194,13 @@ static bool key_step(sequence_t *seq) {
     return true;
 }
 
-// ms to the next thing to do: a key going down or a held one coming up
+// ms to the next thing to do: a key going down or a held one coming up (ui_keys_wait_ms)
 static uint32_t ms_to_next(sequence_t const *seq) {
-    uint32_t now  = lv_tick_get();
-    int32_t  wait = (int32_t)(seq->next_at - now);
+    uint32_t until[MAX_HELD];
     for (size_t i = 0; i < seq->n_held; i++) {
-        int32_t d = (int32_t)(seq->held[i].until - now);
-        wait      = d < wait ? d : wait;
+        until[i] = seq->held[i].until;
     }
-    return wait < 1 ? 1 : (uint32_t)wait;
+    return ui_keys_wait_ms(lv_tick_get(), seq->next_at, seq->next < seq->n, until, seq->n_held);
 }
 
 static void sequence_finish(lv_timer_t *timer, sequence_t *seq) {
@@ -215,14 +223,14 @@ static void sequence_step(lv_timer_t *timer) {
 }
 
 static void sequence_report(sequence_t const *seq) {
-    if (seq->failed) {
+    if (seq->dropped) { // first: a lost event may be what made a guard fail or left a key down
+        console_reply("keys send: %u key events dropped (keyboard queue full); %u of %u sent", (unsigned)seq->dropped,
+                      (unsigned)seq->next, (unsigned)seq->n);
+    } else if (seq->failed) {
         console_reply("keys send: guard %u failed: focus '%s'; %u of %u sent", (unsigned)seq->failed,
                       seq->focus[0] ? seq->focus : "(none)", (unsigned)seq->next, (unsigned)seq->n);
     } else if (seq->lock_lost) {
         console_reply("keys send: stopped, the key lock is off; %u of %u sent", (unsigned)seq->next, (unsigned)seq->n);
-    } else if (seq->dropped) {
-        console_reply("keys send: %u key events dropped (keyboard queue full); %u sent", (unsigned)seq->dropped,
-                      (unsigned)seq->n);
     } else {
         console_reply("keys sent: %u", (unsigned)seq->n);
     }

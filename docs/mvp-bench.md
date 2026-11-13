@@ -81,8 +81,8 @@ Contract: `docs/architecture.md` "Two-chip contract". Any failure stops the pass
 - [ ] `fw mesh` shows `rx N` rising between two reads; one TX to `#badgetest`.
 - [ ] `fw c6` -> note `restarts`; `fw keys on`; `fw c6 reset`; wait 75 s. **Expected** in the log: `wifi: down for the C6
   re-attach ...`, then `wifi: started after the C6 re-attach`, then `stack free: c6sup N, c6wifi M` with M > 0. One
-  physical key press logs a key (`fw keys send` bypasses the keyboard chip and proves nothing), LoRa `rx N` counts again,
-  `ota-info` answers, `fw c6` reads `up` with `restarts` one higher.
+  physical key press logs a key (`fw keys send` takes the keyboard's own path since #375 but never reads the TCA8418,
+  so it proves nothing here), LoRa `rx N` counts again, `ota-info` answers, `fw c6` reads `up` with `restarts` one higher.
 - [ ] `fw bl 40 40` -> **Expected:** `backlight 40 40` and the panel follows (this path runs through the C6). Restore
   the noted levels.
 - [ ] `fw mem` -> **Expected:** `mem dma free N ... min M` with **N >= 89981 and M >= 80650** (the pre-MVP 99979 / 89611
