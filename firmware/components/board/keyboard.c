@@ -9,6 +9,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "kbd_map.h"
+#include "key_origin.h"
 #include "raw_hooks.h"
 
 #include <assert.h>
@@ -30,12 +31,13 @@ static_assert(KBD_KEY_UP == LV_KEY_UP && KBD_KEY_DOWN == LV_KEY_DOWN && KBD_KEY_
 typedef struct {
     uint32_t key;
     bool     pressed;
+    bool     injected; // key_origin_injected: read_cb records it for lichen_sys_keys_last_injected (#391)
 } key_event_t;
 
 typedef struct {
-    uint8_t code;
-    bool    pressed;
-    bool    gated; // as_physical: the remote key gate sees it too
+    uint8_t      code;
+    bool         pressed;
+    key_origin_t origin; // key_origin_of_inject(as_physical)
 } injected_t;
 
 static tca8418_dev_t *chip;
@@ -50,6 +52,7 @@ static bool (*_Atomic wake_hook)(void);        // the screen timeout (#43)
 static bool (*_Atomic gate_hook)(uint8_t key, bool pressed); // the remote key lock (#190)
 static void (*_Atomic gate_reset_hook)(void);                // ... told when every key was released
 static bool           woke[0x51];              // presses the wake hook swallowed: their releases go nowhere either
+static atomic_bool    last_injected;           // the event read_cb last gave LVGL was injected (#391)
 
 static raw_hooks_t hooks;              // raw_hooks.h: no lock, so this task never waits on a hook's remover (#251)
 static _Atomic(TaskHandle_t) poll_handle; // the keyboard task: a hook that adds or removes a hook runs here
@@ -194,20 +197,21 @@ static void self_heal(TickType_t *last_check) {
     }
 }
 
-// One key event, the chip's or an injected one (#375): the gate (unless gated is false), the wake hook, the raw hooks,
-// then LVGL. Poll task only.
-static void handle_key(uint8_t key, bool pressed, bool gated) {
+// One key event, the chip's or an injected one (#375): the gate (unless the origin skips it), the wake hook, the raw
+// hooks, then LVGL; the origin travels with it to the last two (#391). Poll task only.
+static void handle_key(uint8_t key, bool pressed, key_origin_t origin) {
     if (key == 0 || key >= sizeof(held) / sizeof(held[0])) {
         return;
     }
     if (kbd_map_is_shift(key)) {
         shift = pressed;
     }
-    if ((gated && gate_drops(key, pressed)) || wake_swallows(key, pressed)) {
+    if ((key_origin_gated(origin) && gate_drops(key, pressed)) || wake_swallows(key, pressed)) {
         return;
     }
+    bool injected          = key_origin_injected(origin);
     raw_down[key]          = pressed;
-    key_raw_event_t raw_ev = {.code = key, .pressed = pressed, .shift = shift};
+    key_raw_event_t raw_ev = {.code = key, .pressed = pressed, .shift = shift, .injected = injected};
     bool swallowed = run_hooks(&raw_ev);
     // A key pressed before the hook grabbed the keys still gets its release, or LVGL would see it held forever
     if (swallowed && (pressed || !held[key])) {
@@ -219,7 +223,7 @@ static void handle_key(uint8_t key, bool pressed, bool gated) {
     uint32_t mapped = pressed ? kbd_map_key(key, shift) : held[key];
     held[key]       = pressed ? mapped : 0;
     if (mapped) {
-        key_event_t ev = {.key = mapped, .pressed = pressed};
+        key_event_t ev = {.key = mapped, .pressed = pressed, .injected = injected};
         xQueueSend(events, &ev, 0); // a full queue drops keys rather than blocking the poll
     }
 }
@@ -229,7 +233,7 @@ bool keyboard_inject(uint8_t code, bool pressed, bool as_physical) {
     if (!q || code == 0 || code >= sizeof(held) / sizeof(held[0])) {
         return false;
     }
-    injected_t in = {.code = code, .pressed = pressed, .gated = as_physical};
+    injected_t in = {.code = code, .pressed = pressed, .origin = key_origin_of_inject(as_physical)};
     return xQueueSend(q, &in, 0) == pdTRUE;
 }
 
@@ -241,11 +245,11 @@ static void poll_task(void *arg) {
         self_heal(&last_check);
         injected_t in;
         while (xQueueReceive(atomic_load(&injected), &in, 0) == pdTRUE) {
-            handle_key(in.code, in.pressed, in.gated);
+            handle_key(in.code, in.pressed, in.origin);
         }
         while (tca8418_get_event_count(chip) > 0) {
             uint8_t raw = tca8418_get_key(chip);
-            handle_key(raw & 0x7F, raw & 0x80, true);
+            handle_key(raw & 0x7F, raw & 0x80, KEY_ORIGIN_CHIP);
         }
         // The poll's pause, cut short by an injected event: a held key's press and release then reach the hooks as
         // far apart as they were sent, which is what a hold timed to the millisecond (the remote lock's 3 s) needs
@@ -258,7 +262,10 @@ static void read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     static uint32_t last_key;
     key_event_t     ev;
     if (xQueueReceive(events, &ev, 0) == pdTRUE) {
-        last_key               = ev.key;
+        last_key = ev.key;
+        // Before LVGL handles it: lv_indev_read processes each read before the next, so a key handler asking
+        // lichen_sys_keys_last_injected hears about the event it is handling
+        atomic_store(&last_injected, ev.injected);
         data->key              = ev.key;
         data->state            = ev.pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
         data->continue_reading = uxQueueMessagesWaiting(events) > 0;
@@ -266,6 +273,10 @@ static void read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
         data->key   = last_key;
         data->state = LV_INDEV_STATE_RELEASED;
     }
+}
+
+bool keyboard_last_injected(void) {
+    return atomic_load(&last_injected);
 }
 
 bool keyboard_start(lv_indev_t **out) {

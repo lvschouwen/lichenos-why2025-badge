@@ -222,6 +222,7 @@ lichen_sys_keys_code_for	SYSTEM	any	lichen_sys_keys.h
 lichen_sys_keys_hook_add	SYSTEM	any	lichen_sys_keys.h
 lichen_sys_keys_hook_remove	SYSTEM	any	lichen_sys_keys.h
 lichen_sys_keys_inject	SYSTEM	any	lichen_sys_keys.h
+lichen_sys_keys_last_injected	SYSTEM	any	lichen_sys_keys.h
 lichen_sys_keys_set_gate	SYSTEM	any	lichen_sys_keys.h
 lichen_sys_keys_set_wake	SYSTEM	any	lichen_sys_keys.h
 lichen_sys_led_enabled	SYSTEM	any	lichen_sys_led.h

@@ -33,8 +33,10 @@ typedef struct {
 
 // Any task.
 void lichen_sys_factory_combo_init(lichen_fc_combo_t *c);
-// A key event at now_ms. Any task.
-lichen_fc_event_t lichen_sys_factory_combo_key(lichen_fc_combo_t *c, uint8_t code, bool pressed, uint32_t now_ms);
+// A key event at now_ms; injected is key_raw_event_t.injected: such a key neither arms nor confirms (hand-only = TCA8418
+// only, #391), only its Esc cancels an open question. Any task.
+lichen_fc_event_t lichen_sys_factory_combo_key(lichen_fc_combo_t *c, uint8_t code, bool pressed, bool injected,
+                                               uint32_t now_ms);
 // The clock alone: the hold completing, the question timing out, the window closing. Any task.
 lichen_fc_event_t lichen_sys_factory_combo_tick(lichen_fc_combo_t *c, uint32_t now_ms);
 // Keys go to the combo's screen only, not the UI. Any task.

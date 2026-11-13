@@ -100,8 +100,12 @@ typedef struct {
 } factory_combo_t;
 
 void       factory_combo_init(factory_combo_t *c);
-// A key event at now_ms (ms since the keyboard came up)
+// A key event from the TCA8418 at now_ms (ms since the keyboard came up)
 fc_event_t factory_combo_key(factory_combo_t *c, uint8_t code, bool pressed, uint32_t now_ms);
+// Any key event: an injected one (key_raw_event_t.injected, #391) neither arms nor confirms, since the question is a
+// DANGER confirm and hand-only means the TCA8418 only. It cannot touch a hold either; on the open question only its
+// Esc counts (cancel, the safe way). The clock still runs.
+fc_event_t factory_combo_event(factory_combo_t *c, uint8_t code, bool pressed, bool injected, uint32_t now_ms);
 // The clock alone: the hold completing, the question timing out, the window closing
 fc_event_t factory_combo_tick(factory_combo_t *c, uint32_t now_ms);
 // Keys go to the combo's screen only, not the UI

@@ -94,10 +94,11 @@ void lichen_sys_factory_combo_init(lichen_fc_combo_t *c) {
     memcpy(c, &in, sizeof(*c));
 }
 
-lichen_fc_event_t lichen_sys_factory_combo_key(lichen_fc_combo_t *c, uint8_t code, bool pressed, uint32_t now_ms) {
+lichen_fc_event_t lichen_sys_factory_combo_key(lichen_fc_combo_t *c, uint8_t code, bool pressed, bool injected,
+                                               uint32_t now_ms) {
     factory_combo_t in;
     memcpy(&in, c, sizeof(in));
-    fc_event_t e = factory_combo_key(&in, code, pressed, now_ms);
+    fc_event_t e = factory_combo_event(&in, code, pressed, injected, now_ms);
     memcpy(c, &in, sizeof(*c));
     return (lichen_fc_event_t)e;
 }

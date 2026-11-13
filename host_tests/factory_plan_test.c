@@ -236,6 +236,45 @@ static void window_closes(void) {
     CHECK(factory_combo_tick(&c, 12500) == FC_EV_ARM);
 }
 
+// #391: hand-only = TCA8418 only. "fw keys press esc hold:3500 bksp hold:3500" must not open the question, and an
+// injected Enter must not confirm one a hand opened
+static void injected_keys_never_arm(void) {
+    factory_combo_t c;
+    factory_combo_init(&c);
+    CHECK(factory_combo_event(&c, FACTORY_COMBO_KEY_A, true, true, 500) == FC_EV_NONE);
+    CHECK(factory_combo_event(&c, FACTORY_COMBO_KEY_B, true, true, 600) == FC_EV_NONE);
+    CHECK(c.state == FC_IDLE && !c.a_down && !c.b_down);
+    CHECK(factory_combo_tick(&c, 4000) == FC_EV_NONE && c.state == FC_IDLE);
+    // half by hand, half injected: still no hold
+    CHECK(factory_combo_event(&c, FACTORY_COMBO_KEY_A, true, false, 4100) == FC_EV_NONE);
+    CHECK(factory_combo_event(&c, FACTORY_COMBO_KEY_B, true, true, 4200) == FC_EV_NONE);
+    CHECK(c.state == FC_IDLE && factory_combo_tick(&c, 8000) == FC_EV_NONE);
+    // an injected release cannot end a hand's hold either, nor an injected third key break it
+    factory_combo_init(&c);
+    factory_combo_event(&c, FACTORY_COMBO_KEY_A, true, false, 0);
+    factory_combo_event(&c, FACTORY_COMBO_KEY_B, true, false, 100);
+    CHECK(factory_combo_event(&c, FACTORY_COMBO_KEY_B, false, true, 1000) == FC_EV_NONE);
+    CHECK(factory_combo_event(&c, 0x2a, true, true, 1100) == FC_EV_NONE);
+    CHECK(c.state == FC_HOLDING && factory_combo_tick(&c, 3100) == FC_EV_ARM);
+}
+
+static void injected_enter_never_confirms(void) {
+    factory_combo_t c = held_and_armed();
+    CHECK(factory_combo_event(&c, FACTORY_COMBO_ENTER, true, true, 4700) == FC_EV_NONE);
+    CHECK(c.state == FC_ARMED && factory_combo_swallows(&c));
+    CHECK(factory_combo_event(&c, FACTORY_COMBO_ENTER, true, false, 4800) == FC_EV_CONFIRM); // the hand's Enter does
+    // an injected Esc still cancels (the safe way), and the question still times out under injected keys
+    c = held_and_armed();
+    CHECK(factory_combo_event(&c, FACTORY_COMBO_KEY_A, true, true, 5000) == FC_EV_CANCEL && c.state == FC_OVER);
+    c = held_and_armed();
+    CHECK(factory_combo_event(&c, FACTORY_COMBO_ENTER, true, true, 3600 + FACTORY_COMBO_CONFIRM_MS) == FC_EV_CANCEL);
+    // the hand path through factory_combo_event is factory_combo_key's
+    factory_combo_init(&c);
+    factory_combo_event(&c, FACTORY_COMBO_KEY_A, true, false, 500);
+    factory_combo_event(&c, FACTORY_COMBO_KEY_B, true, false, 600);
+    CHECK(c.state == FC_HOLDING);
+}
+
 int main(void) {
     app_declared_keys_are_kept();
     boot_plan_per_pending_value();
@@ -256,6 +295,8 @@ int main(void) {
     third_key_breaks_it();
     one_key_never_arms();
     window_closes();
+    injected_keys_never_arm();
+    injected_enter_never_confirms();
     if (fails) {
         printf("factory_plan_test: %d failure(s)\n", fails);
         return 1;

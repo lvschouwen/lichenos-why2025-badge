@@ -142,6 +142,10 @@ bool lichen_sys_keys_inject(uint8_t code, bool pressed, bool as_physical) {
     return keyboard_inject(code, pressed, as_physical);
 }
 
+bool lichen_sys_keys_last_injected(void) {
+    return keyboard_last_injected();
+}
+
 uint8_t lichen_sys_keys_code_for(uint32_t key, uint8_t *shift_code) {
     bool    shift = false;
     uint8_t code  = kbd_map_code_for(key, &shift);

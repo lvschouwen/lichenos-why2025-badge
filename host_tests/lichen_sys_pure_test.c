@@ -80,23 +80,28 @@ static void test_factory(void) {
     lichen_fc_combo_t c;
     lichen_sys_factory_combo_init(&c);
     CHECK(c.state == LICHEN_FC_IDLE);
-    CHECK(lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, 500) == LICHEN_FC_EV_NONE);
-    CHECK(lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_B, true, 600) == LICHEN_FC_EV_NONE);
+    CHECK(lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, false, 500) == LICHEN_FC_EV_NONE);
+    CHECK(lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_B, true, false, 600) == LICHEN_FC_EV_NONE);
     CHECK(c.state == LICHEN_FC_HOLDING);
     CHECK(lichen_sys_factory_combo_tick(&c, 3500) == LICHEN_FC_EV_NONE);
     CHECK(lichen_sys_factory_combo_tick(&c, 3600) == LICHEN_FC_EV_ARM);
     CHECK(c.state == LICHEN_FC_ARMED && lichen_sys_factory_combo_swallows(&c));
-    CHECK(lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_A, false, 3700) == LICHEN_FC_EV_NONE);
-    CHECK(lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_B, false, 3700) == LICHEN_FC_EV_NONE);
-    CHECK(lichen_sys_factory_combo_key(&c, FACTORY_COMBO_ENTER, true, 4700) == LICHEN_FC_EV_CONFIRM);
+    CHECK(lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_A, false, false, 3700) == LICHEN_FC_EV_NONE);
+    CHECK(lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_B, false, false, 3700) == LICHEN_FC_EV_NONE);
+    CHECK(lichen_sys_factory_combo_key(&c, FACTORY_COMBO_ENTER, true, false, 4700) == LICHEN_FC_EV_CONFIRM);
     CHECK(c.state == LICHEN_FC_OVER && !lichen_sys_factory_combo_swallows(&c));
     // the cancel path, through the timeout
     lichen_sys_factory_combo_init(&c);
-    lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, 500);
-    lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_B, true, 600);
+    lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, false, 500);
+    lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_B, true, false, 600);
     lichen_sys_factory_combo_tick(&c, 3600);
     CHECK(lichen_sys_factory_combo_tick(&c, 3600 + FACTORY_COMBO_CONFIRM_MS) == LICHEN_FC_EV_CANCEL);
     CHECK(c.state == LICHEN_FC_OVER);
+    // injected keys reach the pure rule as injected (#391): they never arm
+    lichen_sys_factory_combo_init(&c);
+    lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_A, true, true, 500);
+    lichen_sys_factory_combo_key(&c, FACTORY_COMBO_KEY_B, true, true, 600);
+    CHECK(c.state == LICHEN_FC_IDLE && lichen_sys_factory_combo_tick(&c, 3600) == LICHEN_FC_EV_NONE);
 }
 
 int main(void) {

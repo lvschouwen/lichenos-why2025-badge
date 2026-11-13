@@ -215,6 +215,18 @@ fc_event_t factory_combo_key(factory_combo_t *c, uint8_t code, bool pressed, uin
     return FC_EV_NONE;
 }
 
+fc_event_t factory_combo_event(factory_combo_t *c, uint8_t code, bool pressed, bool injected, uint32_t now_ms) {
+    if (!injected) {
+        return factory_combo_key(c, code, pressed, now_ms);
+    }
+    fc_event_t ev = factory_combo_tick(c, now_ms);
+    if (ev == FC_EV_NONE && c->state == FC_ARMED && pressed && code == FACTORY_COMBO_KEY_A) {
+        c->state = FC_OVER;
+        return FC_EV_CANCEL;
+    }
+    return ev;
+}
+
 bool factory_combo_swallows(factory_combo_t const *c) {
     return c->state == FC_ARMED;
 }

@@ -32,6 +32,10 @@ void keyboard_set_gate_hook(bool (*fn)(uint8_t key, bool pressed), void (*reset)
 // The events are handled in order, ahead of the chip's, at once (the poll task wakes for them). False when the
 // keyboard is not started or its 16-deep queue is full (the event is then not sent). Any task, never blocks, no LVGL.
 bool keyboard_inject(uint8_t code, bool pressed, bool as_physical);
+// True when the key event LVGL last read was injected (keyboard_inject, as_physical or not), false for the TCA8418's
+// (#391). For an LV_EVENT_KEY handler or the like, which runs while LVGL handles that event; false before any key.
+// Hand-only paths refuse a key it calls injected. Any task, no LVGL.
+bool keyboard_last_injected(void);
 
 // Raw key hooks (#81, #79): up to KEYBOARD_RAW_MAX; false when full. Called from any task. A hook that swallows an
 // event stops the mapped key reaching LVGL (its release too); other hooks still see it. Once keyboard_raw_remove returns

@@ -6,7 +6,8 @@
 // It offers the settings reset only (everything else stays in Settings and the console), on a page of its own on
 // LVGL's top layer: no shell screen, menu or dialog. While the question is up the combo hook swallows every key, so
 // the UI underneath sees none. If the LVGL lock cannot be had (the UI is stuck) the question still works blind:
-// Enter resets, Esc or 30 s cancel, and the log says so.
+// Enter resets, Esc or 30 s cancel, and the log says so. Only the TCA8418 counts (#391): injected keys, "phys" ones
+// too, neither arm nor confirm it (a DANGER confirm is hands only); an injected Esc still cancels.
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -43,7 +44,8 @@ static bool on_raw(key_raw_event_t const *ev, void *arg) {
     (void)arg;
     portENTER_CRITICAL(&lock);
     bool              was = lichen_sys_factory_combo_swallows(&combo);
-    lichen_fc_event_t e   = lichen_sys_factory_combo_key(&combo, ev->code, ev->pressed, now_ms());
+    // Injected keys ("fw keys", phys too) neither arm nor confirm: a DANGER confirm is hands only (#391)
+    lichen_fc_event_t e = lichen_sys_factory_combo_key(&combo, ev->code, ev->pressed, ev->injected, now_ms());
     bool              now = lichen_sys_factory_combo_swallows(&combo);
     portEXIT_CRITICAL(&lock);
     // Loaded once: the combo task clears it as it ends, and only returns after the hook remove, which waits for this
