@@ -142,14 +142,22 @@ static void select_checks(void) {
 }
 
 int main(void) {
-    char s[32];
+    char s[48];
     CHECK(status(0, MESH_OUT_FAILED, 0, s) == MESH_STATUS_NONE && s[0] == '\0'); // incoming: no state
     CHECK(status(1, MESH_OUT_QUEUED, 0, s) == MESH_STATUS_PENDING && strcmp(s, "queued") == 0);
-    CHECK(status(1, MESH_OUT_SENT, 0, s) == MESH_STATUS_PENDING && strcmp(s, "queued") == 0);
+    CHECK(status(1, MESH_OUT_SENT, 0, s) == MESH_STATUS_PENDING && strcmp(s, "sent") == 0);
     CHECK(status(1, MESH_OUT_ON_AIR, 0, s) == MESH_STATUS_PENDING && strcmp(s, "on air") == 0);
     CHECK(status(1, MESH_OUT_HEARD, 1, s) == MESH_STATUS_OK && strcmp(s, "heard repeated") == 0);
     CHECK(status(1, MESH_OUT_HEARD, 3, s) == MESH_STATUS_OK && strcmp(s, "heard repeated x3") == 0);
     CHECK(status(1, MESH_OUT_DELIVERED, 0, s) == MESH_STATUS_OK && strcmp(s, "delivered") == 0);
+    {
+        mesh_msg_t h;
+        memset(&h, 0, sizeof(h));
+        h.outgoing = 1, h.state = MESH_OUT_HEARD, h.repeats = 2, h.trip_ms = 1840;
+        CHECK(mesh_msg_status(&h, s, 48) == MESH_STATUS_OK && strcmp(s, "heard repeated x2, after 1.8 s") == 0);
+        h.repeats = 1;
+        CHECK(mesh_msg_status(&h, s, 48) == MESH_STATUS_OK && strcmp(s, "heard repeated, after 1.8 s") == 0);
+    }
     CHECK(status(1, MESH_OUT_FAILED, 0, s) == MESH_STATUS_FAILED && strcmp(s, "not sent") == 0);
 
     // The counter and the cut: 10 bytes of room

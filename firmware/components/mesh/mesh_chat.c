@@ -48,6 +48,22 @@ bool mesh_msg_in_dm(mesh_msg_t const *m, uint8_t const peer[6]) {
     return m->dm && memcmp(m->peer, peer, 6) == 0;
 }
 
+// "heard repeated", "x3" from the second repeat, and the time to the first repeat when the outbox recorded one (#389;
+// trip_ms is zero for a channel message until it does, then nothing extra is shown)
+static mesh_status_kind_t heard_status(mesh_msg_t const *m, char *out, size_t cap) {
+    char rep[8] = "", trip[24] = "";
+    if (m->repeats > 1) {
+        snprintf(rep, sizeof(rep), " x%u", (unsigned)m->repeats);
+    }
+    if (m->trip_ms) {
+        char t[16];
+        mesh_format_trip(m->trip_ms, t, sizeof(t));
+        snprintf(trip, sizeof(trip), ", after %s", t);
+    }
+    snprintf(out, cap, "heard repeated%s%s", rep, trip);
+    return MESH_STATUS_OK;
+}
+
 mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap) {
     if (cap) {
         out[0] = '\0';
@@ -60,19 +76,16 @@ mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap) {
     }
     switch ((mesh_out_state_t)m->state) {
     case MESH_OUT_QUEUED:
-    case MESH_OUT_SENT:
         snprintf(out, cap, "queued");
+        return MESH_STATUS_PENDING;
+    case MESH_OUT_SENT: // MyMesh took it, the radio has not sent it yet: a state of its own (#389)
+        snprintf(out, cap, "sent");
         return MESH_STATUS_PENDING;
     case MESH_OUT_ON_AIR:
         snprintf(out, cap, "on air");
         return MESH_STATUS_PENDING;
     case MESH_OUT_HEARD:
-        if (m->repeats > 1) {
-            snprintf(out, cap, "heard repeated x%u", (unsigned)m->repeats);
-        } else {
-            snprintf(out, cap, "heard repeated");
-        }
-        return MESH_STATUS_OK;
+        return heard_status(m, out, cap);
     case MESH_OUT_DELIVERED:
         snprintf(out, cap, "delivered");
         return MESH_STATUS_OK;
