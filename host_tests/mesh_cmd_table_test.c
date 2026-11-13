@@ -65,7 +65,7 @@ static void test_subcommand_table(void) {
         {"telemetry", OPTIONAL, true}, {"history", OPTIONAL, true}, {"remote", OPTIONAL, true},
         {"link", NONE, true},       {"chats", NONE, true},         {"ident simulate", NONE, true},
         {"advert", OPTIONAL, true}, {"loc", OPTIONAL, true},       {"autoadd", OPTIONAL, true},
-        {"scope", OPTIONAL, true},
+        {"scope", OPTIONAL, true},  {"airlog", OPTIONAL, true}, // #408
     };
     CHECK(MESH_SUB_COUNT == sizeof(want) / sizeof(want[0]));
     for (int i = 0; i < MESH_SUB_COUNT; i++) {
@@ -99,6 +99,7 @@ static void test_needs_running(void) {
     CHECK(!mesh_sub_needs_running(MESH_SUB_ORDER));
     CHECK(mesh_sub_needs_running(MESH_SUB_NAME));
     CHECK(mesh_sub_needs_running(MESH_SUB_SCOPE));
+    CHECK(mesh_sub_needs_running(MESH_SUB_AIRLOG)); // #408: the ring is MeshCore's
     CHECK(mesh_sub_needs_running(MESH_SUB_COUNT)); // an unknown line and the status say why not
     char const *rest;
     CHECK(mesh_sub_needs_running(mesh_sub_find("", &rest)));
@@ -118,6 +119,9 @@ static void test_matching(void) {
     expect("hist", MESH_SUB_HIST, "");
     expect("hist scan 3 bad", MESH_SUB_HIST, "scan 3 bad");
     expect("history", MESH_SUB_HISTORY, ""); // not "hist"
+    expect("airlog", MESH_SUB_AIRLOG, ""); // #408
+    expect("airlog 15", MESH_SUB_AIRLOG, "15");
+    expect("airlogs", MESH_SUB_COUNT, NULL);
     expect("history abcd on 30 YES", MESH_SUB_HISTORY, "abcd on 30 YES");
     expect("notify test dm", MESH_SUB_NOTIFY, "test dm");
     expect("order", MESH_SUB_ORDER, "");

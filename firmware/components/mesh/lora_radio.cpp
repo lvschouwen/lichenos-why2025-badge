@@ -1,5 +1,7 @@
 #include "lora_radio.h"
 
+#include "mesh_airlog.h"
+
 #include "esp_log.h"
 #include "lichen_random.h"
 #include "freertos/FreeRTOS.h"
@@ -141,6 +143,7 @@ uint32_t LoraRadio::getRngSeed() {
 }
 
 bool LoraRadio::startSendRaw(uint8_t const *bytes, int len) {
+    last_tx = AIRLOG_TX_REFUSED;
     if (len <= 0 || __atomic_load_n(&tx_blocked, __ATOMIC_ACQUIRE) || !lichen_radio_get(RADIO_LORA)) {
         return false; // a damaged identity, or LoRa switched off (#108)
     }
@@ -148,6 +151,7 @@ bool LoraRadio::startSendRaw(uint8_t const *bytes, int len) {
         send_refused++;
         return false;
     }
+    last_tx   = AIRLOG_TX_TIMEOUT; // until the C6 answers
     sending   = true;
     completed = false;
     return true;
@@ -161,8 +165,10 @@ bool LoraRadio::isSendComplete() {
     completed = true;
     if (state > 0) {
         n_sent++;
+        last_tx = AIRLOG_TX_OK;
     } else {
         send_failed++;
+        last_tx = AIRLOG_TX_FAILED;
     }
     return true;
 }

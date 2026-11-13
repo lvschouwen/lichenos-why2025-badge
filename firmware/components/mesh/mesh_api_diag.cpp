@@ -6,34 +6,65 @@ using namespace mesh_int;
 
 static char const TAG[] = "mesh";
 
-// ---- the air log (#165) ----------------------------------------------------------------------------------------
-// The ring is written on the mesh task (inside MyMesh::loop(), mesh lock held) and read by the screen. Its own lock
-// (a mutex: the ring and the screen's copy are in PSRAM, #271) covers only the push and the copy.
+// ---- the air log (#165, #408) -------------------------------------------------------------------------------------
+// The ring is written on the mesh task (inside MyMesh::loop(), mesh lock held) and read by the screen and the console.
+// Its own lock (a mutex: the ring and the readers' copies are in PSRAM, #271) covers only a push and a copy: a push is
+// one 24-byte store, a copy at most SHOW_ENTRIES (the screen's 100) entries, so a transmit's note waits at most for one
+// such copy, and the mutex's priority inheritance lifts a reader that holds it to the mesh task's priority.
 
 static airlog_t       airlog_ring;
 static bool           airlog_failed;
 
+// Only the mesh task (or MeshCore's start, before that task exists) writes the pointer; readers see NULL or the ring
+static bool airlog_ready(void) {
+    if (airlog_ring.e) {
+        return true;
+    }
+    if (airlog_failed) {
+        return false;
+    }
+    auto *mem = (airlog_entry_t *)lichen_alloc(meshcore_ctx(), (size_t)(AIRLOG_CAP) * sizeof(airlog_entry_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
+    if (!mem) {
+        airlog_failed = true;
+        ESP_LOGW(TAG, "air log: no memory, packets are not listed");
+        return false;
+    }
+    section_enter<SECTION_AIRLOG>();
+    airlog_init(&airlog_ring, mem, AIRLOG_CAP);
+    section_exit<SECTION_AIRLOG>();
+    return true;
+}
+
+void mesh_int::airlog_prepare(void) {
+    airlog_ready();
+}
+
 extern "C" void mesh_airlog_note(uint8_t header, uint8_t path_len, uint8_t const *path, uint8_t raw_len, float rssi,
                                  float snr) {
-    if (!airlog_ring.e) { // the first packet; only this task writes the pointer, readers see NULL or the whole ring
-        if (airlog_failed) {
-            return;
-        }
-        auto *mem = (airlog_entry_t *)lichen_alloc(meshcore_ctx(), (size_t)(AIRLOG_CAP) * sizeof(airlog_entry_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
-        if (!mem) {
-            airlog_failed = true;
-            ESP_LOGW(TAG, "air log: no memory, packets are not listed");
-            return;
-        }
-        section_enter<SECTION_AIRLOG>();
-        airlog_init(&airlog_ring, mem, AIRLOG_CAP);
-        section_exit<SECTION_AIRLOG>();
+    if (!airlog_ready()) { // a start that found no memory tries again at the first packet heard
+        return;
     }
     int16_t rssi_x10 = (int16_t)lroundf(rssi * 10.0f);
     int16_t snr_x10  = (int16_t)lroundf(snr * 10.0f);
     uint32_t at_s    = mesh_uptime_s();
     section_enter<SECTION_AIRLOG>();
     airlog_push(&airlog_ring, header, path_len, path, raw_len, rssi_x10, snr_x10, at_s);
+    section_exit<SECTION_AIRLOG>();
+}
+
+// Observation only (#408): never allocates (a ring that is not there drops the note), never logs. The outcome is the
+// radio's, set in the same dispatcher step that called logTx or logTxFail; logTxFail never counts as sent.
+extern "C" void mesh_airlog_note_tx(uint8_t header, uint8_t path_len, uint8_t raw_len, bool retry, bool completed) {
+    if (!airlog_ring.e) {
+        return;
+    }
+    auto result = (airlog_tx_result_t)lora_radio.last_tx;
+    if (!completed && (result == AIRLOG_TX_OK || result == AIRLOG_TX_FAILED)) {
+        result = AIRLOG_TX_TIMEOUT;
+    }
+    uint32_t at_s = mesh_uptime_s();
+    section_enter<SECTION_AIRLOG>();
+    airlog_push_tx(&airlog_ring, header, path_len, raw_len, retry, result, at_s);
     section_exit<SECTION_AIRLOG>();
 }
 

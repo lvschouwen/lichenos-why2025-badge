@@ -108,6 +108,15 @@ extern "C" void mesh_advert_limited(uint32_t refused) {
 }
 extern "C" void mesh_contacts_full(void) {}
 extern "C" void mesh_airlog_note(uint8_t, uint8_t, uint8_t const *, uint8_t, float, float) {}
+// What BadgeMesh told the air log about its transmits (#408): one per packet the radio was given
+struct TxNote {
+    uint8_t header, path_len, raw_len;
+    bool    retry, completed;
+};
+static std::vector<TxNote> tx_notes;
+extern "C" void mesh_airlog_note_tx(uint8_t header, uint8_t path_len, uint8_t raw_len, bool retry, bool completed) {
+    tx_notes.push_back({header, path_len, raw_len, retry, completed});
+}
 extern "C" void mesh_signal_note(uint8_t const *, bool, uint8_t, uint8_t const *, float, float) {}
 // What BadgeMesh told the senders' copy last (#291)
 static std::vector<uint32_t> noted_damaged; // name hashes
@@ -954,6 +963,22 @@ static void blob_checks(std::vector<std::vector<uint8_t>> const &packets, char c
 }
 
 // The companion pipe (#45, #55) on the real MyMesh: start sequence, offline queue drained, sends through the outbox
+// The air log's transmit hook (#408): every packet the radio was given since sent_from reached the air log exactly once,
+// in the same order, with the header, path and length it went out with; adverts, channel and direct messages, ACKs,
+// traces and requests all pass the same hook
+static void tx_note_checks(BadgeMesh &mesh, size_t sent_from, size_t notes_from) {
+    settle(mesh, 5); // the last packet started completes in the next loop
+    size_t sent = test_radio.sent.size() - sent_from;
+    CHECK(sent > 0 && tx_notes.size() - notes_from == sent);
+    for (size_t i = 0; i < sent && notes_from + i < tx_notes.size(); i++) {
+        auto const   &raw = test_radio.sent[sent_from + i];
+        TxNote const &n   = tx_notes[notes_from + i];
+        bool          tc  = (raw[0] & 0x03) == 0 || (raw[0] & 0x03) == 3; // transport codes before the path length
+        CHECK(n.header == raw[0] && n.raw_len == raw.size() && n.completed && !n.retry);
+        CHECK(raw.size() > (tc ? 5u : 1u) && n.path_len == raw[tc ? 5 : 1]);
+    }
+}
+
 static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, SimpleMeshTables &tables, char const *root) {
     static DataStore store(SPIFFS, rtc_clock);
     static ob_t      ob;
@@ -969,6 +994,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     store.begin();
     mesh.begin();
     mesh.setListener(&listener);
+    size_t sent_at_start = test_radio.sent.size(), notes_at_start = tx_notes.size();
     mesh.startPipe();
     settle(mesh, 10);
     LinkStats const &st = mesh.pipe().stats();
@@ -1058,6 +1084,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     remote_checks(mesh, rr, listener);
     contact_action_checks(mesh);
     import_checks(mesh);
+    tx_note_checks(mesh, sent_at_start, notes_at_start);
 }
 
 static std::vector<uint8_t> file_bytes(std::string const &path) {

@@ -27,6 +27,10 @@ void mesh_contacts_full(void);
 // A packet MeshCore received (#165), headers only, on the mesh task under the mesh lock: header and path_len as the
 // packet carries them, the path bytes, bytes on air, RSSI in dBm and SNR in dB. mesh_task.cpp keeps the air log ring.
 void mesh_airlog_note(uint8_t header, uint8_t path_len, uint8_t const *path, uint8_t raw_len, float rssi, float snr);
+// A packet MeshCore started to transmit has ended (#408), on the mesh task under the mesh lock, from logTx (completed:
+// the C6 answered) or logTxFail (not started, or given up): header and path_len as the packet carries them, bytes on
+// air, and whether it is the outbox's resend of a DM. Observation only: no allocation, no log line, no I/O.
+void mesh_airlog_note_tx(uint8_t header, uint8_t path_len, uint8_t raw_len, bool retry, bool completed);
 // An advert or a direct message from a contact in the table (#166), on the mesh task under the mesh lock: its public
 // key (the first 6 bytes name it), the signal of the packet and, for an advert, the path it came by. mesh_task.cpp
 // keeps it.

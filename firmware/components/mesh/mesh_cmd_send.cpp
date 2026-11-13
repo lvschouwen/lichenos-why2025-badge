@@ -1,7 +1,9 @@
-// "fw mesh send|dm|path|trace|discover|out|link|chats".
+// "fw mesh send|dm|path|trace|discover|out|link|chats|airlog".
 // Split out of mesh_task.cpp (#208); the state it uses is mesh_int.h's.
 #include "mesh_int.h"
 #include "mesh_cmd.h"
+
+#include <ctype.h>
 
 using namespace mesh_int;
 
@@ -266,6 +268,43 @@ void mesh_int::cmd_mesh_link(void) {
         }
     }
     console_reply("mesh task stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(mesh_task_handle));
+}
+
+// "fw mesh airlog [n]" (#408): the air log's newest n entries, received and sent, in the form bench scripts parse
+// (airlog_console_line). A debug command: compiled out of a release image, refused while developer mode is off.
+#define AIRLOG_CONSOLE_DEFAULT 20
+#define AIRLOG_CONSOLE_MAX     50 // bounded output; the ring keeps AIRLOG_CAP
+
+void mesh_int::cmd_mesh_airlog(char const *arg) {
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    if (!console_dev_gate("mesh airlog")) {
+        return;
+    }
+    char         *end = NULL;
+    unsigned long n   = *arg ? strtoul(arg, &end, 10) : AIRLOG_CONSOLE_DEFAULT;
+    if ((*arg && (*end || !isdigit((unsigned char)*arg))) || n == 0 || n > AIRLOG_CONSOLE_MAX) {
+        console_reply("mesh airlog [n]: n from 1 to %d (default %d)", AIRLOG_CONSOLE_MAX, AIRLOG_CONSOLE_DEFAULT);
+        return;
+    }
+    auto *rows = (airlog_entry_t *)lichen_alloc(meshcore_ctx(), n * sizeof(airlog_entry_t), LICHEN_MEM_BULK);
+    if (!rows) {
+        console_reply("mesh airlog: no memory");
+        return;
+    }
+    uint32_t seq;
+    size_t   got = mesh_airlog_snapshot(rows, n, &seq); // a short copy under the air log's lock, printed after it
+    char     line[96];
+    airlog_console_header(got, seq, line, sizeof(line));
+    console_reply("%s", line);
+    for (size_t i = 0; i < got; i++) {
+        airlog_console_line(&rows[i], line, sizeof(line));
+        console_reply("%s", line);
+    }
+    lichen_free(meshcore_ctx(), rows);
+#else
+    (void)arg;
+    console_reply("mesh airlog: a debug command, not in this build");
+#endif
 }
 
 // "fw mesh chats": every chat with its unread count and how full its ring is

@@ -274,25 +274,33 @@ static ob_entry_t *awaiting_air(ob_t *ob, bool dm) {
     return best;
 }
 
-void ob_on_tx(ob_t *ob, bool payload_is_dm, uint8_t const hash[OB_HASH_LEN]) {
-    ob_entry_t *e = awaiting_air(ob, payload_is_dm);
-    if (e) {
-        memcpy(e->hash, hash, OB_HASH_LEN);
-        e->have_hash = true;
-        e->state     = MESH_OUT_ON_AIR;
-    }
+// fill_action counted the attempt when it handed the frame out: the frame's own (0-based) is one less
+static bool is_resend(ob_entry_t const *e) {
+    return e->kind == OB_DM && e->attempt > 1;
 }
 
-void ob_on_tx_fail(ob_t *ob, bool payload_is_dm, uint32_t now_ms) {
+bool ob_on_tx(ob_t *ob, bool payload_is_dm, uint8_t const hash[OB_HASH_LEN]) {
     ob_entry_t *e = awaiting_air(ob, payload_is_dm);
     if (!e) {
-        return;
+        return false;
+    }
+    memcpy(e->hash, hash, OB_HASH_LEN);
+    e->have_hash = true;
+    e->state     = MESH_OUT_ON_AIR;
+    return is_resend(e);
+}
+
+bool ob_on_tx_fail(ob_t *ob, bool payload_is_dm, uint32_t now_ms) {
+    ob_entry_t *e = awaiting_air(ob, payload_is_dm);
+    if (!e) {
+        return false;
     }
     if (e->kind == OB_CHANNEL) {
         e->state = MESH_OUT_FAILED;
     } else {
         e->deadline_ms = now_ms + OB_RETRY_BACKOFF_MS; // the attempt is lost: retry after a pause, not at once
     }
+    return is_resend(e);
 }
 
 // The time from MyMesh taking a channel message (sent_ms, the clock the DM trip uses) to its first heard repeat (#389).

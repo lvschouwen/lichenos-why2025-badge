@@ -237,6 +237,36 @@ static void dm_retries(void) {
     CHECK(state_of(&ob, id) == MESH_OUT_DELIVERED);
 }
 
+// The air log's retry mark (#408): a DM's first transmit is not a retry, its resends are; a channel message never is
+static void tx_retry_flag(void) {
+    ob_t ob;
+    ob_init(&ob);
+    char const   *why = NULL;
+    mesh_msg_id_t id  = ob_add_dm(&ob, PEER, "hi", 2, 0, &why);
+    take(&ob, 0, OB_ACT_SEND_DM);
+    mf_msg_t s1 = sent(0x01, 3000, 0);
+    ob_on_reply(&ob, id, &s1, 0);
+    uint8_t h[OB_HASH_LEN] = {7};
+    CHECK(!ob_on_tx(&ob, true, h));
+    take(&ob, 3750, OB_ACT_SEND_DM); // no ACK: the second attempt
+    mf_msg_t s2 = sent(0x02, 3000, 0);
+    ob_on_reply(&ob, id, &s2, 3750);
+    CHECK(ob_on_tx(&ob, true, h));
+    CHECK(!ob_on_tx(&ob, true, h)); // nothing awaits the radio any more
+    mesh_msg_id_t c = ob_add_channel(&ob, "#test", "x", 1, 4000, &why);
+    take(&ob, 4000, OB_ACT_SEND_CHANNEL);
+    mf_msg_t ok = reply(MF_OK);
+    ob_on_reply(&ob, c, &ok, 4000);
+    CHECK(!ob_on_tx_fail(&ob, false, 4001));
+    // a refused resend is still a retry
+    take(&ob, 7500, OB_ACT_RESET_PATH);
+    ob_on_reply(&ob, id, &(mf_msg_t){.kind = MF_OK}, 7500);
+    take(&ob, 7500, OB_ACT_SEND_DM);
+    mf_msg_t s3 = sent(0x03, 3000, 1);
+    ob_on_reply(&ob, id, &s3, 7500);
+    CHECK(ob_on_tx_fail(&ob, true, 7600));
+}
+
 static void dm_retry_and_errors(void) {
     ob_t ob;
     ob_init(&ob);
@@ -500,6 +530,7 @@ int main(void) {
     channel_failures();
     dm_delivered();
     dm_retries();
+    tx_retry_flag();
     dm_retry_and_errors();
     limits();
     ack_slots();

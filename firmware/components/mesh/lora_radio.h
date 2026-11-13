@@ -33,6 +33,9 @@ public:
     uint32_t send_refused  = 0; // not started: the previous packet was still waiting for the C6's answer
     // The stored identity failed its check at load (#80, mesh_ident.h): nothing leaves the radio until a restart
     bool     tx_blocked    = false;
+    // How the last packet MeshCore started ended (airlog_tx_result_t, #408): set by startSendRaw and isSendComplete (a
+    // send the C6 never answered stays TIMEOUT), read by the air log in the logTx / logTxFail that follow them in the same dispatcher step
+    uint8_t  last_tx       = 0;
 
 private:
     uint32_t dropped   = 0;

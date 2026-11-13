@@ -22,7 +22,7 @@ void cmd_mesh_advert(char const *args);
 void cmd_mesh_loc(char const *args);
 void cmd_mesh_autoadd(char const *args);
 
-// ---- mesh_cmd_send.cpp: send, dm, path, trace, out, link, chats ---------------------------------------------------
+// ---- mesh_cmd_send.cpp: send, dm, path, trace, out, link, chats, airlog--------------------------------------------------
 
 bool console_channel_name(char const *typed, char *out, size_t cap, char const *what);
 bool console_contact(char const *hex, uint8_t out[6]);
@@ -33,6 +33,7 @@ void cmd_mesh_trace(char const *arg, mt_kind_t kind);
 void cmd_mesh_out(void);
 void cmd_mesh_link(void);
 void cmd_mesh_chats(void);
+void cmd_mesh_airlog(char const *arg); // #408, a debug command
 
 // ---- mesh_cmd_remote.cpp: remote, history, telemetry --------------------------------------------------------------
 

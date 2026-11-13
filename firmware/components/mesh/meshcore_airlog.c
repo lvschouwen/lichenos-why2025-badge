@@ -1,6 +1,7 @@
-// The MeshCore app's Air log page (#165): the packets MeshCore received, newest first, from the RAM ring in
-// mesh_task.cpp (mesh_airlog_snapshot: a short locked copy, never the mesh lock). Headers only: type, route, hops, signal,
-// the last hop's hash and the age. No message text or payload bytes are kept or shown. Receive only.
+// The MeshCore app's Air log page (#165): the packets MeshCore received and sent (#408), newest first, from the RAM
+// ring in mesh_api_diag.cpp (mesh_airlog_snapshot: a short locked copy, never the mesh lock). Headers only: type, route,
+// hops, signal, the last hop's hash and the age; a sent row says "Sent" instead of a signal (airlog_detail). No message
+// text or payload bytes are kept or shown.
 #include "lichen_mem.h"
 #include "meshcore_run.h"
 #include "esp_log.h"

@@ -40,13 +40,20 @@ static void cmd_mesh_autostart(char const *rest) {
     }
 }
 
+// The debug subcommands (#373) are named only where they are in the image
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+#define MESH_DEV_USAGE " | mesh airlog [n] (debug, fw dev)"
+#else
+#define MESH_DEV_USAGE ""
+#endif
+
 // "fw mesh" with a line it does not know
 static void cmd_mesh_usage(void) {
     console_reply("mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
                   "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact|scan [n] [bad|bad1] [int] [from<offset>]] | mesh send <channel> <text> | "
                   "mesh dm <12 hex> <text> | mesh scope [console <region> YES] | mesh remote [<name|hex> login [pw]|status|cli <text>|settings|logout] | mesh remote settings | mesh history [<name|hex> [on [min] YES|off|interval <min>]] | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
                   "[<lat> <lon> | share on|off] | mesh autoadd [on|off | types <all|chat,repeater,room,sensor> | hops "
-                  "<any|direct|n> | overwrite on|off]");
+                  "<any|direct|n> | overwrite on|off]" MESH_DEV_USAGE);
 }
 
 // "fw mesh" alone: MeshCore's figures, copied under the lock and printed after it
@@ -110,6 +117,7 @@ static constexpr mesh_sub_run_t MESH_SUB_RUN[] = {
     {MESH_SUB_LOC, cmd_mesh_loc},
     {MESH_SUB_AUTOADD, cmd_mesh_autoadd},
     {MESH_SUB_SCOPE, mesh_cscope_console},
+    {MESH_SUB_AIRLOG, cmd_mesh_airlog},
 };
 
 template <typename T, size_t N> static constexpr bool ids_in_order(T const (&table)[N], size_t count) {

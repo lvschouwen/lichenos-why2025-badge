@@ -747,6 +747,7 @@ static bool start_locked(char const *files_dir) {
     mesh_journal_boot(STORE_MESSAGES, mesh_lock, mesh_unlock, have_prv ? prv : NULL, sizeof(prv));
     mh_wipe(prv, sizeof(prv));
     n->setListener(&screen_feed);
+    airlog_prepare(); // #408: before anything can transmit, so the transmit hook only stores
     n->startPipe(); // connected, so MyMesh's replies and pushes reach us (#45)
     uint8_t const *key = n->self_id.pub_key;
     snprintf(node_id_text, sizeof(node_id_text), "%02x%02x%02x%02x", key[0], key[1], key[2], key[3]);

@@ -143,5 +143,6 @@ extern tl_rate_t telem_rate; // under mesh_ob_enter/exit
 
 void discover_note_locked(mesh::Packet const *pkt); // #167, from MyMesh's loop
 void discover_tick_locked(void);                    // the mesh task, under the mesh lock
+void airlog_prepare(void); // #408: the air log's ring, at MeshCore's start, so the transmit hook never allocates
 
 } // namespace mesh_int
