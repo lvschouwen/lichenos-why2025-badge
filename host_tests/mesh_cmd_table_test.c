@@ -30,8 +30,25 @@ static void test_console_commands(void) {
         // each usage starts with its own command, as "fw help" lists it
         CHECK(strncmp(MESH_CONSOLE_CMDS[i].usage, names[i], strlen(names[i])) == 0);
     }
-    CHECK(strstr(MESH_CONSOLE_CMDS[MESH_CON_MESH].usage, "mesh notify [test dm|chan <name>|fail|mention]") != NULL);
-    CHECK(strcmp(MESH_CONSOLE_CMDS[MESH_CON_MSGS].usage, "msgs [n] (last n messages)") == 0);
+    // what "fw help" lists, byte for byte
+    static char const *const usage[] = {
+        "mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset | freq bw sf "
+        "cr> [txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact|scan [n] [bad|bad1] "
+        "[int] [from<offset>]] | mesh send <channel> <text> | mesh dm <12 hex> <text> | mesh notify [test dm|chan "
+        "<name>|fail|mention] | mesh order [reset] | mesh advert ... | mesh loc ... | mesh autoadd ...",
+        "contacts (nodes heard, newest first) | contacts export [<12 hex>] | contacts import <part> | end | cancel",
+        "msgs [n] (last n messages)",
+        "channels (the channels the badge can read)",
+        "channel add <name> <base64 key> | channel add #name | channel rm <index|name> | channel show <index|name> | "
+        "channel rename <index|name> <new name>",
+        "advert [zero|flood] (send an advert now; default as the Advertise setting)",
+    };
+    for (int i = 0; i < MESH_CON_COUNT; i++) {
+        if (strcmp(MESH_CONSOLE_CMDS[i].usage, usage[i]) != 0) {
+            printf("FAIL usage of %s:\n  got  \"%s\"\n  want \"%s\"\n", names[i], MESH_CONSOLE_CMDS[i].usage, usage[i]);
+            failures++;
+        }
+    }
 }
 
 static void test_subcommand_table(void) {
@@ -71,6 +88,23 @@ static void expect(char const *line, mesh_sub_id_t id, char const *rest) {
                (int)id, rest ? rest : "(null)");
         failures++;
     }
+}
+
+// The gate in front of the dispatch: a stopped MeshCore answers only the anytime subcommands
+static void test_needs_running(void) {
+    for (int i = 0; i < MESH_SUB_COUNT; i++) {
+        CHECK(mesh_sub_needs_running((mesh_sub_id_t)i) == MESH_SUBS[i].needs_running);
+    }
+    CHECK(!mesh_sub_needs_running(MESH_SUB_START));
+    CHECK(!mesh_sub_needs_running(MESH_SUB_ORDER));
+    CHECK(mesh_sub_needs_running(MESH_SUB_NAME));
+    CHECK(mesh_sub_needs_running(MESH_SUB_SCOPE));
+    CHECK(mesh_sub_needs_running(MESH_SUB_COUNT)); // an unknown line and the status say why not
+    char const *rest;
+    CHECK(mesh_sub_needs_running(mesh_sub_find("", &rest)));
+    CHECK(mesh_sub_needs_running(mesh_sub_find("bogus", &rest)));
+    CHECK(!mesh_sub_needs_running(mesh_sub_find("hist scan", &rest)));
+    CHECK(mesh_sub_needs_running(mesh_sub_find("history", &rest)));
 }
 
 static void test_matching(void) {
@@ -118,6 +152,7 @@ static void test_matching(void) {
 int main(void) {
     test_console_commands();
     test_subcommand_table();
+    test_needs_running();
     test_matching();
     if (failures) {
         printf("%d failure(s)\n", failures);

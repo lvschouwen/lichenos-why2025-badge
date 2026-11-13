@@ -122,8 +122,12 @@ template <typename T, size_t N> static constexpr bool ids_in_order(T const (&tab
 }
 static_assert(ids_in_order(MESH_SUB_RUN, MESH_SUB_COUNT), "MESH_SUB_RUN: one handler per MESH_SUBS entry, in its order");
 
-// Every "fw mesh" subcommand runs here, after its match. #289: the on-air allow-list check of console sends goes in
-// front of the handler here (fw advert, cmd_advert, is the one top-level command that transmits as well).
+// Every "fw mesh" subcommand runs here, after its match. Not the place for #289's on-air allow-list: here the target is
+// still raw text. The sites that see it resolved are the MESH_FROM_CONSOLE checks next to the #290 scope refusals:
+// send_ready (mesh_api_send.cpp: channel and DM sends, and the trace, discover, remote and telemetry starts, with
+// mesh_cscope_channel_refusal for channels) and advert_tx_locked (mesh_api_settings.cpp). #289 must still decide two
+// cases: "fw advert" (cmd_advert), which has no target, and the status requests that "fw mesh history <who> on"
+// schedules, which the mesh task sends later (mesh_rhist_tick), not from the console.
 static void mesh_sub_run(mesh_sub_id_t id, char const *rest) {
     MESH_SUB_RUN[id].run(rest);
 }
@@ -133,7 +137,7 @@ static void mesh_sub_run(mesh_sub_id_t id, char const *rest) {
 static void cmd_mesh(char const *args) {
     char const   *rest;
     mesh_sub_id_t id = mesh_sub_find(args, &rest);
-    if ((id == MESH_SUB_COUNT || MESH_SUBS[id].needs_running) && console_not_running()) {
+    if (mesh_sub_needs_running(id) && console_not_running()) {
         return;
     }
     if (id != MESH_SUB_COUNT) {

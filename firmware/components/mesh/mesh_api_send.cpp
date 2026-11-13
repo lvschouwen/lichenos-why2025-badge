@@ -112,7 +112,7 @@ extern "C" size_t mesh_out_list(mesh_out_info_t *out, size_t max) {
     OutSnap *snap = (OutSnap *)lichen_alloc(meshcore_ctx(), OB_CAP * sizeof(OutSnap), LICHEN_MEM_BULK);
     if (!snap) {
         ESP_LOGW(TAG, "outbox list: no memory for the copy");
-        return 0;
+        return MESH_OUT_NO_MEMORY;
     }
     mesh_ob_enter();
     for (int i = 0; i < OB_CAP; i++) {

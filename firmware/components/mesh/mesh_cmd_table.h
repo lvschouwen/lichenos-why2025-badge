@@ -3,8 +3,8 @@
 // data with their matching rule, so the dispatch is one loop and a host test pins the names (host_tests/
 // mesh_cmd_table_test.c). Pure; the handlers are mesh_cmd*.cpp's, in the same order (mesh_cmd.cpp checks it).
 //
-// Later work hooks in here: the per-app command prefix (#229) goes where mesh_console_init registers MESH_CONSOLE_CMDS,
-// the on-air allow-list (#289) where mesh_cmd.cpp runs a subcommand (mesh_sub_run).
+// The per-app command prefix (#229) goes where mesh_console_init registers MESH_CONSOLE_CMDS. The on-air allow-list
+// (#289) does not belong in this dispatch, which sees only a word and raw text: see mesh_sub_run in mesh_cmd.cpp.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -77,6 +77,10 @@ extern mesh_sub_t const MESH_SUBS[MESH_SUB_COUNT];
 
 // What sub's handler gets of args (the line after "mesh "), or NULL when it does not match
 char const *mesh_sub_match(mesh_sub_t const *sub, char const *args);
+
+// Whether id (from mesh_sub_find) needs MeshCore running: true for MESH_SUB_COUNT, so an unknown line and the status
+// ("fw mesh" alone) say why not while it is stopped
+bool mesh_sub_needs_running(mesh_sub_id_t id);
 
 // The first subcommand that matches args, in table order, with what its handler gets in *rest; MESH_SUB_COUNT (and
 // *rest NULL) for none

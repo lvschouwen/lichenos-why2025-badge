@@ -1,7 +1,8 @@
 #pragma once
 // The mesh task's own state, shared by the files split out of mesh_task.cpp (#208): mesh_task.cpp keeps the task, its
 // start and stop and the state below (defined there); mesh_api_*.cpp hold the C API of mesh.h and friends, mesh_cmd*.cpp
-// the console. C++ only and private to the mesh component (in namespace mesh_int, so nothing here is a global symbol).
+// the console. C++ only and private to the mesh component by convention: the names have external linkage, in namespace
+// mesh_int so they cannot clash with a global (MeshCore's or the OS's) of the same name.
 // Every piece keeps the task and the lock that own it, as documented at its definition.
 #include "mesh_wipe.h"
 #include "mesh_rset.h"

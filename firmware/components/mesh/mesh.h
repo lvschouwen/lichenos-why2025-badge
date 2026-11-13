@@ -272,7 +272,9 @@ typedef struct {
     uint32_t         trip_ms;
     char             target[OB_TARGET_MAX]; // channel name, or the contact prefix in hex
 } mesh_out_info_t;
-// The newest messages first, up to max (for the console and the chat screens)
+// The newest messages first, up to max (for the console and the chat screens); MESH_OUT_NO_MEMORY when the copy it
+// takes (PSRAM) could not be made
+#define MESH_OUT_NO_MEMORY (SIZE_MAX - 1)
 size_t mesh_out_list(mesh_out_info_t *out, size_t max);
 
 // ---- trace path and path discovery (#53; mesh_trace.h) ---------------------------------------------------------------

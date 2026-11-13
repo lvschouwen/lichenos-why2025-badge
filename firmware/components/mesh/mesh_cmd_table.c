@@ -64,6 +64,10 @@ char const *mesh_sub_match(mesh_sub_t const *sub, char const *args) {
     return args + len + (sub->match == MESH_SUB_WORD && args[len] ? 1 : 0);
 }
 
+bool mesh_sub_needs_running(mesh_sub_id_t id) {
+    return id >= MESH_SUB_COUNT || MESH_SUBS[id].needs_running;
+}
+
 mesh_sub_id_t mesh_sub_find(char const *args, char const **rest) {
     for (int i = 0; i < MESH_SUB_COUNT; i++) {
         char const *r = mesh_sub_match(&MESH_SUBS[i], args);

@@ -230,6 +230,10 @@ void mesh_int::cmd_mesh_trace(char const *arg, mt_kind_t kind) {
 void mesh_int::cmd_mesh_out(void) {
     mesh_out_info_t list[OB_CAP];
     size_t          n = mesh_out_list(list, OB_CAP);
+    if (n == MESH_OUT_NO_MEMORY) {
+        console_reply("no memory");
+        return;
+    }
     for (size_t i = 0; i < n; i++) {
         console_reply("out #%lu %s %s: %s, attempt %u, repeats %u, trip %lu ms", (unsigned long)list[i].id,
                       list[i].is_dm ? "dm" : "channel", list[i].target, OUT_STATE_NAME[list[i].state], list[i].attempt,
