@@ -420,30 +420,63 @@ static void cli_tag_secret(void) {
     CHECK(strcmp(r.cli[r.cli_head].reply, "password now: (hidden)") == 0);
 }
 
-// The status history's poll gives way to the person (#168 review): replaced while queued or sent, never while the pipe
-// has it; and it never replaces anything itself
-// An argument past the field is refused for every kind, never copied or left unterminated (#404)
-static void long_argument_every_kind(void) {
-    static rr_t rt;
-    for (int op = RR_LOGIN; op <= RR_TELEMETRY; op++) {
-        for (size_t len = RR_CMD_MAX + 1; len <= RR_CMD_MAX + 100; len += 100) {
-            char arg[RR_CMD_MAX + 101];
-            memset(arg, 'a', len);
-            arg[len] = 0;
-            rr_t *r = &rt;
-            rr_init(r);
-            char const *why = NULL;
-            uint32_t seq = rr_request(r, (rr_op_t)op, A, arg, 0, &why);
-            if (op == RR_STATUS) {
-                CHECK(seq != 0); // a status request takes no argument
-            } else if (len > RR_CMD_MAX) {
-                CHECK(seq == 0 && why);
-            }
-            CHECK(memchr(r->arg, 0, sizeof(r->arg)) != NULL);
-        }
+// An argument past a kind's limit is refused with the request untouched and idle, one that fits is stored whole with
+// its NUL and zeros after it, for every kind (#404). rr_t is one object, so an overflow from arg into its neighbours
+// is invisible to ASan: the whole struct is compared instead.
+static size_t arg_limit(rr_op_t op) {
+    return op == RR_LOGIN ? MF_PASSWORD_MAX : RR_CMD_MAX;
+}
+
+static void arg_refused(rr_op_t op, size_t len) {
+    static rr_t r, before;
+    char        arg[RR_CMD_MAX + 101];
+    memset(arg, 'a', len);
+    arg[len] = 0;
+    rr_init(&r);
+    before          = r;
+    char const *why = NULL;
+    CHECK(rr_request(&r, op, A, arg, 0, &why) == 0 && why);
+    CHECK(memcmp(&r, &before, sizeof(r)) == 0 && !rr_busy(&r));
+}
+
+static void arg_accepted(rr_op_t op, size_t len) {
+    static rr_t r;
+    char        arg[RR_CMD_MAX + 1];
+    memset(arg, 'a', len);
+    arg[len] = 0;
+    rr_init(&r);
+    char const *why = NULL;
+    CHECK(rr_request(&r, op, A, arg, 0, &why) == 1 && rr_busy(&r));
+    CHECK(memcmp(r.arg, arg, len) == 0 && r.arg[len] == 0);
+    for (size_t i = len; i < sizeof(r.arg); i++) {
+        CHECK(r.arg[i] == 0);
     }
 }
 
+static void long_argument_every_kind(void) {
+    for (int op = RR_LOGIN; op <= RR_TELEMETRY; op++) {
+        if (op == RR_STATUS) {
+            arg_accepted(RR_STATUS, 0); // takes no argument: a long one is not read
+            static rr_t r;
+            char        big[RR_CMD_MAX + 101];
+            memset(big, 'a', sizeof(big) - 1);
+            big[sizeof(big) - 1] = 0;
+            char const *why = NULL;
+            rr_init(&r);
+            CHECK(rr_request(&r, RR_STATUS, A, big, 0, &why) == 1 && r.arg[0] == 0);
+            continue;
+        }
+        size_t const lim = arg_limit((rr_op_t)op);
+        arg_accepted((rr_op_t)op, lim);
+        arg_accepted((rr_op_t)op, lim - 1);
+        arg_refused((rr_op_t)op, lim + 1);
+        arg_refused((rr_op_t)op, RR_CMD_MAX + 1);
+        arg_refused((rr_op_t)op, RR_CMD_MAX + 100);
+    }
+}
+
+// The status history's poll gives way to the person (#168 review): replaced while queued or sent, never while the pipe
+// has it; and it never replaces anything itself
 static void background_gives_way(void) {
     rr_t        r;
     char const *why = NULL;
@@ -559,7 +592,8 @@ static uint32_t request_step(rr_t *r, mut_rng_t *g, uint32_t now, uint32_t h) {
 }
 
 // Pins rr_request_prepared's results and every field it writes over a long seeded script (#212); taken before the
-// split; 0xc199ec64 until #404 (the 101-character argument for a telemetry request is now refused). A deliberate change to the request state machine changes it: print the new value and say why in the commit.
+// split; 0xc199ec64 until #404 (the 101-character argument for a telemetry request is now refused). A deliberate
+// change to the request state machine changes it: print the new value and say why in the commit.
 static void request_pin(void) {
     rr_t      r;
     mut_rng_t g;
