@@ -37,6 +37,14 @@ void shell_arrange_home(bool rebuild); // Settings > Display > Arrange home: bac
 // ui_probe.c: bench diagnostics
 void ui_probe_init(void);           // registers "fw ui"
 void ui_probe_send(char const *seq); // "fw keys send|press <seq>": through the real key path (#375)
+// The key sequence runner behind it, for "fw ui answer" too (ui_answer.c): who names the command in the replies;
+// answer_label (NULL for none) makes every Enter go down only while the dialog that has that confirm label and open
+// number answer_gen is still on screen (#377). Returns the sequence entries sent, -1 when it stopped (said why)
+int  ui_probe_run(char const *who, char const *seq, char const *answer_label, uint32_t answer_gen);
+// ui_answer.c (#377): "fw ui answer [yes <confirm_label> | no]" (console task), and the stepper's check before a remote
+// Enter, Left or Right (LVGL task): true when the key with TCA8418 code may go down; else why not is written to why
+void ui_answer_cmd(char const *args);
+bool ui_answer_key_ok(uint8_t code, char const *answer_label, uint32_t answer_gen, char *why, size_t cap);
 void ui_check_start(void);           // #89: 1 s LVGL object-tree check, registers "fw uicheck"
 // card_overlay.c (#352): "fw ui card [test|white|grey|black|off]", the bench test card over the current screen
 void card_overlay_init(void);            // sets the fw label the card shows
@@ -153,6 +161,8 @@ typedef struct {
     char     confirm_label[SHELL_DIALOG_LABEL_MAX];
     uint32_t ms_open;                              // since it was built on screen
     uint32_t left_s;                               // of the countdown, rounded up
+    uint32_t gen;                                  // this open's number: another open (even with the same words) has
+                                                   // another, so a caller checks it again right before acting (#377)
 } shell_dialog_info_t;
 bool shell_dialog_info(shell_dialog_info_t *info);
 

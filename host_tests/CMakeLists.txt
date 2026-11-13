@@ -2235,3 +2235,24 @@ target_include_directories(boot_keys_test PRIVATE
 )
 target_compile_options(boot_keys_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME boot_keys_test COMMAND boot_keys_test)
+
+# What a key sent over the console may answer (#377): dialog verdicts, the bench scope, the radio pages, label and gen
+add_executable(remote_answer_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/remote_answer_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/remote_answer.c
+)
+target_include_directories(remote_answer_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
+)
+target_compile_options(remote_answer_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME remote_answer_test COMMAND remote_answer_test)
+
+# The bench console scope cell MeshCore binds for the shell (#377): unbound is no scope
+add_executable(bench_scope_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/bench_scope_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/bench_scope.c
+)
+target_include_directories(bench_scope_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(bench_scope_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME bench_scope_test COMMAND bench_scope_test)

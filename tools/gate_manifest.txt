@@ -37,6 +37,8 @@ app_settings_set_u64	-	unspecified	lichen_settings.h
 app_settings_set_u8	-	unspecified	lichen_settings.h
 badge_table_get	-	unspecified	badge_table.h
 badge_table_set	-	unspecified	badge_table.h
+bench_scope_bind	-	any	bench_scope.h
+bench_scope_set	-	any	bench_scope.h
 crashlog_badge	-	unspecified	crashlog_fmt.h
 crashlog_export	-	unspecified	crashlog_fmt.h
 crashlog_export_name	-	unspecified	crashlog_fmt.h

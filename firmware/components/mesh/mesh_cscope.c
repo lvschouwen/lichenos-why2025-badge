@@ -1,5 +1,6 @@
 #include "mesh_cscope.h"
 
+#include "bench_scope.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -67,11 +68,17 @@ char const *mesh_cscope_channel_refusal(bool from_console, char const *channel) 
     return from_console ? NULL : chscope_why(channel); // a console line keeps the console scope (#290 wins)
 }
 
+// The shell's remote answers read the scope through bench_scope.h (#377): set exactly when a console flood may go
+static bool console_scope_set(void) {
+    return mesh_cscope_refusal(true) == NULL;
+}
+
 void mesh_cscope_note(char const *name) {
     SemaphoreHandle_t lock = cscope_lock_made();
     xSemaphoreTake(lock, portMAX_DELAY);
     snprintf(cscope_name, sizeof(cscope_name), "%s", name ? name : "");
     xSemaphoreGive(lock);
+    bench_scope_bind(console_scope_set); // from the first note on (MeshCore's start); again is harmless
 }
 
 static void cscope_get(char *out, size_t cap) {

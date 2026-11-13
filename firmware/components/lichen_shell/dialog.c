@@ -338,6 +338,7 @@ bool shell_dialog_info(shell_dialog_info_t *info) {
     }
     info->open    = true;
     info->careful = careful;
+    info->gen     = text_gen;
     copy_text(info->title, sizeof(info->title), title);
     copy_text(info->confirm_label, sizeof(info->confirm_label), label);
     dlg_countdown_t const shown_cd = {.start_ms = start, .total_ms = total};

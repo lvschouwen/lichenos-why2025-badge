@@ -712,7 +712,7 @@ void shell_start(lv_display_t *display) {
     screen_idle_init();
     attention_init();
     screen_saver_init();
-    console_register("keys", "keys on|off (log every key) | keys log on|off (log raw key events) | keys send|press <up down left right enter esc tab bksp wait square triangle cross circle cloud diamond text:..| focus:..| row:..| notfocus:a;b| needlock hold:<ms> phys> (through the real key path; hold:<ms> after a key holds it, up to 10 s; phys: through the key lock as physical keys; guards: the sequence stops when the focused row does not match, or the remote key lock is off, #190, #375)", cmd_keys);
+    console_register_dev("keys", "keys on|off (log every key) | keys log on|off (log raw key events) | keys send|press <up down left right enter esc tab bksp wait square triangle cross circle cloud diamond text:..| focus:..| row:..| notfocus:a;b| needlock hold:<ms> phys> (through the real key path; hold:<ms> after a key holds it, up to 10 s; phys: through the key lock as physical keys; guards: the sequence stops when the focused row does not match, or the remote key lock is off, #190, #375; a remote Enter on a hand-only dialog, and Enter, Left or Right on a dialog or the radio pages that transmit without the bench console scope, stops it too, #377)", cmd_keys);
     ui_probe_init();
     ui_remote_start();
     ui_check_start();

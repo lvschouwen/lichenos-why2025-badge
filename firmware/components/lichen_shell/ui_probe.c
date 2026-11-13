@@ -75,6 +75,11 @@ typedef struct {
     size_t       n_held;
     char         focus[LINE_CHARS]; // the focus a failed guard found
     char         text[CONSOLE_WIFI_CMD_MAX]; // the sequence as sent: the guards' texts are read from it
+    char const  *who;                        // "keys send" or "ui answer", for the replies
+    bool         answer;                     // fw ui answer yes: every Enter needs the dialog below still open
+    uint32_t     answer_gen;
+    char         answer_label[SHELL_DIALOG_LABEL_MAX];
+    char         refused[192];               // why the remote policy stopped the sequence (#377); "" = it did not
 } sequence_t;
 
 // The TCA8418 code of a sequence key and the Shift it needs; 0 when no key types it
@@ -180,7 +185,13 @@ static bool key_step(sequence_t *seq) {
     if (seq->next >= seq->n) {
         return true; // only guards were left
     }
-    uint32_t key = seq->keys[seq->next++];
+    uint32_t key = seq->keys[seq->next];
+    uint8_t  shift_code;
+    if (key != UI_KEY_WAIT && !ui_answer_key_ok(code_of(key, &shift_code), seq->answer ? seq->answer_label : NULL,
+                                                seq->answer_gen, seq->refused, sizeof(seq->refused))) {
+        return false; // the remote policy (#377): this key and the rest stay up
+    }
+    seq->next++;
     if (key == UI_KEY_WAIT) {
         seq->next_at = lv_tick_get() + WAIT_MS;
         return true;
@@ -222,18 +233,23 @@ static void sequence_step(lv_timer_t *timer) {
     lv_timer_set_period(timer, ms_to_next(seq));
 }
 
-static void sequence_report(sequence_t const *seq) {
+// False (and says why) when the sequence did not go through whole
+static bool sequence_report(sequence_t const *seq) {
+    char const *who = seq->who;
     if (seq->dropped) { // first: a lost event may be what made a guard fail or left a key down
-        console_reply("keys send: %u key events dropped (keyboard queue full); %u of %u sent", (unsigned)seq->dropped,
+        console_reply("%s: %u key events dropped (keyboard queue full); %u of %u sent", who, (unsigned)seq->dropped,
                       (unsigned)seq->next, (unsigned)seq->n);
+    } else if (seq->refused[0]) {
+        console_reply("%s: %s; %u of %u sent", who, seq->refused, (unsigned)seq->next, (unsigned)seq->n);
     } else if (seq->failed) {
-        console_reply("keys send: guard %u failed: focus '%s'; %u of %u sent", (unsigned)seq->failed,
+        console_reply("%s: guard %u failed: focus '%s'; %u of %u sent", who, (unsigned)seq->failed,
                       seq->focus[0] ? seq->focus : "(none)", (unsigned)seq->next, (unsigned)seq->n);
     } else if (seq->lock_lost) {
-        console_reply("keys send: stopped, the key lock is off; %u of %u sent", (unsigned)seq->next, (unsigned)seq->n);
+        console_reply("%s: stopped, the key lock is off; %u of %u sent", who, (unsigned)seq->next, (unsigned)seq->n);
     } else {
-        console_reply("keys sent: %u", (unsigned)seq->n);
+        return true;
     }
+    return false;
 }
 
 // Reads phys and checks that a key types every key of the sequence; adds up the holds. False (and says so) when not.
@@ -247,32 +263,36 @@ static bool sequence_check(sequence_t *seq, uint32_t *hold_total) {
         } else if (UI_KEY_IS_HOLD(k)) {
             *hold_total += UI_KEY_HOLD_MS(k);
         } else if (ui_keys_is_key(k) && !code_of(k, &shift_code)) {
-            console_reply("keys send: no key types 0x%02x (key %u)", (unsigned)k, (unsigned)i + 1);
+            console_reply("%s: no key types 0x%02x (key %u)", seq->who, (unsigned)k, (unsigned)i + 1);
             return false;
         }
     }
     return true;
 }
 
-// "fw keys send <seq>" and "fw keys press <seq>" (shell.c's keys command hands it over)
-void ui_probe_send(char const *seq_text) {
+// Returns how many sequence entries went, -1 when it stopped (and said why)
+int ui_probe_run(char const *who, char const *seq_text, char const *answer_label, uint32_t answer_gen) {
     size_t      pos;
     uint32_t    hold_total;
     sequence_t *seq = lichen_alloc(lichen_sys_ctx_os(), sizeof(*seq), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!seq) {
-        console_reply("keys send: no memory");
-        return;
+        console_reply("%s: no memory", who);
+        return -1;
     }
+    seq->who    = who;
+    seq->answer = answer_label != NULL;
+    seq->answer_gen = answer_gen;
+    snprintf(seq->answer_label, sizeof(seq->answer_label), "%s", answer_label ? answer_label : "");
     snprintf(seq->text, sizeof(seq->text), "%s", seq_text);
     seq->n = ui_keys_parse(seq->text, seq->keys, MAX_KEYS, &pos);
     if (seq->n == UI_KEYS_ERR) {
-        console_reply("keys send: not understood at offset %u", (unsigned)pos);
+        console_reply("%s: not understood at offset %u", who, (unsigned)pos);
         lichen_free(lichen_sys_ctx_os(), seq);
-        return;
+        return -1;
     }
     if (!sequence_check(seq, &hold_total)) {
         lichen_free(lichen_sys_ctx_os(), seq);
-        return;
+        return -1;
     }
     seq->locked = ui_remote_locked();
     seq->waiter = xTaskGetCurrentTaskHandle();
@@ -282,18 +302,27 @@ void ui_probe_send(char const *seq_text) {
     lv_timer_t *timer = lv_timer_create(sequence_step, 1, seq);
     lichen_sys_ui_unlock();
     if (!timer) {
-        console_reply("keys send: no timer");
+        console_reply("%s: no timer", who);
         lichen_free(lichen_sys_ctx_os(), seq);
-        return;
+        return -1;
     }
     uint32_t total_ms = (uint32_t)(seq->n + 2) * (KEY_GAP_MS + WAIT_MS) + hold_total;
     if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(total_ms)) == 0) {
         // Not finished (LVGL stuck?): the timer still owns seq, so leave it be rather than free it under the timer
-        console_reply("keys send: timed out");
-        return;
+        console_reply("%s: timed out", who);
+        return -1;
     }
-    sequence_report(seq);
+    int sent = sequence_report(seq) ? (int)seq->n : -1;
     lichen_free(lichen_sys_ctx_os(), seq);
+    return sent;
+}
+
+// "fw keys send <seq>" and "fw keys press <seq>" (shell.c's keys command hands it over)
+void ui_probe_send(char const *seq_text) {
+    int sent = ui_probe_run("keys send", seq_text, NULL, 0);
+    if (sent >= 0) {
+        console_reply("keys sent: %d", sent);
+    }
 }
 
 static bool visible(lv_obj_t *obj) {
@@ -744,6 +773,10 @@ static void cmd_ui(char const *args) {
         ui_remote_lock_cmd(rest);
         return;
     }
+    if ((rest = sub_args(args, "answer"))) {
+        ui_answer_cmd(rest); // a dialog by its remote policy (#377)
+        return;
+    }
     if ((rest = sub_args(args, "open"))) {
         ui_remote_open_cmd(rest);
         settle();
@@ -776,5 +809,5 @@ static void cmd_ui(char const *args) {
 
 void ui_probe_init(void) {
     card_overlay_init();
-    console_register("ui", "ui [perf [reset | bench [n]] | overflow [-v] | lock [on [s] | off] | card [test|white|grey|black|off] | open <app> | lockcheck [reset]] (lockcheck: LVGL calls made without the LVGL lock, #225; lock: physical keys off until off, s seconds (default 60, max 600) after the last command, or Esc held 3 s; open: an app as from its home tile, or home; #190. overflow: text cut off, off the screen or under the hint/status bar, #133; -v: the scroll geometry of each hit; screen ids on the stack, the focused row, every visible label; card: the bench test card over the screen, off after 60 s, #352; perf: frame timing, #93)", cmd_ui);
+    console_register_dev("ui", "ui [perf [reset | bench [n]] | overflow [-v] | answer [yes <confirm_label> | no] | lock [on [s] | off] | card [test|white|grey|black|off] | open <app> | lockcheck [reset]] (answer: the open dialog and whether a remote Enter may answer it; yes confirms it when its confirm label matches, once 1.1 s old; no sends Esc; #377. lockcheck: LVGL calls made without the LVGL lock, #225; lock: physical keys off until off, s seconds (default 60, max 600) after the last command, or Esc held 3 s; open: an app as from its home tile, or home; #190. overflow: text cut off, off the screen or under the hint/status bar, #133; -v: the scroll geometry of each hit; screen ids on the stack, the focused row, every visible label; card: the bench test card over the screen, off after 60 s, #352; perf: frame timing, #93)", cmd_ui);
 }
