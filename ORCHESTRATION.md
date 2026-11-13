@@ -7,7 +7,7 @@ Plan, implement, test, review, bench and deliver seven epics through dependency-
 #216 platform and architecture, #262 memory and performance, #381 bench tooling, #392 MeshCore, #393 UI and apps, #394 hardware and power, #395 security.
 
 ## Phase
-- **Current (2026-11-13, night):** waves A, B and C CLOSED. Wave D: #288, #411, #412 merged and pushed (main 580555a0, not flashed); #409 has its review fixes in progress in wt-2.
+- **Current (2026-11-13, night):** waves A, B and C CLOSED. Wave D: all four changes (#288, #411, #412, #409) merged and pushed; NOT flashed, NOT benched. Next step: flash wave D and bench it.
 - Planning finished 2026-11-13. Plans: `orchestration/plans/` (`consolidated.md` is the program plan).
 
 ## Process (owner, 2026-11-13)
@@ -57,9 +57,9 @@ Environment: default subagent model Sonnet, at most 6 concurrent, spawn depth 1.
 | D | #288 app secrets + one-time password move; #411 Wi-Fi trial rule; #412 status poll timing; #409 `fw soak` | not flashed yet | see "Wave D state" |
 
 ### Wave D state (resume here)
-1. #288, #411, #412 are merged, checked (239 host tests) and pushed. Their bench steps are in the last comment on each issue.
-2. #409 `fw soak`: branch `feat/409-fw-soak-line` in wt-2. The first commit was reviewed (Opus): merge after documentation fixes (format contract: boot counter and reset-reason rules; comments; two low items from #410). A fix commit was requested; check `git -C .claude/worktrees/wt-2 log --oneline -3` and `check-wt-2-409b.log`. If the fix commit is there with a green check: one quick delta review (documentation and a buffer size), then merge with `orchestration/tools/merge-one.sh wt-2 feat/409-fw-soak-line 409`.
-3. Then: `./firmware/build.sh reconfigure build` (the label must equal HEAD), flash, and a bench agent with a script modelled on `orchestration/bench/bench-wave-C.md`. Wave D's script must cover: the #288 lines (one "app secrets: N moved" log line, gone after a reboot; the reset preview count), the #411 normal path and `fw slot other`, the #412 start with `fw mesh airlog`, `fw soak` three times plus a restart (boot +1), and a block of 10-15 older unproven issues whose remote steps a read-only prep agent compiles first (start with the #392 MeshCore list in `orchestration/plans/epic-392.md`). The #411 rollback path ends on the OLD image: run it last and flash the wave image again afterwards.
+1. #288, #411, #412 and #409 are merged, checked and pushed. Their bench steps are in the last comment on each issue.
+2. No agent is running and no slot holds unmerged wave D work.
+3. Then: `./firmware/build.sh reconfigure build` (the label must equal HEAD), flash, and a bench agent with a script modelled on `orchestration/bench/bench-wave-C.md`. Wave D's script must cover: the #288 lines (one "app secrets: N moved" log line, gone after a reboot; the reset preview count), the #411 normal path and `fw slot other`, the #412 start with `fw mesh airlog`, `fw soak` three times (same `boot` and `up` on the three lines of one reply, `up` rising), a restart (`boot` +1, `rst=sw`), `fw crash test panic` (`boot` +1, `rstcrash=1`, then `fw crash clear`), MeshCore stopped (the mesh keys read -1), and a block of 10-15 older unproven issues whose remote steps a read-only prep agent compiles first (start with the #392 MeshCore list in `orchestration/plans/epic-392.md`). The #411 rollback path ends on the OLD image: run it last and flash the wave image again afterwards.
 4. This image carries the #288 password move: no other settings migration may join it, and it must never be the #116 encryption flash.
 
 After wave D, in dependency order: #289 on-air allow list (decided: a setting, USB-only), #229 capabilities, #232, #231 + #349, #233, #385; in parallel as slots allow: #403 OTA parser follow-ups (ota_server.c is at 1471 of 1500 nloc: split first), mesh hygiene (#209/#212/#213 remainder), #384 + #268 (need bench numbers), #380, the soak tooling on #407.
@@ -67,11 +67,11 @@ After wave D, in dependency order: #289 on-air allow list (decided: a setting, U
 Every merge had an independent review and a re-review of its fix commit. Reviews caught before merge: a journal wipe on a card read error (#368), a fail-open race and a regression in the hand-only start (#400), an uncapped decompression size (#298), two holes in the loosened advert-page rule (#405), a false "nothing transmitted" in the transmit log (#408), a migration record that stranded plaintext after a rollback (#288), two ways to keep a bad image (#411).
 
 ## Slots
-- Free: wt-1, wt-4, wt-5.
-- wt-2: #409 (see Wave D state). wt-3: #322 `feat/322-refresh-50hz`, held until the #254 verdict. wt-6: the unmerged #398 branch, no longer needed (#398 closed as already fixed); deleting an unmerged branch is the owner's call.
+- Free: wt-1, wt-2, wt-4, wt-5.
+- wt-3: #322 `feat/322-refresh-50hz`, held until the #254 verdict. wt-6: the unmerged #398 branch, no longer needed (#398 closed as already fixed); deleting an unmerged branch is the owner's call.
 
 ## Tools kept in the repo
-- `orchestration/tools/merge-one.sh <slot> <branch> <tag>`: merges ONE reviewed branch from the main checkout: records the branch's non-size baseline removals, rebases (main's size lines win, source and test lists are union-merged by `union.py`), re-applies the removals, fast-forwards, runs the full check and commits the new size lines. It stops on any other conflict, on a branch that adds baseline entries, and on a check that is not green. Set `SOAK_SCRATCH` to a scratch directory for its logs. After the last merge run `agent-check` once more for the stamp, then push in its own command.
+- `orchestration/tools/merge-one.sh <slot> <branch> <tag>`: merges ONE reviewed branch from the main checkout: records the branch's non-size baseline removals, rebases (main's size lines win, source and test lists are union-merged by `union.py`), re-applies the removals, fast-forwards, runs the full check and commits the new size lines. It stops on any other conflict (resolve that one by hand in the slot, finish the rebase, then run the script again), on a branch that adds baseline entries, and on a check that is not green. Set `SOAK_SCRATCH` to a scratch directory for its logs. After the last merge run `agent-check` once more for the stamp, then push in its own command.
 - `orchestration/bench/bench-wave-{A,B,C}.md`: the bench scripts that were run, as models. Their "Tools" section refers to a session scratchpad helper (`fw.sh`) that sends one console line over Wi-Fi and redacts addresses; recreate it in the new session's scratchpad (it is a ten-line wrapper around `tools/badge.sh fw`).
 
 ## Bench facts
