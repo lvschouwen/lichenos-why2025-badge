@@ -2,6 +2,7 @@
 #include "secure_wipe.h"
 #include "text_entry.h"
 #include "esp_log.h"
+#include "key_cause.h"
 #include "screen_ids.h"
 
 #include "lichen_ui.h"
@@ -24,6 +25,7 @@ static void *done_arg;
 static lv_obj_t   *ta;
 static lv_indev_t *tab_indev;
 static bool        fired;
+static bool        typed_remotely; // a change since the open that was no hand's (#405); cleared only by a new open
 static char        pending[MAX_CHARS + 1];
 
 // Runs from shell_back_then, once the entry screen is gone: then the owner hears (and may open a screen of its own)
@@ -33,6 +35,19 @@ static void finish(void *unused) {
         done_cb(pending, done_arg);
     }
     memset(pending, 0, sizeof(pending));
+}
+
+// The text's changes (a character, Backspace, Del) run while LVGL handles the key that made them, so its cause is that
+// key's. SYSTEM counts as remote too: no console command types into a field, and any that did is no hand.
+static void on_changed(lv_event_t *e) {
+    (void)e;
+    if (key_cause_now() != KEY_CAUSE_HAND) {
+        typed_remotely = true;
+    }
+}
+
+bool text_entry_typed_by_hand(void) {
+    return !typed_remotely;
 }
 
 static void on_ready(lv_event_t *e) {
@@ -111,6 +126,7 @@ static lv_obj_t *build(void) {
     lv_obj_set_style_bg_color(ta, lv_color_hex(THEME_AMBER), LV_PART_CURSOR);
     lv_obj_set_style_text_color(ta, lv_color_hex(THEME_BG), LV_PART_CURSOR);
     lv_obj_add_event_cb(ta, on_ready, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(ta, on_changed, LV_EVENT_VALUE_CHANGED, NULL); // after the initial text: that is no typing
     lv_obj_add_event_cb(ta, on_delete, LV_EVENT_DELETE, NULL);
 
     lv_obj_t *hint = lv_label_create(screen);
@@ -143,10 +159,11 @@ bool text_entry_open(char const *heading, char const *start, bool is_secret, siz
     }
     snprintf(title, sizeof(title), "%s", heading ? heading : "");
     snprintf(initial, sizeof(initial), "%s", start ? start : "");
-    secret   = is_secret;
-    max_len  = max > MAX_CHARS ? MAX_CHARS : max;
-    done_cb  = done;
-    done_arg = arg;
+    secret         = is_secret;
+    typed_remotely = false;
+    max_len        = max > MAX_CHARS ? MAX_CHARS : max;
+    done_cb        = done;
+    done_arg       = arg;
     shell_open(build, SCREEN_TEXT_ENTRY);
     return true;
 }

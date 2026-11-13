@@ -160,7 +160,7 @@ char const *advcfg_parse_coord(char const *text, bool is_lat, double *out) {
     return NULL;
 }
 
-char const *advcfg_coord_submit(char const *text, bool is_lat, bool hand_ok, double *out) {
+char const *advcfg_coord_submit(char const *text, bool is_lat, bool hand_ok, bool typed_by_hand, double *out) {
     double      v;
     char const *why = advcfg_parse_coord(text, is_lat, &v);
     if (why) {
@@ -169,8 +169,15 @@ char const *advcfg_coord_submit(char const *text, bool is_lat, bool hand_ok, dou
     if (!hand_ok) {
         return ADVCFG_COORD_HAND_ONLY;
     }
+    if (!typed_by_hand) {
+        return ADVCFG_COORD_TYPED_REMOTELY;
+    }
     *out = v;
     return NULL;
+}
+
+char const *advcfg_change_refusal(bool hand_ok) {
+    return hand_ok ? NULL : ADVCFG_CHANGE_HAND_ONLY;
 }
 
 void advcfg_coord_text(double lat, double lon, char *out, size_t cap) {

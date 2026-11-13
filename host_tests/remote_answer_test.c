@@ -279,8 +279,9 @@ static void test_send_pages(void) {
     CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
 }
 
-// #405: Advert & contacts, every row of meshcore_advert_settings.c's build() (its labels pinned here: a renamed row
-// fails this test) x every key kind x the bench scope. Typing goes as RKEY_OTHER; Esc is RKEY_OTHER too.
+// #405: Advert & contacts, every row of meshcore_advert_settings.c's build() (labels copied by hand: a renamed row is
+// not caught here, it only fails closed, hand-only, until it is listed) x every key kind x the bench scope. Typing goes
+// as RKEY_OTHER; Esc is RKEY_OTHER too.
 typedef struct {
     char const *row;
     rans_t      enter_off, enter_on; // Enter without and with the bench scope
@@ -302,7 +303,7 @@ static void test_advert_page(void) {
         {"Sensors", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
         {"Max hops", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
         {"Overwrite oldest when full", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
-        {"Send advert", RANS_NEEDS_SCOPE, RANS_OK}, // a one-off send, as on the radio pages
+        {"Send advert", RANS_ADVERT_HAND, RANS_ADVERT_HAND}, // no such row here: none is allowed by its label
         // Unknown, grown, partial or missing labels fail closed
         {"Latitude source", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
         {"Lat", RANS_ADVERT_HAND, RANS_ADVERT_HAND},
@@ -331,8 +332,8 @@ static void test_advert_page(void) {
             CHECK(remote_key_check(RKEY_SIDE, &v) == RANS_ADVERT_HAND);
         }
     }
-    CHECK(remote_advert_row("Latitude") == RADV_OPENS_FIELD && remote_advert_row("Longitude") == RADV_OPENS_FIELD);
-    CHECK(remote_advert_row("Send advert") == RADV_SENDS_ONCE && remote_advert_row(NULL) == RADV_CHANGES_SENDING);
+    CHECK(remote_advert_opens_field("Latitude") && remote_advert_opens_field("Longitude"));
+    CHECK(!remote_advert_opens_field("Send advert") && !remote_advert_opens_field(NULL) && !remote_advert_opens_field(""));
     // The rule is this page's only: elsewhere the rows are as before
     remote_view_t v = page(SCREEN_SETTINGS, true);
     v.focus         = "Send advert"; // MeshCore's settings: still refused outright

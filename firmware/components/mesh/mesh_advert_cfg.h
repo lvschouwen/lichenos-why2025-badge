@@ -58,11 +58,19 @@ bool advcfg_gap_ok(uint32_t last_s, uint32_t now_s);
 // NULL when text is a decimal number within range (lat +-90, lon +-180) stored in *out, else the reason
 char const *advcfg_parse_coord(char const *text, bool is_lat, double *out);
 // A coordinate submitted on Advert & contacts (#405): NULL when it is to be saved (in *out), else why not, nothing
-// saved. An invalid value is refused for its own reason whoever typed it (harmless, so a remote key may try one); a
-// valid one is saved only when hand_ok (key_cause_hand_only_ok: a hand or no key), else ADVCFG_COORD_HAND_ONLY: the
-// position goes out in later adverts, so a remote key never changes it.
-#define ADVCFG_COORD_HAND_ONLY "saving a position takes a hand (remote keys may not)"
-char const *advcfg_coord_submit(char const *text, bool is_lat, bool hand_ok, double *out);
+// saved. The position goes out in later adverts, so a remote key never changes it:
+//   - an invalid value is refused for its own reason whoever typed it (harmless, so a remote key may try one);
+//   - a valid one needs a hand's Enter (hand_ok: key_cause_hand_only_ok), else ADVCFG_COORD_HAND_ONLY;
+//   - and text a hand typed all of (typed_by_hand: text_entry_typed_by_hand), else ADVCFG_COORD_TYPED_REMOTELY: a
+//     value a remote key typed and left open is not saved by the owner's next Enter.
+#define ADVCFG_COORD_HAND_ONLY      "saving a position takes a hand (remote keys may not)"
+#define ADVCFG_COORD_TYPED_REMOTELY "typed remotely: retype it by hand"
+char const *advcfg_coord_submit(char const *text, bool is_lat, bool hand_ok, bool typed_by_hand, double *out);
+// Any change on Advert & contacts (interval, flood, location, sharing, auto-add; #405): NULL when hand_ok
+// (key_cause_hand_only_ok of the key that asked), else ADVCFG_CHANGE_HAND_ONLY. The page's own lock: the remote key
+// rule reads the focus ahead of LVGL, so a key can land on another row than the one it was judged on.
+#define ADVCFG_CHANGE_HAND_ONLY "changing this takes a hand (remote keys may not)"
+char const *advcfg_change_refusal(bool hand_ok);
 // Both coordinates, "52.370200 4.895200"
 void advcfg_coord_text(double lat, double lon, char *out, size_t cap);
 // Sharing the location needs one: (0, 0) is "not set" (a node at the null island would be a default, not a place)

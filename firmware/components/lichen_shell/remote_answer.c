@@ -78,12 +78,12 @@ static bool any_send_row(char const *focus) {
 }
 
 // Advert & contacts (SCREEN_ADVERT, #405): the rows a remote Enter may take there. Latitude and Longitude only open a
-// text field (saving what is typed in it is hand-only: meshcore_advert_settings.c asks the key's cause as it saves);
-// a one-off "Send advert" row would go on air once, as the radio pages do. Exact labels, so a row that is renamed or
-// grows ("Latitude source") is hand-only until it is listed here: every other row, known or new, changes what the
-// badge sends on its own later (the interval, the flood mode, the location shared, who is added).
-static char const *const ADVERT_OPEN_ROWS[]   = {"Latitude", "Longitude"};
-static char const *const ADVERT_SCOPED_ROWS[] = {"Send advert"};
+// text field (saving what is typed in it is hand-only: meshcore_advert_settings.c asks the key's cause as it saves).
+// Exact labels, so a row that is renamed or grows ("Latitude source") is hand-only until it is listed here: every
+// other row, known or new, changes what the badge sends on its own later (the interval, the flood mode, the location
+// shared, who is added). The page refuses an injected key's change itself too: this rule reads the focus a key or two
+// ahead of LVGL, so it is a convenience (a clear reply), not the lock.
+static char const *const ADVERT_OPEN_ROWS[] = {"Latitude", "Longitude"};
 
 static bool row_in(char const *focus, char const *const *rows, size_t n) {
     while (focus && (*focus == '*' || *focus == ' ')) {
@@ -97,22 +97,8 @@ static bool row_in(char const *focus, char const *const *rows, size_t n) {
     return false;
 }
 
-remote_advert_row_t remote_advert_row(char const *focus) {
-    if (row_in(focus, ADVERT_OPEN_ROWS, sizeof(ADVERT_OPEN_ROWS) / sizeof(ADVERT_OPEN_ROWS[0]))) {
-        return RADV_OPENS_FIELD;
-    }
-    if (row_in(focus, ADVERT_SCOPED_ROWS, sizeof(ADVERT_SCOPED_ROWS) / sizeof(ADVERT_SCOPED_ROWS[0]))) {
-        return RADV_SENDS_ONCE;
-    }
-    return RADV_CHANGES_SENDING; // no row read, or any other: fail closed
-}
-
-static rans_t advert_enter(remote_view_t const *v) {
-    switch (remote_advert_row(v->focus)) {
-        case RADV_OPENS_FIELD: return RANS_OK;
-        case RADV_SENDS_ONCE: return v->scope_set ? RANS_OK : RANS_NEEDS_SCOPE;
-        default: return RANS_ADVERT_HAND;
-    }
+bool remote_advert_opens_field(char const *focus) {
+    return row_in(focus, ADVERT_OPEN_ROWS, sizeof(ADVERT_OPEN_ROWS) / sizeof(ADVERT_OPEN_ROWS[0]));
 }
 
 static bool chat_screen(int id) {
@@ -140,7 +126,7 @@ static rans_t page_enter(remote_view_t const *v) {
         return chat_rule(v);
     }
     if (v->top_screen == SCREEN_ADVERT && !v->enter_starts) { // a start is refused below, whatever the row
-        return advert_enter(v);
+        return remote_advert_opens_field(v->focus) ? RANS_OK : RANS_ADVERT_HAND; // no row read: fail closed
     }
     if (send_page(v->top_screen) || v->enter_starts ||
         (v->top_screen == SCREEN_CONTACT && remote_contact_send_row(v->focus)) ||

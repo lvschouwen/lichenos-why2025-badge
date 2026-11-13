@@ -14,6 +14,11 @@
 // the key log can tell a secret field without looking at the password mode
 #define TEXT_ENTRY_SECRET_BIT 0 // lv_obj_set_user_flag() index
 
+// True when every change to the text since this entry opened came from a hand on the keyboard (#405): a character,
+// Backspace or Del from an injected key ("fw keys") or of no known cause marks it false until the next
+// text_entry_open, whatever is typed after. An owner whose saved value must be a hand's reads it in done.
+bool text_entry_typed_by_hand(void);
+
 // Returns false, and calls nothing, when an entry is already open (there is one at a time); true once it is opening.
 bool text_entry_open(char const *title, char const *initial, bool secret, size_t max,
                      void (*done)(char const *text, void *arg), void *arg);

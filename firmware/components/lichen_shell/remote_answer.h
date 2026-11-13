@@ -25,7 +25,8 @@
 //     Right on any row, and Enter on every row but these, are hand-only (RANS_ADVERT_HAND). Enter on Latitude or
 //     Longitude opens its text field (typing, Esc and an invalid value are harmless; saving a valid one is refused
 //     for an injected key by the page itself, which asks the key's cause: the Enter that saves lands on the text
-//     entry, not here). A one-off "Send advert" row there needs the bench console scope (remote_advert_row).
+//     entry, not here). The page also refuses an injected key's change itself (change_start), as this rule reads
+//     the focus ahead of LVGL; and a value typed by a remote key is never saved, even on a hand's Enter.
 //   - Esc and every other key always go: they only move or go back.
 //   - Enter, Left and Right are never held (hold:): LVGL clicks on the release, so a dialog that opened during the hold
 //     would take a key checked before it. (The stepper looks again right before a tap's release; that only notices a
@@ -52,12 +53,6 @@ typedef enum {
     RANS_ADVERT_HAND,  // Advert & contacts: a row that changes what the badge sends later (interval, flood, location)
 } rans_t;
 
-// What a remote Enter on an Advert & contacts row does (by the row's exact label, "* " of a checked row ignored)
-typedef enum {
-    RADV_CHANGES_SENDING, // hand-only: every row not listed below, and no row read
-    RADV_OPENS_FIELD,     // Latitude, Longitude: opens a text field
-    RADV_SENDS_ONCE,      // Send advert: one advert now, under the bench console scope
-} remote_advert_row_t;
 
 typedef struct {
     rdlg_t               dialog;
@@ -86,8 +81,9 @@ bool     remote_holds_ok(uint32_t const *keys, size_t n, uint8_t (*code_of)(uint
 rans_t   remote_key_check(rkey_t key, remote_view_t const *v);
 // Is focus (the row label "fw ui" reports) a contact page row whose Enter goes on air with no dialog?
 bool     remote_contact_send_row(char const *focus);
-// The Advert & contacts row rule for focus (what "fw ui" reports; NULL or "" is no row: hand-only)
-remote_advert_row_t remote_advert_row(char const *focus);
+// Is focus (what "fw ui" reports) an Advert & contacts row whose Enter only opens a text field (Latitude, Longitude;
+// the exact label, a checked row's "* " ignored)? NULL or "" is no row: false, hand-only.
+bool     remote_advert_opens_field(char const *focus);
 // Is screen_id one of the badge's own radio pages (no dialog: Enter, Left and Right there need the bench scope)?
 bool     remote_radio_page(int screen_id);
 // "yes <label> [#<gen>]" (the text after "yes"): the label (spaces inside kept, the ends trimmed) and the open number when

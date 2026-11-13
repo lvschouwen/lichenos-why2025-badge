@@ -40,10 +40,7 @@ static void why_text(rans_t r, remote_view_t const *v, bool page, char *why, siz
     switch (r) {
         case RANS_HAND_ONLY: snprintf(why, cap, "dialog '%s' is hand-only", v->label); break;
         case RANS_NEEDS_SCOPE:
-            if (page && !remote_radio_page(v->top_screen)) {
-                snprintf(why, cap, "this row (screen %d) sends an advert now: only under the bench console scope (" SCOPE_HOW
-                         ")", v->top_screen);
-            } else if (page) {
+            if (page) {
                 snprintf(why, cap, "the badge's radio page (screen %d) only under the bench console scope (" SCOPE_HOW ")",
                          v->top_screen);
             } else {

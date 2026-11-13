@@ -460,6 +460,7 @@ test_card_create	-	unspecified	test_card.h
 test_card_set_hooks	-	unspecified	test_card.h
 test_card_set_mode	-	unspecified	test_card.h
 text_entry_open	-	unspecified	text_entry.h
+text_entry_typed_by_hand	-	unspecified	text_entry.h
 tile_cell_size	-	unspecified	tile_order.h
 tile_order_encode	-	unspecified	tile_order.h
 tile_order_is_default	-	unspecified	tile_order.h

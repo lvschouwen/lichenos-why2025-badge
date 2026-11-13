@@ -140,7 +140,16 @@ static void change_task(void *arg) {
     }
 }
 
+// Every change on this page comes here (each row's Enter, the coordinates' save): an injected key's is refused here,
+// whatever row the remote key rule judged it on (#405)
 static void change_start(change_t const *what) {
+    key_cause_t cause = key_cause_now();
+    char const *no    = advcfg_change_refusal(key_cause_hand_only_ok(cause));
+    if (no) {
+        ESP_LOGW(TAG, "%s: advert change %d refused: %s", key_cause_name(cause), (int)what->kind, no);
+        set_note(no, true);
+        return;
+    }
     if (busy) {
         set_note(mc_busy_note(), true);
         return;
@@ -180,16 +189,17 @@ static void toggle_manual(void *arg) {
 }
 
 // The text entry's Enter reaches here through shell_back_then, a deferred UI call that runs under the cause of the key
-// that queued it (#400): so this asks whose Enter it was, whichever way the entry was opened or submitted (#405)
+// that queued it (#400): so this asks whose Enter it was, whichever way the entry was opened or submitted, and whether
+// a remote key typed in the field (#405)
 static void on_coord(char const *text, void *arg) {
     bool              is_lat = arg != NULL;
     mesh_advert_cfg_t c;
     double            v;
     key_cause_t       cause = key_cause_now();
-    char const       *why   = advcfg_coord_submit(text, is_lat, key_cause_hand_only_ok(cause), &v);
+    char const *why = advcfg_coord_submit(text, is_lat, key_cause_hand_only_ok(cause), text_entry_typed_by_hand(), &v);
     if (why) {
-        if (strcmp(why, ADVCFG_COORD_HAND_ONLY) == 0) {
-            ESP_LOGW(TAG, "%s: %s; position unchanged", key_cause_name(cause), why); // the console's reply
+        if (strcmp(why, ADVCFG_COORD_HAND_ONLY) == 0 || strcmp(why, ADVCFG_COORD_TYPED_REMOTELY) == 0) {
+            ESP_LOGW(TAG, "%s Enter: %s; position unchanged", key_cause_name(cause), why); // the console's reply
         }
         set_loc_note(why);
         return;

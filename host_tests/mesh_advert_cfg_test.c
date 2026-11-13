@@ -113,27 +113,39 @@ static advcfg_autoadd_t aa(bool on, uint8_t types, bool ow, uint8_t hops) {
 }
 
 // #405: the save gate of a submitted coordinate. An invalid value is refused for its own reason whoever typed it (a
-// remote key may try one); a valid one is saved only for a hand (or no key), never for an injected key
+// remote key may try one); a valid one is saved only on a hand's Enter (or no key's) over text a hand typed all of
 static void test_coord_submit(void) {
     double v = 7;
-    CHECK(advcfg_coord_submit("52.3702", true, true, &v) == NULL && v > 52.37 && v < 52.371);
-    CHECK(advcfg_coord_submit("4.8952", false, true, &v) == NULL && v > 4.89 && v < 4.9);
+    CHECK(advcfg_coord_submit("52.3702", true, true, true, &v) == NULL && v > 52.37 && v < 52.371);
+    CHECK(advcfg_coord_submit("4.8952", false, true, true, &v) == NULL && v > 4.89 && v < 4.9);
     v = 7;
-    char const *why = advcfg_coord_submit("52.3702", true, false, &v);
-    CHECK(why && strcmp(why, ADVCFG_COORD_HAND_ONLY) == 0 && v == 7); // remote: refused, nothing stored
-    why = advcfg_coord_submit("4.8952", false, false, &v);
-    CHECK(why && strcmp(why, ADVCFG_COORD_HAND_ONLY) == 0 && v == 7);
+    char const *why;
+    for (int typed_by_hand = 0; typed_by_hand < 2; typed_by_hand++) { // an injected Enter: refused either way
+        why = advcfg_coord_submit("52.3702", true, false, typed_by_hand, &v);
+        CHECK(why && strcmp(why, ADVCFG_COORD_HAND_ONLY) == 0 && v == 7);
+        why = advcfg_coord_submit("4.8952", false, false, typed_by_hand, &v);
+        CHECK(why && strcmp(why, ADVCFG_COORD_HAND_ONLY) == 0 && v == 7);
+    }
+    // A hand's Enter over a value a remote key typed (and left open for the owner's next Enter): refused
+    why = advcfg_coord_submit("52.3702", true, true, false, &v);
+    CHECK(why && strcmp(why, ADVCFG_COORD_TYPED_REMOTELY) == 0 && v == 7);
+    why = advcfg_coord_submit("4.8952", false, true, false, &v);
+    CHECK(why && strcmp(why, ADVCFG_COORD_TYPED_REMOTELY) == 0 && v == 7);
     char const *bad[] = {"95", "-91", "abc", "", "52.3N", "nan"};
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
-        for (int hand = 0; hand < 2; hand++) {
-            why = advcfg_coord_submit(bad[i], true, hand, &v);
-            CHECK(why && strcmp(why, ADVCFG_COORD_HAND_ONLY) != 0 && v == 7); // its own reason, for both
+        for (int k = 0; k < 4; k++) { // its own reason, for every origin of the Enter and the text
+            why = advcfg_coord_submit(bad[i], true, k & 1, (k & 2) != 0, &v);
+            CHECK(why && strcmp(why, ADVCFG_COORD_HAND_ONLY) != 0 && strcmp(why, ADVCFG_COORD_TYPED_REMOTELY) != 0 &&
+                  v == 7);
         }
     }
-    why = advcfg_coord_submit("200", false, false, &v);
+    why = advcfg_coord_submit("200", false, false, false, &v);
     CHECK(why && strcmp(why, "longitude is -180 to 180") == 0 && v == 7);
-    why = advcfg_coord_submit("95", true, false, &v);
+    why = advcfg_coord_submit("95", true, false, false, &v);
     CHECK(why && strcmp(why, "latitude is -90 to 90") == 0);
+    // The page's lock on every change (interval, flood, sharing, auto-add, the position): a hand's or none
+    CHECK(advcfg_change_refusal(true) == NULL);
+    CHECK(advcfg_change_refusal(false) && strcmp(advcfg_change_refusal(false), ADVCFG_CHANGE_HAND_ONLY) == 0);
 }
 
 static void test_autoadd_codec(void) {
