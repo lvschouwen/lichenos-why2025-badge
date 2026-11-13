@@ -5,11 +5,12 @@
 #include <stdint.h>
 #include <string.h>
 
-// MeshCore's directory on /storage (meshcore_app_record.h, shared/arduino_shim/SPIFFS.h) and what in it is secret:
-// identity/_main.id (+ ".id.new" while a save is in flight, IdentityStore.cpp) holds the private key, channels2 the
-// channel keys, new_prefs (and the older prefs.json) may hold a Wi-Fi password (NodePrefs.wifi_pwd)
-#define MESHCORE_DIR "meshcore"
-static char const *const MESHCORE_SECRET[] = {"identity", "channels2", "new_prefs", "prefs.json"};
+// MeshCore's secret names (it keeps them in /storage/meshcore, meshcore_app_record.h), refused at any depth so a copy on
+// the card is refused too: identity/_main.id (+ ".id.new" while a save is in flight, IdentityStore.cpp) holds the
+// private key, channels2 the channel keys, new_prefs and prefs.json (DataStore.cpp) and node_prefs / com_prefs (the
+// other MeshCore roles' prefs) may hold a password (NodePrefs.wifi_pwd), s_contacts a room server's client secrets
+static char const *const MESHCORE_SECRET[] = {"identity",   "channels2", "new_prefs", "prefs.json",
+                                               "node_prefs", "com_prefs", "s_contacts"};
 // Anywhere: the update token (ota_server.c TOKEN_FILE, ota_token.txt) and anything named like it
 static char const *const DENY_PREFIX[] = {"ota_token", "nvs"}; // nvs: a partition dump (docs/nvs-encryption.md)
 static char const *const DENY_SUFFIX[] = {".key", ".pem", ".id", ".id.new"};
@@ -43,9 +44,10 @@ static bool ci_suffix(comp_t c, char const *s) {
 }
 
 // Bytes no name of ours holds, which some file system reads as something else: FatFs takes '\\' as a separator and
-// "0:" as a drive, '*' and '?' are wildcards to some tools, and a control byte could rewrite the console line
+// "0:" as a drive, '*' and '?' are wildcards to some tools, a control byte could rewrite the console line, and FatFs
+// folds the case of non-ASCII names by its own Unicode tables, which could map one onto a denied name
 static bool bad_byte(unsigned char c) {
-    return c < 0x20 || c == 0x7f || strchr("\\:*?\"<>|", c) != NULL;
+    return c < 0x20 || c >= 0x7f || strchr("\\:*?\"<>|", c) != NULL;
 }
 
 // ".", "..", and what FAT quietly turns into another name: trailing dots and spaces are dropped ("ota_token.txt."),
@@ -73,13 +75,13 @@ static bool in_list(comp_t c, char const *const *list, size_t n, bool (*match)(c
 
 #define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
-// What the checks need of a path: its first three components, its last, how many, and whether any is named like a
-// denied prefix (kept small: this runs on the 4 KB console task)
+// What the checks need of a path: its first component, its last, how many, and whether any is a denied name (kept
+// small: this runs on the 4 KB console task)
 typedef struct {
-    comp_t head[3];
+    comp_t first;
     comp_t last;
     size_t count;
-    bool   prefix_denied;
+    bool   name_denied;
 } parsed_t;
 
 // false for anything not plain: "//", a trailing '/', a dot trick, a bad byte
@@ -99,12 +101,13 @@ static bool split(char const *path, parsed_t *out) {
         if (bad_comp(c)) {
             return false;
         }
-        if (out->count < COUNT(out->head)) {
-            out->head[out->count] = c;
+        if (out->count++ == 0) {
+            out->first = c;
         }
-        out->count++;
-        out->last           = c;
-        out->prefix_denied |= in_list(c, DENY_PREFIX, COUNT(DENY_PREFIX), ci_prefix); // a directory named so too
+        out->last = c;
+        // a directory named so too: nothing below it is read
+        out->name_denied |= in_list(c, DENY_PREFIX, COUNT(DENY_PREFIX), ci_prefix) ||
+                            in_list(c, MESHCORE_SECRET, COUNT(MESHCORE_SECRET), ci_eq);
         if (!end) {
             return true;
         }
@@ -113,11 +116,7 @@ static bool split(char const *path, parsed_t *out) {
 }
 
 static bool denied(parsed_t const *p) {
-    if (p->prefix_denied || in_list(p->last, DENY_SUFFIX, COUNT(DENY_SUFFIX), ci_suffix)) {
-        return true;
-    }
-    return p->count >= 3 && ci_eq(p->head[0], "storage") && ci_eq(p->head[1], MESHCORE_DIR) &&
-           in_list(p->head[2], MESHCORE_SECRET, COUNT(MESHCORE_SECRET), ci_eq);
+    return p->name_denied || in_list(p->last, DENY_SUFFIX, COUNT(DENY_SUFFIX), ci_suffix);
 }
 
 static bool exact(comp_t c, char const *s) {
@@ -139,7 +138,7 @@ sd_path_verdict_t sd_path_check(char const *path) {
         return SD_PATH_DENIED; // before the roots: the deny list wins
     }
     // The VFS matches mount points exactly, so "/SD" is not the card; a volume root is a directory, never a file
-    bool root = exact(p.head[0], "sd") || exact(p.head[0], "storage");
+    bool root = exact(p.first, "sd") || exact(p.first, "storage");
     return root && p.count >= 2 ? SD_PATH_OK : SD_PATH_ROOT;
 }
 

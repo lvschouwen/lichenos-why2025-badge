@@ -38,7 +38,7 @@ static allow_t const allowed[] = {
     {"whatsnew", NULL}, {"home", NULL},  {"airplane", NULL}, {"msgs", NULL},   {"channels", NULL}, {"advert", NULL},
     {"contacts", "-"}, {"tasks", NULL}, {"stress", NULL}, {"storage", NULL},
     {"mesh", "- link out chats hist"},
-    {"sd", "- status mount unmount test"},
+    {"sd", "- status mount unmount test cat"},
     {"crash", "- dump"},
     {"ota", "- on off auto"},
     {"lora", "- on off log raw"},

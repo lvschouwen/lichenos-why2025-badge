@@ -2,12 +2,14 @@
 #include "sd_cat_fmt.h"
 #include "sd_path_policy.h"
 #include "sdcard.h"
+#include "secure_wipe.h"
 
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "fw_console.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -29,6 +31,9 @@ static void reply_status(void) {
     console_reply("%s", line);
 }
 
+// "sd test" and "sd cat" are debug commands (#378): with LICHEN_DEV_COMMANDS off (the release build) neither their
+// code nor their usage is in the image, so a release "fw sd" knows only status, mount, unmount and format
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
 static uint8_t pattern(size_t i) {
     return (uint8_t)(i * 31u + 7u + (i >> 9));
 }
@@ -134,6 +139,25 @@ static void cmd_test(void) {
 
 // ---- cat (#378) ---------------------------------------------------------------------------------------------------
 
+// Up to len bytes at off of fd; plain read(), so no stdio buffer is left holding the file's bytes. -1 and errno on error.
+static ssize_t read_at(int fd, uint32_t off, uint8_t *buf, size_t len) {
+    if (lseek(fd, (off_t)off, SEEK_SET) == (off_t)-1) {
+        return -1;
+    }
+    size_t got = 0;
+    while (got < len) {
+        ssize_t n = read(fd, buf + got, len - got);
+        if (n < 0) {
+            return -1;
+        }
+        if (n == 0) {
+            break; // the end of the file
+        }
+        got += (size_t)n;
+    }
+    return (ssize_t)got;
+}
+
 // Reads up to a->len bytes at a->offset of a regular file into buf; *got the bytes read, *size the file's size. NULL
 // on success, else what went wrong (errno in *err). The caller holds the card for a path on /sd.
 static char const *cat_read(sd_cat_args_t const *a, uint8_t *buf, size_t *got, long *size, int *err) {
@@ -143,29 +167,21 @@ static char const *cat_read(sd_cat_args_t const *a, uint8_t *buf, size_t *got, l
         return "not found";
     }
     if (!S_ISREG(st.st_mode)) {
-        *err = 0;
         return "not a regular file";
     }
-    *size   = (long)st.st_size;
-    FILE *f = fopen(a->path, "rb");
-    if (!f) {
+    *size  = (long)st.st_size;
+    int fd = open(a->path, O_RDONLY);
+    if (fd < 0) {
         *err = errno;
         return "can't open";
     }
-    char const *why = NULL;
-    *got            = 0;
-    if (fseek(f, (long)a->offset, SEEK_SET) != 0) {
-        *err = errno;
-        why  = "can't seek";
-    } else {
-        *got = fread(buf, 1, a->len, f);
-        if (*got < a->len && ferror(f)) {
-            *err = errno ? errno : EIO;
-            why  = "read failed";
-        }
+    ssize_t n = read_at(fd, a->offset, buf, a->len);
+    if (n < 0) {
+        *err = errno ? errno : EIO;
     }
-    fclose(f);
-    return why;
+    close(fd);
+    *got = n < 0 ? 0 : (size_t)n;
+    return n < 0 ? "read failed" : NULL;
 }
 
 // The bytes go out through console_reply_private: to whoever asked, never into the log store (GET /log)
@@ -181,7 +197,7 @@ static void cat_print(sd_cat_args_t const *a, uint8_t const *buf, size_t got) {
         console_reply_private("%s", line);
         i += used;
     }
-    memset(line, 0, sizeof(line));
+    secure_wipe(line, sizeof(line));
 }
 
 static void cmd_cat(char const *args) {
@@ -203,11 +219,11 @@ static void cmd_cat(char const *args) {
         console_reply("sd cat: card not mounted (or busy)");
         return;
     }
-    uint8_t *buf = heap_caps_malloc(SD_CAT_MAX, MALLOC_CAP_SPIRAM);
-    size_t   got = 0;
-    long     size = 0;
-    int      err  = 0;
-    char const *why = buf ? cat_read(&a, buf, &got, &size, &err) : "out of memory";
+    uint8_t    *buf  = heap_caps_malloc(SD_CAT_MAX, MALLOC_CAP_SPIRAM);
+    size_t      got  = 0;
+    long        size = 0;
+    int         err  = 0;
+    char const *why  = buf ? cat_read(&a, buf, &got, &size, &err) : "out of memory";
     if (on_card) {
         sd_end(buf ? sd_io_from_errno(err) : SD_IO_NEUTRAL); // only a card error counts against the card
     }
@@ -218,10 +234,11 @@ static void cmd_cat(char const *args) {
         cat_print(&a, buf, got);
     }
     if (buf) {
-        memset(buf, 0, SD_CAT_MAX);
+        secure_wipe(buf, SD_CAT_MAX);
         heap_caps_free(buf);
     }
 }
+#endif // CONFIG_LICHEN_DEV_COMMANDS
 
 static void cmd_format(char const *word) {
     if (!sd_format_confirmed(word)) {
@@ -250,12 +267,19 @@ static void sub_unmount(char const *rest) {
     reply_status();
 }
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
 static void sub_test(char const *rest) {
     (void)rest;
     cmd_test();
 }
 
-#define SD_USAGE "sd [status | mount | unmount | test | cat [-x] <path> [offset [len]] | format " SD_FORMAT_CONFIRM "]"
+#define SD_DEV_SUBS " | test | cat [-x] <path> [offset [len]]"
+#define SD_DEV_NOTE "; test and cat are debug commands (fw dev)"
+#else
+#define SD_DEV_SUBS ""
+#define SD_DEV_NOTE ""
+#endif
+#define SD_USAGE "sd [status | mount | unmount" SD_DEV_SUBS " | format " SD_FORMAT_CONFIRM "]"
 
 // A table rather than an else-if chain (#378 pushed the chain past the nesting line). with_args: the word may be
 // followed by " ..." (cat, format), else it must stand alone.
@@ -264,9 +288,11 @@ static struct {
     bool        with_args;
     void (*fn)(char const *rest);
 } const SUBS[] = {
-    {"", false, sub_status},       {"status", false, sub_status}, {"mount", false, sub_mount},
-    {"unmount", false, sub_unmount}, {"test", false, sub_test},     {"cat", true, cmd_cat},
-    {"format", true, cmd_format},
+    {"", false, sub_status},         {"status", false, sub_status}, {"mount", false, sub_mount},
+    {"unmount", false, sub_unmount}, {"format", true, cmd_format},
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    {"test", false, sub_test},       {"cat", true, cmd_cat},
+#endif
 };
 
 static void cmd_sd(char const *args) {
@@ -285,5 +311,5 @@ static void cmd_sd(char const *args) {
 }
 
 void sd_console_register(void) {
-    console_register("sd", SD_USAGE " (the SD card at /sd, #60; test and cat need fw dev on)", cmd_sd);
+    console_register("sd", SD_USAGE " (the SD card at /sd, #60" SD_DEV_NOTE ")", cmd_sd);
 }

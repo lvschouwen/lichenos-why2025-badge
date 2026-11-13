@@ -86,6 +86,25 @@ static void identity_and_keys(void) {
     CHECK(V("/sd/nvs-plain.bin") == SD_PATH_DENIED); // docs/nvs-encryption.md's backup
     CHECK(V("/sd/NVS_backup.csv") == SD_PATH_DENIED);
     CHECK(V("/sd/keys.txt") == SD_PATH_OK); // only the named patterns
+    // MeshCore's secret names at any depth, as a directory too, whatever the case: copies on the card
+    char const *const copies[] = {"/sd/identity/x.bin",      "/sd/backup/IDENTITY/x",     "/sd/a/b/channels2",
+                                  "/sd/meshcore/new_prefs",  "/sd/old/Prefs.JSON",       "/sd/node_prefs",
+                                  "/sd/x/com_prefs",         "/sd/s_contacts",            "/storage/meshcore/s_contacts",
+                                  "/storage/meshcore/node_prefs", "/sd/channels2/readme.txt"};
+    for (size_t i = 0; i < sizeof(copies) / sizeof(copies[0]); i++) {
+        CHECK(V(copies[i]) == SD_PATH_DENIED);
+    }
+    CHECK(V("/sd/identity.txt") == SD_PATH_OK); // the name, not a prefix
+    CHECK(V("/sd/channels") == SD_PATH_OK);
+}
+
+// FatFs folds the case of non-ASCII names with its own tables: no byte >= 0x80 is let through (#378 review)
+static void non_ascii(void) {
+    CHECK(V("/sd/caf\xc3\xa9.txt") == SD_PATH_BAD);
+    CHECK(V("/storage/ota_to\xe2\x80\x8bken.txt") == SD_PATH_BAD); // a zero-width space
+    CHECK(V("/sd/\xc4\xb0" "dentity/x") == SD_PATH_BAD);               // a dotted capital I
+    CHECK(V("/sd/a\x7f") == SD_PATH_BAD);
+    CHECK(V("/sd/\x80") == SD_PATH_BAD);
 }
 
 static void long_names(void) {
@@ -158,6 +177,7 @@ int main(void) {
     traversal();
     token();
     identity_and_keys();
+    non_ascii();
     long_names();
     parse();
     lines();

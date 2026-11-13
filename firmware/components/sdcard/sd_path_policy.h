@@ -16,10 +16,11 @@ extern "C" {
 
 typedef enum {
     SD_PATH_OK,
-    SD_PATH_BAD,      // not absolute, or an empty, ".", ".." or dot-trick component, a control byte, '\\', ':', ...
+    SD_PATH_BAD,      // not absolute, or an empty, ".", ".." or dot-trick component, a control or non-ASCII byte, ':'...
     SD_PATH_ROOT,     // not below /sd or /storage (the volume roots themselves included)
     SD_PATH_TOO_LONG, // over SD_PATH_MAX
-    SD_PATH_DENIED,   // the deny list: the update token, the MeshCore identity and keys, key files, NVS backups
+    SD_PATH_DENIED,   // the deny list (any depth): the update token, MeshCore's identity, keys and prefs, key files, NVS
+                      // backups
 } sd_path_verdict_t;
 
 // The deny list wins over everything else. Case-insensitive, the way FAT matches names.

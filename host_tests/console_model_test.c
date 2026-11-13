@@ -51,6 +51,7 @@ static void test_public(void) {
     CHECK(!console_line_is_public("unknowncmd"));
     CHECK(!console_line_is_public("wifi scan password")); // keyword deny on top
     CHECK(!console_line_is_public("sd format YES")); // a confirm is typed each time
+    CHECK(console_line_is_public("sd cat /sd/lichen/settings.txt")); // #378: a path, no secret
     CHECK(!console_line_is_public("thermal test shutdown YES"));
     CHECK(console_line_is_public("thermal test warn"));
     CHECK(!console_line_is_public("wifi"" ""on YES"));

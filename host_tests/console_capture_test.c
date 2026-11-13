@@ -81,9 +81,9 @@ static void route(void) {
     pub = console_route(false, false);
     CHECK(pub.uart && pub.tap && !pub.capture);
     // A private line (#378, a file's contents): whoever asked sees it, the log store never
-    console_route_t priv = console_route_private(true);
-    CHECK(priv.uart && !priv.tap && priv.capture);
-    priv = console_route_private(false);
+    console_route_t priv = console_route_private(true); // Wi-Fi or the Console app: not the bench's serial log either
+    CHECK(!priv.uart && !priv.tap && priv.capture);
+    priv = console_route_private(false); // typed on the UART: that is who asked
     CHECK(priv.uart && !priv.tap && !priv.capture);
 }
 

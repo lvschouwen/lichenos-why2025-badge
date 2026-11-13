@@ -38,7 +38,7 @@ console_route_t console_route(bool secret, bool capturing) {
 }
 
 console_route_t console_route_private(bool capturing) {
-    return (console_route_t){.uart = true, .tap = false, .capture = capturing};
+    return (console_route_t){.uart = !capturing, .tap = false, .capture = capturing};
 }
 
 size_t console_line_fmt(char *out, size_t cap, char const *fmt, va_list ap, size_t *text_len) {
