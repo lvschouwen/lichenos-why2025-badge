@@ -422,6 +422,28 @@ static void cli_tag_secret(void) {
 
 // The status history's poll gives way to the person (#168 review): replaced while queued or sent, never while the pipe
 // has it; and it never replaces anything itself
+// An argument past the field is refused for every kind, never copied or left unterminated (#404)
+static void long_argument_every_kind(void) {
+    static rr_t rt;
+    for (int op = RR_LOGIN; op <= RR_TELEMETRY; op++) {
+        for (size_t len = RR_CMD_MAX + 1; len <= RR_CMD_MAX + 100; len += 100) {
+            char arg[RR_CMD_MAX + 101];
+            memset(arg, 'a', len);
+            arg[len] = 0;
+            rr_t *r = &rt;
+            rr_init(r);
+            char const *why = NULL;
+            uint32_t seq = rr_request(r, (rr_op_t)op, A, arg, 0, &why);
+            if (op == RR_STATUS) {
+                CHECK(seq != 0); // a status request takes no argument
+            } else if (len > RR_CMD_MAX) {
+                CHECK(seq == 0 && why);
+            }
+            CHECK(memchr(r->arg, 0, sizeof(r->arg)) != NULL);
+        }
+    }
+}
+
 static void background_gives_way(void) {
     rr_t        r;
     char const *why = NULL;
@@ -537,7 +559,7 @@ static uint32_t request_step(rr_t *r, mut_rng_t *g, uint32_t now, uint32_t h) {
 }
 
 // Pins rr_request_prepared's results and every field it writes over a long seeded script (#212); taken before the
-// split. A deliberate change to the request state machine changes it: print the new value and say why in the commit.
+// split; 0xc199ec64 until #404 (the 101-character argument for a telemetry request is now refused). A deliberate change to the request state machine changes it: print the new value and say why in the commit.
 static void request_pin(void) {
     rr_t      r;
     mut_rng_t g;
@@ -547,7 +569,7 @@ static void request_pin(void) {
     for (uint32_t i = 0; i < 20000; i++) {
         h = request_step(&r, &g, i * 500u, h);
     }
-    uint32_t const pinned = 0xc199ec64u;
+    uint32_t const pinned = 0x77a2e49fu;
     if (h != pinned) {
         printf("FAIL rr_request digest 0x%08x, pinned 0x%08x\n", (unsigned)h, (unsigned)pinned);
         failures++;
@@ -555,6 +577,7 @@ static void request_pin(void) {
 }
 
 int main(void) {
+    long_argument_every_kind();
     background_gives_way();
     login();
     login_refused_and_timeout();

@@ -70,8 +70,11 @@ static char const *refusal(rr_t const *r, rr_op_t op, char const *arg, rr_prep_t
     if (op == RR_LOGIN && *n > MF_PASSWORD_MAX) {
         return "the password is at most 15 characters";
     }
-    if (op == RR_CLI && (*n == 0 || *n > RR_CMD_MAX)) {
-        return *n ? "the command is too long" : "no command";
+    if (op == RR_CLI && *n == 0) {
+        return "no command";
+    }
+    if (*n > RR_CMD_MAX) { // every kind: r->arg holds RR_CMD_MAX characters and its NUL
+        return "the command is too long";
     }
     if (op == RR_CLI && p->cls == RS_CMD_FORBIDDEN) {
         return "erase is never sent from the badge (#117)"; // it wipes the repeater's file system
