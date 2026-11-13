@@ -4,7 +4,8 @@
 # console lines for the boot screen and "fw boot". factory_plan.c (factory_plan_test.c, #66) decides what a factory
 # reset erases and runs the boot combo's state; factory_reset.c erases it at boot and is "fw factory-reset". The
 # "fw boot fail" flag and the factory reset's error notices reach the settings and notify through what lichen_os binds
-# in start_nvs (boot_progress_bind_store, factory_reset_bind_notice, #245): no gate header here.
-idf_component_register(SRCS "boot_steps.c" "boot_text.c" "boot_progress.c" "log_tap.c" "log_clean.c" "factory_plan.c" "factory_reset.c"
+# in start_nvs (boot_progress_bind_store, factory_reset_bind_notice, #245): no gate header here. boot_keys.c
+# (boot_keys_test.c, #379) is the one-shot combo of "fw boot keys"; boot_keys_rtc.c keeps its flag in LP RAM.
+idf_component_register(SRCS "boot_steps.c" "boot_text.c" "boot_progress.c" "log_tap.c" "log_clean.c" "factory_plan.c" "factory_reset.c" "boot_keys.c" "boot_keys_rtc.c"
                        INCLUDE_DIRS "."
                        PRIV_REQUIRES fw_console freertos heap nvs_flash storage vfs esp_partition lichen_nvs psram_guard)

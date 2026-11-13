@@ -5,6 +5,7 @@
 #include "backlight.h"
 #include "lichen_sys_power.h"
 #include "board_i2c.h"
+#include "boot_keys_play.h"
 #include "boot_order.h"
 #include "boot_progress.h"
 #include "power_route.h"
@@ -718,6 +719,9 @@ static void start_backlight(boot_ctx_t *ctx) {
 }
 
 static void start_keyboard(boot_ctx_t *ctx) {
+    // "fw boot keys" (#379): cleared first, on every path, so a crash while the keys are held does not hold them again
+    // on every boot, and a boot without a screen or keyboard uses up the shot too
+    boot_keys_t armed = boot_keys_take_armed();
     if (!ctx->screen) {
         return;
     }
@@ -733,6 +737,9 @@ static void start_keyboard(boot_ctx_t *ctx) {
     keyboard_set_reset_hook(c6link_note_keyboard_reset); // the chip resets only with the C6 (#14)
     have_keyboard = true;
     factory_combo_start(); // Esc + Backspace held now: the settings-only reset for a badge whose UI is stuck
+    // After the combo's hook is in: the poll task (priority 4) handles an injected key at once, and a press sent
+    // before the hook was added would never reach the combo
+    boot_keys_play(armed);
 }
 
 // The sensors (#69) share the keyboard's bus: after it. Their own task initialises the chips (the BMI270's 8 KB config

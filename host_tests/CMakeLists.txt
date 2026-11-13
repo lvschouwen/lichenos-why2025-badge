@@ -2221,3 +2221,17 @@ add_executable(sd_path_policy_test
 target_include_directories(sd_path_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard)
 target_compile_options(sd_path_policy_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME sd_path_policy_test COMMAND sd_path_policy_test)
+
+# fw boot keys (#379): parse, the one-shot LP RAM flag, a bad magic ignored, and each plan against the #66 combo
+add_executable(boot_keys_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/boot_keys_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/boot_keys.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/factory_plan.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board/kbd_map.c
+)
+target_include_directories(boot_keys_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/board
+)
+target_compile_options(boot_keys_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME boot_keys_test COMMAND boot_keys_test)

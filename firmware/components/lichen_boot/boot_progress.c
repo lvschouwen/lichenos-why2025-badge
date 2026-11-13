@@ -1,5 +1,7 @@
 #include "boot_progress.h"
 
+#include "boot_keys.h"
+
 #include "fw_console.h"
 #include "fw_store.h"
 #include "log_tap.h"
@@ -81,6 +83,10 @@ char const *boot_progress_label(boot_step_t step) {
 }
 
 static void cmd_boot(char const *args) {
+    if (strncmp(args, "keys", 4) == 0 && (args[4] == '\0' || args[4] == ' ')) {
+        boot_keys_cmd(args + 4); // dev-gated there (#379)
+        return;
+    }
     if (strncmp(args, "fail ", 5) == 0) {
         for (int i = 0; i < BOOT_STEP_COUNT; i++) {
             if (boot_step_failable((boot_step_t)i) && strcasecmp(args + 5, boot_step_label((boot_step_t)i)) == 0) {
@@ -124,5 +130,5 @@ void boot_progress_start(void) {
     portENTER_CRITICAL(&lock);
     boot_steps_reset();
     portEXIT_CRITICAL(&lock);
-    console_register("boot", "boot [fail <step>] (start-up steps and the last log lines; fail marks a step failed on the next boot)", cmd_boot);
+    console_register("boot", "boot [fail <step> | keys <down|esc+bksp|none>] (start-up steps and the last log lines; fail marks a step failed on the next boot; keys holds a combo at the next software restart, once, developer mode)", cmd_boot);
 }
