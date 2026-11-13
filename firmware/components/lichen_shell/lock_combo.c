@@ -56,16 +56,3 @@ int lock_combo_percent(lock_combo_t const *c, uint32_t now) {
     uint32_t held = now - c->since;
     return held >= LOCK_HOLD_MS ? 100 : (int)(held * 100 / LOCK_HOLD_MS);
 }
-
-bool lock_combo_probe_key(lock_combo_t *c, uint32_t lv_key, uint32_t now) {
-    if (lv_key == 27) {
-        lock_combo_event(c, LOCK_KEY_A, true, now);
-        return true;
-    }
-    if (lv_key == 8) {
-        lock_combo_event(c, LOCK_KEY_B, true, now);
-        return true;
-    }
-    lock_combo_reset(c);
-    return false;
-}

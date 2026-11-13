@@ -3,6 +3,7 @@
 #include "console_cmd.h"
 #include "lichen_mem.h"
 #include "lichen_sys_app.h"
+#include "lichen_sys_keys.h"
 #include "esp_log.h"
 #include "lichen_sys_ui.h"
 #include "fw_console.h"
@@ -10,7 +11,6 @@
 #include "freertos/task.h"
 #include "lichen_ui.h"
 #include "nav.h"
-#include "raw_keys.h"
 #include "shell_parts.h"
 #include "ui_keys.h"
 #include "ui_overflow.h"
@@ -36,32 +36,6 @@ typedef struct {
     char    text[LINE_CHARS];
 } line_t;
 
-// LVGL context only
-static void deliver_key(uint32_t key) {
-    if (card_overlay_key(key)) {
-        return; // the test card (#352) is up: it takes the key
-    }
-    if (screen_idle_key()) {
-        return; // it woke the dark screen (#43), as a real key would
-    }
-    if (screen_lock_active()) {
-        screen_lock_probe_key(key); // the lock takes every key but feeds the unlock combo (#75, #112)
-        return;
-    }
-    lv_group_t *group = shell_top_group();
-    if (UI_KEY_IS_SHAPE(key)) {
-        shortcuts_key(UI_KEY_SHAPE_CODE(key), true, raw_keys_test_open()); // as the real key: the OS's, never LVGL's
-    } else if (key == LV_KEY_ESC) {
-        shell_esc(); // the shell's own Esc handling (it sees the indev's key, which this does not go through)
-    } else if (key == LV_KEY_NEXT) {
-        if (group) {
-            lv_group_focus_next(group);
-        }
-    } else if (group) {
-        lv_group_send_data(group, key);
-    }
-}
-
 static void describe_focus(lv_obj_t *foc, char *out, size_t cap);
 
 // What "fw ui" reports as the focus; "" for none. LVGL context.
@@ -74,42 +48,102 @@ static void current_focus(char *out, size_t cap) {
     }
 }
 
-// The key handlers (and what they build) run on the LVGL task, one key per timer tick: the console task's 4 KB stack
-// is too small for them. The console task waits for the end. A failed guard (#190) or the end of the remote key lock
-// the sequence started under stops it there: no later key is sent.
+// The steps run on the LVGL task from a timer (guards read the focus there); the console task waits for the end. Keys
+// go through the keyboard task's own path (#375), so the wake hook, the remote key gate (phys), the raw hooks (test
+// card, pocket lock, shortcuts, hold-to-exit) and the shell's key handler see them as they see the keyboard's. A failed
+// guard (#190) or the end of the remote key lock the sequence started under stops it there: no later key goes down,
+// and the held ones come up.
+#define MAX_HELD 8 // keys one sequence holds down at once
+
+typedef struct {
+    uint8_t  code, shift_code; // shift_code: the Shift held with it, 0 for none
+    uint32_t until;            // lv_tick_get() when it comes up
+} held_key_t;
+
 typedef struct {
     uint32_t     keys[MAX_KEYS];
     size_t       n, next;
     TaskHandle_t waiter;
     bool         locked;      // the remote key lock was on when the sequence started
     bool         lock_lost;   // ... and ended before it was through, or a needlock found it off
+    bool         physical;    // phys: through the remote key gate, as the keyboard's keys
     size_t       failed;      // the guard that failed, 1-based among the guards; 0 = none
     size_t       guards;
+    size_t       dropped;     // key events the keyboard's queue had no room for
+    uint32_t     next_at;     // lv_tick_get() when the next key may go down
+    held_key_t   held[MAX_HELD];
+    size_t       n_held;
     char         focus[LINE_CHARS]; // the focus a failed guard found
     char         text[CONSOLE_WIFI_CMD_MAX]; // the sequence as sent: the guards' texts are read from it
 } sequence_t;
 
-static void sequence_finish(lv_timer_t *timer, sequence_t *seq) {
-    screen_lock_probe_end();
-    xTaskNotifyGive(seq->waiter); // the last gap has passed: the screen has settled
-    lv_timer_delete(timer);
+// The TCA8418 code of a sequence key and the Shift it needs; 0 when no key types it
+static uint8_t code_of(uint32_t key, uint8_t *shift_code) {
+    if (UI_KEY_IS_SHAPE(key)) {
+        *shift_code = 0;
+        return UI_KEY_SHAPE_CODE(key); // no LVGL value: ui_keys.h spells them as their codes
+    }
+    return lichen_sys_keys_code_for(key, shift_code);
 }
 
-static void sequence_step(lv_timer_t *timer) {
-    sequence_t *seq = lv_timer_get_user_data(timer);
-    if (seq->locked && !ui_remote_locked()) {
-        seq->lock_lost = true; // the holder took the keys back (or the lock timed out): hands off
-        sequence_finish(timer, seq);
-        return;
+static void inject(sequence_t *seq, uint8_t code, bool pressed) {
+    if (!lichen_sys_keys_inject(code, pressed, seq->physical)) {
+        seq->dropped++;
     }
-    while (seq->next < seq->n &&
-           (UI_KEY_IS_GUARD(seq->keys[seq->next]) || seq->keys[seq->next] == UI_KEY_NEEDLOCK)) {
+}
+
+static void key_up(sequence_t *seq, held_key_t const *k) {
+    inject(seq, k->code, false);
+    if (k->shift_code) {
+        inject(seq, k->shift_code, false);
+    }
+}
+
+// Lets go of the held keys that are due, the one with code (it is about to go down again) or, with all, every one
+static void release(sequence_t *seq, bool all, uint8_t code) {
+    uint32_t now  = lv_tick_get();
+    size_t   kept = 0;
+    for (size_t i = 0; i < seq->n_held; i++) {
+        held_key_t const *k = &seq->held[i];
+        if (all || k->code == code || (int32_t)(now - k->until) >= 0) {
+            key_up(seq, k);
+        } else {
+            seq->held[kept++] = *k;
+        }
+    }
+    seq->n_held = kept;
+}
+
+// Presses key; a tap comes up at once, a hold at hold_ms from now
+static void key_down(sequence_t *seq, uint32_t key, uint32_t hold_ms) {
+    held_key_t k = {.until = lv_tick_get() + hold_ms};
+    k.code       = code_of(key, &k.shift_code);
+    release(seq, false, k.code);
+    if (seq->n_held == MAX_HELD) {
+        release(seq, false, seq->held[0].code); // no room: the first held comes up early
+    }
+    if (k.shift_code) {
+        inject(seq, k.shift_code, true);
+    }
+    inject(seq, k.code, true);
+    if (hold_ms) {
+        seq->held[seq->n_held++] = k;
+    } else {
+        key_up(seq, &k);
+    }
+}
+
+// Runs the guards, needlock and phys ahead of the next key; false when the sequence must stop
+static bool pass_guards(sequence_t *seq) {
+    while (seq->next < seq->n && !ui_keys_is_key(seq->keys[seq->next]) && seq->keys[seq->next] != UI_KEY_WAIT) {
         uint32_t guard = seq->keys[seq->next++];
+        if (guard == UI_KEY_PHYS || UI_KEY_IS_HOLD(guard)) {
+            continue; // read up front, or by key_step with its key
+        }
         if (guard == UI_KEY_NEEDLOCK) {
             if (!ui_remote_locked()) {
                 seq->lock_lost = true;
-                sequence_finish(timer, seq);
-                return;
+                return false;
             }
             seq->locked = true; // from here on the lock must hold to the end
             continue;
@@ -118,21 +152,66 @@ static void sequence_step(lv_timer_t *timer) {
         current_focus(seq->focus, sizeof(seq->focus));
         if (!ui_keys_guard_ok(guard, seq->text, seq->focus)) {
             seq->failed = seq->guards;
+            return false;
+        }
+    }
+    return true;
+}
+
+// The next key (or wait) goes down; false when the sequence must stop
+static bool key_step(sequence_t *seq) {
+    if (seq->locked && !ui_remote_locked()) {
+        seq->lock_lost = true; // the holder took the keys back (or the lock timed out): hands off
+        return false;
+    }
+    if (!pass_guards(seq)) {
+        return false;
+    }
+    if (seq->next >= seq->n) {
+        return true; // only guards were left
+    }
+    uint32_t key = seq->keys[seq->next++];
+    if (key == UI_KEY_WAIT) {
+        seq->next_at = lv_tick_get() + WAIT_MS;
+        return true;
+    }
+    uint32_t hold = 0;
+    if (seq->next < seq->n && UI_KEY_IS_HOLD(seq->keys[seq->next])) {
+        hold = UI_KEY_HOLD_MS(seq->keys[seq->next++]); // the parser put it right after its key
+    }
+    key_down(seq, key, hold);
+    seq->next_at = lv_tick_get() + KEY_GAP_MS;
+    return true;
+}
+
+// ms to the next thing to do: a key going down or a held one coming up
+static uint32_t ms_to_next(sequence_t const *seq) {
+    uint32_t now  = lv_tick_get();
+    int32_t  wait = (int32_t)(seq->next_at - now);
+    for (size_t i = 0; i < seq->n_held; i++) {
+        int32_t d = (int32_t)(seq->held[i].until - now);
+        wait      = d < wait ? d : wait;
+    }
+    return wait < 1 ? 1 : (uint32_t)wait;
+}
+
+static void sequence_finish(lv_timer_t *timer, sequence_t *seq) {
+    release(seq, true, 0); // a sequence that stopped half-way leaves no key down
+    xTaskNotifyGive(seq->waiter); // the last gap has passed: the screen has settled
+    lv_timer_delete(timer);
+}
+
+static void sequence_step(lv_timer_t *timer) {
+    sequence_t *seq = lv_timer_get_user_data(timer);
+    release(seq, false, 0);
+    if ((int32_t)(lv_tick_get() - seq->next_at) >= 0) {
+        bool more = seq->next < seq->n;
+        if ((more && !key_step(seq)) || (!more && !seq->n_held)) {
             sequence_finish(timer, seq);
             return;
         }
     }
-    if (seq->next < seq->n) {
-        uint32_t key = seq->keys[seq->next++];
-        if (key == UI_KEY_WAIT) {
-            lv_timer_set_period(timer, WAIT_MS);
-            return;
-        }
-        deliver_key(key);
-        lv_timer_set_period(timer, KEY_GAP_MS);
-        return;
-    }
-    sequence_finish(timer, seq);
+    lv_timer_set_period(timer, ms_to_next(seq));
 }
 
 static void sequence_report(sequence_t const *seq) {
@@ -141,14 +220,36 @@ static void sequence_report(sequence_t const *seq) {
                       seq->focus[0] ? seq->focus : "(none)", (unsigned)seq->next, (unsigned)seq->n);
     } else if (seq->lock_lost) {
         console_reply("keys send: stopped, the key lock is off; %u of %u sent", (unsigned)seq->next, (unsigned)seq->n);
+    } else if (seq->dropped) {
+        console_reply("keys send: %u key events dropped (keyboard queue full); %u sent", (unsigned)seq->dropped,
+                      (unsigned)seq->n);
     } else {
         console_reply("keys sent: %u", (unsigned)seq->n);
     }
 }
 
-// "fw keys send <seq>" (shell.c's keys command hands it over)
+// Reads phys and checks that a key types every key of the sequence; adds up the holds. False (and says so) when not.
+static bool sequence_check(sequence_t *seq, uint32_t *hold_total) {
+    *hold_total = 0;
+    for (size_t i = 0; i < seq->n; i++) {
+        uint32_t k = seq->keys[i];
+        uint8_t  shift_code;
+        if (k == UI_KEY_PHYS) {
+            seq->physical = true; // anywhere in the sequence: every key of it
+        } else if (UI_KEY_IS_HOLD(k)) {
+            *hold_total += UI_KEY_HOLD_MS(k);
+        } else if (ui_keys_is_key(k) && !code_of(k, &shift_code)) {
+            console_reply("keys send: no key types 0x%02x (key %u)", (unsigned)k, (unsigned)i + 1);
+            return false;
+        }
+    }
+    return true;
+}
+
+// "fw keys send <seq>" and "fw keys press <seq>" (shell.c's keys command hands it over)
 void ui_probe_send(char const *seq_text) {
     size_t      pos;
+    uint32_t    hold_total;
     sequence_t *seq = lichen_alloc(lichen_sys_ctx_os(), sizeof(*seq), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!seq) {
         console_reply("keys send: no memory");
@@ -161,10 +262,15 @@ void ui_probe_send(char const *seq_text) {
         lichen_free(lichen_sys_ctx_os(), seq);
         return;
     }
+    if (!sequence_check(seq, &hold_total)) {
+        lichen_free(lichen_sys_ctx_os(), seq);
+        return;
+    }
     seq->locked = ui_remote_locked();
     seq->waiter = xTaskGetCurrentTaskHandle();
     ulTaskNotifyTake(pdTRUE, 0); // a stale notification would end the wait early
     lichen_sys_ui_lock(0);
+    seq->next_at      = lv_tick_get();
     lv_timer_t *timer = lv_timer_create(sequence_step, 1, seq);
     lichen_sys_ui_unlock();
     if (!timer) {
@@ -172,7 +278,7 @@ void ui_probe_send(char const *seq_text) {
         lichen_free(lichen_sys_ctx_os(), seq);
         return;
     }
-    uint32_t total_ms = (uint32_t)(seq->n + 2) * (KEY_GAP_MS + WAIT_MS);
+    uint32_t total_ms = (uint32_t)(seq->n + 2) * (KEY_GAP_MS + WAIT_MS) + hold_total;
     if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(total_ms)) == 0) {
         // Not finished (LVGL stuck?): the timer still owns seq, so leave it be rather than free it under the timer
         console_reply("keys send: timed out");

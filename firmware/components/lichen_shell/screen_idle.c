@@ -1,6 +1,6 @@
 // Screen timeout (#43): after a while without a key the backlight dims (screen to its minimum, keyboard off), later
 // both go off. Any key lights them again; a key that finds the screen off only wakes it. The keyboard is the activity
-// source (its wake hook, ahead of the raw key hooks), plus "fw keys send" so the bench can wake the badge, plus a
+// source (its wake hook, ahead of the raw key hooks; "fw keys send" goes through it too, #375), plus a
 // backlight change (fw bl, a slider). The remote key lock and an open test card (#355) hold it bright like an update.
 // idle_policy.c decides; an LVGL timer applies the level, so the inhibits (update, first-run setup, Bench, the card)
 // are read on the task that owns them.

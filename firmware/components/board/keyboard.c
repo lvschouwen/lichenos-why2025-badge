@@ -19,6 +19,7 @@ static char const TAG[] = "keyboard";
 
 #define POLL_MS     20
 #define QUEUE_DEPTH 32
+#define INJECT_DEPTH 16 // keyboard_inject's queue: a held uppercase character is two events, a tap four at most
 #define CHECK_MS    1000 // the self-heal readback (#14): one I2C read a second
 
 static_assert(KBD_KEY_UP == LV_KEY_UP && KBD_KEY_DOWN == LV_KEY_DOWN && KBD_KEY_LEFT == LV_KEY_LEFT &&
@@ -31,8 +32,15 @@ typedef struct {
     bool     pressed;
 } key_event_t;
 
+typedef struct {
+    uint8_t code;
+    bool    pressed;
+    bool    gated; // as_physical: the remote key gate sees it too
+} injected_t;
+
 static tca8418_dev_t *chip;
 static QueueHandle_t  events;
+static _Atomic(QueueHandle_t) injected; // keyboard_inject (#375): drained by the poll task ahead of the chip
 static uint32_t       held[0x51]; // what each pressed key was mapped to, so its release reports the same key
 static bool           shift;
 static bool           raw_down[0x51]; // keys the raw hooks saw pressed, so a chip reset releases them there too (#14)
@@ -186,43 +194,62 @@ static void self_heal(TickType_t *last_check) {
     }
 }
 
+// One key event, the chip's or an injected one (#375): the gate (unless gated is false), the wake hook, the raw hooks,
+// then LVGL. Poll task only.
+static void handle_key(uint8_t key, bool pressed, bool gated) {
+    if (key == 0 || key >= sizeof(held) / sizeof(held[0])) {
+        return;
+    }
+    if (kbd_map_is_shift(key)) {
+        shift = pressed;
+    }
+    if ((gated && gate_drops(key, pressed)) || wake_swallows(key, pressed)) {
+        return;
+    }
+    raw_down[key]          = pressed;
+    key_raw_event_t raw_ev = {.code = key, .pressed = pressed, .shift = shift};
+    bool swallowed = run_hooks(&raw_ev);
+    // A key pressed before the hook grabbed the keys still gets its release, or LVGL would see it held forever
+    if (swallowed && (pressed || !held[key])) {
+        return;
+    }
+    if (kbd_map_is_shift(key)) {
+        return;
+    }
+    uint32_t mapped = pressed ? kbd_map_key(key, shift) : held[key];
+    held[key]       = pressed ? mapped : 0;
+    if (mapped) {
+        key_event_t ev = {.key = mapped, .pressed = pressed};
+        xQueueSend(events, &ev, 0); // a full queue drops keys rather than blocking the poll
+    }
+}
+
+bool keyboard_inject(uint8_t code, bool pressed, bool as_physical) {
+    QueueHandle_t q = atomic_load(&injected);
+    if (!q || code == 0 || code >= sizeof(held) / sizeof(held[0])) {
+        return false;
+    }
+    injected_t in = {.code = code, .pressed = pressed, .gated = as_physical};
+    return xQueueSend(q, &in, 0) == pdTRUE;
+}
+
 static void poll_task(void *arg) {
     (void)arg;
     atomic_store(&poll_handle, xTaskGetCurrentTaskHandle());
     TickType_t last_check = xTaskGetTickCount();
     for (;;) {
         self_heal(&last_check);
-        while (tca8418_get_event_count(chip) > 0) {
-            uint8_t raw     = tca8418_get_key(chip);
-            uint8_t key     = raw & 0x7F;
-            bool    pressed = raw & 0x80;
-            if (key == 0 || key >= sizeof(held) / sizeof(held[0])) {
-                continue;
-            }
-            if (kbd_map_is_shift(key)) {
-                shift = pressed;
-            }
-            if (gate_drops(key, pressed) || wake_swallows(key, pressed)) {
-                continue;
-            }
-            raw_down[key]          = pressed;
-            key_raw_event_t raw_ev = {.code = key, .pressed = pressed, .shift = shift};
-            bool swallowed = run_hooks(&raw_ev);
-            // A key pressed before the hook grabbed the keys still gets its release, or LVGL would see it held forever
-            if (swallowed && (pressed || !held[key])) {
-                continue;
-            }
-            if (kbd_map_is_shift(key)) {
-                continue;
-            }
-            uint32_t mapped = pressed ? kbd_map_key(key, shift) : held[key];
-            held[key]       = pressed ? mapped : 0;
-            if (mapped) {
-                key_event_t ev = {.key = mapped, .pressed = pressed};
-                xQueueSend(events, &ev, 0); // a full queue drops keys rather than blocking the poll
-            }
+        injected_t in;
+        while (xQueueReceive(atomic_load(&injected), &in, 0) == pdTRUE) {
+            handle_key(in.code, in.pressed, in.gated);
         }
-        vTaskDelay(pdMS_TO_TICKS(POLL_MS));
+        while (tca8418_get_event_count(chip) > 0) {
+            uint8_t raw = tca8418_get_key(chip);
+            handle_key(raw & 0x7F, raw & 0x80, true);
+        }
+        // The poll's pause, cut short by an injected event: a held key's press and release then reach the hooks as
+        // far apart as they were sent, which is what a hold timed to the millisecond (the remote lock's 3 s) needs
+        xQueuePeek(atomic_load(&injected), &in, pdMS_TO_TICKS(POLL_MS));
     }
 }
 
@@ -252,7 +279,8 @@ bool keyboard_start(lv_indev_t **out) {
     }
     tca8418_flush(chip);
     events = xQueueCreate(QUEUE_DEPTH, sizeof(key_event_t));
-    if (!events || xTaskCreatePinnedToCore(poll_task, "keyboard", 3072 /* peak 1 KB, #107 */, NULL, 4, NULL, 0) != pdPASS) {
+    atomic_store(&injected, xQueueCreate(INJECT_DEPTH, sizeof(injected_t)));
+    if (!events || !atomic_load(&injected) || xTaskCreatePinnedToCore(poll_task, "keyboard", 3072 /* peak 1 KB, #107 */, NULL, 4, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "keyboard task not started");
         return false;
     }

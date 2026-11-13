@@ -14,7 +14,7 @@ typedef void (*raw_keys_cb)(key_raw_event_t const *ev, void *arg);
 // lichen_keys_raw_take sets this while an app (the Keyboard Test) holds the keys; the keyboard task stamps it into
 // each event at capture time
 void raw_keys_set_test_open(bool open);
-bool raw_keys_test_open(void); // what the keyboard task stamps now ("fw keys send" shape keys, #79)
+bool raw_keys_test_open(void); // what the keyboard task stamps now
 
 // The listener table has no lock of its own: callers of raw_keys_listen / raw_keys_unlisten hold the LVGL lock
 // (lichen_sys_ui_lock, e.g. from a console command) or run on the LVGL task (event handlers, timers), which is what keeps

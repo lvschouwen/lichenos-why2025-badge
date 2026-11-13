@@ -14,7 +14,7 @@ static int failures;
     } while (0)
 
 int main(void) {
-    uint32_t k[16];
+    uint32_t k[32];
     size_t   pos = 99;
     CHECK(ui_keys_parse("down down enter", k, 16, &pos) == 3);
     CHECK(k[0] == 18 && k[1] == 18 && k[2] == 10); // LV_KEY_DOWN, LV_KEY_ENTER
@@ -62,6 +62,45 @@ int main(void) {
     CHECK(!ui_keys_guard_ok(k[1], any, "(none)"));
     CHECK(!ui_keys_guard_ok(k[1], any, ""));
     CHECK(ui_keys_parse("notfocus:|enter", k, 16, &pos) == UI_KEYS_ERR);
+    // hold:<ms> and phys (#375): the hold goes right after its key, over a phys in between; capped at 10 s
+    CHECK(ui_keys_parse("esc phys hold:3000", k, 16, &pos) == 3);
+    CHECK(k[0] == 27 && UI_KEY_IS_HOLD(k[1]) && UI_KEY_HOLD_MS(k[1]) == 3000 && k[2] == UI_KEY_PHYS);
+    CHECK(ui_keys_parse("esc hold:1500 bksp hold:1300", k, 16, &pos) == 4);
+    CHECK(k[0] == 27 && UI_KEY_HOLD_MS(k[1]) == 1500 && k[2] == 8 && UI_KEY_HOLD_MS(k[3]) == 1300);
+    CHECK(ui_keys_parse("enter hold:20000", k, 16, &pos) == 2 && UI_KEY_HOLD_MS(k[1]) == UI_KEY_HOLD_MAX_MS);
+    CHECK(ui_keys_parse("enter hold:99999999999999999999", k, 16, &pos) == 2 && UI_KEY_HOLD_MS(k[1]) == 10000);
+    CHECK(ui_keys_parse("enter hold:10000", k, 16, &pos) == 2 && UI_KEY_HOLD_MS(k[1]) == 10000);
+    CHECK(ui_keys_parse("enter hold:0", k, 16, &pos) == 2 && UI_KEY_IS_HOLD(k[1]) && UI_KEY_HOLD_MS(k[1]) == 0);
+    CHECK(ui_keys_parse("text:ab|hold:500", k, 16, &pos) == 3 && k[1] == 'b' && UI_KEY_HOLD_MS(k[2]) == 500);
+    CHECK(ui_keys_parse("square hold:100", k, 16, &pos) == 2 && UI_KEY_IS_SHAPE(k[0]) && UI_KEY_IS_HOLD(k[1]));
+    CHECK(ui_keys_parse("hold:100", k, 16, &pos) == UI_KEYS_ERR && pos == 0);     // no key to hold
+    CHECK(ui_keys_parse("phys hold:100", k, 16, &pos) == UI_KEYS_ERR && pos == 5);
+    CHECK(ui_keys_parse("wait hold:100", k, 16, &pos) == UI_KEYS_ERR && pos == 5);
+    CHECK(ui_keys_parse("needlock hold:100", k, 16, &pos) == UI_KEYS_ERR);
+    CHECK(ui_keys_parse("row:A|hold:100", k, 16, &pos) == UI_KEYS_ERR && pos == 6); // a guard is no key
+    CHECK(ui_keys_parse("esc hold:1 hold:2", k, 16, &pos) == UI_KEYS_ERR && pos == 11);
+    CHECK(ui_keys_parse("esc hold:", k, 16, &pos) == UI_KEYS_ERR && pos == 4);
+    CHECK(ui_keys_parse("esc hold:12x", k, 16, &pos) == UI_KEYS_ERR && pos == 4);
+    CHECK(ui_keys_parse("esc hold:-5", k, 16, &pos) == UI_KEYS_ERR && pos == 4);
+    CHECK(ui_keys_parse("esc phys hold:5", k, 2, &pos) == UI_KEYS_ERR && pos == 9); // does not fit
+    CHECK(ui_keys_parse("phys", k, 16, &pos) == 1 && k[0] == UI_KEY_PHYS);
+    // None of the new values passes for another kind
+    uint32_t const odd[] = {UI_KEY_HOLD_BIT | 3000, UI_KEY_PHYS};
+    for (size_t i = 0; i < 2; i++) {
+        CHECK(!UI_KEY_IS_GUARD(odd[i]) && !UI_KEY_IS_SHAPE(odd[i]) && odd[i] != UI_KEY_WAIT &&
+              odd[i] != UI_KEY_NEEDLOCK && !ui_keys_is_key(odd[i]));
+    }
+    CHECK(!UI_KEY_IS_HOLD(UI_KEY_WAIT) && !UI_KEY_IS_HOLD(UI_KEY_NEEDLOCK) && !UI_KEY_IS_HOLD(UI_KEY_SHAPE(2)));
+    CHECK(!UI_KEY_IS_HOLD(k[0]) && !UI_KEY_IS_HOLD('z') && !UI_KEY_IS_HOLD(27));
+    CHECK(ui_keys_is_key(27) && ui_keys_is_key('z') && ui_keys_is_key(UI_KEY_SHAPE(7)));
+    CHECK(!ui_keys_is_key(UI_KEY_WAIT) && !ui_keys_is_key(UI_KEY_NEEDLOCK));
+    // Old "keys send" strings parse as they did (#375 keeps the grammar)
+    char const *old = "needlock square wait row:Messages|enter text:Hi there|enter down notfocus:Erase|esc cloud";
+    CHECK(ui_keys_parse(old, k, 32, &pos) == 18);
+    CHECK(k[0] == UI_KEY_NEEDLOCK && k[1] == UI_KEY_SHAPE(2) && k[2] == UI_KEY_WAIT && UI_KEY_IS_GUARD(k[3]));
+    CHECK(k[4] == 10 && k[5] == 'H' && k[7] == ' ' && k[12] == 'e');
+    CHECK(k[13] == 10 && k[14] == 18 && UI_KEY_IS_GUARD(k[15]) && k[16] == 27 && k[17] == UI_KEY_SHAPE(6));
+    CHECK(ui_keys_parse("text:hold:5|phys", k, 16, &pos) == 7 && k[0] == 'h' && k[6] == UI_KEY_PHYS);
     if (failures) {
         return 1;
     }

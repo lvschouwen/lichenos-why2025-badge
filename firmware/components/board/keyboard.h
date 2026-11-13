@@ -25,6 +25,14 @@ void keyboard_set_wake_hook(bool (*fn)(void));
 // task, keep both short; NULL removes them.
 void keyboard_set_gate_hook(bool (*fn)(uint8_t key, bool pressed), void (*reset)(void));
 
+// Feeds one key event through the keyboard task's own path (#375), as if the chip had sent it: the wake hook, the raw
+// hooks, the mapping to LVGL, and the held-key bookkeeping, so a chip reset releases an injected key too. code is a
+// TCA8418 code (1-0x50, kbd_map_code_for); send the release yourself. as_physical also puts it through the gate
+// (keyboard_set_gate_hook), which then drops it as it drops the keyboard's keys; without it only the gate is skipped.
+// The events are handled in order, ahead of the chip's, at once (the poll task wakes for them). False when the
+// keyboard is not started or its 16-deep queue is full (the event is then not sent). Any task, never blocks, no LVGL.
+bool keyboard_inject(uint8_t code, bool pressed, bool as_physical);
+
 // Raw key hooks (#81, #79): up to KEYBOARD_RAW_MAX; false when full. Called from any task. A hook that swallows an
 // event stops the mapped key reaching LVGL (its release too); other hooks still see it. Once keyboard_raw_remove returns
 // no call of that hook is running or will start (#251): it waits for one in flight, except when called from inside a

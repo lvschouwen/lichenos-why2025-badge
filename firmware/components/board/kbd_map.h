@@ -20,3 +20,8 @@
 uint32_t kbd_map_key(uint8_t key, bool shift);
 // Whether key is one of the Shift keys
 bool     kbd_map_is_shift(uint8_t key);
+// The Left Shift key's code: what an injected uppercase character holds down (#375)
+#define KBD_CODE_SHIFT 0x29
+// The other way round (#375): the code that types key (a KBD_KEY_* or a character), with *shift set when Shift must be
+// down for it (only then: a key both ways gives the unshifted code). 0 for none, e.g. a character no key types.
+uint8_t  kbd_map_code_for(uint32_t key, bool *shift);

@@ -4,6 +4,7 @@
 // the services' and are asserted equal there.
 #include "boot_progress.h"
 #include "c6link.h"
+#include "kbd_map.h"
 #include "keyboard.h"
 #include "led.h"
 #include "lichen_clock.h"
@@ -135,6 +136,17 @@ void lichen_sys_keys_set_wake(bool (*fn)(void)) {
 
 void lichen_sys_keys_set_gate(bool (*fn)(uint8_t key, bool pressed), void (*reset)(void)) {
     keyboard_set_gate_hook(fn, reset);
+}
+
+bool lichen_sys_keys_inject(uint8_t code, bool pressed, bool as_physical) {
+    return keyboard_inject(code, pressed, as_physical);
+}
+
+uint8_t lichen_sys_keys_code_for(uint32_t key, uint8_t *shift_code) {
+    bool    shift = false;
+    uint8_t code  = kbd_map_code_for(key, &shift);
+    *shift_code   = code && shift ? KBD_CODE_SHIFT : 0;
+    return code;
 }
 
 bool lichen_sys_led_enabled(void) {

@@ -8,6 +8,7 @@ static struct {
     uint32_t    key;
 } const NAMES[] = {{"up", 17},   {"down", 18}, {"left", 20}, {"right", 19}, {"enter", 10},
                    {"esc", 27},  {"tab", 9},   {"bksp", 8},  {"wait", UI_KEY_WAIT}, {"needlock", UI_KEY_NEEDLOCK},
+                   {"phys", UI_KEY_PHYS},
                    {"square", UI_KEY_SHAPE(2)}, {"triangle", UI_KEY_SHAPE(3)}, {"cross", UI_KEY_SHAPE(4)},
                    {"circle", UI_KEY_SHAPE(5)}, {"cloud", UI_KEY_SHAPE(6)},    {"diamond", UI_KEY_SHAPE(7)}};
 
@@ -97,6 +98,59 @@ bool ui_keys_guard_ok(uint32_t guard, char const *seq, char const *focus) {
     return flen == len && strncmp(focus, want, len) == 0;
 }
 
+// The NAMES entry spelled by the len characters at p
+static bool named_key(char const *p, size_t len, uint32_t *key) {
+    for (size_t i = 0; i < sizeof(NAMES) / sizeof(NAMES[0]); i++) {
+        if (strlen(NAMES[i].name) == len && strncmp(p, NAMES[i].name, len) == 0) {
+            *key = NAMES[i].key;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ui_keys_is_key(uint32_t k) {
+    return k != UI_KEY_WAIT && k != UI_KEY_NEEDLOCK && k != UI_KEY_PHYS && !UI_KEY_IS_GUARD(k) && !UI_KEY_IS_HOLD(k);
+}
+
+// "hold:<ms>" at p: false unless ms is digits up to the next ' ' or '|'. *end is past them; more than the cap is capped.
+static bool parse_hold_ms(char const *p, uint32_t *ms, char const **end) {
+    size_t skip;
+    if (!prefix(p, "hold:", &skip)) {
+        return false;
+    }
+    p += skip;
+    size_t len = strcspn(p, " |");
+    if (!len) {
+        return false;
+    }
+    uint32_t v = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (p[i] < '0' || p[i] > '9') {
+            return false;
+        }
+        v = v > UI_KEY_HOLD_MAX_MS ? v : v * 10 + (uint32_t)(p[i] - '0'); // capped: no overflow on long strings
+    }
+    *ms  = v > UI_KEY_HOLD_MAX_MS ? UI_KEY_HOLD_MAX_MS : v;
+    *end = p + len;
+    return true;
+}
+
+// Puts the hold right after the last key (over any phys); false when there is no key before it or out is full
+static bool add_hold(uint32_t *out, size_t *n, size_t max, uint32_t ms) {
+    size_t at = *n;
+    while (at && out[at - 1] == UI_KEY_PHYS) {
+        at--;
+    }
+    if (!at || !ui_keys_is_key(out[at - 1]) || *n >= max) {
+        return false;
+    }
+    memmove(&out[at + 1], &out[at], (*n - at) * sizeof(out[0]));
+    out[at] = UI_KEY_HOLD_BIT | ms;
+    (*n)++;
+    return true;
+}
+
 size_t ui_keys_parse(char const *seq, uint32_t *out, size_t max, size_t *err_pos) {
     size_t n = 0;
     char const *p = seq;
@@ -128,23 +182,22 @@ size_t ui_keys_parse(char const *seq, uint32_t *out, size_t max, size_t *err_pos
             p        = end;
             continue;
         }
-        size_t len = strcspn(p, " |");
-        bool   hit = false;
-        for (size_t i = 0; i < sizeof(NAMES) / sizeof(NAMES[0]); i++) {
-            if (strlen(NAMES[i].name) == len && strncmp(p, NAMES[i].name, len) == 0) {
-                if (n >= max) {
-                    *err_pos = (size_t)(p - seq);
-                    return UI_KEYS_ERR;
-                }
-                out[n++] = NAMES[i].key;
-                hit      = true;
-                break;
+        uint32_t    ms;
+        char const *end;
+        if (parse_hold_ms(p, &ms, &end)) {
+            if (!add_hold(out, &n, max, ms)) {
+                *err_pos = (size_t)(p - seq);
+                return UI_KEYS_ERR;
             }
+            p = end;
+            continue;
         }
-        if (!hit) {
+        size_t len = strcspn(p, " |");
+        if (n >= max || !named_key(p, len, &out[n])) {
             *err_pos = (size_t)(p - seq);
             return UI_KEYS_ERR;
         }
+        n++;
         p += len;
     }
     return n;

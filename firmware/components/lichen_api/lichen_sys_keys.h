@@ -26,3 +26,13 @@ void lichen_sys_keys_set_wake(bool (*fn)(void));
 // The remote key lock: called for every key event before everything else, true drops it. reset is told when the chip
 // was reset and every key counts as released. Keyboard task, keep both short; NULL removes them. Any task to set.
 void lichen_sys_keys_set_gate(bool (*fn)(uint8_t key, bool pressed), void (*reset)(void));
+
+// Key injection for the console's "fw keys send/press" (#375; meant for the console, the manifest's capability column
+// is per header). Feeds one event of a TCA8418 code (1-0x50) through the keyboard task's own path, as the chip's: the
+// wake hook, the raw hooks, LVGL and the held-key bookkeeping. as_physical also puts it through the remote key gate,
+// which drops it as it drops the keyboard's keys; without it only the gate is skipped. The caller sends the release.
+// False when there is no keyboard or its 16-deep queue is full. Any task, never blocks.
+bool    lichen_sys_keys_inject(uint8_t code, bool pressed, bool as_physical);
+// The code that types key (an LVGL key or a character), 0 when no key types it. *shift_code is the Shift key's code
+// when Shift must be down for it, else 0. Pure, any task.
+uint8_t lichen_sys_keys_code_for(uint32_t key, uint8_t *shift_code);

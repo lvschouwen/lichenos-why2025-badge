@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// `fw keys send <seq>` (bench diagnostic): the key sequence tokenizer. Pure, host-tested in host_tests/ui_keys_test.c.
+// `fw keys send <seq>` and its alias `fw keys press <seq>` (bench diagnostic): the key sequence tokenizer. Pure, host-tested in host_tests/ui_keys_test.c.
 // Tokens are separated by spaces: up down left right enter esc tab bksp wait, the shape keys (#79) square triangle
 // cross circle cloud diamond, or text:<characters> (everything up to the next '|' or the end of the string, spaces
 // included, so "text:Ab c|enter" types Ab c and presses Enter). wait is a pause (UI_KEY_WAIT), not a key.
@@ -26,6 +26,19 @@
 #define UI_KEY_NEEDLOCK       0x20000000u
 #define UI_KEY_IS_GUARD(k)    (!UI_KEY_IS_SHAPE(k) && (k) != UI_KEY_WAIT && ((k) & UI_KEY_GUARD_BIT) != 0)
 #define UI_KEY_GUARD_MAX_TEXT 0xfffu
+// The keys go through the real key path (#375): each one is pressed and released as a typed key would be, and the
+// next goes down 250 ms after it. hold:<ms> after a key (phys in between is fine) keeps that key down ms long, at
+// most UI_KEY_HOLD_MAX_MS (more is capped); the keys after it go down meanwhile, so two holds make a combo
+// ("esc hold:1500 bksp hold:1300": both down for over a second). After text: put a '|' first ("text:ab|hold:500").
+// The parser puts the hold value right after its key. phys anywhere in the sequence sends all its keys as physical
+// ones: through the remote key lock's gate (#190), which then drops them as it drops the keyboard's.
+#define UI_KEY_HOLD_BIT       0x10000000u
+#define UI_KEY_HOLD_MAX_MS    10000u
+#define UI_KEY_IS_HOLD(k)     (((k) & 0xf0000000u) == UI_KEY_HOLD_BIT)
+#define UI_KEY_HOLD_MS(k)     ((k) & 0xffffu)
+#define UI_KEY_PHYS           0x08000000u
+// Whether k is a key to press, not a pause, a guard, needlock, phys or a hold
+bool ui_keys_is_key(uint32_t k);
 
 // Fills out with LVGL key codes (characters as themselves); returns how many, or UI_KEYS_ERR with *err_pos set to the
 // offset of the first thing not understood (or of the token that did not fit in max).

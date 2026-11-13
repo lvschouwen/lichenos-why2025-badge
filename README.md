@@ -212,9 +212,11 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
   `fw crash clear` drops it. `tools/badge.sh crash <port> [elf]` fetches the dump and decodes it against the crashed
   image's ELF; `flash-fw` and `ota-firmware` keep the ELF in `~/badge-backups/elf` under its SHA-256 and version (one hardlinked copy; the newest `BADGE_ELF_KEEP`, default 20, images stay).
 - Bench: `fw boot [fail <step>]`, `fw home layout tiles|grid`, `fw setup reset [mesh]`, `fw keys on|off|send <keys>` and
-  `fw ui` (press keys and read the screen without looking at it; `keys send` takes `focus:<text>|` / `row:<text>|`
-  `notfocus:<a;b>|` guards that stop the sequence before a wrong Enter, and `needlock` which
-  refuses the keys unless the lock is on), `fw ui lock on [s]|off` (the badge's own keys off, "Keys locked: hold
+  `fw ui` (press keys and read the screen without looking at it; `keys send` (alias `keys press`) feeds the keys
+  through the keyboard's own path, so they wake the screen and reach the hooks as typed ones; it takes `hold:<ms>`
+  after a key (held up to 10 s, holds overlap for combos), `phys` (through the key lock as physical keys),
+  `focus:<text>|` / `row:<text>|` `notfocus:<a;b>|` guards that stop the sequence before a wrong Enter, and `needlock`
+  which refuses the keys unless the lock is on), `fw ui lock on [s]|off` (the badge's own keys off, "Keys locked: hold
   Esc 3 s" in the status bar; ends s seconds (default 60, max 600) after the last command, on Esc held 3 s or a
   restart, #190), `fw ui open <app id|name|home>` (an app as from its home tile), `fw uicheck` (walk every LVGL object now, #89), `fw crash test panic|wdt`.
 

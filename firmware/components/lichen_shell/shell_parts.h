@@ -36,12 +36,11 @@ void shell_arrange_home(bool rebuild); // Settings > Display > Arrange home: bac
 
 // ui_probe.c: bench diagnostics
 void ui_probe_init(void);           // registers "fw ui"
-void ui_probe_send(char const *seq); // "fw keys send <seq>"
+void ui_probe_send(char const *seq); // "fw keys send|press <seq>": through the real key path (#375)
 void ui_check_start(void);           // #89: 1 s LVGL object-tree check, registers "fw uicheck"
 // card_overlay.c (#352): "fw ui card [test|white|grey|black|off]", the bench test card over the current screen
 void card_overlay_init(void);            // sets the fw label the card shows
 void card_overlay_cmd(char const *args); // console task: args after "card"
-bool card_overlay_key(uint32_t key);     // LVGL context: true while a card is up (it takes every key; Esc closes it)
 bool test_cards_open(void);              // LVGL task: a test card is up, this overlay or the Test card app (#355)
 // draw_call.c (#255, #259): full-screen draws (lv_refr_now) only on a stack with DRAW_STACK_NEED free (draw_stack.h)
 bool   shell_note_ui_task(void); // shell_start: queues the note of the LVGL task's handle; false when not queued
@@ -107,7 +106,7 @@ bool setup_running(void); // the first-run setup is on screen (LVGL task)
 // screen_idle.c: the screen timeout (#43)
 void screen_idle_init(void);  // registers "fw idle"; from shell_start
 void screen_idle_start(void); // once the keyboard is attached: the key hook and the timer (LVGL lock held)
-// A key press reached the badge (the keyboard task, or "fw keys send" on the LVGL task): restarts the idle clock and
+// A key press reached the badge (the keyboard task's wake hook, "fw keys send" included, #375): restarts the idle clock and
 // lights the screen. True when the key only woke a dark screen and must not act.
 bool screen_idle_key(void);
 // Settings > Display changed the times, or the screensaver / lock switches (#75)
@@ -132,8 +131,6 @@ void screen_saver_show(bool on);       // screen_idle's tick: the idle stage wan
 void screen_saver_reload(void);        // the saver's style setting changed (#119); any task, from screen_idle_reload
 void screen_lock_engage(void);         // the lock screen until the combo; nothing when already locked
 void screen_lock_release(void);        // unlocks (the combo, an update, power off, a warning that must show)
-void screen_lock_probe_key(uint32_t lv_key); // "fw keys send" while locked: only Esc/Backspace reach the combo (#112)
-void screen_lock_probe_end(void);      // the sequence is over: let go of the probe's keys
 bool screen_lock_active(void);         // any task
 void screen_lock_wake(void);           // any task: unlock and light the screen for something that must be seen
 

@@ -84,16 +84,6 @@ static void on_raw(key_raw_event_t const *ev, void *arg) {
     }
 }
 
-bool card_overlay_key(uint32_t key) {
-    if (!card) {
-        return false;
-    }
-    if (key == LV_KEY_ESC) {
-        close_card(false);
-    }
-    return true; // an open card takes every key, as the physical ones
-}
-
 // LVGL task: arg is the tcard_mode_t
 static void apply(void *arg) {
     tcard_mode_t mode = (tcard_mode_t)(intptr_t)arg;

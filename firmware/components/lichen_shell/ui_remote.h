@@ -3,7 +3,7 @@
 #include <stdbool.h>
 
 // Remote control for bench walks (#190): "fw ui lock" keeps the person holding the badge from typing into a scripted
-// walk (physical keys only; "fw keys send" still works), "fw ui open" jumps to an app as from its home tile. The
+// walk (physical keys only; "fw keys send" still works, its phys keys do not), "fw ui open" jumps to an app as from its home tile. The
 // rules are remote_ctl.c; this is the glue (keyboard gate, console activity, the status bar banner).
 
 void ui_remote_start(void);               // shell_start: the keyboard gate and the console activity hook

@@ -25,7 +25,3 @@ void lock_combo_event(lock_combo_t *c, uint8_t code, bool pressed, uint32_t now)
 bool lock_combo_tick(lock_combo_t *c, uint32_t now);
 // 0-100 how far the hold has got (the lock screen's bar), 0 when not armed
 int  lock_combo_percent(lock_combo_t const *c, uint32_t now);
-// "fw keys send" while locked (#112): Esc and Backspace (LVGL key codes 27 and 8) go down and stay down, as a held
-// combo, so a script can test the real unlock; any other key is dropped and lets go of everything. true when the key
-// was one of the two.
-bool lock_combo_probe_key(lock_combo_t *c, uint32_t lv_key, uint32_t now);

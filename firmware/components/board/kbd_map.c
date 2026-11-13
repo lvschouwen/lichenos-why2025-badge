@@ -33,3 +33,17 @@ uint32_t kbd_map_key(uint8_t key, bool shift) {
     char c = keyboard_get_ascii(s, shift ? BADGEVMS_KMOD_LSHIFT : BADGEVMS_KMOD_NONE);
     return (unsigned char)c >= 0x20 && c != 0x7f ? (uint32_t)(unsigned char)c : 0;
 }
+
+uint8_t kbd_map_code_for(uint32_t key, bool *shift) {
+    uint8_t const last = (uint8_t)(sizeof(tca8418_keymap) / sizeof(tca8418_keymap[0]));
+    for (int with_shift = 0; key && with_shift < 2; with_shift++) {
+        for (uint8_t code = 1; code <= last; code++) {
+            if (kbd_map_key(code, with_shift) == key) {
+                *shift = with_shift;
+                return code;
+            }
+        }
+    }
+    *shift = false;
+    return 0;
+}

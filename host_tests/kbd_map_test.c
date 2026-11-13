@@ -42,6 +42,37 @@ int main(void) {
     CHECK(kbd_map_key(0x00, false) == 0);
     CHECK(kbd_map_key(0x51, false) == 0);
 
+    // The reverse map (#375): every key a code types comes back to a code that types it, with the same Shift
+    int mapped = 0;
+    for (unsigned code = 1; code <= 0x50; code++) {
+        for (int with_shift = 0; with_shift < 2; with_shift++) {
+            uint32_t key = kbd_map_key((uint8_t)code, with_shift);
+            if (!key) {
+                continue;
+            }
+            mapped++;
+            bool    shift = !with_shift;
+            uint8_t back  = kbd_map_code_for(key, &shift);
+            CHECK(back != 0 && kbd_map_key(back, shift) == key);
+            CHECK(!kbd_map_is_shift(back));
+        }
+    }
+    CHECK(mapped > 100);
+    bool shift = true;
+    CHECK(kbd_map_code_for('a', &shift) == 0x20 && !shift);
+    CHECK(kbd_map_code_for('A', &shift) == 0x20 && shift);
+    CHECK(kbd_map_code_for(' ', &shift) == 0x41 && !shift);
+    CHECK(kbd_map_code_for(LV_KEY_ENTER, &shift) == 0x3b && !shift); // the same both ways: no Shift
+    CHECK(kbd_map_code_for(27, &shift) == 0x01 && !shift);          // Esc
+    CHECK(kbd_map_code_for(9, &shift) == 0x15 && !shift);           // Tab, LV_KEY_NEXT
+    CHECK(kbd_map_is_shift(KBD_CODE_SHIFT));
+    // Nothing types these
+    shift = true;
+    CHECK(kbd_map_code_for(0, &shift) == 0 && !shift);
+    CHECK(kbd_map_code_for(0xe9, &shift) == 0);       // a Latin-1 e acute
+    CHECK(kbd_map_code_for(127, &shift) == 0);        // DEL
+    CHECK(kbd_map_code_for(0x80000002u, &shift) == 0); // a shape key as ui_keys.h spells it
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;
