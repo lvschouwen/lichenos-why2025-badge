@@ -27,7 +27,8 @@ set(COMPANION_SRCS
 # sd_begin/sd_end batches on /sd/lichen/messages, #98: an SD batch call in lichen_fs.h). Results of the settings jobs
 # reach the LVGL task through lichen_ui_call (#84 T8a), so esp_lvgl_port is not needed.
 set(MESH_REQUIRES lichen_api lichen_clock lichen_random lora fw_console freertos esp_timer heap mbedtls)
-idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "mesh_trace.c" "mesh_remote.c" "mesh_telem.c" "meshcore_telem.c" "mesh_rset.c" "mesh_rset_run.c" "mesh_rhist.c" "mesh_rhist_run.c" "meshcore_rhist.c" "meshcore_remote.c" "meshcore_rset.c" "lora_radio.cpp" "mesh_store.c" "mesh_mem.c" "lora_airtime.c" "advert_limit.c" "mesh_blobq.c" "mesh_advert_cfg.c" "meshcore_app_record.c" "mesh_scope.c" "mesh_cscope.c"
+idf_component_register(SRCS "mesh_task.cpp" "mesh_api_view.cpp" "mesh_api_settings.cpp" "mesh_api_channels.cpp" "mesh_api_send.cpp" "mesh_api_diag.cpp" "mesh_cmd.cpp" "mesh_cmd_settings.cpp" "mesh_cmd_send.cpp" "mesh_cmd_remote.cpp" "mesh_cmd_store.cpp"
+                            "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "mesh_trace.c" "mesh_remote.c" "mesh_telem.c" "meshcore_telem.c" "mesh_rset.c" "mesh_rset_run.c" "mesh_rhist.c" "mesh_rhist_run.c" "meshcore_rhist.c" "meshcore_remote.c" "meshcore_rset.c" "lora_radio.cpp" "mesh_store.c" "mesh_mem.c" "lora_airtime.c" "advert_limit.c" "mesh_blobq.c" "mesh_advert_cfg.c" "meshcore_app_record.c" "mesh_scope.c" "mesh_cscope.c"
                             "mesh_hist.c" "mesh_hist_boot.c" "mesh_hist_crypto.cpp" "mesh_hist_selftest.c" "mesh_ident.c" "mesh_journal.c" "mesh_journal_gen.c" "mesh_format.c" "mesh_contact_fmt.c" "mesh_share.c" "mesh_tile.c" "mesh_notify.c" "mesh_notify_run.c" "meshcore_notify.c"
                             "meshcore_hdr.c" "mesh_health.c" "meshcore_health.c" "mesh_airlog.c" "meshcore_airlog.c" "mesh_discover.c" "meshcore_discover.c" "mesh_radar.c" "meshcore_radar.c" "mesh_signal.c" "meshcore_signal.c" "meshcore_app.c" "meshcore_run.c" "mesh_run.c" "meshcore_grid.c" "meshcore_grid_icons.c" "mesh_grid.c" "mesh_order.c" "meshcore_list.c" "meshcore_chats.c" "meshcore_contacts.c" "meshcore_chat.c" "meshcore_contact.c" "mesh_chat.c" "mesh_chat_target.c" "meshcore_settings.c" "meshcore_advert_settings.c" "radio_presets.c" "mesh_radio_line.c" "mesh_applied.c" "meshcore_applied.c" "radio_filter.c" "radio_confirm.c" "channel_input.c" "mc_first.c"
                             "../../../shared/arduino_shim/arduino_shim.cpp"
@@ -39,7 +40,9 @@ idf_component_register(SRCS "mesh_task.cpp" "mesh_link.cpp" "mesh_frame.c" "mesh
 # MeshCore's sizes on the badge: its tables live in PSRAM (mesh_task.cpp), so far beyond MeshCore's defaults
 target_compile_definitions(${COMPONENT_LIB} PRIVATE MAX_CONTACTS=1000 MAX_GROUP_CHANNELS=40 OFFLINE_QUEUE_SIZE=256
                            LORA_FREQ=869.618 LORA_BW=62.5 LORA_SF=7 LORA_CR=5 LORA_TX_POWER=22 MAX_LORA_TX_POWER=22)
-set_source_files_properties(${COMPANION_SRCS} "mesh_task.cpp" "mesh_link.cpp" PROPERTIES COMPILE_DEFINITIONS ESP32)
+# The files split out of mesh_task.cpp (#208) see BadgeMesh (MyMesh.h) as it does: with ESP32, or the class differs
+set_source_files_properties(${COMPANION_SRCS} "mesh_task.cpp" "mesh_api_view.cpp" "mesh_api_settings.cpp" "mesh_api_channels.cpp" "mesh_api_send.cpp" "mesh_api_diag.cpp" "mesh_cmd.cpp" "mesh_cmd_settings.cpp" "mesh_cmd_send.cpp" "mesh_cmd_remote.cpp" "mesh_cmd_store.cpp"
+                            "mesh_link.cpp" PROPERTIES COMPILE_DEFINITIONS ESP32)
 # The app's factory reset must not erase NVS (Wi-Fi credentials): see mesh_nvs_flash_erase() in mesh_task.cpp
 set_property(SOURCE ${MC}/examples/companion_radio/DataStore.cpp APPEND PROPERTY COMPILE_DEFINITIONS
              nvs_flash_erase=mesh_nvs_flash_erase)
