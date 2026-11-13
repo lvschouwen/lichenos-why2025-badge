@@ -270,16 +270,23 @@ static bool output_bytes(void *ctx, uint8_t const *data, size_t len) {
 EXT_RAM_BSS_ATTR static tinfl_decompressor inflater; // 43 KB with the window: PSRAM (#107)
 EXT_RAM_BSS_ATTR static uint8_t            inflate_window[TINFL_LZ_DICT_SIZE];
 static size_t             inflate_ofs;
+static bool               inflate_more; // the last step left output: the next one runs without a socket read between
 
 static ota_inflate_status_t tinfl_step(void *dec, uint8_t const *in, size_t *in_len, uint8_t const **out,
                                        size_t *out_len) {
     (void)dec;
+    if (inflate_more) {
+        // Back-to-back windows (32 KiB decoded, then written to flash) would otherwise hold core 0 for a whole piece;
+        // one tick lets the idle task (and the task watchdog) run between them (#298)
+        vTaskDelay(1);
+    }
     size_t       space  = sizeof(inflate_window) - inflate_ofs;
     tinfl_status status = tinfl_decompress(&inflater, in, in_len, inflate_window, inflate_window + inflate_ofs, &space,
                                            TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_HAS_MORE_INPUT);
     *out        = inflate_window + inflate_ofs;
     *out_len    = space;
-    inflate_ofs = (inflate_ofs + space) & (sizeof(inflate_window) - 1);
+    inflate_ofs  = (inflate_ofs + space) & (sizeof(inflate_window) - 1);
+    inflate_more = status == TINFL_STATUS_HAS_MORE_OUTPUT;
     if (status < TINFL_STATUS_DONE) {
         return OTA_INFLATE_ERROR;
     }
@@ -328,7 +335,8 @@ static bool receive_body(int fd, body_t b, char sha_hex[OTA_SHA256_HEX + 1]) {
     out.max  = b.max;
     if (b.deflate) {
         tinfl_init(&inflater);
-        inflate_ofs = 0;
+        inflate_ofs  = 0;
+        inflate_more = false;
         ota_inflate_begin(&z, tinfl_step, NULL, b.max > 0 ? (size_t)b.max : 0);
     }
 
@@ -355,8 +363,10 @@ static bool receive_body(int fd, body_t b, char sha_hex[OTA_SHA256_HEX + 1]) {
         last_received  = got;
         hook_progress(progress_base + (b.piece ? last_decoded : got));
     }
-    if (b.deflate && !z.done) {
-        return false; // the stream ended early
+    // The stream must have ended; a piece must decode to exactly its X-Piece-Size (b.max), a whole body to anything
+    // up to its cap
+    if (b.deflate && !(b.piece ? ota_inflate_complete(&z, (size_t)b.max) : ota_inflate_complete(&z, z.produced))) {
+        return false;
     }
 
     uint8_t digest[SHA256_DIGEST_LEN];
@@ -599,6 +609,10 @@ __attribute__((noinline)) static bool finish_assets(int fd, uint8_t const *data,
 
 
 static void handle_firmware(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len) {
+    if (!ota_whole_body_ok(req)) {
+        respond(fd, 400, "X-Piece-Size belongs to a piece (with X-Offset), nothing installed");
+        return;
+    }
     if (req->content_length <= 0 || !req->has_sha256) {
         respond(fd, req->content_length < 0 ? 411 : 400, "needs Content-Length and X-Content-SHA256");
         return;
@@ -635,7 +649,9 @@ static void handle_firmware(int fd, ota_request_t const *req, uint8_t const *pre
         }
         return;
     }
-    hook_end(finish_firmware(fd, mem.data, mem.len, last_received), false);
+    // rebooting: the badge restarts into it by itself, unless the sender holds that (X-Reboot: hold, #298)
+    bool installed = finish_firmware(fd, mem.data, mem.len, last_received);
+    hook_end(installed, installed && !req->hold_reboot);
     free(mem.data);
 }
 
@@ -649,6 +665,10 @@ static void handle_file(int fd, ota_request_t const *req, uint8_t const *pre, si
     char path[OTA_PATH_MAX + 16];
     if (!file_allowed()) {
         respond(fd, 409, "updating");
+        return;
+    }
+    if (!ota_whole_body_ok(req)) {
+        respond(fd, 400, "X-Piece-Size belongs to a piece (with X-Offset), file left as it was");
         return;
     }
     if (!req->has_path || req->content_length < 0 || !req->has_sha256) {
@@ -944,13 +964,14 @@ static bool piece_start(int fd, ota_request_t const *req, char const *path, uint
     return true;
 }
 
-static void piece_done(int fd) {
+// hold: the request that completed the file said X-Reboot: hold, so an installed image waits for the sender's reboot
+static void piece_done(int fd, bool hold) {
     uint8_t digest[SHA256_DIGEST_LEN];
     char    sha_hex[OTA_SHA256_HEX + 1];
     bool    finished;
     if (staged.route == OTA_ROUTE_FIRMWARE) {
         finished = finish_streamed(fd, sha_hex);
-        hook_end(finished, false);
+        hook_end(finished, finished && !hold);
         staged_reset();
         return;
     }
@@ -968,7 +989,7 @@ static void piece_done(int fd) {
     }
     finished = staged.route == OTA_ROUTE_ASSETS ? finish_assets(fd, staged.data, staged.total, staged.sent)
                                                 : finish_file(fd, staged.path, staged.data, staged.total, staged.sent);
-    hook_end(finished, false);
+    hook_end(finished, finished && staged.route == OTA_ROUTE_ASSETS && !hold);
     staged_reset();
 }
 
@@ -993,7 +1014,7 @@ static bool piece_receive(int fd, ota_request_t const *req, uint8_t const *pre, 
     body_t body   = {.pre = pre, .pre_len = pre_len, .total = req->content_length, .deflate = req->deflate,
                      .max = (long long)len, .sink = stream ? flash_sink : fixed_sink,
                      .ctx = stream ? (void *)&flash : (void *)&mem, .piece = true};
-    bool   ok     = receive_body(fd, body, sha_hex) && last_decoded == (long long)len;
+    bool   ok     = receive_body(fd, body, sha_hex); // a compressed piece: exactly len bytes (ota_inflate_complete)
     if (!ok || strcmp(sha_hex, req->sha256) != 0) {
         respond(fd, 400, "piece at %lld %s, send it again", req->offset, ok ? "arrived damaged" : "didn't arrive");
         return false; // staged.got is unchanged, so the same piece can come again
@@ -1018,7 +1039,7 @@ static bool piece_receive(int fd, ota_request_t const *req, uint8_t const *pre, 
 static bool piece_verdict_sent(int fd, ota_piece_verdict_t verdict, long long max) {
     switch (verdict) {
         case OTA_PIECE_MISSING:
-            respond(fd, 400, "a piece needs Content-Length, X-Content-SHA256, X-Total-Size, X-File-SHA256, no compression");
+            respond(fd, 400, "a piece needs Content-Length, X-Content-SHA256, X-Total-Size and X-File-SHA256");
             return true;
         case OTA_PIECE_BAD_DEFLATE:
             respond(fd, 400, "a compressed piece needs X-Piece-Size (its decoded bytes), and only a compressed piece has one");
@@ -1027,6 +1048,9 @@ static bool piece_verdict_sent(int fd, ota_piece_verdict_t verdict, long long ma
             respond(fd, 400, "the first firmware piece comes uncompressed: its image header is checked before anything is erased");
             return true;
         case OTA_PIECE_BLOATED: respond(fd, 413, "compressed piece larger than its X-Piece-Size allows"); return true;
+        case OTA_PIECE_ZTOO_LARGE:
+            respond(fd, 413, "a compressed piece decodes to at most %d bytes", OTA_ZPIECE_MAX);
+            return true;
         case OTA_PIECE_TOO_LARGE: respond(fd, 413, "larger than %lld bytes", max); return true;
         case OTA_PIECE_UNALIGNED:
             respond(fd, 400, "firmware pieces start on a 4096-byte boundary and are whole multiples of it, except the last");
@@ -1090,7 +1114,7 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
         respond(fd, 200, "piece ok, %zu of %zu bytes", staged.got, staged.total);
         return;
     }
-    piece_done(fd);
+    piece_done(fd, req->hold_reboot);
 }
 
 static void handle_delete(int fd, ota_request_t const *req) {

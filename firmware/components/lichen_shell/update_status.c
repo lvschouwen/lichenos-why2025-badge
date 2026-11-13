@@ -51,7 +51,9 @@ upd_stall_t update_stall(upd_watch_t const *w) {
     if (w->receiving && w->quiet_ms > (int64_t)update_stall_limit_ms(w->firmware, w->done, w->total)) {
         return UPD_STALL_SENDER;
     }
-    if (w->restarting && w->quiet_ms >= UPDATE_RESTART_AFTER_MS) {
+    int64_t restart_after = w->hold ? (int64_t)update_stall_limit_ms(w->firmware, w->done, w->total)
+                                    : UPDATE_RESTART_AFTER_MS;
+    if (w->restarting && w->quiet_ms >= restart_after) {
         return UPD_STALL_RESTART;
     }
     return UPD_STALL_NONE;

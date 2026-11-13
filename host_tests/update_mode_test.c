@@ -24,9 +24,14 @@ static void hook(bool apps_stopped) {
 #define STOP_CLOSE (UM_ACT_STOP_APPS | UM_ACT_CLOSE_SCREENS)
 
 // #298: the restart decision end to end, as the update screen's tick takes it (update_stall, then update mode)
-static upd_stall_t after(bool restarting, int64_t quiet_ms) {
-    upd_watch_t w = {.restarting = restarting, .firmware = true, .done = 100, .total = 100, .quiet_ms = quiet_ms};
+static upd_stall_t after_hold(bool restarting, bool hold, int64_t quiet_ms) {
+    upd_watch_t w = {.restarting = restarting, .hold = hold, .firmware = true, .done = 100, .total = 100,
+                     .quiet_ms = quiet_ms};
     return update_stall(&w);
+}
+
+static upd_stall_t after(bool restarting, int64_t quiet_ms) {
+    return after_hold(restarting, false, quiet_ms);
 }
 
 static void test_restart_decision(void) {
@@ -51,6 +56,23 @@ static void test_restart_decision(void) {
     CHECK(update_mode_on_end(&s, true, false) == UM_ACT_REBOOT && s.reboot);
     CHECK(after(false, 1000000) == UPD_STALL_NONE);
     CHECK(!update_mode_restart_due(&s, false) && update_mode_restart_due(&s, true));
+
+    // Held (X-Reboot: hold, badge.sh --no-reboot): no self-restart after 2 s; the badge stays on the running image
+    // until the sender reboots it, and only a sender gone for the stall limit (3 min) ends update mode
+    s = (update_state_t){0};
+    update_mode_on_prepare(&s, 0);
+    update_mode_on_begin(&s, true);
+    CHECK(update_mode_on_end(&s, true, true) == UM_ACT_NONE && !s.reboot);
+    CHECK(after_hold(true, true, UPDATE_RESTART_AFTER_MS) == UPD_STALL_NONE);
+    CHECK(after_hold(true, true, 179999) == UPD_STALL_NONE);
+    CHECK(!update_mode_restart_due(&s, true));
+    CHECK(after_hold(true, true, 180000) == UPD_STALL_RESTART);
+    // A failure is the #76 path, held or not: the hold is never consulted (no image is restarting)
+    s = (update_state_t){0};
+    update_mode_on_begin(&s, true);
+    CHECK(update_mode_on_end(&s, true, false) == UM_ACT_REBOOT && s.reboot);
+    CHECK(after_hold(false, true, 1000000) == UPD_STALL_NONE && after_hold(false, false, 1000000) == UPD_STALL_NONE);
+    CHECK(update_mode_restart_due(&s, true));
 }
 
 int main(void) {

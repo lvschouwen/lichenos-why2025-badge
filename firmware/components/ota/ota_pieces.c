@@ -94,10 +94,17 @@ static ota_piece_verdict_t deflate_rules(ota_request_t const *req) {
     if (req->deflate && req->route == OTA_ROUTE_FIRMWARE && req->offset == 0) {
         return OTA_PIECE_FIRST_PLAIN;
     }
+    if (req->deflate && req->piece_size > OTA_ZPIECE_MAX) {
+        return OTA_PIECE_ZTOO_LARGE;
+    }
     if (req->deflate && req->content_length > ota_deflate_bound(req->piece_size)) {
         return OTA_PIECE_BLOATED;
     }
     return OTA_PIECE_OK;
+}
+
+bool ota_whole_body_ok(ota_request_t const *req) {
+    return req->piece_size < 0;
 }
 
 ota_piece_verdict_t ota_piece_headers(ota_request_t const *req, long long max, size_t sector) {

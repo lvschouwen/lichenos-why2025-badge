@@ -116,7 +116,11 @@ target_compile_options(ota_pieces_test PRIVATE
 add_test(NAME ota_pieces_test COMMAND ota_pieces_test)
 
 # The inflate rules of compressed uploads (#298); the host's zlib stands in for the badge's ROM tinfl (test only)
-find_package(ZLIB REQUIRED)
+find_package(ZLIB)
+if(NOT ZLIB_FOUND)
+    message(FATAL_ERROR "host tests need the zlib headers (ota_inflate_test, #298): install zlib1g-dev (Debian, Ubuntu), "
+                        "zlib-devel (Fedora) or zlib (Arch)")
+endif()
 add_executable(ota_inflate_test
     ${CMAKE_CURRENT_SOURCE_DIR}/ota_inflate_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota/ota_inflate.c

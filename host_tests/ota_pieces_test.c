@@ -168,6 +168,17 @@ static void test_deflate_verdicts(void) {
     CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_BLOATED);
     CHECK(ota_deflate_bound(-1) == 0 && ota_deflate_bound(999999999999LL) > 999999999999LL);
 
+    // One compressed piece decodes to at most OTA_ZPIECE_MAX (badge.sh's piece cap): a tiny stream may not claim 4 MB
+    r = zpiece(OTA_ROUTE_FIRMWARE, 262144, 1000, 256 * 1024, total);
+    CHECK(OTA_ZPIECE_MAX == 256 * 1024);
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_OK && ota_piece_bounds(&r) == OTA_PIECE_OK);
+    r = zpiece(OTA_ROUTE_FILE, 0, 1000, 256 * 1024 + 1, MAX);
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_ZTOO_LARGE);
+    r = zpiece(OTA_ROUTE_FIRMWARE, 4096, 4096, 4 * 1024 * 1024 - 4096, MAX); // the whole slot in a few KiB
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_ZTOO_LARGE);
+    r = piece(OTA_ROUTE_FILE, 0, 1024 * 1024, MAX); // the cap is the compressed pieces' only: plain ones are as before
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_OK);
+
     // X-Piece-Size exactly when compressed, and never 0
     r = piece(OTA_ROUTE_FILE, 0, 10, 10), r.piece_size = 10;
     CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_BAD_DEFLATE);
@@ -230,11 +241,21 @@ static void test_deflate_lies(void) {
         ota_request_t r     = zpiece(route, off, wire, len, total);
         if (ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_OK && ota_piece_bounds(&r) == OTA_PIECE_OK) {
             CHECK(off >= 0 && len > 0 && wire > 0 && total <= MAX && off + len <= total);
-            CHECK(wire <= ota_deflate_bound(len) && ota_piece_len(&r) == len);
+            CHECK(wire <= ota_deflate_bound(len) && ota_piece_len(&r) == len && len <= OTA_ZPIECE_MAX);
             CHECK(route != OTA_ROUTE_FIRMWARE ||
                   (off > 0 && ota_piece_flash_ok((size_t)off, (size_t)len, (size_t)total, 4096)));
         }
     }
+}
+
+// #298: a whole-body upload with a piece header is refused, not silently treated as plain
+static void test_whole_body(void) {
+    ota_request_t r = {.route = OTA_ROUTE_FIRMWARE, .content_length = 100, .total_size = -1, .piece_size = -1};
+    CHECK(ota_whole_body_ok(&r));
+    r.piece_size = 100;
+    CHECK(!ota_whole_body_ok(&r));
+    r.piece_size = 0;
+    CHECK(!ota_whole_body_ok(&r));
 }
 
 // #298: the boot slot switches only for an image whose every byte came and whose slot hash is the file's hash
@@ -283,6 +304,7 @@ int main(void) {
     test_deflate_verdicts();
     test_deflate_lies();
     test_whole_file_ok();
+    test_whole_body();
     test_overflow_guards();
 
     CHECK(ota_round_up(0, 128) == 0);

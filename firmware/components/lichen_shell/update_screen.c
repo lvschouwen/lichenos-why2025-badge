@@ -45,6 +45,7 @@ typedef struct {
     bool     firmware; // an image (firmware or assets, #22): update mode, ends in a restart
     bool     new_version; // real firmware: remembered for "Updated" / "Update failed" after the restart
     bool     installed;   // new firmware installed: the restart boots it, so it never waits for the trial (#304)
+    bool     hold;        // the sender holds the restart (X-Reboot: hold, #298): no self-restart after 2 s
     char     name[48];
     uint32_t total;
     uint32_t done;
@@ -98,6 +99,7 @@ void update_screen_prepare(void) {
     shared.firmware    = true;
     shared.new_version = false; // the begin that follows says whether this is new firmware or assets
     shared.installed   = false;
+    shared.hold        = false;
     shared.name[0]     = '\0';
     shared.total    = 0;
     shared.done     = 0;
@@ -139,6 +141,7 @@ void update_screen_begin(bool image, bool firmware, char const *name, uint32_t t
     shared.firmware    = image;
     shared.new_version = firmware;
     shared.installed   = false;
+    shared.hold        = false;
     snprintf(shared.name, sizeof(shared.name), "%s", name ? name : "");
     shared.total    = total;
     shared.done     = 0;
@@ -162,7 +165,7 @@ void update_screen_progress(uint32_t done) {
 }
 
 void update_screen_end(bool ok, bool rebooting) {
-    (void)rebooting; // an installed image shows "Restarting" either way: the sender reboots it next
+    // An installed image shows "Restarting" either way; rebooting false means the sender holds the restart (#298)
     bool save = false;
     portENTER_CRITICAL(&lock);
     // FAILED too: the stall timer may have given up on a slow flash write that then succeeded
@@ -172,6 +175,7 @@ void update_screen_end(bool ok, bool rebooting) {
             shared.done  = shared.total;
             save         = shared.new_version;
             shared.installed = shared.new_version;
+            shared.hold      = !rebooting;
         } else {
             shared.phase = PH_FAILED;
         }
@@ -364,6 +368,7 @@ static void tick_stall(state_t *s, bool waiting, int64_t now) {
     upd_watch_t const w     = {.waiting    = waiting,
                                .receiving  = s->phase == PH_RECEIVING,
                                .restarting = s->phase == PH_RESTARTING,
+                               .hold       = s->hold,
                                .firmware   = s->firmware,
                                .done       = s->done,
                                .total      = s->total,

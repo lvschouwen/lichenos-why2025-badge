@@ -36,7 +36,7 @@ completely. A few files still come from BadgeVMS, see [Acknowledgements](#acknow
 - **An external 868 MHz antenna before any transmit.** The stock antenna is poorly matched at 868 MHz (SWR about 1.7
   even after tuning), and MeshCore transmits at up to 22 dBm.
 - To build: Linux, [ESP-IDF 6.1](https://docs.espressif.com/projects/esp-idf/en/v6.1/esp32p4/get-started/index.html),
-  CMake, Ninja and a host C/C++ compiler (for the host tests).
+  CMake, Ninja and a host C/C++ compiler with the zlib headers (for the host tests; `zlib1g-dev` on Debian/Ubuntu).
 
 ## Build
 

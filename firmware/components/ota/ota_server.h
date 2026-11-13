@@ -25,7 +25,8 @@ bool    ota_server_auto_closed(void);
 // block, never call LVGL without its lock. Any member may be NULL.
 // begin: a transfer starts (name is the file's name, NULL for firmware); total is the bytes the sender will send, 0 if
 // unknown. progress: bytes received so far, counted the same way as total (compressed bytes for a compressed body).
-// end: the transfer is over; rebooting is true when the badge is about to restart into the new firmware.
+// end: the transfer is over; rebooting is true when an installed image (firmware or assets) restarts by itself shortly,
+// false for a failure, a file, or an install whose sender holds the restart (X-Reboot: hold, #298).
 // ASSETS (#22) is handled like FIRMWARE (allowed after /prepare, everything stopped) but is not a new version
 typedef enum { OTA_KIND_FIRMWARE, OTA_KIND_FILE, OTA_KIND_ASSETS } ota_kind_t;
 typedef struct {

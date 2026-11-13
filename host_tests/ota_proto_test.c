@@ -255,7 +255,7 @@ static void test_repeated_headers(void) {
     static char const *const once[] = {
         "Content-Length: 5",       "X-Offset: 0",           "X-Total-Size: 5",   "X-File-SHA256: " SHA,
         "Authorization: Bearer " TOKEN, "X-Content-SHA256: " SHA, "X-Path: SD0:a.txt", "Content-Encoding: identity",
-        "Expect: 100-continue",    "X-Piece-Size: 5",
+        "Expect: 100-continue",    "X-Piece-Size: 5",       "X-Reboot: hold",
     };
     for (size_t i = 0; i < sizeof(once) / sizeof(once[0]); i++) {
         char          head[512];
@@ -289,6 +289,21 @@ static void test_piece_size(void) {
     CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Piece-Size: 1000000000000\r\n\r\n", &req) == 400); // 13 digits
     CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Piece-Size: 999999999999\r\n\r\n", &req) == 0 &&
           req.piece_size == 999999999999LL);
+}
+
+// #298: X-Reboot takes one of two words; absent is "auto" (the badge restarts by itself), as an old client gets
+static void test_reboot_header(void) {
+    ota_request_t req;
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Reboot: hold\r\n\r\n", &req) == 0 && req.hold_reboot);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nx-reboot:  HOLD \r\n\r\n", &req) == 0 && req.hold_reboot);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Reboot: auto\r\n\r\n", &req) == 0 && !req.hold_reboot);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\n\r\n", &req) == 0 && !req.hold_reboot);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Reboot: holdx\r\n\r\n", &req) == 400);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Reboot: \r\n\r\n", &req) == 400);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Reboot: no\r\n\r\n", &req) == 400);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Reboot: hold\r\nX-Reboot: auto\r\n\r\n", &req) == 400);
+    static char const nul[] = "PUT /firmware HTTP/1.1\r\nX-Reboot: ho\0ld\r\n\r\n";
+    CHECK(ota_parse_request(nul, sizeof(nul) - 1, &req) == 400);
 }
 
 // #211: a NUL inside a line used to cut the value short (X-Path: a.txt\0junk read as a.txt); it is refused now
@@ -527,6 +542,7 @@ int main(void) {
     test_recorded_valid();
     test_repeated_headers();
     test_piece_size();
+    test_reboot_header();
     test_embedded_nul();
     test_mutate_helpers();
     test_mutations();

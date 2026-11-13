@@ -49,15 +49,22 @@ typedef enum {
     OTA_PIECE_TOO_LARGE,   // 413: X-Total-Size past the route's limit
     OTA_PIECE_FIRST_PLAIN, // 400: a compressed firmware piece at offset 0 (its image header is checked before erasing)
     OTA_PIECE_BLOATED,     // 413: a compressed piece longer than any stream of X-Piece-Size bytes needs to be
+    OTA_PIECE_ZTOO_LARGE,  // 413: a compressed piece that decodes to more than OTA_ZPIECE_MAX
     OTA_PIECE_UNALIGNED, // 400: a firmware piece inside the file that is not whole erase sectors (ota_piece_flash_ok)
     OTA_PIECE_PAST_END,  // 400: X-Offset + Content-Length runs past X-Total-Size
 } ota_piece_verdict_t;
+
+// The most a compressed piece may decode to (#298), tools/badge.sh's piece cap: a few KiB on the wire must not make the
+// server task write megabytes of flash in one request
+#define OTA_ZPIECE_MAX (256 * 1024)
 
 // The bytes a piece adds to the file: X-Piece-Size when compressed, else Content-Length (the server reads it only once
 // ota_piece_headers and ota_piece_bounds passed)
 long long ota_piece_len(ota_request_t const *req);
 // The most bytes a zlib stream of len decoded bytes may take (stored blocks of incompressible data are a little longer)
 long long ota_deflate_bound(long long len);
+// A whole-body upload (no X-Offset) carries no piece header: X-Piece-Size there is refused (#298), not ignored
+bool ota_whole_body_ok(ota_request_t const *req);
 // The header checks: the fields a piece needs, the size limit max, and for firmware the sector rule
 ota_piece_verdict_t ota_piece_headers(ota_request_t const *req, long long max, size_t sector);
 // The piece lies inside the file; no sum of network numbers can overflow here

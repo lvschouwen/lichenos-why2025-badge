@@ -21,7 +21,9 @@ uint32_t update_stall_limit_ms(bool firmware, uint32_t done, uint32_t total);
 
 // After an installed image the screen says "Restarting..." and the sender reboots the badge (tools/badge.sh does at
 // once). When that reboot doesn't come the badge restarts by itself after this long (#298: it was 20 s, and every
-// update waited for it). Long enough to read the line and for the sender's own reboot to come first.
+// update waited for it). Long enough to read the line and for the sender's own reboot to come first. A sender that
+// holds the restart (X-Reboot: hold, badge.sh --no-reboot) gets the stall limit instead: the badge stays on the
+// running image until the sender reboots it, or the sender is gone that long.
 #define UPDATE_RESTART_AFTER_MS 2000
 
 // The update screen's watch on a transfer, once per tick
@@ -29,6 +31,7 @@ typedef struct {
     bool     waiting;    // prepared, no image started yet: the prepare timeout speaks, not this
     bool     receiving;  // bytes are coming
     bool     restarting; // an image is installed, the restart has not happened yet
+    bool     hold;       // the sender holds the restart (X-Reboot: hold)
     bool     firmware;
     uint32_t done;
     uint32_t total;

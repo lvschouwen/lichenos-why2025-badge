@@ -60,6 +60,12 @@ int main(void) {
     CHECK(update_stall(&w) == UPD_STALL_RESTART);
     w.quiet_ms = 19999; // the old 20 s line: long past now
     CHECK(update_stall(&w) == UPD_STALL_RESTART);
+    w.hold     = true; // the sender holds the restart: the stall limit, not 2 s
+    w.quiet_ms = 2000;
+    CHECK(update_stall(&w) == UPD_STALL_NONE);
+    w.quiet_ms = 180000;
+    CHECK(update_stall(&w) == UPD_STALL_RESTART);
+    w.hold    = false;
     w.waiting = true; // a prepare that no image followed: its own timeout speaks
     CHECK(update_stall(&w) == UPD_STALL_NONE);
     // A sender that went quiet mid-transfer is a failed update, never a restart into anything new

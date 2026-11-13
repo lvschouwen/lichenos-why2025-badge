@@ -131,6 +131,15 @@ static int h_piece_size(char *value, size_t vlen, ota_request_t *req) {
     return size_into(value, vlen, &req->piece_size);
 }
 
+static int h_reboot(char *value, size_t vlen, ota_request_t *req) {
+    (void)vlen;
+    if (strcasecmp(value, "hold") == 0) {
+        req->hold_reboot = true;
+        return 0;
+    }
+    return strcasecmp(value, "auto") == 0 ? 0 : 400;
+}
+
 static int h_file_sha256(char *value, size_t vlen, ota_request_t *req) {
     (void)vlen;
     int status           = hex_into(value, req->file_sha256);
@@ -195,6 +204,7 @@ static struct {
     {"X-Offset", h_offset},
     {"X-Total-Size", h_total_size},
     {"X-Piece-Size", h_piece_size},
+    {"X-Reboot", h_reboot},
     {"X-File-SHA256", h_file_sha256},
     {"Authorization", h_authorization},
     {"X-Content-SHA256", h_sha256},

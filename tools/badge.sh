@@ -70,10 +70,11 @@ Over Wi-Fi, while the badge is on Wi-Fi. <host> is an address or the badge's nam
 Settings and by "fw wifi"; needs mDNS on this machine, e.g. avahi/nss-mdns):
   ota-info <host>                       show the firmware version the badge runs
   ota-firmware <host> [--no-reboot]     install firmware/build/badge_fw.bin (or \$BADGE_FIRMWARE_BIN) and reboot into it
-                                      (--no-reboot: the badge still restarts by itself about 2 s after the install)
+                                      (--no-reboot: the badge keeps running the old version until you reboot it,
+                                      e.g. ota-reboot; after about 3 min without one it restarts into the new one)
   ota-file <host> <file> <badge-path>   push one file, e.g. 'FLASH0:[c6]firmware.bin'
   ota-assets <host> [--no-reboot]       write firmware/build/assets.bin (or \$BADGE_ASSETS_BIN) into the assets
-                                      partition (fonts) and reboot (--no-reboot: it still restarts by itself)
+                                      partition (fonts) and reboot (--no-reboot: as for ota-firmware)
   ota-c6 <host> [dir]                   push the C6 bundle (bootloader, partitions, firmware + .md5; default dir
                                       firmware/storage_staging/c6) in a safe order, reboot, wait for Wi-Fi
   ota-rm <host> <badge-path>            delete one file on the badge
@@ -590,6 +591,8 @@ ota_put_pieces() {
         fi
         args+=(-T "$body")
         [ -n "$path" ] && args+=(-H "X-Path: $path")
+        # The piece that completes an install says whether the badge may restart by itself (#298)
+        [ "$OTA_HOLD" = yes ] && [ $((offset + size)) -ge "$total" ] && args+=(-H 'X-Reboot: hold')
         for ((try = 1; ; try++)); do
             # Damage on the badge's link depends on where bytes fall in the TCP stream (#40): a filler header of
             # varying length shifts the body, so a retry doesn't hit the same spot again
@@ -639,6 +642,7 @@ ota_put() {
     fi
     args+=(-T "$body")
     [ -n "$path" ] && args+=(-H "X-Path: $path")
+    [ "$OTA_HOLD" = yes ] && args+=(-H 'X-Reboot: hold')
     local status=0
     ota_curl "${args[@]}" "http://$ip:$OTA_PORT/$route" || status=$?
     [ "$body" = "$file" ] || rm -f -- "$body"
@@ -651,18 +655,20 @@ cmd_ota_info() { ota_curl "http://$1:$OTA_PORT/info"; }
 cmd_ota_reboot() { ota_curl -X POST "http://$1:$OTA_PORT/reboot"; }
 
 # After an install the badge restarts by itself about 2 s later when no reboot came (#298): the reboot is sent at
-# once, and a badge that is already restarting (connection refused or cut) is what was asked for
+# once, and a badge that is already restarting is what was asked for: connection refused (7), or closed or cut
+# without a reply (52, 56). Any other failure (no such host, a timeout, an error reply) is reported.
 ota_reboot_installed() {
-    local reply
-    if ! reply=$(cmd_ota_reboot "$1" 2>&1); then
-        case $reply in
-            *"curl: (22)"*) echo "$reply" >&2; return 1 ;; # the badge answered with an error
-            *) echo "the badge restarts by itself" ;;
-        esac
-        return 0
-    fi
-    echo "$reply"
+    local reply rc=0
+    reply=$(cmd_ota_reboot "$1" 2>&1) || rc=$?
+    case $rc in
+        0) echo "$reply" ;;
+        7 | 52 | 56) echo "the badge restarts by itself" ;;
+        *) echo "$reply" >&2; return 1 ;;
+    esac
 }
+
+# --no-reboot (#298): the request that completes the install says X-Reboot: hold, so the badge waits for a reboot
+OTA_HOLD=
 
 # Ask the badge to stop everything else (MeshCore, LoRa, screens) before the image starts, and wait for it
 # to say "ready" (it prints the DMA RAM it has free then). Without /prepare in /info the push goes ahead as is.
@@ -680,6 +686,7 @@ ota_prepare() {
 
 cmd_ota_firmware() {
     local ip=$1 reboot=${2:-}
+    [ "$reboot" != --no-reboot ] || OTA_HOLD=yes
     ota_prepare "$ip" || exit 1
     local bin=${BADGE_FIRMWARE_BIN:-$REPO/firmware/build/badge_fw.bin}
     ota_put "$ip" firmware "$bin"
@@ -697,6 +704,7 @@ cmd_ota_file() {
 # and followed by a reboot, because the running firmware reads the partition in place
 cmd_ota_assets() {
     local ip=$1 reboot=${2:-}
+    [ "$reboot" != --no-reboot ] || OTA_HOLD=yes
     local bin=${BADGE_ASSETS_BIN:-$REPO/firmware/build/assets.bin}
     [ -f "$bin" ] || { echo "no $bin, build first" >&2; exit 1; }
     ota_chunks "$ip" || { echo "this receiver can't take assets (no pieces support)" >&2; exit 1; }
