@@ -174,6 +174,29 @@ static void test_cancel_overflow(void) {
     CHECK(sevens == 0 && ones == UI_CALL_QUEUE_CAP - 1 && twos == 1);
 }
 
+// A schedule that fails, driven single-threaded so the count is ours: the call is taken back (hand_over says false and
+// the caller keeps arg), the queue is idle again, and the next call schedules a drain that runs it
+static int  s_det_schedules;
+static bool fail_first_schedule(ui_call_fn_t fn, void *arg) {
+    (void)fn;
+    (void)arg;
+    return ++s_det_schedules > 1;
+}
+
+static void test_schedule_failure(void) {
+    ui_call_queue_t q = {0};
+    ran_n             = 0;
+    s_det_schedules   = 0;
+    s_raw_n           = 0;
+    CHECK(!ui_call_queue_hand_over(&q, note, (void *)1, 0, fail_first_schedule, fake_raw_call));
+    CHECK(q.count == 0 && !q.scheduled && s_det_schedules == 1 && s_raw_n == 0);
+    CHECK(ui_call_queue_hand_over(&q, note, (void *)2, 0, fail_first_schedule, fake_raw_call)); // schedules again
+    CHECK(ui_call_queue_hand_over(&q, note, (void *)3, 0, fail_first_schedule, fake_raw_call));
+    CHECK(s_det_schedules == 2 && q.count == 2 && q.scheduled);
+    ui_call_queue_drain(&q);
+    CHECK(ran_n == 2 && ran[0] == 2 && ran[1] == 3 && q.count == 0 && !q.scheduled); // 1 never runs
+}
+
 // ---- threads: producers, one LVGL thread, the recursive lock, the production hand-over ----
 
 #define PRODUCERS 6
@@ -231,7 +254,9 @@ static bool add_timer(ui_call_fn_t fn, void *arg) {
 }
 
 static bool fake_schedule(ui_call_fn_t fn, void *arg) {
-    if (++s_schedules % SCHEDULE_FAIL_EVERY == 0) {
+    // The first schedule always happens (the first push finds the queue idle), so one failure is certain whatever
+    // the thread timing; how many drains follow depends on it, so the every-Nth ones are extra, never counted on
+    if (++s_schedules == 1 || s_schedules % SCHEDULE_FAIL_EVERY == 0) {
         s_schedule_fails++;
         return false;
     }
@@ -472,6 +497,7 @@ int main(void) {
     test_reentrant_push();
     test_cancel();
     test_cancel_overflow();
+    test_schedule_failure();
     test_call_owner();
     test_owner();
     test_port_gate();
