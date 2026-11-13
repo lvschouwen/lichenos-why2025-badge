@@ -15,6 +15,7 @@
 #include "mesh_advert_cfg.h"
 #include "mesh_chat.h"
 #include "mesh_cscope.h"
+#include "mesh_onair_run.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
 #include "mesh_hist_crypto.h"

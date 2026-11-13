@@ -534,6 +534,27 @@ history slot) and `BadgeMesh`'s `sendFloodScoped` overrides pick the console key
 - `tools/badge.sh` reads `fw mesh scope` through the same path before each line that can flood and refuses unless the
   one exact status line names the allow file's `scope <region>` line (`tools/onair_guard.sh`).
 
+## Console on-air allow list (#289)
+
+The badge-side twin of `tools/onair_guard.sh`, for console lines that reach the badge another way (a direct
+`POST /console`, a serial write, keys typed into the Console app). With `fw onair on`, a console line transmits only to
+a listed channel or contact; anything else answers `on air refused: <target> is not on the console allow list` and
+sends nothing. The screens are never limited. Rules: `mesh_onair.c` (pure, `host_tests/mesh_onair_test.c`); the live
+copy, its setting and `fw onair` are `mesh_onair_run.c`.
+
+- A setting in MeshCore's app settings (`onair_on`, `onair_list`), **off by default**: a user badge behaves as before.
+  Kept across flashes; a factory reset or MeshCore's Clear data erases it (off again). The list is never in the repo.
+- `fw onair` shows it; `fw onair on` works from any console (it only narrows). `off`, `allow <channel|key digits>`,
+  `remove <...>` and `clear` work only from the USB console: the Wi-Fi console's token also installs firmware, and the
+  Console app counts as remote (injected keys). `tools/onair_guard.sh` refuses those four itself.
+- At most 8 entries. Key digits (12 to 64 hex) match a contact by the 6-byte prefix the senders address it by; a
+  channel matches by name (ASCII case, as the badge compares channels). A saved list that does not decode is empty.
+- Checked where the target is resolved, after `send_ready` (`mesh_api_send.cpp`): channel and DM sends, trace,
+  discover, remote login/status/cli/settings, telemetry. Two cases without a plain target: an **advert** (`fw advert`,
+  `fw mesh advert`) passes, it has no target and its flood is bounded by the console scope (a one-off bench advert is
+  accepted); the **history polls** `fw mesh history <who> on` schedules are checked when switched on (the console says
+  why) and again at each poll the mesh task sends, so a poll whose target is not listed is refused, not sent.
+
 ## Channel flood scope (#291)
 
 A channel can carry a **flood scope of its own**: a message sent on it from the screens floods in that region instead

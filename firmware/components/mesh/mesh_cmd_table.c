@@ -15,6 +15,8 @@ mesh_con_t const MESH_CONSOLE_CMDS[MESH_CON_COUNT] = {
     [MESH_CON_CHANNEL]  = {"channel", "channel add <name> <base64 key> | channel add #name | channel rm <index|name> | "
                                       "channel show <index|name> | channel rename <index|name> <new name>"},
     [MESH_CON_ADVERT]   = {"advert", "advert [zero|flood] (send an advert now; default as the Advertise setting)"},
+    [MESH_CON_ONAIR]    = {"onair", "onair [on | off | allow <channel|key digits> | remove <channel|key digits> | clear] "
+                                    "(the console's on-air allow list; off and changes only from the USB console)"},
 };
 
 mesh_sub_t const MESH_SUBS[MESH_SUB_COUNT] = {

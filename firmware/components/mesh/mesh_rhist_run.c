@@ -12,6 +12,7 @@
 #include "mesh.h"
 #include "mesh_cscope.h"
 #include "mesh_format.h"
+#include "mesh_onair_run.h"
 #include "meshcore_run.h"
 
 #include <stdio.h>
@@ -381,6 +382,13 @@ static bool parse_change(char const *rest, unsigned *minutes, bool *yes) {
     return true;
 }
 
+// Why a console line may not switch polls on: #290, its asks would be console floods; #289, said now with the target
+// (every poll is checked again when the mesh task sends it)
+static char const *switch_on_refusal(uint8_t const *prefix) {
+    char const *why = mesh_cscope_refusal(true);
+    return why ? why : mesh_onair_refusal(true, ONAIR_TX_CONTACT, NULL, prefix);
+}
+
 static void console_change(uint8_t const *prefix, char const *verb) {
     unsigned   minutes = RH_INTERVAL_DEF;
     bool       yes     = false;
@@ -418,7 +426,7 @@ static void console_change(uint8_t const *prefix, char const *verb) {
                       have ? "more often" : "at the interval");
         return;
     }
-    char const *why = on ? mesh_cscope_refusal(true) : NULL; // #290: its asks would be console floods
+    char const *why = on ? switch_on_refusal(prefix) : NULL;
     if (why) {
         console_reply("not switched on: %s", why);
         return;

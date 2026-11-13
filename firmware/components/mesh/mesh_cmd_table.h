@@ -3,8 +3,9 @@
 // data with their matching rule, so the dispatch is one loop and a host test pins the names (host_tests/
 // mesh_cmd_table_test.c). Pure; the handlers are mesh_cmd*.cpp's, in the same order (mesh_cmd.cpp checks it).
 //
-// The per-app command prefix (#229) goes where mesh_console_init registers MESH_CONSOLE_CMDS. The on-air allow-list
-// (#289) does not belong in this dispatch, which sees only a word and raw text: see mesh_sub_run in mesh_cmd.cpp.
+// The per-app command prefix (#229) goes where mesh_console_init registers MESH_CONSOLE_CMDS. The on-air allow list's
+// check (#289) does not belong in this dispatch, which sees only a word and raw text: it sits in the senders
+// (mesh_onair.h); only its own command, "onair", is in the table.
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -21,6 +22,7 @@ typedef enum {
     MESH_CON_CHANNELS,
     MESH_CON_CHANNEL,
     MESH_CON_ADVERT,
+    MESH_CON_ONAIR, // #289: the console's on-air allow list
     MESH_CON_COUNT,
 } mesh_con_id_t;
 

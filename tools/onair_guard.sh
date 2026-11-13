@@ -121,6 +121,13 @@ onair_scope_verdict() {
 onair_verdict() {
     local w1 w2 w3 w4 _rest want
     read -r w1 w2 w3 w4 _rest <<<"$(onair_words "$1")"
+    if [ "$w1" = onair ]; then # #289: the badge's own allow list; only narrowing it passes
+        case "$w2" in
+            "" | on) echo pass ;;
+            *) echo "deny 'onair ${w2}' weakens or edits the badge's on-air allow list: Lucas does that himself at the USB console (#289)" ;;
+        esac
+        return
+    fi
     [ "$w1" = mesh ] || { echo pass; return; }
     case "$w2" in
         send)

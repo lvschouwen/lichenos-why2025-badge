@@ -68,6 +68,15 @@ expect pass "$b mesh history"
 expect pass "$b mesh history TESTNODE on 60 YES"
 expect deny "$b mesh history OTHER-RPT on 60 YES"
 expect deny "$b mesh history 0123456789ab interval 10"
+# The badge's own allow list (#289): reading it and switching it on pass, off and every edit are Lucas's
+expect pass "$b onair"
+expect pass "$b onair on"
+expect deny "$b onair off"
+expect deny "$b fw onair allow '#zz-other'"
+expect deny "$b onair remove abcdef123456"
+expect deny "$b onair clear"
+expect deny "tools/badge.sh console /dev/ttyACM0 'fw onair off'"
+expect pass "grep -n 'onair off' firmware/components/mesh/mesh_onair_run.c"
 expect pass "grep -n 'mesh send Public' firmware/components/mesh/mesh_task.cpp"
 expect pass "git commit -m 'guard-badge.sh denies fw mesh send to Public
 lines that reach the badge (badge.sh, ssh) are checked'"
@@ -129,6 +138,9 @@ sent refused fw 192.0.2.1 mesh remote OTHER-RPT cli reboot YES
 sent refused fw 192.0.2.1 mesh advert interval 6h
 sent refused console /dev/null "fw mesh send Public hi"
 sent sent fw 192.0.2.1 mesh advert
+sent sent fw 192.0.2.1 onair on
+sent refused fw 192.0.2.1 onair off
+sent refused console /dev/null "fw onair allow #zz-other"
 # The console scope (#290): an on-air line with a target goes only when the badge's console scope is the scope line
 sent sent fw 192.0.2.1 mesh remote TESTNODE status
 sent sent fw 192.0.2.1 fw mesh send '#badgetest' hi

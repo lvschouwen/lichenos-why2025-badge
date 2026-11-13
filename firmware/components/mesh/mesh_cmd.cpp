@@ -130,12 +130,11 @@ template <typename T, size_t N> static constexpr bool ids_in_order(T const (&tab
 }
 static_assert(ids_in_order(MESH_SUB_RUN, MESH_SUB_COUNT), "MESH_SUB_RUN: one handler per MESH_SUBS entry, in its order");
 
-// Every "fw mesh" subcommand runs here, after its match. Not the place for #289's on-air allow-list: here the target is
-// still raw text. The sites that see it resolved are the MESH_FROM_CONSOLE checks next to the #290 scope refusals:
-// send_ready (mesh_api_send.cpp: channel and DM sends, and the trace, discover, remote and telemetry starts, with
-// mesh_cscope_channel_refusal for channels) and advert_tx_locked (mesh_api_settings.cpp). #289 must still decide two
-// cases: "fw advert" (cmd_advert), which has no target, and the status requests that "fw mesh history <who> on"
-// schedules, which the mesh task sends later (mesh_rhist_tick), not from the console.
+// Every "fw mesh" subcommand runs here, after its match. Not the place for #289's on-air allow list: here the target is
+// still raw text. It is checked where the target is resolved, next to the #290 scope refusals: onair_ready after
+// send_ready (mesh_api_send.cpp: channel and DM sends, the trace, discover, remote and telemetry starts and the status
+// history's polls) and advert_tx_locked (mesh_api_settings.cpp). The two cases without a plain target (adverts, and
+// the polls "fw mesh history <who> on" schedules) are decided in mesh_onair.h.
 static void mesh_sub_run(mesh_sub_id_t id, char const *rest) {
     MESH_SUB_RUN[id].run(rest);
 }
@@ -165,6 +164,7 @@ struct mesh_con_run_t {
 static constexpr mesh_con_run_t MESH_CON_RUN[] = {
     {MESH_CON_MESH, cmd_mesh},         {MESH_CON_CONTACTS, cmd_contacts}, {MESH_CON_MSGS, cmd_msgs},
     {MESH_CON_CHANNELS, cmd_channels}, {MESH_CON_CHANNEL, cmd_channel},   {MESH_CON_ADVERT, cmd_advert},
+    {MESH_CON_ONAIR, mesh_onair_console},
 };
 static_assert(ids_in_order(MESH_CON_RUN, MESH_CON_COUNT), "MESH_CON_RUN: one handler per MESH_CONSOLE_CMDS entry");
 
@@ -174,6 +174,7 @@ extern "C" void mesh_console_init(void) {
         return;
     }
     registered = true;
+    mesh_onair_init(); // #289: before the first command that can send
     // #229: the per-app command prefix goes here, the one place MeshCore's commands get their names
     for (mesh_con_run_t const &c : MESH_CON_RUN) {
         console_register(MESH_CONSOLE_CMDS[c.id].name, MESH_CONSOLE_CMDS[c.id].usage, c.run);

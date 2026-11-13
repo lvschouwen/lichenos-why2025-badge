@@ -23,7 +23,7 @@ static int failures;
 #define RAW      MESH_SUB_WORD_RAW // none or some, the handler gets the space too
 
 static void test_console_commands(void) {
-    static char const *const names[] = {"mesh", "contacts", "msgs", "channels", "channel", "advert"};
+    static char const *const names[] = {"mesh", "contacts", "msgs", "channels", "channel", "advert", "onair"};
     CHECK(MESH_CON_COUNT == sizeof(names) / sizeof(names[0]));
     for (int i = 0; i < MESH_CON_COUNT; i++) {
         CHECK(strcmp(MESH_CONSOLE_CMDS[i].name, names[i]) == 0);
@@ -42,6 +42,8 @@ static void test_console_commands(void) {
         "channel add <name> <base64 key> | channel add #name | channel rm <index|name> | channel show <index|name> | "
         "channel rename <index|name> <new name>",
         "advert [zero|flood] (send an advert now; default as the Advertise setting)",
+        "onair [on | off | allow <channel|key digits> | remove <channel|key digits> | clear] (the console's on-air allow "
+        "list; off and changes only from the USB console)",
     };
     for (int i = 0; i < MESH_CON_COUNT; i++) {
         if (strcmp(MESH_CONSOLE_CMDS[i].usage, usage[i]) != 0) {
