@@ -536,7 +536,7 @@ static void test_status_reason(void) {
         {200, "OK"},          {400, "Bad Request"},         {401, "Unauthorized"},       {403, "Forbidden"},
         {404, "Not Found"},   {405, "Method Not Allowed"},  {409, "Conflict"},           {411, "Length Required"},
         {413, "Content Too Large"}, {422, "Unprocessable Content"}, {503, "Service Unavailable"},
-        {507, "Insufficient Storage"}, {500, "Internal Server Error"}, {0, "Internal Server Error"},
+        {507, "Insufficient Storage"}, {415, "Unsupported Media Type"}, {500, "Internal Server Error"}, {0, "Internal Server Error"},
     };
     for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
         CHECK(strcmp(ota_status_reason(want[i].status), want[i].reason) == 0);
@@ -641,8 +641,9 @@ static bool slots_match_limit(char const *csv) {
     return slot_size(csv, "ota_0") == OTA_FIRMWARE_MAX && slot_size(csv, "ota_1") == OTA_FIRMWARE_MAX;
 }
 
-// #403: stream_erase clamps an erase to the slot, safe only while the firmware limit is the slot size. The firmware
-// build asserts it (_Static_assert in ota_server.c, sizes from the partition table); this checks the same table here.
+// #403: stream_erase clamps an erase to the slot, safe only while the firmware limit is the slot size. A documentation
+// test only: it re-reads the table with its own parser and passed before #403 too. The real guard is the build: the ota
+// component's CMakeLists (both slots one size) and the _Static_assert in ota_server.c (FIRMWARE_MAX == that size).
 static void test_slot_size(void) {
     static char csv[4096];
     FILE       *f = fopen(OTA_PARTITIONS_CSV, "r");

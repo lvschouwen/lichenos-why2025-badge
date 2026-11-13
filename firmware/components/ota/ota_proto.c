@@ -327,6 +327,7 @@ char const *ota_status_reason(int status) {
         case 409: return "Conflict";
         case 411: return "Length Required";
         case 413: return "Content Too Large";
+        case 415: return "Unsupported Media Type";
         case 417: return "Expectation Failed";
         case 422: return "Unprocessable Content";
         case 503: return "Service Unavailable";
