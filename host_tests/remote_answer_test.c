@@ -263,6 +263,10 @@ static void test_send_pages(void) {
         CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS);
         v.focus = "* Send advert";
         CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS);
+        v.focus = "Start MeshCore"; // starts it: a due periodic advert may go out
+        CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS);
+        v.focus = "Start at boot"; // only the setting
+        CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
         v.focus = "Advert & contacts"; // opens the page; its own rule below
         CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
     }

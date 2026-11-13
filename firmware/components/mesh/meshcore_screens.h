@@ -15,6 +15,8 @@ bool meshcore_grid_arrange_possible(void);
 bool meshcore_grid_arrange_start(void);
 void meshcore_grid_reload(void);
 bool meshcore_grid_esc(void *arg);
+// The grid is the screen on top (#377, bench_enter_starts). LVGL task.
+bool meshcore_grid_on_top(void);
 // A tile's drawing (meshcore_grid_icons.c), mesh_grid_tile_t; size_px square, on its own object in parent
 void meshcore_grid_icon(lv_obj_t *parent, int tile, int size_px);
 

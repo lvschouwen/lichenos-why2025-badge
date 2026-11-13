@@ -151,7 +151,25 @@ static void texts(void) {
     CHECK(mesh_run_tile_text(s, true, tiny, sizeof(tiny), l2, sizeof(l2)) && strcmp(tiny, "Not") == 0);
 }
 
+// #377: a remote Enter that would start MeshCore is refused; which states count
+static void enter_starts(void) {
+    mesh_run_t r = MESH_RUN_INIT;
+    CHECK(mesh_run_enter_starts(r, true));
+    CHECK(!mesh_run_enter_starts(r, false)); // not on its grid or home tile
+    r.paused = true;
+    CHECK(mesh_run_enter_starts(r, true)); // fails safe
+    r = (mesh_run_t){MESH_RUN_STOPPED, MESH_WHY_UPDATE, false};
+    CHECK(!mesh_run_enter_starts(r, true)); // stopped for an update: Enter starts nothing
+    r.state = MESH_RUN_RUNNING;
+    CHECK(!mesh_run_enter_starts(r, true));
+    r.state = MESH_RUN_STARTING;
+    CHECK(!mesh_run_enter_starts(r, true));
+    r.state = MESH_RUN_STOPPING;
+    CHECK(!mesh_run_enter_starts(r, true));
+}
+
 int main(void) {
+    enter_starts();
     machine();
     paused();
     texts();

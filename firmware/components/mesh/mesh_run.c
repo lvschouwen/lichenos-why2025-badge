@@ -133,6 +133,10 @@ char const *mesh_run_action_label(mesh_run_t r) {
     return r.why == MESH_WHY_UPDATE ? "Stopped for update" : "Start MeshCore";
 }
 
+bool mesh_run_enter_starts(mesh_run_t r, bool on_top) {
+    return on_top && r.state == MESH_RUN_STOPPED && r.why != MESH_WHY_UPDATE;
+}
+
 char const *mesh_run_action_value(mesh_run_t r) {
     if (mesh_run_busy(r) || (r.state == MESH_RUN_STOPPED && r.why == MESH_WHY_UPDATE)) {
         return "";

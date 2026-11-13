@@ -88,7 +88,7 @@ bool ui_answer_key_ok(uint8_t code, char const *focus, char const *answer_label,
     v.focus        = focus;
     v.chat_known   = bench_chat_on_top(chat, sizeof(chat), &v.chat_dm);
     v.chat_name    = chat;
-    v.enter_starts = bench_enter_starts();
+    v.enter_starts = bench_enter_starts(v.top_screen, focus);
     rans_t r     = answer_label && key == RKEY_ENTER ? remote_answer_still(&v, answer_label, answer_gen)
                                                      : remote_key_check(key, &v);
     if (r == RANS_OK) {

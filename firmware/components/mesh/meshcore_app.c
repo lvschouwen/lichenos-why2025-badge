@@ -2,6 +2,7 @@
 // tiles, #88: meshcore_grid.c, with the lists in meshcore_chats.c and meshcore_contacts.c), its about section under
 // Settings and its background part (the mesh task, started from main.c whatever screen is open). Esc on the grid is
 // the shell's. Everything with an lv_obj_t runs in the LVGL task; it reads MeshCore only through mesh.h copies.
+#include "bench_scope.h"
 #include "esp_log.h"
 #include "screen_ids.h"
 #include "lichen_app.h"
@@ -415,6 +416,14 @@ static lichen_app_t const *self(void) {
     return &meshcore_app;
 }
 
+// bench_enter_starts (#377): Enter on the grid (any tile: the check does not read which) or on MeshCore's home tile
+// would start a stopped MeshCore (open() and the grid's start_instead), and a start may send a due periodic advert
+static bool remote_enter_starts(int top_screen, char const *focus) {
+    bool home_tile = top_screen == 0 && focus && strcmp(focus, meshcore_app.name) == 0;
+    return mesh_run_enter_starts(meshcore_run_get(), home_tile || meshcore_grid_on_top());
+}
+
 void meshcore_app_register(void) {
+    bench_starts_bind(remote_enter_starts); // from boot on, before home shows its tile
     meshcore_run_init(lichen_register_app(&meshcore_app));
 }

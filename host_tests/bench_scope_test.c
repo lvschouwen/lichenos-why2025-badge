@@ -34,18 +34,20 @@ static bool no_chat(char *name, size_t cap, bool *dm) {
 
 static bool starts_now;
 
-static bool fake_starts(void) {
-    return starts_now;
+static bool fake_starts(int top_screen, char const *focus) {
+    return starts_now && top_screen == 0 && focus && strcmp(focus, "MeshCore") == 0;
 }
 
 static void test_starts(void) {
-    CHECK(!bench_enter_starts()); // unbound: no grid was ever built
+    CHECK(!bench_enter_starts(0, "MeshCore")); // unbound: MeshCore not registered
     bench_starts_bind(fake_starts);
-    CHECK(!bench_enter_starts());
+    CHECK(!bench_enter_starts(0, "MeshCore"));
     starts_now = true;
-    CHECK(bench_enter_starts());
+    CHECK(bench_enter_starts(0, "MeshCore")); // the arguments reach the bound check
+    CHECK(!bench_enter_starts(0, "Settings"));
+    CHECK(!bench_enter_starts(3, "MeshCore"));
     bench_starts_bind(NULL);
-    CHECK(!bench_enter_starts());
+    CHECK(!bench_enter_starts(0, "MeshCore"));
 }
 
 static void test_chat(void) {

@@ -62,6 +62,10 @@ char const *mesh_run_grid_text(mesh_run_t r, bool lora_ok);
 // The Settings action row: its label ("Stop MeshCore" while running, "Start MeshCore" while stopped, the state while
 // busy) and its value (what Enter does now, "" when nothing)
 char const *mesh_run_action_label(mesh_run_t r);
+// Whether an Enter would start MeshCore (#377: a start may send a due periodic advert): on_top is a screen whose Enter
+// opens or starts it (its grid, or its home tile focused) while it is stopped, not for an update. Paused counts too
+// (the start is refused then, but the remote check fails safe).
+bool        mesh_run_enter_starts(mesh_run_t r, bool on_top);
 char const *mesh_run_action_value(mesh_run_t r);
 
 // The Settings "Start at boot" row's value

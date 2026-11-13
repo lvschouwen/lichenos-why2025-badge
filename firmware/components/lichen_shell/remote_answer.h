@@ -19,8 +19,8 @@
 //     is refused ("fw mesh send/dm" is the console's way). Typing text is fine.
 //   - The other screens where Enter goes on air with no dialog are refused outright: Trace and Discover path, Status
 //     and Telemetry (their Again rows), the repeater login, command and settings pages, the contact page's rows that
-//     open them or send (remote_contact_send_row), a "Send advert" row anywhere (MeshCore's settings), and an Enter
-//     that starts a stopped MeshCore (a due periodic advert goes out). Advert & contacts (SCREEN_ADVERT) changes what
+//     open them or send (remote_contact_send_row), a "Send advert" or "Start MeshCore" row anywhere (MeshCore's
+//     settings), and an Enter that starts a stopped MeshCore on its grid or home tile (a due periodic advert goes out). Advert & contacts (SCREEN_ADVERT) changes what
 //     the badge sends on its own later (interval, flood, location): Enter, Left and Right are refused there.
 //   - Esc and every other key always go: they only move or go back.
 //   - Enter, Left and Right are never held (hold:): LVGL clicks on the release, so a dialog that opened during the hold

@@ -44,8 +44,10 @@ bool remote_holds_ok(uint32_t const *keys, size_t n, uint8_t (*code_of)(uint32_t
 // Settings (a repeater's) opens SCREEN_RSET, which reads with CLI gets as it opens; Log out sends the logout.
 static char const *const CONTACT_SEND_ROWS[] = {"Trace path", "Discover path", "Status", "Log in",
                                                 "Command",    "Settings",      "Log out"};
-// MeshCore's settings: sends an advert at once, with no dialog (the grid's Advertise asks first)
-#define SEND_ADVERT_ROW "Send advert"
+// Rows on any screen whose Enter goes on air with no dialog: MeshCore's settings (Lichen Settings > Apps > MeshCore and
+// MeshCore's own) send an advert at once (the grid's Advertise asks first), and start MeshCore (mesh_run.c's action
+// label), which may send a due periodic advert
+static char const *const ANY_SEND_ROWS[] = {"Send advert", "Start MeshCore"};
 
 static bool row_is(char const *focus, char const *row) {
     while (*focus == '*' || *focus == ' ') {
@@ -60,6 +62,15 @@ bool remote_contact_send_row(char const *focus) {
     }
     for (size_t i = 0; i < sizeof(CONTACT_SEND_ROWS) / sizeof(CONTACT_SEND_ROWS[0]); i++) {
         if (row_is(focus, CONTACT_SEND_ROWS[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool any_send_row(char const *focus) {
+    for (size_t i = 0; focus && i < sizeof(ANY_SEND_ROWS) / sizeof(ANY_SEND_ROWS[0]); i++) {
+        if (row_is(focus, ANY_SEND_ROWS[i])) {
             return true;
         }
     }
@@ -92,7 +103,7 @@ static rans_t page_enter(remote_view_t const *v) {
     }
     if (send_page(v->top_screen) || v->top_screen == SCREEN_ADVERT || v->enter_starts ||
         (v->top_screen == SCREEN_CONTACT && remote_contact_send_row(v->focus)) ||
-        (v->focus && row_is(v->focus, SEND_ADVERT_ROW))) {
+        any_send_row(v->focus)) {
         return RANS_SENDS;
     }
     return RANS_OK;

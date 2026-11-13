@@ -23,9 +23,9 @@ void bench_starts_bind(bench_starts_fn fn) {
     __atomic_store_n(&bound_starts, fn, __ATOMIC_RELEASE);
 }
 
-bool bench_enter_starts(void) {
+bool bench_enter_starts(int top_screen, char const *focus) {
     bench_starts_fn fn = __atomic_load_n(&bound_starts, __ATOMIC_ACQUIRE);
-    return fn != NULL && fn();
+    return fn != NULL && fn(top_screen, focus);
 }
 
 bool bench_chat_on_top(char *name, size_t cap, bool *dm) {
