@@ -16,7 +16,6 @@
 # First version created by --init (2026-11-07); --init refuses when this file exists.
 ccn	firmware/components/lichen_net/wifi_list.c:utf8_len	27
 ccn	firmware/components/lichen_shell/files_model.c:files_text_page	30
-ccn	firmware/components/lichen_shell/update_screen.c:tick	35
 ccn	firmware/components/mesh/mesh_frame.c:mf_decode	33
 ccn	firmware/components/mesh/mesh_journal.c:scan_task_fn	29
 ccn	firmware/components/mesh/mesh_remote.c:rr_request_prepared	29

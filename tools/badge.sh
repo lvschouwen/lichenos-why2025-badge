@@ -18,7 +18,8 @@
 #                      from ${XDG_CONFIG_HOME:-~/.config}/why2025-badge/ota-token)
 #   BADGE_OTA_PORT     port of the badge's update server  (default: 8080)
 #   BADGE_FIRMWARE_BIN image ota-firmware installs        (default: firmware/build/badge_fw.bin)
-#   BADGE_OTA_COMPRESS 0 sends uncompressed even when the receiver takes deflate (default: 1)
+#   BADGE_OTA_COMPRESS 0 sends uncompressed even when the receiver takes deflate, whole
+#                      bodies and pieces alike (default: 1)
 #
 # Paths containing ~ and the remote command strings are meant to expand on the
 # badge host, not locally.
@@ -69,9 +70,10 @@ Over Wi-Fi, while the badge is on Wi-Fi. <host> is an address or the badge's nam
 Settings and by "fw wifi"; needs mDNS on this machine, e.g. avahi/nss-mdns):
   ota-info <host>                       show the firmware version the badge runs
   ota-firmware <host> [--no-reboot]     install firmware/build/badge_fw.bin (or \$BADGE_FIRMWARE_BIN) and reboot into it
+                                      (--no-reboot: the badge still restarts by itself about 2 s after the install)
   ota-file <host> <file> <badge-path>   push one file, e.g. 'FLASH0:[c6]firmware.bin'
   ota-assets <host> [--no-reboot]       write firmware/build/assets.bin (or \$BADGE_ASSETS_BIN) into the assets
-                                      partition (fonts) and reboot
+                                      partition (fonts) and reboot (--no-reboot: it still restarts by itself)
   ota-c6 <host> [dir]                   push the C6 bundle (bootloader, partitions, firmware + .md5; default dir
                                       firmware/storage_staging/c6) in a safe order, reboot, wait for Wi-Fi
   ota-rm <host> <badge-path>            delete one file on the badge
@@ -506,6 +508,29 @@ ota_chunks() {
     [ "$OTA_CHUNKS" = yes ]
 }
 
+# Whether the receiver takes compressed pieces (it says "zpieces" in /info, #298); asked once per run
+OTA_ZPIECES=
+ota_zpieces() {
+    if [ -z "$OTA_ZPIECES" ]; then
+        OTA_ZPIECES=no
+        if [ "${BADGE_OTA_COMPRESS:-1}" != 0 ] && [[ $(ota_info_line "$1") == *zpieces* ]]; then
+            OTA_ZPIECES=yes
+        fi
+    fi
+    [ "$OTA_ZPIECES" = yes ]
+}
+
+# ota_zpiece <route> <offset> <piece> <out>: write the piece as a zlib stream to <out> when the receiver takes one and
+# it comes out smaller; false = send the piece as it is. The first firmware piece always goes plain: the badge checks
+# the image header in it before it erases anything (#298).
+ota_zpiece() {
+    local route=$1 offset=$2 piece=$3 out=$4
+    [ "$OTA_ZPIECES" = yes ] || return 1
+    [ "$route" != firmware ] || [ "$offset" -gt 0 ] || return 1
+    python3 -c 'import sys, zlib; sys.stdout.buffer.write(zlib.compress(open(sys.argv[1], "rb").read(), 9))' "$piece" > "$out" || return 1
+    [ "$(stat -c %s "$out")" -lt "$(stat -c %s "$piece")" ]
+}
+
 # ota_room <ip> <bytes> [what]: stop with a plain message when the badge says (in /info, #299) that /storage can't take a
 # file of <bytes>; an upload is written next to the old file before the swap, so it needs its own room plus a cluster.
 # A receiver that doesn't say is let through: it answers 507 itself, or fails the write as before.
@@ -538,9 +563,12 @@ OTA_PIECE=${BADGE_OTA_PIECE:-131072} # bytes per piece; a damaged piece is resen
 [ "$OTA_PIECE" -le 262144 ] || OTA_PIECE=262144
 OTA_PIECE_TRIES=${BADGE_OTA_PIECE_TRIES:-6}
 
-# ota_put_pieces <ip> <route> <local file> [badge path]: upload in checked pieces, the whole file checked at the end
+# ota_put_pieces <ip> <route> <local file> [badge path]: upload in checked pieces, the whole file checked at the end.
+# Pieces go compressed when the receiver takes that (#298); offsets, sizes and hashes stay those of the file itself.
 ota_put_pieces() {
-    local ip=$1 route=$2 file=$3 path=${4:-} total file_sha piece piece_sha offset=0 index=0 try reply snapshot
+    local ip=$1 route=$2 file=$3 path=${4:-} total file_sha piece zpiece piece_sha offset=0 index=0 try reply snapshot
+    local wire=0 started=$SECONDS size body
+    ota_zpieces "$ip" || true
     # Work on a private copy: a rebuild during the push must not mix two images (#37)
     snapshot=$(mktemp)
     cp -- "$file" "$snapshot" || { rm -f -- "$snapshot"; return 1; }
@@ -548,11 +576,19 @@ ota_put_pieces() {
     total=$(stat -c %s "$file")
     file_sha=$(sha256sum "$file" | cut -d' ' -f1)
     piece=$(mktemp)
+    zpiece=$(mktemp)
     while [ "$offset" -lt "$total" ]; do
         dd if="$file" of="$piece" bs="$OTA_PIECE" skip="$index" count=1 status=none
         piece_sha=$(sha256sum "$piece" | cut -d' ' -f1)
+        size=$(stat -c %s "$piece")
         local args=(-H 'Expect:' -H "X-Content-SHA256: $piece_sha" -H "X-Offset: $offset" -H "X-Total-Size: $total"
-                    -H "X-File-SHA256: $file_sha" -T "$piece")
+                    -H "X-File-SHA256: $file_sha")
+        body=$piece
+        if ota_zpiece "$route" "$offset" "$piece" "$zpiece"; then
+            body=$zpiece
+            args+=(-H 'Content-Encoding: deflate' -H "X-Piece-Size: $size")
+        fi
+        args+=(-T "$body")
         [ -n "$path" ] && args+=(-H "X-Path: $path")
         for ((try = 1; ; try++)); do
             # Damage on the badge's link depends on where bytes fall in the TCP stream (#40): a filler header of
@@ -563,22 +599,25 @@ ota_put_pieces() {
                 break
             fi
             if ! ota_piece_retry "$reply"; then
-                rm -f -- "$piece" "$snapshot"
+                rm -f -- "$piece" "$zpiece" "$snapshot"
                 echo "the badge refused the piece at $offset: $reply" >&2
                 return 1
             fi
             if [ "$try" -ge "$OTA_PIECE_TRIES" ]; then
-                rm -f -- "$piece" "$snapshot"
+                rm -f -- "$piece" "$zpiece" "$snapshot"
                 echo "giving up on the piece at $offset: $reply" >&2
                 return 1
             fi
             echo "  piece at $offset failed ($try/$OTA_PIECE_TRIES), resending" >&2
         done
-        offset=$((offset + $(stat -c %s "$piece")))
+        wire=$((wire + $(stat -c %s "$body")))
+        offset=$((offset + size))
         index=$((index + 1))
     done
-    rm -f -- "$piece" "$snapshot"
+    rm -f -- "$piece" "$zpiece" "$snapshot"
     echo "$reply"
+    # The time split of an update (#298): what went over the air and how long all pieces took
+    echo "sent $total bytes in $index pieces, $wire on the wire, in $((SECONDS - started)) s"
 }
 
 # ota_put <ip> <route> <local file> [badge path]
@@ -611,6 +650,20 @@ cmd_ota_info() { ota_curl "http://$1:$OTA_PORT/info"; }
 
 cmd_ota_reboot() { ota_curl -X POST "http://$1:$OTA_PORT/reboot"; }
 
+# After an install the badge restarts by itself about 2 s later when no reboot came (#298): the reboot is sent at
+# once, and a badge that is already restarting (connection refused or cut) is what was asked for
+ota_reboot_installed() {
+    local reply
+    if ! reply=$(cmd_ota_reboot "$1" 2>&1); then
+        case $reply in
+            *"curl: (22)"*) echo "$reply" >&2; return 1 ;; # the badge answered with an error
+            *) echo "the badge restarts by itself" ;;
+        esac
+        return 0
+    fi
+    echo "$reply"
+}
+
 # Ask the badge to stop everything else (MeshCore, LoRa, screens) before the image starts, and wait for it
 # to say "ready" (it prints the DMA RAM it has free then). Without /prepare in /info the push goes ahead as is.
 ota_prepare() {
@@ -630,8 +683,8 @@ cmd_ota_firmware() {
     ota_prepare "$ip" || exit 1
     local bin=${BADGE_FIRMWARE_BIN:-$REPO/firmware/build/badge_fw.bin}
     ota_put "$ip" firmware "$bin"
+    [ "$reboot" = --no-reboot ] || ota_reboot_installed "$ip"
     [ ! -f "$(dirname "$bin")/badge_fw.elf" ] || archive_elf "$(dirname "$bin")"
-    [ "$reboot" = --no-reboot ] || cmd_ota_reboot "$ip"
 }
 
 cmd_ota_file() {
@@ -650,7 +703,7 @@ cmd_ota_assets() {
     # The partition is read in place (memory-mapped): stop the apps and screens before it is rewritten
     ota_prepare "$ip" || exit 1
     ota_put_pieces "$ip" assets "$bin" || exit 1
-    [ "$reboot" = --no-reboot ] || cmd_ota_reboot "$ip"
+    [ "$reboot" = --no-reboot ] || ota_reboot_installed "$ip"
 }
 
 # GET /screenshot (#30, #146): the screen as a 16-bit BMP header plus run/literal packets (firmware/components/ota/

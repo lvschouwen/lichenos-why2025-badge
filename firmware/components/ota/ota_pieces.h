@@ -44,12 +44,20 @@ int ota_piece_flash_ok(size_t offset, size_t len, size_t total, size_t sector);
 // in the order of ota_piece_headers, then its own path checks for /file, then ota_piece_bounds.
 typedef enum {
     OTA_PIECE_OK,
-    OTA_PIECE_MISSING,   // 400: Content-Length, X-Content-SHA256, X-Total-Size or X-File-SHA256 absent, or compressed
-    OTA_PIECE_TOO_LARGE, // 413: X-Total-Size past the route's limit
+    OTA_PIECE_MISSING,     // 400: Content-Length, X-Content-SHA256, X-Total-Size or X-File-SHA256 absent
+    OTA_PIECE_BAD_DEFLATE, // 400: compressed without X-Piece-Size, or X-Piece-Size on a plain piece (#298)
+    OTA_PIECE_TOO_LARGE,   // 413: X-Total-Size past the route's limit
+    OTA_PIECE_FIRST_PLAIN, // 400: a compressed firmware piece at offset 0 (its image header is checked before erasing)
+    OTA_PIECE_BLOATED,     // 413: a compressed piece longer than any stream of X-Piece-Size bytes needs to be
     OTA_PIECE_UNALIGNED, // 400: a firmware piece inside the file that is not whole erase sectors (ota_piece_flash_ok)
     OTA_PIECE_PAST_END,  // 400: X-Offset + Content-Length runs past X-Total-Size
 } ota_piece_verdict_t;
 
+// The bytes a piece adds to the file: X-Piece-Size when compressed, else Content-Length (the server reads it only once
+// ota_piece_headers and ota_piece_bounds passed)
+long long ota_piece_len(ota_request_t const *req);
+// The most bytes a zlib stream of len decoded bytes may take (stored blocks of incompressible data are a little longer)
+long long ota_deflate_bound(long long len);
 // The header checks: the fields a piece needs, the size limit max, and for firmware the sector rule
 ota_piece_verdict_t ota_piece_headers(ota_request_t const *req, long long max, size_t sector);
 // The piece lies inside the file; no sum of network numbers can overflow here

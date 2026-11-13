@@ -32,7 +32,6 @@
 #define TICK_MS         200
 #define FILE_MIN_MS     1000  // a small file would otherwise flash past
 #define FAILED_MS       3000
-#define RESTART_MS      20000 // installed but nobody asked for the reboot
 #define BANNER_MS       4000
 #define UPD_FROM_KEY    "upd_from"
 
@@ -342,11 +341,9 @@ static void restart_after_update(bool due, state_t const *s) {
     system_restart("after update");
 }
 
-static void tick(lv_timer_t *t) {
-    (void)t;
-    int64_t now = now_ms();
-
-    // /prepare that no firmware followed is a failed update; until then the stall timer below has nothing to say
+// /prepare that no firmware followed is a failed update; until then the stall rule has nothing to say. Returns whether
+// the badge still waits for the image after a prepare.
+static bool tick_prepare_expiry(int64_t now) {
     portENTER_CRITICAL(&lock);
     bool expired = (update_mode_tick(&um, now) & UM_ACT_REBOOT) != 0;
     bool waiting = um.prepared;
@@ -358,68 +355,90 @@ static void tick(lv_timer_t *t) {
     if (expired) {
         ESP_LOGW(TAG, "prepared, but no firmware came: restarting");
     }
-    state_t s = snapshot();
+    return waiting;
+}
 
-    // A sender that went quiet must not keep the screen forever
-    if (!waiting && ((s.phase == PH_RECEIVING &&
-                      now - s.stamp_ms > (int64_t)update_stall_limit_ms(s.firmware, s.done, s.total)) ||
-                     (s.phase == PH_RESTARTING && now - s.stamp_ms > RESTART_MS))) {
-        portENTER_CRITICAL(&lock);
-        if (shared.gen == s.gen && shared.stamp_ms == s.stamp_ms) {
-            if (s.phase == PH_RECEIVING) {
-                shared.phase = PH_FAILED;
-                update_mode_on_end(&um, s.firmware, false); // everything else is stopped: restart after the message
-            } else {
-                shared.phase = PH_IDLE;
-                update_mode_on_restart_stall(&um); // installed, nobody rebooted it: restart anyway
-            }
-            shared.stamp_ms = now;
-            s.phase         = shared.phase;
-            s.stamp_ms      = now;
-        }
-        portEXIT_CRITICAL(&lock);
-        if (s.phase == PH_FAILED) {
-            ESP_LOGW(TAG, "the sender stopped; giving the screen back");
-        }
+// A sender that went quiet must not keep the screen forever, and an installed image nobody rebooted restarts by itself
+// (update_stall, #298). s follows what was decided.
+static void tick_stall(state_t *s, bool waiting, int64_t now) {
+    upd_watch_t const w     = {.waiting    = waiting,
+                               .receiving  = s->phase == PH_RECEIVING,
+                               .restarting = s->phase == PH_RESTARTING,
+                               .firmware   = s->firmware,
+                               .done       = s->done,
+                               .total      = s->total,
+                               .quiet_ms   = now - s->stamp_ms};
+    upd_stall_t const stall = update_stall(&w);
+    if (stall == UPD_STALL_NONE) {
+        return;
     }
-
     portENTER_CRITICAL(&lock);
-    bool restart = update_mode_restart_due(
-        &um, (s.phase == PH_FAILED && now - s.stamp_ms >= FAILED_MS) || s.phase == PH_IDLE ||
-                 (s.phase == PH_RESTARTING && now - s.stamp_ms >= FAILED_MS)); // installed, and the restart was decided
+    if (shared.gen == s->gen && shared.stamp_ms == s->stamp_ms) {
+        if (stall == UPD_STALL_SENDER) {
+            shared.phase = PH_FAILED;
+            update_mode_on_end(&um, s->firmware, false); // everything else is stopped: restart after the message
+        } else {
+            shared.phase = PH_IDLE;
+            update_mode_on_restart_stall(&um); // installed, nobody rebooted it: restart now
+        }
+        shared.stamp_ms = now;
+        s->phase        = shared.phase;
+        s->stamp_ms     = now;
+    }
+    portEXIT_CRITICAL(&lock);
+    if (s->phase == PH_FAILED) {
+        ESP_LOGW(TAG, "the sender stopped; giving the screen back");
+    }
+}
+
+// The restart update mode decided, once its message has been shown. Returns whether a restart is decided at all.
+static bool tick_restart(state_t const *s, int64_t now) {
+    bool shown = (s->phase == PH_FAILED && now - s->stamp_ms >= FAILED_MS) || s->phase == PH_IDLE ||
+                 (s->phase == PH_RESTARTING && now - s->stamp_ms >= FAILED_MS); // installed, and the restart was decided
+    portENTER_CRITICAL(&lock);
+    bool restart         = update_mode_restart_due(&um, shown);
     bool restart_decided = um.reboot;
     portEXIT_CRITICAL(&lock);
-    restart_after_update(restart, &s);
+    restart_after_update(restart, s);
+    return restart_decided;
+}
 
-    if (!title_label) {
-        if (s.phase == PH_IDLE) {
-            return;
+// Open the screen for a transfer that has none yet; false when there is nothing to draw on this tick
+static bool tick_open(state_t const *s, int64_t now) {
+    if (title_label) {
+        if (s->gen != opened_gen) {
+            opened_gen = s->gen; // the next file of a series: same screen
+            opened_ms  = now;
         }
-        if (s.gen == opened_gen) { // closed with Esc: leave it closed
-            if (s.phase == PH_FILE_DONE || s.phase == PH_FAILED) {
-                finish_screen(s.gen);
-            }
-            return;
-        }
-        if (!shell_home_shown()) {
-            return; // still booting
-        }
-        shell_open(build, SCREEN_UPDATE); // takes the lock itself; we are on the LVGL task already
-        if (!title_label) {
-            if (!open_failed_warned) {
-                ESP_LOGW(TAG, "couldn't open the update screen");
-                open_failed_warned = true;
-            }
-            return;
-        }
-        open_failed_warned = false;
-        opened_ms          = now;
-        opened_gen         = s.gen;
-    } else if (s.gen != opened_gen) {
-        opened_gen = s.gen; // the next file of a series: same screen
-        opened_ms  = now;
+        return true;
     }
+    if (s->phase == PH_IDLE) {
+        return false;
+    }
+    if (s->gen == opened_gen) { // closed with Esc: leave it closed
+        if (s->phase == PH_FILE_DONE || s->phase == PH_FAILED) {
+            finish_screen(s->gen);
+        }
+        return false;
+    }
+    if (!shell_home_shown()) {
+        return false; // still booting
+    }
+    shell_open(build, SCREEN_UPDATE); // takes the lock itself; we are on the LVGL task already
+    if (!title_label) {
+        if (!open_failed_warned) {
+            ESP_LOGW(TAG, "couldn't open the update screen");
+            open_failed_warned = true;
+        }
+        return false;
+    }
+    open_failed_warned = false;
+    opened_ms          = now;
+    opened_gen         = s->gen;
+    return true;
+}
 
+static void tick_close_screens(void) {
     portENTER_CRITICAL(&lock);
     bool close = close_pending && nav_current() == SCREEN_UPDATE;
     if (close) {
@@ -429,15 +448,24 @@ static void tick(lv_timer_t *t) {
     if (close) {
         shell_close_all_but_top(); // frees home and whatever was open: the update needs the internal RAM
     }
+}
 
+static void tick(lv_timer_t *t) {
+    (void)t;
+    int64_t now     = now_ms();
+    bool    waiting = tick_prepare_expiry(now);
+    state_t s       = snapshot();
+    tick_stall(&s, waiting, now);
+    bool restart_decided = tick_restart(&s, now);
+    if (!tick_open(&s, now)) {
+        return;
+    }
+    tick_close_screens();
     render(&s);
-    if ((s.phase == PH_FILE_DONE && now - opened_ms >= FILE_MIN_MS && now - s.stamp_ms >= 0) ||
-        (s.phase == PH_FAILED && now - s.stamp_ms >= FAILED_MS)) {
-        finish_screen(s.gen);
-    } else if (s.phase == PH_IDLE) {
-        if (!restart_decided) {
-            finish_screen(s.gen); // the stall timer gave up on a restart that never came
-        }
+    bool file_shown   = s.phase == PH_FILE_DONE && now - opened_ms >= FILE_MIN_MS && now - s.stamp_ms >= 0;
+    bool failed_shown = s.phase == PH_FAILED && now - s.stamp_ms >= FAILED_MS;
+    if (file_shown || failed_shown || (s.phase == PH_IDLE && !restart_decided)) {
+        finish_screen(s.gen); // PH_IDLE without a restart: the stall timer gave up on a restart that never came
     }
 }
 

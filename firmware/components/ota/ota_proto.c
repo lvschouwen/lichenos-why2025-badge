@@ -127,6 +127,10 @@ static int h_total_size(char *value, size_t vlen, ota_request_t *req) {
     return size_into(value, vlen, &req->total_size);
 }
 
+static int h_piece_size(char *value, size_t vlen, ota_request_t *req) {
+    return size_into(value, vlen, &req->piece_size);
+}
+
 static int h_file_sha256(char *value, size_t vlen, ota_request_t *req) {
     (void)vlen;
     int status           = hex_into(value, req->file_sha256);
@@ -190,6 +194,7 @@ static struct {
     {"Content-Length", h_content_length},
     {"X-Offset", h_offset},
     {"X-Total-Size", h_total_size},
+    {"X-Piece-Size", h_piece_size},
     {"X-File-SHA256", h_file_sha256},
     {"Authorization", h_authorization},
     {"X-Content-SHA256", h_sha256},
@@ -261,6 +266,7 @@ int ota_parse_request(char const *head, size_t len, ota_request_t *req) {
     memset(req, 0, sizeof(*req));
     req->content_length = -1;
     req->total_size     = -1;
+    req->piece_size     = -1;
 
     char     line[LINE_MAX_LEN + 1];
     uint32_t seen = 0;

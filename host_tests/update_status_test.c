@@ -53,6 +53,27 @@ int main(void) {
     CHECK(update_stall_limit_ms(false, 1000, 1000) == 30000);
     CHECK(update_stall_limit_ms(true, 0, 0) == 30000);
 
+    // #298: an installed image nobody rebooted restarts by itself after 2 s (it waited 20 s, every update paid for it)
+    upd_watch_t w = {.restarting = true, .firmware = true, .done = 1000, .total = 1000, .quiet_ms = 1999};
+    CHECK(update_stall(&w) == UPD_STALL_NONE);
+    w.quiet_ms = 2000;
+    CHECK(update_stall(&w) == UPD_STALL_RESTART);
+    w.quiet_ms = 19999; // the old 20 s line: long past now
+    CHECK(update_stall(&w) == UPD_STALL_RESTART);
+    w.waiting = true; // a prepare that no image followed: its own timeout speaks
+    CHECK(update_stall(&w) == UPD_STALL_NONE);
+    // A sender that went quiet mid-transfer is a failed update, never a restart into anything new
+    w = (upd_watch_t){.receiving = true, .firmware = true, .done = 10, .total = 1000, .quiet_ms = 30001};
+    CHECK(update_stall(&w) == UPD_STALL_SENDER);
+    w.quiet_ms = 30000;
+    CHECK(update_stall(&w) == UPD_STALL_NONE);
+    w = (upd_watch_t){.receiving = true, .firmware = true, .done = 1000, .total = 1000, .quiet_ms = 179999};
+    CHECK(update_stall(&w) == UPD_STALL_NONE); // the flash write and checks after the last byte take a while
+    w.quiet_ms = 180001;
+    CHECK(update_stall(&w) == UPD_STALL_SENDER);
+    w = (upd_watch_t){.quiet_ms = 1000000}; // idle, done or failed: nothing to watch
+    CHECK(update_stall(&w) == UPD_STALL_NONE);
+
     // After boot: show the line at once, forget the stored version only once the new image has proved itself
     upd_boot_t b = update_after_boot("", "fw-b", false, false);
     CHECK(b.result == UPD_NONE && !b.erase);

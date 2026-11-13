@@ -17,7 +17,9 @@
 // Every request but /info carries "Authorization: Bearer <token>"; uploads carry "X-Content-SHA256: <hex>" of the
 // file as it ends up on the badge. "Content-Encoding: deflate" (a zlib stream) sends it compressed.
 // Large uploads can come in pieces: each carries "X-Offset", "X-Total-Size" and "X-File-SHA256" (the whole file);
-// its own X-Content-SHA256 covers just that piece, so a damaged piece is resent alone.
+// its own X-Content-SHA256 covers just that piece, so a damaged piece is resent alone. A piece may be compressed on its
+// own (#298): "Content-Encoding: deflate", Content-Length counts the zlib stream and "X-Piece-Size" the bytes it decodes
+// to; X-Offset, X-Total-Size and both hashes stay in decoded bytes. The first firmware piece is never compressed.
 #pragma once
 
 #include <stdbool.h>
@@ -64,6 +66,7 @@ typedef struct {
     bool        has_offset;
     long long   offset;
     long long   total_size; // -1 when absent
+    long long   piece_size; // X-Piece-Size: decoded bytes of a compressed piece; -1 when absent
     long long   since; // GET /log: ?since=; 0 when absent
     bool        has_file_sha256;
     char        file_sha256[OTA_SHA256_HEX + 1]; // lowercase

@@ -28,6 +28,7 @@
 #include "ota_autooff.h"
 #include "ota_bmp.h"
 #include "ota_hw.h"
+#include "ota_inflate.h"
 #include "ota_path.h"
 #include "ota_pieces.h"
 #include "ota_proto.h"
@@ -254,7 +255,8 @@ typedef struct {
     long long    max;
 } output_t;
 
-static bool output_bytes(output_t *out, uint8_t const *data, size_t len) {
+static bool output_bytes(void *ctx, uint8_t const *data, size_t len) {
+    output_t *out = ctx;
     if (last_decoded + (long long)len > out->max) {
         return false;
     }
@@ -263,97 +265,97 @@ static bool output_bytes(output_t *out, uint8_t const *data, size_t len) {
     return out->sink(out->ctx, data, len);
 }
 
-// Streaming inflate of a zlib body with the ROM's tinfl; its 32 KiB dictionary doubles as the output window
+// Streaming inflate of a zlib body with the ROM's tinfl; its 32 KiB dictionary doubles as the output window. The rules
+// a stream from the network must keep (output cap, nothing after the end, progress) are ota_inflate.c's (#298).
 EXT_RAM_BSS_ATTR static tinfl_decompressor inflater; // 43 KB with the window: PSRAM (#107)
 EXT_RAM_BSS_ATTR static uint8_t            inflate_window[TINFL_LZ_DICT_SIZE];
 static size_t             inflate_ofs;
-static bool               inflate_done;
 
-static bool inflate_bytes(output_t *out, uint8_t const *in, size_t len) {
-    for (;;) {
-        size_t       in_bytes  = len;
-        size_t       out_bytes = sizeof(inflate_window) - inflate_ofs;
-        tinfl_status status    = tinfl_decompress(&inflater, in, &in_bytes, inflate_window, inflate_window + inflate_ofs,
-                                                  &out_bytes, TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_HAS_MORE_INPUT);
-        in  += in_bytes;
-        len -= in_bytes;
-        if (out_bytes && !output_bytes(out, inflate_window + inflate_ofs, out_bytes)) {
-            return false;
-        }
-        inflate_ofs = (inflate_ofs + out_bytes) & (sizeof(inflate_window) - 1);
-        if (status < TINFL_STATUS_DONE) {
-            return false;
-        }
-        if (status == TINFL_STATUS_DONE) {
-            inflate_done = true;
-            return len == 0; // nothing may follow the stream
-        }
-        if (status == TINFL_STATUS_NEEDS_MORE_INPUT && len == 0) {
-            return true;
-        }
+static ota_inflate_status_t tinfl_step(void *dec, uint8_t const *in, size_t *in_len, uint8_t const **out,
+                                       size_t *out_len) {
+    (void)dec;
+    size_t       space  = sizeof(inflate_window) - inflate_ofs;
+    tinfl_status status = tinfl_decompress(&inflater, in, in_len, inflate_window, inflate_window + inflate_ofs, &space,
+                                           TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_HAS_MORE_INPUT);
+    *out        = inflate_window + inflate_ofs;
+    *out_len    = space;
+    inflate_ofs = (inflate_ofs + space) & (sizeof(inflate_window) - 1);
+    if (status < TINFL_STATUS_DONE) {
+        return OTA_INFLATE_ERROR;
     }
+    return status == TINFL_STATUS_DONE               ? OTA_INFLATE_DONE
+           : status == TINFL_STATUS_HAS_MORE_OUTPUT ? OTA_INFLATE_HAS_OUTPUT
+                                                     : OTA_INFLATE_NEEDS_INPUT;
 }
 
-// Read the body (part of which may already sit behind the head), decode it if it is compressed, hash it and feed it to
-// sink. max caps the decoded size. sha_hex is the SHA-256 of the decoded bytes, i.e. of the file as it ends up.
-static bool receive_body(
-    int            fd,
-    uint8_t const *pre,
-    size_t         pre_len,
-    long long      total,
-    bool           deflate,
-    long long      max,
-    sink_fn        sink,
-    void          *ctx,
-    char           sha_hex[OTA_SHA256_HEX + 1]
-) {
-    static output_t out; // static, not on the stack: one transfer at a time
+// A request body: the bytes already read behind the head, how many come in all (on the wire), whether they are a zlib
+// stream, the most decoded bytes allowed, and where they go
+typedef struct {
+    uint8_t const *pre;
+    size_t         pre_len;
+    long long      total;
+    bool           deflate;
+    long long      max;
+    sink_fn        sink;
+    void          *ctx;
+    bool           piece; // progress counts decoded bytes (a piece's place in the file), else bytes on the wire
+} body_t;
+
+// One read of the body: what sits behind the head first, then the socket within the body's deadline
+static ssize_t body_chunk(int fd, body_t *b, long long got, long deadline, uint8_t const **chunk) {
+    if (b->pre_len > 0) {
+        size_t n   = b->pre_len;
+        *chunk     = b->pre;
+        b->pre_len = 0;
+        return (ssize_t)n;
+    }
+    if (now_s() > deadline) {
+        return -1;
+    }
+    size_t want = b->total - got < (long long)sizeof(body_buf) ? (size_t)(b->total - got) : sizeof(body_buf);
+    *chunk      = body_buf;
+    return read(fd, body_buf, want);
+}
+
+// Read the body, decode it if it is compressed, hash it and feed it to its sink. sha_hex is the SHA-256 of the decoded
+// bytes, i.e. of the file as it ends up. A compressed body must end its stream.
+static bool receive_body(int fd, body_t b, char sha_hex[OTA_SHA256_HEX + 1]) {
+    static output_t      out; // static, not on the stack: one transfer at a time
+    EXT_RAM_BSS_ATTR static ota_inflate_t z; // PSRAM like the inflater: this task only, no DMA
     sha256_init(&out.sha);
-    out.sink = sink;
-    out.ctx  = ctx;
-    out.max  = max;
-    if (deflate) {
+    out.sink = b.sink;
+    out.ctx  = b.ctx;
+    out.max  = b.max;
+    if (b.deflate) {
         tinfl_init(&inflater);
-        inflate_ofs  = 0;
-        inflate_done = false;
+        inflate_ofs = 0;
+        ota_inflate_begin(&z, tinfl_step, NULL, b.max > 0 ? (size_t)b.max : 0);
     }
 
     // A per-read timeout alone lets a client trickle bytes forever; the whole body gets a deadline too
-    long      deadline = now_s() + BODY_GRACE_S + (long)(total / BODY_MIN_RATE);
+    long      deadline = now_s() + BODY_GRACE_S + (long)(b.total / BODY_MIN_RATE);
     long long got      = 0;
     last_received      = 0;
     last_decoded       = 0;
     hook_progress(progress_base);
-    if (pre_len > (size_t)total) {
-        pre_len = (size_t)total;
+    if (b.pre_len > (size_t)b.total) {
+        b.pre_len = (size_t)b.total;
     }
-    while (got < total || pre_len > 0) {
+    while (got < b.total || b.pre_len > 0) {
         uint8_t const *chunk;
-        size_t         n;
-        if (pre_len > 0) {
-            chunk   = pre;
-            n       = pre_len;
-            pre_len = 0;
-        } else {
-            if (now_s() > deadline) {
-                return false;
-            }
-            size_t  want = total - got < (long long)sizeof(body_buf) ? (size_t)(total - got) : sizeof(body_buf);
-            ssize_t r    = read(fd, body_buf, want);
-            if (r <= 0) {
-                return false;
-            }
-            chunk = body_buf;
-            n     = (size_t)r;
-        }
-        if (!(deflate ? inflate_bytes(&out, chunk, n) : output_bytes(&out, chunk, n))) {
+        ssize_t        n = body_chunk(fd, &b, got, deadline, &chunk);
+        if (n <= 0) {
             return false;
         }
-        got           += (long long)n;
+        if (!(b.deflate ? ota_inflate_feed(&z, chunk, (size_t)n, output_bytes, &out)
+                        : output_bytes(&out, chunk, (size_t)n))) {
+            return false;
+        }
+        got           += n;
         last_received  = got;
-        hook_progress(progress_base + got);
+        hook_progress(progress_base + (b.piece ? last_decoded : got));
     }
-    if (deflate && !inflate_done) {
+    if (b.deflate && !z.done) {
         return false; // the stream ended early
     }
 
@@ -619,8 +621,9 @@ static void handle_firmware(int fd, ota_request_t const *req, uint8_t const *pre
     }
     char sha_hex[OTA_SHA256_HEX + 1];
     progress_base = 0;
-    bool ok =
-        receive_body(fd, pre, pre_len, req->content_length, req->deflate, FIRMWARE_MAX, memory_sink, &mem, sha_hex);
+    body_t body = {.pre = pre, .pre_len = pre_len, .total = req->content_length, .deflate = req->deflate,
+                   .max = FIRMWARE_MAX, .sink = memory_sink, .ctx = &mem};
+    bool   ok   = receive_body(fd, body, sha_hex);
     if (!ok || strcmp(sha_hex, req->sha256) != 0) {
         hook_end(false, false);
         free(mem.data);
@@ -682,7 +685,9 @@ static void handle_file(int fd, ota_request_t const *req, uint8_t const *pre, si
     }
     char sha_hex[OTA_SHA256_HEX + 1];
     progress_base = 0;
-    bool ok = receive_body(fd, pre, pre_len, req->content_length, req->deflate, FILE_MAX, memory_sink, &mem, sha_hex);
+    body_t body = {.pre = pre, .pre_len = pre_len, .total = req->content_length, .deflate = req->deflate,
+                   .max = FILE_MAX, .sink = memory_sink, .ctx = &mem};
+    bool   ok   = receive_body(fd, body, sha_hex);
     if (!ok || strcmp(sha_hex, req->sha256) != 0) {
         hook_end(false, false);
         free(mem.data);
@@ -920,6 +925,7 @@ static bool piece_start(int fd, ota_request_t const *req, char const *path, uint
             send_all(fd, "HTTP/1.1 100 Continue\r\n\r\n", 25);
             *continued = true;
         }
+        // Offset 0 of firmware is never compressed (ota_piece_headers), so these are the image's own first bytes
         size_t want = req->content_length < OTA_IMAGE_HEADER_LEN ? (size_t)req->content_length : OTA_IMAGE_HEADER_LEN;
         if (!peek_body(fd, pre, pre_len, want) || !ota_image_header_ok(*pre, *pre_len, CONFIG_IDF_FIRMWARE_CHIP_ID)) {
             hook_end(false, false);
@@ -966,13 +972,15 @@ static void piece_done(int fd) {
     staged_reset();
 }
 
-// Receive one piece into its place: the staging buffer, or the slot (erased first when it is not fresh)
+// Receive one piece into its place: the staging buffer, or the slot (erased first when it is not fresh). A compressed
+// piece (#298) is decoded on its way in, capped at its X-Piece-Size, so len below is always the decoded length.
 static bool piece_receive(int fd, ota_request_t const *req, uint8_t const *pre, size_t pre_len, bool continued) {
     bool        stream = req->route == OTA_ROUTE_FIRMWARE;
+    size_t      len    = (size_t)ota_piece_len(req); // ota_piece_bounds: inside the file, so below 4 MB
     char        sha_hex[OTA_SHA256_HEX + 1];
     flash_ctx_t flash = {.handle = staged.ota, .base = staged.got};
-    fixed_ctx_t mem   = {.data = stream ? NULL : staged.data + staged.got, .cap = staged.total - staged.got};
-    if (stream && (req->offset > 0 || staged.dirty) && !stream_erase(staged.got, (size_t)req->content_length)) {
+    fixed_ctx_t mem   = {.data = stream ? NULL : staged.data + staged.got, .cap = len};
+    if (stream && (req->offset > 0 || staged.dirty) && !stream_erase(staged.got, len)) {
         staged.dirty = true;
         respond(fd, 500, "couldn't erase the slot for the piece at %lld, send it again", req->offset);
         return false;
@@ -982,15 +990,17 @@ static bool piece_receive(int fd, ota_request_t const *req, uint8_t const *pre, 
         send_all(fd, "HTTP/1.1 100 Continue\r\n\r\n", 25);
     }
     progress_base = (uint32_t)staged.got;
-    bool ok = receive_body(fd, pre, pre_len, req->content_length, false, req->content_length,
-                           stream ? flash_sink : fixed_sink, stream ? (void *)&flash : (void *)&mem, sha_hex);
+    body_t body   = {.pre = pre, .pre_len = pre_len, .total = req->content_length, .deflate = req->deflate,
+                     .max = (long long)len, .sink = stream ? flash_sink : fixed_sink,
+                     .ctx = stream ? (void *)&flash : (void *)&mem, .piece = true};
+    bool   ok     = receive_body(fd, body, sha_hex) && last_decoded == (long long)len;
     if (!ok || strcmp(sha_hex, req->sha256) != 0) {
         respond(fd, 400, "piece at %lld %s, send it again", req->offset, ok ? "arrived damaged" : "didn't arrive");
         return false; // staged.got is unchanged, so the same piece can come again
     }
     // The piece was hashed on its way through the internal buffer; hash it again where it landed (#37)
     uint8_t stored[SHA256_DIGEST_LEN];
-    rehash_piece(staged.got, (size_t)req->content_length, stored);
+    rehash_piece(staged.got, len, stored);
     ota_hex(stored, sizeof(stored), sha_hex);
     if (strcmp(sha_hex, req->sha256) != 0) {
         ESP_LOGW(TAG, "piece at %lld damaged in %s, asking for it again", req->offset, stream ? "the slot" : "PSRAM");
@@ -998,9 +1008,9 @@ static bool piece_receive(int fd, ota_request_t const *req, uint8_t const *pre, 
         return false;
     }
     staged.dirty = false;
-    ota_pieces_add(&staged.pieces, staged.got, (size_t)req->content_length, stored);
-    staged.got  += (size_t)req->content_length;
-    staged.sent += req->content_length;
+    ota_pieces_add(&staged.pieces, staged.got, len, stored);
+    staged.got  += len;
+    staged.sent += req->content_length; // bytes on the wire, as the final reply says
     return true;
 }
 
@@ -1010,6 +1020,13 @@ static bool piece_verdict_sent(int fd, ota_piece_verdict_t verdict, long long ma
         case OTA_PIECE_MISSING:
             respond(fd, 400, "a piece needs Content-Length, X-Content-SHA256, X-Total-Size, X-File-SHA256, no compression");
             return true;
+        case OTA_PIECE_BAD_DEFLATE:
+            respond(fd, 400, "a compressed piece needs X-Piece-Size (its decoded bytes), and only a compressed piece has one");
+            return true;
+        case OTA_PIECE_FIRST_PLAIN:
+            respond(fd, 400, "the first firmware piece comes uncompressed: its image header is checked before anything is erased");
+            return true;
+        case OTA_PIECE_BLOATED: respond(fd, 413, "compressed piece larger than its X-Piece-Size allows"); return true;
         case OTA_PIECE_TOO_LARGE: respond(fd, 413, "larger than %lld bytes", max); return true;
         case OTA_PIECE_UNALIGNED:
             respond(fd, 400, "firmware pieces start on a 4096-byte boundary and are whole multiples of it, except the last");
@@ -1376,7 +1393,8 @@ static bool refused_on_trial(int fd, ota_request_t const *req, size_t pre_len) {
     return true;
 }
 
-// "deflate chunks" tells tools/badge.sh this receiver takes compressed bodies and pieces; "storage free N" (#299) lets
+// "deflate chunks" tells tools/badge.sh this receiver takes compressed bodies and pieces, "zpieces" compressed pieces
+// (#298); "storage free N" (#299) lets
 // it check a file push fits before it sends a byte
 static void respond_info(int fd) {
     uint64_t free_b, total_b;
@@ -1387,7 +1405,7 @@ static void respond_info(int fd) {
     // The hw object makes the line longer than respond's stack buffer: built in the PSRAM body buffer, which no other
     // request uses while this one is answered (#321)
     char *line = (char *)body_buf;
-    int   n    = snprintf(line, 256, "badge_fw %s; receiver: deflate chunks%s%s; hw ", esp_app_get_description()->version,
+    int   n    = snprintf(line, 256, "badge_fw %s; receiver: deflate chunks zpieces%s%s; hw ", esp_app_get_description()->version,
                           hooks.prepare ? " prepare" : "", room);
     n          = n < 0 ? 0 : n > 255 ? 255 : n; // snprintf says what it would have written
     n         += (int)ota_hw_json(hooks.hw_text, line + n, 1024);

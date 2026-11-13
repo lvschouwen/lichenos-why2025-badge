@@ -19,6 +19,30 @@ int update_pct(uint32_t done, uint32_t total);
 // received the flash write and the checks report nothing and can take a while, so the limit is much longer.
 uint32_t update_stall_limit_ms(bool firmware, uint32_t done, uint32_t total);
 
+// After an installed image the screen says "Restarting..." and the sender reboots the badge (tools/badge.sh does at
+// once). When that reboot doesn't come the badge restarts by itself after this long (#298: it was 20 s, and every
+// update waited for it). Long enough to read the line and for the sender's own reboot to come first.
+#define UPDATE_RESTART_AFTER_MS 2000
+
+// The update screen's watch on a transfer, once per tick
+typedef struct {
+    bool     waiting;    // prepared, no image started yet: the prepare timeout speaks, not this
+    bool     receiving;  // bytes are coming
+    bool     restarting; // an image is installed, the restart has not happened yet
+    bool     firmware;
+    uint32_t done;
+    uint32_t total;
+    int64_t  quiet_ms; // since the last news from the server
+} upd_watch_t;
+
+typedef enum {
+    UPD_STALL_NONE,
+    UPD_STALL_SENDER,  // the sender went quiet mid-transfer: a failed update
+    UPD_STALL_RESTART, // installed and nobody rebooted it: restart now
+} upd_stall_t;
+
+upd_stall_t update_stall(upd_watch_t const *w);
+
 // What to do at boot with a stored upd_from. The line is shown at once; the stored version is forgotten only when the
 // running image is valid, so a crash during the trial (bootloader rolls back) still leaves the old image something to say.
 typedef struct {

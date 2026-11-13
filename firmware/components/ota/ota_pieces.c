@@ -69,20 +69,48 @@ int ota_piece_flash_ok(size_t offset, size_t len, size_t total, size_t sector) {
     return offset % sector == 0 && (len % sector == 0 || len == total - offset);
 }
 
+long long ota_piece_len(ota_request_t const *req) {
+    return req->deflate ? req->piece_size : req->content_length;
+}
+
+// zlib's own deflateBound is len + len/4096 + len/16384 + 13; this leaves room for any sane encoder. len is at most 12
+// digits (ota_proto parse_size), so nothing here overflows.
+long long ota_deflate_bound(long long len) {
+    return len < 0 ? 0 : len + len / 64 + 64;
+}
+
 // The sector rule (ota_piece_flash_ok) for a piece inside the file. A piece outside it is ota_piece_bounds's to answer
 // ("runs past X-Total-Size"), so it passes here; only inside the file are the numbers below 4 MB and safe to cast.
 static bool sector_rule(ota_request_t const *req, size_t sector) {
     return ota_piece_bounds(req) != OTA_PIECE_OK ||
-           ota_piece_flash_ok((size_t)req->offset, (size_t)req->content_length, (size_t)req->total_size, sector);
+           ota_piece_flash_ok((size_t)req->offset, (size_t)ota_piece_len(req), (size_t)req->total_size, sector);
+}
+
+// What compression adds to the header rules (#298); a plain piece without X-Piece-Size passes untouched
+static ota_piece_verdict_t deflate_rules(ota_request_t const *req) {
+    if (req->deflate != (req->piece_size >= 0) || (req->deflate && req->piece_size == 0)) {
+        return OTA_PIECE_BAD_DEFLATE;
+    }
+    if (req->deflate && req->route == OTA_ROUTE_FIRMWARE && req->offset == 0) {
+        return OTA_PIECE_FIRST_PLAIN;
+    }
+    if (req->deflate && req->content_length > ota_deflate_bound(req->piece_size)) {
+        return OTA_PIECE_BLOATED;
+    }
+    return OTA_PIECE_OK;
 }
 
 ota_piece_verdict_t ota_piece_headers(ota_request_t const *req, long long max, size_t sector) {
     if (!req->has_offset || !req->has_sha256 || req->content_length <= 0 || req->total_size <= 0 ||
-        !req->has_file_sha256 || req->deflate) {
+        !req->has_file_sha256) {
         return OTA_PIECE_MISSING;
     }
     if (req->total_size > max) {
         return OTA_PIECE_TOO_LARGE;
+    }
+    ota_piece_verdict_t v = deflate_rules(req);
+    if (v != OTA_PIECE_OK) {
+        return v;
     }
     if (req->route == OTA_ROUTE_FIRMWARE && !sector_rule(req, sector)) {
         return OTA_PIECE_UNALIGNED;
@@ -91,8 +119,9 @@ ota_piece_verdict_t ota_piece_headers(ota_request_t const *req, long long max, s
 }
 
 ota_piece_verdict_t ota_piece_bounds(ota_request_t const *req) {
-    if (req->offset < 0 || req->content_length <= 0 || req->total_size <= 0 ||
-        req->content_length > req->total_size || req->offset > req->total_size - req->content_length) {
+    long long len = ota_piece_len(req);
+    if (req->offset < 0 || req->content_length <= 0 || len <= 0 || req->total_size <= 0 || len > req->total_size ||
+        req->offset > req->total_size - len) {
         return OTA_PIECE_PAST_END;
     }
     return OTA_PIECE_OK;

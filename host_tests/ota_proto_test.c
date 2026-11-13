@@ -255,7 +255,7 @@ static void test_repeated_headers(void) {
     static char const *const once[] = {
         "Content-Length: 5",       "X-Offset: 0",           "X-Total-Size: 5",   "X-File-SHA256: " SHA,
         "Authorization: Bearer " TOKEN, "X-Content-SHA256: " SHA, "X-Path: SD0:a.txt", "Content-Encoding: identity",
-        "Expect: 100-continue",
+        "Expect: 100-continue",    "X-Piece-Size: 5",
     };
     for (size_t i = 0; i < sizeof(once) / sizeof(once[0]); i++) {
         char          head[512];
@@ -272,6 +272,23 @@ static void test_repeated_headers(void) {
     CHECK(parse("PUT /file HTTP/1.1\r\nContent-Length: 5\r\ncontent-length: 6\r\n\r\n", &(ota_request_t){0}) == 400);
     // Headers the receiver does not read may repeat (proxies and curl add some)
     CHECK(parse("GET /info HTTP/1.1\r\nAccept: */*\r\nAccept: text/plain\r\n\r\n", &(ota_request_t){0}) == 0);
+}
+
+// #298: a compressed piece says how many bytes it decodes to; the value follows the size rules of the other headers
+static void test_piece_size(void) {
+    ota_request_t req;
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Offset: 131072\r\nX-Total-Size: 2630000\r\nContent-Length: 70000\r\n"
+                "Content-Encoding: deflate\r\nX-Piece-Size: 131072\r\n\r\n",
+                &req) == 0);
+    CHECK(req.deflate && req.piece_size == 131072 && req.content_length == 70000 && req.offset == 131072);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Offset: 0\r\n\r\n", &req) == 0 && req.piece_size == -1);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nx-piece-size: 0\r\n\r\n", &req) == 0 && req.piece_size == 0);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Piece-Size: -1\r\n\r\n", &req) == 400);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Piece-Size: 12x\r\n\r\n", &req) == 400);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Piece-Size: \r\n\r\n", &req) == 400);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Piece-Size: 1000000000000\r\n\r\n", &req) == 400); // 13 digits
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nX-Piece-Size: 999999999999\r\n\r\n", &req) == 0 &&
+          req.piece_size == 999999999999LL);
 }
 
 // #211: a NUL inside a line used to cut the value short (X-Path: a.txt\0junk read as a.txt); it is refused now
@@ -303,7 +320,8 @@ static void check_invariants(int st, ota_request_t const *r) {
     if (st != 0) {
         return;
     }
-    CHECK(r->content_length >= -1 && r->total_size >= -1 && r->offset >= 0 && r->since >= 0);
+    CHECK(r->content_length >= -1 && r->total_size >= -1 && r->offset >= 0 && r->since >= 0 && r->piece_size >= -1);
+    CHECK(r->piece_size < 1000000000000LL);
     CHECK(r->content_length < 1000000000000LL && r->total_size < 1000000000000LL && r->offset < 1000000000000LL);
     CHECK(!r->has_token || lower_hex(r->token, OTA_TOKEN_LEN));
     CHECK(!r->has_sha256 || lower_hex(r->sha256, OTA_SHA256_HEX));
@@ -506,6 +524,7 @@ int main(void) {
     test_token();
     test_recorded_valid();
     test_repeated_headers();
+    test_piece_size();
     test_embedded_nul();
     test_mutate_helpers();
     test_mutations();

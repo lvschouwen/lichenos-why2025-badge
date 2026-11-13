@@ -44,7 +44,7 @@ static int fake_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
 // A piece request as tools/badge.sh sends it: offset, length, file size
 static ota_request_t piece(ota_route_t route, long long offset, long long len, long long total) {
     ota_request_t r = {.route = route, .has_offset = true, .offset = offset, .content_length = len,
-                       .total_size = total, .has_sha256 = true, .has_file_sha256 = true};
+                       .total_size = total, .piece_size = -1, .has_sha256 = true, .has_file_sha256 = true};
     memcpy(r.sha256, SHA, sizeof(SHA));
     memcpy(r.file_sha256, SHA, sizeof(SHA));
     return r;
@@ -77,8 +77,8 @@ static void test_verdicts(void) {
     CHECK(ota_piece_headers(&m, MAX, 4096) == OTA_PIECE_MISSING);
     m = piece(OTA_ROUTE_FILE, 0, 10, -1);
     CHECK(ota_piece_headers(&m, MAX, 4096) == OTA_PIECE_MISSING);
-    m = piece(OTA_ROUTE_FILE, 0, 10, 10), m.deflate = true;
-    CHECK(ota_piece_headers(&m, MAX, 4096) == OTA_PIECE_MISSING);
+    m = piece(OTA_ROUTE_FILE, 0, 10, 10), m.deflate = true; // compressed without X-Piece-Size (#298)
+    CHECK(ota_piece_headers(&m, MAX, 4096) == OTA_PIECE_BAD_DEFLATE);
     // Missing wins over too large, too large over unaligned, as the server answered before
     m = piece(OTA_ROUTE_FIRMWARE, 100, 10, MAX + 1), m.has_sha256 = false;
     CHECK(ota_piece_headers(&m, MAX, 4096) == OTA_PIECE_MISSING);
@@ -138,6 +138,59 @@ static void test_is_next(void) {
     CHECK(!ota_piece_is_next(&e, &r, "SD0:a.txt"));
 }
 
+// A compressed piece (#298): Content-Length counts the stream, X-Piece-Size the bytes it adds to the file
+static ota_request_t zpiece(ota_route_t route, long long offset, long long wire, long long len, long long total) {
+    ota_request_t r = piece(route, offset, wire, total);
+    r.deflate       = true;
+    r.piece_size    = len;
+    return r;
+}
+
+// #298: compressed pieces pass the same rules in decoded bytes; failed before (any compressed piece was refused)
+static void test_deflate_verdicts(void) {
+    // A firmware push: the first piece plain, the others compressed to about 60 %
+    long long const total = 2630000;
+    for (long long off = 0; off < total; off += 131072) {
+        long long     len = total - off < 131072 ? total - off : 131072;
+        ota_request_t r   = off == 0 ? piece(OTA_ROUTE_FIRMWARE, 0, len, total) : zpiece(OTA_ROUTE_FIRMWARE, off, len * 6 / 10, len, total);
+        CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_OK && ota_piece_bounds(&r) == OTA_PIECE_OK);
+        CHECK(ota_piece_len(&r) == len);
+    }
+    ota_request_t r = zpiece(OTA_ROUTE_FILE, 0, 20, 300, 300); // a file may start compressed
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_OK && ota_piece_bounds(&r) == OTA_PIECE_OK);
+    r = zpiece(OTA_ROUTE_ASSETS, 0, 20, 300, 3 * 1024 * 1024);
+    CHECK(ota_piece_headers(&r, 3 * 1024 * 1024, 4096) == OTA_PIECE_OK && ota_piece_bounds(&r) == OTA_PIECE_OK);
+    // Incompressible data comes out a little longer: allowed up to the bound, not past it
+    r = zpiece(OTA_ROUTE_FILE, 0, ota_deflate_bound(1000), 1000, 1000);
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_OK);
+    CHECK(ota_deflate_bound(131072) >= 131072 + 131072 / 4096 + 131072 / 16384 + 13); // zlib's deflateBound
+    r = zpiece(OTA_ROUTE_FILE, 0, ota_deflate_bound(1000) + 1, 1000, 1000);
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_BLOATED);
+    CHECK(ota_deflate_bound(-1) == 0 && ota_deflate_bound(999999999999LL) > 999999999999LL);
+
+    // X-Piece-Size exactly when compressed, and never 0
+    r = piece(OTA_ROUTE_FILE, 0, 10, 10), r.piece_size = 10;
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_BAD_DEFLATE);
+    r = zpiece(OTA_ROUTE_FILE, 0, 10, 0, 10);
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_BAD_DEFLATE);
+    // The first firmware piece stays plain: its image header is checked before the slot is erased
+    r = zpiece(OTA_ROUTE_FIRMWARE, 0, 100, 131072, total);
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_FIRST_PLAIN);
+    // Missing and too large still win; the sector rule and the bounds use the decoded length
+    r = zpiece(OTA_ROUTE_FIRMWARE, 131072, 100, 131072, total), r.has_sha256 = false;
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_MISSING);
+    r = zpiece(OTA_ROUTE_FIRMWARE, 131072, 100, 131072, MAX + 1);
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_TOO_LARGE);
+    r = zpiece(OTA_ROUTE_FIRMWARE, 131072, 4096, 5000, total); // a 4096-byte stream of a ragged 5000-byte middle piece
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_UNALIGNED);
+    r = zpiece(OTA_ROUTE_FILE, 90, 5, 11, 100); // 5 wire bytes that would land one past the end
+    CHECK(ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_OK && ota_piece_bounds(&r) == OTA_PIECE_PAST_END);
+    r = zpiece(OTA_ROUTE_FILE, 90, 50, 10, 100); // more wire bytes than room left is fine: the decoded bytes fit
+    CHECK(ota_piece_bounds(&r) == OTA_PIECE_OK);
+    r = zpiece(OTA_ROUTE_FILE, 0, 10, 999999999999LL, 100);
+    CHECK(ota_piece_bounds(&r) == OTA_PIECE_PAST_END);
+}
+
 // #211: random and boundary numbers (as a lying client would send) through the verdicts: whatever passes them lies in
 // the file and under the limit, so the server's casts to size_t and its sums cannot wrap
 static void test_verdict_lies(void) {
@@ -156,6 +209,30 @@ static void test_verdict_lies(void) {
             CHECK(off >= 0 && len > 0 && total <= MAX && off + len <= total);
             CHECK(route != OTA_ROUTE_FIRMWARE ||
                   ota_piece_flash_ok((size_t)off, (size_t)len, (size_t)total, 4096));
+        }
+    }
+}
+
+// #298: the same lies through compressed pieces; whatever passes decodes to bytes inside the file and under the limit,
+// and its stream is no longer than the bound, so the server's inflate cap and casts hold
+static void test_deflate_lies(void) {
+    static long long const edge[] = {-1, 0, 1, 4096, 131072, MAX - 1, MAX, MAX + 1, 4294967296LL, 999999999999LL};
+    size_t const           ne     = sizeof(edge) / sizeof(edge[0]);
+    mut_rng_t              rng;
+    mut_seed(&rng, 298);
+    for (int i = 0; i < 40000; i++) {
+        bool      walk  = i < (int)(ne * ne * ne * ne);
+        long long off   = walk ? edge[i % ne] : (long long)mut_next(&rng) % (MAX * 2);
+        long long wire  = walk ? edge[(i / ne) % ne] : (long long)mut_next(&rng) % (MAX * 2);
+        long long len   = walk ? edge[(i / ne / ne) % ne] : (long long)mut_next(&rng) % (MAX * 2);
+        long long total = walk ? edge[(i / ne / ne / ne) % ne] : (long long)mut_next(&rng) % (MAX * 2);
+        ota_route_t   route = (i & 1) ? OTA_ROUTE_FIRMWARE : OTA_ROUTE_FILE;
+        ota_request_t r     = zpiece(route, off, wire, len, total);
+        if (ota_piece_headers(&r, MAX, 4096) == OTA_PIECE_OK && ota_piece_bounds(&r) == OTA_PIECE_OK) {
+            CHECK(off >= 0 && len > 0 && wire > 0 && total <= MAX && off + len <= total);
+            CHECK(wire <= ota_deflate_bound(len) && ota_piece_len(&r) == len);
+            CHECK(route != OTA_ROUTE_FIRMWARE ||
+                  (off > 0 && ota_piece_flash_ok((size_t)off, (size_t)len, (size_t)total, 4096)));
         }
     }
 }
@@ -190,6 +267,8 @@ int main(void) {
     test_verdicts();
     test_is_next();
     test_verdict_lies();
+    test_deflate_verdicts();
+    test_deflate_lies();
     test_overflow_guards();
 
     CHECK(ota_round_up(0, 128) == 0);

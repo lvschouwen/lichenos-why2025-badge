@@ -44,6 +44,19 @@ uint32_t update_stall_limit_ms(bool firmware, uint32_t done, uint32_t total) {
     return firmware && total > 0 && done >= total ? 180000 : 30000;
 }
 
+upd_stall_t update_stall(upd_watch_t const *w) {
+    if (w->waiting) {
+        return UPD_STALL_NONE;
+    }
+    if (w->receiving && w->quiet_ms > (int64_t)update_stall_limit_ms(w->firmware, w->done, w->total)) {
+        return UPD_STALL_SENDER;
+    }
+    if (w->restarting && w->quiet_ms >= UPDATE_RESTART_AFTER_MS) {
+        return UPD_STALL_RESTART;
+    }
+    return UPD_STALL_NONE;
+}
+
 upd_boot_t update_after_boot(char const *prev_version, char const *running_version, bool rolled_back, bool image_valid) {
     upd_boot_t b = {.result = update_result(prev_version, running_version, rolled_back)};
     if (!prev_version || !prev_version[0]) {
