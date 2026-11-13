@@ -88,7 +88,7 @@ static void refresh(lv_timer_t *t) {
         return;
     }
     uint32_t seq;
-    size_t   count = mesh_airlog_snapshot(mem->entries, SHOW_ENTRIES, &seq);
+    size_t   count = mesh_airlog_snapshot(mem->entries, SHOW_ENTRIES, &seq, NULL);
     bool     stale = mesh_uptime_s() - last_rebuild_s >= AGE_REFRESH_S;
     // A busy mesh brings a packet about every second: rebuilding 100 rows each time costs frames, so new packets
     // show at most every REBUILD_MIN_MS (review #165). The first fill (t == NULL) is immediate.

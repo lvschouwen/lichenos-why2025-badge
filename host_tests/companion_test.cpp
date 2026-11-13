@@ -59,11 +59,32 @@ public:
     }
     uint32_t getEstAirtimeFor(int len) override { return (uint32_t)len; }
     float    packetScore(float snr, int len) override { return 1.0f; }
+    // The air log's outcomes (#408): the next refuse_starts starts are refused, the next hang_sends sends started are
+    // never answered (MeshCore gives up), the next fail_sends answered ones report a failure
+    int      refuse_starts = 0, hang_sends = 0, fail_sends = 0;
+    uint8_t  last_tx       = AIRLOG_TX_OK;
+    bool     hanging       = false;
     bool     startSendRaw(uint8_t const *bytes, int len) override {
+        last_tx = AIRLOG_TX_REFUSED;
+        if (refuse_starts > 0) {
+            refuse_starts--;
+            return false;
+        }
         sent.emplace_back(bytes, bytes + len);
+        last_tx = AIRLOG_TX_TIMEOUT;
+        hanging = hang_sends > 0;
+        hang_sends -= hanging ? 1 : 0;
         return true;
     }
-    bool     isSendComplete() override { return true; }
+    bool     isSendComplete() override {
+        if (hanging) {
+            return false;
+        }
+        last_tx = fail_sends > 0 ? AIRLOG_TX_FAILED : AIRLOG_TX_OK;
+        fail_sends -= fail_sends > 0 ? 1 : 0;
+        return true;
+    }
+    uint8_t  lastTxResult() const override { return last_tx; }
     void     onSendFinished() override {}
     bool     isInRecvMode() const override { return true; }
     float    getLastRSSI() const override { return -63.0f; }
@@ -110,12 +131,14 @@ extern "C" void mesh_contacts_full(void) {}
 extern "C" void mesh_airlog_note(uint8_t, uint8_t, uint8_t const *, uint8_t, float, float) {}
 // What BadgeMesh told the air log about its transmits (#408): one per packet the radio was given
 struct TxNote {
-    uint8_t header, path_len, raw_len;
-    bool    retry, completed;
+    uint8_t            header, path_len, raw_len;
+    bool               retry;
+    airlog_tx_result_t result;
 };
 static std::vector<TxNote> tx_notes;
-extern "C" void mesh_airlog_note_tx(uint8_t header, uint8_t path_len, uint8_t raw_len, bool retry, bool completed) {
-    tx_notes.push_back({header, path_len, raw_len, retry, completed});
+extern "C" void mesh_airlog_note_tx(uint8_t header, uint8_t path_len, uint8_t raw_len, bool retry,
+                                    airlog_tx_result_t result) {
+    tx_notes.push_back({header, path_len, raw_len, retry, result});
 }
 extern "C" void mesh_signal_note(uint8_t const *, bool, uint8_t, uint8_t const *, float, float) {}
 // What BadgeMesh told the senders' copy last (#291)
@@ -974,9 +997,64 @@ static void tx_note_checks(BadgeMesh &mesh, size_t sent_from, size_t notes_from)
         auto const   &raw = test_radio.sent[sent_from + i];
         TxNote const &n   = tx_notes[notes_from + i];
         bool          tc  = (raw[0] & 0x03) == 0 || (raw[0] & 0x03) == 3; // transport codes before the path length
-        CHECK(n.header == raw[0] && n.raw_len == raw.size() && n.completed && !n.retry);
+        CHECK(n.header == raw[0] && n.raw_len == raw.size() && n.result == AIRLOG_TX_OK && !n.retry);
         CHECK(raw.size() > (tc ? 5u : 1u) && n.path_len == raw[tc ? 5 : 1]);
     }
+}
+
+// The notes of payload type since from
+static std::vector<TxNote> notes_of(size_t from, uint8_t type) {
+    std::vector<TxNote> out;
+    for (size_t i = from; i < tx_notes.size(); i++) {
+        if (((tx_notes[i].header >> PH_TYPE_SHIFT) & PH_TYPE_MASK) == type) {
+            out.push_back(tx_notes[i]);
+        }
+    }
+    return out;
+}
+
+// One advert, sent now, ends with one note of result want (#408)
+static void advert_ends(BadgeMesh &mesh, airlog_tx_result_t want, bool on_air) {
+    size_t from = tx_notes.size(), sent = test_radio.sent.size();
+    CHECK(mesh.advertNow(false));
+    settle(mesh, 10); // a hanging send is given up after 1.5 x its airtime (len ms here)
+    auto adverts = notes_of(from, PAYLOAD_TYPE_ADVERT);
+    CHECK(adverts.size() == 1 && adverts[0].result == want && !adverts[0].retry);
+    CHECK((test_radio.sent.size() > sent) == on_air);
+}
+
+// Every way a transmit ends reaches the air log once, with its own result: refused at the start, never answered,
+// failed as the radio reports it, sent
+static void tx_outcome_checks(BadgeMesh &mesh) {
+    test_radio.refuse_starts = 1;
+    advert_ends(mesh, AIRLOG_TX_REFUSED, false);
+    test_radio.hang_sends = 1;
+    advert_ends(mesh, AIRLOG_TX_TIMEOUT, true);
+    test_radio.hanging    = false;
+    test_radio.fail_sends = 1;
+    advert_ends(mesh, AIRLOG_TX_FAILED, true);
+    advert_ends(mesh, AIRLOG_TX_OK, true);
+}
+
+// A DM nobody acknowledges: its first transmit is not a retry, the outbox's resends are (#408)
+static void tx_retry_checks(BadgeMesh &mesh, ob_t &ob) {
+    ContactsIterator it = mesh.startContactsIterator();
+    ContactInfo      c;
+    CHECK(it.hasNext(&mesh, c));
+    char const   *why  = NULL;
+    size_t        from = tx_notes.size();
+    mesh_msg_id_t dm   = ob_add_dm(&ob, c.id.pub_key, "no ack", 6, (uint32_t)millis(), &why);
+    CHECK(dm != 0);
+    settle(mesh, 600); // 60 s: every attempt times out
+    auto texts = notes_of(from, PAYLOAD_TYPE_TXT_MSG);
+    CHECK(texts.size() >= 2 && !texts[0].retry);
+    bool resent = false;
+    for (size_t i = 1; i < texts.size(); i++) {
+        resent = resent || texts[i].retry;
+    }
+    CHECK(resent);
+    mesh_out_state_t state = MESH_OUT_QUEUED;
+    CHECK(ob_get(&ob, dm, &state, NULL, NULL, NULL) && state == MESH_OUT_FAILED);
 }
 
 static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, SimpleMeshTables &tables, char const *root) {
@@ -1085,6 +1163,8 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     contact_action_checks(mesh);
     import_checks(mesh);
     tx_note_checks(mesh, sent_at_start, notes_at_start);
+    tx_outcome_checks(mesh);
+    tx_retry_checks(mesh, ob);
 }
 
 static std::vector<uint8_t> file_bytes(std::string const &path) {

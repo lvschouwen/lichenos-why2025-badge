@@ -37,8 +37,9 @@ static void kinds(void) {
     airlog_entry_t           mem[2];
     airlog_t                 r;
     airlog_entry_t           out[2];
+    char                     buf[AIRLOG_KIND_MAX];
     for (size_t i = 0; i < sizeof(types); i++) {
-        CHECK_STR(airlog_kind_token(types[i]), want[i]);
+        CHECK_STR(airlog_kind_token(types[i], buf, sizeof(buf)), want[i]);
         airlog_init(&r, mem, 2);
         airlog_push_tx(&r, HDR(types[i], 2), 0, 10, false, AIRLOG_TX_OK, 1);
         airlog_push(&r, HDR(types[i], 1), 0, NULL, 10, -900, 10, 2);
@@ -96,10 +97,15 @@ static void console_format(void) {
     airlog_entry_t mem[4];
     airlog_t       r;
     airlog_init(&r, mem, 4);
-    char    line[128];
-    uint8_t path[6] = {0x1f, 0x2e, 0x3d, 0x4c, 0x5b, 0x6a};
-    airlog_console_header(0, 0, line, sizeof(line));
-    CHECK_STR(line, "air log: empty");
+    char          line[128];
+    uint8_t       path[6] = {0x1f, 0x2e, 0x3d, 0x4c, 0x5b, 0x6a};
+    airlog_info_t info    = {.have_ring = true, .dropped = 0};
+    airlog_console_header(0, 0, &info, line, sizeof(line));
+    CHECK_STR(line, "air log: empty, 0 dropped");
+    // no ring: nothing was recorded, which must not read as "nothing happened"
+    airlog_info_t none = {.have_ring = false, .dropped = 7};
+    airlog_console_header(0, 0, &none, line, sizeof(line));
+    CHECK_STR(line, "air log: no memory, 7 dropped");
     airlog_push(&r, HDR(4, 1), (uint8_t)((1 << 6) | 3), path, 90, -874, 65, 1234);
     airlog_push_tx(&r, HDR(2, 2), 1, 45, true, AIRLOG_TX_OK, 1240);
     airlog_push(&r, HDR(5, 0), 0, NULL, 50, -1205, -5, 1241); // transport flood, SNR -0.5
@@ -107,8 +113,10 @@ static void console_format(void) {
     airlog_push_tx(&r, HDR(5, 1), 0, 60, false, AIRLOG_TX_FAILED, 1251);
     airlog_entry_t out[4];
     size_t         n = airlog_copy(&r, out, 4);
-    airlog_console_header(n, r.seq, line, sizeof(line));
-    CHECK_STR(line, "air log: 4 entries, newest first, 5 logged since boot");
+    info.dropped = 3; // a ring allocated late: the log is partial, and says so
+    airlog_console_header(n, r.seq, &info, line, sizeof(line));
+    CHECK_STR(line, "air log: 4 entries, newest first, 5 logged since boot, 3 dropped");
+    info.dropped = 0;
     airlog_console_line(&out[0], line, sizeof(line));
     CHECK_STR(line, "#5 t=1251 tx grp_txt flood hops=0 len=60 retry=0 result=failed");
     airlog_console_line(&out[1], line, sizeof(line));
@@ -122,15 +130,46 @@ static void console_format(void) {
     airlog_copy(&r, out, 1);
     airlog_console_line(&out[0], line, sizeof(line)); // no hash on the console: it names a repeater
     CHECK_STR(line, "#1 t=1234 rx advert flood hops=3 len=90 rssi=-87.4 snr=6.5");
-    airlog_console_header(1, r.seq, line, sizeof(line));
-    CHECK_STR(line, "air log: 1 entry, newest first, 1 logged since boot");
+    airlog_console_header(1, r.seq, &info, line, sizeof(line));
+    CHECK_STR(line, "air log: 1 entry, newest first, 1 logged since boot, 0 dropped");
     airlog_push_tx(&r, HDR(1, 2), 0, 20, false, AIRLOG_TX_TIMEOUT, 1300);
     airlog_copy(&r, out, 1);
     airlog_console_line(&out[0], line, sizeof(line));
     CHECK_STR(line, "#2 t=1300 tx resp direct hops=0 len=20 retry=0 result=timeout");
 }
 
+// The radio's outcome and the dispatcher's hook make the result; logTxFail is never a send
+static void outcomes(void) {
+    CHECK(airlog_tx_outcome(AIRLOG_TX_OK, true) == AIRLOG_TX_OK);
+    CHECK(airlog_tx_outcome(AIRLOG_TX_FAILED, true) == AIRLOG_TX_FAILED);
+    CHECK(airlog_tx_outcome(AIRLOG_TX_TIMEOUT, false) == AIRLOG_TX_TIMEOUT);
+    CHECK(airlog_tx_outcome(AIRLOG_TX_REFUSED, false) == AIRLOG_TX_REFUSED);
+    CHECK(airlog_tx_outcome(AIRLOG_TX_OK, false) == AIRLOG_TX_TIMEOUT);
+    CHECK(airlog_tx_outcome(AIRLOG_TX_FAILED, false) == AIRLOG_TX_TIMEOUT);
+    CHECK(airlog_tx_outcome(9, true) == AIRLOG_TX_OK);
+    CHECK(airlog_tx_outcome(9, false) == AIRLOG_TX_TIMEOUT);
+}
+
+// "fw mesh airlog [n]": spaces around the number are fine, anything else is the usage line
+static void console_count(void) {
+    unsigned n = 0;
+    CHECK(airlog_console_count("", &n) && n == AIRLOG_CONSOLE_DEFAULT);
+    CHECK(airlog_console_count("  ", &n) && n == AIRLOG_CONSOLE_DEFAULT);
+    CHECK(airlog_console_count("5", &n) && n == 5);
+    CHECK(airlog_console_count("5 ", &n) && n == 5);
+    CHECK(airlog_console_count(" 12\t", &n) && n == 12);
+    CHECK(airlog_console_count("50", &n) && n == 50);
+    CHECK(!airlog_console_count("51", &n));
+    CHECK(!airlog_console_count("0", &n));
+    CHECK(!airlog_console_count("-3", &n));
+    CHECK(!airlog_console_count("5x", &n));
+    CHECK(!airlog_console_count("5 6", &n));
+    CHECK(!airlog_console_count("99999999999", &n));
+}
+
 int main(void) {
+    outcomes();
+    console_count();
     kinds();
     sent_entries();
     interleaved_and_wrap();

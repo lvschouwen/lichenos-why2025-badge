@@ -21,6 +21,9 @@ public:
     virtual uint32_t getRngSeed() { return 0; }
     virtual bool     setRxBoostedGainMode(bool on) { return false; }
     virtual bool     getRxBoostedGainMode() const { return false; }
+    // How the packet started last ended (airlog_tx_result_t, #408), read in the logTx / logTxFail that follow in the
+    // same dispatcher step; 0 (sent) for a radio that does not tell
+    virtual uint8_t  lastTxResult() const { return 0; }
     uint32_t         getPacketsRecv() const { return n_recv; }
     uint32_t         getPacketsRecvErrors() const { return n_recv_errors; }
     uint32_t         getPacketsSent() const { return n_sent; }

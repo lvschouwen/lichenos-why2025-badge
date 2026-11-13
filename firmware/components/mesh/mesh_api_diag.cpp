@@ -11,67 +11,77 @@ static char const TAG[] = "mesh";
 // Its own lock (a mutex: the ring and the readers' copies are in PSRAM, #271) covers only a push and a copy: a push is
 // one 24-byte store, a copy at most SHOW_ENTRIES (the screen's 100) entries, so a transmit's note waits at most for one
 // such copy, and the mutex's priority inheritance lifts a reader that holds it to the mesh task's priority.
+//
+// The ring is allocated by airlog_prepare only: at MeshCore's start and, after a failed try, again from the mesh loop
+// between two of MeshCore's steps (never from a packet's note). Until it exists every note is dropped and counted, so
+// the console says "no memory" and how many, never a false "empty".
 
-static airlog_t       airlog_ring;
-static bool           airlog_failed;
+#define AIRLOG_RETRY_S 30 // a failed allocation is tried again this often
+
+static airlog_t airlog_ring;
+static bool     airlog_failed;
+static uint32_t airlog_failed_at_s;
+static uint32_t airlog_dropped; // notes without a ring; written on the mesh task, read under the air log's lock
 
 // Only the mesh task (or MeshCore's start, before that task exists) writes the pointer; readers see NULL or the ring
-static bool airlog_ready(void) {
-    if (airlog_ring.e) {
-        return true;
-    }
-    if (airlog_failed) {
-        return false;
+void mesh_int::airlog_prepare(void) {
+    uint32_t now = mesh_uptime_s();
+    if (airlog_ring.e || (airlog_failed && now - airlog_failed_at_s < AIRLOG_RETRY_S)) {
+        return;
     }
     auto *mem = (airlog_entry_t *)lichen_alloc(meshcore_ctx(), (size_t)(AIRLOG_CAP) * sizeof(airlog_entry_t), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
     if (!mem) {
-        airlog_failed = true;
-        ESP_LOGW(TAG, "air log: no memory, packets are not listed");
-        return false;
+        airlog_failed      = true;
+        airlog_failed_at_s = now;
+        ESP_LOGW(TAG, "air log: no memory, packets are not listed (tried again in %d s)", AIRLOG_RETRY_S);
+        return;
     }
     section_enter<SECTION_AIRLOG>();
     airlog_init(&airlog_ring, mem, AIRLOG_CAP);
     section_exit<SECTION_AIRLOG>();
-    return true;
+    airlog_failed = false;
 }
 
-void mesh_int::airlog_prepare(void) {
-    airlog_ready();
+// Under the air log's lock: false (the note counted as dropped) while there is no ring
+static bool airlog_have_locked(void) {
+    if (airlog_ring.e) {
+        return true;
+    }
+    airlog_dropped++;
+    return false;
 }
 
 extern "C" void mesh_airlog_note(uint8_t header, uint8_t path_len, uint8_t const *path, uint8_t raw_len, float rssi,
                                  float snr) {
-    if (!airlog_ready()) { // a start that found no memory tries again at the first packet heard
-        return;
-    }
-    int16_t rssi_x10 = (int16_t)lroundf(rssi * 10.0f);
-    int16_t snr_x10  = (int16_t)lroundf(snr * 10.0f);
-    uint32_t at_s    = mesh_uptime_s();
+    int16_t  rssi_x10 = (int16_t)lroundf(rssi * 10.0f);
+    int16_t  snr_x10  = (int16_t)lroundf(snr * 10.0f);
+    uint32_t at_s     = mesh_uptime_s();
     section_enter<SECTION_AIRLOG>();
-    airlog_push(&airlog_ring, header, path_len, path, raw_len, rssi_x10, snr_x10, at_s);
+    if (airlog_have_locked()) {
+        airlog_push(&airlog_ring, header, path_len, path, raw_len, rssi_x10, snr_x10, at_s);
+    }
     section_exit<SECTION_AIRLOG>();
 }
 
-// Observation only (#408): never allocates (a ring that is not there drops the note), never logs. The outcome is the
-// radio's, set in the same dispatcher step that called logTx or logTxFail; logTxFail never counts as sent.
-extern "C" void mesh_airlog_note_tx(uint8_t header, uint8_t path_len, uint8_t raw_len, bool retry, bool completed) {
-    if (!airlog_ring.e) {
-        return;
-    }
-    auto result = (airlog_tx_result_t)lora_radio.last_tx;
-    if (!completed && (result == AIRLOG_TX_OK || result == AIRLOG_TX_FAILED)) {
-        result = AIRLOG_TX_TIMEOUT;
-    }
+// Observation only (#408): never allocates, never logs; one store under the air log's lock
+extern "C" void mesh_airlog_note_tx(uint8_t header, uint8_t path_len, uint8_t raw_len, bool retry,
+                                    airlog_tx_result_t result) {
     uint32_t at_s = mesh_uptime_s();
     section_enter<SECTION_AIRLOG>();
-    airlog_push_tx(&airlog_ring, header, path_len, raw_len, retry, result, at_s);
+    if (airlog_have_locked()) {
+        airlog_push_tx(&airlog_ring, header, path_len, raw_len, retry, result, at_s);
+    }
     section_exit<SECTION_AIRLOG>();
 }
 
-extern "C" size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq) {
+extern "C" size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq, airlog_info_t *info) {
     section_enter<SECTION_AIRLOG>();
     size_t n = airlog_ring.e ? airlog_copy(&airlog_ring, out, max) : 0;
     *seq     = airlog_ring.seq;
+    if (info) {
+        info->have_ring = airlog_ring.e != NULL;
+        info->dropped   = airlog_dropped;
+    }
     section_exit<SECTION_AIRLOG>();
     return n;
 }

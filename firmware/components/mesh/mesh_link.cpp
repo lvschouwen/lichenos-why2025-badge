@@ -37,8 +37,9 @@ void BadgeMesh::logRx(mesh::Packet *packet, int len, float score) {
 // MeshCore's dispatcher ends every packet it starts with exactly one of logTx (the C6 answered) and logTxFail (not
 // started, or given up waiting), so the air log sees each transmit once (#408). len is not used for it: at a refused
 // start the dispatcher passes another length than at the end, so the air log takes the packet's own raw length.
-static void note_tx(mesh::Packet const *packet, bool retry, bool completed) {
-    mesh_airlog_note_tx(packet->header, (uint8_t)packet->path_len, (uint8_t)packet->getRawLength(), retry, completed);
+void BadgeMesh::noteTx(mesh::Packet const *packet, bool retry, bool completed) {
+    airlog_tx_result_t result = airlog_tx_outcome(radio_.lastTxResult(), completed);
+    mesh_airlog_note_tx(packet->header, (uint8_t)packet->path_len, (uint8_t)packet->getRawLength(), retry, result);
 }
 
 void BadgeMesh::logTx(mesh::Packet *packet, int len) {
@@ -49,12 +50,12 @@ void BadgeMesh::logTx(mesh::Packet *packet, int len) {
         mesh_ob_enter();
         mt_on_tx(mt, tag, (uint32_t)millis()); // our trace on air: its round trip counts from here (#53)
         mesh_ob_exit();
-        note_tx(packet, false, true);
+        noteTx(packet, false, true);
         return;
     }
     bool is_dm;
     if (!ours_to_track(packet, &is_dm)) {
-        note_tx(packet, false, true);
+        noteTx(packet, false, true);
         return;
     }
     uint8_t hash[MAX_HASH_SIZE];
@@ -62,19 +63,19 @@ void BadgeMesh::logTx(mesh::Packet *packet, int len) {
     mesh_ob_enter();
     bool retry = ob_on_tx(ob_, is_dm, hash);
     mesh_ob_exit();
-    note_tx(packet, retry, true);
+    noteTx(packet, retry, true);
 }
 
 void BadgeMesh::logTxFail(mesh::Packet *packet, int len) {
     bool is_dm;
     if (!ours_to_track(packet, &is_dm)) {
-        note_tx(packet, false, false);
+        noteTx(packet, false, false);
         return;
     }
     mesh_ob_enter();
     bool retry = ob_on_tx_fail(ob_, is_dm, (uint32_t)millis());
     mesh_ob_exit();
-    note_tx(packet, retry, false);
+    noteTx(packet, retry, false);
 }
 
 void BadgeMesh::onAdvertRecv(mesh::Packet *packet, mesh::Identity const &id, uint32_t timestamp,

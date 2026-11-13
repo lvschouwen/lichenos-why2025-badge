@@ -18,13 +18,36 @@ extern "C" {
 #define AIRLOG_F_SENT  0x01 // transmitted by this badge (rssi, snr and hash unused)
 #define AIRLOG_F_RETRY 0x02 // sent: the outbox's resend of a direct message (its attempt 2 or 3)
 
-// How a transmit ended, as MeshCore's dispatcher saw it: each packet it starts ends in exactly one of these
+// How a transmit ended, as MeshCore's dispatcher saw it: each packet it starts ends in exactly one of these. A packet
+// too long for the radio is dropped by the dispatcher before it starts (nothing goes on air) and gets no entry.
 typedef enum {
     AIRLOG_TX_OK,      // the C6 reported it sent (the "tx" count of "fw mesh")
     AIRLOG_TX_FAILED,  // the C6 reported it failed ("failed")
     AIRLOG_TX_TIMEOUT, // MeshCore gave up before the C6 answered ("timed out")
-    AIRLOG_TX_REFUSED, // never started: TX blocked, LoRa off, or the C6 still busy ("refused")
+    // Never started: the C6 still busy with the previous packet, which is all the "refused" count of "fw mesh"
+    // counts, but also TX blocked (a damaged identity), LoRa switched off or an empty packet. Scripts must not equate
+    // the two.
+    AIRLOG_TX_REFUSED,
 } airlog_tx_result_t;
+
+// The result of a packet's end: the radio's last outcome (BadgeRadio::lastTxResult), and whether it ended in logTx
+// (completed: the C6 answered) rather than logTxFail, which is never a send
+static inline airlog_tx_result_t airlog_tx_outcome(uint8_t radio_last, bool completed) {
+    if (radio_last > AIRLOG_TX_REFUSED) {
+        return completed ? AIRLOG_TX_OK : AIRLOG_TX_TIMEOUT;
+    }
+    airlog_tx_result_t r = (airlog_tx_result_t)radio_last;
+    if (!completed && (r == AIRLOG_TX_OK || r == AIRLOG_TX_FAILED)) {
+        return AIRLOG_TX_TIMEOUT;
+    }
+    return r;
+}
+
+// Whether the ring exists, and how many notes (received or sent) were dropped because it did not
+typedef struct {
+    bool     have_ring;
+    uint32_t dropped;
+} airlog_info_t;
 
 typedef struct {
     uint32_t seq;         // 1, 2, 3 ... as received: a stable identity for a row
@@ -76,11 +99,20 @@ void airlog_detail(airlog_entry_t const *e, char const *age_text, char *out, siz
 //   rx: "#57 t=1234 rx advert flood hops=3 len=90 rssi=-87.4 snr=6.5"
 //   tx: "#58 t=1240 tx txt direct hops=1 len=45 retry=1 result=ok"
 // The kind tokens: req resp txt ack advert grp_txt grp_data anon_req (a login) path trace multipart control, else
-// type<n>; the results: ok failed timeout refused.
-char const *airlog_kind_token(uint8_t type);
+// type<n> (written into buf, which needs AIRLOG_KIND_MAX bytes); the results: ok failed timeout refused.
+#define AIRLOG_KIND_MAX 12
+char const *airlog_kind_token(uint8_t type, char *buf, size_t cap);
 void        airlog_console_line(airlog_entry_t const *e, char *out, size_t cap);
-// The line before them: "air log: 2 entries, newest first, 58 logged since boot" / "air log: empty"
-void        airlog_console_header(size_t shown, uint32_t seq, char *out, size_t cap);
+// The line before them, always with the notes dropped for lack of a ring:
+//   "air log: 2 entries, newest first, 58 logged since boot, 0 dropped" / "air log: empty, 0 dropped" /
+//   "air log: no memory, 7 dropped" (the ring could not be allocated: nothing was recorded, not "nothing happened")
+void        airlog_console_header(size_t shown, uint32_t seq, airlog_info_t const *info, char *out, size_t cap);
+
+// "fw mesh airlog [n]": n from 1 to AIRLOG_CONSOLE_MAX, AIRLOG_CONSOLE_DEFAULT when arg is empty or blank; spaces
+// around the number are fine. false for anything else.
+#define AIRLOG_CONSOLE_DEFAULT 20
+#define AIRLOG_CONSOLE_MAX     50 // bounded output; the ring keeps AIRLOG_CAP
+bool        airlog_console_count(char const *arg, unsigned *n);
 
 #ifdef __cplusplus
 }

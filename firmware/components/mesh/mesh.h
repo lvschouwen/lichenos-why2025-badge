@@ -81,10 +81,11 @@ void mesh_tile_snapshot(mesh_tile_t *out);
 // under the mesh lock (up to wait_ms). false when MeshCore isn't running or the lock was busy. Reads only.
 bool mesh_health_snapshot(mesh_health_t *out, uint32_t wait_ms);
 
-// The air log (#165): up to max received packets, newest first, copied from the ring under its own short lock (not
-// the mesh lock, never waits on MeshCore). *seq is the newest entry's sequence number (0: none yet), which changes
-// whenever a packet was added. The ring lives from the first packet on and survives MeshCore stopping and starting.
-size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq);
+// The air log (#165, #408): up to max packets received and sent, newest first, copied from the ring under its own
+// short lock (not the mesh lock, never waits on MeshCore). *seq is the newest entry's sequence number (0: none yet),
+// which changes whenever a packet was added. The ring lives from MeshCore's first start on and survives it stopping
+// and starting. info (may be NULL): whether the ring exists and how many notes were dropped for lack of it.
+size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq, airlog_info_t *info);
 
 // Discover nearby (#167): one zero-hop request that nearby nodes answer. Start only after the user confirmed: it
 // transmits. false with *why when it cannot go (MeshCore stopped, LoRa off, asked a moment ago, still running). Not the

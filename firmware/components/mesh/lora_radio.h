@@ -18,6 +18,7 @@ public:
     bool     isInRecvMode() const override { return !sending; }
     float    getLastRSSI() const override { return last_rssi; }
     float    getLastSNR() const override { return last_snr; }
+    uint8_t  lastTxResult() const override { return last_tx; }
 
     void     setParams(float freq_mhz, float bw_khz, uint8_t sf, uint8_t cr) override;
     void     setTxPower(int8_t dbm) override;

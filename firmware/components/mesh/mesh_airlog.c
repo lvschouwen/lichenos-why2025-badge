@@ -135,16 +135,15 @@ void airlog_detail(airlog_entry_t const *e, char const *age_text, char *out, siz
     snprintf(out, cap, "%s, %s SNR%s%s, %s", rssi, snr, via[0] ? ", " : "", via, age_text);
 }
 
-char const *airlog_kind_token(uint8_t type) {
+char const *airlog_kind_token(uint8_t type, char *buf, size_t cap) {
     static char const *const TOKENS[] = {
         "req", "resp", "txt", "ack", "advert", "grp_txt", "grp_data", "anon_req", "path", "trace", "multipart", "control",
     };
-    static char other[12];
     if (type < sizeof(TOKENS) / sizeof(TOKENS[0])) {
         return TOKENS[type];
     }
-    snprintf(other, sizeof(other), "type%u", (unsigned)type);
-    return other;
+    snprintf(buf, cap, "type%u", (unsigned)type);
+    return buf;
 }
 
 // A tenth as "-87.4" / "6.5" / "-0.5": the sign separate, so -5 is not printed as "0.5"
@@ -155,9 +154,11 @@ static void fmt_tenths(int16_t v, char *out, size_t cap) {
 
 void airlog_console_line(airlog_entry_t const *e, char *out, size_t cap) {
     char const *route = airlog_is_flood(e) ? "flood" : "direct";
+    char        kind_buf[AIRLOG_KIND_MAX];
+    char const *kind = airlog_kind_token(e->type, kind_buf, sizeof(kind_buf));
     if (airlog_is_sent(e)) {
         snprintf(out, cap, "#%lu t=%lu tx %s %s hops=%u len=%u retry=%u result=%s", (unsigned long)e->seq,
-                 (unsigned long)e->at_s, airlog_kind_token(e->type), route, (unsigned)e->hops, (unsigned)e->len,
+                 (unsigned long)e->at_s, kind, route, (unsigned)e->hops, (unsigned)e->len,
                  (e->flags & AIRLOG_F_RETRY) ? 1u : 0u, tx_result(e->result));
         return;
     }
@@ -165,14 +166,40 @@ void airlog_console_line(airlog_entry_t const *e, char *out, size_t cap) {
     fmt_tenths(e->rssi_x10, rssi, sizeof(rssi));
     fmt_tenths(e->snr_x10, snr, sizeof(snr));
     snprintf(out, cap, "#%lu t=%lu rx %s %s hops=%u len=%u rssi=%s snr=%s", (unsigned long)e->seq,
-             (unsigned long)e->at_s, airlog_kind_token(e->type), route, (unsigned)e->hops, (unsigned)e->len, rssi, snr);
+             (unsigned long)e->at_s, kind, route, (unsigned)e->hops, (unsigned)e->len, rssi, snr);
 }
 
-void airlog_console_header(size_t shown, uint32_t seq, char *out, size_t cap) {
-    if (shown == 0) {
-        snprintf(out, cap, "air log: empty");
-        return;
+void airlog_console_header(size_t shown, uint32_t seq, airlog_info_t const *info, char *out, size_t cap) {
+    unsigned long dropped = (unsigned long)info->dropped;
+    if (!info->have_ring) {
+        snprintf(out, cap, "air log: no memory, %lu dropped", dropped);
+    } else if (shown == 0) {
+        snprintf(out, cap, "air log: empty, %lu dropped", dropped);
+    } else {
+        snprintf(out, cap, "air log: %u entr%s, newest first, %lu logged since boot, %lu dropped", (unsigned)shown,
+                 shown == 1 ? "y" : "ies", (unsigned long)seq, dropped);
     }
-    snprintf(out, cap, "air log: %u entr%s, newest first, %lu logged since boot", (unsigned)shown,
-             shown == 1 ? "y" : "ies", (unsigned long)seq);
+}
+
+bool airlog_console_count(char const *arg, unsigned *n) {
+    while (*arg == ' ' || *arg == '\t') {
+        arg++;
+    }
+    if (!*arg) {
+        *n = AIRLOG_CONSOLE_DEFAULT;
+        return true;
+    }
+    unsigned v = 0;
+    size_t   digits = 0;
+    for (; *arg >= '0' && *arg <= '9' && digits < 4; arg++, digits++) {
+        v = v * 10 + (unsigned)(*arg - '0');
+    }
+    while (*arg == ' ' || *arg == '\t') {
+        arg++;
+    }
+    if (!digits || *arg || v == 0 || v > AIRLOG_CONSOLE_MAX) {
+        return false;
+    }
+    *n = v;
+    return true;
 }

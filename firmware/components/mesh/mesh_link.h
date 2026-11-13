@@ -6,6 +6,7 @@
 // under the mesh lock; only the outbox is shared, through mesh_ob_enter/exit (a mutex, as the outbox is in PSRAM, #271;
 // defined by the platform: mesh_task.cpp on the badge, a no-op in the host test).
 #include "advert_limit.h"
+#include "mesh_airlog.h"
 #include "mesh_blobq.h"
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
@@ -27,10 +28,10 @@ void mesh_contacts_full(void);
 // A packet MeshCore received (#165), headers only, on the mesh task under the mesh lock: header and path_len as the
 // packet carries them, the path bytes, bytes on air, RSSI in dBm and SNR in dB. mesh_task.cpp keeps the air log ring.
 void mesh_airlog_note(uint8_t header, uint8_t path_len, uint8_t const *path, uint8_t raw_len, float rssi, float snr);
-// A packet MeshCore started to transmit has ended (#408), on the mesh task under the mesh lock, from logTx (completed:
-// the C6 answered) or logTxFail (not started, or given up): header and path_len as the packet carries them, bytes on
-// air, and whether it is the outbox's resend of a DM. Observation only: no allocation, no log line, no I/O.
-void mesh_airlog_note_tx(uint8_t header, uint8_t path_len, uint8_t raw_len, bool retry, bool completed);
+// A packet MeshCore started to transmit has ended (#408), on the mesh task under the mesh lock, from logTx (the C6
+// answered) or logTxFail (not started, or given up): header and path_len as the packet carries them, bytes on air,
+// whether it is the outbox's resend of a DM, and how it ended. Observation only: no allocation, no log line, no I/O.
+void mesh_airlog_note_tx(uint8_t header, uint8_t path_len, uint8_t raw_len, bool retry, airlog_tx_result_t result);
 // An advert or a direct message from a contact in the table (#166), on the mesh task under the mesh lock: its public
 // key (the first 6 bytes name it), the signal of the packet and, for an advert, the path it came by. mesh_task.cpp
 // keeps it.
@@ -162,9 +163,9 @@ class CompanionPipe : public BaseSerialInterface {
 class BadgeMesh : public MyMesh {
   public:
     BadgeMesh(
-        mesh::Radio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore &store, ob_t *ob
+        BadgeRadio &radio, mesh::RNG &rng, mesh::RTCClock &rtc, SimpleMeshTables &tables, DataStore &store, ob_t *ob
     )
-        : MyMesh(radio, rng, rtc, tables, store), ob_(ob), store_(store) {
+        : MyMesh(radio, rng, rtc, tables, store), radio_(radio), ob_(ob), store_(store) {
         pipe_.attach(this, ob);
         advert_limit_init(&advert_limit_);
         mesh_blobq_init(&blobs_);
@@ -284,6 +285,7 @@ class BadgeMesh : public MyMesh {
     void logRx(mesh::Packet *packet, int len, float score) override;
     void logTx(mesh::Packet *packet, int len) override;
     void logTxFail(mesh::Packet *packet, int len) override;
+    void noteTx(mesh::Packet const *packet, bool retry, bool completed); // #408: the air log's transmit note
     // A room's post (#51): the screens get "<author>: <text>", as the room's own chat shows it
     void onSignedMessageRecv(
         ContactInfo const &from,
@@ -311,6 +313,7 @@ class BadgeMesh : public MyMesh {
     bool               saveChannelScopes();
     bool               blobWanted(mesh_blobq_entry_t const &e);
     void               blobDone();
+    BadgeRadio        &radio_; // MeshCore's _radio, with the badge's own calls (lastTxResult, #408)
     ob_t              *ob_;
     DataStore         &store_;
     mesh_blobq_t       blobs_;
