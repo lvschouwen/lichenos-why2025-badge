@@ -581,7 +581,8 @@ void mesh_journal_tick_locked(void) {
 
 // The card was formatted or wiped under a running journal (#368): log.bin and its directory are gone, and appending
 // would fail with ENOENT. A new log.bin starts with a HEAD under the keys already in use (the pending records are
-// encrypted with them), inside the caller's card batch. Nothing stays open between writes, so no handle can go stale.
+// encrypted with them), inside the caller's card batch. Opened "ab", never "wb": whatever is in the file stays.
+// Nothing stays open between writes, so no handle can go stale.
 static char const *journal_reopen(int *err) {
     uint8_t head[MESH_HIST_REC_MAX];
     if (mkdir(SD_MESSAGES_DIR, 0755) != 0 && errno != EEXIST) {
@@ -589,7 +590,7 @@ static char const *journal_reopen(int *err) {
         return "messages directory not recreated";
     }
     size_t n  = mesh_hist_encode_head(&wcrypt, head, sizeof(head));
-    FILE  *f  = n ? fopen(LOG_PATH, "wb") : NULL; // only reached for a missing or empty file (mesh_journal_gen_plan)
+    FILE  *f  = n ? fopen(LOG_PATH, "ab") : NULL;
     bool   ok = f && fwrite(head, 1, n, f) == n;
     *err      = ok ? 0 : (n ? errno : EINVAL);
     if (f && fclose(f) != 0 && ok) {
@@ -599,8 +600,8 @@ static char const *journal_reopen(int *err) {
     if (!ok) {
         return "journal not reopened";
     }
-    log_bytes   = (uint32_t)n;
-    log_records = 1;
+    log_bytes               = (uint32_t)n;
+    log_records             = 1;
     chats_forgotten_pending = true;
     ESP_LOGW(TAG, "journal: log.bin was gone (card formatted or wiped): started a new one");
     return NULL;
@@ -609,11 +610,17 @@ static char const *journal_reopen(int *err) {
 // Before an append: is the file there? (stat is one directory lookup inside the batch)
 static char const *journal_check(int *err) {
     struct stat st;
-    bool        have = stat(LOG_PATH, &st) == 0;
-    if (mesh_journal_gen_plan(have, have ? (uint64_t)st.st_size : 0) == MESH_JOURNAL_GEN_APPEND) {
+    bool        ok = stat(LOG_PATH, &st) == 0;
+    *err           = ok ? 0 : errno;
+    switch (mesh_journal_gen_plan(ok, *err, ok ? (uint64_t)st.st_size : 0)) {
+    case MESH_JOURNAL_GEN_APPEND:
         return NULL;
+    case MESH_JOURNAL_GEN_REOPEN:
+        return journal_reopen(err);
+    case MESH_JOURNAL_GEN_FAIL:
+        break;
     }
-    return journal_reopen(err);
+    return "journal file not readable";
 }
 
 // Appends spare[0..out_len) to log.bin in one batch. A failed or short write may leave a torn record at the end:

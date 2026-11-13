@@ -673,6 +673,54 @@ static void forget_checks(void) {
     CHECK(h.pending_records == 5);
 }
 
+// #368: a journal started again after a card format. Records queued before the reopen come without the CHAT records the
+// lost file held; they replay with a fallback title, and once the chats are forgotten the next message writes its CHAT
+// record again, so the new file is whole from there on
+static void reopen_checks(void) {
+    static mesh_hist_t h;
+    static uint8_t     pend[1024], spare[1024];
+    mesh_store_set_hooks(NULL, NULL, NULL);
+    CHECK(mesh_store_init(3));
+    mesh_hist_init(&h, pend, sizeof(pend), &kc);
+    mesh_chat_key_t dk = dm_key(7);
+    mesh_msg_t      m;
+    memset(&m, 0, sizeof(m));
+    strcpy(m.channel, "@Bob");
+    m.dm = true;
+    m.peer[0] = 7;
+    mesh_hist_add(&h, &dk, &m, 1); // CHAT + MSG: written to the file the format destroyed
+    size_t   len = 0;
+    uint32_t recs = 0;
+    uint8_t *old = mesh_hist_swap(&h, spare, &len, &recs);
+    CHECK(recs == 2);
+    m.seq = 1;
+    mesh_hist_add(&h, &dk, &m, 2); // the chat is known: a MSG alone, queued when the card is reformatted
+    old = mesh_hist_swap(&h, old, &len, &recs);
+    CHECK(recs == 1);
+    start_file(); // the reopen: a new HEAD under the same keys, then the queued bytes
+    memcpy(file + file_len, old, len);
+    file_len += len;
+    mesh_hist_forget_chats(&h);
+    m.seq = 2;
+    mesh_hist_add(&h, &dk, &m, 3); // CHAT + MSG again
+    old = mesh_hist_swap(&h, old, &len, &recs);
+    CHECK(recs == 2);
+    memcpy(file + file_len, old, len);
+    file_len += len;
+    mesh_hist_scan_t s = scan_bytes(file, file_len, 5);
+    CHECK(!s.torn && got_n == 3 && got[0].type == MESH_HIST_MSG && got[1].type == MESH_HIST_CHAT);
+    mesh_hist_t h2;
+    static uint8_t pend2[1024];
+    mesh_hist_init(&h2, pend2, sizeof(pend2), &kc);
+    for (size_t i = 0; i < got_n; i++) {
+        CHECK(mesh_hist_replay(&h2, &got[i]));
+    }
+    mesh_msg_t out[4];
+    CHECK(mesh_store_chat(&dk, out, 4, false) == 2);
+    CHECK(strcmp(out[0].channel, "@?") == 0);   // the queued record, before any CHAT: the fallback
+    CHECK(strcmp(out[1].channel, "@Bob") == 0); // after the new CHAT record: the real title
+}
+
 static bool has_bytes(uint8_t const *hay, size_t n, char const *needle) {
     size_t m = strlen(needle);
     for (size_t i = 0; i + m <= n; i++) {
@@ -1156,6 +1204,7 @@ int main(void) {
     compact_checks();
     compact_dup_checks();
     forget_checks();
+    reopen_checks();
     damage_checks();
     boot_load_checks();
     if (failures) {
