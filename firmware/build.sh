@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 # Builds Lichen: ./firmware/build.sh build (any idf.py arguments). A build first builds the C6 image (c6/) and runs
 # the host tests (host_tests/), so the P4 image always carries a matching C6 image.
+# ./firmware/build.sh release build: the release image (#373), sdkconfig.defaults plus sdkconfig.release.defaults
+# (no debug or test commands) in firmware/build-release with its own sdkconfig; the dev build's tree is not touched.
 set -euo pipefail
+
+release=0
+if [ "${1:-}" = release ]; then
+    release=1
+    shift
+fi
 
 IDF_DIR=${BADGE_IDF_PATH:-~/esp/esp-idf}
 REQUIRED_IDF=6.1
@@ -17,6 +25,16 @@ fi
 
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(dirname "$here")
+
+bdir=$here/build
+sdkconfig=$here/sdkconfig
+idf_args=()
+if [ "$release" = 1 ]; then
+    bdir=$here/build-release
+    sdkconfig=$bdir/sdkconfig
+    mkdir -p "$bdir"
+    idf_args=(-B "$bdir" -D "SDKCONFIG=$sdkconfig" -D "SDKCONFIG_DEFAULTS=$here/sdkconfig.defaults;$here/sdkconfig.release.defaults")
+fi
 
 # Only commands that build need the C6 image, the host tests and fresh sdkconfigs; monitor, menuconfig etc. don't
 building=0
@@ -57,6 +75,11 @@ if [ "$building" = 1 ]; then
             mv -f "$dir/sdkconfig" "$dir/sdkconfig.old"
         fi
     done
+    if [ "$release" = 1 ] && [ -f "$sdkconfig" ] &&
+       { [ "$here/sdkconfig.defaults" -nt "$sdkconfig" ] || [ "$here/sdkconfig.release.defaults" -nt "$sdkconfig" ]; }; then
+        echo "the release defaults are newer than $sdkconfig, regenerating it (old one: sdkconfig.old)"
+        mv -f "$sdkconfig" "$bdir/sdkconfig.old"
+    fi
 
     # Static checks first, they take seconds (#196)
     "$repo/tools/static_checks.sh"
@@ -70,7 +93,29 @@ if [ "$building" = 1 ]; then
     "$here/tools/stage_storage.sh"
 fi
 
-if [ "$building" = 1 ]; then
+# The release image's own checks (#373). The dev build's gates (layers, the size ratchet, .clangd) read and write
+# firmware/build and its baselines, so they are left to the dev build.
+release_checks() {
+    python3 -I "$repo/tools/check_console_slots.py" --sdkconfig "$sdkconfig"
+    "$repo/tools/pack_storage.sh" check-config "$bdir/config/sdkconfig.json" "$here/managed_components/joltwallet__littlefs"
+    # No debug command may reach the image: `fw dev`'s usage and the off note are the markers console.c builds with them
+    local marker
+    for marker in "dev [on|off|status]" "fw dev on" "developer mode"; do
+        if grep -aqF "$marker" "$bdir/badge_fw.bin"; then
+            echo "release image $bdir/badge_fw.bin holds \"$marker\": LICHEN_DEV_COMMANDS is not off" >&2
+            exit 1
+        fi
+    done
+    echo "release image: no developer commands ($bdir/badge_fw.bin)"
+}
+
+if [ "$building" = 1 ] && [ "$release" = 1 ]; then
+    idf.py -C "$here" "${idf_args[@]}" "$@"
+    for arg in "$@"; do
+        case $arg in build|all|app) release_checks; break ;; esac
+    done
+    BADGE_IDF_PATH="$IDF_DIR" python3 "$repo/tools/third_party_licenses.py" --check
+elif [ "$building" = 1 ]; then
     idf.py -C "$here" "$@"
     # Layers: requires, includes and undefined symbols of every component against tools/layers.conf, ratcheted by
     # tools/layers-baseline.txt (#218; the app boundary of #178 is its L6 profile)
@@ -101,5 +146,5 @@ if [ "$building" = 1 ]; then
     # Released images ship this file; it must match the dependencies just built (#18)
     BADGE_IDF_PATH="$IDF_DIR" python3 "$repo/tools/third_party_licenses.py" --check
 else
-    exec idf.py -C "$here" "$@"
+    exec idf.py -C "$here" "${idf_args[@]}" "$@"
 fi

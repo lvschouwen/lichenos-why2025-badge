@@ -1,0 +1,7 @@
+# The release build (#373): ./firmware/build.sh release build appends this to sdkconfig.defaults, in its own build
+# directory (firmware/build-release). Debug and test commands are left out of the image, and the LVGL lock-owner
+# check's wraps with them.
+CONFIG_LICHEN_DEV_COMMANDS=n
+CONFIG_LICHEN_UI_LOCK_CHECK_OFF=y
+# The irreversible eFuse burn command: off in sdkconfig.defaults too, said here so a release never gets it
+CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD=n

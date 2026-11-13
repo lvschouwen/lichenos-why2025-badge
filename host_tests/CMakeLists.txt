@@ -2190,3 +2190,16 @@ add_executable(dialog_remote_policy_test
 target_include_directories(dialog_remote_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(dialog_remote_policy_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME dialog_remote_policy_test COMMAND dialog_remote_policy_test)
+
+# Developer mode (#373): debug commands run and show in fw help only while it is on; on only from the USB console
+add_executable(dev_mode_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/dev_mode_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console/dev_mode.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/factory_plan.c
+)
+target_include_directories(dev_mode_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot
+)
+target_compile_options(dev_mode_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME dev_mode_test COMMAND dev_mode_test)

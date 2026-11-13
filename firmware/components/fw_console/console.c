@@ -34,13 +34,7 @@
 
 static char const TAG[] = "console";
 
-typedef struct {
-    char const  *name;
-    char const  *usage;
-    console_fn_t fn;
-} command_t;
-
-static command_t commands[MAX_COMMANDS];
+static console_entry_t commands[MAX_COMMANDS]; // dev_mode.c looks commands up and lists them (#373)
 static int       n_commands;
 
 #define REPLY_MAX 384 // longer replies reach the UART whole but are cut in the log and the Wi-Fi console
@@ -58,6 +52,7 @@ static struct {
     bool              done_called;
     console_done_fn   done;
     void             *ctx;
+    console_origin_t  origin; // WIFI or LOCAL: a UART line is never captured
 } capture;
 
 // One command runs at a time, from the UART or from Wi-Fi: commands share state (the capture, the commands' statics)
@@ -131,12 +126,12 @@ static int commands_count(void) {
     return __atomic_load_n(&n_commands, __ATOMIC_ACQUIRE);
 }
 
-void console_register(char const *name, char const *usage, console_fn_t fn) {
+static void register_entry(char const *name, char const *usage, console_fn_t fn, bool dev) {
     portENTER_CRITICAL(&commands_lock);
     int  n    = n_commands;
     bool room = n < MAX_COMMANDS;
     if (room) {
-        commands[n] = (command_t){name, usage, fn};
+        commands[n] = (console_entry_t){name, usage, fn, dev};
         __atomic_store_n(&n_commands, n + 1, __ATOMIC_RELEASE);
     }
     portEXIT_CRITICAL(&commands_lock);
@@ -145,13 +140,74 @@ void console_register(char const *name, char const *usage, console_fn_t fn) {
     }
 }
 
+void console_register(char const *name, char const *usage, console_fn_t fn) {
+    register_entry(name, usage, fn, false);
+}
+
+// Developer mode (#373): read once from the settings service at bind time, then kept here. A release build points at
+// no fw dev, so its image holds no developer mode words at all.
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+#define DEV_OFF_REPLY DEV_MODE_OFF_NOTE
+#else
+#define DEV_OFF_REPLY "not in this build"
+#endif
+static atomic_bool s_dev_on;
+
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+static fw_set_u8_fn s_dev_save;
+
+void console_register_dev(char const *name, char const *usage, console_fn_t fn) {
+    register_entry(name, usage, fn, true);
+}
+#endif
+
+void console_bind_dev_store(fw_get_u8_fn get, fw_set_u8_fn set) {
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    s_dev_save = set;
+    atomic_store(&s_dev_on, get && get(DEV_MODE_KEY, 0) == 1);
+#else
+    (void)get;
+    (void)set; // a release build has no debug commands, so nothing to turn on: a saved "on" stays unread
+#endif
+}
+
+bool console_dev_mode(void) {
+    return atomic_load(&s_dev_on);
+}
+
+bool console_dev_set(bool on) {
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    atomic_store(&s_dev_on, on);
+    ESP_LOGI(TAG, "developer mode %s", on ? "on" : "off");
+    return s_dev_save && s_dev_save(DEV_MODE_KEY, on ? 1 : 0);
+#else
+    (void)on;
+    return false;
+#endif
+}
+
+bool console_dev_gate(char const *what) {
+    if (console_dev_mode()) {
+        return true;
+    }
+    console_reply("%s: " DEV_OFF_REPLY, what);
+    return false;
+}
+
+static void help_line(char const *usage, void *ctx) {
+    (void)ctx;
+    console_reply("%s", usage);
+}
+
 static void cmd_help(char const *args) {
     (void)args;
-    int n = commands_count();
-    for (int i = 0; i < n; i++) {
-        console_reply("%s", commands[i].usage);
+    int n      = commands_count();
+    int listed = dev_mode_help(commands, n, console_dev_mode(), help_line, NULL);
+    if (listed < n) {
+        console_reply("%d of %d commands registered (%d debug ones hidden: fw dev)", n, MAX_COMMANDS, n - listed);
+    } else {
+        console_reply("%d of %d commands registered", n, MAX_COMMANDS);
     }
-    console_reply("%d of %d commands registered", n, MAX_COMMANDS);
 }
 
 static void print_heap(char const *name, uint32_t caps) {
@@ -653,22 +709,31 @@ static void run_command(char *line) {
     } else {
         args = line + strlen(line);
     }
-    int n = commands_count();
-    for (int i = 0; i < n; i++) {
-        if (strcmp(commands[i].name, line) == 0) {
-            commands[i].fn(args);
-            return;
-        }
+    int i = 0;
+    switch (dev_mode_find(commands, commands_count(), line, console_dev_mode(), &i)) {
+    case DEV_FIND_RUN:
+        commands[i].fn(args);
+        return;
+    case DEV_FIND_DEV_OFF:
+        console_reply("%s: " DEV_OFF_REPLY, commands[i].name);
+        return;
+    case DEV_FIND_NONE:
+        break;
     }
     // Not echoed: a mistyped line may be a password, and the reply goes to the log store (#123); the asker sees what
     // they typed on their own side
     console_reply("unknown command, try 'fw help'");
 }
 
-bool console_from_uart(void) {
-    return capture.task != xTaskGetCurrentTaskHandle();
+console_origin_t console_origin(void) {
+    return capture.task == xTaskGetCurrentTaskHandle() ? capture.origin : CONSOLE_ORIGIN_UART;
 }
 
+bool console_from_uart(void) {
+    return console_origin() == CONSOLE_ORIGIN_UART;
+}
+
+// keep_secret is the Wi-Fi console (console_exec_with_secrets, POST /console); without it, the Console app
 static void exec(char const *line, char *buf, size_t cap, bool keep_secret, console_done_fn done, void *ctx) {
     while (*line == ' ') {
         line++;
@@ -696,8 +761,9 @@ static void exec(char const *line, char *buf, size_t cap, bool keep_secret, cons
     capture = (typeof(capture)){
         .task = xTaskGetCurrentTaskHandle(),
         .out  = {.buf = buf, .cap = cap, .keep_secret = keep_secret},
-        .done = done,
-        .ctx  = ctx,
+        .done   = done,
+        .ctx    = ctx,
+        .origin = keep_secret ? CONSOLE_ORIGIN_WIFI : CONSOLE_ORIGIN_LOCAL,
     };
     if (cmd[0]) {
         run(cmd);
@@ -718,6 +784,31 @@ void console_exec(char const *line, char *buf, size_t cap, console_done_fn done,
 void console_exec_with_secrets(char const *line, char *buf, size_t cap, console_done_fn done, void *ctx) {
     exec(line, buf, cap, true, done, ctx);
 }
+
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+// "fw dev [on|off|status]" (#373): on only from the USB console, never over Wi-Fi (the OTA token is not enough)
+static void cmd_dev(char const *args) {
+    switch (dev_mode_request(args, console_origin())) {
+    case DEV_REQ_STATUS:
+        console_reply("developer mode %s", console_dev_mode() ? "on" : "off");
+        break;
+    case DEV_REQ_ON:
+    case DEV_REQ_OFF: {
+        bool on = strcmp(args, "on") == 0;
+        bool saved = console_dev_set(on);
+        console_reply("developer mode %s%s", on ? "on" : "off", saved ? "" : " (not saved: this boot only)");
+        break;
+    }
+    case DEV_REQ_REFUSED:
+        console_reply("dev on: only from the USB console (or About: tap Version 7 times)");
+        break;
+    case DEV_REQ_USAGE:
+    default:
+        console_reply("dev [on|off|status]");
+        break;
+    }
+}
+#endif
 
 static void console_task(void *arg) {
     (void)arg;
@@ -759,6 +850,9 @@ void console_start(void) {
     console_register("assets", "assets (state of the assets partition and its files)", cmd_assets);
     console_register("slot", "slot [other] (show the app slots, or boot the other one)", cmd_slot);
     console_register("reboot", "reboot", cmd_reboot);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    console_register("dev", "dev [on|off|status] (developer mode: debug and test commands; on only from USB)", cmd_dev);
+#endif
 
     if (uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0) != ESP_OK) {
         ESP_LOGE(TAG, "UART0 driver install failed, no console");

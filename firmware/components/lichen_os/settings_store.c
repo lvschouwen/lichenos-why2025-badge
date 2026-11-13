@@ -159,6 +159,7 @@ void settings_bind_services(void) {
     led_bind_store(settings_get_u8, settings_set_u8);
     haptics_bind_store(settings_get_u8, settings_set_u8);
     system_restart_bind_store(settings_get_blob, settings_set_blob);
+    console_bind_dev_store(settings_get_u8, settings_set_u8); // dev.mode (#373); a factory reset erases it
     os_bind_lower();
 }
 

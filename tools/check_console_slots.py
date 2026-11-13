@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Console table guard (#243): count the console_register() calls this image reaches and fail above 80 % of
-MAX_COMMANDS in firmware/components/fw_console/console.c.
+"""Console table guard (#243): count the console_register() and console_register_dev() calls this image reaches and
+fail above 80 % of MAX_COMMANDS in firmware/components/fw_console/console.c. console_register_dev calls count only
+with CONFIG_LICHEN_DEV_COMMANDS set (#373): without it they are empty inlines and take no slot.
 
 Why a source count and not a boot check: it fails at build time, on the machine that adds the 40th command, not on
 a bench badge after flashing. #if/#ifdef blocks on CONFIG_* are evaluated against firmware/sdkconfig (a block whose
 condition is not a plain CONFIG_ test is counted, so the check errs on the high side). Calls inside comments do not
-count. Usage: check_console_slots.py [--selftest] [--count]
+count. Usage: check_console_slots.py [--selftest] [--sdkconfig PATH] (default firmware/sdkconfig)
 """
 import re
 import sys
@@ -14,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FW = ROOT / "firmware"
 LIMIT_PERCENT = 80
-CALL = re.compile(r"(?<![\w])console_register\s*\(")
+CALL = re.compile(r"(?<![\w])console_register(_dev)?\s*\(")
 DECL = re.compile(r"(?:void|int)\s+$")
 
 
@@ -70,8 +71,11 @@ def count_calls(text, cfg):
             continue
         if active:
             for c in CALL.finditer(line):
-                if not DECL.search(line[: c.start()]):
-                    n += 1
+                if DECL.search(line[: c.start()]):
+                    continue
+                if c.group(1) and not cfg.get("CONFIG_LICHEN_DEV_COMMANDS", False):
+                    continue
+                n += 1
     return n
 
 
@@ -111,6 +115,13 @@ console_register("h", "u", f);
 #endif
 """
     assert count_calls(src, cfg) == 3, count_calls(src, cfg)  # a, d, g
+    dev = """
+void console_register_dev(char const *a);
+console_register_dev("i", "u", f);
+console_register("j", "u", f);
+"""
+    assert count_calls(dev, {"CONFIG_LICHEN_DEV_COMMANDS": True}) == 2  # i, j
+    assert count_calls(dev, {}) == 1  # j: a release build drops i
     print("check_console_slots selftest ok")
 
 
@@ -118,7 +129,10 @@ def main():
     if "--selftest" in sys.argv:
         selftest()
         return 0
-    cfg = load_config(FW / "sdkconfig")
+    path = FW / "sdkconfig"
+    if "--sdkconfig" in sys.argv:
+        path = Path(sys.argv[sys.argv.index("--sdkconfig") + 1])
+    cfg = load_config(path)
     total = sum(count_calls(p.read_text(errors="replace"), cfg) for p in sources())
     limit = max_commands()
     print(f"console commands: {total} reachable of {limit} slots (fail above {LIMIT_PERCENT} % = {limit * LIMIT_PERCENT // 100})")
