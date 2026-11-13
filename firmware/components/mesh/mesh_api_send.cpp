@@ -4,6 +4,8 @@
 
 using namespace mesh_int;
 
+static char const TAG[] = "mesh";
+
 // ---- sending (#45) -------------------------------------------------------------------------------------------------
 
 extern "C" size_t mesh_channel_text_max(void) {
@@ -100,10 +102,16 @@ struct OutSnap {
     uint32_t        seq;
 };
 
+// The copy is in PSRAM (#208): OB_CAP of them made a 1.7 KB frame on the caller's stack (the console's is 4 KB).
+// Taken before the outbox lock, which never waits on anything.
 extern "C" size_t mesh_out_list(mesh_out_info_t *out, size_t max) {
-    OutSnap snap[OB_CAP];
-    size_t  n = 0;
+    size_t n = 0;
     if (!outbox) {
+        return 0;
+    }
+    OutSnap *snap = (OutSnap *)lichen_alloc(meshcore_ctx(), OB_CAP * sizeof(OutSnap), LICHEN_MEM_BULK);
+    if (!snap) {
+        ESP_LOGW(TAG, "outbox list: no memory for the copy");
         return 0;
     }
     mesh_ob_enter();
@@ -144,6 +152,7 @@ extern "C" size_t mesh_out_list(mesh_out_info_t *out, size_t max) {
             snprintf(out[i].target, sizeof(out[i].target), "%s", snap[i].target);
         }
     }
+    lichen_free(meshcore_ctx(), snap);
     return n;
 }
 
