@@ -142,7 +142,7 @@ static void select_checks(void) {
 }
 
 int main(void) {
-    char s[48];
+    char s[32];
     CHECK(status(0, MESH_OUT_FAILED, 0, s) == MESH_STATUS_NONE && s[0] == '\0'); // incoming: no state
     CHECK(status(1, MESH_OUT_QUEUED, 0, s) == MESH_STATUS_PENDING && strcmp(s, "queued") == 0);
     CHECK(status(1, MESH_OUT_SENT, 0, s) == MESH_STATUS_PENDING && strcmp(s, "sent") == 0);
@@ -151,12 +151,17 @@ int main(void) {
     CHECK(status(1, MESH_OUT_HEARD, 3, s) == MESH_STATUS_OK && strcmp(s, "heard repeated x3") == 0);
     CHECK(status(1, MESH_OUT_DELIVERED, 0, s) == MESH_STATUS_OK && strcmp(s, "delivered") == 0);
     {
+        // longest label, and a cap too small for it: cut, NUL-terminated, nothing written past cap
         mesh_msg_t h;
+        char       big[24], small[8];
         memset(&h, 0, sizeof(h));
-        h.outgoing = 1, h.state = MESH_OUT_HEARD, h.repeats = 2, h.trip_ms = 1840;
-        CHECK(mesh_msg_status(&h, s, 48) == MESH_STATUS_OK && strcmp(s, "heard repeated x2, after 1.8 s") == 0);
-        h.repeats = 1;
-        CHECK(mesh_msg_status(&h, s, 48) == MESH_STATUS_OK && strcmp(s, "heard repeated, after 1.8 s") == 0);
+        h.outgoing = 1, h.state = MESH_OUT_HEARD, h.repeats = 255;
+        memset(big, 'z', sizeof(big));
+        CHECK(mesh_msg_status(&h, big, sizeof(big)) == MESH_STATUS_OK && strcmp(big, "heard repeated x255") == 0);
+        memset(small, 'z', sizeof(small));
+        CHECK(mesh_msg_status(&h, small, 6) == MESH_STATUS_OK && strcmp(small, "heard") == 0 && small[6] == 'z');
+        small[0] = 'q';
+        CHECK(mesh_msg_status(&h, small, 0) == MESH_STATUS_OK && small[0] == 'q'); // cap 0: untouched
     }
     CHECK(status(1, MESH_OUT_FAILED, 0, s) == MESH_STATUS_FAILED && strcmp(s, "not sent") == 0);
 
