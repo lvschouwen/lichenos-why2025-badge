@@ -5,6 +5,7 @@
 #include "app_icons.h"
 #include "dev_tap.h"
 #include "esp_app_desc.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "fonts.h"
 #include "fw_console.h"
@@ -12,6 +13,7 @@
 #include "lichen_reg.h"
 #include "lichen_sys_c6.h"
 #include "lichen_sys_clock.h"
+#include "lichen_sys_keys.h"
 #include "lichen_sys_mem.h"
 #include "lichen_sys_notify.h"
 #include "lichen_sys_net.h"
@@ -171,6 +173,11 @@ static void refresh(lv_timer_t *timer) {
     }
 }
 
+// A release build has no developer mode (#373: its image holds none of the words, release_checks in build.sh), so
+// Enter on About does nothing there: no taps, no dialog, no log line
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+static char const TAG[] = "about";
+
 static void dev_off_answer(bool yes) {
     if (!yes) {
         return;
@@ -194,29 +201,33 @@ static void ask_dev_off(void) {
     shell_dialog_countdown(&d, dev_off_answer);
 }
 
-static void dev_enter(void) {
-    switch (dev_enter_action(&tap, console_dev_mode(), lv_tick_get())) {
+// injected: read in on_key, on the press itself (#391: only valid synchronously in the key's LV_EVENT_KEY handler)
+static void dev_enter(bool injected) {
+    switch (dev_enter_action(&tap, console_dev_mode(), injected, lv_tick_get())) {
+        case DEV_ENTER_REFUSED: ESP_LOGI(TAG, "injected Enter ignored: developer mode takes a hand or USB"); break;
         case DEV_ENTER_ASK_OFF: ask_dev_off(); break;
         case DEV_ENTER_SWITCH_ON: {
             bool saved = console_dev_set(true);
-            if (console_dev_mode()) { // a release build has no developer commands: it stays off, so say nothing
-                lichen_sys_notify(LN_INFO, "Developer mode on",
-                                  saved ? "Switch it off in About." : "This boot only: not saved.", 0);
-                apply_dev();
-            }
+            lichen_sys_notify(LN_INFO, "Developer mode on", saved ? "Switch it off in About." : "This boot only: not saved.",
+                              0);
+            apply_dev();
             break;
         }
         default: break;
     }
 }
+#endif
 
 static void on_key(lv_event_t *e) {
     uint32_t key = lv_event_get_key(e);
     if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
         shell_scroll_by(lv_event_get_target(e), key == LV_KEY_UP ? SCROLL_STEP : -SCROLL_STEP);
-    } else if (key == LV_KEY_ENTER) {
-        dev_enter();
     }
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    else if (key == LV_KEY_ENTER) {
+        dev_enter(lichen_sys_keys_last_injected());
+    }
+#endif
 }
 
 static void on_delete(lv_event_t *e) {

@@ -17,7 +17,10 @@ bool dev_tap(dev_tap_t *t, uint32_t now) {
     return false;
 }
 
-dev_enter_action_t dev_enter_action(dev_tap_t *t, bool dev_on, uint32_t now) {
+dev_enter_action_t dev_enter_action(dev_tap_t *t, bool dev_on, bool injected, uint32_t now) {
+    if (injected) {
+        return DEV_ENTER_REFUSED;
+    }
     if (dev_on) {
         t->n = 0;
         return DEV_ENTER_ASK_OFF;
