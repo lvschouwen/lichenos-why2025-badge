@@ -33,7 +33,7 @@ params	firmware/components/lichen_shell/shot_blend.c:shot_blend_argb8888	10
 params	firmware/components/mesh/mesh_chat.c:mesh_conv_row	9
 params	firmware/components/mesh/mesh_hist.c:mesh_hist_compact	11
 params	firmware/components/mesh/radio_confirm.c:radio_confirm_needed	10
-size	<merged-strings>	275273
+size	<merged-strings>	275745
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
@@ -128,7 +128,7 @@ size	liblichen_notify.a	13488
 size	liblichen_nvs.a	1153
 size	liblichen_os.a	59778
 size	liblichen_random.a	63
-size	liblichen_shell.a	187472
+size	liblichen_shell.a	187586
 size	liblog.a	2726
 size	liblora.a	35669
 size	liblvgl__lvgl.a	542041
@@ -136,11 +136,11 @@ size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820
 size	libmain.a	6891
 size	libmbedtls.a	22
-size	libmesh.a	396382
+size	libmesh.a	396446
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18676
 size	libnvs_sec_provider.a	2
-size	libota.a	73690
+size	libota.a	74816
 size	libpsram_guard.a	25239
 size	libpthread.a	1229
 size	libriscv.a	1684
@@ -150,7 +150,7 @@ size	libsensors.a	29265
 size	libsoc.a	793
 size	libspi_flash.a	16014
 size	libstdc++.a	1634
-size	libstorage.a	1820
+size	libstorage.a	1828
 size	libtfpsacrypto.a	80464
 size	libvfs.a	4945
 stack	firmware/components/lora/lora.c:lora_task	1360
