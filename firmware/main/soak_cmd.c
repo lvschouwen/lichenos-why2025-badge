@@ -55,7 +55,7 @@ EXT_RAM_NOINIT_ATTR static char   s_line[SOAK_LINE_MAX];
 
 // Whether this boot follows a crash, sticky across the re-arm restart (soak_line.h). Decided once from the restart
 // history, in soak_cmd_register: that runs early in the boot, before any note is added to the history, so its newest line
-// is still the one that restarted the badge..
+// is still the one that restarted the badge.
 static int s_reset_crash = SOAK_NA;
 
 static void latch_reset_crash(void) {

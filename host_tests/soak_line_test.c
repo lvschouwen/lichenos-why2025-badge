@@ -229,11 +229,13 @@ static void sticky_crash_flag(void) {
     CHECK(soak_reset_crash(false, true, LINE_REARM) == 1);        // the re-arm boot after the panic
     CHECK(soak_reset_crash(false, true, LINE_REARM " caller=0x4ff00012") == 1);
     CHECK(soak_reset_crash(false, true, LINE_REBOOT) == 0);       // a plain software restart
-    CHECK(soak_reset_crash(false, true, LINE_REBOOT) == 0);       // the second ordinary reboot: its own line is newest
+    // the second ordinary reboot after the re-arm boot: only the newest line is read, and it is that reboot's own
+    CHECK(soak_reset_crash(false, true, LINE_REBOOT " caller=0x4ff00012") == 0);
     CHECK(soak_reset_crash(false, false, LINE_REARM) == 0);       // a power cycle or EN reset after the re-arm boot
     CHECK(soak_reset_crash(false, true, NULL) == 0);              // no history
     CHECK(soak_reset_crash(false, true, "t? fw up=1s psram 120 re-arm after crashes") == 0);
-    // fw crash clear empties the crash log and count, never the restart history, and the rule takes neither
+    // fw crash clear empties the crash log and count, never the restart history, and the rule takes neither: crash.c's
+    // verdict is 0 here (a software reset) and the re-arm line alone keeps the flag
     CHECK(soak_reset_crash(false, true, LINE_REARM) == 1);
     // the text speed_job gives the restart must stay the one the rule looks for
     FILE *f = fopen(PSRAM_SPEED_SRC, "r");

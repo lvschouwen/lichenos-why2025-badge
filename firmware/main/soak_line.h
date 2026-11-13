@@ -25,8 +25,9 @@
 //   later ("psram 120 re-arm after crash"), so a sampler would only ever see that second boot. That boot (rst=sw)
 //   reports rstcrash=1 too, meaning "the previous boot crashed". It follows from the recorded restart history, not the
 //   crash log, so fw crash clear does not hide it; the boot after it reads 0 again. One crash can therefore show as
-//   two boots (+2 boot, one rstcrash=1 sample at most): count a crash once per rstcrash=1 sample, and compare crash
-//   (which fw crash clear resets) only as a cross-check. The meaning widened and no key moved, so SOAK_FORMAT stays 1.
+//   two boots (the panic boot and the re-arm boot, under 20 s apart), so up to two samples can show one crash: when
+//   two consecutive samples have rstcrash=1 and boot advanced by exactly 1, count one crash. Compare crash (which
+//   fw crash clear resets) only as a cross-check. The meaning widened and no key moved, so SOAK_FORMAT stays 1.
 // Pure (no ESP-IDF headers): the glue that reads the values is soak_cmd.c.
 
 #include <stdbool.h>
