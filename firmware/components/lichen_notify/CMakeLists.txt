@@ -6,8 +6,10 @@
 # the toast/feedback decision), notify_mute.c (notify_mute_test.c: the per-source switch), notify_push.c
 # (notify_push_test.c: the state and feedback pushes to the drivers below, #245). REQUIRES lichen_api and fw_console
 # publicly: notify_ring.h, notify_push.h and notify_bind.h include the gate's notify headers and fw_store.h.
+# priv/notify_post.h (the console's "test" notices) is for this component only (#340).
 idf_component_register(SRCS "lichen_notify.c" "notify_ring.c" "notify_rate.c" "notify_mute.c" "notify_cmd.c" "notify_store.c"
                             "notify_push.c"
                        INCLUDE_DIRS "."
+                       PRIV_INCLUDE_DIRS "priv"
                        REQUIRES lichen_api fw_console
                        PRIV_REQUIRES freertos esp_timer heap storage log)

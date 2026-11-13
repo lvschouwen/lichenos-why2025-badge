@@ -27,7 +27,7 @@ static void test_register(void) {
     CHECK(app_ctx_apps(&t) == 2);
     CHECK(app_ctx_app_at(&t, 0) == &app_a && app_ctx_app_at(&t, 1) == &app_b && app_ctx_app_at(&t, 2) == NULL);
     CHECK(app_ctx_at(&t, 1) == b && app_ctx_at(&t, 2) == APP_CTX_NONE);
-    CHECK(app_ctx_of(&t, &app_a) == a && app_ctx_of(&t, NULL) == os); // the compat shim's lookup
+    CHECK(app_ctx_of(&t, &app_a) == a && app_ctx_of(&t, NULL) == os); // lichen_task_start's owner lookup
     CHECK(app_ctx_of(&t, &app_c) == APP_CTX_NONE);                     // never registered
     CHECK(app_ctx_add(&t, NULL, 1) == APP_CTX_NONE);
     CHECK(app_ctx_apps(&t) == 2);

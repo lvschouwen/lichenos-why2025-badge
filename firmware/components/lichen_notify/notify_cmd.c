@@ -75,8 +75,8 @@ static void test(char const *args) {
     char title[NR_TITLE_CAP];
     snprintf(title, sizeof(title), "Test %s", LEVEL_NAME[level]);
     // Target = the level: repeats of one level merge (count goes up), levels stay apart
-    uint32_t id = lichen_notify_post("test", (ln_level_t)level, target, title,
-                                    *args ? args : "Raised with fw notify test", LN_COALESCE);
+    uint32_t id = lichen_notify_post_test((ln_level_t)level, target, title, *args ? args : "Raised with fw notify test",
+                                          LN_COALESCE);
     console_reply("notify test %s: %s %u", LEVEL_NAME[level], id ? "id" : "dropped", (unsigned)id);
 }
 

@@ -101,12 +101,13 @@ static void cmd_setup(char const *args) {
         // is a diagnostic
         bool        done = args[0] == 'd';
         char const *id   = args + (done ? 5 : 6);
-        lichen_app_t const *app = lichen_app_by_name(id);
+        lichen_ctx_t        ctx  = LICHEN_CTX_NONE;
+        lichen_app_t const *app  = lichen_app_by_name(id, &ctx);
         if (!app || !app->first_run_set) {
             console_reply("no app '%s' with first-run questions", id);
             return;
         }
-        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230
+        lichen_ctx_t previous = lichen_ctx_enter(ctx); // #230
         app->first_run_set(done);
         lichen_ctx_leave(previous);
         if (done) {

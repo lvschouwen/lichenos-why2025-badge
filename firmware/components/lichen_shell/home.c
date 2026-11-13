@@ -338,7 +338,7 @@ static void refresh(lv_timer_t *timer) {
             continue;
         }
         t1[0] = t2[0] = '\0';
-        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230: the hook runs for its app
+        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at((size_t)i)); // #230: the hook runs for its app
         bool         fresh    = app->tile_text(t1, sizeof(t1), t2, sizeof(t2));
         lichen_ctx_leave(previous);
         if (!fresh) {
@@ -376,14 +376,15 @@ static lv_obj_t *add_badge(lv_obj_t *cell) {
     return badge;
 }
 
-static lv_obj_t *add_icon(lv_obj_t *parent, lichen_app_t const *app, int px) {
+static lv_obj_t *add_icon(lv_obj_t *parent, int i, int px) {
+    lichen_app_t const *app = lichen_app_at((size_t)i);
     lv_obj_t *box = lv_obj_create(parent);
     lv_obj_remove_style_all(box);
     lv_obj_set_size(box, px, px);
     lv_obj_set_scrollable(box, false);
     lv_obj_set_clickable(box, false);
     if (app->draw_icon) {
-        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app));
+        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at((size_t)i));
         app->draw_icon(box, px);
         lichen_ctx_leave(previous);
     } else {
@@ -424,7 +425,7 @@ static void add_tile(home_t *h, lv_obj_t *home, int i) {
     lv_obj_set_style_pad_column(tile, 24, 0);
     lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    h->icon[i] = add_icon(tile, app, TILE_ICON_PX);
+    h->icon[i] = add_icon(tile, i, TILE_ICON_PX);
 
     lv_obj_t *text = lv_obj_create(tile);
     lv_obj_remove_style_all(text);
@@ -455,7 +456,7 @@ static void add_grid_cell(home_t *h, lv_obj_t *home, int i) {
     lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(cell, TILE_GRID_ICON_GAP, 0);
-    h->icon[i] = add_icon(cell, app, TILE_GRID_ICON_PX);
+    h->icon[i] = add_icon(cell, i, TILE_GRID_ICON_PX);
     lv_obj_t *name = add_label(cell, app->name, THEME_TEXT);
     lv_obj_set_width(name, size.w - 16);
     lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);

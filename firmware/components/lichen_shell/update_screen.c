@@ -70,7 +70,7 @@ bool shell_stop_apps(void) {
         if (!app || !app->stop_for_update) {
             continue;
         }
-        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230: on the OTA task, for the app
+        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); // #230: on the OTA task, for the app
         bool         stopped  = app->stop_for_update();
         lichen_ctx_leave(previous);
         if (!stopped) {

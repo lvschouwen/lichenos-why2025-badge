@@ -54,6 +54,12 @@ char const *gate_app_source(gate_app_env_t const *g, uint32_t ctx, char const *w
 gate_app_kind_t gate_app_settings_ns(gate_app_env_t const *g, uint32_t ctx, char const *what, char *ns, size_t cap,
                                      char const **name);
 
+// Why an app with id and alias (either may be NULL) may not join the apps already registered (#340), whose ids and
+// aliases are the n strings of taken (NULL entries skipped): an id or alias the OS keeps or that is no app id
+// (gate_app_id's rules), or a name another app has as its id or alias, so two apps never share a namespace,
+// a directory, a notification source or a console name. NULL when it may.
+char const *gate_app_names_refusal(char const *id, char const *alias, char const *const *taken, size_t n);
+
 // An SD batch is ended by the ctx that began it: held is the ctx recorded at begin (0 = no batch), ctx the caller's
 bool gate_batch_may_end(uint32_t held, uint32_t ctx);
 

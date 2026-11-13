@@ -52,6 +52,7 @@ crashlog_when_text	-	unspecified	crashlog_fmt.h
 fs_app_dir_path	-	unspecified	fs_path.h
 gate_app_caller	-	unspecified	gate_app.h
 gate_app_id	-	unspecified	gate_app.h
+gate_app_names_refusal	-	unspecified	gate_app.h
 gate_app_settings_ns	-	unspecified	gate_app.h
 gate_app_source	-	unspecified	gate_app.h
 gate_batch_may_end	-	unspecified	gate_app.h
@@ -77,10 +78,10 @@ lichen_airplane_get	RADIO	unspecified	lichen_radio.h
 lichen_airplane_set	RADIO	unspecified	lichen_radio.h
 lichen_alloc	-	any	lichen_mem.h
 lichen_alloc_aligned	-	any	lichen_mem.h
-lichen_app_at	-	unspecified	lichen_app.h
-lichen_app_by_id	-	unspecified	lichen_app.h
-lichen_app_by_name	-	unspecified	lichen_app.h
-lichen_app_count	-	unspecified	lichen_app.h
+lichen_app_at	SYSTEM	any	lichen_sys_app.h
+lichen_app_by_id	SYSTEM	any	lichen_sys_app.h
+lichen_app_by_name	SYSTEM	any	lichen_sys_app.h
+lichen_app_count	SYSTEM	any	lichen_sys_app.h
 lichen_badge_generation	SYSTEM	unspecified	lichen_badge.h
 lichen_badge_get	SYSTEM	unspecified	lichen_badge.h
 lichen_badge_set	SYSTEM	unspecified	lichen_badge.h
@@ -145,7 +146,7 @@ lichen_notify_source_is_on	SYSTEM	unspecified	notify_os.h
 lichen_notify_start	SYSTEM	unspecified	notify_os.h
 lichen_notify_stats	SYSTEM	unspecified	notify_os.h
 lichen_notify_to	-	unspecified	lichen_notify.h
-lichen_notify_unread	-	unspecified	lichen_notify.h
+lichen_notify_unread	SYSTEM	unspecified	notify_os.h
 lichen_notify_unread_top	-	unspecified	lichen_notify.h
 lichen_os_name	-	unspecified	os_name.h
 lichen_os_version_line	-	unspecified	os_name.h
@@ -171,7 +172,7 @@ lichen_sensors_start	SENSORS	unspecified	lichen_sensors.h
 lichen_sensors_stop	SENSORS	unspecified	lichen_sensors.h
 lichen_station_clock	-	lvgl	lichen_ui.h
 lichen_sys_app_console_register	SYSTEM	not-lvgl	lichen_sys_app.h
-lichen_sys_app_ctx	SYSTEM	any	lichen_sys_app.h
+lichen_sys_app_ctx_at	SYSTEM	any	lichen_sys_app.h
 lichen_sys_badge_get	SYSTEM	unspecified	lichen_sys_badge.h
 lichen_sys_badge_set	SYSTEM	unspecified	lichen_sys_badge.h
 lichen_sys_boot_label	SYSTEM	any	lichen_sys_boot.h

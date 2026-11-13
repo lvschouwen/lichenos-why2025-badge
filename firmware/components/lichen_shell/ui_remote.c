@@ -9,6 +9,7 @@
 #include "fw_console.h"
 #include "key_matrix.h"
 #include "lichen_app.h"
+#include "lichen_sys_app.h"
 #include "lichen_sys_keys.h"
 #include "lichen_sys_ui.h"
 #include "nav.h"

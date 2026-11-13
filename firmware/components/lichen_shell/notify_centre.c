@@ -190,7 +190,7 @@ static void open_where(uint32_t id) {
     } else if (app->open_notification) {
         char target[NR_TARGET_CAP];
         snprintf(target, sizeof(target), "%s", s_entry.target);
-        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230
+        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at((size_t)i)); // #230
         app->open_notification(target, id);
         lichen_ctx_leave(previous);
     } else {
@@ -512,8 +512,12 @@ static void toggle_source(void *arg) {
 }
 
 static void open_app_notify_settings(void *arg) {
-    lichen_app_t const *app      = arg;
-    lichen_ctx_t        previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230
+    size_t              i   = (size_t)(uintptr_t)arg;
+    lichen_app_t const *app = lichen_app_at(i);
+    if (!app || !app->notify_settings_open) {
+        return;
+    }
+    lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); // #230
     app->notify_settings_open();
     lichen_ctx_leave(previous);
 }
@@ -594,7 +598,7 @@ static lv_obj_t *build_settings(void) {
         if (app->notify_settings_open) {
             char label[96];
             snprintf(label, sizeof(label), "%s notifications", app->name);
-            menu_set_kind(menu_add(menu, label, "", open_app_notify_settings, (void *)app), MENU_OPEN);
+            menu_set_kind(menu_add(menu, label, "", open_app_notify_settings, (void *)(uintptr_t)i), MENU_OPEN);
         }
     }
     s_s.dnd_row = menu_add(menu, "Do not disturb", "", toggle_dnd, NULL);

@@ -29,6 +29,9 @@ to `layers.conf`):
 
 - `lichen_app.h`: register the app (`lichen_register_app`); `id` (a-z 0-9 _, at most 13) names its settings and
   directories; the hooks (`open`, `start_background`, `stop_for_update`, `first_run_set`...) are how the OS calls it.
+  An id or alias another app already has, or one the OS keeps ("lichen", "test", "c6", "crash"), is refused: the app is
+  skipped with an error in the log and gets `LICHEN_CTX_NONE` (#340). The app table itself is the OS's: an app knows
+  only its own context, never another app's struct.
   An app's `*_register()` runs on the main task during boot, not on the LVGL task: it makes no LVGL objects or timers
   itself and hands that work over with `lichen_ui_call` (the Timer app's poll, #242). With the lock-owner check on, a
   direct LVGL call there is reported (#225).
@@ -175,7 +178,7 @@ reaching drivers, `board` or NVS. The headers, all in `lichen_api`:
 | `lichen_sys_radio.h` | the radio service's system holds: radios held off for a reason (the thermal shed), never saved, the person's switches untouched (#282) |
 | `lichen_sys_c6.h` | the C6 link (up, trouble in words, outage count) and the LoRa radio's up state and packet counts for the status bar, About, Settings and the stress run (#284) |
 | `lichen_sys_psram.h` | the PSRAM guard's speed, speed switch, tuning line, trial state and DMA gate round for Bench, Settings and the stress run (#284) |
-| `lichen_sys_app.h` | the app context (#230): `lichen_ctx_enter`/`_leave` around every hook call, the compat shim `lichen_sys_app_ctx(app)`, `lichen_sys_ctx_resolve` for the gate calls, `fw app ctx` |
+| `lichen_sys_app.h` | the app context (#230): `lichen_ctx_enter`/`_leave` around every hook call, the app table (`lichen_app_count`/`_at`/`_by_id`/`_by_name`, `lichen_sys_app_ctx_at(i)`: the ctx to enter for app i), `lichen_sys_ctx_resolve` for the gate calls, `fw app ctx` |
 
 `notify_os.h` (history of every app, do-not-disturb, toast queue, feedback hooks) is also the shell's side, forbidden
 to apps by name in `layers.conf`; apps have `lichen_notify.h` only (#245). Types that live in a lower component are
@@ -222,7 +225,9 @@ context and count it like a bad one: an app can reach it through `lichen_ctx_sel
 carry the OS's powers. Settings, directories and badges simply have none for it. An SD batch is ended by the ctx that began it. A
 refused context does nothing before it looks at the caller's data: reads give the default or 0, writes false, a
 notice is dropped, a refused `lichen_fs_sd_end` leaves the lock alone. The pure decision is `gate_app.c`
-(`host_tests/gate_app_test.c`). Still on the compat shim until E1e: `lichen_app_at`/`lichen_app_by_id`.
+(`host_tests/gate_app_test.c`). Since E1e (#340) no OS call looks a ctx up from an app struct: the shell and main enter
+the ctx the table holds for the app's index, and the lookups and `lichen_ctx_enter`/`_leave` are owner-only in
+`layers.conf` (forbidden to apps outright).
 
 Not yet covered: an LVGL event or timer callback an app registers runs as the OS when it fires outside a hook (a key
 press, a timer tick), and so does a `lichen_ui_call` queued from one, until those registrations are wrapped (a follow-up

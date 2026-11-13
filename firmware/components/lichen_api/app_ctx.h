@@ -42,7 +42,7 @@ uint32_t    app_ctx_os(app_ctx_table_t const *t); // APP_CTX_NONE before app_ctx
 size_t      app_ctx_apps(app_ctx_table_t const *t);
 void const *app_ctx_app_at(app_ctx_table_t const *t, size_t index); // NULL past the end
 uint32_t    app_ctx_at(app_ctx_table_t const *t, size_t index);     // the app's ctx, APP_CTX_NONE past the end
-// The ctx of owner: the OS's for NULL, APP_CTX_NONE for a pointer no app registered (the compat shim's lookup)
+// The ctx of owner: the OS's for NULL, APP_CTX_NONE for a pointer no app registered (lichen_task_start's owner)
 uint32_t    app_ctx_of(app_ctx_table_t const *t, void const *owner);
 
 // A ctx of a taken slot with that slot's generation. Counts nothing.

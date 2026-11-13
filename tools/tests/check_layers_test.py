@@ -132,6 +132,18 @@ class Rules(unittest.TestCase):
                                       "gate": (BASE_FILES["gate"][0], {"g.c": src % "gate_fn", "gate.h": ""})})
         self.assertEqual(keys(fx), {("C", "gate:xTaskCreate")})  # <=L1 owns it: drv yes, gate no
 
+    def test_rule_c_forbid_glob_judges_symbols_not_locals(self):
+        """#280: a forbid glob is matched against the archive's undefined symbols, so a file-local function or a local
+        variable whose name fits it (app_settings.c's psram_speed_row) is never flagged; a call out is."""
+        conf = CONF + "forbid L3 psram_speed_*\n"
+        local = ("static int psram_speed_row(int x){return x + 1;}\n"
+                 "int app_fn(void){int psram_speed_rows = 3; return psram_speed_row(psram_speed_rows);}\n")
+        fx = Fixture(self, conf=conf, overrides={"app": (BASE_FILES["app"][0], {"a.c": local})})
+        self.assertEqual(keys(fx), set())
+        call = "int psram_speed_tick(void);\nint app_fn(void){return psram_speed_tick();}\n"
+        fx = Fixture(self, conf=conf, overrides={"app": (BASE_FILES["app"][0], {"a.c": call})})
+        self.assertEqual(keys(fx), {("C!", "app:psram_speed_tick")})
+
     def test_rule_c_forbidden_symbol(self):
         src = "void esp_restart(void);\nint app_fn(void){esp_restart();return 4;}\n"
         fx = Fixture(self, overrides={"app": (BASE_FILES["app"][0], {"a.c": src})})
@@ -246,7 +258,7 @@ class HardAndConf(unittest.TestCase):
                   "lichen_notify_feedback", "lichen_notify_stats", "lichen_notify_bind_store",
                   "lichen_notify_set_state_hooks"):
             self.assertIn(f, conf.forbid["L6"])
-        for f in ("lichen_notify", "lichen_notify_to", "lichen_notify_unread", "lichen_notify_unread_top",
+        for f in ("lichen_notify", "lichen_notify_to", "lichen_notify_unread_top",
                   "lichen_notify_mark_read", "lichen_notify_source_enabled", "lichen_notify_dnd"):
             self.assertFalse(any(cl.fnmatch.fnmatchcase(f, g) for g in conf.forbid["L6"]), f)
         # the console's LoRa switch saves "off" (#222): lora alone may call it, never a peer app
@@ -273,6 +285,39 @@ class HardAndConf(unittest.TestCase):
             self.assertIn((g, []), conf.owner_only)
         self.assertIn("../shared/arduino_shim", conf.own_dirs["mesh"])
         self.assertNotIn("../shared/arduino_shim", conf.vendored["mesh"])
+
+    def test_real_conf_keeps_the_app_table_and_contexts_with_the_os(self):
+        """#340: entering a context and the app table's lookups are owner-only (the components that call them), forbidden
+        to apps outright; another source's unread count and switch are the shell's; the console's test poster is
+        lichen_notify's alone. Checked through sym_violation, the way rule C judges an archive's undefined symbol."""
+        conf = cl.parse_conf(cl.read(os.path.join(os.path.dirname(cl.__file__), "layers.conf")))
+        owners = {"lichen_ctx_enter": {"lichen_os", "lichen_shell", "main"},
+                  "lichen_ctx_leave": {"lichen_os", "lichen_shell", "main"},
+                  "lichen_sys_app_ctx_at": {"lichen_shell", "main"},
+                  "lichen_app_count": {"lichen_shell", "main"}, "lichen_app_at": {"lichen_shell", "main"},
+                  "lichen_app_by_id": {"lichen_os"}, "lichen_app_by_name": {"lichen_shell"},
+                  "lichen_notify_post_test": set()}
+        for sym, want in owners.items():
+            defs = {sym: "lichen_notify" if sym == "lichen_notify_post_test" else "lichen_api"}
+            for comp, layer in conf.comp_layer.items():
+                if comp == defs[sym]:
+                    continue
+                bad, hard = cl.sym_violation(conf, comp, layer, sym, defs)
+                self.assertEqual(bad is None, comp in want, (sym, comp))
+                if layer == "L6" or not want:
+                    self.assertTrue(hard, (sym, comp))  # never baselined
+        for sym in ("lichen_notify_unread", "lichen_notify_source_is_on", "lichen_sys_app_ctx_at"):
+            self.assertEqual(cl.sym_violation(conf, "mesh", "L6", sym, {sym: "lichen_notify"}), (sym, True))
+            self.assertEqual(cl.sym_violation(conf, "lichen_shell", "L5", sym, {sym: "lichen_api"}), (None, False))
+        self.assertIsNone(cl.sym_violation(conf, "mesh", "L6", "lichen_ctx_self", {"lichen_ctx_self": "lichen_api"})[0])
+
+    def test_real_conf_bars_every_psram_speed_symbol_for_apps(self):
+        """#280: one glob for the whole PSRAM speed switch, not a list that a new function slips past."""
+        conf = cl.parse_conf(cl.read(os.path.join(os.path.dirname(cl.__file__), "layers.conf")))
+        self.assertIn("psram_speed_*", conf.forbid["L6"])
+        self.assertEqual([g for g in conf.forbid["L6"] if g.startswith("psram_speed_") and g != "psram_speed_*"], [])
+        for sym in ("psram_speed_choice", "psram_speed_tick", "psram_speed_on_pass", "psram_speed_some_new_call"):
+            self.assertEqual(cl.sym_violation(conf, "lichen_apps", "L6", sym, {sym: "psram_guard"}), (sym, True))
 
     def test_real_conf_lets_apps_read_the_registry_and_set_nothing(self):
         """#313: lichen_reg.h's lichen_reg_get is the apps' one way to a registry key, and it is a read. The gate

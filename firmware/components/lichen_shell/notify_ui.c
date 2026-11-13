@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "fonts.h"
 #include "lichen_app.h"
+#include "lichen_sys_app.h"
 #include "lichen_sys_badge.h"
 #include "lichen_sys_clock.h"
 #include "notify_os.h"

@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "fw_console.h"
+#include "gate_app.h"
 #include "lichen_random.h"
 
 #include <stdint.h>
@@ -54,11 +55,35 @@ static void register_backup_keys(lichen_app_t const *app) {
     }
 }
 
+// Why app may not join the table (gate_app_names_refusal over every registered id and alias), NULL when it may
+static char const *names_refusal(app_ctx_table_t const *t, lichen_app_t const *app) {
+    char const *taken[2 * LICHEN_MAX_APPS];
+    size_t      n = 0;
+    for (size_t i = 0; i < app_ctx_apps(t) && n + 2 <= sizeof(taken) / sizeof(taken[0]); i++) {
+        lichen_app_t const *other = app_ctx_app_at(t, i);
+        taken[n++]                = other->id;
+        taken[n++]                = other->alias;
+    }
+    return gate_app_names_refusal(app->id, app->alias, taken, n);
+}
+
 lichen_ctx_t lichen_register_app(lichen_app_t const *app) {
-    app_ctx_table_t *t   = table();
-    lichen_ctx_t     ctx = app ? app_ctx_add(t, app, lichen_random_u32()) : LICHEN_CTX_NONE;
+    app_ctx_table_t *t = table();
+    if (!app) {
+        ESP_LOGE(TAG, "no app to register");
+        return LICHEN_CTX_NONE;
+    }
+    // Two apps sharing an id would share a settings namespace, a directory and a notification source (#340): the
+    // second is skipped, never an abort, so the badge still boots with the others
+    char const *refusal = names_refusal(t, app);
+    if (refusal) {
+        ESP_LOGE(TAG, "app %s (id %s, alias %s) not registered: %s", app->name ? app->name : "?",
+                 app->id ? app->id : "-", app->alias ? app->alias : "-", refusal);
+        return LICHEN_CTX_NONE;
+    }
+    lichen_ctx_t ctx = app_ctx_add(t, app, lichen_random_u32());
     if (ctx == LICHEN_CTX_NONE) {
-        ESP_LOGE(TAG, "no room for app %s: LICHEN_MAX_APPS (%d) apps are registered already", app ? app->name : "?",
+        ESP_LOGE(TAG, "no room for app %s: LICHEN_MAX_APPS (%d) apps are registered already", app->name,
                  LICHEN_MAX_APPS);
     } else if (app->backup_keys) {
         register_backup_keys(app);
@@ -74,25 +99,36 @@ lichen_app_t const *lichen_app_at(size_t index) {
     return app_ctx_app_at(&s_table, index);
 }
 
-lichen_app_t const *lichen_app_by_id(char const *id) {
-    for (size_t i = 0; id && i < app_ctx_apps(&s_table); i++) {
-        lichen_app_t const *app = app_ctx_app_at(&s_table, i);
-        if (app->id && strcmp(app->id, id) == 0) {
-            return app;
-        }
-    }
-    return NULL;
+lichen_ctx_t lichen_sys_app_ctx_at(size_t index) {
+    return app_ctx_at(&s_table, index);
 }
 
-lichen_app_t const *lichen_app_by_name(char const *name) {
-    lichen_app_t const *app = lichen_app_by_id(name);
-    for (size_t i = 0; !app && name && i < app_ctx_apps(&s_table); i++) {
-        lichen_app_t const *a = app_ctx_app_at(&s_table, i);
-        if (a->alias && strcmp(a->alias, name) == 0) {
-            app = a;
+// The index of the app named name by its id (alias false) or its alias, -1 for none
+static int find_app(char const *name, bool alias) {
+    for (size_t i = 0; name && i < app_ctx_apps(&s_table); i++) {
+        lichen_app_t const *app  = app_ctx_app_at(&s_table, i);
+        char const         *mine = alias ? app->alias : app->id;
+        if (mine && strcmp(mine, name) == 0) {
+            return (int)i;
         }
     }
-    return app;
+    return -1;
+}
+
+lichen_app_t const *lichen_app_by_id(char const *id) {
+    int i = find_app(id, false);
+    return i >= 0 ? app_ctx_app_at(&s_table, (size_t)i) : NULL;
+}
+
+lichen_app_t const *lichen_app_by_name(char const *name, lichen_ctx_t *ctx) {
+    int i = find_app(name, false);
+    if (i < 0) {
+        i = find_app(name, true);
+    }
+    if (ctx) {
+        *ctx = i >= 0 ? app_ctx_at(&s_table, (size_t)i) : LICHEN_CTX_NONE;
+    }
+    return i >= 0 ? app_ctx_app_at(&s_table, (size_t)i) : NULL;
 }
 
 // ---- the current app -----------------------------------------------------------------------------------------------
@@ -168,14 +204,6 @@ static void warn_unregistered(lichen_app_t const *app) {
     if (first && !in_isr()) {
         ESP_LOGW(TAG, "app %s is not registered: it runs for the OS", app_name(app));
     }
-}
-
-lichen_ctx_t lichen_sys_app_ctx(lichen_app_t const *app) {
-    lichen_ctx_t ctx = app_ctx_of(table(), app);
-    if (ctx == LICHEN_CTX_NONE) {
-        warn_unregistered(app);
-    }
-    return ctx;
 }
 
 lichen_ctx_t lichen_sys_task_ctx(lichen_app_t const *app) {

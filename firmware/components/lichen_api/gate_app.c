@@ -57,6 +57,31 @@ gate_app_kind_t gate_app_settings_ns(gate_app_env_t const *g, uint32_t ctx, char
     return kind;
 }
 
+static bool name_taken(char const *name, char const *const *taken, size_t n) {
+    for (size_t i = 0; name && i < n; i++) {
+        if (taken[i] && strcmp(taken[i], name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+char const *gate_app_names_refusal(char const *id, char const *alias, char const *const *taken, size_t n) {
+    if (id && !id_usable(id)) {
+        return "the id is reserved for the OS or not an app id";
+    }
+    if (alias && !id_usable(alias)) {
+        return "the alias is reserved for the OS or not an app id";
+    }
+    if (name_taken(id, taken, n)) {
+        return "another app has the id";
+    }
+    if (name_taken(alias, taken, n)) {
+        return "another app has the alias";
+    }
+    return NULL;
+}
+
 bool gate_batch_may_end(uint32_t held, uint32_t ctx) {
     return held != 0 && held == ctx;
 }

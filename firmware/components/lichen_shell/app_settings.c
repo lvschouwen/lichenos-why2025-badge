@@ -654,8 +654,9 @@ static void open_about(void *arg) {
     }
 }
 
-// A page an app provides under Settings
+// A page an app provides under Settings, and the app's context for its hooks
 static lichen_app_t const *page_app;
+static lichen_ctx_t        page_ctx;
 
 #define PAGE_SCROLL_STEP 96
 
@@ -670,7 +671,7 @@ static void on_page_key(lv_event_t *e) {
 static lv_obj_t *build_app_page(void) {
     lv_obj_t *screen = shell_page_create();
     lv_obj_t *menu   = menu_create_named(screen, "App settings", page_app->name);
-    lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(page_app)); // #230: both hooks run for their app
+    lichen_ctx_t previous = lichen_ctx_enter(page_ctx); // #230: both hooks run for their app
     if (page_app->settings) {
         page_app->settings(menu);
     }
@@ -685,6 +686,7 @@ static lv_obj_t *build_app_page(void) {
 static void open_app_page(void *arg) {
     size_t index = (size_t)(intptr_t)arg;
     page_app     = lichen_app_at(index);
+    page_ctx     = lichen_sys_app_ctx_at(index);
     if (page_app && (page_app->settings || page_app->about)) {
         _Static_assert(LICHEN_MAX_APPS <= SCREEN_APP_MAX, "app page ids would overlap");
         shell_open(build_app_page, SCREEN_APP + (int)index);

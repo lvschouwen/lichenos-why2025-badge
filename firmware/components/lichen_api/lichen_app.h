@@ -73,7 +73,9 @@ typedef uint32_t lichen_ctx_t;
 #define LICHEN_CTX_NONE ((lichen_ctx_t)0)
 
 // Before shell_home(). The app struct must stay valid for as long as the badge runs (a static const). Returns the
-// app's context, LICHEN_CTX_NONE when the table is full.
+// app's context, LICHEN_CTX_NONE when the table is full or the app's id or alias is refused (#340): already registered
+// (as an id or an alias), or one the OS keeps ("lichen", "test", the drive folders) or no app id at all. A refused app
+// is skipped with an error in the log; boot goes on.
 lichen_ctx_t lichen_register_app(lichen_app_t const *app);
 // The context of the app the calling code runs for: inside its hooks (the shell enters it around every hook call and
 // every lichen_ui_call it queued) and on its tasks (lichen_task_start; a task started from an app's task inherits it).
@@ -81,11 +83,7 @@ lichen_ctx_t lichen_register_app(lichen_app_t const *app);
 // registered, a task the app did not start through lichen_task_start (docs/app-api.md "The app context"). Any task
 // or ISR; never blocks.
 lichen_ctx_t lichen_ctx_self(void);
-size_t lichen_app_count(void);
-lichen_app_t const *lichen_app_at(size_t index);
-lichen_app_t const *lichen_app_by_id(char const *id); // NULL when no registered app has that id
-// The same, and an app's alias ("mesh") matches too: for what a person types
-lichen_app_t const *lichen_app_by_name(char const *name);
+// The table of registered apps is the OS's (lichen_sys_app.h, #340): an app knows only its own context.
 
 #ifdef __cplusplus
 }

@@ -412,8 +412,10 @@ static bool source_usable(char const *source, char const *title) {
     return true;
 }
 
-uint32_t lichen_notify_post(char const *source, ln_level_t level, char const *target, char const *title,
-                            char const *body, uint32_t flags) {
+// Every notice goes in here, under a source the service names itself (an app's id from its ctx, the OS's, the
+// console's): never a string a caller hands over (#340)
+static uint32_t post_as(char const *source, ln_level_t level, char const *target, char const *title, char const *body,
+                        uint32_t flags) {
     if (!source_usable(source, title)) {
         return 0;
     }
@@ -474,13 +476,18 @@ uint32_t lichen_notify_post(char const *source, ln_level_t level, char const *ta
 uint32_t lichen_notify_to(lichen_ctx_t ctx, ln_level_t level, char const *target, char const *title, char const *body,
                           uint32_t flags) {
     // The source is the ctx's app, never the caller's word; NULL (refused ctx, the OS's, no id) is dropped by
-    // lichen_notify_post
-    return lichen_notify_post(lichen_sys_ctx_source(ctx, "lichen_notify"), level, target, title, body, flags);
+    // post_as
+    return post_as(lichen_sys_ctx_source(ctx, "lichen_notify"), level, target, title, body, flags);
 }
 
 uint32_t lichen_sys_notify_to(ln_level_t level, char const *target, char const *title, char const *body,
                               uint32_t flags) {
-    return lichen_notify_post(GATE_OS_SOURCE, level, target, title, body, flags);
+    return post_as(GATE_OS_SOURCE, level, target, title, body, flags);
+}
+
+uint32_t lichen_notify_post_test(ln_level_t level, char const *target, char const *title, char const *body,
+                                 uint32_t flags) {
+    return post_as("test", level, target, title, body, flags);
 }
 
 uint32_t lichen_sys_notify(ln_level_t level, char const *title, char const *body, uint32_t flags) {

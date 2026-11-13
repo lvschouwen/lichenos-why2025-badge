@@ -411,7 +411,9 @@ void shell_no_arrow_scroll_impl(lv_obj_t *obj) {
     lv_obj_set_scroll_with_arrow(obj, false);
 }
 
-static lichen_app_t const *opening; // for build_app, which shell_open() calls without arguments
+// For build_app, which shell_open() calls without arguments: the app and its context
+static lichen_app_t const *opening;
+static lichen_ctx_t        opening_ctx;
 
 static lv_obj_t *build_app(void) {
     lv_obj_t *screen = lv_obj_create(NULL);
@@ -420,7 +422,7 @@ static lv_obj_t *build_app(void) {
     lv_obj_set_style_pad_hor(screen, THEME_PAD, 0);
     shell_scroll_tame(screen);
     shell_no_arrow_scroll(screen);
-    lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(opening)); // the app's own code from here (#230)
+    lichen_ctx_t previous = lichen_ctx_enter(opening_ctx); // the app's own code from here (#230)
     opening->open(screen);
     lichen_ctx_leave(previous);
     return screen;
@@ -432,7 +434,8 @@ void shell_open_app(size_t index) {
         return;
     }
     lichen_sys_ui_lock(0);
-    opening = app;
+    opening     = app;
+    opening_ctx = lichen_sys_app_ctx_at(index);
     shell_open(build_app, 1 + (int)index);
     if (nav_current() == 1 + (int)index) {
         shortcuts_app_opened(index); // ✕ goes back here later (#79)

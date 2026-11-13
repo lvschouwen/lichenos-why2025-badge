@@ -118,7 +118,30 @@ static void test_batch(void) {
     CHECK(!gate_batch_may_end(0, 0));
 }
 
+// #340: a second app can never take a registered app's id or alias, nor one the OS keeps
+static void test_names_refusal(void) {
+    char const *const taken[] = {"meshcore", "mesh", "settings", NULL, "clock"};
+    size_t const      n       = sizeof(taken) / sizeof(taken[0]);
+    CHECK(gate_app_names_refusal("weather", NULL, taken, n) == NULL);
+    CHECK(gate_app_names_refusal("weather", "wx", taken, n) == NULL);
+    CHECK(gate_app_names_refusal(NULL, NULL, taken, n) == NULL);       // an app without an id: the gate gives it NO_ID
+    CHECK(gate_app_names_refusal("meshcore", NULL, taken, n) != NULL); // a registered id
+    CHECK(gate_app_names_refusal("mesh", NULL, taken, n) != NULL);     // a registered alias as an id
+    CHECK(gate_app_names_refusal("weather", "clock", taken, n) != NULL);
+    CHECK(gate_app_names_refusal("weather", "mesh", taken, n) != NULL);
+    for (size_t i = 0; i < 4; i++) {
+        char const *os[] = {"lichen", "test", "c6", "crash"};
+        CHECK(gate_app_names_refusal(os[i], NULL, NULL, 0) != NULL);
+        CHECK(gate_app_names_refusal("weather", os[i], NULL, 0) != NULL);
+    }
+    CHECK(gate_app_names_refusal("", NULL, NULL, 0) != NULL);
+    CHECK(gate_app_names_refusal("Not Valid!", NULL, NULL, 0) != NULL);
+    CHECK(gate_app_names_refusal("weather", "", NULL, 0) != NULL);
+    CHECK(gate_app_names_refusal("first", NULL, NULL, 0) == NULL); // the first app: nothing taken yet
+}
+
 int main(void) {
+    test_names_refusal();
     test_kind();
     test_source();
     test_os_ctx_refused();

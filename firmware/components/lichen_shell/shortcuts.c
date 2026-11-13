@@ -53,7 +53,7 @@ static void open_messages(void) {
         lichen_app_t const *app = lichen_app_at(i);
         if (app->open_messages) {
             if (open_from_home((int)i)) {
-                lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230
+                lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); // #230
                 app->open_messages();
                 lichen_ctx_leave(previous);
             }

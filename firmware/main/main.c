@@ -363,7 +363,7 @@ static void start_apps(void) {
         if (!app->start_background) {
             continue;
         }
-        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx(app)); // #230: its tasks inherit the app
+        lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); // #230: its tasks inherit the app
         bool         started  = app->start_background();
         lichen_ctx_leave(previous);
         if (started) {

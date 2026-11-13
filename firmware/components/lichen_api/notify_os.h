@@ -22,6 +22,10 @@ bool lichen_notify_save_now(uint32_t wait_ms);
 // The clock can be believed (lichen_clock's clock_is_set): entries get a wall-clock time only then. Set once by the shell.
 void lichen_notify_set_clock(bool (*is_set)(void));
 
+// Unread entries of source (NULL: all sources): the status bar, the centre and the tile badges (#340: an app is not
+// told another source's count)
+size_t lichen_notify_unread(char const *source);
+
 // Moves on every change of the history: a view reads it again then
 uint32_t lichen_notify_generation(void);
 // Ids newest first (at most max) and a copy of one entry (false when it is gone)

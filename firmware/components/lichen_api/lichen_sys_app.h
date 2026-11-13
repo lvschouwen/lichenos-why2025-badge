@@ -19,16 +19,27 @@ extern "C" {
 #endif
 
 // Makes ctx the current app of the calling task and returns the one before it, for lichen_ctx_leave. Wrap every call
-// into an app's hook: prev = lichen_ctx_enter(lichen_sys_app_ctx(app)); app->hook(...); lichen_ctx_leave(prev). They
+// into an app's hook: prev = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); app->hook(...); lichen_ctx_leave(prev). They
 // nest (a hook that opens another app's page). A ctx that is not valid is refused (logged, counted) and the OS is
 // entered instead. Any task; in an ISR nothing changes.
 lichen_ctx_t lichen_ctx_enter(lichen_ctx_t ctx);
 // Puts back what lichen_ctx_enter returned. Any task (the one that entered).
 void lichen_ctx_leave(lichen_ctx_t previous);
 
-// The compat shim until #230 E1e: the context of a registered app's struct, the OS's for NULL, LICHEN_CTX_NONE for
-// a struct that never registered (logged once per struct). Any task.
-lichen_ctx_t lichen_sys_app_ctx(lichen_app_t const *app);
+// The registered apps (#66), in registration order: home, Settings and the console list them. The OS's view of the
+// table (#340): tools/layers.conf keeps these from the apps, which know only their own context. The table is filled
+// at boot before anything reads it and never changes afterwards. Any task.
+size_t lichen_app_count(void);
+// The app at index, NULL past the end. Any task.
+lichen_app_t const *lichen_app_at(size_t index);
+// The context lichen_register_app gave the app at index (lichen_app_at's), LICHEN_CTX_NONE past the end: what the OS
+// enters around that app's hooks. Any task.
+lichen_ctx_t lichen_sys_app_ctx_at(size_t index);
+// The registered app with that id, NULL when there is none. Any task.
+lichen_app_t const *lichen_app_by_id(char const *id);
+// The same, and an app's alias ("mesh") matches too: for what a person types. *ctx (may be NULL) gets the app's
+// context, LICHEN_CTX_NONE when there is no such app. Any task.
+lichen_app_t const *lichen_app_by_name(char const *name, lichen_ctx_t *ctx);
 // The context a task lichen_task_start makes runs for: app's, or for app NULL the calling task's own (inherited); the
 // OS's for a struct that never registered. Any task.
 lichen_ctx_t lichen_sys_task_ctx(lichen_app_t const *app);

@@ -44,9 +44,8 @@ uint32_t lichen_notify(lichen_ctx_t ctx, ln_level_t level, char const *title, ch
 uint32_t lichen_notify_to(lichen_ctx_t ctx, ln_level_t level, char const *target, char const *title,
                           char const *body, uint32_t flags);
 
-// Unread entries of source (NULL: all sources)
-size_t     lichen_notify_unread(char const *source);
-// The highest unread level, for the status bar's colour; LN_INFO when nothing is unread (check lichen_notify_unread)
+// The highest unread level, for the status bar's colour; LN_INFO when nothing is unread (the OS counts them with
+// notify_os.h's lichen_notify_unread)
 ln_level_t lichen_notify_unread_top(void);
 // The app's own "seen" (MeshCore opened the chat): marks the unread entries of (source, target) read; target NULL =
 // all of the caller's
