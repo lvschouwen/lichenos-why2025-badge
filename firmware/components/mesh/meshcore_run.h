@@ -26,8 +26,12 @@ bool meshcore_run_boot(void);
 // The state, brought in line with the mesh task first (a stop that finished late). Quick: any task, any time.
 mesh_run_t meshcore_run_get(void);
 // Asks for a start (true) or a stop (false) on a job task: NULL when it was taken, else why not ("busy, try again",
-// "already running", ...). The screens see the result through meshcore_run_get.
+// "already running", ...). The screens see the result through meshcore_run_get. The UI's (every key path: the tile,
+// the grid, a shape-key shortcut, a Settings row), under the LVGL lock: a start whose cause (key_cause_now) is an
+// injected key is refused with MESH_RUN_HAND_ONLY_REFUSAL and logged once (#400).
 char const *meshcore_run_request(bool start);
+// The same for "fw mesh start|stop": an operator's explicit command, not a key. Any task.
+char const *meshcore_run_request_console(bool start);
 // The OS holds the radio for a while (LoRa spectrum, #188): true marks the state paused (tile, grid and "fw mesh" say
 // why, starts are refused with MESH_RUN_PAUSED_REFUSAL), false clears it. Mark before the stop, clear before the start.
 void meshcore_run_set_paused(bool paused);

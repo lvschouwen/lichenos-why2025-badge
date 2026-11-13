@@ -205,8 +205,10 @@ static bool start_instead(mesh_grid_tile_t tile) {
         return false;
     }
     if (r.state == MESH_RUN_STOPPED) {
-        char const *why = meshcore_run_request(true);
-        ESP_LOGI(TAG, "start from the grid: %s", why ? why : "asked");
+        char const *why = meshcore_run_request(true); // refused for an injected key (#400): it logged that itself
+        if (!why || strcmp(why, MESH_RUN_HAND_ONLY_REFUSAL) != 0) {
+            ESP_LOGI(TAG, "start from the grid: %s", why ? why : "asked");
+        }
     }
     refresh(NULL); // "Starting MeshCore..." at once
     return true;   // starting or stopping: the tiles wait for it

@@ -137,6 +137,10 @@ bool mesh_run_enter_starts(mesh_run_t r, bool on_top) {
     return on_top && r.state == MESH_RUN_STOPPED && r.why != MESH_WHY_UPDATE;
 }
 
+bool mesh_run_start_hand_only(mesh_run_t r, bool cause_ok) {
+    return !cause_ok && mesh_run_enter_starts(r, true);
+}
+
 char const *mesh_run_action_value(mesh_run_t r) {
     if (mesh_run_busy(r) || (r.state == MESH_RUN_STOPPED && r.why == MESH_WHY_UPDATE)) {
         return "";

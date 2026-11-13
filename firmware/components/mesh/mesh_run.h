@@ -44,6 +44,8 @@ typedef struct {
 
 // Why a start is refused while paused (also the console's reply)
 #define MESH_RUN_PAUSED_REFUSAL "LoRa spectrum has the radio; close it first"
+// A start asked for by an injected key (#400): starting MeshCore is hand-only (meshcore_run_request says why once)
+#define MESH_RUN_HAND_ONLY_REFUSAL "takes a hand"
 
 // Applies ev. True when it changed the state; for START and STOP that means the caller now runs the start or stop and
 // reports DONE_OK or DONE_FAIL. False: refused (busy, already there, or stopped for an update), nothing to do.
@@ -66,6 +68,9 @@ char const *mesh_run_action_label(mesh_run_t r);
 // opens or starts it (its grid, or its home tile focused) while it is stopped, not for an update. Paused counts too
 // (the start is refused then, but the remote check fails safe).
 bool        mesh_run_enter_starts(mesh_run_t r, bool on_top);
+// #400: a start is refused as hand-only: it would start MeshCore and its cause may not (key_cause_hand_only_ok false:
+// an injected key). False while it would not start anyway (running, busy, stopped for an update).
+bool        mesh_run_start_hand_only(mesh_run_t r, bool cause_ok);
 char const *mesh_run_action_value(mesh_run_t r);
 
 // The Settings "Start at boot" row's value

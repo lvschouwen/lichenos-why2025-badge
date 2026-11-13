@@ -224,8 +224,10 @@ static void open(lv_obj_t *screen) {
     // "Enter to start" (#103): a stopped MeshCore starts on the job task; the grid says so until it runs
     mesh_run_t run = meshcore_run_get();
     if (run.state == MESH_RUN_STOPPED && run.why != MESH_WHY_UPDATE && lora_up()) {
-        char const *why = meshcore_run_request(true);
-        ESP_LOGI(TAG, "opened while stopped: start %s", why ? why : "asked");
+        char const *why = meshcore_run_request(true); // refused for an injected key (#400): it logged that itself
+        if (!why || strcmp(why, MESH_RUN_HAND_ONLY_REFUSAL) != 0) {
+            ESP_LOGI(TAG, "opened while stopped: start %s", why ? why : "asked");
+        }
     }
     bool starting = meshcore_run_get().state == MESH_RUN_STARTING;
     if ((mesh_running() || starting) && app_settings_get_u8(meshcore_ctx(), "mc_name_set", 0) == 0) {

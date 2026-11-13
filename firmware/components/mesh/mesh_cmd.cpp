@@ -22,7 +22,7 @@ bool mesh_int::console_not_running(void) {
 
 // "fw mesh start|stop" (#103): the same job as the tile and the Settings row; "fw mesh" shows the result
 static void cmd_mesh_run(bool start) {
-    char const *why = meshcore_run_request(start);
+    char const *why = meshcore_run_request_console(start);
     if (why) {
         console_reply("MeshCore not %s: %s", start ? "started" : "stopped", why);
     } else {

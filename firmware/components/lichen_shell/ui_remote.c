@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "fw_console.h"
+#include "key_cause.h"
 #include "key_matrix.h"
 #include "lichen_app.h"
 #include "lichen_sys_app.h"
@@ -215,7 +216,10 @@ void ui_remote_open_cmd(char const *args) {
     if (!why) {
         shell_home();
         if (!to_home) {
+            // An operator's command, not a key (#400): opening a stopped MeshCore here starts it, as from the tile
+            key_cause_t previous = key_cause_enter(KEY_CAUSE_CONSOLE);
             shell_open_app((size_t)index);
+            key_cause_leave(previous);
         }
         ok = to_home ? nav_depth() == 1 : nav_current() == 1 + index;
     }

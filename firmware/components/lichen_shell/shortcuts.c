@@ -2,8 +2,10 @@
 // The keyboard maps them to no LVGL key (kbd_map.c), so no app or text field ever sees them; the shell hears them as raw
 // key events (raw_keys.c, LVGL context) before any focus and acts here. shortcut.c decides, this file does.
 #include "esp_log.h"
+#include "key_cause.h"
 #include "lichen_app.h"
 #include "lichen_sys_app.h"
+#include "lichen_sys_keys.h"
 #include "nav.h"
 #include "raw_keys.h"
 #include "shell_parts.h"
@@ -109,6 +111,8 @@ static void on_raw_key(key_raw_event_t const *ev, void *arg) {
 }
 
 void shortcuts_start(void) {
+    // #400: what an LVGL key set off (a tile's Enter, a notification's) is a hand's only when that key was
+    key_cause_bind_last_key(lichen_sys_keys_last_injected);
     if (!raw_keys_listen(on_raw_key, NULL, false)) {
         ESP_LOGE(TAG, "shape keys not wired: no raw key listener free");
     }

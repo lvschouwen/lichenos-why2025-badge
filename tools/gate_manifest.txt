@@ -72,6 +72,12 @@ hold_exit_event	-	unspecified	hold_exit.h
 hold_exit_percent	-	unspecified	hold_exit.h
 hold_exit_tick	-	unspecified	hold_exit.h
 hold_exit_tick_after	-	unspecified	hold_exit.h
+key_cause_bind_last_key	-	any	key_cause.h
+key_cause_enter	-	lvgl	key_cause.h
+key_cause_hand_only_ok	-	any	key_cause.h
+key_cause_leave	-	lvgl	key_cause.h
+key_cause_name	-	any	key_cause.h
+key_cause_now	-	lvgl	key_cause.h
 key_layout	-	unspecified	key_matrix.h
 key_layout_index	-	unspecified	key_matrix.h
 key_matrix_code	-	unspecified	key_matrix.h

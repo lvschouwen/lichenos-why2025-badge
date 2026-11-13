@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "key_cause.h"
 #include "lichen_fs.h"
 #include "lichen_settings.h"
 #include "lichen_task.h"
@@ -144,7 +145,7 @@ void meshcore_run_set_paused(bool paused) {
     apply(paused ? MESH_EV_PAUSE : MESH_EV_UNPAUSE);
 }
 
-char const *meshcore_run_request(bool start) {
+static char const *request(bool start) {
     mesh_run_t r = meshcore_run_get();
     if (start && r.paused) {
         return MESH_RUN_PAUSED_REFUSAL; // before "busy": the reason is the radio's owner, not a job
@@ -173,6 +174,21 @@ char const *meshcore_run_request(bool start) {
         return "no memory for the job";
     }
     return NULL;
+}
+
+// The UI's: its cause is the key (or console command) behind the screen work running now (key_cause.h)
+char const *meshcore_run_request(bool start) {
+    key_cause_t cause = start ? key_cause_now() : KEY_CAUSE_NONE;
+    if (start && mesh_run_start_hand_only(meshcore_run_get(), key_cause_hand_only_ok(cause))) {
+        // #400: a start may send a due periodic advert, so an injected key never starts it, whichever path it took
+        ESP_LOGI(TAG, "%s ignored: starting MeshCore takes a hand (or fw mesh start)", key_cause_name(cause));
+        return MESH_RUN_HAND_ONLY_REFUSAL;
+    }
+    return request(start);
+}
+
+char const *meshcore_run_request_console(bool start) {
+    return request(start);
 }
 
 bool meshcore_run_stop_for_update(void) {

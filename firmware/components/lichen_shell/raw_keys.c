@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "key_cause.h"
 #include "lichen_keys.h"
 #include "lichen_sys_keys.h"
 #include "lvgl.h"
@@ -51,11 +52,14 @@ static void drain(lv_timer_t *t) {
     (void)t;
     key_raw_event_t ev;
     while (xQueueReceive(queue, &ev, 0) == pdTRUE) {
+        // What a listener does is this key's (#400): a shape-key shortcut that opens MeshCore starts it only for a hand
+        key_cause_t previous = key_cause_enter(ev.injected ? KEY_CAUSE_INJECTED : KEY_CAUSE_HAND);
         for (int i = 0; i < MAX_LISTENERS; i++) {
             if (listeners[i].cb) {
                 listeners[i].cb(&ev, listeners[i].arg);
             }
         }
+        key_cause_leave(previous);
     }
 }
 

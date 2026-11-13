@@ -364,6 +364,12 @@ The rule: **core 1 draws, core 0 talks to the world.**
   (not after `lv_async_call`, a UI call or a focus change), checked on the press. Paths that must take a hand on the keyboard refuse injected keys: the #66
   factory question (neither arms nor confirms; an injected Esc may still cancel) and About's developer taps (#374).
   A new DANGER confirm or mode switch meant for hands joins that list.
+- **Starting MeshCore is hand-only on every path (#400).** `meshcore_run_request` (the UI's start: home tile, grid,
+  shape-key shortcuts, notifications, the Settings row) asks `key_cause_now()` (lichen_api/key_cause.c): the shell
+  marks each raw key's listeners with that event's origin (raw_keys.c) and `fw ui open` as the console's; unmarked
+  work takes the last LVGL key's origin, so a tile's Enter the UI service runs a moment later counts too. An injected
+  cause is refused and logged once ("injected key ignored: starting MeshCore takes a hand"); `fw mesh start` and
+  `fw ui open` are operator commands and still start it. Opening a MeshCore that already runs is free.
 - Remote keys (#375, #377): `fw keys send` and `fw ui` are developer-mode commands (`fw dev on` from USB first, #373;
   not in a release build). The stepper checks every remote Enter, Tab, Left and Right right before it goes down
   (`remote_answer.c`, host-tested; a second look before a tap's release only detects a change and stops the sequence). A

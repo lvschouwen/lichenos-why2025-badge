@@ -2316,6 +2316,17 @@ target_include_directories(bench_scope_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(bench_scope_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME bench_scope_test COMMAND bench_scope_test)
 
+# Starting MeshCore is hand-only on every key path (#400): the cause of the work running now x MeshCore's state
+add_executable(key_cause_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/key_cause_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/key_cause.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_run.c
+)
+target_include_directories(key_cause_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(key_cause_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME key_cause_test COMMAND key_cause_test)
+
 add_executable(mesh_journal_gen_test
     ${CMAKE_CURRENT_SOURCE_DIR}/mesh_journal_gen_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_journal_gen.c
