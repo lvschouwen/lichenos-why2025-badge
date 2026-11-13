@@ -20,6 +20,7 @@
 #include "shell_parts.h"
 #include "text_entry.h"
 #include "theme.h"
+#include "wifi_focus.h"
 
 #include <stdarg.h>
 #include <stdint.h>
@@ -154,6 +155,19 @@ static bool focus_in_rows(void) {
 
 // The radio went off: as the page opens with it off, the saved networks and why it is off. A join being watched
 // stops (its "Connecting to..." would cover why), and focus in the list stays in it (R6), never on the switch or Skip.
+// Focus the first row that is in the group: a note (the "Saved networks" heading) is a row slot but never focusable,
+// and lv_group_focus_obj on it leaves focus on a neighbour of the deleted row, the radio switch (#361)
+static void focus_first_row(void) {
+    bool focusable[sizeof(rows) / sizeof(rows[0])] = {false};
+    for (size_t i = 0; i < row_count; i++) {
+        focusable[i] = rows[i] && lv_obj_get_group(rows[i]) != NULL;
+    }
+    size_t i = wifi_first_focusable(focusable, row_count);
+    if (i < row_count) {
+        lv_group_focus_obj(rows[i]);
+    }
+}
+
 static void show_radio_off(void) {
     bool in_rows = focus_in_rows();
     drop_scan();
@@ -161,8 +175,8 @@ static void show_radio_off(void) {
     clear_rows();
     add_saved_rows();
     set_status(off_status());
-    if (in_rows && row_count > 0) {
-        lv_group_focus_obj(rows[0]);
+    if (in_rows) {
+        focus_first_row();
     }
 }
 
@@ -426,9 +440,7 @@ static void rebuild_rows(void) {
         clear_rows();
         add_saved_rows();
     }
-    if (rows[0]) {
-        lv_group_focus_obj(rows[0]);
-    }
+    focus_first_row();
 }
 
 static void on_scan_done(void *data) {
@@ -443,8 +455,8 @@ static void on_scan_done(void *data) {
     shown_n         = res->ok ? res->n : 0;
     memcpy(shown, res->aps, shown_n * sizeof(shown[0]));
     fill_rows();
-    if (!moved && rows[0]) {
-        lv_group_focus_obj(rows[0]); // the first network or "Scan again": never the radio switch, one Enter from off
+    if (!moved) {
+        focus_first_row(); // the first network or "Scan again": never the radio switch, one Enter from off
     }
     char joined[33] = "", ip[16] = "";
     settings_get_str("wifi_ssid", joined, sizeof(joined), "");
