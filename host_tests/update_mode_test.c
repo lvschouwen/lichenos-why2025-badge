@@ -1,5 +1,6 @@
 // Host test: what update mode does per event (#76)
 #include "update_mode.h"
+#include "update_status.h"
 
 #include <stdio.h>
 
@@ -22,7 +23,38 @@ static void hook(bool apps_stopped) {
 
 #define STOP_CLOSE (UM_ACT_STOP_APPS | UM_ACT_CLOSE_SCREENS)
 
+// #298: the restart decision end to end, as the update screen's tick takes it (update_stall, then update mode)
+static upd_stall_t after(bool restarting, int64_t quiet_ms) {
+    upd_watch_t w = {.restarting = restarting, .firmware = true, .done = 100, .total = 100, .quiet_ms = quiet_ms};
+    return update_stall(&w);
+}
+
+static void test_restart_decision(void) {
+    // Success: installed (the slot switched after the whole-file hash, ota_whole_file_ok), "Restarting..." shows, no
+    // reboot from the sender: the badge restarts by itself after UPDATE_RESTART_AFTER_MS, not 20 s
+    update_state_t s = {0};
+    update_mode_on_prepare(&s, 0);
+    update_mode_on_begin(&s, true);
+    CHECK(update_mode_on_end(&s, true, true) == UM_ACT_NONE && !s.reboot);
+    CHECK(after(true, UPDATE_RESTART_AFTER_MS - 1) == UPD_STALL_NONE);
+    CHECK(!update_mode_restart_due(&s, true));
+    CHECK(after(true, UPDATE_RESTART_AFTER_MS) == UPD_STALL_RESTART);
+    CHECK(UPDATE_RESTART_AFTER_MS <= 3000);
+    update_mode_on_restart_stall(&s);
+    CHECK(update_mode_restart_due(&s, true));
+
+    // Failure (#76): nothing installed, the boot slot is the old one; the restart comes from update mode once the
+    // message has shown, never from the restart stall (a failed image is not "restarting")
+    s = (update_state_t){0};
+    update_mode_on_prepare(&s, 0);
+    update_mode_on_begin(&s, true);
+    CHECK(update_mode_on_end(&s, true, false) == UM_ACT_REBOOT && s.reboot);
+    CHECK(after(false, 1000000) == UPD_STALL_NONE);
+    CHECK(!update_mode_restart_due(&s, false) && update_mode_restart_due(&s, true));
+}
+
 int main(void) {
+    test_restart_decision();
     update_state_t s = {0};
 
     // Old sender: no prepare, update mode starts on the first byte

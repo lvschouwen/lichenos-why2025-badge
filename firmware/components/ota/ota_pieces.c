@@ -134,6 +134,24 @@ bool ota_piece_is_next(ota_piece_expect_t const *e, ota_request_t const *req, ch
            strcmp(e->file_sha256, req->file_sha256) == 0;
 }
 
+static bool lower_hex64(char const *s) {
+    size_t n = strnlen(s, OTA_SHA256_HEX + 1);
+    if (n != OTA_SHA256_HEX) {
+        return false;
+    }
+    for (size_t i = 0; i < n; i++) {
+        if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ota_whole_file_ok(size_t got, size_t total, char const *slot_sha, char const *file_sha) {
+    return total > 0 && got == total && lower_hex64(slot_sha) && lower_hex64(file_sha) &&
+           strcmp(slot_sha, file_sha) == 0;
+}
+
 int ota_hash_range(ota_read_fn read, void *ctx, size_t off, size_t len, uint8_t *scratch, size_t scratch_len,
                    uint8_t digest[32]) {
     sha256_ctx_t sha;

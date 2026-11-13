@@ -847,7 +847,7 @@ __attribute__((noinline)) static bool finish_streamed(int fd, char sha_hex[OTA_S
         return false;
     }
     ota_hex(digest, sizeof(digest), sha_hex);
-    if (strcmp(sha_hex, staged.file_sha256) != 0) {
+    if (!ota_whole_file_ok(staged.got, staged.total, sha_hex, staged.file_sha256)) {
         size_t bad[8];
         size_t n = ota_pieces_check_read(&staged.pieces, slot_read, (void *)staged.slot, bounce, sizeof(bounce), bad,
                                          8);

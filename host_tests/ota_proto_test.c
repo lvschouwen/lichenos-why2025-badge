@@ -298,6 +298,8 @@ static void test_embedded_nul(void) {
     CHECK(ota_parse_request(head, sizeof(head) - 1, &req) == 400);
     static char const in_line[] = "GET /info\0 HTTP/1.1\r\n\r\n";
     CHECK(ota_parse_request(in_line, sizeof(in_line) - 1, &req) == 400);
+    static char const in_piece[] = "PUT /firmware HTTP/1.1\r\nX-Piece-Size: 13\0" "1072\r\n\r\n"; // #298
+    CHECK(ota_parse_request(in_piece, sizeof(in_piece) - 1, &req) == 400);
     static char const in_name[] = "GET /info HTTP/1.1\r\nAc\0cept: x\r\n\r\n";
     CHECK(ota_parse_request(in_name, sizeof(in_name) - 1, &req) == 400);
 }

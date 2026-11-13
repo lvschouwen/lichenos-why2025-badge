@@ -77,6 +77,11 @@ typedef struct {
 // file hash, and the offset where the last verified piece ended
 bool ota_piece_is_next(ota_piece_expect_t const *e, ota_request_t const *req, char const *path);
 
+// Whether a streamed image may be installed (#298): every byte of it verified in pieces (got == total) and the SHA-256
+// of what the slot holds (slot_sha, lowercase hex) equal to the whole file's (file_sha). Nothing else switches the boot
+// slot, compressed pieces or not.
+bool ota_whole_file_ok(size_t got, size_t total, char const *slot_sha, char const *file_sha);
+
 // Reads n bytes at off of some store (the OTA slot) into buf; returns 0 on success
 typedef int (*ota_read_fn)(void *ctx, size_t off, uint8_t *buf, size_t n);
 

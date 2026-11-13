@@ -237,6 +237,19 @@ static void test_deflate_lies(void) {
     }
 }
 
+// #298: the boot slot switches only for an image whose every byte came and whose slot hash is the file's hash
+static void test_whole_file_ok(void) {
+    char const *other = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ae";
+    CHECK(ota_whole_file_ok(2630000, 2630000, SHA, SHA));
+    CHECK(!ota_whole_file_ok(2630000, 2630000, SHA, other));        // a damaged piece, inflated or not
+    CHECK(!ota_whole_file_ok(2630000 - 131072, 2630000, SHA, SHA)); // not every piece came
+    CHECK(!ota_whole_file_ok(0, 0, SHA, SHA));
+    CHECK(!ota_whole_file_ok(10, 10, "", ""));                      // no hash is no match
+    CHECK(!ota_whole_file_ok(10, 10, "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD",
+                             "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD"));
+    CHECK(!ota_whole_file_ok(10, 10, SHA "0", SHA "0")); // too long
+}
+
 // #211: size arithmetic on recorded pieces refuses what would wrap instead of wrapping
 static void test_overflow_guards(void) {
     CHECK(ota_round_up(SIZE_MAX, 128) == 0);
@@ -269,6 +282,7 @@ int main(void) {
     test_verdict_lies();
     test_deflate_verdicts();
     test_deflate_lies();
+    test_whole_file_ok();
     test_overflow_guards();
 
     CHECK(ota_round_up(0, 128) == 0);
