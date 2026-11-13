@@ -27,9 +27,26 @@ static int part_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
     return r->err == ESP_OK ? 0 : -1;
 }
 
+// The image into copy through a transient 4 KB internal bounce, freed right after; the stack one when that malloc fails
+// (#366). Keeps the partition's own error so the status names it.
+static esp_err_t copy_image(esp_partition_t const *part, uint32_t len) {
+    uint8_t     bounce[FLASH_CHUNK_BOUNCE];
+    part_read_t r   = {.part = part, .err = ESP_OK};
+    uint8_t    *big = heap_caps_malloc(FLASH_CHUNK_BIG, MALLOC_CAP_INTERNAL);
+    if (!big) {
+        ESP_LOGW(TAG, "no internal bounce: reading through the stack, slower");
+    }
+    size_t   cap = 0;
+    uint8_t *via = flash_chunk_pick(big, FLASH_CHUNK_BIG, bounce, sizeof(bounce), &cap);
+    int      rc  = flash_chunk_copy(part_read, &r, 0, copy, len, via, cap);
+    heap_caps_free(big);
+    return rc == 0 ? ESP_OK : r.err != ESP_OK ? r.err : ESP_FAIL;
+}
+
 // Read, not mmap: while any flash stays mapped, a flash write turns the cache and non-IRAM interrupts off and the
-// display drops frames (#31); unmapping at runtime hung the badge. The image goes to PSRAM through a stack buffer: one
-// read straight into PSRAM took a 16 KB internal temp buffer at boot (#364).
+// display drops frames (#31); unmapping at runtime hung the badge. The image goes to PSRAM through an internal bounce
+// (copy_image): one read straight into PSRAM took a 16 KB internal temp buffer at boot (#364), a 512 B bounce alone made
+// the boot mount ~100 ms slower (#366).
 bool assets_mount(void) {
     esp_partition_t const *part =
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, ASSETS_PARTITION);
@@ -46,13 +63,8 @@ bool assets_mount(void) {
         memcpy(&total, header + 12, sizeof(total)); // total_len, little endian like the P4
         // A blank or foreign partition: let assets_open() name the error from the header alone
         len = total > ASSETS_HEADER_LEN && total <= part->size ? total : ASSETS_HEADER_LEN;
-        uint8_t     bounce[FLASH_CHUNK_BOUNCE];
-        part_read_t r = {.part = part, .err = ESP_OK};
-        copy          = heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
-        err           = !copy ? ESP_ERR_NO_MEM
-                        : flash_chunk_copy(part_read, &r, 0, copy, len, bounce, sizeof(bounce)) != 0
-                            ? (r.err != ESP_OK ? r.err : ESP_FAIL)
-                            : ESP_OK;
+        copy = heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
+        err  = copy ? copy_image(part, len) : ESP_ERR_NO_MEM;
     }
     if (err != ESP_OK) {
         assets_unmount();
