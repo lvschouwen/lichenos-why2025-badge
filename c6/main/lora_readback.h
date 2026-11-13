@@ -20,19 +20,24 @@ uint32_t lora_rb_bw_hz(uint8_t code);
 // first and its low nibble into the top of the second, with control bits below
 uint8_t lora_rb_sync(uint8_t msb, uint8_t lsb);
 
-// The frequency the synthesizer runs for RadioLib's frequency in MHz: RadioLib turns it into the chip's frf steps
-// (32 MHz / 2^25, about 0.95 Hz) in single-precision float, so the result is within about 64 Hz of the request
-uint32_t lora_rb_freq_hz(float mhz);
+// The frequency the synthesizer runs for its SetRfFrequency steps (32 MHz / 2^25, about 0.95 Hz each), to the nearest
+// Hz; 0 for none or more than 1000 MHz
+uint32_t lora_rb_freq_hz(uint32_t frf);
+
+// The packet RSSI (dBm * 10) RadioLib 7.8.1's getRSSI() gave for an SX126x LoRa GetPacketStatus word (RssiPkt in bits
+// 23..16, SnrPkt 15..8, SignalRssiPkt 7..0): SignalRssiPkt, the signal after despreading. RadioLib 8 reads RssiPkt, the
+// channel's average over the packet, instead; the P4 and MeshCore keep the value they always had (#370).
+int16_t lora_rb_signal_rssi_x10(uint32_t packet_status);
 
 // The coding rate denominator (5..8 = 4/5..4/8) for RadioLib's stored code (cr - 4 without long interleaving); 0 =
 // unknown
 uint8_t lora_rb_cr(uint8_t code);
 
-// What lora_service fetches, undecoded: RadioLib's members and the two LoRa sync registers
+// What lora_service fetches, undecoded: RadioLib's members, the steps it wrote itself and the two LoRa sync registers
 typedef struct {
     bool     started;   // the last radio start succeeded; RadioLib holds no settings before that
     bool     regs_read; // sync_msb / sync_lsb came off the chip
-    float    freq_mhz;  // SX126x::freqMHz
+    uint32_t frf;       // the SetRfFrequency steps lora_service wrote last (lora_tune.h); RadioLib's freqHz is the request
     uint8_t  bw_code;   // SX126x::bandwidth, a SetModulationParams code
     uint8_t  sf;        // SX126x::spreadingFactor
     uint8_t  cr_code;   // SX126x::codingRate

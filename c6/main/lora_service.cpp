@@ -26,6 +26,7 @@
 #include "lora_irq.h"
 #include "lora_proto.h"
 #include "lora_readback.h"
+#include "lora_tune.h"
 #include "reg_c6.h"
 
 #include <atomic>
@@ -86,16 +87,18 @@ static std::atomic<uint32_t> callback_dropped; // written by the peer-data callb
 static int64_t               tx_deadline_us;   // while LORA_STATE_TX
 static bool                  radio_started;    // the last start (begin and the board settings) succeeded
 static int8_t                applied_power_dbm; // the power of that start
+static uint32_t              applied_frf;       // the SetRfFrequency steps tune() wrote last, 0 for none
 static uint32_t              reg_served;        // REG_GET / REG_SET answered, for the heartbeat
 
-// RadioLib 7.8 keeps the modem settings it gave the chip in private members without getters, and the SX126x has no
-// command that reads them back. These read them without patching the library or opening every class to everyone
-// (RADIOLIB_GODMODE): an explicit instantiation may name private members ([temp.spec.general]/6). A RadioLib update
-// that renames or retypes one fails to compile here. What the members mean (codingRate = cr - 4, bandwidth a chip code,
-// freqMHz before the frf conversion) is only checked by reading 7.8.1's source: a new pin in c6/main/idf_component.yml
-// has to re-read SX126x_config.cpp and then move this assert.
-static_assert(RADIOLIB_VERSION_MAJOR == 7 && RADIOLIB_VERSION_MINOR == 8 && RADIOLIB_VERSION_PATCH == 1,
-              "RADIOLIB_PEEK reads 7.8.1's private members: re-check their meaning before moving the radiolib pin");
+// RadioLib 8 keeps the modem settings it gave the chip in private members without getters, and the SX126x has no
+// command that reads them back. These read them, and reach the protected frequency and packet status commands, without
+// patching the library or opening every class to everyone (RADIOLIB_GODMODE): an explicit instantiation may name
+// private members ([temp.spec.general]/6). A RadioLib update that renames or retypes one fails to compile here. What
+// the members mean (codingRate = cr - 4, bandwidth a chip code) and the behaviour lora_tune.h and
+// lora_rb_signal_rssi_x10 make up for are only checked by reading 8.0.0's source (SX126x_config.cpp, SX126x.cpp,
+// SX1262.cpp): a new pin in c6/main/idf_component.yml has to re-read them and then move this assert.
+static_assert(RADIOLIB_VERSION_MAJOR == 8 && RADIOLIB_VERSION_MINOR == 0 && RADIOLIB_VERSION_PATCH == 0,
+              "RADIOLIB_PEEK reads 8.0.0's private members: re-check their meaning before moving the radiolib pin");
 template <typename Tag, typename Tag::type Member> struct radiolib_peek {
     friend typename Tag::type peek(Tag) { return Member; }
 };
@@ -105,7 +108,8 @@ template <typename Tag, typename Tag::type Member> struct radiolib_peek {
         friend type peek(tag);                                                                                         \
     };                                                                                                                 \
     template struct radiolib_peek<tag, &SX126x::member>
-RADIOLIB_PEEK(peek_freq, float SX126x::*, freqMHz);
+RADIOLIB_PEEK(peek_set_frf, int16_t (SX126x::*)(uint32_t), setRfFrequency);
+RADIOLIB_PEEK(peek_pkt_status, uint32_t (SX126x::*)(), getPacketStatus);
 RADIOLIB_PEEK(peek_bw, uint8_t SX126x::*, bandwidth);
 RADIOLIB_PEEK(peek_sf, uint8_t SX126x::*, spreadingFactor);
 RADIOLIB_PEEK(peek_cr, uint8_t SX126x::*, codingRate);
@@ -161,18 +165,41 @@ static int16_t arm_receive(void) {
     );
 }
 
+// After RadioLib set freq_hz (image calibration, its bookkeeping): the steps RadioLib 7.8.1 gave the chip, so the
+// carrier stays where it was (lora_tune.h). In standby, never while transmitting.
+static int16_t tune(uint32_t freq_hz) {
+    uint32_t const frf = lora_tune_frf(freq_hz);
+    int16_t const  err = (radio.*peek(peek_set_frf{}))(frf);
+    applied_frf        = err == RADIOLIB_ERR_NONE ? frf : 0;
+    return err;
+}
+
+static int16_t set_frequency(uint32_t freq_hz) {
+    int16_t err = radio.setFrequency(freq_hz);
+    return err == RADIOLIB_ERR_NONE ? tune(freq_hz) : err;
+}
+
+static int16_t begin_radio(void) {
+    lora_tune_t t;
+    lora_tune(&config, &t);
+    ConfigLoRa_t cfg;
+    cfg.frequency       = t.freq_hz;
+    cfg.bandwidth       = t.bw_hz;
+    cfg.spreadingFactor = t.sf;
+    cfg.codingRate      = t.cr;
+    cfg.syncWord        = t.sync_word;
+    cfg.power           = t.power_dbm;
+    cfg.preambleLength  = t.preamble;
+    // Crystal, no TCXO, DC-DC regulator, as 7.8.1's begin(..., 0.0f, false) had it: RadioLib 8 defaults to a 1.6 V
+    // TCXO and only falls back to the crystal after the oscillator fails to start
+    radio.tcxoVoltage     = RadioLibTCXOVoltage_t::VoltageNone;
+    radio.useRegulatorLDO = false;
+    int16_t err           = radio.begin(cfg);
+    return err == RADIOLIB_ERR_NONE ? tune(t.freq_hz) : err;
+}
+
 static int16_t start_rx(void) {
-    int16_t err = radio.begin(
-        config.freq_hz / 1e6f,
-        config.bw_hz / 1e3f,
-        config.sf,
-        config.cr,
-        config.sync_word,
-        config.tx_power_dbm,
-        config.preamble,
-        0.0f, // crystal, no TCXO
-        false
-    );
+    int16_t err = begin_radio();
     if (err == RADIOLIB_ERR_NONE) {
         // MeshCore's settings for this board: TXEN on GPIO3 (driven by RadioLib only while transmitting), no RXEN
         radio.setRfSwitchPins(RADIOLIB_NC, PIN_TXEN);
@@ -185,7 +212,7 @@ static int16_t start_rx(void) {
         err = radio.setRxBoostedGainMode(true);
     }
     if (err == RADIOLIB_ERR_NONE) {
-        radio.setPacketReceivedAction(on_dio1);
+        radio.setIrqAction(on_dio1);
         err = arm_receive();
     }
     status.last_radio_err = err;
@@ -218,7 +245,7 @@ static void fill_health(lora_status_t *st) {
 // After a transmission (done or not): back to receiving
 static void finish_tx(void) {
     radio.finishTransmit();
-    radio.setPacketReceivedAction(on_dio1);
+    radio.setIrqAction(on_dio1);
     int16_t err = arm_receive();
     status.last_radio_err = err;
     status.state          = err == RADIOLIB_ERR_NONE ? LORA_STATE_RX : LORA_STATE_ERROR;
@@ -250,7 +277,7 @@ static int16_t sample_rssi_x10(uint8_t samples) {
 static int16_t sweep_step(uint32_t freq_hz, uint8_t samples, int16_t *rssi_x10) {
     int16_t err = radio.standby();
     if (err == RADIOLIB_ERR_NONE) {
-        err = radio.setFrequency(freq_hz / 1e6f);
+        err = set_frequency(freq_hz);
     }
     if (err == RADIOLIB_ERR_NONE) {
         err = radio.startReceive();
@@ -267,10 +294,10 @@ static int16_t sweep_step(uint32_t freq_hz, uint8_t samples, int16_t *rssi_x10) 
 static int16_t sweep_restore(void) {
     int16_t err = radio.standby();
     if (err == RADIOLIB_ERR_NONE) {
-        err = radio.setFrequency(config.freq_hz / 1e6f);
+        err = set_frequency(config.freq_hz);
     }
     if (err == RADIOLIB_ERR_NONE) {
-        radio.setPacketReceivedAction(on_dio1);
+        radio.setIrqAction(on_dio1);
         err = arm_receive(); // clears the IRQ flags a packet heard during the sweep left behind
     }
     if (err != RADIOLIB_ERR_NONE) {
@@ -326,7 +353,7 @@ bool lora_service_readback(lora_config_t *out) {
                         RADIOLIB_ERR_NONE;
         raw.sync_msb  = sync[0];
         raw.sync_lsb  = sync[1];
-        raw.freq_mhz  = radio.*peek(peek_freq{});
+        raw.frf       = applied_frf;
         raw.bw_code   = radio.*peek(peek_bw{});
         raw.sf        = radio.*peek(peek_sf{});
         raw.cr_code   = radio.*peek(peek_cr{});
@@ -430,7 +457,7 @@ static void handle_command(lora_cmd_t const *cmd) {
                 send_result(msg.type, LORA_RESULT_BAD_STATE, 0);
                 return;
             }
-            radio.setPacketSentAction(on_dio1);
+            radio.setIrqAction(on_dio1);
             int16_t err = radio.startTransmit(msg.u.tx.data, msg.u.tx.len);
             if (err != RADIOLIB_ERR_NONE) {
                 status.last_radio_err = err;
@@ -468,7 +495,7 @@ static void handle_radio_event(void) {
                 status.last_radio_err = err;
             } else {
                 msg.u.rx.len      = (uint8_t)len;
-                msg.u.rx.rssi_x10 = (int16_t)(radio.getRSSI() * 10);
+                msg.u.rx.rssi_x10 = lora_rb_signal_rssi_x10((radio.*peek(peek_pkt_status{}))());
                 msg.u.rx.snr_x10  = (int16_t)(radio.getSNR() * 10);
                 msg.u.rx.c6_ms    = esp_log_timestamp();
                 status.packets++;

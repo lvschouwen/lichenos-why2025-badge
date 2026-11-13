@@ -28,15 +28,17 @@ uint8_t lora_rb_sync(uint8_t msb, uint8_t lsb) {
 }
 
 #define FRF_DIV_EXPONENT 25
-#define FRF_CRYSTAL_MHZ  32.0f
+#define FRF_MAX          1048576000u // 1000 MHz
 
-uint32_t lora_rb_freq_hz(float mhz) {
-    if (!(mhz > 0.0f) || mhz > 1000.0f) {
+uint32_t lora_rb_freq_hz(uint32_t frf) {
+    if (frf == 0 || frf > FRF_MAX) {
         return 0;
     }
-    // The same float expression as RadioLib's SX126x::setFrequencyRaw, so the step count is the one the chip got
-    uint32_t const frf = (uint32_t)((mhz * (float)(1UL << FRF_DIV_EXPONENT)) / FRF_CRYSTAL_MHZ);
     return (uint32_t)llround((double)frf * 32e6 / (double)(1UL << FRF_DIV_EXPONENT));
+}
+
+int16_t lora_rb_signal_rssi_x10(uint32_t packet_status) {
+    return (int16_t)(-5 * (int16_t)(packet_status & 0xFF)); // 0.5 dB per unit, negative
 }
 
 uint8_t lora_rb_cr(uint8_t code) {
@@ -49,7 +51,7 @@ bool lora_rb_decode(lora_rb_raw_t const *raw, lora_config_t *out) {
         return false;
     }
     lora_config_t const c = {
-        .freq_hz      = lora_rb_freq_hz(raw->freq_mhz),
+        .freq_hz      = lora_rb_freq_hz(raw->frf),
         .bw_hz        = lora_rb_bw_hz(raw->bw_code),
         .sf           = raw->sf,
         .cr           = lora_rb_cr(raw->cr_code),

@@ -142,8 +142,9 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
   (U8 %, the only settable C6 keys; same apply path as the UART `BL d k` line, which stays as the old-P4 and early-boot
   fallback; applied = the LEDC duty register read back, after the 10-80 % clamp), `bl.freq` (LEDC timer Hz) and
   `bl.boot` (on until the first set since the C6 started). `lora.*` RO|TX, the chip's real values: freq on the frf
-  step (within 64 Hz of the request), bw the exact chip bandwidth (62500, 41667, ...), sf, cr, preamble from
-  RadioLib 7.8.1's driver state (private members, read through an explicit-instantiation accessor in
+  step written last (within 64 Hz of the request: RadioLib 8 is followed by the steps 7.8.1's float conversion gave,
+  `c6/main/lora_tune.c`, #370), bw the exact chip bandwidth (62500, 41667, ...), sf, cr, preamble from
+  RadioLib 8.0.0's driver state (private members, read through an explicit-instantiation accessor in
   `lora_service.cpp`), sync from the SX1262 registers 0x0740/0x0741, power as the dBm of the last accepted start; all
   FAILED until a start succeeded (decoded by `lora_rb_decode`). `lora.state` (service state), `bt.state`
   (`esp_bt_controller_get_status`), `c6.reg_caps`. One lock in `backlight.c` guards the LEDC for both tasks (the UART

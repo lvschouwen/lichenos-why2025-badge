@@ -195,15 +195,12 @@ static void test_readback_decoders(void) {
     CHECK(lora_rb_cr(1) == 5 && lora_rb_cr(4) == 8);
     CHECK(lora_rb_cr(0) == 0 && lora_rb_cr(5) == 0);
 
-    // The synthesizer frequency is within the float steps of the request, never exact by luck alone
-    static float const mhz[]  = {869.618f, 869.525f, 868.1f, 863.0f, 927.9f};
-    static long const  want[] = {869618000, 869525000, 868100000, 863000000, 927900000};
-    for (size_t i = 0; i < sizeof(mhz) / sizeof(mhz[0]); i++) {
-        long const got = (long)lora_rb_freq_hz(mhz[i]);
-        CHECK(labs(got - want[i]) <= 64);
-    }
-    CHECK(lora_rb_freq_hz(0.0f) == 0);
-    CHECK(lora_rb_freq_hz(-1.0f) == 0);
+    // The synthesizer frequency of the frf steps, to the nearest Hz (32 MHz / 2^25 per step)
+    CHECK(lora_rb_freq_hz(911860544) == 869617981); // what 869.618 MHz gets (lora_tune_test)
+    CHECK(lora_rb_freq_hz(905969664) == 864000000); // 864 MHz exactly: 864 * 2^20
+    CHECK(lora_rb_freq_hz(1048576000) == 1000000000);
+    CHECK(lora_rb_freq_hz(0) == 0);
+    CHECK(lora_rb_freq_hz(1048576001) == 0);
 }
 
 // lora_service_readback's whole mapping: every RadioLib member lands in its own field, and the gates
@@ -212,7 +209,7 @@ static void test_readback_decode(void) {
     lora_rb_raw_t const raw = {
         .started   = true,
         .regs_read = true,
-        .freq_mhz  = 869.618f,
+        .frf       = 911860544,
         .bw_code   = 0x03,
         .sf        = 9,
         .cr_code   = 2,
@@ -223,7 +220,7 @@ static void test_readback_decode(void) {
     };
     lora_config_t c;
     CHECK(lora_rb_decode(&raw, &c));
-    CHECK(labs((long)c.freq_hz - 869618000L) <= 64);
+    CHECK(c.freq_hz == 869617981);
     CHECK(c.bw_hz == 62500);
     CHECK(c.sf == 9 && c.cr == 6);
     CHECK(c.sync_word == 0x34);
@@ -237,7 +234,7 @@ static void test_readback_decode(void) {
     r.regs_read = false; // the sync registers did not come off the chip
     CHECK(!lora_rb_decode(&r, &c) && c.sync_word == 0);
     r          = raw;
-    r.freq_mhz = 0.0f; // incomplete: frequency, bandwidth or coding rate do not decode
+    r.frf      = 0; // incomplete: frequency, bandwidth or coding rate do not decode
     CHECK(!lora_rb_decode(&r, &c));
     r         = raw;
     r.bw_code = 0x07;

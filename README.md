@@ -253,7 +253,7 @@ Lichen stands on a lot of other people's work. Thank you!
 | [ESP-IDF](https://github.com/espressif/esp-idf) and Espressif's components (esp_lvgl_port, esp-serial-flasher, esp_wifi_remote, i2c_bus, USB host drivers) | The base of both firmwares | Apache-2.0 |
 | [LVGL](https://github.com/lvgl/lvgl) 9.6 | The user interface (with the Montserrat font, OFL-1.1) | MIT |
 | [DejaVu Sans](https://dejavu-fonts.github.io), [Noto Emoji](https://github.com/googlefonts/noto-emoji) | Glyphs merged into Lichen's fonts (Bitstream Vera license, OFL-1.1) | free font licenses |
-| [RadioLib](https://github.com/jgromes/RadioLib) 7.8 | The SX1262 driver on the C6 | MIT |
+| [RadioLib](https://github.com/jgromes/RadioLib) 8.0 | The SX1262 driver on the C6 | MIT |
 | [rweather/arduinolibs](https://github.com/rweather/arduinolibs) Crypto | Ed25519, AES and SHA for MeshCore | MIT |
 | [base64_arduino](https://github.com/Densaugeo/base64_arduino) | Base64 for MeshCore | MIT |
 | [tomlc17](https://github.com/cktan/tomlc17) | Reading `lora.toml` | MIT |
