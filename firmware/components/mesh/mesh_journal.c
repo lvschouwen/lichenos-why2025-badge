@@ -4,6 +4,7 @@
 #include "mesh.h"
 #include "mesh_hist.h"
 #include "mesh_hist_crypto.h"
+#include "mesh_journal_gen.h"
 #include "lichen_fs.h"
 #include "meshcore_run.h"
 
@@ -66,6 +67,7 @@ static char const *volatile why_off = "not started";
 static volatile uint32_t    log_bytes, log_records, flushes, last_flush_s, last_flush_ms, write_errors, compactions;
 static volatile uint32_t    resyncs, auth_failures, read_errors; // read_errors: bad spots gone on a re-read (#120)
 static volatile uint32_t    boot_replay_ms, boot_records, boot_bytes; // hardware vs portable crypto on the bench
+static volatile bool        chats_forgotten_pending; // a reopened journal lost its CHAT records: forget them on the next unlocked flush (#368)
 static volatile bool        compact_asked; // the mesh task compacts before its next write (boot asks when needed)
 
 static void turn_off(char const *why) {
@@ -577,6 +579,43 @@ void mesh_journal_tick_locked(void) {
     }
 }
 
+// The card was formatted or wiped under a running journal (#368): log.bin and its directory are gone, and appending
+// would fail with ENOENT. A new log.bin starts with a HEAD under the keys already in use (the pending records are
+// encrypted with them), inside the caller's card batch. Nothing stays open between writes, so no handle can go stale.
+static char const *journal_reopen(int *err) {
+    uint8_t head[MESH_HIST_REC_MAX];
+    if (mkdir(SD_MESSAGES_DIR, 0755) != 0 && errno != EEXIST) {
+        *err = errno;
+        return "messages directory not recreated";
+    }
+    size_t n  = mesh_hist_encode_head(&wcrypt, head, sizeof(head));
+    FILE  *f  = n ? fopen(LOG_PATH, "wb") : NULL; // only reached for a missing or empty file (mesh_journal_gen_plan)
+    bool   ok = f && fwrite(head, 1, n, f) == n;
+    *err      = ok ? 0 : (n ? errno : EINVAL);
+    if (f && fclose(f) != 0 && ok) {
+        ok   = false;
+        *err = errno;
+    }
+    if (!ok) {
+        return "journal not reopened";
+    }
+    log_bytes   = (uint32_t)n;
+    log_records = 1;
+    chats_forgotten_pending = true;
+    ESP_LOGW(TAG, "journal: log.bin was gone (card formatted or wiped): started a new one");
+    return NULL;
+}
+
+// Before an append: is the file there? (stat is one directory lookup inside the batch)
+static char const *journal_check(int *err) {
+    struct stat st;
+    bool        have = stat(LOG_PATH, &st) == 0;
+    if (mesh_journal_gen_plan(have, have ? (uint64_t)st.st_size : 0) == MESH_JOURNAL_GEN_APPEND) {
+        return NULL;
+    }
+    return journal_reopen(err);
+}
+
 // Appends spare[0..out_len) to log.bin in one batch. A failed or short write may leave a torn record at the end:
 // nothing more is appended after it (persistence goes off), and the next boot compacts it away.
 static void write_out(uint32_t wait_ms) {
@@ -593,10 +632,14 @@ static void write_out(uint32_t wait_ms) {
         retry_after_s = mesh_uptime_s() + RETRY_S;
         return;
     }
-    int64_t started = esp_timer_get_time();
-    FILE   *f       = fopen(LOG_PATH, "ab");
-    bool    ok      = f && fwrite(spare, 1, out_len, f) == out_len;
-    int     err     = ok ? 0 : errno;
+    int64_t     started = esp_timer_get_time();
+    int         err     = 0;
+    char const *why     = journal_check(&err);
+    FILE       *f       = why ? NULL : fopen(LOG_PATH, "ab");
+    bool        ok      = f && fwrite(spare, 1, out_len, f) == out_len;
+    if (!ok && !why) {
+        err = errno;
+    }
     if (f && fclose(f) != 0 && ok) {
         ok  = false;
         err = errno;
@@ -604,7 +647,7 @@ static void write_out(uint32_t wait_ms) {
     lichen_fs_sd_end(journal_app(), ok ? 0 : err);
     if (!ok) {
         write_errors++;
-        ESP_LOGE(TAG, "journal write of %u bytes failed (errno %d)", (unsigned)out_len, err);
+        ESP_LOGE(TAG, "journal write of %u bytes failed (errno %d)%s%s", (unsigned)out_len, err, why ? ": " : "", why ? why : "");
         out_len = 0;
         turn_off("journal write failed");
         return;
@@ -663,6 +706,12 @@ void mesh_journal_flush(void) {
     }
     if (out_len) {
         write_out(FLUSH_WAIT_MS);
+    }
+    if (on && chats_forgotten_pending) {
+        chats_forgotten_pending = false;
+        lock_fn();
+        mesh_hist_forget_chats(hist); // the new log.bin has no CHAT records: written again with the next messages
+        unlock_fn();
     }
     if (on && log_bytes > MESH_HIST_CAP) {
         compact_asked = true; // next loop

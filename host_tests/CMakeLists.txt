@@ -2269,3 +2269,11 @@ add_executable(bench_scope_test
 target_include_directories(bench_scope_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(bench_scope_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME bench_scope_test COMMAND bench_scope_test)
+
+add_executable(mesh_journal_gen_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/mesh_journal_gen_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_journal_gen.c
+)
+target_include_directories(mesh_journal_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_compile_options(mesh_journal_gen_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME mesh_journal_gen_test COMMAND mesh_journal_gen_test)
