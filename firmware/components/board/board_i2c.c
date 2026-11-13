@@ -31,8 +31,8 @@ i2c_master_bus_handle_t board_i2c_bus(void) {
     return bus;
 }
 
-// Both lines must idle high through R7/R8. Read as plain inputs, no pulls of our own (an internal pull-up would make an
-// unwired header look idle), output driver off: the same state the pins are left in after a close.
+// Both lines must idle high through R7/R8. Read as plain inputs, no pulls of our own (an internal pull-up would hide a
+// missing external one), output driver off: the same state the pins are left in after a close.
 static bool i2c2_lines_idle(void) {
     gpio_config_t in = {
         .pin_bit_mask = (1ULL << BOARD_I2C2_SDA) | (1ULL << BOARD_I2C2_SCL),
@@ -54,7 +54,7 @@ esp_err_t board_i2c2_open(i2c_master_bus_handle_t *out) {
         return ESP_OK;
     }
     if (!i2c2_lines_idle()) {
-        return ESP_ERR_INVALID_STATE;
+        return ESP_ERR_INVALID_RESPONSE;
     }
     i2c_master_bus_config_t cfg = {
         .i2c_port                     = BOARD_I2C2_PORT,

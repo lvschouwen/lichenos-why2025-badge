@@ -42,7 +42,7 @@ static void cmd_battery(char const *args) {
     if (s.have) {
         reply_reading(&s);
     } else {
-        console_reply("battery: %s%s%s", battery_gauge_name(s.gauge), s.why ? ": " : "", s.why ? s.why : "");
+        console_reply("battery: %s (probe: %s)", battery_gauge_name(s.gauge), battery_probe_name(s.probe));
     }
     console_reply("battery: polls %u, i2c errors %u, rejected %u (last %s), probe %u ms, tmp102 %s, stack %u B free",
                   (unsigned)s.polls, (unsigned)s.io_errors, (unsigned)s.rejected,

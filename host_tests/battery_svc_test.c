@@ -25,7 +25,7 @@ static bat_regs_t good(uint32_t mv) {
 
 static void present(bat_svc_t *s) {
     battery_service_init(s);
-    battery_service_probed(s, true);
+    battery_service_probed(s, BAT_PROBE_FOUND);
 }
 
 static void regs_check_limits(void) {
@@ -69,7 +69,7 @@ static void absent_does_nothing(void) {
     battery_service_init(&s);
     CHECK(s.gauge == BAT_GAUGE_UNPROBED);
     CHECK(battery_service_poll_ms(&s) == 0);
-    battery_service_probed(&s, false);
+    battery_service_probed(&s, BAT_PROBE_NOTHING);
     CHECK(s.gauge == BAT_GAUGE_ABSENT);
     CHECK(battery_service_poll_ms(&s) == 0);
     bat_regs_t low = good(3000);
@@ -78,6 +78,44 @@ static void absent_does_nothing(void) {
     }
     CHECK(s.gauge == BAT_GAUGE_ABSENT && !s.have && !s.off_due && !s.off_sent && s.polls == 0);
     CHECK(s.model.level == BAT_OK);
+}
+
+// Every probe result that is not FOUND leaves a state that is never polled and never acts, whatever comes in
+static void probe_results_map_to_states(void) {
+    static struct {
+        bat_probe_t p;
+        bat_gauge_t g;
+    } const cases[] = {
+        {BAT_PROBE_FOUND, BAT_GAUGE_PRESENT},       {BAT_PROBE_NOTHING, BAT_GAUGE_ABSENT},
+        {BAT_PROBE_NOT_MAX, BAT_GAUGE_ABSENT},      {BAT_PROBE_LINES_LOW, BAT_GAUGE_LINES_LOW},
+        {BAT_PROBE_BUS_ERROR, BAT_GAUGE_NO_BUS},    {BAT_PROBE_TIMEOUT, BAT_GAUGE_NO_BUS},
+        {(bat_probe_t)99, BAT_GAUGE_NO_BUS},
+    };
+    bat_regs_t low = good(3000);
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        bat_svc_t s;
+        battery_service_init(&s);
+        battery_service_probed(&s, cases[i].p);
+        CHECK(s.gauge == cases[i].g && s.probe == cases[i].p);
+        if (cases[i].p == BAT_PROBE_FOUND) {
+            continue;
+        }
+        CHECK(battery_service_poll_ms(&s) == 0);
+        for (uint32_t t = 0; t <= 60000; t += 5000) {
+            CHECK(battery_service_step(&s, &low, true, t) == BAT_ACT_NONE);
+        }
+        CHECK(s.gauge == cases[i].g && s.polls == 0 && !s.have && !s.off_due);
+    }
+    // A re-probe moves between them: present, then the lines are held low, then the gauge is back
+    bat_svc_t s;
+    battery_service_init(&s);
+    battery_service_probed(&s, BAT_PROBE_FOUND);
+    bat_regs_t ok = good(3900);
+    battery_service_step(&s, &ok, false, 0);
+    battery_service_probed(&s, BAT_PROBE_LINES_LOW);
+    CHECK(s.gauge == BAT_GAUGE_LINES_LOW && !s.have && battery_service_poll_ms(&s) == 0);
+    battery_service_probed(&s, BAT_PROBE_FOUND);
+    CHECK(s.gauge == BAT_GAUGE_PRESENT && battery_service_poll_ms(&s) == BAT_POLL_MS);
 }
 
 static void reading_reaches_the_model(void) {
@@ -184,7 +222,7 @@ static void off_with_auto_off_once(void) {
         offs += battery_service_step(&s, &dead, true, t) == BAT_ACT_OFF;
     }
     CHECK(offs == 1 && s.off_sent);
-    battery_service_probed(&s, true); // a re-probe starts the model over, the one OFF per boot stays spent
+    battery_service_probed(&s, BAT_PROBE_FOUND); // a re-probe starts the model over, the one OFF per boot stays spent
     for (uint32_t t = 100000; t <= 160000; t += 5000) {
         CHECK(battery_service_step(&s, &dead, true, t) != BAT_ACT_OFF);
     }
@@ -203,7 +241,11 @@ static void charging_holds_off_the_warning(void) {
 
 static void names(void) {
     CHECK(strcmp(battery_gauge_name(BAT_GAUGE_ABSENT), "absent") == 0);
+    CHECK(strcmp(battery_gauge_name(BAT_GAUGE_LINES_LOW), "lines low") == 0);
     CHECK(strcmp(battery_gauge_name((bat_gauge_t)99), "?") == 0);
+    CHECK(strcmp(battery_probe_name(BAT_PROBE_LINES_LOW), "SDA/SCL held low") == 0);
+    CHECK(strcmp(battery_probe_name(BAT_PROBE_NOTHING), "nothing at 0x36") == 0);
+    CHECK(strcmp(battery_probe_name((bat_probe_t)99), "?") == 0);
     CHECK(strcmp(battery_regs_verdict_name(BAT_REGS_CRATE), "bad rate") == 0);
     CHECK(strcmp(battery_regs_verdict_name((bat_regs_verdict_t)99), "?") == 0);
 }
@@ -211,6 +253,7 @@ static void names(void) {
 int main(void) {
     regs_check_limits();
     absent_does_nothing();
+    probe_results_map_to_states();
     reading_reaches_the_model();
     failures_go_stale_then_lost();
     garbage_is_rejected_and_never_powers_off();

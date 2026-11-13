@@ -20,67 +20,74 @@ static char const TAG[] = "battery";
 // service cannot ask for a power-off whatever the chip reports, and nothing in this build could act on one anyway.
 #define BATTERY_AUTO_OFF false
 #define TMP102_ADDR      0x48
-#define PROBE_MS         20 // per address: an unanswered address NACKs at once, a stuck line hits the 20 ms SCL timeout
+#define PROBE_MS         20 // per transfer: an unanswered address NACKs at once, a stalled one hits the 20 ms timeout
 
 static portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
 EXT_RAM_BSS_ATTR static bat_svc_t      svc;  // the task's own
 static battery_snap_t                  snap; // under lock: internal RAM, a critical section never touches PSRAM (#271)
 static _Atomic(TaskHandle_t)           task; // set by the task itself, read by the console
 static atomic_bool                     probe_asked = true; // the task's first round probes
-static void (*_Atomic level_hook)(bat_level_t level);
-static char const *absent_why;
-static bool        tmp102_seen, off_logged, stack_logged;
-static uint32_t    probe_ms;
+static bool                            tmp102_seen, off_logged, stack_logged;
+static uint32_t                        probe_ms;
 
 static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
-// What is at 0x36: NULL when it is a MAX17048 (attached and left attached), otherwise why not
-static char const *find_gauge(i2c_master_bus_handle_t bus) {
-    if (i2c_master_probe(bus, MAX17048_ADDR, PROBE_MS) != ESP_OK) {
-        return "nothing at 0x36";
+// 0x36 first, then 0x48. A MAX17048 is left attached. The first transfer that stalls ends the probe, so a stuck bus
+// costs one 20 ms timeout (and the one error line IDF logs for it); every other step NACKs or answers in well under a
+// millisecond at 100 kHz, so a probe takes about 1 ms normally and about 25 ms at worst.
+static bat_probe_t look(i2c_master_bus_handle_t bus) {
+    esp_err_t err = i2c_master_probe(bus, MAX17048_ADDR, PROBE_MS);
+    if (err == ESP_ERR_TIMEOUT) {
+        return BAT_PROBE_TIMEOUT;
     }
-    if (max17048_attach(bus) != ESP_OK) {
-        return "device add failed";
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) {
+        return BAT_PROBE_BUS_ERROR;
     }
-    uint16_t version = 0;
-    if (!max17048_read_version(&version)) {
-        return "VERSION read failed";
+    bat_probe_t result = BAT_PROBE_NOTHING;
+    if (err == ESP_OK) {
+        uint16_t version = 0;
+        if (max17048_attach(bus) != ESP_OK) {
+            return BAT_PROBE_BUS_ERROR;
+        }
+        if (!max17048_read_version(&version)) {
+            return BAT_PROBE_TIMEOUT; // it acknowledged its address, then the read failed
+        }
+        result = bat_version_valid(version) ? BAT_PROBE_FOUND : BAT_PROBE_NOT_MAX;
     }
-    return bat_version_valid(version) ? NULL : "0x36 is not a MAX17048";
+    tmp102_seen = i2c_master_probe(bus, TMP102_ADDR, PROBE_MS) == ESP_OK; // mod 5; nothing reads it yet
+    return result;
 }
 
 static void probe(void) {
     int64_t t0 = esp_timer_get_time();
     max17048_detach(); // a re-probe starts from a closed bus
     board_i2c2_close();
+    tmp102_seen                 = false;
     i2c_master_bus_handle_t bus = NULL;
     esp_err_t               err = board_i2c2_open(&bus);
-    char const             *why = NULL;
-    tmp102_seen                 = false;
-    if (err == ESP_ERR_INVALID_STATE) {
-        why = "SDA/SCL low, nothing wired";
+    bat_probe_t             result;
+    if (err == ESP_ERR_INVALID_RESPONSE) {
+        result = BAT_PROBE_LINES_LOW; // nothing was sent
     } else if (err != ESP_OK) {
-        why = "bus not available";
+        result = BAT_PROBE_BUS_ERROR;
     } else {
-        tmp102_seen = i2c_master_probe(bus, TMP102_ADDR, PROBE_MS) == ESP_OK;
-        why         = find_gauge(bus);
+        result = look(bus);
     }
-    if (why) {
+    if (result != BAT_PROBE_FOUND) {
         max17048_detach();
         board_i2c2_close(); // the camera header's pins back to plain inputs
     }
-    battery_service_probed(&svc, why == NULL);
-    absent_why = why;
+    battery_service_probed(&svc, result);
     off_logged = false;
     probe_ms   = (uint32_t)((esp_timer_get_time() - t0) / 1000);
-    if (why) {
-        ESP_LOGI(TAG, "no fuel gauge on I2C2 (SDA %d, SCL %d): %s (%u ms)", BOARD_I2C2_SDA, BOARD_I2C2_SCL, why,
-                 (unsigned)probe_ms);
-    } else {
+    if (result == BAT_PROBE_FOUND) {
         ESP_LOGI(TAG, "MAX17048 on I2C2 (SDA %d, SCL %d)%s", BOARD_I2C2_SDA, BOARD_I2C2_SCL,
                  tmp102_seen ? ", TMP102 at 0x48 too" : "");
+    } else {
+        ESP_LOGI(TAG, "no fuel gauge on I2C2 (SDA %d, SCL %d): %s (%u ms)", BOARD_I2C2_SDA, BOARD_I2C2_SCL,
+                 battery_probe_name(result), (unsigned)probe_ms);
     }
 }
 
@@ -98,7 +105,7 @@ static void gauge_changed(bat_gauge_t before, bat_gauge_t after, bat_regs_verdic
     }
 }
 
-static void acted(bat_action_t act, bat_level_t level) {
+static void acted(bat_action_t act) {
     if (act == BAT_ACT_WARN) {
         ESP_LOGW(TAG, "battery low: %u mV", (unsigned)svc.mv);
     } else if (act == BAT_ACT_WARN_CLEAR) {
@@ -111,10 +118,6 @@ static void acted(bat_action_t act, bat_level_t level) {
         ESP_LOGW(TAG, "cell at or below %d mV for %d s; automatic power-off is disabled until calibrated", BAT_OFF_MV,
                  BAT_DWELL_MS / 1000);
     }
-    void (*hook)(bat_level_t) = atomic_load(&level_hook);
-    if (act != BAT_ACT_NONE && hook) {
-        hook(level);
-    }
 }
 
 static void poll_once(void) {
@@ -123,7 +126,7 @@ static void poll_once(void) {
     bat_gauge_t  before = svc.gauge;
     bat_action_t act    = battery_service_step(&svc, &r, BATTERY_AUTO_OFF, now_ms());
     gauge_changed(before, svc.gauge, battery_regs_check(&r));
-    acted(act, svc.model.level);
+    acted(act);
 }
 
 static void publish(void) {
@@ -134,7 +137,7 @@ static void publish(void) {
     }
     battery_snap_t s = {
         .gauge            = svc.gauge,
-        .why              = svc.gauge == BAT_GAUGE_ABSENT ? absent_why : NULL,
+        .probe            = svc.probe,
         .have             = svc.have,
         .mv               = svc.mv,
         .percent          = (uint8_t)((svc.soc_pct256 + 128u) >> 8),
@@ -178,10 +181,6 @@ void battery_get(battery_snap_t *out) {
     taskENTER_CRITICAL(&lock);
     *out = snap;
     taskEXIT_CRITICAL(&lock);
-}
-
-void battery_set_level_hook(void (*fn)(bat_level_t level)) {
-    atomic_store(&level_hook, fn);
 }
 
 bool battery_service_reprobe(void) {

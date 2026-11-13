@@ -12,10 +12,34 @@ char const *battery_regs_verdict_name(bat_regs_verdict_t v) {
 
 char const *battery_gauge_name(bat_gauge_t g) {
     static char const *const names[] = {
-        [BAT_GAUGE_UNPROBED] = "not probed", [BAT_GAUGE_ABSENT] = "absent", [BAT_GAUGE_PRESENT] = "present",
-        [BAT_GAUGE_STALE] = "stale",         [BAT_GAUGE_LOST] = "lost",
+        [BAT_GAUGE_UNPROBED] = "not probed", [BAT_GAUGE_ABSENT] = "absent",   [BAT_GAUGE_LINES_LOW] = "lines low",
+        [BAT_GAUGE_NO_BUS] = "no bus",       [BAT_GAUGE_PRESENT] = "present", [BAT_GAUGE_STALE] = "stale",
+        [BAT_GAUGE_LOST] = "lost",
     };
     return (unsigned)g < sizeof names / sizeof names[0] ? names[g] : "?";
+}
+
+char const *battery_probe_name(bat_probe_t p) {
+    static char const *const names[] = {
+        [BAT_PROBE_FOUND] = "MAX17048 found",         [BAT_PROBE_NOTHING] = "nothing at 0x36",
+        [BAT_PROBE_NOT_MAX] = "0x36 is not a MAX17048", [BAT_PROBE_LINES_LOW] = "SDA/SCL held low",
+        [BAT_PROBE_BUS_ERROR] = "bus not available",  [BAT_PROBE_TIMEOUT] = "bus timeout",
+    };
+    return (unsigned)p < sizeof names / sizeof names[0] ? names[p] : "?";
+}
+
+static bat_gauge_t gauge_after_probe(bat_probe_t p) {
+    switch (p) {
+    case BAT_PROBE_FOUND:
+        return BAT_GAUGE_PRESENT;
+    case BAT_PROBE_NOTHING:
+    case BAT_PROBE_NOT_MAX:
+        return BAT_GAUGE_ABSENT;
+    case BAT_PROBE_LINES_LOW:
+        return BAT_GAUGE_LINES_LOW;
+    default:
+        return BAT_GAUGE_NO_BUS; // BUS_ERROR, TIMEOUT and anything unknown: never polled
+    }
 }
 
 bat_regs_verdict_t battery_regs_check(bat_regs_t const *r) {
@@ -44,8 +68,9 @@ void battery_service_init(bat_svc_t *s) {
     bat_reset(&s->model);
 }
 
-void battery_service_probed(bat_svc_t *s, bool found) {
-    s->gauge   = found ? BAT_GAUGE_PRESENT : BAT_GAUGE_ABSENT;
+void battery_service_probed(bat_svc_t *s, bat_probe_t result) {
+    s->probe   = result;
+    s->gauge   = gauge_after_probe(result);
     s->have    = false;
     s->fails   = 0;
     s->off_due = false; // off_sent stays: at most one BAT_ACT_OFF per boot
@@ -87,8 +112,8 @@ static bat_action_t level_action(bat_svc_t *s, bat_level_t before, bat_level_t a
 }
 
 bat_action_t battery_service_step(bat_svc_t *s, bat_regs_t const *r, bool auto_off, uint32_t now_ms) {
-    if (s->gauge == BAT_GAUGE_UNPROBED || s->gauge == BAT_GAUGE_ABSENT) {
-        return BAT_ACT_NONE;
+    if (battery_service_poll_ms(s) == 0) {
+        return BAT_ACT_NONE; // no gauge found: nothing to step
     }
     s->polls++;
     bat_regs_verdict_t v = battery_regs_check(r);

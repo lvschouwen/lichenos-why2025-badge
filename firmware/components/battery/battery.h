@@ -1,6 +1,7 @@
 #pragma once
 // The battery service (#11): finds the optional MAX17048 fuel gauge on the camera header's bus (board_i2c.h, J7) and
-// polls it. A stock badge has none: one probe at start, one log line, then the task sleeps until "fw battery probe".
+// polls it. A stock badge has none: one probe at start (about 1 ms: the lines idle high through R7/R8 and nothing
+// answers), one log line, then the task sleeps until "fw battery probe".
 // It never powers the badge off: the 3.30 V power-off of battery_model.c is only reported (off_due) until the readings
 // are calibrated on the bench (BATTERY_AUTO_OFF in battery_service.c).
 #include "battery_svc.h"
@@ -14,7 +15,7 @@
 
 typedef struct {
     bat_gauge_t        gauge;
-    char const        *why;    // ABSENT: what the probe found (a constant string), NULL otherwise
+    bat_probe_t        probe;  // what the last probe found
     bool               have;   // a reading passed the checks since the probe
     uint32_t           mv;     // cell voltage
     uint8_t            percent; // the chip's state of charge, rounded
@@ -35,8 +36,6 @@ typedef struct {
 void battery_service_run(void);
 // The latest state; any task (a copy under a spinlock, no I/O)
 void battery_get(battery_snap_t *out);
-// Called on the battery task when the level changes (OK, WARN, OFF), for the UI of a later wave; NULL removes it
-void battery_set_level_hook(void (*fn)(bat_level_t level));
 // Asks the task to probe the bus again ("fw battery probe"); false when the service is not running
 bool battery_service_reprobe(void);
 // "fw battery [probe]", developer mode only

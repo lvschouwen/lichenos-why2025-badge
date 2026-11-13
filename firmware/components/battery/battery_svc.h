@@ -8,16 +8,30 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// Where the gauge stands. ABSENT is the stock badge: nothing answered (or something that is not a MAX17048 did), so
+// Where the gauge stands. ABSENT is the stock badge: the lines idle high, nothing answered at 0x36 (or something that
+// is not a MAX17048 did). LINES_LOW: SDA or SCL held low before any transfer, a wiring fault (or no pull-ups on these
+// pins). NO_BUS: the controller refused the bus, or a probe ran into a timeout (a stretched or stuck line). In all three
 // nothing is polled until a probe is asked for again. STALE: it answered before, the last poll failed or was rejected;
 // the last good reading is kept (with its age). LOST: BAT_LOST_FAILS polls in a row failed; polled slowly from then on.
 typedef enum {
     BAT_GAUGE_UNPROBED = 0,
     BAT_GAUGE_ABSENT,
+    BAT_GAUGE_LINES_LOW,
+    BAT_GAUGE_NO_BUS,
     BAT_GAUGE_PRESENT,
     BAT_GAUGE_STALE,
     BAT_GAUGE_LOST,
 } bat_gauge_t;
+
+// What one probe found (battery_service.c's probe, in the order it looks)
+typedef enum {
+    BAT_PROBE_FOUND = 0,   // 0x36 acknowledged and its VERSION passed bat_version_valid
+    BAT_PROBE_NOTHING,     // the lines idle high, 0x36 does not answer: no gauge
+    BAT_PROBE_NOT_MAX,     // 0x36 answered with another VERSION (a camera module, say)
+    BAT_PROBE_LINES_LOW,   // board_i2c2_open: SDA or SCL held low, no transfer made
+    BAT_PROBE_BUS_ERROR,   // board_i2c2_open: the controller refused the bus
+    BAT_PROBE_TIMEOUT,     // a probe or the VERSION read timed out or failed after an acknowledge
+} bat_probe_t;
 
 // One poll's registers as the chip sent them (most significant byte first already combined, bat_be16). ok false: a
 // transfer failed, the values mean nothing.
@@ -61,6 +75,7 @@ typedef enum {
 
 typedef struct {
     bat_gauge_t        gauge;
+    bat_probe_t        probe; // the last probe's result
     bat_state_t        model;
     bool               have; // a reading has passed the checks since the last probe
     uint32_t           mv;
@@ -77,15 +92,16 @@ typedef struct {
 
 char const        *battery_regs_verdict_name(bat_regs_verdict_t v);
 char const        *battery_gauge_name(bat_gauge_t g);
+char const        *battery_probe_name(bat_probe_t p);
 bat_regs_verdict_t battery_regs_check(bat_regs_t const *r);
 
 void battery_service_init(bat_svc_t *s);
-// The probe's result: found means the chip acknowledged 0x36 and its VERSION passed bat_version_valid. Every probe
-// starts over: the model (its dwells and the OFF latch) and the kept reading are reset; the counters stay.
-void battery_service_probed(bat_svc_t *s, bool found);
+// The probe's result. Every probe starts over: the model (its dwells and the OFF latch) and the kept reading are reset;
+// the counters stay.
+void battery_service_probed(bat_svc_t *s, bat_probe_t result);
 // One poll at now_ms (wrapping ms clock). r NULL counts as a failed transfer. auto_off: whether a latched OFF may be
-// returned as BAT_ACT_OFF; with it false the service never asks for a power-off, whatever the chip reports. While the
-// gauge is UNPROBED or ABSENT nothing changes and the result is BAT_ACT_NONE.
+// returned as BAT_ACT_OFF; with it false the service never asks for a power-off, whatever the chip reports. While no
+// gauge was found (UNPROBED, ABSENT, LINES_LOW, NO_BUS) nothing changes and the result is BAT_ACT_NONE.
 bat_action_t battery_service_step(bat_svc_t *s, bat_regs_t const *r, bool auto_off, uint32_t now_ms);
-// How long until the next poll; 0 = do not poll (UNPROBED, ABSENT)
+// How long until the next poll; 0 = do not poll (UNPROBED, ABSENT, LINES_LOW, NO_BUS)
 uint32_t battery_service_poll_ms(bat_svc_t const *s);
