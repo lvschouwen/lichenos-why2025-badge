@@ -539,15 +539,27 @@ static bool finish_firmware(int fd, uint8_t const *data, size_t len, long long s
     return install_slot(fd, slot, handle, len, sent);
 }
 
-// A partition read for ota_hash_range and flash_chunk_same; buf is always an internal bounce buffer (#364)
+// A partition read for ota_hash_range; buf is always an internal bounce buffer (#364)
 static int slot_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
     return esp_partition_read(ctx, off, buf, n) == ESP_OK ? 0 : -1;
 }
 
+// The same for flash_chunk_same, keeping the error so the reply names it
+typedef struct {
+    esp_partition_t const *part;
+    esp_err_t              err;
+} part_read_t;
+
+static int part_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
+    part_read_t *r = ctx;
+    r->err         = esp_partition_read(r->part, off, buf, n);
+    return r->err == ESP_OK ? 0 : -1;
+}
+
 // Write a checked assets image (#22) over the assets partition. The image is fully checked (header, table, CRC)
-// before anything is erased, and read back afterwards. The partition is memory-mapped, not copied: while it is
-// rewritten, anything reading it sees erased or half-written bytes. So tools/badge.sh asks for /prepare first (the
-// apps and screens stop) and reboots afterwards; consumers copy what they keep (assets.h). noinline: its read-back
+// before anything is erased, and read back afterwards. The running firmware uses the boot-time PSRAM copy (#31), which
+// assets_unmount drops once the fonts are parsed, and nothing reads the partition until the next boot; still,
+// tools/badge.sh asks for /prepare first (the apps and screens stop) and reboots afterwards to load the new image. noinline: its read-back
 // bounce buffer stays out of handle_piece's frame (#364).
 __attribute__((noinline)) static bool finish_assets(int fd, uint8_t const *data, size_t len, long long sent) {
     assets_view_t view;
@@ -568,9 +580,10 @@ __attribute__((noinline)) static bool finish_assets(int fd, uint8_t const *data,
         err = esp_partition_write(part, 0, data, len);
     }
     if (err == ESP_OK) {
-        uint8_t bounce[FLASH_CHUNK_BOUNCE];
-        int     same = flash_chunk_same(slot_read, (void *)part, 0, data, len, bounce, sizeof(bounce));
-        err          = same == 1 ? ESP_OK : same == 0 ? ESP_ERR_INVALID_CRC : ESP_FAIL;
+        uint8_t     bounce[FLASH_CHUNK_BOUNCE];
+        part_read_t r    = {.part = part, .err = ESP_OK};
+        int         same = flash_chunk_same(part_read, &r, 0, data, len, bounce, sizeof(bounce));
+        err              = same == 1 ? ESP_OK : same == 0 ? ESP_ERR_INVALID_CRC : r.err != ESP_OK ? r.err : ESP_FAIL;
     }
     if (err != ESP_OK) {
         respond(fd, 500, "writing the assets failed (%s); the built-in fonts are used until it succeeds",

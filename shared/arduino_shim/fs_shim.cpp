@@ -27,9 +27,19 @@ static void (*drive_fn)(size_t *total, size_t *used);
 // and resets it once per loop. Atomic: since #257 the mesh task also writes advert blobs after its unlock, while another
 // task may be in a file under the mesh lock.
 static uint32_t busy_us, busy_ops;
-static uint32_t raw_writes; // writes and truncates of buffered "w" files (host tests count them)
 static bool     fail_alloc, fail_reads, fat_rename;
-static size_t   largest_read; // the largest single read() the shim asked for (host tests check the compare reads)
+
+// Counters only the host tests read: kept out of the badge build, where several tasks use files at once and plain
+// globals would race
+#ifndef ESP_PLATFORM
+static uint32_t raw_writes;   // writes and truncates of buffered "w" files
+static size_t   largest_read; // the largest single read() the shim asked for (the compare reads)
+#define COUNT_RAW_WRITE() (raw_writes++)
+#define NOTE_READ(n)      (largest_read = (n) > largest_read ? (n) : largest_read)
+#else
+#define COUNT_RAW_WRITE() ((void)0)
+#define NOTE_READ(n)      ((void)(n))
+#endif
 
 void fs_shim_test_faults(bool alloc, bool reads) {
     fail_alloc = alloc;
@@ -51,6 +61,7 @@ void fs_shim_test_fat_rename(bool on) {
 #define DEFAULT_FREE(p)   free(p)
 #endif
 
+#ifndef ESP_PLATFORM
 size_t fs_shim_take_largest_read(void) {
     size_t n     = largest_read;
     largest_read = 0;
@@ -62,6 +73,7 @@ uint32_t fs_shim_take_raw_writes(void) {
     raw_writes = 0;
     return n;
 }
+#endif
 
 // A "w" file's buffer comes from the owner's hooks (the badge: lichen_alloc, PSRAM first and internal RAM when PSRAM is
 // full, so a small prefs or identity save still lands; contacts3 alone is 152 bytes a contact, up to 1000 contacts).
@@ -100,9 +112,7 @@ static bool read_full(int fd, uint8_t *dst, size_t n) {
     if (fail_reads) {
         return false;
     }
-    if (n > largest_read) {
-        largest_read = n;
-    }
+    NOTE_READ(n);
     while (n > 0) {
         ssize_t r = ::read(fd, dst, n);
         if (r <= 0) {
@@ -353,8 +363,9 @@ size_t File::size() {
 }
 
 // Whether the n bytes at the file's position equal expect, read FS_SHIM_COMPARE_READ bytes at a time into a stack
-// buffer. LittleFS reads a large aligned request straight into the caller's buffer: with a PSRAM buffer that made
-// esp_flash_read malloc a 4 KB internal temp buffer per chunk (#364). A stack buffer is internal and per caller.
+// buffer. LittleFS reads a request of a whole block (4 KB) straight into the caller's buffer: with a PSRAM buffer that
+// made esp_flash_read malloc a 4 KB internal temp buffer per chunk (#364). Below the block size LittleFS reads through
+// its internal file cache (#362), and the stack buffer is internal and per caller.
 static bool same_bytes(int fd, uint8_t const *expect, size_t n) {
     uint8_t got[FS_SHIM_COMPARE_READ];
     for (size_t at = 0; at < n; at += sizeof(got)) {
@@ -381,12 +392,12 @@ bool File::commit() {
         bool   same = off + n <= old && lseek(fd_, (off_t)off, SEEK_SET) == (off_t)off && same_bytes(fd_, buf_ + off, n);
         if (!same) {
             ok = lseek(fd_, (off_t)off, SEEK_SET) == (off_t)off && write_full(fd_, buf_ + off, n);
-            raw_writes++;
+            COUNT_RAW_WRITE();
         }
     }
     if (ok && old > len_) {
         ok = ftruncate(fd_, (off_t)len_) == 0;
-        raw_writes++;
+        COUNT_RAW_WRITE();
     }
     if (!ok) {
         SHIM_ERROR("writing %s failed: errno %d", path_, errno);

@@ -15,8 +15,16 @@ static assets_view_t view;
 static uint8_t      *copy; // the image in PSRAM while mounted
 static char          status[48] = "not mounted";
 
-static int part_read(void *part, size_t off, uint8_t *buf, size_t n) {
-    return esp_partition_read(part, off, buf, n) == ESP_OK ? 0 : -1;
+// A partition read for flash_chunk_copy that keeps the error, so the status names it
+typedef struct {
+    esp_partition_t const *part;
+    esp_err_t              err;
+} part_read_t;
+
+static int part_read(void *ctx, size_t off, uint8_t *buf, size_t n) {
+    part_read_t *r = ctx;
+    r->err         = esp_partition_read(r->part, off, buf, n);
+    return r->err == ESP_OK ? 0 : -1;
 }
 
 // Read, not mmap: while any flash stays mapped, a flash write turns the cache and non-IRAM interrupts off and the
@@ -38,11 +46,13 @@ bool assets_mount(void) {
         memcpy(&total, header + 12, sizeof(total)); // total_len, little endian like the P4
         // A blank or foreign partition: let assets_open() name the error from the header alone
         len = total > ASSETS_HEADER_LEN && total <= part->size ? total : ASSETS_HEADER_LEN;
-        uint8_t bounce[FLASH_CHUNK_BOUNCE];
-        copy = heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
-        err  = !copy ? ESP_ERR_NO_MEM
-               : flash_chunk_copy(part_read, (void *)part, 0, copy, len, bounce, sizeof(bounce)) != 0 ? ESP_FAIL
-                                                                                                    : ESP_OK;
+        uint8_t     bounce[FLASH_CHUNK_BOUNCE];
+        part_read_t r = {.part = part, .err = ESP_OK};
+        copy          = heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
+        err           = !copy ? ESP_ERR_NO_MEM
+                        : flash_chunk_copy(part_read, &r, 0, copy, len, bounce, sizeof(bounce)) != 0
+                            ? (r.err != ESP_OK ? r.err : ESP_FAIL)
+                            : ESP_OK;
     }
     if (err != ESP_OK) {
         assets_unmount();

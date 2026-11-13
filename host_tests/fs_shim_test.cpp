@@ -138,7 +138,8 @@ static void buffered_writes(void) {
     CHECK(fs_shim_take_raw_writes() == 0);
     CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 30 * REC_SIZE && memcmp(disk, expect, 30 * REC_SIZE) == 0);
 
-    // Through the hooks: a save that grows the buffer and compares chunks takes blocks and gives all of them back
+    // Through the hooks: a save that grows the buffer takes blocks and gives all of them back (the chunk compare reads
+    // into a stack buffer, no block of its own: #364)
     fs_shim_set_buffer_hooks(count_alloc, count_free);
     save_contacts(expect, 30, 999, 0);
     CHECK(total_blocks >= 2 && live_blocks == 0);

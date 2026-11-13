@@ -95,14 +95,16 @@ bool fs_shim_format_allowed(char const *root);
 // Microseconds spent in file calls (open, read, write, close, exists, remove) since the last call, and how many calls
 // (ops may be NULL); always 0 off the badge
 uint32_t fs_shim_take_busy_us(uint32_t *ops);
-// Writes (and truncates) that reached the file system for buffered "w" files since the last call: host tests count them
+#ifndef ESP_PLATFORM
+// Host tests only. Writes (and truncates) that reached the file system for buffered "w" files since the last call
 uint32_t fs_shim_take_raw_writes(void);
-// The largest single read the shim asked the file system for since the last call: host tests check the compare reads
+// Host tests only. The largest single read the shim asked the file system for since the last call (the compare reads)
 size_t fs_shim_take_largest_read(void);
+#endif
 // The chunk a "w" file is compared and rewritten in: the LittleFS block on the badge, one flash erase each
 #define FS_SHIM_CHUNK 4096
-// The largest read a chunk compare makes: on the badge it lands in a stack buffer, internal RAM, so the flash read needs
-// no temp buffer of its own (#364). Two LittleFS read sizes (128 bytes).
+// The largest read a chunk compare makes, below the block size LittleFS reads through its internal file cache: the
+// flash read never targets the caller's (PSRAM) buffer, so it needs no temp buffer of its own (#364)
 #define FS_SHIM_COMPARE_READ 256
 // The largest "w" file the shim buffers (1 MB): MeshCore's biggest is contacts3, 152 KB at 1000 contacts. A write past
 // it fails, and close() leaves the old file as it was.
