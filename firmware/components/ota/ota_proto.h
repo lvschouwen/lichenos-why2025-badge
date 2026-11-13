@@ -79,7 +79,7 @@ typedef struct {
 // Length of the request head including the blank line, or 0 while it isn't complete yet
 size_t ota_head_length(char const *buf, size_t len);
 
-// Parse a complete request head. Returns 0, or the HTTP status to answer with (400, 404, 405, 415).
+// Parse a complete request head. Returns 0, or the HTTP status to answer with (400, 404, 405, 415, 417).
 int ota_parse_request(char const *head, size_t len, ota_request_t *req);
 
 // The reason phrase of a reply status line; an unlisted status reads "Internal Server Error"

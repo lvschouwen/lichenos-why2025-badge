@@ -333,7 +333,7 @@ static bool lower_hex(char const *s, size_t want) {
 
 // What any accepted request must look like, however it was mangled
 static void check_invariants(int st, ota_request_t const *r) {
-    CHECK(st == 0 || st == 400 || st == 404 || st == 405 || st == 415);
+    CHECK(st == 0 || st == 400 || st == 404 || st == 405 || st == 415 || st == 417);
     if (st != 0) {
         return;
     }
@@ -543,6 +543,125 @@ static void test_status_reason(void) {
     }
 }
 
+// #403: the request line used strtok, whose static state any other strtok user in the same task (or another task)
+// overwrote. A caller midway through its own strtok split must find its place unchanged after a parse.
+static void test_request_line_reentrant(void) {
+    char          outer[] = "one two three";
+    ota_request_t req;
+    CHECK(strcmp(strtok(outer, " "), "one") == 0);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nContent-Length: 5\r\n\r\n", &req) == 0 && req.route == OTA_ROUTE_FIRMWARE);
+    char const *next = strtok(NULL, " ");
+    CHECK(next && strcmp(next, "two") == 0);
+    // The split itself is unchanged: runs of spaces count as one, a fourth word or a missing one is refused
+    CHECK(parse("GET  /info   HTTP/1.1\r\n\r\n", &req) == 0 && req.route == OTA_ROUTE_INFO);
+    CHECK(parse(" GET /info HTTP/1.1 \r\n\r\n", &req) == 0 && req.route == OTA_ROUTE_INFO);
+    CHECK(parse("GET /info HTTP/1.1 x\r\n\r\n", &req) == 400);
+    CHECK(parse("GET /info\r\n\r\n", &req) == 400);
+    CHECK(parse("   \r\n\r\n", &req) == 400);
+    CHECK(parse("GET /log?since=7 HTTP/1.0\r\n\r\n", &req) == 0 && req.route == OTA_ROUTE_LOG && req.since == 7);
+}
+
+// #403: "Name : value" used to be read as a header called "Name " and ignored, so "Content-Length : 5" went unseen by
+// the receiver while a proxy might read it; HTTP/1.1 says to refuse it. A blank before the colon of any header line of
+// every recorded valid request is refused with 400.
+static void test_blank_before_colon(void) {
+    ota_request_t req;
+    CHECK(parse("PUT /file HTTP/1.1\r\nContent-Length : 5\r\n\r\n", &req) == 400);
+    CHECK(parse("PUT /file HTTP/1.1\r\nContent-Length\t: 5\r\n\r\n", &req) == 400);
+    CHECK(parse("GET /info HTTP/1.1\r\nAccept : */*\r\n\r\n", &req) == 400); // headers it does not read as well
+    CHECK(parse("PUT /file HTTP/1.1\r\nContent-Length:5\r\n\r\n", &req) == 0 && req.content_length == 5);
+    CHECK(parse("PUT /file HTTP/1.1\r\nContent-Length: \t5\t \r\n\r\n", &req) == 0 && req.content_length == 5);
+    static uint8_t out[1024];
+    for (size_t i = 0; i < sizeof(recorded) / sizeof(recorded[0]); i++) {
+        if (!recorded[i].parsed) {
+            continue; // refused for its route or encoding before or regardless of the headers
+        }
+        char const *head = recorded[i].head;
+        size_t      len  = strlen(head);
+        size_t      line = (size_t)(strstr(head, "\r\n") - head) + 2; // past the request line
+        while (line < len) {
+            char const *colon = memchr(head + line, ':', len - line);
+            char const *eol   = strstr(head + line, "\r\n");
+            if (colon && eol && colon < eol) {
+                for (char const *blank = " \t"; *blank; blank++) {
+                    size_t n = mut_insert((uint8_t const *)head, len, (size_t)(colon - head), blank, 1, out, sizeof(out));
+                    CHECK(n && ota_parse_request((char const *)out, n, &req) == 400);
+                }
+            }
+            line = eol ? (size_t)(eol - head) + 2 : len;
+        }
+    }
+}
+
+// #403: an Expect other than 100-continue used to be ignored; the receiver cannot meet it, so it is refused with 417
+static void test_expect(void) {
+    ota_request_t req;
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nExpect: 100-continue\r\n\r\n", &req) == 0 && req.expect_continue);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nexpect:  100-Continue \r\n\r\n", &req) == 0 && req.expect_continue);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\n\r\n", &req) == 0 && !req.expect_continue);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nExpect: 200-ok\r\n\r\n", &req) == 417);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nExpect: \r\n\r\n", &req) == 417);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nExpect: 100-continue, x\r\n\r\n", &req) == 417);
+    CHECK(parse("PUT /firmware HTTP/1.1\r\nExpect: 100-continuex\r\n\r\n", &req) == 417);
+    static char const nul[] = "PUT /firmware HTTP/1.1\r\nExpect: 100-cont\0inue\r\n\r\n";
+    CHECK(ota_parse_request(nul, sizeof(nul) - 1, &req) == 400);
+    CHECK(strcmp(ota_status_reason(417), "Expectation Failed") == 0);
+    // The recorded client that sends Expect, with its value changed
+    static char const *const others[] = {"100-continu", "1OO-continue", "100-continue;q=1", "*", "x"};
+    static uint8_t           out[1024];
+    for (size_t i = 0; i < sizeof(recorded) / sizeof(recorded[0]); i++) {
+        size_t len = strlen(recorded[i].head);
+        for (size_t o = 0; o < sizeof(others) / sizeof(others[0]); o++) {
+            size_t n = mut_replace((uint8_t const *)recorded[i].head, len, "100-continue", others[o], out, sizeof(out));
+            if (n) {
+                CHECK(ota_parse_request((char const *)out, n, &req) == 417);
+            }
+        }
+    }
+}
+
+// The size field of the partition table line of name (one of the app slots), or 0 when it is not there
+static unsigned long slot_size(char const *csv, char const *name) {
+    size_t      nl = strlen(name);
+    char const *p  = csv;
+    for (; p && *p; p = strchr(p, '\n') ? strchr(p, '\n') + 1 : NULL) {
+        if (strncmp(p, name, nl) == 0 && p[nl] == ',') {
+            char const *f = p;
+            for (int field = 0; field < 4 && f; field++) {
+                f = strchr(f, ',');
+                f = f ? f + 1 : NULL;
+            }
+            return f ? strtoul(f, NULL, 0) : 0;
+        }
+    }
+    return 0;
+}
+
+static bool slots_match_limit(char const *csv) {
+    return slot_size(csv, "ota_0") == OTA_FIRMWARE_MAX && slot_size(csv, "ota_1") == OTA_FIRMWARE_MAX;
+}
+
+// #403: stream_erase clamps an erase to the slot, safe only while the firmware limit is the slot size. The firmware
+// build asserts it (_Static_assert in ota_server.c, sizes from the partition table); this checks the same table here.
+static void test_slot_size(void) {
+    static char csv[4096];
+    FILE       *f = fopen(OTA_PARTITIONS_CSV, "r");
+    CHECK(f != NULL);
+    if (!f) {
+        return;
+    }
+    size_t n = fread(csv, 1, sizeof(csv) - 1, f);
+    fclose(f);
+    csv[n] = '\0';
+    CHECK(slots_match_limit(csv));
+    // A table whose second slot shrank (or grew) no longer matches
+    static uint8_t out[4096];
+    size_t         m = mut_replace((uint8_t const *)csv, n, "0x420000, 0x400000", "0x420000, 0x3F0000", out, sizeof(out) - 1);
+    CHECK(m != 0);
+    out[m] = '\0';
+    CHECK(!slots_match_limit((char const *)out));
+}
+
 int main(void) {
     test_file_fits();
     test_token_kept();
@@ -563,6 +682,10 @@ int main(void) {
     test_mutate_helpers();
     test_mutations();
     test_status_reason();
+    test_request_line_reentrant();
+    test_blank_before_colon();
+    test_expect();
+    test_slot_size();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

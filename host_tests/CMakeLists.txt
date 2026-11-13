@@ -82,6 +82,7 @@ add_executable(ota_proto_test
 )
 
 target_include_directories(ota_proto_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota)
+target_compile_definitions(ota_proto_test PRIVATE OTA_PARTITIONS_CSV="${CMAKE_CURRENT_SOURCE_DIR}/../firmware/partitions.csv")
 
 target_compile_options(ota_proto_test PRIVATE
     -Wall

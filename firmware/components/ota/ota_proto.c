@@ -51,11 +51,28 @@ static bool parse_size(char const *value, size_t vlen, long long *out) {
     return true;
 }
 
+// The next space-separated word of *rest, cut off in place; NULL when none is left. Splits as strtok(" ") did (runs of
+// spaces count as one), but keeps its place in *rest instead of strtok's static state (#403): reentrant.
+static char *split_word(char **rest) {
+    char *word = *rest + strspn(*rest, " ");
+    if (*word == '\0') {
+        *rest = word;
+        return NULL;
+    }
+    char *end = word + strcspn(word, " ");
+    if (*end != '\0') {
+        *end++ = '\0';
+    }
+    *rest = end;
+    return word;
+}
+
 static int parse_request_line(char *line, ota_request_t *req) {
-    char *method  = strtok(line, " ");
-    char *target  = strtok(NULL, " ");
-    char *version = strtok(NULL, " ");
-    if (!method || !target || !version || strtok(NULL, " ") || strncmp(version, "HTTP/1.", 7) != 0) {
+    char *rest    = line;
+    char *method  = split_word(&rest);
+    char *target  = split_word(&rest);
+    char *version = split_word(&rest);
+    if (!method || !target || !version || split_word(&rest) || strncmp(version, "HTTP/1.", 7) != 0) {
         return 400;
     }
 
@@ -188,10 +205,11 @@ static int h_content_encoding(char *value, size_t vlen, ota_request_t *req) {
     return strcasecmp(value, "identity") == 0 ? 0 : 415;
 }
 
+// The only expectation HTTP/1.1 defines; any other is one the receiver cannot meet, so 417 rather than ignoring it (#403)
 static int h_expect(char *value, size_t vlen, ota_request_t *req) {
     (void)vlen;
     req->expect_continue = strcasecmp(value, "100-continue") == 0;
-    return 0;
+    return req->expect_continue ? 0 : 417;
 }
 
 // The headers the receiver reads; any other is ignored. Each may come once (#211): a second copy is refused rather
@@ -215,10 +233,11 @@ static struct {
 };
 _Static_assert(sizeof(headers) / sizeof(headers[0]) <= 32, "one bit of the seen mask per header");
 
-// Split "Name: value" in place into the name and the value without its surrounding blanks; false without a name
+// Split "Name: value" in place into the name and the value without its surrounding blanks; false without a name or
+// with a blank before the colon ("Name : value"), which HTTP/1.1 says to refuse rather than read as another name (#403)
 static bool split_header(char *line, char **name, char **value, size_t *vlen) {
     char *colon = strchr(line, ':');
-    if (!colon || colon == line) {
+    if (!colon || colon == line || colon[-1] == ' ' || colon[-1] == '\t') {
         return false;
     }
     *colon  = '\0';
@@ -308,6 +327,7 @@ char const *ota_status_reason(int status) {
         case 409: return "Conflict";
         case 411: return "Length Required";
         case 413: return "Content Too Large";
+        case 417: return "Expectation Failed";
         case 422: return "Unprocessable Content";
         case 503: return "Service Unavailable";
         case 507: return "Insufficient Storage";

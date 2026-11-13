@@ -829,6 +829,10 @@ static bool peek_body(int fd, uint8_t const **pre, size_t *pre_len, size_t want)
     return true;
 }
 
+// The clamp below keeps an erase inside the slot; it only hides nothing while no accepted piece ends past the slot,
+// i.e. while the firmware size limit is the slot size (#403; OTA_SLOT_SIZE comes from the partition table, CMakeLists)
+_Static_assert(FIRMWARE_MAX == OTA_SLOT_SIZE, "FIRMWARE_MAX must equal the app slot size in partitions.csv");
+
 static bool stream_erase(size_t offset, size_t len) {
     size_t end = ota_round_up(offset + len, 4096);
     if (end == 0 || end < offset) { // ota_round_up's overflow sentinel; pieces lie inside the slot, so never on the badge
