@@ -7,7 +7,7 @@ Plan, implement, test, review, bench and deliver seven epics through dependency-
 #216 platform and architecture, #262 memory and performance, #381 bench tooling, #392 MeshCore, #393 UI and apps, #394 hardware and power, #395 security.
 
 ## Phase
-- **Current:** Round 1 code RUNNING; bench sweep S1 waits on Lucas's go for OTA-1.
+- **Current (2026-11-13, evening):** Round 1 COMPLETED as code (merged, checked, pushed; bench open). Round 2 code RUNNING. Bench: OTA-1 done, tooling proofs done, the rest of sweep S1 is next.
 - Planning (phases A and B) finished 2026-11-13. Plans: `orchestration/plans/` (`consolidated.md` is the program plan: order, dependency graph, wave queue, bench schedule, decisions).
 
 ## Epic order
@@ -41,28 +41,39 @@ OTA-1 -> remote sweep S1 -> #208 + #211 merged -> OTA-2 + hands sitting H1 -> so
 
 Environment: default subagent model Sonnet, at most 6 concurrent, spawn depth 1.
 
-## Round 1 (code, started 2026-11-13)
-Merge order: #389 -> #368 -> #397 -> #211 -> #208. One reviewer each before merge.
+## Round 1 (code) COMPLETED 2026-11-13
+All merged on main one branch at a time (rebase, ff-only, full check, push), each with an independent review and a delta re-review of its fix commit. main = 4df31405.
+
+| Issue | Epic | Review | State |
+|---|---|---|---|
+| #389 delivery-state labels | #392 | Sonnet | merged; heard time is a follow-up (needs the outbox to record it, after #208); bench open |
+| #368 journal after SD format | #392 | Opus, 1 high fixed (truncation on a failed stat) | merged; `needs-proofing` |
+| #397 Settings Display split | #393 | Sonnet | merged; `needs-proofing` |
+| #211 OTA parsers + `host_tests/mutate.h` | #395 | Opus | merged; `needs-proofing`; follow-ups in #403 |
+| #208 split mesh_task.cpp | #216 | Opus | merged; NOT on the badge yet (goes with OTA-2) |
+
+## Round 2 (code, started 2026-11-13)
+Merge order: #212 -> #11 -> #298 (badge.sh last). Then, as slots free: mesh hygiene (E216-W1-B), misc #212/#213 (W1-E), #398, #400, the #389 heard time.
 
 | Issue | Epic | Slot | Branch | Agent / model | State |
 |---|---|---|---|---|---|
-| #389 delivery-state labels | #392 | wt-2 | `fix/389-delivery-state-labels` | impl-389 / Sonnet | RUNNING |
-| #368 journal after SD format | #392 | wt-4 | `fix/368-journal-after-sd-format` | impl-368 / Sonnet | RUNNING |
-| #211 OTA parsers + `mutate.h` | #395 | wt-5 | `refactor/211-ota-parsers` | impl-211 / Opus | RUNNING |
-| #208 split mesh_task.cpp | #216 | wt-6 | `refactor/208-split-mesh-task` | impl-208 / Opus | RUNNING |
-| #397 Settings Display split (P1) | #393 | next free slot | `refactor/397-settings-display-split` | Sonnet | READY, waits for a slot |
+| #212 LoRa, C6-link and mesh frames (not `lora_decode`) | #216 | wt-2 | `refactor/212-lora-c6link-frames` | impl-212c / Opus | RUNNING |
+| #298 deflate through pieces, short restart delay | #216 | wt-4 | `perf/298-ota-deflate-pieces` | impl-298 / Opus | RUNNING |
+| #11 I2C2, MAX17048 driver, battery service (gauge absent path) | #394 | wt-5 | `feat/11-battery-gauge-driver` | impl-11 / Opus | RUNNING |
 
 ## Slots
-- wt-1: still claimed by #374 (merged and pushed, not benched). Release with `agent-wt done wt-1` after the #374 bench.
-- wt-3: #322 `feat/322-refresh-50hz`, held until the #254 verdict.
+- Free: wt-1, wt-6. wt-3: #322 `feat/322-refresh-50hz`, held until the #254 verdict.
 
-## Bench queue (main only)
+## Bench log (main only)
 | Step | What | State |
 |---|---|---|
-| OTA-1 | current main to the badge (`ota-c6` first), then `fw dev on` over USB | NEEDS_LUCAS (go-ahead) |
-| S1 | combined remote sweep of all epics, order in `consolidated.md` section 5 | BLOCKED on OTA-1 |
-| OTA-2 + H1 | Round 1 image, re-proof, one hands sitting | PLANNED |
-| Soak | 36 h or more after H1, hourly DMA gate | NEEDS_LUCAS (slot) |
+| OTA-1 | fw-4bda782a (P4 only; C6 bundle unchanged) | DONE 2026-11-13: clean boot, C6 IDENT match, DMA free 156 KB / min 146.5 KB |
+| S1 tooling | #374 #376 #377 #378 #379 #391 remote steps | DONE: #378 and #376 closed; #374, #391 remote part passed, hands part `needs-lucas`; #377 partly; #379 waits for the retarget ok |
+| S1 rest | measurements, UI sweep, MeshCore chat block, mvp-bench remote sections (order in `consolidated.md` section 5) | NEXT |
+| OTA-2 + H1 | image with #208 and Round 2; re-proof; one hands sitting | PLANNED; H1 date NEEDS_LUCAS |
+| Soak | Lucas, 2026-11-13: no 36 h soak | CANCELLED; #256 #260 #261 #269 #121 and the #268 merge gate need a new proof (proposal: shorter passive run with an hourly DMA gate) |
+
+Bench facts: the badge ran fw-664dea27 before OTA-1. Developer mode is on (switch it back on over the USB console after any `fw dev off`). The home order is arranged: never confirm Settings > Display > Reset order.
 
 ## Epic dashboard
 | Epic | Open issues | Waves | Done | Active | Blocked on |
