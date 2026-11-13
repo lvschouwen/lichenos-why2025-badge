@@ -3,6 +3,7 @@
 // LoRa right. The unread count, Wi-Fi fan (#58) and LoRa label are polled once a second from the LVGL task (the
 // latter two through lichen_sys_*); the LoRa TX/RX chevrons from the packet counters every 100 ms (#29).
 #include "fonts.h"
+#include "fw_console.h"
 #include "lichen_radio.h"
 #include "lichen_sys_c6.h"
 #include "lichen_sys_net.h"
@@ -28,6 +29,8 @@ static lv_obj_t *c6_label; // only while the C6 is being recovered or gone (#14)
 static int32_t   c6_max_w; // the room left of the clock (#104): longer C6 text ends in "..."
 static lv_obj_t *hot_label; // "HOT" while the thermal watchdog warns (#10), left of the clock (#128)
 static int32_t   hot_room;  // what HOT takes from the C6 text's room while it shows
+static lv_obj_t *dev_label; // "DEV" while developer mode is on (#374), after HOT
+static int32_t   dev_room;  // what DEV takes from the C6 text's room while it shows
 static lv_obj_t *notify_box; // the unread dot and count (#62), hidden at 0
 static lv_obj_t *notify_dot;
 static lv_obj_t *notify_count;
@@ -215,7 +218,8 @@ static void show_c6(void) {
     }
     snprintf(text, sizeof(text), "C6: %s", state);
     // HOT sits before this label in the same room: its width comes off (every refresh, HOT comes and goes)
-    int32_t room = LV_MAX(c6_max_w - (lv_obj_is_hidden(hot_label) ? 0 : hot_room), 0);
+    int32_t room = LV_MAX(c6_max_w - (lv_obj_is_hidden(hot_label) ? 0 : hot_room) -
+                              (lv_obj_is_hidden(dev_label) ? 0 : dev_room), 0);
     lv_obj_set_width(c6_label, LV_MIN(text_width(text), room));
     if (strcmp(lv_label_get_text(c6_label), text) != 0) {
         lv_label_set_text(c6_label, text);
@@ -254,9 +258,15 @@ static void show_hot(void) {
     }
 }
 
+// Amber chip "DEV" while developer mode is on (#374): the word, not only the colour (R8)
+static void show_dev(void) {
+    lv_obj_set_hidden(dev_label, !console_dev_mode());
+}
+
 static void refresh(lv_timer_t *timer) {
     (void)timer;
     show_hot();
+    show_dev();
     show_notify();
     show_clock();
     show_c6();
@@ -350,6 +360,13 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     hot_label      = add_text(left, "HOT", THEME_AMBER);
     lv_obj_set_hidden(hot_label, true);
     hot_room       = text_width("HOT") + LEFT_GAP;
+    dev_label      = add_text(left, "DEV", THEME_BG);
+    lv_obj_set_style_bg_color(dev_label, lv_color_hex(THEME_AMBER), 0);
+    lv_obj_set_style_bg_opa(dev_label, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_hor(dev_label, 6, 0);
+    lv_obj_set_style_radius(dev_label, 4, 0);
+    lv_obj_set_hidden(dev_label, true);
+    dev_room       = text_width("DEV") + 12 + LEFT_GAP;
     c6_label       = add_text(left, "", THEME_AMBER);
     lv_label_set_long_mode(c6_label, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_hidden(c6_label, true);

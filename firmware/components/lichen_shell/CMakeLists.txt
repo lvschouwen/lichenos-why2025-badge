@@ -12,6 +12,7 @@
 # remote_ctl.c (remote_ctl_test.c, #190; ui_remote.c is "fw ui lock" and "fw ui open"),
 # shortcut.c (shortcut_test.c, #79; shortcuts.c runs the shape-key shortcuts it decides).
 # reg_row_text.c (reg_row_text_test.c, #332): the settings rows' applied / age / differs-from-saved text.
+# dev_tap.c (dev_tap_test.c, #374): the seven About taps that switch developer mode on.
 # dialog_remote_policy.c (dialog_remote_policy_test.c, #376): which dialogs a remote key may answer (#182).
 # app_battery.c is Settings > Battery (#10; the thermal watchdog and Lichen's own notices are lichen_os services, #281).
 # notify_ui.c and notify_centre.c are the notifications' toast, tile badges, cloud key, centre and settings page (#62).
@@ -63,6 +64,8 @@ idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_r
                             "factory_screen.c" "factory_combo.c"
                             "card_overlay.c" "app_files.c" "files_job.c" "files_ops.c" "files_model.c" "backup_screen.c"
                             "dialog_remote_policy.c" "remote_answer.c" "ui_answer.c"
+
+                            "dialog_remote_policy.c" "dev_tap.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api
                        PRIV_REQUIRES freertos fw_console heap esp_hw_support esp_app_format esp_timer app_update esp_system esp_mm)

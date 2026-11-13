@@ -3,14 +3,17 @@
 // storage, the SD card, uptime and the local clock. Up/Down scroll when it doesn't fit; the detail lines refresh once a second.
 #include "about_dev.h"
 #include "app_icons.h"
+#include "dev_tap.h"
 #include "esp_app_desc.h"
 #include "esp_timer.h"
 #include "fonts.h"
+#include "fw_console.h"
 #include "lichen_app.h"
 #include "lichen_reg.h"
 #include "lichen_sys_c6.h"
 #include "lichen_sys_clock.h"
 #include "lichen_sys_mem.h"
+#include "lichen_sys_notify.h"
 #include "lichen_sys_net.h"
 #include "lichen_sys_storage.h"
 #include "lichen_ui.h"
@@ -43,6 +46,15 @@ static struct {
 
 static lv_obj_t *value_label[ROW_DEV + DEV_N];
 
+// Developer mode (#374): the "For developers" block and the "Developer mode: on" row exist always and show only while
+// the mode is on, so a console `fw dev on` or off reaches an open page within a second. Seven Enter presses switch it
+// on (dev_tap.c); while on, Enter asks to switch it off.
+enum { DEVOBJ_MODE, DEVOBJ_HEAD, DEVOBJ_FIRST_ROW, DEVOBJ_N = DEVOBJ_FIRST_ROW + ROW_DEV + DEV_N - ROW_MEMORY };
+static lv_obj_t *dev_obj[DEVOBJ_N];
+static lv_obj_t *page;
+static dev_tap_t tap;
+static int       dev_shown = -1; // what the page last showed: 0 off, 1 on, -1 not yet
+
 static void fmt_uptime(char *out, size_t cap) {
     uint64_t s = (uint64_t)(esp_timer_get_time() / 1000000);
     if (s >= 86400) {
@@ -71,9 +83,26 @@ static void set_text(lv_obj_t *label, char const *text) {
     }
 }
 
+static void apply_dev(void) {
+    int on = console_dev_mode() ? 1 : 0;
+    if (on == dev_shown) {
+        return;
+    }
+    dev_shown = on;
+    for (size_t i = 0; i < DEVOBJ_N; i++) {
+        lv_obj_set_hidden(dev_obj[i], !on);
+    }
+    if (on) {
+        shell_page_hint(page, "Up/Down", "scroll", "Enter", "dev mode off", NULL);
+    } else {
+        shell_page_hint(page, "Up/Down", "scroll", NULL);
+    }
+}
+
 static void refresh(lv_timer_t *timer) {
     (void)timer;
     char text[96];
+    apply_dev();
 
     snprintf(text, sizeof(text), "%u KB internal " LV_SYMBOL_BULLET " %.1f MB PSRAM free",
              (unsigned)(lichen_sys_mem_free(LICHEN_SYS_MEM_INTERNAL) / 1024),
@@ -132,16 +161,54 @@ static void refresh(lv_timer_t *timer) {
     }
 }
 
+static void dev_off_answer(bool yes) {
+    if (!yes) {
+        return;
+    }
+    if (!console_dev_set(false)) {
+        lichen_sys_notify(LN_WARN, "Developer mode off, not saved", "It comes back after a restart.", 0);
+    }
+    dev_tap_reset(&tap);
+    if (page) {
+        apply_dev();
+    }
+}
+
+static void ask_dev_off(void) {
+    shell_dialog_t const d = {
+        .title         = "Switch developer mode off? The developer rows and commands go away.",
+        .seconds       = 20,
+        .careful       = true,
+        .confirm_label = "switch off",
+    };
+    shell_dialog_countdown(&d, dev_off_answer);
+}
+
+static void dev_enter(void) {
+    if (console_dev_mode()) {
+        ask_dev_off();
+    } else if (dev_tap(&tap, lv_tick_get())) {
+        bool saved = console_dev_set(true);
+        lichen_sys_notify(LN_INFO, "Developer mode on", saved ? "Switch it off in About." : "This boot only: not saved.", 0);
+        apply_dev();
+    }
+}
+
 static void on_key(lv_event_t *e) {
     uint32_t key = lv_event_get_key(e);
     if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
         shell_scroll_by(lv_event_get_target(e), key == LV_KEY_UP ? SCROLL_STEP : -SCROLL_STEP);
+    } else if (key == LV_KEY_ENTER) {
+        dev_enter();
     }
 }
 
 static void on_delete(lv_event_t *e) {
     lv_timer_delete(lv_event_get_user_data(e));
     memset(value_label, 0, sizeof(value_label));
+    memset(dev_obj, 0, sizeof(dev_obj));
+    page      = NULL;
+    dev_shown = -1;
 }
 
 static lv_obj_t *add_text(lv_obj_t *parent, char const *text, uint32_t color) {
@@ -165,7 +232,7 @@ static int32_t key_col_w(lv_obj_t *obj, char const *const *keys, size_t n) {
 }
 
 static lv_obj_t *add_row(lv_obj_t *parent, char const *key, char const *fixed) {
-    static char const *const KEYS[] = {"Version", "Memory", "Radio chip", "Wi-Fi", "LoRa", "Internal storage", "SD card", "Uptime", "Clock",
+    static char const *const KEYS[] = {"Version", "Memory", "Radio chip", "Wi-Fi", "LoRa", "Internal storage", "SD card", "Uptime", "Clock", "Developer mode",
                                            "PSRAM clock", "Display refresh", "Wi-Fi country", "LoRa power (dBm)", "Bluetooth",
                                            "Write failures", "Last write error", "C6 registry caps"};
     lv_obj_t *row = lv_obj_create(parent);
@@ -236,18 +303,25 @@ static void open_about(lv_obj_t *screen) {
     value_label[ROW_SD]      = add_row(screen, "SD card", NULL);
     value_label[ROW_UP]      = add_row(screen, "Uptime", NULL);
     value_label[ROW_CLOCK]   = add_row(screen, "Clock", NULL);
-    add_text(screen, "For developers", THEME_DIM);
+    page = screen;
+    dev_tap_reset(&tap);
+    dev_shown = -1;
+    dev_obj[DEVOBJ_MODE] = lv_obj_get_parent(add_row(screen, "Developer mode", "on"));
+    dev_obj[DEVOBJ_HEAD] = add_text(screen, "For developers", THEME_DIM);
     value_label[ROW_MEMORY]  = add_row(screen, "Memory", NULL);
     value_label[ROW_C6]      = add_row(screen, "Radio chip", NULL);
     for (size_t i = 0; i < DEV_N; i++) {
         value_label[ROW_DEV + i] = add_row(screen, DEV[i].label, NULL);
     }
+    for (size_t i = ROW_MEMORY; i < ROW_DEV + DEV_N; i++) {
+        dev_obj[DEVOBJ_FIRST_ROW + i - ROW_MEMORY] = lv_obj_get_parent(value_label[i]);
+    }
     // The last row ended flush on the pinned hint at the scroll end (#149): its own bottom pad is room that scrolls
     lv_obj_set_style_pad_bottom(lv_obj_get_parent(value_label[ROW_DEV + DEV_N - 1]), 12, 0);
+    lv_obj_set_style_pad_bottom(lv_obj_get_parent(value_label[ROW_CLOCK]), 12, 0); // the same while the block is hidden
 
     lv_timer_t *timer = lv_timer_create(refresh, 1000, NULL);
-    refresh(timer);
-    shell_page_hint(screen, "Up/Down", "scroll", NULL); // after the padding above: it keeps the room it needs
+    refresh(timer); // builds the hint too (apply_dev), after the padding above: it keeps the room it needs
     lv_obj_add_event_cb(screen, on_key, LV_EVENT_KEY, NULL);
     lv_obj_add_event_cb(screen, on_delete, LV_EVENT_DELETE, timer);
 }
