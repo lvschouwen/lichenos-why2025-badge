@@ -1,6 +1,7 @@
 // The list menu helper (#66): see menu.h
 #include "menu.h"
 
+#include "gate_mem.h"
 #include "lichen_ui.h"
 #include "lichen_ui_ops.h"
 #include "fonts.h"
@@ -11,8 +12,6 @@
 #include "esp_log.h"
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #define ROW_PAD_V   14
 #define ROW_PAD_H   20
@@ -29,7 +28,9 @@
 
 static char const TAG[] = "menu";
 
+// In PSRAM through gate_mem.h (#296), charged to whoever added the row: freed with owner, never lichen_ctx_self()
 typedef struct {
+    lichen_ctx_t owner;
     void (*on_enter)(void *);
     void (*on_change)(int, void *);
     void     *arg;
@@ -39,8 +40,7 @@ typedef struct {
     menu_kind_t kind;
     lv_obj_t   *chev;   // MENU_OPEN's mark, made when first needed
     lv_group_t *group;  // the group the row joined, to put an INFO row back
-    char       *danger_question; // MENU_DANGER's dialog
-    char       *danger_confirm;
+    gate_mem_pair_t danger; // MENU_DANGER's dialog: .a the question, .b the confirm label (each may be NULL)
 } row_t;
 
 static void apply_kind(lv_obj_t *r, row_t *row);
@@ -88,11 +88,11 @@ static void ask_danger(row_t *row) {
     danger.arg      = row->arg;
     danger.row      = row;
     shell_dialog_t d = {
-        .title         = row->danger_question ? row->danger_question : "Are you sure?",
+        .title         = row->danger.a ? row->danger.a : "Are you sure?",
         .hint          = NULL, // generated from confirm_label
         .seconds       = DANGER_SECS,
         .careful       = true,
-        .confirm_label = row->danger_confirm ? row->danger_confirm : "continue",
+        .confirm_label = row->danger.b ? row->danger.b : "continue",
         .cancel_label  = "cancel",
     };
     if (!shell_dialog_countdown(&d, danger_done)) {
@@ -117,6 +117,7 @@ typedef struct {
 } text_hook_t;
 
 typedef struct {
+    lichen_ctx_t owner; // who made the menu (gate_mem.h, #296)
     text_hook_t hook;
     lv_obj_t   *status; // menu_status_*: made by the first begin
     ui_status_t status_state;
@@ -226,13 +227,13 @@ static void on_key(lv_event_t *e) {
     }
 }
 
+// LVGL context, so lichen_ctx_self() is the OS here: each block goes back to the ctx it was charged to
 static void on_delete(lv_event_t *e) {
     row_t *row = lv_event_get_user_data(e);
     lichen_ui_ops_later_cancel(fire_enter, row);
     danger_drop(row);
-    free(row->danger_question);
-    free(row->danger_confirm);
-    free(row);
+    gate_mem_pair_clear(&row->danger);
+    gate_mem_free(row->owner, row);
 }
 
 // A menu with no selectable row (a page of only INFO rows: Radio health, a contact's Signal page) takes the focus
@@ -286,7 +287,7 @@ static void on_menu_delete(lv_event_t *e) {
     if (m->status_state.state == UI_STATUS_RUNNING) { // R5: a wait must end; say which one did not
         ESP_LOGW(TAG, "status \"%s\" began and never ended", m->status_state.verb);
     }
-    free(m);
+    gate_mem_free(m->owner, m); // LVGL context: the stored owner, as on_delete
 }
 
 static lv_obj_t *menu_base(lv_obj_t *parent) {
@@ -299,8 +300,10 @@ static lv_obj_t *menu_base(lv_obj_t *parent) {
     lv_obj_set_scrollbar_mode(menu, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(menu, LV_DIR_VER);
     shell_scroll_tame(menu); // it scrolls only when the rows don't fit (focus moves it), never past them
-    menu_t *m = calloc(1, sizeof(*m));
+    lichen_ctx_t owner = LICHEN_CTX_NONE;
+    menu_t      *m     = gate_mem_new(sizeof(*m), &owner);
     if (m) {
+        m->owner = owner;
         lv_obj_set_user_data(menu, m);
         lv_obj_add_event_cb(menu, on_menu_delete, LV_EVENT_DELETE, m);
         lv_obj_add_event_cb(menu, on_menu_key, LV_EVENT_KEY, NULL);
@@ -404,8 +407,18 @@ static lv_obj_t *add_row(lv_obj_t *menu, char const *label_text, char const *val
     return r;
 }
 
+// A zeroed row charged to the caller (gate_mem.h): NULL without room, before anything of the row exists
+static row_t *row_new(void) {
+    lichen_ctx_t owner = LICHEN_CTX_NONE;
+    row_t       *row   = gate_mem_new(sizeof(*row), &owner);
+    if (row) {
+        row->owner = owner;
+    }
+    return row;
+}
+
 static lv_obj_t *add_plain(lv_obj_t *menu, char const *label, char const *value, void (*on_enter)(void *), void *arg) {
-    row_t *row = calloc(1, sizeof(*row));
+    row_t *row = row_new();
     if (!row) {
         return NULL;
     }
@@ -422,7 +435,7 @@ lv_obj_t *menu_add(lv_obj_t *menu, char const *label, char const *value, void (*
 
 lv_obj_t *menu_add_slider(lv_obj_t *menu, char const *label, int min, int max, int value,
                           void (*on_change)(int, void *), void *arg) {
-    row_t *row = calloc(1, sizeof(*row));
+    row_t *row = row_new();
     if (!row) {
         return NULL;
     }
@@ -542,10 +555,12 @@ void menu_set_danger(lv_obj_t *row, char const *question, char const *confirm_la
     if (!r) {
         return;
     }
-    free(r->danger_question);
-    free(r->danger_confirm);
-    r->danger_question = question ? strdup(question) : NULL;
-    r->danger_confirm  = confirm_label ? strdup(confirm_label) : NULL;
+    // The new words are made before the old go. Without room the row asks the generic "Are you sure?" rather than
+    // keeping words that may name another action; it still asks (R3).
+    if (!gate_mem_pair_set(&r->danger, question, confirm_label)) {
+        ESP_LOGW(TAG, "no room for a danger row's words: it asks \"Are you sure?\"");
+        gate_mem_pair_clear(&r->danger);
+    }
     menu_set_kind(row, MENU_DANGER);
 }
 

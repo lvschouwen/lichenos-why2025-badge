@@ -551,6 +551,7 @@ static void start_nvs(boot_ctx_t *ctx) {
 
 static void start_early(boot_ctx_t *ctx) {
     (void)ctx;
+    lichen_sys_mem_start(); // the gate's widgets allocate through lichen_alloc (#296): before the boot screen
     haptics_start();     // the motor pin low and the setting read, before anything slow (#68)
     settings_apply_tz(); // before anything shows the clock
     clock_boot_init();   // the carried or the saved clock (#326), before anything stamps a time

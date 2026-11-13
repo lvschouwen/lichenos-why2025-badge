@@ -57,6 +57,19 @@ void lichen_sys_mem_walk(lichen_sys_mem_kind_t kind, lichen_sys_mem_walk_fn fn, 
 // Heap integrity check (true = sound, details are logged); slow, a diagnostic. Any task but an interrupt.
 bool lichen_sys_mem_check(lichen_sys_mem_kind_t kind);
 
+// The OS's lichen_alloc and lichen_free for the gate's own widgets (#296, gate_mem.h): the gate may not call lichen_os,
+// so lichen_os hands them over. ctx is a lichen_ctx_t (lichen_app.h).
+typedef struct {
+    void *(*alloc)(uint32_t ctx, size_t size, uint32_t flags);
+    void (*release)(uint32_t ctx, void *ptr);
+} lichen_sys_mem_ops_t;
+// The OS's table, or NULL to take it away (host tests only: a block made before must not outlive the table). ops must
+// outlive every call (a static const). Defined by the gate (gate_mem.c). Any task (an atomic store).
+void lichen_sys_mem_ops_set(lichen_sys_mem_ops_t const *ops);
+// main.c, the first boot step that can: hands lichen_alloc and lichen_free to the gate, before any screen exists. Until
+// then the gate's widgets get no memory. Any task.
+void lichen_sys_mem_start(void);
+
 #ifdef __cplusplus
 }
 #endif

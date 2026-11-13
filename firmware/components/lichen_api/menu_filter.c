@@ -1,18 +1,19 @@
 // Type-to-search on a menu (#32, #57): see menu_filter.h
 #include "menu_filter.h"
 
+#include "gate_mem.h"
 #include "list_filter.h"
 #include "menu.h"
 #include "lichen_ui.h"
 #include "theme.h"
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #define MAX_ROWS 128
 
+// In PSRAM through gate_mem.h (#296), charged to whoever made the filter
 struct menu_filter {
+    lichen_ctx_t         owner; // freed with it, never lichen_ctx_self(): the screen's delete runs as the OS
     lv_obj_t            *menu, *line, *none;
     lv_obj_t            *fallback;
     menu_filter_match_fn match;
@@ -118,14 +119,17 @@ static void on_search(void *arg) {
 }
 
 static void on_screen_delete(lv_event_t *e) {
-    free(lv_event_get_user_data(e));
+    menu_filter_t *f = lv_event_get_user_data(e);
+    gate_mem_free(f->owner, f);
 }
 
 menu_filter_t *menu_filter_create(lv_obj_t *screen, lv_obj_t *menu, menu_filter_match_fn match, void *ctx) {
-    menu_filter_t *f = calloc(1, sizeof(*f));
+    lichen_ctx_t   owner = LICHEN_CTX_NONE;
+    menu_filter_t *f     = gate_mem_new(sizeof(*f), &owner);
     if (!f) {
         return NULL;
     }
+    f->owner = owner;
     f->menu  = menu;
     f->match = match;
     f->ctx   = ctx;

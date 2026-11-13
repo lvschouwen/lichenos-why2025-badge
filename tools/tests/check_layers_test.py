@@ -350,7 +350,7 @@ class HardAndConf(unittest.TestCase):
         tools = os.path.dirname(cl.__file__)
         root = os.path.join(tools, "..")
         conf = cl.parse_conf(cl.read(os.path.join(tools, "layers.conf")))
-        external = {"strndup": "", "esp_partition_mmap": "esp_partition", "spi_flash_mmap": "spi_flash",
+        external = {"strndup": "", "strdup": "", "esp_partition_mmap": "esp_partition", "spi_flash_mmap": "spi_flash",
                     "esp_mmu_map": "esp_mm"}
         known = set(external)
         for base in ("firmware/components", "firmware/main", "shared"):

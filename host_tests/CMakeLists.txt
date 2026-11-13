@@ -2134,3 +2134,15 @@ target_include_directories(ui_ops_test PRIVATE
 )
 target_compile_options(ui_ops_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME ui_ops_test COMMAND ui_ops_test)
+
+# The gate's widgets allocate through the OS's lichen_alloc table, charged to the ctx that built them (#296)
+add_executable(gate_mem_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/gate_mem_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/gate_mem.c
+)
+target_include_directories(gate_mem_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs_lvgl
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
+)
+target_compile_options(gate_mem_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME gate_mem_test COMMAND gate_mem_test)

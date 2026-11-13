@@ -55,6 +55,11 @@ gate_app_id	-	unspecified	gate_app.h
 gate_app_settings_ns	-	unspecified	gate_app.h
 gate_app_source	-	unspecified	gate_app.h
 gate_batch_may_end	-	unspecified	gate_app.h
+gate_mem_free	-	any	gate_mem.h
+gate_mem_new	-	any	gate_mem.h
+gate_mem_pair_clear	-	any	gate_mem.h
+gate_mem_pair_set	-	any	gate_mem.h
+gate_mem_strdup	-	any	gate_mem.h
 hold_exit_event	-	unspecified	hold_exit.h
 hold_exit_percent	-	unspecified	hold_exit.h
 hold_exit_tick	-	unspecified	hold_exit.h
@@ -228,7 +233,9 @@ lichen_sys_mem_free	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_internal	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_largest	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_min	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_ops_set	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_stacks	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_start	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_total	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_walk	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_notify	SYSTEM	unspecified	lichen_sys_notify.h

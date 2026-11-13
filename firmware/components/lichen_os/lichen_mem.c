@@ -4,6 +4,7 @@
 // context (#230 E1b), checked before anything is booked: lock-free, no LVGL lock.
 #include "lichen_mem.h"
 #include "lichen_sys_app.h"
+#include "lichen_sys_mem.h"
 #include "gate_book.h"
 
 #include "dma_watch.h"
@@ -148,6 +149,13 @@ static void mem_report(void) {
         }
     }
     dma_watch_report();
+}
+
+// The gate's widgets allocate through these (gate_mem.c, #296): the gate may not link to lichen_os
+static lichen_sys_mem_ops_t const gate_ops = {.alloc = lichen_alloc, .release = lichen_free};
+
+void lichen_sys_mem_start(void) {
+    lichen_sys_mem_ops_set(&gate_ops);
 }
 
 void lichen_mem_console_register(void) {
