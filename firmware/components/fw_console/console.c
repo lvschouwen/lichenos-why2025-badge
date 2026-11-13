@@ -65,7 +65,10 @@ static SemaphoreHandle_t run_mutex;
 static SemaphoreHandle_t reply_mutex;
 static char              reply_line[CONSOLE_LINE_PREFIX_LEN + REPLY_MAX + 1];
 
-static void reply_emit(bool secret, console_route_t to, char *line, size_t cap, char const *fmt, va_list ap) {
+typedef enum { LINE_PUBLIC, LINE_SECRET, LINE_PRIVATE } line_kind_t;
+
+static void reply_emit(line_kind_t kind, console_route_t to, char *line, size_t cap, char const *fmt, va_list ap) {
+    bool   secret = kind == LINE_SECRET;
     size_t text_len;
     size_t n = console_line_fmt(line, cap, fmt, ap, &text_len);
     if (to.uart) {
@@ -85,37 +88,45 @@ static void reply_emit(bool secret, console_route_t to, char *line, size_t cap, 
             console_capture_add(&capture.out, text, text_len, secret);
         }
     }
-    if (secret) {
+    if (kind != LINE_PUBLIC) {
         secure_wipe(line, cap);
     }
 }
 
 // Where a line goes is console_route's decision (console_capture.c, host-tested): a secret line (#123) reaches only the
 // one who asked, never the tap (the log store is read over Wi-Fi and on the screen later). Its formatted copy is wiped.
-static void reply_v(bool secret, char const *fmt, va_list ap) {
-    console_route_t to = console_route(secret, capture.task && capture.task == xTaskGetCurrentTaskHandle());
+static void reply_v(line_kind_t kind, char const *fmt, va_list ap) {
+    bool            capturing = capture.task && capture.task == xTaskGetCurrentTaskHandle();
+    console_route_t to = kind == LINE_PRIVATE ? console_route_private(capturing) : console_route(kind == LINE_SECRET, capturing);
     if (reply_mutex && xSemaphoreTake(reply_mutex, pdMS_TO_TICKS(RUN_WAIT_MS)) == pdTRUE) {
-        reply_emit(secret, to, reply_line, sizeof(reply_line), fmt, ap);
+        reply_emit(kind, to, reply_line, sizeof(reply_line), fmt, ap);
         xSemaphoreGive(reply_mutex);
     } else {
         // Before the mutex exists or when it is held too long: a short line on the stack still leaves in one write
         char line[96];
         to.tap = to.capture = false;
-        reply_emit(secret, to, line, sizeof(line), fmt, ap);
+        reply_emit(kind, to, line, sizeof(line), fmt, ap);
     }
 }
 
 void console_reply(char const *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    reply_v(false, fmt, ap);
+    reply_v(LINE_PUBLIC, fmt, ap);
     va_end(ap);
 }
 
 void console_reply_secret(char const *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    reply_v(true, fmt, ap);
+    reply_v(LINE_SECRET, fmt, ap);
+    va_end(ap);
+}
+
+void console_reply_private(char const *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    reply_v(LINE_PRIVATE, fmt, ap);
     va_end(ap);
 }
 

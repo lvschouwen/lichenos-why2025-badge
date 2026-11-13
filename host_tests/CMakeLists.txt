@@ -2203,3 +2203,13 @@ target_include_directories(dev_mode_test PRIVATE
 )
 target_compile_options(dev_mode_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME dev_mode_test COMMAND dev_mode_test)
+
+# "fw sd cat" (#378): what it may read (roots, traversal, the deny list) and how it prints it
+add_executable(sd_path_policy_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/sd_path_policy_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard/sd_path_policy.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard/sd_cat_fmt.c
+)
+target_include_directories(sd_path_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/sdcard)
+target_compile_options(sd_path_policy_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME sd_path_policy_test COMMAND sd_path_policy_test)

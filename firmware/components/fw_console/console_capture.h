@@ -33,6 +33,9 @@ typedef struct {
 #define CONSOLE_SECRET_UART "(secret line)"
 // capturing: the calling task runs console_exec (the Wi-Fi console or the Console app), not a UART line
 console_route_t console_route(bool secret, bool capturing);
+// A private line (console_reply_private, #378: a file's contents) goes to whoever asked, whole, and never to the log
+// store: the UART, and the capture as an ordinary line (the Wi-Fi reply, the Console app's screen); the tap never
+console_route_t console_route_private(bool capturing);
 
 // Appends text (n bytes, no newline) and a '\n'. Output past cap is dropped with CONSOLE_CUT_NOTE (room for it is
 // always kept). A secret line is collected only when keep_secret; otherwise the note stands in for it.

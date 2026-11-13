@@ -1,4 +1,6 @@
-// "fw sd" (#60): status, mount, unmount, a small write/read test and the explicit format
+// "fw sd" (#60): status, mount, unmount, a small write/read test, the explicit format and "cat" (#378)
+#include "sd_cat_fmt.h"
+#include "sd_path_policy.h"
 #include "sdcard.h"
 
 #include "esp_heap_caps.h"
@@ -8,6 +10,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #define TEST_PATH  SD_LICHEN_DIR "/.sdtest"
@@ -95,6 +98,9 @@ static void test_read(test_state_t *t, uint8_t *buf) {
 
 // Write, fsync, read back and compare TEST_BYTES; the file is removed again. Holds the card's mutex throughout.
 static void cmd_test(void) {
+    if (!console_dev_gate("sd test")) {
+        return; // writes 64 KB to the card: a bench command (#378)
+    }
     if (!sd_begin(2000)) {
         console_reply("sd test: card not mounted (or busy)");
         return;
@@ -126,6 +132,97 @@ static void cmd_test(void) {
                   mb_per_s(TEST_BYTES, t1 - t0), mb_per_s(TEST_BYTES, t2 - t1));
 }
 
+// ---- cat (#378) ---------------------------------------------------------------------------------------------------
+
+// Reads up to a->len bytes at a->offset of a regular file into buf; *got the bytes read, *size the file's size. NULL
+// on success, else what went wrong (errno in *err). The caller holds the card for a path on /sd.
+static char const *cat_read(sd_cat_args_t const *a, uint8_t *buf, size_t *got, long *size, int *err) {
+    struct stat st;
+    if (stat(a->path, &st) != 0) {
+        *err = errno;
+        return "not found";
+    }
+    if (!S_ISREG(st.st_mode)) {
+        *err = 0;
+        return "not a regular file";
+    }
+    *size   = (long)st.st_size;
+    FILE *f = fopen(a->path, "rb");
+    if (!f) {
+        *err = errno;
+        return "can't open";
+    }
+    char const *why = NULL;
+    *got            = 0;
+    if (fseek(f, (long)a->offset, SEEK_SET) != 0) {
+        *err = errno;
+        why  = "can't seek";
+    } else {
+        *got = fread(buf, 1, a->len, f);
+        if (*got < a->len && ferror(f)) {
+            *err = errno ? errno : EIO;
+            why  = "read failed";
+        }
+    }
+    fclose(f);
+    return why;
+}
+
+// The bytes go out through console_reply_private: to whoever asked, never into the log store (GET /log)
+static void cat_print(sd_cat_args_t const *a, uint8_t const *buf, size_t got) {
+    char line[SD_CAT_LINE_CAP];
+    for (size_t i = 0; i < got;) {
+        size_t used = got - i < SD_CAT_HEX_ROW ? got - i : SD_CAT_HEX_ROW;
+        if (a->hex) {
+            sd_cat_hex_line(a->offset + (uint32_t)i, buf + i, used, line, sizeof(line));
+        } else {
+            sd_cat_text_line(buf + i, got - i, &used, line, sizeof(line));
+        }
+        console_reply_private("%s", line);
+        i += used;
+    }
+    memset(line, 0, sizeof(line));
+}
+
+static void cmd_cat(char const *args) {
+    if (!console_dev_gate("sd cat")) {
+        return;
+    }
+    sd_cat_args_t a;
+    if (!sd_cat_parse(args, &a)) {
+        console_reply("sd cat [-x] <path> [offset [len]] (len 1..%d, default %d)", SD_CAT_MAX, SD_CAT_DEFAULT);
+        return;
+    }
+    sd_path_verdict_t v = sd_path_check(a.path);
+    if (v != SD_PATH_OK) {
+        console_reply("sd cat: %s", sd_path_verdict_text(v)); // the path is not echoed: it may be long or odd
+        return;
+    }
+    bool on_card = strncmp(a.path, SD_BASE "/", sizeof(SD_BASE)) == 0;
+    if (on_card && !sd_begin(2000)) {
+        console_reply("sd cat: card not mounted (or busy)");
+        return;
+    }
+    uint8_t *buf = heap_caps_malloc(SD_CAT_MAX, MALLOC_CAP_SPIRAM);
+    size_t   got = 0;
+    long     size = 0;
+    int      err  = 0;
+    char const *why = buf ? cat_read(&a, buf, &got, &size, &err) : "out of memory";
+    if (on_card) {
+        sd_end(buf ? sd_io_from_errno(err) : SD_IO_NEUTRAL); // only a card error counts against the card
+    }
+    if (why) {
+        console_reply("sd cat: %s (errno %d)", why, err);
+    } else {
+        console_reply("sd cat: %u bytes at %lu of %ld", (unsigned)got, (unsigned long)a.offset, size);
+        cat_print(&a, buf, got);
+    }
+    if (buf) {
+        memset(buf, 0, SD_CAT_MAX);
+        heap_caps_free(buf);
+    }
+}
+
 static void cmd_format(char const *word) {
     if (!sd_format_confirmed(word)) {
         console_reply("sd format erases everything on the card: fw sd format " SD_FORMAT_CONFIRM);
@@ -136,27 +233,57 @@ static void cmd_format(char const *word) {
     reply_status();
 }
 
+static void sub_status(char const *rest) {
+    (void)rest;
+    reply_status();
+}
+
+static void sub_mount(char const *rest) {
+    (void)rest;
+    sd_mount();
+    reply_status();
+}
+
+static void sub_unmount(char const *rest) {
+    (void)rest;
+    sd_unmount();
+    reply_status();
+}
+
+static void sub_test(char const *rest) {
+    (void)rest;
+    cmd_test();
+}
+
+#define SD_USAGE "sd [status | mount | unmount | test | cat [-x] <path> [offset [len]] | format " SD_FORMAT_CONFIRM "]"
+
+// A table rather than an else-if chain (#378 pushed the chain past the nesting line). with_args: the word may be
+// followed by " ..." (cat, format), else it must stand alone.
+static struct {
+    char const *word;
+    bool        with_args;
+    void (*fn)(char const *rest);
+} const SUBS[] = {
+    {"", false, sub_status},       {"status", false, sub_status}, {"mount", false, sub_mount},
+    {"unmount", false, sub_unmount}, {"test", false, sub_test},     {"cat", true, cmd_cat},
+    {"format", true, cmd_format},
+};
+
 static void cmd_sd(char const *args) {
-    if (args[0] == '\0' || strcmp(args, "status") == 0) {
-        reply_status();
-    } else if (strcmp(args, "mount") == 0) {
-        sd_mount();
-        reply_status();
-    } else if (strcmp(args, "unmount") == 0) {
-        sd_unmount();
-        reply_status();
-    } else if (strcmp(args, "test") == 0) {
-        cmd_test();
-    } else if (strcmp(args, "format") == 0) {
-        cmd_format("");
-    } else if (strncmp(args, "format ", 7) == 0) {
-        cmd_format(args + 7);
-    } else {
-        console_reply("sd [status | mount | unmount | test | format " SD_FORMAT_CONFIRM "]");
+    for (size_t i = 0; i < sizeof(SUBS) / sizeof(SUBS[0]); i++) {
+        size_t n = strlen(SUBS[i].word);
+        if (strncmp(args, SUBS[i].word, n) != 0) {
+            continue;
+        }
+        char const *rest = args + n;
+        if (*rest == '\0' || (SUBS[i].with_args && n > 0 && *rest == ' ')) {
+            SUBS[i].fn(*rest ? rest + 1 : rest);
+            return;
+        }
     }
+    console_reply(SD_USAGE);
 }
 
 void sd_console_register(void) {
-    console_register("sd", "sd [status | mount | unmount | test | format " SD_FORMAT_CONFIRM "] (the SD card at /sd, #60)",
-                     cmd_sd);
+    console_register("sd", SD_USAGE " (the SD card at /sd, #60; test and cat need fw dev on)", cmd_sd);
 }

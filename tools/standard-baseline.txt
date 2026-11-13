@@ -39,7 +39,7 @@ params	firmware/components/lichen_shell/shot_blend.c:shot_blend_argb8888	10
 params	firmware/components/mesh/mesh_chat.c:mesh_conv_row	9
 params	firmware/components/mesh/mesh_hist.c:mesh_hist_compact	11
 params	firmware/components/mesh/radio_confirm.c:radio_confirm_needed	10
-size	<merged-strings>	270049
+size	<merged-strings>	270497
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libboard.a	11749
@@ -68,7 +68,7 @@ size	libesp_app_format.a	742
 size	libesp_common.a	1816
 size	libesp_driver_dma.a	16665
 size	libesp_driver_gpio.a	10656
-size	libesp_driver_i2c.a	15927
+size	libesp_driver_i2c.a	15935
 size	libesp_driver_ledc.a	6320
 size	libesp_driver_sd_intf.a	866
 size	libesp_driver_sdmmc.a	18051
@@ -116,7 +116,7 @@ size	libespressif__i2c_bus.a	3196
 size	libespressif__mdns.a	38881
 size	libfatfs.a	30649
 size	libfreertos.a	33118
-size	libfw_console.a	12278
+size	libfw_console.a	12438
 size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
@@ -141,7 +141,7 @@ size	liblvgl_port_lib.a	6122
 size	liblwip.a	109820
 size	libmain.a	5967
 size	libmbedtls.a	22
-size	libmesh.a	397773
+size	libmesh.a	397925
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18676
 size	libnvs_sec_provider.a	2
@@ -149,7 +149,7 @@ size	libota.a	73768
 size	libpsram_guard.a	25239
 size	libpthread.a	1229
 size	libriscv.a	1684
-size	libsdcard.a	7890
+size	libsdcard.a	10586
 size	libsdmmc.a	24355
 size	libsensors.a	29265
 size	libsoc.a	793

@@ -58,6 +58,10 @@ void console_reply(char const *fmt, ...) __attribute__((format(printf, 1, 2)));
 // "fw: (secret line)" on the UART), or the Wi-Fi console's reply (console_exec_with_secrets). It is never given to the tap (the log store), the Console app shows a note instead (console_exec), and the formatted copy is
 // wiped. A caller wipes its own copies of the secret after the call.
 void console_reply_secret(char const *fmt, ...) __attribute__((format(printf, 1, 2)));
+// Like console_reply for a line that is private but not secret (a file's contents, "fw sd cat", #378): whoever asked
+// sees it whole (the UART, the Wi-Fi console's reply, the Console app's screen), but it is never given to the tap, so it
+// never reaches the log store (GET /log, the log viewer). The formatted copy is wiped.
+void console_reply_private(char const *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 // Gets every console_reply line (without the "fw: " prefix) for the log store (#38). Set once at boot.
 void console_set_tap(void (*tap)(char const *text, size_t len));

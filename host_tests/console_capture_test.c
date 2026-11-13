@@ -80,6 +80,11 @@ static void route(void) {
     CHECK(pub.uart && pub.tap && pub.capture);
     pub = console_route(false, false);
     CHECK(pub.uart && pub.tap && !pub.capture);
+    // A private line (#378, a file's contents): whoever asked sees it, the log store never
+    console_route_t priv = console_route_private(true);
+    CHECK(priv.uart && !priv.tap && priv.capture);
+    priv = console_route_private(false);
+    CHECK(priv.uart && !priv.tap && !priv.capture);
 }
 
 static size_t fmt_line(char *out, size_t cap, size_t *tl, char const *fmt, ...) {
