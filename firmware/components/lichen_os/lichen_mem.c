@@ -8,6 +8,7 @@
 #include "gate_book.h"
 
 #include "dma_watch.h"
+#include "mem_window_watch.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_memory_utils.h"
@@ -160,5 +161,6 @@ void lichen_sys_mem_start(void) {
 
 void lichen_mem_console_register(void) {
     console_set_mem_report(mem_report);
-    dma_watch_start();
+    mem_window_watch_register();
+    dma_watch_start(); // its first sample also starts the mem window
 }

@@ -9,6 +9,7 @@
 #include "dma_watch.h"
 
 #include "dma_low.h"
+#include "mem_window_watch.h"
 #include "esp_attr.h"
 #include "esp_cpu.h"
 #include "esp_heap_caps.h"
@@ -92,6 +93,7 @@ static portMUX_TYPE dma_low_mux = portMUX_INITIALIZER_UNLOCKED;
 static void dma_watch(void *arg) {
     (void)arg;
     static uint32_t seen = UINT32_MAX; // the timer task only
+    mem_window_watch_sample(); // every tick, before the early return below (#410)
     // The window closes before the mark is read: an allocation in between counts towards the next one
     char     task[DMA_LOW_TASK_CAP];
     uint32_t taken = take_big(task);

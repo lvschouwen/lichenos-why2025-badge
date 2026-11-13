@@ -69,6 +69,9 @@ void console_set_tap(void (*tap)(char const *text, size_t len));
 // Adds lines to "fw mem" after the heaps: lichen_mem.c's per-app use (#181; fw_console cannot depend on lichen_api,
 // which uses it). Set once at boot.
 void console_set_mem_report(void (*report)(void));
+// Answers "fw mem window [...]" with the rest of the line (#410, lichen_os's mem_window_watch.c). Set once at boot;
+// unset (a release build), the subcommand says it is not in this build.
+void console_set_mem_window(void (*window)(char const *args));
 // Called at the start and the end of every command (UART and Wi-Fi): the remote key lock's timeout counts from the
 // last one (#190). Must be quick. Set once at boot.
 void console_set_activity(void (*activity)(void));
