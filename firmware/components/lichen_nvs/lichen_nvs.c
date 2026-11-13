@@ -51,6 +51,7 @@ static char const TAG[] = "nvs-enc";
 
 static nvs_boot_path_t s_path = NVS_BOOT_PATH_PLAIN;
 static int             s_boot = -1; // -1 not reported yet, 0 down, 1 up
+static bool            s_migrated;  // migrate() began erasing this boot
 
 // The only eFuse call on the boot path, in every build, and it only reads the purpose field
 static bool key_burned(void) {
@@ -59,6 +60,10 @@ static bool key_burned(void) {
 
 nvs_boot_path_t lichen_nvs_boot_path(void) {
     return s_path;
+}
+
+bool lichen_nvs_migrated(void) {
+    return s_migrated;
 }
 
 void lichen_nvs_boot_done(bool up) {
@@ -405,6 +410,7 @@ static esp_err_t migrate(nvs_sec_cfg_t const *cfg) {
         return nvs_flash_init(); // untouched, plain this boot
     }
     ESP_LOGI(TAG, "migrating %u plaintext entries into encrypted NVS", (unsigned)snap.n);
+    s_migrated = true;
     err = __real_nvs_flash_erase_partition(NVS_DEFAULT_PART_NAME);
     if (err == ESP_OK) {
         err = secure_init(cfg);

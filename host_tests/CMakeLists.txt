@@ -1301,6 +1301,15 @@ target_include_directories(lichen_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_options(lichen_settings_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME lichen_settings_test COMMAND lichen_settings_test)
 
+# The one-time move of plain secrets into the class (#288): injected failures, a power cut after every write and erase
+add_executable(app_secret_move_test ${CMAKE_CURRENT_SOURCE_DIR}/app_secret_move_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/app_secret_move.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c)
+target_include_directories(app_secret_move_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(app_secret_move_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME app_secret_move_test COMMAND app_secret_move_test)
+
 # lichen_task_start's bookkeeping and lichen_alloc's per-app accounting (#181)
 foreach(book task_book mem_book)
     add_executable(${book}_test

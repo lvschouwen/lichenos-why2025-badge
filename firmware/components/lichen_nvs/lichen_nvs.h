@@ -14,5 +14,9 @@ esp_err_t lichen_nvs_init(void);
 // to nvs_boot_next(), which never erases on the KEYED path.
 nvs_boot_path_t lichen_nvs_boot_path(void);
 
+// True when this boot migrated the partition to encrypted NVS (#116): no other settings migration may share the boot
+// (#288's move of the apps' secrets waits for the next one)
+bool lichen_nvs_migrated(void);
+
 // main.c tells the module how the boot ended up (for "fw nvs-enc"): NVS up, or down with nothing erased
 void lichen_nvs_boot_done(bool up);

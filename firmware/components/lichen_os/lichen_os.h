@@ -1,5 +1,7 @@
 #pragma once
 
+#include "app_secret_move.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -24,6 +26,14 @@ bool settings_set_blob(char const *key, void const *data, size_t size);
 // Hands the console developer mode's saved state (dev.mode, #373), which it reads once here. Call right after
 // factory_reset_boot_nvs(), so a factory reset pending at this boot is already done (main.c start_nvs).
 void settings_bind_dev_mode(void);
+
+// The one-time move of an app's plain secrets into its secrets class (#288, app_secret_move.h), in namespace a.<id>
+// for the declared prefix (NULL: nothing to do). main.c calls it for every registered app, once at boot after
+// factory_reset_boot_nvs() and before anything reads an app's settings. other_migration: another settings migration
+// ran this boot (lichen_nvs_migrated()), and two never share a boot: the move then waits for the next one. Logs
+// nothing; *count gets the numbers for main.c's one line.
+app_secret_move_t app_secrets_move_app(char const *id, char const *prefix, bool other_migration,
+                                       app_secret_move_count_t *count);
 
 // Hands lichen_net its store (#235): the SSIDs as plain settings, the Wi-Fi passwords as
 // secrets (settings_secret.h). Call once after NVS is up, before wifi_service_init().

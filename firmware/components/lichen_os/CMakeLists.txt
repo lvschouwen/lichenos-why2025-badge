@@ -40,7 +40,7 @@
 idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "app_slot.c"
                             "lichen_crashlog.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "gate_book.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
-                            "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "os_bind.c" "lichen_sys_pure_view.c" "lichen_sys_view.c"
+                            "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "app_secret_move.c" "app_secret_boot.c" "os_bind.c" "lichen_sys_pure_view.c" "lichen_sys_view.c"
                             "ui_call_queue.c" "ui_lock_owner.c" "ui_lock_hits.c" "ui_lock_check.c" "dma_low.c" "dma_watch.c" "mem_window.c" "mem_window_watch.c"
                             "thermal.c" "thermal_rules.c" "sys_notices.c" "sys_notice_rules.c" "lichen_sys_power.c"
                             "lichen_reg.c" "reg_cmd.c" "reg_proxy.c" "reg_p4_table.c" "reg_p4_psram.c" "reg_p4_display.c" "reg_p4_sensors.c" "reg_p4_misc.c" "reg_p4_settings.c" "settings_fail.c" "settings_reg.c" "reg_wifi.c" "disp_state.c" "disp_state_fmt.c" "../../../shared/reg/reg.c"

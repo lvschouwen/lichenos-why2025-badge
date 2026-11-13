@@ -518,6 +518,29 @@ static void declare_keep_keys(void) {
     }
 }
 
+// The apps' plain secrets into their secrets class (#288), once: one line with the counts, never a key or a value. Not
+// in a boot that migrated NVS to encrypted (#116): one settings migration per boot.
+static void move_app_secrets(void) {
+    unsigned moved = 0, failed = 0;
+    bool     ran = false, deferred = false;
+    for (size_t i = 0; i < lichen_app_count(); i++) {
+        lichen_app_t const     *app = lichen_app_at(i);
+        app_secret_move_count_t c;
+        app_secret_move_t       r = app_secrets_move_app(app->id, app->secret_prefix, lichen_nvs_migrated(), &c);
+        deferred                  = deferred || r == APP_SECRET_MOVE_DEFERRED;
+        ran                       = ran || r == APP_SECRET_MOVE_DONE || r == APP_SECRET_MOVE_PARTIAL;
+        moved += c.moved;
+        failed += c.failed;
+    }
+    if (deferred) {
+        ESP_LOGW(TAG, "app secrets not moved: NVS was migrated this boot (the next boot moves them)");
+    }
+    if (ran) {
+        ESP_LOGI(TAG, "app secrets: %u moved into the secrets class, %u not moved (the next boot tries again)", moved,
+                 failed);
+    }
+}
+
 // #353: the crash of a settled 120 MHz session went to the crash log (a failed write is logged at W there: the notice,
 // which the restart saves, is then its trace) and its notice is raised: the re-arm may restart now
 static bool crash_told(void) {
@@ -539,6 +562,7 @@ static void start_nvs(boot_ctx_t *ctx) {
     meshcore_app_register(); // first in home's order; its keep list is needed by the reset
     declare_keep_keys();
     factory_reset_boot_nvs(); // a pending factory reset (#66): before anything reads a setting
+    move_app_secrets();       // #288, once: after the reset, before any app reads a setting
     settings_bind_dev_mode(); // reads dev.mode (#373): after the reset, which erases it
     // #121, #353: the 80/120 MHz record: bad bytes in the boot check at 120 fall back to 80, a wanted 120 arms and
     // restarts once (not while the image is on trial, #285: ota answers that; not after a crash, which crash.c's core
