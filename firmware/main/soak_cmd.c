@@ -2,8 +2,9 @@
 // Rules for each read: no allocation, no flash or file I/O, no lock held across a reply. A value another task owns
 // comes through that task's getter (a copy under its spinlock, an atomic, or a cache the owner refreshes); a value
 // that cannot be read now stays SOAK_NA. The one wait is MeshCore's lock, bounded by MESH_WAIT_MS.
-// Cost of one read: three heap walks for the largest blocks (heap_caps_get_largest_free_block, as fw mem), the
-// mesh lock for a few loads, and short spinlock copies; no NVS, no /storage, no SD, no message to the C6.
+// Cost of one read: four heap walks for the largest blocks (internal, DMA, PSRAM and LP RAM, each under that heap's
+// lock, as fw mem), the mesh lock for a few loads, and short spinlock copies; no NVS, no /storage, no SD, no message
+// to the C6. Fine for a sample every few minutes (the soak takes one every 10), not every second.
 #include "soak_cmd.h"
 
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
@@ -208,7 +209,7 @@ static void read_power_and_keys(soak_t *s) {
 static void cmd_soak(char const *args) {
     if (*args) {
         console_reply("soak (one snapshot in key=value lines soak1..soak%d, numbers and words only; -1 or na: not "
-                      "readable now)",
+                      "readable now; meant for a sample every few minutes)",
                       SOAK_LINES);
         return;
     }
@@ -231,7 +232,7 @@ static void cmd_soak(char const *args) {
 
 void soak_cmd_register(void) {
     console_register_dev("soak", "soak (the badge's state in key=value lines for an unattended sampler, #409; no names "
-                                 "or addresses)",
+                                 "or addresses; meant for a sample every few minutes)",
                          cmd_soak);
 }
 #endif

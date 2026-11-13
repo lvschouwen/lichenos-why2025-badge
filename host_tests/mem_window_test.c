@@ -128,6 +128,23 @@ static void format_and_cap(void) {
     CHECK(strcmp(small, "mem window ") == 0);
 }
 
+// The heaps apart (#410 review): only DMA reaches a new since-boot low after the reset, so only its window is exact;
+// internal dips above its since-boot low and PSRAM stays put (its window is still its free figure at the reset)
+static void heaps_apart(void) {
+    mem_window_t     w = {0};
+    mem_window_fig_t f[MEM_WINDOW_HEAPS] = {{1000, 900}, {5000, 4000}, {30000, 29000}};
+    mem_window_reset(&w, f, 0);
+    f[MEM_WINDOW_INTERNAL] = (mem_window_fig_t){950, 900};   // above its boot low: not exact
+    f[MEM_WINDOW_DMA]      = (mem_window_fig_t){3900, 3800}; // a new boot low after the reset: exact
+    sample(&w, f, 250);
+    f[MEM_WINDOW_INTERNAL] = (mem_window_fig_t){990, 900};
+    f[MEM_WINDOW_DMA]      = (mem_window_fig_t){4500, 3800};
+    sample(&w, f, 500);
+    CHECK(strcmp(at(&w, MEM_WINDOW_INTERNAL, 500), "mem window internal min 950 age_ms 500 boot_min 900 resets 0 exact 0 sample_ms 250") == 0);
+    CHECK(strcmp(at(&w, MEM_WINDOW_DMA, 500), "mem window dma min 3800 age_ms 500 boot_min 3800 resets 0 exact 1 sample_ms 250") == 0);
+    CHECK(strcmp(at(&w, MEM_WINDOW_PSRAM, 500), "mem window psram min 30000 age_ms 500 boot_min 29000 resets 0 exact 0 sample_ms 250") == 0);
+}
+
 int main(void) {
     not_started();
     tracks_the_minimum();
@@ -135,6 +152,7 @@ int main(void) {
     stale_sample_dropped();
     age_wraps();
     format_and_cap();
+    heaps_apart();
     if (failures) {
         printf("mem_window_test: %d failure(s)\n", failures);
         return 1;

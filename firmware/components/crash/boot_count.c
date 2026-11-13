@@ -2,8 +2,11 @@
 // "fw soak" lines even when the uptime alone would not show it (a reboot between two samples that ran longer than
 // the gap). Why NVS and not RTC no-init or LP RAM: those survive a software restart but not every reset (a power cut,
 // the CH340 EN reset, a brownout, #330), and a counter a reset loses would go back or stall exactly when the sampler
-// needs it. NVS survives all of them; factory_plan.c keeps the key through a factory reset, so only erasing the nvs
-// partition itself (a full flash erase) starts it again at 1.
+// needs it. NVS survives all of them, and factory_plan.c keeps the key through a factory reset. It starts again at 1
+// whenever the nvs partition itself is erased: the boot-time erase-and-retry of an NVS with a broken layout (main.c
+// nvs_boot), a full flash erase, a rollback from an image with encrypted settings to one without the guard, and a
+// power cut inside the #116 migration's erase window (the migration itself keeps it). soak_line.h says how a sampler
+// reads that: a lower boot counts as a reboot.
 // Cost: one small NVS write per boot, from crash_check_early, before the display starts: a flash write then stalls
 // nothing on the glass (#31), and nothing writes it again until the next boot.
 #include "crash.h"

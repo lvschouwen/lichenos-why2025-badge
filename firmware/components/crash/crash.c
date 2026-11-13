@@ -463,7 +463,10 @@ void crash_check_early(void) {
     crash_log_lock(); // creates the lock before any other task can want it
     crash_log_unlock();
     console_register("crash", "crash [dump | clear | test panic|wdt] (crash log and core dump)", crash_command);
-    boot_count_bump(); // first, before anything this boot can fail (#409)
+    // #409: here, the first thing crash_check_early does, which runs in START_EARLY after NVS (and its factory reset
+    // and PSRAM speed check, which may restart once on purpose), memory start, haptics and the clock. A boot that dies
+    // before this is not counted: the sampler sees it as up falling, and the serial log has it.
+    boot_count_bump();
     count_cache_load();
     esp_reset_reason_t const why = esp_reset_reason();
     s_reset_reason               = (int)why;

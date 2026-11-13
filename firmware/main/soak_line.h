@@ -7,10 +7,20 @@
 // - SOAK_LINES lines, "soak1 ..." to "soak3 ...". Each starts with its name, then v (SOAK_FORMAT), boot and up, so a
 //   line read on its own says which boot and moment it belongs to; the keys of one "fw soak" come from one snapshot.
 // - Keys are separated by single spaces and never change order. A new key is appended to the last line; when that
-//   line would not fit, a new line soak4 starts. Removing or reordering a key bumps SOAK_FORMAT.
+//   line would not fit, a new line soak4 starts. Removing or reordering a key bumps SOAK_FORMAT. soak3 has 11
+//   characters left at its ceilings: room for the Wi-Fi disconnect count (its own issue) and no more.
 // - A number that cannot be read now is SOAK_NA (-1), an enum that cannot be read is "na"; wdbm (Wi-Fi signal) is 0
 //   when there is no reading (a real one is below 0). A number above its key's ceiling prints the ceiling.
 // - Every line, at every key's ceiling, fits SOAK_LINE_MAX: the console's reply limit (console.c REPLY_MAX).
+// - Reboots: a boot higher than the last sample's is a reboot. boot=-1 means the counter is unknown this boot, not a
+//   change. A boot LOWER than the last sample's (or an up lower than the last one) means the counter's storage was
+//   restarted, which counts as a reboot too: NVS is erased and the count starts again at 1 after the boot-time
+//   erase-and-retry of an NVS with a broken layout (main.c nvs_boot), a full flash erase, and a rollback from an
+//   image with encrypted settings to one without the guard; the #116 migration keeps it, except for a power cut
+//   inside its erase window.
+// - Crashes: rst=wdt rstcrash=0 is what a power cycle, an EN reset through the USB adapter and a watchdog reset
+//   without a core dump all print on this board. Count crashes from rstcrash and boot (with crash), never from rst
+//   alone.
 // Pure (no ESP-IDF headers): the glue that reads the values is soak_cmd.c.
 
 #include <stdbool.h>

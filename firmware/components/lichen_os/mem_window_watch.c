@@ -72,7 +72,7 @@ static void cmd_window(char const *args) {
     }
     mem_window_t snap = win; // printed after the critical section: no lock across a reply
     portEXIT_CRITICAL(&win_mux);
-    char line[112];
+    char line[128]; // the longest line, every figure at 10 digits, is 112 characters and its NUL
     for (unsigned i = 0; i < MEM_WINDOW_HEAPS; i++) {
         if (mem_window_line(&snap, i, at, line, sizeof(line))) {
             console_reply("%s", line);
