@@ -1,5 +1,7 @@
 #include "app_ctx.h"
 
+#include "gate_app.h"
+
 #include <string.h>
 
 static uint32_t gen_of(uint32_t draw) {
@@ -29,6 +31,21 @@ uint32_t app_ctx_add(app_ctx_table_t *t, void const *owner, uint32_t draw) {
     t->gen[slot]   = gen_of(draw);
     t->apps++;
     return make_ctx(slot, t->gen[slot]);
+}
+
+uint32_t app_ctx_add_app(app_ctx_table_t *t, void const *owner, uint32_t draw, app_ctx_names_fn names, char const **why) {
+    char const *taken[2 * (APP_CTX_SLOTS - 1)];
+    size_t      n = 0;
+    for (size_t i = 0; i < t->apps; i++) {
+        names(t->owner[i + 1], &taken[n], &taken[n + 1]);
+        n += 2;
+    }
+    char const *id = NULL, *alias = NULL;
+    if (owner) {
+        names(owner, &id, &alias);
+    }
+    *why = owner ? gate_app_names_refusal(id, alias, taken, n) : NULL;
+    return *why ? APP_CTX_NONE : app_ctx_add(t, owner, draw);
 }
 
 uint32_t app_ctx_os(app_ctx_table_t const *t) {

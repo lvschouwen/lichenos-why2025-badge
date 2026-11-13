@@ -29,7 +29,8 @@ to `layers.conf`):
 
 - `lichen_app.h`: register the app (`lichen_register_app`); `id` (a-z 0-9 _, at most 13) names its settings and
   directories; the hooks (`open`, `start_background`, `stop_for_update`, `first_run_set`...) are how the OS calls it.
-  An id or alias another app already has, or one the OS keeps ("lichen", "test", "c6", "crash"), is refused: the app is
+  An app without an id, an alias equal to its own id, an id or alias another app already has, or one the OS keeps
+  ("lichen", "test", "c6", "crash") is refused: the app is
   skipped with an error in the log and gets `LICHEN_CTX_NONE` (#340). The app table itself is the OS's: an app knows
   only its own context, never another app's struct.
   An app's `*_register()` runs on the main task during boot, not on the LVGL task: it makes no LVGL objects or timers

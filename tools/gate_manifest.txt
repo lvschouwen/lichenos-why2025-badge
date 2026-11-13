@@ -5,6 +5,7 @@
 # thread: any, lvgl (LVGL task only), not-lvgl, unspecified (the header comment does not say; fix the comment,
 # then the entry).
 app_ctx_add	-	unspecified	app_ctx.h
+app_ctx_add_app	-	unspecified	app_ctx.h
 app_ctx_app_at	-	unspecified	app_ctx.h
 app_ctx_apps	-	unspecified	app_ctx.h
 app_ctx_at	-	unspecified	app_ctx.h

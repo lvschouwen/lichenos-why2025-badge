@@ -37,6 +37,12 @@ bool app_ctx_ready(app_ctx_table_t const *t);
 // Takes the next slot for owner (not NULL) with a generation from draw. Returns its ctx, APP_CTX_NONE when the table
 // is full or not set up.
 uint32_t app_ctx_add(app_ctx_table_t *t, void const *owner, uint32_t draw);
+// An owner's id and alias (either may come back NULL), for app_ctx_add_app
+typedef void (*app_ctx_names_fn)(void const *owner, char const **id, char const **alias);
+// As app_ctx_add, for an app (#340): refused, the table untouched and *why set (gate_app_names_refusal's reason), when
+// its id or alias is no usable name or one an app already registered has as its id or alias. APP_CTX_NONE with *why
+// NULL: the table is full or not set up.
+uint32_t app_ctx_add_app(app_ctx_table_t *t, void const *owner, uint32_t draw, app_ctx_names_fn names, char const **why);
 
 uint32_t    app_ctx_os(app_ctx_table_t const *t); // APP_CTX_NONE before app_ctx_init
 size_t      app_ctx_apps(app_ctx_table_t const *t);

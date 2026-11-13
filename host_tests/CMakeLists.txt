@@ -1661,6 +1661,9 @@ add_test(NAME app_slot_test COMMAND app_slot_test)
 add_executable(app_ctx_test
     ${CMAKE_CURRENT_SOURCE_DIR}/app_ctx_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ctx.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/gate_app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/fs_path.c
 )
 target_include_directories(app_ctx_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(app_ctx_test PRIVATE -Wall -Wextra -Werror)

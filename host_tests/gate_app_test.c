@@ -124,7 +124,9 @@ static void test_names_refusal(void) {
     size_t const      n       = sizeof(taken) / sizeof(taken[0]);
     CHECK(gate_app_names_refusal("weather", NULL, taken, n) == NULL);
     CHECK(gate_app_names_refusal("weather", "wx", taken, n) == NULL);
-    CHECK(gate_app_names_refusal(NULL, NULL, taken, n) == NULL);       // an app without an id: the gate gives it NO_ID
+    CHECK(gate_app_names_refusal(NULL, NULL, taken, n) != NULL); // no id: the shell lists and finds apps by it
+    CHECK(gate_app_names_refusal(NULL, "wx", NULL, 0) != NULL);
+    CHECK(gate_app_names_refusal("weather", "weather", NULL, 0) != NULL); // an alias that is its own id
     CHECK(gate_app_names_refusal("meshcore", NULL, taken, n) != NULL); // a registered id
     CHECK(gate_app_names_refusal("mesh", NULL, taken, n) != NULL);     // a registered alias as an id
     CHECK(gate_app_names_refusal("weather", "clock", taken, n) != NULL);
@@ -136,6 +138,7 @@ static void test_names_refusal(void) {
     }
     CHECK(gate_app_names_refusal("", NULL, NULL, 0) != NULL);
     CHECK(gate_app_names_refusal("Not Valid!", NULL, NULL, 0) != NULL);
+    CHECK(gate_app_names_refusal("Not Valid!", NULL, NULL, 0) != gate_app_names_refusal(NULL, NULL, NULL, 0));
     CHECK(gate_app_names_refusal("weather", "", NULL, 0) != NULL);
     CHECK(gate_app_names_refusal("first", NULL, NULL, 0) == NULL); // the first app: nothing taken yet
 }

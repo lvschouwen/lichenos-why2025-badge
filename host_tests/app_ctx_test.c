@@ -194,7 +194,7 @@ static void test_task_inherit(void) {
     CHECK(app_ctx_for_task(&t, &tls, &app_b, NULL) == b);
     s_slot = a; // an app's task (or hook) starts one
     CHECK(app_ctx_for_task(&t, &tls, NULL, NULL) == a);   // NULL inherits the app
-    CHECK(app_ctx_for_task(&t, &tls, &app_b, NULL) == b); // a named owner wins (the compat shim, until E1e)
+    CHECK(app_ctx_for_task(&t, &tls, &app_b, NULL) == b); // a named owner wins (lichen_task_start with an app)
     CHECK(app_ctx_for_task(&t, &tls, &app_c, &unregistered) == os && unregistered); // never registered: the OS
     s_slot = 0;
 }
@@ -271,7 +271,42 @@ static void test_trampoline_sets_and_nests(void) {
     s_saved = 0;
 }
 
+// #340: an app's id and alias against every earlier app's id and alias; a refused app takes no slot
+typedef struct {
+    char const *id;
+    char const *alias;
+} fake_app_t;
+
+static void fake_names(void const *owner, char const **id, char const **alias) {
+    fake_app_t const *app = owner;
+    *id                   = app->id;
+    *alias                = app->alias;
+}
+
+static void test_add_app_refuses_taken_names(void) {
+    static fake_app_t const mesh = {"meshcore", "mesh"}, clock = {"clock", NULL}, by_id = {"meshcore", NULL},
+                            by_alias = {"mesh", NULL}, alias_clash = {"weather", "clock"}, mine = {"weather", "wx"},
+                            no_id = {NULL, NULL}, os_id = {"lichen", NULL};
+    app_ctx_table_t t;
+    app_ctx_init(&t, 0x123456u);
+    char const *why = "x";
+    CHECK(app_ctx_add_app(&t, &mesh, 0x11u, fake_names, &why) != APP_CTX_NONE && why == NULL);
+    CHECK(app_ctx_add_app(&t, &clock, 0x22u, fake_names, &why) != APP_CTX_NONE && why == NULL);
+    fake_app_t const *refused[] = {&by_id, &by_alias, &alias_clash, &no_id, &os_id};
+    for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); i++) {
+        why = NULL;
+        CHECK(app_ctx_add_app(&t, refused[i], 0x33u, fake_names, &why) == APP_CTX_NONE && why != NULL);
+        CHECK(app_ctx_apps(&t) == 2 && app_ctx_of(&t, refused[i]) == APP_CTX_NONE); // the table is untouched
+    }
+    uint32_t w = app_ctx_add_app(&t, &mine, 0x44u, fake_names, &why);
+    CHECK(w != APP_CTX_NONE && why == NULL && app_ctx_apps(&t) == 3 && app_ctx_app_at(&t, 2) == &mine);
+    CHECK((w & 0xffu) == 3u); // the next slot: the refused apps took none
+    why = "x";
+    CHECK(app_ctx_add_app(&t, NULL, 0x55u, fake_names, &why) == APP_CTX_NONE && why == NULL);
+}
+
 int main(void) {
+    test_add_app_refuses_taken_names();
     test_register();
     test_zero_draw_never_gives_ctx_zero();
     test_not_ready();

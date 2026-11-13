@@ -67,11 +67,14 @@ static bool name_taken(char const *name, char const *const *taken, size_t n) {
 }
 
 char const *gate_app_names_refusal(char const *id, char const *alias, char const *const *taken, size_t n) {
-    if (id && !id_usable(id)) {
-        return "the id is reserved for the OS or not an app id";
+    if (!id_usable(id)) {
+        return id && id[0] ? "the id is reserved for the OS or not an app id" : "it has no id";
     }
     if (alias && !id_usable(alias)) {
         return "the alias is reserved for the OS or not an app id";
+    }
+    if (alias && strcmp(alias, id) == 0) {
+        return "the alias is its own id";
     }
     if (name_taken(id, taken, n)) {
         return "another app has the id";

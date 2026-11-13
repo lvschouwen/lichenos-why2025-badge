@@ -9,7 +9,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "fw_console.h"
-#include "gate_app.h"
 #include "lichen_random.h"
 
 #include <stdint.h>
@@ -55,16 +54,10 @@ static void register_backup_keys(lichen_app_t const *app) {
     }
 }
 
-// Why app may not join the table (gate_app_names_refusal over every registered id and alias), NULL when it may
-static char const *names_refusal(app_ctx_table_t const *t, lichen_app_t const *app) {
-    char const *taken[2 * LICHEN_MAX_APPS];
-    size_t      n = 0;
-    for (size_t i = 0; i < app_ctx_apps(t) && n + 2 <= sizeof(taken) / sizeof(taken[0]); i++) {
-        lichen_app_t const *other = app_ctx_app_at(t, i);
-        taken[n++]                = other->id;
-        taken[n++]                = other->alias;
-    }
-    return gate_app_names_refusal(app->id, app->alias, taken, n);
+static void app_names(void const *owner, char const **id, char const **alias) {
+    lichen_app_t const *app = owner;
+    *id                     = app->id;
+    *alias                  = app->alias;
 }
 
 lichen_ctx_t lichen_register_app(lichen_app_t const *app) {
@@ -75,14 +68,12 @@ lichen_ctx_t lichen_register_app(lichen_app_t const *app) {
     }
     // Two apps sharing an id would share a settings namespace, a directory and a notification source (#340): the
     // second is skipped, never an abort, so the badge still boots with the others
-    char const *refusal = names_refusal(t, app);
+    char const  *refusal = NULL;
+    lichen_ctx_t ctx     = app_ctx_add_app(t, app, lichen_random_u32(), app_names, &refusal);
     if (refusal) {
         ESP_LOGE(TAG, "app %s (id %s, alias %s) not registered: %s", app->name ? app->name : "?",
                  app->id ? app->id : "-", app->alias ? app->alias : "-", refusal);
-        return LICHEN_CTX_NONE;
-    }
-    lichen_ctx_t ctx = app_ctx_add(t, app, lichen_random_u32());
-    if (ctx == LICHEN_CTX_NONE) {
+    } else if (ctx == LICHEN_CTX_NONE) {
         ESP_LOGE(TAG, "no room for app %s: LICHEN_MAX_APPS (%d) apps are registered already", app->name,
                  LICHEN_MAX_APPS);
     } else if (app->backup_keys) {
