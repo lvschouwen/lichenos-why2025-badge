@@ -4,6 +4,7 @@
 #include "channel_input.h"
 #include "mesh_prefs.h"
 #include "SPIFFS.h"
+#include "mesh_onair_run.h"
 #include "mesh_wipe.h"
 
 #include <math.h>
@@ -302,6 +303,10 @@ static_assert(MESH_CHSCOPE_MAX >= MAX_GROUP_CHANNELS, "a scope of its own for ev
 
 static void channel_scope_id(uint8_t const secret[PUB_KEY_SIZE], uint8_t id[MESH_CHSCOPE_ID]) {
     mesh::Utils::sha256(id, MESH_CHSCOPE_ID, secret, PUB_KEY_SIZE);
+}
+
+void channel_key_id(uint8_t const secret[PUB_KEY_SIZE], uint8_t id[ONAIR_KEY_ID]) {
+    mesh::Utils::sha256(id, ONAIR_KEY_ID, secret, PUB_KEY_SIZE);
 }
 
 // The table to its file: through scope_file_write; an empty table removes the file
@@ -612,12 +617,36 @@ static int channel_slot(MyMesh *mesh, char const *name) {
     return -1;
 }
 
+// #289: a console line's message is checked against the on-air allow list again when its frame is built (retries
+// too): a channel by the key of the slot its name resolves to now, so a channel re-created or renamed under a listed
+// name with another key is not the listed one; a DM by its prefix. Under the mesh lock; nothing read while it is off.
+static bool onair_frame_ok(MyMesh *mesh, ob_action_t const &act, int slot) {
+    if (!act.console || act.kind == OB_ACT_RESET_PATH || !mesh_onair_on()) {
+        return true;
+    }
+    if (act.kind == OB_ACT_SEND_DM) {
+        return mesh_onair_refusal(true, ONAIR_TX_CONTACT, NULL, NULL, act.prefix) == NULL;
+    }
+    ChannelDetails d;
+    uint8_t        id[ONAIR_KEY_ID];
+    bool           have = slot >= 0 && mesh->getChannel(slot, d) && d.name[0];
+    if (have) {
+        channel_key_id(d.channel.secret, id);
+    }
+    bool ok = have && mesh_onair_refusal(true, ONAIR_TX_CHANNEL, d.name, id, NULL) == NULL;
+    mesh_wipe(&d, sizeof(d)); // the channel's key: not left on the stack
+    return ok;
+}
+
 size_t CompanionPipe::build_outbox_frame(ob_action_t const &act, uint8_t *dest) {
     size_t text_len = strlen(act.text);
     if (act.kind == OB_ACT_SEND_CHANNEL) {
         int slot = channel_slot(mesh_, act.target);
         if (slot < 0 || (!act.console && static_cast<BadgeMesh *>(mesh_)->channelScopeDamaged(slot))) {
             return 0; // #291: a screen's message on a channel with a damaged scope fails, never floods wider
+        }
+        if (!onair_frame_ok(mesh_, act, slot)) {
+            return 0; // #289: fails, nothing sent
         }
         size_t room = mf_channel_text_max(strlen(mesh_->getNodeName()));
         text_len    = mf_text_cut(act.text, room);
@@ -629,6 +658,9 @@ size_t CompanionPipe::build_outbox_frame(ob_action_t const &act, uint8_t *dest) 
     }
     if (act.kind == OB_ACT_RESET_PATH) {
         return mf_encode_reset_path(dest, c->id.pub_key);
+    }
+    if (!onair_frame_ok(mesh_, act, -1)) {
+        return 0; // #289: a console DM (or its retry) to a target no longer listed fails, nothing sent
     }
     return mf_encode_send_dm(dest, act.attempt, act.ts, act.prefix, act.text, mf_text_cut(act.text, MF_MAX_TEXT));
 }

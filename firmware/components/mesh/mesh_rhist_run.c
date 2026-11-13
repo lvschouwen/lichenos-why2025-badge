@@ -386,7 +386,7 @@ static bool parse_change(char const *rest, unsigned *minutes, bool *yes) {
 // (every poll is checked again when the mesh task sends it)
 static char const *switch_on_refusal(uint8_t const *prefix) {
     char const *why = mesh_cscope_refusal(true);
-    return why ? why : mesh_onair_refusal(true, ONAIR_TX_CONTACT, NULL, prefix);
+    return why ? why : mesh_onair_refusal(true, ONAIR_TX_CONTACT, NULL, NULL, prefix);
 }
 
 static void console_change(uint8_t const *prefix, char const *verb) {

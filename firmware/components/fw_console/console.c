@@ -739,6 +739,22 @@ static void activity(void) {
     }
 }
 
+static char const *(*_Atomic usb_hold)(void);
+
+void console_usb_hold_bind(char const *(*held)(void)) {
+    atomic_store(&usb_hold, held);
+}
+
+bool console_usb_hold_ok(char const *what) {
+    char const *(*held)(void) = atomic_load(&usb_hold);
+    char const *why           = held ? held() : NULL;
+    if (!console_hold_refuses(why != NULL, console_origin())) {
+        return true;
+    }
+    console_reply("%s refused: %s is on, which it would erase; only the USB console can do that", what, why);
+    return false;
+}
+
 static void run_command(char *line);
 
 // Every command line, from the UART and from Wi-Fi

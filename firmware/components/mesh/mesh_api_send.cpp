@@ -35,10 +35,27 @@ bool mesh_int::send_ready(char const **why, mesh_origin_t from) {
 }
 
 // #289: a console line's send goes only to a target on the console's on-air allow list (mesh_onair.h), checked after
-// send_ready (its reasons come first) and before anything is queued; NULL from a screen and while the list is off
-static bool onair_ready(char const **why, mesh_origin_t from, onair_tx_t tx, char const *channel,
-                        uint8_t const *prefix) {
-    *why = mesh_onair_refusal(from == MESH_FROM_CONSOLE, tx, channel, prefix);
+// send_ready (its reasons come first) and before anything is queued; NULL from a screen and while the list is off.
+// The frame is checked again when it is built (onair_frame_ok in mesh_link.cpp), retries included.
+static bool onair_ready(char const **why, mesh_origin_t from, uint8_t const *prefix) {
+    *why = mesh_onair_refusal(from == MESH_FROM_CONSOLE, ONAIR_TX_CONTACT, NULL, NULL, prefix);
+    return *why == NULL;
+}
+
+// The same for a channel: the key of the slot the stored name resolves to now, under the mesh lock, only while the
+// list is on (off: no lock taken, as before)
+static bool onair_channel_ready(char const **why, mesh_origin_t from, char const *channel) {
+    if (from != MESH_FROM_CONSOLE || !mesh_onair_on()) {
+        return true;
+    }
+    char    name[MESH_CHANNEL_MAX + 1];
+    uint8_t id[ONAIR_KEY_ID];
+    size_t  found = mesh_channel_key_id(channel, false, name, sizeof(name), id);
+    if (found == MESH_BUSY) {
+        *why = "MeshCore is busy, try again";
+        return false;
+    }
+    *why = mesh_onair_refusal(true, ONAIR_TX_CHANNEL, channel, found == 1 ? id : NULL, NULL);
     return *why == NULL;
 }
 
@@ -48,7 +65,7 @@ extern "C" mesh_msg_id_t mesh_send_channel(char const *channel_name, char const 
     why = why ? why : &local;
     *why = NULL;
     if (!send_ready(why, from) || (*why = mesh_cscope_channel_refusal(from == MESH_FROM_CONSOLE, channel_name)) ||
-        !onair_ready(why, from, ONAIR_TX_CHANNEL, channel_name, NULL)) {
+        !onair_channel_ready(why, from, channel_name)) {
         return 0; // #291: a damaged channel scope refuses the screens' sends
     }
     size_t len = mf_text_cut(text, mesh_channel_text_max());
@@ -69,7 +86,7 @@ extern "C" mesh_msg_id_t mesh_send_dm(uint8_t const prefix[6], char const *text,
     char const *local;
     why = why ? why : &local;
     *why = NULL;
-    if (!send_ready(why, from) || !onair_ready(why, from, ONAIR_TX_CONTACT, NULL, prefix)) {
+    if (!send_ready(why, from) || !onair_ready(why, from, prefix)) {
         return 0;
     }
     size_t len = mf_text_cut(text, MF_MAX_TEXT);
@@ -174,7 +191,7 @@ extern "C" uint32_t mesh_trace_start(uint8_t const prefix[6], mt_kind_t kind, me
     char const *local;
     why  = why ? why : &local;
     *why = NULL;
-    if (!send_ready(why, from) || !onair_ready(why, from, ONAIR_TX_CONTACT, NULL, prefix)) {
+    if (!send_ready(why, from) || !onair_ready(why, from, prefix)) {
         return 0;
     }
     if (!trace_req) {
@@ -211,7 +228,7 @@ extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char 
     char const *local;
     why  = why ? why : &local;
     *why = NULL;
-    if (!send_ready(why, from) || !onair_ready(why, from, ONAIR_TX_CONTACT, NULL, prefix)) {
+    if (!send_ready(why, from) || !onair_ready(why, from, prefix)) {
         return 0;
     }
     if (!remote_req) {
@@ -233,7 +250,7 @@ extern "C" uint32_t mesh_remote_start_background(uint8_t const prefix[6], mesh_o
     char const *local;
     why  = why ? why : &local;
     *why = NULL;
-    if (!send_ready(why, from) || !onair_ready(why, from, ONAIR_TX_CONTACT, NULL, prefix)) {
+    if (!send_ready(why, from) || !onair_ready(why, from, prefix)) {
         return 0;
     }
     if (!remote_req) {

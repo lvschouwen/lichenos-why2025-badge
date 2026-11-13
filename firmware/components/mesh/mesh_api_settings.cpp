@@ -189,7 +189,7 @@ static char const *advert_tx_locked(bool flood, mesh_origin_t from = MESH_FROM_S
     if (char const *why = flood ? mesh_cscope_refusal(from == MESH_FROM_CONSOLE) : NULL) {
         return why; // #290: a console line's flood advert needs the console scope
     }
-    if (char const *why = mesh_onair_refusal(from == MESH_FROM_CONSOLE, ONAIR_TX_ADVERT, NULL, NULL)) {
+    if (char const *why = mesh_onair_refusal(from == MESH_FROM_CONSOLE, ONAIR_TX_ADVERT, NULL, NULL, NULL)) {
         return why; // #289: an advert has no target; the allow list lets it pass (mesh_onair.h), decided there
     }
     if (!ident_tx_allowed()) {

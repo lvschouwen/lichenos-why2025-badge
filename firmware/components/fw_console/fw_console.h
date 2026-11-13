@@ -49,6 +49,12 @@ bool             console_dev_set(bool on);
 // The saved state through the settings service (#235); read once here. Bound in settings_bind_dev_mode(), after the
 // factory reset step.
 void             console_bind_dev_store(fw_get_u8_fn get, fw_set_u8_fn set);
+// The USB hold (#289): a guard that, while it is on, makes the console's commands that would erase it USB-only (MeshCore's
+// on-air allow list, which a factory reset erases). held returns what holds (a short text) or NULL; one guard, bound
+// once (tools/layers.conf: only mesh binds it). A guarded command asks console_usb_hold_ok(what) before acting: true
+// when it may go on, else it has replied why.
+void             console_usb_hold_bind(char const *(*held)(void));
+bool             console_usb_hold_ok(char const *what);
 // Where the command running on the calling task came from: the console_exec run's origin, UART on the console task,
 // UNKNOWN on any other task
 console_origin_t console_origin(void);

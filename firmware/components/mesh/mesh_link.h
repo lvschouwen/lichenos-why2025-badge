@@ -11,6 +11,7 @@
 #include "mesh_contact_fmt.h"
 #include "mesh_frame.h"
 #include "mesh_health.h"
+#include "mesh_onair.h"
 #include "mesh_outbox.h"
 #include "mesh_remote.h"
 #include "mesh_scope.h"
@@ -20,6 +21,9 @@
 extern "C" {
 void mesh_ob_enter(void);
 void mesh_ob_exit(void);
+// #289: a channel's key id for the on-air allow list, ONAIR_KEY_ID bytes of SHA-256 of its secret (as the channel
+// scopes' id): it tells channels apart and gives nothing of the key away
+void channel_key_id(uint8_t const secret[PUB_KEY_SIZE], uint8_t id[ONAIR_KEY_ID]);
 // Adverts from new nodes are being dropped (#6): told once per spell, with the total since boot (mesh_task.cpp logs it)
 void mesh_advert_limited(uint32_t refused);
 // The contact table is full and an advert of a new node was not added (#52): called for each such advert, under the

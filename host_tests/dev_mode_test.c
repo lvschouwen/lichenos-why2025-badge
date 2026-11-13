@@ -74,6 +74,17 @@ static void on_only_from_usb(void) {
 
 // console.c records an exec run's origin and asks it back per task: swapping WIFI and LOCAL, or letting a task that is
 // not the console's own count as the UART, would let `fw dev on` in over Wi-Fi
+// The USB hold (#289): while a guard holds, a console factory reset only from the USB console; without one, from any
+static void usb_hold(void) {
+    CHECK(!console_hold_refuses(true, CONSOLE_ORIGIN_UART));
+    CHECK(console_hold_refuses(true, CONSOLE_ORIGIN_WIFI));
+    CHECK(console_hold_refuses(true, CONSOLE_ORIGIN_LOCAL)); // injected keys can type in the Console app
+    CHECK(console_hold_refuses(true, CONSOLE_ORIGIN_UNKNOWN));
+    CHECK(!console_hold_refuses(false, CONSOLE_ORIGIN_WIFI)); // nothing holds: as before
+    CHECK(!console_hold_refuses(false, CONSOLE_ORIGIN_LOCAL));
+    CHECK(!console_hold_refuses(false, CONSOLE_ORIGIN_UART));
+}
+
 static void origin_plumbing(void) {
     CHECK(dev_mode_exec_origin(true) == CONSOLE_ORIGIN_WIFI);   // console_exec_with_secrets: POST /console
     CHECK(dev_mode_exec_origin(false) == CONSOLE_ORIGIN_LOCAL); // console_exec: the Console app
@@ -96,6 +107,7 @@ int main(void) {
     gate_off_and_on();
     help_hides_debug_commands();
     on_only_from_usb();
+    usb_hold();
     origin_plumbing();
     factory_reset_clears_it();
     if (failures) {

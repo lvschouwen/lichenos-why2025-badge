@@ -26,6 +26,22 @@ static bool                        onair_damaged; // the saved list did not deco
 // The refusal with its target, for the console run that asked (console.c serialises the runs)
 static char onair_refused[ONAIR_REFUSED_MAX];
 
+bool mesh_onair_on(void) {
+    SemaphoreHandle_t lock = __atomic_load_n(&onair_lock, __ATOMIC_ACQUIRE);
+    if (!lock) {
+        return false;
+    }
+    xSemaphoreTake(lock, portMAX_DELAY);
+    bool on = onair_on;
+    xSemaphoreGive(lock);
+    return on;
+}
+
+// console_usb_hold's question: what makes the console's destructive commands USB-only now
+static char const *onair_hold(void) {
+    return mesh_onair_on() ? "the on-air allow list (fw onair)" : NULL;
+}
+
 void mesh_onair_init(void) {
     static char text[ONAIR_TEXT_MAX]; // boot, one task
     if (onair_lock) {
@@ -35,6 +51,7 @@ void mesh_onair_init(void) {
     onair_damaged = !onair_decode(text, &onair_list);
     onair_on      = app_settings_get_u8(meshcore_ctx(), KEY_ON, 0) != 0;
     __atomic_store_n(&onair_lock, xSemaphoreCreateMutexStatic(&onair_lock_mem), __ATOMIC_RELEASE);
+    console_usb_hold_bind(onair_hold); // the console's factory reset would erase the setting: USB only while it is on
     if (onair_damaged) {
         ESP_LOGW(TAG, "on-air allow list: the saved list is damaged, it is empty now (fw onair)");
     }
@@ -43,12 +60,13 @@ void mesh_onair_init(void) {
     }
 }
 
-char const *mesh_onair_refusal(bool from_console, onair_tx_t tx, char const *channel, uint8_t const *prefix) {
+char const *mesh_onair_refusal(bool from_console, onair_tx_t tx, char const *channel, uint8_t const *key_id,
+                               uint8_t const *prefix) {
     if (!from_console || !__atomic_load_n(&onair_lock, __ATOMIC_ACQUIRE)) {
         return NULL; // a screen's send never reads it; the lock comes before the first console command
     }
     xSemaphoreTake(onair_lock, portMAX_DELAY);
-    bool ok = mesh_onair_allows(&onair_list, onair_on, true, tx, channel, prefix);
+    bool ok = mesh_onair_allows(&onair_list, onair_on, true, tx, channel, key_id, prefix);
     xSemaphoreGive(onair_lock);
     if (ok) {
         return NULL;
@@ -93,30 +111,57 @@ static char const *result_text(onair_result_t r) {
     case ONAIR_FULL: return "the list is full (fw onair remove <entry>)";
     case ONAIR_DUPLICATE: return "already on the list";
     case ONAIR_NOT_FOUND: return "not on the list";
+    case ONAIR_REKEYED: return "re-keyed";
     }
     return "?";
+}
+
+// "allow": the entry, a channel bound to the key of the channel its name resolves to now (stored name, key id); false
+// (said why) when it does not parse or no channel of that name is on the badge
+static bool allow_entry(char const *target, onair_entry_t *e) {
+    onair_result_t r = onair_entry_parse(target, e);
+    if (r != ONAIR_OK) {
+        console_reply("on-air allow list not changed: %s", result_text(r));
+        return false;
+    }
+    if (e->kind != ONAIR_CHANNEL) {
+        return true;
+    }
+    size_t found = mesh_channel_key_id(e->name, true, e->name, sizeof(e->name), e->key_id);
+    if (found != 1) {
+        console_reply("on-air allow list not changed: %s", found == 0 ? "no channel of that name on the badge now (fw "
+                                                                      "channels)" : "MeshCore is not running or busy");
+        return false;
+    }
+    return true;
 }
 
 // allow, remove, clear: the change and its text under the lock, the write after it (console runs keep them in order)
 static void onair_change(onair_op_t op, char const *target) {
     static char    text[ONAIR_TEXT_MAX]; // console runs only, one at a time
+    onair_entry_t  e = {0};
     onair_result_t r = ONAIR_OK;
+    if (op == ONAIR_OP_ALLOW && !allow_entry(target, &e)) {
+        return;
+    }
     xSemaphoreTake(onair_lock, portMAX_DELAY);
     if (op == ONAIR_OP_CLEAR) {
         memset(&onair_list, 0, sizeof(onair_list));
     } else {
-        r = op == ONAIR_OP_ALLOW ? onair_add(&onair_list, target) : onair_remove(&onair_list, target);
+        r = op == ONAIR_OP_ALLOW ? onair_add(&onair_list, &e) : onair_remove(&onair_list, target);
     }
-    bool fits = onair_encode(&onair_list, text, sizeof(text));
-    onair_damaged = onair_damaged && r != ONAIR_OK;
+    bool changed  = r == ONAIR_OK || r == ONAIR_REKEYED;
+    bool fits     = onair_encode(&onair_list, text, sizeof(text));
+    onair_damaged = onair_damaged && !changed;
     xSemaphoreGive(onair_lock);
-    if (r != ONAIR_OK) {
+    if (!changed) {
         console_reply("on-air allow list not changed: %s", result_text(r));
         return;
     }
     bool saved = fits && (text[0] ? app_settings_set_str(meshcore_ctx(), KEY_LIST, text)
                                   : app_settings_erase(meshcore_ctx(), KEY_LIST));
-    console_reply("on-air allow list changed (%s)", saved ? "saved" : "not saved, this boot only");
+    console_reply("on-air allow list changed (%s)%s", saved ? "saved" : "not saved, this boot only",
+                  r == ONAIR_REKEYED ? ": the channel has another key now, only the new one is listed" : "");
 }
 
 void mesh_onair_console(char const *args) {

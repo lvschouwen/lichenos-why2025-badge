@@ -5,6 +5,7 @@
 #include "mesh_prefs.h"
 #include "mesh_ident.h"
 #include "mesh_link.h"
+#include "mesh_onair.h"
 
 #include "SPIFFS.h"
 
@@ -128,6 +129,18 @@ extern "C" void mesh_advert_limited(uint32_t refused) {
     (void)refused;
 }
 extern "C" void mesh_contacts_full(void) {}
+// The on-air allow list (#289): the badge's live copy is mesh_onair_run.c; here a list the test sets, with the same
+// pure decision, so the pipe's frame check runs on the real MyMesh
+static onair_list_t test_onair;
+static bool         test_onair_on;
+extern "C" bool     mesh_onair_on(void) {
+    return test_onair_on;
+}
+extern "C" char const *mesh_onair_refusal(bool from_console, onair_tx_t tx, char const *channel, uint8_t const *key_id,
+                                          uint8_t const *prefix) {
+    bool ok = mesh_onair_allows(&test_onair, test_onair_on, from_console, tx, channel, key_id, prefix);
+    return ok ? nullptr : ONAIR_REFUSED_POLL;
+}
 extern "C" void mesh_airlog_note(uint8_t, uint8_t, uint8_t const *, uint8_t, float, float) {}
 // What BadgeMesh told the air log about its transmits (#408): one per packet the radio was given
 struct TxNote {
@@ -336,6 +349,66 @@ static void console_scope_checks(BadgeMesh &mesh, ob_t &ob, mesh::GroupChannel c
     ui = ob_add_channel(&ob, "public", "scope ui again", 14, (uint32_t)millis(), &why);
     settle(mesh, 30);
     CHECK(find_group(before, pub, prefix + "scope ui again", pkt) && pkt.getRouteType() == ROUTE_TYPE_FLOOD);
+}
+
+static std::vector<TxNote> notes_of(size_t from, uint8_t type); // below
+
+// One outbox message to its end state; mark: as a console line's
+static mesh_out_state_t onair_send(BadgeMesh &mesh, ob_t &ob, bool dm, uint8_t const *key, char const *text, bool mark) {
+    char const      *why = NULL;
+    mesh_msg_id_t    id  = dm ? ob_add_dm(&ob, key, text, strlen(text), (uint32_t)millis(), &why)
+                              : ob_add_channel(&ob, "public", text, strlen(text), (uint32_t)millis(), &why);
+    mesh_out_state_t st  = MESH_OUT_FAILED;
+    CHECK(id && (!mark || ob_set_console(&ob, id)));
+    settle(mesh, 30);
+    CHECK(ob_get(&ob, id, &st, NULL, NULL, NULL));
+    return st;
+}
+
+// The on-air allow list (#289) where the frame is built: a console line's channel message goes only when the slot its
+// name resolves to has the listed key (a channel re-created under the listed name with another key does not), a
+// console DM only to a listed prefix; a screen's always. Made-up key ids and texts.
+static void onair_frame_checks(BadgeMesh &mesh, ob_t &ob, ChannelDetails const &pub) {
+    char scope[MESH_SCOPE_MAX + 1];
+    snprintf(scope, sizeof(scope), "%s", mesh.consoleScope());
+    CHECK(mesh.setConsoleScope("zz-test") == NULL); // #290: console floods need it
+    ContactsIterator it = mesh.startContactsIterator();
+    ContactInfo      c;
+    CHECK(it.hasNext(&mesh, c));
+    onair_entry_t e = {};
+    CHECK(onair_entry_parse(pub.name, &e) == ONAIR_OK && e.kind == ONAIR_CHANNEL);
+    channel_key_id(pub.channel.secret, e.key_id);
+    memset(&test_onair, 0, sizeof(test_onair));
+    CHECK(onair_add(&test_onair, &e) == ONAIR_OK);
+    test_onair_on = true;
+    size_t       before = test_radio.sent.size();
+    std::string  prefix = std::string(mesh.getNodeName()) + ": ";
+    mesh::Packet pkt;
+    CHECK(onair_send(mesh, ob, false, NULL, "onair listed", true) != MESH_OUT_FAILED);
+    CHECK(find_group(before, pub.channel, prefix + "onair listed", pkt));
+    // The same name, another key: refused when built, nothing on air; a screen's message on it still goes
+    e.key_id[0] ^= 1;
+    CHECK(onair_add(&test_onair, &e) == ONAIR_REKEYED);
+    CHECK(onair_send(mesh, ob, false, NULL, "onair rekeyed", true) == MESH_OUT_FAILED);
+    CHECK(!find_group(before, pub.channel, prefix + "onair rekeyed", pkt));
+    CHECK(onair_send(mesh, ob, false, NULL, "onair screen", false) != MESH_OUT_FAILED);
+    CHECK(find_group(before, pub.channel, prefix + "onair screen", pkt));
+    // A console DM: refused to a prefix not listed, sent once it is
+    size_t from = tx_notes.size();
+    CHECK(onair_send(mesh, ob, true, c.id.pub_key, "onair dm no", true) == MESH_OUT_FAILED);
+    CHECK(notes_of(from, PAYLOAD_TYPE_TXT_MSG).empty());
+    onair_entry_t ce = {};
+    ce.kind          = ONAIR_CONTACT;
+    memcpy(ce.prefix, c.id.pub_key, ONAIR_PREFIX);
+    CHECK(onair_add(&test_onair, &ce) == ONAIR_OK);
+    CHECK(onair_send(mesh, ob, true, c.id.pub_key, "onair dm yes", true) != MESH_OUT_FAILED);
+    CHECK(!notes_of(from, PAYLOAD_TYPE_TXT_MSG).empty());
+    // Off: as before
+    test_onair_on = false;
+    CHECK(onair_send(mesh, ob, false, NULL, "onair off", true) != MESH_OUT_FAILED);
+    CHECK(find_group(before, pub.channel, prefix + "onair off", pkt));
+    memset(&test_onair, 0, sizeof(test_onair));
+    CHECK(mesh.setConsoleScope(scope) == NULL);
 }
 
 // A channel's own scope (#291) on the real MyMesh: a screen's message on the channel floods under the channel's region,
@@ -1165,6 +1238,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     tx_note_checks(mesh, sent_at_start, notes_at_start);
     tx_outcome_checks(mesh);
     tx_retry_checks(mesh, ob);
+    onair_frame_checks(mesh, ob, pub); // last: its unanswered DM retries
 }
 
 static std::vector<uint8_t> file_bytes(std::string const &path) {

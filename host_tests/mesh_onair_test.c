@@ -20,16 +20,54 @@ static int failures;
 
 static uint8_t const LISTED[ONAIR_PREFIX]   = {0xab, 0xcd, 0xef, 0x12, 0x34, 0x56};
 static uint8_t const UNLISTED[ONAIR_PREFIX] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab};
+// Made-up channel key ids (the first bytes of SHA-256 of a channel's secret on the badge)
+static uint8_t const KEY_A[ONAIR_KEY_ID] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80};
+static uint8_t const KEY_B[ONAIR_KEY_ID] = {0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x81};
 
-// A list with the test channel and the test node
-static void bench_list(onair_list_t *l) {
-    memset(l, 0, sizeof(*l));
-    CHECK(onair_add(l, "#zz-test") == ONAIR_OK);
-    CHECK(onair_add(l, "ABCDEF123456") == ONAIR_OK);
+// Adds typed text as "fw onair allow" does: a channel bound to the key id its name resolves to (key)
+static onair_result_t add(onair_list_t *l, char const *text, uint8_t const *key) {
+    onair_entry_t  e;
+    onair_result_t r = onair_entry_parse(text, &e);
+    if (r != ONAIR_OK) {
+        return r;
+    }
+    if (e.kind == ONAIR_CHANNEL) {
+        memcpy(e.key_id, key, ONAIR_KEY_ID);
+    }
+    return onair_add(l, &e);
 }
 
+// A list with the test channel (key A) and the test node
+static void bench_list(onair_list_t *l) {
+    memset(l, 0, sizeof(*l));
+    CHECK(add(l, "#zz-test", KEY_A) == ONAIR_OK);
+    CHECK(add(l, "ABCDEF123456", NULL) == ONAIR_OK);
+}
+
+// A channel send passes key A (the listed channel's key) unless a test gives another
 static bool allows(onair_list_t const *l, bool on, bool console, onair_tx_t tx, char const *ch, uint8_t const *p) {
-    return mesh_onair_allows(l, on, console, tx, ch, p);
+    return mesh_onair_allows(l, on, console, tx, ch, KEY_A, p);
+}
+
+// The review of #289: a listed name re-created or renamed with another key is not the listed channel
+static void test_channel_key(void) {
+    onair_list_t l;
+    bench_list(&l);
+    CHECK(mesh_onair_allows(&l, true, true, ONAIR_TX_CHANNEL, "#zz-test", KEY_A, NULL));
+    CHECK(!mesh_onair_allows(&l, true, true, ONAIR_TX_CHANNEL, "#zz-test", KEY_B, NULL));
+    CHECK(!mesh_onair_allows(&l, true, true, ONAIR_TX_CHANNEL, "#ZZ-TEST", KEY_B, NULL));
+    CHECK(!mesh_onair_allows(&l, true, true, ONAIR_TX_CHANNEL, "#zz-test", NULL, NULL)); // no channel resolved
+    CHECK(!mesh_onair_allows(&l, true, true, ONAIR_TX_CHANNEL, "#zz-other", KEY_A, NULL)); // the key under another name
+    CHECK(mesh_onair_allows(&l, false, true, ONAIR_TX_CHANNEL, "#zz-test", KEY_B, NULL));  // off: as before
+    CHECK(mesh_onair_allows(&l, true, false, ONAIR_TX_CHANNEL, "#zz-test", KEY_B, NULL));  // a screen's
+    // Allowing the name again after the channel changed: the entry takes the new key, the old one no longer passes
+    CHECK(add(&l, "#zz-test", KEY_A) == ONAIR_DUPLICATE);
+    CHECK(add(&l, "#ZZ-Test", KEY_B) == ONAIR_REKEYED && l.n == 2);
+    CHECK(mesh_onair_allows(&l, true, true, ONAIR_TX_CHANNEL, "#zz-test", KEY_B, NULL));
+    CHECK(!mesh_onair_allows(&l, true, true, ONAIR_TX_CHANNEL, "#zz-test", KEY_A, NULL));
+    // Removed by name, whatever its key
+    CHECK(onair_remove(&l, "#zz-test") == ONAIR_OK && l.n == 1);
+    CHECK(!mesh_onair_allows(&l, true, true, ONAIR_TX_CHANNEL, "#zz-test", KEY_B, NULL));
 }
 
 static void test_decision(void) {
@@ -95,26 +133,26 @@ static void test_entries(void) {
     CHECK(onair_entry_parse("#123456789012345678901234567890", &e) == ONAIR_OK);   // 31
     CHECK(onair_entry_parse("#1234567890123456789012345678901", &e) == ONAIR_BAD); // 32
     // Duplicates (any case, any key length), full, remove
-    CHECK(onair_add(&l, "#zz-test") == ONAIR_OK);
-    CHECK(onair_add(&l, "#ZZ-TEST") == ONAIR_DUPLICATE);
-    CHECK(onair_add(&l, "abcdef123456") == ONAIR_OK);
-    CHECK(onair_add(&l, "ABCDEF123456ffff") == ONAIR_DUPLICATE);
-    CHECK(onair_add(&l, "bad\x01") == ONAIR_BAD && l.n == 2);
+    CHECK(add(&l, "#zz-test", KEY_A) == ONAIR_OK);
+    CHECK(add(&l, "#ZZ-TEST", KEY_A) == ONAIR_DUPLICATE);
+    CHECK(add(&l, "abcdef123456", NULL) == ONAIR_OK);
+    CHECK(add(&l, "ABCDEF123456ffff", NULL) == ONAIR_DUPLICATE);
+    CHECK(add(&l, "bad\x01", KEY_A) == ONAIR_BAD && l.n == 2);
     for (int i = 2; i < ONAIR_MAX; i++) {
         snprintf(text, sizeof(text), "#zz-%d", i);
-        CHECK(onair_add(&l, text) == ONAIR_OK);
+        CHECK(add(&l, text, KEY_B) == ONAIR_OK);
     }
     CHECK(l.n == ONAIR_MAX);
-    CHECK(onair_add(&l, "#zz-one-more") == ONAIR_FULL && l.n == ONAIR_MAX);
-    CHECK(onair_add(&l, "#zz-test") == ONAIR_DUPLICATE); // said before full: it is on the list
+    CHECK(add(&l, "#zz-one-more", KEY_A) == ONAIR_FULL && l.n == ONAIR_MAX);
+    CHECK(add(&l, "#zz-test", KEY_A) == ONAIR_DUPLICATE); // said before full: it is on the list
     CHECK(onair_remove(&l, "#zz-nothere") == ONAIR_NOT_FOUND);
     CHECK(onair_remove(&l, "") == ONAIR_BAD);
     CHECK(onair_remove(&l, "#ZZ-TEST") == ONAIR_OK && l.n == ONAIR_MAX - 1);
-    CHECK(!mesh_onair_allows(&l, true, true, ONAIR_TX_CHANNEL, "#zz-test", NULL));
-    CHECK(mesh_onair_allows(&l, true, true, ONAIR_TX_CONTACT, NULL, LISTED)); // the rest moved up, still there
+    CHECK(!mesh_onair_allows(&l, true, true, ONAIR_TX_CHANNEL, "#zz-test", KEY_A, NULL));
+    CHECK(mesh_onair_allows(&l, true, true, ONAIR_TX_CONTACT, NULL, NULL, LISTED)); // the rest moved up, still there
     CHECK(onair_remove(&l, "abcdef123456") == ONAIR_OK);
-    CHECK(!mesh_onair_allows(&l, true, true, ONAIR_TX_CONTACT, NULL, LISTED));
-    CHECK(onair_add(&l, "#zz-one-more") == ONAIR_OK);
+    CHECK(!mesh_onair_allows(&l, true, true, ONAIR_TX_CONTACT, NULL, NULL, LISTED));
+    CHECK(add(&l, "#zz-one-more", KEY_A) == ONAIR_OK);
     onair_entry_text(&l.e[l.n - 1], text, sizeof(text));
     CHECK(!strcmp(text, "channel #zz-one-more"));
     onair_entry_parse("ABCDEF123456", &e);
@@ -171,25 +209,38 @@ static void test_saved_text(void) {
     char         text[ONAIR_TEXT_MAX];
     bench_list(&l);
     CHECK(onair_encode(&l, text, sizeof(text)));
-    CHECK(!strcmp(text, "c #zz-test\nk abcdef123456"));
+    CHECK(!strcmp(text, "v2\nc 1020304050607080 #zz-test\nk abcdef123456"));
     CHECK(onair_decode(text, &back) && back.n == 2 && !memcmp(&back, &l, sizeof(l)));
     CHECK(!onair_encode(&l, text, 10) && text[0] == '\0');
     CHECK(onair_decode("", &back) && back.n == 0);
     CHECK(onair_decode(NULL, &back) && back.n == 0);
+    CHECK(onair_decode("v2", &back) && back.n == 0);
+    memset(&l, 0, sizeof(l));
+    CHECK(onair_encode(&l, text, sizeof(text)) && text[0] == '\0'); // empty: erased, not saved
     // A full list of the longest names fits the text
     memset(&l, 0, sizeof(l));
     for (int i = 0; i < ONAIR_MAX; i++) {
         char name[ONAIR_NAME_MAX + 1];
         snprintf(name, sizeof(name), "#%029d%d", 0, i);
-        CHECK(onair_add(&l, name) == ONAIR_OK);
+        CHECK(add(&l, name, KEY_A) == ONAIR_OK);
     }
     CHECK(onair_encode(&l, text, sizeof(text)) && onair_decode(text, &back) && back.n == ONAIR_MAX);
     // Strict: damaged, repeated, too many: false and an empty list
+#define K "1020304050607080 "
     static char const *const bad[] = {
-        "x #zz", "c", "c ", "c  zz", "k abcdef12345", "k abcdef1234567", "k abcdef12345g", "c #zz\n", "\nc #zz",
-        "c #zz\nc #ZZ", "k abcdef123456\nk ABCDEF123456", "c #zz-test\nk abcdef123456\nc #zz-test", "c\t#zz",
-        "c #zz\n\nc #yy", "c #a\nc #b\nc #c\nc #d\nc #e\nc #f\nc #g\nc #h\nc #i",
+        // the first format (efdb68b7, no version, no key id) and other versions: none
+        "c #zz-test", "k abcdef123456", "c #zz-test\nk abcdef123456", "v1\nk abcdef123456", "v3\nk abcdef123456",
+        "v2x\nk abcdef123456", "V2\nk abcdef123456", "v2\n", "\nv2",
+        // damaged lines
+        "v2\nx #zz", "v2\nc", "v2\nc ", "v2\nc " K, "v2\nc  " K "zz", "v2\nc #zz", "v2\nc 102030405060708 #zz",
+        "v2\nc 10203040506070809 #zz", "v2\nc 102030405060708g #zz", "v2\nc " K " zz", "v2\nk abcdef12345",
+        "v2\nk abcdef1234567", "v2\nk abcdef12345g", "v2\nc " K "#zz\n", "v2\n\nc " K "#zz", "v2\nc\t" K "#zz",
+        "v2\nc " K "#zz\n\nc " K "#yy", "v2\nv2\nc " K "#zz",
+        // repeated (a name with another key too) and too many
+        "v2\nc " K "#zz\nc " K "#ZZ", "v2\nc " K "#zz\nc 0000000000000000 #zz", "v2\nk abcdef123456\nk ABCDEF123456",
+        "v2\nc " K "#a\nc " K "#b\nc " K "#c\nc " K "#d\nc " K "#e\nc " K "#f\nc " K "#g\nc " K "#h\nc " K "#i",
     };
+#undef K
     for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         back.n = 1;
         CHECK(!onair_decode(bad[i], &back) && back.n == 0);
@@ -210,7 +261,7 @@ static void test_mutated(void) {
     uint8_t      buf[ONAIR_TEXT_MAX + 64];
     char         again[ONAIR_TEXT_MAX];
     bench_list(&l);
-    CHECK(onair_add(&l, "#zz private") == ONAIR_OK);
+    CHECK(add(&l, "#zz private", KEY_B) == ONAIR_OK);
     CHECK(onair_encode(&l, text, sizeof(text)));
     mut_rng_t rng;
     mut_seed(&rng, 289);
@@ -231,6 +282,7 @@ static void test_mutated(void) {
 
 int main(void) {
     test_decision();
+    test_channel_key();
     test_entries();
     test_refused_text();
     test_ops();

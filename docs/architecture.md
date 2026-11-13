@@ -544,16 +544,28 @@ copy, its setting and `fw onair` are `mesh_onair_run.c`.
 
 - A setting in MeshCore's app settings (`onair_on`, `onair_list`), **off by default**: a user badge behaves as before.
   Kept across flashes; a factory reset or MeshCore's Clear data erases it (off again). The list is never in the repo.
+  While it is on, the console's `fw factory-reset settings|all YES` runs only from the USB console (`plan` from any):
+  MeshCore binds fw_console's USB hold (`console_usb_hold_bind`, `owner-only` in `tools/layers.conf`), and
+  `factory_reset.c` asks `console_usb_hold_ok` before it acts. The reset by hand on the screen still clears it.
 - `fw onair` shows it; `fw onair on` works from any console (it only narrows). `off`, `allow <channel|key digits>`,
   `remove <...>` and `clear` work only from the USB console: the Wi-Fi console's token also installs firmware, and the
   Console app counts as remote (injected keys). `tools/onair_guard.sh` refuses those four itself.
-- At most 8 entries. Key digits (12 to 64 hex) match a contact by the 6-byte prefix the senders address it by; a
-  channel matches by name (ASCII case, as the badge compares channels). A saved list that does not decode is empty.
-- Checked where the target is resolved, after `send_ready` (`mesh_api_send.cpp`): channel and DM sends, trace,
-  discover, remote login/status/cli/settings, telemetry. Two cases without a plain target: an **advert** (`fw advert`,
+- At most 8 entries. Key digits (12 to 64 hex) match a contact by the 6-byte prefix the senders address it by. A
+  channel entry is its name plus a key id (8 bytes of SHA-256 of its secret, never the secret), taken at `allow` from
+  the channel the name resolves to then (`allow` of a name with no channel is refused): a channel removed and added
+  again under the listed name with another key, or another channel renamed to it, is not the listed one. Allowing the
+  name again re-keys the entry. The saved text is versioned (`v2` first line); a text that does not decode (the first,
+  unversioned format included) is an empty list.
+- Checked where the target is resolved, after `send_ready` (`mesh_api_send.cpp`, the channel's key under the mesh
+  lock): channel and DM sends, trace, discover, remote login/status/cli/settings, telemetry. Checked again where the
+  pipe builds the frame (`onair_frame_ok`, `mesh_link.cpp`): a console channel message by the key of the slot it
+  resolves to then, a console DM by its prefix, so the outbox's retries are checked too. Two cases without a plain target: an **advert** (`fw advert`,
   `fw mesh advert`) passes, it has no target and its flood is bounded by the console scope (a one-off bench advert is
   accepted); the **history polls** `fw mesh history <who> on` schedules are checked when switched on (the console says
   why) and again at each poll the mesh task sends, so a poll whose target is not listed is refused, not sent.
+- Accepted limits: the list holds only while this image runs; `fw slot other` and an update over Wi-Fi (both behind
+  the OTA token) can boot an image without it. An unreadable NVS reads as off: the settings API returns the default on
+  a failed read and cannot report it.
 
 ## Channel flood scope (#291)
 

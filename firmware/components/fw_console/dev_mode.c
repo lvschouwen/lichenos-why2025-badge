@@ -35,6 +35,10 @@ console_origin_t dev_mode_origin(bool captured, console_origin_t exec, bool uart
     return uart_task ? CONSOLE_ORIGIN_UART : CONSOLE_ORIGIN_UNKNOWN;
 }
 
+bool console_hold_refuses(bool held, console_origin_t origin) {
+    return held && origin != CONSOLE_ORIGIN_UART;
+}
+
 dev_req_t dev_mode_request(char const *args, console_origin_t origin) {
     if (args[0] == '\0' || strcmp(args, "status") == 0) {
         return DEV_REQ_STATUS;

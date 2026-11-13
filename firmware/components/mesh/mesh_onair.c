@@ -88,7 +88,8 @@ onair_result_t onair_entry_parse(char const *text, onair_entry_t *out) {
     return ONAIR_OK;
 }
 
-static bool entry_matches(onair_entry_t const *e, onair_tx_t tx, char const *channel, uint8_t const *prefix) {
+// The same target: a channel by name (the key compared by the caller where it matters), a contact by prefix
+static bool same_target(onair_entry_t const *e, onair_tx_t tx, char const *channel, uint8_t const *prefix) {
     if (tx == ONAIR_TX_CHANNEL) {
         return e->kind == ONAIR_CHANNEL && channel && channel[0] && same_name(e->name, channel);
     }
@@ -96,30 +97,31 @@ static bool entry_matches(onair_entry_t const *e, onair_tx_t tx, char const *cha
            memcmp(e->prefix, prefix, ONAIR_PREFIX) == 0;
 }
 
-// The index of the entry the same as e, or -1
+// The index of the entry for e's target, or -1
 static int find(onair_list_t const *list, onair_entry_t const *e) {
     onair_tx_t tx = e->kind == ONAIR_CHANNEL ? ONAIR_TX_CHANNEL : ONAIR_TX_CONTACT;
     for (size_t i = 0; i < list->n && i < ONAIR_MAX; i++) {
-        if (entry_matches(&list->e[i], tx, e->name, e->prefix)) {
+        if (same_target(&list->e[i], tx, e->name, e->prefix)) {
             return (int)i;
         }
     }
     return -1;
 }
 
-onair_result_t onair_add(onair_list_t *list, char const *text) {
-    onair_entry_t  e;
-    onair_result_t r = onair_entry_parse(text, &e);
-    if (r != ONAIR_OK) {
-        return r;
-    }
-    if (find(list, &e) >= 0) {
-        return ONAIR_DUPLICATE;
+onair_result_t onair_add(onair_list_t *list, onair_entry_t const *e) {
+    int at = find(list, e);
+    if (at >= 0) {
+        onair_entry_t *have = &list->e[at];
+        if (e->kind != ONAIR_CHANNEL || memcmp(have->key_id, e->key_id, ONAIR_KEY_ID) == 0) {
+            return ONAIR_DUPLICATE;
+        }
+        *have = *e; // the channel of that name now has another key: only the new one is listed
+        return ONAIR_REKEYED;
     }
     if (list->n >= ONAIR_MAX) {
         return ONAIR_FULL;
     }
-    list->e[list->n++] = e;
+    list->e[list->n++] = *e;
     return ONAIR_OK;
 }
 
@@ -140,12 +142,14 @@ onair_result_t onair_remove(onair_list_t *list, char const *text) {
 }
 
 bool mesh_onair_allows(onair_list_t const *list, bool on, bool from_console, onair_tx_t tx, char const *channel,
-                       uint8_t const *prefix) {
+                       uint8_t const *key_id, uint8_t const *prefix) {
     if (!from_console || !on || tx == ONAIR_TX_ADVERT) {
         return true;
     }
     for (size_t i = 0; list && i < list->n && i < ONAIR_MAX; i++) {
-        if (entry_matches(&list->e[i], tx, channel, prefix)) {
+        onair_entry_t const *e = &list->e[i];
+        if (same_target(e, tx, channel, prefix) &&
+            (tx != ONAIR_TX_CHANNEL || (key_id && memcmp(e->key_id, key_id, ONAIR_KEY_ID) == 0))) {
             return true;
         }
     }
@@ -224,24 +228,45 @@ void onair_entry_text(onair_entry_t const *e, char *out, size_t cap) {
     }
 }
 
+static void hex_out(uint8_t const *b, size_t n, char *out) {
+    static char const DIGITS[] = "0123456789abcdef";
+    for (size_t i = 0; i < n; i++) {
+        out[2 * i]     = DIGITS[b[i] >> 4];
+        out[2 * i + 1] = DIGITS[b[i] & 15];
+    }
+    out[2 * n] = '\0';
+}
+
+// "\nc <key id> <name>" or "\nk <prefix>": snprintf's count
+static int entry_line(onair_entry_t const *e, char *out, size_t cap) {
+    char hex[2 * ONAIR_KEY_ID + 1];
+    if (e->kind == ONAIR_CHANNEL) {
+        hex_out(e->key_id, ONAIR_KEY_ID, hex);
+        return snprintf(out, cap, "\nc %s %s", hex, e->name);
+    }
+    hex_out(e->prefix, ONAIR_PREFIX, hex);
+    return snprintf(out, cap, "\nk %s", hex);
+}
+
 bool onair_encode(onair_list_t const *list, char *out, size_t cap) {
-    size_t used = 0;
     if (cap == 0) {
         return false;
     }
     out[0] = '\0';
-    for (size_t i = 0; i < list->n && i < ONAIR_MAX; i++) {
-        onair_entry_t const *e = &list->e[i];
-        int                  w = e->kind == ONAIR_CHANNEL
-                                     ? snprintf(out + used, cap - used, "%sc %s", used ? "\n" : "", e->name)
-                                     : snprintf(out + used, cap - used, "%sk %02x%02x%02x%02x%02x%02x", used ? "\n" : "",
-                                                e->prefix[0], e->prefix[1], e->prefix[2], e->prefix[3], e->prefix[4],
-                                                e->prefix[5]);
+    if (list->n == 0) {
+        return true; // erased, not saved
+    }
+    int w = snprintf(out, cap, "%s", ONAIR_TEXT_VER);
+    if (w < 0 || (size_t)w >= cap) {
+        out[0] = '\0';
+        return false;
+    }
+    for (size_t i = 0, used = (size_t)w; i < list->n && i < ONAIR_MAX; i++, used += (size_t)w) {
+        w = entry_line(&list->e[i], out + used, cap - used);
         if (w < 0 || (size_t)w >= cap - used) {
             out[0] = '\0';
             return false;
         }
-        used += (size_t)w;
     }
     return true;
 }
@@ -251,8 +276,13 @@ static bool decode_line(char const *s, size_t len, onair_entry_t *e) {
     if (len < 3 || s[1] != ' ') {
         return false;
     }
-    if (s[0] == 'c' && channel_ok(s + 2, len - 2)) {
-        set_channel(e, s + 2, len - 2);
+    size_t id_hex = 2 * ONAIR_KEY_ID;
+    if (s[0] == 'c' && len > 3 + id_hex && all_hex(s + 2, id_hex) && s[2 + id_hex] == ' ' &&
+        channel_ok(s + 3 + id_hex, len - 3 - id_hex)) {
+        set_channel(e, s + 3 + id_hex, len - 3 - id_hex);
+        for (size_t i = 0; i < ONAIR_KEY_ID; i++) {
+            e->key_id[i] = (uint8_t)(hex_val(s[2 + 2 * i]) << 4 | hex_val(s[3 + 2 * i]));
+        }
         return true;
     }
     if (s[0] == 'k' && len - 2 == 2 * ONAIR_PREFIX && all_hex(s + 2, len - 2)) {
@@ -267,10 +297,15 @@ bool onair_decode(char const *text, onair_list_t *out) {
     if (!text || !*text) {
         return true;
     }
-    if (strlen(text) >= ONAIR_TEXT_MAX) {
-        return false;
+    size_t ver = strlen(ONAIR_TEXT_VER);
+    if (strlen(text) >= ONAIR_TEXT_MAX || strncmp(text, ONAIR_TEXT_VER, ver) != 0 ||
+        (text[ver] != '\n' && text[ver] != '\0')) {
+        return false; // an unversioned or other version's text: none (fails closed)
     }
-    for (char const *s = text;;) {
+    if (!text[ver]) {
+        return true;
+    }
+    for (char const *s = text + ver + 1;;) {
         char const   *end = strchr(s, '\n');
         size_t        len = end ? (size_t)(end - s) : strlen(s);
         onair_entry_t e;

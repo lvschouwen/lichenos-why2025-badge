@@ -84,6 +84,23 @@ static int channel_named_locked(char const *name, ChannelDetails &slot) {
     return -1;
 }
 
+extern "C" size_t mesh_channel_key_id(char const *channel, bool typed, char *name, size_t cap,
+                                      uint8_t key_id[ONAIR_KEY_ID]) {
+    if (settings_lock()) {
+        return MESH_BUSY;
+    }
+    ChannelDetails slot;
+    int            at    = typed ? channel_find_locked(channel) : channel_named_locked(channel, slot);
+    bool           found = at >= 0 && node->getChannel(at, slot) && slot.name[0];
+    if (found) {
+        channel_key_id(slot.channel.secret, key_id);
+        snprintf(name, cap, "%.*s", (int)sizeof(slot.name), slot.name); // name may be the channel argument
+    }
+    mesh_unlock();
+    mesh_wipe(&slot, sizeof(slot)); // the channel's key: not left on the stack
+    return found ? 1 : 0;
+}
+
 // Clears slot `index` as MeshCore's apps do (setChannel with an empty ChannelDetails) and saves. DataStore writes every
 // slot in order, empty ones as zeroes, and loads them back by position: so the later channels keep their indices and
 // an emptied slot reads back empty (the lists skip it, the next add reuses it). Called with the lock held; by_name

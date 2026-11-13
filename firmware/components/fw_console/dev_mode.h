@@ -62,6 +62,10 @@ typedef enum {
 // What "fw dev <args>" asks, given where it came from
 dev_req_t dev_mode_request(char const *args, console_origin_t origin);
 
+// The USB hold (#289): while a bound guard is on (held), a console command that would erase it (factory-reset ...
+// YES) runs only from the USB console; Wi-Fi, the Console app (injected keys) and other tasks are refused
+bool console_hold_refuses(bool held, console_origin_t origin);
+
 #ifdef __cplusplus
 }
 #endif
