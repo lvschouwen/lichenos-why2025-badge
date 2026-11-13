@@ -7,7 +7,7 @@ Plan, implement, test, review, bench and deliver seven epics through dependency-
 #216 platform and architecture, #262 memory and performance, #381 bench tooling, #392 MeshCore, #393 UI and apps, #394 hardware and power, #395 security.
 
 ## Phase
-- **Current (2026-11-13, late evening):** wave A CLOSED. Wave B merged, pushed, flashed (fw-f537a44a), its bench RUNNING. Wave C code RUNNING.
+- **Current (2026-11-13, night):** waves A and B CLOSED. Wave C flashed (fw-f742e4ce), its bench RUNNING. Wave D: #288 reviewed and READY (not merged), #411, #409, #412 in progress.
 - Planning finished 2026-11-13. Plans: `orchestration/plans/` (`consolidated.md` is the program plan).
 
 ## Process (owner, 2026-11-13)
@@ -51,23 +51,40 @@ Environment: default subagent model Sonnet, at most 6 concurrent, spawn depth 1.
 ## Waves
 | Wave | Issues | Image | State |
 |---|---|---|---|
-| A | #389 (sent label), #368, #397, #211, #208, #11 (wave 1), #212 (5 functions), #298 | fw-0746e922 | CLOSED. Bench passed (29 steps, 10 reboots). #208, #397, #376, #378 closed. Open ends: #368 (the SD format step is destructive, not run), #11 (hands, breakout), #398 (hands), an unexplained transmit after a MeshCore start (existing behaviour, tool to identify it: #408) |
-| B | #404, #389 (heard time), #400 | fw-f537a44a | Flashed (first compressed update: 1.74 MB on the wire for a 2.75 MB image, 24 s). Bench RUNNING (agent bench-wave-B, script `bench-wave-B.md`) |
-| C | #406 (wt-1, Sonnet), #408 (wt-2, Opus), #410 (wt-4, Opus); then #409 `fw soak`, #405 per-row remote keys, #403, the mesh hygiene part of #209/#212/#213 | - | Code RUNNING |
+| A | #389 (sent label), #368, #397, #211, #208, #11 (wave 1), #212 (5 functions), #298 | fw-0746e922 | CLOSED. #208, #397, #376, #378, #379 closed. Open ends: #11 (hands, breakout), #298 (rest of its bench list) |
+| B | #404, #389 (heard time), #400 | fw-f537a44a | CLOSED. #389, #404 closed; #400 has one hands check left. Found #412 |
+| C | #406, #410 `fw mem window`, #408 transmit air log, #405 per-row remote keys; plus the #368 SD-format proof and #398 | fw-f742e4ce | Flashed. Bench RUNNING (agent `bench-wave-C`, script `bench-wave-C.md` in the scratchpad). #406 closed |
+| D | #288 app secrets + one-time password move; #411 Wi-Fi rollback rule; #409 `fw soak`; #412 status poll timing | - | see "Wave D state" |
 
-Every merge so far had an independent review and a re-review of its fix commit. Reviews caught, before merge: a journal wipe on a card read error (#368), a fail-open race and a regression in the hand-only start (#400), an uncapped decompression size (#298), surviving mutants in the config limits test (#212).
+### Wave D state (resume here)
+| Issue | Slot / branch | State |
+|---|---|---|
+| #288 | wt-5 `feat/288-app-secrets` (3 commits, tip f5952023) | Reviewed twice (Opus), verdict merge as is. NOT merged on purpose: it migrates stored passwords, so it rides in wave D with no other settings migration, and never with the #116 encryption flash. Merge it first in wave D |
+| #411 | wt-4 `feat/411-ota-valid-needs-wifi` (tip bb676556 + a fix commit in progress) | Review found 2 mediums (Wi-Fi-off must read the saved switch; apply the rule to every trial image unless `fw slot other` left a mark). Fix commit was requested from `impl-411`; then a delta re-review, then merge |
+| #409 | wt-2 `feat/409-fw-soak-line` | `impl-409` implementing; needs an Opus review (boot counter must increase across every kind of reset) |
+| #412 | wt-1 `fix/412-status-poll-after-start` | `impl-412` implementing; needs an Opus review (it may only move a transmit later, never sooner or more often) |
+
+A slot with a claimed branch and no live agent holds finished or interrupted work: read its `git log` and its check log in the scratchpad (`check-wt-N-<issue>*.log`) before doing anything; never reset it blind. Agents resume by name with SendMessage if the session is the same; in a new session start a fresh `lichen-implementer` on the same slot and branch with the issue and the review findings as the brief.
+
+After wave D, in dependency order: #289 on-air allow list (decided: a setting, USB-only), #229 capabilities, #232, #231 + #349, #233, #385; in parallel as slots allow: #403 OTA parser follow-ups (ota_server.c is at 1471 of 1500 nloc: split first), mesh hygiene (#209/#212/#213 remainder), #384 + #268 (need bench numbers), #380, the soak tooling on #407.
+
+Every merge had an independent review and a re-review of its fix commit. Reviews caught before merge: a journal wipe on a card read error (#368), a fail-open race and a regression in the hand-only start (#400), an uncapped decompression size (#298), two holes in the loosened advert-page rule (#405), a false "nothing transmitted" in the transmit log (#408), a migration record that stranded plaintext after a rollback (#288), two ways to keep a bad image (#411).
 
 ## Slots
-- Free: wt-5. wt-3: #322 `feat/322-refresh-50hz`, held until the #254 verdict. wt-6: #398 `fix/398-latitude-error-visible`, parked until the owner's hands check says whether the bug still exists.
+- Free: wt-6 holds the parked #398 branch (drop it if the wave C bench shows the note visible). wt-3: #322 `feat/322-refresh-50hz`, held until the #254 verdict.
+- Claimed: wt-1 (#412), wt-2 (#409), wt-4 (#411), wt-5 (#288).
 
 ## Bench facts
 - The badge ran fw-664dea27 before this program. Developer mode is on (switch it back on over the USB console after any `fw dev off`). The home order is arranged: never confirm Settings > Display > Reset order.
-- A remote Enter on the Advert & contacts page is refused by the firmware by design (#405 proposes a per-row rule). The page shows the owner's saved position: never copy it anywhere.
-- The helper `fw.sh` in the scratchpad sends console lines and redacts addresses; badge.sh needs the address from the scratchpad file, never printed.
-- DMA memory on the current images: free about 156 KB, minimum about 146-148 KB (gate: 89981 / 80650).
+- The MeshCore Advert & contacts page shows the owner's saved position: never copy it anywhere. Remote keys there: open the two position fields, type, cancel, submit an invalid value; nothing else (#405).
+- The helper `fw.sh` in the scratchpad sends console lines and redacts addresses; badge.sh needs the address from a scratchpad file, never printed. In a new session the scratchpad is gone: get the address with `fw wifi` over the USB console (see the bench recipes in project memory), write it to a 0600 file, never echo it.
+- DMA memory on these images: free about 156 KB, minimum about 146-149 KB (gate: 89981 / 80650).
+- Status-history polling (#168) is ON, every 10 min, to the agreed repeater: the badge transmits a request after every MeshCore start and every 10 min. The owner wants it OFF; the on-air guard refuses `mesh history <id> off` from an agent because that repeater is not in the allow file. The owner switches it off himself.
+- Updates are compressed since wave B: about 1.75 MB on the wire for a 2.76 MB image, 24-28 s.
+- The on-air guard allows sends to the test channel and the two test nodes; the owner also allows a one-off advert.
 
 ## Soak (after the last wave)
-#407: 36 h with the verdict at 24 h, PSRAM at 120 MHz, a supervisor script on the bench host owns the run and wakes a headless Claude run only for a blocker, updates through one guarded wrapper, a diff guard on loop fixes, restorable destructive steps allowed with a verified backup and a passed restore drill. Prerequisites to build: #409 `fw soak`, #410 `fw mem window`, #408 transmit log, a Wi-Fi disconnect counter, the Wi-Fi rollback rule (owner decision), and the tools listed on #407.
+#407: 36 h, verdict at 24 h, a blocker in hours 24-36 still fails it; PSRAM at 120 MHz; a supervisor script on the bench host owns the run and wakes a headless Claude run only for a blocker; updates through one guarded wrapper; a diff guard on loop fixes; wipe, settings reset and SD format allowed with a verified backup and a passed restore drill (losing the SD message history is acceptable). Firmware prerequisites: #410 done, #408 done, #409 and #411 in wave D, a Wi-Fi disconnect counter (inside #409 if the Wi-Fi code already counts). Tooling still to build: the list on #407.
 
 ## Epic dashboard
 | Epic | Open issues | Waves | Done | Active | Blocked on |
@@ -84,12 +101,11 @@ Every merge so far had an independent review and a re-review of its fix commit. 
 #397 Display split (P1), #398 latitude error off screen, #399 "99+" overlaps the clock, #400 injected shape key starts MeshCore, #401 release build not in the check, #402 DMA gate docs.
 
 ## Waiting on Lucas
-The full list of 23 decisions with recommendations is `orchestration/plans/consolidated.md` section 7. The ones that block the most:
-1. Go-ahead for OTA-1 (unblocks all remote proofing).
-2. A soak slot of 36 h or more after H1, with an hourly DMA gate.
-3. A date for the hands sitting H1 (about 40 hands-only items).
-4. #288 form: key prefix plus a one-time `pw*` migration.
-5. #289 switch: a setting, default off, USB-only to change.
+Decisions are asked at once as multiple choice with a recommendation (project memory `ask-decisions`); none is open right now. Open actions on his side:
+1. Switch the status-history polling off (see Bench facts).
+2. One hands sitting, any time: #374 (7 Enters on About; the off dialog), #391 (physical Esc+Backspace at boot), #377 (confirm attempts on the reset dialog, with him watching), #400 (physical Messages key starts a stopped MeshCore), #11 (wire the MAX17048 breakout on J7, then the readings check).
+3. For the soak: one permission rule for the update wrapper once it exists, and a notification channel.
+Decided on 2026-11-13 and recorded on the issues: #288 (prefix + one-time move), #289 (setting, USB-only), #405 (saving a position stays hands-only), #411 (roll back after 5 min without Wi-Fi), #379 (closed on the refusal), bench debt folded into wave benches (10-15 old issues per wave, steps compiled by a read-only prep agent first), soak length and rules (#407).
 
 ## Open housekeeping
 - Post each epic's wave table as a comment on the epic once the plans are pushed.
