@@ -1,5 +1,6 @@
 // Host test: MeshCore companion frame codec (#45)
 #include "mesh_frame.h"
+#include "mesh_pin.h"
 #include "mutate.h"
 
 #include <stdio.h>
@@ -303,17 +304,8 @@ static bool decoded_sane(uint8_t const *f, size_t len, mf_msg_t const *m) {
     }
 }
 
-static uint32_t fnv(uint32_t h, void const *p, size_t n) {
-    uint8_t const *b = p;
-    while (n--) {
-        h = (h ^ *b++) * 16777619u;
-    }
-    return h;
-}
-
 // Malformed input (#212): every mutation of every corpus frame decodes to a sane result. The digest over all results
-// pins the decoder's output byte for byte (mf_decode zeroes the struct first, so padding is 0); it was taken before the
-// #212 split. A deliberate change to what mf_decode returns changes it: print the new value and say why in the commit.
+// pins every field of every result (mesh_pin.h); it matches the decoder from before the #212 split. A deliberate change to what mf_decode returns changes it: print the new value and say why in the commit.
 static void decode_malformed(void) {
     frame_t  c[CORPUS_MAX];
     size_t   n      = corpus(c);
@@ -334,12 +326,12 @@ static void decode_malformed(void) {
                     printf("FAIL insane decode: corpus %zu mutation %d len %zu kind %d\n", i, k, len, (int)m.kind);
                 }
             }
-            digest = fnv(digest, &m, sizeof(m));
+            digest = pin_msg(digest, &m);
             free(f);
         }
     }
     failures += bad ? 1 : 0;
-    uint32_t const pinned = 0x94a9306cu;
+    uint32_t const pinned = 0xac20dd0bu;
     if (digest != pinned) {
         printf("FAIL mf_decode output digest 0x%08x, pinned 0x%08x\n", (unsigned)digest, (unsigned)pinned);
         failures++;

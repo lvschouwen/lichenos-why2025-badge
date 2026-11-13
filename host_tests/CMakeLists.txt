@@ -530,6 +530,9 @@ set_source_files_properties(
 target_link_libraries(lora_link_test PRIVATE m)
 
 add_test(NAME lora_link_test COMMAND lora_link_test)
+# tomlc17 leaks a malformed inline table (third-party, #212): that leak only is suppressed
+set_tests_properties(lora_link_test PROPERTIES ENVIRONMENT
+    "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lora_link_test.lsan.supp:print_suppressions=0")
 
 add_executable(lora_irq_test
     ${CMAKE_CURRENT_SOURCE_DIR}/lora_irq_test.c

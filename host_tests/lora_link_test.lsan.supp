@@ -1,0 +1,3 @@
+# tomlc17 (third-party) leaks the table of an inline table that fails to parse; lora_link_test's malformed-input run
+# (#212) reaches it. Only that function's allocations are suppressed.
+leak:parse_inline_table

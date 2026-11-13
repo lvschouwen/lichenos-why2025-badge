@@ -217,12 +217,15 @@ static void test_no_loop_glue(void) {
 // Every input combination against the rule written out once more (#212): the first reason that applies, in this order,
 // is the one given, and only the last ("unchanged") skips. Pins the plan and the exact reason the log shows.
 static void test_plan_exhaustive(void) {
-    char const *const keys[] = {NULL, "", "k", "j"};
+    // stored and current keys in separate buffers: equal contents, never the same pointer, so only strcmp passes
+    static char       stored_buf[3][2] = {"", "k", "j"}, current_buf[3][2] = {"", "k", "j"};
+    char const *const stored_keys[]    = {NULL, stored_buf[0], stored_buf[1], stored_buf[2]};
+    char const *const current_keys[]   = {NULL, current_buf[0], current_buf[1], current_buf[2]};
     for (int i = 0; i < 2 * 2 * 2 * 2 * 4 * 4; i++) {
         c6_reset_kind_t kind    = i & 1 ? C6_RST_OTHER : C6_RST_SOFTWARE;
         bool            force   = i & 2, verify = i & 4, trial = i & 8;
-        char const     *stored  = keys[(i >> 4) & 3];
-        char const     *current = keys[(i >> 6) & 3];
+        char const     *stored  = stored_keys[(i >> 4) & 3];
+        char const     *current = current_keys[(i >> 6) & 3];
         char const     *want    = kind != C6_RST_SOFTWARE        ? "not a software reset"
                                   : force                         ? "forced reflash"
                                   : verify                        ? "verify flag (last attach failed)"

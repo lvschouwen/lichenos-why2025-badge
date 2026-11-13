@@ -323,10 +323,57 @@ static void cfg_reasons(void) {
     CHECK(!lora_cfg_parse("preamble = 5\n", 13, &c, NULL, 0) && same(&c, &defaults));
 }
 
+// The limits themselves (#212): each edge value is taken, the next one past it refused with its key's reason, and
+// numbers are rounded to the nearest Hz, not cut
+static void cfg_edges(void) {
+    struct {
+        char const *text;
+        uint32_t    freq_hz, bw_hz;
+        uint8_t     sync_word;
+        uint16_t    preamble;
+    } const ok[] = {
+        {"frequency_mhz = 862\n", 862000000, 62500, 0x12, 16},
+        {"frequency_mhz = 928\n", 928000000, 62500, 0x12, 16},
+        {"bandwidth_khz = 500\n", 869618000, 500000, 0x12, 16},
+        {"sync_word = 255\n", 869618000, 62500, 255, 16},
+        {"preamble = 65535\n", 869618000, 62500, 0x12, 65535},
+        {"frequency_mhz = 869.6184996\n", 869618500, 62500, 0x12, 16},  // 869618499.6 Hz
+        {"bandwidth_khz = 62.4996\n", 869618000, 62500, 0x12, 16},      // 62499.6 Hz
+    };
+    for (size_t i = 0; i < sizeof(ok) / sizeof(ok[0]); i++) {
+        lora_config_t c;
+        char          err[128] = "x";
+        bool          got      = parse(ok[i].text, &c, err);
+        if (!got || err[0] || c.freq_hz != ok[i].freq_hz || c.bw_hz != ok[i].bw_hz || c.sync_word != ok[i].sync_word ||
+            c.preamble != ok[i].preamble) {
+            printf("FAIL edge %zu not taken as written: %s (%s, %lu Hz, %lu Hz)\n", i, ok[i].text, err,
+                   (unsigned long)c.freq_hz, (unsigned long)c.bw_hz);
+            failures++;
+        }
+    }
+    struct {
+        char const *text, *why;
+    } const past[] = {
+        {"frequency_mhz = 861.999\n", "frequency_mhz must be 862-928 MHz"},
+        {"frequency_mhz = 928.001\n", "frequency_mhz must be 862-928 MHz"},
+        {"bandwidth_khz = 500.001\n", "bandwidth_khz must be a LoRa bandwidth up to 500 kHz"},
+        {"sync_word = 256\n", "sync_word must be an integer 0-255"},
+    };
+    for (size_t i = 0; i < sizeof(past) / sizeof(past[0]); i++) {
+        lora_config_t c;
+        char          err[128] = "";
+        if (parse(past[i].text, &c, err) || !same(&c, &defaults) || strcmp(err, past[i].why) != 0) {
+            printf("FAIL past edge %zu: %s got \"%s\"\n", i, past[i].text, err);
+            failures++;
+        }
+    }
+}
+
 // Malformed config text (#212): every mutation of a full file either parses to a valid config with an empty reason,
 // or falls back to the defaults with a terminated reason. The digest pins every result (taken before the #212 split);
-// a deliberate change to the parser changes it: print the new value and say why in the commit. Inline tables are left
-// out because tomlc17 leaks one that fails to parse (third-party; LeakSanitizer would fail this test).
+// a deliberate change to the parser changes it: print the new value and say why in the commit. tomlc17 leaks the table
+// of an inline table that fails to parse (third-party): lora_link_test.lsan.supp, set by ctest, suppresses that leak
+// only, so a valid inline table (a value of the wrong type) is still tested.
 static void cfg_malformed(void) {
     static char const full[] = "# lora.toml\nfrequency_mhz = 869.618\nbandwidth_khz = 62.5\nspreading_factor = 8\n"
                                "coding_rate = 5\nsync_word = 0x12\npreamble = 16\n[extra]\nkey = \"v\"\n";
@@ -341,9 +388,6 @@ static void cfg_malformed(void) {
             memcpy(buf, full, len);
         }
         buf[len] = 0; // the documented contract: NUL-terminated text, len without the NUL
-        if (memchr(buf, '{', len)) {
-            continue; // tomlc17 leaks the table of a malformed inline table (reported with #212): not this parser's
-        }
         uint8_t *text = mut_exact(buf, len + 1);
         lora_config_t c;
         char          err[64];
@@ -361,7 +405,7 @@ static void cfg_malformed(void) {
         free(text);
     }
     failures += bad ? 1 : 0;
-    uint32_t const pinned = 0x1359c853u;
+    uint32_t const pinned = 0x810aca26u;
     if (h != pinned) {
         printf("FAIL lora_cfg_parse digest 0x%08x, pinned 0x%08x\n", (unsigned)h, (unsigned)pinned);
         failures++;
@@ -374,6 +418,7 @@ int main(void) {
     cfg_overrides();
     cfg_bad_values_fall_back();
     cfg_reasons();
+    cfg_edges();
     cfg_malformed();
     supervisor_starts_with_config();
     supervisor_reconfigures_after_c6_restart();

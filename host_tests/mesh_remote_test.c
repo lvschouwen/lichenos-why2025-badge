@@ -1,5 +1,6 @@
 // Host test: log in, status and CLI state machine for a repeater or room (#51)
 #include "mesh_remote.h"
+#include "mesh_pin.h"
 #include "mutate.h"
 
 #include <stdio.h>
@@ -442,11 +443,50 @@ static void background_gives_way(void) {
     CHECK(rr_request(&r, RR_CLI, A, "ver", 20006, &why) == 0); // the person's own request is never replaced
 }
 
-static uint32_t fnv(uint32_t h, void const *p, size_t n) {
-    uint8_t const *b = p;
-    while (n--) {
-        h = (h ^ *b++) * 16777619u;
+// Every field of the request, field by field (mesh_pin.h); why as its words, its address differs between builds
+static uint32_t pin_request(uint32_t h, rr_t const *r) {
+    PIN_V(h, r->seq);
+    PIN_V(h, r->op);
+    PIN_V(h, r->state);
+    PIN_A(h, r->prefix);
+    PIN_A(h, r->arg);
+    PIN_V(h, r->flood);
+    PIN_V(h, r->err);
+    PIN_V(h, r->refused);
+    h = r->why ? pin_fnv(h, r->why, strlen(r->why)) : pin_fnv(h, "-", 1);
+    PIN_V(h, r->asked_ms);
+    PIN_V(h, r->sent_ms);
+    PIN_V(h, r->est_ms);
+    PIN_V(h, r->done_ms);
+    PIN_V(h, r->secret);
+    PIN_V(h, r->background);
+    PIN_V(h, r->console);
+    PIN_V(h, r->logged_in);
+    PIN_V(h, r->admin);
+    PIN_A(h, r->login_prefix);
+    PIN_V(h, r->acl);
+    PIN_V(h, r->fw_level);
+    PIN_V(h, r->have_status);
+    PIN_A(h, r->status_prefix);
+    h = pin_status(h, &r->status);
+    PIN_V(h, r->have_telem);
+    PIN_A(h, r->telem_prefix);
+    PIN_V(h, r->telem_len);
+    PIN_A(h, r->telem);
+    PIN_A(h, r->cli_prefix);
+    PIN_V(h, r->cli_n);
+    PIN_V(h, r->cli_head);
+    for (size_t i = 0; i < RR_CLI_KEEP; i++) {
+        rr_exchange_t const *x = &r->cli[i];
+        PIN_V(h, x->state);
+        PIN_V(h, x->secret);
+        PIN_V(h, x->got_ms);
+        PIN_A(h, x->tag);
+        PIN_A(h, x->cmd);
+        PIN_A(h, x->reply);
     }
+    PIN_V(h, r->notag);
+    PIN_A(h, r->notag_prefix);
     return h;
 }
 
@@ -468,7 +508,7 @@ static uint32_t request_step(rr_t *r, mut_rng_t *g, uint32_t now, uint32_t h) {
             uint8_t to[MF_PREFIX];
             char    arg[RR_ARG_MAX + 1];
             seq = rr_take(r, &op, to, arg, sizeof(arg), now);
-            h   = seq ? fnv(h, arg, strlen(arg)) : h;
+            h   = seq ? pin_fnv(h, arg, strlen(arg)) : h;
             break;
         }
         case 1: {
@@ -491,12 +531,9 @@ static uint32_t request_step(rr_t *r, mut_rng_t *g, uint32_t now, uint32_t h) {
                              now, &why);
             break;
     }
-    h = fnv(h, &seq, sizeof(seq));
-    h = why ? fnv(h, why, strlen(why)) : fnv(h, "-", 1);
-    rr_t copy = *r;
-    copy.why  = NULL; // static text: its address differs between builds, its words are in the digest below
-    h         = fnv(h, &copy, sizeof(copy));
-    return r->why ? fnv(h, r->why, strlen(r->why)) : h;
+    PIN_V(h, seq);
+    h = why ? pin_fnv(h, why, strlen(why)) : pin_fnv(h, "-", 1);
+    return pin_request(h, r);
 }
 
 // Pins rr_request_prepared's results and every field it writes over a long seeded script (#212); taken before the
@@ -510,7 +547,7 @@ static void request_pin(void) {
     for (uint32_t i = 0; i < 20000; i++) {
         h = request_step(&r, &g, i * 500u, h);
     }
-    uint32_t const pinned = 0xdbf61b7eu;
+    uint32_t const pinned = 0xc199ec64u;
     if (h != pinned) {
         printf("FAIL rr_request digest 0x%08x, pinned 0x%08x\n", (unsigned)h, (unsigned)pinned);
         failures++;
