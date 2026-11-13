@@ -41,7 +41,7 @@ params	firmware/components/mesh/mesh_hist.c:mesh_hist_compact	11
 params	firmware/components/mesh/radio_confirm.c:radio_confirm_needed	10
 size	<merged-strings>	268985
 size	libapp_update.a	4602
-size	libassets.a	2351
+size	libassets.a	2683
 size	libboard.a	11341
 size	libbootloader_support.a	5942
 size	libc.a	47594
@@ -141,11 +141,11 @@ size	liblvgl_port_lib.a	6122
 size	liblwip.a	109820
 size	libmain.a	5957
 size	libmbedtls.a	22
-size	libmesh.a	397703
+size	libmesh.a	397709
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18676
 size	libnvs_sec_provider.a	2
-size	libota.a	73746
+size	libota.a	73764
 size	libpsram_guard.a	25239
 size	libpthread.a	1229
 size	libriscv.a	1684
