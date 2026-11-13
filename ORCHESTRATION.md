@@ -79,7 +79,7 @@ Every merge had an independent review and a re-review of its fix commit. Reviews
 - The MeshCore Advert & contacts page shows the owner's saved position: never copy it anywhere. Remote keys there: open the two position fields, type, cancel, submit an invalid value; nothing else (#405).
 - The helper `fw.sh` in the scratchpad sends console lines and redacts addresses; badge.sh needs the address from a scratchpad file, never printed. In a new session the scratchpad is gone: get the address with `fw wifi` over the USB console (see the bench recipes in project memory), write it to a 0600 file, never echo it.
 - DMA memory on these images: free about 156 KB, minimum about 146-149 KB (gate: 89981 / 80650).
-- Status-history polling (#168) is ON, every 10 min, to the agreed repeater: the badge transmits a request after every MeshCore start and every 10 min. The owner wants it OFF; the on-air guard refuses `mesh history <id> off` from an agent because that repeater is not in the allow file. The owner switches it off himself.
+- Status-history polling (#168) is OFF since 2026-11-13 (the owner switched it off on the badge: `fw mesh history` reads `off`, 0 of 3 slots on). The badge no longer transmits by itself after a MeshCore start, so a bench may assert an empty transmit log after a start. The on-air guard refuses any `mesh history <target>` line from badge.sh or an agent unless the target is in the allow file, also for `off`. The #412 bench step needs the polling on: leave that step for a time the owner switches it on, or prove #412 by its host tests only.
 - Updates are compressed since wave B: about 1.75 MB on the wire for a 2.76 MB image, 24-28 s.
 - The on-air guard allows sends to the test channel and the two test nodes; the owner also allows a one-off advert.
 
@@ -102,7 +102,7 @@ Every merge had an independent review and a re-review of its fix commit. Reviews
 
 ## Waiting on Lucas
 Decisions are asked at once as multiple choice with a recommendation (project memory `ask-decisions`); none is open right now. Open actions on his side:
-1. Switch the status-history polling off (see Bench facts).
+1. The SD format for the #368 proof: run `fw sd format ERASE` himself or allow that one command.
 2. One hands sitting, any time: #374 (7 Enters on About; the off dialog), #391 (physical Esc+Backspace at boot), #377 (confirm attempts on the reset dialog, with him watching), #400 (physical Messages key starts a stopped MeshCore), #11 (wire the MAX17048 breakout on J7, then the readings check).
 3. For the soak: one permission rule for the update wrapper once it exists, and a notification channel.
 Decided on 2026-11-13 and recorded on the issues: #288 (prefix + one-time move), #289 (setting, USB-only), #405 (saving a position stays hands-only), #411 (roll back after 5 min without Wi-Fi), #379 (closed on the refusal), bench debt folded into wave benches (10-15 old issues per wave, steps compiled by a read-only prep agent first), soak length and rules (#407).
