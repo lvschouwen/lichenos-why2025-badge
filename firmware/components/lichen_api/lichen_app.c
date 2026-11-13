@@ -5,6 +5,7 @@
 
 #include "app_ctx.h"
 #include "app_ns.h"
+#include "app_secret.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -49,6 +50,10 @@ static void register_backup_keys(lichen_app_t const *app) {
             return;
         }
     }
+    if (!app_secret_keys_plain(app->secret_prefix, app->backup_keys, app->backup_key_count)) {
+        ESP_LOGE(TAG, "app %s: a backup key is one of its secrets (#288): no backup for the app", app->name);
+        return;
+    }
     if (!sb_add_app_keys(app->backup_keys, app->backup_key_count)) {
         ESP_LOGE(TAG, "app %s: its backup keys do not fit the allow-list (SB_KEYS_MAX): no backup for the app", app->name);
     }
@@ -64,6 +69,12 @@ lichen_ctx_t lichen_register_app(lichen_app_t const *app) {
     app_ctx_table_t *t = table();
     if (!app) {
         ESP_LOGE(TAG, "no app to register");
+        return LICHEN_CTX_NONE;
+    }
+    // A secret prefix the OS cannot enforce would leave the app's secrets as plain settings (#288): not registered
+    if (!app_secret_prefix_ok(app->secret_prefix)) {
+        ESP_LOGE(TAG, "app %s not registered: its secret prefix is not 1..%d of a-z 0-9 _", app->name ? app->name : "?",
+                 APP_SECRET_PREFIX_MAX);
         return LICHEN_CTX_NONE;
     }
     // Two apps sharing an id would share a settings namespace, a directory and a notification source (#340): the

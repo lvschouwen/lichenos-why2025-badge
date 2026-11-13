@@ -50,23 +50,23 @@ lichen_ctx_t meshcore_ctx(void) {
     return app_ctx;
 }
 
+// The remembered passwords are the app's secrets (#288, MESHCORE_SECRET_PREFIX): never through the plain settings
 bool meshcore_pw_get(uint8_t const prefix[6], char *out, size_t cap) {
     char key[RR_PW_KEY_MAX];
     rr_pw_key(prefix, key, sizeof(key));
-    app_settings_get_str(app_ctx, key, out, cap, "");
-    return out[0] != 0;
+    return app_secret_get(app_ctx, key, out, cap) && out[0] != 0;
 }
 
 bool meshcore_pw_set(uint8_t const prefix[6], char const *password) {
     char key[RR_PW_KEY_MAX];
     rr_pw_key(prefix, key, sizeof(key));
-    return password[0] ? app_settings_set_str(app_ctx, key, password) : app_settings_erase(app_ctx, key);
+    return password[0] ? app_secret_set(app_ctx, key, password) : app_secret_erase(app_ctx, key);
 }
 
 bool meshcore_pw_forget(uint8_t const prefix[6]) {
     char key[RR_PW_KEY_MAX];
     rr_pw_key(prefix, key, sizeof(key));
-    return app_settings_erase(app_ctx, key);
+    return app_secret_erase(app_ctx, key);
 }
 
 bool meshcore_autostart(void) {

@@ -45,6 +45,11 @@ static void app_declared_keys_are_kept(void) {
     }
     CHECK(factory_keep_app_key("a.x", "k0"));  // known: still fine when full
     CHECK(!factory_keep_app_key("a.x", "k9")); // a new one: full
+    // An app's stored secret (#288, "~" + key) goes at both levels, even when it reached the keep list
+    factory_keep_app_keys_clear();
+    CHECK(factory_keep_app_key("a.pager", "~pwabc"));
+    CHECK(factory_nvs_erases("a.pager", "~pwabc", S) && factory_nvs_erases("a.pager", "~pwabc", A));
+    CHECK(factory_nvs_erases("a.meshcore", "~:moved", A));
     factory_keep_app_keys_clear();
     factory_keep_app_key("a.meshcore", "mc_advlast"); // what MeshCore's record declares
 }

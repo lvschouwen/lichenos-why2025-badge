@@ -15,8 +15,10 @@ bool app_ns_name(char const *id, char *out, size_t cap);
 // True when ns is exactly the namespace of app id (a key group an app registers may only name its own)
 bool app_ns_owns(char const *id, char const *ns);
 // The apps' declared keep-over-reset keys (lichen_app_t.keep_keys, NULL-terminated), passed one by one to add(ns, key) with
-// ns = app_ns_name(id). Returns how many were not accepted (a bad id counts them all, at least 1 when keys exist)
-size_t app_ns_declare_keep(char const *id, char const *const *keys, bool (*add)(char const *ns, char const *key));
+// ns = app_ns_name(id). A key of the app's secrets class (secret_prefix, app_secret.h) is not passed on. Returns how many
+// were not accepted (a bad id counts them all, at least 1 when keys exist)
+size_t app_ns_declare_keep(char const *id, char const *secret_prefix, char const *const *keys,
+                           bool (*add)(char const *ns, char const *key));
 
 #ifdef __cplusplus
 }

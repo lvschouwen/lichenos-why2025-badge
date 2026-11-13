@@ -13,6 +13,8 @@
 #define MESHCORE_STORAGE_ROOT   MESHCORE_APP_ID // /storage/meshcore: the identity and keys
 #define MESHCORE_STORAGE_SECRET true
 #define MESHCORE_BACKUP_KEYS    3
+// The repeater and room passwords (#288): rr_pw_key's "pw<12 hex>" (mesh_remote.h) are the app's secrets class
+#define MESHCORE_SECRET_PREFIX "pw"
 
 extern char const *const meshcore_keep_keys[]; // NULL-terminated
 extern sb_key_t const    meshcore_backup_keys[MESHCORE_BACKUP_KEYS];

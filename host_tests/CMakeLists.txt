@@ -1276,11 +1276,30 @@ add_test(NAME setup_state_test COMMAND setup_state_test)
 
 add_executable(app_ns_test
     ${CMAKE_CURRENT_SOURCE_DIR}/app_ns_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
 )
 target_include_directories(app_ns_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(app_ns_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME app_ns_test COMMAND app_ns_test)
+
+# The apps' secrets class (#288): the declared prefix, the stored name, out of backup groups and keep lists
+add_executable(app_secret_test ${CMAKE_CURRENT_SOURCE_DIR}/app_secret_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c)
+target_include_directories(app_secret_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(app_secret_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME app_secret_test COMMAND app_secret_test)
+
+# The app settings gate over a fake NVS (#288): the plain calls refuse a secret, app_secret_* the declaring app only
+add_executable(lichen_settings_test ${CMAKE_CURRENT_SOURCE_DIR}/lichen_settings_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/lichen_settings.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c)
+target_include_directories(lichen_settings_test BEFORE PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stubs/lichen_settings
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs_lvgl)
+target_include_directories(lichen_settings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
+target_compile_options(lichen_settings_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME lichen_settings_test COMMAND lichen_settings_test)
 
 # lichen_task_start's bookkeeping and lichen_alloc's per-app accounting (#181)
 foreach(book task_book mem_book)
@@ -1296,7 +1315,7 @@ endforeach()
 add_executable(badge_table_test
     ${CMAKE_CURRENT_SOURCE_DIR}/badge_table_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/badge_table.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
 )
 target_include_directories(badge_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(badge_table_test PRIVATE -Wall -Wextra -Werror)
@@ -1729,7 +1748,7 @@ add_test(NAME flash_chunk_test COMMAND flash_chunk_test)
 add_executable(fs_path_test
     ${CMAKE_CURRENT_SOURCE_DIR}/fs_path_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/fs_path.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
 )
 target_include_directories(fs_path_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
 target_compile_options(fs_path_test PRIVATE -Wall -Wextra -Werror)
@@ -1749,7 +1768,7 @@ add_executable(app_ctx_test
     ${CMAKE_CURRENT_SOURCE_DIR}/app_ctx_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ctx.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/gate_app.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/fs_path.c
 )
 target_include_directories(app_ctx_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
@@ -1772,7 +1791,7 @@ add_test(NAME gate_book_test COMMAND gate_book_test)
 add_executable(gate_app_test
     ${CMAKE_CURRENT_SOURCE_DIR}/gate_app_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/gate_app.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/fs_path.c
 )
 target_include_directories(gate_app_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
@@ -1908,7 +1927,7 @@ add_test(NAME factory_plan_test COMMAND factory_plan_test)
 
 # MeshCore's app record, pinned against the literals the OS used to carry (#230 E1d)
 add_executable(meshcore_app_record_test ${CMAKE_CURRENT_SOURCE_DIR}/meshcore_app_record_test.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/meshcore_app_record.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/factory_plan.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/files_model.c)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/meshcore_app_record.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot/factory_plan.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/files_model.c)
 target_include_directories(meshcore_app_record_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_boot ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
 target_compile_options(meshcore_app_record_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME meshcore_app_record_test COMMAND meshcore_app_record_test)

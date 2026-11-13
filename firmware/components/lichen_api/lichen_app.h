@@ -60,6 +60,11 @@ typedef struct lichen_app {
     // The app's settings that may go in the SD backup (#169), each with its own namespace; allow-list as in settings_backup.h
     sb_key_t const *backup_keys;
     size_t          backup_key_count;
+    // The app's secrets class (#288, lichen_settings.h app_secret_*): every key of its namespace that starts with this
+    // prefix ("pw" for MeshCore's repeater passwords), 1..8 of a-z 0-9 _; NULL: the app has no secrets. A prefix that
+    // breaks those rules, or a backup or keep key under it, is refused at registration (the app, its backup group,
+    // the key). Set by name like every member, so later members never move it.
+    char const *secret_prefix;
 } lichen_app_t;
 
 // Size of the app table. Home scrolls to the selection, so this only bounds the arrays; lichen_register_app logs an error

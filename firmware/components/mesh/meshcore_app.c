@@ -412,6 +412,7 @@ static lichen_app_t const meshcore_app = {
     .storage_secret   = MESHCORE_STORAGE_SECRET,
     .backup_keys      = meshcore_backup_keys,
     .backup_key_count = MESHCORE_BACKUP_KEYS,
+    .secret_prefix    = MESHCORE_SECRET_PREFIX,
 };
 
 static lichen_app_t const *self(void) {

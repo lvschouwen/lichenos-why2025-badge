@@ -1,5 +1,7 @@
 #include "app_ns.h"
 
+#include "app_secret.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -29,12 +31,14 @@ bool app_ns_owns(char const *id, char const *ns) {
     return ns && app_ns_name(id, want, sizeof(want)) && strcmp(want, ns) == 0;
 }
 
-size_t app_ns_declare_keep(char const *id, char const *const *keys, bool (*add)(char const *ns, char const *key)) {
+size_t app_ns_declare_keep(char const *id, char const *secret_prefix, char const *const *keys,
+                           bool (*add)(char const *ns, char const *key)) {
     size_t failed = 0;
     char   ns[APP_ID_MAX + 3];
     bool   ns_ok = app_ns_name(id, ns, sizeof(ns));
     for (; keys && *keys; keys++) {
-        if (!ns_ok || !add(ns, *keys)) {
+        // A secret never survives a reset (#288): one on the keep list is refused like a key that does not fit
+        if (!ns_ok || app_secret_key_secret(secret_prefix, *keys) || !add(ns, *keys)) {
             failed++;
         }
     }

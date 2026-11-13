@@ -81,17 +81,25 @@ static bool listed(char const *const *list, size_t n, char const *s) {
     return false;
 }
 
+// An app's key goes unless the app declared it kept; its secrets (#288, app_secret.h's '~' mark) go whatever it declared
+static bool app_key_erases(char const *ns, char const *key) {
+    if (key[0] == '~') {
+        return true;
+    }
+    for (size_t i = 0; i < s_keep_app_n; i++) {
+        if (strcmp(ns, s_keep_app[i][0]) == 0 && strcmp(key, s_keep_app[i][1]) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level) {
     if (!ns || !key || (level != FACTORY_SETTINGS && level != FACTORY_ALL)) {
         return false;
     }
     if (strncmp(ns, "a.", 2) == 0 && ns[2]) {
-        for (size_t i = 0; i < s_keep_app_n; i++) {
-            if (strcmp(ns, s_keep_app[i][0]) == 0 && strcmp(key, s_keep_app[i][1]) == 0) {
-                return false;
-            }
-        }
-        return true; // an app's own settings (lichen_settings.h)
+        return app_key_erases(ns, key); // an app's own settings (lichen_settings.h)
     }
     if (strncmp(ns, "badgevms_", 9) == 0 || strcmp(ns, "backlight") == 0) {
         return true; // left by the factory BadgeVMS firmware (its Wi-Fi password too); nothing in Lichen reads them

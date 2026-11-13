@@ -80,6 +80,9 @@ to `layers.conf`):
   - The text and choices are pure (`ui_text.h`, `host_tests/ui_text_test.c`).
 - `theme.h`, `fonts.h`: Lichen's colours, sizes and fonts. Use them instead of literals.
 - `lichen_settings.h`: the app's own NVS namespace `a.<id>`, from the ctx every call takes (u8, u32, u64, strings, erase, erase all). Never open NVS.
+  Secrets (#288): an app declares one key prefix in `lichen_app_t.secret_prefix` (MeshCore: `pw`); its keys under it
+  go through `app_secret_get/set/erase` only (the plain calls refuse them), never reach a backup or a keep list, are
+  never printed by the OS, and go with Clear data and a factory reset. Stored as `~<key>` in the same namespace.
 - `lichen_fs.h`: the app's directory `/storage/<id>` and, with a card in, `/sd/lichen/apps/<id>`; drive sizes. Never
   name a path outside them. Every file call on the card is inside one batch: `lichen_fs_sd_begin(ctx, wait_ms)` (false:
   no card, or busy past `wait_ms`; then no file work and no end), the work, `lichen_fs_sd_end(ctx, errno_or_0)` (only

@@ -511,7 +511,7 @@ static void start_psram(boot_ctx_t *ctx) {
 static void declare_keep_keys(void) {
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app    = lichen_app_at(i);
-        size_t              failed = app_ns_declare_keep(app->id, app->keep_keys, factory_keep_app_key);
+        size_t              failed = app_ns_declare_keep(app->id, app->secret_prefix, app->keep_keys, factory_keep_app_key);
         if (failed) {
             ESP_LOGE(TAG, "%s: %u key(s) not kept over a factory reset", app->name, (unsigned)failed);
         }
