@@ -24,6 +24,12 @@ static int failures;
 
 static rh_t t;
 
+// A fresh table whose radio has been ready since 0 (#412): the schedule tests below start settled
+static void fresh(void) {
+    rh_init(&t);
+    rh_radio(&t, true, 0);
+}
+
 static void key(uint8_t out[RH_PREFIX], uint8_t n) {
     memset(out, n, RH_PREFIX);
 }
@@ -54,7 +60,7 @@ static rr_head_t head(uint32_t seq, rr_state_t state, uint8_t const prefix[RH_PR
 
 // Nothing is ever due on a fresh table, whatever the time: off by default
 static void off_by_default(void) {
-    rh_init(&t);
+    fresh();
     for (uint32_t now = 0; now < 100000; now += 37) {
         CHECK(rh_due(&t, now, false, UINT32_MAX, false) == -1);
     }
@@ -67,7 +73,7 @@ static void off_by_default(void) {
 static void switched_on_and_interval(void) {
     uint8_t a[RH_PREFIX];
     key(a, 1);
-    rh_init(&t);
+    fresh();
     CHECK(rh_set(&t, a, true, 5, 1000) == RH_BAD); // under the 10 min floor
     CHECK(rh_set(&t, a, true, 11, 1000) == RH_BAD); // not offered
     CHECK(rh_on_count(&t) == 0);
@@ -101,7 +107,7 @@ static void switched_on_and_interval(void) {
 
 static void cap_on_slots(void) {
     uint8_t k[RH_SLOTS + 1][RH_PREFIX];
-    rh_init(&t);
+    fresh();
     for (int i = 0; i <= RH_SLOTS; i++) {
         key(k[i], (uint8_t)(10 + i));
     }
@@ -122,7 +128,7 @@ static void start_is_staggered(void) {
     for (int i = 0; i < 3; i++) {
         key(k[i], (uint8_t)(20 + i));
     }
-    rh_init(&t);
+    fresh();
     rh_load(&t, k, m, 3, 30, false);
     CHECK(rh_on_count(&t) == 3);
     CHECK(rh_due(&t, 30 + RH_FIRST_S - 1, false, UINT32_MAX, false) == -1);
@@ -142,7 +148,7 @@ static void start_is_staggered(void) {
 static void busy_and_quiet(void) {
     uint8_t a[RH_PREFIX];
     key(a, 3);
-    rh_init(&t);
+    fresh();
     rh_set(&t, a, true, 10, 0);
     CHECK(rh_due(&t, 100, true, UINT32_MAX, false) == -1);             // another request runs
     CHECK(rh_due(&t, 100, false, RH_QUIET_S - 1, false) == -1);        // the person asked a moment ago
@@ -154,7 +160,7 @@ static void busy_and_quiet(void) {
     CHECK(rh_other_age_s(&t, &h) == UINT32_MAX); // our own request is not the person's
     CHECK(rh_other_age_s(&t, NULL) == UINT32_MAX);
     // could not start: retried in RH_RETRY_S, not a miss
-    rh_init(&t);
+    fresh();
     rh_set(&t, a, true, 10, 0);
     rh_not_started(&t, 0, "LoRa is off", 50);
     CHECK(t.slot[0].misses == 0 && t.slot[0].next_s == 50 + RH_RETRY_S && strcmp(t.slot[0].why, "LoRa is off") == 0);
@@ -163,7 +169,7 @@ static void busy_and_quiet(void) {
 static void backoff(void) {
     uint8_t a[RH_PREFIX];
     key(a, 4);
-    rh_init(&t);
+    fresh();
     rh_set(&t, a, true, 10, 0);
     uint32_t now = RH_SOON_S, seq = 1;
     uint32_t want[] = {1200, 2400, 4800, 4800, 4800};
@@ -198,7 +204,7 @@ static void persons_answer(void) {
     uint8_t a[RH_PREFIX], b[RH_PREFIX];
     key(a, 5);
     key(b, 6);
-    rh_init(&t);
+    fresh();
     rh_set(&t, a, true, 30, 0);
     rr_head_t h = head(40, RR_DONE, a, 3900, 50, 7200);
     CHECK(rh_observe(&t, &h, 15));
@@ -216,7 +222,7 @@ static void persons_answer(void) {
 static void ring_and_series(void) {
     uint8_t a[RH_PREFIX];
     key(a, 7);
-    rh_init(&t);
+    fresh();
     rh_set(&t, a, true, 10, 0);
     for (uint32_t i = 0; i < RH_SAMPLES + 5; i++) {
         rr_head_t h = head(100 + i, RR_DONE, a, (uint16_t)(4000 + i), 1000 + 10 * i, 3600 * (i + 1));
@@ -265,7 +271,7 @@ static void texts(void) {
           rh_interval_next(180) == 10);
     uint8_t a[RH_PREFIX];
     key(a, 8);
-    rh_init(&t);
+    fresh();
     rh_next_text(NULL, false, 0, out, sizeof(out));
     CHECK_STR(out, "Off");
     rh_set(&t, a, true, 10, 0);
@@ -293,7 +299,7 @@ static void texts(void) {
 static void console_off(void) {
     uint8_t a[RH_PREFIX], b[RH_PREFIX], c[RH_PREFIX];
     key(a, 1), key(b, 2), key(c, 3);
-    rh_init(&t);
+    fresh();
     rh_set(&t, a, true, 30, 0);
     rh_set(&t, b, true, 60, 0);
     rh_set(&t, c, true, 10, 0);
@@ -311,7 +317,7 @@ static void console_off(void) {
 static void setting(void) {
     uint8_t a[RH_PREFIX] = {0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6}, b[RH_PREFIX] = {0, 1, 2, 3, 4, 5}, c[RH_PREFIX];
     key(c, 9);
-    rh_init(&t);
+    fresh();
     char out[RH_CFG_MAX];
     rh_cfg_encode(&t, out, sizeof(out));
     CHECK_STR(out, "");
@@ -349,7 +355,7 @@ static void setting(void) {
     rh_cfg_encode(&t, out, sizeof(out));
     CHECK_STR(out, "a1b2c3d4e5f6:30,000102030405:180");
     // the longest setting still fits: every slot console, 180 min
-    rh_init(&t);
+    fresh();
     for (int i = 0; i < RH_SLOTS; i++) {
         uint8_t k[RH_PREFIX];
         key(k, 0x40 + i);
@@ -364,7 +370,7 @@ static void setting(void) {
 static void held_by_screen(void) {
     uint8_t a[RH_PREFIX];
     key(a, 30);
-    rh_init(&t);
+    fresh();
     rh_set(&t, a, true, 10, 0);
     CHECK(rh_due(&t, 5000, false, UINT32_MAX, true) == -1);
     CHECK(rh_due(&t, 5000, false, UINT32_MAX, false) == 0);
@@ -376,11 +382,11 @@ static void crash_boot_waits_interval(void) {
     uint16_t m[2] = {30, 10};
     key(k[0], 31);
     key(k[1], 32);
-    rh_init(&t);
+    fresh();
     rh_load(&t, k, m, 2, 40, true);
     CHECK(t.slot[0].next_s == 40 + 1800 && t.slot[1].next_s == 40 + 600 + RH_STAGGER_S);
     CHECK(rh_due(&t, 40 + 600 + RH_STAGGER_S - 1, false, UINT32_MAX, false) == -1);
-    rh_init(&t);
+    fresh();
     rh_load(&t, k, m, 2, 40, false); // a clean start: the short wait
     CHECK(t.slot[0].next_s == 40 + RH_FIRST_S && t.slot[1].next_s == 40 + RH_FIRST_S + RH_STAGGER_S);
 }
@@ -389,7 +395,7 @@ static void crash_boot_waits_interval(void) {
 static void confirm_policy(void) {
     uint8_t a[RH_PREFIX];
     key(a, 33);
-    rh_init(&t);
+    fresh();
     CHECK(rh_needs_confirm(&t, a, true, 30));  // on
     CHECK(!rh_needs_confirm(&t, a, false, 30)); // off
     rh_set(&t, a, true, 30, 0);
@@ -407,7 +413,7 @@ static void last_ask_survives_eviction(void) {
     for (int i = 0; i < 3; i++) {
         key(o[i], (uint8_t)(41 + i));
     }
-    rh_init(&t);
+    fresh();
     rh_set(&t, a, true, 30, 0);
     CHECK(rh_due(&t, RH_SOON_S, false, UINT32_MAX, false) == 0);
     rh_asked(&t, 0, 1, 100);
@@ -423,7 +429,7 @@ static void last_ask_survives_eviction(void) {
     int idx = rh_find(&t, a);
     CHECK(idx >= 0 && t.slot[idx].next_s == 100 + 1800);
     // a full recent table drops its oldest entry, never the newest
-    rh_init(&t);
+    fresh();
     uint8_t p[RH_RECENT + 1][RH_PREFIX];
     for (int i = 0; i <= RH_RECENT; i++) {
         key(p[i], (uint8_t)(100 + i));
@@ -439,6 +445,137 @@ static void last_ask_survives_eviction(void) {
         last  = last || (memcmp(t.recent[i].prefix, p[RH_RECENT], RH_PREFIX) == 0 && t.recent[i].ask_s == 1000 + RH_RECENT);
     }
     CHECK(!first && last);
+}
+
+// #412: the poll waits for the radio's settings. At a start MeshCore's settings are pending until the LoRa task sends
+// them; a poll before would be cut short by them (C6 code 3, a failed send). Not ready: nobody is asked; ready: asked
+// RH_SETTLE_S after the first tick that saw it ready; a tick gap (a stop) makes a stale "ready" count from new.
+static void waits_for_radio(void) {
+    uint8_t a[RH_PREFIX];
+    key(a, 50);
+    rh_init(&t);
+    CHECK(!rh_radio_settled(&t, 1000)); // a fresh table: not ready until a tick says so
+    rh_set(&t, a, true, 10, 0);
+    CHECK(rh_due(&t, 1000, false, UINT32_MAX, false) == -1);
+    for (uint32_t now = 1000; now < 1010; now++) { // the settings pending: wait, whatever the schedule says
+        rh_radio(&t, false, now);
+        CHECK(rh_due(&t, now, false, UINT32_MAX, false) == -1);
+    }
+    rh_radio(&t, true, 1010);
+    CHECK(rh_due(&t, 1010, false, UINT32_MAX, false) == -1);
+    rh_radio(&t, true, 1011);
+    CHECK(rh_due(&t, 1011, false, UINT32_MAX, false) == -1);
+    rh_radio(&t, true, 1012);
+    CHECK(rh_due(&t, 1012, false, UINT32_MAX, false) == 0); // RH_SETTLE_S after the first ready tick
+    // MeshCore stopped and started again: no tick for a while, the first tick after sees "ready" (a stale state)
+    rh_asked(&t, 0, 1, 1012);
+    rr_head_t h = head(1, RR_DONE, a, 4000, 1, 1);
+    rh_observe(&t, &h, 1015);
+    uint32_t start = 1012 + 600 + 300; // the poll is overdue by then: before #412 it went out at once
+    rh_radio(&t, true, start);
+    CHECK(rh_due(&t, start, false, UINT32_MAX, false) == -1);
+    rh_radio(&t, true, start + 1);
+    CHECK(rh_due(&t, start + 1, false, UINT32_MAX, false) == -1);
+    rh_radio(&t, true, start + 2);
+    CHECK(rh_due(&t, start + 2, false, UINT32_MAX, false) == 0);
+    // ready, then pending again (a radio change) before the ask: waits once more
+    rh_radio(&t, false, start + 3);
+    CHECK(rh_due(&t, start + 3, false, UINT32_MAX, false) == -1);
+}
+
+// #412: a poll refused because the radio was not ready is no ask and no miss; it is tried again after RH_DEFER_S,
+// doubling, never before its regular time. A refusal for another reason is as before (RH_RETRY_S, not a miss).
+static void refused_not_ready(void) {
+    uint8_t a[RH_PREFIX];
+    key(a, 51);
+    fresh();
+    rh_set(&t, a, true, 10, 0);
+    uint32_t now = RH_SOON_S;
+    uint32_t want[] = {RH_DEFER_S, 2 * RH_DEFER_S, 4 * RH_DEFER_S, 8 * RH_DEFER_S, 8 * RH_DEFER_S};
+    for (int i = 0; i < 5; i++) {
+        rh_radio(&t, true, now - 3);
+        rh_radio(&t, true, now - 2);
+        rh_radio(&t, true, now);
+        CHECK(rh_due(&t, now, false, UINT32_MAX, false) == 0);
+        rh_not_ready(&t, 0, now);
+        CHECK(t.slot[0].misses == 0 && t.slot[0].asks == 0 && t.slot[0].ask_s == 0 && t.last_ask_s == 0);
+        CHECK(t.slot[0].next_s - now == want[i]);
+        CHECK(!rh_radio_settled(&t, now + 100)); // counts as not ready until a tick sees it ready again
+        now = t.slot[0].next_s;
+    }
+    CHECK(strcmp(t.slot[0].why, "the radio was not ready") == 0);
+    rh_radio(&t, true, now - 2);
+    rh_radio(&t, true, now);
+    CHECK(rh_due(&t, now, false, UINT32_MAX, false) == 0);
+    rh_asked(&t, 0, 7, now);
+    CHECK(t.slot[0].defers == 0 && t.slot[0].next_s == now + 600); // the regular interval, from the real ask
+    // a deferral never moves a later time sooner
+    t.slot[0].next_s = now + 5000;
+    rh_not_ready(&t, 0, now + 10);
+    CHECK(t.slot[0].next_s == now + 5000);
+    // refused for another reason: as before
+    fresh();
+    rh_set(&t, a, true, 10, 0);
+    rh_not_started(&t, 0, "LoRa is off", 50);
+    CHECK(t.slot[0].misses == 0 && t.slot[0].defers == 0 && t.slot[0].next_s == 50 + RH_RETRY_S);
+}
+
+// #412: no retry storm. A day on a fake clock, one tick a second, the radio flapping between ready and not and every
+// other attempt refused as not ready: asks per repeater never come closer than its interval, refused attempts never
+// closer than RH_DEFER_S, and there are never more asks than with a radio that is always ready.
+static uint32_t lcg(uint32_t *x) {
+    *x = *x * 1103515245u + 12345u;
+    return *x >> 16;
+}
+
+static unsigned simulate(bool flaky, uint32_t *min_ask_gap, uint32_t *min_refused_gap) {
+    uint8_t a[RH_PREFIX], b[RH_PREFIX];
+    key(a, 52);
+    key(b, 53);
+    fresh();
+    rh_set(&t, a, true, 10, 0);
+    rh_set(&t, b, true, 30, 0);
+    uint32_t seed = 412, seq = 0, last_ask[RH_SLOTS] = {0}, last_refused[RH_SLOTS] = {0};
+    unsigned asks = 0;
+    *min_ask_gap = *min_refused_gap = UINT32_MAX;
+    for (uint32_t now = 1; now < 86400; now++) {
+        bool ready = !flaky || lcg(&seed) % 4 != 0;
+        rh_radio(&t, ready, now);
+        if (t.asking >= 0 && now - t.slot[t.asking].ask_s >= 15) {
+            rr_head_t h = head(seq, RR_DONE, t.slot[t.asking].prefix, 4000, now, now);
+            rh_observe(&t, &h, now);
+        }
+        int idx = rh_due(&t, now, false, UINT32_MAX, false);
+        if (idx < 0) {
+            continue;
+        }
+        if (flaky && lcg(&seed) % 2) {
+            if (last_refused[idx] && now - last_refused[idx] < *min_refused_gap) {
+                *min_refused_gap = now - last_refused[idx];
+            }
+            last_refused[idx] = now;
+            rh_not_ready(&t, idx, now);
+            continue;
+        }
+        if (last_ask[idx] && now - last_ask[idx] < *min_ask_gap) {
+            *min_ask_gap = now - last_ask[idx];
+        }
+        last_ask[idx] = now;
+        rh_asked(&t, idx, ++seq, now);
+        asks++;
+    }
+    return asks;
+}
+
+static void no_retry_storm(void) {
+    uint32_t gap, refused_gap;
+    unsigned steady = simulate(false, &gap, &refused_gap);
+    CHECK(gap >= 600 && refused_gap == UINT32_MAX);
+    unsigned flaky = simulate(true, &gap, &refused_gap);
+    CHECK(gap >= 600);                 // the shortest interval: a refusal never shortens the regular timer
+    CHECK(refused_gap >= RH_DEFER_S);  // at most one deferred attempt per bound
+    CHECK(flaky > 0 && flaky <= steady);
+    CHECK(steady <= 86400 / 600 + 86400 / 1800 + 2);
 }
 
 int main(void) {
@@ -457,6 +594,9 @@ int main(void) {
     crash_boot_waits_interval();
     confirm_policy();
     last_ask_survives_eviction();
+    waits_for_radio();
+    refused_not_ready();
+    no_retry_storm();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

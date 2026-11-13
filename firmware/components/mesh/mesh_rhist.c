@@ -134,6 +134,7 @@ rh_result_t rh_set(rh_t *t, uint8_t const prefix[RH_PREFIX], bool on, uint16_t i
     s->on           = true;
     if (!was) {
         s->misses = 0;
+        s->defers = 0;
         s->next_s = earliest_s(s, now_s + RH_SOON_S);
     } else if (s->ask_s) {
         s->next_s = s->ask_s + rh_wait_s(s); // a new interval counts from the last ask
@@ -194,7 +195,24 @@ bool rh_needs_confirm(rh_t const *t, uint8_t const prefix[RH_PREFIX], bool on, u
     return idx < 0 || !t->slot[idx].on || interval_min < t->slot[idx].interval_min;
 }
 
+void rh_radio(rh_t *t, bool ready, uint32_t now_s) {
+    bool gap = !t->ticked || now_s - t->tick_s > RH_TICK_GAP_S;
+    if (!ready || gap || !t->ready) {
+        t->ready_s = now_s; // from now on, if ready: a stale "ready" from before a stop does not count
+    }
+    t->ready  = ready;
+    t->ticked = true;
+    t->tick_s = now_s;
+}
+
+bool rh_radio_settled(rh_t const *t, uint32_t now_s) {
+    return t->ready && now_s - t->ready_s >= RH_SETTLE_S;
+}
+
 int rh_due(rh_t const *t, uint32_t now_s, bool busy, uint32_t other_age_s, bool held) {
+    if (!rh_radio_settled(t, now_s)) {
+        return -1; // its settings may not be on the C6 yet: a packet now would be cut short by them (#412)
+    }
     if (busy || held || t->asking >= 0 || other_age_s < RH_QUIET_S) {
         return -1;
     }
@@ -218,6 +236,7 @@ void rh_asked(rh_t *t, int idx, uint32_t seq, uint32_t now_s) {
     t->last_ask_s = now_s;
     s->ask_s      = now_s;
     s->asks++;
+    s->defers     = 0;
     note_recent(t, s->prefix, now_s);
     s->next_s = now_s + rh_wait_s(s); // also when the end is never seen: the schedule cannot run away
 }
@@ -225,6 +244,19 @@ void rh_asked(rh_t *t, int idx, uint32_t seq, uint32_t now_s) {
 void rh_not_started(rh_t *t, int idx, char const *why, uint32_t now_s) {
     t->slot[idx].why    = why;
     t->slot[idx].next_s = now_s + RH_RETRY_S; // not a miss: nothing went out
+}
+
+void rh_not_ready(rh_t *t, int idx, uint32_t now_s) {
+    rh_slot_t *s = &t->slot[idx];
+    uint8_t    k = s->defers > RH_DEFER_MAX ? RH_DEFER_MAX : s->defers;
+    if (s->defers < 255) {
+        s->defers++;
+    }
+    uint32_t next = now_s + ((uint32_t)RH_DEFER_S << k);
+    s->next_s     = next > s->next_s ? next : s->next_s; // later, never sooner: nothing went out
+    s->why        = "the radio was not ready";
+    t->ready      = false; // settles again from the next tick that sees it ready
+    t->ready_s    = now_s;
 }
 
 static void record(rh_slot_t *s, mf_status_t const *st, uint32_t now_s) {

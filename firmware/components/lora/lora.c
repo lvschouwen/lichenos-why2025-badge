@@ -845,6 +845,13 @@ bool lora_internal_usable(void) {
            !__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE);
 }
 
+bool lora_settings_pending(void) {
+    portENTER_CRITICAL(&state_lock);
+    bool pending = config_changed || c6_link.lost;
+    portEXIT_CRITICAL(&state_lock);
+    return pending;
+}
+
 bool lora_up(void) {
     return __atomic_load_n(&started, __ATOMIC_ACQUIRE) && !__atomic_load_n(&stopped, __ATOMIC_ACQUIRE);
 }

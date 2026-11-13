@@ -74,6 +74,9 @@ lora_sweep_err_t lora_sweep(char const *owner, uint32_t start_hz, uint32_t step_
 // Read-only, for anyone
 // The radio task is running: started and not stopped for an update (says nothing about the C6 link)
 bool lora_up(void);
+// New settings (lora_set_radio, lora_set_tx_power: MeshCore's start) not sent to the C6 yet, or the C6 being attached
+// again (#14): a packet sent now would be cut short by them or fail (#412). Read only; any task.
+bool lora_settings_pending(void);
 // The radio settings in use (from lora.toml or the owner), for airtime estimates
 void lora_get_radio(uint8_t *sf, uint32_t *bw_hz, uint8_t *cr, uint16_t *preamble);
 // The channel's frequency in use (from lora.toml or the owner), Hz

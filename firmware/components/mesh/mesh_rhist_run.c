@@ -8,6 +8,7 @@
 #include "lichen_crashlog.h"
 #include "lichen_mem.h"
 #include "lichen_settings.h"
+#include "lora_app.h"
 #include "mesh.h"
 #include "mesh_cscope.h"
 #include "mesh_format.h"
@@ -104,6 +105,7 @@ static bool save_locked(rh_t *t) {
 // Ours ended or a person's answer came, and the next due one, all under the lock; *idx the slot to ask, -1 for none
 static void step_locked(rr_head_t const *h, bool have, uint32_t now_s, int *idx, uint8_t prefix[RH_PREFIX],
                         bool *console) {
+    rh_radio(table, !lora_settings_pending(), now_s); // #412: no poll before the C6 has MeshCore's settings
     rh_observe(table, have ? h : NULL, now_s);
     bool held = __atomic_load_n(&holds, __ATOMIC_ACQUIRE) > 0;
     *idx      = rh_due(table, now_s, !have || rr_head_busy(h), rh_other_age_s(table, have ? h : NULL), held);
@@ -113,6 +115,30 @@ static void step_locked(rr_head_t const *h, bool have, uint32_t now_s, int *idx,
     }
     if (dirty && now_s >= retry_s) {
         save_locked(table);
+    }
+}
+
+// The due slot's request, unless new settings came since step_locked: they would cut it short (#412)
+static void ask(int idx, uint8_t const prefix[RH_PREFIX], bool console, uint32_t now_s) {
+    char const *why       = NULL;
+    bool        not_ready = lora_settings_pending();
+    uint32_t    seq       = not_ready ? 0
+                                      : mesh_remote_start_background(prefix, console ? MESH_FROM_CONSOLE : MESH_FROM_SCREEN,
+                                                                     &why); // the #51 request; the person's replaces it
+    lock(portMAX_DELAY);
+    if (rh_find(table, prefix) == idx && table->slot[idx].on) { // not switched off meanwhile
+        if (not_ready) {
+            rh_not_ready(table, idx, now_s); // not an ask, not a miss: tried again within RH_DEFER_S x 8
+        } else if (seq) {
+            rh_asked(table, idx, seq, now_s);
+        } else {
+            rh_not_started(table, idx, why ? why : "could not start", now_s);
+        }
+    }
+    unlock();
+    if (seq) {
+        ESP_LOGI(TAG, "status history: asked %02x%02x%02x%02x%02x%02x (#%lu)", prefix[0], prefix[1], prefix[2],
+                 prefix[3], prefix[4], prefix[5], (unsigned long)seq);
     }
 }
 
@@ -142,22 +168,7 @@ void mesh_rhist_tick(void) {
     if (idx < 0) {
         return;
     }
-    char const *why = NULL;
-    uint32_t    seq = mesh_remote_start_background(prefix, console ? MESH_FROM_CONSOLE : MESH_FROM_SCREEN,
-                                                   &why); // the #51 request; the person's replaces it
-    lock(portMAX_DELAY);
-    if (rh_find(table, prefix) == idx && table->slot[idx].on) { // not switched off meanwhile
-        if (seq) {
-            rh_asked(table, idx, seq, now_s);
-        } else {
-            rh_not_started(table, idx, why ? why : "could not start", now_s);
-        }
-    }
-    unlock();
-    if (seq) {
-        ESP_LOGI(TAG, "status history: asked %02x%02x%02x%02x%02x%02x (#%lu)", prefix[0], prefix[1], prefix[2],
-                 prefix[3], prefix[4], prefix[5], (unsigned long)seq);
-    }
+    ask(idx, prefix, console, now_s);
 }
 
 void mesh_rhist_hold(bool open) {
