@@ -110,7 +110,7 @@ static void refresh(lv_timer_t *t) {
         char text[MESH_GRID_BADGE_MAX];
         bool countdown = mesh_grid_badge((mesh_grid_tile_t)i, c, text, sizeof(text));
         set_text(g.badge[i], text);
-        if (g.badge_dot[i] && lv_obj_has_flag(g.badge_dot[i], LV_OBJ_FLAG_HIDDEN) == countdown) {
+        if (g.badge_dot[i] && lv_obj_is_hidden(g.badge_dot[i]) == countdown) {
             lv_obj_set_hidden(g.badge_dot[i], !countdown);
         }
     }

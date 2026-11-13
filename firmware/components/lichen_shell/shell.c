@@ -254,7 +254,7 @@ static bool log_keys; // "fw keys on": a diagnostic, not saved
 static bool password_focused(void) {
     lv_group_t *g  = lv_indev_get_group(keys);
     lv_obj_t   *ta = g ? lv_group_get_focused(g) : NULL;
-    return ta && (lv_obj_has_flag(ta, TEXT_ENTRY_SECRET_FLAG) ||
+    return ta && (lv_obj_get_user_flag(ta, TEXT_ENTRY_SECRET_BIT) ||
                   (lv_obj_check_type(ta, &lv_textarea_class) && lv_textarea_get_password_mode(ta)));
 }
 

@@ -205,7 +205,7 @@ static void summary(void) {
 static lv_obj_t *make_list(lv_obj_t *screen) {
     lv_obj_t *list = lv_obj_create(screen);
     lv_obj_remove_style_all(list);
-    lv_obj_add_flag(list, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_ignore_layout(list, true);
     lv_obj_set_pos(list, 0, 0);
     lv_obj_set_size(list, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_bg_color(list, lv_color_hex(THEME_BG), 0);

@@ -27,7 +27,7 @@ void icon_bench(lv_obj_t *parent, int size_px) {
     lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
     lv_obj_t *arc = lv_arc_create(parent);
     lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
-    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(arc, false);
     lv_obj_set_size(arc, size_px * 5 / 8, size_px * 5 / 8);
     lv_arc_set_rotation(arc, 135);
     lv_arc_set_bg_angles(arc, 0, 270);
@@ -84,7 +84,7 @@ void icon_power(lv_obj_t *parent, int size_px) {
     lv_obj_set_style_arc_width(arc, w, LV_PART_INDICATOR);
     lv_obj_set_style_arc_color(arc, lv_color_hex(THEME_TEAL), LV_PART_INDICATOR);
     lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
-    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(arc, false);
     lv_obj_center(arc);
     lv_obj_t *bar = lv_obj_create(parent);
     lv_obj_remove_style_all(bar);

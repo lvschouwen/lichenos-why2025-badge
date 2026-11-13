@@ -326,10 +326,10 @@ static void add_rows(void) {
     lv_obj_t *hint = shell_page_hint(s_c.screen, "Enter", "open", "Backspace", "clear", NULL);
     if (shown) {
         s_c.clear_row = menu_add(s_c.menu, "Clear all", NULL, on_clear_all, NULL);
-        lv_obj_remove_flag(hint, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(hint, false);
     } else {
         menu_empty(s_c.menu, "notifications", "apps and Lichen post here when they have news");
-        lv_obj_add_flag(hint, LV_OBJ_FLAG_HIDDEN); // nothing to open or clear
+        lv_obj_set_hidden(hint, true); // nothing to open or clear
     }
     if (lichen_notify_dnd()) {
         menu_note(s_c.menu, "Do not disturb is on: only errors pop up (Settings \xE2\x80\xBA Notifications).");

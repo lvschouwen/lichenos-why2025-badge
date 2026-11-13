@@ -12,7 +12,7 @@
 // what you keep, and never log it. max is at most 128 characters.
 // Set on a secret entry's text area for its whole life, whether the text is shown or hidden (Tab), so callers such as
 // the key log can tell a secret field without looking at the password mode
-#define TEXT_ENTRY_SECRET_FLAG LV_OBJ_FLAG_USER_1
+#define TEXT_ENTRY_SECRET_BIT 0 // lv_obj_set_user_flag() index
 
 // Returns false, and calls nothing, when an entry is already open (there is one at a time); true once it is opening.
 bool text_entry_open(char const *title, char const *initial, bool secret, size_t max,

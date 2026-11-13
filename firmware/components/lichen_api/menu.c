@@ -137,7 +137,7 @@ static bool is_selectable(lv_obj_t *child) {
 static bool is_last_row(lv_obj_t *menu, lv_obj_t *row) {
     for (uint32_t i = lv_obj_get_index(row) + 1; i < lv_obj_get_child_count(menu); i++) {
         lv_obj_t *child = lv_obj_get_child(menu, (int32_t)i);
-        if (is_selectable(child) && !lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+        if (is_selectable(child) && !lv_obj_is_hidden(child)) {
             return false;
         }
     }
@@ -148,7 +148,7 @@ static bool is_last_row(lv_obj_t *menu, lv_obj_t *row) {
 static bool is_first_row(lv_obj_t *menu, lv_obj_t *row) {
     for (uint32_t i = 0; i < lv_obj_get_index(row); i++) {
         lv_obj_t *child = lv_obj_get_child(menu, (int32_t)i);
-        if (is_selectable(child) && !lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+        if (is_selectable(child) && !lv_obj_is_hidden(child)) {
             return false;
         }
     }
@@ -204,7 +204,7 @@ static void on_key(lv_event_t *e) {
     } else if (key == LV_KEY_ENTER) {
         // Opening a screen swaps the indev's group: not from inside its key handling. A row a filter hid (it can
         // still hold the focus when nothing matches) does nothing.
-        if (row->on_enter && row->kind != MENU_INFO && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+        if (row->on_enter && row->kind != MENU_INFO && !lv_obj_is_hidden(obj)) {
             lichen_ui_ops_later(fire_enter, row);
         }
     } else if ((key == LV_KEY_LEFT || key == LV_KEY_RIGHT) && row->slider) {
@@ -495,9 +495,9 @@ static void set_chevron(lv_obj_t *r, row_t *row, bool shown) {
     }
     if (row->chev) {
         if (shown) {
-            lv_obj_remove_flag(row->chev, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(row->chev, false);
         } else {
-            lv_obj_add_flag(row->chev, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(row->chev, true);
         }
     }
 }

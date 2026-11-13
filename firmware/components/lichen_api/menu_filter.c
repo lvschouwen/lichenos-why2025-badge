@@ -39,11 +39,11 @@ static void show_line(menu_filter_t *f, size_t shown) {
 // The focus when its row was hidden: the first row still showing, else the fallback, else it stays (hidden, so nothing
 // is highlighted and Enter does nothing)
 static lv_obj_t *refocus(menu_filter_t *f, lv_obj_t *focused) {
-    if (!focused || !lv_obj_has_flag(focused, LV_OBJ_FLAG_HIDDEN)) {
+    if (!focused || !lv_obj_is_hidden(focused)) {
         return focused;
     }
     for (size_t i = 0; i < f->n; i++) {
-        if (!lv_obj_has_flag(f->rows[i].row, LV_OBJ_FLAG_HIDDEN)) {
+        if (!lv_obj_is_hidden(f->rows[i].row)) {
             lv_group_focus_obj(f->rows[i].row);
             return f->rows[i].row;
         }
@@ -57,9 +57,9 @@ static lv_obj_t *refocus(menu_filter_t *f, lv_obj_t *focused) {
 
 static void set_hidden(lv_obj_t *obj, bool hidden) {
     if (hidden) {
-        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(obj, true);
     } else {
-        lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(obj, false);
     }
 }
 
@@ -74,10 +74,10 @@ static void apply(menu_filter_t *f) {
     set_hidden(f->none, !(f->query[0] && shown == 0 && f->n > 0));
     lv_group_t *g       = f->n ? lv_obj_get_group(f->rows[0].row) : NULL;
     lv_obj_t   *focused = g ? lv_group_get_focused(g) : NULL;
-    bool        was_hidden = focused && lv_obj_has_flag(focused, LV_OBJ_FLAG_HIDDEN);
+    bool        was_hidden = focused && lv_obj_is_hidden(focused);
     focused = refocus(f, focused);
     lv_obj_update_layout(f->menu);
-    if (focused && !lv_obj_has_flag(focused, LV_OBJ_FLAG_HIDDEN)) {
+    if (focused && !lv_obj_is_hidden(focused)) {
         lv_obj_scroll_to_view(focused, LV_ANIM_OFF);
         if (was_hidden && focused != f->fallback) {
             lv_obj_scroll_to_y(f->menu, 0, LV_ANIM_OFF); // a list that just shrank starts at its top
@@ -131,7 +131,7 @@ menu_filter_t *menu_filter_create(lv_obj_t *screen, lv_obj_t *menu, menu_filter_
     f->ctx   = ctx;
     f->line  = menu_note(menu, "");
     f->none  = menu_note(menu, "Nothing matches. Backspace edits, Esc clears.");
-    lv_obj_add_flag(f->none, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(f->none, true);
     show_line(f, 0);
     menu_on_text(menu, on_text, f);
     shell_on_esc(on_esc, f);

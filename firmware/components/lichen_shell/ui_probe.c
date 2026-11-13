@@ -422,7 +422,7 @@ static void check_wrap_height(ovf_ctx_t *ctx, lv_obj_t *obj, char const *text) {
 }
 
 static bool scrolls(lv_obj_t *o) {
-    return lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) && (lv_obj_get_scroll_dir(o) & LV_DIR_VER) &&
+    return lv_obj_is_scrollable(o) && (lv_obj_get_scroll_dir(o) & LV_DIR_VER) &&
            (lv_obj_get_scroll_bottom(o) > 0 || lv_obj_get_scroll_top(o) > 0);
 }
 

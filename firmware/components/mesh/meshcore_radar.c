@@ -73,7 +73,8 @@ static lv_obj_t *circle(lv_obj_t *parent, int d, uint32_t color, bool filled) {
         lv_obj_set_style_border_width(o, 2, 0);
         lv_obj_set_style_border_color(o, lv_color_hex(color), 0);
     }
-    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_scrollable(o, false);
+    lv_obj_set_clickable(o, false);
     return o;
 }
 
@@ -119,9 +120,9 @@ static void set_note(char const *text) {
         lv_label_set_text(note_label, text);
     }
     if (text[0]) {
-        lv_obj_remove_flag(note_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(note_label, false);
     } else {
-        lv_obj_add_flag(note_label, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(note_label, true);
     }
 }
 
@@ -240,11 +241,12 @@ static void build_body(lv_obj_t *screen) {
     lv_obj_set_flex_grow(body, 1);
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(body, 12, 0);
-    lv_obj_remove_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(body, false);
     plot = lv_obj_create(body);
     lv_obj_remove_style_all(plot);
     lv_obj_set_size(plot, PLOT_PX, PLOT_PX);
-    lv_obj_remove_flag(plot, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_scrollable(plot, false);
+    lv_obj_set_clickable(plot, false);
     lv_obj_set_parent(list.list, body);
     lv_obj_set_height(list.list, LV_PCT(100));
     lv_obj_set_flex_grow(list.list, 1);

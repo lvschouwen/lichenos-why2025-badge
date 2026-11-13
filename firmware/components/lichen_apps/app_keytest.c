@@ -106,7 +106,7 @@ static void add_cell(keytest_t *t, lv_obj_t *grid, key_layout_t const *k) {
     lv_obj_set_pos(cell, k->x * KEY_U / 4, k->row * ROW_PITCH);
     lv_obj_set_style_radius(cell, 6, 0);
     lv_obj_set_style_bg_opa(cell, LV_OPA_COVER, 0);
-    lv_obj_remove_flag(cell, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(cell, false);
     lv_obj_t *label = lv_label_create(cell);
     char      buf[8];
     lv_label_set_text(label, key_matrix_label(k->code, buf, sizeof(buf)));
@@ -125,7 +125,7 @@ static void open_keytest(lv_obj_t *screen) {
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(screen, 10, 0);
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(screen, false);
 
     lv_obj_t *title = add_label(screen, "Keyboard test", THEME_TEXT);
     lv_obj_set_style_text_font(title, lichen_font(LICHEN_FONT_LARGE), 0);

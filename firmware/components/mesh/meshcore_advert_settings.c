@@ -65,9 +65,9 @@ static void set_loc_note(char const *text) {
     }
     if (text) {
         lv_label_set_text(ui.loc_note, text);
-        lv_obj_remove_flag(ui.loc_note, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(ui.loc_note, false);
     } else {
-        lv_obj_add_flag(ui.loc_note, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(ui.loc_note, true);
     }
 }
 
@@ -266,7 +266,7 @@ static lv_obj_t *build(void) {
     ui.lon   = menu_add(menu, "Longitude", "", edit_coord, NULL);
     ui.loc_note = menu_note(menu, "");
     lv_obj_set_style_text_color(ui.loc_note, lv_color_hex(THEME_RED), 0);
-    lv_obj_add_flag(ui.loc_note, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(ui.loc_note, true);
     ui.share = menu_add(menu, "Share location in advert", "", toggle_share, NULL);
     menu_set_kind(ui.share, MENU_TOGGLE);
     menu_note(menu, "Auto-add contacts");

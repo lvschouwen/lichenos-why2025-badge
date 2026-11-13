@@ -38,7 +38,7 @@ static void show(lv_obj_t *label, char const *kind, char const *text, uint32_t c
     snprintf(line, sizeof(line), "%s%s%s", kind, kind[0] ? "  " : "", text);
     lv_label_set_text(label, line);
     colour(label, color);
-    lv_obj_remove_flag(label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(label, false);
 }
 
 static void show_expression(void) {
@@ -54,8 +54,8 @@ static void show_expression(void) {
             snprintf(text, sizeof(text), "%s (at character %zu)", calc_err_text(err), pos + 1);
         }
         show(s_w.dec, "", text, err == CALC_EMPTY ? THEME_DIM : THEME_RED);
-        lv_obj_add_flag(s_w.hex, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_w.bin, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(s_w.hex, true);
+        lv_obj_set_hidden(s_w.bin, true);
         return;
     }
     char text[CALC_FMT_MAX];

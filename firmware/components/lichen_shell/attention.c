@@ -122,8 +122,8 @@ static lv_obj_t *build_flashlight(void) {
     lv_obj_t *catcher = lv_obj_create(screen); // takes the focus, so any key reaches it
     lv_obj_remove_style_all(catcher);
     lv_obj_set_size(catcher, LV_PCT(100), LV_PCT(100));
-    lv_obj_remove_flag(catcher, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(catcher, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_set_scrollable(catcher, false);
+    lv_obj_set_click_focusable(catcher, true);
     if (!lv_obj_get_group(catcher) && lv_group_get_default()) {
         lv_group_add_obj(lv_group_get_default(), catcher);
     }

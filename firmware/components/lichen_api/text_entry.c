@@ -95,7 +95,7 @@ static lv_obj_t *build(void) {
     lv_textarea_set_max_length(ta, (uint32_t)max_len);
     lv_textarea_set_password_mode(ta, secret);
     if (secret) {
-        lv_obj_add_flag(ta, TEXT_ENTRY_SECRET_FLAG);
+        lv_obj_set_user_flag(ta, TEXT_ENTRY_SECRET_BIT, true);
     }
     lv_textarea_set_text(ta, initial);
     lv_obj_set_style_bg_color(ta, lv_color_hex(THEME_TILE), 0);

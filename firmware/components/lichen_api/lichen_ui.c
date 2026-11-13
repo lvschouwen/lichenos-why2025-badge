@@ -90,12 +90,12 @@ lv_obj_t *lichen_heading(lv_obj_t *parent, char const *kind, char const *name) {
     return box;
 }
 
-#define PAGE_HINT_FLAG LV_OBJ_FLAG_USER_2 // marks the screen's hint (USER_1 is text_entry's secret flag)
+#define PAGE_HINT_BIT 1 // user-flag index marking the screen's hint (0 is text_entry's secret bit)
 
 lv_obj_t *lichen_page_hint_of(lv_obj_t *screen) {
     for (uint32_t i = 0; screen && i < lv_obj_get_child_count(screen); i++) {
         lv_obj_t *child = lv_obj_get_child(screen, (int32_t)i);
-        if (lv_obj_has_flag(child, PAGE_HINT_FLAG)) {
+        if (lv_obj_get_user_flag(child, PAGE_HINT_BIT)) {
             return child;
         }
     }
@@ -112,13 +112,13 @@ lv_obj_t *shell_page_hint(lv_obj_t *screen, ...) {
     // the hint is the screen's child, not the menu's, so the old one would stay and pile up (#135 review)
     for (int32_t i = (int32_t)lv_obj_get_child_count(screen) - 1; i >= 0; i--) {
         lv_obj_t *child = lv_obj_get_child(screen, i);
-        if (lv_obj_has_flag(child, PAGE_HINT_FLAG)) {
+        if (lv_obj_get_user_flag(child, PAGE_HINT_BIT)) {
             lv_obj_delete(child);
         }
     }
     lv_obj_t *label = lichen_label_line(screen, LV_PCT(100));
-    lv_obj_add_flag(label, PAGE_HINT_FLAG);
-    lv_obj_add_flag(label, LV_OBJ_FLAG_FLOATING); // out of the flex flow and the scroll: it stays where it is put
+    lv_obj_set_user_flag(label, PAGE_HINT_BIT, true);
+    lv_obj_set_floating(label, true); // out of the flex flow and the scroll: it stays where it is put
     lv_obj_set_style_text_font(label, lichen_font(LICHEN_FONT_SMALL), 0);
     lv_obj_set_style_text_color(label, lv_color_hex(THEME_DIM), 0);
     // A page that scrolls as a whole (This is new, a note, a QR code) moves its text under the floating hint: the hint

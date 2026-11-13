@@ -357,7 +357,7 @@ lv_obj_t *status_bar_create(lv_obj_t *parent) {
     clock_label     = add_text(bar, "--:--", THEME_DIM);
     int32_t clock_w = fix_clock_width();
     clock_w_shown   = clock_w;
-    lv_obj_add_flag(clock_label, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_ignore_layout(clock_label, true);
     lv_obj_align(clock_label, LV_ALIGN_CENTER, 0, 0);
     c6_max_w = c6_room(word, clock_w);
 

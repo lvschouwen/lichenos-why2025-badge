@@ -304,10 +304,10 @@ static void search_enter(chat_t *c) {
     // The search line takes the focus (and the keys) before the compose line hides: hiding a focused object moves the
     // focus on, which in a DM is the Tab-retry hop
     lv_group_add_obj(group, c->search_line);
-    lv_obj_remove_flag(c->search_line, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(c->search_line, false);
     lv_group_focus_obj(c->search_line);
-    lv_obj_add_flag(c->ta, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(c->counter, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(c->ta, true);
+    lv_obj_set_hidden(c->counter, true);
     set_note(c, HINT_SEARCH, false);
     search_apply(c, false);
 }
@@ -320,11 +320,11 @@ static void search_leave(chat_t *c, bool restore) {
     c->searching = false;
     c->query[0]  = '\0';
     search_apply(c, false); // no query, no hits: every row plain again
-    lv_obj_remove_flag(c->ta, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_remove_flag(c->counter, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(c->ta, false);
+    lv_obj_set_hidden(c->counter, false);
     lv_group_focus_obj(c->ta);
     lv_group_remove_obj(c->search_line);
-    lv_obj_add_flag(c->search_line, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(c->search_line, true);
     set_default_note(c);
     if (restore) {
         // By the messages that were in view, not the pixels: new ones may have pushed them along since (#127)
@@ -597,7 +597,7 @@ static lv_obj_t *create_search_line(chat_t *c) {
     lichen_label_line_fit(line); // one line of the font plus the padding and border, so DOT cuts instead of wrapping
     lv_obj_set_style_border_color(line, lv_color_hex(THEME_AMBER), 0);
     lv_obj_set_style_outline_width(line, 0, LV_STATE_ANY);
-    lv_obj_add_flag(line, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(line, true);
     lv_obj_add_event_cb(line, on_search_key, LV_EVENT_KEY, c);
     return line;
 }

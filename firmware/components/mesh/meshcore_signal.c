@@ -75,9 +75,9 @@ static void show_empty(signal_t *s, bool empty) {
                              : "");
     for (lv_obj_t **o = (lv_obj_t *[]){s->rssi_chart, s->snr_chart, s->rssi_note, s->snr_note, s->path, NULL}; *o; o++) {
         if (empty) {
-            lv_obj_add_flag(*o, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(*o, true);
         } else {
-            lv_obj_remove_flag(*o, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(*o, false);
         }
     }
 }

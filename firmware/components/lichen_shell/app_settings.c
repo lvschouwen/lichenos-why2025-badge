@@ -378,9 +378,9 @@ static void bl_refresh(lv_timer_t *t) {
     }
     if (bl_rows[4].obj) {
         if (bl_rows[4].shown[0]) {
-            lv_obj_remove_flag(bl_rows[4].obj, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(bl_rows[4].obj, false);
         } else {
-            lv_obj_add_flag(bl_rows[4].obj, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(bl_rows[4].obj, true);
         }
     }
 }
