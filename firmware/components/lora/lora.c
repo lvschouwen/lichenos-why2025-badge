@@ -536,7 +536,8 @@ static char const *msg_name(uint8_t type) {
     }
 }
 
-static void log_packet(lora_rx_packet_t const *rx) {
+// Not inlined: its text buffers stay off the frames of the receive path (#212)
+__attribute__((noinline)) static void log_packet(lora_rx_packet_t const *rx) {
     char summary[128];
     portENTER_CRITICAL(&owner_lock);
     lora_rx_formatter_t fmt = rx_fmt;
@@ -676,99 +677,130 @@ uint32_t lora_reg_burst_ms(void) {
     return lora_regq_burst_ms(ahead);
 }
 
+// The stop for an update: the C6 stops listening (its own bridge keeps running for Wi-Fi), then this task ends. Sent
+// from here so the stop is not interleaved with this task's own sends; the mesh task's lora_send (its own send_to_c6)
+// is stopped first by main.c and refused from here on
+static void stop_for_update(void) {
+    lora_msg_t stop = {.type = LORA_MSG_RX_STOP};
+    send_to_c6(&stop);
+    __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
+    ESP_LOGI(TAG, "LoRa stopped for the update");
+    vTaskDelete(NULL);
+}
+
+static void count_bad(void) {
+    portENTER_CRITICAL(&state_lock);
+    p4_bad++;
+    portEXIT_CRITICAL(&state_lock);
+}
+
+// New settings from MeshCore since the last pass: config and RX start go out again
+static void apply_config_change(void) {
+    portENTER_CRITICAL(&state_lock);
+    bool changed   = config_changed;
+    config_changed = false;
+    portEXIT_CRITICAL(&state_lock);
+    if (changed) {
+        ESP_LOGI(TAG, "new radio settings from MeshCore");
+        run_actions(LORA_ACT_SEND_CONFIG | LORA_ACT_RX_START);
+    }
+}
+
+// Not inlined: its RX stop message would sit next to the decoded one in handle_c6_msg's frame on every packet (#212)
+__attribute__((noinline)) static void on_status(lora_sup_t *sup, lora_status_t const *st) {
+    portENTER_CRITICAL(&state_lock);
+    c6_status    = *st;
+    have_status  = true;
+    status_at_ms = now_ms();
+    portEXIT_CRITICAL(&state_lock);
+    if (st->state == LORA_STATE_ERROR) {
+        ESP_LOGE(TAG, "C6 radio error %d", st->last_radio_err);
+    }
+    if (!applied_on && st->state == LORA_STATE_RX) {
+        // Switched off while the C6 was sending: it went back to receiving afterwards
+        lora_msg_t stop = {.type = LORA_MSG_RX_STOP};
+        send_to_c6(&stop);
+    }
+    run_actions(lora_sup_on_status(sup, st, now_ms()));
+}
+
+// The answer to lora_ident_live (runtime IDENT, #36); at boot a late duplicate that nobody waits for
+static void on_ident(lora_ident_t const *id) {
+    portENTER_CRITICAL(&state_lock);
+    memcpy(live_ident_sha, id->app_elf_sha256, sizeof(live_ident_sha));
+    portEXIT_CRITICAL(&state_lock);
+    if (live_ident_done) {
+        xSemaphoreGive(live_ident_done);
+    }
+}
+
+// The C6 spoke: false for a message from before a loss (dropped); a first one after the C6 came back tells the owner
+static bool c6_heard(void) {
+    portENTER_CRITICAL(&state_lock);
+    bool     lost_now = c6_link.lost;
+    unsigned heard    = lost_now ? 0 : lora_c6_link_heard(&c6_link);
+    if (!lost_now) {
+        lora_tx_link(&tx, true); // the C6 spoke: sends may go to it again
+    }
+    portEXIT_CRITICAL(&state_lock);
+    if (lost_now) {
+        return false;
+    }
+    if (heard & LORA_C6_TELL_UP) {
+        ESP_LOGI(TAG, "C6 answers again: LoRa back");
+        tell_owner(true);
+        reg_link(true); // its LoRa service listens again: the registry asks c6.reg_caps anew
+    }
+    return true;
+}
+
+// One message from the C6. Not inlined, so the decoded message is a frame of its own below the task's (#212)
+__attribute__((noinline)) static void handle_c6_msg(lora_sup_t *sup, uint8_t const *buf, size_t len) {
+    lora_msg_t msg;
+    if (lora_decode(buf, len, &msg) != LORA_DEC_OK) {
+        count_bad();
+        return;
+    }
+    if (!c6_heard()) {
+        return; // from before the loss
+    }
+    switch (msg.type) {
+        case LORA_MSG_RX_PACKET: log_packet(&msg.u.rx); break;
+        case LORA_MSG_SWEEP: lora_sweep_answer(&msg.u.sweep); break; // #161
+        case LORA_MSG_REG_VAL: reg_answer(&msg.u.reg_val); break;   // #310
+        case LORA_MSG_STATUS: on_status(sup, &msg.u.status); break;
+        case LORA_MSG_RESULT: on_result(&msg.u.result); break;
+        case LORA_MSG_IDENT: on_ident(&msg.u.ident); break;
+        default: count_bad(); break;
+    }
+}
+
+// Waits for the next message from the C6 (rx_wait_ticks at most) and handles it. Not inlined: the queue entry's buffer
+// is a frame of its own, not the task's (#212)
+__attribute__((noinline)) static void receive_one(lora_sup_t *sup) {
+    lora_rx_msg_t raw;
+    if (xQueueReceive(rx_queue, &raw, rx_wait_ticks()) != pdTRUE || raw.len == 0) {
+        return; // a timeout, or the registry's wake token
+    }
+    handle_c6_msg(sup, raw.buf, raw.len);
+}
+
 static void lora_task(void *arg) {
     lora_sup_t sup;
     lora_sup_init(&sup, now_ms());
 
     for (;;) {
         if (__atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
-            // The C6 stops listening (its own bridge keeps running for Wi-Fi), then this task ends. Sent from here so
-            // the stop is not interleaved with this task's own sends; the mesh task's lora_send (its own send_to_c6)
-            // is stopped first by main.c and refused from here on
-            lora_msg_t stop = {.type = LORA_MSG_RX_STOP};
-            send_to_c6(&stop);
-            __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
-            ESP_LOGI(TAG, "LoRa stopped for the update");
-            vTaskDelete(NULL);
+            stop_for_update();
         }
         if (c6_link_work(&sup)) {
             continue;
         }
         apply_enabled(&sup);
         run_actions(lora_sup_tick(&sup, now_ms()));
-        portENTER_CRITICAL(&state_lock);
-        bool changed   = config_changed;
-        config_changed = false;
-        portEXIT_CRITICAL(&state_lock);
-        if (changed) {
-            ESP_LOGI(TAG, "new radio settings from MeshCore");
-            run_actions(LORA_ACT_SEND_CONFIG | LORA_ACT_RX_START);
-        }
+        apply_config_change();
         run_reg_queue(); // also while LoRa is switched off: reading the C6's settings is not radio use
-
-        lora_rx_msg_t raw;
-        if (xQueueReceive(rx_queue, &raw, rx_wait_ticks()) != pdTRUE || raw.len == 0) {
-            continue; // a timeout, or the registry's wake token
-        }
-        lora_msg_t msg;
-        if (lora_decode(raw.buf, raw.len, &msg) != LORA_DEC_OK) {
-            portENTER_CRITICAL(&state_lock);
-            p4_bad++;
-            portEXIT_CRITICAL(&state_lock);
-            continue;
-        }
-
-        portENTER_CRITICAL(&state_lock);
-        bool     lost_now = c6_link.lost;
-        unsigned heard    = lost_now ? 0 : lora_c6_link_heard(&c6_link);
-        if (!lost_now) {
-            lora_tx_link(&tx, true); // the C6 spoke: sends may go to it again
-        }
-        portEXIT_CRITICAL(&state_lock);
-        if (lost_now) {
-            continue; // from before the loss
-        }
-        if (heard & LORA_C6_TELL_UP) {
-            ESP_LOGI(TAG, "C6 answers again: LoRa back");
-            tell_owner(true);
-            reg_link(true); // its LoRa service listens again: the registry asks c6.reg_caps anew
-        }
-        switch (msg.type) {
-            case LORA_MSG_RX_PACKET: log_packet(&msg.u.rx); break;
-            case LORA_MSG_SWEEP: lora_sweep_answer(&msg.u.sweep); break; // #161
-            case LORA_MSG_REG_VAL: reg_answer(&msg.u.reg_val); break;   // #310
-            case LORA_MSG_STATUS:
-                portENTER_CRITICAL(&state_lock);
-                c6_status    = msg.u.status;
-                have_status  = true;
-                status_at_ms = now_ms();
-                portEXIT_CRITICAL(&state_lock);
-                if (msg.u.status.state == LORA_STATE_ERROR) {
-                    ESP_LOGE(TAG, "C6 radio error %d", msg.u.status.last_radio_err);
-                }
-                if (!applied_on && msg.u.status.state == LORA_STATE_RX) {
-                    // Switched off while the C6 was sending: it went back to receiving afterwards
-                    lora_msg_t stop = {.type = LORA_MSG_RX_STOP};
-                    send_to_c6(&stop);
-                }
-                run_actions(lora_sup_on_status(&sup, &msg.u.status, now_ms()));
-                break;
-            case LORA_MSG_RESULT: on_result(&msg.u.result); break;
-            case LORA_MSG_IDENT:
-                // The answer to lora_ident_live (runtime IDENT, #36); at boot a late duplicate that nobody waits for
-                portENTER_CRITICAL(&state_lock);
-                memcpy(live_ident_sha, msg.u.ident.app_elf_sha256, sizeof(live_ident_sha));
-                portEXIT_CRITICAL(&state_lock);
-                if (live_ident_done) {
-                    xSemaphoreGive(live_ident_done);
-                }
-                break;
-            default:
-                portENTER_CRITICAL(&state_lock);
-                p4_bad++;
-                portEXIT_CRITICAL(&state_lock);
-                break;
-        }
+        receive_one(&sup);
     }
 }
 
