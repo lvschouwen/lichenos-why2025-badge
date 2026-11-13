@@ -33,6 +33,7 @@ typedef struct {
     char    fail_erase[16]; // this key's erase fails
     bool    corrupt_read;  // a read-back of a stored name gives a different value
     size_t  list_cap;      // list hands out at most this many (0: as asked)
+    int     list_fail_at;  // the listing fails after this many keys (-1: never)
     unsigned ops;          // writes and erases done
 } fake_t;
 
@@ -70,37 +71,44 @@ static bool power(fake_t *f) {
     return true;
 }
 
-static size_t f_list(void *env, char const *prefix, char (*keys)[APP_SECRET_STORED_MAX], size_t cap, bool *more) {
+static bool f_list(void *env, char const *prefix, char (*keys)[APP_SECRET_STORED_MAX], size_t cap, size_t *n,
+                   bool *more) {
     fake_t *f = env;
-    size_t  n = 0;
+    *n        = 0;
     *more     = false;
     if (f->dead) {
-        return 0;
+        return false;
     }
     size_t lim = f->list_cap && f->list_cap < cap ? f->list_cap : cap;
     for (int i = 0; i < ENTRIES; i++) {
         if (f->e[i].used && !strncmp(f->e[i].key, prefix, strlen(prefix))) {
-            if (n == lim) {
+            if (f->list_fail_at >= 0 && *n == (size_t)f->list_fail_at) {
+                return false;
+            }
+            if (*n == lim) {
                 *more = true;
                 break;
             }
-            snprintf(keys[n++], APP_SECRET_STORED_MAX, "%s", f->e[i].key);
+            snprintf(keys[(*n)++], APP_SECRET_STORED_MAX, "%s", f->e[i].key);
         }
     }
-    return n;
+    return true;
 }
 
-static bool f_get(void *env, char const *key, char *out, size_t cap) {
+static app_secret_get_t f_get(void *env, char const *key, char *out, size_t cap) {
     fake_t  *f = env;
     entry_t *e = f->dead ? NULL : find(f, key);
-    if (!e || strlen(e->value) >= cap) {
-        return false;
+    if (!e) {
+        return APP_SECRET_GET_NONE;
+    }
+    if (strlen(e->value) >= cap) {
+        return APP_SECRET_GET_TOO_LONG;
     }
     strcpy(out, e->value);
     if (f->corrupt_read && key[0] == APP_SECRET_MARK) {
         out[0] ^= 1;
     }
-    return true;
+    return APP_SECRET_GET_OK;
 }
 
 static bool f_set(void *env, char const *key, char const *value) {
@@ -147,7 +155,8 @@ static char const *const values[] = {"made-up-one", "made-up-two", ""}; // an em
 
 static void seed(fake_t *f) {
     memset(f, 0, sizeof(*f));
-    f->writes_left = -1;
+    f->writes_left  = -1;
+    f->list_fail_at = -1;
     for (int i = 0; i < N; i++) {
         put(f, keys[i], values[i]);
     }
@@ -194,7 +203,8 @@ static void fresh_move(void) {
     CHECK(app_secret_move(&s, "pw", false, &c) == APP_SECRET_MOVE_ALREADY && c.moved == 0 && f.ops == ops);
     // nothing to move at all: the record still ends it
     memset(&f, 0, sizeof(f));
-    f.writes_left = -1;
+    f.writes_left  = -1;
+    f.list_fail_at = -1;
     CHECK(app_secret_move(&s, "pw", false, NULL) == APP_SECRET_MOVE_DONE && f.moved);
     // no declaration: nothing
     seed(&f);
@@ -319,16 +329,60 @@ static void more_than_a_batch(void) {
     CHECK(app_secret_move(&s, "pw", false, NULL) == APP_SECRET_MOVE_DONE && all_moved(&f));
 }
 
-static void unmovable_key(void) {
-    // a value longer than a secret may be: left plain (refused by the plain API, erased by Clear data), no record
-    fake_t             f;
-    app_secret_store_t s = store_of(&f);
+static void invalid_keys_dropped(void) {
+    // a value longer than any secret, a name too long for the mark: only from crafted storage, erased and counted
+    fake_t                  f;
+    app_secret_store_t      s = store_of(&f);
+    app_secret_move_count_t c;
     seed(&f);
     char longv[APP_SECRET_VALUE_MAX + 2];
     memset(longv, 'a', sizeof(longv) - 1);
     longv[sizeof(longv) - 1] = '\0';
     put(&f, "pwlong", longv);
-    CHECK(app_secret_move(&s, "pw", false, NULL) == APP_SECRET_MOVE_PARTIAL && at(&f, "pwlong") && !f.moved);
+    put(&f, "pw0123456789abc", "made-up"); // 15 characters: no room for the mark
+    CHECK(app_secret_move(&s, "pw", false, &c) == APP_SECRET_MOVE_DONE && c.moved == N && c.dropped == 2);
+    CHECK(!at(&f, "pwlong") && !at(&f, "~pwlong") && !at(&f, "pw0123456789abc") && all_moved(&f));
+    // an erase that fails keeps it for the next boot
+    seed(&f);
+    put(&f, "pwlong", longv);
+    strcpy(f.fail_erase, "pwlong");
+    CHECK(app_secret_move(&s, "pw", false, &c) == APP_SECRET_MOVE_PARTIAL && c.failed == 1 && !f.moved);
+}
+
+static void after_a_rollback(void) {
+    // moved once; the older image then saved a retyped password plainly next to the stale stored one
+    fake_t                  f;
+    app_secret_store_t      s = store_of(&f);
+    app_secret_move_count_t c;
+    seed(&f);
+    CHECK(app_secret_move(&s, "pw", false, NULL) == APP_SECRET_MOVE_DONE && f.moved);
+    put(&f, keys[0], "made-up-retyped");
+    CHECK(app_secret_move(&s, "pw", false, &c) == APP_SECRET_MOVE_DONE && c.moved == 1);
+    CHECK(!at(&f, keys[0]) && !strcmp(stored(&f, 0), "made-up-retyped"));
+    unsigned ops = f.ops;
+    CHECK(app_secret_move(&s, "pw", false, &c) == APP_SECRET_MOVE_ALREADY && f.ops == ops && c.moved == 0);
+}
+
+static void listing_fails(void) {
+    // at the start and in the middle: no record over keys not seen, nothing moved this boot, the next boot moves
+    for (int at_key = 0; at_key < 2; at_key++) {
+        fake_t                  f;
+        app_secret_store_t      s = store_of(&f);
+        app_secret_move_count_t c;
+        seed(&f);
+        f.list_fail_at = at_key;
+        CHECK(app_secret_move(&s, "pw", false, &c) == APP_SECRET_MOVE_PARTIAL && c.failed == 1 && !f.moved);
+        CHECK(every_value_readable(&f) && at(&f, keys[0]) && at(&f, keys[1]) && at(&f, keys[2]));
+        f.list_fail_at = -1;
+        CHECK(app_secret_move(&s, "pw", false, NULL) == APP_SECRET_MOVE_DONE && all_moved(&f));
+    }
+    // with the record already there too: still no claim that all moved
+    fake_t             f;
+    app_secret_store_t s = store_of(&f);
+    seed(&f);
+    f.moved        = true;
+    f.list_fail_at = 0;
+    CHECK(app_secret_move(&s, "pw", false, NULL) == APP_SECRET_MOVE_PARTIAL);
 }
 
 int main(void) {
@@ -338,7 +392,9 @@ int main(void) {
     injected_failures();
     plain_copy_counts_while_it_exists();
     more_than_a_batch();
-    unmovable_key();
+    invalid_keys_dropped();
+    after_a_rollback();
+    listing_fails();
     printf("%s: %d failure(s)\n", __FILE__, failures);
     return failures ? 1 : 0;
 }

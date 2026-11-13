@@ -72,6 +72,9 @@ bool factory_keep_app_key(char const *ns, char const *key);
 void factory_keep_app_keys_clear(void);
 // True when this NVS entry goes at this level
 bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level);
+// True for an entry whose name the reset's preview does not print (#288): an app's stored secret ("~" in a.<id>), whose
+// name carries a contact's id; the preview counts them instead
+bool factory_nvs_name_hidden(char const *ns, char const *key);
 // True when a top-level name on /storage survives "everything"
 bool factory_storage_keeps(char const *name);
 // Write-back order: the C6 bundle's .md5 files after the images, so a half-written bundle never looks complete

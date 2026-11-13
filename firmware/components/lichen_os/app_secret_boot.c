@@ -14,32 +14,41 @@ typedef struct {
     nvs_handle_t h;
 } env_t;
 
-static size_t list(void *env, char const *prefix, char (*keys)[APP_SECRET_STORED_MAX], size_t cap, bool *more) {
+// Only NOT_FOUND ends the walk normally (no entries, or past the last one); any other error is a failed listing, so the
+// move writes no record over keys it did not see
+static bool list(void *env, char const *prefix, char (*keys)[APP_SECRET_STORED_MAX], size_t cap, size_t *n,
+                 bool *more) {
     env_t         *e   = env;
     nvs_iterator_t it  = NULL;
-    size_t         n   = 0;
     size_t         pl  = strlen(prefix);
     esp_err_t      err = nvs_entry_find(NVS_DEFAULT_PART_NAME, e->ns, NVS_TYPE_STR, &it);
+    *n                 = 0;
     *more              = false;
     for (; err == ESP_OK; err = nvs_entry_next(&it)) {
         nvs_entry_info_t info;
-        nvs_entry_info(it, &info);
+        err = nvs_entry_info(it, &info);
+        if (err != ESP_OK) {
+            break;
+        }
         if (strncmp(info.key, prefix, pl) != 0) {
             continue;
         }
-        if (n == cap) {
+        if (*n == cap) {
             *more = true;
             break;
         }
-        strlcpy(keys[n++], info.key, APP_SECRET_STORED_MAX);
+        strlcpy(keys[(*n)++], info.key, APP_SECRET_STORED_MAX);
     }
     nvs_release_iterator(it);
-    return n;
+    return err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND; // ESP_OK: stopped at cap
 }
 
-static bool get(void *env, char const *key, char *out, size_t cap) {
-    size_t len = cap;
-    return nvs_get_str(((env_t *)env)->h, key, out, &len) == ESP_OK;
+static app_secret_get_t get(void *env, char const *key, char *out, size_t cap) {
+    size_t    len = cap;
+    esp_err_t err = nvs_get_str(((env_t *)env)->h, key, out, &len);
+    return err == ESP_OK                       ? APP_SECRET_GET_OK
+           : err == ESP_ERR_NVS_INVALID_LENGTH ? APP_SECRET_GET_TOO_LONG
+                                               : APP_SECRET_GET_NONE;
 }
 
 static bool commit(nvs_handle_t h, esp_err_t err) {

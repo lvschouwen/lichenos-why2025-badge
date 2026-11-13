@@ -113,6 +113,10 @@ bool factory_nvs_erases(char const *ns, char const *key, factory_level_t level) 
     return !listed(keep_keys, sizeof(keep_keys) / sizeof(keep_keys[0]), key);
 }
 
+bool factory_nvs_name_hidden(char const *ns, char const *key) {
+    return ns && key && strncmp(ns, "a.", 2) == 0 && ns[2] && key[0] == '~';
+}
+
 bool factory_storage_keeps(char const *name) {
     return name && listed(keep_files, sizeof(keep_files) / sizeof(keep_files[0]), name);
 }

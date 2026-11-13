@@ -167,6 +167,15 @@ simply migrates again. Not done: a scratch copy in flash. There is no spare part
 `otadata`, `phy_init`, `ota_0/1`, `coredump`, `assets`, `storage`); the 128 KB `coredump` partition could serve as one
 (plaintext secrets in flash until wiped) at the price of losing a crash dump. Decision for Lucas if the window worries him.
 
+**The apps' secrets class (#288) and this migration.** The class (`app_secret_*`, MeshCore's repeater passwords stored
+as `~pw<hex>`) keeps a secret from every software path: plain settings calls, backups, the reset's keep list, console
+output. It does not protect the flash. Until the partition is encrypted, both the stored values and the bytes of the
+old plain `pw<hex>` entries the password move erased (NVS marks an entry erased, it does not overwrite it) can be read
+from a flash dump. This migration erases the whole partition before it writes back, which removes those leftovers. The
+password move and this migration never share a boot (`lichen_nvs_migrated()` defers the move), and the image with the
+password move must never be the same flash as the encryption flash: flash it, let it boot and move, then flash for
+encryption separately.
+
 If the partition table were ever changed for this (not needed for the HMAC scheme): the `nvs_keys` partition is only for
 the flash-encryption scheme (`CONFIG_NVS_SEC_KEY_PROTECT_USING_FLASH_ENC`, 4 KB, subtype `nvs_keys`, e.g. at `0x12000`
 in the free gap before `ota_0`). The partition table is written only by USB flashing (`0x8000`), never by Wi-Fi OTA,

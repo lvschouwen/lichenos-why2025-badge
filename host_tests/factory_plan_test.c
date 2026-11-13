@@ -50,6 +50,11 @@ static void app_declared_keys_are_kept(void) {
     CHECK(factory_keep_app_key("a.pager", "~pwabc"));
     CHECK(factory_nvs_erases("a.pager", "~pwabc", S) && factory_nvs_erases("a.pager", "~pwabc", A));
     CHECK(factory_nvs_erases("a.meshcore", "~:moved", A));
+    // the preview counts them instead of printing a name that carries a contact's id
+    CHECK(factory_nvs_name_hidden("a.meshcore", "~pw0123456789ab"));
+    CHECK(!factory_nvs_name_hidden("a.meshcore", "mc_advlast") && !factory_nvs_name_hidden("badge_fw", "~x"));
+    CHECK(!factory_nvs_name_hidden("a.", "~x") && !factory_nvs_name_hidden(NULL, "~x") &&
+          !factory_nvs_name_hidden("a.x", NULL));
     factory_keep_app_keys_clear();
     factory_keep_app_key("a.meshcore", "mc_advlast"); // what MeshCore's record declares
 }

@@ -27,9 +27,9 @@ bool settings_set_blob(char const *key, void const *data, size_t size);
 // factory_reset_boot_nvs(), so a factory reset pending at this boot is already done (main.c start_nvs).
 void settings_bind_dev_mode(void);
 
-// The one-time move of an app's plain secrets into its secrets class (#288, app_secret_move.h), in namespace a.<id>
-// for the declared prefix (NULL: nothing to do). main.c calls it for every registered app, once at boot after
-// factory_reset_boot_nvs() and before anything reads an app's settings. other_migration: another settings migration
+// The move of an app's plain secrets into its secrets class (#288, app_secret_move.h), in namespace a.<id> for the
+// declared prefix (NULL: nothing to do). main.c calls it for every registered app at every boot (a no-op once none are
+// left), after factory_reset_boot_nvs() and before anything reads an app's settings. other_migration: another settings migration
 // ran this boot (lichen_nvs_migrated()), and two never share a boot: the move then waits for the next one. Logs
 // nothing; *count gets the numbers for main.c's one line.
 app_secret_move_t app_secrets_move_app(char const *id, char const *prefix, bool other_migration,

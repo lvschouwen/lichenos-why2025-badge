@@ -110,11 +110,14 @@ static size_t nvs_collect(factory_level_t level, nvs_name_t *out, size_t cap, bo
     nvs_iterator_t it  = NULL;
     size_t         n   = 0;
     esp_err_t      err = nvs_entry_find(NVS_DEFAULT_PART_NAME, NULL, NVS_TYPE_ANY, &it);
+    unsigned       hidden = 0; // the apps' secrets: counted, their names (a contact's id) not printed (#288)
     while (err == ESP_OK && (print || n < cap)) {
         nvs_entry_info_t info;
         nvs_entry_info(it, &info);
         bool erase = factory_nvs_erases(info.namespace_name, info.key, level);
-        if (print) {
+        if (print && factory_nvs_name_hidden(info.namespace_name, info.key)) {
+            hidden++;
+        } else if (print) {
             console_reply("  nvs %-5s %s/%s", erase ? "ERASE" : "keep", info.namespace_name, info.key);
         } else if (erase) {
             strlcpy(out[n].ns, info.namespace_name, sizeof(out[n].ns));
@@ -124,6 +127,9 @@ static size_t nvs_collect(factory_level_t level, nvs_name_t *out, size_t cap, bo
         err = nvs_entry_next(&it);
     }
     nvs_release_iterator(it);
+    if (hidden) {
+        console_reply("  nvs ERASE %u app secret(s), names not shown", hidden);
+    }
     return n;
 }
 
