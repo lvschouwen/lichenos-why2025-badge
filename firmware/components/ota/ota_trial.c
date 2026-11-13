@@ -1,14 +1,96 @@
 // ota_trial.h: the image's trial state, read from the OTA data in one place (#285)
 #include "ota_trial.h"
 
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "fw_console.h"
+#include "freertos/FreeRTOS.h"
 
 #include <stdatomic.h>
+#include <stdint.h>
+#include <string.h>
 
 static char const TAG[] = "ota";
 
 static _Atomic int trial_known = OTA_IMAGE_UNKNOWN; // an ota_image_state_t
+
+// The arrival mark (#411, ota_valid.h): LP RAM, which #330 measured to survive esp_restart and a panic and to be lost
+// at a power-off and the EN reset. Only this file writes it, only for the receiver's install and the dev test arm.
+static RTC_NOINIT_ATTR ota_arrival_mark_t s_mark;
+static portMUX_TYPE        s_mark_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool                s_taken;    // under s_mark_lock
+static ota_arrival_taken_t s_arrival;  // under s_mark_lock once s_taken
+
+// Takes the mark once, before anything this boot may write a new one (lock held by the caller)
+static void take_locked(uint32_t running_addr) {
+    if (!s_taken) {
+        s_arrival = ota_arrival_take(&s_mark, running_addr);
+        s_taken   = true;
+    }
+}
+
+static uint32_t running_addr(void) {
+    esp_partition_t const *run = esp_ota_get_running_partition(); // outside the spinlock: it may read flash once
+    return run ? run->address : UINT32_MAX;
+}
+
+static ota_arrival_taken_t arrival(void) {
+    uint32_t addr = running_addr();
+    portENTER_CRITICAL(&s_mark_lock);
+    take_locked(addr);
+    ota_arrival_taken_t t = s_arrival;
+    portEXIT_CRITICAL(&s_mark_lock);
+    return t;
+}
+
+ota_arrival_t ota_image_arrival(void) {
+    return arrival().arrival;
+}
+
+bool ota_image_arrival_test_no_wifi(void) {
+    return arrival().test_no_wifi;
+}
+
+void ota_image_note_wifi_install(esp_partition_t const *slot) {
+    uint32_t addr = running_addr();
+    portENTER_CRITICAL(&s_mark_lock);
+    take_locked(addr); // this boot's own arrival first: the new mark is for the next boot
+    ota_arrival_mark(&s_mark, slot->address);
+    portEXIT_CRITICAL(&s_mark_lock);
+    ESP_LOGI(TAG, "%s installed over Wi-Fi: its trial needs Wi-Fi back within %d s", slot->label,
+             OTA_VALID_NEEDS_WIFI_S);
+}
+
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+// `fw trial nowifi` (developer mode): the next Wi-Fi install's trial counts Wi-Fi as not rejoined, so it rolls back at
+// OTA_VALID_NEEDS_WIFI_S. Proves the rollback without touching an access point; it can only make a trial stricter.
+static void cmd_trial(char const *args) {
+    bool arm = strcmp(args, "nowifi") == 0;
+    if (!arm && strcmp(args, "off") != 0) {
+        console_reply("trial <nowifi|off>: the next Wi-Fi install's trial ignores Wi-Fi (rolls back), or not");
+        return;
+    }
+    uint32_t addr = running_addr();
+    portENTER_CRITICAL(&s_mark_lock);
+    take_locked(addr);
+    ota_arrival_arm_test(&s_mark, arm);
+    portEXIT_CRITICAL(&s_mark_lock);
+    if (arm) {
+        console_reply("trial: armed, the next Wi-Fi install rolls back %d s after its boot (one-shot)",
+                      OTA_VALID_NEEDS_WIFI_S);
+    } else {
+        console_reply("trial: test arm cleared");
+    }
+}
+#endif
+
+void ota_trial_register_cmds(void) {
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    console_register_dev("trial", "trial <nowifi|off> (dev: the next Wi-Fi install's trial rolls back, #411)",
+                         cmd_trial);
+#endif
+}
 
 ota_image_state_t ota_image_trial_state(void) {
     int known = atomic_load(&trial_known);

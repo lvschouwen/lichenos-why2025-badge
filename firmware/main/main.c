@@ -55,6 +55,7 @@
 #include "nvs_erase_os.h"
 #include "nvs_flash.h"
 #include "ota_server.h"
+#include "ota_os.h"
 #include "ota_trial.h"
 #include "ota_valid.h"
 #include "lichen_os.h"
@@ -889,6 +890,9 @@ static void trial_read(void *ctx, ota_trial_in_t *in) {
     in->shell_up    = in->display == OTA_DISPLAY_UP && shell_up();
     in->c6_up       = c6link_up();
     in->uptime_s    = uptime_ms() / 1000;
+    in->arrival     = ota_image_arrival(); // #411: the receiver's notion of Wi-Fi, the user's own switch
+    in->wifi_joined = !ota_image_arrival_test_no_wifi() && ota_os_wifi_on() && wifi_has_ip(NULL, 0);
+    in->wifi_off    = !ota_os_wifi_on();
 }
 
 static bool trial_mark_valid(void *ctx) {
@@ -923,18 +927,30 @@ static system_restart_gate_t restart_trial_gate(bool asked, bool power_off, bool
 // shell; a boot with the display skipped on purpose (fw noscreen) ends its trial without the shell (#293)
 static void ota_trial_wait(ota_display_t display) {
     ota_trial_io_t const io = {.read = trial_read, .mark_valid = trial_mark_valid, .wait = trial_wait, .ctx = &display};
+    if (ota_image_arrival() == OTA_ARRIVAL_WIFI && ota_image_trial_pending()) {
+        ESP_LOGW(TAG, "on trial, installed over Wi-Fi: valid once back on Wi-Fi, else a rollback at %d s of uptime%s",
+                 OTA_VALID_NEEDS_WIFI_S, ota_image_arrival_test_no_wifi() ? " (dev test arm: Wi-Fi ignored)" : "");
+    }
     ota_trial_end_t end = ota_trial_run(&io);
     atomic_store(&trial_settled, true); // before the rollback below, so a waiting restart goes too
     switch (end) {
     case OTA_TRIAL_END_VALID:
-        ESP_LOGI(TAG, "this image is now valid%s",
-                 display == OTA_DISPLAY_SKIPPED ? " (display skipped: the OS is up)" : "");
+        ESP_LOGI(TAG, "this image is now valid%s%s",
+                 display == OTA_DISPLAY_SKIPPED ? " (display skipped: the OS is up)" : "",
+                 ota_image_arrival() != OTA_ARRIVAL_WIFI ? "" : ota_os_wifi_on() ? " (back on Wi-Fi)"
+                                                                                  : " (Wi-Fi switched off: not needed)");
         update_screen_image_valid();
         break;
     case OTA_TRIAL_END_ROLL_BACK:
         // No C6 means no Wi-Fi, so nobody can replace this image: let the bootloader roll back
         ESP_LOGE(TAG, "C6 link never came up on a trial image: restarting to roll back");
         system_restart_asked("trial image: no C6 link"); // the rollback is the point
+        break;
+    case OTA_TRIAL_END_NO_WIFI:
+        // Installed over Wi-Fi and not back on it: unattended, nobody could replace it but over USB (#411)
+        ESP_LOGE(TAG, "trial image installed over Wi-Fi did not rejoin Wi-Fi within %d s: restarting to roll back",
+                 OTA_VALID_NEEDS_WIFI_S);
+        system_restart_asked("trial image: no Wi-Fi"); // the rollback is the point
         break;
     case OTA_TRIAL_END_STAY:
         ESP_LOGW(TAG, "staying on trial (%s): a reset goes back to the previous image",

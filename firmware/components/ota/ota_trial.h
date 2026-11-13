@@ -29,6 +29,16 @@ bool ota_image_mark_valid(void);
 // The bootloader marked an image invalid (a trial that failed) and that is not the one running: this boot went back to
 // the previous image. Any task.
 bool ota_rolled_back(void);
+// How this image arrived (#411): the arrival mark is taken once per boot, on the first call of this or
+// ota_image_note_wifi_install, and kept in RAM afterwards. Any task.
+ota_arrival_t ota_image_arrival(void);
+// The developer-mode test arm was set when this image was installed: its trial counts Wi-Fi as not rejoined. Any task.
+bool ota_image_arrival_test_no_wifi(void);
+// The Wi-Fi receiver made slot the boot slot after a successful install (only then): the next boot, if it boots that
+// slot, runs the trial that needs Wi-Fi. OTA task.
+void ota_image_note_wifi_install(esp_partition_t const *slot);
+// Registers the developer-mode `trial` command (compiled out of release builds). Once, at start.
+void ota_trial_register_cmds(void);
 // "fw slot": the OTA state of an app slot ("new", "pending-verify", "valid", "invalid", "aborted", "undefined", or
 // "unknown" when there is no slot or nothing could be read). Any task.
 char const *ota_slot_state_name(esp_partition_t const *p);

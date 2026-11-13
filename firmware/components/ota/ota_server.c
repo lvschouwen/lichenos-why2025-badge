@@ -511,6 +511,7 @@ static bool install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t h
         return false;
     }
     ESP_LOGI(TAG, "firmware installed in %s (%zu bytes)", slot->label, len);
+    ota_image_note_wifi_install(slot); // #411: its trial needs Wi-Fi back (ota_trial.c)
     respond(fd, 200, "installed %zu bytes (%lld sent), runs after a reboot", len, sent);
     firmware_installed = true;
     return true;
@@ -1720,6 +1721,7 @@ static void cmd_token(char const *args) {
 void ota_server_start(void) {
     console_register("ota", "ota [on|off | auto <off|minutes>] (the update server over Wi-Fi, also Settings)",
                      cmd_ota);
+    ota_trial_register_cmds();
     server_on = ota_os_get_u8(OTA_WIFI_KEY, OTA_WIFI_DEFAULT) != 0;
     uint8_t m = ota_os_get_u8(OTA_AUTO_KEY, 0);
     auto_min  = m <= OTA_AUTOOFF_MAX_MIN ? m : 0;
