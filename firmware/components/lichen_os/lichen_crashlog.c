@@ -7,6 +7,7 @@
 #include "esp_app_desc.h"
 #include "lichen_settings.h"
 #include "lichen_sys_app.h"
+#include "safe_mode.h"
 #include "sdcard.h"
 
 #include <errno.h>
@@ -208,4 +209,8 @@ uint32_t lichen_crashlog_generation(void) {
 
 bool lichen_crashlog_after_crash(void) {
     return crash_recovered();
+}
+
+bool lichen_boot_degraded(void) {
+    return crash_recovered() || safe_mode_degraded_boot(); // the first part holds before the boot step ran
 }

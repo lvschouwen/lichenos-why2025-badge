@@ -357,7 +357,13 @@ static void speed_job(void *arg) {
     if (job == JOB_ARM) {
         arm_and_restart("psram 120 arm"); // returns only when nothing was armed
     } else if (job == JOB_REARM) {
+        if (s_hooks.rearm_mark) {
+            s_hooks.rearm_mark(true);
+        }
         arm_and_restart("psram 120 re-arm after crash");
+        if (s_hooks.rearm_mark) {
+            s_hooks.rearm_mark(false); // returned: nothing was armed, no restart
+        }
     } else if (job == JOB_LEAVE) {
         ESP_LOGW(TAG, "speed: the image is valid now, leaving 120 MHz");
         leave_restart();

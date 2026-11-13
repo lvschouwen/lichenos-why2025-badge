@@ -60,6 +60,7 @@
 #include "ota_trial.h"
 #include "ota_valid.h"
 #include "lichen_os.h"
+#include "safe_mode.h"
 #include "settings_store.h"
 #include "shell.h"
 #include "soak_cmd.h"
@@ -368,6 +369,9 @@ static void start_apps(void) {
         if (!app->start_background) {
             continue;
         }
+        if (safe_mode_background_off(app->id)) { // #232: crashed twice in three boots; logged by safe_mode.c
+            continue;
+        }
         lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); // #230: its tasks inherit the app
         bool         started  = app->start_background();
         lichen_ctx_leave(previous);
@@ -575,7 +579,8 @@ static void start_nvs(boot_ctx_t *ctx) {
     static psram_speed_hooks_t const speed_hooks = {.image_on_trial = ota_image_trial_maybe, // unread = on trial
                                                     .dump_fresh     = crash_dump_fresh,
                                                     .crash_told     = crash_told,
-                                                    .update_busy    = update_busy};
+                                                    .update_busy    = update_busy,
+                                                    .rearm_mark     = safe_mode_rearm_mark};
     psram_speed_boot(&speed_hooks);
     psram_boot_oneshot_apply(); // #121: a one-shot delayline for the PSRAM bench, before storage and MeshCore load anything
     boot_progress_nvs_up();
@@ -588,6 +593,7 @@ static void start_early(boot_ctx_t *ctx) {
     settings_apply_tz(); // before anything shows the clock
     clock_boot_init();   // the carried or the saved clock (#326), before anything stamps a time
     crash_check_early(); // cheap: only decides crash_recovered(), which the boot screen reads once
+    safe_mode_boot_step(crash_recovered()); // #232: the crash's app, 2 in 3 boots = its background off
 }
 
 static void start_boot_screen(boot_ctx_t *ctx) {

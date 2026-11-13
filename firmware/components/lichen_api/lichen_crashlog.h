@@ -51,6 +51,11 @@ bool lichen_crashlog_export_sd(char *path, size_t cap);
 uint32_t lichen_crashlog_generation(void);
 // This boot follows a crash
 bool lichen_crashlog_after_crash(void);
+// A degraded boot (#232, #280): this boot follows a crash, or one of the last boots ended in one (a restart loop may be
+// under way, the PSRAM re-arm restart after a crash included). Background work that costs airtime or flash, or that
+// a loop would repeat on every boot, waits longer then. The OS decides it; an app keeps no restart policy of its own.
+// Any task.
+bool lichen_boot_degraded(void);
 
 #ifdef __cplusplus
 }

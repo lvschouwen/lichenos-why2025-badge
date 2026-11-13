@@ -67,7 +67,7 @@ static void make_table(void) {
     bool     console[RH_SLOTS];
     app_settings_get_str(meshcore_ctx(), CFG_KEY, text, sizeof(text), "");
     size_t n     = rh_cfg_decode(text, prefix, minutes, console, RH_SLOTS);
-    bool   crash = lichen_crashlog_after_crash(); // panic, watchdog, brownout: a restart loop must not ask more often
+    bool   crash = lichen_boot_degraded(); // the OS's degraded boot (#232): a restart loop must not ask more often
     rh_load(t, prefix, minutes, n, mesh_uptime_s(), crash);
     for (size_t i = 0; i < n; i++) {
         rh_set_console(t, prefix[i], console[i]); // #290: a console line's polls keep the console scope

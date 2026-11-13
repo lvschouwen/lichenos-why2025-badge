@@ -67,6 +67,14 @@ gate_app_kind_t lichen_sys_ctx_settings_ns(lichen_ctx_t ctx, char const *what, c
 // main.c, once (the main task, not on the LVGL task): "fw app ctx" (every app's context, the refusals since boot
 // and the last refused value)
 void lichen_sys_app_console_register(void);
+// More "fw app" subcommands (#232: safe mode's), set once before lichen_sys_app_console_register: every line that is
+// not "ctx" goes to more, and usage (kept by pointer) is the command's help. NULL: only "ctx". Main task, at boot.
+void lichen_sys_app_console_more(void (*more)(char const *args), char const *usage);
+
+// For the panic handler (#232): the id of the app the calling task runs for (its entered context, as lichen_ctx_self
+// would answer), NULL for the OS, an ISR, a context that is not valid or an app without an id. No lock, no log, no
+// count: it only reads the task's thread-local slot and the table. Any task, the panic handler included.
+char const *lichen_sys_panic_app_id(void);
 
 #ifdef __cplusplus
 }

@@ -153,6 +153,20 @@ lichen_ctx_t lichen_ctx_self(void) {
     return app_ctx_self(table(), &s_tls);
 }
 
+// Reads only internal .bss (the table) and the app's const struct; the panic handler runs it with the other core
+// stalled, so nothing here may wait or log
+char const *lichen_sys_panic_app_id(void) {
+    if (xPortInterruptedFromISRContext() || !app_ctx_ready(&s_table)) {
+        return NULL; // an ISR's fault is not the interrupted task's app's
+    }
+    uint32_t ctx = tls_get();
+    if (!app_ctx_valid(&s_table, ctx)) {
+        return NULL;
+    }
+    lichen_app_t const *app = app_ctx_slot_owner(&s_table, ctx);
+    return app ? app->id : NULL;
+}
+
 static char const *app_name(void const *owner) {
     lichen_app_t const *app = owner;
     return app ? (app->id ? app->id : app->name) : "the OS";
@@ -271,9 +285,21 @@ gate_app_kind_t lichen_sys_ctx_settings_ns(lichen_ctx_t ctx, char const *what, c
 
 // ---- fw app ctx ----------------------------------------------------------------------------------------------------
 
+static void (*s_more)(char const *args); // lichen_sys_app_console_more, set at boot before "app" is registered
+static char const *s_more_usage;
+
+void lichen_sys_app_console_more(void (*more)(char const *args), char const *usage) {
+    s_more       = more;
+    s_more_usage = usage;
+}
+
 static void cmd_app(char const *args) {
     if (strcmp(args, "ctx") != 0) {
-        console_reply("usage: app ctx");
+        if (s_more) {
+            s_more(args);
+        } else {
+            console_reply("usage: app ctx");
+        }
         return;
     }
     app_ctx_table_t *t = table();
@@ -288,6 +314,8 @@ static void cmd_app(char const *args) {
 }
 
 void lichen_sys_app_console_register(void) {
-    console_register("app", "app ctx (every app's context, the refusals of stale or made-up contexts since boot)",
+    console_register("app", s_more_usage ? s_more_usage
+                                         : "app ctx (every app's context, the refusals of stale or made-up contexts "
+                                           "since boot)",
                      cmd_app);
 }

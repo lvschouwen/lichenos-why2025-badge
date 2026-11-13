@@ -240,7 +240,11 @@ of #230).
 **Lifecycle (#231, after the MVP):** an app is registered, started, running, suspended (screen off or another app in
 front), stopping (cooperative, with a deadline; the OS never deletes an app's tasks) and stopped. On stop the OS frees
 the app's grants whole (memory, PSRAM quota, booked timers). Two crashes attributed to one app in three boots turn its
-background part off and notify (#232). Settings > Apps shows state and capabilities (#233). Today the OS already books
+background part off and notify (#232): the panic handler notes the app the faulting task ran for (its context; an OS
+task or an ISR blames nobody) in LP RAM, the next boot counts it (the PSRAM re-arm restart after a crash is part of
+that crash, not a clean boot), `fw app background` lists what is off and `fw app background <id> on` switches it on
+again. `lichen_boot_degraded()` (lichen_crashlog.h) tells an app that a crash is among the last boots, so a restart
+loop does not repeat costly background work; an app keeps no restart policy of its own. Settings > Apps shows state and capabilities (#233). Today the OS already books
 every app's tasks and allocations (`lichen_task.h`, `lichen_mem.h`; `fw tasks`, `fw mem`) and
 `lichen_task_leftovers` names what runs after a stop.
 

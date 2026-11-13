@@ -34,6 +34,9 @@ typedef struct {
     bool (*crash_told)(void);
     // an update is under way (a P4 OTA write, a file push, the C6 flasher): the speed's restarts wait. NULL: never
     bool (*update_busy)(void);
+    // the re-arm restart after a crash is about to happen (true) or did not (false): safe mode counts that restart
+    // and the boot after it as the crash's, not as a clean boot (#232). NULL: nobody is told
+    void (*rearm_mark)(bool restarting);
 } psram_speed_hooks_t;
 void psram_speed_boot(psram_speed_hooks_t const *hooks);
 

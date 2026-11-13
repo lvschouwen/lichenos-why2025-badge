@@ -37,17 +37,23 @@
 # reg_proxy.c (the C6 keys' cache, seq, caps, mismatch) and reg_p4_table.c (the P4 core table and the domain iteration; the P4-side domains 0x11-0x15 have a row file each, reg_p4_<domain>.c, #315), host-tested in
 # reg_service_test.c; the core is shared/reg/reg.c (Apache-2.0, also in the C6 image). reg_wifi.c (pure,
 # wifi_reg_test.c, #311) maps lichen_net's Wi-Fi read-back to the wifi.* keys.
+# Crash attribution and safe mode (#232): safe_mode.c (the LP RAM record, the panic hook, the boot step, fw app
+# background) over safe_mode_policy.c (pure, safe_mode_policy_test.c).
 idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "app_slot.c"
                             "lichen_crashlog.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "gate_book.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
                             "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "app_secret_move.c" "app_secret_boot.c" "os_bind.c" "lichen_sys_pure_view.c" "lichen_sys_view.c"
                             "ui_call_queue.c" "ui_lock_owner.c" "ui_lock_hits.c" "ui_lock_check.c" "dma_low.c" "dma_watch.c" "mem_window.c" "mem_window_watch.c"
                             "thermal.c" "thermal_rules.c" "sys_notices.c" "sys_notice_rules.c" "lichen_sys_power.c"
+                            "safe_mode.c" "safe_mode_policy.c"
                             "lichen_reg.c" "reg_cmd.c" "reg_proxy.c" "reg_p4_table.c" "reg_p4_psram.c" "reg_p4_display.c" "reg_p4_sensors.c" "reg_p4_misc.c" "reg_p4_settings.c" "settings_fail.c" "settings_reg.c" "reg_wifi.c" "disp_state.c" "disp_state_fmt.c" "../../../shared/reg/reg.c"
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "../../../shared/reg"
                        PRIV_REQUIRES lichen_api freertos esp_hw_support esp_timer assets fw_console nvs_flash heap storage sdcard
                                      crash esp_lvgl_port esp_app_format board sensors lichen_notify lichen_led lichen_haptics lichen_net ota lichen_boot lichen_clock lichen_mdns c6link psram_guard lora)
+
+# Crash attribution (#232, safe_mode.c): every panic passes safe_mode.c on its way to the IDF's handler
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")
 
 # The debug lock-owner check (#225): LVGL's allocator and lv_inv_area go through ui_lock_check.c
 if(CONFIG_LICHEN_UI_LOCK_CHECK)

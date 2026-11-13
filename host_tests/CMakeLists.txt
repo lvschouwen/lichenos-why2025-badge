@@ -2399,3 +2399,12 @@ add_executable(mesh_journal_gen_test
 target_include_directories(mesh_journal_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
 target_compile_options(mesh_journal_gen_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_journal_gen_test COMMAND mesh_journal_gen_test)
+
+# Crash attribution and safe mode (#232): the LP RAM record, 2 in 3 boots, the PSRAM re-arm pair as one crash, the list
+add_executable(safe_mode_policy_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/safe_mode_policy_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os/safe_mode_policy.c
+)
+target_include_directories(safe_mode_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
+target_compile_options(safe_mode_policy_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME safe_mode_policy_test COMMAND safe_mode_policy_test)

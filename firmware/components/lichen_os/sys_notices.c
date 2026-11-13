@@ -21,6 +21,7 @@
 #include "lichen_sys_notify.h"
 #include "psram_boot.h"
 #include "psram_speed.h"
+#include "safe_mode.h"
 #include "storage.h"
 #include "sys_notice_rules.h"
 
@@ -44,11 +45,29 @@ bool lichen_watch_boot_told(void) {
     return atomic_load(&s_boot_told);
 }
 
+// Names the app the crash is attributed to (#232), by its name when it is still registered
+static void crash_body(char *out, size_t cap) {
+    char id[SAFE_MODE_APP_ID_CAP];
+    bool off = false;
+    if (!safe_mode_crashed_app(id, sizeof(id), &off)) {
+        snprintf(out, cap, "Lichen restarted after a crash. Open this for the Crash log.");
+        return;
+    }
+    lichen_app_t const *app  = lichen_app_by_id(id);
+    char const         *name = app && app->name ? app->name : id;
+    if (off) {
+        snprintf(out, cap, "%s crashed again: its background part is off until switched on (fw app background %s on).",
+                 name, id);
+    } else {
+        snprintf(out, cap, "%s crashed and Lichen restarted. Open this for the Crash log.", name);
+    }
+}
+
 static void body_for(sysn_event_t e, sysn_snapshot_t const *s, lichen_sd_info_t const *sd, char *out, size_t cap) {
     char a[24], b[24];
     out[0] = '\0';
     switch (e) {
-    case SYSN_CRASH: snprintf(out, cap, "Lichen restarted after a crash. Open this for the Crash log."); break;
+    case SYSN_CRASH: crash_body(out, cap); break;
     case SYSN_PSRAM: psram_boot_bad(out, cap); break;
     case SYSN_PSRAM_80: psram_speed_fell(out, cap); break;
     case SYSN_CLOCK_IGNORED:
