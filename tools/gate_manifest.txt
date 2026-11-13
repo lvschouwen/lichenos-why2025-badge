@@ -39,8 +39,10 @@ badge_table_get	-	unspecified	badge_table.h
 badge_table_set	-	unspecified	badge_table.h
 bench_chat_bind	-	any	bench_scope.h
 bench_chat_on_top	-	lvgl	bench_scope.h
+bench_enter_starts	-	lvgl	bench_scope.h
 bench_scope_bind	-	any	bench_scope.h
 bench_scope_set	-	any	bench_scope.h
+bench_starts_bind	-	any	bench_scope.h
 crashlog_badge	-	unspecified	crashlog_fmt.h
 crashlog_export	-	unspecified	crashlog_fmt.h
 crashlog_export_name	-	unspecified	crashlog_fmt.h

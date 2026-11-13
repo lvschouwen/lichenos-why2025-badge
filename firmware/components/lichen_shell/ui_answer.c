@@ -58,7 +58,9 @@ static void why_text(rans_t r, remote_view_t const *v, bool page, char *why, siz
             break;
         case RANS_CHAT_TEST: snprintf(why, cap, "remote send only in " REMOTE_TEST_CHANNEL "; use fw mesh send/dm"); break;
         case RANS_SENDS:
-            snprintf(why, cap, "Enter here (screen %d) goes on air with no dialog: remote send only in " REMOTE_TEST_CHANNEL,
+            snprintf(why, cap,
+                     "this key (screen %d) makes the badge go on air with no dialog: hand-only remotely (remote send "
+                     "only in " REMOTE_TEST_CHANNEL ")",
                      v->top_screen);
             break;
         default: snprintf(why, cap, "refused"); break;
@@ -69,23 +71,24 @@ bool ui_answer_policy_key(uint8_t code) {
     return remote_key_kind(code, lichen_sys_keys_code_for) != RKEY_OTHER;
 }
 
-// LVGL task, right before the key goes down (and again before it comes up): the last look before the keyboard path
-// takes it. A dialog replacing this one in the ~40 ms until LVGL reads the key is not caught; a careful one ignores
-// it, being too new.
+// LVGL task, right before the key goes down: the last look before the keyboard path takes it. A dialog replacing this
+// one in the ~40 ms until LVGL reads the key is not caught; a careful one ignores it, being too new. (The look before
+// a tap's release only notices a change in that instant: detection, not a gate.)
 bool ui_answer_key_ok(uint8_t code, char const *focus, char const *answer_label, uint32_t answer_gen, char *why,
                       size_t cap) {
     rkey_t key = remote_key_kind(code, lichen_sys_keys_code_for);
     if (key == RKEY_OTHER) {
         return true;
     }
-    shell_dialog_info_t info;
-    remote_view_t       v;
-    char                chat[CHAT_NAME_MAX];
+    static shell_dialog_info_t info; // LVGL task only: static keeps ~250 B off its stack
+    static char                chat[CHAT_NAME_MAX];
+    remote_view_t              v;
     read_dialog(&v, &info);
-    v.top_screen = nav_current();
-    v.focus      = focus;
-    v.chat_known = bench_chat_on_top(chat, sizeof(chat), &v.chat_dm);
-    v.chat_name  = chat;
+    v.top_screen   = nav_current();
+    v.focus        = focus;
+    v.chat_known   = bench_chat_on_top(chat, sizeof(chat), &v.chat_dm);
+    v.chat_name    = chat;
+    v.enter_starts = bench_enter_starts();
     rans_t r     = answer_label && key == RKEY_ENTER ? remote_answer_still(&v, answer_label, answer_gen)
                                                      : remote_key_check(key, &v);
     if (r == RANS_OK) {

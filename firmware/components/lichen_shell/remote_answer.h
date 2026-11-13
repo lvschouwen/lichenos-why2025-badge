@@ -18,11 +18,14 @@
 //     both go only when the open chat is the channel "#badgetest" (Lucas 2026-11-13); every other channel and every DM
 //     is refused ("fw mesh send/dm" is the console's way). Typing text is fine.
 //   - The other screens where Enter goes on air with no dialog are refused outright: Trace and Discover path, Status
-//     and Telemetry (their Again rows), the repeater login and command pages, and the contact page's rows that open
-//     them (remote_contact_send_row).
+//     and Telemetry (their Again rows), the repeater login, command and settings pages, the contact page's rows that
+//     open them or send (remote_contact_send_row), a "Send advert" row anywhere (MeshCore's settings), and an Enter
+//     that starts a stopped MeshCore (a due periodic advert goes out). Advert & contacts (SCREEN_ADVERT) changes what
+//     the badge sends on its own later (interval, flood, location): Enter, Left and Right are refused there.
 //   - Esc and every other key always go: they only move or go back.
 //   - Enter, Left and Right are never held (hold:): LVGL clicks on the release, so a dialog that opened during the hold
-//     would take a key checked before it. The stepper checks them again right before the release as a second layer.
+//     would take a key checked before it. (The stepper looks again right before a tap's release; that only notices a
+//     change in the same instant and stops the sequence, it is no gate: the press is already in the queue.)
 
 // After this long a careful dialog takes Enter (DLG_CAREFUL_ARM_MS, with a margin): "fw ui answer yes" waits for it
 #define REMOTE_ANSWER_ARM_MS 1100u
@@ -55,6 +58,7 @@ typedef struct {
     bool                 chat_known; // a chat screen on top whose target was read (bench_chat_on_top)
     bool                 chat_dm;
     char const          *chat_name;  // its channel name, "#" included
+    bool                 enter_starts; // bench_enter_starts(): Enter here would start MeshCore
 } remote_view_t;
 
 // The TCA8418 code for an LVGL key (or a character), 0 when no key types it: lichen_sys_keys_code_for on the badge

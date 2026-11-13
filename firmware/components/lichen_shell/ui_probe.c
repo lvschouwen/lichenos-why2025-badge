@@ -106,26 +106,24 @@ static void inject(sequence_t *seq, uint8_t code, bool pressed) {
     seq->dropped++;
 }
 
-// Whether the remote policy (#377) lets the key with code go down or come up now; records why not, the first time
+// Whether the remote policy (#377) lets the key with code go down (or a tap come up) now; why not goes in refused.
+// seq->focus is the scratch for the focus: a failed guard, the other user of it, stops the sequence before any key.
 static bool policy_ok(sequence_t *seq, uint8_t code) {
-    char focus[LINE_CHARS] = "";
+    if (seq->refused[0]) {
+        return false; // the first reason stands
+    }
     if (!ui_answer_policy_key(code)) {
         return true;
     }
-    current_focus(focus, sizeof(focus));
-    char why[sizeof(seq->refused)];
-    if (ui_answer_key_ok(code, focus, seq->answer ? seq->answer_label : NULL, seq->answer_gen, why, sizeof(why))) {
-        return true;
-    }
-    if (!seq->refused[0]) {
-        memcpy(seq->refused, why, sizeof(why));
-    }
-    return false;
+    current_focus(seq->focus, sizeof(seq->focus));
+    return ui_answer_key_ok(code, seq->focus, seq->answer ? seq->answer_label : NULL, seq->answer_gen, seq->refused,
+                            sizeof(seq->refused));
 }
 
 static void key_up(sequence_t *seq, held_key_t const *k) {
-    // LVGL clicks on the release: a second look right before it. It still comes up (a lost release leaves the key
-    // down for every later key); the sequence stops after it.
+    // LVGL clicks on the release. A tap's release follows its press in this same call, so this look only notices a
+    // change in that instant (detection, not a gate): the key still comes up (a lost release leaves it down for every
+    // later key) and the sequence stops after it.
     policy_ok(seq, k->code);
     inject(seq, k->code, false);
     if (k->shift_code) {

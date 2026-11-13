@@ -32,6 +32,22 @@ static bool no_chat(char *name, size_t cap, bool *dm) {
     return false;
 }
 
+static bool starts_now;
+
+static bool fake_starts(void) {
+    return starts_now;
+}
+
+static void test_starts(void) {
+    CHECK(!bench_enter_starts()); // unbound: no grid was ever built
+    bench_starts_bind(fake_starts);
+    CHECK(!bench_enter_starts());
+    starts_now = true;
+    CHECK(bench_enter_starts());
+    bench_starts_bind(NULL);
+    CHECK(!bench_enter_starts());
+}
+
 static void test_chat(void) {
     char name[11];
     bool dm = true;
@@ -52,6 +68,7 @@ int main(void) {
     bench_scope_bind(NULL);
     CHECK(!bench_scope_set());
     test_chat();
+    test_starts();
     if (failures) {
         printf("bench_scope_test: %d failure(s)\n", failures);
         return 1;

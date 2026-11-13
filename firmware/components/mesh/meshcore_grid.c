@@ -8,6 +8,7 @@
 // are only where a tile is shown, and the arrows move in slots (mesh_grid_move). Settings > Arrange tiles starts it:
 // Enter picks the focused tile up, the arrows move it (insert and shift, the cells are reordered in place), Enter drops
 // and saves, Esc puts it back or ends the mode. The order is saved only on a real move (mesh_order.h).
+#include "bench_scope.h"
 #include "esp_log.h"
 #include "screen_ids.h"
 #include "lichen_clock.h"
@@ -210,6 +211,14 @@ static bool start_instead(mesh_grid_tile_t tile) {
     }
     refresh(NULL); // "Starting MeshCore..." at once
     return true;   // starting or stopping: the tiles wait for it
+}
+
+// bench_enter_starts (#377): the grid is on top and an Enter there would start MeshCore (not the Settings tile, but a
+// remote check does not read the tile: any Enter counts), which may send a due periodic advert
+static bool remote_enter_starts(void) {
+    mesh_run_t r = meshcore_run_get();
+    bool final = r.state == MESH_RUN_STOPPED && r.why == MESH_WHY_UPDATE;
+    return g.screen && shell_stack_screen(0) == g.screen && r.state != MESH_RUN_RUNNING && !final;
 }
 
 static void open_tile(void *arg) {
@@ -512,6 +521,7 @@ static void on_delete(lv_event_t *e) {
 void meshcore_grid_build(lv_obj_t *screen, lv_group_t *group) {
     memset(&g, 0, sizeof(g));
     g.screen = screen;
+    bench_starts_bind(remote_enter_starts); // from the first grid on; again is harmless
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_style_pad_row(screen, TILE_GRID_ROW_GAP, 0);

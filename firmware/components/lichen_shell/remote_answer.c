@@ -41,17 +41,25 @@ bool remote_holds_ok(uint32_t const *keys, size_t n, uint8_t (*code_of)(uint32_t
 
 // The contact page's rows that open a page which sends as it is built, or asks for a password or command to send. A
 // prefix match, so a row whose label grows ("Status history") is refused too rather than let through.
-static char const *const CONTACT_SEND_ROWS[] = {"Trace path", "Discover path", "Status", "Log in", "Command"};
+// Settings (a repeater's) opens SCREEN_RSET, which reads with CLI gets as it opens; Log out sends the logout.
+static char const *const CONTACT_SEND_ROWS[] = {"Trace path", "Discover path", "Status", "Log in",
+                                                "Command",    "Settings",      "Log out"};
+// MeshCore's settings: sends an advert at once, with no dialog (the grid's Advertise asks first)
+#define SEND_ADVERT_ROW "Send advert"
+
+static bool row_is(char const *focus, char const *row) {
+    while (*focus == '*' || *focus == ' ') {
+        focus++; // a checked row's "* "
+    }
+    return strncmp(focus, row, strlen(row)) == 0;
+}
 
 bool remote_contact_send_row(char const *focus) {
     if (!focus || !*focus) {
         return true; // no row read: fail closed
     }
-    while (*focus == '*' || *focus == ' ') {
-        focus++; // a checked row's "* "
-    }
     for (size_t i = 0; i < sizeof(CONTACT_SEND_ROWS) / sizeof(CONTACT_SEND_ROWS[0]); i++) {
-        if (strncmp(focus, CONTACT_SEND_ROWS[i], strlen(CONTACT_SEND_ROWS[i])) == 0) {
+        if (row_is(focus, CONTACT_SEND_ROWS[i])) {
             return true;
         }
     }
@@ -62,10 +70,11 @@ static bool chat_screen(int id) {
     return id == SCREEN_CHAT || id == SCREEN_DM;
 }
 
-// Pages whose Enter (Again, Ask again, Log in, Command...) goes on air with no dialog of its own
+// Pages whose Enter (Again, Ask again, Log in, Command..., Read again, an edited value's set) goes on air with no
+// dialog of its own
 static bool send_page(int id) {
     return id == SCREEN_TRACE || id == SCREEN_STATUS || id == SCREEN_TELEMETRY || id == SCREEN_LOGIN ||
-           id == SCREEN_CLI;
+           id == SCREEN_CLI || id == SCREEN_RSET;
 }
 
 static rans_t chat_rule(remote_view_t const *v) {
@@ -81,7 +90,9 @@ static rans_t page_enter(remote_view_t const *v) {
     if (chat_screen(v->top_screen)) {
         return chat_rule(v);
     }
-    if (send_page(v->top_screen) || (v->top_screen == SCREEN_CONTACT && remote_contact_send_row(v->focus))) {
+    if (send_page(v->top_screen) || v->top_screen == SCREEN_ADVERT || v->enter_starts ||
+        (v->top_screen == SCREEN_CONTACT && remote_contact_send_row(v->focus)) ||
+        (v->focus && row_is(v->focus, SEND_ADVERT_ROW))) {
         return RANS_SENDS;
     }
     return RANS_OK;
@@ -115,6 +126,9 @@ rans_t remote_key_check(rkey_t key, remote_view_t const *v) {
     // Tab, Left and Right reach the page even under a dialog's state being unsure: its rule holds either way
     if (key == RKEY_TAB) {
         return chat_screen(v->top_screen) ? chat_rule(v) : RANS_OK; // Tab-retry sends again
+    }
+    if (v->top_screen == SCREEN_ADVERT) {
+        return RANS_SENDS; // a cycle row's Left or Right changes the interval, the flood or the location shared
     }
     return remote_radio_page(v->top_screen) && !v->scope_set ? RANS_NEEDS_SCOPE : RANS_OK;
 }

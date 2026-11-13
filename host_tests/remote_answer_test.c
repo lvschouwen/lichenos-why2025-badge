@@ -229,20 +229,23 @@ static void test_chat(void) {
 }
 
 static void test_send_pages(void) {
-    int const pages[] = {SCREEN_TRACE, SCREEN_STATUS, SCREEN_TELEMETRY, SCREEN_LOGIN, SCREEN_CLI};
+    int const pages[] = {SCREEN_TRACE, SCREEN_STATUS, SCREEN_TELEMETRY, SCREEN_LOGIN, SCREEN_CLI, SCREEN_RSET};
     for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
         remote_view_t v = page(pages[i], true);
         CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS); // the scope does not open them either
-        CHECK(remote_key_check(RKEY_OTHER, &v) == RANS_OK);
+        CHECK(remote_key_check(RKEY_OTHER, &v) == RANS_OK); // Esc, Up, Down still free
+        CHECK(remote_key_check(RKEY_SIDE, &v) == RANS_OK);
     }
-    char const *sends[] = {"Trace path", "Discover path", "Status", "Status history", "Log in", "Command...", "", NULL};
+    char const *sends[] = {"Trace path", "Discover path", "Status", "Status history", "Log in",
+                           "Command...", "Settings",      "Log out", "",              NULL};
     for (size_t i = 0; i < sizeof(sends) / sizeof(sends[0]); i++) {
         remote_view_t v = page(SCREEN_CONTACT, true);
         v.focus         = sends[i];
         CHECK(remote_contact_send_row(sends[i]));
         CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS);
     }
-    char const *fine[] = {"Message", "Signal", "Favourite", "Share", "Request telemetry", "Remove", "Log out"};
+    // Posts opens the room's DM chat (the chat rule decides there); Request telemetry, Remove and Reset path ask first
+    char const *fine[] = {"Message", "Posts", "Signal", "Favourite", "Share", "Request telemetry", "Remove", "Reset path"};
     for (size_t i = 0; i < sizeof(fine) / sizeof(fine[0]); i++) {
         remote_view_t v = page(SCREEN_CONTACT, false);
         v.focus         = fine[i];
@@ -251,6 +254,29 @@ static void test_send_pages(void) {
     }
     remote_view_t v = page(SCREEN_SETTINGS, false);
     v.focus         = "Status"; // the row rule is the contact page's only
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
+    // MeshCore's settings: Send advert goes at once, with no dialog; on any screen that has the row
+    int const advert_rows[] = {SCREEN_SETTINGS, SCREEN_APP_BASE + 3};
+    for (size_t i = 0; i < 2; i++) {
+        v       = page(advert_rows[i], true);
+        v.focus = "Send advert";
+        CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS);
+        v.focus = "* Send advert";
+        CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS);
+        v.focus = "Advert & contacts"; // opens the page; its own rule below
+        CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
+    }
+    // Advert & contacts: interval, flood and location make the badge send on its own later
+    v = page(SCREEN_ADVERT, true);
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS);
+    CHECK(remote_key_check(RKEY_SIDE, &v) == RANS_SENDS);
+    CHECK(remote_key_check(RKEY_OTHER, &v) == RANS_OK);
+    // An Enter that starts a stopped MeshCore (a due periodic advert goes out)
+    v              = page(1, true); // an app's first screen (1 + its index: MeshCore's grid)
+    v.enter_starts = true;
+    CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_SENDS);
+    CHECK(remote_key_check(RKEY_SIDE, &v) == RANS_OK);
+    v.enter_starts = false;
     CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
 }
 
