@@ -1,66 +1,11 @@
 // MeshCore on the badge (#61, #65): MeshCore's own companion (examples/companion_radio MyMesh + DataStore) runs in one
 // task over the LoRa bridge; the screens and the console are its user interface and read copies taken under
 // mesh_lock (no app port: nothing to expose on a network). MyMesh's loop() holds the lock, so its callbacks (the Listener below) already run under it.
-#include "mesh_wipe.h"
-#include "mesh_rset.h"
-#include "mesh_telem.h"
-#include "mesh_link.h"
+#include "mesh_int.h"
+#include "mesh_cmd.h"
 
-#include "lora_radio.h"
-#include "mesh.h"
-#include "mesh_format.h"
-#include "mesh_advert_cfg.h"
-#include "mesh_chat.h"
-#include "mesh_cscope.h"
-#include "mesh_contact_fmt.h"
-#include "mesh_frame.h"
-#include "mesh_hist_crypto.h"
-#include "mesh_ident.h"
-#include "mesh_journal.h"
-#include "meshcore_run.h"
-#include "mesh_rset_run.h"
-#include "mesh_rhist_run.h"
-#include "channel_input.h"
-#include "mesh_pathhash.h"
-#include "mesh_mem.h"
-#include "mesh_prefs.h"
-#include "mesh_share.h"
-#include "radio_presets.h"
-#include "mesh_radio_line.h"
+using namespace mesh_int;
 
-#include "SPIFFS.h"
-
-#include <SHA256.h>
-#include <helpers/SimpleMeshTables.h>
-#include <helpers/TxtDataHelpers.h>
-
-#include "esp_log.h"
-#include "esp_timer.h"
-#include "lichen_badge.h"
-#include "lichen_fs.h"
-#include "lichen_notify.h"
-#include "lichen_radio.h"
-#include "lichen_settings.h"
-#include "mesh_notify_run.h"
-#include "lichen_random.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
-#include "freertos/task.h"
-#include "lichen_mem.h"
-#include "lichen_task.h"
-
-#include "fw_console.h"
-#include "lora_app.h"
-
-#include <strings.h>
-#include <math.h>
-#include <new>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-
-#define STORE_MESSAGES 100 // kept per chat in mesh_store (PSRAM, allocated with the chat's first message)
 #define MESH_STACK     12288 // Ed25519 checks are deep and MyMesh keeps File objects on the stack; peak 3.1 KB (#107)
 // The mesh task is LICHEN_PRIO_APP_LOOP: core 1 with LVGL, its 400-650 ms file bursts stay off core 0, where SDIO,
 // tcpip and LoRa live (#91)
@@ -94,7 +39,7 @@ public:
 };
 
 // What target.h leaves to the platform
-static LoraRadio lora_radio;
+LoraRadio mesh_int::lora_radio;
 BadgeRadio      &radio_driver = lora_radio;
 BadgeBoard       board;
 BadgeRtc        rtc_clock;
@@ -124,28 +69,10 @@ mesh::LocalIdentity radio_new_identity() {
 
 static EspRng            rng;
 static SimpleMeshTables *tables;
-static DataStore         store(SPIFFS, rtc_clock);
-static BadgeMesh        *node;
-static ob_t             *outbox;            // PSRAM; shared with the UI under the outbox lock (mesh_link.h)
-static volatile int      offline_queue_len; // MyMesh's offline queue, from the Listener (#55: stays ~0 now)
-
-// The locks of data that lives in PSRAM (the outbox, trace and remote requests, air log, signal history) or is copied
-// from or into it (the discovery table): FreeRTOS mutexes, not spinlocks, as a critical section must never touch PSRAM,
-// whose cache can be off during a flash write (lichen_task.c, #271). Never take one from an ISR or inside a critical
-// section, and never block (no other lock, no wait, no I/O) while holding one: the sections stay short copies. Made on
-// first use (thread-safe statics), so a screen may ask before MeshCore starts.
-enum section_t { SECTION_OUTBOX, SECTION_AIRLOG, SECTION_DISCOVER, SECTION_SIGNAL };
-template <section_t S> static SemaphoreHandle_t section_mutex(void) {
-    static StaticSemaphore_t buf;
-    static SemaphoreHandle_t handle = xSemaphoreCreateMutexStatic(&buf);
-    return handle;
-}
-template <section_t S> static void section_enter(void) {
-    xSemaphoreTake(section_mutex<S>(), portMAX_DELAY);
-}
-template <section_t S> static void section_exit(void) {
-    xSemaphoreGive(section_mutex<S>());
-}
+DataStore         mesh_int::store(SPIFFS, rtc_clock);
+BadgeMesh        *mesh_int::node;
+ob_t             *mesh_int::outbox;            // PSRAM; shared with the UI under the outbox lock (mesh_link.h)
+volatile int      mesh_int::offline_queue_len; // MyMesh's offline queue, from the Listener (#55: stays ~0 now)
 
 // DataStore::formatFileSystem() (the app's factory reset) erases NVS on ESP32; on the badge that would take the Wi-Fi
 // credentials with it, so DataStore.cpp is built with nvs_flash_erase renamed to this: MeshCore's own files go (the
@@ -171,20 +98,20 @@ static SemaphoreHandle_t mesh_lock_handle(void) {
     static SemaphoreHandle_t handle = xSemaphoreCreateMutexStatic(&buf);
     return handle;
 }
-static void mesh_lock(void) {
+void mesh_int::mesh_lock(void) {
     xSemaphoreTake(mesh_lock_handle(), portMAX_DELAY);
 }
-static bool mesh_lock_within(uint32_t wait_ms) {
+bool mesh_int::mesh_lock_within(uint32_t wait_ms) {
     return xSemaphoreTake(mesh_lock_handle(), wait_ms == MESH_WAIT_FOREVER ? portMAX_DELAY : pdMS_TO_TICKS(wait_ms)) ==
            pdTRUE;
 }
-static void mesh_unlock(void) {
+void mesh_int::mesh_unlock(void) {
     xSemaphoreGive(mesh_lock_handle());
 }
 
 // Running or not (#103). A stop keeps node, its tables, the outbox and the store in PSRAM: a start after a stop on
 // request only claims the radio again and makes a new task, so nothing is loaded or replayed twice.
-static TaskHandle_t mesh_task_handle; // valid only while mesh_running()
+TaskHandle_t mesh_int::mesh_task_handle; // valid only while mesh_running()
 static bool stop_requested; // mesh_stop -> the task
 static bool stop_final;     // with it: the update stop (the journal settles and wipes its key)
 static bool task_running;   // set once the first task exists
@@ -192,19 +119,19 @@ static bool stopped;        // the task -> everyone: it has saved and is gone (o
 static bool final_stop;     // stopped for an update: no start again before the restart
 static bool task_exited = true; // the task -> mesh_stop / mesh_start: radio released, about to delete itself
 
-static bool mesh_is_stopped(void) {
+bool mesh_int::mesh_is_stopped(void) {
     return __atomic_load_n(&stopped, __ATOMIC_ACQUIRE);
 }
 
 // Why a stopped MeshCore refuses, for the setters and senders
-static char const *stopped_why(void) {
+char const *mesh_int::stopped_why(void) {
     return __atomic_load_n(&final_stop, __ATOMIC_ACQUIRE) ? "MeshCore stopped for update" : "MeshCore is not running";
 }
 
 // The stored identity's check at load (#80, ident_verify): only a passed check transmits
-static mesh_ident_t ident_state;
+mesh_ident_t mesh_int::ident_state;
 
-static bool ident_tx_allowed(void) {
+bool mesh_int::ident_tx_allowed(void) {
     return mesh_ident_tx_allowed(__atomic_load_n(&ident_state, __ATOMIC_ACQUIRE));
 }
 
@@ -219,27 +146,13 @@ static SemaphoreHandle_t run_lock_handle(void) {
 // tile never waits on MeshCore
 static mesh_tile_t  tile;
 static uint32_t     tile_heard_s; // uptime of the newest message, 0 for none
-static uint32_t     tile_advert_s; // uptime + 1 of our last advert, 0 for none (+1: one sent in the first second counts)
-static portMUX_TYPE tile_mux = portMUX_INITIALIZER_UNLOCKED;
+uint32_t     mesh_int::tile_advert_s; // uptime + 1 of our last advert, 0 for none (+1: one sent in the first second counts)
+portMUX_TYPE mesh_int::tile_mux = portMUX_INITIALIZER_UNLOCKED;
 
-// The periodic advert (#52), under tile_mux: the settings' copy, when the last went out and when the next is due
-// (Unix seconds, 0 for none). Stored in the app's settings (adv_load): the schedule survives restarts, so a badge that
-// is on for an hour a day still advertises once per interval and a reboot loop never floods.
-static struct {
-    uint32_t interval_min = ADVCFG_INTERVAL_DEFAULT;
-    bool     flood_manual = false; // the manual Advertise: zero-hop unless set
-    uint32_t last_epoch   = 0;
-    uint32_t next_epoch   = 0;
-    uint32_t last_uptime  = 0; // uptime + 1 of the last advert of ours, for the minimum gap
-} adv;
-
-static void advert_tick_locked(void);
-static void discover_note_locked(mesh::Packet const *pkt); // #167
-static void discover_tick_locked(void);
-static void contacts_full_post(void);
+adv_state_t mesh_int::adv; // the periodic advert (#52), under tile_mux: mesh_int.h
 
 // The unread total over all chats, after the store changed (called under the mesh lock)
-static void tile_publish_unread(void) {
+void mesh_int::tile_publish_unread(void) {
     uint32_t total = mesh_store_unread_where(mesh_notify_counts_unread, NULL); // the number the badge and tile share (#50)
     portENTER_CRITICAL(&tile_mux);
     tile.unread_total = total;
@@ -248,7 +161,7 @@ static void tile_publish_unread(void) {
     lichen_badge_set(meshcore_ctx(), mesh_is_stopped() ? 0 : total);
 }
 
-static uint32_t tile_unread(void) {
+uint32_t mesh_int::tile_unread(void) {
     portENTER_CRITICAL(&tile_mux);
     uint32_t total = tile.unread_total;
     portEXIT_CRITICAL(&tile_mux);
@@ -535,7 +448,7 @@ extern "C" size_t mesh_contact_set_path(uint8_t const prefix[6], uint8_t path_le
 }
 
 // MeshCore writes contacts lazily; a firmware update must not lose the last few minutes of them
-static bool (*const keep_contact)(ContactInfo const &c) = BadgeMesh::keepContact;
+bool (*const mesh_int::keep_contact)(ContactInfo const &c) = BadgeMesh::keepContact;
 
 // MeshCore's own reboot (an admin's "reboot" CLI command, the companion protocol) runs on the mesh task inside
 // node->loop(), with the mesh lock held. The OS's restart save (system_restart -> stop_for_update, #123) would wait for
@@ -796,7 +709,7 @@ extern "C" bool mesh_stop(mesh_stop_reason_t why) {
 // The stored identity's check (#80): once, at the first load. A mismatch, or a file MyMesh could not read (#109),
 // blocks every transmit until a restart, at the senders (nothing is queued to fail later) and at the radio (MeshCore's
 // own ACKs, paths and adverts). The file is never rewritten or regenerated here: it may be the only copy of the identity.
-static void ident_apply(mesh_ident_t state, bool simulated) {
+void mesh_int::ident_apply(mesh_ident_t state, bool simulated) {
     __atomic_store_n(&ident_state, state, __ATOMIC_RELEASE);
     __atomic_store_n(&lora_radio.tx_blocked, !mesh_ident_tx_allowed(state), __ATOMIC_RELEASE);
     if (mesh_ident_tx_allowed(state)) {
@@ -873,7 +786,7 @@ static struct {
 static portMUX_TYPE    settings_mux = portMUX_INITIALIZER_UNLOCKED;
 
 // Under the mesh lock: the copies the screens read
-static void settings_from_node(MyMesh *n) {
+void mesh_int::settings_from_node(MyMesh *n) {
     NodePrefs const *prefs = n->getNodePrefs();
     mesh_settings_t  s     = {};
     snprintf(s.name, sizeof(s.name), "%s", prefs->node_name);
@@ -910,7 +823,7 @@ extern "C" bool mesh_get_settings(mesh_settings_t *out) {
 }
 
 // The lock for a setter, or why there is none (then the lock is not held)
-static char const *settings_lock(void) {
+char const *mesh_int::settings_lock(void) {
     if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE)) {
         return "MeshCore is not running";
     }
@@ -1069,7 +982,7 @@ extern "C" char const *mesh_channel_add(char const *name_in, char const *b64_key
 
 // The slot of the channel a typed name means (channel_name_match: "badgetest" finds "#badgetest", an exact name wins),
 // -1 for none. With the lock held.
-static int channel_find_locked(char const *typed) {
+int mesh_int::channel_find_locked(char const *typed) {
     ChannelDetails slot;
     int            best = -1, best_match = CHANNEL_MATCH_NONE;
     for (int i = 0; i < MAX_GROUP_CHANNELS && node->getChannel(i, slot); i++) {
@@ -1316,7 +1229,7 @@ static lichen_ctx_t adv_app(void) {
 }
 
 // At start, before the task runs
-static void adv_load(void) {
+void mesh_int::adv_load(void) {
     lichen_ctx_t app      = adv_app();
     uint32_t     interval = app_settings_get_u32(app, ADV_KEY_INTERVAL, ADVCFG_INTERVAL_DEFAULT);
     uint32_t     last     = app_settings_get_u32(app, ADV_KEY_LAST, 0);
@@ -1371,7 +1284,7 @@ static char const *advert_tx_locked(bool flood, mesh_origin_t from = MESH_FROM_S
 // Once a second from the mesh loop, under the lock: the periodic flood advert. Not before the first-open questions
 // are answered (a fresh badge would advertise its default name), nor on an approximate clock (our advert would carry
 // a time that may be wrong).
-static void advert_tick_locked(void) {
+void mesh_int::advert_tick_locked(void) {
     static uint32_t checked_s;
     uint32_t        now_s = mesh_uptime_s();
     if (now_s == checked_s || now_s < ADVCFG_FIRST_DELAY_S) {
@@ -1532,7 +1445,7 @@ extern "C" void mesh_contacts_full(void) {
 }
 
 // The mesh task, after the unlock (the notify service takes its own mutex and may read NVS)
-static void contacts_full_post(void) {
+void mesh_int::contacts_full_post(void) {
     if (__atomic_exchange_n(&contacts_full_pending, false, __ATOMIC_ACQ_REL)) {
         lichen_notify_to(meshcore_ctx(), LN_WARN, "contacts-full", "Contacts full",
                          "New nodes are not added. Remove contacts, or turn on Overwrite oldest in Auto-add.",
@@ -1564,7 +1477,7 @@ extern "C" size_t mesh_channels_snapshot_wait(char names[][MESH_CHANNEL_MAX + 1]
 }
 
 // The console commands while MeshCore does not run (#103): "MeshCore stopped (autostart off)" and the like
-static bool console_not_running(void) {
+bool mesh_int::console_not_running(void) {
     if (mesh_running()) {
         return false;
     }
@@ -1578,7 +1491,7 @@ static bool console_not_running(void) {
 }
 
 // "fw mesh name <name>": the same setter as the screen
-static void cmd_mesh_name(char const *name) {
+void mesh_int::cmd_mesh_name(char const *name) {
     if (mesh_set_name(name)) {
         mesh_settings_t s;
         mesh_get_settings(&s);
@@ -1589,7 +1502,7 @@ static void cmd_mesh_name(char const *name) {
 }
 
 // "fw mesh radio <preset index> [txdbm]" or "fw mesh radio <freq> <bw> <sf> <cr> [txdbm]"
-static void cmd_mesh_radio(char const *args) {
+void mesh_int::cmd_mesh_radio(char const *args) {
     mesh_settings_t now;
     mesh_get_settings(&now);
     float    v[5];
@@ -1633,7 +1546,7 @@ static void cmd_mesh_radio(char const *args) {
 }
 
 // "fw mesh pathhash [1|2|3]": the size now, or set it (saved, nothing is sent)
-static void cmd_mesh_pathhash(char const *args) {
+void mesh_int::cmd_mesh_pathhash(char const *args) {
     while (*args == ' ') {
         args++;
     }
@@ -1666,7 +1579,7 @@ extern "C" size_t mesh_channel_text_max(void) {
 }
 
 // from: a console line's send is refused while the console scope is not set (#290), never sent unscoped
-static bool send_ready(char const **why, mesh_origin_t from = MESH_FROM_SCREEN) {
+bool mesh_int::send_ready(char const **why, mesh_origin_t from) {
     if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || !outbox || mesh_is_stopped()) {
         *why = stopped_why();
         return false;
@@ -1805,7 +1718,7 @@ static char const *const OUT_STATE_NAME[] = {"queued", "sent", "on air", "heard 
 // ---- trace path and path discovery (#53) ---------------------------------------------------------------------------
 // One request at a time, shared with the pipe under the outbox lock: copy-in, never the mesh lock (LVGL safe)
 
-static mt_t *trace_req; // PSRAM, made with the outbox
+mt_t *mesh_int::trace_req; // PSRAM, made with the outbox
 
 extern "C" uint32_t mesh_trace_start(uint8_t const prefix[6], mt_kind_t kind, mesh_origin_t from, char const **why) {
     char const *local;
@@ -1840,8 +1753,8 @@ extern "C" bool mesh_trace_get(mt_t *out) {
 // ---- log in, status and CLI for a repeater or room (#51) -------------------------------------------------------------
 // One request at a time, shared with the pipe under the outbox lock as the trace: copy-in, never the mesh lock
 
-static rr_t *remote_req; // PSRAM, made with the outbox
-static tl_rate_t telem_rate; // when each contact was last asked for telemetry (#162), under mesh_ob_enter/exit
+rr_t *mesh_int::remote_req; // PSRAM, made with the outbox
+tl_rate_t mesh_int::telem_rate; // when each contact was last asked for telemetry (#162), under mesh_ob_enter/exit
 
 extern "C" uint32_t mesh_remote_start(uint8_t const prefix[6], rr_op_t op, char const *arg, mesh_origin_t from,
                                       char const **why) {
@@ -1948,7 +1861,7 @@ extern "C" bool mesh_remote_logout(uint8_t const prefix[6], uint32_t wait_ms) {
 
 // A channel name typed on the console as stored (channel_find_locked), into out (may be typed); false (said why,
 // after `what`) when there is none or MeshCore is not there
-static bool console_channel_name(char const *typed, char *out, size_t cap, char const *what) {
+bool mesh_int::console_channel_name(char const *typed, char *out, size_t cap, char const *what) {
     if (char const *why = settings_lock()) {
         console_reply("%s: %s", what, why);
         return false;
@@ -1966,7 +1879,7 @@ static bool console_channel_name(char const *typed, char *out, size_t cap, char 
 }
 
 // "fw mesh send <channel> <text>"
-static void cmd_mesh_send(char const *args) {
+void mesh_int::cmd_mesh_send(char const *args) {
     char channel[OB_TARGET_MAX] = "";
     while (*args == ' ') {
         args++;
@@ -2003,7 +1916,7 @@ static void cmd_mesh_send(char const *args) {
 }
 
 // "fw mesh dm <12 hex digits of the public key> <text>"
-static void cmd_mesh_dm(char const *args) {
+void mesh_int::cmd_mesh_dm(char const *args) {
     uint8_t prefix[6];
     int     used = 12;
     unsigned b[6];
@@ -2029,7 +1942,7 @@ static void cmd_mesh_dm(char const *args) {
 }
 
 // A contact by the start of its key as typed (2 to 12 hex digits): false (said why) when none or more than one
-static bool console_contact(char const *hex, uint8_t out[6]) {
+bool mesh_int::console_contact(char const *hex, uint8_t out[6]) {
     size_t   len = strspn(hex, "0123456789abcdefABCDEF");
     uint8_t  want[6];
     unsigned b;
@@ -2064,7 +1977,7 @@ static bool console_contact(char const *hex, uint8_t out[6]) {
 
 // "fw mesh path <hex>" shows the stored path, "... reset" forgets it (the screen's Reset path), "... set <hop>[,<hop>..]"
 // stores one by hand (#130). Nothing is sent: the next DM goes along it, or floods when there is none.
-static void cmd_mesh_path(char const *args) {
+void mesh_int::cmd_mesh_path(char const *args) {
     while (*args == ' ') {
         args++;
     }
@@ -2135,7 +2048,7 @@ static char const *const TRACE_STATE_NAME[] = {"none", "queued", "sent to MeshCo
                                                "no answer"};
 
 // "fw mesh trace|discover <hex>": starts one; "fw mesh trace" alone shows the last one and its result
-static void cmd_mesh_trace(char const *arg, mt_kind_t kind) {
+void mesh_int::cmd_mesh_trace(char const *arg, mt_kind_t kind) {
     if (*arg) {
         uint8_t prefix[6];
         if (!console_contact(arg, prefix)) {
@@ -2300,7 +2213,7 @@ static uint32_t console_remote_cli(uint8_t const prefix[6], char const *text, ch
 // result) / fw mesh remote settings (the rows of the last settings read, #117: gets only, never a set).
 // A password typed here is remembered like one from the screen; the screens never show it. Nothing is sent unless
 // this command says login, status or cli.
-static void cmd_mesh_remote(char const *args) {
+void mesh_int::cmd_mesh_remote(char const *args) {
     console_pw_settle();
     if (!*args) {
         console_remote_show();
@@ -2367,7 +2280,7 @@ static void cmd_mesh_remote(char const *args) {
 
 // "fw mesh history": the status history's slots and schedule (#168); "fw mesh history <who>" one repeater's samples;
 // "<who> on [minutes] YES | off | interval <minutes>" switches it as its Status history page does
-static void cmd_mesh_history(char const *args) {
+void mesh_int::cmd_mesh_history(char const *args) {
     if (!*args) {
         mesh_rhist_console(NULL, NULL);
         return;
@@ -2386,7 +2299,7 @@ static void cmd_mesh_history(char const *args) {
 
 // "fw mesh telemetry <hex> YES" asks a contact for its sensor values (it transmits: YES as for the repeater commands);
 // "fw mesh telemetry" shows the last answer (#162)
-static void cmd_mesh_telemetry(char const *arg) {
+void mesh_int::cmd_mesh_telemetry(char const *arg) {
     if (*arg) {
         char    token[16];
         int     used = 0;
@@ -2424,7 +2337,7 @@ static void cmd_mesh_telemetry(char const *arg) {
     lichen_free(meshcore_ctx(), r);
 }
 
-static void cmd_mesh_out(void) {
+void mesh_int::cmd_mesh_out(void) {
     mesh_out_info_t list[OB_CAP];
     size_t          n = mesh_out_list(list, OB_CAP);
     for (size_t i = 0; i < n; i++) {
@@ -2436,7 +2349,7 @@ static void cmd_mesh_out(void) {
 }
 
 // "fw mesh link": the companion pipe's counters (#45, #55)
-static void cmd_mesh_link(void) {
+void mesh_int::cmd_mesh_link(void) {
     mesh_lock();
     LinkStats s    = node->pipe().stats();
     bool      busy = node->pipe().draining();
@@ -2462,7 +2375,7 @@ static void cmd_mesh_link(void) {
 }
 
 // "fw mesh chats": every chat with its unread count and how full its ring is
-static void cmd_mesh_chats(void) {
+void mesh_int::cmd_mesh_chats(void) {
     mesh_conv_t *list = (mesh_conv_t *)lichen_alloc(meshcore_ctx(), MESH_CONV_MAX * sizeof(mesh_conv_t), LICHEN_MEM_BULK);
     if (!list) {
         console_reply("no memory");
@@ -2487,7 +2400,7 @@ static void cmd_mesh_chats(void) {
 // "fw mesh ident simulate" (#80): the mismatch path on the bench without touching the identity file. A copy of the
 // live public key with one bit flipped must fail the check; then TX is blocked and the notice raised, as for a real
 // mismatch, until the next restart (which checks the real file again).
-static void cmd_mesh_ident_simulate(void) {
+void mesh_int::cmd_mesh_ident_simulate(void) {
     uint8_t prv[PRV_KEY_SIZE], pub[PUB_KEY_SIZE];
     mesh_lock();
     size_t got = node->self_id.writeTo(prv, sizeof(prv));
@@ -2513,7 +2426,7 @@ static void cmd_mesh_run(bool start) {
 
 // ---- advert, location, auto-add (#52): "fw mesh advert|loc|autoadd" ---------------------------------------------------
 
-static bool arg_onoff(char const *t, bool *v) {
+bool mesh_int::arg_onoff(char const *t, bool *v) {
     if (strcmp(t, "on") == 0 || strcmp(t, "off") == 0) {
         *v = t[1] == 'n';
         return true;
@@ -2525,7 +2438,7 @@ static void reply_result(char const *what, char const *why) {
     console_reply(why ? "%s not changed: %s" : "%s saved", what, why);
 }
 
-static void cmd_mesh_advert(char const *args) {
+void mesh_int::cmd_mesh_advert(char const *args) {
     mesh_advert_cfg_t c;
     if (strncmp(args, "interval ", 9) == 0) {
         uint32_t    min;
@@ -2548,7 +2461,7 @@ static void cmd_mesh_advert(char const *args) {
                   c.flood_manual ? "flood" : "zero-hop");
 }
 
-static void cmd_mesh_loc(char const *args) {
+void mesh_int::cmd_mesh_loc(char const *args) {
     mesh_advert_cfg_t c;
     double            lat, lon;
     char              a_lat[24], a_lon[24];
@@ -2581,7 +2494,7 @@ static void cmd_mesh_loc(char const *args) {
                   c.share_loc ? "shared" : "not shared");
 }
 
-static void cmd_mesh_autoadd(char const *args) {
+void mesh_int::cmd_mesh_autoadd(char const *args) {
     mesh_advert_cfg_t c;
     if (!mesh_get_advert_cfg(&c)) {
         return;
@@ -2807,7 +2720,7 @@ static void contacts_import(char const *arg) {
     lichen_free(meshcore_ctx(), pkt);
 }
 
-static void cmd_contacts(char const *args) {
+void mesh_int::cmd_contacts(char const *args) {
     if (console_not_running()) {
         return;
     }
@@ -2842,7 +2755,7 @@ static void cmd_contacts(char const *args) {
     console_reply("%u contact(s)", (unsigned)total);
 }
 
-static void cmd_msgs(char const *args) {
+void mesh_int::cmd_msgs(char const *args) {
     if (console_not_running()) {
         return;
     }
@@ -2865,7 +2778,7 @@ static void cmd_msgs(char const *args) {
     console_reply("%u message(s)", (unsigned)n);
 }
 
-static void cmd_channels(char const *args) {
+void mesh_int::cmd_channels(char const *args) {
     if (console_not_running()) {
         return;
     }
@@ -2967,7 +2880,7 @@ static void channel_rename(char const *args) {
 }
 
 // "fw channel add <name> <base64 key>" or "fw channel add #name": the same as the screen's
-static void cmd_channel(char const *args) {
+void mesh_int::cmd_channel(char const *args) {
     if (console_not_running()) {
         return;
     }
@@ -3003,7 +2916,7 @@ static void cmd_channel(char const *args) {
 }
 
 // "fw advert": a zero-hop advert now (MyMesh::advert(): nodes in direct range hear it), for testing transmit
-static void cmd_advert(char const *args) {
+void mesh_int::cmd_advert(char const *args) {
     if (console_not_running()) {
         return;
     }
@@ -3109,7 +3022,7 @@ extern "C" void mesh_discover_get(disc_t *out) {
 }
 
 // From the mesh loop, under the lock: sends a pending request
-static void discover_tick_locked(void) {
+void mesh_int::discover_tick_locked(void) {
     section_enter<SECTION_DISCOVER>();
     bool     pending = disc_table.state == DISC_PENDING;
     uint32_t tag     = disc_table.tag;
@@ -3143,7 +3056,7 @@ static void discover_tick_locked(void) {
 }
 
 // An answer (a control packet) heard, under the lock; MyMesh passes every control packet here
-static void discover_note_locked(mesh::Packet const *pkt) {
+void mesh_int::discover_note_locked(mesh::Packet const *pkt) {
     if (pkt->payload_len < 6 + DISC_PREFIX) {
         return;
     }
@@ -3239,11 +3152,6 @@ static void drive_bytes(size_t *total, size_t *used) {
 }
 
 static void cmd_mesh(char const *args);
-static void cmd_contacts(char const *args);
-static void cmd_msgs(char const *args);
-static void cmd_channels(char const *args);
-static void cmd_channel(char const *args);
-static void cmd_advert(char const *args);
 
 extern "C" void mesh_console_init(void) {
     static bool registered; // boot, from start_background: one task
