@@ -62,6 +62,9 @@ typedef struct {
     char         reason[C6W_REASON_MAX]; // the last recovery in words ("" before the first)
 } c6_status_t;
 void c6link_status(c6_status_t *out);
+// The heartbeat's counters since boot (#277): beats received, misses, beats lost between the chips. For fw soak (#409):
+// a copy under the watch's spinlock, no reason text. Any task.
+void c6link_hb_counts(uint32_t *beats, uint32_t *misses, uint32_t *dropped);
 // The keyboard found the TCA8418 reset, which only C6 EN does: hand it to keyboard_set_reset_hook() (#14)
 void c6link_note_keyboard_reset(void);
 // A file under /storage/c6 was written or deleted: forget the verified bundle so the next boot checks the C6 fully (#36).

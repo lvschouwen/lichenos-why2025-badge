@@ -31,6 +31,14 @@ bool crash_log_store(char const *text, size_t len);
 bool crash_clear_all(void);
 // The NVS crash counter: crashes recorded since the last clear
 uint32_t crash_count_since_clear(void);
+// The same as last read or written by this component, without touching NVS (fw soak, #409); false when it could not
+// be read at boot. Any task.
+bool crash_count_cached(uint32_t *count);
+// The boot counter (boot_count.c, #409): +1 in NVS once per boot (crash_check_early calls it), so it grows across
+// every kind of reset and a power cut. *count is this boot's number; false when it could not be read and saved this
+// boot (the number then means nothing). Any task, no I/O.
+void boot_count_bump(void);
+bool boot_count(uint32_t *count);
 // Held around a read-modify-write of the log (load, change, store); store and clear take it too (recursive)
 void crash_log_lock(void);
 void crash_log_unlock(void);

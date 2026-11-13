@@ -965,6 +965,23 @@ void lora_get_counts(uint32_t *rx, uint32_t *tx_count) {
     portEXIT_CRITICAL(&state_lock);
 }
 
+// soak_line.c (main) names the states by these numbers: it cannot see lora_proto.h
+_Static_assert(LORA_STATE_UNCONFIGURED == 0 && LORA_STATE_IDLE == 1 && LORA_STATE_RX == 2 && LORA_STATE_ERROR == 3 &&
+                   LORA_STATE_TX == 4,
+               "lora_state_t order changed: update soak_line.c's LORA_W");
+
+bool lora_get_c6_counts(lora_c6_counts_t *out) {
+    portENTER_CRITICAL(&state_lock);
+    bool have = have_status;
+    *out      = (lora_c6_counts_t){.state       = c6_status.state,
+                                   .packets     = c6_status.packets,
+                                   .crc_errors  = c6_status.crc_errors,
+                                   .c6_uptime_s = c6_status.uptime_s,
+                                   .age_s       = (now_ms() - status_at_ms) / 1000};
+    portEXIT_CRITICAL(&state_lock);
+    return have;
+}
+
 bool lora_get_channel_rssi(int16_t *rssi_x10, uint32_t max_age_s) {
     portENTER_CRITICAL(&state_lock);
     bool     ok  = have_status && (now_ms() - status_at_ms) / 1000 <= max_age_s;

@@ -2253,6 +2253,15 @@ target_include_directories(power_route_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(power_route_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME power_route_test COMMAND power_route_test)
 
+# The "fw soak" lines for the soak sampler (#409, #407): keys, order, sentinels, enum words, the longest line
+add_executable(soak_line_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/soak_line_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/soak_line.c
+)
+target_include_directories(soak_line_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main)
+target_compile_options(soak_line_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME soak_line_test COMMAND soak_line_test)
+
 # The OS name on the boot screen and in About (#236)
 add_executable(os_name_test
     ${CMAKE_CURRENT_SOURCE_DIR}/os_name_test.c

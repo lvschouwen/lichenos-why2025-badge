@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 // PSRAM watchdog (#40, #93): canary blocks in PSRAM, filled with an address-dependent pattern and verified every
 // ~100 ms by a low-priority task on core 0. Damage is logged with ESP_LOGW (so it reaches GET /log), the block is
@@ -14,6 +15,9 @@
 
 // After the heaps are up (app_main, early): boot check, canaries, the task, "fw psram"
 void psram_guard_start(void);
+
+// Canary hits since boot, over every canary (the "fw psram" totals lose a freed canary's): lock-free, any task (#409)
+uint32_t psram_guard_hits(void);
 
 // One more canary while update mode runs (#37 hits then); idempotent. From any task.
 void psram_guard_update_begin(void);

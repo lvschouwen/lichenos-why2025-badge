@@ -132,6 +132,14 @@ void dma_watch_start(void) {
     }
 }
 
+bool dma_watch_drops(uint32_t *drops) {
+    portENTER_CRITICAL(&dma_low_mux);
+    bool started = dma_low.started;
+    *drops       = dma_low.drops;
+    portEXIT_CRITICAL(&dma_low_mux);
+    return started;
+}
+
 void dma_watch_report(void) {
     dma_low_t snap; // ~250 B onto the console's stack: no PSRAM inside the critical section
     portENTER_CRITICAL(&dma_low_mux);

@@ -74,6 +74,17 @@ extern "C" void mesh_airlog_note_tx(uint8_t header, uint8_t path_len, uint8_t ra
     section_exit<SECTION_AIRLOG>();
 }
 
+// The same figures as fw mesh (mesh_cmd.cpp cmd_mesh_status), without the node's name or id
+extern "C" bool mesh_soak_counts(mesh_soak_counts_t *out, uint32_t wait_ms) {
+    if (!__atomic_load_n(&node, __ATOMIC_ACQUIRE) || mesh_is_stopped() || !mesh_lock_within(wait_ms)) {
+        return false;
+    }
+    *out = mesh_soak_counts_t{lora_radio.getPacketsRecv(), lora_radio.rx_dropped(), lora_radio.getPacketsSent(),
+                              lora_radio.send_failed,      lora_radio.send_timeouts, lora_radio.send_refused};
+    mesh_unlock();
+    return true;
+}
+
 extern "C" size_t mesh_airlog_snapshot(airlog_entry_t *out, size_t max, uint32_t *seq, airlog_info_t *info) {
     section_enter<SECTION_AIRLOG>();
     size_t n = airlog_ring.e ? airlog_copy(&airlog_ring, out, max) : 0;

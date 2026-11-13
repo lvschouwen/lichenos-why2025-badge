@@ -59,6 +59,9 @@ void disp_state_start(void);
 // One key's cached applied value as a status line part, never waiting for the C6 (`fw airplane`'s bt.state, #311):
 // "idle (12.3 s ago)" or "? (<why>)"; 0 bytes for a name the table does not have
 size_t lichen_reg_cached_text(char const *name, char *buf, size_t cap);
+// The same cache as a number, for a U8 or U32 key (fw soak, #409: bl.display's applied level): false when the key is
+// not one, has no applied value yet, or the C6 stopped answering (stale). Never waits; any task.
+bool   lichen_reg_cached_u32(char const *name, uint32_t *out);
 
 // The OS watch services (#281): the thermal watchdog (thermal.c, #10) and Lichen's own notices (sys_notices.c, #62).
 // Started by main in their own boot step, display or not, so a badge whose screen did not come up still powers off

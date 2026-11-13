@@ -38,6 +38,17 @@ bool lora_c6_probe(uint32_t timeout_ms, uint32_t *uptime_s);
 // failures are the supervisor's soft signal that the C6 may be gone.
 void lora_set_send_hook(void (*fn)(bool ok));
 
+// The C6's last LoRa status, for fw soak (#409): its counters restart with the C6, so they come with the C6's uptime
+// of the same status. state is lora_state_t (shared/lora/lora_proto.h; soak_line.c's words follow its order). A copy
+// under the state spinlock, any task; false before the first status.
+typedef struct {
+    uint8_t  state;
+    uint32_t packets, crc_errors;
+    uint32_t c6_uptime_s;
+    uint32_t age_s; // how long ago it came
+} lora_c6_counts_t;
+bool lora_get_c6_counts(lora_c6_counts_t *out);
+
 // The OS radio switch (#108; lichen_radio.h is the user-facing one, main.c wires it here): off sends the C6 RX_STOP (the
 // SX1262 idles, nothing is received or sent) and holds back the supervisor's config + RX start; lora_send is refused.
 // On starts them again. Takes effect on the LoRa task within a second; callable before lora_start. Default: on.

@@ -9,6 +9,7 @@
 // unless it is listed here.
 static char const *const keep_keys[] = {
     "boot_fail", "crash_count", "dump_sum", "rst_log", // diagnostics: crashes and restarts stay traceable
+    "boot_count",                                      // crash/boot_count.c: only grows, a reset included (#409)
     "psram_rty",                                       // PSRAM tuning retries (#40, #86)
     "c6_force", "c6_ok_key", "c6_verify", "c6_rt_restart",                  // the C6's image and recovery state
     "upd_from",                                        // the "updated from" note after an update

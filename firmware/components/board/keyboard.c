@@ -47,6 +47,8 @@ static uint32_t       held[0x51]; // what each pressed key was mapped to, so its
 static bool           shift;
 static bool           raw_down[0x51]; // keys the raw hooks saw pressed, so a chip reset releases them there too (#14)
 static key_origin_t   held_origin[0x51]; // key_origin_stamp: a release reports its press's origin (#391)
+static atomic_int     chip_ok = -1; // fw soak (#409): -1 not started, 1 the last readback answered, 0 it did not
+static atomic_uint    chip_resets;  // readbacks that found the chip reset
 static atomic_bool    reinit_asked;            // keyboard_reinit(): honoured by the poll task, which owns the chip
 static void (*_Atomic reset_hook)(void);       // told when the readback finds the chip reset (#14)
 static bool (*_Atomic wake_hook)(void);        // the screen timeout (#43)
@@ -190,8 +192,11 @@ static void self_heal(TickType_t *last_check) {
     if (xTaskGetTickCount() - *last_check < pdMS_TO_TICKS(CHECK_MS)) {
         return;
     }
-    *last_check = xTaskGetTickCount();
-    if (tca8418_check(chip) == TCA8418_CHECK_RESET) {
+    *last_check           = xTaskGetTickCount();
+    tca8418_check_t check = tca8418_check(chip);
+    atomic_store(&chip_ok, check == TCA8418_CHECK_NO_ANSWER ? 0 : 1); // a reset chip is reconfigured right here
+    if (check == TCA8418_CHECK_RESET) {
+        atomic_fetch_add(&chip_resets, 1);
         reconfigure("chip was reset");
         void (*hook)(void) = atomic_load(&reset_hook);
         if (hook) {
@@ -279,6 +284,11 @@ static void read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     }
 }
 
+int keyboard_chip_state(uint32_t *resets) {
+    *resets = atomic_load(&chip_resets);
+    return atomic_load(&chip_ok);
+}
+
 bool keyboard_last_injected(void) {
     return atomic_load(&last_injected);
 }
@@ -293,6 +303,7 @@ bool keyboard_start(lv_indev_t **out) {
         return false;
     }
     tca8418_flush(chip);
+    atomic_store(&chip_ok, 1); // it answered the start's configuration
     events = xQueueCreate(QUEUE_DEPTH, sizeof(key_event_t));
     atomic_store(&injected, xQueueCreate(INJECT_DEPTH, sizeof(injected_t)));
     if (!events || !atomic_load(&injected) || xTaskCreatePinnedToCore(poll_task, "keyboard", 3072 /* peak 1 KB, #107 */, NULL, 4, NULL, 0) != pdPASS) {

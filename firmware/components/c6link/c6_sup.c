@@ -640,6 +640,14 @@ void c6link_status(c6_status_t *out) {
     portEXIT_CRITICAL(&watch_lock);
 }
 
+void c6link_hb_counts(uint32_t *beats, uint32_t *misses, uint32_t *dropped) {
+    portENTER_CRITICAL(&watch_lock);
+    *beats   = watch.hb.beats;
+    *misses  = watch.hb.misses;
+    *dropped = watch.hb.dropped;
+    portEXIT_CRITICAL(&watch_lock);
+}
+
 bool c6link_trouble(char *out, size_t cap) {
     portENTER_CRITICAL(&watch_lock);
     c6w_state_t state   = watch.state;

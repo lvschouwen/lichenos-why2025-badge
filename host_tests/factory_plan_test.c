@@ -76,7 +76,8 @@ static void settings_go_at_both_levels(void) {
 
 static void badge_state_stays(void) {
     char const *keep[] = {"boot_fail", "crash_count", "dump_sum", "rst_log", "psram_rty", "c6_force", "c6_ok_key",
-                          "c6_verify", "c6_rt_restart", "upd_from", "batt_seen", "clock_src", "r16", FACTORY_PENDING_KEY};
+                          "c6_verify", "c6_rt_restart", "upd_from", "batt_seen", "clock_src", "r16", FACTORY_PENDING_KEY,
+                          "boot_count"}; // #409: the soak sampler's reboot detector never goes back
     for (size_t i = 0; i < sizeof(keep) / sizeof(keep[0]); i++) {
         CHECK(!factory_nvs_erases("badge_fw", keep[i], S));
         CHECK(!factory_nvs_erases("badge_fw", keep[i], A));

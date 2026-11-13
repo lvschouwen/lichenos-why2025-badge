@@ -19,6 +19,7 @@
 #include "lvgl.h"
 
 #include <inttypes.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,6 +57,7 @@ static uintptr_t         last_hit_addr;
 static size_t            last_hit_off;
 static uint32_t          last_hit_bad;
 static int64_t           last_hit_ms;
+static atomic_uint       s_hits_total; // every canary's hits since boot, the update canary's too (fw soak, #409)
 
 // ---- where the PSRAM heap is (#89) --------------------------------------------------------------------------------
 // The IDF registers the PSRAM with the heap at system start, before app_main; the call passes straight through and the
@@ -158,6 +160,7 @@ static void report(int id, block_t *b, psram_check_t const *res) {
     ESP_LOGW(TAG, "  canary %d: %u single-bit words, %u bad lines (%u whole), xor of first bad word %08x", id,
              (unsigned)res->bit_flips, (unsigned)res->bad_lines, (unsigned)res->full_lines, (unsigned)res->first_xor);
     b->hits++;
+    atomic_fetch_add(&s_hits_total, 1);
     b->bad_total      += (uint32_t)res->bad_bytes;
     last_hit_block     = (uint32_t)id;
     last_hit_addr      = (uintptr_t)at;
@@ -320,6 +323,10 @@ void psram_guard_start(void) {
     if (xTaskCreatePinnedToCore(guard_task, "psram_guard", 3584 /* peak 1.4 KB (#107) + the PSRAM heap check and its failure line (#353): fw psram speed shows the margin */, NULL, 1, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "canary task failed to start");
     }
+}
+
+uint32_t psram_guard_hits(void) {
+    return atomic_load(&s_hits_total);
 }
 
 void psram_guard_update_begin(void) {

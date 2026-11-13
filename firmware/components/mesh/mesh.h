@@ -81,6 +81,13 @@ void mesh_tile_snapshot(mesh_tile_t *out);
 // under the mesh lock (up to wait_ms). false when MeshCore isn't running or the lock was busy. Reads only.
 bool mesh_health_snapshot(mesh_health_t *out, uint32_t wait_ms);
 
+// fw mesh's counters for fw soak (#409): packets received, dropped (queue full), sent, failed, timed out, refused.
+// Taken under the mesh lock (up to wait_ms); false when MeshCore isn't running or the lock was busy. Reads only.
+typedef struct {
+    uint32_t rx, rx_dropped, tx, failed, timeouts, refused;
+} mesh_soak_counts_t;
+bool mesh_soak_counts(mesh_soak_counts_t *out, uint32_t wait_ms);
+
 // The air log (#165, #408): up to max packets received and sent, newest first, copied from the ring under its own
 // short lock (not the mesh lock, never waits on MeshCore). *seq is the newest entry's sequence number (0: none yet),
 // which changes whenever a packet was added. The ring lives from MeshCore's first start on and survives it stopping

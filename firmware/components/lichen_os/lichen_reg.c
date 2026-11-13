@@ -444,6 +444,20 @@ size_t lichen_reg_cached_text(char const *name, char *buf, size_t cap) {
     return e ? reg_cached_text(e, &v, buf, cap) : 0;
 }
 
+bool lichen_reg_cached_u32(char const *name, uint32_t *out) {
+    reg_entry_t const *e = reg_p4_find_name(name);
+    reg_view_t         v = {.note = RV_FAILED};
+    if (!e || !atomic_load(&started) || (e->type != REG_T_U8 && e->type != REG_T_U32)) {
+        return false;
+    }
+    build_view(e, false, false, &v); // the cache only, as lichen_reg_cached_text
+    if (!v.has_applied || v.note == RV_STALE) {
+        return false;
+    }
+    *out = v.applied.u;
+    return true;
+}
+
 // The apps' read (lichen_reg.h, #313): the same cache-only text, under the gate's name so an app never links an OS
 // symbol, and with no set beside it
 size_t lichen_reg_get(char const *name, char *buf, size_t cap) {

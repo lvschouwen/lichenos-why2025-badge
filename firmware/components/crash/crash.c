@@ -39,6 +39,19 @@ static char const TAG[] = "crash";
 static bool s_recovered;
 static int  s_reset_reason = -1; // esp_reset_reason() of this boot, for fw crash
 static atomic_uint s_generation;  // crash_log_generation()
+// crash_count_cached (#409): the NVS counter as last read or written here, so a sampler never reads flash
+static atomic_uint s_count_cache;
+static atomic_bool s_count_known;
+
+static void count_cache_set(uint32_t count) {
+    atomic_store(&s_count_cache, count);
+    atomic_store(&s_count_known, true);
+}
+
+bool crash_count_cached(uint32_t *count) {
+    *count = atomic_load(&s_count_cache);
+    return atomic_load(&s_count_known);
+}
 
 // One writer at a time: the Crash log app's delete (load, remove, store) against "fw crash clear" on the console.
 // Recursive, so a holder may call crash_log_store and crash_clear_all. Created in crash_check, before any user.
@@ -230,6 +243,7 @@ static uint32_t bump_count(void) {
         fw_nvs_ok(TAG, "crash_count", nvs_commit(nvs));
     }
     nvs_close(nvs);
+    count_cache_set(count);
     return count;
 }
 
@@ -241,6 +255,20 @@ uint32_t crash_count_since_clear(void) {
         nvs_close(nvs);
     }
     return count;
+}
+
+// Once at boot: a counter that could not be read stays unknown (fw soak prints -1), never a made-up 0
+static void count_cache_load(void) {
+    nvs_handle_t nvs;
+    uint32_t     count = 0;
+    if (nvs_open(FW_NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {
+        return;
+    }
+    esp_err_t err = nvs_get_u32(nvs, "crash_count", &count);
+    nvs_close(nvs);
+    if (err == ESP_OK || err == ESP_ERR_NVS_NOT_FOUND) {
+        count_cache_set(count);
+    }
 }
 
 // An image bigger than its slot would be cut by the partition table; say so at every boot
@@ -380,6 +408,7 @@ bool crash_clear_all(void) {
         fw_nvs_erased(TAG, "dump_sum", nvs_erase_key(nvs, "dump_sum"));
         fw_nvs_ok(TAG, "crash_count", nvs_commit(nvs));
         nvs_close(nvs);
+        count_cache_set(0);
     }
     atomic_fetch_add(&s_generation, 1); // the counter changed too
     crash_log_unlock();
@@ -434,6 +463,8 @@ void crash_check_early(void) {
     crash_log_lock(); // creates the lock before any other task can want it
     crash_log_unlock();
     console_register("crash", "crash [dump | clear | test panic|wdt] (crash log and core dump)", crash_command);
+    boot_count_bump(); // first, before anything this boot can fail (#409)
+    count_cache_load();
     esp_reset_reason_t const why = esp_reset_reason();
     s_reset_reason               = (int)why;
     pending_decide();

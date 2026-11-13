@@ -4,6 +4,7 @@
 #include "lvgl.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 
 // The badge keyboard (TCA8418) as an LVGL keypad. Start it after the C6 flasher: resetting the C6 (GPIO12) also resets
 // the TCA8418 (#15, #61).
@@ -37,6 +38,11 @@ bool keyboard_inject(uint8_t code, bool pressed, bool as_physical);
 // the key being handled (not after lv_async_call, a UI call or a focus change: the next key has overwritten it).
 // False before any key. Hand-only paths check it on the press and refuse an injected one. Any task, no LVGL.
 bool keyboard_last_injected(void);
+
+// The TCA8418's health for fw soak (#409): -1 before keyboard_start found it, 1 when the last once-a-second readback
+// answered (a chip found reset is reconfigured at once), 0 when it did not answer. *resets: readbacks that found it
+// reset (C6 EN, #14). Lock-free, any task.
+int keyboard_chip_state(uint32_t *resets);
 
 // Raw key hooks (#81, #79): up to KEYBOARD_RAW_MAX; false when full. Called from any task. A hook that swallows an
 // event stops the mapped key reaching LVGL (its release too); other hooks still see it. Once keyboard_raw_remove returns

@@ -80,6 +80,34 @@ static void cmd_window(char const *args) {
     }
 }
 
+bool mem_window_watch_read(uint32_t min[MEM_WINDOW_HEAPS], bool exact[MEM_WINDOW_HEAPS]) {
+    portENTER_CRITICAL(&win_mux);
+    bool started = win.started;
+    for (int i = 0; i < MEM_WINDOW_HEAPS; i++) {
+        min[i]   = win.min[i];
+        exact[i] = win.boot_now[i] < win.boot_ref[i]; // mem_window_line's rule
+    }
+    portEXIT_CRITICAL(&win_mux);
+    return started;
+}
+
+static void heap_fig(uint32_t caps, mem_heap_fig_t *f) {
+    f->free = (uint32_t)heap_caps_get_free_size(caps);
+    f->min  = (uint32_t)heap_caps_get_minimum_free_size(caps);
+    f->big  = (uint32_t)heap_caps_get_largest_free_block(caps);
+}
+
+bool mem_window_watch_heaps(mem_heap_fig_t out[MEM_WINDOW_HEAPS], mem_heap_fig_t *lp) {
+    for (int i = 0; i < MEM_WINDOW_HEAPS; i++) {
+        heap_fig(CAPS[i], &out[i]);
+    }
+    if (!heap_caps_get_total_size(MALLOC_CAP_RTCRAM)) {
+        return false;
+    }
+    heap_fig(MALLOC_CAP_RTCRAM, lp);
+    return true;
+}
+
 void mem_window_watch_register(void) {
     console_set_mem_window(cmd_window);
 }
