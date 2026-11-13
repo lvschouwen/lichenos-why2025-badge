@@ -60,6 +60,15 @@ int main(void) {
     }
     CHECK(dev_tap(&t, 0xFFFFFF00u + 6 * 100)); // 0xFFFFFF00+600 wraps past zero
 
+    // Enter while on asks to switch off and never counts; off, only the seventh switches on
+    dev_tap_reset(&t);
+    for (int i = 0; i < DEV_TAP_COUNT - 1; i++) {
+        CHECK(dev_enter_action(&t, false, (uint32_t)i) == DEV_ENTER_NONE);
+    }
+    CHECK(dev_enter_action(&t, false, 6) == DEV_ENTER_SWITCH_ON);
+    CHECK(dev_enter_action(&t, true, 7) == DEV_ENTER_ASK_OFF);
+    CHECK(t.n == 0);
+
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

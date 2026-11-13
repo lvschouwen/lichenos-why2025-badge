@@ -29,6 +29,8 @@ static dlg_remote_row_t const table[] = {
     {"send", "Send \"*\" to *?", V_REFUSE}, // meshcore_remote.c: an admin command to a third node
     // app_settings.c: confirmed remotely, it cuts off the console that sent the key
     {"switch off", "Switch off updates over Wi-Fi? The Wi-Fi console goes too.", V_REFUSE},
+    // app_about.c: a remote key must not end the developer mode that lets it in
+    {"switch off", "Switch developer mode off? The developer rows and commands go away.", V_REFUSE},
     // They transmit: only under the bench console scope
     {"send", "Send one request to nearby nodes? It goes on air once, to nodes in direct range.", V_ONAIR}, // discover
     {"send", "Ask * for its telemetry?", V_ONAIR},                          // meshcore_telem.c

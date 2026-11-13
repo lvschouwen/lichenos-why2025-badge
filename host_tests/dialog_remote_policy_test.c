@@ -47,6 +47,7 @@ static case_t const cases[] = {
     {"send", "Send \"reboot\" to Rep1?", R},
     {"send", "Send \"set radio 869.618,62.5,8,8\" to Rep1?", R},
     {"switch off", "Switch off updates over Wi-Fi? The Wi-Fi console goes too.", R},
+    {"switch off", "Switch developer mode off? The developer rows and commands go away.", R},
     {"send", "Send one request to nearby nodes? It goes on air once, to nodes in direct range.", O},
     {"send", "Ask Alice for its telemetry?", O},
     {"send", "Ask (no name) for its telemetry?", O},

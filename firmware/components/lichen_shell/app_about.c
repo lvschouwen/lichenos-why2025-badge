@@ -99,6 +99,49 @@ static void apply_dev(void) {
     }
 }
 
+static void refresh_net(void) {
+    char text[96];
+    char ip[16];
+    if (lichen_sys_wifi_ip(ip, sizeof(ip))) {
+        snprintf(text, sizeof(text), "connected, %s", ip);
+    } else {
+        strlcpy(text, "not connected", sizeof(text));
+    }
+    set_text(value_label[ROW_WIFI], text);
+    set_text(value_label[ROW_LORA], lichen_sys_lora_up() ? "working" : "not available");
+}
+
+static void refresh_storage(void) {
+    char     text[96];
+    uint64_t free_b, total_b;
+    if (lichen_sys_storage_free_bytes(&free_b, &total_b)) {
+        snprintf(text, sizeof(text), "%.1f MB free of %.1f MB", (double)free_b / 1048576.0, (double)total_b / 1048576.0);
+    } else {
+        strlcpy(text, "not available", sizeof(text));
+    }
+    set_text(value_label[ROW_STORAGE], text);
+
+    lichen_sd_info_t sd; // cached: the LVGL task never reads the card (#60)
+    lichen_sys_sd_info(&sd);
+    lichen_sys_sd_short_text(&sd, text, sizeof(text));
+    set_text(value_label[ROW_SD], text);
+}
+
+static void refresh_clock(void) {
+    char      text[96];
+    time_t    now = time(NULL);
+    struct tm local;
+    if (lichen_sys_clock_is_set() && localtime_r(&now, &local)) {
+        size_t n = strftime(text, sizeof(text), "%Y-%m-%d %H:%M", &local);
+        char   src[48];
+        lichen_sys_clock_source_text(src, sizeof(src)); // where the time came from (#83)
+        snprintf(text + n, sizeof(text) - n, ", %s", src);
+    } else {
+        strlcpy(text, "not set", sizeof(text));
+    }
+    set_text(value_label[ROW_CLOCK], text);
+}
+
 static void refresh(lv_timer_t *timer) {
     (void)timer;
     char text[96];
@@ -115,44 +158,11 @@ static void refresh(lv_timer_t *timer) {
     }
     set_text(value_label[ROW_C6], text);
 
-    char ip[16];
-    if (lichen_sys_wifi_ip(ip, sizeof(ip))) {
-        snprintf(text, sizeof(text), "connected, %s", ip);
-    } else {
-        strlcpy(text, "not connected", sizeof(text));
-    }
-    set_text(value_label[ROW_WIFI], text);
-
-    set_text(value_label[ROW_LORA], lichen_sys_lora_up() ? "working" : "not available");
-
-    uint64_t free_b, total_b;
-    if (lichen_sys_storage_free_bytes(&free_b, &total_b)) {
-        snprintf(text, sizeof(text), "%.1f MB free of %.1f MB", (double)free_b / 1048576.0, (double)total_b / 1048576.0);
-    } else {
-        strlcpy(text, "not available", sizeof(text));
-    }
-    set_text(value_label[ROW_STORAGE], text);
-
-    lichen_sd_info_t sd; // cached: the LVGL task never reads the card (#60)
-    lichen_sys_sd_info(&sd);
-    lichen_sys_sd_short_text(&sd, text, sizeof(text));
-    set_text(value_label[ROW_SD], text);
-
+    refresh_net();
+    refresh_storage();
     fmt_uptime(text, sizeof(text));
     set_text(value_label[ROW_UP], text);
-
-    time_t    now = time(NULL);
-    struct tm local;
-    if (lichen_sys_clock_is_set() && localtime_r(&now, &local)) {
-        size_t n = strftime(text, sizeof(text), "%Y-%m-%d %H:%M", &local);
-        char   src[48];
-        lichen_sys_clock_source_text(src, sizeof(src)); // where the time came from (#83)
-        snprintf(text + n, sizeof(text) - n, ", %s", src);
-    } else {
-        strlcpy(text, "not set", sizeof(text));
-    }
-    set_text(value_label[ROW_CLOCK], text);
-
+    refresh_clock();
     for (size_t i = 0; i < DEV_N; i++) { // the cache only: never waits for the C6 or a bus (#307)
         char raw[96] = "";
         lichen_reg_get(DEV[i].key, raw, sizeof(raw));
@@ -185,12 +195,18 @@ static void ask_dev_off(void) {
 }
 
 static void dev_enter(void) {
-    if (console_dev_mode()) {
-        ask_dev_off();
-    } else if (dev_tap(&tap, lv_tick_get())) {
-        bool saved = console_dev_set(true);
-        lichen_sys_notify(LN_INFO, "Developer mode on", saved ? "Switch it off in About." : "This boot only: not saved.", 0);
-        apply_dev();
+    switch (dev_enter_action(&tap, console_dev_mode(), lv_tick_get())) {
+        case DEV_ENTER_ASK_OFF: ask_dev_off(); break;
+        case DEV_ENTER_SWITCH_ON: {
+            bool saved = console_dev_set(true);
+            if (console_dev_mode()) { // a release build has no developer commands: it stays off, so say nothing
+                lichen_sys_notify(LN_INFO, "Developer mode on",
+                                  saved ? "Switch it off in About." : "This boot only: not saved.", 0);
+                apply_dev();
+            }
+            break;
+        }
+        default: break;
     }
 }
 

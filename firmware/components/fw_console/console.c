@@ -809,7 +809,7 @@ static void cmd_dev(char const *args) {
             console_reply("developer mode %s%s", on ? "on" : "off", saved ? "" : " (not saved: this boot only)");
             break;
         }
-        case DEV_REQ_REFUSED: console_reply("dev on: only from the USB console (or About: tap Version 7 times)"); break;
+        case DEV_REQ_REFUSED: console_reply("dev on: only from the USB console (or About: press Enter 7 times)"); break;
         case DEV_REQ_USAGE:
         default: console_reply("dev [on|off|status]"); break;
     }
