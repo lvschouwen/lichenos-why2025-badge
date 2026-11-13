@@ -69,13 +69,11 @@ int ota_piece_flash_ok(size_t offset, size_t len, size_t total, size_t sector) {
     return offset % sector == 0 && (len % sector == 0 || len == total - offset);
 }
 
-// ota_piece_flash_ok's rule on the numbers as sent. Before #211 they were cast to a 32-bit size_t first, so an offset
-// past 4 GB wrapped; such a piece is refused either way. A piece past the end is ota_piece_bounds's to answer, as
-// before: only the ragged last piece's end is compared here, without a sum that could overflow.
+// The sector rule (ota_piece_flash_ok) for a piece inside the file. A piece outside it is ota_piece_bounds's to answer
+// ("runs past X-Total-Size"), so it passes here; only inside the file are the numbers below 4 MB and safe to cast.
 static bool sector_rule(ota_request_t const *req, size_t sector) {
-    long long s = (long long)sector;
-    return s > 0 && req->offset % s == 0 &&
-           (req->content_length % s == 0 || req->content_length == req->total_size - req->offset);
+    return ota_piece_bounds(req) != OTA_PIECE_OK ||
+           ota_piece_flash_ok((size_t)req->offset, (size_t)req->content_length, (size_t)req->total_size, sector);
 }
 
 ota_piece_verdict_t ota_piece_headers(ota_request_t const *req, long long max, size_t sector) {

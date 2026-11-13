@@ -313,7 +313,11 @@ static void check_invariants(int st, ota_request_t const *r) {
 }
 
 static void parse_mutated(uint8_t const *buf, size_t len) {
-    uint8_t      *exact = mut_exact(buf, len); // exactly len bytes: ASan sees any read past them
+    uint8_t *exact = mut_exact(buf, len); // exactly len bytes: ASan sees any read past them
+    CHECK(exact != NULL);
+    if (!exact) {
+        return;
+    }
     ota_request_t req;
     int           st = ota_parse_request((char const *)exact, len, &req);
     check_invariants(st, &req);

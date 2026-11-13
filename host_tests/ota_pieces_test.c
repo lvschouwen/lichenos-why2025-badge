@@ -94,6 +94,13 @@ static void test_verdicts(void) {
     m = piece(OTA_ROUTE_FIRMWARE, 8192, 8192, 10000);
     CHECK(ota_piece_headers(&m, MAX, 4096) == OTA_PIECE_OK && ota_piece_bounds(&m) == OTA_PIECE_PAST_END);
 
+    // A misaligned firmware piece past the end, or past 4 GB, is answered as past the end (#211: one rule, the range
+    // first; before, the 32-bit cast decided which of the two 400 texts it got)
+    m = piece(OTA_ROUTE_FIRMWARE, 100, 5000, 1000);
+    CHECK(ota_piece_headers(&m, MAX, 4096) == OTA_PIECE_OK && ota_piece_bounds(&m) == OTA_PIECE_PAST_END);
+    m = piece(OTA_ROUTE_FIRMWARE, 4294967296LL, 100, MAX);
+    CHECK(ota_piece_headers(&m, MAX, 4096) == OTA_PIECE_OK && ota_piece_bounds(&m) == OTA_PIECE_PAST_END);
+
     // Bounds: the last byte may be the file's last, one more is refused; no sum overflows
     m = piece(OTA_ROUTE_FILE, 90, 10, 100);
     CHECK(ota_piece_bounds(&m) == OTA_PIECE_OK);

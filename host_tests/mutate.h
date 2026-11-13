@@ -117,12 +117,14 @@ static inline uint8_t *mut_exact(uint8_t const *buf, size_t len) {
 }
 
 // One random mutation of src into dst (cap bytes), returns the new length. The inserted bytes favour the ones that
-// split text formats (NUL, CR, LF, ':', ' ', digits), so line and field parsers see their edge cases often.
+// split text formats (NUL, CR, LF, ':', ' ', digits), so line and field parsers see their edge cases often. One case
+// is a binary length lie: a 1-, 2- or 4-byte little-endian field at a random offset set to 0, 1, its maximum or a
+// random value. A binary decoder test that knows where its length fields are calls mut_lie_le on them as well.
 static inline size_t mut_random(mut_rng_t *r, uint8_t const *src, size_t len, uint8_t *dst, size_t cap) {
     static uint8_t const special[] = {0, '\r', '\n', ':', ' ', '\t', '0', '9', '-', 0xff, 0x80, '?', '='};
     size_t               at        = mut_below(r, len + 1);
     size_t               n;
-    switch (mut_next(r) % 6) {
+    switch (mut_next(r) % 7) {
         case 0: return mut_truncate(src, len, at, dst, cap);
         case 1:
             n = mut_truncate(src, len, len, dst, cap);
@@ -139,11 +141,19 @@ static inline size_t mut_random(mut_rng_t *r, uint8_t const *src, size_t len, ui
         case 4:
             n = mut_repeat(src, len, at, mut_below(r, len - at + 1), dst, cap);
             return n ? n : mut_truncate(src, len, len, dst, cap);
-        default:
+        case 5:
             n = mut_truncate(src, len, len, dst, cap);
             if (n) {
                 dst[mut_below(r, n)] = (uint8_t)mut_next(r);
             }
             return n;
+        default: {
+            static uint32_t const lies[] = {0, 1, 0xff, 0xffff, 0xffffffffu, 0x7fffffffu};
+            unsigned const        width  = 1u << mut_below(r, 3);
+            uint32_t const        value  = mut_below(r, 2) ? lies[mut_below(r, 6)] : mut_next(r);
+            n                            = mut_truncate(src, len, len, dst, cap);
+            mut_lie_le(dst, n, mut_below(r, n), width, value);
+            return n;
+        }
     }
 }

@@ -822,6 +822,9 @@ static bool peek_body(int fd, uint8_t const **pre, size_t *pre_len, size_t want)
 
 static bool stream_erase(size_t offset, size_t len) {
     size_t end = ota_round_up(offset + len, 4096);
+    if (end == 0 || end < offset) { // ota_round_up's overflow sentinel; pieces lie inside the slot, so never on the badge
+        return false;
+    }
     if (end > staged.slot->size) {
         end = staged.slot->size;
     }

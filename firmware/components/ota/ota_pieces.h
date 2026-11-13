@@ -46,7 +46,7 @@ typedef enum {
     OTA_PIECE_OK,
     OTA_PIECE_MISSING,   // 400: Content-Length, X-Content-SHA256, X-Total-Size or X-File-SHA256 absent, or compressed
     OTA_PIECE_TOO_LARGE, // 413: X-Total-Size past the route's limit
-    OTA_PIECE_UNALIGNED, // 400: a firmware piece that is not whole erase sectors (ota_piece_flash_ok)
+    OTA_PIECE_UNALIGNED, // 400: a firmware piece inside the file that is not whole erase sectors (ota_piece_flash_ok)
     OTA_PIECE_PAST_END,  // 400: X-Offset + Content-Length runs past X-Total-Size
 } ota_piece_verdict_t;
 
