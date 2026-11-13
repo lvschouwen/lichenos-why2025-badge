@@ -357,9 +357,11 @@ The rule: **core 1 draws, core 0 talks to the world.**
   setup, an update or a power-down is on screen. Bench: `fw keys send square|triangle|cross|circle|cloud|diamond`.
 - **Hand-only = TCA8418 only (#391).** Injected keys (`fw keys send` / `press`, #375) take the keyboard's own path:
   the wake hook, the raw hooks and LVGL see them like the chip's. A `phys` key only also goes through the remote key
-  gate (#190); it is injected all the same. The origin travels with the event: raw hooks read
-  `key_raw_event_t.injected`, a shell key handler asks `lichen_sys_keys_last_injected()` (the event LVGL is handling;
-  board/key_origin.c holds the rule). Paths that must take a hand on the keyboard refuse injected keys: the #66
+  gate (#190); it is injected all the same. The origin is per key and travels with the event: a release reports its
+  press's origin, whichever path it came by (board/key_origin.c, `key_origin_stamp`), so a gesture is never part
+  hand and part injected. Raw hooks read `key_raw_event_t.injected`; a shell key handler asks
+  `lichen_sys_keys_last_injected()`, valid only synchronously in the LV_EVENT_KEY handler of the key being handled
+  (not after `lv_async_call`, a UI call or a focus change), checked on the press. Paths that must take a hand on the keyboard refuse injected keys: the #66
   factory question (neither arms nor confirms; an injected Esc may still cancel) and About's developer taps (#374).
   A new DANGER confirm or mode switch meant for hands joins that list.
 

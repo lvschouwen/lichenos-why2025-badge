@@ -46,6 +46,7 @@ static _Atomic(QueueHandle_t) injected; // keyboard_inject (#375): drained by th
 static uint32_t       held[0x51]; // what each pressed key was mapped to, so its release reports the same key
 static bool           shift;
 static bool           raw_down[0x51]; // keys the raw hooks saw pressed, so a chip reset releases them there too (#14)
+static key_origin_t   held_origin[0x51]; // key_origin_stamp: a release reports its press's origin (#391)
 static atomic_bool    reinit_asked;            // keyboard_reinit(): honoured by the poll task, which owns the chip
 static void (*_Atomic reset_hook)(void);       // told when the readback finds the chip reset (#14)
 static bool (*_Atomic wake_hook)(void);        // the screen timeout (#43)
@@ -156,13 +157,15 @@ static void release_held(void) {
     memset(woke, 0, sizeof(woke));
     xQueueReset(events); // queued presses are moot now, and the releases must not be dropped by a full queue
     for (size_t k = 0; k < sizeof(held) / sizeof(held[0]); k++) {
+        // The held key's own origin: an injected key stays injected through the chip's reset
+        bool from_inject = key_origin_injected(key_origin_stamp(&held_origin[k], false, KEY_ORIGIN_CHIP));
         if (raw_down[k]) {
-            key_raw_event_t raw_ev = {.code = (uint8_t)k, .pressed = false, .shift = false};
+            key_raw_event_t raw_ev = {.code = (uint8_t)k, .pressed = false, .shift = false, .injected = from_inject};
             run_hooks(&raw_ev); // hold-to-exit and other raw listeners would otherwise see the key down forever
             raw_down[k] = false;
         }
         if (held[k]) {
-            key_event_t ev = {.key = held[k], .pressed = false};
+            key_event_t ev = {.key = held[k], .pressed = false, .injected = from_inject};
             xQueueSend(events, &ev, 0);
             held[k] = 0;
         }
@@ -209,9 +212,10 @@ static void handle_key(uint8_t key, bool pressed, key_origin_t origin) {
     if ((key_origin_gated(origin) && gate_drops(key, pressed)) || wake_swallows(key, pressed)) {
         return;
     }
-    bool injected          = key_origin_injected(origin);
+    // Per key: a release is as injected as its press, whichever path it came by
+    bool from_inject       = key_origin_injected(key_origin_stamp(&held_origin[key], pressed, origin));
     raw_down[key]          = pressed;
-    key_raw_event_t raw_ev = {.code = key, .pressed = pressed, .shift = shift, .injected = injected};
+    key_raw_event_t raw_ev = {.code = key, .pressed = pressed, .shift = shift, .injected = from_inject};
     bool swallowed = run_hooks(&raw_ev);
     // A key pressed before the hook grabbed the keys still gets its release, or LVGL would see it held forever
     if (swallowed && (pressed || !held[key])) {
@@ -223,7 +227,7 @@ static void handle_key(uint8_t key, bool pressed, key_origin_t origin) {
     uint32_t mapped = pressed ? kbd_map_key(key, shift) : held[key];
     held[key]       = pressed ? mapped : 0;
     if (mapped) {
-        key_event_t ev = {.key = mapped, .pressed = pressed, .injected = injected};
+        key_event_t ev = {.key = mapped, .pressed = pressed, .injected = from_inject};
         xQueueSend(events, &ev, 0); // a full queue drops keys rather than blocking the poll
     }
 }

@@ -11,3 +11,13 @@ bool key_origin_gated(key_origin_t o) {
 bool key_origin_injected(key_origin_t o) {
     return o != KEY_ORIGIN_CHIP; // an unknown value counts as injected: only the chip is a hand
 }
+
+key_origin_t key_origin_stamp(key_origin_t *held, bool pressed, key_origin_t origin) {
+    if (pressed) {
+        *held = origin;
+        return origin;
+    }
+    key_origin_t press = *held == KEY_ORIGIN_NONE ? origin : *held;
+    *held              = KEY_ORIGIN_NONE;
+    return press;
+}

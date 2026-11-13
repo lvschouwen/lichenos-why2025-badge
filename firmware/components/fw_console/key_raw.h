@@ -11,7 +11,8 @@ typedef struct {
     bool    pressed;
     bool    test_open; // stamped at capture: the Keyboard Test was the foreground screen (gates "fw keys log")
     bool    shift;     // a Shift key is down (for a Shift key's own event: after the event)
-    bool    injected;  // not from the TCA8418: "fw keys send/press", "phys" ones too (#391). Hand-only paths refuse it
+    bool    injected;  // not from the TCA8418: "fw keys send/press", "phys" ones too (#391); a release carries its
+                       // press's origin. Hand-only paths refuse it
 } key_raw_event_t;
 
 // Runs on the keyboard task for every event, before it is mapped: it must be quick and must not touch LVGL (queue the

@@ -34,9 +34,11 @@ void lichen_sys_keys_set_gate(bool (*fn)(uint8_t key, bool pressed), void (*rese
 // False when there is no keyboard or its 16-deep queue is full. Any task, never blocks.
 bool    lichen_sys_keys_inject(uint8_t code, bool pressed, bool as_physical);
 // Hand-only = TCA8418 only (#391): a DANGER confirm or a mode switch that must take a hand on the keyboard refuses
-// injected keys, "phys" ones included. A raw hook reads ev->injected; a shell key handler (LV_EVENT_KEY and the like)
-// asks this: true when the key event LVGL last read, the one it is handling, came from lichen_sys_keys_inject. False
-// before any key. Any task, but only meaningful on the LVGL task while it handles a key.
+// injected keys, "phys" ones included. A raw hook reads ev->injected; a shell key handler asks this: true when the key
+// event LVGL last read came from lichen_sys_keys_inject (a release is as injected as its press). Valid only when
+// called synchronously in the LV_EVENT_KEY handler of the key being handled: not after lv_async_call, a UI call or a
+// focus change, by when another key may have been read. Consumers check it on the press. False before any key. Any
+// task (an atomic read), but only meaningful there.
 bool    lichen_sys_keys_last_injected(void);
 // The code that types key (an LVGL key or a character), 0 when no key types it. *shift_code is the Shift key's code
 // when Shift must be down for it, else 0. Pure, any task.
