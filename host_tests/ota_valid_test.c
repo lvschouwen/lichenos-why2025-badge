@@ -31,8 +31,12 @@ static void test_image_header(void) {
 
 // A display boot with everything up, settled: the case that marks the image valid
 static ota_trial_in_t up_at(uint32_t uptime_s) {
-    return (ota_trial_in_t){.image = OTA_IMAGE_ON_TRIAL, .display = OTA_DISPLAY_UP, .shell_up = true, .c6_up = true,
-                            .uptime_s = uptime_s};
+    return (ota_trial_in_t){.image       = OTA_IMAGE_ON_TRIAL,
+                            .display     = OTA_DISPLAY_UP,
+                            .shell_up    = true,
+                            .c6_up       = true,
+                            .uptime_s    = uptime_s,
+                            .wifi_joined = true}; // #411: a trial image needs Wi-Fi too
 }
 
 static ota_trial_act_t step(ota_trial_in_t in) {
@@ -63,8 +67,9 @@ static void test_display_skipped(void) {
     CHECK(step(in) == OTA_TRIAL_MARK_VALID);
     in.uptime_s = OTA_VALID_AFTER_S - 1;
     CHECK(step(in) == OTA_TRIAL_WAIT); // the same window as with a display
-    in.uptime_s = OTA_VALID_AFTER_S;
-    in.c6_up    = false;
+    in.uptime_s    = OTA_VALID_AFTER_S;
+    in.c6_up       = false;
+    in.wifi_joined = false;            // no C6, no Wi-Fi
     CHECK(step(in) == OTA_TRIAL_WAIT); // still needs the C6 link: without it nobody can replace the image
 }
 
@@ -79,7 +84,8 @@ static void test_display_failed(void) {
     CHECK(step(in) == OTA_TRIAL_STAY);
     in.c6_up = false;
     CHECK(step(in) == OTA_TRIAL_ROLL_BACK);
-    ota_trial_in_t zero = {.image = OTA_IMAGE_ON_TRIAL, .shell_up = true, .c6_up = true, .uptime_s = 100};
+    ota_trial_in_t zero = {
+        .image = OTA_IMAGE_ON_TRIAL, .shell_up = true, .c6_up = true, .uptime_s = 100, .wifi_joined = true};
     CHECK(step(zero) == OTA_TRIAL_STAY); // a zeroed display field is the failed one
 }
 
@@ -121,9 +127,19 @@ typedef struct {
     int           mark_fails;    // the first marks fail
     int           marks;         // marks tried
     ota_arrival_t arrival;       // #411
-    uint32_t      wifi_from_s;   // joined from here (UINT32_MAX: never)
-    bool          wifi_off;      // the user's switch
+    uint32_t      wifi_from_s;   // joined from here (UINT32_MAX: never) ...
+    uint32_t      wifi_to_s;     // ... until here (the access point went away)
+    bool          wifi_off;      // the person's saved switch
+    uint32_t      hold_from_s;   // a thermal hold of Wi-Fi from here ... (0 with hold_to_s 0: none)
+    uint32_t      hold_to_s;     // ... to here
+    int           warns;         // trial_warn calls
+    uint32_t      warn_at_s;
+    uint32_t      warn_left_s;
 } fake_t;
+
+static bool in_hold(fake_t const *f) {
+    return f->uptime_s >= f->hold_from_s && f->uptime_s < f->hold_to_s;
+}
 
 static void fake_read(void *ctx, ota_trial_in_t *in) {
     fake_t *f       = ctx;
@@ -134,7 +150,9 @@ static void fake_read(void *ctx, ota_trial_in_t *in) {
     in->uptime_s    = f->uptime_s;
     in->arrival     = f->arrival;
     in->wifi_off    = f->wifi_off;
-    in->wifi_joined = !f->wifi_off && f->uptime_s >= f->wifi_from_s;
+    in->wifi_joined = !f->wifi_off && in->c6_up && f->uptime_s >= f->wifi_from_s && f->uptime_s < f->wifi_to_s &&
+                      !in_hold(f);
+    in->wifi_held   = !f->wifi_off && in_hold(f);
 }
 
 static bool fake_mark(void *ctx) {
@@ -152,13 +170,22 @@ static void fake_wait(void *ctx) {
     }
 }
 
+static void fake_warn(void *ctx, uint32_t left_s) {
+    fake_t *f = ctx;
+    f->warns++;
+    f->warn_at_s   = f->uptime_s;
+    f->warn_left_s = left_s;
+}
+
 static ota_trial_end_t run(fake_t *f) {
-    ota_trial_io_t const io = {.read = fake_read, .mark_valid = fake_mark, .wait = fake_wait, .ctx = f};
+    ota_trial_io_t const io = {
+        .read = fake_read, .mark_valid = fake_mark, .wait = fake_wait, .warn = fake_warn, .ctx = f};
     return ota_trial_run(&io);
 }
 
 static fake_t badge(void) {
-    return (fake_t){.uptime_s = 20, .c6_from_s = 0, .shell_from_s = 0, .display = OTA_DISPLAY_UP, .wifi_from_s = 0};
+    return (fake_t){.uptime_s = 20, .c6_from_s = 0, .shell_from_s = 0, .display = OTA_DISPLAY_UP, .wifi_from_s = 0,
+                    .wifi_to_s = UINT32_MAX};
 }
 
 static void test_loop_timeline(void) {
@@ -209,75 +236,110 @@ static void test_loop_retries(void) {
     CHECK(run(&f) == OTA_TRIAL_END_NO_STATE && f.marks == 0 && f.uptime_s == 20 + OTA_TRIAL_TRIES - 1);
 }
 
-// ---- #411: an image installed over Wi-Fi is valid only back on Wi-Fi ----
+// ---- #411: a trial image is valid only back on Wi-Fi, unless a slot switch started it ----
 
-// The rule before #411, written as the spec states it: serial flashes and Wi-Fi off keep exactly this
-static ota_trial_act_t legacy_expect(ota_trial_in_t const *in) {
-    bool ui = in->display == OTA_DISPLAY_SKIPPED || (in->display == OTA_DISPLAY_UP && in->shell_up);
-    if (in->uptime_s >= OTA_VALID_AFTER_S && in->c6_up && ui) {
-        return OTA_TRIAL_MARK_VALID;
-    }
-    if (!in->c6_up) {
-        return in->uptime_s >= OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S ? OTA_TRIAL_ROLL_BACK : OTA_TRIAL_WAIT;
-    }
-    return in->uptime_s < OTA_VALID_AFTER_S ? OTA_TRIAL_WAIT : OTA_TRIAL_STAY;
+#define VALID OTA_TRIAL_MARK_VALID
+#define WAIT OTA_TRIAL_WAIT
+#define STAY OTA_TRIAL_STAY
+#define BACK OTA_TRIAL_ROLL_BACK
+#define NOWIFI OTA_TRIAL_ROLL_BACK_NO_WIFI
+#define AIR OTA_ARRIVAL_OVER_AIR
+#define SWITCH OTA_ARRIVAL_SLOT_SWITCH
+
+typedef enum { UI_UP, UI_SHELL_DOWN, UI_SKIPPED, UI_FAILED } ui_t;
+
+typedef struct {
+    ota_arrival_t   arrival;
+    uint32_t        t, held_s;
+    bool            c6, joined, off, held;
+    ui_t            ui;
+    ota_trial_act_t want;
+    char const     *why;
+} row_t;
+
+static ota_trial_in_t row_in(row_t const *r) {
+    static ota_display_t const disp[] = {OTA_DISPLAY_UP, OTA_DISPLAY_UP, OTA_DISPLAY_SKIPPED, OTA_DISPLAY_FAILED};
+    return (ota_trial_in_t){.image       = OTA_IMAGE_ON_TRIAL,
+                            .display     = disp[r->ui],
+                            .shell_up    = r->ui == UI_UP,
+                            .c6_up       = r->c6,
+                            .uptime_s    = r->t,
+                            .arrival     = r->arrival,
+                            .wifi_joined = r->joined,
+                            .wifi_off    = r->off,
+                            .wifi_held   = r->held,
+                            .held_s      = r->held_s};
 }
 
-// The Wi-Fi rule as #411 states it
-static ota_trial_act_t wifi_expect(ota_trial_in_t const *in) {
-    bool ui = in->display == OTA_DISPLAY_SKIPPED || (in->display == OTA_DISPLAY_UP && in->shell_up);
-    if (in->uptime_s >= OTA_VALID_AFTER_S && in->c6_up && ui && in->wifi_joined) {
-        return OTA_TRIAL_MARK_VALID;
+// The cases that matter, written out (not derived from the code)
+static void test_wifi_table(void) {
+    uint32_t const v = OTA_VALID_AFTER_S, g = OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S, w = OTA_VALID_NEEDS_WIFI_S;
+    row_t const rows[] = {
+        // arrival t held_s c6 joined off held ui want
+        {AIR, v, 0, 1, 1, 0, 0, UI_UP, VALID, "everything up and back on Wi-Fi"},
+        {AIR, v - 1, 0, 1, 1, 0, 0, UI_UP, WAIT, "too soon, as before"},
+        {AIR, v, 0, 1, 0, 0, 0, UI_UP, WAIT, "everything up but Wi-Fi: not proven"},
+        {AIR, w - 1, 0, 1, 0, 0, 0, UI_UP, WAIT, "a second before the bound"},
+        {AIR, w, 0, 1, 0, 0, 0, UI_UP, NOWIFI, "the bound without Wi-Fi"},
+        {AIR, w, 0, 1, 0, 0, 0, UI_FAILED, NOWIFI, "a failed display without Wi-Fi rolls back too"},
+        {AIR, w + 500, 0, 1, 1, 0, 0, UI_UP, VALID, "a late join still proves it"},
+        {AIR, v, 0, 1, 1, 0, 0, UI_SHELL_DOWN, STAY, "UI down but reachable over Wi-Fi"},
+        {AIR, v, 0, 1, 1, 0, 0, UI_FAILED, STAY, "display failed but reachable over Wi-Fi"},
+        {AIR, v, 0, 1, 1, 0, 0, UI_SKIPPED, VALID, "fw noscreen, back on Wi-Fi"},
+        {AIR, g, 0, 0, 0, 0, 0, UI_UP, BACK, "no C6: the old rollback, sooner"},
+        {AIR, g - 1, 0, 0, 0, 0, 0, UI_UP, WAIT, "no C6, before its rollback"},
+        {AIR, v, 0, 1, 0, 1, 0, UI_UP, VALID, "Wi-Fi switched off by the person: the old rule"},
+        {AIR, w, 0, 1, 0, 1, 0, UI_SHELL_DOWN, STAY, "switched off, UI down: the old STAY, no rollback"},
+        {AIR, g, 0, 0, 0, 1, 0, UI_UP, BACK, "switched off, no C6: the old rollback"},
+        {AIR, v, 0, 1, 0, 0, 1, UI_UP, WAIT, "thermal hold: not proven by the old rule"},
+        {AIR, w + 100, 0, 1, 0, 0, 1, UI_UP, WAIT, "thermal hold: never rolled back for Wi-Fi"},
+        {AIR, w + 100, 101, 1, 0, 0, 0, UI_UP, WAIT, "the held seconds do not count"},
+        {AIR, w + 100, 100, 1, 0, 0, 0, UI_UP, NOWIFI, "the bound outside the hold"},
+        {AIR, g, 0, 0, 0, 0, 1, UI_UP, BACK, "a hold does not save an image without its C6"},
+        {SWITCH, v, 0, 1, 0, 0, 0, UI_UP, VALID, "fw slot other: the old rule, no Wi-Fi needed"},
+        {SWITCH, w, 0, 1, 0, 0, 0, UI_SHELL_DOWN, STAY, "fw slot other, UI down: the old STAY"},
+        {SWITCH, g, 0, 0, 0, 0, 0, UI_UP, BACK, "fw slot other, no C6: the old rollback"},
+    };
+    for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); i++) {
+        ota_trial_in_t in = row_in(&rows[i]);
+        if (ota_trial_step(&in) != rows[i].want) {
+            printf("FAIL table row %zu (%s): got %d want %d\n", i, rows[i].why, ota_trial_step(&in), rows[i].want);
+            failures++;
+        }
     }
-    if (!in->c6_up && in->uptime_s >= OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S) {
-        return OTA_TRIAL_ROLL_BACK;
-    }
-    if (in->wifi_joined && in->uptime_s >= OTA_VALID_AFTER_S) {
-        return OTA_TRIAL_STAY; // reachable over Wi-Fi: the old reason to stay
-    }
-    return in->uptime_s >= OTA_VALID_NEEDS_WIFI_S ? OTA_TRIAL_ROLL_BACK_NO_WIFI : OTA_TRIAL_WAIT;
 }
 
-// Every combination: arrival x uptime x Wi-Fi joined x C6 x UI x Wi-Fi off by the user's setting
-static void test_wifi_matrix(void) {
-    uint32_t const times[] = {0,
-                              OTA_VALID_AFTER_S - 1,
-                              OTA_VALID_AFTER_S,
-                              OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S - 1,
-                              OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S,
-                              OTA_VALID_NEEDS_WIFI_S - 1,
-                              OTA_VALID_NEEDS_WIFI_S,
-                              100000};
-    struct {
-        ota_display_t display;
-        bool          shell_up;
-    } const uis[] = {{OTA_DISPLAY_UP, true}, {OTA_DISPLAY_UP, false}, {OTA_DISPLAY_SKIPPED, false},
-                     {OTA_DISPLAY_FAILED, true}};
-    int cases = 0;
+// Every combination: arrival x uptime x Wi-Fi joined x C6 x UI x Wi-Fi off x held, checked for the properties the
+// issue states
+static void test_wifi_sweep(void) {
+    uint32_t const times[] = {0, OTA_VALID_AFTER_S - 1, OTA_VALID_AFTER_S, OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S,
+                              OTA_NO_WIFI_WARN_S, OTA_VALID_NEEDS_WIFI_S - 1, OTA_VALID_NEEDS_WIFI_S, 100000};
+    int            cases   = 0;
     for (int arr = 0; arr < 2; arr++) {
         for (size_t t = 0; t < sizeof(times) / sizeof(times[0]); t++) {
-            for (int bits = 0; bits < 8; bits++) {
-                for (size_t u = 0; u < sizeof(uis) / sizeof(uis[0]); u++) {
-                    ota_trial_in_t in = {.image       = OTA_IMAGE_ON_TRIAL,
-                                         .display     = uis[u].display,
-                                         .shell_up    = uis[u].shell_up,
-                                         .c6_up       = bits & 1,
-                                         .uptime_s    = times[t],
-                                         .arrival     = arr ? OTA_ARRIVAL_WIFI : OTA_ARRIVAL_OTHER,
-                                         .wifi_joined = (bits & 2) != 0,
-                                         .wifi_off    = (bits & 4) != 0};
-                    bool            wifi_rule = in.arrival == OTA_ARRIVAL_WIFI && !in.wifi_off;
-                    ota_trial_act_t want      = wifi_rule ? wifi_expect(&in) : legacy_expect(&in);
-                    ota_trial_act_t got       = ota_trial_step(&in);
-                    if (got != want) {
-                        printf("FAIL matrix: arrival %d t %u c6 %d joined %d off %d ui %zu: got %d want %d\n", arr,
-                               (unsigned)in.uptime_s, in.c6_up, in.wifi_joined, in.wifi_off, u, got, want);
-                        failures++;
+            for (int bits = 0; bits < 16; bits++) {
+                for (int ui = UI_UP; ui <= UI_FAILED; ui++) {
+                    row_t r = {.arrival = arr ? SWITCH : AIR,
+                               .t       = times[t],
+                               .c6      = bits & 1,
+                               .joined  = (bits & 2) != 0,
+                               .off     = (bits & 4) != 0,
+                               .held    = (bits & 8) != 0,
+                               .ui      = (ui_t)ui};
+                    ota_trial_in_t  in   = row_in(&r);
+                    ota_trial_act_t got  = ota_trial_step(&in);
+                    bool            rule = r.arrival == AIR && !r.off;
+                    if (!rule) { // the old rule: nothing about Wi-Fi changes the answer
+                        ota_trial_in_t other = in;
+                        other.wifi_joined    = !in.wifi_joined;
+                        other.wifi_held      = !in.wifi_held;
+                        CHECK(ota_trial_step(&other) == got);
+                        CHECK(got != NOWIFI);
                     }
-                    // Never a rollback for Wi-Fi on an image that did not come over Wi-Fi, or with Wi-Fi switched off
-                    CHECK(wifi_rule || got != OTA_TRIAL_ROLL_BACK_NO_WIFI);
-                    // Never a rollback of an image already valid, nor on a state nobody could read
-                    in.image = OTA_IMAGE_NOT_ON_TRIAL;
+                    CHECK(got != VALID || !rule || r.joined); // valid under the rule only back on Wi-Fi
+                    CHECK(got != NOWIFI || !r.held);          // a thermal hold never rolls back for Wi-Fi
+                    CHECK(got != NOWIFI || !r.joined);
+                    in.image = OTA_IMAGE_NOT_ON_TRIAL; // never touch a valid image, nor an unreadable state
                     CHECK(ota_trial_step(&in) == OTA_TRIAL_DONE);
                     in.image = OTA_IMAGE_UNKNOWN;
                     CHECK(ota_trial_step(&in) == OTA_TRIAL_UNKNOWN);
@@ -286,115 +348,143 @@ static void test_wifi_matrix(void) {
             }
         }
     }
-    CHECK(cases == 2 * 8 * 8 * 4);
-    // The headline cases, spelled out: everything up but Wi-Fi is not enough for a Wi-Fi install ...
-    ota_trial_in_t in = up_at(OTA_VALID_AFTER_S);
-    in.arrival        = OTA_ARRIVAL_WIFI;
-    CHECK(step(in) == OTA_TRIAL_WAIT);
-    in.uptime_s = OTA_VALID_NEEDS_WIFI_S;
-    CHECK(step(in) == OTA_TRIAL_ROLL_BACK_NO_WIFI);
-    in.wifi_joined = true; // ... back on Wi-Fi it is
-    CHECK(step(in) == OTA_TRIAL_MARK_VALID);
-    in.wifi_joined = false; // ... and with Wi-Fi switched off by the user, the rule as before
-    in.wifi_off    = true;
-    CHECK(step(in) == OTA_TRIAL_MARK_VALID);
-    in.arrival  = OTA_ARRIVAL_OTHER; // a serial flash never needs Wi-Fi
-    in.wifi_off = false;
-    CHECK(step(in) == OTA_TRIAL_MARK_VALID);
+    CHECK(cases == 2 * 8 * 16 * 4);
+}
+
+// trial_read's Wi-Fi mapping (main.c): the saved switch, the hold, the radio and the address
+static void test_wifi_glue(void) {
+    ota_trial_in_t  in   = {0};
+    ota_wifi_seen_t seen = {.switch_on = true, .radio_on = true, .has_ip = true};
+    ota_trial_wifi_in(&seen, &in);
+    CHECK(in.wifi_joined && !in.wifi_off && !in.wifi_held);
+    seen.has_ip = false; // associated is not enough without an address
+    ota_trial_wifi_in(&seen, &in);
+    CHECK(!in.wifi_joined && !in.wifi_off);
+    seen = (ota_wifi_seen_t){.switch_on = true, .held = true}; // thermal hold: the radio is off, the switch is not
+    ota_trial_wifi_in(&seen, &in);
+    CHECK(!in.wifi_joined && !in.wifi_off && in.wifi_held);
+    seen = (ota_wifi_seen_t){.switch_on = false}; // switched off (or airplane): off, and a hold on top changes nothing
+    ota_trial_wifi_in(&seen, &in);
+    CHECK(in.wifi_off && !in.wifi_held && !in.wifi_joined);
+    seen.held = true;
+    ota_trial_wifi_in(&seen, &in);
+    CHECK(in.wifi_off && !in.wifi_held);
+    seen = (ota_wifi_seen_t){.test_no_wifi = true, .switch_on = true, .radio_on = true, .has_ip = true};
+    ota_trial_wifi_in(&seen, &in); // the dev test arm: never joined, whatever Wi-Fi does
+    CHECK(!in.wifi_joined && !in.wifi_off);
 }
 
 static void test_wifi_loop(void) {
     fake_t f      = badge(); // back on Wi-Fi before the window: valid at 45 s, as before
-    f.arrival     = OTA_ARRIVAL_WIFI;
     f.wifi_from_s = 30;
-    CHECK(run(&f) == OTA_TRIAL_END_VALID && f.uptime_s == OTA_VALID_AFTER_S);
+    CHECK(run(&f) == OTA_TRIAL_END_VALID && f.uptime_s == OTA_VALID_AFTER_S && f.warns == 0);
 
     f             = badge(); // a slow join: valid when it lands
-    f.arrival     = OTA_ARRIVAL_WIFI;
     f.wifi_from_s = 200;
     CHECK(run(&f) == OTA_TRIAL_END_VALID && f.uptime_s == 200 && f.marks == 1);
 
-    f             = badge(); // never back on Wi-Fi: rolls back at the bound, never marked
-    f.arrival     = OTA_ARRIVAL_WIFI;
+    f             = badge(); // never back on Wi-Fi: warned a minute ahead, rolled back at the bound, never marked
     f.wifi_from_s = UINT32_MAX;
     CHECK(run(&f) == OTA_TRIAL_END_NO_WIFI && f.uptime_s == OTA_VALID_NEEDS_WIFI_S && f.marks == 0);
+    CHECK(f.warns == 1 && f.warn_at_s == OTA_NO_WIFI_WARN_S && f.warn_left_s == 60);
 
-    f             = badge(); // the boot steps ran past the bound: the first look rolls back
+    f             = badge(); // the boot steps ran past the bound: the first look rolls back, no warning first
     f.uptime_s    = OTA_VALID_NEEDS_WIFI_S + 7;
-    f.arrival     = OTA_ARRIVAL_WIFI;
     f.wifi_from_s = UINT32_MAX;
-    CHECK(run(&f) == OTA_TRIAL_END_NO_WIFI && f.uptime_s == OTA_VALID_NEEDS_WIFI_S + 7);
+    CHECK(run(&f) == OTA_TRIAL_END_NO_WIFI && f.uptime_s == OTA_VALID_NEEDS_WIFI_S + 7 && f.warns == 0);
 
-    f          = badge(); // Wi-Fi switched off by the user: the rule as before, valid at 45 s
-    f.arrival  = OTA_ARRIVAL_WIFI;
+    f          = badge(); // Wi-Fi switched off by the person: the rule as before, valid at 45 s
     f.wifi_off = true;
     CHECK(run(&f) == OTA_TRIAL_END_VALID && f.uptime_s == OTA_VALID_AFTER_S);
 
     f             = badge(); // no C6 link (so no Wi-Fi): the old rollback, sooner than the Wi-Fi bound
-    f.arrival     = OTA_ARRIVAL_WIFI;
     f.c6_from_s   = UINT32_MAX;
     f.wifi_from_s = UINT32_MAX;
     CHECK(run(&f) == OTA_TRIAL_END_ROLL_BACK && f.uptime_s == OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S);
 
     f              = badge(); // UI down: stays on trial once reachable over Wi-Fi
-    f.arrival      = OTA_ARRIVAL_WIFI;
     f.shell_from_s = UINT32_MAX;
     f.wifi_from_s  = 60;
     CHECK(run(&f) == OTA_TRIAL_END_STAY && f.uptime_s == 60 && f.marks == 0);
 
-    f             = badge(); // a serial flash without Wi-Fi: valid at 45 s, exactly as before
-    f.wifi_from_s = UINT32_MAX;
-    CHECK(run(&f) == OTA_TRIAL_END_VALID && f.uptime_s == OTA_VALID_AFTER_S);
+    f              = badge(); // UI late, Wi-Fi joins at 30 and drops at 40 (a hold from 40 on): not proven at 45,
+    f.shell_from_s = 50;      // waits through the hold, then proven once Wi-Fi is back at 100
+    f.wifi_from_s  = 30;
+    f.hold_from_s  = 40;
+    f.hold_to_s    = 100;
+    CHECK(run(&f) == OTA_TRIAL_END_VALID && f.uptime_s == 100);
 
-    // An automatic restart waits until the longest trial has ended (#304)
+    f              = badge(); // joined at 30, the access point gone at 40, the UI up at 50: not proven, and with no
+    f.shell_from_s = 50;      // rejoin it rolls back at the bound
+    f.wifi_from_s  = 30;
+    f.wifi_to_s    = 40;
+    CHECK(run(&f) == OTA_TRIAL_END_NO_WIFI && f.uptime_s == OTA_VALID_NEEDS_WIFI_S && f.marks == 0);
+
+    f             = badge(); // a thermal hold from 100 to 400: the clock stops, so the rollback comes 300 s later
+    f.wifi_from_s = UINT32_MAX;
+    f.hold_from_s = 100;
+    f.hold_to_s   = 400;
+    CHECK(run(&f) == OTA_TRIAL_END_NO_WIFI && f.uptime_s == OTA_VALID_NEEDS_WIFI_S + 300 && f.warns == 1);
+    CHECK(f.warn_at_s == OTA_NO_WIFI_WARN_S + 300);
+
+    f             = badge(); // ... and a hold that ends in a join proves the image, with no rollback
+    f.wifi_from_s = 450;
+    f.hold_from_s = 100;
+    f.hold_to_s   = 450;
+    CHECK(run(&f) == OTA_TRIAL_END_VALID && f.uptime_s == 450);
+
+    f             = badge(); // `fw slot other` without Wi-Fi: valid at 45 s, exactly as before
+    f.arrival     = OTA_ARRIVAL_SLOT_SWITCH;
+    f.wifi_from_s = UINT32_MAX;
+    CHECK(run(&f) == OTA_TRIAL_END_VALID && f.uptime_s == OTA_VALID_AFTER_S && f.warns == 0);
+
+    // An automatic restart waits until the longest trial without a hold has ended (#304)
     CHECK(OTA_RESTART_GATE_MAX_S > OTA_VALID_NEEDS_WIFI_S);
     CHECK(OTA_VALID_NEEDS_WIFI_S > OTA_VALID_AFTER_S + OTA_ROLLBACK_GRACE_S);
+    CHECK(OTA_NO_WIFI_WARN_S > OTA_VALID_AFTER_S && OTA_NO_WIFI_WARN_S < OTA_VALID_NEEDS_WIFI_S);
 }
 
-// The arrival mark: only an intact mark naming the running slot counts, and only once
+// The arrival mark: only an intact mark naming the running slot is a slot switch, and only once
 static void test_arrival_mark(void) {
-    uint32_t const     slot_b = 0x220000, slot_a = 0x20000;
+    uint32_t const     slot_b = 0x420000, slot_a = 0x20000;
     ota_arrival_mark_t m      = {0};
-    CHECK(ota_arrival_take(&m, slot_a).arrival == OTA_ARRIVAL_OTHER); // nothing written: a serial flash, first boot
+    CHECK(ota_arrival_take(&m, slot_a).arrival == AIR); // nothing written (an OTA, a lost mark): the Wi-Fi rule
 
-    ota_arrival_mark(&m, slot_b); // installed into B, B boots
+    ota_arrival_mark_switch(&m, slot_b); // fw slot other to B, B boots
     ota_arrival_taken_t t = ota_arrival_take(&m, slot_b);
-    CHECK(t.arrival == OTA_ARRIVAL_WIFI && !t.test_no_wifi);
-    CHECK(ota_arrival_take(&m, slot_b).arrival == OTA_ARRIVAL_OTHER); // consumed: a later reboot is no new arrival
+    CHECK(t.arrival == SWITCH && !t.test_no_wifi);
+    CHECK(ota_arrival_take(&m, slot_b).arrival == AIR); // consumed: a later boot is not that switch
 
-    ota_arrival_mark(&m, slot_b); // installed into B, but the bootloader booted A (B invalid, a rollback)
-    CHECK(ota_arrival_take(&m, slot_a).arrival == OTA_ARRIVAL_OTHER);
-    CHECK(ota_arrival_take(&m, slot_b).arrival == OTA_ARRIVAL_OTHER); // and cleared there too
+    ota_arrival_mark_switch(&m, slot_b); // switched to B, but the bootloader booted A (B invalid)
+    CHECK(ota_arrival_take(&m, slot_a).arrival == AIR);
+    CHECK(ota_arrival_take(&m, slot_b).arrival == AIR); // and cleared there too
 
-    ota_arrival_mark(&m, slot_a); // two installs in a row: the last one names the slot
-    ota_arrival_mark(&m, slot_b);
-    CHECK(ota_arrival_take(&m, slot_b).arrival == OTA_ARRIVAL_WIFI);
+    ota_arrival_mark_switch(&m, slot_a); // two switches in a row: the last one names the slot
+    ota_arrival_mark_switch(&m, slot_b);
+    CHECK(ota_arrival_take(&m, slot_b).arrival == SWITCH);
 
-    // Power-on noise: a mark whose check does not hold is no Wi-Fi install
-    ota_arrival_mark(&m, slot_b);
+    // Power-on noise or a damaged mark is no slot switch: the Wi-Fi rule, which fails safe
+    ota_arrival_mark_switch(&m, slot_b);
     m.check ^= 1;
-    CHECK(ota_arrival_take(&m, slot_b).arrival == OTA_ARRIVAL_OTHER);
-    ota_arrival_mark(&m, slot_b);
+    CHECK(ota_arrival_take(&m, slot_b).arrival == AIR);
+    ota_arrival_mark_switch(&m, slot_b);
     m.slot_addr = slot_a;
-    CHECK(ota_arrival_take(&m, slot_a).arrival == OTA_ARRIVAL_OTHER);
+    CHECK(ota_arrival_take(&m, slot_a).arrival == AIR);
     ota_arrival_mark_t noise = {.magic = 0xFFFFFFFFu, .slot_addr = slot_b, .check = 0, .test_no_wifi = 0xFFFFFFFFu};
-    t = ota_arrival_take(&noise, slot_b);
-    CHECK(t.arrival == OTA_ARRIVAL_OTHER && !t.test_no_wifi);
+    t                        = ota_arrival_take(&noise, slot_b);
+    CHECK(t.arrival == AIR && !t.test_no_wifi);
 
-    // The dev test arm rides on the next install and is one-shot
+    // The dev test arm: taken at the next boot, whatever slot it is, and one-shot
     ota_arrival_arm_test(&m, true);
-    ota_arrival_mark(&m, slot_b);
     t = ota_arrival_take(&m, slot_b);
-    CHECK(t.arrival == OTA_ARRIVAL_WIFI && t.test_no_wifi);
-    ota_arrival_mark(&m, slot_b);
+    CHECK(t.arrival == AIR && t.test_no_wifi);
     CHECK(!ota_arrival_take(&m, slot_b).test_no_wifi);
-    ota_arrival_arm_test(&m, true); // armed, then no install: the next boot clears it
-    CHECK(ota_arrival_take(&m, slot_a).arrival == OTA_ARRIVAL_OTHER);
-    ota_arrival_mark(&m, slot_b);
-    CHECK(!ota_arrival_take(&m, slot_b).test_no_wifi);
-    ota_arrival_arm_test(&m, true); // disarmed before the install
+    ota_arrival_arm_test(&m, true); // armed, then a slot switch: both ride on the same boot
+    ota_arrival_mark_switch(&m, slot_a);
+    t = ota_arrival_take(&m, slot_a);
+    CHECK(t.arrival == SWITCH && t.test_no_wifi);
+    ota_arrival_arm_test(&m, true); // disarmed before the boot
     ota_arrival_arm_test(&m, false);
-    ota_arrival_mark(&m, slot_b);
     CHECK(!ota_arrival_take(&m, slot_b).test_no_wifi);
 }
 
@@ -408,7 +498,9 @@ int main(void) {
     test_update_refused();
     test_loop_timeline();
     test_loop_retries();
-    test_wifi_matrix();
+    test_wifi_table();
+    test_wifi_sweep();
+    test_wifi_glue();
     test_wifi_loop();
     test_arrival_mark();
 

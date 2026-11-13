@@ -19,6 +19,7 @@
 #include "esp_system.h"
 #include "fw_console.h"
 #include "lichen_app.h"
+#include "lichen_mem.h"
 #include "lichen_sys_app.h"
 #include "shell.h"
 #include "update_mode.h"
@@ -322,7 +323,8 @@ static void finish_screen(uint32_t gen) {
     portEXIT_CRITICAL(&lock);
 }
 
-// On the LVGL task: the gate's wait (system_restart on trial, #304) would freeze the UI for up to two minutes, so a
+// On the LVGL task: the gate's wait (system_restart on trial, #304) would freeze the UI for up to OTA_RESTART_GATE_MAX_S
+// of uptime (about five minutes since #411), so a
 // restart that would wait is held and tried again on the next tick. A good install restarts at once: it boots the new
 // version, the trial of this one no longer matters.
 static void restart_after_update(bool due, state_t const *s) {
@@ -547,6 +549,16 @@ bool update_screen_banner_active(void) {
     return atomic_load(&banner_up);
 }
 
+// The newest restart-history line names the trial's own Wi-Fi rollback: the banner says so (#411)
+static void rollback_reason(void) {
+    lichen_ctx_t   os = lichen_sys_ctx_os();
+    restart_log_t *rl = lichen_alloc(os, sizeof(*rl), LICHEN_MEM_BULK); // 560 B, once: not on the boot task's stack
+    if (rl && system_restart_history(rl) > 0) {
+        update_rollback_line(rl->line[0], banner_line, sizeof(banner_line));
+    }
+    lichen_free(os, rl);
+}
+
 // Says what the update did; returns the result for the release notes (#13)
 static upd_result_t boot_check(void) {
     char prev[64];
@@ -577,6 +589,9 @@ static upd_result_t boot_check(void) {
         return UPD_NONE;
     }
     update_line(after.result, prev, run, banner_line, sizeof(banner_line));
+    if (after.result == UPD_ROLLED_BACK) {
+        rollback_reason(); // #411: the trial's own Wi-Fi rollback says why
+    }
     atomic_store(&boot_result, (int)after.result);
     atomic_store(&banner_up, true);
     lichen_sys_ui_lock(0);

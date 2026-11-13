@@ -38,3 +38,11 @@ bool ota_os_secret_set(char const *key, char const *value) {
 bool ota_os_wifi_on(void) {
     return s_os.wifi_on && s_os.wifi_on();
 }
+
+bool ota_os_wifi_switch_on(void) {
+    return !s_os.wifi_switch_on || s_os.wifi_switch_on();
+}
+
+bool ota_os_wifi_held(void) {
+    return s_os.wifi_held && s_os.wifi_held();
+}

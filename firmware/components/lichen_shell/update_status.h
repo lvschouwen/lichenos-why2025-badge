@@ -12,6 +12,12 @@ typedef enum { UPD_NONE, UPD_UPDATED, UPD_ROLLED_BACK } upd_result_t;
 upd_result_t update_result(char const *prev_version, char const *running_version, bool rolled_back);
 // "Updated to <run>" / "Update failed, back on <run>", cut to cap; "" for UPD_NONE. Returns the length written.
 size_t update_line(upd_result_t r, char const *prev, char const *run, char *out, size_t cap);
+// The trial's own Wi-Fi rollback (#411) names itself in the restart history with this reason (OTA_NO_WIFI_WHY in
+// ota_valid.h; update_status_test pins the two together)
+#define UPD_NO_WIFI_WHY "trial image: no Wi-Fi"
+// After a rollback: when the newest restart-history line (restart_line_format: "<when> <version> up=<s>s <why>...") is
+// that rollback, writes "Update rolled back: no Wi-Fi within 5 min" and returns true; otherwise writes nothing, false
+bool update_rollback_line(char const *last_restart, char *out, size_t cap);
 // done of total as 0..100, or -1 while the total is unknown (0)
 int update_pct(uint32_t done, uint32_t total);
 

@@ -9,11 +9,16 @@
 // How long a new image must run with everything up before it counts as good: a build that crashes or hangs within
 // this time still rolls back on the next reset
 #define OTA_VALID_AFTER_S 45
-// An image installed through the Wi-Fi receiver (#411) also has to rejoin Wi-Fi before it counts as good: an image that
-// boots but cannot join would otherwise strand an unattended badge, reachable only over USB. If it has not rejoined by
-// this much uptime, the trial restarts so the bootloader boots the previous image. Worst case from reset to the
-// rollback restart: this bound, or the end of the boot steps if they take longer, plus one trial second.
+// A trial image (#411) also has to rejoin Wi-Fi before it counts as good, unless `fw slot other` started its trial: an
+// image that boots but cannot join would otherwise strand an unattended badge, reachable only over USB. If it has not
+// rejoined by this many seconds of uptime outside a thermal hold, the trial restarts so the bootloader boots the
+// previous image. Worst case from reset to the rollback restart: this bound (or the end of the boot steps if they take
+// longer) plus one trial second, plus however long a thermal hold of Wi-Fi lasts (the clock stops during one).
 #define OTA_VALID_NEEDS_WIFI_S 300
+// The on-screen warning that the rollback is coming (docs/ui-standard.md rules 5 and 10)
+#define OTA_NO_WIFI_WARN_S (OTA_VALID_NEEDS_WIFI_S - 60)
+// The restart history's reason for that rollback: the previous image's update banner reads it (update_status.c)
+#define OTA_NO_WIFI_WHY "trial image: no Wi-Fi"
 
 // What ota knows about the running image (ota_image_trial_state): UNKNOWN when the OTA data could not be read yet
 typedef enum { OTA_IMAGE_UNKNOWN, OTA_IMAGE_ON_TRIAL, OTA_IMAGE_NOT_ON_TRIAL } ota_image_state_t;
@@ -53,16 +58,20 @@ char const *restart_gate_name(restart_gate_t gate);
 // FAILED is 0 on purpose: a zeroed input is the cautious one
 typedef enum { OTA_DISPLAY_FAILED, OTA_DISPLAY_UP, OTA_DISPLAY_SKIPPED } ota_display_t;
 
-// How the running image arrived (#411). OTHER (0) is a serial flash, a first install or anything not proven to be a
-// Wi-Fi install: it keeps the rule as before, so an image meant for a place without Wi-Fi is never rolled back for it
-typedef enum { OTA_ARRIVAL_OTHER, OTA_ARRIVAL_WIFI } ota_arrival_t;
+// How the running image's trial started (#411). OVER_AIR (0, the cautious default) is every trial image `fw slot other`
+// did not start: the Wi-Fi receiver is the only other path to a trial (esp_ota_set_boot_partition), and a USB flash
+// writes blank OTA data (ota_data_initial.bin), which is never a trial (the state read finds no entry). SLOT_SWITCH keeps
+// the rule as before: a person at the console chose that image and may be somewhere without Wi-Fi.
+typedef enum { OTA_ARRIVAL_OVER_AIR, OTA_ARRIVAL_SLOT_SWITCH } ota_arrival_t;
 
-// The arrival mark: written by the Wi-Fi receiver at a successful install only, naming the slot it made the boot slot,
-// and taken (read and cleared) once on the next boot. It lives in LP RAM (ota_trial.c): no console command or file
-// push reaches it, a power-off or the EN reset of a serial flash loses it (which is OTHER, the old rule), and the slot
-// check makes a mark for an image the bootloader did not boot (a rollback, a failed later install) mean nothing.
-// test_no_wifi: a developer-mode test arm (`fw trial nowifi`, compiled out of release) that only ever makes the trial
-// stricter: it counts Wi-Fi as not rejoined, to prove the rollback without touching an access point.
+// The arrival mark: written by `fw slot other` once it made the other slot the boot slot, naming that slot, and taken
+// (read and cleared) once on the next boot. It lives in LP RAM (ota_trial.c), which no file push reaches; the console
+// writes it only through the slot switch. Losing it (a power-off, an EN reset before that boot) only puts a manual slot
+// switch under the Wi-Fi rule, which fails safe; the magic, check and slot match make noise or a mark for a slot the
+// bootloader did not boot mean nothing.
+// test_no_wifi: a developer-mode test arm (`fw trial nowifi`, compiled out of release), taken at the next boot like
+// the mark. It only ever makes the trial stricter: Wi-Fi counts as not rejoined, to prove the rollback without
+// touching an access point.
 typedef struct {
     uint32_t magic;
     uint32_t slot_addr;
@@ -75,11 +84,11 @@ typedef struct {
     bool          test_no_wifi;
 } ota_arrival_taken_t;
 
-// The receiver installed an image into the slot at slot_addr and made it the boot slot; test_no_wifi kept as armed
-void ota_arrival_mark(ota_arrival_mark_t *m, uint32_t slot_addr);
-// Arms (or disarms) the test flag for the next install; it is cleared by the next take, so it is one-shot
+// `fw slot other` made the slot at slot_addr the boot slot; a test arm stays as armed
+void ota_arrival_mark_switch(ota_arrival_mark_t *m, uint32_t slot_addr);
+// Arms (or disarms) the test flag for the next boot; that boot's take clears it, so it is one-shot
 void ota_arrival_arm_test(ota_arrival_mark_t *m, bool no_wifi);
-// Once per boot: WIFI only for an intact mark naming the running slot. Always clears the mark.
+// Once per boot: SLOT_SWITCH only for an intact mark naming the running slot. Always clears the mark and the arm.
 ota_arrival_taken_t ota_arrival_take(ota_arrival_mark_t *m, uint32_t running_addr);
 
 // What the trial sees once a second. It runs only after every boot step has returned (main.c app_main), so "the boot
@@ -91,10 +100,22 @@ typedef struct {
     bool              shell_up;    // the shell is up (read only with OTA_DISPLAY_UP)
     bool              c6_up;       // the C6 link is up: Wi-Fi works, so the image can be replaced over the air
     uint32_t          uptime_s;
-    ota_arrival_t     arrival;     // how this image arrived (#411)
+    ota_arrival_t     arrival;     // how this image's trial started (#411)
     bool              wifi_joined; // associated with an address: what the receiver needs to serve a request
-    bool              wifi_off;    // the user's own switch (Wi-Fi off, airplane mode) has Wi-Fi off
+    bool              wifi_off;    // the person's saved switch has Wi-Fi off (airplane mode clears it too)
+    bool              wifi_held;   // the system holds Wi-Fi off for now (a thermal hold); the switch is on
+    uint32_t          held_s;      // seconds of this trial spent with wifi_held (ota_trial_run counts them; read: 0)
 } ota_trial_in_t;
+
+// What trial_read sees of Wi-Fi, mapped to the inputs above (ota_trial_wifi_in): kept pure so the glue is tested
+typedef struct {
+    bool test_no_wifi; // the developer-mode test arm: never joined
+    bool switch_on;    // the person's saved switch (lichen_radio_switch_get)
+    bool held;         // a system hold of Wi-Fi (lichen_sys_radio_held_by)
+    bool radio_on;     // what the radio does (lichen_radio_get: switched on and not held)
+    bool has_ip;       // associated with an address (wifi_has_ip)
+} ota_wifi_seen_t;
+void ota_trial_wifi_in(ota_wifi_seen_t const *seen, ota_trial_in_t *in);
 
 typedef enum {
     OTA_TRIAL_DONE,       // not on trial: nothing to do
@@ -103,7 +124,7 @@ typedef enum {
     OTA_TRIAL_MARK_VALID, // the image proved itself: cancel the rollback
     OTA_TRIAL_ROLL_BACK,  // restart now so the bootloader boots the previous image
     OTA_TRIAL_STAY,       // stop looking: the image stays on trial, a reset goes back to the previous one
-    OTA_TRIAL_ROLL_BACK_NO_WIFI, // came over Wi-Fi, not back on it by OTA_VALID_NEEDS_WIFI_S: restart to roll back
+    OTA_TRIAL_ROLL_BACK_NO_WIFI, // not back on Wi-Fi by OTA_VALID_NEEDS_WIFI_S: restart to roll back (#411)
 } ota_trial_act_t;
 
 // A new image runs on trial until it proves itself: after OTA_VALID_AFTER_S the C6 link is up, no PSRAM trial is live
@@ -112,18 +133,23 @@ typedef enum {
 // (#61). While the C6 link is down the trial keeps watching and rolls back at OTA_VALID_AFTER_S +
 // OTA_ROLLBACK_GRACE_S (#36, #295); a live PSRAM trial is waited for up to that limit too; otherwise, past
 // OTA_VALID_AFTER_S and not proven, it stops looking (STAY).
-// An image that arrived over Wi-Fi (#411) must also have rejoined Wi-Fi to be proven, and with the UI down it stays on
-// trial only once it is reachable over Wi-Fi; without Wi-Fi by OTA_VALID_NEEDS_WIFI_S it rolls back (the C6 rule above
-// still rolls back sooner). With Wi-Fi switched off by the user's own setting it cannot rejoin, and rolling back what
-// the user chose to take offline would be wrong: the rule as before applies then (still the C6 link and the UI).
+// An image whose trial `fw slot other` did not start (#411) must also have rejoined Wi-Fi to be proven, and with the UI
+// down it stays on trial only once it is reachable over Wi-Fi; without Wi-Fi by OTA_VALID_NEEDS_WIFI_S (seconds outside
+// a thermal hold) it rolls back (the C6 rule above still rolls back sooner). During a thermal hold it waits: the hold
+// is the badge's heat, not the image's fault, so it neither proves the image nor counts toward the rollback. With Wi-Fi
+// switched off by the person's saved switch it cannot rejoin, and rolling back what they chose to take offline would
+// be wrong: the rule as before applies then (still the C6 link and the UI).
 ota_trial_act_t ota_trial_step(ota_trial_in_t const *in);
 
 // The trial loop main runs (#295: its stop rule is host-tested with it): read, decide, act, one second, again. read
 // fills every input; mark_valid cancels the rollback (false: not saved); wait sleeps one second.
+// warn (may be NULL): once, when a trial under the Wi-Fi rule reaches OTA_NO_WIFI_WARN_S without Wi-Fi; left_s is the
+// time to the rollback
 typedef struct {
     void (*read)(void *ctx, ota_trial_in_t *in);
     bool (*mark_valid)(void *ctx);
     void (*wait)(void *ctx);
+    void (*warn)(void *ctx, uint32_t left_s);
     void *ctx;
 } ota_trial_io_t;
 
@@ -134,7 +160,7 @@ typedef enum {
     OTA_TRIAL_END_STAY,         // not proven: stays on trial
     OTA_TRIAL_END_MARK_FAILED,  // proven, but the mark could not be saved OTA_TRIAL_TRIES times: stays on trial
     OTA_TRIAL_END_NO_STATE,     // the state could not be read OTA_TRIAL_TRIES times: if on trial, a reset rolls back
-    OTA_TRIAL_END_NO_WIFI,      // came over Wi-Fi and never rejoined it: the caller restarts now (#411)
+    OTA_TRIAL_END_NO_WIFI,      // under the Wi-Fi rule and never rejoined Wi-Fi: the caller restarts now (#411)
 } ota_trial_end_t;
 
 // Reads of the state and saves of the mark, one a second, before the loop gives up on them

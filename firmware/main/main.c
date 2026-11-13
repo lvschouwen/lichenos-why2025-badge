@@ -32,6 +32,7 @@
 #include "lora_os.h"
 #include "lichen_crashlog.h"
 #include "lichen_radio.h"
+#include "lichen_sys_notify.h"
 #include "lichen_apps.h"
 #include "mesh.h"
 #include "meshcore_run.h"
@@ -607,6 +608,7 @@ static void start_console(boot_ctx_t *ctx) {
     (void)ctx;
     console_start();
     console_bind_slot_state(ota_slot_state_name); // "fw slot": ota owns the slot states (#285)
+    console_bind_slot_switch(ota_image_note_slot_switch); // its trial needs no Wi-Fi (#411)
     console_register("noscreen", "noscreen (test: the next boot skips the display start, one boot only)", cmd_noscreen);
     console_register("poweroff", "poweroff (save, then switch the badge off as Power > Power off does; works without a display)",
                      cmd_poweroff);
@@ -890,9 +892,20 @@ static void trial_read(void *ctx, ota_trial_in_t *in) {
     in->shell_up    = in->display == OTA_DISPLAY_UP && shell_up();
     in->c6_up       = c6link_up();
     in->uptime_s    = uptime_ms() / 1000;
-    in->arrival     = ota_image_arrival(); // #411: the receiver's notion of Wi-Fi, the user's own switch
-    in->wifi_joined = !ota_image_arrival_test_no_wifi() && ota_os_wifi_on() && wifi_has_ip(NULL, 0);
-    in->wifi_off    = !ota_os_wifi_on();
+    in->arrival     = ota_image_arrival(); // #411: the receiver's notion of Wi-Fi, the person's saved switch
+    ota_wifi_seen_t const seen = {.test_no_wifi = ota_image_arrival_test_no_wifi(),
+                                  .switch_on    = ota_os_wifi_switch_on(),
+                                  .held         = ota_os_wifi_held(),
+                                  .radio_on     = ota_os_wifi_on(),
+                                  .has_ip       = wifi_has_ip(NULL, 0)};
+    ota_trial_wifi_in(&seen, in);
+}
+
+// A minute before the Wi-Fi rollback (#411): a person nearby sees it coming (docs/ui-standard.md rules 5 and 10)
+static void trial_warn(void *ctx, uint32_t left_s) {
+    (void)ctx;
+    ESP_LOGW(TAG, "trial image still without Wi-Fi: rolling back in %u s", (unsigned)left_s);
+    lichen_sys_notify(LN_WARN, "Update not confirmed", "No Wi-Fi yet: going back to the previous version in 1 min", 0);
 }
 
 static bool trial_mark_valid(void *ctx) {
@@ -926,9 +939,10 @@ static system_restart_gate_t restart_trial_gate(bool asked, bool power_off, bool
 // again. ota_valid.c decides and runs the loop (host_tests/ota_valid_test.c): the C6 link and, with a display, the
 // shell; a boot with the display skipped on purpose (fw noscreen) ends its trial without the shell (#293)
 static void ota_trial_wait(ota_display_t display) {
-    ota_trial_io_t const io = {.read = trial_read, .mark_valid = trial_mark_valid, .wait = trial_wait, .ctx = &display};
-    if (ota_image_arrival() == OTA_ARRIVAL_WIFI && ota_image_trial_pending()) {
-        ESP_LOGW(TAG, "on trial, installed over Wi-Fi: valid once back on Wi-Fi, else a rollback at %d s of uptime%s",
+    ota_trial_io_t const io = {.read = trial_read, .mark_valid = trial_mark_valid, .wait = trial_wait,
+                               .warn = trial_warn, .ctx = &display};
+    if (ota_image_arrival() == OTA_ARRIVAL_OVER_AIR && ota_image_trial_pending()) {
+        ESP_LOGW(TAG, "on trial: valid once back on Wi-Fi, else a rollback at %d s of uptime%s",
                  OTA_VALID_NEEDS_WIFI_S, ota_image_arrival_test_no_wifi() ? " (dev test arm: Wi-Fi ignored)" : "");
     }
     ota_trial_end_t end = ota_trial_run(&io);
@@ -937,8 +951,9 @@ static void ota_trial_wait(ota_display_t display) {
     case OTA_TRIAL_END_VALID:
         ESP_LOGI(TAG, "this image is now valid%s%s",
                  display == OTA_DISPLAY_SKIPPED ? " (display skipped: the OS is up)" : "",
-                 ota_image_arrival() != OTA_ARRIVAL_WIFI ? "" : ota_os_wifi_on() ? " (back on Wi-Fi)"
-                                                                                  : " (Wi-Fi switched off: not needed)");
+                 ota_image_arrival() != OTA_ARRIVAL_OVER_AIR ? " (chosen at the console)"
+                 : ota_os_wifi_switch_on()                   ? " (back on Wi-Fi)"
+                                                             : " (Wi-Fi switched off: not needed)");
         update_screen_image_valid();
         break;
     case OTA_TRIAL_END_ROLL_BACK:
@@ -948,9 +963,8 @@ static void ota_trial_wait(ota_display_t display) {
         break;
     case OTA_TRIAL_END_NO_WIFI:
         // Installed over Wi-Fi and not back on it: unattended, nobody could replace it but over USB (#411)
-        ESP_LOGE(TAG, "trial image installed over Wi-Fi did not rejoin Wi-Fi within %d s: restarting to roll back",
-                 OTA_VALID_NEEDS_WIFI_S);
-        system_restart_asked("trial image: no Wi-Fi"); // the rollback is the point
+        ESP_LOGE(TAG, "trial image did not rejoin Wi-Fi within %d s: restarting to roll back", OTA_VALID_NEEDS_WIFI_S);
+        system_restart_asked(OTA_NO_WIFI_WHY); // the rollback is the point; the old image's banner reads the reason
         break;
     case OTA_TRIAL_END_STAY:
         ESP_LOGW(TAG, "staying on trial (%s): a reset goes back to the previous image",

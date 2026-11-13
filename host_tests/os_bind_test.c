@@ -11,6 +11,7 @@
 #include "lichen_clock.h"
 #include "lichen_notify.h"
 #include "lichen_radio.h"
+#include "lichen_sys_radio.h"
 #include "notify_bind.h"
 #include "notify_os.h"
 #include "nvs_fail.h"
@@ -87,6 +88,13 @@ uint32_t lichen_sys_notify(ln_level_t level, char const *title, char const *body
 bool lichen_radio_get(radio_id_t id) {
     return id == RADIO_WIFI && s_wifi;
 }
+static bool s_switch = true, s_held;
+bool lichen_radio_switch_get(radio_id_t id) {
+    return id == RADIO_WIFI && s_switch;
+}
+radio_hold_t lichen_sys_radio_held_by(radio_id_t id) {
+    return id == RADIO_WIFI && s_held ? RADIO_HOLD_THERMAL : RADIO_HOLD_NONE;
+}
 uint8_t settings_get_u8(char const *key, uint8_t def) {
     return strcmp(key, "ota_wifi") == 0 ? 0 : def;
 }
@@ -143,6 +151,14 @@ static void lower_services_get_settings(void) {
     CHECK(ota_os_wifi_on());
     s_wifi = false;
     CHECK(!ota_os_wifi_on());
+    // #411: the trial reads the saved switch and the hold apart from what the radio does
+    CHECK(ota_os_wifi_switch_on() && !ota_os_wifi_held());
+    s_held = true;
+    CHECK(ota_os_wifi_switch_on() && ota_os_wifi_held());
+    s_switch = false;
+    s_held   = false;
+    CHECK(!ota_os_wifi_switch_on());
+    s_switch = true;
 }
 
 static void nvs_failures_reach_the_settings_counter(void) {

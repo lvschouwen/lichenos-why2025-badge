@@ -7,3 +7,7 @@
 typedef char const *(*fw_slot_state_fn)(esp_partition_t const *p);
 // Unbound, or bound to NULL: every slot shows as "unknown"
 void console_bind_slot_state(fw_slot_state_fn state);
+// `fw slot other` made p the boot slot (#411): ota notes it so that image's trial needs no Wi-Fi (main binds
+// ota_image_note_slot_switch). Unbound: nothing noted, so the trial needs Wi-Fi, which fails safe.
+typedef void (*fw_slot_switch_fn)(esp_partition_t const *p);
+void console_bind_slot_switch(fw_slot_switch_fn note);

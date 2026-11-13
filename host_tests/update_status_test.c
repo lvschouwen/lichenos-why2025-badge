@@ -1,5 +1,6 @@
 // Host test: what the badge says about an update after the reboot into it (#76)
 #include "update_status.h"
+#include "ota_valid.h" // OTA_NO_WIFI_WHY: the reason the banner looks for (#411)
 
 #include <stdio.h>
 #include <string.h>
@@ -14,8 +15,28 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
+// #411: the trial's own Wi-Fi rollback says why on the old image's banner; any other newest restart does not
+static void rollback_reason(void) {
+    char line[64] = "";
+    CHECK(strcmp(UPD_NO_WIFI_WHY, OTA_NO_WIFI_WHY) == 0);
+    CHECK(OTA_VALID_NEEDS_WIFI_S == 5 * 60); // the banner says "5 min"
+    CHECK(update_rollback_line("2026-11-13T10:00:00Z fw-abc up=301s " OTA_NO_WIFI_WHY, line, sizeof(line)));
+    CHECK(strcmp(line, "Update rolled back: no Wi-Fi within 5 min") == 0);
+    line[0] = '\0';
+    CHECK(update_rollback_line("t? fw-abc up=301s " OTA_NO_WIFI_WHY " caller=0x40001234", line, sizeof(line)));
+    CHECK(line[0] != '\0');
+    line[0] = '\0';
+    CHECK(!update_rollback_line("t? fw-abc up=12s ota reboot over Wi-Fi", line, sizeof(line)));
+    CHECK(!update_rollback_line("t? fw-abc up=12s trial image: no C6 link", line, sizeof(line)));
+    CHECK(!update_rollback_line("t? fw-abc up=12s " OTA_NO_WIFI_WHY "x", line, sizeof(line)));
+    CHECK(!update_rollback_line(OTA_NO_WIFI_WHY, line, sizeof(line))); // not a history line
+    CHECK(!update_rollback_line(NULL, line, sizeof(line)));
+    CHECK(line[0] == '\0'); // nothing written when it is not that rollback
+}
+
 int main(void) {
     char line[64];
+    rollback_reason();
 
     CHECK(update_result(NULL, "fw-b", false) == UPD_NONE);
     CHECK(update_result("", "fw-b", false) == UPD_NONE);

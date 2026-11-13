@@ -30,6 +30,17 @@ size_t update_line(upd_result_t r, char const *prev, char const *run, char *out,
     return (size_t)n < cap ? (size_t)n : cap - 1;
 }
 
+bool update_rollback_line(char const *last_restart, char *out, size_t cap) {
+    char const *up  = last_restart ? strstr(last_restart, " up=") : NULL;
+    char const *why = up ? strstr(up, "s ") : NULL;
+    size_t      n   = strlen(UPD_NO_WIFI_WHY);
+    if (!why || cap == 0 || strncmp(why + 2, UPD_NO_WIFI_WHY, n) != 0 || (why[2 + n] != '\0' && why[2 + n] != ' ')) {
+        return false;
+    }
+    snprintf(out, cap, "Update rolled back: no Wi-Fi within 5 min");
+    return true;
+}
+
 int update_pct(uint32_t done, uint32_t total) {
     if (total == 0) {
         return -1;

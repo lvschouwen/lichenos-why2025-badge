@@ -13,6 +13,7 @@
 #include "lichen_clock.h"
 #include "lichen_notify.h"
 #include "lichen_radio.h"
+#include "lichen_sys_radio.h"
 #include "notify_bind.h"
 #include "nvs_fail.h"
 #include "notify_os.h"
@@ -23,6 +24,14 @@
 
 static bool wifi_on(void) {
     return lichen_radio_get(RADIO_WIFI);
+}
+
+static bool wifi_switch_on(void) {
+    return lichen_radio_switch_get(RADIO_WIFI);
+}
+
+static bool wifi_held(void) {
+    return lichen_sys_radio_held_by(RADIO_WIFI) != RADIO_HOLD_NONE;
 }
 
 // lichen_notify's vibrate feedback, fired by the shell on the LVGL task for a toast with feedback (as before #245)
@@ -40,6 +49,8 @@ static ota_os_t const ota_os = {
     .secret_get = settings_secret_get,
     .secret_set = settings_secret_set,
     .wifi_on = wifi_on,
+    .wifi_switch_on = wifi_switch_on,
+    .wifi_held      = wifi_held,
 };
 
 void os_bind_lower(void) {

@@ -1342,7 +1342,8 @@ add_executable(update_status_test
     ${CMAKE_CURRENT_SOURCE_DIR}/update_status_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell/update_status.c
 )
-target_include_directories(update_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell)
+target_include_directories(update_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_shell
+                           ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota)
 target_compile_options(update_status_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME update_status_test COMMAND update_status_test)
 

@@ -511,7 +511,6 @@ static bool install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t h
         return false;
     }
     ESP_LOGI(TAG, "firmware installed in %s (%zu bytes)", slot->label, len);
-    ota_image_note_wifi_install(slot); // #411: its trial needs Wi-Fi back (ota_trial.c)
     respond(fd, 200, "installed %zu bytes (%lld sent), runs after a reboot", len, sent);
     firmware_installed = true;
     return true;

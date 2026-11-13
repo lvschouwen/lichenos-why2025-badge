@@ -399,6 +399,12 @@ void console_bind_slot_state(fw_slot_state_fn state) {
     atomic_store(&s_slot_state, state);
 }
 
+static fw_slot_switch_fn _Atomic s_slot_switch; // ota_image_note_slot_switch, bound by main (#411)
+
+void console_bind_slot_switch(fw_slot_switch_fn note) {
+    atomic_store(&s_slot_switch, note);
+}
+
 static char const *slot_state_name(esp_partition_t const *p) {
     fw_slot_state_fn state = atomic_load(&s_slot_state);
     return state ? state(p) : "unknown";
@@ -438,6 +444,10 @@ static void cmd_slot(char const *args) {
         console_reply("slot: can't boot %s: %s", other->label, esp_err_to_name(err));
         return;
     }
+    fw_slot_switch_fn note = atomic_load(&s_slot_switch);
+    if (note) {
+        note(other);
+    }
     console_reply("booting %s (%s)", other->label, desc.version);
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(200));
@@ -466,7 +476,8 @@ int system_restart_history(restart_log_t *out) {
     return restart_log_load(s_log_get, out);
 }
 
-// NVS, not RTC_NOINIT: that does not survive a software restart on the P4 (#4). One small blob write, no flash mapping
+// NVS, not RTC_NOINIT: LP RAM does survive a software restart and a panic, but #330 measured it lost at the EN reset
+// and a power-off, which the history must outlive. One small blob write, no flash mapping
 static void push_restart_line(char const *why, uint32_t caller) {
     char     when[24];
     char    *when_p = NULL;

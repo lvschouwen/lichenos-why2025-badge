@@ -56,6 +56,7 @@ static void unbound_defaults(void) {
     CHECK(out[0] == 'x');
     CHECK(!ota_os_secret_set("ota_token", "t"));
     CHECK(!ota_os_wifi_on()); // no switch bound: the server does not serve
+    CHECK(ota_os_wifi_switch_on() && !ota_os_wifi_held()); // the trial's cautious defaults: the Wi-Fi rule applies
 }
 
 static void bound_calls_pass_through(void) {
