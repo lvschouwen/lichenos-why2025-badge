@@ -192,6 +192,18 @@ void notify_app_register(void);
 void notify_open_entry(uint32_t id);
 void notify_open_centre(void);
 void notify_settings_open(void);
+// The rows that show the time are refreshed once a second, and only redrawn when their text changed
+typedef struct {
+    lv_obj_t *obj;
+    bool      note; // a menu_note label, not a menu_add row
+    void (*fill)(char *out, size_t cap);
+    char shown[80];
+} shell_live_row_t;
+// app_settings.c: refresh one row when its text changed, and build one (Settings pages; LVGL context)
+void             shell_live_update(shell_live_row_t *r);
+shell_live_row_t shell_live_row(lv_obj_t *obj, bool note, void (*fill)(char *, size_t));
+// settings_display.c: Settings > Display (menu callback; LVGL context)
+void settings_display_open(void *arg);
 // app_settings.c: one registry key's row text from the cache (#332, #333): "<label>: <applied> (<age>)", "(stale N s)",
 // "(saved X)" when it is not the saved one, "?" when unread; never waits for the C6. LVGL context not needed.
 void shell_reg_text(char const *label, char const *key, char const *saved, char const *unit, char *out, size_t cap);

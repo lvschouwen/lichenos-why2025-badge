@@ -38,7 +38,6 @@
 #include <string.h>
 #include <time.h>
 
-#define SAVE_AFTER_MS  1000 // brightness is saved this long after the last step, to spare the flash
 
 // ---- tile text and the Wi-Fi line --------------------------------------------------------------------------------
 
@@ -97,14 +96,7 @@ static void open_wifi(void *arg) {
 }
 
 // The rows that show the time are refreshed once a second, and only redrawn when their text changed
-typedef struct {
-    lv_obj_t *obj;
-    bool      note; // a menu_note label, not a menu_add row
-    void (*fill)(char *out, size_t cap);
-    char shown[80];
-} live_row_t;
-
-static void live_update(live_row_t *r) {
+void shell_live_update(shell_live_row_t *r) {
     if (!r->obj) {
         return; // its page is gone
     }
@@ -120,8 +112,8 @@ static void live_update(live_row_t *r) {
     }
 }
 
-static live_row_t live_row(lv_obj_t *obj, bool note, void (*fill)(char *, size_t)) {
-    live_row_t r = {.obj = obj, .note = note, .fill = fill};
+shell_live_row_t shell_live_row(lv_obj_t *obj, bool note, void (*fill)(char *, size_t)) {
+    shell_live_row_t r = {.obj = obj, .note = note, .fill = fill};
     fill(r.shown, sizeof(r.shown));
     if (note) {
         lv_label_set_text(obj, r.shown);
@@ -180,288 +172,6 @@ void shell_psram_line(char *out, size_t cap) {
         want_mhz[0] = '\0';
     }
     reg_mhz_text("PSRAM now", clk, want_mhz, out, cap);
-}
-
-// Display: brightness is applied on every step and saved once it has settled
-static lv_timer_t *save_timer;
-static uint8_t     level[2]; // screen, keyboard
-static uint8_t     layout_at_open; // home is rebuilt on leaving only when the layout really differs from this (#128)
-
-static void save_levels(void) {
-    lichen_sys_display_set_saved(level[0], level[1]);
-}
-
-static void save_due(lv_timer_t *timer) {
-    (void)timer;
-    save_timer = NULL; // one-shot: LVGL deletes it after this call
-    save_levels();
-}
-
-static void on_level(int value, void *arg) {
-    level[(intptr_t)arg] = (uint8_t)value;
-    lichen_sys_display_set(level[0], level[1]);
-    if (save_timer) {
-        lv_timer_reset(save_timer);
-    } else {
-        save_timer = lv_timer_create(save_due, SAVE_AFTER_MS, NULL);
-        lv_timer_set_repeat_count(save_timer, 1);
-    }
-}
-
-// Message light (#164): the keyboard light blinks twice for a new message; Enter steps Off / Direct messages / All
-static lv_obj_t *pulse_row;
-
-static attn_mode_t pulse_mode(void) {
-    return attn_mode_from_u8(settings_get_u8(ATTN_MODE_KEY, ATTN_MODE_DEFAULT));
-}
-
-static void step_pulse(void *arg) {
-    (void)arg;
-    settings_set_u8(ATTN_MODE_KEY, (uint8_t)attn_mode_next(pulse_mode()));
-    menu_set_value(pulse_row, attn_mode_name(pulse_mode()));
-}
-
-static void open_flashlight(void *arg) {
-    (void)arg;
-    flashlight_open();
-}
-
-static lv_obj_t *layout_row;
-
-static char const *layout_name(void) {
-    return settings_get_u8("home_layout", HOME_TILES) == HOME_GRID ? "Grid" : "Tiles";
-}
-
-static void toggle_layout(void *arg) {
-    (void)arg;
-    bool grid = settings_get_u8("home_layout", HOME_TILES) != HOME_GRID;
-    settings_set_u8("home_layout", grid ? HOME_GRID : HOME_TILES);
-    menu_set_value(layout_row, layout_name()); // home is rebuilt when this screen is left, once, if still changed
-}
-
-// Screen timeout (#43): Enter steps through the choices; saved at once, the idle clock starts again from it
-static lv_obj_t *dim_row, *off_row;
-
-static void idle_rows_refresh(void) {
-    char text[16];
-    idle_choice_text(settings_get_u8("idle_dim", IDLE_DIM_DEFAULT_10S), text, sizeof(text));
-    menu_set_value(dim_row, text);
-    idle_choice_text(settings_get_u8("idle_off", IDLE_OFF_DEFAULT_10S), text, sizeof(text));
-    menu_set_value(off_row, text);
-}
-
-static void step_idle(void *arg) {
-    bool        off = arg != NULL;
-    char const *key = off ? "idle_off" : "idle_dim";
-    uint8_t     now = settings_get_u8(key, off ? IDLE_OFF_DEFAULT_10S : IDLE_DIM_DEFAULT_10S);
-    settings_set_u8(key, off ? idle_off_next(now) : idle_dim_next(now));
-    screen_idle_reload();
-    idle_rows_refresh();
-}
-
-// The clock screensaver (the dim stage) and the pocket lock (#75): Enter switches; saved at once
-static lv_obj_t *saver_row, *style_row, *lock_row;
-
-static void switch_rows_refresh(void) {
-    menu_set_on(saver_row, settings_get_u8(IDLE_SAVER_KEY, 1));
-    bool digital = settings_get_u8(IDLE_SAVER_STYLE_KEY, SAVER_STYLE_STATION) == SAVER_STYLE_DIGITAL;
-    menu_set_value(style_row, digital ? "Digital" : "Station clock");
-    menu_set_on(lock_row, settings_get_u8(IDLE_LOCK_KEY, 0));
-}
-
-static void toggle_switch(void *arg) {
-    char const *key = arg ? IDLE_LOCK_KEY : IDLE_SAVER_KEY;
-    settings_set_u8(key, !settings_get_u8(key, arg ? 0 : 1));
-    screen_idle_reload();
-    switch_rows_refresh();
-}
-
-// The screensaver's look (#119): the station clock or the seven-segment one
-static void toggle_style(void *arg) {
-    (void)arg;
-    bool digital = settings_get_u8(IDLE_SAVER_STYLE_KEY, SAVER_STYLE_STATION) == SAVER_STYLE_DIGITAL;
-    settings_set_u8(IDLE_SAVER_STYLE_KEY, digital ? SAVER_STYLE_STATION : SAVER_STYLE_DIGITAL);
-    screen_idle_reload();
-    switch_rows_refresh();
-}
-
-// Arrange home (#189): Settings closes and home takes the keys in arrange mode
-static void arrange_later(void *arg) {
-    shell_arrange_home(arg != NULL);
-}
-
-static void open_arrange(void *arg) {
-    (void)arg;
-    uint8_t now      = settings_get_u8("home_layout", HOME_TILES);
-    bool    relayout = now != layout_at_open;
-    layout_at_open   = now; // on_display_delete's own rebuild would come after and replace the arranging home
-    // Outside this row's key handling: the page is deleted
-    lichen_sys_ui_call(arrange_later, relayout ? (void *)1 : NULL, 0);
-}
-
-static lv_obj_t *order_row;
-
-// The row's value is the state (R3) and so also the answer to a reset (R5): "Arranged" or "Default"
-static void order_row_refresh(void) {
-    if (order_row) {
-        menu_set_value(order_row, home_order_arranged() ? "Arranged" : "Default");
-    }
-}
-
-static void reset_order_answer(bool yes) {
-    if (yes) {
-        settings_erase(HOME_ORDER_KEY);
-        shell_rebuild_home_below(); // Settings stays on top
-        order_row_refresh();
-    }
-}
-
-static void ask_reset_order(void *arg) {
-    (void)arg;
-    shell_dialog_t const d = {
-        .title         = "Reset the home order? The tiles go back to their first places.",
-        .seconds       = 10,
-        .careful       = true, // an arrangement takes work to redo: running out of time cancels
-        .confirm_label = "reset",
-    };
-    shell_dialog_countdown(&d, reset_order_answer);
-}
-
-static void rebuild_later(void *arg) {
-    (void)arg;
-    shell_rebuild_home_below(); // Settings stays on top
-}
-
-// What the badge shows now (#332): the backlight as the C6 applied it, next to the sliders (which hold the saved levels)
-static lv_timer_t *bl_timer;
-static live_row_t  bl_rows[5]; // screen, keyboard, light mode, override, boot light
-
-static void bl_saved_fill(char const *label, char const *key, int which, char *out, size_t cap) {
-    uint8_t lv[2];
-    char    saved[8];
-    lichen_sys_display_get(&lv[0], &lv[1]);
-    snprintf(saved, sizeof(saved), "%u", lv[which]);
-    shell_reg_text(label, key, saved, "%", out, cap);
-}
-
-static void bl_screen_fill(char *out, size_t cap) {
-    bl_saved_fill("Screen now", "bl.display", 0, out, cap);
-}
-
-static void bl_keyboard_fill(char *out, size_t cap) {
-    bl_saved_fill("Keyboard now", "bl.keyboard", 1, out, cap);
-}
-
-static void bl_idle_fill(char *out, size_t cap) {
-    shell_reg_text("Timeout", "bl.idle", NULL, NULL, out, cap);
-}
-
-static void bl_override_fill(char *out, size_t cap) {
-    shell_reg_text("Override", "bl.override", NULL, NULL, out, cap);
-}
-
-// Only while the boot light is still on: empty (the note is hidden) when it is off or was not read
-static void bl_boot_fill(char *out, size_t cap) {
-    char cached[64], value[16];
-    if (!lichen_reg_get("bl.boot", cached, sizeof(cached)) || !reg_row_value(cached, value, sizeof(value)) ||
-        strcmp(value, "on") != 0) {
-        out[0] = '\0';
-        return;
-    }
-    shell_reg_text("Boot light", "bl.boot", NULL, NULL, out, cap);
-}
-
-static void bl_refresh(lv_timer_t *t) {
-    (void)t;
-    for (size_t i = 0; i < sizeof(bl_rows) / sizeof(bl_rows[0]); i++) {
-        live_update(&bl_rows[i]);
-    }
-    if (bl_rows[4].obj) {
-        if (bl_rows[4].shown[0]) {
-            lv_obj_set_hidden(bl_rows[4].obj, false);
-        } else {
-            lv_obj_set_hidden(bl_rows[4].obj, true);
-        }
-    }
-}
-
-static void bl_rows_build(lv_obj_t *menu) {
-    static void (*const fills[])(char *, size_t) = {bl_screen_fill, bl_keyboard_fill, bl_idle_fill, bl_override_fill,
-                                                    bl_boot_fill};
-    for (size_t i = 0; i < sizeof(bl_rows) / sizeof(bl_rows[0]); i++) {
-        bl_rows[i] = live_row(menu_note(menu, ""), true, fills[i]);
-    }
-    bl_refresh(NULL);
-    bl_timer = lv_timer_create(bl_refresh, 1000, NULL);
-}
-
-static void on_display_delete(lv_event_t *e) {
-    (void)e;
-    if (save_timer) {
-        lv_timer_delete(save_timer);
-        save_timer = NULL;
-        save_levels();
-    }
-    if (bl_timer) {
-        lv_timer_delete(bl_timer);
-        bl_timer = NULL;
-    }
-    memset(bl_rows, 0, sizeof(bl_rows));
-    layout_row = NULL;
-    order_row  = NULL;
-    pulse_row  = NULL;
-    dim_row    = NULL;
-    off_row    = NULL;
-    saver_row  = NULL;
-    style_row  = NULL;
-    lock_row   = NULL;
-    if (settings_get_u8("home_layout", HOME_TILES) != layout_at_open) {
-        lichen_sys_ui_call(rebuild_later, NULL, 0); // after the screen being deleted is gone
-    }
-}
-
-static lv_obj_t *build_display(void) {
-    lv_obj_t *screen = shell_page_create();
-    lv_obj_t *menu   = menu_create(screen, "Display");
-    lichen_sys_display_get(&level[0], &level[1]);
-    menu_add_slider(menu, "Screen", LICHEN_SYS_DISPLAY_MIN, LICHEN_SYS_DISPLAY_MAX, level[0], on_level, (void *)(intptr_t)0);
-    menu_add_slider(menu, "Keyboard", 0, LICHEN_SYS_DISPLAY_MAX, level[1], on_level, (void *)(intptr_t)1);
-    bl_rows_build(menu);
-    if (!lichen_sys_c6_up()) {
-        menu_note(menu, "Brightness can't change right now: the radio chip is not answering. Restart the badge if it "
-                        "stays like this.");
-    }
-    pulse_row = menu_add(menu, "Message light", attn_mode_name(pulse_mode()), step_pulse, NULL);
-    menu_set_kind(pulse_row, MENU_CYCLE);
-    menu_add(menu, "Flashlight", "", open_flashlight, NULL);
-    dim_row    = menu_add(menu, "Dim after", "", step_idle, NULL);
-    off_row    = menu_add(menu, "Screen off after", "", step_idle, (void *)1);
-    menu_set_kind(dim_row, MENU_CYCLE);
-    menu_set_kind(off_row, MENU_CYCLE);
-    idle_rows_refresh();
-    saver_row = menu_add(menu, "Clock screensaver", "", toggle_switch, NULL);
-    style_row = menu_add(menu, "Screensaver style", "", toggle_style, NULL);
-    lock_row  = menu_add(menu, "Pocket lock", "", toggle_switch, (void *)1);
-    menu_set_kind(saver_row, MENU_TOGGLE);
-    menu_set_kind(style_row, MENU_CYCLE);
-    menu_set_kind(lock_row, MENU_TOGGLE);
-    menu_note(menu, "Message light blinks the keyboard light for a new message (not under do-not-disturb or with the screen dark). Flashlight: white screen at full brightness until a key. The screensaver shows when the screen dims. The pocket lock comes on with it or when the screen goes "
-                    "off; hold " LOCK_COMBO_TEXT " to unlock. It stops stray key presses, it is not security: no PIN.");
-    switch_rows_refresh();
-    layout_at_open = settings_get_u8("home_layout", HOME_TILES);
-    layout_row     = menu_add(menu, "Home layout", layout_name(), toggle_layout, NULL);
-    menu_set_kind(layout_row, MENU_CYCLE);
-    menu_set_kind(menu_add(menu, "Arrange home", "", open_arrange, NULL), MENU_OPEN);
-    order_row = menu_add(menu, "Reset order", "", ask_reset_order, NULL);
-    order_row_refresh();
-    shell_page_hint(screen, "Left/Right", "sliders", "Enter", "change", NULL);
-    lv_obj_add_event_cb(screen, on_display_delete, LV_EVENT_DELETE, NULL);
-    return screen;
-}
-
-static void open_display(void *arg) {
-    (void)arg;
-    shell_open(build_display, SCREEN_DISPLAY);
 }
 
 // Time zone
@@ -541,39 +251,39 @@ static void tz_value(char *out, size_t cap) {
     snprintf(out, cap, "%s", i >= 0 ? tz_at((size_t)i)->name : "");
 }
 
-static live_row_t time_rows[3]; // Time's page: Set date & time, Time zone, the source note
-static live_row_t settings_time_row; // Settings' own page: Time
-static live_row_t settings_sd_row;   // and SD card (a mount or unmount on its page or the console shows on return)
-static live_row_t settings_wifi_row;   // Wi-Fi (the radio switch is on its page)
-static live_row_t settings_lora_row;   // LoRa radio: the person's switch, held or not (#348)
-static live_row_t settings_notify_row; // and Notifications (do-not-disturb, #62)
-static live_row_t radio_notes[3];      // LoRa's settings, LoRa's state and the Bluetooth controller (#333)
-static live_row_t settings_psram_row;  // the PSRAM clock against the speed asked for (#333)
-static live_row_t settings_ota_row;    // and Updates over Wi-Fi (the auto-off timer closes it by itself, #112)
+static shell_live_row_t time_rows[3]; // Time's page: Set date & time, Time zone, the source note
+static shell_live_row_t settings_time_row; // Settings' own page: Time
+static shell_live_row_t settings_sd_row;   // and SD card (a mount or unmount on its page or the console shows on return)
+static shell_live_row_t settings_wifi_row;   // Wi-Fi (the radio switch is on its page)
+static shell_live_row_t settings_lora_row;   // LoRa radio: the person's switch, held or not (#348)
+static shell_live_row_t settings_notify_row; // and Notifications (do-not-disturb, #62)
+static shell_live_row_t radio_notes[3];      // LoRa's settings, LoRa's state and the Bluetooth controller (#333)
+static shell_live_row_t settings_psram_row;  // the PSRAM clock against the speed asked for (#333)
+static shell_live_row_t settings_ota_row;    // and Updates over Wi-Fi (the auto-off timer closes it by itself, #112)
 
 // The zone row reads NVS: only refreshed when a zone is picked, not every second
 static void refresh_time_page(lv_timer_t *t) {
     (void)t;
-    live_update(&time_rows[0]);
-    live_update(&time_rows[2]);
+    shell_live_update(&time_rows[0]);
+    shell_live_update(&time_rows[2]);
 }
 
 static void time_tz_changed(void) {
-    live_update(&time_rows[1]);
+    shell_live_update(&time_rows[1]);
 }
 
 static void refresh_settings_time(lv_timer_t *t) {
     (void)t;
-    live_update(&settings_time_row);
-    live_update(&settings_sd_row);
-    live_update(&settings_notify_row);
-    live_update(&settings_wifi_row);
-    live_update(&settings_ota_row);
-    live_update(&settings_lora_row);
+    shell_live_update(&settings_time_row);
+    shell_live_update(&settings_sd_row);
+    shell_live_update(&settings_notify_row);
+    shell_live_update(&settings_wifi_row);
+    shell_live_update(&settings_ota_row);
+    shell_live_update(&settings_lora_row);
     for (size_t i = 0; i < sizeof(radio_notes) / sizeof(radio_notes[0]); i++) {
-        live_update(&radio_notes[i]);
+        shell_live_update(&radio_notes[i]);
     }
-    live_update(&settings_psram_row);
+    shell_live_update(&settings_psram_row);
 }
 
 // Each page's timer dies with it, and the rows it filled are forgotten
@@ -610,9 +320,9 @@ static lv_obj_t *build_time(void) {
     lv_obj_t *tz_open = menu_add(menu, "Time zone", "", open_tz, NULL);
     menu_set_kind(set_row, MENU_OPEN);
     menu_set_kind(tz_open, MENU_OPEN);
-    time_rows[0]     = live_row(set_row, false, now_value);
-    time_rows[1]     = live_row(tz_open, false, tz_value);
-    time_rows[2]     = live_row(menu_note(menu, ""), true, source_note);
+    time_rows[0]     = shell_live_row(set_row, false, now_value);
+    time_rows[1]     = shell_live_row(tz_open, false, tz_value);
+    time_rows[2]     = shell_live_row(menu_note(menu, ""), true, source_note);
     lv_obj_add_event_cb(screen, forget_time_page, LV_EVENT_DELETE, lv_timer_create(refresh_time_page, 1000, NULL));
     return screen;
 }
@@ -771,8 +481,8 @@ static void lora_value(char *out, size_t cap) {
 }
 
 static void radio_rows_refresh(void) {
-    live_update(&settings_wifi_row);
-    live_update(&settings_lora_row);
+    shell_live_update(&settings_wifi_row);
+    shell_live_update(&settings_lora_row);
     if (air_row) {
         menu_set_on(air_row, lichen_airplane_get());
     }
@@ -807,7 +517,7 @@ static void bt_state_fill(char *out, size_t cap) {
 static void add_radio_notes(lv_obj_t *menu) {
     static void (*const fills[])(char *, size_t) = {shell_lora_line, lora_state_fill, bt_state_fill};
     for (size_t i = 0; i < sizeof(radio_notes) / sizeof(radio_notes[0]); i++) {
-        radio_notes[i] = live_row(menu_note(menu, ""), true, fills[i]);
+        radio_notes[i] = shell_live_row(menu_note(menu, ""), true, fills[i]);
     }
 }
 
@@ -855,12 +565,12 @@ static void open_settings(lv_obj_t *screen) {
     char      wifi[48];
     wifi_line(wifi, sizeof(wifi), false);
     menu_note(menu, "Lichen");
-    settings_wifi_row = live_row(menu_add(menu, "Wi-Fi", wifi, open_wifi, NULL), false, wifi_value);
+    settings_wifi_row = shell_live_row(menu_add(menu, "Wi-Fi", wifi, open_wifi, NULL), false, wifi_value);
     menu_set_kind(settings_wifi_row.obj, MENU_OPEN);
     strlcpy(settings_wifi_row.shown, wifi, sizeof(settings_wifi_row.shown));
     ota_row = menu_add(menu, "Updates over Wi-Fi", ota_value(), toggle_ota, NULL);
     menu_set_kind(ota_row, MENU_TOGGLE);
-    settings_ota_row = live_row(ota_row, false, ota_fill);
+    settings_ota_row = shell_live_row(ota_row, false, ota_fill);
     char net_name[LICHEN_SYS_MDNS_NAME_MAX + 8];
     snprintf(net_name, sizeof(net_name), "%s.local", lichen_sys_mdns_name());
     menu_add(menu, "Name on the network", net_name, NULL, NULL); // for badge.sh and the browser (#156)
@@ -872,17 +582,17 @@ static void open_settings(lv_obj_t *screen) {
     air_row  = menu_add(menu, "Airplane mode", "", toggle_airplane, NULL);
     menu_set_kind(lora_row, MENU_TOGGLE);
     menu_set_kind(air_row, MENU_TOGGLE);
-    settings_lora_row = live_row(lora_row, false, lora_value);
+    settings_lora_row = shell_live_row(lora_row, false, lora_value);
     menu_set_on(air_row, lichen_airplane_get());
     add_radio_notes(menu);
     lv_obj_add_event_cb(screen, forget_ota_row, LV_EVENT_DELETE, NULL);
-    open_row(menu, "Display", open_display);
+    open_row(menu, "Display", settings_display_open);
     lv_obj_t *time_open = open_row(menu, "Time", open_time);
-    settings_time_row = live_row(time_open, false, time_value);
+    settings_time_row = shell_live_row(time_open, false, time_value);
     lv_obj_add_event_cb(screen, forget_settings_time, LV_EVENT_DELETE,
                         lv_timer_create(refresh_settings_time, 1000, NULL));
-    settings_sd_row = live_row(open_row(menu, "SD card", open_sd), false, sd_value);
-    settings_notify_row = live_row(open_row(menu, "Notifications", open_notify), false, notify_value);
+    settings_sd_row = shell_live_row(open_row(menu, "SD card", open_sd), false, sd_value);
+    settings_notify_row = shell_live_row(open_row(menu, "Notifications", open_notify), false, notify_value);
     open_row(menu, "Battery", battery_open);
     lv_obj_t *power_open = open_row(menu, "Power", power_open_from_settings);
     menu_set_value(power_open, "Restart, power off");
@@ -893,7 +603,7 @@ static void open_settings(lv_obj_t *screen) {
     menu_note(menu, "For developers");
     menu_set_value(open_row(menu, "Console", console_open_from_settings), "Run fw commands");
     add_psram_speed_row(menu);
-    settings_psram_row = live_row(menu_note(menu, ""), true, shell_psram_line);
+    settings_psram_row = shell_live_row(menu_note(menu, ""), true, shell_psram_line);
     bool heading = false;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
