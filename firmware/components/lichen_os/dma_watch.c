@@ -9,6 +9,7 @@
 #include "dma_watch.h"
 
 #include "dma_low.h"
+#include "mem_window.h"
 #include "mem_window_watch.h"
 #include "esp_attr.h"
 #include "esp_cpu.h"
@@ -30,6 +31,7 @@
 static char const TAG[] = "mem";
 
 #define DMA_WATCH_US    (250 * 1000)
+_Static_assert(DMA_WATCH_US == MEM_WINDOW_SAMPLE_MS * 1000, "fw mem window prints this tick as its sample_ms (#410)");
 #define DMA_BIG_MIN     1024 // an esp_hosted Wi-Fi TX frame copy is ~1.55 KB; 20 of them queue up (#256)
 
 // FreeRTOS's own current-task table (tasks.c; global for the port's context switch). Read directly: no call, so the

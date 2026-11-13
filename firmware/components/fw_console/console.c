@@ -303,17 +303,25 @@ void console_set_mem_window(void (*window)(char const *args)) {
     mem_window = window;
 }
 
-static void cmd_mem(char const *args) {
+// "mem blocks ..." and "mem window ...": true when args was one of them (and it ran)
+static bool mem_subcommand(char const *args) {
     if (strncmp(args, "blocks", 6) == 0) {
         mem_blocks(args + 6 + (args[6] == ' '));
-        return;
+        return true;
     }
-    if (strncmp(args, "window", 6) == 0 && (args[6] == '\0' || args[6] == ' ')) {
-        if (!mem_window) {
-            console_reply("mem window: not in this build"); // lichen_os registers it only with LICHEN_DEV_COMMANDS
-            return;
-        }
+    if (strncmp(args, "window", 6) != 0 || (args[6] != '\0' && args[6] != ' ')) {
+        return false;
+    }
+    if (mem_window) {
         mem_window(args + 6 + (args[6] == ' '));
+    } else {
+        console_reply("mem window: not in this build"); // lichen_os registers it only with LICHEN_DEV_COMMANDS
+    }
+    return true;
+}
+
+static void cmd_mem(char const *args) {
+    if (mem_subcommand(args)) {
         return;
     }
     print_heap("internal", MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -866,7 +874,7 @@ void console_start(void) {
     run_mutex   = xSemaphoreCreateMutex();
     reply_mutex = xSemaphoreCreateMutex();
     console_register("help", "help", cmd_help);
-    console_register("mem", "mem [blocks [internal|dma|psram] [min bytes] | window [reset]] (heaps, per-app use, task stacks, per-task core and CPU %; blocks: who holds a heap; window: the lows since the last reset, developer mode, #410)", cmd_mem);
+    console_register("mem", "mem [blocks [internal|dma|psram] [min bytes] | window [reset]] (heaps, per-app use, task stacks, per-task core and CPU %; blocks: who holds a heap; window: the lows since the last reset, developer mode, sampled every 250 ms; shorter dips above the since-boot low can be missed, #410)", cmd_mem);
     console_register("assets", "assets (state of the assets partition and its files)", cmd_assets);
     console_register("slot", "slot [other] (show the app slots, or boot the other one)", cmd_slot);
     console_register("reboot", "reboot", cmd_reboot);

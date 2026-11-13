@@ -21,7 +21,8 @@ static uint32_t const CAPS[MEM_WINDOW_HEAPS] = {MALLOC_CAP_INTERNAL | MALLOC_CAP
 static mem_window_t win; // ~50 B internal .bss under win_mux (a critical section never touches PSRAM)
 static portMUX_TYPE win_mux = portMUX_INITIALIZER_UNLOCKED;
 
-// Reads fields the heap keeps (no walk, no heap lock), as fw mem's figures with heap task tracking off
+// Walks the short list of registered heaps and reads a counter of each (no heap lock, no walk of the blocks); the
+// same figures as fw mem's with heap task tracking off
 static void figures(mem_window_fig_t f[MEM_WINDOW_HEAPS]) {
     for (int i = 0; i < MEM_WINDOW_HEAPS; i++) {
         f[i].free_now = (uint32_t)heap_caps_get_free_size(CAPS[i]);
@@ -33,12 +34,20 @@ static uint32_t now_ms(void) {
     return (uint32_t)((uint64_t)esp_timer_get_time() / 1000); // wraps after 49.7 days: mem_window.h
 }
 
+static uint32_t gen_now(void) {
+    portENTER_CRITICAL(&win_mux);
+    uint32_t gen = mem_window_gen(&win);
+    portEXIT_CRITICAL(&win_mux);
+    return gen;
+}
+
 void mem_window_watch_sample(void) {
+    uint32_t         gen = gen_now(); // before the figures: a reset after this drops the sample
     mem_window_fig_t f[MEM_WINDOW_HEAPS];
     figures(f);
     uint32_t at = now_ms();
     portENTER_CRITICAL(&win_mux);
-    mem_window_sample(&win, f, at);
+    (void)mem_window_sample(&win, f, at, gen); // dropped when a reset came in between: the next tick counts
     portEXIT_CRITICAL(&win_mux);
 }
 
@@ -51,6 +60,7 @@ static void cmd_window(char const *args) {
         console_reply("mem window: usage fw mem window [reset]");
         return;
     }
+    uint32_t         gen = gen_now();
     mem_window_fig_t f[MEM_WINDOW_HEAPS];
     figures(f);
     uint32_t at = now_ms();
@@ -58,11 +68,11 @@ static void cmd_window(char const *args) {
     if (reset) {
         mem_window_reset(&win, f, at);
     } else {
-        mem_window_sample(&win, f, at); // the figures now count too
+        (void)mem_window_sample(&win, f, at, gen); // the figures now count too, unless a reset came in between
     }
     mem_window_t snap = win; // printed after the critical section: no lock across a reply
     portEXIT_CRITICAL(&win_mux);
-    char line[96];
+    char line[112];
     for (unsigned i = 0; i < MEM_WINDOW_HEAPS; i++) {
         if (mem_window_line(&snap, i, at, line, sizeof(line))) {
             console_reply("%s", line);
