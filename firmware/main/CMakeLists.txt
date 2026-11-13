@@ -1,6 +1,6 @@
 idf_component_register(SRCS "main.c" "boot_order.c" "power_route.c" "boot_keys_play.c"
                        INCLUDE_DIRS "."
-                       PRIV_REQUIRES esp_hw_support esp_app_format esp_partition heap nvs_flash storage sdcard fw_console c6link ota app_update lora board esp_timer mesh crash lichen_apps lichen_shell lichen_api lichen_os lichen_boot lichen_net lichen_random assets psram_guard sensors lichen_led lichen_haptics lichen_nvs lichen_clock)
+                       PRIV_REQUIRES esp_hw_support esp_app_format esp_partition heap nvs_flash storage sdcard fw_console c6link ota app_update lora board esp_timer mesh crash lichen_apps lichen_shell lichen_api lichen_os lichen_boot lichen_net lichen_random assets psram_guard sensors battery lichen_led lichen_haptics lichen_nvs lichen_clock)
 
 # The LittleFS drive (#300): C6 image and lora.toml, staged by tools/stage_storage.sh, packed by tools/pack_storage.sh
 # with the badge's own LittleFS config (build.sh checks it against this sdkconfig and the image against the staging).

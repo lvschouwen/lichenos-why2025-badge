@@ -3,6 +3,7 @@
  */
 
 #include "backlight.h"
+#include "battery.h"
 #include "lichen_sys_power.h"
 #include "board_i2c.h"
 #include "boot_keys_play.h"
@@ -756,6 +757,24 @@ static void start_sensors(boot_ctx_t *ctx) {
     sensors_register_console();
 }
 
+// The fuel gauge (#11) on the camera header's bus, its own task: the probe runs there, so boot never waits for it. LP
+// RAM stack (#269): it touches no flash, NVS or /storage and puts no DMA buffer on its stack.
+static void battery_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        battery_service_run(); // never returns; the loop makes sure an LP RAM task cannot end (#269)
+    }
+}
+
+static void start_battery(boot_ctx_t *ctx) {
+    (void)ctx;
+    battery_register_console();
+    if (!lichen_task_start_in(lichen_sys_ctx_os(), "battery", battery_task, NULL, BATTERY_STACK_BYTES,
+                              LICHEN_PRIO_BACKGROUND, LICHEN_STACK_LP_RAM, NULL)) {
+        ESP_LOGE(TAG, "battery service not started");
+    }
+}
+
 // "fw lora on|off" (#222): the OS switch saves it, and radio_changed hands it back to lora_set_enabled
 static void lora_switch_requested(bool on) {
     lichen_radio_set(RADIO_LORA, on);
@@ -830,6 +849,7 @@ static boot_start_fn_t const start_fns[START_COUNT] = {
     [START_BACKLIGHT]      = start_backlight,
     [START_KEYBOARD]       = start_keyboard,
     [START_SENSORS]        = start_sensors,
+    [START_BATTERY]        = start_battery,
     [START_LORA]           = start_lora,
     [START_C6_HOOKS]       = start_c6_hooks,
     [START_APPS]           = start_apps_step,

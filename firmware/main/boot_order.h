@@ -27,6 +27,7 @@ typedef enum {
     START_BACKLIGHT,      // backlight_start (the C6 drives the backlights)
     START_KEYBOARD,       // the TCA8418 (reset with the C6, #14)
     START_SENSORS,        // on the keyboard's bus
+    START_BATTERY,        // the fuel gauge service on the camera header's bus (#11); absent on a stock badge
     START_LORA,           // lora_start, only with the C6 link up
     START_C6_HOOKS,       // the C6 reset recovery hooks (#14 T-B)
     START_APPS,           // every app's background part (#66)

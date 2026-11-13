@@ -21,6 +21,7 @@ boot_start_t const boot_order[] = {
     START_BACKLIGHT,      // the C6 drives the backlights
     START_KEYBOARD,       // the TCA8418 resets with the C6 (#234)
     START_SENSORS,        // the keyboard's bus
+    START_BATTERY,        // its own bus and task: nothing waits for it
     START_LORA,
     START_C6_HOOKS,       // after keyboard and LoRa: from now on a C6 reset is recovered from
     START_APPS,
@@ -45,7 +46,8 @@ char const *boot_start_name(boot_start_t step) {
         [START_STORAGE] = "storage",     [START_NOTICES] = "notices",   [START_FONTS] = "fonts",
         [START_SHELL] = "shell",         [START_WATCH] = "watch",         [START_SD] = "sd",             [START_RADIO_SWITCHES] = "radio switches",
         [START_LORA_IDENT] = "lora ident", [START_C6LINK] = "c6link",   [START_BACKLIGHT] = "backlight",
-        [START_KEYBOARD] = "keyboard",   [START_SENSORS] = "sensors",   [START_LORA] = "lora",
+        [START_KEYBOARD] = "keyboard",   [START_SENSORS] = "sensors",   [START_BATTERY] = "battery",
+        [START_LORA] = "lora",
         [START_C6_HOOKS] = "c6 hooks",   [START_APPS] = "apps",         [START_OTA] = "ota",
     };
     if ((unsigned)step >= START_COUNT || !names[step]) {

@@ -2094,6 +2094,16 @@ target_include_directories(battery_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_options(battery_model_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME battery_model_test COMMAND battery_model_test)
 
+# Battery service decisions (#11): absent/present/stale/lost, register plausibility, no power-off unless enabled
+add_executable(battery_svc_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/battery_svc_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/battery/battery_svc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/battery/battery_model.c
+)
+target_include_directories(battery_svc_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/battery)
+target_compile_options(battery_svc_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME battery_svc_test COMMAND battery_svc_test)
+
 # Repeater status history (#168): the poll schedule (off by default, cap, stagger, backoff), the ring, graphs, setting
 add_executable(mesh_rhist_test
     ${CMAKE_CURRENT_SOURCE_DIR}/mesh_rhist_test.c
