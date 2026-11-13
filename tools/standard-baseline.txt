@@ -113,7 +113,7 @@ size	libesp_wifi_remote_glue.a	617
 size	libespcoredump.a	13200
 size	libespressif__esp-serial-flasher.a	123667
 size	libespressif__i2c_bus.a	3196
-size	libespressif__mdns.a	39621
+size	libespressif__mdns.a	38881
 size	libfatfs.a	30649
 size	libfreertos.a	33118
 size	libfw_console.a	10847
@@ -141,7 +141,7 @@ size	liblvgl_port_lib.a	6122
 size	liblwip.a	109820
 size	libmain.a	5963
 size	libmbedtls.a	22
-size	libmesh.a	397733
+size	libmesh.a	397709
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18676
 size	libnvs_sec_provider.a	2
