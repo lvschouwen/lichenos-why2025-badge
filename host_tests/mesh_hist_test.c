@@ -674,9 +674,6 @@ static void forget_checks(void) {
     CHECK(h.pending_records == 5);
 }
 
-// #368: a journal started again after a card format. Records queued before the reopen come without the CHAT records the
-// lost file held; they replay with a fallback title, and once the chats are forgotten the next message writes its CHAT
-// record again, so the new file is whole from there on
 // One sync pass of the mesh task (mesh_task.cpp sync_outgoing): fresh messages into the store and the journal's hold,
 // then every state into the store and the journal
 static void sync_pass(ob_t *ob, ob_sync_pass_t *p, mesh_hist_t *h, uint32_t now_s) {
@@ -765,6 +762,9 @@ static void heard_time_checks(void) {
     CHECK(strcmp(s, "heard repeated x2, 1.8 s") == 0);
 }
 
+// #368: a journal started again after a card format. Records queued before the reopen come without the CHAT records the
+// lost file held; they replay with a fallback title, and once the chats are forgotten the next message writes its CHAT
+// record again, so the new file is whole from there on
 static void reopen_checks(void) {
     static mesh_hist_t h;
     static uint8_t     pend[1024], spare[1024];
