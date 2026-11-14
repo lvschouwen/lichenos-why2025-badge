@@ -40,23 +40,23 @@ static bool read_token_file(char *out) {
     fread(text, 1, sizeof(text) - 1, f);
     fclose(f);
     text[OTA_TOKEN_LEN] = '\0';
-    if (!ota_token_text_valid(text)) {
-        return false;
+    bool valid          = ota_token_text_valid(text);
+    if (valid) {
+        strcpy(out, text);
     }
-    strcpy(out, text);
-    return true;
+    secure_wipe(text, sizeof(text)); // the token's text, valid or near enough, stays nowhere but in token
+    return valid;
 }
 
 static bool read_token_nvs(char *out) {
     char text[OTA_TOKEN_LEN + 8] = {0};
-    if (!ota_os_secret_get(TOKEN_NVS_KEY, text, sizeof(text))) {
-        return false;
+    bool valid = ota_os_secret_get(TOKEN_NVS_KEY, text, sizeof(text)) && strlen(text) == OTA_TOKEN_LEN &&
+                 ota_token_text_valid(text);
+    if (valid) {
+        strcpy(out, text);
     }
-    if (strlen(text) != OTA_TOKEN_LEN || !ota_token_text_valid(text)) {
-        return false;
-    }
-    strcpy(out, text);
-    return true;
+    secure_wipe(text, sizeof(text)); // a failed read may still have left text behind
+    return valid;
 }
 
 static bool write_token_file(void) {
@@ -78,6 +78,7 @@ bool ota_token_load(void) {
         uint8_t raw[OTA_TOKEN_LEN / 2];
         lichen_random_fill(raw, sizeof(raw));
         ota_hex(raw, sizeof(raw), token);
+        secure_wipe(raw, sizeof(raw)); // the token itself, as bytes
     }
     bool wrote_file = !from_file && write_token_file();
     bool wrote_nvs  = false;
@@ -85,6 +86,7 @@ bool ota_token_load(void) {
     if (!(from_nvs || (read_token_nvs(stored) && strcmp(stored, token) == 0))) {
         wrote_nvs = ota_os_secret_set(TOKEN_NVS_KEY, token);
     }
+    secure_wipe(stored, sizeof(stored));
     return ota_token_kept(from_file, from_nvs, wrote_file, wrote_nvs);
 }
 
