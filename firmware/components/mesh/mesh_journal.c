@@ -5,6 +5,7 @@
 #include "mesh_hist.h"
 #include "mesh_hist_crypto.h"
 #include "mesh_journal_gen.h"
+#include "mesh_journal_scan.h"
 #include "lichen_fs.h"
 #include "meshcore_run.h"
 
@@ -859,55 +860,82 @@ static uint8_t *scan_buf(size_t bytes, bool internal) {
     return internal ? lichen_alloc(meshcore_ctx(), bytes, LICHEN_MEM_INTERNAL) : psram(bytes);
 }
 
+// Whether the job's file can be scanned; when not, why on the console
+static bool scan_fits(scan_job_t const *job, struct stat *st) {
+    bool found = stat(job->path, st) == 0;
+    switch (mesh_journal_scan_plan(found, found ? (int64_t)st->st_size : 0, job->internal, SCAN_MAX_BYTES,
+                                   SCAN_INT_BYTES)) {
+        case MESH_JOURNAL_SCAN_GO: return true;
+        case MESH_JOURNAL_SCAN_MISSING: console_reply("scan: %s missing or empty", job->path); return false;
+        case MESH_JOURNAL_SCAN_TOO_BIG:
+            console_reply("scan: %s is %ld bytes, over the scan's %d KB: the scan is a bench tool for small journals "
+                          "(the journal itself grows to %u MB before it is compacted)",
+                          job->path, (long)st->st_size, SCAN_MAX_BYTES / 1024, MESH_HIST_CAP / (1024u * 1024u));
+            return false;
+        case MESH_JOURNAL_SCAN_INT_TOO_BIG:
+            console_reply("scan: %s is %ld bytes; int keeps two copies in internal RAM, at most %d KB each", job->path,
+                          (long)st->st_size, SCAN_INT_BYTES / 1024);
+            return false;
+    }
+    return false;
+}
+
+// The decode work area and the two raw copies; the caller frees whatever was had, also on false
+static bool scan_bufs(scan_job_t const *job, size_t bytes, work_t *w, uint8_t **ref, uint8_t **cur) {
+    if (!work_alloc(w) || !(*ref = scan_buf(bytes, job->internal)) || !(*cur = scan_buf(bytes, job->internal))) {
+        console_reply("scan: no memory");
+        return false;
+    }
+    return true;
+}
+
+static void scan_pass_line(int p, mesh_hist_scan_t const *s) {
+    if (p == 1 || mesh_journal_scan_bad(s)) {
+        console_reply("scan pass %d: %lu records, %lu bad spot(s), %llu bytes skipped, first bad at %llu%s, "
+                      "auth failures %lu",
+                      p, (unsigned long)s->records, (unsigned long)s->resyncs, (unsigned long long)s->skipped_bytes,
+                      (unsigned long long)(s->bad_seen ? s->first_bad : 0), s->torn ? ", torn" : "",
+                      (unsigned long)s->auth_failures);
+    }
+}
+
+// The passes over a file of size bytes: pass 1 into ref, the later ones into cur, each compared with pass 1. Stops at
+// the first pass that could not have or read the card.
+static void scan_passes(scan_job_t const *job, work_t *w, uint8_t *ref, uint8_t *cur, off_t size) {
+    size_t ref_n = 0, n = 0;
+    int    bad_passes = 0, diff_passes = 0;
+    for (int p = 1; p <= job->passes; p++) {
+        if (p > 1) {
+            vTaskDelay(pdMS_TO_TICKS(50)); // the mesh task's journal flush waits only 100 ms for the card
+        }
+        mesh_hist_scan_t s;
+        if (mesh_journal_scan_copies_head(p, job->skip, (int64_t)size)) {
+            memcpy(cur, ref, (size_t)job->skip); // the skipped head is compared with itself
+        }
+        if (!scan_pass(job, w, p == 1 ? ref : cur, (size_t)size, p == 1 ? &ref_n : &n,
+                       mesh_journal_scan_skip(p, job->skip), &s)) {
+            break;
+        }
+        if (p > 1) {
+            diff_passes += n != ref_n || memcmp(ref, cur, n) != 0;
+            report_diff(p, ref, ref_n, cur, n);
+        }
+        bad_passes += mesh_journal_scan_bad(&s);
+        scan_pass_line(p, &s);
+    }
+    console_reply("scan %s (%s): %d pass(es), %ld bytes, %d with bad spots, %d with raw differences", job->path,
+                  job->internal ? "raw copies in internal RAM" : "raw copies in PSRAM", job->passes, (long)size,
+                  bad_passes, diff_passes);
+}
+
 static void scan_task_fn(void *arg) {
     scan_job_t job = *(scan_job_t *)arg;
     unalloc(arg);
     struct stat st;
     work_t      w   = {0};
     uint8_t    *ref = NULL, *cur = NULL;
-    if (stat(job.path, &st) != 0 || st.st_size <= 0) {
-        console_reply("scan: %s missing or empty", job.path);
-    } else if (st.st_size > SCAN_MAX_BYTES) {
-        console_reply("scan: %s is %ld bytes, over the scan's %d KB: the scan is a bench tool for small journals (the "
-                      "journal itself grows to %u MB before it is compacted)",
-                      job.path, (long)st.st_size, SCAN_MAX_BYTES / 1024, MESH_HIST_CAP / (1024u * 1024u));
-    } else if (job.internal && st.st_size > SCAN_INT_BYTES) {
-        console_reply("scan: %s is %ld bytes; int keeps two copies in internal RAM, at most %d KB each", job.path,
-                      (long)st.st_size, SCAN_INT_BYTES / 1024);
-    } else if (!work_alloc(&w) || !(ref = scan_buf(st.st_size, job.internal)) ||
-               !(cur = scan_buf(st.st_size, job.internal))) {
-        console_reply("scan: no memory");
-    } else {
-        size_t ref_n = 0, n = 0;
-        int    bad_passes = 0, diff_passes = 0;
-        for (int p = 1; p <= job.passes; p++) {
-            if (p > 1) {
-                vTaskDelay(pdMS_TO_TICKS(50)); // the mesh task's journal flush waits only 100 ms for the card
-            }
-            mesh_hist_scan_t s;
-            if (p == 2 && job.skip > 0 && job.skip < st.st_size) {
-                memcpy(cur, ref, (size_t)job.skip); // the skipped head is compared with itself
-            }
-            if (!scan_pass(&job, &w, p == 1 ? ref : cur, (size_t)st.st_size, p == 1 ? &ref_n : &n, p == 1 ? 0 : job.skip,
-                           &s)) {
-                break;
-            }
-            if (p > 1) {
-                diff_passes += n != ref_n || memcmp(ref, cur, n) != 0;
-                report_diff(p, ref, ref_n, cur, n);
-            }
-            bad_passes += s.resyncs || s.torn || s.auth_failures;
-            if (p == 1 || s.resyncs || s.torn || s.auth_failures) {
-                console_reply("scan pass %d: %lu records, %lu bad spot(s), %llu bytes skipped, first bad at %llu%s, "
-                              "auth failures %lu",
-                              p, (unsigned long)s.records, (unsigned long)s.resyncs,
-                              (unsigned long long)s.skipped_bytes, (unsigned long long)(s.bad_seen ? s.first_bad : 0),
-                              s.torn ? ", torn" : "", (unsigned long)s.auth_failures);
-            }
-        }
-        console_reply("scan %s (%s): %d pass(es), %ld bytes, %d with bad spots, %d with raw differences", job.path,
-                      job.internal ? "raw copies in internal RAM" : "raw copies in PSRAM", job.passes,
-                      (long)st.st_size, bad_passes, diff_passes);
+    if (scan_fits(&job, &st) && scan_bufs(&job, st.st_size, &w, &ref, &cur)) {
+        scan_passes(&job, &w, ref, cur, st.st_size);
     }
     console_reply("scan task stack: %u of %d bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL), SCAN_STACK);
     unalloc(ref);
