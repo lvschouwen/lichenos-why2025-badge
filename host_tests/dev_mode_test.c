@@ -85,6 +85,14 @@ static void usb_hold(void) {
     CHECK(!console_hold_refuses(false, CONSOLE_ORIGIN_UART));
 }
 
+// #455: a console command that erases storage runs from the USB console only, with or without a hold
+static void erase_usb_only(void) {
+    CHECK(!console_erase_refuses(CONSOLE_ORIGIN_UART));
+    CHECK(console_erase_refuses(CONSOLE_ORIGIN_WIFI));
+    CHECK(console_erase_refuses(CONSOLE_ORIGIN_LOCAL));   // the Console app: injected keys can type there
+    CHECK(console_erase_refuses(CONSOLE_ORIGIN_UNKNOWN)); // a task that is not a console command's: fail closed
+}
+
 // #420: while the hold is on, "fw slot other" only from the USB console (another image may not keep the list); the
 // listing and the usage answer from anywhere
 static void slot_other_held(void) {
@@ -268,6 +276,7 @@ int main(void) {
     help_hides_debug_commands();
     on_only_from_usb();
     usb_hold();
+    erase_usb_only();
     slot_other_held();
     origin_plumbing();
     factory_reset_clears_it();

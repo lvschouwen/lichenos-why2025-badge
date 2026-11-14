@@ -61,7 +61,7 @@ typedef enum {
     MESH_SUB_REMOTE,
     MESH_SUB_LINK,
     MESH_SUB_CHATS,
-    MESH_SUB_IDENT_SIMULATE,
+    MESH_SUB_IDENT_SIMULATE, // #455: a test arm that blocks TX until restart; its row has no word in the release image
     MESH_SUB_ADVERT,
     MESH_SUB_LOC,
     MESH_SUB_AUTOADD,

@@ -8,8 +8,8 @@ set -euo pipefail
 
 MARKER="LICHEN-DEBUG-BUILD-MARKER" # keep in step with lichen_debug_build_marker in fw_console/console.c
 # Canaries beside the marker: console wordings that only exist with the debug commands (fw dev, the hidden-commands
-# note). Not UI text; "developer mode" itself is, and is left out on purpose.
-CANARIES=("fw dev on" "debug ones hidden")
+# note), and the mesh identity test arm (#455: "mesh ident simulate", which blocks TX). Not UI text; "developer mode" itself is, and is left out on purpose.
+CANARIES=("fw dev on" "debug ones hidden" "ident simulate")
 # Every Kconfig symbol that compiles a debug or test command (grep "config LICHEN_" firmware/components/*/Kconfig*):
 # LICHEN_NVS_ENCRYPT_BURN_CMD (irreversible eFuse burn) and LICHEN_NVS_DEBUG_FORCE_DOWN (fw nvs-down) are commands;
 # LICHEN_UI_LOCK_CHECK_COUNT and _ASSERT are the LVGL lock-owner debug checks (release carries _OFF).
@@ -70,6 +70,8 @@ selftest() {
     printf 'junk\0Switch developer mode off? dev [on|off|status]\0more' > "$tmp/clean.bin"
     printf 'junk\0%s\0more' "$MARKER" > "$tmp/marked.bin"
     printf 'junk\0debug ones hidden: fw dev\0more' > "$tmp/canary.bin"
+    printf 'junk\0mesh chats | mesh ident simulate | mesh hist\0more' > "$tmp/ident.bin"
+    ! run release "$tmp/ident.bin" 2>/dev/null || { echo "selftest: ident simulate release image accepted" >&2; exit 1; }
     run release "$tmp/clean.bin" >/dev/null || { echo "selftest: clean release image rejected" >&2; exit 1; }
     ! run release "$tmp/marked.bin" 2>/dev/null || { echo "selftest: marked release image accepted" >&2; exit 1; }
     ! run release "$tmp/canary.bin" 2>/dev/null || { echo "selftest: canary release image accepted" >&2; exit 1; }

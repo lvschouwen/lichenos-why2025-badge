@@ -42,7 +42,7 @@ static void cmd_mesh_autostart(char const *rest) {
 
 // The debug subcommands (#373) are named only where they are in the image
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-#define MESH_DEV_USAGE " | mesh airlog [n] (debug, fw dev) | mesh chat open <#channel> | close (debug, fw dev)"
+#define MESH_DEV_USAGE " | mesh ident simulate (debug, fw dev) | mesh airlog [n] (debug, fw dev) | mesh chat open <#channel> | close (debug, fw dev)"
 #else
 #define MESH_DEV_USAGE ""
 #endif
@@ -50,7 +50,7 @@ static void cmd_mesh_autostart(char const *rest) {
 // "fw mesh" with a line it does not know
 static void cmd_mesh_usage(void) {
     console_reply("mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset index | freq bw sf cr> "
-                  "[txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact|scan [n] [bad|bad1] [int] [from<offset>]] | mesh send <channel> <text> | "
+                  "[txdbm] | mesh link | mesh out | mesh chats | mesh hist [compact|scan [n] [bad|bad1] [int] [from<offset>]] | mesh send <channel> <text> | "
                   "mesh dm <12 hex> <text> | mesh scope [console <region> YES] | mesh remote [<name|hex> login [pw]|status|cli <text>|settings|logout] | mesh remote settings | mesh history [<name|hex> [on [min] YES|off|interval <min>]] | mesh trace [<hex>] | mesh discover <hex> | mesh advert [interval <off|180|6h|2d>] [manual <zero|flood>] | mesh loc "
                   "[<lat> <lon> | share on|off] | mesh autoadd [on|off | types <all|chat,repeater,room,sensor> | hops "
                   "<any|direct|n> | overwrite on|off]" MESH_DEV_USAGE);
@@ -112,7 +112,11 @@ static constexpr mesh_sub_run_t MESH_SUB_RUN[] = {
     {MESH_SUB_REMOTE, cmd_mesh_remote},
     {MESH_SUB_LINK, [](char const *) { cmd_mesh_link(); }},
     {MESH_SUB_CHATS, [](char const *) { cmd_mesh_chats(); }},
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     {MESH_SUB_IDENT_SIMULATE, [](char const *) { cmd_mesh_ident_simulate(); }},
+#else
+    {MESH_SUB_IDENT_SIMULATE, [](char const *) {}}, // never matched: its table row has no word (#455)
+#endif
     {MESH_SUB_ADVERT, cmd_mesh_advert},
     {MESH_SUB_LOC, cmd_mesh_loc},
     {MESH_SUB_AUTOADD, cmd_mesh_autoadd},

@@ -849,6 +849,14 @@ bool console_usb_hold_ok(char const *what) {
     return false;
 }
 
+bool console_erase_ok(char const *what) {
+    if (!console_erase_refuses(console_origin())) {
+        return true;
+    }
+    console_reply("%s refused: it erases storage, so only the USB console can do it (the screen's Settings can too)", what);
+    return false;
+}
+
 static void run_command(char *line);
 
 // Every command line, from the UART and from Wi-Fi

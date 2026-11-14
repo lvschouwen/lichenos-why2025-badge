@@ -17,7 +17,9 @@ bool arg_onoff(char const *t, bool *v);
 void cmd_mesh_name(char const *name);
 void cmd_mesh_radio(char const *args);
 void cmd_mesh_pathhash(char const *args);
-void cmd_mesh_ident_simulate(void);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+void cmd_mesh_ident_simulate(void); // #455: a test arm, developer image only
+#endif
 void cmd_mesh_advert(char const *args);
 void cmd_mesh_loc(char const *args);
 void cmd_mesh_autoadd(char const *args);

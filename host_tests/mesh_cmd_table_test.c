@@ -33,7 +33,7 @@ static void test_console_commands(void) {
     // what "fw help" lists, byte for byte
     static char const *const usage[] = {
         "mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset | freq bw sf "
-        "cr> [txdbm] | mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact|scan [n] [bad|bad1] "
+        "cr> [txdbm] | mesh link | mesh out | mesh chats | mesh hist [compact|scan [n] [bad|bad1] "
         "[int] [from<offset>]] | mesh send <channel> <text> | mesh dm <12 hex> <text> | mesh notify [test dm|chan "
         "<name>|fail|mention] | mesh order [reset] | mesh advert ... | mesh loc ... | mesh autoadd ...",
         "contacts (nodes heard, newest first) | contacts export [<12 hex>] | contacts import <part> | end | cancel",
@@ -65,14 +65,19 @@ static void test_subcommand_table(void) {
         {"path ", NEEDS, true},     {"send ", NEEDS, true},        {"dm ", NEEDS, true},
         {"out", NONE, true},        {"trace", OPTIONAL, true},     {"discover ", NEEDS, true},
         {"telemetry", OPTIONAL, true}, {"history", OPTIONAL, true}, {"remote", OPTIONAL, true},
-        {"link", NONE, true},       {"chats", NONE, true},         {"ident simulate", NONE, true},
+        {"link", NONE, true},       {"chats", NONE, true},
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+        {"ident simulate", NONE, true},
+#else
+        {NULL, NONE, true}, // #455: compiled out of the release image
+#endif
         {"advert", OPTIONAL, true}, {"loc", OPTIONAL, true},       {"autoadd", OPTIONAL, true},
         {"scope", OPTIONAL, true},  {"airlog", OPTIONAL, true}, // #408
         {"chat", OPTIONAL, true},   // #438
     };
     CHECK(MESH_SUB_COUNT == sizeof(want) / sizeof(want[0]));
     for (int i = 0; i < MESH_SUB_COUNT; i++) {
-        CHECK(MESH_SUBS[i].word && strcmp(MESH_SUBS[i].word, want[i].word) == 0);
+        CHECK(want[i].word ? MESH_SUBS[i].word && strcmp(MESH_SUBS[i].word, want[i].word) == 0 : MESH_SUBS[i].word == NULL);
         CHECK(MESH_SUBS[i].match == want[i].args);
         CHECK(MESH_SUBS[i].needs_running == want[i].running);
     }
@@ -150,7 +155,11 @@ static void test_matching(void) {
     expect("remote rep login", MESH_SUB_REMOTE, "rep login");
     expect("link", MESH_SUB_LINK, "");
     expect("chats", MESH_SUB_CHATS, "");
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     expect("ident simulate", MESH_SUB_IDENT_SIMULATE, "");
+#else
+    expect("ident simulate", MESH_SUB_COUNT, NULL); // #455: not in the release table at all
+#endif
     expect("ident", MESH_SUB_COUNT, NULL);
     expect("advert interval 6h", MESH_SUB_ADVERT, "interval 6h");
     expect("loc 52.1 4.3", MESH_SUB_LOC, "52.1 4.3");

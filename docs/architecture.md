@@ -550,7 +550,8 @@ copy, its setting and `fw onair` are `mesh_onair_run.c`.
 
 - A setting in MeshCore's app settings (`onair_on`, `onair_list`), **off by default**: a user badge behaves as before.
   Kept across flashes; a factory reset or MeshCore's Clear data erases it (off again). The list is never in the repo.
-  While it is on, the console's `fw factory-reset settings|all YES` runs only from the USB console (`plan` from any):
+  The console's `fw factory-reset settings|all YES` and `fw sd format` run only from the USB console, list on or off
+  (#455, `console_erase_ok`; `plan` from any). While it is on, the same holds through the USB hold:
   MeshCore binds fw_console's USB hold (`console_usb_hold_bind`, `owner-only` in `tools/layers.conf`), and
   `factory_reset.c` asks `console_usb_hold_ok` before it acts. The reset by hand on the screen still clears it.
 - While it is on, nothing but the USB console boots another image or changes the C6's (#420), since that image may

@@ -142,6 +142,10 @@ bool console_hold_refuses(bool held, console_origin_t origin) {
     return held && origin != CONSOLE_ORIGIN_UART;
 }
 
+bool console_erase_refuses(console_origin_t origin) {
+    return origin != CONSOLE_ORIGIN_UART;
+}
+
 slot_req_t console_slot_request(char const *args, bool held, console_origin_t origin) {
     if (args[0] == '\0') {
         return SLOT_REQ_SHOW;

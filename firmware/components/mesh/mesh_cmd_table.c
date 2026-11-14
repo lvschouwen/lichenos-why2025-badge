@@ -6,7 +6,7 @@
 mesh_con_t const MESH_CONSOLE_CMDS[MESH_CON_COUNT] = {
     [MESH_CON_MESH]     = {"mesh",
                            "mesh | mesh start | mesh stop | mesh autostart [on|off] | mesh name <name> | mesh radio <preset | freq bw sf cr> [txdbm] | "
-                           "mesh link | mesh out | mesh chats | mesh ident simulate | mesh hist [compact|scan [n] [bad|bad1] [int] [from<offset>]] | mesh send <channel> <text> | "
+                           "mesh link | mesh out | mesh chats | mesh hist [compact|scan [n] [bad|bad1] [int] [from<offset>]] | mesh send <channel> <text> | "
                            "mesh dm <12 hex> <text> | mesh notify [test dm|chan <name>|fail|mention] | mesh order [reset] | mesh advert ... | mesh loc ... | mesh autoadd ..."},
     [MESH_CON_CONTACTS] = {"contacts", "contacts (nodes heard, newest first) | contacts export [<12 hex>] | contacts import "
                                        "<part> | end | cancel"},
@@ -42,7 +42,13 @@ mesh_sub_t const MESH_SUBS[MESH_SUB_COUNT] = {
     [MESH_SUB_REMOTE]         = {"remote", MESH_SUB_WORD, true},
     [MESH_SUB_LINK]           = {"link", MESH_SUB_EXACT, true},
     [MESH_SUB_CHATS]          = {"chats", MESH_SUB_EXACT, true},
+    // #455: a test arm (developer image only); the release row has no word, so the string is not in the image and
+    // nothing can match it. The id stays so the handler table keeps one row per id.
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     [MESH_SUB_IDENT_SIMULATE] = {"ident simulate", MESH_SUB_EXACT, true},
+#else
+    [MESH_SUB_IDENT_SIMULATE] = {NULL, MESH_SUB_EXACT, true},
+#endif
     [MESH_SUB_ADVERT]         = {"advert", MESH_SUB_WORD, true},
     [MESH_SUB_LOC]            = {"loc", MESH_SUB_WORD, true},
     [MESH_SUB_AUTOADD]        = {"autoadd", MESH_SUB_WORD, true},
@@ -52,6 +58,9 @@ mesh_sub_t const MESH_SUBS[MESH_SUB_COUNT] = {
 };
 
 char const *mesh_sub_match(mesh_sub_t const *sub, char const *args) {
+    if (!sub->word) {
+        return NULL; // a row compiled out of this image (#455)
+    }
     size_t len = strlen(sub->word);
     if (sub->match == MESH_SUB_EXACT) {
         return strcmp(args, sub->word) == 0 ? args + len : NULL;

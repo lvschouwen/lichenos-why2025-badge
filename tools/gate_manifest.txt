@@ -93,6 +93,7 @@ console_boot_pending	-	unspecified	fw_console.h
 console_dev_gate	-	unspecified	fw_console.h
 console_dev_mode	-	any	fw_console.h
 console_dev_set	SYSTEM	unspecified	fw_console.h
+console_erase_ok	SYSTEM	unspecified	fw_console.h
 console_exec	SYSTEM	unspecified	fw_console.h
 console_exec_with_secrets	SYSTEM	unspecified	fw_console.h
 console_from_uart	-	unspecified	fw_console.h

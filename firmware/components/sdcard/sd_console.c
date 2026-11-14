@@ -241,6 +241,9 @@ static void cmd_cat(char const *args) {
 #endif // CONFIG_LICHEN_DEV_COMMANDS
 
 static void cmd_format(char const *word) {
+    if (!console_erase_ok("sd format")) {
+        return; // #455: wipes the card (journal, settings backup): USB only, the screen's format still works
+    }
     if (!sd_format_confirmed(word)) {
         console_reply("sd format erases everything on the card: fw sd format " SD_FORMAT_CONFIRM);
         return;

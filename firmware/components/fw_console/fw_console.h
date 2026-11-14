@@ -62,6 +62,9 @@ void             console_bind_dev_store(fw_get_u8_fn get, fw_set_u8_fn set);
 // when it may go on, else it has replied why.
 void             console_usb_hold_bind(char const *(*held)(void));
 bool             console_usb_hold_ok(char const *what);
+// A command that erases or wipes storage asks this before acting (#455): true from the USB console only; else it has
+// replied that it is refused, whatever the hold says. The reset or format by hand on the screen still works.
+bool             console_erase_ok(char const *what);
 // What holds now (NULL: nothing), for a caller that is never the USB console and answers on its own: the update server
 // refuses firmware while it holds (#420), since another image may not keep the hold. Lock-free, any task.
 char const      *console_usb_hold_why(void);

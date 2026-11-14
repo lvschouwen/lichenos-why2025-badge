@@ -650,6 +650,9 @@ static void cmd_factory(char const *args) {
         console_reply("nothing erased: add YES (factory-reset %s YES)", word);
         return;
     }
+    if (!console_erase_ok("factory reset")) {
+        return; // #455: USB only, hold or not (epic-395 rule 4)
+    }
     if (!console_usb_hold_ok("factory reset")) {
         return; // #289: it would switch MeshCore's on-air allow list off; the reset by hand on the screen still does
     }

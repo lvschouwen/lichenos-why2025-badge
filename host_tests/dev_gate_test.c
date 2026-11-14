@@ -34,12 +34,13 @@ static char const *const GATED[] = {
     "vib test alert", "setup reset", "setup reset mesh", "setup done mesh", "setup", "sensors start", "sensors stop",
     "sensors boot on", "sensors boot off", "sensors boot x", "sensors bogus",
     "mesh chat open #badgetest", "mesh chat close", "mesh chat", "mesh chat open", "mesh  chat   open x",
+    "mesh ident simulate", "mesh ident", "mesh  ident   simulate",
 };
 
 static char const *const OPEN[] = {
     "thermal", "psram", "stress status", "stress stop", "idle", "notify", "notify clear", "notify read", "notify dnd on",
     "notify testing", "vib", "vib on", "vib off", "vib strength low", "vib tests", "sensors", "sensors raw",
-    "sensors boot", "mesh", "mesh chats", "mesh send #x hi", "mesh chatty", "mesh airlog", "help", "wifi on", "mem", "crash", "boot", "reboot",
+    "sensors boot", "mesh", "mesh chats", "mesh send #x hi", "mesh chatty", "mesh identity", "mesh airlog", "help", "wifi on", "mem", "crash", "boot", "reboot",
 };
 
 static void test_forms(void) {

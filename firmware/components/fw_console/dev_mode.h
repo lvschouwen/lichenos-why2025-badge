@@ -107,6 +107,10 @@ dev_req_t dev_mode_request(char const *args, console_origin_t origin);
 // YES) runs only from the USB console; Wi-Fi, the Console app (injected keys) and other tasks are refused
 bool console_hold_refuses(bool held, console_origin_t origin);
 
+// A command that erases or wipes storage (factory-reset ... YES, sd format) runs only from the USB console (#455,
+// epic-395 rule 4): a person at the cable. Wi-Fi, the Console app and any other task are refused, held or not.
+bool console_erase_refuses(console_origin_t origin);
+
 // The hold also covers booting another image (#420): the other slot's image, or one installed over Wi-Fi, may not keep
 // what holds (an older image has no on-air list), so "fw slot other" and the update server's firmware refuse while it
 // holds. Every refusal ends in this one string (passed as an argument, so the image keeps one copy).

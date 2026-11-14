@@ -88,6 +88,7 @@ void mesh_int::cmd_mesh_pathhash(char const *args) {
 // "fw mesh ident simulate" (#80): the mismatch path on the bench without touching the identity file. A copy of the
 // live public key with one bit flipped must fail the check; then TX is blocked and the notice raised, as for a real
 // mismatch, until the next restart (which checks the real file again).
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
 void mesh_int::cmd_mesh_ident_simulate(void) {
     uint8_t prv[PRV_KEY_SIZE], pub[PUB_KEY_SIZE];
     mesh_lock();
@@ -101,6 +102,7 @@ void mesh_int::cmd_mesh_ident_simulate(void) {
     ident_apply(MESH_IDENT_MISMATCH, true);
     console_reply("identity: %s (simulated until restart; the file is untouched)", mesh_ident_text(MESH_IDENT_MISMATCH));
 }
+#endif // CONFIG_LICHEN_DEV_COMMANDS
 
 // ---- advert, location, auto-add (#52): "fw mesh advert|loc|autoadd" ---------------------------------------------------
 
