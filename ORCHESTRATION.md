@@ -14,7 +14,7 @@ Plan, implement, test, review, bench and deliver seven epics through dependency-
 ## Process (owner, 2026-11-13)
 - A wave = a batch of reviewed merges. Per wave: merge one branch at a time (rebase, ff-only, full check), push, relabel build, ONE flash, then a brief on-badge bench that an agent runs from a script main writes. A wave cannot close until that bench is done.
 - No soak per wave. One soak when all waves are done: plan, review and decisions in #407.
-- The flash itself is done by main. Ask the owner for a go when the permission check refuses it.
+- The flash itself is done by main, over Wi-Fi, without asking. Ask the owner only when the permission check refuses it.
 - Bench scripts live in the session scratchpad (`bench-wave-<X>.md`); they are remote only, list every allowed command, and allow on-air sends only to the test channel (an advert is also allowed by the owner).
 - Rebase conflicts in `tools/standard-baseline.txt`: record the branch's non-size changes first, take main's file, re-apply those changes, let the check rewrite the size lines. `host_tests/CMakeLists.txt` and component source lists: union-merge.
 
@@ -31,7 +31,7 @@ OTA-1 -> remote sweep S1 -> #208 + #211 merged -> OTA-2 + hands sitting H1 -> so
 - Worktrees: warm pool `.claude/worktrees/wt-1..6` via `agent-wt`; branches `<type>/<issue>-<slug>`.
 - Agents are build-only: green check plus a local commit. Main merges (rebase, ff-only, check, push), flashes, benches and closes issues.
 - Delivery of a wave = merged on main, check green, pushed, bench evidence on the issue (or `needs-lucas` with a bench checklist), issue closed or labelled.
-- Bench: `lichen-bench` skill, main session only. OTAs batched; ask Lucas before any OTA or key operation; on-air only #badgetest with the Heltec.
+- Bench: `lichen-bench` skill, main session only. Updates over Wi-Fi never need asking (owner, 2026-11-14); when he is at the badge, announce each visible step and wait. Destructive steps and injected keys need his word. On-air only #badgetest with the Heltec.
 - Security: the 13-rule checklist in `orchestration/plans/epic-395.md` section 6 goes into every brief and review from the first wave.
 
 ## Deviations from the program brief (recorded on purpose)
