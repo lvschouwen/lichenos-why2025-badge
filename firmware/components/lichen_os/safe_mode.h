@@ -26,9 +26,10 @@ void safe_mode_boot_step(bool crashed);
 // list changes. Main task, at boot.
 bool safe_mode_background_off(char const *id, bool may_switch_off);
 // This boot follows a crash attributed to an app: its id into id (cap >= 14), its crashes in the window (crashes,
-// may be NULL) and whether start_apps switched its background off (switched_off, may be NULL). False for no crash or
-// nobody to blame. Any task.
-bool safe_mode_crashed_app(char *id, size_t cap, unsigned *crashes, bool *switched_off);
+// may be NULL), whether start_apps switched its background off (switched_off, may be NULL) and whether it happened in
+// one of the app's LVGL callbacks (in_callback, may be NULL; #349: named, not counted). False for no crash or nobody
+// to blame. Any task.
+bool safe_mode_crashed_app(char *id, size_t cap, unsigned *crashes, bool *switched_off, bool *in_callback);
 // A crash is among the last boots in the window, or this boot follows one (lichen_boot_degraded, #280). False before
 // safe_mode_boot_step. Any task.
 bool safe_mode_degraded_boot(void);

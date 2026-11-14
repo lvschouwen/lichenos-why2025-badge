@@ -12,3 +12,4 @@ typedef struct _lv_timer_t     lv_timer_t;
 typedef int                    lv_event_code_t;
 typedef void (*lv_event_cb_t)(lv_event_t *e);
 typedef void (*lv_timer_cb_t)(lv_timer_t *t);
+typedef void (*lv_group_focus_cb_t)(lv_group_t *g);

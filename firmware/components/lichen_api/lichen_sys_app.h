@@ -84,6 +84,13 @@ void lichen_sys_app_console_more(void (*more)(char const *args), char const *usa
 // TCB when it is in internal RAM): no lock, no log, no flash. The panic handler.
 #define LICHEN_PANIC_ID_CAP 14 // an app id with its NUL
 char const *lichen_sys_panic_app_id(void);
+// The callback trampoline (lichen_ui_cb.c, #349): entering true before it enters an app's context, false after it
+// left it. Nests. The LVGL task only (it holds the LVGL lock); no lock, no heap.
+void lichen_sys_ui_cb_mark(bool entering);
+// For the panic handler: the task running on this core is inside an app's LVGL callback (lichen_sys_ui_cb_mark), so
+// the shell, LVGL or a PSRAM fault it reached is named after the app but counts no strike (safe_mode_policy.h). In
+// internal RAM, reads one internal word and the current TCB pointer: no lock, no log, no flash. The panic handler.
+bool lichen_sys_panic_in_ui_cb(void);
 // Once at boot, from a task (main, safe_mode_boot_step): checks that the panic handler's view of the current task's
 // context slot is the real one; false (logged) leaves attribution off. Not from an ISR.
 bool lichen_sys_panic_probe(void);

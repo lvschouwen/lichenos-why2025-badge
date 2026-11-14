@@ -34,6 +34,7 @@ extern "C" {
 
 #define SAFE_MODE_F_PANIC 0x1u // the panic handler ran and wrote crashed[] ("" = nobody)
 #define SAFE_MODE_F_REARM 0x2u // this boot ends in the PSRAM 120 MHz re-arm restart (#353): the next boot is its tail
+#define SAFE_MODE_F_UI_CB 0x4u // the faulting task was in an app's LVGL callback (#349): named, but no strike
 
 typedef struct {
     uint32_t magic;
@@ -57,8 +58,10 @@ void     safe_mode_seal(safe_mode_rec_t *r);
 void     safe_mode_ensure(safe_mode_rec_t *r);
 
 // The panic handler: the faulting task ran for app id (NULL or "" for nobody). A record that is not valid is reset
-// first. Only a well-formed id (a-z 0-9 _, 1..13) is kept; anything else counts as nobody.
-void safe_mode_note_panic(safe_mode_rec_t *r, char const *id);
+// first. Only a well-formed id (a-z 0-9 _, 1..13) is kept; anything else counts as nobody. in_callback: the task was
+// inside an app's LVGL event or timer callback (#349), where the shell, LVGL's renderer and the PSRAM path run as the
+// app too (a Back key that closes the screen, a draw event): the crash is named but is no strike against the app.
+void safe_mode_note_panic(safe_mode_rec_t *r, char const *id, bool in_callback);
 // The PSRAM re-arm restart is about to happen (restarting true), or did not after all (false)
 void safe_mode_note_rearm(safe_mode_rec_t *r, bool restarting);
 
@@ -66,7 +69,8 @@ typedef struct {
     bool     counted;                  // this boot took a place in the window (false: the re-arm restart's tail)
     bool     crash;                    // the boot before ended in a crash
     char     app[SAFE_MODE_ID_CAP];    // the app it is attributed to; "" for nobody (or no crash)
-    unsigned app_crashes;              // that app's crashes in the window, this one included
+    bool     in_callback;              // it happened in one of app's LVGL callbacks: named, not counted (#349)
+    unsigned app_crashes;              // that app's crashes in the window, this one included (not when in_callback)
     bool     limit_reached;            // app_crashes reached SAFE_MODE_LIMIT (safe_mode_switch_off decides)
     bool     degraded;                 // a crash is in the window: keep background work cautious (#280)
 } safe_mode_boot_t;

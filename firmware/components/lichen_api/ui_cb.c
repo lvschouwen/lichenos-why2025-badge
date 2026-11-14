@@ -24,6 +24,14 @@ ui_cb_rec_t *ui_cb_new_timer(ui_cb_env_t const *env, void (*fn)(struct _lv_timer
     return rec;
 }
 
+ui_cb_rec_t *ui_cb_new_group(ui_cb_env_t const *env, void (*fn)(struct _lv_group_t *g)) {
+    ui_cb_rec_t *rec = fn ? rec_new(env) : NULL;
+    if (rec) {
+        rec->fn.group = fn;
+    }
+    return rec;
+}
+
 void ui_cb_free(ui_cb_env_t const *env, void *rec) {
     if (rec) {
         env->free(rec);
@@ -48,5 +56,15 @@ void ui_cb_run_timer(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_
     void (*fn)(struct _lv_timer_t *) = rec->fn.timer;
     uint32_t previous                = env->enter(rec->ctx);
     fn(t);
+    env->leave(previous);
+}
+
+void ui_cb_run_group(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_group_t *g) {
+    if (!rec) {
+        return;
+    }
+    void (*fn)(struct _lv_group_t *) = rec->fn.group;
+    uint32_t previous                = env->enter(rec->ctx);
+    fn(g);
     env->leave(previous);
 }

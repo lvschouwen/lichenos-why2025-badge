@@ -186,7 +186,8 @@ static bool start_job(con_t *c, char const *line) {
     if (j->line && j->exec_buf) {
         strlcpy(j->line, line, CONSOLE_LINE_MAX + 1);
         s_busy = true;
-        if (lichen_task_start(lichen_ctx_self(), "console_app", worker, j, WORKER_STACK, LICHEN_PRIO_JOB, NULL)) {
+        // The OS's, not the app that opened Console (#349): a typed command is booked and blamed like one over USB
+        if (lichen_task_start(lichen_sys_ctx_os(), "console_app", worker, j, WORKER_STACK, LICHEN_PRIO_JOB, NULL)) {
             return true;
         }
         s_busy = false;

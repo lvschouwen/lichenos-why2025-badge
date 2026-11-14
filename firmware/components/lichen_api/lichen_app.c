@@ -225,6 +225,30 @@ char const *IRAM_ATTR lichen_sys_panic_app_id(void) {
     return s_panic_ids[slot][0] ? s_panic_ids[slot] : NULL;
 }
 
+// The task inside an app's LVGL callback (#349), for the panic hook: internal .bss, written only by the task that
+// holds the LVGL lock (the trampolines run nowhere else), so a plain depth count suffices
+static void *volatile s_ui_cb_task;
+static uint32_t       s_ui_cb_depth;
+
+void lichen_sys_ui_cb_mark(bool entering) {
+    if (entering) {
+        if (s_ui_cb_depth++ == 0) {
+            s_ui_cb_task = xTaskGetCurrentTaskHandle();
+        }
+    } else if (s_ui_cb_depth && --s_ui_cb_depth == 0) {
+        s_ui_cb_task = NULL;
+    }
+}
+
+bool IRAM_ATTR lichen_sys_panic_in_ui_cb(void) {
+    int core = esp_cpu_get_core_id();
+    if (core < 0 || core >= portNUM_PROCESSORS || xPortInterruptedFromISRContext()) {
+        return false;
+    }
+    void *task = s_ui_cb_task;
+    return task && task == pxCurrentTCBs[core];
+}
+
 static char const *app_name(void const *owner) {
     lichen_app_t const *app = owner;
     return app ? (app->id ? app->id : app->name) : "the OS";

@@ -48,9 +48,10 @@ to `layers.conf`):
   `shell_on_search`, scroll helpers), the countdown dialog, `lichen_screen_locked()`. Screen code runs on the LVGL task;
   never swap the default group or the active screen yourself. `lichen_ui_call(fn, arg)` hands a result from any task
   to the LVGL task (fn runs there, soon; false when it could not be queued) and `lichen_ui_with_group(group, build,
-  arg)` adds widgets to a screen's group (LVGL context). Register event and timer callbacks with
-  `lichen_ui_event_add` / `lichen_ui_timer_create` (LVGL's arguments; `lv_obj_add_event_cb` and `lv_timer_create` are
-  forbidden to apps, #349) so they run as the app. `shell_back()` pops the top screen like Esc, for a screen that
+  arg)` adds widgets to a screen's group (LVGL context). Register event, timer and group focus callbacks with
+  `lichen_ui_event_add` / `lichen_ui_timer_create` / `lichen_ui_group_focus_cb` (LVGL's arguments; the raw calls,
+  `lv_timer_set_cb`, the external-data setters and display or input-device events are forbidden to apps, #349) so
+  they run as the app. `shell_back()` pops the top screen like Esc, for a screen that
   takes Esc itself (the Keyboard test).
 - `lichen_ui.h` for home tiles and clocks (#180): `lichen_icon_box(parent, w, h, x, y, color, radius)` is a filled box
   centred off the icon's middle (`draw_icon` builds its picture from them, `LV_RADIUS_CIRCLE` for a dot);
@@ -242,12 +243,18 @@ slot 1 (slot 0 is IDF's pthread storage). `lichen_ctx_self()` (`lichen_app.h`) r
   each in `lichen_ctx_enter`/`lichen_ctx_leave` (`lichen_sys_app.h`; TLS only, no lock, nests);
 - in a `lichen_ui_call` (or `lichen_sys_ui_call`): each queued call keeps the context of the code that queued it and
   runs inside it (a burst past the queue's 16 entries goes to LVGL directly and runs for the OS);
-- in an LVGL event or timer callback registered with `lichen_ui_event_add` / `lichen_ui_timer_create` (#349): the
-  context of the code that registered it, entered around each call by a trampoline (`lichen_ui_cb.c`; TLS only, no
-  lock, no heap; the caller's context comes back exactly, also when the callback deletes its object). The record
-  (context + callback, 8 B in LVGL's PSRAM heap) is the descriptor's or timer's external data and LVGL frees it with
-  them (`CONFIG_LV_USE_EXT_DATA`). The panic hook (#232) reads the same slot, so a crash in such a callback blames the
-  app. Every app registration uses them; the shell's own infrastructure (home, status bar, toasts, screensaver, boot
+- in an LVGL event, timer or group focus callback registered with `lichen_ui_event_add` / `lichen_ui_timer_create` /
+  `lichen_ui_group_focus_cb` (#349): the context of the code that registered it, entered around each call by a
+  trampoline (`lichen_ui_cb.c`; TLS only, no lock, no heap; the caller's context comes back exactly, also when the
+  callback deletes its object). The record (context + callback, 8 B, about 16 B with the heap's block header, in
+  LVGL's PSRAM heap) is the descriptor's, timer's or group's external data and LVGL frees it with them
+  (`CONFIG_LV_USE_EXT_DATA`). That option costs 8 B more on every LVGL object, event descriptor, timer, animation,
+  group and input device, all in LVGL's PSRAM heap: about 5-12 KB for a busy screen stack. The panic hook (#232) reads
+  the same slot, so a crash in such a callback names the app; but since everything the callback reaches runs as the
+  app too (the shell closing the screen on Back, LVGL's renderer in a draw event, a PSRAM fault), the trampoline
+  marks the task (`lichen_sys_ui_cb_mark`, one internal word) and such a crash is named ("crashed in a screen
+  callback") but counts no strike toward the background switch-off below. Every app registration uses them;
+  animation callbacks run from LVGL's own timer as the OS (no app uses one); the shell's own infrastructure (home, status bar, toasts, screensaver, boot
   screen, dialog layer, bench overlays) registers raw and runs as whatever context is current, the OS's between calls;
 - on a task from `lichen_task_start`: the context it was given. An app passes its own; code that runs for whoever
   called it (the OS, shell helpers) passes `lichen_ctx_self()`, so a task an app's task or hook starts inherits the app.
@@ -271,15 +278,15 @@ notice is dropped, a refused `lichen_fs_sd_end` leaves the lock alone. The pure 
 the ctx the table holds for the app's index, and the lookups and `lichen_ctx_enter`/`_leave` are owner-only in
 `layers.conf` (forbidden to apps outright).
 
-Since #349 an app's LVGL event and timer callbacks run as the app (above), and so does a `lichen_ui_call` queued from
-one. Display, input-device and group callbacks (`lv_display_add_event_cb`, `lv_indev_add_event_cb`,
-`lv_group_set_focus_cb`) are the OS's and stay raw.
+Since #349 an app's LVGL event, timer and group focus callbacks run as the app (above), and so does a `lichen_ui_call`
+queued from one. Display and input-device events (`lv_display_add_event_cb`, `lv_indev_add_event_cb`) are the OS's
+and stay raw. The Console app's commands run as the OS, as they do over USB.
 
 **Lifecycle (#231, after the MVP):** an app is registered, started, running, suspended (screen off or another app in
 front), stopping (cooperative, with a deadline; the OS never deletes an app's tasks) and stopped. On stop the OS frees
 the app's grants whole (memory, PSRAM quota, booked timers). Two crashes attributed to one app in three boots turn its
 background part off and notify (#232): the panic handler notes the app the faulting task ran for (its context; an OS
-task or an ISR blames nobody) in LP RAM, the next boot counts it (the PSRAM re-arm restart after a crash is part of
+task or an ISR blames nobody; a crash inside one of the app's LVGL callbacks is named but is no strike, #349) in LP RAM, the next boot counts it (the PSRAM re-arm restart after a crash is part of
 that crash, not a clean boot), `fw app background` lists what is off and `fw app background <id> on` switches it on
 again. `lichen_boot_degraded()` (lichen_crashlog.h) tells an app that a crash is among the last boots, so a restart
 loop does not repeat costly background work; an app keeps no restart policy of its own. An app with

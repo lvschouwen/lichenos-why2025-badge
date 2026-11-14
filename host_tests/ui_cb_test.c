@@ -22,6 +22,9 @@ struct _lv_event_t {
 struct _lv_timer_t {
     int ticks;
 };
+struct _lv_group_t {
+    int moves;
+};
 
 static int const app_a = 1, app_b = 2;
 static app_ctx_table_t s_t;
@@ -62,6 +65,10 @@ static void note_event(struct _lv_event_t *e) {
 }
 static void note_timer(struct _lv_timer_t *t) {
     t->ticks++;
+    seen = self();
+}
+static void note_group(struct _lv_group_t *g) {
+    g->moves++;
     seen = self();
 }
 static void inner_event(struct _lv_event_t *e) {
@@ -107,8 +114,16 @@ static void test_runs_as_registrant(void) {
     CHECK(seen == ctx_a && t.ticks == 1);
     CHECK(self() == os);
     CHECK(s_allocs == allocs); // nothing allocated on the call path
+    prev            = enter(ctx_b); // MeshCore's chat sets its group's focus callback (#349 review)
+    ui_cb_rec_t *gr = ui_cb_new_group(&s_env, note_group);
+    leave(prev);
+    struct _lv_group_t g = {0};
+    ui_cb_run_group(&s_env, gr, &g);
+    CHECK(seen == ctx_b && g.moves == 1 && self() == os);
+    CHECK(s_allocs == allocs + 1);
     ui_cb_free(&s_env, ev);
     ui_cb_free(&s_env, tm);
+    ui_cb_free(&s_env, gr);
     CHECK(s_live == 0);
 }
 
@@ -159,6 +174,8 @@ static void test_edges(void) {
     setup();
     CHECK(ui_cb_new_event(&s_env, NULL) == NULL);
     CHECK(ui_cb_new_timer(&s_env, NULL) == NULL);
+    CHECK(ui_cb_new_group(&s_env, NULL) == NULL);
+    ui_cb_run_group(&s_env, NULL, NULL);
     s_fail_next = 1;
     CHECK(ui_cb_new_event(&s_env, note_event) == NULL);
     CHECK(s_live == 0);

@@ -11,7 +11,13 @@ static int fails;
 
 // One boot after a panic of the task that ran for id (NULL: an OS task)
 static safe_mode_boot_t panic_boot(safe_mode_rec_t *r, char const *id) {
-    safe_mode_note_panic(r, id);
+    safe_mode_note_panic(r, id, false);
+    return safe_mode_boot(r, true);
+}
+
+// The same for a panic inside one of id's LVGL callbacks (#349)
+static safe_mode_boot_t callback_boot(safe_mode_rec_t *r, char const *id) {
+    safe_mode_note_panic(r, id, true);
     return safe_mode_boot(r, true);
 }
 
@@ -143,7 +149,7 @@ static void nobody_is_blamed(void) {
 
 static void panic_mark_alone_is_a_crash(void) {
     safe_mode_rec_t r = fresh();
-    safe_mode_note_panic(&r, "timer");
+    safe_mode_note_panic(&r, "timer", false);
     safe_mode_boot_t b = safe_mode_boot(&r, false); // the reset reason said otherwise, but the handler ran
     CHECK(b.crash && strcmp(b.app, "timer") == 0);
     b = safe_mode_boot(&r, false); // consumed
@@ -247,7 +253,42 @@ static void list_rules(void) {
     CHECK(!safe_mode_list_remove(full, sizeof(full), "timer"));
 }
 
+// #349: a crash in an app's screen callback is named but no strike: the shell and LVGL code it reached ran as the app
+static void callback_crashes_are_no_strike(void) {
+    safe_mode_rec_t  r = fresh();
+    safe_mode_boot_t b = callback_boot(&r, "weather");
+    CHECK(b.crash && b.in_callback && strcmp(b.app, "weather") == 0 && b.app_crashes == 0 && !b.limit_reached);
+    CHECK(b.degraded);
+    CHECK(!safe_mode_switch_off(&b, "weather", true));
+    safe_mode_boot(&r, false);
+    b = callback_boot(&r, "weather"); // two callback crashes in three boots: not switched off
+    CHECK(b.in_callback && !b.limit_reached && !safe_mode_switch_off(&b, "weather", true));
+    b = callback_boot(&r, "weather"); // three in a row: still not
+    CHECK(!b.limit_reached);
+
+    r = fresh(); // two task crashes still do
+    b = panic_boot(&r, "weather");
+    CHECK(!b.in_callback && b.app_crashes == 1);
+    b = panic_boot(&r, "weather");
+    CHECK(b.app_crashes == 2 && b.limit_reached && safe_mode_switch_off(&b, "weather", true));
+
+    r = fresh(); // mixed: one task crash and one callback crash are one strike
+    panic_boot(&r, "weather");
+    b = callback_boot(&r, "weather");
+    CHECK(b.in_callback && !b.limit_reached);
+    b = panic_boot(&r, "weather"); // the second task crash in the window: switched off
+    CHECK(!b.in_callback && b.app_crashes == 2 && b.limit_reached);
+
+    r = fresh(); // the flag is one shot and never sticks to the next panic
+    callback_boot(&r, "notes");
+    b = panic_boot(&r, "notes");
+    CHECK(!b.in_callback && b.app_crashes == 1);
+    b = callback_boot(&r, NULL); // nobody to name: nothing to mark
+    CHECK(b.crash && !b.in_callback && b.app[0] == '\0');
+}
+
 int main(void) {
+    callback_crashes_are_no_strike();
     noise_is_not_trusted();
     checksum_guards_the_window();
     two_in_three_switch_off();

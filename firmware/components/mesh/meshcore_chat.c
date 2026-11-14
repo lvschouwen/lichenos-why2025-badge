@@ -552,7 +552,7 @@ static void on_delete(lv_event_t *e) {
     // The focus callback was set on this screen's group; the shell usually deletes the group first (then ta has none)
     lv_group_t *group = c->ta ? lv_obj_get_group(c->ta) : NULL;
     if (group) {
-        lv_group_set_focus_cb(group, NULL);
+        lichen_ui_group_focus_cb(group, NULL);
         lv_group_set_user_data(group, NULL);
     }
     lv_obj_set_user_data(c->screen, NULL);
@@ -689,7 +689,7 @@ static lv_obj_t *build_chat(void) {
     }
     if (group) {
         lv_group_set_user_data(group, c);
-        lv_group_set_focus_cb(group, on_focus_move); // keeps the focus on a search (#48), Tab retries (#47)
+        lichen_ui_group_focus_cb(group, on_focus_move); // keeps the focus on a search (#48), Tab retries (#47)
     }
     c->timer = lichen_ui_timer_create(tick, TICK_MS, c); // NULL without memory: the chat then shows what refresh found once
     refresh(c);

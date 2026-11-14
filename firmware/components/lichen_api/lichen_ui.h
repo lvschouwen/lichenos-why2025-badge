@@ -127,8 +127,12 @@ void lichen_ui_with_group(lv_group_t *group, void (*build)(void *), void *arg);
 // deleting the object or the timer, a one-shot timer ending. Remove such an event by descriptor
 // (lv_obj_remove_event_dsc), not by cb. LVGL task only (a builder or a callback); takes no lock.
 lv_event_dsc_t *lichen_ui_event_add(lv_obj_t *obj, lv_event_cb_t cb, lv_event_code_t filter, void *user_data);
-// lv_timer_create the same way: the timer's cb runs as the registering context. LVGL task only; takes no lock.
+// lv_timer_create the same way: the timer's cb runs as the registering context (never lv_timer_set_cb on it, which
+// would drop the trampoline; no lv_timer_create_basic either). LVGL task only; takes no lock.
 lv_timer_t     *lichen_ui_timer_create(lv_timer_cb_t cb, uint32_t period_ms, void *user_data);
+// lv_group_set_focus_cb the same way, for a screen's own group (shell_open's): cb runs as the registering context.
+// NULL takes the callback away. The record is freed with the group or by the next call. LVGL task only; no lock.
+void            lichen_ui_group_focus_cb(lv_group_t *group, lv_group_focus_cb_t cb);
 
 // The pocket lock (#75) is up: the lock screen covers every screen and no key reaches an app until it is unlocked. An app
 // that would act on its own (open a screen for an incoming message) may wait; screens it opens meanwhile stay under the

@@ -55,7 +55,7 @@ void safe_mode_ensure(safe_mode_rec_t *r) {
     }
 }
 
-void safe_mode_note_panic(safe_mode_rec_t *r, char const *id) {
+void safe_mode_note_panic(safe_mode_rec_t *r, char const *id, bool in_callback) {
     safe_mode_ensure(r);
     bool           ok  = safe_mode_id_ok(id);
     char volatile *out = r->crashed;
@@ -65,6 +65,6 @@ void safe_mode_note_panic(safe_mode_rec_t *r, char const *id) {
             ok = false; // the rest stays zero
         }
     }
-    r->flags |= SAFE_MODE_F_PANIC;
+    r->flags = (r->flags & ~SAFE_MODE_F_UI_CB) | SAFE_MODE_F_PANIC | (in_callback ? SAFE_MODE_F_UI_CB : 0u);
     safe_mode_seal(r);
 }

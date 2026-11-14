@@ -50,13 +50,16 @@ static void crash_body(char *out, size_t cap) {
     char     id[SAFE_MODE_APP_ID_CAP];
     unsigned crashes = 0;
     bool     off     = false;
-    if (!safe_mode_crashed_app(id, sizeof(id), &crashes, &off)) {
+    bool     in_cb   = false;
+    if (!safe_mode_crashed_app(id, sizeof(id), &crashes, &off, &in_cb)) {
         snprintf(out, cap, "Lichen restarted after a crash. Open this for the Crash log.");
         return;
     }
     lichen_app_t const *app  = lichen_app_by_id(id);
     char const         *name = app && app->name ? app->name : id;
-    if (off) {
+    if (in_cb) {
+        snprintf(out, cap, "%s crashed in a screen callback and Lichen restarted. Open this for the Crash log.", name);
+    } else if (off) {
         snprintf(out, cap, "%s crashed again: its background part is off until switched on (fw app background %s on).",
                  name, id);
     } else if (crashes > 1) {

@@ -320,6 +320,7 @@ lichen_sys_mem_walk	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_notify	SYSTEM	unspecified	lichen_sys_notify.h
 lichen_sys_notify_to	SYSTEM	unspecified	lichen_sys_notify.h
 lichen_sys_panic_app_id	SYSTEM	unspecified	lichen_sys_app.h
+lichen_sys_panic_in_ui_cb	SYSTEM	unspecified	lichen_sys_app.h
 lichen_sys_panic_probe	SYSTEM	unspecified	lichen_sys_app.h
 lichen_sys_power_off_now	SYSTEM	any	lichen_sys_power.h
 lichen_sys_power_screen_off	SYSTEM	unspecified	lichen_sys_power.h
@@ -350,6 +351,7 @@ lichen_sys_task_ctx	SYSTEM	any	lichen_sys_app.h
 lichen_sys_thermal_info	SYSTEM	any	lichen_sys_thermal.h
 lichen_sys_ui_call	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_cancel	SYSTEM	any	lichen_sys_ui.h
+lichen_sys_ui_cb_mark	SYSTEM	lvgl	lichen_sys_app.h
 lichen_sys_ui_lock	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_cmd	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_hits	SYSTEM	any	lichen_sys_ui.h
@@ -395,6 +397,7 @@ lichen_task_start	BACKGROUND	any	lichen_task.h
 lichen_task_start_in	BACKGROUND	any	lichen_task.h
 lichen_ui_call	-	any	lichen_ui.h
 lichen_ui_event_add	-	lvgl	lichen_ui.h
+lichen_ui_group_focus_cb	-	lvgl	lichen_ui.h
 lichen_ui_ops_later	SYSTEM	lvgl	lichen_ui_ops.h
 lichen_ui_ops_later_cancel	SYSTEM	lvgl	lichen_ui_ops.h
 lichen_ui_ops_set	SYSTEM	any	lichen_ui_ops.h
@@ -570,8 +573,10 @@ tz_count	-	unspecified	tz_table.h
 tz_find_posix	-	unspecified	tz_table.h
 ui_cb_free	-	unspecified	ui_cb.h
 ui_cb_new_event	-	unspecified	ui_cb.h
+ui_cb_new_group	-	unspecified	ui_cb.h
 ui_cb_new_timer	-	unspecified	ui_cb.h
 ui_cb_run_event	-	unspecified	ui_cb.h
+ui_cb_run_group	-	unspecified	ui_cb.h
 ui_cb_run_timer	-	unspecified	ui_cb.h
 ui_confirm_hint	-	unspecified	ui_text.h
 ui_countdown_text	-	unspecified	ui_text.h

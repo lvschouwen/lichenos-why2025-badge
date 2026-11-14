@@ -14,12 +14,14 @@
 
 struct _lv_event_t; // lv_event_t
 struct _lv_timer_t; // lv_timer_t
+struct _lv_group_t; // lv_group_t
 
 typedef struct {
     uint32_t ctx; // the lichen_ctx_t the registering code ran as
     union {
         void (*event)(struct _lv_event_t *e);
         void (*timer)(struct _lv_timer_t *t);
+        void (*group)(struct _lv_group_t *g); // a group's focus callback
     } fn;
 } ui_cb_rec_t;
 
@@ -37,9 +39,12 @@ typedef struct {
 ui_cb_rec_t *ui_cb_new_event(ui_cb_env_t const *env, void (*fn)(struct _lv_event_t *e));
 // The same for a timer callback
 ui_cb_rec_t *ui_cb_new_timer(ui_cb_env_t const *env, void (*fn)(struct _lv_timer_t *t));
+// The same for a group's focus callback
+ui_cb_rec_t *ui_cb_new_group(ui_cb_env_t const *env, void (*fn)(struct _lv_group_t *g));
 // Frees a record (NULL is fine): LVGL's free_cb when the descriptor or timer goes
 void ui_cb_free(ui_cb_env_t const *env, void *rec);
 // Runs the record's callback inside its context and puts the caller's back, also when the callback deleted the
 // record's object. A NULL record (one LVGL already let go) does nothing.
 void ui_cb_run_event(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_event_t *e);
 void ui_cb_run_timer(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_timer_t *t);
+void ui_cb_run_group(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_group_t *g);

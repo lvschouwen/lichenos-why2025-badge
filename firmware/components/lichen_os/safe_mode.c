@@ -54,7 +54,7 @@ void IRAM_ATTR __wrap_esp_panic_handler(panic_info_t *info) {
         entered          = true;
         bool        mine = info && info->core == esp_cpu_get_core_id();
         char const *id   = mine ? lichen_sys_panic_app_id() : NULL;
-        safe_mode_note_panic(&s_rec, id);
+        safe_mode_note_panic(&s_rec, id, id && lichen_sys_panic_in_ui_cb()); // #349: named, no strike
     }
     __real_esp_panic_handler(info);
 }
@@ -75,7 +75,7 @@ bool safe_mode_background_off(char const *id, bool may_switch_off) {
     return off;
 }
 
-bool safe_mode_crashed_app(char *id, size_t cap, unsigned *crashes, bool *switched_off) {
+bool safe_mode_crashed_app(char *id, size_t cap, unsigned *crashes, bool *switched_off, bool *in_callback) {
     if (!atomic_load(&s_boot_done) || !s_boot.app[0] || cap < sizeof(s_boot.app)) {
         return false;
     }
@@ -85,6 +85,9 @@ bool safe_mode_crashed_app(char *id, size_t cap, unsigned *crashes, bool *switch
     }
     if (switched_off) {
         *switched_off = atomic_load(&s_switched);
+    }
+    if (in_callback) {
+        *in_callback = s_boot.in_callback;
     }
     return true;
 }
@@ -142,6 +145,8 @@ static void show(void) {
     console_reply("app background: off for %s", list[0] ? list : "no app");
     if (!s_boot.counted) {
         console_reply("app background: this boot is the PSRAM re-arm restart after a crash (not counted again)");
+    } else if (s_boot.app[0] && s_boot.in_callback) {
+        console_reply("app background: this boot follows a crash in a screen callback of %s (not counted)", s_boot.app);
     } else if (s_boot.app[0]) {
         console_reply("app background: this boot follows a crash of %s, %u of %d in %d boots", s_boot.app,
                       s_boot.app_crashes, SAFE_MODE_LIMIT, SAFE_MODE_WINDOW);
@@ -232,6 +237,8 @@ static void cmd_more(char const *args) {
 static void log_verdict(void) {
     if (!s_boot.counted) {
         ESP_LOGI(TAG, "this boot is the PSRAM re-arm restart after a crash: not counted again");
+    } else if (s_boot.app[0] && s_boot.in_callback) {
+        ESP_LOGW(TAG, "the crash happened in a screen callback of %s: named, not counted against it", s_boot.app);
     } else if (s_boot.app[0]) {
         ESP_LOGW(TAG, "the crash is attributed to %s: %u of %d in the last %d boots", s_boot.app, s_boot.app_crashes,
                  SAFE_MODE_LIMIT, SAFE_MODE_WINDOW);

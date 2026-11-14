@@ -60,14 +60,18 @@ safe_mode_boot_t safe_mode_boot(safe_mode_rec_t *r, bool crashed) {
     out.crash  = crashed || panic;
     if (out.crash && panic && safe_mode_id_ok(r->crashed)) {
         memcpy(out.app, r->crashed, sizeof(out.app));
+        out.in_callback = (r->flags & SAFE_MODE_F_UI_CB) != 0;
     }
     r->flags = 0;
     memset(r->crashed, 0, sizeof(r->crashed));
     out.counted = out.crash || !rearm;
     if (out.counted) {
-        uint32_t entry = !out.crash ? SAFE_MODE_CLEAN : out.app[0] ? safe_mode_hash(out.app) : SAFE_MODE_NOBODY;
+        // A crash in an app's callback is a crash of the boot (degraded) but no strike: the OS code it reached ran
+        // as the app too, so the app may be healthy (#349)
+        bool     strike = out.app[0] && !out.in_callback;
+        uint32_t entry  = !out.crash ? SAFE_MODE_CLEAN : strike ? safe_mode_hash(out.app) : SAFE_MODE_NOBODY;
         push(r, entry);
-        if (out.app[0]) {
+        if (strike) {
             out.app_crashes   = count_of(r, entry);
             out.limit_reached = out.app_crashes >= SAFE_MODE_LIMIT;
         }
