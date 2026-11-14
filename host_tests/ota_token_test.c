@@ -166,7 +166,7 @@ static void test_rotate(void) {
     write_file(TOKEN "\n");
     CHECK(ota_token_load() && strcmp(ota_token_get(), TOKEN) == 0);
     random_byte = 0xc3;
-    CHECK(ota_token_rotate(fresh) == OTA_ROTATE_SAVED);
+    CHECK(ota_token_rotate(fresh, true) == OTA_ROTATE_SAVED);
     CHECK(strcmp(fresh, "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3") == 0 && ota_token_rotated());
     CHECK(strcmp(ota_token_get(), TOKEN) == 0);
     CHECK(file_is("c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3\n") && strcmp(nvs_value, fresh) == 0);
@@ -181,7 +181,7 @@ static void test_rotate(void) {
     snprintf(nvs_value, sizeof(nvs_value), "%s", TOKEN);
     nvs_up      = false;
     random_byte = 0x11;
-    CHECK(ota_token_rotate(fresh) == OTA_ROTATE_SAVED && strcmp(nvs_value, TOKEN) == 0);
+    CHECK(ota_token_rotate(fresh, true) == OTA_ROTATE_SAVED && strcmp(nvs_value, TOKEN) == 0);
     nvs_up = true;
     ota_token_forget();
     CHECK(ota_token_load() && strcmp(ota_token_get(), "11111111111111111111111111111111") == 0);
@@ -197,7 +197,7 @@ static void test_rotate(void) {
         fclose(f);
     }
     CHECK(ota_token_load() && strcmp(ota_token_get(), TOKEN) == 0);
-    unlink(NEW_FILE);
+    CHECK(access(NEW_FILE, F_OK) != 0); // and the unused token beside it is gone (#456 review)
 
     // The file can't be replaced (a directory where the new file goes): refused, NVS untouched, out wiped
     reset();
@@ -206,21 +206,41 @@ static void test_rotate(void) {
     snprintf(nvs_value, sizeof(nvs_value), "%s", TOKEN);
     CHECK(mkdir(NEW_FILE, 0700) == 0);
     random_byte = 0x33;
-    CHECK(ota_token_rotate(fresh) == OTA_ROTATE_FAILED);
+    CHECK(ota_token_rotate(fresh, true) == OTA_ROTATE_FAILED);
     CHECK(fresh[0] == '\0' && strcmp(nvs_value, TOKEN) == 0 && nvs_writes == 0 && file_is(TOKEN "\n"));
 
     // No token file and none can be written: the settings copy alone, which the next boot reads (and writes back)
     unlink(OTA_TOKEN_FILE);
-    CHECK(ota_token_rotate(fresh) == OTA_ROTATE_NVS_ONLY && strcmp(nvs_value, fresh) == 0);
+    CHECK(ota_token_rotate(fresh, true) == OTA_ROTATE_NVS_ONLY && strcmp(nvs_value, fresh) == 0);
     CHECK(access(OTA_TOKEN_FILE, F_OK) != 0);
     // ... and with NVS down too: nothing kept, refused
     nvs_up = false;
-    CHECK(ota_token_rotate(fresh) == OTA_ROTATE_FAILED && fresh[0] == '\0');
+    CHECK(ota_token_rotate(fresh, true) == OTA_ROTATE_FAILED && fresh[0] == '\0');
     rmdir(NEW_FILE);
     nvs_up = true;
     ota_token_forget();
     CHECK(ota_token_load() && strcmp(ota_token_get(), "33333333333333333333333333333333") == 0);
     CHECK(file_is("33333333333333333333333333333333\n"));
+
+    // /storage not mounted: refused before anything is written (its old file would win once it mounts)
+    reset();
+    nvs_has = true;
+    snprintf(nvs_value, sizeof(nvs_value), "%s", TOKEN);
+    CHECK(ota_token_rotate(fresh, false) == OTA_ROTATE_FAILED && fresh[0] == '\0' && nvs_writes == 0);
+    CHECK(access(OTA_TOKEN_FILE, F_OK) != 0 && access(NEW_FILE, F_OK) != 0);
+
+    // A token file that can't be opened (EACCES, not ENOENT) is not "no file": it would win at boot, so refused, NVS
+    // untouched (as root the open works and the file is simply there: refused the same)
+    reset();
+    write_file(TOKEN "\n");
+    CHECK(chmod(OTA_TOKEN_FILE, 0) == 0);
+    CHECK(mkdir(NEW_FILE, 0700) == 0);
+    nvs_has = true;
+    snprintf(nvs_value, sizeof(nvs_value), "%s", TOKEN);
+    ota_rotate_t got = ota_token_rotate(fresh, true);
+    CHECK(got == OTA_ROTATE_FAILED && nvs_writes == 0 && strcmp(nvs_value, TOKEN) == 0);
+    rmdir(NEW_FILE);
+    chmod(OTA_TOKEN_FILE, 0600);
 
     reset();
     ota_os_bind(NULL);

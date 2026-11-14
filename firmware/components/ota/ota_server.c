@@ -25,6 +25,7 @@
 #include "ota_valid.h"
 #include "ota_os.h"
 #include "secure_wipe.h"
+#include "storage.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -331,7 +332,7 @@ static void token_new(void) {
         return;
     }
     char         fresh[OTA_TOKEN_LEN + 1];
-    ota_rotate_t done = ota_token_rotate(fresh);
+    ota_rotate_t done = ota_token_rotate(fresh, storage_mounted());
     if (done == OTA_ROTATE_FAILED) {
         console_reply("token new: couldn't save a new token; the old one stays");
         return;

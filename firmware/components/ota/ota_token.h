@@ -18,10 +18,11 @@ void ota_token_forget(void);
 
 // "fw token new" (#456): a new random token saved for the next boot; the running server keeps the one it has until the
 // restart. out (OTA_TOKEN_LEN + 1) gets it, wiped again when nothing was saved. SAVED: file and NVS (or the file alone,
-// NVS failing: the next boot copies the file to NVS). NVS_ONLY: no token file could be written and none is there.
-// FAILED: a token file is there but could not be replaced (it would win at boot), or nothing could be written.
+// NVS failing: the next boot copies the file to NVS). NVS_ONLY: no token file could be written and surely none is there
+// (ENOENT). FAILED: storage_up false (/storage not mounted), a token file that is there or can't be looked at could not
+// be replaced (it would win at boot), or nothing could be written.
 // A cut at any point boots with the old token or the new one, never a mix: the file wins at boot.
 typedef enum { OTA_ROTATE_FAILED, OTA_ROTATE_SAVED, OTA_ROTATE_NVS_ONLY } ota_rotate_t;
-ota_rotate_t ota_token_rotate(char *out);
+ota_rotate_t ota_token_rotate(char *out, bool storage_up);
 // A new token was saved this boot: it is in effect after the restart
 bool         ota_token_rotated(void);

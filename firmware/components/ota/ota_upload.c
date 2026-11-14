@@ -108,17 +108,20 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
         return false; // before the bundle is marked changed: the old file stays
     }
     mkdir_parents(path);
-    bool written = write_file(temp, data, len);
-    ota_change_end(false); // a C6 file's change stays pending through c6link_bundle_changed
-    if (!written) {
+    // The change stays marked in progress until the rename has landed or failed: "fw onair on" in between must see it
+    // (#454). A C6 file's change also stays pending through c6link_bundle_changed.
+    if (!write_file(temp, data, len)) {
+        ota_change_end(false);
         unlink(temp);
         ota_respond(fd, 500, "couldn't write %s, file left as it was", temp);
         return false;
     }
     // FLASH0: is /storage, LittleFS since #300: one rename replaces the old file atomically (a cut leaves the old file
     // or the new one). A target another task has open stays put: esp_littlefs refuses the rename with EBUSY.
-    if (rename(temp, path) != 0) {
-        int err = errno;
+    int moved = rename(temp, path);
+    int err   = errno;
+    ota_change_end(false);
+    if (moved != 0) {
         unlink(temp);
         ota_respond(fd, 500, "couldn't move the upload into place (%s), file left as it was", strerror(err));
         return false;

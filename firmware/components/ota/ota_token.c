@@ -9,6 +9,7 @@
 #include "secure_wipe.h"
 #include "storage.h"
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -38,6 +39,7 @@ static bool read_token_file(char *out) {
     if (!f) {
         return false;
     }
+    setvbuf(f, NULL, _IONBF, 0); // no stdio buffer: it would keep a copy of the token in freed heap
     char text[OTA_TOKEN_LEN + 8] = {0};
     fread(text, 1, sizeof(text) - 1, f);
     fclose(f);
@@ -61,12 +63,17 @@ static bool read_token_nvs(char *out) {
     return valid;
 }
 
+// Unbuffered, in one fwrite (no fprintf: unbuffered, newlib formats through a stack buffer of BUFSIZ)
 static bool write_text(char const *path, char const *text) {
     FILE *f = fopen(path, "w");
     if (!f) {
         return false;
     }
-    bool written = fprintf(f, "%s\n", text) > 0;
+    setvbuf(f, NULL, _IONBF, 0); // no stdio buffer: it would keep a copy of the token in freed heap
+    char line[OTA_TOKEN_LEN + 2];
+    int  n       = snprintf(line, sizeof(line), "%s\n", text);
+    bool written = n > 0 && (size_t)n < sizeof(line) && fwrite(line, 1, (size_t)n, f) == (size_t)n;
+    secure_wipe(line, sizeof(line));
     return fclose(f) == 0 && written;
 }
 
@@ -85,6 +92,7 @@ static void make_token(char *out) {
 // /storage first (what tools read), NVS as the copy that still works when /storage is not mounted. True when the
 // token will be the same next boot.
 bool ota_token_load(void) {
+    unlink(OTA_TOKEN_NEW); // a rotation cut before its swap: an unused token, never read (and not left on the drive)
     bool from_file = read_token_file(token);
     bool from_nvs  = !from_file && read_token_nvs(token);
     if (!from_file && !from_nvs) {
@@ -113,14 +121,26 @@ static bool s_rotated; // console task only
 // The file is the authority at boot (ota_token_load), so it is swapped first and in one step: written next to it, then
 // renamed over it (LittleFS: a cut leaves the old file or the new one). The NVS copy follows; a cut before that leaves
 // the new file and the old NVS copy, and the next boot's load writes the file's token to NVS.
-ota_rotate_t ota_token_rotate(char *out) {
+// Whether OTA_TOKEN_FILE is surely not there: only ENOENT says so (a file that can't be opened may still win at boot)
+static bool token_file_absent(void) {
+    FILE *f = fopen(OTA_TOKEN_FILE, "r");
+    if (f) {
+        fclose(f);
+        return false;
+    }
+    return errno == ENOENT;
+}
+
+ota_rotate_t ota_token_rotate(char *out, bool storage_up) {
+    if (!storage_up) { // an unmounted drive may still hold the old file, which wins once it mounts again
+        out[0] = '\0';
+        return OTA_ROTATE_FAILED;
+    }
     make_token(out);
     bool swapped = write_text(OTA_TOKEN_NEW, out) && rename(OTA_TOKEN_NEW, OTA_TOKEN_FILE) == 0;
     if (!swapped) {
         unlink(OTA_TOKEN_NEW);
-        FILE *old = fopen(OTA_TOKEN_FILE, "r");
-        if (old) { // it would bring the old token back at boot, whatever NVS says
-            fclose(old);
+        if (!token_file_absent()) { // it would bring the old token back at boot, whatever NVS says
             secure_wipe(out, OTA_TOKEN_LEN + 1);
             return OTA_ROTATE_FAILED;
         }
