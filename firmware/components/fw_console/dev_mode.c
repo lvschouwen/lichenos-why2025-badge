@@ -146,17 +146,7 @@ bool console_erase_refuses(console_origin_t origin) {
     return origin != CONSOLE_ORIGIN_UART;
 }
 
-slot_req_t console_slot_request(char const *args, bool held, console_origin_t origin) {
-    if (args[0] == '\0') {
-        return SLOT_REQ_SHOW;
-    }
-    if (strcmp(args, "other") != 0) {
-        return SLOT_REQ_USAGE;
-    }
-    return console_hold_refuses(held, origin) ? SLOT_REQ_REFUSED : SLOT_REQ_OTHER;
-}
-
-dev_req_t dev_mode_request(char const *args, console_origin_t origin) {
+dev_req_t dev_mode_request(char const *args) {
     if (args[0] == '\0' || strcmp(args, "status") == 0) {
         return DEV_REQ_STATUS;
     }
@@ -164,7 +154,7 @@ dev_req_t dev_mode_request(char const *args, console_origin_t origin) {
         return DEV_REQ_OFF;
     }
     if (strcmp(args, "on") == 0) {
-        return origin == CONSOLE_ORIGIN_UART ? DEV_REQ_ON : DEV_REQ_REFUSED;
+        return DEV_REQ_ON;
     }
     return DEV_REQ_USAGE;
 }

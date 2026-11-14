@@ -6,6 +6,7 @@
 // The expectations below are the pin: they were written against the code before #464 moved the rules into tables, and
 // a change to one of them changes what the badge accepts. The evaluator under them is what the console decides today
 // (pin_decide): the dev gate and origin layer that runs before a command's own code.
+#include "console_os_rules.h"
 #include "console_sub.h"
 #include "dev_gate.h"
 #include "dev_mode.h"
@@ -303,9 +304,6 @@ static bool handler_dev_gate(char const *name, char const *args) {
 // console_from_uart / console_origin checks inside handlers: true when the form is refused from origin
 static bool handler_origin_refuses(char const *name, char const *args, console_origin_t origin) {
     bool uart = origin == CONSOLE_ORIGIN_UART;
-    if (strcmp(name, "dev") == 0) {
-        return dev_mode_request(args, origin) == DEV_REQ_REFUSED;
-    }
     if (strcmp(name, "token") == 0) {
         return strcmp(args, "new") == 0 && !uart;
     }
@@ -331,10 +329,6 @@ static bool handler_origin_refuses(char const *name, char const *args, console_o
     return false;
 }
 
-static bool handler_hold_refuses(char const *name, char const *args, bool held, console_origin_t origin) {
-    return strcmp(name, "slot") == 0 && console_slot_request(args, held, origin) == SLOT_REQ_REFUSED;
-}
-
 // ---- the sub-command tables the commands register (#464) ---------------------------------------------------------
 
 typedef struct {
@@ -343,7 +337,9 @@ typedef struct {
 } rules_of_t;
 
 static rules_of_t const RULES[] = {
-    {NULL, NULL}, // the commands move here one component at a time
+    {"slot", OS_SLOT_RULES},
+    {"reboot", OS_REBOOT_RULES},
+    {"dev", OS_DEV_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {
@@ -385,9 +381,6 @@ static char pin_decide(char const *text, bool dev_on, console_origin_t origin, b
     }
     if (handler_origin_refuses(name, args, origin)) {
         return 'O';
-    }
-    if (handler_hold_refuses(name, args, held, origin)) {
-        return 'H';
     }
     return 'R';
 }

@@ -6,6 +6,7 @@
 #include "assets.h"
 #include "console_capture.h"
 #include "console_cmd.h"
+#include "console_os_rules.h"
 #include "dev_gate.h"
 #include "driver/uart.h"
 #include "esp_heap_caps.h"
@@ -531,11 +532,9 @@ static void cmd_slot(char const *args) {
         );
         return;
     }
-    char const *why = console_usb_hold_why();
-    switch (console_slot_request(args, why != NULL, console_origin())) {
-        case SLOT_REQ_USAGE: console_reply("slot [other]"); return;
-        case SLOT_REQ_REFUSED: console_reply("slot other refused: %s is on; %s", why, HOLD_OFF_FIRST); return;
-        default: break;
+    if (strcmp(args, "other") != 0) {
+        console_reply("slot [other]");
+        return; // "other" refuses while the USB hold is on: its row in console_os_rules.h, checked by run_command
     }
     esp_app_desc_t desc;
     if (!other || esp_ota_get_partition_description(other, &desc) != ESP_OK) {
@@ -1018,7 +1017,7 @@ void console_exec_with_secrets(char const *line, char *buf, size_t cap, console_
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
 // "fw dev [on|off|status]" (#373): on only from the USB console, never over Wi-Fi (the OTA token is not enough)
 static void cmd_dev(char const *args) {
-    switch (dev_mode_request(args, console_origin())) {
+    switch (dev_mode_request(args)) { // "on" is the USB console's only: its row, checked by run_command (#464)
         case DEV_REQ_STATUS: console_reply("developer mode %s", console_dev_mode() ? "on" : "off"); break;
         case DEV_REQ_ON:
         case DEV_REQ_OFF: {
@@ -1027,7 +1026,6 @@ static void cmd_dev(char const *args) {
             console_reply("developer mode %s%s", on ? "on" : "off", saved ? "" : " (not saved: this boot only)");
             break;
         }
-        case DEV_REQ_REFUSED: console_reply("dev on: only from the USB console (or " DEV_MODE_ENTER_HINT ")"); break;
         case DEV_REQ_USAGE:
         default: console_reply("dev [on|off|status]"); break;
     }
@@ -1073,10 +1071,11 @@ void console_start(void) {
     console_register("help", "help [<command> | <app> | all]", cmd_help);
     console_register("mem", MEM_USAGE, cmd_mem);
     console_register("assets", "assets (state of the assets partition and its files)", cmd_assets);
-    console_register("slot", "slot [other] (show the app slots, or boot the other one)", cmd_slot);
-    console_register("reboot", "reboot", cmd_reboot);
+    console_register_rules("slot", "slot [other] (show the app slots, or boot the other one)", cmd_slot, OS_SLOT_RULES);
+    console_register_rules("reboot", "reboot", cmd_reboot, OS_REBOOT_RULES);
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    console_register("dev", "dev [on|off|status] (developer mode: debug and test commands; on only from USB)", cmd_dev);
+    console_register_rules("dev", "dev [on|off|status] (developer mode: debug and test commands; on only from USB)", cmd_dev,
+                           OS_DEV_RULES);
 #endif
 
     if (uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0) != ESP_OK) {

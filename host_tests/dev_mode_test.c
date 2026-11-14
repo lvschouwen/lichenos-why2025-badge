@@ -1,5 +1,6 @@
 // Host test: developer mode (#373). Debug commands run and are listed only while it is on; `fw dev on` is refused
 // from Wi-Fi and the Console app; a factory reset erases the saved state.
+#include "console_sub.h"
 #include "dev_mode.h"
 #include "factory_plan.h"
 
@@ -59,17 +60,14 @@ static void help_hides_debug_commands(void) {
     CHECK(strcmp(on.seen, "help;ui [dump|perf];reboot;keys send;") == 0);
 }
 
-static void on_only_from_usb(void) {
-    CHECK(dev_mode_request("on", CONSOLE_ORIGIN_UART) == DEV_REQ_ON);
-    CHECK(dev_mode_request("on", CONSOLE_ORIGIN_WIFI) == DEV_REQ_REFUSED);  // the OTA token is not enough
-    CHECK(dev_mode_request("on", CONSOLE_ORIGIN_LOCAL) == DEV_REQ_REFUSED); // the Console app: About's taps instead
-    CHECK(dev_mode_request("off", CONSOLE_ORIGIN_UART) == DEV_REQ_OFF);
-    CHECK(dev_mode_request("off", CONSOLE_ORIGIN_WIFI) == DEV_REQ_OFF); // off works from anywhere
-    CHECK(dev_mode_request("off", CONSOLE_ORIGIN_LOCAL) == DEV_REQ_OFF);
-    CHECK(dev_mode_request("", CONSOLE_ORIGIN_WIFI) == DEV_REQ_STATUS);
-    CHECK(dev_mode_request("status", CONSOLE_ORIGIN_WIFI) == DEV_REQ_STATUS);
-    CHECK(dev_mode_request("onn", CONSOLE_ORIGIN_UART) == DEV_REQ_USAGE);
-    CHECK(dev_mode_request("on ", CONSOLE_ORIGIN_UART) == DEV_REQ_USAGE);
+// "on" is the USB console's only: its row in console_os_rules.h (#464), pinned in console_pin_test.c
+static void dev_requests(void) {
+    CHECK(dev_mode_request("on") == DEV_REQ_ON);
+    CHECK(dev_mode_request("off") == DEV_REQ_OFF);
+    CHECK(dev_mode_request("") == DEV_REQ_STATUS);
+    CHECK(dev_mode_request("status") == DEV_REQ_STATUS);
+    CHECK(dev_mode_request("onn") == DEV_REQ_USAGE);
+    CHECK(dev_mode_request("on ") == DEV_REQ_USAGE);
 }
 
 // console.c records an exec run's origin and asks it back per task: swapping WIFI and LOCAL, or letting a task that is
@@ -93,20 +91,6 @@ static void erase_usb_only(void) {
     CHECK(console_erase_refuses(CONSOLE_ORIGIN_UNKNOWN)); // a task that is not a console command's: fail closed
 }
 
-// #420: while the hold is on, "fw slot other" only from the USB console (another image may not keep the list); the
-// listing and the usage answer from anywhere
-static void slot_other_held(void) {
-    CHECK(console_slot_request("other", true, CONSOLE_ORIGIN_UART) == SLOT_REQ_OTHER);
-    CHECK(console_slot_request("other", true, CONSOLE_ORIGIN_WIFI) == SLOT_REQ_REFUSED);
-    CHECK(console_slot_request("other", true, CONSOLE_ORIGIN_LOCAL) == SLOT_REQ_REFUSED);
-    CHECK(console_slot_request("other", true, CONSOLE_ORIGIN_UNKNOWN) == SLOT_REQ_REFUSED);
-    CHECK(console_slot_request("other", false, CONSOLE_ORIGIN_WIFI) == SLOT_REQ_OTHER); // nothing holds: as before
-    CHECK(console_slot_request("other", false, CONSOLE_ORIGIN_LOCAL) == SLOT_REQ_OTHER);
-    CHECK(console_slot_request("", true, CONSOLE_ORIGIN_WIFI) == SLOT_REQ_SHOW);
-    CHECK(console_slot_request("other ", true, CONSOLE_ORIGIN_UART) == SLOT_REQ_USAGE);
-    CHECK(console_slot_request("others", false, CONSOLE_ORIGIN_UART) == SLOT_REQ_USAGE);
-}
-
 static void origin_plumbing(void) {
     CHECK(dev_mode_exec_origin(true) == CONSOLE_ORIGIN_WIFI);   // console_exec_with_secrets: POST /console
     CHECK(dev_mode_exec_origin(false) == CONSOLE_ORIGIN_LOCAL); // console_exec: the Console app
@@ -114,9 +98,10 @@ static void origin_plumbing(void) {
     CHECK(dev_mode_origin(true, CONSOLE_ORIGIN_LOCAL, false) == CONSOLE_ORIGIN_LOCAL);
     CHECK(dev_mode_origin(false, CONSOLE_ORIGIN_WIFI, true) == CONSOLE_ORIGIN_UART);     // the console task's own line
     CHECK(dev_mode_origin(false, CONSOLE_ORIGIN_WIFI, false) == CONSOLE_ORIGIN_UNKNOWN); // some other task: closed
-    CHECK(dev_mode_request("on", dev_mode_origin(true, dev_mode_exec_origin(true), false)) == DEV_REQ_REFUSED);
-    CHECK(dev_mode_request("on", dev_mode_origin(false, CONSOLE_ORIGIN_LOCAL, false)) == DEV_REQ_REFUSED);
-    CHECK(dev_mode_request("on", dev_mode_origin(false, CONSOLE_ORIGIN_LOCAL, true)) == DEV_REQ_ON);
+    // "dev on" (a USB-console row, #464): neither exec origin, nor another task, counts as the UART
+    CHECK(!console_origin_allows(CON_ORIGIN_UART, dev_mode_origin(true, dev_mode_exec_origin(true), false)));
+    CHECK(!console_origin_allows(CON_ORIGIN_UART, dev_mode_origin(false, CONSOLE_ORIGIN_LOCAL, false)));
+    CHECK(console_origin_allows(CON_ORIGIN_UART, dev_mode_origin(false, CONSOLE_ORIGIN_LOCAL, true)));
 }
 
 static void factory_reset_clears_it(void) {
@@ -274,10 +259,9 @@ int main(void) {
     help_index_and_topic();
     gate_off_and_on();
     help_hides_debug_commands();
-    on_only_from_usb();
+    dev_requests();
     usb_hold();
     erase_usb_only();
-    slot_other_held();
     origin_plumbing();
     factory_reset_clears_it();
     if (failures) {

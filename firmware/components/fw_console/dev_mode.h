@@ -94,15 +94,14 @@ int dev_mode_help_topic(help_view_t const *v, char const *const *ids, int n_ids,
                         void (*line)(char const *usage, void *ctx), void *ctx);
 
 typedef enum {
-    DEV_REQ_STATUS,  // "", "status"
-    DEV_REQ_ON,      // "on" from the USB console
-    DEV_REQ_OFF,     // "off", from anywhere
-    DEV_REQ_REFUSED, // "on" from Wi-Fi or the Console app
-    DEV_REQ_USAGE,   // anything else
+    DEV_REQ_STATUS, // "", "status"
+    DEV_REQ_ON,     // "on": the USB console only, its row in console_os_rules.h (#464)
+    DEV_REQ_OFF,    // "off", from anywhere
+    DEV_REQ_USAGE,  // anything else
 } dev_req_t;
 
-// What "fw dev <args>" asks, given where it came from
-dev_req_t dev_mode_request(char const *args, console_origin_t origin);
+// What "fw dev <args>" asks
+dev_req_t dev_mode_request(char const *args);
 
 // The USB hold (#289): while a bound guard is on (held), a console command that would erase it (factory-reset ...
 // YES) runs only from the USB console; Wi-Fi, the Console app (injected keys) and other tasks are refused
@@ -117,15 +116,7 @@ bool console_erase_refuses(console_origin_t origin);
 // holds. Every refusal ends in this one string (passed as an argument, so the image keeps one copy).
 #define HOLD_OFF_FIRST "switch it off at the USB console first (fw onair off)"
 
-typedef enum {
-    SLOT_REQ_SHOW,    // "": show the slots
-    SLOT_REQ_OTHER,   // "other": boot the other slot
-    SLOT_REQ_REFUSED, // "other" while the hold is on, from anywhere but the USB console
-    SLOT_REQ_USAGE,   // anything else
-} slot_req_t;
-
-// What "fw slot <args>" asks, given the hold and where it came from
-slot_req_t console_slot_request(char const *args, bool held, console_origin_t origin);
+// "fw slot other" refuses while it holds: its row in console_os_rules.h (#464)
 
 #ifdef __cplusplus
 }
