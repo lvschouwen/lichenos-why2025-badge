@@ -17,6 +17,7 @@
 #include "sd_rules.h"
 #include "sensors_rules.h"
 #include "shell_cmd_rules.h"
+#include "lora_rules.h"
 #include "main_rules.h"
 #include "mesh_cmd_table.h"
 #include "notify_rules.h"
@@ -341,6 +342,7 @@ static rules_of_t const RULES[] = {
     {"onair", MESH_ONAIR_RULES},
     {"advert", MESH_ADVERT_RULES},
     {"c6", C6_RULES},
+    {"lora", LORA_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {

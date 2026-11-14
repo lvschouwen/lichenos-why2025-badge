@@ -7,6 +7,7 @@
  */
 
 #include "lora_os.h"
+#include "lora_rules.h"
 
 #include "fw_console.h"
 #include "eh_host_feat_peer_data.h"
@@ -825,7 +826,7 @@ bool lora_start(void) {
         ESP_LOGE(TAG, "peer data callback not registered");
         return false;
     }
-    console_register("lora", "lora [on|off | log on|off | raw on|off] (radio status and switch; log: a line per received packet; raw: also hex and tx answer times)", cmd_lora);
+    console_register_rules("lora", "lora [on|off | log on|off | raw on|off] (radio status and switch; log: a line per received packet; raw: also hex and tx answer times)", cmd_lora, LORA_RULES);
     if (xTaskCreatePinnedToCore(lora_task, "LoRa", 5120 /* peak 2.7 KB, #107 */, NULL, 3, NULL, 0) != pdPASS) {
         ESP_LOGE(TAG, "task not started");
         return false;

@@ -111,7 +111,7 @@ size	liblichen_os.a	73227
 size	liblichen_random.a	63
 size	liblichen_shell.a	192059
 size	liblog.a	2726
-size	liblora.a	36197
+size	liblora.a	36221
 size	liblvgl__lvgl.a	541779
 size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820

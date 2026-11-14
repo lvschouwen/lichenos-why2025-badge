@@ -2643,7 +2643,8 @@ foreach(t console_pin_test console_pin_dev_test)
         ${NPT_FW}/lichen_nvs ${NPT_FW}/lichen_os
         ${NPT_FW}/lichen_shell ${NPT_FW}/../main
         ${NPT_FW}/psram_guard ${NPT_FW}/sensors
-        ${NPT_FW}/lichen_notify ${NPT_FW}/lichen_haptics ${NPT_FW}/c6link)
+        ${NPT_FW}/lichen_notify ${NPT_FW}/lichen_haptics ${NPT_FW}/c6link
+        ${NPT_FW}/lora)
     target_compile_options(${t} PRIVATE -Wall -Wextra -Werror)
     add_test(NAME ${t} COMMAND ${t})
 endforeach()
