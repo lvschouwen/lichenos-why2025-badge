@@ -401,7 +401,136 @@ static void note_pick(void) {
     CHECK(rs_note_pick(false, false, false, false) == RS_NOTE_NONE);
 }
 
+// Every accept and reject rs_check makes, with its exact message (#212: pinned before the validator was restructured)
+typedef struct {
+    char const *key, *value, *why; // why NULL: accepted
+} check_case_t;
+
+static check_case_t const CHECK_CASES[] = {
+    {"reboot", "", NULL},
+    {"reboot", "anything \x01", NULL},
+    {"role", "x", "read only"},
+    {"role", "", "read only"},
+    {"ver", "1.0", "read only"},
+    {"password", "s3cret", NULL},
+    {"password", "123456789012345", NULL},
+    {"password", "in side", NULL},
+    {"password", "", "1 to 15 characters"},
+    {"password", "1234567890123456", "1 to 15 characters"},
+    {"password", " lead", "no spaces at the start or end"},
+    {"password", "trail ", "no spaces at the start or end"},
+    {"password", "ab\tcd", "no spaces at the start or end"},
+    {"password", "ab\x7f", "no spaces at the start or end"},
+    {"name", "NL-HHW-TEST", NULL},
+    {"name", "  spaced  ", NULL},
+    {"name", "1234567890123456789012345678901", NULL},
+    {"name", "12345678901234567890123456789012", "1 to 31 characters"},
+    {"name", "", "1 to 31 characters"},
+    {"name", "   ", "1 to 31 characters"},
+    {"name", "a\nb", "too long"},
+    {"name", "a[", "none of [ ] \\ : , ? *"},
+    {"name", "a]", "none of [ ] \\ : , ? *"},
+    {"name", "a\\", "none of [ ] \\ : , ? *"},
+    {"name", "a:", "none of [ ] \\ : , ? *"},
+    {"name", "a,b", "none of [ ] \\ : , ? *"},
+    {"name", "a?", "none of [ ] \\ : , ? *"},
+    {"name", "a*", "none of [ ] \\ : , ? *"},
+    {"tx", "22", NULL},
+    {"tx", " -9 ", NULL},
+    {"tx", "30", NULL},
+    {"tx", "0", NULL},
+    {"tx", "30.0", NULL},
+    {"tx", "31", "-9 to 30"},
+    {"tx", "-10", "-9 to 30"},
+    {"tx", "2.5", "a whole number"},
+    {"tx", "x", "a whole number"},
+    {"tx", "", "a whole number"},
+    {"tx", "+5", "a whole number"},
+    {"tx", "3e1", "a whole number"},
+    {"tx", "0x10", "a whole number"},
+    {"tx", "1.", "a whole number"},
+    {"tx", "-", "a whole number"},
+    {"advert.interval", "0", NULL},
+    {"advert.interval", "-0", NULL},
+    {"advert.interval", "60", NULL},
+    {"advert.interval", "240", NULL},
+    {"advert.interval", "30", "0 (off) or 60 to 240"},
+    {"advert.interval", "241", "0 (off) or 60 to 240"},
+    {"flood.advert.interval", "0", NULL},
+    {"flood.advert.interval", "2", "0 (off) or 3 to 168"},
+    {"flood.advert.interval", "12", NULL},
+    {"flood.max", "0", NULL},
+    {"flood.max", "64", NULL},
+    {"flood.max", "65", "0 to 64"},
+    {"af", "1.5", NULL},
+    {"af", "9", NULL},
+    {"af", "10", "0 to 9"},
+    {"af", "-0.1", "0 to 9"},
+    {"af", "1e0", "a number"},
+    {"af", ".5", "a number"},
+    {"txdelay", "2", NULL},
+    {"txdelay", "2.01", "0 to 2"},
+    {"direct.txdelay", "0.3", NULL},
+    {"rxdelay", "20.5", "0 to 20"},
+    {"lat", "52.07", NULL},
+    {"lat", "91", "-90 to 90"},
+    {"lon", "-4.3", NULL},
+    {"lon", "-180.5", "-180 to 180"},
+    {"lon", "nan", "a number"},
+    {"lon", "inf", "a number"},
+    {"repeat", "on", NULL},
+    {"repeat", " off ", NULL},
+    {"repeat", "yes", "on or off"},
+    {"repeat", "ON", "on or off"},
+    {"allow.read.only", "off", NULL},
+    {"allow.read.only", "", "on or off"},
+    {"loop.detect", "off", NULL},
+    {"loop.detect", "minimal", NULL},
+    {"loop.detect", "moderate", NULL},
+    {"loop.detect", "strict", NULL},
+    {"loop.detect", "mod", "off, minimal, moderate or strict"},
+    {"loop.detect", "off|minimal", "off, minimal, moderate or strict"},
+    {"loop.detect", "", "off, minimal, moderate or strict"},
+    {"radio", "869.618,62.5,7,5", NULL},
+    {"radio", "869.618 62.5 7 5", NULL},
+    {"radio", "150,7,5,5", NULL},
+    {"radio", "2500,500,12,8", NULL},
+    {"radio", "869.618,62.5,7", "MHz, kHz, SF, CR (150-2500, 7-500, 5-12, 5-8)"},
+    {"radio", "869.618,62.5,13,5", "MHz, kHz, SF, CR (150-2500, 7-500, 5-12, 5-8)"},
+    {"radio", "100,62.5,7,5", "MHz, kHz, SF, CR (150-2500, 7-500, 5-12, 5-8)"},
+    {"radio", "869,62.5,7,5,1", "MHz, kHz, SF, CR (150-2500, 7-500, 5-12, 5-8)"},
+    {"radio", "869,62.5,7.5,5", "MHz, kHz, SF, CR (150-2500, 7-500, 5-12, 5-8)"},
+    {"radio", "869,6,7,5", "MHz, kHz, SF, CR (150-2500, 7-500, 5-12, 5-8)"},
+    {"radio", "869,62.5,7,9", "MHz, kHz, SF, CR (150-2500, 7-500, 5-12, 5-8)"},
+    {"radio", "", "MHz, kHz, SF, CR (150-2500, 7-500, 5-12, 5-8)"},
+};
+
+static void check_table(void) {
+    for (size_t k = 0; k < sizeof(CHECK_CASES) / sizeof(CHECK_CASES[0]); k++) {
+        check_case_t const *c   = &CHECK_CASES[k];
+        char const         *why = rs_check(row(c->key), c->value);
+        bool ok = c->why ? why != NULL && strcmp(why, c->why) == 0 : why == NULL;
+        if (!ok) {
+            printf("FAIL check %s=\"%s\": got \"%s\", want \"%s\"\n", c->key, c->value, why ? why : "(accepted)",
+                   c->why ? c->why : "(accepted)");
+            failures++;
+        }
+    }
+    CHECK(strcmp(rs_check(RS_ROWS, "x"), "no such setting") == 0);
+    CHECK(strcmp(rs_check((size_t)-1, "x"), "no such setting") == 0);
+    // Past RS_CMD_MAX after the spaces come off: too long for every kind that is trimmed
+    char long_value[RS_CMD_MAX + 2];
+    memset(long_value, '1', sizeof(long_value) - 1);
+    long_value[sizeof(long_value) - 1] = 0;
+    CHECK(strcmp(rs_check(row("tx"), long_value), "too long") == 0);
+    CHECK(strcmp(rs_check(row("name"), long_value), "too long") == 0);
+    long_value[RS_CMD_MAX] = 0; // exactly RS_CMD_MAX fits the buffer, then the kind's own rule speaks
+    CHECK(strcmp(rs_check(row("name"), long_value), "1 to 31 characters") == 0);
+    CHECK(strcmp(rs_check(row("tx"), long_value), "-9 to 30") == 0);
+}
+
 int main(void) {
+    check_table();
     note_pick();
     outcome();
     formatting();

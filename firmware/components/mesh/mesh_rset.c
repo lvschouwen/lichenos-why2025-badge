@@ -176,6 +176,81 @@ static bool is_choice(char const *choices, char const *value) {
     return false;
 }
 
+// The admin password is sent as typed (never trimmed): 1..15 characters, no space at either end, no control bytes
+static char const *check_password(char const *value) {
+    size_t n = strlen(value);
+    if (n == 0 || n > PASSWORD_MAX) {
+        return "1 to 15 characters";
+    }
+    if (value[0] == ' ' || value[n - 1] == ' ' || has_control(value)) {
+        return "no spaces at the start or end";
+    }
+    return NULL;
+}
+
+// The per-kind checks below get the value trimmed, free of control bytes and at most RS_CMD_MAX long
+
+static char const *check_text(rs_row_t const *row, char const *v) {
+    (void)row;
+    if (!*v || strlen(v) > NAME_MAX) {
+        return "1 to 31 characters";
+    }
+    return strpbrk(v, "[]\\:,?*") ? "none of [ ] \\ : , ? *" : NULL;
+}
+
+static char const *check_int(rs_row_t const *row, char const *v) {
+    double d;
+    if (!whole_number(v, &d) || d != floor(d)) {
+        return "a whole number";
+    }
+    if (row->zero_ok && d == 0) {
+        return NULL;
+    }
+    if (d < row->min || d > row->max) {
+        static char why[48];
+        snprintf(why, sizeof(why), "%s%d to %d", row->zero_ok ? "0 (off) or " : "", (int)row->min, (int)row->max);
+        return why;
+    }
+    return NULL;
+}
+
+static char const *check_dec(rs_row_t const *row, char const *v) {
+    double d;
+    if (!whole_number(v, &d)) {
+        return "a number";
+    }
+    if (d < row->min || d > row->max) {
+        static char why[48];
+        snprintf(why, sizeof(why), "%g to %g", (double)row->min, (double)row->max);
+        return why;
+    }
+    return NULL;
+}
+
+static char const *check_onoff(rs_row_t const *row, char const *v) {
+    (void)row;
+    return strcmp(v, "on") == 0 || strcmp(v, "off") == 0 ? NULL : "on or off";
+}
+
+static char const *check_choice(rs_row_t const *row, char const *v) {
+    return is_choice(row->choices, v) ? NULL : "off, minimal, moderate or strict";
+}
+
+static char const *check_radio(rs_row_t const *row, char const *v) {
+    float   f, bw;
+    uint8_t sf, cr;
+    (void)row;
+    return rs_radio_parse(v, &f, &bw, &sf, &cr) ? NULL : "MHz, kHz, SF, CR (150-2500, 7-500, 5-12, 5-8)";
+}
+
+typedef char const *(*rs_value_check_t)(rs_row_t const *row, char const *v);
+
+// The rule per kind of a value that is sent as text; a kind without one is not settable
+static rs_value_check_t const VALUE_CHECKS[] = {
+    [RS_TEXT] = check_text,     [RS_INT] = check_int,       [RS_DEC] = check_dec,
+    [RS_ONOFF] = check_onoff,   [RS_CHOICE] = check_choice, [RS_RADIO] = check_radio,
+};
+
 char const *rs_check(size_t i, char const *value) {
     if (i >= RS_ROWS) {
         return "no such setting";
@@ -189,56 +264,15 @@ char const *rs_check(size_t i, char const *value) {
         return "read only";
     }
     if (row->kind == RS_PASSWORD) {
-        size_t n = strlen(value);
-        if (n == 0 || n > PASSWORD_MAX) {
-            return "1 to 15 characters";
-        }
-        if (value[0] == ' ' || value[n - 1] == ' ' || has_control(value)) {
-            return "no spaces at the start or end";
-        }
-        return NULL;
+        return check_password(value);
     }
     if (!trimmed(value, v, sizeof(v)) || has_control(v)) {
         return "too long";
     }
-    double d;
-    float  f, bw;
-    uint8_t sf, cr;
-    switch (row->kind) {
-    case RS_TEXT:
-        if (!*v || strlen(v) > NAME_MAX) {
-            return "1 to 31 characters";
-        }
-        return strpbrk(v, "[]\\:,?*") ? "none of [ ] \\ : , ? *" : NULL;
-    case RS_INT:
-        if (!whole_number(v, &d) || d != floor(d)) {
-            return "a whole number";
-        }
-        if (row->zero_ok && d == 0) {
-            return NULL;
-        }
-        if (d < row->min || d > row->max) {
-            static char why[48];
-            snprintf(why, sizeof(why), "%s%d to %d", row->zero_ok ? "0 (off) or " : "", (int)row->min, (int)row->max);
-            return why;
-        }
-        return NULL;
-    case RS_DEC:
-        if (!whole_number(v, &d)) {
-            return "a number";
-        }
-        if (d < row->min || d > row->max) {
-            static char why[48];
-            snprintf(why, sizeof(why), "%g to %g", (double)row->min, (double)row->max);
-            return why;
-        }
-        return NULL;
-    case RS_ONOFF: return strcmp(v, "on") == 0 || strcmp(v, "off") == 0 ? NULL : "on or off";
-    case RS_CHOICE: return is_choice(row->choices, v) ? NULL : "off, minimal, moderate or strict";
-    case RS_RADIO:
-        return rs_radio_parse(v, &f, &bw, &sf, &cr) ? NULL : "MHz, kHz, SF, CR (150-2500, 7-500, 5-12, 5-8)";
-    default: return "not settable";
+    if (row->kind >= sizeof(VALUE_CHECKS) / sizeof(VALUE_CHECKS[0]) || !VALUE_CHECKS[row->kind]) {
+        return "not settable";
     }
+    return VALUE_CHECKS[row->kind](row, v);
 }
 
 static void wipe(void *p, size_t n);
