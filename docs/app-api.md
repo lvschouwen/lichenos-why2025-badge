@@ -158,7 +158,7 @@ to `layers.conf`):
 ## The two surfaces, the gate, capabilities and lifecycle
 
 Layers and the call rules: [architecture.md](architecture.md) "Layers". The surfaces and the gate are in force since
-OS v2 (#216), capabilities since #229; the lifecycle is still to come.
+OS v2 (#216), capabilities since #229, the lifecycle since #231.
 
 **App surface:** `lichen_*.h` (and the helper headers listed above), what this page lists above. Available to every app.
 
@@ -282,9 +282,17 @@ Since #349 an app's LVGL event, timer and group focus callbacks run as the app (
 queued from one. Display and input-device events (`lv_display_add_event_cb`, `lv_indev_add_event_cb`) are the OS's
 and stay raw. The Console app's commands run as the OS, as they do over USB.
 
-**Lifecycle (#231, after the MVP):** an app is registered, started, running, suspended (screen off or another app in
-front), stopping (cooperative, with a deadline; the OS never deletes an app's tasks) and stopped. On stop the OS frees
-the app's grants whole (memory, PSRAM quota, booked timers). Two crashes attributed to one app in three boots turn its
+**Lifecycle (#231):** the OS keeps a record per app (`app_life.h`, `fw app life`): REGISTERED, BACKGROUND (its
+`start_background` said yes), OPEN (its screen is on the shell's stack with no other app's above it), SUSPENDED (another
+app's screen is above it), STOPPING, STOPPED and FAULTED (safe mode switched its background off, or its last stop was
+refused or late). Closing its screen returns it to REGISTERED, BACKGROUND or FAULTED. Apps get no suspend or resume
+call yet; the states are the OS's record. **stop(reason)** (`lichen_sys_apps_stop`: UPDATE, RESTART, POWER_OFF) runs
+every app's `stop_for_update` inside its context, as before, with a deadline per reason (20 s for an update, 8 s for a
+restart or power off): cooperative, a late or refused stop is reported (FAULTED), the app's tasks are counted and never
+deleted, its booked timers (`lichen_timer.h`: `lichen_timer_start` / `lichen_timer_stop`, a handle, not an LVGL timer)
+are deleted, and what it still holds through `lichen_alloc` is logged (the OS never frees a block under a running
+task). Every app's declared PSRAM budget is its PSRAM quota in the memory book: accounted (`fw mem` shows how often it
+was passed), not enforced, because the budgets cover statics and stacks and the heap part is not measured yet. Two crashes attributed to one app in three boots turn its
 background part off and notify (#232): the panic handler notes the app the faulting task ran for (its context; an OS
 task or an ISR blames nobody; a crash inside one of the app's LVGL callbacks is named but is no strike, #349) in LP RAM, the next boot counts it (the PSRAM re-arm restart after a crash is part of
 that crash, not a clean boot), `fw app background` lists what is off and `fw app background <id> on` switches it on
