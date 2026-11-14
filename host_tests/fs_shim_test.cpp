@@ -264,6 +264,90 @@ static void buffered_writes(void) {
     CHECK(SPIFFS.remove("/b") && SPIFFS.remove("/c") && SPIFFS.remove("/d") && SPIFFS.remove("/contacts3"));
 }
 
+// #425: a held file's saves reach the file system only when the owner writes them, after its unlock: the save under
+// the lock makes no file system call, and what is written is the newest save, whole
+static void held_saves(void) {
+    static uint8_t expect[300 * REC_SIZE], older[300 * REC_SIZE], disk[300 * REC_SIZE];
+    save_contacts(older, 200, 999, 0); // what is on the file system before
+    fs_shim_take_raw_writes();
+    fs_shim_set_buffer_hooks(count_alloc, count_free);
+
+    fs_shim_hold("/contacts3");
+    save_contacts(expect, 200, 10, 4242); // under the lock: buffered and held, nothing opened or written
+    CHECK(fs_shim_take_raw_writes() == 0 && live_blocks == 1);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 200 * REC_SIZE && memcmp(disk, older, 200 * REC_SIZE) == 0);
+    // A newer save before the take replaces the held one (its block given back): the newest state is written
+    save_contacts(expect, 210, 20, 777);
+    CHECK(live_blocks == 1 && fs_shim_take_raw_writes() == 0);
+
+    fs_shim_held_t taken;
+    fs_shim_take_held(&taken); // still under the lock
+    CHECK(taken.set && taken.len == 210 * REC_SIZE);
+    fs_shim_held_t none;
+    fs_shim_take_held(&none);
+    CHECK(!none.set); // taken once
+    // After the unlock: one writer, only the chunks that differ, and the block given back
+    fs_shim_wrote_t w = File::writeHeld(&taken);
+    CHECK(w.ok && w.len == 210 * REC_SIZE && w.rewritten > 0 && w.rewritten < w.len && !taken.set);
+    CHECK(live_blocks == 0 && fs_shim_take_raw_writes() > 0);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 210 * REC_SIZE && memcmp(disk, expect, 210 * REC_SIZE) == 0);
+    w = File::writeHeld(&taken); // nothing held: nothing written
+    CHECK(!w.ok && w.len == 0 && fs_shim_take_raw_writes() == 0);
+
+    // Other files are not held; an empty save is held too and truncates when written
+    File other = SPIFFS.open("/prefs", "w");
+    CHECK(other.write(expect, 10) == 10);
+    other.close();
+    CHECK(disk_read("/prefs", disk, sizeof(disk)) == 10 && SPIFFS.remove("/prefs"));
+    save_contacts(expect, 0, 999, 0);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 210 * REC_SIZE);
+    fs_shim_take_held(&taken);
+    CHECK(taken.set && taken.len == 0 && File::writeHeld(&taken).ok);
+    CHECK(SPIFFS.exists("/contacts3") && disk_read("/contacts3", disk, sizeof(disk)) == 0);
+
+    // A stop drops what is held and saves directly (no hold): the dropped save is never written over it
+    save_contacts(older, 50, 999, 0);
+    fs_shim_drop_held();
+    CHECK(live_blocks == 0);
+    fs_shim_hold(NULL);
+    save_contacts(expect, 60, 999, 0);
+    fs_shim_take_held(&taken);
+    CHECK(!taken.set);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 60 * REC_SIZE && memcmp(disk, expect, 60 * REC_SIZE) == 0);
+
+    // A remove of the held file, or a format, forgets a save held before it: the file is not brought back
+    fs_shim_hold("/contacts3");
+    save_contacts(older, 5, 999, 0);
+    CHECK(live_blocks == 1 && SPIFFS.remove("/contacts3") && live_blocks == 0);
+    fs_shim_take_held(&taken);
+    CHECK(!taken.set && !SPIFFS.exists("/contacts3"));
+    save_contacts(expect, 60, 999, 0); // held again, and written: the file the checks below expect
+    CHECK(!SPIFFS.exists("/contacts3")); // the held open made no file system call: nothing created
+    fs_shim_take_held(&taken);
+    CHECK(File::writeHeld(&taken).ok);
+    fs_shim_hold(NULL);
+
+    // A held save that did not fit in memory is not held: the old file stays
+    fs_shim_hold("/contacts3");
+    alloc_calls = 0;
+    fail_from   = 1;
+    File nomem = SPIFFS.open("/contacts3", "w", true);
+    CHECK(nomem && nomem.write(older, 10) == 0);
+    nomem.close();
+    fail_from = 0;
+    fs_shim_take_held(&taken);
+    CHECK(!taken.set && live_blocks == 0);
+    fs_shim_hold(NULL);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 60 * REC_SIZE && memcmp(disk, expect, 60 * REC_SIZE) == 0);
+
+    fs_shim_set_buffer_hooks(NULL, NULL);
+    // No slow calls off the badge (nothing is timed there)
+    fs_shim_call_t calls[FS_SHIM_SLOW_CALLS];
+    CHECK(fs_shim_slow_calls(calls, FS_SHIM_SLOW_CALLS) == 0);
+    CHECK(strcmp(fs_shim_op_name(FS_OP_CLOSE), "close") == 0 && strcmp(fs_shim_op_name(200), "?") == 0);
+    CHECK(SPIFFS.remove("/contacts3"));
+}
+
 int main(void) {
     char root[] = "/tmp/fs_shim_test.XXXXXX";
     CHECK(mkdtemp(root) != NULL);
@@ -321,6 +405,7 @@ int main(void) {
     in.close();
 
     buffered_writes();
+    held_saves();
 
     // Remove; mkdir of a nested directory
     CHECK(SPIFFS.remove("/a/b") && !SPIFFS.exists("/a/b"));

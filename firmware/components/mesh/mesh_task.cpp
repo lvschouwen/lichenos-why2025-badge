@@ -261,6 +261,8 @@ static ScreenFeed screen_feed;
 // MeshCore writes contacts lazily; a firmware update must not lose the last few minutes of them
 bool (*const mesh_int::keep_contact)(ContactInfo const &c) = BadgeMesh::keepContact;
 
+static int contacts_taken_n; // the mesh task: the contact count of the last loop, for its slow-loop line
+
 // MeshCore's own reboot (an admin's "reboot" CLI command, the companion protocol) runs on the mesh task inside
 // node->loop(), with the mesh lock held. The OS's restart save (system_restart -> stop_for_update, #123) would wait for
 // this very task to stop, so the saves a stop makes are made here first, and stop_locked then has nothing to wait for.
@@ -373,6 +375,22 @@ static bool sync_outgoing(void) {
     return added;
 }
 
+// The slow loop's file calls of 10 ms and more (#425), as the shim noted them: the first n, the ones under the lock
+// (the writes after the unlock come later in the shim's list)
+static void log_slow_calls(size_t n) {
+    fs_shim_call_t calls[FS_SHIM_SLOW_CALLS];
+    fs_shim_slow_calls(calls, FS_SHIM_SLOW_CALLS);
+    for (size_t i = 0; i < n && i < FS_SHIM_SLOW_CALLS; i++) {
+        fs_shim_call_t const &c = calls[i];
+        ESP_LOGW(TAG, "  slow file call: %s %s, %lu B (%lu B rewritten), %lu ms (file system close %lu ms)",
+                 fs_shim_op_name(c.op), c.name, (unsigned long)c.bytes, (unsigned long)c.rewritten,
+                 (unsigned long)(c.us / 1000), (unsigned long)(c.sync_us / 1000));
+    }
+    if (n > FS_SHIM_SLOW_CALLS) {
+        ESP_LOGW(TAG, "  and %u more slow file call(s)", (unsigned)(n - FS_SHIM_SLOW_CALLS));
+    }
+}
+
 static void mesh_task(void *arg) {
     (void)arg;
     for (;;) {
@@ -386,7 +404,8 @@ static void mesh_task(void *arg) {
             tile_publish_unread(); // an added message can evict a DM chat that had unread
         }
         uint32_t file_ops;
-        uint32_t file_us = fs_shim_take_busy_us(&file_ops);
+        uint32_t file_us   = fs_shim_take_busy_us(&file_ops);
+        size_t   slow_file = fs_shim_slow_calls(NULL, 0); // a count only: the calls are copied for a slow loop's log
         rx               = radio_driver.getPacketsRecv() - rx;
         tile_set_contacts((size_t)node->getNumContacts());
         advert_tick_locked();
@@ -432,7 +451,8 @@ static void mesh_task(void *arg) {
             __atomic_store_n(&task_exited, true, __ATOMIC_RELEASE);
             return; // lichen_task_start's trampoline takes the task out of the OS's book and deletes it (#181)
         }
-        int64_t took_ms = (esp_timer_get_time() - started) / 1000;
+        contacts_taken_n = node->getNumContacts();
+        int64_t took_ms  = (esp_timer_get_time() - started) / 1000;
         mesh_unlock();
         mesh_journal_flush(); // the card's I/O never under the mesh lock: the screens keep their snapshots meanwhile
         node->writeTakenBlob();
@@ -454,9 +474,10 @@ static void mesh_task(void *arg) {
             // the unlock since #257), the rest is MeshCore's own
             // work on the packets received (Ed25519 checks of adverts, decryption); the screens skip ticks meanwhile
             ESP_LOGW(TAG, "MeshCore loop took %lld ms: files %lu ms (%lu calls), %lu packet(s) in, waited %lld ms for "
-                          "the lock",
+                          "the lock, %d contacts",
                      (long long)took_ms, (unsigned long)(file_us / 1000), (unsigned long)file_ops, (unsigned long)rx,
-                     (long long)((started - asked) / 1000));
+                     (long long)((started - asked) / 1000), contacts_taken_n);
+            log_slow_calls(slow_file);
         }
         vTaskDelay(pdMS_TO_TICKS(MESH_POLL_MS));
     }

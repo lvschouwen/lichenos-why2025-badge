@@ -136,25 +136,114 @@ static bool write_full(int fd, uint8_t const *src, size_t n) {
     return true;
 }
 
+// The slow calls (#425). A slot is claimed with one atomic add, so two tasks never write the same one; a reader may see
+// a slot a writer is still filling, which only blurs one diagnostic line.
+static fs_shim_call_t slow_calls[FS_SHIM_SLOW_CALLS];
+static uint32_t       slow_count;
+
 uint32_t fs_shim_take_busy_us(uint32_t *ops) {
     uint32_t n = __atomic_exchange_n(&busy_ops, 0, __ATOMIC_RELAXED);
     if (ops) {
         *ops = n;
     }
+    __atomic_store_n(&slow_count, 0, __ATOMIC_RELAXED);
     return __atomic_exchange_n(&busy_us, 0, __ATOMIC_RELAXED);
 }
 
-namespace {
-struct Timed {
-#ifdef ESP_PLATFORM
-    int64_t start = esp_timer_get_time();
-    ~Timed() {
-        __atomic_fetch_add(&busy_us, (uint32_t)(esp_timer_get_time() - start), __ATOMIC_RELAXED);
-        __atomic_fetch_add(&busy_ops, 1, __ATOMIC_RELAXED);
+size_t fs_shim_slow_calls(fs_shim_call_t *out, size_t max) {
+    size_t n = __atomic_load_n(&slow_count, __ATOMIC_RELAXED);
+    for (size_t i = 0; i < n && i < max && i < FS_SHIM_SLOW_CALLS; i++) {
+        out[i] = slow_calls[i];
     }
-#endif
+    return n;
+}
+
+char const *fs_shim_op_name(uint8_t op) {
+    static char const *const names[] = {"open", "read", "write", "flush", "close", "exists", "remove", "rename", "dir"};
+    return op < sizeof(names) / sizeof(names[0]) ? names[op] : "?";
+}
+
+namespace {
+struct Timed;
+}
+static int64_t                       timed_now(void);
+__attribute__((noinline)) static void timed_end(Timed &t);
+
+namespace {
+// One file call's time; the call fills in what it did, which only a slow call keeps. The end is out of line: a dozen
+// call sites share one copy (#425 kept the shim's flash growth small).
+struct Timed {
+    struct {
+        uint8_t  op;
+        uint32_t bytes = 0, rewritten = 0, sync_us = 0;
+    } c;
+    char const *path;
+    int64_t     start;
+    explicit Timed(fs_shim_op_t op, char const *p = NULL) : path(p), start(timed_now()) { c.op = (uint8_t)op; }
+    ~Timed() { timed_end(*this); }
+    static int64_t now() { return timed_now(); }
 };
 } // namespace
+
+#ifdef ESP_PLATFORM
+static int64_t timed_now(void) {
+    return esp_timer_get_time();
+}
+
+static void timed_end(Timed &t) {
+    uint32_t us = (uint32_t)(timed_now() - t.start);
+    __atomic_fetch_add(&busy_us, us, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&busy_ops, 1, __ATOMIC_RELAXED);
+    if (us < FS_SHIM_SLOW_CALL_US) {
+        return;
+    }
+    uint32_t i = __atomic_fetch_add(&slow_count, 1, __ATOMIC_RELAXED);
+    if (i < FS_SHIM_SLOW_CALLS) {
+        fs_shim_call_t *s    = &slow_calls[i];
+        s->op                = t.c.op;
+        s->us                = us;
+        s->bytes             = t.c.bytes;
+        s->rewritten         = t.c.rewritten;
+        s->sync_us           = t.c.sync_us;
+        char const *base     = t.path ? strrchr(t.path, '/') : NULL;
+        char const *name     = base ? base + 1 : t.path ? t.path : "";
+        size_t      n        = strnlen(name, sizeof(s->name) - 1); // cut short on purpose
+        memcpy(s->name, name, n);
+        s->name[n] = '\0';
+    }
+}
+#else
+static int64_t timed_now(void) {
+    return 0;
+}
+
+static void timed_end(Timed &t) {
+    (void)t;
+}
+#endif
+
+// The held path's saves (#425): the path (the owner's string) and the newest save not yet taken
+static char const    *hold_path;
+static fs_shim_held_t held_slot;
+
+// Atomic: other tasks open their own files without the owner's lock and read it then
+static char const *held_path(void) {
+    return __atomic_load_n(&hold_path, __ATOMIC_ACQUIRE);
+}
+
+void fs_shim_hold(char const *path) {
+    __atomic_store_n(&hold_path, path, __ATOMIC_RELEASE);
+}
+
+void fs_shim_take_held(fs_shim_held_t *out) {
+    *out      = held_slot;
+    held_slot = fs_shim_held_t{};
+}
+
+void fs_shim_drop_held(void) {
+    buf_free(held_slot.buf);
+    held_slot = fs_shim_held_t{};
+}
 
 void fs_shim_set_root(char const *dir) {
     snprintf(root, sizeof(root), "%s", dir ? dir : "");
@@ -225,6 +314,10 @@ File::File(FILE *f, char const *full_path) : f_(f) {
     snprintf(path_, sizeof(path_), "%s", full_path);
 }
 
+File::File(char const *full_path, bool held) : held_(held) {
+    snprintf(path_, sizeof(path_), "%s", full_path);
+}
+
 File::File(DIR *d, char const *full_path) : d_(d) {
     snprintf(path_, sizeof(path_), "%s", full_path);
 }
@@ -244,6 +337,8 @@ File &File::operator=(File &&other) noexcept {
         cap_    = other.cap_;
         pos_    = other.pos_;
         failed_ = other.failed_;
+        held_   = other.held_;
+        rewritten_ = other.rewritten_;
         memcpy(path_, other.path_, sizeof(path_));
         other.f_   = nullptr;
         other.d_   = nullptr;
@@ -251,6 +346,7 @@ File &File::operator=(File &&other) noexcept {
         other.buf_ = nullptr;
         other.len_ = other.cap_ = other.pos_ = 0;
         other.failed_ = false;
+        other.held_   = false;
     }
     return *this;
 }
@@ -261,7 +357,7 @@ char const *File::name() const {
 }
 
 File File::openNextFile() {
-    [[maybe_unused]] Timed timed;
+    [[maybe_unused]] Timed timed(FS_OP_DIR, path_);
     struct dirent *e;
     while (d_ && (e = readdir(d_)) != NULL) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) {
@@ -281,7 +377,7 @@ File File::openNextFile() {
 }
 
 int File::available() {
-    if (fd_ >= 0) {
+    if (buffered()) {
         return pos_ < len_ ? (int)(len_ - pos_) : 0;
     }
     long pos = f_ ? ftell(f_) : -1;
@@ -289,7 +385,7 @@ int File::available() {
 }
 
 size_t File::read(uint8_t *buf, size_t len) {
-    if (fd_ >= 0) { // what this File wrote: the buffer is the whole file
+    if (buffered()) { // what this File wrote: the buffer is the whole file
         size_t n = pos_ < len_ ? len_ - pos_ : 0;
         n        = n < len ? n : len;
         if (n > 0) {
@@ -298,8 +394,10 @@ size_t File::read(uint8_t *buf, size_t len) {
         }
         return n;
     }
-    [[maybe_unused]] Timed timed;
-    return f_ ? fread(buf, 1, len, f_) : 0;
+    Timed timed(FS_OP_READ, path_);
+    size_t n = f_ ? fread(buf, 1, len, f_) : 0;
+    timed.c.bytes = (uint32_t)n;
+    return n;
 }
 
 int File::read() {
@@ -308,7 +406,7 @@ int File::read() {
 }
 
 size_t File::write(uint8_t const *buf, size_t len) {
-    if (fd_ >= 0) { // into the buffer, no file system call: committed by flush() or close()
+    if (buffered()) { // into the buffer, no file system call: committed by flush() or close()
         if (failed_ || len == 0) {
             return 0;
         }
@@ -338,12 +436,14 @@ size_t File::write(uint8_t const *buf, size_t len) {
         len_ = end > len_ ? end : len_;
         return len;
     }
-    [[maybe_unused]] Timed timed;
-    return f_ ? fwrite(buf, 1, len, f_) : 0;
+    Timed timed(FS_OP_WRITE, path_);
+    size_t n = f_ ? fwrite(buf, 1, len, f_) : 0;
+    timed.c.bytes = (uint32_t)n;
+    return n;
 }
 
 bool File::seek(uint32_t pos) {
-    if (fd_ >= 0) {
+    if (buffered()) {
         pos_ = pos;
         return true;
     }
@@ -352,7 +452,7 @@ bool File::seek(uint32_t pos) {
 
 size_t File::size() {
     struct stat st;
-    if (fd_ >= 0) {
+    if (buffered()) {
         return len_;
     }
     if (!f_) {
@@ -387,11 +487,13 @@ bool File::commit() {
     }
     size_t old = (size_t)st.st_size;
     bool   ok  = true;
+    rewritten_ = 0;
     for (size_t off = 0; ok && off < len_; off += FS_SHIM_CHUNK) {
         size_t n    = len_ - off < FS_SHIM_CHUNK ? len_ - off : FS_SHIM_CHUNK;
         bool   same = off + n <= old && lseek(fd_, (off_t)off, SEEK_SET) == (off_t)off && same_bytes(fd_, buf_ + off, n);
         if (!same) {
             ok = lseek(fd_, (off_t)off, SEEK_SET) == (off_t)off && write_full(fd_, buf_ + off, n);
+            rewritten_ += n;
             COUNT_RAW_WRITE();
         }
     }
@@ -407,23 +509,44 @@ bool File::commit() {
 
 void File::flush() {
     if (fd_ < 0) {
-        return;
+        return; // a held file is written whole, later (#425)
     }
     if (failed_) {
         SHIM_ERROR("%s not saved: a write did not fit in memory (%u bytes)", path_, (unsigned)len_);
         return;
     }
-    [[maybe_unused]] Timed timed;
+    Timed timed(FS_OP_FLUSH, path_);
     if (commit() && fsync(fd_) != 0) {
         SHIM_ERROR("syncing %s failed: errno %d", path_, errno);
     }
+    timed.c.bytes     = (uint32_t)len_;
+    timed.c.rewritten = (uint32_t)rewritten_;
+}
+
+void File::hold() {
+    if (failed_) {
+        SHIM_ERROR("%s not saved, the old file is kept: a write did not fit in memory (%u bytes)", path_,
+                   (unsigned)len_);
+        buf_free(buf_);
+    } else {
+        buf_free(held_slot.buf); // an older save of the same file: this one is newer
+        held_slot = fs_shim_held_t{buf_, len_, cap_, true};
+    }
+    held_   = false;
+    buf_    = nullptr;
+    len_    = cap_ = pos_ = 0;
+    failed_ = false;
 }
 
 void File::close() {
+    if (held_) {
+        hold(); // no file system call: written after the owner's unlock (#425)
+        return;
+    }
     if (fd_ < 0 && !f_ && !d_) {
         return; // nothing open (the destructor after an explicit close): no file system call, not counted
     }
-    [[maybe_unused]] Timed timed;
+    Timed timed(FS_OP_CLOSE, path_);
     if (fd_ >= 0) {
         if (failed_) {
             SHIM_ERROR(
@@ -434,10 +557,14 @@ void File::close() {
         } else {
             commit();
         }
+        timed.c.bytes     = (uint32_t)len_;
+        timed.c.rewritten = (uint32_t)rewritten_;
+        int64_t sync      = Timed::now();
         // LittleFS commits the file here (data, then its metadata in one step): on flash when close() returns
         if (::close(fd_) != 0) {
             SHIM_ERROR("closing %s failed: errno %d", path_, errno);
         }
+        timed.c.sync_us = (uint32_t)(Timed::now() - sync);
         fd_ = -1;
         buf_free(buf_);
         buf_    = nullptr;
@@ -455,12 +582,16 @@ void File::close() {
 }
 
 File FS::open(char const *path, char const *mode, bool create) {
-    [[maybe_unused]] Timed timed;
     (void)create;
     char full[PATH_MAX_LEN];
     if (!full_path(path, full)) {
         return File();
     }
+    char const *held = held_path();
+    if (mode[0] == 'w' && held && strcmp(path, held) == 0) {
+        return File(full, true); // a buffer only: File::writeHeld opens the file after the owner's unlock
+    }
+    Timed timed(FS_OP_OPEN, full);
     char        m[4] = {mode[0], 'b', '\0', '\0'};
     struct stat st;
     if (mode[0] == 'r' && stat(full, &st) == 0 && S_ISDIR(st.st_mode)) {
@@ -478,14 +609,18 @@ File FS::open(char const *path, char const *mode, bool create) {
 }
 
 bool FS::exists(char const *path) {
-    [[maybe_unused]] Timed timed;
+    [[maybe_unused]] Timed timed(FS_OP_EXISTS, path);
     char        full[PATH_MAX_LEN];
     struct stat st;
     return full_path(path, full) && stat(full, &st) == 0;
 }
 
 bool FS::remove(char const *path) {
-    [[maybe_unused]] Timed timed;
+    [[maybe_unused]] Timed timed(FS_OP_REMOVE, path);
+    char const *held = held_path();
+    if (held && path && strcmp(path, held) == 0) {
+        fs_shim_drop_held(); // a held save written after this would bring the file back
+    }
     char full[PATH_MAX_LEN];
     return full_path(path, full) && unlink(full) == 0;
 }
@@ -500,7 +635,7 @@ static int rename_raw(char const *from, char const *to) {
 }
 
 bool FS::rename(char const *from, char const *to) {
-    [[maybe_unused]] Timed timed;
+    [[maybe_unused]] Timed timed(FS_OP_RENAME, to);
     char a[PATH_MAX_LEN], b[PATH_MAX_LEN];
     if (!full_path(from, a) || !full_path(to, b)) {
         return false;
@@ -513,6 +648,47 @@ bool FS::rename(char const *from, char const *to) {
         return false;
     }
     return unlink(b) == 0 && rename_raw(a, b) == 0; // FatFs: no rename over an existing file (LittleFS replaces)
+}
+
+// Opens the held file as FS::open does for "w" (directories made, not truncated) and closes it the usual way: only the
+// chunks that differ are written, and LittleFS makes them the file in one step at the close, so a cut leaves the old
+// file or the new one
+fs_shim_wrote_t File::writeHeld(fs_shim_held_t *h) {
+    fs_shim_wrote_t r = {};
+    if (!h->set) {
+        return r;
+    }
+    int64_t start = Timed::now();
+    char    full[PATH_MAX_LEN];
+    int     fd = -1;
+    char const *path = held_path();
+    if (path && full_path(path, full) && make_dirs(full, false)) {
+        fd = ::open(full, O_RDWR | O_CREAT, 0644);
+    }
+    if (fd < 0) {
+        SHIM_ERROR("%s not saved, the old file is kept: errno %d", path ? path : "(no held path)", errno);
+        buf_free(h->buf);
+    } else {
+        File f(fd, full);
+        f.buf_      = h->buf;
+        f.len_      = h->len;
+        f.cap_      = h->cap;
+        r.ok        = f.commit();
+        r.len       = f.len_;
+        r.rewritten = f.rewritten_;
+        // LittleFS commits the file here, as in close() (which would compare it all again)
+        if (::close(fd) != 0) {
+            SHIM_ERROR("closing %s failed: errno %d", full, errno);
+            r.ok = false;
+        }
+        f.fd_ = -1;
+        buf_free(f.buf_);
+        f.buf_ = nullptr;
+        f.len_ = f.cap_ = 0;
+    }
+    *h   = fs_shim_held_t{};
+    r.us = (uint32_t)(Timed::now() - start);
+    return r;
 }
 
 bool FS::mkdir(char const *path) {
@@ -554,6 +730,7 @@ static bool remove_tree(char const *dir) {
 }
 
 bool SPIFFSFS::format() {
+    fs_shim_drop_held(); // MeshCore's factory reset: nothing saved before it is written after it
     return fs_shim_format_allowed(root) && remove_tree(root);
 }
 
