@@ -261,6 +261,6 @@ void safe_mode_boot_step(bool crashed) {
         ESP_LOGW(TAG, "background part off (safe mode) for %s: fw app background <id> on", list);
     }
     lichen_sys_app_console_more(cmd_more, "app ctx | caps | life | background [<id> on]" USAGE_DEV
-                                          " (contexts; capabilities, #229; lifecycle states, #231; the apps whose "
-                                          "background is off after crashes, #232)");
+                                          " (contexts; capabilities, #229; lifecycle, #231; the apps whose background "
+                                          "is off after crashes, #232)");
 }

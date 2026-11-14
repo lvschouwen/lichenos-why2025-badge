@@ -33,13 +33,14 @@ app_life_fault_name	-	unspecified	app_life.h
 app_life_init	-	unspecified	app_life.h
 app_life_note_tasks	-	unspecified	app_life.h
 app_life_reason_name	-	unspecified	app_life.h
+app_life_screen_owner	-	unspecified	app_life.h
 app_life_show	-	unspecified	app_life.h
 app_life_started	-	unspecified	app_life.h
 app_life_state_name	-	unspecified	app_life.h
 app_life_stop_begin	-	unspecified	app_life.h
 app_life_stop_end	-	unspecified	app_life.h
 app_life_view	-	unspecified	app_life.h
-app_life_wait	-	unspecified	app_life.h
+app_life_wait_verdict	-	unspecified	app_life.h
 app_ns_declare_keep	-	unspecified	app_ns.h
 app_ns_name	-	unspecified	app_ns.h
 app_ns_owns	-	unspecified	app_ns.h
@@ -320,6 +321,7 @@ lichen_sys_led_set_enabled	SYSTEM	any	lichen_sys_led.h
 lichen_sys_life_console	SYSTEM	unspecified	lichen_sys_life.h
 lichen_sys_life_fault_crashes	SYSTEM	any	lichen_sys_life.h
 lichen_sys_life_get	SYSTEM	any	lichen_sys_life.h
+lichen_sys_life_now_ms	SYSTEM	unspecified	lichen_sys_life.h
 lichen_sys_life_screens	SYSTEM	lvgl	lichen_sys_life.h
 lichen_sys_life_started	SYSTEM	any	lichen_sys_life.h
 lichen_sys_life_stop_begin	SYSTEM	any	lichen_sys_life.h
@@ -376,6 +378,8 @@ lichen_sys_task_ctx	SYSTEM	any	lichen_sys_app.h
 lichen_sys_thermal_info	SYSTEM	any	lichen_sys_thermal.h
 lichen_sys_timer_count	SYSTEM	any	lichen_sys_life.h
 lichen_sys_timer_drop	SYSTEM	lvgl	lichen_sys_life.h
+lichen_sys_timer_kill	SYSTEM	any	lichen_sys_life.h
+lichen_sys_timer_revive	SYSTEM	any	lichen_sys_life.h
 lichen_sys_ui_call	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_cancel	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_cb_mark	SYSTEM	lvgl	lichen_sys_app.h

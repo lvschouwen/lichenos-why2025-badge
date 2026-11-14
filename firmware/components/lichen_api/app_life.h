@@ -14,7 +14,8 @@
 // Where a close returns (the rest state) is REGISTERED, BACKGROUND or FAULTED: the background part runs on (or stays
 // off) whether a screen is open or not. A stop is cooperative: the OS calls the app's hook and records what came of
 // it; a hook that overruns its deadline is reported (FAULTED, late), never interrupted, and its tasks are never
-// deleted by the OS. Once a stop began, the screens no longer move the state (a closing update screen is no resume).
+// deleted by the OS. Once a stop began, the screens no longer move the state (a closing update screen is no resume)
+// until the background part starts again.
 // A stop may be asked again after one ended (an update, then the restart's save): the hook runs again, as it did
 // before the lifecycle existed. Times are uint32_t milliseconds that may wrap.
 
@@ -76,7 +77,9 @@ char const *app_life_fault_name(life_fault_t f);   // "-", "crashes", "stop refu
 
 // The record of a newly registered app (REGISTERED)
 void app_life_init(app_life_t *r);
-// Boot: the background part started. REGISTERED -> BACKGROUND; false (nothing changes) from any other state.
+// The background part started: at boot (REGISTERED), or again after a stop (STOPPED, or FAULTED by that stop) ->
+// BACKGROUND, and the screens move the state again. False (nothing changes) while stopping, for a safe-mode FAULTED
+// app (its background stays off) and from any other state.
 bool app_life_started(app_life_t *r);
 // Boot: safe mode switched the background part off (#232's 2-in-3 rule; an exempt app never gets here). REGISTERED
 // -> FAULTED (crashes); false from any other state.
@@ -93,25 +96,30 @@ typedef enum {
 
 // stop(reason) begins at now_ms: from any state but STOPPING
 life_begin_t app_life_stop_begin(app_life_t *r, life_reason_t reason, uint32_t now_ms);
-// The hook returned at now_ms saying stopped: STOPPED when it did, in time; else FAULTED (refused, or late when it
-// returned after the deadline). Returns the new state; LIFE_STATE_COUNT (nothing changes) when no stop was under way.
+// The hook returned at now_ms saying stopped: STOPPED when it did, in time (a safe-mode app keeps its crashes fault);
+// else FAULTED (refused, or late when it returned after the deadline). Returns the new state; LIFE_STATE_COUNT (nothing changes) when no stop was under way.
 life_state_t app_life_stop_end(app_life_t *r, bool stopped, uint32_t now_ms);
 // The app's booked tasks still running after its stop (capped at 255): reported in "fw app life"
 void app_life_note_tasks(app_life_t *r, uint32_t tasks_left);
 
 typedef enum {
-    LIFE_WAIT_PENDING, // STOPPING, before the deadline: ask again
-    LIFE_WAIT_OVERDUE, // STOPPING past the deadline: the hook hangs; give up waiting, report it
-    LIFE_WAIT_STOPPED, // the stop ended in STOPPED
-    LIFE_WAIT_FAILED,  // the stop ended in FAULTED, or no stop was asked
+    LIFE_WAIT_PENDING, // STOPPING, within the waiter's own bound: ask again
+    LIFE_WAIT_OVERDUE, // STOPPING past it: the hook hangs; give up waiting, report it
+    LIFE_WAIT_STOPPED, // the hook said it stopped (in time, or late)
+    LIFE_WAIT_FAILED,  // the hook said it still runs, or no stop was asked
 } life_wait_t;
 
-// For a second caller of stop(reason) while the first one's hook runs
-life_wait_t app_life_wait(app_life_t const *r, uint32_t now_ms);
+// For a second caller of stop(own) that found the app STOPPING and has waited since since_ms: it waits for the first
+// caller's verdict up to its own reason's deadline (app_life_deadline_ms), counted from since_ms
+life_wait_t app_life_wait_verdict(app_life_t const *r, life_reason_t own, uint32_t since_ms, uint32_t now_ms);
 
-// Which of an app's screens the shell's stack shows (#231): ids[0..depth) bottom to top; the app's own screen is
-// app_id, and every id in app_lo..app_hi is some app's. *on_top: no other app's screen is above the app's.
-void app_life_view(int const *ids, int depth, int app_id, int app_lo, int app_hi, bool *shown, bool *on_top);
+// The app a screen of the shell's stack belongs to, as its slot (app index + 1; 0: the OS's): an app's own screen (id
+// app_lo..app_hi, app index id - app_lo), its Settings page (settings_base + index), else the app the screen was opened
+// for (pushed_slot, from the context it was pushed in; 0 for the OS)
+int app_life_screen_owner(int id, int pushed_slot, int app_lo, int app_hi, int settings_base);
+// Whether app slot's screens are on the stack (owners[0..depth), bottom to top, app_life_screen_owner's answers) and
+// *on_top: no other app's screen is above its topmost one
+void app_life_view(int const *owners, int depth, int slot, bool *shown, bool *on_top);
 
 #ifdef __cplusplus
 }

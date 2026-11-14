@@ -284,7 +284,7 @@ and stay raw. The Console app's commands run as the OS, as they do over USB.
 
 **Lifecycle (#231):** the OS keeps a record per app (`app_life.h`, `fw app life`): REGISTERED, BACKGROUND (its
 `start_background` said yes), OPEN (its screen is on the shell's stack with no other app's above it), SUSPENDED (another
-app's screen is above it), STOPPING, STOPPED and FAULTED (safe mode switched its background off, or its last stop was
+app's screen is above it; a screen is an app's when it is its own, its Settings page, or opened in its context), STOPPING, STOPPED and FAULTED (safe mode switched its background off, or its last stop was
 refused or late). Closing its screen returns it to REGISTERED, BACKGROUND or FAULTED. Apps get no suspend or resume
 call yet; the states are the OS's record. **stop(reason)** (`lichen_sys_apps_stop`: UPDATE, RESTART, POWER_OFF) runs
 every app's `stop_for_update` inside its context, as before, with a deadline per reason (20 s for an update, 8 s for a

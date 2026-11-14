@@ -304,6 +304,7 @@ class HardAndConf(unittest.TestCase):
                   "lichen_sys_life_stop_begin": {"lichen_os"}, "lichen_sys_life_stop_end": {"lichen_os"},
                   "lichen_sys_life_wait": {"lichen_os"},
                   "lichen_sys_timer_drop": {"lichen_os"}, "lichen_sys_timer_count": {"lichen_os"},
+                  "lichen_sys_timer_kill": {"lichen_os"}, "lichen_sys_life_now_ms": {"lichen_os"},
                   "lichen_notify_post_test": set()}
         for sym, want in owners.items():
             defs = {sym: "lichen_notify" if sym == "lichen_notify_post_test" else "lichen_api"}

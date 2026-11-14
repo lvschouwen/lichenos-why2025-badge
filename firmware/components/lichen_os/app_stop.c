@@ -25,27 +25,32 @@ static void drop_timers(void *arg) {
     lichen_sys_timer_drop((uint32_t)(uintptr_t)arg);
 }
 
-// The app's booked timers go with its stop, on the LVGL task. Queued, never run here: this task holds no LVGL lock.
+// The app's booked timers go with its stop: dead at once (any later tick deletes itself), deleted on the LVGL task
+// when its lock is free. Queued, never run here: this task holds no LVGL lock.
 static void stop_timers(lichen_app_t const *app, lichen_ctx_t ctx) {
-    if (lichen_sys_timer_count(ctx) &&
-        !lichen_sys_ui_call(drop_timers, (void *)(uintptr_t)ctx, TIMER_DROP_LOCK_MS)) {
-        ESP_LOGW(TAG, "%s: its booked timers were not dropped (the LVGL task is busy)", app->name);
+    if (!lichen_sys_timer_count(ctx)) {
+        return;
+    }
+    lichen_sys_timer_kill(ctx);
+    if (!lichen_sys_ui_call(drop_timers, (void *)(uintptr_t)ctx, TIMER_DROP_LOCK_MS)) {
+        ESP_LOGW(TAG, "%s: booked timers left to end at their next tick (LVGL busy)", app->name);
     }
 }
 
 // Another caller is stopping the app (the update's stop, then the restart's save on its own task): its verdict, waited
-// for up to the deadline. A hook that hangs past it is reported, and this caller goes on.
+// for up to this caller's own reason's deadline from now. A hook that hangs past it is reported, and this caller goes
+// on; a late hook that did stop counts as stopped (app_life_wait_verdict).
 static bool wait_other(size_t index, lichen_app_t const *app, life_reason_t reason) {
+    uint32_t since = lichen_sys_life_now_ms();
     for (;;) {
-        switch (lichen_sys_life_wait(index)) {
+        switch (lichen_sys_life_wait(index, reason, since)) {
         case LIFE_WAIT_PENDING:
             vTaskDelay(pdMS_TO_TICKS(WAIT_POLL_MS));
             continue;
         case LIFE_WAIT_STOPPED:
             return true;
         case LIFE_WAIT_OVERDUE:
-            ESP_LOGW(TAG, "%s: still stopping, past its deadline: not waited for any longer (%s)", app->name,
-                     app_life_reason_name(reason));
+            ESP_LOGW(TAG, "%s: still stopping, not waited for longer", app->name);
             return false;
         case LIFE_WAIT_FAILED:
         default:
@@ -55,24 +60,20 @@ static bool wait_other(size_t index, lichen_app_t const *app, life_reason_t reas
     }
 }
 
-static void report(lichen_app_t const *app, life_reason_t reason, size_t index, lichen_ctx_t ctx, size_t tasks_left) {
+// One line per app that stopped late or left something; nothing for one that stopped clean. Counted, never deleted or
+// freed: a task the app started ends when the app ends it, and a block may still be in use by it.
+static void report(lichen_app_t const *app, size_t index, lichen_ctx_t ctx, size_t tasks_left) {
     app_life_t r;
+    uint32_t   internal = 0, bulk = 0;
+    lichen_os_mem_held(ctx, &internal, &bulk);
     if (!lichen_sys_life_get(index, &r)) {
         return;
     }
-    if (r.state == LIFE_FAULTED && r.fault == LIFE_FAULT_STOP_LATE) {
-        ESP_LOGW(TAG, "%s stopped for the %s after %u ms, past its %lu ms deadline", app->name,
-                 app_life_reason_name(reason), (unsigned)r.took_ms, (unsigned long)app_life_deadline_ms(reason));
-    }
-    if (tasks_left) {
-        // Counted, never deleted: a task the app started ends when the app ends it (lichen_task.h)
-        ESP_LOGI(TAG, "%s: %u of its tasks still run after its stop", app->name, (unsigned)tasks_left);
-    }
-    uint32_t internal = 0, bulk = 0;
-    if (lichen_os_mem_held(ctx, &internal, &bulk) && (internal || bulk)) {
-        // Reported, not freed: a block may still be in use by a task that has not ended (the OS never frees under it)
-        ESP_LOGI(TAG, "%s holds %lu B internal, %lu B PSRAM through lichen_alloc after its stop", app->name,
-                 (unsigned long)internal, (unsigned long)bulk);
+    bool late = r.state == LIFE_FAULTED && r.fault == LIFE_FAULT_STOP_LATE;
+    if (late || tasks_left || internal || bulk) {
+        ESP_LOGI(TAG, "%s stopped%s in %u ms: %u tasks run, %lu B internal, %lu B PSRAM held", app->name,
+                 late ? " late" : "", (unsigned)r.took_ms, (unsigned)tasks_left, (unsigned long)internal,
+                 (unsigned long)bulk);
     }
 }
 
@@ -102,7 +103,7 @@ static bool stop_one(size_t index, life_reason_t reason) {
     }
     size_t tasks_left = lichen_os_task_count(ctx);
     lichen_sys_life_stop_end(index, stopped, (uint32_t)tasks_left);
-    report(app, reason, index, ctx, tasks_left);
+    report(app, index, ctx, tasks_left);
     stop_timers(app, ctx);
     return stopped;
 }

@@ -449,7 +449,6 @@ static void cmd_app(char const *args) {
 void lichen_sys_app_console_register(void) {
     console_register("app", s_more_usage ? s_more_usage
                                          : "app ctx (every app's context, the refusals of stale or made-up contexts "
-                                           "since boot) | app caps (each app's capabilities, budgets and refused calls) | app life (each "
-                                           "app's lifecycle state and its last stop, #231)",
+                                           "since boot) | app caps (each app's capabilities, budgets and refused calls) | app life",
                      cmd_app);
 }

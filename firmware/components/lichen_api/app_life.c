@@ -42,12 +42,20 @@ void app_life_init(app_life_t *r) {
     r->rest  = LIFE_REGISTERED;
 }
 
+// A stop's outcome holds the record: STOPPING, STOPPED, or FAULTED by the stop (not by safe mode)
+static bool stop_holds(app_life_t const *r) {
+    return r->state == LIFE_STOPPING || r->state == LIFE_STOPPED ||
+           (r->state == LIFE_FAULTED && (r->fault == LIFE_FAULT_STOP_REFUSED || r->fault == LIFE_FAULT_STOP_LATE));
+}
+
 bool app_life_started(app_life_t *r) {
-    if (r->state != LIFE_REGISTERED) {
-        return false;
+    bool restart = stop_holds(r) && r->state != LIFE_STOPPING;
+    if ((r->state != LIFE_REGISTERED && !restart) || r->rest == LIFE_FAULTED) {
+        return false; // safe mode keeps a crashed app's background off whatever starts it
     }
     r->state = LIFE_BACKGROUND;
     r->rest  = LIFE_BACKGROUND;
+    r->fault = LIFE_FAULT_NONE;
     return true;
 }
 
@@ -61,13 +69,8 @@ bool app_life_fault_crashes(app_life_t *r) {
     return true;
 }
 
-// A stop began at some point this boot: its outcome stays what the record says
-static bool stop_seen(app_life_t const *r) {
-    return r->stops != 0;
-}
-
 bool app_life_show(app_life_t *r, bool shown, bool on_top) {
-    if (stop_seen(r)) { // STOPPING included: a stop counts from its begin
+    if (stop_holds(r)) {
         return false;
     }
     uint8_t next = !shown ? r->rest : on_top ? LIFE_OPEN : LIFE_SUSPENDED;
@@ -107,7 +110,7 @@ life_state_t app_life_stop_end(app_life_t *r, bool stopped, uint32_t now_ms) {
     bool late = reached(now_ms, r->deadline_ms);
     if (stopped && !late) {
         r->state = LIFE_STOPPED;
-        r->fault = LIFE_FAULT_NONE;
+        r->fault = r->rest == LIFE_FAULTED ? LIFE_FAULT_CRASHES : LIFE_FAULT_NONE; // safe mode's verdict outlives a stop
     } else {
         r->state = LIFE_FAULTED;
         r->fault = !stopped ? LIFE_FAULT_STOP_REFUSED : LIFE_FAULT_STOP_LATE;
@@ -119,27 +122,42 @@ void app_life_note_tasks(app_life_t *r, uint32_t tasks_left) {
     r->tasks_left = tasks_left > UINT8_MAX ? UINT8_MAX : (uint8_t)tasks_left;
 }
 
-life_wait_t app_life_wait(app_life_t const *r, uint32_t now_ms) {
+life_wait_t app_life_wait_verdict(app_life_t const *r, life_reason_t own, uint32_t since_ms, uint32_t now_ms) {
     switch (r->state) {
     case LIFE_STOPPING:
-        return reached(now_ms, r->deadline_ms) ? LIFE_WAIT_OVERDUE : LIFE_WAIT_PENDING;
+        // The waiter's own bound, from when it began to wait: a restart behind a hung update hook still gives that
+        // hook its 8 s, as the restart did when it ran the hook itself
+        return reached(now_ms, since_ms + app_life_deadline_ms(own)) ? LIFE_WAIT_OVERDUE : LIFE_WAIT_PENDING;
     case LIFE_STOPPED:
         return LIFE_WAIT_STOPPED;
+    case LIFE_FAULTED:
+        // Late is still stopped: the hook said so, only after its deadline
+        return r->fault == LIFE_FAULT_STOP_LATE ? LIFE_WAIT_STOPPED : LIFE_WAIT_FAILED;
     default:
         return LIFE_WAIT_FAILED;
     }
 }
 
-void app_life_view(int const *ids, int depth, int app_id, int app_lo, int app_hi, bool *shown, bool *on_top) {
+int app_life_screen_owner(int id, int pushed_slot, int app_lo, int app_hi, int settings_base) {
+    if (id >= app_lo && id <= app_hi) {
+        return id - app_lo + 1;
+    }
+    if (id >= settings_base && id <= settings_base + (app_hi - app_lo)) {
+        return id - settings_base + 1;
+    }
+    return pushed_slot > 0 ? pushed_slot : 0;
+}
+
+void app_life_view(int const *owners, int depth, int slot, bool *shown, bool *on_top) {
     bool other_above = false;
     *shown           = false;
     *on_top          = false;
-    for (int i = depth - 1; i >= 0; i--) {
-        if (ids[i] == app_id) {
+    for (int i = depth - 1; slot > 0 && i >= 0; i--) {
+        if (owners[i] == slot) {
             *shown  = true;
-            *on_top = !other_above; // the app's own pages and the OS's (Settings, a dialog page) above it do not count
+            *on_top = !other_above; // the OS's pages above it (Settings, a dialog page) do not count
             return;
         }
-        other_above = other_above || (ids[i] >= app_lo && ids[i] <= app_hi);
+        other_above = other_above || owners[i] > 0;
     }
 }

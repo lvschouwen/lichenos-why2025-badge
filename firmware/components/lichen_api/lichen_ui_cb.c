@@ -110,12 +110,27 @@ lv_timer_t *lichen_ui_timer_create(lv_timer_cb_t cb, uint32_t period_ms, void *u
 // A booked timer is a #349 wrapper timer (so it runs as its app) whose user data is its handle in the book. The book is
 // a list of claims, LVGL's timer list is the truth: a timer is only deleted after it was found there with this file's
 // trampoline, record and handle, so a timer the app deleted itself (lv_timer_delete), or memory LVGL reused for another
-// timer, is never deleted twice. Internal .bss (~0.3 KB), the LVGL task only (all callers hold the LVGL lock).
+// timer, is never deleted twice. Internal .bss (~0.3 KB), the LVGL task only (all callers hold the LVGL lock): the
+// debug lock-owner check (#225, on by default) counts a caller without it, since a start allocates through lv_malloc
+// and a stop frees through lv_free; the drop is queued onto the LVGL task by construction.
 
 static char const TIMER_TAG[] = "timer";
 
 static timer_book_t s_timers;
 static uint8_t      s_timer_count[APP_CTX_SLOTS]; // per context slot: stop(reason) reads it from its own task
+static bool         s_timer_dead[APP_CTX_SLOTS];  // per context slot: the app stopped (lichen_sys_timer_kill)
+
+static bool ctx_dead(uint32_t ctx) {
+    uint32_t slot = ctx & ((1u << APP_CTX_SLOT_BITS) - 1u);
+    return slot < APP_CTX_SLOTS && __atomic_load_n(&s_timer_dead[slot], __ATOMIC_ACQUIRE);
+}
+
+static void dead_set(uint32_t ctx, bool dead) {
+    uint32_t slot = ctx & ((1u << APP_CTX_SLOT_BITS) - 1u);
+    if (slot < APP_CTX_SLOTS) {
+        __atomic_store_n(&s_timer_dead[slot], dead, __ATOMIC_RELEASE);
+    }
+}
 
 static void count_note(uint32_t ctx) {
     uint32_t slot = ctx & ((1u << APP_CTX_SLOT_BITS) - 1u);
@@ -125,8 +140,14 @@ static void count_note(uint32_t ctx) {
 }
 
 static void booked_cb(lv_timer_t *t) {
-    timer_slot_t const *slot = timer_book_find(&s_timers, (uint32_t)(uintptr_t)t->user_data);
-    if (slot) {
+    uint32_t            h    = (uint32_t)(uintptr_t)t->user_data;
+    timer_slot_t const *slot = timer_book_find(&s_timers, h);
+    if (slot && ctx_dead(slot->ctx)) {
+        uint32_t ctx = slot->ctx; // its app stopped and the drop did not get here first: it ends itself
+        timer_book_remove(&s_timers, h);
+        count_note(ctx);
+        lv_timer_delete(t);
+    } else if (slot) {
         slot->cb(slot->arg); // may stop its own timer, which clears the slot: nothing reads it afterwards
     }
 }
@@ -155,7 +176,7 @@ static void timers_tidy(void) {
 }
 
 lichen_timer_t lichen_timer_start(lichen_ctx_t ctx, uint32_t period_ms, void (*cb)(void *arg), void *arg) {
-    if (!cb || !period_ms || !lichen_sys_ctx_resolve(ctx, NULL, "lichen_timer_start")) {
+    if (!cb || !period_ms || ctx_dead(ctx) || !lichen_sys_ctx_resolve(ctx, NULL, "lichen_timer_start")) {
         return LICHEN_TIMER_NONE; // a refused ctx is logged and counted by the context table
     }
     uint32_t h = timer_book_add(&s_timers, ctx, cb, arg);
@@ -180,8 +201,8 @@ lichen_timer_t lichen_timer_start(lichen_ctx_t ctx, uint32_t period_ms, void (*c
 
 bool lichen_timer_stop(lichen_ctx_t ctx, lichen_timer_t timer) {
     timer_slot_t const *slot = timer_book_find(&s_timers, timer);
-    if (!slot || slot->ctx != ctx) {
-        return false;
+    if (!slot || slot->ctx != ctx || ctx_dead(ctx)) {
+        return false; // a dead app's timers are the drop's (or end themselves at their next tick)
     }
     lv_timer_t *t = live_timer(timer);
     timer_book_remove(&s_timers, timer);
@@ -197,6 +218,14 @@ size_t lichen_sys_timer_count(uint32_t ctx) {
     return slot < APP_CTX_SLOTS ? __atomic_load_n(&s_timer_count[slot], __ATOMIC_RELAXED) : 0;
 }
 
+void lichen_sys_timer_kill(uint32_t ctx) {
+    dead_set(ctx, true);
+}
+
+void lichen_sys_timer_revive(uint32_t ctx) {
+    dead_set(ctx, false);
+}
+
 void lichen_sys_timer_drop(uint32_t ctx) {
     size_t   from = 0, dropped = 0;
     uint32_t h;
@@ -210,7 +239,6 @@ void lichen_sys_timer_drop(uint32_t ctx) {
     }
     count_note(ctx);
     if (dropped) {
-        ESP_LOGI(TIMER_TAG, "ctx 0x%08lx: %u booked timer(s) dropped with its stop", (unsigned long)ctx,
-                 (unsigned)dropped);
+        ESP_LOGI(TIMER_TAG, "0x%08lx: %u dropped at its stop", (unsigned long)ctx, (unsigned)dropped);
     }
 }

@@ -4,6 +4,7 @@
 #include "lichen_sys_life.h"
 #include "lichen_sys_app.h"
 
+#include "app_ctx.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -39,8 +40,10 @@ void lichen_sys_life_started(size_t index) {
     portENTER_CRITICAL(&s_mux);
     bool ok = app_life_started(&s_life[index]);
     portEXIT_CRITICAL(&s_mux);
-    if (!ok) {
-        ESP_LOGW(TAG, "%s: background start not recorded: the app is past registered", app_label(index));
+    if (ok) {
+        lichen_sys_timer_revive(lichen_sys_app_ctx_at(index)); // a restarted app may book timers again
+    } else {
+        ESP_LOGW(TAG, "%s: background start not recorded", app_label(index));
     }
 }
 
@@ -53,14 +56,25 @@ void lichen_sys_life_fault_crashes(size_t index) {
     portEXIT_CRITICAL(&s_mux);
 }
 
-void lichen_sys_life_screens(int const *ids, int depth) {
+// The app slot (index + 1) ctx is the context of, 0 for the OS's or one that is not an app's
+static int slot_of_ctx(uint32_t ctx, size_t apps) {
+    size_t slot = ctx & ((1u << APP_CTX_SLOT_BITS) - 1u);
+    return slot >= 1 && slot <= apps && lichen_sys_app_ctx_at(slot - 1) == ctx ? (int)slot : 0;
+}
+
+void lichen_sys_life_screens(int const *ids, uint32_t const *ctxs, int depth) {
     size_t apps = lichen_app_count();
+    int    owners[LIFE_SCREENS_MAX] = {0};
+    depth = depth < LIFE_SCREENS_MAX ? depth : LIFE_SCREENS_MAX;
+    for (int f = 0; f < depth; f++) {
+        owners[f] = app_life_screen_owner(ids[f], slot_of_ctx(ctxs[f], apps), 1, SCREEN_APP_MAX, SCREEN_APP_BASE);
+    }
     for (size_t i = 0; i < apps && i < LICHEN_MAX_APPS; i++) {
         bool shown, on_top;
-        app_life_view(ids, depth, 1 + (int)i, 1, SCREEN_APP_MAX, &shown, &on_top);
+        app_life_view(owners, depth, 1 + (int)i, &shown, &on_top);
         portENTER_CRITICAL(&s_mux);
-        bool changed = app_life_show(&s_life[i], shown, on_top);
-        uint8_t state = s_life[i].state;
+        bool    changed = app_life_show(&s_life[i], shown, on_top);
+        uint8_t state   = s_life[i].state;
         portEXIT_CRITICAL(&s_mux);
         if (changed) {
             ESP_LOGD(TAG, "%s %s", app_label(i), app_life_state_name((life_state_t)state));
@@ -93,15 +107,19 @@ life_state_t lichen_sys_life_stop_end(size_t index, bool stopped, uint32_t tasks
     return got;
 }
 
-life_wait_t lichen_sys_life_wait(size_t index) {
+life_wait_t lichen_sys_life_wait(size_t index, life_reason_t own, uint32_t since_ms) {
     if (!index_ok(index)) {
         return LIFE_WAIT_FAILED;
     }
     uint32_t now = now_ms();
     portENTER_CRITICAL(&s_mux);
-    life_wait_t got = app_life_wait(&s_life[index], now);
+    life_wait_t got = app_life_wait_verdict(&s_life[index], own, since_ms, now);
     portEXIT_CRITICAL(&s_mux);
     return got;
+}
+
+uint32_t lichen_sys_life_now_ms(void) {
+    return now_ms();
 }
 
 bool lichen_sys_life_get(size_t index, app_life_t *out) {
@@ -121,17 +139,12 @@ void lichen_sys_life_console(void) {
         if (!lichen_sys_life_get(i, &r)) {
             break;
         }
-        unsigned timers = (unsigned)lichen_sys_timer_count(lichen_sys_app_ctx_at(i));
-        if (!r.stops) {
-            console_reply("app life %s: %s (fault %s), %u booked timer(s)", app_label(i),
-                          app_life_state_name((life_state_t)r.state), app_life_fault_name((life_fault_t)r.fault), timers);
-            continue;
-        }
-        console_reply("app life %s: %s (fault %s), %u booked timer(s); %u stop(s), the last for %s took %u ms, %u "
-                      "task(s) left",
-                      app_label(i), app_life_state_name((life_state_t)r.state),
-                      app_life_fault_name((life_fault_t)r.fault), timers, (unsigned)r.stops,
-                      app_life_reason_name((life_reason_t)r.reason), (unsigned)r.took_ms, (unsigned)r.tasks_left);
+        // One line per app; the stop part reads "0 stops" until one happened
+        console_reply("app life %s: %s, fault %s, %u timers, %u stops (last %s, %u ms, %u tasks left)", app_label(i),
+                      app_life_state_name((life_state_t)r.state), app_life_fault_name((life_fault_t)r.fault),
+                      (unsigned)lichen_sys_timer_count(lichen_sys_app_ctx_at(i)), (unsigned)r.stops,
+                      r.stops ? app_life_reason_name((life_reason_t)r.reason) : "-", (unsigned)r.took_ms,
+                      (unsigned)r.tasks_left);
     }
     console_reply("app life: %u apps", (unsigned)apps);
 }

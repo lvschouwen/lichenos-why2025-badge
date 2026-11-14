@@ -42,6 +42,7 @@ typedef struct {
     void       *on_esc_arg;
     void      (*on_search)(void *); // shell_on_search() (#79)
     void       *on_search_arg;
+    uint32_t    ctx; // the context it was opened in (lichen_ctx_self): the app it belongs to, for the lifecycle (#231)
 } frame_t;
 
 shell_sources_t shell_sources;
@@ -99,12 +100,15 @@ void shell_refocus(void) {
 // Every change of the stack ends in show_top: the apps' lifecycle follows it (#231, OPEN or SUSPENDED while a screen of
 // theirs is on the stack). Only the records' spinlock, nothing that waits, under the LVGL lock.
 static void life_sync(void) {
-    int ids[NAV_MAX_DEPTH];
-    int depth = nav_depth();
-    for (int i = 0; i < depth && i < NAV_MAX_DEPTH; i++) {
-        ids[i] = nav_at(i);
+    _Static_assert(NAV_MAX_DEPTH <= LIFE_SCREENS_MAX, "the lifecycle looks at the whole stack");
+    int      ids[NAV_MAX_DEPTH];
+    uint32_t ctxs[NAV_MAX_DEPTH];
+    int      depth = nav_depth() < NAV_MAX_DEPTH ? nav_depth() : NAV_MAX_DEPTH;
+    for (int i = 0; i < depth; i++) {
+        ids[i]  = nav_at(i);
+        ctxs[i] = frames[i].ctx;
     }
-    lichen_sys_life_screens(ids, depth < NAV_MAX_DEPTH ? depth : NAV_MAX_DEPTH);
+    lichen_sys_life_screens(ids, ctxs, depth);
 }
 
 static void show_top(void) {
@@ -310,6 +314,7 @@ static void new_home_frame(frame_t *frame) {
     lv_group_add_obj(frame->group, frame->screen);
     frame->on_esc     = home_arrange_esc; // arranging is a state of home, not a screen of its own (#189)
     frame->on_esc_arg = frame->screen;
+    frame->ctx        = 0; // home is the OS's
 }
 
 static void first_run_cb(lv_timer_t *timer) {
@@ -514,6 +519,7 @@ static void build_in_group(void *arg) {
 }
 
 void shell_open_keyed_impl(lv_obj_t *(*build)(void), int screen_id, uint32_t key) {
+    uint32_t opener = lichen_ctx_self(); // the app opening it (its hook, callback or queued call), else the OS
     lichen_sys_ui_lock(0);
     if (!frames[0].screen || home_settling()) {
         ESP_LOGW(TAG, "screen %d not opened (still booting)", screen_id);
@@ -546,7 +552,7 @@ void shell_open_keyed_impl(lv_obj_t *(*build)(void), int screen_id, uint32_t key
         lv_group_add_obj(group, screen); // keys still reach a screen without focusable widgets
         shell_no_arrow_scroll(screen);
     }
-    frames[nav_depth() - 1] = (frame_t){screen, group, job.on_esc, job.on_esc_arg, job.on_search, job.on_search_arg};
+    frames[nav_depth() - 1] = (frame_t){screen, group, job.on_esc, job.on_esc_arg, job.on_search, job.on_search_arg, opener};
     show_top();
     lichen_sys_ui_unlock();
 }
