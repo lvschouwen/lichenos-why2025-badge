@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
-#define FILE_REPLACE_PATH_MAX 96 // longest <path>; the side names add 4
+#define FILE_REPLACE_PATH_MAX 128 // longest <path>; the side names add 4
 
 typedef struct {
     bool (*write)(void *ctx, char const *path, void const *buf, size_t len); // create or truncate, write, close

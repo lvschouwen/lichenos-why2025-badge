@@ -3,35 +3,42 @@
 #include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
+// One buffer for both side names (the stack of a small task counts): side() rewrites the suffix, so a name is only
+// valid until the next call, and no operation needs both at once.
 typedef struct {
-    char fresh[FILE_REPLACE_PATH_MAX + 8];
-    char old[FILE_REPLACE_PATH_MAX + 8];
+    char   buf[FILE_REPLACE_PATH_MAX + 5];
+    size_t n;
 } sides_t;
 
 static bool sides_of(char const *path, sides_t *s) {
-    size_t n = strlen(path);
-    if (n == 0 || n > FILE_REPLACE_PATH_MAX) {
+    s->n = strlen(path);
+    if (s->n == 0 || s->n > FILE_REPLACE_PATH_MAX) {
         errno = ENAMETOOLONG;
         return false;
     }
-    memcpy(s->fresh, path, n);
-    memcpy(s->fresh + n, ".new", 5);
-    memcpy(s->old, path, n);
-    memcpy(s->old + n, ".old", 5);
+    memcpy(s->buf, path, s->n);
     return true;
 }
 
-static bool recover_sides(file_ops_t const *o, void *ctx, char const *path, sides_t const *s) {
-    if (o->exists(ctx, path) || !o->exists(ctx, s->old)) {
+static char const *side(sides_t *s, char const *suffix) {
+    memcpy(s->buf + s->n, suffix, 5);
+    return s->buf;
+}
+#define FRESH(s) side(s, ".new")
+#define OLD(s)   side(s, ".old")
+
+static bool recover_sides(file_ops_t const *o, void *ctx, char const *path, sides_t *s) {
+    if (o->exists(ctx, path) || !o->exists(ctx, OLD(s))) {
         return true; // nothing half done (a .new beside <path> or on its own is an unfinished write)
     }
     // <path> was moved aside: the finished .new is the newer copy, the .old the previous one
-    char const *from = o->exists(ctx, s->fresh) ? s->fresh : s->old;
-    if (!o->rename(ctx, from, path)) {
+    bool fresh = o->exists(ctx, FRESH(s));
+    if (!o->rename(ctx, fresh ? FRESH(s) : OLD(s), path)) {
         return false;
     }
-    o->remove(ctx, s->old);
+    o->remove(ctx, OLD(s));
     return true;
 }
 
@@ -40,17 +47,17 @@ bool file_recover_ops(file_ops_t const *o, void *ctx, char const *path, bool fat
     return !fat || !sides_of(path, &s) || recover_sides(o, ctx, path, &s);
 }
 
-static bool swap_fat(file_ops_t const *o, void *ctx, char const *path, sides_t const *s) {
+static bool swap_fat(file_ops_t const *o, void *ctx, char const *path, sides_t *s) {
     // From here .new is complete. A stale .old is older than <path> and would make the rename below fail.
-    if (!o->remove(ctx, s->old)) {
+    if (!o->remove(ctx, OLD(s))) {
         return false;
     }
-    bool had = o->rename(ctx, path, s->old); // false also when there is no <path> yet
-    if (!o->rename(ctx, s->fresh, path)) {
+    bool had = o->rename(ctx, path, OLD(s)); // false also when there is no <path> yet
+    if (!o->rename(ctx, FRESH(s), path)) {
         return false; // do not undo: that would be another window; the recovery finds .new (or .old)
     }
     if (had) {
-        o->remove(ctx, s->old); // best effort: a leftover is older than <path> and never preferred
+        o->remove(ctx, OLD(s)); // best effort: a leftover is older than <path> and never preferred
     }
     return true;
 }
@@ -63,16 +70,16 @@ bool file_replace_ops(file_ops_t const *o, void *ctx, char const *path, void con
     if (fat && !recover_sides(o, ctx, path, &s)) {
         return false; // a copy is still waiting: writing .new now would overwrite the one the recovery needs
     }
-    if (!o->write(ctx, s.fresh, buf, len)) {
+    if (!o->write(ctx, FRESH(&s), buf, len)) {
         int err = errno;
-        o->remove(ctx, s.fresh);
+        o->remove(ctx, FRESH(&s));
         errno = err;
         return false;
     }
-    bool ok = fat ? swap_fat(o, ctx, path, &s) : o->rename(ctx, s.fresh, path);
+    bool ok = fat ? swap_fat(o, ctx, path, &s) : o->rename(ctx, FRESH(&s), path);
     if (!ok && !fat) {
         int err = errno;
-        o->remove(ctx, s.fresh);
+        o->remove(ctx, FRESH(&s));
         errno = err;
     }
     return ok;
@@ -101,7 +108,7 @@ static bool posix_rename(void *ctx, char const *from, char const *to) {
 
 static bool posix_remove(void *ctx, char const *path) {
     (void)ctx;
-    return remove(path) == 0 || errno == ENOENT;
+    return unlink(path) == 0 || errno == ENOENT; // not remove(): that would take an empty directory too
 }
 
 static bool posix_exists(void *ctx, char const *path) {
