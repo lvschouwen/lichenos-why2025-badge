@@ -2621,3 +2621,9 @@ target_include_directories(radio_bounds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_options(radio_bounds_test PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(radio_bounds_test PRIVATE m)
 add_test(NAME radio_bounds_test COMMAND radio_bounds_test)
+
+# #463: the atomic file replace (storage/file_replace.c), cut after every step on a fake LittleFS and FAT
+add_executable(file_replace_test ${CMAKE_CURRENT_SOURCE_DIR}/file_replace_test.c ${NPT_FW}/storage/file_replace.c)
+target_include_directories(file_replace_test PRIVATE ${NPT_FW}/storage)
+target_compile_options(file_replace_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME file_replace_test COMMAND file_replace_test)
