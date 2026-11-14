@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Soak report (#424, #430, #407). Three parts:
+"""Soak report (#424, #430, #407): `census`, `trend` and `expected`.
 `soak_report.py census <serial.log> [--warmup-h 2] [--window-h 2] [--gap-min 30] [--top 40]` counts every log line kind
 per window and reports late kinds, rising rates and rising numbers (tools/soak_census.py);
 `soak_report.py trend <samples.csv> [--warmup-h 2] [--interval-s 600] [--allow FILE]` tests every numeric column for a
@@ -188,6 +188,10 @@ def render(rows: list, samples: List[soak_parse.Sample], log_given: bool = True)
     return "\n".join(lines)
 
 
+USAGE_CENSUS = "usage: soak_report.py census <serial-log> [--warmup-h H] [--window-h H] [--gap-min M] [--top N]"
+USAGE_TREND = "usage: soak_report.py trend <samples.csv> [--warmup-h H] [--interval-s S] [--allow FILE]"
+
+
 def float_options(rest: List[str], spec: Dict[str, float]) -> Optional[str]:
     """Parse `--name value` pairs (numbers) into spec in place; -> the first unknown option, or None."""
     while rest:
@@ -200,7 +204,10 @@ def float_options(rest: List[str], spec: Dict[str, float]) -> Optional[str]:
 
 def run_census(args: List[str]) -> int:
     spec = {"--warmup-h": 2.0, "--window-h": 2.0, "--gap-min": 30.0, "--top": 40.0}
-    bad = float_options(args[1:], spec) if args else "census <serial-log>"
+    if not args:
+        print(USAGE_CENSUS, file=sys.stderr)
+        return 2
+    bad = float_options(args[1:], spec)
     if bad is None and (spec["--window-h"] <= 0 or spec["--warmup-h"] < 0):
         bad = "--window-h must be positive"
     if bad is not None:
@@ -223,7 +230,10 @@ def run_trend(args: List[str]) -> int:
         allow_path = rest[i + 1] if i + 1 < len(rest) else ""
         del rest[i:i + 2]
     spec = {"--warmup-h": 2.0, "--interval-s": 600.0}
-    bad = float_options(rest, spec) if args and allow_path else "trend <csv> [--allow FILE]"
+    if not args or not allow_path:
+        print(USAGE_TREND, file=sys.stderr)
+        return 2
+    bad = float_options(rest, spec)
     if bad is not None:
         print("soak_report: bad option " + bad, file=sys.stderr)
         return 2
@@ -243,9 +253,9 @@ def main(argv: Sequence[str]) -> int:
         print(__doc__)
         return 0
     try:
-        if len(args) >= 2 and args[0] == "census":
+        if args and args[0] == "census":
             return run_census(args[1:])
-        if len(args) >= 2 and args[0] == "trend":
+        if args and args[0] == "trend":
             return run_trend(args[1:])
     except ValueError as e:
         print("soak_report: %s" % e, file=sys.stderr)

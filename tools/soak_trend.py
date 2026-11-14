@@ -97,7 +97,7 @@ def series(rows: List[soak_parse.Sample], times: List[float], keep: Sequence[int
 
 
 def judge(xs: List[float], ys: List[float]) -> Optional[dict]:
-    """The quarter test of one column, or None when it does not move (or has too few values)."""
+    """The quarter and slope tests of one column, or None when it does not move (or has too few values)."""
     if len(ys) < MIN_POINTS:
         return None
     slope, icpt = theil_sen(xs, ys)
@@ -105,10 +105,12 @@ def judge(xs: List[float], ys: List[float]) -> Optional[dict]:
     q = len(ys) // 4
     first, last = statistics.median(ys[:q]), statistics.median(ys[-q:])
     delta = last - first
-    limit = SIGMAS * sigma * math.sqrt(2.0 / q)
-    if delta == 0 or abs(delta) <= limit or (slope > 0) != (delta > 0):
+    span = xs[-1] - xs[0]
+    # Either test fires: the quarters (a step that starts late leaves the slope at 0) or the fitted drift over the run
+    # (a ramp whose quarters differ little). With no noise at all (sigma 0) any change counts.
+    if abs(delta) <= SIGMAS * sigma * math.sqrt(2.0 / q) and abs(slope * span) <= SIGMAS * sigma:
         return None
-    return {"first": first, "last": last, "slope": slope, "noise": sigma}
+    return {"first": first, "last": last, "slope": slope, "noise": sigma, "up": (delta if delta else slope) > 0}
 
 
 def num(v: float) -> str:
@@ -117,7 +119,7 @@ def num(v: float) -> str:
 
 def move_line(key: str, m: dict) -> str:
     return "  %-14s %s  first quarter median %s -> last %s  (slope %s/h, noise %s)" % (
-        key, "rises" if m["last"] > m["first"] else "falls", num(m["first"]), num(m["last"]), num(m["slope"]),
+        key, "rises" if m["up"] else "falls", num(m["first"]), num(m["last"]), num(m["slope"]),
         num(m["noise"]))
 
 
@@ -157,7 +159,7 @@ def fit_longest(rows, times, reboot_at, allow, warmup_h) -> List[str]:
         m = judge(*cols[key])
         if m is None:
             continue
-        (allowed if key in allow and m["last"] > m["first"] else moving).append((key, m))
+        (allowed if key in allow and m["up"] else moving).append((key, m))
     out.append("  moving (not on the allow list): %d" % len(moving))
     out += [move_line(k, m) for k, m in moving]
     out.append("  rising as allowed: %d%s" % (len(allowed), " (%s)" % ", ".join(k for k, _ in allowed) if allowed else ""))

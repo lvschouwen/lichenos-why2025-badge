@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(HERE, ".."))
 import soak_census as sc  # noqa: E402
 import soak_report as sr  # noqa: E402
 import soak_trend as st  # noqa: E402
+import soak_vocab as sv  # noqa: E402
 
 H = 3600
 
@@ -34,8 +35,14 @@ def log_lines(hours, every, extra=None, start=10 * H):
     return out
 
 
-def census(lines, warmup_h=2, window_h=2):
-    return sc.read_census(iter(lines), warmup_h * H, window_h * H, 1800)
+# The words the fixtures use as "firmware words": a test never depends on the checked-in vocabulary's content.
+TEST_VOCAB = frozenset("""app tick ok fs new thing happened count took ms wifi retry rf level dbm mesh ping to node at name
+    got advert neighbour seen connected sending from rx hello label foo bar said here msg online soak console echo
+    for and more words peer rssi pkt len snr bytes in lost send""".split())
+
+
+def census(lines, warmup_h=2, window_h=2, vocab=TEST_VOCAB):
+    return sc.read_census(iter(lines), warmup_h * H, window_h * H, 1800, vocab)
 
 
 def report(lines, **kw):
@@ -110,6 +117,18 @@ class CensusTest(unittest.TestCase):
         out = report(a + b)
         self.assertIn("boot restarts (the boot-relative stamp dropped): 1; line 101", out)
 
+    def test_rom_banner_starts_a_segment_without_esp_stamps(self):
+        a = ["%s I (%d) app: tick ok" % (stamp(10 * H + i * 60), 60000 + i * 60000) for i in range(30)]
+        banner = ["%s ESP-ROM:esp32p4-eco2-20240710" % stamp(10 * H + 30 * 60), "%s rst:0x1 (POWERON),boot:0xc (SPI_FAST_FLASH_BOOT)" % stamp(10 * H + 30 * 60)]
+        b = ["%s I (%d) app: tick ok" % (stamp(10 * H + (31 + i) * 60), 90000 + i * 60000) for i in range(30)]   # larger than the last stamp before
+        c = census(a + banner + b)
+        self.assertEqual(c.clock.segments, [(31, c.clock.segments[0][1])])     # one segment for the two banner lines
+        self.assertIn("boot restarts (the boot-relative stamp dropped): 1; line 31", "\n".join(sc.census_report(c)))
+
+    def test_banner_that_opens_the_log_is_not_a_restart(self):
+        c = census(["ESP-ROM:esp32p4", "rst:0x1 (POWERON),boot:0xc"] + log_lines(1, 60))
+        self.assertEqual(c.clock.segments, [])
+
     def test_log_gap_is_reported(self):
         lines = log_lines(1, 60) + log_lines(1, 60, start=10 * H + 3 * H)
         self.assertIn("log gaps over 30 min: 1", report(lines))
@@ -130,62 +149,120 @@ class CensusTest(unittest.TestCase):
 
 
 class ScrubTest(unittest.TestCase):
-    SECRETS = ["Wren", "192.0.2.77", "2001:db8::1f", "aa:bb:cc:dd:ee:01", "deadbeefcafe0123", "Lichenville", "hello mesh",
-               "/sdcard/wren/notes.txt", "0x3ffb1234", "tok3nAbCdEfGhIjKlMnOpQrStUvWxYz"]
-    LINES = [
-        'I (100) mesh: rx from Wren: hello mesh at -61 dBm',
-        'W (101) wifi: connected to "Lichenville" ip 192.0.2.77 gw 192.0.2.1',
-        'I (102) wifi: ssid=Lichenville bssid aa:bb:cc:dd:ee:01 v6 2001:db8::1f',
-        'I (103) mesh: contact name=Wren key deadbeefcafe0123 sent',
-        'I (104) fs: open /sdcard/wren/notes.txt failed 0x3ffb1234 err 5',
-        'I (105) net: token tok3nAbCdEfGhIjKlMnOpQrStUvWxYz accepted',
-        'I (106) mesh: channel Lichenville joined, 3 members',
-        "console echo for Wren 192.0.2.77 and more words",
+    # Every line a reviewer found leaking on 65b1bd88, plus the first drafts' own: (text after `I (123) `, words that
+    # must never be printed).
+    LEAKS = [
+        ("mesh: got advert Alice Smith", ["Alice", "Smith"]),
+        ("mesh: neighbour Bob-the-Builder seen", ["Bob", "Builder"]),
+        ("wifi: connected Home_WiFi_Net ok", ["Home", "WiFi", "Net"]),
+        ("mesh: label=Jan", ["Jan"]),
+        ("mesh: foo=Jan Pietersen bar=3", ["Jan", "Pietersen"]),
+        ("mesh: sending to Alice: hi there", ["Alice", "hi", "there"]),
+        ("mesh: from: Alice", ["Alice"]),
+        ("mesh: Rx: Alice: hello bob", ["Alice", "hello", "bob"]),
+        ("mesh: Alice", ["Alice"]),
+        ("mesh: [Alice] hello", ["Alice", "hello"]),
+        ("mesh: J\u00fcrgen M\u00fcller \u65e5\u672c\u8a9e online", ["rgen", "ller", "\u65e5"]),
+        ("mesh: from Alice Smith", ["Alice", "Smith"]),
+        ("mesh: aabbcc-ddeeff", ["aabbcc", "ddeeff"]),
+        ('mesh: msg "he said \\"secret\\" here" ok', ["secret", "said", "here"]),
+        ("wifi: connected to Lichenville ip 192.0.2.77 gw 192.0.2.1 aa:bb:cc:dd:ee:01 2001:db8::1f", ["Lichenville", "192", "ee:01", "db8"]),
     ]
 
-    def test_nothing_private_reaches_the_report(self):
-        c = census(self.LINES * 3, warmup_h=0)
-        out = "\n".join(sc.census_report(c)) + "\n".join(c.kinds)
-        for secret in self.SECRETS:
-            self.assertNotIn(secret, out)
-        self.assertNotIn("Wren", out)
+    def kinds(self, text, **kw):
+        return list(census(["I (100) " + text] * 2, warmup_h=0, **kw).kinds)
 
-    def test_names_never_reach_a_late_kind_line(self):
-        lines = log_lines(7, 60, lambda t: ['W (@MS@) mesh: ping to node name=Wren at 192.0.2.77'] if t == 4 * H else [])
-        out = report(lines)
-        self.assertIn("kinds first seen after the warm-up: 1", out)
-        for secret in ("Wren", "192.0.2.77"):
-            self.assertNotIn(secret, out)
+    def test_nothing_private_reaches_the_kind_or_the_report(self):
+        for vocab in (TEST_VOCAB, None):          # the fixture vocabulary and the checked-in one
+            for text, bad in self.LEAKS:
+                c = census(["I (100) " + text] * 3, warmup_h=0, vocab=vocab)
+                out = "\n".join(sc.census_report(c)) + "\n".join(c.kinds)
+                for word in bad:
+                    self.assertNotIn(word, out, "%r leaked from %r" % (word, text))
 
-    def test_kinds_hold_no_digits(self):
-        c = census(self.LINES, warmup_h=0)
-        for name in c.kinds:
-            self.assertNotRegex(name, r"\d", name)
+    def test_console_line_without_a_stamp_prints_no_first_word(self):
+        out = self.kinds_of(["12:00:01 Wren says hi", "12:00:02 >> mesh send Wren hello"])
+        self.assertEqual(sorted(out), ["-: <w>", "-: >> mesh <w>"])
+        self.assertEqual(self.kinds_of(["12:00:03 hello"]), ["-: hello"])      # a vocabulary word may print
+
+    def kinds_of(self, lines):
+        return list(census(lines, warmup_h=0).kinds)
+
+    def test_a_token_with_a_capital_digit_or_non_ascii_is_not_printed(self):
+        c = census(["I (1) mesh: Hello hELLo hello1 h\u00e9llo hello"], warmup_h=0)
+        self.assertEqual(list(c.kinds), ["I mesh: Hello <w> hello"])
+
+    def test_the_tag_is_printed_only_from_the_vocabulary(self):
+        c = census(["I (1) Wren: tick ok", "I (2) mesh: tick ok"], warmup_h=0)
+        self.assertEqual(sorted(c.kinds), ["I <w>: tick ok", "I mesh: tick ok"])
+
+    def test_numbers_with_a_unit_or_safe_key_are_tracked_others_not(self):
+        s = sc.Scrubber(TEST_VOCAB)
+        k, nums = s.text("took 812 ms at lat 52.3731 lon 4.8922 count=7 rssi=-61 id=99 n 5%")
+        self.assertEqual(k, "took # ms at <w> # <w> # count=# rssi=# <w>=# <w> #%")
+        shown = [v for v, show in nums if show]
+        self.assertEqual(shown, [812, 7, -61, 5])
+        self.assertTrue(all(v is None for v, show in nums if not show))
+
+    def test_coordinates_never_get_statistics(self):
+        vocab = TEST_VOCAB | {"lat", "lon"}
+        lines = log_lines(12, 60, lambda t: ["W (@MS@) rf: lat %d lon %d" % (52 + t // 3600, 4 + t // 600),
+                                             "W (@MS@) rf: lat=%d lon=%d" % (52 + t // 3600, 4 + t // 600)]
+                          if t % 600 == 0 else [])
+        c = census(lines, vocab=vocab)
+        self.assertEqual([k.nums for n, k in c.kinds.items() if n.startswith("W rf")], [{}, {}])
+        out = "\n".join(sc.census_report(c))
+        self.assertIn("numbers that rise (median or max, first window after warm-up -> last): 0", out)
+
+    def test_deny_listed_key_gets_no_statistics(self):
+        s = sc.Scrubber(TEST_VOCAB | {"port", "id"})
+        self.assertEqual([show for _, show in s.text("port=80 id=7 count=3")[1]], [False, False, True])      # count is a vocabulary key
+
+    def test_number_positions_are_capped(self):
+        c = census(["I (1) rf: " + " ".join("%d ms" % i for i in range(20))] * 3, warmup_h=0)
+        (k,) = c.kinds.values()
+        self.assertEqual(max(i for _, i in k.nums), sc.MAX_POSITIONS - 1)
 
     def test_numbers_are_taken_out_and_kept(self):
-        s = sc.Scrubber()
-        self.assertEqual(s.text("took 812 ms, 3 dropped, -61 dBm, 1.5 s"), ("took # ms, # dropped, # dBm, # s", [812, 3, -61, 1.5]))
-        self.assertEqual(s.text("took 9 ms, 4 dropped, -7 dBm, 2.25 s")[1], [9, 4, -7, 2.25])   # cached shape
-
-    def test_console_text_keeps_only_a_command_shaped_first_word(self):
-        c = census(["12:00:01 >> mesh send Wren hello", "12:00:02 soak1 v=1 up=5", "12:00:03 Wren says hi"], warmup_h=0)
-        self.assertEqual(sorted(c.kinds), ["-: <text>", "-: >>", "-: soak#"])
+        s = sc.Scrubber(TEST_VOCAB)
+        self.assertEqual(s.text("took 812 ms, 3 retry, -61 dbm, 1.5 s"), ("took # ms, # retry, # dbm, # s", [(812, True), (None, False), (None, False), (1.5, True)]))
+        self.assertEqual(s.text("took 9 ms, 4 retry, -7 dbm, 2.25 s")[1][3], (2.25, True))   # cached shape
 
     def test_unsafe_kind_is_withheld(self):
         self.assertEqual(sc.safe_kind("W a: x7"), "<withheld kind>")
+        self.assertEqual(sc.safe_kind("W a: x \u00e9"), "<withheld kind>")
         self.assertEqual(sc.safe_kind("W a: x #"), "W a: x #")
 
     def test_hex_id_with_long_digit_runs(self):
-        s = sc.Scrubber()
-        self.assertEqual(s.text("id 0000ce1a x")[0], "id <hex> x")
-        self.assertEqual(s.text("id 3fcb2a10 x")[0], "id <hex> x")
-        self.assertEqual(s.text("id 000000cf x")[0], "id <hex> x")
-        self.assertEqual(s.text("on c6 and esp32 now")[0], "on c# and esp# now")
+        s = sc.Scrubber(TEST_VOCAB)
+        for t in ("id 0000ce1a x", "id 3fcb2a10 x", "id 000000cf x"):
+            self.assertNotRegex(s.text(t)[0], "ce1a|3fcb|cf")
 
-    def test_decimal_and_ip_differ(self):
-        s = sc.Scrubber()
-        self.assertEqual(s.text("a 1.5 b")[0], "a # b")
-        self.assertEqual(s.text("a 1.5.6.7 b")[0], "a <addr> b")
+    def test_decimal_and_ip(self):
+        s = sc.Scrubber(TEST_VOCAB)
+        self.assertEqual(s.text("count 1.5 ok")[0], "count # ok")
+        self.assertNotIn("192", s.text("count 192.0.2.1 ok")[0])
+
+
+class VocabTest(unittest.TestCase):
+    def test_checked_in_vocabulary_is_what_the_generator_extracts(self):
+        with open(sv.VOCAB_FILE, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "\n".join(sv.extract()) + "\n", "stale: run tools/soak_vocab.py --write")
+
+    def test_extraction_rules(self):
+        src = ('static char const TAG[] = "boot_keys";\n'
+               'ESP_LOGW(TAG, "slot %-5s took %lu ms 0x1f: Retry\\n", name, x ? "yes" : "no");\n'
+               'console_reply("ok %d", 5);\n'
+               'printf("not a log word");\n')
+        self.assertEqual(sorted(sv.file_words(src)), ["boot", "keys", "ms", "no", "ok", "retry", "slot", "took", "yes"])
+
+    def test_vocabulary_is_ascii_lowercase_and_sorted(self):
+        words = sv.load()
+        self.assertGreater(len(words), 500)
+        self.assertTrue(all(w.isascii() and w.isalpha() and w == w.lower() for w in words))
+        with open(sv.VOCAB_FILE, encoding="utf-8") as f:
+            lines = f.read().split()
+        self.assertEqual(lines, sorted(lines))
 
 
 def csv_samples(n, **cols):
@@ -208,6 +285,17 @@ class TrendTest(unittest.TestCase):
         self.assertIn("moving (not on the allow list): 1", out)
         self.assertRegex(out, r"int +falls +first quarter median 1[0-9]+ -> last 1[0-9]+")
         self.assertNotIn("steady ", out)
+
+    def test_a_step_that_starts_late_is_reported(self):
+        out = trend(csv_samples(40, f=lambda i: 5.0 if i < 30 else 6.0), warmup_h=0)
+        self.assertRegex(out, r"f +rises +first quarter median 5 -> last 6")
+
+    def test_a_late_change_in_a_quiet_series_is_reported(self):
+        out = trend(csv_samples(40, g=lambda i: 5.0 if i < 35 else 5.1), warmup_h=0)
+        self.assertRegex(out, r"g +rises")
+
+    def test_a_constant_column_is_quiet(self):
+        self.assertIn("moving (not on the allow list): 0", trend(csv_samples(40, g=lambda i: 5.0), warmup_h=0))
 
     def test_noise_alone_is_quiet(self):
         out = trend(csv_samples(220, jitter=lambda i: 1000 + (i * 7919 % 13) - 6))
@@ -296,6 +384,12 @@ class CliTest(unittest.TestCase):
     def test_unreadable_input_exits_two(self):
         self.assertEqual(self.run_cli("census", "/nonexistent/x.log")[0], 2)
         self.assertEqual(self.run_cli("trend", "/nonexistent/x.csv")[0], 2)
+
+    def test_missing_file_prints_the_own_usage(self):
+        code, _, err = self.run_cli("census")
+        self.assertEqual((code, err.startswith("usage: soak_report.py census")), (2, True))
+        code, _, err = self.run_cli("trend")
+        self.assertEqual((code, err.startswith("usage: soak_report.py trend")), (2, True))
 
     def test_bad_option_exits_two(self):
         self.assertEqual(self.run_cli("census", "/nonexistent/x.log", "--bogus", "1")[0], 2)
