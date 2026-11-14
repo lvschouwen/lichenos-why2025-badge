@@ -14,7 +14,7 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-size	<merged-strings>	288425
+size	<merged-strings>	288469
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
@@ -111,13 +111,13 @@ size	liblichen_os.a	72853
 size	liblichen_random.a	63
 size	liblichen_shell.a	190979
 size	liblog.a	2726
-size	liblora.a	36059
+size	liblora.a	36197
 size	liblvgl__lvgl.a	541779
 size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820
-size	libmain.a	13319
+size	libmain.a	13367
 size	libmbedtls.a	22
-size	libmesh.a	404609
+size	libmesh.a	404651
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18856
 size	libnvs_sec_provider.a	2
