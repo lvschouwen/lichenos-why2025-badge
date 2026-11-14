@@ -441,12 +441,18 @@ static void *second_set(void *arg) {
 }
 
 static pthread_t second;
+static bool      joined;
 static bool      overlap_save(char const *next, void *arg) {
     bool ok = fake_save(next, arg); // the flash has it from here
     if (first_save) {
         first_save = false;
         pthread_create(&second, NULL, second_set, arg);
-        usleep(100 * 1000); // long enough for an unserialised second set to run through
+        if (!((safe_mode_sync_t const *)arg)->take) {
+            pthread_join(second, NULL); // unserialised: the second set runs through inside this save, deterministically
+            joined = true;
+        } else {
+            usleep(50 * 1000); // serialised: it must be waiting on the gate, not running
+        }
     }
     return ok;
 }
@@ -461,9 +467,12 @@ static void overlapping_sets(void) {
         shared[0]  = '\0';
         saved[0]   = '\0';
         first_save = true;
+        joined     = false;
         // the setter's arg reaches the save callback, which hands it to the second set
         CHECK(safe_mode_list_set_shared(runs[i], shared, sizeof(shared), "aaa", true, overlap_save, runs[i]));
-        pthread_join(second, NULL);
+        if (!joined) {
+            pthread_join(second, NULL);
+        }
         consistent[i] = strcmp(shared, saved) == 0;
         if (i == 0) {
             CHECK(strstr(shared, "aaa") && strstr(shared, "bbb")); // both sets took effect

@@ -68,6 +68,27 @@ void IRAM_ATTR __wrap_esp_panic_handler(panic_info_t *info) {
 
 // ---- queries -------------------------------------------------------------------------------------------------------
 
+// One change of the list at a time (#461): it spans a flash write, so a mutex, not s_mux. Static storage, created first
+// in safe_mode_boot_step. Taken by the setter (console task, Apps page job: never the LVGL task) and by switch_off (the
+// boot task, only once s_boot_done, which boot_step sets after creating it); the setter never calls switch_off and
+// switch_off calls nothing that takes it, so neither can wait on itself. s_off reads stay on s_mux alone.
+static StaticSemaphore_t s_set_buf;
+static SemaphoreHandle_t s_set_lock;
+
+static void set_take(void *arg) {
+    (void)arg;
+    if (s_set_lock) {
+        xSemaphoreTake(s_set_lock, portMAX_DELAY);
+    }
+}
+
+static void set_give(void *arg) {
+    (void)arg;
+    if (s_set_lock) {
+        xSemaphoreGive(s_set_lock);
+    }
+}
+
 static void switch_off(char const *id);
 
 bool safe_mode_background_off(char const *id, bool may_switch_off) {
@@ -130,15 +151,18 @@ static void switch_off(char const *id) {
     char list[SAFE_MODE_LIST_MAX];
     ESP_LOGW(TAG, "%s crashed %u times in %d boots%s: its background part is off until fw app background %s on", id,
              s_boot.named_crashes, SAFE_MODE_WINDOW, s_boot.in_callback ? " (in a screen callback)" : "", id);
+    set_take(NULL); // a setter's save must not interleave with this add and save (#461)
     portENTER_CRITICAL(&s_mux);
     bool added = safe_mode_list_add(s_off, sizeof(s_off), id);
     memcpy(list, s_off, sizeof(list));
     portEXIT_CRITICAL(&s_mux);
     if (!added) {
+        set_give(NULL);
         ESP_LOGE(TAG, "%s: no room in the list to switch its background off; it starts as usual", id);
         return;
     }
     save_list(list); // not saved: off this boot only
+    set_give(NULL);
 }
 
 // ---- fw app background / crash -------------------------------------------------------------------------------------
@@ -175,26 +199,6 @@ bool safe_mode_background_listed(char const *id) {
     bool listed = safe_mode_list_has(s_off, id);
     portEXIT_CRITICAL(&s_mux);
     return listed;
-}
-
-// One set at a time (#461): it spans a flash write, so a mutex, not s_mux. Static storage, created first in
-// safe_mode_boot_step (before any caller: the console command and the Apps page job both come later, and neither runs on
-// the LVGL task). The boot path (safe_mode_background_off, switch_off) never takes it, so it cannot wait on a setter.
-static StaticSemaphore_t s_set_buf;
-static SemaphoreHandle_t s_set_lock;
-
-static void set_take(void *arg) {
-    (void)arg;
-    if (s_set_lock) {
-        xSemaphoreTake(s_set_lock, portMAX_DELAY);
-    }
-}
-
-static void set_give(void *arg) {
-    (void)arg;
-    if (s_set_lock) {
-        xSemaphoreGive(s_set_lock);
-    }
 }
 
 static void list_enter(void *arg) {
