@@ -4,6 +4,7 @@
 
 #include "app_caps.h"
 #include "backlight.h"
+#include "main_rules.h"
 #include "battery.h"
 #include "lichen_sys_power.h"
 #include "board_i2c.h"
@@ -636,7 +637,7 @@ static void start_console(boot_ctx_t *ctx) {
     console_bind_boot_pending(ota_boot_pending); // MeshCore's on-air list waits for that boot (#420)
     soak_cmd_register(); // "fw soak" (#409), developer mode
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    console_register("noscreen", "noscreen (test: the next boot skips the display start, one boot only)", cmd_noscreen);
+    console_register_rules("noscreen", "noscreen (test: the next boot skips the display start, one boot only)", cmd_noscreen, NOSCREEN_RULES);
 #endif
     console_register("poweroff", "poweroff (save, then switch the badge off as Power > Power off does; works without a display)",
                      cmd_poweroff);
