@@ -30,7 +30,7 @@ params	firmware/components/lichen_shell/shot_blend.c:shot_blend_argb8888	10
 params	firmware/components/mesh/mesh_chat.c:mesh_conv_row	9
 params	firmware/components/mesh/mesh_hist.c:mesh_hist_compact	11
 params	firmware/components/mesh/radio_confirm.c:radio_confirm_needed	10
-size	<merged-strings>	285665
+size	<merged-strings>	285557
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
@@ -108,11 +108,11 @@ size	libespressif__i2c_bus.a	3208
 size	libespressif__mdns.a	38917
 size	libfatfs.a	30649
 size	libfreertos.a	33118
-size	libfw_console.a	14150
+size	libfw_console.a	14612
 size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
-size	libjoltwallet__littlefs.a	34374
+size	libjoltwallet__littlefs.a	34382
 size	liblichen_api.a	39903
 size	liblichen_apps.a	51808
 size	liblichen_boot.a	13082
@@ -143,7 +143,7 @@ size	libpthread.a	1229
 size	libriscv.a	1684
 size	libsdcard.a	10544
 size	libsdmmc.a	24355
-size	libsensors.a	29273
+size	libsensors.a	29275
 size	libsoc.a	793
 size	libspi_flash.a	16014
 size	libstdc++.a	1634
