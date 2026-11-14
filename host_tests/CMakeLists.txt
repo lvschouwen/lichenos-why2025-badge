@@ -2523,3 +2523,15 @@ target_link_libraries(crashlog_fmt_test PRIVATE lichen_text)
 target_link_libraries(notify_ring_test PRIVATE lichen_text)
 target_link_libraries(mesh_telem_test PRIVATE lichen_text)
 target_link_libraries(mesh_rhist_test PRIVATE lichen_text)
+
+# The update server's front door, pinned before its #447 split: every route with and without the token, wrong
+# methods, malformed heads and seeded mutations; and the token's text rules
+add_executable(ota_route_test ${CMAKE_CURRENT_SOURCE_DIR}/ota_route_test.c ${NPT_FW}/ota/ota_route.c ${NPT_FW}/ota/ota_proto.c)
+target_include_directories(ota_route_test PRIVATE ${NPT_FW}/ota ${NPT_FW}/fw_console)
+target_compile_options(ota_route_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME ota_route_test COMMAND ota_route_test)
+
+add_executable(ota_token_test ${CMAKE_CURRENT_SOURCE_DIR}/ota_token_test.c ${NPT_FW}/ota/ota_token.c)
+target_include_directories(ota_token_test PRIVATE ${NPT_FW}/ota)
+target_compile_options(ota_token_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME ota_token_test COMMAND ota_token_test)

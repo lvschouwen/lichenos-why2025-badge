@@ -34,6 +34,8 @@
 #include "ota_pieces.h"
 #include "ota_proto.h"
 #include "ota_rle.h"
+#include "ota_route.h"
+#include "ota_token.h"
 #include "ota_trial.h"
 #include "ota_valid.h"
 #include "miniz.h" // the ROM inflater
@@ -1485,14 +1487,10 @@ static bool handle_connection(int fd) {
     }
 
     ota_request_t req;
-    int           status = ota_parse_request(head_buf, head_len, &req);
+    char const   *why;
+    int           status = ota_request_admit(head_buf, head_len, token, &req, &why);
     if (status) {
-        respond(fd, status, "bad request");
-        return false;
-    }
-
-    if (ota_route_needs_token(req.route) && (!req.has_token || !ota_token_equal(req.token, token))) {
-        respond(fd, 401, "wrong or missing token");
+        respond(fd, status, "%s", why);
         return false;
     }
 
@@ -1556,16 +1554,6 @@ static bool handle_connection(int fd) {
 
 #define TOKEN_NVS_KEY "ota_token" // the copy that survives an unmounted /storage (#112)
 
-static bool token_text_valid(char const *text) {
-    for (int i = 0; i < OTA_TOKEN_LEN; i++) {
-        char c = text[i];
-        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
-            return false;
-        }
-    }
-    return true;
-}
-
 static bool read_token_file(char *out) {
     FILE *f = fopen(TOKEN_FILE, "r");
     if (!f) {
@@ -1575,7 +1563,7 @@ static bool read_token_file(char *out) {
     fread(text, 1, sizeof(text) - 1, f);
     fclose(f);
     text[OTA_TOKEN_LEN] = '\0';
-    if (!token_text_valid(text)) {
+    if (!ota_token_text_valid(text)) {
         return false;
     }
     strcpy(out, text);
@@ -1587,7 +1575,7 @@ static bool read_token_nvs(char *out) {
     if (!ota_os_secret_get(TOKEN_NVS_KEY, text, sizeof(text))) {
         return false;
     }
-    if (strlen(text) != OTA_TOKEN_LEN || !token_text_valid(text)) {
+    if (strlen(text) != OTA_TOKEN_LEN || !ota_token_text_valid(text)) {
         return false;
     }
     strcpy(out, text);
