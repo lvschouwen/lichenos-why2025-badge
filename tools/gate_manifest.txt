@@ -73,7 +73,9 @@ clock_source_age_s	-	unspecified	lichen_clock.h
 clock_source_text	-	unspecified	lichen_clock.h
 clock_sync_info	-	unspecified	lichen_clock.h
 clock_sync_snapshot	SYSTEM	unspecified	lichen_clock.h
+console_bind_boot_pending	SYSTEM	any	fw_console.h
 console_bind_dev_store	SYSTEM	unspecified	fw_console.h
+console_boot_pending	-	unspecified	fw_console.h
 console_dev_gate	-	unspecified	fw_console.h
 console_dev_mode	-	any	fw_console.h
 console_dev_set	SYSTEM	unspecified	fw_console.h
@@ -93,6 +95,7 @@ console_set_tap	SYSTEM	unspecified	fw_console.h
 console_start	SYSTEM	unspecified	fw_console.h
 console_usb_hold_bind	-	unspecified	fw_console.h
 console_usb_hold_ok	-	unspecified	fw_console.h
+console_usb_hold_why	-	any	fw_console.h
 crashlog_badge	-	unspecified	crashlog_fmt.h
 crashlog_export	-	unspecified	crashlog_fmt.h
 crashlog_export_name	-	unspecified	crashlog_fmt.h
