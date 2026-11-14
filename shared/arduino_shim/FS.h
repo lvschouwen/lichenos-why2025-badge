@@ -120,6 +120,11 @@ void fs_shim_set_drive_bytes(void (*fn)(size_t *total, size_t *used));
 // drive itself, never the C6 image's /storage/c6, never through "..". The root is lichen_fs_app_dir's, which never
 // hands out an OS directory (fs_path.h, #283): the c6 check here is a second line. Pure, host-tested.
 bool fs_shim_format_allowed(char const *root);
+// A format() wiped the root and nothing was saved into it since (#426): MeshCore's factory reset formats and then asks
+// for the reboot, so the owner's own saves (the reboot's, a stop's) must not write the old state back. A "w" or "a"
+// open lowers it (MeshCore's "rebuild" saves on purpose), as does fs_shim_set_root (the next start). Under the owner's
+// lock, as format() and open().
+bool fs_shim_wiped(void);
 // Microseconds spent in file calls (open, read, write, close, exists, remove) since the last call, and how many calls
 // (ops may be NULL); always 0 off the badge. Also forgets the slow calls below.
 uint32_t fs_shim_take_busy_us(uint32_t *ops);
@@ -163,7 +168,8 @@ void fs_shim_drop_held(void);
 // contacts), at most FS_SHIM_MAX_FILE; 0 (no reserve: one chunk, doubling) when the size is not known. Pure.
 size_t fs_shim_reserve(size_t last_len);
 // The size a "w" buffer of cap bytes grows to for end bytes: the reserve when it is empty and the reserve fits, else
-// one chunk (when empty) doubled until end fits. Pure.
+// one chunk (when empty) doubled until end fits; at most FS_SHIM_MAX_FILE when end fits in that. Pure. A reserve that
+// does not fit in memory is tried again without it (the plain doubling), so the headroom never costs a save.
 size_t fs_shim_grow_cap(size_t cap, size_t end, size_t reserve);
 // What the held path's saves did since the last take (#425: the slow-loop notes). Developer build only (and the host
 // tests); the owner takes it under its lock. out may be NULL (forget only). The times are 0 off the badge.

@@ -264,7 +264,8 @@ bool (*const mesh_int::keep_contact)(ContactInfo const &c) = BadgeMesh::keepCont
 // MeshCore's lazy contacts rewrite (#425), DataStore's "/contacts3": on LittleFS a changed chunk rewrites every block
 // after it, 0.5-1 s at 552 contacts. While the task runs, the shim holds that file's saves (any task's, all under the
 // mesh lock): the loop takes the newest one before its unlock and writes it after, so the mesh task is the one writer
-// and the screens never wait for it. A stop or MeshCore's own reboot drops what is held and saves directly.
+// and the screens never wait for it. A stop or MeshCore's own reboot drops what is held and saves directly, unless
+// a format erased the files since the last save (fs_shim_wiped, #426: the factory reset stays a reset).
 static char const     CONTACTS_FILE[] = "/contacts3";
 static fs_shim_held_t contacts_taken; // the mesh task: taken under the lock, written right after it
 static int            contacts_taken_n;
@@ -282,7 +283,9 @@ static bool rebooting;
 void BadgeBoard::reboot() {
     if (mesh_task_handle && xTaskGetCurrentTaskHandle() == mesh_task_handle) {
         contacts_hold_off_locked(); // the restart comes before the loop would write a held save
-        node->saveAll();
+        if (!fs_shim_wiped()) { // a factory reset formats, then reboots: its erase stays erased (#426)
+            node->saveAll();
+        }
         mesh_journal_stop_locked(true);
         __atomic_store_n(&rebooting, true, __ATOMIC_RELEASE);
     }
@@ -481,13 +484,17 @@ static void mesh_task(void *arg) {
                          dropped);
             }
             contacts_hold_off_locked();
-            int64_t save_started = esp_timer_get_time();
-            store.savePrefs(*node->getNodePrefs());
-            int64_t contacts_started = esp_timer_get_time();
-            store.saveContacts(node, keep_contact);
-            long long contacts_ms = (esp_timer_get_time() - contacts_started) / 1000;
-            store.saveChannels(node);
-            node->flushBlobs();
+            bool      wiped        = fs_shim_wiped(); // MeshCore's files were erased and not saved since (#426)
+            int64_t   save_started = esp_timer_get_time();
+            long long contacts_ms  = 0;
+            if (!wiped) {
+                store.savePrefs(*node->getNodePrefs());
+                int64_t contacts_started = esp_timer_get_time();
+                store.saveContacts(node, keep_contact);
+                contacts_ms = (esp_timer_get_time() - contacts_started) / 1000;
+                store.saveChannels(node);
+                node->flushBlobs();
+            }
             long long save_ms = (esp_timer_get_time() - save_started) / 1000;
             mesh_journal_stop_locked(final);
             __atomic_store_n(&stopped, true, __ATOMIC_RELEASE);
@@ -496,8 +503,9 @@ static void mesh_task(void *arg) {
             lora_radio.end();
             lichen_badge_set(meshcore_ctx(), 0);
             // The contact rewrite is the same one MyMesh does lazily in its loop: its time here says what it costs there
-            ESP_LOGI(TAG, "MeshCore stopped%s: prefs, %d contacts, channels saved in %lld ms (contacts %lld ms)",
-                     final ? " for the update" : "", node->getNumContacts(), save_ms, contacts_ms);
+            ESP_LOGI(TAG, "MeshCore stopped%s: prefs, %d contacts, channels %s in %lld ms (contacts %lld ms)",
+                     final ? " for the update" : "", node->getNumContacts(), wiped ? "NOT saved (erased)" : "saved",
+                     save_ms, contacts_ms);
             __atomic_store_n(&task_exited, true, __ATOMIC_RELEASE);
             return; // lichen_task_start's trampoline takes the task out of the OS's book and deletes it (#181)
         }

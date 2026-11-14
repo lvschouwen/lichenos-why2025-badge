@@ -163,14 +163,15 @@ size_t fs_shim_reserve(size_t last_len) {
 }
 
 size_t fs_shim_grow_cap(size_t cap, size_t end, size_t reserve) {
-    if (cap == 0 && reserve >= end) {
-        return reserve;
+    size_t n = reserve;
+    if (cap != 0 || reserve < end) {
+        n = cap ? cap : FS_SHIM_CHUNK;
+        while (n < end) {
+            n *= 2;
+        }
     }
-    size_t n = cap ? cap : FS_SHIM_CHUNK;
-    while (n < end) {
-        n *= 2;
-    }
-    return n;
+    // A reserve is no power of two, so its doublings pass the cap: never a block larger than a file may be
+    return n > FS_SHIM_MAX_FILE && end <= FS_SHIM_MAX_FILE ? FS_SHIM_MAX_FILE : n;
 }
 
 #if FS_SHIM_SLOW_NOTES
@@ -349,8 +350,17 @@ void fs_shim_take_held(fs_shim_held_t *out) {
 }
 
 
+// Raised by a format() and lowered by the next save or start: the owner skips its own saves while it is up (#426).
+// Touched under the owner's lock (the badge: the mesh lock), as every open and format.
+static bool wiped;
+
+bool fs_shim_wiped(void) {
+    return wiped;
+}
+
 void fs_shim_set_root(char const *dir) {
     snprintf(root, sizeof(root), "%s", dir ? dir : "");
+    wiped = false;
 }
 
 void fs_shim_set_drive_bytes(void (*fn)(size_t *total, size_t *used)) {
@@ -523,10 +533,14 @@ bool File::grow(size_t end) {
     int64_t t0 = held_ ? timed_now() : 0;
 #endif
     uint8_t *grown = (uint8_t *)buf_grow(buf_, len_, cap);
+    if (!grown && !buf_ && held_) { // the reserve's headroom did not fit: the save itself may, as before the reserve
+        cap   = fs_shim_grow_cap(0, end, 0);
+        grown = (uint8_t *)buf_grow(NULL, 0, cap);
+    }
 #if FS_SHIM_SLOW_NOTES
     if (held_) {
-        held_stats.allocs++;
-        held_stats.copied += buf_ ? (uint32_t)len_ : 0;
+        held_stats.allocs += grown ? 1 : 0; // a failed one gave no block and copied nothing
+        held_stats.copied += grown && buf_ ? (uint32_t)len_ : 0;
         held_stats.alloc_us += (uint32_t)(timed_now() - t0);
     }
 #endif
@@ -729,6 +743,7 @@ File FS::open(char const *path, char const *mode, bool create) {
     if (!full_path(path, full)) {
         return File();
     }
+    wiped &= mode[0] == 'r'; // a save after the format (MeshCore's "rebuild"): the files are in use again
     if ((mode[0] == 'w' || (mode[0] == 'r' && held_slot.set)) && is_held(path)) {
         // "w": a buffer only, File::writeHeld opens the file after the owner's unlock; "r": the parked save is the
         // file's newest state
@@ -872,7 +887,9 @@ static bool remove_tree(char const *dir) {
 
 bool SPIFFSFS::format() {
     fs_shim_drop_held(); // MeshCore's factory reset: nothing saved before it is written after it
-    return fs_shim_format_allowed(root) && remove_tree(root);
+    bool ok = fs_shim_format_allowed(root) && remove_tree(root);
+    wiped   = wiped || ok;
+    return ok;
 }
 
 // Sizes of the whole drive the root lives on

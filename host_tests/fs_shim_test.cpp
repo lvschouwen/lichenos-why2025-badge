@@ -25,9 +25,10 @@ static char root_dir[64];
 
 // Buffer hooks that count: every block the shim takes is given back (the badge books them as the app's memory)
 static int live_blocks, total_blocks, alloc_calls, fail_from; // fail_from: the Nth call on returns NULL, 0 = never
+static size_t fail_over; // a block larger than this is refused (memory short of the reserve), 0 = never
 static void *count_alloc(size_t n) {
     alloc_calls++;
-    if (fail_from && alloc_calls >= fail_from) {
+    if ((fail_from && alloc_calls >= fail_from) || (fail_over && n > fail_over)) {
         return NULL;
     }
     live_blocks++;
@@ -407,6 +408,11 @@ static void held_reserve(void) {
     CHECK(fs_shim_grow_cap(0, 10, 0) == FS_SHIM_CHUNK && fs_shim_grow_cap(0, 10, 9000) == 9000);
     CHECK(fs_shim_grow_cap(0, 9001, 9000) == 4 * FS_SHIM_CHUNK && fs_shim_grow_cap(9000, 9001, 0) == 18000);
     CHECK(fs_shim_grow_cap(9000, 9001, 50000) == 18000); // a reserve only for an empty buffer
+    // A reserve's doublings stop at the largest file (#426 extra): 1 MB - 4 KB doubled is not 2 MB
+    size_t big = FS_SHIM_MAX_FILE - FS_SHIM_CHUNK;
+    CHECK(fs_shim_grow_cap(big, big + 1, 0) == FS_SHIM_MAX_FILE);
+    CHECK(fs_shim_grow_cap(0, FS_SHIM_MAX_FILE, 0) == FS_SHIM_MAX_FILE);
+    CHECK(fs_shim_grow_cap(0, 10, FS_SHIM_MAX_FILE + 1) == FS_SHIM_MAX_FILE);
 
     save_contacts(expect, 200, 999, 0); // not held: on the file system, 30400 B
     fs_shim_set_buffer_hooks(count_alloc, count_free);
@@ -435,6 +441,30 @@ static void held_reserve(void) {
     CHECK(File::writeHeld(&taken).ok && live_blocks == 0);
     CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 230 * REC_SIZE && memcmp(disk, expect, 230 * REC_SIZE) == 0);
 
+    // Memory short of the reserve's headroom (#426 extra): the save is made without it, by the plain doubling, and
+    // only the allocations that gave a block are counted (4, 8, 16 and 32 KB; the refused reserve is not)
+    fail_over   = 230 * REC_SIZE + 100; // the reserve is 230 contacts plus 4 KB
+    alloc_calls = 0;
+    save_contacts(expect, 210, 8, 4);
+    fail_over = 0;
+    fs_shim_take_held_stats(&st);
+    CHECK(st.saves == 1 && st.allocs == 4 && alloc_calls == 5);
+    CHECK(st.copied > 7 * FS_SHIM_CHUNK - 3 * 64 && st.copied <= 7 * FS_SHIM_CHUNK); // the three growths' bytes
+    fs_shim_take_held(&taken);
+    CHECK(taken.set && taken.len == 210 * REC_SIZE && taken.cap == 8 * FS_SHIM_CHUNK && File::writeHeld(&taken).ok);
+    CHECK(disk_read("/contacts3", disk, sizeof(disk)) == 210 * REC_SIZE && memcmp(disk, expect, 210 * REC_SIZE) == 0);
+    // ... and a save that fits nowhere counts no allocation and copies nothing
+    fail_from   = 1;
+    alloc_calls = 0;
+    File none = SPIFFS.open("/contacts3", "w", true);
+    CHECK(none && none.write(expect, 10) == 0);
+    none.close();
+    fail_from = 0;
+    fs_shim_take_held_stats(&st);
+    CHECK(st.allocs == 0 && st.copied == 0 && alloc_calls == 2);
+    fs_shim_take_held(&taken);
+    CHECK(!taken.set && live_blocks == 0);
+
     // A file that is not held never reserves, and its writes are not counted
     File other = SPIFFS.open("/prefs", "w");
     CHECK(other.write(expect, 10) == 10);
@@ -444,6 +474,38 @@ static void held_reserve(void) {
     fs_shim_hold(NULL);
     fs_shim_set_buffer_hooks(NULL, NULL);
     CHECK(SPIFFS.remove("/prefs") && SPIFFS.remove("/contacts3"));
+}
+
+// #426: MeshCore's factory reset formats and then asks for the reboot, whose save would write the old prefs, contacts
+// and channels back. The format raises the mark the owner's saves honour; a save on purpose or the next start lowers it.
+static void reset_mark(void) {
+    static uint8_t expect[20 * REC_SIZE];
+    fs_shim_set_root(root_dir);
+    CHECK(!fs_shim_wiped());
+    save_contacts(expect, 20, 999, 0);
+    CHECK(!fs_shim_wiped());
+    // A save held before the format is dropped, and the mark is up after it
+    fs_shim_hold("/contacts3");
+    save_contacts(expect, 10, 999, 0);
+    CHECK(SPIFFS.format() && fs_shim_wiped());
+    fs_shim_held_t taken;
+    fs_shim_take_held(&taken);
+    CHECK(!taken.set && !SPIFFS.exists("/contacts3"));
+    fs_shim_hold(NULL);
+    // Reads and checks are no save: the mark stays (the reboot's delay, the reload of a missing file)
+    File gone = SPIFFS.open("/contacts3", "r");
+    CHECK(!gone && !SPIFFS.exists("/new_prefs") && fs_shim_wiped());
+    // MeshCore's "rebuild" saves on purpose right after its format: the files are in use again
+    File prefs = SPIFFS.open("/new_prefs", "w", true);
+    CHECK(!fs_shim_wiped() && prefs.write(expect, 4) == 4);
+    prefs.close();
+    // The next start lowers it; a format the rule refuses never raises it
+    CHECK(SPIFFS.format() && fs_shim_wiped());
+    fs_shim_set_root(root_dir);
+    CHECK(!fs_shim_wiped());
+    fs_shim_set_root("/");
+    CHECK(!SPIFFS.format() && !fs_shim_wiped());
+    fs_shim_set_root(root_dir);
 }
 
 int main(void) {
@@ -549,6 +611,7 @@ int main(void) {
     CHECK(!SPIFFS.format());
     fs_shim_set_root(root);
     CHECK(SPIFFS.exists("/d") && SPIFFS.remove("/d"));
+    reset_mark();
     rmdir(root);
 
     if (failures) {
