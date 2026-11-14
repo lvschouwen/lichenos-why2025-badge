@@ -5,60 +5,63 @@
 #include <stdio.h>
 #include <string.h>
 
-// Cayenne LPP types (electroniccats/CayenneLPP): the ones sensors of MeshCore nodes send
-enum {
-    LPP_DIGITAL_IN  = 0,
-    LPP_DIGITAL_OUT = 1,
-    LPP_ANALOG_IN   = 2,
-    LPP_ANALOG_OUT  = 3,
-    LPP_GENERIC     = 100,
-    LPP_LUMINOSITY  = 101,
-    LPP_PRESENCE    = 102,
-    LPP_TEMPERATURE = 103,
-    LPP_HUMIDITY    = 104,
-    LPP_ACCEL       = 113,
-    LPP_BAROMETER   = 115,
-    LPP_VOLTAGE     = 116,
-    LPP_CURRENT     = 117,
-    LPP_FREQUENCY   = 118,
-    LPP_PERCENTAGE  = 120,
-    LPP_ALTITUDE    = 121,
-    LPP_CONCENTR    = 125,
-    LPP_POWER       = 128,
-    LPP_DISTANCE    = 130,
-    LPP_ENERGY      = 131,
-    LPP_DIRECTION   = 132,
-    LPP_UNIXTIME    = 133,
-    LPP_GYRO        = 134,
-    LPP_GPS         = 136,
-    LPP_SWITCH      = 142,
-};
-
 #define TELEM_CHANNEL_SELF 1 // MeshCore: the node's own battery voltage, temperature and GPS
 
+#define DEG "\xC2\xB0"
+
+// How a value is shown: one scaled number, on/off, three axes, or a location
+typedef enum { LPP_SHOW_NUM, LPP_SHOW_ONOFF, LPP_SHOW_XYZ, LPP_SHOW_GPS } lpp_show_t;
+
+// A Cayenne LPP type (electroniccats/CayenneLPP): the ones sensors of MeshCore nodes send. The value is shown as
+// raw * mul / div with dec decimals, then unit (which carries its own leading space). One table, so the length a
+// type has (which the parser needs to step over it) and how it is shown cannot drift apart (#212).
 typedef struct {
-    uint8_t size;
-    bool    is_signed;
+    uint8_t     type, size;
+    bool        is_signed;
+    uint8_t     show; // lpp_show_t
+    uint8_t     mul;
+    uint8_t     dec : 3; // decimals; 3 bits also tell the compiler the text fits fixed()'s 32 bytes
+    uint16_t    div;
+    char const *name, *self_name; // self_name: the name on TELEM_CHANNEL_SELF, NULL = name
+    char const *unit;
 } lpp_type_t;
 
-static bool lpp_type(uint8_t t, lpp_type_t *o) {
-    switch (t) {
-    case LPP_DIGITAL_IN: case LPP_DIGITAL_OUT: case LPP_PRESENCE: case LPP_SWITCH: case LPP_PERCENTAGE:
-    case LPP_HUMIDITY:
-        *o = (lpp_type_t){1, false}; return true;
-    case LPP_ANALOG_IN: case LPP_ANALOG_OUT: case LPP_TEMPERATURE: case LPP_ALTITUDE:
-        *o = (lpp_type_t){2, true}; return true;
-    case LPP_LUMINOSITY: case LPP_BAROMETER: case LPP_VOLTAGE: case LPP_CURRENT: case LPP_CONCENTR: case LPP_POWER:
-    case LPP_DIRECTION:
-        *o = (lpp_type_t){2, false}; return true;
-    case LPP_GENERIC: case LPP_FREQUENCY: case LPP_DISTANCE: case LPP_ENERGY: case LPP_UNIXTIME:
-        *o = (lpp_type_t){4, false}; return true;
-    case LPP_ACCEL: case LPP_GYRO:
-        *o = (lpp_type_t){6, true}; return true;
-    case LPP_GPS:
-        *o = (lpp_type_t){9, true}; return true;
-    default: return false;
+static lpp_type_t const LPP_TYPES[] = {
+    {0, 1, false, LPP_SHOW_ONOFF, 1, 0, 1, "Input", NULL, ""},                // digital input
+    {1, 1, false, LPP_SHOW_ONOFF, 1, 0, 1, "Input", NULL, ""},                // digital output
+    {2, 2, true, LPP_SHOW_NUM, 1, 2, 100, "Analog value", NULL, ""},          // analog input
+    {3, 2, true, LPP_SHOW_NUM, 1, 2, 100, "Analog value", NULL, ""},          // analog output
+    {100, 4, false, LPP_SHOW_NUM, 1, 0, 1, "Value", NULL, ""},                // generic sensor
+    {101, 2, false, LPP_SHOW_NUM, 1, 0, 1, "Light", NULL, " lux"},            // luminosity
+    {102, 1, false, LPP_SHOW_ONOFF, 1, 0, 1, "Presence", NULL, ""},           // presence
+    {103, 2, true, LPP_SHOW_NUM, 1, 1, 10, "Temperature", NULL, " " DEG "C"}, // temperature
+    {104, 1, false, LPP_SHOW_NUM, 5, 1, 10, "Humidity", NULL, " %"},          // humidity, 0.5 % steps
+    {113, 6, true, LPP_SHOW_XYZ, 1, 3, 1000, "Acceleration", NULL, " g"},     // accelerometer
+    {115, 2, false, LPP_SHOW_NUM, 1, 1, 10, "Pressure", NULL, " hPa"},        // barometer
+    {116, 2, false, LPP_SHOW_NUM, 1, 2, 100, "Voltage", "Battery", " V"},     // voltage
+    {117, 2, false, LPP_SHOW_NUM, 1, 3, 1000, "Current", NULL, " A"},         // current
+    {118, 4, false, LPP_SHOW_NUM, 1, 0, 1, "Frequency", NULL, " Hz"},         // frequency
+    {120, 1, false, LPP_SHOW_NUM, 1, 0, 1, "Level", NULL, " %"},              // percentage
+    {121, 2, true, LPP_SHOW_NUM, 1, 0, 1, "Altitude", NULL, " m"},            // altitude
+    {125, 2, false, LPP_SHOW_NUM, 1, 0, 1, "Concentration", NULL, " ppm"},    // concentration
+    {128, 2, false, LPP_SHOW_NUM, 1, 0, 1, "Power", NULL, " W"},              // power
+    {130, 4, false, LPP_SHOW_NUM, 1, 3, 1000, "Distance", NULL, " m"},        // distance
+    {131, 4, false, LPP_SHOW_NUM, 1, 3, 1000, "Energy", NULL, " kWh"},        // energy
+    {132, 2, false, LPP_SHOW_NUM, 1, 0, 1, "Direction", NULL, DEG},           // direction
+    {133, 4, false, LPP_SHOW_NUM, 1, 0, 1, "Time", NULL, " s since 1970"},    // unix time
+    {134, 6, true, LPP_SHOW_XYZ, 1, 2, 100, "Rotation", NULL, " " DEG "/s"},  // gyrometer
+    {136, 9, true, LPP_SHOW_GPS, 1, 4, 10000, "Location", NULL, " m"},        // GPS: 0.0001 degree steps
+    {142, 1, false, LPP_SHOW_ONOFF, 1, 0, 1, "Switch", NULL, ""},             // switch
+};
+
+// NULL for a type we do not know (its length is unknown too)
+static lpp_type_t const *lpp_type(uint8_t t) {
+    for (size_t i = 0; i < sizeof(LPP_TYPES) / sizeof(LPP_TYPES[0]); i++) {
+        if (LPP_TYPES[i].type == t) {
+            return &LPP_TYPES[i];
+        }
     }
+    return NULL;
 }
 
 static int32_t be(uint8_t const *p, int n, bool is_signed) {
@@ -97,127 +100,42 @@ static void put(tl_line_t *out, size_t max, size_t *n, char const *fmt, ...) {
 }
 
 // "Battery" or "Temperature (channel 3)"
-static void label(char *out, size_t cap, char const *name, uint8_t ch) {
+static void label(char *out, size_t cap, lpp_type_t const *lt, uint8_t ch) {
     if (ch == TELEM_CHANNEL_SELF) {
-        snprintf(out, cap, "%s", name);
+        snprintf(out, cap, "%s", lt->self_name ? lt->self_name : lt->name);
     } else {
-        snprintf(out, cap, "%s (channel %u)", name, ch);
+        snprintf(out, cap, "%s (channel %u)", lt->name, ch);
     }
 }
 
-static void one_value(tl_line_t *out, size_t max, size_t *n, uint8_t ch, uint8_t type, uint8_t const *d, bool is_signed) {
-    char     name[40], v[32], v2[32], v3[32];
-    int      sz = 0;
-    lpp_type_t lt;
-    lpp_type(type, &lt);
-    sz = lt.size;
-    int64_t x = be(d, sz > 4 ? 4 : sz, is_signed);
-    if (sz == 4 && !is_signed) {
-        x = (int64_t)(uint32_t)be(d, 4, false);
-    }
-    switch (type) {
-    case LPP_VOLTAGE:
-        label(name, sizeof(name), ch == TELEM_CHANNEL_SELF ? "Battery" : "Voltage", ch);
-        fixed(v, sizeof(v), x, 100, 2);
-        put(out, max, n, "%s: %s V", name, v);
+// One line for one value of type lt at d (lt->size bytes, all there): "Battery: 4.12 V", "Switch: on". put() cuts it
+// at TL_LINE_MAX, as it cuts every line.
+static void one_value(tl_line_t *out, size_t max, size_t *n, uint8_t ch, lpp_type_t const *lt, uint8_t const *d) {
+    char name[40], v[3][32];
+    label(name, sizeof(name), lt, ch);
+    switch (lt->show) {
+    case LPP_SHOW_ONOFF:
+        put(out, max, n, "%s: %s", name, be(d, lt->size, lt->is_signed) ? "on" : "off");
         break;
-    case LPP_TEMPERATURE:
-        label(name, sizeof(name), "Temperature", ch);
-        fixed(v, sizeof(v), x, 10, 1);
-        put(out, max, n, "%s: %s \xC2\xB0""C", name, v);
+    case LPP_SHOW_XYZ:
+        for (int i = 0; i < 3; i++) {
+            fixed(v[i], sizeof(v[i]), be(d + 2 * i, 2, true), lt->div, lt->dec);
+        }
+        put(out, max, n, "%s: x %s, y %s, z %s%s", name, v[0], v[1], v[2], lt->unit);
         break;
-    case LPP_HUMIDITY:
-        label(name, sizeof(name), "Humidity", ch);
-        fixed(v, sizeof(v), x * 5, 10, 1); // 0.5 % steps
-        put(out, max, n, "%s: %s %%", name, v);
+    case LPP_SHOW_GPS:
+        fixed(v[0], sizeof(v[0]), be(d, 3, true), lt->div, lt->dec);
+        fixed(v[1], sizeof(v[1]), be(d + 3, 3, true), lt->div, lt->dec);
+        fixed(v[2], sizeof(v[2]), be(d + 6, 3, true), 100, 0); // 0.01 m steps, shown in whole metres
+        put(out, max, n, "%s: %s, %s, %s%s", name, v[0], v[1], v[2], lt->unit);
         break;
-    case LPP_BAROMETER:
-        label(name, sizeof(name), "Pressure", ch);
-        fixed(v, sizeof(v), x, 10, 1);
-        put(out, max, n, "%s: %s hPa", name, v);
-        break;
-    case LPP_LUMINOSITY:
-        label(name, sizeof(name), "Light", ch);
-        put(out, max, n, "%s: %lu lux", name, (unsigned long)x);
-        break;
-    case LPP_CURRENT:
-        label(name, sizeof(name), "Current", ch);
-        fixed(v, sizeof(v), x, 1000, 3);
-        put(out, max, n, "%s: %s A", name, v);
-        break;
-    case LPP_POWER:
-        label(name, sizeof(name), "Power", ch);
-        put(out, max, n, "%s: %ld W", name, (long)x);
-        break;
-    case LPP_ENERGY:
-        label(name, sizeof(name), "Energy", ch);
-        fixed(v, sizeof(v), x, 1000, 3);
-        put(out, max, n, "%s: %s kWh", name, v);
-        break;
-    case LPP_DISTANCE:
-        label(name, sizeof(name), "Distance", ch);
-        fixed(v, sizeof(v), x, 1000, 3);
-        put(out, max, n, "%s: %s m", name, v);
-        break;
-    case LPP_ALTITUDE:
-        label(name, sizeof(name), "Altitude", ch);
-        put(out, max, n, "%s: %ld m", name, (long)x);
-        break;
-    case LPP_FREQUENCY:
-        label(name, sizeof(name), "Frequency", ch);
-        put(out, max, n, "%s: %lu Hz", name, (unsigned long)x);
-        break;
-    case LPP_PERCENTAGE:
-        label(name, sizeof(name), "Level", ch);
-        put(out, max, n, "%s: %ld %%", name, (long)x);
-        break;
-    case LPP_CONCENTR:
-        label(name, sizeof(name), "Concentration", ch);
-        put(out, max, n, "%s: %ld ppm", name, (long)x);
-        break;
-    case LPP_DIRECTION:
-        label(name, sizeof(name), "Direction", ch);
-        put(out, max, n, "%s: %ld\xC2\xB0", name, (long)x);
-        break;
-    case LPP_PRESENCE:
-    case LPP_SWITCH:
-    case LPP_DIGITAL_IN:
-    case LPP_DIGITAL_OUT:
-        label(name, sizeof(name), type == LPP_PRESENCE ? "Presence" : type == LPP_SWITCH ? "Switch" : "Input", ch);
-        put(out, max, n, "%s: %s", name, x ? "on" : "off");
-        break;
-    case LPP_ANALOG_IN:
-    case LPP_ANALOG_OUT:
-        label(name, sizeof(name), "Analog value", ch);
-        fixed(v, sizeof(v), x, 100, 2);
-        put(out, max, n, "%s: %s", name, v);
-        break;
-    case LPP_UNIXTIME:
-        label(name, sizeof(name), "Time", ch);
-        put(out, max, n, "%s: %lu s since 1970", name, (unsigned long)x);
-        break;
-    case LPP_ACCEL:
-    case LPP_GYRO: {
-        int div = type == LPP_ACCEL ? 1000 : 100;
-        int dec = type == LPP_ACCEL ? 3 : 2;
-        label(name, sizeof(name), type == LPP_ACCEL ? "Acceleration" : "Rotation", ch);
-        fixed(v, sizeof(v), be(d, 2, true), div, dec);
-        fixed(v2, sizeof(v2), be(d + 2, 2, true), div, dec);
-        fixed(v3, sizeof(v3), be(d + 4, 2, true), div, dec);
-        put(out, max, n, "%s: x %s, y %s, z %s %s", name, v, v2, v3, type == LPP_ACCEL ? "g" : "\xC2\xB0/s");
+    default: { // LPP_SHOW_NUM: at most 4 bytes; a 4-byte one is unsigned, kept whole above INT32_MAX
+        int64_t x = lt->size == 4 && !lt->is_signed
+                        ? (int64_t)(uint32_t)be(d, 4, false) : be(d, lt->size, lt->is_signed);
+        fixed(v[0], sizeof(v[0]), x * lt->mul, lt->div, lt->dec);
+        put(out, max, n, "%s: %s%s", name, v[0], lt->unit);
         break;
     }
-    case LPP_GPS:
-        label(name, sizeof(name), "Location", ch);
-        fixed(v, sizeof(v), be(d, 3, true), 10000, 4); // 0.0001 degree steps
-        fixed(v2, sizeof(v2), be(d + 3, 3, true), 10000, 4);
-        fixed(v3, sizeof(v3), be(d + 6, 3, true), 100, 0); // 0.01 m steps, shown in whole metres
-        put(out, max, n, "%s: %s, %s, %s m", name, v, v2, v3);
-        break;
-    default: // LPP_GENERIC
-        label(name, sizeof(name), "Value", ch);
-        put(out, max, n, "%s: %lu", name, (unsigned long)x);
-        break;
     }
 }
 
@@ -228,12 +146,12 @@ size_t tl_lpp_lines(uint8_t const *lpp, size_t len, tl_line_t *out, size_t max) 
             // more values than lines: count the rest (a value we cannot size ends the count) and say so
             size_t more = 0;
             for (; at + 2 <= len; more++) {
-                lpp_type_t u;
-                if (!lpp_type(lpp[at + 1], &u) || len - at - 2 < u.size) {
+                lpp_type_t const *u = lpp_type(lpp[at + 1]);
+                if (!u || len - at - 2 < u->size) {
                     more++;
                     break;
                 }
-                at += 2u + u.size;
+                at += 2u + u->size;
             }
             if (max > 0 && more > 0) {
                 snprintf(out[max - 1].text, TL_LINE_MAX, "%u more values not shown", (unsigned)more + 1u); // replaces the last
@@ -244,18 +162,18 @@ size_t tl_lpp_lines(uint8_t const *lpp, size_t len, tl_line_t *out, size_t max) 
             put(out, max, &n, "(the answer is cut off)");
             break;
         }
-        uint8_t    ch = lpp[at], type = lpp[at + 1];
-        lpp_type_t lt;
-        if (!lpp_type(type, &lt)) {
+        uint8_t           ch = lpp[at], type = lpp[at + 1];
+        lpp_type_t const *lt = lpp_type(type);
+        if (!lt) {
             put(out, max, &n, "(a value of type %u could not be read)", type);
             break;
         }
-        if (len - at - 2 < lt.size) {
+        if (len - at - 2 < lt->size) {
             put(out, max, &n, "(the answer is cut off)");
             break;
         }
-        one_value(out, max, &n, ch, type, lpp + at + 2, lt.is_signed);
-        at += 2u + lt.size;
+        one_value(out, max, &n, ch, lt, lpp + at + 2);
+        at += 2u + lt->size;
     }
     return n;
 }
