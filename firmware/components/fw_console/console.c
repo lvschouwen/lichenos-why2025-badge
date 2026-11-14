@@ -254,28 +254,35 @@ static void help_count(int n, int listed) {
 // "fw help": the names only (#439: the usages of 60 commands no longer fit the Wi-Fi reply); "fw help <command|app>"
 // gives usages, "fw help all" every one (the USB console's old listing)
 static int help_index(int n) {
-    bool on     = console_dev_mode();
-    int  listed = dev_mode_help_names(commands, n, on, 0, "OS:", HELP_WIDTH, help_line, NULL);
+    help_view_t v      = {commands, n, console_dev_mode()};
+    int         listed = dev_mode_help_names(&v, 0, "OS:", HELP_WIDTH, help_line, NULL);
     int  apps   = __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE);
     for (int a = 1; a <= apps; a++) {
-        char head[40];
+        char head[DEV_HELP_LINE_MAX]; // two app ids and the frame: longer ids are cut, not lost
         snprintf(head, sizeof(head), "%s (fw %s <cmd>):", app_ids[a - 1], app_ids[a - 1]);
-        listed += dev_mode_help_names(commands, n, on, a, head, HELP_WIDTH, help_line, NULL);
+        listed += dev_mode_help_names(&v, a, head, HELP_WIDTH, help_line, NULL);
     }
     return listed;
 }
 
 static void cmd_help(char const *args) {
     int n = commands_count();
+    char topic[48];
     while (*args == ' ') {
         args++;
     }
+    size_t len = strlen(args);
+    while (len && args[len - 1] == ' ') {
+        len--; // "all " is all
+    }
+    snprintf(topic, sizeof(topic), "%.*s", (int)len, args);
+    args = topic;
     if (*args && strcmp(args, "all") == 0) {
         help_count(n, dev_mode_help_app(commands, n, console_dev_mode(), 0, help_line, NULL) + help_apps(n));
     } else if (*args) {
-        if (!dev_mode_help_topic(commands, n, app_ids, __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE), console_dev_mode(),
-                                 args, help_line, NULL)) {
-            console_reply("help: no command or app '%s' (fw help lists them)", args);
+        help_view_t v = {commands, n, console_dev_mode()};
+        if (!dev_mode_help_topic(&v, app_ids, __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE), args, help_line, NULL)) {
+            console_reply("help: no such command or app (fw help lists them)"); // never the typed word (#123)
         }
     } else {
         int listed = help_index(n);

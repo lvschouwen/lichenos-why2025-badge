@@ -79,12 +79,18 @@ int dev_mode_help_app(console_entry_t const *table, int n, bool on, int app, voi
 // line (the full usages of every command do not fit the Wi-Fi console's 4 KB reply). Debug commands only while on.
 // Calls line once per output line; returns the commands listed (0: no line at all).
 #define DEV_HELP_LINE_MAX 128
-int dev_mode_help_names(console_entry_t const *table, int n, bool on, int app, char const *head, size_t width,
+typedef struct {
+    console_entry_t const *table;
+    int                    n;
+    bool                   on; // developer mode
+} help_view_t;
+// A name longer than a line is printed cut.
+int dev_mode_help_names(help_view_t const *v, int app, char const *head, size_t width,
                         void (*line)(char const *text, void *ctx), void *ctx);
 // "fw help <word>": the usages of the command word, or of every listed command of the app whose id is word. A debug
 // command while off counts as unknown (what the help hides stays hidden). Returns the usages given, 0 for no topic.
-int dev_mode_help_topic(console_entry_t const *table, int n, char const *const *ids, int n_ids, bool on,
-                        char const *word, void (*line)(char const *usage, void *ctx), void *ctx);
+int dev_mode_help_topic(help_view_t const *v, char const *const *ids, int n_ids, char const *word,
+                        void (*line)(char const *usage, void *ctx), void *ctx);
 
 typedef enum {
     DEV_REQ_STATUS,  // "", "status"

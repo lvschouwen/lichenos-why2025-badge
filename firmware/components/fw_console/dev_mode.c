@@ -75,8 +75,9 @@ int dev_mode_help_app(console_entry_t const *table, int n, bool on, int app, voi
     return listed;
 }
 
-int dev_mode_help_names(console_entry_t const *table, int n, bool on, int app, char const *head, size_t width,
+int dev_mode_help_names(help_view_t const *v, int app, char const *head, size_t width,
                         void (*line)(char const *text, void *ctx), void *ctx) {
+    console_entry_t const *table = v->table;
     char   buf[DEV_HELP_LINE_MAX];
     size_t head_len = strlen(head);
     if (head_len >= sizeof(buf)) {
@@ -90,8 +91,8 @@ int dev_mode_help_names(console_entry_t const *table, int n, bool on, int app, c
     bool   on_line = false; // a name is on the current line
     bool   bare    = false; // the line is a continuation: two blanks, then the first name without a separator
     int    listed  = 0;
-    for (int i = 0; i < n; i++) {
-        if (table[i].app != app || (table[i].dev && !on)) {
+    for (int i = 0; i < v->n; i++) {
+        if (table[i].app != app || (table[i].dev && !v->on)) {
             continue;
         }
         size_t nl = strlen(table[i].name);
@@ -101,10 +102,8 @@ int dev_mode_help_names(console_entry_t const *table, int n, bool on, int app, c
             on_line = false;
             bare    = true;
         }
-        if (len + 1 + nl >= sizeof(buf)) {
-            continue; // a name longer than a whole line: never in practice
-        }
-        len += (size_t)snprintf(buf + len, sizeof(buf) - len, "%s%s", bare && !on_line ? "" : " ", table[i].name);
+        size_t put = (size_t)snprintf(buf + len, sizeof(buf) - len, "%s%s", bare && !on_line ? "" : " ", table[i].name);
+        len += put < sizeof(buf) - len ? put : sizeof(buf) - len - 1; // a name longer than a line is cut, still listed
         on_line = true;
         listed++;
     }
@@ -114,17 +113,17 @@ int dev_mode_help_names(console_entry_t const *table, int n, bool on, int app, c
     return listed;
 }
 
-int dev_mode_help_topic(console_entry_t const *table, int n, char const *const *ids, int n_ids, bool on,
-                        char const *word, void (*line)(char const *usage, void *ctx), void *ctx) {
+int dev_mode_help_topic(help_view_t const *v, char const *const *ids, int n_ids, char const *word,
+                        void (*line)(char const *usage, void *ctx), void *ctx) {
     int app = dev_mode_app_of(ids, n_ids, word);
     if (app) {
-        return dev_mode_help_app(table, n, on, app, line, ctx);
+        return dev_mode_help_app(v->table, v->n, v->on, app, line, ctx);
     }
     int index;
-    if (dev_mode_find(table, n, word, on, &index) != DEV_FIND_RUN) {
+    if (dev_mode_find(v->table, v->n, word, v->on, &index) != DEV_FIND_RUN) {
         return 0;
     }
-    line(table[index].usage, ctx);
+    line(v->table[index].usage, ctx);
     return 1;
 }
 
