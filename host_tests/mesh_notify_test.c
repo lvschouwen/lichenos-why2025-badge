@@ -45,6 +45,46 @@ static void decide_matrix(void) {
     CHECK(mn_decide(MN_FAILED, MN_MODE_ALL, &sw, false, false, false).reason == MN_R_FAIL_OFF);
 }
 
+// Every input combination of mn_decide pinned (#212): per (kind, mode) one row, in the order switches (dm, fail, mentions
+// as bits 0..2), chat open, mention, dnd, each a verdict digit and a reason digit. Recorded from the original nested code.
+static char const *const PIN[3 * 3] = {
+    "02020202010101012017201701010101020202020101010120172017010101010202020201010101201720170101010102020202010101012017201701010101",
+    "02020202010101012017201701010101020202020101010120172017010101010202020201010101201720170101010102020202010101012017201701010101",
+    "02020202010101012017201701010101020202020101010120172017010101010202020201010101201720170101010102020202010101012017201701010101",
+    "20172017010101012017201701010101201720170101010120172017010101012017201701010101201720170101010120172017010101012017201701010101",
+    "05050606010101010505060601010101050506060101010105050606010101010505201701010101050520170101010105052017010101010505201701010101",
+    "04040404010101010404040401010101040404040101010104040404010101010404040401010101040404040101010104040404010101010404040401010101",
+    "03030303010101010303030301010101201720170101010120172017010101010303030301010101030303030101010120172017010101012017201701010101",
+    "03030303010101010303030301010101201720170101010120172017010101010303030301010101030303030101010120172017010101012017201701010101",
+    "03030303010101010303030301010101201720170101010120172017010101010303030301010101030303030101010120172017010101012017201701010101",
+};
+
+static void decide_pinned(void) {
+    int combos = 0;
+    for (int k = 0; k < 3; k++) {
+        for (int m = 0; m < 3; m++) {
+            char const *p = PIN[k * 3 + m];
+            CHECK(strlen(p) == 128);
+            for (int b = 0; b < 8; b++) {
+                for (int o = 0; o < 2; o++) {
+                    for (int n = 0; n < 2; n++) {
+                        for (int d = 0; d < 2; d++, p += 2, combos++) {
+                            mn_switches_t sw  = {(b & 1) != 0, (b & 2) != 0, (b & 4) != 0};
+                            mn_out_t      out = mn_decide((mn_kind_t)k, (mn_mode_t)m, &sw, o, n, d);
+                            if (out.verdict != (mn_verdict_t)(p[0] - '0') || out.reason != (mn_reason_t)(p[1] - '0')) {
+                                printf("FAIL pin k%d m%d sw%d open%d mention%d dnd%d: got %d/%d\n", k, m, b, o, n, d,
+                                       out.verdict, out.reason);
+                                failures++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    CHECK(combos == 576);
+}
+
 static void defaults(void) {
     mesh_chat_key_t k;
     mesh_chat_key_channel(&k, "Public");
@@ -253,6 +293,7 @@ static void prepared_text(void) {
 int main(void) {
     channel_match();
     decide_matrix();
+    decide_pinned();
     defaults();
     mentions();
     targets();
