@@ -80,7 +80,8 @@ A badge whose `/storage` is still FAT (firmware before #300) moves to LittleFS o
 After that, update over Wi-Fi (the update server runs whenever Wi-Fi is up and Settings › Updates over Wi-Fi is on,
 `fw ota on|off`; Settings › Close updates after, or `fw ota auto <minutes|off>`, closes it that long after boot or after
 switching it on, for that boot only, default never; put the token from `fw token` in
-`~/.config/why2025-badge/ota-token`):
+`~/.config/why2025-badge/ota-token`; the token crosses the LAN in clear, so after a shared network `fw token new` at
+the USB console makes a new one, in effect after the next reboot, #456):
 
 ```
 tools/badge.sh ota-firmware <ip>                       # firmware/build/badge_fw.bin, then reboot
@@ -189,7 +190,7 @@ switch the Wi-Fi console off, disable `OTA_WIFI_CONSOLE` (menuconfig, "Lichen Wi
 
 The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.sh console <port> "fw help"`:
 
-- Wi-Fi and device: `fw wifi [on | off | scan | reconnect | stats | ps [none | min] | tx <8-80> | bw 20|40 | proto n|ax | <ssid> <password> | --clear]` (`ps`: power save, off by default; `stats`, `tx` (0.25 dBm units), `bw` and `proto`: link tests, not saved, #146), `fw net`, `fw token`, `fw mem` (heaps,
+- Wi-Fi and device: `fw wifi [on | off | scan | reconnect | stats | ps [none | min] | tx <8-80> | bw 20|40 | proto n|ax | <ssid> <password> | --clear]` (`ps`: power save, off by default; `stats`, `tx` (0.25 dBm units), `bw` and `proto`: link tests, not saved, #146), `fw net`, `fw token [new]` (`new`: USB console only), `fw mem` (heaps,
   what each app holds, task stacks, per-task core and CPU %), `fw tasks` (every task with its owner app, #181), `fw slot [other]`, `fw assets`, `fw reboot`, `fw bl <display> <keyboard>`,
   `fw idle [test <s>]` (screen timeout; `test` fakes s seconds without a key), `fw screensaver [on|off|test [analog|digital]]`, `fw lock [on|off|now|unlock]` (#75; the station clock style #119).
 - Sensors: `fw sensors` (BMI270 accel and gyro, BME690 temperature, humidity, pressure and gas, P4 die temperature),

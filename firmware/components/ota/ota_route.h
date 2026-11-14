@@ -44,9 +44,9 @@ typedef struct {
 } ota_verdict_t;
 
 // The only way to a handler: ota_request_admit, then the table. NULL with a status (and why) when refused; NULL with
-// status 0 for a route without a row (none: the test checks every route has one). Else the handler.
-ota_route_fn ota_route_open(char const *head, size_t head_len, char const *token, ota_request_t *req,
-                            ota_verdict_t *v);
+// status 0 for a route without a row (none: the test checks every route has one). Else the handler. Either way the
+// head's head_len bytes and req->token are wiped after the check (#456); req->has_token stays.
+ota_route_fn ota_route_open(char *head, size_t head_len, char const *token, ota_request_t *req, ota_verdict_t *v);
 
 // The handlers, in ota_server.c (prepare, reboot), ota_upload.c, ota_piece_http.c and ota_extra.c
 bool ota_on_info(ota_conn_t const *conn);

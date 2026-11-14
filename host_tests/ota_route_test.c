@@ -220,12 +220,24 @@ static void test_malformed_heads(void) {
     CHECK(req.has_path && strcmp(req.path, "FLASH0:a.txt") == 0 && !req.has_offset);
 }
 
-// Open a request the way handle_connection does and run what it hands back; ran says which handler that was
-static int open_and_run(char const *head, char const *token, bool *up_front, char const **why) {
+static bool wiped(void const *buf, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (((unsigned char const *)buf)[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Open a request the way handle_connection does and run what it hands back; ran says which handler that was. The head
+// and the request's token copy are wiped once the token is checked, whatever the verdict (#456).
+static int open_and_run(char *head, char const *token, bool *up_front, char const **why) {
     ota_request_t req;
-    ota_verdict_t v      = {.status = -1};
-    ran                  = NULL;
-    ota_route_fn handler = ota_route_open(head, strlen(head), token, &req, &v);
+    ota_verdict_t v        = {.status = -1};
+    ran                    = NULL;
+    size_t       head_len  = strlen(head);
+    ota_route_fn handler   = ota_route_open(head, head_len, token, &req, &v);
+    CHECK(wiped(head, head_len) && wiped(req.token, sizeof(req.token)));
     int          status  = v.status;
     *why                 = v.why;
     *up_front            = v.up_front;
@@ -301,9 +313,10 @@ static void admit_mutated(uint8_t const *buf, size_t len) {
         CHECK(why && strcmp(why, st == 401 ? "wrong or missing token" : "bad request") == 0);
     }
     ota_verdict_t v       = {.status = -1};
-    ota_route_fn  handler = ota_route_open((char const *)exact, len, TOKEN, &req, &v);
+    ota_route_fn  handler = ota_route_open((char *)exact, len, TOKEN, &req, &v);
     CHECK(v.status == st && (handler != NULL) == (st == 0));
-    CHECK(!handler || (req.has_token && strcmp(req.token, TOKEN) == 0));
+    CHECK(!handler || req.has_token);
+    CHECK(wiped(exact, len) && wiped(req.token, sizeof(req.token))); // #456: checked, then gone, admitted or not
     free(exact);
 }
 

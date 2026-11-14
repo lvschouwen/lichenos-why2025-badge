@@ -1,6 +1,7 @@
 #include "ota_proto.h"
 
 #include "dev_mode.h" // HOLD_OFF_FIRST
+#include "secure_wipe.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -296,13 +297,7 @@ static long next_line(char const *head, size_t len, size_t pos, char line[LINE_M
     return -1;
 }
 
-int ota_parse_request(char const *head, size_t len, ota_request_t *req) {
-    memset(req, 0, sizeof(*req));
-    req->content_length = -1;
-    req->total_size     = -1;
-    req->piece_size     = -1;
-
-    char     line[LINE_MAX_LEN + 1];
+static int parse_lines(char const *head, size_t len, ota_request_t *req, char *line) {
     uint32_t seen = 0;
     for (size_t pos = 0; pos < len;) {
         long line_len = next_line(head, len, pos, line);
@@ -319,6 +314,18 @@ int ota_parse_request(char const *head, size_t len, ota_request_t *req) {
         pos += (size_t)line_len + 2;
     }
     return 400;
+}
+
+int ota_parse_request(char const *head, size_t len, ota_request_t *req) {
+    memset(req, 0, sizeof(*req));
+    req->content_length = -1;
+    req->total_size     = -1;
+    req->piece_size     = -1;
+
+    char line[LINE_MAX_LEN + 1];
+    int  status = parse_lines(head, len, req, line);
+    secure_wipe(line, sizeof(line)); // the Authorization line may be the last one copied here (#456)
+    return status;
 }
 
 char const *ota_status_reason(int status) {

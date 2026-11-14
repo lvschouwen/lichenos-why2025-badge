@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static int failures = 0;
@@ -151,9 +152,84 @@ static void test_load(void) {
     ota_os_bind(NULL);
 }
 
+#define NEW_FILE OTA_TOKEN_FILE ".new"
+
+// #456: "fw token new" saves a new token for the next boot, the file first (the one that wins at boot), and a cut at
+// any point boots with the old token or the new one
+static void test_rotate(void) {
+    ota_os_t const os = {.secret_get = fake_secret_get, .secret_set = fake_secret_set};
+    ota_os_bind(&os);
+    char fresh[OTA_TOKEN_LEN + 1];
+
+    // Both copies get the new token; the running one stays until the restart
+    reset();
+    write_file(TOKEN "\n");
+    CHECK(ota_token_load() && strcmp(ota_token_get(), TOKEN) == 0);
+    random_byte = 0xc3;
+    CHECK(ota_token_rotate(fresh) == OTA_ROTATE_SAVED);
+    CHECK(strcmp(fresh, "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3") == 0 && ota_token_rotated());
+    CHECK(strcmp(ota_token_get(), TOKEN) == 0);
+    CHECK(file_is("c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3\n") && strcmp(nvs_value, fresh) == 0);
+    CHECK(access(NEW_FILE, F_OK) != 0); // swapped in, nothing left beside it
+    ota_token_forget(); // the restart
+    CHECK(ota_token_load() && strcmp(ota_token_get(), fresh) == 0);
+
+    // Cut after the swap, before NVS (or NVS failing): the file wins at boot and NVS follows it
+    reset();
+    write_file(TOKEN "\n");
+    nvs_has = true;
+    snprintf(nvs_value, sizeof(nvs_value), "%s", TOKEN);
+    nvs_up      = false;
+    random_byte = 0x11;
+    CHECK(ota_token_rotate(fresh) == OTA_ROTATE_SAVED && strcmp(nvs_value, TOKEN) == 0);
+    nvs_up = true;
+    ota_token_forget();
+    CHECK(ota_token_load() && strcmp(ota_token_get(), "11111111111111111111111111111111") == 0);
+    CHECK(strcmp(nvs_value, ota_token_get()) == 0);
+
+    // Cut before the swap: the new file beside the old one is never read; the old token boots
+    reset();
+    write_file(TOKEN "\n");
+    FILE *f = fopen(NEW_FILE, "w");
+    CHECK(f != NULL);
+    if (f) {
+        fputs("22222222222222222222222222222222\n", f);
+        fclose(f);
+    }
+    CHECK(ota_token_load() && strcmp(ota_token_get(), TOKEN) == 0);
+    unlink(NEW_FILE);
+
+    // The file can't be replaced (a directory where the new file goes): refused, NVS untouched, out wiped
+    reset();
+    write_file(TOKEN "\n");
+    nvs_has = true;
+    snprintf(nvs_value, sizeof(nvs_value), "%s", TOKEN);
+    CHECK(mkdir(NEW_FILE, 0700) == 0);
+    random_byte = 0x33;
+    CHECK(ota_token_rotate(fresh) == OTA_ROTATE_FAILED);
+    CHECK(fresh[0] == '\0' && strcmp(nvs_value, TOKEN) == 0 && nvs_writes == 0 && file_is(TOKEN "\n"));
+
+    // No token file and none can be written: the settings copy alone, which the next boot reads (and writes back)
+    unlink(OTA_TOKEN_FILE);
+    CHECK(ota_token_rotate(fresh) == OTA_ROTATE_NVS_ONLY && strcmp(nvs_value, fresh) == 0);
+    CHECK(access(OTA_TOKEN_FILE, F_OK) != 0);
+    // ... and with NVS down too: nothing kept, refused
+    nvs_up = false;
+    CHECK(ota_token_rotate(fresh) == OTA_ROTATE_FAILED && fresh[0] == '\0');
+    rmdir(NEW_FILE);
+    nvs_up = true;
+    ota_token_forget();
+    CHECK(ota_token_load() && strcmp(ota_token_get(), "33333333333333333333333333333333") == 0);
+    CHECK(file_is("33333333333333333333333333333333\n"));
+
+    reset();
+    ota_os_bind(NULL);
+}
+
 int main(void) {
     test_text_valid();
     test_load();
+    test_rotate();
     if (failures) {
         printf("%d failure(s)\n", failures);
         return 1;

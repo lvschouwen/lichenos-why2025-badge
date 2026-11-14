@@ -12,10 +12,12 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #ifndef OTA_TOKEN_FILE
 #define OTA_TOKEN_FILE STORAGE_BASE "/ota_token.txt" // host tests point it at a scratch file
 #endif
+#define OTA_TOKEN_NEW OTA_TOKEN_FILE ".new" // a rotation's new file before it is swapped in; never read at boot
 
 static char token[OTA_TOKEN_LEN + 1];
 
@@ -59,13 +61,25 @@ static bool read_token_nvs(char *out) {
     return valid;
 }
 
-static bool write_token_file(void) {
-    FILE *f = fopen(OTA_TOKEN_FILE, "w");
+static bool write_text(char const *path, char const *text) {
+    FILE *f = fopen(path, "w");
     if (!f) {
         return false;
     }
-    bool written = fprintf(f, "%s\n", token) > 0;
+    bool written = fprintf(f, "%s\n", text) > 0;
     return fclose(f) == 0 && written;
+}
+
+static bool write_token_file(void) {
+    return write_text(OTA_TOKEN_FILE, token);
+}
+
+// The token guards firmware installs: it must not be predictable (lichen_random keeps the entropy source on)
+static void make_token(char *out) {
+    uint8_t raw[OTA_TOKEN_LEN / 2];
+    lichen_random_fill(raw, sizeof(raw));
+    ota_hex(raw, sizeof(raw), out);
+    secure_wipe(raw, sizeof(raw)); // the token itself, as bytes
 }
 
 // /storage first (what tools read), NVS as the copy that still works when /storage is not mounted. True when the
@@ -74,11 +88,7 @@ bool ota_token_load(void) {
     bool from_file = read_token_file(token);
     bool from_nvs  = !from_file && read_token_nvs(token);
     if (!from_file && !from_nvs) {
-        // The token guards firmware installs: it must not be predictable (lichen_random keeps the entropy source on)
-        uint8_t raw[OTA_TOKEN_LEN / 2];
-        lichen_random_fill(raw, sizeof(raw));
-        ota_hex(raw, sizeof(raw), token);
-        secure_wipe(raw, sizeof(raw)); // the token itself, as bytes
+        make_token(token);
     }
     bool wrote_file = !from_file && write_token_file();
     bool wrote_nvs  = false;
@@ -96,4 +106,34 @@ char const *ota_token_get(void) {
 
 void ota_token_forget(void) {
     secure_wipe(token, sizeof(token));
+}
+
+static bool s_rotated; // console task only
+
+// The file is the authority at boot (ota_token_load), so it is swapped first and in one step: written next to it, then
+// renamed over it (LittleFS: a cut leaves the old file or the new one). The NVS copy follows; a cut before that leaves
+// the new file and the old NVS copy, and the next boot's load writes the file's token to NVS.
+ota_rotate_t ota_token_rotate(char *out) {
+    make_token(out);
+    bool swapped = write_text(OTA_TOKEN_NEW, out) && rename(OTA_TOKEN_NEW, OTA_TOKEN_FILE) == 0;
+    if (!swapped) {
+        unlink(OTA_TOKEN_NEW);
+        FILE *old = fopen(OTA_TOKEN_FILE, "r");
+        if (old) { // it would bring the old token back at boot, whatever NVS says
+            fclose(old);
+            secure_wipe(out, OTA_TOKEN_LEN + 1);
+            return OTA_ROTATE_FAILED;
+        }
+    }
+    bool saved = ota_os_secret_set(TOKEN_NVS_KEY, out);
+    if (!swapped && !saved) {
+        secure_wipe(out, OTA_TOKEN_LEN + 1);
+        return OTA_ROTATE_FAILED;
+    }
+    s_rotated = true;
+    return swapped ? OTA_ROTATE_SAVED : OTA_ROTATE_NVS_ONLY;
+}
+
+bool ota_token_rotated(void) {
+    return s_rotated;
 }

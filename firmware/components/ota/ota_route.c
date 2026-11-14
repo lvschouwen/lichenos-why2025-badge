@@ -1,5 +1,7 @@
 #include "ota_route.h"
 
+#include "secure_wipe.h"
+
 // Route -> handler. Method and path -> route is the parser's table (ota_proto.c): a request reaches a row only as a
 // parsed, admitted route.
 static ota_route_row_t const rows[] = {
@@ -33,11 +35,14 @@ ota_route_row_t const *ota_route_row(ota_route_t route) {
     return (size_t)route < sizeof(rows) / sizeof(rows[0]) ? &rows[route] : NULL;
 }
 
-ota_route_fn ota_route_open(char const *head, size_t head_len, char const *token, ota_request_t *req,
-                            ota_verdict_t *v) {
+ota_route_fn ota_route_open(char *head, size_t head_len, char const *token, ota_request_t *req, ota_verdict_t *v) {
     v->why      = NULL;
     v->up_front = false;
     v->status   = ota_request_admit(head, head_len, token, req, &v->why);
+    // The token crossed the LAN in clear (#456): once checked, its copies in the head and the request go, admitted or
+    // not. Every handler reads the parsed request, never the head.
+    secure_wipe(head, head_len);
+    secure_wipe(req->token, sizeof(req->token));
     if (v->status) {
         return NULL;
     }
