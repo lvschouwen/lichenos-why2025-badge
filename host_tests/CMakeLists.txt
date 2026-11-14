@@ -2295,6 +2295,8 @@ add_test(NAME reserved_ids_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/.
 add_test(NAME check_rules_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_rules_test.py)
 # tools/soak_parse.py and soak_report.py: the fw soak parser and the expected-against-measured table (#424)
 add_test(NAME soak_report_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/soak_report_test.py)
+# tools/soak_census.py and soak_trend.py: the log census and the trend test of the soak report (#430)
+add_test(NAME soak_census_test COMMAND python3 -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/soak_census_test.py)
 
 # app_main's start order, the two-chip start rules (#210, #234)
 add_executable(boot_order_test

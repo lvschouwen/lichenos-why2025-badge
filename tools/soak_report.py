@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Soak report (#424, #407): `soak_report.py expected <samples.csv> [--log <serial.log>] [--budgets FILE]`.
+"""Soak report (#424, #430, #407). Three parts:
+`soak_report.py census <serial.log> [--warmup-h 2] [--window-h 2] [--gap-min 30] [--top 40]` counts every log line kind
+per window and reports late kinds, rising rates and rising numbers (tools/soak_census.py);
+`soak_report.py trend <samples.csv> [--warmup-h 2] [--interval-s 600] [--allow FILE]` tests every numeric column for a
+drift, with the allow file tools/soak_rising.txt (tools/soak_trend.py). Both are report only: exit 0, or 2 when the
+input cannot be read.
+
+`soak_report.py expected <samples.csv> [--log <serial.log>] [--budgets FILE]`.
 Prints the expected-against-measured table of tools/soak_budgets.txt (format documented there): figure, expected,
 tolerance, measured median, measured worst, flag. Samples marked incomplete (a lost or mismatched soak line) are
 counted and left out of the figures.
@@ -19,7 +26,9 @@ import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import soak_census  # noqa: E402
 import soak_parse  # noqa: E402
+import soak_trend  # noqa: E402
 
 DEFAULT_BUDGETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "soak_budgets.txt")
 # A comment is a "#" followed by a space or the line end: "#234" (an issue) is a source, not a comment.
@@ -179,11 +188,68 @@ def render(rows: list, samples: List[soak_parse.Sample], log_given: bool = True)
     return "\n".join(lines)
 
 
+def float_options(rest: List[str], spec: Dict[str, float]) -> Optional[str]:
+    """Parse `--name value` pairs (numbers) into spec in place; -> the first unknown option, or None."""
+    while rest:
+        opt = rest.pop(0)
+        if opt not in spec or not rest:
+            return opt
+        spec[opt] = float(rest.pop(0))
+    return None
+
+
+def run_census(args: List[str]) -> int:
+    spec = {"--warmup-h": 2.0, "--window-h": 2.0, "--gap-min": 30.0, "--top": 40.0}
+    bad = float_options(args[1:], spec) if args else "census <serial-log>"
+    if bad is None and (spec["--window-h"] <= 0 or spec["--warmup-h"] < 0):
+        bad = "--window-h must be positive"
+    if bad is not None:
+        print("soak_report: bad option " + bad, file=sys.stderr)
+        return 2
+    try:
+        with open(args[0], encoding="utf-8", errors="replace") as f:
+            c = soak_census.read_census(f, spec["--warmup-h"] * 3600, spec["--window-h"] * 3600, spec["--gap-min"] * 60)
+    except OSError as e:
+        print("soak_report: %s" % e, file=sys.stderr)
+        return 2
+    print("\n".join(soak_census.census_report(c, int(spec["--top"]))))
+    return 0
+
+
+def run_trend(args: List[str]) -> int:
+    rest, allow_path = list(args[1:]), soak_trend.DEFAULT_ALLOW
+    if "--allow" in rest:
+        i = rest.index("--allow")
+        allow_path = rest[i + 1] if i + 1 < len(rest) else ""
+        del rest[i:i + 2]
+    spec = {"--warmup-h": 2.0, "--interval-s": 600.0}
+    bad = float_options(rest, spec) if args and allow_path else "trend <csv> [--allow FILE]"
+    if bad is not None:
+        print("soak_report: bad option " + bad, file=sys.stderr)
+        return 2
+    try:
+        allow = soak_trend.load_allow(allow_path)
+        samples = soak_parse.read_csv(args[0])
+    except (OSError, ValueError) as e:
+        print("soak_report: %s" % e, file=sys.stderr)
+        return 2
+    print("\n".join(soak_trend.trend_report(samples, allow, spec["--warmup-h"], spec["--interval-s"])))
+    return 0
+
+
 def main(argv: Sequence[str]) -> int:
     args = list(argv[1:])
     if args and args[0] in ("-h", "--help"):
         print(__doc__)
         return 0
+    try:
+        if len(args) >= 2 and args[0] == "census":
+            return run_census(args[1:])
+        if len(args) >= 2 and args[0] == "trend":
+            return run_trend(args[1:])
+    except ValueError as e:
+        print("soak_report: %s" % e, file=sys.stderr)
+        return 2
     if len(args) < 2 or args[0] != "expected":
         print(__doc__.split("\n")[0], file=sys.stderr)
         return 2

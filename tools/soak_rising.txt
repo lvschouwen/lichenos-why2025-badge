@@ -1,0 +1,17 @@
+# Soak keys that are meant to rise (#430, #407 check B). Read by `tools/soak_report.py trend`: a column listed here
+# that rises is not reported; one that FALLS still is. Anything not listed that moves is reported on purpose: add a key
+# only when its design says it only counts up (reason after the key), never to quiet a leak.
+#
+# key   reason
+up       uptime of this boot
+c6up     the C6's own uptime
+hb       heartbeats answered since boot
+pooltx   packets sent through the C6 pool since boot
+poolrx   packets received through the C6 pool since boot
+lpkt     LoRa packets seen by the C6 (restarts with the C6)
+lcrc     LoRa CRC errors seen by the C6 (restarts with the C6)
+lrx      LoRa frames received since boot
+ltx      LoRa frames sent since boot
+mrx      MeshCore packets received since boot
+mtx      MeshCore packets sent since boot
+airlog   air-log entries written since boot
