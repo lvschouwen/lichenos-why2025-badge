@@ -66,14 +66,17 @@ bool ota_update_refused_on_trial(bool stops_apps, ota_image_state_t state) {
     return stops_apps && state == OTA_IMAGE_ON_TRIAL;
 }
 
-char const *ota_pending_why(bool installed, ota_image_state_t state, bool c6_changed) {
+char const *ota_pending_why(bool changing, bool installed, ota_image_state_t state, bool c6_unproven) {
+    if (changing) {
+        return "an update is being written";
+    }
     if (installed) {
-        return "an update installed this boot runs after the next restart";
+        return "an installed update boots at the next restart";
     }
     if (state == OTA_IMAGE_ON_TRIAL) {
-        return "the running image is on trial, and a reset before it is valid boots the previous one";
+        return "the running image is on trial";
     }
-    return c6_changed ? "a C6 image pushed this boot is flashed at the next boot" : NULL;
+    return c6_unproven ? "the C6 does not run the staged C6 image yet" : NULL;
 }
 
 restart_gate_t restart_gate_decide(bool asked, ota_image_state_t image, bool trial_settled, uint32_t uptime_s,

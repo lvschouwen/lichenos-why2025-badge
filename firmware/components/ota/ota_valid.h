@@ -28,11 +28,12 @@ bool ota_image_may_be_on_trial(ota_image_state_t state);
 // Whether the receiver refuses a request that stops the apps (#302): only on a definite trial, the state esp_ota_begin
 // refuses too. An unread state is let through: refusing it would lock out Wi-Fi updates on a badge with blank otadata
 bool ota_update_refused_on_trial(bool stops_apps, ota_image_state_t state);
-// What would boot an image other than the running one without asking (#420), or NULL: an update installed this boot
-// (the next restart boots it), a running image on trial (any reset before it is valid boots the previous one; only a
-// definite trial: blank OTA data after a USB flash reads UNKNOWN and is none), a C6 bundle changed this boot (flashed
-// at the next boot). The on-air allow list is not switched on then, since that image may not keep it.
-char const *ota_pending_why(bool installed, ota_image_state_t state, bool c6_changed);
+// What would run an image other than the running one without asking (#420), or NULL: a covered change being written
+// (changing: ota_hold.h, the boot switch or a C6 file), an update installed this boot (the next restart boots it), a
+// running image on trial (any reset before it is valid boots the previous one; only a definite trial: blank OTA data
+// after a USB flash reads UNKNOWN and is none), a staged C6 image the running C6 has not proven (c6link_bundle_pending:
+// changed this boot, or not matched by IDENT). The on-air allow list is not switched on then.
+char const *ota_pending_why(bool changing, bool installed, ota_image_state_t state, bool c6_unproven);
 
 // The restart gate (#304): a restart the badge makes on its own while this image is on trial rolls it back, so it
 // waits (system_restart, polled once a second) until the image is valid, the trial loop has ended any other way (a

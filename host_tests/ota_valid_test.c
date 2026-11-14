@@ -106,18 +106,47 @@ static void test_update_refused(void) {
     CHECK(!ota_update_refused_on_trial(false, OTA_IMAGE_ON_TRIAL));
 }
 
-// #420: the on-air list is not switched on while another image could boot without asking; a USB-flashed badge (blank
+// #420: the on-air list is not switched on while another image could run without asking; a USB-flashed badge (blank
 // OTA data reads UNKNOWN) and a proven image are not pending
 static void test_pending(void) {
-    CHECK(ota_pending_why(false, OTA_IMAGE_NOT_ON_TRIAL, false) == NULL);
-    CHECK(ota_pending_why(false, OTA_IMAGE_UNKNOWN, false) == NULL);
-    CHECK(ota_pending_why(true, OTA_IMAGE_NOT_ON_TRIAL, false) != NULL);
-    CHECK(ota_pending_why(false, OTA_IMAGE_ON_TRIAL, false) != NULL);
-    CHECK(ota_pending_why(false, OTA_IMAGE_NOT_ON_TRIAL, true) != NULL);
-    CHECK(ota_pending_why(false, OTA_IMAGE_UNKNOWN, true) != NULL);
-    CHECK(strstr(ota_pending_why(true, OTA_IMAGE_ON_TRIAL, true), "installed")); // the one the next restart boots
-    CHECK(strstr(ota_pending_why(false, OTA_IMAGE_ON_TRIAL, true), "trial"));
-    CHECK(strstr(ota_pending_why(false, OTA_IMAGE_NOT_ON_TRIAL, true), "C6"));
+    CHECK(ota_pending_why(false, false, OTA_IMAGE_NOT_ON_TRIAL, false) == NULL);
+    CHECK(ota_pending_why(false, false, OTA_IMAGE_UNKNOWN, false) == NULL);
+    CHECK(ota_pending_why(true, false, OTA_IMAGE_NOT_ON_TRIAL, false) != NULL);
+    CHECK(ota_pending_why(false, true, OTA_IMAGE_NOT_ON_TRIAL, false) != NULL);
+    CHECK(ota_pending_why(false, false, OTA_IMAGE_ON_TRIAL, false) != NULL);
+    CHECK(ota_pending_why(false, false, OTA_IMAGE_NOT_ON_TRIAL, true) != NULL);
+    CHECK(ota_pending_why(false, false, OTA_IMAGE_UNKNOWN, true) != NULL);
+    CHECK(strstr(ota_pending_why(true, true, OTA_IMAGE_ON_TRIAL, true), "being written"));
+    CHECK(strstr(ota_pending_why(false, true, OTA_IMAGE_ON_TRIAL, true), "installed"));
+    CHECK(strstr(ota_pending_why(false, false, OTA_IMAGE_ON_TRIAL, true), "trial"));
+    CHECK(strstr(ota_pending_why(false, false, OTA_IMAGE_NOT_ON_TRIAL, true), "C6"));
+}
+
+// #420, the Dekker pair of ota_hold.h under sequential consistency: the server stores "changing" then loads onair_on
+// (held: it clears the mark and refuses); the list stores onair_on then asks ota_pending_why (pending: it stores off
+// and refuses). Over every interleaving of the two, the boot switch and a list left on never both happen.
+static void test_dekker(void) {
+    // Steps: server 0 = store busy, 1 = load on; list 0 = store on, 1 = load pending. Bit i of order: step i is the
+    // server's. Orders of 2 + 2 steps that keep each side's own order: 6.
+    static unsigned const orders[] = {0x3, 0x5, 0x6, 0x9, 0xA, 0xC};
+    for (size_t o = 0; o < sizeof(orders) / sizeof(orders[0]); o++) {
+        bool busy = false, on = false, server_held = false, list_pending = false;
+        int  s = 0, l = 0;
+        for (int i = 0; i < 4; i++) {
+            if (orders[o] & (1u << i)) {
+                if (s++ == 0) {
+                    busy = true;
+                } else {
+                    server_held = on;
+                }
+            } else if (l++ == 0) {
+                on = true;
+            } else {
+                list_pending = ota_pending_why(busy, false, OTA_IMAGE_NOT_ON_TRIAL, false) != NULL;
+            }
+        }
+        CHECK(server_held || list_pending); // at least one side saw the other
+    }
 }
 
 static void test_image_state(void) {
@@ -512,6 +541,7 @@ int main(void) {
     test_may_be_on_trial();
     test_update_refused();
     test_pending();
+    test_dekker();
     test_loop_timeline();
     test_loop_retries();
     test_wifi_table();

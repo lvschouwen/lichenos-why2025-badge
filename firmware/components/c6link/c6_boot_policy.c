@@ -105,6 +105,10 @@ c6_state_write_t c6_state_after_attach(bool full_path, bool attached, bool ident
     return w;
 }
 
+bool c6_bundle_pending(bool changed, bool checked, bool staged, bool ident_ok) {
+    return changed || !checked || (staged && !ident_ok);
+}
+
 bool c6_restart_after_attach(bool full_path, bool attached, bool ident_ok, bool state_persisted) {
     return !full_path && (!attached || !ident_ok) && state_persisted;
 }

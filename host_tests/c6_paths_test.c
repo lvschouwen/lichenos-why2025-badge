@@ -36,6 +36,8 @@ static void image_dir_held(void) {
     CHECK(!c6_path_in_image_dir("/sd/c6/firmware.bin"));
     CHECK(!c6_path_in_image_dir("/storage/..c6/x"));
     CHECK(!c6_path_in_image_dir(""));
+    CHECK(c6_path_in_image_dir(C6_IMAGE_DIR) && c6_path_in_image_dir(C6_IMAGE_DIR "/firmware.bin")); // the parts agree
+    CHECK(!c6_path_in_image_dir(C6_IMAGE_DIR "x"));
 }
 
 int main(void) {

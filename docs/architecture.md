@@ -567,10 +567,13 @@ copy, its setting and `fw onair` are `mesh_onair_run.c`.
   `fw c6 reflash` and `fw c6 verify` only flash the staged bundle, which nothing but the USB console can change then;
   the Files app keeps the OS folders (`c6` among them) read-only. `fw trial` (developer mode, which only the USB console
   turns on), `fw boot fail` and `fw crash test` boot no other image on a badge that is not on trial.
-- `fw onair on` is refused, from every console, while another image could boot without asking (`ota_pending_why`,
-  bound by main as `console_boot_pending`): an update installed this boot and waiting for its restart, a running image
-  still on trial (any reset before it is valid boots the previous one), or a C6 bundle pushed this boot. It works again
-  after that boot, once `fw slot` shows the running image valid.
+- `fw onair on` is refused, from every console, while another image could run without asking (`ota_pending_why`,
+  bound by main as `console_boot_pending`): a boot slot switch or C6 file change being written, an update installed
+  this boot and waiting for its restart, a running image still on trial (any reset before it is valid boots the
+  previous one), or a staged C6 bundle the running C6 has not proven (`c6_bundle_pending`: changed this boot, the C6
+  step not run yet, or IDENT not matching it, e.g. after a failed flash). It works again after that boot, once
+  `fw slot` shows the running image valid. The switch and a covered change are a Dekker pair (`ota_hold.h`): each side
+  stores its own flag, then loads the other's, all seq_cst and with no lock spanning both, so they never both go ahead.
 - `fw onair` shows it; `fw onair on` works from any console (it only narrows). `off`, `allow <channel|key digits>`,
   `remove <...>` and `clear` work only from the USB console: the Wi-Fi console's token also installs firmware, and the
   Console app counts as remote (injected keys). `tools/onair_guard.sh` refuses those four itself.

@@ -30,6 +30,7 @@
 #include "ota_hw.h"
 #include "ota_inflate.h"
 #include "ota_path.h"
+#include "ota_hold.h"
 #include "ota_pieces.h"
 #include "ota_proto.h"
 #include "ota_rle.h"
@@ -199,7 +200,7 @@ static bool send_all(int fd, void const *data, size_t len) {
 static void respond(int fd, int status, char const *fmt, ...) __attribute__((format(printf, 3, 4)));
 
 // The reply head and a body (NUL terminated, ends in a newline), sent as is
-static void send_reply(int fd, int status, char const *body) {
+void ota_send_reply(int fd, int status, char const *body) {
     char head[192];
     int  n = snprintf(
         head,
@@ -221,7 +222,7 @@ static void respond(int fd, int status, char const *fmt, ...) {
     vsnprintf(body, sizeof(body) - 1, fmt, ap);
     va_end(ap);
     strcat(body, "\n");
-    send_reply(fd, status, body);
+    ota_send_reply(fd, status, body);
 }
 
 static void set_read_timeout(int fd, int seconds, int usec) {
@@ -407,31 +408,6 @@ static bool write_file(char const *path, uint8_t const *data, size_t len) {
     return fclose(f) == 0 && ok;
 }
 
-// A change under the C6 image directory makes the stored "verified bundle" stale (#36); forget it before touching the file,
-// so even an interrupted write leaves the next boot with a full check. Every writer of the C6 image directory must go
-// through here (or call c6link_bundle_changed itself): the skip key only covers sizes and .md5 text
-static void forget_c6_bundle_if_c6_file(char const *posix_path) {
-    if (c6_path_in_image_dir(posix_path)) {
-        c6link_bundle_changed();
-    }
-}
-
-// The USB hold (#420): true when why (console_usb_hold_why) holds, and the 409 is sent. noinline: its text stays off
-// the callers' stacks (handle_connection's, finish_file's)
-__attribute__((noinline)) static bool held_now(int fd, ota_hold_t kind, char const *why) {
-    if (!why) {
-        return false;
-    }
-    char text[320];
-    ota_hold_reply(kind, why, text, sizeof(text));
-    respond(fd, 409, "%s", text);
-    return true;
-}
-
-bool ota_server_installed(void) {
-    return __atomic_load_n(&firmware_installed, __ATOMIC_ACQUIRE);
-}
-
 // Room for an upload of size bytes on /storage (#299), else a 507 now instead of a failed write after the transfer.
 // A drive whose free space can't be read is let through: the write reports that.
 // body: bytes of a request body not read yet (0: none, or the client waits for 100 Continue), dropped before the reply.
@@ -476,12 +452,13 @@ static bool finish_file(int fd, char const *vms, uint8_t const *data, size_t len
         respond(fd, 400, "bad path");
         return false;
     }
-    if (!storage_room(fd, len, 0, 0) || (c6_path_in_image_dir(path) && held_now(fd, OTA_HOLD_C6, console_usb_hold_why()))) {
+    if (!storage_room(fd, len, 0, 0) || !ota_c6_change_begin(fd, path)) {
         return false; // before the bundle is marked changed: the old file stays
     }
-    forget_c6_bundle_if_c6_file(path);
     mkdir_parents(path);
-    if (!write_file(temp, data, len)) {
+    bool written = write_file(temp, data, len);
+    ota_change_end(false); // a C6 file's change stays pending through c6link_bundle_changed
+    if (!written) {
         unlink(temp);
         respond(fd, 500, "couldn't write %s, file left as it was", temp);
         return false;
@@ -506,16 +483,18 @@ static bool install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t h
         respond(fd, 422, "image failed validation (%s), nothing installed", esp_err_to_name(err));
         return false;
     }
-    if (held_now(fd, OTA_HOLD_BOOT, console_usb_hold_why())) { // the hold may have gone on while the image came (#420)
+    if (ota_hold_refused(fd, OTA_HOLD_BOOT, ota_change_begin())) { // the hold may have gone on while the image came (#420)
         return false;
     }
-    if ((err = esp_ota_set_boot_partition(slot)) != ESP_OK) {
+    err = esp_ota_set_boot_partition(slot);
+    ota_change_end(err == ESP_OK);
+    if (err != ESP_OK) {
         respond(fd, 500, "couldn't select %s (%s)", slot->label, esp_err_to_name(err));
         return false;
     }
     ESP_LOGI(TAG, "firmware installed in %s (%zu bytes)", slot->label, len);
     respond(fd, 200, "installed %zu bytes (%lld sent), runs after a reboot", len, sent);
-    __atomic_store_n(&firmware_installed, true, __ATOMIC_RELEASE); // ota_server_installed reads it on other tasks
+    firmware_installed = true;
     return true;
 }
 
@@ -1134,12 +1113,16 @@ static void handle_delete(int fd, ota_request_t const *req) {
         respond(fd, 403, "path not allowed: use FLASH0: with a plain file name");
         return;
     }
-    if (unlink(path) != 0) { // EBUSY: open in another task (esp_littlefs, #300); the file and its bundle stay
+    if (!ota_c6_change_begin(fd, path)) {
+        return;
+    }
+    int gone = unlink(path);
+    ota_change_end(false);
+    if (gone != 0) { // EBUSY: open in another task (esp_littlefs, #300); the file stays (a C6 one's bundle is forgotten)
         int err = errno;
         respond(fd, err == ENOENT ? 404 : 409, "couldn't delete %s: %s", req->path, strerror(err));
         return;
     }
-    forget_c6_bundle_if_c6_file(path);
     respond(fd, 200, "deleted %s", req->path);
 }
 
@@ -1435,9 +1418,9 @@ __attribute__((noinline)) static bool refused_on_hold(int fd, ota_request_t cons
     if (kind == OTA_HOLD_NONE) {
         return false;
     }
-    piece_expire(staged.active && staged.route == req->route);
+    piece_expire(staged.active && staged.route == req->route && (!c6 || strcmp(staged.path, req->path) == 0));
     drain_body(fd, pre_len, req->expect_continue ? 0 : req->content_length);
-    return held_now(fd, kind, why);
+    return ota_hold_refused(fd, kind, why);
 }
 
 static bool refused_up_front(int fd, ota_request_t const *req, size_t pre_len) {
@@ -1461,7 +1444,7 @@ static void respond_info(int fd) {
     n          = n < 0 ? 0 : n > 255 ? 255 : n; // snprintf says what it would have written
     n         += (int)ota_hw_json(hooks.hw_text, line + n, 1024);
     strcpy(line + n, "\n");
-    send_reply(fd, 200, line);
+    ota_send_reply(fd, 200, line);
 }
 
 // A new firmware boots after the reboot; without one, a reboot on trial goes back to the previous version (#304)

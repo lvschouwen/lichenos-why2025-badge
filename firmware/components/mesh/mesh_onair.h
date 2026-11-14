@@ -11,8 +11,9 @@
 // so does booting another image or changing the C6's (#420): another P4 image may not keep the list, and the C6 drives
 // the LoRa radio, so a changed C6 image could send anything. "fw slot other" from any other console, a firmware update
 // over Wi-Fi (refused at prepare, at every firmware request and again before the boot slot switch) and a file write
-// or delete in the C6 image folder are refused. "fw onair on" itself waits while another image could boot without
-// asking (an update installed this boot, an image on trial, a C6 bundle pushed this boot: console_boot_pending).
+// or delete in the C6 image folder are refused. "fw onair on" itself waits while another image could run without
+// asking (a covered change being written, an update installed this boot, an image on trial, a staged C6 bundle the
+// C6 has not proven: console_boot_pending); the two sides are a Dekker pair (ota_hold.h).
 // The list lives on the badge only, never in the repo (it is public).
 //
 // A channel entry is its name and a key id (ONAIR_KEY_ID bytes of SHA-256 of the channel's secret, never the

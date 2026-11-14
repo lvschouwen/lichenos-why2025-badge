@@ -81,7 +81,8 @@ add_executable(ota_proto_test
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota/sha256.c
 )
 
-target_include_directories(ota_proto_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota)
+target_include_directories(ota_proto_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
 target_compile_definitions(ota_proto_test PRIVATE OTA_PARTITIONS_CSV="${CMAKE_CURRENT_SOURCE_DIR}/../firmware/partitions.csv")
 
 target_compile_options(ota_proto_test PRIVATE
@@ -661,6 +662,7 @@ add_executable(ota_path_test
 target_include_directories(ota_path_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/storage
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console
 )
 
 target_compile_options(ota_path_test PRIVATE

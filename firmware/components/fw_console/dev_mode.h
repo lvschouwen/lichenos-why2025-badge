@@ -68,8 +68,8 @@ bool console_hold_refuses(bool held, console_origin_t origin);
 
 // The hold also covers booting another image (#420): the other slot's image, or one installed over Wi-Fi, may not keep
 // what holds (an older image has no on-air list), so "fw slot other" and the update server's firmware refuse while it
-// holds. %s is what holds (console_usb_hold_why).
-#define HOLD_BOOT_REFUSAL "%s is on and another image may not keep it; switch it off at the USB console first"
+// holds. Every refusal ends in this one string (passed as an argument, so the image keeps one copy).
+#define HOLD_OFF_FIRST "switch it off at the USB console first (fw onair off)"
 
 typedef enum {
     SLOT_REQ_SHOW,    // "": show the slots

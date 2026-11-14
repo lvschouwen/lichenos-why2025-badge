@@ -6,7 +6,7 @@
 #include "esp_ota_ops.h"
 #include "c6link.h"
 #include "fw_console.h"
-#include "ota_server.h"
+#include "ota_hold.h"
 #include "freertos/FreeRTOS.h"
 
 #include <stdatomic.h>
@@ -95,7 +95,8 @@ void ota_trial_register_cmds(void) {
 }
 
 char const *ota_boot_pending(void) {
-    return ota_pending_why(ota_server_installed(), ota_image_trial_state(), c6link_bundle_pending());
+    // The loads of the Dekker pair (ota_hold.h): seq_cst, after the caller's store of onair_on
+    return ota_pending_why(ota_change_busy(), ota_change_installed(), ota_image_trial_state(), c6link_bundle_pending());
 }
 
 ota_image_state_t ota_image_trial_state(void) {

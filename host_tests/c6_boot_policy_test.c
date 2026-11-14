@@ -247,8 +247,21 @@ static void test_plan_exhaustive(void) {
     }
 }
 
+// #420: the on-air list waits while the staged bundle could still change the C6; a boot whose C6 proved it, or with no
+// bundle staged, does not (else the list could never be switched on); a failed flash (IDENT no match) still waits
+static void test_bundle_pending(void) {
+    CHECK(!c6_bundle_pending(false, true, true, true));   // the usual boot: proven
+    CHECK(!c6_bundle_pending(false, true, false, false)); // nothing staged: the flasher leaves the C6 alone
+    CHECK(c6_bundle_pending(false, true, true, false));   // staged, not running (a failed flash, an older C6)
+    CHECK(c6_bundle_pending(true, true, true, true));     // pushed or deleted this boot
+    CHECK(c6_bundle_pending(true, true, false, false));
+    CHECK(c6_bundle_pending(false, false, true, true));   // the C6 step has not run yet
+    CHECK(c6_bundle_pending(false, false, false, false));
+}
+
 int main(void) {
     test_key();
+    test_bundle_pending();
     test_plan_table();
     test_plan_exhaustive();
     test_why();

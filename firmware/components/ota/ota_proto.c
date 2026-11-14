@@ -1,5 +1,7 @@
 #include "ota_proto.h"
 
+#include "dev_mode.h" // HOLD_OFF_FIRST
+
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -456,28 +458,13 @@ ota_hold_t ota_route_usb_held(ota_route_t route, bool c6_dir) {
 
 void ota_hold_reply(ota_hold_t kind, char const *held, char *out, size_t cap) {
     static char const *const what[] = {
-        [OTA_HOLD_PREPARE]  = "update refused (prepare, for a firmware or assets push)",
+        [OTA_HOLD_NONE]     = "firmware update refused", // never asked; a refusal still reads as one
+        [OTA_HOLD_PREPARE]  = "update refused (prepare: firmware or assets)",
         [OTA_HOLD_FIRMWARE] = "firmware update refused",
-        [OTA_HOLD_C6]       = "C6 image change refused",
-        [OTA_HOLD_BOOT]     = "firmware not installed",
+        [OTA_HOLD_C6]       = "C6 image change refused (the C6 drives the LoRa radio)",
+        [OTA_HOLD_BOOT]     = "firmware written but not booted",
     };
-    static char const *const why[] = {
-        [OTA_HOLD_PREPARE]  = "another image may not keep it",
-        [OTA_HOLD_FIRMWARE] = "another image may not keep it",
-        [OTA_HOLD_C6]       = "the C6 drives the LoRa radio, so a changed C6 image could send anything",
-        [OTA_HOLD_BOOT]     = "another image may not keep it",
-    };
-    static char const *const left[] = {
-        [OTA_HOLD_PREPARE]  = "nothing was stopped",
-        [OTA_HOLD_FIRMWARE] = "nothing was stopped or erased",
-        [OTA_HOLD_C6]       = "nothing was written or deleted",
-        [OTA_HOLD_BOOT]     = "the image is written to the other slot but does not boot",
-    };
-    if (kind <= OTA_HOLD_NONE || kind > OTA_HOLD_BOOT) {
-        kind = OTA_HOLD_FIRMWARE; // never called with NONE; a refusal still reads as one
-    }
-    snprintf(out, cap, "%s: %s is on and %s; switch it off at the USB console first (fw onair off); %s", what[kind],
-             held, why[kind], left[kind]);
+    snprintf(out, cap, "%s: %s is on; %s", what[kind <= OTA_HOLD_BOOT ? kind : OTA_HOLD_NONE], held, HOLD_OFF_FIRST);
 }
 
 bool ota_route_needs_token(ota_route_t route) {

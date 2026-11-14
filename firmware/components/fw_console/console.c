@@ -433,7 +433,7 @@ static void cmd_slot(char const *args) {
     char const *why = console_usb_hold_why();
     switch (console_slot_request(args, why != NULL, console_origin())) {
         case SLOT_REQ_USAGE: console_reply("slot [other]"); return;
-        case SLOT_REQ_REFUSED: console_reply("slot other refused: " HOLD_BOOT_REFUSAL, why); return;
+        case SLOT_REQ_REFUSED: console_reply("slot other refused: %s is on; %s", why, HOLD_OFF_FIRST); return;
         default: break;
     }
     esp_app_desc_t desc;

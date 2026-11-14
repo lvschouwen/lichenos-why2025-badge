@@ -509,15 +509,17 @@ static void test_routes_usb_held(void) {
     CHECK(strcmp(ota_status_reason(409), "Conflict") == 0); // the refusal's status line
     char text[512];
     ota_hold_reply(OTA_HOLD_PREPARE, "the list", text, sizeof(text));
-    CHECK(strncmp(text, "update refused (prepare, for a firmware or assets push): the list is on", 70) == 0);
-    CHECK(strstr(text, "switch it off at the USB console first") && strstr(text, "nothing was stopped"));
+    CHECK(strcmp(text, "update refused (prepare: firmware or assets): the list is on; switch it off at the USB console "
+                       "first (fw onair off)") == 0);
     ota_hold_reply(OTA_HOLD_FIRMWARE, "the list", text, sizeof(text));
-    CHECK(strncmp(text, "firmware update refused: ", 25) == 0 && strstr(text, "nothing was stopped or erased"));
+    CHECK(strncmp(text, "firmware update refused: the list is on; switch it off", 54) == 0);
     ota_hold_reply(OTA_HOLD_C6, "the list", text, sizeof(text));
-    CHECK(strncmp(text, "C6 image change refused: ", 25) == 0 && strstr(text, "LoRa radio"));
+    CHECK(strncmp(text, "C6 image change refused (", 25) == 0 && strstr(text, "LoRa radio"));
     ota_hold_reply(OTA_HOLD_BOOT, "the list", text, sizeof(text));
-    CHECK(strncmp(text, "firmware not installed: ", 24) == 0 && strstr(text, "does not boot"));
+    CHECK(strncmp(text, "firmware written but not booted: ", 33) == 0);
     ota_hold_reply(OTA_HOLD_NONE, "the list", text, sizeof(text)); // never asked; still a refusal, never garbage
+    CHECK(strncmp(text, "firmware update refused: ", 25) == 0);
+    ota_hold_reply((ota_hold_t)99, "the list", text, sizeof(text));
     CHECK(strncmp(text, "firmware update refused: ", 25) == 0);
     ota_hold_reply(OTA_HOLD_C6, "the list", text, 16); // truncated, terminated
     CHECK(strlen(text) == 15);

@@ -38,9 +38,10 @@ bool mesh_onair_on(void) {
 }
 
 // console_usb_hold's question: what makes the console's destructive commands USB-only now
-// Lock-free (#420): the update server asks it per firmware request, and with the list off that costs no lock
+// Lock-free (#420): the update server asks it per firmware request, and with the list off that costs no lock. seq_cst:
+// the server's load in the Dekker pair of ota_hold.h
 static char const *onair_hold(void) {
-    return __atomic_load_n(&onair_on, __ATOMIC_ACQUIRE) ? "the on-air allow list (fw onair)" : NULL;
+    return __atomic_load_n(&onair_on, __ATOMIC_SEQ_CST) ? "the on-air allow list (fw onair)" : NULL;
 }
 
 void mesh_onair_init(void) {
@@ -95,9 +96,18 @@ static void onair_status(void) {
     }
 }
 
-static void onair_switch(bool on) {
+// Sets the live flag (seq_cst: onair_hold reads it without the lock, ota_hold.h) and returns what it was
+static bool onair_set(bool on) {
     xSemaphoreTake(onair_lock, portMAX_DELAY);
-    __atomic_store_n(&onair_on, on, __ATOMIC_RELEASE); // onair_hold reads it without the lock
+    bool was = onair_on;
+    __atomic_store_n(&onair_on, on, __ATOMIC_SEQ_CST);
+    xSemaphoreGive(onair_lock);
+    return was;
+}
+
+static void onair_switch(bool on) {
+    onair_set(on);
+    xSemaphoreTake(onair_lock, portMAX_DELAY);
     size_t n = onair_list.n;
     xSemaphoreGive(onair_lock);
     bool saved = app_settings_set_u8(meshcore_ctx(), KEY_ON, on ? 1 : 0);
@@ -105,12 +115,13 @@ static void onair_switch(bool on) {
                   on && !n ? ": the list is empty, every console send is refused" : "");
 }
 
-// Not while another image could boot without asking (#420): it may not keep the list. From every origin, USB too.
+// Not while another image could run without asking (#420): it may not keep the list. From every origin, USB too. The
+// list's side of the Dekker pair (ota_hold.h): store on first, then load what is pending; pending: back off again.
 static void onair_switch_on(void) {
-    char const *pending = console_boot_pending();
+    char const *pending = onair_set(true) ? NULL : console_boot_pending();
     if (pending) {
-        console_reply("on-air allow list not switched on: %s, and that image may not keep it; switch it on after "
-                      "that boot, once fw slot shows the running image valid", pending);
+        onair_set(false);
+        console_reply("on-air allow list not switched on: %s", pending);
         return;
     }
     onair_switch(true);

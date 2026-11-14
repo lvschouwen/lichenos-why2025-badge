@@ -56,3 +56,9 @@ c6_state_write_t c6_state_after_attach(bool full_path, bool attached, bool ident
 // really persisted; otherwise the next boot would skip again and loop. The full path never restarts; everything else
 // carries on (without a link when not attached).
 bool c6_restart_after_attach(bool full_path, bool attached, bool ident_ok, bool state_persisted);
+
+// Whether the staged C6 bundle could still change what the C6 runs (#420: the on-air list is not switched on then):
+// changed this boot (a push or delete; flashed at the next boot), not checked yet this boot, or staged (staged: its key
+// could be built) but not proven by the running C6 (IDENT did not match, e.g. after a failed flash). A boot whose C6
+// proved the staged bundle is not pending, nor one with no bundle staged (the flasher then leaves the C6 alone).
+bool c6_bundle_pending(bool changed, bool checked, bool staged, bool ident_ok);

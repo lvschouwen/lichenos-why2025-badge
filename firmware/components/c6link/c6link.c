@@ -294,7 +294,11 @@ static bool nvs_write_boot_state(char const *key, bool verify) {
     return ok;
 }
 
-static atomic_bool s_bundle_changed;
+static atomic_bool s_bundle_changed; // seq_cst (atomic_store/load): the list's side of the Dekker pair, ota_hold.h
+// This boot's C6 step, once it tried the attach and IDENT: BOOT_CHECKED, with BOOT_STAGED (a bundle staged) and
+// BOOT_PROVEN (the running C6 matched it). One word, so it is written whole.
+enum { BOOT_CHECKED = 1, BOOT_STAGED = 2, BOOT_PROVEN = 4 };
+static atomic_int s_boot_c6;
 
 void c6link_bundle_changed(void) {
     atomic_store(&s_bundle_changed, true);
@@ -302,7 +306,8 @@ void c6link_bundle_changed(void) {
 }
 
 bool c6link_bundle_pending(void) {
-    return atomic_load(&s_bundle_changed);
+    int boot = atomic_load(&s_boot_c6);
+    return c6_bundle_pending(atomic_load(&s_bundle_changed), boot & BOOT_CHECKED, boot & BOOT_STAGED, boot & BOOT_PROVEN);
 }
 
 // The C6 was lost at runtime and the badge restarts for it (#14): check it fully during the next boot, keeping the key
@@ -441,6 +446,8 @@ bool c6link_start(void) {
     // rests on a C6 that answered IDENT, never on an older image that cannot
     boot_info.ident = attached ? check_ident(&boot_info.ident_ms) : C6_IDENT_NOT_ASKED;
     bool ident_ok   = boot_info.ident == C6_IDENT_MATCH;
+    // A failed flash leaves the C6 unproven: still pending (#420)
+    atomic_store(&s_boot_c6, BOOT_CHECKED | (key[0] ? BOOT_STAGED : 0) | (ident_ok ? BOOT_PROVEN : 0));
     // The key is stored only after a successful attach and IDENT; a failed skip sets the verify flag (full check next
     // boot)
     c6_state_write_t w         = c6_state_after_attach(full, attached, ident_ok, err == ESP_OK, key[0] != '\0');
