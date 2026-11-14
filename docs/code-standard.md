@@ -65,6 +65,11 @@ because `firmware/CMakeLists.txt` turns `-fstack-usage` on for every directory u
 
 ## The gate and the ratchet
 
+The standard gate checks the developer image only. `build` then builds the release image too (`firmware/build-release`,
+#401, about 1.5 min warm) and runs `tools/check_release_image.sh` on it: the marker `LICHEN-DEBUG-BUILD-MARKER`
+(`fw_console/console.c`, only with `CONFIG_LICHEN_DEV_COMMANDS`) must be absent there and present in the developer image.
+`BADGE_SKIP_RELEASE=1` skips it and exits 3, so such a run never earns a green stamp.
+
 `firmware/build.sh build` (also `all` and `app`; not `reconfigure` or `storage`) runs `tools/check_standard.sh` after the
 P4 image is built, about 3 s. It runs `tools/check_standard.py`. Nothing passes silently:
 

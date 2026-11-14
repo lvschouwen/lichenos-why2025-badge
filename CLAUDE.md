@@ -8,6 +8,7 @@ ESP32-P4 runs Lichen (ESP-IDF 6.1, LVGL 9.6); ESP32-C6 is a radio coprocessor (W
 ## Build and check
 - Full check, green before every commit: `BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh build` (static checks, host tests under ASan+UBSan, C6 + P4 images, layer, standard and licence checks). Log to a file, 600 s timeout. Gate details: `.claude/rules/build-gates.md`.
 - Host tests only: `cmake -S host_tests -B host_tests/build && cmake --build host_tests/build -j8 && ctest --test-dir host_tests/build`.
+- The full check ends with the release build (`firmware/build-release`, +~1.5 min warm, #401); `BADGE_SKIP_RELEASE=1` skips it but exits 3, so it never stamps green.
 - A green build rewrites the `size` lines of `tools/standard-baseline.txt`: commit them, never restore. More than +8 KB per archive over the merge base fails; baselines only shrink.
 - `git restore dependencies.lock` unless dependencies changed. After committing: `BADGE_IDF_PATH=~/esp/esp-idf-v6.1 ./firmware/build.sh reconfigure build` (label `fw-<sha>`).
 - `sdkconfig` is gitignored; `sdkconfig.defaults` (firmware/ and c6/) is the truth.

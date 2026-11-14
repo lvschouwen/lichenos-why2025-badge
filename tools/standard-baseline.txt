@@ -92,7 +92,7 @@ size	libespressif__i2c_bus.a	3208
 size	libespressif__mdns.a	38917
 size	libfatfs.a	30649
 size	libfreertos.a	33118
-size	libfw_console.a	15690
+size	libfw_console.a	15716
 size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428

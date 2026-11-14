@@ -178,6 +178,10 @@ void console_register_app(char const *app, char const *name, char const *usage, 
 static atomic_bool s_dev_on;
 
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
+// What tools/check_release_image.sh looks for (#401): a string only debug code holds, unlike UI wording such as
+// "developer mode". `retain` keeps it through --gc-sections; the developer image is checked to hold it.
+__attribute__((used, retain)) char const lichen_debug_build_marker[] = "LICHEN-DEBUG-BUILD-MARKER";
+
 static fw_set_u8_fn s_dev_save;
 
 void console_register_dev(char const *name, char const *usage, console_fn_t fn) {

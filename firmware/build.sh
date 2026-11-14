@@ -3,6 +3,9 @@
 # the host tests (host_tests/), so the P4 image always carries a matching C6 image.
 # ./firmware/build.sh release build: the release image (#373), sdkconfig.defaults plus sdkconfig.release.defaults
 # (no debug or test commands) in firmware/build-release with its own sdkconfig; the dev build's tree is not touched.
+# The full check (./firmware/build.sh build) ends with that release build and its checks (#401), so a release-only
+# break fails the gate. BADGE_SKIP_RELEASE=1 leaves it out on purpose and then exits 3 at the end, so agent-check never
+# stamps a partial check as green (the dev image is still fully built and checked by then).
 set -euo pipefail
 
 release=0
@@ -81,16 +84,19 @@ if [ "$building" = 1 ]; then
         mv -f "$sdkconfig" "$bdir/sdkconfig.old"
     fi
 
-    # Static checks first, they take seconds (#196)
-    "$repo/tools/static_checks.sh"
+    # Static checks, host tests and the C6 image come first (#196); the release build the full check ends with
+    # (BADGE_RELEASE_NESTED) has just had all of them
+    if [ -z "${BADGE_RELEASE_NESTED:-}" ]; then
+        "$repo/tools/static_checks.sh"
 
-    cmake -S "$repo/host_tests" -B "$here/build/host_tests" -G Ninja "${host_launcher[@]}" >/dev/null
-    cmake --build "$here/build/host_tests"
-    ctest --test-dir "$here/build/host_tests" --output-on-failure
-    python3 -I "$repo/tools/ui_overflow_sweep.py" --selftest # the sweep's guard logic, no badge needed (#133)
+        cmake -S "$repo/host_tests" -B "$here/build/host_tests" -G Ninja "${host_launcher[@]}" >/dev/null
+        cmake --build "$here/build/host_tests"
+        ctest --test-dir "$here/build/host_tests" --output-on-failure
+        python3 -I "$repo/tools/ui_overflow_sweep.py" --selftest # the sweep's guard logic, no badge needed (#133)
 
-    IDF_TARGET=esp32c6 idf.py -C "$repo/c6" build
-    "$here/tools/stage_storage.sh"
+        IDF_TARGET=esp32c6 idf.py -C "$repo/c6" build
+        "$here/tools/stage_storage.sh"
+    fi
 fi
 
 # The release image's own checks (#373). The dev build's gates (layers, the size ratchet, .clangd) read and write
@@ -98,15 +104,8 @@ fi
 release_checks() {
     python3 -I "$repo/tools/check_console_slots.py" --sdkconfig "$sdkconfig"
     "$repo/tools/pack_storage.sh" check-config "$bdir/config/sdkconfig.json" "$here/managed_components/joltwallet__littlefs"
-    # No debug command may reach the image: `fw dev`'s usage and the off note are the markers console.c builds with them
-    local marker
-    for marker in "dev [on|off|status]" "fw dev on" "developer mode" "debug ones hidden"; do
-        if grep -aqF "$marker" "$bdir/badge_fw.bin"; then
-            echo "release image $bdir/badge_fw.bin holds \"$marker\": LICHEN_DEV_COMMANDS is not off" >&2
-            exit 1
-        fi
-    done
-    echo "release image: no developer commands ($bdir/badge_fw.bin)"
+    # No debug command may reach the image: only debug code holds the marker (tools/check_release_image.sh, #401)
+    "$repo/tools/check_release_image.sh" release "$bdir/badge_fw.bin"
 }
 
 if [ "$building" = 1 ] && [ "$release" = 1 ]; then
@@ -137,6 +136,10 @@ elif [ "$building" = 1 ]; then
     # The console table must keep headroom (#243); reads the sdkconfig this build just wrote
     python3 -I "$repo/tools/check_console_slots.py" --selftest
     python3 -I "$repo/tools/check_console_slots.py"
+    # The release check is only worth something while the developer image holds the marker it looks for (#401)
+    for arg in "$@"; do
+        case $arg in build|all|app) "$repo/tools/check_release_image.sh" dev "$bdir/badge_fw.bin"; break ;; esac
+    done
     # Size, complexity and stack standard with its ratchet baseline (#202); needs the image just built, so only the
     # commands that build it (reconfigure and storage do not)
     for arg in "$@"; do
@@ -145,6 +148,21 @@ elif [ "$building" = 1 ]; then
     "$repo/tools/gen_clangd.sh" # .clangd for clangd/LSP over this build's compile_commands.json (#196)
     # Released images ship this file; it must match the dependencies just built (#18)
     BADGE_IDF_PATH="$IDF_DIR" python3 "$repo/tools/third_party_licenses.py" --check
+    # The release image (#373) in firmware/build-release, last so its own failure message is the one left on screen
+    # (#401: a release-only break slipped through twice, #396 and #437). Only commands that build the image run it.
+    for arg in "$@"; do
+        case $arg in
+            build|all|app)
+                if [ -n "${BADGE_SKIP_RELEASE:-}" ]; then
+                    echo "BADGE_SKIP_RELEASE set: the release build was skipped, this is not a full check (exit 3)" >&2
+                    exit 3
+                else
+                    echo "== release build (#401) =="
+                    BADGE_RELEASE_NESTED=1 "$here/build.sh" release "$@"
+                fi
+                break ;;
+        esac
+    done
 else
     exec idf.py -C "$here" "${idf_args[@]}" "$@"
 fi
