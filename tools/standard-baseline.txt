@@ -14,7 +14,6 @@
 #     fails; when the growth is intended and reviewed, run `python3 -I tools/check_standard.py --size-update`
 #     (IDF environment, firmware built; it prints the diff) and say why in the commit message.
 # First version created by --init (2026-11-07); --init refuses when this file exists.
-ccn	shared/lora/lora_proto.c:lora_decode	27
 size	<merged-strings>	286393
 size	libapp_update.a	4602
 size	libassets.a	2847
