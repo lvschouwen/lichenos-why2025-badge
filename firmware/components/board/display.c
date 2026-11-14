@@ -86,9 +86,6 @@ static void flush_direct(lv_display_t *disp, lv_area_t const *area, uint8_t *px_
     // Cache: ppa_do_scale_rotate_mirror writes the strip back (C2M, unaligned allowed) before the PPA reads it,
     // and invalidates the destination rows (M2C) itself, so there is no msync here. The CPU never writes the
     // frame buffer in this variant, so that invalidate drops nothing dirty.
-    // TODO(#95 e2): PPA_TRANS_MODE_NON_BLOCKING with on_trans_done -> lv_display_flush_ready, so LVGL renders
-    // the next strip while the PPA turns this one. The callback runs in the DMA2D ISR (ppa_transaction_done_cb),
-    // the same context the port's DPI done callback calls flush_ready from today; measure e1 first.
     ppa_srm_oper_config_t const op = {
         .in.buffer          = px_map,
         .in.pic_w           = stride / 2,

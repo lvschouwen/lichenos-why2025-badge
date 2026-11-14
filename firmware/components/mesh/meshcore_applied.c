@@ -16,13 +16,6 @@
 
 #define APPLIED_REFRESH_MS 1000 // the registry polls the C6 about this often
 
-// Only when the text changed: the labels wrap, and an unchanged rewrite would still relayout the page
-static void set_if_changed(lv_obj_t *label, char const *text) {
-    if (strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text);
-    }
-}
-
 // The menu's focused row below the notes, NULL when it is above them (a change in the notes cannot move it) or none is
 static lv_obj_t *focused_below(lv_obj_t *menu, lv_obj_t *box) {
     uint32_t n = lv_obj_get_child_count(menu);
@@ -49,12 +42,12 @@ static void applied_fill(lv_obj_t *box) {
     mesh_applied_read(&a);
     mesh_applied_line(&a, false, line, sizeof(line));
     snprintf(text, sizeof(text), "LoRa radio now: %s", line);
-    set_if_changed(now, text);
+    lichen_label_set(now, text);
     bool differ = mesh_get_settings(&s) && mesh_applied_differs(&a, s.freq, s.bw, s.sf, s.cr, s.tx_dbm);
     if (differ) {
         mesh_format_radio(line, sizeof(line), s.freq, s.bw, s.sf, s.cr);
         snprintf(text, sizeof(text), "Differs: MeshCore asks for %s, %d dBm", line, s.tx_dbm);
-        set_if_changed(differs, text);
+        lichen_label_set(differs, text);
     }
     lv_obj_set_hidden(differs, !differ);
     if (focused) {

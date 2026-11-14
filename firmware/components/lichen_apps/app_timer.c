@@ -23,12 +23,6 @@
 
 // ---- shared bits ----
 
-static void set_text(lv_obj_t *label, char const *text) {
-    if (strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text);
-    }
-}
-
 // The big time on a page: LARGE, centred, text colour
 static lv_obj_t *add_readout(lv_obj_t *menu) {
     lv_obj_t *label = menu_note(menu, "");
@@ -60,10 +54,10 @@ static void timer_refresh(lv_timer_t *timer) {
     int64_t now = timer_svc_now();
     char    text[48];
     tfmt_countdown(text, sizeof(text), tcd_left(cd, now));
-    set_text(s_t.readout, text);
+    lichen_label_set(s_t.readout, text);
     char const *state = s_t.message[0] ? s_t.message : cd->state == TCD_RUNNING ? "Running" :
                         cd->state == TCD_PAUSED ? "Paused" : cd->state == TCD_DONE ? "Time is up" : "Ready";
-    set_text(s_t.state, state);
+    lichen_label_set(s_t.state, state);
     uint32_t color = s_t.message[0] ? THEME_RED : cd->state == TCD_DONE ? THEME_AMBER :
                      cd->state == TCD_RUNNING ? THEME_TEAL : THEME_DIM;
     lv_obj_set_style_text_color(s_t.state, lv_color_hex(color), 0);
@@ -221,14 +215,14 @@ static void stopwatch_refresh(lv_timer_t *timer) {
     sw_t *sw = timer_svc_stopwatch();
     char  text[400];
     tfmt_stopwatch(text, sizeof(text), sw_elapsed(sw, timer_svc_now()));
-    set_text(s_s.readout, text);
+    lichen_label_set(s_s.readout, text);
     char const *toggle = sw->running ? "Stop" : sw->acc_ms > 0 ? "Resume" : "Start";
     if (strcmp(s_s.shown_toggle, toggle) != 0) {
         snprintf(s_s.shown_toggle, sizeof(s_s.shown_toggle), "%s", toggle);
         menu_set_label(s_s.toggle, toggle);
     }
     laps_text(text, sizeof(text));
-    set_text(s_s.laps, text);
+    lichen_label_set(s_s.laps, text);
 }
 
 static void on_sw_toggle(void *arg) {

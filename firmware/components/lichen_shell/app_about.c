@@ -79,12 +79,6 @@ static bool about_tile(char *l1, size_t c1, char *l2, size_t c2) {
     return true;
 }
 
-static void set_text(lv_obj_t *label, char const *text) {
-    if (strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text);
-    }
-}
-
 static void apply_dev(void) {
     int on = console_dev_mode() ? 1 : 0;
     if (on == dev_shown) {
@@ -109,8 +103,8 @@ static void refresh_net(void) {
     } else {
         strlcpy(text, "not connected", sizeof(text));
     }
-    set_text(value_label[ROW_WIFI], text);
-    set_text(value_label[ROW_LORA], lichen_sys_lora_up() ? "working" : "not available");
+    lichen_label_set(value_label[ROW_WIFI], text);
+    lichen_label_set(value_label[ROW_LORA], lichen_sys_lora_up() ? "working" : "not available");
 }
 
 static void refresh_storage(void) {
@@ -121,12 +115,12 @@ static void refresh_storage(void) {
     } else {
         strlcpy(text, "not available", sizeof(text));
     }
-    set_text(value_label[ROW_STORAGE], text);
+    lichen_label_set(value_label[ROW_STORAGE], text);
 
     lichen_sd_info_t sd; // cached: the LVGL task never reads the card (#60)
     lichen_sys_sd_info(&sd);
     lichen_sys_sd_short_text(&sd, text, sizeof(text));
-    set_text(value_label[ROW_SD], text);
+    lichen_label_set(value_label[ROW_SD], text);
 }
 
 static void refresh_clock(void) {
@@ -141,7 +135,7 @@ static void refresh_clock(void) {
     } else {
         strlcpy(text, "not set", sizeof(text));
     }
-    set_text(value_label[ROW_CLOCK], text);
+    lichen_label_set(value_label[ROW_CLOCK], text);
 }
 
 static void refresh(lv_timer_t *timer) {
@@ -152,24 +146,24 @@ static void refresh(lv_timer_t *timer) {
     snprintf(text, sizeof(text), "%u KB internal " LV_SYMBOL_BULLET " %.1f MB PSRAM free",
              (unsigned)(lichen_sys_mem_free(LICHEN_SYS_MEM_INTERNAL) / 1024),
              (double)lichen_sys_mem_free(LICHEN_SYS_MEM_PSRAM) / 1048576.0);
-    set_text(value_label[ROW_MEMORY], text);
+    lichen_label_set(value_label[ROW_MEMORY], text);
 
     // While the C6 is being recovered, how far it has got (#14 T-B)
     if (!lichen_sys_c6_trouble(text, sizeof(text))) {
         strlcpy(text, lichen_sys_c6_up() ? "working" : "not answering", sizeof(text));
     }
-    set_text(value_label[ROW_C6], text);
+    lichen_label_set(value_label[ROW_C6], text);
 
     refresh_net();
     refresh_storage();
     fmt_uptime(text, sizeof(text));
-    set_text(value_label[ROW_UP], text);
+    lichen_label_set(value_label[ROW_UP], text);
     refresh_clock();
     for (size_t i = 0; i < DEV_N; i++) { // the cache only: never waits for the C6 or a bus (#307)
         char raw[96] = "";
         lichen_reg_get(DEV[i].key, raw, sizeof(raw));
         about_dev_text(DEV[i].key, raw, text, sizeof(text));
-        set_text(value_label[ROW_DEV + i], text);
+        lichen_label_set(value_label[ROW_DEV + i], text);
     }
 }
 

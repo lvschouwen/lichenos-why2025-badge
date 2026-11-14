@@ -14,6 +14,8 @@
 #include <string.h>
 #include <time.h>
 
+static char const TAG[] = "clock";
+
 static int64_t rtc0_us, timer0_us;
 static int64_t rtc_boot_us;    // esp_clk_rtc_time() then
 
@@ -60,7 +62,7 @@ static void cmd_set(char const *a) {
         return;
     }
     if (force) {
-        ESP_LOGI("clock", "fw clock set --force: judged as if SNTP had not set the clock this boot (bench only)");
+        ESP_LOGI(TAG, "fw clock set --force: judged as if SNTP had not set the clock this boot (bench only)");
     }
     int64_t         before = (int64_t)time(NULL);
     struct timeval  tv     = {.tv_sec = (time_t)t};

@@ -205,6 +205,7 @@ lichen_keys_raw_release	RAW_KEYS	lvgl	lichen_keys.h
 lichen_keys_raw_take	RAW_KEYS	lvgl	lichen_keys.h
 lichen_label_line	-	lvgl	lichen_ui.h
 lichen_label_line_fit	-	lvgl	lichen_ui.h
+lichen_label_set	-	lvgl	lichen_ui.h
 lichen_label_wrap	-	lvgl	lichen_ui.h
 lichen_mem_console_register	SYSTEM	unspecified	lichen_mem.h
 lichen_notify	NOTIFY	unspecified	lichen_notify.h

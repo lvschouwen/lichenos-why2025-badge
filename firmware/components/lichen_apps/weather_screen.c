@@ -30,12 +30,6 @@ typedef struct {
 
 EXT_RAM_BSS_ATTR static wx_ui_t s_ui; // PSRAM (#264): LVGL task only
 
-static void set_text(lv_obj_t *label, char const *text) {
-    if (strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text);
-    }
-}
-
 static void show_rows(void) {
     wx_sample_t now;
     bool        have = weather_current(&now);
@@ -46,7 +40,7 @@ static void show_rows(void) {
         } else {
             wx_fmt_value(text, sizeof(text), (wx_qty_t)q, have ? now.v[q] : NAN);
         }
-        set_text(s_ui.value[q], text);
+        lichen_label_set(s_ui.value[q], text);
         lv_color_t c = lv_color_hex(q == (int)s_ui.sel ? THEME_AMBER : THEME_TEXT);
         lv_obj_set_style_text_color(s_ui.name[q], c, 0);
         lv_obj_set_style_text_color(s_ui.value[q], c, 0);
@@ -64,7 +58,7 @@ static void show_chart(void) {
         lv_chart_set_point_count(s_ui.chart, 2);
         lv_chart_set_series_value_by_id(s_ui.chart, s_ui.ser, 0, LV_CHART_POINT_NONE);
         lv_chart_set_series_value_by_id(s_ui.chart, s_ui.ser, 1, LV_CHART_POINT_NONE);
-        set_text(s_ui.high_low, "Collecting: one reading a minute.");
+        lichen_label_set(s_ui.high_low, "Collecting: one reading a minute.");
         return;
     }
     lv_chart_set_axis_range(s_ui.chart, LV_CHART_AXIS_PRIMARY_Y, wx_chart_value(floorf(lo)), wx_chart_value(ceilf(hi)));
@@ -80,11 +74,11 @@ static void show_chart(void) {
     wx_span_text(span, sizeof(span), n);
     // one line: a second line for the span pushed the gas note under the hint
     snprintf(text, sizeof(text), "High %s  \xE2\x80\xA2  Low %s  \xE2\x80\xA2  last %s", a, b, span);
-    set_text(s_ui.high_low, text);
+    lichen_label_set(s_ui.high_low, text);
 }
 
 static void show_note(void) {
-    set_text(s_ui.note, s_ui.sel == WX_GAS ? "Gas resistance in kOhm: higher is cleaner air. Compared with earlier "
+    lichen_label_set(s_ui.note, s_ui.sel == WX_GAS ? "Gas resistance in kOhm: higher is cleaner air. Compared with earlier "
                                               "in this room, not an absolute index."
                                             : "");
 }

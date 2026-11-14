@@ -22,7 +22,7 @@ size	libboard.a	12830
 size	libbootloader_support.a	5942
 size	libc.a	47594
 size	libc6link.a	33050
-size	libcrash.a	5718
+size	libcrash.a	5710
 size	libcxx.a	872
 size	libefuse.a	2173
 size	libeh_common.a	144
@@ -96,11 +96,11 @@ size	libfw_console.a	15716
 size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
-size	libjoltwallet__littlefs.a	34374
-size	liblichen_api.a	39925
-size	liblichen_apps.a	51808
+size	libjoltwallet__littlefs.a	34338
+size	liblichen_api.a	39985
+size	liblichen_apps.a	51552
 size	liblichen_boot.a	13082
-size	liblichen_clock.a	11144
+size	liblichen_clock.a	11156
 size	liblichen_haptics.a	2769
 size	liblichen_led.a	1428
 size	liblichen_mdns.a	598
@@ -109,7 +109,7 @@ size	liblichen_notify.a	13688
 size	liblichen_nvs.a	1157
 size	liblichen_os.a	70624
 size	liblichen_random.a	63
-size	liblichen_shell.a	188648
+size	liblichen_shell.a	187734
 size	liblog.a	2726
 size	liblora.a	36059
 size	liblvgl__lvgl.a	541779
@@ -117,7 +117,7 @@ size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820
 size	libmain.a	13319
 size	libmbedtls.a	22
-size	libmesh.a	406804
+size	libmesh.a	404888
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18676
 size	libnvs_sec_provider.a	2

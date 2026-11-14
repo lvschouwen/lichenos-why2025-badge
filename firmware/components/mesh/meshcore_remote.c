@@ -38,12 +38,6 @@ static bool        shown_busy;
 
 static void wipe_pw(void);
 
-static void set_text(lv_obj_t *label, char const *text) {
-    if (label && strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text); // only on a change: the same text every tick would redraw for nothing
-    }
-}
-
 static lv_obj_t *add_text(lv_obj_t *menu, char const *text) {
     lv_obj_t *label = menu_note(menu, text);
     lv_obj_set_style_text_color(label, lv_color_hex(THEME_TEXT), 0);
@@ -124,7 +118,7 @@ static void login_tick(lv_timer_t *t) {
     }
     rr_t const *r = &mem->rr;
     if (r->seq != seq) {
-        set_text(result, "Another request to a repeater or room was started.");
+        lichen_label_set(result, "Another request to a repeater or room was started.");
         wipe_pw();
         return;
     }
@@ -137,7 +131,7 @@ static void login_tick(lv_timer_t *t) {
     } else if (!rr_busy(r)) {
         wipe_pw(); // refused or no answer: not kept
     }
-    set_text(result, text);
+    lichen_label_set(result, text);
 }
 
 static void login_start(void) {
@@ -146,7 +140,7 @@ static void login_start(void) {
     if (!seq) {
         char text[96];
         snprintf(text, sizeof(text), "Not started: %s", why ? why : "?");
-        set_text(result, text);
+        lichen_label_set(result, text);
         wipe_pw();
         return;
     }
@@ -196,7 +190,7 @@ static void status_show(void) {
     }
     rr_t const *r = &mem->rr;
     if (r->seq != seq) {
-        set_text(result, "Another request was started: Ask again.");
+        lichen_label_set(result, "Another request was started: Ask again.");
         return;
     }
     char text[128];
@@ -212,7 +206,7 @@ static void status_show(void) {
     if (r->state != RR_DONE) {
         snprintf(mem->text + at, sizeof(mem->text) - at, "%s%s", at ? "\n\n(last answer above) " : "", text);
     }
-    set_text(result, mem->text);
+    lichen_label_set(result, mem->text);
     bool busy = rr_busy(r);
     if (busy != shown_busy) {
         menu_set_value(again, busy ? "..." : "");
@@ -235,7 +229,7 @@ static void status_start(void *arg) {
     if (!seq) {
         char text[96];
         snprintf(text, sizeof(text), "Not started: %s", why ? why : "?");
-        set_text(result, text);
+        lichen_label_set(result, text);
         return;
     }
     status_show();
@@ -270,10 +264,10 @@ static void cli_show(void) {
     }
     rr_t const *r = &mem->rr;
     if (r->cli_n == 0 || memcmp(r->cli_prefix, target, 6) != 0) {
-        set_text(result, "No commands yet: Command... types one, it is sent when you press Enter.");
+        lichen_label_set(result, "No commands yet: Command... types one, it is sent when you press Enter.");
     } else {
         rr_cli_format(r, mem->text, sizeof(mem->text));
-        set_text(result, mem->text);
+        lichen_label_set(result, mem->text);
     }
     bool busy = rr_busy(r);
     if (busy != shown_busy) {
@@ -290,12 +284,12 @@ static void cli_tick(lv_timer_t *t) {
 static void cli_send(char const *command) {
     char const *why = NULL;
     if (mesh_remote_start(target, RR_CLI, command, MESH_FROM_SCREEN, &why)) {
-        set_text(note, "");
+        lichen_label_set(note, "");
         cli_show();
     } else {
         char text[96];
         snprintf(text, sizeof(text), "Not sent: %s", why ? why : "?");
-        set_text(note, text);
+        lichen_label_set(note, text);
     }
 }
 
@@ -307,7 +301,7 @@ static void cli_answer(bool yes) {
     if (yes && mem && note) {
         cli_send(cli_pending);
     } else if (mem && note) {
-        set_text(note, "Not sent.");
+        lichen_label_set(note, "Not sent.");
     }
     memset(cli_pending, 0, sizeof(cli_pending));
 }
@@ -325,7 +319,7 @@ static void cli_ask(char const *command, bool radio) {
         .confirm_label = "send",
     };
     if (!shell_dialog_countdown(&d, cli_answer)) {
-        set_text(note, mc_busy_note());
+        lichen_label_set(note, mc_busy_note());
         memset(cli_pending, 0, sizeof(cli_pending));
     }
 }

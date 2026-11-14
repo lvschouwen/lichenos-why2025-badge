@@ -167,9 +167,7 @@ bool saver_date_text(char *out, size_t cap) {
 static void labels_update(station_view_t *v) {
     char date[48];
     saver_date_text(date, sizeof(date));
-    if (strcmp(lv_label_get_text(v->date_label), date) != 0) {
-        lv_label_set_text(v->date_label, date);
-    }
+    lichen_label_set(v->date_label, date);
     if (v->update_line2) {
         v->update_line2(v->line2);
     }

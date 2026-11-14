@@ -206,12 +206,6 @@ static lv_obj_t *add_label(lv_obj_t *parent, char const *text, uint32_t color, l
     return label;
 }
 
-static void set_text(lv_obj_t *label, char const *text) {
-    if (strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text);
-    }
-}
-
 static void on_delete(lv_event_t *e) {
     (void)e;
     title_label = bar = status_label = hint_label = NULL;
@@ -251,10 +245,10 @@ static lv_obj_t *build(void) {
 static void render(state_t const *s) {
     char text[80];
     if (s->firmware) {
-        set_text(title_label, "Updating Lichen");
+        lichen_label_set(title_label, "Updating Lichen");
     } else {
         snprintf(text, sizeof(text), "Receiving %s", s->name);
-        set_text(title_label, text);
+        lichen_label_set(title_label, text);
     }
     int         pct = update_pct(s->done, s->total);
     uint32_t    color = THEME_AMBER;
@@ -284,7 +278,7 @@ static void render(state_t const *s) {
                 status = text;
             }
     }
-    set_text(status_label, status);
+    lichen_label_set(status_label, status);
     lv_obj_set_style_text_color(status_label, lv_color_hex(color), 0);
     lv_bar_set_value(bar, s->phase == PH_FAILED ? 0 : (s->phase == PH_IDLE || pct < 0 ? 0 : pct), LV_ANIM_OFF);
     bool busy = s->phase == PH_RECEIVING || s->phase == PH_RESTARTING;
@@ -292,7 +286,7 @@ static void render(state_t const *s) {
     char const *hint = restart_held ? "Waiting for this version to be confirmed, then the badge restarts"
                        : failed     ? "The badge still runs the old version. Start the update again from your computer."
                                     : "Don't turn off the badge";
-    set_text(hint_label, hint);
+    lichen_label_set(hint_label, hint);
     lv_obj_set_hidden(hint_label, !(busy || failed || restart_held));
 }
 

@@ -116,9 +116,7 @@ static void add_entry_row(radar_entry_t const *e, bool selected) {
 
 // An empty note is hidden, so it does not leave a gap under the heading
 static void set_note(char const *text) {
-    if (strcmp(lv_label_get_text(note_label), text) != 0) {
-        lv_label_set_text(note_label, text);
-    }
+    lichen_label_set(note_label, text);
     if (text[0]) {
         lv_obj_set_hidden(note_label, false);
     } else {

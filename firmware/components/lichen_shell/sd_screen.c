@@ -14,6 +14,7 @@
 #include "lichen_sys_storage.h"
 #include "shell_parts.h"
 #include "theme.h"
+#include "lichen_ui.h"
 
 #include <stdatomic.h>
 #include <stdint.h>
@@ -44,12 +45,6 @@ static struct {
 } page;                      // all NULL while the page is closed
 static sds_actions_t shown; // what the rows show now; its strings are the model's literals
 
-static void set_label(lv_obj_t *label, char const *text) {
-    if (strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text);
-    }
-}
-
 // Makes the page match lichen_sys_sd_info() and the job; cheap when nothing changed
 static void refresh(void) {
     if (!page.status) {
@@ -59,7 +54,7 @@ static void refresh(void) {
     lichen_sys_sd_info(&info);
     char status[64];
     sds_status(&info, job, status, sizeof(status));
-    set_label(page.status, status);
+    lichen_label_set(page.status, status);
     sds_actions_t a = sds_actions(info.state, job);
     if (a.mount_label != shown.mount_label) {
         menu_set_label(page.mount, a.mount_label);
@@ -71,7 +66,7 @@ static void refresh(void) {
         menu_set_value(page.format, a.format_value);
     }
     shown = a;
-    set_label(page.result, result);
+    lichen_label_set(page.result, result);
 }
 
 static sds_actions_t actions_now(lichen_sd_info_t *info) {

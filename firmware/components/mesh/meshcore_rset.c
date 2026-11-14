@@ -59,9 +59,7 @@ static void wipe_secrets(void) {
 static void set_note(char const *text, bool error) {
     if (note) {
         lv_obj_set_style_text_color(note, lv_color_hex(error ? THEME_RED : THEME_TEAL), 0);
-        if (strcmp(lv_label_get_text(note), text) != 0) {
-            lv_label_set_text(note, text);
-        }
+        lichen_label_set(note, text);
     }
 }
 

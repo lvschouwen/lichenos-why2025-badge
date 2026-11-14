@@ -51,12 +51,6 @@ static struct {
     bool     was_on; // a shorter interval, not a switch on
 } pending;
 
-static void set_text(lv_obj_t *label, char const *text) {
-    if (label && strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text); // only on a change: the same text every second would redraw for nothing
-    }
-}
-
 
 // The note over a graph: "Battery: 4.10 V now (4.05 V to 4.12 V)"
 static void chart_note(rhv_t *v, rh_field_t f, size_t n) {
@@ -81,7 +75,7 @@ static void chart_note(rhv_t *v, rh_field_t f, size_t n) {
     } else {
         snprintf(text, sizeof(text), "%s: %s now (%s to %s)", TITLES[f], a, b, c);
     }
-    set_text(v->note[f], text);
+    lichen_label_set(v->note[f], text);
 }
 
 static void draw_chart(rhv_t *v, rh_field_t f, size_t n) {
@@ -124,7 +118,7 @@ static void show_graphs(rhv_t *v, rh_slot_t const *s) {
                  "traffic and uptime here.",
                  every);
     }
-    set_text(v->empty, text);
+    lichen_label_set(v->empty, text);
 }
 
 static void set_value(lv_obj_t *row, char *shown, size_t cap, char const *text) {
@@ -168,12 +162,12 @@ static void show_rows(rhv_t *v) {
     } else {
         snprintf(text, sizeof(text), "%s", saved);
     }
-    set_text(v->problem, text);
+    lichen_label_set(v->problem, text);
 }
 
 static void update(rhv_t *v) {
     if (!mesh_rhist_view(v->prefix, &v->view)) {
-        set_text(v->empty, "MeshCore is not running.");
+        lichen_label_set(v->empty, "MeshCore is not running.");
         return;
     }
     show_rows(v);
@@ -194,7 +188,7 @@ static void refresh(lv_timer_t *timer) {
 // The outcome of a key on this page; it stays until the next key (the refresh does not touch it)
 static void say(rhv_t *v, char const *text) {
     if (v) {
-        set_text(v->msg, text);
+        lichen_label_set(v->msg, text);
     }
 }
 

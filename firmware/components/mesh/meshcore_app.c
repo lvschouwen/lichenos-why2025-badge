@@ -292,18 +292,12 @@ static void radio_texts(char *text, size_t cap, char *power, size_t power_cap) {
     mesh_applied_power(&applied, power, power_cap);
 }
 
-static void set_if_changed(lv_obj_t *label, char const *text) {
-    if (strcmp(lv_label_get_text(label), text) != 0) { // the rows wrap: an unchanged rewrite would relayout the page
-        lv_label_set_text(label, text);
-    }
-}
-
 void meshcore_about_refresh(void) {
     if (about_radio && about_power) {
         char text[96], power[48];
         radio_texts(text, sizeof(text), power, sizeof(power));
-        set_if_changed(about_radio, text);
-        set_if_changed(about_power, power);
+        lichen_label_set(about_radio, text);
+        lichen_label_set(about_power, power);
     }
 }
 

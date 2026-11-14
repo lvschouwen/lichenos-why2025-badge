@@ -16,6 +16,7 @@
 #include "theme.h"
 #include "ui_text.h"
 #include "shell_ui_ops.h"
+#include "lichen_ui.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -91,9 +92,7 @@ static void set_message(void) {
     char text[2 * TEXT_MAX + 40];
     ui_countdown_text(text, sizeof(text), shown.title, shown.prefix, shown.careful, shown.confirm_label,
                       dlg_countdown_left_s(&countdown, now_ms()));
-    if (strcmp(lv_label_get_text(message), text) != 0) {
-        lv_label_set_text(message, text);
-    }
+    lichen_label_set(message, text);
 }
 
 static void teardown(void) {

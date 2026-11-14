@@ -37,13 +37,6 @@ static struct {
     char    name[MESH_NAME_MAX + 1];
 } want;
 
-// Only on a change: the same text every second would redraw for nothing
-static void set_text(lv_obj_t *label, char const *text) {
-    if (label && strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text);
-    }
-}
-
 static void show_row(signal_t *s, int i, char const *text) {
     if (strcmp(s->shown[i], text) != 0) {
         strlcpy(s->shown[i], text, TEXT_MAX);
@@ -65,11 +58,11 @@ static void draw_chart(lv_obj_t *chart, lv_chart_series_t *ser, lv_obj_t *note, 
     }
     char text[TEXT_MAX];
     snprintf(text, sizeof(text), "%s, last %u heard, %d to %d %s", what, (unsigned)n, lo, hi, unit);
-    set_text(note, text);
+    lichen_label_set(note, text);
 }
 
 static void show_empty(signal_t *s, bool empty) {
-    set_text(s->empty, empty ? (mesh_running() ? "Nothing heard from this contact since the badge started. This page "
+    lichen_label_set(s->empty, empty ? (mesh_running() ? "Nothing heard from this contact since the badge started. This page "
                                                  "fills as its adverts and messages arrive."
                                                : "MeshCore is not running.")
                              : "");
@@ -123,7 +116,7 @@ static void update(signal_t *s) {
     char path[TEXT_MAX], text[TEXT_MAX + 24];
     sig_path_text(&c, path, sizeof(path));
     snprintf(text, sizeof(text), "Last advert path: %s", path);
-    set_text(s->path, text);
+    lichen_label_set(s->path, text);
     s->drawn_heard = c.heard;
 }
 

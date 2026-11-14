@@ -19,6 +19,8 @@
 
 #include <time.h>
 
+static char const TAG[] = "clock";
+
 #if !CONFIG_SPIRAM_ALLOW_NOINIT_SEG_EXTERNAL_MEMORY
 #error "the clock record needs PSRAM's no-init segment (lichen_clock/Kconfig selects it)"
 #endif
@@ -64,7 +66,7 @@ static void save_now(void) {
     taskEXIT_CRITICAL(&s_rec_mux);
     // Outside the critical section: a race with another save writes back the newer line either way
     if (esp_cache_msync(&s_line, sizeof(s_line), ESP_CACHE_MSYNC_FLAG_DIR_C2M) != ESP_OK) {
-        ESP_LOGW("clock", "clock record not written back to PSRAM");
+        ESP_LOGW(TAG, "clock record not written back to PSRAM");
     }
 }
 
@@ -84,10 +86,10 @@ static void choose_at_boot(void) {
     s_boot.save_age_s = s_boot.rec_valid && rtc >= (int64_t)r.rtc_s ? rtc - (int64_t)r.rtc_s : -1;
     s_boot.pick       = clock_boot_pick(s_boot.carried_s, &r, rtc, clock_build_epoch(), &t);
     if (s_boot.pick == CLOCK_BOOT_SAVED && !clock_restore_saved(t)) {
-        ESP_LOGW("clock", "saved clock %lld not applied", (long long)t);
+        ESP_LOGW(TAG, "saved clock %lld not applied", (long long)t);
         s_boot.pick = clock_is_set() ? CLOCK_BOOT_CARRIED : CLOCK_BOOT_NONE;
     }
-    ESP_LOGI("clock", "boot: carried %lld, saved %lld, using %s", (long long)s_boot.carried_s,
+    ESP_LOGI(TAG, "boot: carried %lld, saved %lld, using %s", (long long)s_boot.carried_s,
              (long long)s_boot.saved_s, clock_boot_text(s_boot.pick));
 }
 
@@ -108,7 +110,7 @@ void clock_boot_init(void) {
     esp_timer_handle_t timer = NULL;
     if (esp_timer_create(&args, &timer) != ESP_OK ||
         esp_timer_start_periodic(timer, (uint64_t)CLOCK_SAVE_EVERY_S * 1000000) != ESP_OK) {
-        ESP_LOGW("clock", "clock save timer not started: saved only when a source sets the clock");
+        ESP_LOGW(TAG, "clock save timer not started: saved only when a source sets the clock");
     }
 }
 

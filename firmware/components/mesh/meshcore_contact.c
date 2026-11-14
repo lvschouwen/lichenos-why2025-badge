@@ -65,16 +65,10 @@ static struct {
 // The same for the trace and share screens: the details screen they were opened from
 static contact_t *want_ct;
 
-static void set_text(lv_obj_t *label, char const *text) {
-    if (label && strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text); // only on a change: the same text every second would redraw for nothing
-    }
-}
-
 static void set_note(lv_obj_t *label, char const *text, bool error) {
     if (label) {
         lv_obj_set_style_text_color(label, lv_color_hex(error ? THEME_RED : THEME_TEAL), 0);
-        set_text(label, text);
+        lichen_label_set(label, text);
     }
 }
 
@@ -99,7 +93,7 @@ static void fill(contact_t *ct, uint32_t wait_ms) {
     ct->have_detail = true;
     size_t n        = mesh_contact_lines(&ct->d, ct->lines, MESH_CONTACT_LINES);
     for (size_t i = 0; i < n; i++) {
-        set_text(ct->info[i], ct->lines[i].text);
+        lichen_label_set(ct->info[i], ct->lines[i].text);
     }
     if (ct->d.path_len != ct->shown_path_len || ct->d.flags != ct->shown_flags) { // the rows redraw only on a change
         char hops[16];
@@ -256,7 +250,7 @@ static void trace_show(trace_t *tr) {
     }
     mt_t const *t = &tr->t;
     if (t->seq != tr->seq) {
-        set_text(tr->label, "Another trace or discovery was started (the console?): Enter starts this one again");
+        lichen_label_set(tr->label, "Another trace or discovery was started (the console?): Enter starts this one again");
         return;
     }
     size_t n   = mt_format(t, tr->lines, MT_LINES_MAX);
@@ -266,7 +260,7 @@ static void trace_show(trace_t *tr) {
     for (size_t i = 0; i < n && at + 1 < cap; i++) {
         at += (size_t)snprintf(tr->text + at, cap - at, "%s%s", i ? "\n" : "", tr->lines[i].text);
     }
-    set_text(tr->label, tr->text);
+    lichen_label_set(tr->label, tr->text);
     bool busy = mt_busy(t);
     if (busy != tr->shown_busy) { // the row redraws only on a change
         menu_set_value(tr->again, busy ? "..." : "");
@@ -284,7 +278,7 @@ static void trace_start(trace_t *tr) {
     if (!tr->seq) {
         char text[96];
         snprintf(text, sizeof(text), "Not started: %s", why ? why : "?");
-        set_text(tr->label, text);
+        lichen_label_set(tr->label, text);
         return;
     }
     trace_show(tr);

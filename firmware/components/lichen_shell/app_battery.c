@@ -11,6 +11,7 @@
 #include "menu.h"
 #include "shell_parts.h"
 #include "theme.h"
+#include "lichen_ui.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -50,9 +51,7 @@ static void refresh(lv_timer_t *timer) {
     lv_obj_t *label = lv_timer_get_user_data(timer);
     char      text[160];
     status_text(text, sizeof(text));
-    if (strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text);
-    }
+    lichen_label_set(label, text);
 }
 
 static void on_delete(lv_event_t *e) {

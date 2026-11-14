@@ -15,6 +15,7 @@
 #include "notify_view.h"
 #include "shell_parts.h"
 #include "theme.h"
+#include "lichen_ui.h"
 
 #include <stdio.h>
 
@@ -183,9 +184,7 @@ static void show_clock(void) {
         strftime(text, sizeof(text), approx ? "~%H:%M" : "%H:%M", &local);
         color = approx ? THEME_AMBER : THEME_TEXT;
     }
-    if (strcmp(lv_label_get_text(clock_label), text) != 0) {
-        lv_label_set_text(clock_label, text);
-    }
+    lichen_label_set(clock_label, text);
     if (color != shown_color) {
         lv_obj_set_style_text_color(clock_label, lv_color_hex(color), 0);
         shown_color = color;
@@ -242,9 +241,7 @@ static void show_notify(void) {
     lv_color_t color = lv_color_hex(top == LN_INFO ? THEME_TEAL : notify_level_color(top));
     lv_obj_set_style_bg_color(notify_dot, color, 0);
     lv_obj_set_style_text_color(notify_count, color, 0);
-    if (strcmp(lv_label_get_text(notify_count), text) != 0) {
-        lv_label_set_text(notify_count, text);
-    }
+    lichen_label_set(notify_count, text);
 }
 
 // Amber "HOT" while the watchdog warns, red once it is switching the badge off (#10)

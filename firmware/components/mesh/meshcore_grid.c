@@ -64,12 +64,6 @@ static struct {
     mesh_grid_counts_t counts;
 } g;
 
-static void set_text(lv_obj_t *label, char const *text) {
-    if (label && strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text); // only on a change: the same text every second would redraw for nothing
-    }
-}
-
 // The counts that need the mesh lock, in one pass; a busy MeshCore keeps the last ones
 static void take_contact_counts(mesh_grid_counts_t *c) {
     mesh_contact_stats_t st;
@@ -90,7 +84,7 @@ static void refresh(lv_timer_t *t) {
     if (g.arranging && run[0]) {
         run = "Arranging tiles"; // Enter picks up now, it does not start MeshCore
     }
-    set_text(g.run, run);
+    lichen_label_set(g.run, run);
     if (g.run && lv_obj_is_hidden(g.run) != (run[0] == '\0')) {
         lv_obj_set_hidden(g.run, run[0] == '\0'); // only on a change, as set_text
     }
@@ -109,7 +103,7 @@ static void refresh(lv_timer_t *t) {
     for (int i = 0; i < MESH_GRID_TILES; i++) {
         char text[MESH_GRID_BADGE_MAX];
         bool countdown = mesh_grid_badge((mesh_grid_tile_t)i, c, text, sizeof(text));
-        set_text(g.badge[i], text);
+        lichen_label_set(g.badge[i], text);
         if (g.badge_dot[i] && lv_obj_is_hidden(g.badge_dot[i]) == countdown) {
             lv_obj_set_hidden(g.badge_dot[i], !countdown);
         }
@@ -123,7 +117,7 @@ static void set_status(char const *text) {
     if (!g.status) {
         return;
     }
-    set_text(g.status, text);
+    lichen_label_set(g.status, text);
     if (lv_obj_is_hidden(g.status) != (text[0] == '\0')) {
         lv_obj_set_hidden(g.status, text[0] == '\0');
     }

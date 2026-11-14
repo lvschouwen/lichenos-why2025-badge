@@ -164,6 +164,9 @@ lv_obj_t *lichen_label_line(lv_obj_t *parent, int32_t width);
 void      lichen_label_line_fit(lv_obj_t *label);
 // Wraps onto as many lines as it needs. LVGL task only.
 lv_obj_t *lichen_label_wrap(lv_obj_t *parent, int32_t width);
+// Sets the label's text only when it differs: the same text every tick would invalidate and redraw (and a wrapped
+// label would relayout its page) for nothing. A NULL label or NULL text does nothing. LVGL task only.
+void      lichen_label_set(lv_obj_t *label, char const *text);
 
 // Shared page parts (#135; the UI standard's R1 and R6). Apps use these rather than building their own.
 // A page heading that names its subject (R1): a small dim kind line ("Repeater settings") over the name in LARGE on its

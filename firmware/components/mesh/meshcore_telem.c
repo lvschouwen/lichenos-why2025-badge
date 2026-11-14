@@ -32,12 +32,6 @@ static lv_obj_t   *result, *again, *note;
 static uint32_t    seq; // the request this page made; 0 when it could not start
 static bool        shown_busy;
 
-static void set_text(lv_obj_t *label, char const *text) {
-    if (label && strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text); // only on a change: the same text every tick would redraw for nothing
-    }
-}
-
 static void on_delete(lv_event_t *e) {
     if (lv_event_get_target(e) != screen_obj) {
         return; // a late delete of an older page must not free what a newer one owns
@@ -58,11 +52,11 @@ static void show(void) {
     }
     rr_t const *r = &mem->rr;
     if (r->seq != seq) {
-        set_text(result, "Another request to a contact was started: Again asks for telemetry once more.");
+        lichen_label_set(result, "Another request to a contact was started: Again asks for telemetry once more.");
         return;
     }
     tl_view_text(r, target, mem->lines, mem->text, sizeof(mem->text));
-    set_text(result, mem->text);
+    lichen_label_set(result, mem->text);
     bool busy = rr_busy(r);
     if (busy != shown_busy) {
         menu_set_value(again, busy ? "..." : "");
@@ -82,10 +76,10 @@ static void start_request(void) {
     if (!seq) {
         char text[128];
         snprintf(text, sizeof(text), "Not sent: %s", why);
-        set_text(note, text);
+        lichen_label_set(note, text);
         return;
     }
-    set_text(note, "");
+    lichen_label_set(note, "");
     show();
 }
 
@@ -154,7 +148,7 @@ uint32_t meshcore_telem_ask(uint8_t const prefix[6], char const *name) {
         .confirm_label = "send",
     };
     if (!shell_dialog_countdown(&d, confirmed)) {
-        set_text(note, mc_busy_note());
+        lichen_label_set(note, mc_busy_note());
     }
     return 0;
 }
@@ -168,6 +162,6 @@ static void again_row(void *arg) {
     if (wait) {
         char t[24];
         snprintf(t, sizeof(t), "Wait %lu s", (unsigned long)wait);
-        set_text(note, t);
+        lichen_label_set(note, t);
     }
 }

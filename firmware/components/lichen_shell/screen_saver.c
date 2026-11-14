@@ -143,9 +143,7 @@ static void clock_update(big_clock_t *c) {
             lv_obj_set_style_bg_color(c->colon[i], lv_color_hex(color), 0);
         }
     }
-    if (strcmp(lv_label_get_text(c->date), date) != 0) {
-        lv_label_set_text(c->date, date);
-    }
+    lichen_label_set(c->date, date);
     saver_notes_update(c->notes);
 }
 

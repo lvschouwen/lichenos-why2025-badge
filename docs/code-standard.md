@@ -130,19 +130,20 @@ Function keys are `path:name`; a second function of the same name in a file (C++
 `path:function` as gcc prints it (C++ with its signature); one source built into two objects keeps the larger frame.
 The gate's own logic is tested by `tools/tests/check_standard_test.py` (ctest `check_standard_test`).
 
-## Where we stand (2026-11-07; the numbers below are from before #168 landed, `check_standard.py --report` gives today's)
+## Where we stand (2026-11-14; `check_standard.py --report` gives today's)
 
-Measured over 548 files, 4198 functions, 63492 NLOC (lizard), 3052 functions in `.su` files.
+Past-warn and max columns are from `--report` at the commit of #444; the medians and the file and function counts are
+from 2026-11-07 (`--report` does not print them).
 
 | Metric | Median | Max | Past warn | Past fail |
 |---|---|---|---|---|
-| Lines per file (NLOC) | 43 | 3088 (`mesh_task.cpp`) | 6 | 1 |
-| Lines per function | 9 | 172 (`app_main`) | 44 | 2 |
-| CCN | 3 | 76 (`cmd_wifi`) | 82 | 18 |
-| Nesting | 1 | 12 (`cmd_wifi`) | 23 | 4 |
-| Parameters | 1 | 11 (`mesh_hist_compact`, `files_text_page`) | 40 | 6 |
-| Stack frame | 16 B | 2448 B (`settings_backup_plan`) | 32 | 9 |
+| Lines per file (NLOC) | 43 | 1481 (`ota_server.c`) | 9 | 0 |
+| Lines per function | 9 | 129 (`boot_screen_create`) | 27 | 0 |
+| CCN | 3 | 25 (`handle_connection`) | 64 | 0 |
+| Nesting | 1 | 6 (`cmd_sensors`) | 17 | 0 |
+| Parameters | 1 | 8 (`draw_chart`) | 43 | 0 |
+| Stack frame | 16 B | 1872 B (`mesh_notify_drain`) | 40 | 1 |
 
-App image: 2,554,160 B of the 4 MiB OTA slot = 60.9 % (warn at 75 %). Internal RAM (DIRAM, static): 199,000 of 441,296 B
-(45 %). Largest archives: `liblvgl` 542 KB, `libmesh` 374 KB, `libesp_stdio` 234 KB (this was the merged string pool, now its own line),
-`liblichen_shell` 217 KB. The offenders past the fail line are the baseline file itself; the ranked list is in #202.
+App image: 2,800,352 B of the 4 MiB OTA slot = 66.8 % (warn at 75 %). Internal RAM (DIRAM, static): not re-measured
+(199,000 B on 2026-11-07). Largest archives: see the `size` lines of `tools/standard-baseline.txt`.
+The offenders past the fail line are the baseline file itself; the ranked list is in #202.

@@ -23,9 +23,7 @@ static void source_line(char *out, size_t cap) {
 static void update_source(lv_obj_t *line) {
     char text[80];
     source_line(text, sizeof(text));
-    if (strcmp(lv_label_get_text(line), text) != 0) {
-        lv_label_set_text(line, text);
-    }
+    lichen_label_set(line, text);
 }
 
 // The fallback when the dial cannot be built: HH:MM:SS and the date in one label, once a second
@@ -42,9 +40,7 @@ static void text_tick(lv_timer_t *t) {
     } else {
         snprintf(text, sizeof(text), "%s", date);
     }
-    if (strcmp(lv_label_get_text(label), text) != 0) {
-        lv_label_set_text(label, text);
-    }
+    lichen_label_set(label, text);
 }
 
 static void on_text_delete(lv_event_t *e) {

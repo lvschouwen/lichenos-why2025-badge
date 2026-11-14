@@ -8,6 +8,7 @@
 #include "ui_text.h"
 
 #include <stdarg.h>
+#include <string.h>
 
 lv_obj_t *lichen_icon_box(lv_obj_t *parent, int32_t w, int32_t h, int32_t x, int32_t y, uint32_t color, int32_t radius) {
     lv_obj_t *b = lv_obj_create(parent);
@@ -35,6 +36,12 @@ lv_obj_t *lichen_label_line(lv_obj_t *parent, int32_t width) {
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lichen_label_line_fit(label);
     return label;
+}
+
+void lichen_label_set(lv_obj_t *label, char const *text) {
+    if (label && text && strcmp(lv_label_get_text(label), text) != 0) {
+        lv_label_set_text(label, text);
+    }
 }
 
 lv_obj_t *lichen_label_wrap(lv_obj_t *parent, int32_t width) {

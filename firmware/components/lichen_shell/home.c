@@ -344,12 +344,8 @@ static void refresh(lv_timer_t *timer) {
         if (!fresh) {
             continue; // nothing new: keep what is shown
         }
-        if (strcmp(lv_label_get_text(h->line1[i]), t1) != 0) {
-            lv_label_set_text(h->line1[i], t1);
-        }
-        if (strcmp(lv_label_get_text(h->line2[i]), t2) != 0) {
-            lv_label_set_text(h->line2[i], t2);
-        }
+        lichen_label_set(h->line1[i], t1);
+        lichen_label_set(h->line2[i], t2);
     }
 }
 

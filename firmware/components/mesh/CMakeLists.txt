@@ -22,10 +22,9 @@ set(COMPANION_SRCS
     ${MC}/src/helpers/IdentityStore.cpp ${MC}/src/helpers/RegionMap.cpp ${MC}/src/helpers/TransportKeyStore.cpp
     ${MC}/examples/companion_radio/MyMesh.cpp ${MC}/examples/companion_radio/DataStore.cpp)
 # The app's allowlist (#84 T9, docs/app-api.md): Lichen's app API and services, the radio, the console, and plain
-# libraries. The build is the check: a header from any other component does not resolve. One exception, with
-# its follow-up: sdcard (the message journal's
-# sd_begin/sd_end batches on /sd/lichen/messages, #98: an SD batch call in lichen_fs.h). Results of the settings jobs
-# reach the LVGL task through lichen_ui_call (#84 T8a), so esp_lvgl_port is not needed.
+# libraries. The build is the check: a header from any other component does not resolve. The card goes through
+# lichen_fs.h (the SD batch calls, #98), never the sdcard component. Results of the settings jobs reach the LVGL task
+# through lichen_ui_call (#84 T8a), so esp_lvgl_port is not needed.
 set(MESH_REQUIRES lichen_api lichen_clock lichen_random lora fw_console freertos esp_timer heap mbedtls)
 idf_component_register(SRCS "mesh_task.cpp" "mesh_api_view.cpp" "mesh_api_settings.cpp" "mesh_api_channels.cpp" "mesh_api_send.cpp" "mesh_api_diag.cpp" "mesh_cmd.cpp" "mesh_cmd_settings.cpp" "mesh_cmd_send.cpp" "mesh_cmd_remote.cpp" "mesh_cmd_store.cpp"
                             "mesh_cmd_table.c" "mesh_link.cpp" "mesh_frame.c" "mesh_outbox.c" "mesh_trace.c" "mesh_remote.c" "mesh_telem.c" "meshcore_telem.c" "mesh_rset.c" "mesh_rset_run.c" "mesh_rhist.c" "mesh_rhist_run.c" "meshcore_rhist.c" "meshcore_remote.c" "meshcore_rset.c" "lora_radio.cpp" "mesh_store.c" "mesh_mem.c" "lora_airtime.c" "advert_limit.c" "mesh_blobq.c" "mesh_advert_cfg.c" "meshcore_app_record.c" "mesh_scope.c" "mesh_cscope.c" "mesh_onair.c" "mesh_onair_run.c"
