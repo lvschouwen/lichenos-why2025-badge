@@ -30,7 +30,9 @@ for f in "$repo"/tools/*; do
 done
 cp "$repo/host_tests/CMakeLists.txt" "$t/host_tests/"
 # the real tree is read-only for this test: remember it to prove that below
-real_before=$(git -C "$repo" status --porcelain -- firmware tools host_tests 2>/dev/null | sort | sha256sum)
+# only the paths the scaffold could touch, so a build writing elsewhere in the real tree cannot fail this test
+real_snap() { (cd "$repo" && { find firmware/components/lichen_apps tools/layers.conf host_tests/CMakeLists.txt host_tests/*_model_test.c -type f | sort | xargs sha256sum; ls firmware/components; }) | sha256sum; }
+real_before=$(real_snap)
 
 snap() { (cd "$t" && { find firmware/components/lichen_apps tools/layers.conf host_tests -type f | sort | xargs sha256sum; ls firmware/components; }) | sha256sum; }
 new_app() { python3 -I "$repo/tools/new_app.py" --root "$t" "$@"; }
@@ -62,6 +64,25 @@ refuses "comment end in name" ok1 'x */ y?'
 refuses "template slot in name" ok1 '@ID@'
 refuses "non-ASCII name" ok1 'Caf'$'\xc3\xa9'
 refuses "padded name" ok1 ' App'
+
+# A leftover test file or target of that id is refused too, not overwritten
+touch "$t/host_tests/zz_model_test.c"
+refuses "existing test file" zz "Fine"
+rm "$t/host_tests/zz_model_test.c"
+cp "$t/host_tests/CMakeLists.txt" "$tmp/host_cmake.bak"
+echo 'add_test(NAME yy_model_test COMMAND yy_model_test)' >> "$t/host_tests/CMakeLists.txt"
+refuses "existing test target" yy "Fine"
+cp "$tmp/host_cmake.bak" "$t/host_tests/CMakeLists.txt"
+
+# A write that fails half way rolls everything back (a read-only tools/ stops the layers.conf write, after the
+# lichen_apps files were changed); then the same run works. Not testable as root, which ignores the mode.
+if [ "$(id -u)" != 0 ]; then
+    chmod a-w "$t/tools"
+    refuses "write failure" demo "Demo app"
+    chmod u+w "$t/tools"
+else
+    echo "note: running as root, the rollback case is skipped" >&2
+fi
 
 # A good one
 before=$(snap)
@@ -100,8 +121,20 @@ PY
 out=$(python3 -I "$repo/tools/check_layers.py" --root "$t" --no-symbols --no-merge-base 2>&1) || bad "layer check failed on the scaffold: $out"
 out=$("$repo/tools/check_app_boundary.sh" --root "$t" --no-symbols --no-merge-base 2>&1) || bad "app boundary check failed on the scaffold: $out"
 
-# The generated model test builds and passes the way host_tests builds it
 cc=${CC:-cc}
+# The generated app file compiles (syntax only) against the real lvgl headers and the gate's: a template that drifted
+# from lichen_label_set, menu_*, lichen_app_t ... fails here. lvgl is a managed component, so a clone that has not
+# built once has none; then this step is skipped with a note (the gap: the IDF build is what compiles it).
+lvgl=$repo/firmware/managed_components/lvgl__lvgl
+if [ -f "$lvgl/lvgl.h" ]; then
+    out=$("$cc" -std=gnu11 -fsyntax-only -Wall -Wextra -Werror -DLV_CONF_SKIP=1 -I"$lvgl" \
+        -I"$repo/firmware/components/lichen_api" -I"$t/firmware/components/lichen_demo" \
+        "$t/firmware/components/lichen_demo/app_demo.c" 2>&1) || bad "the generated app_demo.c does not compile: $out"
+else
+    echo "note: firmware/managed_components/lvgl__lvgl missing, the generated app is not compiled (build once first)" >&2
+fi
+
+# The generated model test builds and passes the way host_tests builds it
 comp=$t/firmware/components/lichen_demo
 if out=$("$cc" -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -I"$comp" "$t/host_tests/demo_model_test.c" "$comp/demo_model.c" -o "$tmp/demo_model_test" 2>&1); then
     out=$("$tmp/demo_model_test" 2>&1) || bad "the generated model test failed: $out"
@@ -110,7 +143,7 @@ else
 fi
 
 # The real tree was not touched
-[ "$real_before" = "$(git -C "$repo" status --porcelain -- firmware tools host_tests 2>/dev/null | sort | sha256sum)" ] || bad "the real tree changed"
+[ "$real_before" = "$(real_snap)" ] || bad "the real tree changed"
 [ ! -e "$repo/firmware/components/lichen_demo" ] || bad "a generated app is in the real tree"
 
 # badge.sh new-app is host-only: no host, no ssh, and bad input is refused before anything else

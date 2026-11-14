@@ -85,6 +85,12 @@ def find_traces(root, app_id):
         text = read(path)
         if any(p.search(text) for p in pats):
             found.append("%s already uses it" % os.path.relpath(path, root))
+    test_src = os.path.join(root, "host_tests/%s_model_test.c" % app_id)
+    if os.path.exists(test_src):
+        found.append("host_tests/%s_model_test.c exists" % app_id)
+    if re.search(r"(add_executable|add_test)\(\s*(NAME\s+)?%s_model_test\b" % app_id,
+                 read(os.path.join(root, "host_tests/CMakeLists.txt"))):
+        found.append("host_tests/CMakeLists.txt has a %s_model_test target" % app_id)
     if re.search(r"^app\s+%s\s" % app_id, read(os.path.join(root, "tools/layers.conf")), re.M):
         found.append("tools/layers.conf has an app line for it")
     return found
@@ -153,15 +159,17 @@ def edit_layers(text, app_id):
 
 
 def edit_host_cmake(text, app_id):
-    if re.search(r"add_test\(NAME %s_model_test\b" % app_id, text):
+    """Appends the target and its test, each only when it is not there yet."""
+    d = {"id": app_id}
+    parts = (("add_executable(%(id)s_model_test ", "add_executable(%(id)s_model_test ${CMAKE_CURRENT_SOURCE_DIR}/%(id)s_model_test.c "
+              "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_%(id)s/%(id)s_model.c)\n"
+              "target_include_directories(%(id)s_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_%(id)s)\n"
+              "target_compile_options(%(id)s_model_test PRIVATE -Wall -Wextra -Werror)\n"),
+             ("add_test(NAME %(id)s_model_test ", "add_test(NAME %(id)s_model_test COMMAND %(id)s_model_test)\n"))
+    add = "".join(body % d for key, body in parts if (key % d) not in text)
+    if not add:
         return text
-    block = ("\n# %(id)s: the scaffolded app's rules (tools/badge.sh new-app, #385)\n"
-             "add_executable(%(id)s_model_test ${CMAKE_CURRENT_SOURCE_DIR}/%(id)s_model_test.c "
-             "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_%(id)s/%(id)s_model.c)\n"
-             "target_include_directories(%(id)s_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_%(id)s)\n"
-             "target_compile_options(%(id)s_model_test PRIVATE -Wall -Wextra -Werror)\n"
-             "add_test(NAME %(id)s_model_test COMMAND %(id)s_model_test)\n") % {"id": app_id}
-    return text.rstrip("\n") + "\n" + block
+    return text.rstrip("\n") + "\n\n# %s: the scaffolded app's rules (tools/badge.sh new-app, #385)\n" % app_id + add
 
 
 SHARED = (("firmware/components/lichen_apps/CMakeLists.txt", edit_cmake),
@@ -189,12 +197,41 @@ def scaffold(root, app_id, name):
     for rel, fn in SHARED:  # every anchor is looked up before anything is written
         old = read(os.path.join(root, rel))
         edited.append((rel, fn(old, app_id), old))
-    for dest, text in new_files:
-        write_atomic(os.path.join(root, dest), text)
-    for rel, new, old in edited:
-        if new != old:
-            write_atomic(os.path.join(root, rel), new)
+    created = []
+    done = []  # shared files already replaced: (path, old text)
+    try:
+        for dest, text in new_files:
+            path = os.path.join(root, dest)
+            created.append(path)
+            write_atomic(path, text)
+        for rel, new, old in edited:
+            if new != old:
+                path = os.path.join(root, rel)
+                write_atomic(path, new)
+                done.append((path, old))
+    except OSError as e:
+        rollback(root, app_id, created, done)
+        raise Refused("writing failed (%s); every file this run wrote was removed or restored, the tree is as it was" % e)
     return [d for d, _ in new_files] + [r for r, n, o in edited if n != o]
+
+
+def rollback(root, app_id, created, done):
+    """Undo a half-done run: restore the shared files already replaced, remove the new files and the new directory
+    (the id was free, so the component directory is ours). A step that fails too is skipped: the rest still runs."""
+    for path, old in done:
+        try:
+            write_atomic(path, old)
+        except OSError:
+            pass
+    for path in created:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    try:
+        os.rmdir(os.path.join(root, "firmware/components/lichen_" + app_id))
+    except OSError:
+        pass
 
 
 def main(argv):
