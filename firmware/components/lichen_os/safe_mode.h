@@ -25,6 +25,16 @@ void safe_mode_boot_step(bool crashed);
 // (may_switch_off: it has a background part and is not safe_mode_exempt). The settings are written only when the
 // list changes. Main task, at boot.
 bool safe_mode_background_off(char const *id, bool may_switch_off);
+// Settings > Apps (#233). Whether id is on the list of apps whose background part stays off (a crash put it there, or a
+// person did); the switch itself: allowed false adds id to the list, true takes it off and forgets its crashes (the
+// same as "fw app background <id> on"). Both apply from the next boot (start_apps reads the list once). True when the
+// list holds the wanted state afterwards and it was saved; false (list unchanged on disk, the change kept for this
+// boot only) when the settings store refused it or there is no room. Any task but the LVGL task (a settings write).
+bool safe_mode_background_listed(char const *id);
+bool safe_mode_background_set(char const *id, bool allowed);
+// How many of the window's boots ended in a crash named after id, either kind (0 for a bad id). Any task.
+unsigned safe_mode_app_crashes(char const *id);
+
 // This boot follows a crash attributed to an app: its id into id (cap >= 14), its crashes in the window (crashes,
 // may be NULL: its strikes, or for a callback crash its crashes of both kinds toward the callback limit), whether
 // start_apps switched its background off (switched_off, may be NULL) and whether it happened in one of the app's LVGL

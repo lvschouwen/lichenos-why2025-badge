@@ -356,7 +356,28 @@ static void callback_crash_loop_is_stopped(void) {
     CHECK(safe_mode_cb_hash("weather") != safe_mode_cb_hash("notes") && safe_mode_cb_hash(NULL) > SAFE_MODE_NOBODY);
 }
 
+// #233: the Apps page shows how many of the window's boots ended in a crash named after the app
+static void crashes_per_app(void) {
+    safe_mode_rec_t r;
+    memset(&r, 0xA5, sizeof(r));
+    CHECK(safe_mode_crashes(&r, "weather") == 0); // power-on noise: nothing is trusted
+    r = fresh();
+    CHECK(safe_mode_crashes(&r, "weather") == 0);
+    panic_boot(&r, "weather");
+    CHECK(safe_mode_crashes(&r, "weather") == 1 && safe_mode_crashes(&r, "notes") == 0);
+    callback_boot(&r, "weather"); // either kind counts
+    CHECK(safe_mode_crashes(&r, "weather") == 2);
+    panic_boot(&r, NULL); // nobody's crash is no app's
+    CHECK(safe_mode_crashes(&r, "weather") == 2 && safe_mode_crashes(&r, "") == 0);
+    CHECK(safe_mode_crashes(&r, NULL) == 0 && safe_mode_crashes(&r, "../x") == 0 && safe_mode_crashes(&r, "A") == 0);
+    safe_mode_boot(&r, false); // the third boot after the first crash: it left the window
+    CHECK(safe_mode_crashes(&r, "weather") == 1);
+    safe_mode_forget(&r, "weather");
+    CHECK(safe_mode_crashes(&r, "weather") == 0);
+}
+
 int main(void) {
+    crashes_per_app();
     callback_crashes_are_no_strike();
     callback_crash_loop_is_stopped();
     noise_is_not_trusted();

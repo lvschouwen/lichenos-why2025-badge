@@ -164,20 +164,57 @@ static void show(void) {
                   valid ? "" : " (the window record is not valid)");
 }
 
-static void background_on(char const *id) {
-    char const *key = id; // an app that is gone since (an update) can still be taken off the list
-    char                list[SAFE_MODE_LIST_MAX];
+// id off the list and its crashes forgotten; *was: it was on the list. True when the list is saved (or did not change)
+static bool bg_enable(char const *id, bool *was) {
+    char list[SAFE_MODE_LIST_MAX];
     portENTER_CRITICAL(&s_mux);
-    bool was = safe_mode_list_remove(s_off, sizeof(s_off), key);
-    safe_mode_forget(&s_rec, key);
+    *was = safe_mode_list_remove(s_off, sizeof(s_off), id);
+    safe_mode_forget(&s_rec, id);
     memcpy(list, s_off, sizeof(list));
     portEXIT_CRITICAL(&s_mux);
+    return !*was || save_list(list);
+}
+
+bool safe_mode_background_listed(char const *id) {
+    portENTER_CRITICAL(&s_mux);
+    bool listed = safe_mode_list_has(s_off, id);
+    portEXIT_CRITICAL(&s_mux);
+    return listed;
+}
+
+bool safe_mode_background_set(char const *id, bool allowed) {
+    if (!safe_mode_id_ok(id)) {
+        return false;
+    }
+    if (allowed) {
+        bool was;
+        return bg_enable(id, &was);
+    }
+    char list[SAFE_MODE_LIST_MAX];
+    portENTER_CRITICAL(&s_mux);
+    bool had   = safe_mode_list_has(s_off, id);
+    bool added = had || safe_mode_list_add(s_off, sizeof(s_off), id);
+    memcpy(list, s_off, sizeof(list));
+    portEXIT_CRITICAL(&s_mux);
+    return added && (had || save_list(list)); // already off: no flash write
+}
+
+unsigned safe_mode_app_crashes(char const *id) {
+    portENTER_CRITICAL(&s_mux);
+    unsigned n = safe_mode_crashes(&s_rec, id);
+    portEXIT_CRITICAL(&s_mux);
+    return n;
+}
+
+static void background_on(char const *id) {
+    bool was;
+    bool saved = bg_enable(id, &was);
     if (!was) {
-        console_reply("app background: %s was not off", key);
-    } else if (save_list(list)) {
-        console_reply("app background: %s on again from the next boot, its crashes forgotten", key);
+        console_reply("app background: %s was not off", id);
+    } else if (saved) {
+        console_reply("app background: %s on again from the next boot, its crashes forgotten", id);
     } else {
-        console_reply("app background: %s on, but not saved: it is off again at the next boot", key);
+        console_reply("app background: %s on, but not saved: it is off again at the next boot", id);
     }
 }
 

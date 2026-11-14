@@ -25,5 +25,6 @@ esp_err_t nvs_set_u64(nvs_handle_t h, char const *key, uint64_t value);
 esp_err_t nvs_get_u64(nvs_handle_t h, char const *key, uint64_t *out);
 esp_err_t nvs_erase_key(nvs_handle_t h, char const *key);
 esp_err_t nvs_erase_all(nvs_handle_t h);
+esp_err_t nvs_get_used_entry_count(nvs_handle_t h, size_t *used);
 esp_err_t nvs_commit(nvs_handle_t h);
 void      nvs_close(nvs_handle_t h);

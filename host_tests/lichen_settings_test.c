@@ -3,6 +3,7 @@
 // Clear data takes the secrets with the rest. Values are made up.
 #include "lichen_settings.h"
 #include "lichen_sys_app.h"
+#include "lichen_sys_app_data.h"
 #include "nvs.h"
 #include "settings_fail.h"
 
@@ -56,7 +57,9 @@ static char const *raw(char const *ns, char const *key) {
 }
 
 esp_err_t nvs_open(char const *name, nvs_open_mode_t mode, nvs_handle_t *out) {
-    (void)mode;
+    if (mode == NVS_READONLY && count_ns(name) == 0) { // as the real NVS: a namespace nobody wrote does not exist
+        return ESP_ERR_NVS_NOT_FOUND;
+    }
     for (int h = 0; h < 4; h++) {
         if (!handles[h][0] || !strcmp(handles[h], name)) {
             strcpy(handles[h], name);
@@ -157,6 +160,11 @@ esp_err_t nvs_erase_all(nvs_handle_t h) {
             nvs[i].used = 0;
         }
     }
+    return ESP_OK;
+}
+
+esp_err_t nvs_get_used_entry_count(nvs_handle_t h, size_t *used) {
+    *used = (size_t)count_ns(handles[h - 1]);
     return ESP_OK;
 }
 
@@ -286,11 +294,29 @@ static void clear_data_takes_the_secrets(void) {
     CHECK(count_ns("a.meshcore") == 0 && count_ns("a.other") > 0);
 }
 
+// #233: Settings > Apps counts an app's NVS entries (secrets included) without reading a value
+static void entries_are_counted(void) {
+    size_t n = 99;
+    CHECK(lichen_sys_app_settings_entries(OTHER, &n) && n == (size_t)count_ns("a.other") && n > 0);
+    CHECK(lichen_sys_app_settings_entries(MESH, &n) && n == (size_t)count_ns("a.meshcore"));
+    CHECK(app_secret_set(MESH, "pwcount", "made-up-6")); // a secret is an entry too
+    size_t with = 0;
+    CHECK(lichen_sys_app_settings_entries(MESH, &with) && with == n + 1);
+    CHECK(app_secret_erase(MESH, "pwcount"));
+    CHECK(app_settings_erase_all(OTHER));
+    n = 99;
+    CHECK(lichen_sys_app_settings_entries(OTHER, &n) && n == 0); // nothing saved: empty, not an error
+    n = 99;
+    CHECK(!lichen_sys_app_settings_entries(OS, &n) && n == 0); // the OS has no namespace
+    CHECK(!lichen_sys_app_settings_entries((lichen_ctx_t)99, &n) && n == 0);
+}
+
 int main(void) {
     plain_calls_refuse_secrets();
     secrets_scoped_to_the_declaring_app();
     secrets_need_the_capability();
     clear_data_takes_the_secrets();
+    entries_are_counted();
     printf("%s: %d failure(s)\n", __FILE__, failures);
     return failures ? 1 : 0;
 }

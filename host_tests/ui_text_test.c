@@ -109,7 +109,41 @@ static void test_hint_pad(void) {
     CHECK(ui_hint_pad(0, 0, 18, 8) == 26);       // an unmeasured line must not be trusted as the hint's height
 }
 
+// #233: sizes on the Apps page (R4: units, sensible precision, never a raw byte count past 1 KB)
+static void test_size(void) {
+    char b[24];
+    ui_size_text(b, sizeof(b), 0);
+    CHECK_STR(b, "0 B");
+    ui_size_text(b, sizeof(b), 512);
+    CHECK_STR(b, "512 B");
+    ui_size_text(b, sizeof(b), 1023);
+    CHECK_STR(b, "1023 B");
+    ui_size_text(b, sizeof(b), 1024);
+    CHECK_STR(b, "1.0 KB");
+    ui_size_text(b, sizeof(b), 1536);
+    CHECK_STR(b, "1.5 KB");
+    ui_size_text(b, sizeof(b), 10 * 1024 - 1);
+    CHECK_STR(b, "9.9 KB");
+    ui_size_text(b, sizeof(b), 48 * 1024);
+    CHECK_STR(b, "48 KB");
+    ui_size_text(b, sizeof(b), 1024 * 1024 - 1); // never "1024 KB"
+    CHECK_STR(b, "1023 KB");
+    ui_size_text(b, sizeof(b), 1024 * 1024);
+    CHECK_STR(b, "1.0 MB");
+    ui_size_text(b, sizeof(b), 3ull * 1024 * 1024 + 300 * 1024);
+    CHECK_STR(b, "3.2 MB");
+    ui_size_text(b, sizeof(b), 29ull * 1024 * 1024 * 1024);
+    CHECK_STR(b, "29 GB");
+    ui_size_text(b, sizeof(b), UINT64_MAX); // no overflow, still a unit
+    CHECK(strstr(b, "GB") != NULL);
+    char small[5];
+    size_t n = ui_size_text(small, sizeof(small), 48 * 1024);
+    CHECK(n == strlen(small) && n < sizeof(small));
+    CHECK(ui_size_text(small, 0, 5) == 0);
+}
+
 int main(void) {
+    test_size();
     test_hint();
     test_countdown();
     test_status();

@@ -2,6 +2,7 @@
 // date & time, time zone), SD card (#99, sd_screen.c), Notifications (#62, notify_centre.c), Factory reset (#66, factory_screen.c), About Lichen, then one entry per app that has a settings page.
 // Every screen is a menu.h list; Esc is the shell's.
 #include "app_icons.h"
+#include "app_page.h"
 #include "lichen_app.h"
 #include "lichen_sys_app.h"
 #include "lichen_reg.h"
@@ -358,6 +359,7 @@ static void open_about(void *arg) {
 // A page an app provides under Settings, and the app's context for its hooks
 static lichen_app_t const *page_app;
 static lichen_ctx_t        page_ctx;
+static size_t              page_index; // its place in the OS's table (#233: the OS's rows on the page)
 
 #define PAGE_SCROLL_STEP 96
 
@@ -380,6 +382,7 @@ static lv_obj_t *build_app_page(void) {
         page_app->about(menu);
     }
     lichen_ctx_leave(previous);
+    app_page_add_rows(screen, menu, page_index); // #233: after the app's own rows, so they keep their places
     lichen_ui_event_add(screen, on_page_key, LV_EVENT_KEY, menu);
     return screen;
 }
@@ -388,7 +391,8 @@ static void open_app_page(void *arg) {
     size_t index = (size_t)(intptr_t)arg;
     page_app     = lichen_app_at(index);
     page_ctx     = lichen_sys_app_ctx_at(index);
-    if (page_app && (page_app->settings || page_app->about)) {
+    page_index   = index;
+    if (page_app && app_page_listed(index)) {
         _Static_assert(LICHEN_MAX_APPS <= SCREEN_APP_MAX, "app page ids would overlap");
         shell_open(build_app_page, SCREEN_APP + (int)index);
     }
@@ -598,7 +602,7 @@ static void open_settings(lv_obj_t *screen) {
     bool heading = false;
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
-        if (!app->settings && !app->about) {
+        if (!app_page_listed(i)) {
             continue;
         }
         if (!heading) {

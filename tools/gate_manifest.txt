@@ -265,9 +265,15 @@ lichen_sensors_stop	SENSORS	unspecified	lichen_sensors.h
 lichen_station_clock	-	lvgl	lichen_ui.h
 lichen_str_copy	-	unspecified	lichen_str.h
 lichen_str_copy_n	-	unspecified	lichen_str.h
+lichen_sys_app_background_allowed	SYSTEM	any	lichen_sys_app_data.h
+lichen_sys_app_background_set	SYSTEM	unspecified	lichen_sys_app_data.h
 lichen_sys_app_console_more	SYSTEM	unspecified	lichen_sys_app.h
 lichen_sys_app_console_register	SYSTEM	not-lvgl	lichen_sys_app.h
+lichen_sys_app_crashes	SYSTEM	any	lichen_sys_app_data.h
 lichen_sys_app_ctx_at	SYSTEM	any	lichen_sys_app.h
+lichen_sys_app_data_clear	SYSTEM	unspecified	lichen_sys_app_data.h
+lichen_sys_app_data_measure	SYSTEM	not-lvgl	lichen_sys_app_data.h
+lichen_sys_app_settings_entries	SYSTEM	unspecified	lichen_sys_app_data.h
 lichen_sys_apps_stop	SYSTEM	not-lvgl	lichen_sys_life.h
 lichen_sys_badge_get	SYSTEM	unspecified	lichen_sys_badge.h
 lichen_sys_badge_set	SYSTEM	unspecified	lichen_sys_badge.h
@@ -301,6 +307,9 @@ lichen_sys_ctx_os	SYSTEM	any	lichen_sys_app.h
 lichen_sys_ctx_resolve	SYSTEM	any	lichen_sys_app.h
 lichen_sys_ctx_settings_ns	SYSTEM	unspecified	lichen_sys_app.h
 lichen_sys_ctx_source	SYSTEM	unspecified	lichen_sys_app.h
+lichen_sys_data_dir_clear	SYSTEM	unspecified	lichen_sys_data_fs.h
+lichen_sys_data_dir_measure	SYSTEM	unspecified	lichen_sys_data_fs.h
+lichen_sys_data_dir_path	SYSTEM	unspecified	lichen_sys_data_fs.h
 lichen_sys_display_get	SYSTEM	any	lichen_sys_display.h
 lichen_sys_display_idle	SYSTEM	any	lichen_sys_display.h
 lichen_sys_display_resume	SYSTEM	any	lichen_sys_display.h
@@ -631,6 +640,7 @@ ui_empty_text	-	unspecified	ui_text.h
 ui_hint_build	-	unspecified	ui_text.h
 ui_hint_pad	-	unspecified	ui_text.h
 ui_hint_vbuild	-	unspecified	ui_text.h
+ui_size_text	-	unspecified	ui_text.h
 ui_status_begin	-	unspecified	ui_text.h
 ui_status_begin_text	-	unspecified	ui_text.h
 ui_status_end	-	unspecified	ui_text.h

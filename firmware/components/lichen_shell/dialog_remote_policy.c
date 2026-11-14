@@ -23,6 +23,7 @@ static dlg_remote_row_t const table[] = {
     {"format now", "*", V_REFUSE},       // sd_screen.c: format, second question
     {"power off", "*", V_REFUSE},        // app_power.c
     {"forget", "*", V_REFUSE},           // wifi_screen.c network, meshcore_contact.c repeater password
+    {"clear data", "*", V_REFUSE},       // app_page.c: Settings > Apps > Clear data (#233): erases an app's settings and files
     {"remove", "*", V_REFUSE},           // meshcore_contact.c contact, meshcore_settings.c channel
     {"set radio", "*", V_REFUSE},        // meshcore_rset.c: a third node's radio
     {"restart", "Restart *? It is off the air for a while; log in again after.", V_REFUSE}, // meshcore_rset.c repeater

@@ -110,6 +110,13 @@ bool safe_mode_may_switch_off(bool has_background, bool exempt) {
     return has_background && !exempt;
 }
 
+unsigned safe_mode_crashes(safe_mode_rec_t const *r, char const *id) {
+    if (!safe_mode_valid(r) || !safe_mode_id_ok(id)) {
+        return 0;
+    }
+    return count_of(r, safe_mode_hash(id)) + count_of(r, safe_mode_cb_hash(id));
+}
+
 void safe_mode_forget(safe_mode_rec_t *r, char const *id) {
     safe_mode_ensure(r);
     uint32_t h = safe_mode_hash(id), cb = safe_mode_cb_hash(id);

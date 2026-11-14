@@ -95,6 +95,9 @@ bool safe_mode_may_switch_off(bool has_background, bool exempt);
 void safe_mode_forget(safe_mode_rec_t *r, char const *id);
 // A crash in the window (what safe_mode_boot said about degraded; false for a record that is not valid)
 bool safe_mode_degraded(safe_mode_rec_t const *r);
+// How many of the window's boots ended in a crash named after id, either kind (#233: Settings > Apps); 0 for a bad id
+// or a record that is not valid. Counts what safe_mode_forget has not cleared.
+unsigned safe_mode_crashes(safe_mode_rec_t const *r, char const *id);
 
 // An app id as the OS takes it: 1..13 of a-z 0-9 _
 bool safe_mode_id_ok(char const *id);

@@ -38,6 +38,8 @@ static case_t const cases[] = {
     {"format now", "Sure? All files on the card are lost.", R},
     {"power off", "Power off the badge?", R},
     {"forget", "Forget Home? Its password is deleted.", R},
+    {"clear data", "Clear all data of Weather? Its settings and files are erased and cannot come back.", R}, // #233
+    {"clear data", "Clear all data of a 24 character app? Its settings and files are erased and cannot come back.", R},
     {"forget", "Forget the saved password of this repeater or room? Log in asks for it again.", R},
     {"remove", "Remove Alice from MeshCore? The chat stays.", R},
     {"remove", "Remove #badgetest? Messages already received stay.", R},

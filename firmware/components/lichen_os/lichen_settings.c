@@ -217,6 +217,28 @@ bool app_settings_erase_all(lichen_ctx_t ctx) {
     return commit_close("(all)", nvs, nvs_erase_all(nvs));
 }
 
+// Settings > Apps (#233): how many entries the app's namespace holds (a value of up to 8 bytes is one, a string or a
+// blob takes more). Reads no value. A namespace that was never written is empty, not an error.
+bool lichen_sys_app_settings_entries(lichen_ctx_t ctx, size_t *entries) {
+    char            ns[16];
+    char const     *name = NULL;
+    nvs_handle_t    nvs;
+    *entries = 0;
+    if (lichen_sys_ctx_settings_ns(ctx, "app_settings", ns, sizeof(ns), &name) != GATE_APP_ID) {
+        return false;
+    }
+    esp_err_t err = nvs_open(ns, NVS_READONLY, &nvs);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        return true;
+    }
+    if (err != ESP_OK) {
+        return false;
+    }
+    err = nvs_get_used_entry_count(nvs, entries);
+    nvs_close(nvs);
+    return err == ESP_OK;
+}
+
 static void wipe(void *p, size_t n) {
     volatile char *v = p;
     while (n--) {

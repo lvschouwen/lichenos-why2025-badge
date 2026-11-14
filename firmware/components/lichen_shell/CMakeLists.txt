@@ -20,6 +20,8 @@
 # app_bench.c is the Bench app (#96); app_stress.c is `fw stress` and its screen (#278: stress_workers.c runs the load, stress_calc.c,
 # pure, stress_calc_test.c, judges it and writes its lines), app_crashlog.c the Crash log app (#72, on lichen_crashlog.h), app_power.c the Power app (#65).
 # release_notes.c (release_notes_test.c, #13; notes_app.c is the Release notes app and "This is new", notes_render.c its markdown).
+# app_page.c (#233, Settings > Apps: the OS's rows on an app's page) over app_page_model.c (pure, app_page_model_test.c);
+# app_data_job.c runs its drive and settings work off the LVGL task.
 # app_files.c is the Files app (#71): files_job.c runs its file work off the LVGL task, files_ops.c is plain POSIX
 # (files_ops_test.c) and files_model.c the paths, protected list, sort and text paging (files_model_test.c).
 # shell.c, boot_screen.c, status_bar.c and logo.c are the LVGL screens; shell_ui_ops.c hands the gate the table of the
@@ -66,6 +68,7 @@ idf_component_register(SRCS ${RN_TABLE} "release_notes.c" "notes_app.c" "notes_r
                             "dialog_remote_policy.c" "remote_answer.c" "ui_answer.c"
 
                             "dialog_remote_policy.c" "dev_tap.c"
+                            "app_page.c" "app_page_model.c" "app_data_job.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl lichen_api
                        PRIV_REQUIRES freertos fw_console heap esp_hw_support esp_app_format esp_timer app_update esp_system esp_mm)

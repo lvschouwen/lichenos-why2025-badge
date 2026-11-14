@@ -26,6 +26,7 @@
 # pure, tested by host_tests/timer_book_test.c; lichen_ui_cb.c is its LVGL glue.
 # lichen_hex.c and lichen_str.c (the one hex text and the one bounded string copy, #445) are pure, tested by
 # host_tests/lichen_hex_test.c and lichen_str_test.c.
+# lichen_sys_data_fs.c (an app's data directories, their size and Clear data, #233) is pure POSIX, tested by host_tests/app_data_fs_test.c.
 # fonts.c holds the font slots lichen_font() reads; lichen_os loads the asset fonts into them (font_slots.h).
 idf_component_register(SRCS "lichen_app.c" "fonts.c" "menu.c" "menu_filter.c" "list_filter.c" "scroll_anchor.c"
                             "text_entry.c"
@@ -33,7 +34,7 @@ idf_component_register(SRCS "lichen_app.c" "fonts.c" "menu.c" "menu_filter.c" "l
                             "badge_table.c" "lichen_ui.c" "ui_text.c" "qr_payload.c" "qr_screen.c" "tile_order.c"
                             "task_book.c" "mem_book.c" "hold_exit.c" "os_name.c" "lichen_ui_ops.c" "gate_mem.c" "app_ctx.c" "app_caps.c" "gate_app.c" "test_card_layout.c" "test_card.c"
                             "bench_scope.c" "key_cause.c" "ui_cb.c" "lichen_ui_cb.c" "app_life.c" "lichen_app_life.c" "timer_book.c"
-                            "lichen_hex.c" "lichen_str.c"
+                            "lichen_hex.c" "lichen_str.c" "lichen_sys_data_fs.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl
                        PRIV_REQUIRES freertos fw_console lichen_random)

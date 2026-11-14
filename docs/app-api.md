@@ -300,8 +300,20 @@ background part off, so a callback that crashes every boot is stopped (#427); tw
 own. `fw app background` lists what is off and `fw app background <id> on` switches it on
 again. `lichen_boot_degraded()` (lichen_crashlog.h) tells an app that a crash is among the last boots, so a restart
 loop does not repeat costly background work; an app keeps no restart policy of its own. An app with
-`safe_mode_exempt` (MeshCore, the main app) is counted and named but never switched off; #233 (Settings > Apps)
-revisits that exemption. Settings > Apps shows state and capabilities (#233). Today the OS already books
+`safe_mode_exempt` (MeshCore, the main app) is counted and named but never switched off.
+
+**Settings > Apps (#233).** Every app that is not the OS's own, and every OS app with a page of its own, has a page under
+Settings > Apps: its own settings and about rows (unchanged), then the OS's rows: what it may use (its capabilities in
+words), Data (its settings namespace and its directory on the storage drive) and On the SD card (its directory
+`/sd/lichen/apps/<id>`), Background, Crashes (of the last 3 boots) and Clear data. The Background switch is the list
+behind `fw app background` (it takes the app off or puts it on from the next boot; nothing is stopped live, there is no
+stop for it), shown for an app with a `start_background` hook that is not exempt; an exempt app shows "Always on"
+(the owner decision of 2026-11-14 stands: the exemption is kept, so a person cannot switch the main app off by accident). Clear data (a
+careful dialog, hand-only) erases the app's settings namespace, secrets included, and the contents of its two
+directories, and nothing else: the paths come from the app's id by `fs_path.h`'s rules (`lichen_sys_data_fs.h`), never from
+input. It is not offered for an app whose descriptor says `storage_secret` (MeshCore's identity and keys go only with a
+factory reset) or for the OS's own apps. A running app keeps its state in RAM: the page says to restart the badge.
+Size, clear and the switch's save run on a job task, never on the LVGL task. Today the OS already books
 every app's tasks and allocations (`lichen_task.h`, `lichen_mem.h`; `fw tasks`, `fw mem`) and
 `lichen_task_leftovers` names what runs after a stop.
 

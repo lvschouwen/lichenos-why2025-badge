@@ -44,3 +44,7 @@ size_t ui_status_fail_text(char *out, size_t n, char const *why, char const *nex
 
 // An empty list: "No contacts yet: they appear when a node adverts." (how NULL: "No contacts yet.") (R11)
 size_t ui_empty_text(char *out, size_t n, char const *what, char const *how);
+
+// A size for a person (R4): "0 B", "512 B", "1.5 KB", "48 KB", "2.3 MB". Binary units (1 KB = 1024 B), one decimal below
+// 10 of a unit, none above; a unit never reads "1024 KB" (it rolls over to "1.0 MB"). Used by Settings > Apps (#233).
+size_t ui_size_text(char *out, size_t n, uint64_t bytes);

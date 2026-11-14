@@ -128,3 +128,24 @@ size_t ui_empty_text(char *out, size_t n, char const *what, char const *how) {
     }
     return finish(out, n, snprintf(out, n, "No %s yet: %s%s", w, how, stop ? "" : "."));
 }
+
+size_t ui_size_text(char *out, size_t n, uint64_t bytes) {
+    static char const units[] = {'K', 'M', 'G'};
+    if (n == 0) {
+        return 0;
+    }
+    if (bytes < 1024) {
+        return finish(out, n, snprintf(out, n, "%u B", (unsigned)bytes));
+    }
+    // tenths of the unit, rounded down: 1.5 KB is 15, and 1023.9 KB is a whole MB by its own rollover
+    uint64_t tenths = (bytes / 1024) * 10 + (bytes % 1024) * 10 / 1024; // no overflow near UINT64_MAX
+    size_t   u      = 0;
+    while (tenths >= 10240 && u + 1 < sizeof(units)) {
+        tenths /= 1024;
+        u++;
+    }
+    if (tenths < 100) {
+        return finish(out, n, snprintf(out, n, "%u.%u %cB", (unsigned)(tenths / 10), (unsigned)(tenths % 10), units[u]));
+    }
+    return finish(out, n, snprintf(out, n, "%u %cB", (unsigned)(tenths / 10), units[u]));
+}
