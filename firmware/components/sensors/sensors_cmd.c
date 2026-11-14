@@ -3,6 +3,7 @@
 #include "esp_timer.h"
 #include "fw_console.h"
 #include "sensors.h"
+#include "sensors_rules.h"
 #include "sensors_chips.h"
 #include "sensors_format.h"
 
@@ -169,5 +170,5 @@ bool sensors_boot_start(void) {
 }
 
 void sensors_register_console(void) {
-    console_register("sensors", SENSORS_USAGE " (IMU, environment, P4 die temperature)", cmd_sensors);
+    console_register_rules("sensors", SENSORS_USAGE " (IMU, environment, P4 die temperature)", cmd_sensors, SENSORS_RULES);
 }

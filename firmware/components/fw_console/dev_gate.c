@@ -5,17 +5,6 @@
 
 #include <string.h>
 
-// A command with test arms: "open" lists the argument strings that stay open, exactly (no open form: none listed).
-// An argument not listed is gated, so a form added to a command later is gated until it is listed here.
-typedef struct {
-    char const *name;
-    char const *open[4];
-} gated_t;
-
-static gated_t const GATED[] = {
-    {"sensors", {"", "raw", "boot", NULL}}, // start, stop and "boot on|off" change state and what boots
-};
-
 // "notify test ..." and "vib test ...": the other forms are settings a person uses, so only the test word is gated
 static bool first_word_is(char const *args, char const *word) {
     size_t n = strlen(word);
@@ -30,18 +19,7 @@ bool dev_gate_needs_dev(char const *name, char const *args) {
         // #438: "mesh chat open|close" opens a screen from the console; #455: "mesh ident simulate" blocks TX
         return first_word_is(args, "chat") || first_word_is(args, "ident");
     }
-    for (unsigned i = 0; i < sizeof(GATED) / sizeof(GATED[0]); i++) {
-        if (strcmp(name, GATED[i].name) != 0) {
-            continue;
-        }
-        for (int o = 0; GATED[i].open[o]; o++) {
-            if (strcmp(args, GATED[i].open[o]) == 0) {
-                return false;
-            }
-        }
-        return true;
-    }
-    return false;
+    return false; // every other command's forms: its sub-command table (#464, console_sub.h)
 }
 
 dev_gate_t dev_gate_decide(dev_find_t found, bool needs_dev, bool dev_on) {

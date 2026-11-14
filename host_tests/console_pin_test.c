@@ -13,6 +13,7 @@
 #include "crash_rules.h"
 #include "dev_mode.h"
 #include "sd_rules.h"
+#include "sensors_rules.h"
 #include "shell_cmd_rules.h"
 #include "main_rules.h"
 #include "mesh_onair.h"
@@ -353,6 +354,7 @@ static rules_of_t const RULES[] = {
     {"setup", SETUP_RULES},
     {"noscreen", NOSCREEN_RULES},
     {"psram", PSRAM_RULES},
+    {"sensors", SENSORS_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {
