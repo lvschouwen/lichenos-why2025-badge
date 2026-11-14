@@ -95,5 +95,9 @@ bool     remote_answer_parse_yes(char const *arg, char *label, size_t cap, bool 
 rans_t   remote_answer_check(remote_view_t const *v, char const *want_label, uint32_t const *want_gen);
 // The same right before its Enter goes down (or comes up), which must also find the open it started from (want_gen)
 rans_t   remote_answer_still(remote_view_t const *v, char const *want_label, uint32_t want_gen);
+// "fw ui answer no": may its Esc go down now? Only while a dialog is open (RANS_NO_DIALOG when none, RANS_UNSURE while
+// one opens or closes or could not be read: the Esc would land on the screen below). Checked on the LVGL task right
+// before the key, so a dialog closing in between cannot let the Esc through (#439).
+rans_t   remote_dismiss_check(remote_view_t const *v);
 // How long "fw ui answer yes" waits before its Enter: up to REMOTE_ANSWER_ARM_MS since the dialog opened
 uint32_t remote_answer_wait_ms(uint32_t ms_open);

@@ -8,6 +8,7 @@
 // Off works from anywhere.
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,6 +74,17 @@ dev_find_t dev_mode_find_app(console_entry_t const *table, int n, char const *na
 // dev_mode_help for the entries of one app (0: the OS's); line may be NULL to only count
 int dev_mode_help_app(console_entry_t const *table, int n, bool on, int app, void (*line)(char const *usage, void *ctx),
                       void *ctx);
+
+// "fw help" (#439): the names of one app's (0: the OS's) listed commands, head first, wrapped to width characters per
+// line (the full usages of every command do not fit the Wi-Fi console's 4 KB reply). Debug commands only while on.
+// Calls line once per output line; returns the commands listed (0: no line at all).
+#define DEV_HELP_LINE_MAX 128
+int dev_mode_help_names(console_entry_t const *table, int n, bool on, int app, char const *head, size_t width,
+                        void (*line)(char const *text, void *ctx), void *ctx);
+// "fw help <word>": the usages of the command word, or of every listed command of the app whose id is word. A debug
+// command while off counts as unknown (what the help hides stays hidden). Returns the usages given, 0 for no topic.
+int dev_mode_help_topic(console_entry_t const *table, int n, char const *const *ids, int n_ids, bool on,
+                        char const *word, void (*line)(char const *usage, void *ctx), void *ctx);
 
 typedef enum {
     DEV_REQ_STATUS,  // "", "status"

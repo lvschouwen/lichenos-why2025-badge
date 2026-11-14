@@ -79,6 +79,17 @@ static void test_radio_pages(void) {
     CHECK(remote_key_check(RKEY_ENTER, &v) == RANS_OK);
 }
 
+static void test_dismiss(void) {
+    remote_view_t v = dialog(DLG_REMOTE_REFUSE, "erase everything", true);
+    CHECK(remote_dismiss_check(&v) == RANS_OK); // any open dialog may be cancelled, hand-only ones too
+    v.dialog = RDLG_NONE;
+    CHECK(remote_dismiss_check(&v) == RANS_NO_DIALOG); // the Esc would hit the screen below
+    v.dialog = RDLG_SETTLING;
+    CHECK(remote_dismiss_check(&v) == RANS_UNSURE);
+    v.dialog = RDLG_UNREAD;
+    CHECK(remote_dismiss_check(&v) == RANS_UNSURE);
+}
+
 static void test_answer_label(void) {
     remote_view_t v = dialog(DLG_REMOTE_ALLOW_ONAIR_SCOPED, "send", true);
     CHECK(remote_answer_check(&v, "send", NULL) == RANS_OK);
@@ -357,6 +368,7 @@ static void test_wait(void) {
 int main(void) {
     test_dialog_enter();
     test_radio_pages();
+    test_dismiss();
     test_answer_label();
     test_answer_gen();
     test_wait();

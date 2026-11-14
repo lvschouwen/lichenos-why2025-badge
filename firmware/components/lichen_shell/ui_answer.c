@@ -104,6 +104,19 @@ bool ui_answer_key_ok(uint8_t code, char const *focus, char const *answer_label,
     return false;
 }
 
+// LVGL task, right before the dismissing Esc: the dialog is still open, or the Esc would hit the screen below
+bool ui_answer_dismiss_ok(char *why, size_t cap) {
+    static shell_dialog_info_t info; // LVGL task only
+    remote_view_t              v;
+    read_dialog(&v, &info);
+    rans_t r = remote_dismiss_check(&v);
+    if (r == RANS_OK) {
+        return true;
+    }
+    why_text(r, &v, false, why, cap);
+    return false;
+}
+
 static void answer_show(void) {
     shell_dialog_info_t info;
     remote_view_t       v;
@@ -170,7 +183,7 @@ void ui_answer_cmd(char const *args) {
     if (!len) {
         answer_show();
     } else if (len == 2 && strcmp(word, "no") == 0) {
-        if (ui_probe_run(WHO, "esc", NULL, 0) >= 0) { // Esc is always allowed
+        if (ui_probe_dismiss(WHO) >= 0) { // only while a dialog is open, decided on the LVGL task
             console_reply(WHO ": Esc sent");
         }
     } else if (strncmp(args, "yes ", 4) == 0 || (len == 3 && strcmp(word, "yes") == 0)) {

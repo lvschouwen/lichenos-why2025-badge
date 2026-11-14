@@ -239,6 +239,10 @@ rans_t remote_answer_still(remote_view_t const *v, char const *want_label, uint3
     return r == RANS_NO_DIALOG ? RANS_OTHER_DIALOG : r; // it closed meanwhile: also not the one asked about
 }
 
+rans_t remote_dismiss_check(remote_view_t const *v) {
+    return v->dialog == RDLG_OPEN ? RANS_OK : v->dialog == RDLG_NONE ? RANS_NO_DIALOG : RANS_UNSURE;
+}
+
 uint32_t remote_answer_wait_ms(uint32_t ms_open) {
     return ms_open >= REMOTE_ANSWER_ARM_MS ? 0 : REMOTE_ANSWER_ARM_MS - ms_open;
 }

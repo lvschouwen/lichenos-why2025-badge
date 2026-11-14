@@ -46,6 +46,9 @@ int  ui_probe_run(char const *who, char const *seq, char const *answer_label, ui
 // remote Enter, Tab, Left or Right goes down or comes up (LVGL task): true when the key with TCA8418 code may; else
 // why not is written to why. focus is what "fw ui" reports. policy_key: whether the check looks at the key at all.
 void ui_answer_cmd(char const *args);
+// "fw ui answer no" (#439): one Esc, sent only while a dialog is open (LVGL task, right before the key); else why
+bool ui_answer_dismiss_ok(char *why, size_t cap);
+int  ui_probe_dismiss(char const *who);
 bool ui_answer_policy_key(uint8_t code);
 bool ui_answer_key_ok(uint8_t code, char const *focus, char const *answer_label, uint32_t answer_gen, char *why,
                       size_t cap);

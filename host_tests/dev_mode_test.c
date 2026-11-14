@@ -192,10 +192,68 @@ static void app_help_groups(void) {
               dev_mode_help_app(app_table, AN, true, 2, NULL, NULL) == AN);
 }
 
+static void collect_line(char const *text, void *ctx) {
+    char *out = ctx;
+    strcat(out, text);
+    strcat(out, "|");
+}
+
+// "fw help" (#439): names only, wrapped, debug ones hidden while off; "fw help <word>" gives the usages
+static void help_index_and_topic(void) {
+    char out[512] = "";
+    CHECK(dev_mode_help_names(app_table, AN, false, 0, "OS:", 100, collect_line, out) == 1);
+    CHECK(strcmp(out, "OS: help|") == 0);
+    out[0] = 0;
+    CHECK(dev_mode_help_names(app_table, AN, false, 1, "meshcore:", 100, collect_line, out) == 2);
+    CHECK(strcmp(out, "meshcore: mesh advert|") == 0); // mdbg stays hidden while off
+    out[0] = 0;
+    CHECK(dev_mode_help_names(app_table, AN, true, 1, "meshcore:", 100, collect_line, out) == 3);
+    CHECK(strcmp(out, "meshcore: mesh advert mdbg|") == 0);
+    out[0] = 0;
+    CHECK(dev_mode_help_names(app_table, AN, false, 3, "none:", 100, collect_line, out) == 0 && out[0] == 0); // no line
+    out[0] = 0;
+    CHECK(dev_mode_help_names(app_table, AN, true, 1, "m:", 12, collect_line, out) == 3); // wraps, never cuts a name
+    CHECK(strcmp(out, "m: mesh|  advert|  mdbg|") == 0);
+    // a long table: every line within the width, every name once
+    console_entry_t big[40];
+    char            names[40][8];
+    for (int i = 0; i < 40; i++) {
+        snprintf(names[i], sizeof(names[i]), "cmd%d", i);
+        big[i] = (console_entry_t){names[i], "usage", noop, false, 0};
+    }
+    char big_out[1024] = "";
+    CHECK(dev_mode_help_names(big, 40, false, 0, "OS:", 60, collect_line, big_out) == 40);
+    size_t lines = 0, run = 0;
+    for (char const *c = big_out; *c; c++) {
+        run++;
+        if (*c == '|') {
+            CHECK(run - 1 <= 60);
+            lines++;
+            run = 0;
+        }
+    }
+    CHECK(lines > 1 && strstr(big_out, "cmd39|") != NULL && strstr(big_out, " cmd0 ") != NULL);
+
+    char const *ids[] = {"meshcore", "qrcode"};
+    out[0]            = 0;
+    CHECK(dev_mode_help_topic(app_table, AN, ids, 2, false, "mesh", collect_line, out) == 1);
+    CHECK(strcmp(out, "mesh send ...|") == 0);
+    out[0] = 0;
+    CHECK(dev_mode_help_topic(app_table, AN, ids, 2, false, "meshcore", collect_line, out) == 2); // the group, debug hidden
+    CHECK(strcmp(out, "mesh send ...|advert|") == 0);
+    CHECK(dev_mode_help_topic(app_table, AN, ids, 2, true, "meshcore", collect_line, out) == 3);
+    out[0] = 0;
+    CHECK(dev_mode_help_topic(app_table, AN, ids, 2, false, "mdbg", collect_line, out) == 0 && out[0] == 0); // hidden: unknown
+    CHECK(dev_mode_help_topic(app_table, AN, ids, 2, true, "mdbg", collect_line, out) == 1);
+    CHECK(dev_mode_help_topic(app_table, AN, ids, 2, true, "nope", collect_line, out) == 0);
+    CHECK(dev_mode_help_topic(app_table, AN, ids, 2, true, "", collect_line, out) == 0);
+}
+
 int main(void) {
     app_ids_and_intern();
     app_prefix_dispatch();
     app_help_groups();
+    help_index_and_topic();
     gate_off_and_on();
     help_hides_debug_commands();
     on_only_from_usb();

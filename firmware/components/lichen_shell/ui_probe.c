@@ -77,6 +77,7 @@ typedef struct {
     char         focus[LINE_CHARS]; // the focus a failed guard found
     char         text[CONSOLE_WIFI_CMD_MAX]; // the sequence as sent: the guards' texts are read from it
     char const  *who;                        // "keys send" or "ui answer", for the replies
+    bool         dismiss;                    // fw ui answer no: its Esc needs a dialog open (#439)
     bool         answer;                     // fw ui answer yes: every Enter needs the dialog below still open
     uint32_t     answer_gen;
     char         answer_label[SHELL_DIALOG_LABEL_MAX];
@@ -206,6 +207,9 @@ static bool key_step(sequence_t *seq) {
     }
     uint32_t key = seq->keys[seq->next];
     uint8_t  shift_code;
+    if (seq->dismiss && key != UI_KEY_WAIT && !ui_answer_dismiss_ok(seq->refused, sizeof(seq->refused))) {
+        return false; // no dialog to dismiss: the Esc would go to the screen below
+    }
     if (key != UI_KEY_WAIT && !policy_ok(seq, code_of(key, &shift_code))) {
         return false; // the remote policy (#377): this key and the rest stay up
     }
@@ -257,6 +261,8 @@ static bool sequence_report(sequence_t const *seq) {
     if (seq->dropped) { // first: a lost event may be what made a guard fail or left a key down
         console_reply("%s: %u key events dropped (keyboard queue full); %u of %u sent", who, (unsigned)seq->dropped,
                       (unsigned)seq->next, (unsigned)seq->n);
+    } else if (seq->refused[0] && seq->dismiss) {
+        console_reply("%s: %s", who, seq->refused); // "no dialog open": nothing was half-sent
     } else if (seq->refused[0]) {
         console_reply("%s: %s; %u of %u sent", who, seq->refused, (unsigned)seq->next, (unsigned)seq->n);
     } else if (seq->failed) {
@@ -300,7 +306,8 @@ static bool sequence_check(sequence_t *seq, uint32_t *hold_total) {
 }
 
 // Returns how many sequence entries went, -1 when it stopped (and said why)
-int ui_probe_run(char const *who, char const *seq_text, char const *answer_label, uint32_t answer_gen) {
+static int probe_run(char const *who, char const *seq_text, char const *answer_label, uint32_t answer_gen,
+                     bool dismiss) {
     size_t      pos;
     uint32_t    hold_total;
     sequence_t *seq = lichen_alloc(lichen_sys_ctx_os(), sizeof(*seq), LICHEN_MEM_BULK | LICHEN_MEM_ZERO);
@@ -309,6 +316,7 @@ int ui_probe_run(char const *who, char const *seq_text, char const *answer_label
         return -1;
     }
     seq->who    = who;
+    seq->dismiss = dismiss;
     seq->answer = answer_label != NULL;
     seq->answer_gen = answer_gen;
     snprintf(seq->answer_label, sizeof(seq->answer_label), "%s", answer_label ? answer_label : "");
@@ -344,6 +352,14 @@ int ui_probe_run(char const *who, char const *seq_text, char const *answer_label
     int sent = sequence_report(seq) ? (int)seq->n : -1;
     lichen_free(lichen_sys_ctx_os(), seq);
     return sent;
+}
+
+int ui_probe_run(char const *who, char const *seq_text, char const *answer_label, uint32_t answer_gen) {
+    return probe_run(who, seq_text, answer_label, answer_gen, false);
+}
+
+int ui_probe_dismiss(char const *who) {
+    return probe_run(who, "esc", NULL, 0, true);
 }
 
 // "fw keys send <seq>" and "fw keys press <seq>" (shell.c's keys command hands it over)

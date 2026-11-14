@@ -223,7 +223,10 @@ static void help_line(char const *usage, void *ctx) {
     console_reply("%s", usage);
 }
 
-// An app's commands after the OS's, each group under its app id (#423); every one also runs as "fw <app> <name>"
+// The index's line width: a name list wraps here (a 4 KB Wi-Fi reply is plenty; an 80-column terminal is not the aim)
+#define HELP_WIDTH 100
+
+// Full usages, every group under its app id (#423); every command also runs as "fw <app> <command>"
 static int help_apps(int n) {
     int listed = 0;
     int apps   = __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE);
@@ -236,10 +239,7 @@ static int help_apps(int n) {
     return listed;
 }
 
-static void cmd_help(char const *args) {
-    (void)args;
-    int n      = commands_count();
-    int listed = dev_mode_help_app(commands, n, console_dev_mode(), 0, help_line, NULL) + help_apps(n);
+static void help_count(int n, int listed) {
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
     if (listed < n) {
         console_reply("%d of %d commands registered (%d debug ones hidden: fw dev)", n, MAX_COMMANDS, n - listed);
@@ -249,6 +249,39 @@ static void cmd_help(char const *args) {
     (void)listed; // a release build registers no debug commands: all are listed
 #endif
     console_reply("%d of %d commands registered", n, MAX_COMMANDS);
+}
+
+// "fw help": the names only (#439: the usages of 60 commands no longer fit the Wi-Fi reply); "fw help <command|app>"
+// gives usages, "fw help all" every one (the USB console's old listing)
+static int help_index(int n) {
+    bool on     = console_dev_mode();
+    int  listed = dev_mode_help_names(commands, n, on, 0, "OS:", HELP_WIDTH, help_line, NULL);
+    int  apps   = __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE);
+    for (int a = 1; a <= apps; a++) {
+        char head[40];
+        snprintf(head, sizeof(head), "%s (fw %s <cmd>):", app_ids[a - 1], app_ids[a - 1]);
+        listed += dev_mode_help_names(commands, n, on, a, head, HELP_WIDTH, help_line, NULL);
+    }
+    return listed;
+}
+
+static void cmd_help(char const *args) {
+    int n = commands_count();
+    while (*args == ' ') {
+        args++;
+    }
+    if (*args && strcmp(args, "all") == 0) {
+        help_count(n, dev_mode_help_app(commands, n, console_dev_mode(), 0, help_line, NULL) + help_apps(n));
+    } else if (*args) {
+        if (!dev_mode_help_topic(commands, n, app_ids, __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE), console_dev_mode(),
+                                 args, help_line, NULL)) {
+            console_reply("help: no command or app '%s' (fw help lists them)", args);
+        }
+    } else {
+        int listed = help_index(n);
+        console_reply("fw help <command|app>: its usage; fw help all: every usage (long)");
+        help_count(n, listed);
+    }
 }
 
 static void print_heap(char const *name, uint32_t caps) {
@@ -948,7 +981,7 @@ static void console_task(void *arg) {
 void console_start(void) {
     run_mutex   = xSemaphoreCreateMutex();
     reply_mutex = xSemaphoreCreateMutex();
-    console_register("help", "help", cmd_help);
+    console_register("help", "help [<command> | <app> | all]", cmd_help);
     console_register("mem", MEM_USAGE, cmd_mem);
     console_register("assets", "assets (state of the assets partition and its files)", cmd_assets);
     console_register("slot", "slot [other] (show the app slots, or boot the other one)", cmd_slot);

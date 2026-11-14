@@ -1,6 +1,7 @@
 // Developer mode's rules (#373): see dev_mode.h
 #include "dev_mode.h"
 
+#include <stdio.h>
 #include <string.h>
 
 dev_find_t dev_mode_find(console_entry_t const *table, int n, char const *name, bool on, int *index) {
@@ -72,6 +73,59 @@ int dev_mode_help_app(console_entry_t const *table, int n, bool on, int app, voi
         }
     }
     return listed;
+}
+
+int dev_mode_help_names(console_entry_t const *table, int n, bool on, int app, char const *head, size_t width,
+                        void (*line)(char const *text, void *ctx), void *ctx) {
+    char   buf[DEV_HELP_LINE_MAX];
+    size_t head_len = strlen(head);
+    if (head_len >= sizeof(buf)) {
+        return 0; // a caller's bug: print nothing rather than a cut line
+    }
+    if (width >= sizeof(buf)) {
+        width = sizeof(buf) - 1;
+    }
+    memcpy(buf, head, head_len + 1);
+    size_t len     = head_len;
+    bool   on_line = false; // a name is on the current line
+    bool   bare    = false; // the line is a continuation: two blanks, then the first name without a separator
+    int    listed  = 0;
+    for (int i = 0; i < n; i++) {
+        if (table[i].app != app || (table[i].dev && !on)) {
+            continue;
+        }
+        size_t nl = strlen(table[i].name);
+        if (on_line && len + 1 + nl > width) {
+            line(buf, ctx);
+            len     = (size_t)snprintf(buf, sizeof(buf), "  ");
+            on_line = false;
+            bare    = true;
+        }
+        if (len + 1 + nl >= sizeof(buf)) {
+            continue; // a name longer than a whole line: never in practice
+        }
+        len += (size_t)snprintf(buf + len, sizeof(buf) - len, "%s%s", bare && !on_line ? "" : " ", table[i].name);
+        on_line = true;
+        listed++;
+    }
+    if (listed) {
+        line(buf, ctx);
+    }
+    return listed;
+}
+
+int dev_mode_help_topic(console_entry_t const *table, int n, char const *const *ids, int n_ids, bool on,
+                        char const *word, void (*line)(char const *usage, void *ctx), void *ctx) {
+    int app = dev_mode_app_of(ids, n_ids, word);
+    if (app) {
+        return dev_mode_help_app(table, n, on, app, line, ctx);
+    }
+    int index;
+    if (dev_mode_find(table, n, word, on, &index) != DEV_FIND_RUN) {
+        return 0;
+    }
+    line(table[index].usage, ctx);
+    return 1;
 }
 
 console_origin_t dev_mode_exec_origin(bool keep_secret) {
