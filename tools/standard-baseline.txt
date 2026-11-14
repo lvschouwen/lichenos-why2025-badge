@@ -16,7 +16,7 @@
 # First version created by --init (2026-11-07); --init refuses when this file exists.
 ccn	shared/lora/lora_proto.c:lora_decode	27
 nest	firmware/components/mesh/mesh_notify.c:mn_decide	7
-size	<merged-strings>	286533
+size	<merged-strings>	286393
 size	libapp_update.a	4602
 size	libassets.a	2847
 size	libbattery.a	4106
@@ -98,7 +98,7 @@ size	libfw_console.a	15690
 size	libgcc.a	542
 size	libhal.a	4170
 size	libheap.a	16428
-size	libjoltwallet__littlefs.a	34390
+size	libjoltwallet__littlefs.a	34374
 size	liblichen_api.a	39925
 size	liblichen_apps.a	51808
 size	liblichen_boot.a	13082
@@ -109,7 +109,7 @@ size	liblichen_mdns.a	598
 size	liblichen_net.a	25274
 size	liblichen_notify.a	13688
 size	liblichen_nvs.a	1157
-size	liblichen_os.a	70628
+size	liblichen_os.a	70624
 size	liblichen_random.a	63
 size	liblichen_shell.a	188648
 size	liblog.a	2726
@@ -119,7 +119,7 @@ size	liblvgl_port_lib.a	6174
 size	liblwip.a	109820
 size	libmain.a	13319
 size	libmbedtls.a	22
-size	libmesh.a	410386
+size	libmesh.a	406808
 size	libmsg_codec.a	13256
 size	libnvs_flash.a	18676
 size	libnvs_sec_provider.a	2
