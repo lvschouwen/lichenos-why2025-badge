@@ -38,6 +38,8 @@ static char const *const KEYS[SOAK_LINES][40] = {
      "lcrc", "c6up", "lage", "lrx", "ltx", NULL},
     {"v", "boot", "up", "mrx", "mtx", "mfail", "mtmo", "mref", "mdrop", "airlog", "airdrop", "wdbm", "wup", "therm",
      "store", "sd", "sdok", "sdfree", "sderr", "bat", "batmv", "kbd", "kbdrst", "bl", "blapp", "kbl", "kblapp", NULL},
+    {"v", "boot", "up", "mslow", "mslowms", "mslowfile", "stlast", "stmax", "nslow", "nslowms", "uiref", "uiwait",
+     "wqfull", "c6qfull", "toastdrop", "notdrop", "jpend", "jdrop", "c6busy", NULL},
 };
 
 // A badge as a soak sample might see it: every value distinct, so a key reading the wrong field shows
@@ -57,6 +59,10 @@ static soak_t sample(void) {
         .air_logged = 302, .air_dropped = 17, .wifi_dbm = -61, .wifi_up = 1, .thermal = 0, .storage_free = 1234567,
         .sd_state = 4, .sd_ok = 1, .sd_free = 31000000000LL, .sd_errors = 18, .battery = 1, .battery_mv = SOAK_NA,
         .kbd_ok = 1, .kbd_resets = 19, .bl_req = 40, .bl_app = 41, .kbl_req = 20, .kbl_app = 21,
+        .mesh_slow = 22, .mesh_slow_max = 923, .mesh_slow_file = 874, .store_last_ms = 1250, .store_max_ms = 4700,
+        .notice_slow = 23, .notice_slow_max = 610, .ui_refused = 24, .ui_wait_max = 100, .wifi_qfull = 25,
+        .c6_qfull = 26, .toast_drops = 27, .notice_drops = 28, .journal_pend_hw = 3900, .journal_dropped = 29,
+        .c6_send_busy = 30,
     };
     return s;
 }
@@ -74,6 +80,23 @@ static void exact_lines(void) {
                "soak3 v=1 boot=42 up=3600250 mrx=290 mtx=12 mfail=13 mtmo=14 mref=15 mdrop=16 airlog=302 airdrop=17 "
                "wdbm=-61 wup=1 therm=ok store=1234567 sd=mounted sdok=1 sdfree=31000000000 sderr=18 bat=absent "
                "batmv=-1 kbd=1 kbdrst=19 bl=40 blapp=41 kbl=20 kblapp=21");
+    CHECK_LINE(&s, 4,
+               "soak4 v=1 boot=42 up=3600250 mslow=22 mslowms=923 mslowfile=874 stlast=1250 stmax=4700 nslow=23 "
+               "nslowms=610 uiref=24 uiwait=100 wqfull=25 c6qfull=26 toastdrop=27 notdrop=28 jpend=3900 jdrop=29 "
+               "c6busy=30");
+}
+
+// MeshCore stopped: its keys are -1 (the glue leaves them), the rest of the line is still numbers
+static void slow_path_stopped(void) {
+    soak_t s = sample();
+    s.mesh_slow = s.mesh_slow_max = s.mesh_slow_file = s.journal_pend_hw = s.journal_dropped = SOAK_NA;
+    s.store_last_ms = SOAK_NA; // no storage count yet
+    CHECK_LINE(&s, 4,
+               "soak4 v=1 boot=42 up=3600250 mslow=-1 mslowms=-1 mslowfile=-1 stlast=-1 stmax=4700 nslow=23 "
+               "nslowms=610 uiref=24 uiwait=100 wqfull=25 c6qfull=26 toastdrop=27 notdrop=28 jpend=-1 jdrop=-1 "
+               "c6busy=30");
+    soak_init(&s);
+    CHECK(strstr(at(&s, 4), " mslow=-1 ") && strstr(at(&s, 4), " c6busy=-1"));
 }
 
 // Splits a line into its keys and checks them against KEYS[n-1]: names, order, count, one space each, key=value
@@ -209,7 +232,7 @@ static void extremes_fit(void) {
 // SOAK_LINES lines and no other; a buffer too small gets nothing rather than a cut line
 static void split_rule(void) {
     soak_t s = sample();
-    CHECK(SOAK_LINES == 3);
+    CHECK(SOAK_LINES == 4);
     CHECK(soak_line(&s, 0, line, sizeof(line)) == 0 && line[0] == '\0');
     CHECK(soak_line(&s, SOAK_LINES + 1, line, sizeof(line)) == 0 && line[0] == '\0');
     size_t len = soak_line(&s, 1, line, sizeof(line));
@@ -255,6 +278,7 @@ int main(void) {
     sentinels();
     enum_words();
     extremes_fit();
+    slow_path_stopped();
     split_rule();
     sticky_crash_flag();
     if (failures) {

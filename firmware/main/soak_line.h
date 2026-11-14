@@ -4,11 +4,13 @@
 // lowercase enum words only: no names, addresses, ids or text, so a line may be pasted into a public issue.
 //
 // The contract for tools (pinned by host_tests/soak_line_test.c):
-// - SOAK_LINES lines, "soak1 ..." to "soak3 ...". Each starts with its name, then v (SOAK_FORMAT), boot and up, so a
+// - SOAK_LINES lines, "soak1 ..." to "soak4 ...". Each starts with its name, then v (SOAK_FORMAT), boot and up, so a
 //   line read on its own says which boot and moment it belongs to; the keys of one "fw soak" come from one snapshot.
 // - Keys are separated by single spaces and never change order. A new key is appended to the last line; when that
-//   line would not fit, a new line soak4 starts. Removing or reordering a key bumps SOAK_FORMAT. soak3 has 11
-//   characters left at its ceilings: room for the Wi-Fi disconnect count (its own issue) and no more.
+//   line would not fit, a new line starts. Removing or reordering a key bumps SOAK_FORMAT; adding a key or a line does
+//   not (soak4, #419, kept v=1: a sampler that reads the keys it knows by name loses nothing). soak3 has 11
+//   characters left at its ceilings: room for the Wi-Fi disconnect count (its own issue) and no more. soak4 holds
+//   the slow-path counters; the mesh ones (mslow, mslowms, mslowfile, jpend, jdrop) are -1 while MeshCore is stopped.
 // - A number that cannot be read now is SOAK_NA (-1), an enum that cannot be read is "na"; wdbm (Wi-Fi signal) is 0
 //   when there is no reading (a real one is below 0). A number above its key's ceiling prints the ceiling.
 // - Every line, at every key's ceiling, fits SOAK_LINE_MAX: the console's reply limit (console.c REPLY_MAX).
@@ -35,7 +37,7 @@
 #include <stdint.h>
 
 #define SOAK_FORMAT   1
-#define SOAK_LINES    3
+#define SOAK_LINES    4
 #define SOAK_LINE_MAX 384 // a 383-character line and its NUL: console.c's REPLY_MAX, past which the Wi-Fi reply is cut
 #define SOAK_NA       (-1)
 #define SOAK_NA_WORD  "na"
@@ -85,6 +87,15 @@ typedef struct {
     int64_t kbd_resets; // TCA8418 resets the readback found (C6 EN, #14)
     int64_t bl_req, bl_app;   // display backlight: last level sent to the C6, the level the C6 reports applied
     int64_t kbl_req, kbl_app; // keyboard backlight: the same
+    // soak4: slow paths (#419), counted where each warning line is printed, since boot
+    int64_t mesh_slow, mesh_slow_max, mesh_slow_file; // MeshCore loops over its slow limit: count, longest ms, longest file ms
+    int64_t store_last_ms, store_max_ms; // the OS's /storage count: the last and the longest wall time (ms)
+    int64_t notice_slow, notice_slow_max; // OS notice steps over their slow limit: count, longest ms
+    int64_t ui_refused, ui_wait_max;     // ui calls refused for want of the LVGL lock: count, longest wait asked (ms)
+    int64_t wifi_qfull, c6_qfull;        // messages dropped for a full queue: the Wi-Fi service, the C6 supervisor
+    int64_t toast_drops, notice_drops;   // toasts dropped from the full waiting list; notices that found no room
+    int64_t journal_pend_hw, journal_dropped; // MeshCore history: highest pending bytes, records not journaled
+    int64_t c6_send_busy;                // times the C6 link went down with a send still inside ESP-Hosted
 } soak_t;
 
 // 1 when this boot follows a crash: crash.c judged so itself (crash_now), or it is the software restart of the PSRAM

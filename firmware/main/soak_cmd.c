@@ -25,12 +25,15 @@
 #include "lichen_os.h"
 #include "lichen_sys_thermal.h"
 #include "lichen_sys_ui.h"
+#include "lora_app.h"
 #include "lora_os.h"
 #include "mem_window_watch.h"
 #include "mesh.h"
+#include "notify_os.h"
 #include "ota_trial.h"
 #include "psram_guard.h"
 #include "sdcard.h"
+#include "shell_parts.h"
 #include "storage.h"
 #include "wifi_service.h"
 
@@ -170,6 +173,34 @@ static void read_mesh(soak_t *s) {
     s->air_dropped = info.dropped;
 }
 
+static void read_slow_paths(soak_t *s) {
+    mesh_slow_counts_t m;
+    if (mesh_slow_counts(&m)) { // -1 while MeshCore is stopped, as the other mesh keys
+        s->mesh_slow         = m.slow_loops;
+        s->mesh_slow_max     = m.slow_max_ms;
+        s->mesh_slow_file    = m.slow_file_ms;
+        s->journal_pend_hw   = m.journal_pending_hw;
+        s->journal_dropped   = m.journal_dropped;
+    }
+    lichen_watch_slow_t w;
+    lichen_watch_slow_counts(&w);
+    if (w.storage_known) { // no count has run yet: unknown, not 0 ms
+        s->store_last_ms = w.storage_last_ms;
+        s->store_max_ms  = w.storage_max_ms;
+    }
+    s->notice_slow     = w.steps_slow;
+    s->notice_slow_max = w.steps_slow_max_ms;
+    uint32_t refused, wait;
+    lichen_sys_ui_refused(&refused, &wait);
+    s->ui_refused  = refused;
+    s->ui_wait_max = wait;
+    s->wifi_qfull  = wifi_queue_drops();
+    s->c6_qfull    = c6link_queue_drops();
+    s->toast_drops = notify_ui_toast_drops();
+    s->notice_drops = lichen_notify_dropped();
+    s->c6_send_busy = lora_c6_send_busy();
+}
+
 static void read_net_and_heat(soak_t *s) {
     int8_t rssi;
     s->wifi_dbm = wifi_rssi(&rssi) ? rssi : 0;
@@ -234,6 +265,7 @@ static void cmd_soak(char const *args) {
     read_net_and_heat(s);
     read_storage(s);
     read_power_and_keys(s);
+    read_slow_paths(s);
     for (unsigned n = 1; n <= SOAK_LINES; n++) {
         if (soak_line(s, n, s_line, sizeof(s_line))) {
             console_reply("%s", s_line);

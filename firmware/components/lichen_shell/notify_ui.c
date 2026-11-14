@@ -15,6 +15,7 @@
 #include "theme.h"
 #include "update_screen.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 
 #include <string.h>
@@ -31,6 +32,11 @@ static lv_obj_t     *s_stripe;
 static lv_obj_t     *s_title;
 static lv_obj_t     *s_body;
 static nview_queue_t s_waiting;
+static atomic_uint   s_toast_drops; // fw soak (#419): the LVGL task writes, any task reads
+
+uint32_t notify_ui_toast_drops(void) {
+    return atomic_load(&s_toast_drops);
+}
 static nview_toast_t s_showing;   // id 0: none
 static uint32_t      s_shown_at;  // lv_tick of the last (re)show
 static uint32_t      s_gen = UINT32_MAX; // lichen_notify_generation() at the last check; none yet: the first drain sets the badges
@@ -107,6 +113,7 @@ static void drain(lv_timer_t *timer) {
             fill(t.id); // a merged notice: new text, the time starts again
             s_shown_at = lv_tick_get();
         } else if (!nview_push(&s_waiting, v)) {
+            atomic_fetch_add(&s_toast_drops, 1);
             ESP_LOGW(TAG, "toast %u dropped: queue full", (unsigned)t.id);
         }
     }

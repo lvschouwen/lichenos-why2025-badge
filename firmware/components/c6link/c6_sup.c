@@ -88,8 +88,15 @@ static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
+static atomic_uint queue_full; // messages dropped for a full queue, since boot (fw soak, #419)
+
+uint32_t c6link_queue_drops(void) {
+    return atomic_load(&queue_full);
+}
+
 static void post(sup_msg_t const *m) {
     if (!sup_queue || xQueueSend(sup_queue, m, 0) != pdTRUE) {
+        atomic_fetch_add(&queue_full, 1);
         ESP_LOGW(TAG, "queue full: message %u dropped", (unsigned)m->type);
     }
 }

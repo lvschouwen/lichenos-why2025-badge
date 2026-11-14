@@ -34,6 +34,9 @@ void mesh_journal_out_sweep_locked(uint32_t const *ids, size_t n);
 
 // Once per mesh loop, under the lock: when a flush is due, the pending buffer is swapped out for mesh_journal_flush
 void mesh_journal_tick_locked(void);
+// For fw soak (#419), since boot, any task, no lock: the most bytes the pending buffer held at a tick, and the records
+// it had no room for
+void mesh_journal_stats(uint32_t *pending_hw, uint32_t *dropped);
 // Once per mesh loop, after mesh_unlock(): writes a swapped-out buffer (and compacts when asked or over the cap)
 void mesh_journal_flush(void);
 // MeshCore stops, with the lock held (MeshCore saves its own files under it too): everything pending goes to the card.

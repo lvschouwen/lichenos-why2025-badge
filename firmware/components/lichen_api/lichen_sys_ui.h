@@ -27,3 +27,6 @@ void lichen_sys_ui_lockcheck_cmd(char const *args);
 // The lock-owner check's hits since boot or the last reset (0 when it is not built in): the stress run (#278) fails a
 // run during which it grew. Any task.
 uint32_t lichen_sys_ui_lockcheck_hits(void);
+// fw soak (#419), since boot, any task, no lock: ui calls refused because the LVGL lock was not free in time (the "not
+// queued: the LVGL lock was not free" warning): how many, and the longest wait one asked for, in ms
+void lichen_sys_ui_refused(uint32_t *count, uint32_t *longest_ms);

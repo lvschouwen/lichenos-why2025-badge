@@ -14,6 +14,9 @@ using namespace mesh_int;
 
 static char const TAG[] = "mesh";
 
+// fw soak (#419): the loops the "MeshCore loop took" warning is printed for, since boot; the mesh task writes, any reads
+static uint32_t slow_loops, slow_max_ms, slow_file_ms;
+
 // The shim's platform hooks
 extern "C" unsigned long millis(void) {
     return (unsigned long)(esp_timer_get_time() / 1000);
@@ -440,6 +443,13 @@ static void mesh_task(void *arg) {
             mesh_unlock();
         }
         if (took_ms >= MESH_SLOW_LOOP_MS) {
+            __atomic_store_n(&slow_loops, slow_loops + 1, __ATOMIC_RELAXED);
+            if ((uint32_t)took_ms > slow_max_ms) {
+                __atomic_store_n(&slow_max_ms, (uint32_t)took_ms, __ATOMIC_RELAXED);
+            }
+            if (file_us / 1000 > slow_file_ms) {
+                __atomic_store_n(&slow_file_ms, (uint32_t)(file_us / 1000), __ATOMIC_RELAXED);
+            }
             // Where it went (#67): file time is DataStore's (the lazy /contacts3 rewrite; advert blobs are written after
             // the unlock since #257), the rest is MeshCore's own
             // work on the packets received (Ed25519 checks of adverts, decryption); the screens skip ticks meanwhile
@@ -454,6 +464,17 @@ static void mesh_task(void *arg) {
 
 extern "C" bool mesh_running(void) {
     return __atomic_load_n(&task_running, __ATOMIC_ACQUIRE) && !mesh_is_stopped();
+}
+
+extern "C" bool mesh_slow_counts(mesh_slow_counts_t *out) {
+    if (!mesh_running()) {
+        return false;
+    }
+    out->slow_loops   = __atomic_load_n(&slow_loops, __ATOMIC_RELAXED);
+    out->slow_max_ms  = __atomic_load_n(&slow_max_ms, __ATOMIC_RELAXED);
+    out->slow_file_ms = __atomic_load_n(&slow_file_ms, __ATOMIC_RELAXED);
+    mesh_journal_stats(&out->journal_pending_hw, &out->journal_dropped);
+    return true;
 }
 
 // Under the run lock

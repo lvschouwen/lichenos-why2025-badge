@@ -88,6 +88,14 @@ typedef struct {
 } mesh_soak_counts_t;
 bool mesh_soak_counts(mesh_soak_counts_t *out, uint32_t wait_ms);
 
+// The slow-path counters for fw soak (#419), since boot, taken without any lock; false while MeshCore is stopped.
+// Loops over the slow limit (the "MeshCore loop took" warning): count, longest ms, longest file time ms among them; the
+// journal's pending high-water in bytes and the records it had no room for.
+typedef struct {
+    uint32_t slow_loops, slow_max_ms, slow_file_ms, journal_pending_hw, journal_dropped;
+} mesh_slow_counts_t;
+bool mesh_slow_counts(mesh_slow_counts_t *out);
+
 // The air log (#165, #408): up to max packets received and sent, newest first, copied from the ring under its own
 // short lock (not the mesh lock, never waits on MeshCore). *seq is the newest entry's sequence number (0: none yet),
 // which changes whenever a packet was added. The ring lives from MeshCore's first start on and survives it stopping

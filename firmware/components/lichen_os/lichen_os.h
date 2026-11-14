@@ -85,5 +85,12 @@ void lichen_watch_start(lichen_watch_hooks_t const *hooks);
 // The boot's own notices (a crash, a PSRAM check, an update, ...) have been raised: a restart from now on keeps them, as
 // its saves write the notifications (#353: the re-arm of 120 MHz after a crash waits for this). Any task.
 bool lichen_watch_boot_told(void);
+// fw soak (#419), since boot, any task, no lock: the /storage count's last and longest wall time (known false before
+// the first count), and the notice steps over their slow limit (the "took ... ms" warnings): how many, the longest ms
+typedef struct {
+    bool     storage_known;
+    uint32_t storage_last_ms, storage_max_ms, steps_slow, steps_slow_max_ms;
+} lichen_watch_slow_t;
+void lichen_watch_slow_counts(lichen_watch_slow_t *out);
 void thermal_start(lichen_watch_hooks_t const *hooks);     // lichen_watch_start's thermal half
 void sys_notices_start(lichen_watch_hooks_t const *hooks); // and its notices half

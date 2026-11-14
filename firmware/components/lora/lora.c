@@ -868,6 +868,12 @@ void lora_stop(void) {
     vTaskDelay(pdMS_TO_TICKS(50));
 }
 
+static uint32_t send_busy; // fw soak (#419): drains that ended with a send still running, since boot
+
+uint32_t lora_c6_send_busy(void) {
+    return __atomic_load_n(&send_busy, __ATOMIC_RELAXED);
+}
+
 void lora_c6_lost(void) {
     if (__atomic_load_n(&stopped, __ATOMIC_ACQUIRE) || __atomic_load_n(&stop_requested, __ATOMIC_ACQUIRE)) {
         return; // stopped for an update: nothing to bring back
@@ -883,6 +889,7 @@ void lora_c6_lost(void) {
     if (send_mutex && xSemaphoreTake(send_mutex, pdMS_TO_TICKS(SEND_DRAIN_MS)) == pdTRUE) {
         xSemaphoreGive(send_mutex);
     } else {
+        __atomic_fetch_add(&send_busy, 1, __ATOMIC_RELAXED);
         ESP_LOGW(TAG, "a send to the C6 is still running after %d ms", SEND_DRAIN_MS);
     }
 }

@@ -36,6 +36,8 @@ void wifi_enable(bool on);
 bool wifi_enabled(void);
 // Copies the station's IPv4 address into ip; false while there is none
 bool wifi_has_ip(char *ip, size_t cap);
+// Messages to the c6wifi task dropped for a full queue, since boot (fw soak, #419). Any task, no lock.
+uint32_t wifi_queue_drops(void);
 // The cached signal strength of the connected AP (read every 5 s by the c6wifi task); false while not connected or
 // before the first reading
 bool wifi_rssi(int8_t *out);

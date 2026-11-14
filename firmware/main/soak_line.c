@@ -79,6 +79,13 @@ static soak_key_t const KEYS[] = {
     NUM(3, "sderr", sd_errors, U32),        ENUM(3, "bat", battery, BAT),          NUM(3, "batmv", battery_mv, U32),
     NUM(3, "kbd", kbd_ok, FLAG),            NUM(3, "kbdrst", kbd_resets, U32),     NUM(3, "bl", bl_req, LEVEL),
     NUM(3, "blapp", bl_app, LEVEL),         NUM(3, "kbl", kbl_req, LEVEL),         NUM(3, "kblapp", kbl_app, LEVEL),
+
+    NUM(4, "mslow", mesh_slow, U32),        NUM(4, "mslowms", mesh_slow_max, U32), NUM(4, "mslowfile", mesh_slow_file, U32),
+    NUM(4, "stlast", store_last_ms, U32),   NUM(4, "stmax", store_max_ms, U32),    NUM(4, "nslow", notice_slow, U32),
+    NUM(4, "nslowms", notice_slow_max, U32), NUM(4, "uiref", ui_refused, U32),     NUM(4, "uiwait", ui_wait_max, U32),
+    NUM(4, "wqfull", wifi_qfull, U32),      NUM(4, "c6qfull", c6_qfull, U32),      NUM(4, "toastdrop", toast_drops, U32),
+    NUM(4, "notdrop", notice_drops, U32),   NUM(4, "jpend", journal_pend_hw, U32), NUM(4, "jdrop", journal_dropped, U32),
+    NUM(4, "c6busy", c6_send_busy, U32),
 };
 #define N_KEYS (sizeof(KEYS) / sizeof(KEYS[0]))
 

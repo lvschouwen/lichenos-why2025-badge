@@ -148,6 +148,7 @@ lichen_mem_console_register	-	unspecified	lichen_mem.h
 lichen_notify	-	unspecified	lichen_notify.h
 lichen_notify_clear_all	SYSTEM	unspecified	notify_os.h
 lichen_notify_dnd	-	unspecified	lichen_notify.h
+lichen_notify_dropped	SYSTEM	any	notify_os.h
 lichen_notify_feedback	SYSTEM	unspecified	notify_os.h
 lichen_notify_generation	SYSTEM	unspecified	notify_os.h
 lichen_notify_get	SYSTEM	unspecified	notify_os.h
@@ -301,6 +302,7 @@ lichen_sys_ui_cancel	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lock	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_cmd	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_lockcheck_hits	SYSTEM	any	lichen_sys_ui.h
+lichen_sys_ui_refused	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_unlock	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_update_auto_closed	SYSTEM	any	lichen_sys_update.h
 lichen_sys_update_auto_off	SYSTEM	any	lichen_sys_update.h

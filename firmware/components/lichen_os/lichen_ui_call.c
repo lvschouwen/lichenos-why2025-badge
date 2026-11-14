@@ -20,6 +20,8 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
+#include <stdatomic.h>
+
 static char const TAG[] = "ui";
 
 #define UI_CALL_LOCK_MS 2000 // as the dialog: a render takes milliseconds, a lock held this long is a stuck LVGL task
@@ -98,12 +100,27 @@ static void run_as_owner(ui_call_fn_t fn, void *arg, uint32_t owner) {
     lichen_ctx_leave(previous);
 }
 
+static atomic_uint s_refused, s_refused_wait_max; // any task writes: the max is a compare-and-swap
+
+void lichen_sys_ui_refused(uint32_t *count, uint32_t *longest_ms) {
+    *count      = atomic_load(&s_refused);
+    *longest_ms = atomic_load(&s_refused_wait_max);
+}
+
+static void note_refused(uint32_t waited_ms) {
+    atomic_fetch_add(&s_refused, 1);
+    unsigned seen = atomic_load(&s_refused_wait_max);
+    while (waited_ms > seen && !atomic_compare_exchange_weak(&s_refused_wait_max, &seen, waited_ms)) {
+    }
+}
+
 bool lichen_sys_ui_call(void (*fn)(void *), void *arg, uint32_t timeout_ms) {
     if (!fn) {
         return false;
     }
     lichen_ctx_t owner = lichen_ctx_self();
     if (!lichen_sys_ui_lock(timeout_ms)) {
+        note_refused(timeout_ms);
         ESP_LOGW(TAG, "ui call %p not queued: the LVGL lock was not free in %u ms", (void *)fn, (unsigned)timeout_ms);
         return false;
     }

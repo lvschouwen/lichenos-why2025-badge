@@ -111,11 +111,27 @@ static void body_for(sysn_event_t e, sysn_snapshot_t const *s, lichen_sd_info_t 
 }
 
 static sysn_timing_t timing; // this task only
+// fw soak (#419): the warnings' counts since boot (timing's own are per warning); this task writes, any task reads
+static atomic_uint s_slow_steps, s_slow_max_ms, s_count_n, s_count_last_ms, s_count_max_ms;
+
+void lichen_watch_slow_counts(lichen_watch_slow_t *out) {
+    out->storage_known     = atomic_load(&s_count_n) > 0;
+    out->storage_last_ms   = atomic_load(&s_count_last_ms);
+    out->storage_max_ms    = atomic_load(&s_count_max_ms);
+    out->steps_slow        = atomic_load(&s_slow_steps);
+    out->steps_slow_max_ms = atomic_load(&s_slow_max_ms);
+}
 
 static int64_t step_done(sysn_step_id_t step, int64_t since_us) {
     int64_t     now_us = esp_timer_get_time();
     uint32_t    ms     = (uint32_t)((now_us - since_us) / 1000);
     sysn_slow_t slow;
+    if (ms > SYSN_SLOW_MS) { // the same limit as the warning, which is rate-limited per step
+        atomic_fetch_add(&s_slow_steps, 1);
+        if (ms > atomic_load(&s_slow_max_ms)) {
+            atomic_store(&s_slow_max_ms, ms);
+        }
+    }
     if (sysn_time_step(&timing, step, ms, (uint64_t)now_us / 1000, &slow)) {
         ESP_LOGW(TAG, "%s took %u ms (%u slow since the last warning, longest %u ms; over %u ms is slow)",
                  sysn_step_name(step), (unsigned)ms, (unsigned)slow.count, (unsigned)slow.max_ms, SYSN_SLOW_MS);
@@ -135,8 +151,13 @@ static bool count_storage(uint64_t *free_bytes, uint64_t *total_bytes) {
     bool    ok = storage_free_bytes(free_bytes, total_bytes);
     vTaskPrioritySet(NULL, prio);
     // Every count (every 10 min): the soak shows how the walk grows with the drive
-    ESP_LOGI(TAG, "storage count: %u ms wall time at idle priority (%s)", (unsigned)((esp_timer_get_time() - t) / 1000),
-             ok ? "known" : "unknown");
+    unsigned const ms = (unsigned)((esp_timer_get_time() - t) / 1000);
+    atomic_store(&s_count_last_ms, ms);
+    if (ms > atomic_load(&s_count_max_ms)) {
+        atomic_store(&s_count_max_ms, ms);
+    }
+    atomic_fetch_add(&s_count_n, 1);
+    ESP_LOGI(TAG, "storage count: %u ms wall time at idle priority (%s)", ms, ok ? "known" : "unknown");
     return ok;
 }
 

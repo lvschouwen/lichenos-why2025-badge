@@ -57,6 +57,8 @@ static uint32_t     out_records;
 static uint32_t     retry_after_s;
 static size_t       keep_n;
 static bool         drop_warned;
+static uint32_t     pend_hw;    // fw soak (#419): the most pending bytes seen at a tick; written by the mesh task only,
+static uint32_t     pend_drops; // and the records the full buffer refused then (hist is freed at a stop, so a copy)
 static void (*lock_fn)(void);
 static void (*unlock_fn)(void);
 
@@ -562,9 +564,18 @@ void mesh_journal_out_sweep_locked(uint32_t const *ids, size_t n) {
     }
 }
 
+void mesh_journal_stats(uint32_t *pending_hw, uint32_t *dropped) {
+    *pending_hw = __atomic_load_n(&pend_hw, __ATOMIC_RELAXED);
+    *dropped    = __atomic_load_n(&pend_drops, __ATOMIC_RELAXED);
+}
+
 void mesh_journal_tick_locked(void) {
     if (!hist || !on) {
         return;
+    }
+    __atomic_store_n(&pend_drops, hist->dropped, __ATOMIC_RELAXED);
+    if (hist->len > __atomic_load_n(&pend_hw, __ATOMIC_RELAXED)) {
+        __atomic_store_n(&pend_hw, (uint32_t)hist->len, __ATOMIC_RELAXED);
     }
     if (hist->dropped && !drop_warned) {
         drop_warned = true;

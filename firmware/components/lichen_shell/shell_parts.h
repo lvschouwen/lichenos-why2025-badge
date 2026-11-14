@@ -185,6 +185,7 @@ bool shell_search(void);
 // Notifications (#62). notify_ui.c: the toast, the tile badges, the cloud key; from shell_start, LVGL lock held.
 #define NOTIFY_APP_ID "notify"
 void     notify_ui_start(void);
+uint32_t notify_ui_toast_drops(void); // toasts dropped from the full waiting list, since boot (fw soak, #419); any task
 uint32_t notify_level_color(uint8_t level); // dim / amber / red, the toast's stripe and the status bar's dot
 // notify_centre.c: the Notifications app (registered by shell_start), opening one notice where it belongs, the centre,
 // Settings › Notifications. LVGL context.

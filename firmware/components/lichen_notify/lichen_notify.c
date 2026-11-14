@@ -633,6 +633,16 @@ void lichen_notify_feedback(ln_level_t level, bool on) {
     npush_feedback(&s_feedback, level, on);
 }
 
+uint32_t lichen_notify_dropped(void) {
+    if (!atomic_load(&s_started)) {
+        return 0;
+    }
+    lock();
+    uint32_t n = s_ring->dropped;
+    unlock();
+    return n;
+}
+
 void lichen_notify_stats(ln_stats_t *out) {
     memset(out, 0, sizeof(*out));
     out->started = atomic_load(&s_started);

@@ -137,6 +137,11 @@ typedef struct {
 } msg_t;
 
 static QueueHandle_t queue;
+static atomic_uint    queue_full; // messages dropped for a full queue, since boot (fw soak, #419)
+
+uint32_t wifi_queue_drops(void) {
+    return atomic_load(&queue_full);
+}
 
 static wifi_link_t link_ap; // c6wifi task only: the SSID the C6 says it is connected to (#15)
 
@@ -144,6 +149,7 @@ static wifi_link_t link_ap; // c6wifi task only: the SSID the C6 says it is conn
 static bool post(msg_t const *m) {
     bool ok = queue && xQueueSend(queue, m, pdMS_TO_TICKS(50)) == pdTRUE;
     if (!ok && queue) {
+        atomic_fetch_add(&queue_full, 1);
         ESP_LOGW(TAG, "wifi: queue full, message %d dropped", (int)m->type);
     }
     return ok;
