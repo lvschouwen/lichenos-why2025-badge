@@ -13,6 +13,11 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
+// The test drives the stack with key 0 (the keyless screens)
+static bool nav_push(int screen_id) {
+    return nav_push_keyed(screen_id, 0);
+}
+
 int main(void) {
     nav_reset();
     CHECK(nav_current() == NAV_HOME);

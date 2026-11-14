@@ -467,10 +467,12 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), ui
     keep_n    = keep;
     lock_fn   = lock;
     unlock_fn = unlock;
+    int fail = 0;
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     // The crypto first: the badge's hardware path must give the portable code's answers, or journals written by one
-    // would be unreadable by the other
-    int64_t t0   = esp_timer_get_time();
-    int     fail = mh_selftest();
+    // would be unreadable by the other. Developer builds only (#446): the release image skips the vectors
+    int64_t t0 = esp_timer_get_time();
+    fail       = mh_selftest();
     ESP_LOG_LEVEL(
         fail ? ESP_LOG_ERROR : ESP_LOG_INFO,
         TAG,
@@ -479,6 +481,7 @@ void mesh_journal_boot(size_t keep, void (*lock)(void), void (*unlock)(void), ui
         fail ? "FAILED" : "passed",
         (long long)(esp_timer_get_time() - t0)
     );
+#endif
     uint8_t root[32];
     bool    keyed = !fail && prv && mesh_hist_key(root, prv, prv_len);
     if (keyed) {

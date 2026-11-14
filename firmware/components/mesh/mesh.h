@@ -275,8 +275,6 @@ mesh_msg_id_t mesh_send_channel(char const *channel_name, char const *text, mesh
 mesh_msg_id_t mesh_send_dm(uint8_t const prefix[6], char const *text, mesh_origin_t from, char const **why);
 // A failed message starts over under the same id
 bool mesh_retry(mesh_msg_id_t id);
-// false when the id is unknown (evicted: the table keeps 16). Any pointer may be NULL.
-bool mesh_out_state(mesh_msg_id_t id, mesh_out_state_t *st, uint8_t *attempt, uint8_t *repeats);
 // Bytes of text that fit in a channel message: 160 minus "<node name>: "
 size_t mesh_channel_text_max(void);
 

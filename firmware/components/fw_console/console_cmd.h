@@ -50,18 +50,3 @@ console_cmd_result_t console_cmd_feed(console_cmd_t *s, char c, char const **pas
 // prompt must not wait for the next key), and a pending line-end swallow is cancelled. Never interrupts a command
 // that is being typed.
 console_cmd_result_t console_cmd_flush(console_cmd_t *s, char const **pass, size_t *pass_len);
-
-// A C6 image identifier as used in APPS:[<id>]: 1-48 characters of a-z, 0-9 and '_'
-#define CONSOLE_C6_ID_MAX 48
-bool console_c6_id_valid(char const *id);
-
-// The duration argument of "c6log [ms]": empty means CONSOLE_C6LOG_DEFAULT_MS, otherwise 1-CONSOLE_C6LOG_MAX_MS digits
-#define CONSOLE_C6LOG_DEFAULT_MS 10000
-#define CONSOLE_C6LOG_MAX_MS     60000
-bool console_c6log_ms(char const *arg, uint32_t *ms);
-
-// The arguments of "memhog <bytes-left> <seconds>": bytes-left 0-CONSOLE_MEMHOG_MAX_LEFT, seconds 1-CONSOLE_MEMHOG_MAX_S,
-// separated by one space
-#define CONSOLE_MEMHOG_MAX_LEFT (16u * 1024 * 1024)
-#define CONSOLE_MEMHOG_MAX_S    600
-bool console_memhog_args(char const *arg, uint32_t *left, uint32_t *secs);

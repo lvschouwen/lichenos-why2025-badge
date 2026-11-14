@@ -10,7 +10,3 @@ setup_step_t setup_next(setup_step_t step, bool have_wifi_credentials) {
     }
     return SETUP_DONE;
 }
-
-setup_step_t setup_back(setup_step_t step) {
-    return step == SETUP_WIFI ? SETUP_WELCOME : step;
-}

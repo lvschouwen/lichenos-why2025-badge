@@ -142,43 +142,6 @@ int main(void) {
     feed(&s, &r, "\n"); // an Enter typed later is real input
     CHECK(strcmp(r.stdin_out, "\n") == 0);
 
-    // C6 image identifiers end up in an APPS:[<id>] path, so only plain names get through (#54)
-    CHECK(console_c6_id_valid("why2025_firmware_ota_c6"));
-    CHECK(console_c6_id_valid("c6_radio_check"));
-    CHECK(!console_c6_id_valid(""));
-    CHECK(!console_c6_id_valid("a]b"));
-    CHECK(!console_c6_id_valid("a.b"));
-    CHECK(!console_c6_id_valid("FLASH0:x"));
-    CHECK(!console_c6_id_valid("with space"));
-    CHECK(!console_c6_id_valid("Upper"));
-    CHECK(console_c6_id_valid("abcdefghijklmnopqrstuvwxyz0123456789_abcdefghijk")); // 48 chars
-    CHECK(!console_c6_id_valid("abcdefghijklmnopqrstuvwxyz0123456789_abcdefghijkl"));
-
-    // "c6log [ms]": how long to copy the C6 console, 10 s by default, at most a minute (#56)
-    uint32_t ms = 0;
-    CHECK(console_c6log_ms("", &ms) && ms == 10000);
-    CHECK(console_c6log_ms("2500", &ms) && ms == 2500);
-    CHECK(console_c6log_ms("60000", &ms) && ms == 60000);
-    CHECK(!console_c6log_ms("60001", &ms));
-    CHECK(!console_c6log_ms("0", &ms));
-    CHECK(!console_c6log_ms("-5", &ms));
-    CHECK(!console_c6log_ms("10s", &ms));
-    CHECK(!console_c6log_ms("99999999999999999999", &ms));
-
-    // "memhog <bytes-left> <seconds>": hold DMA RAM until only bytes-left are free, for 1-600 s (#60)
-    uint32_t left, secs;
-    CHECK(console_memhog_args("4096 30", &left, &secs) && left == 4096 && secs == 30);
-    CHECK(console_memhog_args("0 1", &left, &secs) && left == 0 && secs == 1);
-    CHECK(console_memhog_args("1048576 600", &left, &secs) && left == 1048576 && secs == 600);
-    CHECK(!console_memhog_args("4096 601", &left, &secs));
-    CHECK(!console_memhog_args("4096 0", &left, &secs));
-    CHECK(!console_memhog_args("4096", &left, &secs));
-    CHECK(!console_memhog_args("", &left, &secs));
-    CHECK(!console_memhog_args("4096  30", &left, &secs));
-    CHECK(!console_memhog_args("4k 30", &left, &secs));
-    CHECK(!console_memhog_args("4096 30 1", &left, &secs));
-    CHECK(!console_memhog_args("99999999999 30", &left, &secs));
-
     // The Wi-Fi console's longer line (#110): a whole contact link in one "fw contacts import" line; the UART stays small
     CHECK(sizeof("fw contacts import ") - 1 + MESH_ADVERT_URI_MAX - 1 < CONSOLE_WIFI_CMD_MAX);
     CHECK(CONSOLE_CMD_MAX == 96);

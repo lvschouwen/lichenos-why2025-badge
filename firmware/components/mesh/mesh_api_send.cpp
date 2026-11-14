@@ -117,16 +117,6 @@ extern "C" bool mesh_retry(mesh_msg_id_t id) {
     return ok;
 }
 
-extern "C" bool mesh_out_state(mesh_msg_id_t id, mesh_out_state_t *st, uint8_t *attempt, uint8_t *repeats) {
-    if (!outbox) {
-        return false;
-    }
-    mesh_ob_enter();
-    bool ok = ob_get(outbox, id, st, attempt, repeats, NULL);
-    mesh_ob_exit();
-    return ok;
-}
-
 // Copies what the list needs under the outbox lock; the formatting happens after it, so the lock is held only briefly
 struct OutSnap {
     mesh_out_info_t info;

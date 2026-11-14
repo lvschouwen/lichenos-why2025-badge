@@ -15,5 +15,3 @@ void log_store_add(char const *text, size_t len);
 // Up to cap bytes of lines with sequence number >= since, as log_ring_read renders them. cap should be a few KB: the
 // ring is locked (interrupts off) only while the raw records are copied; formatting happens after. Returns 0 bytes when there is nothing new or the store is off.
 size_t log_store_read(uint32_t since, char *out, size_t cap, uint32_t *next, uint32_t *missed);
-// Lines that were not stored because another writer held the ring at that moment
-uint32_t log_store_lost(void);

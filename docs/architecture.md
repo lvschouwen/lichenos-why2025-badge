@@ -117,7 +117,7 @@ and `START_SHELL`: its own step, so `start_shell` returning early without a disp
 
 - A new service takes the next free id in the `0x4C0x` block and adds a row to `peer_ids` in the contract test. `i154_proto.h` also `_Static_assert`s that its ids differ from the LoRa ones.
 - **Message framing:** `[version][type]` then little-endian fields. P4 to C6 types count from 1; C6 to P4 types from 0x81.
-  Both images build the same headers: `shared/lora/lora_proto.h` (v4) and `shared/i154/i154_proto.h` (v1).
+  Both images build `shared/lora/lora_proto.h` (v4). `shared/i154/i154_proto.h` (v1) is not linked into either image yet: it is pre-work for #234, built and tested only on the host.
 - **Versions:** the version byte must match exactly. LoRa v4 (RSSI sweep, #161): a v3 C6 drops every v4 message
   (`BAD_VERSION`), IDENT_REQ included, so IDENT never comes and the P4 reflashes the bundled C6 image. IDENT itself was
   new types only (no bump); an old peer answers nothing, which counts as "not proven". i154 CAPS may carry newer

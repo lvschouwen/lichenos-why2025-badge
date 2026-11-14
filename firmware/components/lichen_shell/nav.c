@@ -35,10 +35,6 @@ bool nav_push_keyed(int screen_id, uint32_t key) {
     return true;
 }
 
-bool nav_push(int screen_id) {
-    return nav_push_keyed(screen_id, 0);
-}
-
 uint32_t nav_key_at(int index) {
     return index >= 0 && index < depth ? keys[index] : 0;
 }

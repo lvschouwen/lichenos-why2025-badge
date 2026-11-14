@@ -7,6 +7,10 @@
 
 #include <string.h>
 
+// Compiled into the badge only with developer commands: the release image skips the vectors, the host tests always run
+// them (the portable code is the reference the hardware path is checked against)
+#if defined(CONFIG_LICHEN_DEV_COMMANDS) || !defined(ESP_PLATFORM)
+
 static uint8_t const SHA_ABC[32] = {0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40,
                                     0xde, 0x5d, 0xae, 0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17,
                                     0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad};
@@ -97,3 +101,5 @@ int mh_selftest(void) {
     }
     return 0;
 }
+
+#endif

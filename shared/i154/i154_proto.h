@@ -1,5 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Lucas van Schouwen
 // SPDX-License-Identifier: Apache-2.0
+// NOT LINKED: neither the P4 nor the C6 image includes this yet; only host_tests/i154_proto_test builds it. It is
+// pre-work for the C6 802.15.4 plan (#234); keep it until that lands.
 #pragma once
 
 #include <stdbool.h>

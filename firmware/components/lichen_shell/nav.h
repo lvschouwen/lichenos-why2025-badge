@@ -26,8 +26,6 @@ void nav_reset(void);
 nav_open_t nav_decide(int screen_id, uint32_t key, int *frame);
 // false (nothing changes) when the stack is full or (screen_id, key) is already on it (decide first, then push)
 bool nav_push_keyed(int screen_id, uint32_t key);
-// nav_push_keyed with key 0
-bool nav_push(int screen_id);
 // The key at stack position index, 0 past the top
 uint32_t nav_key_at(int index);
 // Leaves the current screen; returns the one now on top. At home it stays home.

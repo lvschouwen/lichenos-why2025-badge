@@ -283,10 +283,6 @@ station_view_t *station_view_create(lv_obj_t *parent, station_view_cfg_t const *
     return v;
 }
 
-lv_obj_t *station_view_line2(station_view_t const *v) {
-    return v->line2;
-}
-
 // lichen_ui.h's station clock for an app (#180): the Clock app's layout, under the status bar, a small dim second line
 bool lichen_station_clock_impl(lv_obj_t *screen, void (*update_line2)(lv_obj_t *line2)) {
     lv_obj_update_layout(screen);

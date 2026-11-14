@@ -30,7 +30,6 @@ static store_mem_t   *mem;
 static volatile bool  ready;
 static volatile int   busy; // set while the ring changes; interrupts are off then (same scheme as log_tap.c)
 static volatile uint32_t lost; // dropped and not yet reported in the log
-static volatile uint32_t lost_total;
 static vprintf_like_t previous;
 static volatile int   reading;
 
@@ -68,7 +67,6 @@ static void store(char const *text, size_t len) {
         give(state);
     } else {
         __atomic_fetch_add(&lost, 1, __ATOMIC_RELAXED);
-        __atomic_fetch_add(&lost_total, 1, __ATOMIC_RELAXED);
     }
 }
 
@@ -149,8 +147,4 @@ size_t log_store_read(uint32_t since, char *out, size_t cap, uint32_t *next, uin
     }
     __atomic_store_n(&reading, 0, __ATOMIC_RELEASE);
     return n;
-}
-
-uint32_t log_store_lost(void) {
-    return __atomic_load_n(&lost_total, __ATOMIC_RELAXED);
 }

@@ -4,8 +4,8 @@
 //   badge (ESP_PLATFORM): mbedTLS 4's PSA Crypto API, which IDF routes to the P4's AES and SHA engines (its esp_aes,
 //                         esp_sha and esp_mac PSA drivers; the legacy mbedtls_aes_* calls are private in mbedTLS 4)
 //   host tests:           rweather's portable Crypto library (SHA256, AES128), as MeshCore builds it
-// mh_selftest() runs the same known-answer vectors on both: the host tests run it on the portable code, the badge at
-// boot on the hardware path, so a difference between the two shows instead of making journals unreadable.
+// mh_selftest() runs the same known-answer vectors on both: the host tests run it on the portable code, the badge (developer
+// builds) at boot on the hardware path, so a difference between the two shows instead of making journals unreadable.
 // Every call returns false when the primitive failed (the badge's crypto can run out of key slots or memory); the
 // caller then treats its output as garbage.
 
@@ -35,8 +35,11 @@ char const *mh_backend(void);
 // Host tests only: while on, every primitive fails (a hardware error or out of memory on the badge)
 void mh_test_fail(bool on);
 #endif
-// Known-answer tests (mesh_hist_selftest.c): 0 when all pass, else the number of the first that failed
+// Known-answer tests (mesh_hist_selftest.c): 0 when all pass, else the number of the first that failed. On the
+// badge only with developer commands; the host tests always have it
+#if defined(CONFIG_LICHEN_DEV_COMMANDS) || !defined(ESP_PLATFORM)
 int mh_selftest(void);
+#endif
 
 #ifdef __cplusplus
 }

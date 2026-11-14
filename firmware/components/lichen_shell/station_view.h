@@ -27,5 +27,3 @@ bool saver_date_text(char *out, size_t cap);
 // there is no PSRAM for the dial (nothing was added). The view frees itself, after the parent screen is deleted (the
 // timer is deleted first, with the dial; the buffer a moment later, outside the delete).
 station_view_t *station_view_create(lv_obj_t *parent, station_view_cfg_t const *cfg);
-// The second line's label (for a caller that wants to set it outside update_line2)
-lv_obj_t *station_view_line2(station_view_t const *v);
