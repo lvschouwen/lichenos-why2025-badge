@@ -66,7 +66,7 @@ bool ota_update_refused_on_trial(bool stops_apps, ota_image_state_t state) {
     return stops_apps && state == OTA_IMAGE_ON_TRIAL;
 }
 
-char const *ota_pending_why(bool changing, bool installed, ota_image_state_t state, bool c6_unproven) {
+char const *ota_pending_why(bool changing, bool installed, ota_image_state_t state, bool c6_unproven, bool c6_up) {
     if (changing) {
         return "an update is being written";
     }
@@ -76,7 +76,10 @@ char const *ota_pending_why(bool changing, bool installed, ota_image_state_t sta
     if (state == OTA_IMAGE_ON_TRIAL) {
         return "the running image is on trial";
     }
-    return c6_unproven ? "the C6 does not run the staged C6 image yet" : NULL;
+    if (!c6_unproven) {
+        return NULL;
+    }
+    return c6_up ? "the C6 does not run the staged C6 image yet" : "the C6 is not attached";
 }
 
 restart_gate_t restart_gate_decide(bool asked, ota_image_state_t image, bool trial_settled, uint32_t uptime_s,

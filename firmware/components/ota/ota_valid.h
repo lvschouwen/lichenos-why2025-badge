@@ -33,7 +33,8 @@ bool ota_update_refused_on_trial(bool stops_apps, ota_image_state_t state);
 // running image on trial (any reset before it is valid boots the previous one; only a definite trial: blank OTA data
 // after a USB flash reads UNKNOWN and is none), a staged C6 image the running C6 has not proven (c6link_bundle_pending:
 // changed this boot, or not matched by IDENT). The on-air allow list is not switched on then.
-char const *ota_pending_why(bool changing, bool installed, ota_image_state_t state, bool c6_unproven);
+// c6_up: the C6 link is up (c6link_up); an unproven C6 without one says that instead.
+char const *ota_pending_why(bool changing, bool installed, ota_image_state_t state, bool c6_unproven, bool c6_up);
 
 // The restart gate (#304): a restart the badge makes on its own while this image is on trial rolls it back, so it
 // waits (system_restart, polled once a second) until the image is valid, the trial loop has ended any other way (a

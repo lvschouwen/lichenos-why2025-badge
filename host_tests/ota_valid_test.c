@@ -109,44 +109,67 @@ static void test_update_refused(void) {
 // #420: the on-air list is not switched on while another image could run without asking; a USB-flashed badge (blank
 // OTA data reads UNKNOWN) and a proven image are not pending
 static void test_pending(void) {
-    CHECK(ota_pending_why(false, false, OTA_IMAGE_NOT_ON_TRIAL, false) == NULL);
-    CHECK(ota_pending_why(false, false, OTA_IMAGE_UNKNOWN, false) == NULL);
-    CHECK(ota_pending_why(true, false, OTA_IMAGE_NOT_ON_TRIAL, false) != NULL);
-    CHECK(ota_pending_why(false, true, OTA_IMAGE_NOT_ON_TRIAL, false) != NULL);
-    CHECK(ota_pending_why(false, false, OTA_IMAGE_ON_TRIAL, false) != NULL);
-    CHECK(ota_pending_why(false, false, OTA_IMAGE_NOT_ON_TRIAL, true) != NULL);
-    CHECK(ota_pending_why(false, false, OTA_IMAGE_UNKNOWN, true) != NULL);
-    CHECK(strstr(ota_pending_why(true, true, OTA_IMAGE_ON_TRIAL, true), "being written"));
-    CHECK(strstr(ota_pending_why(false, true, OTA_IMAGE_ON_TRIAL, true), "installed"));
-    CHECK(strstr(ota_pending_why(false, false, OTA_IMAGE_ON_TRIAL, true), "trial"));
-    CHECK(strstr(ota_pending_why(false, false, OTA_IMAGE_NOT_ON_TRIAL, true), "C6"));
+    CHECK(ota_pending_why(false, false, OTA_IMAGE_NOT_ON_TRIAL, false, true) == NULL);
+    CHECK(ota_pending_why(false, false, OTA_IMAGE_UNKNOWN, false, true) == NULL);
+    CHECK(ota_pending_why(false, false, OTA_IMAGE_NOT_ON_TRIAL, false, false) == NULL); // no C6, nothing staged
+    CHECK(ota_pending_why(true, false, OTA_IMAGE_NOT_ON_TRIAL, false, true) != NULL);
+    CHECK(ota_pending_why(false, true, OTA_IMAGE_NOT_ON_TRIAL, false, true) != NULL);
+    CHECK(ota_pending_why(false, false, OTA_IMAGE_ON_TRIAL, false, true) != NULL);
+    CHECK(ota_pending_why(false, false, OTA_IMAGE_NOT_ON_TRIAL, true, true) != NULL);
+    CHECK(ota_pending_why(false, false, OTA_IMAGE_UNKNOWN, true, true) != NULL);
+    CHECK(strstr(ota_pending_why(true, true, OTA_IMAGE_ON_TRIAL, true, true), "being written"));
+    CHECK(strstr(ota_pending_why(false, true, OTA_IMAGE_ON_TRIAL, true, true), "installed"));
+    CHECK(strstr(ota_pending_why(false, false, OTA_IMAGE_ON_TRIAL, true, true), "trial"));
+    CHECK(strstr(ota_pending_why(false, false, OTA_IMAGE_NOT_ON_TRIAL, true, true), "staged"));
+    CHECK(strstr(ota_pending_why(false, false, OTA_IMAGE_NOT_ON_TRIAL, true, false), "not attached"));
 }
 
-// #420, the Dekker pair of ota_hold.h under sequential consistency: the server stores "changing" then loads onair_on
-// (held: it clears the mark and refuses); the list stores onair_on then asks ota_pending_why (pending: it stores off
-// and refuses). Over every interleaving of the two, the boot switch and a list left on never both happen.
-static void test_dekker(void) {
-    // Steps: server 0 = store busy, 1 = load on; list 0 = store on, 1 = load pending. Bit i of order: step i is the
-    // server's. Orders of 2 + 2 steps that keep each side's own order: 6.
-    static unsigned const orders[] = {0x3, 0x5, 0x6, 0x9, 0xA, 0xC};
-    for (size_t o = 0; o < sizeof(orders) / sizeof(orders[0]); o++) {
-        bool busy = false, on = false, server_held = false, list_pending = false;
+// #420, the Dekker pair of ota_hold.h under sequential consistency, with the hand-off. Server: 0 store busy, 1 load
+// onair_on (held: clear busy, stop), 2 store its result (installed, or the C6 change), 3 clear busy. List: 0 store
+// onair_on, then three loads in load_order (of BUSY, RESULT, OTHER), then ota_pending_why on what it saw. A violation is
+// the server finishing its change while the list stays on with nothing pending. Every interleaving of 4 + 4 steps.
+enum { LOAD_BUSY, LOAD_RESULT, LOAD_OTHER };
+static int dekker_violations(bool c6_change, int const load_order[3]) {
+    int violations = 0;
+    for (unsigned order = 0; order < 256; order++) {
+        if (__builtin_popcount(order) != 4) {
+            continue; // bit i set: step i is the server's
+        }
+        bool busy = false, result = false, on = false, held = false, seen[3] = {false, false, false};
         int  s = 0, l = 0;
-        for (int i = 0; i < 4; i++) {
-            if (orders[o] & (1u << i)) {
-                if (s++ == 0) {
+        for (int i = 0; i < 8; i++) {
+            if (order & (1u << i)) {
+                int step = s++;
+                if (step == 0) {
                     busy = true;
-                } else {
-                    server_held = on;
+                } else if (step == 1) {
+                    held = on;
+                    busy = held ? false : busy;
+                } else if (!held) {
+                    busy   = step == 3 ? false : busy;
+                    result = step == 2 ? true : result;
                 }
             } else if (l++ == 0) {
                 on = true;
             } else {
-                list_pending = ota_pending_why(busy, false, OTA_IMAGE_NOT_ON_TRIAL, false) != NULL;
+                int what   = load_order[l - 2];
+                seen[what] = what == LOAD_BUSY ? busy : what == LOAD_RESULT ? result : false;
             }
         }
-        CHECK(server_held || list_pending); // at least one side saw the other
+        bool installed = !c6_change && seen[LOAD_RESULT], c6 = c6_change && seen[LOAD_RESULT];
+        bool pending   = ota_pending_why(seen[LOAD_BUSY], installed, OTA_IMAGE_NOT_ON_TRIAL, c6, true) != NULL;
+        violations += !held && !pending;
     }
+    return violations;
+}
+
+static void test_dekker(void) {
+    static int const real[3]  = {LOAD_BUSY, LOAD_RESULT, LOAD_OTHER}; // ota_boot_pending's order
+    static int const wrong[3] = {LOAD_RESULT, LOAD_OTHER, LOAD_BUSY}; // busy last: misses a whole hand-off
+    CHECK(dekker_violations(false, real) == 0); // the boot slot switch
+    CHECK(dekker_violations(true, real) == 0);  // a C6 file change
+    CHECK(dekker_violations(false, wrong) > 0); // the model can fail: the order matters
+    CHECK(dekker_violations(true, wrong) > 0);
 }
 
 static void test_image_state(void) {

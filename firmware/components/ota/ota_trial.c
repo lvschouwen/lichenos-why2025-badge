@@ -95,8 +95,15 @@ void ota_trial_register_cmds(void) {
 }
 
 char const *ota_boot_pending(void) {
-    // The loads of the Dekker pair (ota_hold.h): seq_cst, after the caller's store of onair_on
-    return ota_pending_why(ota_change_busy(), ota_change_installed(), ota_image_trial_state(), c6link_bundle_pending());
+    // The loads of the Dekker pair (ota_hold.h), seq_cst, after the caller's store of onair_on, in this order and in
+    // separate statements (argument order is unspecified): busy first, then what the server stores while busy is set
+    // (installed, the C6 change), then the rest. Loading busy last could miss a whole hand-off (ota_valid_test).
+    bool              busy      = ota_change_busy();
+    bool              installed = ota_change_installed();
+    bool              c6        = c6link_bundle_pending();
+    bool              c6_up     = c6link_up();
+    ota_image_state_t trial     = ota_image_trial_state();
+    return ota_pending_why(busy, installed, trial, c6, c6_up);
 }
 
 ota_image_state_t ota_image_trial_state(void) {

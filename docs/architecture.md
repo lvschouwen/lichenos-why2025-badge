@@ -573,7 +573,9 @@ copy, its setting and `fw onair` are `mesh_onair_run.c`.
   previous one), or a staged C6 bundle the running C6 has not proven (`c6_bundle_pending`: changed this boot, the C6
   step not run yet, or IDENT not matching it, e.g. after a failed flash). It works again after that boot, once
   `fw slot` shows the running image valid. The switch and a covered change are a Dekker pair (`ota_hold.h`): each side
-  stores its own flag, then loads the other's, all seq_cst and with no lock spanning both, so they never both go ahead.
+  stores its own flag, then loads the other's, all seq_cst and with no lock spanning both, so they never both go ahead;
+  the list loads `busy` before what the server stores while busy is set (installed, the C6 change), in separate
+  statements.
 - `fw onair` shows it; `fw onair on` works from any console (it only narrows). `off`, `allow <channel|key digits>`,
   `remove <...>` and `clear` work only from the USB console: the Wi-Fi console's token also installs firmware, and the
   Console app counts as remote (injected keys). `tools/onair_guard.sh` refuses those four itself.

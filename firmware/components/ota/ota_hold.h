@@ -4,7 +4,9 @@
 //   server: store "change in progress" (seq_cst), then load the hold (onair_on, seq_cst): held -> clear, refuse
 //   list:   store onair_on (seq_cst), then load what is pending (these flags, seq_cst): pending -> store off, refuse
 // Each side stores its own flag before it loads the other's, all seq_cst (an acquire/release pair would let a load
-// pass the earlier store on the dual-core P4). No lock spans both sides. host_tests/ota_valid_test.c models it.
+// pass the earlier store on the dual-core P4). No lock spans both sides. The server stores "installed" or the C6 change
+// while busy is set and clears busy after them, so the list must load busy FIRST and those after it, in separate
+// statements (ota_boot_pending). host_tests/ota_valid_test.c models it, and shows the other order fails.
 
 #include "ota_proto.h" // ota_hold_t
 

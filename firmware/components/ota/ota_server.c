@@ -1407,6 +1407,13 @@ static bool refused_on_trial(int fd, ota_request_t const *req, size_t pre_len) {
     return true;
 }
 
+// The staged upload is the refused request's own: the same route and, for a C6 file, the same file however it was named
+static bool staged_is(ota_request_t const *req, bool c6, char const *posix) {
+    char mine[OTA_PATH_MAX + 16];
+    return staged.active && staged.route == req->route &&
+           (!c6 || (ota_path_to_posix(staged.path, mine, sizeof(mine)) && strcmp(mine, posix) == 0));
+}
+
 // The console's USB hold (#420), asked only on the held routes. A refused piece also drops its upload in pieces (open
 // slot, staging buffer), so update mode ends (a firmware one in a restart) instead of waiting PIECE_IDLE_S. noinline:
 // the path buffer stays off handle_connection's stack.
@@ -1418,7 +1425,7 @@ __attribute__((noinline)) static bool refused_on_hold(int fd, ota_request_t cons
     if (kind == OTA_HOLD_NONE) {
         return false;
     }
-    piece_expire(staged.active && staged.route == req->route && (!c6 || strcmp(staged.path, req->path) == 0));
+    piece_expire(staged_is(req, c6, posix));
     drain_body(fd, pre_len, req->expect_continue ? 0 : req->content_length);
     return ota_hold_refused(fd, kind, why);
 }
