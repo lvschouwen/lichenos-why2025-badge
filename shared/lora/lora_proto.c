@@ -40,7 +40,7 @@ static uint32_t get_u32(uint8_t const **p) {
     return lo | (uint32_t)get_u16(p) << 16;
 }
 
-// The registry messages (#308) sit in helpers so lora_encode / lora_decode keep their complexity
+// The registry messages (#308) sit in helpers so lora_encode keeps its complexity
 static size_t reg_encoded_len(uint8_t type) {
     switch (type) {
         case LORA_MSG_REG_GET: return REG_GET_LEN;
@@ -72,33 +72,6 @@ static void encode_reg(lora_msg_t const *msg, uint8_t *p) {
         }
         default: break; // bodyless
     }
-}
-
-static lora_dec_t decode_reg(uint8_t const *buf, size_t len, lora_msg_t *out) {
-    size_t want = reg_encoded_len(out->type);
-    if (!want) {
-        return LORA_DEC_BAD_TYPE;
-    }
-    if (len != want) {
-        return LORA_DEC_BAD_LEN;
-    }
-    uint8_t const *p = buf + HDR_LEN;
-    if (out->type == LORA_MSG_REG_GET) {
-        out->u.reg_get.id  = get_u16(&p);
-        out->u.reg_get.seq = *p;
-    } else if (out->type == LORA_MSG_REG_SET) {
-        out->u.reg_set.id    = get_u16(&p);
-        out->u.reg_set.value = get_u32(&p);
-        out->u.reg_set.seq   = *p;
-    } else {
-        lora_reg_val_t *v = &out->u.reg_val;
-        v->id             = get_u16(&p);
-        v->seq            = *p++;
-        v->status         = *p++;
-        v->type           = *p++;
-        v->value          = get_u32(&p);
-    }
-    return LORA_DEC_OK;
 }
 
 static size_t encoded_len(lora_msg_t const *msg) {
@@ -207,26 +180,160 @@ size_t lora_encode(lora_msg_t const *msg, uint8_t *buf, size_t cap) {
     return len;
 }
 
-static lora_dec_t decode_sweep(uint8_t const *buf, size_t len, lora_sweep_t *sw) {
+// The decoder, one entry per message type (#212). A frame's length is checked first, then its body read, so a
+// wrong length never reads a byte of the body. Fixed-length types give exact_len; the ones whose length follows from a
+// length byte give len_ok. The readers return nothing and end in plain stores or a memcpy, so the compiler adds no
+// stack frame under lora_decode's (the C6 runs this on its LoRa task).
+typedef struct {
+    uint8_t type;      // lora_msg_type_t
+    uint8_t exact_len; // 0: len_ok decides
+    bool (*len_ok)(uint8_t const *buf, size_t len);
+    void (*read)(uint8_t const *p, lora_msg_t *out); // p: the body after the header; NULL for the bodyless commands
+} decoder_t;
+
+// [header][fixed fields][n][n bytes], n 1-255, the length byte the last fixed byte
+static bool counted_len_ok(uint8_t const *buf, size_t len, size_t fixed) {
+    return len >= fixed && buf[fixed - 1] != 0 && len == fixed + buf[fixed - 1];
+}
+
+static bool send_len_ok(uint8_t const *buf, size_t len) {
+    return counted_len_ok(buf, len, TX_FIXED_LEN);
+}
+
+static bool rx_len_ok(uint8_t const *buf, size_t len) {
+    return counted_len_ok(buf, len, RX_FIXED_LEN);
+}
+
+static bool sweep_len_ok(uint8_t const *buf, size_t len) {
     if (len < SWEEP_FIXED_LEN) {
-        return LORA_DEC_BAD_LEN;
+        return false;
     }
     uint8_t count = buf[SWEEP_FIXED_LEN - 1];
-    if (count == 0 || count > LORA_SWEEP_MAX_BINS || len != SWEEP_FIXED_LEN + 2u * count) {
-        return LORA_DEC_BAD_LEN;
-    }
-    uint8_t const *p     = buf + HDR_LEN;
+    return count != 0 && count <= LORA_SWEEP_MAX_BINS && len == SWEEP_FIXED_LEN + 2u * count;
+}
+
+static void read_config(uint8_t const *p, lora_msg_t *out) {
+    lora_config_t *c = &out->u.config;
+    c->freq_hz       = get_u32(&p);
+    c->bw_hz         = get_u32(&p);
+    c->sf            = *p++;
+    c->cr            = *p++;
+    c->sync_word     = *p++;
+    c->preamble      = get_u16(&p);
+    c->tx_power_dbm  = (int8_t)*p;
+}
+
+static void read_send(uint8_t const *p, lora_msg_t *out) {
+    out->u.tx.len = *p++;
+    memcpy(out->u.tx.data, p, out->u.tx.len);
+}
+
+static void read_rx(uint8_t const *p, lora_msg_t *out) {
+    lora_rx_packet_t *rx = &out->u.rx;
+    rx->rssi_x10         = (int16_t)get_u16(&p);
+    rx->snr_x10          = (int16_t)get_u16(&p);
+    rx->c6_ms            = get_u32(&p);
+    rx->len              = *p++;
+    memcpy(rx->data, p, rx->len);
+}
+
+static void read_status(uint8_t const *p, lora_msg_t *out) {
+    lora_status_t *s  = &out->u.status;
+    s->state          = *p++;
+    s->rssi_x10       = (int16_t)get_u16(&p);
+    s->last_radio_err = (int16_t)get_u16(&p);
+    s->packets        = get_u32(&p);
+    s->crc_errors     = get_u32(&p);
+    s->header_errors  = get_u32(&p);
+    s->dropped        = get_u32(&p);
+    s->ignored        = get_u32(&p);
+    s->uptime_s       = get_u32(&p);
+    s->heap_free      = get_u32(&p);
+    s->heap_min       = get_u32(&p);
+    s->stack_free     = get_u16(&p);
+}
+
+static void read_result(uint8_t const *p, lora_msg_t *out) {
+    lora_result_t *r = &out->u.result;
+    r->for_type      = *p++;
+    r->code          = *p++;
+    r->radio_err     = (int16_t)get_u16(&p);
+}
+
+static void read_ident(uint8_t const *p, lora_msg_t *out) {
+    memcpy(out->u.ident.app_elf_sha256, p, LORA_IDENT_SHA_LEN);
+}
+
+static void read_sweep_req(uint8_t const *p, lora_msg_t *out) {
+    lora_sweep_req_t *r = &out->u.sweep_req;
+    r->start_hz         = get_u32(&p);
+    r->step_hz          = get_u32(&p);
+    r->count            = *p++;
+    r->samples          = *p++;
+    r->seq              = *p;
+}
+
+static void read_sweep(uint8_t const *p, lora_msg_t *out) {
+    lora_sweep_t *sw     = &out->u.sweep;
     sw->start_hz         = get_u32(&p);
     sw->step_hz          = get_u32(&p);
     sw->seq              = *p++;
     sw->channel_rssi_x10 = (int16_t)get_u16(&p);
     sw->count            = *p++;
-    for (uint8_t i = 0; i < count; i++) {
+    for (uint8_t i = 0; i < sw->count; i++) {
         sw->rssi_x10[i] = (int16_t)get_u16(&p);
     }
-    return LORA_DEC_OK;
 }
 
+static void read_reg_get(uint8_t const *p, lora_msg_t *out) {
+    out->u.reg_get.id  = get_u16(&p);
+    out->u.reg_get.seq = *p;
+}
+
+static void read_reg_set(uint8_t const *p, lora_msg_t *out) {
+    out->u.reg_set.id    = get_u16(&p);
+    out->u.reg_set.value = get_u32(&p);
+    out->u.reg_set.seq   = *p;
+}
+
+static void read_reg_val(uint8_t const *p, lora_msg_t *out) {
+    lora_reg_val_t *v = &out->u.reg_val;
+    v->id             = get_u16(&p);
+    v->seq            = *p++;
+    v->status         = *p++;
+    v->type           = *p++;
+    v->value          = get_u32(&p);
+}
+
+static decoder_t const decoders[] = {
+    {LORA_MSG_CONFIG, CONFIG_LEN, NULL, read_config},
+    {LORA_MSG_RX_START, BODYLESS_LEN, NULL, NULL},
+    {LORA_MSG_RX_STOP, BODYLESS_LEN, NULL, NULL},
+    {LORA_MSG_STATUS_REQ, BODYLESS_LEN, NULL, NULL},
+    {LORA_MSG_SEND, 0, send_len_ok, read_send},
+    {LORA_MSG_IDENT_REQ, BODYLESS_LEN, NULL, NULL},
+    {LORA_MSG_SWEEP_REQ, SWEEP_REQ_LEN, NULL, read_sweep_req},
+    {LORA_MSG_REG_GET, REG_GET_LEN, NULL, read_reg_get},
+    {LORA_MSG_REG_SET, REG_SET_LEN, NULL, read_reg_set},
+    {LORA_MSG_RX_PACKET, 0, rx_len_ok, read_rx},
+    {LORA_MSG_STATUS, STATUS_LEN, NULL, read_status},
+    {LORA_MSG_RESULT, RESULT_LEN, NULL, read_result},
+    {LORA_MSG_IDENT, IDENT_LEN, NULL, read_ident},
+    {LORA_MSG_SWEEP, 0, sweep_len_ok, read_sweep},
+    {LORA_MSG_REG_VAL, REG_VAL_LEN, NULL, read_reg_val},
+};
+
+static decoder_t const *find_decoder(uint8_t type) {
+    for (size_t i = 0; i < sizeof(decoders) / sizeof(decoders[0]); i++) {
+        if (decoders[i].type == type) {
+            return &decoders[i];
+        }
+    }
+    return NULL;
+}
+
+// Which error wins: a frame shorter than the header is BAD_LEN, then the version, then the type, then the length.
+// out is cleared (and its type set) only once the version matched, as before #212.
 lora_dec_t lora_decode(uint8_t const *buf, size_t len, lora_msg_t *out) {
     if (len < HDR_LEN) {
         return LORA_DEC_BAD_LEN;
@@ -235,100 +342,19 @@ lora_dec_t lora_decode(uint8_t const *buf, size_t len, lora_msg_t *out) {
         return LORA_DEC_BAD_VERSION;
     }
 
-    uint8_t const *p = buf + HDR_LEN;
     memset(out, 0, sizeof(*out));
-    out->type = buf[1];
-    switch (out->type) {
-        case LORA_MSG_CONFIG: {
-            if (len != CONFIG_LEN) {
-                return LORA_DEC_BAD_LEN;
-            }
-            lora_config_t *c = &out->u.config;
-            c->freq_hz       = get_u32(&p);
-            c->bw_hz         = get_u32(&p);
-            c->sf            = *p++;
-            c->cr            = *p++;
-            c->sync_word     = *p++;
-            c->preamble      = get_u16(&p);
-            c->tx_power_dbm  = (int8_t)*p;
-            return LORA_DEC_OK;
-        }
-        case LORA_MSG_RX_START:
-        case LORA_MSG_RX_STOP:
-        case LORA_MSG_STATUS_REQ:
-        case LORA_MSG_IDENT_REQ: return len == BODYLESS_LEN ? LORA_DEC_OK : LORA_DEC_BAD_LEN;
-        case LORA_MSG_SEND: {
-            if (len < TX_FIXED_LEN || buf[TX_FIXED_LEN - 1] == 0 ||
-                len != (size_t)TX_FIXED_LEN + buf[TX_FIXED_LEN - 1]) {
-                return LORA_DEC_BAD_LEN;
-            }
-            out->u.tx.len = *p++;
-            memcpy(out->u.tx.data, p, out->u.tx.len);
-            return LORA_DEC_OK;
-        }
-        case LORA_MSG_RX_PACKET: {
-            if (len < RX_FIXED_LEN || buf[RX_FIXED_LEN - 1] == 0 ||
-                len != (size_t)RX_FIXED_LEN + buf[RX_FIXED_LEN - 1]) {
-                return LORA_DEC_BAD_LEN;
-            }
-            lora_rx_packet_t *rx = &out->u.rx;
-            rx->rssi_x10         = (int16_t)get_u16(&p);
-            rx->snr_x10          = (int16_t)get_u16(&p);
-            rx->c6_ms            = get_u32(&p);
-            rx->len              = *p++;
-            memcpy(rx->data, p, rx->len);
-            return LORA_DEC_OK;
-        }
-        case LORA_MSG_STATUS: {
-            if (len != STATUS_LEN) {
-                return LORA_DEC_BAD_LEN;
-            }
-            lora_status_t *s  = &out->u.status;
-            s->state          = *p++;
-            s->rssi_x10       = (int16_t)get_u16(&p);
-            s->last_radio_err = (int16_t)get_u16(&p);
-            s->packets        = get_u32(&p);
-            s->crc_errors     = get_u32(&p);
-            s->header_errors  = get_u32(&p);
-            s->dropped        = get_u32(&p);
-            s->ignored        = get_u32(&p);
-            s->uptime_s       = get_u32(&p);
-            s->heap_free      = get_u32(&p);
-            s->heap_min       = get_u32(&p);
-            s->stack_free     = get_u16(&p);
-            return LORA_DEC_OK;
-        }
-        case LORA_MSG_RESULT: {
-            if (len != RESULT_LEN) {
-                return LORA_DEC_BAD_LEN;
-            }
-            lora_result_t *r = &out->u.result;
-            r->for_type      = *p++;
-            r->code          = *p++;
-            r->radio_err     = (int16_t)get_u16(&p);
-            return LORA_DEC_OK;
-        }
-        case LORA_MSG_IDENT:
-            if (len != IDENT_LEN) {
-                return LORA_DEC_BAD_LEN;
-            }
-            memcpy(out->u.ident.app_elf_sha256, p, LORA_IDENT_SHA_LEN);
-            return LORA_DEC_OK;
-        case LORA_MSG_SWEEP_REQ: {
-            if (len != SWEEP_REQ_LEN) {
-                return LORA_DEC_BAD_LEN;
-            }
-            lora_sweep_req_t *r = &out->u.sweep_req;
-            r->start_hz         = get_u32(&p);
-            r->step_hz          = get_u32(&p);
-            r->count            = *p++;
-            r->samples          = *p++;
-            r->seq              = *p;
-            return LORA_DEC_OK;
-        }
-        case LORA_MSG_SWEEP: return decode_sweep(buf, len, &out->u.sweep);
-        default: return decode_reg(buf, len, out); // BAD_TYPE for anything else
+    out->type            = buf[1];
+    decoder_t const *dec = find_decoder(out->type);
+    if (!dec) {
+        return LORA_DEC_BAD_TYPE;
     }
+    if (dec->exact_len ? len != dec->exact_len : !dec->len_ok(buf, len)) {
+        return LORA_DEC_BAD_LEN;
+    }
+    if (dec->read) {
+        dec->read(buf + HDR_LEN, out);
+    }
+    return LORA_DEC_OK;
 }
 
 bool lora_config_valid(lora_config_t const *c) {
