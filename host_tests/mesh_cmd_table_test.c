@@ -68,6 +68,7 @@ static void test_subcommand_table(void) {
         {"link", NONE, true},       {"chats", NONE, true},         {"ident simulate", NONE, true},
         {"advert", OPTIONAL, true}, {"loc", OPTIONAL, true},       {"autoadd", OPTIONAL, true},
         {"scope", OPTIONAL, true},  {"airlog", OPTIONAL, true}, // #408
+        {"chat", OPTIONAL, true},   // #438
     };
     CHECK(MESH_SUB_COUNT == sizeof(want) / sizeof(want[0]));
     for (int i = 0; i < MESH_SUB_COUNT; i++) {
@@ -124,6 +125,9 @@ static void test_matching(void) {
     expect("airlog", MESH_SUB_AIRLOG, ""); // #408
     expect("airlog 15", MESH_SUB_AIRLOG, "15");
     expect("airlogs", MESH_SUB_COUNT, NULL);
+    expect("chat open #x", MESH_SUB_CHAT, "open #x"); // #438
+    expect("chat", MESH_SUB_CHAT, "");
+    expect("chats", MESH_SUB_CHATS, ""); // not "chat"
     expect("history abcd on 30 YES", MESH_SUB_HISTORY, "abcd on 30 YES");
     expect("notify test dm", MESH_SUB_NOTIFY, "test dm");
     expect("order", MESH_SUB_ORDER, "");

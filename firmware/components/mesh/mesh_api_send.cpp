@@ -59,6 +59,13 @@ static bool onair_channel_ready(char const **why, mesh_origin_t from, char const
     return *why == NULL;
 }
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+extern "C" char const *mesh_onair_open_refusal(char const *channel) {
+    char const *why = NULL;
+    return onair_channel_ready(&why, MESH_FROM_CONSOLE, channel) ? NULL : why;
+}
+#endif
+
 extern "C" mesh_msg_id_t mesh_send_channel(char const *channel_name, char const *text, mesh_origin_t from,
                                            char const **why) {
     char const *local;

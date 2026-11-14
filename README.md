@@ -208,6 +208,11 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
   stays), `fw contacts export [<12 hex>]` (MeshCore's `meshcore://<hex>` export of a contact, or of this badge),
   `fw contacts import <part>` ... `fw contacts import end` (the Wi-Fi console takes a whole link in one line; over
   USB paste it in parts of up to 79 characters; `cancel` drops it; existing contacts are never changed), `fw advert` (send a zero-hop advert now).
+  `fw mesh chat open <#channel>` and `fw mesh chat close` (developer mode, not in a release image): open a channel's chat
+  screen as Enter on its row would, and leave it as Esc would. Channels only (a contact, a DM or an unknown name is
+  refused), only while MeshCore runs, and a channel off the badge's on-air allow list (`fw onair`) is refused too. It
+  never focuses the compose line and never sends. The host guard (`tools/onair_guard.sh`) treats the open like a send:
+  only `#badgetest` or an allow-listed target.
 - Crashes: every crash keeps a core dump and a log line. `fw crash` shows them, `fw crash dump` prints the dump,
   `fw crash clear` drops it. `tools/badge.sh crash <port> [elf]` fetches the dump and decodes it against the crashed
   image's ELF; `flash-fw` and `ota-firmware` keep the ELF in `~/badge-backups/elf` under its SHA-256 and version (one hardlinked copy; the newest `BADGE_ELF_KEEP`, default 20, images stay).

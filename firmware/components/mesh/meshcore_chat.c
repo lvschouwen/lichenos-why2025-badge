@@ -15,6 +15,7 @@
 #include "menu_filter.h"
 #include "mesh.h"
 #include "mesh_chat.h"
+#include "mesh_chat_cmd.h"
 #include "mesh_chat_target.h"
 #include "mesh_frame.h"
 #include "mesh_format.h"
@@ -23,6 +24,8 @@
 #include "scroll_anchor.h"
 #include "theme.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -775,6 +778,62 @@ void meshcore_chat_open_channel(char const *name) {
     mesh_chat_target_channel(&want, name);
     open_target(&want);
 }
+
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+// ---- "fw mesh chat open|close" (#438) ---------------------------------------------------------------------------------
+
+#define CON_WAIT_MS 3000
+#define CON_POLL_MS 10
+enum { CON_IDLE, CON_QUEUED, CON_DONE_OK, CON_DONE_NONE };
+
+// One job at a time (console.c serialises the commands). A job whose answer was not waited for out stays QUEUED until
+// its callback runs, and the next command is refused meanwhile: the buffer is never shared by two jobs.
+static struct {
+    int  state;
+    bool open;
+    char name[MESH_CHAT_CMD_NAME_MAX];
+} con_job;
+
+// LVGL task, through the UI service: the same push a row's Enter does
+static void con_run(void *arg) {
+    (void)arg;
+    int done = CON_DONE_OK;
+    if (con_job.open) {
+        meshcore_chat_open_channel(con_job.name);
+    } else if (chat_on_top()) {
+        shell_back(); // Esc, but leaving at once also with a draft or a search open
+    } else {
+        done = CON_DONE_NONE;
+    }
+    __atomic_store_n(&con_job.state, done, __ATOMIC_RELEASE);
+}
+
+meshcore_chat_con_t meshcore_chat_console(char const *name) {
+    int idle = CON_IDLE;
+    int busy = CON_QUEUED;
+    if (!__atomic_compare_exchange_n(&con_job.state, &idle, busy, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        if (__atomic_load_n(&con_job.state, __ATOMIC_ACQUIRE) == CON_QUEUED) {
+            return MESHCORE_CHAT_CON_BUSY;
+        }
+        __atomic_store_n(&con_job.state, CON_QUEUED, __ATOMIC_RELEASE); // the last answer was never collected
+    }
+    con_job.open = name != NULL;
+    snprintf(con_job.name, sizeof(con_job.name), "%s", name ? name : "");
+    if (!lichen_ui_call(con_run, NULL)) {
+        __atomic_store_n(&con_job.state, CON_IDLE, __ATOMIC_RELEASE);
+        return MESHCORE_CHAT_CON_BUSY;
+    }
+    for (int waited = 0; waited < CON_WAIT_MS; waited += CON_POLL_MS) {
+        int s = __atomic_load_n(&con_job.state, __ATOMIC_ACQUIRE);
+        if (s != CON_QUEUED) {
+            __atomic_store_n(&con_job.state, CON_IDLE, __ATOMIC_RELEASE);
+            return s == CON_DONE_OK ? MESHCORE_CHAT_CON_OK : MESHCORE_CHAT_CON_NONE;
+        }
+        vTaskDelay(pdMS_TO_TICKS(CON_POLL_MS));
+    }
+    return MESHCORE_CHAT_CON_BUSY;
+}
+#endif
 
 void meshcore_chat_open_dm(uint8_t const prefix[6], char const *title) {
     mesh_chat_target_t want;

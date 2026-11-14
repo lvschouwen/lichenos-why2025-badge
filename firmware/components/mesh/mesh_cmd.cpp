@@ -42,7 +42,7 @@ static void cmd_mesh_autostart(char const *rest) {
 
 // The debug subcommands (#373) are named only where they are in the image
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-#define MESH_DEV_USAGE " | mesh airlog [n] (debug, fw dev)"
+#define MESH_DEV_USAGE " | mesh airlog [n] (debug, fw dev) | mesh chat open <#channel> | close (debug, fw dev)"
 #else
 #define MESH_DEV_USAGE ""
 #endif
@@ -118,6 +118,7 @@ static constexpr mesh_sub_run_t MESH_SUB_RUN[] = {
     {MESH_SUB_AUTOADD, cmd_mesh_autoadd},
     {MESH_SUB_SCOPE, mesh_cscope_console},
     {MESH_SUB_AIRLOG, cmd_mesh_airlog},
+    {MESH_SUB_CHAT, cmd_mesh_chat},
 };
 
 template <typename T, size_t N> static constexpr bool ids_in_order(T const (&table)[N], size_t count) {

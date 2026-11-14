@@ -34,6 +34,7 @@ void cmd_mesh_out(void);
 void cmd_mesh_link(void);
 void cmd_mesh_chats(void);
 void cmd_mesh_airlog(char const *arg); // #408, a debug command
+void cmd_mesh_chat(char const *arg);   // #438, a debug command
 
 // ---- mesh_cmd_remote.cpp: remote, history, telemetry --------------------------------------------------------------
 

@@ -48,6 +48,7 @@ mesh_sub_t const MESH_SUBS[MESH_SUB_COUNT] = {
     [MESH_SUB_AUTOADD]        = {"autoadd", MESH_SUB_WORD, true},
     [MESH_SUB_SCOPE]          = {"scope", MESH_SUB_WORD, true}, // #290: the console scope
     [MESH_SUB_AIRLOG]         = {"airlog", MESH_SUB_WORD, true}, // #408: a debug command (developer mode)
+    [MESH_SUB_CHAT]           = {"chat", MESH_SUB_WORD, true},   // #438: a debug command (developer mode)
 };
 
 char const *mesh_sub_match(mesh_sub_t const *sub, char const *args) {

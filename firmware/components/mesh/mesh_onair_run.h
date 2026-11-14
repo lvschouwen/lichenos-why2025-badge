@@ -17,6 +17,11 @@ char const *mesh_onair_refusal(bool from_console, onair_tx_t tx, char const *cha
                                uint8_t const *prefix);
 // Whether the setting is on now (any task): the senders resolve a channel's key only then
 bool        mesh_onair_on(void);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+// #438: why "fw mesh chat open <channel>" (a stored name) may not open that channel's chat, NULL when it may: the same
+// check a console send to it gets (the list is on and the channel is not on it, or MeshCore is busy). Console task.
+char const *mesh_onair_open_refusal(char const *channel);
+#endif
 // mesh_api_channels.cpp: the channel a name means (typed: as "fw mesh send" resolves a typed name; else the stored
 // name exactly, without case), its stored name into name and its key id (never the secret), under the mesh lock.
 // 1 when found, 0 when not, MESH_BUSY when MeshCore is not running or busy.

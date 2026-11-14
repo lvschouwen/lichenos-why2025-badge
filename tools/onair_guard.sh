@@ -173,6 +173,14 @@ onair_verdict_words() {
             if [ -z "$w3" ] || onair_allowed "$w3"; then echo pass; else
                 echo "deny on air only the test node: 'mesh $w2 $w3' targets a contact not in .claude/onair-allow.local (#287)"
             fi ;;
+        chat) # #438: an open chat is one Enter from a message, so opening one is judged like a send
+            case "${w3,,}" in
+                open)
+                    if [ "$w4" = "#badgetest" ] || onair_allowed "$w4"; then echo pass; else
+                        echo "deny on air only #badgetest: 'mesh chat open ${w4:-?}' would open a chat that is not the test channel's (#438)"
+                    fi ;;
+                *) echo pass ;;
+            esac ;;
         remote)
             if [ -z "$w3" ] || onair_remote_show "$w3" "$w4" || onair_allowed "$w3"; then echo pass; else
                 echo "deny on air only the test node: 'mesh remote $w3' targets a node not in .claude/onair-allow.local (#287)"

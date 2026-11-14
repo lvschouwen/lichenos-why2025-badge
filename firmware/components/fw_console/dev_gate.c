@@ -32,6 +32,9 @@ bool dev_gate_needs_dev(char const *name, char const *args) {
     if (strcmp(name, "notify") == 0 || strcmp(name, "vib") == 0) {
         return first_word_is(args, "test");
     }
+    if (strcmp(name, "mesh") == 0) {
+        return first_word_is(args, "chat"); // #438: "mesh chat open|close" opens a screen from the console
+    }
     for (unsigned i = 0; i < sizeof(GATED) / sizeof(GATED[0]); i++) {
         if (strcmp(name, GATED[i].name) != 0) {
             continue;

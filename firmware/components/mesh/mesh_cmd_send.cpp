@@ -1,7 +1,9 @@
-// "fw mesh send|dm|path|trace|discover|out|link|chats|airlog".
+// "fw mesh send|dm|path|trace|discover|out|link|chats|airlog|chat".
 // Split out of mesh_task.cpp (#208); the state it uses is mesh_int.h's.
 #include "mesh_int.h"
 #include "mesh_cmd.h"
+#include "mesh_chat_cmd.h"
+#include "meshcore_chat.h"
 
 using namespace mesh_int;
 
@@ -299,6 +301,55 @@ void mesh_int::cmd_mesh_airlog(char const *arg) {
 #else
     (void)arg;
     console_reply("mesh airlog: a debug command, not in this build");
+#endif
+}
+
+// "fw mesh chat open <#channel> | close" (#438): opens a channel's chat screen as Enter on its row would, so chat-screen
+// checks run from the console. Opens only; it never focuses or fills the compose line and never sends. A debug command:
+// compiled out of a release image, refused while developer mode is off (the table in dev_gate.c, before this runs).
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+static void chat_open(char const *typed) {
+    char name[MESH_CHAT_CMD_NAME_MAX];
+    if (!console_channel_name(typed, name, sizeof(name), "chat not opened")) {
+        return; // a contact, a DM target or an unknown name is no channel of the list
+    }
+    if (char const *why = mesh_onair_open_refusal(name)) {
+        console_reply("chat not opened: %s", why); // #289: the same allow list as a send
+        return;
+    }
+    switch (meshcore_chat_console(name)) {
+        case MESHCORE_CHAT_CON_OK: console_reply("chat opened: %s", name); break;
+        default: console_reply("chat not opened: the screen did not answer, try again"); break;
+    }
+}
+
+static void chat_close(void) {
+    switch (meshcore_chat_console(NULL)) {
+        case MESHCORE_CHAT_CON_OK: console_reply("chat closed"); break;
+        case MESHCORE_CHAT_CON_NONE: console_reply("no chat is open"); break;
+        default: console_reply("chat not closed: the screen did not answer, try again"); break;
+    }
+}
+#endif
+
+void mesh_int::cmd_mesh_chat(char const *arg) {
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    if (!console_dev_gate("mesh chat")) {
+        return;
+    }
+    char typed[MESH_CHAT_CMD_NAME_MAX];
+    switch (mesh_chat_cmd_parse(arg, typed, sizeof(typed))) {
+        case MESH_CHAT_CMD_OPEN: chat_open(typed); break;
+        case MESH_CHAT_CMD_CLOSE: chat_close(); break;
+        case MESH_CHAT_CMD_NOT_CHANNEL:
+            console_reply("chat not opened: only a channel opens (not a contact or a DM)");
+            break;
+        case MESH_CHAT_CMD_TOO_LONG: console_reply("chat not opened: a channel name is at most %d bytes", MESH_CHANNEL_MAX); break;
+        case MESH_CHAT_CMD_USAGE: console_reply("mesh chat open <#channel> | mesh chat close"); break;
+    }
+#else
+    (void)arg;
+    console_reply("mesh chat: a debug command, not in this build");
 #endif
 }
 

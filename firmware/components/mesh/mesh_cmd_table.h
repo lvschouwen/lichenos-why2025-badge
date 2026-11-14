@@ -67,6 +67,7 @@ typedef enum {
     MESH_SUB_AUTOADD,
     MESH_SUB_SCOPE,
     MESH_SUB_AIRLOG,
+    MESH_SUB_CHAT, // #438: a debug command (developer mode)
     MESH_SUB_COUNT, // none matched
 } mesh_sub_id_t;
 

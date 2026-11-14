@@ -13,3 +13,22 @@ void meshcore_chat_pick_contact(void);
 // stays); opening another while a chat is showing replaces that one (Esc then goes where it went).
 void meshcore_chat_open_channel(char const *name);
 void meshcore_chat_open_dm(uint8_t const prefix[6], char const *title);
+
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+// "fw mesh chat open|close" (#438), from the console task: the open or the close runs on the LVGL task through the UI
+// service (lichen_ui_call) and this waits for its answer (up to 3 s). name NULL closes the chat on top (as Esc would
+// leave it); else opens that channel's chat through meshcore_chat_open_channel. Never opens a DM, never touches the
+// compose line, never sends.
+typedef enum {
+    MESHCORE_CHAT_CON_OK,   // done
+    MESHCORE_CHAT_CON_NONE, // close: no chat is on top
+    MESHCORE_CHAT_CON_BUSY, // not queued, or the answer did not come in time
+} meshcore_chat_con_t;
+#ifdef __cplusplus
+extern "C" {
+#endif
+meshcore_chat_con_t meshcore_chat_console(char const *name);
+#ifdef __cplusplus
+}
+#endif
+#endif
