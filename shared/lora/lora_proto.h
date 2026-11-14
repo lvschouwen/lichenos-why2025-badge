@@ -196,8 +196,27 @@ typedef enum {
 // The length must match the type exactly
 lora_dec_t lora_decode(uint8_t const *buf, size_t len, lora_msg_t *out);
 
-// Within what the RA-01SH (862-928 MHz) and the SX1262 support
+// The longest preamble either chip takes (#452). MeshCore sends 16; 64 leaves room for experiments while a full
+// 255-byte frame on the slowest preset (Costa Rica, SF11/125 kHz) stays at about 5.9 s. The SX1262 takes up to 65535,
+// which keys the PA for minutes to hours per packet.
+#define LORA_PREAMBLE_MIN 6
+#define LORA_PREAMBLE_MAX 64
+
+// Within what the RA-01SH (862-928 MHz) and the SX1262 support, preamble LORA_PREAMBLE_MIN..MAX. Both chips judge a
+// config with this one function: the P4 before it sends one, the C6 when it gets one.
 bool lora_config_valid(lora_config_t const *c);
+
+// The C6's last line against a stuck carrier (#452): no single SEND keys the PA for longer than this. Above every
+// MeshCore preset's full 255-byte frame at LORA_PREAMBLE_MAX (the longest, Costa Rica, about 5.9 s), so only a custom
+// slow config (SF12 at 125 kHz or less) with a long packet is refused.
+#define LORA_TX_MAX_AIRTIME_US 8000000u
+// The time the C6 waits for a TX done after a send before it gives up on it
+#define LORA_TX_SLACK_US 1000000
+
+// A SEND whose time on air is toa_us, started at now_us: false (refuse with LORA_RESULT_BAD_PARAM) when it would be
+// on air for longer than LORA_TX_MAX_AIRTIME_US, else true with the TX-done deadline in *deadline_us (saturated, never
+// an overflow)
+bool lora_tx_admit(int64_t now_us, uint64_t toa_us, int64_t *deadline_us);
 
 // A sweep the C6 carries out: count, samples and step in range, every step inside 862-928 MHz like lora_config_valid
 bool lora_sweep_req_valid(lora_sweep_req_t const *r);

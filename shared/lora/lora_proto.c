@@ -365,7 +365,16 @@ bool lora_config_valid(lora_config_t const *c) {
         bw_ok |= c->bw_hz == bandwidths[i];
     }
     return bw_ok && c->freq_hz >= 862000000 && c->freq_hz <= 928000000 && c->sf >= 5 && c->sf <= 12 && c->cr >= 5 &&
-           c->cr <= 8 && c->preamble >= 6 && c->tx_power_dbm >= -9 && c->tx_power_dbm <= 22;
+           c->cr <= 8 && c->preamble >= LORA_PREAMBLE_MIN && c->preamble <= LORA_PREAMBLE_MAX && c->tx_power_dbm >= -9 && c->tx_power_dbm <= 22;
+}
+
+bool lora_tx_admit(int64_t now_us, uint64_t toa_us, int64_t *deadline_us) {
+    if (toa_us > LORA_TX_MAX_AIRTIME_US) {
+        return false;
+    }
+    int64_t const wait = (int64_t)toa_us + LORA_TX_SLACK_US; // at most 9 s after the check above
+    *deadline_us       = now_us > INT64_MAX - wait ? INT64_MAX : now_us + wait;
+    return true;
 }
 
 bool lora_sweep_req_valid(lora_sweep_req_t const *r) {

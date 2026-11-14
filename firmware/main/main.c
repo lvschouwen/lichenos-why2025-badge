@@ -850,6 +850,10 @@ static void start_lora(boot_ctx_t *ctx) {
     if (!lora_ok) {
         ESP_LOGE(TAG, "LoRa not started");
     }
+    char const *cfg_err = lora_config_error();
+    if (cfg_err) { // the console has the same line from lora; the default preset keeps the radio usable (#452)
+        lichen_sys_notify(LN_WARN, "lora.toml not used: default preset", cfg_err, LN_ONCE_BOOT);
+    }
     lichen_reg_start(); // after lora_start: its first c6.reg_caps ask goes out through the LoRa task (#310)
     boot_progress_end(BOOT_LORA, lora_ok ? STEP_DONE : STEP_FAILED, lora_ok ? NULL : "LoRa not started");
 }

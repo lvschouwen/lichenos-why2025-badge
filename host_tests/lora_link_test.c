@@ -304,8 +304,11 @@ static void cfg_reasons(void) {
         {"coding_rate = \"8\"\nsync_word = -1\n", "coding_rate must be an integer (5 = 4/5 ... 8 = 4/8)"},
         {"sync_word = 1.5\n", "sync_word must be an integer 0-255"},
         {"preamble = 65536\n", "preamble must be an integer 0-65535"},
-        {"spreading_factor = 4\n", "values out of range (862-928 MHz, LoRa bandwidth, SF 5-12, CR 5-8, preamble >= 6)"},
-        {"preamble = 5\n", "values out of range (862-928 MHz, LoRa bandwidth, SF 5-12, CR 5-8, preamble >= 6)"},
+        {"spreading_factor = 4\n", "values out of range (862-928 MHz, LoRa bandwidth, SF 5-12, CR 5-8, preamble 6-64)"},
+        {"preamble = 5\n", "values out of range (862-928 MHz, LoRa bandwidth, SF 5-12, CR 5-8, preamble 6-64)"},
+        // #452: 65535 keyed the PA for minutes per packet; both chips now refuse it, the badge keeps the default preset
+        {"preamble = 65\n", "values out of range (862-928 MHz, LoRa bandwidth, SF 5-12, CR 5-8, preamble 6-64)"},
+        {"preamble = 65535\n", "values out of range (862-928 MHz, LoRa bandwidth, SF 5-12, CR 5-8, preamble 6-64)"},
     };
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
         lora_config_t c;
@@ -336,7 +339,8 @@ static void cfg_edges(void) {
         {"frequency_mhz = 928\n", 928000000, 62500, 0x12, 16},
         {"bandwidth_khz = 500\n", 869618000, 500000, 0x12, 16},
         {"sync_word = 255\n", 869618000, 62500, 255, 16},
-        {"preamble = 65535\n", 869618000, 62500, 0x12, 65535},
+        {"preamble = 64\n", 869618000, 62500, 0x12, 64}, // LORA_PREAMBLE_MAX (#452)
+        {"preamble = 6\n", 869618000, 62500, 0x12, 6},
         {"frequency_mhz = 869.6184996\n", 869618500, 62500, 0x12, 16},  // 869618499.6 Hz
         {"bandwidth_khz = 62.4996\n", 869618000, 62500, 0x12, 16},      // 62499.6 Hz
     };
@@ -405,7 +409,7 @@ static void cfg_malformed(void) {
         free(text);
     }
     failures += bad ? 1 : 0;
-    uint32_t const pinned = 0x810aca26u;
+    uint32_t const pinned = 0xad0f43e6u; // #452: the reason now says "preamble 6-64", and over 64 is refused
     if (h != pinned) {
         printf("FAIL lora_cfg_parse digest 0x%08x, pinned 0x%08x\n", (unsigned)h, (unsigned)pinned);
         failures++;

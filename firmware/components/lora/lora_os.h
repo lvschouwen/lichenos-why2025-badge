@@ -95,6 +95,10 @@ typedef struct {
 } lora_requested_t;
 void lora_get_requested(lora_requested_t *out);
 
+// Why lora.toml was refused at boot (out of range, not TOML, a bad key), NULL when it was used or is missing. The
+// radio runs the default preset instead (#452); the OS says so on screen. Set once by lora_start, read after it.
+char const *lora_config_error(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -241,6 +241,10 @@ static void config_valid_ranges(void) {
         {3, 9, false},
         {4, 5, false},
         {4, 6, true},
+        {4, 16, true},     // MeshCore's
+        {4, 64, true},     // LORA_PREAMBLE_MAX (#452)
+        {4, 65, false},
+        {4, 65535, false}, // minutes to hours on air per packet
         {5, (uint32_t)-10, false},
         {5, (uint32_t)-9, true},
         {5, 22, true},
@@ -261,6 +265,34 @@ static void config_valid_ranges(void) {
             failures++;
         }
     }
+}
+
+// #452: a config at each preamble bound comes out of the wire as it went in and the C6 (the same function on the
+// decoded copy) judges it as the P4 did
+static void config_bounds_agree_over_the_wire(void) {
+    uint16_t const preambles[] = {5, 6, 64, 65, 65535};
+    for (size_t i = 0; i < sizeof(preambles) / sizeof(preambles[0]); i++) {
+        lora_msg_t m        = {.type = LORA_MSG_CONFIG, .u.config = LORA_CONFIG_DEFAULT};
+        m.u.config.preamble = preambles[i];
+        size_t     n;
+        lora_msg_t got = round_trip(&m, &n);
+        CHECK(got.u.config.preamble == preambles[i]);
+        CHECK(lora_config_valid(&got.u.config) == lora_config_valid(&m.u.config));
+    }
+}
+
+// #452: the C6 refuses a SEND over the ceiling and its deadline never overflows
+static void tx_admit_ceiling(void) {
+    int64_t d = -1;
+    CHECK(lora_tx_admit(1000, 0, &d) && d == 1000 + LORA_TX_SLACK_US);
+    CHECK(lora_tx_admit(1000, LORA_TX_MAX_AIRTIME_US, &d) && d == 1000 + LORA_TX_MAX_AIRTIME_US + LORA_TX_SLACK_US);
+    d = -1;
+    CHECK(!lora_tx_admit(1000, LORA_TX_MAX_AIRTIME_US + 1, &d) && d == -1); // refused, deadline untouched
+    CHECK(!lora_tx_admit(0, UINT64_MAX, &d));
+    CHECK(!lora_tx_admit(0, (uint64_t)INT64_MAX + 1, &d)); // would be negative as an int64
+    CHECK(!lora_tx_admit(0, UINT32_MAX, &d));              // RadioLib's largest figure
+    CHECK(lora_tx_admit(INT64_MAX - 5, LORA_TX_MAX_AIRTIME_US, &d) && d == INT64_MAX); // saturated
+    CHECK(lora_tx_admit(INT64_MIN, 0, &d) && d == INT64_MIN + LORA_TX_SLACK_US);
 }
 
 // RSSI sweep (#161): request and answer round trip, the layout pinned, every bad length refused
@@ -427,6 +459,8 @@ int main(void) {
     encode_short_buffer();
     decode_rejects_bad_input();
     config_valid_ranges();
+    config_bounds_agree_over_the_wire();
+    tx_admit_ceiling();
     ident_round_trip();
     sweep_round_trip();
     sweep_valid_ranges();

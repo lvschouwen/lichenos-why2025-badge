@@ -3,6 +3,9 @@
 #include <math.h>
 
 uint32_t lora_airtime_us(int len, uint8_t sf, uint32_t bw_hz, uint8_t cr, uint16_t preamble) {
+    if (bw_hz == 0 || sf < 5 || sf > 12) {
+        return UINT32_MAX; // no radio config looks like this: the longest answer is the safe one for a budget
+    }
     double tsym_us = (double)(1u << sf) * 1e6 / (double)bw_hz;
     int    de      = tsym_us >= 16000.0 ? 1 : 0; // low data rate optimisation
     int    crc     = 1, ih = 0;                  // CRC on, explicit header
@@ -13,7 +16,10 @@ uint32_t lora_airtime_us(int len, uint8_t sf, uint32_t bw_hz, uint8_t cr, uint16
     }
     double payload_symbols = 8 + symbols;
     double preamble_us     = (preamble + 4.25) * tsym_us;
-    return (uint32_t)(preamble_us + payload_symbols * tsym_us);
+    double us              = preamble_us + payload_symbols * tsym_us;
+    // Saturated, as a cast of a double past the range is undefined (#452): 65535 preamble symbols at SF12/7.8 kHz
+    // is about 9.5 h, over UINT32_MAX microseconds
+    return us >= (double)UINT32_MAX ? UINT32_MAX : (uint32_t)us;
 }
 
 // RadioLibWrapper's table: the SNR each SF needs at least (SF7 first)

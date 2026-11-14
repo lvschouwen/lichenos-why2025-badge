@@ -57,8 +57,6 @@ static_assert(RADIOLIB_SX126X_LORA_BW_7_8 == 0x00 && RADIOLIB_SX126X_LORA_BW_10_
 
 // MeshCore's settings for this board (variants/why2025_badge: SX126X_CURRENT_LIMIT)
 #define CURRENT_LIMIT_MA 140
-// A transmission not done by its airtime plus this is given up (a missed DIO1)
-#define TX_SLACK_US (1000 * 1000LL)
 
 // RSSI sweep (#161): after entering RX on a new frequency the SX1262 needs about a millisecond before its instantaneous
 // RSSI means anything (2 ticks at 1 kHz: at least one full millisecond), then the readings are spread a little
@@ -457,6 +455,15 @@ static void handle_command(lora_cmd_t const *cmd) {
                 send_result(msg.type, LORA_RESULT_BAD_STATE, 0);
                 return;
             }
+            // The chip that owns the PA refuses an absurd time on air itself (#452), whatever the P4 asked for.
+            // RadioLib's figure does not wrap for any config lora_config_valid takes (at most about 1.1e9 us).
+            uint64_t const toa_us = radio.getTimeOnAir(msg.u.tx.len);
+            if (!lora_tx_admit(esp_timer_get_time(), toa_us, &tx_deadline_us)) {
+                ESP_LOGW(TAG, "tx %u B refused: on air for over %u ms", (unsigned)msg.u.tx.len,
+                         (unsigned)(LORA_TX_MAX_AIRTIME_US / 1000));
+                send_result(msg.type, LORA_RESULT_BAD_PARAM, 0);
+                return;
+            }
             radio.setIrqAction(on_dio1);
             int16_t err = radio.startTransmit(msg.u.tx.data, msg.u.tx.len);
             if (err != RADIOLIB_ERR_NONE) {
@@ -466,7 +473,7 @@ static void handle_command(lora_cmd_t const *cmd) {
                 return;
             }
             status.state   = LORA_STATE_TX;
-            tx_deadline_us = esp_timer_get_time() + (int64_t)radio.getTimeOnAir(msg.u.tx.len) + TX_SLACK_US;
+            lora_tx_admit(esp_timer_get_time(), toa_us, &tx_deadline_us); // from the start, as before
             ESP_LOGI(TAG, "tx %u B", (unsigned)msg.u.tx.len);
             return;
         }

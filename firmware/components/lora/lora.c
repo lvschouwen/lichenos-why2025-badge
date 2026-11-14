@@ -194,6 +194,8 @@ static uint32_t  tx_sent_ms, tx_airtime_ms; // the current send, for the round-t
 // Set by lora_set_radio(), sent to the C6 by the LoRa task
 static bool          config_changed;
 static lora_config_t boot_config = LORA_CONFIG_DEFAULT;
+// Why lora.toml was not used at boot (#452), for the OS's notice; empty when it was, or when there is none
+static char config_error[96];
 
 bool lora_set_tx_power(char const *who, int8_t dbm) {
     if (!owner_check(who, "TX power")) {
@@ -300,6 +302,10 @@ static uint32_t now_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
+char const *lora_config_error(void) {
+    return config_error[0] ? config_error : NULL;
+}
+
 static void load_config(void) {
     FILE *fp = fopen(LORA_TOML, "r");
     if (!fp) {
@@ -316,9 +322,9 @@ static void load_config(void) {
     fclose(fp);
     text[len] = '\0';
 
-    char err[128];
-    if (!lora_cfg_parse(text, len, &config, err, sizeof(err))) {
-        ESP_LOGE(TAG, "%s: %s; using the default preset", LORA_TOML, err);
+    // The reason goes straight into config_error (cut to its size), so the notice says what the console says
+    if (!lora_cfg_parse(text, len, &config, config_error, sizeof(config_error))) {
+        ESP_LOGE(TAG, "%s: %s; using the default preset", LORA_TOML, config_error);
     }
     free(text);
 }

@@ -119,7 +119,7 @@ bool lora_cfg_parse(char const *text, size_t len, lora_config_t *out, char *err,
             out,
             err,
             errlen,
-            "values out of range (862-928 MHz, LoRa bandwidth, SF 5-12, CR 5-8, preamble >= 6)"
+            "values out of range (862-928 MHz, LoRa bandwidth, SF 5-12, CR 5-8, preamble 6-64)"
         );
     }
     *out = c;

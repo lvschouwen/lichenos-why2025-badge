@@ -24,6 +24,18 @@ int main(void) {
     // The badge's mesh preset with a full packet stays well under a second
     CHECK(lora_airtime_us(255, 7, 62500, 5, 16) < 1000000);
 
+    // #452: the extremes saturate instead of an undefined cast. 65535 preamble symbols at SF12/7.8 kHz is about
+    // 9.6 h, over UINT32_MAX us; UBSan (float-cast-overflow) caught the old cast here
+    CHECK(lora_airtime_us(255, 12, 7800, 8, 65535) == UINT32_MAX);
+    CHECK(lora_airtime_us(255, 12, 7800, 8, 64) > 250000000u && lora_airtime_us(255, 12, 7800, 8, 64) < 260000000u);
+    CHECK(lora_airtime_us(0, 5, 500000, 5, 6) > 0);
+    CHECK(lora_airtime_us(-1000, 7, 62500, 5, 16) > 0); // a negative length counts no payload symbols
+    // Never a real config: the longest answer, no division by zero or shift past the width
+    CHECK(lora_airtime_us(10, 7, 0, 5, 16) == UINT32_MAX);
+    CHECK(lora_airtime_us(10, 13, 125000, 5, 16) == UINT32_MAX);
+    CHECK(lora_airtime_us(10, 4, 125000, 5, 16) == UINT32_MAX);
+    CHECK(lora_airtime_us(10, 255, 125000, 5, 16) == UINT32_MAX);
+
     // Score: nothing below the SF7 floor of -7.5 dB, full marks 10 dB above it for an empty packet
     CHECK(lora_packet_score(-8.0f, 7, 20) == 0.0f);
     CHECK(fabsf(lora_packet_score(2.5f, 7, 0) - 1.0f) < 1e-6f);

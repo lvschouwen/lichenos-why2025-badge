@@ -2604,3 +2604,11 @@ target_include_directories(ota_token_test PRIVATE ${NPT_FW}/ota ${NPT_FW}/fw_con
 target_compile_definitions(ota_token_test PRIVATE OTA_TOKEN_FILE="${CMAKE_CURRENT_BINARY_DIR}/ota_token_test.txt")
 target_compile_options(ota_token_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME ota_token_test COMMAND ota_token_test)
+
+# #452: every MeshCore preset inside the radio bounds both chips share (lora_config_valid, the C6's airtime ceiling)
+add_executable(radio_bounds_test ${CMAKE_CURRENT_SOURCE_DIR}/radio_bounds_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../shared/lora/lora_proto.c ${NPT_FW}/mesh/radio_presets.c ${NPT_FW}/mesh/lora_airtime.c)
+target_include_directories(radio_bounds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/lora ${NPT_FW}/mesh)
+target_compile_options(radio_bounds_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(radio_bounds_test PRIVATE m)
+add_test(NAME radio_bounds_test COMMAND radio_bounds_test)
