@@ -15,7 +15,8 @@ typedef enum { FJ_ROOT, FJ_LIST, FJ_READ, FJ_DELETE, FJ_COPY } files_job_kind_t;
 typedef struct {
     files_job_kind_t kind;
     files_result_t   result;
-    int              err;        // errno of a failed listing
+    int              err;        // errno of a failed listing, or of the failed step of a copy
+    files_step_t     step;       // FJ_COPY: where it failed (FILES_STEP_NONE when it did not)
     // FJ_ROOT: both volumes; FJ_LIST: the listed directory's volume (free/total in the first slot)
     bool             have[2];
     uint64_t         free_bytes[2], total_bytes[2];

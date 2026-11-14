@@ -35,6 +35,10 @@ char const *files_result_text(files_result_t r) {
     case FILES_ERR_NOT_EMPTY: return "Only empty folders can be deleted.";
     case FILES_ERR_SPACE:     return "Not enough room on the target.";
     case FILES_ERR_OPEN:      return "Could not open it (is the card still in?).";
+    case FILES_ERR_CARD:      return "The card is not ready or busy. Try again in a moment.";
+    case FILES_ERR_SRC:       return "Could not read the source file.";
+    case FILES_ERR_DEST:      return "Could not create the file on the target (name not allowed there?).";
+    case FILES_ERR_NAME:      return "Names on the card cannot hold \" * : < > ? | \\ or end in a space or dot.";
     case FILES_ERR_IO:        return "A read or write failed.";
     case FILES_ERR_NO_MEM:    return "Not enough memory.";
     case FILES_ERR_BUSY:      return "In use by another app (or read-only): left as it was.";
@@ -48,6 +52,26 @@ char const *files_result_text(files_result_t r) {
 // is ENFILE/EMFILE. Both are "try again later", not a card fault, so files_job does not count them against the card.
 static files_result_t errno_result(int err, files_result_t otherwise) {
     return err == EACCES || err == EBUSY || err == ENFILE || err == EMFILE ? FILES_ERR_BUSY : otherwise;
+}
+
+char const *files_step_name(files_step_t step) {
+    switch (step) {
+    case FILES_STEP_NONE:     return "none";
+    case FILES_STEP_SD_BEGIN: return "sd_begin";
+    case FILES_STEP_SRC_STAT: return "src_stat";
+    case FILES_STEP_SRC_OPEN: return "src_open";
+    case FILES_STEP_DST_OPEN: return "dst_open";
+    }
+    return "?";
+}
+
+static files_result_t fail_at(files_fail_t *fail, files_step_t step, files_result_t otherwise) {
+    int err = errno;
+    if (fail) {
+        fail->step = step;
+        fail->err  = err;
+    }
+    return errno_result(err, otherwise);
 }
 
 int files_list(char const *dir, files_entry_t *out, size_t max, size_t *count, size_t *skipped) {
@@ -145,7 +169,8 @@ files_result_t files_read_at(char const *path, uint32_t offset, uint8_t *buf, si
 
 // ---- copy ---------------------------------------------------------------------------------------------------------
 
-static files_result_t copy_checks(char const *src, char const *dst, uint64_t free_bytes, uint32_t *size) {
+static files_result_t copy_checks(char const *src, char const *dst, uint64_t free_bytes, uint32_t *size,
+                                  files_fail_t *fail) {
     if (!files_path_ok(src) || !files_path_ok(dst) || strlen(dst) + sizeof(FILES_PART_SUFFIX) >= FILES_PATH_MAX) {
         return FILES_ERR_ARG;
     }
@@ -155,7 +180,7 @@ static files_result_t copy_checks(char const *src, char const *dst, uint64_t fre
     struct stat st;
     char        rb[FILES_PATH_MAX + 64];
     if (stat(real_path(src, rb, sizeof(rb)), &st) != 0) {
-        return FILES_ERR_OPEN;
+        return fail_at(fail, FILES_STEP_SRC_STAT, FILES_ERR_SRC);
     }
     if (!S_ISREG(st.st_mode)) {
         return FILES_ERR_NOT_FILE;
@@ -187,10 +212,10 @@ static files_result_t copy_data(FILE *in, FILE *out, uint8_t *buf, size_t cap, u
     }
 }
 
-files_result_t files_copy(char const *src, char const *dst, uint8_t *buf, size_t buf_cap, uint64_t free_bytes,
-                          files_progress_fn progress, void *ctx) {
+files_result_t files_copy_ex(char const *src, char const *dst, uint8_t *buf, size_t buf_cap, uint64_t free_bytes,
+                             files_progress_fn progress, void *ctx, files_fail_t *fail) {
     uint32_t       total = 0;
-    files_result_t r     = buf && buf_cap ? copy_checks(src, dst, free_bytes, &total) : FILES_ERR_NO_MEM;
+    files_result_t r     = buf && buf_cap ? copy_checks(src, dst, free_bytes, &total, fail) : FILES_ERR_NO_MEM;
     if (r != FILES_OK) {
         return r;
     }
@@ -204,7 +229,7 @@ files_result_t files_copy(char const *src, char const *dst, uint8_t *buf, size_t
     FILE *in  = fopen(real_path(src, rsrc, sizeof(rsrc)), "rb");
     FILE *out = in ? fopen(rpart, "wb") : NULL;
     if (!out) {
-        r = errno_result(errno, FILES_ERR_OPEN);
+        r = in ? fail_at(fail, FILES_STEP_DST_OPEN, FILES_ERR_DEST) : fail_at(fail, FILES_STEP_SRC_OPEN, FILES_ERR_SRC);
         if (in) {
             fclose(in);
         }
@@ -223,4 +248,9 @@ files_result_t files_copy(char const *src, char const *dst, uint8_t *buf, size_t
         unlink(rpart);
     }
     return r;
+}
+
+files_result_t files_copy(char const *src, char const *dst, uint8_t *buf, size_t buf_cap, uint64_t free_bytes,
+                          files_progress_fn progress, void *ctx) {
+    return files_copy_ex(src, dst, buf, buf_cap, free_bytes, progress, ctx, NULL);
 }

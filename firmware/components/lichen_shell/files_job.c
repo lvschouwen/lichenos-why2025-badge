@@ -75,7 +75,10 @@ static files_result_t run_copy(void) {
     if (s_result.have[slot]) {
         free_bytes = s_result.free_bytes[slot];
     }
-    files_result_t r = files_copy(s_req.path, s_req.dst, buf, COPY_CHUNK, free_bytes, copy_progress, NULL);
+    files_fail_t   fail = {FILES_STEP_NONE, 0};
+    files_result_t r    = files_copy_ex(s_req.path, s_req.dst, buf, COPY_CHUNK, free_bytes, copy_progress, NULL, &fail);
+    s_result.step       = fail.step;
+    s_result.err        = fail.err;
     lichen_free(lichen_sys_ctx_os(), buf);
     return r;
 }
@@ -121,7 +124,8 @@ static void job_task(void *arg) {
     bool need_sd  = on_sd(s_req.path) || on_sd(s_req.dst);
     bool locked   = need_sd && lichen_sys_sd_begin(SD_WAIT_MS);
     if (need_sd && !locked) {
-        s_result.result = FILES_ERR_OPEN; // no card, or the card is busy
+        s_result.result = FILES_ERR_CARD; // no card, or the card is busy
+        s_result.step   = FILES_STEP_SD_BEGIN;
     } else {
         errno           = 0;
         s_result.result = run_kind();
@@ -129,9 +133,13 @@ static void job_task(void *arg) {
     if (locked) {
         int err = errno;
         // A full open-file table (a listing's opendir) is the OS's limit, not the card's (#274)
-        bool card_error = (s_result.result == FILES_ERR_IO || s_result.result == FILES_ERR_OPEN) && err != ENFILE &&
-                          err != EMFILE;
+        bool card_error = (s_result.result == FILES_ERR_IO || s_result.result == FILES_ERR_OPEN ||
+                           s_result.result == FILES_ERR_SRC || s_result.result == FILES_ERR_DEST) &&
+                          err != ENFILE && err != EMFILE;
         lichen_sys_sd_end(card_error ? lichen_sys_sd_io_from_errno(err) : LICHEN_SD_IO_OK);
+    }
+    if (s_req.kind == FJ_COPY && s_result.result != FILES_OK && s_result.step != FILES_STEP_NONE) {
+        ESP_LOGI(TAG, "copy: step=%s errno=%d", files_step_name(s_result.step), s_result.err);
     }
     ESP_LOGI(TAG, "job %d -> %d, stack margin %u", (int)s_req.kind, (int)s_result.result,
              (unsigned)uxTaskGetStackHighWaterMark(NULL));

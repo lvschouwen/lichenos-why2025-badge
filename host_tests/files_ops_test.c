@@ -125,8 +125,13 @@ static void test_copy(void) {
     CHECK(files_copy("/sd/big.bin", "/storage/lora.toml", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_PROTECTED);
     CHECK(files_copy("/storage/big.bin", "/sd/lichen/messages/x", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_PROTECTED);
     CHECK(files_copy("/storage/zdir", "/sd/zdir", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_NOT_FILE);
-    CHECK(files_copy("/storage/nothing", "/sd/n", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_OPEN);
-    CHECK(files_copy("/storage/big.bin", "/sd/nodir/x", buf, sizeof(buf), UINT64_MAX, NULL, NULL) == FILES_ERR_OPEN);
+    files_fail_t fail = {FILES_STEP_NONE, 0}; // #443: the step and errno say which of the failures it was
+    CHECK(files_copy_ex("/storage/nothing", "/sd/n", buf, sizeof(buf), UINT64_MAX, NULL, NULL, &fail) == FILES_ERR_SRC);
+    CHECK(fail.step == FILES_STEP_SRC_STAT && fail.err == ENOENT);
+    fail.step = FILES_STEP_NONE;
+    CHECK(files_copy_ex("/storage/big.bin", "/sd/nodir/x", buf, sizeof(buf), UINT64_MAX, NULL, NULL, &fail) == FILES_ERR_DEST);
+    CHECK(fail.step == FILES_STEP_DST_OPEN && fail.err == ENOENT);
+    CHECK(!strcmp(files_step_name(fail.step), "dst_open") && !strcmp(files_step_name(FILES_STEP_SD_BEGIN), "sd_begin"));
     CHECK(!exists("/sd/nodir/x.lichen-part"));
     CHECK(files_copy("/storage/big.bin", "/sd/y", NULL, 0, UINT64_MAX, NULL, NULL) == FILES_ERR_NO_MEM);
     write_file("/sd/u.part", 3, 'u'); // a user's own .part file is never touched
@@ -137,6 +142,20 @@ static void test_copy(void) {
 
 // FatFs's file lock (#274) answers EACCES for a file another task has open. A read-only directory gives the host the
 // same errno: the Files app says "in use", leaves the file as it was and does not blame the card (FILES_ERR_IO).
+static void test_texts(void) {
+    // the three copy failures and the name refusal each get their own sentence
+    files_result_t const all[] = {FILES_ERR_OPEN, FILES_ERR_CARD, FILES_ERR_SRC, FILES_ERR_DEST, FILES_ERR_NAME};
+    for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); i++) {
+        for (size_t j = i + 1; j < sizeof(all) / sizeof(all[0]); j++) {
+            CHECK(strcmp(files_result_text(all[i]), files_result_text(all[j])) != 0);
+        }
+        CHECK(strlen(files_result_text(all[i])) < 90); // action_done's buffer is 96
+    }
+    CHECK(strstr(files_result_text(FILES_ERR_CARD), "not ready") != NULL);
+    CHECK(strstr(files_result_text(FILES_ERR_SRC), "source") != NULL);
+    CHECK(strstr(files_result_text(FILES_ERR_DEST), "name not allowed") != NULL);
+}
+
 static void test_busy(void) {
     static uint8_t buf[64];
     char           rp[512];
@@ -159,6 +178,10 @@ static void test_busy(void) {
     uint32_t total;
     CHECK(files_read_at("/sd/held/r", 0, buf, 4, &got, &total) == FILES_ERR_BUSY);
     CHECK(strstr(files_result_text(FILES_ERR_BUSY), "In use") != NULL);
+    // an unreadable source is "could not read the source", not the card's fault (#443)
+    files_fail_t fail = {FILES_STEP_NONE, 0};
+    CHECK(files_copy_ex("/sd/held/r", "/sd/held/h", buf, sizeof(buf), UINT64_MAX, NULL, NULL, &fail) == FILES_ERR_BUSY);
+    CHECK(fail.step == FILES_STEP_SRC_OPEN && fail.err == EACCES);
     chmod(rp, 0700);
     fpath("/sd/held/r", rp);
     chmod(rp, 0600);
@@ -176,6 +199,7 @@ int main(void) {
     test_delete();
     test_read();
     test_copy();
+    test_texts();
     test_busy();
     char cmd[300];
     snprintf(cmd, sizeof(cmd), "rm -r %s", tmpl); // test data only, in our own mkdtemp directory

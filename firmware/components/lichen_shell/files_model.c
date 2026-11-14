@@ -21,6 +21,19 @@ bool files_name_ok(char const *name) {
     return true;
 }
 
+bool files_name_ok_fat(char const *name) {
+    if (!files_name_ok(name)) {
+        return false;
+    }
+    for (char const *p = name; *p; p++) {
+        if (strchr("\"*:<>?|\\", *p)) {
+            return false;
+        }
+    }
+    char last = name[strlen(name) - 1];
+    return last != ' ' && last != '.';
+}
+
 char const *files_volume_of(char const *path) {
     if (!path) {
         return NULL;

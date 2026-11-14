@@ -22,6 +22,11 @@ static void test_paths(void) {
     CHECK(!files_path_ok(NULL));
     CHECK(files_name_ok("a b.txt") && !files_name_ok("") && !files_name_ok("..") && !files_name_ok(".") &&
           !files_name_ok("a/b") && !files_name_ok("a\tb"));
+    CHECK(files_name_ok_fat("a b.txt") && files_name_ok_fat("a.b") && files_name_ok_fat(".hidden") && files_name_ok_fat("x"));
+    CHECK(!files_name_ok_fat("a\"b") && !files_name_ok_fat("a*b") && !files_name_ok_fat("a:b") && !files_name_ok_fat("a<b") &&
+          !files_name_ok_fat("a>b") && !files_name_ok_fat("a?b") && !files_name_ok_fat("a|b") && !files_name_ok_fat("a\\b"));
+    CHECK(!files_name_ok_fat("a ") && !files_name_ok_fat("a.") && !files_name_ok_fat("a/b") && !files_name_ok_fat("a\tb") &&
+          !files_name_ok_fat("") && !files_name_ok_fat(NULL));
     char out[FILES_PATH_MAX];
     CHECK(files_path_join("/sd", "x.txt", out, sizeof(out)) && !strcmp(out, "/sd/x.txt"));
     CHECK(!files_path_join("/sd", "../x", out, sizeof(out)));

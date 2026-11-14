@@ -22,7 +22,21 @@ typedef enum {
     FILES_ERR_IO,
     FILES_ERR_NO_MEM,
     FILES_ERR_BUSY, // EACCES/EBUSY: another task has the file open (FatFs's lock #274, LittleFS #300), or read-only
+    // A copy says which step failed (#443), so the screen can tell the three apart
+    FILES_ERR_CARD, // the card is not ready or another user holds it (sd_begin refused)
+    FILES_ERR_SRC,  // the source could not be examined or opened
+    FILES_ERR_DEST, // the target file could not be created (FatFs: name not allowed, no directory entry, ...)
+    FILES_ERR_NAME, // the name cannot exist on FAT: refused before anything is opened
 } files_result_t;
+
+// The step of a copy that failed, with the errno it left (0 when none was set)
+typedef enum { FILES_STEP_NONE, FILES_STEP_SD_BEGIN, FILES_STEP_SRC_STAT, FILES_STEP_SRC_OPEN, FILES_STEP_DST_OPEN } files_step_t;
+typedef struct {
+    files_step_t step;
+    int          err;
+} files_fail_t;
+
+char const *files_step_name(files_step_t step); // for the log line
 
 char const *files_result_text(files_result_t r); // a sentence for the screen
 
@@ -46,6 +60,9 @@ typedef bool (*files_progress_fn)(uint32_t done, uint32_t total, void *ctx);
 // A marker a user is unlikely to have; only a file with this suffix is ever removed as a leftover
 #define FILES_PART_SUFFIX ".lichen-part"
 
+// fail (may be NULL) is filled when the copy fails at one of the steps above.
+files_result_t files_copy_ex(char const *src, char const *dst, uint8_t *buf, size_t buf_cap, uint64_t free_bytes,
+                             files_progress_fn progress, void *ctx, files_fail_t *fail);
 files_result_t files_copy(char const *src, char const *dst, uint8_t *buf, size_t buf_cap, uint64_t free_bytes,
                           files_progress_fn progress, void *ctx);
 

@@ -459,6 +459,8 @@ static void start_copy(size_t index) {
         say("This file holds secrets, so it is not copied.");
     } else if (!files_path_join(files_other_volume(files_volume_of(src)), e->name, dst, sizeof(dst))) {
         say(files_result_text(FILES_ERR_ARG));
+    } else if (!strcmp(files_other_volume(files_volume_of(src)), FILES_SD) && !files_name_ok_fat(e->name)) {
+        say(files_result_text(FILES_ERR_NAME)); // FatFs would refuse it at the open; say so before any file is touched
     } else if (files_job_start(FJ_COPY, src, dst, 0)) {
         snprintf(s_v.target, sizeof(s_v.target), "%s", e->name);
         say("Copying...");

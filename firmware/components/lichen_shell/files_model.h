@@ -28,6 +28,8 @@ typedef struct {
 bool files_path_ok(char const *path);
 // A plain file or directory name: not empty, not "." or "..", no '/', no control characters, fits FILES_NAME_MAX
 bool files_name_ok(char const *name);
+// Also fine on a FAT card (FatFs refuses " * : < > ? | \ and a trailing space or dot with FR_INVALID_NAME, #443)
+bool files_name_ok_fat(char const *name);
 // dir + "/" + name; false (out untouched) for a bad name or when it does not fit
 bool files_path_join(char const *dir, char const *name, char *out, size_t cap);
 // "/storage/a/b" -> "/storage/a"; "/storage" -> "" (the volume list). False for a path that is not ok or already ""
