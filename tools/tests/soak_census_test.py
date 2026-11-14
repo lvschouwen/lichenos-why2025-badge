@@ -173,7 +173,7 @@ class ScrubTest(unittest.TestCase):
         return list(census(["I (100) " + text] * 2, warmup_h=0, **kw).kinds)
 
     def test_nothing_private_reaches_the_kind_or_the_report(self):
-        for vocab in (TEST_VOCAB, None):          # the fixture vocabulary and the checked-in one
+        for vocab in (TEST_VOCAB, sv.build()):    # the fixture vocabulary and the real tree's
             for text, bad in self.LEAKS:
                 c = census(["I (100) " + text] * 3, warmup_h=0, vocab=vocab)
                 out = "\n".join(sc.census_report(c)) + "\n".join(c.kinds)
@@ -245,10 +245,6 @@ class ScrubTest(unittest.TestCase):
 
 
 class VocabTest(unittest.TestCase):
-    def test_checked_in_vocabulary_is_what_the_generator_extracts(self):
-        with open(sv.VOCAB_FILE, encoding="utf-8") as f:
-            self.assertEqual(f.read(), "\n".join(sv.extract()) + "\n", "stale: run tools/soak_vocab.py --write")
-
     def test_extraction_rules(self):
         src = ('static char const TAG[] = "boot_keys";\n'
                'ESP_LOGW(TAG, "slot %-5s took %lu ms 0x1f: Retry\\n", name, x ? "yes" : "no");\n'
@@ -256,13 +252,48 @@ class VocabTest(unittest.TestCase):
                'printf("not a log word");\n')
         self.assertEqual(sorted(sv.file_words(src)), ["boot", "keys", "ms", "no", "ok", "retry", "slot", "took", "yes"])
 
-    def test_vocabulary_is_ascii_lowercase_and_sorted(self):
-        words = sv.load()
+    def write_tree(self, root, files):
+        for rel, text in files.items():
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                f.write(text)
+
+    def test_fixture_tree_scan_dirs_and_exclusions(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.write_tree(d, {
+                "firmware/main/a.c": 'ESP_LOGI(TAG, "alpha beta");',
+                "c6/main/b.c": 'ESP_LOGI(TAG, "gamma");',
+                "shared/lora/c.h": 'console_reply("delta");',
+                "firmware/build/gen.c": 'ESP_LOGI(TAG, "excluded one");',
+                "firmware/managed_components/x/y.c": 'ESP_LOGI(TAG, "excluded two");',
+                "third_party/z.c": 'ESP_LOGI(TAG, "excluded three");',
+                "firmware/main/notes.txt": 'ESP_LOGI(TAG, "excluded four");'})
+            self.assertEqual(sv.extract(d), ["alpha", "beta", "delta", "gamma"])
+            self.assertEqual(sv.build(d), frozenset(["alpha", "beta", "delta", "gamma"]))
+
+    def test_no_source_tree_fails_closed(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaises(sv.VocabError):
+                sv.build(d)
+
+    def test_saved_word_list_round_trip(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "words.txt")
+            with open(path, "w") as f:
+                f.write("beta\nalpha\n\n")
+            self.assertEqual(sv.load(path), frozenset(["alpha", "beta"]))
+            with open(path, "w") as f:
+                f.write("\n")
+            with self.assertRaises(sv.VocabError):
+                sv.load(path)
+
+    def test_real_tree_vocabulary(self):
+        words = sv.build()
         self.assertGreater(len(words), 500)
+        for w in ("took", "loop", "saved", "ms"):
+            self.assertIn(w, words)
         self.assertTrue(all(w.isascii() and w.isalpha() and w == w.lower() for w in words))
-        with open(sv.VOCAB_FILE, encoding="utf-8") as f:
-            lines = f.read().split()
-        self.assertEqual(lines, sorted(lines))
 
 
 def csv_samples(n, **cols):
@@ -390,6 +421,31 @@ class CliTest(unittest.TestCase):
         self.assertEqual((code, err.startswith("usage: soak_report.py census")), (2, True))
         code, _, err = self.run_cli("trend")
         self.assertEqual((code, err.startswith("usage: soak_report.py trend")), (2, True))
+
+    def test_no_source_tree_and_no_vocab_exits_two_without_output(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "s.log")
+            with open(log, "w") as f:
+                f.write("I (1) tick: ok\n")
+            saved = sv.ROOT
+            sv.ROOT = d
+            sv.build.__defaults__ = (d,)
+            try:
+                code, out, err = self.run_cli("census", log)
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn("--vocab", err)
+                words = os.path.join(d, "w.txt")
+                with open(words, "w") as f:
+                    f.write("tick\nok\n")
+                code, out, _ = self.run_cli("census", log, "--vocab", words)
+                self.assertEqual(code, 0)
+                self.assertIn("1 lines, 1 kinds", out)
+            finally:
+                sv.build.__defaults__ = (saved,)
+                sv.ROOT = saved
+
+    def test_vocab_option_without_value_exits_two(self):
+        self.assertEqual(self.run_cli("census", "x.log", "--vocab")[0], 2)
 
     def test_bad_option_exits_two(self):
         self.assertEqual(self.run_cli("census", "/nonexistent/x.log", "--bogus", "1")[0], 2)

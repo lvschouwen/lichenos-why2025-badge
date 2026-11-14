@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Soak report (#424, #430, #407): `census`, `trend` and `expected`.
-`soak_report.py census <serial.log> [--warmup-h 2] [--window-h 2] [--gap-min 30] [--top 40]` counts every log line kind
+`soak_report.py census <serial.log> [--warmup-h 2] [--window-h 2] [--gap-min 30] [--top 40] [--vocab FILE]` counts every log line kind
 per window and reports late kinds, rising rates and rising numbers (tools/soak_census.py);
 `soak_report.py trend <samples.csv> [--warmup-h 2] [--interval-s 600] [--allow FILE]` tests every numeric column for a
 drift, with the allow file tools/soak_rising.txt (tools/soak_trend.py). Both are report only: exit 0, or 2 when the
@@ -29,6 +29,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import soak_census  # noqa: E402
 import soak_parse  # noqa: E402
 import soak_trend  # noqa: E402
+import soak_vocab  # noqa: E402
 
 DEFAULT_BUDGETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "soak_budgets.txt")
 # A comment is a "#" followed by a space or the line end: "#234" (an issue) is a source, not a comment.
@@ -188,7 +189,7 @@ def render(rows: list, samples: List[soak_parse.Sample], log_given: bool = True)
     return "\n".join(lines)
 
 
-USAGE_CENSUS = "usage: soak_report.py census <serial-log> [--warmup-h H] [--window-h H] [--gap-min M] [--top N]"
+USAGE_CENSUS = "usage: soak_report.py census <serial-log> [--warmup-h H] [--window-h H] [--gap-min M] [--top N] [--vocab FILE]"
 USAGE_TREND = "usage: soak_report.py trend <samples.csv> [--warmup-h H] [--interval-s S] [--allow FILE]"
 
 
@@ -204,7 +205,8 @@ def float_options(rest: List[str], spec: Dict[str, float]) -> Optional[str]:
 
 def run_census(args: List[str]) -> int:
     spec = {"--warmup-h": 2.0, "--window-h": 2.0, "--gap-min": 30.0, "--top": 40.0}
-    if not args:
+    args, vocab_path = take_option(list(args), "--vocab")
+    if not args or vocab_path == "":
         print(USAGE_CENSUS, file=sys.stderr)
         return 2
     bad = float_options(args[1:], spec)
@@ -214,21 +216,30 @@ def run_census(args: List[str]) -> int:
         print("soak_report: bad option " + bad, file=sys.stderr)
         return 2
     try:
+        vocab = soak_vocab.load(vocab_path) if vocab_path else soak_vocab.build()
         with open(args[0], encoding="utf-8", errors="replace") as f:
-            c = soak_census.read_census(f, spec["--warmup-h"] * 3600, spec["--window-h"] * 3600, spec["--gap-min"] * 60)
-    except OSError as e:
+            c = soak_census.read_census(f, spec["--warmup-h"] * 3600, spec["--window-h"] * 3600, spec["--gap-min"] * 60, vocab)
+    except (OSError, ValueError) as e:
         print("soak_report: %s" % e, file=sys.stderr)
         return 2
     print("\n".join(soak_census.census_report(c, int(spec["--top"]))))
     return 0
 
 
+def take_option(args: List[str], name: str):
+    """-> (args without `name VALUE`, VALUE); VALUE is None when absent and "" when the value is missing."""
+    if name not in args:
+        return args, None
+    i = args.index(name)
+    value = args[i + 1] if i + 1 < len(args) else ""
+    return args[:i] + args[i + 2:], value
+
+
 def run_trend(args: List[str]) -> int:
-    rest, allow_path = list(args[1:]), soak_trend.DEFAULT_ALLOW
-    if "--allow" in rest:
-        i = rest.index("--allow")
-        allow_path = rest[i + 1] if i + 1 < len(rest) else ""
-        del rest[i:i + 2]
+    args, allow_path = take_option(list(args), "--allow")
+    rest = args[1:]
+    if allow_path is None:
+        allow_path = soak_trend.DEFAULT_ALLOW
     spec = {"--warmup-h": 2.0, "--interval-s": 600.0}
     if not args or not allow_path:
         print(USAGE_TREND, file=sys.stderr)

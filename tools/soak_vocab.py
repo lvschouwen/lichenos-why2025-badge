@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Vocabulary of the firmware's own log words (#430): `soak_vocab.py [--write | --check]`.
+"""Vocabulary of the firmware's own log words (#430): `soak_vocab.py [--write FILE]`.
 The soak census (tools/soak_census.py) prints a log line kind only from these words; every other token (a name, a
 network, message text) is replaced. The words are the lowercase ASCII words of the string literals inside the
 ESP_LOG*/LICHEN_LOG*/console_reply* calls and of the TAG definitions under firmware/main, firmware/components,
 c6/main and shared (no submodules, no third_party, no build or managed_components directories). Format conversions
 (%d, %-5s, %lu), escapes and 0x numbers are dropped first; one-letter words are dropped except `a`.
---write rewrites tools/soak_vocab.txt (sorted, one word per line); --check exits 1 when it is stale (a host test
-does the same). Standard library only."""
+The census builds it from the source tree at run time (build()); `--write FILE` saves a sorted word list (one word per
+line) for `soak_report.py census --vocab FILE`, to read a log from another checkout; without --write the words are
+printed. Standard library only."""
 import os
 import re
 import sys
@@ -14,7 +15,6 @@ from typing import Iterable, List, Set
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-VOCAB_FILE = os.path.join(HERE, "soak_vocab.txt")
 SCAN = ("firmware/main", "firmware/components", "c6/main", "shared")
 SKIP_DIRS = {"build", "managed_components", "third_party", ".git", "node_modules"}
 EXTS = (".c", ".h", ".cpp", ".hpp", ".cc")
@@ -77,31 +77,38 @@ def extract(root: str = ROOT) -> List[str]:
     return sorted(found)
 
 
-def load(path: str = VOCAB_FILE) -> frozenset:
-    try:
-        with open(path, encoding="utf-8") as f:
-            return frozenset(w.strip() for w in f if w.strip())
-    except OSError:
-        return frozenset()      # fail closed: no vocabulary prints nothing
+class VocabError(ValueError):
+    """No vocabulary: the census must not print kinds it cannot scrub."""
+
+
+def build(root: str = ROOT) -> frozenset:
+    words = frozenset(extract(root))
+    if not words:
+        raise VocabError("no firmware source tree under %s (%s): give --vocab FILE" % (root, ", ".join(SCAN)))
+    return words
+
+
+def load(path: str) -> frozenset:
+    with open(path, encoding="utf-8") as f:
+        words = frozenset(w.strip() for w in f if w.strip())
+    if not words:
+        raise VocabError("%s holds no words" % path)
+    return words
 
 
 def main(argv: List[str]) -> int:
-    words = extract()
+    try:
+        words = sorted(build())
+    except VocabError as e:
+        print("soak_vocab: %s" % e, file=sys.stderr)
+        return 2
     text = "\n".join(words) + "\n"
-    if "--write" in argv:
-        with open(VOCAB_FILE, "w", encoding="utf-8") as f:
+    if "--write" in argv and argv.index("--write") + 1 < len(argv):
+        with open(argv[argv.index("--write") + 1], "w", encoding="utf-8") as f:
             f.write(text)
         print("%d words" % len(words))
-        return 0
-    if "--check" in argv:
-        try:
-            with open(VOCAB_FILE, encoding="utf-8") as f:
-                same = f.read() == text
-        except OSError:
-            same = False
-        print("soak_vocab: %s" % ("up to date" if same else "stale: run tools/soak_vocab.py --write"))
-        return 0 if same else 1
-    print(text, end="")
+    else:
+        print(text, end="")
     return 0
 
 
