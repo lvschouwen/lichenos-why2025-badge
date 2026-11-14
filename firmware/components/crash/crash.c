@@ -1,6 +1,7 @@
 #include "crash.h"
 
 #include "crash_log.h"
+#include "crash_rules.h"
 #include "esp_core_dump.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -409,13 +410,9 @@ static void crash_command(char const *args) {
         console_reply(crash_clear_all() ? "crash: cleared" : "crash: erasing the core dump failed");
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
     } else if (strcmp(args, "test panic") == 0) {
-        if (console_dev_gate("crash test")) {
-            crash_test_panic();
-        }
+        crash_test_panic(); // developer mode: its row in crash_rules.h, checked before this runs (#464)
     } else if (strcmp(args, "test wdt") == 0) {
-        if (console_dev_gate("crash test")) {
-            crash_test_wdt();
-        }
+        crash_test_wdt();
     } else {
         console_reply("crash [dump | clear | test panic|wdt]");
 #else
@@ -457,9 +454,10 @@ void crash_check_early(void) {
     crash_log_lock(); // creates the lock before any other task can want it
     crash_log_unlock();
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    console_register("crash", "crash [dump | clear | test panic|wdt] (crash log and core dump; test: developer mode)", crash_command);
+    console_register_rules("crash", "crash [dump | clear | test panic|wdt] (crash log and core dump; test: developer mode)",
+                           crash_command, CRASH_RULES);
 #else
-    console_register("crash", "crash [dump | clear] (crash log and core dump)", crash_command);
+    console_register_rules("crash", "crash [dump | clear] (crash log and core dump)", crash_command, CRASH_RULES);
 #endif
     // #409: here, the first thing crash_check_early does, which runs in START_EARLY after NVS (and its factory reset
     // and PSRAM speed check, which may restart once on purpose), memory start, haptics and the clock. A boot that dies

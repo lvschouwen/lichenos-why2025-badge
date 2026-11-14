@@ -9,6 +9,7 @@
 #include "console_os_rules.h"
 #include "console_sub.h"
 #include "dev_gate.h"
+#include "crash_rules.h"
 #include "dev_mode.h"
 #include "sd_rules.h"
 #include "mesh_onair.h"
@@ -284,9 +285,6 @@ static bool handler_dev_gate(char const *name, char const *args) {
     if (strcmp(name, "boot") == 0) {
         return word_is(args, "keys") || (DEV_BUILD && strncmp(args, "fail ", 5) == 0);
     }
-    if (strcmp(name, "crash") == 0) {
-        return DEV_BUILD && (strcmp(args, "test panic") == 0 || strcmp(args, "test wdt") == 0);
-    }
     if (strcmp(name, "app") == 0) {
         return DEV_BUILD && strncmp(args, "crash ", 6) == 0 && args[6];
     }
@@ -336,6 +334,7 @@ static rules_of_t const RULES[] = {
     {"reboot", OS_REBOOT_RULES},
     {"dev", OS_DEV_RULES},
     {"sd", SD_RULES},
+    {"crash", CRASH_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {
