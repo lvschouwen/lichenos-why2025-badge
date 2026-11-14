@@ -43,21 +43,29 @@ onair_allow_override=${ONAIR_ALLOW_FILE:-}
 reach='(^|[^[:alnum:]_-])badge\.sh[[:space:]]+(fw|console)[[:space:]]|(^|[^[:alnum:]_-])ssh[[:space:]]|/dev/tty|curl[^|;&]*/console'
 # Backslash-newline continuations join first, so a target on the next line is still seen
 cmd_joined=$(printf '%s\n' "$cmd" | sed -e ':a' -e '/\\$/N' -e 's/\\\n/ /' -e 'ta')
-# One console line must never hide the next (grep -o does not rescan text it consumed): each line that reaches the
-# badge is split into segments (a real or printf/echo-escaped newline or carriage return, ;, &, |) and every segment
-# is searched on its own. The #438 "mesh chat" words are a separate pass, so their match cannot swallow a word of
-# another command.
-onair_segments() {
-  printf '%s\n' "$1" | sed -e 's/\\\(n\|r\|x0[aAdD]\|01[25]\)/\n/g' -e 's/\r/\n/g' -e 's/[;&|]/\n/g'
+# Never looser than main, and one console line must never hide the next. grep -o does not rescan text it consumed, so
+# a verb's match (up to two words after it) could swallow the next verb whatever stands between them (a newline in
+# any escape form: \n, \12, \xa, \u000a, %0a, a here-doc or a second line). So the text is judged twice and any one
+# refusal refuses the whole command: (A) whole, as main did, so a target is never cut apart; (B) cut in front of every
+# console verb, so no match can consume a later verb. The text is the command as written and with its
+# backslash-newlines joined, from every line once any line reaches the badge. Limit: a payload encoded (base64, xxd)
+# or built from pieces (echo -n) never shows its verb to a text hook (#440).
+onair_alt='mesh[[:space:]]+(send|dm|remote|telemetry|trace|discover|history|advert|scope)([[:space:]]+[^[:space:];&|)]+){0,2}|onair([[:space:]]+[^[:space:];&|)]+){0,2}'
+onair_chat='mesh[[:space:]]+chat([[:space:]]+[^[:space:];&|)]+){0,2}' # #438: its own pass
+onair_grep_both() {
+  local line
+  line=$(cat)
+  printf '%s\n' "$line" | grep -oE "$onair_alt" || true
+  printf '%s\n' "$line" | grep -oE "$onair_chat" || true
 }
 onair_hits() {
-  local seg
-  while IFS= read -r seg; do
-    printf '%s\n' "$seg" | grep -oE 'mesh[[:space:]]+(send|dm|remote|telemetry|trace|discover|history|advert|scope)([[:space:]]+[^[:space:];&|)]+){0,2}|onair([[:space:]]+[^[:space:];&|)]+){0,2}' || true
-    printf '%s\n' "$seg" | grep -oE 'mesh[[:space:]]+chat([[:space:]]+[^[:space:];&|)]+){0,2}' || true
-  done < <(onair_segments "$1")
+  local text=$1 piece
+  printf '%s\n' "$text" | onair_grep_both
+  while IFS= read -r piece; do
+    printf '%s\n' "$piece" | onair_grep_both
+  done < <(printf '%s\n' "$text" | sed -E 's/(mesh|onair)[[:space:]]/\n&/g')
 }
-if printf '%s' "$cmd_joined" | grep -qE "$reach"; then
+if printf '%s\n%s' "$cmd_joined" "$cmd" | grep -qE "$reach"; then
   while IFS= read -r hit; do
     [ -n "$hit" ] || continue
     verdict=$(onair_verdict "$hit")
@@ -65,7 +73,7 @@ if printf '%s' "$cmd_joined" | grep -qE "$reach"; then
       deny\ *) deny "${verdict#deny }" ;;
       ask\ *) deny "${verdict#ask }: Lucas sets it in MeshCore Settings on the badge" ;;
     esac
-  done < <(onair_hits "$(printf '%s\n' "$cmd_joined" | grep -E "$reach")")
+  done < <(onair_hits "$cmd_joined"; onair_hits "$cmd")
 fi
 main_dir=$(git -C "${cwd:-.}" rev-parse --show-toplevel 2>/dev/null || true)
 main_checkout=${CLAUDE_PROJECT_DIR:-/home/lucas/coding/why2025-badge}

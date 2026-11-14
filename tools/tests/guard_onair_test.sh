@@ -76,6 +76,39 @@ expect deny "curl -s http://192.0.2.1/console -d 'fw mesh chat open #general'"
 expect pass "curl -s http://192.0.2.1/console -d 'fw mesh chat open #badgetest'"
 expect deny "$b mesh chat open #badgetest; $b mesh chat open #general"
 expect pass "git commit -m 'mesh chat open #general'"
+# #440: the swallow works through any separator, so the hook cuts in front of every verb. A first line that takes
+# two words after its verb, then a send to another channel, in every spelling of "newline", over each route
+nl=(
+  '\12' '\012' '\0012' '\xa' '\x0a' '\u000a' '\U0000000a' '\n' '\r' '%0a' '%0A' ' ' ',' '#'
+)
+for sep in "${nl[@]}"; do
+  expect deny "printf 'mesh advert zero${sep}mesh send #general hi' > /dev/ttyACM0"
+  expect deny "echo -e 'mesh scope default${sep}mesh dm 0123456789ab hi' > /dev/ttyACM0"
+  expect deny "ssh pi 'printf \"mesh chat close${sep}mesh send #general hi\" > /dev/ttyACM0'"
+  expect deny "curl -s http://192.0.2.1/console -d 'fw mesh advert zero${sep}mesh send #general hi'"
+done
+expect deny "curl -s http://192.0.2.1/console -d 'mesh advert zero%0amesh send #general hi'"
+expect deny "printf 'mesh advert zero\\
+mesh send #general hi' > /dev/ttyACM0"
+expect deny "echo 'mesh chat close
+mesh send #general hi' > /dev/ttyACM0"
+# a here-doc body, a variable on another line, a second line: every line is judged once any line reaches the badge
+expect deny "cat > /dev/ttyACM0 <<'EOF'
+mesh send #general hi
+EOF"
+expect deny "msg='mesh send #general hi'
+echo \"\$msg\" > /dev/ttyACM0"
+expect deny "x=1
+printf 'mesh advert zero\\nmesh send #general hi' > /dev/ttyACM0"
+expect pass "cat > /dev/ttyACM0 <<'EOF'
+mesh send #badgetest hi
+EOF"
+# never looser than main: the whole text is judged as it was, a target is not cut apart by an escape
+expect deny "echo 'mesh send #badgetest\n#general hi' > /dev/ttyACM0"
+expect deny "echo 'mesh send #badgetest\r#general' > /dev/ttyACM0"
+expect deny "printf 'mesh remote settings\nx' > /dev/ttyACM0"
+expect deny "$b mesh dm abcdef123456\nfoo"
+expect deny "echo 'mesh remote mesh status' > /dev/ttyACM0"
 # The console scope (#290): read freely, set only to the allow list's scope line
 expect pass "$b mesh scope"
 expect pass "$b mesh scope console zz-bench YES"

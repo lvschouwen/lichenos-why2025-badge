@@ -22,7 +22,8 @@ void meshcore_chat_open_dm(uint8_t const prefix[6], char const *title);
 // keeps its draft.
 typedef enum {
     MESHCORE_CHAT_CON_PENDING, // while the job runs (never returned)
-    MESHCORE_CHAT_CON_OK,      // done
+    MESHCORE_CHAT_CON_OK,      // done (open: the chat is on top)
+    MESHCORE_CHAT_CON_FAILED,  // open: the chat is not on top after the open (no memory, a pop not queued)
     MESHCORE_CHAT_CON_NONE,    // close: no chat is on top
     MESHCORE_CHAT_CON_REFUSED, // close: the screen stayed (a dialog or the update screen refused the pop)
     MESHCORE_CHAT_CON_BUSY,    // not started: the last job still runs, or no memory or UI lock

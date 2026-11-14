@@ -320,6 +320,7 @@ static void chat_open(char const *typed) {
     switch (meshcore_chat_console(name)) {
         case MESHCORE_CHAT_CON_OK: console_reply("chat opened: %s", name); break;
         case MESHCORE_CHAT_CON_LATE: console_reply("chat not confirmed: the screen did not answer"); break;
+        case MESHCORE_CHAT_CON_FAILED: console_reply("chat not opened: the screen did not open"); break;
         default: console_reply("chat not opened: busy, try again"); break;
     }
 }

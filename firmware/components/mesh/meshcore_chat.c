@@ -785,6 +785,7 @@ void meshcore_chat_open_channel(char const *name) {
 
 #define CON_WAIT_MS 3000
 #define CON_POLL_MS 10
+#define CON_VERIFY_TRIES 5
 #define CON_STACK   3072 // lichen_ui_call and a short wait only
 
 // One job at a time (console.c serialises the commands). state is PENDING while the job runs, else its answer; a job
@@ -792,6 +793,7 @@ void meshcore_chat_open_channel(char const *name) {
 static struct {
     int        state;
     bool       open;
+    int        tries;
     lv_obj_t  *was; // close: the chat that was on top
     char       name[MESH_CHAT_CMD_NAME_MAX];
 } con_job = {.state = MESHCORE_CHAT_CON_NONE};
@@ -806,12 +808,25 @@ static void con_closed(void *arg) {
     con_finish(shell_stack_screen(0) != con_job.was ? MESHCORE_CHAT_CON_OK : MESHCORE_CHAT_CON_REFUSED);
 }
 
+// The chat is on top by now? A chat replaced by this one is popped first (open_after_pop), so look again a few
+// queue passes later before giving up
+static void con_verify(void *arg) {
+    (void)arg;
+    chat_t const *c = chat_on_top();
+    if (c && !c->target.dm && strcmp(c->target.title, con_job.name) == 0) {
+        con_finish(MESHCORE_CHAT_CON_OK);
+    } else if (++con_job.tries >= CON_VERIFY_TRIES || !lichen_ui_call(con_verify, NULL)) {
+        con_finish(MESHCORE_CHAT_CON_FAILED);
+    }
+}
+
 // LVGL task, as MeshCore (the task below queued it): the same push a row's Enter does
 static void con_run(void *arg) {
     (void)arg;
     if (con_job.open) {
         meshcore_chat_open_channel(con_job.name);
-        con_finish(MESHCORE_CHAT_CON_OK);
+        con_job.tries = 0;
+        con_verify(NULL); // open_target may have done nothing (no memory, a pop not queued): look, do not assume
         return;
     }
     chat_t *c = chat_on_top();
