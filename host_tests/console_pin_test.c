@@ -10,6 +10,7 @@
 #include "console_sub.h"
 #include "dev_gate.h"
 #include "dev_mode.h"
+#include "sd_rules.h"
 #include "mesh_onair.h"
 
 #include <stdbool.h>
@@ -286,9 +287,6 @@ static bool handler_dev_gate(char const *name, char const *args) {
     if (strcmp(name, "crash") == 0) {
         return DEV_BUILD && (strcmp(args, "test panic") == 0 || strcmp(args, "test wdt") == 0);
     }
-    if (strcmp(name, "sd") == 0) {
-        return DEV_BUILD && (strcmp(args, "test") == 0 || word_is(args, "cat"));
-    }
     if (strcmp(name, "app") == 0) {
         return DEV_BUILD && strncmp(args, "crash ", 6) == 0 && args[6];
     }
@@ -312,9 +310,6 @@ static bool handler_origin_refuses(char const *name, char const *args, console_o
     }
     if (strcmp(name, "nvs-enc") == 0) {
         return DEV_BUILD && strcmp(args, "burn YES") == 0 && !uart; // the burn arm: its own Kconfig, in the dev test
-    }
-    if (strcmp(name, "sd") == 0) {
-        return word_is(args, "format") && console_erase_refuses(origin);
     }
     if (strcmp(name, "onair") == 0) {
         char const *rest;
@@ -340,6 +335,7 @@ static rules_of_t const RULES[] = {
     {"slot", OS_SLOT_RULES},
     {"reboot", OS_REBOOT_RULES},
     {"dev", OS_DEV_RULES},
+    {"sd", SD_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {

@@ -1,4 +1,5 @@
 // "fw sd" (#60): status, mount, unmount, a small write/read test, the explicit format and "cat" (#378)
+#include "sd_rules.h"
 #include "sd_cat_fmt.h"
 #include "sd_path_policy.h"
 #include "sdcard.h"
@@ -103,9 +104,6 @@ static void test_read(test_state_t *t, uint8_t *buf) {
 
 // Write, fsync, read back and compare TEST_BYTES; the file is removed again. Holds the card's mutex throughout.
 static void cmd_test(void) {
-    if (!console_dev_gate("sd test")) {
-        return; // writes 64 KB to the card: a bench command (#378)
-    }
     if (!sd_begin(2000)) {
         console_reply("sd test: card not mounted (or busy)");
         return;
@@ -201,9 +199,6 @@ static void cat_print(sd_cat_args_t const *a, uint8_t const *buf, size_t got) {
 }
 
 static void cmd_cat(char const *args) {
-    if (!console_dev_gate("sd cat")) {
-        return;
-    }
     sd_cat_args_t a;
     if (!sd_cat_parse(args, &a)) {
         console_reply("sd cat [-x] <path> [offset [len]] (len 1..%d, default %d)", SD_CAT_MAX, SD_CAT_DEFAULT);
@@ -241,9 +236,6 @@ static void cmd_cat(char const *args) {
 #endif // CONFIG_LICHEN_DEV_COMMANDS
 
 static void cmd_format(char const *word) {
-    if (!console_erase_ok("sd format")) {
-        return; // #455: wipes the card (journal, settings backup): USB only, the screen's format still works
-    }
     if (!sd_format_confirmed(word)) {
         console_reply("sd format erases everything on the card: fw sd format " SD_FORMAT_CONFIRM);
         return;
@@ -314,5 +306,6 @@ static void cmd_sd(char const *args) {
 }
 
 void sd_console_register(void) {
-    console_register("sd", SD_USAGE " (the SD card at /sd, #60" SD_DEV_NOTE ")", cmd_sd);
+    // test and cat need developer mode, format the USB console: sd_rules.h, checked before cmd_sd runs (#464)
+    console_register_rules("sd", SD_USAGE " (the SD card at /sd, #60" SD_DEV_NOTE ")", cmd_sd, SD_RULES);
 }
