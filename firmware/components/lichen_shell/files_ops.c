@@ -38,6 +38,7 @@ char const *files_result_text(files_result_t r) {
     case FILES_ERR_CARD:      return "The card is not ready or busy. Try again in a moment.";
     case FILES_ERR_SRC:       return "Could not read the source file.";
     case FILES_ERR_DEST:      return "Could not create the file on the target (name not allowed there?).";
+    case FILES_ERR_CREATE:    return "Could not create the file on the target.";
     case FILES_ERR_NAME:      return "Names on the card cannot hold \" * : < > ? | \\ or end in a space or dot.";
     case FILES_ERR_IO:        return "A read or write failed.";
     case FILES_ERR_NO_MEM:    return "Not enough memory.";
@@ -63,6 +64,16 @@ char const *files_step_name(files_step_t step) {
     case FILES_STEP_DST_OPEN: return "dst_open";
     }
     return "?";
+}
+
+files_result_t files_dest_result(int err) {
+    return err == EINVAL ? FILES_ERR_DEST : err == ENOSPC ? FILES_ERR_SPACE : FILES_ERR_CREATE;
+}
+
+bool files_card_strike(files_result_t r, int err) {
+    bool failed = r == FILES_ERR_IO || r == FILES_ERR_OPEN || r == FILES_ERR_SRC || r == FILES_ERR_DEST ||
+                  r == FILES_ERR_CREATE;
+    return failed && err != ENFILE && err != EMFILE;
 }
 
 static files_result_t fail_at(files_fail_t *fail, files_step_t step, files_result_t otherwise) {
@@ -229,7 +240,7 @@ files_result_t files_copy_ex(char const *src, char const *dst, uint8_t *buf, siz
     FILE *in  = fopen(real_path(src, rsrc, sizeof(rsrc)), "rb");
     FILE *out = in ? fopen(rpart, "wb") : NULL;
     if (!out) {
-        r = in ? fail_at(fail, FILES_STEP_DST_OPEN, FILES_ERR_DEST) : fail_at(fail, FILES_STEP_SRC_OPEN, FILES_ERR_SRC);
+        r = in ? fail_at(fail, FILES_STEP_DST_OPEN, files_dest_result(errno)) : fail_at(fail, FILES_STEP_SRC_OPEN, FILES_ERR_SRC);
         if (in) {
             fclose(in);
         }

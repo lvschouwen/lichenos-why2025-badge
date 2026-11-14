@@ -28,7 +28,9 @@ typedef struct {
 bool files_path_ok(char const *path);
 // A plain file or directory name: not empty, not "." or "..", no '/', no control characters, fits FILES_NAME_MAX
 bool files_name_ok(char const *name);
-// Also fine on a FAT card (FatFs refuses " * : < > ? | \ and a trailing space or dot with FR_INVALID_NAME, #443)
+// Also fine on a FAT card, which is stricter than files_name_ok (#443). FatFs (ff.c create_name) refuses " * : < > ? | \,
+// DEL and invalid UTF-8 with FR_INVALID_NAME. A trailing space or dot it silently snips, so the card's name would differ
+// from the source's (and "a" and "a." would collide): Lichen refuses those too, as its own rule.
 bool files_name_ok_fat(char const *name);
 // dir + "/" + name; false (out untouched) for a bad name or when it does not fit
 bool files_path_join(char const *dir, char const *name, char *out, size_t cap);

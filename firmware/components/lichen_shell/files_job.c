@@ -131,11 +131,9 @@ static void job_task(void *arg) {
         s_result.result = run_kind();
     }
     if (locked) {
-        int err = errno;
-        // A full open-file table (a listing's opendir) is the OS's limit, not the card's (#274)
-        bool card_error = (s_result.result == FILES_ERR_IO || s_result.result == FILES_ERR_OPEN ||
-                           s_result.result == FILES_ERR_SRC || s_result.result == FILES_ERR_DEST) &&
-                          err != ENFILE && err != EMFILE;
+        // A copy recorded the errno of its failed step: the global one has been overwritten by the closes since
+        int  err        = s_req.kind == FJ_COPY && s_result.step != FILES_STEP_NONE ? s_result.err : errno;
+        bool card_error = files_card_strike(s_result.result, err);
         lichen_sys_sd_end(card_error ? lichen_sys_sd_io_from_errno(err) : LICHEN_SD_IO_OK);
     }
     if (s_req.kind == FJ_COPY && s_result.result != FILES_OK && s_result.step != FILES_STEP_NONE) {

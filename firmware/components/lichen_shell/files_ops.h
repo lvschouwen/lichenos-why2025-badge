@@ -25,7 +25,8 @@ typedef enum {
     // A copy says which step failed (#443), so the screen can tell the three apart
     FILES_ERR_CARD, // the card is not ready or another user holds it (sd_begin refused)
     FILES_ERR_SRC,  // the source could not be examined or opened
-    FILES_ERR_DEST, // the target file could not be created (FatFs: name not allowed, no directory entry, ...)
+    FILES_ERR_DEST,   // the target file could not be created and the errno says the name (EINVAL, FatFs FR_INVALID_NAME)
+    FILES_ERR_CREATE, // the target file could not be created for another reason (EIO, ENOMEM, ENOENT, ...)
     FILES_ERR_NAME, // the name cannot exist on FAT: refused before anything is opened
 } files_result_t;
 
@@ -37,6 +38,11 @@ typedef struct {
 } files_fail_t;
 
 char const *files_step_name(files_step_t step); // for the log line
+// What a failed create of the target file is called: EINVAL (a name FatFs rejects) -> DEST, ENOSPC -> SPACE, any other -> CREATE
+files_result_t files_dest_result(int err);
+// Whether a finished job counts against the card's error strikes (sd_end's io result): only a failed read, write or open
+// does, and a full open-file table (ENFILE/EMFILE) is the OS's limit, not the card's (#274)
+bool files_card_strike(files_result_t r, int err);
 
 char const *files_result_text(files_result_t r); // a sentence for the screen
 

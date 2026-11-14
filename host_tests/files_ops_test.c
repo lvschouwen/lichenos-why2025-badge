@@ -129,7 +129,7 @@ static void test_copy(void) {
     CHECK(files_copy_ex("/storage/nothing", "/sd/n", buf, sizeof(buf), UINT64_MAX, NULL, NULL, &fail) == FILES_ERR_SRC);
     CHECK(fail.step == FILES_STEP_SRC_STAT && fail.err == ENOENT);
     fail.step = FILES_STEP_NONE;
-    CHECK(files_copy_ex("/storage/big.bin", "/sd/nodir/x", buf, sizeof(buf), UINT64_MAX, NULL, NULL, &fail) == FILES_ERR_DEST);
+    CHECK(files_copy_ex("/storage/big.bin", "/sd/nodir/x", buf, sizeof(buf), UINT64_MAX, NULL, NULL, &fail) == FILES_ERR_CREATE);
     CHECK(fail.step == FILES_STEP_DST_OPEN && fail.err == ENOENT);
     CHECK(!strcmp(files_step_name(fail.step), "dst_open") && !strcmp(files_step_name(FILES_STEP_SD_BEGIN), "sd_begin"));
     CHECK(!exists("/sd/nodir/x.lichen-part"));
@@ -144,7 +144,7 @@ static void test_copy(void) {
 // same errno: the Files app says "in use", leaves the file as it was and does not blame the card (FILES_ERR_IO).
 static void test_texts(void) {
     // the three copy failures and the name refusal each get their own sentence
-    files_result_t const all[] = {FILES_ERR_OPEN, FILES_ERR_CARD, FILES_ERR_SRC, FILES_ERR_DEST, FILES_ERR_NAME};
+    files_result_t const all[] = {FILES_ERR_OPEN, FILES_ERR_CARD, FILES_ERR_SRC, FILES_ERR_DEST, FILES_ERR_CREATE, FILES_ERR_NAME};
     for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); i++) {
         for (size_t j = i + 1; j < sizeof(all) / sizeof(all[0]); j++) {
             CHECK(strcmp(files_result_text(all[i]), files_result_text(all[j])) != 0);
@@ -154,6 +154,28 @@ static void test_texts(void) {
     CHECK(strstr(files_result_text(FILES_ERR_CARD), "not ready") != NULL);
     CHECK(strstr(files_result_text(FILES_ERR_SRC), "source") != NULL);
     CHECK(strstr(files_result_text(FILES_ERR_DEST), "name not allowed") != NULL);
+}
+
+// The create failure is named by its errno, so the "name not allowed" hint appears only when it can be the name
+static void test_dest_and_strikes(void) {
+    CHECK(files_dest_result(EINVAL) == FILES_ERR_DEST && files_dest_result(ENOSPC) == FILES_ERR_SPACE);
+    CHECK(files_dest_result(ENOENT) == FILES_ERR_CREATE && files_dest_result(EIO) == FILES_ERR_CREATE &&
+          files_dest_result(ENOMEM) == FILES_ERR_CREATE && files_dest_result(EROFS) == FILES_ERR_CREATE);
+    // the old rule: (IO || OPEN) and not ENFILE/EMFILE; SRC and DEST are the old OPEN, so they strike as OPEN did
+    files_result_t const old[] = {FILES_ERR_IO, FILES_ERR_OPEN};
+    files_result_t const now[] = {FILES_ERR_SRC, FILES_ERR_DEST, FILES_ERR_CREATE};
+    int const            errs[] = {0, EIO, ENODEV, ENOENT, EINVAL, ENFILE, EMFILE};
+    for (size_t e = 0; e < sizeof(errs) / sizeof(errs[0]); e++) {
+        for (size_t i = 0; i < 2; i++) {
+            CHECK(files_card_strike(old[i], errs[e]) == (errs[e] != ENFILE && errs[e] != EMFILE));
+        }
+        for (size_t i = 0; i < 3; i++) {
+            CHECK(files_card_strike(now[i], errs[e]) == files_card_strike(FILES_ERR_OPEN, errs[e]));
+        }
+        CHECK(!files_card_strike(FILES_OK, errs[e]) && !files_card_strike(FILES_CANCELLED, errs[e]));
+    }
+    CHECK(!files_card_strike(FILES_ERR_BUSY, EIO) && !files_card_strike(FILES_ERR_CARD, EIO) &&
+          !files_card_strike(FILES_ERR_NAME, EIO) && !files_card_strike(FILES_ERR_SPACE, EIO));
 }
 
 static void test_busy(void) {
@@ -200,6 +222,7 @@ int main(void) {
     test_read();
     test_copy();
     test_texts();
+    test_dest_and_strikes();
     test_busy();
     char cmd[300];
     snprintf(cmd, sizeof(cmd), "rm -r %s", tmpl); // test data only, in our own mkdtemp directory

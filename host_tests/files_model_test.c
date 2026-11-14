@@ -27,6 +27,10 @@ static void test_paths(void) {
           !files_name_ok_fat("a>b") && !files_name_ok_fat("a?b") && !files_name_ok_fat("a|b") && !files_name_ok_fat("a\\b"));
     CHECK(!files_name_ok_fat("a ") && !files_name_ok_fat("a.") && !files_name_ok_fat("a/b") && !files_name_ok_fat("a\tb") &&
           !files_name_ok_fat("") && !files_name_ok_fat(NULL));
+    // a trailing space or dot is Lichen's own refusal (FatFs would snip it); DEL and bad UTF-8 are FatFs's
+    CHECK(!files_name_ok_fat("a\x7f") && !files_name_ok_fat("\x80") && !files_name_ok_fat("a\xC3") && !files_name_ok_fat("\xC0\x80") &&
+          !files_name_ok_fat("\xED\xA0\x80") && !files_name_ok_fat("\xF5\x80\x80\x80") && !files_name_ok_fat("\xE0\x80\x80"));
+    CHECK(files_name_ok_fat("caf\xC3\xA9") && files_name_ok_fat("\xE2\x82\xAC") && files_name_ok_fat("\xF0\x9F\x98\x80"));
     char out[FILES_PATH_MAX];
     CHECK(files_path_join("/sd", "x.txt", out, sizeof(out)) && !strcmp(out, "/sd/x.txt"));
     CHECK(!files_path_join("/sd", "../x", out, sizeof(out)));

@@ -21,8 +21,35 @@ bool files_name_ok(char const *name) {
     return true;
 }
 
+// Strict UTF-8 as FatFs decodes it: no stray continuation, no overlong form, no surrogate, nothing above U+10FFFF
+static bool utf8_ok(char const *s) {
+    unsigned char const *p = (unsigned char const *)s;
+    while (*p) {
+        if (*p < 0x80) {
+            p++;
+            continue;
+        }
+        int      n  = *p >= 0xF0 ? 3 : *p >= 0xE0 ? 2 : *p >= 0xC2 ? 1 : 0;
+        uint32_t cp = n == 3 ? *p & 0x07u : n == 2 ? *p & 0x0Fu : *p & 0x1Fu;
+        if (n == 0 || *p > 0xF4) {
+            return false;
+        }
+        for (int i = 1; i <= n; i++) {
+            if ((p[i] & 0xC0) != 0x80) {
+                return false;
+            }
+            cp = cp << 6 | (p[i] & 0x3Fu);
+        }
+        if ((n == 2 && cp < 0x800) || (n == 3 && cp < 0x10000) || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+            return false;
+        }
+        p += n + 1;
+    }
+    return true;
+}
+
 bool files_name_ok_fat(char const *name) {
-    if (!files_name_ok(name)) {
+    if (!files_name_ok(name) || !utf8_ok(name)) { // files_name_ok already refuses DEL with the other control characters
         return false;
     }
     for (char const *p = name; *p; p++) {
