@@ -22,7 +22,9 @@ static char const TAG[] = "shell";
 
 // Slot 0 is IDF's pthread thread-local storage (pthread_local_storage.c); 1 is Lichen's current app
 #define CTX_TLS_INDEX 1
-_Static_assert(configNUM_THREAD_LOCAL_STORAGE_POINTERS > CTX_TLS_INDEX,
+// The Kconfig value, not configNUM_THREAD_LOCAL_STORAGE_POINTERS: that one is doubled when deletion callbacks are on,
+// and index 1 must be a pointer slot, never a callback's
+_Static_assert(CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS > CTX_TLS_INDEX,
                "CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS must be 2 or more (firmware/sdkconfig.defaults)");
 _Static_assert(APP_CTX_SLOTS == LICHEN_MAX_APPS + 1, "app_ctx.h's table is the OS plus LICHEN_MAX_APPS apps");
 

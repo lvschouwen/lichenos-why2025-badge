@@ -16,9 +16,9 @@ extern "C" {
 #endif
 
 // main.c start_early, once, right after crash_check_early (crashed = crash_recovered()): the window, the saved list of
-// apps whose background is off (a settings write only when an app is switched off now), and the "fw app background"
-// and "crash" subcommands (bound before lichen_sys_app_console_register). Before the display starts, so the one
-// possible flash write stalls nothing on the glass (#31).
+// apps whose background is off (read here, written nothing), and the "fw app background" and "crash" subcommands
+// (bound before lichen_sys_app_console_register). The list is written later, by safe_mode_background_off in
+// start_apps after the shell is up, once and only when it changes (an app switched off now).
 void safe_mode_boot_step(bool crashed);
 // start_apps, for every registered app: its background part stays off this boot (start_apps skips start_background).
 // The app this boot's crash is blamed on is switched off here (and saved) when it reached the limit and may be

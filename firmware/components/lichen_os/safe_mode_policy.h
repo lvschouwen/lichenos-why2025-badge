@@ -78,6 +78,8 @@ safe_mode_boot_t safe_mode_boot(safe_mode_rec_t *r, bool crashed);
 // switched off (may_switch_off: it has a background part and is not exempt, lichen_app_t.safe_mode_exempt). One that
 // may not is only counted: its notice names the app and the crashes.
 bool safe_mode_switch_off(safe_mode_boot_t const *b, char const *id, bool may_switch_off);
+// may_switch_off for an app: it has a background part and is not exempt (lichen_app_t.safe_mode_exempt, MeshCore)
+bool safe_mode_may_switch_off(bool has_background, bool exempt);
 // Re-enabling an app forgets its crashes, so one more crash does not switch it off again at once
 void safe_mode_forget(safe_mode_rec_t *r, char const *id);
 // A crash in the window (what safe_mode_boot said about degraded; false for a record that is not valid)

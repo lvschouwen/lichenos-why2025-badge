@@ -61,6 +61,7 @@
 #include "ota_valid.h"
 #include "lichen_os.h"
 #include "safe_mode.h"
+#include "safe_mode_policy.h"
 #include "settings_store.h"
 #include "shell.h"
 #include "soak_cmd.h"
@@ -368,7 +369,7 @@ static void start_apps(void) {
         lichen_app_t const *app = lichen_app_at(i);
         // #232: crashed twice in three boots (logged by safe_mode.c); asked for every app, so the rule sees which
         // ones have a background part it may switch off (never an exempt one: MeshCore)
-        bool may_off = app->start_background && !app->safe_mode_exempt;
+        bool may_off = safe_mode_may_switch_off(app->start_background != NULL, app->safe_mode_exempt);
         if (safe_mode_background_off(app->id, may_off) || !app->start_background) {
             continue;
         }

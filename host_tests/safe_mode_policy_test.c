@@ -195,13 +195,15 @@ static void exempt_app_is_never_listed(void) {
     panic_boot(&r, "meshcore");
     safe_mode_boot_t b = panic_boot(&r, "meshcore");
     CHECK(b.limit_reached && b.app_crashes == 2 && b.degraded && strcmp(b.app, "meshcore") == 0);
-    bool exempt = true, has_background = true;
-    if (safe_mode_switch_off(&b, "meshcore", has_background && !exempt)) {
+    CHECK(!safe_mode_may_switch_off(true, true) && !safe_mode_may_switch_off(false, true) &&
+          !safe_mode_may_switch_off(false, false) && safe_mode_may_switch_off(true, false));
+    if (safe_mode_switch_off(&b, "meshcore", safe_mode_may_switch_off(true, true))) { // MeshCore: background, exempt
         safe_mode_list_add(list, sizeof(list), "meshcore");
     }
     CHECK(list[0] == '\0' && !safe_mode_list_has(list, "meshcore"));
     b = panic_boot(&r, "meshcore"); // a third: still never
-    CHECK(b.app_crashes == 3 && !safe_mode_switch_off(&b, "meshcore", false));
+    CHECK(b.app_crashes == 3 && !safe_mode_switch_off(&b, "meshcore", safe_mode_may_switch_off(true, true)));
+    CHECK(safe_mode_switch_off(&b, "meshcore", safe_mode_may_switch_off(true, false))); // without the flag it would be
 }
 
 static void hash_and_size(void) {

@@ -81,6 +81,10 @@ bool safe_mode_switch_off(safe_mode_boot_t const *b, char const *id, bool may_sw
     return b->limit_reached && may_switch_off && safe_mode_id_ok(id) && strcmp(b->app, id) == 0;
 }
 
+bool safe_mode_may_switch_off(bool has_background, bool exempt) {
+    return has_background && !exempt;
+}
+
 void safe_mode_forget(safe_mode_rec_t *r, char const *id) {
     safe_mode_ensure(r);
     uint32_t h = safe_mode_hash(id);
