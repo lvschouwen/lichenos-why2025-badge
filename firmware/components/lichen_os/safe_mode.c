@@ -8,6 +8,7 @@
 #include "esp_private/panic_internal.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "fw_console.h"
 #include "lichen_sys_app.h"
@@ -176,21 +177,47 @@ bool safe_mode_background_listed(char const *id) {
     return listed;
 }
 
+// One set at a time (#461): it spans a flash write, so a mutex, not s_mux. Static storage, created first in
+// safe_mode_boot_step (before any caller: the console command and the Apps page job both come later, and neither runs on
+// the LVGL task). The boot path (safe_mode_background_off, switch_off) never takes it, so it cannot wait on a setter.
+static StaticSemaphore_t s_set_buf;
+static SemaphoreHandle_t s_set_lock;
+
+static void set_take(void *arg) {
+    (void)arg;
+    if (s_set_lock) {
+        xSemaphoreTake(s_set_lock, portMAX_DELAY);
+    }
+}
+
+static void set_give(void *arg) {
+    (void)arg;
+    if (s_set_lock) {
+        xSemaphoreGive(s_set_lock);
+    }
+}
+
+static void list_enter(void *arg) {
+    (void)arg;
+    portENTER_CRITICAL(&s_mux);
+}
+
+static void list_leave(void *arg) {
+    (void)arg;
+    portEXIT_CRITICAL(&s_mux);
+}
+
 // The list in RAM only takes the change once it is saved: a switch that did not save is not shown as set (#233)
 bool safe_mode_background_set(char const *id, bool allowed) {
-    char list[SAFE_MODE_LIST_MAX];
-    portENTER_CRITICAL(&s_mux);
-    memcpy(list, s_off, sizeof(list));
-    portEXIT_CRITICAL(&s_mux);
-    if (!safe_mode_list_set(list, sizeof(list), id, !allowed, save_cb, NULL)) {
+    static safe_mode_sync_t const sync = {set_take, set_give, list_enter, list_leave, NULL};
+    if (!safe_mode_list_set_shared(&sync, s_off, sizeof(s_off), id, !allowed, save_cb, NULL)) {
         return false;
     }
-    portENTER_CRITICAL(&s_mux);
-    memcpy(s_off, list, sizeof(s_off));
     if (allowed) {
+        portENTER_CRITICAL(&s_mux);
         safe_mode_forget(&s_rec, id); // one more crash must not switch it off again at once
+        portEXIT_CRITICAL(&s_mux);
     }
-    portEXIT_CRITICAL(&s_mux);
     return true;
 }
 
@@ -324,6 +351,7 @@ static void log_verdict(void) {
 
 void safe_mode_boot_step(bool crashed) {
     char list[SAFE_MODE_LIST_MAX];
+    s_set_lock = xSemaphoreCreateMutexStatic(&s_set_buf); // static: cannot fail
     lichen_sys_panic_probe(); // the panic hook blames nobody until its view of the task checked out
     settings_get_str(LIST_KEY, list, sizeof(list), "");
     portENTER_CRITICAL(&s_mux);

@@ -4,8 +4,10 @@
 // apps whose background is off.
 #include "safe_mode_policy.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
@@ -420,7 +422,60 @@ static void list_set_rolls_back(void) {
     CHECK(!safe_mode_list_set(full, sizeof(full), "bbbbbbbbbbbbb", true, fake_save, NULL) && saves == before);
 }
 
+// #461: a second set during the first one's save. Serialised, RAM ends as the list saved last; unserialised it does not.
+static pthread_mutex_t gate_mu  = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t crit_mu  = PTHREAD_MUTEX_INITIALIZER;
+static char            shared[SAFE_MODE_LIST_MAX];
+static bool            first_save;
+static safe_mode_sync_t sync_on, sync_off;
+
+static void take(void *a) { (void)a; pthread_mutex_lock(&gate_mu); }
+static void give(void *a) { (void)a; pthread_mutex_unlock(&gate_mu); }
+static void enter(void *a) { (void)a; pthread_mutex_lock(&crit_mu); }
+static void leave(void *a) { (void)a; pthread_mutex_unlock(&crit_mu); }
+
+static void *second_set(void *arg) {
+    safe_mode_sync_t const *sync = arg;
+    safe_mode_list_set_shared(sync, shared, sizeof(shared), "bbb", true, fake_save, NULL);
+    return NULL;
+}
+
+static pthread_t second;
+static bool      overlap_save(char const *next, void *arg) {
+    bool ok = fake_save(next, arg); // the flash has it from here
+    if (first_save) {
+        first_save = false;
+        pthread_create(&second, NULL, second_set, arg);
+        usleep(100 * 1000); // long enough for an unserialised second set to run through
+    }
+    return ok;
+}
+
+static void overlapping_sets(void) {
+    sync_on  = (safe_mode_sync_t){take, give, enter, leave, NULL};
+    sync_off = (safe_mode_sync_t){NULL, NULL, enter, leave, NULL};
+    save_ok_flag = true;
+    safe_mode_sync_t *runs[2] = {&sync_on, &sync_off};
+    bool  consistent[2];
+    for (int i = 0; i < 2; i++) {
+        shared[0]  = '\0';
+        saved[0]   = '\0';
+        first_save = true;
+        // the setter's arg reaches the save callback, which hands it to the second set
+        CHECK(safe_mode_list_set_shared(runs[i], shared, sizeof(shared), "aaa", true, overlap_save, runs[i]));
+        pthread_join(second, NULL);
+        consistent[i] = strcmp(shared, saved) == 0;
+        if (i == 0) {
+            CHECK(strstr(shared, "aaa") && strstr(shared, "bbb")); // both sets took effect
+        }
+    }
+    CHECK(consistent[0]);                                    // serialised: RAM is what was saved last
+    CHECK(!consistent[1]);                                   // the control: without the mutex they differ (the bug)
+    CHECK(!safe_mode_list_set_shared(NULL, shared, sizeof(shared), "a", true, fake_save, NULL));
+}
+
 int main(void) {
+    overlapping_sets();
     list_set_rolls_back();
     crashes_per_app();
     callback_crashes_are_no_strike();

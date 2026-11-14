@@ -2554,6 +2554,7 @@ add_executable(safe_mode_policy_test
 )
 target_include_directories(safe_mode_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_os)
 target_compile_options(safe_mode_policy_test PRIVATE -Wall -Wextra -Werror)
+target_link_libraries(safe_mode_policy_test PRIVATE Threads::Threads)
 add_test(NAME safe_mode_policy_test COMMAND safe_mode_policy_test)
 
 # Test and state-changing console forms need developer mode (#421), also under the "fw <app>" prefix

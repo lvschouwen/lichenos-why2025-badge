@@ -113,6 +113,19 @@ bool safe_mode_list_add(char *list, size_t cap, char const *id);
 // and it was saved (no save when it already did). For Settings > Apps (#233): a switch that could not be saved is not shown.
 bool safe_mode_list_set(char *list, size_t cap, char const *id, bool listed, bool (*save)(char const *next, void *arg),
                         void *arg);
+// The locks around a set on a list shared between tasks (#461): take/give serialise whole sets (a mutex: the set spans
+// a flash write), enter/leave guard the copies of the shared list (a spinlock). Any hook may be NULL.
+typedef struct {
+    void (*take)(void *arg);
+    void (*give)(void *arg);
+    void (*enter)(void *arg);
+    void (*leave)(void *arg);
+    void *arg;
+} safe_mode_sync_t;
+// safe_mode_list_set on the shared list under sync: two sets at once run one after the other, so the list in RAM is
+// the one saved last (a set that overlapped another could leave RAM with the first one's list and flash with the second's).
+bool safe_mode_list_set_shared(safe_mode_sync_t const *sync, char *shared, size_t cap, char const *id, bool listed,
+                               bool (*save)(char const *next, void *arg), void *arg);
 // id taken out; true when it was in. The rest is rewritten well-formed.
 bool safe_mode_list_remove(char *list, size_t cap, char const *id);
 
