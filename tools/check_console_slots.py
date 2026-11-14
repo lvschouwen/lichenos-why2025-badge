@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FW = ROOT / "firmware"
 LIMIT_PERCENT = 80
-CALL = re.compile(r"(?<![\w])console_register(_dev|_app)?\s*\(")
+CALL = re.compile(r"(?<![\w])console_register(_dev|_app)?(?:_rules)?\s*\(")  # _rules: with a sub-command table (#464)
 DECL = re.compile(r"(?:void|int)\s+$")
 
 
@@ -124,6 +124,8 @@ console_register("j", "u", f);
     assert count_calls(dev, {}) == 1  # j: a release build drops i
     app = 'console_register_app("q", "n", "u", f);\nconsole_register("j", "u", f);\n'
     assert count_calls(app, {}) == 2  # an app's command counts in a release build too (#423)
+    rules = 'console_register_rules("s", "u", f, R);\nconsole_register_app_rules("q", "t", "u", f, R);\n'
+    assert count_calls(rules, {}) == 2  # a command with a sub-command table takes a slot too (#464)
     print("check_console_slots selftest ok")
 
 

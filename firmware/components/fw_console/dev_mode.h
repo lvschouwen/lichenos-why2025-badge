@@ -39,6 +39,7 @@ typedef struct {
     void (*fn)(char const *args);
     bool dev; // registered with console_register_dev
     unsigned char app; // 0: the OS's; else 1 + the index of the app id in the app table (#423), in the padding after dev
+    unsigned char rules; // 0: none; else 1 + the index of its sub-command table in console.c's list (#464), padding too
 } console_entry_t;
 
 typedef enum {

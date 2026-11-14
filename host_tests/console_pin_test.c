@@ -6,6 +6,7 @@
 // The expectations below are the pin: they were written against the code before #464 moved the rules into tables, and
 // a change to one of them changes what the badge accepts. The evaluator under them is what the console decides today
 // (pin_decide): the dev gate and origin layer that runs before a command's own code.
+#include "console_sub.h"
 #include "dev_gate.h"
 #include "dev_mode.h"
 #include "mesh_onair.h"
@@ -334,6 +335,26 @@ static bool handler_hold_refuses(char const *name, char const *args, bool held, 
     return strcmp(name, "slot") == 0 && console_slot_request(args, held, origin) == SLOT_REQ_REFUSED;
 }
 
+// ---- the sub-command tables the commands register (#464) ---------------------------------------------------------
+
+typedef struct {
+    char const          *name;
+    console_sub_t const *rules;
+} rules_of_t;
+
+static rules_of_t const RULES[] = {
+    {NULL, NULL}, // the commands move here one component at a time
+};
+
+static console_sub_t const *rules_of(char const *name) {
+    for (size_t i = 0; i < sizeof(RULES) / sizeof(RULES[0]); i++) {
+        if (RULES[i].name && strcmp(RULES[i].name, name) == 0) {
+            return RULES[i].rules;
+        }
+    }
+    return NULL;
+}
+
 // ---- the decision -----------------------------------------------------------------------------------------------
 
 static char pin_decide(char const *text, bool dev_on, console_origin_t origin, bool held) {
@@ -351,6 +372,13 @@ static char pin_decide(char const *text, bool dev_on, console_origin_t origin, b
     }
     if (dev_gate_needs_dev(name, args) && !dev_on) {
         return 'D'; // run_command's gate (dev_gate.c)
+    }
+    console_ask_t ask = {.dev_on = dev_on, .origin = origin, .held = held};
+    switch (console_sub_rule(console_sub_find(rules_of(name), args), &ask)) { // run_command's rules_allow
+        case CON_RULE_DEV: return 'D';
+        case CON_RULE_ORIGIN: return 'O';
+        case CON_RULE_HOLD: return 'H';
+        case CON_RULE_RUN: break;
     }
     if (handler_dev_gate(name, args) && !dev_on) {
         return 'D';

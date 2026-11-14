@@ -22,10 +22,10 @@ static void noop(char const *args) {
 }
 
 static console_entry_t const table[] = {
-    {"help", "help", noop, false, 0},
-    {"ui", "ui [dump|perf]", noop, true, 0},
-    {"reboot", "reboot", noop, false, 0},
-    {"keys", "keys send", noop, true, 0},
+    {"help", "help", noop, false, 0, 0},
+    {"ui", "ui [dump|perf]", noop, true, 0, 0},
+    {"reboot", "reboot", noop, false, 0, 0},
+    {"keys", "keys send", noop, true, 0, 0},
 };
 #define N ((int)(sizeof(table) / sizeof(table[0])))
 
@@ -127,11 +127,11 @@ static void factory_reset_clears_it(void) {
 
 // Per-app prefix (#423): "mesh" and "advert" belong to app 1 (meshcore), "qr" to app 2, the rest to the OS
 static console_entry_t const app_table[] = {
-    {"help", "help", noop, false, 0},
-    {"mesh", "mesh send ...", noop, false, 1},
-    {"advert", "advert", noop, false, 1},
-    {"mdbg", "mdbg", noop, true, 1}, // an app's debug command
-    {"qr", "qr <text>", noop, false, 2},
+    {"help", "help", noop, false, 0, 0},
+    {"mesh", "mesh send ...", noop, false, 1, 0},
+    {"advert", "advert", noop, false, 1, 0},
+    {"mdbg", "mdbg", noop, true, 1, 0}, // an app's debug command
+    {"qr", "qr <text>", noop, false, 2, 0},
 };
 #define AN ((int)(sizeof(app_table) / sizeof(app_table[0])))
 
@@ -227,7 +227,7 @@ static void help_index_and_topic(void) {
     char            names[40][8];
     for (int i = 0; i < 40; i++) {
         snprintf(names[i], sizeof(names[i]), "cmd%d", i);
-        big[i] = (console_entry_t){names[i], "usage", noop, false, 0};
+        big[i] = (console_entry_t){names[i], "usage", noop, false, 0, 0};
     }
     char big_out[1024] = "";
     CHECK(dev_mode_help_names(&(help_view_t){big, 40, false}, 0, "OS:", 60, collect_line, big_out) == 40);
@@ -246,7 +246,7 @@ static void help_index_and_topic(void) {
     char            longname[200];
     memset(longname, 'x', sizeof(longname) - 1);
     longname[sizeof(longname) - 1] = 0;
-    console_entry_t lng[1]         = {{longname, "u", noop, false, 0}};
+    console_entry_t lng[1]         = {{longname, "u", noop, false, 0, 0}};
     out[0]                         = 0;
     char huge[512]                 = "";
     CHECK(dev_mode_help_names(&(help_view_t){lng, 1, false}, 0, "OS:", 100, collect_line, huge) == 1 && strlen(huge) > 100);

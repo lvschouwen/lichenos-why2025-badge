@@ -2630,7 +2630,7 @@ add_test(NAME file_replace_test COMMAND file_replace_test)
 # #464: the console's gate and origin pin, per developer mode, build and origin; built as a developer and a release
 # image (the developer one with the off-by-default nvs-down and nvs-enc burn arms compiled in)
 set(CONSOLE_PIN_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/console_pin_test.c ${NPT_FW}/fw_console/dev_gate.c
-    ${NPT_FW}/fw_console/dev_mode.c ${NPT_FW}/mesh/mesh_onair.c)
+    ${NPT_FW}/fw_console/dev_mode.c ${NPT_FW}/fw_console/console_sub.c ${NPT_FW}/mesh/mesh_onair.c)
 foreach(t console_pin_test console_pin_dev_test)
     add_executable(${t} ${CONSOLE_PIN_SRCS})
     target_include_directories(${t} PRIVATE ${NPT_FW}/fw_console ${NPT_FW}/mesh)
@@ -2640,3 +2640,10 @@ foreach(t console_pin_test console_pin_dev_test)
 endforeach()
 target_compile_definitions(console_pin_dev_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1
     CONFIG_LICHEN_NVS_DEBUG_FORCE_DOWN=1 CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD=1)
+
+# #464: the sub-command table type: matching, the gate, the origin rules and the USB hold
+add_executable(console_sub_test ${CMAKE_CURRENT_SOURCE_DIR}/console_sub_test.c ${NPT_FW}/fw_console/console_sub.c
+    ${NPT_FW}/fw_console/dev_mode.c)
+target_include_directories(console_sub_test PRIVATE ${NPT_FW}/fw_console)
+target_compile_options(console_sub_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME console_sub_test COMMAND console_sub_test)

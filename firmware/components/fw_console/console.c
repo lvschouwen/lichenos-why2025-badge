@@ -31,6 +31,7 @@
 
 // 12 B of .bss per slot (name, usage, fn). tools/check_console_slots.py fails the build above 80 % of this (#243)
 #define MAX_COMMANDS   96
+#define MAX_RULE_TABLES 32 // 4 B of .bss each: the commands with a sub-command table (#464)
 #define MAX_TASKS_SEEN 48
 
 static char const TAG[] = "console";
@@ -142,30 +143,53 @@ static int commands_count(void) {
     return __atomic_load_n(&n_commands, __ATOMIC_ACQUIRE);
 }
 
-static void register_entry(char const *app, char const *name, char const *usage, console_fn_t fn, bool dev) {
+// The commands' sub-command tables (#464): an entry keeps 1 + the index here in its padding, not a pointer of its own.
+// Written once per table before the entry that names it is published, like the commands.
+static console_sub_t const *rule_tables[MAX_RULE_TABLES];
+static int                  n_rule_tables;
+
+static void register_entry(char const *app, char const *name, char const *usage, console_fn_t fn, bool dev,
+                           console_sub_t const *rules) {
     portENTER_CRITICAL(&commands_lock);
     int  n    = n_commands;
     bool clash = dev_mode_name_clash(commands, n, app_ids, n_apps, app, name); // #423: a word must mean one thing
-    int  id    = app && !clash ? dev_mode_app_intern(app_ids, &n_apps, CONSOLE_MAX_APPS, app) : 0;
-    bool room  = !clash && n < MAX_COMMANDS && (app == NULL || id != 0);
+    // A command whose rules cannot be kept is not registered at all: without them it would run unchecked
+    bool rules_room = !rules || n_rule_tables < MAX_RULE_TABLES;
+    int  id    = app && !clash && rules_room ? dev_mode_app_intern(app_ids, &n_apps, CONSOLE_MAX_APPS, app) : 0;
+    bool room  = !clash && rules_room && n < MAX_COMMANDS && (app == NULL || id != 0);
     if (room) {
-        commands[n] = (console_entry_t){name, usage, fn, dev, (unsigned char)id};
+        unsigned char r = 0;
+        if (rules) {
+            rule_tables[n_rule_tables] = rules;
+            r                          = (unsigned char)++n_rule_tables;
+        }
+        commands[n] = (console_entry_t){name, usage, fn, dev, (unsigned char)id, r};
         __atomic_store_n(&n_commands, n + 1, __ATOMIC_RELEASE);
     }
     portEXIT_CRITICAL(&commands_lock);
     if (clash) {
         ESP_LOGE(TAG, "command %s (app %s) clashes with an app id or a command name: not registered", name, app ? app : "-");
     } else if (!room) {
-        ESP_LOGE(TAG, "no room for command %s (table of %d or %d apps is full)", name, MAX_COMMANDS, CONSOLE_MAX_APPS);
+        ESP_LOGE(TAG, "no room for command %s (table of %d, %d apps or %d rule tables is full)", name, MAX_COMMANDS,
+                 CONSOLE_MAX_APPS, MAX_RULE_TABLES);
     }
 }
 
 void console_register(char const *name, char const *usage, console_fn_t fn) {
-    register_entry(NULL, name, usage, fn, false);
+    register_entry(NULL, name, usage, fn, false, NULL);
 }
 
 void console_register_app(char const *app, char const *name, char const *usage, console_fn_t fn) {
-    register_entry(app, name, usage, fn, false);
+    register_entry(app, name, usage, fn, false, NULL);
+}
+
+void console_register_rules(char const *name, char const *usage, console_fn_t fn, console_sub_t const *rules) {
+    register_entry(NULL, name, usage, fn, false, rules);
+}
+
+void console_register_app_rules(char const *app, char const *name, char const *usage, console_fn_t fn,
+                                console_sub_t const *rules) {
+    register_entry(app, name, usage, fn, false, rules);
 }
 
 // Developer mode (#373): read once from the settings service at bind time, then kept here. A release build points at
@@ -185,7 +209,7 @@ __attribute__((used, retain)) char const lichen_debug_build_marker[] = "LICHEN-D
 static fw_set_u8_fn s_dev_save;
 
 void console_register_dev(char const *name, char const *usage, console_fn_t fn) {
-    register_entry(NULL, name, usage, fn, true);
+    register_entry(NULL, name, usage, fn, true, NULL);
 }
 #endif
 
@@ -866,6 +890,48 @@ static void run(char *line) {
     activity();
 }
 
+// The refusals of a sub-command row (#464): "<command> <word>" names it, a REST row names the command alone
+static void rule_refused(console_rule_t rule, char const *name, console_sub_t const *row) {
+    char   what[48];
+    size_t wl = row->word ? strlen(row->word) : 0;
+    wl -= wl && row->word[wl - 1] == ' '; // a PREFIX word's own space
+    snprintf(what, sizeof(what), "%s%s%.*s", name, wl ? " " : "", (int)wl, wl ? row->word : "");
+    switch (rule) {
+        case CON_RULE_DEV: console_reply("%s: " DEV_OFF_REPLY, what); break;
+        case CON_RULE_HOLD: console_reply("%s refused: %s is on; " HOLD_OFF_FIRST, what, console_usb_hold_why() ? console_usb_hold_why() : "?"); break;
+        case CON_RULE_ORIGIN:
+        default:
+            console_reply("%s refused: %s", what,
+                          row->origin == CON_ORIGIN_LOCAL ? "only on the badge (the USB console or the Console app)"
+                          : row->flags & CON_F_ERASE ? "it erases storage, so only the USB console can do it (the "
+                                                        "screen's Settings can too)"
+                                                      : "only from the USB console");
+            break;
+    }
+}
+
+// The one gate and origin check of a command with a sub-command table, before its own code runs
+static bool rules_allow(console_entry_t const *e, char const *name, char const *args) {
+    if (!e->rules) {
+        return true;
+    }
+    console_sub_t const *row = console_sub_find(rule_tables[e->rules - 1], args);
+    if (!row) {
+        return true;
+    }
+    console_ask_t ask = {
+        .dev_on = console_dev_mode(),
+        .origin = console_origin(),
+        .held   = (row->flags & CON_F_USB_HOLD) && console_usb_hold_why() != NULL,
+    };
+    console_rule_t rule = console_sub_rule(row, &ask);
+    if (rule == CON_RULE_RUN) {
+        return true;
+    }
+    rule_refused(rule, name, row);
+    return false;
+}
+
 static void run_command(char *line) {
     // "fw <app> <command>" (#423): the same table, the same gates; only the command's owner may answer under a prefix
     char const *args;
@@ -876,7 +942,11 @@ static void run_command(char *line) {
     // One decision for all three outcomes (host-tested): a test arm of an otherwise open command (#421) is refused
     // before it can write anything
     switch (dev_gate_decide(found, dev_gate_needs_dev(line, args), console_dev_mode())) {
-        case DEV_GATE_RUN: commands[i].fn(args); return;
+        case DEV_GATE_RUN:
+            if (rules_allow(&commands[i], line, args)) {
+                commands[i].fn(args);
+            }
+            return;
         case DEV_GATE_REFUSE: console_reply("%s: " DEV_OFF_REPLY, line); return;
         case DEV_GATE_UNKNOWN: break;
     }

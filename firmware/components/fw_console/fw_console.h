@@ -5,6 +5,7 @@
 extern "C" {
 #endif
 
+#include "console_sub.h"
 #include "dev_mode.h"
 #include "restart_log.h"
 
@@ -32,6 +33,12 @@ size_t console_line_max(void);
 // under app. app is the app's id (tools/layers.conf `app` line), a string literal. The command keeps its plain name
 // for scripts and the on-air guard (tools/onair_guard.sh strips the prefix before it judges a line).
 void console_register_app(char const *app, char const *name, char const *usage, console_fn_t fn);
+// The same with the command's sub-command table (#464, console_sub.h; ended by CONSOLE_SUB_END, kept by pointer): before
+// fn runs, the row the arguments match is checked once for developer mode, the origin and the USB hold, and refused
+// with a reply. A command with a table carries no gate or origin check of its own.
+void console_register_rules(char const *name, char const *usage, console_fn_t fn, console_sub_t const *rules);
+void console_register_app_rules(char const *app, char const *name, char const *usage, console_fn_t fn,
+                                console_sub_t const *rules);
 
 // Developer mode (#373, dev_mode.h). A debug or test command registers with console_register_dev: while developer mode
 // is off it answers DEV_MODE_OFF_NOTE and "fw help" leaves it out. With LICHEN_DEV_COMMANDS off (the release build) the

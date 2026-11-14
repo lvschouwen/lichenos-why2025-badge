@@ -89,8 +89,8 @@ static void dispatch(char const *text, bool dev_on) {
     char                 buf[96];
     char const          *args;
     int                  app, i = 0;
-    static console_entry_t const table[] = {{"psram", "psram", counting, false, 0}, {"stress", "stress", counting, false, 0},
-                                            {"ui", "ui", counting, true, 0}};
+    static console_entry_t const table[] = {{"psram", "psram", counting, false, 0, 0}, {"stress", "stress", counting, false, 0, 0},
+                                            {"ui", "ui", counting, true, 0, 0}};
     snprintf(buf, sizeof(buf), "%s", text);
     char *name = dev_gate_split(buf, IDS, 2, &app, &args);
     dev_find_t found = dev_mode_find_app(table, 3, name, dev_on, app, &i);
