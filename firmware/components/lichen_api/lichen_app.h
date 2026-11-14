@@ -65,6 +65,9 @@ typedef struct lichen_app {
     // breaks those rules, or a backup or keep key under it, is refused at registration (the app, its backup group,
     // the key). Set by name like every member, so later members never move it.
     char const *secret_prefix;
+    // Safe mode never switches the app's background part off (#232, owner decision 2026-11-14: MeshCore, the main
+    // app). Its crashes are still counted, named in the notice and make the boot degraded. #233 revisits it.
+    bool safe_mode_exempt;
 } lichen_app_t;
 
 // Size of the app table. Home scrolls to the selection, so this only bounds the arrays; lichen_register_app logs an error

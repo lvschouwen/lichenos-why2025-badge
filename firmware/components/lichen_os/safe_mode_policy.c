@@ -77,8 +77,8 @@ safe_mode_boot_t safe_mode_boot(safe_mode_rec_t *r, bool crashed) {
     return out;
 }
 
-bool safe_mode_switch_off(safe_mode_boot_t const *b, char const *id, bool has_background) {
-    return b->limit_reached && has_background && safe_mode_id_ok(id) && strcmp(b->app, id) == 0;
+bool safe_mode_switch_off(safe_mode_boot_t const *b, char const *id, bool may_switch_off) {
+    return b->limit_reached && may_switch_off && safe_mode_id_ok(id) && strcmp(b->app, id) == 0;
 }
 
 void safe_mode_forget(safe_mode_rec_t *r, char const *id) {

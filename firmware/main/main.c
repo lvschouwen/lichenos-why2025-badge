@@ -367,8 +367,9 @@ static void start_apps(void) {
     for (size_t i = 0; i < lichen_app_count(); i++) {
         lichen_app_t const *app = lichen_app_at(i);
         // #232: crashed twice in three boots (logged by safe_mode.c); asked for every app, so the rule sees which
-        // ones have a background part to switch off
-        if (safe_mode_background_off(app->id, app->start_background != NULL) || !app->start_background) {
+        // ones have a background part it may switch off (never an exempt one: MeshCore)
+        bool may_off = app->start_background && !app->safe_mode_exempt;
+        if (safe_mode_background_off(app->id, may_off) || !app->start_background) {
             continue;
         }
         lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); // #230: its tasks inherit the app

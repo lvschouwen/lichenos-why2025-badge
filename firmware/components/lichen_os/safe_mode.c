@@ -63,11 +63,11 @@ void IRAM_ATTR __wrap_esp_panic_handler(panic_info_t *info) {
 
 static void switch_off(char const *id);
 
-bool safe_mode_background_off(char const *id, bool has_background) {
+bool safe_mode_background_off(char const *id, bool may_switch_off) {
     portENTER_CRITICAL(&s_mux);
     bool off = safe_mode_list_has(s_off, id);
     portEXIT_CRITICAL(&s_mux);
-    if (!off && atomic_load(&s_boot_done) && safe_mode_switch_off(&s_boot, id, has_background)) {
+    if (!off && atomic_load(&s_boot_done) && safe_mode_switch_off(&s_boot, id, may_switch_off)) {
         switch_off(id); // a list that did not save still keeps it off this boot
         atomic_store(&s_switched, true);
         off = true;

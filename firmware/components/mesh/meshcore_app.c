@@ -401,6 +401,7 @@ static lichen_app_t const meshcore_app = {
     .settings         = meshcore_settings,
     .about            = about,
     .start_background = start_background,
+    .safe_mode_exempt = true, // #232: the main app's background is never switched off by safe mode
     .stop_for_update  = stop_for_update,
     .first_run_set    = first_run_set,
     .open_messages    = open_messages,

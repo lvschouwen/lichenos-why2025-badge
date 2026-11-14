@@ -21,10 +21,10 @@ extern "C" {
 // possible flash write stalls nothing on the glass (#31).
 void safe_mode_boot_step(bool crashed);
 // start_apps, for every registered app: its background part stays off this boot (start_apps skips start_background).
-// The app this boot's crash is blamed on is switched off here (and saved) when it reached the limit and has a
-// background part (has_background); one without has nothing to switch off. The settings are written only when the
+// The app this boot's crash is blamed on is switched off here (and saved) when it reached the limit and may be
+// (may_switch_off: it has a background part and is not safe_mode_exempt). The settings are written only when the
 // list changes. Main task, at boot.
-bool safe_mode_background_off(char const *id, bool has_background);
+bool safe_mode_background_off(char const *id, bool may_switch_off);
 // This boot follows a crash attributed to an app: its id into id (cap >= 14), its crashes in the window (crashes,
 // may be NULL) and whether start_apps switched its background off (switched_off, may be NULL). False for no crash or
 // nobody to blame. Any task.

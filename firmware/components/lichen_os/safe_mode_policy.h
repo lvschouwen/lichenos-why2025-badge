@@ -74,9 +74,10 @@ typedef struct {
 // Once per boot, early: crashed is this boot's crash verdict (crash.c's crash_recovered). Consumes the panic and
 // re-arm marks, moves the window and seals the record.
 safe_mode_boot_t safe_mode_boot(safe_mode_rec_t *r, bool crashed);
-// Whether the boot switches id's background part off now: id is the app b blames, it reached the limit and it has a
-// background part (an app without one has nothing to switch off: its notice names the crashes only)
-bool safe_mode_switch_off(safe_mode_boot_t const *b, char const *id, bool has_background);
+// Whether the boot switches id's background part off now: id is the app b blames, it reached the limit and it may be
+// switched off (may_switch_off: it has a background part and is not exempt, lichen_app_t.safe_mode_exempt). One that
+// may not is only counted: its notice names the app and the crashes.
+bool safe_mode_switch_off(safe_mode_boot_t const *b, char const *id, bool may_switch_off);
 // Re-enabling an app forgets its crashes, so one more crash does not switch it off again at once
 void safe_mode_forget(safe_mode_rec_t *r, char const *id);
 // A crash in the window (what safe_mode_boot said about degraded; false for a record that is not valid)

@@ -244,7 +244,9 @@ background part off and notify (#232): the panic handler notes the app the fault
 task or an ISR blames nobody) in LP RAM, the next boot counts it (the PSRAM re-arm restart after a crash is part of
 that crash, not a clean boot), `fw app background` lists what is off and `fw app background <id> on` switches it on
 again. `lichen_boot_degraded()` (lichen_crashlog.h) tells an app that a crash is among the last boots, so a restart
-loop does not repeat costly background work; an app keeps no restart policy of its own. Settings > Apps shows state and capabilities (#233). Today the OS already books
+loop does not repeat costly background work; an app keeps no restart policy of its own. An app with
+`safe_mode_exempt` (MeshCore, the main app) is counted and named but never switched off; #233 (Settings > Apps)
+revisits that exemption. Settings > Apps shows state and capabilities (#233). Today the OS already books
 every app's tasks and allocations (`lichen_task.h`, `lichen_mem.h`; `fw tasks`, `fw mem`) and
 `lichen_task_leftovers` names what runs after a stop.
 
