@@ -117,6 +117,14 @@ static files_result_t run_kind(void) {
     return FILES_ERR_ARG;
 }
 
+// Whether the side that failed is the card: a copy names its step, any other job touches s_req.path
+static bool failing_side_on_card(void) {
+    if (s_req.kind != FJ_COPY) {
+        return on_sd(s_req.path);
+    }
+    return files_fail_on_card(s_result.step, on_sd(s_req.path), on_sd(s_req.dst));
+}
+
 static void job_task(void *arg) {
     (void)arg;
     memset(&s_result, 0, sizeof(s_result));
@@ -133,7 +141,7 @@ static void job_task(void *arg) {
     if (locked) {
         // A copy recorded the errno of its failed step: the global one has been overwritten by the closes since
         int  err        = s_req.kind == FJ_COPY && s_result.step != FILES_STEP_NONE ? s_result.err : errno;
-        bool card_error = files_card_strike(s_result.result, err);
+        bool card_error = files_card_strike(s_result.result, err, failing_side_on_card());
         lichen_sys_sd_end(card_error ? lichen_sys_sd_io_from_errno(err) : LICHEN_SD_IO_OK);
     }
     if (s_req.kind == FJ_COPY && s_result.result != FILES_OK && s_result.step != FILES_STEP_NONE) {

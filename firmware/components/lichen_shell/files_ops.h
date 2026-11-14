@@ -31,7 +31,8 @@ typedef enum {
 } files_result_t;
 
 // The step of a copy that failed, with the errno it left (0 when none was set)
-typedef enum { FILES_STEP_NONE, FILES_STEP_SD_BEGIN, FILES_STEP_SRC_STAT, FILES_STEP_SRC_OPEN, FILES_STEP_DST_OPEN } files_step_t;
+typedef enum { FILES_STEP_NONE, FILES_STEP_SD_BEGIN, FILES_STEP_SRC_STAT, FILES_STEP_SRC_OPEN, FILES_STEP_DST_OPEN,
+               FILES_STEP_SRC_READ, FILES_STEP_DST_WRITE } files_step_t; // READ/WRITE: during the data copy, WRITE covers close and rename
 typedef struct {
     files_step_t step;
     int          err;
@@ -42,7 +43,12 @@ char const *files_step_name(files_step_t step); // for the log line
 files_result_t files_dest_result(int err);
 // Whether a finished job counts against the card's error strikes (sd_end's io result): only a failed read, write or open
 // does, and a full open-file table (ENFILE/EMFILE) is the OS's limit, not the card's (#274)
-bool files_card_strike(files_result_t r, int err);
+// side_on_card: the volume of the failing side is the card (a failure on /storage is not the card's fault, #465)
+bool files_card_strike(files_result_t r, int err, bool side_on_card);
+// Whether the step failed on the copy's source side (else the destination side)
+bool files_step_on_src(files_step_t step);
+// Whether the side a copy failed on is the card, given which of its two paths are on the card
+bool files_fail_on_card(files_step_t step, bool src_on_card, bool dst_on_card);
 
 char const *files_result_text(files_result_t r); // a sentence for the screen
 

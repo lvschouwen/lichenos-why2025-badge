@@ -167,15 +167,40 @@ static void test_dest_and_strikes(void) {
     int const            errs[] = {0, EIO, ENODEV, ENOENT, EINVAL, ENFILE, EMFILE};
     for (size_t e = 0; e < sizeof(errs) / sizeof(errs[0]); e++) {
         for (size_t i = 0; i < 2; i++) {
-            CHECK(files_card_strike(old[i], errs[e]) == (errs[e] != ENFILE && errs[e] != EMFILE));
+            CHECK(files_card_strike(old[i], errs[e], true) == (errs[e] != ENFILE && errs[e] != EMFILE));
         }
         for (size_t i = 0; i < 3; i++) {
-            CHECK(files_card_strike(now[i], errs[e]) == files_card_strike(FILES_ERR_OPEN, errs[e]));
+            CHECK(files_card_strike(now[i], errs[e], true) == files_card_strike(FILES_ERR_OPEN, errs[e], true) &&
+                  !files_card_strike(now[i], errs[e], false));
         }
-        CHECK(!files_card_strike(FILES_OK, errs[e]) && !files_card_strike(FILES_CANCELLED, errs[e]));
+        CHECK(!files_card_strike(FILES_OK, errs[e], true) && !files_card_strike(FILES_CANCELLED, errs[e], true));
     }
-    CHECK(!files_card_strike(FILES_ERR_BUSY, EIO) && !files_card_strike(FILES_ERR_CARD, EIO) &&
-          !files_card_strike(FILES_ERR_NAME, EIO) && !files_card_strike(FILES_ERR_SPACE, EIO));
+    CHECK(!files_card_strike(FILES_ERR_BUSY, EIO, true) && !files_card_strike(FILES_ERR_CARD, EIO, true) &&
+          !files_card_strike(FILES_ERR_NAME, EIO, true) && !files_card_strike(FILES_ERR_SPACE, EIO, true));
+}
+
+// #465: only the side that failed counts, so a bad /storage read in a /storage -> card copy does not strike the card
+static void test_strike_side(void) {
+    files_step_t const src_steps[] = {FILES_STEP_SRC_STAT, FILES_STEP_SRC_OPEN, FILES_STEP_SRC_READ};
+    files_step_t const dst_steps[] = {FILES_STEP_DST_OPEN, FILES_STEP_DST_WRITE};
+    for (size_t i = 0; i < 3; i++) {
+        // source on /storage, destination on the card: EIO at open or during the read does not strike
+        CHECK(!files_card_strike(FILES_ERR_SRC, EIO, files_fail_on_card(src_steps[i], false, true)));
+        CHECK(!files_card_strike(FILES_ERR_IO, EIO, files_fail_on_card(src_steps[i], false, true)));
+        // source on the card: strikes
+        CHECK(files_card_strike(FILES_ERR_IO, EIO, files_fail_on_card(src_steps[i], true, false)));
+        CHECK(files_card_strike(FILES_ERR_SRC, EIO, files_fail_on_card(src_steps[i], true, true)));
+    }
+    for (size_t i = 0; i < 2; i++) {
+        CHECK(files_card_strike(FILES_ERR_IO, EIO, files_fail_on_card(dst_steps[i], false, true)));
+        CHECK(files_card_strike(FILES_ERR_CREATE, EIO, files_fail_on_card(dst_steps[i], false, true)));
+        CHECK(!files_card_strike(FILES_ERR_IO, EIO, files_fail_on_card(dst_steps[i], true, false)));
+        CHECK(!files_card_strike(FILES_ERR_CREATE, EIO, files_fail_on_card(dst_steps[i], true, false)));
+    }
+    CHECK(!files_card_strike(FILES_ERR_IO, ENFILE, files_fail_on_card(FILES_STEP_DST_WRITE, false, true)));
+    CHECK(!files_card_strike(FILES_ERR_IO, EMFILE, files_fail_on_card(FILES_STEP_SRC_READ, true, false)));
+    CHECK(files_fail_on_card(FILES_STEP_NONE, true, false) && files_fail_on_card(FILES_STEP_NONE, false, true) &&
+          !files_fail_on_card(FILES_STEP_NONE, false, false));
 }
 
 static void test_busy(void) {
@@ -223,6 +248,7 @@ int main(void) {
     test_copy();
     test_texts();
     test_dest_and_strikes();
+    test_strike_side();
     test_busy();
     char cmd[300];
     snprintf(cmd, sizeof(cmd), "rm -r %s", tmpl); // test data only, in our own mkdtemp directory

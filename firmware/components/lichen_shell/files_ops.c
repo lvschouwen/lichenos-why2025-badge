@@ -62,6 +62,8 @@ char const *files_step_name(files_step_t step) {
     case FILES_STEP_SRC_STAT: return "src_stat";
     case FILES_STEP_SRC_OPEN: return "src_open";
     case FILES_STEP_DST_OPEN: return "dst_open";
+    case FILES_STEP_SRC_READ: return "src_read";
+    case FILES_STEP_DST_WRITE: return "dst_write";
     }
     return "?";
 }
@@ -70,19 +72,35 @@ files_result_t files_dest_result(int err) {
     return err == EINVAL ? FILES_ERR_DEST : err == ENOSPC ? FILES_ERR_SPACE : FILES_ERR_CREATE;
 }
 
-bool files_card_strike(files_result_t r, int err) {
-    bool failed = r == FILES_ERR_IO || r == FILES_ERR_OPEN || r == FILES_ERR_SRC || r == FILES_ERR_DEST ||
-                  r == FILES_ERR_CREATE;
-    return failed && err != ENFILE && err != EMFILE;
+bool files_step_on_src(files_step_t step) {
+    return step == FILES_STEP_SRC_STAT || step == FILES_STEP_SRC_OPEN || step == FILES_STEP_SRC_READ;
 }
 
-static files_result_t fail_at(files_fail_t *fail, files_step_t step, files_result_t otherwise) {
+bool files_fail_on_card(files_step_t step, bool src_on_card, bool dst_on_card) {
+    if (step == FILES_STEP_NONE) {
+        return src_on_card || dst_on_card; // no step recorded: either side may be the card
+    }
+    return files_step_on_src(step) ? src_on_card : dst_on_card;
+}
+
+bool files_card_strike(files_result_t r, int err, bool side_on_card) {
+    bool failed = r == FILES_ERR_IO || r == FILES_ERR_OPEN || r == FILES_ERR_SRC || r == FILES_ERR_DEST ||
+                  r == FILES_ERR_CREATE;
+    return side_on_card && failed && err != ENFILE && err != EMFILE;
+}
+
+// Records the failing step and its errno without touching the result (the data-copy results keep their own mapping)
+static int note_fail(files_fail_t *fail, files_step_t step) {
     int err = errno;
     if (fail) {
         fail->step = step;
         fail->err  = err;
     }
-    return errno_result(err, otherwise);
+    return err;
+}
+
+static files_result_t fail_at(files_fail_t *fail, files_step_t step, files_result_t otherwise) {
+    return errno_result(note_fail(fail, step), otherwise);
 }
 
 int files_list(char const *dir, files_entry_t *out, size_t max, size_t *count, size_t *skipped) {
@@ -206,15 +224,15 @@ static files_result_t copy_checks(char const *src, char const *dst, uint64_t fre
 
 // The data loop. Returns FILES_OK when every byte was written and flushed.
 static files_result_t copy_data(FILE *in, FILE *out, uint8_t *buf, size_t cap, uint32_t total, files_progress_fn progress,
-                                void *ctx) {
+                                void *ctx, files_fail_t *fail) {
     uint32_t done = 0;
     for (;;) {
         size_t n = fread(buf, 1, cap, in);
         if (n == 0) {
-            return ferror(in) ? FILES_ERR_IO : FILES_OK;
+            return ferror(in) ? (note_fail(fail, FILES_STEP_SRC_READ), FILES_ERR_IO) : FILES_OK;
         }
         if (fwrite(buf, 1, n, out) != n) {
-            return errno == ENOSPC ? FILES_ERR_SPACE : FILES_ERR_IO;
+            return note_fail(fail, FILES_STEP_DST_WRITE) == ENOSPC ? FILES_ERR_SPACE : FILES_ERR_IO;
         }
         done += (uint32_t)n;
         if (progress && !progress(done, total, ctx)) {
@@ -247,13 +265,13 @@ files_result_t files_copy_ex(char const *src, char const *dst, uint8_t *buf, siz
         return r;
     }
     errno = 0;
-    r = copy_data(in, out, buf, buf_cap, total, progress, ctx);
+    r = copy_data(in, out, buf, buf_cap, total, progress, ctx, fail);
     fclose(in);
     if (fclose(out) != 0 && r == FILES_OK) {
-        r = errno == ENOSPC ? FILES_ERR_SPACE : FILES_ERR_IO;
+        r = note_fail(fail, FILES_STEP_DST_WRITE) == ENOSPC ? FILES_ERR_SPACE : FILES_ERR_IO;
     }
     if (r == FILES_OK && rename(rpart, real_path(dst, rdst, sizeof(rdst))) != 0) {
-        r = errno_result(errno, FILES_ERR_IO);
+        r = errno_result(note_fail(fail, FILES_STEP_DST_WRITE), FILES_ERR_IO);
     }
     if (r != FILES_OK) {
         unlink(rpart);
