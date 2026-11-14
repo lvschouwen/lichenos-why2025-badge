@@ -20,7 +20,7 @@ static int failures;
 #define V0 "v0"
 #define V1 "v1"
 #define V2 "v2"
-#define PARTIAL "v" // what a cut write leaves: not a valid copy
+#define PARTIAL "vs" // what a cut write leaves: it parses as a smaller file, so only the end marker tells (NEW needs it)
 
 typedef struct {
     char file[SBS_COUNT][8]; // "" = absent
@@ -87,8 +87,9 @@ static sbs_state_t fk_probe(void *c, sbs_name_t n) {
     if (!f->present[n]) {
         return SBS_ABSENT;
     }
-    bool valid = !strcmp(f->file[n], V0) || !strcmp(f->file[n], V1) || !strcmp(f->file[n], V2);
-    return valid ? SBS_VALID : SBS_INVALID;
+    bool complete = !strcmp(f->file[n], V0) || !strcmp(f->file[n], V1) || !strcmp(f->file[n], V2);
+    bool parses   = complete || !strcmp(f->file[n], PARTIAL);
+    return (n == SBS_NEW ? complete : parses) ? SBS_VALID : SBS_INVALID;
 }
 
 static void put(fake_t *f, sbs_name_t n, char const *text) {
@@ -102,6 +103,16 @@ static void start(fake_t *f, int variant) {
     if (variant == 0) {
         put(f, SBS_MAIN, V0);
     } else if (variant == 2) {
+        put(f, SBS_NEW, V1);
+        put(f, SBS_OLD, V0);
+    } else if (variant == 3) { // a backup and a leftover NEW
+        put(f, SBS_MAIN, V1);
+        put(f, SBS_NEW, V1);
+    } else if (variant == 4) { // a backup and a leftover OLD
+        put(f, SBS_MAIN, V1);
+        put(f, SBS_OLD, V0);
+    } else if (variant == 5) { // all three
+        put(f, SBS_MAIN, V1);
         put(f, SBS_NEW, V1);
         put(f, SBS_OLD, V0);
     }
@@ -139,9 +150,15 @@ static void check_case(int variant, int step, bool cut) {
         CHECK(strcmp(got, V2) == 0);
     } else if (variant == 0) {
         CHECK(strcmp(got, V0) == 0 || strcmp(got, V2) == 0);
+    } else if (variant >= 3) { // MAIN existed: it stays the choice until the new one is renamed in
+        CHECK(strcmp(got, V1) == 0 || strcmp(got, V2) == 0);
     } else if (variant == 2) {
-        // the newest; a failed first write truncates the leftover NEW, so only the older OLD remains (still valid)
-        CHECK(strcmp(got, V2) == 0 || strcmp(got, V1) == 0 || (step == 1 && strcmp(got, V0) == 0));
+        // The first write truncates the leftover NEW, a partial that parses: it must lose to OLD, not win
+        if (step == 1) {
+            CHECK(strcmp(got, V0) == 0);
+        } else {
+            CHECK(strcmp(got, V2) == 0 || strcmp(got, V1) == 0);
+        }
     }
     // after a cut the next save (power is back) must converge: MAIN holds the new text, no leftovers
     f.dead = false; f.fail_at = 0; f.op = 0;
@@ -151,7 +168,7 @@ static void check_case(int variant, int step, bool cut) {
 }
 
 static void test_every_step(void) {
-    for (int variant = 0; variant < 3; variant++) {
+    for (int variant = 0; variant < 6; variant++) {
         int ops = count_ops(variant);
         CHECK(ops >= 3);
         for (int step = 1; step <= ops; step++) {
@@ -175,8 +192,11 @@ static void test_choose_order(void) {
     put(&f, SBS_MAIN, "junk"); // an invalid MAIN is refused, not papered over with an older copy
     CHECK(sbs_choose(fk_probe, &f, &saw) == SBS_COUNT && saw);
     f.present[SBS_MAIN] = false;
-    put(&f, SBS_NEW, PARTIAL); // a partial NEW with MAIN absent falls through to OLD
+    put(&f, SBS_NEW, PARTIAL); // a partial NEW that parses fine, MAIN absent: falls through to OLD
     CHECK(sbs_choose(fk_probe, &f, &saw) == SBS_OLD);
+    put(&f, SBS_MAIN, PARTIAL); // MAIN and OLD may predate the end marker: judged by the parse alone
+    CHECK(sbs_choose(fk_probe, &f, &saw) == SBS_MAIN);
+    f.present[SBS_MAIN] = false;
     put(&f, SBS_OLD, "junk");
     CHECK(sbs_choose(fk_probe, &f, &saw) == SBS_COUNT && saw); // refused, not missing
 }

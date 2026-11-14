@@ -158,11 +158,20 @@ size_t sb_format(char const *firmware, sb_value_t const *vals, size_t count, cha
         n    = snprintf(out + pos, cap - pos, "%s.%s = %s\n", vals[i].key->ns, vals[i].key->key, text);
         pos += n > 0 ? (size_t)n : cap;
     }
+    if (pos < cap) {
+        n    = snprintf(out + pos, cap - pos, "%s", SB_END_LINE);
+        pos += n > 0 ? (size_t)n : cap;
+    }
     if (pos >= cap) {
         out[0] = '\0';
         return 0;
     }
     return pos;
+}
+
+bool sb_complete(char const *text, size_t len) {
+    size_t e = sizeof(SB_END_LINE) - 1;
+    return len >= e && memcmp(text + len - e, SB_END_LINE, e) == 0 && (len == e || text[len - e - 1] == '\n');
 }
 
 // ---- parsing ------------------------------------------------------------------------------------------------------

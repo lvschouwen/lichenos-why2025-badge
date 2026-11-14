@@ -102,7 +102,9 @@ static sbs_ops_t const FS_OPS = {fs_write, fs_rename, fs_remove};
 static bool write_file(char const *buf, size_t len) {
     bool ok = sbs_save(&FS_OPS, NULL, buf, len);
     if (!ok) {
-        ESP_LOGW(TAG, "writing the backup failed: errno %d", errno);
+        int err = errno; // the log call may change it, and the caller classifies the card's state by it
+        ESP_LOGW(TAG, "writing the backup failed: errno %d", err);
+        errno = err;
     }
     return ok;
 }
@@ -157,8 +159,9 @@ static sbs_state_t probe_file(void *ctx, sbs_name_t n) {
     load_t *l = ctx;
     FILE   *f = fopen(path_of(n), "r");
     if (!f) {
-        if (errno != ENOENT) {
-            l->io_err = errno;
+        if (errno != ENOENT) { // the card failed, not "no such file": for the main file the load stops here, it does not
+            l->io_err = errno; // fall back to a leftover that may be older
+            return n == SBS_MAIN ? SBS_INVALID : SBS_ABSENT;
         }
         return SBS_ABSENT;
     }
@@ -174,6 +177,9 @@ static sbs_state_t probe_file(void *ctx, sbs_name_t n) {
         return SBS_INVALID;
     }
     l->text[len] = '\0';
+    if (n == SBS_NEW && !sb_complete(l->text, len)) { // a save cut mid-write can still parse as a smaller file
+        return SBS_INVALID;
+    }
     sb_result_t r = sb_parse(l->text, len, l->parsed, VALUES_MAX, &l->count);
     if (r.err != SB_OK) {
         note_refused(l, r);
@@ -204,6 +210,9 @@ static sbk_status_t load_backup(load_t *l, sb_result_t *result) {
 sbk_status_t settings_backup_plan(settings_backup_plan_t *plan) {
     memset(plan, 0, sizeof(*plan));
     held_release();
+    if (!sd_mounted()) { // before the ~8 KB below, so no card is never reported as no memory
+        return SBK_NO_CARD;
+    }
     // 2.3 KB of values, off the caller's stack (#209)
     load_t l = {0};
     l.text   = lichen_alloc(lichen_sys_ctx_os(), FILE_CAP + 2, LICHEN_MEM_BULK);

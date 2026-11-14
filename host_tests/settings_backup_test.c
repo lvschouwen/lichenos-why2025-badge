@@ -74,6 +74,13 @@ static void test_roundtrip(void) {
         CHECK(sb_value_equal(&vals[i], &back[i]));
     }
     CHECK(sb_format("x", vals, n, file, 100) == 0); // too small: nothing
+    size_t flen = sb_format("fw-test", vals, n, file, sizeof(file));
+    CHECK(flen > 0 && sb_complete(file, flen));
+    CHECK(!sb_complete(file, flen - 1));                    // cut inside the marker
+    CHECK(!sb_complete(file, (size_t)(strstr(file, "# end") - file))); // cut before it, at a line boundary
+    CHECK(!sb_complete("badge_fw.x = 1\n", 15));
+    CHECK(!sb_complete("x" SB_END_LINE, 1 + sizeof(SB_END_LINE) - 1)); // marker glued to a longer line
+    CHECK(sb_complete(SB_END_LINE, sizeof(SB_END_LINE) - 1));
 }
 
 static void test_bad_values(void) {

@@ -9,8 +9,10 @@
 //   SBS_NEW   settings.new  a save in flight; complete once the write returned (a cut mid-write leaves a partial one)
 //   SBS_OLD   settings.old  the previous backup, moved aside while the new one is renamed in
 // Save: write NEW; MAIN -> OLD; NEW -> MAIN; remove OLD. A power cut or a failed call anywhere leaves a copy that the
-// read accepts: MAIN until step 2, NEW or OLD between steps 2 and 3, MAIN after. A partial NEW fails validation and the
-// read falls through to the copy that is intact.
+// read accepts: MAIN until step 2, NEW or OLD between steps 2 and 3, MAIN after. A partial NEW must fail the probe and the
+// read falls through to the copy that is intact. The parse alone cannot tell (a file cut at a line boundary, or a value
+// cut short, still parses as a smaller set), so the probe demands the end line of settings_backup.h for NEW; MAIN and
+// OLD may predate that marker and are judged by the parse alone.
 
 #include <stdbool.h>
 #include <stddef.h>

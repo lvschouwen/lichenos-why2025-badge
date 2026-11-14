@@ -518,6 +518,7 @@ radio_state_set_switch	-	unspecified	radio_state.h
 radio_state_switch	-	unspecified	radio_state.h
 sb_add_app_keys	SYSTEM	unspecified	settings_backup.h
 sb_app_keys_clear	SYSTEM	unspecified	settings_backup.h
+sb_complete	SYSTEM	unspecified	settings_backup.h
 sb_error_text	SYSTEM	unspecified	settings_backup.h
 sb_find	SYSTEM	unspecified	settings_backup.h
 sb_format	SYSTEM	unspecified	settings_backup.h

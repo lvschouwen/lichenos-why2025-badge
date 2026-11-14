@@ -61,6 +61,11 @@ bool sb_value_parse(sb_key_t const *key, char const *text, sb_value_t *out);
 void sb_value_text(sb_value_t const *value, char *out, size_t cap);
 bool sb_value_equal(sb_value_t const *a, sb_value_t const *b);
 
+// The last line of a file this firmware writes. A file without it was cut short or is older than the marker; the parse
+// cannot tell a cut at a line boundary from a smaller file, so a save in flight (settings.new) must have it to be trusted.
+#define SB_END_LINE "# end of settings backup\n"
+bool sb_complete(char const *text, size_t len);
+
 // The file's text: a header naming the firmware, then every value in vals (cap too small: 0, nothing usable)
 size_t sb_format(char const *firmware, sb_value_t const *vals, size_t count, char *out, size_t cap);
 
