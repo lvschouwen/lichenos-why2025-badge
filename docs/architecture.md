@@ -552,6 +552,16 @@ copy, its setting and `fw onair` are `mesh_onair_run.c`.
   While it is on, the console's `fw factory-reset settings|all YES` runs only from the USB console (`plan` from any):
   MeshCore binds fw_console's USB hold (`console_usb_hold_bind`, `owner-only` in `tools/layers.conf`), and
   `factory_reset.c` asks `console_usb_hold_ok` before it acts. The reset by hand on the screen still clears it.
+- While it is on, nothing but the USB console boots another image (#420), since that image may not keep the list (an
+  older one has none): `fw slot other` from any other console answers `slot other refused: ...; switch it off at the
+  USB console first`, and the update server answers `409 Conflict` (`firmware update refused: ...; nothing was stopped
+  or erased`) to `/prepare` and to every `/firmware` request, whole or a piece, before anything stops or is erased
+  (`ota_route_usb_held`, the hold read lock-free through `console_usb_hold_why`). So remote updates and the bench's
+  `fw slot other` need the list off; the bench keeps it off except during the #289 checks. A USB flash is untouched.
+  Not held: asset pushes (data, no code; `tools/badge.sh` still asks `/prepare` first, so they need the list off too),
+  file pushes (the list is in NVS, which no file reaches) and C6 images (the list is checked on the P4, where the
+  frames are built; the C6 only transmits what the P4 hands it). `fw trial` (developer mode, which only the USB
+  console turns on), `fw boot fail` and `fw crash test` boot no other image on a badge that is not on trial.
 - `fw onair` shows it; `fw onair on` works from any console (it only narrows). `off`, `allow <channel|key digits>`,
   `remove <...>` and `clear` work only from the USB console: the Wi-Fi console's token also installs firmware, and the
   Console app counts as remote (injected keys). `tools/onair_guard.sh` refuses those four itself.
@@ -568,9 +578,10 @@ copy, its setting and `fw onair` are `mesh_onair_run.c`.
   `fw mesh advert`) passes, it has no target and its flood is bounded by the console scope (a one-off bench advert is
   accepted); the **history polls** `fw mesh history <who> on` schedules are checked when switched on (the console says
   why) and again at each poll the mesh task sends, so a poll whose target is not listed is refused, not sent.
-- Accepted limits: the list holds only while this image runs; `fw slot other` and an update over Wi-Fi (both behind
-  the OTA token) can boot an image without it. An unreadable NVS reads as off: the settings API returns the default on
-  a failed read and cannot report it.
+- Accepted limits: an image that set the boot slot before the list went on (installed and waiting for its reboot, or
+  a trial image not yet proven, which any reset rolls back) boots as before; switch the list on once `fw slot` shows
+  the running image valid. An unreadable NVS reads as off: the settings API returns the default on a failed read and
+  cannot report it.
 
 ## Channel flood scope (#291)
 

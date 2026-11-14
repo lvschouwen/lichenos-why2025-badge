@@ -39,6 +39,16 @@ bool console_hold_refuses(bool held, console_origin_t origin) {
     return held && origin != CONSOLE_ORIGIN_UART;
 }
 
+slot_req_t console_slot_request(char const *args, bool held, console_origin_t origin) {
+    if (args[0] == '\0') {
+        return SLOT_REQ_SHOW;
+    }
+    if (strcmp(args, "other") != 0) {
+        return SLOT_REQ_USAGE;
+    }
+    return console_hold_refuses(held, origin) ? SLOT_REQ_REFUSED : SLOT_REQ_OTHER;
+}
+
 dev_req_t dev_mode_request(char const *args, console_origin_t origin) {
     if (args[0] == '\0' || strcmp(args, "status") == 0) {
         return DEV_REQ_STATUS;

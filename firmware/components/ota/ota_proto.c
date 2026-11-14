@@ -444,6 +444,10 @@ bool ota_route_stops_apps(ota_route_t route) {
     return route == OTA_ROUTE_PREPARE || route == OTA_ROUTE_FIRMWARE || route == OTA_ROUTE_ASSETS;
 }
 
+bool ota_route_usb_held(ota_route_t route) {
+    return route == OTA_ROUTE_PREPARE || route == OTA_ROUTE_FIRMWARE;
+}
+
 bool ota_route_needs_token(ota_route_t route) {
     (void)route;
     return true;

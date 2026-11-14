@@ -54,6 +54,10 @@ bool ota_route_needs_token(ota_route_t route);
 // The routes that stop the other apps (and end in a restart, #76): prepare, firmware, assets. While the running image is
 // on trial they are refused before anything stops, since that restart would roll the new image back (#302)
 bool ota_route_stops_apps(ota_route_t route);
+// The routes the console's USB hold refuses while it holds (#420): prepare and firmware (whole or any piece), before
+// anything stops or is erased, since a new image may not keep the hold (an older one has no on-air list). Assets,
+// files (C6 images included), delete and reboot are not held: none of them boots another P4 image.
+bool ota_route_usb_held(ota_route_t route);
 
 typedef struct {
     ota_route_t route;

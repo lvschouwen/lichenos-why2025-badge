@@ -66,6 +66,21 @@ dev_req_t dev_mode_request(char const *args, console_origin_t origin);
 // YES) runs only from the USB console; Wi-Fi, the Console app (injected keys) and other tasks are refused
 bool console_hold_refuses(bool held, console_origin_t origin);
 
+// The hold also covers booting another image (#420): the other slot's image, or one installed over Wi-Fi, may not keep
+// what holds (an older image has no on-air list), so "fw slot other" and the update server's firmware refuse while it
+// holds. %s is what holds (console_usb_hold_why).
+#define HOLD_BOOT_REFUSAL "%s is on and another image may not keep it; switch it off at the USB console first"
+
+typedef enum {
+    SLOT_REQ_SHOW,    // "": show the slots
+    SLOT_REQ_OTHER,   // "other": boot the other slot
+    SLOT_REQ_REFUSED, // "other" while the hold is on, from anywhere but the USB console
+    SLOT_REQ_USAGE,   // anything else
+} slot_req_t;
+
+// What "fw slot <args>" asks, given the hold and where it came from
+slot_req_t console_slot_request(char const *args, bool held, console_origin_t origin);
+
 #ifdef __cplusplus
 }
 #endif

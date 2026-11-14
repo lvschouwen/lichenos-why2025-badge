@@ -490,6 +490,19 @@ static void test_routes_stop_apps(void) {
     }
 }
 
+// #420: while the console's USB hold is on, prepare and firmware (whole or a piece) are refused before anything stops
+// or is erased; assets, files (C6 images too), delete and reboot boot no other P4 image and are served as before
+static void test_routes_usb_held(void) {
+    CHECK(ota_route_usb_held(OTA_ROUTE_PREPARE));
+    CHECK(ota_route_usb_held(OTA_ROUTE_FIRMWARE));
+    ota_route_t const others[] = {OTA_ROUTE_INFO, OTA_ROUTE_FILE, OTA_ROUTE_REBOOT, OTA_ROUTE_DELETE, OTA_ROUTE_ASSETS,
+                                  OTA_ROUTE_SCREENSHOT, OTA_ROUTE_LOG, OTA_ROUTE_CONSOLE, OTA_ROUTE_CRASHES};
+    for (size_t i = 0; i < sizeof(others) / sizeof(others[0]); i++) {
+        CHECK(!ota_route_usb_held(others[i]));
+    }
+    CHECK(strcmp(ota_status_reason(409), "Conflict") == 0); // the refusal's status line
+}
+
 // #116: no token read or saved anywhere this boot means the server does not listen
 static void test_token_kept(void) {
     CHECK(!ota_token_kept(false, false, false, false));
@@ -695,6 +708,7 @@ int main(void) {
     test_server_listens();
     test_routes_need_token();
     test_routes_stop_apps();
+    test_routes_usb_held();
     test_sha256();
     test_head_length();
     test_parse();

@@ -1405,6 +1405,21 @@ static bool refused_on_trial(int fd, ota_request_t const *req, size_t pre_len) {
     return true;
 }
 
+// The console's USB hold (#420): asked only on the held routes, so every other request costs nothing
+static bool refused_on_hold(int fd, ota_request_t const *req, size_t pre_len) {
+    char const *why = ota_route_usb_held(req->route) ? console_usb_hold_why() : NULL;
+    if (!why) {
+        return false;
+    }
+    drain_body(fd, pre_len, req->expect_continue ? 0 : req->content_length);
+    respond(fd, 409, "firmware update refused: " HOLD_BOOT_REFUSAL " (fw onair off); nothing was stopped or erased", why);
+    return true;
+}
+
+static bool refused_up_front(int fd, ota_request_t const *req, size_t pre_len) {
+    return refused_on_trial(fd, req, pre_len) || refused_on_hold(fd, req, pre_len);
+}
+
 // "deflate chunks" tells tools/badge.sh this receiver takes compressed bodies and pieces, "zpieces" compressed pieces
 // (#298); "storage free N" (#299) lets
 // it check a file push fits before it sends a byte
@@ -1474,7 +1489,7 @@ static bool handle_connection(int fd) {
 
     uint8_t const *pre     = (uint8_t const *)head_buf + head_len;
     size_t         pre_len = len - head_len;
-    if (refused_on_trial(fd, &req, pre_len)) {
+    if (refused_up_front(fd, &req, pre_len)) {
         return false;
     }
     switch (req.route) {

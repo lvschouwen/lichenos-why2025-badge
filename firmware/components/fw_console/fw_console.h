@@ -55,6 +55,9 @@ void             console_bind_dev_store(fw_get_u8_fn get, fw_set_u8_fn set);
 // when it may go on, else it has replied why.
 void             console_usb_hold_bind(char const *(*held)(void));
 bool             console_usb_hold_ok(char const *what);
+// What holds now (NULL: nothing), for a caller that is never the USB console and answers on its own: the update server
+// refuses firmware while it holds (#420), since another image may not keep the hold. Lock-free, any task.
+char const      *console_usb_hold_why(void);
 // Where the command running on the calling task came from: the console_exec run's origin, UART on the console task,
 // UNKNOWN on any other task
 console_origin_t console_origin(void);

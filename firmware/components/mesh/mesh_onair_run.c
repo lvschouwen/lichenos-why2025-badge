@@ -38,8 +38,9 @@ bool mesh_onair_on(void) {
 }
 
 // console_usb_hold's question: what makes the console's destructive commands USB-only now
+// Lock-free (#420): the update server asks it per firmware request, and with the list off that costs no lock
 static char const *onair_hold(void) {
-    return mesh_onair_on() ? "the on-air allow list (fw onair)" : NULL;
+    return __atomic_load_n(&onair_on, __ATOMIC_ACQUIRE) ? "the on-air allow list (fw onair)" : NULL;
 }
 
 void mesh_onair_init(void) {
@@ -96,7 +97,7 @@ static void onair_status(void) {
 
 static void onair_switch(bool on) {
     xSemaphoreTake(onair_lock, portMAX_DELAY);
-    onair_on = on;
+    __atomic_store_n(&onair_on, on, __ATOMIC_RELEASE); // onair_hold reads it without the lock
     size_t n = onair_list.n;
     xSemaphoreGive(onair_lock);
     bool saved = app_settings_set_u8(meshcore_ctx(), KEY_ON, on ? 1 : 0);

@@ -7,7 +7,9 @@
 // Off by default, so a user badge behaves as before. Switching it on works from anywhere (it only narrows); switching
 // it off and editing the list work only from the USB console, a person at the cable: the Wi-Fi console's token also
 // installs firmware, and the Console app counts as remote because injected keys can type there (epic-395 rule 4).
-// While it is on, the console's factory reset (which would erase it) also needs the USB console (console_usb_hold).
+// While it is on, the console's factory reset (which would erase it) also needs the USB console (console_usb_hold), and
+// so does booting another image (#420), which may not keep it: "fw slot other" from any other console, and a firmware
+// update over Wi-Fi (refused at prepare and at every firmware request, before anything stops or is erased).
 // The list lives on the badge only, never in the repo (it is public).
 //
 // A channel entry is its name and a key id (ONAIR_KEY_ID bytes of SHA-256 of the channel's secret, never the
@@ -22,9 +24,10 @@
 //   the console, with the reason) and at every poll the mesh task sends later (a poll whose target left the list, or
 //   that was switched on while the list was off, is refused at the radio's door, not sent).
 //
-// Accepted limits (review of #289): the list holds only while this image runs. "fw slot other" and an update over
-// Wi-Fi (both behind the OTA token) can boot an image without it. An unreadable NVS reads as off: the settings API
-// gives the default on a failed read and cannot report it.
+// Accepted limits: an image that already set the boot slot before the list went on (one installed and waiting for its
+// reboot, or a trial image not yet proven, which any reset rolls back) still boots as before: switch the list on once
+// "fw slot" shows the running image valid. An unreadable NVS reads as off: the settings API gives the default on a
+// failed read and cannot report it.
 //
 // Pure logic, no ESP headers (host_tests/mesh_onair_test.c); mesh_onair_run.c holds the live copy, its lock, the
 // setting and the console command.

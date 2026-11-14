@@ -85,6 +85,20 @@ static void usb_hold(void) {
     CHECK(!console_hold_refuses(false, CONSOLE_ORIGIN_UART));
 }
 
+// #420: while the hold is on, "fw slot other" only from the USB console (another image may not keep the list); the
+// listing and the usage answer from anywhere
+static void slot_other_held(void) {
+    CHECK(console_slot_request("other", true, CONSOLE_ORIGIN_UART) == SLOT_REQ_OTHER);
+    CHECK(console_slot_request("other", true, CONSOLE_ORIGIN_WIFI) == SLOT_REQ_REFUSED);
+    CHECK(console_slot_request("other", true, CONSOLE_ORIGIN_LOCAL) == SLOT_REQ_REFUSED);
+    CHECK(console_slot_request("other", true, CONSOLE_ORIGIN_UNKNOWN) == SLOT_REQ_REFUSED);
+    CHECK(console_slot_request("other", false, CONSOLE_ORIGIN_WIFI) == SLOT_REQ_OTHER); // nothing holds: as before
+    CHECK(console_slot_request("other", false, CONSOLE_ORIGIN_LOCAL) == SLOT_REQ_OTHER);
+    CHECK(console_slot_request("", true, CONSOLE_ORIGIN_WIFI) == SLOT_REQ_SHOW);
+    CHECK(console_slot_request("other ", true, CONSOLE_ORIGIN_UART) == SLOT_REQ_USAGE);
+    CHECK(console_slot_request("others", false, CONSOLE_ORIGIN_UART) == SLOT_REQ_USAGE);
+}
+
 static void origin_plumbing(void) {
     CHECK(dev_mode_exec_origin(true) == CONSOLE_ORIGIN_WIFI);   // console_exec_with_secrets: POST /console
     CHECK(dev_mode_exec_origin(false) == CONSOLE_ORIGIN_LOCAL); // console_exec: the Console app
@@ -108,6 +122,7 @@ int main(void) {
     help_hides_debug_commands();
     on_only_from_usb();
     usb_hold();
+    slot_other_held();
     origin_plumbing();
     factory_reset_clears_it();
     if (failures) {

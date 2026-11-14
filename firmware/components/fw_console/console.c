@@ -430,9 +430,11 @@ static void cmd_slot(char const *args) {
         );
         return;
     }
-    if (strcmp(args, "other") != 0) {
-        console_reply("slot [other]");
-        return;
+    char const *why = console_usb_hold_why();
+    switch (console_slot_request(args, why != NULL, console_origin())) {
+        case SLOT_REQ_USAGE: console_reply("slot [other]"); return;
+        case SLOT_REQ_REFUSED: console_reply("slot other refused: " HOLD_BOOT_REFUSAL, why); return;
+        default: break;
     }
     esp_app_desc_t desc;
     if (!other || esp_ota_get_partition_description(other, &desc) != ESP_OK) {
@@ -745,9 +747,13 @@ void console_usb_hold_bind(char const *(*held)(void)) {
     atomic_store(&usb_hold, held);
 }
 
-bool console_usb_hold_ok(char const *what) {
+char const *console_usb_hold_why(void) {
     char const *(*held)(void) = atomic_load(&usb_hold);
-    char const *why           = held ? held() : NULL;
+    return held ? held() : NULL;
+}
+
+bool console_usb_hold_ok(char const *what) {
+    char const *why = console_usb_hold_why();
     if (!console_hold_refuses(why != NULL, console_origin())) {
         return true;
     }
