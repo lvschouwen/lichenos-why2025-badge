@@ -1,5 +1,7 @@
 #include "crashlog_fmt.h"
 
+#include "lichen_str.h"
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -66,14 +68,6 @@ size_t crashlog_split(char const *text, size_t len, crashlog_span_t *out, size_t
     return n;
 }
 
-static void copy_word(char *dst, size_t cap, char const *src, size_t n) {
-    if (n >= cap) {
-        n = cap - 1;
-    }
-    memcpy(dst, src, n);
-    dst[n] = '\0';
-}
-
 static void parse_bt(crashlog_entry_t *out, char const *v) {
     while (*v && out->depth < CRASHLOG_BT_MAX) {
         char         *end;
@@ -92,11 +86,11 @@ static void parse_bt(crashlog_entry_t *out, char const *v) {
 // One "key=value" word
 static void parse_field(crashlog_entry_t *out, char const *w) {
     if (strncmp(w, "task=", 5) == 0) {
-        copy_word(out->task, sizeof(out->task), w + 5, strlen(w + 5));
+        lichen_str_copy_n(out->task, sizeof(out->task), w + 5, strlen(w + 5));
     } else if (strncmp(w, "pc=", 3) == 0) {
         out->pc = (uint32_t)strtoul(w + 3, NULL, 16);
     } else if (strncmp(w, "elf=", 4) == 0) {
-        copy_word(out->elf, sizeof(out->elf), w + 4, strlen(w + 4));
+        lichen_str_copy_n(out->elf, sizeof(out->elf), w + 4, strlen(w + 4));
     } else if (strncmp(w, "bt=", 3) == 0) {
         parse_bt(out, w + 3);
     }
@@ -104,7 +98,7 @@ static void parse_field(crashlog_entry_t *out, char const *w) {
 
 void crashlog_parse(char const *line, size_t n, crashlog_entry_t *out) {
     memset(out, 0, sizeof(*out));
-    copy_word(out->line, sizeof(out->line), line, n);
+    lichen_str_copy_n(out->line, sizeof(out->line), line, n);
     char *fields[3] = {out->when, out->version, out->reason};
     size_t const caps[3] = {sizeof(out->when), sizeof(out->version), sizeof(out->reason)};
     char  word[CRASHLOG_LINE_MAX];
@@ -117,9 +111,9 @@ void crashlog_parse(char const *line, size_t n, crashlog_entry_t *out) {
         if (l == 0) {
             break;
         }
-        copy_word(word, sizeof(word), p, l);
+        lichen_str_copy_n(word, sizeof(word), p, l);
         if (words < 3) {
-            copy_word(fields[words], caps[words], word, l);
+            lichen_str_copy_n(fields[words], caps[words], word, l);
         } else {
             parse_field(out, word);
         }

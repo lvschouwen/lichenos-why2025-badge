@@ -10,6 +10,7 @@
 #include "lichen_sys_ui.h"
 #include "esp_timer.h"
 #include "fonts.h"
+#include "lichen_str.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "shell_parts.h"
@@ -257,21 +258,14 @@ static bool queue_apply(void) {
     return lichen_sys_ui_call(apply, NULL, LOCK_WAIT_MS);
 }
 
-// A bounded copy into one TEXT_MAX field, NULL as ""
-static void copy_text(char *dst, size_t max, char const *src) {
-    size_t n = src ? strnlen(src, max - 1) : 0;
-    memcpy(dst, src ? src : "", n);
-    dst[n] = '\0';
-}
-
 // With open_lock held: apply() does not read want now
 static void fill_want(shell_dialog_t const *d, shell_dialog_fn done) {
-    copy_text(want.title, TEXT_MAX, d->title);
-    copy_text(want.prefix, TEXT_MAX, d->count_prefix);
-    copy_text(want.suffix, TEXT_MAX, d->count_suffix);
-    copy_text(want.hint, TEXT_MAX, d->hint);
-    copy_text(want.confirm_label, sizeof(want.confirm_label), d->confirm_label);
-    copy_text(want.cancel_label, sizeof(want.cancel_label), d->cancel_label);
+    lichen_str_copy(want.title, TEXT_MAX, d->title);
+    lichen_str_copy(want.prefix, TEXT_MAX, d->count_prefix);
+    lichen_str_copy(want.suffix, TEXT_MAX, d->count_suffix);
+    lichen_str_copy(want.hint, TEXT_MAX, d->hint);
+    lichen_str_copy(want.confirm_label, sizeof(want.confirm_label), d->confirm_label);
+    lichen_str_copy(want.cancel_label, sizeof(want.cancel_label), d->cancel_label);
     want.seconds = d->seconds;
     want.careful = d->careful;
     want.done    = done;
@@ -338,8 +332,8 @@ bool shell_dialog_info(shell_dialog_info_t *info) {
     info->open    = true;
     info->careful = careful;
     info->gen     = text_gen;
-    copy_text(info->title, sizeof(info->title), title);
-    copy_text(info->confirm_label, sizeof(info->confirm_label), label);
+    lichen_str_copy(info->title, sizeof(info->title), title);
+    lichen_str_copy(info->confirm_label, sizeof(info->confirm_label), label);
     dlg_countdown_t const shown_cd = {.start_ms = start, .total_ms = total};
     uint32_t              now      = now_ms();
     info->ms_open                  = now - start;

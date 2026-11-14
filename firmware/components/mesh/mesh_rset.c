@@ -1,6 +1,8 @@
 // A repeater's settings over its CLI (#117): see mesh_rset.h
 #include "mesh_rset.h"
 
+#include "lichen_str.h"
+
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -355,14 +357,7 @@ static void copy_trimmed(char const *s, size_t n, char *out, size_t cap) {
     while (n && s[n - 1] == ' ') {
         n--;
     }
-    if (!cap) {
-        return;
-    }
-    if (n >= cap) {
-        n = cap - 1;
-    }
-    memcpy(out, s, n);
-    out[n] = 0;
+    lichen_str_copy_n(out, cap, s, n); // cap 0 writes nothing
 }
 
 static bool starts(char const *s, size_t n, char const *with) {

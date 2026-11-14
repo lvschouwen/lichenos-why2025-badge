@@ -1767,6 +1767,16 @@ target_include_directories(flash_chunk_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/
 target_compile_options(flash_chunk_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME flash_chunk_test COMMAND flash_chunk_test)
 
+# The one hex text helper and the one bounded string copy (#445); the tests of the files that call them link this
+add_library(lichen_text STATIC ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/lichen_hex.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/lichen_str.c)
+target_include_directories(lichen_text PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+foreach(t lichen_hex lichen_str)
+    add_executable(${t}_test ${CMAKE_CURRENT_SOURCE_DIR}/${t}_test.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/${t}.c)
+    target_include_directories(${t}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+    target_compile_options(${t}_test PRIVATE -Wall -Wextra -Werror)
+    add_test(NAME ${t}_test COMMAND ${t}_test)
+endforeach()
+
 add_executable(fs_path_test
     ${CMAKE_CURRENT_SOURCE_DIR}/fs_path_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/fs_path.c
@@ -2498,3 +2508,18 @@ add_executable(lora_decode_pin_test ${CMAKE_CURRENT_SOURCE_DIR}/lora_decode_pin_
 target_include_directories(lora_decode_pin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/lora)
 target_compile_options(lora_decode_pin_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME lora_decode_pin_test COMMAND lora_decode_pin_test)
+
+# Tests of the files that use lichen_hex / lichen_str (#445)
+target_link_libraries(reg_row_text_test PRIVATE lichen_text)
+target_link_libraries(mesh_contact_fmt_test PRIVATE lichen_text)
+target_link_libraries(mesh_trace_test PRIVATE lichen_text)
+target_link_libraries(mesh_remote_test PRIVATE lichen_text)
+target_link_libraries(mesh_rset_test PRIVATE lichen_text)
+target_link_libraries(mesh_share_test PRIVATE lichen_text)
+target_link_libraries(mesh_scope_test PRIVATE lichen_text)
+target_link_libraries(mesh_onair_test PRIVATE lichen_text)
+target_link_libraries(companion_test PRIVATE lichen_text)
+target_link_libraries(crashlog_fmt_test PRIVATE lichen_text)
+target_link_libraries(notify_ring_test PRIVATE lichen_text)
+target_link_libraries(mesh_telem_test PRIVATE lichen_text)
+target_link_libraries(mesh_rhist_test PRIVATE lichen_text)

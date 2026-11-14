@@ -1,20 +1,14 @@
 // The console's on-air allow list (#289): mesh_onair.h. Pure.
 #include "mesh_onair.h"
 
+#include "lichen_hex.h"
+
 #include <stdio.h>
 #include <string.h>
 
-static int hex_val(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    c = (char)(c | 0x20);
-    return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
-}
-
 static bool all_hex(char const *s, size_t len) {
     for (size_t i = 0; i < len; i++) {
-        if (hex_val(s[i]) < 0) {
+        if (lichen_hex_digit(s[i]) < 0) {
             return false;
         }
     }
@@ -58,9 +52,7 @@ static void set_channel(onair_entry_t *out, char const *s, size_t len) {
 static void set_contact(onair_entry_t *out, char const *hex) {
     memset(out, 0, sizeof(*out));
     out->kind = ONAIR_CONTACT;
-    for (size_t i = 0; i < ONAIR_PREFIX; i++) {
-        out->prefix[i] = (uint8_t)(hex_val(hex[2 * i]) << 4 | hex_val(hex[2 * i + 1]));
-    }
+    lichen_hex_decode(hex, 2 * ONAIR_PREFIX, out->prefix, ONAIR_PREFIX); // the caller checked the digits
 }
 
 onair_result_t onair_entry_parse(char const *text, onair_entry_t *out) {
@@ -228,23 +220,14 @@ void onair_entry_text(onair_entry_t const *e, char *out, size_t cap) {
     }
 }
 
-static void hex_out(uint8_t const *b, size_t n, char *out) {
-    static char const DIGITS[] = "0123456789abcdef";
-    for (size_t i = 0; i < n; i++) {
-        out[2 * i]     = DIGITS[b[i] >> 4];
-        out[2 * i + 1] = DIGITS[b[i] & 15];
-    }
-    out[2 * n] = '\0';
-}
-
 // "\nc <key id> <name>" or "\nk <prefix>": snprintf's count
 static int entry_line(onair_entry_t const *e, char *out, size_t cap) {
     char hex[2 * ONAIR_KEY_ID + 1];
     if (e->kind == ONAIR_CHANNEL) {
-        hex_out(e->key_id, ONAIR_KEY_ID, hex);
+        lichen_hex_encode(e->key_id, ONAIR_KEY_ID, hex, sizeof(hex));
         return snprintf(out, cap, "\nc %s %s", hex, e->name);
     }
-    hex_out(e->prefix, ONAIR_PREFIX, hex);
+    lichen_hex_encode(e->prefix, ONAIR_PREFIX, hex, sizeof(hex));
     return snprintf(out, cap, "\nk %s", hex);
 }
 
@@ -280,9 +263,7 @@ static bool decode_line(char const *s, size_t len, onair_entry_t *e) {
     if (s[0] == 'c' && len > 3 + id_hex && all_hex(s + 2, id_hex) && s[2 + id_hex] == ' ' &&
         channel_ok(s + 3 + id_hex, len - 3 - id_hex)) {
         set_channel(e, s + 3 + id_hex, len - 3 - id_hex);
-        for (size_t i = 0; i < ONAIR_KEY_ID; i++) {
-            e->key_id[i] = (uint8_t)(hex_val(s[2 + 2 * i]) << 4 | hex_val(s[3 + 2 * i]));
-        }
+        lichen_hex_decode(s + 2, id_hex, e->key_id, ONAIR_KEY_ID); // all_hex checked them
         return true;
     }
     if (s[0] == 'k' && len - 2 == 2 * ONAIR_PREFIX && all_hex(s + 2, len - 2)) {

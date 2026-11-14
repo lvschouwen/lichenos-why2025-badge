@@ -1,6 +1,8 @@
 // Trace path and path discovery (#53): see mesh_trace.h
 #include "mesh_trace.h"
 
+#include "lichen_hex.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -188,11 +190,7 @@ static size_t add(mt_line_t *out, size_t n, size_t max, char const *fmt, char co
 }
 
 static void hex_hash(uint8_t const *h, unsigned size, char *out, size_t cap) {
-    if (size == 2) {
-        snprintf(out, cap, "%02x%02x", h[0], h[1]);
-    } else {
-        snprintf(out, cap, "%02x", h[0]);
-    }
+    lichen_hex_encode(h, size == 2 ? 2 : 1, out, cap); // one byte unless the hash is 2
 }
 
 // "N hops via a1,b2" (or "direct") for a packed path, cut to fit

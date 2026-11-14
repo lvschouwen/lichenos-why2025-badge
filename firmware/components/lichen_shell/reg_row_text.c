@@ -1,5 +1,7 @@
 #include "reg_row_text.h"
 
+#include "lichen_str.h"
+
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -11,12 +13,6 @@ typedef struct {
     bool stale;
     bool unread;
 } parts_t;
-
-static void copy_n(char *dst, size_t cap, char const *src, size_t n) {
-    n = n < cap - 1 ? n : cap - 1;
-    memcpy(dst, src, n);
-    dst[n] = '\0';
-}
 
 // "[stale, ]<n>[.<n>] s ago": the only age forms lichen_reg_cached_text prints (the note of a read key)
 static bool is_age(char const *note, size_t n) {
@@ -63,7 +59,7 @@ static bool split(char const *cached, parts_t *p) {
     }
     size_t      len = strlen(cached);
     char const *cut = note_start(cached, len);
-    copy_n(p->value, sizeof(p->value), cached, cut ? (size_t)(cut - cached) : len);
+    lichen_str_copy_n(p->value, sizeof(p->value), cached, cut ? (size_t)(cut - cached) : len);
     p->unread = strcmp(p->value, "?") == 0;
     if (!cut) {
         return true;
@@ -78,7 +74,7 @@ static bool split(char const *cached, parts_t *p) {
     if (!p->unread && n >= 4 && strncmp(note + n - 4, " ago", 4) == 0) {
         n -= 4;
     }
-    copy_n(p->note, sizeof(p->note), note, n);
+    lichen_str_copy_n(p->note, sizeof(p->note), note, n);
     return true;
 }
 

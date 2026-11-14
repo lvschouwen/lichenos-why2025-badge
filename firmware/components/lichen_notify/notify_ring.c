@@ -1,18 +1,9 @@
 // The notification history (#62): see notify_ring.h. Pure, host-tested in host_tests/notify_ring_test.c.
 #include "notify_ring.h"
 
-#include <string.h>
+#include "lichen_str.h"
 
-static void copy(char *dst, size_t cap, char const *src) {
-    size_t n = 0;
-    if (src) {
-        while (n + 1 < cap && src[n]) {
-            n++;
-        }
-        memcpy(dst, src, n);
-    }
-    dst[n] = '\0';
-}
+#include <string.h>
 
 static bool same(char const *field, char const *s) {
     return strcmp(field, s ? s : "") == 0;
@@ -88,7 +79,7 @@ static void stamp(nr_ring_t *r, nr_entry_t *e, nr_new_t const *n) {
     e->epoch  = n->epoch;
     e->mono_s = n->mono_s;
     e->boot   = r->boot;
-    copy(e->body, sizeof(e->body), n->body);
+    lichen_str_copy(e->body, sizeof(e->body), n->body);
 }
 
 nr_outcome_t nr_add(nr_ring_t *r, nr_new_t const *n, uint32_t *id) {
@@ -102,7 +93,7 @@ nr_outcome_t nr_add(nr_ring_t *r, nr_new_t const *n, uint32_t *id) {
             if (n->level > e->level) {
                 e->level = n->level;
             }
-            copy(e->title, sizeof(e->title), n->title);
+            lichen_str_copy(e->title, sizeof(e->title), n->title);
             stamp(r, e, n);
             r->generation++;
             *id = e->id;
@@ -122,9 +113,9 @@ nr_outcome_t nr_add(nr_ring_t *r, nr_new_t const *n, uint32_t *id) {
     e->count = 1;
     e->level = n->level > NR_ERROR ? NR_ERROR : n->level;
     e->flags = n->flags;
-    copy(e->source, sizeof(e->source), n->source);
-    copy(e->target, sizeof(e->target), n->target);
-    copy(e->title, sizeof(e->title), n->title);
+    lichen_str_copy(e->source, sizeof(e->source), n->source);
+    lichen_str_copy(e->target, sizeof(e->target), n->target);
+    lichen_str_copy(e->title, sizeof(e->title), n->title);
     stamp(r, e, n);
     r->generation++;
     *id = e->id;
@@ -159,6 +150,7 @@ size_t nr_ids(nr_ring_t const *r, uint32_t *ids, size_t max) {
         all[at]  = e->id;
     }
     n = n < max ? n : max;
+    // cppcheck-suppress uninitvar ; the insertion sort filled all[0..n), and n is at most the slots it filled
     memcpy(ids, all, n * sizeof(*ids));
     return n;
 }
@@ -266,7 +258,7 @@ static uint64_t get(uint8_t const **p, int bytes) {
 
 static uint8_t *put_str(uint8_t *p, char const *s, size_t cap) {
     memset(p, 0, cap);
-    copy((char *)p, cap, s);
+    lichen_str_copy((char *)p, cap, s);
     return p + cap;
 }
 

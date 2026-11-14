@@ -1,6 +1,8 @@
 // Repeater status history (#168): see mesh_rhist.h
 #include "mesh_rhist.h"
 
+#include "lichen_hex.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -467,10 +469,6 @@ void rh_cfg_encode(rh_t const *t, char *out, size_t cap) {
     }
 }
 
-static int hexval(char c) {
-    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
-}
-
 // One "a1b2c3d4e5f6:30" (or "...:30c", console) of len bytes; false when it is not one
 static bool parse_entry(char const *e, size_t len, uint8_t prefix[RH_PREFIX], uint16_t *minutes, bool *console) {
     *console = len > 0 && e[len - 1] == 'c';
@@ -478,12 +476,8 @@ static bool parse_entry(char const *e, size_t len, uint8_t prefix[RH_PREFIX], ui
     if (len < 2 * RH_PREFIX + 2 || len > 2 * RH_PREFIX + 4 || e[2 * RH_PREFIX] != ':') {
         return false;
     }
-    for (int i = 0; i < RH_PREFIX; i++) {
-        int a = hexval(e[2 * i]), b = hexval(e[2 * i + 1]);
-        if (a < 0 || b < 0) {
-            return false;
-        }
-        prefix[i] = (uint8_t)(a << 4 | b);
+    if (!lichen_hex_decode(e, 2 * RH_PREFIX, prefix, RH_PREFIX)) {
+        return false;
     }
     unsigned m = 0;
     for (size_t i = 2 * RH_PREFIX + 1; i < len; i++) {

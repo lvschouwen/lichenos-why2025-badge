@@ -200,6 +200,9 @@ lichen_haptics_set_enabled	SYSTEM	unspecified	lichen_haptics.h
 lichen_haptics_set_strength	SYSTEM	unspecified	lichen_haptics.h
 lichen_haptics_strength	-	unspecified	lichen_haptics.h
 lichen_heading	-	lvgl	lichen_ui.h
+lichen_hex_decode	-	unspecified	lichen_hex.h
+lichen_hex_digit	-	unspecified	lichen_hex.h
+lichen_hex_encode	-	unspecified	lichen_hex.h
 lichen_icon_box	-	lvgl	lichen_ui.h
 lichen_keys_raw_release	RAW_KEYS	lvgl	lichen_keys.h
 lichen_keys_raw_take	RAW_KEYS	lvgl	lichen_keys.h
@@ -260,6 +263,8 @@ lichen_sensors_set_periods	SENSORS	unspecified	lichen_sensors.h
 lichen_sensors_start	SENSORS	unspecified	lichen_sensors.h
 lichen_sensors_stop	SENSORS	unspecified	lichen_sensors.h
 lichen_station_clock	-	lvgl	lichen_ui.h
+lichen_str_copy	-	unspecified	lichen_str.h
+lichen_str_copy_n	-	unspecified	lichen_str.h
 lichen_sys_app_console_more	SYSTEM	unspecified	lichen_sys_app.h
 lichen_sys_app_console_register	SYSTEM	not-lvgl	lichen_sys_app.h
 lichen_sys_app_ctx_at	SYSTEM	any	lichen_sys_app.h

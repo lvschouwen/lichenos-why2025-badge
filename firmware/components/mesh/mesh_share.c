@@ -3,7 +3,9 @@
 
 #include "mesh_contact_fmt.h"
 
-#include <ctype.h>
+#include "lichen_hex.h"
+
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -28,20 +30,7 @@ size_t mesh_channel_key_len(uint8_t const secret[MESH_CHANNEL_SECRET]) {
 }
 
 bool mesh_hex_text(uint8_t const *bytes, size_t n, char *out, size_t cap) {
-    static char const digits[] = "0123456789abcdef";
-    if (cap == 0) {
-        return false;
-    }
-    out[0] = '\0';
-    if (2 * n + 1 > cap) {
-        return false;
-    }
-    for (size_t i = 0; i < n; i++) {
-        out[2 * i]     = digits[bytes[i] >> 4];
-        out[2 * i + 1] = digits[bytes[i] & 15];
-    }
-    out[2 * n] = '\0';
-    return true;
+    return lichen_hex_encode(bytes, n, out, cap);
 }
 
 bool mesh_base64_text(uint8_t const *bytes, size_t n, char *out, size_t cap) {
@@ -136,14 +125,6 @@ bool mesh_advert_uri(uint8_t const *pkt, size_t len, char *out, size_t cap) {
     return true;
 }
 
-static int hex_value(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    c = (char)tolower((unsigned char)c);
-    return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
-}
-
 size_t mesh_advert_uri_parse(char const *text, uint8_t *out, size_t cap, char const **why) {
     char const *local;
     why  = why ? why : &local;
@@ -169,13 +150,9 @@ size_t mesh_advert_uri_parse(char const *text, uint8_t *out, size_t cap, char co
         *why = len % 2 ? "odd number of hex digits (a part missing?)" : "too long for a contact";
         return 0;
     }
-    for (size_t i = 0; i < len / 2; i++) {
-        int hi = hex_value(text[2 * i]), lo = hex_value(text[2 * i + 1]);
-        if (hi < 0 || lo < 0) {
-            *why = "not hex after meshcore://";
-            return 0;
-        }
-        raw[i] = (uint8_t)(hi << 4 | lo);
+    if (!lichen_hex_decode(text, len, raw, len / 2)) {
+        *why = "not hex after meshcore://";
+        return 0;
     }
     size_t n = mesh_advert_normalize(raw, len / 2, out, cap);
     if (!n) {

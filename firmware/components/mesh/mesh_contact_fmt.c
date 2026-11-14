@@ -2,6 +2,8 @@
 
 #include "mesh_format.h"
 
+#include "lichen_hex.h"
+
 #include <stdint.h>
 #include <stdio.h>
 
@@ -38,8 +40,7 @@ char const *mesh_contact_type_name(uint8_t type) {
 }
 
 void mesh_hex(uint8_t const *bytes, size_t n, size_t group, char *out, size_t cap) {
-    static char const digits[] = "0123456789abcdef";
-    size_t            at       = 0;
+    size_t at = 0;
     if (cap == 0) {
         return;
     }
@@ -51,8 +52,8 @@ void mesh_hex(uint8_t const *bytes, size_t n, size_t group, char *out, size_t ca
         if (space) {
             out[at++] = ' ';
         }
-        out[at++] = digits[bytes[i] >> 4];
-        out[at++] = digits[bytes[i] & 15];
+        lichen_hex_encode(bytes + i, 1, out + at, 3); // room is checked above
+        at += 2;
     }
     out[at] = '\0';
 }
@@ -206,10 +207,6 @@ bool mesh_path_stale(uint8_t path_len, uint8_t hash_size) {
 
 // ---- a manual path (#130) --------------------------------------------------------------------------------------------
 
-static int hex_val(char c) {
-    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
-}
-
 mesh_path_err_t mesh_path_parse(char const *text, uint8_t hash_size, uint8_t *path_len, uint8_t path[64]) {
     if (hash_size < 1 || hash_size > 3) {
         return MESH_PATH_ERR_HASH;
@@ -221,7 +218,7 @@ mesh_path_err_t mesh_path_parse(char const *text, uint8_t hash_size, uint8_t *pa
     char const *p = text;
     while (1) {
         size_t digits = 0;
-        while (hex_val(p[digits]) >= 0) {
+        while (lichen_hex_digit(p[digits]) >= 0) {
             digits++;
         }
         if (p[digits] && p[digits] != ',') {
@@ -236,9 +233,8 @@ mesh_path_err_t mesh_path_parse(char const *text, uint8_t hash_size, uint8_t *pa
         if (hops + 1 > 63 || bytes + hash_size > MESH_CONTACT_PATH_MAX) {
             return MESH_PATH_ERR_TOO_LONG;
         }
-        for (size_t i = 0; i < hash_size; i++) {
-            path[bytes++] = (uint8_t)(hex_val(p[2 * i]) << 4 | hex_val(p[2 * i + 1]));
-        }
+        lichen_hex_decode(p, digits, path + bytes, hash_size); // digits is 2 * hash_size hex chars, checked above
+        bytes += hash_size;
         hops++;
         p += digits;
         if (!*p) {

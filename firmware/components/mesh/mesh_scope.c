@@ -1,5 +1,7 @@
 #include "mesh_scope.h"
 
+#include "lichen_hex.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -161,14 +163,6 @@ size_t mesh_chscope_write(mesh_chscope_t const *t, char *out, size_t cap) {
     return len;
 }
 
-static int hex_digit(char c) {
-    if (c >= '0' && c <= '9') {
-        return c - '0';
-    }
-    c = (char)(c | 0x20); // lower case
-    return c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
-}
-
 // One "<16 hex> <region>" line (len bytes, no line end) into the table; false when its id does not read. ended: the
 // line had its line end (a cut write leaves the last one without, maybe shorter: a tombstone, never a shorter region).
 static bool chscope_read_line(mesh_chscope_t *t, char const *line, size_t len, bool ended) {
@@ -177,12 +171,8 @@ static bool chscope_read_line(mesh_chscope_t *t, char const *line, size_t len, b
     if (len < 2 * MESH_CHSCOPE_ID) {
         return false;
     }
-    for (size_t b = 0; b < MESH_CHSCOPE_ID; b++) {
-        int hi = hex_digit(line[2 * b]), lo = hex_digit(line[2 * b + 1]);
-        if (hi < 0 || lo < 0) {
-            return false;
-        }
-        id[b] = (uint8_t)(hi << 4 | lo);
+    if (!lichen_hex_decode(line, 2 * MESH_CHSCOPE_ID, id, MESH_CHSCOPE_ID)) {
+        return false;
     }
     size_t rlen = len > 2 * MESH_CHSCOPE_ID ? len - (2 * MESH_CHSCOPE_ID + 1) : 0;
     bool   ok   = ended && len > 2 * MESH_CHSCOPE_ID + 1 && line[2 * MESH_CHSCOPE_ID] == ' ' && rlen < sizeof(region);
