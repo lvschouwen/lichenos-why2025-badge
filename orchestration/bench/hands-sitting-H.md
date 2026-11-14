@@ -9,8 +9,8 @@
 
 ## 1. Keys at the desk (badge on USB, Wi-Fi up, developer mode on) about 15 min
 - [ ] #400 `fw mesh stop`, then press the physical Messages shape key -> **Expected:** MeshCore starts (log has no `starting MeshCore takes a hand` line).
-- [ ] #377 open the "reset settings" confirm page/dialog by hand, then `fw ui answer yes <wrong label>`, then `fw ui answer yes <the real label>` -> **Expected:** both refused (`dialog '<label>' is hand-only` or a label mismatch), dialog stays open; press Esc. **If either one confirms, settings are erased: watch the screen.**
-- [ ] #377 Settings > Reset order dialog, `fw ui answer no <its label>` -> **Expected:** answered (verdict ALLOW), the dialog closes, the order is kept. (**`answer yes` here resets your arranged home order: only if you accept that.**) Then `fw ui answer no` with no dialog -> `ui answer: no dialog open`.
+- [ ] #377 open the "reset settings" confirm page/dialog by hand, then `fw ui answer yes <wrong label>`, then `fw ui answer yes <the real label>` -> **Expected:** both answer `ui answer: <reason>; not confirmed` (the reason names the dialog as hand-only or the label as not matching), dialog stays open; press Esc. **If either one confirms, settings are erased: watch the screen.**
+- [ ] #377 Settings > Reset order dialog, `fw ui answer` -> **Expected:** a line starting `ui answer: ALLOW` naming the confirm label; then `fw ui answer no` -> `ui answer: Esc sent`, the dialog closes, the order is kept. (**`answer yes` here resets your arranged home order: only if you accept that.**) Then `fw ui answer no` with no dialog -> `ui answer: no dialog open`.
 - [ ] #273 Settings > Display > reset home order: Esc, then let the countdown run out -> **Expected:** log `answered: cancel`, `answered: cancel`; (**Enter after more than 1 s logs `answered: confirm` and resets your arranged home order: only if you accept that**); text "Reset the home order? The tiles go back to their first places."; no `could not be shown (another dialog is opening)`.
 - [ ] #274 Notes: delete the test note "bench 274 note edited" and confirm with Enter -> **Expected:** "Delete this note?" countdown, then the note is gone ("Deleted.").
 - [ ] #274 Files: copy a large /storage file to the SD card; meanwhile on the host `badge.sh ota-rm` that file -> **Expected:** 409 `couldn't delete ...: Permission denied`, file intact, copy completes.
@@ -71,8 +71,8 @@ Run `fw dev off` on the USB console first.
 - #374 and #391 title say "tap Version"; the code counts 7 Enter presses anywhere on About (no Version row). Steps use Enter.
 - #274 says Notes shows `Done.`; code shows "Saved." and "Deleted." in the Notes screen (`Done.` is only the Files result). Steps use the code's strings.
 - #421: the full sweep is on this image; group 3 tests it with developer mode off. #128 (`thermal test`), #281 (`noscreen`) and #286 (`stress`) need developer mode ON: they sit after `fw dev on` or in groups where it is on.
-- #281 and #292: the issue text says the poweroff-then-reboot log line is `restart (console reboot) after a power off was asked: powering off instead`; only the tail "powering off instead" was found in code (app_power.c, console.c), the full wording is unconfirmed.
-- #377 "dialog '<label>' is hand-only" is in code (ui_answer.c); the "wrong label" refusal wording was not checked.
+- #281 and #292: the issue text says the poweroff-then-reboot log line is `restart (console reboot) after a power off was asked: powering off instead`; confirmed in code (console.c).
+- #377: a refusal reads `ui answer: <reason>; not confirmed`; a cancel reads `ui answer: Esc sent` (ui_answer.c).
 - #335 has no stated expected string for the cold boot and the key after `fw c6 reset`.
 - #426 needs the companion app (a phone or desktop client); the ban on phone checks was overridden because the issue was required.
 - The "Reset order" confirm (#377, #273) resets your arranged home order: both steps are written so the order is kept unless you choose otherwise. #286 "Clear all" erases your notification list; #264 deletes one crash entry.
