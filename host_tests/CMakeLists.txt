@@ -1795,6 +1795,20 @@ target_include_directories(app_ctx_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../f
 target_compile_options(app_ctx_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME app_ctx_test COMMAND app_ctx_test)
 
+# The run-time capability check (#229, app_caps.c): an undeclared capability refuses, the OS and SYSTEM pass, the log
+# is rate-limited
+add_executable(caps_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/caps_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_caps.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ctx.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/gate_app.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_ns.c ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/app_secret.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api/fs_path.c
+)
+target_include_directories(caps_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api)
+target_compile_options(caps_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME caps_test COMMAND caps_test)
+
 # The gate's context check before the memory and task books (#230 E1b): refusals book nothing, the trampoline's owner
 add_executable(gate_book_test
     ${CMAKE_CURRENT_SOURCE_DIR}/gate_book_test.c

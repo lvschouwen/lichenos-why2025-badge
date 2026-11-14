@@ -4,6 +4,11 @@
 # capability: from tools/layers.conf (cap-func, cap-header; '-' = none, A|B = either); rule D checks an app's use.
 # thread: any, lvgl (LVGL task only), not-lvgl, unspecified (the header comment does not say; fix the comment,
 # then the entry).
+app_caps_allows	-	unspecified	app_caps.h
+app_caps_check	-	unspecified	app_caps.h
+app_caps_format	-	unspecified	app_caps.h
+app_caps_log_due	-	unspecified	app_caps.h
+app_caps_name	-	unspecified	app_caps.h
 app_ctx_add	-	unspecified	app_ctx.h
 app_ctx_add_app	-	unspecified	app_ctx.h
 app_ctx_app_at	-	unspecified	app_ctx.h
@@ -247,6 +252,8 @@ lichen_sys_boot_view	SYSTEM	any	lichen_sys_boot.h
 lichen_sys_c6_restarts	SYSTEM	not-lvgl	lichen_sys_c6.h
 lichen_sys_c6_trouble	SYSTEM	any	lichen_sys_c6.h
 lichen_sys_c6_up	SYSTEM	any	lichen_sys_c6.h
+lichen_sys_caps_ok	SYSTEM	any	lichen_sys_app.h
+lichen_sys_caps_self_ok	SYSTEM	unspecified	lichen_sys_app.h
 lichen_sys_clock_accepted	SYSTEM	any	lichen_sys_clock.h
 lichen_sys_clock_back_hint	SYSTEM	any	lichen_sys_clock.h
 lichen_sys_clock_build_epoch	SYSTEM	any	lichen_sys_clock.h

@@ -2,6 +2,7 @@
  * Lean badge firmware (#61): entry point. app_main walks boot_order.c (#210) and runs one start function per entry.
  */
 
+#include "app_caps.h"
 #include "backlight.h"
 #include "battery.h"
 #include "lichen_sys_power.h"
@@ -371,6 +372,11 @@ static void start_apps(void) {
         // ones have a background part it may switch off (never an exempt one: MeshCore)
         bool may_off = safe_mode_may_switch_off(app->start_background != NULL, app->safe_mode_exempt);
         if (safe_mode_background_off(app->id, may_off) || !app->start_background) {
+            continue;
+        }
+        // #229: a background part is CAP_BACKGROUND (layers.conf rule D checks it at build time; this is the backstop)
+        if (!app_caps_allows(app->caps, CAP_BACKGROUND)) {
+            ESP_LOGE(TAG, "%s not started: it has a background part but did not declare CAP_BACKGROUND", app->name);
             continue;
         }
         lichen_ctx_t previous = lichen_ctx_enter(lichen_sys_app_ctx_at(i)); // #230: its tasks inherit the app

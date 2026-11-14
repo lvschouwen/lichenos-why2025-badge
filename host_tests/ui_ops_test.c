@@ -1,4 +1,5 @@
 // Host test: the gate forwards lichen_ui.h / lichen_keys.h to the shell's table, with a defined answer before (#221)
+#include "lichen_sys_app.h"
 #include "lichen_ui_ops.h"
 
 #include <stdio.h>
@@ -25,6 +26,13 @@ static struct {
     void       *arg;
     size_t      cap;
 } seen;
+
+// lichen_app.c's capability check (#229): what the calling app declared
+static uint32_t caller_caps = UINT32_MAX;
+bool lichen_sys_caps_self_ok(uint32_t need, char const *what) {
+    (void)what;
+    return (caller_caps & need) == need;
+}
 
 static lv_obj_t *const OBJ    = (lv_obj_t *)0x1000;
 static lv_obj_t *const SCREEN = (lv_obj_t *)0x2000;
@@ -245,8 +253,12 @@ static void forwards_rest(void) {
     seen.arg = NULL;
     CHECK(lichen_keys_raw_take(raw_fn, &token) && strcmp(seen.call, "take") == 0 && seen.arg == &token);
     CHECK(seen.fn == (void const *)raw_fn);
-    seen.fn  = NULL;
-    seen.arg = NULL;
+    seen.call   = "none";
+    caller_caps = CAP_NOTIFY; // #229: an app without CAP_RAW_KEYS never reaches the shell's table
+    CHECK(!lichen_keys_raw_take(raw_fn, &token) && strcmp(seen.call, "none") == 0);
+    caller_caps = UINT32_MAX;
+    seen.fn     = NULL;
+    seen.arg    = NULL;
     lichen_keys_raw_release(raw_fn, &token);
     CHECK(strcmp(seen.call, "release") == 0 && seen.fn == (void const *)raw_fn && seen.arg == &token);
     seen.fn  = NULL;

@@ -84,7 +84,8 @@ static bool open_secret(lichen_ctx_t ctx, char const *key, nvs_open_mode_t mode,
                         size_t cap) {
     char const  *prefix = NULL;
     nvs_handle_t nvs;
-    if (!key || !open_app(ctx, mode, &nvs, &prefix)) {
+    // #229: the secrets class is SECRETS (the descriptor's secret_prefix needs it, layers.conf rule D)
+    if (!key || !lichen_sys_caps_ok(ctx, CAP_SECRETS, "app_secret") || !open_app(ctx, mode, &nvs, &prefix)) {
         return false;
     }
     if (!app_secret_stored_name(prefix, key, stored, cap)) {

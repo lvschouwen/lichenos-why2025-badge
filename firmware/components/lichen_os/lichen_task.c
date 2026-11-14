@@ -118,6 +118,10 @@ bool lichen_task_start(lichen_ctx_t ctx, char const *name, void (*fn)(void *arg)
 
 bool lichen_task_start_in(lichen_ctx_t ctx, char const *name, void (*fn)(void *arg), void *arg,
                           uint32_t stack_bytes, lichen_prio_t prio, lichen_stack_t mem, TaskHandle_t *handle) {
+    // #229: a task runs off screen, so it is BACKGROUND; the OS's and the shell's (SYSTEM) tasks always pass
+    if (!lichen_sys_caps_ok(ctx, CAP_BACKGROUND, "lichen_task_start")) {
+        return false;
+    }
     int priority = task_class_priority((task_class_t)prio);
     if (!fn || priority < 0) {
         ESP_LOGE(TAG, "task %s not started: no function or an unknown class %d", name ? name : "?", (int)prio);

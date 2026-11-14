@@ -1,6 +1,7 @@
 // The gate's side of lichen_ui.h / lichen_keys.h (#221): each call is forwarded to the shell's table, see lichen_ui_ops.h.
 // Pure (no LVGL call, no lock): host-tested by host_tests/ui_ops_test.c.
 #include "lichen_ui_ops.h"
+#include "lichen_sys_app.h"
 
 #include <stdatomic.h>
 
@@ -183,6 +184,9 @@ bool lichen_date_text(char *out, size_t cap) {
 }
 
 bool lichen_keys_raw_take(lichen_raw_key_fn take, void *arg) {
+    if (!lichen_sys_caps_self_ok(CAP_RAW_KEYS, "lichen_keys_raw_take")) {
+        return false; // #229: the keys act as usual
+    }
     bool (*fn)(lichen_raw_key_fn, void *) = OP(keys_raw_take);
     return fn && fn(take, arg);
 }

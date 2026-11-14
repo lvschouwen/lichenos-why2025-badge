@@ -1,5 +1,6 @@
 #include "lichen_os.h"
 #include "lichen_radio.h"
+#include "lichen_sys_app.h"
 #include "lichen_sys_radio.h"
 
 #include "fw_console.h"
@@ -239,13 +240,18 @@ void lichen_radio_set_lora_user(bool (*pause)(bool *was_running, bool (*keep_goi
     lora_user_resume = resume;
 }
 
+// #229: borrowing needs LORA_BORROW. A refused pause stops nothing and says so (*was_running false), so the app owes no
+// resume; a refused resume starts nothing it did not stop.
 bool lichen_radio_lora_pause(bool *was_running, bool (*keep_going)(void)) {
     *was_running = false;
+    if (!lichen_sys_caps_self_ok(CAP_LORA_BORROW, "lichen_radio_lora_pause")) {
+        return false;
+    }
     return !lora_user_pause || lora_user_pause(was_running, keep_going);
 }
 
 void lichen_radio_lora_resume(void) {
-    if (lora_user_resume) {
+    if (lora_user_resume && lichen_sys_caps_self_ok(CAP_LORA_BORROW, "lichen_radio_lora_resume")) {
         lora_user_resume();
     }
 }

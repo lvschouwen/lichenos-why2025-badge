@@ -1,6 +1,7 @@
 // lichen_haptics.h for apps and the shell (#221): the gate's calls, defined here over the haptics driver (L2) so no
 // caller links to a driver; "fw vib" keeps the driver's haptics_* names
 #include "lichen_haptics.h"
+#include "lichen_sys_app.h"
 
 #include "haptics.h"
 
@@ -13,7 +14,8 @@ _Static_assert((int)LICHEN_HAPTIC_LOW == HP_LOW && (int)LICHEN_HAPTIC_MEDIUM == 
                "lichen_haptic_strength_t follows hp_strength_t");
 
 void lichen_haptics_play(lichen_haptic_t pattern) {
-    if ((int)pattern >= 0 && (int)pattern < HP_COUNT) {
+    // #229: the shell's own rows play as the OS or as a SYSTEM app, so only an app without HAPTICS is refused
+    if ((int)pattern >= 0 && (int)pattern < HP_COUNT && lichen_sys_caps_self_ok(CAP_HAPTICS, "lichen_haptics_play")) {
         haptics_play((hp_pattern_t)pattern);
     }
 }

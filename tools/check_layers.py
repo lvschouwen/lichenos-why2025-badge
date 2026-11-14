@@ -18,7 +18,7 @@ built into it, e.g. the Arduino shim, #283). `forbid-except` names the one objec
 unchanged) that may still use a forbidden symbol; it is keyed to the object's file name in the archive
 (MyMesh.cpp.obj), so a line whose object no longer exists or no longer uses the symbol is a hard C (a rename upstream
 cannot drop the exception silently). An owner-only line with no owner bans the symbol for everyone, hard like forbid.
-  D  capabilities (#229): the `cap` list in layers.conf is the CAP_* list of lichen_app.h, and every app descriptor
+  D  capabilities (#229): the `cap` list in layers.conf is the CAP_* list of lichen_caps.h, and every app descriptor
      (lichen_app_t ... = {...} in a component's sources) has an `app` line with the same caps and budgets (a secret
      prefix needs SECRETS, a start_background hook BACKGROUND). nm on the closed layer's archives: every undefined
      symbol the manifest gives a capability (`cap-func` / `cap-header`) is used by an object of an app (`app-objects`)
@@ -83,7 +83,7 @@ class Conf:
         self.peer_headers = {}      # (component, peer) -> header globs it may include of that peer
         self.vendored = collections.defaultdict(list)  # component -> own-dir roots of third-party code (not scanned)
         self.forbid_except = []     # (component, object file name glob, [symbol globs]): upstream code built unchanged
-        self.caps = {}              # #229: capability name -> bit (lichen_app.h CAP_<name>)
+        self.caps = {}              # #229: capability name -> bit (lichen_caps.h CAP_<name>)
         self.cap_funcs = []         # (cap spec, [function globs]) first match wins; spec '-', 'A' or 'A|B' (either)
         self.cap_headers = []       # (cap spec, [header globs]) for the functions no cap-func line names
         self.apps = {}              # app id -> App
@@ -541,6 +541,7 @@ def rule_c(conf, comps, found, build, nm, selected, gate_syms=frozenset()):
 
 # --- rule D (capabilities, #229) ------------------------------------------------------------------------------
 
+CAPS_HEADER = "lichen_caps.h"  # the CAP_* list, included by lichen_app.h
 CAP_DEFINE_RE = re.compile(r"^\s*#\s*define\s+CAP_(\w+)\s+\(\s*1u\s*<<\s*(\d+)\s*\)", re.M)
 DESC_RE = re.compile(r"lichen_app_t\s+const\s+(\w+)\s*=\s*\{(.*?)\n\s*\};", re.S)
 FIELD_RE = re.compile(r"^\s*\.(\w+)\s*=\s*(.+?)\s*,?\s*(?://.*)?$")
@@ -576,17 +577,17 @@ def caps_of_value(value):
 
 
 def mirror_defines(conf, root, found):
-    """lichen_app.h's CAP_* bits are layers.conf's cap lines, both ways."""
-    path = os.path.join(gate_dir(root), "lichen_app.h")
+    """lichen_caps.h's CAP_* bits are layers.conf's cap lines, both ways."""
+    path = os.path.join(gate_dir(root), CAPS_HEADER)
     if not conf.caps:
         return
     if not os.path.exists(path):
-        add(found, "D", "cap list (no lichen_app.h to mirror it)", CONF_REL, True)
+        add(found, "D", "cap list (no %s to mirror it)" % CAPS_HEADER, CONF_REL, True)
         return
     have = {n: int(b) for n, b in CAP_DEFINE_RE.findall(read(path))}
     for n in sorted(set(have) | set(conf.caps)):
         if have.get(n) != conf.caps.get(n):
-            add(found, "D", "cap %s (layers.conf bit %s, lichen_app.h bit %s)" % (n, conf.caps.get(n), have.get(n)),
+            add(found, "D", "cap %s (layers.conf bit %s, lichen_caps.h bit %s)" % (n, conf.caps.get(n), have.get(n)),
                 os.path.relpath(path, root), True)
 
 

@@ -37,6 +37,9 @@ static char const *own_tile(lichen_ctx_t ctx, char const *what) {
 }
 
 void lichen_badge_set(lichen_ctx_t ctx, unsigned count) {
+    if (!lichen_sys_caps_ok(ctx, CAP_NOTIFY, "lichen_badge_set")) {
+        return; // #229: the tile badge is a notification
+    }
     char const *id = own_tile(ctx, "lichen_badge_set");
     if (id) {
         lichen_sys_badge_set(id, count);

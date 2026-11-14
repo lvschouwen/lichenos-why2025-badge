@@ -478,6 +478,9 @@ static uint32_t post_as(char const *source, ln_level_t level, char const *target
 
 uint32_t lichen_notify_to(lichen_ctx_t ctx, ln_level_t level, char const *target, char const *title, char const *body,
                           uint32_t flags) {
+    if (!lichen_sys_caps_ok(ctx, CAP_NOTIFY, "lichen_notify")) {
+        return 0; // #229: dropped, as a notice of a refused ctx is
+    }
     // The source is the ctx's app, never the caller's word; NULL (refused ctx, the OS's, no id) is dropped by
     // post_as
     return post_as(lichen_sys_ctx_source(ctx, "lichen_notify"), level, target, title, body, flags);
@@ -539,6 +542,9 @@ static void mark(char const *source, char const *target, uint32_t id, int upto) 
 }
 
 void lichen_notify_mark_read(lichen_ctx_t ctx, char const *target) {
+    if (!lichen_sys_caps_ok(ctx, CAP_NOTIFY, "lichen_notify_mark_read")) {
+        return;
+    }
     char const *source = lichen_sys_ctx_source(ctx, "lichen_notify_mark_read");
     if (source) {
         mark(source, target, 0, -1);

@@ -3,10 +3,12 @@
 // (sensors_snap_t, #245: it includes no gate header); the asserts below keep it equal to the gate's, so the caller's
 // struct is filled in place (sensors_get copies bytes with memcpy, never through a sensors_snap_t lvalue).
 #include "lichen_sensors.h"
+#include "lichen_sys_app.h"
 
 #include "sensors.h"
 
 #include <stddef.h>
+#include <string.h>
 
 // A mirror field matches when it sits at the same offset with the same type (so a float never mirrors an int32)
 #define MIRROR_FIELD(field)                                                                                            \
@@ -30,16 +32,26 @@ MIRROR_FIELD(die_valid);
 MIRROR_FIELD(die_c);
 MIRROR_FIELD(die_us);
 
+// #229: an app that did not declare the sensors reads nothing valid and starts or stops nothing; the OS's own callers
+// (the thermal watchdog, the notices, main) run as the OS and always pass
 void lichen_sensors_get(lichen_sensors_t *out) {
+    if (!lichen_sys_caps_self_ok(CAP_SENSORS, "lichen_sensors_get")) {
+        memset(out, 0, sizeof(*out));
+        return;
+    }
     sensors_get((sensors_snap_t *)(void *)out);
 }
 
 void lichen_sensors_start(void) {
-    sensors_start();
+    if (lichen_sys_caps_self_ok(CAP_SENSORS, "lichen_sensors_start")) {
+        sensors_start();
+    }
 }
 
 void lichen_sensors_stop(void) {
-    sensors_stop();
+    if (lichen_sys_caps_self_ok(CAP_SENSORS, "lichen_sensors_stop")) {
+        sensors_stop();
+    }
 }
 
 bool lichen_sensors_running(void) {
@@ -47,5 +59,8 @@ bool lichen_sensors_running(void) {
 }
 
 void lichen_sensors_set_periods(uint32_t imu_ms, uint32_t env_ms) {
+    if (!lichen_sys_caps_self_ok(CAP_SENSORS, "lichen_sensors_set_periods")) {
+        return;
+    }
     sensors_set_periods(imu_ms, env_ms);
 }

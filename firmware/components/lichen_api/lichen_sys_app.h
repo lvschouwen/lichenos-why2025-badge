@@ -64,8 +64,15 @@ char const *lichen_sys_ctx_source(lichen_ctx_t ctx, char const *what);
 gate_app_kind_t lichen_sys_ctx_settings_ns(lichen_ctx_t ctx, char const *what, char *ns, size_t cap,
                                            char const **name);
 
+// The capability check of a gated call (#229, app_caps.h): true when ctx's app declared every CAP_* bit of need (or is
+// a SYSTEM app, or ctx is the OS's or not valid: the call's own ctx check refuses that). False is counted and logged at
+// most once per 10 s under what ("fw app caps"). Lock-free, heap-free, any task; never on an ISR or panic path.
+bool lichen_sys_caps_ok(lichen_ctx_t ctx, uint32_t need, char const *what);
+// lichen_sys_caps_ok for the context the caller runs for (lichen_ctx_self), for the gate calls that take no ctx
+bool lichen_sys_caps_self_ok(uint32_t need, char const *what);
+
 // main.c, once (the main task, not on the LVGL task): "fw app ctx" (every app's context, the refusals since boot
-// and the last refused value)
+// and the last refused value) and "fw app caps" (every app's capabilities, budgets and capability refusals, #229)
 void lichen_sys_app_console_register(void);
 // More "fw app" subcommands (#232: safe mode's), set once before lichen_sys_app_console_register: every line that is
 // not "ctx" goes to more, and usage (kept by pointer) is the command's help. NULL: only "ctx". Main task, at boot.

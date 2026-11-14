@@ -179,12 +179,24 @@ void settings_fail_note(char const *key, int err) {
 #define MESH  ((lichen_ctx_t)1)
 #define OTHER ((lichen_ctx_t)2)
 #define OS    ((lichen_ctx_t)3)
+#define NOCAP ((lichen_ctx_t)4) // MeshCore's namespace and prefix without CAP_SECRETS (#229)
 
-static lichen_app_t const mesh_app  = {.name = "MeshCore", .id = "meshcore", .secret_prefix = "pw"};
+static lichen_app_t const mesh_app  = {.name = "MeshCore", .id = "meshcore", .secret_prefix = "pw", .caps = CAP_SECRETS};
 static lichen_app_t const other_app = {.name = "Other", .id = "other"};
+static lichen_app_t const nocap_app = {.name = "MeshCore", .id = "meshcore", .secret_prefix = "pw"};
 
 static lichen_app_t const *app_of(lichen_ctx_t ctx) {
-    return ctx == MESH ? &mesh_app : ctx == OTHER ? &other_app : NULL;
+    return ctx == MESH ? &mesh_app : ctx == OTHER ? &other_app : ctx == NOCAP ? &nocap_app : NULL;
+}
+
+// lichen_app.c's check over this table: the OS and a ctx it does not know pass (their own checks refuse those)
+static int caps_refused;
+bool lichen_sys_caps_ok(lichen_ctx_t ctx, uint32_t need, char const *what) {
+    (void)what;
+    lichen_app_t const *app = app_of(ctx);
+    bool                ok  = !app || (app->caps & need) == need;
+    caps_refused += !ok;
+    return ok;
 }
 
 gate_app_kind_t lichen_sys_ctx_settings_ns(lichen_ctx_t ctx, char const *what, char *ns, size_t cap,
@@ -258,6 +270,16 @@ static void secrets_scoped_to_the_declaring_app(void) {
     CHECK(!app_secret_get(MESH, "pwe", out, sizeof(out)));
 }
 
+static void secrets_need_the_capability(void) {
+    char out[32];
+    CHECK(app_secret_set(MESH, "pwcap", "made-up-4"));
+    caps_refused = 0;
+    CHECK(!app_secret_get(NOCAP, "pwcap", out, sizeof(out)) && !out[0]);
+    CHECK(!app_secret_set(NOCAP, "pwcap", "made-up-5") && !app_secret_erase(NOCAP, "pwcap"));
+    CHECK(caps_refused == 3 && !strcmp(raw("a.meshcore", "~pwcap"), "made-up-4"));
+    CHECK(app_secret_erase(MESH, "pwcap"));
+}
+
 static void clear_data_takes_the_secrets(void) {
     CHECK(count_ns("a.meshcore") > 0);
     CHECK(app_settings_erase_all(MESH));
@@ -267,6 +289,7 @@ static void clear_data_takes_the_secrets(void) {
 int main(void) {
     plain_calls_refuse_secrets();
     secrets_scoped_to_the_declaring_app();
+    secrets_need_the_capability();
     clear_data_takes_the_secrets();
     printf("%s: %d failure(s)\n", __FILE__, failures);
     return failures ? 1 : 0;

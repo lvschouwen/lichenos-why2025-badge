@@ -152,6 +152,9 @@ static char const *sd_dir_locked(char const *id, uint32_t generation) {
 }
 
 char const *lichen_fs_sd_dir(lichen_ctx_t ctx) {
+    if (!lichen_sys_caps_ok(ctx, CAP_SD, "lichen_fs_sd_dir")) {
+        return NULL; // #229: an app that did not declare the card
+    }
     char const *id = usable_id(ctx, "lichen_fs_sd_dir");
     if (!id) {
         return NULL;
@@ -190,6 +193,9 @@ static char const *volatile sd_holder;
 static volatile uint32_t sd_holder_ctx;
 
 bool lichen_fs_sd_begin(lichen_ctx_t ctx, uint32_t wait_ms) {
+    if (!lichen_sys_caps_ok(ctx, CAP_SD, "lichen_fs_sd_begin")) {
+        return false; // #229: no batch, so the app calls no lichen_fs_sd_end either
+    }
     char const     *id   = NULL;
     char const     *name = NULL;
     gate_app_kind_t kind = lichen_sys_ctx_caller(ctx, "lichen_fs_sd_begin", &id, &name);

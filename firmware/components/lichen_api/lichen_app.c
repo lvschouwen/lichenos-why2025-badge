@@ -3,6 +3,7 @@
 #include "lichen_app.h"
 #include "lichen_sys_app.h"
 
+#include "app_caps.h"
 #include "app_ctx.h"
 #include "app_ns.h"
 #include "app_secret.h"
@@ -338,6 +339,34 @@ char const *lichen_sys_ctx_source(lichen_ctx_t ctx, char const *what) {
 gate_app_kind_t lichen_sys_ctx_settings_ns(lichen_ctx_t ctx, char const *what, char *ns, size_t cap,
                                            char const **name) {
     return gate_app_settings_ns(&s_app_env, ctx, what, ns, cap, name);
+}
+
+// ---- capabilities (#229) --------------------------------------------------------------------------------------------
+
+// Internal .bss (~0.1 KB): counted from any task, so never PSRAM
+static app_caps_refusals_t s_caps_refused;
+
+static uint32_t app_caps(void const *owner) {
+    return ((lichen_app_t const *)owner)->caps;
+}
+
+bool lichen_sys_caps_ok(lichen_ctx_t ctx, uint32_t need, char const *what) {
+    if (app_caps_check(&s_caps_refused, table(), ctx, need, app_caps)) {
+        return true;
+    }
+    uint32_t skipped = 0;
+    if (!in_isr() && app_caps_log_due(&s_caps_refused, (uint32_t)pdTICKS_TO_MS(xTaskGetTickCount()), &skipped)) {
+        char needs[48];
+        app_caps_format(need, needs, sizeof(needs));
+        ESP_LOGW(TAG, "%s refused for app %s: it needs %s, which the app did not declare (#229; %lu more not logged "
+                      "since the last)", what ? what : "?", app_name(app_ctx_slot_owner(&s_table, ctx)), needs,
+                 (unsigned long)skipped);
+    }
+    return false;
+}
+
+bool lichen_sys_caps_self_ok(uint32_t need, char const *what) {
+    return lichen_sys_caps_ok(lichen_ctx_self(), need, what);
 }
 
 // ---- fw app ctx ----------------------------------------------------------------------------------------------------

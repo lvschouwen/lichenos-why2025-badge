@@ -881,7 +881,7 @@ int second(int a) __attribute__((nonnull(1), format(printf, 1, 2)));
 
 
 class Capabilities(unittest.TestCase):
-    """Rule D (#229): the cap list mirrored in lichen_app.h, descriptors mirrored in app lines, symbols mapped through
+    """Rule D (#229): the cap list mirrored in lichen_caps.h, descriptors mirrored in app lines, symbols mapped through
     the manifest's capability column to a capability the using app declared."""
     CONF = CONF.replace("component gate L2", "component gate lichen_api L2") + """\
 cap SD 0
@@ -911,7 +911,7 @@ app-objects one a.c
                                                     ("psram_kib", "1")]
         comps = {"lichen_api": ("idf_component_register(SRCS \"l.c\")",
                                 {"l.c": "char const *lichen_fs_sd_dir(int ctx){return ctx ? \"x\" : 0;}\n",
-                                 "lichen_app.h": app_h or self.APP_H,
+                                 "lichen_caps.h": app_h or self.APP_H,
                                  "lichen_fs.h": "char const *lichen_fs_sd_dir(int ctx);\n",
                                  "lora_x.h": "int lora_claim(void);\n"}),
                  "app": (BASE_FILES["app"][0], dict({"a.c": self.app_src(fields, call, head)}, **(extra or {})))}
@@ -969,9 +969,9 @@ app-objects one a.c
         fields = [("id", "ONE_ID"), ("caps", "CAP_SD"), ("internal_ram_kib", "2"), ("psram_kib", "1")]
         self.assertEqual(self.d_keys(self.fixture(fields, extra=extra, head='#include "ids.h"\n')), set())
 
-    def test_cap_list_mirrors_lichen_app_h(self):
+    def test_cap_list_mirrors_lichen_caps_h(self):
         got = self.d_keys(self.fixture(app_h=self.APP_H.replace("CAP_SYSTEM (1u << 5)", "CAP_SYSTEM (1u << 6)")))
-        self.assertEqual(got, {"cap SYSTEM (layers.conf bit 5, lichen_app.h bit 6)"})
+        self.assertEqual(got, {"cap SYSTEM (layers.conf bit 5, lichen_caps.h bit 6)"})
 
     def test_conf_rejects_unknown_capability_and_shared_bit(self):
         with self.assertRaises(cl.LayerError):
