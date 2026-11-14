@@ -10,6 +10,7 @@
 #include "esp_partition.h"
 #include "esp_rom_crc.h"
 #include "esp_system.h"
+#include "file_replace.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -29,7 +30,7 @@
 
 #define CRASH_DIR    STORAGE_BASE "/crash"
 #define CRASH_LOG    CRASH_DIR "/log.txt"
-#define CRASH_TMP    CRASH_DIR "/log.tmp"
+#define CRASH_TMP    CRASH_LOG ".new" // lichen_file_replace's side file: a clear removes a stale one
 #define KEEP_RECORDS 20
 #define LOG_MAX      (KEEP_RECORDS * 256 + 256)
 #define B64_LINE     76
@@ -153,7 +154,7 @@ static void store_dump_sum(uint32_t v) {
 // Reads the whole log (it is small); returns its length
 static size_t read_file(char const *path, char *buf, size_t cap) {
     buf[0]  = '\0';
-    FILE *f = fopen(path, "r");
+    FILE *f = lichen_file_open_recovered(path);
     if (!f) {
         return 0;
     }
@@ -163,28 +164,12 @@ static size_t read_file(char const *path, char *buf, size_t cap) {
     return n;
 }
 
-// A swap cut short by a reset leaves the log as log.tmp (not renamed yet) only: it still counts
 static size_t read_log(char *buf, size_t cap) {
-    size_t n = read_file(CRASH_LOG, buf, cap);
-    return n ? n : read_file(CRASH_TMP, buf, cap);
+    return read_file(CRASH_LOG, buf, cap);
 }
 
 size_t crash_log_load(char *buf, size_t cap) {
     return cap ? read_log(buf, cap) : 0;
-}
-
-static bool write_file(char const *path, char const *text, size_t len) {
-    FILE *f = fopen(path, "w");
-    if (!f) {
-        return false;
-    }
-    bool ok = fwrite(text, 1, len, f) == len;
-    return (fclose(f) == 0) && ok;
-}
-
-// LittleFS's rename replaces log.txt in one atomic step (#300): after a cut it is the old log or the new one.
-static bool swap_in(void) {
-    return rename(CRASH_TMP, CRASH_LOG) == 0;
 }
 
 bool crash_log_store(char const *text, size_t len) {
@@ -195,10 +180,7 @@ bool crash_log_store(char const *text, size_t len) {
         unlink(CRASH_TMP);
     } else {
         mkdir(CRASH_DIR, 0777); // exists after the first crash
-        ok = write_file(CRASH_TMP, text, len) && swap_in();
-        if (!ok) {
-            unlink(CRASH_TMP);
-        }
+        ok = lichen_file_replace(CRASH_LOG, text, len); // LittleFS: a cut leaves the old log or the new one (#300)
     }
     if (!ok) {
         ESP_LOGE(TAG, "cannot write %s: errno %d", CRASH_LOG, errno);
