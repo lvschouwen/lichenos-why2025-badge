@@ -14,6 +14,7 @@ Everything is validated before the first file is touched, and the new files are 
 refusal leaves the tree as it was. --root points at another tree (the gate scaffolds a throwaway app into a temp copy
 with it: tools/tests/new_app_test.sh)."""
 import argparse
+import errno
 import os
 import re
 import sys
@@ -180,9 +181,19 @@ SHARED = (("firmware/components/lichen_apps/CMakeLists.txt", edit_cmake),
 def write_atomic(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        # Test hook (tools/tests/new_app_test.sh): fail after the temp file exists, as a full disk would
+        if os.environ.get("NEW_APP_TEST_FAIL_AFTER_TEMP") and path.endswith(os.environ["NEW_APP_TEST_FAIL_AFTER_TEMP"]):
+            raise OSError(errno.ENOSPC, "No space left on device (test hook)")
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def scaffold(root, app_id, name):
@@ -210,28 +221,38 @@ def scaffold(root, app_id, name):
                 write_atomic(path, new)
                 done.append((path, old))
     except OSError as e:
-        rollback(root, app_id, created, done)
+        left = rollback(root, app_id, created, done)
+        if left:
+            raise Refused("writing failed (%s) and the undo failed too: partial state is left, remove or restore by "
+                          "hand: %s" % (e, ", ".join(left)))
         raise Refused("writing failed (%s); every file this run wrote was removed or restored, the tree is as it was" % e)
     return [d for d, _ in new_files] + [r for r, n, o in edited if n != o]
 
 
 def rollback(root, app_id, created, done):
     """Undo a half-done run: restore the shared files already replaced, remove the new files and the new directory
-    (the id was free, so the component directory is ours). A step that fails too is skipped: the rest still runs."""
+    (the id was free, so the component directory is ours). A step that fails too is skipped, the rest still runs; the
+    paths that could not be undone are returned (empty: the tree is as it was)."""
+    left = []
     for path, old in done:
         try:
             write_atomic(path, old)
         except OSError:
-            pass
+            left.append(os.path.relpath(path, root))
     for path in created:
         try:
             os.remove(path)
+        except FileNotFoundError:
+            pass  # the write that failed never got as far as the file
         except OSError:
-            pass
+            left.append(os.path.relpath(path, root))
     try:
         os.rmdir(os.path.join(root, "firmware/components/lichen_" + app_id))
-    except OSError:
+    except FileNotFoundError:
         pass
+    except OSError:
+        left.append("firmware/components/lichen_" + app_id)
+    return left
 
 
 def main(argv):

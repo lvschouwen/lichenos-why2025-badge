@@ -84,6 +84,42 @@ else
     echo "note: running as root, the rollback case is skipped" >&2
 fi
 
+# A write that fails AFTER its temp file exists (a full disk): the first new file, then a shared one. No temp file
+# and no directory may stay; the hook is read by tools/new_app.py's write_atomic only for this test.
+for failing in CMakeLists.txt layers.conf; do
+    before=$(snap)
+    out=$(NEW_APP_TEST_FAIL_AFTER_TEMP=$failing new_app demo "Demo app" 2>&1); rc=$?
+    [ "$rc" = 1 ] && grep -q 'the tree is as it was' <<<"$out" || bad "failing $failing: exit $rc: $out"
+    [ "$before" = "$(snap)" ] || bad "failing $failing: the tree changed"
+    [ ! -e "$t/firmware/components/lichen_demo" ] || bad "failing $failing: a directory or temp file is left"
+done
+# An undo that fails too says so and names what is left (os.remove patched in-process)
+cp -a "$t" "$tmp/t2"
+python3 -I - "$repo/tools" "$tmp/t2" <<'PY' || bad "a failed undo is not reported"
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import new_app
+real_write, real_remove = new_app.write_atomic, os.remove
+calls = [0]
+def flaky(path, text):
+    calls[0] += 1
+    if path.endswith("app_demo.c"):
+        raise OSError("disk full")
+    real_write(path, text)
+def stuck(path):
+    raise OSError("busy")
+new_app.write_atomic = flaky
+os.remove = stuck
+try:
+    new_app.scaffold(sys.argv[2], "demo", "Demo")
+    sys.exit("no refusal")
+except new_app.Refused as e:
+    msg = str(e)
+finally:
+    os.remove = real_remove
+assert "partial state is left" in msg and "CMakeLists.txt" in msg and "lichen_demo.h" in msg, msg
+PY
+
 # A good one
 before=$(snap)
 out=$(new_app demo "Demo app" 2>&1) || bad "good id refused: $out"
@@ -130,8 +166,12 @@ if [ -f "$lvgl/lvgl.h" ]; then
     out=$("$cc" -std=gnu11 -fsyntax-only -Wall -Wextra -Werror -DLV_CONF_SKIP=1 -I"$lvgl" \
         -I"$repo/firmware/components/lichen_api" -I"$t/firmware/components/lichen_demo" \
         "$t/firmware/components/lichen_demo/app_demo.c" 2>&1) || bad "the generated app_demo.c does not compile: $out"
+elif [ -f "$repo/firmware/build/compile_commands.json" ]; then
+    # build.sh runs the host tests before the first IDF configure, which fetches the component: on a clone that has
+    # configured once it must be there, so its absence is a failure, not a skip
+    bad "lvgl is missing although the firmware was configured: the generated app cannot be compiled"
 else
-    echo "note: firmware/managed_components/lvgl__lvgl missing, the generated app is not compiled (build once first)" >&2
+    echo "SKIP: firmware/managed_components/lvgl__lvgl is missing (a clone that has not configured once): the generated app is not compiled here, the IDF build compiles it" >&2
 fi
 
 # The generated model test builds and passes the way host_tests builds it
