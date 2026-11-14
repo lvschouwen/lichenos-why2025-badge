@@ -10,6 +10,7 @@
 #include "console_sub.h"
 #include "dev_gate.h"
 #include "boot_rules.h"
+#include "c6_rules.h"
 #include "crash_rules.h"
 #include "dev_mode.h"
 #include "haptics_rules.h"
@@ -339,6 +340,7 @@ static rules_of_t const RULES[] = {
     {"mesh", MESH_SUBS},
     {"onair", MESH_ONAIR_RULES},
     {"advert", MESH_ADVERT_RULES},
+    {"c6", C6_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {

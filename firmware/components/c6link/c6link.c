@@ -3,6 +3,7 @@
 
 #include "c6_boot_policy.h"
 #include "c6_hooks_priv.h"
+#include "c6_rules.h"
 #include "c6link_priv.h"
 #include "c6_flasher.h"
 #include "c6_image.h"
@@ -414,7 +415,7 @@ bool c6link_flashing(void) {
 }
 
 bool c6link_start(void) {
-    console_register("c6", "c6 [reflash | verify | reset [rom] | reattach]", cmd_c6);
+    console_register_rules("c6", "c6 [reflash | verify | reset [rom] | reattach]", cmd_c6, C6_RULES);
     c6_sup_start();
 
     c6_hooks_step_begin();
