@@ -29,7 +29,8 @@ class Tree:
     def keys(self, check, allow=()):
         files = list(cr.tree_files(self.root))
         fn = {"cs-psram": cr.check_cs_psram, "task-class": cr.check_task_class, "lvgl-task": cr.check_lvgl_task,
-              "task-delete": cr.check_task_delete, "log-level": lambda f: cr.check_log_level(f, list(allow))}[check]
+              "task-delete": cr.check_task_delete, "log-level": lambda f: cr.check_log_level(f, list(allow)),
+              "anim-field": lambda f: cr.check_anim_field(f + list(cr.app_extra_files(self.root)), self.root)}[check]
         return sorted(cr.key_str(self.root, k) for k in fn(files))
 
     def run(self, check):
@@ -355,6 +356,56 @@ class Counts(unittest.TestCase):
         c = cr.function_counts(list(cr.tree_files(t.root)))
         self.assertEqual(c[".c"][0], 1)
         self.assertGreater(c[".c"][1], 5)
+
+
+
+ANIM_HIT = """\
+void f(void) {
+    lv_anim_t a;
+    a.exec_cb = cb;
+    p->completed_cb = done;
+    lv_anim_t b = { .start_cb = go, .path_cb = lv_anim_path_linear };
+}
+"""
+ANIM_QUIET = """\
+// a.exec_cb = cb;   a comment naming the field
+/* b.start_cb = go; */
+void f(lv_anim_t *a) {
+    lv_anim_cb_t c = a->exec_cb;
+    if (a->completed_cb == NULL) puts("x.exec_cb = y");
+    use(a.deleted_cb);
+    char const *s = ".path_cb = 1";
+    lv_anim_set_duration(a, 5);
+}
+"""
+
+
+class AnimFieldTest(unittest.TestCase):
+    def test_writes_in_an_app_source_are_found(self):
+        keys = Tree(self, {"../lichen_apps/a.c": ANIM_HIT}).keys("anim-field")
+        self.assertEqual(keys, ["firmware/components/lichen_apps/a.c:completed_cb",
+                                "firmware/components/lichen_apps/a.c:exec_cb",
+                                "firmware/components/lichen_apps/a.c:path_cb",
+                                "firmware/components/lichen_apps/a.c:start_cb"])
+
+    def test_mesh_component_and_meshcore_src_are_app_sources(self):
+        t = Tree(self, {"../mesh/m.cpp": ANIM_HIT})
+        os.makedirs(os.path.join(t.root, "meshcore/src"))
+        with open(os.path.join(t.root, "meshcore/src/x.cpp"), "w") as f:
+            f.write(ANIM_HIT)
+        keys = t.keys("anim-field")
+        self.assertEqual(len(keys), 8)
+        self.assertTrue(any(k.startswith("meshcore/src/x.cpp") for k in keys))
+
+    def test_comments_reads_comparisons_and_strings_are_quiet(self):
+        self.assertEqual(Tree(self, {"../lichen_apps/a.c": ANIM_QUIET}).keys("anim-field"), [])
+
+    def test_os_sources_may_write_the_fields(self):
+        self.assertEqual(Tree(self, {"a.c": ANIM_HIT}).keys("anim-field"), [])  # firmware/components/x is not L6
+
+    def test_a_finding_fails_the_run_with_no_baseline(self):
+        self.assertEqual(Tree(self, {"../lichen_apps/a.c": ANIM_HIT}).run("anim-field"), 4)
+        self.assertEqual(Tree(self, {"../lichen_apps/a.c": ANIM_QUIET}).run("anim-field"), 0)
 
 
 if __name__ == "__main__":

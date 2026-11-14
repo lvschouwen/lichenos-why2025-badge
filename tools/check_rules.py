@@ -9,6 +9,7 @@ Checks (python3 -I tools/check_rules.py [--root DIR] [--baseline-dir DIR] [check
                    not call NVS / flash / file APIs, directly or through a function of the same file.
   lvgl-task  #118  an lv_* call in a task entry function (the function given to xTaskCreate* / lichen_task_start*)
                    outside a lichen_sys_ui_lock ... lichen_sys_ui_unlock (or lvgl_port_lock ... unlock) span.
+  anim-field #441  an app source (layer L6) assigns a callback field of an lv_anim_t (.exec_cb, .start_cb, ...).
   task-delete #358 a function given to lichen_task_start / lichen_task_start_in (any stack), or a same-file function it
                    calls, deletes its own task (vTaskDelete(NULL) or of xTaskGetCurrentTaskHandle()): it must return.
 
@@ -539,6 +540,42 @@ def check_task_delete(files):
     return found
 
 
+# ---- anim-field -------------------------------------------------------------------------------------------------
+# Why: an app registers LVGL callbacks only through the lichen_ui_* wrappers so that they run as the app (#349). The
+# lv_anim_set_*_cb setters are banned for L6 by the symbol rule in tools/layers.conf; writing the public callback
+# fields of an lv_anim_t (or a designated initialiser of one) is the same registration without a symbol to see.
+# Limits: the lv_anim_t type is not known to a lexer, so any `.field =` / `->field =` with one of these names in an app
+# source counts (an app's own struct must pick another name); a positional initialiser, a memcpy or a struct copy of an
+# anim is not seen (false negatives). Comments and string literals are blanked first; a read or `==` is not a write.
+# App sources: the mesh and lichen_apps components, plus meshcore/src, which the mesh component builds.
+
+APP_DIRS = ("firmware/components/mesh/", "firmware/components/lichen_apps/", "meshcore/src/")
+ANIM_FIELDS = ("exec_cb", "start_cb", "completed_cb", "deleted_cb", "path_cb", "get_value_cb", "custom_exec_cb")
+ANIM_WRITE = re.compile(r"(?:\.|->)\s*(" + "|".join(ANIM_FIELDS) + r")\s*=(?!=)")
+
+
+def app_extra_files(root):
+    for dp, _dn, fns in os.walk(os.path.join(root, "meshcore", "src")):
+        for fn in sorted(fns):
+            if fn.endswith(EXTS + (".hpp",)):
+                yield os.path.join(dp, fn)
+
+
+def is_app_source(root, path):
+    return os.path.relpath(path, root).replace(os.sep, "/").startswith(APP_DIRS)
+
+
+def check_anim_field(files, root):
+    found = {}
+    for path in files:
+        if not is_app_source(root, path):
+            continue
+        _src, code, _text = load(path)
+        for m in ANIM_WRITE.finditer(code):
+            found.setdefault((path, m.group(1)), []).append(line_of(code, m.start()))
+    return found
+
+
 # ---- baseline and driver ----------------------------------------------------------------------------------------
 
 def function_counts(files):
@@ -583,6 +620,7 @@ HELP = {
     "log-level": "ESP_LOGW for a retry / drop / skip (policy #113); reword it or add a reviewed line to tools/log-level-allow.txt",
     "task-class": "a task on an LP RAM / PSRAM stack never returns and (PSRAM) never touches flash (#269)",
     "lvgl-task": "no lv_* in a task: lichen_ui_call (apps) or lichen_sys_ui_lock ... unlock (OS), #118",
+    "anim-field": "an app writes an lv_anim_t callback field: it would run as the OS; use lichen_ui_* wrappers (#441)",
     "task-delete": "a lichen_task_start* task returns; its trampoline deletes it and frees the book slot (#181, #358)",
 }
 
@@ -596,6 +634,7 @@ def run(root, base_dir, checks, quiet=False):
         "task-class": lambda: check_task_class(files),
         "lvgl-task": lambda: check_lvgl_task(files),
         "task-delete": lambda: check_task_delete(files),
+        "anim-field": lambda: check_anim_field(files + list(app_extra_files(root)), root),
     }
     bad = 0
     for name in checks:
@@ -626,7 +665,8 @@ def main(argv):
     if a.report:
         files = list(tree_files(a.root))
         fns = {"cs-psram": check_cs_psram, "task-class": check_task_class, "lvgl-task": check_lvgl_task,
-               "task-delete": check_task_delete, "log-level": lambda f: check_log_level(f, [])}
+               "task-delete": check_task_delete, "log-level": lambda f: check_log_level(f, []),
+               "anim-field": lambda f: check_anim_field(f + list(app_extra_files(a.root)), a.root)}
         for name in a.checks:
             for k, v in sorted(fns[name](files).items()):
                 print("%s\t%s\t%d\t%s" % (name, key_str(a.root, k), len(v), ",".join(map(str, v[:5]))))

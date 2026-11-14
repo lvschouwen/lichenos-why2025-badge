@@ -175,6 +175,13 @@ CONFIG_LV_FONT_MONTSERRAT_40=y
 # (lichen_ui_cb.c). LVGL core (MIT), no extra library; 8 bytes more per object, descriptor and timer, in PSRAM.
 CONFIG_LV_USE_EXT_DATA=y
 
+# LVGL observers and the animated image widget are off (#441): an observer, or an animimg start/completed callback,
+# would run app code as the OS (no attribution, #349), and nothing in Lichen uses either. Off removes the route.
+# CONFIG_LV_USE_OBSERVER is not set
+# CONFIG_LV_USE_ANIMIMG is not set
+# LVGL's examples use observers unguarded, so they cannot build without them; nothing here calls them
+# CONFIG_LV_BUILD_EXAMPLES is not set
+
 # QR codes (#153): lv_qrcode with qrcodegen (MIT), only for the QR code screen (contact and channel links, the QR code app)
 CONFIG_LV_USE_QRCODE=y
 

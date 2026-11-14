@@ -397,6 +397,27 @@ class HardAndConf(unittest.TestCase):
         self.assertEqual(listed, want)
         self.assertNotIn("No component or header exception is open", doc)
 
+    @staticmethod
+    def header_text(base):
+        text = ""
+        for f in cl.source_files(base):
+            if f.endswith(".h"):
+                with open(f, encoding="utf-8", errors="replace") as h:
+                    text += h.read()
+        return text
+
+    def test_observer_and_animimg_routes_are_banned_for_apps(self):
+        """#441: the observer and animimg callback registrations are closed to L6 (each glob has a name it matches)."""
+        tools = os.path.dirname(cl.__file__)
+        conf = cl.parse_conf(cl.read(os.path.join(tools, "layers.conf")))
+        banned = conf.forbid["L6"]
+        for sym in ("lv_subject_add_observer", "lv_subject_add_observer_obj", "lv_subject_add_observer_with_target",
+                    "lv_obj_bind_bool", "lv_label_bind_text", "lv_slider_bind_value", "lv_animimg_set_start_cb",
+                    "lv_animimg_set_completed_cb"):
+            self.assertTrue(any(cl.fnmatch.fnmatchcase(sym, g) for g in banned), sym)
+        for ok in ("lv_subject_get_int", "lv_animimg_create", "lichen_ui_event_add"):  # reading and creating stay open
+            self.assertFalse(any(cl.fnmatch.fnmatchcase(ok, g) for g in banned), ok)
+
     def test_real_conf_symbol_globs_name_real_symbols(self):
         """Every forbid and owner-only glob matches a symbol that exists (#283): a typo such as lora_intrnal_* would
         match nothing and guard nothing. Known symbols: the identifiers of the repo's sources plus the IDF functions
@@ -408,7 +429,12 @@ class HardAndConf(unittest.TestCase):
                     "esp_mmu_map": "esp_mm"}
         # LVGL's raw hooks banned for apps before any source used them (#427; lv_anim.h, lv_obj.h, lv_group.h)
         external.update(dict.fromkeys(("lv_anim_set_exec_cb", "lv_obj_add_delete_cb", "lv_group_set_edge_cb",
-                                       "lv_obj_set_external_data", "lv_anim_set_external_data"), ""))
+                                       "lv_obj_set_external_data", "lv_anim_set_external_data"), "lvgl"))
+        # observers and the animated image (#441): lv_observer.h, lv_animimage.h
+        external.update(dict.fromkeys(("lv_subject_add_observer", "lv_subject_add_observer_obj",
+                                       "lv_subject_add_observer_with_target", "lv_obj_bind_bool", "lv_obj_bind_int",
+                                       "lv_label_bind_text", "lv_slider_bind_value", "lv_animimg_set_start_cb",
+                                       "lv_animimg_set_completed_cb"), "lvgl"))
         known = set(external)
         for base in ("firmware/components", "firmware/main", "shared"):
             for path in cl.source_files(os.path.join(root, base)):
@@ -418,8 +444,12 @@ class HardAndConf(unittest.TestCase):
         dead = [g for g in globs if not any(cl.fnmatch.fnmatchcase(k, g) for k in known)]
         self.assertEqual(dead, [])
         idf = os.environ.get("IDF_PATH", "")
+        lvgl = os.path.join(root, "firmware", "managed_components", "lvgl__lvgl", "include")
+        for sym, comp in external.items():  # LVGL names are checked against its headers (a typo would match nothing)
+            if comp == "lvgl" and os.path.isdir(lvgl):
+                self.assertRegex(self.header_text(lvgl), r"\b%s\s*\(" % sym, sym)
         for sym, comp in external.items():
-            if comp and os.path.isdir(os.path.join(idf, "components", comp)):
+            if comp and comp != "lvgl" and os.path.isdir(os.path.join(idf, "components", comp)):
                 text = ""
                 for f in cl.source_files(os.path.join(idf, "components", comp)):
                     if f.endswith(".h"):
