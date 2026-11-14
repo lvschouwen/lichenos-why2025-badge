@@ -85,9 +85,9 @@ void lichen_sys_app_console_more(void (*more)(char const *args), char const *usa
 #define LICHEN_PANIC_ID_CAP 14 // an app id with its NUL
 char const *lichen_sys_panic_app_id(void);
 // The callback trampoline (lichen_ui_cb.c, #349): entering true with the context it is about to enter, before it
-// enters it; false with the context it put back, after it left. Nests. The LVGL task only (it holds the LVGL lock); no
-// lock, no heap.
-void lichen_sys_ui_cb_mark(bool entering, lichen_ctx_t ctx);
+// enters it, returns the context marked before; false, after it left, with that returned value (put back when they
+// nest; the return is 0). The LVGL task only (it holds the LVGL lock); no lock, no heap.
+uint32_t lichen_sys_ui_cb_mark(bool entering, lichen_ctx_t ctx);
 // For the panic handler: the task running on this core is inside an app's LVGL callback (lichen_sys_ui_cb_mark) and
 // still runs as the context that callback entered (#427: not another app's, as when Settings runs an app's hook), so
 // the shell, LVGL or a PSRAM fault it reached is named after the app and counts toward the callback limit, not as a

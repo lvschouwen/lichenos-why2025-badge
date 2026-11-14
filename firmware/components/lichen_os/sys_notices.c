@@ -60,14 +60,11 @@ static void crash_body(char *out, size_t cap) {
     if (off) { // #427: a callback crash loop is switched off too
         snprintf(out, cap, "%s crashed again: its background part is off until switched on (fw app background %s on).",
                  name, id);
-    } else if (in_cb && crashes > 1) {
-        snprintf(out, cap, "%s crashed in a screen callback %u times in the last %d boots. Open this for the Crash log.",
-                 name, crashes, SAFE_MODE_WINDOW_BOOTS);
+    } else if (crashes > 1) { // a callback crash's count is the app's crashes of both kinds (#427)
+        snprintf(out, cap, "%s crashed %u times in the last %d boots%s. Open this for the Crash log.", name, crashes,
+                 SAFE_MODE_WINDOW_BOOTS, in_cb ? " (last in a screen callback)" : "");
     } else if (in_cb) {
         snprintf(out, cap, "%s crashed in a screen callback and Lichen restarted. Open this for the Crash log.", name);
-    } else if (crashes > 1) {
-        snprintf(out, cap, "%s crashed %u times in the last %d boots. Open this for the Crash log.", name, crashes,
-                 SAFE_MODE_WINDOW_BOOTS);
     } else {
         snprintf(out, cap, "%s crashed and Lichen restarted. Open this for the Crash log.", name);
     }

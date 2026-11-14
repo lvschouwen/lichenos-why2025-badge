@@ -22,6 +22,10 @@
 
 static char const TAG[] = "safe_mode";
 
+// A callback crash's verdict (#427): the count is the app's crashes of both kinds, toward SAFE_MODE_CB_LIMIT
+#define CB_VERDICT "%s crashed %u times in the last %d boots, the last in a screen callback (no strike; %d switch it " \
+                   "off)"
+
 _Static_assert(SAFE_MODE_APP_ID_CAP == SAFE_MODE_ID_CAP && SAFE_MODE_APP_ID_CAP == LICHEN_PANIC_ID_CAP,
                "safe_mode.h's id buffer is the record's and the panic view's");
 _Static_assert(SAFE_MODE_WINDOW_BOOTS == SAFE_MODE_WINDOW, "safe_mode.h's window is the policy's");
@@ -148,9 +152,8 @@ static void show(void) {
     if (!s_boot.counted) {
         console_reply("app background: this boot is the PSRAM re-arm restart after a crash (not counted again)");
     } else if (s_boot.app[0] && s_boot.in_callback) {
-        console_reply("app background: this boot follows a crash in a screen callback of %s, %u of %d in %d boots "
-                      "(the callback limit; no strike)", s_boot.app, s_boot.named_crashes, SAFE_MODE_CB_LIMIT,
-                      SAFE_MODE_WINDOW);
+        console_reply("app background: " CB_VERDICT, s_boot.app, s_boot.named_crashes, SAFE_MODE_WINDOW,
+                      SAFE_MODE_CB_LIMIT);
     } else if (s_boot.app[0]) {
         console_reply("app background: this boot follows a crash of %s, %u of %d in %d boots", s_boot.app,
                       s_boot.app_crashes, SAFE_MODE_LIMIT, SAFE_MODE_WINDOW);
@@ -278,8 +281,7 @@ static void log_verdict(void) {
     if (!s_boot.counted) {
         ESP_LOGI(TAG, "this boot is the PSRAM re-arm restart after a crash: not counted again");
     } else if (s_boot.app[0] && s_boot.in_callback) {
-        ESP_LOGW(TAG, "the crash happened in a screen callback of %s: no strike, %u of %d in the last %d boots toward "
-                      "the callback limit", s_boot.app, s_boot.named_crashes, SAFE_MODE_CB_LIMIT, SAFE_MODE_WINDOW);
+        ESP_LOGW(TAG, CB_VERDICT, s_boot.app, s_boot.named_crashes, SAFE_MODE_WINDOW, SAFE_MODE_CB_LIMIT);
     } else if (s_boot.app[0]) {
         ESP_LOGW(TAG, "the crash is attributed to %s: %u of %d in the last %d boots", s_boot.app, s_boot.app_crashes,
                  SAFE_MODE_LIMIT, SAFE_MODE_WINDOW);

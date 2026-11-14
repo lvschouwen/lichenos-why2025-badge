@@ -28,14 +28,21 @@ typedef struct {
     } fn;
 } ui_cb_rec_t;
 
-// What the record works with: lv_malloc / lv_free and lichen_ctx_self / _enter / _leave on the badge, stand-ins in
-// the host test
+// What enter hands to leave: the task's context before the enter, and the context the outer callback had marked (the
+// two differ when that callback entered another app's context in between, #427)
+typedef struct {
+    uint32_t previous;
+    uint32_t outer_mark;
+} ui_cb_saved_t;
+
+// What the record works with: lv_malloc / lv_free, lichen_ctx_self, and the mark plus lichen_ctx_enter / _leave on
+// the badge; stand-ins in the host test
 typedef struct {
     void *(*alloc)(size_t size);
     void (*free)(void *ptr);
     uint32_t (*self)(void);
-    uint32_t (*enter)(uint32_t ctx);
-    void (*leave)(uint32_t previous);
+    ui_cb_saved_t (*enter)(uint32_t ctx);
+    void (*leave)(ui_cb_saved_t saved);
 } ui_cb_env_t;
 
 // A record for an event callback (fn not NULL) that will run as the caller's current context. NULL when out of memory.
@@ -62,19 +69,21 @@ void ui_cb_run_group(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_
 // The stores are ordered so that every state a reader can catch is safe. Each word is one aligned 32-bit store, so it
 // is never torn. Entering at depth 0 writes ctx before task: a crash between the two sees no task, so no mark (it
 // counts as whatever context the task runs as, the OS's before the trampoline entered the app's). Leaving to depth 0
-// clears task first, so a stale ctx is never paired with a live task. Nested, only ctx changes: a crash between the
-// mark and the context switch sees two different slots and strikes the context the task runs as (OS code in the
-// trampoline, a few instructions).
+// clears task first, so a stale ctx is never paired with a live task. Nested, only ctx changes, and a leave puts back
+// the ctx the outer callback marked (not the task's context before the inner enter: that may be another app's, entered
+// by the outer callback). The one window left: nested, between the mark and the context switch (in either direction)
+// only OS code from flash runs; a fault there finds two different slots and strikes the context the task runs as,
+// which is the outer callback's app (or the inner one's), never the OS; MeshCore's exemption still applies to it.
 typedef struct {
     void *volatile    task;  // the task inside a callback; NULL: none
     volatile uint32_t ctx;   // the context the innermost callback entered
     uint32_t          depth; // the writer's own count, never read by the panic handler
 } ui_cb_mark_t;
 
-// The trampoline is about to enter ctx (before env->enter) on task
-void ui_cb_mark_enter(ui_cb_mark_t *m, void *task, uint32_t ctx);
-// The trampoline left back to previous (after env->leave): the outer callback's context when they nest
-void ui_cb_mark_leave(ui_cb_mark_t *m, uint32_t previous);
+// The trampoline is about to enter ctx (before env->enter) on task. Returns the ctx marked before, for the leave.
+uint32_t ui_cb_mark_enter(ui_cb_mark_t *m, void *task, uint32_t ctx);
+// The trampoline left (after env->leave): outer_mark is what ui_cb_mark_enter returned, put back when they nest
+void ui_cb_mark_leave(ui_cb_mark_t *m, uint32_t outer_mark);
 
 // The panic handler's test: task (the core's current one) is inside a callback whose context slot is still the one it
 // runs as (current_ctx, its thread-local slot). Always inlined: the caller is in IRAM and must not reach flash.

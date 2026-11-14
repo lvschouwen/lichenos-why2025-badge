@@ -1,6 +1,7 @@
 // Crash attribution and safe mode (#232): the LP RAM record (magic + checksum before use), 2 crashes of one app in 3
-// boots switch its background off (3 counting its screen callback crashes, #427), the PSRAM re-arm restart after a crash counts as part of that crash (never as a
-// clean boot), re-enabling forgets, the degraded boot, and the list of apps whose background is off.
+// boots switch its background off (3 counting its screen callback crashes, #427), the PSRAM re-arm restart after a
+// crash counts as part of that crash (never as a clean boot), re-enabling forgets, the degraded boot, and the list of
+// apps whose background is off.
 #include "safe_mode_policy.h"
 
 #include <stdio.h>
@@ -286,7 +287,6 @@ static void callback_crashes_are_no_strike(void) {
     b = callback_boot(&r, NULL); // nobody to name: nothing to mark
     CHECK(b.crash && !b.in_callback && b.app[0] == '\0');
 }
-
 
 // #427: a callback that crashes every boot (a UI timer an app's background or register hook made) is stopped by its
 // own, higher limit: 3 crashes named after the app in 3 boots switch its background off, callback crashes included

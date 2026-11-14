@@ -231,12 +231,12 @@ char const *IRAM_ATTR lichen_sys_panic_app_id(void) {
 // the panic hook: internal .bss, written only by the LVGL task under the LVGL lock
 static ui_cb_mark_t s_ui_cb_mark;
 
-void lichen_sys_ui_cb_mark(bool entering, lichen_ctx_t ctx) {
+uint32_t lichen_sys_ui_cb_mark(bool entering, lichen_ctx_t ctx) {
     if (entering) {
-        ui_cb_mark_enter(&s_ui_cb_mark, xTaskGetCurrentTaskHandle(), ctx);
-    } else {
-        ui_cb_mark_leave(&s_ui_cb_mark, ctx);
+        return ui_cb_mark_enter(&s_ui_cb_mark, xTaskGetCurrentTaskHandle(), ctx);
     }
+    ui_cb_mark_leave(&s_ui_cb_mark, ctx);
+    return 0;
 }
 
 // The same reads as lichen_sys_panic_app_id: the TCB only when it is in internal RAM and the mirror checked out

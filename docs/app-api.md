@@ -295,7 +295,9 @@ task). Every app's declared PSRAM budget is its PSRAM quota in the memory book: 
 was passed), not enforced, because the budgets cover statics and stacks and the heap part is not measured yet. Two crashes attributed to one app in three boots turn its
 background part off and notify (#232): the panic handler notes the app the faulting task ran for (its context; an OS
 task or an ISR blames nobody; a crash inside one of the app's LVGL callbacks is named but is no strike, #349) in LP RAM, the next boot counts it (the PSRAM re-arm restart after a crash is part of
-that crash, not a clean boot), `fw app background` lists what is off and `fw app background <id> on` switches it on
+that crash, not a clean boot). Three crashes named after one app in three counted boots, of either kind, also turn its
+background part off, so a callback that crashes every boot is stopped (#427); two ordinary strikes still do so on their
+own. `fw app background` lists what is off and `fw app background <id> on` switches it on
 again. `lichen_boot_degraded()` (lichen_crashlog.h) tells an app that a crash is among the last boots, so a restart
 loop does not repeat costly background work; an app keeps no restart policy of its own. An app with
 `safe_mode_exempt` (MeshCore, the main app) is counted and named but never switched off; #233 (Settings > Apps)

@@ -29,14 +29,15 @@ static void *rec_alloc(size_t size) {
 // against it (#349 review), since the shell, LVGL's renderer and the PSRAM path a callback reaches run as the app too;
 // it counts toward the higher callback limit instead, and only while ctx is still the context the task runs as (#427).
 // Marked before the enter and cleared after the leave: a crash in between finds the slots unequal (ui_cb.h)
-static uint32_t cb_enter(uint32_t ctx) {
-    lichen_sys_ui_cb_mark(true, ctx);
-    return lichen_ctx_enter(ctx);
+static ui_cb_saved_t cb_enter(uint32_t ctx) {
+    ui_cb_saved_t saved = {.outer_mark = lichen_sys_ui_cb_mark(true, ctx)};
+    saved.previous      = lichen_ctx_enter(ctx);
+    return saved;
 }
 
-static void cb_leave(uint32_t previous) {
-    lichen_ctx_leave(previous);
-    lichen_sys_ui_cb_mark(false, previous);
+static void cb_leave(ui_cb_saved_t saved) {
+    lichen_ctx_leave(saved.previous);
+    lichen_sys_ui_cb_mark(false, saved.outer_mark);
 }
 
 static ui_cb_env_t const s_env = {

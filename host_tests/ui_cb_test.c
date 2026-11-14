@@ -53,8 +53,22 @@ static uint32_t self(void) { return app_ctx_self(&s_t, &s_tls); }
 static uint32_t enter(uint32_t ctx) { return app_ctx_enter(&s_t, &s_tls, ctx, NULL); }
 static void     leave(uint32_t previous) { app_ctx_leave(&s_tls, previous); }
 
+// The trampoline's pair as lichen_ui_cb.c has it: the mark before the enter, cleared after the leave
+static ui_cb_mark_t s_mark;
+static int          s_task;
+static ui_cb_saved_t env_enter(uint32_t ctx) {
+    ui_cb_saved_t saved = {.outer_mark = ui_cb_mark_enter(&s_mark, &s_task, ctx)};
+    saved.previous      = enter(ctx);
+    return saved;
+}
+static void env_leave(ui_cb_saved_t saved) {
+    leave(saved.previous);
+    ui_cb_mark_leave(&s_mark, saved.outer_mark);
+}
+static bool mark_holds(void) { return ui_cb_mark_holds(&s_mark, &s_task, self()); }
+
 static ui_cb_env_t const s_env = {
-    .alloc = count_alloc, .free = count_free, .self = self, .enter = enter, .leave = leave};
+    .alloc = count_alloc, .free = count_free, .self = self, .enter = env_enter, .leave = env_leave};
 
 static uint32_t ctx_a, ctx_b, seen, seen_inner;
 static ui_cb_rec_t *s_inner, *s_self_rec;
@@ -196,7 +210,6 @@ static void test_edges(void) {
     CHECK(s_live == 0);
 }
 
-
 // #427: the panic hook's mark holds only for the task inside a callback while it still runs as the context the
 // callback entered; another app's hook run from there (Settings opening an app's settings) strikes that app
 static void test_mark_tied_to_context(void) {
@@ -211,11 +224,11 @@ static void test_mark_tied_to_context(void) {
     CHECK(!ui_cb_mark_holds(&m, &task, os));     // nor is the OS the callback put back
     CHECK(ui_cb_mark_holds(&m, &task, a_new_gen)); // the slot is what is compared
 
-    ui_cb_mark_enter(&m, &task, b); // nested: b's callback, sent from inside a's
-    CHECK(ui_cb_mark_holds(&m, &task, b) && !ui_cb_mark_holds(&m, &task, a));
-    ui_cb_mark_leave(&m, a); // back in a's callback
+    uint32_t outer = ui_cb_mark_enter(&m, &task, b); // nested: b's callback, sent from inside a's
+    CHECK(outer == a && ui_cb_mark_holds(&m, &task, b) && !ui_cb_mark_holds(&m, &task, a));
+    ui_cb_mark_leave(&m, outer); // back in a's callback
     CHECK(ui_cb_mark_holds(&m, &task, a) && !ui_cb_mark_holds(&m, &task, b));
-    ui_cb_mark_leave(&m, os);
+    ui_cb_mark_leave(&m, 0);
     CHECK(!ui_cb_mark_holds(&m, &task, a) && !ui_cb_mark_holds(&m, &task, os) && m.task == NULL);
     ui_cb_mark_leave(&m, a); // a leave without an enter changes nothing
     CHECK(m.depth == 0 && m.task == NULL && !ui_cb_mark_holds(&m, &task, a));
@@ -226,11 +239,64 @@ static void test_mark_tied_to_context(void) {
     // An OS callback (slot 0) never holds: the OS is never named, and an app hook it runs strikes that app
     ui_cb_mark_enter(&m, &task, os);
     CHECK(!ui_cb_mark_holds(&m, &task, os) && !ui_cb_mark_holds(&m, &task, a));
-    ui_cb_mark_leave(&m, os);
+    ui_cb_mark_leave(&m, 0);
+}
+
+// #427 review: a nested leave puts back the context the outer callback marked, not the task's context before the
+// inner enter. Settings' row (an OS callback) enters app X for X's settings hook; X's hook fires one of its own
+// callbacks; after it returns, the rest of X's hook is a strike again, so the mark must not hold for X.
+static ui_cb_rec_t *s_x_rec, *s_b_rec;
+static bool         s_held_inner, s_held_after;
+static void x_own_event(struct _lv_event_t *e) {
+    (void)e;
+    s_held_inner = mark_holds();
+}
+static void settings_row(struct _lv_event_t *e) { // runs as the OS
+    uint32_t prev = enter(ctx_b);                    // build_app_page: X's (here b's) settings hook from here
+    ui_cb_run_event(&s_env, s_x_rec, e);             // X's hook sends an event to a row it just made
+    s_held_after = mark_holds();                     // the rest of X's hook
+    leave(prev);
+}
+static void a_enters_b(struct _lv_event_t *e) { // app A's callback runs app B's hook
+    uint32_t prev = enter(ctx_b);
+    ui_cb_run_event(&s_env, s_b_rec, e); // B's own callback, nested
+    s_held_after = mark_holds();          // B's hook again: a strike against B
+    leave(prev);
+    s_held_inner = mark_holds(); // back in A's callback: the mark holds for A
+}
+
+static void test_nested_leave_restores_outer_mark(void) {
+    setup();
+    struct _lv_event_t e = {0};
+    uint32_t           prev = enter(ctx_b);
+    s_x_rec                 = ui_cb_new_event(&s_env, x_own_event);
+    s_b_rec                 = ui_cb_new_event(&s_env, x_own_event);
+    leave(prev);
+    ui_cb_rec_t *row = ui_cb_new_event(&s_env, settings_row); // the shell's: OS
+    s_held_inner = s_held_after = true;
+    ui_cb_run_event(&s_env, row, &e);
+    CHECK(s_held_inner);  // inside X's own callback: named, no strike
+    CHECK(!s_held_after); // X's hook after it: a strike against X
+    CHECK(!mark_holds() && s_mark.depth == 0 && s_mark.task == NULL);
+
+    prev              = enter(ctx_a);
+    ui_cb_rec_t *a_cb = ui_cb_new_event(&s_env, a_enters_b);
+    leave(prev);
+    s_held_inner = false;
+    s_held_after = true;
+    ui_cb_run_event(&s_env, a_cb, &e);
+    CHECK(!s_held_after && s_held_inner);
+    CHECK(!mark_holds() && s_mark.depth == 0);
+    ui_cb_free(&s_env, row);
+    ui_cb_free(&s_env, a_cb);
+    ui_cb_free(&s_env, s_x_rec);
+    ui_cb_free(&s_env, s_b_rec);
+    CHECK(s_live == 0);
 }
 
 int main(void) {
     test_mark_tied_to_context();
+    test_nested_leave_restores_outer_mark();
     test_runs_as_registrant();
     test_os_registration_stays_os();
     test_nested();

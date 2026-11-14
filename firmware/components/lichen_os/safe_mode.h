@@ -2,8 +2,8 @@
 // Crash attribution and safe mode (#232), lichen_os's entry points for main and the OS's own services: not part of
 // the gate. The panic handler (linker --wrap of esp_panic_handler, CMakeLists.txt) notes the owner app of the faulting
 // task in LP RAM; the next boot turns that into a window entry (safe_mode_policy.h): 2 crashes of one app in 3 boots
-// (3 when its screen callbacks crashed, #427) switch its background part off until "fw app background <id> on". An OS or IDF task (the console's, so "fw crash
-// test panic"), an ISR, a brownout or a lockup blames nobody.
+// (3 when its screen callbacks crashed, #427) switch its background part off until "fw app background <id> on". An
+// OS or IDF task (the console's, so "fw crash test panic"), an ISR, a brownout or a lockup blames nobody.
 
 #include <stdbool.h>
 #include <stddef.h>

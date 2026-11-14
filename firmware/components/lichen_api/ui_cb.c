@@ -44,9 +44,9 @@ void ui_cb_run_event(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_
         return;
     }
     void (*fn)(struct _lv_event_t *) = rec->fn.event;
-    uint32_t previous                = env->enter(rec->ctx);
+    ui_cb_saved_t saved = env->enter(rec->ctx);
     fn(e);
-    env->leave(previous);
+    env->leave(saved);
 }
 
 void ui_cb_run_timer(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_timer_t *t) {
@@ -54,9 +54,9 @@ void ui_cb_run_timer(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_
         return;
     }
     void (*fn)(struct _lv_timer_t *) = rec->fn.timer;
-    uint32_t previous                = env->enter(rec->ctx);
+    ui_cb_saved_t saved = env->enter(rec->ctx);
     fn(t);
-    env->leave(previous);
+    env->leave(saved);
 }
 
 void ui_cb_run_group(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_group_t *g) {
@@ -64,25 +64,27 @@ void ui_cb_run_group(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_
         return;
     }
     void (*fn)(struct _lv_group_t *) = rec->fn.group;
-    uint32_t previous                = env->enter(rec->ctx);
+    ui_cb_saved_t saved = env->enter(rec->ctx);
     fn(g);
-    env->leave(previous);
+    env->leave(saved);
 }
 
-void ui_cb_mark_enter(ui_cb_mark_t *m, void *task, uint32_t ctx) {
-    m->ctx = ctx; // before task: see ui_cb.h
+uint32_t ui_cb_mark_enter(ui_cb_mark_t *m, void *task, uint32_t ctx) {
+    uint32_t outer = m->ctx;
+    m->ctx         = ctx; // before task: see ui_cb.h
     if (m->depth++ == 0) {
         m->task = task;
     }
+    return outer;
 }
 
-void ui_cb_mark_leave(ui_cb_mark_t *m, uint32_t previous) {
+void ui_cb_mark_leave(ui_cb_mark_t *m, uint32_t outer_mark) {
     if (m->depth == 0) {
         return; // a leave without an enter changes nothing
     }
     if (--m->depth == 0) {
         m->task = NULL;
     } else {
-        m->ctx = previous; // the outer callback's context
+        m->ctx = outer_mark; // what the outer callback marked
     }
 }
