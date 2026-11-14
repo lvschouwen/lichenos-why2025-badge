@@ -87,7 +87,11 @@ static void cmd_boot(char const *args) {
         boot_keys_cmd(args + 4); // dev-gated there (#379)
         return;
     }
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     if (strncmp(args, "fail ", 5) == 0) {
+        if (!console_dev_gate("boot fail")) {
+            return;
+        }
         for (int i = 0; i < BOOT_STEP_COUNT; i++) {
             if (boot_step_failable((boot_step_t)i) && strcasecmp(args + 5, boot_step_label((boot_step_t)i)) == 0) {
                 flag_set((uint8_t)(i + 1));
@@ -98,6 +102,7 @@ static void cmd_boot(char const *args) {
         console_reply("boot fail <storage|display|C6|Wi-Fi|clock|LoRa|apps>: unknown step");
         return;
     }
+#endif
     static char const *const state_text[] = {"pending", "active", "done", "failed", "skipped"};
     boot_view_t              view;
     boot_progress_view(&view);
@@ -131,8 +136,8 @@ void boot_progress_start(void) {
     boot_steps_reset();
     portEXIT_CRITICAL(&lock);
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    console_register("boot", "boot [fail <step> | keys <down|esc+bksp|none>] (start-up steps and the last log lines; fail marks a step failed on the next boot; keys holds a combo at the next software restart, once, developer mode)", cmd_boot);
+    console_register("boot", "boot [fail <step> | keys <down|esc+bksp|none>] (start-up steps and the last log lines; fail marks a step failed on the next boot; fail and keys: developer mode; keys holds a combo at the next software restart, once)", cmd_boot);
 #else // a release names no debug subcommand (build.sh release_checks)
-    console_register("boot", "boot [fail <step>] (start-up steps and the last log lines; fail marks a step failed on the next boot)", cmd_boot);
+    console_register("boot", "boot (start-up steps and the last log lines)", cmd_boot);
 #endif
 }

@@ -378,6 +378,7 @@ static void dump(void) {
     free(b64);
 }
 
+#ifdef CONFIG_LICHEN_DEV_COMMANDS // the test arms are debug commands (#421): not in a release image
 static void crash_test_panic(void) __attribute__((noinline, noreturn));
 static void crash_test_panic(void) {
     console_reply("crash: test panic, the badge restarts");
@@ -397,6 +398,7 @@ static void crash_test_wdt(void) {
         __asm__ volatile("nop");
     }
 }
+#endif
 
 bool crash_clear_all(void) {
     crash_log_lock();
@@ -422,12 +424,21 @@ static void crash_command(char const *args) {
         dump();
     } else if (strcmp(args, "clear") == 0) {
         console_reply(crash_clear_all() ? "crash: cleared" : "crash: erasing the core dump failed");
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     } else if (strcmp(args, "test panic") == 0) {
-        crash_test_panic();
+        if (console_dev_gate("crash test")) {
+            crash_test_panic();
+        }
     } else if (strcmp(args, "test wdt") == 0) {
-        crash_test_wdt();
+        if (console_dev_gate("crash test")) {
+            crash_test_wdt();
+        }
     } else {
         console_reply("crash [dump | clear | test panic|wdt]");
+#else
+    } else {
+        console_reply("crash [dump | clear]"); // a release names no test subcommand (build.sh release_checks)
+#endif
     }
 }
 
@@ -462,7 +473,11 @@ bool crash_dump_fresh(void) {
 void crash_check_early(void) {
     crash_log_lock(); // creates the lock before any other task can want it
     crash_log_unlock();
-    console_register("crash", "crash [dump | clear | test panic|wdt] (crash log and core dump)", crash_command);
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+    console_register("crash", "crash [dump | clear | test panic|wdt] (crash log and core dump; test: developer mode)", crash_command);
+#else
+    console_register("crash", "crash [dump | clear] (crash log and core dump)", crash_command);
+#endif
     // #409: here, the first thing crash_check_early does, which runs in START_EARLY after NVS (and its factory reset
     // and PSRAM speed check, which may restart once on purpose), memory start, haptics and the clock. A boot that dies
     // before this is not counted: the sampler sees it as up falling, and the serial log has it.
