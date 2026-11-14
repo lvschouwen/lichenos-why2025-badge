@@ -6,6 +6,7 @@
 // ota_piece_http.c and ota_extra.c, the HTTP side in ota_http.c, the token in ota_token.c (#447).
 #include "ota_server_priv.h"
 #include "ota_token.h"
+#include "ota_rules.h"
 
 #include "esp_attr.h"
 
@@ -325,12 +326,9 @@ static void cmd_ota(char const *args) {
 }
 
 // "fw token new" (#456): from the USB console only (the token guards firmware installs; the Wi-Fi console and the
-// Console app count as remote). The new token is printed as a secret line only and never logged.
+// Console app count as remote): its row in ota_rules.h, checked before cmd_token runs (#464). The new token is printed
+// as a secret line only and never logged.
 static void token_new(void) {
-    if (!console_from_uart()) {
-        console_reply("token new: refused, only from the USB console");
-        return;
-    }
     char         fresh[OTA_TOKEN_LEN + 1];
     ota_rotate_t done = ota_token_rotate(fresh, storage_mounted());
     if (done == OTA_ROTATE_FAILED) {
@@ -372,8 +370,8 @@ void ota_server_start(void) {
         ESP_LOGE(TAG, "Wi-Fi updates refused this boot: no saved token (no /storage, no settings); USB flashing works");
     }
     // After the token is final (#5): "fw token" never shows a half-written one or "(none)" while it is being made
-    console_register("token", "token [new] (the update token for tools/badge.sh; new: USB only, from the restart)",
-                     cmd_token);
+    console_register_rules("token", "token [new] (the update token for tools/badge.sh; new: USB only, from the restart)",
+                           cmd_token, TOKEN_RULES);
     if (token_refused) {
         return; // no listener, no mDNS service, no Wi-Fi console
     }

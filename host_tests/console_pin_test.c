@@ -14,6 +14,8 @@
 #include "dev_mode.h"
 #include "sd_rules.h"
 #include "mesh_onair.h"
+#include "nvs_rules.h"
+#include "ota_rules.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -300,16 +302,6 @@ static bool handler_dev_gate(char const *name, char const *args) {
 
 // console_from_uart / console_origin checks inside handlers: true when the form is refused from origin
 static bool handler_origin_refuses(char const *name, char const *args, console_origin_t origin) {
-    bool uart = origin == CONSOLE_ORIGIN_UART;
-    if (strcmp(name, "token") == 0) {
-        return strcmp(args, "new") == 0 && !uart;
-    }
-    if (strcmp(name, "nvs-down") == 0) {
-        return !uart;
-    }
-    if (strcmp(name, "nvs-enc") == 0) {
-        return DEV_BUILD && strcmp(args, "burn YES") == 0 && !uart; // the burn arm: its own Kconfig, in the dev test
-    }
     if (strcmp(name, "onair") == 0) {
         char const *rest;
         return !onair_op_permitted(onair_op_parse(args, &rest), origin);
@@ -332,6 +324,9 @@ static rules_of_t const RULES[] = {
     {"crash", CRASH_RULES},
     {"boot", BOOT_RULES},
     {"factory-reset", FACTORY_RULES},
+    {"token", TOKEN_RULES},
+    {"nvs-down", NVS_DOWN_RULES},
+    {"nvs-enc", NVS_ENC_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {

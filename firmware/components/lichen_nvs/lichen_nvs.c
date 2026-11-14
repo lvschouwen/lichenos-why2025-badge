@@ -12,6 +12,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "nvs_mark.h"
+#include "nvs_rules.h"
 #include "sdkconfig.h"
 
 #include <stddef.h>
@@ -146,7 +147,7 @@ static bool force_down_take(void) {
 }
 
 static void cmd_nvs_down(char const *args) {
-    if (!console_from_uart() || strcmp(args, "YES") != 0) {
+    if (strcmp(args, "YES") != 0) { // the USB console only: its row in nvs_rules.h, checked before this runs (#464)
         console_reply("nvs-down YES (USB console only): the next boot leaves NVS down once, nothing erased");
         return;
     }
@@ -160,7 +161,8 @@ static void register_debug(void) {
     static bool done;
     if (!done) {
         done = true;
-        console_register("nvs-down", "nvs-down YES (bench: next boot without NVS, nothing erased)", cmd_nvs_down);
+        console_register_rules("nvs-down", "nvs-down YES (bench: next boot without NVS, nothing erased)", cmd_nvs_down,
+                               NVS_DOWN_RULES);
     }
 }
 #else
@@ -478,10 +480,7 @@ static bool key_block_all_zero(void) {
 }
 
 static void burn(void) {
-    if (!console_from_uart()) {
-        console_reply("refused: the eFuse burn runs only from the USB console, not over Wi-Fi");
-        return;
-    }
+    // The USB console only, not over Wi-Fi or the Console app: its row in nvs_rules.h, checked before this runs (#464)
     // Both checks: a block with purpose unset can still hold key bits that a second write would OR into a bad key
     if (!esp_efuse_key_block_unused(KEY_BLK) || !key_block_all_zero()) {
         console_reply("KEY%d is not empty (purpose %d): nothing burned", CONFIG_LICHEN_NVS_HMAC_KEY_ID,
@@ -522,9 +521,11 @@ static void register_console(void) {
     }
     done = true;
 #if CONFIG_LICHEN_NVS_ENCRYPT_BURN_CMD
-    console_register("nvs-enc", "nvs-enc | nvs-enc burn YES (state; burn = IRREVERSIBLE eFuse key)", cmd_nvs_enc);
+    console_register_rules("nvs-enc", "nvs-enc | nvs-enc burn YES (state; burn = IRREVERSIBLE eFuse key)", cmd_nvs_enc,
+                           NVS_ENC_RULES);
 #else
-    console_register("nvs-enc", "nvs-enc (is an HMAC key burned, is NVS plain or encrypted)", cmd_nvs_enc);
+    console_register_rules("nvs-enc", "nvs-enc (is an HMAC key burned, is NVS plain or encrypted)", cmd_nvs_enc,
+                           NVS_ENC_RULES);
 #endif
 }
 
