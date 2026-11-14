@@ -456,10 +456,14 @@ itself: `lichen_ui_ops.c` forwards them to the `lichen_ui_ops_t` table the shell
 - No syscall trap and no export table: the P4 runs everything in M-mode with no configurable MPU, and U-mode/TEE is
   not available on it, so a trap would protect nothing and cost a context switch.
 
-**Capabilities (#229, still to come):** the manifest's capability column is a per-header seed (`-` = none). Per-app
-declarations in `layers.conf`, a build-time `nm` check (rule D) and a run-time refusal come with #229, and the
-identity, lifecycle and crash-attribution waves (#230-#233) after the MVP. Capabilities are an accident and audit
-guard, not a security boundary: apps are compiled in and share the address space.
+**Capabilities (#229):** `layers.conf` declares the `CAP_*` list (mirrored in `lichen_api/lichen_caps.h`), what each
+gate and peer-header function needs (`cap-func`, `cap-header`: the manifest's capability column) and each app's set and
+budgets (`app`, mirrored in its `lichen_app_t`). Rule D checks both mirrors and every symbol an app archive uses; the
+gate's entry points in `lichen_api`, `lichen_os` and `lichen_notify` refuse a call made for an app without the
+capability (`lichen_sys_caps_ok`, a lock-free table lookup; the OS's context and SYSTEM apps always pass). The calls
+into `lora` and `fw_console` (L2 and L0, below the check) are rule D only until #221's gate wrapper. Capabilities are an
+accident and audit guard, not a security boundary: apps are compiled in and share the address space. Details:
+[app-api.md](app-api.md) "Capabilities".
 
 ### Services behind the gate
 
@@ -496,7 +500,8 @@ guard, not a security boundary: apps are compiled in and share the address space
 
 `tools/check_layers.sh` with `tools/layers.conf` (#218; it absorbs `tools/check_app_boundary.sh`'s rules and runs at the
 end of `build.sh build`): A, `REQUIRES` rules; B, includes; C, symbol ownership through `nm`, which catches link-time
-upward edges; D, capabilities (#229, not in the checker yet). Rule C counts per object file, A per edge, B per include
+upward edges; D, capabilities (#229: the cap list and app descriptors mirror `layers.conf`, and an app archive's
+symbols map through the manifest to capabilities its app declared; always hard). Rule C counts per object file, A per edge, B per include
 line. The app profile (L6) is a closed set of libraries, headers and forbidden symbols that no baseline can excuse.
 
 - **The ratchet is at 0.** `tools/layers-baseline.txt` holds no entries (only its header comment). A violation fails as

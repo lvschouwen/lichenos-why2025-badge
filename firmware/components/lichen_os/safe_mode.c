@@ -224,7 +224,7 @@ static void cmd_more(char const *args) {
         return;
     }
 #endif
-    console_reply("usage: app ctx | background [<id> on]" USAGE_DEV);
+    console_reply("usage: app ctx | caps | background [<id> on]" USAGE_DEV);
 }
 
 // ---- the boot step -------------------------------------------------------------------------------------------------
@@ -253,6 +253,7 @@ void safe_mode_boot_step(bool crashed) {
     if (list[0]) {
         ESP_LOGW(TAG, "background part off (safe mode) for %s: fw app background <id> on", list);
     }
-    lichen_sys_app_console_more(cmd_more, "app ctx | background [<id> on]" USAGE_DEV
-                                          " (contexts; the apps whose background is off after crashes, #232)");
+    lichen_sys_app_console_more(cmd_more, "app ctx | caps | background [<id> on]" USAGE_DEV
+                                          " (contexts; capabilities, #229; the apps whose background is off after "
+                                          "crashes, #232)");
 }

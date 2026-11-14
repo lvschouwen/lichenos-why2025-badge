@@ -379,15 +379,7 @@ void lichen_sys_app_console_more(void (*more)(char const *args), char const *usa
     s_more_usage = usage;
 }
 
-static void cmd_app(char const *args) {
-    if (strcmp(args, "ctx") != 0) {
-        if (s_more) {
-            s_more(args);
-        } else {
-            console_reply("usage: app ctx");
-        }
-        return;
-    }
+static void cmd_app_ctx(void) {
     app_ctx_table_t *t = table();
     console_reply("app ctx os 0x%08lx current 0x%08lx", (unsigned long)app_ctx_os(t), (unsigned long)lichen_ctx_self());
     for (size_t i = 0; i < app_ctx_apps(t); i++) {
@@ -399,9 +391,37 @@ static void cmd_app(char const *args) {
                   (unsigned long)__atomic_load_n(&t->last_refused, __ATOMIC_RELAXED));
 }
 
+// #229: what each app declared (tools/layers.conf mirrors it), its budgets and the calls refused for it since boot
+static void cmd_app_caps(void) {
+    app_ctx_table_t *t = table();
+    char             names[160];
+    for (size_t i = 0; i < app_ctx_apps(t); i++) {
+        lichen_app_t const *app = app_ctx_app_at(t, i);
+        app_caps_format(app->caps, names, sizeof(names));
+        console_reply("app caps %s: %s; budget internal %u KiB, PSRAM %u KiB; %lu refused", app->id ? app->id : app->name,
+                      names, (unsigned)app->internal_ram_kib, (unsigned)app->psram_kib,
+                      (unsigned long)__atomic_load_n(&s_caps_refused.per_slot[i + 1], __ATOMIC_RELAXED));
+    }
+    app_caps_format(__atomic_load_n(&s_caps_refused.last_need, __ATOMIC_RELAXED), names, sizeof(names));
+    console_reply("app caps: %lu refused since boot (last needed %s)",
+                  (unsigned long)__atomic_load_n(&s_caps_refused.refused, __ATOMIC_RELAXED), names);
+}
+
+static void cmd_app(char const *args) {
+    if (strcmp(args, "ctx") == 0) {
+        cmd_app_ctx();
+    } else if (strcmp(args, "caps") == 0) {
+        cmd_app_caps();
+    } else if (s_more) {
+        s_more(args);
+    } else {
+        console_reply("usage: app ctx | app caps");
+    }
+}
+
 void lichen_sys_app_console_register(void) {
     console_register("app", s_more_usage ? s_more_usage
                                          : "app ctx (every app's context, the refusals of stale or made-up contexts "
-                                           "since boot)",
+                                           "since boot) | app caps (each app's capabilities, budgets and refused calls)",
                      cmd_app);
 }

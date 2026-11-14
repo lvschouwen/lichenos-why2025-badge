@@ -155,7 +155,7 @@ to `layers.conf`):
 ## The two surfaces, the gate, capabilities and lifecycle
 
 Layers and the call rules: [architecture.md](architecture.md) "Layers". The surfaces and the gate are in force since
-OS v2 (#216); capabilities and the lifecycle are still to come.
+OS v2 (#216), capabilities since #229; the lifecycle is still to come.
 
 **App surface:** `lichen_*.h` (and the helper headers listed above), what this page lists above. Available to every app.
 
@@ -182,7 +182,7 @@ reaching drivers, `board` or NVS. The headers, all in `lichen_api`:
 | `lichen_sys_radio.h` | the radio service's system holds: radios held off for a reason (the thermal shed), never saved, the person's switches untouched (#282) |
 | `lichen_sys_c6.h` | the C6 link (up, trouble in words, outage count) and the LoRa radio's up state and packet counts for the status bar, About, Settings and the stress run (#284) |
 | `lichen_sys_psram.h` | the PSRAM guard's speed, speed switch, tuning line, trial state and DMA gate round for Bench, Settings and the stress run (#284) |
-| `lichen_sys_app.h` | the app context (#230): `lichen_ctx_enter`/`_leave` around every hook call, the app table (`lichen_app_count`/`_at`/`_by_id`/`_by_name`, `lichen_sys_app_ctx_at(i)`: the ctx to enter for app i), `lichen_sys_ctx_resolve` for the gate calls, `fw app ctx` |
+| `lichen_sys_app.h` | the app context (#230): `lichen_ctx_enter`/`_leave` around every hook call, the app table (`lichen_app_count`/`_at`/`_by_id`/`_by_name`, `lichen_sys_app_ctx_at(i)`: the ctx to enter for app i), `lichen_sys_ctx_resolve` for the gate calls, `fw app ctx`; the capability check of the gate calls (`lichen_sys_caps_ok`, #229), `fw app caps` |
 
 `notify_os.h` (history of every app, do-not-disturb, toast queue, feedback hooks) is also the shell's side, forbidden
 to apps by name in `layers.conf`; apps have `lichen_notify.h` only (#245). Types that live in a lower component are
@@ -194,12 +194,41 @@ declares counts as a call to the gate). The shell's navigation goes through the 
 (`lichen_ui_ops_t`), so `lichen_api` does not depend upward. `tools/gate_manifest.txt` lists every declared function
 with its capability and thread rule, and the build checks that it matches the headers. No syscall trap.
 
-**Capabilities (#229, still to come):** `LORA_TX`, `LORA_RX`, `LORA_BORROW`, `SD`, `NET`, `SECRETS`, `RAW_KEYS`,
-`CONSOLE`, `RESTART`, `BACKGROUND`, `HAPTICS`, `SENSORS`, `NOTIFY`, `RADIO_SCAN`, `BT`, `AUDIO`, `BATTERY`, the quotas
-`INTERNAL_RAM=` and `PSRAM=`, and `SYSTEM`. Today the manifest's capability column is only a per-header seed.
-- To be declared per app in `tools/layers.conf` (reviewed like code) and mirrored in `lichen_app_t`.
-- To be checked at build time (`nm`: every symbol an app uses maps to a capability it declared) and at run time (a call
-  without the capability is refused and logs a line).
+**Capabilities (#229):** an app declares what it uses; the build and the gate hold it to that.
+
+| Capability | Guards | Apps today |
+|---|---|---|
+| `LORA_TX` | `lora_send`, `lora_send_state`, `lora_set_tx_power` | MeshCore |
+| `LORA_RX` | owning the radio: `lora_claim`/`_release`, `lora_set_radio`, `_set_link_callback`, `_set_rx_formatter` | MeshCore |
+| `LORA_BORROW` | `lichen_radio_lora_pause`/`_resume`, `lora_sweep`, `lora_claim`/`_release` | LoRa spectrum |
+| `SD` | `lichen_fs_sd_dir`, `lichen_fs_sd_begin`/`_end` (the app's own `/storage/<id>` needs none) | MeshCore, Weather, Notes |
+| `SECRETS` | the app's secrets class: `secret_prefix`, `app_secret_*` | MeshCore |
+| `RAW_KEYS` | `lichen_keys_raw_take`/`_release` | Keyboard test |
+| `CONSOLE` | `console_register` (fw_console.h) | MeshCore, QR code |
+| `RESTART` | `system_restart`, `system_restart_asked` | MeshCore (the companion's reboot) |
+| `BACKGROUND` | a `start_background` hook, `lichen_task_start`/`_start_in`, `lichen_task_leftovers` | MeshCore, Weather, Notes, LoRa spectrum |
+| `HAPTICS` | `lichen_haptics_play` | none |
+| `SENSORS` | `lichen_sensors.h` | Weather |
+| `NOTIFY` | `lichen_notify.h`, `lichen_badge_set` | MeshCore, Weather, Timer |
+| `NET`, `RADIO_SCAN`, `BT`, `AUDIO`, `BATTERY` | nothing an app reaches yet (the Wi-Fi, scanner #172, Bluetooth #73, audio #67, battery #11 calls are the OS's); declared so the list is not reopened | none |
+| `SYSTEM` | every capability: the shell's own apps; also what `lichen_sys_*.h`, radio switching (`lichen_radio_set` and friends), the haptics and clock settings need | Settings, About, Files, Power, Benchmark, Crash log, Release notes, Notifications |
+
+Clock, Calculator and Test card declare none. `CAP_SECRETS` is an app's own class only: the OS's protected secrets
+(#116: the Wi-Fi passwords, the OTA token) are SYSTEM, behind `lichen_sys_net.h` and `lichen_sys_update.h`.
+- **Declared** per app in `tools/layers.conf` (`app <id> <component> <caps> INTERNAL_RAM=<KiB> PSRAM=<KiB>`, reviewed
+  like code, and `app-objects` naming its sources) and mirrored in its `lichen_app_t` (`.caps = CAP_SD | CAP_NOTIFY`,
+  `.internal_ram_kib`, `.psram_kib`). The list itself is `cap` lines mirrored in `lichen_caps.h`. The budgets are what
+  the app may hold, for the soak to compare (`tools/soak_budgets.txt`, #407); nothing enforces them.
+- **Checked at build time** (rule D, `tools/check_layers.py`, always hard): the mirrors match, a `secret_prefix` comes
+  with `SECRETS` and a `start_background` hook with `BACKGROUND`, and every undefined symbol of an app archive that the
+  manifest (`tools/gate_manifest.txt`, which also lists the peer headers `lora_app.h`, `fw_console.h`,
+  `lichen_clock.h`, `lichen_random.h`) gives a capability is used by an object of an app that declared it.
+- **Checked at run time** at the gate's entry points (`lichen_sys_caps_ok`): a call made for an app without the
+  capability is refused (NULL, false, 0, nothing done) and logged at most once per 10 s; `fw app caps` lists each app's
+  capabilities, budgets and refusals. The check is one table lookup and a compare, no lock, no heap, any task. The OS's
+  context passes, so a call from an ISR, an esp_timer or an LVGL callback outside a hook is never refused, and so do
+  SYSTEM apps. `main.c` skips a `start_background` hook without `BACKGROUND`. The `lora_app.h` and `fw_console.h`
+  calls (LORA_TX/RX, CONSOLE, RESTART) sit below the gate and are checked at build time only until #221's wrapper.
 - **An accident and audit guard, not a security boundary:** apps are compiled in and share the address space.
 - Identity: an opaque `lichen_ctx_t` handed out at registration, plus the calling task's TLS (#230).
 
