@@ -137,6 +137,7 @@ static void app_ids_and_intern(void) {
     CHECK(dev_mode_app_of(ids, n, "qrcode") == 2 && dev_mode_app_of(ids, n, "meshcore") == 1);
     CHECK(dev_mode_app_of(ids, n, "mesh") == 0 && dev_mode_app_of(ids, n, "meshcor") == 0); // whole ids only
     CHECK(dev_mode_app_of(ids, n, "help") == 0);
+    CHECK(dev_mode_app_of(ids, n, "MeshCore") == 0); // case-sensitive: the badge's strcmp is
     n = 1;
     CHECK(dev_mode_app_intern(ids, &n, 1, "other") == 0 && n == 1); // full table
 }
@@ -156,6 +157,16 @@ static void app_prefix_dispatch(void) {
     CHECK(dev_mode_find_app(app_table, AN, "help", false, 1, &i) == DEV_FIND_NONE);
     CHECK(dev_mode_find_app(app_table, AN, "mdbg", true, 2, &i) == DEV_FIND_NONE); // not even a debug one's existence
     CHECK(dev_mode_find_app(app_table, AN, "", false, 1, &i) == DEV_FIND_NONE);
+    CHECK(dev_mode_find_app(app_table, AN, "meshcore", false, 1, &i) == DEV_FIND_NONE); // a doubled prefix
+    // a name that is both an app id and a command is refused at registration (console.c)
+    char const *ids2[CONSOLE_MAX_APPS] = {"meshcore"};
+    CHECK(dev_mode_name_clash(app_table, AN, ids2, 1, NULL, "meshcore"));   // a command named like an app id
+    CHECK(dev_mode_name_clash(app_table, AN, ids2, 1, "meshcore", "meshcore")); // an app's command named so too
+    CHECK(dev_mode_name_clash(app_table, AN, ids2, 1, "mesh", "x"));        // an app id equal to a command name
+    CHECK(dev_mode_name_clash(app_table, AN, ids2, 1, "help", "x"));
+    CHECK(dev_mode_name_clash(app_table, AN, ids2, 1, "newapp", "newapp")); // an app id equal to its own command
+    CHECK(!dev_mode_name_clash(app_table, AN, ids2, 1, "meshcore", "advert"));
+    CHECK(!dev_mode_name_clash(app_table, AN, ids2, 1, NULL, "fresh"));
     // developer mode gates the prefixed spelling exactly like the plain one
     CHECK(dev_mode_find_app(app_table, AN, "mdbg", false, 0, &i) == DEV_FIND_DEV_OFF);
     CHECK(dev_mode_find_app(app_table, AN, "mdbg", false, 1, &i) == DEV_FIND_DEV_OFF);

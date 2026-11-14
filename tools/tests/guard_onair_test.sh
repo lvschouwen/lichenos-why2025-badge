@@ -153,6 +153,14 @@ sent refused fw 192.0.2.1 meshcore onair off
 sent refused console /dev/null "fw meshcore onair allow #zz-other"
 sent sent fw 192.0.2.1 meshcore onair on
 FAKE_SCOPE="default None | console not set" sent refused fw 192.0.2.1 meshcore mesh send '#badgetest' hello
+# Spelling variants and any app id in front (#423): the first word is judged both ways
+sent refused fw 192.0.2.1 $'meshcore\tmesh' send Public hi
+sent refused fw 192.0.2.1 "'meshcore' mesh dm 0123456789ab hi"
+sent refused fw 192.0.2.1 "  fw   meshcore   mesh   remote OTHER-RPT cli reboot YES"
+FAKE_SCOPE="default None | console not set" sent refused fw 192.0.2.1 meshcore advert
+sent refused fw 192.0.2.1 meshcore onair clear
+sent refused fw 192.0.2.1 zzapp mesh send Public hi
+sent sent fw 192.0.2.1 help mesh
 # The console scope (#290): an on-air line with a target goes only when the badge's console scope is the scope line
 sent sent fw 192.0.2.1 mesh remote TESTNODE status
 sent sent fw 192.0.2.1 fw mesh send '#badgetest' hi

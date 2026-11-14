@@ -57,8 +57,11 @@ onair_scope_allowed() {
 }
 
 # The words of a console line as the badge's parser sees them: quotes and backslashes dropped (as the shell would
-# before the line reaches the badge), a leading "fw" gone, and then MeshCore's app prefix (#423: "fw meshcore mesh send"
-# is "fw mesh send"; the badge strips one prefix word only, so "meshcore meshcore ..." stays a line it refuses)
+# before the line reaches the badge), a leading "fw" gone. An app's prefix (#423: "fw meshcore mesh send") is not
+# stripped by name: every rule below judges the words as they are AND without the first word (onair_candidates), so
+# any app id in front of a gated command is refused without a list of apps. A harmless "help mesh" is judged as
+# "mesh" and passes (no subcommand); "help mesh send x" or "help advert" would be judged as the on-air line they
+# resemble: the guard fails closed there.
 onair_words() {
     local line w1 rest
     line=$(printf '%s' "$1" | tr -d "'\"\\\\")
@@ -67,16 +70,31 @@ onair_words() {
         line=$rest
         read -r w1 rest <<<"$line"
     fi
-    if [ "$w1" = meshcore ]; then line=$rest; fi
     printf '%s' "$line"
+}
+
+# The line's words, then the same without the first word: one per output line
+onair_candidates() {
+    local words rest
+    words=$(onair_words "$1")
+    read -r _ rest <<<"$words"
+    printf '%s\n%s\n' "$words" "$rest"
 }
 
 # True when the line can start a flood (#290): badge.sh checks the console scope before those. With a target: send,
 # dm, telemetry, trace, discover, remote, and history (switching a repeater's polls on or changing them); without one:
 # "advert" (a flood advert from the console, or the Advertise setting's, which may be flood).
 onair_needs_scope() {
+    local c
+    while IFS= read -r c; do
+        onair_needs_scope_words "$c" && return 0
+    done < <(onair_candidates "$1")
+    return 1
+}
+
+onair_needs_scope_words() {
     local w1 w2 w3 w4 _rest
-    read -r w1 w2 w3 w4 _rest <<<"$(onair_words "$1")"
+    read -r w1 w2 w3 w4 _rest <<<"$1"
     [ "$w1" = advert ] && return 0
     [ "$w1" = mesh ] && [ -n "$w3" ] || return 1
     case "$w2" in
@@ -124,8 +142,20 @@ onair_scope_verdict() {
 
 # Verdict for one console line ("[fw ]mesh <sub> [target] ..."): prints "pass", "deny <reason>" or "ask <reason>".
 onair_verdict() {
+    local c v
+    while IFS= read -r c; do
+        v=$(onair_verdict_words "$c")
+        if [ "$v" != pass ]; then
+            printf '%s\n' "$v"
+            return
+        fi
+    done < <(onair_candidates "$1")
+    echo pass
+}
+
+onair_verdict_words() {
     local w1 w2 w3 w4 _rest want
-    read -r w1 w2 w3 w4 _rest <<<"$(onair_words "$1")"
+    read -r w1 w2 w3 w4 _rest <<<"$1"
     if [ "$w1" = onair ]; then # #289: the badge's own allow list; only narrowing it passes
         case "$w2" in
             "" | on) echo pass ;;

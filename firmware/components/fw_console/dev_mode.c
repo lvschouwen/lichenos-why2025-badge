@@ -43,6 +43,15 @@ int dev_mode_app_intern(char const **ids, int *n, int max, char const *id) {
     return *n;
 }
 
+bool dev_mode_name_clash(console_entry_t const *table, int n, char const *const *ids, int n_ids, char const *app,
+                         char const *name) {
+    int unused;
+    if (dev_mode_app_of(ids, n_ids, name) != 0) {
+        return true;
+    }
+    return app != NULL && (strcmp(app, name) == 0 || dev_mode_find(table, n, app, true, &unused) != DEV_FIND_NONE);
+}
+
 dev_find_t dev_mode_find_app(console_entry_t const *table, int n, char const *name, bool on, int app, int *index) {
     dev_find_t r = dev_mode_find(table, n, name, on, index);
     if (r != DEV_FIND_NONE && app != 0 && table[*index].app != app) {

@@ -62,6 +62,10 @@ int dev_mode_app_of(char const *const *ids, int n, char const *word);
 // Adds id to ids (a string literal, kept by pointer) unless it is there; returns 1 + its index, 0 when the table of max
 // is full. *n counts the ids.
 int dev_mode_app_intern(char const **ids, int *n, int max, char const *id);
+// True when registering the command name (of app, NULL: the OS's) would make a word mean two things: name is an app id,
+// or app is a command name (or the name itself). The prefix is read before the command, so either would hide one.
+bool dev_mode_name_clash(console_entry_t const *table, int n, char const *const *ids, int n_ids, char const *app,
+                         char const *name);
 // Like dev_mode_find for "fw <app> <name>": app is dev_mode_app_of's result (0: the plain spelling, any command). A
 // command of another app, or the OS's, is NONE under the wrong prefix; a debug command of the right app is DEV_OFF.
 dev_find_t dev_mode_find_app(console_entry_t const *table, int n, char const *name, bool on, int app, int *index);

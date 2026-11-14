@@ -73,7 +73,7 @@ def count_calls(text, cfg):
             for c in CALL.finditer(line):
                 if DECL.search(line[: c.start()]):
                     continue
-                if c.group(1) and not cfg.get("CONFIG_LICHEN_DEV_COMMANDS", False):
+                if c.group(1) == "_dev" and not cfg.get("CONFIG_LICHEN_DEV_COMMANDS", False):
                     continue
                 n += 1
     return n
@@ -122,6 +122,8 @@ console_register("j", "u", f);
 """
     assert count_calls(dev, {"CONFIG_LICHEN_DEV_COMMANDS": True}) == 2  # i, j
     assert count_calls(dev, {}) == 1  # j: a release build drops i
+    app = 'console_register_app("q", "n", "u", f);\nconsole_register("j", "u", f);\n'
+    assert count_calls(app, {}) == 2  # an app's command counts in a release build too (#423)
     print("check_console_slots selftest ok")
 
 

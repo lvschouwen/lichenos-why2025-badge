@@ -144,14 +144,17 @@ static int commands_count(void) {
 static void register_entry(char const *app, char const *name, char const *usage, console_fn_t fn, bool dev) {
     portENTER_CRITICAL(&commands_lock);
     int  n    = n_commands;
-    int  id   = app ? dev_mode_app_intern(app_ids, &n_apps, CONSOLE_MAX_APPS, app) : 0;
-    bool room = n < MAX_COMMANDS && (app == NULL || id != 0);
+    bool clash = dev_mode_name_clash(commands, n, app_ids, n_apps, app, name); // #423: a word must mean one thing
+    int  id    = app && !clash ? dev_mode_app_intern(app_ids, &n_apps, CONSOLE_MAX_APPS, app) : 0;
+    bool room  = !clash && n < MAX_COMMANDS && (app == NULL || id != 0);
     if (room) {
         commands[n] = (console_entry_t){name, usage, fn, dev, (unsigned char)id};
         __atomic_store_n(&n_commands, n + 1, __ATOMIC_RELEASE);
     }
     portEXIT_CRITICAL(&commands_lock);
-    if (!room) {
+    if (clash) {
+        ESP_LOGE(TAG, "command %s (app %s) clashes with an app id or a command name: not registered", name, app ? app : "-");
+    } else if (!room) {
         ESP_LOGE(TAG, "no room for command %s (table of %d or %d apps is full)", name, MAX_COMMANDS, CONSOLE_MAX_APPS);
     }
 }
