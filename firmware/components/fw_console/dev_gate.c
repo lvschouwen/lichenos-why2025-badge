@@ -13,7 +13,6 @@ typedef struct {
 } gated_t;
 
 static gated_t const GATED[] = {
-    {"psram", {"", NULL}},               // test, dma, dl, dlboot and speed change timing or the next boot
     {"sensors", {"", "raw", "boot", NULL}}, // start, stop and "boot on|off" change state and what boots
 };
 

@@ -19,6 +19,7 @@
 #include "nvs_rules.h"
 #include "os_cmd_rules.h"
 #include "ota_rules.h"
+#include "psram_rules.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -351,6 +352,7 @@ static rules_of_t const RULES[] = {
     {"idle", IDLE_RULES},
     {"setup", SETUP_RULES},
     {"noscreen", NOSCREEN_RULES},
+    {"psram", PSRAM_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {
