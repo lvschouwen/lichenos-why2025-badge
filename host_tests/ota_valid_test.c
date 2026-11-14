@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static int failures;
 
@@ -103,6 +104,20 @@ static void test_update_refused(void) {
     CHECK(!ota_update_refused_on_trial(true, OTA_IMAGE_UNKNOWN));
     CHECK(!ota_update_refused_on_trial(true, OTA_IMAGE_NOT_ON_TRIAL));
     CHECK(!ota_update_refused_on_trial(false, OTA_IMAGE_ON_TRIAL));
+}
+
+// #420: the on-air list is not switched on while another image could boot without asking; a USB-flashed badge (blank
+// OTA data reads UNKNOWN) and a proven image are not pending
+static void test_pending(void) {
+    CHECK(ota_pending_why(false, OTA_IMAGE_NOT_ON_TRIAL, false) == NULL);
+    CHECK(ota_pending_why(false, OTA_IMAGE_UNKNOWN, false) == NULL);
+    CHECK(ota_pending_why(true, OTA_IMAGE_NOT_ON_TRIAL, false) != NULL);
+    CHECK(ota_pending_why(false, OTA_IMAGE_ON_TRIAL, false) != NULL);
+    CHECK(ota_pending_why(false, OTA_IMAGE_NOT_ON_TRIAL, true) != NULL);
+    CHECK(ota_pending_why(false, OTA_IMAGE_UNKNOWN, true) != NULL);
+    CHECK(strstr(ota_pending_why(true, OTA_IMAGE_ON_TRIAL, true), "installed")); // the one the next restart boots
+    CHECK(strstr(ota_pending_why(false, OTA_IMAGE_ON_TRIAL, true), "trial"));
+    CHECK(strstr(ota_pending_why(false, OTA_IMAGE_NOT_ON_TRIAL, true), "C6"));
 }
 
 static void test_image_state(void) {
@@ -496,6 +511,7 @@ int main(void) {
     test_image_state();
     test_may_be_on_trial();
     test_update_refused();
+    test_pending();
     test_loop_timeline();
     test_loop_retries();
     test_wifi_table();

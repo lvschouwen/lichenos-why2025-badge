@@ -444,8 +444,40 @@ bool ota_route_stops_apps(ota_route_t route) {
     return route == OTA_ROUTE_PREPARE || route == OTA_ROUTE_FIRMWARE || route == OTA_ROUTE_ASSETS;
 }
 
-bool ota_route_usb_held(ota_route_t route) {
-    return route == OTA_ROUTE_PREPARE || route == OTA_ROUTE_FIRMWARE;
+ota_hold_t ota_route_usb_held(ota_route_t route, bool c6_dir) {
+    switch (route) {
+        case OTA_ROUTE_PREPARE: return OTA_HOLD_PREPARE;
+        case OTA_ROUTE_FIRMWARE: return OTA_HOLD_FIRMWARE;
+        case OTA_ROUTE_FILE:
+        case OTA_ROUTE_DELETE: return c6_dir ? OTA_HOLD_C6 : OTA_HOLD_NONE;
+        default: return OTA_HOLD_NONE;
+    }
+}
+
+void ota_hold_reply(ota_hold_t kind, char const *held, char *out, size_t cap) {
+    static char const *const what[] = {
+        [OTA_HOLD_PREPARE]  = "update refused (prepare, for a firmware or assets push)",
+        [OTA_HOLD_FIRMWARE] = "firmware update refused",
+        [OTA_HOLD_C6]       = "C6 image change refused",
+        [OTA_HOLD_BOOT]     = "firmware not installed",
+    };
+    static char const *const why[] = {
+        [OTA_HOLD_PREPARE]  = "another image may not keep it",
+        [OTA_HOLD_FIRMWARE] = "another image may not keep it",
+        [OTA_HOLD_C6]       = "the C6 drives the LoRa radio, so a changed C6 image could send anything",
+        [OTA_HOLD_BOOT]     = "another image may not keep it",
+    };
+    static char const *const left[] = {
+        [OTA_HOLD_PREPARE]  = "nothing was stopped",
+        [OTA_HOLD_FIRMWARE] = "nothing was stopped or erased",
+        [OTA_HOLD_C6]       = "nothing was written or deleted",
+        [OTA_HOLD_BOOT]     = "the image is written to the other slot but does not boot",
+    };
+    if (kind <= OTA_HOLD_NONE || kind > OTA_HOLD_BOOT) {
+        kind = OTA_HOLD_FIRMWARE; // never called with NONE; a refusal still reads as one
+    }
+    snprintf(out, cap, "%s: %s is on and %s; switch it off at the USB console first (fw onair off); %s", what[kind],
+             held, why[kind], left[kind]);
 }
 
 bool ota_route_needs_token(ota_route_t route) {

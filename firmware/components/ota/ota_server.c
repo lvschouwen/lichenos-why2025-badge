@@ -411,9 +411,25 @@ static bool write_file(char const *path, uint8_t const *data, size_t len) {
 // so even an interrupted write leaves the next boot with a full check. Every writer of the C6 image directory must go
 // through here (or call c6link_bundle_changed itself): the skip key only covers sizes and .md5 text
 static void forget_c6_bundle_if_c6_file(char const *posix_path) {
-    if (strncmp(posix_path, C6_IMAGE_DIR "/", strlen(C6_IMAGE_DIR) + 1) == 0) {
+    if (c6_path_in_image_dir(posix_path)) {
         c6link_bundle_changed();
     }
+}
+
+// The USB hold (#420): true when why (console_usb_hold_why) holds, and the 409 is sent. noinline: its text stays off
+// the callers' stacks (handle_connection's, finish_file's)
+__attribute__((noinline)) static bool held_now(int fd, ota_hold_t kind, char const *why) {
+    if (!why) {
+        return false;
+    }
+    char text[320];
+    ota_hold_reply(kind, why, text, sizeof(text));
+    respond(fd, 409, "%s", text);
+    return true;
+}
+
+bool ota_server_installed(void) {
+    return __atomic_load_n(&firmware_installed, __ATOMIC_ACQUIRE);
 }
 
 // Room for an upload of size bytes on /storage (#299), else a 507 now instead of a failed write after the transfer.
@@ -460,8 +476,8 @@ static bool finish_file(int fd, char const *vms, uint8_t const *data, size_t len
         respond(fd, 400, "bad path");
         return false;
     }
-    if (!storage_room(fd, len, 0, 0)) { // before the bundle is marked changed: the old file stays
-        return false;
+    if (!storage_room(fd, len, 0, 0) || (c6_path_in_image_dir(path) && held_now(fd, OTA_HOLD_C6, console_usb_hold_why()))) {
+        return false; // before the bundle is marked changed: the old file stays
     }
     forget_c6_bundle_if_c6_file(path);
     mkdir_parents(path);
@@ -490,13 +506,16 @@ static bool install_slot(int fd, esp_partition_t const *slot, esp_ota_handle_t h
         respond(fd, 422, "image failed validation (%s), nothing installed", esp_err_to_name(err));
         return false;
     }
+    if (held_now(fd, OTA_HOLD_BOOT, console_usb_hold_why())) { // the hold may have gone on while the image came (#420)
+        return false;
+    }
     if ((err = esp_ota_set_boot_partition(slot)) != ESP_OK) {
         respond(fd, 500, "couldn't select %s (%s)", slot->label, esp_err_to_name(err));
         return false;
     }
     ESP_LOGI(TAG, "firmware installed in %s (%zu bytes)", slot->label, len);
     respond(fd, 200, "installed %zu bytes (%lld sent), runs after a reboot", len, sent);
-    firmware_installed = true;
+    __atomic_store_n(&firmware_installed, true, __ATOMIC_RELEASE); // ota_server_installed reads it on other tasks
     return true;
 }
 
@@ -1405,15 +1424,20 @@ static bool refused_on_trial(int fd, ota_request_t const *req, size_t pre_len) {
     return true;
 }
 
-// The console's USB hold (#420): asked only on the held routes, so every other request costs nothing
-static bool refused_on_hold(int fd, ota_request_t const *req, size_t pre_len) {
-    char const *why = ota_route_usb_held(req->route) ? console_usb_hold_why() : NULL;
-    if (!why) {
+// The console's USB hold (#420), asked only on the held routes. A refused piece also drops its upload in pieces (open
+// slot, staging buffer), so update mode ends (a firmware one in a restart) instead of waiting PIECE_IDLE_S. noinline:
+// the path buffer stays off handle_connection's stack.
+__attribute__((noinline)) static bool refused_on_hold(int fd, ota_request_t const *req, size_t pre_len) {
+    char const *why = ota_route_usb_held(req->route, true) ? console_usb_hold_why() : NULL; // the list off: no more
+    char        posix[OTA_PATH_MAX + 16];
+    bool c6 = why && req->has_path && ota_path_to_posix(req->path, posix, sizeof(posix)) && c6_path_in_image_dir(posix);
+    ota_hold_t kind = why ? ota_route_usb_held(req->route, c6) : OTA_HOLD_NONE;
+    if (kind == OTA_HOLD_NONE) {
         return false;
     }
+    piece_expire(staged.active && staged.route == req->route);
     drain_body(fd, pre_len, req->expect_continue ? 0 : req->content_length);
-    respond(fd, 409, "firmware update refused: " HOLD_BOOT_REFUSAL " (fw onair off); nothing was stopped or erased", why);
-    return true;
+    return held_now(fd, kind, why);
 }
 
 static bool refused_up_front(int fd, ota_request_t const *req, size_t pre_len) {

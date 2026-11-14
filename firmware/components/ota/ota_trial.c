@@ -4,7 +4,9 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "c6link.h"
 #include "fw_console.h"
+#include "ota_server.h"
 #include "freertos/FreeRTOS.h"
 
 #include <stdatomic.h>
@@ -90,6 +92,10 @@ void ota_trial_register_cmds(void) {
     console_register_dev("trial", "trial <nowifi|off> (dev: the next boot's trial ignores Wi-Fi, #411)",
                          cmd_trial);
 #endif
+}
+
+char const *ota_boot_pending(void) {
+    return ota_pending_why(ota_server_installed(), ota_image_trial_state(), c6link_bundle_pending());
 }
 
 ota_image_state_t ota_image_trial_state(void) {

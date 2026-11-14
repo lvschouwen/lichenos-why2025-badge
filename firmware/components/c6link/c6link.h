@@ -73,6 +73,8 @@ void c6link_note_keyboard_reset(void);
 // Invariant: EVERY writer of /storage/c6 must call this before touching the files. The boot-time skip key is built from
 // file sizes and the .md5 text only, so a .bin changed behind its back would still look verified.
 void c6link_bundle_changed(void);
+// c6link_bundle_changed ran this boot: the next boot flashes what changed (#420). Any task.
+bool c6link_bundle_pending(void);
 // A firmware update is being received (#76): wifi_scan refuses from now on (until the restart)
 void c6link_set_updating(void);
 // True once c6link_set_updating or c6link_hold_in_reset ran: no scans, no RSSI polls, no C6 recovery

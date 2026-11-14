@@ -16,8 +16,31 @@ static int failures;
         }                                                                                                              \
     } while (0)
 
+// #420: the update server refuses writes and deletes in the C6 image folder while the on-air list holds; no spelling
+// of the path gets around it, and nothing outside it is caught
+static void image_dir_held(void) {
+    CHECK(c6_path_in_image_dir("/storage/c6/firmware.bin"));
+    CHECK(c6_path_in_image_dir("/storage/c6"));
+    CHECK(c6_path_in_image_dir("/storage/c6/"));
+    CHECK(c6_path_in_image_dir("//storage///c6//firmware.bin"));
+    CHECK(c6_path_in_image_dir("/STORAGE/C6/firmware.bin"));
+    CHECK(c6_path_in_image_dir("/storage/C6/sub/x"));
+    CHECK(c6_path_in_image_dir("/storage/x/../c6/firmware.bin"));
+    CHECK(c6_path_in_image_dir("/storage/./c6/firmware.bin"));
+    CHECK(c6_path_in_image_dir("/storage/notes/.."));
+    CHECK(!c6_path_in_image_dir("/storage/c6x/firmware.bin"));
+    CHECK(!c6_path_in_image_dir("/storage/c/6"));
+    CHECK(!c6_path_in_image_dir("/storage/notes.txt"));
+    CHECK(!c6_path_in_image_dir("/storage/lichen/c6/firmware.bin"));
+    CHECK(!c6_path_in_image_dir("/storage"));
+    CHECK(!c6_path_in_image_dir("/sd/c6/firmware.bin"));
+    CHECK(!c6_path_in_image_dir("/storage/..c6/x"));
+    CHECK(!c6_path_in_image_dir(""));
+}
+
 int main(void) {
     char out[64];
+    image_dir_held();
 
     CHECK(c6_image_path("firmware.bin", out, sizeof(out)) && strcmp(out, "/storage/c6/firmware.bin") == 0);
     CHECK(c6_image_path("firmware.bin.md5", out, sizeof(out)) && strcmp(out, "/storage/c6/firmware.bin.md5") == 0);

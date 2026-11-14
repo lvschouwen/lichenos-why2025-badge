@@ -294,8 +294,15 @@ static bool nvs_write_boot_state(char const *key, bool verify) {
     return ok;
 }
 
+static atomic_bool s_bundle_changed;
+
 void c6link_bundle_changed(void) {
+    atomic_store(&s_bundle_changed, true);
     nvs_write_boot_state(NULL, false);
+}
+
+bool c6link_bundle_pending(void) {
+    return atomic_load(&s_bundle_changed);
 }
 
 // The C6 was lost at runtime and the badge restarts for it (#14): check it fully during the next boot, keeping the key

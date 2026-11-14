@@ -15,6 +15,8 @@
 // it is known: only ota_image_mark_valid changes it while the image runs. UNKNOWN when the read failed (not kept: the
 // next call reads again). Any task.
 ota_image_state_t ota_image_trial_state(void);
+// ota_pending_why for this boot (#420; main binds it as the console's boot-pending check). Any task.
+char const *ota_boot_pending(void);
 // What ota_image_trial_state already knows, without reading the OTA data: UNKNOWN until a read succeeded. For a
 // restart path that must not touch flash (__wrap_esp_restart's warning, #304). Any task.
 ota_image_state_t ota_image_trial_known(void);

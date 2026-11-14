@@ -105,6 +105,17 @@ static void onair_switch(bool on) {
                   on && !n ? ": the list is empty, every console send is refused" : "");
 }
 
+// Not while another image could boot without asking (#420): it may not keep the list. From every origin, USB too.
+static void onair_switch_on(void) {
+    char const *pending = console_boot_pending();
+    if (pending) {
+        console_reply("on-air allow list not switched on: %s, and that image may not keep it; switch it on after "
+                      "that boot, once fw slot shows the running image valid", pending);
+        return;
+    }
+    onair_switch(true);
+}
+
 static char const *result_text(onair_result_t r) {
     switch (r) {
     case ONAIR_OK: return "done";
@@ -178,7 +189,7 @@ void mesh_onair_console(char const *args) {
     }
     switch (op) {
     case ONAIR_OP_STATUS: onair_status(); break;
-    case ONAIR_OP_ON: onair_switch(true); break;
+    case ONAIR_OP_ON: onair_switch_on(); break;
     case ONAIR_OP_OFF: onair_switch(false); break;
     case ONAIR_OP_ALLOW:
     case ONAIR_OP_REMOVE:

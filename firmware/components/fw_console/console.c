@@ -752,6 +752,17 @@ char const *console_usb_hold_why(void) {
     return held ? held() : NULL;
 }
 
+static char const *(*_Atomic boot_pending)(void);
+
+void console_bind_boot_pending(char const *(*pending)(void)) {
+    atomic_store(&boot_pending, pending);
+}
+
+char const *console_boot_pending(void) {
+    char const *(*pending)(void) = atomic_load(&boot_pending);
+    return pending ? pending() : NULL;
+}
+
 bool console_usb_hold_ok(char const *what) {
     char const *why = console_usb_hold_why();
     if (!console_hold_refuses(why != NULL, console_origin())) {

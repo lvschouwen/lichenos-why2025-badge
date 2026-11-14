@@ -13,6 +13,8 @@ void ota_server_start(void);
 bool ota_server_enabled(void);
 // No token read or saved anywhere this boot (#116: no /storage and NVS down): the server does not listen this boot
 bool ota_server_refused(void);
+// A firmware update installed this boot: the next restart boots it (#420: the on-air list waits for that boot)
+bool ota_server_installed(void);
 void ota_server_set_enabled(bool on); // on also starts the auto-off time again
 // Optional auto-off (#110): closes the server this many minutes after boot or after it was switched on, for this boot
 // only (the setting stays on). 0, the default, never closes. Saved in NVS; a new value counts from now.

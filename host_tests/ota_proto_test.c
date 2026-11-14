@@ -491,16 +491,36 @@ static void test_routes_stop_apps(void) {
 }
 
 // #420: while the console's USB hold is on, prepare and firmware (whole or a piece) are refused before anything stops
-// or is erased; assets, files (C6 images too), delete and reboot boot no other P4 image and are served as before
+// or is erased, and so is a file write or delete in the C6 image folder; assets, other files, reboot and the rest boot
+// no other image and are served as before
 static void test_routes_usb_held(void) {
-    CHECK(ota_route_usb_held(OTA_ROUTE_PREPARE));
-    CHECK(ota_route_usb_held(OTA_ROUTE_FIRMWARE));
-    ota_route_t const others[] = {OTA_ROUTE_INFO, OTA_ROUTE_FILE, OTA_ROUTE_REBOOT, OTA_ROUTE_DELETE, OTA_ROUTE_ASSETS,
-                                  OTA_ROUTE_SCREENSHOT, OTA_ROUTE_LOG, OTA_ROUTE_CONSOLE, OTA_ROUTE_CRASHES};
+    CHECK(ota_route_usb_held(OTA_ROUTE_PREPARE, false) == OTA_HOLD_PREPARE);
+    CHECK(ota_route_usb_held(OTA_ROUTE_FIRMWARE, false) == OTA_HOLD_FIRMWARE);
+    CHECK(ota_route_usb_held(OTA_ROUTE_FILE, true) == OTA_HOLD_C6);
+    CHECK(ota_route_usb_held(OTA_ROUTE_DELETE, true) == OTA_HOLD_C6);
+    CHECK(ota_route_usb_held(OTA_ROUTE_FILE, false) == OTA_HOLD_NONE);
+    CHECK(ota_route_usb_held(OTA_ROUTE_DELETE, false) == OTA_HOLD_NONE);
+    ota_route_t const others[] = {OTA_ROUTE_INFO, OTA_ROUTE_REBOOT, OTA_ROUTE_ASSETS, OTA_ROUTE_SCREENSHOT,
+                                  OTA_ROUTE_LOG, OTA_ROUTE_CONSOLE, OTA_ROUTE_CRASHES};
     for (size_t i = 0; i < sizeof(others) / sizeof(others[0]); i++) {
-        CHECK(!ota_route_usb_held(others[i]));
+        CHECK(ota_route_usb_held(others[i], false) == OTA_HOLD_NONE);
+        CHECK(ota_route_usb_held(others[i], true) == OTA_HOLD_NONE); // a path on another route means nothing
     }
     CHECK(strcmp(ota_status_reason(409), "Conflict") == 0); // the refusal's status line
+    char text[512];
+    ota_hold_reply(OTA_HOLD_PREPARE, "the list", text, sizeof(text));
+    CHECK(strncmp(text, "update refused (prepare, for a firmware or assets push): the list is on", 70) == 0);
+    CHECK(strstr(text, "switch it off at the USB console first") && strstr(text, "nothing was stopped"));
+    ota_hold_reply(OTA_HOLD_FIRMWARE, "the list", text, sizeof(text));
+    CHECK(strncmp(text, "firmware update refused: ", 25) == 0 && strstr(text, "nothing was stopped or erased"));
+    ota_hold_reply(OTA_HOLD_C6, "the list", text, sizeof(text));
+    CHECK(strncmp(text, "C6 image change refused: ", 25) == 0 && strstr(text, "LoRa radio"));
+    ota_hold_reply(OTA_HOLD_BOOT, "the list", text, sizeof(text));
+    CHECK(strncmp(text, "firmware not installed: ", 24) == 0 && strstr(text, "does not boot"));
+    ota_hold_reply(OTA_HOLD_NONE, "the list", text, sizeof(text)); // never asked; still a refusal, never garbage
+    CHECK(strncmp(text, "firmware update refused: ", 25) == 0);
+    ota_hold_reply(OTA_HOLD_C6, "the list", text, 16); // truncated, terminated
+    CHECK(strlen(text) == 15);
 }
 
 // #116: no token read or saved anywhere this boot means the server does not listen

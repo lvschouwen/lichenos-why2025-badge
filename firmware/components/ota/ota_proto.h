@@ -54,10 +54,15 @@ bool ota_route_needs_token(ota_route_t route);
 // The routes that stop the other apps (and end in a restart, #76): prepare, firmware, assets. While the running image is
 // on trial they are refused before anything stops, since that restart would roll the new image back (#302)
 bool ota_route_stops_apps(ota_route_t route);
-// The routes the console's USB hold refuses while it holds (#420): prepare and firmware (whole or any piece), before
-// anything stops or is erased, since a new image may not keep the hold (an older one has no on-air list). Assets,
-// files (C6 images included), delete and reboot are not held: none of them boots another P4 image.
-bool ota_route_usb_held(ota_route_t route);
+// What the console's USB hold refuses while it holds (#420), answered 409 before anything stops, is erased or written:
+// prepare and firmware (whole or any piece), since a new image may not keep the hold (an older one has no on-air list),
+// and a file write or delete in the C6 image folder (c6_dir: c6_path_in_image_dir of its /storage path), since the C6
+// drives the LoRa radio and is flashed from there at boot. BOOT is the last check before the boot slot switch.
+// Assets, other files and reboot are not held.
+typedef enum { OTA_HOLD_NONE, OTA_HOLD_PREPARE, OTA_HOLD_FIRMWARE, OTA_HOLD_C6, OTA_HOLD_BOOT } ota_hold_t;
+ota_hold_t ota_route_usb_held(ota_route_t route, bool c6_dir);
+// The refusal's body for kind (not NONE): what was refused, why (held: console_usb_hold_why) and what to do
+void       ota_hold_reply(ota_hold_t kind, char const *held, char *out, size_t cap);
 
 typedef struct {
     ota_route_t route;

@@ -624,6 +624,7 @@ static void start_console(boot_ctx_t *ctx) {
     console_start();
     console_bind_slot_state(ota_slot_state_name); // "fw slot": ota owns the slot states (#285)
     console_bind_slot_switch(ota_image_note_slot_switch); // its trial needs no Wi-Fi (#411)
+    console_bind_boot_pending(ota_boot_pending); // MeshCore's on-air list waits for that boot (#420)
     soak_cmd_register(); // "fw soak" (#409), developer mode
     console_register("noscreen", "noscreen (test: the next boot skips the display start, one boot only)", cmd_noscreen);
     console_register("poweroff", "poweroff (save, then switch the badge off as Power > Power off does; works without a display)",

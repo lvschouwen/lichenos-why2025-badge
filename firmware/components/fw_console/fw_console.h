@@ -58,6 +58,10 @@ bool             console_usb_hold_ok(char const *what);
 // What holds now (NULL: nothing), for a caller that is never the USB console and answers on its own: the update server
 // refuses firmware while it holds (#420), since another image may not keep the hold. Lock-free, any task.
 char const      *console_usb_hold_why(void);
+// What would boot another image without asking (#420; main binds ota_boot_pending): NULL when nothing, or when unbound.
+// MeshCore does not switch the on-air list on while it answers, since that image may not keep the list. Any task.
+void             console_bind_boot_pending(char const *(*pending)(void));
+char const      *console_boot_pending(void);
 // Where the command running on the calling task came from: the console_exec run's origin, UART on the console task,
 // UNKNOWN on any other task
 console_origin_t console_origin(void);
