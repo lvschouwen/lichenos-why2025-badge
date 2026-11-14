@@ -261,7 +261,18 @@ static ScreenFeed screen_feed;
 // MeshCore writes contacts lazily; a firmware update must not lose the last few minutes of them
 bool (*const mesh_int::keep_contact)(ContactInfo const &c) = BadgeMesh::keepContact;
 
-static int contacts_taken_n; // the mesh task: the contact count of the last loop, for its slow-loop line
+// MeshCore's lazy contacts rewrite (#425), DataStore's "/contacts3": on LittleFS a changed chunk rewrites every block
+// after it, 0.5-1 s at 552 contacts. While the task runs, the shim holds that file's saves (any task's, all under the
+// mesh lock): the loop takes the newest one before its unlock and writes it after, so the mesh task is the one writer
+// and the screens never wait for it. A stop or MeshCore's own reboot drops what is held and saves directly.
+static char const     CONTACTS_FILE[] = "/contacts3";
+static fs_shim_held_t contacts_taken; // the mesh task: taken under the lock, written right after it
+static int            contacts_taken_n;
+
+static void contacts_hold_off_locked(void) {
+    fs_shim_hold(NULL);
+    fs_shim_drop_held(); // the save that follows has the newest state
+}
 
 // MeshCore's own reboot (an admin's "reboot" CLI command, the companion protocol) runs on the mesh task inside
 // node->loop(), with the mesh lock held. The OS's restart save (system_restart -> stop_for_update, #123) would wait for
@@ -271,6 +282,7 @@ static bool rebooting;
 
 void BadgeBoard::reboot() {
     if (mesh_task_handle && xTaskGetCurrentTaskHandle() == mesh_task_handle) {
+        contacts_hold_off_locked(); // the restart comes before the loop would write a held save
         node->saveAll();
         mesh_journal_stop_locked(true);
         __atomic_store_n(&rebooting, true, __ATOMIC_RELEASE);
@@ -375,6 +387,15 @@ static bool sync_outgoing(void) {
     return added;
 }
 
+static void contacts_write_taken(void) {
+    if (!contacts_taken.set) {
+        return;
+    }
+    fs_shim_wrote_t w = File::writeHeld(&contacts_taken);
+    ESP_LOGI(TAG, "contacts saved after the unlock: %d contacts, %u B, %u B rewritten, %lu ms%s", contacts_taken_n,
+             (unsigned)w.len, (unsigned)w.rewritten, (unsigned long)(w.us / 1000), w.ok ? "" : " (failed)");
+}
+
 // The slow loop's file calls of 10 ms and more (#425), as the shim noted them: the first n, the ones under the lock
 // (the writes after the unlock come later in the shim's list)
 static void log_slow_calls(size_t n) {
@@ -393,6 +414,9 @@ static void log_slow_calls(size_t n) {
 
 static void mesh_task(void *arg) {
     (void)arg;
+    mesh_lock();
+    fs_shim_hold(CONTACTS_FILE);
+    mesh_unlock();
     for (;;) {
         int64_t asked = esp_timer_get_time();
         mesh_lock();
@@ -431,6 +455,7 @@ static void mesh_task(void *arg) {
                 ESP_LOGI(TAG, "stop: %u outgoing message(s) failed, %d queued packet(s) dropped", (unsigned)failed,
                          dropped);
             }
+            contacts_hold_off_locked();
             int64_t save_started = esp_timer_get_time();
             store.savePrefs(*node->getNodePrefs());
             int64_t contacts_started = esp_timer_get_time();
@@ -451,11 +476,13 @@ static void mesh_task(void *arg) {
             __atomic_store_n(&task_exited, true, __ATOMIC_RELEASE);
             return; // lichen_task_start's trampoline takes the task out of the OS's book and deletes it (#181)
         }
+        fs_shim_take_held(&contacts_taken);
         contacts_taken_n = node->getNumContacts();
         int64_t took_ms  = (esp_timer_get_time() - started) / 1000;
         mesh_unlock();
         mesh_journal_flush(); // the card's I/O never under the mesh lock: the screens keep their snapshots meanwhile
         node->writeTakenBlob();
+        contacts_write_taken();
         contacts_full_post();
         if (mesh_notify_drain()) { // #50: notices posted after the unlock; a mode read or changed moves the badge
             mesh_lock();
@@ -470,8 +497,8 @@ static void mesh_task(void *arg) {
             if (file_us / 1000 > slow_file_ms) {
                 __atomic_store_n(&slow_file_ms, (uint32_t)(file_us / 1000), __ATOMIC_RELAXED);
             }
-            // Where it went (#67): file time is DataStore's (the lazy /contacts3 rewrite; advert blobs are written after
-            // the unlock since #257), the rest is MeshCore's own
+            // Where it went (#67): file time is DataStore's (prefs, channels; advert blobs since #257 and the contacts
+            // rewrite since #425 are written after the unlock), the rest is MeshCore's own
             // work on the packets received (Ed25519 checks of adverts, decryption); the screens skip ticks meanwhile
             ESP_LOGW(TAG, "MeshCore loop took %lld ms: files %lu ms (%lu calls), %lu packet(s) in, waited %lld ms for "
                           "the lock, %d contacts",
