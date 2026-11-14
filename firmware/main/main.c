@@ -365,6 +365,7 @@ static void start_apps(void) {
     // The plain apps (#180) join after the shell's own, so the default home order keeps them behind Settings, About and
     // Files; home is built when boot ends, and a saved order is merged by tile_order_merge
     lichen_apps_register();
+    lichen_sys_mem_quotas(); // #231: every app has registered by now
     char   failed[96] = ""; // boot_steps cuts the reason to BOOT_REASON_LEN on a character boundary
     size_t used       = 0;
     for (size_t i = 0; i < lichen_app_count(); i++) {

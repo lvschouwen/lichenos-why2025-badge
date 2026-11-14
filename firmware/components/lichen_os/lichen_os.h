@@ -98,3 +98,6 @@ void sys_notices_start(lichen_watch_hooks_t const *hooks); // and its notices ha
 // stop(reason)'s report (#231, app_stop.c): ctx's booked tasks still running, other than the caller's, counted now
 // without a wait or a log line. Any task, not an ISR (lichen_task.c's spinlock).
 size_t lichen_os_task_count(uint32_t ctx); // a lichen_ctx_t (this header stays free of LVGL for the host tests)
+// stop(reason)'s report (#231): what ctx still holds through lichen_alloc, internal and PSRAM (zeros and false when it
+// never allocated). The app frees its own; the OS never frees a block under a running task. Any task, not an ISR.
+bool   lichen_os_mem_held(uint32_t ctx, uint32_t *internal, uint32_t *bulk);

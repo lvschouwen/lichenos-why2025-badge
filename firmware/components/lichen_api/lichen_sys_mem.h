@@ -69,6 +69,9 @@ void lichen_sys_mem_ops_set(lichen_sys_mem_ops_t const *ops);
 // main.c, the first boot step that can: hands lichen_alloc and lichen_free to the gate, before any screen exists. Until
 // then the gate's widgets get no memory. Any task.
 void lichen_sys_mem_start(void);
+// main.c's apps boot step, once every app registered (#231): each app's declared PSRAM budget becomes its PSRAM quota in
+// the memory book, accounted (a charge past it is granted and counted in "fw mem"), not enforced. Any task.
+void lichen_sys_mem_quotas(void);
 
 #ifdef __cplusplus
 }

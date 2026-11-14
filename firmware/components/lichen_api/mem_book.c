@@ -39,6 +39,11 @@ static mem_use_t *row_of(mem_book_t *b, uint32_t ctx, bool make, char const *lab
     return NULL;
 }
 
+// held + bytes would pass quota (without overflowing)
+static bool past(uint32_t held, uint32_t bytes, uint32_t quota) {
+    return bytes > quota || held > quota - bytes;
+}
+
 static void add(mem_use_t *r, bool internal, uint32_t bytes) {
     if (internal) {
         r->internal += bytes;
@@ -54,9 +59,16 @@ mem_charge_t mem_book_charge(mem_book_t *b, uint32_t ctx, char const *label, boo
     if (!r) {
         return MEM_CHARGE_NO_ROW;
     }
-    if (internal && !r->os && (bytes > MEM_BOOK_INTERNAL_QUOTA || r->internal > MEM_BOOK_INTERNAL_QUOTA - bytes)) {
+    if (internal && !r->os && past(r->internal, bytes, MEM_BOOK_INTERNAL_QUOTA)) {
         r->refused++;
         return MEM_CHARGE_QUOTA;
+    }
+    if (!internal && !r->os && (r->bulk_flags & MEM_BOOK_BULK_QUOTA) && past(r->bulk, bytes, r->bulk_quota)) {
+        if (r->bulk_flags & MEM_BOOK_BULK_ENFORCE) {
+            r->refused++;
+            return MEM_CHARGE_QUOTA;
+        }
+        r->bulk_over++; // accounted, granted
     }
     add(r, internal, bytes);
     r->blocks++;
@@ -86,4 +98,17 @@ mem_release_t mem_book_release(mem_book_t *b, uint32_t ctx, bool internal, uint3
 
 mem_use_t const *mem_book_find(mem_book_t const *b, uint32_t ctx) {
     return row_of((mem_book_t *)b, ctx, false, NULL, false);
+}
+
+bool mem_book_set_bulk_quota(mem_book_t *b, uint32_t ctx, char const *label, uint32_t bytes, bool enforce) {
+    mem_use_t *r = row_of(b, ctx, true, label, false);
+    if (!r || r->os) {
+        return false;
+    }
+    r->bulk_quota = bytes;
+    r->bulk_flags = (uint8_t)(MEM_BOOK_BULK_QUOTA | (enforce ? MEM_BOOK_BULK_ENFORCE : 0u));
+    if (r->bulk > bytes) {
+        r->bulk_over++; // charged before the quota was known (an app that allocated at registration)
+    }
+    return true;
 }

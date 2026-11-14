@@ -6,6 +6,8 @@
 #include "lichen_sys_app.h"
 #include "lichen_sys_mem.h"
 #include "gate_book.h"
+#include "lichen_caps.h"
+#include "lichen_os.h"
 
 #include "dma_watch.h"
 #include "mem_window_watch.h"
@@ -74,8 +76,9 @@ static void *alloc_aligned(lichen_ctx_t ctx, size_t align, size_t size, uint32_t
     }
     char const *owner = who.label ? who.label : MEM_BOOK_OS;
     if (charge == MEM_CHARGE_QUOTA) {
-        ESP_LOGW(TAG, "%s: %u B of internal RAM refused: over the app's %u B", owner, (unsigned)size,
-                 MEM_BOOK_INTERNAL_QUOTA);
+        // PSRAM is refused only where its quota is enforced, which the firmware does not do yet (#231)
+        ESP_LOGW(TAG, "%s: %u B of %s refused: over the app's quota", owner, (unsigned)size,
+                 internal ? "internal RAM" : "PSRAM");
         return NULL;
     }
     if (charge == MEM_CHARGE_NO_ROW && first_unbooked()) {
@@ -147,9 +150,41 @@ static void mem_report(void) {
             console_reply("mem app %s internal %u (peak %u, quota %u) psram %u (peak %u) blocks %u refused %u", r->owner,
                           (unsigned)r->internal, (unsigned)r->internal_peak, MEM_BOOK_INTERNAL_QUOTA,
                           (unsigned)r->bulk, (unsigned)r->bulk_peak, (unsigned)r->blocks, (unsigned)r->refused);
+            if (r->bulk_flags & MEM_BOOK_BULK_QUOTA) {
+                console_reply("mem app %s psram quota %u (%s) passed %u time(s)", r->owner, (unsigned)r->bulk_quota,
+                              (r->bulk_flags & MEM_BOOK_BULK_ENFORCE) ? "enforced" : "accounted", (unsigned)r->bulk_over);
+            }
         }
     }
     dma_watch_report();
+}
+
+// #231: every app's declared PSRAM budget (lichen_app_t.psram_kib, tools/layers.conf) as its PSRAM quota, accounted and
+// not enforced: the budgets were measured as statics and stacks (#229), the heap part is not measured yet, so a refusal
+// would fail an app that works today. SYSTEM apps (the shell's) declare none.
+void lichen_sys_mem_quotas(void) {
+    for (size_t i = 0; i < lichen_app_count(); i++) {
+        lichen_app_t const *app = lichen_app_at(i);
+        if (!app || (app->caps & CAP_SYSTEM)) {
+            continue;
+        }
+        portENTER_CRITICAL(&book_mux);
+        bool ok = mem_book_set_bulk_quota(&book, lichen_sys_app_ctx_at(i), app->id, (uint32_t)app->psram_kib * 1024u,
+                                          false);
+        portEXIT_CRITICAL(&book_mux);
+        if (!ok) {
+            ESP_LOGW(TAG, "%s: no row left in the memory book for its PSRAM quota", app->id ? app->id : app->name);
+        }
+    }
+}
+
+bool lichen_os_mem_held(uint32_t ctx, uint32_t *internal, uint32_t *bulk) {
+    portENTER_CRITICAL(&book_mux);
+    mem_use_t const *r = mem_book_find(&book, ctx);
+    *internal          = r ? r->internal : 0;
+    *bulk              = r ? r->bulk : 0;
+    portEXIT_CRITICAL(&book_mux);
+    return r != NULL;
 }
 
 // The gate's widgets allocate through these (gate_mem.c, #296): the gate may not link to lichen_os

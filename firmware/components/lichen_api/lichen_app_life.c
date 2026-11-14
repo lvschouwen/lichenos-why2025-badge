@@ -121,14 +121,16 @@ void lichen_sys_life_console(void) {
         if (!lichen_sys_life_get(i, &r)) {
             break;
         }
+        unsigned timers = (unsigned)lichen_sys_timer_count(lichen_sys_app_ctx_at(i));
         if (!r.stops) {
-            console_reply("app life %s: %s (fault %s)", app_label(i), app_life_state_name((life_state_t)r.state),
-                          app_life_fault_name((life_fault_t)r.fault));
+            console_reply("app life %s: %s (fault %s), %u booked timer(s)", app_label(i),
+                          app_life_state_name((life_state_t)r.state), app_life_fault_name((life_fault_t)r.fault), timers);
             continue;
         }
-        console_reply("app life %s: %s (fault %s); %u stop(s), the last for %s took %u ms, %u task(s) left",
+        console_reply("app life %s: %s (fault %s), %u booked timer(s); %u stop(s), the last for %s took %u ms, %u "
+                      "task(s) left",
                       app_label(i), app_life_state_name((life_state_t)r.state),
-                      app_life_fault_name((life_fault_t)r.fault), (unsigned)r.stops,
+                      app_life_fault_name((life_fault_t)r.fault), timers, (unsigned)r.stops,
                       app_life_reason_name((life_reason_t)r.reason), (unsigned)r.took_ms, (unsigned)r.tasks_left);
     }
     console_reply("app life: %u apps", (unsigned)apps);

@@ -115,11 +115,53 @@ static void test_keyed_by_ctx(void) {
     CHECK(strlen(mem_book_find(&b, WX)->owner) == MEM_BOOK_OWNER_CAP - 1 && !mem_book_find(&b, WX)->os);
 }
 
+// #231: the PSRAM quota. Accounted (the firmware's mode): a charge past it is granted and counted; enforced: refused
+// and counted like the internal quota. The OS has none; a row past a new quota counts once.
+static void test_bulk_quota(void) {
+    static mem_book_t b;
+    memset(&b, 0, sizeof(b));
+    CHECK(mem_book_set_bulk_quota(&b, WX, "weather", 3 * 1024, false));
+    mem_use_t const *w = mem_book_find(&b, WX);
+    CHECK(w && w->bulk_quota == 3 * 1024 && w->bulk == 0 && w->blocks == 0 && strcmp(w->owner, "weather") == 0);
+    CHECK(mem_book_charge(&b, WX, "weather", false, false, 3 * 1024) == MEM_CHARGE_OK); // exactly the quota
+    CHECK(w->bulk_over == 0);
+    CHECK(mem_book_charge(&b, WX, "weather", false, false, 1) == MEM_CHARGE_OK); // one byte past: granted, counted
+    CHECK(w->bulk_over == 1 && w->bulk == 3 * 1024 + 1 && w->refused == 0 && w->blocks == 2);
+    CHECK(mem_book_charge(&b, WX, "weather", false, true, 1024) == MEM_CHARGE_OK); // internal: its own quota
+    CHECK(w->bulk_over == 1);
+    CHECK(mem_book_release(&b, WX, false, 3 * 1024 + 1) == MEM_RELEASE_OK && w->bulk == 0); // back under it
+    CHECK(mem_book_charge(&b, WX, "weather", false, false, UINT32_MAX) == MEM_CHARGE_OK); // no overflow in the check
+    CHECK(w->bulk_over == 2);
+
+    // Enforced: refused, nothing charged, counted in refused
+    CHECK(mem_book_set_bulk_quota(&b, MESH, "meshcore", 24 * 1024, true));
+    mem_use_t const *m = mem_book_find(&b, MESH);
+    CHECK(mem_book_charge(&b, MESH, "meshcore", false, false, 24 * 1024) == MEM_CHARGE_OK);
+    CHECK(mem_book_charge(&b, MESH, "meshcore", false, false, 1) == MEM_CHARGE_QUOTA);
+    CHECK(m->bulk == 24 * 1024 && m->refused == 1 && m->bulk_over == 0 && m->blocks == 1);
+    CHECK(mem_book_release(&b, MESH, false, 1024) == MEM_RELEASE_OK);
+    CHECK(mem_book_charge(&b, MESH, "meshcore", false, false, 1024) == MEM_CHARGE_OK); // room again
+
+    // Without a quota PSRAM is never limited (the default before #231)
+    CHECK(mem_book_charge(&b, BENCH, "bench", false, false, 8u * 1024 * 1024) == MEM_CHARGE_OK);
+    CHECK(mem_book_find(&b, BENCH)->bulk_over == 0 && !(mem_book_find(&b, BENCH)->bulk_flags & MEM_BOOK_BULK_QUOTA));
+
+    // The OS has no quota, a quota on its row is refused
+    CHECK(mem_book_charge(&b, OS, NULL, true, false, 1024) == MEM_CHARGE_OK);
+    CHECK(!mem_book_set_bulk_quota(&b, OS, NULL, 1, true));
+    CHECK(mem_book_charge(&b, OS, NULL, true, false, 1024) == MEM_CHARGE_OK && mem_book_find(&b, OS)->refused == 0);
+
+    // A row already past a quota set later counts once; ctx 0 has no row
+    CHECK(mem_book_set_bulk_quota(&b, BENCH, "bench", 1024, false) && mem_book_find(&b, BENCH)->bulk_over == 1);
+    CHECK(!mem_book_set_bulk_quota(&b, 0, "x", 1024, false));
+}
+
 int main(void) {
     test_keyed_by_ctx();
     test_quota();
     test_adjust_release();
     test_full_table();
+    test_bulk_quota();
     if (failures) {
         printf("mem_book_test: %d failure(s)\n", failures);
         return 1;

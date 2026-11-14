@@ -337,6 +337,7 @@ lichen_sys_mem_internal	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_largest	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_min	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_ops_set	SYSTEM	any	lichen_sys_mem.h
+lichen_sys_mem_quotas	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_stacks	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_start	SYSTEM	any	lichen_sys_mem.h
 lichen_sys_mem_total	SYSTEM	any	lichen_sys_mem.h
@@ -373,6 +374,8 @@ lichen_sys_storage_free_bytes	SYSTEM	any	lichen_sys_storage.h
 lichen_sys_storage_mounted	SYSTEM	any	lichen_sys_storage.h
 lichen_sys_task_ctx	SYSTEM	any	lichen_sys_app.h
 lichen_sys_thermal_info	SYSTEM	any	lichen_sys_thermal.h
+lichen_sys_timer_count	SYSTEM	any	lichen_sys_life.h
+lichen_sys_timer_drop	SYSTEM	lvgl	lichen_sys_life.h
 lichen_sys_ui_call	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_cancel	SYSTEM	any	lichen_sys_ui.h
 lichen_sys_ui_cb_mark	SYSTEM	lvgl	lichen_sys_app.h
@@ -419,6 +422,8 @@ lichen_task_console_register	SYSTEM	unspecified	lichen_task.h
 lichen_task_leftovers	BACKGROUND	not-lvgl	lichen_task.h
 lichen_task_start	BACKGROUND	any	lichen_task.h
 lichen_task_start_in	BACKGROUND	any	lichen_task.h
+lichen_timer_start	-	lvgl	lichen_timer.h
+lichen_timer_stop	-	lvgl	lichen_timer.h
 lichen_ui_call	-	any	lichen_ui.h
 lichen_ui_event_add	-	lvgl	lichen_ui.h
 lichen_ui_group_focus_cb	-	lvgl	lichen_ui.h
@@ -456,6 +461,7 @@ mem_book_adjust	-	unspecified	mem_book.h
 mem_book_charge	-	unspecified	mem_book.h
 mem_book_find	-	unspecified	mem_book.h
 mem_book_release	-	unspecified	mem_book.h
+mem_book_set_bulk_quota	-	unspecified	mem_book.h
 menu_add	-	unspecified	menu.h
 menu_add_slider	-	unspecified	menu.h
 menu_create	-	unspecified	menu.h
@@ -592,6 +598,11 @@ tile_order_merge	-	unspecified	tile_order.h
 tile_order_move	-	unspecified	tile_order.h
 tile_order_parse	-	unspecified	tile_order.h
 tile_order_slots	-	unspecified	tile_order.h
+timer_book_add	-	unspecified	timer_book.h
+timer_book_count	-	unspecified	timer_book.h
+timer_book_find	-	unspecified	timer_book.h
+timer_book_next	-	unspecified	timer_book.h
+timer_book_remove	-	unspecified	timer_book.h
 tz_at	-	unspecified	tz_table.h
 tz_count	-	unspecified	tz_table.h
 tz_find_posix	-	unspecified	tz_table.h

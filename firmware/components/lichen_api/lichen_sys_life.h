@@ -33,9 +33,15 @@ bool lichen_sys_life_get(size_t index, app_life_t *out);
 // "fw app life": every app's state and its last stop (console task)
 void lichen_sys_life_console(void);
 
+// How many booked timers (lichen_timer.h) ctx (a lichen_ctx_t) has. Any task (an atomic read).
+size_t lichen_sys_timer_count(uint32_t ctx);
+// Deletes every booked timer of ctx; stop(reason) queues it with lichen_sys_ui_call. LVGL task only.
+void   lichen_sys_timer_drop(uint32_t ctx);
+
 // stop(reason) (#231): every registered app in registration order, each inside its own context. An app's
 // stop_for_update hook (if it has one) runs on the calling task and is given until app_life_deadline_ms(reason): it is
-// never interrupted, a late or refused one is reported (FAULTED) and its tasks are only counted, never deleted. While another caller is stopping an app, this one waits for
+// never interrupted, a late or refused one is reported (FAULTED) and its tasks are only counted, never deleted;
+// its booked timers (lichen_timer.h) go with it. While another caller is stopping an app, this one waits for
 // that verdict up to the deadline instead of running the hook twice at once. True when every hook said it stopped (an
 // app without a hook has nothing running to stop). Holds no lock while a hook runs or while it waits. Blocks for
 // seconds: never on the LVGL task, nor with the LVGL or the mesh lock held (a hook may wait for either).

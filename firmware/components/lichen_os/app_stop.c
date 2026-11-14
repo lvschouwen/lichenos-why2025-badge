@@ -14,10 +14,24 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lichen_os.h"
+#include "lichen_sys_ui.h"
 
 static char const TAG[] = "update"; // shell_stop_apps's tag: the update log reads as before
 
 #define WAIT_POLL_MS 50
+#define TIMER_DROP_LOCK_MS 1000 // the LVGL lock, only to queue the drop; the badge goes down after a stop anyway
+
+static void drop_timers(void *arg) {
+    lichen_sys_timer_drop((uint32_t)(uintptr_t)arg);
+}
+
+// The app's booked timers go with its stop, on the LVGL task. Queued, never run here: this task holds no LVGL lock.
+static void stop_timers(lichen_app_t const *app, lichen_ctx_t ctx) {
+    if (lichen_sys_timer_count(ctx) &&
+        !lichen_sys_ui_call(drop_timers, (void *)(uintptr_t)ctx, TIMER_DROP_LOCK_MS)) {
+        ESP_LOGW(TAG, "%s: its booked timers were not dropped (the LVGL task is busy)", app->name);
+    }
+}
 
 // Another caller is stopping the app (the update's stop, then the restart's save on its own task): its verdict, waited
 // for up to the deadline. A hook that hangs past it is reported, and this caller goes on.
@@ -41,7 +55,7 @@ static bool wait_other(size_t index, lichen_app_t const *app, life_reason_t reas
     }
 }
 
-static void report(lichen_app_t const *app, life_reason_t reason, size_t index, size_t tasks_left) {
+static void report(lichen_app_t const *app, life_reason_t reason, size_t index, lichen_ctx_t ctx, size_t tasks_left) {
     app_life_t r;
     if (!lichen_sys_life_get(index, &r)) {
         return;
@@ -53,6 +67,12 @@ static void report(lichen_app_t const *app, life_reason_t reason, size_t index, 
     if (tasks_left) {
         // Counted, never deleted: a task the app started ends when the app ends it (lichen_task.h)
         ESP_LOGI(TAG, "%s: %u of its tasks still run after its stop", app->name, (unsigned)tasks_left);
+    }
+    uint32_t internal = 0, bulk = 0;
+    if (lichen_os_mem_held(ctx, &internal, &bulk) && (internal || bulk)) {
+        // Reported, not freed: a block may still be in use by a task that has not ended (the OS never frees under it)
+        ESP_LOGI(TAG, "%s holds %lu B internal, %lu B PSRAM through lichen_alloc after its stop", app->name,
+                 (unsigned long)internal, (unsigned long)bulk);
     }
 }
 
@@ -82,7 +102,8 @@ static bool stop_one(size_t index, life_reason_t reason) {
     }
     size_t tasks_left = lichen_os_task_count(ctx);
     lichen_sys_life_stop_end(index, stopped, (uint32_t)tasks_left);
-    report(app, reason, index, tasks_left);
+    report(app, reason, index, ctx, tasks_left);
+    stop_timers(app, ctx);
     return stopped;
 }
 
