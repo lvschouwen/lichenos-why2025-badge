@@ -38,7 +38,7 @@ def log_lines(hours, every, extra=None, start=10 * H):
 # The words the fixtures use as "firmware words": a test never depends on the checked-in vocabulary's content.
 TEST_VOCAB = frozenset("""app tick ok fs new thing happened count took ms wifi retry rf level dbm mesh ping to node at name
     got advert neighbour seen connected sending from rx hello label foo bar said here msg online soak console echo
-    for and more words peer rssi pkt len snr bytes in lost send""".split())
+    for and more words peer rssi pkt len snr bytes in lost send meet the gate nine dm mark message storage dropped slow loop file""".split())
 
 
 def census(lines, warmup_h=2, window_h=2, vocab=TEST_VOCAB):
@@ -125,6 +125,13 @@ class CensusTest(unittest.TestCase):
         self.assertEqual(c.clock.segments, [(31, c.clock.segments[0][1])])     # one segment for the two banner lines
         self.assertIn("boot restarts (the boot-relative stamp dropped): 1; line 31", "\n".join(sc.census_report(c)))
 
+    def test_second_banner_after_stamped_lines_is_a_second_restart(self):
+        banner = ["ESP-ROM:esp32p4", "rst:0x1 (POWERON),boot:0xc"]
+        c = census(log_lines(1, 60) + banner + log_lines(1, 60) + banner + log_lines(1, 60))
+        self.assertEqual(len(c.clock.segments), 2)
+        c = census(banner + log_lines(1, 60) + banner + log_lines(1, 60))     # the opening banner does not count
+        self.assertEqual(len(c.clock.segments), 1)
+
     def test_banner_that_opens_the_log_is_not_a_restart(self):
         c = census(["ESP-ROM:esp32p4", "rst:0x1 (POWERON),boot:0xc"] + log_lines(1, 60))
         self.assertEqual(c.clock.segments, [])
@@ -179,6 +186,25 @@ class ScrubTest(unittest.TestCase):
                 out = "\n".join(sc.census_report(c)) + "\n".join(c.kinds)
                 for word in bad:
                     self.assertNotIn(word, out, "%r leaked from %r" % (word, text))
+
+    def test_free_text_of_vocabulary_words_is_cut(self):
+        for vocab in (TEST_VOCAB, sv.build()):
+            for text in ("mesh: said meet at the gate at nine", "mesh: message meet at the gate",
+                         "mesh: dm to mark: meet at the gate"):
+                kinds = list(census(["I (1) " + text] * 2, warmup_h=0, vocab=vocab).kinds)
+                for word in ("gate", "nine", "meet"):
+                    self.assertNotIn(word, kinds[0], text)
+
+    def test_timing_lines_still_print_whole(self):
+        for vocab in (TEST_VOCAB, sv.build()):
+            c = census(["W (1) fs: storage count took 2961 ms, 3 dropped", "W (2) mesh: slow loop 812 ms in file 331 ms"],
+                       warmup_h=0, vocab=vocab)
+            self.assertEqual(sorted(c.kinds), ["W fs: storage count took # ms, # dropped",
+                                               "W mesh: slow loop # ms in file # ms"])
+
+    def test_more_denied_keys(self):
+        s = sc.Scrubber(TEST_VOCAB | {"address", "seed", "gps"})
+        self.assertEqual([show for _, show in s.text("address=5 seed=7 gps=3 count=2")[1]], [False, False, False, True])
 
     def test_console_line_without_a_stamp_prints_no_first_word(self):
         out = self.kinds_of(["12:00:01 Wren says hi", "12:00:02 >> mesh send Wren hello"])

@@ -13,7 +13,8 @@ SCRUBBING IS AN ALLOW-LIST: a kind is printed only from the vocabulary of the fi
 letter, a digit or a non-ASCII character, quoted text and what follows `<unknown>:` is printed as `<w>`. Numbers are
 printed as `#`; their medians and maxima are shown only for a number followed by a unit (ms us s B KB MB % dBm mV mA C)
 or the value of a vocabulary `key=` outside a small deny list (lat, lon, pos, key, id, ip ...). Residual gap: a name
-that is also a firmware word is printed as that word. Standard library only."""
+that is also a firmware word (`mark`, `will`, `home`) prints as that word, so read the census output once before it is
+posted. Standard library only."""
 import os
 import random
 import re
@@ -42,7 +43,10 @@ SAMPLE_CAP = 512
 MIN_VALUES = 3
 RISE = 1.25
 UNITS = ("ms", "us", "s", "B", "KB", "MB", "%", "dBm", "mV", "mA", "C")
-DENY_KEYS = frozenset(("lat", "lon", "pos", "key", "id", "ip", "mac", "addr", "port", "chan", "freq"))
+DENY_KEYS = frozenset(("lat", "lon", "pos", "key", "id", "ip", "mac", "addr", "port", "chan", "freq", "address", "loc",
+                       "position", "location", "latitude", "longitude", "coord", "gps", "hash", "seed", "name", "ssid",
+                       "pass", "password", "token"))
+SAID = re.compile(r"(?i)\b(message|msg|text|chat|dm|said|says|reply|sent|received)\b.*$")
 QUOTED = re.compile(r'"(?:[^"\\]|\\.)*(?:"|$)')
 FREE_KV = re.compile(r"(?i)\b((?:name|ssid|node|contact|nick|sender|user|msg|message|text|payload|body|title|peer|"
                      r"network|pass\w*|token|key)\w*)\s*[=:].*$")
@@ -104,12 +108,19 @@ def tokenise(text: str, vocab):
     return FINAL.sub(rep, text).replace(UNK, "<w>"), found
 
 
+def cut_after_colon(text: str) -> str:
+    """The first `:` of a line's text after words that are not all vocabulary words starts free text (`dm to <name>:
+    ...`): everything after it is cut."""
+    i = text.find(":")
+    return text[:i + 1] + " " + UNK if i >= 0 and UNK in text[:i] else text
+
+
 def scrub_marked(marked: str, vocab) -> str:
     """Marked text (numbers and units as private-use chars) -> text of vocabulary words, `#` slots and `<w>`."""
-    text = QUOTED.sub(UNK, marked)
+    text = SAID.sub("\\1 " + UNK, QUOTED.sub(UNK, marked))
     text = FREE_KV.sub("\\1=" + UNK, text)
     text = FROM_WORD.sub("\\1 " + UNK, text)
-    text = TOKEN.sub(classify(vocab), mark_units(text))
+    text = cut_after_colon(TOKEN.sub(classify(vocab), mark_units(text)))
     return W_RUN.sub(UNK, AFTER_UNKNOWN.sub(lambda m: m.group(0)[:2], text))
 
 
@@ -263,6 +274,8 @@ class Census:
     def add(self, line: str) -> None:
         self.lines += 1
         wall, level, ms, tag, text = split_line(line)
+        if level != "-":
+            self.in_banner = False         # a stamped line ends the banner block, so the next banner is a new boot
         stamped_before = self.clock.t0 is not None or self.clock.prev_ms is not None
         t = self.clock.feed(self.lines, wall, ms)
         if t - self.last_t > self.gap:
