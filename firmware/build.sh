@@ -35,13 +35,38 @@ if [ "$nested" = 1 ] && [ "$release" = 0 ]; then
     echo "--nested-from-check is only for the release build the full check starts itself (build.sh release build)" >&2
     exit 2
 fi
-case "${BADGE_SKIP_RELEASE:-}" in
-    ''|1) ;;
-    *) echo "BADGE_SKIP_RELEASE must be 1 or unset, not '$BADGE_SKIP_RELEASE'" >&2; exit 2 ;;
-esac
+
+# The two decisions, each in one place: --plan prints them and the real run acts on them (#401)
+is_building() { # commands that build need the C6 image, the host tests and fresh sdkconfigs; monitor, menuconfig etc. don't
+    local a
+    for a in "$@"; do
+        case $a in build|all|app|flash|reconfigure|app-flash|storage|storage-flash) return 0 ;; esac
+    done
+    return 1
+}
+want_prechecks() { # static checks, host tests, C6 image, storage staging
+    [ "$nested" = 0 ] && is_building "$@"
+}
+want_release_step() { # the developer build ends with the release build, for the commands that build the image
+    local a
+    [ "$release" = 0 ] || return 1
+    for a in "$@"; do
+        case $a in build|all|app) return 0 ;; esac
+    done
+    return 1
+}
+if want_release_step "$@"; then
+    case "${BADGE_SKIP_RELEASE:-}" in
+        ''|1) ;;
+        *) echo "BADGE_SKIP_RELEASE must be 1 or unset, not '$BADGE_SKIP_RELEASE'" >&2; exit 2 ;;
+    esac
+fi
 if [ "$plan" = 1 ]; then
-    echo "prechecks=$([ "$nested" = 1 ] && echo no || echo yes) release_step=$([ "$release" = 0 ] && [ -z "${BADGE_SKIP_RELEASE:-}" ] && echo yes || echo no)"
+    echo "prechecks=$(want_prechecks "$@" && echo yes || echo no) release_step=$(want_release_step "$@" && [ -z "${BADGE_SKIP_RELEASE:-}" ] && echo yes || echo no)"
     exit 0
+fi
+if [ "$nested" = 1 ]; then
+    echo "release build: prechecks skipped (nested call from the full check)" >&2
 fi
 
 IDF_DIR=${BADGE_IDF_PATH:-~/esp/esp-idf}
@@ -69,13 +94,8 @@ if [ "$release" = 1 ]; then
     idf_args=(-B "$bdir" -D "SDKCONFIG=$sdkconfig" -D "SDKCONFIG_DEFAULTS=$here/sdkconfig.defaults;$here/sdkconfig.release.defaults")
 fi
 
-# Only commands that build need the C6 image, the host tests and fresh sdkconfigs; monitor, menuconfig etc. don't
 building=0
-for arg in "$@"; do
-    case $arg in
-        build|all|app|flash|reconfigure|app-flash|storage|storage-flash) building=1 ;;
-    esac
-done
+is_building "$@" && building=1
 
 # PSRAM at 120 MHz (#94) is not an IDF option: it needs tools/idf-patches/ applied to the IDF checkout. Without it
 # Kconfig would drop the unknown symbol and fall back to the 200 MHz default, which flips bits on this badge.
@@ -116,7 +136,7 @@ if [ "$building" = 1 ]; then
 
     # Static checks, host tests and the C6 image come first (#196); the release build the full check ends with
     # (--nested-from-check) has just had all of them
-    if [ "$nested" = 0 ]; then
+    if want_prechecks "$@"; then
         "$repo/tools/static_checks.sh"
 
         cmake -S "$repo/host_tests" -B "$here/build/host_tests" -G Ninja "${host_launcher[@]}" >/dev/null
@@ -182,19 +202,14 @@ elif [ "$building" = 1 ]; then
     BADGE_IDF_PATH="$IDF_DIR" python3 "$repo/tools/third_party_licenses.py" --check
     # The release image (#373) in firmware/build-release, last so its own failure message is the one left on screen
     # (#401: a release-only break slipped through twice, #396 and #437). Only commands that build the image run it.
-    for arg in "$@"; do
-        case $arg in
-            build|all|app)
-                if [ -n "${BADGE_SKIP_RELEASE:-}" ]; then
-                    echo "BADGE_SKIP_RELEASE set: the release build was skipped, this is not a full check (exit 3)" >&2
-                    exit 3
-                else
-                    echo "== release build (#401) =="
-                    "$here/build.sh" release "$@" --nested-from-check
-                fi
-                break ;;
-        esac
-    done
+    if want_release_step "$@"; then
+        if [ -n "${BADGE_SKIP_RELEASE:-}" ]; then
+            echo "BADGE_SKIP_RELEASE set: the release build was skipped, this is not a full check (exit 3)" >&2
+            exit 3
+        fi
+        echo "== release build (#401) =="
+        "$here/build.sh" release "$@" --nested-from-check
+    fi
 else
     exec idf.py -C "$here" "${idf_args[@]}" "$@"
 fi

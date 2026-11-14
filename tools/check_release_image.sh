@@ -41,6 +41,11 @@ check_image() {
 check_config() {
     local file=$1 sym bad=0
     [ -f "$file" ] || { echo "sdkconfig $file does not exist" >&2; return 1; }
+    # Absence alone would pass an empty or unrelated file: the release config always carries the "is not set" line
+    if ! grep -q '^CONFIG_' "$file" || ! grep -qxF '# CONFIG_LICHEN_DEV_COMMANDS is not set' "$file"; then
+        echo "$file is not a release sdkconfig: no CONFIG_ lines or no \"# CONFIG_LICHEN_DEV_COMMANDS is not set\"" >&2
+        return 1
+    fi
     for sym in "${DEBUG_SYMBOLS[@]}"; do
         if grep -qE "^CONFIG_${sym}=(y|[1-9])" "$file"; then
             echo "release sdkconfig $file has CONFIG_$sym on" >&2
@@ -72,7 +77,10 @@ selftest() {
     ! run dev "$tmp/clean.bin" 2>/dev/null || { echo "selftest: unmarked dev image accepted" >&2; exit 1; }
     printf 'CONFIG_LICHEN_UI_LOCK_CHECK_OFF=y\n# CONFIG_LICHEN_DEV_COMMANDS is not set\n' > "$tmp/off.cfg"
     printf 'CONFIG_LICHEN_DEV_COMMANDS=y\n' > "$tmp/on.cfg"
-    printf 'CONFIG_LICHEN_NVS_DEBUG_FORCE_DOWN=y\n' > "$tmp/on2.cfg"
+    : > "$tmp/empty.cfg"; printf 'CONFIG_FOO=y\n' > "$tmp/other.cfg"
+    ! run config "$tmp/empty.cfg" 2>/dev/null || { echo "selftest: empty config accepted" >&2; exit 1; }
+    ! run config "$tmp/other.cfg" 2>/dev/null || { echo "selftest: config without the symbol accepted" >&2; exit 1; }
+    printf '# CONFIG_LICHEN_DEV_COMMANDS is not set\nCONFIG_LICHEN_NVS_DEBUG_FORCE_DOWN=y\n' > "$tmp/on2.cfg"
     run config "$tmp/off.cfg" >/dev/null || { echo "selftest: clean config rejected" >&2; exit 1; }
     ! run config "$tmp/on.cfg" 2>/dev/null || { echo "selftest: dev commands config accepted" >&2; exit 1; }
     ! run config "$tmp/on2.cfg" 2>/dev/null || { echo "selftest: force-down config accepted" >&2; exit 1; }

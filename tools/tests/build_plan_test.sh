@@ -13,4 +13,13 @@ r=0; out=$(bash "$sh" --plan build --nested-from-check 2>&1) || r=$?
 [ "$(BADGE_SKIP_RELEASE=1 bash "$sh" --plan build)" = "prechecks=yes release_step=no" ] || fail "skip=1"
 r=0; BADGE_SKIP_RELEASE=0 bash "$sh" --plan build >/dev/null 2>&1 || r=$?
 [ "$r" = 2 ] || fail "BADGE_SKIP_RELEASE=0 not refused ($r)"
+# What the real run does per command: prechecks for the commands that build, the release step only for build|all|app
+p() { bash "$sh" --plan "$@"; }
+for c in "build:yes:yes" "all:yes:yes" "app:yes:yes" "reconfigure:yes:no" "flash:yes:no" "monitor:no:no" "build reconfigure:yes:yes"; do
+    IFS=: read -r cmd pre rel <<<"$c"
+    # shellcheck disable=SC2086
+    [ "$(p $cmd)" = "prechecks=$pre release_step=$rel" ] || fail "plan for '$cmd': $(p $cmd)"
+done
+r=0; BADGE_SKIP_RELEASE=0 bash "$sh" --plan monitor >/dev/null 2>&1 || r=$?
+[ "$r" = 0 ] || fail "BADGE_SKIP_RELEASE=0 refused for monitor ($r)"
 echo "build_plan_test ok"
