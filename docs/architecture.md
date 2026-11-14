@@ -559,7 +559,9 @@ copy, its setting and `fw onair` are `mesh_onair_run.c`.
   the update server answers `409 Conflict` with what was refused and why (`ota_route_usb_held`, `ota_hold_reply`) to
   `/prepare`, to every `/firmware` request (whole or a piece) and to every file write or delete in the C6 image folder
   (`c6_path_in_image_dir`: by path segment, any case, doubled slashes and `.`/`..` fail closed), before anything stops,
-  is erased or written. A refused piece drops its upload in pieces (a firmware one ends update mode in a restart). The
+  is erased or written. The same goes for `lora.toml` (what the radio sends), MeshCore's directory (its identity) and
+  `ota_token.txt` (#454, `ota_path_onair_held`: the root's `lora*` and `ota_*` names and `meshcore`, any case,
+  trailing dots and spaces dropped, `.`/`..` fail closed); with the list off they are pushed as before. A refused piece drops its upload in pieces (a firmware one ends update mode in a restart). The
   hold is asked again right before the boot slot switch (the image then stays written but unbooted) and before a C6
   file is swapped in. It is read lock-free (`console_usb_hold_why`), so with the list off the update path costs no lock.
   Remote updates, `ota-c6` and the bench's `fw slot other` need the list off; the bench keeps it off except during the

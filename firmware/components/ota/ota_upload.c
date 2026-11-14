@@ -104,7 +104,7 @@ bool ota_finish_file(int fd, char const *vms, uint8_t const *data, size_t len, l
         ota_respond(fd, 400, "bad path");
         return false;
     }
-    if (!ota_storage_room(fd, len, 0, 0) || !ota_c6_change_begin(fd, path)) {
+    if (!ota_storage_room(fd, len, 0, 0) || !ota_file_change_begin(fd, path)) {
         return false; // before the bundle is marked changed: the old file stays
     }
     mkdir_parents(path);
@@ -356,7 +356,7 @@ static void handle_delete(int fd, ota_request_t const *req) {
         ota_respond(fd, 403, "path not allowed: use FLASH0: with a plain file name");
         return;
     }
-    if (!ota_c6_change_begin(fd, path)) {
+    if (!ota_file_change_begin(fd, path)) {
         return;
     }
     int gone = unlink(path);

@@ -124,14 +124,16 @@ static bool refused_on_trial(int fd, ota_request_t const *req, size_t pre_len) {
 // slot, staging buffer), so update mode ends (a firmware one in a restart) instead of waiting PIECE_IDLE_S. noinline:
 // the path buffer stays off handle_connection's stack.
 __attribute__((noinline)) static bool refused_on_hold(int fd, ota_request_t const *req, size_t pre_len) {
-    char const *why = ota_route_usb_held(req->route, true) ? console_usb_hold_why() : NULL; // the list off: no more
+    char const *why = ota_route_usb_held(req->route, true, true) ? console_usb_hold_why() : NULL; // list off: no more
     char        posix[OTA_PATH_MAX + 16];
-    bool c6 = why && req->has_path && ota_path_to_posix(req->path, posix, sizeof(posix)) && c6_path_in_image_dir(posix);
-    ota_hold_t kind = why ? ota_route_usb_held(req->route, c6) : OTA_HOLD_NONE;
+    bool        mapped = why && req->has_path && ota_path_to_posix(req->path, posix, sizeof(posix));
+    bool        c6     = mapped && c6_path_in_image_dir(posix);
+    bool        file   = mapped && ota_path_onair_held(posix);
+    ota_hold_t  kind   = why ? ota_route_usb_held(req->route, c6, file) : OTA_HOLD_NONE;
     if (kind == OTA_HOLD_NONE) {
         return false;
     }
-    ota_piece_expire(ota_piece_staged_is(req, c6, posix));
+    ota_piece_expire(ota_piece_staged_is(req, c6 || file, posix));
     ota_drain_body(fd, pre_len, req->expect_continue ? 0 : req->content_length);
     return ota_hold_refused(fd, kind, why);
 }

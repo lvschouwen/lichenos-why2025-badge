@@ -446,12 +446,12 @@ bool ota_route_stops_apps(ota_route_t route) {
     return route == OTA_ROUTE_PREPARE || route == OTA_ROUTE_FIRMWARE || route == OTA_ROUTE_ASSETS;
 }
 
-ota_hold_t ota_route_usb_held(ota_route_t route, bool c6_dir) {
+ota_hold_t ota_route_usb_held(ota_route_t route, bool c6_dir, bool onair_file) {
     switch (route) {
         case OTA_ROUTE_PREPARE: return OTA_HOLD_PREPARE;
         case OTA_ROUTE_FIRMWARE: return OTA_HOLD_FIRMWARE;
         case OTA_ROUTE_FILE:
-        case OTA_ROUTE_DELETE: return c6_dir ? OTA_HOLD_C6 : OTA_HOLD_NONE;
+        case OTA_ROUTE_DELETE: return c6_dir ? OTA_HOLD_C6 : onair_file ? OTA_HOLD_FILE : OTA_HOLD_NONE;
         default: return OTA_HOLD_NONE;
     }
 }
@@ -463,8 +463,9 @@ void ota_hold_reply(ota_hold_t kind, char const *held, char *out, size_t cap) {
         [OTA_HOLD_FIRMWARE] = "firmware update refused",
         [OTA_HOLD_C6]       = "C6 image change refused (the C6 drives the LoRa radio)",
         [OTA_HOLD_BOOT]     = "firmware written but not booted",
+        [OTA_HOLD_FILE]     = "file change refused (radio settings, MeshCore identity or update token)",
     };
-    snprintf(out, cap, "%s: %s is on; %s", what[kind <= OTA_HOLD_BOOT ? kind : OTA_HOLD_NONE], held, HOLD_OFF_FIRST);
+    snprintf(out, cap, "%s: %s is on; %s", what[kind <= OTA_HOLD_FILE ? kind : OTA_HOLD_NONE], held, HOLD_OFF_FIRST);
 }
 
 bool ota_route_needs_token(ota_route_t route) {

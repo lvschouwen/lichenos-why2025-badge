@@ -407,11 +407,11 @@ static void handle_piece(int fd, ota_request_t const *req, uint8_t const *pre, s
     piece_done(fd, req->hold_reboot);
 }
 
-// The staged upload is the refused request's own: the same route and, for a C6 file, the same file however it was named
-bool ota_piece_staged_is(ota_request_t const *req, bool c6, char const *posix) {
+// The staged upload is the refused request's own: the same route and, for a held file, the same file however it was named
+bool ota_piece_staged_is(ota_request_t const *req, bool held_file, char const *posix) {
     char mine[OTA_PATH_MAX + 16];
     return staged.active && staged.route == req->route &&
-           (!c6 || (ota_path_to_posix(staged.path, mine, sizeof(mine)) && strcmp(mine, posix) == 0));
+           (!held_file || (ota_path_to_posix(staged.path, mine, sizeof(mine)) && strcmp(mine, posix) == 0));
 }
 
 bool ota_piece_active(void) {

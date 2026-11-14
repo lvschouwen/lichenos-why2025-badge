@@ -663,6 +663,8 @@ target_include_directories(ota_path_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/ota
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/storage
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/lichen_api
 )
 
 target_compile_options(ota_path_test PRIVATE

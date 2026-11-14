@@ -494,17 +494,21 @@ static void test_routes_stop_apps(void) {
 // or is erased, and so is a file write or delete in the C6 image folder; assets, other files, reboot and the rest boot
 // no other image and are served as before
 static void test_routes_usb_held(void) {
-    CHECK(ota_route_usb_held(OTA_ROUTE_PREPARE, false) == OTA_HOLD_PREPARE);
-    CHECK(ota_route_usb_held(OTA_ROUTE_FIRMWARE, false) == OTA_HOLD_FIRMWARE);
-    CHECK(ota_route_usb_held(OTA_ROUTE_FILE, true) == OTA_HOLD_C6);
-    CHECK(ota_route_usb_held(OTA_ROUTE_DELETE, true) == OTA_HOLD_C6);
-    CHECK(ota_route_usb_held(OTA_ROUTE_FILE, false) == OTA_HOLD_NONE);
-    CHECK(ota_route_usb_held(OTA_ROUTE_DELETE, false) == OTA_HOLD_NONE);
+    CHECK(ota_route_usb_held(OTA_ROUTE_PREPARE, false, false) == OTA_HOLD_PREPARE);
+    CHECK(ota_route_usb_held(OTA_ROUTE_FIRMWARE, false, false) == OTA_HOLD_FIRMWARE);
+    CHECK(ota_route_usb_held(OTA_ROUTE_FILE, true, false) == OTA_HOLD_C6);
+    CHECK(ota_route_usb_held(OTA_ROUTE_DELETE, true, false) == OTA_HOLD_C6);
+    CHECK(ota_route_usb_held(OTA_ROUTE_FILE, false, false) == OTA_HOLD_NONE);
+    CHECK(ota_route_usb_held(OTA_ROUTE_DELETE, false, false) == OTA_HOLD_NONE);
+    // #454: lora.toml, MeshCore's files and the token file are held like the C6 folder
+    CHECK(ota_route_usb_held(OTA_ROUTE_FILE, false, true) == OTA_HOLD_FILE);
+    CHECK(ota_route_usb_held(OTA_ROUTE_DELETE, false, true) == OTA_HOLD_FILE);
+    CHECK(ota_route_usb_held(OTA_ROUTE_FILE, true, true) == OTA_HOLD_C6);
     ota_route_t const others[] = {OTA_ROUTE_INFO, OTA_ROUTE_REBOOT, OTA_ROUTE_ASSETS, OTA_ROUTE_SCREENSHOT,
                                   OTA_ROUTE_LOG, OTA_ROUTE_CONSOLE, OTA_ROUTE_CRASHES};
     for (size_t i = 0; i < sizeof(others) / sizeof(others[0]); i++) {
-        CHECK(ota_route_usb_held(others[i], false) == OTA_HOLD_NONE);
-        CHECK(ota_route_usb_held(others[i], true) == OTA_HOLD_NONE); // a path on another route means nothing
+        CHECK(ota_route_usb_held(others[i], false, false) == OTA_HOLD_NONE);
+        CHECK(ota_route_usb_held(others[i], true, true) == OTA_HOLD_NONE); // a path on another route means nothing
     }
     CHECK(strcmp(ota_status_reason(409), "Conflict") == 0); // the refusal's status line
     char text[512];
@@ -515,6 +519,8 @@ static void test_routes_usb_held(void) {
     CHECK(strncmp(text, "firmware update refused: the list is on; switch it off", 54) == 0);
     ota_hold_reply(OTA_HOLD_C6, "the list", text, sizeof(text));
     CHECK(strncmp(text, "C6 image change refused (", 25) == 0 && strstr(text, "LoRa radio"));
+    ota_hold_reply(OTA_HOLD_FILE, "the list", text, sizeof(text));
+    CHECK(strncmp(text, "file change refused (", 21) == 0 && strstr(text, "the list is on; switch it off"));
     ota_hold_reply(OTA_HOLD_BOOT, "the list", text, sizeof(text));
     CHECK(strncmp(text, "firmware written but not booted: ", 33) == 0);
     ota_hold_reply(OTA_HOLD_NONE, "the list", text, sizeof(text)); // never asked; still a refusal, never garbage

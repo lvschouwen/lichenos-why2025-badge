@@ -4,6 +4,7 @@
 #include "c6_paths.h"
 #include "c6link.h"
 #include "fw_console.h"
+#include "ota_path.h"
 
 #include <string.h>
 
@@ -45,13 +46,16 @@ bool ota_hold_refused(int fd, ota_hold_t kind, char const *why) {
     return true;
 }
 
-bool ota_c6_change_begin(int fd, char const *posix_path) {
-    if (!c6_path_in_image_dir(posix_path)) {
+bool ota_file_change_begin(int fd, char const *posix_path) {
+    bool c6 = c6_path_in_image_dir(posix_path);
+    if (!c6 && !ota_path_onair_held(posix_path)) {
         return true;
     }
-    if (ota_hold_refused(fd, OTA_HOLD_C6, ota_change_begin())) {
+    if (ota_hold_refused(fd, c6 ? OTA_HOLD_C6 : OTA_HOLD_FILE, ota_change_begin())) {
         return false;
     }
-    c6link_bundle_changed();
+    if (c6) {
+        c6link_bundle_changed();
+    }
     return true;
 }
