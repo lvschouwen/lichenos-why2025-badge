@@ -2488,3 +2488,11 @@ add_executable(mesh_chat_cmd_test
 target_include_directories(mesh_chat_cmd_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
 target_compile_options(mesh_chat_cmd_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_chat_cmd_test COMMAND mesh_chat_cmd_test)
+
+# lora_decode pinned before its #212 split: per-type tables (truncations, length bytes, every version and type byte)
+# with digests from the old decoder, and a differential run against it (lora_decode_ref.c, the old function verbatim)
+add_executable(lora_decode_pin_test ${CMAKE_CURRENT_SOURCE_DIR}/lora_decode_pin_test.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/lora_decode_ref.c ${CMAKE_CURRENT_SOURCE_DIR}/../shared/lora/lora_proto.c)
+target_include_directories(lora_decode_pin_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../shared/lora)
+target_compile_options(lora_decode_pin_test PRIVATE -Wall -Wextra -Werror)
+add_test(NAME lora_decode_pin_test COMMAND lora_decode_pin_test)
