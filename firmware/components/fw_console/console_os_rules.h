@@ -16,6 +16,13 @@ static console_sub_t const OS_REBOOT_RULES[] = {
     CONSOLE_SUB_END,
 };
 
+// "mem window" (#410): developer mode; lichen_os binds the window only in a developer image, so the row has no word in a
+// release (fw_console answers "not in this build" there itself)
+static console_sub_t const OS_MEM_RULES[] = {
+    {CON_DEV_WORD("window"), CON_MATCH_WORD, CON_GATE_DEV, CON_ORIGIN_ANY, 0},
+    CONSOLE_SUB_END,
+};
+
 // "dev on" from the USB console only (#373): the Wi-Fi console's OTA token is not enough, and keys injected into the
 // Console app could type it there; About's taps are the owner's other way in. Off works from anywhere.
 static console_sub_t const OS_DEV_RULES[] = {

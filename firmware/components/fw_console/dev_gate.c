@@ -14,7 +14,6 @@ typedef struct {
 
 static gated_t const GATED[] = {
     {"noscreen", {NULL}},                // the next boot skips the display
-    {"thermal", {"", NULL}},             // "test ..." can power the badge off; "seen reset" erases a flag
     {"psram", {"", NULL}},               // test, dma, dl, dlboot and speed change timing or the next boot
     {"stress", {"status", "stop", NULL}}, // a bare "stress" starts a run; stop stays open so a run can be ended
     {"idle", {"", NULL}},                // "test <s>" fakes the idle clock

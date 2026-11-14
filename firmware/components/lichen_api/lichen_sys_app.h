@@ -75,8 +75,10 @@ bool lichen_sys_caps_self_ok(uint32_t need, char const *what);
 // and the last refused value) and "fw app caps" (every app's capabilities, budgets and capability refusals, #229)
 void lichen_sys_app_console_register(void);
 // More "fw app" subcommands (#232: safe mode's), set once before lichen_sys_app_console_register: every line that is
-// not "ctx" goes to more, and usage (kept by pointer) is the command's help. NULL: only "ctx". Main task, at boot.
-void lichen_sys_app_console_more(void (*more)(char const *args), char const *usage);
+// not "ctx" goes to more, and usage (kept by pointer) is the command's help. NULL: only "ctx". rules: the sub-command
+// table "fw app" registers with (#464, console_sub.h; kept by pointer, NULL for none). Main task, at boot.
+struct console_sub; // fw_console's console_sub_t
+void lichen_sys_app_console_more(void (*more)(char const *args), char const *usage, struct console_sub const *rules);
 
 // For the panic handler (#232): the id of the app the task running on this core runs for (its entered context, as
 // lichen_ctx_self would answer), NULL for the OS, an ISR, a context that is not valid, an app without an id, or before

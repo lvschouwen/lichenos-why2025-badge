@@ -16,67 +16,7 @@ static int failures;
 
 static char const *const IDS[] = {"meshcore", "bench"};
 
-// What console.c decides for a whole line: split (prefix too), then ask the table
-static bool line_gated(char const *text) {
-    char        buf[96];
-    char const *args;
-    int         app;
-    snprintf(buf, sizeof(buf), "%s", text);
-    char *name = dev_gate_split(buf, IDS, 2, &app, &args);
-    return dev_gate_needs_dev(name, args);
-}
-
-static char const *const GATED[] = {
-    "thermal test warn", "thermal test clear", "thermal test shutdown YES", "thermal seen reset", "thermal bogus",
-    "psram test 64", "psram test", "psram speed", "psram dma", "psram dl 3", "psram dlboot 3 yes", "psram speed 120", "psram carrier",
-    "psram  test", "noscreen", "noscreen now", "stress", "stress 5", "stress status ", "stress bogus",
-    "idle test 30", "idle bogus", "notify test warn", "notify test", "notify test info @x hi", "vib test",
-    "vib test alert", "setup reset", "setup reset mesh", "setup done mesh", "setup", "sensors start", "sensors stop",
-    "sensors boot on", "sensors boot off", "sensors boot x", "sensors bogus",
-    "mesh chat open #badgetest", "mesh chat close", "mesh chat", "mesh chat open", "mesh  chat   open x",
-    "mesh ident simulate", "mesh ident", "mesh  ident   simulate",
-};
-
-static char const *const OPEN[] = {
-    "thermal", "psram", "stress status", "stress stop", "idle", "notify", "notify clear", "notify read", "notify dnd on",
-    "notify testing", "vib", "vib on", "vib off", "vib strength low", "vib tests", "sensors", "sensors raw",
-    "sensors boot", "mesh", "mesh chats", "mesh send #x hi", "mesh chatty", "mesh identity", "mesh airlog", "help", "wifi on", "mem", "crash", "boot", "reboot",
-};
-
-static void test_forms(void) {
-    for (unsigned i = 0; i < sizeof(GATED) / sizeof(GATED[0]); i++) {
-        if (!line_gated(GATED[i])) {
-            printf("not gated: %s\n", GATED[i]);
-            failures++;
-        }
-    }
-    for (unsigned i = 0; i < sizeof(OPEN) / sizeof(OPEN[0]); i++) {
-        if (line_gated(OPEN[i])) {
-            printf("gated but should be open: %s\n", OPEN[i]);
-            failures++;
-        }
-    }
-}
-
-// "fw <app> <command>" (#423): the same decision under either spelling
-static void test_prefixed(void) {
-    for (unsigned i = 0; i < sizeof(GATED) / sizeof(GATED[0]); i++) {
-        char line[96];
-        snprintf(line, sizeof(line), "meshcore %s", GATED[i]);
-        if (!line_gated(line)) {
-            printf("not gated with prefix: %s\n", line);
-            failures++;
-        }
-    }
-    for (unsigned i = 0; i < sizeof(OPEN) / sizeof(OPEN[0]); i++) {
-        char line[96];
-        snprintf(line, sizeof(line), "bench %s", OPEN[i]);
-        if (line_gated(line)) {
-            printf("gated with prefix but open: %s\n", line);
-            failures++;
-        }
-    }
-}
+// The forms GATED[] gated, and those it left open, are pinned with every other rule in console_pin_test.c (#464)
 
 // The gate decision, with the command function replaced by a counter: a refused line never runs it
 static int ran;
@@ -134,8 +74,6 @@ static void test_split(void) {
 }
 
 int main(void) {
-    test_forms();
-    test_prefixed();
     test_split();
     test_decide();
     if (failures) {

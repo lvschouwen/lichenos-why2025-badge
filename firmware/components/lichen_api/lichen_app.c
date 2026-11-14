@@ -400,10 +400,12 @@ bool lichen_sys_caps_self_ok(uint32_t need, char const *what) {
 
 static void (*s_more)(char const *args); // lichen_sys_app_console_more, set at boot before "app" is registered
 static char const *s_more_usage;
+static console_sub_t const *s_more_rules;
 
-void lichen_sys_app_console_more(void (*more)(char const *args), char const *usage) {
+void lichen_sys_app_console_more(void (*more)(char const *args), char const *usage, console_sub_t const *rules) {
     s_more       = more;
     s_more_usage = usage;
+    s_more_rules = rules;
 }
 
 static void cmd_app_ctx(void) {
@@ -449,8 +451,8 @@ static void cmd_app(char const *args) {
 }
 
 void lichen_sys_app_console_register(void) {
-    console_register("app", s_more_usage ? s_more_usage
-                                         : "app ctx (every app's context, the refusals of stale or made-up contexts "
-                                           "since boot) | app caps (each app's capabilities, budgets and refused calls) | app life",
-                     cmd_app);
+    console_register_rules("app", s_more_usage ? s_more_usage
+                                               : "app ctx (every app's context, the refusals of stale or made-up contexts "
+                                                 "since boot) | app caps (each app's capabilities, budgets and refused calls) | app life",
+                           cmd_app, s_more_rules);
 }

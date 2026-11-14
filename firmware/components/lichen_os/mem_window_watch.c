@@ -52,9 +52,7 @@ void mem_window_watch_sample(void) {
 }
 
 static void cmd_window(char const *args) {
-    if (!console_dev_gate("mem window")) {
-        return;
-    }
+    // developer mode: the row in console_os_rules.h, checked before "fw mem" runs (#464)
     bool reset = strcmp(args, "reset") == 0;
     if (!reset && args[0]) {
         console_reply("mem window: usage fw mem window [reset]");

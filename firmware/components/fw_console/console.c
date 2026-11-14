@@ -1069,7 +1069,7 @@ void console_start(void) {
     run_mutex   = xSemaphoreCreateMutex();
     reply_mutex = xSemaphoreCreateMutex();
     console_register("help", "help [<command> | <app> | all]", cmd_help);
-    console_register("mem", MEM_USAGE, cmd_mem);
+    console_register_rules("mem", MEM_USAGE, cmd_mem, OS_MEM_RULES);
     console_register("assets", "assets (state of the assets partition and its files)", cmd_assets);
     console_register_rules("slot", "slot [other] (show the app slots, or boot the other one)", cmd_slot, OS_SLOT_RULES);
     console_register_rules("reboot", "reboot", cmd_reboot, OS_REBOOT_RULES);

@@ -2,6 +2,7 @@
 // / "fw app crash". The rules are safe_mode_policy.c (pure, host-tested).
 #include "safe_mode.h"
 #include "safe_mode_policy.h"
+#include "os_cmd_rules.h"
 
 #include "esp_attr.h"
 #include "esp_cpu.h"
@@ -269,9 +270,7 @@ static void crash_in_callback(lichen_app_t const *app, lichen_ctx_t ctx) {
 // The faulting task runs as the app: what the panic hook reads is the real attribution path, not a shortcut.
 // "<id> cb": the fault is in one of the app's LVGL timer callbacks instead (#427)
 static void crash_as(char const *args) {
-    if (!console_dev_gate("app crash")) {
-        return;
-    }
+    // developer mode: its row in os_cmd_rules.h, checked before "fw app" runs (#464)
     char        name[SAFE_MODE_ID_CAP];
     char const *sp  = strchr(args, ' ');
     size_t      len = sp ? (size_t)(sp - args) : strlen(args);
@@ -369,5 +368,6 @@ void safe_mode_boot_step(bool crashed) {
     }
     lichen_sys_app_console_more(cmd_more, "app ctx | caps | life | background [<id> on]" USAGE_DEV
                                           " (contexts; capabilities, #229; lifecycle, #231; the apps whose background "
-                                          "is off after crashes, #232)");
+                                          "is off after crashes, #232)",
+                                APP_RULES);
 }

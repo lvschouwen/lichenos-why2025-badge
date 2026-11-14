@@ -23,6 +23,7 @@
 #include "fw_console.h"
 #include "lichen_notify.h"
 #include "lichen_task.h"
+#include "os_cmd_rules.h"
 #include "lichen_sys_app.h"
 #include "lichen_sys_notify.h"
 #include "lichen_radio.h"
@@ -400,9 +401,10 @@ void thermal_start(lichen_watch_hooks_t const *h) {
         hooks = *h;
     }
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    console_register("thermal", "thermal [test warn|clear|shutdown YES] (temperature watchdog, battery safety)", cmd_thermal);
+    console_register_rules("thermal", "thermal [test warn|clear|shutdown YES] (temperature watchdog, battery safety)",
+                           cmd_thermal, THERMAL_RULES);
 #else
-    console_register("thermal", "thermal (temperature watchdog, battery safety)", cmd_thermal);
+    console_register_rules("thermal", "thermal (temperature watchdog, battery safety)", cmd_thermal, THERMAL_RULES);
 #endif
     // LP RAM (#269): a poll every few seconds that writes NVS (its shed and seen flags), so internal-capable, no DMA
     if (!lichen_task_start_in(lichen_sys_ctx_os(), "thermal", thermal_task, NULL, STACK_BYTES, LICHEN_PRIO_SERVICE,

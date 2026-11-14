@@ -15,6 +15,7 @@
 #include "sd_rules.h"
 #include "mesh_onair.h"
 #include "nvs_rules.h"
+#include "os_cmd_rules.h"
 #include "ota_rules.h"
 
 #include <stdbool.h>
@@ -149,6 +150,7 @@ static pin_t const PINS[] = {
     {"app background",             "RRR", "RRR", "RRR", false},
     {"app crash meshcore",         "RRR", "DDD", "RRR", false}, // release: usage
     {"app crash meshcore cb",      "RRR", "DDD", "RRR", false},
+    {"app crash ",                 "RRR", "DDD", "RRR", false}, // #464: tighter (usage before, a PREFIX row now)
     // handler origin rules
     {"token",                      "RRR", "RRR", "RRR", false},
     {"token new",                  "ROO", "ROO", "ROO", false},
@@ -216,6 +218,25 @@ static pin_t const PINS[] = {
     {"qrcode qr hello",            "RRR", "RRR", "RRR", false},
 };
 // clang-format on
+
+// The forms dev_gate.c's GATED[] gated (moved from dev_gate_test.c, #464): refused while developer mode is off
+static char const *const GATE_FORMS[] = {
+    "thermal test warn", "thermal test clear", "thermal test shutdown YES", "thermal seen reset", "thermal bogus",
+    "psram test 64", "psram test", "psram speed", "psram dma", "psram dl 3", "psram dlboot 3 yes", "psram speed 120", "psram carrier",
+    "psram  test", "noscreen", "noscreen now", "stress", "stress 5", "stress status ", "stress bogus",
+    "idle test 30", "idle bogus", "notify test warn", "notify test", "notify test info @x hi", "vib test",
+    "vib test alert", "setup reset", "setup reset mesh", "setup done mesh", "setup", "sensors start", "sensors stop",
+    "sensors boot on", "sensors boot off", "sensors boot x", "sensors bogus",
+    "mesh chat open #badgetest", "mesh chat close", "mesh chat", "mesh chat open", "mesh  chat   open x",
+    "mesh ident simulate", "mesh ident", "mesh  ident   simulate",
+};
+
+// The forms it left open: they run while developer mode is off
+static char const *const OPEN_FORMS[] = {
+    "thermal", "psram", "stress status", "stress stop", "idle", "notify", "notify clear", "notify read", "notify dnd on",
+    "notify testing", "vib", "vib on", "vib off", "vib strength low", "vib tests", "sensors", "sensors raw",
+    "sensors boot", "mesh", "mesh chats", "mesh send #x hi", "mesh chatty", "mesh identity", "help", "wifi on", "mem", "crash", "boot", "reboot",
+};
 
 // ---- the console's command list (registration, per build) ------------------------------------------------------
 
@@ -288,12 +309,6 @@ static bool word_is(char const *args, char const *word) {
 // console_dev_gate calls inside handlers: boot_keys_rtc.c, boot_progress.c, crash.c, sd_console.c, safe_mode.c,
 // mem_window_watch.c, mesh_cmd_send.cpp (airlog, chat). True when the form reaches one.
 static bool handler_dev_gate(char const *name, char const *args) {
-    if (strcmp(name, "app") == 0) {
-        return DEV_BUILD && strncmp(args, "crash ", 6) == 0 && args[6];
-    }
-    if (strcmp(name, "mem") == 0) {
-        return DEV_BUILD && word_is(args, "window"); // a release image binds no window: fw_console answers
-    }
     if (strcmp(name, "mesh") == 0) {
         return DEV_BUILD && (word_is(args, "airlog") || word_is(args, "chat"));
     }
@@ -327,6 +342,9 @@ static rules_of_t const RULES[] = {
     {"token", TOKEN_RULES},
     {"nvs-down", NVS_DOWN_RULES},
     {"nvs-enc", NVS_ENC_RULES},
+    {"mem", OS_MEM_RULES},
+    {"thermal", THERMAL_RULES},
+    {"app", APP_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {
@@ -386,6 +404,27 @@ static void check_column(pin_t const *p, char const *col, char const *what, bool
     }
 }
 
+static void check_forms(void) {
+    for (size_t i = 0; i < sizeof(GATE_FORMS) / sizeof(GATE_FORMS[0]); i++) {
+        char off = pin_decide(GATE_FORMS[i], false, CONSOLE_ORIGIN_UART, false);
+        char on  = pin_decide(GATE_FORMS[i], true, CONSOLE_ORIGIN_UART, false);
+        checked += 2;
+        bool ok = DEV_BUILD ? off == 'D' && on == 'R' : off == 'D' || off == '?';
+        if (!ok) {
+            printf("FAIL gated form \"%s\": off %c, on %c\n", GATE_FORMS[i], off, on);
+            failures++;
+        }
+    }
+    for (size_t i = 0; i < sizeof(OPEN_FORMS) / sizeof(OPEN_FORMS[0]); i++) {
+        char off = pin_decide(OPEN_FORMS[i], false, CONSOLE_ORIGIN_WIFI, false);
+        checked++;
+        if (off != 'R') {
+            printf("FAIL open form \"%s\": %c\n", OPEN_FORMS[i], off);
+            failures++;
+        }
+    }
+}
+
 // Every pinned line names a command of the list, and every command of the list is pinned at least once
 static void check_coverage(void) {
     for (size_t c = 0; c < sizeof(CMDS) / sizeof(CMDS[0]); c++) {
@@ -410,6 +449,7 @@ int main(void) {
             check_column(&PINS[i], PINS[i].rel, "release build", false);
         }
     }
+    check_forms();
     check_coverage();
     printf("console_pin%s: %d checks, %d failures\n", DEV_BUILD ? " (developer build)" : " (release)", checked,
            failures);

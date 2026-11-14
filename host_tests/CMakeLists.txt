@@ -2635,7 +2635,7 @@ set(CONSOLE_PIN_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/console_pin_test.c ${NPT_FW}/fw
 foreach(t console_pin_test console_pin_dev_test)
     add_executable(${t} ${CONSOLE_PIN_SRCS})
     target_include_directories(${t} PRIVATE ${NPT_FW}/fw_console ${NPT_FW}/mesh ${NPT_FW}/sdcard ${NPT_FW}/crash ${NPT_FW}/lichen_boot ${NPT_FW}/ota
-        ${NPT_FW}/lichen_nvs)
+        ${NPT_FW}/lichen_nvs ${NPT_FW}/lichen_os)
     target_compile_options(${t} PRIVATE -Wall -Wextra -Werror)
     target_link_libraries(${t} PRIVATE lichen_text)
     add_test(NAME ${t} COMMAND ${t})

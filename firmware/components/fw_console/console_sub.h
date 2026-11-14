@@ -55,7 +55,7 @@ typedef enum {
 #define CON_F_SECRET   0x10 // prints a secret (console_reply_secret)
 #define CON_F_OWNER    0x80 // the owner's own bit for its dispatch (MeshCore: needs MeshCore running)
 
-typedef struct {
+typedef struct console_sub { // named, so a header can pass a table without including this one
     char const *word;   // NULL: a row compiled out of this image, it matches nothing (REST and END have none)
     uint8_t     match;  // console_match_t
     uint8_t     gate;   // console_gate_t
