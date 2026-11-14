@@ -21,6 +21,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "file_replace.h"
 #include "fw_console.h"
 #include "notify_mute.h"
 #include "notify_rate.h"
@@ -88,25 +89,6 @@ static void unlock(void) {
 
 // ---- saving ---------------------------------------------------------------------------------------------------------
 
-static bool write_file(char const *path, uint8_t const *data, size_t len) {
-    FILE *f = fopen(path, "wb");
-    if (!f) {
-        return false;
-    }
-    bool ok = fwrite(data, 1, len, f) == len;
-    return (fclose(f) == 0) && ok;
-}
-
-// One atomic rename on LittleFS (#300), as crash.c's swap: notify.bin is the old file or the new one after a cut. A
-// notify.old left by the FAT drive's step-aside swap goes once notify.bin is in place.
-static bool swap_in(void) {
-    if (rename(NOTIFY_TMP, NOTIFY_FILE) != 0) {
-        return false;
-    }
-    unlink(NOTIFY_OLD);
-    return true;
-}
-
 typedef enum { SAVE_SLOW, SAVE_SOON, SAVE_FORCE } save_when_t;
 static void schedule_save_locked(save_when_t when);
 
@@ -118,10 +100,9 @@ static void save_task(void *arg) {
     size_t len      = nr_encode(s_ring, s_buf, NR_FILE_MAX);
     unlock();
     mkdir(NOTIFY_DIR, 0777); // exists after the first save
-    bool ok = len && write_file(NOTIFY_TMP, s_buf, len) && swap_in();
+    bool ok = len && lichen_file_replace(NOTIFY_FILE, s_buf, len); // a cut leaves the old file or the new one
     if (!ok) {
         ESP_LOGW(TAG, "cannot write %s (errno %d)", NOTIFY_FILE, errno);
-        unlink(NOTIFY_TMP);
     }
     if (!told_stack) {
         told_stack = true;
@@ -218,9 +199,8 @@ static void changed_locked(save_when_t when) {
 
 // ---- loading --------------------------------------------------------------------------------------------------------
 
-// The file or one of its swap leftovers; the first whole one wins
 static bool load_file(char const *path) {
-    FILE *f = fopen(path, "rb");
+    FILE *f = lichen_file_open_recovered(path);
     if (!f) {
         return false;
     }
@@ -235,12 +215,7 @@ static bool load_file(char const *path) {
 }
 
 static void load(void) {
-    // A swap cut short leaves .old (the previous file) and .tmp (complete, newer): .tmp before .old
-    char const *paths[] = {NOTIFY_FILE, NOTIFY_TMP, NOTIFY_OLD};
-    bool        loaded  = false;
-    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]) && !loaded; i++) {
-        loaded = load_file(paths[i]);
-    }
+    bool loaded = load_file(NOTIFY_FILE);
     uint16_t boot = loaded ? s_ring->boot : 0;
     if (!loaded) {
         nr_init(s_ring, 0);

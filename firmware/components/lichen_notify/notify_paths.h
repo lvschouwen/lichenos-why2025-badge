@@ -4,5 +4,3 @@
 
 #define NOTIFY_DIR  STORAGE_BASE "/lichen"
 #define NOTIFY_FILE NOTIFY_DIR "/notify.bin"
-#define NOTIFY_OLD  NOTIFY_DIR "/notify.old"
-#define NOTIFY_TMP  NOTIFY_DIR "/notify.tmp"
