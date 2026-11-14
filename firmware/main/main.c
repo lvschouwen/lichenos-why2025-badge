@@ -48,6 +48,7 @@
 #include "app_ns.h"
 #include "factory_plan.h"
 #include "lichen_sys_app.h"
+#include "lichen_sys_life.h"
 #include "lichen_mem.h"
 #include "lichen_task.h"
 #include "lichen_random.h"
@@ -371,7 +372,11 @@ static void start_apps(void) {
         // #232: crashed twice in three boots (logged by safe_mode.c); asked for every app, so the rule sees which
         // ones have a background part it may switch off (never an exempt one: MeshCore)
         bool may_off = safe_mode_may_switch_off(app->start_background != NULL, app->safe_mode_exempt);
-        if (safe_mode_background_off(app->id, may_off) || !app->start_background) {
+        if (safe_mode_background_off(app->id, may_off)) {
+            lichen_sys_life_fault_crashes(i); // #231: FAULTED until a boot after fw app background <id> on
+            continue;
+        }
+        if (!app->start_background) {
             continue;
         }
         // #229: a start_background hook needs CAP_BACKGROUND (rule D checks it at build time; this is the backstop,
@@ -383,6 +388,7 @@ static void start_apps(void) {
             lichen_ctx_leave(previous);
         }
         if (started) {
+            lichen_sys_life_started(i);
             continue;
         }
         ESP_LOGE(TAG, "%s not started%s", app->name,

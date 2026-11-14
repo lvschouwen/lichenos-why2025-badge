@@ -6,6 +6,7 @@
 #include "lichen_sys_app.h"
 #include "lichen_sys_mem.h"
 #include "gate_book.h"
+#include "lichen_os.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -191,6 +192,13 @@ size_t lichen_task_leftovers(lichen_ctx_t ctx, uint32_t wait_ms) {
             ESP_LOGW(TAG, "%s stopped, but its task %s still runs", owner, name);
         }
     }
+    return left;
+}
+
+size_t lichen_os_task_count(uint32_t ctx) {
+    portENTER_CRITICAL(&book_mux);
+    size_t left = task_book_count(&book, ctx, xTaskGetCurrentTaskHandle());
+    portEXIT_CRITICAL(&book_mux);
     return left;
 }
 

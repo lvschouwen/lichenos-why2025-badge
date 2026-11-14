@@ -4,6 +4,7 @@
 #include "lichen_sys_thermal.h"
 #include "radio_state.h"
 #include "draw_stack.h"
+#include "app_life.h"
 
 // Between the shell's own files (#66), not for apps
 
@@ -91,9 +92,9 @@ void factory_screen_open(void *arg);
 void backup_screen_open(void *arg); // backup_screen.c: Settings > Backup (#169)
 // app_console.c: Settings > For developers > Console (#150; menu callback, LVGL context)
 void console_open_from_settings(void *arg);
-// update_screen.c: every app's stop_for_update (a firmware update, a restart or power off from the Power app, #65);
-// true when all of them stopped. Blocks for seconds: never on the LVGL task.
-bool shell_stop_apps(void);
+// update_screen.c: stop(reason) (#231): every app's stop_for_update (a firmware update, a restart or power off from the
+// Power app, #65); true when all of them stopped. Blocks for seconds: never on the LVGL task.
+bool shell_stop_apps(life_reason_t reason);
 void crashlog_app_register(void); // app_crashlog.c (#72); after a crash also asks on home to open it
 
 // time_set_screen.c: Settings > Time > Set date & time (#64), a builder for shell_open()

@@ -40,13 +40,14 @@
 # Crash attribution and safe mode (#232): safe_mode.c (the LP RAM record, the panic hook, the boot step, fw app
 # background) over safe_mode_policy.c and safe_mode_rec.c (pure, safe_mode_policy_test.c); linker.lf keeps the panic
 # path (safe_mode_rec.c) in internal RAM.
+# stop(reason) (#231, app_stop.c): every app's stop hook with its lifecycle record (lichen_sys_life.h), cooperative.
 idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "app_slot.c"
                             "lichen_crashlog.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"
                             "lichen_task.c" "lichen_mem.c" "gate_book.c" "fonts.c" "lichen_ui_call.c" "key_matrix.c"
                             "lichen_sensors.c" "lichen_haptics.c" "lichen_sys_display.c" "lichen_sys_mem.c" "lichen_sys_pure.c" "lichen_sys_storage.c" "lichen_sys_update.c" "settings_secret.c" "settings_secret_keys.c" "app_secret_move.c" "app_secret_boot.c" "os_bind.c" "lichen_sys_pure_view.c" "lichen_sys_view.c"
                             "ui_call_queue.c" "ui_lock_owner.c" "ui_lock_hits.c" "ui_lock_check.c" "dma_low.c" "dma_watch.c" "mem_window.c" "mem_window_watch.c"
                             "thermal.c" "thermal_rules.c" "sys_notices.c" "sys_notice_rules.c" "lichen_sys_power.c"
-                            "safe_mode.c" "safe_mode_policy.c" "safe_mode_rec.c"
+                            "safe_mode.c" "safe_mode_policy.c" "safe_mode_rec.c" "app_stop.c"
                             "lichen_reg.c" "reg_cmd.c" "reg_proxy.c" "reg_p4_table.c" "reg_p4_psram.c" "reg_p4_display.c" "reg_p4_sensors.c" "reg_p4_misc.c" "reg_p4_settings.c" "settings_fail.c" "settings_reg.c" "reg_wifi.c" "disp_state.c" "disp_state_fmt.c" "../../../shared/reg/reg.c"
                        INCLUDE_DIRS "."
                        PRIV_INCLUDE_DIRS "../../../shared/reg"

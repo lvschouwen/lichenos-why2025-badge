@@ -94,3 +94,7 @@ typedef struct {
 void lichen_watch_slow_counts(lichen_watch_slow_t *out);
 void thermal_start(lichen_watch_hooks_t const *hooks);     // lichen_watch_start's thermal half
 void sys_notices_start(lichen_watch_hooks_t const *hooks); // and its notices half
+
+// stop(reason)'s report (#231, app_stop.c): ctx's booked tasks still running, other than the caller's, counted now
+// without a wait or a log line. Any task, not an ISR (lichen_task.c's spinlock).
+size_t lichen_os_task_count(uint32_t ctx); // a lichen_ctx_t (this header stays free of LVGL for the host tests)

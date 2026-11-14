@@ -50,7 +50,7 @@ static void power_task(void *arg) {
     bool       off   = atomic_load(&want_off);
     TickType_t begin = xTaskGetTickCount();
     ESP_LOGI(TAG, "%s: stopping the apps", off ? "power off" : "restart");
-    bool all_stopped = shell_stop_apps();
+    bool all_stopped = shell_stop_apps(off ? LIFE_STOP_POWER_OFF : LIFE_STOP_RESTART);
     update_mode_run_stop_hook(all_stopped); // LoRa (when every app stopped), the C6 link's update state
     if (!lichen_notify_save_now(NOTIFY_SAVE_MS)) {
         ESP_LOGW(TAG, "notifications not saved in time");
@@ -75,7 +75,7 @@ void shell_save_for_restart(void) {
         ESP_LOGW(TAG, "notifications not saved in time");
     }
     ESP_LOGI(TAG, "restart: stopping the apps");
-    if (!shell_stop_apps()) {
+    if (!shell_stop_apps(LIFE_STOP_RESTART)) {
         ESP_LOGW(TAG, "restart: an app did not stop, its last changes may be lost");
     }
 }

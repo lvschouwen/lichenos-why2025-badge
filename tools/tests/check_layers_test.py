@@ -293,9 +293,16 @@ class HardAndConf(unittest.TestCase):
         conf = cl.parse_conf(cl.read(os.path.join(os.path.dirname(cl.__file__), "layers.conf")))
         owners = {"lichen_ctx_enter": {"lichen_os", "lichen_shell", "main"},
                   "lichen_ctx_leave": {"lichen_os", "lichen_shell", "main"},
-                  "lichen_sys_app_ctx_at": {"lichen_shell", "main"},
-                  "lichen_app_count": {"lichen_shell", "main"}, "lichen_app_at": {"lichen_shell", "main"},
+                  # #231: lichen_os's stop(reason) walks the table (app_stop.c, what shell_stop_apps did)
+                  "lichen_sys_app_ctx_at": {"lichen_shell", "main", "lichen_os"},
+                  "lichen_app_count": {"lichen_shell", "main", "lichen_os"},
+                  "lichen_app_at": {"lichen_shell", "main", "lichen_os"},
                   "lichen_app_by_id": {"lichen_os"}, "lichen_app_by_name": {"lichen_shell"},
+                  # #231: the lifecycle's moves, each by the one component that makes it
+                  "lichen_sys_apps_stop": {"lichen_shell"}, "lichen_sys_life_started": {"main"},
+                  "lichen_sys_life_fault_crashes": {"main"}, "lichen_sys_life_screens": {"lichen_shell"},
+                  "lichen_sys_life_stop_begin": {"lichen_os"}, "lichen_sys_life_stop_end": {"lichen_os"},
+                  "lichen_sys_life_wait": {"lichen_os"},
                   "lichen_notify_post_test": set()}
         for sym, want in owners.items():
             defs = {sym: "lichen_notify" if sym == "lichen_notify_post_test" else "lichen_api"}

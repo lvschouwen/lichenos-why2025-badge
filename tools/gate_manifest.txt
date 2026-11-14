@@ -261,6 +261,7 @@ lichen_station_clock	-	lvgl	lichen_ui.h
 lichen_sys_app_console_more	SYSTEM	unspecified	lichen_sys_app.h
 lichen_sys_app_console_register	SYSTEM	not-lvgl	lichen_sys_app.h
 lichen_sys_app_ctx_at	SYSTEM	any	lichen_sys_app.h
+lichen_sys_apps_stop	SYSTEM	not-lvgl	lichen_sys_life.h
 lichen_sys_badge_get	SYSTEM	unspecified	lichen_sys_badge.h
 lichen_sys_badge_set	SYSTEM	unspecified	lichen_sys_badge.h
 lichen_sys_boot_label	SYSTEM	any	lichen_sys_boot.h
@@ -316,6 +317,14 @@ lichen_sys_keys_set_gate	SYSTEM	any	lichen_sys_keys.h
 lichen_sys_keys_set_wake	SYSTEM	any	lichen_sys_keys.h
 lichen_sys_led_enabled	SYSTEM	any	lichen_sys_led.h
 lichen_sys_led_set_enabled	SYSTEM	any	lichen_sys_led.h
+lichen_sys_life_console	SYSTEM	unspecified	lichen_sys_life.h
+lichen_sys_life_fault_crashes	SYSTEM	any	lichen_sys_life.h
+lichen_sys_life_get	SYSTEM	any	lichen_sys_life.h
+lichen_sys_life_screens	SYSTEM	lvgl	lichen_sys_life.h
+lichen_sys_life_started	SYSTEM	any	lichen_sys_life.h
+lichen_sys_life_stop_begin	SYSTEM	any	lichen_sys_life.h
+lichen_sys_life_stop_end	SYSTEM	unspecified	lichen_sys_life.h
+lichen_sys_life_wait	SYSTEM	unspecified	lichen_sys_life.h
 lichen_sys_log_clean	SYSTEM	any	lichen_sys_boot.h
 lichen_sys_log_tap_last	SYSTEM	any	lichen_sys_boot.h
 lichen_sys_lora_counts	SYSTEM	any	lichen_sys_c6.h

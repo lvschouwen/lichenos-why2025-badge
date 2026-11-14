@@ -4,6 +4,7 @@
 
 #include "esp_log.h"
 #include "fw_console.h"
+#include "lichen_sys_life.h"
 #include "lichen_sys_ui.h"
 #include "lichen_sys_mem.h"
 #include "freertos/FreeRTOS.h"
@@ -95,9 +96,21 @@ void shell_refocus(void) {
 
 // A cover stays in front whatever opens or closes below it; the keys still go to the top screen's group (the lock
 // swallows them before LVGL, the saver's waking key never gets there)
+// Every change of the stack ends in show_top: the apps' lifecycle follows it (#231, OPEN or SUSPENDED while a screen of
+// theirs is on the stack). Only the records' spinlock, nothing that waits, under the LVGL lock.
+static void life_sync(void) {
+    int ids[NAV_MAX_DEPTH];
+    int depth = nav_depth();
+    for (int i = 0; i < depth && i < NAV_MAX_DEPTH; i++) {
+        ids[i] = nav_at(i);
+    }
+    lichen_sys_life_screens(ids, depth < NAV_MAX_DEPTH ? depth : NAV_MAX_DEPTH);
+}
+
 static void show_top(void) {
     lv_screen_load(cover ? cover : frames[nav_depth() - 1].screen);
     focus_keys();
+    life_sync();
 }
 
 void shell_set_cover(lv_obj_t *screen, bool status_bar_shown) {

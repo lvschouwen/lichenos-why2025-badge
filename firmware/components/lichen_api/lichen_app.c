@@ -2,6 +2,7 @@
 // each app has a context (app_ctx.c) and the current one lives in the task's thread-local slot (lichen_sys_app.h).
 #include "lichen_app.h"
 #include "lichen_sys_app.h"
+#include "lichen_sys_life.h"
 
 #include "app_caps.h"
 #include "app_ctx.h"
@@ -436,16 +437,19 @@ static void cmd_app(char const *args) {
         cmd_app_ctx();
     } else if (strcmp(args, "caps") == 0) {
         cmd_app_caps();
+    } else if (strcmp(args, "life") == 0) {
+        lichen_sys_life_console(); // #231
     } else if (s_more) {
         s_more(args);
     } else {
-        console_reply("usage: app ctx | app caps");
+        console_reply("usage: app ctx | app caps | app life");
     }
 }
 
 void lichen_sys_app_console_register(void) {
     console_register("app", s_more_usage ? s_more_usage
                                          : "app ctx (every app's context, the refusals of stale or made-up contexts "
-                                           "since boot) | app caps (each app's capabilities, budgets and refused calls)",
+                                           "since boot) | app caps (each app's capabilities, budgets and refused calls) | app life (each "
+                                           "app's lifecycle state and its last stop, #231)",
                      cmd_app);
 }
