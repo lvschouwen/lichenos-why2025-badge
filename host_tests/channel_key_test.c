@@ -29,15 +29,11 @@ static uint8_t const FOO[16] = {
 #define DUMMY16_B64   "AAECAwQFBgcICQoLDA0ODw=="                     // 0x00..0x0F
 #define DUMMY32_B64   "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=" // 0x00..0x1F
 
-// What mesh_channel_add decides: channel_parse, then a typed key checked against the name. NULL when added.
+// mesh_channel_add's decision, as it calls it. NULL when added.
 static char const *add(char const *name_in, char const *b64, char *name, size_t cap) {
-    uint8_t     secret[CHANNEL_SECRET_MAX] = {0};
-    size_t      len                        = 0;
-    char const *why                        = channel_parse(name_in, b64, name, cap, secret, &len);
-    if (!why && len) {
-        why = channel_key_refusal(name, secret, len);
-    }
-    return why;
+    uint8_t secret[CHANNEL_SECRET_MAX] = {0};
+    size_t  len                        = 0;
+    return channel_add_parse(name_in, b64, name, cap, secret, &len);
 }
 
 static void derivation(void) {
@@ -61,6 +57,22 @@ static void adds(void) {
     CHECK(add("#BADGETEST", "iMnx1wCALr16qgmzI01IcQ", name, sizeof(name)) == NULL); // unpadded
     // Without a key: the hashtag channel, as before
     CHECK(add("#badgetest", NULL, name, sizeof(name)) == NULL && strcmp(name, "#badgetest") == 0);
+    // The key the add stores: the hashtag's own when none is typed, nothing when refused
+    {
+        uint8_t key[CHANNEL_SECRET_MAX];
+        size_t  n = 0;
+        CHECK(
+            channel_add_parse("#BadgeTest", NULL, name, sizeof(name), key, &n) == NULL && n == 16 &&
+            memcmp(key, BADGETEST, 16) == 0
+        );
+        CHECK(
+            channel_add_parse("#badgetest", DUMMY32_B64, name, sizeof(name), key, &n) == CHANNEL_WRONG_KEY && n == 0 &&
+            key[0] == 0 && key[31] == 0
+        );
+        CHECK(
+            channel_add_parse("friends", DUMMY16_B64, name, sizeof(name), key, &n) == NULL && n == 16 && key[15] == 15
+        );
+    }
     // A foreign key under a #name: refused, 16 or 32 bytes, whatever the case of the name
     CHECK(add("#badgetest", DUMMY16_B64, name, sizeof(name)) == CHANNEL_WRONG_KEY);
     CHECK(add("#badgetest", DUMMY32_B64, name, sizeof(name)) == CHANNEL_WRONG_KEY);

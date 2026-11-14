@@ -596,6 +596,13 @@ copy, its setting and `fw onair` are `mesh_onair_run.c`.
 - Accepted limit: an unreadable NVS reads as off: the settings API returns the default on a failed read and cannot
   report it.
 
+## Hashtag channel keys (#451)
+
+A `#name` channel carries only its hashtag's key (the first 16 bytes of SHA-256 of the ASCII-lowercased name,
+`channel_key.c`): add and rename refuse another, and a stored `#name` whose key is not its own (for example derived
+without lowercasing by other firmware, or a non-ASCII name lowercased differently) is kept, marked in `fw channels`, and
+not sent on (refused when queued and again when the frame is built).
+
 ## Channel flood scope (#291)
 
 A channel can carry a **flood scope of its own**: a message sent on it from the screens floods in that region instead

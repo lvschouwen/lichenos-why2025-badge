@@ -48,3 +48,25 @@ char const *channel_stored_key_refusal(char const *name, uint8_t const secret[32
     }
     return channel_key_refusal(name, secret, len);
 }
+
+char const *channel_add_parse(
+    char const *name,
+    char const *b64_or_null,
+    char       *out_name,
+    size_t      name_cap,
+    uint8_t     out_secret[CHANNEL_SECRET_MAX],
+    size_t     *secret_len
+) {
+    char const *why = channel_parse(name, b64_or_null, out_name, name_cap, out_secret, secret_len);
+    if (!why && *secret_len == 0) {
+        *secret_len = channel_hashtag_key(out_name, out_secret) ? CHANNEL_HASHTAG_KEY_LEN : 0;
+        why         = *secret_len ? NULL : "The hashtag's key could not be made, try again";
+    } else if (!why) {
+        why = channel_key_refusal(out_name, out_secret, *secret_len);
+    }
+    if (why) {
+        mh_wipe(out_secret, CHANNEL_SECRET_MAX); // a typed key, refused: not left behind
+        *secret_len = 0;
+    }
+    return why;
+}

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "channel_input.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -25,6 +27,17 @@ bool        channel_hashtag_key(char const *name, uint8_t out[CHANNEL_HASHTAG_KE
 char const *channel_key_refusal(char const *name, uint8_t const *secret, size_t secret_len);
 // The same for a stored channel: MeshCore keeps 32 bytes, a 16-byte key has zeroes after it (mesh_share.h)
 char const *channel_stored_key_refusal(char const *name, uint8_t const secret[32]);
+// What mesh_channel_add takes: channel_parse's rules, then the key. Without one a #hashtag's own (16 bytes), a typed
+// one only when the name may carry it (channel_key_refusal). NULL with out_secret and *secret_len set, else why not
+// (out_secret zeroed, *secret_len 0).
+char const *channel_add_parse(
+    char const *name,
+    char const *b64_or_null,
+    char       *out_name,
+    size_t      name_cap,
+    uint8_t     out_secret[CHANNEL_SECRET_MAX],
+    size_t     *secret_len
+);
 
 #ifdef __cplusplus
 }

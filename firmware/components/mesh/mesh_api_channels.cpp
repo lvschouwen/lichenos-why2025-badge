@@ -10,19 +10,9 @@ extern "C" char const *mesh_channel_add(char const *name_in, char const *b64_key
     ChannelDetails details = {};
     char           name[MESH_CHANNEL_MAX + 1];
     size_t         key_len;
-    // The input rules (and the key's bounds, #65 review) are channel_input.c's, host-tested
-    char const *why = channel_parse(name_in, b64_key_or_null, name, sizeof(name), details.channel.secret, &key_len);
+    // The input rules (and the key's bounds, #65 review; #451: a #name takes only its own key) are channel_key.c's
+    char const *why = channel_add_parse(name_in, b64_key_or_null, name, sizeof(name), details.channel.secret, &key_len);
     if (why) {
-        return why;
-    }
-    if (key_len == 0) {
-        key_len = channel_hashtag_key(name, details.channel.secret) ? CHANNEL_HASHTAG_KEY_LEN : 0;
-        why     = key_len ? NULL : "The hashtag's key could not be made, try again";
-    } else {
-        why = channel_key_refusal(name, details.channel.secret, key_len); // #451: a #name takes only its own key
-    }
-    if (why) {
-        mesh_wipe(&details, sizeof(details)); // a typed channel key: not left on the stack
         return why;
     }
     StrHelper::strncpy(details.name, name, sizeof(details.name));
@@ -107,9 +97,9 @@ char const *mesh_int::channel_send_refusal(char const *name, uint32_t wait_ms) {
         return wait_ms ? "MeshCore is busy, try again" : NULL;
     }
     ChannelDetails slot;
-    int            at  = channel_named_locked(name, slot);
-    char const    *why = at >= 0 ? channel_stored_key_refusal(slot.name, slot.channel.secret) : NULL;
-    mesh_unlock();
+    bool           found = channel_named_locked(name, slot) >= 0;
+    mesh_unlock(); // the copy is judged after the unlock: the hash never runs under the lock on the LVGL task
+    char const *why = found ? channel_stored_key_refusal(slot.name, slot.channel.secret) : NULL;
     mesh_wipe(&slot, sizeof(slot)); // the channel's key: not left on the stack
     return why;
 }
