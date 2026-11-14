@@ -55,6 +55,27 @@ expect deny "$b meshcore mesh chat open '#general'"
 expect pass "$b mesh chat open TESTNODE"
 expect pass "$b mesh chat close"
 expect pass "$b mesh chat"
+# #438 review: one console line must never hide the next (grep -o does not rescan consumed text); the printf string
+# carries a literal \n, as it does when a script writes two lines to the tty
+tty='printf "%s\n" "'
+for first in "mesh chat close" "mesh advert" "mesh advert zero" "mesh scope" "mesh scope default" "mesh scope default zz" "mesh scope console zz-bench YES" "mesh chat open #badgetest"; do
+  expect deny "${tty}${first}\nmesh send #general hi\" > /dev/ttyACM0"
+  expect deny "${tty}${first}\nmesh chat open #general\" > /dev/ttyACM0"
+  expect deny "echo -e '${first}\nmesh dm 0123456789ab hi' > /dev/ttyACM0"
+  expect deny "echo '${first}'; echo 'mesh send #general hi' > /dev/ttyACM0"
+  expect deny "echo '${first}' && echo 'mesh send #general hi' > /dev/ttyACM0"
+  expect deny "echo '${first}' | tee /dev/ttyACM0; echo 'mesh send #general hi' > /dev/ttyACM0"
+  expect deny "${tty}${first}\rmesh send #general hi\" > /dev/ttyACM0"
+done
+expect pass "${tty}mesh chat close\nmesh send #badgetest hi\" > /dev/ttyACM0"
+expect deny "ssh pi 'tools/badge.sh console /dev/ttyACM0 \"fw mesh chat open #general\"'"
+expect pass "ssh pi 'tools/badge.sh console /dev/ttyACM0 \"fw mesh chat open #badgetest\"'"
+expect deny "echo 'mesh chat open #general' > /dev/ttyACM0"
+expect pass "echo 'mesh chat open #badgetest' > /dev/ttyACM0"
+expect deny "curl -s http://192.0.2.1/console -d 'fw mesh chat open #general'"
+expect pass "curl -s http://192.0.2.1/console -d 'fw mesh chat open #badgetest'"
+expect deny "$b mesh chat open #badgetest; $b mesh chat open #general"
+expect pass "git commit -m 'mesh chat open #general'"
 # The console scope (#290): read freely, set only to the allow list's scope line
 expect pass "$b mesh scope"
 expect pass "$b mesh scope console zz-bench YES"

@@ -24,6 +24,7 @@
 #include "scroll_anchor.h"
 #include "theme.h"
 
+#include "lichen_task.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <stdio.h>
@@ -784,54 +785,74 @@ void meshcore_chat_open_channel(char const *name) {
 
 #define CON_WAIT_MS 3000
 #define CON_POLL_MS 10
-enum { CON_IDLE, CON_QUEUED, CON_DONE_OK, CON_DONE_NONE };
+#define CON_STACK   3072 // lichen_ui_call and a short wait only
 
-// One job at a time (console.c serialises the commands). A job whose answer was not waited for out stays QUEUED until
-// its callback runs, and the next command is refused meanwhile: the buffer is never shared by two jobs.
+// One job at a time (console.c serialises the commands). state is PENDING while the job runs, else its answer; a job
+// whose answer nobody waited for ends by itself and the next command only sees the old answer overwritten.
 static struct {
-    int  state;
-    bool open;
-    char name[MESH_CHAT_CMD_NAME_MAX];
-} con_job;
+    int        state;
+    bool       open;
+    lv_obj_t  *was; // close: the chat that was on top
+    char       name[MESH_CHAT_CMD_NAME_MAX];
+} con_job = {.state = MESHCORE_CHAT_CON_NONE};
 
-// LVGL task, through the UI service: the same push a row's Enter does
+static void con_finish(int answer) {
+    __atomic_store_n(&con_job.state, answer, __ATOMIC_RELEASE);
+}
+
+// shell_back_then's follow-up: the chat is gone when another screen is on top (the pop was refused otherwise)
+static void con_closed(void *arg) {
+    (void)arg;
+    con_finish(shell_stack_screen(0) != con_job.was ? MESHCORE_CHAT_CON_OK : MESHCORE_CHAT_CON_REFUSED);
+}
+
+// LVGL task, as MeshCore (the task below queued it): the same push a row's Enter does
 static void con_run(void *arg) {
     (void)arg;
-    int done = CON_DONE_OK;
     if (con_job.open) {
         meshcore_chat_open_channel(con_job.name);
-    } else if (chat_on_top()) {
-        shell_back(); // Esc, but leaving at once also with a draft or a search open
-    } else {
-        done = CON_DONE_NONE;
+        con_finish(MESHCORE_CHAT_CON_OK);
+        return;
     }
-    __atomic_store_n(&con_job.state, done, __ATOMIC_RELEASE);
+    chat_t *c = chat_on_top();
+    if (!c) {
+        con_finish(MESHCORE_CHAT_CON_NONE);
+        return;
+    }
+    con_job.was = c->screen;
+    if (!shell_back_then(con_closed, NULL)) { // Esc, but leaving at once also with a draft or a search open
+        con_finish(MESHCORE_CHAT_CON_REFUSED);
+    }
+}
+
+// A short task of MeshCore's: lichen_ui_call runs fn for the context that queues it, and the console task is the OS's,
+// so a chat pushed from it would be booked to the OS (#231, #349)
+static void con_task(void *arg) {
+    (void)arg;
+    if (!lichen_ui_call(con_run, NULL)) {
+        con_finish(MESHCORE_CHAT_CON_BUSY);
+    }
 }
 
 meshcore_chat_con_t meshcore_chat_console(char const *name) {
-    int idle = CON_IDLE;
-    int busy = CON_QUEUED;
-    if (!__atomic_compare_exchange_n(&con_job.state, &idle, busy, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
-        if (__atomic_load_n(&con_job.state, __ATOMIC_ACQUIRE) == CON_QUEUED) {
-            return MESHCORE_CHAT_CON_BUSY;
-        }
-        __atomic_store_n(&con_job.state, CON_QUEUED, __ATOMIC_RELEASE); // the last answer was never collected
+    if (__atomic_load_n(&con_job.state, __ATOMIC_ACQUIRE) == MESHCORE_CHAT_CON_PENDING) {
+        return MESHCORE_CHAT_CON_BUSY; // the last job has not ended yet
     }
     con_job.open = name != NULL;
     snprintf(con_job.name, sizeof(con_job.name), "%s", name ? name : "");
-    if (!lichen_ui_call(con_run, NULL)) {
-        __atomic_store_n(&con_job.state, CON_IDLE, __ATOMIC_RELEASE);
+    con_finish(MESHCORE_CHAT_CON_PENDING);
+    if (!lichen_task_start(meshcore_ctx(), "chatcmd", con_task, NULL, CON_STACK, LICHEN_PRIO_JOB, NULL)) {
+        con_finish(MESHCORE_CHAT_CON_BUSY);
         return MESHCORE_CHAT_CON_BUSY;
     }
     for (int waited = 0; waited < CON_WAIT_MS; waited += CON_POLL_MS) {
         int s = __atomic_load_n(&con_job.state, __ATOMIC_ACQUIRE);
-        if (s != CON_QUEUED) {
-            __atomic_store_n(&con_job.state, CON_IDLE, __ATOMIC_RELEASE);
-            return s == CON_DONE_OK ? MESHCORE_CHAT_CON_OK : MESHCORE_CHAT_CON_NONE;
+        if (s != MESHCORE_CHAT_CON_PENDING) {
+            return (meshcore_chat_con_t)s;
         }
         vTaskDelay(pdMS_TO_TICKS(CON_POLL_MS));
     }
-    return MESHCORE_CHAT_CON_BUSY;
+    return MESHCORE_CHAT_CON_LATE;
 }
 #endif
 

@@ -43,6 +43,20 @@ onair_allow_override=${ONAIR_ALLOW_FILE:-}
 reach='(^|[^[:alnum:]_-])badge\.sh[[:space:]]+(fw|console)[[:space:]]|(^|[^[:alnum:]_-])ssh[[:space:]]|/dev/tty|curl[^|;&]*/console'
 # Backslash-newline continuations join first, so a target on the next line is still seen
 cmd_joined=$(printf '%s\n' "$cmd" | sed -e ':a' -e '/\\$/N' -e 's/\\\n/ /' -e 'ta')
+# One console line must never hide the next (grep -o does not rescan text it consumed): each line that reaches the
+# badge is split into segments (a real or printf/echo-escaped newline or carriage return, ;, &, |) and every segment
+# is searched on its own. The #438 "mesh chat" words are a separate pass, so their match cannot swallow a word of
+# another command.
+onair_segments() {
+  printf '%s\n' "$1" | sed -e 's/\\\(n\|r\|x0[aAdD]\|01[25]\)/\n/g' -e 's/\r/\n/g' -e 's/[;&|]/\n/g'
+}
+onair_hits() {
+  local seg
+  while IFS= read -r seg; do
+    printf '%s\n' "$seg" | grep -oE 'mesh[[:space:]]+(send|dm|remote|telemetry|trace|discover|history|advert|scope)([[:space:]]+[^[:space:];&|)]+){0,2}|onair([[:space:]]+[^[:space:];&|)]+){0,2}' || true
+    printf '%s\n' "$seg" | grep -oE 'mesh[[:space:]]+chat([[:space:]]+[^[:space:];&|)]+){0,2}' || true
+  done < <(onair_segments "$1")
+}
 if printf '%s' "$cmd_joined" | grep -qE "$reach"; then
   while IFS= read -r hit; do
     [ -n "$hit" ] || continue
@@ -51,7 +65,7 @@ if printf '%s' "$cmd_joined" | grep -qE "$reach"; then
       deny\ *) deny "${verdict#deny }" ;;
       ask\ *) deny "${verdict#ask }: Lucas sets it in MeshCore Settings on the badge" ;;
     esac
-  done < <(printf '%s\n' "$cmd_joined" | grep -E "$reach" | grep -oE 'mesh[[:space:]]+(send|dm|remote|telemetry|trace|discover|history|advert|scope|chat)([[:space:]]+[^[:space:];&|)]+){0,2}|onair([[:space:]]+[^[:space:];&|)]+){0,2}' || true)
+  done < <(onair_hits "$(printf '%s\n' "$cmd_joined" | grep -E "$reach")")
 fi
 main_dir=$(git -C "${cwd:-.}" rev-parse --show-toplevel 2>/dev/null || true)
 main_checkout=${CLAUDE_PROJECT_DIR:-/home/lucas/coding/why2025-badge}

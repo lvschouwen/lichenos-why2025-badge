@@ -211,7 +211,7 @@ The serial console (115200 baud) takes `fw <command>` lines, e.g. `tools/badge.s
   `fw mesh chat open <#channel>` and `fw mesh chat close` (developer mode, not in a release image): open a channel's chat
   screen as Enter on its row would, and leave it as Esc would. Channels only (a contact, a DM or an unknown name is
   refused), only while MeshCore runs, and a channel off the badge's on-air allow list (`fw onair`) is refused too. It
-  never focuses the compose line and never sends. The host guard (`tools/onair_guard.sh`) treats the open like a send:
+  never fills the compose line and never sends (the line takes the focus as in a hand-opened chat). The host guard (`tools/onair_guard.sh`) treats the open like a send:
   only `#badgetest` or an allow-listed target.
 - Crashes: every crash keeps a core dump and a log line. `fw crash` shows them, `fw crash dump` prints the dump,
   `fw crash clear` drops it. `tools/badge.sh crash <port> [elf]` fetches the dump and decodes it against the crashed
