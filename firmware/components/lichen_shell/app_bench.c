@@ -448,6 +448,7 @@ static lichen_app_t const bench_app = {
     .draw_icon = icon_bench,
     .tile_text = bench_tile,
     .open      = open_bench,
+    .caps      = CAP_SYSTEM, // the shell's own app (#229)
 };
 
 void bench_app_register(void) {

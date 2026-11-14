@@ -218,6 +218,7 @@ static lichen_app_t const notes_app = {
     .draw_icon = icon_notes,
     .tile_text = notes_tile,
     .open      = open_notes,
+    .caps      = CAP_SYSTEM, // the shell's own app (#229)
 };
 
 // ---- after boot ----

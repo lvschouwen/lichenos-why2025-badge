@@ -72,11 +72,14 @@ static void icon_testcard(lv_obj_t *parent, int size_px) {
 }
 
 static lichen_app_t const testcard_app = {
-    .name      = "Test card",
-    .id        = "testcard",
-    .draw_icon = icon_testcard,
-    .tile_text = testcard_tile,
-    .open      = open_testcard,
+    .name             = "Test card",
+    .id               = "testcard",
+    .draw_icon        = icon_testcard,
+    .tile_text        = testcard_tile,
+    .open             = open_testcard,
+    .caps             = 0,
+    .internal_ram_kib = 1,
+    .psram_kib        = 0,
 };
 
 void testcard_app_register(void) {

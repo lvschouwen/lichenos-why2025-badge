@@ -181,6 +181,7 @@ static lichen_app_t const power_app = {
     .id        = "power",
     .draw_icon = icon_power,
     .open      = open_power,
+    .caps      = CAP_SYSTEM, // the shell's own app (#229)
 };
 
 void power_app_register(void) {

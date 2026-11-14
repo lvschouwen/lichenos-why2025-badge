@@ -414,6 +414,10 @@ static lichen_app_t const meshcore_app = {
     .backup_keys      = meshcore_backup_keys,
     .backup_key_count = MESHCORE_BACKUP_KEYS,
     .secret_prefix    = MESHCORE_SECRET_PREFIX,
+    // #229: budgets are the static floor (statics, mesh and job stacks); the heap part is measured on the bench
+    .caps = CAP_LORA_TX | CAP_LORA_RX | CAP_SD | CAP_SECRETS | CAP_CONSOLE | CAP_RESTART | CAP_BACKGROUND | CAP_NOTIFY,
+    .internal_ram_kib = 48,
+    .psram_kib        = 24,
 };
 
 static lichen_app_t const *self(void) {

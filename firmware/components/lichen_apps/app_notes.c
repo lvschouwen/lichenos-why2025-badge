@@ -466,11 +466,14 @@ static void icon_pad(lv_obj_t *parent, int size_px) {
 }
 
 static lichen_app_t const notes_list_app = {
-    .name      = "Notes",
-    .id        = "notes",
-    .draw_icon = icon_pad,
-    .tile_text = notes_tile,
-    .open      = open_notes,
+    .name             = "Notes",
+    .id               = "notes",
+    .draw_icon        = icon_pad,
+    .tile_text        = notes_tile,
+    .open             = open_notes,
+    .caps             = CAP_SD | CAP_BACKGROUND,
+    .internal_ram_kib = 9,
+    .psram_kib        = 0,
 };
 
 void notepad_app_register(void) {

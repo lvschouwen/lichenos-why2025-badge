@@ -182,11 +182,14 @@ static void icon_keytest(lv_obj_t *parent, int size_px) {
 }
 
 static lichen_app_t const keytest_app = {
-    .name      = "Keyboard test",
-    .id        = "keytest",
-    .draw_icon = icon_keytest,
-    .tile_text = keytest_tile,
-    .open      = open_keytest,
+    .name             = "Keyboard test",
+    .id               = "keytest",
+    .draw_icon        = icon_keytest,
+    .tile_text        = keytest_tile,
+    .open             = open_keytest,
+    .caps             = CAP_RAW_KEYS,
+    .internal_ram_kib = 1,
+    .psram_kib        = 0,
 };
 
 void keytest_app_register(void) {

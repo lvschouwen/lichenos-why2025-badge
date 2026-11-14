@@ -405,6 +405,7 @@ static lichen_app_t const crashlog_app = {
     .draw_icon = icon_crashlog,
     .tile_text = tile_text,
     .open      = open_crashlog,
+    .caps      = CAP_SYSTEM, // the shell's own app (#229)
 };
 
 // ---- after a crash: one question on home ---------------------------------------------------------------------------

@@ -96,11 +96,14 @@ static void icon_clock(lv_obj_t *parent, int size_px) {
 }
 
 static lichen_app_t const clock_app = {
-    .name      = "Clock",
-    .id        = "clock",
-    .draw_icon = icon_clock,
-    .tile_text = clock_tile,
-    .open      = open_clock,
+    .name             = "Clock",
+    .id               = "clock",
+    .draw_icon        = icon_clock,
+    .tile_text        = clock_tile,
+    .open             = open_clock,
+    .caps             = 0,
+    .internal_ram_kib = 1,
+    .psram_kib        = 0,
 };
 
 void clock_app_register(void) {

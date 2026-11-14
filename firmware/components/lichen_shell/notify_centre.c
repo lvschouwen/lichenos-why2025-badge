@@ -484,6 +484,7 @@ static lichen_app_t const notify_app = {
     .draw_icon = icon_notify,
     .tile_text = tile_text,
     .open      = open_centre,
+    .caps      = CAP_SYSTEM, // the shell's own app (#229)
 };
 
 void notify_app_register(void) {

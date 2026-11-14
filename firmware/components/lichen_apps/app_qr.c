@@ -139,10 +139,13 @@ static void icon_qr(lv_obj_t *parent, int size_px) {
 }
 
 static lichen_app_t const qr_app = {
-    .name      = "QR code",
-    .id        = "qrcode",
-    .draw_icon = icon_qr,
-    .open      = open_qr,
+    .name             = "QR code",
+    .id               = "qrcode",
+    .draw_icon        = icon_qr,
+    .open             = open_qr,
+    .caps             = CAP_CONSOLE,
+    .internal_ram_kib = 1,
+    .psram_kib        = 0,
 };
 
 // fw qr <text>: for the bench, shows the text as a code

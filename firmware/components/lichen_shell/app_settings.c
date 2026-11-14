@@ -615,6 +615,7 @@ static lichen_app_t const settings_app = {
     .draw_icon = icon_settings,
     .tile_text = settings_tile,
     .open      = open_settings,
+    .caps      = CAP_SYSTEM, // the shell's own app (#229)
 };
 
 void settings_app_register(void) {

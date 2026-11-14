@@ -427,11 +427,14 @@ static void icon_timer(lv_obj_t *parent, int size_px) {
 }
 
 static lichen_app_t const timer_app = {
-    .name      = "Timer",
-    .id        = "timer",
-    .draw_icon = icon_timer,
-    .tile_text = timer_tile,
-    .open      = open_timer_app,
+    .name             = "Timer",
+    .id               = "timer",
+    .draw_icon        = icon_timer,
+    .tile_text        = timer_tile,
+    .open             = open_timer_app,
+    .caps             = CAP_NOTIFY,
+    .internal_ram_kib = 1,
+    .psram_kib        = 1,
 };
 
 void timer_app_register(void) {

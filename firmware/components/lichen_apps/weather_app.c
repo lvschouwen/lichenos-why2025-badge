@@ -307,6 +307,9 @@ static lichen_app_t const weather_app = {
     .settings         = weather_settings,
     .start_background = start_background,
     .stop_for_update  = stop_for_update,
+    .caps             = CAP_SD | CAP_NOTIFY | CAP_BACKGROUND | CAP_SENSORS,
+    .internal_ram_kib = 7,
+    .psram_kib        = 3,
 };
 
 void weather_app_register(void) {

@@ -18,7 +18,11 @@ built into it, e.g. the Arduino shim, #283). `forbid-except` names the one objec
 unchanged) that may still use a forbidden symbol; it is keyed to the object's file name in the archive
 (MyMesh.cpp.obj), so a line whose object no longer exists or no longer uses the symbol is a hard C (a rename upstream
 cannot drop the exception silently). An owner-only line with no owner bans the symbol for everyone, hard like forbid.
-Rule D (capabilities) is #229's and not here.
+  D  capabilities (#229): the `cap` list in layers.conf is the CAP_* list of lichen_app.h, and every app descriptor
+     (lichen_app_t ... = {...} in a component's sources) has an `app` line with the same caps and budgets (a secret
+     prefix needs SECRETS, a start_background hook BACKGROUND). nm on the closed layer's archives: every undefined
+     symbol the manifest gives a capability (`cap-func` / `cap-header`) is used by an object of an app (`app-objects`)
+     that declared it. All D failures are hard.
 
 Rule C counts per object file (an object that calls a symbol three times counts once), A per edge, B per include line.
 Hard failures, never baselined and never ratcheted: a `forbid` symbol, a library or header outside a closed layer's
@@ -29,9 +33,10 @@ count): a violation that is not in the baseline is NEW, a higher one is WORSE, a
 or gone is STALE (run --shrink), and a baseline entry that is new or higher than in the merge-base version of the file
 GREW. The baseline only shrinks. Report mode (--report) prints every violation and exits 0.
 
-Also: --gen-manifest writes tools/gate_manifest.txt from the lichen_api headers. The manifest must match what the
-headers declare (a failure otherwise, #220), and rule C takes the gate's functions from the headers themselves, so
-a header is the only way in: a line added to the manifest by hand frees nothing. The capability column is #229's.
+Also: --gen-manifest writes tools/gate_manifest.txt from the lichen_api headers and the peer headers apps may include
+(peer-headers of a closed layer, #229: lora_app.h, fw_console.h ...), with the capability layers.conf gives each
+function. The manifest must match (a failure otherwise, #220), and rule C takes the gate's functions from the lichen_api
+headers themselves, so a header is the only way in: a line added to the manifest by hand frees nothing.
 
 Nothing passes silently: a tool that is missing or a build that lacks an archive fails rule C instead of skipping it,
 unless --no-symbols asked for the skip."""
@@ -78,6 +83,10 @@ class Conf:
         self.peer_headers = {}      # (component, peer) -> header globs it may include of that peer
         self.vendored = collections.defaultdict(list)  # component -> own-dir roots of third-party code (not scanned)
         self.forbid_except = []     # (component, object file name glob, [symbol globs]): upstream code built unchanged
+        self.caps = {}              # #229: capability name -> bit (lichen_app.h CAP_<name>)
+        self.cap_funcs = []         # (cap spec, [function globs]) first match wins; spec '-', 'A' or 'A|B' (either)
+        self.cap_headers = []       # (cap spec, [header globs]) for the functions no cap-func line names
+        self.apps = {}              # app id -> App
 
     def height(self, layer):
         return self.layers.index(layer)
@@ -150,8 +159,62 @@ def apply_directive(conf, key, args):
         if not args[2:]:
             raise ValueError("forbid-except needs a component, an object and at least one symbol")
         conf.forbid_except.append((args[0], args[1], args[2:]))
+    elif key in CAP_KEYS:
+        apply_cap_directive(conf, key, args)
     else:
         raise ValueError("unknown directive")
+
+
+CAP_KEYS = ("cap", "cap-func", "cap-header", "app", "app-objects")
+BUDGETS = ("INTERNAL_RAM", "PSRAM")  # KiB; lichen_app_t internal_ram_kib, psram_kib
+
+
+class App:
+    def __init__(self, app_id, comp, caps, budgets):
+        self.id, self.comp, self.caps, self.budgets = app_id, comp, caps, budgets
+        self.objects = []  # source file names (globs) whose objects are the app's, for rule D
+
+
+def apply_cap_directive(conf, key, args):
+    """The #229 directives: cap NAME BIT; cap-func SPEC globs; cap-header SPEC globs; app ID COMPONENT CAP... [BUDGET=n];
+    app-objects ID globs."""
+    if key == "cap":
+        conf.caps[args[0]] = int(args[1])
+    elif key in ("cap-func", "cap-header"):
+        if not args[1:]:
+            raise ValueError("%s needs a capability and at least one name" % key)
+        (conf.cap_funcs if key == "cap-func" else conf.cap_headers).append((args[0], args[1:]))
+    elif key == "app":
+        if args[0] in conf.apps:
+            raise ValueError("app %s is listed twice" % args[0])
+        caps, budgets = set(), {}
+        for a in args[2:]:
+            if "=" in a:
+                name, val = a.split("=", 1)
+                if name not in BUDGETS:
+                    raise ValueError("unknown budget %s (%s)" % (name, ", ".join(BUDGETS)))
+                budgets[name] = int(val)
+            elif a != "-":
+                caps.add(a)
+        conf.apps[args[0]] = App(args[0], args[1], caps, budgets)
+    else:
+        if args[0] not in conf.apps or not args[1:]:
+            raise ValueError("app-objects needs an app of an earlier app line and at least one file")
+        conf.apps[args[0]].objects.extend(args[1:])
+
+
+def check_conf_caps(conf):
+    """#229: the capability names on every line are declared `cap` names, bits are unique, apps sit on components."""
+    if len(set(conf.caps.values())) != len(conf.caps):
+        raise LayerError("layers.conf: two cap lines share a bit")
+    names = [n for spec, _ in conf.cap_funcs + conf.cap_headers if spec != "-" for n in spec.split("|")]
+    for a in conf.apps.values():
+        if a.comp not in conf.comp_layer:
+            raise LayerError("layers.conf: app %s names unknown component %s" % (a.id, a.comp))
+        names += sorted(a.caps)
+    for n in names:
+        if n not in conf.caps:
+            raise LayerError("layers.conf: capability %s has no cap line" % n)
 
 
 def check_conf(conf):
@@ -170,6 +233,7 @@ def check_conf(conf):
             if not o.startswith("<=") and o not in conf.comp_layer:
                 raise LayerError("layers.conf: owner-only %s names unknown owner %s" % (glob, o))
     check_conf_283(conf)
+    check_conf_caps(conf)
     for c, layer in conf.comp_layer.items():
         if layer not in conf.layers:
             raise LayerError("layers.conf: component %s is on the undeclared layer %s" % (c, layer))
@@ -475,6 +539,132 @@ def rule_c(conf, comps, found, build, nm, selected, gate_syms=frozenset()):
                 add(found, "C", "%s:%s" % (name, sym), "%s(%s)" % (lib, ob), sym in hard)
 
 
+# --- rule D (capabilities, #229) ------------------------------------------------------------------------------
+
+CAP_DEFINE_RE = re.compile(r"^\s*#\s*define\s+CAP_(\w+)\s+\(\s*1u\s*<<\s*(\d+)\s*\)", re.M)
+DESC_RE = re.compile(r"lichen_app_t\s+const\s+(\w+)\s*=\s*\{(.*?)\n\s*\};", re.S)
+FIELD_RE = re.compile(r"^\s*\.(\w+)\s*=\s*(.+?)\s*,?\s*(?://.*)?$")
+STR_DEFINE_RE = re.compile(r'^\s*#\s*define\s+(\w+)\s+"([^"]*)"', re.M)
+
+
+def cap_satisfied(spec, caps):
+    """spec '-' needs nothing, 'A|B' either; SYSTEM (the OS's own apps) has every capability."""
+    return spec == "-" or "SYSTEM" in caps or any(c in caps for c in spec.split("|"))
+
+
+def descriptors(text):
+    """[(variable, {field: value})] of the lichen_app_t definitions in a source file (designated initialisers)."""
+    out = []
+    for m in DESC_RE.finditer(text):
+        fields = {}
+        for line in m.group(2).splitlines():
+            f = FIELD_RE.match(line)
+            if f:
+                fields[f.group(1)] = f.group(2)
+        out.append((m.group(1), fields))
+    return out
+
+
+def caps_of_value(value):
+    """The capability names of a .caps initialiser ('0' or CAP_X | CAP_Y), None when it is something else."""
+    if value.strip() == "0":
+        return set()
+    parts = [p.strip() for p in value.split("|")]
+    if not all(re.fullmatch(r"CAP_\w+", p) for p in parts):
+        return None
+    return set(p[4:] for p in parts)
+
+
+def mirror_defines(conf, root, found):
+    """lichen_app.h's CAP_* bits are layers.conf's cap lines, both ways."""
+    path = os.path.join(gate_dir(root), "lichen_app.h")
+    if not conf.caps:
+        return
+    if not os.path.exists(path):
+        add(found, "D", "cap list (no lichen_app.h to mirror it)", CONF_REL, True)
+        return
+    have = {n: int(b) for n, b in CAP_DEFINE_RE.findall(read(path))}
+    for n in sorted(set(have) | set(conf.caps)):
+        if have.get(n) != conf.caps.get(n):
+            add(found, "D", "cap %s (layers.conf bit %s, lichen_app.h bit %s)" % (n, conf.caps.get(n), have.get(n)),
+                os.path.relpath(path, root), True)
+
+
+def descriptor_problems(conf, comp, fields, defines):
+    """What is wrong with one descriptor against its app line, as strings ([] = fine)."""
+    raw_id = fields.get("id", "")
+    app_id = raw_id.strip('"') if raw_id.startswith('"') else defines.get(raw_id, raw_id)
+    app = conf.apps.get(app_id)
+    if not app:
+        return app_id, ["no `app %s %s ...` line in %s" % (app_id, comp, CONF_REL)]
+    caps = caps_of_value(fields.get("caps", "0"))
+    probs = []
+    if app.comp != comp:
+        probs.append("its app line names component %s, the descriptor is in %s" % (app.comp, comp))
+    if caps is None:
+        probs.append(".caps must be 0 or CAP_* names joined with |")
+    elif caps != app.caps:
+        probs.append(".caps %s differ from layers.conf %s" % (" ".join(sorted(caps)) or "-", " ".join(sorted(app.caps)) or "-"))
+    for b, member in (("INTERNAL_RAM", "internal_ram_kib"), ("PSRAM", "psram_kib")):
+        if fields.get(member, "0") != str(app.budgets.get(b, 0)):
+            probs.append(".%s %s differ from layers.conf %s=%s" % (member, fields.get(member, "0"), b, app.budgets.get(b, 0)))
+    has = app.caps
+    if fields.get("secret_prefix", "NULL") != "NULL" and not cap_satisfied("SECRETS", has):
+        probs.append("a secret_prefix needs SECRETS")
+    if "SECRETS" in has and fields.get("secret_prefix", "NULL") == "NULL":
+        probs.append("SECRETS without a secret_prefix")
+    if fields.get("start_background", "NULL") != "NULL" and not cap_satisfied("BACKGROUND", has):
+        probs.append("a start_background hook needs BACKGROUND")
+    return app_id, probs
+
+
+def rule_d_mirror(conf, comps, found, root):
+    """Every descriptor in a repo component against its app line, and every app line against a descriptor."""
+    mirror_defines(conf, root, found)
+    seen = set()
+    for comp, d in comps.items():
+        files = [f for f in source_files(d) if f.endswith((".c", ".cpp"))]
+        texts = {f: read(f) for f in files}
+        defines = dict(m for t in texts.values() for m in STR_DEFINE_RE.findall(t))
+        for f in [h for h in source_files(d) if h.endswith(".h")]:
+            defines.update(STR_DEFINE_RE.findall(read(f)))
+        for f, text in texts.items():
+            for var, fields in descriptors(text):
+                app_id, probs = descriptor_problems(conf, comp, fields, defines)
+                seen.add(app_id)
+                for p in probs:
+                    add(found, "D", "%s:%s (%s)" % (comp, app_id, p), "%s (%s)" % (os.path.relpath(f, root), var), True)
+    for app_id in sorted(set(conf.apps) - seen):
+        add(found, "D", "%s:%s (app line without a descriptor)" % (conf.apps[app_id].comp, app_id), CONF_REL, True)
+
+
+def object_app(conf, comp, obj):
+    """The app whose app-objects line names this object of comp's archive (x.c.obj for x.c), or None."""
+    src = obj[:-4] if obj.endswith(".obj") else obj
+    for a in conf.apps.values():
+        if a.comp == comp and any(fnmatch.fnmatchcase(src, g) for g in a.objects):
+            return a
+    return None
+
+
+def rule_d_symbols(conf, found, build, nm, selected, cap_of):
+    """Every undefined symbol of a closed layer's archive that has a capability is used by an app that declared it."""
+    for name in selected:
+        if conf.comp_layer[name] not in conf.closed:
+            continue
+        lib = os.path.join(build, "esp-idf", name, "lib%s.a" % name)
+        for obj, sym in sorted(set(undefined_symbols(nm, lib))):
+            need = cap_of.get(sym, "-")
+            if need == "-":
+                continue
+            app = object_app(conf, name, obj)
+            if app is None:
+                add(found, "D", "%s:%s (needs %s; %s belongs to no app-objects line)" % (name, sym, need, obj),
+                    "%s(%s)" % (lib, obj), True)
+            elif not cap_satisfied(need, app.caps):
+                add(found, "D", "%s:%s (needs %s, not declared)" % (app.id, sym, need), "%s(%s)" % (lib, obj), True)
+
+
 # --- baseline -------------------------------------------------------------------------------------------------
 
 def parse_baseline(text):
@@ -625,20 +815,18 @@ def grew_problems(root, baseline, skip, marks=None):
 
 # --- gate manifest --------------------------------------------------------------------------------------------
 
-# Seed capability per header for the first generation; #229 owns the real capability list.
-HEADER_CAP = {
-    "lichen_fs.h": "SD", "lichen_haptics.h": "HAPTICS", "lichen_sensors.h": "SENSORS", "lichen_task.h": "BACKGROUND",
-    "lichen_radio.h": "RADIO", "settings_backup.h": "SYSTEM",
-    "settings_backup_io.h": "SYSTEM", "lichen_crashlog.h": "SYSTEM", "lichen_badge.h": "SYSTEM", "font_slots.h": "SYSTEM",
-    "lichen_ui_ops.h": "SYSTEM", "lichen_sys_ui.h": "SYSTEM", "notify_os.h": "SYSTEM",
-    "lichen_sys_display.h": "SYSTEM", "lichen_sys_power.h": "SYSTEM",
-    "lichen_sys_storage.h": "SYSTEM", "lichen_sys_update.h": "SYSTEM", "lichen_sys_crash.h": "SYSTEM",
-    "lichen_sys_factory.h": "SYSTEM", "lichen_sys_mem.h": "SYSTEM", "lichen_sys_clock.h": "SYSTEM",
-    "lichen_sys_net.h": "SYSTEM", "lichen_sys_boot.h": "SYSTEM", "lichen_sys_keys.h": "SYSTEM",
-    "lichen_sys_led.h": "SYSTEM", "lichen_sys_thermal.h": "SYSTEM", "lichen_sys_radio.h": "SYSTEM",
-    "lichen_sys_c6.h": "SYSTEM", "lichen_sys_psram.h": "SYSTEM", "lichen_sys_app.h": "SYSTEM", "lichen_sys_badge.h": "SYSTEM",
-    "lichen_sys_notify.h": "SYSTEM",
-}
+def cap_for(conf, func, header):
+    """The capability layers.conf gives a function (#229): its cap-func line, else its header's cap-header line, else
+    '-' (none)."""
+    for spec, globs in conf.cap_funcs:
+        if any(fnmatch.fnmatchcase(func, g) for g in globs):
+            return spec
+    for spec, globs in conf.cap_headers:
+        if any(fnmatch.fnmatchcase(header, g) for g in globs):
+            return spec
+    return "-"
+
+
 PROTO_RE = re.compile(r"(?:^|\n)([A-Za-z_][\w \t\*]*?[\s\*](\w+)\s*\([^;{}]*\))\s*;", re.S)
 SKIP_PROTO = ("typedef", "static", "extern \"C\"", "return", "define")
 
@@ -718,43 +906,68 @@ def gate_dir(root):
     return os.path.join(root, "firmware", "components", GATE)
 
 
-def gate_functions(root):
-    """[(function, header, thread rule)] over the lichen_api headers (none when the tree has no gate)."""
-    d = gate_dir(root)
+def header_dir_functions(d, wanted=None):
+    """[(function, header, thread rule)] of the headers in directory d (only the basenames in wanted, when given)."""
     out = []
     if not os.path.isdir(d):
         return out
     for fn in sorted(os.listdir(d)):
-        if fn.endswith(".h"):
+        if fn.endswith(".h") and (wanted is None or fn in wanted):
             with open(os.path.join(d, fn), encoding="utf-8", errors="replace") as f:
                 out.extend((name, fn, thr) for name, thr in header_functions(f.read()))
     return out
 
 
+def gate_functions(root):
+    """[(function, header, thread rule)] over the lichen_api headers (none when the tree has no gate)."""
+    return header_dir_functions(gate_dir(root))
+
+
+def peer_functions(root, conf):
+    """#229: the functions of the peer headers a closed layer may include (peer-headers lines), so rule D can map an
+    app's lora_send or console_register to a capability. Never gate functions for rule C."""
+    out, comps = [], repo_components(root)
+    for (comp, peer), globs in sorted(conf.peer_headers.items()):
+        if conf.comp_layer.get(comp) in conf.closed and peer in comps:
+            names = set(fn for fn in os.listdir(comps[peer]) if any(fnmatch.fnmatchcase(fn, g) for g in globs))
+            out.extend(header_dir_functions(comps[peer], names))
+    return out
+
+
+def surface_functions(root, conf):
+    """[(function, header, thread rule)] of everything an app may call: the gate and the peer headers"""
+    return sorted(set(gate_functions(root) + (peer_functions(root, conf) if conf else [])))
+
+
 MANIFEST_HEAD = (
-    "# Gate manifest (#218, #216): every function the lichen_api headers declare, with the capability that guards it and\n"
-    "# the thread it may be called from. Format: function<TAB>capability<TAB>thread<TAB>header.\n"
-    "# Generated by `tools/check_layers.sh --gen-manifest`, checked against the headers on every build (#220). The\n"
-    "# capability column is a seed (per header, '-' = none) and #229 (capabilities) owns making it right.\n"
+    "# Gate manifest (#218, #216, #229): every function the lichen_api headers and the apps' peer headers declare, with\n"
+    "# the capability that guards it and the thread it may be called from. Format: function<TAB>capability<TAB>thread<TAB>\n"
+    "# header. Generated by `tools/check_layers.sh --gen-manifest`, checked against the headers on every build (#220).\n"
+    "# capability: from tools/layers.conf (cap-func, cap-header; '-' = none, A|B = either); rule D checks an app's use.\n"
     "# thread: any, lvgl (LVGL task only), not-lvgl, unspecified (the header comment does not say; fix the comment,\n"
     "# then the entry).\n"
 )
 
 
-def manifest_text(funcs):
-    rows = sorted(set((f, HEADER_CAP.get(h, "-"), t, h) for f, h, t in funcs))
+def manifest_text(funcs, conf=None):
+    rows = sorted(set((f, cap_for(conf, f, h) if conf else "-", t, h) for f, h, t in funcs))
     return MANIFEST_HEAD + "".join("%s\t%s\t%s\t%s\n" % r for r in rows)
 
 
-def manifest_warnings(root, manifest):
+def manifest_caps(root, conf):
+    """function -> capability spec, for rule D"""
+    return {f: cap_for(conf, f, h) for f, h, _ in surface_functions(root, conf)}
+
+
+def manifest_warnings(root, manifest, conf=None):
     have = set(l.split("\t")[0] for l in manifest.splitlines() if l.strip() and not l.startswith("#"))
-    now = set(f for f, _, _ in gate_functions(root))
+    now = set(f for f, _, _ in surface_functions(root, conf))
     out = ["gate manifest: %s is declared in a lichen_api header but not in %s" % (f, MANIFEST_REL) for f in sorted(now - have)]
     out += ["gate manifest: %s is in %s but no header declares it" % (f, MANIFEST_REL) for f in sorted(have - now)]
     return out
 
 
-def manifest_problems(root):
+def manifest_problems(root, conf=None):
     """Failures when tools/gate_manifest.txt is not what --gen-manifest writes from the headers today (#220)."""
     if not os.path.isdir(gate_dir(root)):
         return []
@@ -762,10 +975,10 @@ def manifest_problems(root):
     if not os.path.exists(mf):
         return ["%s is missing (run: tools/check_layers.sh --gen-manifest)" % MANIFEST_REL]
     text = read(mf)
-    if text == manifest_text(gate_functions(root)):
+    if text == manifest_text(surface_functions(root, conf), conf):
         return []
-    return manifest_warnings(root, text) + [
-        "%s does not match the lichen_api headers (run: tools/check_layers.sh --gen-manifest)" % MANIFEST_REL]
+    return manifest_warnings(root, text, conf) + [
+        "%s does not match the headers and layers.conf (run: tools/check_layers.sh --gen-manifest)" % MANIFEST_REL]
 
 
 # --- driver ---------------------------------------------------------------------------------------------------
@@ -779,8 +992,11 @@ def measure(conf, root, build, nm, symbols, layer_filter=None):
     found = collections.defaultdict(list)
     rule_a(conf, comps, found, root, selected)
     rule_b(conf, comps, found, root, selected)
+    if not layer_filter:  # the mirror is about every component's descriptors (the shell's too)
+        rule_d_mirror(conf, comps, found, root)
     if symbols:
         rule_c(conf, comps, found, build, nm, selected, frozenset(f for f, _, _ in gate_functions(root)))
+        rule_d_symbols(conf, found, build, nm, selected, manifest_caps(root, conf))
     return found
 
 
@@ -819,15 +1035,16 @@ def report(found):
         for w in wheres:
             print("    " + w)
     per = collections.Counter(r[0] for (r, _k), w in found.items() for _ in w)
-    print("layers: %d violation(s) in %d entries (A %d, B %d, C %d)" % (total, len(found), per["A"], per["B"], per["C"]))
+    print("layers: %d violation(s) in %d entries (A %d, B %d, C %d, D %d)" % (total, len(found), per["A"], per["B"], per["C"],
+                                                                         per["D"]))
 
 
 def run(args):
     root = os.path.abspath(args.root)
-    if args.gen_manifest:
-        write_atomic(os.path.join(root, MANIFEST_REL), manifest_text(gate_functions(root)))
-        return 0
     conf = parse_conf(read(os.path.join(root, CONF_REL)))
+    if args.gen_manifest:
+        write_atomic(os.path.join(root, MANIFEST_REL), manifest_text(surface_functions(root, conf), conf))
+        return 0
     build = args.build or os.path.join(root, "firmware", "build")
     nm = args.nm or shutil.which("riscv32-esp-elf-nm")
     symbols = not args.no_symbols
@@ -867,11 +1084,11 @@ def ratchet(args, root, conf, all_measured, symbols, where=None):
     fails, stale = compare(all_measured, baseline, rules, where)
     fails += ["STALE baseline %s (run: tools/check_layers.sh --shrink)" % s for s in stale]
     fails += grew_problems(root, baseline, args.no_merge_base, baseline_marks(text))
-    return finish(root, fails, measured, baseline)
+    return finish(root, fails, measured, baseline, conf)
 
 
-def finish(root, fails, measured, baseline):
-    fails = fails + manifest_problems(root)
+def finish(root, fails, measured, baseline, conf=None):
+    fails = fails + manifest_problems(root, conf)
     for f in fails:
         print("layers: " + f, file=sys.stderr)
     if fails:

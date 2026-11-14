@@ -569,11 +569,14 @@ static void icon_spectrum(lv_obj_t *parent, int size_px) {
 }
 
 static lichen_app_t const spectrum_app = {
-    .name            = "LoRa spectrum",
-    .id              = "lora_spectrum",
-    .draw_icon       = icon_spectrum,
-    .open            = open_spectrum,
-    .stop_for_update = spectrum_stop_for_update,
+    .name             = "LoRa spectrum",
+    .id               = "lora_spectrum",
+    .draw_icon        = icon_spectrum,
+    .open             = open_spectrum,
+    .stop_for_update  = spectrum_stop_for_update,
+    .caps             = CAP_LORA_BORROW | CAP_BACKGROUND,
+    .internal_ram_kib = 5,
+    .psram_kib        = 0,
 };
 
 void lora_spectrum_app_register(void) {

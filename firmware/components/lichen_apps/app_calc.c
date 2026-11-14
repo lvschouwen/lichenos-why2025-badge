@@ -166,10 +166,13 @@ static void icon_calc(lv_obj_t *parent, int size_px) {
 }
 
 static lichen_app_t const calc_app = {
-    .name      = "Calculator",
-    .id        = "calc",
-    .draw_icon = icon_calc,
-    .open      = open_calc,
+    .name             = "Calculator",
+    .id               = "calc",
+    .draw_icon        = icon_calc,
+    .open             = open_calc,
+    .caps             = 0,
+    .internal_ram_kib = 1,
+    .psram_kib        = 0,
 };
 
 void calc_app_register(void) {

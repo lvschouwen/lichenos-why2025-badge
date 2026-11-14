@@ -880,5 +880,117 @@ int second(int a) __attribute__((nonnull(1), format(printf, 1, 2)));
         self.assertIn("other is in", warns)
 
 
+class Capabilities(unittest.TestCase):
+    """Rule D (#229): the cap list mirrored in lichen_app.h, descriptors mirrored in app lines, symbols mapped through
+    the manifest's capability column to a capability the using app declared."""
+    CONF = CONF.replace("component gate L2", "component gate lichen_api L2") + """\
+cap SD 0
+cap LORA_RX 1
+cap LORA_BORROW 2
+cap SECRETS 3
+cap BACKGROUND 4
+cap SYSTEM 5
+cap-func LORA_RX|LORA_BORROW lora_claim
+cap-header SD lichen_fs.h
+app one app SD INTERNAL_RAM=2 PSRAM=1
+app-objects one a.c
+"""
+    APP_H = ("#define CAP_SD (1u << 0)\n#define CAP_LORA_RX (1u << 1)\n#define CAP_LORA_BORROW (1u << 2)\n"
+             "#define CAP_SECRETS (1u << 3)\n#define CAP_BACKGROUND (1u << 4)\n#define CAP_SYSTEM (1u << 5)\n"
+             "int lichen_register_app(void const *app);\n")
+    TYPES = ("typedef struct { char const *id; unsigned caps; unsigned short internal_ram_kib, psram_kib;"
+             " char const *secret_prefix; int (*start_background)(void); } lichen_app_t;\n")
+
+    def app_src(self, fields, call="lichen_fs_sd_dir(0)", head=""):
+        return (head + self.APP_H + self.TYPES + "char const *lichen_fs_sd_dir(int ctx);\nint lora_claim(void);\n"
+                "static lichen_app_t const one_app = {\n%s\n};\nlong app_fn(void){return (long)%s + (long)&one_app;}\n"
+                % ("\n".join("    .%s = %s," % kv for kv in fields), call))
+
+    def fixture(self, fields=None, call="lichen_fs_sd_dir(0)", conf=None, app_h=None, extra=None, head=""):
+        fields = fields if fields is not None else [("id", '"one"'), ("caps", "CAP_SD"), ("internal_ram_kib", "2"),
+                                                    ("psram_kib", "1")]
+        comps = {"lichen_api": ("idf_component_register(SRCS \"l.c\")",
+                                {"l.c": "char const *lichen_fs_sd_dir(int ctx){return ctx ? \"x\" : 0;}\n",
+                                 "lichen_app.h": app_h or self.APP_H,
+                                 "lichen_fs.h": "char const *lichen_fs_sd_dir(int ctx);\n",
+                                 "lora_x.h": "int lora_claim(void);\n"}),
+                 "app": (BASE_FILES["app"][0], dict({"a.c": self.app_src(fields, call, head)}, **(extra or {})))}
+        return Fixture(self, conf=conf or self.CONF, overrides=comps)
+
+    def d_keys(self, fx):
+        return set(k for r, k in keys(fx) if r == "D!")
+
+    def test_declared_use_is_clean(self):
+        self.assertEqual(self.d_keys(self.fixture()), set())
+
+    def test_undeclared_symbol_fails(self):
+        conf = self.CONF.replace("app one app SD", "app one app -")
+        fields = [("id", '"one"'), ("caps", "0"), ("internal_ram_kib", "2"), ("psram_kib", "1")]
+        self.assertEqual(self.d_keys(self.fixture(fields, conf=conf)), {"one:lichen_fs_sd_dir (needs SD, not declared)"})
+
+    def test_object_of_no_app_may_use_no_capability(self):
+        extra = {"b.c": "char const *lichen_fs_sd_dir(int ctx);\nlong b_fn(void){return (long)lichen_fs_sd_dir(1);}\n"}
+        self.assertEqual(self.d_keys(self.fixture(extra=extra)),
+                         {"app:lichen_fs_sd_dir (needs SD; b.c.obj belongs to no app-objects line)"})
+
+    def test_either_capability_and_system(self):
+        for caps in ("LORA_BORROW", "SYSTEM"):
+            conf = self.CONF.replace("app one app SD", "app one app %s" % caps)
+            fields = [("id", '"one"'), ("caps", "CAP_" + caps), ("internal_ram_kib", "2"), ("psram_kib", "1")]
+            self.assertEqual(self.d_keys(self.fixture(fields, call="lora_claim()", conf=conf)), set(), caps)
+        conf = self.CONF.replace("app one app SD", "app one app SECRETS")
+        fields = [("id", '"one"'), ("caps", "CAP_SECRETS"), ("internal_ram_kib", "2"), ("psram_kib", "1"),
+                  ("secret_prefix", '"pw"')]
+        self.assertEqual(self.d_keys(self.fixture(fields, call="lora_claim()", conf=conf)),
+                         {"one:lora_claim (needs LORA_RX|LORA_BORROW, not declared)"})
+
+    def test_descriptor_must_mirror_its_app_line(self):
+        fields = [("id", '"one"'), ("caps", "CAP_SD | CAP_LORA_RX"), ("internal_ram_kib", "3")]
+        got = self.d_keys(self.fixture(fields))
+        self.assertIn("app:one (.caps LORA_RX SD differ from layers.conf SD)", got)
+        self.assertIn("app:one (.internal_ram_kib 3 differ from layers.conf INTERNAL_RAM=2)", got)
+        self.assertIn("app:one (.psram_kib 0 differ from layers.conf PSRAM=1)", got)
+
+    def test_secret_prefix_and_background_need_their_caps(self):
+        fields = [("id", '"one"'), ("caps", "CAP_SD"), ("internal_ram_kib", "2"), ("psram_kib", "1"),
+                  ("secret_prefix", '"pw"'), ("start_background", "0")]
+        got = self.d_keys(self.fixture(fields))
+        self.assertIn("app:one (a secret_prefix needs SECRETS)", got)
+        self.assertIn("app:one (a start_background hook needs BACKGROUND)", got)
+
+    def test_app_line_without_descriptor_and_unknown_id(self):
+        fields = [("id", '"two"'), ("caps", "CAP_SD")]
+        got = self.d_keys(self.fixture(fields))
+        self.assertIn("app:one (app line without a descriptor)", got)
+        self.assertIn("app:two (no `app two app ...` line in tools/layers.conf)", got)
+
+    def test_id_from_a_define(self):
+        extra = {"ids.h": '#define ONE_ID "one"\n'}
+        fields = [("id", "ONE_ID"), ("caps", "CAP_SD"), ("internal_ram_kib", "2"), ("psram_kib", "1")]
+        self.assertEqual(self.d_keys(self.fixture(fields, extra=extra, head='#include "ids.h"\n')), set())
+
+    def test_cap_list_mirrors_lichen_app_h(self):
+        got = self.d_keys(self.fixture(app_h=self.APP_H.replace("CAP_SYSTEM (1u << 5)", "CAP_SYSTEM (1u << 6)")))
+        self.assertEqual(got, {"cap SYSTEM (layers.conf bit 5, lichen_app.h bit 6)"})
+
+    def test_conf_rejects_unknown_capability_and_shared_bit(self):
+        with self.assertRaises(cl.LayerError):
+            cl.parse_conf(self.CONF + "cap-func NOPE x\n")
+        with self.assertRaises(cl.LayerError):
+            cl.parse_conf(self.CONF + "cap OTHER 0\n")
+        with self.assertRaises(cl.LayerError):
+            cl.parse_conf(self.CONF + "app one app SD\n")
+
+    def test_manifest_capability_column(self):
+        conf = cl.parse_conf(self.CONF + "cap-func - lichen_fs_free\n")
+        self.assertEqual(cl.cap_for(conf, "lichen_fs_sd_dir", "lichen_fs.h"), "SD")
+        self.assertEqual(cl.cap_for(conf, "lichen_fs_free", "lichen_fs.h"), "-")
+        self.assertEqual(cl.cap_for(conf, "lora_claim", "lora_app.h"), "LORA_RX|LORA_BORROW")
+        self.assertEqual(cl.cap_for(conf, "other", "other.h"), "-")
+        fx = self.fixture()
+        self.assertEqual(fx.run("--gen-manifest")[0], 0)
+        self.assertIn("lichen_fs_sd_dir\tSD\tunspecified\tlichen_fs.h", cl.read(os.path.join(fx.root, "tools/gate_manifest.txt")))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -624,6 +624,7 @@ static lichen_app_t const files_app = {
     .id        = "files",
     .draw_icon = icon_files,
     .open      = open_files,
+    .caps      = CAP_SYSTEM, // the shell's own app (#229)
 };
 
 void files_app_register(void) {
