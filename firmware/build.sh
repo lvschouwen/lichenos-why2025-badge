@@ -4,14 +4,44 @@
 # ./firmware/build.sh release build: the release image (#373), sdkconfig.defaults plus sdkconfig.release.defaults
 # (no debug or test commands) in firmware/build-release with its own sdkconfig; the dev build's tree is not touched.
 # The full check (./firmware/build.sh build) ends with that release build and its checks (#401), so a release-only
-# break fails the gate. BADGE_SKIP_RELEASE=1 leaves it out on purpose and then exits 3 at the end, so agent-check never
+# break fails the gate. BADGE_SKIP_RELEASE=1 (exactly 1) leaves it out on purpose and then exits 3 at the end, so agent-check never
 # stamps a partial check as green (the dev image is still fully built and checked by then).
 set -euo pipefail
+
+# --plan (first argument) prints which steps this invocation would run and exits: for tests/build_plan_test.sh only,
+# it changes nothing about a real run.
+plan=0
+if [ "${1:-}" = --plan ]; then
+    plan=1
+    shift
+fi
 
 release=0
 if [ "${1:-}" = release ]; then
     release=1
     shift
+fi
+
+# --nested-from-check: private to the release build the developer build ends with (#401): static checks, host tests and
+# the C6 image have just run, so they are not repeated. An argument, not an environment variable, so nothing left in
+# a shell can thin out a real check; only the release path accepts it.
+nested=0
+args=()
+for arg in "$@"; do
+    if [ "$arg" = --nested-from-check ]; then nested=1; else args+=("$arg"); fi
+done
+set -- ${args[@]+"${args[@]}"}
+if [ "$nested" = 1 ] && [ "$release" = 0 ]; then
+    echo "--nested-from-check is only for the release build the full check starts itself (build.sh release build)" >&2
+    exit 2
+fi
+case "${BADGE_SKIP_RELEASE:-}" in
+    ''|1) ;;
+    *) echo "BADGE_SKIP_RELEASE must be 1 or unset, not '$BADGE_SKIP_RELEASE'" >&2; exit 2 ;;
+esac
+if [ "$plan" = 1 ]; then
+    echo "prechecks=$([ "$nested" = 1 ] && echo no || echo yes) release_step=$([ "$release" = 0 ] && [ -z "${BADGE_SKIP_RELEASE:-}" ] && echo yes || echo no)"
+    exit 0
 fi
 
 IDF_DIR=${BADGE_IDF_PATH:-~/esp/esp-idf}
@@ -85,8 +115,8 @@ if [ "$building" = 1 ]; then
     fi
 
     # Static checks, host tests and the C6 image come first (#196); the release build the full check ends with
-    # (BADGE_RELEASE_NESTED) has just had all of them
-    if [ -z "${BADGE_RELEASE_NESTED:-}" ]; then
+    # (--nested-from-check) has just had all of them
+    if [ "$nested" = 0 ]; then
         "$repo/tools/static_checks.sh"
 
         cmake -S "$repo/host_tests" -B "$here/build/host_tests" -G Ninja "${host_launcher[@]}" >/dev/null
@@ -104,7 +134,9 @@ fi
 release_checks() {
     python3 -I "$repo/tools/check_console_slots.py" --sdkconfig "$sdkconfig"
     "$repo/tools/pack_storage.sh" check-config "$bdir/config/sdkconfig.json" "$here/managed_components/joltwallet__littlefs"
-    # No debug command may reach the image: only debug code holds the marker (tools/check_release_image.sh, #401)
+    # No debug command may reach the image: the config symbols are off and only debug code holds the marker
+    # (tools/check_release_image.sh, #401)
+    "$repo/tools/check_release_image.sh" config "$sdkconfig"
     "$repo/tools/check_release_image.sh" release "$bdir/badge_fw.bin"
 }
 
@@ -158,7 +190,7 @@ elif [ "$building" = 1 ]; then
                     exit 3
                 else
                     echo "== release build (#401) =="
-                    BADGE_RELEASE_NESTED=1 "$here/build.sh" release "$@"
+                    "$here/build.sh" release "$@" --nested-from-check
                 fi
                 break ;;
         esac

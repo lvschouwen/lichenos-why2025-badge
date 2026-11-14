@@ -2212,6 +2212,7 @@ add_test(NAME badge_usage_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools
 add_test(NAME badge_log_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_log_test.sh)
 add_test(NAME guard_onair_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/guard_onair_test.sh)
 add_test(NAME check_release_image_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/check_release_image_test.sh)
+add_test(NAME build_plan_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/build_plan_test.sh)
 add_test(NAME badge_console_ctrl_test COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests/badge_console_ctrl_test.sh)
 
 # Battery model (#11): V to percent, warn/off with dwell, MAX17048 decode, ADC divider
