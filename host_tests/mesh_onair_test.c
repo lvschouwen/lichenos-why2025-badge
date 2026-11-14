@@ -189,19 +189,7 @@ static void test_ops(void) {
     CHECK(onair_op_parse("offline", &rest) == ONAIR_OP_USAGE);
     CHECK(onair_op_parse("onx", &rest) == ONAIR_OP_USAGE);
     CHECK(onair_op_parse("OFF", &rest) == ONAIR_OP_USAGE);
-    // Origins: off and every change only from the USB console; Wi-Fi and the Console app (injected keys) are remote
-    static console_origin_t const remote[] = {CONSOLE_ORIGIN_WIFI, CONSOLE_ORIGIN_LOCAL, CONSOLE_ORIGIN_UNKNOWN};
-    static onair_op_t const       guarded[] = {ONAIR_OP_OFF, ONAIR_OP_ALLOW, ONAIR_OP_REMOVE, ONAIR_OP_CLEAR};
-    for (size_t i = 0; i < sizeof(guarded) / sizeof(guarded[0]); i++) {
-        CHECK(onair_op_permitted(guarded[i], CONSOLE_ORIGIN_UART));
-        for (size_t k = 0; k < sizeof(remote) / sizeof(remote[0]); k++) {
-            CHECK(!onair_op_permitted(guarded[i], remote[k]));
-        }
-    }
-    for (size_t k = 0; k < sizeof(remote) / sizeof(remote[0]); k++) {
-        CHECK(onair_op_permitted(ONAIR_OP_STATUS, remote[k]));
-        CHECK(onair_op_permitted(ONAIR_OP_ON, remote[k])); // switching it on only narrows
-    }
+    // Origins: "fw onair"'s rows in mesh_cmd_table.c, pinned in console_pin_test.c (#464)
 }
 
 static void test_saved_text(void) {

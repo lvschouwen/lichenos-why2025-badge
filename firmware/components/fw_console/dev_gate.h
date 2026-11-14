@@ -1,7 +1,7 @@
 #pragma once
-// Which console command lines are test or state-changing arms that run only in developer mode (#421), decided in one
-// place from a table instead of in each command. console.c asks before it calls a command, so the gate sits before
-// any state is written and a new spelling of the line cannot skip it. Pure and host-tested (host_tests/dev_gate_test.c).
+// The console line's split into app prefix, command and arguments (#423), and the command-level gate (#373). Which
+// forms of a command need developer mode or an origin is its sub-command table's (console_sub.h, #464), checked by
+// run_command after this, before the command runs. Pure and host-tested (host_tests/dev_gate_test.c).
 
 #include "dev_mode.h"
 
@@ -16,10 +16,6 @@ extern "C" {
 // the name is the word after it. The result never starts with the prefix, so the gate sees the same name either way.
 char *dev_gate_split(char *line, char const *const *ids, int n_ids, int *app, char const **args);
 
-// True when "name args" is a form that needs developer mode. Fail closed: a command with a gated form lists the forms
-// that stay open (a status print), and any other argument is gated, including one the command itself rejects.
-bool dev_gate_needs_dev(char const *name, char const *args);
-
 // What run_command does with a command it found: the gate comes first, so a refused line never reaches the command
 // function. found is dev_mode_find_app's answer (DEV_FIND_DEV_OFF is already refused there).
 typedef enum {
@@ -27,7 +23,7 @@ typedef enum {
     DEV_GATE_REFUSE, // answer the developer-mode note, call nothing
     DEV_GATE_UNKNOWN // no such command
 } dev_gate_t;
-dev_gate_t dev_gate_decide(dev_find_t found, bool needs_dev, bool dev_on);
+dev_gate_t dev_gate_decide(dev_find_t found);
 
 #ifdef __cplusplus
 }

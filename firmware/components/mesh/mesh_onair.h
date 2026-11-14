@@ -115,9 +115,8 @@ bool mesh_onair_allows(onair_list_t const *list, bool on, bool from_console, ona
 void onair_refused_text(onair_tx_t tx, char const *channel, uint8_t const *prefix, char *out, size_t cap);
 
 onair_op_t onair_op_parse(char const *args, char const **rest);
-// Whether a console line from origin may run op: off and every change of the list only from the USB console; the
-// status and "on" (it only narrows) from anywhere
-bool onair_op_permitted(onair_op_t op, console_origin_t origin);
+// Who may run op: "fw onair"'s rows in mesh_cmd_table.c (#464): off and every change of the list from the USB console
+// only, the status and "on" (it only narrows) from anywhere
 
 // The saved text and back (ONAIR_TEXT_VER first). Decoding is strict: a damaged, unversioned, duplicated or overlong
 // text gives false and an empty list (with the setting on, an empty list refuses every console send). Encoding gives

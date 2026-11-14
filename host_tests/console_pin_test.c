@@ -17,7 +17,7 @@
 #include "sensors_rules.h"
 #include "shell_cmd_rules.h"
 #include "main_rules.h"
-#include "mesh_onair.h"
+#include "mesh_cmd_table.h"
 #include "notify_rules.h"
 #include "nvs_rules.h"
 #include "os_cmd_rules.h"
@@ -126,9 +126,11 @@ static pin_t const PINS[] = {
     {"onair clear",                "ROO", "ROO", "ROO", false},
     {"onair allow #badgetest",     "ROO", "ROO", "ROO", false},
     {"onair remove #badgetest",    "ROO", "ROO", "ROO", false},
-    {"onair allow",                "RRR", "RRR", "RRR", false}, // usage: a target is missing
-    {"onair off now",              "RRR", "RRR", "RRR", false}, // usage
-    {"onair bogus",                "RRR", "RRR", "RRR", false}, // usage
+    // #464: tighter than before, where the list did not change either way (the usage): the table fails closed, so every
+    // form but the status and "on" is the USB console's
+    {"onair allow",                "ROO", "ROO", "ROO", false},
+    {"onair off now",              "ROO", "ROO", "ROO", false},
+    {"onair bogus",                "ROO", "ROO", "ROO", false},
     {"meshcore onair off",         "ROO", "ROO", "ROO", false},
     // handler gates (console_dev_gate inside the command)
     {"boot",                       "RRR", "RRR", "RRR", false},
@@ -305,31 +307,6 @@ static cmd_t const *cmd_find(char const *name, int app) {
     return NULL;
 }
 
-// ---- what the commands check themselves before #464 (handler gates and origin rules) ---------------------------
-
-static bool word_is(char const *args, char const *word) {
-    size_t n = strlen(word);
-    return strncmp(args, word, n) == 0 && (args[n] == '\0' || args[n] == ' ');
-}
-
-// console_dev_gate calls inside handlers: boot_keys_rtc.c, boot_progress.c, crash.c, sd_console.c, safe_mode.c,
-// mem_window_watch.c, mesh_cmd_send.cpp (airlog, chat). True when the form reaches one.
-static bool handler_dev_gate(char const *name, char const *args) {
-    if (strcmp(name, "mesh") == 0) {
-        return DEV_BUILD && (word_is(args, "airlog") || word_is(args, "chat"));
-    }
-    return false;
-}
-
-// console_from_uart / console_origin checks inside handlers: true when the form is refused from origin
-static bool handler_origin_refuses(char const *name, char const *args, console_origin_t origin) {
-    if (strcmp(name, "onair") == 0) {
-        char const *rest;
-        return !onair_op_permitted(onair_op_parse(args, &rest), origin);
-    }
-    return false;
-}
-
 // ---- the sub-command tables the commands register (#464) ---------------------------------------------------------
 
 typedef struct {
@@ -359,6 +336,9 @@ static rules_of_t const RULES[] = {
     {"sensors", SENSORS_RULES},
     {"notify", NOTIFY_RULES},
     {"vib", VIB_RULES},
+    {"mesh", MESH_SUBS},
+    {"onair", MESH_ONAIR_RULES},
+    {"advert", MESH_ADVERT_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {
@@ -385,21 +365,12 @@ static char pin_decide(char const *text, bool dev_on, console_origin_t origin, b
     if (cmd->reg == REG_DEV && !dev_on) {
         return 'D';
     }
-    if (dev_gate_needs_dev(name, args) && !dev_on) {
-        return 'D'; // run_command's gate (dev_gate.c)
-    }
     console_ask_t ask = {.dev_on = dev_on, .origin = origin, .held = held};
     switch (console_sub_rule(console_sub_find(rules_of(name), args), &ask)) { // run_command's rules_allow
         case CON_RULE_DEV: return 'D';
         case CON_RULE_ORIGIN: return 'O';
         case CON_RULE_HOLD: return 'H';
         case CON_RULE_RUN: break;
-    }
-    if (handler_dev_gate(name, args) && !dev_on) {
-        return 'D';
-    }
-    if (handler_origin_refuses(name, args, origin)) {
-        return 'O';
     }
     return 'R';
 }

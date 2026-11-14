@@ -117,6 +117,7 @@ static constexpr mesh_sub_run_t MESH_SUB_RUN[] = {
 #else
     {MESH_SUB_IDENT_SIMULATE, [](char const *) {}}, // never matched: its table row has no word (#455)
 #endif
+    {MESH_SUB_IDENT, [](char const *) { cmd_mesh_usage(); }}, // only the gate's row (#464): as an unknown line
     {MESH_SUB_ADVERT, cmd_mesh_advert},
     {MESH_SUB_LOC, cmd_mesh_loc},
     {MESH_SUB_AUTOADD, cmd_mesh_autoadd},
@@ -182,6 +183,7 @@ extern "C" void mesh_console_init(void) {
     mesh_onair_init(); // #289: before the first command that can send
     // #423: each command also answers as "fw meshcore <name>"; the plain name stays for badge.sh and the on-air guard
     for (mesh_con_run_t const &c : MESH_CON_RUN) {
-        console_register_app("meshcore", MESH_CONSOLE_CMDS[c.id].name, MESH_CONSOLE_CMDS[c.id].usage, c.run);
+        console_register_app_rules("meshcore", MESH_CONSOLE_CMDS[c.id].name, MESH_CONSOLE_CMDS[c.id].usage, c.run,
+                                   MESH_CONSOLE_CMDS[c.id].rules); // gates and origins: mesh_cmd_table.c (#464)
     }
 }

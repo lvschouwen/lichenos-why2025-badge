@@ -7,6 +7,8 @@
 // check (#289) does not belong in this dispatch, which sees only a word and raw text: it sits in the senders
 // (mesh_onair.h); only its own command, "onair", is in the table.
 
+#include "fw_console.h" // console_sub_t (#464): a peer header mesh may include (tools/layers.conf)
+
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -27,16 +29,19 @@ typedef enum {
 } mesh_con_id_t;
 
 typedef struct {
-    char const *name;
-    char const *usage; // what "fw help" lists
+    char const          *name;
+    char const          *usage; // what "fw help" lists
+    console_sub_t const *rules; // the sub-command rules it registers with (#464), NULL for none
 } mesh_con_t;
 
 extern mesh_con_t const MESH_CONSOLE_CMDS[MESH_CON_COUNT];
 
-// How a subcommand's word matches the line after "mesh ", and what its handler gets:
-// EXACT: the whole line, nothing; PREFIX: the word with its space ("send "), what follows; WORD: the word alone or
-// with a space, what follows that space; WORD_RAW: as WORD, with the space (handlers that skip it themselves).
-typedef enum { MESH_SUB_EXACT, MESH_SUB_PREFIX, MESH_SUB_WORD, MESH_SUB_WORD_RAW } mesh_sub_match_t;
+// How a subcommand's word matches the line after "mesh ", and what its handler gets: console_sub.h's match rules (#464)
+typedef console_match_t mesh_sub_match_t;
+#define MESH_SUB_EXACT    CON_MATCH_EXACT
+#define MESH_SUB_PREFIX   CON_MATCH_PREFIX
+#define MESH_SUB_WORD     CON_MATCH_WORD
+#define MESH_SUB_WORD_RAW CON_MATCH_WORD_RAW
 
 // The "fw mesh" subcommands in the order they are tried: those that answer whether MeshCore runs or not first, then
 // those that need it running
@@ -62,6 +67,7 @@ typedef enum {
     MESH_SUB_LINK,
     MESH_SUB_CHATS,
     MESH_SUB_IDENT_SIMULATE, // #455: a test arm that blocks TX until restart; its row has no word in the release image
+    MESH_SUB_IDENT,          // any other "ident ...": only the developer-mode gate (#464), the handler answers usage
     MESH_SUB_ADVERT,
     MESH_SUB_LOC,
     MESH_SUB_AUTOADD,
@@ -71,13 +77,17 @@ typedef enum {
     MESH_SUB_COUNT, // none matched
 } mesh_sub_id_t;
 
-typedef struct {
-    char const      *word;
-    mesh_sub_match_t match;
-    bool             needs_running; // MeshCore must run: "MeshCore is not running" (and the like) otherwise
-} mesh_sub_t;
+// A "fw mesh" row is a console_sub_t (#464): run_command checks its gate and origin before cmd_mesh runs, and the
+// owner's bit says MeshCore must run ("MeshCore is not running" and the like otherwise)
+typedef console_sub_t mesh_sub_t;
+#define MESH_SUB_RUNNING CON_F_OWNER
 
-extern mesh_sub_t const MESH_SUBS[MESH_SUB_COUNT];
+// One row per id, then CONSOLE_SUB_END: "fw mesh" registers with it as its sub-command rules
+extern mesh_sub_t const MESH_SUBS[MESH_SUB_COUNT + 1];
+
+// "fw onair" (#289) and "fw advert": the rules they register with
+extern console_sub_t const MESH_ONAIR_RULES[];
+extern console_sub_t const MESH_ADVERT_RULES[];
 
 // What sub's handler gets of args (the line after "mesh "), or NULL when it does not match
 char const *mesh_sub_match(mesh_sub_t const *sub, char const *args);

@@ -196,21 +196,6 @@ onair_op_t onair_op_parse(char const *args, char const **rest) {
     return ONAIR_OP_USAGE;
 }
 
-bool onair_op_permitted(onair_op_t op, console_origin_t origin) {
-    switch (op) {
-    case ONAIR_OP_STATUS:
-    case ONAIR_OP_ON:
-    case ONAIR_OP_USAGE:
-        return true;
-    case ONAIR_OP_OFF:
-    case ONAIR_OP_ALLOW:
-    case ONAIR_OP_REMOVE:
-    case ONAIR_OP_CLEAR:
-        return origin == CONSOLE_ORIGIN_UART;
-    }
-    return false;
-}
-
 void onair_entry_text(onair_entry_t const *e, char *out, size_t cap) {
     if (e->kind == ONAIR_CHANNEL) {
         snprintf(out, cap, "channel %s", e->name);

@@ -915,16 +915,20 @@ add_test(NAME radio_presets_test COMMAND radio_presets_test)
 add_executable(mesh_cmd_table_test
     ${CMAKE_CURRENT_SOURCE_DIR}/mesh_cmd_table_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_cmd_table.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console/console_sub.c
 )
-target_include_directories(mesh_cmd_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_include_directories(mesh_cmd_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
 target_compile_options(mesh_cmd_table_test PRIVATE -Wall -Wextra -Werror)
 add_test(NAME mesh_cmd_table_test COMMAND mesh_cmd_table_test)
 # The same table as a developer image builds it (#455): the "ident simulate" row and its help branch
 add_executable(mesh_cmd_table_dev_test
     ${CMAKE_CURRENT_SOURCE_DIR}/mesh_cmd_table_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh/mesh_cmd_table.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console/console_sub.c
 )
-target_include_directories(mesh_cmd_table_dev_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh)
+target_include_directories(mesh_cmd_table_dev_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/mesh
+    ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/components/fw_console)
 target_compile_options(mesh_cmd_table_dev_test PRIVATE -Wall -Wextra -Werror)
 target_compile_definitions(mesh_cmd_table_dev_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1)
 add_test(NAME mesh_cmd_table_dev_test COMMAND mesh_cmd_table_dev_test)
@@ -2632,7 +2636,7 @@ add_test(NAME file_replace_test COMMAND file_replace_test)
 # #464: the console's gate and origin pin, per developer mode, build and origin; built as a developer and a release
 # image (the developer one with the off-by-default nvs-down and nvs-enc burn arms compiled in)
 set(CONSOLE_PIN_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/console_pin_test.c ${NPT_FW}/fw_console/dev_gate.c
-    ${NPT_FW}/fw_console/dev_mode.c ${NPT_FW}/fw_console/console_sub.c ${NPT_FW}/mesh/mesh_onair.c)
+    ${NPT_FW}/fw_console/dev_mode.c ${NPT_FW}/fw_console/console_sub.c ${NPT_FW}/mesh/mesh_cmd_table.c)
 foreach(t console_pin_test console_pin_dev_test)
     add_executable(${t} ${CONSOLE_PIN_SRCS})
     target_include_directories(${t} PRIVATE ${NPT_FW}/fw_console ${NPT_FW}/mesh ${NPT_FW}/sdcard ${NPT_FW}/crash ${NPT_FW}/lichen_boot ${NPT_FW}/ota
@@ -2641,7 +2645,6 @@ foreach(t console_pin_test console_pin_dev_test)
         ${NPT_FW}/psram_guard ${NPT_FW}/sensors
         ${NPT_FW}/lichen_notify ${NPT_FW}/lichen_haptics)
     target_compile_options(${t} PRIVATE -Wall -Wextra -Werror)
-    target_link_libraries(${t} PRIVATE lichen_text)
     add_test(NAME ${t} COMMAND ${t})
 endforeach()
 target_compile_definitions(console_pin_dev_test PRIVATE CONFIG_LICHEN_DEV_COMMANDS=1

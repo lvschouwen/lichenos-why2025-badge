@@ -43,17 +43,16 @@ static void dispatch(char const *text, bool dev_on) {
     console_sub_t const *rules = strcmp(name, "psram") == 0 ? psram_rules : strcmp(name, "stress") == 0 ? stress_rules : NULL;
     console_ask_t        ask   = {.dev_on = dev_on, .origin = CONSOLE_ORIGIN_UART, .held = false};
     bool                 dev   = console_sub_rule(console_sub_find(rules, args), &ask) == CON_RULE_DEV;
-    if (dev_gate_decide(found, dev, dev_on) == DEV_GATE_RUN) {
+    if (dev_gate_decide(found) == DEV_GATE_RUN && !dev) {
         table[i].fn(args);
     }
 }
 
 static void test_decide(void) {
-    CHECK(dev_gate_decide(DEV_FIND_RUN, true, false) == DEV_GATE_REFUSE);
-    CHECK(dev_gate_decide(DEV_FIND_RUN, true, true) == DEV_GATE_RUN);
-    CHECK(dev_gate_decide(DEV_FIND_RUN, false, false) == DEV_GATE_RUN);
-    CHECK(dev_gate_decide(DEV_FIND_DEV_OFF, false, false) == DEV_GATE_REFUSE);
-    CHECK(dev_gate_decide(DEV_FIND_NONE, true, true) == DEV_GATE_UNKNOWN);
+    CHECK(dev_gate_decide(DEV_FIND_RUN) == DEV_GATE_RUN);
+    CHECK(dev_gate_decide(DEV_FIND_DEV_OFF) == DEV_GATE_REFUSE);
+    CHECK(dev_gate_decide(DEV_FIND_NONE) == DEV_GATE_UNKNOWN);
+    CHECK(dev_gate_decide((dev_find_t)7) == DEV_GATE_REFUSE); // fail closed
     ran = 0;
     dispatch("psram speed", false);
     dispatch("psram speed 120 yes", false);

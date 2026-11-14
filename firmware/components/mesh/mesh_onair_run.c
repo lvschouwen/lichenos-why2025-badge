@@ -194,10 +194,7 @@ void mesh_onair_console(char const *args) {
         console_reply("on-air allow list: not loaded yet");
         return;
     }
-    if (!onair_op_permitted(op, console_origin())) {
-        console_reply("on-air allow list not changed: switching it off and editing it work only from the USB console");
-        return;
-    }
+    // Switching it off and editing it: the USB console only, its rows in mesh_cmd_table.c, checked before this runs
     switch (op) {
     case ONAIR_OP_STATUS: onair_status(); break;
     case ONAIR_OP_ON: onair_switch_on(); break;

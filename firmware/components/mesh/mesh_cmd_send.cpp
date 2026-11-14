@@ -274,9 +274,7 @@ void mesh_int::cmd_mesh_link(void) {
 // (airlog_console_line). A debug command: compiled out of a release image, refused while developer mode is off.
 void mesh_int::cmd_mesh_airlog(char const *arg) {
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    if (!console_dev_gate("mesh airlog")) {
-        return;
-    }
+    // developer mode: its row in mesh_cmd_table.c, checked before cmd_mesh runs (#464)
     unsigned n;
     if (!airlog_console_count(arg, &n)) {
         console_reply("mesh airlog [n]: n from 1 to %d (default %d)", AIRLOG_CONSOLE_MAX, AIRLOG_CONSOLE_DEFAULT);
@@ -338,9 +336,7 @@ static void chat_close(void) {
 
 void mesh_int::cmd_mesh_chat(char const *arg) {
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    if (!console_dev_gate("mesh chat")) {
-        return;
-    }
+    // developer mode: its row in mesh_cmd_table.c, checked before cmd_mesh runs (#464)
     char typed[MESH_CHAT_CMD_NAME_MAX];
     switch (mesh_chat_cmd_parse(arg, typed, sizeof(typed))) {
         case MESH_CHAT_CMD_OPEN: chat_open(typed); break;

@@ -71,19 +71,25 @@ static void test_subcommand_table(void) {
 #else
         {NULL, NONE, true}, // #455: compiled out of the release image
 #endif
+        {"ident", OPTIONAL, true}, // #464: only the developer-mode gate
         {"advert", OPTIONAL, true}, {"loc", OPTIONAL, true},       {"autoadd", OPTIONAL, true},
-        {"scope", OPTIONAL, true},  {"airlog", OPTIONAL, true}, // #408
+        {"scope", OPTIONAL, true},
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
+        {"airlog", OPTIONAL, true}, // #408
+#else
+        {NULL, OPTIONAL, true}, // #464: no handler arm in a release, so no word
+#endif
         {"chat", OPTIONAL, true},   // #438
     };
     CHECK(MESH_SUB_COUNT == sizeof(want) / sizeof(want[0]));
     for (int i = 0; i < MESH_SUB_COUNT; i++) {
         CHECK(want[i].word ? MESH_SUBS[i].word && strcmp(MESH_SUBS[i].word, want[i].word) == 0 : MESH_SUBS[i].word == NULL);
         CHECK(MESH_SUBS[i].match == want[i].args);
-        CHECK(MESH_SUBS[i].needs_running == want[i].running);
+        CHECK(((MESH_SUBS[i].flags & MESH_SUB_RUNNING) != 0) == want[i].running);
     }
     // the ones that answer while MeshCore is stopped come first: the dispatch relies on it
     for (int i = 1; i < MESH_SUB_COUNT; i++) {
-        CHECK(MESH_SUBS[i - 1].needs_running <= MESH_SUBS[i].needs_running);
+        CHECK((MESH_SUBS[i - 1].flags & MESH_SUB_RUNNING) <= (MESH_SUBS[i].flags & MESH_SUB_RUNNING));
     }
 }
 
@@ -101,7 +107,7 @@ static void expect(char const *line, mesh_sub_id_t id, char const *rest) {
 // The gate in front of the dispatch: a stopped MeshCore answers only the anytime subcommands
 static void test_needs_running(void) {
     for (int i = 0; i < MESH_SUB_COUNT; i++) {
-        CHECK(mesh_sub_needs_running((mesh_sub_id_t)i) == MESH_SUBS[i].needs_running);
+        CHECK(mesh_sub_needs_running((mesh_sub_id_t)i) == ((MESH_SUBS[i].flags & MESH_SUB_RUNNING) != 0));
     }
     CHECK(!mesh_sub_needs_running(MESH_SUB_START));
     CHECK(!mesh_sub_needs_running(MESH_SUB_ORDER));
@@ -127,8 +133,12 @@ static void test_matching(void) {
     expect("hist", MESH_SUB_HIST, "");
     expect("hist scan 3 bad", MESH_SUB_HIST, "scan 3 bad");
     expect("history", MESH_SUB_HISTORY, ""); // not "hist"
+#ifdef CONFIG_LICHEN_DEV_COMMANDS
     expect("airlog", MESH_SUB_AIRLOG, ""); // #408
     expect("airlog 15", MESH_SUB_AIRLOG, "15");
+#else
+    expect("airlog", MESH_SUB_COUNT, NULL); // #464: no word in a release
+#endif
     expect("airlogs", MESH_SUB_COUNT, NULL);
     expect("chat open #x", MESH_SUB_CHAT, "open #x"); // #438
     expect("chat", MESH_SUB_CHAT, "");
@@ -158,9 +168,11 @@ static void test_matching(void) {
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
     expect("ident simulate", MESH_SUB_IDENT_SIMULATE, "");
 #else
-    expect("ident simulate", MESH_SUB_COUNT, NULL); // #455: not in the release table at all
+    expect("ident simulate", MESH_SUB_IDENT, "simulate"); // #455: its own row has no word; the gate's row refuses it
 #endif
-    expect("ident", MESH_SUB_COUNT, NULL);
+    expect("ident", MESH_SUB_IDENT, ""); // #464: the gate's row, the handler answers usage
+    expect("ident foo", MESH_SUB_IDENT, "foo");
+    expect("identity", MESH_SUB_COUNT, NULL);
     expect("advert interval 6h", MESH_SUB_ADVERT, "interval 6h");
     expect("loc 52.1 4.3", MESH_SUB_LOC, "52.1 4.3");
     expect("autoadd off", MESH_SUB_AUTOADD, "off");

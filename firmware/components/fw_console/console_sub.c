@@ -54,7 +54,7 @@ console_rule_t console_sub_rule(console_sub_t const *row, console_ask_t const *a
     if (!console_origin_allows(row->origin, ask->origin)) {
         return CON_RULE_ORIGIN;
     }
-    if ((row->flags & CON_F_USB_HOLD) && console_hold_refuses(ask->held, ask->origin)) {
+    if ((row->flags & CON_F_USB_HOLD) && ask->held && ask->origin != CONSOLE_ORIGIN_UART) { // #289's rule
         return CON_RULE_HOLD;
     }
     return CON_RULE_RUN;

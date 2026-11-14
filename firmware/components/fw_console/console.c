@@ -938,9 +938,9 @@ static void run_command(char *line) {
     line = dev_gate_split(line, (char const *const *)app_ids, __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE), &app, &args);
     int        i = 0;
     dev_find_t found = dev_mode_find_app(commands, commands_count(), line, console_dev_mode(), app, &i);
-    // One decision for all three outcomes (host-tested): a test arm of an otherwise open command (#421) is refused
-    // before it can write anything
-    switch (dev_gate_decide(found, dev_gate_needs_dev(line, args), console_dev_mode())) {
+    // One decision for all three outcomes (host-tested), then the form's row: a test arm of an otherwise open command
+    // (#421) is refused before it can write anything
+    switch (dev_gate_decide(found)) { // then the form's own row (rules_allow): developer mode, origin, the USB hold
         case DEV_GATE_RUN:
             if (rules_allow(&commands[i], line, args)) {
                 commands[i].fn(args);
