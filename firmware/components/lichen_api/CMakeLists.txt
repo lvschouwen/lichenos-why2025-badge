@@ -19,14 +19,15 @@
 # shell's `fw ui card` overlay and the Test card app.
 # bench_scope.c (the bench console scope MeshCore binds for the shell's remote answers, #377) is pure, tested by
 # host_tests/bench_scope_test.c. key_cause.c (what set off the UI work running now, for hand-only actions, #400) is pure,
-# tested by host_tests/key_cause_test.c.
+# tested by host_tests/key_cause_test.c. ui_cb.c (the record that makes an event or timer callback run as the context
+# that registered it, #349) is pure, tested by host_tests/ui_cb_test.c; lichen_ui_cb.c is its LVGL glue.
 # fonts.c holds the font slots lichen_font() reads; lichen_os loads the asset fonts into them (font_slots.h).
 idf_component_register(SRCS "lichen_app.c" "fonts.c" "menu.c" "menu_filter.c" "list_filter.c" "scroll_anchor.c"
                             "text_entry.c"
                             "tz_table.c" "app_ns.c" "app_secret.c" "fs_path.c" "crashlog_fmt.c" "settings_backup.c"
                             "badge_table.c" "lichen_ui.c" "ui_text.c" "qr_payload.c" "qr_screen.c" "tile_order.c"
                             "task_book.c" "mem_book.c" "hold_exit.c" "os_name.c" "lichen_ui_ops.c" "gate_mem.c" "app_ctx.c" "app_caps.c" "gate_app.c" "test_card_layout.c" "test_card.c"
-                            "bench_scope.c" "key_cause.c"
+                            "bench_scope.c" "key_cause.c" "ui_cb.c" "lichen_ui_cb.c"
                        INCLUDE_DIRS "."
                        REQUIRES lvgl__lvgl
                        PRIV_REQUIRES freertos fw_console lichen_random)

@@ -171,6 +171,9 @@ CONFIG_LV_FONT_MONTSERRAT_24=y
 CONFIG_LV_FONT_MONTSERRAT_28=y
 # Lichen's name and the boot screen's current step (#66)
 CONFIG_LV_FONT_MONTSERRAT_40=y
+# An event descriptor and a timer carry a record LVGL frees with them (#349): the context a callback runs as
+# (lichen_ui_cb.c). LVGL core (MIT), no extra library; 8 bytes more per object, descriptor and timer, in PSRAM.
+CONFIG_LV_USE_EXT_DATA=y
 
 # QR codes (#153): lv_qrcode with qrcodegen (MIT), only for the QR code screen (contact and channel links, the QR code app)
 CONFIG_LV_USE_QRCODE=y

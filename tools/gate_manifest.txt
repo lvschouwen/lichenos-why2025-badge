@@ -394,9 +394,11 @@ lichen_task_leftovers	BACKGROUND	not-lvgl	lichen_task.h
 lichen_task_start	BACKGROUND	any	lichen_task.h
 lichen_task_start_in	BACKGROUND	any	lichen_task.h
 lichen_ui_call	-	any	lichen_ui.h
+lichen_ui_event_add	-	lvgl	lichen_ui.h
 lichen_ui_ops_later	SYSTEM	lvgl	lichen_ui_ops.h
 lichen_ui_ops_later_cancel	SYSTEM	lvgl	lichen_ui_ops.h
 lichen_ui_ops_set	SYSTEM	any	lichen_ui_ops.h
+lichen_ui_timer_create	-	lvgl	lichen_ui.h
 lichen_ui_with_group	-	lvgl	lichen_ui.h
 list_filter_edit	-	unspecified	list_filter.h
 list_filter_is_hex	-	unspecified	list_filter.h
@@ -566,6 +568,11 @@ tile_order_slots	-	unspecified	tile_order.h
 tz_at	-	unspecified	tz_table.h
 tz_count	-	unspecified	tz_table.h
 tz_find_posix	-	unspecified	tz_table.h
+ui_cb_free	-	unspecified	ui_cb.h
+ui_cb_new_event	-	unspecified	ui_cb.h
+ui_cb_new_timer	-	unspecified	ui_cb.h
+ui_cb_run_event	-	unspecified	ui_cb.h
+ui_cb_run_timer	-	unspecified	ui_cb.h
 ui_confirm_hint	-	unspecified	ui_text.h
 ui_countdown_text	-	unspecified	ui_text.h
 ui_empty_text	-	unspecified	ui_text.h

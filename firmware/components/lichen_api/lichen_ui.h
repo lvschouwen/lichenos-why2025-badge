@@ -119,6 +119,17 @@ bool lichen_ui_call(void (*fn)(void *), void *arg);
 // to a screen that is already showing), then puts the previous default back. Never set the default group yourself.
 void lichen_ui_with_group(lv_group_t *group, void (*build)(void *), void *arg);
 
+// lv_obj_add_event_cb and lv_timer_create for an app (#349; tools/layers.conf keeps the raw two from the apps): cb runs
+// as the context that registered it (lichen_ctx_self() now: the app inside its hooks, its callbacks and its UI calls),
+// so its memory, tasks, capability checks and a crash in it count for that app, not for the OS. Same arguments and
+// answers as LVGL's (user_data stays what lv_event_get_user_data / lv_timer_get_user_data return; NULL when out of
+// memory). The record (8 bytes, LVGL's heap in PSRAM) is freed with the descriptor or the timer: removing the event,
+// deleting the object or the timer, a one-shot timer ending. Remove such an event by descriptor
+// (lv_obj_remove_event_dsc), not by cb. LVGL task only (a builder or a callback); takes no lock.
+lv_event_dsc_t *lichen_ui_event_add(lv_obj_t *obj, lv_event_cb_t cb, lv_event_code_t filter, void *user_data);
+// lv_timer_create the same way: the timer's cb runs as the registering context. LVGL task only; takes no lock.
+lv_timer_t     *lichen_ui_timer_create(lv_timer_cb_t cb, uint32_t period_ms, void *user_data);
+
 // The pocket lock (#75) is up: the lock screen covers every screen and no key reaches an app until it is unlocked. An app
 // that would act on its own (open a screen for an incoming message) may wait; screens it opens meanwhile stay under the
 // lock. Any task (an atomic read).
