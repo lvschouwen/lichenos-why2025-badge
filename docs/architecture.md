@@ -313,7 +313,8 @@ The rule: **core 1 draws, core 0 talks to the world.**
 - **No downloadable apps for now.** Loadable native apps (ELF) were BadgeVMS's biggest source of trouble (per-app
   heaps and stacks, wrapped functions, an export table). A sandboxed script runtime (WebAssembly through WAMR, #78)
   is the safe way to open up later and could be one app running scripts through the same interface (v2: WAMR, below).
-- Others can already write an app as a component and build their own Lichen.
+- Anyone can write an app and build their own Lichen: `tools/badge.sh new-app <id> "<Name>"` scaffolds an app
+  component that passes the checks, and [app-api.md](app-api.md) "An app in 10 minutes" walks through it (#385).
 - Notifications (#62) are an OS service in the app API: `lichen_notify(ctx, level, title, body, flags)` (the source is the ctx's app, #230) from any
   task. Lichen shows a toast that never takes the focus, the unread count on the app's tile and in the status bar, and
   keeps a history of 48 in `/storage/lichen/notify.bin` (the Notifications tile, the cloud key). The user switches

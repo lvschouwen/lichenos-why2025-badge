@@ -371,7 +371,7 @@ The layer checker `tools/check_layers.sh` runs at the end of `firmware/build.sh 
 the build with `file:line` and the rule for any violation: the baseline `tools/layers-baseline.txt` is empty (0, #237)
 and may not grow (#218; `BADGE_LAYERS_ALLOW_GROW` is the one-off hatch, architecture.md "Enforcement"). Apps are
 layer L6, a closed profile in `tools/layers.conf` (allowed peers, libraries, system headers, own include roots and
-forbidden symbols); a new app component is added there with `component <name> L6`. `tools/check_app_boundary.sh` runs
+forbidden symbols); a new app component is added there with `component <name> L6` (`tools/badge.sh new-app` does it, see "An app in 10 minutes"). `tools/check_app_boundary.sh` runs
 just that L6 profile.
 
 - Rule A: the app's `REQUIRES`/`PRIV_REQUIRES` (variables expanded) must be on the allow-list above.
@@ -391,6 +391,70 @@ The eight plain apps (Timer, Calculator, QR code, Clock, Keyboard test, LoRa spe
 `lichen_apps` component (#180) and are checked as layer L6, like `mesh`. The system apps in `lichen_shell` are not.
 `lichen_apps` is the only component allowed `dirent.h` (Notepad lists a directory; `lichen_fs` has no listing call yet).
 The navigation calls (`shell_open` and friends) are the gate's own since #221: they forward to the shell's ops table.
+
+## An app in 10 minutes
+
+One command scaffolds a working app (#385); the rest of this page is the reference for what it uses.
+
+```
+tools/badge.sh new-app counter "Counter"      # id: 1-13 of a-z0-9_, a letter first; name: up to 24 printable characters
+./firmware/build.sh build                     # the full check; then update the badge as usual
+```
+
+`new-app` is host-only (it touches files in this repo and never the badge). It refuses an id that is reserved, already an
+app's id, a component, or already used by a symbol, and a name with a quote, backslash, `?`, `@` or a control character
+(the name goes into C source as a string), before it writes anything. Run it twice and the second run is refused with the
+tree unchanged. The scaffold creates:
+
+| File | What it is |
+|---|---|
+| `firmware/components/lichen_<id>/CMakeLists.txt` | the component; `PRIV_REQUIRES lichen_api` and nothing else (rule A) |
+| `lichen_<id>.h` | `<id>_app_register()`, the one entry point |
+| `<id>_model.c`, `<id>_model.h` | the pure rules, no ESP or LVGL header: a counter with a step and a limit |
+| `app_<id>.c` | the screens, the saving, the tile and the icon; registers the descriptor |
+| `host_tests/<id>_model_test.c` | the model's host test, with its target in `host_tests/CMakeLists.txt` |
+
+and adds four lines of wiring: `lichen_<id>` to the `PRIV_REQUIRES` of `lichen_apps`, the include and the
+`<id>_app_register()` call to `lichen_apps.c` (the new tile is the last on home), and `component`, `app` and
+`app-objects` lines to `tools/layers.conf` (layer L6; rule D). The app builds and passes the full check unmodified.
+`tools/tests/new_app_test.sh` (part of the host tests, so of every build) scaffolds a throwaway app into a temp tree and
+runs the layer and boundary checks and the generated model test on it, so the template cannot go stale; the real tree
+is never touched. The template is `tools/app_template/` (`@ID@`, `@UP@`, `@NAME_C@` are its slots).
+
+**1. The model.** Put every decision in `<id>_model.c`: plain C with no `esp_*`, `lvgl` or `lichen_*` header, so it
+builds on the host. Follow Notes (`notes_model.c`) and Calculator (`calc_eval.c`). A rule you add gets a case in
+`<id>_model_test.c` first (`ctest --test-dir host_tests/build -R <id>`); the screen then stays thin.
+
+**2. The UI.** `open(screen)` runs in LVGL's context: build a `menu_create` page, rows with `menu_add`, notes with
+`menu_note`, a danger row with `menu_set_kind(row, MENU_DANGER)` + `menu_set_danger`. Rules in
+[ui-standard.md](ui-standard.md). Callbacks on LVGL objects go through `lichen_ui_event_add` and `lichen_ui_timer_create`
+(and `lichen_ui_group_focus_cb`), never `lv_obj_add_event_cb` or `lv_timer_create`: they then run as your app (#349).
+Clear your widget pointers in an `LV_EVENT_DELETE` callback, as the scaffold does, and delete a timer there. Set a label
+with `lichen_label_set` (no redraw when the text is the same) and copy strings with `lichen_str_copy`
+(`lichen_str.h`; always terminates, says when it cut). The tile text (`tile_text`) runs every second on the LVGL task:
+copy a cached string, never wait.
+
+**3. Settings.** Keep `lichen_register_app`'s answer (`self_ctx`) and pass it to the gate calls:
+`app_settings_get_u32(self_ctx, "count", 0)` and `_set_u32` (also `u8`, `u64`, `str`) read and write the namespace
+`a.<id>`; the keys are 1-15 characters and read their default until set. Read them in a hook, not in
+`<id>_app_register()`: the scaffold loads on first use. A `settings` member
+adds rows to Settings > <Name>; the OS builds the page.
+
+**4. Notifications.** `lichen_notify(self_ctx, LN_INFO, "Title", "Body", 0)` (`lichen_notify.h`) from any task. It needs
+the capability `NOTIFY` (next step) and the user may switch the app's notices off.
+
+**5. Capabilities.** The scaffold declares none (`.caps = 0`, budgets `internal_ram_kib = 1`, `psram_kib = 0`). When the
+app calls a gated function, declare the capability in both places: `.caps = CAP_NOTIFY` in `app_<id>.c` and `NOTIFY` in
+the `app <id> lichen_<id> NOTIFY INTERNAL_RAM=1 PSRAM=0` line of `tools/layers.conf` (the table above says which
+function needs which). Rule D fails the build when they differ or when an app uses a gated function it did not declare.
+Raise the budgets there and in `.internal_ram_kib` / `.psram_kib` when the app holds more (statics, stacks). A source
+file you add to the app goes on its `app-objects` line and in the component's `SRCS`; a new `.c` of pure logic gets a
+test target like the scaffold's. Tasks need `BACKGROUND` and `lichen_task_start(self_ctx, ...)`; files on the SD card
+need `SD`.
+
+**6. Tests and the check.** `./firmware/build.sh build` runs the host tests (your model test included), the layer and
+boundary checks and the size checks; a failure names the file and the rule. To drop the app again, delete the
+component, its test and the lines the scaffold added (`git diff` shows them).
 
 ## New services
 

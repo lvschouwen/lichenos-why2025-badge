@@ -90,6 +90,11 @@ Settings and by "fw wifi"; needs mDNS on this machine, e.g. avahi/nss-mdns):
   screenshot <ip> [out.png]           save what the screen shows as a PNG (default: a private dir under \$XDG_RUNTIME_DIR or \$TMPDIR; it
                                       can show private messages, so keep it out of the repo)
 
+Host only (touches no badge, no ssh):
+  new-app <id> "<Name>"     scaffold a new app: firmware/components/lichen_<id>/ (model, screens, CMake), its host test
+                            and the register, layer and test lines; refuses an id in use or a name with quotes (#385,
+                            docs/app-api.md "An app in 10 minutes")
+
 <port> is a /dev/serial/by-id/... path or /dev/ttyACMn as shown by 'ports'.
 EOF
     exit 1
@@ -928,6 +933,7 @@ case "${1:-}" in
     log)          { [ $# -eq 2 ] || { [ $# -eq 3 ] && [ "$3" = --follow ]; }; } || usage; cmd_log "$2" "${3:-}" ;;
     crashes)      [ $# -eq 2 ] || usage; cmd_crashes "$2" ;;
     fw)           [ $# -ge 3 ] || usage; ip=$2; shift 2; cmd_fw "$ip" "$@" ;;
+    new-app)      [ $# -eq 3 ] || usage; exec python3 -I "$REPO/tools/new_app.py" "$2" "$3" ;; # host only: never reaches the badge (#385)
     screenshot)   [ $# -ge 2 ] && [ $# -le 3 ] || usage; cmd_screenshot "$2" "${3:-}" ;;
     *)        usage ;;
 esac
