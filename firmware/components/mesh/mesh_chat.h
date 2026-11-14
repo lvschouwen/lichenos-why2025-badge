@@ -31,8 +31,16 @@ bool mesh_msg_in_dm(mesh_msg_t const *m, uint8_t const peer[6]);
 // One row of the Chat list (#48, #88): the title ("#badgetest", "@bob"), the unread badge ("" for none, "3", "99+") and
 // the dim line under it: "bob: hello · 3 min ago", or "no messages yet" for a chat without any; a DM whose contact was
 // removed starts with "contact removed" (#101). now_s is the mesh_uptime_s() the chat's last_heard_s is measured against.
-void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, uint32_t now_epoch, char *title, size_t title_cap,
-                   char *badge, size_t badge_cap, char *sub, size_t sub_cap);
+typedef struct {
+    char  *title;
+    size_t title_cap;
+    char  *badge;
+    size_t badge_cap;
+    char  *sub;
+    size_t sub_cap;
+} mesh_conv_text_t;
+
+void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, uint32_t now_epoch, mesh_conv_text_t const *out);
 
 // While the clock is not set (#8) other nodes see a wrong time on what we send: adverts are refused, messages are sent
 // with this hint shown in the composer. NULL when the clock is set / when nothing is refused. An approximate clock (set

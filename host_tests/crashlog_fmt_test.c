@@ -21,8 +21,7 @@ static void test_parse(void) {
     char           line[256];
     uint32_t const bt[3] = {0x40001234, 0x4ff00010, 0xdeadbeef};
     // The writer's own output (crash_log.c) is what the reader must understand
-    crash_record_format(line, sizeof(line), "2026-10-30T12:00:00", "fw-v0.1.0-3-gabc1234", "1a2b3c4d5", "panic", "console",
-                        0x4ff0abcd, bt, 3);
+    crash_record_format(line, sizeof(line), &(crash_log_rec_t){"2026-10-30T12:00:00", "fw-v0.1.0-3-gabc1234", "1a2b3c4d5", "panic", "console", 0x4ff0abcd, bt, 3});
     crashlog_entry_t e;
     crashlog_parse(line, strlen(line), &e);
     CHECK(e.parsed);
@@ -36,7 +35,7 @@ static void test_parse(void) {
     CHECK(strcmp(e.line, line) == 0);
 
     // Without bt and elf, clock not set
-    crash_record_format(line, sizeof(line), "#3", "v", NULL, "task_wdt", "mesh", 0x10, NULL, 0);
+    crash_record_format(line, sizeof(line), &(crash_log_rec_t){"#3", "v", NULL, "task_wdt", "mesh", 0x10, NULL, 0});
     crashlog_parse(line, strlen(line), &e);
     CHECK(e.parsed && e.depth == 0 && e.elf[0] == '\0' && e.pc == 0x10 && strcmp(e.when, "#3") == 0);
 
@@ -174,9 +173,9 @@ static void test_export(void) {
     char           log[1024], out[2048];
     uint32_t const bt[2] = {0x40001234, 0x4ff00010};
     size_t         n = 0;
-    n += crash_record_format(log + n, sizeof(log) - n, "2026-10-30T12:00:00", "fw-a", "1a2b", "panic", "console", 0x4ff0abcd, bt, 2);
+    n += crash_record_format(log + n, sizeof(log) - n, &(crash_log_rec_t){"2026-10-30T12:00:00", "fw-a", "1a2b", "panic", "console", 0x4ff0abcd, bt, 2});
     log[n++] = '\n';
-    n += crash_record_format(log + n, sizeof(log) - n, "#2", "fw-b", NULL, "task_wdt", "wifi", 0x40000001, NULL, 0);
+    n += crash_record_format(log + n, sizeof(log) - n, &(crash_log_rec_t){"#2", "fw-b", NULL, "task_wdt", "wifi", 0x40000001, NULL, 0});
     log[n++] = '\n';
     size_t len = crashlog_export(log, n, "fw-b", out, sizeof(out));
     CHECK(len == strlen(out) && len > 0);

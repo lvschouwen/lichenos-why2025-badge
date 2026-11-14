@@ -15,8 +15,7 @@
 
 static radio_confirm_t between(size_t from, size_t to) {
     radio_preset_t const *a = radio_preset_at(from), *b = radio_preset_at(to);
-    return radio_confirm_needed(a->freq_mhz, a->bw_khz, a->sf, a->cr, 0, b->freq_mhz, b->bw_khz, b->sf,
-                                b->cr, 0); // the path hash size is not part of a preset (#129)
+    return radio_confirm_needed(&(radio_confirm_cfg_t){a->freq_mhz, a->bw_khz, a->sf, a->cr, 0}, &(radio_confirm_cfg_t){b->freq_mhz, b->bw_khz, b->sf, b->cr, 0}); // the path hash size is not part of a preset (#129)
 }
 
 int main(void) {
@@ -31,9 +30,11 @@ int main(void) {
     CHECK(between(9, 0) == RADIO_CONFIRM_BAND);    // USA -> Netherlands
     CHECK(between(9, 14) == RADIO_CONFIRM_SWITCH); // USA -> Australia
     // Custom values equal to the current radio need no confirm
-    CHECK(radio_confirm_needed(869.618f, 62.5f, 7, 5, 1, 869.618f, 62.5f, 7, 5, 1) == RADIO_CONFIRM_NONE);
-    CHECK(radio_confirm_needed(869.618f, 62.5f, 7, 5, 1, 869.618f, 62.5f, 7, 5, 3) == RADIO_CONFIRM_SWITCH);
-    CHECK(radio_confirm_needed(869.618f, 62.5f, 7, 5, 1, 915.0f, 62.5f, 7, 5, 1) == RADIO_CONFIRM_BAND);
+    radio_confirm_cfg_t const cur = {869.618f, 62.5f, 7, 5, 1}, same = {869.618f, 62.5f, 7, 5, 1},
+                              hash3 = {869.618f, 62.5f, 7, 5, 3}, us = {915.0f, 62.5f, 7, 5, 1};
+    CHECK(radio_confirm_needed(&cur, &same) == RADIO_CONFIRM_NONE);
+    CHECK(radio_confirm_needed(&cur, &hash3) == RADIO_CONFIRM_SWITCH);
+    CHECK(radio_confirm_needed(&cur, &us) == RADIO_CONFIRM_BAND);
     printf("radio_confirm_test: all checks passed\n");
     return 0;
 }

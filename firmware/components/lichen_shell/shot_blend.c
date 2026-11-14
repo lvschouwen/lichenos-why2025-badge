@@ -24,8 +24,12 @@ static void blend_pixel(uint16_t *d, uint8_t const *s) {
     *d = (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
 
-void shot_blend_argb8888(uint8_t *dst, int dst_w, int dst_h, size_t dst_stride, uint8_t const *src, int src_w,
-                         int src_h, size_t src_stride, int x, int y) {
+void shot_blend_argb8888(shot_img_t const *dst_img, shot_img_t const *src_img, int x, int y) {
+    // Plain locals: the per-pixel loop must not reload through the structs
+    uint8_t *const       dst        = dst_img->px;
+    uint8_t const *const src        = src_img->px;
+    int const            dst_w      = dst_img->w, dst_h = dst_img->h, src_w = src_img->w, src_h = src_img->h;
+    size_t const         dst_stride = dst_img->stride, src_stride = src_img->stride;
     for (int row = 0; row < src_h; row++) {
         int dy = y + row;
         if (dy < 0 || dy >= dst_h) {

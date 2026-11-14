@@ -41,8 +41,10 @@ size_t crash_elf_sha_clean(char *out, size_t cap, char const *in) {
     return n;
 }
 
-size_t crash_record_format(char *out, size_t cap, char const *when, char const *version, char const *elf_sha, char const *reason,
-                           char const *task, uint32_t pc, uint32_t const *backtrace, size_t depth) {
+size_t crash_record_format(char *out, size_t cap, crash_log_rec_t const *rec) {
+    char const     *task      = rec->task;
+    uint32_t const *backtrace = rec->backtrace;
+    size_t          depth     = rec->depth;
     if (cap == 0) {
         return 0;
     }
@@ -58,9 +60,10 @@ size_t crash_record_format(char *out, size_t cap, char const *when, char const *
 
     size_t pos = 0;
     out[0]     = '\0';
-    pos        = append(out, cap, pos, "%s %s %s task=%s pc=0x%08x", when, version, reason, clean, (unsigned)pc);
+    pos        = append(out, cap, pos, "%s %s %s task=%s pc=0x%08x", rec->when, rec->version, rec->reason, clean,
+                  (unsigned)rec->pc);
     char sha[65];
-    if (crash_elf_sha_clean(sha, sizeof(sha), elf_sha)) {
+    if (crash_elf_sha_clean(sha, sizeof(sha), rec->elf_sha)) {
         pos = append(out, cap, pos, " elf=%s", sha);
     }
     for (size_t i = 0; i < depth; i++) {

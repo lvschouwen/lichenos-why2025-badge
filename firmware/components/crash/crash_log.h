@@ -29,8 +29,18 @@ bool crash_is_crash(crash_reset_t reason, bool fresh_dump);
 // version is the running image's; elf_sha is the crashed image's ELF SHA-256 prefix from the core dump (they differ
 // after a rollback), left out when NULL or not hex. The task name is cut to [A-Za-z0-9_-], 16 characters.
 // Returns the length written (always NUL terminated).
-size_t crash_record_format(char *out, size_t cap, char const *when, char const *version, char const *elf_sha, char const *reason,
-                           char const *task, uint32_t pc, uint32_t const *backtrace, size_t depth);
+typedef struct {
+    char const     *when;
+    char const     *version;
+    char const     *elf_sha;
+    char const     *reason;
+    char const     *task;
+    uint32_t        pc;
+    uint32_t const *backtrace;
+    size_t          depth;
+} crash_log_rec_t;
+
+size_t crash_record_format(char *out, size_t cap, crash_log_rec_t const *rec);
 
 // Copies the leading hex digits of in (lower case) into out, cap-1 at most; returns their count (0 for NULL)
 size_t crash_elf_sha_clean(char *out, size_t cap, char const *in);

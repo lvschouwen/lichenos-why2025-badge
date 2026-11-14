@@ -8,5 +8,11 @@
 
 // Lay an ARGB8888 image (LVGL byte order B, G, R, A; straight alpha) over an RGB565 image with its top-left corner at
 // (x, y), which may be negative; the parts outside dst are clipped. Strides are in bytes.
-void shot_blend_argb8888(uint8_t *dst, int dst_w, int dst_h, size_t dst_stride, uint8_t const *src, int src_w,
-                         int src_h, size_t src_stride, int x, int y);
+typedef struct {
+    uint8_t *px;
+    int      w;
+    int      h;
+    size_t   stride;
+} shot_img_t;
+
+void shot_blend_argb8888(shot_img_t const *dst, shot_img_t const *src, int x, int y);

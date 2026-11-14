@@ -17,8 +17,16 @@ typedef enum {
 // 0 = 862-879.999 MHz (EU 868), 1 = 880 MHz and up (the 902-928 MHz bands of the Americas and Asia-Pacific)
 int radio_band(float freq_mhz);
 
-radio_confirm_t radio_confirm_needed(float cur_freq, float cur_bw, uint8_t cur_sf, uint8_t cur_cr, uint8_t cur_hash,
-                                     float new_freq, float new_bw, uint8_t new_sf, uint8_t new_cr, uint8_t new_hash);
+// One radio setup as the confirm check compares it
+typedef struct {
+    float   freq;
+    float   bw;
+    uint8_t sf;
+    uint8_t cr;
+    uint8_t hash;
+} radio_confirm_cfg_t;
+
+radio_confirm_t radio_confirm_needed(radio_confirm_cfg_t const *cur, radio_confirm_cfg_t const *next);
 
 #ifdef __cplusplus
 }

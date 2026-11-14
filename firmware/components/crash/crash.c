@@ -536,8 +536,8 @@ void crash_check_late(void) {
     }
     char record[256];
     // No backtrace here: the decoder (tools/badge.sh crash) gives it
-    crash_record_format(record, sizeof(record), when, esp_app_get_description()->version, elf, reason_name(reason), task, pc,
-                        NULL, 0);
+    crash_log_rec_t const rec = {when, esp_app_get_description()->version, elf, reason_name(reason), task, pc, NULL, 0};
+    crash_record_format(record, sizeof(record), &rec);
     bool written = append_record(record);
     ESP_LOGW(TAG, "last reset was a crash: %s", record);
     if (!written) {

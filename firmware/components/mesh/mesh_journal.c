@@ -164,7 +164,8 @@ static char const *compact_file(char const *src, mesh_hist_table_t *t, uint8_t *
     }
     mesh_hist_compact_t st;
     mesh_hist_crypt_t   c = wcrypt; // the root; the HEAD opens the copy
-    mesh_hist_compact(file_read, in, buf, &c, t, keep_n, file_write, out, stage, STAGE_BYTES, &st);
+    mesh_hist_compact_args_t const args = {file_read, in, buf, &c, t, keep_n, file_write, out, stage, STAGE_BYTES};
+    mesh_hist_compact(&args, &st);
     mh_wipe(&c, sizeof(c));
     auth_failures += st.auth_failures;
     bool ok = st.ok && !ferror(in);

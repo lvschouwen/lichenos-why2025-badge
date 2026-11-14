@@ -49,7 +49,8 @@ static chats_t *live; // every Chat list that exists, newest first
 // One chat: title and unread badge on top, the age and latest line under them (mesh_conv_row)
 static void add_conv_row(chats_t *st, mesh_conv_t const *c, uint32_t now, uint32_t now_epoch, bool selected) {
     char title[MESH_CHANNEL_MAX + 1], badge[8], sub[MESH_TEXT_MAX + 40];
-    mesh_conv_row(c, now, now_epoch, title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub));
+    mesh_conv_text_t const text = {title, sizeof(title), badge, sizeof(badge), sub, sizeof(sub)};
+    mesh_conv_row(c, now, now_epoch, &text);
     lv_obj_t *row = mc_list_row(&st->list, selected);
     lv_obj_t *top = lv_obj_create(row);
     lv_obj_remove_style_all(top);

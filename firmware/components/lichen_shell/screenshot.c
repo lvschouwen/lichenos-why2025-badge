@@ -32,8 +32,9 @@ static bool blend_child(lv_obj_t *child, uint8_t *dst, uint32_t w, uint32_t h, u
         lv_area_t a;
         lv_obj_get_coords(child, &a);
         int32_t ext = ((int32_t)buf->header.w - lv_obj_get_width(child)) / 2; // the snapshot grew by the shadow/outline size
-        shot_blend_argb8888(dst, (int)w, (int)h, stride, buf->data, (int)buf->header.w, (int)buf->header.h,
-                            buf->header.stride, a.x1 - ext, a.y1 - ext);
+        shot_img_t const to   = {dst, (int)w, (int)h, stride};
+        shot_img_t const from = {buf->data, (int)buf->header.w, (int)buf->header.h, buf->header.stride};
+        shot_blend_argb8888(&to, &from, a.x1 - ext, a.y1 - ext);
     }
     lv_draw_buf_destroy(buf);
     return ok;

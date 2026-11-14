@@ -723,8 +723,9 @@ static void pick_preset(void *arg) {
     if (!p || !mesh_get_settings(&s)) {
         return;
     }
-    radio_confirm_t level = radio_confirm_needed(s.freq, s.bw, s.sf, s.cr, 0, p->freq_mhz, p->bw_khz,
-                                                 p->sf, p->cr, 0);
+    radio_confirm_cfg_t const cur  = {s.freq, s.bw, s.sf, s.cr, 0};
+    radio_confirm_cfg_t const next = {p->freq_mhz, p->bw_khz, p->sf, p->cr, 0};
+    radio_confirm_t           level = radio_confirm_needed(&cur, &next);
     if (level == RADIO_CONFIRM_NONE) {
         region_chosen(); // already in use: nothing to switch (the first-run question counts it as the answer)
         return;
@@ -1007,8 +1008,9 @@ static void apply_custom(void *arg) {
         set_note(custom_note, why, true);
         return;
     }
-    radio_confirm_t level = radio_confirm_needed(s.freq, s.bw, s.sf, s.cr, 0, draft_freq,
-                                                 radio_bandwidth_at(draft_bw), draft_sf, draft_cr, 0);
+    radio_confirm_cfg_t const cur  = {s.freq, s.bw, s.sf, s.cr, 0};
+    radio_confirm_cfg_t const next = {draft_freq, radio_bandwidth_at(draft_bw), draft_sf, draft_cr, 0};
+    radio_confirm_t           level = radio_confirm_needed(&cur, &next);
     if (level == RADIO_CONFIRM_NONE) {
         set_note(custom_note, "Already using these values", false);
         region_chosen();

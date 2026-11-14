@@ -260,8 +260,9 @@ static void show_page(files_job_result_t const *r) {
         return;
     }
     bool eof = r->got < FILES_READ_CHUNK;
-    files_text_page(files_job_data(), r->got, eof, s_t->width_px, s_t->lines, s_t->page_text, sizeof(s_t->page_text),
-                    &s_t->consumed, &s_t->binary, glyph_width, s_t);
+    files_text_in_t const  in  = {files_job_data(), r->got, eof, s_t->width_px, s_t->lines, glyph_width, s_t};
+    files_text_out_t const out = {s_t->page_text, sizeof(s_t->page_text), &s_t->consumed, &s_t->binary};
+    files_text_page(&in, &out);
     s_t->size   = r->file_size;
     s_t->at_end = s_t->consumed == 0 || s_t->offs[s_t->page] + s_t->consumed >= r->file_size || s_t->page + 1 >= VIEW_PAGES;
     s_t->loaded = true;

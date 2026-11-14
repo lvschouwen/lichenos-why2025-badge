@@ -1025,9 +1025,16 @@ static bool compact_rec(mesh_hist_rec_t const *r, uint8_t const *raw, size_t byt
     return stage_raw(c, raw, bytes);
 }
 
-void mesh_hist_compact(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_crypt_t *crypt, mesh_hist_table_t *t,
-                       size_t keep, mesh_hist_write_fn write, void *wctx, uint8_t *out, size_t out_cap,
-                       mesh_hist_compact_t *st) {
+void mesh_hist_compact(mesh_hist_compact_args_t const *a, mesh_hist_compact_t *st) {
+    mesh_hist_read_fn  read    = a->read;
+    void              *rctx    = a->rctx;
+    uint8_t           *buf     = a->buf;
+    mesh_hist_crypt_t *crypt   = a->c;
+    mesh_hist_table_t *t       = a->t;
+    mesh_hist_write_fn write   = a->write;
+    void              *wctx    = a->wctx;
+    uint8_t           *out     = a->out;
+    size_t             out_cap = a->out_cap;
     memset(st, 0, sizeof(*st));
     st->ok = out_cap >= MESH_HIST_REC_MAX;
     if (!st->ok) {
@@ -1040,7 +1047,7 @@ void mesh_hist_compact(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hi
     }
     compact_ctx_t c = {.crypt   = crypt,
                        .t       = t,
-                       .keep    = keep,
+                       .keep    = a->keep,
                        .write   = write,
                        .wctx    = wctx,
                        .out     = out,

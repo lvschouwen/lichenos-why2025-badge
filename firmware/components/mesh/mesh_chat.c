@@ -96,8 +96,9 @@ mesh_status_kind_t mesh_msg_status(mesh_msg_t const *m, char *out, size_t cap) {
     }
 }
 
-void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, uint32_t now_epoch, char *title, size_t title_cap,
-                   char *badge, size_t badge_cap, char *sub, size_t sub_cap) {
+void mesh_conv_row(mesh_conv_t const *c, uint32_t now_s, uint32_t now_epoch, mesh_conv_text_t const *out) {
+    char *const  title = out->title, *const badge = out->badge, *const sub = out->sub;
+    size_t const title_cap = out->title_cap, badge_cap = out->badge_cap, sub_cap = out->sub_cap;
     snprintf(title, title_cap, "%s", c->title);
     if (c->unread == 0) {
         badge[0] = '\0';

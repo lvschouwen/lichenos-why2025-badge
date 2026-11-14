@@ -18,29 +18,29 @@ int main(void) {
     char           out[256];
     uint32_t const bt[3] = {0x40001234, 0x4ff00010, 0xdeadbeef};
 
-    size_t n = crash_record_format(out, sizeof(out), "2026-10-30T12:00:00", "fw-v0.1.0-3-gabc1234", "1a2b3c4d5", "panic", "console", 0x4ff0abcd, bt, 3);
+    size_t n = crash_record_format(out, sizeof(out), &(crash_log_rec_t){"2026-10-30T12:00:00", "fw-v0.1.0-3-gabc1234", "1a2b3c4d5", "panic", "console", 0x4ff0abcd, bt, 3});
     CHECK(strcmp(out, "2026-10-30T12:00:00 fw-v0.1.0-3-gabc1234 panic task=console pc=0x4ff0abcd elf=1a2b3c4d5 bt=0x40001234,0x4ff00010,0xdeadbeef") == 0);
     CHECK(n == strlen(out));
 
-    crash_record_format(out, sizeof(out), "t", "v", NULL, "wdt", "mesh", 0x10, NULL, 0);
+    crash_record_format(out, sizeof(out), &(crash_log_rec_t){"t", "v", NULL, "wdt", "mesh", 0x10, NULL, 0});
     CHECK(strcmp(out, "t v wdt task=mesh pc=0x00000010") == 0);
 
     // The task name keeps [A-Za-z0-9_-], 16 chars at most
-    crash_record_format(out, sizeof(out), "t", "v", NULL, "panic", "mesh task!", 0, NULL, 0);
+    crash_record_format(out, sizeof(out), &(crash_log_rec_t){"t", "v", NULL, "panic", "mesh task!", 0, NULL, 0});
     CHECK(strcmp(out, "t v panic task=mesh_task_ pc=0x00000000") == 0);
-    crash_record_format(out, sizeof(out), "t", "v", NULL, "panic", "abcdefghijklmnopqrstuvwxyz", 0, NULL, 0);
+    crash_record_format(out, sizeof(out), &(crash_log_rec_t){"t", "v", NULL, "panic", "abcdefghijklmnopqrstuvwxyz", 0, NULL, 0});
     CHECK(strstr(out, "task=abcdefghijklmnop pc=") != NULL);
 
     // Never overruns a short buffer
-    n = crash_record_format(out, 10, "2026-10-30T12:00:00", "v", "", "panic", "x", 0, bt, 3);
+    n = crash_record_format(out, 10, &(crash_log_rec_t){"2026-10-30T12:00:00", "v", "", "panic", "x", 0, bt, 3});
     CHECK(strlen(out) == 9 && n == 9);
 
     // The crashed image's ELF SHA (from the core dump) is hex only: anything else is cut there; empty or NULL leaves it out
-    crash_record_format(out, sizeof(out), "t", "v", "", "panic", "x", 0, NULL, 0);
+    crash_record_format(out, sizeof(out), &(crash_log_rec_t){"t", "v", "", "panic", "x", 0, NULL, 0});
     CHECK(strcmp(out, "t v panic task=x pc=0x00000000") == 0);
-    crash_record_format(out, sizeof(out), "t", "v", "ABCdef012 x", "panic", "x", 0, NULL, 0);
+    crash_record_format(out, sizeof(out), &(crash_log_rec_t){"t", "v", "ABCdef012 x", "panic", "x", 0, NULL, 0});
     CHECK(strcmp(out, "t v panic task=x pc=0x00000000 elf=abcdef012") == 0);
-    crash_record_format(out, sizeof(out), "t", "v", "zz", "panic", "x", 0, NULL, 0);
+    crash_record_format(out, sizeof(out), &(crash_log_rec_t){"t", "v", "zz", "panic", "x", 0, NULL, 0});
     CHECK(strcmp(out, "t v panic task=x pc=0x00000000") == 0);
 
     char sha[16];

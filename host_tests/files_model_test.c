@@ -109,7 +109,9 @@ static void test_sort(void) {
 
 static size_t page(char const *in, size_t len, bool eof, int cols, int lines, char *out, size_t cap, bool *bin) {
     size_t used = 0;
-    files_text_page((uint8_t const *)in, len, eof, cols, lines, out, cap, &used, bin, NULL, NULL);
+    files_text_in_t const  a = {(uint8_t const *)in, len, eof, cols, lines, NULL, NULL};
+    files_text_out_t const o = {out, cap, &used, bin};
+    files_text_page(&a, &o);
     return used;
 }
 
@@ -144,7 +146,9 @@ static void test_wrap(void) {
     used = page("one two three", 13, true, 12, 5, out, sizeof(out), &bin);
     CHECK(!strcmp(out, "one two\nthree"));
     // measured width: letters 2 units, blanks 1: "ab cd" is exactly 9
-    files_text_page((uint8_t const *)"ab cd ef", 8, true, 9, 5, out, sizeof(out), &used, &bin, narrow_blank, NULL);
+    files_text_in_t const  in = {(uint8_t const *)"ab cd ef", 8, true, 9, 5, narrow_blank, NULL};
+    files_text_out_t const o  = {out, sizeof(out), &used, &bin};
+    files_text_page(&in, &o);
     CHECK(!strcmp(out, "ab cd\nef"));
     // paging a whole text word by word loses nothing: the words come back in order
     char text[300];

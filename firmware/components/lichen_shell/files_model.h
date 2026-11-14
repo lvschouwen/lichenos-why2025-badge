@@ -70,8 +70,24 @@ typedef int (*files_width_fn)(void *ctx, char const *utf8, size_t n);
 // and is never split. Writes out (NUL-terminated) and sets *consumed to the bytes the screen used (> 0 whenever len > 0
 // and at_eof or len is at least 4 bytes more than a screen needs). at_eof false: a sequence cut off at the end of the
 // buffer is left for the next read. *binary is set when more than a tenth of the bytes were control bytes.
-size_t files_text_page(uint8_t const *buf, size_t len, bool at_eof, int cols, int lines, char *out, size_t cap,
-                       size_t *consumed, bool *binary, files_width_fn measure, void *measure_ctx);
+typedef struct {
+    uint8_t const *buf;
+    size_t         len;
+    bool           at_eof;
+    int            cols;
+    int            lines;
+    files_width_fn measure;
+    void          *measure_ctx;
+} files_text_in_t;
+
+typedef struct {
+    char   *out;
+    size_t  cap;
+    size_t *consumed;
+    bool   *binary;
+} files_text_out_t;
+
+size_t files_text_page(files_text_in_t const *in, files_text_out_t const *out);
 
 #ifdef __cplusplus
 }

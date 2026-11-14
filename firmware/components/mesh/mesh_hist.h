@@ -280,9 +280,20 @@ typedef struct {
 // records go. The journal keeps its salt and keys: records are copied as they are (no new nonces), so records still
 // pending in the writer, encrypted with these keys, can follow. buf as mesh_hist_scan's, out is a staging buffer of
 // out_cap bytes (at least MESH_HIST_REC_MAX). c holds the root; the HEAD opens it.
-void mesh_hist_compact(mesh_hist_read_fn read, void *rctx, uint8_t *buf, mesh_hist_crypt_t *c, mesh_hist_table_t *t,
-                       size_t keep, mesh_hist_write_fn write, void *wctx, uint8_t *out, size_t out_cap,
-                       mesh_hist_compact_t *st);
+typedef struct {
+    mesh_hist_read_fn   read;
+    void               *rctx;
+    uint8_t            *buf;
+    mesh_hist_crypt_t  *c;
+    mesh_hist_table_t  *t;
+    size_t              keep;
+    mesh_hist_write_fn  write;
+    void               *wctx;
+    uint8_t            *out;
+    size_t              out_cap;
+} mesh_hist_compact_args_t;
+
+void mesh_hist_compact(mesh_hist_compact_args_t const *a, mesh_hist_compact_t *st);
 
 // ---- boot decisions (mesh_journal.c acts on them; table-tested) ---------------------------------------------------
 

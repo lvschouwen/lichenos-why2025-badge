@@ -565,7 +565,7 @@ static void compact_checks(void) {
     out_len            = 0;
     fail_write_after   = -1;
     rd.pos             = 0;
-    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_compact(&(mesh_hist_compact_args_t){mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage)}, &st);
     CHECK(st.ok && st.bytes_out == out_len && st.records_out == 1 + 2 + 3 + 2); // HEAD, CHATs, messages
     CHECK(memcmp(out_file, file, MESH_HIST_HDR + 1 + MESH_HIST_SALT + MESH_HIST_CHECK) == 0); // the same HEAD
     s = scan_bytes(out_file, out_len, 0);
@@ -588,14 +588,14 @@ static void compact_checks(void) {
     file_len = out_len;
     rd       = (mem_rd_t){.p = file, .len = file_len};
     out_len  = 0;
-    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_compact(&(mesh_hist_compact_args_t){mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage)}, &st);
     CHECK(st.ok && out_len == first);
 
     // A write that fails is reported
     rd.pos           = 0;
     out_len          = 0;
     fail_write_after = 0;
-    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_compact(&(mesh_hist_compact_args_t){mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage)}, &st);
     CHECK(!st.ok);
     fail_write_after = -1;
 
@@ -608,7 +608,7 @@ static void compact_checks(void) {
     CHECK(t.n == 1 && t.overflow);
     rd.pos  = 0;
     out_len = 0;
-    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 1, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_compact(&(mesh_hist_compact_args_t){mem_read, &rd, buf, kcopy(), &t, 1, mem_write, NULL, stage, sizeof(stage)}, &st);
     CHECK(st.ok);
     s = scan_bytes(out_file, out_len, 0);
     CHECK(!s.torn && got_n == 2 + 4); // the tracked chat (b): CHAT + 1 message; the other: CHAT + all 3 of its messages
@@ -651,7 +651,7 @@ static void compact_dup_checks(void) {
     mesh_hist_compact_t st;
     mem_rd_t            rd = {.p = file, .len = file_len};
     out_len                = 0;
-    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 2, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_compact(&(mesh_hist_compact_args_t){mem_read, &rd, buf, kcopy(), &t, 2, mem_write, NULL, stage, sizeof(stage)}, &st);
     mesh_hist_scan_t s = scan_bytes(out_file, out_len, 0);
     // keep 2: messages 5 and 6, with both copies of 5 (the replay keeps the newest)
     CHECK(st.ok && !s.torn && got_n == 4 && got[1].seq == 5 && got[2].seq == 6 && got[3].seq == 5 &&
@@ -1031,7 +1031,7 @@ static void fault_checks(void) {
     mesh_hist_compact_t st;
     rd.pos  = 0;
     out_len = 0;
-    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_compact(&(mesh_hist_compact_args_t){mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage)}, &st);
     CHECK(!st.ok && out_len == 0);
     uint8_t one[MESH_HIST_REC_MAX];
     CHECK(ENC(&r, one, sizeof(one)) == 0); // and nothing is written in plaintext either
@@ -1057,7 +1057,7 @@ static void compact_refuse_checks(void) {
     mesh_hist_table_init(&t, slots, 16);
     mem_rd_t rd = {.p = file, .len = file_len};
     out_len     = 0;
-    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_compact(&(mesh_hist_compact_args_t){mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage)}, &st);
     CHECK(!st.ok);
     // Our records but no HEAD left at all
     file_len = 0;
@@ -1065,7 +1065,7 @@ static void compact_refuse_checks(void) {
     append(&r);
     rd      = (mem_rd_t){.p = file, .len = file_len};
     out_len = 0;
-    mesh_hist_compact(mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage), &st);
+    mesh_hist_compact(&(mesh_hist_compact_args_t){mem_read, &rd, buf, kcopy(), &t, 3, mem_write, NULL, stage, sizeof(stage)}, &st);
     CHECK(!st.ok);
 }
 
