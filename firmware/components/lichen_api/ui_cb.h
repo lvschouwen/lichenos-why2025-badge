@@ -9,6 +9,9 @@
 // Running a record takes no lock and allocates nothing: enter, call, leave. The callback may delete the object or the
 // timer, which frees the record: nothing reads it after the call.
 
+#include "app_ctx.h"
+
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -48,3 +51,37 @@ void ui_cb_free(ui_cb_env_t const *env, void *rec);
 void ui_cb_run_event(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_event_t *e);
 void ui_cb_run_timer(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_timer_t *t);
 void ui_cb_run_group(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_group_t *g);
+
+// ---- the mark the panic hook reads (#349, #427) ---------------------------------------------------------------------
+// The task inside an app's callback and the context that callback entered, so a crash there is named after the app but
+// is no strike against it (safe_mode_policy.h) only while that context is still the one the task runs as: a callback
+// that enters another app's context (Settings running an app's settings or about hook) leaves the mark, and a crash in
+// that hook strikes that app. Written by the LVGL task only (it holds the LVGL lock; the trampolines run nowhere else),
+// read by the panic handler on any core: internal RAM (plain .bss), no lock.
+//
+// The stores are ordered so that every state a reader can catch is safe. Each word is one aligned 32-bit store, so it
+// is never torn. Entering at depth 0 writes ctx before task: a crash between the two sees no task, so no mark (it
+// counts as whatever context the task runs as, the OS's before the trampoline entered the app's). Leaving to depth 0
+// clears task first, so a stale ctx is never paired with a live task. Nested, only ctx changes: a crash between the
+// mark and the context switch sees two different slots and strikes the context the task runs as (OS code in the
+// trampoline, a few instructions).
+typedef struct {
+    void *volatile    task;  // the task inside a callback; NULL: none
+    volatile uint32_t ctx;   // the context the innermost callback entered
+    uint32_t          depth; // the writer's own count, never read by the panic handler
+} ui_cb_mark_t;
+
+// The trampoline is about to enter ctx (before env->enter) on task
+void ui_cb_mark_enter(ui_cb_mark_t *m, void *task, uint32_t ctx);
+// The trampoline left back to previous (after env->leave): the outer callback's context when they nest
+void ui_cb_mark_leave(ui_cb_mark_t *m, uint32_t previous);
+
+// The panic handler's test: task (the core's current one) is inside a callback whose context slot is still the one it
+// runs as (current_ctx, its thread-local slot). Always inlined: the caller is in IRAM and must not reach flash.
+static inline __attribute__((always_inline)) bool ui_cb_mark_holds(ui_cb_mark_t const *m, void const *task,
+                                                                    uint32_t current_ctx) {
+    void *marked = m->task; // read the task first: ctx was written before it
+    uint32_t ctx = m->ctx;
+    uint32_t mask = (1u << APP_CTX_SLOT_BITS) - 1u;
+    return marked && marked == task && (ctx & mask) != 0 && (ctx & mask) == (current_ctx & mask);
+}

@@ -406,6 +406,9 @@ class HardAndConf(unittest.TestCase):
         conf = cl.parse_conf(cl.read(os.path.join(tools, "layers.conf")))
         external = {"strndup": "", "strdup": "", "esp_partition_mmap": "esp_partition", "spi_flash_mmap": "spi_flash",
                     "esp_mmu_map": "esp_mm"}
+        # LVGL's raw hooks banned for apps before any source used them (#427; lv_anim.h, lv_obj.h, lv_group.h)
+        external.update(dict.fromkeys(("lv_anim_set_exec_cb", "lv_obj_add_delete_cb", "lv_group_set_edge_cb",
+                                       "lv_obj_set_external_data", "lv_anim_set_external_data"), ""))
         known = set(external)
         for base in ("firmware/components", "firmware/main", "shared"):
             for path in cl.source_files(os.path.join(root, base)):

@@ -611,6 +611,8 @@ tz_at	-	unspecified	tz_table.h
 tz_count	-	unspecified	tz_table.h
 tz_find_posix	-	unspecified	tz_table.h
 ui_cb_free	-	unspecified	ui_cb.h
+ui_cb_mark_enter	-	unspecified	ui_cb.h
+ui_cb_mark_leave	-	unspecified	ui_cb.h
 ui_cb_new_event	-	unspecified	ui_cb.h
 ui_cb_new_group	-	unspecified	ui_cb.h
 ui_cb_new_timer	-	unspecified	ui_cb.h

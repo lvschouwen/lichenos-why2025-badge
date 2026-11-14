@@ -68,3 +68,21 @@ void ui_cb_run_group(ui_cb_env_t const *env, ui_cb_rec_t const *rec, struct _lv_
     fn(g);
     env->leave(previous);
 }
+
+void ui_cb_mark_enter(ui_cb_mark_t *m, void *task, uint32_t ctx) {
+    m->ctx = ctx; // before task: see ui_cb.h
+    if (m->depth++ == 0) {
+        m->task = task;
+    }
+}
+
+void ui_cb_mark_leave(ui_cb_mark_t *m, uint32_t previous) {
+    if (m->depth == 0) {
+        return; // a leave without an enter changes nothing
+    }
+    if (--m->depth == 0) {
+        m->task = NULL;
+    } else {
+        m->ctx = previous; // the outer callback's context
+    }
+}

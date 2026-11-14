@@ -26,15 +26,17 @@ static void *rec_alloc(size_t size) {
 }
 
 // The mark spans the whole time the app's context is entered: a crash in there is named after the app but is no strike
-// against it (#349 review), since the shell, LVGL's renderer and the PSRAM path a callback reaches run as the app too
+// against it (#349 review), since the shell, LVGL's renderer and the PSRAM path a callback reaches run as the app too;
+// it counts toward the higher callback limit instead, and only while ctx is still the context the task runs as (#427).
+// Marked before the enter and cleared after the leave: a crash in between finds the slots unequal (ui_cb.h)
 static uint32_t cb_enter(uint32_t ctx) {
-    lichen_sys_ui_cb_mark(true);
+    lichen_sys_ui_cb_mark(true, ctx);
     return lichen_ctx_enter(ctx);
 }
 
 static void cb_leave(uint32_t previous) {
     lichen_ctx_leave(previous);
-    lichen_sys_ui_cb_mark(false);
+    lichen_sys_ui_cb_mark(false, previous);
 }
 
 static ui_cb_env_t const s_env = {

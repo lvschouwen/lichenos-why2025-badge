@@ -11,6 +11,8 @@
 #include "freertos/task.h"
 #include "fw_console.h"
 #include "lichen_sys_app.h"
+#include "lichen_sys_ui.h"
+#include "lichen_ui.h"
 #include "settings_store.h"
 
 #include <stdatomic.h>
@@ -54,7 +56,7 @@ void IRAM_ATTR __wrap_esp_panic_handler(panic_info_t *info) {
         entered          = true;
         bool        mine = info && info->core == esp_cpu_get_core_id();
         char const *id   = mine ? lichen_sys_panic_app_id() : NULL;
-        safe_mode_note_panic(&s_rec, id, id && lichen_sys_panic_in_ui_cb()); // #349: named, no strike
+        safe_mode_note_panic(&s_rec, id, id && lichen_sys_panic_in_ui_cb()); // #349, #427: the callback limit
     }
     __real_esp_panic_handler(info);
 }
@@ -81,7 +83,7 @@ bool safe_mode_crashed_app(char *id, size_t cap, unsigned *crashes, bool *switch
     }
     memcpy(id, s_boot.app, sizeof(s_boot.app));
     if (crashes) {
-        *crashes = s_boot.app_crashes;
+        *crashes = s_boot.in_callback ? s_boot.named_crashes : s_boot.app_crashes; // toward the limit that applies
     }
     if (switched_off) {
         *switched_off = atomic_load(&s_switched);
@@ -121,8 +123,8 @@ static bool save_list(char const *list) {
 // Only for an app not on the list yet (safe_mode_background_off asks first), so a boot that changes nothing writes nothing
 static void switch_off(char const *id) {
     char list[SAFE_MODE_LIST_MAX];
-    ESP_LOGW(TAG, "%s crashed %d times in %d boots: its background part is off until fw app background %s on", id,
-             SAFE_MODE_LIMIT, SAFE_MODE_WINDOW, id);
+    ESP_LOGW(TAG, "%s crashed %u times in %d boots%s: its background part is off until fw app background %s on", id,
+             s_boot.named_crashes, SAFE_MODE_WINDOW, s_boot.in_callback ? " (in a screen callback)" : "", id);
     portENTER_CRITICAL(&s_mux);
     bool added = safe_mode_list_add(s_off, sizeof(s_off), id);
     memcpy(list, s_off, sizeof(list));
@@ -146,7 +148,9 @@ static void show(void) {
     if (!s_boot.counted) {
         console_reply("app background: this boot is the PSRAM re-arm restart after a crash (not counted again)");
     } else if (s_boot.app[0] && s_boot.in_callback) {
-        console_reply("app background: this boot follows a crash in a screen callback of %s (not counted)", s_boot.app);
+        console_reply("app background: this boot follows a crash in a screen callback of %s, %u of %d in %d boots "
+                      "(the callback limit; no strike)", s_boot.app, s_boot.named_crashes, SAFE_MODE_CB_LIMIT,
+                      SAFE_MODE_WINDOW);
     } else if (s_boot.app[0]) {
         console_reply("app background: this boot follows a crash of %s, %u of %d in %d boots", s_boot.app,
                       s_boot.app_crashes, SAFE_MODE_LIMIT, SAFE_MODE_WINDOW);
@@ -175,15 +179,51 @@ static void background_on(char const *id) {
 }
 
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-// The faulting task runs as the app: what the panic hook reads is the real attribution path, not a shortcut
-static void crash_as(char const *name) {
+static void crash_in_timer(lv_timer_t *t) {
+    (void)t;
+    abort();
+}
+
+// #427: a timer the app's context made, so it runs through the #349 trampoline on the LVGL task and the panic hook
+// sees the callback mark, as a faulty app timer would
+static void crash_in_callback(lichen_app_t const *app, lichen_ctx_t ctx) {
+    if (!lichen_sys_ui_lock(1000)) {
+        console_reply("app crash: the UI is busy, nothing done");
+        return;
+    }
+    lichen_ctx_t previous = lichen_ctx_enter(ctx);
+    lv_timer_t  *t        = lichen_ui_timer_create(crash_in_timer, 200, NULL);
+    lichen_ctx_leave(previous);
+    lichen_sys_ui_unlock();
+    console_reply(t ? "app crash: %s crashes in a screen callback in 0.2 s, the badge restarts"
+                    : "app crash: %s: no timer (no memory), nothing done",
+                  app->id ? app->id : app->name);
+}
+
+// The faulting task runs as the app: what the panic hook reads is the real attribution path, not a shortcut.
+// "<id> cb": the fault is in one of the app's LVGL timer callbacks instead (#427)
+static void crash_as(char const *args) {
     if (!console_dev_gate("app crash")) {
         return;
     }
+    char        name[SAFE_MODE_ID_CAP];
+    char const *sp  = strchr(args, ' ');
+    size_t      len = sp ? (size_t)(sp - args) : strlen(args);
+    bool        cb  = sp && strcmp(sp, " cb") == 0;
+    if ((sp && !cb) || len >= sizeof(name)) {
+        console_reply("app crash: usage: app crash <id> [cb]");
+        return;
+    }
+    memcpy(name, args, len);
+    name[len]               = '\0';
     lichen_app_t const *app = lichen_app_by_id(name); // ids only: lichen_app_by_name is the shell's (layers.conf)
     lichen_ctx_t        ctx = app ? lichen_sys_task_ctx(app) : LICHEN_CTX_NONE;
     if (!app || ctx == LICHEN_CTX_NONE) {
         console_reply("app crash: no app %s", name);
+        return;
+    }
+    if (cb) {
+        crash_in_callback(app, ctx);
         return;
     }
     console_reply("app crash: %s crashes now (abort as the app), the badge restarts", app->id ? app->id : app->name);
@@ -192,7 +232,7 @@ static void crash_as(char const *name) {
     lichen_ctx_enter(ctx);
     abort();
 }
-#define USAGE_DEV " | crash <id> (developer mode: a panic as that app)"
+#define USAGE_DEV " | crash <id> [cb] (developer mode: a panic as that app, or in its timer callback)"
 #else
 #define USAGE_DEV ""
 #endif
@@ -238,7 +278,8 @@ static void log_verdict(void) {
     if (!s_boot.counted) {
         ESP_LOGI(TAG, "this boot is the PSRAM re-arm restart after a crash: not counted again");
     } else if (s_boot.app[0] && s_boot.in_callback) {
-        ESP_LOGW(TAG, "the crash happened in a screen callback of %s: named, not counted against it", s_boot.app);
+        ESP_LOGW(TAG, "the crash happened in a screen callback of %s: no strike, %u of %d in the last %d boots toward "
+                      "the callback limit", s_boot.app, s_boot.named_crashes, SAFE_MODE_CB_LIMIT, SAFE_MODE_WINDOW);
     } else if (s_boot.app[0]) {
         ESP_LOGW(TAG, "the crash is attributed to %s: %u of %d in the last %d boots", s_boot.app, s_boot.app_crashes,
                  SAFE_MODE_LIMIT, SAFE_MODE_WINDOW);

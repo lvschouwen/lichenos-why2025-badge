@@ -26,11 +26,13 @@ extern "C" {
 #define SAFE_MODE_ID_CAP 14          // an app id is 1..13 of a-z 0-9 _ (app_ns.h), with the NUL
 #define SAFE_MODE_WINDOW 3           // boots looked at
 #define SAFE_MODE_LIMIT  2           // crashes of one app in the window that switch its background off
+#define SAFE_MODE_CB_LIMIT 3         // crashes named after one app, its callback crashes included, that do (#427)
 
 // A window entry: what the boot before it died of
 #define SAFE_MODE_CLEAN  0u // a clean end (no crash)
 #define SAFE_MODE_NOBODY 1u // a crash no app is blamed for (an OS or IDF task, an ISR, a brownout, a lockup)
-// anything else: safe_mode_hash of the app the crash is attributed to
+// anything else: safe_mode_hash of the app the crash is attributed to, or safe_mode_cb_hash of the app whose LVGL
+// callback it happened in (#427)
 
 #define SAFE_MODE_F_PANIC 0x1u // the panic handler ran and wrote crashed[] ("" = nobody)
 #define SAFE_MODE_F_REARM 0x2u // this boot ends in the PSRAM 120 MHz re-arm restart (#353): the next boot is its tail
@@ -49,6 +51,8 @@ _Static_assert(sizeof(safe_mode_rec_t) <= 64, "the record is at most 64 B of LP 
 // A hash of an app id that is never SAFE_MODE_CLEAN or SAFE_MODE_NOBODY; ids are compared by it across boots (an OTA
 // may register the apps in another order, so a table index would not do)
 uint32_t safe_mode_hash(char const *id);
+// The window entry of a crash in one of id's LVGL callbacks: never CLEAN, NOBODY or safe_mode_hash(id)
+uint32_t safe_mode_cb_hash(char const *id);
 uint32_t safe_mode_sum(safe_mode_rec_t const *r);
 bool     safe_mode_valid(safe_mode_rec_t const *r);
 // The record emptied (an empty window) and sealed
@@ -60,7 +64,9 @@ void     safe_mode_ensure(safe_mode_rec_t *r);
 // The panic handler: the faulting task ran for app id (NULL or "" for nobody). A record that is not valid is reset
 // first. Only a well-formed id (a-z 0-9 _, 1..13) is kept; anything else counts as nobody. in_callback: the task was
 // inside an app's LVGL event or timer callback (#349), where the shell, LVGL's renderer and the PSRAM path run as the
-// app too (a Back key that closes the screen, a draw event): the crash is named but is no strike against the app.
+// app too (a Back key that closes the screen, a draw event): the crash is named but is no strike against the app. It
+// counts toward the higher callback limit instead (#427): SAFE_MODE_CB_LIMIT crashes named after the app in the window
+// stop a callback that crashes every boot.
 void safe_mode_note_panic(safe_mode_rec_t *r, char const *id, bool in_callback);
 // The PSRAM re-arm restart is about to happen (restarting true), or did not after all (false)
 void safe_mode_note_rearm(safe_mode_rec_t *r, bool restarting);
@@ -69,9 +75,10 @@ typedef struct {
     bool     counted;                  // this boot took a place in the window (false: the re-arm restart's tail)
     bool     crash;                    // the boot before ended in a crash
     char     app[SAFE_MODE_ID_CAP];    // the app it is attributed to; "" for nobody (or no crash)
-    bool     in_callback;              // it happened in one of app's LVGL callbacks: named, not counted (#349)
-    unsigned app_crashes;              // that app's crashes in the window, this one included (not when in_callback)
-    bool     limit_reached;            // app_crashes reached SAFE_MODE_LIMIT (safe_mode_switch_off decides)
+    bool     in_callback;              // it happened in one of app's LVGL callbacks: named, no strike (#349)
+    unsigned app_crashes;              // that app's strikes in the window, this one included (0 when in_callback)
+    unsigned named_crashes;            // its crashes of either kind in the window, this one included (#427)
+    bool     limit_reached;            // app_crashes reached SAFE_MODE_LIMIT or named_crashes SAFE_MODE_CB_LIMIT
     bool     degraded;                 // a crash is in the window: keep background work cautious (#280)
 } safe_mode_boot_t;
 
@@ -84,7 +91,7 @@ safe_mode_boot_t safe_mode_boot(safe_mode_rec_t *r, bool crashed);
 bool safe_mode_switch_off(safe_mode_boot_t const *b, char const *id, bool may_switch_off);
 // may_switch_off for an app: it has a background part and is not exempt (lichen_app_t.safe_mode_exempt, MeshCore)
 bool safe_mode_may_switch_off(bool has_background, bool exempt);
-// Re-enabling an app forgets its crashes, so one more crash does not switch it off again at once
+// Re-enabling an app forgets its crashes (both kinds), so one more crash does not switch it off again at once
 void safe_mode_forget(safe_mode_rec_t *r, char const *id);
 // A crash in the window (what safe_mode_boot said about degraded; false for a record that is not valid)
 bool safe_mode_degraded(safe_mode_rec_t const *r);

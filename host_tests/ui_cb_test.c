@@ -196,7 +196,41 @@ static void test_edges(void) {
     CHECK(s_live == 0);
 }
 
+
+// #427: the panic hook's mark holds only for the task inside a callback while it still runs as the context the
+// callback entered; another app's hook run from there (Settings opening an app's settings) strikes that app
+static void test_mark_tied_to_context(void) {
+    ui_cb_mark_t m    = {0};
+    int          task = 0, other = 0;
+    uint32_t     a = 0x00012301u, b = 0x00045602u, a_new_gen = 0x00078901u, os = 0x00011100u;
+    CHECK(!ui_cb_mark_holds(&m, &task, a)); // nothing marked
+    ui_cb_mark_enter(&m, &task, a);
+    CHECK(ui_cb_mark_holds(&m, &task, a));
+    CHECK(!ui_cb_mark_holds(&m, &task, b));      // a's callback entered b's context: b's crash, a strike
+    CHECK(!ui_cb_mark_holds(&m, &other, a));     // another task (the other core) is not in the callback
+    CHECK(!ui_cb_mark_holds(&m, &task, os));     // nor is the OS the callback put back
+    CHECK(ui_cb_mark_holds(&m, &task, a_new_gen)); // the slot is what is compared
+
+    ui_cb_mark_enter(&m, &task, b); // nested: b's callback, sent from inside a's
+    CHECK(ui_cb_mark_holds(&m, &task, b) && !ui_cb_mark_holds(&m, &task, a));
+    ui_cb_mark_leave(&m, a); // back in a's callback
+    CHECK(ui_cb_mark_holds(&m, &task, a) && !ui_cb_mark_holds(&m, &task, b));
+    ui_cb_mark_leave(&m, os);
+    CHECK(!ui_cb_mark_holds(&m, &task, a) && !ui_cb_mark_holds(&m, &task, os) && m.task == NULL);
+    ui_cb_mark_leave(&m, a); // a leave without an enter changes nothing
+    CHECK(m.depth == 0 && m.task == NULL && !ui_cb_mark_holds(&m, &task, a));
+
+    // Half-written at depth 0: ctx is stored before task, so the state in between holds for nobody
+    ui_cb_mark_t half = {.task = NULL, .ctx = a, .depth = 0};
+    CHECK(!ui_cb_mark_holds(&half, &task, a));
+    // An OS callback (slot 0) never holds: the OS is never named, and an app hook it runs strikes that app
+    ui_cb_mark_enter(&m, &task, os);
+    CHECK(!ui_cb_mark_holds(&m, &task, os) && !ui_cb_mark_holds(&m, &task, a));
+    ui_cb_mark_leave(&m, os);
+}
+
 int main(void) {
+    test_mark_tied_to_context();
     test_runs_as_registrant();
     test_os_registration_stays_os();
     test_nested();

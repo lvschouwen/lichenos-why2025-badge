@@ -2,7 +2,7 @@
 // Crash attribution and safe mode (#232), lichen_os's entry points for main and the OS's own services: not part of
 // the gate. The panic handler (linker --wrap of esp_panic_handler, CMakeLists.txt) notes the owner app of the faulting
 // task in LP RAM; the next boot turns that into a window entry (safe_mode_policy.h): 2 crashes of one app in 3 boots
-// switch its background part off until "fw app background <id> on". An OS or IDF task (the console's, so "fw crash
+// (3 when its screen callbacks crashed, #427) switch its background part off until "fw app background <id> on". An OS or IDF task (the console's, so "fw crash
 // test panic"), an ISR, a brownout or a lockup blames nobody.
 
 #include <stdbool.h>
@@ -26,9 +26,10 @@ void safe_mode_boot_step(bool crashed);
 // list changes. Main task, at boot.
 bool safe_mode_background_off(char const *id, bool may_switch_off);
 // This boot follows a crash attributed to an app: its id into id (cap >= 14), its crashes in the window (crashes,
-// may be NULL), whether start_apps switched its background off (switched_off, may be NULL) and whether it happened in
-// one of the app's LVGL callbacks (in_callback, may be NULL; #349: named, not counted). False for no crash or nobody
-// to blame. Any task.
+// may be NULL: its strikes, or for a callback crash its crashes of both kinds toward the callback limit), whether
+// start_apps switched its background off (switched_off, may be NULL) and whether it happened in one of the app's LVGL
+// callbacks (in_callback, may be NULL; #349: no strike; #427: 3 in 3 boots switch it off). False for no crash or
+// nobody to blame. Any task.
 bool safe_mode_crashed_app(char *id, size_t cap, unsigned *crashes, bool *switched_off, bool *in_callback);
 // A crash is among the last boots in the window, or this boot follows one (lichen_boot_degraded, #280). False before
 // safe_mode_boot_step. Any task.

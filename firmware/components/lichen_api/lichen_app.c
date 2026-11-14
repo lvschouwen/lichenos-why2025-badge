@@ -8,6 +8,7 @@
 #include "app_ctx.h"
 #include "app_ns.h"
 #include "app_secret.h"
+#include "ui_cb.h"
 #include "esp_attr.h"
 #include "esp_cpu.h"
 #include "esp_memory_utils.h"
@@ -226,28 +227,29 @@ char const *IRAM_ATTR lichen_sys_panic_app_id(void) {
     return s_panic_ids[slot][0] ? s_panic_ids[slot] : NULL;
 }
 
-// The task inside an app's LVGL callback (#349), for the panic hook: internal .bss, written only by the task that
-// holds the LVGL lock (the trampolines run nowhere else), so a plain depth count suffices
-static void *volatile s_ui_cb_task;
-static uint32_t       s_ui_cb_depth;
+// The task inside an app's LVGL callback and the context it entered (#349, #427; ui_cb.h has the store order), for
+// the panic hook: internal .bss, written only by the LVGL task under the LVGL lock
+static ui_cb_mark_t s_ui_cb_mark;
 
-void lichen_sys_ui_cb_mark(bool entering) {
+void lichen_sys_ui_cb_mark(bool entering, lichen_ctx_t ctx) {
     if (entering) {
-        if (s_ui_cb_depth++ == 0) {
-            s_ui_cb_task = xTaskGetCurrentTaskHandle();
-        }
-    } else if (s_ui_cb_depth && --s_ui_cb_depth == 0) {
-        s_ui_cb_task = NULL;
+        ui_cb_mark_enter(&s_ui_cb_mark, xTaskGetCurrentTaskHandle(), ctx);
+    } else {
+        ui_cb_mark_leave(&s_ui_cb_mark, ctx);
     }
 }
 
+// The same reads as lichen_sys_panic_app_id: the TCB only when it is in internal RAM and the mirror checked out
 bool IRAM_ATTR lichen_sys_panic_in_ui_cb(void) {
     int core = esp_cpu_get_core_id();
-    if (core < 0 || core >= portNUM_PROCESSORS || xPortInterruptedFromISRContext()) {
+    if (!s_panic_mirror_ok || core < 0 || core >= portNUM_PROCESSORS || xPortInterruptedFromISRContext()) {
         return false;
     }
-    void *task = s_ui_cb_task;
-    return task && task == pxCurrentTCBs[core];
+    void const *tcb = pxCurrentTCBs[core];
+    if (!esp_ptr_in_dram(tcb) || ((uintptr_t)tcb & 3u)) {
+        return false;
+    }
+    return ui_cb_mark_holds(&s_ui_cb_mark, tcb, (uint32_t)(uintptr_t)tcb_slot(tcb));
 }
 
 static char const *app_name(void const *owner) {

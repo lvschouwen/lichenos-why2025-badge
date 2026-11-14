@@ -15,6 +15,11 @@ uint32_t safe_mode_hash(char const *id) {
     return h <= SAFE_MODE_NOBODY ? h + 2u : h; // never CLEAN or NOBODY
 }
 
+uint32_t safe_mode_cb_hash(char const *id) {
+    uint32_t h = safe_mode_hash(id) ^ 0x80000000u; // never the id's own hash
+    return h <= SAFE_MODE_NOBODY ? h + 2u : h;
+}
+
 void safe_mode_note_rearm(safe_mode_rec_t *r, bool restarting) {
     safe_mode_ensure(r);
     r->flags = restarting ? r->flags | SAFE_MODE_F_REARM : r->flags & ~SAFE_MODE_F_REARM;
@@ -49,6 +54,29 @@ static unsigned count_of(safe_mode_rec_t const *r, uint32_t entry) {
     return n;
 }
 
+// A crash in an app's callback is a crash of the boot (degraded) but no strike: the OS code it reached ran as the app
+// too, so the app may be healthy (#349). It still takes its own entry, so one that crashes every boot is stopped by
+// the higher callback limit (#427).
+static uint32_t entry_of(safe_mode_boot_t const *b) {
+    if (!b->crash) {
+        return SAFE_MODE_CLEAN;
+    }
+    if (!b->app[0]) {
+        return SAFE_MODE_NOBODY;
+    }
+    return b->in_callback ? safe_mode_cb_hash(b->app) : safe_mode_hash(b->app);
+}
+
+static void count_app(safe_mode_rec_t const *r, safe_mode_boot_t *b) {
+    if (!b->app[0]) {
+        return;
+    }
+    unsigned strikes = count_of(r, safe_mode_hash(b->app));
+    b->app_crashes   = b->in_callback ? 0 : strikes;
+    b->named_crashes = strikes + count_of(r, safe_mode_cb_hash(b->app));
+    b->limit_reached = b->app_crashes >= SAFE_MODE_LIMIT || b->named_crashes >= SAFE_MODE_CB_LIMIT;
+}
+
 // The panic handler's mark is a crash even when the reset reason did not say so: it ran, so the boot died. The re-arm
 // restart is a software restart the OS made because of the crash before it: that pair is one crash, so its tail takes
 // no place in the window (it is neither a crash nor a clean boot that would dilute the count).
@@ -66,15 +94,8 @@ safe_mode_boot_t safe_mode_boot(safe_mode_rec_t *r, bool crashed) {
     memset(r->crashed, 0, sizeof(r->crashed));
     out.counted = out.crash || !rearm;
     if (out.counted) {
-        // A crash in an app's callback is a crash of the boot (degraded) but no strike: the OS code it reached ran
-        // as the app too, so the app may be healthy (#349)
-        bool     strike = out.app[0] && !out.in_callback;
-        uint32_t entry  = !out.crash ? SAFE_MODE_CLEAN : strike ? safe_mode_hash(out.app) : SAFE_MODE_NOBODY;
-        push(r, entry);
-        if (strike) {
-            out.app_crashes   = count_of(r, entry);
-            out.limit_reached = out.app_crashes >= SAFE_MODE_LIMIT;
-        }
+        push(r, entry_of(&out));
+        count_app(r, &out);
     }
     out.degraded = any_crash(r);
     safe_mode_seal(r);
@@ -91,9 +112,9 @@ bool safe_mode_may_switch_off(bool has_background, bool exempt) {
 
 void safe_mode_forget(safe_mode_rec_t *r, char const *id) {
     safe_mode_ensure(r);
-    uint32_t h = safe_mode_hash(id);
+    uint32_t h = safe_mode_hash(id), cb = safe_mode_cb_hash(id);
     for (size_t i = 0; i < SAFE_MODE_WINDOW; i++) {
-        if (r->window[i] == h) {
+        if (r->window[i] == h || r->window[i] == cb) {
             r->window[i] = SAFE_MODE_CLEAN;
         }
     }

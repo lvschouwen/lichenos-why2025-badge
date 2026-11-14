@@ -1,5 +1,5 @@
 // Crash attribution and safe mode (#232): the LP RAM record (magic + checksum before use), 2 crashes of one app in 3
-// boots switch its background off, the PSRAM re-arm restart after a crash counts as part of that crash (never as a
+// boots switch its background off (3 counting its screen callback crashes, #427), the PSRAM re-arm restart after a crash counts as part of that crash (never as a
 // clean boot), re-enabling forgets, the degraded boot, and the list of apps whose background is off.
 #include "safe_mode_policy.h"
 
@@ -287,8 +287,78 @@ static void callback_crashes_are_no_strike(void) {
     CHECK(b.crash && !b.in_callback && b.app[0] == '\0');
 }
 
+
+// #427: a callback that crashes every boot (a UI timer an app's background or register hook made) is stopped by its
+// own, higher limit: 3 crashes named after the app in 3 boots switch its background off, callback crashes included
+static void callback_crash_loop_is_stopped(void) {
+    safe_mode_rec_t  r = fresh();
+    safe_mode_boot_t b = callback_boot(&r, "weather");
+    CHECK(b.named_crashes == 1 && b.app_crashes == 0 && !b.limit_reached);
+    b = callback_boot(&r, "weather");
+    CHECK(b.named_crashes == 2 && !b.limit_reached && !safe_mode_switch_off(&b, "weather", true));
+    b = callback_boot(&r, "weather"); // the third in three boots: off
+    CHECK(b.in_callback && b.named_crashes == 3 && b.app_crashes == 0 && b.limit_reached);
+    CHECK(safe_mode_switch_off(&b, "weather", true) && !safe_mode_switch_off(&b, "notes", true));
+    CHECK(!safe_mode_switch_off(&b, "weather", false)); // no background part: only counted
+
+    r = fresh(); // the window: a clean boot in between keeps it under the limit
+    callback_boot(&r, "weather");
+    safe_mode_boot(&r, false);
+    callback_boot(&r, "weather");
+    b = callback_boot(&r, "weather"); // two of the last three
+    CHECK(b.named_crashes == 2 && !b.limit_reached);
+    b = callback_boot(&r, "weather");
+    CHECK(b.named_crashes == 3 && b.limit_reached);
+
+    // Two boots per crash: the PSRAM re-arm restart after each is the crash's tail, not a clean boot that would push
+    // the first one out of the window
+    r = fresh();
+    for (int i = 0; i < 3; i++) {
+        b = callback_boot(&r, "weather");
+        CHECK(b.counted && b.named_crashes == (unsigned)i + 1u && b.limit_reached == (i == 2));
+        safe_mode_note_rearm(&r, true);
+        safe_mode_boot_t tail = safe_mode_boot(&r, false);
+        CHECK(!tail.counted && !tail.limit_reached);
+    }
+
+    r = fresh(); // per app: another app's callback crashes are not this one's
+    callback_boot(&r, "weather");
+    callback_boot(&r, "notes");
+    b = callback_boot(&r, "weather");
+    CHECK(b.named_crashes == 2 && !b.limit_reached);
+
+    r = fresh(); // a callback crash is no strike: with one task crash it is still under the limit of 2
+    callback_boot(&r, "weather");
+    b = panic_boot(&r, "weather");
+    CHECK(b.app_crashes == 1 && b.named_crashes == 2 && !b.limit_reached);
+    b = callback_boot(&r, "weather"); // but three of the app's crashes of either kind in three boots are a loop
+    CHECK(b.app_crashes == 0 && b.named_crashes == 3 && b.limit_reached);
+    r = fresh();
+    callback_boot(&r, "weather");
+    callback_boot(&r, "weather");
+    b = panic_boot(&r, "weather");
+    CHECK(b.app_crashes == 1 && b.named_crashes == 3 && b.limit_reached);
+
+    r = fresh(); // MeshCore stays exempt exactly as #232 has it: counted, never switched off
+    callback_boot(&r, "meshcore");
+    callback_boot(&r, "meshcore");
+    b = callback_boot(&r, "meshcore");
+    CHECK(b.limit_reached && b.degraded && !safe_mode_switch_off(&b, "meshcore", safe_mode_may_switch_off(true, true)));
+
+    r = fresh(); // switching it on again forgets the callback crashes too
+    callback_boot(&r, "weather");
+    callback_boot(&r, "weather");
+    safe_mode_forget(&r, "weather");
+    b = callback_boot(&r, "weather");
+    CHECK(b.named_crashes == 1 && !b.limit_reached);
+
+    CHECK(safe_mode_cb_hash("weather") != safe_mode_hash("weather") && safe_mode_cb_hash("weather") > SAFE_MODE_NOBODY);
+    CHECK(safe_mode_cb_hash("weather") != safe_mode_cb_hash("notes") && safe_mode_cb_hash(NULL) > SAFE_MODE_NOBODY);
+}
+
 int main(void) {
     callback_crashes_are_no_strike();
+    callback_crash_loop_is_stopped();
     noise_is_not_trusted();
     checksum_guards_the_window();
     two_in_three_switch_off();

@@ -57,11 +57,14 @@ static void crash_body(char *out, size_t cap) {
     }
     lichen_app_t const *app  = lichen_app_by_id(id);
     char const         *name = app && app->name ? app->name : id;
-    if (in_cb) {
-        snprintf(out, cap, "%s crashed in a screen callback and Lichen restarted. Open this for the Crash log.", name);
-    } else if (off) {
+    if (off) { // #427: a callback crash loop is switched off too
         snprintf(out, cap, "%s crashed again: its background part is off until switched on (fw app background %s on).",
                  name, id);
+    } else if (in_cb && crashes > 1) {
+        snprintf(out, cap, "%s crashed in a screen callback %u times in the last %d boots. Open this for the Crash log.",
+                 name, crashes, SAFE_MODE_WINDOW_BOOTS);
+    } else if (in_cb) {
+        snprintf(out, cap, "%s crashed in a screen callback and Lichen restarted. Open this for the Crash log.", name);
     } else if (crashes > 1) {
         snprintf(out, cap, "%s crashed %u times in the last %d boots. Open this for the Crash log.", name, crashes,
                  SAFE_MODE_WINDOW_BOOTS);
