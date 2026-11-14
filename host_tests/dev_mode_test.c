@@ -22,10 +22,10 @@ static void noop(char const *args) {
 }
 
 static console_entry_t const table[] = {
-    {"help", "help", noop, false},
-    {"ui", "ui [dump|perf]", noop, true},
-    {"reboot", "reboot", noop, false},
-    {"keys", "keys send", noop, true},
+    {"help", "help", noop, false, 0},
+    {"ui", "ui [dump|perf]", noop, true, 0},
+    {"reboot", "reboot", noop, false, 0},
+    {"keys", "keys send", noop, true, 0},
 };
 #define N ((int)(sizeof(table) / sizeof(table[0])))
 
@@ -117,7 +117,74 @@ static void factory_reset_clears_it(void) {
     CHECK(strlen(DEV_MODE_KEY) <= 15); // NVS keys hold at most 15 characters
 }
 
+// Per-app prefix (#423): "mesh" and "advert" belong to app 1 (meshcore), "qr" to app 2, the rest to the OS
+static console_entry_t const app_table[] = {
+    {"help", "help", noop, false, 0},
+    {"mesh", "mesh send ...", noop, false, 1},
+    {"advert", "advert", noop, false, 1},
+    {"mdbg", "mdbg", noop, true, 1}, // an app's debug command
+    {"qr", "qr <text>", noop, false, 2},
+};
+#define AN ((int)(sizeof(app_table) / sizeof(app_table[0])))
+
+static void app_ids_and_intern(void) {
+    char const *ids[CONSOLE_MAX_APPS] = {0};
+    int         n = 0;
+    CHECK(dev_mode_app_of(ids, n, "meshcore") == 0); // nothing registered: no prefix is known
+    CHECK(dev_mode_app_intern(ids, &n, CONSOLE_MAX_APPS, "meshcore") == 1 && n == 1);
+    CHECK(dev_mode_app_intern(ids, &n, CONSOLE_MAX_APPS, "qrcode") == 2 && n == 2);
+    CHECK(dev_mode_app_intern(ids, &n, CONSOLE_MAX_APPS, "meshcore") == 1 && n == 2); // once
+    CHECK(dev_mode_app_of(ids, n, "qrcode") == 2 && dev_mode_app_of(ids, n, "meshcore") == 1);
+    CHECK(dev_mode_app_of(ids, n, "mesh") == 0 && dev_mode_app_of(ids, n, "meshcor") == 0); // whole ids only
+    CHECK(dev_mode_app_of(ids, n, "help") == 0);
+    n = 1;
+    CHECK(dev_mode_app_intern(ids, &n, 1, "other") == 0 && n == 1); // full table
+}
+
+static void app_prefix_dispatch(void) {
+    int i = -1;
+    // the old spelling runs every command, whoever owns it
+    CHECK(dev_mode_find_app(app_table, AN, "mesh", false, 0, &i) == DEV_FIND_RUN && i == 1);
+    CHECK(dev_mode_find_app(app_table, AN, "qr", false, 0, &i) == DEV_FIND_RUN && i == 4);
+    CHECK(dev_mode_find_app(app_table, AN, "help", false, 0, &i) == DEV_FIND_RUN);
+    // the prefixed spelling reaches the same entry
+    CHECK(dev_mode_find_app(app_table, AN, "mesh", false, 1, &i) == DEV_FIND_RUN && i == 1);
+    CHECK(dev_mode_find_app(app_table, AN, "qr", false, 2, &i) == DEV_FIND_RUN && i == 4);
+    // another app's command, or an OS one, under the wrong prefix is unknown
+    CHECK(dev_mode_find_app(app_table, AN, "qr", false, 1, &i) == DEV_FIND_NONE);
+    CHECK(dev_mode_find_app(app_table, AN, "mesh", false, 2, &i) == DEV_FIND_NONE);
+    CHECK(dev_mode_find_app(app_table, AN, "help", false, 1, &i) == DEV_FIND_NONE);
+    CHECK(dev_mode_find_app(app_table, AN, "mdbg", true, 2, &i) == DEV_FIND_NONE); // not even a debug one's existence
+    CHECK(dev_mode_find_app(app_table, AN, "", false, 1, &i) == DEV_FIND_NONE);
+    // developer mode gates the prefixed spelling exactly like the plain one
+    CHECK(dev_mode_find_app(app_table, AN, "mdbg", false, 0, &i) == DEV_FIND_DEV_OFF);
+    CHECK(dev_mode_find_app(app_table, AN, "mdbg", false, 1, &i) == DEV_FIND_DEV_OFF);
+    CHECK(dev_mode_find_app(app_table, AN, "mdbg", true, 0, &i) == DEV_FIND_RUN);
+    CHECK(dev_mode_find_app(app_table, AN, "mdbg", true, 1, &i) == DEV_FIND_RUN);
+}
+
+static void count_line(char const *usage, void *ctx) {
+    (void)usage;
+    ++*(int *)ctx;
+}
+
+static void app_help_groups(void) {
+    int n = 0;
+    CHECK(dev_mode_help_app(app_table, AN, false, 0, count_line, &n) == 1 && n == 1);   // the OS's group
+    n = 0;
+    CHECK(dev_mode_help_app(app_table, AN, false, 1, count_line, &n) == 2 && n == 2);   // debug one hidden
+    CHECK(dev_mode_help_app(app_table, AN, true, 1, NULL, NULL) == 3);                  // NULL line: only counts
+    CHECK(dev_mode_help_app(app_table, AN, false, 2, NULL, NULL) == 1);
+    CHECK(dev_mode_help_app(app_table, AN, false, 3, NULL, NULL) == 0);                 // an app with nothing: no group
+    // every command is in exactly one group
+    CHECK(dev_mode_help_app(app_table, AN, true, 0, NULL, NULL) + dev_mode_help_app(app_table, AN, true, 1, NULL, NULL) +
+              dev_mode_help_app(app_table, AN, true, 2, NULL, NULL) == AN);
+}
+
 int main(void) {
+    app_ids_and_intern();
+    app_prefix_dispatch();
+    app_help_groups();
     gate_off_and_on();
     help_hides_debug_commands();
     on_only_from_usb();

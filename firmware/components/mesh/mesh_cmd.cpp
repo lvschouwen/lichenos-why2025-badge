@@ -175,8 +175,8 @@ extern "C" void mesh_console_init(void) {
     }
     registered = true;
     mesh_onair_init(); // #289: before the first command that can send
-    // #229: the per-app command prefix goes here, the one place MeshCore's commands get their names
+    // #423: each command also answers as "fw meshcore <name>"; the plain name stays for badge.sh and the on-air guard
     for (mesh_con_run_t const &c : MESH_CON_RUN) {
-        console_register(MESH_CONSOLE_CMDS[c.id].name, MESH_CONSOLE_CMDS[c.id].usage, c.run);
+        console_register_app("meshcore", MESH_CONSOLE_CMDS[c.id].name, MESH_CONSOLE_CMDS[c.id].usage, c.run);
     }
 }

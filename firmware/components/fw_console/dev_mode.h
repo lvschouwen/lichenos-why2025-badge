@@ -36,6 +36,7 @@ typedef struct {
     char const *usage;
     void (*fn)(char const *args);
     bool dev; // registered with console_register_dev
+    unsigned char app; // 0: the OS's; else 1 + the index of the app id in the app table (#423), in the padding after dev
 } console_entry_t;
 
 typedef enum {
@@ -50,6 +51,23 @@ dev_find_t dev_mode_find(console_entry_t const *table, int n, char const *name, 
 // Calls line(usage, ctx) for every entry "fw help" lists: all of them while on, the plain ones while off. Returns how
 // many it listed.
 int dev_mode_help(console_entry_t const *table, int n, bool on, void (*line)(char const *usage, void *ctx), void *ctx);
+
+// Per-app prefix (#423): an app with the CONSOLE capability registers its commands with its app id, and "fw <app id>
+// <command>" runs them. The plain "fw <command>" spelling keeps working for every command (a script, badge.sh and the
+// on-air guard use it), so each command has two spellings and the same gate: dev_mode_find_app is dev_mode_find
+// plus the owner check, and everything after it (developer mode, the USB hold, origins) is the command's own.
+#define CONSOLE_MAX_APPS 8
+// 1 + the index of word in ids[0..n), or 0 when word is no app id
+int dev_mode_app_of(char const *const *ids, int n, char const *word);
+// Adds id to ids (a string literal, kept by pointer) unless it is there; returns 1 + its index, 0 when the table of max
+// is full. *n counts the ids.
+int dev_mode_app_intern(char const **ids, int *n, int max, char const *id);
+// Like dev_mode_find for "fw <app> <name>": app is dev_mode_app_of's result (0: the plain spelling, any command). A
+// command of another app, or the OS's, is NONE under the wrong prefix; a debug command of the right app is DEV_OFF.
+dev_find_t dev_mode_find_app(console_entry_t const *table, int n, char const *name, bool on, int app, int *index);
+// dev_mode_help for the entries of one app (0: the OS's); line may be NULL to only count
+int dev_mode_help_app(console_entry_t const *table, int n, bool on, int app, void (*line)(char const *usage, void *ctx),
+                      void *ctx);
 
 typedef enum {
     DEV_REQ_STATUS,  // "", "status"

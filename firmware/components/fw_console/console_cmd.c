@@ -90,6 +90,10 @@ console_cmd_result_t console_cmd_feed(console_cmd_t *s, char c, char const **pas
     return pass_held(s, pass, pass_len);
 }
 
+size_t console_line_max(void) {
+    return CONSOLE_WIFI_CMD_MAX;
+}
+
 bool console_wifi_len_ok(long content_length) {
     return content_length >= 1 && content_length < CONSOLE_WIFI_CMD_MAX;
 }

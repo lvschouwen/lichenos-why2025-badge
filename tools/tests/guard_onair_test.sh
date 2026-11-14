@@ -72,6 +72,9 @@ expect deny "$b mesh history 0123456789ab interval 10"
 expect pass "$b onair"
 expect pass "$b onair on"
 expect deny "$b onair off"
+expect deny "$b meshcore mesh send Public hello"
+expect deny "$b meshcore onair off"
+expect deny "$b fw meshcore onair allow '#zz-other'"
 expect deny "$b fw onair allow '#zz-other'"
 expect deny "$b onair remove abcdef123456"
 expect deny "$b onair clear"
@@ -141,6 +144,15 @@ sent sent fw 192.0.2.1 mesh advert
 sent sent fw 192.0.2.1 onair on
 sent refused fw 192.0.2.1 onair off
 sent refused console /dev/null "fw onair allow #zz-other"
+# #423: "fw meshcore <command>" is the same line as "fw <command>": judged and scope-checked identically
+sent sent fw 192.0.2.1 meshcore mesh send '#badgetest' hello
+sent refused fw 192.0.2.1 meshcore mesh send Public hello
+sent refused fw 192.0.2.1 meshcore mesh dm 0123456789ab hi
+sent refused fw 192.0.2.1 meshcore mesh advert interval 6h
+sent refused fw 192.0.2.1 meshcore onair off
+sent refused console /dev/null "fw meshcore onair allow #zz-other"
+sent sent fw 192.0.2.1 meshcore onair on
+FAKE_SCOPE="default None | console not set" sent refused fw 192.0.2.1 meshcore mesh send '#badgetest' hello
 # The console scope (#290): an on-air line with a target goes only when the badge's console scope is the scope line
 sent sent fw 192.0.2.1 mesh remote TESTNODE status
 sent sent fw 192.0.2.1 fw mesh send '#badgetest' hi

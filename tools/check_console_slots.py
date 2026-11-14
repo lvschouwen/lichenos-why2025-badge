@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 FW = ROOT / "firmware"
 LIMIT_PERCENT = 80
-CALL = re.compile(r"(?<![\w])console_register(_dev)?\s*\(")
+CALL = re.compile(r"(?<![\w])console_register(_dev|_app)?\s*\(")
 DECL = re.compile(r"(?:void|int)\s+$")
 
 

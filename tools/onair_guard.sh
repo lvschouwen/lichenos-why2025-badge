@@ -57,12 +57,17 @@ onair_scope_allowed() {
 }
 
 # The words of a console line as the badge's parser sees them: quotes and backslashes dropped (as the shell would
-# before the line reaches the badge), a leading "fw" gone
+# before the line reaches the badge), a leading "fw" gone, and then MeshCore's app prefix (#423: "fw meshcore mesh send"
+# is "fw mesh send"; the badge strips one prefix word only, so "meshcore meshcore ..." stays a line it refuses)
 onair_words() {
     local line w1 rest
     line=$(printf '%s' "$1" | tr -d "'\"\\\\")
     read -r w1 rest <<<"$line"
-    if [ "$w1" = fw ]; then line=$rest; fi
+    if [ "$w1" = fw ]; then
+        line=$rest
+        read -r w1 rest <<<"$line"
+    fi
+    if [ "$w1" = meshcore ]; then line=$rest; fi
     printf '%s' "$line"
 }
 

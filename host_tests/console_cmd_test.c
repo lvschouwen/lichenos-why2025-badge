@@ -182,6 +182,7 @@ int main(void) {
     // The Wi-Fi console's longer line (#110): a whole contact link in one "fw contacts import" line; the UART stays small
     CHECK(sizeof("fw contacts import ") - 1 + MESH_ADVERT_URI_MAX - 1 < CONSOLE_WIFI_CMD_MAX);
     CHECK(CONSOLE_CMD_MAX == 96);
+    CHECK(console_line_max() == CONSOLE_WIFI_CMD_MAX && console_line_max() > CONSOLE_CMD_MAX); // #423: the Wi-Fi console's
     CHECK(!console_wifi_len_ok(-1) && !console_wifi_len_ok(0));
     CHECK(console_wifi_len_ok(1) && console_wifi_len_ok(CONSOLE_CMD_MAX) && console_wifi_len_ok(CONSOLE_WIFI_CMD_MAX - 1));
     CHECK(!console_wifi_len_ok(CONSOLE_WIFI_CMD_MAX) && !console_wifi_len_ok(1L << 20));

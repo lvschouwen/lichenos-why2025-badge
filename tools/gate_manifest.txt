@@ -82,8 +82,10 @@ console_dev_set	SYSTEM	unspecified	fw_console.h
 console_exec	SYSTEM	unspecified	fw_console.h
 console_exec_with_secrets	SYSTEM	unspecified	fw_console.h
 console_from_uart	-	unspecified	fw_console.h
+console_line_max	-	unspecified	fw_console.h
 console_origin	-	unspecified	fw_console.h
 console_register	CONSOLE	unspecified	fw_console.h
+console_register_app	CONSOLE	unspecified	fw_console.h
 console_register_dev	CONSOLE	unspecified	fw_console.h
 console_reply	-	unspecified	fw_console.h
 console_reply_private	-	unspecified	fw_console.h

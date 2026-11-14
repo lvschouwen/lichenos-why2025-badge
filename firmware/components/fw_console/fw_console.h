@@ -25,6 +25,13 @@ typedef void (*console_fn_t)(char const *args); // args: the text after the comm
 
 void console_start(void);
 void console_register(char const *name, char const *usage, console_fn_t fn);
+// The longest console line, with its NUL: the Wi-Fi console's (a UART line takes less). A caller sizes what it hands to
+// the console from this instead of including the OS's console_cmd.h.
+size_t console_line_max(void);
+// An app's command (#423): runs as "fw <name>" like console_register, and also as "fw <app> <name>"; "fw help" lists it
+// under app. app is the app's id (tools/layers.conf `app` line), a string literal. The command keeps its plain name
+// for scripts and the on-air guard (tools/onair_guard.sh strips the prefix before it judges a line).
+void console_register_app(char const *app, char const *name, char const *usage, console_fn_t fn);
 
 // Developer mode (#373, dev_mode.h). A debug or test command registers with console_register_dev: while developer mode
 // is off it answers DEV_MODE_OFF_NOTE and "fw help" leaves it out. With LICHEN_DEV_COMMANDS off (the release build) the

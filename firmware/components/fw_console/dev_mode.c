@@ -24,6 +24,47 @@ int dev_mode_help(console_entry_t const *table, int n, bool on, void (*line)(cha
     return listed;
 }
 
+int dev_mode_app_of(char const *const *ids, int n, char const *word) {
+    for (int i = 0; i < n; i++) {
+        if (strcmp(ids[i], word) == 0) {
+            return i + 1;
+        }
+    }
+    return 0;
+}
+
+int dev_mode_app_intern(char const **ids, int *n, int max, char const *id) {
+    int known = dev_mode_app_of(ids, *n, id);
+    if (known || *n >= max) {
+        return known;
+    }
+    ids[*n] = id;
+    __atomic_store_n(n, *n + 1, __ATOMIC_RELEASE); // readers load the count without the lock (console.c)
+    return *n;
+}
+
+dev_find_t dev_mode_find_app(console_entry_t const *table, int n, char const *name, bool on, int app, int *index) {
+    dev_find_t r = dev_mode_find(table, n, name, on, index);
+    if (r != DEV_FIND_NONE && app != 0 && table[*index].app != app) {
+        return DEV_FIND_NONE;
+    }
+    return r;
+}
+
+int dev_mode_help_app(console_entry_t const *table, int n, bool on, int app, void (*line)(char const *usage, void *ctx),
+                      void *ctx) {
+    int listed = 0;
+    for (int i = 0; i < n; i++) {
+        if (table[i].app == app && (!table[i].dev || on)) {
+            if (line) {
+                line(table[i].usage, ctx);
+            }
+            listed++;
+        }
+    }
+    return listed;
+}
+
 console_origin_t dev_mode_exec_origin(bool keep_secret) {
     return keep_secret ? CONSOLE_ORIGIN_WIFI : CONSOLE_ORIGIN_LOCAL;
 }

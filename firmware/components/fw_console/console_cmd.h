@@ -18,6 +18,9 @@
 // characters, mesh_share.h), so a link goes in one line there instead of parts. Its buffers are on the heap.
 #define CONSOLE_WIFI_CMD_MAX 512
 
+// The longest line the console takes from anywhere (the Wi-Fi console's, UART lines are shorter), bytes with the NUL
+size_t console_line_max(void);
+
 // A POST /console body length the Wi-Fi console takes: 1 to CONSOLE_WIFI_CMD_MAX - 1 bytes (negative: none given)
 bool console_wifi_len_ok(long content_length);
 

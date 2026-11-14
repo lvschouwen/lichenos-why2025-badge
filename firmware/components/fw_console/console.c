@@ -34,6 +34,8 @@
 
 static char const TAG[] = "console";
 
+static char const *app_ids[CONSOLE_MAX_APPS]; // the app ids that registered a command (#423), literals kept by pointer
+static int         n_apps;
 static console_entry_t commands[MAX_COMMANDS]; // dev_mode.c looks commands up and lists them (#373)
 static int       n_commands;
 
@@ -139,22 +141,27 @@ static int commands_count(void) {
     return __atomic_load_n(&n_commands, __ATOMIC_ACQUIRE);
 }
 
-static void register_entry(char const *name, char const *usage, console_fn_t fn, bool dev) {
+static void register_entry(char const *app, char const *name, char const *usage, console_fn_t fn, bool dev) {
     portENTER_CRITICAL(&commands_lock);
     int  n    = n_commands;
-    bool room = n < MAX_COMMANDS;
+    int  id   = app ? dev_mode_app_intern(app_ids, &n_apps, CONSOLE_MAX_APPS, app) : 0;
+    bool room = n < MAX_COMMANDS && (app == NULL || id != 0);
     if (room) {
-        commands[n] = (console_entry_t){name, usage, fn, dev};
+        commands[n] = (console_entry_t){name, usage, fn, dev, (unsigned char)id};
         __atomic_store_n(&n_commands, n + 1, __ATOMIC_RELEASE);
     }
     portEXIT_CRITICAL(&commands_lock);
     if (!room) {
-        ESP_LOGE(TAG, "no room for command %s (table of %d is full, raise MAX_COMMANDS)", name, MAX_COMMANDS);
+        ESP_LOGE(TAG, "no room for command %s (table of %d or %d apps is full)", name, MAX_COMMANDS, CONSOLE_MAX_APPS);
     }
 }
 
 void console_register(char const *name, char const *usage, console_fn_t fn) {
-    register_entry(name, usage, fn, false);
+    register_entry(NULL, name, usage, fn, false);
+}
+
+void console_register_app(char const *app, char const *name, char const *usage, console_fn_t fn) {
+    register_entry(app, name, usage, fn, false);
 }
 
 // Developer mode (#373): read once from the settings service at bind time, then kept here. A release build points at
@@ -170,7 +177,7 @@ static atomic_bool s_dev_on;
 static fw_set_u8_fn s_dev_save;
 
 void console_register_dev(char const *name, char const *usage, console_fn_t fn) {
-    register_entry(name, usage, fn, true);
+    register_entry(NULL, name, usage, fn, true);
 }
 #endif
 
@@ -212,10 +219,23 @@ static void help_line(char const *usage, void *ctx) {
     console_reply("%s", usage);
 }
 
+// An app's commands after the OS's, each group under its app id (#423); every one also runs as "fw <app> <name>"
+static int help_apps(int n) {
+    int listed = 0;
+    int apps   = __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE);
+    for (int a = 1; a <= apps; a++) {
+        if (dev_mode_help_app(commands, n, console_dev_mode(), a, NULL, NULL) > 0) {
+            console_reply("%s (also: fw %s <command>):", app_ids[a - 1], app_ids[a - 1]);
+            listed += dev_mode_help_app(commands, n, console_dev_mode(), a, help_line, NULL);
+        }
+    }
+    return listed;
+}
+
 static void cmd_help(char const *args) {
     (void)args;
     int n      = commands_count();
-    int listed = dev_mode_help(commands, n, console_dev_mode(), help_line, NULL);
+    int listed = dev_mode_help_app(commands, n, console_dev_mode(), 0, help_line, NULL) + help_apps(n);
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
     if (listed < n) {
         console_reply("%d of %d commands registered (%d debug ones hidden: fw dev)", n, MAX_COMMANDS, n - listed);
@@ -791,8 +811,22 @@ static void run_command(char *line) {
     } else {
         args = line + strlen(line);
     }
+    // "fw <app> <command>" (#423): the same table, the same gates; only the command's owner may answer under a prefix
+    int app = dev_mode_app_of(app_ids, __atomic_load_n(&n_apps, __ATOMIC_ACQUIRE), line);
+    if (app) {
+        line = args;
+        args = strchr(line, ' ');
+        if (args) {
+            *args++ = '\0';
+            while (*args == ' ') {
+                args++;
+            }
+        } else {
+            args = line + strlen(line);
+        }
+    }
     int i = 0;
-    switch (dev_mode_find(commands, commands_count(), line, console_dev_mode(), &i)) {
+    switch (dev_mode_find_app(commands, commands_count(), line, console_dev_mode(), app, &i)) {
         case DEV_FIND_RUN: commands[i].fn(args); return;
         case DEV_FIND_DEV_OFF: console_reply("%s: " DEV_OFF_REPLY, commands[i].name); return;
         case DEV_FIND_NONE: break;

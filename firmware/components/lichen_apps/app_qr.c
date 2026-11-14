@@ -171,5 +171,5 @@ static void cmd_qr(char const *args) {
 
 void qr_app_register(void) {
     lichen_register_app(&qr_app);
-    console_register("qr", "qr <text> (show a QR code, #153)", cmd_qr);
+    console_register_app("qrcode", "qr", "qr <text> (show a QR code, #153)", cmd_qr);
 }
