@@ -7,7 +7,7 @@ Plan, implement, test, review, bench and deliver seven epics through dependency-
 #216 platform and architecture, #262 memory and performance, #381 bench tooling, #392 MeshCore, #393 UI and apps, #394 hardware and power, #395 security.
 
 ## Phase
-- **Current (2026-11-14):** waves A-E CLOSED. The badge runs fw-73532714 (wave E), both slots hold it. The on-air allow list (#289) is ON with the test channel as its only entry. Next step: the queue under "After wave E".
+- **Current (2026-11-14, afternoon):** waves A-E CLOSED. Wave F (#417, #419, #229, #420) merged, pushed, flashed (fw-575798b9) and benched remotely; open: #420's list-off steps (need the owner's USB helper) and #229's hand checks. The allow list is ON with the test channel as its only entry, so Wi-Fi updates, C6 pushes and `fw slot other` are refused until the owner switches it off at USB; a USB flash always works.
 - Planning finished 2026-11-13. Plans: `orchestration/plans/` (`consolidated.md` is the program plan).
 
 ## Process (owner, 2026-11-13)
@@ -54,8 +54,15 @@ Environment: default subagent model Sonnet, at most 6 concurrent, spawn depth 1.
 | A | #389 (sent label), #368, #397, #211, #208, #11 (wave 1), #212 (5 functions), #298 | fw-0746e922 | CLOSED. #208, #397, #376, #378, #379 closed. Open ends: #11 (hands, breakout), #298 (rest of its bench list) |
 | B | #404, #389 (heard time), #400 | fw-f537a44a | CLOSED. #389, #404 closed; #400 has one hands check left. Found #412 |
 | C | #406, #410, #408, #405, #398 | fw-f742e4ce | CLOSED. All five closed. The #368 SD-format proof was NOT run: the permission check refused `fw sd format ERASE` from the bench agent; the owner runs it or allows it (#368, `needs-lucas`) |
+| F | #417, #419, #229, #420 | fw-575798b9 | Benched remotely. #417, #419 closed. #229 open for hand checks (`needs-lucas`). #420 open for its list-off steps. Follow-ups filed: #421 (test commands outside developer mode), #422 (callbacks run as the OS), #423 (per-app console prefix) |
 | E | #416, #403, #289, #232 | fw-73532714 | CLOSED. #416, #403, #232 closed. #289 open (`needs-lucas`): four hand checks listed on the issue. Script: `orchestration/bench/bench-wave-E.md` |
 | D | #288, #411, #412, #409 | fw-869e608d | CLOSED. #409, #411, #412 closed. #288 open for one check: the repeater login with the saved password (on air, `needs-lucas`). Found #416. Not seen: the #411 rollback banner (same version in both slots). Script: `orchestration/bench/bench-wave-D.md` |
+
+### Wave F state (resume here)
+1. To finish #420: the owner runs the USB helper with `off`; then main proves over Wi-Fi: an update passes (this also settles #417's "normal update" step), `fw slot other` there and back, `ota-c6`; an update with no reboot followed by the owner's `fw onair on` attempt is refused as pending; after the reboot and a valid slot the owner's helper `sync` switches it on again.
+2. Wave F facts: rule D (#229) fails the build when a component calls a new gate or console function that `tools/layers.conf` does not classify: after merging branches that add such functions, expect to add a `cap-func` line and run `tools/check_layers.sh --gen-manifest` (it happened with #420 on top of #229). `tools/gate_manifest.txt` is generated: on a rebase conflict take the branch's side and regenerate at each commit. With the list on, `badge.sh ota-c6` prints a misleading "mixed bundle" warning for the refusal.
+3. Expected against measured (owner rule, #407): every issue states expected resources; #420 measured 2.3 KB of flash against an expected 1 KB (scope added by the reviews; recorded on the issue). Per-app budgets from #229 cover statics and stacks only; the heap part is still to be measured.
+4. Next, in dependency order: #231 + #349, #233 (revisits the MeshCore exemption and what "background" means), #385. In parallel as slots allow: #421, the soak tooling on #407 (`tools/soak_budgets.txt`, the report's expected-against-measured table, the log census), #422, #423, mesh hygiene (#209/#212/#213 remainder), #384 + #268, #380. After the soak: #418.
 
 ### After wave E (resume here)
 Bench facts from wave E: a test crash at 120 MHz costs two boots and about 2 min; `degraded boot yes` stays for the 3-boot window after a crash (by the rule); the badge's own allow list now refuses console sends to anything but the test channel, and only the USB console can edit it. Agents and main cannot send `onair` edit lines or read the host allow file (hooks): the owner runs a USB helper himself (a script in the session scratchpad, modelled as `owner-onair.sh sync|show|off|line`; recreate it when needed). The host allow file lists contact NAMES; the badge's list takes key digits, so a test-node entry needs its key from the owner.
