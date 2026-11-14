@@ -877,6 +877,48 @@ static void long_response_checks(BadgeMesh &mesh) {
     CHECK(mesh.pipe().stats().pushes == pushes);
 }
 
+// MyMesh::onContactResponse is protected; a response that comes back inside a path return is not padded to whole
+// cipher blocks, so the short ones below are handed to it directly
+struct ResponseProbe : MyMesh {
+    static auto fn() {
+        return &ResponseProbe::onContactResponse;
+    }
+};
+
+// A login response too short to hold the fields MyMesh reads is a failed login, and nothing behind it is read (#462)
+static void short_login_checks(BadgeMesh &mesh, rr_t &rr) {
+    static Rng          peer_rng;
+    mesh::LocalIdentity peer(&peer_rng);
+    ContactInfo         ci{}; // value-initialised: Identity has a constructor, so no memset (-Wclass-memaccess)
+    ci.id           = mesh::Identity(peer.pub_key);
+    ci.type         = ADV_TYPE_REPEATER;
+    ci.out_path_len = OUT_PATH_UNKNOWN;
+    ci.lastmod      = rtc_clock.getCurrentTime();
+    strcpy(ci.name, "Short");
+    CHECK(mesh.addContact(ci));
+    ContactInfo *pc  = mesh.lookupContactByPubKey(peer.pub_key, PUB_KEY_SIZE);
+    char const  *why = NULL;
+    CHECK(pc != NULL);
+
+    // each buffer is exactly as long as the response, so ASan sees a read past it
+    for (auto const &resp : {std::vector<uint8_t>{1, 2, 3, 4, 0 /* LOGIN_OK */}, std::vector<uint8_t>{1, 2, 3, 4, 'O'},
+                             std::vector<uint8_t>{1, 2, 3, 4, 0, 0, 1, 3, 1, 2, 3, 4}}) {
+        CHECK(rr_request(&rr, RR_LOGIN, peer.pub_key, "hunter2", (uint32_t)millis(), &why) != 0);
+        settle(mesh, 10);
+        CHECK(rr.state == RR_SENT);
+        (mesh.*ResponseProbe::fn())(*pc, resp.data(), (uint8_t)resp.size());
+        settle(mesh, 3);
+        CHECK(rr.state == RR_FAILED && !rr_logged_in(&rr, peer.pub_key));
+    }
+
+    // shorter than its tag, no login pending: passed on as an unknown response without a read past the two bytes
+    std::vector<uint8_t> tiny{7, 7};
+    auto                 pushes = mesh.pipe().stats().pushes;
+    (mesh.*ResponseProbe::fn())(*pc, tiny.data(), (uint8_t)tiny.size());
+    settle(mesh, 3);
+    CHECK(mesh.pipe().stats().pushes == pushes + 1);
+}
+
 // Log in, status, CLI and a room's posts (#51) through the pipe on the real MyMesh, against a peer that answers as
 // a repeater does (its replies built as simple_repeater builds them)
 static void remote_checks(BadgeMesh &mesh, rr_t &rr, CountingListener &listener) {
@@ -1301,6 +1343,7 @@ static void pipe_checks(std::vector<std::vector<uint8_t>> const &packets, Simple
     trace_checks(mesh, mt);
     remote_checks(mesh, rr, listener);
     long_response_checks(mesh);
+    short_login_checks(mesh, rr);
     contact_action_checks(mesh);
     import_checks(mesh);
     tx_note_checks(mesh, sent_at_start, notes_at_start);
