@@ -94,6 +94,19 @@ static void running(void) {
     CHECK(!app_page_bg_running(&l));
 }
 
+// M1: a clear leaves old state in RAM for every state in which something of the app ran or may still run
+static void restart_hint_per_state(void) {
+    for (int st = 0; st < LIFE_STATE_COUNT; st++) {
+        app_life_t l   = life((life_state_t)st, LIFE_REGISTERED);
+        bool       yes = st == LIFE_BACKGROUND || st == LIFE_OPEN || st == LIFE_SUSPENDED || st == LIFE_STOPPING;
+        CHECK(app_page_needs_restart(&l) == yes);
+    }
+    app_life_t l = life(LIFE_REGISTERED, LIFE_BACKGROUND); // nothing started yet: the rest state alone is no reason
+    CHECK(!app_page_needs_restart(&l));
+    l = life((life_state_t)99, LIFE_REGISTERED);
+    CHECK(!app_page_needs_restart(&l));
+}
+
 static void background_text(void) {
     char b[32];
     app_page_bg_text(APP_BG_NONE, true, false, false, b, sizeof(b));
@@ -138,6 +151,12 @@ static void data_and_crash_text(void) {
     CHECK_STR(b, "2.0 KB");
     app_page_sd_text(&d, b, sizeof(b));
     CHECK_STR(b, "None");
+    d.sd_busy  = true; // the card's lock was not free: unknown, never "No card" and never a size
+    d.sd_known = false;
+    app_page_sd_text(&d, b, sizeof(b));
+    CHECK_STR(b, "Unknown");
+    d.sd_busy  = false;
+    d.sd_known = true;
     d.sd_bytes = 3 * 1024 * 1024;
     app_page_sd_text(&d, b, sizeof(b));
     CHECK_STR(b, "3.0 MB");
@@ -183,6 +202,7 @@ int main(void) {
     rows();
     caps_words();
     running();
+    restart_hint_per_state();
     background_text();
     data_and_crash_text();
     clear_texts();

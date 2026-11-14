@@ -65,20 +65,26 @@ size_t app_page_bg_text(app_page_bg_t mode, bool allowed, bool running, bool cra
 // "None in the last 3 boots" / "1 in the last 3 boots" / "2 in the last 3 boots"
 size_t app_page_crash_text(unsigned crashes, unsigned window, char *out, size_t cap);
 
-// The Data row: the app's settings and files in the badge, "None" when empty; and the SD card row ("No card" when none)
+// Does a clear leave the app holding old state? Every state but REGISTERED (nothing of it ever ran), STOPPED and FAULTED
+// (nothing runs): a background part, an open screen, a suspended one under Settings or a stop in progress keep their
+// settings in RAM and may write them back, and the app's own rows on this page show the old values until a restart.
+bool app_page_needs_restart(app_life_t const *life);
+
+// The Data row: the app's settings and files in the badge, "None" when empty; and the SD card row ("No card" when none,
+// "Unknown" when the card was busy)
 size_t app_page_data_text(lichen_app_data_t const *d, char *out, size_t cap);
 size_t app_page_sd_text(lichen_app_data_t const *d, char *out, size_t cap);
 
 // The careful dialog's question: names the app and what goes. Short enough that the dialog keeps all of it.
 size_t app_page_clear_question(char const *name, char *out, size_t cap);
-// The status line's ending (R5): done = true gives text "Cleared 12 KB." (with the restart advice when the app runs a
-// background part: it keeps what it holds in RAM); done = false gives why and next for ui_status_fail_text.
+// The status line's ending (R5): ok gives text "Cleared 12 KB." (with the restart advice when restart is true, see
+// app_page_needs_restart); failed gives why (text) and next for ui_status_fail_text.
 typedef struct {
     bool ok;
-    char text[96]; // done: the whole line; failed: why (the reason, plain words)
+    char text[128]; // done: the whole line; failed: why (the reason, plain words)
     char next[64]; // failed: what to do next; "" when done
 } app_page_clear_msg_t;
-void app_page_clear_msg(lichen_app_clear_t const *c, bool bg_running, app_page_clear_msg_t *out);
+void app_page_clear_msg(lichen_app_clear_t const *c, bool restart, app_page_clear_msg_t *out);
 
 #ifdef __cplusplus
 }

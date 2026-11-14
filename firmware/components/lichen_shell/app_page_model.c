@@ -101,6 +101,16 @@ bool app_page_bg_running(app_life_t const *life) {
     }
 }
 
+bool app_page_needs_restart(app_life_t const *life) {
+    switch ((life_state_t)life->state) {
+    case LIFE_BACKGROUND:
+    case LIFE_OPEN:
+    case LIFE_SUSPENDED:
+    case LIFE_STOPPING: return true;
+    default:            return false; // REGISTERED, STOPPED, FAULTED (and an unknown state): nothing of it runs
+    }
+}
+
 size_t app_page_bg_text(app_page_bg_t mode, bool allowed, bool running, bool crashes_off, char *out, size_t cap) {
     if (mode == APP_BG_NONE) {
         return put(out, cap, "None");
@@ -129,6 +139,9 @@ size_t app_page_data_text(lichen_app_data_t const *d, char *out, size_t cap) {
 }
 
 size_t app_page_sd_text(lichen_app_data_t const *d, char *out, size_t cap) {
+    if (d->sd_busy) {
+        return put(out, cap, "Unknown");
+    }
     if (!d->sd_known) {
         return put(out, cap, "No card");
     }
@@ -144,14 +157,14 @@ size_t app_page_clear_question(char const *name, char *out, size_t cap) {
     return n < 0 ? 0 : (size_t)n >= cap ? cap - 1 : (size_t)n;
 }
 
-void app_page_clear_msg(lichen_app_clear_t const *c, bool bg_running, app_page_clear_msg_t *out) {
+void app_page_clear_msg(lichen_app_clear_t const *c, bool restart, app_page_clear_msg_t *out) {
     memset(out, 0, sizeof(*out));
     out->ok = c->settings_ok && c->files_ok && c->sd_ok;
     if (out->ok) {
         char size[24];
         ui_size_text(size, sizeof(size), c->bytes);
         snprintf(out->text, sizeof(out->text), "Cleared%s%s.%s", c->bytes ? " " : "", c->bytes ? size : "",
-                 bg_running ? " Restart the badge so the app starts fresh." : "");
+                 restart ? " Restart the badge: the app and its rows here still hold the old values." : "");
         return;
     }
     snprintf(out->text, sizeof(out->text), "%s could not be cleared",

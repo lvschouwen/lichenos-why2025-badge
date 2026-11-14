@@ -35,7 +35,7 @@ bool lichen_sys_data_dir_measure(char const *dir, app_data_fs_t *out);
 
 // Removes everything below dir (files, then the emptied directories) and keeps dir itself. A missing dir is already
 // clear (true). False when anything was left (out->skipped says how many entries), so the caller does not claim a clear
-// that did not happen. Never follows a link, never goes above dir.
+// that did not happen. Never follows a link, never goes above dir. Only lichen_os calls it (tools/layers.conf).
 bool lichen_sys_data_dir_clear(char const *dir, app_data_fs_t *out);
 
 #ifdef __cplusplus

@@ -15,6 +15,7 @@ typedef struct {
     uint64_t files_bytes;    // its directory on the storage drive
     uint32_t files;          // files there and on the card
     bool     sd_known;       // a card is mounted and its directory was read
+    bool     sd_busy;        // a card is mounted but its lock was not free in time: the size is unknown, not zero
     uint64_t sd_bytes;       // its directory on the card
 } lichen_app_data_t;
 

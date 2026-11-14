@@ -108,6 +108,11 @@ bool safe_mode_id_ok(char const *id);
 bool safe_mode_list_has(char const *list, char const *id);
 // id added to list (cap bytes with the NUL); true when it is in afterwards. False for a bad id or no room.
 bool safe_mode_list_add(char *list, size_t cap, char const *id);
+// The list changed so that id is on it (listed) or off it, saved by save(next, arg) before list takes the change: false
+// (list untouched, nothing is half done) for a bad id, no room or a save that failed; true when it holds the wanted state
+// and it was saved (no save when it already did). For Settings > Apps (#233): a switch that could not be saved is not shown.
+bool safe_mode_list_set(char *list, size_t cap, char const *id, bool listed, bool (*save)(char const *next, void *arg),
+                        void *arg);
 // id taken out; true when it was in. The rest is rewritten well-formed.
 bool safe_mode_list_remove(char *list, size_t cap, char const *id);
 

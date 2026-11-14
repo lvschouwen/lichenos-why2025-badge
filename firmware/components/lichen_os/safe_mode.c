@@ -164,15 +164,9 @@ static void show(void) {
                   valid ? "" : " (the window record is not valid)");
 }
 
-// id off the list and its crashes forgotten; *was: it was on the list. True when the list is saved (or did not change)
-static bool bg_enable(char const *id, bool *was) {
-    char list[SAFE_MODE_LIST_MAX];
-    portENTER_CRITICAL(&s_mux);
-    *was = safe_mode_list_remove(s_off, sizeof(s_off), id);
-    safe_mode_forget(&s_rec, id);
-    memcpy(list, s_off, sizeof(list));
-    portEXIT_CRITICAL(&s_mux);
-    return !*was || save_list(list);
+static bool save_cb(char const *next, void *arg) {
+    (void)arg;
+    return save_list(next);
 }
 
 bool safe_mode_background_listed(char const *id) {
@@ -182,21 +176,22 @@ bool safe_mode_background_listed(char const *id) {
     return listed;
 }
 
+// The list in RAM only takes the change once it is saved: a switch that did not save is not shown as set (#233)
 bool safe_mode_background_set(char const *id, bool allowed) {
-    if (!safe_mode_id_ok(id)) {
-        return false;
-    }
-    if (allowed) {
-        bool was;
-        return bg_enable(id, &was);
-    }
     char list[SAFE_MODE_LIST_MAX];
     portENTER_CRITICAL(&s_mux);
-    bool had   = safe_mode_list_has(s_off, id);
-    bool added = had || safe_mode_list_add(s_off, sizeof(s_off), id);
     memcpy(list, s_off, sizeof(list));
     portEXIT_CRITICAL(&s_mux);
-    return added && (had || save_list(list)); // already off: no flash write
+    if (!safe_mode_list_set(list, sizeof(list), id, !allowed, save_cb, NULL)) {
+        return false;
+    }
+    portENTER_CRITICAL(&s_mux);
+    memcpy(s_off, list, sizeof(s_off));
+    if (allowed) {
+        safe_mode_forget(&s_rec, id); // one more crash must not switch it off again at once
+    }
+    portEXIT_CRITICAL(&s_mux);
+    return true;
 }
 
 unsigned safe_mode_app_crashes(char const *id) {
@@ -207,8 +202,8 @@ unsigned safe_mode_app_crashes(char const *id) {
 }
 
 static void background_on(char const *id) {
-    bool was;
-    bool saved = bg_enable(id, &was);
+    bool was   = safe_mode_background_listed(id);
+    bool saved = safe_mode_background_set(id, true);
     if (!was) {
         console_reply("app background: %s was not off", id);
     } else if (saved) {

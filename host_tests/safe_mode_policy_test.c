@@ -376,7 +376,52 @@ static void crashes_per_app(void) {
     CHECK(safe_mode_crashes(&r, "weather") == 0);
 }
 
+static int  saves;
+static bool save_ok_flag;
+static char saved[SAFE_MODE_LIST_MAX];
+static bool fake_save(char const *next, void *arg) {
+    (void)arg;
+    saves++;
+    if (save_ok_flag) {
+        strcpy(saved, next);
+    }
+    return save_ok_flag;
+}
+
+// L2 (#233): the list in RAM only takes a change once it is saved
+static void list_set_rolls_back(void) {
+    char list[SAFE_MODE_LIST_MAX] = "weather";
+    save_ok_flag = true;
+    saves        = 0;
+    CHECK(safe_mode_list_set(list, sizeof(list), "timer", true, fake_save, NULL));
+    CHECK(strcmp(list, "weather,timer") == 0 && strcmp(saved, "weather,timer") == 0 && saves == 1);
+    CHECK(safe_mode_list_set(list, sizeof(list), "timer", true, fake_save, NULL) && saves == 1); // already: no write
+    CHECK(safe_mode_list_set(list, sizeof(list), "notes", false, fake_save, NULL) && saves == 1);
+    save_ok_flag = false; // the store refuses: the list stays as it was, in both directions
+    CHECK(!safe_mode_list_set(list, sizeof(list), "calc", true, fake_save, NULL));
+    CHECK(strcmp(list, "weather,timer") == 0);
+    CHECK(!safe_mode_list_set(list, sizeof(list), "timer", false, fake_save, NULL));
+    CHECK(strcmp(list, "weather,timer") == 0 && saves == 3);
+    save_ok_flag = true;
+    CHECK(safe_mode_list_set(list, sizeof(list), "timer", false, fake_save, NULL) && strcmp(list, "weather") == 0);
+    // bad input changes nothing and saves nothing
+    int before = saves;
+    CHECK(!safe_mode_list_set(list, sizeof(list), "../x", true, fake_save, NULL) && !safe_mode_list_set(NULL, 8, "a", true, fake_save, NULL));
+    CHECK(!safe_mode_list_set(list, sizeof(list), "a", true, NULL, NULL) && !safe_mode_list_set(list, 0, "a", true, fake_save, NULL));
+    CHECK(saves == before && strcmp(list, "weather") == 0);
+    // no room: refused before a save
+    char full[SAFE_MODE_LIST_MAX] = "";
+    for (int i = 0; i < 11; i++) {
+        char id[16];
+        snprintf(id, sizeof(id), "%sapp_%09d", i ? "," : "", i); // 13 characters, all different
+        strcat(full, id);
+    }
+    before = saves;
+    CHECK(!safe_mode_list_set(full, sizeof(full), "bbbbbbbbbbbbb", true, fake_save, NULL) && saves == before);
+}
+
 int main(void) {
+    list_set_rolls_back();
     crashes_per_app();
     callback_crashes_are_no_strike();
     callback_crash_loop_is_stopped();

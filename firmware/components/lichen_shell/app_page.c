@@ -88,7 +88,7 @@ static void finish_clear(adj_result_t const *r) {
     app_life_t life = {0};
     lichen_sys_life_get(s_pg.index, &life);
     app_page_clear_msg_t m;
-    app_page_clear_msg(&r->clear, app_page_bg_running(&life), &m);
+    app_page_clear_msg(&r->clear, app_page_needs_restart(&life), &m);
     if (m.ok) {
         menu_status_done(s_pg.menu, m.text);
     } else {
@@ -127,7 +127,9 @@ static void poll(lv_timer_t *t) {
 }
 
 static void forget_page(lv_event_t *e) {
-    lv_timer_delete(lv_event_get_user_data(e));
+    if (lv_event_get_user_data(e)) {
+        lv_timer_delete(lv_event_get_user_data(e));
+    }
     memset(&s_pg, 0, sizeof(s_pg));
 }
 
@@ -205,6 +207,17 @@ void app_page_add_rows(lv_obj_t *screen, lv_obj_t *menu, size_t index) {
     s_pg.rows        = app_page_rows(&d);
     menu_note(menu, "Managed by Lichen");
     add_caps_note(menu, app);
+    lv_timer_t *timer = lichen_ui_timer_create(poll, POLL_MS, NULL);
+    lichen_ui_event_add(screen, forget_page, LV_EVENT_DELETE, timer);
+    if (!timer) { // no way to hear back from a job: show only what needs none, and say why
+        menu_note(menu, "Out of memory: Data, the Background switch and Clear data are not available. Restart the badge.");
+        s_pg.rows.data = s_pg.rows.background = s_pg.rows.clear = false;
+        if (s_pg.rows.crashes) {
+            s_pg.crash_row = info_row(menu, "Crashes", "");
+            refresh_crashes();
+        }
+        return;
+    }
     if (s_pg.rows.data) {
         s_pg.data_row = info_row(menu, "Data", "Reading...");
         s_pg.sd_row   = info_row(menu, "On the SD card", "Reading...");
@@ -221,8 +234,6 @@ void app_page_add_rows(lv_obj_t *screen, lv_obj_t *menu, size_t index) {
     } else if (s_pg.rows.clear_note) {
         menu_note(menu, "Its identity and keys are erased only by Factory reset.");
     }
-    lv_timer_t *timer = lichen_ui_timer_create(poll, POLL_MS, NULL);
-    lichen_ui_event_add(screen, forget_page, LV_EVENT_DELETE, timer);
     if (s_pg.rows.data && !app_data_job_start(ADJ_MEASURE, index, false)) {
         menu_set_value(s_pg.data_row, "Unknown");
         menu_set_value(s_pg.sd_row, "Unknown");

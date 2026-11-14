@@ -10,6 +10,7 @@
 #include "lichen_sys_app.h"
 #include "lichen_sys_storage.h"
 #include "safe_mode.h"
+#include "sdcard.h"
 
 #include <errno.h>
 #include <string.h>
@@ -17,7 +18,6 @@
 static char const TAG[] = "app_data";
 
 #define SD_WAIT_MS      3000
-#define SD_APPS_DIR     LICHEN_SYS_SD_LICHEN_DIR "/apps" // lichen_fs_sd_dir's directory for an app
 #define NVS_ENTRY_BYTES 32                               // one NVS entry
 
 // The table's app at index and its context; false past the table or for an app with no usable id
@@ -30,22 +30,27 @@ static bool resolve(size_t index, lichen_app_t const **app, lichen_ctx_t *ctx) {
 // One directory on one drive under its lock; what is a measure or a clear of that directory
 typedef bool (*dir_fn)(char const *dir, app_data_fs_t *out);
 
-// The app's directory on the SD card: false when there is no card (nothing to do: *used false), true with *ok the verdict
-static bool on_sd(lichen_app_t const *app, dir_fn fn, app_data_fs_t *fs, bool *used) {
+typedef enum {
+    SD_NONE,   // no card mounted: nothing to do
+    SD_BUSY,   // a card, but its lock was not free in time (or no path): not read, not cleared
+    SD_DONE,   // the walk ran and worked
+    SD_FAILED, // the walk ran and failed
+} sd_walk_t;
+
+// The app's directory on the SD card (SD_APPS_DIR, the one lichen_fs_sd_dir makes), under the card's batch lock
+static sd_walk_t on_sd(lichen_app_t const *app, dir_fn fn, app_data_fs_t *fs) {
     char dir[APP_DATA_PATH_MAX];
-    *used = false;
     if (!lichen_sys_sd_mounted()) {
-        return true;
+        return SD_NONE;
     }
     if (!lichen_sys_data_dir_path(SD_APPS_DIR, app->id, dir, sizeof(dir)) || !lichen_sys_sd_begin(SD_WAIT_MS)) {
-        return false; // the card is busy: not read, and not claimed clear
+        return SD_BUSY;
     }
-    *used   = true;
-    errno   = 0;
-    bool ok = fn(dir, fs);
+    errno    = 0;
+    bool ok  = fn(dir, fs);
     int  err = errno;
     lichen_sys_sd_end(ok ? LICHEN_SD_IO_OK : lichen_sys_sd_io_from_errno(err));
-    return ok;
+    return ok ? SD_DONE : SD_FAILED;
 }
 
 bool lichen_sys_app_data_measure(size_t index, lichen_app_data_t *out) {
@@ -65,8 +70,9 @@ bool lichen_sys_app_data_measure(size_t index, lichen_app_data_t *out) {
     out->files_bytes    = fs.bytes;
     out->files          = fs.files;
     app_data_fs_t sd    = {0};
-    bool          used;
-    out->sd_known = on_sd(app, lichen_sys_data_dir_measure, &sd, &used) && used;
+    sd_walk_t     card = on_sd(app, lichen_sys_data_dir_measure, &sd);
+    out->sd_known = card == SD_DONE;
+    out->sd_busy  = card == SD_BUSY;
     out->sd_bytes = sd.bytes;
     out->files += sd.files;
     out->ok = settings_ok && files_ok;
@@ -84,10 +90,10 @@ bool lichen_sys_app_data_clear(size_t index, lichen_app_clear_t *out) {
     }
     app_data_fs_t fs = {0}, sd = {0};
     char          dir[APP_DATA_PATH_MAX];
-    bool          used;
     out->settings_ok = app_settings_erase_all(ctx);
     out->files_ok    = lichen_sys_data_dir_path(LICHEN_SYS_STORAGE_BASE, app->id, dir, sizeof(dir)) && lichen_sys_data_dir_clear(dir, &fs);
-    out->sd_ok       = on_sd(app, lichen_sys_data_dir_clear, &sd, &used);
+    sd_walk_t card   = on_sd(app, lichen_sys_data_dir_clear, &sd);
+    out->sd_ok       = card == SD_NONE || card == SD_DONE; // a busy card is not claimed clear
     out->bytes       = fs.bytes + sd.bytes;
     ESP_LOGI(TAG, "%s: data cleared, settings %s, files %s, card %s", app->id, out->settings_ok ? "ok" : "FAILED",
              out->files_ok ? "ok" : "FAILED", out->sd_ok ? "ok" : "FAILED");

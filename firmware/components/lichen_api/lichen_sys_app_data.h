@@ -29,15 +29,17 @@ bool lichen_sys_app_data_measure(size_t index, lichen_app_data_t *out);
 // Clear data: the app's settings (its secrets too) and the contents of its two directories. Never an app whose
 // descriptor says storage_secret (MeshCore's identity and keys: only a factory reset erases those, false and nothing
 // touched), never the OS's own context. A running app keeps what it holds in RAM and may write settings back: the page
-// says so. Same task rules as lichen_sys_app_data_measure.
+// says so. Not on the LVGL task (file and settings writes). Only the shell calls it (tools/layers.conf).
 bool lichen_sys_app_data_clear(size_t index, lichen_app_clear_t *out);
 
-// The background switch (#233 on top of #232's list): whether the app's background part is allowed to start at the next
-// boot (it is not on the list of switched-off apps), and the change. The change is saved and applies from the next
-// boot, an app is never stopped by it (the lifecycle has no stop for it). Turning it on forgets the app's crashes, as
-// "fw app background <id> on" does. False (nothing changes) for an index past the table, an app without a background
-// part and one the OS keeps on (lichen_app_t.safe_mode_exempt), or when the list could not be saved. Any task.
+// The background switch (#233 on top of #232's list). _allowed: whether the app's background part may start at the next
+// boot (it is not on the list of switched-off apps). Any task.
 bool lichen_sys_app_background_allowed(size_t index);
+// The change: saved, and applied from the next boot; an app is never stopped by it (the lifecycle has no stop for it).
+// Turning it on forgets the app's crashes, as "fw app background <id> on" does. False (nothing changes, the list in RAM
+// included, so the row shows what is saved) for an index past the table, an app without a background part, one the OS
+// keeps on (lichen_app_t.safe_mode_exempt) or a list that could not be saved. Not on the LVGL task (a settings write).
+// Only the shell calls it (tools/layers.conf).
 bool lichen_sys_app_background_set(size_t index, bool allowed);
 
 // How many of the last *window boots ended in a crash named after the app (either kind, #232/#427); 0 and *window 0 for

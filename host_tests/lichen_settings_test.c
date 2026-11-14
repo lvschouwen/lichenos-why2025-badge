@@ -29,6 +29,7 @@ static struct {
     int  used;
 } nvs[ENTRIES];
 static char handles[4][16]; // handle h - 1 -> namespace
+static int  rw_opens;       // read-write opens: a clear of nothing must not make a namespace (#233)
 
 static int find(nvs_handle_t h, char const *key) {
     for (int i = 0; i < ENTRIES; i++) {
@@ -57,6 +58,7 @@ static char const *raw(char const *ns, char const *key) {
 }
 
 esp_err_t nvs_open(char const *name, nvs_open_mode_t mode, nvs_handle_t *out) {
+    rw_opens += mode == NVS_READWRITE;
     if (mode == NVS_READONLY && count_ns(name) == 0) { // as the real NVS: a namespace nobody wrote does not exist
         return ESP_ERR_NVS_NOT_FOUND;
     }
@@ -307,6 +309,8 @@ static void entries_are_counted(void) {
     n = 99;
     CHECK(lichen_sys_app_settings_entries(OTHER, &n) && n == 0); // nothing saved: empty, not an error
     n = 99;
+    int opens = rw_opens;
+    CHECK(app_settings_erase_all(OTHER) && rw_opens == opens); // nothing to clear: no read-write open, no namespace made
     CHECK(!lichen_sys_app_settings_entries(OS, &n) && n == 0); // the OS has no namespace
     CHECK(!lichen_sys_app_settings_entries((lichen_ctx_t)99, &n) && n == 0);
 }

@@ -1,6 +1,7 @@
 #include "lichen_settings.h"
 
 #include "app_secret.h"
+#include "lichen_sys_app_data.h"
 #include "lichen_sys_app.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -209,6 +210,10 @@ bool app_settings_erase(lichen_ctx_t ctx, char const *key) {
 
 // The whole namespace: the app's secrets and the move's record go with it (Clear data, #233)
 bool app_settings_erase_all(lichen_ctx_t ctx) {
+    size_t entries = 0;
+    if (lichen_sys_app_settings_entries(ctx, &entries) && entries == 0) {
+        return true; // nothing saved: opening it read-write would only create an empty namespace
+    }
     char const  *prefix = NULL;
     nvs_handle_t nvs;
     if (!open_app(ctx, NVS_READWRITE, &nvs, &prefix)) {

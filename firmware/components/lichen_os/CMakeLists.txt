@@ -41,7 +41,7 @@
 # background) over safe_mode_policy.c and safe_mode_rec.c (pure, safe_mode_policy_test.c); linker.lf keeps the panic
 # path (safe_mode_rec.c) in internal RAM.
 # app_manage.c (#233): Settings > Apps' data size, Clear data, background switch and crash count for one app, over
-# lichen_api's app_data_fs.c (pure, app_data_fs_test.c).
+# lichen_api's lichen_sys_data_fs.c (pure, app_data_fs_test.c).
 # stop(reason) (#231, app_stop.c): every app's stop hook with its lifecycle record (lichen_sys_life.h), cooperative.
 idf_component_register(SRCS "settings_store.c" "lichen_settings.c" "settings_backup_io.c" "lichen_fs.c" "app_slot.c"
                             "lichen_crashlog.c" "lichen_badge.c" "radio_state.c" "lichen_radio.c"

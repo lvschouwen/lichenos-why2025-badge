@@ -12,7 +12,7 @@
 
 static char const TAG[] = "app_data";
 
-#define JOB_STACK 5120 // the walk is a few frames deep, NVS and the log need the rest
+#define JOB_STACK 6144 // as the Files app's jobs: the walk is 7 frames deep through FAT, and an NVS erase and the log need the rest
 enum { IDLE, RUNNING, DONE };
 
 static atomic_int   s_state;

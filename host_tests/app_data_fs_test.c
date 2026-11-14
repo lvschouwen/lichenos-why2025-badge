@@ -81,6 +81,10 @@ static void measure_and_clear(void) {
     make_file("notes/sub/b.txt", 2000);
     make_file("notes/sub/deeper/c.txt", 5);
     make_file("other_a.txt", 7); // outside
+    make_dir("notes2"); // a sibling whose name starts with the app's own id
+    make_dir("notes2/sub");
+    make_file("notes2/n.txt", 11);
+    make_file("notes2/sub/m.txt", 13);
     make_dir("weather");
     make_file("weather/w.csv", 300); // a sibling app
     char dir[256];
@@ -92,6 +96,11 @@ static void measure_and_clear(void) {
     CHECK(r.files == 3 && r.dirs == 2 && r.bytes == 2105 && r.skipped == 0);
     CHECK(exists("notes") && !exists("notes/a.txt") && !exists("notes/sub")); // the directory itself stays
     CHECK(exists("other_a.txt") && exists("weather/w.csv"));                    // nothing else was touched
+    CHECK(exists("notes2/n.txt") && exists("notes2/sub/m.txt")); // not even a directory with the id as its prefix
+    app_data_fs_t two;
+    char          dir2[256];
+    path_of(dir2, sizeof(dir2), "notes2");
+    CHECK(lichen_sys_data_dir_measure(dir2, &two) && two.bytes == 24 && two.files == 2 && two.dirs == 1);
     CHECK(lichen_sys_data_dir_measure(dir, &r) && r.bytes == 0 && r.files == 0);
     CHECK(lichen_sys_data_dir_clear(dir, &r) && r.files == 0); // clearing twice is fine
 }

@@ -266,12 +266,12 @@ lichen_station_clock	-	lvgl	lichen_ui.h
 lichen_str_copy	-	unspecified	lichen_str.h
 lichen_str_copy_n	-	unspecified	lichen_str.h
 lichen_sys_app_background_allowed	SYSTEM	any	lichen_sys_app_data.h
-lichen_sys_app_background_set	SYSTEM	unspecified	lichen_sys_app_data.h
+lichen_sys_app_background_set	SYSTEM	not-lvgl	lichen_sys_app_data.h
 lichen_sys_app_console_more	SYSTEM	unspecified	lichen_sys_app.h
 lichen_sys_app_console_register	SYSTEM	not-lvgl	lichen_sys_app.h
 lichen_sys_app_crashes	SYSTEM	any	lichen_sys_app_data.h
 lichen_sys_app_ctx_at	SYSTEM	any	lichen_sys_app.h
-lichen_sys_app_data_clear	SYSTEM	unspecified	lichen_sys_app_data.h
+lichen_sys_app_data_clear	SYSTEM	not-lvgl	lichen_sys_app_data.h
 lichen_sys_app_data_measure	SYSTEM	not-lvgl	lichen_sys_app_data.h
 lichen_sys_app_settings_entries	SYSTEM	unspecified	lichen_sys_app_data.h
 lichen_sys_apps_stop	SYSTEM	not-lvgl	lichen_sys_life.h

@@ -213,3 +213,27 @@ bool safe_mode_list_remove(char *list, size_t cap, char const *id) {
     rebuild(list, cap, id, NULL, &had);
     return had;
 }
+
+bool safe_mode_list_set(char *list, size_t cap, char const *id, bool listed, bool (*save)(char const *next, void *arg),
+                        void *arg) {
+    char next[SAFE_MODE_LIST_MAX];
+    if (!list || !save || cap == 0 || cap > SAFE_MODE_LIST_MAX || !safe_mode_id_ok(id)) {
+        return false;
+    }
+    size_t n = strnlen(list, cap);
+    if (n >= cap) {
+        return false;
+    }
+    memcpy(next, list, n + 1);
+    if (safe_mode_list_has(next, id) == listed) {
+        return true;
+    }
+    if (listed ? !safe_mode_list_add(next, cap, id) : !safe_mode_list_remove(next, cap, id)) {
+        return false;
+    }
+    if (!save(next, arg)) {
+        return false;
+    }
+    memcpy(list, next, strlen(next) + 1);
+    return true;
+}
