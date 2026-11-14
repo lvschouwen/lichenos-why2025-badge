@@ -22,6 +22,7 @@
 #include "lichen_mdns.h"
 #include "wifi_cmd.h"
 #include "wifi_regdom.h"
+#include "wifi_text.h"
 #include "wifi_saved.h"
 
 #include <stdatomic.h>
@@ -56,19 +57,11 @@ static SemaphoreHandle_t scan_lock; // one scan at a time (the screen and the co
 static portMUX_TYPE ip_lock = portMUX_INITIALIZER_UNLOCKED;
 static char         ip_text[16];
 
-// A bounded copy for the state_lock / ip_lock sections: no snprintf with interrupts off (#5). Stops at cap - 1 bytes
-// or a NUL, so it also takes the driver's unterminated 32-byte SSID field.
-static void copy_text(char *dst, size_t cap, char const *src) {
-    size_t n = strnlen(src, cap - 1);
-    memcpy(dst, src, n);
-    dst[n] = '\0';
-}
-
 bool wifi_has_ip(char *ip, size_t cap) {
     portENTER_CRITICAL(&ip_lock);
     bool have = ip_text[0] != '\0';
     if (have && ip && cap) { // wifi_has_ip(NULL, 0) only asks whether there is one
-        copy_text(ip, cap, ip_text);
+        wifi_text_copy(ip, cap, ip_text);
     }
     portEXIT_CRITICAL(&ip_lock);
     return have;
@@ -89,7 +82,7 @@ static bool first_connect_settled;
 
 static void set_ip(char const *text) {
     portENTER_CRITICAL(&ip_lock);
-    copy_text(ip_text, sizeof(ip_text), text);
+    wifi_text_copy(ip_text, sizeof(ip_text), text);
     portEXIT_CRITICAL(&ip_lock);
     if (!text[0]) {
         portENTER_CRITICAL(&state_lock);
@@ -490,7 +483,7 @@ static drv_result_t wifi_driver_up(char const **why) {
         return DRV_NO_CREDENTIALS;
     }
     portENTER_CRITICAL(&state_lock);
-    copy_text(ssid, sizeof(ssid), (char const *)cfg.sta.ssid);
+    wifi_text_copy(ssid, sizeof(ssid), (char const *)cfg.sta.ssid);
     portEXIT_CRITICAL(&state_lock);
     atomic_store(&driver_up, true); // before esp_wifi_start, see above
     if ((err = esp_wifi_set_config(WIFI_IF_STA, &cfg)) != ESP_OK || (err = esp_wifi_start()) != ESP_OK) {
@@ -714,7 +707,7 @@ void wifi_bind_alloc(void *(*alloc)(size_t size), void (*release)(void *p)) {
 // Under saved_lock, once the RPC went through and the name is still saved: from here on Forget compares against it
 static void pick_committed(char const *name) {
     portENTER_CRITICAL(&state_lock);
-    copy_text(ssid, sizeof(ssid), name);
+    wifi_text_copy(ssid, sizeof(ssid), name);
     portEXIT_CRITICAL(&state_lock);
 }
 
@@ -750,7 +743,7 @@ static void choose_network(bool current_failed) {
     }
     char cur[33];
     portENTER_CRITICAL(&state_lock);
-    copy_text(cur, sizeof(cur), ssid);
+    wifi_text_copy(cur, sizeof(cur), ssid);
     portEXIT_CRITICAL(&state_lock);
     int at = wifi_saved_find(&list, cur);
     if (current_failed && at >= 0) {
@@ -770,7 +763,7 @@ static void choose_network(bool current_failed) {
         // now. The C6 RPC runs with saved_lock released (#249: the UI must not wait on it) and the list is checked once
         // more afterwards, since a Forget in that window does not know the driver holds the name yet.
         char name[33];
-        copy_text(name, sizeof(name), list.e[pick].ssid);
+        wifi_text_copy(name, sizeof(name), list.e[pick].ssid);
         wifi_apply_t res = wifi_saved_apply_with(&saved_ops, name, apply_config, pick_committed);
         if (res == WIFI_APPLY_APPLIED) {
             ESP_LOGI(TAG, "wifi: %d saved networks, joining the strongest in range", (int)list.n); // no names
@@ -801,8 +794,8 @@ static void rollback(void) {
     portENTER_CRITICAL(&state_lock);
     join.state       = WIFI_JOIN_FAILED_KEPT_OLD;
     have_credentials = had;
-    copy_text(kept_ssid, sizeof(kept_ssid), had ? s : "");
-    copy_text(ssid, sizeof(ssid), had ? s : "");
+    wifi_text_copy(kept_ssid, sizeof(kept_ssid), had ? s : "");
+    wifi_text_copy(ssid, sizeof(ssid), had ? s : "");
     portEXIT_CRITICAL(&state_lock);
     if (had && apply_config(s, p)) {
         esp_wifi_connect();
@@ -819,9 +812,9 @@ static void handle_join(msg_t const *m, uint32_t now) {
     memcpy(trial_pass, m->pass, sizeof(trial_pass));
     portENTER_CRITICAL(&state_lock);
     wifi_join_start(&join, now);
-    copy_text(trial_ssid, sizeof(trial_ssid), m->ssid);
+    wifi_text_copy(trial_ssid, sizeof(trial_ssid), m->ssid);
     have_credentials = true;
-    copy_text(ssid, sizeof(ssid), m->ssid);
+    wifi_text_copy(ssid, sizeof(ssid), m->ssid);
     portEXIT_CRITICAL(&state_lock);
     retry_pending = false;
     set_ip("");
@@ -859,7 +852,7 @@ static void handle_reconnect(bool force) {
     }
     portENTER_CRITICAL(&state_lock);
     have_credentials = true;
-    copy_text(ssid, sizeof(ssid), s);
+    wifi_text_copy(ssid, sizeof(ssid), s);
     portEXIT_CRITICAL(&state_lock);
     set_ip("");
     esp_wifi_disconnect();
@@ -919,7 +912,7 @@ static void handle_got_ip(void) {
         // One of the saved networks was picked by choose_network: it becomes the pair in use (first in the list)
         char cur[33];
         portENTER_CRITICAL(&state_lock);
-        copy_text(cur, sizeof(cur), ssid);
+        wifi_text_copy(cur, sizeof(cur), ssid);
         portEXIT_CRITICAL(&state_lock);
         xSemaphoreTake(saved_lock, portMAX_DELAY);
         bool kept = wifi_cred_activate(cur);
@@ -997,8 +990,8 @@ static void abort_trial(void) {
     memset(trial_pass, 0, sizeof(trial_pass));
     portENTER_CRITICAL(&state_lock);
     have_credentials = had;
-    copy_text(kept_ssid, sizeof(kept_ssid), had ? s : "");
-    copy_text(ssid, sizeof(ssid), had ? s : "");
+    wifi_text_copy(kept_ssid, sizeof(kept_ssid), had ? s : "");
+    wifi_text_copy(ssid, sizeof(ssid), had ? s : "");
     portEXIT_CRITICAL(&state_lock);
     ESP_LOGW(TAG, "wifi: the C6 went away during a trial join: not saved");
 }
@@ -1110,8 +1103,8 @@ bool wifi_forget_network(char const *name) {
     // The driver may hold it without NVS saying so (a saved network joined by choose_network, or a trial under way)
     char cur[33], tried[33];
     portENTER_CRITICAL(&state_lock);
-    copy_text(cur, sizeof(cur), ssid);
-    copy_text(tried, sizeof(tried), trial_ssid);
+    wifi_text_copy(cur, sizeof(cur), ssid);
+    wifi_text_copy(tried, sizeof(tried), trial_ssid);
     portEXIT_CRITICAL(&state_lock);
     if ((ok || was_active) && (was_active || strcmp(cur, name) == 0 || strcmp(tried, name) == 0)) { // the next saved one (or none) takes over
         msg_t m = {.type = left ? MSG_RECONNECT : MSG_FORGET, .reason = 1};
@@ -1243,7 +1236,7 @@ bool wifi_set_credentials(char const *new_ssid, char const *pass) {
     portENTER_CRITICAL(&state_lock);
     wifi_join_t before = join;
     wifi_join_request(&join);
-    copy_text(pending_ssid, sizeof(pending_ssid), new_ssid);
+    wifi_text_copy(pending_ssid, sizeof(pending_ssid), new_ssid);
     portEXIT_CRITICAL(&state_lock);
     bool ok = post(&m);
     memset(&m, 0, sizeof(m));
@@ -1259,10 +1252,10 @@ wifi_join_state_t wifi_join_state(char *tried, size_t tried_cap, char *kept, siz
     portENTER_CRITICAL(&state_lock);
     wifi_join_state_t state = join.state;
     if (tried && tried_cap) {
-        copy_text(tried, tried_cap, state == WIFI_JOIN_PENDING ? pending_ssid : trial_ssid);
+        wifi_text_copy(tried, tried_cap, state == WIFI_JOIN_PENDING ? pending_ssid : trial_ssid);
     }
     if (kept && kept_cap) {
-        copy_text(kept, kept_cap, kept_ssid);
+        wifi_text_copy(kept, kept_cap, kept_ssid);
     }
     portEXIT_CRITICAL(&state_lock);
     return state;
@@ -1304,7 +1297,7 @@ static void wifi_status_link(void) {
     char a[140], ip[16], cur[33];
     portENTER_CRITICAL(&state_lock);
     bool have = have_credentials;
-    copy_text(cur, sizeof(cur), ssid);
+    wifi_text_copy(cur, sizeof(cur), ssid);
     portEXIT_CRITICAL(&state_lock);
     clean(cur, a, sizeof(a));
     if (!wifi_enabled()) {
