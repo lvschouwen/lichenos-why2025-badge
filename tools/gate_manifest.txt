@@ -528,6 +528,8 @@ sb_summary	SYSTEM	unspecified	settings_backup.h
 sb_value_equal	SYSTEM	unspecified	settings_backup.h
 sb_value_parse	SYSTEM	unspecified	settings_backup.h
 sb_value_text	SYSTEM	unspecified	settings_backup.h
+sbs_choose	-	unspecified	settings_backup_swap.h
+sbs_save	-	unspecified	settings_backup_swap.h
 scroll_anchor_find	-	unspecified	scroll_anchor.h
 scroll_anchor_take	-	unspecified	scroll_anchor.h
 scroll_keep_top	-	unspecified	scroll_anchor.h

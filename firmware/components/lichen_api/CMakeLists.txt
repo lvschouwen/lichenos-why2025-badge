@@ -30,7 +30,7 @@
 # fonts.c holds the font slots lichen_font() reads; lichen_os loads the asset fonts into them (font_slots.h).
 idf_component_register(SRCS "lichen_app.c" "fonts.c" "menu.c" "menu_filter.c" "list_filter.c" "scroll_anchor.c"
                             "text_entry.c"
-                            "tz_table.c" "app_ns.c" "app_secret.c" "fs_path.c" "crashlog_fmt.c" "settings_backup.c"
+                            "tz_table.c" "app_ns.c" "app_secret.c" "fs_path.c" "crashlog_fmt.c" "settings_backup.c" "settings_backup_swap.c"
                             "badge_table.c" "lichen_ui.c" "ui_text.c" "qr_payload.c" "qr_screen.c" "tile_order.c"
                             "task_book.c" "mem_book.c" "hold_exit.c" "os_name.c" "lichen_ui_ops.c" "gate_mem.c" "app_ctx.c" "app_caps.c" "gate_app.c" "test_card_layout.c" "test_card.c"
                             "bench_scope.c" "key_cause.c" "ui_cb.c" "lichen_ui_cb.c" "app_life.c" "lichen_app_life.c" "timer_book.c"
