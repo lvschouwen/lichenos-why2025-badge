@@ -9,6 +9,7 @@
 #include "console_os_rules.h"
 #include "console_sub.h"
 #include "dev_gate.h"
+#include "boot_rules.h"
 #include "crash_rules.h"
 #include "dev_mode.h"
 #include "sd_rules.h"
@@ -156,8 +157,11 @@ static pin_t const PINS[] = {
     {"factory-reset settings YES", "ROO", "ROO", "ROO", false},
     {"factory-reset all YES",      "ROO", "ROO", "ROO", false},
     {"factory-reset all YES",      "ROO", "ROO", "ROO", true},
-    {"factory-reset settings",     "RRR", "RRR", "RRR", false}, // "add YES"
-    {"factory-reset bogus",        "RRR", "RRR", "RRR", false}, // usage
+    // #464: tighter than before, where nothing was erased either way ("add YES", the usage): the table fails closed,
+    // so every form but the dry run and the bare usage is the USB console's (cmd_factory's sscanf takes any spacing)
+    {"factory-reset settings",     "ROO", "ROO", "ROO", false},
+    {"factory-reset bogus",        "ROO", "ROO", "ROO", false},
+    {"factory-reset settings\tYES", "ROO", "ROO", "ROO", false}, // a tab: sscanf reads it as YES
     {"nvs-enc",                    "RRR", "RRR", "RRR", false},
     {"nvs-enc burn",               "RRR", "RRR", "RRR", false}, // the warning; release: no burn arm, the state
     {"nvs-enc burn YES",           "ROO", "ROO", "RRR", false},
@@ -282,9 +286,6 @@ static bool word_is(char const *args, char const *word) {
 // console_dev_gate calls inside handlers: boot_keys_rtc.c, boot_progress.c, crash.c, sd_console.c, safe_mode.c,
 // mem_window_watch.c, mesh_cmd_send.cpp (airlog, chat). True when the form reaches one.
 static bool handler_dev_gate(char const *name, char const *args) {
-    if (strcmp(name, "boot") == 0) {
-        return word_is(args, "keys") || (DEV_BUILD && strncmp(args, "fail ", 5) == 0);
-    }
     if (strcmp(name, "app") == 0) {
         return DEV_BUILD && strncmp(args, "crash ", 6) == 0 && args[6];
     }
@@ -313,12 +314,6 @@ static bool handler_origin_refuses(char const *name, char const *args, console_o
         char const *rest;
         return !onair_op_permitted(onair_op_parse(args, &rest), origin);
     }
-    if (strcmp(name, "factory-reset") == 0) {
-        char word[16] = "", yes[8] = "";
-        sscanf(args, "%15s %7s", word, yes);
-        bool level = strcmp(word, "settings") == 0 || strcmp(word, "all") == 0;
-        return level && strcmp(yes, "YES") == 0 && console_erase_refuses(origin);
-    }
     return false;
 }
 
@@ -335,6 +330,8 @@ static rules_of_t const RULES[] = {
     {"dev", OS_DEV_RULES},
     {"sd", SD_RULES},
     {"crash", CRASH_RULES},
+    {"boot", BOOT_RULES},
+    {"factory-reset", FACTORY_RULES},
 };
 
 static console_sub_t const *rules_of(char const *name) {

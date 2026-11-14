@@ -11,6 +11,7 @@
 // the default preset).
 #include "psram_speed.h"
 #include "factory_reset.h"
+#include "boot_rules.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -650,10 +651,7 @@ static void cmd_factory(char const *args) {
         console_reply("nothing erased: add YES (factory-reset %s YES)", word);
         return;
     }
-    if (!console_erase_ok("factory reset")) {
-        return; // #455: USB only, hold or not (epic-395 rule 4)
-    }
-    // No console_usb_hold_ok here: it is the #289 check for non-USB callers, and console_erase_ok already refused them
+    // #455: the USB console only, hold or not (epic-395 rule 4): its row in boot_rules.h, checked before this runs
     if (!factory_reset_request(level)) {
         console_reply("could not save the reset: nothing erased");
         return;
@@ -663,5 +661,6 @@ static void cmd_factory(char const *args) {
 }
 
 void factory_reset_console_register(void) {
-    console_register("factory-reset", "factory-reset plan [settings|all] | settings YES | all YES", cmd_factory);
+    console_register_rules("factory-reset", "factory-reset plan [settings|all] | settings YES | all YES", cmd_factory,
+                           FACTORY_RULES);
 }

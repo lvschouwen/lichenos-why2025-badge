@@ -1,6 +1,7 @@
 #include "boot_progress.h"
 
 #include "boot_keys.h"
+#include "boot_rules.h"
 
 #include "fw_console.h"
 #include "fw_store.h"
@@ -84,14 +85,11 @@ char const *boot_progress_label(boot_step_t step) {
 
 static void cmd_boot(char const *args) {
     if (strncmp(args, "keys", 4) == 0 && (args[4] == '\0' || args[4] == ' ')) {
-        boot_keys_cmd(args + 4); // dev-gated there (#379)
+        boot_keys_cmd(args + 4); // developer mode: its row in boot_rules.h, checked before cmd_boot runs (#464)
         return;
     }
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
     if (strncmp(args, "fail ", 5) == 0) {
-        if (!console_dev_gate("boot fail")) {
-            return;
-        }
         for (int i = 0; i < BOOT_STEP_COUNT; i++) {
             if (boot_step_failable((boot_step_t)i) && strcasecmp(args + 5, boot_step_label((boot_step_t)i)) == 0) {
                 flag_set((uint8_t)(i + 1));
@@ -136,8 +134,8 @@ void boot_progress_start(void) {
     boot_steps_reset();
     portEXIT_CRITICAL(&lock);
 #ifdef CONFIG_LICHEN_DEV_COMMANDS
-    console_register("boot", "boot [fail <step> | keys <down|esc+bksp|none>] (start-up steps and the last log lines; fail marks a step failed on the next boot; fail and keys: developer mode; keys holds a combo at the next software restart, once)", cmd_boot);
+    console_register_rules("boot", "boot [fail <step> | keys <down|esc+bksp|none>] (start-up steps and the last log lines; fail marks a step failed on the next boot; fail and keys: developer mode; keys holds a combo at the next software restart, once)", cmd_boot, BOOT_RULES);
 #else // a release names no debug subcommand (build.sh release_checks)
-    console_register("boot", "boot (start-up steps and the last log lines)", cmd_boot);
+    console_register_rules("boot", "boot (start-up steps and the last log lines)", cmd_boot, BOOT_RULES);
 #endif
 }

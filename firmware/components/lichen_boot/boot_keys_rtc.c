@@ -15,9 +15,6 @@ boot_keys_t boot_keys_take_armed(void) {
 }
 
 void boot_keys_cmd(char const *args) {
-    if (!console_dev_gate("boot keys")) {
-        return;
-    }
     while (*args == ' ') {
         args++;
     }
